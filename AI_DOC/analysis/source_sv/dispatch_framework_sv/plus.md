@@ -83,3 +83,28 @@ UVM cmdline processor 的参数来源。整数、bit 和 64-bit hex 再由 `load
 
 - 代码中的 directed flow 显式调用 `common_data_transaction::request_flushsb()`。
 - 命令行或 testcase 设置 `MEMBLOCK_FLUSHSB_REQUEST_CYCLE` 为非 0，用最小入口触发一次 pulse。该入口要求 `MEMBLOCK_FLUSHSB_SEQ_EN=1` 且 `MEMBLOCK_LSQCOMMIT_SEQ_EN=1`；等待 request cycle 期间不计入 commit sequence idle-stop，并且 scheduled pending 状态会阻止 real smoke 提前结束。
+
+## 4. DCache/Uncache 返回调度参数
+
+这组参数只控制 memory responder 已接受请求的返回时机和返回选择，不改变 DCache/Uncache
+接口宽度、DUT buffer 深度或 TileLink 握手规则。`plus.sv` 解析原始值；
+`seq_csr_common::validate_and_clamp()` 拒绝任一通道四档权重全为零；DCache/Uncache sequence
+只通过 getter 在 scheduler 启动一轮计时器时读取。
+
+| 参数 | 默认值 | 含义 |
+|---|---:|---|
+| `MEMBLOCK_L2_RSP_DELAY_ZERO_WT` | `0` | DCache 返回额外延迟为 0 cycle 的权重；仍要经过 record queue，绝不是组合直返。 |
+| `MEMBLOCK_L2_RSP_DELAY_SMALL_WT` | `1` | DCache 返回额外延迟落在 `1..10` cycle 的权重。 |
+| `MEMBLOCK_L2_RSP_DELAY_MEDIUM_WT` | `0` | DCache 返回额外延迟落在 `10..100` cycle 的权重。 |
+| `MEMBLOCK_L2_RSP_DELAY_LARGE_WT` | `0` | DCache 返回额外延迟落在 `101..1000` cycle 的权重。 |
+| `MEMBLOCK_UNCACHE_RSP_DELAY_ZERO_WT` | `0` | Uncache 返回额外延迟为 0 cycle 的权重。 |
+| `MEMBLOCK_UNCACHE_RSP_DELAY_SMALL_WT` | `1` | Uncache 返回额外延迟落在 `1..10` cycle 的权重。 |
+| `MEMBLOCK_UNCACHE_RSP_DELAY_MEDIUM_WT` | `0` | Uncache 返回额外延迟落在 `10..100` cycle 的权重。 |
+| `MEMBLOCK_UNCACHE_RSP_DELAY_LARGE_WT` | `0` | Uncache 返回额外延迟落在 `101..1000` cycle 的权重。 |
+| `MEMBLOCK_L2_RSP_REORDER_EN` | `0` | `0` 按 DCache ready record 队列顺序返回；`1` 时从已到期 record 中随机选择。 |
+| `MEMBLOCK_UNCACHE_RSP_REORDER_EN` | `0` | `0` 按 Uncache ready record 队列顺序返回；`1` 时从已到期 record 中随机选择。 |
+
+四个 delay weight 是 runtime 概率参数，必须至少一项非零。DCache 和 Uncache 互不共享
+timer、ready record、D hold 或随机权重。两侧真实可接受的 in-flight 上限不是 plus：
+`MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING` 与 `MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING` 在
+`memblock_compile_params.svh` 固定为 `16`，由 responder 的容量检查直接读取。

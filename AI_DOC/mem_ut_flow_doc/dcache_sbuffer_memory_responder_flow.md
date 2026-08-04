@@ -1,331 +1,178 @@
-# DCache/SBuffer Memory Responder Flow
+# DCache/Uncache Memory Responder Flow
 
-本文是共享 memory responder 的总览。DCache V2 coherent 细节以
-AI_DOC/mem_ut_flow_doc/dcache_l2_response_hint_probe_model_flow.md 为准；本文同时保留
-SBuffer 的单拍 responder 说明，避免共享源码修改后总览仍描述旧 DCache for-loop。
+## 1. 术语与抽象功能说明
 
-## 1. Flow 定位与职责边界
+本文描述 `mem_base_sequence.sv` 中两条 memory-facing responder 的公共边界：
+`dcache_mem__access_base_sequence` 是 coherent DCache TileLink A/B/C/D/E responder；历史类名
+`sbuffer_mem_access_base_sequence` 实际承接 V2 Uncache/MMIO 的 TL-UL A/D 端口。二者复用 shared
+memory backend，但不共享协议 queue、timer、D hold、source、sink 或返回仲裁。
 
-### 1.1 术语与抽象功能说明
-
-| 英文术语 | 当前含义 | 代码对象/状态落点 | 示例 |
+| 术语 | 当前含义 | 代码对象 | 说明 |
 |---|---|---|---|
-| responder | 响应 DUT memory channel 的长期 sequence | DCache/SBuffer base sequence | 不写 dispatch status |
-| service cycle | DCache response 模型的逻辑拍计数 | service_cycle | 用于 delay 和 Hint due |
-| armed snapshot | valid 已采样、等待下一边界确认 fire 的请求快照 | armed_a_req_xact、armed_c_req_xact | A.valid 先保存，下一拍才接受 |
-| pending response | 已接受但尚未完成的 response | pending_d_*、C assembly | D.ready=0 时保持 payload |
-| owner | 当前负责某条协议生命周期的唯一状态 | GrantAck owner、Probe owner | 无 owner 不消费 E |
-| safe idle | 所有 channel valid/ready 和 sideband 为 0 的 item | build_*_idle_xaction | reset/terminal 边界发送 |
-| in-flight | 尚未完成的 handshake、pending response 或 assembly | DCache pending/armed/Probe/GrantAck | stop 后必须先排空 |
-| backing memory | 只保存确定性懒初始化字节的共享稀疏内存 | `main_mem` | 未被 DUT 写污染的初始数据来源 |
-| write overlay | 保存已完成 DUT 写、并按 byte valid 覆盖 backing 的共享层 | `write_overlay_mem`、`write_overlay_byte_valid` | 同一 line 的部分写只覆盖有效 byte |
-| write batch | 当前采样边界已经确认、但还未提交到 overlay 的写事件 | `dcache_write_batch`、`uncache_write_batch` | 下一边界固定先 DCache、后 Uncache 提交 |
-| memory lifecycle owner | 每个 testcase 唯一负责清空和配置共享 memory store 的入口 | `memblock_dispatch_real_smoke_vseq` | fork 两个 responder 前初始化一次 |
+| `shared memory` | 测试级 sparse backing 与 write overlay | `mem_access_base_sequence` static store | 只保存 memory-facing 访问，不是 RTL L2 cache |
+| `response record` | 已 A/C fire、等待 D 返回的协议回复 | `dcache_rsp_q` / `uncache_rsp_q` | 两通道各自独立维护 |
+| `eligible_cycle` | record 最早可被本通道 scheduler 选择的 service cycle | 两种 response record | 防止新入队 record 当拍返回 |
+| `D hold` | 已选择但尚未 D.fire 的唯一 D payload | `current_d_record/current_d_valid` | D.ready=0 时 payload 不变 |
+| `admission` | 从真实 request fire 到允许进入返回仲裁的固定边界 | DCache `+3`，Uncache `+1` | 不是 `pre_pkt_gap/post_pkt_gap` |
+| `scheduler timer` | 每个通道每轮返回前独立抽样的额外延迟计时器 | `*_rsp_timer_*` | 到期后才选 record |
+| `ordered/reorder` | record 的返回选择模式 | `*_RSP_REORDER_EN` | 两通道分别配置 |
+| `memory lifecycle owner` | 每 testcase 唯一清空与配置 shared memory 的入口 | real-smoke virtual sequence | responder 只在 legacy topology 未初始化时兜底调用 |
+| `write batch` | 已确认 fire、下一 shared-memory sample 才提交的写集合 | `dcache_write_batch/uncache_write_batch` | 同拍固定先 DCache、后 Uncache |
 
-抽象功能说明：两个 responder 都复用 `mem_access_base_sequence` 的测试级共享 memory store，但协议模型
-不同。DCache 是 V2 轻量 coherent responder；历史命名为 `sbuffer_agent` 的端口实际承担 Uncache
-TL-UL A-to-D responder。二者都不拥有主表、LQ/SQ、pass/fail、ROB commit 或 terminal 状态。
-
-## 2. 函数调用 Flow 图
+## 2. 调用 Flow
 
 ```mermaid
 flowchart TD
-    A[dcache_mem__access_base_sequence::body] --> B[wait drv_cb sample]
-    B --> C[compute last_cycle fire]
-    C --> D[build_dcache_idle_xaction]
-    D --> E{owner priority}
-    E -->|pending D| F[build_pending_d_xaction]
-    E -->|GrantAck| G[e_ready only]
-    E -->|Probe| H[drive Probe B]
-    E -->|C| I[start/consume C assembly]
-    E -->|A| J[arm A snapshot]
-    E -->|idle| K[try_start_probe]
-    F --> L[send_dcache_xaction]
-    G --> L
-    H --> L
-    I --> L
-    J --> L
-    K --> L
-    L --> B
+    A[DCache body] --> B[begin_shared_mem_sample]
+    B --> C[DCache A/B/C/D/E fire]
+    C --> D[DCache response record + scheduler]
+    D --> E[DCache D/E/B/C item]
+    E --> F[DCache driver]
 
-    M[sbuffer_mem_access_base_sequence::body] --> N[drv_cb sample and begin_shared_mem_sample]
-    N --> O{armed A?}
-    O -->|yes and A.fire| P[capture drv_cb fire snapshot and check stable]
-    P --> Q[sbuffer_mem_access_xaction and Uncache write batch]
-    Q --> R[drive pending D until D.fire]
-    R --> S[build idle item]
-    O -->|yes and A.valid=0| V[clear armed snapshot and return to idle]
-    V --> S
-    O -->|no| T{sampled A.valid and no stop?}
-    T -->|yes| U[capture drv_cb armed snapshot and drive A.ready]
-    U --> S
-    T -->|no| S
-    S --> N
+    G[Uncache body] --> H[begin_shared_mem_sample]
+    H --> I[Uncache A/D fire]
+    I --> J[decode_uncache_a_opcode]
+    J --> K[create_uncache_response_record]
+    K --> L[Uncache scheduler]
+    L --> M[Uncache D item]
+    M --> N[SBuffer agent driver]
+
+    B --> O[shared backing/overlay]
+    H --> O
 ```
 
 ### 2.1 函数调用 Flow 图整体文字伪代码
 
 ```text
+两个 responder 都在自己的 drv_cb 边界先调用 begin_shared_mem_sample：
+  提交上一拍已确认的 write batch；当前拍 read 只读取上一轮 committed overlay/backing view。
+
 DCache：
-  body 在 drv_cb 边界采样上一 item 的对端 ready/valid；
-  用 last_cycle_xact 确认 A/B/C/D/E fire；
-  先推进已确认的旧 owner，再从 idle item 开始按 pending D、GrantAck、Probe、C、A 优先级构造下一 item；
-  A.fire 才调用 accept_dcache_a_request 建立 Grant/GrantData/CBOAck pending；
-  D.fire 才推进 beat或建立 GrantAck owner；
-  E.fire 才插入 cached line table；
-  C.fire 才进入 Probe/Release assembly；
-  C.fire 完成后的同拍禁止 A arm 和新 Probe，C assembly 下一拍继续优先；
-  非 reset 边界先检查 A.valid/B.ready/C.valid/D.ready/E.valid 四态 raw 值；
-  global stop 只在所有 DCache in-flight 清空后发送 safe idle并退出。
+  确认 A/C fire 后建立 coherent response record；
+  以 DCache 自己的 admission、delay timer、选择模式和 D hold 返回 Grant/CBOAck/ReleaseAck；
+  Grant 的 sink 在 E.fire 后才释放；Probe/C assembly 仍由 DCache 私有 owner 处理。
 
-SBuffer：
-  body 在 drv_cb 边界先推进 shared memory sample，并检查 A.valid/D.ready 四态；
-  每次复制 armed 或 fire snapshot 前检查 opcode/param/size/source/address/mask/data/corrupt 均为已知值；
-  看到 A.valid 时只保存 drv_cb armed snapshot 并驱动 A.ready；
-  下一 drv_cb 边界确认真实 A.fire 后，重新从同一采样域取得 fire snapshot并检查 payload稳定性；
-  若 armed 后 A.valid 已撤销而没有 fire，则清 armed snapshot，不建立 D response 或 Uncache write batch；
-  仅 fire snapshot 才调用 sbuffer_mem_access_xaction，store 加入 Uncache write batch、load 固化 merged read data；
-  pending D 持续驱动到真实 D.fire；
-  driver 阻塞取得每个 item 后立即写 clocking output，确保本轮 last_cycle_xact 已在 DUT 侧保持完整一拍；
-  global stop 后已 fire 的 armed A 允许继续建立 D response 并 drain；若出现未 fire 的新 A.valid 则 fatal，
-  只有没有 pending D、armed A或当前 A.valid 时才发送 safe idle并退出。
+Uncache：
+  确认 A.fire 后先用白名单解码 PutFullData/PutPartialData/Get；
+  真实 store 写入 Uncache write batch，Get 固化 merged read data；
+  建立 AccessAck 或 AccessAckData record；
+  用 Uncache 自己的 timer 和选择模式返回 D，D.ready=0 时保持 current D hold。
 
-共享 memory store：
-  两个 responder 在每个 drv_cb 边界调用 begin_shared_mem_sample($time)；该调用先提交上一拍 batch，
-  即使后续没有新的 memory access，最后一次已确认写也不会滞留；
-  DCache 64B coherent beat 和 Uncache 8B beat都经过 shared_mem_access_task；
-  read 先看上一拍已提交 overlay，未命中的 byte 才回退 backing main_mem；
-  当前拍 DCache C writeback 和 Uncache store 只进入 batch，下一采样边界固定先提交 DCache、后提交 Uncache；
-  range、corrupt、denied由公共 memory 后端返回。
+任何一侧的 D.ready backpressure、timer、record 满或 GrantAck wait 都不直接阻塞另一侧。
 ```
 
-## 3. DCache responder 总览
+## 3. 公共 Shared Memory 后端
 
-源码位置：mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv:1478-1800。
+### 3.1 `begin_shared_mem_sample()` 与 `shared_mem_access_task()`
 
-抽象功能描述：DCache body 是单一逐拍 service loop，负责 fire 采样、response delay、Hint、
-GrantAck、Probe、C assembly 和 global stop。它不依赖 DCache monitor analysis port。
+抽象功能描述：公共后端维护 backing、overlay 与跨通道 write batch 的唯一生命周期。它不创建
+TileLink response、不分配 sink，也不管理 DCache/Uncache scheduler。
 
-当前 DCache 合同：
-
-| 输入/事件 | 当前处理 |
-|---|---|
-| AcquireBlock | 两拍 GrantData，固定 sink 0，可按权重发一次 Hint |
-| AcquirePerm | 单拍 Grant(toT)，固定 sink 0，等待 E |
-| CBOClean/Flush/Inval | 单拍 CBOAck；flush/inval 完成后删 map |
-| Release | 单拍 ReleaseAck |
-| ReleaseData | 两拍接收；全部 data beat `corrupt=0` 时完整 C.fire 后写入 DCache overlay batch，再发 ReleaseAck；任一 beat corrupt 时不写 overlay 但仍完成协议收敛 |
-| ProbeAck/ProbeAckData | 匹配 Probe owner；ProbeAckData 仅完整且所有 data beat `corrupt=0` 时写入 DCache overlay batch，任一 beat corrupt 时不写 overlay 但仍完成协议收敛，随后删 map |
-| 不支持的 A/C opcode | 在建立 response 前 fatal，不 fallback AccessAckData |
-| io_l2_flush_done | 始终为已知 0；driver 首次赋值前做四态检查 |
-| global stop | 禁止新 Probe；等待 pending/owner/armed/valid 全部收敛后发布 done 并自然退出 |
-
-### 3.1 body() 的 fire 边界
-
-抽象功能描述：每轮先采样上一 item 的对端值，再决定本轮 item；它不把看到 valid 等同于
-已经握手。
-
-```systemverilog
-@(dcache_vif.drv_cb);
-begin_shared_mem_sample($time);
-a_fire = (last_cycle_xact.auto_inner_dcache_client_out_a_ready == 1'b1) && sampled_a_valid;
-d_fire = (last_cycle_xact.auto_inner_dcache_client_out_d_valid == 1'b1) && sampled_d_ready;
-e_fire = (last_cycle_xact.auto_inner_dcache_client_out_e_ready == 1'b1) && sampled_e_valid;
+```text
+每个 sample：先提交上一拍 batch，固定顺序为 DCache C writeback -> Uncache store；
+读：每个 byte 优先读 overlay valid byte，未命中 byte 才读取或懒初始化 backing；
+写：不污染 backing main_mem，只把 mask/data 作为 DCache 或 Uncache write event 进入本拍 batch；
+下一 sample：统一提交 batch 到 overlay。
 ```
 
-中文伪代码：等待采样边界；先提交上一拍已确认的跨通道写 batch；再将上一 item 的 ready/valid 与当前
-DUT 对端值相与；只在 fire 后调用对应状态更新函数。两个 responder 在同一时刻重复调用该 helper
-是幂等的，不会改变当前拍 read view。
+`MEMBLOCK_MAIN_MEM_RANGES_EN=1` 时，DCache 与 Uncache 都受 `PADDR_BASE/RANGE` 严格范围检查；为
+`0` 时两侧允许 48-bit physical address sparse lazy allocation。该开关不限制主表虚拟地址、TLB PPN
+构造或任意 TileLink 字段宽度。
 
-C.fire 完成后的本拍显式跳过 A/Probe 仲裁；A.fire 已完成时阻止同拍 A arm，避免旧 C owner 被
-新 pending D 抢占或同一个输入被重复分类。
+## 4. DCache Response Pipeline
 
-### 3.2 DCache driver 合同
+详细 coherent A/B/C/D/E 行为见
+`AI_DOC/mem_ut_flow_doc/dcache_l2_response_hint_probe_model_flow.md`。本节只说明与 Uncache 的公共
+调度关系。
 
-源码位置：mem_ut/ver/ut/memblock/agent/dcache_agent_agent/src/dcache_agent_agent_driver.sv:51-255。
+抽象功能描述：DCache responder 将 A Acquire/CBO 和 C Release 流程统一为最多 16 条 response record，
+使用独立 scheduler 返回 D。GrantData、CBOAck、ReleaseAck 共用容量；Grant 的动态 sink 等待 E.fire
+不再占用 D response record。
 
-抽象功能描述：driver 一对一搬运 sequence item，不决定协议状态。
-
-```systemverilog
-req = null;
-seq_item_port.get_next_item(req);
-send_pkt(req);
-seq_item_port.item_done();
+```text
+Acquire/CBO/Release fire：建立 response record；
+DCache fixed admission：record 最早在 accept_cycle + 3 参与 scheduler；
+timer：按 DCache 四档 delay weight 抽一次；
+timer 到期：按 DCache ORDERED/REORDER 选 record 为 current D hold；
+最后 D.fire：释放 record；Grant 再转入 GrantAck wait；
+E.fire：按 sink 释放 Grant owner 和 sink。
 ```
 
-中文伪代码：清空旧句柄；阻塞获取新 item；立即写 clocking output；完成 item_done；不 hold 或重复上一 item。
+`MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING=16` 是 compile-time 结构上限，不能由 plus 改变。
+`MEMBLOCK_L2_RSP_DELAY_*_WT` 和 `MEMBLOCK_L2_RSP_REORDER_EN` 只改变 DCache 返回调度。
 
-send_pkt 要求 pre/post gap 为 0，使用四态比较检查 Hint valid/payload 和 flush_done；null item、
-未知 valid/payload 或非已知 0 的 flush 都在首次 VIF 赋值前 fatal。四个 sideband xaction 字段为
-四态 `logic`，检查不会在 driver 前被二态折叠；generic idle 的四个 sideband 和 E.ready 始终写 0。
-DCache 详细状态流见专用 flow 文档。
+## 5. Uncache Response Pipeline
 
-### 3.3 GrantAck、Probe 和 C assembly
+### 5.1 `decode_uncache_a_opcode()`
 
-抽象功能描述：DCache 的 D/E/B/C 生命周期由 sequence-local owner 管理，不把完成的 map 当作
-in-flight。
+抽象功能描述：该函数只将已稳定的 Uncache A payload 分类为 store ack 或 load data，非法 opcode 在
+建立 record 前 fail-fast。它不访问 memory，不推进 queue。
 
-中文伪代码：
-
-1. Grant/GrantData 最后一拍 D.fire：保存 line/alias/sink，置 GrantAck owner，暂不插入 map。
-2. 只有 owner 分支才把 e_ready 置 1；无 owner 的 E.valid fatal；匹配 E.fire 后以四态完全匹配校验
-   sink 并插入 map。
-3. 未 stop、完全空闲且 map 非空时按权重启动 Probe；helper 自身重复检查全部 owner hazard；B.fire
-   后等待 ProbeAck/Data。
-4. ProbeAckData/ReleaseData 收两拍，header 必须稳定；仅全部 data beat无 `corrupt` 时把完整数据加入
-   DCache overlay batch，而不是覆盖 backing `main_mem`。任一 beat corrupt 时只完成对应协议收敛，
-   本专项不改写 overlay 或 alias `data_valid`。
-5. Release 完成后排期 ReleaseAck；Probe/失效操作完成后删除 map。
-
-对 C payload，`check_dcache_c_payload_known()` 必须在复制到二态 xaction 前执行：所有 opcode 都检查
-header（opcode/param/size/source/address），`ProbeAckData` 与 `ReleaseData` 额外检查 data/corrupt。
-无数据 `ProbeAck`/`Release` 的 data/corrupt 是 don't-care，不作为 X/Z fatal 条件。C.fire 后 assembly
-只消费当前已经检查并确认的 fired snapshot；armed snapshot 只用于等待 ready 时的稳定性比较，不能作为
-data writeback 的第二来源。
-
-## 4. SBuffer responder 总览
-
-源码位置：mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv:2000-2119。
-
-抽象功能描述：历史名为 SBuffer 的 sequence 复用公共 memory store，按 8B beat 处理 Uncache 单拍
-A-to-D request；它没有 DCache
-的 GrantAck、Probe、Hint 或 multi-beat C owner。
-
-### 4.1 sbuffer_mem_access_base_sequence::body()
-
-```systemverilog
-@(sbuffer_vif.drv_cb);
-begin_shared_mem_sample($time);
-if (!reset_active &&
-    ((sampled_a_valid_raw !== 1'b0 && sampled_a_valid_raw !== 1'b1) ||
-     (sampled_d_ready_raw !== 1'b0 && sampled_d_ready_raw !== 1'b1))) begin
-    `uvm_fatal(get_type_name(), "Uncache A.valid/D.ready sampled as X/Z outside reset")
-end
-if ($isunknown({sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_opcode,
-                sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_param,
-                sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_size,
-                sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_source,
-                sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_address,
-                sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_mask,
-                sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_data,
-                sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_corrupt}))
-    `uvm_fatal(get_type_name(), "Uncache A payload sampled as X/Z outside reset")
-if (a_accept_armed && sampled_a_valid) begin
-    capture_sbuffer_a_xaction(fired_a_req_xact);
-    check_sbuffer_a_payload_stable(armed_a_req_xact, fired_a_req_xact);
-    sbuffer_mem_access_xaction(fired_a_req_xact, pending_d_xact);
-    pending_d_valid = 1'b1;
-end
-else if (!data.is_global_stop_requested() && sampled_a_valid) begin
-    capture_sbuffer_a_xaction(armed_a_req_xact);
-    a_accept_armed = 1'b1;
-    idle_xact.auto_inner_buffers_out_a_ready = 1'b1;
-end
+```text
+PutFullData / PutPartialData -> STORE_ACK；
+Get -> LOAD_DATA；
+其它 opcode -> uvm_fatal，不创建 response record。
 ```
 
-中文伪代码：每个 drv_cb 边界先推进共享 memory 采样代次；已 armed 且真实 A.fire 的请求可以在 stop 后
-继续建立 D response 并 drain；若 stop 后出现未 fire 的新 A.valid，立即 fatal，不能无限保持 A.ready=0
-等待 DUT 自行撤销。只有 stop 已请求且 pending D、armed A和当前 A.valid均为空时发送 safe idle并退出；
-否则发送 idle，看到 A.valid 后采样、发送 A.ready。非 reset 时 A.valid 或
-D.ready 为 X/Z 直接 fatal；每次复制 A snapshot 前，opcode/param/size/source/address/mask/data/corrupt
-任一 X/Z 也直接 fatal，不能让二态 xaction 把未知值转成 0。只有下一边界确认真实 A.fire 后才调用
-`sbuffer_mem_access_xaction`，并且 fire payload 必须从同一个 `drv_cb` snapshot 复制；若 armed A 的
-下一边界 A.valid 已撤销，则清 armed snapshot 后回到 idle，不建立 D response 或 Uncache write batch；
-store 在真实 fire 时加入 Uncache write batch，load 在此时读取已提交 merged view；随后等待 D.ready。
-退出不依赖 `dispatch_real_smoke_active` 保持为 1。
+这避免旧逻辑将任何“非 Put”请求静默伪装为 `AccessAckData`。当前 V2 TL-UL edge 不支持在此
+responder 中模拟 Arithmetic、Logical、Hint、Acquire 或 CBO transaction。
 
-### 4.2 sbuffer_mem_access_xaction()
+### 5.2 `create_uncache_response_record()`
 
-抽象功能描述：将已经真实握手的 Uncache A request 映射到公共 memory，并生成单拍 D response。
+抽象功能描述：该 task 仅消费真实 Uncache A.fire，执行一次 shared-memory 读或写并建立语义固定、
+当拍不可返回的 AccessAck/AccessAckData record。它不管理 timer，也不在 D hold 时重读 memory。
 
-中文伪代码：判断 opcode 是否 store；将地址按 8B 对齐、mask/data 送入 `shared_mem_access_task`；store
-只建立 Uncache overlay batch 并返回 ack，load 从已提交 overlay 与 backing 的 merged view 固化 64bit
-data；复制 source/size 并保留 denied/corrupt。
-
-### 4.3 sbuffer_agent_agent_driver::main_phase()
-
-源码位置：`mem_ut/ver/ut/memblock/agent/sbuffer_agent_agent/src/sbuffer_agent_agent_driver.sv`。
-
-抽象功能描述：driver 是 Uncache responder item 到 DUT clocking output 的唯一搬运者。它不计算 fire、
-不更新 overlay、不创建 D response；它保证 sequence 保存为 `last_cycle_xact` 的 item 已在下一 sample
-前真正驱动到接口。
-
-```systemverilog
-req = null;
-seq_item_port.get_next_item(req);
-if (req == null) begin
-    `uvm_fatal(get_type_name(), "get_next_item returned a null Uncache item")
-end
-if (req.pre_pkt_gap != 0 || req.post_pkt_gap != 0) begin
-    `uvm_fatal(get_type_name(), "Uncache responder item must use pre_pkt_gap=0 and post_pkt_gap=0")
-end
-this.send_pkt(req);
-seq_item_port.item_done();
+```text
+先检查未超过 MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING；
+解码 opcode；
+STORE_ACK：以 address/mask/data 创建 Uncache write batch，record 记录 AccessAck；
+LOAD_DATA：从当前 committed merged view 读取 64-bit data，record 记录 AccessAckData；
+record.eligible_cycle = accept_cycle + 1；入 uncache_rsp_q。
 ```
 
-中文伪代码：清空上一轮 request 句柄后阻塞等待一个新的 responder item；空 item 或非零 gap 表示当前
-lockstep 合同被破坏，立即 fatal。合法 item 不再额外等待 `drv_cb`，直接写入 clocking output 并通知
-sequencer 已完成。这样 sequence 到下一个 `drv_cb` 才计算的 A/D fire，一定使用已对 DUT 生效完整一拍的
-A.ready/D.valid；driver 不在无 item 时额外插入 idle，从而不覆盖 responder 已明确发送的 item。
+当前专项保留 backend 返回的 load `corrupt`，store `AccessAck.corrupt` 固定为 0。D response
+denied/corrupt 注入和协议归一化由独立 D-error plan 在此唯一 record 创建点补齐，不能在 scheduler 或
+D hold 中重新随机。
 
-## 5. 公共 memory 后端
+### 5.3 `service_uncache_response_scheduler()` 与 D hold
 
-源码位置：mem_base_sequence.sv:11-386。
+抽象功能描述：该函数是 Uncache queue 到 current D hold 的唯一仲裁 owner。它只在没有 current D hold
+时启动或消费 timer；D.ready=0 时它不改变 record 内容。
 
-抽象功能描述：`mem_access_base_sequence` 保存测试级共享 sparse memory store，并提供范围检查、lazy
-line、byte mask 和确定性的跨通道写提交。`main_mem` 只保存 backing 初值；`write_overlay_mem` 保存
-memory-facing 写，读按 byte 合并两层。内部 backing line 是 8192-bit/1024B；DCache/Uncache 只使用其中的 64B/8B
-子范围。
-
-```systemverilog
-begin_shared_mem_sample($time);
-main_mem_access_task(addr, 1'b0, byte_mask, '0, corrupt, denied, backing_data);
-if (!corrupt && !denied) begin
-    if (is_store)
-        push_write_event_to_dcache_or_uncache_batch();
-    else foreach (byte_mask[i]) begin
-        if (write_overlay_byte_valid[line_addr][byte_offset])
-            load_data[(i * 8) +: 8] = write_overlay_mem[line_addr][(byte_offset * 8) +: 8];
-        else
-            load_data[(i * 8) +: 8] = backing_data[(i * 8) +: 8];
-    end
-end
+```text
+无 current D hold 且有本拍前已存在的 eligible record：按 Uncache 四档权重抽 delay，启动 timer；
+timer 到：ORDERED 选最早 eligible record，REORDER 在 eligible 集合随机选择；
+移入 current_d_record，驱动 AccessAck 或 AccessAckData；
+D.ready=0：保持 D.valid、opcode、source、size、data、denied、corrupt；
+D.fire：清 current record，立即归还一条 Uncache response capacity。
 ```
 
-中文伪代码：先在当前 sample 固定上一拍 committed view；后端只做范围检查和 backing 懒初始化读取。读
-优先 overlay valid byte；写不修改 backing，只根据 write owner 加入 DCache 或 Uncache batch。下一
-sample 统一提交 batch，顺序为 DCache 后 Uncache，因此同 byte 冲突由 Uncache 覆盖。
+`service_uncache_d_hold_watchdog()` 只在 D hold 持续 1000 个 driver 边界且无 D.fire 时输出一次
+warning。它不超时删除 record、不改变 overlay、global stop、pass/fail 或 terminal。
 
-real-smoke vseq 在 fork 两个 responder 前调用 `initialize_shared_memory_state()`，清空 backing、overlay、
-batch 并按 `MEMBLOCK_MAIN_MEM_RANGES_EN` 决定是否注册 `PADDR_BASE/RANGE`。legacy default topology
-仅在 shared lifecycle 尚未初始化时兜底调用同一 helper；后启动 responder、reset、Probe、CBO、stop
-均不得重置 shared store。该范围不影响主表虚拟地址生成。
+## 6. 参数、容量与退出
 
-## 6. 与其它 flow 的边界和同步要求
+| 项目 | DCache | Uncache |
+|---|---|---|
+| 编译期 response 上限 | `MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING=16` | `MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING=16` |
+| admission 最早可选拍 | A/C fire 后 `+3` | A fire 后 `+1` |
+| runtime delay | `MEMBLOCK_L2_RSP_DELAY_ZERO/SMALL/MEDIUM/LARGE_WT` | `MEMBLOCK_UNCACHE_RSP_DELAY_ZERO/SMALL/MEDIUM/LARGE_WT` |
+| 返回选择 | `MEMBLOCK_L2_RSP_REORDER_EN` | `MEMBLOCK_UNCACHE_RSP_REORDER_EN` |
+| 默认分布 | SMALL `1`，其它 `0`，即 `1..10` | SMALL `1`，其它 `0`，即 `1..10` |
+| E/sink | Grant 动态 sink，等待 GrantAck | 不使用 GrantAck sink |
 
-这些 responder 不生成主表、issue、writeback、ROB commit/deq、redirect/replay 或 pass/fail。
-virtual_sequence_unified_dispatch_flow 只描述它们的启动、join和自然退出；本文件描述共享 memory
-后端和 SBuffer，DCache 专项 flow 描述完整 coherent 生命周期。
+两通道在 `global_stop_requested` 后不再接受未握手的新 request，却必须 drain 已建立的 record、timer 与
+D hold。DCache 还必须等待 GrantAck、Hint、Probe/C assembly 收敛；Uncache 还必须等待 armed A 和
+`uncache_rsp_q` 清空。任何一侧自然退出都不应清另一个 responder 的 shared memory 或协议状态。
 
-任何修改以下共享对象的子 plan 都必须同步本文件及命中文档：
+## 7. 边界与修改类型总结
 
-- mem_base_sequence.sv 的 body、driver 时序、memory range 或 global stop；
-- dcache_agent_agent_driver 的 get_next_item/send_pkt/idle 行为；
-- io_l2_hint/io_l2_flush_done 的 producer、约束或 fail-fast；
-- DCache/SBuffer responder 的退出条件。
+本轮把旧的 DCache 单 pending 与 Uncache 即时/单笔回复替换为两个独立的 response pipeline：
 
-## 7. 与旧实现的差异总结
-
-- DCache 由旧 A-to-D 阻塞 for-loop 改为 fire 驱动逐拍状态机。
-- DCache 新增 coherent response 分类、delay、Hint、GrantAck/E、cached line、Probe 和 C assembly。
-- DCache driver 改为阻塞 get_next_item 后立即发送，消除旧 hold 造成的重复 beat。
-- DCache sideband 使用四态 fail-fast；无 GrantAck owner 的 E.valid 和未知 E sink 不再静默通过。
-- C assembly fire 后独占本拍仲裁，stop 后禁止新 Probe和未握手 A；global stop 需要 DCache 自身
-  in-flight drain，cached line map 不阻塞退出。
-- DCache terminal idle 后发布 `dcache_responder_done`，legacy testcase 等待该标志后才 drop objection。
-- SBuffer 仍保持单拍响应主体，不共享 DCache coherent owner；global stop 后只 drain 已 fire 的 A，
-  未 fire 新 A.valid fail-fast，避免 terminal 双方永久等待。
-- 本轮新增 `MEMBLOCK_MAIN_MEM_RANGES_EN`，默认同时限制 DCache 与 Uncache；关闭时两者均可在完整
-  48-bit 物理地址空间懒分配，不改变 TLB 映射窗口本身。
-- backing `main_mem` 不再接收 DUT memory-facing 写；完整 DCache C data 与真实 Uncache store A.fire
-  分别进入共享 overlay batch，下一拍按 DCache 后 Uncache 的固定顺序提交。
+- 新增 DCache/Uncache response record、独立 timer、eligible boundary、ORDERED/REORDER 和 D hold；
+- DCache 新增动态 sink 与多笔 GrantAck wait，ReleaseData 首 beat reservation；
+- Uncache 新增 V2 opcode 白名单、16 笔容量和长 D.ready hold warning；
+- shared memory 的 backing/overlay、byte mask、write batch 以及 DCache/Uncache 同拍写入顺序保持原
+  有公共后端语义；
+- 本 flow 不实现多 Probe/toB、alias、CBO closure、D error injection 或完整 L2 flush。这些功能必须由
+  相应专项 plan 在现有 response pipeline 上扩展，而不能恢复旧的单 pending 状态机。

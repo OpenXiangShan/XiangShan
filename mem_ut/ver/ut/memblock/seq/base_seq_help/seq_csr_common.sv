@@ -193,11 +193,19 @@ class seq_csr_common;
     static int unsigned flushsb_timeout = 1000;
     static bit          replay_wait_ptw_en = 1'b0;
     static int unsigned replay_wait_ptw_timeout = 1000;
-    // 中文注释：DCache 轻量 L2 responder 的三档首拍 response delay 权重。
-    // plus/default cfg 负责提供 raw 权重；validate_and_clamp() 只做 fail-fast，不做静默 clamp。
+    // 中文注释：DCache/Uncache 各自的四档 response scheduling delay 权重。
+    // 设置：plus/default cfg 写入；读取：各 responder scheduler 在一轮返回调度开始时一次采样。
+    // 作用：只控制 record 入队后的返回等待，不改变物理 outstanding 上限或 A-channel handshake。
+    static int unsigned l2_rsp_delay_zero_wt = 0;
     static int unsigned l2_rsp_delay_small_wt = 1;
     static int unsigned l2_rsp_delay_medium_wt = 0;
     static int unsigned l2_rsp_delay_large_wt = 0;
+    static int unsigned uncache_rsp_delay_zero_wt = 0;
+    static int unsigned uncache_rsp_delay_small_wt = 1;
+    static int unsigned uncache_rsp_delay_medium_wt = 0;
+    static int unsigned uncache_rsp_delay_large_wt = 0;
+    static bit          l2_rsp_reorder_en = 1'b0;
+    static bit          uncache_rsp_reorder_en = 1'b0;
     // 中文注释：每个 AcquireBlock 产生 hint、每个合格空闲周期尝试 Probe 的百分比权重。
     // 0 表示关闭，100 表示每次都命中；sequence 只读 getter，不在 getter 内修改状态。
     static int unsigned l2_hint_valid_wt = 0;
@@ -408,9 +416,16 @@ class seq_csr_common;
         flushsb_timeout             = get_non_negative_int("MEMBLOCK_FLUSHSB_TIMEOUT", plus::MEMBLOCK_FLUSHSB_TIMEOUT);
         replay_wait_ptw_en          = plus::MEMBLOCK_REPLAY_WAIT_PTW_EN;
         replay_wait_ptw_timeout     = get_non_negative_int("MEMBLOCK_REPLAY_WAIT_PTW_TIMEOUT", plus::MEMBLOCK_REPLAY_WAIT_PTW_TIMEOUT);
+        l2_rsp_delay_zero_wt        = get_non_negative_int("MEMBLOCK_L2_RSP_DELAY_ZERO_WT", plus::MEMBLOCK_L2_RSP_DELAY_ZERO_WT);
         l2_rsp_delay_small_wt       = get_non_negative_int("MEMBLOCK_L2_RSP_DELAY_SMALL_WT", plus::MEMBLOCK_L2_RSP_DELAY_SMALL_WT);
         l2_rsp_delay_medium_wt      = get_non_negative_int("MEMBLOCK_L2_RSP_DELAY_MEDIUM_WT", plus::MEMBLOCK_L2_RSP_DELAY_MEDIUM_WT);
         l2_rsp_delay_large_wt       = get_non_negative_int("MEMBLOCK_L2_RSP_DELAY_LARGE_WT", plus::MEMBLOCK_L2_RSP_DELAY_LARGE_WT);
+        uncache_rsp_delay_zero_wt   = get_non_negative_int("MEMBLOCK_UNCACHE_RSP_DELAY_ZERO_WT", plus::MEMBLOCK_UNCACHE_RSP_DELAY_ZERO_WT);
+        uncache_rsp_delay_small_wt  = get_non_negative_int("MEMBLOCK_UNCACHE_RSP_DELAY_SMALL_WT", plus::MEMBLOCK_UNCACHE_RSP_DELAY_SMALL_WT);
+        uncache_rsp_delay_medium_wt = get_non_negative_int("MEMBLOCK_UNCACHE_RSP_DELAY_MEDIUM_WT", plus::MEMBLOCK_UNCACHE_RSP_DELAY_MEDIUM_WT);
+        uncache_rsp_delay_large_wt  = get_non_negative_int("MEMBLOCK_UNCACHE_RSP_DELAY_LARGE_WT", plus::MEMBLOCK_UNCACHE_RSP_DELAY_LARGE_WT);
+        l2_rsp_reorder_en           = plus::MEMBLOCK_L2_RSP_REORDER_EN;
+        uncache_rsp_reorder_en      = plus::MEMBLOCK_UNCACHE_RSP_REORDER_EN;
         l2_hint_valid_wt            = get_non_negative_int("MEMBLOCK_L2_HINT_VALID_WT", plus::MEMBLOCK_L2_HINT_VALID_WT);
         l2_probe_enable_wt          = get_non_negative_int("MEMBLOCK_L2_PROBE_ENABLE_WT", plus::MEMBLOCK_L2_PROBE_ENABLE_WT);
         l2tlb_seq_en                = plus::MEMBLOCK_L2TLB_SEQ_EN;
@@ -511,10 +526,16 @@ class seq_csr_common;
             `uvm_warning("SEQ_CSR_CFG", "replay_wait_ptw_timeout=0 while replay wait PTW is enabled, clamp to 1")
             replay_wait_ptw_timeout = 1;
         end
-        fatal_if_all_zero3("DCache L2 response delay weights",
+        fatal_if_all_zero4("DCache L2 response delay weights",
+                           l2_rsp_delay_zero_wt,
                            l2_rsp_delay_small_wt,
                            l2_rsp_delay_medium_wt,
                            l2_rsp_delay_large_wt);
+        fatal_if_all_zero4("Uncache response delay weights",
+                           uncache_rsp_delay_zero_wt,
+                           uncache_rsp_delay_small_wt,
+                           uncache_rsp_delay_medium_wt,
+                           uncache_rsp_delay_large_wt);
         if (l2_hint_valid_wt > 100) begin
             `uvm_fatal("SEQ_CSR_CFG",
                        $sformatf("MEMBLOCK_L2_HINT_VALID_WT=%0d must be within [0:100]", l2_hint_valid_wt))
@@ -1522,6 +1543,11 @@ class seq_csr_common;
         return l2_rsp_delay_small_wt;
     endfunction:get_l2_rsp_delay_small_wt
 
+    static function int unsigned get_l2_rsp_delay_zero_wt();
+        check_initialized("get_l2_rsp_delay_zero_wt");
+        return l2_rsp_delay_zero_wt;
+    endfunction:get_l2_rsp_delay_zero_wt
+
     static function int unsigned get_l2_rsp_delay_medium_wt();
         check_initialized("get_l2_rsp_delay_medium_wt");
         return l2_rsp_delay_medium_wt;
@@ -1531,6 +1557,36 @@ class seq_csr_common;
         check_initialized("get_l2_rsp_delay_large_wt");
         return l2_rsp_delay_large_wt;
     endfunction:get_l2_rsp_delay_large_wt
+
+    static function int unsigned get_uncache_rsp_delay_zero_wt();
+        check_initialized("get_uncache_rsp_delay_zero_wt");
+        return uncache_rsp_delay_zero_wt;
+    endfunction:get_uncache_rsp_delay_zero_wt
+
+    static function int unsigned get_uncache_rsp_delay_small_wt();
+        check_initialized("get_uncache_rsp_delay_small_wt");
+        return uncache_rsp_delay_small_wt;
+    endfunction:get_uncache_rsp_delay_small_wt
+
+    static function int unsigned get_uncache_rsp_delay_medium_wt();
+        check_initialized("get_uncache_rsp_delay_medium_wt");
+        return uncache_rsp_delay_medium_wt;
+    endfunction:get_uncache_rsp_delay_medium_wt
+
+    static function int unsigned get_uncache_rsp_delay_large_wt();
+        check_initialized("get_uncache_rsp_delay_large_wt");
+        return uncache_rsp_delay_large_wt;
+    endfunction:get_uncache_rsp_delay_large_wt
+
+    static function bit get_l2_rsp_reorder_en();
+        check_initialized("get_l2_rsp_reorder_en");
+        return l2_rsp_reorder_en;
+    endfunction:get_l2_rsp_reorder_en
+
+    static function bit get_uncache_rsp_reorder_en();
+        check_initialized("get_uncache_rsp_reorder_en");
+        return uncache_rsp_reorder_en;
+    endfunction:get_uncache_rsp_reorder_en
 
     static function int unsigned get_l2_hint_valid_wt();
         check_initialized("get_l2_hint_valid_wt");

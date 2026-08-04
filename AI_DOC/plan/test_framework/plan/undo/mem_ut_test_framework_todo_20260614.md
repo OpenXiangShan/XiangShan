@@ -511,52 +511,20 @@ TODO：
 - 默认关闭 directed MMIO；未开启专项时，不把 MMIO sideband 接入 pass/fail 或 terminal。
 - 不在该 TODO 中实现 RM/scoreboard 正确性比较；若后续要判断 DUT MMIO 顺序或异常处理正确性，应另建 RM/checker/coverage 专项。
 
-## 12. V2 L2 hint 与 L2 flush completion responder 完整闭环 TODO
+## 12. V2 L2 flush completion responder TODO
 
-状态：V2 request-bound L2 hint、轻量 coherent response、地址表和低频 Probe 已形成待执行专项 plan：
-`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md`。
-`io_l2_flush_done` 仍不支持具有 request/in-flight/completion 关联的非零模型，继续保持 zero-only。
+状态：request-bound `io_l2_hint_*`、DCache/Uncache response record、动态 Grant sink 和低频
+Probe 已由已完成的 DCache responder 专项实现；Hint 只来自真实 `AcquireBlock -> GrantData`，
+并与最终选中的 GrantData record 绑定。当前仍不支持具有 request/in-flight/completion 关联的
+非零 `io_l2_flush_done`，继续保持 zero-only。
 
-```text
-io_l2_hint_valid
-io_l2_hint_bits_sourceId[3:0]
-io_l2_hint_bits_isKeyword
-io_l2_flush_done
-```
+当前 flush sideband 边界：
 
-当前能力边界：
+- generic xaction、constructor、idle builder 和 `drive_idle()` 保证无 owner 周期 `io_l2_flush_done=0`；
+- 没有合法 L2 flush request 时不得产生 done；不得用随机 pulse、固定周期 pulse 或 testcase 直接赋值伪造完成；
+- 不能由 DCache response scheduler、Hint、Probe 或第二个并发 sequence 产生 flush completion。
 
-- interface 声明初始化、generic xaction、constructor、idle builder 和 `drive_idle()` 共同保证
-  无 owner 周期的四字段为 0。
-- 专用 responder 只允许对已接受的 `AcquireBlock -> GrantData` 产生一次 hint；Grant、CBOAck、
-  ReleaseAck、AccessAckData 和非 DCache client 不产生 hint。
-- 没有合法 L2 flush request 时不得产生 `l2_flush_done`；不得使用随机 pulse、固定周期
-  pulse或 testcase 直接赋值伪造完成。
-- 不得由 generic random transaction 或第二个并发 sequence 产生 hint/flush sideband。
-
-为什么需要独立专项：
-
-- `l2_hint` 会按 `sourceId` 关联 DCache MSHR，并可能在 GrantData 完成前推进 mainpipe；
-  LoadQueueReplay 还会用 hint 提前唤醒 C_DM replay。
-- `isKeyword` 不是普通随机 payload，它会影响 keyword beat 选择和 replay 优先级。
-- `l2_flush_done` 会进入 CSR `L2_FLUSH_DONE` 语义；没有请求来源的完成会制造错误
-  CSR 状态和低功耗/flush 生命周期。
-- 因此两个功能都需要独立 owner、请求关联和完成状态，不能作为 DCache D response 的
-  附属随机字段实现。
-
-### 12.1 L2 hint responder TODO
-
-- 执行 2026-07-17 轻量 L2Cache 专项 plan；唯一 owner 为现有
-  `dcache_mem__access_base_sequence` 的逐拍 service loop。
-- hint 候选只来自当前 DCache 分离端口已接受的 `AcquireBlock`，source 限制 0..15，
-  `sourceId/isKeyword` 分别取 A source 低 4 bit和 A echo。
-- 使用单 A reply 在途状态关联 hint 与两拍 GrantData，不建立主表 uid、LQ/SQ key 或第二份 MSHR 表。
-- hint 按参数在 no-hint fallback 和一次有效 pulse 之间采样；首拍 D.valid 位于 hint 后 2/3 拍，
-  backpressure 只允许把实际 D.fire 推迟。
-- 同一专项同时闭环 Grant/GrantData/CBOAck/ReleaseAck、固定 sink E ack、缓存地址表和轻量 Probe，
-  但不实现完整 L2 directory 或多 outstanding。
-
-### 12.2 L2 flush/低功耗 completion responder TODO
+### 12.1 L2 flush/低功耗 completion responder TODO
 
 - 新建 V2 L2 flush completion 专项 plan，确认 MemBlock/系统侧实际 flush request 入口，
   例如相关 `l2_flush_en`/低功耗请求，以及 `io_l2_flush_done` 的采样和脉冲/电平合同。
@@ -576,10 +544,9 @@ io_l2_flush_done
   timeout、重复request、back-to-back request、reset during in-flight 和 completion去重。
 - end check 必须保证无未完成 flush、无孤立 done、request/completion 计数一致。
 
-### 12.3 开放非零 sideband 的条件
+### 12.2 开放非零 flush completion 的条件
 
-Hint 只按 2026-07-17 专项 plan 的 request-bound 合同开放；`io_l2_flush_done` 只有以下条件全部满足后
-才允许从当前 zero-only 合同开放：
+`io_l2_flush_done` 只有以下条件全部满足后才允许从当前 zero-only 合同开放：
 
 - flush completion 专项形成已 review 的执行 plan，明确唯一 owner 和状态生命周期。
 - 非零值来自真实 request/outstanding 状态，而不是 random transaction payload。

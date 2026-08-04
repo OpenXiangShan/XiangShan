@@ -12,6 +12,11 @@
 > `AI_DOC/plan/test_framework/plan/do/mem_ut_dcache_main_mem_range_switch_plan_20260730.md` 已将 memory state 改为 DCache/Uncache 共用
 > static backing 与 overlay，并改变 C data 的写入可见性；本文中“写回主存”只代表当时实现，不应作为
 > 当前行为依据。
+>
+> 后续 response 调度说明（2026-08-04）：本文中的单一 `pending_d_*`、固定 sink 0 和三档 delay
+> 已由 `mem_ut_dcache_uncache_response_delay_control_plan_20260730.md` 替换为 DCache/Uncache
+> 独立 response record、动态 sink、四档 delay 和可选乱序返回。本文继续保留为历史审计，当前行为
+> 以最新 flow、源码分析和后续专项 implementation review 为准。
 
 ## 1. 术语与抽象功能说明
 

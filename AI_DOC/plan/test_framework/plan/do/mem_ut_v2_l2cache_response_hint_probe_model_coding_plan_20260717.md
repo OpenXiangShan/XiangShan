@@ -14,6 +14,11 @@
 > 已由 `AI_DOC/plan/test_framework/plan/do/mem_ut_dcache_main_mem_range_switch_plan_20260730.md` 改为 DCache/Uncache 共用 static backing 与
 > byte-valid write overlay；DCache C data 不再覆盖 backing，而是在下一 shared sample 提交 overlay。当前
 > 行为以最新专项 plan、implementation review 和 flow 文档为准。
+>
+> 后续 response 调度说明（2026-08-04）：本文中的单一 `pending_d_*`、固定 sink 0、三档 DCache
+> delay 和 Uncache 即时回复仅是当时实现。当前有效实现已由
+> `mem_ut_dcache_uncache_response_delay_control_plan_20260730.md` 迁移到独立 response record、
+> 动态 Grant sink、四档 delay 与可选乱序返回；以当前 flow、源码分析和最新 implementation review 为准。
 
 ## 1. 目标、范围与替代关系
 

@@ -181,6 +181,16 @@ source、sink 和 user bundle 的实际宽度也由当前 edge shape 决定。
 | `MEMBLOCK_DUT_UNCACHE_TL_SINK_W` | 1 | 当前 `sbuffer_agent` sink | uncache edge sink range；1-bit 字段仍应由同源 shape 表达。 |
 | `MEMBLOCK_DUT_UNCACHE_HAS_BCE` | 0 | 当前 `sbuffer_agent` channel presence | V2 uncache/MMIO edge 只有 A/D，B/C/E 完全不存在。 |
 
+除 edge packed shape 外，V2 responder 还需要两项不允许 runtime 覆盖的结构容量：
+
+| 建议宏 | V2 默认值 | 主要 consumer | 参数化原因 |
+|---|---:|---|---|
+| `MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING` | 16 | DCache response record 容量、动态 Grant sink pool | 对应 DCache 16 个普通 miss/Acquire 资源，不能从 6-bit TL source 编码推导为 64。 |
+| `MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING` | 16 | Uncache response record 容量 | 对应 `UncacheBufferSize=16`，不能从 4-bit TL source 编码推导为 16 的独立 runtime 参数。 |
+
+它们是 compile-time DUT profile 常量，只能由 `memblock_compile_params.svh` 定义并由 typed localparam
+消费；延迟权重、顺序/乱序选择才属于 runtime plus 行为参数。
+
 现有 `sbuffer_agent` 连接的是 `uncache_port` 的 `auto_inner_buffers_out_*` TLBuffer 链，
 不是 StoreBuffer 对外边界。保留 agent 类名时，参数名和文档语义仍必须使用 uncache/MMIO
 edge，不能把这组 data/source/sink 误写成 StoreBuffer 内部结构参数。
