@@ -79,10 +79,6 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     // assert(!(RegNext(io.read(rport_index).fire && PopCount(io.read(rport_index).bits.way_en) > 1.U)))
     way_en_htag(rport_index) := io.read(rport_index).bits.way_en
   })
-
-  val load_req_valid = io.read.map(_.valid)
-  val load_req_lqIdx = io.read.map(_.bits.lqIdx)
-
   
   // Age matrix of lqIdx: if i < j and matrix(i, j) == true, then i is older than j
   val lqIdx_age_matrix = Seq.tabulate(LoadPipelineWidth)(i => Seq.tabulate(LoadPipelineWidth)(j => {
@@ -193,19 +189,24 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         //     +--------+--------+
         //     |    Data Bank    |
         //     +-----------------+
-        val loadpipe_en = VecInit(Seq.tabulate(LoadPipelineWidth)(i => {
-          io.read(i).valid && div_addrs(i) === div_index.U && (bank_addrs(i)(0) === bank_index.U || bank_addrs(i)(1) === bank_index.U && io.is128Req(i)) &&
-        //   way_en(i)(way_index) &&
-        //   !rr_bank_conflict_oldest(i)
-          !rr_conflict_evict(i) &&
-          way_en_htag(i)(way_index)
+        val loadpipe_en_fast = VecInit(Seq.tabulate(LoadPipelineWidth)(i => {
+          io.read(i).valid && div_addrs(i) === div_index.U && (bank_addrs(i)(0) === bank_index.U || bank_addrs(i)(1) === bank_index.U && io.is128Req(i))
         }))
+        val loadpipe_en_origin = Seq.tabulate(LoadPipelineWidth)(i => loadpipe_en_fast(i) && way_en_htag(i)(way_index))
+        // Use age check to evict way-conflict younger one
+        val loadpipe_en = (0 until LoadPipelineWidth).map(i => {
+          val evicted_by_older = (0 until LoadPipelineWidth).filter(_ != i).map(j => {
+            val j_older_than_i = if (j < i) lqIdx_age_matrix(j)(i) else !lqIdx_age_matrix(i)(j)
+            loadpipe_en_origin(j) && j_older_than_i
+          }).reduce(_ || _)
+          loadpipe_en_origin(i) && !evicted_by_older
+        })
         val readline_en = io.readline.valid && div_index.U === line_div_addr && line_way_en_htag(way_index)
         val sram_set_addr = Mux(readline_en,
           addr_to_dcache_div_set(io.readline.bits.addr),
           PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => loadpipe_en(i) -> set_addrs(i)))
         )
-        val read_en = loadpipe_en.asUInt.orR || readline_en
+        val read_en = loadpipe_en.reduce(_ || _) || readline_en
         // read raw data
         val data_bank = data_banks(div_index)(bank_index)(way_index)
         data_bank.io.r.en := read_en
