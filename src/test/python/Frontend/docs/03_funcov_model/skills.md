@@ -211,8 +211,8 @@ src/test/python/Frontend/scripts/gen_coverage_html.sh <run-dir>/coverage
 状态只使用：
 
 - `UNMAPPED`：没有 coverage 模型。
-- `MODELED`：已建模，只有静态或模型验证，尚无有效真实 DUT 命中。
-- `PARTIAL`：真实 DUT 已运行但目标未命中、语义不完整、testcase 失败或旧证据待重验。
+- `MODELED`：已完成建模，但尚无当前版本真实 DUT 命中。
+- `PARTIAL`：模型或证据仍不完整，例如语义未闭环、testcase 失败或旧证据待重验。它是中间状态，不代表功能覆盖率建模完成，不能当作最终目标或验收完成态。
 - `HIT`：当前版本真实 DUT 回归通过且目标 bin 命中。
 - `CLOSED`：人工完成测试点语义、checker 和波形/trace 证据验收。
 - `BLOCKED`：明确的 DUT、design 或 environment blocker。
