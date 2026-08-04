@@ -267,17 +267,17 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_shiftMshrMaybeRvc = Wire(Vec(MaxFetchReqNum, UInt(MaxInstNumPerBlock.W)))
   s1_shiftMshrMaybeRvc(0) := Mux(
     s1_mshrValid(0)(0),
-    s1_mshrMaybeRvcMap >> s1_shiftNum(0),
-    Cat(s1_mshrMaybeRvcMap, 0.U(1.W)) << s1_shiftNum(1)
+    (s1_mshrMaybeRvcMap >> s1_shiftNum(0)).asUInt,
+    (Cat(s1_mshrMaybeRvcMap, 0.U(1.W)) << s1_shiftNum(1)).asUInt
   )
   s1_shiftMshrMaybeRvc(1) := Mux(
     s1_mshrValid(1)(0),
     Mux(
       s1_shiftFlag,
-      s1_mshrMaybeRvcMap >> s1_shiftNum(2),
-      s1_mshrMaybeRvcMap << s1_shiftNum(2)
+      (s1_mshrMaybeRvcMap >> s1_shiftNum(2)).asUInt,
+      (s1_mshrMaybeRvcMap << s1_shiftNum(2)).asUInt
     ),
-    Cat(s1_mshrMaybeRvcMap, 0.U(2.W)) << s1_shiftNum(3)
+    (Cat(s1_mshrMaybeRvcMap, 0.U(2.W)) << s1_shiftNum(3)).asUInt
   )
 
   private val s1_mshrValidReg       = RegNext(s1_mshrValid)
