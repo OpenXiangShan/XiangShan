@@ -38,6 +38,12 @@ IFU 的 compact / RVC 补充覆盖点写在：
 
 `Checkpoint` 不进入 coverage bin。`Checkpoint` 是 checker、scoreboard 或断言要检查的预期行为。
 
+### 测试点与 funcov 的边界
+
+测试点的 `Condition` 和叶子场景描述决定 funcov 的采样条件：只要 DUT 可见信号证明该场景或其必要时序关系已经出现，就可以标为 `MODELED`。`Checkpoint` 只定义该场景出现后 DUT 应有的正确行为；它不得进入 coverpoint/bin，也不得作为 `MODELED`、`PARTIAL` 或 `UNMAPPED` 的判定理由。
+
+`PARTIAL` 仅用于场景本身只能观测到一部分、不同事件不能确认属于同一事务、或一个 aggregate bin 混合了多个待区分场景。若现有 bin 以 `cfVec`、指针恢复、旧路径抑制等 Checkpoint 结果作为额外门槛，应拆成只采样 Condition 的 funcov bin，并将正确性保留给 testcase、checker 或 scoreboard。
+
 单周期组合覆盖写在 Python 索引里。带时序关系的覆盖写在 SV bind 文件里，用 `covergroup` / `coverpoint` 和必要状态寄存器建模。
 
 当前模型识别 113 个五级测试点，其中 110 个已经建立 coverage bin。CSV 526 行是没有 Condition/Checkpoint 的迁移占位项；491 行缺少 locked entry CSR 重写尝试事件，532 行缺少 Frontend DUT 边界上的 PBMTE 配置输入。这两项不会用 Checkpoint 结果伪造成 coverage bin，原因写在 `address_translation_permission.py` 的 `UNMODELED_POINTS` 和 `NON_EXECUTABLE_POINTS`。
