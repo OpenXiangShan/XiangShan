@@ -33,6 +33,13 @@ localparam int unsigned MEMBLOCK_DUT_SCALAR_ISSUE_PORT_NUM =
 localparam int unsigned MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W =
     MEMBLOCK_DUT_SCALAR_ISSUE_PORT_NUM;
 localparam int unsigned MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM = `MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM;
+// 中文注释：两个外部 memory responder 的物理 response record 上限。
+// 设置：由 V2 compile profile 宏固定；使用：DCache/Uncache scheduler 准入时直接读取。
+// 作用：避免 runtime plus 生成超过 DUT in-flight 能力的 request 接收行为。
+localparam int unsigned MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING =
+    `MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING;
+localparam int unsigned MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING =
+    `MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING;
 localparam bit MEMBLOCK_DUT_ISSUE_PORT_STYLE_SPLIT = `MEMBLOCK_DUT_ISSUE_PORT_STYLE_SPLIT;
 localparam bit MEMBLOCK_DUT_LSQ_ENQ_HAS_ACCEPT_RESP = `MEMBLOCK_DUT_LSQ_ENQ_HAS_ACCEPT_RESP;
 localparam bit MEMBLOCK_DUT_HAS_SQ_DEQ_PTR = `MEMBLOCK_DUT_HAS_SQ_DEQ_PTR;

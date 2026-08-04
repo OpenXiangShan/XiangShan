@@ -416,7 +416,6 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
 
     localparam bit [2:0] TL_LINE_SIZE              = 3'd6;
     localparam bit [5:0] TL_CBO_SOURCE             = 6'd17;
-    localparam bit [9:0] TL_FIXED_SINK             = 10'd0;
 
     typedef enum int unsigned {
         DCACHE_PENDING_D_NONE        = 0,
@@ -450,43 +449,52 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     dcache_agent_agent_xaction armed_a_req_xact;
     dcache_agent_agent_xaction armed_c_req_xact;
 
-    // 中文注释：唯一在途 D reply 的完整生命周期状态。
-    // 设置：A Acquire/CBO 或 C Release/ReleaseData 完成后建立；清零：最后一拍 D.fire 或 reset。
-    // 作用：统一管理 response delay、Grant/GrantData/CBOAck/ReleaseAck 的 hold 和后续 GrantAck owner。
-    bit pending_d_valid;
-    dcache_pending_d_kind_e pending_d_kind;
-    bit [3:0] pending_d_cbo_opcode;
-    longint unsigned pending_d_due_cycle;
-    int unsigned pending_d_beat_count;
-    int unsigned pending_d_beat_idx;
-    bit [1:0] pending_d_param;
-    bit [2:0] pending_d_size;
-    bit [5:0] pending_d_source;
-    bit [9:0] pending_d_sink;
-    bit pending_d_denied;
-    bit pending_d_corrupt;
-    bit pending_d_echo_isKeyword;
-    bit [47:0] pending_d_line_addr;
-    bit [1:0] pending_d_alias;
-    bit [255:0] pending_d_data_low;
-    bit [255:0] pending_d_data_high;
+    // 中文注释：DCache response record 保存已真实 fire、尚未完成最后一个 D beat 的回复。
+    // 同一张表同时服务 Grant/GrantData、CBOAck 和 ReleaseAck；current_d_record 是从表中
+    // 选出后正在 D channel 上保持的唯一记录，仍属于这张表的 capacity。
+    typedef struct {
+        dcache_pending_d_kind_e kind;
+        bit [3:0]               cbo_opcode;
+        longint unsigned        eligible_cycle;
+        int unsigned            beat_count;
+        int unsigned            beat_idx;
+        bit [1:0]               param;
+        bit [2:0]               size;
+        bit [5:0]               source;
+        bit [9:0]               sink;
+        bit                     denied;
+        bit                     corrupt;
+        bit                     echo_isKeyword;
+        bit [47:0]              line_addr;
+        bit [1:0]               line_alias;
+        bit [255:0]             data_low;
+        bit [255:0]             data_high;
+        bit                     hint_pending;
+        bit [3:0]               hint_source_id;
+        bit                     hint_isKeyword;
+    } dcache_response_record_t;
 
-    // 中文注释：Grant/GrantData 最后一拍 D.fire 后等待 E GrantAck 的唯一 owner。
-    // 设置：Grant 或 GrantData 完成时保存 line/alias/sink；清零：匹配 sink 的 E.fire 或 reset。
-    // 作用：只有收到真实 GrantAck 后，才允许把 line 加入 Probe 候选地址表。
-    bit waiting_grant_ack;
-    bit [47:0] pending_grant_line;
-    bit [1:0] pending_grant_alias;
-    bit [9:0] pending_grant_expected_sink;
+    // 中文注释：GrantAck wait record 只保存已经完成最后一个 D beat 的 Grant owner。
+    // D response record 在最后一个 D.fire 时释放；同一个 sink 直到 E.fire 匹配后才可复用。
+    typedef struct {
+        bit [47:0] line_addr;
+        bit [1:0]  line_alias;
+        bit [9:0]  sink;
+    } dcache_grant_ack_record_t;
 
-    // 中文注释：每个 AcquireBlock 最多发一次 hint 的排期状态。
-    // 设置：accept_dcache_a_request() 选中 GrantData hint 后保存；清零：hint 发出、D reply 完成或 reset。
-    // 作用：保证 hint 只由专用 responder 产生，且与已接受的 GrantData 生命周期绑定。
-    bit hint_selected;
-    bit hint_sent;
-    longint unsigned hint_due_cycle;
-    bit [3:0] hint_source_id;
-    bit hint_isKeyword;
+    typedef struct {
+        longint unsigned due_cycle;
+        bit [3:0]        source_id;
+        bit              isKeyword;
+    } dcache_hint_record_t;
+
+    dcache_response_record_t  dcache_rsp_q[$];
+    dcache_response_record_t  current_d_record;
+    bit                       current_d_valid;
+    bit                       dcache_rsp_timer_active;
+    longint unsigned          dcache_rsp_timer_due_cycle;
+    dcache_grant_ack_record_t grant_ack_wait_q[$];
+    dcache_hint_record_t      dcache_hint_q[$];
 
     // 中文注释：DCache 已完成 GrantAck 的 cache line 候选表，只保存 line 对齐地址和 alias。
     // 设置：GrantAck fire 后插入/覆盖；清零：ProbeAck 完成、Release 完成、CBOFlush/Inval 完成或 reset。
@@ -514,13 +522,16 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     bit [2:0] c_assembly_param;
     bit c_assembly_corrupt_seen;
     bit [511:0] c_assembly_data;
+    // 中文注释：ReleaseData 首个 C.fire 已经占用一个未来 ReleaseAck response slot。
+    // 该 reservation 防止 16 笔表接近满时第二 beat 收齐后没有空间建立 ReleaseAck。
+    bit c_assembly_response_reserved;
 
     `uvm_object_utils(dcache_mem__access_base_sequence)
 
     extern function new(string name = "dcache_mem__access_base_sequence");
-    extern virtual function void clear_pending_d_state();
+    extern virtual function void clear_current_d_state();
+    extern virtual function void clear_dcache_response_state();
     extern virtual function void clear_c_assembly_state();
-    extern virtual function void clear_hint_state();
     extern virtual function void clear_runtime_state(bit clear_cache_map = 1'b1);
     extern virtual function void build_dcache_idle_xaction(output dcache_agent_agent_xaction rsp_xact);
     extern virtual function void capture_dcache_a_xaction(output dcache_agent_agent_xaction req_xact);
@@ -555,7 +566,27 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     );
     extern virtual function void record_cached_line(input bit [47:0] addr, input bit [1:0] line_alias);
     extern virtual function void remove_cached_line(input bit [47:0] addr, input string reason);
-    extern virtual function int unsigned sample_l2_response_delay();
+    extern virtual function int unsigned sample_dcache_response_delay();
+    extern virtual function int unsigned get_dcache_response_count();
+    extern virtual function bit has_dcache_response_capacity();
+    extern virtual function bit is_grant_sink_in_use(input bit [9:0] sink);
+    extern virtual function bit has_free_grant_sink();
+    extern virtual function bit allocate_grant_sink(output bit [9:0] sink);
+    extern virtual function bit can_accept_dcache_a_request(
+        input dcache_agent_agent_xaction req_xact
+    );
+    extern virtual function bit can_accept_dcache_release_c_request(
+        input dcache_agent_agent_xaction req_xact
+    );
+    extern virtual function int find_dcache_eligible_response(
+        input longint unsigned current_cycle,
+        input int unsigned      visible_count
+    );
+    extern virtual function void service_dcache_response_scheduler(
+        input longint unsigned current_cycle,
+        input int unsigned      visible_count
+    );
+    extern virtual function void enqueue_dcache_response(input dcache_response_record_t response_record);
     extern virtual function bit sample_hint_enable();
     extern virtual function bit sample_probe_enable();
     extern virtual function bit select_random_cached_line(output bit [47:0] line_addr, output bit [1:0] line_alias);
@@ -563,7 +594,7 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
         input dcache_agent_agent_xaction req_xact,
         input longint unsigned           accept_cycle
     );
-    extern virtual function void build_pending_d_xaction(inout dcache_agent_agent_xaction cycle_xact);
+    extern virtual function void build_current_d_xaction(inout dcache_agent_agent_xaction cycle_xact);
     extern virtual function void process_d_fire();
     extern virtual function void process_e_fire();
     extern virtual task complete_probe_c_assembly(input longint unsigned complete_cycle);
@@ -593,25 +624,19 @@ function dcache_mem__access_base_sequence::new(string name = "dcache_mem__access
     clear_runtime_state(1'b1);
 endfunction:new
 
-function void dcache_mem__access_base_sequence::clear_pending_d_state();
-    pending_d_valid         = 1'b0;
-    pending_d_kind          = DCACHE_PENDING_D_NONE;
-    pending_d_cbo_opcode    = '0;
-    pending_d_due_cycle     = 0;
-    pending_d_beat_count    = 0;
-    pending_d_beat_idx      = 0;
-    pending_d_param         = '0;
-    pending_d_size          = '0;
-    pending_d_source        = '0;
-    pending_d_sink          = '0;
-    pending_d_denied        = 1'b0;
-    pending_d_corrupt       = 1'b0;
-    pending_d_echo_isKeyword = 1'b0;
-    pending_d_line_addr     = '0;
-    pending_d_alias         = '0;
-    pending_d_data_low      = '0;
-    pending_d_data_high     = '0;
-endfunction:clear_pending_d_state
+function void dcache_mem__access_base_sequence::clear_current_d_state();
+    current_d_valid  = 1'b0;
+    current_d_record = '{default:'0};
+endfunction:clear_current_d_state
+
+function void dcache_mem__access_base_sequence::clear_dcache_response_state();
+    dcache_rsp_q.delete();
+    grant_ack_wait_q.delete();
+    dcache_hint_q.delete();
+    dcache_rsp_timer_active    = 1'b0;
+    dcache_rsp_timer_due_cycle = 0;
+    clear_current_d_state();
+endfunction:clear_dcache_response_state
 
 function void dcache_mem__access_base_sequence::clear_c_assembly_state();
     c_assembly_owner          = DCACHE_C_OWNER_NONE;
@@ -623,34 +648,22 @@ function void dcache_mem__access_base_sequence::clear_c_assembly_state();
     c_assembly_param          = '0;
     c_assembly_corrupt_seen   = 1'b0;
     c_assembly_data           = '0;
+    c_assembly_response_reserved = 1'b0;
 endfunction:clear_c_assembly_state
-
-function void dcache_mem__access_base_sequence::clear_hint_state();
-    hint_selected  = 1'b0;
-    hint_sent      = 1'b0;
-    hint_due_cycle = 0;
-    hint_source_id = '0;
-    hint_isKeyword = 1'b0;
-endfunction:clear_hint_state
 
 function void dcache_mem__access_base_sequence::clear_runtime_state(bit clear_cache_map = 1'b1);
     a_accept_armed           = 1'b0;
     c_accept_armed           = 1'b0;
     armed_a_req_xact         = null;
     armed_c_req_xact         = null;
-    waiting_grant_ack        = 1'b0;
-    pending_grant_line       = '0;
-    pending_grant_alias      = '0;
-    pending_grant_expected_sink = '0;
     pending_probe_b_valid    = 1'b0;
     waiting_probe_c          = 1'b0;
     pending_probe_line       = '0;
     pending_probe_alias      = '0;
     last_cycle_valid         = 1'b0;
     last_cycle_xact          = null;
-    clear_pending_d_state();
+    clear_dcache_response_state();
     clear_c_assembly_state();
-    clear_hint_state();
     if (clear_cache_map) begin
         cached_alias_by_line.delete();
     end
@@ -850,6 +863,7 @@ task dcache_mem__access_base_sequence::dcache_mem_access_task(
 endtask:dcache_mem_access_task
 
 function void dcache_mem__access_base_sequence::check_l2_model_cfg();
+    void'(seq_csr_common::get_l2_rsp_delay_zero_wt());
     void'(seq_csr_common::get_l2_rsp_delay_small_wt());
     void'(seq_csr_common::get_l2_rsp_delay_medium_wt());
     void'(seq_csr_common::get_l2_rsp_delay_large_wt());
@@ -903,39 +917,45 @@ function void dcache_mem__access_base_sequence::remove_cached_line(input bit [47
     end
 endfunction:remove_cached_line
 
-function int unsigned dcache_mem__access_base_sequence::sample_l2_response_delay();
+function int unsigned dcache_mem__access_base_sequence::sample_dcache_response_delay();
     int unsigned delay_class;
     int unsigned delay_value;
+    int unsigned zero_wt;
     int unsigned small_wt;
     int unsigned medium_wt;
     int unsigned large_wt;
 
+    zero_wt   = seq_csr_common::get_l2_rsp_delay_zero_wt();
     small_wt  = seq_csr_common::get_l2_rsp_delay_small_wt();
     medium_wt = seq_csr_common::get_l2_rsp_delay_medium_wt();
     large_wt  = seq_csr_common::get_l2_rsp_delay_large_wt();
 
     if (!std::randomize(delay_class) with {
             delay_class dist {
-                0 := small_wt,
-                1 := medium_wt,
-                2 := large_wt
+                0 := zero_wt,
+                1 := small_wt,
+                2 := medium_wt,
+                3 := large_wt
             };
         }) begin
         `uvm_fatal(get_type_name(), "failed to randomize DCache L2 response delay class")
     end
     case (delay_class)
         0: begin
-            if (!std::randomize(delay_value) with { delay_value inside {[3:5]}; }) begin
+            delay_value = 0;
+        end
+        1: begin
+            if (!std::randomize(delay_value) with { delay_value inside {[1:10]}; }) begin
                 `uvm_fatal(get_type_name(), "failed to randomize SMALL DCache L2 delay")
             end
         end
-        1: begin
-            if (!std::randomize(delay_value) with { delay_value inside {[6:15]}; }) begin
+        2: begin
+            if (!std::randomize(delay_value) with { delay_value inside {[10:100]}; }) begin
                 `uvm_fatal(get_type_name(), "failed to randomize MEDIUM DCache L2 delay")
             end
         end
-        2: begin
-            if (!std::randomize(delay_value) with { delay_value inside {[16:50]}; }) begin
+        3: begin
+            if (!std::randomize(delay_value) with { delay_value inside {[101:1000]}; }) begin
                 `uvm_fatal(get_type_name(), "failed to randomize LARGE DCache L2 delay")
             end
         end
@@ -944,7 +964,197 @@ function int unsigned dcache_mem__access_base_sequence::sample_l2_response_delay
         end
     endcase
     return delay_value;
-endfunction:sample_l2_response_delay
+endfunction:sample_dcache_response_delay
+
+function int unsigned dcache_mem__access_base_sequence::get_dcache_response_count();
+    return dcache_rsp_q.size() + (current_d_valid ? 1 : 0) +
+           (c_assembly_response_reserved ? 1 : 0);
+endfunction:get_dcache_response_count
+
+function bit dcache_mem__access_base_sequence::has_dcache_response_capacity();
+    return get_dcache_response_count() < MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING;
+endfunction:has_dcache_response_capacity
+
+function bit dcache_mem__access_base_sequence::is_grant_sink_in_use(input bit [9:0] sink);
+    if (current_d_valid &&
+        ((current_d_record.kind == DCACHE_PENDING_D_GRANT) ||
+         (current_d_record.kind == DCACHE_PENDING_D_GRANT_DATA)) &&
+        (current_d_record.sink == sink)) begin
+        return 1'b1;
+    end
+    foreach (dcache_rsp_q[i]) begin
+        if (((dcache_rsp_q[i].kind == DCACHE_PENDING_D_GRANT) ||
+             (dcache_rsp_q[i].kind == DCACHE_PENDING_D_GRANT_DATA)) &&
+            (dcache_rsp_q[i].sink == sink)) begin
+            return 1'b1;
+        end
+    end
+    foreach (grant_ack_wait_q[i]) begin
+        if (grant_ack_wait_q[i].sink == sink) begin
+            return 1'b1;
+        end
+    end
+    return 1'b0;
+endfunction:is_grant_sink_in_use
+
+function bit dcache_mem__access_base_sequence::has_free_grant_sink();
+    bit [9:0] sink;
+
+    for (int unsigned i = 0; i < MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING; i++) begin
+        sink = i;
+        if (!is_grant_sink_in_use(sink)) begin
+            return 1'b1;
+        end
+    end
+    return 1'b0;
+endfunction:has_free_grant_sink
+
+function bit dcache_mem__access_base_sequence::allocate_grant_sink(output bit [9:0] sink);
+    sink = '0;
+    for (int unsigned i = 0; i < MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING; i++) begin
+        sink = i;
+        if (!is_grant_sink_in_use(sink)) begin
+            return 1'b1;
+        end
+    end
+    sink = '0;
+    return 1'b0;
+endfunction:allocate_grant_sink
+
+function bit dcache_mem__access_base_sequence::can_accept_dcache_a_request(
+    input dcache_agent_agent_xaction req_xact
+);
+    case (req_xact.auto_inner_dcache_client_out_a_bits_opcode)
+        TL_A_OPCODE_ACQUIRE_BLOCK,
+        TL_A_OPCODE_ACQUIRE_PERM: begin
+            return has_dcache_response_capacity() && has_free_grant_sink();
+        end
+        TL_A_OPCODE_CBO_CLEAN,
+        TL_A_OPCODE_CBO_FLUSH,
+        TL_A_OPCODE_CBO_INVAL: begin
+            return has_dcache_response_capacity();
+        end
+        default: begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("unsupported DCache coherent A opcode=%0d before accept",
+                                 req_xact.auto_inner_dcache_client_out_a_bits_opcode))
+        end
+    endcase
+    return 1'b0;
+endfunction:can_accept_dcache_a_request
+
+function bit dcache_mem__access_base_sequence::can_accept_dcache_release_c_request(
+    input dcache_agent_agent_xaction req_xact
+);
+    case (req_xact.auto_inner_dcache_client_out_c_bits_opcode)
+        TL_C_OPCODE_RELEASE,
+        TL_C_OPCODE_RELEASEDATA: return has_dcache_response_capacity();
+        default: return 1'b1;
+    endcase
+endfunction:can_accept_dcache_release_c_request
+
+function int dcache_mem__access_base_sequence::find_dcache_eligible_response(
+    input longint unsigned current_cycle,
+    input int unsigned      visible_count
+);
+    int unsigned eligible_count;
+    int unsigned selected_ordinal;
+    int unsigned seen;
+    int unsigned scan_count;
+
+    scan_count = (visible_count < dcache_rsp_q.size()) ? visible_count : dcache_rsp_q.size();
+    if (!seq_csr_common::get_l2_rsp_reorder_en()) begin
+        for (int unsigned i = 0; i < scan_count; i++) begin
+            if (dcache_rsp_q[i].eligible_cycle <= current_cycle) begin
+                return i;
+            end
+        end
+        return -1;
+    end
+
+    eligible_count = 0;
+    for (int unsigned i = 0; i < scan_count; i++) begin
+        if (dcache_rsp_q[i].eligible_cycle <= current_cycle) begin
+            eligible_count++;
+        end
+    end
+    if (eligible_count == 0) begin
+        return -1;
+    end
+    if (!std::randomize(selected_ordinal) with { selected_ordinal inside {[0:eligible_count-1]}; }) begin
+        `uvm_fatal(get_type_name(), "failed to randomize DCache ready response ordinal")
+    end
+    seen = 0;
+    for (int unsigned i = 0; i < scan_count; i++) begin
+        if (dcache_rsp_q[i].eligible_cycle <= current_cycle) begin
+            if (seen == selected_ordinal) begin
+                return i;
+            end
+            seen++;
+        end
+    end
+    `uvm_fatal(get_type_name(), "DCache eligible response ordinal was not found")
+    return -1;
+endfunction:find_dcache_eligible_response
+
+function void dcache_mem__access_base_sequence::service_dcache_response_scheduler(
+    input longint unsigned current_cycle,
+    input int unsigned      visible_count
+);
+    int selected_index;
+    int unsigned response_delay;
+    dcache_response_record_t selected_record;
+    dcache_hint_record_t hint_record;
+
+    if (current_d_valid) begin
+        return;
+    end
+
+    selected_index = find_dcache_eligible_response(current_cycle, visible_count);
+    if (!dcache_rsp_timer_active) begin
+        if (selected_index < 0) begin
+            return;
+        end
+        response_delay = sample_dcache_response_delay();
+        dcache_rsp_timer_active    = 1'b1;
+        dcache_rsp_timer_due_cycle = current_cycle + response_delay;
+    end
+
+    if (current_cycle < dcache_rsp_timer_due_cycle) begin
+        return;
+    end
+    selected_index = find_dcache_eligible_response(current_cycle, visible_count);
+    if (selected_index < 0) begin
+        dcache_rsp_timer_active = 1'b0;
+        return;
+    end
+    selected_record = dcache_rsp_q[selected_index];
+    dcache_rsp_q.delete(selected_index);
+    current_d_record       = selected_record;
+    current_d_valid        = 1'b1;
+    // Hint 与其所属 GrantData 在同一轮 D response 调度后生效；不能仅因某条
+    // record 启动 timer 就提前发送，否则 REORDER 时可能和另一条最终选中的 D response 脱钩。
+    if (current_d_record.hint_pending) begin
+        hint_record.due_cycle = current_cycle;
+        hint_record.source_id = current_d_record.hint_source_id;
+        hint_record.isKeyword = current_d_record.hint_isKeyword;
+        dcache_hint_q.push_back(hint_record);
+        current_d_record.hint_pending = 1'b0;
+    end
+    dcache_rsp_timer_active = 1'b0;
+endfunction:service_dcache_response_scheduler
+
+function void dcache_mem__access_base_sequence::enqueue_dcache_response(
+    input dcache_response_record_t response_record
+);
+    if (!has_dcache_response_capacity()) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("DCache response record overflow count=%0d max=%0d",
+                             get_dcache_response_count(),
+                             MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING))
+    end
+    dcache_rsp_q.push_back(response_record);
+endfunction:enqueue_dcache_response
 
 function bit dcache_mem__access_base_sequence::sample_hint_enable();
     int unsigned valid_wt;
@@ -1024,9 +1234,13 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
     bit [47:0] line_addr;
     bit [255:0] line_data_low;
     bit [255:0] line_data_high;
-    line_addr = line_addr64(req_xact.auto_inner_dcache_client_out_a_bits_address);
-    clear_hint_state();
+    bit [9:0]  grant_sink;
+    dcache_response_record_t response_record;
 
+    line_addr = line_addr64(req_xact.auto_inner_dcache_client_out_a_bits_address);
+    if (!can_accept_dcache_a_request(req_xact)) begin
+        `uvm_fatal(get_type_name(), "DCache A.fire occurred without response-record or Grant sink capacity")
+    end
     if (req_xact.auto_inner_dcache_client_out_a_bits_size != TL_LINE_SIZE) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("DCache coherent A size must be 6, got %0d",
@@ -1039,11 +1253,11 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
     end
     check_line_range(line_addr, "dcache coherent A");
 
-    clear_pending_d_state();
-    pending_d_due_cycle = accept_cycle + sample_l2_response_delay();
-    pending_d_line_addr = line_addr;
-    pending_d_size      = req_xact.auto_inner_dcache_client_out_a_bits_size;
-    pending_d_source    = req_xact.auto_inner_dcache_client_out_a_bits_source;
+    response_record                = '{default:'0};
+    response_record.eligible_cycle = accept_cycle + 3;
+    response_record.line_addr      = line_addr;
+    response_record.size           = req_xact.auto_inner_dcache_client_out_a_bits_size;
+    response_record.source         = req_xact.auto_inner_dcache_client_out_a_bits_source;
 
     case (req_xact.auto_inner_dcache_client_out_a_bits_opcode)
         TL_A_OPCODE_ACQUIRE_BLOCK: begin
@@ -1053,36 +1267,30 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
                                      req_xact.auto_inner_dcache_client_out_a_bits_source))
             end
             case (req_xact.auto_inner_dcache_client_out_a_bits_param)
-                TL_GROW_NTOB: pending_d_param = TL_CAP_TOB;
+                TL_GROW_NTOB: response_record.param = TL_CAP_TOB;
                 TL_GROW_NTOT,
-                TL_GROW_BTOT: pending_d_param = TL_CAP_TOT;
+                TL_GROW_BTOT: response_record.param = TL_CAP_TOT;
                 default: begin
                     `uvm_fatal(get_type_name(),
                                $sformatf("AcquireBlock param=%0d is unsupported",
                                          req_xact.auto_inner_dcache_client_out_a_bits_param))
                 end
             endcase
-            load_grant_line(line_addr, line_data_low, line_data_high);
-            pending_d_valid          = 1'b1;
-            pending_d_kind           = DCACHE_PENDING_D_GRANT_DATA;
-            pending_d_beat_count     = 2;
-            pending_d_beat_idx       = 0;
-            pending_d_sink           = TL_FIXED_SINK;
-            pending_d_echo_isKeyword = req_xact.auto_inner_dcache_client_out_a_bits_echo_isKeyword;
-            pending_d_alias          = req_xact.auto_inner_dcache_client_out_a_bits_user_alias;
-            pending_d_data_low       = line_data_low;
-            pending_d_data_high      = line_data_high;
-            if (sample_hint_enable()) begin
-                hint_selected  = 1'b1;
-                hint_sent      = 1'b0;
-                hint_source_id = req_xact.auto_inner_dcache_client_out_a_bits_source[3:0];
-                hint_isKeyword = req_xact.auto_inner_dcache_client_out_a_bits_echo_isKeyword;
-                if ((pending_d_due_cycle - accept_cycle) == 3) begin
-                    hint_due_cycle = pending_d_due_cycle - 2;
-                end else begin
-                    hint_due_cycle = pending_d_due_cycle - 3;
-                end
+            if (!allocate_grant_sink(grant_sink)) begin
+                `uvm_fatal(get_type_name(), "AcquireBlock accepted without an available Grant sink")
             end
+            load_grant_line(line_addr, line_data_low, line_data_high);
+            response_record.kind           = DCACHE_PENDING_D_GRANT_DATA;
+            response_record.beat_count     = 2;
+            response_record.beat_idx       = 0;
+            response_record.sink           = grant_sink;
+            response_record.echo_isKeyword = req_xact.auto_inner_dcache_client_out_a_bits_echo_isKeyword;
+            response_record.line_alias     = req_xact.auto_inner_dcache_client_out_a_bits_user_alias;
+            response_record.data_low       = line_data_low;
+            response_record.data_high      = line_data_high;
+            response_record.hint_pending   = sample_hint_enable();
+            response_record.hint_source_id = req_xact.auto_inner_dcache_client_out_a_bits_source[3:0];
+            response_record.hint_isKeyword = req_xact.auto_inner_dcache_client_out_a_bits_echo_isKeyword;
         end
         TL_A_OPCODE_ACQUIRE_PERM: begin
             if (req_xact.auto_inner_dcache_client_out_a_bits_source > 6'd15) begin
@@ -1092,18 +1300,20 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
             end
             case (req_xact.auto_inner_dcache_client_out_a_bits_param)
                 TL_GROW_NTOT,
-                TL_GROW_BTOT: pending_d_param = TL_CAP_TOT;
+                TL_GROW_BTOT: response_record.param = TL_CAP_TOT;
                 default: begin
                     `uvm_fatal(get_type_name(),
                                $sformatf("AcquirePerm param=%0d is unsupported",
                                          req_xact.auto_inner_dcache_client_out_a_bits_param))
                 end
             endcase
-            pending_d_valid      = 1'b1;
-            pending_d_kind       = DCACHE_PENDING_D_GRANT;
-            pending_d_beat_count = 1;
-            pending_d_sink       = TL_FIXED_SINK;
-            pending_d_alias      = req_xact.auto_inner_dcache_client_out_a_bits_user_alias;
+            if (!allocate_grant_sink(grant_sink)) begin
+                `uvm_fatal(get_type_name(), "AcquirePerm accepted without an available Grant sink")
+            end
+            response_record.kind       = DCACHE_PENDING_D_GRANT;
+            response_record.beat_count = 1;
+            response_record.sink       = grant_sink;
+            response_record.line_alias = req_xact.auto_inner_dcache_client_out_a_bits_user_alias;
         end
         TL_A_OPCODE_CBO_CLEAN,
         TL_A_OPCODE_CBO_FLUSH,
@@ -1114,10 +1324,9 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
                                      TL_CBO_SOURCE,
                                      req_xact.auto_inner_dcache_client_out_a_bits_source))
             end
-            pending_d_valid      = 1'b1;
-            pending_d_kind       = DCACHE_PENDING_D_CBO_ACK;
-            pending_d_beat_count = 1;
-            pending_d_cbo_opcode = req_xact.auto_inner_dcache_client_out_a_bits_opcode;
+            response_record.kind       = DCACHE_PENDING_D_CBO_ACK;
+            response_record.beat_count = 1;
+            response_record.cbo_opcode = req_xact.auto_inner_dcache_client_out_a_bits_opcode;
         end
         default: begin
             `uvm_fatal(get_type_name(),
@@ -1125,34 +1334,35 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
                                  req_xact.auto_inner_dcache_client_out_a_bits_opcode))
         end
     endcase
+    enqueue_dcache_response(response_record);
 endtask:accept_dcache_a_request
 
-function void dcache_mem__access_base_sequence::build_pending_d_xaction(inout dcache_agent_agent_xaction cycle_xact);
+function void dcache_mem__access_base_sequence::build_current_d_xaction(inout dcache_agent_agent_xaction cycle_xact);
     bit [255:0] grant_data;
 
-    if (!pending_d_valid) begin
+    if (!current_d_valid) begin
         return;
     end
     cycle_xact.auto_inner_dcache_client_out_d_valid            = 1'b1;
-    cycle_xact.auto_inner_dcache_client_out_d_bits_param       = pending_d_param;
-    cycle_xact.auto_inner_dcache_client_out_d_bits_size        = pending_d_size;
-    cycle_xact.auto_inner_dcache_client_out_d_bits_source      = pending_d_source;
-    cycle_xact.auto_inner_dcache_client_out_d_bits_sink        = pending_d_sink;
-    cycle_xact.auto_inner_dcache_client_out_d_bits_denied      = pending_d_denied;
-    cycle_xact.auto_inner_dcache_client_out_d_bits_echo_isKeyword = pending_d_echo_isKeyword;
-    cycle_xact.auto_inner_dcache_client_out_d_bits_corrupt     = pending_d_corrupt;
+    cycle_xact.auto_inner_dcache_client_out_d_bits_param       = current_d_record.param;
+    cycle_xact.auto_inner_dcache_client_out_d_bits_size        = current_d_record.size;
+    cycle_xact.auto_inner_dcache_client_out_d_bits_source      = current_d_record.source;
+    cycle_xact.auto_inner_dcache_client_out_d_bits_sink        = current_d_record.sink;
+    cycle_xact.auto_inner_dcache_client_out_d_bits_denied      = current_d_record.denied;
+    cycle_xact.auto_inner_dcache_client_out_d_bits_echo_isKeyword = current_d_record.echo_isKeyword;
+    cycle_xact.auto_inner_dcache_client_out_d_bits_corrupt     = current_d_record.corrupt;
     cycle_xact.auto_inner_dcache_client_out_d_bits_data        = '0;
 
-    case (pending_d_kind)
+    case (current_d_record.kind)
         DCACHE_PENDING_D_GRANT: begin
             cycle_xact.auto_inner_dcache_client_out_d_bits_opcode = TL_D_OPCODE_GRANT;
         end
         DCACHE_PENDING_D_GRANT_DATA: begin
             cycle_xact.auto_inner_dcache_client_out_d_bits_opcode = TL_D_OPCODE_GRANT_DATA;
-            if (pending_d_beat_idx == 0) begin
-                grant_data = pending_d_echo_isKeyword ? pending_d_data_high : pending_d_data_low;
+            if (current_d_record.beat_idx == 0) begin
+                grant_data = current_d_record.echo_isKeyword ? current_d_record.data_high : current_d_record.data_low;
             end else begin
-                grant_data = pending_d_echo_isKeyword ? pending_d_data_low : pending_d_data_high;
+                grant_data = current_d_record.echo_isKeyword ? current_d_record.data_low : current_d_record.data_high;
             end
             cycle_xact.auto_inner_dcache_client_out_d_bits_data = grant_data;
         end
@@ -1163,67 +1373,73 @@ function void dcache_mem__access_base_sequence::build_pending_d_xaction(inout dc
             cycle_xact.auto_inner_dcache_client_out_d_bits_opcode = TL_D_OPCODE_RELEASE_ACK;
         end
         default: begin
-            `uvm_fatal(get_type_name(), $sformatf("unexpected pending_d_kind=%0d", pending_d_kind))
+            `uvm_fatal(get_type_name(), $sformatf("unexpected current D kind=%0d", current_d_record.kind))
         end
     endcase
-endfunction:build_pending_d_xaction
+endfunction:build_current_d_xaction
 
 function void dcache_mem__access_base_sequence::process_d_fire();
-    case (pending_d_kind)
+    dcache_response_record_t completed_record;
+    dcache_grant_ack_record_t grant_ack_record;
+
+    if (!current_d_valid) begin
+        `uvm_fatal(get_type_name(), "D.fire observed without a current DCache response record")
+    end
+    if ((current_d_record.kind == DCACHE_PENDING_D_GRANT_DATA) &&
+        ((current_d_record.beat_idx + 1) < current_d_record.beat_count)) begin
+        current_d_record.beat_idx++;
+        return;
+    end
+
+    completed_record = current_d_record;
+    case (completed_record.kind)
         DCACHE_PENDING_D_GRANT_DATA: begin
-            if ((pending_d_beat_idx + 1) < pending_d_beat_count) begin
-                pending_d_beat_idx++;
-            end else begin
-                waiting_grant_ack         = 1'b1;
-                pending_grant_line        = pending_d_line_addr;
-                pending_grant_alias       = pending_d_alias;
-                pending_grant_expected_sink = pending_d_sink;
-                clear_pending_d_state();
-                clear_hint_state();
-            end
+            grant_ack_record.line_addr = completed_record.line_addr;
+            grant_ack_record.line_alias = completed_record.line_alias;
+            grant_ack_record.sink      = completed_record.sink;
+            grant_ack_wait_q.push_back(grant_ack_record);
         end
         DCACHE_PENDING_D_GRANT: begin
-            waiting_grant_ack         = 1'b1;
-            pending_grant_line        = pending_d_line_addr;
-            pending_grant_alias       = pending_d_alias;
-            pending_grant_expected_sink = pending_d_sink;
-            clear_pending_d_state();
-            clear_hint_state();
+            grant_ack_record.line_addr = completed_record.line_addr;
+            grant_ack_record.line_alias = completed_record.line_alias;
+            grant_ack_record.sink      = completed_record.sink;
+            grant_ack_wait_q.push_back(grant_ack_record);
         end
         DCACHE_PENDING_D_CBO_ACK: begin
-            if (pending_d_cbo_opcode == TL_A_OPCODE_CBO_FLUSH) begin
-                remove_cached_line(pending_d_line_addr, "cbo_flush");
-            end else if (pending_d_cbo_opcode == TL_A_OPCODE_CBO_INVAL) begin
-                remove_cached_line(pending_d_line_addr, "cbo_inval");
+            if (completed_record.cbo_opcode == TL_A_OPCODE_CBO_FLUSH) begin
+                remove_cached_line(completed_record.line_addr, "cbo_flush");
+            end else if (completed_record.cbo_opcode == TL_A_OPCODE_CBO_INVAL) begin
+                remove_cached_line(completed_record.line_addr, "cbo_inval");
             end
-            clear_pending_d_state();
-            clear_hint_state();
         end
         DCACHE_PENDING_D_RELEASE_ACK: begin
-            clear_pending_d_state();
-            clear_hint_state();
         end
         default: begin
-            `uvm_fatal(get_type_name(), $sformatf("process_d_fire with invalid kind=%0d", pending_d_kind))
+            `uvm_fatal(get_type_name(), $sformatf("process_d_fire with invalid kind=%0d", completed_record.kind))
         end
     endcase
+    clear_current_d_state();
 endfunction:process_d_fire
 
 function void dcache_mem__access_base_sequence::process_e_fire();
-    if (!waiting_grant_ack) begin
+    bit [9:0] observed_sink;
+
+    if (grant_ack_wait_q.size() == 0) begin
         `uvm_fatal(get_type_name(), "unexpected E.valid when no GrantAck is pending")
     end
-    if (dcache_vif.drv_cb.auto_inner_dcache_client_out_e_bits_sink !== pending_grant_expected_sink) begin
-        `uvm_fatal(get_type_name(),
-                   $sformatf("GrantAck sink mismatch expected=%0d got=%0d",
-                             pending_grant_expected_sink,
-                             dcache_vif.drv_cb.auto_inner_dcache_client_out_e_bits_sink))
+    if ($isunknown(dcache_vif.drv_cb.auto_inner_dcache_client_out_e_bits_sink)) begin
+        `uvm_fatal(get_type_name(), "GrantAck E.bits.sink sampled as X/Z on E.fire")
     end
-    record_cached_line(pending_grant_line, pending_grant_alias);
-    waiting_grant_ack          = 1'b0;
-    pending_grant_line         = '0;
-    pending_grant_alias        = '0;
-    pending_grant_expected_sink = '0;
+    observed_sink = dcache_vif.drv_cb.auto_inner_dcache_client_out_e_bits_sink;
+    foreach (grant_ack_wait_q[i]) begin
+        if (grant_ack_wait_q[i].sink == observed_sink) begin
+            record_cached_line(grant_ack_wait_q[i].line_addr, grant_ack_wait_q[i].line_alias);
+            grant_ack_wait_q.delete(i);
+            return;
+        end
+    end
+    `uvm_fatal(get_type_name(),
+               $sformatf("GrantAck sink=%0d does not match any pending Grant owner", observed_sink))
 endfunction:process_e_fire
 
 task dcache_mem__access_base_sequence::complete_probe_c_assembly(input longint unsigned complete_cycle);
@@ -1254,6 +1470,7 @@ task dcache_mem__access_base_sequence::complete_release_c_assembly(input longint
     bit corrupt;
     bit denied;
     bit [255:0] load_data_unused;
+    dcache_response_record_t response_record;
 
     if (!c_assembly_corrupt_seen) begin
         dcache_mem_access_task(c_assembly_line, 1'b1, 32'hffff_ffff, c_assembly_data[255:0], corrupt, denied, load_data_unused);
@@ -1270,16 +1487,21 @@ task dcache_mem__access_base_sequence::complete_release_c_assembly(input longint
         end
     end
     remove_cached_line(c_assembly_line, "release_or_writeback");
-    clear_pending_d_state();
-    pending_d_valid      = 1'b1;
-    pending_d_kind       = DCACHE_PENDING_D_RELEASE_ACK;
-    pending_d_due_cycle  = complete_cycle + sample_l2_response_delay();
-    pending_d_beat_count = 1;
-    pending_d_param      = '0;
-    pending_d_size       = c_assembly_size;
-    pending_d_source     = c_assembly_source;
-    pending_d_sink       = '0;
-    pending_d_line_addr  = c_assembly_line;
+    if (!c_assembly_response_reserved) begin
+        `uvm_fatal(get_type_name(), "ReleaseData completed without a reserved ReleaseAck response slot")
+    end
+    response_record                = '{default:'0};
+    response_record.kind           = DCACHE_PENDING_D_RELEASE_ACK;
+    response_record.eligible_cycle = complete_cycle + 3;
+    response_record.beat_count     = 1;
+    response_record.param          = '0;
+    response_record.size           = c_assembly_size;
+    response_record.source         = c_assembly_source;
+    response_record.sink           = '0;
+    response_record.line_addr      = c_assembly_line;
+    // 将 assembly reservation 原子转换为真正 record；它不应额外占用第二个 capacity。
+    c_assembly_response_reserved = 1'b0;
+    enqueue_dcache_response(response_record);
     clear_c_assembly_state();
 endtask:complete_release_c_assembly
 
@@ -1404,16 +1626,22 @@ task dcache_mem__access_base_sequence::start_c_assembly(
             end
             check_line_range(line_addr, "Release");
             remove_cached_line(line_addr, "release_or_writeback");
-            clear_pending_d_state();
-            pending_d_valid      = 1'b1;
-            pending_d_kind       = DCACHE_PENDING_D_RELEASE_ACK;
-            pending_d_due_cycle  = accept_cycle + sample_l2_response_delay();
-            pending_d_beat_count = 1;
-            pending_d_param      = '0;
-            pending_d_size       = c_req_xact.auto_inner_dcache_client_out_c_bits_size;
-            pending_d_source     = c_req_xact.auto_inner_dcache_client_out_c_bits_source;
-            pending_d_sink       = '0;
-            pending_d_line_addr  = line_addr;
+            begin
+                dcache_response_record_t response_record;
+                if (!has_dcache_response_capacity()) begin
+                    `uvm_fatal(get_type_name(), "Release C.fire occurred without ReleaseAck response capacity")
+                end
+                response_record                = '{default:'0};
+                response_record.kind           = DCACHE_PENDING_D_RELEASE_ACK;
+                response_record.eligible_cycle = accept_cycle + 3;
+                response_record.beat_count     = 1;
+                response_record.param          = '0;
+                response_record.size           = c_req_xact.auto_inner_dcache_client_out_c_bits_size;
+                response_record.source         = c_req_xact.auto_inner_dcache_client_out_c_bits_source;
+                response_record.sink           = '0;
+                response_record.line_addr      = line_addr;
+                enqueue_dcache_response(response_record);
+            end
         end
         TL_C_OPCODE_RELEASEDATA: begin
             if (c_req_xact.auto_inner_dcache_client_out_c_bits_size != TL_LINE_SIZE) begin
@@ -1432,6 +1660,10 @@ task dcache_mem__access_base_sequence::start_c_assembly(
             c_assembly_source         = c_req_xact.auto_inner_dcache_client_out_c_bits_source;
             c_assembly_size           = c_req_xact.auto_inner_dcache_client_out_c_bits_size;
             c_assembly_param          = c_req_xact.auto_inner_dcache_client_out_c_bits_param;
+            if (!has_dcache_response_capacity()) begin
+                `uvm_fatal(get_type_name(), "ReleaseData C.fire occurred without a reservable ReleaseAck response slot")
+            end
+            c_assembly_response_reserved = 1'b1;
             consume_c_beat(c_req_xact, accept_cycle);
         end
         default: begin
@@ -1446,7 +1678,8 @@ function void dcache_mem__access_base_sequence::try_start_probe(input bit allow_
     bit [1:0]  selected_alias;
 
     // Probe 只能在完全空闲且未进入 stop drain 时新建；已有 B/C owner 由主循环继续消费。
-    if (!allow_new_probe || pending_d_valid || waiting_grant_ack ||
+    if (!allow_new_probe || current_d_valid || (dcache_rsp_q.size() != 0) ||
+        (grant_ack_wait_q.size() != 0) ||
         pending_probe_b_valid || waiting_probe_c ||
         (c_assembly_owner != DCACHE_C_OWNER_NONE) ||
         a_accept_armed || c_accept_armed) begin
@@ -1467,11 +1700,14 @@ function void dcache_mem__access_base_sequence::service_hint(
     input longint unsigned           current_cycle,
     inout dcache_agent_agent_xaction cycle_xact
 );
-    if (hint_selected && !hint_sent && current_cycle == hint_due_cycle) begin
-        cycle_xact.io_l2_hint_valid          = 1'b1;
-        cycle_xact.io_l2_hint_bits_sourceId  = hint_source_id;
-        cycle_xact.io_l2_hint_bits_isKeyword = hint_isKeyword;
-        hint_sent                            = 1'b1;
+    foreach (dcache_hint_q[i]) begin
+        if (dcache_hint_q[i].due_cycle <= current_cycle) begin
+            cycle_xact.io_l2_hint_valid          = 1'b1;
+            cycle_xact.io_l2_hint_bits_sourceId  = dcache_hint_q[i].source_id;
+            cycle_xact.io_l2_hint_bits_isKeyword = dcache_hint_q[i].isKeyword;
+            dcache_hint_q.delete(i);
+            return;
+        end
     end
 endfunction:service_hint
 
@@ -1498,6 +1734,7 @@ task dcache_mem__access_base_sequence::body();
     bit                        d_fire;
     bit                        e_fire;
     int unsigned               stop_wait_cycles;
+    int unsigned               response_visible_count;
 
     if (!uvm_config_db#(virtual dcache_agent_agent_interface)::get(null, get_full_name(), "vif", dcache_vif) &&
         !uvm_config_db#(virtual dcache_agent_agent_interface)::get(null, "uvm_test_top.env.u_dcache_agent_agent*", "vif", dcache_vif)) begin
@@ -1567,6 +1804,10 @@ task dcache_mem__access_base_sequence::body();
             continue;
         end
 
+        // 本拍返回调度只能看见进入本拍前已经存在的 record；本拍 A/C.fire 新建的
+        // record 会在后续周期才允许被 scheduler 选择。
+        response_visible_count = dcache_rsp_q.size();
+
         if (last_cycle_valid && (last_cycle_xact != null)) begin
             a_fire = (last_cycle_xact.auto_inner_dcache_client_out_a_ready == 1'b1) && sampled_a_valid;
             b_fire = (last_cycle_xact.auto_inner_dcache_client_out_b_valid == 1'b1) && sampled_b_ready;
@@ -1580,7 +1821,7 @@ task dcache_mem__access_base_sequence::body();
             if (e_fire) begin
                 process_e_fire();
             end
-            if (sampled_e_valid && !e_fire && !waiting_grant_ack) begin
+            if (sampled_e_valid && !e_fire && (grant_ack_wait_q.size() == 0)) begin
                 `uvm_fatal(get_type_name(), "E.valid observed without a pending GrantAck owner")
             end
 
@@ -1639,11 +1880,15 @@ task dcache_mem__access_base_sequence::body();
         // 只有 A/C/B/D/E、GrantAck、Probe 和 assembly 生命周期都自然归零后，才发最后一拍 safe idle 并退出；
         // 已完成 GrantAck 的 cached line map 是稳定历史状态，不属于 in-flight，也不阻塞退出。
         if (data.is_global_stop_requested() &&
-            !pending_d_valid &&
-            !waiting_grant_ack &&
+            !current_d_valid &&
+            (dcache_rsp_q.size() == 0) &&
+            !dcache_rsp_timer_active &&
+            (grant_ack_wait_q.size() == 0) &&
+            (dcache_hint_q.size() == 0) &&
             !pending_probe_b_valid &&
             !waiting_probe_c &&
             (c_assembly_owner == DCACHE_C_OWNER_NONE) &&
+            !c_assembly_response_reserved &&
             !a_accept_armed &&
             !c_accept_armed &&
             !sampled_a_valid &&
@@ -1665,13 +1910,17 @@ task dcache_mem__access_base_sequence::body();
             stop_wait_cycles++;
             if ((stop_wait_cycles % 1000) == 0) begin
                 `uvm_warning(get_type_name(),
-                             $sformatf("DCache responder still draining after global stop: cycles=%0d pending_d=%0d grant_ack=%0d probe_b=%0d probe_c=%0d c_owner=%0d a_armed=%0d c_armed=%0d a_valid=%0d c_valid=%0d",
+                             $sformatf("DCache responder still draining after global stop: cycles=%0d current_d=%0d queued_rsp=%0d timer=%0d grant_ack=%0d hint=%0d probe_b=%0d probe_c=%0d c_owner=%0d c_resv=%0d a_armed=%0d c_armed=%0d a_valid=%0d c_valid=%0d",
                                        stop_wait_cycles,
-                                       pending_d_valid,
-                                       waiting_grant_ack,
+                                       current_d_valid,
+                                       dcache_rsp_q.size(),
+                                       dcache_rsp_timer_active,
+                                       grant_ack_wait_q.size(),
+                                       dcache_hint_q.size(),
                                        pending_probe_b_valid,
                                        waiting_probe_c,
                                        c_assembly_owner,
+                                       c_assembly_response_reserved,
                                        a_accept_armed,
                                        c_accept_armed,
                                        sampled_a_valid,
@@ -1682,17 +1931,15 @@ task dcache_mem__access_base_sequence::body();
             stop_wait_cycles = 0;
         end
 
-        if (pending_d_valid && (service_cycle >= pending_d_due_cycle)) begin
-            build_pending_d_xaction(cycle_xact);
+        service_dcache_response_scheduler(service_cycle, response_visible_count);
+        if (current_d_valid) begin
+            build_current_d_xaction(cycle_xact);
         end
-        else if (pending_d_valid) begin
-            // delay count-down 期间保持 A/C/B backpressure，只等待 due cycle。
-        end
-        else if (waiting_grant_ack) begin
-            // 只开放 E.ready；A/C/B 继续 blocked。
+        if (grant_ack_wait_q.size() != 0) begin
             cycle_xact.auto_inner_dcache_client_out_e_ready = 1'b1;
         end
-        else if (pending_probe_b_valid) begin
+
+        if (pending_probe_b_valid) begin
             cycle_xact.auto_inner_dcache_client_out_b_valid        = 1'b1;
             cycle_xact.auto_inner_dcache_client_out_b_bits_opcode  = TL_B_OPCODE_PROBE;
             cycle_xact.auto_inner_dcache_client_out_b_bits_param   = TL_CAP_TON;
@@ -1721,9 +1968,11 @@ task dcache_mem__access_base_sequence::body();
                     TL_C_OPCODE_PROBE_ACKDATA,
                     TL_C_OPCODE_RELEASE,
                     TL_C_OPCODE_RELEASEDATA: begin
-                        cycle_xact.auto_inner_dcache_client_out_c_ready = 1'b1;
-                        c_accept_armed = 1'b1;
-                        armed_c_req_xact = sampled_req_xact;
+                        if (can_accept_dcache_release_c_request(sampled_req_xact)) begin
+                            cycle_xact.auto_inner_dcache_client_out_c_ready = 1'b1;
+                            c_accept_armed = 1'b1;
+                            armed_c_req_xact = sampled_req_xact;
+                        end
                     end
                     default: begin
                         `uvm_fatal(get_type_name(),
@@ -1738,9 +1987,11 @@ task dcache_mem__access_base_sequence::body();
             case (sampled_req_xact.auto_inner_dcache_client_out_c_bits_opcode)
                 TL_C_OPCODE_RELEASE,
                 TL_C_OPCODE_RELEASEDATA: begin
-                    cycle_xact.auto_inner_dcache_client_out_c_ready = 1'b1;
-                    c_accept_armed = 1'b1;
-                    armed_c_req_xact = sampled_req_xact;
+                    if (can_accept_dcache_release_c_request(sampled_req_xact)) begin
+                        cycle_xact.auto_inner_dcache_client_out_c_ready = 1'b1;
+                        c_accept_armed = 1'b1;
+                        armed_c_req_xact = sampled_req_xact;
+                    end
                 end
                 default: begin
                     `uvm_fatal(get_type_name(),
@@ -1761,9 +2012,11 @@ task dcache_mem__access_base_sequence::body();
                 TL_A_OPCODE_CBO_CLEAN,
                 TL_A_OPCODE_CBO_FLUSH,
                 TL_A_OPCODE_CBO_INVAL: begin
-                    cycle_xact.auto_inner_dcache_client_out_a_ready = 1'b1;
-                    a_accept_armed = 1'b1;
-                    armed_a_req_xact = sampled_req_xact;
+                    if (can_accept_dcache_a_request(sampled_req_xact)) begin
+                        cycle_xact.auto_inner_dcache_client_out_a_ready = 1'b1;
+                        a_accept_armed = 1'b1;
+                        armed_a_req_xact = sampled_req_xact;
+                    end
                 end
                 default: begin
                     `uvm_fatal(get_type_name(),
@@ -1804,15 +2057,45 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
     int unsigned default_post_pkt_gap;
     virtual sbuffer_agent_agent_interface sbuffer_vif;
 
+    localparam bit [3:0] UNCACHE_A_OPCODE_PUT_FULL      = 4'd0;
+    localparam bit [3:0] UNCACHE_A_OPCODE_PUT_PARTIAL   = 4'd1;
+    localparam bit [3:0] UNCACHE_A_OPCODE_GET           = 4'd4;
+    localparam bit [3:0] UNCACHE_D_OPCODE_ACCESS_ACK    = 4'd0;
+    localparam bit [3:0] UNCACHE_D_OPCODE_ACCESS_ACKDATA = 4'd1;
+    localparam int unsigned UNCACHE_D_READY_WARN_CYCLES = 1000;
+
+    typedef enum int unsigned {
+        UNCACHE_RESPONSE_STORE_ACK = 0,
+        UNCACHE_RESPONSE_LOAD_DATA = 1
+    } uncache_response_kind_e;
+
+    typedef struct {
+        uncache_response_kind_e kind;
+        longint unsigned        eligible_cycle;
+        longint unsigned        accept_cycle;
+        bit [2:0]               size;
+        bit [3:0]               source;
+        bit [47:0]              address;
+        bit                     denied;
+        bit                     corrupt;
+        bit [63:0]              data;
+    } uncache_response_record_t;
+
     // 中文注释：Uncache A request 的 pending handshake owner。
     // 设置：当前 sample 观察到 A.valid 后准备驱动 A.ready 时；清零：下一 sample 确认 A.fire、
     // valid 撤销或 reset。作用：只有 A.fire 后才允许生成 response 或把 store 写入 shared batch。
     bit a_accept_armed;
     sbuffer_agent_agent_xaction armed_a_req_xact;
-    // 中文注释：唯一的 Uncache D response owner。设置：确认 A.fire 后建立；清零：对应 D.fire
-    // 或 reset。该专项保持原有单笔串行行为，不在此处引入 outstanding response queue。
-    bit pending_d_valid;
-    sbuffer_agent_agent_xaction pending_d_xact;
+    // 中文注释：Uncache response record 队列与当前 D hold 分离。A.fire 后先创建 record；
+    // 只有 scheduler 选中后才成为 current D hold。D.ready=0 时保持 current payload 不重采样。
+    uncache_response_record_t uncache_rsp_q[$];
+    uncache_response_record_t current_d_record;
+    bit                       current_d_valid;
+    bit                       uncache_rsp_timer_active;
+    longint unsigned          uncache_rsp_timer_due_cycle;
+    longint unsigned          service_cycle;
+    int unsigned              d_hold_cycles;
+    bit                       d_hold_timeout_reported;
     sbuffer_agent_agent_xaction last_cycle_xact;
     bit last_cycle_valid;
 
@@ -1826,7 +2109,9 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
         input sbuffer_agent_agent_xaction expected_xact,
         input sbuffer_agent_agent_xaction observed_xact
     );
-    extern virtual function bit is_store_opcode(input bit [3:0] opcode);
+    extern virtual function uncache_response_kind_e decode_uncache_a_opcode(
+        input sbuffer_agent_agent_xaction req_xact
+    );
     extern virtual function bit [47:0] sbuffer_beat_addr(input bit [47:0] addr);
     extern virtual task send_sbuffer_xaction(input sbuffer_agent_agent_xaction rsp_xact);
     extern virtual task sbuffer_mem_access_task(
@@ -1838,10 +2123,26 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
         output bit        denied,
         output bit [63:0] load_data
     );
-    extern virtual task sbuffer_mem_access_xaction(
-        input  sbuffer_agent_agent_xaction req_xact,
-        output sbuffer_agent_agent_xaction rsp_xact
+    extern virtual function int unsigned get_uncache_response_count();
+    extern virtual function bit has_uncache_response_capacity();
+    extern virtual function int unsigned sample_uncache_response_delay();
+    extern virtual function int find_uncache_eligible_response(
+        input longint unsigned current_cycle,
+        input int unsigned      visible_count
     );
+    extern virtual function void service_uncache_response_scheduler(
+        input longint unsigned current_cycle,
+        input int unsigned      visible_count
+    );
+    extern virtual task create_uncache_response_record(
+        input sbuffer_agent_agent_xaction req_xact,
+        input longint unsigned            accept_cycle
+    );
+    extern virtual function void build_current_uncache_d_xaction(
+        inout sbuffer_agent_agent_xaction rsp_xact
+    );
+    extern virtual function void process_uncache_d_fire();
+    extern virtual function void service_uncache_d_hold_watchdog(input bit d_fire);
     extern virtual task body();
 
 endclass:sbuffer_mem_access_base_sequence
@@ -1850,14 +2151,20 @@ function sbuffer_mem_access_base_sequence::new(string name = "sbuffer_mem_access
     super.new(name);
     default_pre_pkt_gap  = 0;
     default_post_pkt_gap = 0;
+    service_cycle        = 0;
     clear_runtime_state();
 endfunction:new
 
 function void sbuffer_mem_access_base_sequence::clear_runtime_state();
     a_accept_armed = 1'b0;
     armed_a_req_xact = null;
-    pending_d_valid = 1'b0;
-    pending_d_xact = null;
+    uncache_rsp_q.delete();
+    current_d_valid            = 1'b0;
+    current_d_record           = '{default:'0};
+    uncache_rsp_timer_active   = 1'b0;
+    uncache_rsp_timer_due_cycle = 0;
+    d_hold_cycles              = 0;
+    d_hold_timeout_reported    = 1'b0;
     last_cycle_xact = null;
     last_cycle_valid = 1'b0;
 endfunction:clear_runtime_state
@@ -1914,9 +2221,26 @@ function void sbuffer_mem_access_base_sequence::check_sbuffer_a_payload_stable(
     end
 endfunction:check_sbuffer_a_payload_stable
 
-function bit sbuffer_mem_access_base_sequence::is_store_opcode(input bit [3:0] opcode);
-    return (opcode == 4'd0) || (opcode == 4'd1);
-endfunction:is_store_opcode
+function sbuffer_mem_access_base_sequence::uncache_response_kind_e
+sbuffer_mem_access_base_sequence::decode_uncache_a_opcode(
+    input sbuffer_agent_agent_xaction req_xact
+);
+    case (req_xact.auto_inner_buffers_out_a_bits_opcode)
+        UNCACHE_A_OPCODE_PUT_FULL,
+        UNCACHE_A_OPCODE_PUT_PARTIAL: return UNCACHE_RESPONSE_STORE_ACK;
+        UNCACHE_A_OPCODE_GET: return UNCACHE_RESPONSE_LOAD_DATA;
+        default: begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("unsupported Uncache A opcode=%0d source=%0d address=0x%0h size=%0d param=%0d",
+                                 req_xact.auto_inner_buffers_out_a_bits_opcode,
+                                 req_xact.auto_inner_buffers_out_a_bits_source,
+                                 req_xact.auto_inner_buffers_out_a_bits_address,
+                                 req_xact.auto_inner_buffers_out_a_bits_size,
+                                 req_xact.auto_inner_buffers_out_a_bits_param))
+        end
+    endcase
+    return UNCACHE_RESPONSE_LOAD_DATA;
+endfunction:decode_uncache_a_opcode
 
 function bit [47:0] sbuffer_mem_access_base_sequence::sbuffer_beat_addr(input bit [47:0] addr);
     return {addr[47:3], 3'b0};
@@ -1960,21 +2284,158 @@ task sbuffer_mem_access_base_sequence::sbuffer_mem_access_task(
     load_data = line_load_data[63:0];
 endtask:sbuffer_mem_access_task
 
-task sbuffer_mem_access_base_sequence::sbuffer_mem_access_xaction(
-    input  sbuffer_agent_agent_xaction req_xact,
-    output sbuffer_agent_agent_xaction rsp_xact
+function int unsigned sbuffer_mem_access_base_sequence::get_uncache_response_count();
+    return uncache_rsp_q.size() + (current_d_valid ? 1 : 0);
+endfunction:get_uncache_response_count
+
+function bit sbuffer_mem_access_base_sequence::has_uncache_response_capacity();
+    return get_uncache_response_count() < MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING;
+endfunction:has_uncache_response_capacity
+
+function int unsigned sbuffer_mem_access_base_sequence::sample_uncache_response_delay();
+    int unsigned delay_class;
+    int unsigned delay_value;
+    int unsigned zero_wt;
+    int unsigned small_wt;
+    int unsigned medium_wt;
+    int unsigned large_wt;
+
+    zero_wt   = seq_csr_common::get_uncache_rsp_delay_zero_wt();
+    small_wt  = seq_csr_common::get_uncache_rsp_delay_small_wt();
+    medium_wt = seq_csr_common::get_uncache_rsp_delay_medium_wt();
+    large_wt  = seq_csr_common::get_uncache_rsp_delay_large_wt();
+    if (!std::randomize(delay_class) with {
+            delay_class dist {
+                0 := zero_wt,
+                1 := small_wt,
+                2 := medium_wt,
+                3 := large_wt
+            };
+        }) begin
+        `uvm_fatal(get_type_name(), "failed to randomize Uncache response delay class")
+    end
+    case (delay_class)
+        0: delay_value = 0;
+        1: begin
+            if (!std::randomize(delay_value) with { delay_value inside {[1:10]}; }) begin
+                `uvm_fatal(get_type_name(), "failed to randomize SMALL Uncache delay")
+            end
+        end
+        2: begin
+            if (!std::randomize(delay_value) with { delay_value inside {[10:100]}; }) begin
+                `uvm_fatal(get_type_name(), "failed to randomize MEDIUM Uncache delay")
+            end
+        end
+        3: begin
+            if (!std::randomize(delay_value) with { delay_value inside {[101:1000]}; }) begin
+                `uvm_fatal(get_type_name(), "failed to randomize LARGE Uncache delay")
+            end
+        end
+        default: begin
+            `uvm_fatal(get_type_name(), $sformatf("unexpected Uncache delay class=%0d", delay_class))
+        end
+    endcase
+    return delay_value;
+endfunction:sample_uncache_response_delay
+
+function int sbuffer_mem_access_base_sequence::find_uncache_eligible_response(
+    input longint unsigned current_cycle,
+    input int unsigned      visible_count
+);
+    int unsigned eligible_count;
+    int unsigned selected_ordinal;
+    int unsigned seen;
+    int unsigned scan_count;
+
+    scan_count = (visible_count < uncache_rsp_q.size()) ? visible_count : uncache_rsp_q.size();
+    if (!seq_csr_common::get_uncache_rsp_reorder_en()) begin
+        for (int unsigned i = 0; i < scan_count; i++) begin
+            if (uncache_rsp_q[i].eligible_cycle <= current_cycle) begin
+                return i;
+            end
+        end
+        return -1;
+    end
+    eligible_count = 0;
+    for (int unsigned i = 0; i < scan_count; i++) begin
+        if (uncache_rsp_q[i].eligible_cycle <= current_cycle) begin
+            eligible_count++;
+        end
+    end
+    if (eligible_count == 0) begin
+        return -1;
+    end
+    if (!std::randomize(selected_ordinal) with { selected_ordinal inside {[0:eligible_count-1]}; }) begin
+        `uvm_fatal(get_type_name(), "failed to randomize Uncache ready response ordinal")
+    end
+    seen = 0;
+    for (int unsigned i = 0; i < scan_count; i++) begin
+        if (uncache_rsp_q[i].eligible_cycle <= current_cycle) begin
+            if (seen == selected_ordinal) begin
+                return i;
+            end
+            seen++;
+        end
+    end
+    `uvm_fatal(get_type_name(), "Uncache eligible response ordinal was not found")
+    return -1;
+endfunction:find_uncache_eligible_response
+
+function void sbuffer_mem_access_base_sequence::service_uncache_response_scheduler(
+    input longint unsigned current_cycle,
+    input int unsigned      visible_count
+);
+    int selected_index;
+    int unsigned response_delay;
+    uncache_response_record_t selected_record;
+
+    if (current_d_valid) begin
+        return;
+    end
+    selected_index = find_uncache_eligible_response(current_cycle, visible_count);
+    if (!uncache_rsp_timer_active) begin
+        if (selected_index < 0) begin
+            return;
+        end
+        response_delay = sample_uncache_response_delay();
+        uncache_rsp_timer_active    = 1'b1;
+        uncache_rsp_timer_due_cycle = current_cycle + response_delay;
+    end
+    if (current_cycle < uncache_rsp_timer_due_cycle) begin
+        return;
+    end
+    selected_index = find_uncache_eligible_response(current_cycle, visible_count);
+    if (selected_index < 0) begin
+        uncache_rsp_timer_active = 1'b0;
+        return;
+    end
+    selected_record = uncache_rsp_q[selected_index];
+    uncache_rsp_q.delete(selected_index);
+    current_d_record        = selected_record;
+    current_d_valid         = 1'b1;
+    uncache_rsp_timer_active = 1'b0;
+endfunction:service_uncache_response_scheduler
+
+task sbuffer_mem_access_base_sequence::create_uncache_response_record(
+    input sbuffer_agent_agent_xaction req_xact,
+    input longint unsigned            accept_cycle
 );
     bit        corrupt;
     bit        denied;
     bit [63:0] load_data;
-    bit        is_store;
+    uncache_response_kind_e response_kind;
+    uncache_response_record_t response_record;
 
-    rsp_xact = sbuffer_agent_agent_xaction::type_id::create("rsp_xact");
-
-    is_store = is_store_opcode(req_xact.auto_inner_buffers_out_a_bits_opcode);
+    if (!has_uncache_response_capacity()) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("Uncache A.fire exceeded response capacity count=%0d max=%0d",
+                             get_uncache_response_count(),
+                             MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING))
+    end
+    response_kind = decode_uncache_a_opcode(req_xact);
     sbuffer_mem_access_task(
         req_xact.auto_inner_buffers_out_a_bits_address,
-        is_store,
+        response_kind == UNCACHE_RESPONSE_STORE_ACK,
         req_xact.auto_inner_buffers_out_a_bits_mask,
         req_xact.auto_inner_buffers_out_a_bits_data,
         corrupt,
@@ -1982,25 +2443,80 @@ task sbuffer_mem_access_base_sequence::sbuffer_mem_access_xaction(
         load_data
     );
 
-    // 当前 response 已由已确认 A.fire 建立，不能再借此 item 接收第二笔 A。
-    rsp_xact.auto_inner_buffers_out_a_ready        = 1'b0;
+    response_record                = '{default:'0};
+    response_record.kind           = response_kind;
+    response_record.eligible_cycle = accept_cycle + 1;
+    response_record.accept_cycle   = accept_cycle;
+    response_record.size           = req_xact.auto_inner_buffers_out_a_bits_size;
+    response_record.source         = req_xact.auto_inner_buffers_out_a_bits_source;
+    response_record.address        = req_xact.auto_inner_buffers_out_a_bits_address;
+    response_record.denied         = denied;
+    response_record.data           = (response_kind == UNCACHE_RESPONSE_STORE_ACK) ? '0 : load_data;
+    // 当前专项保留 backend 的 load corrupt；AccessAck 本身不携带 corrupt 语义。
+    response_record.corrupt        = (response_kind == UNCACHE_RESPONSE_STORE_ACK) ? 1'b0 : corrupt;
+    uncache_rsp_q.push_back(response_record);
+endtask:create_uncache_response_record
+
+function void sbuffer_mem_access_base_sequence::build_current_uncache_d_xaction(
+    inout sbuffer_agent_agent_xaction rsp_xact
+);
+    if (!current_d_valid) begin
+        return;
+    end
     rsp_xact.auto_inner_buffers_out_d_valid        = 1'b1;
-    rsp_xact.auto_inner_buffers_out_d_bits_opcode  = is_store ? 4'd0 : 4'd1;
+    rsp_xact.auto_inner_buffers_out_d_bits_opcode  =
+        (current_d_record.kind == UNCACHE_RESPONSE_STORE_ACK) ?
+        UNCACHE_D_OPCODE_ACCESS_ACK : UNCACHE_D_OPCODE_ACCESS_ACKDATA;
     rsp_xact.auto_inner_buffers_out_d_bits_param   = '0;
-    rsp_xact.auto_inner_buffers_out_d_bits_size    = req_xact.auto_inner_buffers_out_a_bits_size;
-    rsp_xact.auto_inner_buffers_out_d_bits_source  = req_xact.auto_inner_buffers_out_a_bits_source;
+    rsp_xact.auto_inner_buffers_out_d_bits_size    = current_d_record.size;
+    rsp_xact.auto_inner_buffers_out_d_bits_source  = current_d_record.source;
     rsp_xact.auto_inner_buffers_out_d_bits_sink    = '0;
-    rsp_xact.auto_inner_buffers_out_d_bits_denied  = denied;
-    rsp_xact.auto_inner_buffers_out_d_bits_data    = is_store ? '0 : load_data;
-    rsp_xact.auto_inner_buffers_out_d_bits_corrupt = corrupt;
+    rsp_xact.auto_inner_buffers_out_d_bits_denied  = current_d_record.denied;
+    rsp_xact.auto_inner_buffers_out_d_bits_data    = current_d_record.data;
+    rsp_xact.auto_inner_buffers_out_d_bits_corrupt = current_d_record.corrupt;
     rsp_xact.pre_pkt_gap                           = default_pre_pkt_gap;
     rsp_xact.post_pkt_gap                          = default_post_pkt_gap;
-endtask:sbuffer_mem_access_xaction
+endfunction:build_current_uncache_d_xaction
+
+function void sbuffer_mem_access_base_sequence::process_uncache_d_fire();
+    if (!current_d_valid) begin
+        `uvm_fatal(get_type_name(), "Uncache D.fire observed without a current response record")
+    end
+    current_d_valid  = 1'b0;
+    current_d_record = '{default:'0};
+    d_hold_cycles = 0;
+    d_hold_timeout_reported = 1'b0;
+endfunction:process_uncache_d_fire
+
+function void sbuffer_mem_access_base_sequence::service_uncache_d_hold_watchdog(input bit d_fire);
+    if (!current_d_valid || d_fire) begin
+        d_hold_cycles           = 0;
+        d_hold_timeout_reported = 1'b0;
+        return;
+    end
+    if (last_cycle_valid && (last_cycle_xact != null) &&
+        (last_cycle_xact.auto_inner_buffers_out_d_valid == 1'b1)) begin
+        d_hold_cycles++;
+        if ((d_hold_cycles >= UNCACHE_D_READY_WARN_CYCLES) && !d_hold_timeout_reported) begin
+            `uvm_warning(get_type_name(),
+                         $sformatf("Uncache D hold exceeds %0d cycles: source=%0d opcode=%0d size=%0d address=0x%0h denied=%0d corrupt=%0d accept_cycle=%0d",
+                                   UNCACHE_D_READY_WARN_CYCLES,
+                                   current_d_record.source,
+                                   (current_d_record.kind == UNCACHE_RESPONSE_STORE_ACK) ?
+                                   UNCACHE_D_OPCODE_ACCESS_ACK : UNCACHE_D_OPCODE_ACCESS_ACKDATA,
+                                   current_d_record.size,
+                                   current_d_record.address,
+                                   current_d_record.denied,
+                                   current_d_record.corrupt,
+                                   current_d_record.accept_cycle))
+            d_hold_timeout_reported = 1'b1;
+        end
+    end
+endfunction:service_uncache_d_hold_watchdog
 
 task sbuffer_mem_access_base_sequence::body();
     sbuffer_agent_agent_xaction idle_xact;
     sbuffer_agent_agent_xaction req_xact;
-    sbuffer_agent_agent_xaction rsp_xact;
     sbuffer_agent_agent_xaction fired_a_req_xact;
     logic sampled_a_valid_raw;
     logic sampled_d_ready_raw;
@@ -2010,6 +2526,7 @@ task sbuffer_mem_access_base_sequence::body();
     bit a_fire;
     bit d_fire;
     common_data_transaction data;
+    int unsigned response_visible_count;
 
     if (!uvm_config_db#(virtual sbuffer_agent_agent_interface)::get(null, get_full_name(), "vif", sbuffer_vif) &&
         !uvm_config_db#(virtual sbuffer_agent_agent_interface)::get(null, "uvm_test_top.env.u_sbuffer_agent_agent*", "vif", sbuffer_vif)) begin
@@ -2028,6 +2545,7 @@ task sbuffer_mem_access_base_sequence::body();
                                        seq_csr_common::get_paddr_range());
     end
     clear_runtime_state();
+    service_cycle = 0;
 
     forever begin
         // 中文注释：先在 drv_cb 边界确认上一轮驱动的 A.ready/D.valid 是否真实握手，
@@ -2054,6 +2572,9 @@ task sbuffer_mem_access_base_sequence::body();
             clear_runtime_state();
         end
         else begin
+            // scheduler 只看见进入本拍前已有的 record。本拍 A.fire 新建的 record
+            // 即使 eligible_cycle 已满足，也要在下一拍才可能进入返回仲裁。
+            response_visible_count = uncache_rsp_q.size();
             if (a_accept_armed) begin
                 if (!last_cycle_valid ||
                     last_cycle_xact.auto_inner_buffers_out_a_ready !== 1'b1) begin
@@ -2063,21 +2584,19 @@ task sbuffer_mem_access_base_sequence::body();
                     capture_sbuffer_a_xaction(fired_a_req_xact);
                     check_sbuffer_a_payload_stable(armed_a_req_xact, fired_a_req_xact);
                     a_fire = 1'b1;
-                    sbuffer_mem_access_xaction(fired_a_req_xact, rsp_xact);
-                    pending_d_xact = rsp_xact;
-                    pending_d_valid = 1'b1;
+                    create_uncache_response_record(fired_a_req_xact, service_cycle);
                 end
                 a_accept_armed = 1'b0;
                 armed_a_req_xact = null;
             end
 
-            if (pending_d_valid && last_cycle_valid &&
+            if (current_d_valid && last_cycle_valid &&
                 last_cycle_xact.auto_inner_buffers_out_d_valid === 1'b1 &&
                 sampled_d_ready) begin
                 d_fire = 1'b1;
-                pending_d_valid = 1'b0;
-                pending_d_xact = null;
+                process_uncache_d_fire();
             end
+            service_uncache_d_hold_watchdog(d_fire);
         end
 
         // 中文注释：global stop 后只能 drain 已由前一拍 A.ready 接受的请求；若此时出现
@@ -2091,30 +2610,33 @@ task sbuffer_mem_access_base_sequence::body();
         if (reset_active) begin
             // reset 周期保持所有 responder output 为零。
         end
-        else if (data.is_global_stop_requested() && !pending_d_valid &&
+        else if (data.is_global_stop_requested() && !current_d_valid &&
+                 (uncache_rsp_q.size() == 0) && !uncache_rsp_timer_active &&
                  !a_accept_armed && !sampled_a_valid) begin
             send_sbuffer_xaction(idle_xact);
             last_cycle_xact  = idle_xact;
             last_cycle_valid = 1'b1;
+            service_cycle++;
             break;
         end
-        else if (pending_d_valid) begin
-            idle_xact = pending_d_xact;
-            idle_xact.auto_inner_buffers_out_a_ready = 1'b0;
-        end
-        else if (a_accept_armed) begin
-            idle_xact.auto_inner_buffers_out_a_ready = 1'b1;
-        end
-        else if (!data.is_global_stop_requested() && sampled_a_valid) begin
-            capture_sbuffer_a_xaction(req_xact);
-            armed_a_req_xact = req_xact;
-            a_accept_armed   = 1'b1;
-            idle_xact.auto_inner_buffers_out_a_ready = 1'b1;
+        else begin
+            service_uncache_response_scheduler(service_cycle, response_visible_count);
+            build_current_uncache_d_xaction(idle_xact);
+            if (!a_fire && !data.is_global_stop_requested() && sampled_a_valid) begin
+                capture_sbuffer_a_xaction(req_xact);
+                void'(decode_uncache_a_opcode(req_xact));
+                if (has_uncache_response_capacity()) begin
+                    armed_a_req_xact = req_xact;
+                    a_accept_armed   = 1'b1;
+                    idle_xact.auto_inner_buffers_out_a_ready = 1'b1;
+                end
+            end
         end
 
         send_sbuffer_xaction(idle_xact);
         last_cycle_xact  = idle_xact;
         last_cycle_valid = 1'b1;
+        service_cycle++;
     end
 endtask:body
 

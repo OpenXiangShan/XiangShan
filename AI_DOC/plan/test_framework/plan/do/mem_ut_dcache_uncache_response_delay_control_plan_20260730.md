@@ -1,5 +1,12 @@
 # DCache/Uncache 返回延迟分组控制专项 Plan
 
+> 执行完成说明（2026-08-04）：本 plan 已落地 DCache/Uncache 独立 response record、四档 delay、
+> 可选乱序返回、DCache 动态 sink、ReleaseData reservation 与 Uncache opcode 白名单。验证结果和
+> 与原 plan 的三项执行中修正在
+> `AI_DOC/plan/test_framework/review_doc/undo/mem_ut_dcache_uncache_response_delay_control_implementation_review_20260804.md`。
+> 本文件归档到 `plan/do` 后保留原始设计内容与 `IMPLEMENTATION_DELTA`，当前行为以 flow、源码分析
+> 和 implementation review 为准。
+
 ## 专有名词与抽象功能说明
 
 - `admission delay`：从 responder 已确认 A-channel `fire` 到 response record 进入本通道 ready queue 的固定等待；
@@ -433,8 +440,9 @@ response record 准入机会。
 
 - `env/plus.sv`、`seq_csr_common.sv`、`seq/plus_cfg/default.cfg` 保留同名字段并更新中文注释、
   参数作用范围和四档区间说明。
-- `env/plus.sv`、`seq_csr_common.sv`、`seq/plus_cfg/default.cfg` 需要同步新增 Uncache 的四档返回延迟权重入口、
-  DCache/Uncache outstanding 上限入口和 DCache/Uncache 顺序/乱序返回选择入口。
+- `env/plus.sv`、`seq_csr_common.sv`、`seq/plus_cfg/default.cfg` 需要同步新增 Uncache 的四档返回延迟权重入口
+  和 DCache/Uncache 顺序/乱序返回选择入口。DCache/Uncache outstanding 上限只由 compile-time DUT 宏和
+  typed localparam 提供，不建立 runtime plus 镜像。
 - 已有 DCache L2 responder 专项文档和 preset 中的权重名称需要更新为四档；`SMALL_WT` 的说明改为 `1..10`，新增 `ZERO_WT` 说明为 `0 cycle`。
 - 新增/更新 Uncache memory responder flow 文档时，使用 Uncache 语义说明 `auto_inner_buffers_out_a/d`，
   并备注历史源码类名为 `sbuffer_mem_access_base_sequence`。
@@ -464,3 +472,62 @@ clocking 边界后打印一次 response 快照，但仍保持并等待真实 D.f
 timeout abort、pass/fail 或 terminal 逻辑变更。Uncache D error 字段的协议归一化及随机注入由
 `mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md` 统一完成：它扩展的是合法 D payload 的
 错误激励，不改变本 plan 的延迟调度、LSQ 异常优先级或主框架控制行为。
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+### 1. outstanding 上限的编译期权威
+
+`[IMPLEMENTATION_DELTA]`
+
+- 来源：当前项目参数规则明确要求物理 port、buffer 或 outstanding 深度不能建立 runtime plus 镜像。
+- 原 plan：参数同步段仍列出 DCache/Uncache outstanding 上限的 plus 入口，与前文“compile-time 宏固定 16”冲突。
+- 实现调整：在 `memblock_compile_params.svh` 增加 `MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING=16` 和
+  `MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING=16`，并在 `memblock_dispatch_types.sv` 暴露 typed localparam。
+  DCache/Uncache responder 直接消费这些编译期值；runtime 参数仅保留四档 delay weight 和 reorder enable。
+- 原因：防止 testcase plus 宣称改变 DUT 能接收的物理 in-flight 深度，形成第二权威。
+- 影响范围：参数定义、response record 的容量检查和相关参数文档；不改变运行期随机行为。
+
+### 2. Uncache error helper 的跨专项调用边界
+
+`[IMPLEMENTATION_DELTA]`
+
+- 来源：`apply_uncache_d_error_injection()` 的实现和权重属于
+  `mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md`，当前源码中尚不存在该 helper。
+- 原 plan：要求 response-delay plan 在 record 创建时调用该 helper；若直接实现会把后续错误注入功能混入
+  本专项并使单专项提交无法独立编译。
+- 实现调整：本专项先在 `create_uncache_response_record()` 固定 response kind、memory backend 返回的
+  `denied/corrupt`、source/size/data 和 record 生命周期；对于当前无数据 `AccessAck`，保持 corrupt 为 0。
+  后续 error-injection plan 只在这个 record 创建点接入一次 helper，覆盖 backend error 与 injection weight，
+  不改动 scheduler、queue 或 D hold。
+- 原因：保证 delay/outstanding 专项可独立编译验证，同时保留错误位的唯一后续写入点，避免重复采样。
+- 影响范围：本专项不新增 error plus、不实现权重随机或 error normalization；合法 backend error 的当前传递
+  保持最小行为，后续专项负责完整协议归一化。
+
+```text
+本专项创建 Uncache response record：
+  解码 Put*/Get；
+  调用 shared memory backend，保存当前 backend denied/corrupt；
+  AccessAck 固定 corrupt=0；
+  建立 delay/eligible/queue record；
+
+后续 error-injection 专项：
+  只在同一 record 创建点调用一次 error helper；
+  覆盖 record 的 denied/corrupt；
+  D hold 或 scheduler 取出 record 时不再随机。
+```
+
+### 3. Hint 与最终 D response 的绑定
+
+`[IMPLEMENTATION_DELTA]`
+
+- 来源：在 `REORDER` 模式下，scheduler timer 启动时看到的候选 record 与 timer 到期时最终选出的
+  record 可以不同；若在 timer 启动时直接发送 Hint，会让 Hint 的 source/isKeyword 与实际 D response 脱钩。
+- 原 plan：只要求 Hint 生命周期不因 delay 档位改变，没有规定 timer 与 REORDER 并存时 Hint 的绑定时点。
+- 实现调整：`accept_dcache_a_request()` 仍只对 `AcquireBlock` 采样一次 Hint 并把字段写入所属
+  response record；`service_dcache_response_scheduler()` 只有在 timer 到期、真正把该 record 转为
+  `current_d_record` 时，才将 Hint 写入 `dcache_hint_q`。同一轮 `service_hint()` 输出该 Hint；D.ready
+  backpressure 不会重发，也不会改写 D payload。
+- 原因：保证任何已发送 Hint 都对应本轮实际选择的 GrantData，避免乱序返回下的跨 record 错配；新的
+  `0 cycle` 档位也不再需要伪造旧的固定提前拍数。
+- 影响范围：只改变 Hint 的 responder 内部排期点，不改变 Hint 是否采样、payload 来源、D response
+  内容、GrantAck/E 生命周期或主表/LSQ 控制逻辑。

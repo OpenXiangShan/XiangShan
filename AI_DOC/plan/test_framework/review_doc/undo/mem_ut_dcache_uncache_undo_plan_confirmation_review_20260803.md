@@ -21,7 +21,7 @@
 - `AI_DOC/plan/test_framework/plan/do/mem_ut_dcache_main_mem_range_switch_plan_20260730.md`
 - `AI_DOC/plan/test_framework/plan/undo/mem_ut_dcache_multi_probe_alias_state_plan_20260803.md`
 - `AI_DOC/plan/test_framework/plan/undo/mem_ut_dcache_multi_probe_tob_control_plan_20260730.md`
-- `AI_DOC/plan/test_framework/plan/undo/mem_ut_dcache_uncache_response_delay_control_plan_20260730.md`
+- `AI_DOC/plan/test_framework/plan/do/mem_ut_dcache_uncache_response_delay_control_plan_20260730.md`
 - `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_dcache_cbo_probe_closure_plan_20260731.md`
 - `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md`
 

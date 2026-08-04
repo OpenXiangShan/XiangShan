@@ -333,7 +333,7 @@ coding 时同步更新：
   route、`GrantData/AccessAckData` 蕴含规则、`AccessAck` 固定 corrupt=0 和 `CBOAck` 独立错误语义。
 - `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md`：
   在已实现专项后追加本 plan 的增量链接，不改写其原始归档结论。
-- `AI_DOC/plan/test_framework/plan/undo/mem_ut_dcache_uncache_response_delay_control_plan_20260730.md`：
+- `AI_DOC/plan/test_framework/plan/do/mem_ut_dcache_uncache_response_delay_control_plan_20260730.md`：
   改为引用本 plan 的 Uncache error 参数与格式归一化，保留其 opcode、延迟和 hold 所有权，避免两个
   plan 分别要求实现同一个 helper。
 - `AI_DOC/project_management/mem_ut_parameter_management.md` 与

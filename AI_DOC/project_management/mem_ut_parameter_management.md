@@ -44,6 +44,7 @@
 - 自动主表虚拟地址窗口、TLB 物理地址映射窗口、PTE 权重和 MDP 字段权重
 - send priority 相关公共参数
 - replay / redirect / flushSb / L2TLB responder 等公共 sequence 行为参数
+- DCache/Uncache response delay 权重与 ready record 的顺序/乱序选择参数
 - 公共 timeout / idle stop / max cycle 参数
 
 约束规则：
@@ -112,6 +113,12 @@ runtime资源收敛：
   避免32-bit表达式先溢出。zero-only不会消费uid或产生terminal，只能用于存在外部结束条件的场景；
   非空主表的主动flow若没有外部结束条件，将按既有no-progress/UVM timeout策略保持等待。
 - `collect_lsq_candidates()`每拍只采样一次总slot目标，再分别按编译期load/store 6/4和实际LQ/SQ free count截断；不得新增同义per-type runtime limit，也不得复制RTL registered credit公式要求额外预留6/4空项。
+- `MEMBLOCK_L2_RSP_DELAY_*_WT`、`MEMBLOCK_UNCACHE_RSP_DELAY_*_WT` 与两个 `*_RSP_REORDER_EN`
+  只表示 responder 的运行期延迟分布和返回选择策略，统一通过 `plus.sv -> seq_csr_common -> getter` 读取；
+  DCache/Uncache 各自四档权重不得全零。它们不改变 A-channel 准入、D.ready backpressure 或 DUT 实际请求数。
+- `MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING`、`MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING` 是 V2 memory
+  responder 的物理 in-flight 上限，只能定义在 `memblock_compile_params.svh` 并经
+  `memblock_dispatch_types.sv` 导出 typed localparam；不得新增同名 plus 或 testcase cfg 覆盖。
 - 三类`*_PIP_NUM_LIMIT`按对应compile pipe数执行warning+clamp；三类随机开关只决定固定返回limit还是在`[1:limit]`采样。
 - `MEMBLOCK_REAL_LSQ_ENQ_MAX`、`MEMBLOCK_REAL_ENQ_WIDTH`和三个`MEMBLOCK_REAL_*_PIPE_NUM`已经退出配置系统，不得重新引入兼容字段或wrapper。
 

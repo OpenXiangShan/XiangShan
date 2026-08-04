@@ -111,6 +111,14 @@
 `ifndef MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM
     `define MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM 3
 `endif
+// DCache 与 Uncache 的 response record 上限对应 V2 实际可同时在途的请求资源。
+// 这是 DUT 结构参数，测试框架 runtime plus 不能改变它们。
+`ifndef MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING
+    `define MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING 16
+`endif
+`ifndef MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING
+    `define MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING 16
+`endif
 `ifndef MEMBLOCK_DUT_ISSUE_PORT_STYLE_SPLIT
     `define MEMBLOCK_DUT_ISSUE_PORT_STYLE_SPLIT 1
 `endif
