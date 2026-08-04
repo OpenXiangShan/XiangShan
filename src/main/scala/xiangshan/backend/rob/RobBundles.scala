@@ -66,8 +66,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
     val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
     val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
-    val crossFtqCommit = UInt(2.W)
-    val hasLastInFtqEntry = UInt(2.W)
 
     val vls = Bool()
     val interrupt_safe = Bool()
@@ -152,8 +150,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-    val crossFtqCommit = UInt(2.W)
-    val hasLastInFtqEntry = UInt(2.W)
 
     val fpWen = Bool()
     val rfWen = Bool()
@@ -181,8 +177,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.formerInstrCnt := robEnq.formerInstrCnt
     robEntry.latterInstrCnt := robEnq.latterInstrCnt
     robEntry.formerLen := robEnq.formerLen
-    robEntry.crossFtqCommit := robEnq.crossFtqCommit
-    robEntry.hasLastInFtqEntry := robEnq.hasLastInFtqEntry
 
 
     robEntry.commitType := robEnq.commitType
@@ -264,8 +258,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.mmio := robEntry.mmio
     robCommitEntry.ftqIdx := robEntry.ftqIdx
     robCommitEntry.ftqOffset := robEntry.ftqOffset
-    robCommitEntry.crossFtqCommit := robEntry.crossFtqCommit
-    robCommitEntry.hasLastInFtqEntry := robEntry.hasLastInFtqEntry
     robCommitEntry.commitType := robEntry.commitType
     robCommitEntry.hasStore := robEntry.hasStore
     robCommitEntry.formerInstrCnt := robEntry.formerInstrCnt
