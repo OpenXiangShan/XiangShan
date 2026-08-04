@@ -477,54 +477,7 @@ TODO：
 - 默认关闭 directed MMIO；未开启专项时，不把 MMIO sideband 接入 pass/fail 或 terminal。
 - 不在该 TODO 中实现 RM/scoreboard 正确性比较；若后续要判断 DUT MMIO 顺序或异常处理正确性，应另建 RM/checker/coverage 专项。
 
-## 12. V2 L2 flush completion responder TODO
-
-状态：request-bound `io_l2_hint_*`、DCache/Uncache response record、动态 Grant sink 和低频
-Probe 已由已完成的 DCache responder 专项实现；Hint 只来自真实 `AcquireBlock -> GrantData`，
-并与最终选中的 GrantData record 绑定。当前仍不支持具有 request/in-flight/completion 关联的
-非零 `io_l2_flush_done`，继续保持 zero-only。
-
-当前 flush sideband 边界：
-
-- generic xaction、constructor、idle builder 和 `drive_idle()` 保证无 owner 周期 `io_l2_flush_done=0`；
-- 没有合法 L2 flush request 时不得产生 done；不得用随机 pulse、固定周期 pulse 或 testcase 直接赋值伪造完成；
-- 不能由 DCache response scheduler、Hint、Probe 或第二个并发 sequence 产生 flush completion。
-
-### 12.1 L2 flush/低功耗 completion responder TODO
-
-- 新建 V2 L2 flush completion 专项 plan，确认 MemBlock/系统侧实际 flush request 入口，
-  例如相关 `l2_flush_en`/低功耗请求，以及 `io_l2_flush_done` 的采样和脉冲/电平合同。
-- 建立明确状态机，例如 `IDLE -> REQUESTED -> IN_FLIGHT -> COMPLETE -> IDLE`；只有观察到
-  合法 request 后才能进入 in-flight，只有 in-flight 状态才能驱动 done。
-- 定义 request identity、重复 request、request 保持、多拍 request、完成 latency、timeout、
-  back-to-back flush 和 reset 中断规则。
-- `io_l2_flush_done` 必须由状态机唯一产生，不允许 DCache generic xaction、idle mode、
-  randomize 或 testcase 直接驱动。
-- 定义 flush 完成前需要满足的环境条件，例如 outstanding DCache transaction、MSHR、
-  SBuffer/uncache 活动是否必须排空；不得只等待固定拍数就无条件完成。
-- 定义完成事件与 CSR `L2_FLUSH_DONE`、低功耗握手和后续 request 的可见周期，避免同一
-  completion 被重复消费。
-- 定义 reset、redirect、异常和仿真终止时 in-flight 状态的清理或保留策略；若 redirect
-  与系统级 L2 flush 无关，应明确说明不取消，而不是默认共用 dispatch flush epoch。
-- directed testcase 至少覆盖：无request禁止done、正常request/completion、可配置延迟、
-  timeout、重复request、back-to-back request、reset during in-flight 和 completion去重。
-- end check 必须保证无未完成 flush、无孤立 done、request/completion 计数一致。
-
-### 12.2 开放非零 flush completion 的条件
-
-`io_l2_flush_done` 只有以下条件全部满足后才允许从当前 zero-only 合同开放：
-
-- flush completion 专项形成已 review 的执行 plan，明确唯一 owner 和状态生命周期。
-- 非零值来自真实 request/outstanding 状态，而不是 random transaction payload。
-- interface/xaction/driver/builder 的 hard-zero合同按 capability 精确拆分，默认普通 smoke
-  仍保持 zero-only。
-- 已补负向 fail-fast、directed testcase、monitor/debug dump、reset和end check。
-- 编译和回归证明原 DCache A/B/C/D/E responder、load/store completion、replay和 CSR
-  普通路径无行为回归。
-- 若后续需要判断 DUT 对 hint/flush 的功能正确性，再建立独立 RM/checker/coverage专项；
-  responder 闭环完成本身不等于正确性检查闭环完成。
-
-## 13. LSQ issue hold、压力模式与 boundary vseq TODO
+## 12. LSQ issue hold、压力模式与 boundary vseq TODO
 
 状态：当前 V2 LSQ enqueue 适配只补齐 scalar request 字段、6 个物理 slot、单拍最多
 6 个 load element/4 个 store element 的 admission gate、V2 E0/E1 发送时序和 redirect 后重试。
@@ -549,7 +502,7 @@ interface 字段，也不表示当前普通 LSQ enqueue/issue flow 不可用。
 - 当前 pass/fail、ROB commit、LSQ deq 和 terminal owner 保持不变；三项专项后续实现也只能控制
   场景调度，不得建立第二套完成状态机。
 
-### 13.1 Issue hold TODO
+### 12.1 Issue hold TODO
 
 Issue hold 是测试框架主动暂停 LOAD/STA/STD issue 发送、让已 enqueue 项暂时留在 LQ/SQ 中的
 测试控制。它不是 DUT backpressure，不是 issue interface 字段，也不得复用
@@ -572,7 +525,7 @@ Issue hold 是测试框架主动暂停 LOAD/STA/STD issue 发送、让已 enqueu
   env cfg 或 transaction 字段。
 - hold 释放后继续使用原 issue scheduler 和 fire 处理，最终仍由既有 terminal/global-stop 合同退出。
 
-### 13.2 LSQ 压力模式 TODO
+### 12.2 LSQ 压力模式 TODO
 
 压力模式用于稳定制造 LQ/SQ 高占用，而不是提高硬件结构上限或强制 DUT 接收非法 batch。最小方案
 应通过“继续合法 enqueue + 暂停 issue”接近 admission 门限，避免同时修改 commit/deq 主逻辑。
@@ -592,7 +545,7 @@ Issue hold 是测试框架主动暂停 LOAD/STA/STD issue 发送、让已 enqueu
 - 可记录目标 occupancy、最大 occupancy、gate 阻塞次数和 hold 周期等激励有效性统计；这些是 debug
   统计，不是 DUT 正确性 checker 或功能覆盖率达标条件。
 
-### 13.3 Boundary directed vseq TODO
+### 12.3 Boundary directed vseq TODO
 
 Boundary vseq 是协调主表生成、LSQ enqueue、issue hold、redirect 和必要 responder sequence 的顶层
 定向场景。它用于稳定命中容量门限和 E0/E1 时序边界，不直接驱动 DUT interface，也不替代各
@@ -615,14 +568,14 @@ agent 的 base sequence/driver。
 - 后续若需要 RM/checker/coverage，只消费该 vseq 产生的 case 标签、实际 batch 数量、free-entry
   snapshot 和 redirect phase 标签；本 TODO 不实现 DUT 正确性比较或 covergroup。
 
-### 13.4 后续专项完成边界
+### 12.4 后续专项完成边界
 
 只有 issue hold、pressure controller 和 boundary vseq 的 owner、参数、运行期状态、清理与退出合同
 形成独立可 coding plan 并通过 review 后，才能从 V2 LSQ enqueue 适配 plan 的“不支持”列表中移除。
 专项默认关闭时，当前普通 scalar enqueue、issue、writeback、commit/deq、redirect/replay 和 terminal
 行为必须保持完全不变。
 
-## 14. V2 L2TLB S1/S2 PTE 权限独立建模 TODO
+## 13. V2 L2TLB S1/S2 PTE 权限独立建模 TODO
 
 状态：当前只完成 L2TLB response 权限字段链适配，尚未独立建模 S1/S2 两阶段 PTE 权限。
 
@@ -666,9 +619,9 @@ agent 的 base sequence/driver。
 - 若后续需要判断 DUT 两阶段翻译结果是否正确，应另由 RM/checker/coverage 专项消费 S1/S2 状态；
   不能把 responder 能生成独立权限等同于参考模型检查闭环完成。
 
-## 15. Fault 指令支持边界与 standalone 资源释放 TODO
+## 14. Fault 指令支持边界与 standalone 资源释放 TODO
 
-### 15.1 专有名词与抽象功能说明
+### 14.1 专有名词与抽象功能说明
 
 本节中的专有名词先统一定义，避免把 ROB 语义和 MemBlock 本地资源语义混在一起：
 
@@ -690,7 +643,7 @@ agent 的 base sequence/driver。
   `uvm_fatal`。`apply_raw_ctrl_deq()` 的职责仍只是消费已经观察到的 DUT raw deq，并调用现有
   pointer/map release helper；它不能被 watchdog 或 fault sequence 当作预测释放 API。
 
-### 15.2 V2 源码确认的 fault 释放分类
+### 14.2 V2 源码确认的 fault 释放分类
 
 V2 源码的关键事实如下：
 
@@ -757,7 +710,7 @@ scalar store 的 `hasException=1` 不是单独的出队条件，必须保留以�
   若 testcase 必须验证该路径，应新建对应 directed fault plan；当前 software-only synthetic event
   不能充当 DUT 释放证据。
 
-### 15.3 不支持指令的后续修改方案
+### 14.3 不支持指令的后续修改方案
 
 以下条目是后续专项的可执行落点；在专项完成前，admission 必须保持现有运行期 `uvm_fatal`，
 不能因为 enum/classifier 已存在就把指令静默转成 scalar load/store。
@@ -810,7 +763,7 @@ scalar store 的 `hasException=1` 不是单独的出队条件，必须保留以�
      等 ctrl monitor raw `lqDeq/sqDeq` 或 redirect/cancel snapshot `lqCancelCnt/sqCancelCnt`，不在 sequence
      中直接释放公共 mapping。
 
-### 15.4 普通 scalar fault 后续修改方案（待 coding）
+### 14.4 普通 scalar fault 后续修改方案（待 coding）
 
 1. **真实 raw 是唯一释放入口**
 
@@ -913,7 +866,7 @@ scalar store 的 `hasException=1` 不是单独的出队条件，必须保留以�
    - normal scalar load/store 的 pass/fail/terminal 主逻辑保持不变；本专项只补 fault 事件的真实
      释放来源和超时保护，不新增 RM 或 scoreboard。
 
-### 15.5 本轮完成边界
+### 14.5 本轮完成边界
 
 - 当前代码只有 raw deq consumer、fault token 等基础设施，普通 scalar load/store 的真实 fault
   smoke、release provenance 和 fault-head watchdog 仍未完成；这些必须作为待 coding 项补入既有

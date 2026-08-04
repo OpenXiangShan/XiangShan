@@ -1,5 +1,11 @@
 # DCache 多 Probe、`Probe(toB)` 与轻量 L2 flush 专项 Plan
 
+| 项目 | 内容 |
+|---|---|
+| 状态 | coding 已完成，已归档至 `do` |
+| 实现日期 | 2026-08-04 |
+| 关联实现 | `dcache_mem__access_base_sequence`、`dcache_agent_agent_driver`、`plus.sv`、`seq_csr_common.sv` |
+
 > **Alias 前置依赖**：随机 `Probe(toB/toN)` 的 target_cap、旧 alias B payload、alias conflict
 > 与 line 删除/保留由
 > `mem_ut_dcache_multi_probe_alias_state_plan_20260803.md` 统一定义。本 plan 只负责 Probe batch
@@ -20,7 +26,7 @@ Probe policy 共用的请求提交、B-channel 发送和 C-channel 收敛功能�
 
 | 参数 | 默认值 | 功能 |
 |---|---:|---|
-| `MEMBLOCK_L2_PROBE_EN` | `0` | 总开关。仅为 `1` 时允许产生 Probe。 |
+| `MEMBLOCK_L2_PROBE_EN` | `0` | 随机 Probe 总开关。仅为 `1` 时允许随机 policy 产生 Probe；不阻止 DUT 已发起的 L2 flush 完成功能。 |
 | `MEMBLOCK_L2_PROBE_PRE_START_WT` | `0` | 每个可启动周期随机启动 batch 的权重，范围 `0..10000`；不启动权重自动为 `10000 - 此值`。 |
 | `MEMBLOCK_L2_PROBE_COUNT_ONE_WT` | `1` | 本 batch 发送 1 笔 Probe 的权重。 |
 | `MEMBLOCK_L2_PROBE_COUNT_MID_WT` | `0` | 本 batch 从 `2..6` 随机选择次数的权重。 |
@@ -40,7 +46,7 @@ Probe record queue 容量固定为 16 笔，属于测试框架 compile-time 状�
 
 ```text
 Probe_EN 关闭：
-  不产生新的 Probe。
+  不产生新的随机 Probe；alias conflict、后续 CBO 和 DUT 已发起的 l2Flush 仍可使用共享 Probe service。
 
 Probe_EN 开启且当前可启动：
   每拍按 pre_start 权重决定是否开始新的 probe batch；
@@ -118,8 +124,8 @@ DONE 前采样到 io_outer_l2_flush_en=0：
   完整 L2 的 level 请求合同要求请求端在观察到 done 前保持 FLUSH_L2_ENABLE=1。
 ```
 
-`io_outer_l2_flush_en` 由现有 `other_ctrl_agent` monitor 观察，`io_l2_flush_done` 继续由
-DCache responder sideband 驱动。flush 中所有 Probe 固定为 `toN`；仅在对应 C response 完成后
+`io_outer_l2_flush_en` 通过现有 `other_ctrl_agent` 顶层 interface 被 DCache responder 同拍只读采样，
+`io_l2_flush_done` 继续由 DCache responder sideband 驱动。flush 中所有 Probe 固定为 `toN`；仅在对应 C response 完成后
 删除全局候选记录，不能在 B.fire 时提前删除。
 
 本专项通过 `cycle_xact.auto_inner_dcache_client_out_a_ready=0` 冻结新 Grant，而不是只在软件表中
@@ -158,3 +164,36 @@ CHI L2 在 `WAITMSHR` 阶段可能出现的 A-channel 资源仲裁窗口；C-cha
 - 不增加动态 sink、完整 directory、`needData` 随机策略、Probe 错误注入或其他 client 的 Probe 模型。
 - 本专项的 flush 只保证当前 `cached_line_record` 记录全部经 `toN` 收敛；不模拟完整 CoupledL2
   的 set/way 扫描、MSHR/snoop 全局仲裁、下游 CHI writeback 或其他 L2 client 的 flush 行为。
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+### [IMPLEMENTATION_DELTA] 同拍 flush request 采样
+
+- 来源：coding 时确认 `other_ctrl_agent_agent_monitor` 当前不发布可供 responder 消费的 analysis item；
+  直接把 monitor 的上一拍采样写入新的共享变量会让 DCache A.ready 多滞后一拍。
+- 原 plan：描述为由 `other_ctrl_agent` monitor 观察 `io_outer_l2_flush_en`。
+- 实现调整：`dcache_mem__access_base_sequence::body()` 通过已有的
+  `other_ctrl_agent_agent_interface` 同拍只读 `mon_cb.io_outer_l2_flush_en`，并在同一 responder cycle
+  调用 `service_l2_flush()`。
+- 原因：flush 是 level request；必须先结算该 sample 已经发生的 A.fire，再从下一输出拍关闭 A.ready，
+  不能因为跨 monitor 的滞后再接受额外 A request。
+- 影响范围：只新增 responder 对既有 read-only VIF 的获取；不修改 other_ctrl monitor、raw queue、主表或
+  dispatch 控制逻辑。
+
+文字伪代码：
+
+```text
+每个 dcache drv_cb：
+  从 other_ctrl VIF 读取 flush_en；
+  先结算上一拍 A/B/C/D/E fire；
+  调用 service_l2_flush(flush_en)；
+  DRAIN/PROBE 时不再建立新的 A.ready；
+  DONE 时输出 done=1；request 撤销后只清 flush-local snapshot。
+```
+
+### [IMPLEMENTATION_DELTA] `MEMBLOCK_L2_PROBE_EN` 的边界
+
+- 来源：计划原文“仅为 1 时允许产生 Probe”可能把随机激励开关误解为阻断 DUT 主动 l2Flush。
+- 实现调整：该参数只关闭随机 batch policy；alias conflict 和 l2Flush 继续调用同一 `submit_probe()`。
+- 原因：l2Flush 是 DUT 发出的功能性 request；若用随机开关阻止其 Probe，request 会永远等不到 done。
+- 影响范围：不增加参数或新状态；仅明确随机 policy 与功能性 flush policy 的职责边界。

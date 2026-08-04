@@ -19,6 +19,10 @@
 > delay 和 Uncache 即时回复仅是当时实现。当前有效实现已由
 > `mem_ut_dcache_uncache_response_delay_control_plan_20260730.md` 迁移到独立 response record、
 > 动态 Grant sink、四档 delay 与可选乱序返回；以当前 flow、源码分析和最新 implementation review 为准。
+>
+> Probe/flush 参数迁移说明（2026-08-04）：本文出现的 `MEMBLOCK_L2_PROBE_ENABLE_WT`、单笔
+> `Probe(toN)` 与 zero-only `io_l2_flush_done` 只反映当时实现。该旧参数已删除；现行随机 batch/toB
+> 与轻量 l2Flush 行为以 `mem_ut_dcache_multi_probe_tob_control_plan_20260730.md` 为准。
 
 ## 1. 目标、范围与替代关系
 

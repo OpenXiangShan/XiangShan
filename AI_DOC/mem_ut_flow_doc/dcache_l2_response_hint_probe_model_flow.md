@@ -3,10 +3,10 @@
 ## 1. 术语与抽象功能说明
 
 本 flow 描述 `dcache_mem__access_base_sequence` 对 V2 coherent TileLink A/B/C/D/E 的轻量
-responder 行为。它只模拟 MemBlock 对外的 L2 交接，不实现完整 L2 directory、MSHR、替换、权限
-目录或完整 `l2Flush`。当前已具备 alias conflict 所需的共享 line/probe 生命周期基础：同一 physical
-line 的新 alias Acquire 会先 Probe(toN) 旧 alias，再继续原 A 请求；每笔 Probe 使用稳定 token 匹配 C
-reply。随机多批 Probe、随机 Probe(toB)、CBO Probe closure 与轻量 L2 flush 仍由后续专项扩展。
+responder 行为。它只模拟 MemBlock 对外的 L2 交接，不实现完整 L2 directory、MSHR、替换或权限目录。
+当前已具备 alias conflict 所需的共享 line/probe 生命周期基础：同一 physical line 的新 alias Acquire
+会先 Probe(toN) 旧 alias，再继续原 A 请求；每笔 Probe 使用稳定 token 匹配 C reply。本 flow 已支持
+随机 multi-batch `Probe(toB/toN)` 与轻量 `l2Flush` snapshot；CBO Probe closure 仍由独立专项扩展。
 
 | 术语 | 当前含义 | 代码落点 | 生命周期 |
 |---|---|---|---|
@@ -23,6 +23,9 @@ reply。随机多批 Probe、随机 Probe(toB)、CBO Probe closure 与轻量 L2 
 | `line record` | physical line 的唯一轻量 alias 生命周期记录；不是完整 L2 directory | `cached_line_by_addr[line_addr]` | GrantAck 后 ACTIVE；Probe、alias conflict、GrantAck 等阶段更新 |
 | `probe record` | 一笔 B Probe 的稳定请求身份和 target 权限 | `probe_record_q` | submit 时创建；合法 C reply 完成后删除 |
 | `probe token` | 测试框架内部唯一 Probe 标识，不在 C payload 中传输 | `dcache_probe_token_t`、`c_assembly_probe_token` | 建 record 时分配；两拍 ProbeAckData 到齐前保持不变 |
+| `probe batch` | 一次随机开始后建立的一组互不重复的随机 Probe record | `dcache_probe_record_t::batch_id` | 建立时写入；所有 record C 收敛后该 batch 自然结束 |
+| `flush snapshot` | `l2Flush` DRAIN 完成时固定下来的 ACTIVE line 集合 | `l2_flush_snapshot_line_q` | 只在一次 DRAIN->PROBE 边界建立；新 Grant 不会追加入本轮 |
+| `flush state` | 轻量 L2 flush 的 level-request 本地状态机 | `l2_flush_state` | `IDLE -> DRAIN -> PROBE -> DONE -> IDLE` |
 | `deferred Acquire` | 已 A.fire 但必须先清除旧 alias 的新 alias Acquire | `line_record.deferred_acquire` | alias conflict 时保存；旧 alias Probe(toN) 收敛后交回普通 A response builder |
 
 ## 2. 调用 Flow
@@ -34,6 +37,7 @@ flowchart TD
     C --> D[process_d_fire / process_e_fire]
     C --> E[start_c_assembly / consume_c_beat]
     C --> F[accept_dcache_a_request]
+    C --> R[service_l2_flush]
     F --> P[start_alias_conflict / submit_probe]
     P --> Q[service_probe_b_hold / build_probe_b_xaction]
     Q --> E
@@ -42,7 +46,8 @@ flowchart TD
     G --> H[service_dcache_response_scheduler]
     H --> I[build_current_d_xaction]
     H --> J[service_hint]
-    C --> K[try_start_probe]
+    R --> S[capture_l2_flush_snapshot / submit_probe(toN)]
+    C --> K[try_start_probe multi-batch]
     I --> L[send_dcache_xaction]
     J --> L
     K --> L
@@ -54,7 +59,7 @@ flowchart TD
 
 ```text
 每个 drv_cb 边界：
-  先提交上一 sample 已确认的 shared-memory 写 batch，并采样 A/B/C/D/E 对端信号；
+  先提交上一 sample 已确认的 shared-memory 写 batch，并采样 A/B/C/D/E 与 `io_outer_l2_flush_en`；
   用上一拍已驱动 item 和当前采样确认 fire；
   D.fire 推进或结束当前 D hold，Grant 最后一拍转入 GrantAck wait；
   E.fire 必须按 sink 匹配 GrantAck wait，命中后更新 line record 为 ACTIVE；
@@ -62,8 +67,12 @@ flowchart TD
   继续 assembly，Release 类最终建立 ReleaseAck record；
   A.fire 解码 Acquire/CBO；若 Acquire alias 与 ACTIVE line record 不同，先保存 deferred Acquire 并建立
   Probe(toN)，否则沿用 Grant、GrantData 或 CBOAck record 创建；
+  调用 service_l2_flush：flush request 首先 DRAIN 已建立 owner；全部收敛后复制 ACTIVE line snapshot，
+  逐条 submit Probe(toN)，全部 C 收敛后进入 DONE 并保持 io_l2_flush_done=1 到 request 撤销；
   scheduler 只看进入本拍前已经存在且到期的 record，独立计时后按顺序或乱序选一条成为 current D hold；
   被选中的 GrantData 如有 Hint，才在同一返回轮次送入 Hint queue；
+  DRAIN/PROBE 时 A.ready=0；DONE 时恢复普通 A 准入，但随机 Probe 仍暂停；
+  仅在 IDLE 且无其它 Probe owner 时，按 batch 参数建立互不重复的 random Probe(toB/toN) record；
   按当前 D hold、GrantAck wait、probe B hold、Probe/C assembly 和 A/C 准入构造下一 item；
   driver 立即写 clocking output；下一 drv_cb 再确认该 item 是否真正 fire。
 ```
@@ -81,22 +90,25 @@ item；它不读取 monitor analysis port，也不修改 dispatch 主表、LSQ �
 文字伪代码：
 
 ```text
-等待 drv_cb；调用 begin_shared_mem_sample；采样 A/B/C/D/E valid/ready 和 reset；
+等待 drv_cb；调用 begin_shared_mem_sample；采样 A/B/C/D/E valid/ready、`io_outer_l2_flush_en` 和 reset；
 任一握手位在非 reset 时为 X/Z：fatal；
 从全零 idle item 开始；
 
 若 reset：清 response queue、D hold、timer、GrantAck wait、Hint、Probe、C assembly 和 cache map；发送 idle；
 否则：
   根据上一 item 确认 D/E/C/B/A fire，并按 D -> E -> C -> B -> A 顺序消费；
+  先调用 service_l2_flush：已有 A/B/C/D/E owner 继续自然收敛；DRAIN/PROBE 阶段禁止新的 A.fire；
   记录本拍开始时 dcache_rsp_q.size()，作为 scheduler 可见上界；
   调用 scheduler；若存在 current D hold，填充 D.valid 和稳定 payload；
   GrantAck wait 非空时才打开 e_ready；
   C assembly、已发送 Probe 的 C reply、Probe B hold、普通 Release C 和普通 A 依协议优先级准入；
-  `service_probe_b_hold()` 只把已建 record 中的一笔变成稳定 B payload；legacy 随机 toN Probe 仍只在
-  完全空闲时由 `try_start_probe()` 创建；最后叠加本拍 Hint。
+  `service_probe_b_hold()` 只把已建 record 中的一笔变成稳定 B payload；IDLE 且无其它 owner 时
+  `try_start_probe()` 按 batch 数量和 toB 权重建立互不重复 record；PROBE 状态由 snapshot 驱动固定 toN；
+  最后叠加本拍 Hint，并仅在 flush DONE 驱动 io_l2_flush_done=1。
 
-global stop：停止新 Probe 和新 A 准入，只排空现有协议状态；所有 queue、timer、D hold、GrantAck、Hint、
-Probe、C assembly 和 armed snapshot 收敛后发送最后一个 idle 并退出。
+global stop：停止新的随机 Probe 和新 A 准入，只排空现有协议状态；若已经观察到 L2 flush request，
+仍必须先完成该 level handshake，不能提前退出。所有 queue、timer、D hold、GrantAck、Hint、Probe、
+C assembly、armed snapshot 与 flush state 收敛后发送最后一个 idle 并退出。
 ```
 
 `response_visible_count` 在处理 A/C fire 前取得。因此本拍新建的 D response record 即使其 `eligible_cycle`
@@ -228,7 +240,8 @@ E.fire：E.bits.sink 必须已知；按 sink 查 grant_ack_wait_q；
 `sample_hint_enable()` 只在 `AcquireBlock` 真实接受时采样一次。scheduler 在最终选中该条
 GrantData 时才把 Hint 放入 `dcache_hint_q`，随后同一轮 `service_hint()` 输出。
 因此 REORDER 不会发生 Hint 属于 A、D response 却属于 B 的错配；`D.ready=0` 也不会重复发送 Hint。
-`io_l2_flush_done` 仍为 known-zero level，本专项不模拟 L2 flush 完成行为。
+`io_l2_flush_done` 由 `l2_flush_state==DONE` 唯一驱动为 1；其它状态为 known-zero。driver 只检查该
+sideband 已知，不把合法的 DONE level 误报为非法非零值。
 
 ## 6. C Channel、Probe 与 ReleaseAck
 
@@ -251,11 +264,22 @@ line 唯一找到 `WAIT_C` probe record，保存其 `c_assembly_probe_token` 并
 writeback、将 line record 的 `data_valid` 清零并报告 `uvm_error`，但仍调用 `complete_probe_record()` 完成
 toN/toB 生命周期，不能让 owner 永久残留。
 
-`submit_probe()` 是 B/C 生命周期的唯一创建入口：它从 ACTIVE line record 复制旧 alias、target cap 和 owner，
+`submit_probe()` 是 B/C 生命周期的唯一创建入口：它从 ACTIVE line record 复制旧 alias、target cap、owner
+和随机 batch_id，
 分配 token 并保证同一 line 不会有第二笔未完成 Probe。`service_probe_b_hold()` 只将一个 QUEUED record
 变为 B hold；`build_probe_b_xaction()` 在 backpressure 时持续读取同一 record 输出稳定 payload；B.fire 后该
-record 进入 WAIT_C。当前 legacy random policy 仍仅在空闲窗口创建单笔 `Probe(toN)`；multi-batch/toB/
-CBO/flush policy 不在本 flow 的当前实现范围内。
+record 进入 WAIT_C。
+
+随机 policy 仅在 `MEMBLOCK_L2_PROBE_EN=1` 且 responder 空闲时工作：先按
+`MEMBLOCK_L2_PROBE_PRE_START_WT` 选择是否开始 batch，再按 ONE/MID/LARGE 权重选择 `1`、`2..6` 或
+`7..15` 条 line，最后逐 line 按 `MEMBLOCK_L2_PROBE_TO_B_WT` 选择 `toB/toN`。被选 line 会立即建立
+record，因此同 batch 不会重复；16 条 record 满时停止继续建立，不报 fatal。该 EN 只控制随机激励，
+不能阻止 DUT 已发起的 `l2Flush` 完成功能。
+
+`service_l2_flush()` 是轻量 flush 的唯一状态 owner：DRAIN 等待已有 D/E/B/C/assembly/Probe 收敛，
+再一次性扫描 `cached_line_by_addr` 建 snapshot；PROBE 对 snapshot 中每条 line 提交 `toN`；DONE 只保持
+done level，直到 `io_outer_l2_flush_en=0` 清空 flush-local snapshot 回到 IDLE。它不调用
+`clear_runtime_state()`，不会取消正常 D/E/Probe owner，也不模拟完整 CoupledL2 set/way 扫描。
 
 ## 7. Reset、Stop 与边界
 
@@ -263,8 +287,9 @@ CBO/flush policy 不在本 flow 的当前实现范围内。
 C reservation、Probe 和 cache map。shared backing/overlay 的清空只由 testcase 的 memory lifecycle owner
 在 responder 启动前完成；reset 不应重新清空公共 memory。
 
-global stop 的退出条件包括：无 queued/current D record、无运行 timer、无 GrantAck wait、无 Hint、
-无 B hold、`probe_record_q` 为空、无 C assembly/reservation、无 armed A/C snapshot 和当前未处理 A/C valid。
+global stop 的退出条件包括：flush state 已回到 IDLE、无 queued/current D record、无运行 timer、无 GrantAck
+wait、无 Hint、无 B hold、`probe_record_q` 为空、无 C assembly/reservation、无 armed A/C snapshot 和当前
+未处理 A/C valid。
 已完成 GrantAck 的 ACTIVE line record 是历史状态，不阻止退出。
 
 本 flow 不拥有主表、LSQ admission、issue、writeback、commit/deq、redirect/replay、pass/fail 或 terminal。
@@ -283,9 +308,13 @@ Uncache TL-UL A/D responder 的独立 queue 和 delay 见
   C reply 唯一匹配；ProbeAckData 首拍锁定 token，第二拍不能被其它 C response 覆盖；
 - `cached_alias_by_line` 替换为包含 alias、valid、data 边界、lifecycle 与 deferred Acquire 的 line record；
   不同 alias Acquire 先 Probe(toN) 旧 alias，再恢复原始 A response，避免覆盖仍有效的旧 DCache 副本；
+- 旧 `MEMBLOCK_L2_PROBE_ENABLE_WT` 单百分比门替换为 `MEMBLOCK_L2_PROBE_EN`、batch start/count/toB 六个
+  参数；随机 policy 从单笔 toN 扩展为多笔互不重复 `toB/toN`，但仍复用同一 Probe record/token/B hold；
+- 新增 flush-local `IDLE/DRAIN/PROBE/DONE` 状态机：采样外部 level request，DRAIN 后固定 ACTIVE line
+  snapshot，逐条 Probe(toN)，完成后保持 `io_l2_flush_done` 到 request 撤销；
 - 保留原有 A/C/E/Probe/overlay 和 global-stop 所有权，不把 responder 状态写入主表或 status table。
 
 当前默认 delay 为 `1..10` cycle、顺序返回。D-error 随机注入已由
 `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md` 实现：它只扩展 response record 的
-合法 D payload，不改变本 flow 的调度或主框架控制行为。alias conflict 基础已实现；多 Probe/toB 的
-随机策略、CBO closure 和 L2 flush 仍由各自 plan 实现，不能在本 flow 中宣称已覆盖。
+合法 D payload，不改变本 flow 的调度或主框架控制行为。alias conflict、随机 multi-batch/toB 与轻量
+L2 flush 已实现；CBO Probe closure 仍由独立 plan 实现，不能在本 flow 中宣称已覆盖。
