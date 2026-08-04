@@ -18,13 +18,18 @@
 | GrantAck owner | Grant/GrantData 完成后等待 E.fire 的状态 | waiting_grant_ack、pending_grant_* | 只有 owner 存在时 e_ready=1 |
 | cached line table | 已完成 GrantAck、可作为 Probe 候选的 64B line 影子表 | cached_alias_by_line | key 是 line 对齐地址，value 是 alias |
 | Probe owner | 当前唯一的 B Probe 或其 C 回复生命周期 | pending_probe_b_valid、waiting_probe_c | B.fire 后等待 ProbeAck |
-| C assembly | 收集 ProbeAckData/ReleaseData 两个 32B beat 的状态 | c_assembly_* | 收满后再写主存 |
+| C assembly | 收集 ProbeAckData/ReleaseData 两个 32B beat 的状态 | c_assembly_* | 收满后再加入 DCache write batch |
 | in-flight | 尚未完成握手或生命周期的状态 | pending/armed/owner 字段 | global stop 必须等待其归零 |
+| backing memory | 只保存确定性懒初始化数据的共享稀疏内存 | `main_mem` | DUT 写不会覆盖它 |
+| write overlay | 按 byte valid 覆盖 backing 的共享写层 | `write_overlay_mem`、`write_overlay_byte_valid` | 部分写只替换对应字节 |
+| write batch | 已确认 fire、等待下一采样边界提交的写集合 | `dcache_write_batch`、`uncache_write_batch` | 提交顺序固定为 DCache 后 Uncache |
+| lifecycle owner | 每 testcase 唯一清空并配置 shared store 的入口 | `memblock_dispatch_real_smoke_vseq` | fork responder 前完成初始化 |
 
 本文件提供三层对象：
 
-1. mem_access_base_sequence：公共 sparse memory 后端。它按 1024-bit 地址片段保存 main_mem，
-   并提供 lazy line、byte mask、corrupt/denied 和物理范围检查。
+1. mem_access_base_sequence：公共 sparse memory 后端。它按 8192-bit/1024B 地址片段保存只读 backing
+   `main_mem` 和 byte-valid write overlay，并提供 lazy line、byte mask、corrupt/denied、物理范围
+   检查和跨通道写 batch 提交。
 2. dcache_mem__access_base_sequence：挂在 DCache agent 上的 V2 coherent responder。当前实现是
    单 A/C response、单 Probe、固定 sink 0 的轻量模型。
 3. sbuffer_mem_access_base_sequence：挂在 SBuffer agent 上的旧式单拍 responder。它复用公共
@@ -48,16 +53,19 @@ env/plus.sv
   -> dcache_mem__access_base_sequence
 ```
 
-中文伪代码：公共 plus 定义并读取五个 L2 权重；seq_csr_common 保存并校验快照；DCache responder 只通过 getter 读取，不直接访问 plus 原始值。
+中文伪代码：公共 plus 定义并读取 L2 权重以及 `MEMBLOCK_MAIN_MEM_RANGES_EN`；`seq_csr_common`
+保存 runtime 快照；两个 responder 只通过 getter 读取，不直接访问 plus 原始值。
 
-DCache sequence 启动时把 get_paddr_base()/get_paddr_range() 注册到自身 main_mem_ranges。这只
-约束 DCache 看到的物理地址，不限制主表的虚拟地址窗口。
+real-smoke virtual sequence 在 fork responder 前通过 `initialize_shared_memory_state()` 清空唯一
+shared store；当 `main_mem_ranges_en=1` 才注册 `get_paddr_base()/get_paddr_range()`。legacy topology
+只有发现 lifecycle 尚未初始化时才兜底初始化，两个 responder 不会各自清空 static store。这只约束
+DCache 和 Uncache memory-facing 物理访问，不限制主表虚拟地址窗口。
 
 ## 3. DCache responder 调用链
 
 ### 3.1 body() 主循环
 
-源码位置：mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv:1305-1585。
+源码位置：mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv:1478-1800。
 
 抽象功能描述：body 是 DCache responder 的唯一调度入口，在每个 dcache_vif.drv_cb 边界采样
 上一 item 的握手结果，推进 owner 状态，再提交下一拍 response item。它不依赖 DCache monitor
@@ -68,6 +76,7 @@ fire 驱动的 service loop，同时处理 A/B/C/D/E、Hint、GrantAck、Probe �
 
 ```systemverilog
 @(dcache_vif.drv_cb);
+begin_shared_mem_sample($time);
 sampled_a_valid_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_a_valid;
 sampled_c_valid_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_c_valid;
 sampled_e_valid_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_e_valid;
@@ -87,9 +96,9 @@ e_fire = 1'b0;
 build_dcache_idle_xaction(cycle_xact);
 ```
 
-中文伪代码：等待 clocking sample 边界并保留 DUT 对端四态 raw 值；非 reset 时任一握手位为 X/Z
-直接 fatal；随后转换成二态 sampled 值；清空本轮 fire 标志并构造全零基线 item；后续只用上一 item
-output 与当前采样值确认真实 fire。
+中文伪代码：等待 clocking sample 边界，先提交上一拍的共享写 batch，再保留 DUT 对端四态 raw 值；
+非 reset 时任一握手位为 X/Z 直接 fatal；随后转换成二态 sampled 值；清空本轮 fire 标志并构造全零
+基线 item；后续只用上一 item output 与当前采样值确认真实 fire。
 
 ```systemverilog
 if (last_cycle_valid && (last_cycle_xact != null)) begin
@@ -111,21 +120,25 @@ A arm 分支要求 !a_fire。这样首个 C data beat 建立 assembly 后不会�
 
 ### 3.2 reset、range 和 safe idle
 
-源码位置：mem_base_sequence.sv:1339-1350、533-565。
+源码位置：mem_base_sequence.sv:1483-1498、660-692。
 
-抽象功能描述：初始化公共参数、物理 memory range 和 responder 状态；每拍用 known-zero item
-作为默认输出，GrantAck owner 之外不开放 E。
+抽象功能描述：初始化公共参数和 responder 私有状态；shared memory store 的清空与 range 配置由
+lifecycle owner 完成，responder 只在 legacy topology 未初始化时兜底调用同一初始化 helper。每拍用
+known-zero item 作为默认输出，GrantAck owner 之外不开放 E。
 
 ```systemverilog
 seq_csr_common::init();
-clear_main_mem_ranges();
-init_main_mem_range(mem_addr_t'(seq_csr_common::get_paddr_base()),
-                    seq_csr_common::get_paddr_range());
+if (!is_shared_memory_lifecycle_initialized())
+    initialize_shared_memory_state(seq_csr_common::get_main_mem_ranges_en(),
+                                   mem_addr_t'(seq_csr_common::get_paddr_base()),
+                                   seq_csr_common::get_paddr_range());
 check_l2_model_cfg();
 clear_runtime_state(1'b1);
 ```
 
-中文伪代码：初始化 runtime snapshot；清除旧 range；注册共享 PADDR 窗口；校验 L2 权重；清除 pending、owner、assembly、Hint 和 cached line map。
+中文伪代码：初始化 runtime snapshot；若 vseq 尚未初始化 shared store 才作一次兜底清空/配置；校验
+L2 权重；清除 responder 私有的 pending、owner、assembly、Hint 和 cached line map。reset 只清私有
+协议状态，不清 backing 或 overlay。
 
 ```systemverilog
 rsp_xact.auto_inner_dcache_client_out_a_ready = 1'b0;
@@ -148,16 +161,19 @@ reset 或 backend reset 未完成时，body 清除所有 in-flight state 和 cac
 
 ### 4.1 capture 和稳定性检查
 
-源码位置：mem_base_sequence.sv:567-649。
+源码位置：mem_base_sequence.sv:694-776。
 
 抽象功能描述：从 VIF 复制 A/C channel 完整字段，供下一边界的 fire 和稳定性检查使用；不建立
-response owner。
+response owner。C payload 复制到二态 xaction 前还负责拒绝会被静默折叠的四态值。
 
 中文伪代码：看到 valid 时复制 payload 并 arm ready；下一 drv_cb 边界确认 fire 后比较实际 payload；valid 消失则清 arm，不创建 pending。
+对 C channel，所有 opcode 的 header 必须已知；仅 `ProbeAckData`/`ReleaseData` 要求 data/corrupt 已知，
+无数据 C opcode 的 data/corrupt 允许为 don't-care。C.fire 的 `start_c_assembly()`/`consume_c_beat()`
+只消费当前 drv_cb 已检查的 fired snapshot，armed snapshot 只做 valid 等待 ready 时的稳定性比较。
 
 ### 4.2 accept_dcache_a_request()
 
-源码位置：mem_base_sequence.sv:858-968。
+源码位置：mem_base_sequence.sv:992-1100。
 
 抽象功能描述：只消费真实 A.fire 的快照，完成 size、line alignment、source、param、PADDR range
 和 opcode 检查，并建立唯一 pending D。
@@ -187,7 +203,7 @@ CBOClean/CBOFlush/CBOInval:
 
 ### 4.3 build_pending_d_xaction() 和 process_d_fire()
 
-源码位置：mem_base_sequence.sv:970-1050。
+源码位置：mem_base_sequence.sv:1102-1182。
 
 抽象功能描述：build_pending_d_xaction 把 pending 状态转换为当前拍 D item，process_d_fire 只消费真实 D.fire 并推进 beat/owner。
 
@@ -195,7 +211,7 @@ CBOClean/CBOFlush/CBOInval:
 
 ### 4.4 process_e_fire()
 
-源码位置：mem_base_sequence.sv:1052-1067。
+源码位置：mem_base_sequence.sv:1184-1199。
 
 抽象功能描述：消费 GrantAck E.fire，确认 E 属于当前 owner，并在生命周期真正完成后插入 cached line table。
 
@@ -207,7 +223,7 @@ E.fire 且处理 D 后仍无 waiting_grant_ack，则 fatal；合法 E.fire 再�
 
 ### 5.1 sample_l2_response_delay()
 
-源码位置：mem_base_sequence.sv:744-785。
+源码位置：mem_base_sequence.sv:878-920。
 
 抽象功能描述：按三个 runtime 权重选择类别，再在固定区间内选择具体 service cycle；一次 transaction
 只采样一次。
@@ -217,7 +233,7 @@ large 在 16..50 内抽 exact delay；返回值固定到 pending due cycle。
 
 ### 5.2 sample_hint_enable() 和 service_hint()
 
-源码位置：mem_base_sequence.sv:787-807、1299-1309。
+源码位置：mem_base_sequence.sv:921-964、1438-1448。
 
 抽象功能描述：只对 AcquireBlock 的 GrantData 选择一次 Hint，并在 due cycle 输出单拍 valid。
 
@@ -227,7 +243,7 @@ io_l2_flush_done 没有功能模型，始终为 0。
 
 ### 5.3 record/remove/select cached line
 
-源码位置：mem_base_sequence.sv:727-742、831-856。
+源码位置：mem_base_sequence.sv:861-877、965-991。
 
 抽象功能描述：维护 line 对齐地址到 alias 的轻量候选表，不复制主存 data，也不表达完整 coherence
 状态。
@@ -239,7 +255,7 @@ io_l2_flush_done 没有功能模型，始终为 0。
 
 ### 6.1 try_start_probe()
 
-源码位置：mem_base_sequence.sv:1284-1297。
+源码位置：mem_base_sequence.sv:1416-1436。
 
 抽象功能描述：只在未 global stop、没有 pending D、GrantAck、C assembly、B Probe、等待 C 或
 A/C armed 的完全空闲窗口启动固定 Probe(toN)。helper 自身重复执行 owner gate，不依赖调用点位置。
@@ -249,7 +265,7 @@ waiting_probe_c。
 
 ### 6.2 start_c_assembly() 和 consume_c_beat()
 
-源码位置：mem_base_sequence.sv:1126-1282。
+源码位置：mem_base_sequence.sv:1258-1414。
 
 抽象功能描述：区分 ProbeAck/ProbeAckData 与 Release/ReleaseData，检查 header 稳定并收集多拍 data。
 
@@ -259,19 +275,19 @@ param 在多拍中改变时 fatal。
 
 ### 6.3 complete_probe_c_assembly() 和 complete_release_c_assembly()
 
-源码位置：mem_base_sequence.sv:1069-1124。
+源码位置：mem_base_sequence.sv:1201-1256。
 
-抽象功能描述：完整两拍 data 到达后执行主存写回、map 删除和 owner 清理；Release completion 还
+抽象功能描述：完整两拍 data 到达后把 data 排入 DCache write batch、删除 map 和清理 owner；Release completion 还
 建立 ReleaseAck pending D。
 
-中文伪代码：无 corrupt 时两次全 mask store 更新 main_mem；有 corrupt 时跳过写回但仍结束协议；
-Probe 清 waiting_probe_c；Release 清 assembly 后按 delay 建 ReleaseAck。
+中文伪代码：无 corrupt 时两次全 mask store 只加入 overlay batch；有 corrupt 时跳过写回但仍结束协议；
+下一采样边界统一提交 batch，Probe 清 waiting_probe_c；Release 清 assembly 后按 delay 建 ReleaseAck。
 
 ## 7. global stop 与 DCache driver
 
 ### 7.1 DCache body 退出
 
-源码位置：mem_base_sequence.sv:1427-1469。
+源码位置：mem_base_sequence.sv:1478-1800。
 
 抽象功能描述：global stop 只请求 responder 排空，不允许立即退出。
 
@@ -307,25 +323,36 @@ flush、未知 Hint valid、valid=0 时非零 payload、valid=1 时未知 payloa
 
 ### 8.1 sbuffer_mem_access_base_sequence::body()
 
-源码位置：mem_base_sequence.sv:1724-1768。
+源码位置：mem_base_sequence.sv:2000-2119。
 
-抽象功能描述：SBuffer 仍使用单拍、阻塞式 A-to-D 模型；global stop 后，
-仅当没有尚未接受的 A request 才发送 safe idle 并退出。
+抽象功能描述：历史名为 SBuffer 的 sequence 仍使用单拍 Uncache A-to-D 模型；每个 `drv_cb` 先推进
+shared memory sample。global stop 后它只 drain 已由上一拍 `A.ready` 接受的 A request；新出现但尚未
+形成 `A.fire` 的 `A.valid` 没有 lifecycle owner，立即 fail-fast，不能无限 backpressure。
 
-中文伪代码：检查 stop/reset；发送 idle；看到 A.valid 后采样并发送 A.ready；调用
-sbuffer_mem_access_xaction 构造单拍 D；持续发送到 D.ready；完成后回到循环。
+中文伪代码：检查 stop/reset；非 reset 时 A.valid 或 D.ready 为 X/Z 直接 fatal；每次将 A payload
+复制到二态 xaction 前，还检查 opcode/param/size/source/address/mask/data/corrupt 均不含 X/Z。发送 idle，
+看到 A.valid 后从 `drv_cb` 保存 armed snapshot 并发送 A.ready；仅在下一边界从同一 `drv_cb` 复制 fired
+snapshot、完成稳定性检查后调用 `sbuffer_mem_access_xaction` 构造单拍 D。若 armed 后 A.valid 撤销，清空
+armed snapshot 而不建立 response。global stop 已请求时，先允许已 fire 的 A 完成 response/写 batch；若
+仍观察到未 fire A.valid 则立即 fatal，只有 pending D、armed A和当前 A.valid 都清空时才能发送 safe idle。
+store 此时进入 Uncache write batch，load 此时读取上一拍 committed merged view；持续发送到 D.ready；
+完成后回到循环。
 
 本专项没有把 DCache 的 GrantAck、Probe、Hint 或 lockstep 状态复制到 SBuffer。
+`last_cycle_xact` 的 fire 含义依赖 `sbuffer_agent_agent_driver::main_phase()` 与 DCache 同样在获得 item 后
+立即写入 clocking output；driver 不得再在 `send_pkt()` 前额外等待 `drv_cb`，否则 sequence 会提前把未对
+DUT 生效的 A.ready/D.valid 当作 fire。
 
 ### 8.2 sbuffer_mem_access_xaction() 和 memory task
 
-源码位置：mem_base_sequence.sv:1649-1722。
+源码位置：mem_base_sequence.sv:1898-1966。
 
-抽象功能描述：按 8B 对齐地址和 8-bit mask 访问公共 main_mem，store 返回 ack，load 返回 64-bit
-data，不修改 DCache cached line table。
+抽象功能描述：按 8B 对齐地址和 8-bit mask 访问共享 memory store，store 返回 ack，load 返回已固化的
+64-bit merged data，不修改 DCache cached line table。
 
-中文伪代码：判断 store；映射到 8B beat；调用 main_mem_access_task；构造 D valid、opcode、
-source、size、denied/corrupt/data；等待 D.ready。
+中文伪代码：判断 store；映射到 8B beat；调用 `shared_mem_access_task`；真实 A.fire 的 store 只排入
+Uncache batch，load 逐 byte 先读 overlay、再读 backing；构造 D valid、opcode、source、size、
+denied/corrupt/data；等待 D.ready。
 
 ## 9. 与其它 flow 的边界
 
@@ -357,4 +384,9 @@ DCache/SBuffer 内部 response 生命周期。修改 service loop、driver 时�
   E sink 直接 fatal；generic E.ready 恒为 0；
 - C assembly fire 后独占本拍，Probe helper 自带 owner/stop gate；
 - global stop 改为等待 DCache 自身 in-flight 收敛并发布 `dcache_responder_done`；
-- SBuffer 保留独立单拍响应主体，不受 DCache coherent 状态机影响。
+- SBuffer 保留独立单拍响应主体，不受 DCache coherent 状态机影响；stop 后只 drain 已 fire A，
+  新、未 fire A.valid 直接 fatal，避免 responder 和 DUT 因持续 backpressure 永久等待。
+- `MEMBLOCK_MAIN_MEM_RANGES_EN=1` 为默认严格范围模式，DCache/Uncache 都检查 `PADDR_BASE/RANGE`；
+  为 0 时两者都允许 48-bit sparse backing 懒分配。
+- memory-facing 写不再覆盖 `main_mem`。DCache 完整 C data 和 Uncache A.fire 按来源进入 batch，下一
+  sample 固定先提交 DCache、后提交 Uncache，同拍 read 只看上一轮 committed view。

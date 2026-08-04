@@ -8,6 +8,11 @@
 | Review 范围 | DCache coherent responder、L2 sideband、参数链、driver 时序和相关文档 |
 | 当前状态 | coding、文档同步、验证和最终独立 reviewer 已完成；review 结论 `FINAL PASS` |
 
+> 历史实现说明（2026-08-04）：本文记录 2026-07-23 的 DCache responder 实现。后续
+> `AI_DOC/plan/test_framework/plan/do/mem_ut_dcache_main_mem_range_switch_plan_20260730.md` 已将 memory state 改为 DCache/Uncache 共用
+> static backing 与 overlay，并改变 C data 的写入可见性；本文中“写回主存”只代表当时实现，不应作为
+> 当前行为依据。
+
 ## 1. 术语与抽象功能说明
 
 | 英文术语 | 当前文档中的中文含义 | 对应代码对象或落点 | 示例 |

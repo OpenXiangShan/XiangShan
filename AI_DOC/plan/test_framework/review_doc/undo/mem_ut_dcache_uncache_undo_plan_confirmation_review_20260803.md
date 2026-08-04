@@ -18,7 +18,7 @@
 
 审查文件：
 
-- `AI_DOC/plan/test_framework/plan/undo/mem_ut_dcache_main_mem_range_switch_plan_20260730.md`
+- `AI_DOC/plan/test_framework/plan/do/mem_ut_dcache_main_mem_range_switch_plan_20260730.md`
 - `AI_DOC/plan/test_framework/plan/undo/mem_ut_dcache_multi_probe_alias_state_plan_20260803.md`
 - `AI_DOC/plan/test_framework/plan/undo/mem_ut_dcache_multi_probe_tob_control_plan_20260730.md`
 - `AI_DOC/plan/test_framework/plan/undo/mem_ut_dcache_uncache_response_delay_control_plan_20260730.md`
@@ -98,7 +98,7 @@ response record 在最后一个 D.fire 释放，sink 要到 E.fire 才释放。
 
 ### 3.4 `ReleaseData.corrupt` 的数据面规则未定义
 
-涉及：`mem_ut_dcache_main_mem_range_switch_plan_20260730.md` 的覆盖层写入边界。
+涉及：`AI_DOC/plan/test_framework/plan/do/mem_ut_dcache_main_mem_range_switch_plan_20260730.md` 的覆盖层写入边界。
 
 问题：plan 已明确 `ProbeAckData.corrupt=1` 不写 overlay，但没有同样规定 `ReleaseData.corrupt=1`。
 如果损坏的 ReleaseData 仍写入 shared overlay，后续 merged read 会观察到不可靠数据。

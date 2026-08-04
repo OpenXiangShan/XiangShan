@@ -20,22 +20,60 @@ class mem_access_base_sequence extends uvm_sequence;
         mem_addr_t limit;
     } mem_range_t;
 
-    mem_line_data_t main_mem[mem_line_addr_t];
-    mem_line_data_t prog_mem[mem_line_addr_t];
-    mem_line_mask_t prog_mem_byte_valid[mem_line_addr_t];
-    mem_range_t     main_mem_ranges[$];
-    bit             main_mem_range_configured;
+    typedef enum bit [1:0] {
+        // 无写入来源，仅供 load 路径调用 shared memory helper。
+        SHARED_MEM_WRITE_NONE    = 2'd0,
+        // DCache C-channel 的完整 ReleaseData/ProbeAckData 写回。
+        SHARED_MEM_WRITE_DCACHE  = 2'd1,
+        // Uncache A-channel 的真实 store fire。
+        SHARED_MEM_WRITE_UNCACHE = 2'd2
+    } shared_mem_write_owner_e;
+
+    typedef struct {
+        mem_addr_t                addr;
+        mem_line_mask_t           byte_mask;
+        mem_line_data_t           store_data;
+    } shared_mem_write_event_t;
+
+    // 所有 memory-facing responder 共用 backing/overlay；DUT 写只进入 overlay。
+    static mem_line_data_t          main_mem[mem_line_addr_t];
+    static mem_line_data_t          write_overlay_mem[mem_line_addr_t];
+    static mem_line_mask_t          write_overlay_byte_valid[mem_line_addr_t];
+    static mem_range_t              main_mem_ranges[$];
+    static bit                      main_mem_range_configured = 1'b0;
+    // 中文注释：同一物理采样时刻的 memory-facing 写先进入两个来源队列。
+    // 设置：DCache C data 或 Uncache store 完成真实握手后入队；清空：下一采样时刻首次访问
+    // shared store 时按 DCache、Uncache 顺序提交，或 testcase 生命周期初始化时删除。
+    // 作用：同拍读只能看到上一轮 committed overlay，且同 byte 冲突固定由 Uncache 覆盖 DCache。
+    static shared_mem_write_event_t dcache_write_batch[$];
+    static shared_mem_write_event_t uncache_write_batch[$];
+    static bit                      shared_mem_sample_valid = 1'b0;
+    static longint unsigned         shared_mem_sample_time = 0;
+    // 中文注释：唯一 lifecycle owner 已完成本 testcase shared memory 清空和 range 配置。
+    // 设置：real-smoke virtual sequence 在 fork responder 前完成初始化后置位；清零：下一次
+    // initialize_shared_memory_state() 先清空旧状态。legacy default topology 仅在该位为 0 时兜底初始化。
+    static bit                      shared_mem_lifecycle_initialized = 1'b0;
 
     `uvm_object_utils(mem_access_base_sequence)
 
     extern function new(string name = "mem_access_base_sequence");
-    extern virtual function void init_main_mem_range(input mem_addr_t base, input longint unsigned capacity);
-    extern virtual function void clear_main_mem_ranges();
-    extern virtual function bit is_main_mem_access_in_range(input mem_addr_t addr, input mem_line_mask_t byte_mask);
+    extern static function void init_main_mem_range(input mem_addr_t base, input longint unsigned capacity);
+    extern static function void clear_main_mem_ranges();
+    extern static function bit is_main_mem_access_in_range(input mem_addr_t addr, input mem_line_mask_t byte_mask);
     extern virtual function void paddr_to_error(input mem_addr_t addr, output bit corrupt, output bit denied);
-    extern virtual function mem_line_data_t build_lazy_line(input mem_line_addr_t line_addr);
-    extern virtual function void ensure_main_line(input mem_line_addr_t line_addr);
-    extern virtual function void ensure_prog_line(input mem_line_addr_t line_addr);
+    extern static function mem_line_data_t build_lazy_line(input mem_line_addr_t line_addr);
+    extern static function void ensure_main_line(input mem_line_addr_t line_addr);
+    extern static function void ensure_write_overlay_line(input mem_line_addr_t line_addr);
+    extern static function void clear_shared_memory_state();
+    extern static function void initialize_shared_memory_state(
+        input bit              ranges_en,
+        input mem_addr_t       base,
+        input longint unsigned capacity
+    );
+    extern static function bit is_shared_memory_lifecycle_initialized();
+    extern static function void apply_shared_mem_write(input shared_mem_write_event_t write_event);
+    extern static function void commit_shared_mem_write_batch();
+    extern static function void begin_shared_mem_sample(input longint unsigned sample_time);
     extern virtual task main_mem_access_task(
         input  mem_addr_t       addr,
         input  bit              is_store,
@@ -45,21 +83,21 @@ class mem_access_base_sequence extends uvm_sequence;
         output bit              denied,
         output mem_line_data_t  load_data
     );
-    extern virtual task prog_mem_access_task(
+    extern virtual task shared_mem_access_task(
         input  mem_addr_t       addr,
         input  bit              is_store,
         input  mem_line_mask_t  byte_mask,
         input  mem_line_data_t  store_data,
         output bit              corrupt,
         output bit              denied,
-        output mem_line_data_t  load_data
+        output mem_line_data_t  load_data,
+        input  shared_mem_write_owner_e write_owner
     );
 
 endclass:mem_access_base_sequence
 
 function mem_access_base_sequence::new(string name = "mem_access_base_sequence");
     super.new(name);
-    main_mem_range_configured = 1'b0;
 endfunction:new
 
 function void mem_access_base_sequence::init_main_mem_range(input mem_addr_t base, input longint unsigned capacity);
@@ -142,12 +180,85 @@ function void mem_access_base_sequence::ensure_main_line(input mem_line_addr_t l
     end
 endfunction:ensure_main_line
 
-function void mem_access_base_sequence::ensure_prog_line(input mem_line_addr_t line_addr);
-    if (!prog_mem.exists(line_addr)) begin
-        prog_mem[line_addr]            = '0;
-        prog_mem_byte_valid[line_addr] = '0;
+function void mem_access_base_sequence::ensure_write_overlay_line(input mem_line_addr_t line_addr);
+    if (!write_overlay_mem.exists(line_addr)) begin
+        write_overlay_mem[line_addr]            = '0;
+        write_overlay_byte_valid[line_addr]     = '0;
     end
-endfunction:ensure_prog_line
+endfunction:ensure_write_overlay_line
+
+function void mem_access_base_sequence::clear_shared_memory_state();
+    main_mem.delete();
+    write_overlay_mem.delete();
+    write_overlay_byte_valid.delete();
+    dcache_write_batch.delete();
+    uncache_write_batch.delete();
+    shared_mem_sample_valid          = 1'b0;
+    shared_mem_sample_time           = 0;
+    shared_mem_lifecycle_initialized = 1'b0;
+    clear_main_mem_ranges();
+endfunction:clear_shared_memory_state
+
+function void mem_access_base_sequence::initialize_shared_memory_state(
+    input bit              ranges_en,
+    input mem_addr_t       base,
+    input longint unsigned capacity
+);
+    clear_shared_memory_state();
+    if (ranges_en) begin
+        init_main_mem_range(base, capacity);
+    end
+    shared_mem_lifecycle_initialized = 1'b1;
+endfunction:initialize_shared_memory_state
+
+function bit mem_access_base_sequence::is_shared_memory_lifecycle_initialized();
+    return shared_mem_lifecycle_initialized;
+endfunction:is_shared_memory_lifecycle_initialized
+
+function void mem_access_base_sequence::apply_shared_mem_write(input shared_mem_write_event_t write_event);
+    mem_addr_t      byte_addr;
+    mem_line_addr_t line_addr;
+    bit [9:0]       byte_offset;
+
+    foreach (write_event.byte_mask[i]) begin
+        if (write_event.byte_mask[i]) begin
+            byte_addr   = write_event.addr + mem_addr_t'(i);
+            line_addr   = byte_addr[47:10];
+            byte_offset = byte_addr[9:0];
+            ensure_write_overlay_line(line_addr);
+            write_overlay_mem[line_addr][(byte_offset * 8) +: 8] = write_event.store_data[(i * 8) +: 8];
+            write_overlay_byte_valid[line_addr][byte_offset] = 1'b1;
+        end
+    end
+endfunction:apply_shared_mem_write
+
+function void mem_access_base_sequence::commit_shared_mem_write_batch();
+    // 中文注释：先提交 DCache C 写回，再提交 Uncache store；同拍同 byte 冲突固定以后者为准。
+    foreach (dcache_write_batch[i]) begin
+        apply_shared_mem_write(dcache_write_batch[i]);
+    end
+    dcache_write_batch.delete();
+    foreach (uncache_write_batch[i]) begin
+        apply_shared_mem_write(uncache_write_batch[i]);
+    end
+    uncache_write_batch.delete();
+endfunction:commit_shared_mem_write_batch
+
+function void mem_access_base_sequence::begin_shared_mem_sample(input longint unsigned sample_time);
+    if (!shared_mem_sample_valid) begin
+        shared_mem_sample_valid = 1'b1;
+        shared_mem_sample_time  = sample_time;
+        return;
+    end
+    if (sample_time < shared_mem_sample_time) begin
+        $fatal(1, "shared memory sample time moved backwards: current=%0d previous=%0d",
+               sample_time, shared_mem_sample_time);
+    end
+    if (sample_time != shared_mem_sample_time) begin
+        commit_shared_mem_write_batch();
+        shared_mem_sample_time = sample_time;
+    end
+endfunction:begin_shared_mem_sample
 
 task mem_access_base_sequence::main_mem_access_task(
     input  mem_addr_t       addr,
@@ -167,6 +278,12 @@ task mem_access_base_sequence::main_mem_access_task(
     corrupt   = 1'b0;
     denied    = 1'b0;
     load_data = '0;
+
+    // backing memory 只保存确定性懒初始化数据；DUT memory-facing store 必须经 overlay batch。
+    if (is_store) begin
+        `uvm_fatal(get_type_name(), "main_mem_access_task only provides backing reads; use shared_mem_access_task for DUT writes")
+        return;
+    end
 
     foreach (byte_mask[i]) begin
         if (byte_mask[i]) begin
@@ -189,12 +306,7 @@ task mem_access_base_sequence::main_mem_access_task(
                 byte_offset  = byte_addr[9:0];
                 ensure_main_line(line_addr);
 
-                if (is_store) begin
-                    main_mem[line_addr][(byte_offset * 8) +: 8] = store_data[(i * 8) +: 8];
-                end
-                else begin
-                    load_data[(i * 8) +: 8] = main_mem[line_addr][(byte_offset * 8) +: 8];
-                end
+                load_data[(i * 8) +: 8] = main_mem[line_addr][(byte_offset * 8) +: 8];
             end
         end
     end
@@ -205,14 +317,15 @@ task mem_access_base_sequence::main_mem_access_task(
 
 endtask:main_mem_access_task
 
-task mem_access_base_sequence::prog_mem_access_task(
+task mem_access_base_sequence::shared_mem_access_task(
     input  mem_addr_t       addr,
     input  bit              is_store,
     input  mem_line_mask_t  byte_mask,
     input  mem_line_data_t  store_data,
     output bit              corrupt,
     output bit              denied,
-    output mem_line_data_t  load_data
+    output mem_line_data_t  load_data,
+    input  shared_mem_write_owner_e write_owner
 );
     mem_addr_t      byte_addr;
     mem_line_addr_t line_addr;
@@ -220,11 +333,15 @@ task mem_access_base_sequence::prog_mem_access_task(
     mem_line_data_t main_load_data;
     bit             main_corrupt;
     bit             main_denied;
+    shared_mem_write_event_t write_event;
 
     corrupt   = 1'b0;
     denied    = 1'b0;
     load_data = '0;
 
+    // 中文注释：同一物理采样时刻的所有访问先固定在上一轮 committed view；下一时刻首次访问时
+    // 才统一提交上一拍 DCache/Uncache 写队列，避免两个 responder 的执行 delta 决定读写可见性。
+    begin_shared_mem_sample($time);
     main_mem_access_task(addr, 1'b0, byte_mask, '0, main_corrupt, main_denied, main_load_data);
     corrupt = main_corrupt;
     denied  = main_denied;
@@ -240,19 +357,31 @@ task mem_access_base_sequence::prog_mem_access_task(
             byte_offset = byte_addr[9:0];
 
             if (is_store) begin
-                ensure_prog_line(line_addr);
-                prog_mem[line_addr][(byte_offset * 8) +: 8] = store_data[(i * 8) +: 8];
-                prog_mem_byte_valid[line_addr][byte_offset] = 1'b1;
+                if (write_owner == SHARED_MEM_WRITE_NONE) begin
+                    `uvm_fatal(get_type_name(), "shared memory store requires a DCache or Uncache write owner")
+                end
             end
-            else if (prog_mem_byte_valid.exists(line_addr) && prog_mem_byte_valid[line_addr][byte_offset]) begin
-                load_data[(i * 8) +: 8] = prog_mem[line_addr][(byte_offset * 8) +: 8];
+            else if (write_overlay_byte_valid.exists(line_addr) && write_overlay_byte_valid[line_addr][byte_offset]) begin
+                load_data[(i * 8) +: 8] = write_overlay_mem[line_addr][(byte_offset * 8) +: 8];
             end
             else begin
                 load_data[(i * 8) +: 8] = main_load_data[(i * 8) +: 8];
             end
         end
     end
-endtask:prog_mem_access_task
+    if (is_store) begin
+        write_event.addr        = addr;
+        write_event.byte_mask   = byte_mask;
+        write_event.store_data  = store_data;
+        case (write_owner)
+            SHARED_MEM_WRITE_DCACHE:  dcache_write_batch.push_back(write_event);
+            SHARED_MEM_WRITE_UNCACHE: uncache_write_batch.push_back(write_event);
+            default: begin
+                `uvm_fatal(get_type_name(), $sformatf("unsupported shared memory write owner=%0d", write_owner))
+            end
+        endcase
+    end
+endtask:shared_mem_access_task
 
 class dcache_mem__access_base_sequence extends mem_access_base_sequence;
 
@@ -395,6 +524,7 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     extern virtual function void clear_runtime_state(bit clear_cache_map = 1'b1);
     extern virtual function void build_dcache_idle_xaction(output dcache_agent_agent_xaction rsp_xact);
     extern virtual function void capture_dcache_a_xaction(output dcache_agent_agent_xaction req_xact);
+    extern virtual function void check_dcache_c_payload_known();
     extern virtual function void capture_dcache_c_xaction(output dcache_agent_agent_xaction req_xact);
     extern virtual function void check_a_payload_stable(
         input dcache_agent_agent_xaction expected_xact,
@@ -579,7 +709,36 @@ function void dcache_mem__access_base_sequence::capture_dcache_a_xaction(output 
     req_xact.auto_inner_dcache_client_out_a_bits_corrupt        = dcache_vif.drv_cb.auto_inner_dcache_client_out_a_bits_corrupt;
 endfunction:capture_dcache_a_xaction
 
+function void dcache_mem__access_base_sequence::check_dcache_c_payload_known();
+    logic [2:0] c_opcode_raw;
+
+    // 中文注释：C payload 会复制到二态 xaction；先只检查当前 responder 真实消费的 header，
+    // data/corrupt 仅对有数据的 C opcode 检查，避免无数据 ProbeAck/Release 的 don't-care data 误报。
+    c_opcode_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_c_bits_opcode;
+    if ($isunknown({c_opcode_raw,
+                    dcache_vif.drv_cb.auto_inner_dcache_client_out_c_bits_param,
+                    dcache_vif.drv_cb.auto_inner_dcache_client_out_c_bits_size,
+                    dcache_vif.drv_cb.auto_inner_dcache_client_out_c_bits_source,
+                    dcache_vif.drv_cb.auto_inner_dcache_client_out_c_bits_address})) begin
+        `uvm_fatal(get_type_name(), "DCache C header sampled as X/Z outside reset")
+    end
+
+    case (c_opcode_raw)
+        TL_C_OPCODE_PROBE_ACKDATA,
+        TL_C_OPCODE_RELEASEDATA: begin
+            if ($isunknown({dcache_vif.drv_cb.auto_inner_dcache_client_out_c_bits_data,
+                            dcache_vif.drv_cb.auto_inner_dcache_client_out_c_bits_corrupt})) begin
+                `uvm_fatal(get_type_name(), "DCache C data/corrupt sampled as X/Z outside reset")
+            end
+        end
+        default: begin
+            // 无数据 C opcode 的 data/corrupt 不参与当前 responder 语义；后续 opcode 合法性由现有分支检查。
+        end
+    endcase
+endfunction:check_dcache_c_payload_known
+
 function void dcache_mem__access_base_sequence::capture_dcache_c_xaction(output dcache_agent_agent_xaction req_xact);
+    check_dcache_c_payload_known();
     req_xact = dcache_agent_agent_xaction::type_id::create("dcache_c_req_xact");
     req_xact.auto_inner_dcache_client_out_c_valid               = dcache_vif.drv_cb.auto_inner_dcache_client_out_c_valid;
     req_xact.auto_inner_dcache_client_out_c_ready               = 1'b0;
@@ -679,7 +838,14 @@ task dcache_mem__access_base_sequence::dcache_mem_access_task(
     line_mask[31:0]        = byte_mask;
     line_store_data[255:0] = store_data;
 
-    main_mem_access_task(beat_addr, is_store, line_mask, line_store_data, corrupt, denied, line_load_data);
+    shared_mem_access_task(beat_addr,
+                           is_store,
+                           line_mask,
+                           line_store_data,
+                           corrupt,
+                           denied,
+                           line_load_data,
+                           is_store ? SHARED_MEM_WRITE_DCACHE : SHARED_MEM_WRITE_NONE);
     load_data = line_load_data[255:0];
 endtask:dcache_mem_access_task
 
@@ -1345,12 +1511,13 @@ task dcache_mem__access_base_sequence::body();
     memblock_sync_pkg::dcache_responder_done = 1'b0;
 
     seq_csr_common::init();
-    // 中文注释：DCache A/C 地址是物理地址；把共享 PADDR 窗口绑定到本 sequence
-    // 的主存 range，确保完整 64B line 的边界检查真正生效。该 range 只约束
-    // DCache responder 的主存访问，不改变主表的虚拟地址生成策略。
-    clear_main_mem_ranges();
-    init_main_mem_range(mem_addr_t'(seq_csr_common::get_paddr_base()),
-                        seq_csr_common::get_paddr_range());
+    // 中文注释：real-smoke 由 virtual sequence 在 fork responder 前初始化 shared store。
+    // legacy default topology 没有该入口时才在 DCache 首次启动兜底，避免两个 responder 分别清空同一份状态。
+    if (!is_shared_memory_lifecycle_initialized()) begin
+        initialize_shared_memory_state(seq_csr_common::get_main_mem_ranges_en(),
+                                       mem_addr_t'(seq_csr_common::get_paddr_base()),
+                                       seq_csr_common::get_paddr_range());
+    end
     check_l2_model_cfg();
     service_cycle    = 0;
     last_drive_cycle = 0;
@@ -1359,8 +1526,10 @@ task dcache_mem__access_base_sequence::body();
 
     forever begin
         // 中文注释：上一轮 item 已在前一个 drv_cb 边界更新到 clocking output；
-        // 当前边界先采样它的真实握手，再提交下一周期 item。
+        // 当前边界先推进 shared-store 采样代次，使上一拍已确认的写即使后续没有新 memory
+        // access 也会稳定提交；随后再采样真实握手并提交下一周期 item。
         @(dcache_vif.drv_cb);
+        begin_shared_mem_sample($time);
         sampled_a_valid_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_a_valid;
         sampled_b_ready_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_b_ready;
         sampled_c_valid_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_c_valid;
@@ -1421,10 +1590,12 @@ task dcache_mem__access_base_sequence::body();
                 end
                 capture_dcache_c_xaction(fired_c_req_xact);
                 check_c_payload_stable(armed_c_req_xact, fired_c_req_xact);
+                // 中文注释：C.fire 的状态推进必须消费当前 sample 已完成四态检查的 fired snapshot。
+                // armed snapshot 只用于 valid 等待 ready 期间的稳定性比较，不能作为最终 data/corrupt 的写回来源。
                 if (c_assembly_owner == DCACHE_C_OWNER_NONE) begin
-                    start_c_assembly(armed_c_req_xact, last_drive_cycle);
+                    start_c_assembly(fired_c_req_xact, last_drive_cycle);
                 end else begin
-                    consume_c_beat(armed_c_req_xact, last_drive_cycle);
+                    consume_c_beat(fired_c_req_xact, last_drive_cycle);
                 end
                 c_accept_armed = 1'b0;
                 armed_c_req_xact = null;
@@ -1633,11 +1804,28 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
     int unsigned default_post_pkt_gap;
     virtual sbuffer_agent_agent_interface sbuffer_vif;
 
+    // 中文注释：Uncache A request 的 pending handshake owner。
+    // 设置：当前 sample 观察到 A.valid 后准备驱动 A.ready 时；清零：下一 sample 确认 A.fire、
+    // valid 撤销或 reset。作用：只有 A.fire 后才允许生成 response 或把 store 写入 shared batch。
+    bit a_accept_armed;
+    sbuffer_agent_agent_xaction armed_a_req_xact;
+    // 中文注释：唯一的 Uncache D response owner。设置：确认 A.fire 后建立；清零：对应 D.fire
+    // 或 reset。该专项保持原有单笔串行行为，不在此处引入 outstanding response queue。
+    bit pending_d_valid;
+    sbuffer_agent_agent_xaction pending_d_xact;
+    sbuffer_agent_agent_xaction last_cycle_xact;
+    bit last_cycle_valid;
+
     `uvm_object_utils(sbuffer_mem_access_base_sequence)
 
     extern function new(string name = "sbuffer_mem_access_base_sequence");
+    extern virtual function void clear_runtime_state();
     extern virtual function void build_sbuffer_idle_xaction(output sbuffer_agent_agent_xaction rsp_xact);
     extern virtual function void capture_sbuffer_a_xaction(output sbuffer_agent_agent_xaction req_xact);
+    extern virtual function void check_sbuffer_a_payload_stable(
+        input sbuffer_agent_agent_xaction expected_xact,
+        input sbuffer_agent_agent_xaction observed_xact
+    );
     extern virtual function bit is_store_opcode(input bit [3:0] opcode);
     extern virtual function bit [47:0] sbuffer_beat_addr(input bit [47:0] addr);
     extern virtual task send_sbuffer_xaction(input sbuffer_agent_agent_xaction rsp_xact);
@@ -1662,7 +1850,17 @@ function sbuffer_mem_access_base_sequence::new(string name = "sbuffer_mem_access
     super.new(name);
     default_pre_pkt_gap  = 0;
     default_post_pkt_gap = 0;
+    clear_runtime_state();
 endfunction:new
+
+function void sbuffer_mem_access_base_sequence::clear_runtime_state();
+    a_accept_armed = 1'b0;
+    armed_a_req_xact = null;
+    pending_d_valid = 1'b0;
+    pending_d_xact = null;
+    last_cycle_xact = null;
+    last_cycle_valid = 1'b0;
+endfunction:clear_runtime_state
 
 function void sbuffer_mem_access_base_sequence::build_sbuffer_idle_xaction(output sbuffer_agent_agent_xaction rsp_xact);
     rsp_xact = sbuffer_agent_agent_xaction::type_id::create("sbuffer_idle_xact");
@@ -1672,17 +1870,49 @@ endfunction:build_sbuffer_idle_xaction
 
 function void sbuffer_mem_access_base_sequence::capture_sbuffer_a_xaction(output sbuffer_agent_agent_xaction req_xact);
     req_xact = sbuffer_agent_agent_xaction::type_id::create("sbuffer_a_req_xact");
-    req_xact.auto_inner_buffers_out_a_valid                    = sbuffer_vif.auto_inner_buffers_out_a_valid;
-    req_xact.auto_inner_buffers_out_a_ready                    = sbuffer_vif.auto_inner_buffers_out_a_ready;
-    req_xact.auto_inner_buffers_out_a_bits_opcode              = sbuffer_vif.auto_inner_buffers_out_a_bits_opcode;
-    req_xact.auto_inner_buffers_out_a_bits_param               = sbuffer_vif.auto_inner_buffers_out_a_bits_param;
-    req_xact.auto_inner_buffers_out_a_bits_size                = sbuffer_vif.auto_inner_buffers_out_a_bits_size;
-    req_xact.auto_inner_buffers_out_a_bits_source              = sbuffer_vif.auto_inner_buffers_out_a_bits_source;
-    req_xact.auto_inner_buffers_out_a_bits_address             = sbuffer_vif.auto_inner_buffers_out_a_bits_address;
-    req_xact.auto_inner_buffers_out_a_bits_mask                = sbuffer_vif.auto_inner_buffers_out_a_bits_mask;
-    req_xact.auto_inner_buffers_out_a_bits_data                = sbuffer_vif.auto_inner_buffers_out_a_bits_data;
-    req_xact.auto_inner_buffers_out_a_bits_corrupt             = sbuffer_vif.auto_inner_buffers_out_a_bits_corrupt;
+    // 中文注释：A.fire 的 valid 在 drv_cb sample 确认，payload 必须来自同一个 clocking-block
+    // snapshot；不能读取 edge 后可能已经切换到下一笔请求的裸 interface。xaction payload 是二态 bit，
+    // 因此复制前必须拒绝任一 X/Z，避免未知值静默折叠为 0 并污染 response 或 overlay。
+    if ($isunknown({sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_opcode,
+                    sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_param,
+                    sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_size,
+                    sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_source,
+                    sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_address,
+                    sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_mask,
+                    sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_data,
+                    sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_corrupt})) begin
+        `uvm_fatal(get_type_name(), "Uncache A payload sampled as X/Z outside reset")
+    end
+    req_xact.auto_inner_buffers_out_a_valid                    = sbuffer_vif.drv_cb.auto_inner_buffers_out_a_valid;
+    req_xact.auto_inner_buffers_out_a_ready                    = 1'b0;
+    req_xact.auto_inner_buffers_out_a_bits_opcode              = sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_opcode;
+    req_xact.auto_inner_buffers_out_a_bits_param               = sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_param;
+    req_xact.auto_inner_buffers_out_a_bits_size                = sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_size;
+    req_xact.auto_inner_buffers_out_a_bits_source              = sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_source;
+    req_xact.auto_inner_buffers_out_a_bits_address             = sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_address;
+    req_xact.auto_inner_buffers_out_a_bits_mask                = sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_mask;
+    req_xact.auto_inner_buffers_out_a_bits_data                = sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_data;
+    req_xact.auto_inner_buffers_out_a_bits_corrupt             = sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_corrupt;
 endfunction:capture_sbuffer_a_xaction
+
+function void sbuffer_mem_access_base_sequence::check_sbuffer_a_payload_stable(
+    input sbuffer_agent_agent_xaction expected_xact,
+    input sbuffer_agent_agent_xaction observed_xact
+);
+    if (expected_xact == null || observed_xact == null) begin
+        `uvm_fatal(get_type_name(), "cannot check a null Uncache A payload")
+    end
+    if (expected_xact.auto_inner_buffers_out_a_bits_opcode  != observed_xact.auto_inner_buffers_out_a_bits_opcode ||
+        expected_xact.auto_inner_buffers_out_a_bits_param   != observed_xact.auto_inner_buffers_out_a_bits_param ||
+        expected_xact.auto_inner_buffers_out_a_bits_size    != observed_xact.auto_inner_buffers_out_a_bits_size ||
+        expected_xact.auto_inner_buffers_out_a_bits_source  != observed_xact.auto_inner_buffers_out_a_bits_source ||
+        expected_xact.auto_inner_buffers_out_a_bits_address != observed_xact.auto_inner_buffers_out_a_bits_address ||
+        expected_xact.auto_inner_buffers_out_a_bits_mask    != observed_xact.auto_inner_buffers_out_a_bits_mask ||
+        expected_xact.auto_inner_buffers_out_a_bits_data    != observed_xact.auto_inner_buffers_out_a_bits_data ||
+        expected_xact.auto_inner_buffers_out_a_bits_corrupt != observed_xact.auto_inner_buffers_out_a_bits_corrupt) begin
+        `uvm_fatal(get_type_name(), "Uncache A payload changed while valid was waiting for ready")
+    end
+endfunction:check_sbuffer_a_payload_stable
 
 function bit sbuffer_mem_access_base_sequence::is_store_opcode(input bit [3:0] opcode);
     return (opcode == 4'd0) || (opcode == 4'd1);
@@ -1719,7 +1949,14 @@ task sbuffer_mem_access_base_sequence::sbuffer_mem_access_task(
     line_mask[7:0]       = byte_mask;
     line_store_data[63:0] = store_data;
 
-    main_mem_access_task(beat_addr, is_store, line_mask, line_store_data, corrupt, denied, line_load_data);
+    shared_mem_access_task(beat_addr,
+                           is_store,
+                           line_mask,
+                           line_store_data,
+                           corrupt,
+                           denied,
+                           line_load_data,
+                           is_store ? SHARED_MEM_WRITE_UNCACHE : SHARED_MEM_WRITE_NONE);
     load_data = line_load_data[63:0];
 endtask:sbuffer_mem_access_task
 
@@ -1745,7 +1982,8 @@ task sbuffer_mem_access_base_sequence::sbuffer_mem_access_xaction(
         load_data
     );
 
-    rsp_xact.auto_inner_buffers_out_a_ready        = 1'b1;
+    // 当前 response 已由已确认 A.fire 建立，不能再借此 item 接收第二笔 A。
+    rsp_xact.auto_inner_buffers_out_a_ready        = 1'b0;
     rsp_xact.auto_inner_buffers_out_d_valid        = 1'b1;
     rsp_xact.auto_inner_buffers_out_d_bits_opcode  = is_store ? 4'd0 : 4'd1;
     rsp_xact.auto_inner_buffers_out_d_bits_param   = '0;
@@ -1763,6 +2001,14 @@ task sbuffer_mem_access_base_sequence::body();
     sbuffer_agent_agent_xaction idle_xact;
     sbuffer_agent_agent_xaction req_xact;
     sbuffer_agent_agent_xaction rsp_xact;
+    sbuffer_agent_agent_xaction fired_a_req_xact;
+    logic sampled_a_valid_raw;
+    logic sampled_d_ready_raw;
+    bit sampled_a_valid;
+    bit sampled_d_ready;
+    bit reset_active;
+    bit a_fire;
+    bit d_fire;
     common_data_transaction data;
 
     if (!uvm_config_db#(virtual sbuffer_agent_agent_interface)::get(null, get_full_name(), "vif", sbuffer_vif) &&
@@ -1773,34 +2019,102 @@ task sbuffer_mem_access_base_sequence::body();
     if (data == null) begin
         `uvm_fatal(get_type_name(), "failed to get common_data_transaction for SBuffer responder")
     end
+    seq_csr_common::init();
+    // 中文注释：legacy default topology 未经过 real-smoke vseq 时由首个 responder 兜底初始化。
+    // real-smoke 已提前完成初始化时只读取静态状态，绝不重复清空 shared backing/overlay。
+    if (!is_shared_memory_lifecycle_initialized()) begin
+        initialize_shared_memory_state(seq_csr_common::get_main_mem_ranges_en(),
+                                       mem_addr_t'(seq_csr_common::get_paddr_base()),
+                                       seq_csr_common::get_paddr_range());
+    end
+    clear_runtime_state();
 
     forever begin
-        // 中文注释：SBuffer response 在本轮发送完成后才回到循环顶部；global stop 且没有
-        // 尚未接受的 A 请求时发送安全 idle 并自然退出，不依赖 phase kill。
-        if (data.is_global_stop_requested() &&
-            sbuffer_vif.auto_inner_buffers_out_a_valid === 1'b0) begin
-            build_sbuffer_idle_xaction(idle_xact);
-            send_sbuffer_xaction(idle_xact);
-            break;
+        // 中文注释：先在 drv_cb 边界确认上一轮驱动的 A.ready/D.valid 是否真实握手，
+        // 并推进 shared-store 采样代次；store overlay 只能由 a_fire 分支建立写批次，
+        // 下一拍即使没有新的 memory access 也会由这里统一提交。
+        @(sbuffer_vif.drv_cb);
+        begin_shared_mem_sample($time);
+        sampled_a_valid_raw = sbuffer_vif.drv_cb.auto_inner_buffers_out_a_valid;
+        sampled_d_ready_raw = sbuffer_vif.drv_cb.auto_inner_buffers_out_d_ready;
+        reset_active        = (sbuffer_vif.rst_n !== 1'b1) ||
+                              (memblock_sync_pkg::reset_backend_done !== 1'b1);
+        sampled_a_valid     = (sampled_a_valid_raw === 1'b1);
+        sampled_d_ready     = (sampled_d_ready_raw === 1'b1);
+        a_fire              = 1'b0;
+        d_fire              = 1'b0;
+
+        if (!reset_active &&
+            ((sampled_a_valid_raw !== 1'b0 && sampled_a_valid_raw !== 1'b1) ||
+             (sampled_d_ready_raw !== 1'b0 && sampled_d_ready_raw !== 1'b1))) begin
+            `uvm_fatal(get_type_name(), "Uncache A.valid/D.ready sampled as X/Z outside reset")
+        end
+
+        if (reset_active) begin
+            clear_runtime_state();
+        end
+        else begin
+            if (a_accept_armed) begin
+                if (!last_cycle_valid ||
+                    last_cycle_xact.auto_inner_buffers_out_a_ready !== 1'b1) begin
+                    `uvm_fatal(get_type_name(), "armed Uncache A request lost its driven A.ready")
+                end
+                if (sampled_a_valid) begin
+                    capture_sbuffer_a_xaction(fired_a_req_xact);
+                    check_sbuffer_a_payload_stable(armed_a_req_xact, fired_a_req_xact);
+                    a_fire = 1'b1;
+                    sbuffer_mem_access_xaction(fired_a_req_xact, rsp_xact);
+                    pending_d_xact = rsp_xact;
+                    pending_d_valid = 1'b1;
+                end
+                a_accept_armed = 1'b0;
+                armed_a_req_xact = null;
+            end
+
+            if (pending_d_valid && last_cycle_valid &&
+                last_cycle_xact.auto_inner_buffers_out_d_valid === 1'b1 &&
+                sampled_d_ready) begin
+                d_fire = 1'b1;
+                pending_d_valid = 1'b0;
+                pending_d_xact = null;
+            end
+        end
+
+        // 中文注释：global stop 后只能 drain 已由前一拍 A.ready 接受的请求；若此时出现
+        // 新的未 fire A.valid，继续保持 A.ready=0 会让 DUT 与 responder 永久互等，必须 fail-fast。
+        if (!reset_active && data.is_global_stop_requested() && sampled_a_valid && !a_fire) begin
+            `uvm_fatal(get_type_name(),
+                       "new Uncache A.valid observed after global stop without a sampled fire")
         end
 
         build_sbuffer_idle_xaction(idle_xact);
-        send_sbuffer_xaction(idle_xact);
-
-        if (sbuffer_vif.rst_n == 1'b1 &&
-            memblock_sync_pkg::reset_backend_done == 1'b1 &&
-            sbuffer_vif.auto_inner_buffers_out_a_valid === 1'b1) begin
-            capture_sbuffer_a_xaction(req_xact);
-            build_sbuffer_idle_xaction(idle_xact);
-            idle_xact.auto_inner_buffers_out_a_ready = 1'b1;
-            send_sbuffer_xaction(idle_xact);
-            sbuffer_mem_access_xaction(req_xact, rsp_xact);
-            rsp_xact.auto_inner_buffers_out_a_ready = 1'b0;
-
-            do begin
-                send_sbuffer_xaction(rsp_xact);
-            end while (sbuffer_vif.auto_inner_buffers_out_d_ready !== 1'b1);
+        if (reset_active) begin
+            // reset 周期保持所有 responder output 为零。
         end
+        else if (data.is_global_stop_requested() && !pending_d_valid &&
+                 !a_accept_armed && !sampled_a_valid) begin
+            send_sbuffer_xaction(idle_xact);
+            last_cycle_xact  = idle_xact;
+            last_cycle_valid = 1'b1;
+            break;
+        end
+        else if (pending_d_valid) begin
+            idle_xact = pending_d_xact;
+            idle_xact.auto_inner_buffers_out_a_ready = 1'b0;
+        end
+        else if (a_accept_armed) begin
+            idle_xact.auto_inner_buffers_out_a_ready = 1'b1;
+        end
+        else if (!data.is_global_stop_requested() && sampled_a_valid) begin
+            capture_sbuffer_a_xaction(req_xact);
+            armed_a_req_xact = req_xact;
+            a_accept_armed   = 1'b1;
+            idle_xact.auto_inner_buffers_out_a_ready = 1'b1;
+        end
+
+        send_sbuffer_xaction(idle_xact);
+        last_cycle_xact  = idle_xact;
+        last_cycle_valid = 1'b1;
     end
 endtask:body
 
