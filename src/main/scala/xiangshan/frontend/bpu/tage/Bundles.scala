@@ -58,10 +58,7 @@ class TageEntry(implicit p: Parameters) extends TageBundle {
 }
 
 class TagePrediction(implicit p: Parameters) extends TageBundle {
-  val useProvider:  Bool = Bool()
-  val providerPred: Bool = Bool()
-  val hasAlt:       Bool = Bool()
-  val altPred:      Bool = Bool()
+  val takenVec: Vec[Valid[Bool]] = Vec(NumBtbResultEntries, Valid(Bool()))
 }
 
 class PhrToTageIO(implicit p: Parameters) extends TageBundle {

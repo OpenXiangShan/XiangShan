@@ -382,18 +382,18 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_rasTargetDiff          = ras.io.topRetAddr =/= s3_s1Prediction.target
 
   private val s3_takenMask = VecInit(s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
-    val tagePred = s3_tagePrediction(i)
-    val useSc    = s3_scUsed(i)
-    val scTaken  = s3_scTakenMask(i)
+    val useTage   = s3_tagePrediction.takenVec(i).valid
+    val tageTaken = s3_tagePrediction.takenVec(i).bits
+    val useSc     = s3_scUsed(i)
+    val scTaken   = s3_scTakenMask(i)
 
     s3_jumpTakenVec(i) ||
     (s3_isBrVec(i) &&
       MuxCase(
         entry.bits.taken, // default: base table
         Seq(
-          useSc                -> scTaken,
-          tagePred.useProvider -> tagePred.providerPred,
-          tagePred.hasAlt      -> tagePred.altPred
+          useSc   -> scTaken,
+          useTage -> tageTaken
         )
       ))
   })
