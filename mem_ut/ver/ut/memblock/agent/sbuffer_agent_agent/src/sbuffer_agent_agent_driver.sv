@@ -52,24 +52,19 @@ task sbuffer_agent_agent_driver::main_phase(uvm_phase phase);
     //while(1) begin
     if(this.cfg.sqr_sw==tcnt_dec_base::ON && this.cfg.drv_sw==tcnt_dec_base::ON) begin
         while(1) begin
-            seq_item_port.try_next_item(req);
-            if(req!=null) begin
-                repeat(req.pre_pkt_gap) begin
-                    @this.vif.drv_mp.drv_cb;
-                    this.drive_idle(this.cfg.drv_mode);
-                end
-                @this.vif.drv_mp.drv_cb;
-                this.send_pkt(req);
-                repeat(req.post_pkt_gap) begin
-                    @this.vif.drv_mp.drv_cb;
-                    this.drive_idle(this.cfg.drv_mode);
-                end
-                seq_item_port.item_done();
+            // 中文注释：Uncache responder 在 drv_cb 边界产生下一拍 item，并以 last_cycle_xact
+            // 在下一边界确认 A/D fire。driver 必须立即写 clocking output，不能再插入额外 drv_cb，
+            // 否则 sequence 会把尚未对 DUT 生效的 A.ready/D.valid 错当成已完成握手。
+            req = null;
+            seq_item_port.get_next_item(req);
+            if (req == null) begin
+                `uvm_fatal(get_type_name(), "get_next_item returned a null Uncache item")
             end
-            else begin
-                @this.vif.drv_mp.drv_cb;
-                this.drive_idle(this.cfg.drv_mode);
+            if (req.pre_pkt_gap != 0 || req.post_pkt_gap != 0) begin
+                `uvm_fatal(get_type_name(), "Uncache responder item must use pre_pkt_gap=0 and post_pkt_gap=0")
             end
+            this.send_pkt(req);
+            seq_item_port.item_done();
         end
     end
     else if (this.cfg.drv_sw==tcnt_dec_base::ON) begin

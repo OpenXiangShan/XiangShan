@@ -12,9 +12,10 @@
 | `GrantAck owner` | Grant/GrantData 最后一拍完成后等待 E.fire 的状态所有权 | `waiting_grant_ack`、`pending_grant_*` | 只有 owner 存在时才开放 `e_ready` |
 | `cached line table` | 已完成 GrantAck、可作为 Probe 候选的 64B line 表 | `cached_alias_by_line` | GrantAck 插入，Probe/Release/CBO 失效删除 |
 | `Probe owner` | 单个 B Probe 已发出或等待其 C 回复的状态 | `pending_probe_b_valid`、`waiting_probe_c` | B.fire 后进入等待 C |
-| `C assembly` | ProbeAckData/ReleaseData 两个 32B beat 的收集状态 | `c_assembly_*` | 首 beat 建立，第二 beat 完成写回/ack |
+| `C assembly` | ProbeAckData/ReleaseData 两个 32B beat 的收集状态 | `c_assembly_*` | 首 beat 建立，第二 beat 加入 DCache overlay batch/ack |
 | `fire` | 同一 channel 的 valid 与 ready 在同一 DUT 采样边界同时为 1 | `a_fire`、`b_fire`、`c_fire`、`d_fire`、`e_fire` | 只在确认 fire 后改变生命周期状态 |
 | `lockstep driver` | driver 阻塞取一个 item，立即写 clocking output，并由 sequence 下一边界确认握手 | `dcache_agent_agent_driver::main_phase()` | 不 hold 或重复上一 item |
+| `shared memory store` | DCache/Uncache 共用的 backing、overlay 和 write batch | `mem_access_base_sequence` static 状态 | DCache C data 与 Uncache store 在下一 sample 按固定顺序提交 |
 
 本 flow 只实现 DCache coherent 端口的轻量 responder，不是完整 L2 directory、MSHR 或 coherence
 参考模型。它保持以下简化边界：单个 A/C-driven response、单个 Probe、固定 sink 0；不模拟
@@ -67,7 +68,7 @@ flowchart TD
 
 ```text
 顶层 vseq 在 DCache sequencer 启动 responder；
-responder 每拍先构造 safe idle，再用上一 item 和当前 DUT 对端信号计算真实 fire；
+responder 每拍先推进 shared memory sample、构造 safe idle，再用上一 item 和当前 DUT 对端信号计算真实 fire；
 A.fire 由 accept_dcache_a_request 分类并建立 pending D；
 C.fire 由 start/consume C helper 建立或推进唯一 C assembly；
 D.fire/E.fire 分别推进 reply beat、GrantAck owner 和 cached line table；
@@ -211,21 +212,25 @@ due cycle；`service_hint()` 在 due cycle 只把 `io_l2_hint_valid` 拉高一�
 ### 7.2 Probe C 回复
 
 `ProbeAck` 为单拍，必须匹配 pending line，完成后删除 line。`ProbeAckData` 建立 C assembly，
-收齐两个 32B beat 后合并 64B data；无 corrupt 时写回主存，有 corrupt 时跳过写回但仍完成
-协议生命周期，最后删除 line 并清 waiting Probe。
+收齐两个 32B beat 后合并 64B data；无 corrupt 时加入 DCache overlay write batch，有 corrupt 时跳过写入但仍完成
+协议生命周期，最后删除 line 并清 waiting Probe。C payload 写入二态 transaction 前，所有 header 字段
+必须已知；`ProbeAckData` 的 data/corrupt 也必须已知，X/Z 直接 fatal，不能折叠为 `corrupt=0`。
 
 ### 7.3 Release C 回复
 
 Release/ReleaseData 可在等待 Probe C 时先到达，但不能破坏原 Probe owner。Release 单拍完成后
-直接排期一拍 `ReleaseAck`；ReleaseData 收齐两拍后检查 header/data 稳定、无 corrupt 时写主存，
-无论 corrupt 与否都删除 line，再排期 `ReleaseAck`。ReleaseAck 使用原 C source/size，不等待 E。
+直接排期一拍 `ReleaseAck`；ReleaseData 收齐两拍后检查 header/data 稳定、无 corrupt 时加入 DCache overlay write batch，
+无论 corrupt 与否都删除 line，再排期 `ReleaseAck`。ReleaseData 的 data/corrupt 在二态 snapshot 前必须
+已知；无数据 Release 的 don't-care data/corrupt 不检查。C.fire 后 assembly 只使用当前确认的 fired snapshot，
+armed snapshot 只用于稳定性检查。ReleaseAck 使用原 C source/size，不等待 E。
 
 ## 8. 主存范围和 reset
 
-responder 启动时先调用 `seq_csr_common::init()`，再把 `get_paddr_base()/get_paddr_range()` 注册到
-自身的 `main_mem_ranges`。A coherent line、Release 和 ReleaseData 都用完整 64B mask 做边界检查；
-越界在建立 response 前 fatal。这个物理范围只用于 DCache responder 的物理地址主存访问，不会
-限制主表的虚拟地址窗口。
+real-smoke lifecycle owner 在 fork responder 前调用 `initialize_shared_memory_store()` 清空 shared backing、
+overlay、write batch 和旧 range。`MEMBLOCK_MAIN_MEM_RANGES_EN=1` 时才把
+`get_paddr_base()/get_paddr_range()` 注册为 DCache/Uncache 共用 `main_mem_ranges`；为 `0` 时两个端口
+都按 48-bit 物理地址懒分配。A coherent line、Release 和 ReleaseData 在严格模式仍用完整 64B mask 做
+边界检查；越界在建立 response 前 fatal。该范围不限制主表虚拟地址窗口，也不改变 TLB PPN 构造。
 
 reset 或 `reset_backend_done` 未完成时，清 pending D、GrantAck、hint、Probe、C assembly 和
 cached line table，发送所有 channel/sideband 为 0 的 safe idle。reset 恢复后从新一拍重新建立
@@ -264,7 +269,9 @@ env/plus.sv
   -> dcache_mem__access_base_sequence
 ```
 
-三档 delay 权重必须非负且不能全 0；hint/probe 权重必须在 0..100。默认 cfg 只打开 small delay，
+三档 delay 权重必须非负且不能全 0；hint/probe 权重必须在 0..100。
+`MEMBLOCK_MAIN_MEM_RANGES_EN` 默认值为 1，只控制 shared memory store 的严格物理范围，不参与 D response
+delay 或 Hint/Probe 随机。默认 cfg 只打开 small delay，
 hint/probe 关闭。`tc_dispatch_real_l2cache_model.cfg` 是独立可执行的 real-smoke preset，显式
 包含主表、LSQ、issue、commit、L2TLB 和 TLB 合法性开关，再覆盖 delay 权重；它不依赖 cfg 继承。
 

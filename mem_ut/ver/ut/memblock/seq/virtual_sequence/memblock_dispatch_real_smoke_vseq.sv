@@ -16,6 +16,7 @@ class memblock_dispatch_real_smoke_vseq extends virtual_base_sequence;
     extern virtual task pre_body();
     extern virtual task body();
     extern virtual function void require_real_smoke_sqr();
+    extern virtual function void initialize_shared_memory_store();
     extern virtual task start_background_responders();
     extern virtual task start_core_dispatch_flow();
 
@@ -38,6 +39,8 @@ task memblock_dispatch_real_smoke_vseq::body();
 
     memblock_sync_pkg::dispatch_real_smoke_active = 1'b1;
     `uvm_info(get_type_name(), "real dispatch smoke virtual sequence start", UVM_LOW)
+
+    initialize_shared_memory_store();
 
     fork : background_responder_fork
         start_background_responders();
@@ -65,6 +68,17 @@ function void memblock_dispatch_real_smoke_vseq::require_real_smoke_sqr();
     require_agent_sqr("sbuffer", p_sequencer.sbuffer_sqr);
     require_agent_sqr("redirect", p_sequencer.redirect_sqr);
 endfunction:require_real_smoke_sqr
+
+function void memblock_dispatch_real_smoke_vseq::initialize_shared_memory_store();
+    // 中文注释：本 vseq 是 real-smoke topology 的唯一 shared memory lifecycle owner。
+    // 在 DCache/Uncache responder fork 前清空上一次 testcase 的 backing、overlay 和写批次，
+    // 再按 runtime range 开关配置统一物理窗口，避免两个 responder 的启动先后决定初始状态。
+    mem_access_base_sequence::initialize_shared_memory_state(
+        seq_csr_common::get_main_mem_ranges_en(),
+        mem_access_base_sequence::mem_addr_t'(seq_csr_common::get_paddr_base()),
+        seq_csr_common::get_paddr_range()
+    );
+endfunction:initialize_shared_memory_store
 
 task memblock_dispatch_real_smoke_vseq::start_background_responders();
     dcache_mem__access_base_sequence        dcache_seq;

@@ -95,6 +95,7 @@ Dispatch framework 参数分组如下：
 | TLB/PTE 权重 | `MEMBLOCK_TLB_PTE_*_WT` |
 | 自动主表虚拟地址范围 | `MEMBLOCK_MAIN_VADDR_BASE`、`MEMBLOCK_MAIN_VADDR_RANGE` |
 | TLB物理地址映射范围 | `MEMBLOCK_PADDR_BASE`、`MEMBLOCK_PADDR_RANGE` |
+| DCache/Uncache shared memory 范围检查 | `MEMBLOCK_MAIN_MEM_RANGES_EN` |
 | 主动主流程 sequence debug | `MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES` |
 | lintsissue dispatch sequence | `MEMBLOCK_DISPATCH_ISSUE_SEQ_EN`、`MEMBLOCK_DISPATCH_ISSUE_NONBLOCKING_EN`、`MEMBLOCK_DISPATCH_READY_TIMEOUT` |
 | lsqenq admission sequence | `MEMBLOCK_LSQENQ_SEQ_EN`、`MEMBLOCK_LSQENQ_READY_TIMEOUT` |
@@ -119,6 +120,11 @@ DUT物理LSQ enqueue slot和LOAD/STA/STD pipe数量不属于plus参数，统一�
 虚拟地址，`MEMBLOCK_PADDR_BASE/RANGE` 继续只供 `tlb_map_builder` 生成翻译后的物理 PPN。
 两组默认值相同只用于兼容既有 Bare smoke，不表示 VA 和 PA 窗口继续耦合。manual directed
 和 boundary profile 地址生成不受 MAIN_VADDR 参数全局限制。
+
+`MEMBLOCK_MAIN_MEM_RANGES_EN` 默认值为 `1`，只决定 DCache/Uncache shared sparse memory 是否
+把当前 `MEMBLOCK_PADDR_BASE/RANGE` 作为严格物理访问窗口；为 `0` 时两个 memory-facing responder
+都允许在 48-bit 物理地址空间按需懒分配 backing line。它不改变 TLB PPN、自动主表虚拟地址或 DUT
+端口结构，统一经 `seq_csr_common::get_main_mem_ranges_en()` 读取。
 
 `MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES` 是主动主流程 driver 的统一无进展
 debug 阈值，覆盖 LSQ enqueue、lintsissue dispatch issue 和 LSQ commit sequence。

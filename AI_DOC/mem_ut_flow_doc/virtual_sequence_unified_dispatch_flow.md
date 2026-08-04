@@ -19,6 +19,8 @@
 | `inflight` | responder已经接受、但response或drive生命周期尚未完成的请求 | DCache/SBuffer握手状态、redirect drive queue/inflight | inflight存在时不能因global stop直接退出 |
 | `natural exit` | sequence在安全idle边界自行`break/return` | responder `body()`、cancel vseq等待逻辑 | 不使用`disable fork`强杀线程 |
 | `responder done` | DCache 已完成 terminal idle 并自然返回的兼容完成标志 | `memblock_sync_pkg::dcache_responder_done` | legacy testcase 用它保持 phase objection |
+| `shared memory lifecycle owner` | 每 testcase 唯一清空并配置 DCache/Uncache 共用 backing、overlay 与 write batch 的入口 | `memblock_dispatch_real_smoke_vseq::initialize_shared_memory_store()` | fork responder 前调用一次 |
+| `write overlay` | memory-facing 写按 byte valid 覆盖 backing 的共享数据层 | `mem_access_base_sequence::write_overlay_mem` | 不用 DUT 写污染 `main_mem` |
 | `testcase objection` | `basicTest`在顶层`start()`前raise、返回后drop的phase objection | `basicTest::main_phase()` | 覆盖目标vseq完整`start()`，不依赖派生`pre_body/post_body`保活 |
 | `automatic phase objection` | sequence自身可选的自动raise/drop机制，不是顶层phase保活唯一来源 | cancel vseq `set_automatic_phase_objection(1'b1)` | 可覆盖局部sequence生命周期，但外层testcase objection仍在整个`start()`期间保持 |
 | `software-only directed` | 只在virtual sequencer上运行公共owner API检查、不启动业务agent sequence的专项入口 | `memblock_pending_mmio_directed_vseq` | 覆盖normal raw、LOAD `R/R+1` stale和精确expected-fatal |
@@ -60,16 +62,18 @@ flowchart TD
 
     RS --> RS1[require_real_smoke_sqr]
     RS1 --> RS2[dispatch_real_smoke_active=1]
-    RS2 --> RS3[start_background_responders]
-    RS2 --> RS4[start_core_dispatch_flow]
+    RS2 --> RS2A[initialize_shared_memory_store]
+    RS2A --> RS3[start_background_responders]
+    RS2A --> RS4[start_core_dispatch_flow]
     RS3 --> RS5[uvm_do_on DCache/SBuffer/redirect responder]
     RS4 --> RS6[uvm_do_on LSQ enq/issue/commit/L2TLB/main]
     RS6 --> RS7[main service requests global stop after terminal and cancel/raw drain]
     RS7 --> RS8[core sequences publish final idle and return]
     RS7 --> RS9[responders wait until no inflight, drive safe idle, return]
 
-    CR --> CR1[start_background_responders join_none]
-    CR --> CR2[start_core_dispatch_flow plus directed redirect barrier]
+    CR --> CR0[initialize_shared_memory_store]
+    CR0 --> CR1[start_background_responders join_none]
+    CR0 --> CR2[start_core_dispatch_flow plus directed redirect barrier]
     CR2 --> CR3[wait DUT-visible uid1/uid2 reservations]
     CR3 --> CR4[request_redirect_flush + push_redirect_drive]
     CR4 --> CR5[per-epoch cancel reconcile]
@@ -101,7 +105,9 @@ flowchart TD
    具体vseq在启动前调用require_real_smoke_sqr，缺少必需handle时fatal。
 
 3. real smoke调度：
-   body置dispatch_real_smoke_active；
+   body初始化 runtime 参数并置dispatch_real_smoke_active；
+   在 fork background responder 前清空 shared backing/overlay/write batch，并按
+   MEMBLOCK_MAIN_MEM_RANGES_EN 配置 DCache/Uncache 共用物理范围；
    background task用uvm_do_on并发启动DCache、SBuffer和redirect responder；
    core task用uvm_do_on并发启动LSQ enq、issue、commit、L2TLB和main sequence；
    main service只在所有uid terminal且cancel record、anchor、snapshot及raw timing queue收敛后请求global stop；
@@ -258,7 +264,9 @@ flow和后台responder都完成。它不强制kill responder，也不会在后�
 
 ```systemverilog
 require_real_smoke_sqr();
+seq_csr_common::init();
 memblock_sync_pkg::dispatch_real_smoke_active = 1'b1;
+initialize_shared_memory_store();
 fork
     start_background_responders();
 join_none
@@ -269,13 +277,38 @@ memblock_sync_pkg::dispatch_real_smoke_active = 1'b0;
 
 中文伪代码：
 
-1. 置`dispatch_real_smoke_active=1`，并以`join_none`启动后台DCache、SBuffer和redirect responder。
-2. 同步等待core dispatch flow完成；core flow结束不代表后台responder已经观察到最终stop边界。
-3. 执行`wait fork`等待本task创建的后台fork完整返回；responder只有在`global_stop_requested`且无inflight时
+1. 初始化 runtime 参数后置`dispatch_real_smoke_active=1`；调用
+   `initialize_shared_memory_store()` 清空本 testcase 的 shared backing/overlay/write batch，并按
+   `MEMBLOCK_MAIN_MEM_RANGES_EN` 配置共用物理范围。该步骤必须在 fork 前结束。
+2. 以`join_none`启动后台DCache、SBuffer和redirect responder。DCache/SBuffer 不拥有 shared memory
+   lifecycle，后启动者只能复用已配置的 store。
+3. 同步等待core dispatch flow完成；core flow结束不代表后台responder已经观察到最终stop边界。
+4. 执行`wait fork`等待本task创建的后台fork完整返回；responder只有在`global_stop_requested`且无inflight时
    才会自然返回，因而不会被提前清 active 竞态截断。
-4. 后台task返回后才清`dispatch_real_smoke_active`并结束vseq；若responder卡住，由UVM timeout暴露问题。
+5. 后台task返回后才清`dispatch_real_smoke_active`并结束vseq；若responder卡住，由UVM timeout暴露问题。
 
-### 6.2 `start_background_responders()`
+### 6.2 `initialize_shared_memory_store()`
+
+抽象功能描述：该函数是 real-smoke topology 的 shared memory lifecycle owner。它只在场景开始时一次性
+清空测试级 memory store，并把 runtime 范围开关转换为 shared range 配置；它不参与 responder 的逐拍
+读写、response delay 或 global stop。
+
+```text
+读取 seq_csr_common 的 main_mem_ranges_en、paddr_base、paddr_range：
+  清空 static main_mem、write_overlay、byte-valid、DCache/Uncache write batch 和旧 range；
+  若 main_mem_ranges_en=1：注册 PADDR_BASE/RANGE；
+  若 main_mem_ranges_en=0：保持 range 未配置，使两个端口都可按 48-bit 地址懒分配；
+  设置 lifecycle initialized，随后 fork 两个 responder；
+```
+
+legacy agent-default topology 没有此 vseq 入口时，首个 responder 仅在 lifecycle 尚未初始化时调用同一
+helper 兜底；它不是第二个 owner，第二个 responder、reset、Probe、CBO 和 stop 均不得清空 shared store。
+
+`memblock_dispatch_real_cancel_reconcile_vseq` 虽继承该类但覆盖了 `body()`，因此也必须在自己的
+background fork 前显式调用此 helper；不能把父类 `body()` 未执行时的 static initialized 标志当成
+本 testcase 已完成初始化的证明。
+
+### 6.3 `start_background_responders()`
 
 抽象功能描述：该task并发启动三个长期responder，并使用`join`把task返回定义为“三者都自然退出”。
 
@@ -292,7 +325,8 @@ join
 - DCache：global stop后继续等待pending D、GrantAck、Probe B/C、C assembly、A/C armed snapshot
   和当前A/C valid全部归零；cached line map不属于inflight。满足条件后发安全idle再break，不能只
   用A valid为0作为退出条件。
-- SBuffer：global stop且当前A valid为0；已接受请求的D response先完成，再发安全idle并break。
+- SBuffer：global stop 后已 fire 的 A 仍完成对应 D response；若观察到未 fire 的新 A.valid 则 fail-fast，
+  不通过持续 A.ready=0 等待其撤销。pending D、armed A与当前 A.valid均清空后，再发安全idle并break。
 - Redirect：global stop、pending/inflight drive为空且无active redirect；发安全idle并break。
 
 DCache responder 的 item 交付还依赖 DCache driver 的锁步合同：driver 阻塞 get_next_item 后立即
@@ -346,10 +380,16 @@ phase.phase_done.set_drain_time(this, 1us);
 
 1. vseq构造时开启自身automatic objection，但这不是testcase保持main phase存活的唯一条件。
 2. `pre_body()`读取由`basicTest`传入的starting phase；读取失败立即fatal，成功后设置1us drain time。
-3. `post_body()`只清理场景active标志；testcase objection仍由`basicTest`在完整`start()`返回后统一drop。
+3. `body()`在设置 real-smoke active 后、fork 三个 background responder 前，调用继承的
+   `initialize_shared_memory_store()`；因此 cancel 场景也从新的 backing/overlay/write batch 开始，
+   不会复用同一仿真中先前 vseq 的 static store。
+4. `post_body()`只清理场景active标志；testcase objection仍由`basicTest`在完整`start()`返回后统一drop。
 
 这避免直接依赖可能为null的deprecated `starting_phase`公共别名。`post_body()`只清
 `dispatch_real_smoke_active`；若automatic objection存在，则由UVM负责配对释放，但不替代testcase objection。
+
+该场景覆盖了父类 `body()`，所以不能只依赖父类的初始化调用。它复用父类 helper 而非复制 backing、
+overlay 或 range 的实现，保持每个 scenario 只有一个 shared memory lifecycle owner。
 
 ### 7.2 `start_core_dispatch_flow()` 与 directed barrier
 

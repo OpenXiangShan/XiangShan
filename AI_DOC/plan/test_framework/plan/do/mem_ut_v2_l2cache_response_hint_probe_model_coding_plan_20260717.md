@@ -10,6 +10,11 @@
 | 核心原则 | 在现有 DCache responder 内建立单 A 回复、单 Probe 在途的轻量 L2 模型，不复刻完整 L2 directory、slice、MSHR 或 CHI 流水线 |
 | 创建日期 | 2026-07-17 |
 
+> 历史实现说明（2026-08-04）：本文保留当时 DCache responder 的 `main_mem`/写回描述。当前有效实现
+> 已由 `AI_DOC/plan/test_framework/plan/do/mem_ut_dcache_main_mem_range_switch_plan_20260730.md` 改为 DCache/Uncache 共用 static backing 与
+> byte-valid write overlay；DCache C data 不再覆盖 backing，而是在下一 shared sample 提交 overlay。当前
+> 行为以最新专项 plan、implementation review 和 flow 文档为准。
+
 ## 1. 目标、范围与替代关系
 
 ### 1.1 术语与抽象功能说明

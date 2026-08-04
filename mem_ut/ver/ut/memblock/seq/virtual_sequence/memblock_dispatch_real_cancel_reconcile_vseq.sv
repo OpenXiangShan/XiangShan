@@ -75,6 +75,10 @@ task memblock_dispatch_real_cancel_reconcile_vseq::body();
     memblock_sync_pkg::dispatch_real_smoke_active = 1'b1;
     `uvm_info(get_type_name(), "real cancel reconcile virtual sequence start", UVM_LOW)
 
+    // 中文注释：派生 vseq 同样在 fork DCache/Uncache responder 前成为本 testcase 的唯一
+    // shared memory lifecycle owner，不能依赖上一次场景残留的 static initialized 标志。
+    initialize_shared_memory_store();
+
     fork : cancel_reconcile_background_fork
         start_background_responders();
     join_none

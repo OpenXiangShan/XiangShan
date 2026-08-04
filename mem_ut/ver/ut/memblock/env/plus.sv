@@ -177,6 +177,8 @@ class plus;
     // PADDR 窗口只控制 TLB entry 的物理地址映射，不再限制自动主表虚拟地址。
     `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_PADDR_BASE, bit [63:0], 64'h8000_0000)
     `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_PADDR_RANGE, bit [63:0], 64'h1000_0000)
+    // 1：DCache/Uncache 仅访问 PADDR 窗口；0：48-bit 物理地址空间按需懒分配。
+    `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_MAIN_MEM_RANGES_EN, bit, 1'b1)
 
     // 非严格 DUT 行为 / smoke 兼容控制。
     // 这些参数只影响 UT 框架如何补齐事件、处理 miss 或处理本地模型不一致，
@@ -374,6 +376,7 @@ class plus;
         load_hex64("MEMBLOCK_MAIN_VADDR_RANGE", MEMBLOCK_MAIN_VADDR_RANGE);
         load_hex64("MEMBLOCK_PADDR_BASE", MEMBLOCK_PADDR_BASE);
         load_hex64("MEMBLOCK_PADDR_RANGE", MEMBLOCK_PADDR_RANGE);
+        load_bit("MEMBLOCK_MAIN_MEM_RANGES_EN", MEMBLOCK_MAIN_MEM_RANGES_EN);
 
         // 读取非严格 DUT 行为 / smoke 兼容控制。严格 DUT 行为验证时重点检查这些开关。
         load_bit("MEMBLOCK_LSQ_RESYNC_ON_MISMATCH", MEMBLOCK_LSQ_RESYNC_ON_MISMATCH);

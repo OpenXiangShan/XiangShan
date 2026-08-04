@@ -170,6 +170,11 @@ class seq_csr_common;
     // 该窗口与自动主表虚拟地址窗口可独立配置，不再作为 vaddr 生成约束。
     static bit [63:0]   paddr_base = 64'h8000_0000;
     static bit [63:0]   paddr_range = 64'h1000_0000;
+    // 中文注释：DCache/Uncache shared sparse memory 是否启用 PADDR window 严格检查。
+    // 设置：plus/default cfg 在 load_from_plus() 写入；读取：memory lifecycle owner 初始化 shared store。
+    // 作用：为 1 时两个 memory-facing responder 都限制在 PADDR window，为 0 时按 48-bit 地址懒分配；
+    // 不改变 tlb_map_builder 的 PPN 生成窗口。
+    static bit          main_mem_ranges_en = 1'b1;
     static int unsigned active_seq_no_progress_warn_cycles = 10000;
     static bit          dispatch_issue_seq_en = 1'b0;
     // 中文注释：lintsissue 非阻塞发射模式开关。
@@ -386,6 +391,7 @@ class seq_csr_common;
         main_vaddr_range            = plus::MEMBLOCK_MAIN_VADDR_RANGE;
         paddr_base                  = plus::MEMBLOCK_PADDR_BASE;
         paddr_range                 = plus::MEMBLOCK_PADDR_RANGE;
+        main_mem_ranges_en          = plus::MEMBLOCK_MAIN_MEM_RANGES_EN;
         active_seq_no_progress_warn_cycles = get_non_negative_int("MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES", plus::MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES);
         dispatch_issue_seq_en       = plus::MEMBLOCK_DISPATCH_ISSUE_SEQ_EN;
         dispatch_issue_nonblocking_en = plus::MEMBLOCK_DISPATCH_ISSUE_NONBLOCKING_EN;
@@ -1425,6 +1431,11 @@ class seq_csr_common;
         check_initialized("get_paddr_range");
         return paddr_range;
     endfunction:get_paddr_range
+
+    static function bit get_main_mem_ranges_en();
+        check_initialized("get_main_mem_ranges_en");
+        return main_mem_ranges_en;
+    endfunction:get_main_mem_ranges_en
 
     static function bit get_dispatch_issue_seq_en();
         check_initialized("get_dispatch_issue_seq_en");

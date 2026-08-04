@@ -57,6 +57,10 @@
 
 - `MEMBLOCK_MAIN_VADDR_BASE/RANGE` 只控制自动主表 normal transaction 的 `src_0/imm/vaddr` 生成范围。
 - `MEMBLOCK_PADDR_BASE/RANGE` 只控制 `tlb_map_builder` 为 TLB entry 选择的物理 PPN 范围。
+- `MEMBLOCK_MAIN_MEM_RANGES_EN` 只控制 DCache/Uncache shared sparse memory 是否把
+  `MEMBLOCK_PADDR_BASE/RANGE` 注册为严格物理访问窗口；默认值为 `1`，设为 `0` 时两个
+  memory-facing responder 都按 48-bit 物理地址懒分配。该开关不改变 TLB PPN 生成、主表虚拟地址
+  或任何 DUT 接口宽度。
 - 两组参数默认数值可以相同以保持 Bare smoke 兼容，但参数语义和 consumer 必须独立；translated testcase 可以配置不同 VA/PA 窗口。
 - manual directed 和 boundary profile 地址不由 `MEMBLOCK_MAIN_VADDR_BASE/RANGE` 全局拦截，避免破坏异常地址和边界地址构造。
 
