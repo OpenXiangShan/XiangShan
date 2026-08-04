@@ -108,7 +108,6 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ssid = UInt(SSIDWidth.W)
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-  val isLastInFtqEntry = Bool()
   val vtype            = VType()
   val specvtype        = VType()
   val debug_seqNum = InstSeqNum()

@@ -115,7 +115,6 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-    val isLastInFtqEntry = Bool()
     val vtype            = new VType()
     val specvtype        = new VType()
     val instr = UInt(32.W)
@@ -149,7 +148,6 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-    val isLastInFtqEntry = Bool()
     // DecodeOutUop also needs instr because the fusion decoder uses it.
     val instr = UInt(32.W)
     // commitType will be used in rob to calculate lsq commit count
@@ -243,7 +241,6 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-    val hasLastInFtqEntry = UInt(2.W)
     val compressType = CompressType()
     val complexHasDest = UInt(1.W)
     val hasStore = Bool()
@@ -315,11 +312,8 @@ object Bundles {
     val lsqIdxStart = new LSIdx
     val lsqIdxEnd = new LSIdx
     val hasException = Bool()
-    val ftqLastOffset = UInt(FetchBlockInstOffsetWidth.W) // store ftqoffset before change in rename
     val lastIsRVC = Bool() // store isrvc before change in rename
     val debug = OptionWrapper(backendParams.debugEn, new RenameOutUopDebug())
-    val crossFtqCommit = UInt(2.W) // use to caculate the ftq idx of ftqentry when commit
-    val crossFtq = Bool() // use to caculate the ftq idx of brh instructions when pass to exu
     def isLUI: Bool = this.fuType === FuType.alu.U && (this.selImm === SelImm.IMM_U || this.selImm === SelImm.IMM_LUI32)
     def needWriteRf: Bool = rfWen || fpWen || vecWen || v0Wen || vlWen
     def isAMOCAS: Bool = FuType.isAMO(fuType) && LSUOpType.isAMOCAS(fuOpType)
@@ -631,7 +625,6 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(FetchBlockInstOffsetWidth.W)
-    val ftqLastOffset   = UInt(FetchBlockInstOffsetWidth.W) // store ftqoffset before channge in rename
     val stdwriteNeed    = Bool()
     // passed from DecodeOutUop
     val srcType         = Vec(numSrc, SrcType())
@@ -648,7 +641,6 @@ object Bundles {
     val blockBackward   = Bool()
     val flushPipe       = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val canRobCompress  = Bool()
-    val hasLastInFtqEntry = UInt(2.W)
     val compressType    = CompressType()
     val complexHasDest = UInt(1.W)
     val hasStore = Bool()
