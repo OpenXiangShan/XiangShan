@@ -234,8 +234,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_firstEndIndex       = RegEnable(s0_firstEndIndex, s0_fire)
   private val s1_secondEndIndex      = RegEnable(s0_secondEndIndex, s0_fire)
   private val s1_secondStartIndex    = RegEnable(s0_secondStartIndex, s0_fire)
-  private val s1_rawFirstDataDup     = VecInit((0 until 2).map(i => cutICacheData(s1_firstICacheDataDup(i))))
-  private val s1_rawSecondDataDup    = VecInit((0 until 2).map(i => cutICacheData(s1_secondICacheDataDup(i))))
+  private val s1_rawFirstDataDup     = VecInit(s1_firstICacheDataDup.map(cutICacheData(_)))
+  private val s1_rawSecondDataDup    = VecInit(s1_secondICacheDataDup.map(cutICacheData(_)))
 
   private val s1_icacheMetaIn = RegEnable(s0_icacheMeta, s0_fire)
   private val s1_instrVec     = s1_compactedInstrVec
@@ -290,7 +290,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_firstEndPos     = s1_fetchBlock(0).takenCfiOffset.bits
   private val s1_firstEndHalfRvi = Wire(new EndHalfRviInfo)
   s1_firstEndHalfRvi.isHalfRvi := s1_firstEndIsHalfRvi
-  s1_firstEndHalfRvi.pc        := s1_fetchBlock(0).startVAddr + (s1_firstEndPos << 1)
+  s1_firstEndHalfRvi.pc        := s1_fetchBlock(0).startVAddr + (s1_firstEndPos << 1).asUInt
   s1_firstEndHalfRvi.data      := s1_rawFirstDataDup(0)(s1_firstEndIndex)(15, 0)
 
   private val s1_secondEndHalfRviData = s1_rawSecondDataDup(0)(s1_secondEndIndex)(15, 0)
