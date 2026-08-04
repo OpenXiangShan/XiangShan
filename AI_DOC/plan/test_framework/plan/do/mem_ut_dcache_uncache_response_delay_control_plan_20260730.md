@@ -223,7 +223,7 @@ Uncache A.fire：
 ### Uncache error 字段专项依赖
 
 抽象功能描述：`apply_uncache_d_error_injection()` 由
-`mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md` 实现，负责将 memory backend error 与
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md` 实现，负责将 memory backend error 与
 Uncache error 权重的单次采样结果合并，并映射为当前 D opcode 合法的 payload。本 response-delay plan
 只在 response record 创建时调用它一次；不持有权重、不重复实现归一化，也不在 D hold 期间再次调用。
 
@@ -430,7 +430,7 @@ response record 准入机会。
 - 主存数据读写、byte mask、DCache GrantAck、Probe、L2 flush 和 memory overlay 的正常语义不因本专项
   改变。Uncache opcode 从旧的“非 store 即 load”隐式 fallback 改为显式白名单，但合法 `Put*/Get` 的
   读写和 source/size 回传保持不变。Uncache `denied/corrupt` 的格式归一化与 runtime injection 由
-  `mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md` 统一负责；本 plan 仅在 record 创建时调用它。
+  `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md` 统一负责；本 plan 仅在 record 创建时调用它。
 - Uncache D hold watchdog 只产生一次 `uvm_warning`，不构成 timeout completion 或 error recovery；
   正常长 backpressure 仍必须等真实 D.fire 后才释放 response record。
 - `MEMBLOCK_DELAY_0_WT`、`MEMBLOCK_DELAY_1_20_WT`、`MEMBLOCK_DELAY_21_50_WT` 保持 dispatch 内部
@@ -469,8 +469,8 @@ memory 数据内容和 Probe/CBO 状态语义不因延迟档位改变。另有�
 正常 scalar MMIO/NC load/store 的主框架控制行为。另新增 sequence-local 的 Uncache D hold warning
 watchdog：旧逻辑在 D.ready 长期为 0 时只会等待、没有定位信息；新逻辑在固定 1000 个 driver
 clocking 边界后打印一次 response 快照，但仍保持并等待真实 D.fire。它是 debug 防御性修改，不是
-timeout abort、pass/fail 或 terminal 逻辑变更。Uncache D error 字段的协议归一化及随机注入由
-`mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md` 统一完成：它扩展的是合法 D payload 的
+timeout abort、pass/fail 或 terminal 逻辑变更。Uncache D error 字段的协议归一化及随机注入已由
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md` 统一完成：它扩展的是合法 D payload 的
 错误激励，不改变本 plan 的延迟调度、LSQ 异常优先级或主框架控制行为。
 
 ## 执行中补充/修正（IMPLEMENTATION_DELTA）
@@ -492,7 +492,8 @@ timeout abort、pass/fail 或 terminal 逻辑变更。Uncache D error 字段的�
 `[IMPLEMENTATION_DELTA]`
 
 - 来源：`apply_uncache_d_error_injection()` 的实现和权重属于
-  `mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md`，当前源码中尚不存在该 helper。
+  `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md`；本 response-delay
+  plan 完成时当前源码尚不存在该 helper，后续专项已在同一 record 创建点实现它。
 - 原 plan：要求 response-delay plan 在 record 创建时调用该 helper；若直接实现会把后续错误注入功能混入
   本专项并使单专项提交无法独立编译。
 - 实现调整：本专项先在 `create_uncache_response_record()` 固定 response kind、memory backend 返回的

@@ -334,22 +334,27 @@ else:
 | A | DUT 输出 | `corrupt` | 当前 coherent DCache 的 `AcquireBlock/AcquirePerm` 及 CBO 构造均为 0；responder 只采样并检查稳定性。非 0 不是可由 responder 解释的请求语义，应作为 DUT/protocol 异常记录。 |
 | B | DUT 输入 | `corrupt` | Probe 合法值只能为 0，且 DCache ProbeQueue 不消费该字段；轻量 responder 必须固定驱动 0，不能随机注入。 |
 | C | DUT 输出 | `corrupt` | `ProbeAckData/ReleaseData` 表示 data corrupt；DCache WritebackQueue 从 tag/data error 生成该值。无数据 `ProbeAck/Release` 的标准 TileLink 合同要求为 0，但当前 CoupledL2 SinkC 会把同一 wire 解释为 denied，因此轻量 responder 必须采样、保持握手闭环，不能自行改写。 |
-| D | DUT 输入 | `denied`、`corrupt` | 仅在与原 A/C request 匹配的合法 D opcode 上消费，具体约束见下表。当前正常 smoke 对两者固定 0。 |
+| D | DUT 输入 | `denied`、`corrupt` | 仅在与原 A/C request 匹配的合法 D opcode 上消费，具体约束见下表。默认 smoke 对两者固定 0；D-error 专项可在 response record 创建时按权重生成合法组合。 |
 | E | DUT 输出 | 无 | 不存在 `denied/corrupt`。 |
 
 D 通道错误字段必须按 opcode 驱动，不能随意组合：
 
 | D opcode | `denied` | `corrupt` | 最小 responder 规则 |
 |---|---|---|---|
-| `GrantData` | DCache 会累计并向 refill/forward error 路径传递 | DCache 会累计并标记返回数据错误；若 `denied=1`，TileLink 合同要求 `corrupt=1` | 正常模式两者均为 0。后续若建立 error injection，必须在 A.fire 时一次决定并在同一 GrantData 全部 beat 中保持一致，不能对单拍任意翻转。 |
+| `GrantData` | DCache 会累计并向 refill/forward error 路径传递 | DCache 会累计并标记返回数据错误；若 `denied=1`，TileLink 合同要求 `corrupt=1` | 默认两者均为 0。`MEMBLOCK_L2_GRANTDATA_*_WT` 只在对应 response record 创建时采样一次，并在全部 beat 与 D hold 中保持不变。 |
 | `Grant` | DCache 会累计该错误，但当前轻量模型不注入 | 合法 Grant 必须为 0 | 正常模式均为 0；不把 `Grant.corrupt=1` 当作合法随机激励。 |
-| `CBOAck` | CMOUnit 传给 LSQ `CMOResp.denied` | CMOUnit 传给 LSQ `CMOResp.corrupt` | 当前正常模式均为 0；如后续专项注入错误，仍必须发送匹配 CBO source 的 Ack，使 CMO FSM 能完成。 |
+| `CBOAck` | CMOUnit 传给 LSQ `CMOResp.denied` | CMOUnit 传给 LSQ `CMOResp.corrupt` | 默认两者均为 0。`MEMBLOCK_L2_CBO_ACK_*_WT` 在单拍 CBOAck record 创建时独立采样，仍发送匹配 CBO source 的 Ack，使 CMO FSM 能完成。 |
 | `ReleaseAck` | 必须为 0 | 必须为 0 | 轻量 responder 固定 0；非 0 属于协议违例，不能用作 writeback error 注入。 |
 
-当前 `dcache_mem__access_base_sequence` 已满足正常模式的最小处理：idle/B Probe/D reply
-均将这些输入驱为 0；DUT C `ProbeAckData/ReleaseData` 的 `corrupt` 被逐 beat 汇总，若任一
-beat corrupt 则跳过向测试框架主内存写回，但仍完成 Probe/Release 生命周期。它不需要为了
-“模拟 L2 错误原因”建立 directory 或下游 error model。
+当前 `dcache_mem__access_base_sequence` 的默认 normal 模式仍将 D 错误位驱为 0；只有显式设置
+六个 D-error runtime 权重时才生成错误 response。DCache `GrantData` 与 `CBOAck` 在 coherent
+response record 创建时保存错误快照，Uncache `AccessAckData/AccessAck` 则在
+`sbuffer_mem_access_base_sequence::create_uncache_response_record()` 创建 TL-UL response record
+时处理。scheduler、D hold、GrantAck/E、主表、LSQ、pass/fail 与 terminal 不重新解释或重采样这些位。
+
+DUT C `ProbeAckData/ReleaseData` 的 `corrupt` 仍被逐 beat 汇总；任一 beat corrupt 时跳过向测试框架
+memory overlay 写回，但仍完成 Probe/Release 生命周期。该 D-error 能力只构造合法 response stimulus，
+不建立 L2 directory、下游错误原因模型、RM 或 scoreboard。
 
 因此本轮约束为：
 
@@ -362,8 +367,10 @@ beat corrupt 则跳过向测试框架主内存写回，但仍完成 Probe/Releas
   只能 monitor/sample，不能由测试框架赋值；
   C data opcode 的 corrupt 数据不写入本地 memory overlay，但 handshake 和 owner 收敛继续完成。
 
-后续错误注入：
-  必须按 D opcode 建立单独专项，不得用随机 bit 翻转替代合法 transaction 错误语义。
+已实现的错误注入：
+  `GrantData` denied 命中强制 corrupt=1；非 denied 的 corrupt 由独立权重决定；
+  `CBOAck` 的 denied/corrupt 独立采样；`AccessAckData` denied 命中强制 corrupt=1；
+  无数据 `AccessAck` 只允许 denied，corrupt 固定 0。所有采样都只发生一次，不能用逐拍随机 bit 翻转替代。
 ```
 
 ## 8. 测试框架最小处理规则
@@ -447,4 +454,8 @@ GrantData D 的 isKeyword 参与关键 half 语义，B/E 没有该字段。
 
 新增：B corrupt 和 ReleaseAck denied/corrupt 固定 0；D GrantData/CBOAck 的错误位会被
 DCache 消费。轻量 responder 默认只驱动正常 0，DUT C data corrupt 时跳过本地内存写回并继续收敛。
+
+新增：D-error 专项已实现六个公共 runtime 权重。DCache `GrantData`、`CBOAck` 和 Uncache
+`AccessAckData/AccessAck` 只在各自 response record 创建点生成并保存合法错误组合；错误位不会进入
+主表、LSQ commit/deq、pass/fail 或 terminal 的软件判断。
 ```

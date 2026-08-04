@@ -10,6 +10,7 @@ responder 行为。它只模拟 MemBlock 对外的 L2 交接，不实现完整 L
 | 术语 | 当前含义 | 代码落点 | 生命周期 |
 |---|---|---|---|
 | `response record` | 已真实 A/C `fire`、等待最后一个 D beat 的 DCache 回复记录 | `dcache_rsp_q`、`current_d_record` | 建立于 A/C fire，最后一个 D.fire 后释放 record 容量 |
+| `D-error snapshot` | 本次 coherent D reply 的 `denied/corrupt` 固定值 | `dcache_response_record_t::denied/corrupt` | 建立 GrantData/CBOAck record 时采样一次，D hold 或多 beat 不重采样 |
 | `eligible_cycle` | record 最早允许参加 D 返回仲裁的逻辑拍 | `dcache_response_record_t::eligible_cycle` | DCache 真实请求在 `t` fire 后最早 `t+3` 可选 |
 | `scheduler timer` | 每次选择 D response 前按 delay weight 抽一次等待的定时器 | `dcache_rsp_timer_active/due_cycle` | 无 D hold 且存在 eligible record 时启动；选出 record 后清除 |
 | `current D hold` | 已被 scheduler 选中、正在 D channel 保持 payload 的唯一 record | `current_d_record/current_d_valid` | D.ready=0 时保持；最后一个 D.fire 时结束 |
@@ -118,9 +119,9 @@ source、param 和 memory 读取检查，并生成一个语义已固定的 respo
 `enqueue_dcache_response()` 是统一容量检查和入队入口。
 
 ```text
-AcquireBlock：读取两个 32B memory beat，建立两拍 GrantData；分配动态 sink；保留 alias、isKeyword 和一次 Hint 采样结果；
+AcquireBlock：读取两个 32B memory beat，建立两拍 GrantData；分配动态 sink；保留 alias、isKeyword、一次 Hint 采样和一次 D-error snapshot；若 denied 命中则强制 corrupt=1；
 AcquirePerm：建立单拍 Grant；分配动态 sink；
-CBO：建立单拍 CBOAck；不分配 sink；
+CBO：建立单拍 CBOAck；不分配 sink；denied/corrupt 由各自权重独立采样并保存在 record；
 所有 record：eligible_cycle = accept_cycle + 3；入 dcache_rsp_q；
 ```
 
@@ -175,6 +176,11 @@ GrantData：按 beat_idx 输出两个 32B beat；第一个 D.fire 只递增 beat
 CBOAck：最后 D.fire 后按 CBO opcode 删除对应 cached line（clean 保留）；释放 record；
 ReleaseAck：最后 D.fire 后释放 record；
 ```
+
+`MEMBLOCK_L2_GRANTDATA_DENIED_WT/CORRUPT_WT` 和
+`MEMBLOCK_L2_CBO_ACK_DENIED_WT/CORRUPT_WT` 都经过 `seq_csr_common` 读取。它们不改变
+response record 的准入、延迟、sink 或 Hint 逻辑。GrantData 的两个 D beat 与任何 D.ready hold
+只复用 record 中已保存的错误位；CBOAck 仍按原 source 和 opcode 完成 cached line 动作。
 
 最后一个 D.fire 立即归还 response record capacity，但 Grant sink 仍属于 `grant_ack_wait_q`，直到 E.fire
 匹配后才可分配给新的 Acquire。
@@ -250,5 +256,7 @@ Uncache TL-UL A/D responder 的独立 queue 和 delay 见
 - Hint 从独立 pending 状态改为附着在 GrantData record，最终选中 D response 后才输出；
 - 保留原有 A/C/E/Probe/overlay 和 global-stop 所有权，不把 responder 状态写入主表或 status table。
 
-当前默认 delay 为 `1..10` cycle、顺序返回。D error 随机注入、多 Probe/toB、alias conflict、
-CBO closure 和 L2 flush 仍由各自 undo plan 实现，不能在本 flow 中宣称已覆盖。
+当前默认 delay 为 `1..10` cycle、顺序返回。D-error 随机注入已由
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md` 实现：它只扩展 response record 的
+合法 D payload，不改变本 flow 的调度或主框架控制行为。多 Probe/toB、alias conflict、CBO closure
+和 L2 flush 仍由各自 undo plan 实现，不能在本 flow 中宣称已覆盖。

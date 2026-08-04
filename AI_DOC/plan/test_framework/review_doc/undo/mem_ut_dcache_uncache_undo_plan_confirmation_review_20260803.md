@@ -23,7 +23,7 @@
 - `AI_DOC/plan/test_framework/plan/undo/mem_ut_dcache_multi_probe_tob_control_plan_20260730.md`
 - `AI_DOC/plan/test_framework/plan/do/mem_ut_dcache_uncache_response_delay_control_plan_20260730.md`
 - `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_dcache_cbo_probe_closure_plan_20260731.md`
-- `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md`
+- `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md`
 
 第一轮 review 结论：发现四项必须修正的计划问题；未发现必须由用户在行为上二选一的新问题。默认值、
 Probe 默认关闭、DCache/Uncache 默认 `1..10` cycle、默认顺序返回、各通道 16 笔 response record 已有明确方案。

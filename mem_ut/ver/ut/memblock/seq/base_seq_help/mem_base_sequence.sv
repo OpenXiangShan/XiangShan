@@ -61,6 +61,10 @@ class mem_access_base_sequence extends uvm_sequence;
     extern static function void clear_main_mem_ranges();
     extern static function bit is_main_mem_access_in_range(input mem_addr_t addr, input mem_line_mask_t byte_mask);
     extern virtual function void paddr_to_error(input mem_addr_t addr, output bit corrupt, output bit denied);
+    extern function bit sample_d_error_enable(
+        input int unsigned weight,
+        input string       error_name
+    );
     extern static function mem_line_data_t build_lazy_line(input mem_line_addr_t line_addr);
     extern static function void ensure_main_line(input mem_line_addr_t line_addr);
     extern static function void ensure_write_overlay_line(input mem_line_addr_t line_addr);
@@ -161,6 +165,34 @@ function void mem_access_base_sequence::paddr_to_error(input mem_addr_t addr, ou
     corrupt = 1'b0;
     denied  = 1'b0;
 endfunction:paddr_to_error
+
+function bit mem_access_base_sequence::sample_d_error_enable(
+    input int unsigned weight,
+    input string       error_name
+);
+    bit enable;
+
+    if (weight > 100) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%s weight=%0d must be within [0:100]", error_name, weight))
+    end
+    if (weight == 0) begin
+        return 1'b0;
+    end
+    if (weight == 100) begin
+        return 1'b1;
+    end
+    if (!std::randomize(enable) with {
+            enable dist {
+                1'b1 := weight,
+                1'b0 := (100 - weight)
+            };
+        }) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("failed to randomize %s with weight=%0d", error_name, weight))
+    end
+    return enable;
+endfunction:sample_d_error_enable
 
 function mem_access_base_sequence::mem_line_data_t mem_access_base_sequence::build_lazy_line(input mem_line_addr_t line_addr);
     mem_line_data_t line_data;
@@ -1288,6 +1320,16 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
             response_record.line_alias     = req_xact.auto_inner_dcache_client_out_a_bits_user_alias;
             response_record.data_low       = line_data_low;
             response_record.data_high      = line_data_high;
+            // 中文注释：GrantData 错误位只在 response record 创建时采样一次。
+            // denied 命中时协议要求 corrupt 同时置位；后续两拍 D 和 D.ready hold 只复用该快照。
+            response_record.denied = sample_d_error_enable(
+                seq_csr_common::get_l2_grantdata_denied_wt(),
+                "DCache GrantData denied"
+            );
+            response_record.corrupt = response_record.denied ? 1'b1 : sample_d_error_enable(
+                seq_csr_common::get_l2_grantdata_corrupt_wt(),
+                "DCache GrantData corrupt"
+            );
             response_record.hint_pending   = sample_hint_enable();
             response_record.hint_source_id = req_xact.auto_inner_dcache_client_out_a_bits_source[3:0];
             response_record.hint_isKeyword = req_xact.auto_inner_dcache_client_out_a_bits_echo_isKeyword;
@@ -1327,6 +1369,16 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
             response_record.kind       = DCACHE_PENDING_D_CBO_ACK;
             response_record.beat_count = 1;
             response_record.cbo_opcode = req_xact.auto_inner_dcache_client_out_a_bits_opcode;
+            // 中文注释：CBOAck 的 denied/corrupt 是独立可控错误位；当前 CBO direct-ack
+            // 路径在 record 创建时固定它们，后续 CBO Probe closure 迁移 ack 创建点时必须保留同一语义。
+            response_record.denied = sample_d_error_enable(
+                seq_csr_common::get_l2_cbo_ack_denied_wt(),
+                "DCache CBOAck denied"
+            );
+            response_record.corrupt = sample_d_error_enable(
+                seq_csr_common::get_l2_cbo_ack_corrupt_wt(),
+                "DCache CBOAck corrupt"
+            );
         end
         default: begin
             `uvm_fatal(get_type_name(),
@@ -2134,6 +2186,13 @@ class sbuffer_mem_access_base_sequence extends mem_access_base_sequence;
         input longint unsigned current_cycle,
         input int unsigned      visible_count
     );
+    extern virtual function void apply_uncache_d_error_injection(
+        input uncache_response_kind_e response_kind,
+        input bit                     backend_denied,
+        input bit                     backend_corrupt,
+        output bit                    d_denied,
+        output bit                    d_corrupt
+    );
     extern virtual task create_uncache_response_record(
         input sbuffer_agent_agent_xaction req_xact,
         input longint unsigned            accept_cycle
@@ -2416,6 +2475,46 @@ function void sbuffer_mem_access_base_sequence::service_uncache_response_schedul
     uncache_rsp_timer_active = 1'b0;
 endfunction:service_uncache_response_scheduler
 
+function void sbuffer_mem_access_base_sequence::apply_uncache_d_error_injection(
+    input uncache_response_kind_e response_kind,
+    input bit                     backend_denied,
+    input bit                     backend_corrupt,
+    output bit                    d_denied,
+    output bit                    d_corrupt
+);
+    bit inject_denied;
+    bit inject_corrupt;
+
+    // 中文注释：该 helper 只在 Uncache response record 创建点调用一次，合并 backend 与
+    // runtime 注入错误；scheduler/D hold 之后只搬运已固定的 record 字段，不可再次随机。
+    inject_denied = sample_d_error_enable(
+        seq_csr_common::get_uncache_denied_wt(),
+        "Uncache denied"
+    );
+    d_denied = backend_denied || inject_denied;
+    d_corrupt = 1'b0;
+
+    case (response_kind)
+        UNCACHE_RESPONSE_LOAD_DATA: begin
+            inject_corrupt = sample_d_error_enable(
+                seq_csr_common::get_uncache_corrupt_wt(),
+                "Uncache corrupt"
+            );
+            d_corrupt = backend_corrupt || inject_corrupt || d_denied;
+        end
+        UNCACHE_RESPONSE_STORE_ACK: begin
+            if (backend_corrupt) begin
+                `uvm_fatal(get_type_name(),
+                           "Uncache AccessAck cannot carry backend corrupt=1")
+            end
+        end
+        default: begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("unsupported Uncache response kind=%0d for D error injection", response_kind))
+        end
+    endcase
+endfunction:apply_uncache_d_error_injection
+
 task sbuffer_mem_access_base_sequence::create_uncache_response_record(
     input sbuffer_agent_agent_xaction req_xact,
     input longint unsigned            accept_cycle
@@ -2450,10 +2549,14 @@ task sbuffer_mem_access_base_sequence::create_uncache_response_record(
     response_record.size           = req_xact.auto_inner_buffers_out_a_bits_size;
     response_record.source         = req_xact.auto_inner_buffers_out_a_bits_source;
     response_record.address        = req_xact.auto_inner_buffers_out_a_bits_address;
-    response_record.denied         = denied;
     response_record.data           = (response_kind == UNCACHE_RESPONSE_STORE_ACK) ? '0 : load_data;
-    // 当前专项保留 backend 的 load corrupt；AccessAck 本身不携带 corrupt 语义。
-    response_record.corrupt        = (response_kind == UNCACHE_RESPONSE_STORE_ACK) ? 1'b0 : corrupt;
+    apply_uncache_d_error_injection(
+        response_kind,
+        denied,
+        corrupt,
+        response_record.denied,
+        response_record.corrupt
+    );
     uncache_rsp_q.push_back(response_record);
 endtask:create_uncache_response_record
 

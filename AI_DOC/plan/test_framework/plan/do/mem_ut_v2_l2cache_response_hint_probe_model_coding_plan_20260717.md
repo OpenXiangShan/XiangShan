@@ -1181,3 +1181,11 @@ canonical `basicTest + memblock_dispatch_real_smoke_vseq` 仍使用既有 `wait 
 VCS compile 的功能结果为 0 error，但日志包含工具自身的 `LCA_FEATURES_ENABLED` warning；UVM 运行
 日志也保留既有 resource/default-sequence warning。验收只记录 `TEST_PASS`、`UVM_ERROR=0` 和
 `UVM_FATAL=0`，不再把结果写成“0 warning”。
+
+### 19.16 后续 D-error 专项实施注记
+
+本归档 plan 中“`denied/corrupt` 固定为 0”仅描述其完成时的 normal responder 行为。后续
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md` 已在
+现有 response-record pipeline 上实现六个默认关闭的 D-error 权重：GrantData denied 命中强制
+corrupt=1，CBOAck 两位独立采样，Uncache 按 AccessAckData/AccessAck opcode 规范化。该增量不恢复
+本 plan 的旧单 pending 模型，也不改变其 delay、sink、GrantAck、Hint 或 Probe 所有权。
