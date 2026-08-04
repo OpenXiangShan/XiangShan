@@ -21,6 +21,7 @@
         force RTL_PATH.io_ooo_to_mem_lsqio_pendingMMIOld = U_IF_NAME.io_ooo_to_mem_lsqio_pendingMMIOld; \
         force RTL_PATH.io_ooo_to_mem_lsqio_pendingst = U_IF_NAME.io_ooo_to_mem_lsqio_pendingst; \
         force RTL_PATH.io_ooo_to_mem_lsqio_scommit = U_IF_NAME.io_ooo_to_mem_lsqio_scommit; \
+        force RTL_PATH.io_ooo_to_mem_isStoreException = U_IF_NAME.io_ooo_to_mem_isStoreException; \
     end \
     `else \
     initial begin \
@@ -30,6 +31,7 @@
         force U_IF_NAME.io_ooo_to_mem_lsqio_pendingMMIOld = RTL_PATH.io_ooo_to_mem_lsqio_pendingMMIOld; \
         force U_IF_NAME.io_ooo_to_mem_lsqio_pendingst = RTL_PATH.io_ooo_to_mem_lsqio_pendingst; \
         force U_IF_NAME.io_ooo_to_mem_lsqio_scommit = RTL_PATH.io_ooo_to_mem_lsqio_scommit; \
+        force U_IF_NAME.io_ooo_to_mem_isStoreException = RTL_PATH.io_ooo_to_mem_isStoreException; \
     end \
     `endif
 

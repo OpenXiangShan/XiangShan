@@ -13,7 +13,6 @@ class vecissue_agent_agent_xaction  extends tcnt_data_base;
     // stable vtype/index/capacity legality; scenario templates should still
     // refine fuOpType and vpu fields together.
 
-    rand bit io_ooo_to_mem_isStoreException;
     rand bit [4:0] io_ooo_to_mem_issueVldu_0_bits_flowNum;
     rand bit io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay;
     rand bit [127:0] io_ooo_to_mem_issueVldu_0_bits_src_0;
@@ -100,7 +99,6 @@ class vecissue_agent_agent_xaction  extends tcnt_data_base;
 
     `uvm_object_utils_begin(vecissue_agent_agent_xaction)
 
-        `uvm_field_int(io_ooo_to_mem_isStoreException, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_issueVldu_0_bits_flowNum, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_issueVldu_0_bits_src_0, UVM_ALL_ON);

@@ -18,6 +18,13 @@ class `TC_NAME extends tc_base;
         super.new(name, parent);
     endfunction
 
+    // Test subclasses may refine an already-created smoke cfg before env creates agents.
+    virtual function void configure_smoke_env_cfg(input memblock_env_cfg cfg);
+        if (cfg == null) begin
+            `uvm_fatal(get_type_name(), "configure_smoke_env_cfg got null cfg")
+        end
+    endfunction
+
     virtual function void build_phase(uvm_phase phase);
         smoke_cfg = memblock_env_cfg::type_id::create("smoke_cfg");
         void'(smoke_cfg.randomize());
@@ -44,6 +51,7 @@ class `TC_NAME extends tc_base;
         smoke_cfg.u_io_mem_to_ooo_iq_feedback_agent_agent_cfg.xz_sw = tcnt_dec_base::OFF;
         smoke_cfg.u_other_ctrl_agent_agent_cfg.xz_sw = tcnt_dec_base::OFF;
 
+        configure_smoke_env_cfg(smoke_cfg);
         uvm_config_db#(memblock_env_cfg)::set(this, "env", "cfg", smoke_cfg);
         super.build_phase(phase);
         // Smoke only checks top-level bring-up and basic UVM phasing.

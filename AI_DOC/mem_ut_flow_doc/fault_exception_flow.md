@@ -2,10 +2,22 @@
 
 本文按通用 flow 文档规则整理 mem_ut 中 real writeback fault 之后的处理。关键结论：**fault 状态先在 `writeback_status_handler::handle_real_writeback_event()` 中通过 `mark_target_fault()` 落表；随后 fault event 进入 `push_feedback_event()`，由 `handle_fault_event()` 消费，但不重复 mark fault。**
 
+fault 到达 modeled ROB head 后，`lsq_commit_handler`还会生成独立的
+`io_ooo_to_mem_isStoreException` level sideband：load fault驱动0，scalar store/CBO fault驱动1；
+该值不产生fault，只决定DUT选择LQ还是SQ异常地址来源。
+
 V2 scalar STA fault writeback 在严格模式下还必须先观察到同一 current issue 的 STA IQ
 feedback success；否则 `handle_real_writeback_event()` 以 `WB_STATUS_STA_ORDER` fail-fast。
 STA IQ 的 SQ-only 反查、同拍 IQ/WB 顺序和 ctrl deq 延后规则见
 [`iq_feedback_replay_v2_flow.md`](iq_feedback_replay_v2_flow.md)。
+
+software-only fault smoke也遵守这条既有合同：它在构造STA fault writeback前，使用同一SQ key推入synthetic
+STA IQ-hit并由`collect_monitor_event_batch()`完成既有adapter/handler处理；这只是testcase激励前置条件，
+不改变fault、writeback或`isStoreException`的主流程。
+
+software-only fault smoke在注入fault writeback后还会调用既有`exception_redirect_replay_task()`消费
+`exception_event_q`中的fault recovery event。该调用只复用`handle_fault_event()`的队列消费职责，不重复
+`mark_target_fault()`，避免测试结束时把合法已提交的fault event遗留在runtime drain检查中。
 
 ## 1. 函数调用 Flow 图
 
@@ -40,6 +52,12 @@ flowchart TD
     Z --> AA[resolve_uid_for_event]
     Z --> AB[get_event_issue_epoch/get_event_replay_seq]
     AB --> AC[consume only, no mark_target_fault]
+    R --> AD[select_fault_head_candidate]
+    AD --> AE[fault_uid_is_store_exception]
+    AE --> AF[lsqcommit driver sends sideband]
+    AF --> AG[mark_fault_rob_commit_uid latches type and token]
+    AG --> AH[wait LQ or SQ deq]
+    AH --> AI[consume_fault_retire]
 ```
 
 ## 1.1 函数调用 Flow 图整体文字伪代码
@@ -68,6 +86,13 @@ Fault / Exception 主流程：
    push_feedback_event 再次 normalize，成功后写入 exception_event_q；
    process_pending_events 出队后如果没有 redirect 抢占，调用 handle_fault_event；
    handle_fault_event 只解析 uid/issue_epoch/replay_seq 并消费事件，不重新调用 mark_target_fault。
+
+5. fault head commit与异常地址类型：
+   lsq_commit_handler只在fault到达modeled ROB head时选择该uid；
+   fault_uid_is_store_exception从主表统一operation behavior派生store bit并写入本拍lsqcommit transaction；
+   driver发送后，mark_fault_rob_commit_uid建立fault token并锁存同一bit；
+   后续idle、normal commit、deq和redirect保持该level值，直到新的fault transaction覆盖；
+   fault uid同时等待ROB commit和真实LQ/SQ mapping释放，再由consume_fault_retire进入非成功终态。
 ```
 
 
@@ -298,7 +323,41 @@ required_targets_done 即使返回 true，也还要检查 !status.fault 和 !sta
 - `try_retire_committed_uid()`：commit/deq 后识别 fault 并进入 terminal retire。
 - `consume_fault_retire()`：清 exception_pending，设置 success=0、terminal_done=1 并释放 active uid。
 
-## 6.1 `consume_fault_retire()`
+### 6.1 `fault_uid_is_store_exception()` 与 fault sideband
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/lsq_commit_handler.sv`
+
+抽象功能描述：该helper只根据fault UID的权威主表操作分类生成ROB exception store bit；
+`build_lsqcommit_xaction()`把结果放入本拍transaction，`mark_fault_rob_commit_uid()`在发送后提交到
+`latched_is_store_exception`。它不修改fault判定、pass/fail或LSQ资源。
+
+真实逻辑摘要：
+
+```systemverilog
+behavior = lsq_ctrl_model::derive_op_behavior(data.get_main_transaction(uid));
+return memblock_op_behavior_util::is_scalar_rob_store_commit(behavior);
+
+if (has_fault_head)
+    tr.io_ooo_to_mem_isStoreException = fault_uid_is_store_exception(fault_uid);
+...
+latched_is_store_exception = fault_is_store_exception;
+```
+
+文字伪代码：
+
+```text
+检查main table已ready且uid在有效范围；
+读取该uid的main transaction，并调用统一operation behavior helper；
+普通scalar store和STU CBO返回1，load/atomic返回0，vector或非法编码沿用统一helper的fatal；
+构造fault transaction时只预览结果，不提前更新handler latch；
+transaction发送后，mark_fault_rob_commit_uid完成既有fault token状态更新，再把同一结果写入latch；
+后续clear_lsqcommit_xaction从latch恢复level值，因此普通周期不会自动清0。
+```
+
+`pendingst`仍表示normal active ROB head是scalar store；fault head必须保持`pendingst=0`。
+因此`pendingst`和`isStoreException`不能互相替代，也不能用前者推导后者。
+
+### 6.2 `consume_fault_retire()`
 
 源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
 
@@ -457,6 +516,8 @@ real writeback fault 未被 redirect 覆盖：
   -> handle_fault_event
   -> resolve_uid_for_event / get_event_issue_epoch / get_event_replay_seq
   -> consume only，不重复 mark_target_fault
+  -> fault到达ROB head后，fault_uid_is_store_exception生成异常地址store bit
+  -> lsqcommit transaction驱动DUT，mark_fault_rob_commit_uid锁存该bit并建立fault token
   -> 后续 ROB commit 且 LQ/SQ deq 完成
   -> try_retire_committed_uid
   -> consume_fault_retire
@@ -489,6 +550,8 @@ real writeback fault 未被 redirect 覆盖：
   fault event 随后进入 push_feedback_event，用于 recovery queue 统一消费和调试追踪；
   process_pending_events 中没有 redirect 抢占时，handle_fault_event 只解析 uid/epoch/replay_seq 并消费 event；
   handle_fault_event 不再调用 mark_target_fault，避免 fault 状态重复写入。
+  当fault到达modeled ROB head时，lsq_commit_handler根据主表operation behavior生成isStoreException；
+  load fault为0，scalar store/CBO fault为1；driver发送后才更新level latch，普通周期不清零；
   当该 uid 后续完成 ROB commit 且 LQ/SQ active map 都释放后：
     try_retire_committed_uid 识别 fault/exception；
     调用 consume_fault_retire；

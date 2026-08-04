@@ -34,13 +34,13 @@
 | `io_mem_to_ooo_wakeup_agent_agent` | 12 | 12 | 12 | 12 | 0 |
 | `itlb_agent_agent` | 64 | 64 | 64 | 64 | 4 |
 | `lintsissue_agent_agent` | 112 | 112 | 112 | 112 | 105 |
-| `lsqcommit_agent_agent` | 6 | 6 | 6 | 6 | 6 |
+| `lsqcommit_agent_agent` | 7 | 7 | 7 | 7 | 7 |
 | `lsqenq_agent_agent` | 234 | 234 | 234 | 234 | 234 |
 | `other_ctrl_agent_agent` | 16 | 16 | 16 | 16 | 4 |
 | `prefetch_agent_agent` | 11 | 11 | 11 | 11 | 0 |
 | `redirect_agent_agent` | 4 | 4 | 4 | 4 | 4 |
 | `sbuffer_agent_agent` | 20 | 20 | 20 | 20 | 10 |
-| `vecissue_agent_agent` | 76 | 76 | 76 | 76 | 74 |
+| `vecissue_agent_agent` | 75 | 75 | 75 | 75 | 73 |
 
 ## 4. 逐 agent interface 信号列表
 
@@ -848,6 +848,7 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/lsqcommit_agent_agent/src/lsqco
 | `io_ooo_to_mem_lsqio_pendingMMIOld` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_lsqio_pendingMMIOld`<br>RTL->IF: `io_ooo_to_mem_lsqio_pendingMMIOld` | 有 | 有 |
 | `io_ooo_to_mem_lsqio_pendingst` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_lsqio_pendingst`<br>RTL->IF: `io_ooo_to_mem_lsqio_pendingst` | 有 | 有 |
 | `io_ooo_to_mem_lsqio_scommit` | `[3:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_lsqio_scommit`<br>RTL->IF: `io_ooo_to_mem_lsqio_scommit` | 有 | 有 |
+| `io_ooo_to_mem_isStoreException` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_isStoreException`<br>RTL->IF: `io_ooo_to_mem_isStoreException` | 有 | 有 |
 
 ### 4.15 `lsqenq_agent_agent`
 
@@ -1175,7 +1176,6 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/vecissue_agent_agent/src/veciss
 
 | 信号 | 位宽 | drv_cb方向 | mon_cb方向 | xaction字段 | connect | connect方向/对象（解析） | monitor采集 | driver驱动 |
 |---|---|---|---|---|---|---|---|---|
-| `io_ooo_to_mem_isStoreException` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_isStoreException`<br>RTL->IF: `io_ooo_to_mem_isStoreException` | 有 | 有 |
 | `io_ooo_to_mem_issueVldu_0_bits_flowNum` | `[4:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_issueVldu_0_bits_flowNum`<br>RTL->IF: `io_ooo_to_mem_issueVldu_0_bits_flowNum` | 有 | 有 |
 | `io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay`<br>RTL->IF: `io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay` | 有 | 有 |
 | `io_ooo_to_mem_issueVldu_0_bits_src_0` | `[127:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_issueVldu_0_bits_src_0`<br>RTL->IF: `io_ooo_to_mem_issueVldu_0_bits_src_0` | 有 | 有 |
@@ -1720,6 +1720,10 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/vecissue_agent_agent/src/veciss
 ## 7. 结论
 
 - 当前 agent interface 与 xaction、monitor 采集整体闭合；本次静态检查未发现缺 xaction 字段。规则上纯握手 `ready` 字段后续可按语义例外处理，但本轮不依赖该例外。
+
+- `io_ooo_to_mem_isStoreException`已从vector issue字段链迁移到`lsqcommit_agent_agent`。该DUT input
+  由lsqcommit handler按fault UID类型生成，driver按level sideband保持；`vecissue_agent_agent`不再声明、
+  驱动、采样或连接该字段，避免同一端口出现双owner。
 
 - 本文统计的“没有 driver 驱动”仅表示当前 driver 源码没有主动赋值该 interface 字段。对于 DUT output 或被动采样类接口，这是预期状态；后续只需要重点关注 DUT input 且测试目标要求主动驱动的未驱动字段。
 

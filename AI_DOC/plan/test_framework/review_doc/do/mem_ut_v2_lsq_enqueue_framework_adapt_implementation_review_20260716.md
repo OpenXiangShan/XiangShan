@@ -2245,9 +2245,9 @@ override、agent driver、VIF和DUT采样路径。日志确认被测default sequ
   refill hint/flush-done RTL分析文档，属于DCache sideband专项。
 - `AI_DOC/analysis/rtl/v2/flows/l2_inner_tilelink_request_response_flow.md`：未跟踪的L2 inner TileLink
   request/response RTL分析文档，属于DCache/L2接口专项。
-- `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_csr_control_runtime_semantic_review_execution_plan_20260708.md`：
+- `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_csr_control_runtime_semantic_review_execution_plan_20260708.md`：
   CSR control/sfence `flushPipe` 接口透传专项 Plan，属于其他功能逻辑，需要独立 coding/review。
-- `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_test_framework_adapt_coding_plan_20260708.md`：本专项只覆盖
+- `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_test_framework_adapt_coding_plan_20260708.md`：本专项只覆盖
   该总控Plan中的LSQ enqueue状态/路径同步；同文件当前diff中的CSR/sfence `flushPipe` 方案属于并发专项，
   不纳入本次LSQ功能正确性结论，也不进入本次commit。
 

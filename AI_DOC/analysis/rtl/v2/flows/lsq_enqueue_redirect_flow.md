@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `6e721ccb42bec882b3254062bff003294a507854` |
+| 核验 commit | `f3bdd04b3763147e714a786d078e0cb90460a31d` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `src/main/scala/xiangshan`；DUT 生成基线见 `mem_ut/ver/ut/memblock/rule/version/v2/memblock_rtl_profile.md` |
-| 最后核验日期 | `2026-07-15` |
+| 最后核验日期 | `2026-07-27` |
 
 ## Flow 范围
 
@@ -336,6 +336,60 @@ Redirect 到来后：
 - `LsqEnqCtrl` 等 Dispatch queue 清空并收到 LQ/SQ cancel count 后，回退影子
   `lqPtr/sqPtr`，增加 free counter；恢复窗口内通过 `t2_update/t3_update` 阻止新入队。
 
+### 5.1 ROB exception 的 `flush` anchor 与 fault store
+
+ROB head 的普通 exception 不等价于 `flushAfter`。`Rob.scala` 对 `deqHasException`
+生成 `flushOut.bits.level = RedirectLevel.flush`，该 level 的 `flushItself=1`；因此
+redirect 的 `robIdx` 本身和所有更年轻 uop 都满足 `robIdx.needFlush(redirect)`。
+完整 Core 中该 redirect 经 CtrlBlock/Backend/`XSCore` 回灌到 `MemBlock.io.redirect`，再
+作为 `LSQWrapper.brqRedirect` 进入 StoreQueue。
+
+对已分配的 fault store，StoreQueue 的结果依赖 redirect 到达时 entry 是否已 `committed`：
+
+```text
+未 committed：
+  needCancel = allocated && !committed && robIdx.needFlush(redirect)
+  -> entry 被取消
+  -> redirect T0 后在 T2 输出 sqCancelCnt
+
+已 committed 且 STA 已置 hasException：
+  -> 不走 redirect cancel
+  -> 进入 exception dataBuffer drain
+  -> SBuffer handshake 不写真实数据，但使 completed=1
+  -> 由 sqDeq 输出物理释放数量
+```
+
+所以 `sqCancelCnt` 与 `sqDeq` 是两种不同的释放报告，不能要求 fault store 必有其中某一个，
+更不能用 `scommit` 代替任一输出。`scommit` 只统计 normal ROB scalar-store commit；fault
+head 的 normal commit 被阻止，仍可能通过上述任一路径释放 SQ entry。
+
+在不接入该 ROB redirect 的 standalone 环境中，`sqCancelCnt` 不是可用的本地恢复手段。此时
+测试框架只能保持 fault head 的 `pendingPtr`，等待 DUT 自己输出 `sqDeq`；该等待只适用于
+已进入 StoreQueue exception completion 的 cacheable/NC/scalar-MMIO fault，或 request 已发出
+后的 MMIO response fault。scalar MMIO fault 虽不会发 MMIO request，但 StoreUnit 会清除写入
+SQ 的 `mmio` 标志，使非 CBO entry 按通用 exception drain 释放。early CBO fault 不同：其
+`wline` entry 不会由通用 SBuffer handshake 置 `completed`，CMO request 又受 `!hasException`
+门控；仅有 `pendingPtr` 时没有 `sqDeq`。不得软件伪造 release，必须在 bounded watchdog 后
+报 `uvm_fatal`。这是一条测试框架可驱动性边界，不要求也不实现 RM/checker。
+
+### 5.2 vector LS 与 AMO/MOU 的 cancel 边界
+
+普通 vector load/store 会分别分配 LQ/SQ，但它们的 fault 并非只能等待 ROB redirect：
+
+- vector load merge buffer 收齐 flow 后，同时发异常 writeback 和 FLUSH feedback；
+  `VirtualLoadQueue` 对匹配 feedback 置 `committed`，可自然产生 `lqDeq`。
+- vector store 的 FLUSH feedback 会置 `vecMbCommit`。若 ROB-head `pendingPtr` 已使该 entry
+  `committed`，它按 `hasException` drain 产生 `sqDeq`；若 redirect 先命中未 committed entry，
+  则产生 `sqCancelCnt`。
+- segment vector LS 和 `FuType.mou` 在 `NewDispatch` 中不进入普通 LSQ request，分别由
+  `VSegmentUnit` 与 `AtomicsUnit` 的 finish/writeback 路径释放本地状态，不应等待
+  `lqDeq/sqDeq`。
+
+所有真正送到 ROB 的架构 fault 仍会在 ROB head 产生 `RedirectLevel.flush`，用于移除 faulting
+ROB entry 和回滚年轻指令。这里说明的是本地资源释放不总以该 redirect 为唯一条件。完整
+源码顺序和 FOF 例外见
+[ROB 压缩与后端指令信息流](rob_compress_and_backend_instruction_flow.md#82-vector-ls-与-amomou-fault-是否依赖-rob-redirect-释放)。
+
 ## `flushPipe` 对入队的直接与间接影响
 
 | 场景 | 是否直接检查 `flushPipe` | 对入队的实际影响 |
@@ -399,6 +453,12 @@ redirect 对齐必须在 V3 分支/profile 下独立核验；本文不把 V2 内
 - `src/main/scala/xiangshan/mem/lsqueue/VirtualLoadQueue.scala:92-134,163-203,232-238`：Load以 `free>=LSQLdEnqWidth` 产生 `canAccept`，并处理同拍取消、entry写入和指针恢复。
 - `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:290-418,1476-1524`：Store以 `free>=LSQStEnqWidth` 产生 `canAccept`，并处理同拍取消、entry写入和两拍恢复。
 - `src/main/scala/xiangshan/backend/rob/RobBundles.scala:193-198`：redirect年龄范围和`flushItself`语义。
+- `src/main/scala/xiangshan/package.scala:179-185`、`src/main/scala/xiangshan/backend/rob/Rob.scala:573-650`：ROB exception 产生 `RedirectLevel.flush`，其 redirect 包含 anchor 自身。
+- `src/main/scala/xiangshan/backend/CtrlBlock.scala:749-757`、`src/main/scala/xiangshan/XSCore.scala:235`、`src/main/scala/xiangshan/mem/MemBlock.scala:1419`：ROB redirect 回灌 StoreQueue 的连接链。
+- `src/main/scala/xiangshan/mem/pipeline/StoreUnit.scala:122,256,461-545`：CBO `wline`、scalar MMIO exception 时 SQ `mmio` 清除、异常回填。
+- `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:830-985,1038-1071,1126-1160,1204-1343,1476-1524`：fault store 的 `committed`/exception drain、NC/MMIO response 条件、`sqDeq` 和 `sqCancelCnt` 两条释放路径。
+- `src/main/scala/xiangshan/mem/vector/VMergeBuffer.scala:112-129,351-417`、`src/main/scala/xiangshan/mem/lsqueue/VirtualLoadQueue.scala:217-230`、`src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:1454-1488`：vector LS 的异常 feedback、自然 deq 和 redirect cancel 边界。
+- `src/main/scala/xiangshan/backend/dispatch/NewDispatch.scala:688-707`、`src/main/scala/xiangshan/mem/vector/VSegmentUnit.scala:870-961`、`src/main/scala/xiangshan/mem/pipeline/AtomicsUnit.scala:401-431`：segment 与 MOU 不分配普通 LSQ，并由各自 finish/writeback 路径释放本地状态。
 - `src/main/scala/xiangshan/backend/rob/Rob.scala:578-630`：`flushPipe`在ROB头生成`flushAfter`。
 - `src/main/scala/xiangshan/backend/decode/DecodeUnit.scala:228-231,454-460,490-491`：Fence类指令的`blockBackward/flushPipe`属性。
 
@@ -411,6 +471,9 @@ redirect 对齐必须在 V3 分支/profile 下独立核验；本文不把 V2 内
 | 2026-07-15 | `6e721ccb42bec882b3254062bff003294a507854` | 已给出 `3 x 2=6`、`2 x 2=4`，但未展开各 IQ 分类及 enqueue/issue 宽度边界 | 补充 LDU/STA/VLSU/STD 汇总表，明确 `numEnq` 是 Dispatch 入队宽度，STD 复用 STA 分配，实际 issue pipe 为 3/2/2 | 用户要求分析 store 为 4、load 为 6 的源码原因和关联结构 | V2 memory scheduler、IssueQueue、LSQ allocation 宽度 |
 | 2026-07-15 | `6e721ccb42bec882b3254062bff003294a507854` | “总容量”和 load/store 分容量容易被理解为共享 entry 池 | 区分公共 6-slot 请求宽度、分类 6/4 allocation 上限和独立 72/56 物理队列，并说明合并 `canAccept` 的整包门控原因 | 用户要求解释进入 LSQ 的总量与 load/store 分量为何并存 | V2 LsqEnqIO、LsqEnqCtrl、LsqWrapper、LQ/SQ |
 | 2026-07-15 | `6e721ccb42bec882b3254062bff003294a507854` | 已说明 redirect 阻止/取消入队，但未明确 flush release 后是否存在额外硬件 guard | 补充 `do_enq`、LQ/SQ `enqCancel`、已分配 entry cancel 三个覆盖点，并明确 Scala 中没有 flush 解除后固定拍数 retry guard | 用户询问 redirect/flush 是否能阻塞取消入队，以及测试框架是否可复用 flush 标志阻塞 LSQ 入队 | V2 LsqEnqCtrl、VirtualLoadQueue、StoreQueue、mem_ut LSQ retry guard 建模边界 |
+| 2026-07-27 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 只说明 redirect 取消未 committed entry，未说明 ROB exception 的 flush anchor 与 fault store 的另一条 SQ 清理路径 | 补充 exception 使用 `flush` 并覆盖 anchor 自身；未 committed fault store 走 `sqCancelCnt`，已 committed 且 `hasException` 的 fault store 可走无真实 SBuffer 写入的 `sqDeq` | 用户要求结合 V2 Scala 核对 fault、redirect、`scommit` 与 SQ 出队关系 | V2 ROB/CtrlBlock/Backend/MemBlock/StoreQueue/SBuffer |
+| 2026-07-27 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 只描述完整 Core redirect 下的 fault 释放，未说明 standalone 不驱动 redirect 时哪些 fault 可以等待 raw deq | 明确 NC/cacheable/scalar-MMIO exception completion 与 MMIO response fault 可等待真实 `sqDeq`；只有 early CBO fault 无 natural deq，需 watchdog fail-fast 而非软件 release | 用户要求限定本轮只改测试框架、不新增 RM，并确认 raw deq 等待边界 | V2 StoreUnit/StoreQueue/uncache/MMIO/CBO/standalone mem_ut |
+| 2026-07-27 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 已分配 entry 的 fault cancel 仅按 scalar store 描述，容易误读为 vector LS 与 MOU 都必须靠 ROB cancel 释放 | 补充 vector load 自然 `lqDeq`、vector store deq/cancel 双路径，以及 segment/MOU 不进入普通 LSQ 的边界 | 用户追问 vector LS、AMO/MOU fault 是否均依赖 ROB exception redirect/cancel | V2 vector merge buffer/VLQ/SQ/VSegmentUnit/AtomicsUnit/ROB redirect |
 
 ## 待确认项
 

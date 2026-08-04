@@ -28,6 +28,7 @@ class lsq_commit_handler extends uvm_object;
     bit                fault_head_waiting;
     memblock_uid_t     fault_head_uid;
     int unsigned       fault_head_dynamic_epoch;
+    bit                latched_is_store_exception;
 
     `uvm_object_utils(lsq_commit_handler)
 
@@ -44,6 +45,7 @@ class lsq_commit_handler extends uvm_object;
         fault_head_waiting = 1'b0;
         fault_head_uid = 0;
         fault_head_dynamic_epoch = 0;
+        latched_is_store_exception = 1'b0;
     endfunction:new
 
     static function lsq_commit_handler get();
@@ -81,6 +83,7 @@ class lsq_commit_handler extends uvm_object;
         fault_head_waiting = 1'b0;
         fault_head_uid = 0;
         fault_head_dynamic_epoch = 0;
+        latched_is_store_exception = 1'b0;
     endfunction:reset_lsqcommit_runtime_state
 
     function void ensure_modeled_rob_deq_ptr_initialized();
@@ -276,6 +279,26 @@ class lsq_commit_handler extends uvm_object;
         return data.get_status(uid).get_rob_key() == modeled_rob_deq_ptr;
     endfunction:select_fault_head_candidate
 
+    // 根据 fault UID 的权威主表操作分类生成 ROB exception commit type 的 store bit。
+    // 该 helper 不修改 handler、status 或 LSQ 状态。
+    function bit fault_uid_is_store_exception(input memblock_uid_t uid);
+        main_control_transaction main_tr;
+        memblock_op_behavior_t   behavior;
+
+        ensure_handles();
+        if (!data.main_table_ready || uid >= data.main_trans_num) begin
+            `uvm_fatal("LSQ_COMMIT",
+                       $sformatf("cannot classify fault store bit for uid=%0d ready=%0d main_trans_num=%0d",
+                                 uid, data.main_table_ready, data.main_trans_num))
+        end
+        main_tr = data.get_main_transaction(uid);
+        if (main_tr == null) begin
+            `uvm_fatal("LSQ_COMMIT", $sformatf("fault uid=%0d has null main transaction", uid))
+        end
+        behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
+        return memblock_op_behavior_util::is_scalar_rob_store_commit(behavior);
+    endfunction:fault_uid_is_store_exception
+
     function void clear_lsqcommit_xaction(input lsqcommit_agent_agent_xaction tr);
         if (tr == null) begin
             `uvm_fatal("LSQ_COMMIT", "clear_lsqcommit_xaction got null transaction")
@@ -298,6 +321,7 @@ class lsq_commit_handler extends uvm_object;
         tr.io_ooo_to_mem_lsqio_pendingMMIOld    = 1'b0;
         tr.io_ooo_to_mem_lsqio_scommit          = '0;
         tr.io_ooo_to_mem_flushSb                = 1'b0;
+        tr.io_ooo_to_mem_isStoreException       = latched_is_store_exception;
     endfunction:clear_lsqcommit_xaction
 
     function void build_lsqcommit_xaction(output lsqcommit_agent_agent_xaction tr,
@@ -324,6 +348,10 @@ class lsq_commit_handler extends uvm_object;
             `uvm_fatal("LSQ_COMMIT", "failed to create lsqcommit xaction")
         end
         clear_lsqcommit_xaction(tr);
+        if (has_fault_head) begin
+            tr.io_ooo_to_mem_isStoreException =
+                fault_uid_is_store_exception(fault_uid);
+        end
         // Fault head 的 pendingPtr 仍需保持，但 fault token 不是 normal commit，
         // 不得把该指令解释成 pending store/MMIO load。
         if (has_head && !has_fault_head && !fault_head_waiting) begin
@@ -444,6 +472,7 @@ class lsq_commit_handler extends uvm_object;
     function bit mark_fault_rob_commit_uid(input memblock_uid_t uid);
         status_transaction status;
         memblock_uid_t resolved_uid;
+        bit fault_is_store_exception;
 
         ensure_handles();
         ensure_modeled_rob_deq_ptr_initialized();
@@ -460,6 +489,7 @@ class lsq_commit_handler extends uvm_object;
             data.get_status(uid).get_rob_key() != modeled_rob_deq_ptr) begin
             `uvm_fatal("LSQ_COMMIT", "fault token uid does not match modeled ROB head")
         end
+        fault_is_store_exception = fault_uid_is_store_exception(uid);
         status = data.get_status(uid);
         status.rob_commit = 1'b1;
         status.last_event_cycle = $time;
@@ -468,6 +498,7 @@ class lsq_commit_handler extends uvm_object;
         fault_head_dynamic_epoch = status.dynamic_epoch;
         data.try_retire_committed_uid(uid);
         sync_modeled_head_after_fault_terminal();
+        latched_is_store_exception = fault_is_store_exception;
         return 1'b1;
     endfunction:mark_fault_rob_commit_uid
 

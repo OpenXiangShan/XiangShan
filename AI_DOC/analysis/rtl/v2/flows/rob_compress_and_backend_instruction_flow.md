@@ -6,9 +6,9 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `bd813bc3ed5b39581be966c6518788852890ff6f` |
-| 权威源码 | `src/main/scala/xiangshan/backend/rob/Rob.scala`、`src/main/scala/xiangshan/backend/rob/RobBundles.scala`、`src/main/scala/xiangshan/backend/rob/RobDeqPtrWrapper.scala`、`src/main/scala/xiangshan/backend/rob/Rab.scala`、`src/main/scala/xiangshan/backend/rename/Rename.scala`、`src/main/scala/xiangshan/backend/rename/CompressUnit.scala`、`src/main/scala/xiangshan/backend/Bundles.scala`、`src/main/scala/xiangshan/backend/decode/DecodeUnit.scala`、`src/main/scala/xiangshan/mem/lsqueue/LSQWrapper.scala`、`src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala`、`src/main/scala/xiangshan/mem/lsqueue/LoadQueueUncache.scala` |
-| 最后核验日期 | 2026-07-18 |
+| 核验 commit | `f3bdd04b3763147e714a786d078e0cb90460a31d` |
+| 权威源码 | `src/main/scala/xiangshan/backend/rob/Rob.scala`、`src/main/scala/xiangshan/backend/rob/RobBundles.scala`、`src/main/scala/xiangshan/backend/rob/RobDeqPtrWrapper.scala`、`src/main/scala/xiangshan/backend/rob/Rab.scala`、`src/main/scala/xiangshan/backend/rename/Rename.scala`、`src/main/scala/xiangshan/backend/rename/CompressUnit.scala`、`src/main/scala/xiangshan/backend/dispatch/NewDispatch.scala`、`src/main/scala/xiangshan/backend/Bundles.scala`、`src/main/scala/xiangshan/backend/decode/DecodeUnit.scala`、`src/main/scala/xiangshan/backend/CtrlBlock.scala`、`src/main/scala/xiangshan/backend/Backend.scala`、`src/main/scala/xiangshan/XSCore.scala`、`src/main/scala/xiangshan/mem/MemBlock.scala`、`src/main/scala/xiangshan/mem/lsqueue/LSQWrapper.scala`、`src/main/scala/xiangshan/mem/lsqueue/VirtualLoadQueue.scala`、`src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala`、`src/main/scala/xiangshan/mem/lsqueue/LoadQueueUncache.scala`、`src/main/scala/xiangshan/mem/vector/VecBundle.scala`、`src/main/scala/xiangshan/mem/vector/VMergeBuffer.scala`、`src/main/scala/xiangshan/mem/vector/VSegmentUnit.scala`、`src/main/scala/xiangshan/mem/pipeline/AtomicsUnit.scala`、`src/main/scala/xiangshan/mem/sbuffer/Sbuffer.scala` |
+| 最后核验日期 | 2026-07-28 |
 
 ## Flow 范围
 
@@ -22,6 +22,7 @@
 - ROB 压缩的条件、上限和不能压缩的边界。
 - RAB、ExceptionGen、LSQ、FTQ、IssueQueue 与 ROB 的职责分工。
 - ROB scalar store commit、StoreQueue request、`completed` 和 `sqDeq` 的顺序及 MMIO/CBO 例外。
+- vector LS 与 AMO/MOU fault 的本地资源释放条件，以及它们和 ROB exception redirect 的职责边界。
 
 本文不覆盖前端取指预测细节、具体功能单元内部执行算法、完整 LSQ replay 策略和 V3 差异。
 
@@ -162,6 +163,38 @@ commitType = Cat(isLs | isVls, (isStore && !isAMO) | isVStore | isBranch)
 ```
 
 因此低两位含义是：bit1 表示 load/store 大类，bit0 在非 load/store 下表示 branch，在 load/store 下表示 store。`CommitType.isFused(commitType)` 单独检查 bit2，所以 fused 类型不再按上述低两位解释为普通 load/store/branch。
+
+### `isStoreException` 的更新与保持
+
+ROB 不把 `isStoreException` 实现成一拍脉冲。`Rob.scala` 只在
+`exceptionHappen` 为 1 时用当前 ROB head 的 `commitType` 更新寄存器：
+
+```scala
+io.exception.valid := RegNext(exceptionHappen)
+io.exception.bits.commitType := RegEnable(deqPtrEntry.commitType, exceptionHappen)
+```
+
+`Backend.scala` 未用 `io.exception.valid` 对它做脉冲化，而是持续输出该寄存器的 bit0：
+
+```scala
+io.mem.isStoreException := CommitType.lsInstIsStore(ctrlBlock.io.robio.exception.bits.commitType)
+```
+
+`XSCore` 将它直接连到 MemBlock，`LSQWrapper` 再通过
+`RegNext(io.exceptionAddr.isStore)` 选择 StoreQueue/LoadQueue exception address。因此时序语义为：
+
+```text
+首次 exceptionHappen 之前：RegEnable 无 reset 初值，该位不保证确定。
+store exceptionHappen：捕获 commitType bit0=1，之后普通周期继续保持 1。
+普通 commit/deq/redirect/纯 flushPipe：不更新该 RegEnable，不会在下一拍清 0。
+后续 exceptionHappen：用新 head 的 commitType bit0 覆盖；bit0=0 时才变为 0。
+```
+
+所以“store fault 驱动 1 后下一拍自动清 0”不符合 V2 RTL。更精确的说法也不是
+“下一个非 store fault 必然清 0”，而是“下一个 `exceptionHappen` 使寄存器采样新
+`commitType(0)`”。`lsInstIsStore()` 只返回 bit0；例如 `BRANCH=001` 的 bit0 也是 1，
+但非访存异常时 MemBlock 的 load/store exception address 选择不是有效功能结果。在 scalar LS
+范围内，可以简化为“store fault 后保持 1，直到后续 load fault 捕获 0”。
 
 ## 一条指令的其他信息存在哪里
 
@@ -347,6 +380,185 @@ success/terminal 收敛的必要条件，但 SQ deq 可以先释放 mapping，�
 等待后续 ROB commit；MMIO/CBO 或异常清理路径则允许明确记录“deq-before-commit”。
 若 raw event 已经满足 SQ head、连续 count、active mapping 和 redirect/flush 世代校验，
 不能仅因软件 `status.rob_commit=0` 就判定 SQ pointer mismatch 或静默丢弃。
+
+### 8. scalar store fault：`scommit=0` 时的两条 SQ 释放路径
+
+这里的“fault store”特指已经进入 StoreQueue 的 scalar store，其 STA 地址/权限等执行结果
+已使 `StoreQueue.hasException` 为 1，随后该异常在 ROB 队头被精确处理。它不能被当成一条
+正常 scalar store commit：ROB 只有 `commitValid` 的 STORE lane 才计入 `scommit`；异常
+head 会阻止正常 commit，因此它不会产生这笔 normal `scommit`。
+
+V2 对这类 entry 不只有一条路径，以下两条路径由不同的先后时序决定，不能把其中任一条
+写成另一条的必然替代。
+
+```text
+STA S2 发现 store exception
+  -> StoreQueue.hasException(entry) = 1
+  -> ExceptionGen 保存异常；ROB head 命中异常后生成 flush redirect
+
+若 redirect 到 StoreQueue 时 entry 尚未 committed：
+  redirect.level = flush，flushItself = 1
+  -> entry.robIdx.needFlush(redirect) = 1
+  -> StoreQueue.needCancel = 1
+  -> allocated 清零
+  -> redirect 两拍后输出 sqCancelCnt
+
+若 entry 已先被 StoreQueue 的 pendingPtr 规则标记 committed：
+  -> exception entry 可以进入 dataBuffer
+  -> dataBuffer entry 的 vecValid = 0，因此 SBuffer 不产生真正写请求
+  -> 但 SBuffer handshake 仍使 StoreQueue.completed = 1
+  -> sqDeqCnt / sqDeq 释放该 SQ entry
+  -> 后到的 redirect 不会再取消 committed entry
+```
+
+这说明三点。
+
+1. `sqDeq` 的直接条件仍是 `allocated && completed`，不是 `scommit`。对异常 store，源码
+   明确将 `hasException` 注释为“应出队但不写 SBuffer”，并通过 `vecValid=0` 屏蔽 SBuffer
+   的真实 write request，同时保留完成/出队握手。
+2. `scommit=0` 不会自动阻止上述异常清理路径。StoreQueue 的 `committed` 判定直接比较
+   延迟 `pendingPtr`，只有 MMIO `s_wait` 等特殊状态额外消费 `scommit`。因此不能用
+   “fault 没有 scommit”推导“DUT 必定没有 sqDeq”。
+3. ROB exception redirect 仍然是完整 Core 的必要行为。ROB 对 `deqHasException` 产生
+   `RedirectLevel.flush`；CtrlBlock 将它作为后端 redirect，`XSCore` 再驱动
+   `MemBlock.io.redirect`，最终进入 `StoreQueue.brqRedirect`。`flush` 包含 redirect
+   anchor 自身，故未 committed 的 fault store 可由 `sqCancelCnt` 释放。实际波形可能看到
+   `sqDeq` 或 `sqCancelCnt`，取决于 redirect 到达时 entry 是否已 committed；两者没有固定
+   的同拍或固定计数关系。
+
+`io_ooo_to_mem_isStoreException` 不承担上述释放控制。它只是 Backend 根据 ROB exception
+的 `commitType` 指出异常属于 store，再由 MemBlock/LSQWrapper 选择 exception address
+来源；单独驱动该字段不会生成 redirect、`completed`、`sqDeq` 或 `sqCancelCnt`。
+
+对 standalone 验证环境的边界是：只有真实 DUT STA/StoreQueue 状态已经使
+`hasException=1` 时，才可能自然观察到异常 `sqDeq`。若测试框架只把 writeback 的
+`exceptionVec` 记为软件 fault，却既未驱动 ROB-style exception redirect、也未让 DUT
+进入上述 `hasException` 清理路径，则 active SQ mapping 没有硬件释放来源，不能用伪造
+`scommit` 解决。
+
+### 8.1 standalone 无 redirect 时的 NC/MMIO 出队边界
+
+`pendingPtr` 是 ROB 已到达位置的顺序水位，不是“软件要求 DUT 立即释放该 entry”的命令。
+StoreQueue 的 commit pointer 只有在 entry 已分配、ROB key 不晚于延迟的 `pendingPtr`、且
+当前状态机允许时，才会把该 entry 标为 `committed`。物理 `sqDeq` 仍必须等待
+`completed=1`；ctrl monitor 只能采集该结果，不能把等待本身变成一次硬件释放。
+
+在 standalone 测试框架不模拟完整 ROB exception redirect 的前提下，是否可以仅保持
+`pendingPtr=fault head`、`scommit=0` 并等待真实 `sqDeq`，必须按下表区分。
+
+| 场景 | `pendingPtr`/sideband 前提 | `scommit=0` 时能否自然 `sqDeq` | 原因 |
+|---|---|---|---|
+| cacheable scalar store fault | DUT 已将该 SQ entry 的 `hasException` 置 1，`pendingPtr` 覆盖该 ROB key | 可以，需等待 DataBuffer/SBuffer handshake | exception entry 可进入 DataBuffer；`vecValid=0` 屏蔽真实写请求，但 handshake 仍置 `completed` |
+| NC/uncache store fault | DUT 已将 `hasException` 置 1，`pendingPtr` 覆盖该 ROB key | 可以 | `isCommit && nc && hasException` 直接置 `completed`，不发 NC request，也不读取 `scommit` |
+| normal NC/uncache store | `pendingPtr` 覆盖 entry，地址/数据有效，且没有前序 MMIO 卡在 `s_wait` | 可以，但必须等 uncache request、ack/response | NC request 条件读取 `committed`，response/ack 后才置 `completed`；`scommit` 不是该 entry 的直接完成条件 |
+| normal MMIO store | 除 `pendingPtr` 外还必须 `pendingst=1`，且 `pending=1`、地址/数据有效、`hasException=0` | 当前 entry 可以；完成后不能长期保持 0 | request 入口显式要求 `pendingst && pendingPtr match && !hasException`。response 后 `mmioStout.fire` 置 `completed` 并产生 `sqDeq`；无异常时状态机进入 `s_wait`，后续需要 normal `scommit>0` 回到 `s_idle` |
+| MMIO request 已发出后的 denied/corrupt fault | 请求已由之前的 normal `pendingPtr+pendingst` 发出 | 可以 | response 将异常写入 `uncacheUop`，`mmioStout.fire` 仍置 `completed`；因为有 exception，FSM 直接回 `s_idle`，不等待 `scommit` |
+| 请求前已经 fault 的 scalar MMIO store | DUT 已将 `hasException` 置 1，且不是 CBO，因此 `wlineflag=0` | 可以，走异常 drain 而不是 MMIO request | StoreUnit 在 exception 时把写入 SQ 的 `mmio` 标志清为 0；`pendingPtr` 使 entry committed 后，StoreQueue 按通用 `hasException` DataBuffer/SBuffer 路径置 `completed`，不发真实 MMIO write |
+| 请求前已经 fault 的 CBO store | CBO 的 `wlineflag=1`，DUT 已置 `hasException` | 不可以，仅靠无 redirect standalone sideband 无法释放 | CMO request gate 要求 `!hasException`；通用 SBuffer handshake 虽可发生，但 `completed` 只在 `!wline` 时置位。完整 Core 需用 exception redirect 的未提交 entry cancel 路径释放 |
+
+MMIO/NC load 走 `LoadQueueUncache`，不能套用 store 的 `scommit/pendingst` 结论：
+
+| 场景 | 发送 uncache request 的条件 | `scommit=0` 的影响 | LQ 释放来源 |
+|---|---|---|---|
+| normal MMIO load | `pendingMMIOld=1` 且 `req.robIdx == pendingPtr` | 无直接影响；单独 `pendingPtr` 不足以发 request | response 后 `mmioOut.fire` 形成实际 LDU writeback，VirtualLoadQueue 再产生 `lqDeq` |
+| normal NC load | `req.nc=1`，不等待 `pendingMMIOld/pendingPtr` | 无直接影响 | response 后 `ncOut.fire` 形成 LDU writeback，随后由 VirtualLoadQueue 释放 |
+| MMIO/NC response denied/corrupt load | request 已经发出 | 无直接影响 | response 仍生成带 exceptionVec 的 `mmioOut/ncOut`；是否 `lqDeq` 由实际 LDU writeback 是否满足 LQ commit 条件决定 |
+| request 前已有 exception 的 scalar MMIO/NC load | LDU 的 `exceptionVec` 已非零 | 不适用 | LoadQueueUncache 入队条件明确排除 exception，因此它不生成 uncache request/writeback；但普通 scalar LoadUnit exception 会强制其 LDU-to-LQ event 的 `updateAddrValid=1`。只要未被 redirect kill、没有 replay、且不是 vector，VirtualLoadQueue 仍会 committed 并输出 `lqDeq`；`pendingPtr` 不替代该路径 |
+
+因此，不做 redirect 的本轮测试框架可对 cacheable/NC/scalar-MMIO exception drain、普通
+scalar load exception，以及“MMIO response 后才发现 denied/corrupt”的 fault 路径等待 raw
+`lqDeq/sqDeq`。early CBO fault 没有可等待的自然 `sqDeq` 来源；框架必须在该 fault head 的
+drain watchdog 到期时 `uvm_fatal`，不得伪造 `apply_dut_sq_deq()`、伪造 `scommit` 或在软件表
+中直接释放 SQ mapping。完整 Core 的替代释放是 ROB exception redirect 产生的 `sqCancelCnt`，
+但它不属于当前 standalone 无 redirect 模式。
+
+ctrl monitor 每个 `mon_cb` 周期都会采样 `io_mem_to_ooo_lqDeq` 和
+`io_mem_to_ooo_sqDeq`，adapter 只在 raw count 已真实出现时释放软件 LQ/SQ mapping。故
+“等待 monitor”在已支持的路径上是正确的收敛方式，但必须区分两类未看到 deq 的原因：
+
+1. **结构性无释放路径**：请求前 CBO fault 的 CMO request 被 `!hasException` gate 阻止，且
+   CBO 的 `wline` entry 不会由通用 SBuffer handshake 置 `completed`；这是 standalone 无
+   redirect 模式的明确不支持场景。普通 scalar MMIO store fault 不属于这一类，它会降级走
+   通用 exception drain。
+2. **已有合法路径但尚未完成**：normal NC/MMIO request 尚未收到 responder response，或
+   cacheable fault store 尚未完成 SBuffer handshake。这不是“fault 没有 deq 路径”；例如
+   MMIO response fault 必须先收到该 response 才会成为 fault。若 responder 永不回复或 ready
+   永不开放，属于测试环境/下游活性故障，watchdog 同样应 fail-fast。
+
+watchdog 必须保留 fault UID、`exceptionVec`、ROB/LQ/SQ key、`pendingPtr/pendingst/scommit`
+和最近 raw count 用于日志。本段只规定测试框架的驱动和状态收敛边界，不新增 RM、scoreboard
+或参考结果比较。
+
+### 8.2 vector LS 与 AMO/MOU fault 是否依赖 ROB redirect 释放
+
+必须把“处理架构异常”和“释放 MemBlock 本地资源”分开判断。V2 中，只要一个 fault 最终
+作为架构异常送到 ROB，ROB 都会在该指令成为 head 且写回完成后产生
+`RedirectLevel.flush`；这一步负责移除 faulting ROB entry、回滚年轻指令并进入异常处理。
+但 VLQ、SQ、vector merge buffer、`VSegmentUnit` 和 `AtomicsUnit` 并不都把该 redirect
+作为唯一的本地释放条件。
+
+| 类型 | 是否分配普通 LQ/SQ | fault 时的本地完成/释放路径 | ROB redirect 的作用 |
+|---|---|---|---|
+| 普通 vector load | 分配 LQ entry | merge buffer 收齐 flow 后，同时产生带异常的 vector writeback 和 `toLsq` FLUSH feedback；`VirtualLoadQueue` 对匹配 `robidx/uopidx` 的有效 feedback 置 `committed`，随后按队头连续性产生 `lqDeq` | 负责精确异常和 ROB/年轻指令回滚，不是该 LQ entry 唯一的释放来源 |
+| 普通 vector store | 分配 SQ entry | Store pipeline 把 `hasException` 写入 SQ；merge buffer 的 FLUSH feedback 也会置 `vecMbCommit`。若 `pendingPtr` 已覆盖该 ROB head，entry 可进入异常 drain，以 `vecValid=0` 完成握手后产生 `sqDeq`；若 redirect 先命中尚未 `committed` 的 entry，则改走 `sqCancelCnt` | 两条 SQ 释放路径之一，同时负责精确异常；不能断言 fault 必定只出现 cancel 或只出现 deq |
+| segment vector LS | `NewDispatch` 排除普通 LSQ request | `VSegmentUnit` 在异常后转入 `s_finish`，推进自己的 `deqPtr` 并产生 vector writeback | 负责 ROB/架构恢复；不负责释放不存在的普通 LQ/SQ entry |
+| LR/SC/AMO，即 `FuType.mou` | `NewDispatch` 排除普通 LSQ request | `AtomicsUnit` 在 misalign、TLB/PMP/PBMT 或 DCache error 后进入 `s_finish`；普通 AMO 在 `io.out.fire` 后 `resetFSM()`，`AMOCAS.Q` 在第二次 writeback fire 后复位 | 负责 ROB/架构恢复；不会产生普通 `lqDeq/sqDeq`，也不是 `AtomicsUnit` FSM 复位条件 |
+
+普通 vector load 的关键顺序是：
+
+```text
+所有有效 flow 返回 merge buffer
+  -> merge buffer 记录最老 exception
+  -> flowNum 归零并选择该 uop 输出
+  -> 同时发送：
+       vector writeback(exceptionVec != 0)
+       toLsq.valid + feedback.FLUSH = 1
+  -> VirtualLoadQueue 按 robidx/uopidx 命中并置 committed
+  -> 队头连续 committed entry 产生 lqDeq
+  -> ExceptionGen/ROB 稍后在 ROB head 产生精确 flush redirect
+```
+
+`VirtualLoadQueue` 在 vector feedback 路径中没有要求 `isCommit=1`，它对任意匹配的
+`vecCommit.valid` 都置 `committed`。因此这里的 `feedback.FLUSH` 表示“该 vector uop 带异常
+完成并向 LSQ 回报”，不能机械解释成“必须等 ROB redirect 才取消 LQ”。如果更老的其他
+redirect 在该 uop 完成前命中，则会走普通 cancel；那属于该 vector uop 被杀死，不是它自身
+fault 的正常完成路径。
+
+普通 vector store 的关键顺序是：
+
+```text
+StoreUnit S2 发现 vector store exception
+  -> StoreQueue.hasException = 1，addrvalid 可更新
+merge buffer 收齐 flow
+  -> toLsq feedback.FLUSH = 1
+  -> StoreQueue 将 COMMIT 或 FLUSH 都识别为 vecMbCommit
+
+若 pendingPtr 先覆盖该 head：
+  -> StoreQueue.committed = 1
+  -> exception entry 进入 DataBuffer，vecValid = 0
+  -> SBuffer 接受控制握手但不建立真实写请求
+  -> completed = 1 -> sqDeq
+
+若 ROB flush redirect 先命中且 committed = 0：
+  -> needCancel = 1 -> sqCancelCnt
+```
+
+因此，无 redirect 的 standalone 环境若未来支持普通 vector store fault，不能只等待
+`vecMbCommit`；还必须正确维护 ROB-head `pendingPtr` 并等待真实 `sqDeq`。反过来，也不能因
+没有 normal `scommit` 就伪造 cancel。当前 mem_ut 主动主流程仍拒绝 vector LS，本段只记录
+V2 DUT 行为，不能据此宣称测试框架已支持 vector fault。
+
+AMO 与 MOU 不是两套独立硬件路径：AMO/LR/SC 是 ISA 操作，`mou` 是它们在 V2 中使用的
+`FuType`。它们不占普通 LQ/SQ，fault 本身也会产生带 `exceptionVec` 的真实 writeback。
+`AtomicsUnit` 的 `resetFSM()` 由 writeback handshake 触发；`io.redirect.valid` 在该模块中只
+清 `atom_override_xtval`，不会调用 `resetFSM()`。所以未来 standalone 支持该类 fault 时，
+必须保证 atomic writeback ready/monitor 闭环；等待 `lqDeq/sqDeq` 或只发送 redirect 都不是
+正确的本地完成条件。
+
+还有一个 vector fault-only-first 边界：FOF load 在 element 0 fault 时保留 exception，仍走
+上述 ROB 精确异常；在后续 element fault 时，merge buffer 改为缩短 `vl` 而不保留
+`exceptionVec`。后一种情况按 ISA 语义不是一次对 ROB 可见的 fault，因此不会要求 exception
+redirect。
 
 ## 为什么不会丢失必要信息
 
@@ -543,12 +755,16 @@ compile-time capability；对 scalar LDA 有效写回，运行时值应为 0。�
 - `src/main/scala/xiangshan/backend/rob/Rab.scala:204`：RAB 入队保存 `DynInst` 中的提交信息。
 - `src/main/scala/xiangshan/package.scala:165`：`CommitType` 编码定义，`NORMAL/BRANCH/LOAD/STORE` 和 `isFused/isLoadStore/isStore/isBranch` helper。
 - `src/main/scala/xiangshan/backend/decode/DecodeUnit.scala:953`：Decode 生成非 fused `commitType` 的低两位分类。
+- `src/main/scala/xiangshan/backend/rob/Rob.scala:639-645`：`exceptionHappen` 使能无 reset 初值的 `commitType` RegEnable，`exception.valid` 另外延迟一拍。
+- `src/main/scala/xiangshan/backend/Backend.scala:837`：`isStoreException` 持续取已锁存 `commitType(0)`，未用 exception valid 门控成脉冲。
+- `src/main/scala/xiangshan/XSCore.scala:247`：Backend 的 `isStoreException` 直接连入 MemBlock。
+- `src/main/scala/xiangshan/mem/MemBlock.scala:1857`、`src/main/scala/xiangshan/mem/lsqueue/LSQWrapper.scala:249-255`：MemBlock 直接传递该 level，LSQWrapper 再延迟一拍选择 SQ/LQ exception address。
 - `src/main/scala/xiangshan/backend/CtrlBlock.scala:605`：fusion decoder 将 fused 指令的 `commitType` 写为 `4.U` 到 `7.U`。
 - `src/main/scala/xiangshan/backend/dispatch/NewDispatch.scala:877`：Dispatch 根据前一条 fired 且 `CommitType.isFused` 识别 fused lane。
 - `src/main/scala/xiangshan/Bundle.scala:193-205`、`src/main/scala/xiangshan/backend/rob/RobBundles.scala:285-315`：`flushPipe`、`replayInst` 定义和 commit 边界。
 - `src/main/scala/xiangshan/backend/fu/FuConfig.scala:415-463`、`src/main/scala/xiangshan/backend/exu/ExeUnitParams.scala:65-76`：LDA/STA/STD replay capability。
 - `src/main/scala/xiangshan/backend/Backend.scala:671-703`：MemBlock `uop.replayInst` 进入 writeback replay 字段。
-- `src/main/scala/xiangshan/mem/pipeline/LoadUnit.scala:1560-1645`、`src/main/scala/xiangshan/mem/lsqueue/LoadMisalignBuffer.scala:562-568`：scalar LDA 写回清零。
+- `src/main/scala/xiangshan/mem/pipeline/LoadUnit.scala:1353-1359,1537-1601,1631-1692`、`src/main/scala/xiangshan/mem/lsqueue/LoadMisalignBuffer.scala:562-568`：scalar LDA exception 强制可写回、进入 LQ 和 `updateAddrValid` 的条件，以及 replay/redirect 边界。
 - `src/main/scala/xiangshan/mem/pipeline/HybridUnit.scala:1168-1215`：HybridUnit 的 `s3_rep_frm_fetch` 是当前源码中的动态 producer。
 - `src/main/scala/xiangshan/mem/Bundles.scala:200-208`、`src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:744-747`、`src/main/scala/xiangshan/mem/sbuffer/Sbuffer.scala:830-832`：`matchInvalid` 的地址 CAM 不一致定义。
 - `src/main/scala/xiangshan/backend/rob/RobBundles.scala:313-316`、`src/main/scala/xiangshan/backend/rob/ExceptionGen.scala:82-99,118-140`：`has_exception` 方法包含 replay，以及写回合并。
@@ -562,6 +778,22 @@ compile-time capability；对 scalar LDA 有效写回，运行时值应为 0。�
 - `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:1117-1219`：cmt pointer/`committed` 更新和普通 cacheable store 的 dataBuffer 入口条件。
 - `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:1324-1343`：SBuffer fire 后设置普通 store 的 `completed`。
 - `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:1476-1519`：redirect 只取消未 committed entry，SQ deq pointer 独立推进。
+- `src/main/scala/xiangshan/package.scala:179-185`、`src/main/scala/xiangshan/backend/rob/RobBundles.scala:193-198`：`RedirectLevel.flush=1` 表示 flush anchor 自身，`RobPtr.needFlush()` 对同 ROB key 返回 true。
+- `src/main/scala/xiangshan/backend/rob/Rob.scala:573-650`：ROB head 的异常判断和 `flushOut.level=RedirectLevel.flush`。
+- `src/main/scala/xiangshan/backend/CtrlBlock.scala:330-390,749-757`、`src/main/scala/xiangshan/backend/Backend.scala:1022,837`、`src/main/scala/xiangshan/XSCore.scala:235`、`src/main/scala/xiangshan/mem/MemBlock.scala:1419`：ROB exception redirect 依次进入 Backend、MemBlock 和 `LSQWrapper.brqRedirect`。
+- `src/main/scala/xiangshan/mem/pipeline/StoreUnit.scala:122,256,461-545`：CBO 的 `wlineflag`、exception 时清除 SQ `mmio` 标志、STA exception 与 `hasException` 回填条件。
+- `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:260-270,560-581,830-985,1038-1071,1126-1160,1204-1316,1324-1343`：STA exception 写入 `hasException`，MMIO/NC request、response、异常 DataBuffer/SBuffer 完成和 `sqDeq` 条件。
+- `src/main/scala/xiangshan/mem/lsqueue/LoadQueueUncache.scala:122-160,188-241,360-365,503-525`：MMIO load 需要 `pendingMMIOld+pendingPtr`，NC load 不需要；request 前 exception 不入 uncache buffer，response error 仍形成 writeback。
+- `src/main/scala/xiangshan/mem/lsqueue/VirtualLoadQueue.scala:136-160,249-265`：`lqDeq` 只在 DUT 已把 entry 标为 `committed` 后产生；scalar fault 的 exceptionVec 本身不阻止 scalar `committed` 路径，vector entry 则改走独立的 `vecCommit` feedback 路径。
+- `src/main/scala/xiangshan/backend/dispatch/NewDispatch.scala:536-541,688-707`：普通 vector LS 分配 LQ/SQ；AMO/MOU、segment 和 FOF fix-vl uop 不进入普通 LSQ request。
+- `src/main/scala/xiangshan/mem/vector/VecBundle.scala:170-179,213-231`、`src/main/scala/xiangshan/mem/vector/VMergeBuffer.scala:112-129,291-305,309-417`：vector merge buffer 用 COMMIT/FLUSH 区分正常与异常反馈；收齐 flow 后同时向 LSQ 和 vector writeback 输出，FOF 的非首元素 fault 改为缩短 `vl`。
+- `src/main/scala/xiangshan/mem/lsqueue/VirtualLoadQueue.scala:136-160,217-230`：普通 vector load 的匹配 feedback 无论 COMMIT/FLUSH 都会置 `committed`，随后由 VLQ 队头产生 `lqDeq`。
+- `src/main/scala/xiangshan/mem/pipeline/StoreUnit.scala:461-545,664-687`、`src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:1126-1164,1193-1400,1454-1488`：vector store exception 回填 `hasException`；COMMIT/FLUSH 均置 `vecMbCommit`，随后按 pendingPtr 异常 drain 或 redirect cancel 释放 SQ。
+- `src/main/scala/xiangshan/mem/vector/VSegmentUnit.scala:243-361,870-873,900-961`：segment vector LS 不占普通 LSQ；异常进入 `s_finish`，本地队列推进并产生 writeback。
+- `src/main/scala/xiangshan/mem/pipeline/AtomicsUnit.scala:236-307,337-431,479-495`：MOU misalign/TLB/PMP/PBMT/DCache fault 均进入 finish/writeback；FSM 在 writeback fire 后复位，redirect 不是复位条件。
+- `src/main/scala/xiangshan/backend/rob/ExceptionGen.scala:88-100`、`src/main/scala/xiangshan/backend/rob/Rob.scala:573-640`：MOU 与 vector LS exception writeback 进入 ExceptionGen；ROB 对实际 exception 产生包含 anchor 自身的 `flush` redirect，vector LS 还等待 RAB exception commit 条件。
+- `src/main/scala/xiangshan/mem/sbuffer/Sbuffer.scala:471-480`：`vecValid=0` 时 SBuffer handshake 不发真实 write request。
+- `src/main/scala/xiangshan/mem/MemBlock.scala:1857-1866`、`src/main/scala/xiangshan/mem/lsqueue/LSQWrapper.scala:243-255`：`isStoreException` 仅选择 exception address 的 store/load 来源。
 - `src/main/scala/xiangshan/backend/Backend.scala:269-273,420-425`：后端把 MemBlock `sqDeq` 作为 LSQ free/deq 数量接收，不能与 ROB->MemBlock 的 `lsqio.scommit` 混同。
 - `build_memblock/rtl/MemBlock.sv:831-950`：LDA/STA/STD split 顶层字段实际保留结果。
 
@@ -576,6 +808,11 @@ compile-time capability；对 scalar LDA 有效写回，运行时值应为 0。�
 | 2026-07-17 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 未给出 `replayInst` 的具体运行时 producer，也未区分 forwarding 地址 CAM 失配和普通 Load replay | 补充 `HybridUnit.s3_rep_frm_fetch` 的 `matchInvalid && s3_troublem` 条件、scalar `LoadUnit` 清零边界，并明确 `RobExceptionInfo.has_exception` 方法会收集 replay-only 写回 | 用户追问 `replayInst` 何时置高以及为什么不能提交 | V2 HybridUnit/LoadUnit/ExceptionGen/ROB |
 | 2026-07-17 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 只说明 replay redirect 会阻止提交，未区分架构 retirement 与物理寄存器投机写回，也未说明执行级 rollback 与 ROB 级 replay marker 的并行关系 | 补充 `RobDeqPtrWrapper.not_commit`、`WbDataPath` 和 `io.rollback` 的边界：旧代可能短暂写入物理寄存器，但不会进入架构映射，随后由 flush 清理 | 用户追问 `replayInst` 为什么重发且不会提交 | V2 HybridUnit/Backend/WbDataPath/ROB |
 | 2026-07-18 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 测试框架 flow 将 `status.rob_commit` 作为 V2 count-only SQ deq 的硬门槛，未区分 ROB commit、store request、`completed` 和物理 SQ deq | 明确普通 cacheable/NC store 通常先 commit 授权再出队，但 MMIO/CBO 可先完成并产生 SQ deq、后收到 ROB `commitValid/scommit`；`rob_commit` 只能门控最终 retire，不能全局门控 raw SQ deq 消费 | 用户要求结合 V2 Scala 核对 store 提交与 SQ 出队顺序 | V2 ROB/StoreQueue/MMIO/CBO/SQ deq 与 mem_ut 状态建模边界 |
+| 2026-07-27 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 仅按 normal store 与 MMIO/CBO 解释 `scommit`、`completed` 和 `sqDeq`，未说明 fault store 是否必须等待 `scommit` | 明确 STA exception store 有“SQ 出队但不写 SBuffer 数据”的硬件清理路径；同时 ROB exception 必定生成 `flush` redirect，未 committed entry 走 `sqCancelCnt`，已 committed entry 可走异常 `sqDeq`；两者由时序决定 | 用户追问 fault token 不增加 `scommit` 是否会导致 SQ entry 永远无法释放 | V2 ROB/ExceptionGen/CtrlBlock/Backend/MemBlock/StoreQueue/SBuffer |
+| 2026-07-27 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 仅说明 generic fault store 的两条释放路径，未区分 standalone 无 redirect 下 NC、MMIO request 前 fault 与 MMIO response fault 的完成条件 | 明确 `pendingPtr` 只授予提交顺序；NC store fault 可直接完成，scalar MMIO store fault 会清除 SQ `mmio` 标志并走 exception drain，normal MMIO store 还需要 `pendingst`，MMIO load 还需要 `pendingMMIOld`，只有 early CBO fault 无自然 deq，response fault 可在 `scommit=0` 时完成 | 用户要求确认等待 ctrl monitor 的真实 deq 是否可靠，以及 MMIO/uncache 无 `scommit` 时的行为 | V2 StoreUnit/StoreQueue/LoadQueueUncache/uncache/MMIO/CBO/SBuffer 与 standalone mem_ut fault 收敛边界 |
+| 2026-07-27 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | “没有看到 deq”可能被笼统理解为 fault 没有完成路径，且错误将 early scalar MMIO 与 CBO 合并 | 区分 scalar MMIO exception drain 与 CBO `wline` 无完成路径；普通 scalar load exception 强制 LDU-to-LQ `updateAddrValid`，仅 replay/redirect/vector/纯软件伪造 fault 不形成该 LQ 释放 | 用户追问 fault load 的 LQ 条件，以及 early MMIO/CBO store 如何避免残留 | V2 LoadUnit/VirtualLoadQueue/StoreUnit/StoreQueue 与 standalone fault-drain 分类 |
+| 2026-07-27 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | fault 释放讨论只覆盖 scalar，并容易把 vector/AMO 的架构 redirect 与本地资源释放混为同一条件 | 明确普通 vector load 由 merge feedback 使 VLQ 自然 `lqDeq`；vector store 可按 pendingPtr 异常 drain 或 redirect cancel；segment 与 MOU 不分配普通 LSQ，分别由本地 finish/writeback 释放；所有 ROB 可见 fault 仍需精确 redirect 完成架构恢复 | 用户追问 vector LS、AMO/MOU fault 是否都必须依靠 ROB exception redirect/cancel 才能释放 | V2 VMergeBuffer/VLQ/StoreQueue/VSegmentUnit/AtomicsUnit/ExceptionGen/ROB |
+| 2026-07-28 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 只记录 `isStoreException` 选择 SQ/LQ exception address，未说明它是脉冲还是保持值 | 明确 ROB 只在 `exceptionHappen` 时 RegEnable 新 `commitType`，Backend 持续输出 bit0，普通下一拍、commit、deq、redirect 或纯 flushPipe 都不清零；只有后续 exception 捕获 bit0=0 才变为 0 | 用户要求结合 Scala 确认 store fault 后是否应下一拍清 0 | V2 ROB/Backend/XSCore/MemBlock/LSQWrapper exception address 时序 |
 
 ## 待确认项
 
