@@ -166,8 +166,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   io.toRenameAllFire := io.fromRename.map(x => !x.valid || x.fire).reduce(_ && _)
   val fromRenameUpdate = Wire(Vec(RenameWidth, Flipped(ValidIO(new DispatchUpdateUop))))
 
-  // Keep each compressed slot's own FTQ pointer; the ROB reconstructs commit metadata
-  // from hasLastInFtqEntry and RVC. Branch execution still uses the latter slot's isRVC.
+  // Keep each compressed slot's own FTQ pointer for execution and redirect metadata.
   for (i <- 0 until RenameWidth) {
     fromRenameUpdate(i).valid := fromRename(i).valid
     // v0 don't need srcLoadDependency, srcState unpdated with allSrcState

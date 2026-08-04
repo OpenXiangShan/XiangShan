@@ -620,7 +620,6 @@ class CtrlBlockImp(
     dispatch.io.renameIn(i).bits := decodePipeRename(i).bits
     rename.io.validVec(i) := decodePipeRename(i).valid
     rename.io.isFusionVec(i) := false.B
-    rename.io.fusionCross2FtqVec(i) := false.B
     decode.io.debugOutValid.foreach{ validVec => validVec(i) := decodePipeRename(i).valid}
   }
 
@@ -633,16 +632,9 @@ class CtrlBlockImp(
     when (fusionDecoder.io.out(i).valid) {
       fusionDecoder.io.out(i).bits.update(rename.io.in(i).bits)
       fusionDecoder.io.out(i).bits.update(dispatch.io.renameIn(i).bits)
-      val cross2Ftq = decodePipeRename(i).bits.isLastInFtqEntry && decodePipeRename(i + 1).bits.isLastInFtqEntry && backendParams.robCompressEn.B
-      val cross1Ftq = decodePipeRename(i).bits.isLastInFtqEntry || decodePipeRename(i + 1).bits.isLastInFtqEntry
-      rename.io.in(i + 1).bits.isLastInFtqEntry := cross1Ftq
-      rename.io.in(i + 1).bits.canRobCompress := !cross2Ftq
       // if second instruciton of fusion is move and it can also be fusion, it will not act as a move
       rename.io.in(i + 1).bits.isMove := false.B
-      rename.io.in(i).bits.isLastInFtqEntry := false.B
-      rename.io.in(i).bits.canRobCompress := !cross2Ftq
       rename.io.isFusionVec(i) := true.B
-      rename.io.fusionCross2FtqVec(i) := cross2Ftq
     }
   }
 
