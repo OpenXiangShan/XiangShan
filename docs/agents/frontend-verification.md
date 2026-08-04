@@ -383,6 +383,13 @@ Enable the versioned git hook so staged frontend changes run the smoke guard bef
 git config core.hooksPath .githooks
 ```
 
+When the staged files include
+`src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv`,
+the same hook also checks the staged CSV itself: every logical record must
+occupy exactly one physical line. The check is implemented in
+`src/test/python/Frontend/tests/py/environment/test_testpoint_csv_contract.py`
+and can be run directly with `--staged`.
+
 ## Bin-Trace Workflow
 
 Treat `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh` as the

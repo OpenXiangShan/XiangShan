@@ -4,6 +4,13 @@ set -euo pipefail
 REPO_DIR="$(git rev-parse --show-toplevel)"
 cd "${REPO_DIR}"
 
+TESTPOINT_CSV="src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+
+if git diff --cached --name-only --diff-filter=ACMR -- "${TESTPOINT_CSV}" | grep -Fxq "${TESTPOINT_CSV}"; then
+  echo "[testpoint-csv-guard] checking staged CSV record layout"
+  python src/test/python/Frontend/tests/py/environment/test_testpoint_csv_contract.py --staged
+fi
+
 if ! git diff --cached --name-only --diff-filter=ACMR | grep -Eq '^(src/test/python/Frontend/|\.githooks/pre-commit$)'; then
   exit 0
 fi
