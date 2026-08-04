@@ -327,7 +327,12 @@ module frontend_atp_remaining_funcov (
   input logic [1:0]    ptw_resp_s2_pbmt,
   input logic          ptw_resp_s1_v,
   input logic          ptw_resp_s1_perm_a,
+  input logic          ptw_resp_s1_perm_u,
   input logic          ptw_resp_s1_perm_x,
+  input logic          ptw_resp_s1_perm_w,
+  input logic          ptw_resp_s1_perm_r,
+  input logic          ptw_resp_s2_perm_a,
+  input logic          ptw_resp_s2_perm_x,
   input logic          ptw_resp_s1_pf,
   input logic          ptw_resp_s1_af,
   input logic          ptw_resp_s2_gpf,
@@ -548,6 +553,7 @@ module frontend_atp_remaining_funcov (
   logic [1:0] atp_napot_boundary;
   logic atp_cross_pma_attribute;
   logic [2:0] atp_redirect_attr_transition;
+  logic [3:0] atp_translation_mode;
 
   always_ff @(posedge clock) begin
     if (reset) begin
@@ -773,8 +779,98 @@ module frontend_atp_remaining_funcov (
     ptw_resp_s1_perm_a && ptw_resp_s1_perm_x && !ptw_resp_s1_pf &&
     !ptw_resp_s1_af && !ptw_resp_s2_gpf && !ptw_resp_s2_gaf &&
     (ptw_resp_s1_pbmt == PBMT_RSVD || ptw_resp_s2_pbmt == PBMT_RSVD);
+  wire atp_translation_observed = itlb_req_valid &&
+    (!itlb_resp_miss || ptw_req_fire);
+  wire atp_s1_leaf_executable = ptw_resp_valid && ptw_resp_s1_v &&
+    ptw_resp_s1_perm_x && (!ptw_resp_s1_perm_w || ptw_resp_s1_perm_r);
+  wire atp_s1_leaf_not_executable = ptw_resp_valid && ptw_resp_s1_v &&
+    !ptw_resp_s1_perm_x;
+  wire atp_s1_leaf_accessed_clear = ptw_resp_valid && ptw_resp_s1_v &&
+    !ptw_resp_s1_perm_a;
+  wire atp_s1_privilege_denied = ptw_resp_valid && ptw_resp_s1_v &&
+    ((io_tlbCsr_priv_imode == 2'b00 && !ptw_resp_s1_perm_u) ||
+     (io_tlbCsr_priv_imode == 2'b01 && ptw_resp_s1_perm_u));
+  wire atp_s1_write_without_read = ptw_resp_valid && ptw_resp_s1_v &&
+    ptw_resp_s1_perm_w && !ptw_resp_s1_perm_r;
+  wire atp_s2_leaf_executable = ptw_resp_valid &&
+    ptw_resp_s2xlate != NO_STAGE && ptw_resp_s2_perm_x &&
+    ptw_resp_s2_perm_a && !ptw_resp_s2_gpf && !ptw_resp_s2_gaf;
+  wire atp_s2_leaf_not_executable = ptw_resp_valid &&
+    ptw_resp_s2xlate != NO_STAGE && !ptw_resp_s2_perm_x &&
+    !ptw_resp_s2_gpf && !ptw_resp_s2_gaf;
+  wire atp_s2_leaf_accessed_clear = ptw_resp_valid &&
+    ptw_resp_s2xlate != NO_STAGE && ptw_resp_s2_perm_x &&
+    !ptw_resp_s2_perm_a && !ptw_resp_s2_gpf && !ptw_resp_s2_gaf;
+  wire atp_only_stage2_gpf = ptw_resp_valid &&
+    ptw_resp_s2xlate == ONLY_STAGE2 && ptw_resp_s2_gpf && !ptw_resp_s2_gaf;
+  wire atp_only_stage2_gaf = ptw_resp_valid &&
+    ptw_resp_s2xlate == ONLY_STAGE2 && ptw_resp_s2_gaf && !ptw_resp_s2_gpf;
+  wire atp_all_stage_fault_context = ptw_resp_valid &&
+    ptw_resp_s2xlate == ALL_STAGE;
+  wire atp_all_stage_vs_leaf_gpf = atp_all_stage_fault_context &&
+    ptw_resp_s1_v && ptw_resp_s1_perm_x &&
+    (!ptw_resp_s1_perm_w || ptw_resp_s1_perm_r) && !ptw_resp_s1_pf &&
+    !ptw_resp_s1_af && ptw_resp_s2_gpf && !ptw_resp_s2_gaf;
+  wire atp_all_stage_vs_leaf_gaf = atp_all_stage_fault_context &&
+    ptw_resp_s1_v && ptw_resp_s1_perm_x &&
+    (!ptw_resp_s1_perm_w || ptw_resp_s1_perm_r) && !ptw_resp_s1_pf &&
+    !ptw_resp_s1_af && ptw_resp_s2_gaf && !ptw_resp_s2_gpf;
+  wire atp_all_stage_vs_fake_gpf = atp_all_stage_fault_context &&
+    !ptw_resp_s1_v && !ptw_resp_s1_pf && !ptw_resp_s1_af &&
+    ptw_resp_s2_gpf && !ptw_resp_s2_gaf;
+  wire atp_all_stage_vs_fake_gaf = atp_all_stage_fault_context &&
+    !ptw_resp_s1_v && !ptw_resp_s1_pf && !ptw_resp_s1_af &&
+    ptw_resp_s2_gaf && !ptw_resp_s2_gpf;
+  wire atp_all_stage_vs_nonleaf_gpf = atp_all_stage_fault_context &&
+    ptw_resp_s1_v && !ptw_resp_s1_perm_r && !ptw_resp_s1_perm_w &&
+    !ptw_resp_s1_perm_x && !ptw_resp_s1_pf && !ptw_resp_s1_af &&
+    ptw_resp_s2_gpf && !ptw_resp_s2_gaf;
+  wire atp_all_stage_vs_nonleaf_gaf = atp_all_stage_fault_context &&
+    ptw_resp_s1_v && !ptw_resp_s1_perm_r && !ptw_resp_s1_perm_w &&
+    !ptw_resp_s1_perm_x && !ptw_resp_s1_pf && !ptw_resp_s1_af &&
+    ptw_resp_s2_gaf && !ptw_resp_s2_gpf;
+  wire atp_all_stage_s1_pf_s2_leaf = atp_all_stage_fault_context &&
+    ptw_resp_s1_pf && !ptw_resp_s1_af && !ptw_resp_s2_gpf &&
+    !ptw_resp_s2_gaf && ptw_resp_s2_perm_x && ptw_resp_s2_perm_a;
+  wire atp_all_stage_s1_af_s2_leaf = atp_all_stage_fault_context &&
+    ptw_resp_s1_af && !ptw_resp_s1_pf && !ptw_resp_s2_gpf &&
+    !ptw_resp_s2_gaf && ptw_resp_s2_perm_x && ptw_resp_s2_perm_a;
+  wire atp_all_stage_s1_pf_s2_gpf = atp_all_stage_fault_context &&
+    ptw_resp_s1_pf && !ptw_resp_s1_af && ptw_resp_s2_gpf && !ptw_resp_s2_gaf;
+  wire atp_all_stage_s1_pf_s2_gaf = atp_all_stage_fault_context &&
+    ptw_resp_s1_pf && !ptw_resp_s1_af && ptw_resp_s2_gaf && !ptw_resp_s2_gpf;
+  wire atp_all_stage_s1_af_s2_gpf = atp_all_stage_fault_context &&
+    ptw_resp_s1_af && !ptw_resp_s1_pf && ptw_resp_s2_gpf && !ptw_resp_s2_gaf;
+  wire atp_all_stage_s1_af_s2_gaf = atp_all_stage_fault_context &&
+    ptw_resp_s1_af && !ptw_resp_s1_pf && ptw_resp_s2_gaf && !ptw_resp_s2_gpf;
 
   always_comb begin
+    atp_translation_mode = 4'd0;
+    if (atp_translation_observed) begin
+      if (!io_tlbCsr_priv_virt) begin
+        if (io_tlbCsr_satp_mode == 4'h0) atp_translation_mode = 4'd1;
+        else if (io_tlbCsr_satp_mode == 4'h8) atp_translation_mode = 4'd2;
+        else if (io_tlbCsr_satp_mode == 4'h9) atp_translation_mode = 4'd3;
+      end else if (io_tlbCsr_vsatp_mode == 4'h0 && io_tlbCsr_hgatp_mode == 4'h0) begin
+        atp_translation_mode = 4'd4;
+      end else if (io_tlbCsr_vsatp_mode == 4'h8 && io_tlbCsr_hgatp_mode == 4'h0) begin
+        atp_translation_mode = 4'd5;
+      end else if (io_tlbCsr_vsatp_mode == 4'h9 && io_tlbCsr_hgatp_mode == 4'h0) begin
+        atp_translation_mode = 4'd6;
+      end else if (io_tlbCsr_vsatp_mode == 4'h0 && io_tlbCsr_hgatp_mode == 4'h8) begin
+        atp_translation_mode = 4'd7;
+      end else if (io_tlbCsr_vsatp_mode == 4'h0 && io_tlbCsr_hgatp_mode == 4'h9) begin
+        atp_translation_mode = 4'd8;
+      end else if (io_tlbCsr_vsatp_mode == 4'h8 && io_tlbCsr_hgatp_mode == 4'h8) begin
+        atp_translation_mode = 4'd9;
+      end else if (io_tlbCsr_vsatp_mode == 4'h9 && io_tlbCsr_hgatp_mode == 4'h8) begin
+        atp_translation_mode = 4'd10;
+      end else if (io_tlbCsr_vsatp_mode == 4'h8 && io_tlbCsr_hgatp_mode == 4'h9) begin
+        atp_translation_mode = 4'd11;
+      end else if (io_tlbCsr_vsatp_mode == 4'h9 && io_tlbCsr_hgatp_mode == 4'h9) begin
+        atp_translation_mode = 4'd12;
+      end
+    end
     atp_sfence_attr_transition = atp_sfence_attr_cacheable_to_mmio ? 3'd1 :
       atp_sfence_attr_cacheable_to_nc ? 3'd2 : atp_sfence_attr_mmio_to_cacheable ? 3'd3 :
       atp_sfence_attr_mmio_to_nc ? 3'd4 : atp_sfence_attr_nc_to_cacheable ? 3'd5 :
@@ -795,6 +891,90 @@ module frontend_atp_remaining_funcov (
 
   covergroup frontend_atp_remaining_funcov_cg @(posedge clock);
     option.per_instance = 1;
+
+    ATP_translation_mode_cp: coverpoint atp_translation_mode iff (!reset) {
+      bins nonvirtual_bare = {4'd1};
+      bins nonvirtual_sv39 = {4'd2};
+      bins nonvirtual_sv48 = {4'd3};
+      bins virtual_bare = {4'd4};
+      bins only_stage1_sv39 = {4'd5};
+      bins only_stage1_sv48 = {4'd6};
+      bins only_stage2_sv39x4 = {4'd7};
+      bins only_stage2_sv48x4 = {4'd8};
+      bins all_stage_sv39_sv39x4 = {4'd9};
+      bins all_stage_sv48_sv39x4 = {4'd10};
+      bins all_stage_sv39_sv48x4 = {4'd11};
+      bins all_stage_sv48_sv48x4 = {4'd12};
+    }
+    ATP_s1_leaf_executable_cp: coverpoint atp_s1_leaf_executable iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_s1_leaf_not_executable_cp: coverpoint atp_s1_leaf_not_executable iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_s1_leaf_accessed_clear_cp: coverpoint atp_s1_leaf_accessed_clear iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_s1_privilege_denied_cp: coverpoint atp_s1_privilege_denied iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_s1_write_without_read_cp: coverpoint atp_s1_write_without_read iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_s2_leaf_executable_cp: coverpoint atp_s2_leaf_executable iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_s2_leaf_not_executable_cp: coverpoint atp_s2_leaf_not_executable iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_s2_leaf_accessed_clear_cp: coverpoint atp_s2_leaf_accessed_clear iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_only_stage2_gpf_cp: coverpoint atp_only_stage2_gpf iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_only_stage2_gaf_cp: coverpoint atp_only_stage2_gaf iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_all_stage_fault_context_cp: coverpoint atp_all_stage_fault_context iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_all_stage_vs_leaf_gpf_cp: coverpoint atp_all_stage_vs_leaf_gpf iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_all_stage_vs_leaf_gaf_cp: coverpoint atp_all_stage_vs_leaf_gaf iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_all_stage_vs_fake_gpf_cp: coverpoint atp_all_stage_vs_fake_gpf iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_all_stage_vs_fake_gaf_cp: coverpoint atp_all_stage_vs_fake_gaf iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_all_stage_vs_nonleaf_gpf_cp: coverpoint atp_all_stage_vs_nonleaf_gpf iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_all_stage_vs_nonleaf_gaf_cp: coverpoint atp_all_stage_vs_nonleaf_gaf iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_all_stage_s1_pf_s2_leaf_cp: coverpoint atp_all_stage_s1_pf_s2_leaf iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_all_stage_s1_af_s2_leaf_cp: coverpoint atp_all_stage_s1_af_s2_leaf iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_all_stage_s1_pf_s2_gpf_cp: coverpoint atp_all_stage_s1_pf_s2_gpf iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_all_stage_s1_pf_s2_gaf_cp: coverpoint atp_all_stage_s1_pf_s2_gaf iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_all_stage_s1_af_s2_gpf_cp: coverpoint atp_all_stage_s1_af_s2_gpf iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_all_stage_s1_af_s2_gaf_cp: coverpoint atp_all_stage_s1_af_s2_gaf iff (!reset) {
+      bins observed = {1'b1};
+    }
 
     ATP_satp_asid_changed_cp: coverpoint (atp_satp_asid_changed_after_refill) iff (!reset) {
       bins observed = {1'b1};
