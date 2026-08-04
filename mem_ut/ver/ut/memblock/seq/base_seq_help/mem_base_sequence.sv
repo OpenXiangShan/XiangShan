@@ -442,8 +442,10 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     localparam bit [1:0] TL_CAP_TOB                = 2'd1;
     localparam bit [1:0] TL_CAP_TON                = 2'd2;
 
+    localparam bit [2:0] TL_REPORT_TTOB            = 3'd0;
     localparam bit [2:0] TL_REPORT_TTON            = 3'd1;
     localparam bit [2:0] TL_REPORT_BTON            = 3'd2;
+    localparam bit [2:0] TL_REPORT_BTOB            = 3'd4;
     localparam bit [2:0] TL_REPORT_NTON            = 3'd5;
 
     localparam bit [2:0] TL_LINE_SIZE              = 3'd6;
@@ -462,6 +464,32 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
         DCACHE_C_OWNER_PROBE   = 1,
         DCACHE_C_OWNER_RELEASE = 2
     } dcache_c_owner_e;
+
+    typedef enum int unsigned {
+        DCACHE_LINE_INVALID        = 0,
+        DCACHE_LINE_ACTIVE         = 1,
+        DCACHE_LINE_GRANT_WAIT_E   = 2,
+        DCACHE_LINE_ALIAS_CONFLICT = 3,
+        DCACHE_LINE_PROBE_PENDING  = 4
+    } dcache_line_lifecycle_e;
+
+    typedef enum int unsigned {
+        DCACHE_PROBE_OWNER_RANDOM         = 0,
+        DCACHE_PROBE_OWNER_FLUSH          = 1,
+        DCACHE_PROBE_OWNER_CBO            = 2,
+        DCACHE_PROBE_OWNER_ALIAS_CONFLICT = 3
+    } dcache_probe_owner_e;
+
+    typedef enum int unsigned {
+        DCACHE_PROBE_STATE_QUEUED     = 0,
+        DCACHE_PROBE_STATE_B_HOLD     = 1,
+        DCACHE_PROBE_STATE_WAIT_C     = 2,
+        DCACHE_PROBE_STATE_C_ASSEMBLY = 3
+    } dcache_probe_state_e;
+
+    typedef longint unsigned dcache_probe_token_t;
+
+    localparam int unsigned DCACHE_MAX_PROBE_RECORDS = 16;
 
     virtual dcache_agent_agent_interface dcache_vif;
 
@@ -528,19 +556,41 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     dcache_grant_ack_record_t grant_ack_wait_q[$];
     dcache_hint_record_t      dcache_hint_q[$];
 
-    // 中文注释：DCache 已完成 GrantAck 的 cache line 候选表，只保存 line 对齐地址和 alias。
-    // 设置：GrantAck fire 后插入/覆盖；清零：ProbeAck 完成、Release 完成、CBOFlush/Inval 完成或 reset。
-    // 作用：轻量 Probe 只能从这个表里随机挑选，主内存 data 仍由 main_mem 唯一持有。
-    bit [1:0] cached_alias_by_line[mem_addr_t];
+    // 中文注释：line record 是 physical line 的唯一轻量 alias 生命周期真源。
+    // 设置：Grant 的 D.fire 标记 GRANT_WAIT_E，GrantAck 后转 ACTIVE；Probe/Release/CBO 后更新或删除。
+    // 作用：alias 不参与 memory key，只用于判断同一 physical line 的 DCache 副本和 Probe B payload。
+    typedef struct {
+        bit [47:0]                line_addr;
+        bit [1:0]                 active_alias;
+        bit                       alias_valid;
+        bit                       may_return_data;
+        bit                       data_valid;
+        dcache_line_lifecycle_e   lifecycle_state;
+        bit                       deferred_acquire_valid;
+        dcache_agent_agent_xaction deferred_acquire;
+        bit                       deferred_response_reserved;
+        bit [9:0]                 deferred_sink;
+        longint unsigned          deferred_accept_cycle;
+    } dcache_cached_line_record_t;
 
-    // 中文注释：同一时刻只允许一个 Probe launch 和一个等待中的 Probe C reply。
-    // 设置：try_start_probe() 选中 map entry 后置 launch，B.fire 后切到 waiting_probe_c。
-    // 清零：ProbeAck/ProbeAckData 完整结束或 reset。
-    // 作用：避免引入多 Probe 并发和第二份 directory owner。
-    bit pending_probe_b_valid;
-    bit waiting_probe_c;
-    bit [47:0] pending_probe_line;
-    bit [1:0] pending_probe_alias;
+    // 中文注释：Probe record 保存一笔 B Probe 的稳定身份，C response 通过 line 唯一定位后再回到 token。
+    // 同一 physical line 只允许一笔未收敛 record；不同 line 可同时 WAIT_C，B channel 仍一次只保持一笔。
+    typedef struct {
+        dcache_probe_token_t token;
+        bit [47:0]           line_addr;
+        bit [1:0]            probe_alias;
+        bit [1:0]            target_cap;
+        dcache_probe_owner_e owner;
+        dcache_probe_state_e state;
+    } dcache_probe_record_t;
+
+    dcache_cached_line_record_t cached_line_by_addr[mem_addr_t];
+    dcache_probe_record_t       probe_record_q[$];
+    dcache_probe_token_t        next_probe_token;
+    bit                         probe_b_hold_valid;
+    dcache_probe_token_t        probe_b_hold_token;
+    int unsigned                deferred_response_reservation_count;
+    bit                         grant_sink_reserved[MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING];
 
     // 中文注释：当前正在收集的 C-channel 多拍 transaction。
     // 设置：首拍 ProbeAckData/ReleaseData fire 后建 owner 和 beat0 缓冲；清零：完整 2 beat 收齐或 reset。
@@ -554,6 +604,7 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     bit [2:0] c_assembly_param;
     bit c_assembly_corrupt_seen;
     bit [511:0] c_assembly_data;
+    dcache_probe_token_t c_assembly_probe_token;
     // 中文注释：ReleaseData 首个 C.fire 已经占用一个未来 ReleaseAck response slot。
     // 该 reservation 防止 16 笔表接近满时第二 beat 收齐后没有空间建立 ReleaseAck。
     bit c_assembly_response_reserved;
@@ -598,6 +649,45 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     );
     extern virtual function void record_cached_line(input bit [47:0] addr, input bit [1:0] line_alias);
     extern virtual function void remove_cached_line(input bit [47:0] addr, input string reason);
+    extern virtual function void mark_cached_line_grant_wait(
+        input bit [47:0] addr,
+        input bit [1:0]  line_alias
+    );
+    extern virtual function bit is_alias_conflict_request(
+        input dcache_agent_agent_xaction req_xact
+    );
+    extern virtual function bit has_probe_for_line(input bit [47:0] line_addr);
+    extern virtual function bit has_waiting_probe_c();
+    extern virtual function int find_probe_record_by_token(input dcache_probe_token_t probe_token);
+    extern virtual function int find_waiting_probe_record_by_line(input bit [47:0] line_addr);
+    extern virtual function bit submit_probe(
+        input bit [47:0]           line_addr,
+        input bit [1:0]            target_cap,
+        input dcache_probe_owner_e probe_owner,
+        output dcache_probe_token_t probe_token
+    );
+    extern virtual function void service_probe_b_hold();
+    extern virtual function void build_probe_b_xaction(inout dcache_agent_agent_xaction cycle_xact);
+    extern virtual function void process_probe_b_fire();
+    extern virtual function void check_probe_response_param(
+        input dcache_probe_record_t probe_record,
+        input bit [2:0]             response_param,
+        input string                response_name
+    );
+    extern virtual function bit reserve_deferred_acquire_resources(output bit [9:0] reserved_sink);
+    extern virtual function void release_deferred_acquire_resources(
+        input dcache_cached_line_record_t line_record
+    );
+    extern virtual task start_alias_conflict(
+        input dcache_agent_agent_xaction req_xact,
+        input longint unsigned           accept_cycle
+    );
+    extern virtual task complete_probe_record(
+        input int              probe_index,
+        input bit              data_response_seen,
+        input bit              data_valid,
+        input longint unsigned complete_cycle
+    );
     extern virtual function int unsigned sample_dcache_response_delay();
     extern virtual function int unsigned get_dcache_response_count();
     extern virtual function bit has_dcache_response_capacity();
@@ -680,6 +770,7 @@ function void dcache_mem__access_base_sequence::clear_c_assembly_state();
     c_assembly_param          = '0;
     c_assembly_corrupt_seen   = 1'b0;
     c_assembly_data           = '0;
+    c_assembly_probe_token    = '0;
     c_assembly_response_reserved = 1'b0;
 endfunction:clear_c_assembly_state
 
@@ -688,16 +779,20 @@ function void dcache_mem__access_base_sequence::clear_runtime_state(bit clear_ca
     c_accept_armed           = 1'b0;
     armed_a_req_xact         = null;
     armed_c_req_xact         = null;
-    pending_probe_b_valid    = 1'b0;
-    waiting_probe_c          = 1'b0;
-    pending_probe_line       = '0;
-    pending_probe_alias      = '0;
+    probe_record_q.delete();
+    next_probe_token                    = 1;
+    probe_b_hold_valid                  = 1'b0;
+    probe_b_hold_token                  = '0;
+    deferred_response_reservation_count = 0;
+    foreach (grant_sink_reserved[i]) begin
+        grant_sink_reserved[i] = 1'b0;
+    end
     last_cycle_valid         = 1'b0;
     last_cycle_xact          = null;
     clear_dcache_response_state();
     clear_c_assembly_state();
     if (clear_cache_map) begin
-        cached_alias_by_line.delete();
+        cached_line_by_addr.delete();
     end
 endfunction:clear_runtime_state
 
@@ -933,21 +1028,58 @@ task dcache_mem__access_base_sequence::load_grant_line(
 endtask:load_grant_line
 
 function void dcache_mem__access_base_sequence::record_cached_line(input bit [47:0] addr, input bit [1:0] line_alias);
-    cached_alias_by_line[line_addr64(addr)] = line_alias;
+    bit [47:0] line_addr;
+    dcache_cached_line_record_t line_record;
+
+    line_addr = line_addr64(addr);
+    line_record.line_addr              = line_addr;
+    line_record.active_alias           = line_alias;
+    line_record.alias_valid            = 1'b1;
+    line_record.may_return_data        = 1'b1;
+    line_record.data_valid             = 1'b1;
+    line_record.lifecycle_state        = DCACHE_LINE_ACTIVE;
+    line_record.deferred_acquire_valid = 1'b0;
+    line_record.deferred_acquire       = null;
+    line_record.deferred_response_reserved = 1'b0;
+    line_record.deferred_sink          = '0;
+    line_record.deferred_accept_cycle  = '0;
+    cached_line_by_addr[line_addr]     = line_record;
 endfunction:record_cached_line
 
 function void dcache_mem__access_base_sequence::remove_cached_line(input bit [47:0] addr, input string reason);
     bit [47:0] key;
 
     key = line_addr64(addr);
-    if (cached_alias_by_line.exists(key)) begin
-        cached_alias_by_line.delete(key);
+    if (cached_line_by_addr.exists(key)) begin
+        cached_line_by_addr.delete(key);
     end else begin
         `uvm_info(get_type_name(),
                   $sformatf("remove_cached_line miss for line=0x%0h reason=%s", key, reason),
                   UVM_DEBUG)
     end
 endfunction:remove_cached_line
+
+function void dcache_mem__access_base_sequence::mark_cached_line_grant_wait(
+    input bit [47:0] addr,
+    input bit [1:0]  line_alias
+);
+    bit [47:0] line_addr;
+    dcache_cached_line_record_t line_record;
+
+    line_addr = line_addr64(addr);
+    line_record.line_addr              = line_addr;
+    line_record.active_alias           = line_alias;
+    line_record.alias_valid            = 1'b0;
+    line_record.may_return_data        = 1'b0;
+    line_record.data_valid             = 1'b0;
+    line_record.lifecycle_state        = DCACHE_LINE_GRANT_WAIT_E;
+    line_record.deferred_acquire_valid = 1'b0;
+    line_record.deferred_acquire       = null;
+    line_record.deferred_response_reserved = 1'b0;
+    line_record.deferred_sink          = '0;
+    line_record.deferred_accept_cycle  = '0;
+    cached_line_by_addr[line_addr]     = line_record;
+endfunction:mark_cached_line_grant_wait
 
 function int unsigned dcache_mem__access_base_sequence::sample_dcache_response_delay();
     int unsigned delay_class;
@@ -1000,7 +1132,8 @@ endfunction:sample_dcache_response_delay
 
 function int unsigned dcache_mem__access_base_sequence::get_dcache_response_count();
     return dcache_rsp_q.size() + (current_d_valid ? 1 : 0) +
-           (c_assembly_response_reserved ? 1 : 0);
+           (c_assembly_response_reserved ? 1 : 0) +
+           deferred_response_reservation_count;
 endfunction:get_dcache_response_count
 
 function bit dcache_mem__access_base_sequence::has_dcache_response_capacity();
@@ -1008,6 +1141,9 @@ function bit dcache_mem__access_base_sequence::has_dcache_response_capacity();
 endfunction:has_dcache_response_capacity
 
 function bit dcache_mem__access_base_sequence::is_grant_sink_in_use(input bit [9:0] sink);
+    if ((sink < MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING) && grant_sink_reserved[sink]) begin
+        return 1'b1;
+    end
     if (current_d_valid &&
         ((current_d_record.kind == DCACHE_PENDING_D_GRANT) ||
          (current_d_record.kind == DCACHE_PENDING_D_GRANT_DATA)) &&
@@ -1056,9 +1192,27 @@ endfunction:allocate_grant_sink
 function bit dcache_mem__access_base_sequence::can_accept_dcache_a_request(
     input dcache_agent_agent_xaction req_xact
 );
+    bit [47:0] line_addr;
+    dcache_cached_line_record_t line_record;
+
     case (req_xact.auto_inner_dcache_client_out_a_bits_opcode)
         TL_A_OPCODE_ACQUIRE_BLOCK,
         TL_A_OPCODE_ACQUIRE_PERM: begin
+            line_addr = line_addr64(req_xact.auto_inner_dcache_client_out_a_bits_address);
+            if (cached_line_by_addr.exists(line_addr)) begin
+                line_record = cached_line_by_addr[line_addr];
+                if (line_record.deferred_acquire_valid ||
+                    (line_record.lifecycle_state != DCACHE_LINE_ACTIVE)) begin
+                    return 1'b0;
+                end
+            end
+            // Alias conflict 的 A.fire 必须同时预留后续 Probe 和 deferred Grant 资源。
+            // 不在 ready 打开后才发现 Probe queue 满，避免已经接受的 A 无法建立 owner。
+            if (is_alias_conflict_request(req_xact) &&
+                (has_probe_for_line(line_addr) ||
+                 (probe_record_q.size() >= DCACHE_MAX_PROBE_RECORDS))) begin
+                return 1'b0;
+            end
             return has_dcache_response_capacity() && has_free_grant_sink();
         end
         TL_A_OPCODE_CBO_CLEAN,
@@ -1084,6 +1238,353 @@ function bit dcache_mem__access_base_sequence::can_accept_dcache_release_c_reque
         default: return 1'b1;
     endcase
 endfunction:can_accept_dcache_release_c_request
+
+function bit dcache_mem__access_base_sequence::is_alias_conflict_request(
+    input dcache_agent_agent_xaction req_xact
+);
+    bit [47:0] line_addr;
+    dcache_cached_line_record_t line_record;
+
+    if (!(req_xact.auto_inner_dcache_client_out_a_bits_opcode inside {
+            TL_A_OPCODE_ACQUIRE_BLOCK,
+            TL_A_OPCODE_ACQUIRE_PERM
+        })) begin
+        return 1'b0;
+    end
+    line_addr = line_addr64(req_xact.auto_inner_dcache_client_out_a_bits_address);
+    if (!cached_line_by_addr.exists(line_addr)) begin
+        return 1'b0;
+    end
+    line_record = cached_line_by_addr[line_addr];
+    return line_record.alias_valid &&
+           (line_record.lifecycle_state == DCACHE_LINE_ACTIVE) &&
+           (line_record.active_alias != req_xact.auto_inner_dcache_client_out_a_bits_user_alias);
+endfunction:is_alias_conflict_request
+
+function bit dcache_mem__access_base_sequence::has_probe_for_line(input bit [47:0] line_addr);
+    bit [47:0] line_key;
+
+    line_key = line_addr64(line_addr);
+    foreach (probe_record_q[i]) begin
+        if (probe_record_q[i].line_addr == line_key) begin
+            return 1'b1;
+        end
+    end
+    return 1'b0;
+endfunction:has_probe_for_line
+
+function bit dcache_mem__access_base_sequence::has_waiting_probe_c();
+    foreach (probe_record_q[i]) begin
+        if (probe_record_q[i].state == DCACHE_PROBE_STATE_WAIT_C) begin
+            return 1'b1;
+        end
+    end
+    return 1'b0;
+endfunction:has_waiting_probe_c
+
+function int dcache_mem__access_base_sequence::find_probe_record_by_token(input dcache_probe_token_t probe_token);
+    foreach (probe_record_q[i]) begin
+        if (probe_record_q[i].token == probe_token) begin
+            return i;
+        end
+    end
+    return -1;
+endfunction:find_probe_record_by_token
+
+function int dcache_mem__access_base_sequence::find_waiting_probe_record_by_line(input bit [47:0] line_addr);
+    bit [47:0] line_key;
+    int found_index;
+
+    line_key = line_addr64(line_addr);
+    found_index = -1;
+    foreach (probe_record_q[i]) begin
+        if ((probe_record_q[i].line_addr == line_key) &&
+            (probe_record_q[i].state == DCACHE_PROBE_STATE_WAIT_C)) begin
+            if (found_index >= 0) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("multiple WAIT_C Probe records match line=0x%0h", line_key))
+            end
+            found_index = i;
+        end
+    end
+    return found_index;
+endfunction:find_waiting_probe_record_by_line
+
+function void dcache_mem__access_base_sequence::check_probe_response_param(
+    input dcache_probe_record_t probe_record,
+    input bit [2:0]             response_param,
+    input string                response_name
+);
+    case (probe_record.target_cap)
+        TL_CAP_TON: begin
+            if (!(response_param inside {TL_REPORT_TTON, TL_REPORT_BTON})) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("%s param=%0d is invalid for Probe(toN) token=%0d line=0x%0h",
+                                     response_name,
+                                     response_param,
+                                     probe_record.token,
+                                     probe_record.line_addr))
+            end
+        end
+        TL_CAP_TOB: begin
+            if (!(response_param inside {TL_REPORT_TTOB, TL_REPORT_BTOB})) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("%s param=%0d is invalid for Probe(toB) token=%0d line=0x%0h",
+                                     response_name,
+                                     response_param,
+                                     probe_record.token,
+                                     probe_record.line_addr))
+            end
+        end
+        default: begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("Probe token=%0d line=0x%0h uses unsupported target_cap=%0d",
+                                 probe_record.token,
+                                 probe_record.line_addr,
+                                 probe_record.target_cap))
+        end
+    endcase
+endfunction:check_probe_response_param
+
+function bit dcache_mem__access_base_sequence::reserve_deferred_acquire_resources(output bit [9:0] reserved_sink);
+    reserved_sink = '0;
+    if (!has_dcache_response_capacity() || !has_free_grant_sink()) begin
+        return 1'b0;
+    end
+    if (!allocate_grant_sink(reserved_sink)) begin
+        return 1'b0;
+    end
+    if (grant_sink_reserved[reserved_sink]) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("deferred Acquire tries to reserve an occupied sink=%0d", reserved_sink))
+    end
+    grant_sink_reserved[reserved_sink] = 1'b1;
+    deferred_response_reservation_count++;
+    return 1'b1;
+endfunction:reserve_deferred_acquire_resources
+
+function void dcache_mem__access_base_sequence::release_deferred_acquire_resources(
+    input dcache_cached_line_record_t line_record
+);
+    if (!line_record.deferred_response_reserved) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("deferred Acquire line=0x%0h has no response reservation", line_record.line_addr))
+    end
+    if ((line_record.deferred_sink >= MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING) ||
+        !grant_sink_reserved[line_record.deferred_sink]) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("deferred Acquire line=0x%0h owns invalid sink=%0d",
+                             line_record.line_addr,
+                             line_record.deferred_sink))
+    end
+    if (deferred_response_reservation_count == 0) begin
+        `uvm_fatal(get_type_name(), "deferred Acquire response reservation counter underflow")
+    end
+    grant_sink_reserved[line_record.deferred_sink] = 1'b0;
+    deferred_response_reservation_count--;
+endfunction:release_deferred_acquire_resources
+
+function bit dcache_mem__access_base_sequence::submit_probe(
+    input bit [47:0]           line_addr,
+    input bit [1:0]            target_cap,
+    input dcache_probe_owner_e probe_owner,
+    output dcache_probe_token_t probe_token
+);
+    bit [47:0] line_key;
+    dcache_cached_line_record_t line_record;
+    dcache_probe_record_t probe_record;
+
+    probe_token = '0;
+    line_key = line_addr64(line_addr);
+    if (!cached_line_by_addr.exists(line_key)) begin
+        return 1'b0;
+    end
+    line_record = cached_line_by_addr[line_key];
+    if (probe_owner == DCACHE_PROBE_OWNER_ALIAS_CONFLICT) begin
+        if (!line_record.alias_valid ||
+            (line_record.lifecycle_state != DCACHE_LINE_ALIAS_CONFLICT)) begin
+            return 1'b0;
+        end
+    end else if (!line_record.alias_valid ||
+                 (line_record.lifecycle_state != DCACHE_LINE_ACTIVE)) begin
+        return 1'b0;
+    end
+    if (has_probe_for_line(line_key) || (probe_record_q.size() >= DCACHE_MAX_PROBE_RECORDS)) begin
+        return 1'b0;
+    end
+    if (!(target_cap inside {TL_CAP_TON, TL_CAP_TOB})) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("submit_probe line=0x%0h uses unsupported target_cap=%0d", line_key, target_cap))
+    end
+    if (next_probe_token == '0) begin
+        next_probe_token = 1;
+    end
+    probe_record             = '{default:'0};
+    probe_record.token       = next_probe_token;
+    probe_record.line_addr   = line_key;
+    probe_record.probe_alias = line_record.active_alias;
+    probe_record.target_cap  = target_cap;
+    probe_record.owner       = probe_owner;
+    probe_record.state       = DCACHE_PROBE_STATE_QUEUED;
+    next_probe_token++;
+    probe_token = probe_record.token;
+    probe_record_q.push_back(probe_record);
+    if (probe_owner != DCACHE_PROBE_OWNER_ALIAS_CONFLICT) begin
+        line_record.lifecycle_state = DCACHE_LINE_PROBE_PENDING;
+        cached_line_by_addr[line_key] = line_record;
+    end
+    return 1'b1;
+endfunction:submit_probe
+
+function void dcache_mem__access_base_sequence::service_probe_b_hold();
+    if (probe_b_hold_valid) begin
+        return;
+    end
+    foreach (probe_record_q[i]) begin
+        if (probe_record_q[i].state == DCACHE_PROBE_STATE_QUEUED) begin
+            probe_record_q[i].state = DCACHE_PROBE_STATE_B_HOLD;
+            probe_b_hold_token      = probe_record_q[i].token;
+            probe_b_hold_valid      = 1'b1;
+            return;
+        end
+    end
+endfunction:service_probe_b_hold
+
+function void dcache_mem__access_base_sequence::build_probe_b_xaction(inout dcache_agent_agent_xaction cycle_xact);
+    int probe_index;
+    dcache_probe_record_t probe_record;
+
+    if (!probe_b_hold_valid) begin
+        return;
+    end
+    probe_index = find_probe_record_by_token(probe_b_hold_token);
+    if ((probe_index < 0) ||
+        (probe_record_q[probe_index].state != DCACHE_PROBE_STATE_B_HOLD)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("B hold token=%0d does not identify a B_HOLD Probe record", probe_b_hold_token))
+    end
+    probe_record = probe_record_q[probe_index];
+    cycle_xact.auto_inner_dcache_client_out_b_valid            = 1'b1;
+    cycle_xact.auto_inner_dcache_client_out_b_bits_opcode      = TL_B_OPCODE_PROBE;
+    cycle_xact.auto_inner_dcache_client_out_b_bits_param       = probe_record.target_cap;
+    cycle_xact.auto_inner_dcache_client_out_b_bits_size        = TL_LINE_SIZE;
+    cycle_xact.auto_inner_dcache_client_out_b_bits_source      = 6'd0;
+    cycle_xact.auto_inner_dcache_client_out_b_bits_address     = probe_record.line_addr;
+    cycle_xact.auto_inner_dcache_client_out_b_bits_mask        = 32'hffff_ffff;
+    cycle_xact.auto_inner_dcache_client_out_b_bits_data        = '0;
+    cycle_xact.auto_inner_dcache_client_out_b_bits_data[2:1]  = probe_record.probe_alias;
+    cycle_xact.auto_inner_dcache_client_out_b_bits_corrupt     = 1'b0;
+endfunction:build_probe_b_xaction
+
+function void dcache_mem__access_base_sequence::process_probe_b_fire();
+    int probe_index;
+
+    if (!probe_b_hold_valid) begin
+        `uvm_fatal(get_type_name(), "B.fire observed without a Probe B hold")
+    end
+    probe_index = find_probe_record_by_token(probe_b_hold_token);
+    if ((probe_index < 0) ||
+        (probe_record_q[probe_index].state != DCACHE_PROBE_STATE_B_HOLD)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("B.fire token=%0d does not identify a B_HOLD Probe record", probe_b_hold_token))
+    end
+    probe_record_q[probe_index].state = DCACHE_PROBE_STATE_WAIT_C;
+    probe_b_hold_valid                = 1'b0;
+    probe_b_hold_token                = '0;
+endfunction:process_probe_b_fire
+
+task dcache_mem__access_base_sequence::start_alias_conflict(
+    input dcache_agent_agent_xaction req_xact,
+    input longint unsigned           accept_cycle
+);
+    bit [47:0] line_addr;
+    bit [9:0] reserved_sink;
+    dcache_probe_token_t probe_token;
+    dcache_cached_line_record_t old_line_record;
+    dcache_cached_line_record_t line_record;
+
+    if (!is_alias_conflict_request(req_xact)) begin
+        `uvm_fatal(get_type_name(), "start_alias_conflict called for a non-conflicting A request")
+    end
+    line_addr = line_addr64(req_xact.auto_inner_dcache_client_out_a_bits_address);
+    if (has_probe_for_line(line_addr) || !reserve_deferred_acquire_resources(reserved_sink)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("A.fire alias conflict cannot reserve Probe/Acquire resources line=0x%0h", line_addr))
+    end
+    old_line_record = cached_line_by_addr[line_addr];
+    line_record = old_line_record;
+    line_record.deferred_acquire = dcache_agent_agent_xaction::type_id::create("deferred_alias_acquire");
+    line_record.deferred_acquire.copy(req_xact);
+    line_record.deferred_acquire_valid      = 1'b1;
+    line_record.deferred_response_reserved  = 1'b1;
+    line_record.deferred_sink               = reserved_sink;
+    line_record.deferred_accept_cycle       = accept_cycle;
+    line_record.lifecycle_state             = DCACHE_LINE_ALIAS_CONFLICT;
+    cached_line_by_addr[line_addr]          = line_record;
+    if (!submit_probe(line_addr, TL_CAP_TON, DCACHE_PROBE_OWNER_ALIAS_CONFLICT, probe_token)) begin
+        cached_line_by_addr[line_addr] = old_line_record;
+        release_deferred_acquire_resources(line_record);
+        `uvm_fatal(get_type_name(),
+                   $sformatf("A.fire alias conflict cannot create Probe record line=0x%0h", line_addr))
+    end
+endtask:start_alias_conflict
+
+task dcache_mem__access_base_sequence::complete_probe_record(
+    input int              probe_index,
+    input bit              data_response_seen,
+    input bit              data_valid,
+    input longint unsigned complete_cycle
+);
+    dcache_probe_record_t probe_record;
+    dcache_cached_line_record_t line_record;
+    dcache_agent_agent_xaction deferred_acquire;
+
+    if ((probe_index < 0) || (probe_index >= probe_record_q.size())) begin
+        `uvm_fatal(get_type_name(), $sformatf("invalid Probe record index=%0d on completion", probe_index))
+    end
+    probe_record = probe_record_q[probe_index];
+    if (!cached_line_by_addr.exists(probe_record.line_addr)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("Probe token=%0d completed without a line record line=0x%0h",
+                             probe_record.token,
+                             probe_record.line_addr))
+    end
+    line_record = cached_line_by_addr[probe_record.line_addr];
+    if (data_response_seen) begin
+        line_record.data_valid = data_valid;
+    end
+
+    case (probe_record.target_cap)
+        TL_CAP_TOB: begin
+            line_record.alias_valid     = 1'b1;
+            line_record.lifecycle_state = DCACHE_LINE_ACTIVE;
+            cached_line_by_addr[probe_record.line_addr] = line_record;
+            probe_record_q.delete(probe_index);
+        end
+        TL_CAP_TON: begin
+            if (probe_record.owner == DCACHE_PROBE_OWNER_ALIAS_CONFLICT) begin
+                if (!line_record.deferred_acquire_valid) begin
+                    `uvm_fatal(get_type_name(),
+                               $sformatf("alias Probe token=%0d completed without deferred Acquire", probe_record.token))
+                end
+                deferred_acquire = line_record.deferred_acquire;
+                release_deferred_acquire_resources(line_record);
+                probe_record_q.delete(probe_index);
+                cached_line_by_addr.delete(probe_record.line_addr);
+                accept_dcache_a_request(deferred_acquire, complete_cycle);
+            end else begin
+                probe_record_q.delete(probe_index);
+                remove_cached_line(probe_record.line_addr, "probe_toN");
+            end
+        end
+        default: begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("Probe token=%0d completed with unsupported target_cap=%0d",
+                                 probe_record.token,
+                                 probe_record.target_cap))
+        end
+    endcase
+endtask:complete_probe_record
 
 function int dcache_mem__access_base_sequence::find_dcache_eligible_response(
     input longint unsigned current_cycle,
@@ -1236,27 +1737,45 @@ function bit dcache_mem__access_base_sequence::select_random_cached_line(output 
     mem_addr_t    key;
     int unsigned  entry_count;
     int unsigned  ordinal;
+    int unsigned  seen;
+    dcache_cached_line_record_t line_record;
 
     line_addr  = '0;
     line_alias = '0;
-    entry_count = cached_alias_by_line.num();
+    entry_count = 0;
+    foreach (cached_line_by_addr[key]) begin
+        line_record = cached_line_by_addr[key];
+        if (line_record.alias_valid &&
+            (line_record.lifecycle_state == DCACHE_LINE_ACTIVE) &&
+            !has_probe_for_line(key)) begin
+            entry_count++;
+        end
+    end
     if (entry_count == 0) begin
         return 1'b0;
     end
     if (!std::randomize(ordinal) with { ordinal inside {[0:entry_count-1]}; }) begin
         `uvm_fatal(get_type_name(), "failed to randomize cached-line probe ordinal")
     end
-    if (!cached_alias_by_line.first(key)) begin
+    if (!cached_line_by_addr.first(key)) begin
         return 1'b0;
     end
-    for (int unsigned i = 0; i < ordinal; i++) begin
-        if (!cached_alias_by_line.next(key)) begin
-            `uvm_fatal(get_type_name(), $sformatf("cached_alias_by_line.next() failed at ordinal=%0d", ordinal))
+    seen = 0;
+    do begin
+        line_record = cached_line_by_addr[key];
+        if (line_record.alias_valid &&
+            (line_record.lifecycle_state == DCACHE_LINE_ACTIVE) &&
+            !has_probe_for_line(key)) begin
+            if (seen == ordinal) begin
+                line_addr  = key;
+                line_alias = line_record.active_alias;
+                return 1'b1;
+            end
+            seen++;
         end
-    end
-    line_addr = key;
-    line_alias = cached_alias_by_line[key];
-    return 1'b1;
+    end while (cached_line_by_addr.next(key));
+    `uvm_fatal(get_type_name(), $sformatf("cached_line_by_addr selection failed at ordinal=%0d", ordinal))
+    return 1'b0;
 endfunction:select_random_cached_line
 
 task dcache_mem__access_base_sequence::accept_dcache_a_request(
@@ -1284,6 +1803,10 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
                              req_xact.auto_inner_dcache_client_out_a_bits_address))
     end
     check_line_range(line_addr, "dcache coherent A");
+    if (is_alias_conflict_request(req_xact)) begin
+        start_alias_conflict(req_xact, accept_cycle);
+        return;
+    end
 
     response_record                = '{default:'0};
     response_record.eligible_cycle = accept_cycle + 3;
@@ -1450,12 +1973,14 @@ function void dcache_mem__access_base_sequence::process_d_fire();
             grant_ack_record.line_alias = completed_record.line_alias;
             grant_ack_record.sink      = completed_record.sink;
             grant_ack_wait_q.push_back(grant_ack_record);
+            mark_cached_line_grant_wait(completed_record.line_addr, completed_record.line_alias);
         end
         DCACHE_PENDING_D_GRANT: begin
             grant_ack_record.line_addr = completed_record.line_addr;
             grant_ack_record.line_alias = completed_record.line_alias;
             grant_ack_record.sink      = completed_record.sink;
             grant_ack_wait_q.push_back(grant_ack_record);
+            mark_cached_line_grant_wait(completed_record.line_addr, completed_record.line_alias);
         end
         DCACHE_PENDING_D_CBO_ACK: begin
             if (completed_record.cbo_opcode == TL_A_OPCODE_CBO_FLUSH) begin
@@ -1498,7 +2023,14 @@ task dcache_mem__access_base_sequence::complete_probe_c_assembly(input longint u
     bit corrupt;
     bit denied;
     bit [255:0] load_data_unused;
+    int probe_index;
 
+    probe_index = find_probe_record_by_token(c_assembly_probe_token);
+    if ((probe_index < 0) ||
+        (probe_record_q[probe_index].state != DCACHE_PROBE_STATE_C_ASSEMBLY)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("ProbeAckData completion cannot find C assembly token=%0d", c_assembly_probe_token))
+    end
     if (!c_assembly_corrupt_seen) begin
         dcache_mem_access_task(c_assembly_line, 1'b1, 32'hffff_ffff, c_assembly_data[255:0], corrupt, denied, load_data_unused);
         if (corrupt || denied) begin
@@ -1513,8 +2045,15 @@ task dcache_mem__access_base_sequence::complete_probe_c_assembly(input longint u
                                  c_assembly_line, corrupt, denied))
         end
     end
-    remove_cached_line(c_assembly_line, "probe_toN");
-    waiting_probe_c = 1'b0;
+    else begin
+        `uvm_error(get_type_name(),
+                   $sformatf("ProbeAckData is corrupt; skip writeback but still close Probe token=%0d line=0x%0h",
+                             c_assembly_probe_token, c_assembly_line))
+    end
+    complete_probe_record(probe_index,
+                          1'b1,
+                          !c_assembly_corrupt_seen,
+                          complete_cycle);
     clear_c_assembly_state();
 endtask:complete_probe_c_assembly
 
@@ -1561,8 +2100,19 @@ task dcache_mem__access_base_sequence::consume_c_beat(
     input dcache_agent_agent_xaction c_req_xact,
     input longint unsigned           accept_cycle
 );
+    int probe_index;
+
     if (c_assembly_owner == DCACHE_C_OWNER_NONE) begin
         `uvm_fatal(get_type_name(), "consume_c_beat called without active C assembly")
+    end
+    if (c_assembly_owner == DCACHE_C_OWNER_PROBE) begin
+        probe_index = find_probe_record_by_token(c_assembly_probe_token);
+        if ((probe_index < 0) ||
+            (probe_record_q[probe_index].state != DCACHE_PROBE_STATE_C_ASSEMBLY)) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("C beat does not belong to an active Probe assembly token=%0d",
+                                 c_assembly_probe_token))
+        end
     end
     if (c_req_xact.auto_inner_dcache_client_out_c_bits_opcode != c_assembly_opcode) begin
         `uvm_fatal(get_type_name(),
@@ -1617,47 +2167,50 @@ task dcache_mem__access_base_sequence::start_c_assembly(
     input longint unsigned           accept_cycle
 );
     bit [47:0] line_addr;
+    int probe_index;
+    dcache_probe_record_t probe_record;
 
     line_addr = line_addr64(c_req_xact.auto_inner_dcache_client_out_c_bits_address);
 
     case (c_req_xact.auto_inner_dcache_client_out_c_bits_opcode)
         TL_C_OPCODE_PROBE_ACK: begin
-            if (!waiting_probe_c) begin
-                `uvm_fatal(get_type_name(), "ProbeAck arrived without a pending Probe owner")
+            probe_index = find_waiting_probe_record_by_line(line_addr);
+            if (probe_index < 0) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("ProbeAck arrived without a unique pending Probe owner line=0x%0h", line_addr))
             end
-            if (line_addr != pending_probe_line) begin
+            probe_record = probe_record_q[probe_index];
+            if (line_addr != probe_record.line_addr) begin
                 `uvm_fatal(get_type_name(),
                            $sformatf("ProbeAck line mismatch expected=0x%0h got=0x%0h",
-                                     pending_probe_line, line_addr))
+                                     probe_record.line_addr, line_addr))
             end
             if (c_req_xact.auto_inner_dcache_client_out_c_bits_size != TL_LINE_SIZE) begin
                 `uvm_fatal(get_type_name(), "ProbeAck size must be 6")
             end
-            if (!(c_req_xact.auto_inner_dcache_client_out_c_bits_param inside {TL_REPORT_TTON, TL_REPORT_BTON, TL_REPORT_NTON})) begin
-                `uvm_fatal(get_type_name(),
-                           $sformatf("ProbeAck param=%0d is unsupported",
-                                     c_req_xact.auto_inner_dcache_client_out_c_bits_param))
-            end
-            remove_cached_line(line_addr, "probe_toN");
-            waiting_probe_c = 1'b0;
+            check_probe_response_param(probe_record,
+                                       c_req_xact.auto_inner_dcache_client_out_c_bits_param,
+                                       "ProbeAck");
+            complete_probe_record(probe_index, 1'b0, 1'b0, accept_cycle);
         end
         TL_C_OPCODE_PROBE_ACKDATA: begin
-            if (!waiting_probe_c) begin
-                `uvm_fatal(get_type_name(), "ProbeAckData arrived without a pending Probe owner")
+            probe_index = find_waiting_probe_record_by_line(line_addr);
+            if (probe_index < 0) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("ProbeAckData arrived without a unique pending Probe owner line=0x%0h", line_addr))
             end
-            if (line_addr != pending_probe_line) begin
+            probe_record = probe_record_q[probe_index];
+            if (line_addr != probe_record.line_addr) begin
                 `uvm_fatal(get_type_name(),
                            $sformatf("ProbeAckData line mismatch expected=0x%0h got=0x%0h",
-                                     pending_probe_line, line_addr))
+                                     probe_record.line_addr, line_addr))
             end
             if (c_req_xact.auto_inner_dcache_client_out_c_bits_size != TL_LINE_SIZE) begin
                 `uvm_fatal(get_type_name(), "ProbeAckData size must be 6")
             end
-            if (!(c_req_xact.auto_inner_dcache_client_out_c_bits_param inside {TL_REPORT_TTON, TL_REPORT_BTON, TL_REPORT_NTON})) begin
-                `uvm_fatal(get_type_name(),
-                           $sformatf("ProbeAckData param=%0d is unsupported",
-                                     c_req_xact.auto_inner_dcache_client_out_c_bits_param))
-            end
+            check_probe_response_param(probe_record,
+                                       c_req_xact.auto_inner_dcache_client_out_c_bits_param,
+                                       "ProbeAckData");
             clear_c_assembly_state();
             c_assembly_owner          = DCACHE_C_OWNER_PROBE;
             c_assembly_opcode         = c_req_xact.auto_inner_dcache_client_out_c_bits_opcode;
@@ -1665,6 +2218,8 @@ task dcache_mem__access_base_sequence::start_c_assembly(
             c_assembly_source         = c_req_xact.auto_inner_dcache_client_out_c_bits_source;
             c_assembly_size           = c_req_xact.auto_inner_dcache_client_out_c_bits_size;
             c_assembly_param          = c_req_xact.auto_inner_dcache_client_out_c_bits_param;
+            c_assembly_probe_token    = probe_record.token;
+            probe_record_q[probe_index].state = DCACHE_PROBE_STATE_C_ASSEMBLY;
             consume_c_beat(c_req_xact, accept_cycle);
         end
         TL_C_OPCODE_RELEASE: begin
@@ -1728,11 +2283,12 @@ endtask:start_c_assembly
 function void dcache_mem__access_base_sequence::try_start_probe(input bit allow_new_probe = 1'b1);
     bit [47:0] selected_line;
     bit [1:0]  selected_alias;
+    dcache_probe_token_t probe_token;
 
     // Probe 只能在完全空闲且未进入 stop drain 时新建；已有 B/C owner 由主循环继续消费。
     if (!allow_new_probe || current_d_valid || (dcache_rsp_q.size() != 0) ||
         (grant_ack_wait_q.size() != 0) ||
-        pending_probe_b_valid || waiting_probe_c ||
+        probe_b_hold_valid || has_waiting_probe_c() ||
         (c_assembly_owner != DCACHE_C_OWNER_NONE) ||
         a_accept_armed || c_accept_armed) begin
         return;
@@ -1743,9 +2299,14 @@ function void dcache_mem__access_base_sequence::try_start_probe(input bit allow_
     if (!select_random_cached_line(selected_line, selected_alias)) begin
         return;
     end
-    pending_probe_b_valid = 1'b1;
-    pending_probe_line    = selected_line;
-    pending_probe_alias   = selected_alias;
+    if (!submit_probe(selected_line,
+                      TL_CAP_TON,
+                      DCACHE_PROBE_OWNER_RANDOM,
+                      probe_token)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("selected legacy Probe line=0x%0h could not create a shared Probe record", selected_line))
+    end
+    service_probe_b_hold();
 endfunction:try_start_probe
 
 function void dcache_mem__access_base_sequence::service_hint(
@@ -1898,11 +2459,7 @@ task dcache_mem__access_base_sequence::body();
             end
 
             if (b_fire) begin
-                if (!pending_probe_b_valid) begin
-                    `uvm_fatal(get_type_name(), "B.fire observed without a pending Probe launch")
-                end
-                pending_probe_b_valid = 1'b0;
-                waiting_probe_c       = 1'b1;
+                process_probe_b_fire();
             end
 
             if (a_fire) begin
@@ -1911,7 +2468,9 @@ task dcache_mem__access_base_sequence::body();
                 end
                 capture_dcache_a_xaction(fired_a_req_xact);
                 check_a_payload_stable(armed_a_req_xact, fired_a_req_xact);
-                accept_dcache_a_request(armed_a_req_xact, last_drive_cycle);
+                // A.fire 的建表和 alias 判断消费当前 sample 的完整 payload；armed snapshot
+                // 只负责 valid 等待 ready 期间的稳定性检查，不能成为后续 owner 的数据来源。
+                accept_dcache_a_request(fired_a_req_xact, last_drive_cycle);
                 a_accept_armed = 1'b0;
                 armed_a_req_xact = null;
             end else if (a_accept_armed && !sampled_a_valid) begin
@@ -1937,8 +2496,8 @@ task dcache_mem__access_base_sequence::body();
             !dcache_rsp_timer_active &&
             (grant_ack_wait_q.size() == 0) &&
             (dcache_hint_q.size() == 0) &&
-            !pending_probe_b_valid &&
-            !waiting_probe_c &&
+            !probe_b_hold_valid &&
+            (probe_record_q.size() == 0) &&
             (c_assembly_owner == DCACHE_C_OWNER_NONE) &&
             !c_assembly_response_reserved &&
             !a_accept_armed &&
@@ -1947,7 +2506,7 @@ task dcache_mem__access_base_sequence::body();
             !sampled_c_valid) begin
             `uvm_info(get_type_name(),
                       $sformatf("DCache responder draining complete at service_cycle=%0d cached_lines=%0d",
-                                service_cycle, cached_alias_by_line.num()),
+                                service_cycle, cached_line_by_addr.num()),
                       UVM_LOW)
             send_dcache_xaction(cycle_xact);
             last_cycle_xact  = cycle_xact;
@@ -1962,15 +2521,15 @@ task dcache_mem__access_base_sequence::body();
             stop_wait_cycles++;
             if ((stop_wait_cycles % 1000) == 0) begin
                 `uvm_warning(get_type_name(),
-                             $sformatf("DCache responder still draining after global stop: cycles=%0d current_d=%0d queued_rsp=%0d timer=%0d grant_ack=%0d hint=%0d probe_b=%0d probe_c=%0d c_owner=%0d c_resv=%0d a_armed=%0d c_armed=%0d a_valid=%0d c_valid=%0d",
+                             $sformatf("DCache responder still draining after global stop: cycles=%0d current_d=%0d queued_rsp=%0d timer=%0d grant_ack=%0d hint=%0d probe_hold=%0d probe_records=%0d c_owner=%0d c_resv=%0d a_armed=%0d c_armed=%0d a_valid=%0d c_valid=%0d",
                                        stop_wait_cycles,
                                        current_d_valid,
                                        dcache_rsp_q.size(),
                                        dcache_rsp_timer_active,
                                        grant_ack_wait_q.size(),
                                        dcache_hint_q.size(),
-                                       pending_probe_b_valid,
-                                       waiting_probe_c,
+                                       probe_b_hold_valid,
+                                       probe_record_q.size(),
                                        c_assembly_owner,
                                        c_assembly_response_reserved,
                                        a_accept_armed,
@@ -1991,20 +2550,11 @@ task dcache_mem__access_base_sequence::body();
             cycle_xact.auto_inner_dcache_client_out_e_ready = 1'b1;
         end
 
-        if (pending_probe_b_valid) begin
-            cycle_xact.auto_inner_dcache_client_out_b_valid        = 1'b1;
-            cycle_xact.auto_inner_dcache_client_out_b_bits_opcode  = TL_B_OPCODE_PROBE;
-            cycle_xact.auto_inner_dcache_client_out_b_bits_param   = TL_CAP_TON;
-            cycle_xact.auto_inner_dcache_client_out_b_bits_size    = TL_LINE_SIZE;
-            cycle_xact.auto_inner_dcache_client_out_b_bits_source  = 6'd0;
-            cycle_xact.auto_inner_dcache_client_out_b_bits_address = pending_probe_line;
-            cycle_xact.auto_inner_dcache_client_out_b_bits_mask    = 32'hffff_ffff;
-            cycle_xact.auto_inner_dcache_client_out_b_bits_data    = '0;
-            cycle_xact.auto_inner_dcache_client_out_b_bits_data[2:1] = pending_probe_alias;
-            cycle_xact.auto_inner_dcache_client_out_b_bits_corrupt = 1'b0;
-        end
+        // 已建立的 Probe record 由单一 B hold 驱动。C assembly 和已到达的 C reply
+        // 优先于新的 B launch，避免两拍 ProbeAckData 被另一个 Probe 抢占。
+        service_probe_b_hold();
         // 当前采样拍已经 fire 的 A/C payload 不能在状态更新后再次被当作新请求 arm。
-        else if (!c_fire && (c_assembly_owner != DCACHE_C_OWNER_NONE)) begin
+        if (!c_fire && (c_assembly_owner != DCACHE_C_OWNER_NONE)) begin
             if (sampled_c_valid) begin
                 capture_dcache_c_xaction(sampled_req_xact);
                 cycle_xact.auto_inner_dcache_client_out_c_ready = 1'b1;
@@ -2012,7 +2562,7 @@ task dcache_mem__access_base_sequence::body();
                 armed_c_req_xact = sampled_req_xact;
             end
         end
-        else if (!c_fire && waiting_probe_c) begin
+        else if (!c_fire && has_waiting_probe_c()) begin
             if (sampled_c_valid) begin
                 capture_dcache_c_xaction(sampled_req_xact);
                 case (sampled_req_xact.auto_inner_dcache_client_out_c_bits_opcode)
@@ -2028,10 +2578,13 @@ task dcache_mem__access_base_sequence::body();
                     end
                     default: begin
                         `uvm_fatal(get_type_name(),
-                                   $sformatf("waiting_probe_c only accepts ProbeAck/Data or Release/Data, got opcode=%0d",
+                                   $sformatf("pending Probe records only accept ProbeAck/Data or Release/Data, got opcode=%0d",
                                              sampled_req_xact.auto_inner_dcache_client_out_c_bits_opcode))
                     end
                 endcase
+            end
+            else if (probe_b_hold_valid) begin
+                build_probe_b_xaction(cycle_xact);
             end
         end
         else if (!c_fire && sampled_c_valid) begin
@@ -2056,6 +2609,9 @@ task dcache_mem__access_base_sequence::body();
             // 本拍 C.fire 已完成或推进了 C owner；禁止同拍 arm A 或启动 Probe。
             // 下一拍由 C assembly/Probe owner 分支继续消费后续 beat。
         end
+        else if (probe_b_hold_valid) begin
+            build_probe_b_xaction(cycle_xact);
+        end
         else if (!a_fire && !data.is_global_stop_requested() && sampled_a_valid) begin
             capture_dcache_a_xaction(sampled_req_xact);
             case (sampled_req_xact.auto_inner_dcache_client_out_a_bits_opcode)
@@ -2079,17 +2635,8 @@ task dcache_mem__access_base_sequence::body();
         end
         else begin
             try_start_probe(!data.is_global_stop_requested());
-            if (pending_probe_b_valid) begin
-                cycle_xact.auto_inner_dcache_client_out_b_valid        = 1'b1;
-                cycle_xact.auto_inner_dcache_client_out_b_bits_opcode  = TL_B_OPCODE_PROBE;
-                cycle_xact.auto_inner_dcache_client_out_b_bits_param   = TL_CAP_TON;
-                cycle_xact.auto_inner_dcache_client_out_b_bits_size    = TL_LINE_SIZE;
-                cycle_xact.auto_inner_dcache_client_out_b_bits_source  = 6'd0;
-                cycle_xact.auto_inner_dcache_client_out_b_bits_address = pending_probe_line;
-                cycle_xact.auto_inner_dcache_client_out_b_bits_mask    = 32'hffff_ffff;
-                cycle_xact.auto_inner_dcache_client_out_b_bits_data    = '0;
-                cycle_xact.auto_inner_dcache_client_out_b_bits_data[2:1] = pending_probe_alias;
-                cycle_xact.auto_inner_dcache_client_out_b_bits_corrupt = 1'b0;
+            if (probe_b_hold_valid) begin
+                build_probe_b_xaction(cycle_xact);
             end
         end
 

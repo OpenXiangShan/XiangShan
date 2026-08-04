@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，待 coding |
+| 状态 | coding 已完成，归档至 `do` |
 | 目标版本 | V2 |
 | 适用对象 | `dcache_mem__access_base_sequence` 轻量 L2 responder |
 | 关联 plan | `mem_ut_dcache_multi_probe_tob_control_plan_20260730.md`、`mem_ut_v2_dcache_cbo_probe_closure_plan_20260731.md` |
@@ -334,3 +334,35 @@ physical-line writeback，最后执行 toB 保留、toN 失效或 alias deferred
 
 仍保持 A/C/D/E 握手、B `data[0]=0`、memory physical-line key 和动态 sink/outstanding 专项边界不变。
 C payload 不携带 alias 时不虚构 C alias 字段；旧 alias 只作为 B request 的内部期望值参与关联校验。
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+`[IMPLEMENTATION_DELTA]`
+
+- 来源：执行前复核发现 multi-Probe、CBO 和 l2Flush plan 都要求复用 alias plan 的
+  `cached_line_record/probe_record/token`，而本 plan 又写成“已有多 Probe responder”，形成循环依赖。
+- 原 plan：alias state、Probe service、CBO/flush 调用关系在同一文档描述，未单独声明最小可独立落地的
+  lifecycle foundation。
+- 实现调整：本 plan 的首个提交只建立唯一共享 foundation：`cached_line_record`、固定 16 笔
+  `probe_record` queue、稳定 `probe_token`、单 B hold/多笔 `WAIT_C`、C line->token 唯一匹配、
+  ProbeAckData 两拍 token 锚定，以及 alias conflict 的真实
+  `A.fire -> Probe(toN) -> C completion -> deferred Acquire -> GrantAck` 闭环。
+- 兼容边界：已有 `MEMBLOCK_L2_PROBE_ENABLE_WT` 的 legacy random Probe 继续只生成单笔 `toN`；
+  foundation 的 `target_cap`、`probe_owner` 与 `submit_probe()` 已支持后续 `toB/CBO/FLUSH` 调用，
+  但本提交不新增 multi-batch 权重、不驱动 `io_l2_flush_done`、不建立 CBO deferred context。
+- 原因：先使所有后续 Probe policy 使用同一套 record/token/C assembly owner，避免三个专项各自维护
+  `pending_probe_*` 或 line map，造成同 line 重复 Probe、C response 误匹配或 alias 覆盖。
+- 影响范围：DCache responder 内部状态与握手仲裁；不修改 interface、agent、主表、LSQ、Uncache、
+  response delay、动态 sink 或 D-error 专项。后续 multi-Probe/flush、CBO plan 必须在此 foundation 上
+  扩展，不能恢复旧单 Probe owner。
+
+## 执行结果
+
+- 已将 `cached_alias_by_line` 与单一 `pending_probe_*` 状态迁移为
+  `cached_line_by_addr`、`probe_record_q`、稳定 `probe_token` 和单一 B hold。
+- 已实现不同 alias `Acquire` 的 `A.fire -> deferred Acquire -> Probe(toN) old alias -> C completion ->
+  normal Grant/GrantData -> E.fire new alias ACTIVE` 闭环；旧 alias 不会在新 Grant 前被覆盖。
+- 已实现 `ProbeAckData` 两拍 token 锚定和 `corrupt` 的“跳过 overlay 写回但继续协议收敛”行为。
+- legacy random Probe 仍只产生单笔 `Probe(toN)`；multi-batch/toB、CBO 和 l2Flush 没有混入本实现。
+- 验证：独立 `alias_foundation` 目录完成 VCS 编译；独立非分区 `alias_smoke` 目录运行
+  `basicTest/memblock_dispatch_real_smoke_vseq` 通过，`UVM_ERROR=0`、`UVM_FATAL=0`。

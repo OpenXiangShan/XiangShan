@@ -149,7 +149,7 @@ val alias_addr_frag = io.mem_probe.bits.data(2, 1)
 测试框架必须从当前 Probe owner 的旧 cache line 状态生成：
 
 ```text
-b_data[2:1] = probe_record.old_alias
+b_data[2:1] = probe_record.probe_alias
 ```
 
 同一个 B 请求在 backpressure 期间，该字段必须保持不变。
@@ -391,6 +391,12 @@ memory overlay 写回，但仍完成 Probe/Release 生命周期。该 D-error �
 12. 错误字段：B `corrupt`、正常 D reply `denied/corrupt` 固定 0；C data response 的
     `corrupt` 仅阻止本地 memory overlay 写入，不阻止协议生命周期结束。
 ```
+
+当前轻量 responder 已将第 4、6、9 条落为共享 `probe_record_q` 与 `cached_line_by_addr`：每笔 B Probe
+保存稳定 `probe_alias/target_cap/token`；C reply 先按 physical line 唯一定位 record，`ProbeAckData` 第一拍
+锁定 token，第二拍不得切换到另一笔 Probe；不同 alias 的 Acquire 已 A.fire 后保存为 deferred request，先
+对旧 alias 发送 `Probe(toN)`，完成 C 生命周期后才建立新 Grant，并在 E GrantAck 后更新新 alias。该实现
+不等同于完整 L2 directory，multi-batch Probe、CBO Probe closure 与 l2Flush 仍由后续专项负责。
 
 ## 9. 与测试框架的边界
 
