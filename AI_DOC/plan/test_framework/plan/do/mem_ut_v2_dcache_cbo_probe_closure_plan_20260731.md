@@ -6,7 +6,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，仅完成方案设计，尚未 coding |
+| 状态 | `do`，coding、文档同步、compile/smoke 和 implementation review 已完成 |
 | 目标版本 | V2 |
 | 测试框架入口 | `dcache_mem__access_base_sequence::body()` |
 | 主要修改文件 | `mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv` |
@@ -96,44 +96,52 @@ Probe 使用 alias plan 的 `cached_line_record.active_alias` 填充 B channel a
 优先复用现有（其中 alias 状态和 Probe owner/token 统一由 alias plan 的共享 service 提供）：
 
 ```text
-pending_d_valid / pending_d_kind
-pending_d_cbo_opcode / pending_d_line_addr / pending_d_source
-pending_probe_b_valid / waiting_probe_c
-pending_probe_line / pending_probe_alias
-probe_record / probe_token / probe_owner
+current_d_valid / current_d_record
+probe_b_hold_valid / probe_b_hold_token
+probe_record_q / dcache_probe_record_t::token/owner/state
 c_assembly_owner / c_assembly_*
-cached_line_record / cached_alias_by_line 兼容访问视图
+cached_line_by_addr / dcache_cached_line_record_t
 ```
+
+上述名称对应当前源码的实际 owner；`cached_alias_by_line`、`pending_d_*` 和 `pending_probe_*` 只作为
+历史讨论中的概念名，不作为当前实现的第二套状态或字段。
 
 新增最小状态：
 
 ```text
 bit                 cbo_context_valid;
+bit                 cbo_response_reserved;
 bit                 pending_cbo_probe_valid;
 bit [3:0]           pending_cbo_probe_opcode;
 bit [47:0]          pending_cbo_probe_line;
+bit [5:0]           pending_cbo_probe_source;
 bit [1:0]           pending_cbo_probe_cap;
 probe_token_t pending_cbo_probe_token; // 使用 alias plan 定义的内部 token 类型
+bit                 pending_cbo_ack_denied;
+bit                 pending_cbo_ack_corrupt;
 ```
 
-实现时如现有 `pending_probe_*` 已能完整保存 CBO line/alias，可不重复增加 line/alias 字段；新增状态
-只保留 CBO deferred context（CBO opcode、line 和关联 token）。CBO A.fire 必须调用共享
-`submit_probe(..., CBO)`，由共享 service 创建 `probe_record.probe_owner=CBO`；不得用 CBO 本地枚举覆盖
-`ALIAS_CONFLICT/FLUSH/RANDOM`，也不得同时维护两套普通 Probe/CBO Probe pending payload 镜像。
+实现直接使用上述实际对象保存 CBO line、alias、owner、token 和 C assembly 状态；新增状态只保留
+CBO deferred context（CBO opcode、source、line、CBOAck error 快照和关联 token）。CBO hit 必须调用共享
+`submit_probe(..., DCACHE_PROBE_OWNER_CBO)`，由共享 service 创建 `probe_record.owner=CBO`；CBO miss 不创建
+Probe。不得用 CBO 本地枚举覆盖 `ALIAS_CONFLICT/FLUSH/RANDOM`，也不得同时维护两套普通 Probe/CBO Probe
+pending payload 镜像。
 
 状态生命周期：
 
 ```text
 CBO context 无效：没有已接受的 CBO deferred request。
-CBO context 有效：保存 CBO opcode、line 和共享 probe_record.probe_token，C response 完成后转入 CBOAck pending。
+CBO context 有效：保存 CBO opcode、source、line、CBOAck error 快照和共享 probe_record.probe_token，
+C response 完成后转入 CBOAck pending。
 共享 Probe service 的 owner 由 probe_record.probe_owner 统一维护。
 ```
 
 本 CBO flow 同一时刻只允许一个 CBO deferred context；全局 Probe service 可以保存多笔不同 line 的
 record/token。Alias conflict/CBO/flush/random 的新建优先级由 alias plan 统一管理；CBO Probe 在途时，禁止新的 CBO A request 和普通随机 Probe 复用同一 line；已有
 当前拍已确认的 transaction 继续按既有规则完成。C channel 的 `Release/ReleaseData` 仍沿用现有
-等待 Probe 时的兼容路径，可以先完成对应 `ReleaseAck`；该 ReleaseAck 不得清除 CBO Probe owner，
-也不得替代最终 CBOAck。
+assembly 和 `ReleaseAck` 路径；但如果它与未收敛 Probe 位于同一 physical line，当前轻量模型不具备
+合并两个 C 生命周期的 directory 状态，因此必须 `uvm_fatal`。不同 line 的 Release/ReleaseData 仍可
+独立完成；任何 `ReleaseAck` 都不得替代最终 CBOAck。
 
 `cbo_context_valid` 覆盖 CBO A.fire 后的完整生命周期：direct CBOAck pending、CBO Probe B hold、等待
 C response、C assembly 以及 CBOAck D hold。该标志只有在 CBOAck.fire 后清除。context 有效期间，如果
@@ -221,23 +229,23 @@ miss 路径同样不允许下一笔 CBO A.fire。
 
 ## 6. CBO Probe B channel 逻辑
 
-### 6.1 `build_pending_probe_xaction()` 或现有 Probe builder
+### 6.1 `build_probe_b_xaction()`
 
 抽象功能：根据 Probe owner 生成稳定的 B-channel payload，并在 B.ready 未打开时保持 payload 不变。
 
 修改后伪代码：
 
 ```text
-build_probe_payload(cycle_xact)：
-  cycle_xact.b_valid = shared Probe service 当前选中 record 的 b_hold_valid
+build_probe_b_xaction(cycle_xact)：
+  cycle_xact.b_valid = probe_b_hold_valid；并从 probe_record_q[probe_b_hold_token] 读取当前 record
   cycle_xact.b_bits_opcode = Probe
   cycle_xact.b_bits_size = 6
   cycle_xact.b_bits_source = 0
-  cycle_xact.b_bits_address = active_probe_record.line_addr
+  cycle_xact.b_bits_address = probe_record_q[probe_b_hold_token].line_addr
   cycle_xact.b_bits_mask = all_ones
   cycle_xact.b_bits_data = 0
-  cycle_xact.b_bits_data[2:1] = active_probe_record.probe_alias
-  cycle_xact.b_bits_param = active_probe_record.target_cap
+  cycle_xact.b_bits_data[2:1] = probe_record_q[probe_b_hold_token].probe_alias
+  cycle_xact.b_bits_param = probe_record_q[probe_b_hold_token].target_cap
 ```
 
 当前随机 Probe 仍按原规则使用 `toN`，其默认行为不因本 plan 改变。CBO Probe 的 cap 只能由 CBO
@@ -246,11 +254,10 @@ opcode 决定：Clean 为 `toB`，Flush/Inval 为 `toN`，不得使用随机 `Pr
 ### 6.2 B.fire 状态转移
 
 ```text
-如果 shared Probe service 当前 b_hold_valid && b_ready：
-  shared Probe service 将当前 record 的 b_hold 标记为已 fire
-  waiting_probe_c = 1
-  保留 active_probe_record.probe_token/probe_owner、pending_probe_line、pending_cbo_probe_opcode
-  不删除 cached_line_by_addr[pending_probe_line]；由 Probe 完成阶段按 target_cap 处理
+如果 `probe_b_hold_valid` 且 DUT `B.ready=1`：
+  调用 `process_probe_b_fire()`，把 `probe_record_q[probe_b_hold_token]` 的状态从 B_HOLD 改为 WAIT_C；
+  同时清除 B hold token，但保留该 record 的 owner、line、alias、target cap 和 token；
+  不删除 `cached_line_by_addr[line]`，后续由 `start_c_assembly()` 和 `complete_probe_record()` 按 target_cap 处理。
 ```
 
 B.fire 只代表 Probe 已发送，不能代表 DCache 已完成降级/失效，也不能提前发送 CBOAck 或删除 map。
@@ -266,26 +273,16 @@ B.fire 只代表 Probe 已发送，不能代表 DCache 已完成降级/失效，
 
 ```text
 收到 ProbeAck：
-  检查 waiting_probe_c == 1
-  通过共享 Probe service 的唯一 C owner/可观察字段定位 probe_record；
-  检查 address == active_probe_record.line_addr、size == 6，并使用 record 保存的 probe_token/active_alias
-    期望值；
-  按 active_probe_record.target_cap 检查 C.param 的合法集合；
-  如果 active_probe_record.probe_owner == CBO：
-    要求 active_probe_record.probe_token == pending_cbo_probe_token；不等时报错且不得建立 CBOAck；
-  直接调用 complete_probe_response()
+  调用 find_waiting_probe_record_by_line(address)，要求得到唯一 WAIT_C record；
+  检查 address、size 和该 record 的 target_cap 对应的 C.param；
+  complete_probe_record(probe_index, 0, 0, accept_cycle)，按 owner 更新 line 并在 CBO owner 时建立 Ack；
 
 收到 ProbeAckData：
-  检查 waiting_probe_c == 1
-  通过共享 Probe service 的唯一 C owner/可观察字段定位 probe_record；
-  检查 address/size/source 合法，并使用 record 保存的 probe_token/active_alias 期望值；
-  按 active_probe_record.target_cap 检查 C.param 的合法集合；
-  如果 active_probe_record.probe_owner == CBO：
-    要求 active_probe_record.probe_token == pending_cbo_probe_token；不等时报错且不得建立 CBOAck；
-  建立 c_assembly_owner = PROBE
-  保存 c_assembly_probe_token = active_probe_record.probe_token，以及 owner、line；
-  第二拍 C.fire 前必须匹配同一 c_assembly_probe_token，其他 C response 不得插入或覆盖；
-  收齐两拍后调用 complete_probe_response()
+  调用 find_waiting_probe_record_by_line(address)，要求得到唯一 WAIT_C record；
+  检查 address、size 和该 record 的 target_cap 对应的 C.param；
+  设置 `c_assembly_owner=PROBE`，保存该 record 的 token/line/source/size/param，并将 record 标为 C_ASSEMBLY；
+  第一拍调用 consume_c_beat()，第二拍必须命中同一个 token；收齐两拍后由
+  complete_probe_c_assembly() 完成数据处理，再调用 complete_probe_record()；
 
 其它 C opcode：
   按现有 Release/ReleaseData 路径处理；不能误认为 CBO Probe response
@@ -296,42 +293,30 @@ B.fire 只代表 Probe 已发送，不能代表 DCache 已完成降级/失效，
 返回 `NtoN`，说明 map 生命周期或 responder 状态已不一致，本专项报错而不是静默当作成功。实现应使用
 集中定义的 TileLink response 常量，不把参数数值散落在 CBO 分支中。
 
-### 7.2 `complete_probe_response()`
+### 7.2 `complete_probe_record()` 与 `complete_cbo_probe()`
 
-抽象功能：在 ProbeAck 或完整 ProbeAckData 完成后，更新必要的轻量状态，并决定是否建立 CBOAck。
+抽象功能：`complete_probe_record()` 在 ProbeAck 或完整 ProbeAckData 完成后更新 line/Probe 生命周期；
+对于 `probe_owner=CBO`，它再调用 `complete_cbo_probe()` 将已预留的容量转换为 CBOAck。两个函数都不直接
+驱动 D channel，也不负责 CBOAck D.fire 后的 context 清理。
 
 修改后伪代码：
 
 ```text
-complete_probe_response():
-  if active_probe_record.probe_owner != CBO:
-    不在本 CBO helper 处理 ProbeAckData 数据；交回 shared Probe service；
-    该 service 只执行一次数据提交、line 生命周期更新和 record/C assembly 释放；
-    本 CBO plan 不建立 CBOAck；
-    return
+complete_probe_record(probe_index, data_response_seen, data_valid, complete_cycle)：
+  通过 probe_index 取出 probe_record_q 中唯一的 record；
+  如果 owner 不是 CBO：按原 shared Probe service 完成 line 更新并结束；
+  如果 owner 是 CBO：校验 cbo_context_valid、pending_cbo_probe_valid、token、line 和 target cap；
+  按 target_cap 执行 toB 保留或 toN 删除；删除/更新 probe record 后进入 CBO 完成分支。
+  如果是 ProbeAckData，数据写回/腐败处理已由 complete_probe_c_assembly() 在调用本函数前完成；
+  本函数不重复写 memory。
 
-  如果是 ProbeAckData 且无 corrupt：
-    通过 shared memory store 提交完整 ProbeAckData 的 overlay 写事件，不得修改 main_mem；
-    将对应 cached_line_record.data_valid 置 1；
-  如果是 ProbeAckData 且有 corrupt：
-    不提交 overlay 写事件，也不得修改 main_mem，将对应 cached_line_record.data_valid 置 0；
-    报 uvm_error，但仍继续协议收敛；
-
-  if active_probe_record.probe_owner == CBO:
-    要求 active_probe_record.probe_token == pending_cbo_probe_token；不等时报错且不得建立 CBOAck；
-    if pending_cbo_probe_opcode == CBOClean:
-      保留 cached_line_by_addr[pending_probe_line] 的 active alias
-    else if pending_cbo_probe_opcode == CBOFlush ||
-            pending_cbo_probe_opcode == CBOInval:
-      使 cached_line_by_addr[pending_probe_line] 失效
-    else:
-      fatal
-
-    清 waiting_probe_c、C assembly 和 CBO Probe payload 状态
-    填充 A.fire 时已保留的共享 response record：
-      kind=CBO_ACK；opcode=CBOAck；source=17；size=6；
-      由 shared response scheduler 选择 complete_cycle 之后的 due cycle；
-    清除 active_probe_record；保留 cbo_context_valid，直到下面的 CBOAck.fire 完成
+complete_cbo_probe(probe_record, complete_cycle)：
+  不重复处理 ProbeAckData；该数据由 complete_probe_c_assembly() 负责，line 生命周期由
+    complete_probe_record() 负责；
+  校验该 record 的 owner/token/line/cap 与 pending CBO context 一致；不一致 fatal；
+  清除 pending_cbo_probe_valid；
+  调用 enqueue_pending_cbo_ack()，把 A.fire 时保存的 error/source/opcode 快照填入同一 response record；
+  保留 cbo_context_valid，直到 process_d_fire() 确认对应 CBOAck 完成。
 ```
 
 CBOAck 必须在 Probe response 完成后建立，随后仍由现有 D-channel hold/fire 逻辑发送。ProbeAckData
@@ -361,9 +346,9 @@ CBO 状态。direct-CBO 分支只适用于 CBO miss。
 ```
 
 若已有任意同 line Probe 在途，新的 CBO A request 必须等待该 Probe 完成；CBO 的 deferred context
-只允许一个，但它必须通过共享 `probe_record` 保存 token。CBO Probe 在途期间允许既有
-Release/ReleaseData 被接收并生成 ReleaseAck，但 ReleaseAck 与 CBOAck 仍由现有 D response owner
-串行发送。不得建立 CBO 专用的第二套 Probe queue。
+只允许一个，但它必须通过共享 `probe_record` 保存 token。同一 physical line 的 Release/ReleaseData
+在该 Probe 收敛前直接 `uvm_fatal`，不同 line 仍可按现有路径接收并生成 ReleaseAck。不得建立 CBO 专用
+的第二套 Probe queue。
 
 ### 8.2 CBO miss 与 hit 的统一出口
 
@@ -381,11 +366,14 @@ Hint。CBO hit 不改变 CBO response 的 opcode、source 和 D-channel 基本�
 
 ## 9. 修改文件与职责
 
-本专项 coding 只修改：
+本专项源码 coding 只修改：
 
 ```text
 mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv
 ```
+
+源码之外的 flow、analysis、interface、TODO、历史 plan/review 同步文件不承担运行期 owner，只用于
+保持当前文档与实现一致；它们的同步修改不新增第二套 CBO 状态。
 
 修改职责：
 
@@ -402,7 +390,7 @@ mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv
 - plus 参数、cfg preset、virtual sequence 和 testcase；
 - 主表、TLB、LSQ/ROB/状态表；
 - 不建立第二份 alias map；coding 实体统一使用 alias plan 的 `cached_line_by_addr[line]` 与
-  `cached_line_record`，旧 `cached_alias_by_line` 仅可作为兼容查询视图；
+  `cached_line_record`，`cached_alias_by_line` 只保留为历史讨论名称，不作为兼容数据结构；
 - 完整 L2 RM/scoreboard。
 
 如果 `Probe(toB)` 所需的 V2 C response 参数常量当前未集中定义，只允许在同一个
@@ -453,6 +441,68 @@ CBO A.fire
 
 普通 Probe 仍为原 owner；CBO Probe 仅增加来源标记和完成后的 CBOAck 转移，不建立完整 directory。
 
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+### [IMPLEMENTATION_DELTA] CBOAck error 快照和 response reservation 转换
+
+- 来源：当前 direct CBO 路径在真实 CBO `A.fire` 时调用既有 D-error 权重；命中路径延后到
+  Probe C 完成才创建 `CBOAck` record。若在该时点重新采样，会让同一 CBO 的错误结果取决于
+  Probe latency，而不是原始请求。
+- 原 plan：要求 CBO A.fire 预留一笔 shared DCache response record，但未明确该 reservation 的
+  CBOAck `denied/corrupt` 快照和 record 转换状态。
+- 实现调整：建立 CBO context 时同时保存 `pending_cbo_ack_denied/corrupt`，并以
+  `cbo_response_reserved` 计入 `get_dcache_response_count()`。direct miss 和 Probe hit 都先占用该
+  reservation；最终建立 CBOAck 时，原子地清 reservation、填充同一份请求快照并入 response queue。
+- 原因：保持既有 D-error 专项“每个已接受 request 只采样一次”的合同，且避免 Probe 期间被其它
+  Grant/ReleaseAck 占满 16 笔 response 容量后无法生成 CBOAck。
+- 影响范围：仅 DCache responder 内部 CBO context 和已有 response capacity 计数；不新增 plus、
+  interface、agent、主表或 checker 逻辑。
+
+文字伪代码：
+
+```text
+CBO A.fire：
+  检查 response capacity；
+  一次采样 CBOAck denied/corrupt；
+  保存 opcode/source/line/error 快照；
+  cbo_response_reserved = 1；
+  miss 立即将 reservation 转为 CBOAck record；
+  hit 先等待共享 Probe C completion。
+
+CBO Probe C 完成：
+  先按 toB/toN 更新 line record；
+  校验 token 与 context；
+  使用 A.fire 时保存的 error 快照将 reservation 转为 CBOAck record；
+  保留 CBO context 到 CBOAck D.fire。
+```
+
+### [IMPLEMENTATION_DELTA] 命中 CBO 的 Probe 容量预检与同线 Release 冲突边界
+
+- 来源：对共享 `probe_record_q` 与 `cached_line_by_addr` 生命周期进行实现复查。
+- 原 plan：只要求 CBO A.fire 预检 response record；`submit_probe()` 失败时 fatal，并说明 Release/ReleaseData
+  可以与等待中的 Probe 走既有兼容路径。
+- 实现调整：命中且 ACTIVE 的 CBO 只有在 `probe_record_q.size() < DCACHE_MAX_PROBE_RECORDS` 时才打开 A.ready，
+  使 A.fire 后一定可分配 token。若 `Release/ReleaseData` 与任意未完成 Probe 同一 physical line 冲突，立即
+  `uvm_fatal`；不同 line 的 Release 仍沿用已有并行收敛路径。
+- 原因：Probe queue 满时先接受 CBO 会留下已保留 response slot、但没有 Probe owner 的不可收敛 context；同线
+  Release 会删除 line record，随后 ProbeAck/ProbeAckData 无法再按 token 完成。当前轻量模型没有完整 directory
+  来合并两个同线 C lifecycle，因此 fail-fast 比静默覆盖或半完成更安全。
+- 影响范围：只收紧 DCache responder 的 A.ready/C protocol 检查，不新增 queue、参数、接口或主框架状态。
+
+文字伪代码：
+
+```text
+准备接受命中 CBO：
+  先检查 response record 与单笔 CBO context；
+  再检查共享 Probe record 队列未满；
+  任一条件不满足就保持 A.ready=0，尚未发生 A.fire，不创建 reservation。
+
+接收 C Release/ReleaseData：
+  将地址规范化为 physical line；
+  若该 line 已有未收敛 Probe record，报告协议/模型冲突并停止；
+  否则继续原来的 Release 或 ReleaseData assembly/ReleaseAck 流程。
+```
+
 ## 11. RM 协同支持
 
 本 plan 不实现 RM、scoreboard 或 checker。
@@ -479,3 +529,47 @@ Probe(toB)/Probe(toN)
 ProbeAck/ProbeAckData
 CBOAck 前是否经历 Probe
 ```
+
+## 13. 实施完成记录
+
+### 13.1 已落地代码
+
+- `dcache_mem__access_base_sequence` 新增单笔 `cbo_context`、CBO response reservation、原始
+  opcode/source/line/error snapshot 和关联 `probe_token`。
+- CBO miss 在 A.fire 后直接把 reservation 转为 `CBOAck` record；CBO hit 复用共享
+  `submit_probe()`，Clean 固定 `toB`，Flush/Inval 固定 `toN`，只有匹配 C response 收敛后才建立 Ack。
+- `complete_probe_record()` 先校验 CBO token/context，再完成 toB 保留或 toN 删除；`process_d_fire()`
+  对 CBOAck 只校验并清 context，不再重复删除 line。
+- 命中 CBO 的 A.ready 额外预检 `probe_record_q` 容量；同一 physical line 的 Release/ReleaseData 与
+  未收敛 Probe 冲突时 fail-fast。该边界不影响不同 line 的既有 Release 兼容路径。
+- reset、随机 Probe、L2 flush drain 和 global stop 都等待 CBO context/reservation/Probe 自然收敛。
+
+### 13.2 已同步文档
+
+- `AI_DOC/mem_ut_flow_doc/dcache_l2_response_hint_probe_model_flow.md`
+- `AI_DOC/analysis/source_sv/dispatch_framework_sv/mem_base_sequence.md`
+- `AI_DOC/analysis/interface/v2/agents/dcache_agent.md`
+- `AI_DOC/plan/test_framework/plan/undo/mem_ut_test_framework_todo_20260614.md`
+- `AI_DOC/plan/test_framework/plan/do/dcache_l2_tilelink_interaction_plan_20260614.md` 和
+  `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_dcache_l2_sideband_responder_adapt_execution_plan_20260712.md`
+  的历史语义已追加当前 owner/边界注记。
+- DCache response-delay、D-error、L2 responder 的历史 plan/review 均已追加当前 CBO closure 注记。
+
+### 13.3 验证结果与边界
+
+2026-08-04 已执行：
+
+```text
+make eda_compile tc=basicTest ts=virtual_base_sequence \
+  mode=dcache_cbo_probe_20260804 partcmp_op=off
+
+make eda_run tc=basicTest ts=memblock_dispatch_real_smoke_vseq \
+  mode=dcache_cbo_probe_20260804 cfg=tc_dispatch_real_smoke partcmp_op=off
+```
+
+编译结果为 VCS `0 error(s), 0 warning(s)`；真实 smoke 为 `TEST_PASS`、`UVM_ERROR=0`、`UVM_FATAL=0`。
+当前 V2 主表仍在 admission 前拒绝主动 CBO，因此这组基础验证不产生真实 CBO hit；CBO B/C/Ack 专项
+directed testcase、多个 CBO context、CBO.ZERO、early fault 和 CBO LSQ/ROB 闭环仍按 TODO 保留，不能因为
+本 responder 专项完成而宣称已支持。
+
+implementation review：`AI_DOC/plan/test_framework/review_doc/undo/mem_ut_v2_dcache_cbo_probe_closure_implementation_review_20260804.md`，结论为通过。

@@ -609,6 +609,19 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     int unsigned                deferred_response_reservation_count;
     bit                         grant_sink_reserved[MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING];
 
+    // 中文注释：CBO context 是单笔 CBO A.fire 到对应 CBOAck D.fire 的唯一 owner。
+    // 命中路径先保留 response slot 并等待 Probe C 收敛；miss 路径立即转为 CBOAck record。
+    bit                         cbo_context_valid;
+    bit                         cbo_response_reserved;
+    bit                         pending_cbo_probe_valid;
+    bit [3:0]                   pending_cbo_probe_opcode;
+    bit [47:0]                  pending_cbo_probe_line;
+    bit [5:0]                   pending_cbo_probe_source;
+    bit [1:0]                   pending_cbo_probe_cap;
+    dcache_probe_token_t        pending_cbo_probe_token;
+    bit                         pending_cbo_ack_denied;
+    bit                         pending_cbo_ack_corrupt;
+
     // 中文注释：轻量 L2 flush 只拥有 request level、snapshot 和 Probe 调度状态。
     // 设置：观察到 io_outer_l2_flush_en 后进入 DRAIN；清零：DONE 观察到 request 撤销或 reset。
     // 作用：DRAIN/PROBE 阶段关闭新 A.ready，DONE 才拉高 io_l2_flush_done；不清正常 D/E 或 shared memory。
@@ -638,6 +651,7 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     extern virtual function void clear_current_d_state();
     extern virtual function void clear_dcache_response_state();
     extern virtual function void clear_c_assembly_state();
+    extern virtual function void clear_cbo_context();
     extern virtual function void clear_runtime_state(bit clear_cache_map = 1'b1);
     extern virtual function void build_dcache_idle_xaction(output dcache_agent_agent_xaction rsp_xact);
     extern virtual function void capture_dcache_a_xaction(output dcache_agent_agent_xaction req_xact);
@@ -711,6 +725,11 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
         input bit              data_response_seen,
         input bit              data_valid,
         input longint unsigned complete_cycle
+    );
+    extern virtual task enqueue_pending_cbo_ack(input longint unsigned complete_cycle);
+    extern virtual task complete_cbo_probe(
+        input dcache_probe_record_t probe_record,
+        input longint unsigned      complete_cycle
     );
     extern virtual function int unsigned sample_dcache_response_delay();
     extern virtual function int unsigned get_dcache_response_count();
@@ -805,6 +824,19 @@ function void dcache_mem__access_base_sequence::clear_c_assembly_state();
     c_assembly_response_reserved = 1'b0;
 endfunction:clear_c_assembly_state
 
+function void dcache_mem__access_base_sequence::clear_cbo_context();
+    cbo_context_valid        = 1'b0;
+    cbo_response_reserved    = 1'b0;
+    pending_cbo_probe_valid  = 1'b0;
+    pending_cbo_probe_opcode = '0;
+    pending_cbo_probe_line   = '0;
+    pending_cbo_probe_source = '0;
+    pending_cbo_probe_cap    = '0;
+    pending_cbo_probe_token  = '0;
+    pending_cbo_ack_denied   = 1'b0;
+    pending_cbo_ack_corrupt  = 1'b0;
+endfunction:clear_cbo_context
+
 function void dcache_mem__access_base_sequence::clear_runtime_state(bit clear_cache_map = 1'b1);
     a_accept_armed           = 1'b0;
     c_accept_armed           = 1'b0;
@@ -825,6 +857,7 @@ function void dcache_mem__access_base_sequence::clear_runtime_state(bit clear_ca
     last_cycle_xact          = null;
     clear_dcache_response_state();
     clear_c_assembly_state();
+    clear_cbo_context();
     if (clear_cache_map) begin
         cached_line_by_addr.delete();
     end
@@ -1172,6 +1205,7 @@ endfunction:sample_dcache_response_delay
 function int unsigned dcache_mem__access_base_sequence::get_dcache_response_count();
     return dcache_rsp_q.size() + (current_d_valid ? 1 : 0) +
            (c_assembly_response_reserved ? 1 : 0) +
+           (cbo_response_reserved ? 1 : 0) +
            deferred_response_reservation_count;
 endfunction:get_dcache_response_count
 
@@ -1257,6 +1291,24 @@ function bit dcache_mem__access_base_sequence::can_accept_dcache_a_request(
         TL_A_OPCODE_CBO_CLEAN,
         TL_A_OPCODE_CBO_FLUSH,
         TL_A_OPCODE_CBO_INVAL: begin
+            line_addr = line_addr64(req_xact.auto_inner_dcache_client_out_a_bits_address);
+            if (cbo_context_valid) begin
+                return 1'b0;
+            end
+            if (cached_line_by_addr.exists(line_addr)) begin
+                line_record = cached_line_by_addr[line_addr];
+                if (!line_record.alias_valid ||
+                    (line_record.lifecycle_state != DCACHE_LINE_ACTIVE) ||
+                    line_record.deferred_acquire_valid ||
+                    has_probe_for_line(line_addr)) begin
+                    return 1'b0;
+                end
+                // 命中 CBO 必须创建共享 Probe record；队列满时反压 A，不能在真实 A.fire 后
+                // 才发现没有 token 容量而留下无法收敛的 CBO context。
+                if (probe_record_q.size() >= DCACHE_MAX_PROBE_RECORDS) begin
+                    return 1'b0;
+                end
+            end
             return has_dcache_response_capacity();
         end
         default: begin
@@ -1574,6 +1626,47 @@ task dcache_mem__access_base_sequence::start_alias_conflict(
     end
 endtask:start_alias_conflict
 
+task dcache_mem__access_base_sequence::enqueue_pending_cbo_ack(input longint unsigned complete_cycle);
+    dcache_response_record_t response_record;
+
+    if (!cbo_context_valid || !cbo_response_reserved) begin
+        `uvm_fatal(get_type_name(), "CBOAck creation requires an active CBO response reservation")
+    end
+    response_record                = '{default:'0};
+    response_record.kind           = DCACHE_PENDING_D_CBO_ACK;
+    response_record.eligible_cycle = complete_cycle + 3;
+    response_record.beat_count     = 1;
+    response_record.size           = TL_LINE_SIZE;
+    response_record.source         = pending_cbo_probe_source;
+    response_record.line_addr      = pending_cbo_probe_line;
+    response_record.cbo_opcode     = pending_cbo_probe_opcode;
+    response_record.denied         = pending_cbo_ack_denied;
+    response_record.corrupt        = pending_cbo_ack_corrupt;
+
+    // 将 CBO A.fire 时已经占用的一笔容量原子转换为可调度的 D response record。
+    cbo_response_reserved = 1'b0;
+    enqueue_dcache_response(response_record);
+endtask:enqueue_pending_cbo_ack
+
+task dcache_mem__access_base_sequence::complete_cbo_probe(
+    input dcache_probe_record_t probe_record,
+    input longint unsigned      complete_cycle
+);
+    if ((probe_record.owner != DCACHE_PROBE_OWNER_CBO) ||
+        !cbo_context_valid || !pending_cbo_probe_valid ||
+        (probe_record.token != pending_cbo_probe_token) ||
+        (probe_record.line_addr != pending_cbo_probe_line) ||
+        (probe_record.target_cap != pending_cbo_probe_cap)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("CBO Probe completion does not match context token=%0d line=0x%0h cap=%0d",
+                             probe_record.token,
+                             probe_record.line_addr,
+                             probe_record.target_cap))
+    end
+    pending_cbo_probe_valid = 1'b0;
+    enqueue_pending_cbo_ack(complete_cycle);
+endtask:complete_cbo_probe
+
 task dcache_mem__access_base_sequence::complete_probe_record(
     input int              probe_index,
     input bit              data_response_seen,
@@ -1595,6 +1688,16 @@ task dcache_mem__access_base_sequence::complete_probe_record(
                              probe_record.line_addr))
     end
     line_record = cached_line_by_addr[probe_record.line_addr];
+    if ((probe_record.owner == DCACHE_PROBE_OWNER_CBO) &&
+        (!cbo_context_valid || !pending_cbo_probe_valid ||
+         (probe_record.token != pending_cbo_probe_token) ||
+         (probe_record.line_addr != pending_cbo_probe_line) ||
+         (probe_record.target_cap != pending_cbo_probe_cap))) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("CBO Probe record token=%0d line=0x%0h cannot update an unmatched CBO context",
+                             probe_record.token,
+                             probe_record.line_addr))
+    end
     if (data_response_seen) begin
         line_record.data_valid = data_valid;
     end
@@ -1605,6 +1708,9 @@ task dcache_mem__access_base_sequence::complete_probe_record(
             line_record.lifecycle_state = DCACHE_LINE_ACTIVE;
             cached_line_by_addr[probe_record.line_addr] = line_record;
             probe_record_q.delete(probe_index);
+            if (probe_record.owner == DCACHE_PROBE_OWNER_CBO) begin
+                complete_cbo_probe(probe_record, complete_cycle);
+            end
         end
         TL_CAP_TON: begin
             if (probe_record.owner == DCACHE_PROBE_OWNER_ALIAS_CONFLICT) begin
@@ -1620,6 +1726,9 @@ task dcache_mem__access_base_sequence::complete_probe_record(
             end else begin
                 probe_record_q.delete(probe_index);
                 remove_cached_line(probe_record.line_addr, "probe_toN");
+                if (probe_record.owner == DCACHE_PROBE_OWNER_CBO) begin
+                    complete_cbo_probe(probe_record, complete_cycle);
+                end
             end
         end
         default: begin
@@ -1892,6 +2001,9 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
     bit [255:0] line_data_low;
     bit [255:0] line_data_high;
     bit [9:0]  grant_sink;
+    bit [1:0]  probe_cap;
+    dcache_probe_token_t        probe_token;
+    dcache_cached_line_record_t line_record;
     dcache_response_record_t response_record;
 
     line_addr = line_addr64(req_xact.auto_inner_dcache_client_out_a_bits_address);
@@ -1995,19 +2107,73 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
                                      TL_CBO_SOURCE,
                                      req_xact.auto_inner_dcache_client_out_a_bits_source))
             end
-            response_record.kind       = DCACHE_PENDING_D_CBO_ACK;
-            response_record.beat_count = 1;
-            response_record.cbo_opcode = req_xact.auto_inner_dcache_client_out_a_bits_opcode;
-            // 中文注释：CBOAck 的 denied/corrupt 是独立可控错误位；当前 CBO direct-ack
-            // 路径在 record 创建时固定它们，后续 CBO Probe closure 迁移 ack 创建点时必须保留同一语义。
-            response_record.denied = sample_d_error_enable(
+            if (req_xact.auto_inner_dcache_client_out_a_bits_param != '0) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("CBO param must be 0, got %0d",
+                                     req_xact.auto_inner_dcache_client_out_a_bits_param))
+            end
+            if (cbo_context_valid) begin
+                `uvm_fatal(get_type_name(), "CBO A.fire occurred while a prior CBO context is still active")
+            end
+
+            // 中文注释：D-error 与 response capacity 均在真实 A.fire 固定；Probe completion
+            // 只把 reservation 转成 CBOAck record，不能第二次随机错误位或接受第二笔 CBO。
+            clear_cbo_context();
+            cbo_context_valid        = 1'b1;
+            cbo_response_reserved    = 1'b1;
+            pending_cbo_probe_opcode = req_xact.auto_inner_dcache_client_out_a_bits_opcode;
+            pending_cbo_probe_line   = line_addr;
+            pending_cbo_probe_source = req_xact.auto_inner_dcache_client_out_a_bits_source;
+            pending_cbo_ack_denied = sample_d_error_enable(
                 seq_csr_common::get_l2_cbo_ack_denied_wt(),
                 "DCache CBOAck denied"
             );
-            response_record.corrupt = sample_d_error_enable(
+            pending_cbo_ack_corrupt = sample_d_error_enable(
                 seq_csr_common::get_l2_cbo_ack_corrupt_wt(),
                 "DCache CBOAck corrupt"
             );
+
+            if (!cached_line_by_addr.exists(line_addr)) begin
+                enqueue_pending_cbo_ack(accept_cycle);
+                return;
+            end
+
+            line_record = cached_line_by_addr[line_addr];
+            if (!line_record.alias_valid ||
+                (line_record.lifecycle_state != DCACHE_LINE_ACTIVE) ||
+                line_record.deferred_acquire_valid ||
+                has_probe_for_line(line_addr)) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("CBO A.fire accepted an unresolved line=0x%0h state=%0d alias_valid=%0d",
+                                     line_addr,
+                                     line_record.lifecycle_state,
+                                     line_record.alias_valid))
+            end
+
+            case (req_xact.auto_inner_dcache_client_out_a_bits_opcode)
+                TL_A_OPCODE_CBO_CLEAN: begin
+                    probe_cap = TL_CAP_TOB;
+                end
+                TL_A_OPCODE_CBO_FLUSH,
+                TL_A_OPCODE_CBO_INVAL: begin
+                    probe_cap = TL_CAP_TON;
+                end
+                default: begin
+                    `uvm_fatal(get_type_name(), "unexpected CBO opcode while selecting Probe target")
+                end
+            endcase
+            if (!submit_probe(line_addr,
+                              probe_cap,
+                              DCACHE_PROBE_OWNER_CBO,
+                              0,
+                              probe_token)) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("CBO A.fire cannot create Probe record line=0x%0h", line_addr))
+            end
+            pending_cbo_probe_valid = 1'b1;
+            pending_cbo_probe_cap   = probe_cap;
+            pending_cbo_probe_token = probe_token;
+            return;
         end
         default: begin
             `uvm_fatal(get_type_name(),
@@ -2089,11 +2255,18 @@ function void dcache_mem__access_base_sequence::process_d_fire();
             mark_cached_line_grant_wait(completed_record.line_addr, completed_record.line_alias);
         end
         DCACHE_PENDING_D_CBO_ACK: begin
-            if (completed_record.cbo_opcode == TL_A_OPCODE_CBO_FLUSH) begin
-                remove_cached_line(completed_record.line_addr, "cbo_flush");
-            end else if (completed_record.cbo_opcode == TL_A_OPCODE_CBO_INVAL) begin
-                remove_cached_line(completed_record.line_addr, "cbo_inval");
+            if (!cbo_context_valid || cbo_response_reserved || pending_cbo_probe_valid ||
+                (completed_record.cbo_opcode != pending_cbo_probe_opcode) ||
+                (completed_record.line_addr != pending_cbo_probe_line) ||
+                (completed_record.source != pending_cbo_probe_source)) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("CBOAck D.fire does not match active CBO context source=%0d line=0x%0h opcode=%0d",
+                                     completed_record.source,
+                                     completed_record.line_addr,
+                                     completed_record.cbo_opcode))
             end
+            // CBO hit 的 toB/toN line 更新已在 Probe C 完成时完成；direct miss 没有 line 可删除。
+            clear_cbo_context();
         end
         DCACHE_PENDING_D_RELEASE_ACK: begin
         end
@@ -2278,6 +2451,18 @@ task dcache_mem__access_base_sequence::start_c_assembly(
 
     line_addr = line_addr64(c_req_xact.auto_inner_dcache_client_out_c_bits_address);
 
+    // 同一 physical line 的 Probe owner 尚未收到 C reply 时，Release/ReleaseData 若先删除
+    // line record，会让随后到来的 ProbeAck/Data 失去唯一生命周期 owner。轻量模型没有合并
+    // 两类同线 C transaction 的 directory 语义，因此明确 fail-fast，而不同 line 仍可并行收敛。
+    if ((c_req_xact.auto_inner_dcache_client_out_c_bits_opcode inside {
+            TL_C_OPCODE_RELEASE,
+            TL_C_OPCODE_RELEASEDATA
+        }) && has_probe_for_line(line_addr)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("Release/ReleaseData conflicts with an active Probe owner line=0x%0h",
+                             line_addr))
+    end
+
     case (c_req_xact.auto_inner_dcache_client_out_c_bits_opcode)
         TL_C_OPCODE_PROBE_ACK: begin
             probe_index = find_waiting_probe_record_by_line(line_addr);
@@ -2398,6 +2583,7 @@ function void dcache_mem__access_base_sequence::try_start_probe(input bit allow_
     // 每个选中 line 立即转为独立 record，因此同一 batch 不会重复；B/C 发送和收敛仍由共享 service 接管。
     if (!allow_new_probe || current_d_valid || (dcache_rsp_q.size() != 0) ||
         (grant_ack_wait_q.size() != 0) ||
+        cbo_context_valid || cbo_response_reserved || pending_cbo_probe_valid ||
         (probe_record_q.size() != 0) || probe_b_hold_valid || has_waiting_probe_c() ||
         (c_assembly_owner != DCACHE_C_OWNER_NONE) ||
         a_accept_armed || c_accept_armed) begin
@@ -2446,6 +2632,9 @@ function bit dcache_mem__access_base_sequence::is_l2_flush_drain_complete();
            !dcache_rsp_timer_active &&
            (grant_ack_wait_q.size() == 0) &&
            (dcache_hint_q.size() == 0) &&
+           !cbo_context_valid &&
+           !cbo_response_reserved &&
+           !pending_cbo_probe_valid &&
            !probe_b_hold_valid &&
            (probe_record_q.size() == 0) &&
            (c_assembly_owner == DCACHE_C_OWNER_NONE) &&
@@ -2751,6 +2940,9 @@ task dcache_mem__access_base_sequence::body();
             !dcache_rsp_timer_active &&
             (grant_ack_wait_q.size() == 0) &&
             (dcache_hint_q.size() == 0) &&
+            !cbo_context_valid &&
+            !cbo_response_reserved &&
+            !pending_cbo_probe_valid &&
             !probe_b_hold_valid &&
             (probe_record_q.size() == 0) &&
             (c_assembly_owner == DCACHE_C_OWNER_NONE) &&
@@ -2776,13 +2968,16 @@ task dcache_mem__access_base_sequence::body();
             stop_wait_cycles++;
             if ((stop_wait_cycles % 1000) == 0) begin
                 `uvm_warning(get_type_name(),
-                             $sformatf("DCache responder still draining after global stop: cycles=%0d current_d=%0d queued_rsp=%0d timer=%0d grant_ack=%0d hint=%0d probe_hold=%0d probe_records=%0d c_owner=%0d c_resv=%0d a_armed=%0d c_armed=%0d a_valid=%0d c_valid=%0d",
+                             $sformatf("DCache responder still draining after global stop: cycles=%0d current_d=%0d queued_rsp=%0d timer=%0d grant_ack=%0d hint=%0d cbo_ctx=%0d cbo_resv=%0d cbo_probe=%0d probe_hold=%0d probe_records=%0d c_owner=%0d c_resv=%0d a_armed=%0d c_armed=%0d a_valid=%0d c_valid=%0d",
                                        stop_wait_cycles,
                                        current_d_valid,
                                        dcache_rsp_q.size(),
                                        dcache_rsp_timer_active,
                                        grant_ack_wait_q.size(),
                                        dcache_hint_q.size(),
+                                       cbo_context_valid,
+                                       cbo_response_reserved,
+                                       pending_cbo_probe_valid,
                                        probe_b_hold_valid,
                                        probe_record_q.size(),
                                        c_assembly_owner,

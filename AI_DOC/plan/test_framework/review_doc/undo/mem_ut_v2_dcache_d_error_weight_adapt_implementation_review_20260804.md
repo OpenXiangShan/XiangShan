@@ -226,3 +226,10 @@ fault TODO 改为“只消费 DUT 可观察事件”的当前边界。
 本轮 implementation review 通过。D-error stimulus 的真源是 response record，不是主表 uid 或 D hold；
 默认值关闭，normal smoke 保持兼容。剩余边界为 nonzero D-error 的 DUT 异常功能验收、RM/scoreboard、
 覆盖率、L2 directory/downstream cause 和 C/B/ReleaseAck 主动错误注入，均未被本提交隐式实现。
+
+## 后续 CBO Probe closure 注记
+
+2026-08-04 后续 CBO 专项已把命中 CBO 的 response record 创建延后到 Probe C completion。本 review 中
+“CBOAck record 创建”均应理解为 CBO A.fire 的一次性 error snapshot：miss 当场转 record，hit 先保存到
+`cbo_context`，Probe 完成后再复用同一快照转 record。两项 CBO error 权重、独立采样和正常 CMO Ack
+语义不变，不允许在延后建 record 时二次随机。

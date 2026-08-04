@@ -366,7 +366,10 @@ TODO：
 
 ### 7.1 CBO地址场景与完成语义补充
 
-以下内容补充第6.3节。当前源码仍有store-like分类，但V2适配执行方案会在admission前运行期拒绝CBO；这些条目是后续完整闭环的输入，不表示当前允许驱动CBO。
+以下内容补充第6.3节。2026-08-04 已完成 DCache responder 侧 `CBOClean/CBOFlush/CBOInval` 命中
+`Probe(toB/toN) -> C response -> CBOAck` 闭环；当前 TODO 仍只讨论 V2 主表/LSQ 主动 CBO、CBO.ZERO、
+异常和 commit/deq 的完整指令流。当前源码仍有 store-like 分类，但 V2 适配执行方案会在 admission 前
+运行期拒绝 CBO；这些条目不表示当前允许主表驱动 CBO。
 
 Scala依据：
 

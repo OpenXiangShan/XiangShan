@@ -61,8 +61,8 @@ DCache record 状态。
 |---|---:|---|---|
 | `MEMBLOCK_L2_GRANTDATA_DENIED_WT` | 0..100 | 每个已接受 `AcquireBlock` 建立 `GrantData` pending D 时 | `denied` 命中概率；命中时强制 `corrupt=1` |
 | `MEMBLOCK_L2_GRANTDATA_CORRUPT_WT` | 0..100 | `GrantData denied` 未命中后 | 非拒绝 data-corrupt 概率 |
-| `MEMBLOCK_L2_CBO_ACK_DENIED_WT` | 0..100 | 每个已接受 CBO A request 建立 `CBOAck` pending D 时 | `CBOAck.denied` 命中概率 |
-| `MEMBLOCK_L2_CBO_ACK_CORRUPT_WT` | 0..100 | 每个已接受 CBO A request 建立 `CBOAck` pending D 时 | `CBOAck.corrupt` 命中概率 |
+| `MEMBLOCK_L2_CBO_ACK_DENIED_WT` | 0..100 | 每个已接受 CBO A.fire 建立 error snapshot 时 | `CBOAck.denied` 命中概率 |
+| `MEMBLOCK_L2_CBO_ACK_CORRUPT_WT` | 0..100 | 每个已接受 CBO A.fire 建立 error snapshot 时 | `CBOAck.corrupt` 命中概率 |
 | `MEMBLOCK_UNCACHE_DENIED_WT` | 0..100 | 每个合法 Uncache D response 建立时 | `AccessAckData` 与 `AccessAck` 的 denied 命中概率 |
 | `MEMBLOCK_UNCACHE_CORRUPT_WT` | 0..100 | 每个 `Get -> AccessAckData` 建立时 | 非拒绝 data-corrupt 命中概率；不适用于无数据 `AccessAck` |
 
@@ -185,19 +185,19 @@ sample_d_error_enable(weight, error_name)：
 
 修改位置：`accept_dcache_a_request()` 的 `CBOClean/CBOFlush/CBOInval` 分支。
 
-抽象功能：在已接受的 CBO request 建立单拍 `CBOAck` pending D 时，独立生成 denied 和 corrupt，
-但始终保留同 source 的 Ack，使 DUT CMOUnit 能结束等待。
+抽象功能：在已接受的 CBO A.fire 时独立生成 denied 和 corrupt，并保存到 CBO context；miss 立即、
+hit 在 Probe C 收敛后才建立单拍 `CBOAck` record，但始终保留同 source 的 Ack，使 DUT CMOUnit 能结束等待。
 
 文字伪代码：
 
 ```text
-建立 CBOAck response record：
-  response_record.denied = sample_d_error_enable(CBO_ACK_DENIED_WT, "CBOAck denied")；
-  response_record.corrupt = sample_d_error_enable(CBO_ACK_CORRUPT_WT, "CBOAck corrupt")；
-
-  保存原 CBO source、size、opcode、line；
-  发送单拍 CBOAck；
-  CBOAck.fire 后继续已有 clean/flush/inval 地址表处理；
+CBO A.fire：
+  一次采样 CBOAck denied/corrupt，保存原 CBO source、size、opcode、line；
+  同时预留一笔 response capacity；
+  miss 立即把 reservation 转为 CBOAck record；
+  hit 先等待 CBO Probe 的合法 ProbeAck/完整 ProbeAckData；
+  Probe 完成后复用保存的 error snapshot 转为单拍 CBOAck；
+  CBOAck.fire 后只清 CBO context；命中 CBO 的 clean/toB、flush/inval/toN line 动作已经在 Probe 完成时处理。
 ```
 
 `CBOAck` 的两个字段不建立强制蕴含关系。DCache CMOUnit 分别保留它们，并以
@@ -374,3 +374,10 @@ DCache/Uncache responder flow 文档。
   又执行 `make eda_run tc=basicTest ts=virtual_base_sequence cfg=default mode=dcache_d_error_cfg_verify_20260804`
   并把六个权重都覆盖为 100，日志同为 `TEST_PASS`、`UVM_ERROR=0`、`UVM_FATAL=0`，确认 runtime
   plus 覆盖和范围校验不会破坏基础启动。非零 error directed 的 DUT 异常结果判定仍不属于本 responder 专项。
+
+## 后续 CBO Probe closure 实施注记
+
+2026-08-04 的 `mem_ut_v2_dcache_cbo_probe_closure_plan_20260731.md` 已将命中 CBO 扩展为
+`A.fire -> error snapshot/reservation -> Probe(toB/toN) -> C completion -> CBOAck`。本 plan 的六个
+error 参数、独立 denied/corrupt 语义和“每个 A.fire 只采样一次”保持不变；变化仅是 CBOAck record 对于
+hit 的建立时点从 A.fire 延后到 Probe 完成，不能在该时点二次采样。

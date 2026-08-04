@@ -21,6 +21,8 @@ TL-UL responder。它们是被动 memory-facing sequence：只在 DUT request �
 | `line record` | `cached_line_by_addr[line_addr]` | physical line 的唯一 alias 生命周期状态，不是完整 L2 directory |
 | `probe record` | `probe_record_q` | B Probe 的 token、batch、旧 alias、target cap、owner 和 B/C 阶段 |
 | `probe batch` | `dcache_probe_record_t::batch_id` | 一次随机 policy 选择出的互不重复 Probe 集合；非随机 owner 的 batch_id 为 0 |
+| `CBO context` | `cbo_context_valid/pending_cbo_probe_*` | 一笔 CBO A.fire 到 CBOAck D.fire 的唯一 responder 生命周期；hit 要等待 Probe C 完成 |
+| `CBO reservation` | `cbo_response_reserved` | A.fire 为未来 CBOAck 占用一笔 response capacity，之后原子转换为 record |
 | `flush snapshot` | `l2_flush_snapshot_line_q` | DRAIN 后固定的 ACTIVE physical line 集合，不随之后的新 Grant 更新 |
 | `flush state` | `l2_flush_state` | 轻量 L2 flush 的 `IDLE/DRAIN/PROBE/DONE` level-request 状态机 |
 | `deferred Acquire` | `line_record.deferred_acquire` | 已 A.fire、等待旧 alias Probe(toN) 收敛的原始新 alias A payload |
@@ -65,6 +67,8 @@ current_d_record：唯一 D hold，仍占 response capacity；
 grant_ack_wait_q：D 已完成但 E 尚未确认的 Grant，继续占 sink；
 dcache_hint_q：已绑定最终 GrantData、等待输出的 Hint；
 c_assembly_response_reserved：ReleaseData 首 beat 预留的 ReleaseAck capacity；
+cbo_response_reserved：CBO A.fire 预留的 CBOAck capacity；
+cbo_context_valid/pending_cbo_probe_*：单笔 CBO opcode/source/line/error snapshot 与命中 Probe token；
 cached_line_by_addr：GrantAck 后形成的 ACTIVE alias line，以及 Probe/alias conflict/GrantAck 中间态；
 probe_record_q：所有已创建 Probe 的唯一生命周期 owner；B channel 同时只保持其中一笔；
 l2_flush_snapshot_line_q：DRAIN 完成时复制的 ACTIVE line，轻量 flush 只扫描该固定集合；
@@ -72,7 +76,7 @@ l2_flush_state：只控制新 A.ready、snapshot/flush Probe 调度和 io_l2_flu
 ```
 
 capacity 由 compile-time `MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING=16` 决定：queued record、current
-D hold 和 ReleaseData reservation 共用这一上限；GrantAck wait 不占 record capacity，但会占用动态 sink。
+D hold、ReleaseData reservation 和 CBO reservation 共用这一上限；GrantAck wait 不占 record capacity，但会占用动态 sink。
 不同 alias 的 Acquire 在 A.fire 时额外预留一个 response slot 与 sink，直到旧 alias Probe(toN) 完成后才交回
 普通 Grant builder，防止已接受的 A 在等待期间因其它流量耗尽资源。
 
@@ -95,9 +99,11 @@ ZERO -> 0；SMALL -> 1..10；MEDIUM -> 10..100；LARGE -> 101..1000；
 AcquireBlock/AcquirePerm：需要 record capacity + free sink；
 若 line 处于 Probe/GrantAck/deferred 中间态则 backpressure；不同 alias 的 Acquire 还要求同 line 无 Probe 且
 probe_record_q 少于固定 16 笔，保证 A.fire 后可以创建 deferred owner；
-CBO：只需要 record capacity；
+CBO：无已有 CBO context 且 response record 有容量；命中 ACTIVE line 还要求无同 line Probe/deferred Acquire 且
+  `probe_record_q` 未满；
 AcquireBlock：读取两个 memory beat，创建两拍 GrantData，记录 alias/isKeyword/Hint；
-AcquirePerm：创建单拍 Grant；CBO：创建单拍 CBOAck；
+AcquirePerm：创建单拍 Grant；CBO miss 直接创建 CBOAck，CBO hit 先建 context/reservation 和
+  `Probe(Clean->toB, Flush/Inval->toN)`，C completion 后再创建 CBOAck；
 所有 record：eligible_cycle = accept_cycle + 3；
 ```
 
@@ -131,7 +137,8 @@ GrantAck。它们共同维护 D/E 生命周期，但不决定下一条 queue rec
 ```text
 GrantData：第一个 D.fire 仅推进 beat_idx；最后 beat 才结束 record；
 Grant/GrantData 最后 D.fire：将 {line, alias, sink} 转入 grant_ack_wait_q，并将 line record 标记为 GRANT_WAIT_E；
-CBOAck/ReleaseAck 最后 D.fire：释放 record；当前 direct CBO flush/inval 同时删除 line record；
+CBOAck/ReleaseAck 最后 D.fire：释放 record；CBOAck 仅校验并清 context，命中 CBO 的 line 更新已在 Probe C
+  完成时执行；
 E.fire：E.bits.sink 必须已知并唯一命中 grant_ack_wait_q；命中后建立 ACTIVE line record，释放 sink；
 ```
 
@@ -150,12 +157,15 @@ ReleaseData 首 beat：检查 capacity，建立 C assembly + reservation；
 ProbeAck/ProbeAckData：先按 physical line 唯一定位 WAIT_C probe record，再通过 record token 读取旧 alias、target cap 和 owner；
 ProbeAckData 首拍：保存 c_assembly_probe_token 并把 record 标记 C_ASSEMBLY；第二拍必须仍命中同 token；
 完整 ProbeAckData：无 corrupt 写 DCache batch；corrupt 时跳过写并置 line record.data_valid=0；两种情况都按 target cap 完成 record；
+CBO owner 的 record 完成：先校验 token/context，再把 A.fire 已保留的 CBO reservation 转为 CBOAck；
 ```
 
 不同 alias Acquire 继续遵守 `deferred A payload -> Probe(toN) 旧 alias -> C completion -> 重建原 A 的
 Grant/GrantData -> E.fire 新 alias ACTIVE`。随机 policy 已使用同一 `submit_probe()` 建立 multi-batch
 `toB/toN` record：每条选中的 line 立即转为 `PROBE_PENDING`，所以同一 batch 不会重复。flush policy 也只
 复用 `cached_line_by_addr/probe_record_q/token`，不能回退为 `pending_probe_*` 或另建第二份 alias map。
+同一 line 的 Release/ReleaseData 若与未完成 Probe 冲突则 fatal，防止 Release 先删除该 Probe 的 line record；
+不同 line 的 Release 继续走原有兼容路径。
 
 ### 3.7 `body()` 与 `service_hint()`
 
@@ -171,7 +181,7 @@ PROBE 逐条建立 toN record；全部 C 收敛后 DONE 保持到外部 request 
 同一轮 service_hint 输出与最终 GrantData 匹配的 io_l2_hint；Probe C reply 优先于新的 B launch，B payload
 由当前 B-hold token 保持稳定；仅在 IDLE 且无 owner 时按随机 batch 参数尝试 Probe(toB/toN)；
 io_l2_flush_done 仅在 DONE 为 1；
-stop 时先完成已启动 flush 的 level handshake，再 drain queue/timer/D hold/GrantAck/Hint/Probe/C assembly。
+stop 时先完成已启动 flush 的 level handshake，再 drain queue/timer/D hold/GrantAck/Hint/CBO context/Probe/C assembly。
 ```
 
 ## 4. Uncache TL-UL Responder
@@ -267,5 +277,9 @@ MEMBLOCK_L2_PROBE_EN
   和单 B hold，capacity 固定为 16。
 - 功能：新增轻量 L2 flush `IDLE/DRAIN/PROBE/DONE`，DRAIN 后建立固定 ACTIVE snapshot 并逐条 toN，DONE
   保持 `io_l2_flush_done` 到 request 撤销；driver 允许 known-one sideband。
+- 功能：CBO 从直接 CBOAck 扩展为 miss 直接 Ack、hit 先 Probe 后 Ack 的单笔 context 闭环；错误位与
+  response 容量均在 A.fire 固定，Probe C 完成只转换 reservation，CBOAck D.fire 才清 context。
+- 保护：命中 CBO 在 A.ready 前预检 Probe record capacity；同一 line Release/ReleaseData 与 Probe 冲突
+  立即 fail-fast，避免破坏 token 对应的 line lifecycle。
 - 保持不变：shared memory backing/overlay 的数据职责、主表/LSQ/issue/commit/terminal owner、完整 CoupledL2
-  directory/set/way 扫描和 CBO Probe closure。
+  directory/set/way 扫描、多个 CBO 并发和主动 CBO 主表闭环。

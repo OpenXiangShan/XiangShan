@@ -6,7 +6,7 @@
 | 目标版本 | V2 |
 | Review 范围 | DCache responder Probe policy、flush sideband、公共参数链和相关文档 |
 | Review 结论 | 通过：实现复用既有 line/probe token owner；未发现遗漏的字段、状态清理或主流程所有权冲突 |
-| 未覆盖边界 | CBO Probe deferred closure、完整 CoupledL2 directory/set/way 扫描、专用 flush directed vseq |
+| 未覆盖边界 | 完整 CoupledL2 directory/set/way 扫描、专用 flush/CBO directed vseq；CBO Probe deferred closure 已由后续专项完成 |
 
 ## 1. 术语与抽象功能说明
 
@@ -179,8 +179,8 @@ make eda_run tc=basicTest ts=memblock_dispatch_real_smoke_vseq \
 结果：VCS 编译 `0 error(s), 0 warning(s)`；真实 smoke `TEST_PASS`，`UVM_ERROR=0`、`UVM_FATAL=0`。
 
 本轮未新增专用 flush directed vseq，因此随机 batch/toB 和 CSR 触发的 flush snapshot 尚未用单独 testcase
-逐条覆盖；代码路径已通过编译和现有真实 DCache main flow 回归。CBO Probe deferred closure 仍由
-`mem_ut_v2_dcache_cbo_probe_closure_plan_20260731.md` 独立实现，不能在本 review 中视为已完成。
+逐条覆盖；代码路径已通过编译和现有真实 DCache main flow 回归。CBO Probe deferred closure 已由后续
+`mem_ut_v2_dcache_cbo_probe_closure_plan_20260731.md` 完成，但不属于本 review 对本提交的验收范围。
 
 ## 9. 最终结论
 

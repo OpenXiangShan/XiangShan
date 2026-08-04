@@ -52,7 +52,8 @@ test -e build_memblock/rtl/filelist.f
 | 既有 compile 参数、宽度、FuType、ROB/LQ/SQ key | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_compile_param_and_width_adapt_execution_plan_20260708.md`，该范围已归档完成，只作为公共基线 |
 | SQ deq/cancel count width 与 redirect/cancel latency compile delta | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`；已在统一compile header新增宏和派生检查，是这些参数的唯一coding owner，不回写到既有compile plan |
 | 自动主表 VADDR 窗口 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_main_table_vaddr_generation_adapt_execution_plan_20260713.md`，源码审计、地址复用跨度修复、远端验证和两轮独立 review 已完成 |
-| DCache 轻量 L2 response/hint/Probe，flush_done zero-only | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md` |
+| DCache 轻量 L2 response/hint/Probe、response delay、multi-Probe/toB、轻量 flush 与 D-error | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md`、`mem_ut_dcache_uncache_response_delay_control_plan_20260730.md`、`mem_ut_dcache_multi_probe_tob_control_plan_20260730.md`、`mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md`；CBO hit 的 Probe 闭环由独立 CBO owner plan 负责 |
+| DCache CBOClean/CBOFlush/CBOInval Probe 闭环 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_dcache_cbo_probe_closure_plan_20260731.md`；唯一拥有 CBO context、Probe completion 到 CBOAck 的 responder 生命周期，不拥有主表主动 CBO |
 | LSQ enqueue | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`，coding、文档同步、冻结验证和最终独立review均已完成；真实load已闭环，store admission已覆盖，store终态仍由后续SQ deq专项闭环 |
 | split issue、vector stimulus/driver gate | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_split_issue_framework_adapt_execution_plan_20260708.md`，已完成并归档；只拥有vecissue默认入口关闭和driver valid fatal，不修改vector output monitor |
 | IQ feedback/replay、VSTU gate | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_iq_feedback_replay_framework_adapt_execution_plan_20260711.md`；已完成STA SQ-only raw、active SQ/current snapshot attach、同拍IQ-first、deferred ctrl、严格STA real-WB顺序和VSTU valid fatal |
@@ -82,7 +83,8 @@ test -e build_memblock/rtl/filelist.f
 | Monitor output 分类与 vector-WB gate | 已完成并归档 | 保持现有output observation与analysis-port deferred边界；`writebackVldu` valid为1或X/Z时fail-fast，不生产第二套scalar raw/event；cancel snapshot和redirect anchor只定义monitor职责，状态owner仍由LSQ专项实现。 | 独立review `FINAL PASS`；commit `cf63e12ebd`；plan位于`plan/do/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md`，review位于`review_doc/undo/mem_ut_v2_monitor_output_framework_adapt_implementation_review_20260722.md`。 |
 | LSQ MMIO/status 与 cancel 对账 | 已完成并归档 | 建立modeled ROB head及表尾watermark，分离normal commit、fault convergence和LQ/SQ physical deq；参数化`sqDeq` count-only链路；active idle保持level sideband；redirect epoch按software count与DUT snapshot直接对账且只由software路径回退free count；deferred raw FIFO、singleton owner和runtime drain闭环；`pendingst/scommit`按V2 scalar ROB store分类接受STORE/CBO。 | 最终VCS/KDB compile通过；default real smoke、real cancel reconcile和pending-MMIO directed均`TEST_PASS`且未捕获error/fatal为0；CBO分类日志通过；最后一轮独立review `FINAL PASS`。plan位于`plan/do/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`，review位于`review_doc/undo/mem_ut_v2_lsq_mmio_status_framework_adapt_implementation_review_20260722.md`。 |
 | pending-MMIO load/store sideband | 已完成并归档 | ctrl monitor采集load/store MMIO raw与ROB value；resolver结合完整active key、动态epoch和LOAD sample provenance归一化uid；status保存canonical tag/source，LSQ owner只查询tag生成head `pendingMMIOld`；stale旧owner丢弃，无法证明归属或新owner重叠fail-fast；directed vseq覆盖tag/provenance、fault head、owner reset和global-stop raw drain。 | `v2_lsq_mmio_cbo_final_20260723`下directed为`TEST_PASS`，`UVM_ERROR=0`、未捕获`UVM_FATAL=0`、精确caught fatal=1；相邻real smoke/cancel也通过；最后一轮独立review `FINAL PASS`。plan位于`plan/do/mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md`，review位于`review_doc/undo/mem_ut_v2_pending_mmio_load_sideband_implementation_review_20260722.md`。 |
-| DCache L2 response/hint/Probe | 已完成并归档 | 建立轻量 coherent response、三档 delay、Hint/Probe、GrantAck/E、cached-line和C assembly；补齐 C.fire owner 独占、channel/sideband 四态 fail-fast、generic E.ready 安全值、global-stop drain 与 legacy done handshake。 | compile 0 error（工具日志保留 LCA warning）；canonical 默认、Hint=100、Probe=100、legacy real smoke 均 `TEST_PASS`，`UVM_ERROR=0`、`UVM_FATAL=0`；最终独立 subagent review `FINAL PASS`。plan 已归档到 `plan/do`，implementation review 在 `review_doc/undo/mem_ut_v2_l2cache_response_hint_probe_model_implementation_review_20260723.md`。 |
+| DCache L2 response/hint/Probe | 已完成并归档 | 建立轻量 coherent response、三档 delay、Hint/Probe、GrantAck/E、cached-line和C assembly；补齐 C.fire owner 独占、channel/sideband 四态 fail-fast、generic E.ready 安全值、global-stop drain 与 legacy done handshake。 | compile 0 error（工具日志保留 LCA warning）；canonical 默认、Hint=100、Probe=100、legacy real smoke 均 `TEST_PASS`，`UVM_ERROR=0`、`UVM_FATAL=0`；plan 已归档到 `plan/do`，implementation review 在 `review_doc/undo/mem_ut_v2_l2cache_response_hint_probe_model_implementation_review_20260723.md`。 |
+| DCache CBO Probe 闭环 | 已完成并归档 | CBO miss 保持 direct Ack；命中 CBOClean 先 `Probe(toB)`、CBOFlush/Inval 先 `Probe(toN)`，匹配 C response 后才转 CBOAck；A.fire 固定 error/reservation，D.fire 清 context；命中 Probe capacity 预检，同线 Release/Probe fail-fast。 | `dcache_cbo_probe_20260804` compile 与真实 dispatch smoke 通过，`TEST_PASS`、`UVM_ERROR=0`、`UVM_FATAL=0`；CBO 主表主动 flow、CBO.ZERO 和 early fault 仍留 TODO。plan 已归档到 `plan/do/mem_ut_v2_dcache_cbo_probe_closure_plan_20260731.md`，review 位于 `review_doc/undo/mem_ut_v2_dcache_cbo_probe_closure_implementation_review_20260804.md`。 |
 
 本表已经覆盖总控中的全部专项 owner。后续新增的 V2 功能不回填为本总控的隐式子项，必须另建带
 唯一 owner 的专项 plan，并继续遵守“一专项一份 implementation review、一个本地 commit”的规则。
@@ -106,11 +108,13 @@ flow/analysis 同步和验证结论均记录在对应 plan 与 implementation re
 | LSQ MMIO/status | `64bed78edc` |
 | pending-MMIO sideband | `7c25383b9a` |
 | DCache L2 response/hint/Probe | `bace94b6ef` |
+| DCache CBO Probe 闭环 | 本次专项提交（见 CBO plan/review） |
 
 最后执行的 DCache 专项 compile/smoke 基于前述所有专项提交之后的集成代码树：VCS/KDB compile 为
 0 error；canonical 默认、Hint=100、Probe=100 和 legacy real smoke 均通过，且
-`UVM_ERROR=0`、`UVM_FATAL=0`。因此总控关闭不再增加第二套集成状态机或重复 smoke；仍未支持的
-vector LS、独立 S1/S2 PTE 权限和 DCache/SBuffer denied/corrupt 等能力继续保留在 TODO 边界。
+`UVM_ERROR=0`、`UVM_FATAL=0`。因此总控关闭不再增加第二套集成状态机或重复 smoke；DCache/SBuffer
+response delay、multi-Probe/toB、轻量 flush 和 denied/corrupt responder stimulus 已由对应专项完成。
+仍未支持的 vector LS、独立 S1/S2 PTE 权限、完整 CoupledL2 error cause 和主动 CBO 主流程继续保留在 TODO 边界。
 完整 core `sfence.flushPipe -> ROB flushAfter` 是当前 MemBlock standalone 之外的架构职责，不是后续
 必须补做的 V2 测试框架适配项；当前字段保真与 `sfence.valid` TLB invalidation 已闭环。
 

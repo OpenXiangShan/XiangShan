@@ -7,6 +7,8 @@
 > 进一步更新（2026-08-04）：`io_l2_flush_done` 已由
 > `mem_ut_dcache_multi_probe_tob_control_plan_20260730.md` 扩展为 request-bound DONE level；本历史 plan
 > 后文的 zero-only 说明仅描述当时能力，不是当前有效合同。
+> CBO 的 A/B/C/D 生命周期也不属于本文 owner；当前命中 CBO 的 Probe 闭环以
+> `mem_ut_v2_dcache_cbo_probe_closure_plan_20260731.md` 为准，本文不应被解读为 CBO 直接 Ack 的当前实现。
 
 | 项目 | 内容 |
 |---|---|
