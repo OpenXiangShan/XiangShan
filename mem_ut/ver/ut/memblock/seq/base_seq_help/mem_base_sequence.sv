@@ -487,11 +487,25 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
         DCACHE_PROBE_STATE_C_ASSEMBLY = 3
     } dcache_probe_state_e;
 
+    typedef enum int unsigned {
+        // 未观察到 L2 flush request，允许普通 A 入口和随机 Probe batch。
+        DCACHE_L2_FLUSH_IDLE  = 0,
+        // 已观察到 level request，先自然收敛 request 前已建立的 D/E/B/C owner。
+        DCACHE_L2_FLUSH_DRAIN = 1,
+        // 已建立固定 snapshot，逐条提交 Probe(toN) 并等待全部 C reply。
+        DCACHE_L2_FLUSH_PROBE = 2,
+        // snapshot 已完成，done 保持为 1，直到外部 level request 撤销。
+        DCACHE_L2_FLUSH_DONE  = 3
+    } dcache_l2_flush_state_e;
+
     typedef longint unsigned dcache_probe_token_t;
 
     localparam int unsigned DCACHE_MAX_PROBE_RECORDS = 16;
 
     virtual dcache_agent_agent_interface dcache_vif;
+    // 中文注释：L2 flush request 由顶层 other_ctrl 接口输出，DCache responder 直接在自己的
+    // drv_cb 边界读取同拍快照。这样不会把 monitor 的上一拍 level 当作当前 request，也不驱动该接口。
+    virtual other_ctrl_agent_agent_interface other_ctrl_vif;
 
     // 中文注释：service loop 的统一拍计数，只在 body() 单一入口递增。
     // 设置：每发送一个 cycle_xact 后自增 1；清零：body() 启动时。
@@ -577,6 +591,8 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     // 同一 physical line 只允许一笔未收敛 record；不同 line 可同时 WAIT_C，B channel 仍一次只保持一笔。
     typedef struct {
         dcache_probe_token_t token;
+        // batch_id 仅记录随机 batch 归属；0 表示 alias/CBO/flush 等非随机 owner。
+        longint unsigned     batch_id;
         bit [47:0]           line_addr;
         bit [1:0]            probe_alias;
         bit [1:0]            target_cap;
@@ -587,10 +603,17 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     dcache_cached_line_record_t cached_line_by_addr[mem_addr_t];
     dcache_probe_record_t       probe_record_q[$];
     dcache_probe_token_t        next_probe_token;
+    longint unsigned            next_probe_batch_id;
     bit                         probe_b_hold_valid;
     dcache_probe_token_t        probe_b_hold_token;
     int unsigned                deferred_response_reservation_count;
     bit                         grant_sink_reserved[MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING];
+
+    // 中文注释：轻量 L2 flush 只拥有 request level、snapshot 和 Probe 调度状态。
+    // 设置：观察到 io_outer_l2_flush_en 后进入 DRAIN；清零：DONE 观察到 request 撤销或 reset。
+    // 作用：DRAIN/PROBE 阶段关闭新 A.ready，DONE 才拉高 io_l2_flush_done；不清正常 D/E 或 shared memory。
+    dcache_l2_flush_state_e l2_flush_state;
+    bit [47:0]              l2_flush_snapshot_line_q[$];
 
     // 中文注释：当前正在收集的 C-channel 多拍 transaction。
     // 设置：首拍 ProbeAckData/ReleaseData fire 后建 owner 和 beat0 缓冲；清零：完整 2 beat 收齐或 reset。
@@ -664,6 +687,7 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
         input bit [47:0]           line_addr,
         input bit [1:0]            target_cap,
         input dcache_probe_owner_e probe_owner,
+        input longint unsigned     batch_id,
         output dcache_probe_token_t probe_token
     );
     extern virtual function void service_probe_b_hold();
@@ -710,8 +734,15 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
     );
     extern virtual function void enqueue_dcache_response(input dcache_response_record_t response_record);
     extern virtual function bit sample_hint_enable();
-    extern virtual function bit sample_probe_enable();
-    extern virtual function bit select_random_cached_line(output bit [47:0] line_addr, output bit [1:0] line_alias);
+    extern virtual function bit sample_probe_batch_start();
+    extern virtual function int unsigned sample_probe_batch_count();
+    extern virtual function bit [1:0] sample_probe_target_cap();
+    extern virtual function bit select_random_cached_line(output bit [47:0] line_addr);
+    extern virtual function bit is_l2_flush_drain_complete();
+    extern virtual function bit has_flush_probe_record();
+    extern virtual function void capture_l2_flush_snapshot();
+    extern virtual function void service_l2_flush(input bit sampled_l2_flush_en);
+    extern virtual function bit l2_flush_blocks_a_request(input bit sampled_l2_flush_en);
     extern virtual task accept_dcache_a_request(
         input dcache_agent_agent_xaction req_xact,
         input longint unsigned           accept_cycle
@@ -781,12 +812,15 @@ function void dcache_mem__access_base_sequence::clear_runtime_state(bit clear_ca
     armed_c_req_xact         = null;
     probe_record_q.delete();
     next_probe_token                    = 1;
+    next_probe_batch_id                 = 1;
     probe_b_hold_valid                  = 1'b0;
     probe_b_hold_token                  = '0;
     deferred_response_reservation_count = 0;
     foreach (grant_sink_reserved[i]) begin
         grant_sink_reserved[i] = 1'b0;
     end
+    l2_flush_state = DCACHE_L2_FLUSH_IDLE;
+    l2_flush_snapshot_line_q.delete();
     last_cycle_valid         = 1'b0;
     last_cycle_xact          = null;
     clear_dcache_response_state();
@@ -995,7 +1029,12 @@ function void dcache_mem__access_base_sequence::check_l2_model_cfg();
     void'(seq_csr_common::get_l2_rsp_delay_medium_wt());
     void'(seq_csr_common::get_l2_rsp_delay_large_wt());
     void'(seq_csr_common::get_l2_hint_valid_wt());
-    void'(seq_csr_common::get_l2_probe_enable_wt());
+    void'(seq_csr_common::get_l2_probe_en());
+    void'(seq_csr_common::get_l2_probe_pre_start_wt());
+    void'(seq_csr_common::get_l2_probe_count_one_wt());
+    void'(seq_csr_common::get_l2_probe_count_mid_wt());
+    void'(seq_csr_common::get_l2_probe_count_large_wt());
+    void'(seq_csr_common::get_l2_probe_to_b_wt());
 endfunction:check_l2_model_cfg
 
 function void dcache_mem__access_base_sequence::check_line_range(input bit [47:0] line_addr, input string ctx);
@@ -1388,6 +1427,7 @@ function bit dcache_mem__access_base_sequence::submit_probe(
     input bit [47:0]           line_addr,
     input bit [1:0]            target_cap,
     input dcache_probe_owner_e probe_owner,
+    input longint unsigned     batch_id,
     output dcache_probe_token_t probe_token
 );
     bit [47:0] line_key;
@@ -1421,6 +1461,7 @@ function bit dcache_mem__access_base_sequence::submit_probe(
     end
     probe_record             = '{default:'0};
     probe_record.token       = next_probe_token;
+    probe_record.batch_id    = batch_id;
     probe_record.line_addr   = line_key;
     probe_record.probe_alias = line_record.active_alias;
     probe_record.target_cap  = target_cap;
@@ -1521,7 +1562,11 @@ task dcache_mem__access_base_sequence::start_alias_conflict(
     line_record.deferred_accept_cycle       = accept_cycle;
     line_record.lifecycle_state             = DCACHE_LINE_ALIAS_CONFLICT;
     cached_line_by_addr[line_addr]          = line_record;
-    if (!submit_probe(line_addr, TL_CAP_TON, DCACHE_PROBE_OWNER_ALIAS_CONFLICT, probe_token)) begin
+    if (!submit_probe(line_addr,
+                      TL_CAP_TON,
+                      DCACHE_PROBE_OWNER_ALIAS_CONFLICT,
+                      0,
+                      probe_token)) begin
         cached_line_by_addr[line_addr] = old_line_record;
         release_deferred_acquire_resources(line_record);
         `uvm_fatal(get_type_name(),
@@ -1711,29 +1756,92 @@ function bit dcache_mem__access_base_sequence::sample_hint_enable();
     return enable;
 endfunction:sample_hint_enable
 
-function bit dcache_mem__access_base_sequence::sample_probe_enable();
-    int unsigned probe_wt;
-    bit          enable;
+function bit dcache_mem__access_base_sequence::sample_probe_batch_start();
+    int unsigned start_wt;
+    bit          start_batch;
 
-    probe_wt = seq_csr_common::get_l2_probe_enable_wt();
-    if (probe_wt == 0) begin
+    if (!seq_csr_common::get_l2_probe_en()) begin
         return 1'b0;
     end
-    if (probe_wt >= 100) begin
+    start_wt = seq_csr_common::get_l2_probe_pre_start_wt();
+    if (start_wt == 0) begin
+        return 1'b0;
+    end
+    if (start_wt >= 10000) begin
         return 1'b1;
     end
-    if (!std::randomize(enable) with {
-            enable dist {
-                1'b1 := probe_wt,
-                1'b0 := (100 - probe_wt)
+    if (!std::randomize(start_batch) with {
+            start_batch dist {
+                1'b1 := start_wt,
+                1'b0 := (10000 - start_wt)
             };
         }) begin
-        `uvm_fatal(get_type_name(), "failed to randomize DCache probe enable")
+        `uvm_fatal(get_type_name(), "failed to randomize DCache Probe batch start")
     end
-    return enable;
-endfunction:sample_probe_enable
+    return start_batch;
+endfunction:sample_probe_batch_start
 
-function bit dcache_mem__access_base_sequence::select_random_cached_line(output bit [47:0] line_addr, output bit [1:0] line_alias);
+function int unsigned dcache_mem__access_base_sequence::sample_probe_batch_count();
+    int unsigned count_class;
+    int unsigned batch_count;
+    int unsigned one_wt;
+    int unsigned mid_wt;
+    int unsigned large_wt;
+
+    one_wt   = seq_csr_common::get_l2_probe_count_one_wt();
+    mid_wt   = seq_csr_common::get_l2_probe_count_mid_wt();
+    large_wt = seq_csr_common::get_l2_probe_count_large_wt();
+    if (!std::randomize(count_class) with {
+            count_class dist {
+                0 := one_wt,
+                1 := mid_wt,
+                2 := large_wt
+            };
+        }) begin
+        `uvm_fatal(get_type_name(), "failed to randomize DCache Probe batch count class")
+    end
+    case (count_class)
+        0: batch_count = 1;
+        1: begin
+            if (!std::randomize(batch_count) with { batch_count inside {[2:6]}; }) begin
+                `uvm_fatal(get_type_name(), "failed to randomize DCache mid Probe batch count")
+            end
+        end
+        2: begin
+            if (!std::randomize(batch_count) with { batch_count inside {[7:15]}; }) begin
+                `uvm_fatal(get_type_name(), "failed to randomize DCache large Probe batch count")
+            end
+        end
+        default: begin
+            `uvm_fatal(get_type_name(), $sformatf("invalid DCache Probe count class=%0d", count_class))
+        end
+    endcase
+    return batch_count;
+endfunction:sample_probe_batch_count
+
+function bit [1:0] dcache_mem__access_base_sequence::sample_probe_target_cap();
+    int unsigned to_b_wt;
+    bit          choose_to_b;
+
+    to_b_wt = seq_csr_common::get_l2_probe_to_b_wt();
+    if (to_b_wt == 0) begin
+        return TL_CAP_TON;
+    end
+    if (to_b_wt >= 10000) begin
+        return TL_CAP_TOB;
+    end
+    if (!std::randomize(choose_to_b) with {
+            choose_to_b dist {
+                1'b1 := to_b_wt,
+                1'b0 := (10000 - to_b_wt)
+            };
+        }) begin
+        `uvm_fatal(get_type_name(), "failed to randomize DCache Probe(toB/toN) target")
+    end
+    return choose_to_b ? TL_CAP_TOB : TL_CAP_TON;
+endfunction:sample_probe_target_cap
+
+function bit dcache_mem__access_base_sequence::select_random_cached_line(output bit [47:0] line_addr);
     mem_addr_t    key;
     int unsigned  entry_count;
     int unsigned  ordinal;
@@ -1741,7 +1849,6 @@ function bit dcache_mem__access_base_sequence::select_random_cached_line(output 
     dcache_cached_line_record_t line_record;
 
     line_addr  = '0;
-    line_alias = '0;
     entry_count = 0;
     foreach (cached_line_by_addr[key]) begin
         line_record = cached_line_by_addr[key];
@@ -1768,7 +1875,6 @@ function bit dcache_mem__access_base_sequence::select_random_cached_line(output 
             !has_probe_for_line(key)) begin
             if (seen == ordinal) begin
                 line_addr  = key;
-                line_alias = line_record.active_alias;
                 return 1'b1;
             end
             seen++;
@@ -2282,32 +2388,163 @@ endtask:start_c_assembly
 
 function void dcache_mem__access_base_sequence::try_start_probe(input bit allow_new_probe = 1'b1);
     bit [47:0] selected_line;
-    bit [1:0]  selected_alias;
+    bit [1:0]  target_cap;
     dcache_probe_token_t probe_token;
+    longint unsigned batch_id;
+    int unsigned batch_target;
+    int unsigned created_count;
 
-    // Probe 只能在完全空闲且未进入 stop drain 时新建；已有 B/C owner 由主循环继续消费。
+    // 中文注释：随机 policy 只在没有其它 Probe owner 的空闲窗口建立一个完整 batch。
+    // 每个选中 line 立即转为独立 record，因此同一 batch 不会重复；B/C 发送和收敛仍由共享 service 接管。
     if (!allow_new_probe || current_d_valid || (dcache_rsp_q.size() != 0) ||
         (grant_ack_wait_q.size() != 0) ||
-        probe_b_hold_valid || has_waiting_probe_c() ||
+        (probe_record_q.size() != 0) || probe_b_hold_valid || has_waiting_probe_c() ||
         (c_assembly_owner != DCACHE_C_OWNER_NONE) ||
         a_accept_armed || c_accept_armed) begin
         return;
     end
-    if (!sample_probe_enable()) begin
+    if (!sample_probe_batch_start()) begin
         return;
     end
-    if (!select_random_cached_line(selected_line, selected_alias)) begin
-        return;
+    if (next_probe_batch_id == '0) begin
+        next_probe_batch_id = 1;
     end
-    if (!submit_probe(selected_line,
-                      TL_CAP_TON,
-                      DCACHE_PROBE_OWNER_RANDOM,
-                      probe_token)) begin
-        `uvm_fatal(get_type_name(),
-                   $sformatf("selected legacy Probe line=0x%0h could not create a shared Probe record", selected_line))
+    batch_id     = next_probe_batch_id;
+    batch_target = sample_probe_batch_count();
+    created_count = 0;
+    for (int unsigned i = 0;
+         (i < batch_target) && (probe_record_q.size() < DCACHE_MAX_PROBE_RECORDS);
+         i++) begin
+        if (!select_random_cached_line(selected_line)) begin
+            break;
+        end
+        target_cap = sample_probe_target_cap();
+        if (!submit_probe(selected_line,
+                          target_cap,
+                          DCACHE_PROBE_OWNER_RANDOM,
+                          batch_id,
+                          probe_token)) begin
+            if (probe_record_q.size() >= DCACHE_MAX_PROBE_RECORDS) begin
+                break;
+            end
+            `uvm_fatal(get_type_name(),
+                       $sformatf("random Probe batch=%0d cannot create record line=0x%0h",
+                                 batch_id,
+                                 selected_line))
+        end
+        created_count++;
     end
-    service_probe_b_hold();
+    if (created_count != 0) begin
+        next_probe_batch_id++;
+        service_probe_b_hold();
+    end
 endfunction:try_start_probe
+
+function bit dcache_mem__access_base_sequence::is_l2_flush_drain_complete();
+    return !current_d_valid &&
+           (dcache_rsp_q.size() == 0) &&
+           !dcache_rsp_timer_active &&
+           (grant_ack_wait_q.size() == 0) &&
+           (dcache_hint_q.size() == 0) &&
+           !probe_b_hold_valid &&
+           (probe_record_q.size() == 0) &&
+           (c_assembly_owner == DCACHE_C_OWNER_NONE) &&
+           !c_assembly_response_reserved &&
+           !a_accept_armed &&
+           !c_accept_armed;
+endfunction:is_l2_flush_drain_complete
+
+function bit dcache_mem__access_base_sequence::has_flush_probe_record();
+    foreach (probe_record_q[i]) begin
+        if (probe_record_q[i].owner == DCACHE_PROBE_OWNER_FLUSH) begin
+            return 1'b1;
+        end
+    end
+    return 1'b0;
+endfunction:has_flush_probe_record
+
+function void dcache_mem__access_base_sequence::capture_l2_flush_snapshot();
+    mem_addr_t key;
+    dcache_cached_line_record_t line_record;
+
+    // 中文注释：snapshot 只在 DRAIN 完成的低频边界扫描一次；之后新 Grant 不会被回填进本轮 flush。
+    l2_flush_snapshot_line_q.delete();
+    foreach (cached_line_by_addr[key]) begin
+        line_record = cached_line_by_addr[key];
+        if (line_record.alias_valid &&
+            (line_record.lifecycle_state == DCACHE_LINE_ACTIVE)) begin
+            l2_flush_snapshot_line_q.push_back(key);
+        end
+    end
+endfunction:capture_l2_flush_snapshot
+
+function void dcache_mem__access_base_sequence::service_l2_flush(input bit sampled_l2_flush_en);
+    bit [47:0] flush_line;
+    dcache_probe_token_t probe_token;
+
+    case (l2_flush_state)
+        DCACHE_L2_FLUSH_IDLE: begin
+            if (sampled_l2_flush_en) begin
+                l2_flush_state = DCACHE_L2_FLUSH_DRAIN;
+            end
+        end
+        DCACHE_L2_FLUSH_DRAIN: begin
+            if (!sampled_l2_flush_en) begin
+                `uvm_fatal(get_type_name(), "L2 flush request was withdrawn before DRAIN completed")
+            end
+            if (is_l2_flush_drain_complete()) begin
+                capture_l2_flush_snapshot();
+                l2_flush_state = DCACHE_L2_FLUSH_PROBE;
+            end
+        end
+        DCACHE_L2_FLUSH_PROBE: begin
+            if (!sampled_l2_flush_en) begin
+                `uvm_fatal(get_type_name(), "L2 flush request was withdrawn before Probe snapshot completed")
+            end
+            if ((l2_flush_snapshot_line_q.size() != 0) &&
+                (probe_record_q.size() < DCACHE_MAX_PROBE_RECORDS)) begin
+                flush_line = l2_flush_snapshot_line_q[0];
+                if (!submit_probe(flush_line,
+                                  TL_CAP_TON,
+                                  DCACHE_PROBE_OWNER_FLUSH,
+                                  0,
+                                  probe_token)) begin
+                    `uvm_fatal(get_type_name(),
+                               $sformatf("L2 flush cannot create Probe(toN) for snapshot line=0x%0h", flush_line))
+                end
+                l2_flush_snapshot_line_q.delete(0);
+            end
+            if ((l2_flush_snapshot_line_q.size() == 0) &&
+                !has_flush_probe_record() &&
+                !probe_b_hold_valid &&
+                (c_assembly_owner == DCACHE_C_OWNER_NONE)) begin
+                l2_flush_state = DCACHE_L2_FLUSH_DONE;
+            end
+        end
+        DCACHE_L2_FLUSH_DONE: begin
+            if (!sampled_l2_flush_en) begin
+                l2_flush_snapshot_line_q.delete();
+                l2_flush_state = DCACHE_L2_FLUSH_IDLE;
+            end
+        end
+        default: begin
+            `uvm_fatal(get_type_name(), $sformatf("invalid L2 flush state=%0d", l2_flush_state))
+        end
+    endcase
+endfunction:service_l2_flush
+
+function bit dcache_mem__access_base_sequence::l2_flush_blocks_a_request(input bit sampled_l2_flush_en);
+    case (l2_flush_state)
+        DCACHE_L2_FLUSH_DRAIN,
+        DCACHE_L2_FLUSH_PROBE: return 1'b1;
+        DCACHE_L2_FLUSH_IDLE:  return sampled_l2_flush_en;
+        DCACHE_L2_FLUSH_DONE:  return 1'b0;
+        default: begin
+            `uvm_fatal(get_type_name(), $sformatf("invalid L2 flush state=%0d", l2_flush_state))
+        end
+    endcase
+    return 1'b1;
+endfunction:l2_flush_blocks_a_request
 
 function void dcache_mem__access_base_sequence::service_hint(
     input longint unsigned           current_cycle,
@@ -2335,11 +2572,13 @@ task dcache_mem__access_base_sequence::body();
     logic                      sampled_c_valid_raw;
     logic                      sampled_d_ready_raw;
     logic                      sampled_e_valid_raw;
+    logic                      sampled_l2_flush_en_raw;
     bit                        sampled_a_valid;
     bit                        sampled_b_ready;
     bit                        sampled_c_valid;
     bit                        sampled_d_ready;
     bit                        sampled_e_valid;
+    bit                        sampled_l2_flush_en;
     bit                        reset_active;
     bit                        a_fire;
     bit                        b_fire;
@@ -2352,6 +2591,10 @@ task dcache_mem__access_base_sequence::body();
     if (!uvm_config_db#(virtual dcache_agent_agent_interface)::get(null, get_full_name(), "vif", dcache_vif) &&
         !uvm_config_db#(virtual dcache_agent_agent_interface)::get(null, "uvm_test_top.env.u_dcache_agent_agent*", "vif", dcache_vif)) begin
         `uvm_fatal(get_type_name(), "dcache virtual interface is not set for memory access sequence")
+    end
+    if (!uvm_config_db#(virtual other_ctrl_agent_agent_interface)::get(null, get_full_name(), "other_ctrl_vif", other_ctrl_vif) &&
+        !uvm_config_db#(virtual other_ctrl_agent_agent_interface)::get(null, "uvm_test_top.env.u_other_ctrl_agent_agent*", "vif", other_ctrl_vif)) begin
+        `uvm_fatal(get_type_name(), "other_ctrl virtual interface is not set for DCache L2 flush responder")
     end
     data = common_data_transaction::get();
     if (data == null) begin
@@ -2385,12 +2628,14 @@ task dcache_mem__access_base_sequence::body();
         sampled_c_valid_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_c_valid;
         sampled_d_ready_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_d_ready;
         sampled_e_valid_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_e_valid;
+        sampled_l2_flush_en_raw = other_ctrl_vif.mon_mp.mon_cb.io_outer_l2_flush_en;
         reset_active    = (dcache_vif.rst_n !== 1'b1) || (memblock_sync_pkg::reset_backend_done !== 1'b1);
         sampled_a_valid = (sampled_a_valid_raw === 1'b1);
         sampled_b_ready = (sampled_b_ready_raw === 1'b1);
         sampled_c_valid = (sampled_c_valid_raw === 1'b1);
         sampled_d_ready = (sampled_d_ready_raw === 1'b1);
         sampled_e_valid = (sampled_e_valid_raw === 1'b1);
+        sampled_l2_flush_en = (sampled_l2_flush_en_raw === 1'b1);
         a_fire          = 1'b0;
         b_fire          = 1'b0;
         c_fire          = 1'b0;
@@ -2402,9 +2647,10 @@ task dcache_mem__access_base_sequence::body();
              (sampled_b_ready_raw !== 1'b0 && sampled_b_ready_raw !== 1'b1) ||
              (sampled_c_valid_raw !== 1'b0 && sampled_c_valid_raw !== 1'b1) ||
              (sampled_d_ready_raw !== 1'b0 && sampled_d_ready_raw !== 1'b1) ||
-             (sampled_e_valid_raw !== 1'b0 && sampled_e_valid_raw !== 1'b1))) begin
+             (sampled_e_valid_raw !== 1'b0 && sampled_e_valid_raw !== 1'b1) ||
+             (sampled_l2_flush_en_raw !== 1'b0 && sampled_l2_flush_en_raw !== 1'b1))) begin
             `uvm_fatal(get_type_name(),
-                       "DCache channel valid/ready sampled as X/Z outside reset")
+                       "DCache channel valid/ready or L2 flush request sampled as X/Z outside reset")
         end
 
         build_dcache_idle_xaction(cycle_xact);
@@ -2479,10 +2725,17 @@ task dcache_mem__access_base_sequence::body();
             end
         end
 
+        // 中文注释：flush request 是 level sideband。先结算上一拍已 fire 的 A/C/D/E/B，
+        // 再推进本地 flush 状态，保证 request 到来前已经接受的 owner 自然 drain，之后才关闭新 A.ready。
+        service_l2_flush(sampled_l2_flush_en);
+
         // global stop 表示主表已经全部终态；只允许本拍已经通过上一 item
         // ready 形成的 A.fire 进入 drain。stop 后新出现、未握手的 A 请求没有
         // 合法 owner，直接报错，避免重新打开 A.ready 或永久等待。
-        if (data.is_global_stop_requested() && sampled_a_valid && !a_fire) begin
+        if (data.is_global_stop_requested() &&
+            (l2_flush_state == DCACHE_L2_FLUSH_IDLE) &&
+            !sampled_l2_flush_en &&
+            sampled_a_valid && !a_fire) begin
             `uvm_fatal(get_type_name(),
                        "new DCache A.valid observed after global stop without a sampled fire")
         end
@@ -2491,6 +2744,8 @@ task dcache_mem__access_base_sequence::body();
         // 只有 A/C/B/D/E、GrantAck、Probe 和 assembly 生命周期都自然归零后，才发最后一拍 safe idle 并退出；
         // 已完成 GrantAck 的 cached line map 是稳定历史状态，不属于 in-flight，也不阻塞退出。
         if (data.is_global_stop_requested() &&
+            (l2_flush_state == DCACHE_L2_FLUSH_IDLE) &&
+            !sampled_l2_flush_en &&
             !current_d_valid &&
             (dcache_rsp_q.size() == 0) &&
             !dcache_rsp_timer_active &&
@@ -2612,7 +2867,8 @@ task dcache_mem__access_base_sequence::body();
         else if (probe_b_hold_valid) begin
             build_probe_b_xaction(cycle_xact);
         end
-        else if (!a_fire && !data.is_global_stop_requested() && sampled_a_valid) begin
+        else if (!a_fire && !data.is_global_stop_requested() && sampled_a_valid &&
+                 !l2_flush_blocks_a_request(sampled_l2_flush_en)) begin
             capture_dcache_a_xaction(sampled_req_xact);
             case (sampled_req_xact.auto_inner_dcache_client_out_a_bits_opcode)
                 TL_A_OPCODE_ACQUIRE_BLOCK,
@@ -2634,14 +2890,16 @@ task dcache_mem__access_base_sequence::body();
             endcase
         end
         else begin
-            try_start_probe(!data.is_global_stop_requested());
+            try_start_probe(!data.is_global_stop_requested() &&
+                            (l2_flush_state == DCACHE_L2_FLUSH_IDLE) &&
+                            !sampled_l2_flush_en);
             if (probe_b_hold_valid) begin
                 build_probe_b_xaction(cycle_xact);
             end
         end
 
         service_hint(service_cycle, cycle_xact);
-        cycle_xact.io_l2_flush_done = 1'b0;
+        cycle_xact.io_l2_flush_done = (l2_flush_state == DCACHE_L2_FLUSH_DONE);
         send_dcache_xaction(cycle_xact);
         last_cycle_xact  = cycle_xact;
         last_cycle_valid = 1'b1;

@@ -78,8 +78,8 @@ function void dcache_agent_agent_driver::check_l2_sideband_item(dcache_agent_age
     if (tr == null) begin
         `uvm_fatal(get_type_name(), "cannot check a null DCache item")
     end
-    if (tr.io_l2_flush_done !== 1'b0) begin
-        `uvm_fatal(get_type_name(), "io_l2_flush_done must stay 0 in DCache responder items")
+    if (tr.io_l2_flush_done !== 1'b0 && tr.io_l2_flush_done !== 1'b1) begin
+        `uvm_fatal(get_type_name(), "io_l2_flush_done must be known before driving the DUT")
     end
     if (tr.io_l2_hint_valid !== 1'b0 && tr.io_l2_hint_valid !== 1'b1) begin
         `uvm_fatal(get_type_name(), "io_l2_hint_valid must be known before driving the DUT")

@@ -19,7 +19,10 @@ TL-UL responder。它们是被动 memory-facing sequence：只在 DUT request �
 | `armed snapshot` | `armed_a_req_xact/armed_c_req_xact` | valid 等待 ready 时保存的 payload，仅用于下一 sample 的 fire/stability check |
 | `write batch` | `dcache_write_batch/uncache_write_batch` | 当前 sample 已确认写，下一 sample 提交 overlay 的暂存集合 |
 | `line record` | `cached_line_by_addr[line_addr]` | physical line 的唯一 alias 生命周期状态，不是完整 L2 directory |
-| `probe record` | `probe_record_q` | B Probe 的 token、旧 alias、target cap、owner 和 B/C 阶段 |
+| `probe record` | `probe_record_q` | B Probe 的 token、batch、旧 alias、target cap、owner 和 B/C 阶段 |
+| `probe batch` | `dcache_probe_record_t::batch_id` | 一次随机 policy 选择出的互不重复 Probe 集合；非随机 owner 的 batch_id 为 0 |
+| `flush snapshot` | `l2_flush_snapshot_line_q` | DRAIN 后固定的 ACTIVE physical line 集合，不随之后的新 Grant 更新 |
+| `flush state` | `l2_flush_state` | 轻量 L2 flush 的 `IDLE/DRAIN/PROBE/DONE` level-request 状态机 |
 | `deferred Acquire` | `line_record.deferred_acquire` | 已 A.fire、等待旧 alias Probe(toN) 收敛的原始新 alias A payload |
 
 ## 2. 公共 Memory 后端
@@ -63,7 +66,9 @@ grant_ack_wait_q：D 已完成但 E 尚未确认的 Grant，继续占 sink；
 dcache_hint_q：已绑定最终 GrantData、等待输出的 Hint；
 c_assembly_response_reserved：ReleaseData 首 beat 预留的 ReleaseAck capacity；
 cached_line_by_addr：GrantAck 后形成的 ACTIVE alias line，以及 Probe/alias conflict/GrantAck 中间态；
-probe_record_q：所有已创建 Probe 的唯一生命周期 owner；B channel 同时只保持其中一笔。
+probe_record_q：所有已创建 Probe 的唯一生命周期 owner；B channel 同时只保持其中一笔；
+l2_flush_snapshot_line_q：DRAIN 完成时复制的 ACTIVE line，轻量 flush 只扫描该固定集合；
+l2_flush_state：只控制新 A.ready、snapshot/flush Probe 调度和 io_l2_flush_done，不拥有 shared memory 或主表。
 ```
 
 capacity 由 compile-time `MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING=16` 决定：queued record、current
@@ -147,10 +152,10 @@ ProbeAckData 首拍：保存 c_assembly_probe_token 并把 record 标记 C_ASSEM
 完整 ProbeAckData：无 corrupt 写 DCache batch；corrupt 时跳过写并置 line record.data_valid=0；两种情况都按 target cap 完成 record；
 ```
 
-当前 legacy random policy 仍只产生单笔 `Probe(toN)`，但 alias state 已实现：不同 alias Acquire 保存
-deferred A payload -> Probe(toN) 旧 alias -> C completion -> 重建原 A 的 Grant/GrantData -> E.fire 后新 alias ACTIVE。
-后续 multi-probe、toB、CBO、flush 只能复用现有 `cached_line_by_addr/probe_record_q/token`，不能回退为
-`pending_probe_*` 或另建第二份 alias map。
+不同 alias Acquire 继续遵守 `deferred A payload -> Probe(toN) 旧 alias -> C completion -> 重建原 A 的
+Grant/GrantData -> E.fire 新 alias ACTIVE`。随机 policy 已使用同一 `submit_probe()` 建立 multi-batch
+`toB/toN` record：每条选中的 line 立即转为 `PROBE_PENDING`，所以同一 batch 不会重复。flush policy 也只
+复用 `cached_line_by_addr/probe_record_q/token`，不能回退为 `pending_probe_*` 或另建第二份 alias map。
 
 ### 3.7 `body()` 与 `service_hint()`
 
@@ -158,12 +163,15 @@ deferred A payload -> Probe(toN) 旧 alias -> C completion -> 重建原 A 的 Gr
 `service_hint()` 在 record 已最终被 scheduler 选中时输出一次 Hint，不参与 D response capacity。
 
 ```text
-每个 drv_cb：begin_shared_mem_sample -> sample raw signals -> 检查 X/Z -> 确认 fire；
+每个 drv_cb：begin_shared_mem_sample -> sample A/B/C/D/E 与 other_ctrl 的 flush level -> 检查 X/Z -> 确认 fire；
 按 D -> E -> C -> B -> A 顺序消费旧 handshake；
-调 scheduler、填 D hold、开放 E ready、处理 C/A 新准入、空闲时尝试 Probe；
+调用 service_l2_flush：先 DRAIN 既有 owner；DRAIN/PROBE 关闭新 A.ready；DRAIN 完成时固定 ACTIVE snapshot；
+PROBE 逐条建立 toN record；全部 C 收敛后 DONE 保持到外部 request 撤销；
+调 scheduler、填 D hold、开放 E ready、处理 C/A 新准入；
 同一轮 service_hint 输出与最终 GrantData 匹配的 io_l2_hint；Probe C reply 优先于新的 B launch，B payload
-由当前 B-hold token 保持稳定；io_l2_flush_done 恒为 0；
-stop 时只 drain queue/timer/D hold/GrantAck/Hint/Probe/C assembly，完全收敛才退出。
+由当前 B-hold token 保持稳定；仅在 IDLE 且无 owner 时按随机 batch 参数尝试 Probe(toB/toN)；
+io_l2_flush_done 仅在 DONE 为 1；
+stop 时先完成已启动 flush 的 level handshake，再 drain queue/timer/D hold/GrantAck/Hint/Probe/C assembly。
 ```
 
 ## 4. Uncache TL-UL Responder
@@ -223,6 +231,20 @@ compile-time capacity 路径：
 cfg/memblock_compile_params.svh -> memblock_dispatch_types.sv typed localparam -> responder capacity check
 ```
 
+随机 Probe 参数替代旧单百分比门：
+
+```text
+MEMBLOCK_L2_PROBE_EN
+  -> MEMBLOCK_L2_PROBE_PRE_START_WT
+  -> MEMBLOCK_L2_PROBE_COUNT_{ONE,MID,LARGE}_WT
+  -> MEMBLOCK_L2_PROBE_TO_B_WT
+  -> seq_csr_common getter
+  -> try_start_probe()/sample_probe_*()
+```
+
+`MEMBLOCK_L2_PROBE_EN` 只控制随机 policy。DUT `io_outer_l2_flush_en` 是功能性 level request，
+`service_l2_flush()` 无论随机开关均可提交固定 `Probe(toN)`，否则 flush 会永久无法完成。
+
 相关现行 flow：
 
 - `AI_DOC/mem_ut_flow_doc/dcache_l2_response_hint_probe_model_flow.md`
@@ -239,5 +261,11 @@ cfg/memblock_compile_params.svh -> memblock_dispatch_types.sv typed localparam -
 - 功能：Uncache 对 V2 A opcode 使用显式白名单，并提供 D.ready 长期阻塞 warning；
 - 功能：DCache alias conflict 已具备 `A.fire -> deferred Acquire -> Probe(toN) old alias -> C token closure -> GrantAck`
   闭环；C two-beat data 使用 token 防止其它 Probe 覆盖。
-- 保持不变：shared memory backing/overlay 的数据职责、主表/LSQ/issue/commit/terminal owner、legacy random
-  single-Probe/toN policy 和 L2 flush 未建模边界。
+- 参数迁移：删除 `MEMBLOCK_L2_PROBE_ENABLE_WT`，改为随机 batch 总开关、开始权重、三档数量权重和 toB 权重；
+  `seq_csr_common` 校验两个 10000 比例权重及非零数量权重。
+- 功能：随机 policy 从单笔 toN 扩展为一批互不重复的 `Probe(toB/toN)`；每条仍使用已有 token、line record
+  和单 B hold，capacity 固定为 16。
+- 功能：新增轻量 L2 flush `IDLE/DRAIN/PROBE/DONE`，DRAIN 后建立固定 ACTIVE snapshot 并逐条 toN，DONE
+  保持 `io_l2_flush_done` 到 request 撤销；driver 允许 known-one sideband。
+- 保持不变：shared memory backing/overlay 的数据职责、主表/LSQ/issue/commit/terminal owner、完整 CoupledL2
+  directory/set/way 扫描和 CBO Probe closure。

@@ -215,10 +215,19 @@ class seq_csr_common;
     static int unsigned l2_cbo_ack_corrupt_wt = 0;
     static int unsigned uncache_denied_wt = 0;
     static int unsigned uncache_corrupt_wt = 0;
-    // 中文注释：每个 AcquireBlock 产生 hint、每个合格空闲周期尝试 Probe 的百分比权重。
+    // 中文注释：每个 AcquireBlock 产生 hint 的百分比权重。
     // 0 表示关闭，100 表示每次都命中；sequence 只读 getter，不在 getter 内修改状态。
     static int unsigned l2_hint_valid_wt = 0;
-    static int unsigned l2_probe_enable_wt = 0;
+    // 中文注释：Probe batch 的公共运行时配置。
+    // 设置：plus/default cfg 在 init 时写入；读取：DCache responder 只经 getter 采样。
+    // 作用：EN 关闭时不创建随机 Probe；其余权重依次控制每拍 batch 启动、1/MID/LARGE 数量
+    // 和 Probe(toB) 概率。它们不改变固定的 16 笔 Probe record 容量。
+    static bit          l2_probe_en = 1'b0;
+    static int unsigned l2_probe_pre_start_wt = 0;
+    static int unsigned l2_probe_count_one_wt = 1;
+    static int unsigned l2_probe_count_mid_wt = 0;
+    static int unsigned l2_probe_count_large_wt = 0;
+    static int unsigned l2_probe_to_b_wt = 0;
     // 中文注释：L2TLB responder运行期开关与队列/调度策略。
     // load_from_plus()设置，validate/apply入口校验并按compile filter容量收敛，sequence只读getter。
     static bit          l2tlb_seq_en = 1'b1;
@@ -442,7 +451,12 @@ class seq_csr_common;
         uncache_denied_wt           = get_non_negative_int("MEMBLOCK_UNCACHE_DENIED_WT", plus::MEMBLOCK_UNCACHE_DENIED_WT);
         uncache_corrupt_wt          = get_non_negative_int("MEMBLOCK_UNCACHE_CORRUPT_WT", plus::MEMBLOCK_UNCACHE_CORRUPT_WT);
         l2_hint_valid_wt            = get_non_negative_int("MEMBLOCK_L2_HINT_VALID_WT", plus::MEMBLOCK_L2_HINT_VALID_WT);
-        l2_probe_enable_wt          = get_non_negative_int("MEMBLOCK_L2_PROBE_ENABLE_WT", plus::MEMBLOCK_L2_PROBE_ENABLE_WT);
+        l2_probe_en                  = plus::MEMBLOCK_L2_PROBE_EN;
+        l2_probe_pre_start_wt        = get_non_negative_int("MEMBLOCK_L2_PROBE_PRE_START_WT", plus::MEMBLOCK_L2_PROBE_PRE_START_WT);
+        l2_probe_count_one_wt        = get_non_negative_int("MEMBLOCK_L2_PROBE_COUNT_ONE_WT", plus::MEMBLOCK_L2_PROBE_COUNT_ONE_WT);
+        l2_probe_count_mid_wt        = get_non_negative_int("MEMBLOCK_L2_PROBE_COUNT_MID_WT", plus::MEMBLOCK_L2_PROBE_COUNT_MID_WT);
+        l2_probe_count_large_wt      = get_non_negative_int("MEMBLOCK_L2_PROBE_COUNT_LARGE_WT", plus::MEMBLOCK_L2_PROBE_COUNT_LARGE_WT);
+        l2_probe_to_b_wt             = get_non_negative_int("MEMBLOCK_L2_PROBE_TO_B_WT", plus::MEMBLOCK_L2_PROBE_TO_B_WT);
         l2tlb_seq_en                = plus::MEMBLOCK_L2TLB_SEQ_EN;
         l2tlb_max_outstanding       = get_non_negative_int("MEMBLOCK_L2TLB_MAX_OUTSTANDING", plus::MEMBLOCK_L2TLB_MAX_OUTSTANDING);
         l2tlb_resp_reorder_en       = plus::MEMBLOCK_L2TLB_RESP_REORDER_EN;
@@ -567,10 +581,16 @@ class seq_csr_common;
             `uvm_fatal("SEQ_CSR_CFG",
                        $sformatf("MEMBLOCK_L2_HINT_VALID_WT=%0d must be within [0:100]", l2_hint_valid_wt))
         end
-        if (l2_probe_enable_wt > 100) begin
+        if (l2_probe_pre_start_wt > 10000 || l2_probe_to_b_wt > 10000) begin
             `uvm_fatal("SEQ_CSR_CFG",
-                       $sformatf("MEMBLOCK_L2_PROBE_ENABLE_WT=%0d must be within [0:100]", l2_probe_enable_wt))
+                       $sformatf("L2 Probe 10000-scale weights exceed range: pre_start=%0d toB=%0d",
+                                 l2_probe_pre_start_wt,
+                                 l2_probe_to_b_wt))
         end
+        fatal_if_all_zero3("L2 Probe batch count weights",
+                           l2_probe_count_one_wt,
+                           l2_probe_count_mid_wt,
+                           l2_probe_count_large_wt);
         if (l2tlb_resp_mid_latency <= 1) begin
             `uvm_fatal("SEQ_CSR_CFG", "MEMBLOCK_L2TLB_RESP_MID_LATENCY must be greater than 1")
         end
@@ -1650,10 +1670,35 @@ class seq_csr_common;
         return l2_hint_valid_wt;
     endfunction:get_l2_hint_valid_wt
 
-    static function int unsigned get_l2_probe_enable_wt();
-        check_initialized("get_l2_probe_enable_wt");
-        return l2_probe_enable_wt;
-    endfunction:get_l2_probe_enable_wt
+    static function bit get_l2_probe_en();
+        check_initialized("get_l2_probe_en");
+        return l2_probe_en;
+    endfunction:get_l2_probe_en
+
+    static function int unsigned get_l2_probe_pre_start_wt();
+        check_initialized("get_l2_probe_pre_start_wt");
+        return l2_probe_pre_start_wt;
+    endfunction:get_l2_probe_pre_start_wt
+
+    static function int unsigned get_l2_probe_count_one_wt();
+        check_initialized("get_l2_probe_count_one_wt");
+        return l2_probe_count_one_wt;
+    endfunction:get_l2_probe_count_one_wt
+
+    static function int unsigned get_l2_probe_count_mid_wt();
+        check_initialized("get_l2_probe_count_mid_wt");
+        return l2_probe_count_mid_wt;
+    endfunction:get_l2_probe_count_mid_wt
+
+    static function int unsigned get_l2_probe_count_large_wt();
+        check_initialized("get_l2_probe_count_large_wt");
+        return l2_probe_count_large_wt;
+    endfunction:get_l2_probe_count_large_wt
+
+    static function int unsigned get_l2_probe_to_b_wt();
+        check_initialized("get_l2_probe_to_b_wt");
+        return l2_probe_to_b_wt;
+    endfunction:get_l2_probe_to_b_wt
 
     static function bit get_l2tlb_seq_en();
         check_initialized("get_l2tlb_seq_en");

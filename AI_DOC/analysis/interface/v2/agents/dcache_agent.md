@@ -38,6 +38,7 @@ V2 顶层端口位于 `build_memblock/rtl/MemBlock.sv:203-255`。
 | C | DUT -> responder | DCache 返回 ProbeAck、ProbeAckData 或 Release | 按 source/address/opcode 匹配 Probe/Release 生命周期 |
 | D | responder -> DUT | L2 返回 Grant、GrantData、CBOAck 或 ReleaseAck | 按 opcode、source/sink 和请求记录生成 response |
 | E | DUT -> responder | DCache 对 Grant 完成 GrantAck | 按 DUT 采样到的 sink 完成对应 Grant 生命周期 |
+| L2 flush sideband | DUT `other_ctrl` -> responder / responder -> DUT | `io_outer_l2_flush_en` request level 与 `io_l2_flush_done` done level | DCache responder 同拍只读 request，flush DONE 时驱动 done |
 
 所有通道都遵守 TileLink `Decoupled` 语义：只有 `valid && ready` 才算请求或回复
 真正传输。`valid=1 && ready=0` 时，payload 必须保持稳定。
@@ -390,13 +391,19 @@ memory overlay 写回，但仍完成 Probe/Release 生命周期。该 D-error �
     `CBOAck`/`ReleaseAck` 的保留字段加入 source/地址关联。
 12. 错误字段：B `corrupt`、正常 D reply `denied/corrupt` 固定 0；C data response 的
     `corrupt` 仅阻止本地 memory overlay 写入，不阻止协议生命周期结束。
+13. 随机 Probe：`MEMBLOCK_L2_PROBE_EN=1` 时才按 batch 参数创建随机 `toB/toN`；同 batch line 不重复，
+    但 alias conflict 和 l2Flush 不受该随机开关阻断。
+14. L2 flush：DRAIN/PROBE 阶段 responder 以 A.ready=0 阻止新的 coherent A 接收，C/B/D/E 仍按既有 owner
+    收敛；全部 snapshot line 的 Probe(toN) 完成后才驱动 `io_l2_flush_done=1`，直到 request 撤销。
 ```
 
 当前轻量 responder 已将第 4、6、9 条落为共享 `probe_record_q` 与 `cached_line_by_addr`：每笔 B Probe
 保存稳定 `probe_alias/target_cap/token`；C reply 先按 physical line 唯一定位 record，`ProbeAckData` 第一拍
 锁定 token，第二拍不得切换到另一笔 Probe；不同 alias 的 Acquire 已 A.fire 后保存为 deferred request，先
-对旧 alias 发送 `Probe(toN)`，完成 C 生命周期后才建立新 Grant，并在 E GrantAck 后更新新 alias。该实现
-不等同于完整 L2 directory，multi-batch Probe、CBO Probe closure 与 l2Flush 仍由后续专项负责。
+对旧 alias 发送 `Probe(toN)`，完成 C 生命周期后才建立新 Grant，并在 E GrantAck 后更新新 alias。当前
+`probe_record_q` 已扩展记录随机 batch id，支持 1、2..6、7..15 条互不重复的 `Probe(toB/toN)`；同时实现
+轻量 `IDLE/DRAIN/PROBE/DONE` l2Flush snapshot，flush 固定以 `toN` 收敛已记录 ACTIVE line。该实现不等同于
+完整 L2 directory，CBO Probe closure 仍由后续专项负责。
 
 ## 9. 与测试框架的边界
 

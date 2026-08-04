@@ -104,7 +104,7 @@ Dispatch framework 参数分组如下：
 | directed flushSb/PTW replay | `MEMBLOCK_FLUSHSB_SEQ_EN`、`MEMBLOCK_FLUSHSB_REQUEST_CYCLE`、`MEMBLOCK_FLUSHSB_TIMEOUT`、`MEMBLOCK_REPLAY_WAIT_PTW_EN`、`MEMBLOCK_REPLAY_WAIT_PTW_TIMEOUT` |
 | DCache/Uncache responder 调度 | `MEMBLOCK_L2_RSP_DELAY_ZERO_WT`、`MEMBLOCK_L2_RSP_DELAY_SMALL_WT`、`MEMBLOCK_L2_RSP_DELAY_MEDIUM_WT`、`MEMBLOCK_L2_RSP_DELAY_LARGE_WT`、`MEMBLOCK_UNCACHE_RSP_DELAY_ZERO_WT`、`MEMBLOCK_UNCACHE_RSP_DELAY_SMALL_WT`、`MEMBLOCK_UNCACHE_RSP_DELAY_MEDIUM_WT`、`MEMBLOCK_UNCACHE_RSP_DELAY_LARGE_WT`、`MEMBLOCK_L2_RSP_REORDER_EN`、`MEMBLOCK_UNCACHE_RSP_REORDER_EN` |
 | DCache/Uncache D-error stimulus | `MEMBLOCK_L2_GRANTDATA_DENIED_WT`、`MEMBLOCK_L2_GRANTDATA_CORRUPT_WT`、`MEMBLOCK_L2_CBO_ACK_DENIED_WT`、`MEMBLOCK_L2_CBO_ACK_CORRUPT_WT`、`MEMBLOCK_UNCACHE_DENIED_WT`、`MEMBLOCK_UNCACHE_CORRUPT_WT` |
-| DCache Hint/Probe | `MEMBLOCK_L2_HINT_VALID_WT`、`MEMBLOCK_L2_PROBE_ENABLE_WT` |
+| DCache Hint/Probe | `MEMBLOCK_L2_HINT_VALID_WT`、`MEMBLOCK_L2_PROBE_EN`、`MEMBLOCK_L2_PROBE_PRE_START_WT`、`MEMBLOCK_L2_PROBE_COUNT_{ONE,MID,LARGE}_WT`、`MEMBLOCK_L2_PROBE_TO_B_WT` |
 | L2TLB/PTW responder sequence | `MEMBLOCK_L2TLB_SEQ_EN`、`MEMBLOCK_L2TLB_MAX_OUTSTANDING`、`MEMBLOCK_L2TLB_RESP_REORDER_EN`、`MEMBLOCK_L2TLB_RESP_MID_LATENCY`、`MEMBLOCK_L2TLB_RESP_LONG_LATENCY`、`MEMBLOCK_L2TLB_RESP_1C_WT`、`MEMBLOCK_L2TLB_RESP_MID_WT`、`MEMBLOCK_L2TLB_RESP_LONG_WT`、`MEMBLOCK_L2TLB_IDLE_STOP_CYCLE` |
 
 `seq_csr_common.sv` 是 sequence 使用的正式读取入口。它从 `plus.sv`
@@ -221,9 +221,13 @@ AccessAckData/AccessAck record 创建时采样并按 opcode 规范化。GrantDat
 命中强制 corrupt=1，无数据 AccessAck 的 corrupt 固定 0。它们不改变 delay、reorder、A/D 握手、
 主表或 terminal；getter 只读，非法范围在 `seq_csr_common::validate_and_clamp()` fail-fast。
 
-`MEMBLOCK_L2_HINT_VALID_WT` 和 `MEMBLOCK_L2_PROBE_ENABLE_WT` 仍是 `[0:100]` 的百分比权重，
-分别控制每个 `AcquireBlock -> GrantData` 是否产生一次 hint，以及每个合格空闲 service cycle 是否
-尝试发起一次 map-backed `Probe(toN)`。
+`MEMBLOCK_L2_HINT_VALID_WT` 保持 `[0:100]` 百分比权重，控制每个
+`AcquireBlock -> GrantData` 是否产生一次 hint。旧 `MEMBLOCK_L2_PROBE_ENABLE_WT` 已在
+2026-08-04 迁移删除：随机 Probe 现在由 `MEMBLOCK_L2_PROBE_EN` 总开关、
+`MEMBLOCK_L2_PROBE_PRE_START_WT` 的 `[0:10000]` 启动权重、ONE/MID/LARGE 三档数量权重和
+`MEMBLOCK_L2_PROBE_TO_B_WT` 的 `[0:10000]` target 权重共同控制。`seq_csr_common` 负责
+检查比例上限和数量权重非零。该随机参数不控制 DUT 已发起的 l2Flush 功能性 Probe(toN)，不能重新
+建立旧名字的兼容入口。
 
 `MEMBLOCK_L2TLB_SEQ_EN` 默认值为 1。启用后，
 `memblock_l2tlb_base_sequence` 从 L2TLB/PTW agent 采样 `vpn/s2xlate`

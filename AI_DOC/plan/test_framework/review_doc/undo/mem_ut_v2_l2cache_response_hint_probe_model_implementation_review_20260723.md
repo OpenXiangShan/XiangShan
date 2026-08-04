@@ -17,6 +17,10 @@
 > 已由 `mem_ut_dcache_uncache_response_delay_control_plan_20260730.md` 替换为 DCache/Uncache
 > 独立 response record、动态 sink、四档 delay 和可选乱序返回。本文继续保留为历史审计，当前行为
 > 以最新 flow、源码分析和后续专项 implementation review 为准。
+>
+> Probe/flush 参数迁移说明（2026-08-04）：本 review 中的 `MEMBLOCK_L2_PROBE_ENABLE_WT`、单笔
+> `Probe(toN)` 与 zero-only `io_l2_flush_done` 均是当时结论。现行实现已迁移到 batch/toB 参数并支持
+> 轻量 l2Flush；以 `mem_ut_dcache_multi_probe_tob_control_plan_20260730.md` 及其 implementation review 为准。
 
 ## 1. 术语与抽象功能说明
 
