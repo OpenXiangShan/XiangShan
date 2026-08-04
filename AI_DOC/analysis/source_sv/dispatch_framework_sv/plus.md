@@ -108,3 +108,22 @@ UVM cmdline processor 的参数来源。整数、bit 和 64-bit hex 再由 `load
 timer、ready record、D hold 或随机权重。两侧真实可接受的 in-flight 上限不是 plus：
 `MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING` 与 `MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING` 在
 `memblock_compile_params.svh` 固定为 `16`，由 responder 的容量检查直接读取。
+
+## 5. DCache/Uncache D-error 权重
+
+这组六个公共 runtime 参数只控制已接受 request 对应的合法 D response 错误位，不改变 memory
+backend、A-channel 准入、response delay 或主表状态。所有参数默认 `0`，合法范围均为 `[0:100]`；
+`plus.sv -> seq_csr_common::validate_and_clamp() -> getter` 是唯一读取链路。
+
+| 参数 | record 创建点 | 语义 |
+|---|---|---|
+| `MEMBLOCK_L2_GRANTDATA_DENIED_WT` | DCache `AcquireBlock -> GrantData` | denied 命中概率；命中时强制 corrupt=1。 |
+| `MEMBLOCK_L2_GRANTDATA_CORRUPT_WT` | DCache `AcquireBlock -> GrantData` | denied 未命中时的独立 corrupt 概率。 |
+| `MEMBLOCK_L2_CBO_ACK_DENIED_WT` | DCache CBO -> `CBOAck` | denied 概率，与 corrupt 独立。 |
+| `MEMBLOCK_L2_CBO_ACK_CORRUPT_WT` | DCache CBO -> `CBOAck` | corrupt 概率，与 denied 独立。 |
+| `MEMBLOCK_UNCACHE_DENIED_WT` | Uncache `Get/Put*` response record | `AccessAckData/AccessAck` 的 denied 概率。 |
+| `MEMBLOCK_UNCACHE_CORRUPT_WT` | Uncache `Get -> AccessAckData` | denied 未命中时的独立 corrupt 概率；无数据 AccessAck 不采样该参数。 |
+
+错误位只在 response record 创建时随机一次。随后 response scheduler、乱序选择和 D.ready hold 都
+复用保存的字段，不能重新随机。`AccessAckData` 的 denied 命中也强制 corrupt=1；`AccessAck`
+的 corrupt 恒为 0，backend 若向该无数据 response 交付 corrupt 则 fail-fast。

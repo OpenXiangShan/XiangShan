@@ -446,40 +446,6 @@ TODO：
 - 如果 DUT 通过已有独立 redirect 接口真实产生 redirect，继续由既有 redirect/replay owner 按真实事件处理，不能把该结果反推为由 fence agent 创建。
 - 只有未来验证对象扩展到包含 ROB/CtrlBlock/global redirect 的完整 core 环境时，才应在新的全核集成计划中验证 `flushAfter`；这不是当前 MemBlock V2 测试框架适配项。
 
-## 10. DCache/SBuffer `corrupt/denied` response 注入 TODO
-
-状态：当前不支持由主表或 directed 配置稳定控制 DCache/SBuffer TL response 的 `corrupt/denied`。
-
-当前本轮 V2 适配策略：
-
-- DCache/SBuffer agent 只按现有 interface/connect 字段边界适配，保持默认正常 response 行为。
-- 当前不新增 runtime flow，不让主表 transaction 直接控制 DCache/SBuffer D channel 的 `denied/corrupt`。
-- 当前不把 DCache/SBuffer `corrupt/denied` 接入 pass/fault、terminal、writeback 或 commit/deq 主状态判断。
-- `PBMT/permission` 不属于 DCache/SBuffer response 字段，后续仍归 TLB/L2TLB/PTW response 权限属性专项处理。
-
-接口事实边界：
-
-- DCache TL D channel 相关字段是 `auto_inner_dcache_client_out_d_bits_denied` 和 `auto_inner_dcache_client_out_d_bits_corrupt`。
-- SBuffer TL D channel 相关字段是 `auto_inner_buffers_out_d_bits_denied` 和 `auto_inner_buffers_out_d_bits_corrupt`。
-- DCache/SBuffer agent xaction、interface、driver/connect 中没有 `PBMT/permission` response 字段。
-- 历史主表字段中存在 `corrupt/denied`，但字段存在不代表当前 memory responder 已经按 uid 或主表稳定消费。
-
-为什么不在本轮实现：
-
-- DCache/SBuffer request 到主表 uid 的稳定反查来源尚未定义。若直接按主表 uid 驱动 response，可能把错误 response 打到错误 transaction 上。
-- 现有 memory responder 更适合按物理地址或地址范围注入错误属性；是否改成 uid 控制、地址范围控制或二者组合，需要单独设计。
-- `corrupt/denied` 会影响 load data、store memory update、writeback fault、commit/deq 和 terminal 收敛，不能只改 response 字段。
-
-后续 TODO：
-
-- 新建 DCache/SBuffer `corrupt/denied` response 注入专项 plan。
-- 先确认 DCache/SBuffer request 是否能从 active map、transaction source、LQ/SQ key 或 paddr 稳定反查到 uid。
-- 若 uid 反查稳定，定义主表 `corrupt/denied` 到 responder response 的字段链路和生命周期。
-- 若 uid 反查不稳定，优先建立 paddr/range 错误注入表，通过地址范围控制 `corrupt/denied`，避免错误归属不确定。
-- 定义 `corrupt/denied` 对 load writeback、store/sbuffer completion、异常写回、commit/deq、redirect/replay 和 terminal 的影响。
-- 定义默认关闭策略、directed testcase 入口、debug dump 和 fail-fast 条件。
-- 不在该 TODO 中实现 RM/scoreboard 正确性比较；若后续需要判断 DUT 对错误 response 的处理正确性，应另建 RM/checker/coverage 专项。
-
 ## 11. V2 MMIO load/store directed 与 `pendingMMIOld` 建模 TODO
 
 状态：已有专项 execution plan 承接 ROB mmio 状态表标签与 `pendingMMIOld` 支持，路径为 `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md`。该专项已完成并归档；当前 TODO 继续记录完整 MMIO directed、地址属性、store MMIO 后续 RM/checker 边界。DUT `loadMmio/loadMmioUop.robIdx_value` 和 `storeMmio/storeMmioUop.robIdx_value` monitor 回填已落地，不再作为待确认项。
@@ -956,7 +922,7 @@ scalar store 的 `hasException=1` 不是单独的出队条件，必须保留以�
   lsq_commit_handler` owner 上，不建立第二套 fault 状态机。
 - vector LS、AMO/MOU、HLV/HLVX/HSV、CBO（尤其 early CBO fault）和完整 atomic/segment fault
   生命周期继续保持 TODO/运行期 fatal。
-- DCache/SBuffer `corrupt/denied` response 注入仍遵守第 10 节；只有真实 response 进入 DUT 并
-  产生可观察完成/异常事件时，scalar fault drain 才能消费，测试框架本轮不新增 response 注入。
+- DCache/SBuffer D-error response 已由专项 responder 实现，但 scalar fault drain 仍只消费 DUT
+  真实可观察的完成/异常事件；该能力不把 error bit 直接写入 fault、commit/deq 或 terminal 状态。
 - 本节不修改 RM、scoreboard、coverage 或 DUT RTL；后续专项必须在完成真实完成/取消事件链路并
   通过 review 后，才能从对应 admission fatal 边界移除。

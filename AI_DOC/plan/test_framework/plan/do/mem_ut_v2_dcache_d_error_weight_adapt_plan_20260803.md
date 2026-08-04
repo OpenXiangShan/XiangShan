@@ -2,23 +2,23 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，仅完成方案设计，尚未 coding |
+| 状态 | 已完成 coding 与 implementation review，已归档到 `plan/do` |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
-| 测试框架入口 | DCache：`dcache_mem__access_base_sequence::accept_dcache_a_request()`；Uncache：`sbuffer_mem_access_base_sequence::sbuffer_mem_access_xaction()` |
+| 测试框架入口 | DCache：`dcache_mem__access_base_sequence::accept_dcache_a_request()`；Uncache：`sbuffer_mem_access_base_sequence::create_uncache_response_record()` |
 | 主要修改文件 | `env/plus.sv`、`seq/base_seq_help/seq_csr_common.sv`、`seq/base_seq_help/mem_base_sequence.sv` |
 | 创建日期 | 2026-08-03 |
-| 方案原则 | 只在既有 pending D 回复建立时一次采样并保存错误字段；不建立 L2 directory、下游错误原因模型、RM 或 scoreboard。 |
+| 方案原则 | 只在既有 response record 创建时一次采样并保存错误字段；不建立 L2 directory、下游错误原因模型、RM 或 scoreboard。 |
 
 ## 1. 术语与抽象功能说明
 
 | 术语 | 中文含义 | 代码对象或状态落点 | 典型场景 |
 |---|---|---|---|
-| `D error injection` | 测试框架在合法 D response 中可控地驱动 `denied/corrupt`，用于触发 MemBlock 自身错误消费路径 | DCache 的 `pending_d_denied/pending_d_corrupt` 或 Uncache 的 `rsp_xact` | A `AcquireBlock` 或 Uncache `Get` 已接受后建立带错误回复 |
-| `pending D` | 已接受 A/C request、尚未完成 D handshake 的唯一回复快照 | `pending_d_*` | 两拍 `GrantData` 在 D backpressure 时保持相同错误字段 |
-| `GrantData denied` | L2 拒绝该次数据获取 | `pending_d_denied=1` | 必须同时使 `pending_d_corrupt=1` |
-| `GrantData corrupt` | 返回数据不可用，但请求未被拒绝 | `pending_d_denied=0`、`pending_d_corrupt=1` | 数据完整性错误激励 |
-| `CBOAck error` | CBO 完成回复携带的拒绝或完整性错误 | `pending_d_kind=DCACHE_PENDING_D_CBO_ACK` | CMOUnit 把错误回传 LSQ，但仍完成 CBO FSM |
+| `D error injection` | 测试框架在合法 D response 中可控地驱动 `denied/corrupt`，用于触发 MemBlock 自身错误消费路径 | DCache/Uncache response record 的 `denied/corrupt` | A `AcquireBlock` 或 Uncache `Get` 已接受后建立带错误回复 |
+| `response record` | 已接受 request、尚未完成最后一个 D handshake 的唯一回复快照 | `dcache_response_record_t`、`uncache_response_record_t` | 两拍 `GrantData` 在 D backpressure 时保持相同错误字段 |
+| `GrantData denied` | L2 拒绝该次数据获取 | `dcache_response_record_t::denied=1` | 必须同时使同一 record 的 `corrupt=1` |
+| `GrantData corrupt` | 返回数据不可用，但请求未被拒绝 | `dcache_response_record_t::denied=0/corrupt=1` | 数据完整性错误激励 |
+| `CBOAck error` | CBO 完成回复携带的拒绝或完整性错误 | `dcache_response_record_t::kind=DCACHE_PENDING_D_CBO_ACK` | CMOUnit 把错误回传 LSQ，但仍完成 CBO FSM |
 | `Uncache port` | MemBlock 到外部 TL-UL manager 的独立端口；历史 agent 名称为 `sbuffer_agent` | `auto_inner_buffers_out_a_*` / `auto_inner_buffers_out_d_*`、`sbuffer_mem_access_base_sequence` | MMIO/NC load 发 `Get`，收到 `AccessAckData` |
 | `AccessAckData error` | Uncache data reply 的拒绝或数据错误 | `auto_inner_buffers_out_d_bits_denied/corrupt` | `Get` 回复前按 Uncache 权重一次采样；denied 命中时 corrupt 必须为 1 |
 | `AccessAck error` | Uncache store reply 的拒绝状态 | `auto_inner_buffers_out_d_bits_denied` | `Put*` 回复；无数据 response 的 corrupt 必须为 0 |
@@ -26,10 +26,11 @@
 
 ## 2. 当前问题、目标与边界
 
-当前轻量 DCache responder 的 `pending_d_denied` 和 `pending_d_corrupt` 始终保持 0。因此
-MemBlock 的 `GrantData` error 累积路径、CMOUnit 对 `CBOAck` error 的传递路径无法由当前
-responder 定向触发。Uncache sequence 虽会从 `main_mem_access_task()` 获得后端错误位，但没有
-独立、可控的 runtime error-injection 入口，也不能复用 DCache 的 `pending_d_*` 状态。
+执行前，轻量 DCache responder 的 D error 字段始终保持 0，因此 MemBlock 的 `GrantData` error
+累积路径和 CMOUnit 对 `CBOAck` error 的传递路径无法由 responder 定向触发。当前实现已在 DCache
+response record 建立时固定错误位。Uncache sequence 虽会从 memory access 获得后端错误位，但此前
+没有独立、可控的 runtime error-injection 入口；当前由其自己的 response record 创建点处理，不能复用
+DCache record 状态。
 
 本 plan 的目标：
 
@@ -158,22 +159,22 @@ sample_d_error_enable(weight, error_name)：
 文字伪代码：
 
 ```text
-建立 AcquireBlock 的 pending GrantData：
-  pending_d_denied = sample_d_error_enable(GRANTDATA_DENIED_WT, "GrantData denied")；
+建立 AcquireBlock 的 GrantData response record：
+  response_record.denied = sample_d_error_enable(GRANTDATA_DENIED_WT, "GrantData denied")；
 
-  如果 pending_d_denied == 1：
-    pending_d_corrupt = 1；
+  如果 response_record.denied == 1：
+    response_record.corrupt = 1；
   否则：
-    pending_d_corrupt = sample_d_error_enable(
+    response_record.corrupt = sample_d_error_enable(
       GRANTDATA_CORRUPT_WT,
       "GrantData corrupt"
     )；
 
   继续执行既有 data line snapshot、source/sink、cap、isKeyword 和 hint 排期；
-  建立 pending_d_valid；
+  将 record 入 response queue；
 
 发送两个 GrantData beat：
-  两拍均复用 pending_d_denied/pending_d_corrupt；
+  两拍均复用 response_record.denied/response_record.corrupt；
   D.ready=0 时不调用采样 helper，也不更新错误字段；
 ```
 
@@ -190,9 +191,9 @@ sample_d_error_enable(weight, error_name)：
 文字伪代码：
 
 ```text
-建立 CBOAck pending D：
-  pending_d_denied = sample_d_error_enable(CBO_ACK_DENIED_WT, "CBOAck denied")；
-  pending_d_corrupt = sample_d_error_enable(CBO_ACK_CORRUPT_WT, "CBOAck corrupt")；
+建立 CBOAck response record：
+  response_record.denied = sample_d_error_enable(CBO_ACK_DENIED_WT, "CBOAck denied")；
+  response_record.corrupt = sample_d_error_enable(CBO_ACK_CORRUPT_WT, "CBOAck corrupt")；
 
   保存原 CBO source、size、opcode、line；
   发送单拍 CBOAck；
@@ -204,21 +205,21 @@ sample_d_error_enable(weight, error_name)：
 
 ### 4.5 保持既有 DCache builder 与生命周期
 
-`build_pending_d_xaction()` 已统一从 `pending_d_denied/pending_d_corrupt` 驱动 D fields，
+`build_current_d_xaction()` 已统一从 `current_d_record.denied/corrupt` 驱动 D fields，
 因此不新增 driver、interface、transaction 字段或 second response builder。需要确保：
 
 ```text
-clear_pending_d_state()：继续清两字段为 0；
+clear_runtime_state()：继续清 response queue 与 current record 的两字段为 0；
 AcquirePerm Grant：继续保持两字段为 0；
 ReleaseAck：继续保持两字段为 0；
-process_d_fire()：不按错误位提前清 pending，不跳过 GrantAck owner，不改变 CBOAck 完成时机；
+process_d_fire()：不按错误位提前释放 current record，不跳过 GrantAck owner，不改变 CBOAck 完成时机；
 ```
 
 ### 4.6 Uncache D error 分流、采样和格式归一化
 
-修改位置：`sbuffer_mem_access_base_sequence::sbuffer_mem_access_xaction()` 新增对
+修改位置：`sbuffer_mem_access_base_sequence::create_uncache_response_record()` 新增对
 `apply_uncache_d_error_injection()` 的一次调用；该 helper 与公共 `sample_d_error_enable()` 均声明在
-`mem_access_base_sequence`。不修改 `dcache_mem__access_base_sequence` 的 pending D 状态，也不通过
+`mem_access_base_sequence`。不修改 `dcache_mem__access_base_sequence` 的 response-record 状态，也不通过
 `source` 数值在两个端口之间反查或转发 response。
 
 本 plan 与 `mem_ut_dcache_uncache_response_delay_control_plan_20260730.md` 的职责边界固定为：
@@ -236,10 +237,8 @@ Uncache response-delay plan：
   本 plan 再只为该已确定 response kind 建立错误字段。
 ```
 
-实施顺序约束：在当前直接回复实现中，唯一调用点是 `sbuffer_mem_access_xaction()` 创建 `rsp_xact`
-之后、首次 `send_sbuffer_xaction()` 之前；若 response-delay plan 已将该路径重构为 response record，
-调用点随之迁移到 `create_uncache_response_record()` 创建 record 时。两种实现形态只能保留一个调用点；
-不得在 record 创建时采样后，又在 driver 从 record 取出 D payload 时再次采样。
+当前 response-delay plan 已将 Uncache 路径重构为 response record，唯一调用点固定为
+`create_uncache_response_record()` 创建 record 时。不得在 driver 从 record 取出 D payload 时再次采样。
 
 抽象功能描述：`apply_uncache_d_error_injection()` 在已接受的 Uncache A request 完成既有 memory
 access 后，给将要建立的单个 `AccessAckData` 或 `AccessAck` xaction 采样 error bit，并按 D opcode
@@ -251,10 +250,10 @@ access 后，给将要建立的单个 `AccessAckData` 或 `AccessAck` xaction �
 
 ```text
 dcache_agent / auto_inner_dcache_client_out_*：
-  DCache A/D/E responder；只使用 existing pending_d_* 和四个 MEMBLOCK_L2_*_WT；
+  DCache A/D/E responder；只使用 existing response record 和四个 MEMBLOCK_L2_*_WT；
 
 sbuffer_agent / auto_inner_buffers_out_*：
-  Uncache TL-UL responder；只使用 sbuffer_mem_access_xaction() 和两个 MEMBLOCK_UNCACHE_*_WT；
+  Uncache TL-UL responder；只使用 create_uncache_response_record() 和两个 MEMBLOCK_UNCACHE_*_WT；
 
 禁止：根据 source、地址、D opcode 或 is_store 把一条已经属于 Uncache 端口的 transaction
       送到 DCache pending D builder，或反向送回 Uncache sequence。
@@ -341,3 +340,37 @@ coding 时同步更新：
 
 本 plan 不修改 `AI_DOC/mem_ut_flow_doc`；只有完成 coding、形成稳定调用链后才按实际代码刷新对应
 DCache/Uncache responder flow 文档。
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+`[IMPLEMENTATION_DELTA]`
+
+- 来源：`mem_ut_dcache_uncache_response_delay_control_plan_20260730.md` 已先完成，DCache/Uncache
+  responder 已由单一 `pending_d_*` 迁移为 response record queue。
+- 原 plan：多个章节仍以 `pending_d_*` 和 `sbuffer_mem_access_xaction()` 描述 error snapshot 的落点。
+- 实现调整：DCache 在 `accept_dcache_a_request()` 创建 `dcache_response_record_t` 时固定错误位；Uncache
+  在 `create_uncache_response_record()` 创建 `uncache_response_record_t` 时调用归一化 helper。两者后续由
+  scheduler、`current_d_record` 和 D hold 只读搬运，绝不在 response 选择或 D.ready 等待期间重采样。
+- 原因：使 error 注入与已经落地的 response queue 唯一 owner 对齐，避免把旧 pending 模型重新引回代码。
+- 影响范围：只改变错误位写入时点的内部存储对象；A/D 握手、response delay、乱序选择、GrantAck、主表、
+  LSQ、terminal 和已有 memory backend 生命周期保持不变。
+
+- 来源：coding 已形成稳定调用链，需要按执行规则刷新实际 flow 文档。
+- 原 plan：第 6 节仅要求同步 interface、历史 plan 和参数文档，flow 文档等待 coding 完成后再刷新。
+- 实现调整：已同步 `dcache_l2_response_hint_probe_model_flow.md` 与
+  `dcache_sbuffer_memory_responder_flow.md`，明确 D-error snapshot 只在 record 创建时产生，以及
+  DCache/Uncache 的 opcode 合法组合。
+- 原因：避免有效 flow 文档仍把已落地的 D-error 误写成 future TODO。
+- 影响范围：仅更新文档；源码所有权、主框架控制行为和专项边界不变。
+
+## 实施完成记录
+
+- 代码：`env/plus.sv`、`seq_csr_common.sv`、`mem_base_sequence.sv` 已实现六个默认关闭的 runtime
+  权重、一次随机 helper 和 DCache/Uncache response-record 级别的错误字段保存。
+- 文档：interface、两个 responder flow、源码分析、参数管理、历史 DCache plan 和 TODO 已按实际实现同步。
+- 基础验证：2026-08-04 执行
+  `make eda_run tc=basicTest ts=memblock_dispatch_real_smoke_vseq cfg=tc_dispatch_real_l2cache_model mode=dcache_d_error_verify_20260804 partcmp_op=off`，
+  日志为 `TEST_PASS`，`UVM_ERROR=0`、`UVM_FATAL=0`。默认全部权重为 0，保持既有 smoke 行为；
+  又执行 `make eda_run tc=basicTest ts=virtual_base_sequence cfg=default mode=dcache_d_error_cfg_verify_20260804`
+  并把六个权重都覆盖为 100，日志同为 `TEST_PASS`、`UVM_ERROR=0`、`UVM_FATAL=0`，确认 runtime
+  plus 覆盖和范围校验不会破坏基础启动。非零 error directed 的 DUT 异常结果判定仍不属于本 responder 专项。

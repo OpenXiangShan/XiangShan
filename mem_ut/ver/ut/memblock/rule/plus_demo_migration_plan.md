@@ -102,7 +102,9 @@ Dispatch framework 参数分组如下：
 | lsqcommit pendingPtr sequence | `MEMBLOCK_LSQCOMMIT_SEQ_EN` |
 | redirect/recovery sequence | `MEMBLOCK_REDIRECT_SEQ_EN`、`MEMBLOCK_REDIRECT_DRIVE_TIMEOUT`、`MEMBLOCK_REDIRECT_FREEZE_TIMEOUT` |
 | directed flushSb/PTW replay | `MEMBLOCK_FLUSHSB_SEQ_EN`、`MEMBLOCK_FLUSHSB_REQUEST_CYCLE`、`MEMBLOCK_FLUSHSB_TIMEOUT`、`MEMBLOCK_REPLAY_WAIT_PTW_EN`、`MEMBLOCK_REPLAY_WAIT_PTW_TIMEOUT` |
-| DCache 轻量 L2 responder | `MEMBLOCK_L2_RSP_DELAY_SMALL_WT`、`MEMBLOCK_L2_RSP_DELAY_MEDIUM_WT`、`MEMBLOCK_L2_RSP_DELAY_LARGE_WT`、`MEMBLOCK_L2_HINT_VALID_WT`、`MEMBLOCK_L2_PROBE_ENABLE_WT` |
+| DCache/Uncache responder 调度 | `MEMBLOCK_L2_RSP_DELAY_ZERO_WT`、`MEMBLOCK_L2_RSP_DELAY_SMALL_WT`、`MEMBLOCK_L2_RSP_DELAY_MEDIUM_WT`、`MEMBLOCK_L2_RSP_DELAY_LARGE_WT`、`MEMBLOCK_UNCACHE_RSP_DELAY_ZERO_WT`、`MEMBLOCK_UNCACHE_RSP_DELAY_SMALL_WT`、`MEMBLOCK_UNCACHE_RSP_DELAY_MEDIUM_WT`、`MEMBLOCK_UNCACHE_RSP_DELAY_LARGE_WT`、`MEMBLOCK_L2_RSP_REORDER_EN`、`MEMBLOCK_UNCACHE_RSP_REORDER_EN` |
+| DCache/Uncache D-error stimulus | `MEMBLOCK_L2_GRANTDATA_DENIED_WT`、`MEMBLOCK_L2_GRANTDATA_CORRUPT_WT`、`MEMBLOCK_L2_CBO_ACK_DENIED_WT`、`MEMBLOCK_L2_CBO_ACK_CORRUPT_WT`、`MEMBLOCK_UNCACHE_DENIED_WT`、`MEMBLOCK_UNCACHE_CORRUPT_WT` |
+| DCache Hint/Probe | `MEMBLOCK_L2_HINT_VALID_WT`、`MEMBLOCK_L2_PROBE_ENABLE_WT` |
 | L2TLB/PTW responder sequence | `MEMBLOCK_L2TLB_SEQ_EN`、`MEMBLOCK_L2TLB_MAX_OUTSTANDING`、`MEMBLOCK_L2TLB_RESP_REORDER_EN`、`MEMBLOCK_L2TLB_RESP_MID_LATENCY`、`MEMBLOCK_L2TLB_RESP_LONG_LATENCY`、`MEMBLOCK_L2TLB_RESP_1C_WT`、`MEMBLOCK_L2TLB_RESP_MID_WT`、`MEMBLOCK_L2TLB_RESP_LONG_WT`、`MEMBLOCK_L2TLB_IDLE_STOP_CYCLE` |
 
 `seq_csr_common.sv` 是 sequence 使用的正式读取入口。它从 `plus.sv`
@@ -204,16 +206,24 @@ dispatch service-cycle warning；timeout 到达只 warning，不退出 sequence�
 重新入队，不模拟 MemBlock 内部 `LoadQueueReplay`，也不把 `flush_state` 单独解释成
 replay 条件。
 
-`MEMBLOCK_L2_RSP_DELAY_SMALL_WT`、`MEMBLOCK_L2_RSP_DELAY_MEDIUM_WT` 和
-`MEMBLOCK_L2_RSP_DELAY_LARGE_WT` 是 DCache 轻量 L2 responder 的三档首拍 D response
-delay 权重。它们只控制 small=`3..5`、medium=`6..15`、large=`16..50` 三个固定区间的类别选择，
-三项都必须非负且不能全 0。`MEMBLOCK_L2_HINT_VALID_WT` 和
-`MEMBLOCK_L2_PROBE_ENABLE_WT` 是 `[0:100]` 的百分比权重，分别控制每个
-`AcquireBlock -> GrantData` 是否产生一次 hint，以及每个合格空闲 service cycle
-是否尝试发起一次 map-backed `Probe(toN)`。这五个参数统一走
-`env/plus.sv -> seq_csr_common -> getter -> dcache_mem__access_base_sequence`；
-getter 只读，非法负值、全零 delay 组合和大于 100 的百分比权重都在
-`seq_csr_common::validate_and_clamp()` 中 fail-fast，不做静默 clamp。
+`MEMBLOCK_L2_RSP_DELAY_ZERO/SMALL/MEDIUM/LARGE_WT` 与对应
+`MEMBLOCK_UNCACHE_RSP_DELAY_*_WT` 分别控制 DCache 和 Uncache response record 的四档额外返回
+延迟：`0`、`1..10`、`10..100`、`101..1000` cycle。每一通道四档都必须非负且不能全 0；
+`MEMBLOCK_L2_RSP_REORDER_EN` 与 `MEMBLOCK_UNCACHE_RSP_REORDER_EN` 只决定本通道 ready record
+的顺序/乱序选择。它们统一走 `env/plus.sv -> seq_csr_common -> getter -> responder scheduler`，
+不改变请求 handshake 或物理 outstanding 上限。
+
+`MEMBLOCK_L2_GRANTDATA_DENIED_WT`、`MEMBLOCK_L2_GRANTDATA_CORRUPT_WT`、
+`MEMBLOCK_L2_CBO_ACK_DENIED_WT`、`MEMBLOCK_L2_CBO_ACK_CORRUPT_WT`、
+`MEMBLOCK_UNCACHE_DENIED_WT` 和 `MEMBLOCK_UNCACHE_CORRUPT_WT` 是 `[0:100]` 的 D-error
+百分比权重，默认均为 0。DCache 在 GrantData/CBOAck record 创建时采样；Uncache 在
+AccessAckData/AccessAck record 创建时采样并按 opcode 规范化。GrantData/AccessAckData 的 denied
+命中强制 corrupt=1，无数据 AccessAck 的 corrupt 固定 0。它们不改变 delay、reorder、A/D 握手、
+主表或 terminal；getter 只读，非法范围在 `seq_csr_common::validate_and_clamp()` fail-fast。
+
+`MEMBLOCK_L2_HINT_VALID_WT` 和 `MEMBLOCK_L2_PROBE_ENABLE_WT` 仍是 `[0:100]` 的百分比权重，
+分别控制每个 `AcquireBlock -> GrantData` 是否产生一次 hint，以及每个合格空闲 service cycle 是否
+尝试发起一次 map-backed `Probe(toN)`。
 
 `MEMBLOCK_L2TLB_SEQ_EN` 默认值为 1。启用后，
 `memblock_l2tlb_base_sequence` 从 L2TLB/PTW agent 采样 `vpn/s2xlate`

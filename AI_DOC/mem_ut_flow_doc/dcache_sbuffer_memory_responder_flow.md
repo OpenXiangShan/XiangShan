@@ -13,6 +13,7 @@ memory backend，但不共享协议 queue、timer、D hold、source、sink 或�
 | `response record` | 已 A/C fire、等待 D 返回的协议回复 | `dcache_rsp_q` / `uncache_rsp_q` | 两通道各自独立维护 |
 | `eligible_cycle` | record 最早可被本通道 scheduler 选择的 service cycle | 两种 response record | 防止新入队 record 当拍返回 |
 | `D hold` | 已选择但尚未 D.fire 的唯一 D payload | `current_d_record/current_d_valid` | D.ready=0 时 payload 不变 |
+| `D-error snapshot` | 当前 Uncache D reply 的 `denied/corrupt` 固定值 | `uncache_response_record_t::denied/corrupt` | response record 创建时合并 backend/error weight；后续 scheduler 与 D hold 只读 |
 | `admission` | 从真实 request fire 到允许进入返回仲裁的固定边界 | DCache `+3`，Uncache `+1` | 不是 `pre_pkt_gap/post_pkt_gap` |
 | `scheduler timer` | 每个通道每轮返回前独立抽样的额外延迟计时器 | `*_rsp_timer_*` | 到期后才选 record |
 | `ordered/reorder` | record 的返回选择模式 | `*_RSP_REORDER_EN` | 两通道分别配置 |
@@ -130,9 +131,10 @@ LOAD_DATA：从当前 committed merged view 读取 64-bit data，record 记录 A
 record.eligible_cycle = accept_cycle + 1；入 uncache_rsp_q。
 ```
 
-当前专项保留 backend 返回的 load `corrupt`，store `AccessAck.corrupt` 固定为 0。D response
-denied/corrupt 注入和协议归一化由独立 D-error plan 在此唯一 record 创建点补齐，不能在 scheduler 或
-D hold 中重新随机。
+在 record 创建点，`apply_uncache_d_error_injection()` 把 backend 结果与
+`MEMBLOCK_UNCACHE_DENIED_WT/CORRUPT_WT` 的一次采样合并。`Get -> AccessAckData` 的 denied
+命中强制 corrupt=1；`Put* -> AccessAck` 只允许 denied，corrupt 固定为 0；backend 给无数据
+AccessAck 的 corrupt=1 会 fail-fast。scheduler 或 D hold 不得再次随机、访问 memory 或改写该快照。
 
 ### 5.3 `service_uncache_response_scheduler()` 与 D hold
 
@@ -174,5 +176,6 @@ D hold。DCache 还必须等待 GrantAck、Hint、Probe/C assembly 收敛；Unca
 - Uncache 新增 V2 opcode 白名单、16 笔容量和长 D.ready hold warning；
 - shared memory 的 backing/overlay、byte mask、write batch 以及 DCache/Uncache 同拍写入顺序保持原
   有公共后端语义；
-- 本 flow 不实现多 Probe/toB、alias、CBO closure、D error injection 或完整 L2 flush。这些功能必须由
-  相应专项 plan 在现有 response pipeline 上扩展，而不能恢复旧的单 pending 状态机。
+- 本 flow 已实现 D-error response snapshot，但它只驱动合法 Uncache D 字段，不接入主表、LSQ、
+  pass/fail 或 terminal。多 Probe/toB、alias、CBO closure 和完整 L2 flush 仍必须由相应专项 plan
+  在现有 response pipeline 上扩展，不能恢复旧的单 pending 状态机。

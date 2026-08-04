@@ -164,9 +164,11 @@ Get -> LOAD_DATA -> AccessAckData；
 record.eligible_cycle = accept_cycle + 1；入 uncache_rsp_q；
 ```
 
-`MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING=16` 是 compile-time record 容量。store `AccessAck.corrupt`
-固定为 0；load 当前保留 backend `corrupt`。denied/corrupt 注入和规范化由 D-error 专项后续只在
-record 创建点接入。
+`MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING=16` 是 compile-time record 容量。当前 D-error 实现只在
+record 创建点调用 `apply_uncache_d_error_injection()`：`Get -> AccessAckData` 将 backend error 与
+`MEMBLOCK_UNCACHE_DENIED_WT/CORRUPT_WT` 一次采样合并，denied 命中强制 corrupt=1；
+`Put* -> AccessAck` 只允许 denied，corrupt 固定为 0。scheduler、D hold 和重排都只搬运 record
+快照，不能再次随机。
 
 ### 4.2 `sample_uncache_response_delay()` 与 `service_uncache_response_scheduler()`
 

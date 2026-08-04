@@ -116,6 +116,12 @@ runtime资源收敛：
 - `MEMBLOCK_L2_RSP_DELAY_*_WT`、`MEMBLOCK_UNCACHE_RSP_DELAY_*_WT` 与两个 `*_RSP_REORDER_EN`
   只表示 responder 的运行期延迟分布和返回选择策略，统一通过 `plus.sv -> seq_csr_common -> getter` 读取；
   DCache/Uncache 各自四档权重不得全零。它们不改变 A-channel 准入、D.ready backpressure 或 DUT 实际请求数。
+- `MEMBLOCK_L2_GRANTDATA_DENIED_WT`、`MEMBLOCK_L2_GRANTDATA_CORRUPT_WT`、
+  `MEMBLOCK_L2_CBO_ACK_DENIED_WT`、`MEMBLOCK_L2_CBO_ACK_CORRUPT_WT`、
+  `MEMBLOCK_UNCACHE_DENIED_WT` 和 `MEMBLOCK_UNCACHE_CORRUPT_WT` 是 DCache/Uncache responder 的
+  公共 runtime D-error 权重，合法范围均为 `[0:100]`、默认均为 0。它们只在对应 response record
+  创建时通过 getter 采样一次，不进入主表、LSQ、commit/deq、pass/fail 或 terminal 判断；非法范围由
+  `seq_csr_common::validate_and_clamp()` fail-fast。
 - `MEMBLOCK_DUT_DCACHE_A_MAX_OUTSTANDING`、`MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING` 是 V2 memory
   responder 的物理 in-flight 上限，只能定义在 `memblock_compile_params.svh` 并经
   `memblock_dispatch_types.sv` 导出 typed localparam；不得新增同名 plus 或 testcase cfg 覆盖。

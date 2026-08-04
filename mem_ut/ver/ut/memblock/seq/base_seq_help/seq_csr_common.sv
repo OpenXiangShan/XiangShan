@@ -206,6 +206,15 @@ class seq_csr_common;
     static int unsigned uncache_rsp_delay_large_wt = 0;
     static bit          l2_rsp_reorder_en = 1'b0;
     static bit          uncache_rsp_reorder_en = 1'b0;
+    // 中文注释：DCache/Uncache D-channel 错误注入的百分比权重。
+    // 设置：plus 读取后由 validate_and_clamp() 校验为 0..100；读取：response record 创建时一次采样。
+    // 作用：只决定该 record 的 denied/corrupt 字段，不改变 A handshake、scheduler、D hold 或 terminal。
+    static int unsigned l2_grantdata_denied_wt = 0;
+    static int unsigned l2_grantdata_corrupt_wt = 0;
+    static int unsigned l2_cbo_ack_denied_wt = 0;
+    static int unsigned l2_cbo_ack_corrupt_wt = 0;
+    static int unsigned uncache_denied_wt = 0;
+    static int unsigned uncache_corrupt_wt = 0;
     // 中文注释：每个 AcquireBlock 产生 hint、每个合格空闲周期尝试 Probe 的百分比权重。
     // 0 表示关闭，100 表示每次都命中；sequence 只读 getter，不在 getter 内修改状态。
     static int unsigned l2_hint_valid_wt = 0;
@@ -426,6 +435,12 @@ class seq_csr_common;
         uncache_rsp_delay_large_wt  = get_non_negative_int("MEMBLOCK_UNCACHE_RSP_DELAY_LARGE_WT", plus::MEMBLOCK_UNCACHE_RSP_DELAY_LARGE_WT);
         l2_rsp_reorder_en           = plus::MEMBLOCK_L2_RSP_REORDER_EN;
         uncache_rsp_reorder_en      = plus::MEMBLOCK_UNCACHE_RSP_REORDER_EN;
+        l2_grantdata_denied_wt      = get_non_negative_int("MEMBLOCK_L2_GRANTDATA_DENIED_WT", plus::MEMBLOCK_L2_GRANTDATA_DENIED_WT);
+        l2_grantdata_corrupt_wt     = get_non_negative_int("MEMBLOCK_L2_GRANTDATA_CORRUPT_WT", plus::MEMBLOCK_L2_GRANTDATA_CORRUPT_WT);
+        l2_cbo_ack_denied_wt        = get_non_negative_int("MEMBLOCK_L2_CBO_ACK_DENIED_WT", plus::MEMBLOCK_L2_CBO_ACK_DENIED_WT);
+        l2_cbo_ack_corrupt_wt       = get_non_negative_int("MEMBLOCK_L2_CBO_ACK_CORRUPT_WT", plus::MEMBLOCK_L2_CBO_ACK_CORRUPT_WT);
+        uncache_denied_wt           = get_non_negative_int("MEMBLOCK_UNCACHE_DENIED_WT", plus::MEMBLOCK_UNCACHE_DENIED_WT);
+        uncache_corrupt_wt          = get_non_negative_int("MEMBLOCK_UNCACHE_CORRUPT_WT", plus::MEMBLOCK_UNCACHE_CORRUPT_WT);
         l2_hint_valid_wt            = get_non_negative_int("MEMBLOCK_L2_HINT_VALID_WT", plus::MEMBLOCK_L2_HINT_VALID_WT);
         l2_probe_enable_wt          = get_non_negative_int("MEMBLOCK_L2_PROBE_ENABLE_WT", plus::MEMBLOCK_L2_PROBE_ENABLE_WT);
         l2tlb_seq_en                = plus::MEMBLOCK_L2TLB_SEQ_EN;
@@ -536,6 +551,18 @@ class seq_csr_common;
                            uncache_rsp_delay_small_wt,
                            uncache_rsp_delay_medium_wt,
                            uncache_rsp_delay_large_wt);
+        if (l2_grantdata_denied_wt > 100 || l2_grantdata_corrupt_wt > 100 ||
+            l2_cbo_ack_denied_wt > 100 || l2_cbo_ack_corrupt_wt > 100 ||
+            uncache_denied_wt > 100 || uncache_corrupt_wt > 100) begin
+            `uvm_fatal("SEQ_CSR_CFG",
+                       $sformatf("D response error weights must be within [0:100]: grantData=%0d/%0d cboAck=%0d/%0d uncache=%0d/%0d",
+                                 l2_grantdata_denied_wt,
+                                 l2_grantdata_corrupt_wt,
+                                 l2_cbo_ack_denied_wt,
+                                 l2_cbo_ack_corrupt_wt,
+                                 uncache_denied_wt,
+                                 uncache_corrupt_wt))
+        end
         if (l2_hint_valid_wt > 100) begin
             `uvm_fatal("SEQ_CSR_CFG",
                        $sformatf("MEMBLOCK_L2_HINT_VALID_WT=%0d must be within [0:100]", l2_hint_valid_wt))
@@ -1587,6 +1614,36 @@ class seq_csr_common;
         check_initialized("get_uncache_rsp_reorder_en");
         return uncache_rsp_reorder_en;
     endfunction:get_uncache_rsp_reorder_en
+
+    static function int unsigned get_l2_grantdata_denied_wt();
+        check_initialized("get_l2_grantdata_denied_wt");
+        return l2_grantdata_denied_wt;
+    endfunction:get_l2_grantdata_denied_wt
+
+    static function int unsigned get_l2_grantdata_corrupt_wt();
+        check_initialized("get_l2_grantdata_corrupt_wt");
+        return l2_grantdata_corrupt_wt;
+    endfunction:get_l2_grantdata_corrupt_wt
+
+    static function int unsigned get_l2_cbo_ack_denied_wt();
+        check_initialized("get_l2_cbo_ack_denied_wt");
+        return l2_cbo_ack_denied_wt;
+    endfunction:get_l2_cbo_ack_denied_wt
+
+    static function int unsigned get_l2_cbo_ack_corrupt_wt();
+        check_initialized("get_l2_cbo_ack_corrupt_wt");
+        return l2_cbo_ack_corrupt_wt;
+    endfunction:get_l2_cbo_ack_corrupt_wt
+
+    static function int unsigned get_uncache_denied_wt();
+        check_initialized("get_uncache_denied_wt");
+        return uncache_denied_wt;
+    endfunction:get_uncache_denied_wt
+
+    static function int unsigned get_uncache_corrupt_wt();
+        check_initialized("get_uncache_corrupt_wt");
+        return uncache_corrupt_wt;
+    endfunction:get_uncache_corrupt_wt
 
     static function int unsigned get_l2_hint_valid_wt();
         check_initialized("get_l2_hint_valid_wt");

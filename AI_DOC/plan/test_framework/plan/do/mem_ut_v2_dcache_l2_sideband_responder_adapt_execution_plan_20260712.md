@@ -43,7 +43,9 @@ time zero 到测试结束都必须保持 known-zero。
 - DCache A/B/C/D/E responder 的 opcode、payload、handshake、beat、gap 和 memory access。
 - 主表、status/raw、pass/fail/terminal、redirect/replay、commit/deq。
 - monitor analysis producer、testcase、plus/cfg、DCache `drv_mode` 配置入口。
-- DCache/SBuffer `corrupt/denied` 注入 TODO。
+- 本 plan 完成时 DCache/SBuffer `corrupt/denied` 注入仍属于 TODO；后续已由
+  `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md` 实现
+  response-record 级别的默认关闭权重注入，不改变本 plan 的 sideband 驱动边界。
 
 后续如需支持非零 L2 hint，必须另建专项，把 `sourceId` 与 MSHR、GrantData 周期和 keyword beat
 绑定；后续如需支持 `l2_flush_done`，也必须另建 L2 flush/低功耗完成模型。本 plan 不允许通过放宽
@@ -260,5 +262,7 @@ make eda_run tc=tc_dispatch_real_smoke mode=base_fun cfg=tc_dispatch_real_smoke
 ## 7. 风险与未解决项
 
 - 当前 plan 不支持非零 L2 hint，也不支持 L2 flush completion；相关能力必须另建专项。
-- DCache/SBuffer `corrupt/denied` 注入仍属于既有 TODO。
+- DCache/SBuffer `corrupt/denied` 注入在本 plan 编写时仍属于 TODO；后续实现见
+  `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md`。当前
+  sideband plan 不拥有 D-error 权重、采样或主框架异常处理。
 - 本 plan 只整理执行方案，不在本文档阶段执行编译或仿真。
