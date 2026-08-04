@@ -17,6 +17,7 @@ package xiangshan.frontend.bpu.tage
 
 import chisel3._
 import chisel3.util._
+import utility.XORFold
 import utils.AddrField
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.TageTableInfo
@@ -40,7 +41,7 @@ trait TopHelper extends HasTageParameters {
 
   def getUseAltOnNaIdx(pc: PrunedAddr): UInt = {
     val useAltOnNaIdxWidth = log2Ceil(NumUseAltOnNa)
-    pc(useAltOnNaIdxWidth - 1 + instOffsetBits, instOffsetBits)
+    XORFold(pc.toUInt(pc.length - 1, instOffsetBits), useAltOnNaIdxWidth)
   }
 }
 

@@ -41,10 +41,13 @@ case class TageParameters(
     NumUsefulCtrSramFolds: Int = 8,
     WriteBufferSize:       Int = 4,
     UsefulResetCtrWidth:   Int = 8,
-    UseAltOnNaWidth:       Int = 7,
-    NumUseAltOnNa:         Int = 128,
+    UseAltOnNaWidth:       Int = 4,
+    NumUseAltOnNa:         Int = 256,
     EnableTageTrace:       Boolean = false
-) {}
+) {
+  require(UseAltOnNaWidth >= 2, "UseAltOnNaWidth must be >= 2")
+  require(NumUseAltOnNa >= 2 && isPow2(NumUseAltOnNa), "NumUseAltOnNa must be a power of two and >= 2")
+}
 
 trait HasTageParameters extends HasBpuParameters {
   def tageParameters: TageParameters = bpuParameters.tageParameters

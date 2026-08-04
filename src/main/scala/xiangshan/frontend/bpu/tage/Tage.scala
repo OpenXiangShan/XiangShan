@@ -51,7 +51,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val usefulResetInFlight = RegInit(false.B)
 
   // use the alternate prediction when counter is positive
-  private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(UseAltOnNaCounter.Zero))
+  private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(UseAltOnNaCounter.WeakNegative))
 
   /* *** reset *** */
   io.sramResetDone := tables.map(_.io.sramResetDone).reduce(_ && _)
@@ -95,6 +95,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       table.getTag(s1_startPc, hist.forTag, position)
     })
   })
+  private val s1_useAltOnNaIdx = VecInit(io.fromMainBtb.s1_positions.map { position =>
+    getUseAltOnNaIdx(getCfiPcFromPosition(s1_startPc, position))
+  })
 
   private val s1_readResp = DataHoldBypass(VecInit(tables.map(_.io.readResp(0))), RegNext(s0_fire))
 
@@ -104,17 +107,16 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      - get prediction for each branch
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val s2_fire     = io.stageCtrl.s2_fire
-  private val s2_startPc  = RegEnable(s1_startPc, s1_fire)
-  private val s2_tag      = RegEnable(s1_tag, s1_fire)
-  private val s2_readResp = RegEnable(s1_readResp, s1_fire)
+  private val s2_fire          = io.stageCtrl.s2_fire
+  private val s2_tag           = RegEnable(s1_tag, s1_fire)
+  private val s2_readResp      = RegEnable(s1_readResp, s1_fire)
+  private val s2_useAltOnNaIdx = RegEnable(s1_useAltOnNaIdx, s1_fire)
 
   private val s2_branches = io.fromMainBtb.result
 
   s2_branches.zipWithIndex.foreach { case (branch, i) =>
     val position      = branch.bits.cfiPosition
-    val cfiPc         = getCfiPcFromPosition(s2_startPc, position)
-    val useAltOnNaIdx = getUseAltOnNaIdx(cfiPc)
+    val useAltOnNaIdx = s2_useAltOnNaIdx(i)
     val useAltOnNa    = useAltOnNaVec(useAltOnNaIdx).isPositive
 
     // compare tags of each branch with all tables
@@ -399,8 +401,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     val needUpdateAltCtr = !alt.takenCtr.shouldHold(actualTaken) && useAlt
 
-    val incUseAltOnNa = hasProvider && provider.takenCtr.isWeak && altOrBasePred === actualTaken
-    val decUseAltOnNa = hasProvider && provider.takenCtr.isWeak && altOrBasePred =/= actualTaken
+    // Train the selector only when it can change the prediction. When the weak
+    // provider and alternate/base disagree, exactly one of them is correct.
+    val trainUseAltOnNa = hasProvider && provider.takenCtr.isWeak && providerPred =/= altOrBasePred
+    val incUseAltOnNa   = trainUseAltOnNa && altOrBasePred === actualTaken
+    val decUseAltOnNa   = trainUseAltOnNa && providerPred === actualTaken
 
     val trainInfo = Wire(new TrainInfo).suggestName(s"t2_branch_${i}_trainInfo")
     trainInfo.valid := isCond && mbtbHit // Only consider update if conditional branch
