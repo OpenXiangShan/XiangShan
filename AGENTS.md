@@ -107,6 +107,10 @@ cd mem_ut/ver/ut/memblock/sim
 
 - [mem_ut_code_review_document_rule.md](AI_DOC/project_management/mem_ut_code_review_document_rule.md)
 
+当前 `mem_ut` flow 文档编写规则为：
+
+- [mem_ut_flow_document_rule.md](AI_DOC/project_management/mem_ut_flow_document_rule.md)
+
 当前 `mem_ut` interface 变更总结文档规则为：
 
 - [mem_ut_interface_change_summary_document_rule.md](AI_DOC/project_management/mem_ut_interface_change_summary_document_rule.md)
@@ -178,10 +182,14 @@ plan、项目管理文档、日志或仿真结果时，默认不触发 RTL 知�
 sequence 主循环、monitor service loop、handler、adapter、scheduler 或公共状态维护逻辑时，
 必须先阅读
 `AI_DOC/project_management/mem_ut_test_framework_logic_build_rule.md`。
+其中实现逻辑涉及函数的 plan/flow/review 描述必须先写抽象功能职责，再展开内部控制流；高频路径仍需遵守该规则中的
+prefix/cursor/map/queue 扫描边界要求。
 
 后续生成、修改、重构或评审 `AI_DOC/plan/test_framework/plan` 下的 mem_ut 测试框架 plan，
 包括只生成 plan、不 coding 的任务，必须先阅读
 `AI_DOC/project_management/mem_ut_test_framework_plan_review_rule.md`。
+Plan 首章必须前置解释后文使用的专有英文名词；每个展开实现逻辑的函数必须先给出抽象功能描述，
+再写详细伪代码和实现逻辑。
 
 后续按 `AI_DOC/plan/test_framework/plan/undo` 下的测试框架 plan 执行 coding、执行 plan、
 根据 plan 修改代码、同步文档、生成 implementation review、移动 plan 到 do 或提交 plan 实现时，
@@ -191,6 +199,12 @@ sequence 主循环、monitor service loop、handler、adapter、scheduler 或公
 后续生成、修改或复查 `mem_ut` 测试框架源码 review 文档、implementation review、
 code review 或专项源码修改 review 时，必须先阅读
 `AI_DOC/project_management/mem_ut_code_review_document_rule.md`。
+Review 首章必须前置解释后文使用的专有英文名词；每个展开实现逻辑的函数必须区分抽象功能描述和内部实现伪代码。
+
+后续新增、修改或复查 `AI_DOC/mem_ut_flow_doc` 下的 mem_ut 测试框架 flow 文档时，必须先阅读
+`AI_DOC/project_management/mem_ut_flow_document_rule.md`。
+Flow 首章必须前置解释流程图、功能描述和文字伪代码中的专有英文名词；每个实现函数、task、handler
+或 helper 必须先给出抽象功能描述，再展开源码控制流和状态副作用。
 
 后续因 DUT/interface/agent 接口变更而生成、修改或复查 interface 变更总结文档，
 包括按 agent 汇总 interface 信号、检查 transaction/connect/monitor/driver 覆盖、

@@ -276,15 +276,17 @@ sfence/hfence 失效可以遍历当前 tlb_entry_by_key；
   参数权重全 0 导致无法随机选择。
 ```
 
-## 9. Plan 文档新增函数描述规则
+## 9. Plan 文档函数逻辑描述规则
 
-当 `AI_DOC/plan/test_framework/plan/undo` 或 `do` 中的 plan 文档提出新增 function、task、class method 或关键 helper 时，必须在 plan 中同时写清以下内容：
+当 `AI_DOC/plan/test_framework/plan/undo` 或 `do` 中的 plan 文档展开新增、修改或复用的 function、task、class method 或关键 helper 逻辑时，必须在 plan 中同时写清以下内容：
 
-1. 函数目的：说明为什么需要新增该函数，它解决哪个测试框架问题，属于构建期、运行期、事件处理还是 debug 路径。
-2. 函数功能：说明输入是什么、输出是什么、会读取或修改哪些公共状态、queue、map、transaction 字段或 driver item。
-3. 源码级伪代码：用 `text` 或目标语言代码块按将来 coding 的控制流写出判断、循环、return、fatal/warning、状态更新和子函数调用。
-4. 中文文字伪代码：紧跟伪代码后，用中文按执行顺序解释该函数在当前 feature/flow 中承担的功能、每个关键分支为什么这样走、调用到的子函数在本函数中负责什么，以及返回值或副作用如何影响后续逻辑。
-5. 子函数说明：如果该函数内部调用新的或已有关键 helper，不能只列 helper 名称，必须说明 helper 的输入来源、输出含义和状态副作用；简单 helper 可以在母函数文字伪代码中一句话说明，复杂 helper 必须单独成节。
+1. 首章术语表：plan 的第一个正文一级章节（通常为第一个 `##` 章节）必须先解释后文功能描述和文字伪代码会使用的专有英文名词，例如 `batch`、`reservation`、`pending sample`、`epoch`、`owner` 和 `cursor`；每个术语写出当前中文含义、代码落点和必要示例。纯路径、命令、日志和标识符可以保留英文，但会影响理解的概念仍需解释。
+2. 抽象功能描述：凡 plan 展开实现逻辑的函数、task、class method 或 helper，都必须在源码级伪代码前用 1 到 3 句话说明由谁调用、处于哪个阶段、消费什么输入、产生什么对外可见结果或状态转换，以及职责边界；不罗列内部判断、循环、逐字段赋值和子函数细节。
+3. 函数目的：说明为什么需要新增该函数，它解决哪个测试框架问题，属于构建期、运行期、事件处理还是 debug 路径。
+4. 函数功能：说明输入是什么、输出是什么、会读取或修改哪些公共状态、queue、map、transaction 字段或 driver item。
+5. 源码级伪代码：用 `text` 或目标语言代码块按将来 coding 的控制流写出判断、循环、return、fatal/warning、状态更新和子函数调用。
+6. 中文文字伪代码：紧跟伪代码后，用中文按执行顺序解释该函数在当前 feature/flow 中承担的功能、每个关键分支为什么这样走、调用到的子函数在本函数中负责什么，以及返回值或副作用如何影响后续逻辑。
+7. 子函数说明：如果该函数内部调用新的或已有关键 helper，不能只列 helper 名称，必须说明 helper 的输入来源、输出含义和状态副作用；简单 helper 可以在母函数文字伪代码中一句话说明，复杂 helper 必须单独成节。
 
 Plan 文档中的中文文字伪代码必须遵循 `AI_DOC/project_management/mem_ut_flow_document_rule.md` 与 `AI_DOC/project_management/mem_ut_code_review_document_rule.md` 中已有的文字伪代码规则：不能只写概念摘要，不能只罗列函数名，必须让读者不读 SystemVerilog 细节也能按文字复现该段控制流。
 
@@ -292,6 +294,7 @@ Plan 文档中的中文文字伪代码必须遵循 `AI_DOC/project_management/me
 
 ```text
 函数名：xxx()
+抽象功能描述：用 1 到 3 句话说明该函数在当前 feature/flow 中的外部职责、调用阶段和可见结果；不罗列内部实现细节。
 函数目的：为什么新增该函数，解决哪个问题。
 输入：列出入参和关键全局状态来源。
 输出/副作用：列出返回值、状态字段、queue/map、driver item 或日志副作用。

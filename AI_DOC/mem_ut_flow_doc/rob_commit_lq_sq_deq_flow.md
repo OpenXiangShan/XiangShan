@@ -2,7 +2,8 @@
 
 本文描述当前 mem_ut V2 flow 中两条并行链路：
 
-1. `memblock_lsqcommit_dispatch_base_sequence`周期驱动`pendingPtr/pendingst/pendingMMIOld/scommit`，
+1. `memblock_lsqcommit_dispatch_base_sequence`周期驱动
+   `pendingPtr/pendingst/pendingMMIOld/scommit/isStoreException`，
    并推进软件ROB commit状态。
 2. `io_mem_to_ooo_ctrl_agent_agent_monitor`采样DUT `lqDeq/sqDeq`，adapter在semantic batch
    仲裁后释放LQ/SQ mapping，并尝试形成normal或fault terminal。
@@ -25,7 +26,8 @@
 | `commit cursor` | 软件ROB顺序提交窗口中第一个尚未越过的uid | `lsq_commit_handler::commit_cursor_uid` | normal batch只能从该uid开始连续选择 |
 | `modeled head` | 当前active ROB head的完整flag/value key | `modeled_rob_deq_ptr`、`modeled_head_valid`、`modeled_head_matches_active_uid()` | normal head可派生`pendingst/pendingMMIOld`；fault token只保留`pendingPtr` |
 | `committed watermark` | 最近一个成功normal commit batch的tail ROB key | `committed_rob_watermark` | 最后batch后继续发布`pendingPtr`，帮助StoreQueue看到已提交边界 |
-| `level sideband` | 在多个周期持续表达当前ROB状态的输入 | `pendingPtr`、`pendingst`、`pendingMMIOld` | driver active idle也必须保持 |
+| `level sideband` | 在多个周期持续表达当前ROB状态的输入 | `pendingPtr`、`pendingst`、`pendingMMIOld`、`isStoreException` | driver active idle也必须保持 |
+| `fault type latch` | 最近一次已发送ROB fault的load/store类型 | `latched_is_store_exception` | store fault置1，后续普通周期保持，新的load fault覆盖为0 |
 | `pulse sideband` | 只描述本拍动作的输入 | `scommit`、`flushSb` | idle周期清0，不继承上一拍 |
 | `normal commit batch` | 从modeled head开始、连续满足writeback/pass/required-target条件的uid集合 | `select_rob_commit_batch()` | 最多`MEMBLOCK_COMMIT_WIDTH`个 |
 | `fault token` | fault head已发送commit语义但尚未完成LSQ release/非成功terminal的独占状态 | `fault_head_waiting`、`fault_head_uid`、`fault_head_dynamic_epoch` | fault未收敛前不允许更年轻normal commit越过 |
@@ -50,6 +52,8 @@
   entry数量。两者没有同拍相等关系，`scommit`不能推进软件SQ deq pointer。
 - normal commit和fault convergence是两条互斥路径。fault head不混入normal `commit_uids`，也不计入
   normal-only `scommit`。
+- `isStoreException`不是`pendingst`的别名。它只在fault head transaction中由主表操作分类覆盖，
+  transaction发送成功后锁存；normal commit、deq、redirect和terminal不会单独清零。
 
 ## 2. 函数调用 Flow 图
 
@@ -67,15 +71,16 @@ flowchart TD
     J --> K{normal batch nonempty?}
     K -->|yes| L[derive pendingst/pendingMMIOld and scommit]
     K -->|no| M[select_fault_head_candidate]
+    M --> M1[fault_uid_is_store_exception]
     L --> N[driver send_pkt]
-    M --> N
+    M1 --> N
     N --> O{normal/fault/idle}
     O -->|normal| P[mark_rob_commit_batch]
     O -->|fault| Q[mark_fault_rob_commit_uid]
     O -->|idle| R[keep level sideband, clear pulses]
     P --> P1[save committed_rob_watermark]
     P1 --> P2[rebase_framework_head_from_commit_cursor]
-    Q --> Q1[fault_head_waiting]
+    Q --> Q1[fault_head_waiting and latch fault type]
     C --> S{global stop and terminal idle published?}
     S -->|yes| T[commit sequence exit]
 
@@ -118,10 +123,12 @@ flowchart TD
    transaction通过driver写到DUT后，normal batch调用mark_rob_commit_batch；
    handler先全批预检，再逐uid置rob_commit，保存batch tail到committed_rob_watermark，并把cursor推进到batch后；
    若后续还有uid，以该uid status ROB key建立新modeled head；若已经是最后batch，只清active head，watermark继续发布；
-   fault head调用独立mark_fault_rob_commit_uid并建立fault token，等deq/terminal收敛后才推进cursor；token期间pendingst/pendingMMIOld保持0。
+   fault head先调用fault_uid_is_store_exception从权威主表分类load/store，随transaction驱动0/1；
+   transaction发送后调用mark_fault_rob_commit_uid建立fault token并提交同一分类到latch，等deq/terminal收敛后才推进cursor；
+   token期间pendingst/pendingMMIOld保持0，isStoreException保持最近一次fault类型。
 
 4. idle和退出：
-   driver没有新item时保持pendingPtr/pendingst/pendingMMIOld，只清scommit/flushSb；
+   driver没有新item时保持pendingPtr/pendingst/pendingMMIOld/isStoreException，只清scommit/flushSb；
    global stop后commit sequence仍发送一次terminal idle；该transaction可带watermark pendingPtr，
    但必须没有active head、pendingst、pendingMMIOld、scommit、flushSb或未收敛cancel/raw状态；
    terminal idle发布后sequence才退出。
@@ -190,6 +197,10 @@ end
 tr.io_ooo_to_mem_lsqio_pendingst     = 1'b0;
 tr.io_ooo_to_mem_lsqio_pendingMMIOld = 1'b0;
 tr.io_ooo_to_mem_lsqio_scommit       = '0;
+tr.io_ooo_to_mem_isStoreException    = latched_is_store_exception;
+
+if (has_fault_head)
+    tr.io_ooo_to_mem_isStoreException = fault_uid_is_store_exception(fault_uid);
 
 if (has_head && !has_fault_head && !fault_head_waiting) begin
     tr.io_ooo_to_mem_lsqio_pendingst =
@@ -214,6 +225,8 @@ pendingst表示当前normal active head的scalar ROB store分类，不依赖本�
 `is_scalar_rob_store_commit()`只接受behavior中的普通STORE或CBO，且要求`commit_is_store=1`；
 pendingMMIOld表示当前active head是load且status已有当前dynamic instance的canonical MMIO load tag；
 scommit只遍历本拍normal commit_uids调用同一helper，因此当前CBO也计入；fault token和watermark都不贡献scommit。
+isStoreException默认继承最近一次已发送fault类型；只有本拍选中fault head时才用该uid的
+`is_scalar_rob_store_commit()`分类覆盖transaction，normal head不更新该值。
 ```
 
 这里不能只检查`behavior.kind == MEMBLOCK_OP_BEHAVIOR_STORE`：V2 `Rob.scala`按
@@ -317,7 +330,8 @@ if (has_fault_head) mark_fault_rob_commit_uid(fault_uid);
 ```text
 只有normal batch为空时才检查fault head；
 fault candidate必须active、位于commit cursor、无replay/redirect/flushed/killed，且已有writeback或target fault；
-mark_fault_rob_commit_uid置rob_commit并保存uid、dynamic_epoch到fault token；
+mark_fault_rob_commit_uid置rob_commit并保存uid、dynamic_epoch到fault token，同时把本次fault分类提交到
+latched_is_store_exception；如果transaction没有进入该mark阶段，latch不提前变化；
 try_retire_committed_uid只有在LQ/SQ mapping释放后才调用consume_fault_retire，形成success=0的terminal；
 sync_modeled_head_after_fault_terminal确认token仍属于同一动态实例且已完整retire后，才推进commit cursor；
 若redirect杀掉旧fault实例，清token但cursor留在同一uid等待reissue。
@@ -332,6 +346,7 @@ fault sideband采用受限语义：`build_lsqcommit_xaction()`先用`resolve_sid
 pending MMIO load；`mark_fault_rob_commit_uid()`建立token后，后续idle拍继续保持pendingPtr并将这两个
 sideband清0，直到fault实例deq/terminal收敛或被redirect杀掉。fault head不进入normal`commit_uids`，
 因此`scommit=0`；最后watermark也不会继承fault head的`pendingst/pendingMMIOld`。
+`isStoreException`则按RTL level语义继续保持最近一次fault类型，不随token收敛、deq或redirect清零。
 
 ## 5. Driver active idle 与 terminal idle
 
@@ -346,6 +361,7 @@ cached_pending_ptr_flag = tr.io_ooo_to_mem_lsqio_pendingPtr_flag;
 cached_pending_ptr_value = tr.io_ooo_to_mem_lsqio_pendingPtr_value;
 cached_pending_st = tr.io_ooo_to_mem_lsqio_pendingst;
 cached_pending_mmio_ld = tr.io_ooo_to_mem_lsqio_pendingMMIOld;
+cached_is_store_exception = tr.io_ooo_to_mem_isStoreException;
 
 // DRV_0 idle
 vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingPtr_flag <=
@@ -356,6 +372,8 @@ vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingst <=
     cached_sideband_valid ? cached_pending_st : 1'b0;
 vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingMMIOld <=
     cached_sideband_valid ? cached_pending_mmio_ld : 1'b0;
+vif.drv_mp.drv_cb.io_ooo_to_mem_isStoreException <=
+    cached_sideband_valid ? cached_is_store_exception : 1'b0;
 vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_scommit <= '0;
 vif.drv_mp.drv_cb.io_ooo_to_mem_flushSb <= '0;
 ```
@@ -373,6 +391,7 @@ commit loop不会在检测到global stop后立即break，而是先完成一次`s
 - transaction的`pendingst/pendingMMIOld/scommit/flushSb`均为0。
 
 才置`terminal_idle_published=1`并退出。该terminal idle仍可发布有效
+`isStoreException`，其值可以继续保持最后一次fault类型；它不表示新增fault，也不参与terminal判定。
 `committed_rob_watermark`作为`pendingPtr`，但这不是active head，也不触发任何新的状态推进。
 
 ## 6. DUT LQ/SQ deq 采集与应用

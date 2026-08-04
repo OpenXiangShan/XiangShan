@@ -15,6 +15,7 @@ class lsqcommit_agent_agent_driver  extends tcnt_driver_base#(virtual lsqcommit_
     bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] cached_pending_ptr_value;
     bit cached_pending_st;
     bit cached_pending_mmio_ld;
+    bit cached_is_store_exception;
 
     `uvm_component_utils(lsqcommit_agent_agent_driver)
 
@@ -34,6 +35,7 @@ function lsqcommit_agent_agent_driver::new(string name, uvm_component parent);
     cached_pending_ptr_value = '0;
     cached_pending_st = 1'b0;
     cached_pending_mmio_ld = 1'b0;
+    cached_is_store_exception = 1'b0;
 endfunction:new
 
 function void lsqcommit_agent_agent_driver::build_phase(uvm_phase phase);
@@ -49,6 +51,7 @@ task lsqcommit_agent_agent_driver::reset_phase(uvm_phase phase);
     cached_pending_ptr_value = '0;
     cached_pending_st = 1'b0;
     cached_pending_mmio_ld = 1'b0;
+    cached_is_store_exception = 1'b0;
 
     repeat(2) begin
         @this.vif.drv_mp.drv_cb;
@@ -106,11 +109,13 @@ task lsqcommit_agent_agent_driver::send_pkt(lsqcommit_agent_agent_xaction tr);
     vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingMMIOld <= tr.io_ooo_to_mem_lsqio_pendingMMIOld;
     vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingst <= tr.io_ooo_to_mem_lsqio_pendingst;
     vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_scommit <= tr.io_ooo_to_mem_lsqio_scommit;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_isStoreException <= tr.io_ooo_to_mem_isStoreException;
     cached_sideband_valid = 1'b1;
     cached_pending_ptr_flag = tr.io_ooo_to_mem_lsqio_pendingPtr_flag;
     cached_pending_ptr_value = tr.io_ooo_to_mem_lsqio_pendingPtr_value;
     cached_pending_st = tr.io_ooo_to_mem_lsqio_pendingst;
     cached_pending_mmio_ld = tr.io_ooo_to_mem_lsqio_pendingMMIOld;
+    cached_is_store_exception = tr.io_ooo_to_mem_isStoreException;
 
 endtask:send_pkt
 
@@ -125,6 +130,8 @@ task lsqcommit_agent_agent_driver::drive_active_idle();
         cached_sideband_valid ? cached_pending_ptr_flag : 1'b0;
     vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingPtr_value <=
         cached_sideband_valid ? cached_pending_ptr_value : '0;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_isStoreException <=
+        cached_sideband_valid ? cached_is_store_exception : 1'b0;
     vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_scommit <= '0;
     vif.drv_mp.drv_cb.io_ooo_to_mem_flushSb <= '0;
 endtask:drive_active_idle
@@ -143,6 +150,8 @@ task lsqcommit_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode
             cached_sideband_valid ? cached_pending_ptr_flag : 1'b0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingPtr_value <=
             cached_sideband_valid ? cached_pending_ptr_value : '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_isStoreException <=
+            cached_sideband_valid ? cached_is_store_exception : 1'b0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_flushSb <= '0;
 
     end
@@ -150,24 +159,28 @@ task lsqcommit_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode
         vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingPtr_flag <= '1;
         vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingPtr_value <= '1;
         vif.drv_mp.drv_cb.io_ooo_to_mem_flushSb <= '1;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_isStoreException <= '1;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_X) begin
         vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingPtr_flag <= 'x;
         vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingPtr_value <= 'x;
         vif.drv_mp.drv_cb.io_ooo_to_mem_flushSb <= 'x;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_isStoreException <= 'x;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_RAND) begin
         vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingPtr_flag <= $urandom;
         vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingPtr_value <= $urandom;
         vif.drv_mp.drv_cb.io_ooo_to_mem_flushSb <= $urandom;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_isStoreException <= $urandom;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_LST) begin
         vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingPtr_flag <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingPtr_value <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_flushSb <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_isStoreException <= '0;
 
     end
 

@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `0ec33be518d75ba9cbcf28bcf51118b68e8a0d96` |
+| 核验 commit | `f3bdd04b3763147e714a786d078e0cb90460a31d` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `coupledL2/src/main/scala/coupledL2`、`src/main/scala/xiangshan/cache/dcache`、`src/main/scala/xiangshan/mem`、`src/main/scala/xiangshan/L2Top.scala` |
-| 最后核验日期 | `2026-07-17` |
+| 最后核验日期 | `2026-07-30` |
 
 ## Flow 范围
 
@@ -40,6 +40,11 @@ LoadQueueReplay 消费，以及 `io_l2_flush_done` 在完整 L2 flush 和独立 
 6. `io_l2_flush_done` 是 L2 全量 flush 的完成电平，不是 cache response，也不直接阻塞、
    取消 LSQ/DCache 请求。完整 CHI L2 在所有 slice 扫完全部 set/way 后拉高，并保持到
    flush request 撤销；独立 MemBlock DUT 只把它作为外部状态输入转送给 CSR。
+7. DCache 询问 L2 时，`L2Top` 的 manager 口最小返回延迟是 2 拍（`minLatency = 2`）。
+   如果从 MemBlock/DCache 边界看，因为 `L2Top` 在 `l1_xbar` 和 `l2.node` 之间还有
+   一级 `xbar_l2_buffer`，所以第一拍 `D` 返回至少再多 1 拍。也就是说：
+   `L2` 已接受请求后最早 2 拍出 `D`，MemBlock 外部边界看到最早 3 拍，若把
+   DCache 发出请求到收到第一拍返回的整条链路都算上，则通常至少 4 拍。
 
 ## 主流程图
 
@@ -363,13 +368,23 @@ L2 等待 probe、必要的 dirty data writeback 和当前 line CMO 完成后，
 
 必须区分“flush 操作”与“done 电平”：
 
-1. flush 进行期间，L2 的 `cmoAllBlock` 会对普通 SinkA 请求施加 backpressure，DCache 新的
-   miss Acquire 可能看到 A-channel `ready=0`；已有 L2 MSHR 需要先完成。
+1. `l2Flush` 不是同步清空 DCache pipeline 的信号。每个 slice 仅在已有 MSHR 全部完成后从
+   `IDLE` 进入 `CMOREQ`；在 `CMOREQ/WAITLINE`，`cmoAllBlock=1`，普通 SinkA 请求被反压，
+   DCache 新的 miss Acquire 可以继续保持 `valid`，但不能发生 A-channel `fire`。C-channel
+   没有由 `cmoAllBlock` 直接关闭，必须继续接收 ProbeAck/ProbeAckData 以完成当前 CMO line。
+   `WAITMSHR` 时源码把 `cmoAllBlock` 重新拉低，因而不能把“flush 整个生命周期 A 永远
+   ready=0”当作严格接口合同；该阶段由 MSHR/主流水资源继续限制请求推进。
 2. DCache cache line 的真实状态变化来自上述 B-channel Probe。被 probe-toN 命中的 line
    会失效，dirty line 必要时通过 C channel 回数据；之后访问这些地址将重新 miss/refill。
 3. `io_l2_flush_done` 本身没有连接到 DCacheWrapper、MissQueue、ProbeQueue 或 load pipeline，
    不会在拉高那一拍再次清空 DCache，也不会直接 kill load、取消 MSHR 或产生 redirect。
    done 只表示所有这些 flush/probe/writeback 操作已经完成。
+
+因此完整 L2 支持的并发语义是“先 drain 既有 MSHR，再以 B/C Probe 流程逐 line 清理；A 请求按
+`cmoAllBlock` 和后续资源状态被 backpressure 或延后”，不是对 DCache 执行全局 kill。mem_ut 的
+轻量 responder 可以在 flush snapshot 建立到 `flush_done` 期间保守地冻结新 Grant/随机 Probe，
+以获得有限集合和可判定完成条件；这是功能正确的测试模型收敛策略，不是对上述 `WAITMSHR` 周期仲裁
+的逐周期复刻。
 
 进入 MemBlock 后，它只经过 `RegNext` 放入 `topToBackendBypass.l2FlushDone`，Backend 再
 寄存后送给 CSR，最终反映到自定义 CSR `mflushpwr.L2_FLUSH_DONE` 只读位。它没有接入
@@ -407,6 +422,7 @@ B-channel Probe。
 - `coupledL2/src/main/scala/coupledL2/tl2chi/MSHR.scala:430-451,525-559`：CBOFlush 生成上行 Probe-toN 和下行 writeback/evict。
 - `coupledL2/src/main/scala/coupledL2/tl2chi/MSHR.scala:741-743`：Get 映射为 `AccessAckData`，Acquire 映射为 `Grant/GrantData`。
 - `src/main/scala/xiangshan/L2Top.scala:79-95,137-146,318-332`：L2、XSTile D buffer、hint 和 flush done 顶层连接。
+- `src/main/scala/xiangshan/L2Top.scala:137-146`：`l2.node` 与 `l1_xbar` 之间的 `xbar_l2_buffer`，以及 `minLatency = 2` 的 manager 口返回下限。
 - `src/main/scala/xiangshan/cache/dcache/mainpipe/MissQueue.scala:218-272,551-609,657-695,828-882,1190-1225`：A-channel source 使用 MSHR id、keyword 携带、refill 重排、hint 提前开放 main-pipe request 和 source 路由。
 - `src/main/scala/xiangshan/cache/dcache/mainpipe/MissQueue.scala:881-926`：无 hint 时等待 `w_grantlast` 的功能 fallback 和性能计数。
 - `src/main/scala/xiangshan/cache/dcache/mainpipe/MissQueue.scala:250-265,299-360,828-845,1231-1237`：DCache AcquireBlock/AcquirePerm 选择、CMO 请求和 CBOAck 路由。
@@ -426,6 +442,8 @@ B-channel Probe。
 | 2026-07-16 | `0ec33be518d75ba9cbcf28bcf51118b68e8a0d96` | 首次建立，无同版本长期 flow 旧结论 | 建立 refill hint、2/3 拍时序、payload 与 L2 flush done 的完整边界 | 用户要求结合 V2 Scala 分析 L2 hint 和 flush done | V2 CoupledL2、DCache、LSQ、MemBlock、CSR |
 | 2026-07-17 | `0ec33be518d75ba9cbcf28bcf51118b68e8a0d96` | 已说明 hint 不是固定延迟协议，但未区分正常实现必发预期、各 D opcode 场景和 DCache no-hint fallback | 明确正常 DCache GrantData 的 hint 覆盖，补充 Grant/AccessAckData/CBOAck/client-range 场景及无 hint fallback | 用户追问 hint 是否一定发送及各类非 hint 回复来源 | V2 CoupledL2 hint responder、DCache MissEntry、mem_ut 激励合同 |
 | 2026-07-17 | `0ec33be518d75ba9cbcf28bcf51118b68e8a0d96` | 本文只有 hint 视角的 D opcode 粗分类 | 保留摘要并链接独立 L2 TileLink 请求/权限/回复 flow | 避免完整 L2 model 规则与 hint 计拍规则混在同一文档重复维护 | V2 L2 responder 知识边界 |
+| 2026-07-30 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 将 `cmoAllBlock` 笼统表述为 flush 全程阻塞普通请求 | 明确 `CMOREQ/WAITLINE` 反压 A、C channel 继续收敛，以及 `WAITMSHR` 解除该信号门控的源码事实 | 用户追问 flush 与 DCache 并发请求、pipeline 清理语义 | V2 CoupledL2 flush、mem_ut 轻量 responder 并发边界 |
+| 2026-07-31 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 只说明了 hint/flush 边界，未把 DCache->L2 的最短返回拍数拆成 manager 口、MemBlock 边界和整条链路三种口径 | 补充 `L2Top` 的 `minLatency = 2`、`xbar_l2_buffer` 和整条链路的最短返回拍数 | 用户追问 DCache 查询 L2Cache 的最短返回延迟 | V2 DCache-L2 查询/回复计拍 |
 
 ## 待确认项
 

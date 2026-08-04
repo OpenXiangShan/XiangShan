@@ -26,6 +26,7 @@ interface lsqcommit_agent_agent_interface  (input bit clk,input bit rst_n);
     logic io_ooo_to_mem_lsqio_pendingMMIOld;
     logic io_ooo_to_mem_lsqio_pendingst;
     logic [3:0] io_ooo_to_mem_lsqio_scommit;
+    logic io_ooo_to_mem_isStoreException;
 
     clocking drv_cb @(posedge clk);
         `ifdef INTERFACE_ADD_DELAY
@@ -38,6 +39,7 @@ interface lsqcommit_agent_agent_interface  (input bit clk,input bit rst_n);
         output io_ooo_to_mem_lsqio_pendingMMIOld;
         output io_ooo_to_mem_lsqio_pendingst;
         output io_ooo_to_mem_lsqio_scommit;
+        output io_ooo_to_mem_isStoreException;
     endclocking:drv_cb
 
     clocking mon_cb @(posedge clk);
@@ -51,6 +53,7 @@ interface lsqcommit_agent_agent_interface  (input bit clk,input bit rst_n);
         input  io_ooo_to_mem_lsqio_pendingMMIOld;
         input  io_ooo_to_mem_lsqio_pendingst;
         input  io_ooo_to_mem_lsqio_scommit;
+        input  io_ooo_to_mem_isStoreException;
     endclocking:mon_cb
 
     modport drv_mp (clocking drv_cb);

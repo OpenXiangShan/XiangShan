@@ -1,57 +1,95 @@
-# memblock_lsqcommit_dispatch_sequence.sv 源码分析
+# `memblock_lsqcommit_dispatch_base_sequence.sv` 源码分析
 
 本文档对应源码：
 
-- `mem_ut/ver/ut/memblock/seq/virtual_sequence/memblock_lsqcommit_dispatch_sequence.sv`
+- `mem_ut/ver/ut/memblock/seq/base_seq/memblock_lsqcommit_dispatch_base_sequence.sv`
 
-## 1. 文件定位与使用场景
+## 1. 定位、术语与抽象职责
 
-真实 lsqcommit pendingPtr 驱动 sequence。它负责告诉 DUT 当前 ROB commit pendingPtr，并在软件侧标记对应 uid 已 ROB commit。LQ/SQ entry 的释放不是它单独决定，而是还要等 ctrl monitor 捕获到 DUT deq。
+该sequence周期构造并发送`lsqcommit_agent_agent_xaction`。它负责驱动
+`pendingPtr/pendingst/pendingMMIOld/scommit/flushSb/isStoreException`，并在driver接受transaction后
+调用`lsq_commit_handler`提交normal commit batch或fault token。
 
-输入是 status 表中的 commit candidate。输出是 `lsqcommit_agent_agent_xaction` 和 `rob_commit` 状态。真正 retire 还依赖 `apply_dut_lq_deq/apply_dut_sq_deq()`。
+| 术语 | 含义 | 示例 |
+|---|---|---|
+| `cycle transaction` | commit loop每轮发送的一笔完整lsqcommit输入 | normal、fault或idle transaction |
+| `level sideband` | 无新动作时继续保持的字段 | `pendingPtr`、`isStoreException` |
+| `pulse sideband` | 只描述当前transaction动作的字段 | `scommit`、`flushSb` |
+| `terminal idle` | global stop后用于发布稳定最终level状态的最后一笔transaction | pulse均为0 |
 
-关键 task/function：
+该sequence不是writeback producer，也不直接释放LQ/SQ mapping。真实deq仍由ctrl monitor raw consumer处理。
 
-- `drive_lsqcommit_loop()`：global stop 前常驻运行，周期性尝试发 pendingPtr/commit/flushSb；global stop 后等待 pending flushSb drain 完再退出。
-- `send_lsqcommit_cycle()`：`build_lsqcommit_xaction()` 后 start/finish item，有 commit 则 mark batch。
-- `wait_clock_tick()`：统一等待 `@(posedge lsqcommit_vif.clk)`，替代旧的 `#1`
-  time-step 等待，保证 sequence 等待行为和 DUT clock 对齐。
-- `drive_flushsb_if_needed()`：处理 directed 或 scheduled `flushSb` request，驱动一个 cycle 后等待 `sbIsEmpty`。
+## 2. 调用流程
 
-## 2. 调度关系与参数数据流
+```mermaid
+flowchart TD
+    A[body] --> B[ensure_helpers]
+    B --> C[wait_for_main_table]
+    C --> D[drive_lsqcommit_loop]
+    D --> E[send_lsqcommit_cycle]
+    E --> F{global flush blocks?}
+    F -->|yes| G[clear_lsqcommit_xaction]
+    F -->|no| H[build_lsqcommit_xaction]
+    G --> I[start_item and finish_item]
+    H --> I
+    I --> J{normal or fault?}
+    J -->|normal| K[mark_rob_commit_batch]
+    J -->|fault| L[mark_fault_rob_commit_uid]
+    J -->|idle| M[no state commit]
+    K --> N[compute progress and terminal idle]
+    L --> N
+    M --> N
+    N --> D
+```
 
-该 sequence 是真实 DUT flow 中负责 LSQ commit 端口刺激的 sequence。它挂在 `env.u_lsqcommit_agent_agent.sqr.main_phase`，由 `MEMBLOCK_LSQCOMMIT_SEQ_EN` 控制是否真正驱动。
+整体文字伪代码：
 
-调度关系：
+```text
+初始化公共data、LSQ model和singleton commit handler，并重置handler私有状态；
+等待main table ready；
+每轮调用build_lsqcommit_xaction生成normal、fault或idle transaction；
+如有flushSb request，把flushSb pulse叠加到本拍transaction；
+调用start_item/finish_item，把完整字段交给lsqcommit driver；
+发送完成后，normal batch调用mark_rob_commit_batch；fault head调用mark_fault_rob_commit_uid；
+isStoreException只有fault transaction会覆盖，mark成功后保持到后续fault覆盖；
+所有uid终态且raw/cancel/flushSb状态收敛后，再发布terminal idle并退出。
+```
 
-| 阶段 | 条件 | 动作 | 输出 |
-|---|---|---|---|
-| 等待主表 | `main_table_ready=1` | 进入 commit loop | 可读取 status 表 |
-| 寻找 candidate | uid active、target pass、无 fault/replay/redirect | `lsq_commit_handler` 选择 ROB 顺序上可提交 uid | commit batch |
-| 构造 xaction | commit batch 或 pendingPtr 需要推进 | 填 `lsqcommit_agent_agent_xaction` | DUT commit/pendingPtr payload |
-| 驱动接口 | `start_item/finish_item` | 发给 `lsqcommit_agent` driver | DUT 看到 commit 刺激 |
-| 软件标记 | 有 commit batch | `mark_rob_commit_batch()` | status.rob_commit 更新 |
-| 等待释放 | DUT ctrl monitor 捕获 deq/cancel | `apply_dut_lq_deq/apply_dut_sq_deq()` | LQ/SQ active map 释放，uid retire |
+## 3. `send_lsqcommit_cycle()`
 
-参数数据流：
+抽象功能描述：该task把“一拍需要驱动什么”和“发送后提交哪类软件状态”串成严格顺序；
+构造阶段不提前修改commit/fault状态。
 
-- `MEMBLOCK_LSQCOMMIT_SEQ_EN`：总开关。
-- `MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES`：控制 commit loop 连续无 commit/flushSb progress 时的 warning 周期；只用于 debug，不作为退出条件。
-- `MEMBLOCK_FLUSHSB_SEQ_EN`：允许 directed `flushSb` 机制；默认关闭，不会自动发 pulse。
-- `MEMBLOCK_FLUSHSB_REQUEST_CYCLE`：非 0 时，在公共数据层登记为 scheduled pending；commit sequence 的 0-based cycle index 到达该值后发起一次 `request_flushsb()`。这是最小 directed 入口；没有显式 request 时即使 `MEMBLOCK_FLUSHSB_SEQ_EN=1` 也不自动发。等待该 request cycle 期间不计入 idle-stop，real smoke 也会因为公共 scheduled pending 状态而不会提前收尾；若 due cycle 被 redirect/global flush 挡住，scheduled pending 保留，等 flush 解除后继续尝试。
-- `MEMBLOCK_FLUSHSB_TIMEOUT`：发出 `flushSb` 后等待 `sbIsEmpty=1` 的 service-cycle timeout。
-- ROB 顺序判断不使用普通 int 递增，而通过 `rob_order_util` 和 `memblock_rob_key_t` 处理 flag/value/wrap 语义。
-- LSQ free count 与 active LQ/SQ map 最终以 DUT monitor 的 deq/cancel 事件为准。
+关键顺序：
 
-状态输出：
+```systemverilog
+commit_handler.build_lsqcommit_xaction(tr, commit_uids,
+                                       has_commit, has_fault_head, fault_uid);
+start_item(tr);
+finish_item(tr);
+if (has_commit) begin
+    commit_handler.mark_rob_commit_batch(commit_uids);
+end else if (has_fault_head) begin
+    commit_handler.mark_fault_rob_commit_uid(fault_uid);
+end
+```
 
-- `rob_commit`：表示框架已经向 DUT commit 端口推进该 uid。
-- `lsq_deq/lq_deq/sq_deq`：不由本 sequence 单独完成，依赖 monitor 事件释放。
-- `success`：必须等 ROB commit 和 LSQ deq 条件都满足后，才由公共数据层 retire。
+因此fault类型只有在transaction完成发送后才进入handler latch。若构造后被global flush路径阻塞，
+不会把未发送的fault类型提交为后续level值。
 
-边界：
+## 4. Driver 协作
 
-- 该 sequence 不是 writeback/pass 生成者；它只选择已 pass 的 uid 推 commit。
-- 它不能替代 DUT ctrl deq monitor。若 commit 发出但 DUT 没有释放 LQ/SQ，uid 仍不能 retire。
-- `flushSb` 只对当前 RTL 暴露的 `io_ooo_to_mem_flushSb` 做 directed pulse 和 `sbIsEmpty` 等待，不建模 SBuffer 内部状态机，也不依赖 `mmioBusy`。
-- scheduled `flushSb` 状态由 `common_data_transaction` 维护，不保存在本 sequence 私有变量中，避免 service loop 和 commit sequence 对未来 request 是否仍 pending 的判断不一致。commit sequence 在每个 cycle 的 early flush return 前也会调用 due 检查，due 后若暂时不能驱动，`flushsb_pending` 会保留到下一次非 blocked cycle；scheduled/pending/waiting 任一状态存在时，即使顶层已置位 global stop，也要继续 drain，不能提前退出。
+`lsqcommit_agent_agent_driver::send_pkt()`原样驱动transaction并缓存所有level sideband；
+`drive_active_idle()`在no-item、pre-gap和post-gap周期继续驱动缓存的
+`pendingPtr/pendingst/pendingMMIOld/isStoreException`，只清`scommit/flushSb`。
+
+`isStoreException`不参与`has_progress`、global stop或terminal判断。terminal idle可以继续保持最后一次
+fault类型，因为该level值本身不表示新的异常事件。
+
+## 5. 参数和边界
+
+- `MEMBLOCK_LSQCOMMIT_SEQ_EN`：sequence运行开关。
+- `MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES`：仅控制debug warning，不决定终态。
+- 本sequence不新增`isStoreException` plusarg或cfg；类型来自主表权威操作分类。
+- `pendingst`表示normal active ROB head是scalar store，不能替代fault专用的`isStoreException`。
+- vector LS仍为当前unsupported边界。

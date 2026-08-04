@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `bd813bc3ed5b39581be966c6518788852890ff6f` |
+| 核验 commit | `f3bdd04b3763147e714a786d078e0cb90460a31d` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `build_memblock/rtl/MemBlock.sv`、`src/main/scala/xiangshan/cache/mmu`、V2 `l2tlb_interface_profile.md` |
-| 最后核验日期 | `2026-07-21` |
+| 最后核验日期 | `2026-07-29` |
 
 ## Agent 职责和边界
 
@@ -91,12 +91,23 @@ legacy `tc_base` default sequence和`basicTest + VSEQ_MAIN`显式sequence是两�
 中的 `s2_entry_perm_g/u` 必须真实连接 `entry.pte_g/pte_u`，但这不等价于 S1/S2 权限已经独立建模。
 独立两阶段权限属于后续专项。
 
+同样地，response 的 `s1_pf/s1_af` 与 `s2_gpf/s2_gaf` 分别来自 S1 `PtwSectorResp` 和 S2
+`HptwResp`。HPTW 保证同一笔 S2 response 的 GPF/GAF 互斥且 GAF 优先；L1 TLB 再按 `s2xlate`
+把生效的 S1/S2 AF、S1 PF、S2 GPF 收敛为单一异常。它们不是可以用一套 entry 任意复制的四个同义位。
+
+真实 RTL 的地址合成是 `s1_ppn = s1.genPPN(request_vpn)`，all-stage 再以 `s1_ppn` 为 GVPN 计算
+`s2_ppn = s2.genPPNS2(s1_ppn)`；每个 stage 的 `level` 决定其 PPN 要由输入 VPN 补回的低位数。当前
+单 entry UVM 模型让 S1/S2 共享 `level/ppn` 且固定 `s2_gaf=0`，故不覆盖独立两阶段 PPN、不同 level
+组合或 S2 GAF 的真实语义。详细依据见下列 GPF/AF flow。
+
 ## 关联 Flow
 
 - [DTLB-L2TLB 多请求与 Response 次序 Flow](../../../rtl/v2/flows/dtlb_l2tlb_request_response_ordering_flow.md)：
   多 entry、L2TLB 多路径和按内容匹配依据。
 - [Memory PMP/PMA 权限检查 flow](../../../rtl/v2/flows/memory_pmp_pma_permission_flow.md)：
   TLB response 后续 PMP/PMA 权限检查边界。
+- [MMU GPF/AF 异常优先级与并发边界 flow](../../../rtl/v2/flows/mmu_gpf_af_exception_priority_flow.md)：
+  S1/S2 fault 字段到 L1 TLB 异常编码及下游 AF 合并的优先级。
 
 ## V2/V3 差异
 
@@ -121,6 +132,7 @@ legacy `tc_base` default sequence和`basicTest + VSEQ_MAIN`显式sequence是两�
 | 日期 | commit | 旧结论 | 新结论 | 修订原因 | 影响范围 |
 |---|---|---|---|---|---|
 | 2026-07-21 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 首次建立，无旧的 agent 长期文档 | 建立 V2 internal request/response、无ID、多 outstanding、内容匹配和 permission 字段边界 | 用户要求结合 Scala 源码设计 L2TLB responder queue 与回复次序 | V2 mem_ut L2TLB agent |
+| 2026-07-29 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 旧文档只说明 permission 共用 entry，未说明 fault/PPN 的两阶段语义 | 补充 response 四个 fault 的阶段归属、最终异常收敛、S1 到 S2 的串行 PPN 合成以及当前 UVM 单 entry 模型的覆盖缺口 | 用户要求结合 Scala 分析 L2TLB reply 的 fault、level 和 PPN 依赖 | V2 L2TLB agent response 建模与 testcase 预期 |
 
 ## 待确认项
 

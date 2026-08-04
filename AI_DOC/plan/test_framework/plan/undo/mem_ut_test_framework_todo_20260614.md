@@ -257,10 +257,22 @@ Scala 依据：
 - `lsq_ctrl_model` 将 prefetch 标记为 `MEMBLOCK_OP_BEHAVIOR_PREFETCH`，但仍沿用 load-like admission/route 框架。
 - 当前没有单独区分 prefetch 是否应该产生普通 load writeback、是否应该进入普通 load commit/deq、miss/merge/late prefetch 的专项行为。
 
+V2 源码已经确定的 fault 边界：
+
+- hardware prefetch 由 `LoadUnit/StoreUnit` 的硬件预取输入进入；`LoadUnit.scala:1537` 和
+  `StoreUnit.scala:412` 排除其普通 LSQ/writeback valid，因此它没有普通 ROB/LQ/SQ fault uid，
+  不进入 scalar fault token/watchdog。
+- software prefetch 仍是软件 LDU uop，但 `LoadUnit.scala:1231-1237` 会清除普通访存异常
+  （ECC error interrupt/特定 trigger 另按其专用语义处理），所以不能把它当作普通 demand load
+  fault 直接送入 scalar fault terminal。
+- 因此第 6 节的后续工作重点是分别定义 software/hardware prefetch 的 accepted、ignore、merge、
+  writeback/commit/deq 和 monitor 语义，而不是把两者合并成一个 scalar fault flow。
+
 后续需要补：
 
 - Prefetch 发射后完成条件：是否等待 DTLB/DCache 反馈，还是只要 request accepted 就认为完成。
-- Prefetch 异常语义：TLB miss、page fault、PMP/PMA fault 是否应像普通 load 一样反馈，还是被静默丢弃/转换。
+- Prefetch 专项异常边界：hardware prefetch 不建立普通 fault uid；software prefetch 的普通访存
+  exception 已由 DUT 清除，剩余 ECC/trigger/平台特定异常是否需要单独观测仍待专项定义。
 - Prefetch 与普通 load/store 的 merge 行为：命中已有 MSHR 或被普通 demand request 覆盖时，测试框架如何判定成功。
 - software prefetch.i 到 frontend、hardware prefetch train、L2/L3 prefetch sender 的 monitor 和 scoreboard 闭环。
 - prefetch 专项 testcase 需要区分“仅提示成功”和“普通 load-like pass”两类完成语义，避免把 prefetch 错当成 demand load 验证。
@@ -315,6 +327,10 @@ CBO 需要补的 checker：
 - 明确 CBO 的 ROB `scommit`、SQ deq、flushSb/sbuffer/uncache 交互何时允许推进。
 - 明确 uncache/MMIO、TLB/PMP fault、cache op ack 异常、redirect/replay 下的 pass/fault/recovery 判定。
 - 增加 CBO 专项 testcase 和 scoreboard，避免仅用普通 store 的 STA/STD pass 作为 CBO 完成条件。
+- 无 redirect 的当前 scalar 主流程不得支持 early CBO fault：CBO entry 的 `wline=1` 使通用
+  SBuffer handshake 不置 `completed`，CMO request 又要求 `!hasException`；若后续要覆盖该场景，
+  必须复用现有真实 redirect/cancel owner 驱动 DUT redirect 并等待 `sqCancelCnt`，不得软件伪造
+  SQ deq/free-count。该项只约束测试框架生命周期，不新增 RM/scoreboard 实现。
 
 ## 7. 地址场景分类覆盖
 
@@ -716,3 +732,264 @@ agent 的 base sequence/driver。
   LSQ、pass/fail 或 terminal 主流程。
 - 若后续需要判断 DUT 两阶段翻译结果是否正确，应另由 RM/checker/coverage 专项消费 S1/S2 状态；
   不能把 responder 能生成独立权限等同于参考模型检查闭环完成。
+
+## 15. Fault 指令支持边界与 standalone 资源释放 TODO
+
+### 15.1 专有名词与抽象功能说明
+
+本节中的专有名词先统一定义，避免把 ROB 语义和 MemBlock 本地资源语义混在一起：
+
+- **fault token**：测试框架为当前 ROB head 的异常实例建立的等待记录。它表示该 uid 已进入
+  fault convergence（异常收敛）路径，不表示一次 normal ROB commit，也不表示 LQ/SQ 已经释放。
+- **real deq**：由 DUT `io_mem_to_ooo_lqDeq/sqDeq` 输出、被 ctrl monitor 采样并进入 raw queue 的
+  LQ/SQ 物理出队事件。只有该事件才能推进软件 LQ/SQ pointer、free count 和 active mapping。
+- **cancel**：redirect 后 DUT 输出的 `lqCancelCnt/sqCancelCnt`，表示被 redirect 清掉的队列项数量。
+  cancel 与 deq 是两类不同事件，observed cancel 不能再次调用软件 `cancel_lq/cancel_sq()`。
+- **natural drain**：DUT 已经把 fault entry 标记为可完成，随后通过真实 writeback/handshake 产生
+  `lqDeq` 或 `sqDeq` 的本地资源释放路径；它不是软件表直接删除 entry。
+- **early fault**：请求尚未发出就因异常被 DUT 的发送 gate 阻止的场景。该场景可能没有 natural
+  drain，只能依赖 ROB exception redirect/cancel 或保持不支持。
+- **fault-head drain watchdog**：只负责防止 fault token 无限等待真实 deq/cancel 的超时保护。它
+  记录 uid、异常向量、ROB/LQ/SQ key 和最近 raw，不生成任何 DUT 事件。
+
+抽象功能描述：`fault-head drain watchdog` 由 LSQ commit/deq owner 在 fault token 建立后维护；它
+ 观察 monitor raw 的 deq/cancel 和 active mapping 是否收敛，收敛后交给既有 retire helper，超时则
+  `uvm_fatal`。`apply_raw_ctrl_deq()` 的职责仍只是消费已经观察到的 DUT raw deq，并调用现有
+  pointer/map release helper；它不能被 watchdog 或 fault sequence 当作预测释放 API。
+
+### 15.2 V2 源码确认的 fault 释放分类
+
+V2 源码的关键事实如下：
+
+- `src/main/scala/xiangshan/mem/lsqueue/VirtualLoadQueue.scala:140-156` 只在 entry 已
+  `committed` 且位于连续队头时产生 `lqDeq`；scalar entry 由真实 LDU writeback 的
+  `updateAddrValid` 路径置 `committed`，vector entry 才由 vector feedback/FLUSH 路径置位。
+- `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:335-347` 的物理 `sqDeq` 条件是连续
+  `allocated && completed`，不是 `scommit`；`StoreQueue.scala:1132-1164` 负责 ROB head 的
+  `committed` 标记，二者可以跨拍。
+- `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:1158-1160` 对已 commit 的 NC 异常
+  entry 可直接置 `completed`；未 commit 的 fault store 则由 redirect 的 `needCancel` 路径释放，
+  `StoreQueue.scala:1493-1524` 在延迟后输出 `sqCancelCnt`。
+- `src/main/scala/xiangshan/mem/lsqueue/LoadQueueUncache.scala:122-143` 表明 MMIO load 只有
+  `pendingMMIOld && robIdx == pendingPtr` 才能发请求；NC load 不依赖该 sideband。无前置异常的
+  NC/MMIO load 才会额外进入 uncache entry；请求前已有 exception 的 load 不进入 uncache request。
+  scalar VLQ 的 `committed` 条件见 `VirtualLoadQueue.scala:249-264`，其中要求真实 LDU event、
+  `!need_rep && updateAddrValid && !isvec`，不能用 vector FLUSH 术语替代。
+- `src/main/scala/xiangshan/mem/pipeline/AtomicsUnit.scala:68-89,398-425` 的 AMO/MOU 完成由
+  `AtomicsUnit.io.out.fire` 驱动，不使用普通 LQ/SQ deq。
+- `src/main/scala/xiangshan/mem/vector/VSegmentUnit.scala:240-360,903-932` 的 segment LS 有
+  独立 finish/writeback 状态机，不等同于普通 LSQ entry。
+
+据此，当前测试框架的 fault 支持边界如下：
+
+| 指令/路径 | 普通 LQ/SQ 资源 | fault 时可用的 DUT 释放来源 | 当前边界 |
+|---|---|---|---|
+| scalar cacheable load | 始终有 VLQ/LQ entry | 真实 LDU fault writeback 且 `updateAddrValid=1` 后的 `lqDeq`；scalar 不依赖 vector FLUSH feedback | 计划支持等待真实 raw；当前真实 fault smoke/watchdog 尚未完成，不能软件伪造 deq |
+| scalar cacheable/NC store | SQ | 已进入 `hasException` 清理路径时的真实 `sqDeq`；若 redirect 先到则是 `sqCancelCnt` | 计划支持 normal scalar fault drain；当前真实 fault smoke/watchdog 未完成，deq/cancel 由 monitor 真值决定 |
+| scalar NC/MMIO load（请求/响应路径） | 始终有 VLQ/LQ entry；无前置异常时另分配 `LoadQueueUncache` entry | NC response/writeback，或 MMIO 的 `pendingMMIOld+pendingPtr` 放行后 response/writeback，再由 VLQ `lqDeq` | 计划支持真实完成路径；MMIO 属性/错误 response 注入仍受第 10、11 节边界约束，当前 fault smoke 未完成 |
+| scalar NC/MMIO load（前置异常） | 仍有 VLQ/LQ entry，但不分配 `LoadQueueUncache` entry | 真实 scalar LDU fault event 的 `updateAddrValid` 使 VLQ entry 可提交，随后真实 `lqDeq`；测试框架预填而未形成 DUT event 时没有可等待 deq | 必须与 synthetic `exceptionVec` 路径分开，不能假设 uncache response 或伪造 `lqDeq` |
+| scalar MMIO store | SQ | request/response 后 `mmioStout.fire -> completed -> sqDeq`；请求前普通 scalar fault 可走 exception drain | 计划支持且不把 `scommit` 当作 deq 门槛；CBO early fault 另行处理，当前真实 fault smoke 未完成 |
+| hardware prefetch | 不形成普通 ROB/LQ/SQ fault uid；由 prefetch source 直接进入硬件预取路径 | prefetch request/ignore/merge 反馈；不产生普通 LQ fault drain | 不进入 scalar fault token/watchdog，也不作为普通 load writeback/terminal |
+| software prefetch | 可能复用软件 LDU uop/load-like入口，但不是 demand load fault语义 | V2 `LoadUnit` 清除普通访存异常（ECC error interrupt 另行处理），完成/忽略由 prefetch 专项语义决定 | 当前只按第 6 节简化建模；不进入 scalar fault token/watchdog，不把无 UID response 当作 load fault terminal |
+| 普通 vector load/store | LQ/SQ 可能占用多 entry | vector merge/feedback、`vecMbCommit`、真实 deq 或 redirect cancel | 当前不支持，见第 1、3 节和本节 15.3 |
+| segment vector LS | 不按普通 scalar LQ/SQ 闭环 | `VSegmentUnit` 独立 finish/writeback/exception path | 当前不支持，不能套用 scalar watchdog 完成 |
+| AMO/LR/SC/AMOCAS（`FuType.mou`/MOU route） | AtomicsUnit 私有状态，不是普通 LQ/SQ | atomic 多 uop 的真实 `AtomicsUnit.io.out.fire` | 当前不支持，不能等待 LQ/SQ deq |
+| HLV/HLVX/HSV | 可能复用 LSQ，但需要 hypervisor 语义 | 依赖两阶段翻译、权限和异常上下文 | 当前不支持，不能只扩普通 load/store 枚举 |
+| CBO，尤其请求前 early fault | SQ/CMO 专用状态 | 未提交 entry 需要 ROB exception redirect -> `sqCancelCnt`；`CBO.ZERO/wline=1` 不保证普通 completed | standalone 当前不支持，必须 fail-fast，不能伪造 `sqDeq` |
+
+这里的“计划支持 scalar fault”仅表示测试框架最终应能等待和消费 DUT 已产生的真实释放事件，
+不表示当前代码已经完成真实 fault smoke 或 watchdog，也不表示测试框架承担 ROB 全核异常重定向
+或 RM 正确性判断。完整 Core 中架构 fault 仍由 ROB exception redirect 清理 faulting ROB entry
+和年轻指令；standalone 只在本地 LSQ 能自然 drain 时省略这部分全核建模。
+
+scalar store 的 `hasException=1` 不是单独的出队条件，必须保留以下前置关系：
+
+- cacheable fault：`pendingPtr` 覆盖 ROB key 后 entry 才能变成 `committed`，随后经过
+  DataBuffer/SBuffer 的异常空写 handshake 置 `completed`，再产生 `sqDeq`。
+- NC fault：`pendingPtr` 形成 `isCommit` 后，`isCommit && nc && hasException` 才直接置
+  `completed`；不需要伪造 `scommit`。
+- 请求前的普通 scalar MMIO fault：`StoreUnit` 在 exception 时清除 MMIO 属性，转入通用异常
+  drain；response 后才发现的 MMIO fault 则仍需先满足 `pendingst + pendingPtr` 发出请求，随后
+  `mmioStout.fire` 才置 `completed`。
+
+对应源码为 `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:1132-1164`、
+`StoreQueue.scala:1158-1160` 和 `src/main/scala/xiangshan/mem/pipeline/StoreUnit.scala:532-544`。
+
+还必须区分 fault 来源：
+
+- 已分配到 LQ/SQ 后由 STA/LDA、TLB/PMP/PMA、misalign 或真实 responder 结果产生的异常，只有在
+  DUT 真正给出 writeback、deq 或 cancel 时，才能进入本节的 scalar fault drain。
+- enqueue 前由测试框架直接写入 `exceptionVec` 的 directed 值可能使 DUT 不分配 uncache entry，或
+  在进入 LSQ 前被过滤；它只能作为“输入异常激励”记录，不能预先假定会出现 `lqDeq/sqDeq`。
+  若 testcase 必须验证该路径，应新建对应 directed fault plan；当前 software-only synthetic event
+  不能充当 DUT 释放证据。
+
+### 15.3 不支持指令的后续修改方案
+
+以下条目是后续专项的可执行落点；在专项完成前，admission 必须保持现有运行期 `uvm_fatal`，
+不能因为 enum/classifier 已存在就把指令静默转成 scalar load/store。
+
+1. **Vector LS（`vldu/vstu/vsegldu/vsegstu`）**
+   - 扩展主表/状态表保存 `[base, base + numLsElem)` 的 LQ/SQ range、每个子元素的 owner 和
+     `uopIdx`，并让 monitor event 能按范围反查 uid。
+   - 普通 vector load 补 merge buffer/FLUSH feedback 到真实 `lqDeq` 的链路；普通 vector store
+     补 `vecMbCommit`、异常 drain、真实 `sqDeq/sqCancelCnt` 链路。
+   - segment LS 单独建立 `VSegmentUnit` finish/writeback owner，不复用 scalar LQ/SQ terminal
+     条件；FOF 首元素 fault 保留 ROB 可见异常并通过 vector feedback/异常路径收敛，非首元素
+     fault 不形成普通 ROB fault而只缩短 `vl`；FOF fix-VL/last-uop 由 `VfofBuffer` 或
+     `VSegmentUnit` writeback，不能假设存在普通 LSQ entry。
+   - segment FOF 只由 `VSegmentUnit` 私有状态管理；不得把 segment FOF 的异常、writeback 或
+     terminal 事件映射成 scalar LQ/SQ fault。
+   - redirect、replay、flush 时按 range 和动态实例释放/重建全部 mapping；专项完成前保持 vector
+     admission fatal。
+
+2. **AMO/LR/SC/AMOCAS（`FuType.mou`/MOU route）**
+   - 建立独立 atomic issue route 和 `uop_count` 展开：普通 AMO/LR/SC 为 1 STA + 1 data uop，
+     AMOCAS.W/D 为 1 STA + 2 data uop，AMOCAS.Q 为 2 STA + 4 data uop。
+   - 增加 atomic issue、DTLB/DCache、真实 `AtomicsUnit.io.out.fire`、异常/redirect、重复
+     writeback 和最终专用资源释放的状态 owner；不得用 LQ/SQ `lqDeq/sqDeq` 代替 atomic 完成。
+   - 每个 atomic 子 uop 必须有独立 correlation key；AMOCAS.Q 只有所有必需 writeback 都完成后
+     才能形成 instruction terminal。专项完成前维持 AMO/MOU admission fatal。
+
+3. **HLV/HLVX/HSV**
+   - 增加 hypervisor CSR/runtime snapshot、`hyperinst`、两阶段翻译和异常字段的链路；分别定义
+     HLV/HLVX 与 HSV 的 legal issue/response 组合。
+   - 更新合法性检查、主表标签和 fault/redirect 生命周期；禁止仅把 fuOpType 加入普通
+     `is_load_fuoptype()/is_store_fuoptype()`。
+   - 专项完成前保持 admission fatal，并在 TODO 中保留“非支持组合不得静默 scalar 化”的约束。
+
+4. **CBO 与 early CBO fault**
+   - 先建立 CBO.ZERO 与 CLEAN/FLUSH/INVAL 的独立完成语义，明确 CMO ack、flushSb、uncache、
+     ROB commit 和 SQ/专用资源释放的关系。
+   - early CBO fault（尤其 `CBO.ZERO` 的 `wline` 路径）必须复用真实 redirect/cancel owner：观察
+     redirect sample/anchor 后等待 `sqCancelCnt`，再清理软件 mapping；不得调用 `apply_dut_sq_deq()`、伪造 `scommit` 或直接
+     修改 SQ free count。
+   - 在 redirect/cancel owner、responder 和状态表闭环前，任何请求前 CBO exception 都在 admission
+     或 fault-head watchdog 处 `uvm_fatal`；不能让它进入一个永远等待 `sqDeq` 的 active 状态。
+     未来若支持该路径，必须在现有 redirect owner 增加“fault anchor cancel”模式：fault anchor
+     保留 fault 结果并等待 cancel 收敛，不重新 admission；只有年轻 uid 沿用既有 reissue 逻辑。
+
+5. **software-only synthetic fault**
+   - 现有 `soft_test_memblock_dispatch_fault_smoke_sequence.sv` 只能作为 ledger/token 单元测试，
+     必须在 testcase、plan 和 review 中明确标注 software-only；其中直接调用
+     `apply_dut_lq_deq()/apply_dut_sq_deq()` 不得作为真实 DUT fault 支持证据。
+   - 若需要真实 fault smoke，新增/改造独立 sequence：只提交 fault writeback 或真实 fault input，
+     等 ctrl monitor raw `lqDeq/sqDeq` 或 redirect/cancel snapshot `lqCancelCnt/sqCancelCnt`，不在 sequence
+     中直接释放公共 mapping。
+
+### 15.4 普通 scalar fault 后续修改方案（待 coding）
+
+1. **真实 raw 是唯一释放入口**
+
+   `io_mem_to_ooo_ctrl_agent_agent_monitor` 采样的 raw 经过
+   `memblock_sync_pkg` FIFO、redirect-first/deferred 规则和 `dispatch_monitor_event_adapter` 后，
+   才调用 `lsq_commit_handler::apply_raw_ctrl_deq()`。该函数只消费 count/pointer 已真实出现的
+   DUT event；不能由 fault sequence、`scommit`、`status.rob_commit` 或 watchdog 代替。
+
+2. **fault token 与 normal commit 分流**
+
+   - normal commit batch 只包含连续、已正常 writeback/pass 的 uid；`scommit` 只统计本批 scalar
+     store 数量。
+   - fault uid 不进入 normal `commit_uids`，可由 `mark_fault_rob_commit_uid()` 建立 fault token，
+     但 token 不推进 SQ/LQ pointer，也不代表 deq 已发生。
+   - 没有 redirect 命中的 natural-drain fault 中，fault token 与 real deq 允许任意先后；只有
+     mapping 已释放且 fault terminal 条件满足时，`try_retire_committed_uid()` 才形成
+     `success=0/terminal_done=1`，随后再推进 modeled head。
+   - 若 redirect/cancel 命中 fault uid，当前 `prepare_uid_for_redirect_reissue()` 会清除 fault、
+     `rob_commit` 并增加 `dynamic_epoch`，因此不能直接形成 fault terminal；应沿现有 reissue/
+     cancel 生命周期等待新实例。只有未来启用 15.3 定义的 fault-anchor 模式时，才允许保留旧
+     fault 结果并在 cancel 收敛后形成非成功 terminal。
+   - `pendingPtr` 可以继续发布当前 modeled head；不得因为 fault token 缺少 `scommit` 就伪造提交或
+     释放资源。
+
+3. **增加 fault-head drain watchdog**
+
+   抽象功能描述：watchdog 绑定 fault uid 的动态实例，逐拍读取 raw deq/cancel、active mapping、
+   fault token 和最近 activity；在合法释放事件到达后停止计时，若超过既有 no-progress/watchdog
+     阈值仍无任何真实释放来源，则打印完整上下文并 `uvm_fatal`。
+
+   文字伪代码：
+
+   ```text
+   fault writeback/raw fault 到达
+     -> mark_target_fault(uid, target)
+   -> 当前 uid 成为 modeled ROB head 后建立 fault token
+   -> 每个 service cycle 先消费 deferred/raw ctrl 的真实 lqDeq/sqDeq
+   -> 若有 redirect/cancel snapshot，先按 redirect epoch 对账，再消费真实 lqCancelCnt/sqCancelCnt；observed count 不重复回退
+   -> 若 cancel 命中 fault uid：
+        若 fault-anchor 模式已启用 -> 保留 fault 结果，等待 cancel 收敛后进入非成功 terminal
+        否则 -> 按现有 redirect owner 清旧实例、失效 fault token，等待同 uid reissue；不得 terminal
+   -> 若是 natural-drain 且 mapping 全部释放、token/动态实例仍匹配
+        -> try_retire_committed_uid(uid, success=0)
+        -> terminal_done，推进 cursor
+     否则
+        -> 更新 watchdog 最近 raw/activity
+        -> 超时 uvm_fatal(uid、fault type、ROB/LQ/SQ key、sideband、raw snapshot)
+   ```
+
+   watchdog 不创建 xaction、不调用 `apply_dut_lq_deq()`/`apply_dut_sq_deq()`，也不把“没有 raw”
+   当作零计数释放。对请求前 CBO fault，超时是预期的 unsupported 诊断；对 scalar load/store，
+   超时表示 responder、DUT handshake、redirect 或 monitor 链路存在问题。
+
+   cancel snapshot 只由既有 cancel/reconcile owner 消费：软件 cancel count 负责一次性恢复
+   free count，DUT observed count 只做同一 redirect epoch 的核对；两者不能由 deq handler 重复应用。
+
+   为避免 raw 被消费后丢失来源，ctrl monitor 必须在每个 post-reset sample（包括 count 为 0 的
+   idle raw）冻结 `ctrl_sample_seq`，并将该字段随 `dispatch_raw_ctrl_t -> deferred raw -> adapter`
+   原样传递；不能只在 MMIO valid 时生成 sample 序号。`status_transaction` 和 fault/cancel record
+   必须增加最小 release provenance：
+   `release_kind`（real LQ/SQ deq 或 real LQ/SQ cancel）、`release_sample_seq`（deq raw 的采样序号）
+   和 `release_cancel_epoch`（cancel snapshot 对应 redirect epoch）。ctrl raw consumer 只写
+   `release_kind/release_sample_seq` 的 real-deq 分支（来源为 raw 的 `ctrl_sample_seq`），cancel/reconcile owner 只写 cancel 分支；
+   `lsq_commit_handler` 的 fault token 保存当前动态实例的值。redirect 清理旧实例时先把旧 provenance
+   归档到 fault/cancel record，再递增 `dynamic_epoch`；新实例必须从空 provenance 开始，不能复用旧
+   sample/epoch。watchdog 读取这些持久状态，而不是逐拍轮询已经消费掉的 raw queue。
+
+   `ctrl_sample_seq` 的 coding 链必须完整覆盖：`dispatch_raw_ctrl_t` typedef、
+   `make_empty_raw_ctrl()` 清零、ctrl monitor 每拍赋值、deferred/raw adapter copy、compare/print
+   和 package reset；不得只在 monitor 的临时变量中保存。建议在 `memblock_dispatch_types.sv` 定义
+   `memblock_fault_release_kind_e`（`NONE/REAL_LQ_DEQ/REAL_SQ_DEQ/REAL_LQ_CANCEL/REAL_SQ_CANCEL`），
+   在 `status_transaction.reset()` 和每次新 `dynamic_epoch` admission 时清为 `NONE`，由 raw deq
+   consumer 或 cancel/reconcile owner 作为唯一写者更新。
+
+   redirect/cancel 的旧实例归档必须由 redirect owner 在清理 status 前完成，最小记录为
+   `{uid, old_dynamic_epoch, redirect_epoch, resource_kind, rob_key, lq_key, sq_key}`。文字伪代码：
+
+   ```text
+   redirect scan 命中 active uid
+     -> 读取并保存 old_dynamic_epoch 与仍存在的 LQ/SQ resource
+     -> push fault/cancel archive(uid, old_dynamic_epoch, redirect_epoch, resource)
+     -> 既有 owner 清旧 status/map，dynamic_epoch++，准备同 uid reissue
+   cancel snapshot 到达
+     -> 先按 snapshot.sample_seq/redirect_epoch 匹配父 cancel record，并比较聚合 LQ/SQ count
+        与该 record 在 redirect scan 阶段按 resource_kind 累计的软件 count
+     -> 聚合 count 对账成功后，由父 cancel record 标记其关联的旧实例 archive 集合
+        release_kind=REAL_*_CANCEL、release_cancel_epoch 和 observed count
+     -> 不把 DUT 聚合 count 假装成 per-UID key，也不回写已经重建的新 dynamic instance 的 status_transaction
+   watchdog/token 查询
+     -> 只接受 uid + 当前 dynamic_epoch 的 provenance
+     -> 旧 archive 未对账时保持 pending，不能被新实例 terminal 消费
+   ```
+
+4. **scalar fault 的最终检查**
+
+   - 检查 fault UID 的 `fault/exception_pending`、真实 target fault、deq/cancel 来源和
+     `terminal_done`；不把 `status.rob_commit` 单独解释成 normal commit。
+   - 检查 active ROB/LQ/SQ map、软件 free count 与 DUT raw 事件收敛；不得通过直接写 status 或
+     直接调用 release helper 使检查通过。
+   - normal scalar load/store 的 pass/fail/terminal 主逻辑保持不变；本专项只补 fault 事件的真实
+     释放来源和超时保护，不新增 RM 或 scoreboard。
+
+### 15.5 本轮完成边界
+
+- 当前代码只有 raw deq consumer、fault token 等基础设施，普通 scalar load/store 的真实 fault
+  smoke、release provenance 和 fault-head watchdog 仍未完成；这些必须作为待 coding 项补入既有
+  LSQ MMIO/status/SQ deq owner（若原 execution plan 已归档，则新增 follow-up plan，不创建第二个
+  SQ deq/fault owner）。新增 coding 必须落在既有 `ctrl monitor -> raw queue -> adapter ->
+  lsq_commit_handler` owner 上，不建立第二套 fault 状态机。
+- vector LS、AMO/MOU、HLV/HLVX/HSV、CBO（尤其 early CBO fault）和完整 atomic/segment fault
+  生命周期继续保持 TODO/运行期 fatal。
+- DCache/SBuffer `corrupt/denied` response 注入仍遵守第 10 节；只有真实 response 进入 DUT 并
+  产生可观察完成/异常事件时，scalar fault drain 才能消费，测试框架本轮不新增 response 注入。
+- 本节不修改 RM、scoreboard、coverage 或 DUT RTL；后续专项必须在完成真实完成/取消事件链路并
+  通过 review 后，才能从对应 admission fatal 边界移除。

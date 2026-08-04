@@ -20,6 +20,7 @@ class lsqcommit_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_ooo_to_mem_lsqio_pendingMMIOld;
     rand bit io_ooo_to_mem_lsqio_pendingst;
     rand bit [3:0] io_ooo_to_mem_lsqio_scommit;
+    bit io_ooo_to_mem_isStoreException;
     extern constraint default_io_ooo_to_mem_lsqio_pendingPtr_flag_cons;
     extern constraint default_io_ooo_to_mem_lsqio_pendingPtr_value_cons;
     extern constraint default_io_ooo_to_mem_flushSb_cons;
@@ -40,6 +41,7 @@ class lsqcommit_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_ooo_to_mem_lsqio_pendingMMIOld, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_lsqio_pendingst, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_lsqio_scommit, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_isStoreException, UVM_ALL_ON);
     `uvm_object_utils_end
 
 endclass:lsqcommit_agent_agent_xaction
@@ -58,6 +60,7 @@ constraint lsqcommit_agent_agent_xaction::default_io_ooo_to_mem_flushSb_cons{
 
 function lsqcommit_agent_agent_xaction::new(string name = "lsqcommit_agent_agent_xaction");
     super.new();
+    io_ooo_to_mem_isStoreException = 1'b0;
 endfunction:new
 
 function void lsqcommit_agent_agent_xaction::pack();
@@ -85,6 +88,7 @@ function string lsqcommit_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sio_ooo_to_mem_lsqio_pendingPtr_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_lsqio_pendingPtr_flag);
     pkt_str = $sformatf("%sio_ooo_to_mem_lsqio_pendingPtr_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_lsqio_pendingPtr_value);
     pkt_str = $sformatf("%sio_ooo_to_mem_flushSb = 0x%0h ",pkt_str,this.io_ooo_to_mem_flushSb);
+    pkt_str = $sformatf("%sio_ooo_to_mem_isStoreException = 0x%0h ",pkt_str,this.io_ooo_to_mem_isStoreException);
 
     return pkt_str;
 endfunction:psdisplay
@@ -118,6 +122,11 @@ function bit lsqcommit_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer
         if(this.io_ooo_to_mem_flushSb!=rhs_.io_ooo_to_mem_flushSb) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_flushSb=0x%0h while the rhs_.io_ooo_to_mem_flushSb=0x%0h",this.io_ooo_to_mem_flushSb,rhs_.io_ooo_to_mem_flushSb),UVM_NONE)
+        end
+
+        if(this.io_ooo_to_mem_isStoreException!=rhs_.io_ooo_to_mem_isStoreException) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_isStoreException=0x%0h while the rhs_.io_ooo_to_mem_isStoreException=0x%0h",this.io_ooo_to_mem_isStoreException,rhs_.io_ooo_to_mem_isStoreException),UVM_NONE)
         end
 
     end

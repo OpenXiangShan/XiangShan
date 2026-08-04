@@ -42,6 +42,7 @@ task lsqcommit_agent_agent_monitor::mon_data();
     logic io_ooo_to_mem_lsqio_pendingMMIOld;
     logic io_ooo_to_mem_lsqio_pendingst;
     logic [3:0] io_ooo_to_mem_lsqio_scommit;
+    logic io_ooo_to_mem_isStoreException;
     lsqcommit_agent_agent_xaction  mon_tr;
     while(1) begin
         @this.vif.mon_mp.mon_cb;
@@ -52,11 +53,15 @@ task lsqcommit_agent_agent_monitor::mon_data();
         io_ooo_to_mem_lsqio_pendingMMIOld = this.vif.mon_mp.mon_cb.io_ooo_to_mem_lsqio_pendingMMIOld;
         io_ooo_to_mem_lsqio_pendingst = this.vif.mon_mp.mon_cb.io_ooo_to_mem_lsqio_pendingst;
         io_ooo_to_mem_lsqio_scommit = this.vif.mon_mp.mon_cb.io_ooo_to_mem_lsqio_scommit;
+        io_ooo_to_mem_isStoreException = this.vif.mon_mp.mon_cb.io_ooo_to_mem_isStoreException;
 
         if(this.cfg.xz_sw==tcnt_dec_base::ON && this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_lsqio_pendingPtr_flag,io_ooo_to_mem_lsqio_pendingPtr_flag,1);
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_lsqio_pendingPtr_value,io_ooo_to_mem_lsqio_pendingPtr_value,`MEMBLOCK_DUT_ROB_VALUE_W);
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_flushSb,io_ooo_to_mem_flushSb,1);
+            `ifdef MEMBLOCK_UT
+                `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_isStoreException,io_ooo_to_mem_isStoreException,1);
+            `endif
 
         end
         //if(xxxTODOxxx==1'b1) begin

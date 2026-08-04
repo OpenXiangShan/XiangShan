@@ -242,20 +242,30 @@ function void memblock_env::connect_phase(uvm_phase phase);
     this.u_prefetch_agent_agent.mon_item_port.connect(this.prefetch_agent_mon2rm_fifo.analysis_export);
     this.rm.prefetch_agent_mon_item_port.connect(this.prefetch_agent_mon2rm_fifo.blocking_get_export);
 
-    this.u_io_mem_to_ooo_ctrl_agent_agent.mon_item_port.connect(this.io_mem_to_ooo_ctrl_agent_mon2rm_fifo.analysis_export);
     this.rm.io_mem_to_ooo_ctrl_agent_mon_item_port.connect(this.io_mem_to_ooo_ctrl_agent_mon2rm_fifo.blocking_get_export);
+    if(this.cfg.u_io_mem_to_ooo_ctrl_agent_agent_cfg.mon_sw==tcnt_dec_base::ON) begin
+        this.u_io_mem_to_ooo_ctrl_agent_agent.mon_item_port.connect(this.io_mem_to_ooo_ctrl_agent_mon2rm_fifo.analysis_export);
+    end
 
-    this.u_io_mem_to_ooo_int_wb_agent_agent.mon_item_port.connect(this.io_mem_to_ooo_int_wb_agent_mon2rm_fifo.analysis_export);
     this.rm.io_mem_to_ooo_int_wb_agent_mon_item_port.connect(this.io_mem_to_ooo_int_wb_agent_mon2rm_fifo.blocking_get_export);
+    if(this.cfg.u_io_mem_to_ooo_int_wb_agent_agent_cfg.mon_sw==tcnt_dec_base::ON) begin
+        this.u_io_mem_to_ooo_int_wb_agent_agent.mon_item_port.connect(this.io_mem_to_ooo_int_wb_agent_mon2rm_fifo.analysis_export);
+    end
 
-    this.u_io_mem_to_ooo_vec_wb_agent_agent.mon_item_port.connect(this.io_mem_to_ooo_vec_wb_agent_mon2rm_fifo.analysis_export);
     this.rm.io_mem_to_ooo_vec_wb_agent_mon_item_port.connect(this.io_mem_to_ooo_vec_wb_agent_mon2rm_fifo.blocking_get_export);
+    if(this.cfg.u_io_mem_to_ooo_vec_wb_agent_agent_cfg.mon_sw==tcnt_dec_base::ON) begin
+        this.u_io_mem_to_ooo_vec_wb_agent_agent.mon_item_port.connect(this.io_mem_to_ooo_vec_wb_agent_mon2rm_fifo.analysis_export);
+    end
 
-    this.u_io_mem_to_ooo_wakeup_agent_agent.mon_item_port.connect(this.io_mem_to_ooo_wakeup_agent_mon2rm_fifo.analysis_export);
     this.rm.io_mem_to_ooo_wakeup_agent_mon_item_port.connect(this.io_mem_to_ooo_wakeup_agent_mon2rm_fifo.blocking_get_export);
+    if(this.cfg.u_io_mem_to_ooo_wakeup_agent_agent_cfg.mon_sw==tcnt_dec_base::ON) begin
+        this.u_io_mem_to_ooo_wakeup_agent_agent.mon_item_port.connect(this.io_mem_to_ooo_wakeup_agent_mon2rm_fifo.analysis_export);
+    end
 
-    this.u_io_mem_to_ooo_iq_feedback_agent_agent.mon_item_port.connect(this.io_mem_to_ooo_iq_feedback_agent_mon2rm_fifo.analysis_export);
     this.rm.io_mem_to_ooo_iq_feedback_agent_mon_item_port.connect(this.io_mem_to_ooo_iq_feedback_agent_mon2rm_fifo.blocking_get_export);
+    if(this.cfg.u_io_mem_to_ooo_iq_feedback_agent_agent_cfg.mon_sw==tcnt_dec_base::ON) begin
+        this.u_io_mem_to_ooo_iq_feedback_agent_agent.mon_item_port.connect(this.io_mem_to_ooo_iq_feedback_agent_mon2rm_fifo.analysis_export);
+    end
 
     this.u_other_ctrl_agent_agent.mon_item_port.connect(this.other_ctrl_agent_mon2rm_fifo.analysis_export);
     this.rm.other_ctrl_agent_mon_item_port.connect(this.other_ctrl_agent_mon2rm_fifo.blocking_get_export);

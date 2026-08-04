@@ -963,7 +963,7 @@ response 确定后，遍历 uid_tlb_record_by_uid，按完整 key 字段回填�
 ### 10.1 残余风险
 
 - `hd_misalign_ld/st_enable` 和 `priv_debug` 目前只保存，不驱动 directed 异常、权限或 debug-mode 行为；这些功能仍需独立专项 plan。
-- `sfence_bits_flushPipe` 目前只完成接口字段保真，不模拟完整 core ROB 提交点 pipeline flush；年轻 uid kill、queue 回滚和 terminal 重收敛仍是 TODO。
+- `sfence_bits_flushPipe` 已完成当前 MemBlock standalone 所需的接口字段保真。完整 core 的 ROB 提交点 `flushAfter` 由 ROB/CtrlBlock 拥有，不是 MemBlock 本地行为；当前测试框架不需要也不得从该字段补建年轻 uid kill、queue 回滚或 terminal 重收敛，因此这不是遗留 TODO。
 - smoke 不专门断言 directed `flushPipe=1`、重复软件 reset 和 snapshot-only 字段动态变化；这些场景当前依赖静态源码审计，未声称已被 testcase 命中。
 
 ### 10.2 结论

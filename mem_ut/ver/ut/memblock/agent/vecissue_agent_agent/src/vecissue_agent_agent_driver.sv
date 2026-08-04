@@ -101,7 +101,6 @@ endtask:send_pkt
 task vecissue_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
 
     if(drv_mode==tcnt_dec_base::DRV_0) begin
-        vif.drv_mp.drv_cb.io_ooo_to_mem_isStoreException <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_flowNum <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_src_0 <= '0;

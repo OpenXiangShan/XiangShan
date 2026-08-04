@@ -7,13 +7,24 @@
 
 这两类 flow 都不等待 DUT monitor 产生真实后端反馈：
 - `soft_test` 是软件事件模拟闭环，用于快速验证 status/queue/commit/deq/replay 规则；
-  replay smoke 会注入与 V2 monitor 同格式的 SQ-only raw，并复用公共 adapter/batch handler。
+  replay smoke 和 store fault smoke 会注入与 V2 monitor 同格式的 SQ-only raw，并复用公共
+  adapter/batch handler。
 - `real_mixed` 是真实 DUT smoke 的定向主表构造分支，只负责生成混合 load/store 主表，不替代 monitor/recovery 逻辑。
+
+`soft_test_tc_dispatch_smoke` 会在环境创建前通过 `configure_smoke_env_cfg()` 关闭五个
+DUT output monitor（ctrl、int writeback、vec writeback、wakeup、IQ feedback）。software-only场景不消费这些
+硬件采样 raw，而是直接注入软件 event；这样未驱动 DUT output 的 X 值不会在 smoke 主序列开始前触发 monitor fatal。
+`memblock_env::connect_phase()` 对这五个 agent 按同一个`mon_sw`条件连接`mon_item_port`，因此关闭monitor时
+不会解引用未创建的port；默认`mon_sw=ON`的real smoke连接保持原样。该设置只作用于
+`soft_test_tc_dispatch_smoke`及其子类，不改变 real smoke 的 monitor、raw queue 或 recovery 路径。
 
 对应主要源码：
 
 - `mem_ut/ver/ut/memblock/seq/base_seq/memblock_main_dispatch_manual_main_table_sequence.sv`
+- `mem_ut/ver/ut/memblock/tc/src/tc_smoke.sv`
+- `mem_ut/ver/ut/memblock/tc/src/soft_test/soft_test_tc_dispatch_smoke.sv`
 - `mem_ut/ver/ut/memblock/seq/base_seq/soft_test/soft_test_memblock_dispatch_smoke_sequence.sv`
+- `mem_ut/ver/ut/memblock/seq/base_seq/soft_test/soft_test_memblock_dispatch_fault_smoke_sequence.sv`
 - `mem_ut/ver/ut/memblock/seq/base_seq/soft_test/soft_test_memblock_dispatch_replay_smoke_sequence.sv`
 - `mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
 - `mem_ut/ver/ut/memblock/seq/base_seq_help/lsq_commit_handler.sv`
@@ -23,7 +34,10 @@
 
 ```mermaid
 flowchart TD
-    A[soft_test_tc_dispatch_smoke / replay_smoke] --> B[soft_test_memblock_dispatch_smoke_sequence.body]
+    A0[tc_smoke.build_phase] --> A1[configure_smoke_env_cfg]
+    A1 --> A2[disable DUT output monitors for soft_test]
+    A2 --> A[soft_test_tc_dispatch_smoke / replay_smoke]
+    A --> B[soft_test_memblock_dispatch_smoke_sequence.body]
     B --> C[build_directed_main_table]
     C --> D[make_directed_transaction]
     D --> E[import_manual_main_table]
@@ -60,7 +74,10 @@ flowchart TD
 Soft test / mixed directed flow：
 
 1. soft_test smoke 构造阶段：
-   body 先 build_directed_main_table；
+   `tc_smoke.build_phase` 创建 smoke cfg 后调用 `configure_smoke_env_cfg`；
+   software-only子类关闭五个不会被本场景消费的 DUT output monitor，避免未驱动 output 的 X 值进入 raw monitor；
+   环境随后按该 cfg 创建 agent，soft test 不创建上述 monitor，也不消费其 raw queue；
+   body 再 build_directed_main_table；
    build_directed_main_table 通过 make_directed_transaction 直接构造 uid 0 load和uid 1 store；
    V2当前未闭环AMO/MOU，因此默认software smoke不再创建第三笔AMO；
    import_manual_main_table 把手工 transaction 导入 common_data；
@@ -78,6 +95,8 @@ Soft test / mixed directed flow：
    replay smoke用submit_raw_sta_iq_feedback构造V2 SQ-only raw，写入raw_iq_feedback_q后
    调用collect_monitor_event_batch，复用真实adapter/batch handler形成hit/miss语义；
    hit=0进入replay recovery，hit=1先设置sta_issue_feedback_success；
+   store fault smoke同样在STA fault real-WB前注入hit=1，满足既有严格STA写回前置条件；
+   fault smoke在fault real-WB落表后调用exception_redirect_replay_task，消费exception_event_q中的recovery event；
    replay smoke随后注入旧快照和当前快照real-WB，验证stale过滤与最终完成；
    commit_and_deq_lsq 通过 lsq_commit_handler 收敛 ROB commit 和 LQ/SQ deq；
    check_final_status / check_replay_final_status 最后验证所有状态和 replay 轮次正确。

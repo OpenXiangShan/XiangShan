@@ -18,7 +18,6 @@
 interface vecissue_agent_agent_interface  (input bit clk,input bit rst_n);
 
 
-    logic io_ooo_to_mem_isStoreException;
     logic [4:0] io_ooo_to_mem_issueVldu_0_bits_flowNum;
     logic io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay;
     logic [127:0] io_ooo_to_mem_issueVldu_0_bits_src_0;
@@ -100,7 +99,6 @@ interface vecissue_agent_agent_interface  (input bit clk,input bit rst_n);
             default input #`DEF_SETUP_TIME output #`DEF_HOLD_TIME;
         `endif
 
-        output io_ooo_to_mem_isStoreException;
         output io_ooo_to_mem_issueVldu_0_bits_flowNum;
         output io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay;
         output io_ooo_to_mem_issueVldu_0_bits_src_0;
@@ -183,7 +181,6 @@ interface vecissue_agent_agent_interface  (input bit clk,input bit rst_n);
             default input #`DEF_SETUP_TIME output #`DEF_HOLD_TIME;
         `endif
 
-        input  io_ooo_to_mem_isStoreException;
         input  io_ooo_to_mem_issueVldu_0_bits_flowNum;
         input  io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay;
         input  io_ooo_to_mem_issueVldu_0_bits_src_0;

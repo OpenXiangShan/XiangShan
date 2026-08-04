@@ -15,7 +15,6 @@
     end \
     `ifdef MEMBLOCK_UT \
     initial begin \
-        force RTL_PATH.io_ooo_to_mem_isStoreException = U_IF_NAME.io_ooo_to_mem_isStoreException; \
         force RTL_PATH.io_ooo_to_mem_issueVldu_0_bits_flowNum = U_IF_NAME.io_ooo_to_mem_issueVldu_0_bits_flowNum; \
         force RTL_PATH.io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay = U_IF_NAME.io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay; \
         force RTL_PATH.io_ooo_to_mem_issueVldu_0_bits_src_0 = U_IF_NAME.io_ooo_to_mem_issueVldu_0_bits_src_0; \
@@ -94,7 +93,6 @@
     end \
     `else \
     initial begin \
-        force U_IF_NAME.io_ooo_to_mem_isStoreException = RTL_PATH.io_ooo_to_mem_isStoreException; \
         force U_IF_NAME.io_ooo_to_mem_issueVldu_0_bits_flowNum = RTL_PATH.io_ooo_to_mem_issueVldu_0_bits_flowNum; \
         force U_IF_NAME.io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay = RTL_PATH.io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay; \
         force U_IF_NAME.io_ooo_to_mem_issueVldu_0_bits_src_0 = RTL_PATH.io_ooo_to_mem_issueVldu_0_bits_src_0; \

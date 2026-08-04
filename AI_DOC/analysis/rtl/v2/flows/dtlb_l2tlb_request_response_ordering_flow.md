@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `bd813bc3ed5b39581be966c6518788852890ff6f` |
+| 核验 commit | `f3bdd04b3763147e714a786d078e0cb90460a31d` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `src/main/scala/xiangshan/cache/mmu`、`src/main/scala/xiangshan/mem/MemBlock.scala`、`build_memblock/rtl/MemBlock.sv` |
-| 最后核验日期 | `2026-07-21` |
+| 最后核验日期 | `2026-07-29` |
 
 ## Flow 范围
 
@@ -36,6 +36,29 @@ L2Cache 或 memory 下游模型。
    在发往 L2TLB 前已经合并；跨 load/store/prefetch filter 的相同 key 可以分别 fire。真实 L2TLB 对每次
    fire 增加 `tlbCounter`，LLPTW 也为每次输入保留独立 entry，只共享重复项的下游 memory wait。因此
    替代 L2TLB 的 agent 不得把已经接受的相同 key request token 合并。
+
+### 结论边界：DTLB 的 outstanding 容量与回复次序
+
+这里的 “支持 outstanding” 是指 **L2TLB 已接受一笔 DTLB request 后，DTLB 不需要等待它的 response，
+仍可继续发出后续 request**，不是指接口带有可供软件或验证环境使用的 request ID。
+
+- `PTWNewFilter` 的 load、store、prefetch 三个 filter 分别有 16、8、8 个 entry；在 V2
+  `KunminghuV2Config` 的默认参数下，DTLB 至多可保留 32 个不同的待处理 key。每个 entry 在 request fire
+  后仅置 `sent`，不会等待 response 才允许其它未发送 entry 经三路仲裁继续 issue。
+- L2TLB 把 ITLB（port 0）和 DTLB（port 1）共同计入 `tlbCounter`。默认
+  `MissQueueSize = ifilterSize(8) + dfilterSize(32) = 40`；只有 `tlbCounter < 40` 才对上游置 ready。
+  所以 DTLB 的实际可接受 outstanding 上限是“自身 32 个 filter entry”与“40 个 ITLB/DTLB 共享额度的剩余量”
+  两者中较小者，不能把 40 误解成 DTLB 独占容量。
+- 回复接口只携带 translation 内容（`s2xlate`、S1/S2 tag、ASID/VMID/permission 等），没有 request ID。
+  `PTWFilterEntry` 用这些内容扫描所有有效 entry；同一回复可同时 refill 多个内容匹配 entry。因此 requester
+  不能用“第 N 个 response 对应第 N 个 request”的 FIFO 假设关联回复。
+- 对同一 source，cache hit、PTW FSM、LLPTW 三条完成路径直接进入 `mergeArb(source)`；源码没有按 request
+  接收序号重排的结构。不同路径延迟不同时，后发的短路径请求可以先完成。因此验证 responder 必须允许
+  多 outstanding，并按 request-time key/context 构造 response；若刻意模拟乱序，不能依靠 FIFO 队首取回。
+
+一次 response 在 DTLB filter 层可能同时解除多个相同内容的 entry；但这不改变 L2TLB `tlbCounter` 以每次
+`req.fire` / `resp.fire` 计数的硬件协议。测试环境替代 L2TLB 时仍应为每次已接受的 request 独立记账，flush
+取消的 request 则按 flush 生命周期处理，不能用 key 去静默吞掉已接受 token。
 
 ## 主流程图
 
@@ -190,6 +213,8 @@ flush 清空 filter entry；验证 responder 若从顶层 monitor 建立 flush s
 
 - [V2 L2TLB agent 接口知识](../../../interface/v2/agents/l2tlb_agent.md)：内部接管点、字段和 UVM 映射。
 - [Memory flushPipe flow](memory_flush_pipe_flow.md)：sfence 与完整 core flushPipe 的不同职责。
+- [MMU GPF/AF 异常优先级与并发边界 flow](mmu_gpf_af_exception_priority_flow.md)：response 中 S1/S2 fault
+  字段到 L1 TLB/LSU 异常编码的优先级。
 - `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md`：
   测试框架多 outstanding responder 的执行方案。
 
@@ -215,6 +240,7 @@ flush 清空 filter entry；验证 responder 若从顶层 monitor 建立 flush s
 
 | 日期 | commit | 旧结论 | 新结论 | 修订原因 | 影响范围 |
 |---|---|---|---|---|---|
+| 2026-07-29 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 已说明 DTLB/L2TLB 支持多笔 request，但容量边界和“支持 outstanding”含义没有在同一处明确展开 | 明确 DTLB filter 的 16+8+8 entry 上限、ITLB/DTLB 共享的 40-entry L2TLB 额度、无 request ID 的内容匹配，以及不保证 FIFO 回复 | 用户要求根据当前 V2 Scala 源码确认 L2TLB 回复 DTLB 是否支持 outstanding | V2 DTLB/L2TLB request-response flow、L2TLB responder 设计 |
 | 2026-07-21 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 首次建立，无旧的长期 flow 文档 | 建立 V2 DTLB filter 多 outstanding、L2TLB 多路径完成和按内容乱序匹配结论 | 用户要求结合 Scala 源码决定测试 responder 是否支持乱序回复 | V2 DTLB/L2TLB request-response flow |
 
 ## 待确认项

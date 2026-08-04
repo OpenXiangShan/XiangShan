@@ -16,6 +16,19 @@ class soft_test_tc_dispatch_smoke extends tc_smoke;
         super.new(name, parent);
     endfunction:new
 
+    virtual function void configure_smoke_env_cfg(input memblock_env_cfg cfg);
+        if (cfg == null) begin
+            `uvm_fatal(get_type_name(), "software smoke got null env cfg")
+        end
+        super.configure_smoke_env_cfg(cfg);
+        // Software smoke injects synthetic events directly and does not consume DUT output raw queues.
+        cfg.u_io_mem_to_ooo_ctrl_agent_agent_cfg.mon_sw = tcnt_dec_base::OFF;
+        cfg.u_io_mem_to_ooo_int_wb_agent_agent_cfg.mon_sw = tcnt_dec_base::OFF;
+        cfg.u_io_mem_to_ooo_vec_wb_agent_agent_cfg.mon_sw = tcnt_dec_base::OFF;
+        cfg.u_io_mem_to_ooo_wakeup_agent_agent_cfg.mon_sw = tcnt_dec_base::OFF;
+        cfg.u_io_mem_to_ooo_iq_feedback_agent_agent_cfg.mon_sw = tcnt_dec_base::OFF;
+    endfunction:configure_smoke_env_cfg
+
     virtual function void build_phase(uvm_phase phase);
         super.build_phase(phase);
         configure_software_smoke_default_sequences();

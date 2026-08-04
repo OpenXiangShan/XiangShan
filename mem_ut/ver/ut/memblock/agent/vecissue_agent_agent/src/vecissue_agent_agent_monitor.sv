@@ -34,7 +34,6 @@ endtask:run_phase
 task vecissue_agent_agent_monitor::mon_data();
 
 
-    logic io_ooo_to_mem_isStoreException;
     logic [4:0] io_ooo_to_mem_issueVldu_0_bits_flowNum;
     logic io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay;
     logic [127:0] io_ooo_to_mem_issueVldu_0_bits_src_0;
@@ -114,7 +113,6 @@ task vecissue_agent_agent_monitor::mon_data();
     while(1) begin
         @this.vif.mon_mp.mon_cb;
 
-        io_ooo_to_mem_isStoreException = this.vif.mon_mp.mon_cb.io_ooo_to_mem_isStoreException;
         io_ooo_to_mem_issueVldu_0_bits_flowNum = this.vif.mon_mp.mon_cb.io_ooo_to_mem_issueVldu_0_bits_flowNum;
         io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay = this.vif.mon_mp.mon_cb.io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay;
         io_ooo_to_mem_issueVldu_0_bits_src_0 = this.vif.mon_mp.mon_cb.io_ooo_to_mem_issueVldu_0_bits_src_0;
