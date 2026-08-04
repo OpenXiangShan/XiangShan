@@ -267,9 +267,11 @@ DCache Acquire A.fire：
   因此该 record 最早在 t+3 参加返回仲裁。
 
 DCache CBO A.fire / C Release(数据或无数据).fire：
-  只要求共享 DCache response record 有空位；
-  分别建立 CBOAck 或 ReleaseAck record，不分配 Grant sink；
-  后续复用同一 DCache admission、ready queue、delay、ORDERED/REORDER 和 D hold 流程。
+  Release 只要求共享 DCache response record 有空位，并直接建立 ReleaseAck record；
+  CBO miss 在 A.fire 预留一笔 capacity 后直接转换为 CBOAck record；
+  CBO hit 还要求共享 Probe record 有空位，先保留 CBO reservation，等 Probe C completion 后才转换为 CBOAck；
+  CBOAck/ReleaseAck 均不分配 Grant sink，建立 record 后复用同一 DCache admission、ready queue、delay、
+  ORDERED/REORDER 和 D hold 流程。
 
 Uncache 请求真实 fire：
   如果 Uncache response record 数量小于 MEMBLOCK_DUT_UNCACHE_MAX_OUTSTANDING（固定为 16），
@@ -455,7 +457,7 @@ response record 准入机会。
 修改后：
 
 ```text
-DCache Acquire/CBO/Release fire -> 共用 16 笔 response record -> 固定 admission 2 拍 -> ready queue -> 默认随机 1..10 拍 -> D response
+DCache Acquire/Release fire、CBO miss 或 CBO hit 的 Probe completion -> 共用 16 笔 response record -> 固定 admission 2 拍 -> ready queue -> 默认随机 1..10 拍 -> D response
 Uncache A.fire   -> opcode 白名单 -> admission 0 拍 -> ready queue -> 默认随机 1..10 拍 -> D response
 最后一个 D.fire 归还 response record；仅 Acquire 的 Grant sink 继续等待 E.fire。两侧分别维护
 outstanding、timer、ready queue 和 backpressure；默认 ORDERED，显式开启后才 REORDER。

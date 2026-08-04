@@ -5,7 +5,7 @@
 | 关联 plan | `AI_DOC/plan/test_framework/plan/do/mem_ut_dcache_multi_probe_alias_state_plan_20260803.md` |
 | 实现范围 | `dcache_mem__access_base_sequence` 的 line/probe 生命周期基础 |
 | 评审结论 | 通过：实现与 plan 的 `IMPLEMENTATION_DELTA` 一致；未发现阻断性逻辑遗漏 |
-| 未覆盖边界 | 本 review 对应的 alias foundation 提交未包含随机 multi-batch/toB、CBO Probe closure、轻量 l2Flush；2026-08-04 后续专项已完成 multi-batch/toB 与轻量 l2Flush，CBO closure 仍待实现 |
+| 未覆盖边界 | 本 review 对应的 alias foundation 提交未包含随机 multi-batch/toB、CBO Probe closure、轻量 l2Flush；2026-08-04 后续专项已完成 multi-batch/toB、轻量 l2Flush 与 CBO closure |
 
 ## 1. 术语与抽象功能说明
 

@@ -23,6 +23,11 @@
 > Probe/flush 参数迁移说明（2026-08-04）：本文出现的 `MEMBLOCK_L2_PROBE_ENABLE_WT`、单笔
 > `Probe(toN)` 与 zero-only `io_l2_flush_done` 只反映当时实现。该旧参数已删除；现行随机 batch/toB
 > 与轻量 l2Flush 行为以 `mem_ut_dcache_multi_probe_tob_control_plan_20260730.md` 为准。
+>
+> CBO 闭环实施说明（2026-08-04）：本文中“CBO A.fire 直接建立 CBOAck，CBOAck.fire 删除 line”的
+> 描述仅适用于 CBO miss 的历史路径。现行命中 CBO 先保留 context/response reservation，使用共享
+> `Probe(Clean->toB, Flush/Inval->toN)` 等待 C response；toB/toN 在 Probe 完成时更新 line，最后才发送
+> CBOAck。以 `mem_ut_v2_dcache_cbo_probe_closure_plan_20260731.md` 及其 implementation review 为准。
 
 ## 1. 目标、范围与替代关系
 

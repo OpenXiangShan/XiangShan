@@ -460,6 +460,7 @@ REORDER 的 Hint 仍然只属于当前 D response。
 本专项通过。DCache/Uncache responder 现在具备独立、可配置且不改变主框架控制流的 response
 调度能力；DCache 多笔 Grant 使用动态 sink 闭环，Uncache 不再把非法 opcode 静默当 load。
 
-仍待后续专项处理：D-error 注入、multi Probe/toB、CBO probe closure、alias conflict、L2 flush
-completion，以及多 outstanding/reorder/capacity-full 的 directed stress testcase。它们不得以恢复旧
-`pending_d_*` 或固定 sink 逻辑的方式实现。
+后续已完成 D-error 注入、multi Probe/toB、alias conflict、轻量 L2 flush 和 CBO Probe closure；本 review
+中的“待后续”仅是本提交当时的边界。当前仍待独立专项处理的是完整 CoupledL2 directory、多个 CBO context
+以及多 outstanding/reorder/capacity-full 的 directed stress testcase。它们不得以恢复旧 `pending_d_*` 或
+固定 sink 逻辑的方式实现。

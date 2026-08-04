@@ -6,18 +6,21 @@
 responder 行为。它只模拟 MemBlock 对外的 L2 交接，不实现完整 L2 directory、MSHR、替换或权限目录。
 当前已具备 alias conflict 所需的共享 line/probe 生命周期基础：同一 physical line 的新 alias Acquire
 会先 Probe(toN) 旧 alias，再继续原 A 请求；每笔 Probe 使用稳定 token 匹配 C reply。本 flow 已支持
-随机 multi-batch `Probe(toB/toN)` 与轻量 `l2Flush` snapshot；CBO Probe closure 仍由独立专项扩展。
+随机 multi-batch `Probe(toB/toN)`、轻量 `l2Flush` snapshot 和 CBO 命中 Probe 闭环。CBO 只扩展
+DCache responder 内部生命周期；V2 主表/LSQ 的主动 CBO flow 仍保持不支持。
 
 | 术语 | 当前含义 | 代码落点 | 生命周期 |
 |---|---|---|---|
 | `response record` | 已真实 A/C `fire`、等待最后一个 D beat 的 DCache 回复记录 | `dcache_rsp_q`、`current_d_record` | 建立于 A/C fire，最后一个 D.fire 后释放 record 容量 |
-| `D-error snapshot` | 本次 coherent D reply 的 `denied/corrupt` 固定值 | `dcache_response_record_t::denied/corrupt` | 建立 GrantData/CBOAck record 时采样一次，D hold 或多 beat 不重采样 |
+| `D-error snapshot` | 本次 coherent D reply 的 `denied/corrupt` 固定值 | GrantData 的 `dcache_response_record_t` 或 CBO context | GrantData record/CBO A.fire 时采样一次，D hold 或多 beat 不重采样 |
 | `eligible_cycle` | record 最早允许参加 D 返回仲裁的逻辑拍 | `dcache_response_record_t::eligible_cycle` | DCache 真实请求在 `t` fire 后最早 `t+3` 可选 |
 | `scheduler timer` | 每次选择 D response 前按 delay weight 抽一次等待的定时器 | `dcache_rsp_timer_active/due_cycle` | 无 D hold 且存在 eligible record 时启动；选出 record 后清除 |
 | `current D hold` | 已被 scheduler 选中、正在 D channel 保持 payload 的唯一 record | `current_d_record/current_d_valid` | D.ready=0 时保持；最后一个 D.fire 时结束 |
 | `dynamic sink` | 每个 Grant/GrantData 独占的 TileLink sink 标识 | `dcache_response_record_t::sink` | Acquire 接收时分配；E.fire 匹配后复用 |
 | `GrantAck wait` | 已完成最后一个 D beat、但尚未收到匹配 E.fire 的 Grant owner | `grant_ack_wait_q` | 最后 D.fire 入队；E.fire 后删除 |
 | `C reservation` | ReleaseData 第一个 C beat 为未来 ReleaseAck 预留的 response slot | `c_assembly_response_reserved` | 首 beat 建立；第二 beat 完整收集后原子转换为 ReleaseAck record |
+| `CBO context` | 一笔真实 CBO A.fire 到对应 CBOAck D.fire 的唯一软件生命周期 owner | `cbo_context_valid` 与 `pending_cbo_probe_*` | miss 直接等待 Ack；hit 等 Probe C 收敛后才建 Ack |
+| `CBO reservation` | CBO A.fire 为未来 CBOAck 预留的一笔统一 D response 容量 | `cbo_response_reserved` | A.fire 建立；direct miss 或 CBO Probe 完成时转换为 CBOAck record |
 | `Hint record` | 已和某条最终选出的 GrantData 绑定、等待本拍输出的 Hint sideband | `dcache_hint_q` | scheduler 选中 GrantData 时入队；`service_hint()` 单拍消费 |
 | `fire` | 上一拍 responder 驱动的 valid/ready 与当前 DUT 采样值同为 1 | `a_fire/b_fire/c_fire/d_fire/e_fire` | 只有 fire 可以创建、推进或释放协议状态 |
 | `line record` | physical line 的唯一轻量 alias 生命周期记录；不是完整 L2 directory | `cached_line_by_addr[line_addr]` | GrantAck 后 ACTIVE；Probe、alias conflict、GrantAck 等阶段更新 |
@@ -38,7 +41,7 @@ flowchart TD
     C --> E[start_c_assembly / consume_c_beat]
     C --> F[accept_dcache_a_request]
     C --> R[service_l2_flush]
-    F --> P[start_alias_conflict / submit_probe]
+    F --> P[start_alias_conflict / CBO context / submit_probe]
     P --> Q[service_probe_b_hold / build_probe_b_xaction]
     Q --> E
     F --> G[enqueue_dcache_response]
@@ -66,7 +69,8 @@ flowchart TD
   C.fire 用 line 筛选唯一 WAIT_C probe record；ProbeAckData 的第一拍锁定 token，第二拍只允许同 token
   继续 assembly，Release 类最终建立 ReleaseAck record；
   A.fire 解码 Acquire/CBO；若 Acquire alias 与 ACTIVE line record 不同，先保存 deferred Acquire 并建立
-  Probe(toN)，否则沿用 Grant、GrantData 或 CBOAck record 创建；
+  Probe(toN)；CBO miss 直接建立 CBOAck，CBO hit 则先保存 CBO context/error snapshot 并建立
+  Clean->toB、Flush/Inval->toN 的 Probe，只有匹配 C response 收敛后才能建立 CBOAck；
   调用 service_l2_flush：flush request 首先 DRAIN 已建立 owner；全部收敛后复制 ACTIVE line snapshot，
   逐条 submit Probe(toN)，全部 C 收敛后进入 DONE 并保持 io_l2_flush_done=1 到 request 撤销；
   scheduler 只看进入本拍前已经存在且到期的 record，独立计时后按顺序或乱序选一条成为 current D hold；
@@ -101,12 +105,14 @@ item；它不读取 monitor analysis port，也不修改 dispatch 主表、LSQ �
   记录本拍开始时 dcache_rsp_q.size()，作为 scheduler 可见上界；
   调用 scheduler；若存在 current D hold，填充 D.valid 和稳定 payload；
   GrantAck wait 非空时才打开 e_ready；
-  C assembly、已发送 Probe 的 C reply、Probe B hold、普通 Release C 和普通 A 依协议优先级准入；
+  C assembly、已发送 Probe 的 C reply、Probe B hold、普通 Release C 和普通 A 依协议优先级准入；同线
+  Release/ReleaseData 与未收敛 Probe 冲突时 fail-fast，避免删除该 Probe 的 line record；
   `service_probe_b_hold()` 只把已建 record 中的一笔变成稳定 B payload；IDLE 且无其它 owner 时
   `try_start_probe()` 按 batch 数量和 toB 权重建立互不重复 record；PROBE 状态由 snapshot 驱动固定 toN；
   最后叠加本拍 Hint，并仅在 flush DONE 驱动 io_l2_flush_done=1。
 
-global stop：停止新的随机 Probe 和新 A 准入，只排空现有协议状态；若已经观察到 L2 flush request，
+global stop：停止新的随机 Probe 和新 A 准入，只排空现有协议状态；CBO context/reservation/Probe 必须先
+自然收敛；若已经观察到 L2 flush request，
 仍必须先完成该 level handshake，不能提前退出。所有 queue、timer、D hold、GrantAck、Hint、Probe、
 C assembly、armed snapshot 与 flush state 收敛后发送最后一个 idle 并退出。
 ```
@@ -124,7 +130,8 @@ memory。A 的 Acquire 还必须有空闲 sink；alias conflict Acquire 还要�
 ```text
 AcquireBlock/AcquirePerm：line 不处于 deferred/Probe/GrantAck 中间态，response record 未满且存在空闲 sink -> 可接受；
 若是不同 alias 的 Acquire：还要求同 line 无 Probe 且 probe_record_q 少于 16；
-CBOClean/CBOFlush/CBOInval：response record 未满 -> 可接受；
+CBOClean/CBOFlush/CBOInval：没有已有 CBO context、response record 未满；若命中 line，还要求 line 为 ACTIVE、
+  无同 line Probe/deferred Acquire 且 probe_record_q 少于 16 -> 可接受；
 Release/ReleaseData：response record 未满 -> 可接受；
 其它 A opcode：fatal；ProbeAck/Data 不需要 ReleaseAck capacity。
 ```
@@ -145,7 +152,9 @@ source、param 和 memory 读取检查，并生成一个语义已固定的 respo
 ```text
 AcquireBlock：读取两个 32B memory beat，建立两拍 GrantData；分配动态 sink；保留 alias、isKeyword、一次 Hint 采样和一次 D-error snapshot；若 denied 命中则强制 corrupt=1；
 AcquirePerm：建立单拍 Grant；分配动态 sink；
-CBO：建立单拍 CBOAck；不分配 sink；denied/corrupt 由各自权重独立采样并保存在 record；
+CBO miss：在 A.fire 建 context、一次采样 denied/corrupt，并把 reservation 直接转换为单拍 CBOAck；
+CBO hit：在 A.fire 建 context/reservation 和错误快照，Clean 创建 Probe(toB)，Flush/Inval 创建 Probe(toN)；
+  只有匹配 ProbeAck 或完整 ProbeAckData 完成后才转换为 CBOAck；不分配 sink；
 所有 record：eligible_cycle = accept_cycle + 3；入 dcache_rsp_q；
 ```
 
@@ -202,14 +211,16 @@ beat 或释放 record。二者不决定 scheduler 的选择和 A/C 准入。
 ```text
 GrantData：按 beat_idx 输出两个 32B beat；第一个 D.fire 只递增 beat_idx；
 最后一个 GrantData D.fire 或 Grant D.fire：把 line/alias/sink 转入 grant_ack_wait_q；释放 current record；
-CBOAck：当前 direct-ack 路径最后 D.fire 后按 CBO opcode 删除对应 line record（clean 保留）；释放 record；
+CBOAck：只校验并清除匹配的 CBO context；CBO hit 的 toB/toN line 更新已经在 Probe C 完成时进行，miss 没有
+  line record 可删除；释放 record；
 ReleaseAck：最后 D.fire 后释放 record；
 ```
 
 `MEMBLOCK_L2_GRANTDATA_DENIED_WT/CORRUPT_WT` 和
 `MEMBLOCK_L2_CBO_ACK_DENIED_WT/CORRUPT_WT` 都经过 `seq_csr_common` 读取。它们不改变
 response record 的准入、延迟、sink 或 Hint 逻辑。GrantData 的两个 D beat 与任何 D.ready hold
-只复用 record 中已保存的错误位；CBOAck 仍按原 source 和 opcode 完成 cached line 动作。
+只复用 record 中已保存的错误位；CBOAck 的 source/opcode 与原 A.fire context 一致，不能在 Probe latency 后
+重新随机错误字段。
 
 最后一个 D.fire 立即归还 response record capacity，但 Grant sink 仍属于 `grant_ack_wait_q`，直到 E.fire
 匹配后才可分配给新的 Acquire。
@@ -264,6 +275,12 @@ line 唯一找到 `WAIT_C` probe record，保存其 `c_assembly_probe_token` 并
 writeback、将 line record 的 `data_valid` 清零并报告 `uvm_error`，但仍调用 `complete_probe_record()` 完成
 toN/toB 生命周期，不能让 owner 永久残留。
 
+CBO Probe 复用同一 C 路径：`complete_probe_record()` 先按 token 校验 CBO context，再按 target cap 更新
+line record，最后调用 `complete_cbo_probe()` 把 A.fire 时保留的 response reservation 原子转换为 CBOAck。
+因此 CBOClean 的 toB 保留 ACTIVE alias，CBOFlush/CBOInval 的 toN 删除 line；两种路径都必须先完成
+ProbeAck 或完整 ProbeAckData。轻量模型不合并同一 physical line 的 Release 与 Probe lifecycle，故发现该
+冲突立即 fatal；不同 line 的 Release 仍可按原路径返回 ReleaseAck。
+
 `submit_probe()` 是 B/C 生命周期的唯一创建入口：它从 ACTIVE line record 复制旧 alias、target cap、owner
 和随机 batch_id，
 分配 token 并保证同一 line 不会有第二笔未完成 Probe。`service_probe_b_hold()` 只将一个 QUEUED record
@@ -284,12 +301,12 @@ done level，直到 `io_outer_l2_flush_en=0` 清空 flush-local snapshot 回到 
 ## 7. Reset、Stop 与边界
 
 `clear_runtime_state()` 在 reset 时清除 `dcache_rsp_q`、timer、current D hold、GrantAck wait、Hint queue、
-C reservation、Probe 和 cache map。shared backing/overlay 的清空只由 testcase 的 memory lifecycle owner
+C reservation、CBO context/reservation、Probe 和 cache map。shared backing/overlay 的清空只由 testcase 的 memory lifecycle owner
 在 responder 启动前完成；reset 不应重新清空公共 memory。
 
 global stop 的退出条件包括：flush state 已回到 IDLE、无 queued/current D record、无运行 timer、无 GrantAck
 wait、无 Hint、无 B hold、`probe_record_q` 为空、无 C assembly/reservation、无 armed A/C snapshot 和当前
-未处理 A/C valid。
+未处理 A/C valid、无 CBO context/reservation/Probe。
 已完成 GrantAck 的 ACTIVE line record 是历史状态，不阻止退出。
 
 本 flow 不拥有主表、LSQ admission、issue、writeback、commit/deq、redirect/replay、pass/fail 或 terminal。
@@ -312,9 +329,14 @@ Uncache TL-UL A/D responder 的独立 queue 和 delay 见
   参数；随机 policy 从单笔 toN 扩展为多笔互不重复 `toB/toN`，但仍复用同一 Probe record/token/B hold；
 - 新增 flush-local `IDLE/DRAIN/PROBE/DONE` 状态机：采样外部 level request，DRAIN 后固定 ACTIVE line
   snapshot，逐条 Probe(toN)，完成后保持 `io_l2_flush_done` 到 request 撤销；
+- 新增单笔 CBO context：CBO miss 保持 direct Ack；hit 必须先经过共享 `Probe(toB/toN)` 和匹配 C completion，
+  再把预留 response slot 转为 CBOAck。CBO error 在 A.fire 固定，CBOAck D.fire 只清 context；
+- 新增保护：命中 CBO 预检 Probe capacity；同一 physical line 的 Release/ReleaseData 与未收敛 Probe
+  fail-fast，不静默删除 Probe owner；
 - 保留原有 A/C/E/Probe/overlay 和 global-stop 所有权，不把 responder 状态写入主表或 status table。
 
 当前默认 delay 为 `1..10` cycle、顺序返回。D-error 随机注入已由
 `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md` 实现：它只扩展 response record 的
 合法 D payload，不改变本 flow 的调度或主框架控制行为。alias conflict、随机 multi-batch/toB 与轻量
-L2 flush 已实现；CBO Probe closure 仍由独立 plan 实现，不能在本 flow 中宣称已覆盖。
+L2 flush 与 CBO Probe closure 已实现；完整 CoupledL2 directory、多个 CBO 并发和 V2 主表主动 CBO
+闭环仍不属于本 flow。

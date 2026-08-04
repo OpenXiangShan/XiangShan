@@ -94,6 +94,23 @@ MSHR 完成后的 miss 路径，不是 `A.user_needHint` 的直接响应。
 这里的“`DontCare`”不是硬件保证为 0。它表示该 opcode 不消费该字段；测试框架只能
 为自身驱动/比较选择已知值，不能把该已知值反向解释为 DUT 功能语义。
 
+### 3.4 当前轻量 responder 的 CBO 闭环
+
+测试框架只在真实 CBO A.fire 后建立一个 CBO context，并保持到同 source 的 CBOAck D.fire：
+
+```text
+CBO miss：A.fire -> CBO reservation -> CBOAck
+CBOClean hit：A.fire -> Probe(toB) -> ProbeAck/完整 ProbeAckData -> CBOAck
+CBOFlush/CBOInval hit：A.fire -> Probe(toN) -> ProbeAck/完整 ProbeAckData -> 删除旧 line -> CBOAck
+```
+
+命中路径的 CBOAck 不能在 B.fire 时或 ProbeAckData 第一拍时提前发送。A.fire 时固定 CBO source、opcode、
+line、`denied/corrupt` 快照和一笔 response capacity；Probe C 收敛时只把该 reservation 转为 CBOAck record。
+Clean 的 toB 保留 old alias，Flush/Inval 的 toN 使该 line 无效。CBOAck 不申请 sink，也不等待 E。
+
+该闭环只覆盖 DCache responder 的 coherent B/C/D 生命周期，不开放 V2 主表主动 CBO、CBO.ZERO、early
+CBO fault、CBO 专用 LSQ/ROB commit/deq 或多个 CBO context。
+
 ## 4. Alias 语义
 
 `user_alias` 是 DCache VIPT set/index 所需的 alias 补充信息，不能当作普通数据字段
@@ -225,6 +242,11 @@ Probe 生命周期；不能在第一拍到达时提前释放 owner。
 `Probe(toN)` 与 `Probe(toB)` 都使用被 Probe 的旧 alias。区别在于 `param` 描述的
 coherence 状态转换；不能用 alias 新旧关系替代 `param` 语义。
 
+CBO owner 也使用相同的 `probe_record`/token。C response 按 physical line 唯一定位 WAIT_C record 后，
+必须再校验 CBO context 保存的 token、line 和 target cap；不匹配不得生成 CBOAck。同一 physical line 的
+Release/ReleaseData 与未收敛 Probe 不能在轻量模型中合并，responder 以 fatal 拒绝该冲突，避免 Release
+删除该 Probe 的 line record；不同 line 的 Release 仍允许独立完成。
+
 ### 6.1 C 通道有效字段、固定扩展字段与 `corrupt` 解释
 
 虽然 V2 顶层展开了 `C.user_alias`、`C.user_vaddr`、`C.user_reqSource`、
@@ -267,7 +289,7 @@ DCache coherent port 的合法 responder 回复。
 |---|---|---|---|
 | `GrantData` | `param`、`size`、`source`、`sink`、`denied`、`corrupt`、`data`、`echo_isKeyword` | 无 | `echo_isKeyword` 必须与原 A 请求一致；该值决定两个 32-byte half 的回填顺序 |
 | `Grant` | `param`、`size`、`source`、`sink`、`denied`、`corrupt` | `data`、`echo_isKeyword` 不承载 payload/关键 half 语义；本地 responder 应驱动已知 0 | 用于权限完成或不带数据的 grant，随后等待对应 E `sink` 的 GrantAck |
-| `CBOAck` | `size`、`source`、`denied/corrupt` | `param`、`sink`、`data`、`echo_isKeyword` 不能作为 CBO 类型或地址关联 | 以 A `source` 和已保存的 CBO record 关联；当前 CHI/CoupledL2 内部实现不构成这些保留位的固定值承诺 |
+| `CBOAck` | `size`、`source`、`denied/corrupt` | `param`、`sink`、`data`、`echo_isKeyword` 不能作为 CBO 类型或地址关联 | 以 A.fire 保存的单笔 CBO context 关联；命中 CBO 必须先完成匹配 B/C Probe，CBOAck D.fire 只清 context |
 | `ReleaseAck` | `size`、`source`、`denied` | `param=0`、`sink=0`；`data`、`echo_isKeyword` reserved | 按 C `source` 完成 Release/Writeback 生命周期；不等待 E |
 
 `GrantBuffer.toTLBundleD()` 的通用构造函数先将 `echo_isKeyword` 置 0，但真实 Grant
@@ -344,7 +366,7 @@ D 通道错误字段必须按 opcode 驱动，不能随意组合：
 |---|---|---|---|
 | `GrantData` | DCache 会累计并向 refill/forward error 路径传递 | DCache 会累计并标记返回数据错误；若 `denied=1`，TileLink 合同要求 `corrupt=1` | 默认两者均为 0。`MEMBLOCK_L2_GRANTDATA_*_WT` 只在对应 response record 创建时采样一次，并在全部 beat 与 D hold 中保持不变。 |
 | `Grant` | DCache 会累计该错误，但当前轻量模型不注入 | 合法 Grant 必须为 0 | 正常模式均为 0；不把 `Grant.corrupt=1` 当作合法随机激励。 |
-| `CBOAck` | CMOUnit 传给 LSQ `CMOResp.denied` | CMOUnit 传给 LSQ `CMOResp.corrupt` | 默认两者均为 0。`MEMBLOCK_L2_CBO_ACK_*_WT` 在单拍 CBOAck record 创建时独立采样，仍发送匹配 CBO source 的 Ack，使 CMO FSM 能完成。 |
+| `CBOAck` | CMOUnit 传给 LSQ `CMOResp.denied` | CMOUnit 传给 LSQ `CMOResp.corrupt` | 默认两者均为 0。`MEMBLOCK_L2_CBO_ACK_*_WT` 在 CBO A.fire 时独立采样并保存；miss 立即、hit 在 Probe C 完成后建立同 source 的 Ack。 |
 | `ReleaseAck` | 必须为 0 | 必须为 0 | 轻量 responder 固定 0；非 0 属于协议违例，不能用作 writeback error 注入。 |
 
 当前 `dcache_mem__access_base_sequence` 的默认 normal 模式仍将 D 错误位驱为 0；只有显式设置
@@ -395,6 +417,8 @@ memory overlay 写回，但仍完成 Probe/Release 生命周期。该 D-error �
     但 alias conflict 和 l2Flush 不受该随机开关阻断。
 14. L2 flush：DRAIN/PROBE 阶段 responder 以 A.ready=0 阻止新的 coherent A 接收，C/B/D/E 仍按既有 owner
     收敛；全部 snapshot line 的 Probe(toN) 完成后才驱动 `io_l2_flush_done=1`，直到 request 撤销。
+15. CBO：miss 可直接 Ack；命中 ACTIVE line 必须先由 CBO owner 建 `toB/toN` Probe、等待匹配 C response 后
+    再 Ack。CBO response reservation 和 error snapshot 建于 A.fire，CBOAck D.fire 后才允许下一笔 CBO。
 ```
 
 当前轻量 responder 已将第 4、6、9 条落为共享 `probe_record_q` 与 `cached_line_by_addr`：每笔 B Probe
@@ -402,8 +426,9 @@ memory overlay 写回，但仍完成 Probe/Release 生命周期。该 D-error �
 锁定 token，第二拍不得切换到另一笔 Probe；不同 alias 的 Acquire 已 A.fire 后保存为 deferred request，先
 对旧 alias 发送 `Probe(toN)`，完成 C 生命周期后才建立新 Grant，并在 E GrantAck 后更新新 alias。当前
 `probe_record_q` 已扩展记录随机 batch id，支持 1、2..6、7..15 条互不重复的 `Probe(toB/toN)`；同时实现
-轻量 `IDLE/DRAIN/PROBE/DONE` l2Flush snapshot，flush 固定以 `toN` 收敛已记录 ACTIVE line。该实现不等同于
-完整 L2 directory，CBO Probe closure 仍由后续专项负责。
+轻量 `IDLE/DRAIN/PROBE/DONE` l2Flush snapshot，flush 固定以 `toN` 收敛已记录 ACTIVE line。CBO hit 也
+复用该 `probe_record_q`，用单笔 context 保留 CBO source/opcode/line/error，只有 Probe C 收敛后才形成
+CBOAck。该实现不等同于完整 L2 directory，也不支持多个并发 CBO。
 
 ## 9. 与测试框架的边界
 

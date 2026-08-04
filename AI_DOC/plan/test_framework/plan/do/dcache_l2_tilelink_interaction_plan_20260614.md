@@ -6,6 +6,11 @@
 > `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md`。
 > V2 coding 不再直接执行本文的多 source、多 sink、完整 directory 和完整并发方案；这些能力保留为
 > 后续完整 L2 model 的知识输入。
+>
+> 当前 CBO 语义同步（2026-08-04）：本文第 13.3 节的“入队 CBOAck”只代表早期完整模型草案，不能
+> 作为当前 V2 standalone responder 的命中路径合同。现行轻量实现由
+> `mem_ut_v2_dcache_cbo_probe_closure_plan_20260731.md` 定义：CBO miss 直接 Ack；命中时
+> `CBOClean -> Probe(toB)`、`CBOFlush/Inval -> Probe(toN)`，匹配 C response 完成后才建立 CBOAck。
 
 ## 1. 目标
 
