@@ -327,19 +327,28 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   replacers.foreach(_.io.replaceSetIdx := t1_setIdx)
   private val victimWayIdx = replacers.map(_.io.victimWayIdx)
 
+  private val t2_fire              = RegNext(t1_fire, init = false.B)
+  private val t2_victimWayIdx      = RegNext(VecInit(victimWayIdx))
+  private val t2_setIdx            = RegNext(t1_setIdx)
+  private val t2_bankMask          = RegNext(t1_bankMask)
+  private val t2_hitMaskOH         = RegNext(VecInit(t1_hitMaskOH))
+  private val t2_needWriteNewEntry = RegNext(t1_needWriteNewEntry)
+  private val t2_needCorrectTarget = RegNext(t1_needCorrectTarget)
+  private val t2_writeEntry        = RegNext(t1_writeEntry)
+
   banks.zipWithIndex.foreach { case (b, i) =>
-    when(t1_fire && t1_needWriteNewEntry && t1_bankMask(i)) {
+    when(t2_fire && t2_needWriteNewEntry && t2_bankMask(i)) {
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := true.B
-      b.io.writeReq.bits.setIdx       := t1_setIdx
-      b.io.writeReq.bits.wayIdx       := victimWayIdx(i)
-      b.io.writeReq.bits.entry        := t1_writeEntry
-    }.elsewhen(t1_fire && t1_needCorrectTarget && t1_bankMask(i)) {
+      b.io.writeReq.bits.setIdx       := t2_setIdx
+      b.io.writeReq.bits.wayIdx       := t2_victimWayIdx(i)
+      b.io.writeReq.bits.entry        := t2_writeEntry
+    }.elsewhen(t2_fire && t2_needCorrectTarget && t2_bankMask(i)) {
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := false.B
-      b.io.writeReq.bits.setIdx       := t1_setIdx
-      b.io.writeReq.bits.wayIdx       := OHToUInt(t1_hitMaskOH)
-      b.io.writeReq.bits.entry        := t1_writeEntry
+      b.io.writeReq.bits.setIdx       := t2_setIdx
+      b.io.writeReq.bits.wayIdx       := OHToUInt(t2_hitMaskOH)
+      b.io.writeReq.bits.entry        := t2_writeEntry
     }.elsewhen(s2_valid && s2_multiHit && s2_bankMask(i)) {
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := true.B
