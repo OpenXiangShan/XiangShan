@@ -128,7 +128,6 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val isBackendException: Bool          = Bool()
   val hasSatpFlush:       Bool          = Bool()
   val triggered:          UInt          = TriggerAction()
-  val isLastInFtqEntry:   Bool          = Bool()
   val instrEndOffset:     UInt          = UInt(FetchBlockInstOffsetWidth.W)
   val vtype:              VType         = VType()
   val specvtype:          VType         = VType()
