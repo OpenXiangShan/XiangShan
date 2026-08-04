@@ -28,3 +28,4 @@
 2. 新模型必须同步更新测试点、registry、sampler、testcase 和一致性测试。
 3. 真实回归 evidence 写入 `src/test/python/Frontend/data/`；不同 DUT、registry 或 sampler 签名的结果不得合并。
 4. 历史试点结果和旧 artifact 不得直接升级当前设计版本的 `HIT` 或 `CLOSED`。
+5. `Frontend_testpoint_0525_coverage_backannotated.csv` 的每条记录必须占一行，单元格内禁止真实换行；需要换行时改写成分号或空格串联，不要让物理行号和 `csv.reader` 逻辑记录号分离。
