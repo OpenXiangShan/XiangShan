@@ -408,7 +408,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_fallThroughPrediction = RegEnable(s2_fallThroughPrediction, s2_fire)
 
   // used for mainBTB replacer
-  mbtb.io.s3_takenMask := s3_takenMask
+  mbtb.io.s3_takenMask := s3_firstTakenBranchOH
 
   // used for ghr
   private val s3_condHitMask = VecInit(s3_mbtbResult.map(e => e.valid && e.bits.attribute.isConditional))
