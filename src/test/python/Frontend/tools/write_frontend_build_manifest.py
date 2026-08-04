@@ -17,23 +17,71 @@ if str(PROVENANCE_ROOT) not in sys.path:
 from artifact_provenance import _OBSERVABILITY_SOURCE_ALLOWLIST, write_frontend_build_manifest
 
 
+def _worktree_git_context(repo_root: Path) -> tuple[Path, Path, Path] | None:
+    """Return (common git dir, worktree index, admin dir) for a linked worktree."""
+    gitfile = repo_root / ".git"
+    if not gitfile.is_file():
+        return None
+    first_line = gitfile.read_text(encoding="utf-8").splitlines()[0].strip()
+    if not first_line.startswith("gitdir:"):
+        return None
+    admin_dir = Path(first_line.split(":", 1)[1].strip())
+    if not admin_dir.is_absolute():
+        admin_dir = (repo_root / admin_dir).resolve()
+    commondir_file = admin_dir / "commondir"
+    if commondir_file.is_file():
+        common_dir = Path(commondir_file.read_text(encoding="utf-8").strip())
+        if not common_dir.is_absolute():
+            common_dir = (admin_dir / common_dir).resolve()
+    else:
+        common_dir = admin_dir
+    return common_dir, admin_dir / "index", admin_dir
+
+
+def _git_invocation(repo_root: Path) -> tuple[list[str], dict[str, str] | None]:
+    context = _worktree_git_context(repo_root)
+    if context is None:
+        return ["git"], None
+    common_dir, index_file, _ = context
+    env = os.environ.copy()
+    env["GIT_INDEX_FILE"] = str(index_file)
+    return ["git", "--git-dir", str(common_dir), "--work-tree", str(repo_root)], env
+
+
+def _worktree_head(repo_root: Path) -> str:
+    context = _worktree_git_context(repo_root)
+    if context is None:
+        return _git(repo_root, "rev-parse", "HEAD")
+    _, _, admin_dir = context
+    head = (admin_dir / "HEAD").read_text(encoding="utf-8").strip()
+    if head.startswith("ref: "):
+        return _git(repo_root, "rev-parse", head[5:].strip())
+    return _git(repo_root, "rev-parse", head)
+
+
 def _git(repo_root: Path, *args: str) -> str:
+    command, env = _git_invocation(repo_root)
     result = subprocess.run(
-        ["git", "-C", str(repo_root), *args],
+        [*command, *args],
+        cwd=str(repo_root),
         check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env=env,
     )
     return result.stdout.strip()
 
 
 def _git_bytes(repo_root: Path, *args: str) -> bytes:
+    command, env = _git_invocation(repo_root)
     result = subprocess.run(
-        ["git", "-C", str(repo_root), *args],
+        [*command, *args],
+        cwd=str(repo_root),
         check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        env=env,
     )
     return bytes(result.stdout)
 
@@ -59,7 +107,7 @@ def main() -> int:
     args = parser.parse_args()
 
     repo_root = args.repo_root.resolve()
-    implementation_sha = _git(repo_root, "rev-parse", "HEAD")
+    implementation_sha = _worktree_head(repo_root)
     source_sha = (
         str(args.dut_source_sha).strip()
         or os.environ.get("FRONTEND_DUT_SOURCE_SHA", "").strip()
@@ -91,7 +139,7 @@ def main() -> int:
         "--",
         *delta_files,
     ) if delta_files else b""
-    source_tree_dirty = bool(_git(repo_root, "status", "--porcelain=v1", "--untracked-files=all"))
+    source_tree_dirty = bool(_git(repo_root, "status", "--porcelain", "--untracked-files=all"))
     manifest = write_frontend_build_manifest(
         args.output,
         build_root=args.build_root,
