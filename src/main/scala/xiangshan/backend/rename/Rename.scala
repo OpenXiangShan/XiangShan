@@ -66,7 +66,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // valid vec not clear by fusion(used by compress)
     val validVec = Vec(RenameWidth, Input(Bool()))
     val isFusionVec = Vec(RenameWidth, Input(Bool()))
-    val fusionCross2FtqVec = Vec(RenameWidth, Input(Bool()))
     val fusionInfo = Vec(DecodeWidth - 1, Flipped(new FusionDecodeInfo))
     // ssit read result
     val ssit = Flipped(Vec(RenameWidth, Output(new SSITEntry)))
@@ -113,7 +112,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // io alias
   private val dispatchCanAcc = io.out.head.ready
 
-  val compressUnit = Module(new NewCompressUnit())
+  val compressUnit = Module(new CompressUnit())
   // create free list and rat
   val intFreeList = Module(new MEFreeList(IntPhyRegs, RabCommitWidth))
   val fpFreeList = Module(new StdFreeList(FpPhyRegs - FpLogicRegs, FpLogicRegs, Reg_F, RabCommitWidth))
@@ -304,48 +303,26 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   //           dispatch1 ready ++ float point free list ready ++ int free list ready ++ vec free list ready     ++ not walk
   val canOut = dispatchCanAcc && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk && !io.vlCommits.isWalk && io.toLsqEnqCtrl.canAccept
 
-  val isLastFtqVec = io.in.map(_.bits.isLastInFtqEntry)
   val isFusionVec = io.isFusionVec
-  val canRobCompressVec = io.in.map(_.bits.canRobCompress)
-  // count crossftq num in may same robentry
-  val crossFtqNumVec = Wire(Vec(RenameWidth, Bool()))
-  // identify cross odd ftqentry
-  val oddFtqVec = Wire(Vec(RenameWidth, Bool()))
-  // Decode clears the second uop of every fusion pair, including cross-FTQ
-  // fusion.  NewCompressUnit sees the pre-clear validVec, so all fusion pairs
-  // must subtract that non-existent writeback from the entry total.
+  // Decode clears the second uop of every fusion pair. CompressUnit sees the
+  // pre-clear validVec, so the fused architectural member is still represented.
   val fusionValidVec = isFusionVec
-  for (i <- 0 until RenameWidth) {
-    if (i == 0) {
-      crossFtqNumVec(i) := canRobCompressVec(i) && isLastFtqVec(i)
-      oddFtqVec(i) := false.B
-    } else {
-      crossFtqNumVec(i) := (crossFtqNumVec(i - 1) ^ isLastFtqVec(i)) && canRobCompressVec(i)
-      oddFtqVec(i) := crossFtqNumVec(i - 1) && isLastFtqVec(i)
-    }
-  }
-  dontTouch(crossFtqNumVec)
-  dontTouch(oddFtqVec)
   val isFusionPair = ((isFusionVec.asUInt << 1).asUInt | isFusionVec.asUInt)(RenameWidth-1, 0).asBools
   compressUnit.io.in.zip(io.in).zip(io.validVec.zip(isFusionPair)).foreach{ case((sink, source), (valid, isFusion)) =>
     sink.valid := valid
     sink.bits := source.bits
-    sink.bits.canRobCompress := source.bits.canRobCompress && backendParams.robCompressEn.B || isFusion
-    // When HD compression is disabled, decode may not classify fusion pairs as simple.
-    // Mark them as simple here to reuse the same tokenization path.
+    // Fusion members use the simple-token path even if the replacement uop was
+    // not classified as a high-density compression candidate by Decode.
     sink.bits.simple := source.bits.simple || isFusion
   }
   compressUnit.io.actualValid := VecInit(io.in.map(_.valid))
   compressUnit.io.forceNoCompress := io.singleStep
-  compressUnit.io.standaloneFusionStart := io.fusionCross2FtqVec
-//  compressUnit.io.oddFtqVec := oddFtqVec
   val needRobFlags = compressUnit.io.out.needRobFlags
   val firstRobFlags = compressUnit.io.out.firstRobFlags
   val instrSizesVec = compressUnit.io.out.instrSizes
-  val compressMasksVec = compressUnit.io.out.masks
   val formerMasksVec = compressUnit.io.out.formerMasks
   val latterMasksVec = compressUnit.io.out.latterMasks
-  val hasLastInFtqEntry = compressUnit.io.out.hasLastInFtqEntry
+  val compressMasksVec = formerMasksVec.zip(latterMasksVec).map { case (former, latter) => former | latter }
   val compressType = compressUnit.io.out.compressType
   val isFormer = compressUnit.io.out.isFormer
   val needFlush = compressUnit.io.out.needFlush
@@ -492,10 +469,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).loadWaitBit := io.waittable(i)
     uops(i).ftqPtr := io.in(i).bits.ftqPtr
     uops(i).ftqOffset := io.in(i).bits.ftqOffset
-    uops(i).crossFtq := false.B
-    uops(i).crossFtqCommit := 0.U
-    uops(i).ftqLastOffset := io.in(i).bits.ftqOffset
-    uops(i).hasLastInFtqEntry := hasLastInFtqEntry(i)
     uops(i).compressType := compressType(i)
     uops(i).needFlush := needFlush(i)
     uops(i).interrupt_safe := interrupt_safe(i)
@@ -549,10 +522,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).chanelIdx := i.U
     uops(i).firstUop := io.in(i).bits.firstUop && firstRobFlags(i)
     uops(i).lastUop := io.in(i).bits.lastUop && needRobFlags(i)
-    // NewCompressUnit consumes validVec, which deliberately retains both
-    // instructions of a fusion pair.  instrSizesVec therefore already includes
-    // a cross-FTQ fusion's cleared second instruction; the legacy +1 would count
-    // that instruction twice.
+    // instrSizesVec includes both architectural members of a fusion pair even
+    // though only one uop is emitted.
     instrSize(i) := instrSizesVec(i)
     val formerMask = formerMasksVec(i)
     val latterMask = latterMasksVec(i)
@@ -579,23 +550,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     when(hasExceptionExceptFlushPipe) {
       uops(i).formerNumWB := 0.U
       uops(i).latterNumWB := 0.U
-    }
-    when(!needRobFlags(i)) {
-      uops(i).lastUop := false.B
-      if (i < RenameWidth - 1) {
-        uops(i).crossFtqCommit := uops(i + 1).crossFtqCommit
-        uops(i).crossFtq := uops(i + 1).crossFtq
-      }
-    }.elsewhen(needRobFlags(i)) {
-      // CtrlBlock folds the first visible FTQ end into the second member for a
-      // fusion crossing two FTQ entries. Add that hidden boundary back here so
-      // the ROB can advance the frontend commit pointer by the exact count.
-      val visibleFtqEnds = PopCount(compressMasksVec(i) & Cat(isLastFtqVec.reverse))
-      val hiddenCross2FusionEnds = PopCount(compressMasksVec(i) & Cat(io.fusionCross2FtqVec.reverse))
-      val ftqCommitCount = visibleFtqEnds +& hiddenCross2FusionEnds
-      assert(ftqCommitCount < 4.U)
-      uops(i).crossFtqCommit := ftqCommitCount
-      uops(i).crossFtq := uops(i).crossFtqCommit(1) || (uops(i).crossFtqCommit(0) && !isLastFtqVec(i))
     }
     // Keep slot metadata attached to the instruction that produced it.  ROB entry
     // aggregation is performed at the ROB enqueue boundary; doing it here would

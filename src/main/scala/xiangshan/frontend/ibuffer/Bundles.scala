@@ -47,31 +47,29 @@ class IBufBankPtr(implicit p: Parameters) extends CircularQueuePtr[IBufBankPtr](
     ) {}
 
 class IBufEntry(implicit p: Parameters) extends IBufferBundle {
-  val inst:             UInt       = UInt(32.W)
-  val pc:               PrunedAddr = PrunedAddr(VAddrBits)
-  val foldpc:           UInt       = UInt(MemPredPCWidth.W)
-  val isRvc:            Bool       = Bool()
-  val predTaken:        Bool       = Bool()
-  val fixedTaken:       Bool       = Bool()
-  val ftqPtr:           FtqPtr     = new FtqPtr
-  val instrEndOffset:   UInt       = UInt(FetchBlockInstOffsetWidth.W)
-  val triggered:        UInt       = TriggerAction()
-  val isLastInFtqEntry: Bool       = Bool()
+  val inst:           UInt       = UInt(32.W)
+  val pc:             PrunedAddr = PrunedAddr(VAddrBits)
+  val foldpc:         UInt       = UInt(MemPredPCWidth.W)
+  val isRvc:          Bool       = Bool()
+  val predTaken:      Bool       = Bool()
+  val fixedTaken:     Bool       = Bool()
+  val ftqPtr:         FtqPtr     = new FtqPtr
+  val instrEndOffset: UInt       = UInt(FetchBlockInstOffsetWidth.W)
+  val triggered:      UInt       = TriggerAction()
 
   val debug_seqNum: InstSeqNum = InstSeqNum()
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
-    inst             := fetch.instrs(i)
-    pc               := fetch.pc(i)
-    foldpc           := fetch.foldpc(i)
-    isRvc            := fetch.isRvc(i)
-    predTaken        := fetch.instrEndOffset(i).predTaken
-    fixedTaken       := fetch.instrEndOffset(i).fixedTaken
-    ftqPtr           := fetch.ftqPtr(i)
-    instrEndOffset   := fetch.instrEndOffset(i).offset
-    triggered        := fetch.triggered(i)
-    isLastInFtqEntry := fetch.isLastInFtqEntry(i)
-    debug_seqNum     := fetch.debug_seqNum(i)
+    inst           := fetch.instrs(i)
+    pc             := fetch.pc(i)
+    foldpc         := fetch.foldpc(i)
+    isRvc          := fetch.isRvc(i)
+    predTaken      := fetch.instrEndOffset(i).predTaken
+    fixedTaken     := fetch.instrEndOffset(i).fixedTaken
+    ftqPtr         := fetch.ftqPtr(i)
+    instrEndOffset := fetch.instrEndOffset(i).offset
+    triggered      := fetch.triggered(i)
+    debug_seqNum   := fetch.debug_seqNum(i)
     this
   }
 
@@ -90,7 +88,6 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     result.exceptionCrossPage := exception.exceptionCrossPage
     result.isBackendException := exception.isBackendException
     result.triggered          := triggered
-    result.isLastInFtqEntry   := isLastInFtqEntry
     result.debug_seqNum       := debug_seqNum
     result.instrEndOffset     := instrEndOffset
     result
@@ -125,7 +122,6 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val exceptionCrossPage: Bool          = Bool()
   val isBackendException: Bool          = Bool()
   val triggered:          UInt          = TriggerAction()
-  val isLastInFtqEntry:   Bool          = Bool()
   val instrEndOffset:     UInt          = UInt(FetchBlockInstOffsetWidth.W)
   val debug_seqNum:       InstSeqNum    = InstSeqNum()
 
@@ -153,7 +149,6 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.ssid                                          := DontCare
     cf.ftqPtr                                        := ftqPtr
     cf.ftqOffset                                     := instrEndOffset
-    cf.isLastInFtqEntry                              := isLastInFtqEntry
     cf.debug_seqNum                                  := debug_seqNum
     cf
   }
