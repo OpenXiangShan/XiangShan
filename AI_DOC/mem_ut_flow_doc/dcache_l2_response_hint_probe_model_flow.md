@@ -4,8 +4,9 @@
 
 本 flow 描述 `dcache_mem__access_base_sequence` 对 V2 coherent TileLink A/B/C/D/E 的轻量
 responder 行为。它只模拟 MemBlock 对外的 L2 交接，不实现完整 L2 directory、MSHR、替换、权限
-目录或完整 `l2Flush`。当前仍只支持单笔 Probe(toN)；多 Probe、Probe(toB) 与 alias conflict 由后续
-专项扩展。
+目录或完整 `l2Flush`。当前已具备 alias conflict 所需的共享 line/probe 生命周期基础：同一 physical
+line 的新 alias Acquire 会先 Probe(toN) 旧 alias，再继续原 A 请求；每笔 Probe 使用稳定 token 匹配 C
+reply。随机多批 Probe、随机 Probe(toB)、CBO Probe closure 与轻量 L2 flush 仍由后续专项扩展。
 
 | 术语 | 当前含义 | 代码落点 | 生命周期 |
 |---|---|---|---|
@@ -19,7 +20,10 @@ responder 行为。它只模拟 MemBlock 对外的 L2 交接，不实现完整 L
 | `C reservation` | ReleaseData 第一个 C beat 为未来 ReleaseAck 预留的 response slot | `c_assembly_response_reserved` | 首 beat 建立；第二 beat 完整收集后原子转换为 ReleaseAck record |
 | `Hint record` | 已和某条最终选出的 GrantData 绑定、等待本拍输出的 Hint sideband | `dcache_hint_q` | scheduler 选中 GrantData 时入队；`service_hint()` 单拍消费 |
 | `fire` | 上一拍 responder 驱动的 valid/ready 与当前 DUT 采样值同为 1 | `a_fire/b_fire/c_fire/d_fire/e_fire` | 只有 fire 可以创建、推进或释放协议状态 |
-| `cached line table` | 已收到 GrantAck、可作为随机 Probe 候选的物理 line 到 alias 映射 | `cached_alias_by_line` | E.fire 插入；Probe/Release/CBO 失效时删除 |
+| `line record` | physical line 的唯一轻量 alias 生命周期记录；不是完整 L2 directory | `cached_line_by_addr[line_addr]` | GrantAck 后 ACTIVE；Probe、alias conflict、GrantAck 等阶段更新 |
+| `probe record` | 一笔 B Probe 的稳定请求身份和 target 权限 | `probe_record_q` | submit 时创建；合法 C reply 完成后删除 |
+| `probe token` | 测试框架内部唯一 Probe 标识，不在 C payload 中传输 | `dcache_probe_token_t`、`c_assembly_probe_token` | 建 record 时分配；两拍 ProbeAckData 到齐前保持不变 |
+| `deferred Acquire` | 已 A.fire 但必须先清除旧 alias 的新 alias Acquire | `line_record.deferred_acquire` | alias conflict 时保存；旧 alias Probe(toN) 收敛后交回普通 A response builder |
 
 ## 2. 调用 Flow
 
@@ -30,6 +34,9 @@ flowchart TD
     C --> D[process_d_fire / process_e_fire]
     C --> E[start_c_assembly / consume_c_beat]
     C --> F[accept_dcache_a_request]
+    F --> P[start_alias_conflict / submit_probe]
+    P --> Q[service_probe_b_hold / build_probe_b_xaction]
+    Q --> E
     F --> G[enqueue_dcache_response]
     E --> G
     G --> H[service_dcache_response_scheduler]
@@ -50,12 +57,14 @@ flowchart TD
   先提交上一 sample 已确认的 shared-memory 写 batch，并采样 A/B/C/D/E 对端信号；
   用上一拍已驱动 item 和当前采样确认 fire；
   D.fire 推进或结束当前 D hold，Grant 最后一拍转入 GrantAck wait；
-  E.fire 必须按 sink 匹配 GrantAck wait，命中后更新 cached line table；
-  C.fire 建立/推进 ProbeAckData 或 ReleaseData 的两拍 assembly，Release 类最终建立 ReleaseAck record；
-  A.fire 解码 Acquire/CBO，并在容量允许时建立 Grant、GrantData 或 CBOAck record；
+  E.fire 必须按 sink 匹配 GrantAck wait，命中后更新 line record 为 ACTIVE；
+  C.fire 用 line 筛选唯一 WAIT_C probe record；ProbeAckData 的第一拍锁定 token，第二拍只允许同 token
+  继续 assembly，Release 类最终建立 ReleaseAck record；
+  A.fire 解码 Acquire/CBO；若 Acquire alias 与 ACTIVE line record 不同，先保存 deferred Acquire 并建立
+  Probe(toN)，否则沿用 Grant、GrantData 或 CBOAck record 创建；
   scheduler 只看进入本拍前已经存在且到期的 record，独立计时后按顺序或乱序选一条成为 current D hold；
   被选中的 GrantData 如有 Hint，才在同一返回轮次送入 Hint queue；
-  按当前 D hold、GrantAck wait、Probe/C assembly 和 A/C 准入构造下一 item；
+  按当前 D hold、GrantAck wait、probe B hold、Probe/C assembly 和 A/C 准入构造下一 item；
   driver 立即写 clocking output；下一 drv_cb 再确认该 item 是否真正 fire。
 ```
 
@@ -82,24 +91,27 @@ item；它不读取 monitor analysis port，也不修改 dispatch 主表、LSQ �
   记录本拍开始时 dcache_rsp_q.size()，作为 scheduler 可见上界；
   调用 scheduler；若存在 current D hold，填充 D.valid 和稳定 payload；
   GrantAck wait 非空时才打开 e_ready；
-  C assembly、waiting Probe C、普通 Release C 和普通 A 依协议优先级准入；
-  完全空闲时才允许 try_start_probe；最后叠加本拍 Hint。
+  C assembly、已发送 Probe 的 C reply、Probe B hold、普通 Release C 和普通 A 依协议优先级准入；
+  `service_probe_b_hold()` 只把已建 record 中的一笔变成稳定 B payload；legacy 随机 toN Probe 仍只在
+  完全空闲时由 `try_start_probe()` 创建；最后叠加本拍 Hint。
 
 global stop：停止新 Probe 和新 A 准入，只排空现有协议状态；所有 queue、timer、D hold、GrantAck、Hint、
 Probe、C assembly 和 armed snapshot 收敛后发送最后一个 idle 并退出。
 ```
 
-`response_visible_count` 在处理 A/C fire 前取得。因此本拍新建的 record 即使其 `eligible_cycle`
+`response_visible_count` 在处理 A/C fire 前取得。因此本拍新建的 D response record 即使其 `eligible_cycle`
 已经满足，也不会被同拍 scheduler 再次选择，保证 A/C 接收和 D 返回之间至少有一个明确的 driver
 边界。
 
 ### 3.2 `can_accept_dcache_a_request()` 与 `can_accept_dcache_release_c_request()`
 
 抽象功能描述：两个 helper 只判断本拍是否可以接受会产生 D response 的输入，不创建 record 或访问
-memory。A 的 Acquire 还必须有空闲 sink；CBO/Release 只占用统一 response record 容量。
+memory。A 的 Acquire 还必须有空闲 sink；alias conflict Acquire 还要确认共享 Probe record queue 有容量，
+以保证一旦 A.fire 就一定能建立 deferred owner；CBO/Release 只占用统一 response record 容量。
 
 ```text
-AcquireBlock/AcquirePerm：response record 未满且存在空闲 sink -> 可接受；
+AcquireBlock/AcquirePerm：line 不处于 deferred/Probe/GrantAck 中间态，response record 未满且存在空闲 sink -> 可接受；
+若是不同 alias 的 Acquire：还要求同 line 无 Probe 且 probe_record_q 少于 16；
 CBOClean/CBOFlush/CBOInval：response record 未满 -> 可接受；
 Release/ReleaseData：response record 未满 -> 可接受；
 其它 A opcode：fatal；ProbeAck/Data 不需要 ReleaseAck capacity。
@@ -124,6 +136,11 @@ AcquirePerm：建立单拍 Grant；分配动态 sink；
 CBO：建立单拍 CBOAck；不分配 sink；denied/corrupt 由各自权重独立采样并保存在 record；
 所有 record：eligible_cycle = accept_cycle + 3；入 dcache_rsp_q；
 ```
+
+不同 alias 的 Acquire 是例外：它已发生 A.fire，不能直接入 `dcache_rsp_q`。`start_alias_conflict()`
+先预留一个 future response slot 和 sink，保存完整 A payload 到 `line_record.deferred_acquire`，并为旧 alias
+创建 `Probe(toN)` record。旧 alias C reply 合法收敛后，才释放预留并将同一份 deferred A payload 重新交给
+`accept_dcache_a_request()` 建立正常 Grant/GrantData；新 alias 直到对应 E.fire 才成为 ACTIVE。
 
 这里的 `+3` 表示 V2 DCache responder 的固定两拍 admission 后，最早下一拍可参加返回仲裁。
 它不使用 `pre_pkt_gap/post_pkt_gap`，也不阻塞 sequence 的主循环。
@@ -173,7 +190,7 @@ beat 或释放 record。二者不决定 scheduler 的选择和 A/C 准入。
 ```text
 GrantData：按 beat_idx 输出两个 32B beat；第一个 D.fire 只递增 beat_idx；
 最后一个 GrantData D.fire 或 Grant D.fire：把 line/alias/sink 转入 grant_ack_wait_q；释放 current record；
-CBOAck：最后 D.fire 后按 CBO opcode 删除对应 cached line（clean 保留）；释放 record；
+CBOAck：当前 direct-ack 路径最后 D.fire 后按 CBO opcode 删除对应 line record（clean 保留）；释放 record；
 ReleaseAck：最后 D.fire 后释放 record；
 ```
 
@@ -196,7 +213,7 @@ GrantAck wait 占用的编号；`process_e_fire()` 按 DUT E sink 唯一完成 G
 Acquire record 创建时：分配未用 sink 并写入 D payload；
 Grant 最后 D.fire：D record 删除，{line_addr, line_alias, sink} 写入 grant_ack_wait_q；
 E.fire：E.bits.sink 必须已知；按 sink 查 grant_ack_wait_q；
-  命中：record_cached_line(line_addr, line_alias)，删除 wait record，sink 释放；
+  命中：record_cached_line(line_addr, line_alias)，把 line record 置为 ACTIVE，删除 wait record，sink 释放；
   无命中：fatal。
 ```
 
@@ -228,9 +245,17 @@ ReleaseData 第二 beat：检查 opcode/address/source/size/param 连续性；�
   删除 cached line；将 reservation 原子转换为 ReleaseAck record；
 ```
 
-`ProbeAckData` 同样必须收齐两个 beat 后才写回 overlay；`corrupt=1` 时跳过写回但继续完成协议收敛。
-当前 single Probe 模型只支持 `Probe(toN)`，`try_start_probe()` 仅在没有 response queue、D hold、
-GrantAck、C assembly、A/C armed 或旧 Probe owner 的空闲窗口从 `cached_alias_by_line` 选择一条 line。
+`ProbeAckData` 同样必须收齐两个 beat 后才写回 overlay；第一拍由 `start_c_assembly()` 通过 physical
+line 唯一找到 `WAIT_C` probe record，保存其 `c_assembly_probe_token` 并把该 record 转为
+`C_ASSEMBLY`。第二拍由 `consume_c_beat()` 重新确认同一 token/line/固定 header；`corrupt=1` 时跳过
+writeback、将 line record 的 `data_valid` 清零并报告 `uvm_error`，但仍调用 `complete_probe_record()` 完成
+toN/toB 生命周期，不能让 owner 永久残留。
+
+`submit_probe()` 是 B/C 生命周期的唯一创建入口：它从 ACTIVE line record 复制旧 alias、target cap 和 owner，
+分配 token 并保证同一 line 不会有第二笔未完成 Probe。`service_probe_b_hold()` 只将一个 QUEUED record
+变为 B hold；`build_probe_b_xaction()` 在 backpressure 时持续读取同一 record 输出稳定 payload；B.fire 后该
+record 进入 WAIT_C。当前 legacy random policy 仍仅在空闲窗口创建单笔 `Probe(toN)`；multi-batch/toB/
+CBO/flush policy 不在本 flow 的当前实现范围内。
 
 ## 7. Reset、Stop 与边界
 
@@ -239,8 +264,8 @@ C reservation、Probe 和 cache map。shared backing/overlay 的清空只由 tes
 在 responder 启动前完成；reset 不应重新清空公共 memory。
 
 global stop 的退出条件包括：无 queued/current D record、无运行 timer、无 GrantAck wait、无 Hint、
-无 B/C Probe owner、无 C assembly/reservation、无 armed A/C snapshot 和当前未处理 A/C valid。
-已完成 GrantAck 的 `cached_alias_by_line` 是历史状态，不阻止退出。
+无 B hold、`probe_record_q` 为空、无 C assembly/reservation、无 armed A/C snapshot 和当前未处理 A/C valid。
+已完成 GrantAck 的 ACTIVE line record 是历史状态，不阻止退出。
 
 本 flow 不拥有主表、LSQ admission、issue、writeback、commit/deq、redirect/replay、pass/fail 或 terminal。
 Uncache TL-UL A/D responder 的独立 queue 和 delay 见
@@ -254,9 +279,13 @@ Uncache TL-UL A/D responder 的独立 queue 和 delay 见
 - 由三档 DCache delay 扩展为四档，并新增 runtime 顺序/乱序返回选择；
 - `ReleaseData` 新增首 beat reservation，避免两拍 C transaction 在 response capacity 满时半完成；
 - Hint 从独立 pending 状态改为附着在 GrantData record，最终选中 D response 后才输出；
+- 单一 `pending_probe_*`/`waiting_probe_c` 替换为共享 `probe_record_q`、稳定 token、单 B hold 和按 line 的
+  C reply 唯一匹配；ProbeAckData 首拍锁定 token，第二拍不能被其它 C response 覆盖；
+- `cached_alias_by_line` 替换为包含 alias、valid、data 边界、lifecycle 与 deferred Acquire 的 line record；
+  不同 alias Acquire 先 Probe(toN) 旧 alias，再恢复原始 A response，避免覆盖仍有效的旧 DCache 副本；
 - 保留原有 A/C/E/Probe/overlay 和 global-stop 所有权，不把 responder 状态写入主表或 status table。
 
 当前默认 delay 为 `1..10` cycle、顺序返回。D-error 随机注入已由
 `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_dcache_d_error_weight_adapt_plan_20260803.md` 实现：它只扩展 response record 的
-合法 D payload，不改变本 flow 的调度或主框架控制行为。多 Probe/toB、alias conflict、CBO closure
-和 L2 flush 仍由各自 undo plan 实现，不能在本 flow 中宣称已覆盖。
+合法 D payload，不改变本 flow 的调度或主框架控制行为。alias conflict 基础已实现；多 Probe/toB 的
+随机策略、CBO closure 和 L2 flush 仍由各自 plan 实现，不能在本 flow 中宣称已覆盖。
