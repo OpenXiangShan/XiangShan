@@ -453,16 +453,15 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   // allocated
   when(doEnqueue){ // if enqueue need to been cancelled, it will be false, so this have high priority
     allocated := true.B
-    isFirstActive := true.B
   }.elsewhen(needCancel) { // redirect
     allocated := false.B
-    isFirstActive := false.B
   }.elsewhen(splitFinish && (activeIssue || inActiveIssue)){ //dequeue
     allocated := false.B
-    isFirstActive := false.B
   }
 
-  when(io.out.fire) {
+  when(doEnqueue) {
+    isFirstActive := true.B
+  }. elsewhen(io.out.fire) {
     isFirstActive := false.B
   }
 
