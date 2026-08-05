@@ -97,6 +97,9 @@ class StaUopInfo(implicit p: Parameters) extends MemBlockBundle {
   val isFirstIssue    = Bool()
   val isRVC           = Bool()
 
+  // Currently only DCache NTL is supported. So only 1 bit is needed.
+  val ntl             = Bool()
+
   // debug info
   val pc              = Option.when(debugEn)(UInt(VAddrBits.W))
   val debugInfo       = Option.when(debugEn)(new PerfDebugInfo)
