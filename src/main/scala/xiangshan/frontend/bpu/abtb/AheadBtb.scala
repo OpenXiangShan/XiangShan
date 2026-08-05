@@ -250,7 +250,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   private val t0_train = io.fastTrain.get.bits
 
-  private val t0_fire = io.enable && io.fastTrain.get.valid && t0_train.finalPrediction.taken && t0_train.abtbMeta.valid
+  private val t0_fire = io.enable && io.fastTrain.get.valid && t0_train.abtbMeta.valid
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1
@@ -267,7 +267,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val t1_setMask  = UIntToOH(t1_setIdx)
   private val t1_bankMask = t1_meta.bankMask
 
-  // use taken branch of s3 prediction to train abtb
+  // A taken final prediction can allocate/correct an entry. A not-taken
+  // prediction only updates counters of the conditional entries that hit.
   private val t1_trainTaken           = t1_train.finalPrediction.taken
   private val t1_trainPosition        = t1_train.finalPrediction.cfiPosition
   private val t1_trainAttribute       = t1_train.finalPrediction.attribute
@@ -305,7 +306,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     e.hit && e.position === t1_trainPosition && e.attribute === t1_trainAttribute
   }
   private val t1_hit               = t1_hitMask.reduce(_ || _)
-  private val t1_needWriteNewEntry = !t1_hit
+  private val t1_needWriteNewEntry = !t1_hit && t1_trainTaken
 
   // If the target of indirect branch is wrong, we need correct it.
   // Since the entry only stores the lower bits of the target, we only need to check the lower bits.
