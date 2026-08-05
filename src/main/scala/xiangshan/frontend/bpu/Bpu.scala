@@ -308,6 +308,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
   for (i <- 0 until NumAheadBtbPredictionEntries) {
     s1_abtbPrediction(i) := abtb.io.prediction(i).bits
+    s1_abtbPrediction(i).target := Mux(
+      abtb.io.prediction(i).bits.attribute.isReturn && uras.io.specOut.isCanUse,
+      uras.io.specOut.retTarget,
+      abtb.io.prediction(i).bits.target
+    )
   }
 
   // Keep ABTB before uBTB in the source vector. Deduplication therefore preserves
@@ -391,7 +396,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     )
   })
 
-  private val s1_mixedCompareMatrix = CompareMatrix(VecInit(s1_mixedBtbEntries.map(_.utagePosition)))
+  // uTAGE needs its early position path above, while final S1 arbitration must use
+  // the position paired with each completed BTB prediction.
+  private val s1_mixedCompareMatrix = CompareMatrix(VecInit(s1_mixedBtbEntries.map(_.result.cfiPosition)))
   private val s1_firstTakenBrOH     = s1_mixedCompareMatrix.getLeastElementOH(s1_mixedTakenMask)
   private val s1_mixedPrediction    = VecInit(s1_mixedBtbEntries.map(_.prediction))
   private val s1_firstTakenBr       = Mux1H(s1_firstTakenBrOH, s1_mixedPrediction)
