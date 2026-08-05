@@ -25,7 +25,7 @@ import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import system.HasSoCParameter
-import xscache.chi.{AsyncPortIO, CHIAsyncBridgeSource, PortIO}
+import xscache.chi.{AsyncPortIO, CHIAsyncBridgeSource, CHIDataCheckKey, CHIPoisonKey, DecoupledPortIO, PortIO}
 import utility.sram.SramBroadcastBundle
 import utility.{DFTResetSignals, IntBuffer, ResetGen}
 import xiangshan.backend.trace.TraceCoreInterface
@@ -87,11 +87,17 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         val l3MissMatch = Input(Bool())
       }
       val l3Miss = Input(Bool())
-      val chi = EnableCHIAsyncBridge match {
+      val chi = Option.when(isOpenLLC)(EnableCHIAsyncBridge match {
         case Some(param) => new AsyncPortIO(param)
         case None => new PortIO
-      }
-      val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
+      })
+      val decoupledCHI = Option.when(isZhuJiang)(
+        new DecoupledPortIO()(p.alter((_, _, _) => {
+          case CHIDataCheckKey => "none"
+          case CHIPoisonKey => false
+        }))
+      )
+      val nodeID = Some(Input(UInt(NodeIDWidth.W)))
       val clintTime = EnableClintAsyncBridge match {
         case Some(param) => Flipped(new AsyncBundle(UInt(64.W), param))
         case None => Input(ValidIO(UInt(64.W)))
@@ -183,14 +189,18 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     }
 
     // CHI Async Queue Source
-    EnableCHIAsyncBridge match {
-      case Some(param) =>
-        val source = withClockAndReset(clock, noc_reset_sync.get)(Module(new CHIAsyncBridgeSource(param)))
-        source.io.enq <> tile.module.io.chi.get
-        io.chi <> source.io.async
-      case None =>
-        require(enableCHI)
-        io.chi <> tile.module.io.chi.get
+    if (isOpenLLC) {
+      EnableCHIAsyncBridge match {
+        case Some(param) =>
+          val source = withClockAndReset(clock, noc_reset_sync.get)(Module(new CHIAsyncBridgeSource(param)))
+          source.io.enq <> tile.module.io.chi.get
+          io.chi.get <> source.io.async
+        case None =>
+          io.chi.get <> tile.module.io.chi.get
+      }
+    } else {
+      require(EnableCHIAsyncBridge.isEmpty, "LLC=ZhuJiang does not support async CHI bridge")
+      io.decoupledCHI.get <> tile.module.io.decoupledCHI.get
     }
 
     withClockAndReset(clock, reset_sync) {
