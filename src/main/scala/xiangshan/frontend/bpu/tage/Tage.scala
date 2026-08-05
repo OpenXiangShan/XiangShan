@@ -33,11 +33,11 @@ import xiangshan.frontend.bpu.TageTableInfo
  */
 class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters with TopHelper with HalfAlignHelper {
   class TageIO(implicit p: Parameters) extends BasePredictorIO {
-    val fromPhr:     PhrToTageIO         = new PhrToTageIO
-    val fromMainBtb: MainBtbToTageIO     = new MainBtbToTageIO
-    val toSc:        TageToScIO          = new TageToScIO
-    val prediction:  Vec[TagePrediction] = Output(Vec(NumBtbResultEntries, new TagePrediction))
-    val meta:        TageMeta            = Output(new TageMeta)
+    val fromPhr:     PhrToTageIO     = new PhrToTageIO
+    val fromMainBtb: MainBtbToTageIO = new MainBtbToTageIO
+    val toSc:        TageToScIO      = new TageToScIO
+    val prediction:  TagePrediction  = Output(new TagePrediction)
+    val meta:        TageMeta        = Output(new TageMeta)
 
     val debug_trainValid: Bool = Input(Bool())
   }
@@ -145,11 +145,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     val useProvider = hasProvider && !(useAltOnNa && provider.takenCtr.isWeak)
 
-    // get prediction for each branch
-    io.prediction(i).useProvider  := useProvider
-    io.prediction(i).providerPred := provider.takenCtr.isPositive
-    io.prediction(i).hasAlt       := hasAlt
-    io.prediction(i).altPred      := alt.takenCtr.isPositive
+    io.prediction.takenVec(i).valid := useProvider || hasAlt
+    io.prediction.takenVec(i).bits  := Mux(useProvider, provider.takenCtr.isPositive, alt.takenCtr.isPositive)
 
     io.toSc.providerTakenCtrVec(i).valid := hasProvider && branch.valid
     io.toSc.providerTakenCtrVec(i).bits  := provider.takenCtr
