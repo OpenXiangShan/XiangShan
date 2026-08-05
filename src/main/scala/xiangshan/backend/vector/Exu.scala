@@ -51,6 +51,12 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
   inEx.bits :<#= in.uop.bits
   inEx.bits.fuSel := VecInit(param.fuConfigs.map(_.fuSel2(in.uop.bits)))
   inEx.bits.data.src := bypass.out.src
+  if (param.numRegSrc >= 2) {
+    when (inEx.bits.ctrl.src12Rev) {
+      inEx.bits.data.src(0) := bypass.out.src(1)
+      inEx.bits.data.src(1) := bypass.out.src(0)
+    }
+  }
 
   ex zip (inEx +: ex) foreach {
     case (sink: ValidIO[Exu.ExStage], source: ValidIO[Exu.ExStage]) =>
@@ -426,6 +432,7 @@ object Exu {
 
     val frm       = Option.when(param.readFrm)(Frm())
     val vm        = Option.when(param.needVM)(Bool())
+    val src12Rev  = Bool()
     val vtype     = Option.when(param.readVType)(VType())
     val oldVType  = Option.when(param.readOldVType)(VType())
 
@@ -456,6 +463,7 @@ object Exu {
 
       this.frm.foreach(_ := deq.frm.get)
       this.vm.foreach(_ := deq.vm.get)
+      this.src12Rev := deq.src12Rev
       this.vtype.foreach(_ := deq.vtype.get)
       this.oldVType.foreach(_ := deq.oldVType.get)
 
