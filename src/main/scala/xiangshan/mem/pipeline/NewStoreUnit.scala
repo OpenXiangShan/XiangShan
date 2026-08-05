@@ -420,7 +420,8 @@ class StoreUnitS1(param: ExeUnitParams)(
     * A illegalIssue means the request is out of range and must be replayed by RS.
     */
   val canFeedBack = isScalar && !isUnalignHead // unalign head should not feed back.
-  val feedBackValid = (fire || illegalIssue) && canFeedBack
+  val illegalScalarIssue = isScalar && illegalIssue
+  val feedBackValid = fire && canFeedBack || illegalScalarIssue // if is illegalIssue, always feedback miss
   val unalignTailHit = tlbHit && io.unalignHeadTlbHit && (!cross4KPage || io.toUnalignQueue.ready)
   val feedBackHit = Mux(isUnalignTail, unalignTailHit, tlbHit) && legalIssue
   val needRSReplay = feedBackValid && !feedBackHit
