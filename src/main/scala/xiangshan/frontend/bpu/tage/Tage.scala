@@ -156,12 +156,15 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     io.toSc.providerTakenCtrVec(i).valid := hasProvider && branch.valid
     io.toSc.providerTakenCtrVec(i).bits  := provider.takenCtr
 
+    io.meta.entries(i).hasProvider       := hasProvider
+    io.meta.entries(i).hasAlt            := hasAlt
     io.meta.entries(i).useProvider       := useProvider
     io.meta.entries(i).providerTableIdx  := OHToUInt(providerTableOH)
     io.meta.entries(i).providerWayIdx    := OHToUInt(provider.hitWayMaskOH)
     io.meta.entries(i).providerTakenCtr  := provider.takenCtr
     io.meta.entries(i).providerUsefulCtr := provider.usefulCtr
     io.meta.entries(i).altOrBasePred     := Mux(hasAlt, alt.takenCtr.isPositive, branch.bits.taken)
+    io.meta.entries(i).useAltOnNaCtr     := useAltOnNaVec(useAltOnNaIdx)
 
     XSPerfAccumulate(
       s"s2_branch_${i}_multihit_on_same_table",
@@ -407,6 +410,13 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val incUseAltOnNa   = trainUseAltOnNa && altOrBasePred === actualTaken
     val decUseAltOnNa   = trainUseAltOnNa && providerPred === actualTaken
 
+    // Use prediction-time metadata for chooser analysis. The table and chooser
+    // may have changed by the time this branch reaches the training pipeline.
+    val chooserDisagree = meta.hasProvider && meta.providerTakenCtr.isWeak &&
+      meta.providerTakenCtr.isPositive =/= meta.altOrBasePred
+    val chooserAltOrBaseWin = chooserDisagree && meta.altOrBasePred === actualTaken
+    val chooserProviderWin  = chooserDisagree && meta.providerTakenCtr.isPositive === actualTaken
+
     val trainInfo = Wire(new TrainInfo).suggestName(s"t2_branch_${i}_trainInfo")
     trainInfo.valid := isCond && mbtbHit // Only consider update if conditional branch
 
@@ -440,9 +450,14 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     trainInfo.finalPred   := finalPred
     trainInfo.actualTaken := actualTaken
 
-    trainInfo.hitTableMask     := hitTableMask.asUInt
-    trainInfo.mispredicted     := branch.bits.mispredict
-    trainInfo.newestMispredict := finalPred =/= actualTaken
+    trainInfo.hitTableMask         := hitTableMask.asUInt
+    trainInfo.mispredicted         := branch.bits.mispredict
+    trainInfo.newestMispredict     := finalPred =/= actualTaken
+    trainInfo.chooserUseAltOrBase  := meta.hasProvider && !meta.useProvider
+    trainInfo.chooserHasAlt        := meta.hasAlt
+    trainInfo.chooserAltOrBaseWin  := chooserAltOrBaseWin
+    trainInfo.chooserProviderWin   := chooserProviderWin
+    trainInfo.chooserUseAltOnNaCtr := meta.useAltOnNaCtr
     trainInfo
   })
 
@@ -765,6 +780,55 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     "resolve_branch_use_base_table",
     t3_trainInfoVec.map(e => (t3_fire && e.valid && !e.useProvider && !e.useAlt).asUInt).reduce(_ +& _)
   )
+
+  private def countUseAltOnNaEvents(predicate: TrainInfo => Bool): UInt =
+    Mux(t3_fire, PopCount(t3_trainInfoVec.map(info => info.valid && predicate(info))), 0.U)
+
+  // Decision matrices for weak-provider disagreements. Split tagged alternate
+  // from base fallback because UseAltOnNa controls both sources.
+  XSPerfAccumulate(
+    "use_alt_on_na_tagged_choose_alt_alt_win",
+    countUseAltOnNaEvents(info => info.chooserHasAlt && info.chooserUseAltOrBase && info.chooserAltOrBaseWin)
+  )
+  XSPerfAccumulate(
+    "use_alt_on_na_tagged_choose_alt_provider_win",
+    countUseAltOnNaEvents(info => info.chooserHasAlt && info.chooserUseAltOrBase && info.chooserProviderWin)
+  )
+  XSPerfAccumulate(
+    "use_alt_on_na_tagged_choose_provider_alt_win",
+    countUseAltOnNaEvents(info => info.chooserHasAlt && !info.chooserUseAltOrBase && info.chooserAltOrBaseWin)
+  )
+  XSPerfAccumulate(
+    "use_alt_on_na_tagged_choose_provider_provider_win",
+    countUseAltOnNaEvents(info => info.chooserHasAlt && !info.chooserUseAltOrBase && info.chooserProviderWin)
+  )
+  XSPerfAccumulate(
+    "use_alt_on_na_base_choose_base_base_win",
+    countUseAltOnNaEvents(info => !info.chooserHasAlt && info.chooserUseAltOrBase && info.chooserAltOrBaseWin)
+  )
+  XSPerfAccumulate(
+    "use_alt_on_na_base_choose_base_provider_win",
+    countUseAltOnNaEvents(info => !info.chooserHasAlt && info.chooserUseAltOrBase && info.chooserProviderWin)
+  )
+  XSPerfAccumulate(
+    "use_alt_on_na_base_choose_provider_base_win",
+    countUseAltOnNaEvents(info => !info.chooserHasAlt && !info.chooserUseAltOrBase && info.chooserAltOrBaseWin)
+  )
+  XSPerfAccumulate(
+    "use_alt_on_na_base_choose_provider_provider_win",
+    countUseAltOnNaEvents(info => !info.chooserHasAlt && !info.chooserUseAltOrBase && info.chooserProviderWin)
+  )
+
+  for (state <- 0 until (1 << UseAltOnNaWidth)) {
+    XSPerfAccumulate(
+      s"use_alt_on_na_state_${state}_alt_or_base_win",
+      countUseAltOnNaEvents(info => info.chooserUseAltOnNaCtr.value === state.U && info.chooserAltOrBaseWin)
+    )
+    XSPerfAccumulate(
+      s"use_alt_on_na_state_${state}_provider_win",
+      countUseAltOnNaEvents(info => info.chooserUseAltOnNaCtr.value === state.U && info.chooserProviderWin)
+    )
+  }
 
   /*
   sum -> total bubbles caused by read bank conflict

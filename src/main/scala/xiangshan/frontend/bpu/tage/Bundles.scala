@@ -112,12 +112,15 @@ class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBun
 }
 
 class TageMetaEntry(implicit p: Parameters) extends TageBundle {
+  val hasProvider:       Bool            = Bool()
+  val hasAlt:            Bool            = Bool()
   val useProvider:       Bool            = Bool()
   val providerTableIdx:  UInt            = UInt(TableIdxWidth.W)
   val providerWayIdx:    UInt            = UInt(MaxNumWays.W)
   val providerTakenCtr:  SaturateCounter = TakenCounter()
   val providerUsefulCtr: SaturateCounter = UsefulCounter()
   val altOrBasePred:     Bool            = Bool()
+  val useAltOnNaCtr:     SaturateCounter = UseAltOnNaCounter()
 }
 
 class TageMeta(implicit p: Parameters) extends TageBundle {
@@ -176,9 +179,14 @@ class TrainInfo(implicit p: Parameters) extends TageBundle {
   val actualTaken: Bool = Bool() // used for writeBuffer
 
   // perf analysis only
-  val hitTableMask:     UInt = UInt(NumTables.W) // all the hit tables
-  val mispredicted:     Bool = Bool()
-  val newestMispredict: Bool = Bool()
+  val hitTableMask:         UInt            = UInt(NumTables.W) // all the hit tables
+  val mispredicted:         Bool            = Bool()
+  val newestMispredict:     Bool            = Bool()
+  val chooserUseAltOrBase:  Bool            = Bool()
+  val chooserHasAlt:        Bool            = Bool()
+  val chooserAltOrBaseWin:  Bool            = Bool()
+  val chooserProviderWin:   Bool            = Bool()
+  val chooserUseAltOnNaCtr: SaturateCounter = UseAltOnNaCounter()
 }
 
 class ConditionalBranchTrace(implicit p: Parameters) extends TageBundle {
