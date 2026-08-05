@@ -60,9 +60,9 @@ class LastHalfEntry(implicit p: Parameters) extends IfuBundle {
 }
 
 class EndHalfRviInfo(implicit p: Parameters) extends IfuBundle {
-  val isHalfRvi: Bool       = Bool()
-  val pc:        PrunedAddr = PrunedAddr(VAddrBits)
-  val data:      UInt       = UInt(16.W)
+  val isHalfRvi: Bool      = Bool()
+  val pc:        GuardedPc = GuardedPc()
+  val data:      UInt      = UInt(16.W)
 }
 
 class InstrIndexEntry(implicit p: Parameters) extends IfuBundle {
