@@ -971,6 +971,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val redirectBegin = Reg(UInt(log2Up(RobSize).W))
   val redirectEnd = Reg(UInt(log2Up(RobSize).W))
   val redirectAll = RegInit(false.B)
+  val redirectMisPredReg = RegEnable(io.redirect.bits.isMisPred, io.redirect.valid)
   when(io.redirect.valid){
     redirectBegin := Mux(io.redirect.bits.flushItself(), io.redirect.bits.robIdx.value - 1.U, io.redirect.bits.robIdx.value)
     redirectEnd := enqPtr.value
@@ -978,6 +979,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   // update robEntries valid
+  val redirectNeedFlush = Wire(Vec(RobSize, Bool()))
   for (i <- 0 until RobSize) {
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
     val commitCond = io.commits.isCommit && io.commits.commitValid.zip(deqPtrVec.map(_.value === i.U)).map(x => x._1 && x._2).reduce(_ || _)
@@ -987,6 +989,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       (i.U > redirectBegin) && (i.U < redirectEnd),
       (i.U > redirectBegin) || (i.U < redirectEnd)
     ) || redirectAll)
+    redirectNeedFlush(i) := needFlush && robEntries(i).valid
     when(commitCond) {
       robEntries(i).valid := false.B
     }.elsewhen(enqOH.asUInt.orR && !io.redirect.valid) {
@@ -1021,6 +1024,76 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enqUopNumVec = VecInit(io.enq.req.map(req => req.bits.numUops))
   val enqWBNumVec = VecInit(io.enq.req.map(req => req.bits.numWB))
   private val enqWriteStdVec = VecInit(io.enq.req.map(req => req.bits.stdwriteNeed))
+
+  // Profiling-only single-stream Squash Log. A static hit requires both the PC and
+  // instruction bits to match, and each squashed entry can be matched only once.
+  val msrMispredSample = redirectValidReg && redirectMisPredReg
+  val msrLogValid = RegInit(VecInit.fill(RobSize)(false.B))
+  val msrLogCompleted = Reg(Vec(RobSize, Bool()))
+  val msrLogAlu = Reg(Vec(RobSize, Bool()))
+  val msrLogPc = Reg(Vec(RobSize, UInt(VAddrBits.W)))
+  val msrLogInstr = Reg(Vec(RobSize, UInt(32.W)))
+  val msrLogHasStaticHit = RegInit(false.B)
+  val msrLogHasCompletedStaticHit = RegInit(false.B)
+
+  val msrEnqPc = io.enq.req.map(_.bits.debug.map(_.pc).getOrElse(0.U(VAddrBits.W)))
+  val msrEnqInstr = io.enq.req.map(_.bits.debug.map(_.instr).getOrElse(0.U(32.W)))
+  val msrLogMatchOH = Wire(Vec(RenameWidth, UInt(RobSize.W)))
+  val msrLogMatchCompleted = Wire(Vec(RenameWidth, Bool()))
+  val msrLogMatchAlu = Wire(Vec(RenameWidth, Bool()))
+  var msrLogAvailable = msrLogValid.asUInt
+  for (i <- 0 until RenameWidth) {
+    val entryMatch = VecInit((0 until RobSize).map { j =>
+      msrLogAvailable(j) &&
+        msrLogPc(j) === msrEnqPc(i) &&
+        msrLogInstr(j) === msrEnqInstr(i)
+    }).asUInt
+    val completedEntryMatch = entryMatch & msrLogCompleted.asUInt
+    val selectedEntry = Mux(
+      completedEntryMatch.orR,
+      PriorityEncoderOH(completedEntryMatch),
+      PriorityEncoderOH(entryMatch)
+    )
+    msrLogMatchOH(i) := Mux(instEnqValidSeq(i) && !msrMispredSample, selectedEntry, 0.U)
+    msrLogMatchCompleted(i) := (msrLogMatchOH(i) & msrLogCompleted.asUInt).orR
+    msrLogMatchAlu(i) := (msrLogMatchOH(i) & msrLogAlu.asUInt).orR
+    msrLogAvailable = msrLogAvailable & ~msrLogMatchOH(i)
+  }
+
+  val msrStaticHitCount = PopCount(msrLogMatchOH.map(_.orR))
+  val msrCompletedStaticHitCount = PopCount(msrLogMatchCompleted)
+  val msrCompletedAluStaticHitCount = PopCount(msrLogMatchCompleted.zip(msrLogMatchAlu).map {
+    case (completed, alu) => completed && alu
+  })
+  val msrAnyStaticHit = msrStaticHitCount.orR
+  val msrAnyCompletedStaticHit = msrCompletedStaticHitCount.orR
+  val msrLogOverwritten = msrMispredSample && msrLogValid.asUInt.orR
+
+  when(msrMispredSample) {
+    for (i <- 0 until RobSize) {
+      msrLogValid(i) := redirectNeedFlush(i)
+      when(redirectNeedFlush(i)) {
+        msrLogCompleted(i) := robEntries(i).isWritebacked
+        msrLogAlu(i) := FuType.isAlu(robEntries(i).debug_fuType.getOrElse(0.U.asTypeOf(FuType())))
+        msrLogPc(i) := robEntries(i).debug_pc.getOrElse(0.U)
+        msrLogInstr(i) := robEntries(i).debug_instr.getOrElse(0.U)
+      }
+    }
+    msrLogHasStaticHit := false.B
+    msrLogHasCompletedStaticHit := false.B
+  }.otherwise {
+    for (i <- 0 until RobSize) {
+      when(msrLogMatchOH.map(_(i)).reduce(_ || _)) {
+        msrLogValid(i) := false.B
+      }
+    }
+    when(msrAnyStaticHit) {
+      msrLogHasStaticHit := true.B
+    }
+    when(msrAnyCompletedStaticHit) {
+      msrLogHasCompletedStaticHit := true.B
+    }
+  }
 
   val fflags_wb = fflagsWBs
   val vxsat_wb = vxsatWBs
@@ -1692,10 +1765,33 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val misPred = io.redirect.valid && io.redirect.bits.isMisPred
   val brhJump = PopCount(isBrhOrJmpWBs.map(wb => wb.valid))
+  val msrSquashedInst = PopCount(redirectNeedFlush)
+  val msrCompletedSquashedInst = PopCount(redirectNeedFlush.zip(robEntries).map { case (flush, entry) =>
+    flush && entry.isWritebacked
+  })
+  val msrCompletedSquashedAluInst = PopCount(redirectNeedFlush.zip(robEntries).map { case (flush, entry) =>
+    flush && entry.isWritebacked && FuType.isAlu(entry.debug_fuType.getOrElse(0.U.asTypeOf(FuType())))
+  })
 
   XSPerfAccumulate("branch_jump", brhJump)
   XSPerfAccumulate("br_mis_pred", misPred)
   XSPerfAccumulate("total_flush", io.redirect.valid)
+  XSPerfAccumulate("msr_mispred_with_squashed_inst", msrMispredSample && msrSquashedInst.orR)
+  XSPerfAccumulate("msr_mispred_with_completed_inst", msrMispredSample && msrCompletedSquashedInst.orR)
+  XSPerfAccumulate("msr_mispred_with_completed_alu_inst", msrMispredSample && msrCompletedSquashedAluInst.orR)
+  XSPerfAccumulate("msr_squashed_inst", Mux(msrMispredSample, msrSquashedInst, 0.U))
+  XSPerfAccumulate("msr_completed_squashed_inst", Mux(msrMispredSample, msrCompletedSquashedInst, 0.U))
+  XSPerfAccumulate("msr_completed_squashed_alu_inst", Mux(msrMispredSample, msrCompletedSquashedAluInst, 0.U))
+  XSPerfAccumulate("msr_log_overwritten", msrLogOverwritten)
+  XSPerfAccumulate("msr_log_overwritten_before_static_hit", msrLogOverwritten && !msrLogHasStaticHit)
+  XSPerfAccumulate("msr_static_hit_inst", msrStaticHitCount)
+  XSPerfAccumulate("msr_completed_static_hit_inst", msrCompletedStaticHitCount)
+  XSPerfAccumulate("msr_completed_alu_static_hit_inst", msrCompletedAluStaticHitCount)
+  XSPerfAccumulate("msr_log_with_static_hit", msrAnyStaticHit && !msrLogHasStaticHit)
+  XSPerfAccumulate(
+    "msr_log_with_completed_static_hit",
+    msrAnyCompletedStaticHit && !msrLogHasCompletedStaticHit
+  )
 
   val commitLoadVec = VecInit(commitLoadValid)
   val commitBranchVec = VecInit(commitBranchValid)
