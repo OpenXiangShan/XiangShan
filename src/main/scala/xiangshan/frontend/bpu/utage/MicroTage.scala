@@ -46,8 +46,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     // Consideration: improve routing and enhance driving capablility.
     val btbPosVec:     Vec[UInt]                  = Input(Vec(NumUtagePredictionEntries, UInt(CfiPositionWidth.W)))
     val btbPrediction: Vec[Valid[AheadBtbResult]] = Input(Vec(NumUtagePredictionEntries, Valid(new AheadBtbResult)))
-    val overrideValid:  Bool                       = Input(Bool())
-    val redirectValid:  Bool                       = Input(Bool())
+    val overrideValid: Bool                       = Input(Bool())
+    val redirectValid: Bool                       = Input(Bool())
 
     val normalPathHist:   PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val s1PathHist:       PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))

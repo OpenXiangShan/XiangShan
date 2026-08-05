@@ -58,11 +58,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   val io: BpuIO = IO(new BpuIO)
 
   private class UtageBtbEntry extends Bundle {
-    val valid:     Bool           = Bool()
-    val prediction: Prediction     = new Prediction
-    val result:    AheadBtbResult = new AheadBtbResult
-    val isUbtb:    Bool           = Bool()
-    val abtbIndex: UInt           = UInt((1 max log2Ceil(NumAheadBtbPredictionEntries)).W)
+    val valid:         Bool           = Bool()
+    val prediction:    Prediction     = new Prediction
+    val result:        AheadBtbResult = new AheadBtbResult
+    val utagePosition: UInt           = UInt(CfiPositionWidth.W)
+    val isUbtb:        Bool           = Bool()
+    val abtbIndex:     UInt           = UInt((1 max log2Ceil(NumAheadBtbPredictionEntries)).W)
   }
   private val NumUtagePredictionEntries = NumAheadBtbPredictionEntries + 1
 
@@ -221,8 +222,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   abtb.io.overrideValid  := s3_override
   abtb.io.normalPathHist := phr.io.oldFoldedPhr
 
-  utage.io.overrideValid  := s3_override
-  utage.io.redirectValid  := redirect.valid
+  utage.io.overrideValid := s3_override
+  utage.io.redirectValid := redirect.valid
 
   utage.io.normalPathHist   := phr.io.oldFoldedPhr
   utage.io.s1PathHist       := phr.io.s1_foldedPhr
@@ -313,21 +314,23 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // the existing ABTB priority when both predictors name the same CFI position.
   private val s1_rawBtbEntries = Wire(Vec(NumUtagePredictionEntries, new UtageBtbEntry))
   for (i <- 0 until NumAheadBtbPredictionEntries) {
-    s1_rawBtbEntries(i).valid      := abtb.io.prediction(i).valid
-    s1_rawBtbEntries(i).prediction := s1_abtbPrediction(i)
-    s1_rawBtbEntries(i).result     := abtb.io.abtbResult(i).bits
-    s1_rawBtbEntries(i).isUbtb     := false.B
-    s1_rawBtbEntries(i).abtbIndex  := i.U
+    s1_rawBtbEntries(i).valid         := abtb.io.prediction(i).valid
+    s1_rawBtbEntries(i).prediction    := s1_abtbPrediction(i)
+    s1_rawBtbEntries(i).result        := abtb.io.abtbResult(i).bits
+    s1_rawBtbEntries(i).utagePosition := abtb.io.abtbPos(i)
+    s1_rawBtbEntries(i).isUbtb        := false.B
+    s1_rawBtbEntries(i).abtbIndex     := i.U
   }
   private val s1_ubtbEntry = s1_rawBtbEntries(NumAheadBtbPredictionEntries)
-  s1_ubtbEntry.valid                      := ubtb.io.prediction.valid
-  s1_ubtbEntry.prediction                 := s1_ubtbPrediction
-  s1_ubtbEntry.result.taken               := s1_ubtbPrediction.taken
-  s1_ubtbEntry.result.cfiPosition         := s1_ubtbPrediction.cfiPosition
-  s1_ubtbEntry.result.attribute           := s1_ubtbPrediction.attribute
-  s1_ubtbEntry.result.isStrongBias        := false.B
-  s1_ubtbEntry.isUbtb                     := true.B
-  s1_ubtbEntry.abtbIndex                  := 0.U
+  s1_ubtbEntry.valid               := ubtb.io.prediction.valid
+  s1_ubtbEntry.prediction          := s1_ubtbPrediction
+  s1_ubtbEntry.result.taken        := s1_ubtbPrediction.taken
+  s1_ubtbEntry.result.cfiPosition  := s1_ubtbPrediction.cfiPosition
+  s1_ubtbEntry.result.attribute    := s1_ubtbPrediction.attribute
+  s1_ubtbEntry.utagePosition       := s1_ubtbPrediction.cfiPosition
+  s1_ubtbEntry.result.isStrongBias := false.B
+  s1_ubtbEntry.isUbtb              := true.B
+  s1_ubtbEntry.abtbIndex           := 0.U
 
   private val s1_uniqueBtbEntries = Wire(Vec(NumUtagePredictionEntries, new UtageBtbEntry))
   for (i <- 0 until NumUtagePredictionEntries) {
@@ -336,7 +339,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       false.B
     } else {
       s1_rawBtbEntries.take(i).map { entry =>
-        entry.valid && entry.result.cfiPosition === s1_rawBtbEntries(i).result.cfiPosition
+        entry.valid && entry.utagePosition === s1_rawBtbEntries(i).utagePosition
       }.reduce(_ || _)
     }
     s1_uniqueBtbEntries(i).valid := s1_rawBtbEntries(i).valid && !duplicate
@@ -345,7 +348,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // Stable selection sort: position is primary, source index is the tie-breaker.
   // Invalid entries are removed from the remaining set and naturally collect at the end.
   private val s1_sortKeys = VecInit.tabulate(NumUtagePredictionEntries) { i =>
-    Cat(s1_uniqueBtbEntries(i).result.cfiPosition, i.U((1 max log2Ceil(NumUtagePredictionEntries)).W))
+    Cat(s1_uniqueBtbEntries(i).utagePosition, i.U((1 max log2Ceil(NumUtagePredictionEntries)).W))
   }
   private val s1_sortCompareMatrix = CompareMatrix(s1_sortKeys)
   private val s1_sortRemaining = Seq.fill(NumUtagePredictionEntries + 1)(Wire(Vec(NumUtagePredictionEntries, Bool())))
@@ -353,7 +356,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s1_sortRemaining.head := VecInit(s1_uniqueBtbEntries.map(_.valid))
   private val s1_mixedBtbEntries = Wire(Vec(NumUtagePredictionEntries, new UtageBtbEntry))
   for (i <- 0 until NumUtagePredictionEntries) {
-    s1_sortOH(i) := s1_sortCompareMatrix.getLeastElementOH(s1_sortRemaining(i))
+    s1_sortOH(i)          := s1_sortCompareMatrix.getLeastElementOH(s1_sortRemaining(i))
     s1_mixedBtbEntries(i) := 0.U.asTypeOf(new UtageBtbEntry)
     when(s1_sortOH(i).asUInt.orR) {
       s1_mixedBtbEntries(i) := Mux1H(s1_sortOH(i), s1_uniqueBtbEntries)
@@ -369,7 +372,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     input.bits  := entry.result
   }
   utage.io.btbPrediction := s1_mixedUtageInput
-  utage.io.btbPosVec     := VecInit(s1_mixedBtbEntries.map(_.result.cfiPosition))
+  utage.io.btbPosVec     := VecInit(s1_mixedBtbEntries.map(_.utagePosition))
 
   private val s1_utageHitMask   = utage.io.prediction.hitVec
   private val s1_utageTakenMask = utage.io.prediction.takenVec
@@ -388,28 +391,31 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     )
   })
 
-  private val s1_mixedCompareMatrix = CompareMatrix(VecInit(s1_mixedBtbEntries.map(_.result.cfiPosition)))
+  private val s1_mixedCompareMatrix = CompareMatrix(VecInit(s1_mixedBtbEntries.map(_.utagePosition)))
   private val s1_firstTakenBrOH     = s1_mixedCompareMatrix.getLeastElementOH(s1_mixedTakenMask)
   private val s1_mixedPrediction    = VecInit(s1_mixedBtbEntries.map(_.prediction))
   private val s1_firstTakenBr       = Mux1H(s1_firstTakenBrOH, s1_mixedPrediction)
   private val s1_taken              = s1_mixedTakenMask.reduce(_ || _)
-  s1_prediction := Mux(s1_taken, s1_firstTakenBr, fallThrough.io.prediction)
+  s1_prediction       := Mux(s1_taken, s1_firstTakenBr, fallThrough.io.prediction)
   s1_prediction.taken := s1_taken
 
   private val s1_firstTakenIsUbtb = Mux1H(s1_firstTakenBrOH, VecInit(s1_mixedBtbEntries.map(_.isUbtb)))
-  private val s1_firstTakenUsesUtage = Mux1H(s1_firstTakenBrOH, VecInit(s1_mixedBtbEntries.zipWithIndex.map {
-    case (entry, i) => entry.result.attribute.isConditional && s1_utageHitMask(i)
-  }))
+  private val s1_firstTakenUsesUtage = Mux1H(
+    s1_firstTakenBrOH,
+    VecInit(s1_mixedBtbEntries.zipWithIndex.map {
+      case (entry, i) => entry.result.attribute.isConditional && s1_utageHitMask(i)
+    })
+  )
   private val s1_abtbFirstTakenBrOH = VecInit.tabulate(NumAheadBtbPredictionEntries) { abtbIdx =>
     s1_firstTakenBrOH.zip(s1_mixedBtbEntries).map { case (firstTaken, entry) =>
       firstTaken && !entry.isUbtb && entry.abtbIndex === abtbIdx.U
     }.reduce(_ || _)
   }
-  private val s1_abtbValid          = s1_taken && !s1_firstTakenIsUbtb
-  private val debug_s1UseUbtb       = s1_taken && s1_firstTakenIsUbtb && !s1_firstTakenUsesUtage
-  private val debug_s1UseUbtbUtage  = s1_taken && s1_firstTakenIsUbtb && s1_firstTakenUsesUtage
-  private val debug_s1UseAbtb       = s1_taken && !s1_firstTakenIsUbtb && !s1_firstTakenUsesUtage
-  private val debug_s1UseAbtbUtage  = s1_taken && !s1_firstTakenIsUbtb && s1_firstTakenUsesUtage
+  private val s1_abtbValid         = s1_taken && !s1_firstTakenIsUbtb
+  private val debug_s1UseUbtb      = s1_taken && s1_firstTakenIsUbtb && !s1_firstTakenUsesUtage
+  private val debug_s1UseUbtbUtage = s1_taken && s1_firstTakenIsUbtb && s1_firstTakenUsesUtage
+  private val debug_s1UseAbtb      = s1_taken && !s1_firstTakenIsUbtb && !s1_firstTakenUsesUtage
+  private val debug_s1UseAbtbUtage = s1_taken && !s1_firstTakenIsUbtb && s1_firstTakenUsesUtage
 
   s1_utageMeta := utage.io.meta.bits
 
