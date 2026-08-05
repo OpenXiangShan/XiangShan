@@ -159,8 +159,8 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
         return {
             "idx": int(idx),
             "start_pc": _read_addr_sig(dut, f"Frontend_top.Frontend.inner_ftq.entryQueue_{idx}_startPc_addr"),
-            "taken_valid": _read_sig(dut, f"Frontend_top.Frontend.inner_ftq.entryQueue_{idx}_takenCfiOffset_valid", 0),
-            "taken_bits": _read_sig(dut, f"Frontend_top.Frontend.inner_ftq.entryQueue_{idx}_takenCfiOffset_bits", 0),
+            "taken": _read_sig(dut, f"Frontend_top.Frontend.inner_ftq.entryQueue_{idx}_taken", 0),
+            "end_position": _read_sig(dut, f"Frontend_top.Frontend.inner_ftq.entryQueue_{idx}_endPosition", 0),
         }
 
     cfvec = []
@@ -430,11 +430,11 @@ def _format_stall_snapshot(snapshot: dict) -> str:
     def _format_runtime_ftq_entry(entry):
         if entry is None:
             return "none"
-        return "({idx},start={start},taken={taken_valid}/{taken_bits})".format(
+        return "({idx},start={start},taken={taken}/end={end_position})".format(
             idx=int(entry["idx"]),
             start=_format_optional_pc(entry["start_pc"]),
-            taken_valid=int(entry["taken_valid"]),
-            taken_bits=int(entry["taken_bits"]),
+            taken=int(entry["taken"]),
+            end_position=int(entry["end_position"]),
         )
 
     def _format_recent_dut_redirect(entry):

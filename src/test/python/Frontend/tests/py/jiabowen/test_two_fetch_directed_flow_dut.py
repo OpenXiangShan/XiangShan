@@ -5,7 +5,7 @@ from typing import Iterable, Sequence
 
 import pytest
 
-from env.funcov import _TWO_FETCH_SIGNALS
+from env.funcov.py.ftq.sampler import _TWO_FETCH_SIGNALS
 from env.pylib import frontend_offset_path
 from env.sequences import LoadProgramSequence
 from env.transactions import ProgramImage

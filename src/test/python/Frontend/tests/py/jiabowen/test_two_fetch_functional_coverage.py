@@ -14,12 +14,12 @@ import env.functional_coverage as functional_coverage_module
 from env.funcov import (
     CFVEC_SAMPLER_BIN_KEYS,
     IFU_CFVEC_SAMPLER_BIN_KEYS,
+    sample_cfvec_coverage,
+)
+from env.funcov.py.ftq.sampler import (
     TWO_FETCH_COVERPOINTS,
-    TWO_FETCH_OPTIONAL_SIGNAL_KEYS,
     TWO_FETCH_SAMPLER_BIN_KEYS,
     _TWO_FETCH_SIGNALS,
-    _WAY_DATA_CONFLICT_SIGNALS,
-    sample_cfvec_coverage,
     sample_two_fetch_coverage,
 )
 from env.funcov.py.icache import (
@@ -71,6 +71,27 @@ class _FakeDut:
         self.set(_TWO_FETCH_SIGNALS[str(key)][0], value)
 
 
+def _set_raw_two_fetch_window(dut, first_size: int) -> None:
+    base = "Frontend_top.Frontend.inner_ifu.instrBoundary.io_resp_rawInstrVec_"
+    for index in range(32):
+        dut.set(f"{base}{index}_valid", int(index in (0, first_size)))
+        dut.set(f"{base}{index}_data", 0)
+        dut.set(f"{base}{index}_isRvc", 0)
+        dut.set(f"{base}{index}_blockSel", int(index >= first_size))
+        dut.set(f"{base}{index}_isCrossBlockInstr", 0)
+        dut.set(f"{base}{index}_startOffset", 0)
+
+
+def _set_dual_ibuffer_entries(dut, first_tag: tuple[int, int], second_tag: tuple[int, int]) -> None:
+    base = "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_"
+    dut.set(f"{base}enqEnable", 0b11)
+    for slot, (flag, value) in enumerate((first_tag, second_tag)):
+        dut.set(f"{base}pc_{slot}_addr", 0x80000000 + 4 * slot)
+        dut.set(f"{base}isRvc_{slot}", 0)
+        dut.set(f"{base}ftqPtr_{slot}_flag", flag)
+        dut.set(f"{base}ftqPtr_{slot}_value", value)
+
+
 class _Memory:
     @staticmethod
     def is_mmio(_addr):
@@ -105,6 +126,9 @@ def _eligible_provenance():
             {
                 "functional_coverage.py": file_sha256(frontend_root / "env/functional_coverage.py"),
                 "funcov/__init__.py": file_sha256(frontend_root / "env/funcov/__init__.py"),
+                "funcov/py/ftq/sampler.py": file_sha256(
+                    frontend_root / "env/funcov/py/ftq/sampler.py"
+                ),
                 "funcov/py/icache/__init__.py": file_sha256(
                     frontend_root / "env/funcov/py/icache/__init__.py"
                 ),
@@ -155,7 +179,14 @@ def _eligible_provenance():
     values["registry_sha256"] = file_sha256(default_pilot_csv_path())
     values["definitions_sha256"] = definitions_sha256
     values["sampler_sha256"] = sampler_sha256
+    values["simulator"] = "verilator"
     values["dut_source_sha"] = "a" * 40
+    values["implementation_sha"] = "a" * 40
+    values["design_baseline_sha"] = "a" * 40
+    values["source_sha_override"] = False
+    values["source_delta_sha256"] = hashlib.sha256(b"").hexdigest()
+    values["source_delta_files"] = []
+    values["source_delta_policy"] = "none"
     values["build_config"] = "frontend-test"
     values["toolchain"] = "python-test"
     values["build_manifest_status"] = "valid"
@@ -164,7 +195,14 @@ def _eligible_provenance():
 
 def _resign_provenance(values):
     compatibility_fields = (
+        "simulator",
         "dut_source_sha",
+        "implementation_sha",
+        "design_baseline_sha",
+        "source_sha_override",
+        "source_delta_sha256",
+        "source_delta_files",
+        "source_delta_policy",
         "dut_build_sha256",
         "dut_python_extension_sha256",
         "generated_rtl_sha256",
@@ -271,6 +309,7 @@ def test_two_fetch_ftq_eligibility_and_pointer_bins(tmp_path):
     dut.set_key("way_out_valid", 1)
     dut.set_key("way_out_ready", 1)
     dut.set_key("way_real_two", 1)
+    dut.set_key("main_s0_fire", 1)
 
     sample_two_fetch_coverage(recorder, env, 1)
     assert recorder.key_hit("two_fetch_ftq_eligibility", "eligible_dual")
@@ -310,6 +349,32 @@ def test_two_fetch_backend_exception_requires_observed_exception_signal(tmp_path
     assert recorder.key_hit("two_fetch_ftq_eligibility", "blocked_backend_exception")
 
 
+def test_two_fetch_size_uses_endposition_and_start_address(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    dut.set_key("ftq_valid", 1)
+    dut.set_key("ftq_ready", 1)
+    dut.set_key("ftq_req1_valid", 0)
+    dut.set_key("ftq_req0_end", 20)
+    dut.set_key("ftq_req1_end", 20)
+    dut.set_key("ftq_req0_exception", 0)
+    dut.set_key("bpu_ptr_flag", 0)
+    dut.set_key("bpu_ptr_value", 8)
+    dut.set_key("fetch_ptr_flag", 0)
+    dut.set_key("fetch_ptr_value", 0)
+
+    # endPosition is relative to a 32 B-aligned block, not to startVAddr.
+    # With halfword start offsets of 15, both requests have size six.
+    dut.set_key("ftq_req0_start", 0x4000000F)
+    dut.set_key("ftq_req1_start", 0x4000000F)
+    sample_two_fetch_coverage(recorder, env, 1)
+    assert not recorder.key_hit("two_fetch_ftq_eligibility", "blocked_size")
+
+    dut.set_key("ftq_req0_start", 0x40000000)
+    dut.set_key("ftq_req1_start", 0x40000000)
+    sample_two_fetch_coverage(recorder, env, 2)
+    assert recorder.key_hit("two_fetch_ftq_eligibility", "blocked_size")
+
+
 def test_two_fetch_cross_page_uses_active_ftq_entries_when_request_probe_is_absent(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
     dut.set_key("ftq_valid", 1)
@@ -340,10 +405,17 @@ def test_two_fetch_waylookup_ifu_and_delivery_bins(tmp_path):
     dut.set_key("ifu_ready", 1)
     dut.set_key("ifu_req1_valid", 1)
     dut.set_key("ifu_req0_size", 8)
-    dut.set("Frontend_top.Frontend.inner_ifu.instrBoundary.io_resp_rawInstrVec_8_blockSel", 1)
+    dut.set_key("main_s0_fire", 1)
+    _set_raw_two_fetch_window(dut, first_size=8)
     dut.set_key("ifu_second_valid", 1)
+    dut.set_key("ifu_s2_valid", 1)
     dut.set_key("to_ibuffer_valid", 1)
     dut.set_key("to_ibuffer_ready", 1)
+    dut.set_key("ifu_s2_ftq0_flag", 0)
+    dut.set_key("ifu_s2_ftq0_value", 3)
+    dut.set_key("ifu_s2_ftq1_flag", 0)
+    dut.set_key("ifu_s2_ftq1_value", 4)
+    _set_dual_ibuffer_entries(dut, (0, 3), (0, 4))
 
     sample_two_fetch_coverage(recorder, env, 3)
 
@@ -370,33 +442,20 @@ def test_two_fetch_waylookup_ifu_and_delivery_bins(tmp_path):
     )
 
     sample_two_fetch_coverage(recorder, env, 4)
-    assert recorder.key_hit("two_fetch_waylookup_block_reason", "data_bank_conflict")
+    assert not recorder.key_hit("two_fetch_waylookup_block_reason", "data_bank_conflict")
 
 
-def test_waylookup_data_conflict_aggregates_all_bank_lanes(tmp_path):
+def test_waylookup_data_conflict_is_not_inferred_without_s0_bank_inputs(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
-    dut.set_key("way_req1_valid", 1)
-    dut.set_key("way_out_valid", 1)
-    dut.set_key("way_out_ready", 1)
-    dut.set_key("way_real_two", 0)
-    dut.set_key("way_num_valid", 2)
-    dut.set_key("way_read_ptr_flag", 0)
-    dut.set_key("way_read_ptr_value", 0)
-    dut.set_key("way_exception_valid", 0)
-    dut.set_key("way_exception_ptr_flag", 0)
-    dut.set_key("way_exception_ptr_value", 0)
-    for index in range(64):
-        suffix = "" if index == 0 else f"_{index}"
-        dut.set(f"Frontend_top.Frontend.inner_icache.wayLookup.entryUpdate_updated{suffix}", 0)
-    for index in range(32):
-        dut.set(f"Frontend_top.Frontend.inner_icache.wayLookup.entries_{index}_isMmio", 0)
+    dut.set_key("main_wli1_valid", 1)
+    dut.set_key("main_wli0_is_mmio", 0)
+    dut.set_key("main_wli1_is_mmio", 0)
+    dut.set_key("main_wli0_itlb_exception", 0)
+    dut.set_key("main_wli1_itlb_exception", 0)
 
-    dut.set("Frontend_top.Frontend.inner_icache.wayLookup.isDataSramReadConflict_reqReadInfo_1_1", 0)
-    dut.set("Frontend_top.Frontend.inner_icache.wayLookup.isDataSramReadConflict_reqReadInfo_1_1_7", 1)
+    sample_two_fetch_coverage(recorder, env, 1)
 
-    sample_two_fetch_coverage(recorder, env, 4)
-
-    assert recorder.key_hit("two_fetch_waylookup_block_reason", "data_bank_conflict")
+    assert not recorder.key_hit("two_fetch_waylookup_block_reason", "data_bank_conflict")
 
 
 def test_waylookup_empty_write_observation_is_not_gated_by_two_fetch(tmp_path):
@@ -428,21 +487,40 @@ def test_two_fetch_mainpipe_refill_completion_bin(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
     dut.set_key("main_s1_valid", 1)
     dut.set_key("main_req1_valid", 1)
+    dut.set_key("main_s1_ftq0_flag", 0)
+    dut.set_key("main_s1_ftq0_value", 3)
+    dut.set_key("main_s1_ftq1_flag", 0)
+    dut.set_key("main_s1_ftq1_value", 4)
+    dut.set_key("main_s1_exception", 0)
+    dut.set_key("main_s1_mmio", 0)
+    dut.set_key("main_s1_flush", 0)
+    dut.set_key("backend_redirect", 0)
     dut.set_key("ifu_valid", 0)
     dut.set_key("ifu_ready", 0)
     dut.set_key("ifu_req1_valid", 0)
     for index, value in enumerate((0, 0, 1, 0)):
         dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_shouldFetch_{index}", value)
+        dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValid_{index // 2}_{index % 2}", 0)
+        dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValidReg_{index // 2}_{index % 2}", 0)
 
-    sample_two_fetch_coverage(recorder, env, 4)
-    assert recorder.key_hit("two_fetch_mainpipe_hit_pattern", "hit_miss")
+    sample_two_fetch_coverage(recorder, env, 1)
 
     dut.set_key("main_s1_valid", 0)
+    dut.set("Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValid_1_0", 1)
+    sample_two_fetch_coverage(recorder, env, 2)
+
+    dut.set("Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValid_1_0", 0)
+    dut.set("Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValidReg_1_0", 1)
     dut.set_key("ifu_valid", 1)
     dut.set_key("ifu_ready", 1)
     dut.set_key("ifu_req1_valid", 1)
-    sample_two_fetch_coverage(recorder, env, 5)
+    dut.set_key("ifu_req0_ftq_flag", 0)
+    dut.set_key("ifu_req0_ftq_value", 3)
+    dut.set_key("ifu_req1_ftq_flag", 0)
+    dut.set_key("ifu_req1_ftq_value", 4)
+    sample_two_fetch_coverage(recorder, env, 3)
 
+    assert recorder.key_hit("two_fetch_mainpipe_hit_pattern", "hit_miss")
     assert recorder.key_hit("two_fetch_mainpipe_completion", "wait_refill_then_dual")
 
 
@@ -612,7 +690,7 @@ def test_two_fetch_signal_map_matches_current_frontend_offset():
         if key not in dynamic_ftq_start_keys
         and not any(signal in registered for signal in candidates)
     ]
-    assert set(missing) <= TWO_FETCH_OPTIONAL_SIGNAL_KEYS
+    assert not missing
     assert {
         "Frontend_top.Frontend.inner_ftq.entryQueue_0_startPc_addr",
         "Frontend_top.Frontend.inner_ftq.entryQueue_63_startPc_addr",
@@ -644,8 +722,6 @@ def test_two_fetch_signal_map_matches_current_frontend_offset():
     )
     generated.append("Frontend_top.Frontend.inner_ifu.s2_fixedInstrValid")
     assert not [signal for signal in generated if signal not in registered]
-    if "way_data_conflict" not in TWO_FETCH_OPTIONAL_SIGNAL_KEYS:
-        assert set(_WAY_DATA_CONFLICT_SIGNALS) <= registered
 
 
 def test_two_fetch_backannotation_matches_registry_and_sampler():

@@ -59,7 +59,14 @@ _SHA256_PROVENANCE = {
     "compatibility_signature",
 }
 _COMPATIBILITY_FIELDS = (
+    "simulator",
     "dut_source_sha",
+    "implementation_sha",
+    "design_baseline_sha",
+    "source_sha_override",
+    "source_delta_sha256",
+    "source_delta_files",
+    "source_delta_policy",
     "dut_build_sha256",
     "dut_python_extension_sha256",
     "generated_rtl_sha256",
@@ -106,6 +113,7 @@ _CANONICAL_REGISTRY = (
 _SAMPLER_FILES = (
     _FRONTEND_ROOT / "env" / "functional_coverage.py",
     _FRONTEND_ROOT / "env" / "funcov" / "__init__.py",
+    _FRONTEND_ROOT / "env" / "funcov" / "py" / "ftq" / "sampler.py",
     _FRONTEND_ROOT / "env" / "funcov" / "py" / "icache" / "__init__.py",
     _FRONTEND_ROOT
     / "env"
@@ -328,6 +336,7 @@ def _current_sampler_sha256() -> str | None:
     labels = (
         "functional_coverage.py",
         "funcov/__init__.py",
+        "funcov/py/ftq/sampler.py",
         "funcov/py/icache/__init__.py",
         "funcov/py/icache/icache_mainpipe_funcov.py",
         "funcov/py/icache/icache_prefetchpipe_funcov.py",
@@ -510,7 +519,13 @@ def evaluate_artifact(raw: Any) -> dict:
                 )
 
     provenance = _as_mapping(raw.get("provenance"))
-    runtime_contract = any(field in provenance for field in _RUNTIME_PROVENANCE_FIELDS)
+    # A runtime manifest contract is active only when the artifact explicitly
+    # names a build manifest. Unit/model artifacts may carry source metadata
+    # without having a compiled-DUT manifest to validate.
+    runtime_contract = bool(
+        str(provenance.get("build_manifest_path") or "").strip()
+        or ("build_manifest_status" in provenance and "build_manifest_reasons" in provenance)
+    )
     required_provenance = (*_REQUIRED_PROVENANCE, *_RUNTIME_PROVENANCE_FIELDS) if runtime_contract else _REQUIRED_PROVENANCE
     for key in required_provenance:
         value = provenance.get(key)
@@ -544,10 +559,7 @@ def evaluate_artifact(raw: Any) -> dict:
         reasons.append("source_delta_without_override")
     elif runtime_contract and override and policy != "observability_only":
         reasons.append("source_delta_policy_not_allowlisted")
-    if all(
-        str(provenance.get(field) or "").strip() not in {"", "unavailable", "unknown"}
-        for field in _COMPATIBILITY_FIELDS
-    ):
+    if all(_compatibility_value_present(field, provenance.get(field)) for field in _COMPATIBILITY_FIELDS):
         compatibility_payload = {field: provenance[field] for field in _COMPATIBILITY_FIELDS}
         expected_signature = hashlib.sha256(
             json.dumps(

@@ -139,7 +139,24 @@ def main() -> int:
         "--",
         *delta_files,
     ) if delta_files else b""
-    source_tree_dirty = bool(_git(repo_root, "status", "--porcelain", "--untracked-files=all"))
+    # Generated/downloaded files inside submodules, such as the local NEMU
+    # executable under ready-to-run, are not part of the superproject source
+    # baseline and must not invalidate a commit-pinned DUT manifest.
+    status_output = _git(
+        repo_root,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "--ignore-submodules=untracked",
+    )
+    status_entries = []
+    for line in status_output.splitlines():
+        path = line[3:].split(" -> ", 1)[-1] if len(line) >= 4 else ""
+        # Build/run outputs are audit data, not source inputs to the DUT.
+        if path.startswith("data/runs/") or path.startswith("build-frontend/"):
+            continue
+        status_entries.append(line)
+    source_tree_dirty = bool(status_entries)
     manifest = write_frontend_build_manifest(
         args.output,
         build_root=args.build_root,

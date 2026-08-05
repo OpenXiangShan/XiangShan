@@ -213,6 +213,14 @@ that boundary stable.
 - Before pushing frontend work, run `proxychains git fetch origin <current-branch>` and then
   `git rebase origin/<current-branch>`. Do not replace this flow with
   `git merge`.
+- For each verification alignment, record the exact `frontend-bt` commit and the
+  corresponding `design_baseline_sha` from the `kunminghu-v3` merge already present in
+  that commit. Do not independently synchronize from `kunminghu-v3`.
+- Count executable testpoint leaves at any hierarchy depth when `Condition`, `Checkpoint`,
+  and `Object` are present; hierarchy headings without those fields are not leaves.
+  Report `UNMAPPED`, `MODELED`, `PARTIAL`, `HIT`, and human-accepted `CLOSED` separately.
+- Use only provenance-compatible functional/code coverage artifacts for current results.
+  Keep generated run data and the local NEMU under `ready-to-run` out of commits.
 - Before changing backend-agent semantics or related logic, run
   `docs/agents/frontend-backend-agent.md` section `实现一致性最小检查项`
   in order: `必须项` first, then `建议项`.
@@ -631,9 +639,9 @@ Therefore:
   and prefer wrapping the pipeline command with an outer `timeout` guard
 - when debugging a stuck bin-trace case, prefer enabling progress/stall
   reporting before changing semantic logic
-- for any bin-trace reproduction, prefer `scripts/run_bin_trace_pipeline.sh` with the
-  NEMU executable available in the current tree; do not assume a historical
-  `NEMU/build/...` path exists locally unless you have verified it
+- for any bin-trace reproduction, use the local
+  `ready-to-run/riscv64-nemu-interpreter` for golden traces; it is not a tracked
+  repository artifact
 
 Implementation Notes:
 

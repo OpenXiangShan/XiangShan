@@ -53,8 +53,8 @@ def run_nemu_for_log(
         raise FileNotFoundError(f"bin not found: {bin_file}")
 
     exec_path = Path(nemu_exec_path) if nemu_exec_path else _default_nemu_exec_path()
-    if not exec_path.is_file():
-        raise FileNotFoundError(f"NEMU executable not found: {exec_path}")
+    if not exec_path.is_file() or not exec_path.stat().st_mode & 0o111:
+        raise FileNotFoundError(f"NEMU executable not found or not executable: {exec_path}")
 
     log_file = Path(nemu_log_path)
     log_file.parent.mkdir(parents=True, exist_ok=True)

@@ -199,10 +199,10 @@ if [[ ! -f "${BIN_PATH}" ]]; then
 fi
 
 if [[ "${SKIP_NEMU}" == "0" ]]; then
-  if [[ ! -f "${NEMU_EXEC}" ]]; then
+  if [[ ! -x "${NEMU_EXEC}" ]]; then
     PIPELINE_STAGE="validate_inputs"
-    PIPELINE_REASON="nemu_exec_not_found"
-    echo "[frontend][error] NEMU executable not found: ${NEMU_EXEC}" >&2
+    PIPELINE_REASON="nemu_exec_not_executable"
+    echo "[frontend][error] NEMU executable not found or not executable: ${NEMU_EXEC}" >&2
     exit 2
   fi
 fi

@@ -20,8 +20,12 @@ from .artifact_provenance import (
 from .funcov import (
     CFVEC_SAMPLER_BIN_KEYS,
     IFU_CFVEC_SAMPLER_BIN_KEYS,
-    TWO_FETCH_SAMPLER_BIN_KEYS,
     sample_cfvec_coverage,
+)
+from .funcov.py.ftq.sampler import (
+    TWO_FETCH_SAMPLER_BIN_KEYS,
+    initialize_ftq_coverage_state,
+    reset_ftq_coverage_state,
     sample_two_fetch_coverage,
 )
 from .funcov.py.icache import (
@@ -76,7 +80,14 @@ def _json_sha256(value: Any) -> str:
 
 
 COMPATIBILITY_FIELDS = (
+    "simulator",
     "dut_source_sha",
+    "implementation_sha",
+    "design_baseline_sha",
+    "source_sha_override",
+    "source_delta_sha256",
+    "source_delta_files",
+    "source_delta_policy",
     "dut_build_sha256",
     "dut_python_extension_sha256",
     "generated_rtl_sha256",
@@ -232,6 +243,7 @@ class FunctionalCoverageRecorder:
         self._two_fetch_waiting_refill = False
         self._two_fetch_ftq_pending = False
         self._two_fetch_last_dual_cycle: Optional[int] = None
+        initialize_ftq_coverage_state(self)
         self._dut_signal_cache: Dict[str, Any] = {}
         self._missing_dut_signals: set[str] = set()
 
@@ -374,6 +386,15 @@ class FunctionalCoverageRecorder:
                 "funcov/__init__.py": _file_sha256(
                     str((Path(__file__).resolve().parent / "funcov" / "__init__.py"))
                 ),
+                "funcov/py/ftq/sampler.py": _file_sha256(
+                    str(
+                        Path(__file__).resolve().parent
+                        / "funcov"
+                        / "py"
+                        / "ftq"
+                        / "sampler.py"
+                    )
+                ),
                 "funcov/py/icache/__init__.py": _file_sha256(
                     str(
                         Path(__file__).resolve().parent
@@ -445,7 +466,7 @@ class FunctionalCoverageRecorder:
             "dut_source_origin": dut_source_origin,
             "implementation_sha": build.get("implementation_sha", "unavailable"),
             "design_baseline_sha": build.get("design_baseline_sha", "unavailable"),
-            "source_sha_override": bool(source_override),
+            "source_sha_override": bool(build.get("source_sha_override", False)),
             "source_delta_sha256": build.get("source_delta_sha256", "unavailable"),
             "source_delta_files": list(build.get("source_delta_files") or []),
             "source_delta_policy": build.get("source_delta_policy", "unavailable"),
@@ -659,6 +680,7 @@ class FunctionalCoverageRecorder:
         self._two_fetch_ftq_pending = False
         self._two_fetch_last_dual_cycle = None
         self._two_fetch_last_waylookup_write_state = None
+        reset_ftq_coverage_state(self)
         reset_icache_mainpipe_coverage_state(self)
         reset_icache_prefetchpipe_coverage_state(self)
         reset_icache_missunit_coverage_state(self)

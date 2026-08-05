@@ -580,8 +580,8 @@ cacheable取指,,,,,,,,,,,
 ,,预测块登记,,,,,,,,,
 ,,,BPU prediction 写入 FTQ,,,,,,,,
 ,,,,顺序 cacheable 预测块写入 FTQ,连续 BPU prediction 有效；预测块 start PC 指向 PBMT=PMA 且 PMA=cacheable 区间；无 redirect,FTQ 接收 prediction 并为该预测块分配 FTQ 归属；对 backend 暴露的 FTQ PC 写入信息与 prediction start PC 一致,,,UNMAPPED,,
-,,,,taken CFI 预测块写入 FTQ,BPU prediction 携带有效 taken CFI offset；预测块 start PC 指向 cacheable 区间；无 redirect,FTQ 保存该预测块的 start PC 和 taken CFI offset；后续 FTQ 发出的取指请求携带同一 taken offset,,,UNMAPPED,,
-,,,,not-taken 预测块写入 FTQ,BPU prediction 不携带有效 taken CFI offset；后续顺序 prediction 连续到达；无 redirect,FTQ 为每个顺序预测块建立独立 FTQ 归属；后续请求按各自 start PC 顺序发出,,,UNMAPPED,,
+,,,,taken CFI 预测块写入 FTQ,BPU prediction 携带 taken 和对应 endPosition；预测块 start PC 指向 cacheable 区间；无 redirect,FTQ 保存该预测块的 start PC、taken 和 endPosition；后续 FTQ 发出的取指请求携带相同预测边界,,,UNMAPPED,,
+,,,,not-taken 预测块写入 FTQ,BPU prediction 的 taken 为0；后续顺序 prediction 连续到达；无 redirect,FTQ 为每个顺序预测块建立独立 FTQ 归属；后续请求按各自 start PC 和 endPosition 顺序发出,,,UNMAPPED,,
 ,,,prediction 接收边界,,,,,,,,
 ,,,,redirect 同拍不接收旧路径 prediction,BPU prediction 有效同拍 backend 或 frontend redirect 有效；prediction 属于 redirect 前旧路径,FTQ 不把该旧路径 prediction 作为新预测块登记；redirect 后首个可见 FTQ 请求来自恢复路径,,,UNMAPPED,,
 ,,,,FTQ runahead 满时反压 BPU prediction,backend commit 边界长期不推进或 IFU/main fetch 消费落后；BPU 连续提供 cacheable prediction,FTQ 在可容纳范围内接收 prediction；达到 runahead 或容量边界后 prediction ready 拉低，避免继续登记不可追踪预测块,,,UNMAPPED,,
@@ -592,8 +592,8 @@ cacheable取指,,,,,,,,,,,
 ,,,IFU wbRedirect,,,,,,,,
 ,,,,收到不包含 CFI 指令的 IFU wbRedirect,IFU wbRedirect 指向一个已登记 cacheable 预测块；无同周期 backend redirect,FTQ 将恢复窗口裁剪到该 redirect 指定位置之后；更年轻旧路径预测块不再产生 main fetch/prefetch 请求,,,UNMAPPED,,
 ,,,,同时收到来自 backend 和 IFU 的 redirect,backend redirect 和 frontend redirect 在同一窗口内同时有效；两个 redirect 目标不同,FTQ 选择 backend redirect 作为恢复来源；后续发给 BPU/ICache/IFU 的恢复信息和请求都基于 backend redirect,,,UNMAPPED,,
-,,,,收到包含 CFI 指令的 IFU wbRedirect，CFI 指令不是 ret,,,,,,,
-,,,,收到包含 CFI 指令的 IFU wbRedirect，CFI 指令为 ret,,,,,,,
+,,,,收到包含 CFI 指令的 IFU wbRedirect，CFI 指令不是 ret,,,,,UNMAPPED,,
+,,,,收到包含 CFI 指令的 IFU wbRedirect，CFI 指令为 ret,,,,,UNMAPPED,,
 ,IFU, @加柏文,TODO：仅保留 ifu 内部相关测试点，与 top 重复的可以删除,,,,,,,,
 ,,s0接收ICache返回与预测块meta采样,,,,,,,,,
 ,,,ICache返回握手与反压,,,,,,,,
@@ -1610,9 +1610,9 @@ wfi,,,,,,,,,,,
 ,FTQ双fetch请求生成,,,,,,,,,,
 ,,资格判定,,,,,,,,,
 ,,,rawTwoFetchValid条件组合,,,,,,,,
-,,,,两个预测块满足全部资格时同拍发出双fetch请求,构造两个相邻FTQ entry，使BPU领先fetchPtr超过3项、两块size之和不超过32个halfword、起始地址同4KB页且均无已知backend取指异常；保持无redirect并打开MainPipe ready,FTQ→MainPipe握手时req(0/1).valid均为1；两个req携带各自startVAddr、takenCfiOffset和ftqIdx,驱动: BPU prediction entryQueue、bpuPtr/fetchPtr距离、两块takenCfiOffset/startVAddr、backendException；采集: MainPipe.io_fromFtq.fire及req(0/1),"covergroup two_fetch_ftq_eligibility, coverpoint request_eligibility, bins eligible_dual (BIN-501)",PARTIAL,fe_2fetch_trained_short_blocks,"DUT_REJECTED:fe_2fetch_trained_short_blocks_test_bin_trace:pytest_outcome:failed,exit_code:1,checker_status:fail"
+,,,,两个预测块满足全部资格时同拍发出双fetch请求,构造两个相邻FTQ entry，使BPU领先fetchPtr超过3项、两块size之和不超过32个halfword、起始地址同4KB页且均无已知backend取指异常；保持无redirect并打开MainPipe ready,FTQ→MainPipe握手时req(0/1).valid均为1；两个req携带各自startVAddr、taken、endPosition和ftqIdx,驱动: BPU prediction entryQueue、bpuPtr/fetchPtr距离、两块taken/endPosition/startVAddr、backendException；采集: MainPipe.io_fromFtq.fire及req(0/1),"covergroup two_fetch_ftq_eligibility, coverpoint request_eligibility, bins eligible_dual (BIN-501)",PARTIAL,fe_2fetch_trained_short_blocks,"DUT_REJECTED:fe_2fetch_trained_short_blocks_test_bin_trace:pytest_outcome:failed,exit_code:1,checker_status:fail"
 ,,,,BPU领先距离不超过3项时退化为单fetch请求,保持两个预测块同页且size之和不超过32个halfword，仅把bpuPtr与fetchPtr距离压到0到3；打开MainPipe ready并保持无异常无redirect,FTQ请求仍可握手但req(1).valid=0；fetchPtr只推进1项，不错误消费下一FTQ entry,驱动: bpuPtr/fetchPtr距离0到3、两个合法entry；采集: req(1).valid、fetchPtr步长,"covergroup two_fetch_ftq_eligibility, coverpoint request_eligibility, bins blocked_runahead (BIN-502)",MODELED,tc_2fetch_ftq_blocked_runahead,DUT:fe_2fetch_trained_short_blocks_test_bin_trace:hits=43; DUT:fe_2fetch_mixed_rvc_rvi_test_bin_trace:hits=54; DUT:fe_2fetch_cross_page_blocked_test_bin_trace:hits=35; DUT:fe_2fetch_size_blocked_test_bin_trace:hits=31
-,,,,两块长度之和超过32个halfword时退化为单fetch请求,构造同页的两个FTQ entry，通过两块takenCfiOffset使size之和大于FetchBlockInstNum；保持BPU领先距离充足且无异常,FTQ req(1).valid=0；第一块仍正常请求，第二entry留待后续fetch，不发生范围截断后伪双取指,驱动: 两块takenCfiOffset/size组合；采集: req(0/1).valid、fetchPtr步长,"covergroup two_fetch_ftq_eligibility, coverpoint request_eligibility, bins blocked_size (BIN-503)",PARTIAL,fe_2fetch_size_blocked,"DUT_REJECTED:fe_2fetch_size_blocked_test_bin_trace:pytest_outcome:failed,exit_code:1,checker_status:fail"
+,,,,两块长度之和超过32个halfword时退化为单fetch请求,构造同页的两个FTQ entry，通过两块startVAddr和endPosition使size之和大于FetchBlockInstNum；保持BPU领先距离充足且无异常,FTQ req(1).valid=0；第一块仍正常请求，第二entry留待后续fetch，不发生范围截断后伪双取指,驱动: 两块startVAddr/endPosition/size组合；采集: req(0/1).valid、fetchPtr步长,"covergroup two_fetch_ftq_eligibility, coverpoint request_eligibility, bins blocked_size (BIN-503)",PARTIAL,fe_2fetch_size_blocked,"DUT_REJECTED:fe_2fetch_size_blocked_test_bin_trace:pytest_outcome:failed,exit_code:1,checker_status:fail"
 ,,,,两个预测块起始地址跨4KB页时退化为单fetch请求,把第一块放在页尾并使第二FTQ entry落到下一4KB页；其他双fetch资格均满足,FTQ req(1).valid=0；本拍只请求第一页内的第一块，第二块后续单独经过翻译和取指,驱动: fetchReq(0/1).startVAddr跨页；采集: 两块vPageNumber、req(1).valid,"covergroup two_fetch_ftq_eligibility, coverpoint request_eligibility, bins blocked_cross_page (BIN-504)",PARTIAL,fe_2fetch_cross_page_blocked,"DUT_REJECTED:fe_2fetch_cross_page_blocked_test_bin_trace:pytest_outcome:failed,exit_code:1,checker_status:fail"
 ,,,,任一候选块带已知backend取指异常时退化为单fetch请求,在fetchPtr或fetchPtr+1对应entry注入backend IPF/IAF/IGPF等已知异常；其余条件满足双fetch,FTQ req(1).valid=0；异常entry不会与另一块组成双请求，异常路径按单块顺序交付,驱动: backendException和backendExceptionPtr分别命中第一或第二entry；采集: req(1).valid、hasBackendException,"covergroup two_fetch_ftq_eligibility, coverpoint request_eligibility, bins blocked_backend_exception (BIN-505)",MODELED,tc_2fetch_ftq_blocked_backend_exception,
 ,,指针与flush,,,,,,,,,

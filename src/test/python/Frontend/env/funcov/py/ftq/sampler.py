@@ -52,10 +52,10 @@ _TWO_FETCH_SIGNALS = {
         f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_vAddr_0_addr",
     ),
     "ftq_req0_end": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_takenCfiOffset_bits",
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_endPosition",
     ),
     "ftq_req1_end": (
-        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_takenCfiOffset_bits",
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_endPosition",
     ),
     "ftq_req0_exception": (
         f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_hasBackendException",
@@ -406,6 +406,20 @@ def _tf_ftq_start(recorder, slot: int) -> int | None:
         recorder,
         (f"Frontend_top.Frontend.inner_ftq.entryQueue_{index}_startPc_addr",),
     )
+
+
+def _tf_fetch_size(start: int | None, end_position: int | None) -> int | None:
+    """Match ``FtqFetchReq.size`` for the current 64 B / 32 B-aligned frontend.
+
+    ``PrunedAddr.addr`` is halfword-addressed.  The low four bits therefore
+    correspond to ``startVAddr(FetchBlockAlignWidth - 1, instOffsetBits)`` for
+    the configured 32 B alignment.  ``endPosition`` is not a relative
+    ``takenCfiOffset``; using it directly would overstate the request length.
+    """
+    if start is None or end_position is None:
+        return None
+    size = int(end_position) + 1 - (int(start) & 0xF)
+    return size if 0 < size <= 32 else None
 
 
 def _tf_vector(recorder, module: str, template: str, count: int) -> list[int | None]:
@@ -774,7 +788,9 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
             )
         # PrunedAddr.addr is halfword-addressed, so its bit 11 is virtual-address bit 12.
         cross_page = None not in (start0, start1) and (int(start0) >> 11) != (int(start1) >> 11)
-        size_block = None not in (end0, end1) and int(end0) + int(end1) + 2 > 32
+        size0 = _tf_fetch_size(start0, end0)
+        size1 = _tf_fetch_size(start1, end1)
+        size_block = None not in (size0, size1) and int(size0) + int(size1) > 32
         backend_exception_candidate = False
         if None not in (
             backend_exc,
@@ -794,6 +810,8 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
             start1=start1,
             end0=end0,
             end1=end1,
+            size0=size0,
+            size1=size1,
             exception0=exc0,
             backend_exception=backend_exc,
             backend_exception_ptr=(
