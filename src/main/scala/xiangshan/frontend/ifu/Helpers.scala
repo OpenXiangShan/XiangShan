@@ -128,19 +128,13 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
 
   def genBaseInstrData(
       instrVec:           Vec[Instruction],
-      firstDataDup:       Vec[Vec[UInt]],
-      secondDataDup:      Vec[Vec[UInt]],
+      firstData:          Vec[UInt],
+      secondData:         Vec[UInt],
       secondStartRviData: UInt
-  ): Vec[UInt] = {
-    require(instrVec.length == IBufferEnqueueWidth)
-    require(firstDataDup.length == 2)
-    require(secondDataDup.length == 2)
-
+  ): Vec[UInt] =
     VecInit((0 until IBufferEnqueueWidth).map { i =>
-      val dupIdx = i / (IBufferEnqueueWidth / 2)
-      selectInstrData(instrVec(i), firstDataDup(dupIdx), secondDataDup(dupIdx), secondStartRviData)
+      selectInstrData(instrVec(i), firstData, secondData, secondStartRviData)
     })
-  }
 
   def alignData[T <: Data](indataVec: Vec[T], shiftNum: UInt, default: T): Vec[T] = {
     require(shiftNum.getWidth == 2)

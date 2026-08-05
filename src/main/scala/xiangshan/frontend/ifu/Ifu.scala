@@ -173,11 +173,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s0_hasException = s0_icacheMeta(0).exception.hasException
   private val s0_instrCount =
     Mux(s0_hasException, 1.U((log2Ceil(FetchBlockInstNum) + 1).W), PopCount(s0_instrEndMask.asUInt & s0_totalRange))
-  private val s0_rawFirstDataDupWire  = VecInit(Seq.fill(NumCacheDataDuplicate)(io.fromICache.req.bits.info(0).data))
-  private val s0_rawSecondDataDupWire = VecInit(Seq.fill(NumCacheDataDuplicate)(io.fromICache.req.bits.info(1).data))
-  private val s0_firstEndIndex        = Wire(UInt(log2Ceil(ICacheLineBytes / 2).W))
-  private val s0_secondEndIndex       = Wire(UInt(log2Ceil(ICacheLineBytes / 2).W))
-  private val s0_secondStartIndex     = Wire(UInt(log2Ceil(ICacheLineBytes / 2).W))
+  private val s0_rawFirstData     = io.fromICache.req.bits.info(0).data
+  private val s0_rawSecondData    = io.fromICache.req.bits.info(1).data
+  private val s0_firstEndIndex    = Wire(UInt(log2Ceil(ICacheLineBytes / 2).W))
+  private val s0_secondEndIndex   = Wire(UInt(log2Ceil(ICacheLineBytes / 2).W))
+  private val s0_secondStartIndex = Wire(UInt(log2Ceil(ICacheLineBytes / 2).W))
   s0_firstEndIndex := io.fromICache.req.bits.info(0).startVAddr(
     log2Ceil(ICacheLineBytes / 2),
     instOffsetBits
@@ -229,13 +229,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_prevEndHalfRviData = RegInit(0.U(16.W))
   private val s1_prevEndHalfRviPc   = RegInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
 
-  private val s1_firstICacheDataDup  = RegEnable(s0_rawFirstDataDupWire, s0_fire)
-  private val s1_secondICacheDataDup = RegEnable(s0_rawSecondDataDupWire, s0_fire)
-  private val s1_firstEndIndex       = RegEnable(s0_firstEndIndex, s0_fire)
-  private val s1_secondEndIndex      = RegEnable(s0_secondEndIndex, s0_fire)
-  private val s1_secondStartIndex    = RegEnable(s0_secondStartIndex, s0_fire)
-  private val s1_rawFirstDataDup     = VecInit(s1_firstICacheDataDup.map(cutICacheData(_)))
-  private val s1_rawSecondDataDup    = VecInit(s1_secondICacheDataDup.map(cutICacheData(_)))
+  private val s1_firstICacheData  = RegEnable(s0_rawFirstData, s0_fire)
+  private val s1_secondICacheData = RegEnable(s0_rawSecondData, s0_fire)
+  private val s1_firstEndIndex    = RegEnable(s0_firstEndIndex, s0_fire)
+  private val s1_secondEndIndex   = RegEnable(s0_secondEndIndex, s0_fire)
+  private val s1_secondStartIndex = RegEnable(s0_secondStartIndex, s0_fire)
+  private val s1_rawFirstData     = cutICacheData(s1_firstICacheData)
+  private val s1_rawSecondData    = cutICacheData(s1_secondICacheData)
 
   private val s1_icacheMetaIn = RegEnable(s0_icacheMeta, s0_fire)
   private val s1_instrVec     = s1_compactedInstrVec
@@ -291,9 +291,9 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_firstEndHalfRvi = Wire(new EndHalfRviInfo)
   s1_firstEndHalfRvi.isHalfRvi := s1_firstEndIsHalfRvi
   s1_firstEndHalfRvi.pc        := s1_fetchBlock(0).startVAddr + (s1_firstEndPos << 1).asUInt
-  s1_firstEndHalfRvi.data      := s1_rawFirstDataDup(0)(s1_firstEndIndex)(15, 0)
+  s1_firstEndHalfRvi.data      := s1_rawFirstData(s1_firstEndIndex)(15, 0)
 
-  private val s1_secondEndHalfRviData = s1_rawSecondDataDup(0)(s1_secondEndIndex)(15, 0)
+  private val s1_secondEndHalfRviData = s1_rawSecondData(s1_secondEndIndex)(15, 0)
   private val s1_totalEndHalfRvi      = Wire(new EndHalfRviInfo)
   s1_totalEndHalfRvi.isHalfRvi := s1_totalEndIsHalfRvi
   s1_totalEndHalfRvi.pc := Mux(
@@ -302,12 +302,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
     s1_firstEndHalfRvi.pc
   )
   s1_totalEndHalfRvi.data := Mux(s1_fetchBlock(1).valid, s1_secondEndHalfRviData, s1_firstEndHalfRvi.data)
-  private val s1_secondStartRviData = s1_rawSecondDataDup(0)(s1_secondStartIndex)(15, 0)
+  private val s1_secondStartRviData = s1_rawSecondData(s1_secondStartIndex)(15, 0)
 
   private val s1_baseInstrData = genBaseInstrData(
     s1_baseAlignedInstrVec,
-    s1_rawFirstDataDup,
-    s1_rawSecondDataDup,
+    s1_rawFirstData,
+    s1_rawSecondData,
     s1_secondStartRviData
   )
   private val s1_alignedInstrPcVec = WireDefault(s1_baseAlignedInstrPcVec)
