@@ -274,10 +274,10 @@ class MainBtbAlignBank(
     t1_newCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, meta.counter.getUpdate(actualTaken))
   }
 
-  private val t2_fire = RegNext(t1_fire, init = false.B)
-  private val t2_entryNeedWrite = RegNext(t1_entryNeedWrite)
-  private val t2_replacerSetIdx = RegNext(getReplacerSetIndex(t1_startPc))
-  private val t2_entryWayMask   = RegNext(t1_entryWayMask)
+  private val t2_fire            = RegNext(t1_fire, init = false.B)
+  private val t2_entryNeedWrite  = RegNext(t1_entryNeedWrite)
+  private val t2_replacerSetIdx  = RegNext(getReplacerSetIndex(t1_startPc))
+  private val t2_entryWayMask    = RegNext(t1_entryWayMask)
   private val t2_actualTakenMask = RegNext(actualTakenMak)
   // update replacer
   replacer.io.train.t1_touch.valid        := t2_fire && t2_entryNeedWrite
