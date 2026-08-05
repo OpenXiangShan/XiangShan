@@ -112,7 +112,10 @@ def _effective_hierarchy_paths(rows: list[dict[str, str]]) -> list[tuple[str, ..
 def _is_executable_leaf(
     row: dict[str, str], path: tuple[str, ...], all_paths: list[tuple[str, ...]]
 ) -> bool:
-    if not all(str(row.get(field) or "").strip() for field in _LEAF_FIELDS):
+    # A row is an executable testpoint once it has any leaf-level definition.
+    # ``Object`` is commonly empty while the point is still UNMAPPED; requiring
+    # all three fields would silently remove those points from the denominator.
+    if not any(str(row.get(field) or "").strip() for field in _LEAF_FIELDS):
         return False
     if not path:
         return False

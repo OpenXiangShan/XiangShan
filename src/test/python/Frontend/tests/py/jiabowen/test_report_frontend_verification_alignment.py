@@ -22,7 +22,7 @@ def test_alignment_report_counts_terminal_leaves_at_any_hierarchy_depth(tmp_path
     rows = [
         {"一级测试点": "TOP"},
         {"一级测试点": "TOP", "二级测试点": "feature3", "三级测试点": "unmapped",
-         "Condition": "condition", "Checkpoint": "checkpoint", "Object": "object", "status": "UNMAPPED"},
+         "Condition": "condition", "Checkpoint": "checkpoint", "status": "UNMAPPED"},
         {"一级测试点": "TOP", "二级测试点": "feature4", "三级测试点": "group", "四级测试点": "modeled",
          "Condition": "condition", "Checkpoint": "checkpoint", "Object": "object",
          "coverage": "covergroup g, coverpoint p, bins b (BIN-001)", "status": "MODELED"},
