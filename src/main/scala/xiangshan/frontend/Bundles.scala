@@ -88,16 +88,6 @@ class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with ICa
       p" offset: ${takenCfiOffset.bits}\n"
 }
 
-class FtqPrefetchRequest(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
-  val startVAddr:         PrunedAddr    = PrunedAddr(VAddrBits)
-  val nextCachelineVAddr: PrunedAddr    = PrunedAddr(VAddrBits)
-  val ftqIdx:             FtqPtr        = new FtqPtr
-  val takenCfiOffset:     UInt          = UInt(CfiPositionWidth.W)
-  val backendException:   ExceptionType = new ExceptionType
-
-  def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset)
-}
-
 class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
   val valid:               Bool            = Bool()
   val vAddr:               Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))

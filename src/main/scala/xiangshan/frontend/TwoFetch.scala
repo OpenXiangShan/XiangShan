@@ -42,6 +42,19 @@ class TwoPrefetchCase extends Bundle {
       )
     )
 
+  // timing optimization:
+  // To avoid introducing a very wide adder on the meta SRAM read path,
+  // vSetIdx(1) comes from vSetIdx(0) + 1.U rather than get_idx(nextLineVAddr).
+  def selectMetaSetIdx(reqVec: Vec[PrefetchReqBundle]): Vec[UInt] =
+    MuxCase(
+      // unable to do 2-prefetch, or isSameLine or isOverlap1, both use req1's start and nextLine
+      reqVec(0).vSetIdx,
+      Seq(
+        isOverlap2   -> reqVec(1).vSetIdx,
+        isInterleave -> VecInit(reqVec(0).vSetIdx(0), reqVec(1).vSetIdx(0))
+      )
+    )
+
   // select isCrossLine flag to read ICacheMetaArray
   def selectIsCrossLine(reqVec: Vec[PrefetchReqBundle]): Bool =
     MuxCase(
