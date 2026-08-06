@@ -1033,8 +1033,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   private val MsrTotalEntries = MsrStreamCount * MsrEntriesPerStream
   private val MsrRgidWidth = 32
 
-  // A fresh RGID denotes a new integer value definition. A fully reusable match
-  // copies the logged destination RGID so dependent matches can be profiled too.
+  // A fresh RGID denotes a new integer value definition. A semantic RGID match
+  // copies the logged destination RGID to model an ideal SQUASH_HOLD and expose
+  // dependent reuse opportunities independently of baseline PReg reallocation.
   val msrIntPRegRgid = RegInit(VecInit((0 until IntPhyRegs).map(_.U(MsrRgidWidth.W))))
   val msrNextRgid = RegInit(IntPhyRegs.U(MsrRgidWidth.W))
   def msrIntPRegIdx(preg: UInt): UInt = preg(IntPhyRegIdxWidth - 1, 0)
@@ -1080,6 +1081,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val msrLogReusableAlu = RegInit(VecInit.fill(MsrTotalEntries)(false.B))
   val msrLogHasStaticHit = RegInit(VecInit.fill(MsrStreamCount)(false.B))
   val msrLogHasCompletedStaticHit = RegInit(VecInit.fill(MsrStreamCount)(false.B))
+  val msrLogHasSemanticHoldHit = RegInit(VecInit.fill(MsrStreamCount)(false.B))
   val msrLogHasFullReuseHit = RegInit(VecInit.fill(MsrStreamCount)(false.B))
 
   // redirectBegin is the entry immediately before the first flushed instruction.
@@ -1172,7 +1174,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val priorAllocCount = if (i == 0) 0.U else PopCount(msrEnqAllocInt.take(i))
     val freshRgid = msrNextRgid + priorAllocCount
     msrEnqDestRgid(i) := Mux(
-      msrLogMatchFullReuse(i),
+      msrLogMatchRgid(i),
       Mux1H(msrLogMatchOH(i), msrLogDestRgid),
       freshRgid
     )
@@ -1212,6 +1214,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   })
   val msrCompletedReusableAluStaticHitCount = PopCount(msrLogMatchReusableAlu)
   val msrCompletedReusableAluRgidHitCount = PopCount(msrLogMatchRgid)
+  val msrCompletedReusableAluSemanticHoldHitCount = msrCompletedReusableAluRgidHitCount
   val msrCompletedReusableAluRgidPRegIntactHitCount = PopCount(msrLogMatchFullReuse)
   val msrStreamStaticHit = VecInit((0 until MsrStreamCount).map { stream =>
     msrLogMatchOH.map(_((stream + 1) * MsrEntriesPerStream - 1, stream * MsrEntriesPerStream).orR)
@@ -1227,6 +1230,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       matched((stream + 1) * MsrEntriesPerStream - 1, stream * MsrEntriesPerStream).orR && fullReuse
     }.reduce(_ || _)
   })
+  val msrStreamSemanticHoldHit = VecInit((0 until MsrStreamCount).map { stream =>
+    msrLogMatchOH.zip(msrLogMatchRgid).map { case (matched, semanticHold) =>
+      matched((stream + 1) * MsrEntriesPerStream - 1, stream * MsrEntriesPerStream).orR && semanticHold
+    }.reduce(_ || _)
+  })
   val msrNewStreamStaticHitCount = PopCount(msrStreamStaticHit.zip(msrLogHasStaticHit).map {
     case (hit, hasHit) => hit && !hasHit
   })
@@ -1238,6 +1246,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val msrNewStreamFullReuseHitCount = PopCount(msrStreamFullReuseHit.zip(msrLogHasFullReuseHit).map {
     case (hit, hasHit) => hit && !hasHit
   })
+  val msrNewStreamSemanticHoldHitCount = PopCount(
+    msrStreamSemanticHoldHit.zip(msrLogHasSemanticHoldHit).map {
+      case (hit, hasHit) => hit && !hasHit
+    }
+  )
   val msrStreamValid = VecInit((0 until MsrStreamCount).map { stream =>
     VecInit(msrLogValid.slice(stream * MsrEntriesPerStream, (stream + 1) * MsrEntriesPerStream)).asUInt.orR
   })
@@ -1275,6 +1288,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         }
         msrLogHasStaticHit(stream) := false.B
         msrLogHasCompletedStaticHit(stream) := false.B
+        msrLogHasSemanticHoldHit(stream) := false.B
         msrLogHasFullReuseHit(stream) := false.B
       }
     }
@@ -1291,6 +1305,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
       when(msrStreamCompletedStaticHit(stream)) {
         msrLogHasCompletedStaticHit(stream) := true.B
+      }
+      when(msrStreamSemanticHoldHit(stream)) {
+        msrLogHasSemanticHoldHit(stream) := true.B
       }
       when(msrStreamFullReuseHit(stream)) {
         msrLogHasFullReuseHit(stream) := true.B
@@ -2012,11 +2029,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("msr_completed_reusable_alu_static_hit_inst", msrCompletedReusableAluStaticHitCount)
   XSPerfAccumulate("msr_completed_reusable_alu_rgid_hit_inst", msrCompletedReusableAluRgidHitCount)
   XSPerfAccumulate(
+    "msr_completed_reusable_alu_semantic_hold_hit_inst",
+    msrCompletedReusableAluSemanticHoldHitCount
+  )
+  XSPerfAccumulate(
     "msr_completed_reusable_alu_rgid_preg_intact_hit_inst",
     msrCompletedReusableAluRgidPRegIntactHitCount
   )
   XSPerfAccumulate("msr_log_with_static_hit", msrNewStreamStaticHitCount)
   XSPerfAccumulate("msr_log_with_completed_static_hit", msrNewStreamCompletedStaticHitCount)
+  XSPerfAccumulate("msr_log_with_semantic_hold_hit", msrNewStreamSemanticHoldHitCount)
   XSPerfAccumulate("msr_log_with_full_reuse_hit", msrNewStreamFullReuseHitCount)
 
   val commitLoadVec = VecInit(commitLoadValid)
