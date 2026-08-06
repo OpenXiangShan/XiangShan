@@ -137,6 +137,7 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   (0 until LoadPipelineWidth).foreach(i => {
     io.bank_conflict_slow(i) := RegNext(wr_bank_conflict(i)) || RegNext(rrl_bank_conflict(i)) ||
                                 RegNext(rr_conflict_evict(i))
+    io.rr_bank_conflict_slow(i) := RegNext(rr_conflict_evict(i))
     io.disable_ld_fast_wakeup(i) := wr_bank_conflict(i) || rrl_bank_conflict_intend(i) ||
       (if (i == 0) 0.B else (0 until i).map(rr_bank_conflict(_)(i)).reduce(_ || _))
   })
