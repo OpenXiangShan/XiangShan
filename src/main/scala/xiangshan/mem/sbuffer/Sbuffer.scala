@@ -922,16 +922,19 @@ class Sbuffer(implicit p: Parameters)
 
       val uop              = io.diffStore.diffInfo(i).uop
 
-      val isVse           = isVStore(uop.fuType) && LSUOpType.isUStride(uop.fuOpType)
-      val isVsm           = isVStore(uop.fuType) && VstuType.isMasked(uop.fuOpType)
-      val isVsr           = isVStore(uop.fuType) && VstuType.isWhole(uop.fuOpType)
+      val isVecMemContinousOp = LSUOpType.isVecMemContinousOp(uop.fuOpType)
+      val isVse           = LSUOpType.isUStride(uop.fuOpType)
+      val isVsm           = LSUOpType.isMasked(uop.fuOpType)
+      val isVsr           = LSUOpType.isWhole(uop.fuOpType)
 
-      val vpu             = uop.vpu
-      val veew            = uop.vpu.veew
-      val eew             = EewLog2(veew)
-      val EEB             = (1.U << eew).asUInt //Only when VLEN=128 effective element byte
-      val EEWBits         = (EEB << 3.U).asUInt
-      val nf              = Mux(isVsr, 0.U, vpu.nf)
+      // log2(eew) - 3
+      // 0: eew = 8
+      // 3: eew = 64
+      val log2eewM3       = LSUOpType.vecElemSize(uop.fuOpType)
+      // EEB = EEW / 8 = 2^(log2(EEW) - 3)
+      val EEB             = (1.U << log2eewM3).asUInt //Only when VLEN=128 effective element byte
+      val EEW         = (EEB << 3.U).asUInt
+      val nf              = 0.U
 
       val isSegment       = nf =/= 0.U && !isVsm
       val isVSLine        = (isVse || isVsm || isVsr) && !isSegment
@@ -941,7 +944,7 @@ class Sbuffer(implicit p: Parameters)
       // No other vector instructions need to be considered.
       val flow            = Mux(
                               isVSLine,
-                              (16.U >> eew).asUInt,
+                              (16.U >> log2eewM3).asUInt,
                               0.U
                             )
 

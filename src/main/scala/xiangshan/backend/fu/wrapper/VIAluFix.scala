@@ -5,18 +5,19 @@ import chisel3.util._
 import chisel3.util.experimental.decode.TruthTable
 import org.chipsalliance.cde.config.Parameters
 import utility.XSError
+import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.{DstMgu, Mgtu, Mgu, NewMgu, VecPipedFuncUnit}
 import xiangshan.backend.fu.vector.Utils._
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import yunsuan.VialuFixType
-import yunsuan.vector.SewOH
-import yunsuan.vector.VectorALU.VIAluFixPoint
+import yunsuan.vector.Common.SewOH
+import yunsuan.vector.VectorALU.FixPoint
 
 import math.pow
 
 class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VialuFixType.dummy, "VialuF OpType not supported")
+//  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VialuFixType.dummy, "VialuF OpType not supported")
 
   // params
   private val dataWidth = cfg.destDataBits
@@ -28,13 +29,13 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   // modules
   private val vs2Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vs1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
-  private val vIAluFixPoints = Seq.fill(numVecModule)(Module(new VIAluFixPoint(XLEN)))
+  private val vIAluFixPoints = Seq.fill(numVecModule)(Module(new FixPoint))
   private val mgu = Module(new NewMgu(dataWidth))
   private val mgtu = Module(new Mgtu(dataWidth))
 
-  private val opcode = VialuFixType.getOpcode(fuOpType).asTypeOf(vIAluFixPoints.head.io.in.opcode)
-  private val isSigned = VialuFixType.isSigned(fuOpType)
-  private val isMisc = VialuFixType.isMisc(fuOpType)
+  private val opcode = fuOpType
+  private val isSigned = VIAluOpcodes.isSigned(fuOpType)
+  private val isMisc = false.B // Todo
   private val widenVs2 = inCtrl.vialuCtrl.get.widenVs2
   private val widen = inCtrl.vialuCtrl.get.widen
   private val isVf2 = inCtrl.vialuCtrl.get.isVf2
@@ -69,33 +70,33 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
 
   vIAluFixPoints.zipWithIndex.foreach {
     case (mod, i) =>
-      mod.io.in.ctrl.valid := valid
-      mod.io.in.opcode := opcode
-      mod.io.in.info.sel8 := sel8
-      mod.io.in.info.sel16 := sel16
-      mod.io.in.info.sel32 := sel32
-      mod.io.in.info.sel64 := sel64
-      mod.io.in.info.vm := vm
-      mod.io.in.ctrl.widen := widen
-      mod.io.in.ctrl.isSigned := isSigned
-      mod.io.in.ctrl.adderCtrl.widenVs2 := widenVs2
-      mod.io.in.ctrl.adderCtrl.isAddCarry := isAddCarry
-      mod.io.in.ctrl.miscCtrl.isExt.valid := isExt
-      mod.io.in.ctrl.miscCtrl.isExt.bits.isVf2 := isVf2
-      mod.io.in.ctrl.miscCtrl.isExt.bits.isVf4 := isVf4
-      mod.io.in.ctrl.miscCtrl.isExt.bits.isVf8 := isVf8
-      mod.io.in.ctrl.miscCtrl.isMisc := isMisc
-      mod.io.in.ctrl.miscCtrl.isNarrow := isNarrow
-      mod.io.in.data.vs2 := vs2Vec(i)
-      mod.io.in.data.vs1 := vs1Vec(i)
-      mod.io.in.data.vs2Widen := vs2WidenVec(i)
-      mod.io.in.data.vs1Widen := vs1WidenVec(i)
-      mod.io.in.data.mask := maskVec(i)
-      mod.io.in.data.vxrm := vxrm
+      mod.in.ctrl.valid := valid
+      mod.in.opcode := opcode
+      mod.in.info.sel8 := sel8
+      mod.in.info.sel16 := sel16
+      mod.in.info.sel32 := sel32
+      mod.in.info.sel64 := sel64
+      mod.in.info.vm := vm
+      mod.in.ctrl.widen := widen
+      mod.in.ctrl.isSigned := isSigned
+      mod.in.ctrl.adderCtrl.widenVs2 := widenVs2
+      mod.in.ctrl.adderCtrl.isAddCarry := isAddCarry
+      mod.in.ctrl.miscCtrl.isExt.valid := isExt
+      mod.in.ctrl.miscCtrl.isExt.bits.isVf2 := isVf2
+      mod.in.ctrl.miscCtrl.isExt.bits.isVf4 := isVf4
+      mod.in.ctrl.miscCtrl.isExt.bits.isVf8 := isVf8
+      mod.in.ctrl.miscCtrl.isMisc := isMisc
+      mod.in.ctrl.miscCtrl.isNarrow := isNarrow
+      mod.in.data.vs2 := vs2Vec(i)
+      mod.in.data.vs1 := vs1Vec(i)
+      mod.in.data.vs2Widen := vs2WidenVec(i)
+      mod.in.data.vs1Widen := vs1WidenVec(i)
+      mod.in.data.mask := maskVec(i)
+      mod.in.data.vxrm := vxrm
   }
 
   private val maskToMgu = Mux(isAddCarry, allMaskTrue, srcMask)
-  private val vdWiden = (VialuFixType.fmtIsVVW(fuOpType) || VialuFixType.fmtIsWVW(fuOpType)) & !isExt & !isDstMask
+  private val vdWiden = VIAluOpcodes.isWiden(fuOpType)
   private val eew = Mux(vdWiden, vsew + 1.U, vsew)
   private val vdIdx = Mux(isNarrow, vuopIdx(2, 1), vuopIdx)
 
