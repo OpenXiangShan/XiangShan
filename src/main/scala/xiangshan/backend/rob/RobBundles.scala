@@ -68,7 +68,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val mmio = Bool()
     val vxsat = Bool()
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
-    val uopNum = UInt(log2Up(MaxUopSize + 1).W)
+    val uopNum = UInt(log2Up(MaxUopSize * 2 + 1).W)
     val needFlush = Bool()
     // status end
 

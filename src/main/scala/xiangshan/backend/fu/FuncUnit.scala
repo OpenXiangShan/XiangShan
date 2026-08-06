@@ -68,6 +68,7 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   })
   val fpu         = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
   val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
+  val oldVType    = Option.when(cfg.writeVType)(VType())
   val vialuCtrl   = OptionWrapper(cfg.needVIaluCtrl, new VIAluCtrlSignals)
 }
 
@@ -192,6 +193,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.toRobValid := io.in.bits.ctrl.toRobValid
     io.out.bits.ctrl.robIdx := io.in.bits.ctrl.robIdx
     io.out.bits.ctrl.pdest := io.in.bits.ctrl.pdest
+    io.out.bits.ctrl.pdestVl.foreach(_ := io.in.bits.ctrl.pdestVl.get)
     io.out.bits.ctrl.rfWen.foreach(_ := io.in.bits.ctrl.rfWen.get)
     io.out.bits.ctrl.fpWen.foreach(_ := io.in.bits.ctrl.fpWen.get)
     io.out.bits.ctrl.vecWen.foreach(_ := io.in.bits.ctrl.vecWen.get)

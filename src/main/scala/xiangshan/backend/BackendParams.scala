@@ -173,6 +173,21 @@ case class BackendParams(
     MixedVec(allSchdParams.map(_.genWriteBackRobValidBundle.flatten).flatten)
   }
 
+  def getWrite2RobParams(needExtraVld: Boolean = true): Seq[ExeUnitParams] = {
+    allIssueParams.flatMap(_.getWriteBackRobParams(needExtraVld))
+  }
+
+  def getWrite2RobSize(cond: ExeUnitParams => Boolean = _ => true)(implicit p: Parameters): Int =
+    genWrite2RobBundles.count(x => cond(x.bits.params))
+
+  def genNewExuOutputBundle[T <: Bundle](
+    builder: NewExuOutput => T,
+    when: ExeUnitParams => Boolean,
+    dataConfigs: Seq[DataConfig],
+  )(implicit p: Parameters): MixedVec[MixedVec[T]] = {
+    MixedVec(allSchdParams.flatMap(_.genNewExuOutputBundle(builder, when)))
+  }
+
   def getIntWbArbiterParams: WbArbiterParams = {
     val intWbCfgs: Seq[IntWB] = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(_.writeInt)).map(_.asInstanceOf[IntWB])
     datapath.WbArbiterParams(intWbCfgs, intPregParams, this)

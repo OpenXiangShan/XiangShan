@@ -2106,7 +2106,6 @@ class StoreQueue(implicit p: Parameters) extends LSQModule with HasPerfEvents {
 
   virtualStoreQueue.io.redirect   <> io.redirect
   virtualStoreQueue.io.fromRob    <> io.fromRob
-  virtualStoreQueue.io.fromVMergeBuffer <> io.fromVMergeBuffer
   virtualStoreQueue.io.enq        <> io.enq
   virtualStoreQueue.io.mdpQuery.zip(io.forward).foreach { case (query, forward) =>
     query.valid := forward.s0Req.valid

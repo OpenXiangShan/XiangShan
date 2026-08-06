@@ -101,9 +101,6 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   val needCancel    = WireInit(VecInit(Seq.fill(Size)(false.B)))
   val retireVec     = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   val physicalQueueEnqPtr = RegInit(0.U.asTypeOf(PhysicalQueuePtr.cloneType))
-  // TODO: vecMbCommit will be remove in the future.
-  val vecCommittmp = Wire(Vec(StoreQueueSize, Vec(VecStorePipelineWidth, Bool())))
-  val vecCommit = Wire(Vec(StoreQueueSize, Bool()))
 
   // Reconstruct per-entry end sqIdx from the snapshot group's first-entry end sqIdx.
   private def getEntryEndSqIdx(entryPtr: VirtualStoreQueuePtr): PhysicalQueuePtrType = {
@@ -201,21 +198,6 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
     // snapshot queue
     when(enqSet && (i % SnapshotInterval == 0).B){
       snapshotQueue(i / SnapshotInterval).entryEndSqIdx := enqBits.reqEndPtr.sqIdx
-    }
-
-    // TODO: vecMbCommit will be remove in the future.
-    val fbk = io.fromVMergeBuffer
-    for (j <- 0 until VecStorePipelineWidth) {
-      vecCommittmp(i)(j) := fbk(j).valid && (fbk(j).bits.isCommit || fbk(j).bits.isFlush) &&
-        dataEntries(i).robIdx === fbk(j).bits.robidx && dataEntries(i).uopIdx === fbk(j).bits.uopidx
-    }
-    // vector feedback may occur with deqCancel/needCancel at the same time
-    vecCommit(i) := vecCommittmp(i).reduce(_ || _) && !needCancel(i) && !deqCancel && ctrlEntries(i).allocated
-
-    when (vecCommit(i)) {
-      ctrlEntries(i).vecMbCommit := true.B
-    }.elsewhen(deqCancel || needCancel(i)) {
-      ctrlEntries(i).vecMbCommit := false.B
     }
 
     // debug info

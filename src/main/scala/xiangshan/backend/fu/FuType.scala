@@ -39,6 +39,7 @@ object FuType extends ChiselOHEnum {
 
   // vec
   val vipu = addType(name = "vipu")
+  val vmpu = addType(name = "vmpu")
   val vialuF = addType(name = "vialuF")
   val vppu = addType(name = "vppu")
   val vimac = addType(name = "vimac")
@@ -48,9 +49,7 @@ object FuType extends ChiselOHEnum {
   val vfma = addType(name = "vfma")
   val vfdiv = addType(name = "vfdiv")
   val vfcvt = addType(name = "vfcvt")
-  val vsetiwi = addType(name = "vsetiwi") // vset read rs write rd
-  val vsetiwf = addType(name = "vsetiwf") // vset read rs write vconfig
-  val vsetfwf = addType(name = "vsetfwf") // vset read old vl write vconfig
+  val vset = addType(name = "vset")
 
   // vec ls
   val vldu = addType(name = "vldu")
@@ -113,7 +112,7 @@ object FuType extends ChiselOHEnum {
   val scalaMemAll = Seq(ldu, stu, mou)
   val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv)
   val vecOPF = Seq(vfalu, vfma, vfdiv, vfcvt)
-  val vecVSET = Seq(vsetiwi, vsetiwf, vsetfwf)
+  val vecVSET = Seq(vset)
   val vecArith = vecOPI ++ vecOPF
   val vecMem = Seq(vldu, vstu, vsegldu, vsegstu)
   val vecArithOrMem = vecArith ++ vecMem
@@ -132,7 +131,7 @@ object FuType extends ChiselOHEnum {
 
   def apply() = UInt(num.W)
 
-  def isInt(fuType: UInt): Bool = FuTypeOrR(fuType, intArithAll) || FuTypeOrR(fuType, vsetiwi, vsetiwf)
+  def isInt(fuType: UInt): Bool = FuTypeOrR(fuType, intArithAll) || FuTypeOrR(fuType, vset)
   def isIntDq0(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intDq0All)
   def isIntDq1(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intDq1All)
   def isIntDq0Deq0(fuType: UInt)(implicit p: Parameters): Bool = FuTypeOrR(fuType, intDq0Deq0)
@@ -169,8 +168,6 @@ object FuType extends ChiselOHEnum {
   def isCsr(fuType: UInt): Bool = FuTypeOrR(fuType, csr)
 
   def isUncertain(fuType: UInt): Bool = FuTypeOrR(fuType, csr, div, fDivSqrt, vidiv, vfdiv)
-
-  def isVsetRvfWvf(fuType: UInt): Bool = FuTypeOrR(fuType, vsetfwf)
 
   def isVArith(fuType: UInt): Bool = FuTypeOrR(fuType, vecArith)
 
@@ -233,9 +230,6 @@ object FuType extends ChiselOHEnum {
     ldu -> "load",
     stu -> "store",
     mou -> "mou",
-    vsetiwi -> "vsetiwi",
-    vsetiwf -> "vsetiwf",
-    vsetfwf -> "vsetfwf",
     vipu -> "vipu",
     vialuF -> "vialuF",
     vldu -> "vldu",
