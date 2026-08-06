@@ -273,6 +273,8 @@ object Bundles {
     val psrcVl = UInt(VlPhyRegIdxWidth.W)
     val pdest = UInt(PhyRegIdxWidth.W)
     val pdestVl = UInt(VlPhyRegIdxWidth.W)
+    val srcRgid = Vec(numSrc, UInt(MsrRgid.Width.W))
+    val destRgid = UInt(MsrRgid.Width.W)
     val robIdx = new RobPtr
     val dirtyFs = Bool()
     val dirtyVs = Bool()

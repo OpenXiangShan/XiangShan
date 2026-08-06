@@ -374,9 +374,15 @@ class RobCommitIO(implicit p: Parameters) extends XSBundle {
   def hasCommitInstr: Bool = isCommit && commitValid.asUInt.orR
 }
 
+object MsrRgid {
+  val Width = 6
+  val Null = 0
+}
+
 class RabCommitInfo(implicit p: Parameters) extends XSBundle {
   val ldest = UInt(LogicRegsWidth.W)
   val pdest = UInt(PhyRegIdxWidth.W)
+  val destRgid = UInt(MsrRgid.Width.W)
   val rfWen = Bool()
   val fpWen = Bool()
   val vecWen = Bool()

@@ -102,6 +102,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       val in = Flipped(new StallReasonIO(RenameWidth))
       val out = new StallReasonIO(RenameWidth)
     }
+    val rgidStatus = Output(new Bundle {
+      val quarantine = Bool()
+      val overflow = Bool()
+    })
   })
 
   io.in.zipWithIndex.map { case (o, i) =>
@@ -124,6 +128,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val rat = Module(new RenameTableWrapper)
 
   val intRenamePorts = Wire(Vec(RenameWidth, new RatWritePort(log2Ceil(IntLogicRegs))))
+  val intRgidRenamePorts = Wire(Vec(RenameWidth, new RgidWritePort(log2Ceil(IntLogicRegs))))
   val fpRenamePorts  = Wire(Vec(RenameWidth, new RatWritePort(log2Ceil(FpLogicRegs))))
   val vecRenamePorts = Wire(Vec(RenameWidth, new RatWritePort(log2Ceil(VecLogicRegs))))
   val v0RenamePorts  = Wire(Vec(RenameWidth, new RatWritePort(log2Ceil(V0LogicRegs))))
@@ -190,18 +195,24 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   vlFreeList.io.debug_rat.foreach(_ := debug_vl_rat.get)
 
   val intReadPorts = rat.io.intReadPorts
+  val intRgidReadPorts = rat.io.intRgidReadPorts
   val fpReadPorts  = rat.io.fpReadPorts
   val vecReadPorts = rat.io.vecReadPorts
   val v0ReadPorts  = rat.io.v0ReadPorts
   val vlReadPorts  = rat.io.vlReadPorts
 
   val intReadPortsData = VecInit(intReadPorts.map(x => VecInit(x.map(_.data))))
+  val intRgidReadPortsData = VecInit(intRgidReadPorts.map(x => VecInit(x.map(_.data))))
   val fpReadPortsData  = VecInit(fpReadPorts.map(x => VecInit(x.map(_.data))))
   val vecReadPortsData = VecInit(vecReadPorts.map(x => VecInit(x.map(_.data))))
   val v0ReadPortsData  = VecInit(v0ReadPorts.map(x => VecInit(x.data)))
   val vlReadPortsData  = VecInit(vlReadPorts.map(x => VecInit(x.data)))
 
   io.intReadPorts <> intReadPorts
+  intRgidReadPorts.flatten.zip(intReadPorts.flatten).foreach { case (rgid, preg) =>
+    rgid.hold := preg.hold
+    rgid.addr := preg.addr
+  }
   io.fpReadPorts  <> fpReadPorts
   io.vecReadPorts <> vecReadPorts
   io.v0ReadPorts  <> v0ReadPorts
@@ -210,6 +221,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   rat.io.snpt <> io.ratSnpt
 
   rat.io.intRenamePorts := intRenamePorts
+  rat.io.intRgidRenamePorts := intRgidRenamePorts
   rat.io.fpRenamePorts  := fpRenamePorts
   rat.io.vecRenamePorts := vecRenamePorts
   rat.io.v0RenamePorts  := v0RenamePorts
@@ -348,6 +360,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     * Rename: allocate free physical register and update rename table
     */
   val uops = Wire(Vec(RenameWidth, new RenameOutUop))
+  val freshDestRgid = Wire(Vec(RenameWidth, UInt(MsrRgid.Width.W)))
   uops.zip(io.in.map(_.bits)).map{ case(uop, in) => {
     uop := 0.U.asTypeOf(uop)
     connectSamePort(uop, in)
@@ -553,13 +566,19 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).psrc(3) := v0ReadPortsData(i)(0)
     uops(i).psrcVl := vlReadPortsData(i).head
     uops(i).psrcIntForMove := intReadPortsData(i).head
+    uops(i).srcRgid := VecInit.fill(uops(i).numSrc)(MsrRgid.Null.U(MsrRgid.Width.W))
+    uops(i).srcRgid(0) := Mux(SrcType.isXp(uops(i).srcType(0)), intRgidReadPortsData(i)(0), MsrRgid.Null.U)
+    uops(i).srcRgid(1) := Mux(SrcType.isXp(uops(i).srcType(1)), intRgidReadPortsData(i)(1), MsrRgid.Null.U)
+    uops(i).destRgid := freshDestRgid(i)
 
     // int psrc2 should be bypassed from next instruction if it is fused
     if (i < RenameWidth - 1) {
       when (io.fusionInfo(i).rs2FromRs2 || io.fusionInfo(i).rs2FromRs1) {
         uops(i).psrc(1) := Mux(io.fusionInfo(i).rs2FromRs2, intReadPortsData(i + 1)(1), intReadPortsData(i + 1)(0))
+        uops(i).srcRgid(1) := Mux(io.fusionInfo(i).rs2FromRs2, intRgidReadPortsData(i + 1)(1), intRgidReadPortsData(i + 1)(0))
       }.elsewhen(io.fusionInfo(i).rs2FromZero) {
         uops(i).psrc(1) := 0.U
+        uops(i).srcRgid(1) := MsrRgid.Null.U
       }
     }
     uops(i).isMove := isMove(i)
@@ -614,6 +633,82 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       walkPdest(i) := io.out(i).bits.pdest
     }
   }
+
+  val nextRgid = RegInit(VecInit.tabulate(IntLogicRegs) { index =>
+    (if (index == 0) MsrRgid.Null else 2).U(MsrRgid.Width.W)
+  })
+  val rgidExhausted = RegInit(VecInit.tabulate(IntLogicRegs)(index => (index == 0).B))
+  val rgidQuarantine = RegInit(false.B)
+  val rgidAllocWen = VecInit((0 until RenameWidth).map { lane =>
+    intSpecWen(lane) && io.in(lane).bits.ldest =/= 0.U
+  })
+  val maxRgid = ((1 << MsrRgid.Width) - 1).U(MsrRgid.Width.W)
+
+  for (lane <- 0 until RenameWidth) {
+    val ldest = io.in(lane).bits.ldest(log2Ceil(IntLogicRegs) - 1, 0)
+    val priorDefinitions = if (lane == 0) {
+      0.U
+    } else {
+      PopCount((0 until lane).map { prior =>
+        rgidAllocWen(prior) && io.in(prior).bits.ldest === io.in(lane).bits.ldest
+      })
+    }
+    val candidate = nextRgid(ldest) +& priorDefinitions
+    val candidateValid = rgidAllocWen(lane) && !rgidQuarantine && !rgidExhausted(ldest) &&
+      candidate <= maxRgid
+    freshDestRgid(lane) := Mux(candidateValid, candidate(MsrRgid.Width - 1, 0), MsrRgid.Null.U)
+  }
+
+  val rgidExhaustionEvent = WireInit(false.B)
+  for (lreg <- 1 until IntLogicRegs) {
+    val definitions = PopCount((0 until RenameWidth).map { lane =>
+      rgidAllocWen(lane) && io.in(lane).bits.ldest === lreg.U
+    })
+    val nextAfterGroup = nextRgid(lreg) +& definitions
+    when(definitions.orR && !rgidQuarantine && !rgidExhausted(lreg)) {
+      when(nextAfterGroup > maxRgid) {
+        nextRgid(lreg) := maxRgid
+        rgidExhausted(lreg) := true.B
+        rgidExhaustionEvent := true.B
+      }.otherwise {
+        nextRgid(lreg) := nextAfterGroup(MsrRgid.Width - 1, 0)
+      }
+    }
+  }
+  nextRgid(0) := MsrRgid.Null.U
+  rgidExhausted(0) := true.B
+  when(rgidExhaustionEvent) {
+    rgidQuarantine := true.B
+  }
+
+  io.rgidStatus.quarantine := rgidQuarantine
+  io.rgidStatus.overflow := rgidExhaustionEvent
+
+  val previousNextRgid = RegNext(nextRgid)
+  val previousExhausted = RegNext(rgidExhausted)
+  when(RegNext(io.redirect.valid, false.B)) {
+    assert(nextRgid.asUInt === previousNextRgid.asUInt, "redirect must not roll back or advance NextRGID")
+    assert(rgidExhausted.asUInt === previousExhausted.asUInt, "redirect must not roll back RGID exhaustion")
+  }
+  for (lane <- 0 until RenameWidth) {
+    when(io.in(lane).bits.ldest === 0.U) {
+      assert(freshDestRgid(lane) === MsrRgid.Null.U, "x0 destination RGID must be null")
+    }
+    for (prior <- 0 until lane) {
+      when(rgidAllocWen(lane) && rgidAllocWen(prior) &&
+        io.in(lane).bits.ldest === io.in(prior).bits.ldest &&
+        freshDestRgid(lane) =/= MsrRgid.Null.U && freshDestRgid(prior) =/= MsrRgid.Null.U) {
+        assert(freshDestRgid(lane) =/= freshDestRgid(prior),
+          "same-cycle definitions of one integer register must receive distinct RGIDs")
+      }
+    }
+  }
+
+  XSPerfAccumulate("msr_rgid_overflow", rgidExhaustionEvent)
+  XSPerfAccumulate("msr_rgid_null_dest", PopCount(rgidAllocWen.zip(freshDestRgid).map {
+    case (valid, rgid) => valid && rgid === MsrRgid.Null.U
+  }))
+  XSPerfAccumulate("msr_rgid_quarantine_cycle", rgidQuarantine)
 
   /**
    * trace begin
@@ -703,6 +798,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     */
   // a simple functional model for now
   io.out(0).bits.pdest := Mux(isMove(0), uops(0).psrc.head, uops(0).pdest)
+  io.out(0).bits.srcRgid(0) := Mux(io.out(0).bits.isLUI, MsrRgid.Null.U, uops(0).srcRgid(0))
 
   // psrc(n) + pdest(1)
   // bypassCond(j)(i)(k): src(j) of uop(i) depends on dest of uop(k)
@@ -752,6 +848,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     io.out(i).bits.psrc(3) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(3)(i-1).asBools).foldLeft(uops(i).psrc(3)) {
       (z, next) => Mux(next._2, next._1, z)
     }
+    for (src <- 0 until uops(i).numSrc) {
+      val intSource = SrcType.isXp(io.in(i).bits.srcType(src))
+      io.out(i).bits.srcRgid(src) := io.out.take(i).map(_.bits.destRgid).zip(bypassCond(src)(i - 1).asBools)
+        .foldLeft(uops(i).srcRgid(src)) { case (current, (producerRgid, bypass)) =>
+          Mux(intSource && bypass, producerRgid, current)
+        }
+    }
+    io.out(i).bits.srcRgid(0) := Mux(io.out(i).bits.isLUI, MsrRgid.Null.U, io.out(i).bits.srcRgid(0))
     io.out(i).bits.psrcVl := MuxCase(
       uops(i).psrcVl,
       (bypassCondVl(i-1).asBools zip io.out.take(i).map(_.bits.pdestVl)).reverse
@@ -770,6 +874,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       val ld_imm = io.in(i).bits.imm(ImmUnion.I.len - 1, 0)
       require(io.out(i).bits.imm.getWidth >= lui_imm.getWidth + ld_imm.getWidth)
       io.out(i).bits.srcType(0) := SrcType.imm
+      io.out(i).bits.srcRgid(0) := MsrRgid.Null.U
       io.out(i).bits.imm := Cat(lui_imm, ld_imm)
     }
   }
@@ -816,6 +921,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     intRenamePorts(i).wen  := intSpecWen(i)
     intRenamePorts(i).addr := inVec(i).ldest(log2Ceil(IntLogicRegs) - 1, 0)
     intRenamePorts(i).data := io.out(i).bits.pdest
+
+    intRgidRenamePorts(i).wen := intSpecWen(i) && inVec(i).ldest =/= 0.U
+    intRgidRenamePorts(i).addr := inVec(i).ldest(log2Ceil(IntLogicRegs) - 1, 0)
+    intRgidRenamePorts(i).data := io.out(i).bits.destRgid
 
     fpRenamePorts(i).wen  := fpSpecWen(i)
     fpRenamePorts(i).addr := inVec(i).ldest(log2Ceil(FpLogicRegs) - 1, 0)

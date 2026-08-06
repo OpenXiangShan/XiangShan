@@ -45,6 +45,77 @@ class RatWritePort(ratAddrWidth: Int)(implicit p: Parameters) extends XSBundle {
   val data = UInt(PhyRegIdxWidth.W)
 }
 
+class RgidReadPort(ratAddrWidth: Int)(implicit p: Parameters) extends XSBundle {
+  val hold = Input(Bool())
+  val addr = Input(UInt(ratAddrWidth.W))
+  val data = Output(UInt(MsrRgid.Width.W))
+}
+
+class RgidWritePort(ratAddrWidth: Int)(implicit p: Parameters) extends XSBundle {
+  val wen = Bool()
+  val addr = UInt(ratAddrWidth.W)
+  val data = UInt(MsrRgid.Width.W)
+}
+
+class IntRgidTable(implicit p: Parameters) extends XSModule {
+  private val addrWidth = log2Ceil(IntLogicRegs)
+
+  val io = IO(new Bundle {
+    val redirect = Input(Bool())
+    val readPorts = Vec(2 * RenameWidth, new RgidReadPort(addrWidth))
+    val specWritePorts = Vec(RabCommitWidth, Input(new RgidWritePort(addrWidth)))
+    val archWritePorts = Vec(RabCommitWidth, Input(new RgidWritePort(addrWidth)))
+    val snpt = Input(new SnapshotPort)
+  })
+
+  private val initialTable = VecInit.tabulate(IntLogicRegs) { index =>
+    (if (index == 0) MsrRgid.Null else 1).U(MsrRgid.Width.W)
+  }
+  val specTable = RegInit(initialTable)
+  val specTableNext = WireInit(specTable)
+  val archTable = RegInit(initialTable)
+  val archTableNext = WireDefault(archTable)
+
+  val t1Redirect = GatedValidRegNext(io.redirect, false.B)
+  val t1ReadAddr = io.readPorts.map(port => RegEnable(port.addr, !port.hold))
+  val t1ReadData = VecInit(t1ReadAddr.map(specTable(_)))
+  val t1SpecWrites = RegNext(Mux(io.redirect, 0.U.asTypeOf(io.specWritePorts), io.specWritePorts))
+  val t1Snpt = RegNext(io.snpt, 0.U.asTypeOf(io.snpt))
+  val t2Snpt = RegNext(t1Snpt, 0.U.asTypeOf(io.snpt))
+  val snapshots = SnapshotGenerator(specTable, t1Snpt.snptEnq, t1Snpt.snptDeq, t1Redirect, t1Snpt.flushVec)
+
+  val t1WriteAddr = t1SpecWrites.map(write => Mux(write.wen, UIntToOH(write.addr), 0.U))
+  for ((next, index) <- specTableNext.zipWithIndex) {
+    val matches = t1WriteAddr.map(_(index))
+    val writeData = ParallelPriorityMux(matches.reverse, t1SpecWrites.map(_.data).reverse)
+    next := Mux(
+      RegNext(t1Redirect),
+      Mux(t2Snpt.useSnpt, snapshots(t2Snpt.snptSelect)(index), archTable(index)),
+      Mux(VecInit(matches).asUInt.orR, writeData, specTable(index))
+    )
+  }
+  specTable := specTableNext
+
+  for ((read, index) <- io.readPorts.zipWithIndex) {
+    val t0Bypass = io.specWritePorts.map { write =>
+      write.wen && Mux(read.hold, write.addr === t1ReadAddr(index), write.addr === read.addr)
+    }
+    val t1Bypass = RegNext(Mux(io.redirect, 0.U.asTypeOf(VecInit(t0Bypass)), VecInit(t0Bypass)))
+    val bypassData = ParallelPriorityMux(t1Bypass.reverse, t1SpecWrites.map(_.data).reverse)
+    read.data := Mux(t1Bypass.asUInt.orR, bypassData, t1ReadData(index))
+  }
+
+  for (write <- io.archWritePorts) {
+    when(write.wen) {
+      archTableNext(write.addr) := write.data
+    }
+  }
+  archTable := archTableNext
+
+  assert(specTable(0) === MsrRgid.Null.U, "integer RGID RAT x0 mapping must remain null")
+  assert(archTable(0) === MsrRgid.Null.U, "integer architectural RGID RAT x0 mapping must remain null")
+}
+
 class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
 
   // params alias
@@ -223,6 +294,8 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val diffVlCommits = Option.when(backendParams.basicDebugEn)(Input(new DiffVlCommitBundle(CommitWidth)))
     val intReadPorts = Vec(RenameWidth, Vec(2, new RatReadPort(log2Ceil(IntLogicRegs))))
     val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort(log2Ceil(IntLogicRegs))))
+    val intRgidReadPorts = Vec(RenameWidth, Vec(2, new RgidReadPort(log2Ceil(IntLogicRegs))))
+    val intRgidRenamePorts = Vec(RenameWidth, Input(new RgidWritePort(log2Ceil(IntLogicRegs))))
     val fpReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort(log2Ceil(FpLogicRegs))))
     val fpRenamePorts = Vec(RenameWidth, Input(new RatWritePort(log2Ceil(FpLogicRegs))))
     val vecReadPorts = Vec(RenameWidth, Vec(numVecRatPorts, new RatReadPort(log2Ceil(VecLogicRegs))))
@@ -252,6 +325,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   })
 
   val intRat = Module(new RenameTable(Reg_I, RabCommitWidth * MaxUopSize))
+  val intRgidRat = Module(new IntRgidTable)
   val fpRat  = Module(new RenameTable(Reg_F, RabCommitWidth * MaxUopSize))
   val vecRat = Module(new RenameTable(Reg_V, RabCommitWidth * MaxUopSize))
   val v0Rat  = Module(new RenameTable(Reg_V0, RabCommitWidth * MaxUopSize))
@@ -265,8 +339,11 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     difftest.value := intRat.io.diff_rdata.get
   }
   intRat.io.readPorts <> io.intReadPorts.flatten
+  intRgidRat.io.readPorts <> io.intRgidReadPorts.flatten
   intRat.io.redirect := io.redirect
+  intRgidRat.io.redirect := io.redirect
   intRat.io.snpt := io.snpt
+  intRgidRat.io.snpt := io.snpt
   io.int_old_pdest := intRat.io.old_pdest
   io.int_need_free := intRat.io.need_free
   val intDestValid = io.rabCommits.info.map(_.rfWen)
@@ -276,15 +353,34 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     arch.data := io.rabCommits.info(i).pdest
     XSError(arch.wen && arch.addr === 0.U && arch.data =/= 0.U, "pdest for $0 should be 0\n")
   }
+  for ((arch, i) <- intRgidRat.io.archWritePorts.zipWithIndex) {
+    arch.wen := io.rabCommits.isCommit && io.rabCommits.commitValid(i) && intDestValid(i) &&
+      io.rabCommits.info(i).ldest =/= 0.U
+    arch.addr := io.rabCommits.info(i).ldest
+    arch.data := io.rabCommits.info(i).destRgid
+  }
   for ((spec, i) <- intRat.io.specWritePorts.zipWithIndex) {
     spec.wen  := io.rabCommits.isWalk && io.rabCommits.walkValid(i) && intDestValid(i)
     spec.addr := io.rabCommits.info(i).ldest
     spec.data := io.rabCommits.info(i).pdest
     XSError(spec.wen && spec.addr === 0.U && spec.data =/= 0.U, "pdest for $0 should be 0\n")
   }
+  for ((spec, i) <- intRgidRat.io.specWritePorts.zipWithIndex) {
+    spec.wen := io.rabCommits.isWalk && io.rabCommits.walkValid(i) && intDestValid(i) &&
+      io.rabCommits.info(i).ldest =/= 0.U
+    spec.addr := io.rabCommits.info(i).ldest
+    spec.data := io.rabCommits.info(i).destRgid
+  }
   for ((spec, rename) <- intRat.io.specWritePorts.zip(io.intRenamePorts)) {
     when (rename.wen) {
       spec.wen  := true.B
+      spec.addr := rename.addr
+      spec.data := rename.data
+    }
+  }
+  for ((spec, rename) <- intRgidRat.io.specWritePorts.zip(io.intRgidRenamePorts)) {
+    when(rename.wen) {
+      spec.wen := true.B
       spec.addr := rename.addr
       spec.data := rename.data
     }
