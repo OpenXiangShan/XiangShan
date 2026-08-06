@@ -1027,9 +1027,38 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // Profiling-only 2-stream x 64-entry Squash Log. A static hit requires both the
   // PC and instruction bits to match, and each squashed entry can be matched once.
+  // RGIDs below are shadow value-version IDs; they do not affect architectural state.
   private val MsrStreamCount = 2
   private val MsrEntriesPerStream = 64
   private val MsrTotalEntries = MsrStreamCount * MsrEntriesPerStream
+  private val MsrRgidWidth = 32
+
+  // A fresh RGID denotes a new integer value definition. A fully reusable match
+  // copies the logged destination RGID so dependent matches can be profiled too.
+  val msrIntPRegRgid = RegInit(VecInit((0 until IntPhyRegs).map(_.U(MsrRgidWidth.W))))
+  val msrNextRgid = RegInit(IntPhyRegs.U(MsrRgidWidth.W))
+  def msrIntPRegIdx(preg: UInt): UInt = preg(IntPhyRegIdxWidth - 1, 0)
+
+  val msrRobSrcUsed = RegInit(VecInit.fill(RobSize)(VecInit.fill(params.numSrc)(false.B)))
+  val msrRobSrcRgid = RegInit(VecInit.fill(RobSize)(
+    VecInit.fill(params.numSrc)(0.U(MsrRgidWidth.W))
+  ))
+  val msrRobDestRgid = RegInit(VecInit.fill(RobSize)(0.U(MsrRgidWidth.W)))
+  val msrRobPdest = RegInit(VecInit.fill(RobSize)(0.U(PhyRegIdxWidth.W)))
+  val msrRobReusableAlu = RegInit(VecInit.fill(RobSize)(false.B))
+
+  val msrEnqAllocInt = VecInit(io.enq.req.map { req =>
+    io.enq.canAccept && req.valid && req.bits.firstUop && !io.redirect.valid &&
+      req.bits.rfWen && !req.bits.isMove
+  })
+  val msrEnqReusableAlu = VecInit(io.enq.req.map { req =>
+    io.enq.canAccept && req.valid && req.bits.firstUop && !io.redirect.valid &&
+      FuType.isAlu(req.bits.fuType) && req.bits.rfWen && !req.bits.isMove &&
+      !req.bits.hasException && !req.bits.flushPipe && !req.bits.singleStep &&
+      req.bits.lastUop
+  })
+  val msrEnqSrcRgid = Wire(Vec(RenameWidth, Vec(params.numSrc, UInt(MsrRgidWidth.W))))
+  val msrEnqDestRgid = Wire(Vec(RenameWidth, UInt(MsrRgidWidth.W)))
 
   val msrMispredSample = redirectValidReg && redirectMisPredReg
   val msrSquashedInst = PopCount(redirectNeedFlush)
@@ -1040,8 +1069,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val msrLogAlu = Reg(Vec(MsrTotalEntries, Bool()))
   val msrLogPc = Reg(Vec(MsrTotalEntries, UInt(VAddrBits.W)))
   val msrLogInstr = Reg(Vec(MsrTotalEntries, UInt(32.W)))
+  val msrLogSrcUsed = RegInit(VecInit.fill(MsrTotalEntries)(VecInit.fill(params.numSrc)(false.B)))
+  val msrLogSrcRgid = RegInit(VecInit.fill(MsrTotalEntries)(
+    VecInit.fill(params.numSrc)(0.U(MsrRgidWidth.W))
+  ))
+  val msrLogDestRgid = RegInit(VecInit.fill(MsrTotalEntries)(0.U(MsrRgidWidth.W)))
+  val msrLogPdest = RegInit(VecInit.fill(MsrTotalEntries)(0.U(PhyRegIdxWidth.W)))
+  // Observational hold state only: the real freelist is deliberately unchanged.
+  val msrLogPdestRetained = RegInit(VecInit.fill(MsrTotalEntries)(false.B))
+  val msrLogReusableAlu = RegInit(VecInit.fill(MsrTotalEntries)(false.B))
   val msrLogHasStaticHit = RegInit(VecInit.fill(MsrStreamCount)(false.B))
   val msrLogHasCompletedStaticHit = RegInit(VecInit.fill(MsrStreamCount)(false.B))
+  val msrLogHasFullReuseHit = RegInit(VecInit.fill(MsrStreamCount)(false.B))
 
   // redirectBegin is the entry immediately before the first flushed instruction.
   // Walk forward in ROB age order so a bounded stream retains the closest 64 entries.
@@ -1060,23 +1099,110 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val msrLogMatchOH = Wire(Vec(RenameWidth, UInt(MsrTotalEntries.W)))
   val msrLogMatchCompleted = Wire(Vec(RenameWidth, Bool()))
   val msrLogMatchAlu = Wire(Vec(RenameWidth, Bool()))
+  val msrLogMatchReusableAlu = Wire(Vec(RenameWidth, Bool()))
+  val msrLogMatchRgid = Wire(Vec(RenameWidth, Bool()))
+  val msrLogMatchFullReuse = Wire(Vec(RenameWidth, Bool()))
   var msrLogAvailable = msrLogValid.asUInt
   for (i <- 0 until RenameWidth) {
+    for (src <- 0 until params.numSrc) {
+      val baseRgid = msrIntPRegRgid(msrIntPRegIdx(io.enq.req(i).bits.psrc(src)))
+      if (i == 0) {
+        msrEnqSrcRgid(i)(src) := baseRgid
+      } else {
+        val sameGroupProducer = VecInit((0 until i).map { producer =>
+          msrEnqAllocInt(producer) &&
+            io.enq.req(producer).bits.pdest === io.enq.req(i).bits.psrc(src)
+        }).asUInt
+        msrEnqSrcRgid(i)(src) := Mux(
+          sameGroupProducer.orR,
+          Mux1H(sameGroupProducer, msrEnqDestRgid.take(i)),
+          baseRgid
+        )
+      }
+    }
+
     val entryMatch = VecInit((0 until MsrTotalEntries).map { j =>
       msrLogAvailable(j) &&
         msrLogPc(j) === msrEnqPc(i) &&
         msrLogInstr(j) === msrEnqInstr(i)
     }).asUInt
     val completedEntryMatch = entryMatch & msrLogCompleted.asUInt
+    val reusableAluEntryMatch = VecInit((0 until MsrTotalEntries).map { j =>
+      entryMatch(j) && msrLogCompleted(j) && msrLogReusableAlu(j) && msrEnqReusableAlu(i)
+    }).asUInt
+    val rgidEntryMatch = VecInit((0 until MsrTotalEntries).map { j =>
+      val allSrcRgidMatch = (0 until params.numSrc).map { src =>
+        val currentSrcUsed = SrcType.isXp(io.enq.req(i).bits.srcType(src)) &&
+          io.enq.req(i).bits.psrc(src) =/= 0.U
+        msrLogSrcUsed(j)(src) === currentSrcUsed &&
+          (!currentSrcUsed || msrLogSrcRgid(j)(src) === msrEnqSrcRgid(i)(src))
+      }.reduce(_ && _)
+      reusableAluEntryMatch(j) && allSrcRgidMatch
+    }).asUInt
+    val fullReuseEntryMatch = VecInit((0 until MsrTotalEntries).map { j =>
+      // A retained result is lost as soon as its PReg is allocated to a new owner.
+      val allocatedInCurrentGroup = VecInit((0 until RenameWidth).map { lane =>
+        msrEnqAllocInt(lane) && io.enq.req(lane).bits.pdest === msrLogPdest(j)
+      }).asUInt.orR
+      rgidEntryMatch(j) && msrLogPdestRetained(j) && !allocatedInCurrentGroup
+    }).asUInt
     val selectedEntry = Mux(
-      completedEntryMatch.orR,
-      PriorityEncoderOH(completedEntryMatch),
-      PriorityEncoderOH(entryMatch)
+      fullReuseEntryMatch.orR,
+      PriorityEncoderOH(fullReuseEntryMatch),
+      Mux(
+        rgidEntryMatch.orR,
+        PriorityEncoderOH(rgidEntryMatch),
+        Mux(
+          reusableAluEntryMatch.orR,
+          PriorityEncoderOH(reusableAluEntryMatch),
+          Mux(
+            completedEntryMatch.orR,
+            PriorityEncoderOH(completedEntryMatch),
+            PriorityEncoderOH(entryMatch)
+          )
+        )
+      )
     )
     msrLogMatchOH(i) := Mux(instEnqValidSeq(i) && !msrMispredSample, selectedEntry, 0.U)
     msrLogMatchCompleted(i) := (msrLogMatchOH(i) & msrLogCompleted.asUInt).orR
     msrLogMatchAlu(i) := (msrLogMatchOH(i) & msrLogAlu.asUInt).orR
+    msrLogMatchReusableAlu(i) := (msrLogMatchOH(i) & reusableAluEntryMatch).orR
+    msrLogMatchRgid(i) := (msrLogMatchOH(i) & rgidEntryMatch).orR
+    msrLogMatchFullReuse(i) := (msrLogMatchOH(i) & fullReuseEntryMatch).orR
+    val priorAllocCount = if (i == 0) 0.U else PopCount(msrEnqAllocInt.take(i))
+    val freshRgid = msrNextRgid + priorAllocCount
+    msrEnqDestRgid(i) := Mux(
+      msrLogMatchFullReuse(i),
+      Mux1H(msrLogMatchOH(i), msrLogDestRgid),
+      freshRgid
+    )
     msrLogAvailable = msrLogAvailable & ~msrLogMatchOH(i)
+  }
+
+  when(msrEnqAllocInt.asUInt.orR) {
+    msrNextRgid := msrNextRgid + PopCount(msrEnqAllocInt)
+  }
+  for (preg <- 0 until IntPhyRegs) {
+    val allocOH = VecInit((0 until RenameWidth).map { lane =>
+      msrEnqAllocInt(lane) && io.enq.req(lane).bits.pdest === preg.U
+    })
+    assert(PopCount(allocOH) <= 1.U, "MSR shadow RGID saw duplicate PReg allocation")
+    when(allocOH.asUInt.orR) {
+      msrIntPRegRgid(preg) := Mux1H(allocOH, msrEnqDestRgid)
+    }
+  }
+  for (lane <- 0 until RenameWidth) {
+    when(instEnqValidSeq(lane) && !io.redirect.valid) {
+      val robIdx = enqRobIdxSeq(lane)
+      for (src <- 0 until params.numSrc) {
+        msrRobSrcUsed(robIdx)(src) := SrcType.isXp(io.enq.req(lane).bits.srcType(src)) &&
+          io.enq.req(lane).bits.psrc(src) =/= 0.U
+        msrRobSrcRgid(robIdx)(src) := msrEnqSrcRgid(lane)(src)
+      }
+      msrRobDestRgid(robIdx) := msrEnqDestRgid(lane)
+      msrRobPdest(robIdx) := io.enq.req(lane).bits.pdest
+      msrRobReusableAlu(robIdx) := msrEnqReusableAlu(lane)
+    }
   }
 
   val msrStaticHitCount = PopCount(msrLogMatchOH.map(_.orR))
@@ -1084,6 +1210,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val msrCompletedAluStaticHitCount = PopCount(msrLogMatchCompleted.zip(msrLogMatchAlu).map {
     case (completed, alu) => completed && alu
   })
+  val msrCompletedReusableAluStaticHitCount = PopCount(msrLogMatchReusableAlu)
+  val msrCompletedReusableAluRgidHitCount = PopCount(msrLogMatchRgid)
+  val msrCompletedReusableAluRgidPRegIntactHitCount = PopCount(msrLogMatchFullReuse)
   val msrStreamStaticHit = VecInit((0 until MsrStreamCount).map { stream =>
     msrLogMatchOH.map(_((stream + 1) * MsrEntriesPerStream - 1, stream * MsrEntriesPerStream).orR)
       .reduce(_ || _)
@@ -1091,6 +1220,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val msrStreamCompletedStaticHit = VecInit((0 until MsrStreamCount).map { stream =>
     msrLogMatchOH.zip(msrLogMatchCompleted).map { case (matched, completed) =>
       matched((stream + 1) * MsrEntriesPerStream - 1, stream * MsrEntriesPerStream).orR && completed
+    }.reduce(_ || _)
+  })
+  val msrStreamFullReuseHit = VecInit((0 until MsrStreamCount).map { stream =>
+    msrLogMatchOH.zip(msrLogMatchFullReuse).map { case (matched, fullReuse) =>
+      matched((stream + 1) * MsrEntriesPerStream - 1, stream * MsrEntriesPerStream).orR && fullReuse
     }.reduce(_ || _)
   })
   val msrNewStreamStaticHitCount = PopCount(msrStreamStaticHit.zip(msrLogHasStaticHit).map {
@@ -1101,6 +1235,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       case (hit, hasHit) => hit && !hasHit
     }
   )
+  val msrNewStreamFullReuseHitCount = PopCount(msrStreamFullReuseHit.zip(msrLogHasFullReuseHit).map {
+    case (hit, hasHit) => hit && !hasHit
+  })
   val msrStreamValid = VecInit((0 until MsrStreamCount).map { stream =>
     VecInit(msrLogValid.slice(stream * MsrEntriesPerStream, (stream + 1) * MsrEntriesPerStream)).asUInt.orR
   })
@@ -1125,10 +1262,20 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
             )
             msrLogPc(logIdx) := robEntries(robIdx).debug_pc.getOrElse(0.U)
             msrLogInstr(logIdx) := robEntries(robIdx).debug_instr.getOrElse(0.U)
+            for (src <- 0 until params.numSrc) {
+              msrLogSrcUsed(logIdx)(src) := msrRobSrcUsed(robIdx)(src)
+              msrLogSrcRgid(logIdx)(src) := msrRobSrcRgid(robIdx)(src)
+            }
+            msrLogDestRgid(logIdx) := msrRobDestRgid(robIdx)
+            msrLogPdest(logIdx) := msrRobPdest(robIdx)
+            msrLogPdestRetained(logIdx) :=
+              robEntries(robIdx).isWritebacked && msrRobReusableAlu(robIdx)
+            msrLogReusableAlu(logIdx) := msrRobReusableAlu(robIdx)
           }
         }
         msrLogHasStaticHit(stream) := false.B
         msrLogHasCompletedStaticHit(stream) := false.B
+        msrLogHasFullReuseHit(stream) := false.B
       }
     }
     msrNextStream := Mux(msrNextStream === (MsrStreamCount - 1).U, 0.U, msrNextStream + 1.U)
@@ -1144,6 +1291,20 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }
       when(msrStreamCompletedStaticHit(stream)) {
         msrLogHasCompletedStaticHit(stream) := true.B
+      }
+      when(msrStreamFullReuseHit(stream)) {
+        msrLogHasFullReuseHit(stream) := true.B
+      }
+    }
+  }
+
+  when(!msrCreateStream) {
+    for (entry <- 0 until MsrTotalEntries) {
+      val pdestReallocated = VecInit((0 until RenameWidth).map { lane =>
+        msrEnqAllocInt(lane) && io.enq.req(lane).bits.pdest === msrLogPdest(entry)
+      }).asUInt.orR
+      when(pdestReallocated) {
+        msrLogPdestRetained(entry) := false.B
       }
     }
   }
@@ -1848,8 +2009,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("msr_static_hit_inst", msrStaticHitCount)
   XSPerfAccumulate("msr_completed_static_hit_inst", msrCompletedStaticHitCount)
   XSPerfAccumulate("msr_completed_alu_static_hit_inst", msrCompletedAluStaticHitCount)
+  XSPerfAccumulate("msr_completed_reusable_alu_static_hit_inst", msrCompletedReusableAluStaticHitCount)
+  XSPerfAccumulate("msr_completed_reusable_alu_rgid_hit_inst", msrCompletedReusableAluRgidHitCount)
+  XSPerfAccumulate(
+    "msr_completed_reusable_alu_rgid_preg_intact_hit_inst",
+    msrCompletedReusableAluRgidPRegIntactHitCount
+  )
   XSPerfAccumulate("msr_log_with_static_hit", msrNewStreamStaticHitCount)
   XSPerfAccumulate("msr_log_with_completed_static_hit", msrNewStreamCompletedStaticHitCount)
+  XSPerfAccumulate("msr_log_with_full_reuse_hit", msrNewStreamFullReuseHitCount)
 
   val commitLoadVec = VecInit(commitLoadValid)
   val commitBranchVec = VecInit(commitBranchValid)
