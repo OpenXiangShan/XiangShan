@@ -57,6 +57,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val io = IO(new Bundle() {
     val redirect = Flipped(ValidIO(new Redirect))
+    val rgidReset = Input(Bool())
     val rabCommits = Input(new RabCommitIO)
     val vlCommits = Input(new VlCommitBundle(RabCommitWidth))
     // from csr
@@ -229,6 +230,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   rat.io.hartId := io.hartId
   rat.io.redirect := io.redirect.valid
+  rat.io.rgidReset := io.rgidReset
   rat.io.rabCommits := io.rabCommits
   rat.io.vlCommits := io.vlCommits
   rat.io.diffCommits.foreach(_ := io.ratDiffCommits.get)
@@ -654,7 +656,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       })
     }
     val candidate = nextRgid(ldest) +& priorDefinitions
-    val candidateValid = rgidAllocWen(lane) && !rgidQuarantine && !rgidExhausted(ldest) &&
+    val candidateValid = rgidAllocWen(lane) && !io.rgidReset && !rgidQuarantine && !rgidExhausted(ldest) &&
       candidate <= maxRgid
     freshDestRgid(lane) := Mux(candidateValid, candidate(MsrRgid.Width - 1, 0), MsrRgid.Null.U)
   }
@@ -665,7 +667,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       rgidAllocWen(lane) && io.in(lane).bits.ldest === lreg.U
     })
     val nextAfterGroup = nextRgid(lreg) +& definitions
-    when(definitions.orR && !rgidQuarantine && !rgidExhausted(lreg)) {
+    when(io.rgidReset) {
+      nextRgid(lreg) := 2.U
+      rgidExhausted(lreg) := false.B
+    }.elsewhen(definitions.orR && !rgidQuarantine && !rgidExhausted(lreg)) {
       when(nextAfterGroup > maxRgid) {
         nextRgid(lreg) := maxRgid
         rgidExhausted(lreg) := true.B
@@ -677,7 +682,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   nextRgid(0) := MsrRgid.Null.U
   rgidExhausted(0) := true.B
-  when(rgidExhaustionEvent) {
+  when(io.rgidReset) {
+    rgidQuarantine := false.B
+  }.elsewhen(rgidExhaustionEvent) {
     rgidQuarantine := true.B
   }
 
@@ -686,7 +693,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val previousNextRgid = RegNext(nextRgid)
   val previousExhausted = RegNext(rgidExhausted)
-  when(RegNext(io.redirect.valid, false.B)) {
+  when(RegNext(io.redirect.valid && !io.rgidReset, false.B)) {
     assert(nextRgid.asUInt === previousNextRgid.asUInt, "redirect must not roll back or advance NextRGID")
     assert(rgidExhausted.asUInt === previousExhausted.asUInt, "redirect must not roll back RGID exhaustion")
   }
@@ -709,6 +716,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     case (valid, rgid) => valid && rgid === MsrRgid.Null.U
   }))
   XSPerfAccumulate("msr_rgid_quarantine_cycle", rgidQuarantine)
+  XSPerfAccumulate("msr_rgid_reset", io.rgidReset)
 
   /**
    * trace begin

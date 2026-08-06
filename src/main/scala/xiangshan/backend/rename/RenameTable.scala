@@ -62,6 +62,7 @@ class IntRgidTable(implicit p: Parameters) extends XSModule {
 
   val io = IO(new Bundle {
     val redirect = Input(Bool())
+    val rgidReset = Input(Bool())
     val readPorts = Vec(2 * RenameWidth, new RgidReadPort(addrWidth))
     val specWritePorts = Vec(RabCommitWidth, Input(new RgidWritePort(addrWidth)))
     val archWritePorts = Vec(RabCommitWidth, Input(new RgidWritePort(addrWidth)))
@@ -75,6 +76,7 @@ class IntRgidTable(implicit p: Parameters) extends XSModule {
   val specTableNext = WireInit(specTable)
   val archTable = RegInit(initialTable)
   val archTableNext = WireDefault(archTable)
+  val nullTable = VecInit.fill(IntLogicRegs)(MsrRgid.Null.U(MsrRgid.Width.W))
 
   val t1Redirect = GatedValidRegNext(io.redirect, false.B)
   val t1ReadAddr = io.readPorts.map(port => RegEnable(port.addr, !port.hold))
@@ -83,18 +85,20 @@ class IntRgidTable(implicit p: Parameters) extends XSModule {
   val t1Snpt = RegNext(io.snpt, 0.U.asTypeOf(io.snpt))
   val t2Snpt = RegNext(t1Snpt, 0.U.asTypeOf(io.snpt))
   val snapshots = SnapshotGenerator(specTable, t1Snpt.snptEnq, t1Snpt.snptDeq, t1Redirect, t1Snpt.flushVec)
+  val restoreApply = RegNext(t1Redirect)
+  val restoreSource = Mux(t2Snpt.useSnpt, snapshots(t2Snpt.snptSelect), archTable)
 
   val t1WriteAddr = t1SpecWrites.map(write => Mux(write.wen, UIntToOH(write.addr), 0.U))
   for ((next, index) <- specTableNext.zipWithIndex) {
     val matches = t1WriteAddr.map(_(index))
     val writeData = ParallelPriorityMux(matches.reverse, t1SpecWrites.map(_.data).reverse)
     next := Mux(
-      RegNext(t1Redirect),
-      Mux(t2Snpt.useSnpt, snapshots(t2Snpt.snptSelect)(index), archTable(index)),
+      restoreApply,
+      restoreSource(index),
       Mux(VecInit(matches).asUInt.orR, writeData, specTable(index))
     )
   }
-  specTable := specTableNext
+  specTable := Mux(io.rgidReset, nullTable, specTableNext)
 
   for ((read, index) <- io.readPorts.zipWithIndex) {
     val t0Bypass = io.specWritePorts.map { write =>
@@ -110,7 +114,13 @@ class IntRgidTable(implicit p: Parameters) extends XSModule {
       archTableNext(write.addr) := write.data
     }
   }
-  archTable := archTableNext
+  archTable := Mux(io.rgidReset, nullTable, archTableNext)
+
+  val expectedRestore = RegEnable(restoreSource, restoreApply && !io.rgidReset)
+  when(RegNext(restoreApply && !io.rgidReset, false.B)) {
+    assert(specTable.asUInt === expectedRestore.asUInt,
+      "integer RGID RAT did not restore the selected checkpoint or architectural table")
+  }
 
   assert(specTable(0) === MsrRgid.Null.U, "integer RGID RAT x0 mapping must remain null")
   assert(archTable(0) === MsrRgid.Null.U, "integer architectural RGID RAT x0 mapping must remain null")
@@ -288,6 +298,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val hartId = Input(UInt(8.W))
     val redirect = Input(Bool())
+    val rgidReset = Input(Bool())
     val rabCommits = Input(new RabCommitIO)
     val vlCommits = Input(new VlCommitBundle(RabCommitWidth))
     val diffCommits = if (backendParams.basicDebugEn) Some(Input(new DiffCommitIO)) else None
@@ -342,6 +353,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
   intRgidRat.io.readPorts <> io.intRgidReadPorts.flatten
   intRat.io.redirect := io.redirect
   intRgidRat.io.redirect := io.redirect
+  intRgidRat.io.rgidReset := io.rgidReset
   intRat.io.snpt := io.snpt
   intRgidRat.io.snpt := io.snpt
   io.int_old_pdest := intRat.io.old_pdest

@@ -674,6 +674,7 @@ class CtrlBlockImp(
   rename.io.ratDiffVlCommits.foreach(_ := rob.io.diffVlCommits.get)
 
   rename.io.redirect := s1_s3_redirect
+  rename.io.rgidReset := rob.io.msrRgid.reset
   rename.io.rabCommits := rob.io.rabCommits
   rename.io.vlCommits := rob.io.vlCommits
   rename.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
@@ -799,6 +800,8 @@ class CtrlBlockImp(
 
   rob.io.hartId := io.fromTop.hartId
   rob.io.redirect := s1_s3_redirect
+  rob.io.msrRgid.overflow := rename.io.rgidStatus.overflow
+  rob.io.msrRgid.quarantine := rename.io.rgidStatus.quarantine
   rob.io.writeback := delayedNotFlushedWriteBack
   rob.io.exuWriteback := delayedWriteBack
   rob.io.writebackNums := VecInit(delayedNotFlushedWriteBackNums)

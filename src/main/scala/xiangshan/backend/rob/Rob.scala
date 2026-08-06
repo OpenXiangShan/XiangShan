@@ -66,6 +66,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val io = IO(new Bundle() {
     val hartId = Input(UInt(hartIdLen.W))
     val redirect = Input(Valid(new Redirect))
+    val msrRgid = new Bundle {
+      val overflow = Input(Bool())
+      val quarantine = Input(Bool())
+      val reset = Output(Bool())
+    }
     val enq = new RobEnqIO
     val flushOut = ValidIO(new Redirect)
     val exception = ValidIO(new ExceptionInfo)
@@ -1025,26 +1030,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enqWBNumVec = VecInit(io.enq.req.map(req => req.bits.numWB))
   private val enqWriteStdVec = VecInit(io.enq.req.map(req => req.bits.stdwriteNeed))
 
-  // Profiling-only 2-stream x 64-entry Squash Log. A static hit requires both the
-  // PC and instruction bits to match, and each squashed entry can be matched once.
-  // RGIDs below are shadow value-version IDs; they do not affect architectural state.
+  // Ordered profiling model for the paper's two 128-entry Squash Log streams.
+  // Reconvergence discovery selects one stream generation and offset at an FTQ
+  // boundary. Every subsequent candidate is addressed only by advancing that cursor.
   private val MsrStreamCount = 2
-  private val MsrEntriesPerStream = 64
+  private val MsrEntriesPerStream = 128
   private val MsrTotalEntries = MsrStreamCount * MsrEntriesPerStream
-  private val MsrRgidWidth = 32
-
-  // A fresh RGID denotes a new integer value definition. A semantic RGID match
-  // copies the logged destination RGID to model an ideal SQUASH_HOLD and expose
-  // dependent reuse opportunities independently of baseline PReg reallocation.
-  val msrIntPRegRgid = RegInit(VecInit((0 until IntPhyRegs).map(_.U(MsrRgidWidth.W))))
-  val msrNextRgid = RegInit(IntPhyRegs.U(MsrRgidWidth.W))
-  def msrIntPRegIdx(preg: UInt): UInt = preg(IntPhyRegIdxWidth - 1, 0)
+  private val MsrStreamIdWidth = log2Ceil(MsrStreamCount)
+  private val MsrOffsetWidth = log2Ceil(MsrEntriesPerStream + 1)
+  private val MsrStreamGenerationWidth = 32
 
   val msrRobSrcUsed = RegInit(VecInit.fill(RobSize)(VecInit.fill(params.numSrc)(false.B)))
   val msrRobSrcRgid = RegInit(VecInit.fill(RobSize)(
-    VecInit.fill(params.numSrc)(0.U(MsrRgidWidth.W))
+    VecInit.fill(params.numSrc)(MsrRgid.Null.U(MsrRgid.Width.W))
   ))
-  val msrRobDestRgid = RegInit(VecInit.fill(RobSize)(0.U(MsrRgidWidth.W)))
+  val msrRobDestRgid = RegInit(VecInit.fill(RobSize)(MsrRgid.Null.U(MsrRgid.Width.W)))
   val msrRobPdest = RegInit(VecInit.fill(RobSize)(0.U(PhyRegIdxWidth.W)))
   val msrRobReusableAlu = RegInit(VecInit.fill(RobSize)(false.B))
 
@@ -1056,25 +1056,48 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     io.enq.canAccept && req.valid && req.bits.firstUop && !io.redirect.valid &&
       FuType.isAlu(req.bits.fuType) && req.bits.rfWen && !req.bits.isMove &&
       !req.bits.hasException && !req.bits.flushPipe && !req.bits.singleStep &&
-      req.bits.lastUop
+      req.bits.firstUop && req.bits.lastUop && req.bits.destRgid =/= MsrRgid.Null.U
   })
-  val msrEnqSrcRgid = Wire(Vec(RenameWidth, Vec(params.numSrc, UInt(MsrRgidWidth.W))))
-  val msrEnqDestRgid = Wire(Vec(RenameWidth, UInt(MsrRgidWidth.W)))
 
   val msrMispredSample = redirectValidReg && redirectMisPredReg
   val msrSquashedInst = PopCount(redirectNeedFlush)
-  val msrCreateStream = msrMispredSample && msrSquashedInst.orR
+  val msrRgidResetPending = RegInit(false.B)
+  val msrRgidDrainCount = RegInit(0.U(log2Ceil(RobSize + 1).W))
+  val msrRgidCommitCount = Mux(io.commits.isCommit, commitCnt, 0.U)
+  val msrRgidDrainNext = msrRgidDrainCount +& msrRgidCommitCount
+  val msrRgidReset = msrRgidResetPending && msrRgidDrainNext >= RobSize.U
+
+  when(io.msrRgid.overflow) {
+    msrRgidResetPending := true.B
+    msrRgidDrainCount := 0.U
+  }.elsewhen(msrRgidResetPending) {
+    when(msrRgidReset) {
+      msrRgidResetPending := false.B
+      msrRgidDrainCount := 0.U
+    }.otherwise {
+      msrRgidDrainCount := msrRgidDrainNext
+    }
+  }
+  io.msrRgid.reset := msrRgidReset
+
+  val msrStreamAdmission = !io.msrRgid.quarantine && !msrRgidResetPending && !io.msrRgid.overflow
+  val msrCreateStream = msrMispredSample && msrSquashedInst.orR && msrStreamAdmission
   val msrNextStream = RegInit(0.U(log2Ceil(MsrStreamCount).W))
+  val msrNewestStream = RegInit(0.U(MsrStreamIdWidth.W))
+  val msrStreamValid = RegInit(VecInit.fill(MsrStreamCount)(false.B))
+  val msrStreamGeneration = RegInit(VecInit.fill(MsrStreamCount)(0.U(MsrStreamGenerationWidth.W)))
+  val msrStreamLength = RegInit(VecInit.fill(MsrStreamCount)(0.U(MsrOffsetWidth.W)))
   val msrLogValid = RegInit(VecInit.fill(MsrTotalEntries)(false.B))
+  val msrLogConsumed = RegInit(VecInit.fill(MsrTotalEntries)(false.B))
   val msrLogCompleted = Reg(Vec(MsrTotalEntries, Bool()))
   val msrLogAlu = Reg(Vec(MsrTotalEntries, Bool()))
   val msrLogPc = Reg(Vec(MsrTotalEntries, UInt(VAddrBits.W)))
   val msrLogInstr = Reg(Vec(MsrTotalEntries, UInt(32.W)))
   val msrLogSrcUsed = RegInit(VecInit.fill(MsrTotalEntries)(VecInit.fill(params.numSrc)(false.B)))
   val msrLogSrcRgid = RegInit(VecInit.fill(MsrTotalEntries)(
-    VecInit.fill(params.numSrc)(0.U(MsrRgidWidth.W))
+    VecInit.fill(params.numSrc)(MsrRgid.Null.U(MsrRgid.Width.W))
   ))
-  val msrLogDestRgid = RegInit(VecInit.fill(MsrTotalEntries)(0.U(MsrRgidWidth.W)))
+  val msrLogDestRgid = RegInit(VecInit.fill(MsrTotalEntries)(MsrRgid.Null.U(MsrRgid.Width.W)))
   val msrLogPdest = RegInit(VecInit.fill(MsrTotalEntries)(0.U(PhyRegIdxWidth.W)))
   // Observational hold state only: the real freelist is deliberately unchanged.
   val msrLogPdestRetained = RegInit(VecInit.fill(MsrTotalEntries)(false.B))
@@ -1084,8 +1107,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val msrLogHasSemanticHoldHit = RegInit(VecInit.fill(MsrStreamCount)(false.B))
   val msrLogHasFullReuseHit = RegInit(VecInit.fill(MsrStreamCount)(false.B))
 
+  val msrCandidateValid = RegInit(false.B)
+  val msrCandidateStreamId = RegInit(0.U(MsrStreamIdWidth.W))
+  val msrCandidateStreamGeneration = RegInit(0.U(MsrStreamGenerationWidth.W))
+  val msrCandidateInstructionOffset = RegInit(0.U(MsrOffsetWidth.W))
+  val msrLastEnqFtqValid = RegInit(false.B)
+  val msrLastEnqFtqPtr = Reg(new FtqPtr)
+
   // redirectBegin is the entry immediately before the first flushed instruction.
-  // Walk forward in ROB age order so a bounded stream retains the closest 64 entries.
+  // Walk forward in ROB age order so a bounded stream retains the closest 128 entries.
   val msrCaptureRobIdx = Wire(Vec(MsrEntriesPerStream, UInt(log2Up(RobSize).W)))
   msrCaptureRobIdx(0) := Mux(redirectBegin >= (RobSize - 1).U, 0.U, redirectBegin + 1.U)
   for (i <- 1 until MsrEntriesPerStream) {
@@ -1098,112 +1128,166 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val msrEnqPc = io.enq.req.map(_.bits.debug.map(_.pc).getOrElse(0.U(VAddrBits.W)))
   val msrEnqInstr = io.enq.req.map(_.bits.debug.map(_.instr).getOrElse(0.U(32.W)))
+  val msrAnyInstEnq = VecInit(instEnqValidSeq).asUInt.orR
+  val msrFirstInstPc = PriorityMux(instEnqValidSeq, msrEnqPc)
+  val msrFirstInstInstr = PriorityMux(instEnqValidSeq, msrEnqInstr)
+  val msrFirstInstFtqPtr = PriorityMux(instEnqValidSeq, io.enq.req.map(_.bits.ftqPtr))
+  val msrNewFtqBlock = !msrLastEnqFtqValid || msrFirstInstFtqPtr =/= msrLastEnqFtqPtr
+
+  val msrCandidateStateCurrent = msrCandidateValid &&
+    msrStreamValid(msrCandidateStreamId) &&
+    msrStreamGeneration(msrCandidateStreamId) === msrCandidateStreamGeneration
+  val msrDiscoveryAllowed = msrAnyInstEnq && !msrCandidateStateCurrent && msrNewFtqBlock &&
+    msrStreamAdmission && !msrMispredSample
+  val msrDiscoveryEntryMatch = Wire(Vec(MsrStreamCount, UInt(MsrEntriesPerStream.W)))
+  val msrDiscoveryStreamMatch = Wire(Vec(MsrStreamCount, Bool()))
+  for (stream <- 0 until MsrStreamCount) {
+    msrDiscoveryEntryMatch(stream) := VecInit((0 until MsrEntriesPerStream).map { offset =>
+      val index = stream * MsrEntriesPerStream + offset
+      msrStreamValid(stream) && offset.U < msrStreamLength(stream) &&
+        msrLogValid(index) && !msrLogConsumed(index) &&
+        msrLogPc(index) === msrFirstInstPc && msrLogInstr(index) === msrFirstInstInstr
+    }).asUInt
+    msrDiscoveryStreamMatch(stream) := msrDiscoveryEntryMatch(stream).orR
+  }
+  val msrOtherStream = ~msrNewestStream
+  val msrDiscoveryStreamId = Mux(
+    msrDiscoveryStreamMatch(msrNewestStream),
+    msrNewestStream,
+    msrOtherStream
+  )
+  val msrDiscoveryValid = msrDiscoveryAllowed &&
+    (msrDiscoveryStreamMatch(msrNewestStream) || msrDiscoveryStreamMatch(msrOtherStream))
+  val msrDiscoveryOffset = PriorityEncoder(msrDiscoveryEntryMatch(msrDiscoveryStreamId))
+  val msrDiscoveryGeneration = msrStreamGeneration(msrDiscoveryStreamId)
+
+  val msrCandidateBaseValid = Mux(msrCandidateStateCurrent, true.B, msrDiscoveryValid)
+  val msrCandidateBaseStreamId = Mux(
+    msrCandidateStateCurrent,
+    msrCandidateStreamId,
+    msrDiscoveryStreamId
+  )
+  val msrCandidateBaseGeneration = Mux(
+    msrCandidateStateCurrent,
+    msrCandidateStreamGeneration,
+    msrDiscoveryGeneration
+  )
+  val msrCandidateBaseOffset = Mux(
+    msrCandidateStateCurrent,
+    msrCandidateInstructionOffset,
+    msrDiscoveryOffset
+  )
+
   val msrLogMatchOH = Wire(Vec(RenameWidth, UInt(MsrTotalEntries.W)))
   val msrLogMatchCompleted = Wire(Vec(RenameWidth, Bool()))
   val msrLogMatchAlu = Wire(Vec(RenameWidth, Bool()))
   val msrLogMatchReusableAlu = Wire(Vec(RenameWidth, Bool()))
   val msrLogMatchRgid = Wire(Vec(RenameWidth, Bool()))
   val msrLogMatchFullReuse = Wire(Vec(RenameWidth, Bool()))
-  var msrLogAvailable = msrLogValid.asUInt
+  val msrCandidateTupleValid = Wire(Vec(RenameWidth, Bool()))
+  val msrCandidateStaticGuard = Wire(Vec(RenameWidth, Bool()))
+  val msrCandidateNullRgidReject = Wire(Vec(RenameWidth, Bool()))
+  val msrCandidateChain = Wire(Vec(RenameWidth + 1, Bool()))
+  msrCandidateChain(0) := msrCandidateBaseValid
   for (i <- 0 until RenameWidth) {
-    for (src <- 0 until params.numSrc) {
-      val baseRgid = msrIntPRegRgid(msrIntPRegIdx(io.enq.req(i).bits.psrc(src)))
-      if (i == 0) {
-        msrEnqSrcRgid(i)(src) := baseRgid
-      } else {
-        val sameGroupProducer = VecInit((0 until i).map { producer =>
-          msrEnqAllocInt(producer) &&
-            io.enq.req(producer).bits.pdest === io.enq.req(i).bits.psrc(src)
-        }).asUInt
-        msrEnqSrcRgid(i)(src) := Mux(
-          sameGroupProducer.orR,
-          Mux1H(sameGroupProducer, msrEnqDestRgid.take(i)),
-          baseRgid
-        )
-      }
-    }
+    val instructionOffset = msrCandidateBaseOffset + PopCount(instEnqValidSeq.take(i))
+    val offsetInRange = instructionOffset < MsrEntriesPerStream.U &&
+      instructionOffset < msrStreamLength(msrCandidateBaseStreamId)
+    val streamGenerationCurrent = msrStreamValid(msrCandidateBaseStreamId) &&
+      msrStreamGeneration(msrCandidateBaseStreamId) === msrCandidateBaseGeneration
+    val entryIndex = Cat(msrCandidateBaseStreamId, instructionOffset(log2Ceil(MsrEntriesPerStream) - 1, 0))
+    val entryAvailable = msrLogValid(entryIndex) && !msrLogConsumed(entryIndex)
+    msrCandidateTupleValid(i) := instEnqValidSeq(i) && msrCandidateChain(i) &&
+      offsetInRange && streamGenerationCurrent && entryAvailable && msrStreamAdmission && !msrMispredSample
+    msrCandidateStaticGuard(i) := msrCandidateTupleValid(i) &&
+      msrLogPc(entryIndex) === msrEnqPc(i) && msrLogInstr(entryIndex) === msrEnqInstr(i)
 
-    val entryMatch = VecInit((0 until MsrTotalEntries).map { j =>
-      msrLogAvailable(j) &&
-        msrLogPc(j) === msrEnqPc(i) &&
-        msrLogInstr(j) === msrEnqInstr(i)
-    }).asUInt
-    val completedEntryMatch = entryMatch & msrLogCompleted.asUInt
-    val reusableAluEntryMatch = VecInit((0 until MsrTotalEntries).map { j =>
-      entryMatch(j) && msrLogCompleted(j) && msrLogReusableAlu(j) && msrEnqReusableAlu(i)
-    }).asUInt
-    val rgidEntryMatch = VecInit((0 until MsrTotalEntries).map { j =>
-      val allSrcRgidMatch = (0 until params.numSrc).map { src =>
+    val allSrcRgidMatch = (0 until params.numSrc).map { src =>
+      val currentSrcUsed = SrcType.isXp(io.enq.req(i).bits.srcType(src)) &&
+        io.enq.req(i).bits.psrc(src) =/= 0.U
+      val currentRgid = io.enq.req(i).bits.srcRgid(src)
+      val loggedRgid = msrLogSrcRgid(entryIndex)(src)
+      msrLogSrcUsed(entryIndex)(src) === currentSrcUsed &&
+        (!currentSrcUsed ||
+          (currentRgid =/= MsrRgid.Null.U && loggedRgid =/= MsrRgid.Null.U && currentRgid === loggedRgid))
+    }.reduce(_ && _)
+    msrCandidateNullRgidReject(i) := msrCandidateStaticGuard(i) &&
+      (0 until params.numSrc).map { src =>
         val currentSrcUsed = SrcType.isXp(io.enq.req(i).bits.srcType(src)) &&
           io.enq.req(i).bits.psrc(src) =/= 0.U
-        msrLogSrcUsed(j)(src) === currentSrcUsed &&
-          (!currentSrcUsed || msrLogSrcRgid(j)(src) === msrEnqSrcRgid(i)(src))
-      }.reduce(_ && _)
-      reusableAluEntryMatch(j) && allSrcRgidMatch
-    }).asUInt
-    val fullReuseEntryMatch = VecInit((0 until MsrTotalEntries).map { j =>
-      // A retained result is lost as soon as its PReg is allocated to a new owner.
-      val allocatedInCurrentGroup = VecInit((0 until RenameWidth).map { lane =>
-        msrEnqAllocInt(lane) && io.enq.req(lane).bits.pdest === msrLogPdest(j)
-      }).asUInt.orR
-      rgidEntryMatch(j) && msrLogPdestRetained(j) && !allocatedInCurrentGroup
-    }).asUInt
-    val selectedEntry = Mux(
-      fullReuseEntryMatch.orR,
-      PriorityEncoderOH(fullReuseEntryMatch),
-      Mux(
-        rgidEntryMatch.orR,
-        PriorityEncoderOH(rgidEntryMatch),
-        Mux(
-          reusableAluEntryMatch.orR,
-          PriorityEncoderOH(reusableAluEntryMatch),
-          Mux(
-            completedEntryMatch.orR,
-            PriorityEncoderOH(completedEntryMatch),
-            PriorityEncoderOH(entryMatch)
-          )
-        )
-      )
-    )
-    msrLogMatchOH(i) := Mux(instEnqValidSeq(i) && !msrMispredSample, selectedEntry, 0.U)
-    msrLogMatchCompleted(i) := (msrLogMatchOH(i) & msrLogCompleted.asUInt).orR
-    msrLogMatchAlu(i) := (msrLogMatchOH(i) & msrLogAlu.asUInt).orR
-    msrLogMatchReusableAlu(i) := (msrLogMatchOH(i) & reusableAluEntryMatch).orR
-    msrLogMatchRgid(i) := (msrLogMatchOH(i) & rgidEntryMatch).orR
-    msrLogMatchFullReuse(i) := (msrLogMatchOH(i) & fullReuseEntryMatch).orR
-    val priorAllocCount = if (i == 0) 0.U else PopCount(msrEnqAllocInt.take(i))
-    val freshRgid = msrNextRgid + priorAllocCount
-    msrEnqDestRgid(i) := Mux(
-      msrLogMatchRgid(i),
-      Mux1H(msrLogMatchOH(i), msrLogDestRgid),
-      freshRgid
-    )
-    msrLogAvailable = msrLogAvailable & ~msrLogMatchOH(i)
-  }
+        currentSrcUsed && (io.enq.req(i).bits.srcRgid(src) === MsrRgid.Null.U ||
+          msrLogSrcRgid(entryIndex)(src) === MsrRgid.Null.U)
+      }.reduce(_ || _)
 
-  when(msrEnqAllocInt.asUInt.orR) {
-    msrNextRgid := msrNextRgid + PopCount(msrEnqAllocInt)
-  }
-  for (preg <- 0 until IntPhyRegs) {
-    val allocOH = VecInit((0 until RenameWidth).map { lane =>
-      msrEnqAllocInt(lane) && io.enq.req(lane).bits.pdest === preg.U
-    })
-    assert(PopCount(allocOH) <= 1.U, "MSR shadow RGID saw duplicate PReg allocation")
-    when(allocOH.asUInt.orR) {
-      msrIntPRegRgid(preg) := Mux1H(allocOH, msrEnqDestRgid)
+    val staticMatchOH = Mux(msrCandidateStaticGuard(i), UIntToOH(entryIndex, MsrTotalEntries), 0.U)
+    val completedStaticMatch = msrCandidateStaticGuard(i) && msrLogCompleted(entryIndex)
+    val reusableAluMatch = completedStaticMatch && msrLogReusableAlu(entryIndex) && msrEnqReusableAlu(i)
+    val rgidMatch = reusableAluMatch && allSrcRgidMatch
+    val allocatedInCurrentGroup = VecInit((0 until RenameWidth).map { lane =>
+      msrEnqAllocInt(lane) && io.enq.req(lane).bits.pdest === msrLogPdest(entryIndex)
+    }).asUInt.orR
+
+    msrLogMatchOH(i) := staticMatchOH
+    msrLogMatchCompleted(i) := completedStaticMatch
+    msrLogMatchAlu(i) := msrCandidateStaticGuard(i) && msrLogAlu(entryIndex)
+    msrLogMatchReusableAlu(i) := reusableAluMatch
+    msrLogMatchRgid(i) := rgidMatch
+    msrLogMatchFullReuse(i) := rgidMatch && msrLogPdestRetained(entryIndex) && !allocatedInCurrentGroup
+    msrCandidateChain(i + 1) := Mux(
+      instEnqValidSeq(i),
+      msrCandidateChain(i) && msrCandidateStaticGuard(i),
+      msrCandidateChain(i)
+    )
+
+    assert(PopCount(msrLogMatchOH(i)) <= 1.U, "MSR position lookup selected more than one entry")
+    when(msrLogMatchOH(i).orR) {
+      assert(!msrLogConsumed(entryIndex), "MSR entry was consumed more than once")
+      assert(msrCandidateBaseGeneration === msrStreamGeneration(msrCandidateBaseStreamId),
+        "MSR accepted a stale stream generation")
+      assert(entryIndex(entryIndex.getWidth - 1) === msrCandidateBaseStreamId,
+        "MSR candidate crossed into another stream")
     }
   }
+
   for (lane <- 0 until RenameWidth) {
     when(instEnqValidSeq(lane) && !io.redirect.valid) {
       val robIdx = enqRobIdxSeq(lane)
       for (src <- 0 until params.numSrc) {
         msrRobSrcUsed(robIdx)(src) := SrcType.isXp(io.enq.req(lane).bits.srcType(src)) &&
           io.enq.req(lane).bits.psrc(src) =/= 0.U
-        msrRobSrcRgid(robIdx)(src) := msrEnqSrcRgid(lane)(src)
+        msrRobSrcRgid(robIdx)(src) := io.enq.req(lane).bits.srcRgid(src)
       }
-      msrRobDestRgid(robIdx) := msrEnqDestRgid(lane)
+      msrRobDestRgid(robIdx) := io.enq.req(lane).bits.destRgid
       msrRobPdest(robIdx) := io.enq.req(lane).bits.pdest
       msrRobReusableAlu(robIdx) := msrEnqReusableAlu(lane)
+    }
+  }
+
+  val msrEnqInstructionCount = PopCount(instEnqValidSeq)
+  val msrCandidateNextOffset = msrCandidateBaseOffset + msrEnqInstructionCount
+  val msrCandidateContinues = msrAnyInstEnq && msrCandidateChain(RenameWidth) &&
+    msrCandidateNextOffset < msrStreamLength(msrCandidateBaseStreamId) &&
+    msrStreamValid(msrCandidateBaseStreamId) &&
+    msrStreamGeneration(msrCandidateBaseStreamId) === msrCandidateBaseGeneration
+
+  when(io.msrRgid.overflow || io.redirect.valid) {
+    msrCandidateValid := false.B
+    msrLastEnqFtqValid := false.B
+  }.elsewhen(msrCreateStream) {
+    msrCandidateValid := false.B
+    msrLastEnqFtqValid := false.B
+  }.otherwise {
+    when(msrAnyInstEnq) {
+      msrCandidateValid := msrCandidateContinues
+      when(msrCandidateContinues) {
+        msrCandidateStreamId := msrCandidateBaseStreamId
+        msrCandidateStreamGeneration := msrCandidateBaseGeneration
+        msrCandidateInstructionOffset := msrCandidateNextOffset
+      }
+      msrLastEnqFtqValid := true.B
+      msrLastEnqFtqPtr := PriorityMux(instEnqValidSeq.zip(io.enq.req.map(_.bits.ftqPtr)).reverse)
+    }.elsewhen(msrCandidateValid && !msrCandidateStateCurrent) {
+      msrCandidateValid := false.B
     }
   }
 
@@ -1251,23 +1335,38 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       case (hit, hasHit) => hit && !hasHit
     }
   )
-  val msrStreamValid = VecInit((0 until MsrStreamCount).map { stream =>
-    VecInit(msrLogValid.slice(stream * MsrEntriesPerStream, (stream + 1) * MsrEntriesPerStream)).asUInt.orR
-  })
   val msrReplacedStreamValid = msrStreamValid(msrNextStream)
   val msrLogOverwritten = msrCreateStream && msrReplacedStreamValid
   val msrLogOverwrittenBeforeStaticHit = msrLogOverwritten && !msrLogHasStaticHit(msrNextStream)
   val msrLogOverwrittenBeforeCompletedStaticHit =
     msrLogOverwritten && !msrLogHasCompletedStaticHit(msrNextStream)
 
-  when(msrCreateStream) {
+  when(io.msrRgid.overflow) {
+    msrStreamValid.foreach(_ := false.B)
+    msrStreamLength.foreach(_ := 0.U)
+    msrLogValid.foreach(_ := false.B)
+    msrLogConsumed.foreach(_ := false.B)
+    msrLogPdestRetained.foreach(_ := false.B)
+    msrLogHasStaticHit.foreach(_ := false.B)
+    msrLogHasCompletedStaticHit.foreach(_ := false.B)
+    msrLogHasSemanticHoldHit.foreach(_ := false.B)
+    msrLogHasFullReuseHit.foreach(_ := false.B)
+  }.elsewhen(msrCreateStream) {
     for (stream <- 0 until MsrStreamCount) {
       when(msrNextStream === stream.U) {
+        msrStreamValid(stream) := true.B
+        msrStreamGeneration(stream) := msrStreamGeneration(stream) + 1.U
+        msrStreamLength(stream) := Mux(
+          msrSquashedInst > MsrEntriesPerStream.U,
+          MsrEntriesPerStream.U,
+          msrSquashedInst
+        )
         for (entry <- 0 until MsrEntriesPerStream) {
           val logIdx = stream * MsrEntriesPerStream + entry
           val robIdx = msrCaptureRobIdx(entry)
-          val captureValid = if (entry < RobSize) redirectNeedFlush(robIdx) else false.B
+          val captureValid = redirectNeedFlush(robIdx)
           msrLogValid(logIdx) := captureValid
+          msrLogConsumed(logIdx) := false.B
           when(captureValid) {
             msrLogCompleted(logIdx) := robEntries(robIdx).isWritebacked
             msrLogAlu(logIdx) := FuType.isAlu(
@@ -1292,11 +1391,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         msrLogHasFullReuseHit(stream) := false.B
       }
     }
+    msrNewestStream := msrNextStream
     msrNextStream := Mux(msrNextStream === (MsrStreamCount - 1).U, 0.U, msrNextStream + 1.U)
   }.elsewhen(!msrMispredSample) {
     for (i <- 0 until MsrTotalEntries) {
       when(msrLogMatchOH.map(_(i)).reduce(_ || _)) {
-        msrLogValid(i) := false.B
+        msrLogConsumed(i) := true.B
       }
     }
     for (stream <- 0 until MsrStreamCount) {
@@ -1324,6 +1424,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         msrLogPdestRetained(entry) := false.B
       }
     }
+  }
+
+  assert(msrStreamLength.map(_ <= MsrEntriesPerStream.U).reduce(_ && _),
+    "MSR stream length exceeded the 128-entry Squash Log")
+  when(msrCandidateValid) {
+    assert(msrCandidateInstructionOffset < MsrEntriesPerStream.U,
+      "MSR candidate cursor exceeded the stream entry bound")
   }
 
   val fflags_wb = fflagsWBs
@@ -2040,6 +2147,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("msr_log_with_completed_static_hit", msrNewStreamCompletedStaticHitCount)
   XSPerfAccumulate("msr_log_with_semantic_hold_hit", msrNewStreamSemanticHoldHitCount)
   XSPerfAccumulate("msr_log_with_full_reuse_hit", msrNewStreamFullReuseHitCount)
+  XSPerfAccumulate("msr_stream_created", msrCreateStream)
+  XSPerfAccumulate("msr_stream_replaced", msrLogOverwritten)
+  XSPerfAccumulate(
+    "msr_entry_captured",
+    Mux(msrCreateStream, Mux(msrSquashedInst > MsrEntriesPerStream.U, MsrEntriesPerStream.U, msrSquashedInst), 0.U)
+  )
+  XSPerfAccumulate("msr_candidate_acquired", msrDiscoveryValid)
+  XSPerfAccumulate("msr_position_candidate_inst", PopCount(msrCandidateTupleValid))
+  XSPerfAccumulate("msr_position_static_divergence", PopCount(
+    msrCandidateTupleValid.zip(msrCandidateStaticGuard).map { case (valid, guard) => valid && !guard }
+  ))
+  XSPerfAccumulate("msr_rgid_null_reject", PopCount(msrCandidateNullRgidReject))
+  XSPerfAccumulate("msr_stale_stream_generation", msrCandidateValid && !msrCandidateStateCurrent)
+  XSPerfAccumulate("msr_rgid_drain_cycle", msrRgidResetPending)
+  XSPerfAccumulate("msr_rgid_global_reset", msrRgidReset)
 
   val commitLoadVec = VecInit(commitLoadValid)
   val commitBranchVec = VecInit(commitBranchValid)
