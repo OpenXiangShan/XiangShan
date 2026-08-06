@@ -123,6 +123,8 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       val vd = Mux1H(fus.flatMap(_.out.ex.lift(i)).map(validIO =>
         validIO.valid -> validIO.bits.data.vec.get.normal
       )).suggestName(s"ex${i}_vd")
+      val isWholeVMove = FuType.FuTypeOrR(ex(i).bits.ctrl.fuType, Seq(FuType.vmove)) &&
+        Opcode.VMoveOpcodes.isNR(ex(i).bits.ctrl.opcode)
 
       mgu.in.valid := ex(i).valid
       mgu.in.ctrl.vma := ex(i).bits.ctrl.vtype.get.vma
@@ -130,11 +132,15 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       mgu.in.data.mask := Fill(vlenb, ex(i).bits.ctrl.vm.get) | ex(i).bits.data.v0.get // Todo: use vlenb v0
       // since vstart is always 0 for vector arith instruction, begin is always 0
       mgu.in.data.begin := 0.U
-      mgu.in.data.end := Mux1H(Seq(
-        (vdIdx > vlMapVdIdx) -> 0.U,
-        (vdIdx === vlMapVdIdx) -> end,
-        (vdIdx < vlMapVdIdx) -> vlenb.U,
-      ))
+      mgu.in.data.end := Mux(
+        isWholeVMove,
+        vlenb.U,
+        Mux1H(Seq(
+          (vdIdx > vlMapVdIdx) -> 0.U,
+          (vdIdx === vlMapVdIdx) -> end,
+          (vdIdx < vlMapVdIdx) -> vlenb.U,
+        )),
+      )
       mgu.in.data.oldVd := ex(i).bits.data.src(2).toByteVec
       mgu.in.data.vd := vd.toByteVec
   }
