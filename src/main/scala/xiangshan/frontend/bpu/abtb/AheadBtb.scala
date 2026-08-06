@@ -322,6 +322,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   replacers.foreach(_.io.replaceSetIdx := t1_setIdx)
   private val victimWayIdx = replacers.map(_.io.victimWayIdx)
 
+  private val t1_touchMask = t1_meta.entries.map(e => e.hit && e.position <= t1_trainPosition)
+
   private val t2_fire              = RegNext(t1_fire, init = false.B)
   private val t2_victimWayIdx      = RegNext(VecInit(victimWayIdx))
   private val t2_setIdx            = RegNext(t1_setIdx)
@@ -332,6 +334,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val t2_writeEntry        = RegNext(t1_writeEntry)
   private val t2_hit               = RegNext(t1_hit)
   private val t2_hitMask           = RegNext(VecInit(t1_hitMask))
+  private val t2_touchMask         = RegNext(VecInit(t1_touchMask))
+  private val t2_touchHit          = RegNext(t1_touchMask.reduce(_ || _))
   private val t2_trainTaken        = RegNext(t1_trainTaken)
 
   banks.zipWithIndex.foreach { case (b, i) =>
@@ -366,9 +370,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }
 
   replacers.zipWithIndex.foreach { case (r, i) =>
-    r.io.readValid   := t2_fire && t2_trainTaken && t2_bankMask(i) && t2_hit
+    r.io.readValid   := t2_fire && t2_bankMask(i) && t2_touchHit
     r.io.readSetIdx  := t2_setIdx
-    r.io.readWayMask := t2_hitMask
+    r.io.readWayMask := t2_touchMask
   }
 
   /* --------------------------------------------------------------------------------------------------------------

@@ -260,13 +260,13 @@ class MainBtbAlignBank(
   private val t1_newCounters    = Wire(Vec(NumWay, TakenCounter()))
   private val t1_counterWayMask = Wire(Vec(NumWay, Bool()))
 
-  private val actualTakenMak = Wire(Vec(NumWay, Bool()))
+  private val touchHitMask = Wire(Vec(NumWay, Bool()))
   t1_meta.zipWithIndex.foreach { case (meta, i) =>
     val hitMask = t1_branches.map { branch =>
       branch.valid && branch.bits.attribute.isConditional && meta.position === branch.bits.cfiPosition
     }
     val actualTaken = Mux1H(hitMask, t1_branches.map(_.bits.taken))
-    actualTakenMak(i) := actualTaken
+    touchHitMask(i) := hitMask.reduce(_ || _)
 
     val entryOverridden = t1_entryNeedWrite && t1_entryWayMask(i)
 
@@ -274,19 +274,19 @@ class MainBtbAlignBank(
     t1_newCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, meta.counter.getUpdate(actualTaken))
   }
 
-  private val t2_fire            = RegNext(t1_fire, init = false.B)
-  private val t2_entryNeedWrite  = RegNext(t1_entryNeedWrite)
-  private val t2_replacerSetIdx  = RegNext(getReplacerSetIndex(t1_startPc))
-  private val t2_entryWayMask    = RegNext(t1_entryWayMask)
-  private val t2_actualTakenMask = RegNext(actualTakenMak)
+  private val t2_fire           = RegNext(t1_fire, init = false.B)
+  private val t2_entryNeedWrite = RegNext(t1_entryNeedWrite)
+  private val t2_replacerSetIdx = RegNext(getReplacerSetIndex(t1_startPc))
+  private val t2_entryWayMask   = RegNext(t1_entryWayMask)
+  private val t2_touchHitMask   = RegNext(touchHitMask)
   // update replacer
   replacer.io.train.t1_touch.valid        := t2_fire && t2_entryNeedWrite
   replacer.io.train.t1_touch.bits.setIdx  := t2_replacerSetIdx
   replacer.io.train.t1_touch.bits.wayMask := t2_entryWayMask
 
-  replacer.io.predict.touch.valid        := t2_actualTakenMask.reduce(_ || _) && t2_fire
+  replacer.io.predict.touch.valid        := t2_touchHitMask.reduce(_ || _) && t2_fire
   replacer.io.predict.touch.bits.setIdx  := t2_replacerSetIdx
-  replacer.io.predict.touch.bits.wayMask := t2_actualTakenMask.asUInt
+  replacer.io.predict.touch.bits.wayMask := t2_touchHitMask.asUInt
 
   // write counter anytime when needed
   private val t1_counterNeedWrite = t1_counterWayMask.reduce(_ || _)
