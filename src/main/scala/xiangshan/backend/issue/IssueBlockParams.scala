@@ -51,7 +51,7 @@ case class IssueBlockParams(
 
   def isMemAddrIQ: Boolean = LduCnt > 0 || StaCnt > 0 || VlduCnt > 0 || VstuCnt > 0 || HyuCnt > 0
 
-  def isMemBlockIQ: Boolean = LduCnt > 0 || StaCnt > 0 || StdCnt > 0 || VlduCnt > 0 || VstuCnt > 0 || HyuCnt > 0
+  def isMemBlockIQ: Boolean = LduCnt > 0 || StaCnt > 0 || StdCnt > 0 || VlduCnt > 0 || VstuCnt > 0 || HyuCnt > 0 || VStdCnt > 0
 
   def isLdAddrIQ: Boolean = LduCnt > 0
 
@@ -67,11 +67,13 @@ case class IssueBlockParams(
 
   def isVecStuIQ: Boolean = (VstuCnt + VsegstuCnt) > 0
 
+  def isVecStdIQ: Boolean = VStdCnt > 0
+
   def isVecMemIQ: Boolean = isVecLduIQ || isVecStuIQ
 
   def needLqIdx: Boolean = isLdAddrIQ || isVecMemIQ
 
-  def needSqIdx: Boolean = isStAddrIQ || isStdIQ || isVecMemIQ || isLdAddrIQ
+  def needSqIdx: Boolean = isStAddrIQ || isStdIQ || isVecMemIQ || isLdAddrIQ || isVecStdIQ
 
   def needFeedBackSqIdx: Boolean = isVecStuIQ
 
@@ -194,7 +196,7 @@ case class IssueBlockParams(
 
   def BkuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.bku)).sum
 
-  def VsetCnt: Int = exuBlockParams.map(_.fuConfigs.count(x => x.fuType == FuType.vsetiwi || x.fuType == FuType.vsetiwf || x.fuType == FuType.vsetfwf)).sum
+  def VsetCnt: Int = exuBlockParams.map(_.fuConfigs.count(x => x.fuType == FuType.vset)).sum
 
   def FmacCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fmac)).sum
 
@@ -207,6 +209,8 @@ case class IssueBlockParams(
   def MouCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.mou)).sum
 
   def StdCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.name == "std")).sum
+
+  def VStdCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.name == "vstd")).sum
 
   def HyuCnt: Int = exuBlockParams.count(_.hasHyldaFu) // only count hylda, since it equals to hysta
 
@@ -347,7 +351,7 @@ case class IssueBlockParams(
 
   def needWakeupFromV0WBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readV0Rf).groupBy(x => x.getV0WBPort.getOrElse(V0WB(port = -1)).port).filter(_._1 != -1)
 
-  def needWakeupFromVlWBPort = backendParam.allExuParams.filter(x => !wakeUpInExuSources.map(_.name).contains(x.name) && this.readVlRf).groupBy(x => x.getVlWBPort.getOrElse(VlWB(port = -1)).port).filter(_._1 != -1)
+  def needWakeupFromVlWBPort = backendParam.allExuParams.filter(x => this.readVlRf).groupBy(x => x.getVlWBPort.getOrElse(VlWB(port = -1)).port).filter(_._1 != -1)
 
   def hasWakeupFromMem: Boolean = backendParam.allExuParams.filter(x => wakeUpInExuSources.map(_.name).contains(x.name)).map(_.isMemExeUnit).fold(false)(_ | _)
 
@@ -402,12 +406,8 @@ case class IssueBlockParams(
     MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genExuInputBundle)))
   }
 
-  def genExuInputDecoupledCopySrcBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuInput]] = {
-    MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genExuInputCopySrcBundle)))
-  }
-
-  def genNewExuInputDecoupledCopySrcBundle(implicit p: Parameters): MixedVec[DecoupledIO[NewExuInput]] = {
-    MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genNewExuInputCopySrcBundle)))
+  def genNewExuInputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[NewExuInput]] = {
+    MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genNewExuInputBundle)))
   }
 
   def genMemWakeupLRQBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueLRQWakeUpBundle]] = {
@@ -434,12 +434,37 @@ case class IssueBlockParams(
     MixedVec(this.exuParams.map(x => ValidIO(x.genExuOutputBundle)))
   }
 
+  def genNewExuOutputBundle[
+    T <: Bundle
+  ](builder: NewExuOutput => T)(implicit p: Parameters) = {
+    MixedVec(this.exuParams.map(x => builder(x.genNewExuOutputBundle)))
+  }
+
+
   def genNewExuOutputValidBundle(implicit p: Parameters): MixedVec[ValidIO[NewExuOutput]] = {
     MixedVec(this.exuParams.map(x => ValidIO(x.genNewExuOutputBundle)))
   }
 
-  def genWriteBackRobValidBundle(implicit p: Parameters): MixedVec[ValidIO[WriteBackRobBundle]] = {
-    MixedVec(this.exuParams.map(x => ValidIO(x.genWriteBackRobBundle)))
+  def getWriteBackRobParams(needExtraVld: Boolean): Seq[ExeUnitParams] = {
+    this.exuParams.flatMap(
+      x =>
+        if (x.hasLoadExu && x.writeIntRf && x.writeVfRf && needExtraVld)
+          Seq.fill(2)(x)
+        else
+          Seq(x)
+    )
+  }
+
+  def genWriteBackRobValidBundle(needExtraVld: Boolean)(implicit p: Parameters): MixedVec[ValidIO[WriteBackRobBundle]] = {
+    MixedVec(
+      this.exuParams.flatMap(
+        x =>
+          if (x.hasLoadExu && x.writeIntRf && x.writeVfRf && needExtraVld)
+            Seq.fill(2)(ValidIO(x.genWriteBackRobBundle))
+          else
+            Seq(ValidIO(x.genWriteBackRobBundle))
+      )
+    )
   }
 
   def genExuBypassValidBundle(implicit p: Parameters): MixedVec[ValidIO[ExuBypassBundle]] = {
@@ -485,7 +510,7 @@ case class IssueBlockParams(
       case _ => Seq()
     }
     val vlBundle = schdType match {
-      case VecScheduler() => needWakeupFromVlWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, VlData()))).toSeq
+      case IntScheduler() | VecScheduler() => needWakeupFromVlWBPort.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam, VlData()))).toSeq
       case _ => Seq()
     }
     MixedVec(intBundle ++ fpBundle ++ vfBundle ++ v0Bundle ++ vlBundle)

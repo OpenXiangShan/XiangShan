@@ -1,14 +1,12 @@
 package xiangshan.backend.datapath
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.exu.ExeUnitParams
-import xiangshan.backend.fu.vector.{ByteMaskTailGen, Mgu, VldMgu, VecInfo}
-import xiangshan.mem.GenUSMaskRegVL
-import yunsuan.vector.SewOH
+import xiangshan.backend.fu.vector.VldMgu
 
 class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new VldMergeUnitIO(params))

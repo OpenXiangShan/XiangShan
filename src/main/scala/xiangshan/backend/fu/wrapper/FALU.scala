@@ -7,11 +7,9 @@ import utility.XSError
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.fpu.FpPipedFuncUnit
-import yunsuan.{VfaluType, VfpuType}
 import yunsuan.fpu.FloatAdder
 
 class FAlu(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "falu OpType not supported")
 
   // io alias
   private val opcode = fuOpType(4, 0)
@@ -29,8 +27,7 @@ class FAlu(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   falu.io.fire             := io.in.valid
   falu.io.fp_a             := src0
   falu.io.fp_b             := src1
-  falu.io.round_mode       := rm
-  falu.io.fp_format        := fp_fmt
+  falu.io.rm               := rm
   falu.io.op_code          := opcode
   falu.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN
   falu.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN

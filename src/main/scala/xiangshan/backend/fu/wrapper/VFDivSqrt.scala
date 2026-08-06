@@ -10,11 +10,9 @@ import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, VecNonPipedFuncUnit}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.ExceptionNO
-import yunsuan.VfpuType
 import yunsuan.vector.VectorFloatDivider
 
 class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "Vfdiv OpType not supported")
 
   // params alias
   private val dataWidth = cfg.destDataBits

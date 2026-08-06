@@ -53,8 +53,8 @@ class ExceptionOut(implicit p: Parameters) extends XSBundle {
 }
 
 class ExceptionInfoGen(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper{
-  // loadUnit, storeUnit, VLoad, VStore, storeQueue Uncache, LoadQueue Uncache, VSegmentUnit, Atomic
-  private val enqPortNum = StorePipelineWidth + LoadPipelineWidth + VecLoadPipelineWidth + VecStorePipelineWidth + 1 + 1 + 1 + 1
+  // loadUnit, storeUnit, storeQueue Uncache, LoadQueue Uncache, Atomic
+  private val enqPortNum = StorePipelineWidth + LoadPipelineWidth + 1 + 1 + 1
   val io = IO(new Bundle{
     val redirect      = Flipped(ValidIO(new Redirect))
     val fromCsr       = Input(new TlbCsrBundle)

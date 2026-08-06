@@ -28,8 +28,7 @@ import xiangshan.backend.Bundles.DecodeOutUop
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import yunsuan.MULOpType
 
-abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters)
-  extends DecodeUnitConstants {
+abstract class BaseFusionCase(pair: Seq[Valid[UInt]])(implicit p: Parameters) {
   require(pair.length == 2)
 
   protected val inst1: XSInstBitFields = instr(0).asTypeOf(new XSInstBitFields)

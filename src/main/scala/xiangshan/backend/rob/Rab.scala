@@ -9,7 +9,6 @@ import utility._
 import utility.OneHot.UIntToOHSeq
 import xiangshan.backend.Bundles.EnqRobUop
 import xiangshan.backend.{RabToVecExcpMod, RegWriteFromRab}
-import xiangshan.backend.decode.VectorConstants
 import xiangshan.backend.rename.SnapshotGenerator
 import chisel3.experimental.BundleLiterals._
 

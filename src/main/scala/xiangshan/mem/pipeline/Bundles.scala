@@ -284,28 +284,13 @@ class StorePipeBundle(
   val mmio = Option.when(param.hasPAddrChecked)(Bool())
   val memBackTypeMM = Option.when(param.hasPAddrChecked)(Bool())
 
-  // Vector
-  val vecBaseVaddr = Option.when(param.hasVector)(UInt(VAddrBits.W))
-  val usSecondInv = Option.when(param.hasVector)(Bool())
-  val elemIdx = Option.when(param.hasVector)(UInt(elemIdxBits.W))
-  val mbIndex = Option.when(param.hasVector)(UInt(vlmBindexBits.W))
-  val vecTriggerMask = Option.when(param.hasVector)(UInt((VLEN/8).W))
-  val vecVaddrOffset = Option.when(param.hasVector)(UInt(VAddrBits.W))
-
   def DontCareUnalign(): Unit = {
     align.get := DontCare
     unalignHead.get := DontCare
     cross4KPage.get := DontCare
     isAddrReadyHead.get := DontCare
   }
-  def DontCareVectorFields(): Unit = {
-    vecBaseVaddr.get := 0.U
-    usSecondInv.get := false.B
-    elemIdx.get := 0.U
-    mbIndex.get := 0.U
-    vecTriggerMask.get := 0.U
-    vecVaddrOffset.get := 0.U
-  }
+
   def DontCareStoreSet(): Unit = {
     ssid.get := 0.U
     storeSetHit.get := false.B

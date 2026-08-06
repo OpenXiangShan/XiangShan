@@ -28,6 +28,7 @@ import top.{ArgParser, DefaultConfig}
 import xiangshan._
 import xiangshan.backend.fu.vector.Bundles.{VSew, Vl}
 import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
+import yunsuan.vector.Common.SewOH
 import yunsuan.vector._
 
 class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
