@@ -40,7 +40,7 @@ case class TageParameters(
     UsefulCtrInitValue:    Int = 0,
     NumUsefulCtrSramFolds: Int = 8,
     WriteBufferSize:       Int = 4,
-    UsefulResetCtrWidth:   Int = 8,
+    UsefulResetCtrWidth:   Int = 6,
     UseAltOnNaWidth:       Int = 7,
     NumUseAltOnNa:         Int = 128,
     EnableTageTrace:       Boolean = false

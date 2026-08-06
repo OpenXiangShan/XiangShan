@@ -34,8 +34,7 @@ class TageTable(
 
     val writeReq: Valid[TableWriteReq] = Flipped(Valid(new TableWriteReq))
 
-    val usefulResetStart:    Bool = Input(Bool())
-    val usefulResetInFlight: Bool = Output(Bool())
+    val usefulResetCtrInc: Bool = Input(Bool())
 
     val sramResetDone: Bool = Output(Bool())
   }
@@ -80,10 +79,18 @@ class TageTable(
       )).suggestName(s"tage_useful_sram_bank${bankIdx}_way${wayIdx}")
     }
 
+  private val usefulResetCtr          = RegInit(UsefulResetCounter.Zero)
   private val usefulResetSetIdx       = RegInit(VecInit.fill(NumBanks)(0.U(SetIdxWidth.W)))
   private val usefulResetInFlightMask = RegInit(VecInit.fill(NumBanks)(false.B))
+  private val usefulResetInFlight     = usefulResetInFlightMask.reduce(_ || _)
+  private val usefulResetStart        = usefulResetCtr.isSaturatePositive && !usefulResetInFlight
+  private val usefulResetCtrInc       = io.usefulResetCtrInc && !usefulResetStart && !usefulResetInFlight
 
-  io.usefulResetInFlight := usefulResetInFlightMask.reduce(_ || _)
+  when(usefulResetStart) {
+    usefulResetCtr.resetZero()
+  }.elsewhen(usefulResetCtrInc) {
+    usefulResetCtr.selfIncrease()
+  }
 
   private val readDuringUsefulReset = io.readReq.map { readReq =>
     (0 until NumBanks).map { bankIdx =>
@@ -110,7 +117,8 @@ class TageTable(
         new UsefulCtrSramWriteReq,
         entries = WriteBufferSize,
         pipe = true,
-        flow = true
+        flow = true,
+        hasFlush = true
       )).suggestName(s"tage_useful_write_buffer_bank${bankIdx}_way${wayIdx}")
     }
 
@@ -153,9 +161,10 @@ class TageTable(
     bankBuffer.zipWithIndex.foreach { case (wayBuffer, wayIdx) =>
       val writeValid =
         writeReqValid && writeReq.bankMask(bankIdx) && writeReq.wayMask(wayIdx) && writeReq.writeUsefulEn(wayIdx)
-      wayBuffer.io.enq.valid          := writeValid
+      wayBuffer.io.enq.valid          := writeValid && !usefulResetStart && !usefulResetInFlight
       wayBuffer.io.enq.bits.setIdx    := writeReq.setIdx
       wayBuffer.io.enq.bits.usefulCtr := writeReq.usefulCtrs(wayIdx)
+      wayBuffer.io.flush.get          := usefulResetStart
     }
   }
 
@@ -173,7 +182,7 @@ class TageTable(
   }
 
   usefulCtrSram.zip(usefulCtrWriteBuffers).zipWithIndex.foreach { case ((bank, bankBuffer), bankIdx) =>
-    when(io.usefulResetStart) {
+    when(usefulResetStart) {
       usefulResetInFlightMask(bankIdx) := true.B
       usefulResetSetIdx(bankIdx)       := 0.U
     }.elsewhen(usefulResetInFlightMask(bankIdx) && bank.head.io.w.req.fire) {
@@ -223,6 +232,7 @@ class TageTable(
   XSPerfAccumulate("predict_read", io.readReq(0).valid)
   XSPerfAccumulate("train_read", io.readReq(1).valid)
   XSPerfAccumulate("write", io.writeReq.valid)
+  XSPerfAccumulate("useful_reset", usefulResetStart)
   XSPerfAccumulate(
     s"tage_write_entry_${tableIdx}",
     Mux(io.writeReq.valid, PopCount(io.writeReq.bits.writeEntryEn), 0.U)

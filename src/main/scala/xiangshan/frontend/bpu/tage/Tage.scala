@@ -46,10 +46,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   /* *** submodules *** */
   private val tables = TableInfos.zipWithIndex.map { case (info, i) => Module(new TageTable(i, info)) }
 
-  // reset all usefulCtr when usefulResetCtr saturated
-  private val usefulResetCtr      = RegInit(UsefulResetCounter.Zero)
-  private val usefulResetInFlight = RegInit(false.B)
-
   // use the alternate prediction when counter is positive
   private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(UseAltOnNaCounter.Zero))
 
@@ -494,7 +490,16 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t3_canAllocate          = t3_canAllocateTableMask.orR
   private val t3_allocate             = t3_needAllocate && t3_canAllocate
 
-  private val t3_allocateTableOH = PriorityEncoderOH(t3_canAllocateTableMask)
+  // Randomly filter allocation candidates, then prefer the shorter-history table among the remaining candidates.
+  // Fall back to the original candidate mask when the random mask filters out every candidate.
+  private val t3_allocateTableRandomMask    = random.LFSR(width = 15)(NumTables - 1, 0)
+  private val t3_randomCanAllocateTableMask = t3_canAllocateTableMask & t3_allocateTableRandomMask
+  private val t3_preferredAllocateTableMask = Mux(
+    t3_randomCanAllocateTableMask.orR,
+    t3_randomCanAllocateTableMask,
+    t3_canAllocateTableMask
+  )
+  private val t3_allocateTableOH = PriorityEncoderOH(t3_preferredAllocateTableMask)
   private val t3_allocateWayMask = Mux1H(t3_allocateTableOH, t3_allTableCanAllocateWayMask)
   private val t3_allocateWayOH   = PriorityEncoderOH(t3_allocateWayMask)
   dontTouch(t3_allocateTableOH)
@@ -514,8 +519,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     )
     entry
   }
-
-  private val t3_usefulResetStart = t3_fire && usefulResetCtr.isSaturatePositive && !usefulResetInFlight
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
     implicit val info: TageTableInfo = TableInfos(tableIdx)
@@ -577,19 +580,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.io.writeReq.bits.usefulCtrs      := writeUsefulCtrs
     table.io.writeReq.bits.actualTakenMask := actualTakenMask
 
-    table.io.usefulResetStart := t3_usefulResetStart
-  }
-
-  when(t3_usefulResetStart) {
-    usefulResetInFlight := true.B
-  }.elsewhen(usefulResetInFlight && !tables.map(_.io.usefulResetInFlight).reduce(_ || _)) {
-    usefulResetInFlight := false.B
-  }
-
-  when(t3_usefulResetStart) {
-    usefulResetCtr.resetZero()
-  }.elsewhen(t3_fire && t3_needAllocate && !t3_canAllocate && !usefulResetInFlight) {
-    usefulResetCtr.selfIncrease()
+    // Each table tracks its own allocation pressure and resets useful counters independently.
+    table.io.usefulResetCtrInc := t3_fire && t3_needAllocate && !t3_canAllocate &&
+      t3_longerHistoryTableMask(tableIdx) && !t3_allTableCanAllocateWayMask(tableIdx).orR
   }
 
   useAltOnNaVec.zipWithIndex.map { case (ctr, i) =>
@@ -682,7 +675,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   XSPerfAccumulate("total_train", io.stageCtrl.t0_fire)
   XSPerfAccumulate("train_has_cond", t0_fire)
   XSPerfAccumulate("read_conflict", debug_readBankConflict)
-  XSPerfAccumulate("reset_useful", t3_usefulResetStart)
   XSPerfAccumulate(
     "allocate_not_needed_due_to_already_on_highest_table", {
       val mispredictBranchOH = PriorityEncoderOH(t3_trainInfoVec.map(b => b.valid && b.mispredicted))
