@@ -79,6 +79,38 @@ def _json_sha256(value: Any) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def funcov_sampler_paths() -> dict[str, Path]:
+    """Return every source file that defines the canonical sampler contract."""
+
+    root = Path(__file__).resolve().parent
+    return {
+        "functional_coverage.py": root / "functional_coverage.py",
+        "funcov/__init__.py": root / "funcov" / "__init__.py",
+        "funcov/py/ftq/sampler.py": root / "funcov" / "py" / "ftq" / "sampler.py",
+        "funcov/py/ftq/two_fetch_funcov.py": root / "funcov" / "py" / "ftq" / "two_fetch_funcov.py",
+        "funcov/py/ftq/ftq_request_funcov.py": root / "funcov" / "py" / "ftq" / "ftq_request_funcov.py",
+        "funcov/py/ftq/waylookup_funcov.py": root / "funcov" / "py" / "ftq" / "waylookup_funcov.py",
+        "funcov/py/ftq/mainpipe_funcov.py": root / "funcov" / "py" / "ftq" / "mainpipe_funcov.py",
+        "funcov/py/ftq/ifu_delivery_funcov.py": root / "funcov" / "py" / "ftq" / "ifu_delivery_funcov.py",
+        "funcov/py/ftq/checker_funcov.py": root / "funcov" / "py" / "ftq" / "checker_funcov.py",
+        "funcov/py/icache/__init__.py": root / "funcov" / "py" / "icache" / "__init__.py",
+        "funcov/py/icache/icache_mainpipe_funcov.py": root / "funcov" / "py" / "icache" / "icache_mainpipe_funcov.py",
+        "funcov/py/icache/icache_prefetchpipe_funcov.py": root / "funcov" / "py" / "icache" / "icache_prefetchpipe_funcov.py",
+        "funcov/py/icache/icache_missunit_funcov.py": root / "funcov" / "py" / "icache" / "icache_missunit_funcov.py",
+        "funcov/py/icache/icache_waylookup_funcov.py": root / "funcov" / "py" / "icache" / "icache_waylookup_funcov.py",
+        "funcov/py/icache/icache_hitmiss_funcov.py": root / "funcov" / "py" / "icache" / "icache_hitmiss_funcov.py",
+        "funcov/py/ifu/sampler.py": root / "funcov" / "py" / "ifu" / "sampler.py",
+        "funcov/py/ifu/cfvec_funcov.py": root / "funcov" / "py" / "ifu" / "cfvec_funcov.py",
+        "funcov/py/ifu/compact_funcov.py": root / "funcov" / "py" / "ifu" / "compact_funcov.py",
+    }
+
+
+def current_funcov_sampler_sha256() -> str:
+    return _json_sha256(
+        {label: _file_sha256(str(path)) for label, path in funcov_sampler_paths().items()}
+    )
+
+
 COMPATIBILITY_FIELDS = (
     "simulator",
     "dut_source_sha",
@@ -380,86 +412,7 @@ class FunctionalCoverageRecorder:
             elif not manifest_was_valid:
                 build_config = build_config_override
         definitions_sha256 = _json_sha256([asdict(item) for item in self.definitions])
-        sampler_sha256 = _json_sha256(
-            {
-                "functional_coverage.py": _file_sha256(str(Path(__file__).resolve())),
-                "funcov/__init__.py": _file_sha256(
-                    str((Path(__file__).resolve().parent / "funcov" / "__init__.py"))
-                ),
-                "funcov/py/ftq/sampler.py": _file_sha256(
-                    str(
-                        Path(__file__).resolve().parent
-                        / "funcov"
-                        / "py"
-                        / "ftq"
-                        / "sampler.py"
-                    )
-                ),
-                "funcov/py/icache/__init__.py": _file_sha256(
-                    str(
-                        Path(__file__).resolve().parent
-                        / "funcov"
-                        / "py"
-                        / "icache"
-                        / "__init__.py"
-                    )
-                ),
-                "funcov/py/icache/icache_mainpipe_funcov.py": _file_sha256(
-                    str(
-                        Path(__file__).resolve().parent
-                        / "funcov"
-                        / "py"
-                        / "icache"
-                        / "icache_mainpipe_funcov.py"
-                    )
-                ),
-                "funcov/py/icache/icache_prefetchpipe_funcov.py": _file_sha256(
-                    str(
-                        Path(__file__).resolve().parent
-                        / "funcov"
-                        / "py"
-                        / "icache"
-                        / "icache_prefetchpipe_funcov.py"
-                    )
-                ),
-                "funcov/py/icache/icache_missunit_funcov.py": _file_sha256(
-                    str(
-                        Path(__file__).resolve().parent
-                        / "funcov"
-                        / "py"
-                        / "icache"
-                        / "icache_missunit_funcov.py"
-                    )
-                ),
-                "funcov/py/icache/icache_waylookup_funcov.py": _file_sha256(
-                    str(
-                        Path(__file__).resolve().parent
-                        / "funcov"
-                        / "py"
-                        / "icache"
-                        / "icache_waylookup_funcov.py"
-                    )
-                ),
-                "funcov/py/icache/icache_hitmiss_funcov.py": _file_sha256(
-                    str(
-                        Path(__file__).resolve().parent
-                        / "funcov"
-                        / "py"
-                        / "icache"
-                        / "icache_hitmiss_funcov.py"
-                    )
-                ),
-                "funcov/py/ifu/sampler.py": _file_sha256(
-                    str(
-                        Path(__file__).resolve().parent
-                        / "funcov"
-                        / "py"
-                        / "ifu"
-                        / "sampler.py"
-                    )
-                ),
-            }
-        )
+        sampler_sha256 = current_funcov_sampler_sha256()
         provenance = {
             "simulator": simulator,
             "dut_source_sha": dut_source_sha,

@@ -204,7 +204,7 @@ Frontend BT 只保留两条职责不同的覆盖率链：
 
 1. 功能覆盖率：
    `测试点主表 -> 03_funcov_model/frontend_bt_functional_coverage_pilot.csv -> env/funcov/__init__.py + env/funcov/py/icache/__init__.py + env/funcov/py/icache/icache_mainpipe_funcov.py + env/funcov/py/icache/icache_prefetchpipe_funcov.py + env/funcov/py/icache/icache_missunit_funcov.py + env/funcov/py/icache/icache_waylookup_funcov.py + env/funcov/py/icache/icache_hitmiss_funcov.py -> env/functional_coverage.py -> data/runs/<run_id>/funcov/*.funcov.json -> tools/backannotate_funcov.py`。
-   registry 当前共 380 行，其中 `Coverpoint` 完整并与 sampler 一一对应的 231 行会装入 runtime；其余 149 行均为 `UNMAPPED` 历史规划。ICache MainPipe、PrefetchPipe、MissUnit、WayLookup、hit/miss 路径分别维护 42、33、31、42、10 个覆盖点于 `env/funcov/py/icache/` 下，IFU compact/RVC 相关的 9 个补充点在 `env/funcov/py/ifu/sampler.py`。带 `旧BPU_FTQ` 路径的历史行全部保持 `Coverpoint` 为空，不能进入采样或自动反标。
+   registry 当前共 380 行，其中 `Coverpoint` 完整并与 sampler 一一对应的 231 行会装入 runtime；其余 149 行均为 `UNMAPPED` 历史规划。ICache MainPipe、PrefetchPipe、MissUnit、WayLookup、hit/miss 路径分别维护 42、33、31、42、10 个覆盖点于 `env/funcov/py/icache/` 下；IFU 的 CFVec 与 compact/RVC 覆盖点分别维护在 `env/funcov/py/ifu/cfvec_funcov.py` 和 `env/funcov/py/ifu/compact_funcov.py`，FTQ two-fetch 覆盖点按请求、WayLookup、MainPipe、IFU delivery、checker 分组维护，`sampler.py` 仅作为兼容聚合入口。带 `旧BPU_FTQ` 路径的历史行全部保持 `Coverpoint` 为空，不能进入采样或自动反标。
    标准 bin-trace 脚本会自动生成 `TB_RUN_ID` / `TB_ARTIFACT_DIR`；fixture 会将 pytest `funcov_bins` 标记或与汇编 case stem 精确匹配的 registry 行写入 `coverage_targets`。
    `make frontend` 在对应 package 构建成功后生成 `build-frontend/frontend_build_manifest.<sim>.json`。funcov 按 `TB_FRONTEND_SIM` 选择 manifest，且只在其源码状态干净、`simulator` 与已选 package 一致、DUT/RTL/signal-contract 哈希与当前编译产物一致时接受其中的 `dut_source_sha`。
 2. 代码覆盖率：

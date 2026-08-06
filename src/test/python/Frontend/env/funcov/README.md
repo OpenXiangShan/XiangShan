@@ -14,11 +14,13 @@ ICache hit/miss 路径模型写在：
 
 对应主测试点表中 `cacheable取指/icache/hit路径` 与 `cacheable取指/icache/miss路径` 下的 10 个叶子，覆盖同 cacheline hit、跨 cacheline hit、双 fetch hit、hit 保护异常、fetch/prefetch 并发、fetch refill 后 prefetch hit、连续 fetch miss merge、PLRU victim 选择和 refill 后同地址再次 hit。模型只使用 MainPipe、MissUnit、MSHR 与 victim 选择相关 DUT 信号；跨周期 refill 关系由 sampler 内部状态保存，Checkpoint 中的正确性仍由 testcase、checker 或 scoreboard 证明。
 
-IFU 的 compact / RVC 补充覆盖点写在：
+IFU 的覆盖率按 coverage group 拆分：
 
-`src/test/python/Frontend/env/funcov/py/ifu/sampler.py`
+- `src/test/python/Frontend/env/funcov/py/ifu/cfvec_funcov.py`：CFVec 的指令尺寸、边界位置、CFI 类型和页边界时序。
+- `src/test/python/Frontend/env/funcov/py/ifu/compact_funcov.py`：IFU 到 IBuffer 的 compact layout、RVC 展开、异常和 two-fetch source 补充点。
+- `src/test/python/Frontend/env/funcov/py/ifu/sampler.py`：兼容入口和聚合导出，保持旧测试的导入路径不变。
 
-这些补充点继续沿用同一个 recorder，和 `env/funcov/__init__.py` 的 CFVEC / two-fetch 调度一起进入 canonical runtime。
+FTQ 的 two-fetch coverage group 也按请求、WayLookup、MainPipe、IFU delivery 和 checker 分文件维护；跨周期状态采样保留在 `two_fetch_funcov.py`，由 `ftq/sampler.py` 统一调度。
 
 地址翻译与权限检查模型写在：
 

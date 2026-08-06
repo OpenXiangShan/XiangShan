@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -24,6 +25,10 @@ from typing import Any, Iterable
 
 FRONTEND_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = FRONTEND_ROOT.parents[3]
+if str(FRONTEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(FRONTEND_ROOT))
+
+from env.functional_coverage import current_funcov_sampler_sha256, funcov_sampler_paths
 
 
 PRIMARY_STATUSES = ("UNMAPPED", "MODELED", "PARTIAL", "HIT", "CLOSED")
@@ -342,24 +347,11 @@ def expected_provenance(pilot_path: Path, simulator: str) -> dict[str, Any]:
     if worktree["status"] != "clean":
         reasons.append("verification_worktree_dirty")
     manifest_status = "valid" if not reasons else "invalid"
-    sampler_paths = {
-        "functional_coverage.py": FRONTEND_ROOT / "env" / "functional_coverage.py",
-        "funcov/__init__.py": FRONTEND_ROOT / "env" / "funcov" / "__init__.py",
-        "funcov/py/ftq/sampler.py": FRONTEND_ROOT / "env" / "funcov" / "py" / "ftq" / "sampler.py",
-        "funcov/py/ifu/sampler.py": FRONTEND_ROOT / "env" / "funcov" / "py" / "ifu" / "sampler.py",
-        "funcov/py/icache/__init__.py": FRONTEND_ROOT / "env" / "funcov" / "py" / "icache" / "__init__.py",
-        "funcov/py/icache/icache_mainpipe_funcov.py": FRONTEND_ROOT / "env" / "funcov" / "py" / "icache" / "icache_mainpipe_funcov.py",
-        "funcov/py/icache/icache_prefetchpipe_funcov.py": FRONTEND_ROOT / "env" / "funcov" / "py" / "icache" / "icache_prefetchpipe_funcov.py",
-        "funcov/py/icache/icache_missunit_funcov.py": FRONTEND_ROOT / "env" / "funcov" / "py" / "icache" / "icache_missunit_funcov.py",
-        "funcov/py/icache/icache_waylookup_funcov.py": FRONTEND_ROOT / "env" / "funcov" / "py" / "icache" / "icache_waylookup_funcov.py",
-        "funcov/py/icache/icache_hitmiss_funcov.py": FRONTEND_ROOT / "env" / "funcov" / "py" / "icache" / "icache_hitmiss_funcov.py",
-    }
+    sampler_paths = funcov_sampler_paths()
     missing_sampler = [str(path) for path in sampler_paths.values() if not path.is_file()]
     if missing_sampler:
         reasons.extend(f"sampler_missing:{path}" for path in missing_sampler)
-    sampler_sha256 = _json_sha256(
-        {label: _sha256(path) for label, path in sampler_paths.items() if path.is_file()}
-    )
+    sampler_sha256 = "unavailable" if missing_sampler else current_funcov_sampler_sha256()
     return {
         "simulator": simulator,
         "build_manifest_path": str(manifest_path),

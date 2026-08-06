@@ -1,8 +1,11 @@
 """Compatibility exports for the modular frontend functional coverage samplers.
 
-New code should import samplers from their module directories.  These exports
-keep existing tests and callers working while the old monolithic implementation
-is retired.
+This is a Python import-compatibility layer: ``env.functional_coverage`` and
+existing tests historically imported symbols from ``env.funcov``.  The actual
+group implementations now live below ``env.funcov.py.ifu`` and
+``env.funcov.py.ftq``; this module re-exports their public symbols so those
+callers do not need a flag-day import rewrite.  It does not bridge DUT
+versions, simulators, or two different coverage semantics.
 """
 
 from .py.ifu.sampler import (

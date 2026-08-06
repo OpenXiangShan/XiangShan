@@ -24,6 +24,7 @@ if str(_IMPORT_ROOT) not in sys.path:
     sys.path.insert(0, str(_IMPORT_ROOT))
 
 from env.artifact_provenance import load_frontend_build_manifest
+from env.functional_coverage import current_funcov_sampler_sha256, funcov_sampler_paths
 
 
 STATUSES = {"UNMAPPED", "MODELED", "PARTIAL", "HIT", "CLOSED", "BLOCKED", "N-A", "SV_FUNCOV"}
@@ -110,45 +111,6 @@ _CANONICAL_REGISTRY = (
     / "03_funcov_model"
     / "frontend_bt_functional_coverage_pilot.csv"
 )
-_SAMPLER_FILES = (
-    _FRONTEND_ROOT / "env" / "functional_coverage.py",
-    _FRONTEND_ROOT / "env" / "funcov" / "__init__.py",
-    _FRONTEND_ROOT / "env" / "funcov" / "py" / "ftq" / "sampler.py",
-    _FRONTEND_ROOT / "env" / "funcov" / "py" / "icache" / "__init__.py",
-    _FRONTEND_ROOT
-    / "env"
-    / "funcov"
-    / "py"
-    / "icache"
-    / "icache_mainpipe_funcov.py",
-    _FRONTEND_ROOT
-    / "env"
-    / "funcov"
-    / "py"
-    / "icache"
-    / "icache_prefetchpipe_funcov.py",
-    _FRONTEND_ROOT
-    / "env"
-    / "funcov"
-    / "py"
-    / "icache"
-    / "icache_missunit_funcov.py",
-    _FRONTEND_ROOT
-    / "env"
-    / "funcov"
-    / "py"
-    / "icache"
-    / "icache_waylookup_funcov.py",
-    _FRONTEND_ROOT
-    / "env"
-    / "funcov"
-    / "py"
-    / "icache"
-    / "icache_hitmiss_funcov.py",
-    _FRONTEND_ROOT / "env" / "funcov" / "py" / "ifu" / "sampler.py",
-)
-
-
 @dataclass(frozen=True)
 class PilotBin:
     bin_id: str
@@ -333,25 +295,9 @@ def _json_sha256(value: Any) -> str:
 
 
 def _current_sampler_sha256() -> str | None:
-    labels = (
-        "functional_coverage.py",
-        "funcov/__init__.py",
-        "funcov/py/ftq/sampler.py",
-        "funcov/py/icache/__init__.py",
-        "funcov/py/icache/icache_mainpipe_funcov.py",
-        "funcov/py/icache/icache_prefetchpipe_funcov.py",
-        "funcov/py/icache/icache_missunit_funcov.py",
-        "funcov/py/icache/icache_waylookup_funcov.py",
-        "funcov/py/icache/icache_hitmiss_funcov.py",
-        "funcov/py/ifu/sampler.py",
-    )
-    hashes = {
-        label: _file_sha256(path)
-        for label, path in zip(labels, _SAMPLER_FILES)
-    }
-    if any(value is None for value in hashes.values()):
+    if any(not path.is_file() for path in funcov_sampler_paths().values()):
         return None
-    return _json_sha256(hashes)
+    return current_funcov_sampler_sha256()
 
 
 def _manifest_value_matches(field: str, recorded: Any, runtime: Any) -> bool:

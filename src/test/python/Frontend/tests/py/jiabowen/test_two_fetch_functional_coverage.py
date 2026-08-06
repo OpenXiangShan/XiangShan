@@ -22,6 +22,26 @@ from env.funcov.py.ftq.sampler import (
     _TWO_FETCH_SIGNALS,
     sample_two_fetch_coverage,
 )
+from env.funcov.py.ftq.checker_funcov import (
+    COVERAGE_GROUPS as CHECKER_COVERAGE_GROUPS,
+    SAMPLER_BIN_KEYS as CHECKER_SAMPLER_BIN_KEYS,
+)
+from env.funcov.py.ftq.ftq_request_funcov import (
+    COVERAGE_GROUPS as REQUEST_COVERAGE_GROUPS,
+    SAMPLER_BIN_KEYS as REQUEST_SAMPLER_BIN_KEYS,
+)
+from env.funcov.py.ftq.ifu_delivery_funcov import (
+    COVERAGE_GROUPS as IFU_DELIVERY_COVERAGE_GROUPS,
+    SAMPLER_BIN_KEYS as IFU_DELIVERY_SAMPLER_BIN_KEYS,
+)
+from env.funcov.py.ftq.mainpipe_funcov import (
+    COVERAGE_GROUPS as MAINPIPE_COVERAGE_GROUPS,
+    SAMPLER_BIN_KEYS as MAINPIPE_SAMPLER_BIN_KEYS,
+)
+from env.funcov.py.ftq.waylookup_funcov import (
+    COVERAGE_GROUPS as WAYLOOKUP_COVERAGE_GROUPS,
+    SAMPLER_BIN_KEYS as WAYLOOKUP_SAMPLER_BIN_KEYS,
+)
 from env.funcov.py.icache import (
     ICACHE_MISSUNIT_SAMPLER_BIN_KEYS,
     ICACHE_MAINPIPE_SAMPLER_BIN_KEYS,
@@ -32,11 +52,14 @@ from env.artifact_provenance import load_frontend_build_manifest, write_frontend
 from env.functional_coverage import (
     FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS,
     FunctionalCoverageRecorder,
+    current_funcov_sampler_sha256,
     default_pilot_csv_path,
+    funcov_sampler_paths,
 )
 from env.pylib import frontend_offset_path
 from tools.backannotate_funcov import (
     PilotBin,
+    _current_sampler_sha256,
     _target_matches,
     backannotate,
     load_artifacts,
@@ -121,46 +144,7 @@ def _eligible_provenance():
         return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
     definitions_sha256 = hashlib.sha256(b"[]").hexdigest()
-    sampler_sha256 = hashlib.sha256(
-        json.dumps(
-            {
-                "functional_coverage.py": file_sha256(frontend_root / "env/functional_coverage.py"),
-                "funcov/__init__.py": file_sha256(frontend_root / "env/funcov/__init__.py"),
-                "funcov/py/ftq/sampler.py": file_sha256(
-                    frontend_root / "env/funcov/py/ftq/sampler.py"
-                ),
-                "funcov/py/icache/__init__.py": file_sha256(
-                    frontend_root / "env/funcov/py/icache/__init__.py"
-                ),
-                "funcov/py/icache/icache_mainpipe_funcov.py": file_sha256(
-                    frontend_root
-                    / "env/funcov/py/icache/icache_mainpipe_funcov.py"
-                ),
-                "funcov/py/icache/icache_prefetchpipe_funcov.py": file_sha256(
-                    frontend_root
-                    / "env/funcov/py/icache/icache_prefetchpipe_funcov.py"
-                ),
-                "funcov/py/icache/icache_missunit_funcov.py": file_sha256(
-                    frontend_root
-                    / "env/funcov/py/icache/icache_missunit_funcov.py"
-                ),
-                "funcov/py/icache/icache_waylookup_funcov.py": file_sha256(
-                    frontend_root
-                    / "env/funcov/py/icache/icache_waylookup_funcov.py"
-                ),
-                "funcov/py/icache/icache_hitmiss_funcov.py": file_sha256(
-                    frontend_root
-                    / "env/funcov/py/icache/icache_hitmiss_funcov.py"
-                ),
-                "funcov/py/ifu/sampler.py": file_sha256(
-                    frontend_root / "env/funcov/py/ifu/sampler.py"
-                ),
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
+    sampler_sha256 = current_funcov_sampler_sha256()
     values = {
         key: "b" * 64
         for key in (
@@ -724,6 +708,51 @@ def test_two_fetch_signal_map_matches_current_frontend_offset():
     assert not [signal for signal in generated if signal not in registered]
 
 
+def test_split_sampler_provenance_uses_the_runtime_file_set():
+    split_modules = {
+        "funcov/py/ftq/two_fetch_funcov.py",
+        "funcov/py/ftq/ftq_request_funcov.py",
+        "funcov/py/ftq/waylookup_funcov.py",
+        "funcov/py/ftq/mainpipe_funcov.py",
+        "funcov/py/ftq/ifu_delivery_funcov.py",
+        "funcov/py/ftq/checker_funcov.py",
+        "funcov/py/ifu/cfvec_funcov.py",
+        "funcov/py/ifu/compact_funcov.py",
+    }
+
+    assert split_modules <= set(funcov_sampler_paths())
+    assert all(path.is_file() for path in funcov_sampler_paths().values())
+    assert _current_sampler_sha256() == current_funcov_sampler_sha256()
+
+
+def test_ftq_split_modules_partition_the_compatibility_sampler_contract():
+    module_groups = (
+        REQUEST_COVERAGE_GROUPS,
+        WAYLOOKUP_COVERAGE_GROUPS,
+        MAINPIPE_COVERAGE_GROUPS,
+        IFU_DELIVERY_COVERAGE_GROUPS,
+        CHECKER_COVERAGE_GROUPS,
+    )
+    module_keys = (
+        REQUEST_SAMPLER_BIN_KEYS,
+        WAYLOOKUP_SAMPLER_BIN_KEYS,
+        MAINPIPE_SAMPLER_BIN_KEYS,
+        IFU_DELIVERY_SAMPLER_BIN_KEYS,
+        CHECKER_SAMPLER_BIN_KEYS,
+    )
+
+    groups: set[str] = set()
+    keys: set[tuple[str, str]] = set()
+    for coverage_groups, sampler_keys in zip(module_groups, module_keys):
+        assert groups.isdisjoint(coverage_groups)
+        assert keys.isdisjoint(sampler_keys)
+        groups.update(coverage_groups)
+        keys.update(sampler_keys)
+
+    assert groups == set(TWO_FETCH_COVERPOINTS)
+    assert keys == set(TWO_FETCH_SAMPLER_BIN_KEYS)
+
+
 def test_two_fetch_backannotation_matches_registry_and_sampler():
     repo_root = _repo_root()
     pilot_path = (
@@ -903,41 +932,7 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
     )
     manifest = load_frontend_build_manifest(source_root, simulator="verilator")
     manifest_path = source_root / "frontend_build_manifest.verilator.json"
-    sampler_sha256 = hashlib.sha256(
-        json.dumps(
-            {
-                "functional_coverage.py": hashlib.sha256(
-                    (frontend_root / "env/functional_coverage.py").read_bytes()
-                ).hexdigest(),
-                "funcov/__init__.py": hashlib.sha256(
-                    (frontend_root / "env/funcov/__init__.py").read_bytes()
-                ).hexdigest(),
-                "funcov/py/icache/__init__.py": hashlib.sha256(
-                    (frontend_root / "env/funcov/py/icache/__init__.py").read_bytes()
-                ).hexdigest(),
-                "funcov/py/icache/icache_mainpipe_funcov.py": hashlib.sha256(
-                    (frontend_root / "env/funcov/py/icache/icache_mainpipe_funcov.py").read_bytes()
-                ).hexdigest(),
-                "funcov/py/icache/icache_prefetchpipe_funcov.py": hashlib.sha256(
-                    (frontend_root / "env/funcov/py/icache/icache_prefetchpipe_funcov.py").read_bytes()
-                ).hexdigest(),
-                "funcov/py/icache/icache_missunit_funcov.py": hashlib.sha256(
-                    (frontend_root / "env/funcov/py/icache/icache_missunit_funcov.py").read_bytes()
-                ).hexdigest(),
-                "funcov/py/icache/icache_waylookup_funcov.py": hashlib.sha256(
-                    (frontend_root / "env/funcov/py/icache/icache_waylookup_funcov.py").read_bytes()
-                ).hexdigest(),
-                "funcov/py/icache/icache_hitmiss_funcov.py": hashlib.sha256(
-                    (frontend_root / "env/funcov/py/icache/icache_hitmiss_funcov.py").read_bytes()
-                ).hexdigest(),
-                "funcov/py/ifu/sampler.py": hashlib.sha256(
-                    (frontend_root / "env/funcov/py/ifu/sampler.py").read_bytes()
-                ).hexdigest(),
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
+    sampler_sha256 = current_funcov_sampler_sha256()
     (run_root / "waveforms").mkdir(parents=True, exist_ok=True)
     waveform_path = run_root / "waveforms" / "case.fst"
     waveform_path.write_bytes(b"fst")
