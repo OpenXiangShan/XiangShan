@@ -116,7 +116,7 @@ class WriteBuffer[T <: WriteReqBundle](
   // and flush overrides both at the end of the next-state calculation.
   for (rowIdx <- 0 until numPorts) {
     val drainIdx = PriorityEncoder(dirty(rowIdx))
-    when(io.read(rowIdx).ready && dirty(rowIdx).reduce(_ || _)) {
+    when(io.read(rowIdx).fire) {
       nextDirty(rowIdx)(drainIdx) := false.B
     }
   }
