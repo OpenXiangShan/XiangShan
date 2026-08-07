@@ -111,6 +111,8 @@ Condition 只描述如何构成场景，Checkpoint 只描述如何证明结果�
 
 一个 testcase 可以覆盖多个叶子，但每个叶子必须有一个主责任 testcase。testcase 必须显式列出目标 TP_ID/Bin_ID，不能依赖运行后偶然命中解释覆盖意图。Python directed test 使用 `@pytest.mark.funcov_bins(...)` / `funcov_tps(...)`；通用 bin-trace testcase 由 registry 中 `建议试点用例` 与汇编/bin stem 的精确匹配生成目标，必要时通过 `TB_FUNCOV_TARGET_BINS` 显式覆盖。
 
+对已知 Bin_ID/TP_ID 范围的 run，artifact 必须记录 `coverage_targets`；Python directed testcase 通过上述 marker 声明，或通过 `TB_FUNCOV_TARGET_BINS`、`TB_FUNCOV_TARGET_TP_IDS`、`TB_FUNCOV_TARGET_TESTCASES` 显式声明。通用 bin-trace 可以不声明 `bin_ids`，不得仅根据 bin 文件名推断 coverage 所有权；一旦声明目标，未知 Bin_ID 或 testcase 名必须使 run 失败。不得专门构造一个只为命中 coverpoint、却不验证真实功能语义的 directed testcase。
+
 标准场景由两部分共同构成：
 
 1. 汇编指令 pattern：RVI/RVC、分支、跳转、页边界、fetch block 边界和目标地址布局。
@@ -152,8 +154,19 @@ coverage registry 定义 `Bin_ID -> Coverage_Group -> Coverpoint -> Bin_Name`，
 - reset、redirect、flush 和 recovery 后按真实寄存时序 gating。
 - 不得用缺失信号的默认值制造 hit 或永久 unhit。
 - sampler 必须保存首次命中 cycle 和关键事务 evidence。
+- `bins` 按需独立记账的可观察场景划分；单 bin coverpoint 合法，不得为形式完整加入补集或占位 bin。
+- event encoding 只用于天然互斥的类别。独立并发条件必须使用独立 coverpoint 或 bin，不得因 `if`/`else if` 优先级丢失低优先级观察。
+- 优先使用直接、可读的 coverpoint predicate；不得仅为减少 coverpoint 数量引入难以审查的 `always_comb` event selector。
 
 模型单测负责证明 predicate、状态机和边界判定可执行；生成 DUT 的 signal contract 测试负责证明采样信号存在；真实 DUT testcase 负责证明场景可达。
+
+### 7.1 Condition 可观察性与跨周期关联
+
+- 统计和审查测试点时使用 `csv.reader` 读取逻辑记录。物理行号只用于定位文件位置；只有层级末端且同时具有 `Condition`、`Checkpoint`、`Object` 的记录才计为可执行叶子，不能把标题行或继承行计入分母。
+- 在标记 `MODELED` 前，将 `Condition` 的每个必要子条件逐项映射到当前选定 simulator 的 DUT object、generated RTL 或 signal contract。源 RTL 中存在、但当前生成 DUT package/bind 未暴露的信号，不得用同名猜测、默认值或旁路信号替代；应保持 `UNMAPPED` 或 `BLOCKED`，并记录具体缺失接口。
+- Coverpoint/bin 只证明场景的触发条件和输入状态。`cfVec` 结果、异常交付、flush 后清空、恢复后取指正确性等属于 `Checkpoint`，必须交给 checker、assertion、scoreboard 或 trace 对比；不能用结果信号反推未观察到的触发原因。
+- 跨周期场景必须保存并匹配最小充分的事务身份，例如 requestor/source、FTQ pointer 与 offset、VPN 或 transaction tag，再将 response、fault 或 redirect 归属于同一事务。全局 pending bit、任意下一次 `valid` response 或仅凭相邻周期不能证明事务关联。
+- 将 `PARTIAL` 或 `UNMAPPED` 时，说明缺失的是哪一个 Condition 信号、时序关系或事务身份；不要把尚未证明的 Checkpoint 当作模型缺口。Condition 建模完成但尚无真实 DUT 命中时应为 `MODELED`，只有同一版本、同一 run 的完整证据才能升级为 `HIT`。
 
 ## 8. 覆盖率口径
 

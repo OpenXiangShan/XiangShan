@@ -27,13 +27,9 @@ tree. Start here unless the task explicitly says otherwise.
   fixtures.
 - `src/test/python/Frontend/env/nemu_trace_pipeline.py`: NEMU trace generation
   helpers used by the API layer.
-- `src/test/python/Frontend/env/functional_coverage.py`: functional coverage
-  recorder and pilot-csv integration.
-- `src/test/python/Frontend/env/funcov/__init__.py`,
-  `src/test/python/Frontend/env/funcov/icache_funcov/__init__.py`, and
-  `src/test/python/Frontend/env/funcov/icache_funcov/icache_*_funcov.py`:
-  module-level predicates in the only active recorder/sampler chain. Keep
-  each group/point/bin aligned with the canonical registry.
+- `src/test/python/Frontend/docs/03_funcov_model/skills.md`: the sole
+  functional-coverage modeling, testcase-targeting, artifact, and
+  back-annotation methodology.
 - `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh`: standard
   single-case bin-trace entry that now auto-creates `TB_RUN_ID` /
   `TB_ARTIFACT_DIR` and routes waveform, coverage, funcov, and case-log
@@ -93,16 +89,6 @@ interface. If a signal is not present on the current DUT object or in the
 generated `Frontend_top.sv` / `signals.json`, remove it from the bundle or
 treat it as intentionally optional; do not keep historical or guessed signal
 names in the active env contract.
-
-Functional-coverage artifacts must carry explicit `coverage_targets` when the
-run is being generated for a known Bin_ID/TP_ID scope. Back-annotation should
-prefer those targets over artifact-tag substring matching, which remains only
-for historical compatibility.
-Python directed tests declare targets with `funcov_bins` / `funcov_tps`
-markers. Generic bin-trace runs do not infer coverage ownership from the bin
-filename. Registry validation applies only when coverage targets are declared
-explicitly through those markers or `TB_FUNCOV_TARGET_BINS`,
-`TB_FUNCOV_TARGET_TP_IDS`, or `TB_FUNCOV_TARGET_TESTCASES`.
 
 The current Frontend package intentionally has two layers:
 
@@ -216,11 +202,6 @@ that boundary stable.
 - For each verification alignment, record the exact `frontend-bt` commit and the
   corresponding `design_baseline_sha` from the `kunminghu-v3` merge already present in
   that commit. Do not independently synchronize from `kunminghu-v3`.
-- Count executable testpoint leaves at any hierarchy depth when `Condition`, `Checkpoint`,
-  and `Object` are present; hierarchy headings without those fields are not leaves.
-  Report `UNMAPPED`, `MODELED`, `PARTIAL`, `HIT`, and human-accepted `CLOSED` separately.
-- Use only provenance-compatible functional/code coverage artifacts for current results.
-  Keep generated run data and the local NEMU under `ready-to-run` out of commits.
 - Before changing backend-agent semantics or related logic, run
   `docs/agents/frontend-backend-agent.md` section `实现一致性最小检查项`
   in order: `必须项` first, then `建议项`.
@@ -228,20 +209,6 @@ that boundary stable.
   every signal name against the current DUT object and generated artifacts
   first. Required signals should fail fast when absent; signals not present on
   the DUT should not remain in the active contract.
-- For SystemVerilog funcov, choose the number of `bins` from the distinct
-  observable scenarios that need separate coverage accounting. A coverpoint may
-  legitimately have one bin; do not add complement or placeholder bins merely
-  to make every coverpoint multi-bin. Multiple testpoints may instead map to
-  distinct bins of one coverpoint when they share the same sampled dimension.
-- Use event encoding only when its categories are inherently mutually
-  exclusive. Do not collapse independently concurrent conditions into an
-  `if`/`else if` event selector, because lower-priority observations are then
-  silently lost. Sample such conditions with separate coverpoints, including
-  single-bin coverpoints when each condition has one meaningful hit.
-- Prefer direct, readable coverpoint predicates over derived event encodings.
-  Do not introduce an `always_comb` event selector merely to reduce the number
-  of coverpoints; compactness is not a goal when it obscures the sampled
-  condition.
 - After changing code, rerun the relevant tests before giving a conclusion. If
   you have not rerun the relevant tests yet, say that explicitly and do not
   present the result as a validated conclusion.
@@ -565,22 +532,8 @@ stem and pytest case name, for example `<case>_test_bin_trace.fst` and
 Do not write new evidence to the old date directories or the global
 `data/funcov/` directory. Those locations contain historical artifacts only.
 
-Each DUT run records `coverage_targets`, but `bin_ids` may be empty for a generic
-bin-trace run. A bin filename does not need to resolve to an active registry
-row. Explicit coverage targets remain strict: unknown Bin_IDs or testcase names
-must stop the run. Binary and trace paths and hashes remain in run provenance,
-independent of registry ownership.
 Monitor/checker redirect-recovery errors are real failures and must not be
-filtered out by a legacy helper. Positive bin hits from a failed run, an old
-schema, or a build without a valid manifest remain diagnostic evidence only.
-The back-annotation gate also verifies that the declared waveform, raw `.dat`,
-case log, and funcov paths are regular files under the same artifact root.
-Waveform, `.dat`, and funcov files must be non-empty; a path string alone is
-not evidence. It recomputes the current canonical registry and sampler hashes,
-and the artifact's definitions hash, so evidence from an older coverage model
-cannot be promoted against the current test-point table. Recorded testcase,
-assembly (when present), binary, and golden-trace hashes are also recomputed
-from their declared files; missing or changed inputs invalidate the evidence.
+filtered out by a legacy helper.
 
 `src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace` is a
 run-to-completion entrypoint. Do not use it as a load-only or partial-step
@@ -722,21 +675,10 @@ make frontend -j
   Do not waive SRAM files by default. Override with `TB_LINE_COVERAGE_IGNORE=...`
   or `TB_LINE_COVERAGE_OMIT=...`; disable reporter registration with
   `TB_ENABLE_TOFFEE_LINE_COVERAGE=0` for debugging.
-- Update the canonical coverage registry,
-  `src/test/python/Frontend/env/funcov/__init__.py`, the relevant
-  `src/test/python/Frontend/env/funcov/icache_funcov/__init__.py`, and the
-  relevant `src/test/python/Frontend/env/funcov/icache_funcov/*_funcov.py`
-  module together when introducing functional coverage. Do not add a
-  parallel toffee or SV functional coverage sampler.
 - Do not commit transient logs, generated waveforms, or other temporary
   artifacts unless they are intentional fixtures.
 
 ### Frontend Testcase Design
-
-Functional coverage must follow meaningful functional scenarios; do not
-construct a directed testcase solely to hit a coverpoint. Declare targets only
-when a run intentionally owns that registry scope. Generic binaries may still
-produce diagnostic coverage hits without claiming registry ownership.
 
 Keep frontend testcase design centered on controllable instruction flow rather
 than host-side test scaffolding.
