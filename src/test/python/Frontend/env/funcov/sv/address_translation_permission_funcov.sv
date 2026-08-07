@@ -317,6 +317,9 @@ module frontend_atp_remaining_funcov (
   input logic [49:0]   itlb_req_vaddr,
   input logic          itlb_resp_miss,
   input logic [1:0]    itlb_resp_pbmt,
+  input logic          itlb_resp_pf_instr,
+  input logic          itlb_resp_af_instr,
+  input logic          itlb_resp_gpf_instr,
   input logic          ptw_req_valid,
   input logic          ptw_req_ready,
   input logic [37:0]   ptw_req_vpn,
@@ -357,7 +360,9 @@ module frontend_atp_remaining_funcov (
   input logic [63:0]   pma_cfg_a,
   input logic [31:0]   pma_cfg_x,
   input logic [1471:0] pma_addr,
-  input logic [1535:0] pma_mask
+  input logic [1535:0] pma_mask,
+  input logic          pmp_checker_0_x,
+  input logic          pmp_checker_1_x
 );
 
   localparam logic [1:0] NO_STAGE    = 2'b00;
@@ -512,6 +517,8 @@ module frontend_atp_remaining_funcov (
 
   wire ptw_req_fire = ptw_req_valid && ptw_req_ready;
   wire fetch_sample = itlb_req_valid && !itlb_resp_miss;
+  wire atp_no_translation_fault = !(itlb_resp_pf_instr ||
+    itlb_resp_af_instr || itlb_resp_gpf_instr);
   wire [37:0] itlb_req_vpn = itlb_req_vaddr[49:12];
   wire pmp_pma_allow_0 = pmp_sel_0_valid && pma_sel_0_valid &&
     pmp_sel_0_x && pma_sel_0_x;
@@ -523,6 +530,19 @@ module frontend_atp_remaining_funcov (
     ATTR_BAD;
   wire current_attr_valid = fetch_sample && pmp_pma_allow_0 &&
     (current_attr != ATTR_BAD);
+  wire [9:0] ptw_translation_signature = {
+    ptw_resp_s1_v,
+    ptw_resp_s1_pbmt,
+    ptw_resp_s2_pbmt,
+    ptw_resp_s1_perm_x,
+    ptw_resp_s1_perm_a,
+    ptw_resp_s1_perm_u,
+    ptw_resp_s2_perm_x,
+    ptw_resp_s2_perm_a
+  };
+  wire atp_tlb_csr_changed = io_tlbCsr_satp_changed ||
+    io_tlbCsr_vsatp_changed || io_tlbCsr_hgatp_changed ||
+    io_tlbCsr_priv_virt_changed;
 
   logic atp_ptw_inflight;
   logic [37:0] atp_inflight_vpn;
@@ -542,9 +562,18 @@ module frontend_atp_remaining_funcov (
   logic atp_last_attr_valid;
   logic [37:0] atp_last_attr_vpn;
   logic [1:0] atp_last_attr;
+  logic atp_last_translation_valid;
+  logic [37:0] atp_last_translation_vpn;
+  logic [9:0] atp_last_translation_signature;
   logic atp_sfence_attr_pending;
   logic [37:0] atp_sfence_attr_vpn;
   logic [1:0] atp_sfence_old_attr;
+  logic atp_sfence_translation_pending;
+  logic [37:0] atp_sfence_translation_vpn;
+  logic [9:0] atp_sfence_old_translation_signature;
+  logic atp_csr_translation_pending;
+  logic [37:0] atp_csr_translation_vpn;
+  logic [9:0] atp_csr_old_translation_signature;
   logic atp_redirect_pending;
   logic [1:0] atp_redirect_old_attr;
   logic [2:0] atp_sfence_attr_transition;
@@ -575,9 +604,18 @@ module frontend_atp_remaining_funcov (
       atp_last_attr_valid <= 1'b0;
       atp_last_attr_vpn <= '0;
       atp_last_attr <= ATTR_BAD;
+      atp_last_translation_valid <= 1'b0;
+      atp_last_translation_vpn <= '0;
+      atp_last_translation_signature <= '0;
       atp_sfence_attr_pending <= 1'b0;
       atp_sfence_attr_vpn <= '0;
       atp_sfence_old_attr <= ATTR_BAD;
+      atp_sfence_translation_pending <= 1'b0;
+      atp_sfence_translation_vpn <= '0;
+      atp_sfence_old_translation_signature <= '0;
+      atp_csr_translation_pending <= 1'b0;
+      atp_csr_translation_vpn <= '0;
+      atp_csr_old_translation_signature <= '0;
       atp_redirect_pending <= 1'b0;
       atp_redirect_old_attr <= ATTR_BAD;
     end else begin
@@ -600,6 +638,15 @@ module frontend_atp_remaining_funcov (
         atp_refill_vsatp_asid <= io_tlbCsr_vsatp_asid;
         atp_refill_hgatp_vmid <= io_tlbCsr_hgatp_vmid;
         atp_refill_priv_virt <= io_tlbCsr_priv_virt;
+        atp_last_translation_valid <= 1'b1;
+        atp_last_translation_vpn <= atp_inflight_vpn;
+        atp_last_translation_signature <= ptw_translation_signature;
+        if (atp_sfence_translation_pending &&
+            atp_inflight_vpn == atp_sfence_translation_vpn)
+          atp_sfence_translation_pending <= 1'b0;
+        if (atp_csr_translation_pending &&
+            atp_inflight_vpn == atp_csr_translation_vpn)
+          atp_csr_translation_pending <= 1'b0;
       end
       if (current_attr_valid) begin
         atp_last_attr_valid <= 1'b1;
@@ -615,6 +662,17 @@ module frontend_atp_remaining_funcov (
         atp_sfence_attr_pending <= 1'b1;
         atp_sfence_attr_vpn <= atp_last_attr_vpn;
         atp_sfence_old_attr <= atp_last_attr;
+      end
+      if (sfence_valid && atp_last_translation_valid &&
+          (sfence_rs1 || sfence_addr[49:12] == atp_last_translation_vpn)) begin
+        atp_sfence_translation_pending <= 1'b1;
+        atp_sfence_translation_vpn <= atp_last_translation_vpn;
+        atp_sfence_old_translation_signature <= atp_last_translation_signature;
+      end
+      if (atp_tlb_csr_changed && atp_last_translation_valid) begin
+        atp_csr_translation_pending <= 1'b1;
+        atp_csr_translation_vpn <= atp_last_translation_vpn;
+        atp_csr_old_translation_signature <= atp_last_translation_signature;
       end
       if (redirect_valid && atp_last_attr_valid) begin
         atp_redirect_pending <= 1'b1;
@@ -669,6 +727,14 @@ module frontend_atp_remaining_funcov (
   wire atp_sfence_attr_nc_to_mmio = current_attr_valid &&
     atp_sfence_attr_pending && itlb_req_vpn == atp_sfence_attr_vpn &&
     atp_sfence_old_attr == ATTR_NC && current_attr == ATTR_MMIO;
+  wire atp_sfence_translation_changed = ptw_resp_valid &&
+    atp_sfence_translation_pending &&
+    atp_inflight_vpn == atp_sfence_translation_vpn &&
+    ptw_translation_signature != atp_sfence_old_translation_signature;
+  wire atp_tlb_csr_translation_changed = ptw_resp_valid &&
+    atp_csr_translation_pending &&
+    atp_inflight_vpn == atp_csr_translation_vpn &&
+    ptw_translation_signature != atp_csr_old_translation_signature;
 
   wire atp_pmp_pma_execute_allow = fetch_sample && pmp_sel_0_valid &&
     pma_sel_0_valid && pmp_sel_0_x && pma_sel_0_x;
@@ -701,6 +767,36 @@ module frontend_atp_remaining_funcov (
     pmp_sel_0_x && pmp_addr_0 > pmp_sel_0_lower &&
     pmp_addr_0 < pmp_sel_0_upper;
   wire atp_pmp_overlap_low_index = fetch_sample && pmp_match_count_0 > 1;
+
+  // Permission-source observations are sampled from the request-side
+  // PMP/PMA decisions only.  They intentionally do not depend on the
+  // eventual frontend exception/cfVec result.
+  wire atp_pmp0_allow = pmp_checker_0_x;
+  wire atp_pmp1_allow = pmp_checker_1_x;
+  wire atp_pma0_allow = pma_sel_0_valid && pma_sel_0_x;
+  wire atp_pma1_allow = pma_sel_1_valid && pma_sel_1_x;
+  wire atp_cacheable_request = fetch_sample && itlb_resp_pbmt == PBMT_PMA &&
+    pma_sel_0_valid && pma_sel_0_c;
+  wire atp_uncache_request = fetch_sample &&
+    (itlb_resp_pbmt == PBMT_NC || itlb_resp_pbmt == PBMT_IO);
+  wire atp_cacheable_pmp_only_deny = atp_cacheable_request && atp_no_translation_fault &&
+    ((!atp_pmp0_allow && atp_pma0_allow) ||
+     (!atp_pmp1_allow && atp_pma1_allow));
+  wire atp_cacheable_pma_only_deny = atp_cacheable_request && atp_no_translation_fault &&
+    ((atp_pmp0_allow && !atp_pma0_allow) ||
+     (atp_pmp1_allow && !atp_pma1_allow));
+  wire atp_cacheable_both_deny = atp_cacheable_request && atp_no_translation_fault &&
+    ((!atp_pmp0_allow && !atp_pma0_allow) ||
+     (!atp_pmp1_allow && !atp_pma1_allow));
+  wire atp_uncache_pmp_only_deny = atp_uncache_request && atp_no_translation_fault &&
+    ((!atp_pmp0_allow && atp_pma0_allow) ||
+     (!atp_pmp1_allow && atp_pma1_allow));
+  wire atp_uncache_pma_only_deny = atp_uncache_request && atp_no_translation_fault &&
+    ((atp_pmp0_allow && !atp_pma0_allow) ||
+     (atp_pmp1_allow && !atp_pma1_allow));
+  wire atp_uncache_both_deny = atp_uncache_request && atp_no_translation_fault &&
+    ((!atp_pmp0_allow && !atp_pma0_allow) ||
+     (!atp_pmp1_allow && !atp_pma1_allow));
 
   wire atp_cross_pma_same_attr = fetch_sample && pmp_addr_0 != pmp_addr_1 &&
     pma_sel_0_valid && pma_sel_1_valid && pma_sel_0_idx != pma_sel_1_idx &&
@@ -999,6 +1095,14 @@ module frontend_atp_remaining_funcov (
       bins nc_to_cache = {3'd5};
       bins nc_to_mmio = {3'd6};
     }
+    ATP_sfence_translation_changed_cp:
+      coverpoint atp_sfence_translation_changed iff (!reset) {
+        bins observed = {1'b1};
+      }
+    ATP_tlb_csr_translation_changed_cp:
+      coverpoint atp_tlb_csr_translation_changed iff (!reset) {
+        bins observed = {1'b1};
+      }
     ATP_execute_permission_cp:
       coverpoint {
         atp_pmp_pma_execute_allow || atp_pmp_or_pma_execute_deny,
@@ -1006,6 +1110,24 @@ module frontend_atp_remaining_funcov (
       } iff (!reset) {
         bins allow = {2'b11};
         bins deny = {2'b10};
+    }
+    ATP_cacheable_pmp_only_deny_cp: coverpoint atp_cacheable_pmp_only_deny iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_cacheable_pma_only_deny_cp: coverpoint atp_cacheable_pma_only_deny iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_cacheable_pmp_pma_both_deny_cp: coverpoint atp_cacheable_both_deny iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_uncache_pmp_only_deny_cp: coverpoint atp_uncache_pmp_only_deny iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_uncache_pma_only_deny_cp: coverpoint atp_uncache_pma_only_deny iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_uncache_pmp_pma_both_deny_cp: coverpoint atp_uncache_both_deny iff (!reset) {
+      bins observed = {1'b1};
     }
     ATP_pmp_lock_mode_cp: coverpoint atp_pmp_lock_mode iff (!reset) {
       bins locked_m_allow = {3'd1};
