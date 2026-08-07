@@ -45,6 +45,7 @@ import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.tile.XLen
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.HeterogeneousBag
+import freechips.rocketchip.util.AsyncResetSynchronizerShiftReg
 //import org.chipsalliance.cde.config.{Config, Parameters}
 import org.chipsalliance.cde.config._
 import sifive.enterprise.firrtl.NestedPrefixModulesAnnotation
@@ -1170,7 +1171,9 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       s"dm.int entries must each contain exactly one interrupt bit")
     val dmintGlobal = Cat(dmintSrc.reverse.map(_.head.asUInt).toSeq)
     val hartResetReqLocal = dm.module.io.resetCtrl.hartResetReq.map(_.asUInt).getOrElse(0.U(totalHartCount.W))
-    val hartIsInResetExternal = dmio.resetCtrl.hartIsInReset.asUInt
+    val hartIsInResetExternal = VecInit(dmio.resetCtrl.hartIsInReset.map { hartInReset =>
+      AsyncResetSynchronizerShiftReg(hartInReset, 3, 0)
+    }).asUInt
 
     u_dm_axi2w.io.axi <> dmWcrsIn
     u_dm_w2axi.io.axi <> dmWcrsOut

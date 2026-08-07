@@ -177,7 +177,7 @@ class apic_aplic_top(params: AplicParams) extends BlackBox {
     val i_aplic_msi_bresp    = Input(UInt(2.W))                   // 1:0
     val i_aplic_msi_bvalid   = Input(Bool())                      // 单bit
     val i_aplic_msi_wready   = Input(Bool())                      // 单bit
-    val i_aplic_wire_int_vld = Input(UInt(params.NumIntSrcs.W)) // 255:0
+    val i_aplic_wire_int_vld = Input(UInt(params.NumIntSrcs.W)) // 511:0
     val i_dft_icg_scan_en    = Input(Bool())                      // 单bit
 
     // 输出信号
