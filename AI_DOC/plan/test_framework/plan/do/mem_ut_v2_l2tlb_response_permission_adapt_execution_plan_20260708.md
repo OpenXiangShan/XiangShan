@@ -31,6 +31,20 @@
   `mem_ut_test_framework_todo_20260614.md` 的 L2TLB S1/S2 权限专项。
 - DUT response 正确性 checker、RM 或 covergroup。
 
+### 1.1 Payload 文档权威交接（2026-08-06）
+
+本 plan 已归档，继续保留已落地的 request token、pending queue、latency/reorder、response sample、
+flush/reset 和 lifecycle owner 的历史实现说明。它不再定义后续 response payload 的 coding 规则。
+
+`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`
+是 S1/S2 response data model 的唯一权威，覆盖字段命名、fault、PPN、permission、PBMT、sector payload、
+snapshot copy 和 driver 映射。本 plan 中所有“共享 `entry.pte_*` 同时填 S1/S2”及由此派生的 response
+payload 描述仅保留为归档历史，不能作为新 coding 的实现依据。
+
+执行该 random payload 专项时，coding 只需遵循对应 `undo` plan 和当前落点源码，不需要回读本 `do` plan。
+本 `do` plan 不要求重做或改写既有 lifecycle；新 payload 代码只保持当前已实现 lifecycle 的外部时序不变，
+不得据本归档文档重新引入共享 payload 字段或第二套 payload 规则。
+
 主要 coding 文件：
 
 ```text
@@ -668,6 +682,14 @@ sequence 的 pending/driving 状态。reset 边界读取一次 latest snapshot �
 `request_token` 也不在 DUT reset 时回退，保证同一 sequence 生命周期内不复用动态请求 token。
 
 ### 8.2 Flush 处理
+
+> **归档后时序修正注记（2026-08-05）：** 本节以下保留的是 2026-07-23 已归档实现的历史记录，
+> 其中“顶层 monitor 观察到 flush 后立即删除 `pending_q`”及“同拍 fire 直接记为
+> `flush-killed`”已经被证实早于 V2 `PTWNewFilter` 的实际清空边界，不能再作为当前实现依据。
+> 后续 coding 必须以
+> `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`
+> 为准：C0 只记录 event 并关闭后续 ready，C0 的真实 request fire 正常建 token；C4 先确认已经
+> 驱动的 response，再取消仍 pending 的旧 token。`sfence.bits.flushPipe` 不得作为 token 取消条件。
 
 `handle_l2tlb_flush_event()`：
 

@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，待 coding、文档同步和 implementation review |
+| 状态 | coding、文档同步、专项验证和归档前复核已完成；本次从 `undo` 归档到 `do` |
 | 目标版本 | V2，分支 `mem_ut_uvm_v2` |
 | DUT 端口 | `io_ooo_to_mem_isStoreException` |
 | 主要 owner | `lsqcommit_agent_agent`、`lsq_commit_handler` |
@@ -322,3 +322,21 @@ driver 在无 item 期间保持。该新增功能只影响异常地址来源选�
 - 原因：复用主flow的唯一recovery owner，避免soft smoke直接删除`exception_event_q`或伪造runtime drain完成。
 - 影响范围：仅fault smoke的测试构造和说明文档；不修改fault判定、status写入、ROB commit、LQ/SQ deq、
   pass/fail、terminal或global stop逻辑。
+
+## 10. 完成与归档结论（2026-08-06）
+
+本专项对应的源码、flow/analysis 文档和 implementation review 均已完成。归档前复核确认：
+
+- `vecissue_agent_agent` 及其 connect 中没有 `isStoreException` 残留；`lsqcommit_agent_agent` 是该 DUT input
+  的唯一 interface/xaction/driver/monitor/connect owner。
+- `fault_uid_is_store_exception()` 只从 fault UID 的权威 operation behavior 派生类型；normal
+  `pendingst/pendingMMIOld/scommit` 不会覆盖该 fault sideband。
+- handler 在 fault token 成功建立后才更新 `latched_is_store_exception`；driver 的 active idle/no-item/pre-gap/
+  post-gap 路径保持缓存值，reset 后安全驱动 0。
+- 既有 software fault smoke 已覆盖 load fault 为 0、scalar store fault 为 1、fault waiting/terminal 保持和
+  case reset；STA 场景复用既有 IQ-hit 前置与 recovery event owner。
+- 历史专项验证和 real smoke 验证记录见关联 implementation review 第 9 节；本次仅完成归档性文档复核，
+  未重新修改功能源码或重复运行仿真。
+
+本 agent 归档前复核未发现 P0-P3 blocker，结论为 `FINAL PASS`。本 plan 的边界保持不变：它不实现
+DUT exception address checker、RM/scoreboard、vector LS 或完整 core ROB readback/reset 建模。

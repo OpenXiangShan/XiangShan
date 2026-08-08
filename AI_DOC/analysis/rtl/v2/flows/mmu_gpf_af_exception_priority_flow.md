@@ -6,9 +6,9 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `f3bdd04b3763147e714a786d078e0cb90460a31d` |
+| 核验 commit | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` |
 | 权威源码 | `src/main/scala/xiangshan/cache/mmu/{MMUBundle.scala,MMUConst.scala,PageTableCache.scala,PageTableWalker.scala,L2TLB.scala,TLB.scala}`；`src/main/scala/xiangshan/mem/pipeline/{LoadUnit.scala,StoreUnit.scala,HybridUnit.scala}`；`src/main/scala/xiangshan/frontend/FrontendBundle.scala`；`src/main/scala/xiangshan/backend/fu/CSR.scala` |
-| 最后核验日期 | `2026-07-29` |
+| 最后核验日期 | `2026-08-04` |
 
 ## Flow 范围
 
@@ -23,6 +23,8 @@
    回填/替换、失效以及命中后的 walker 起点。
 6. L2TLB response 的 `s1.pf/s1.af/s2.gpf/s2.gaf` 独立来源、最终异常收敛，以及每个 stage 的
    `level` 对 `PPN` 补齐和两阶段地址合成的直接作用。
+7. S2 response 的 `g_perm` bundle 中哪些字段实际参与 G-stage permission，及其 `.g` 位是否具有
+   global、hit 或 fence 效果。
 
 入口是 TLB request，出口是 `TlbResp.excp` 或写回 ROB 的异常向量。本文只核验 V2，
 不把 V3 的 MMU 行为套用到 V2。
@@ -422,6 +424,27 @@ PTW 已报告 `af`，得到的物理翻译不可信，RTL 通过 `!af` 抑制 PF
 3. S1 已产生 PF 或 A/D update（`hasPf=1`）；
 4. 请求只做 S1/no-S2 翻译，此时 `s2_valid=0`，本来就不产生 GPF。
 
+#### 3.1 S2 `entries.g_perm.g` 的存储与无功能消费者边界
+
+`TlbSectorEntry` 确实包含完整的 `entries.g_perm: TlbPermBundle`，并由
+`TlbSectorEntry.applyS2(item.s2)` 从 S2 `HptwResp.entry.perm` 复制。local TLB hit 后，该 bundle
+也会被传给 `TLB.perm_check()`；因此“字段存在”与“字段未用”必须分开理解。
+
+| 字段组 | 是否被 `perm_check()` 读取 | 实际作用 |
+|---|---|---|
+| `g_perm.af` | 是 | `onlyStage2/allStage` 的最终 AF 候选。 |
+| `g_perm.pf`、`a`、`d`、`r`、`w`、`x` | 是 | 生成 GPF、S2 A/D update 或 load/store/instruction permission fail。 |
+| `g_perm.g` | 否 | 不参与 local TLB hit、ASID/VMID/global 匹配、S2 permission、SFENCE.VMA、HFENCE.VVMA 或 HFENCE.GVMA。 |
+| `g_perm.u`、`g_perm.v` | 否 | 当前 `TLB.perm_check()` 没有读取；不形成本地权限或 fence 行为。 |
+
+`TlbSectorEntry.hit()` 与三个 fence 分支若需要 global 语义，只读取 `entries.perm.g`，即 S1/VS
+字段；没有 `entries.g_perm.g` 的引用。对于 G-stage page-table cache，`PtwEntry.refill()` 和
+`PtwEntries.genEntries()` 在 `onlyStage2` 时还明确把缓存 PTE 的 `.g` 清成 0，源码注释说明 G-stage
+PTE 的 `g` 应由硬件忽略。直接 HPTW response 的 `HptwResp.apply()` 会保留 raw PTE `.g`（除非
+`gaf` 使整个 payload 清零），所以 `entries.g_perm.g` 在 direct response 路径可能仍带原值；但该原值
+只会作为 aggregate payload 被传递或被 difftest/raw debug 观察，当前 V2 的本地翻译、权限和 fence 行为
+不会因其为 0 或 1 改变。
+
 高位预检查分支 `TLB.scala:144-229` 也采用互斥结构：翻译开启时写 `prepf/pregpf`，否则写
 `preaf`；不会把高位 GPF 与高位 AF 合成同一响应。
 
@@ -597,6 +620,8 @@ AF 优先路径。若 testcase 要验证这些真实边界，模型需要提供�
 
 - [DTLB-L2TLB 多请求与 Response 次序 Flow](dtlb_l2tlb_request_response_ordering_flow.md)：请求、
   response 多 outstanding 与 S1/S2 payload 来源。
+- [Memory flushPipe flow](memory_flush_pipe_flow.md)：local DTLB 对 S1 `PTE.G` 的 SFENCE/HFENCE
+  匹配，以及 S2 `g_perm.g` 不参与 fence 的边界。
 - [Memory PMP/PMA 权限检查 flow](memory_pmp_pma_permission_flow.md)：物理 PMP/PMA 响应的产生和
   下游 AF 属性边界。
 - [V2 L2TLB agent 接口知识](../../../interface/v2/agents/l2tlb_agent.md)：`s2.gpf/gaf` 及 response
@@ -658,6 +683,12 @@ AF 优先路径。若 testcase 要验证这些真实边界，模型需要提供�
 - `src/main/scala/xiangshan/cache/mmu/MMUBundle.scala:270-379`：all-stage 正常与异常 refill 的
   level/PPN 组合规则。
 - `src/main/scala/xiangshan/cache/mmu/TLB.scala:144-229,416-505`：高位预检查与最终 `perm_check()` 互斥条件。
+- `src/main/scala/xiangshan/cache/mmu/TLBStorage.scala:100-166,187-276`：local TLB 对 S1 `perm.g` 的
+  hit/fence 使用、S2 `g_perm` 的保存与转发，以及不存在 `g_perm.g` fence 消费者。
+- `src/main/scala/xiangshan/cache/mmu/MMUBundle.scala:98-112,289-379,1166-1185,941-956,1034-1057`：
+  `applyS2()`/`HptwResp.apply()` 的 S2 permission 复制、direct response raw `.g` 保留，以及
+  `onlyStage2` PtwCache refill 对 `.g` 的清零。
+- `src/main/scala/xiangshan/cache/mmu/L2TLB.scala:568-589`：difftest 可以观测原始 S2 `perm` payload。
 - `src/main/scala/xiangshan/frontend/FrontendBundle.scala:123-155,177-205`：ITLB fault at-most-one-hot
   与异常 merge。
 - `src/main/scala/xiangshan/mem/pipeline/LoadUnit.scala:1206-1228`、`StoreUnit.scala:469-497`：下游
@@ -676,6 +707,7 @@ AF 优先路径。若 testcase 要验证这些真实边界，模型需要提供�
 | 2026-07-29 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 旧文档只描述最终 GPF/AF 收敛，未展开 L2TLB response 的四个 fault 字段与 S1/S2 PPN 合成 | 明确 S1 PF/AF、S2 GPF/GAF 的 stage-local producer/优先级，说明 all-stage 先 S1 再 S2 的 PPN 合成、`min(level)` 的正常 leaf 边界和异常回填特例 | 用户要求结合 Scala 解释 L2TLB 回复 fault、level 与 PPN 的依赖 | V2 PTW/HPTW/L2TLB/L1 TLB 与 mem_ut L2TLB response 模型 |
 | 2026-07-29 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 前述“stage-local 字段可独立携带”未明确正常 producer 是否允许 S1 AF 与 S2 GAF 双高 | 明确同一路 PTW/HPTW 中 `s2.gaf -> hptw_accessFault -> guestFault -> !s1.af`；双高只能作为主动接口压力注入，不能标记为 Scala-faithful response | 用户追问 GAF 与 AF 是否可同时拉高 | V2 PTW/HPTW/LLPTW、L2TLB response 随机约束 |
 | 2026-07-29 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 将 L1 TLB 最终异常收敛优先级误用于 L2TLB raw response producer | 明确普通 PTW、LLPTW PMP-AF、HPTW 与 LLPTW S1-PF/S2-GPF 各有局部优先级；Scala-faithful 随机需保留 fault origin | 用户要求更新 L2TLB 视角四个 PF/AF 字段的优先级表 | V2 L2TLB/PTW/LLPTW/HPTW response 生成 |
+| 2026-08-04 | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` | 只说明 S2 `g_perm` 参与 GPF/AF 收敛，未区分其各 bit 的实际消费者 | 明确 `g_perm.pf/af/A/D/R/W/X` 参与 G-stage fault/permission；`g_perm.g`（以及当前 `u/v`）虽可保存或 debug 观察，但不参与 local hit、fence 或 `perm_check()` | 用户追问 S2 `entries.g_perm.g` 是否对相关 fence 或翻译产生实际效果 | V2 HPTW、PtwCache、TLBStorage、L1 TLB |
 
 ## 待确认项
 

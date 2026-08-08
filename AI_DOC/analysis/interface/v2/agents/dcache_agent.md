@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `f3bdd04b3763147e714a786d078e0cb90460a31d` |
+| 核验 commit | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `build_memblock/rtl/MemBlock.sv`、`src/main/scala/xiangshan/cache/dcache`、`coupledL2/src/main/scala/coupledL2` |
-| 最后核验日期 | `2026-08-03` |
+| 最后核验日期 | `2026-08-04` |
 
 ## 1. Agent 职责与边界
 
@@ -26,6 +26,7 @@ hint、flush done 和完整 TileLink 权限状态机的内部 flow 分别见：
 
 - [DCache-L2 refill hint 与 L2 flush done flow](../../../../rtl/v2/flows/dcache_l2_refill_hint_and_flush_done_flow.md)
 - [L2 内侧 TileLink 请求、权限与回复 flow](../../../../rtl/v2/flows/l2_inner_tilelink_request_response_flow.md)
+- [Memory flushPipe flow](../../../../rtl/v2/flows/memory_flush_pipe_flow.md)
 
 ## 2. 顶层接口方向
 
@@ -430,7 +431,32 @@ memory overlay 写回，但仍完成 Probe/Release 生命周期。该 D-error �
 复用该 `probe_record_q`，用单笔 context 保留 CBO source/opcode/line/error，只有 Probe C 收敛后才形成
 CBOAck。该实现不等同于完整 L2 directory，也不支持多个并发 CBO。
 
-## 9. 与测试框架的边界
+## 9. Fence/HFENCE 与 DCache 接口边界
+
+`FENCE`、`SFENCE.VMA`、`HFENCE.VVMA` 和 `HFENCE.GVMA` 不是本 agent 的 TileLink
+请求类型。`DCacheIO` 没有 `sfence`、`hfence` 或 `redirect` 端口，故 DCache agent 既不采样
+`SfenceBundle.addr/id/hv/hg`，也不以它们作为 physical line 的失效地址。
+
+完整 core 中它们的影响应按以下边界理解：
+
+| 事件 | DCache agent 应观察到的行为 | 不应做的事 |
+|---|---|---|
+| 普通 `FENCE` | Fence FU 先排空 SBuffer/Uncache；旧 store 因此可能继续生成普通 DCache A/C/E 事务 | 不得把该事件解释成 DCache invalidate 或虚构 Probe |
+| `HFENCE.VVMA/GVMA` | TLB/PTW/L2TLB 失效后，后续访问可能重新翻译、replay 并形成新的 DCache 请求 | 不得用 ASID、VMID、VPN/GVPN 删除 `cached_line_by_addr` 或已有 DCache response record |
+| Fence 到 ROB 头形成 `flushAfter` | 尚在 LSU/DCache 前两级的年轻请求可由 `s1_kill/s2_kill` 取消，因而可能不再形成新的 A.fire | 不得把全局 redirect 当作现有 A/B/C/D/E owner 的取消信号 |
+| 已有 DCache `A.fire`/MSHR | Grant/GrantData、GrantAck、Probe 和 Release 生命周期继续按原 source/sink/line 收敛 | 不得因 fence/HFENCE 到达而撤销已发 A、提前释放 owner 或丢弃必须回复的 D/E/C 事务 |
+
+原因是 LoadPipe/StorePipe 的 `cancel` 只作用在候选 miss 进入 MissQueue 前；MissQueue 的
+`primary_fire`/`secondary_fire` 都要求 `!cancel`。一旦 `req_valid` 已写入 MSHR，后续
+`mem_acquire.valid`、Grant 接收和 GrantAck 不再读取 redirect/cancel。因此被清除 uop 的
+coherent refill 仍可能完成并留下纯微架构 line，这不是 Fence 地址范围对 DCache 的物理失效。
+
+真正使 DCache line 降级或无效的是 L2 B-channel Probe，或 CBO clean/flush/inval 的独立
+CMO 路径。全局 L2 flush 也属于独立 sideband/Probe flow。测试框架在收到单独的 sfence
+顶层事件时，只应交给 TLB 软件模型处理；不得修改 DCache TileLink owner、line state 或 D
+hold 状态。
+
+## 10. 与测试框架的边界
 
 本接口文档不要求 standalone responder 实现完整 L2 directory、所有 set/way、完整
 coherence replacement 或真实 L2 prefetch predictor。当前必须保证的是：
@@ -440,7 +466,7 @@ coherence replacement 或真实 L2 prefetch predictor。当前必须保证的是
 - `user_needHint` 不被错误用作 L2 hit 或 refill response valid；
 - A/B/C/D/E 的 owner、source、sink 和多 beat 生命周期不因 backpressure 提前结束。
 
-## 10. 源码证据
+## 11. 源码证据
 
 | 结论 | 源码位置 |
 |---|---|
@@ -469,6 +495,10 @@ coherence replacement 或真实 L2 prefetch predictor。当前必须保证的是
 | E 仅使用 sink 完成 GrantAck | `rocket-chip/src/main/scala/tilelink/Edges.scala:469-475`、`src/main/scala/xiangshan/cache/dcache/mainpipe/MissQueue.scala:876-879` |
 | L2 hint 传递 keyword 至 MemBlock LSQ | `coupledL2/src/main/scala/coupledL2/CustomL1Hint.scala:72-121`、`coupledL2/src/main/scala/coupledL2/CoupledL2.scala:530-540`、`src/main/scala/xiangshan/mem/MemBlock.scala:1010-1014` |
 | L2 refill hint 独立产生 | `coupledL2/src/main/scala/coupledL2/CustomL1Hint.scala`、`coupledL2/src/main/scala/coupledL2/CoupledL2.scala:520-545` |
+| DCache 无直接 sfence/hfence/redirect 输入 | `src/main/scala/xiangshan/cache/dcache/DCacheWrapper.scala:837-855`、`src/main/scala/xiangshan/mem/MemBlock.scala:665-708,851-923,1247-1249` |
+| Fence 排空 SBuffer/Uncache，而非失效 DCache | `src/main/scala/xiangshan/backend/fu/Fence.scala:59-91`、`src/main/scala/xiangshan/XSCore.scala:190,228`、`src/main/scala/xiangshan/mem/MemBlock.scala:1765-1775`、`src/main/scala/xiangshan/mem/sbuffer/Sbuffer.scala:534-692` |
+| redirect 对候选 DCache 请求的 kill/cancel | `src/main/scala/xiangshan/mem/pipeline/LoadUnit.scala:959,1063-1066,1188,1523`、`src/main/scala/xiangshan/mem/pipeline/StoreUnit.scala:318,418,485,502`、`src/main/scala/xiangshan/cache/dcache/loadpipe/LoadPipe.scala:350,442`、`src/main/scala/xiangshan/cache/dcache/storepipe/StorePipe.scala:149,183` |
+| 已分配 MSHR 不被 fence redirect 撤销 | `src/main/scala/xiangshan/cache/dcache/mainpipe/MissQueue.scala:78-86,529-600,829-879` |
 
 ## 知识修订记录
 
@@ -496,4 +526,9 @@ DCache 消费。轻量 responder 默认只驱动正常 0，DUT C data corrupt �
 新增：D-error 专项已实现六个公共 runtime 权重。DCache `GrantData`、`CBOAck` 和 Uncache
 `AccessAckData/AccessAck` 只在各自 response record 创建点生成并保存合法错误组合；错误位不会进入
 主表、LSQ commit/deq、pass/fail 或 terminal 的软件判断。
+
+2026-08-04，commit `7861962dba6f1b6ceb1da7996764b31d3207b5e6`：新增 Fence/HFENCE
+边界。普通 `FENCE` 只排空旧 store；HFENCE 失效翻译状态；DCache agent 不得以 sfence/hfence
+事件删除物理 line 或中止已建立的 TileLink owner。仅未进入 MissQueue 的年轻请求可因
+`flushAfter` 间接取消，已发 coherent 事务必须收敛。
 ```
