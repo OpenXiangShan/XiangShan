@@ -107,7 +107,7 @@ redirect/reissue 重叠”的普通 scalar fault。fault writeback 之前的 TLB
 不由本 plan 生成；fault 与 redirect/reissue 同时发生的旧实例关联也不由本 plan 扩展。
 
 STA 的真实异常地址选择还依赖
-`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_is_store_exception_agent_migration_coding_plan_20260727.md`。
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_is_store_exception_agent_migration_coding_plan_20260727.md`。
 LDA 的 watchdog/drain coding 可以独立进行；该 plan 完成前不得执行或宣称通过 STA real smoke。
 本 plan 的 `uid_is_supported_scalar_fault()` 只负责 ordinary scalar LDA/STA fault producer
 门禁，不调用、不替代其中的 `fault_uid_is_store_exception()`，因为后者的 ROB store 分类还

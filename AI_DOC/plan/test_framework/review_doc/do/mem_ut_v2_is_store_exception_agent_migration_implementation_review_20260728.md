@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 关联 plan | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_is_store_exception_agent_migration_coding_plan_20260727.md` |
+| 关联 plan | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_is_store_exception_agent_migration_coding_plan_20260727.md` |
 | 目标版本 | V2，`mem_ut_uvm_v2` |
 | review 范围 | `io_ooo_to_mem_isStoreException` owner 迁移、fault sideband 生成/保持、software fault smoke 和相关文档 |
 | 不在范围 | DUT exception address checker、RM/scoreboard、vector LS、redirect/replay 主状态机、normal commit/deq 语义 |
@@ -252,9 +252,21 @@ run_fault_case:
 
 专项日志还确认：load fault 的 target fault 为 LOAD，store fault 的 target fault 为 STA；STA 的 IQ hit 先被记录，fault recovery event 被 `EXC_REDIRECT` 消费，末尾 `runtime_drain_complete()` 成立。
 
-## 10. 独立 Review 结论
+## 10. 最终归档前复核结论
 
-最终独立 review 进行中。本节会在 reviewer 返回后记录其 P0-P3 结论、修正情况和最终放行判断。
+本 agent 在归档前重新对照 plan、当前源码、专项 smoke 和已同步文档，结论如下：
+
+| 等级 | 结论 | 复核依据 |
+|---|---|---|
+| P0 | 无 | 字段只有 lsqcommit connect 在 `MEMBLOCK_UT` 下 force，vecissue 链路无残留。 |
+| P1 | 无 | fault UID 分类、fault token 后 latch 更新、normal sideband 隔离和 active-idle 保持均与 plan 一致。 |
+| P2 | 无 | software fault smoke 覆盖 load=0、store=1、waiting/terminal 保持、reset、STA IQ-hit 和 recovery drain；历史专项与 real smoke 均通过。 |
+| P3 | 无阻塞项 | 不新增 DUT exception address checker、RM、vector LS 或完整 core ROB readback，均为 plan 明确边界。 |
+
+本次归档复核只更新文档状态和路径，不修改功能源码，因此沿用第 9 节已有的专项 fault smoke 与 real smoke
+验证记录。当前实现与 plan 的原始内容及第 9 节 `IMPLEMENTATION_DELTA` 一致，未发现遗漏的行为修改。
+
+**最终结论：FINAL PASS。** 关联 plan 可从 `undo` 归档到 `do`。
 
 ## 11. 剩余边界
 

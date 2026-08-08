@@ -216,6 +216,43 @@ uid_is_mmio_store = mmio_tag_valid && is_mmio_store && !is_mmio_load
 
 `active_instance_flush_epoch{_valid}` 的唯一运行期写者是 `activate_uid()` 和 `clear_uid_dispatch_result()`；`status_transaction::reset()` 清零。MMIO tag 的唯一写者是 `common_data_transaction` 中的 canonical setter/clear API，monitor、adapter、sequence 和 testcase 都不得直接写 status 字段。
 
+### 4.1 admission、issue 与 MMIO raw 的时序不变量
+
+本 plan 明确区分两个容易混淆的阶段：
+
+- `activate_uid()` 是软件 active admission 的建立动作。LSQ enqueue driver 已将有效请求写入 VIF、并返回
+  `memblock_dispatch_request_launched=1` 后，`confirm_lsq_candidates()` 立即调用
+  `lsq_ctrl_model::commit_allocate()`；该函数在更新 LQ/SQ 分配指针前调用 `data.activate_uid()`，建立
+  `uid_by_active_rob` 以及必要的 LQ/SQ owner map。
+- `complete_admission()` 不是建立 active map，而是在下一次 DUT sample 边界确认上一批 reservation 可见，随后
+  调用 `prepare_issue_route_for_uid()` 开放 issue queue。也就是说，issue 不会绕过 active admission。
+
+因此，正常 V2 时序中不存在“MMIO raw 只比 `activate_uid()` 晚一个 service tick、当前 uid 尚未建 active map”的窗口。
+`loadMmio` 经过 LDU 的 S0/S1/S2/S3 和 `LoadQueueUncache` 的寄存器边界后才输出；`storeMmio` 则要等
+StoreQueue 的地址/数据有效、`pendingPtr` 命中且允许发起 MMIO request 后才输出。两者都是 MMIO 分类或 request
+sideband，不是 writeback 本身，但都晚于该 uid 的 active map 建立。
+
+本 plan 不新增 `RETRY_PENDING` 解析结果，也不把 active-map 缺失静默转入 deferred FIFO：
+
+```text
+LSQ enqueue driver launch
+  -> confirm_lsq_candidates()
+  -> commit_allocate()
+  -> activate_uid()：建立 ROB/LQ/SQ active map
+  -> 下一 DUT sample
+  -> complete_admission()：开放 issue
+  -> 后续 LDU/StoreQueue 产生 loadMmio/storeMmio raw
+
+resolver：
+  CURRENT      -> 写入当前 uid 的 MMIO tag；
+  STALE_DROP   -> 只有在 epoch/sample/redirect provenance 已证明为旧实例时丢弃；
+  其它无 owner、多 owner、类型不符或 provenance 不可证明 -> MMIO_RESOLVE fatal。
+```
+
+若出现当前 epoch 的 MMIO raw 找不到 active owner，应按 admission/issue 调度或 raw provenance 失配处理，不能
+通过一次 service tick 延迟来掩盖。后续 `deferred_raw_ctrl_q` 的重试只适用于完整 raw 已完成 MMIO normalize 后，
+LSQ owner 的 resync/preflight 暂时失败；它不表示 MMIO resolver 支持 active-map 等待。
+
 新增 `resolve_mmio_uid_by_rob_value(rob_value, expected_kind, raw_sample_flush_epoch,
 raw_sample_seq, uid, stale_reason)`。helper 只 probe `{flag=0,value}` 和 `{flag=1,value}` 两个完整 key，
 并通过 `uid_by_active_rob` associative map 查找，不扫描主表。raw observation epoch 大于 current epoch、
@@ -727,6 +764,9 @@ expected-fatal 诊断文本；本补充只同步输出参数和 fatal message，
   full-raw owner成功才pop。失败队首保留，后续raw不越过。
 - MMIO边界：MMIO normalization仍发生在deq删除active map之前；同一raw因resync重试时，canonical setter
   对同kind/同dynamic instance是幂等的。stale port仍按provenance丢弃，不会在新实例上复活旧tag。
+- active-map边界：resolver 不返回 `RETRY_PENDING`。如果 raw 解析阶段当前 epoch 没有唯一 active owner，
+  仍按第 4.1 节的 `STALE_DROP`/`MMIO_RESOLVE fatal` 合同处理；只有 LSQ owner 的 full-raw resync 返回失败
+  才允许保留队首。
 - stop边界：`raw_monitor_queue_size()`包含持久deferred FIFO；等待重试的raw禁止global stop。
 
 文字伪代码：
