@@ -242,6 +242,21 @@ case class VecDVPattern()(implicit rawInst: BitPat) extends VecIntArithInstPatte
 case class VecIntRedPattern()(implicit rawInst: BitPat) extends VecIntArithInstPattern
 case class VecIntWRedPattern()(implicit rawInst: BitPat) extends VecIntArithInstPattern
 
+case class VecFpOp2VVPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpOp2VMPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpOp3VVVPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpRedPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpWRedPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpOp2VVWPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpOp2WVWPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpOp3VVWPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpS2VPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpS2VVWPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpS2WVIntPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpS2WVFpPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpS2APattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpS1VPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+
 case class VecCryptoVVVVPattern()(implicit rawInst: BitPat) extends VecIntArithInstPattern
 
 trait VecInstFieldDefination {

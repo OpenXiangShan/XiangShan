@@ -118,7 +118,6 @@ object DestSelectField extends DecodeField[
             }
           case _: VecMemWhole => INC1
           case _: VecMemMask => CONST
-          case _: VecMemFF => INC1
         }
       case smui: ScaMultUopInstPattern =>
         smui match {
