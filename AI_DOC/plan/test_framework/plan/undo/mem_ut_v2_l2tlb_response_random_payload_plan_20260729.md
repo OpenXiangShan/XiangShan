@@ -34,7 +34,7 @@ payload 改造只能在 entry build、snapshot copy、UID 回填和 response dri
 第二个 pending queue、token owner 或 flush owner。实际 API 形参和调用点以本 plan 列出的当前源码为准。
 
 SFENCE/HFENCE 的 token 时序以
-`mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md` 为准：monitor 在 C0 看到 event 时，
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md` 为准：monitor 在 C0 看到 event 时，
 同拍已经发生的 `valid && ready` request 仍必须建立 token；C4 到期时才取消仍在 `pending_q` 的旧 token，
 并取消已经观察到旧 L2TLB request fire 且仍未被已完成 response 覆盖的 UID 等待实例。一个 token 不拥有唯一 UID，因为一笔
 `PtwRespS2` 可以同时命中多个 DTLB filter entry。本 plan 不得保留 `record_flush_killed_request()` 或

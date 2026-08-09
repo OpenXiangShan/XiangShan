@@ -308,9 +308,21 @@ endclass:memblock_tlb_entry
 
 class memblock_uid_tlb_record extends uvm_object;
 
+    typedef enum int unsigned {
+        MEMBLOCK_UID_TLB_RECORD_STATE_UNBOUND  = 0,
+        MEMBLOCK_UID_TLB_RECORD_STATE_WAITING  = 1,
+        MEMBLOCK_UID_TLB_RECORD_STATE_COMPLETED = 2,
+        MEMBLOCK_UID_TLB_RECORD_STATE_CANCELED = 3
+    } memblock_uid_tlb_record_state_e;
+
     memblock_uid_t uid;
     bit            record_valid;
     bit            pte_valid;
+    // 中文注释：lifecycle 只补 UID 级 TLB 账本，不替代 record_valid/pte_valid 兼容语义。
+    // request_fire_* 只记录真实 fire 证据，便于按 key/sample 追踪 WAITING/COMPLETED/CANCELED。
+    memblock_uid_tlb_record_state_e lifecycle_state;
+    bit            request_fire_valid;
+    longint unsigned request_fire_sample_seq;
     bit [51:0]     vpn;
     bit [1:0]      s2xlate;
     bit            is_hypervisor_inst;
@@ -352,6 +364,9 @@ class memblock_uid_tlb_record extends uvm_object;
         uid                = 0;
         record_valid       = 1'b0;
         pte_valid          = 1'b0;
+        lifecycle_state    = MEMBLOCK_UID_TLB_RECORD_STATE_UNBOUND;
+        request_fire_valid = 1'b0;
+        request_fire_sample_seq = 0;
         vpn                = '0;
         s2xlate            = 2'd0;
         is_hypervisor_inst = 1'b0;
@@ -394,6 +409,9 @@ class memblock_uid_tlb_record extends uvm_object;
         uid                = uid_i;
         record_valid       = 1'b1;
         pte_valid          = 1'b0;
+        lifecycle_state    = MEMBLOCK_UID_TLB_RECORD_STATE_UNBOUND;
+        request_fire_valid = 1'b0;
+        request_fire_sample_seq = 0;
         vpn                = vpn_i;
         s2xlate            = s2xlate_i;
         is_hypervisor_inst = is_hypervisor_inst_i;
@@ -409,11 +427,9 @@ class memblock_uid_tlb_record extends uvm_object;
         if (entry == null) begin
             `uvm_fatal("UID_TLB_RECORD", "copy_entry_fields got null entry")
         end
-        lookup_key       = entry.lookup_key;
-        asid             = entry.asid;
-        vmid             = entry.vmid;
-        s2xlate          = entry.s2xlate;
-        vpn              = entry.lookup_key.vpn;
+        // Keep the UID request context intact.  A response entry is keyed by
+        // the request that produced it, while a later raw hit may complete a
+        // different same-shape UID under response-visible CSR context.
         paddr            = entry.paddr;
         ppn              = entry.ppn;
         pte_r            = entry.pte_r;
@@ -431,9 +447,33 @@ class memblock_uid_tlb_record extends uvm_object;
         tlbGPF           = entry.tlbGPF;
         pmaAF            = entry.pmaAF;
         level            = entry.level;
+        // Payload copying is deliberately separate from the UID lifecycle
+        // transition.  The response owner marks a record COMPLETED only
+        // after it has proved that the record was WAITING and really fired.
         pte_valid        = 1'b1;
         pte_update_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
     endfunction:copy_entry_fields
+
+    function void mark_request_fire(input longint unsigned sample_seq_i);
+        request_fire_valid       = 1'b1;
+        request_fire_sample_seq  = sample_seq_i;
+        lifecycle_state          = MEMBLOCK_UID_TLB_RECORD_STATE_WAITING;
+    endfunction:mark_request_fire
+
+    function void mark_completed();
+        lifecycle_state = MEMBLOCK_UID_TLB_RECORD_STATE_COMPLETED;
+    endfunction:mark_completed
+
+    function void mark_canceled();
+        if (lifecycle_state == MEMBLOCK_UID_TLB_RECORD_STATE_WAITING) begin
+            lifecycle_state = MEMBLOCK_UID_TLB_RECORD_STATE_CANCELED;
+        end
+    endfunction:mark_canceled
+
+    function bit is_waiting();
+        return record_valid &&
+               lifecycle_state == MEMBLOCK_UID_TLB_RECORD_STATE_WAITING;
+    endfunction:is_waiting
 
 endclass:memblock_uid_tlb_record
 

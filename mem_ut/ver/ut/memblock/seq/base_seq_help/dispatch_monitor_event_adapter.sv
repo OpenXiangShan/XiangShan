@@ -19,17 +19,51 @@ class dispatch_monitor_event_adapter extends uvm_object;
     common_data_transaction data;
     lsq_commit_handler      monitor_commit_handler;
 
+    typedef struct {
+        memblock_sync_pkg::dispatch_raw_sfence_t raw;
+        longint unsigned due_sample_seq;
+    } pending_l2tlb_sfence_t;
+    pending_l2tlb_sfence_t pending_l2tlb_sfence_q[$];
+    longint unsigned adapter_reset_serviced_epoch;
+
     `uvm_object_utils(dispatch_monitor_event_adapter)
 
     function new(string name = "dispatch_monitor_event_adapter");
         super.new(name);
         data = common_data_transaction::get();
         monitor_commit_handler = null;
+        pending_l2tlb_sfence_q.delete();
+        adapter_reset_serviced_epoch = 0;
     endfunction:new
 
     function void bind_commit_handler(input lsq_commit_handler handler);
         monitor_commit_handler = handler;
     endfunction:bind_commit_handler
+
+    function void reset_l2tlb_sfence_state();
+        // Runtime reset owns the epoch boundary. The adapter only drops its
+        // private scheduled work and its package FIFO/live-entry state; it does
+        // not clear CSR/fence history or any response-owner state.
+        ensure_handles();
+        pending_l2tlb_sfence_q.delete();
+        if (memblock_sync_pkg::l2tlb_reset_active() &&
+            memblock_sync_pkg::get_l2tlb_current_reset_epoch() != 0) begin
+            longint unsigned reset_epoch;
+            reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+            if (adapter_reset_serviced_epoch != reset_epoch) begin
+                memblock_sync_pkg::reset_l2tlb_adapter_runtime_state(reset_epoch);
+                data.clear_dispatch_l2tlb_live_entries();
+                adapter_reset_serviced_epoch = reset_epoch;
+                if ((memblock_sync_pkg::l2tlb_runtime_reset_required_ack_mask &
+                     memblock_sync_pkg::MEMBLOCK_L2TLB_RESET_ACK_ADAPTER) != '0) begin
+                    memblock_sync_pkg::acknowledge_l2tlb_runtime_reset(
+                        memblock_sync_pkg::MEMBLOCK_L2TLB_RESET_ACK_ADAPTER,
+                        reset_epoch,
+                        "dispatch_monitor_event_adapter");
+                end
+            end
+        end
+    endfunction:reset_l2tlb_sfence_state
 
     function void ensure_handles();
         if (data == null) begin
@@ -840,14 +874,88 @@ class dispatch_monitor_event_adapter extends uvm_object;
         end
     endfunction:drain_csr_events
 
-    function void drain_sfence_events();
+    function void drain_l2tlb_sfence_events(input longint unsigned current_sample_seq);
         memblock_sync_pkg::dispatch_raw_sfence_t raw_sfence;
+        pending_l2tlb_sfence_t pending;
 
         ensure_handles();
-        while (memblock_sync_pkg::pop_raw_sfence(raw_sfence)) begin
-            void'(data.apply_raw_sfence(raw_sfence));
+        if (!memblock_sync_pkg::dispatch_l2tlb_lookup_active) begin
+            return;
         end
-    endfunction:drain_sfence_events
+        if (current_sample_seq == 0 ||
+            !memblock_sync_pkg::l2tlb_sample_ready(current_sample_seq)) begin
+            return;
+        end
+        while (memblock_sync_pkg::pop_raw_sfence(raw_sfence)) begin
+            if (raw_sfence.sample_seq == 0 ||
+                raw_sfence.sample_seq > current_sample_seq ||
+                raw_sfence.lifecycle_event_seq ==
+                    memblock_sync_pkg::MEMBLOCK_L2TLB_EVENT_SEQ_NONE ||
+                raw_sfence.lifecycle_event_seq >
+                    memblock_sync_pkg::last_allocated_l2tlb_event_seq) begin
+                `uvm_fatal("DISP_RAW_SFENCE",
+                           $sformatf("invalid raw fence provenance sample=%0d current=%0d event_seq=%0d last_event=%0d",
+                                     raw_sfence.sample_seq, current_sample_seq,
+                                     raw_sfence.lifecycle_event_seq,
+                                     memblock_sync_pkg::last_allocated_l2tlb_event_seq))
+            end
+            pending.raw = raw_sfence;
+            pending.due_sample_seq = raw_sfence.sample_seq +
+                                     MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES;
+            pending_l2tlb_sfence_q.push_back(pending);
+        end
+    endfunction:drain_l2tlb_sfence_events
+
+    function void apply_due_l2tlb_sfence_events(input longint unsigned current_sample_seq);
+        pending_l2tlb_sfence_t pending;
+
+        ensure_handles();
+        while (pending_l2tlb_sfence_q.size() != 0 &&
+               pending_l2tlb_sfence_q[0].due_sample_seq <= current_sample_seq) begin
+            pending = pending_l2tlb_sfence_q.pop_front();
+            // C4 is the first destructive point. Keep apply_raw_sfence as the
+            // existing live-entry owner and invoke it only after due sample.
+            void'(data.apply_raw_sfence(pending.raw));
+        end
+    endfunction:apply_due_l2tlb_sfence_events
+
+    function void service_l2tlb_sfence_events();
+        longint unsigned current_sample_seq;
+
+        ensure_handles();
+        if (memblock_sync_pkg::reset_backend_done !== 1'b1) begin
+            reset_l2tlb_sfence_state();
+            return;
+        end
+        current_sample_seq = memblock_sync_pkg::peek_current_dut_global_sample();
+        if (current_sample_seq == 0 ||
+            !memblock_sync_pkg::l2tlb_sample_ready(current_sample_seq)) begin
+            return;
+        end
+        drain_l2tlb_sfence_events(current_sample_seq);
+        apply_due_l2tlb_sfence_events(current_sample_seq);
+        publish_l2tlb_adapter_drain_proof(current_sample_seq);
+    endfunction:service_l2tlb_sfence_events
+
+    function void publish_l2tlb_adapter_drain_proof(
+        input longint unsigned current_sample_seq);
+        // Abstract function: publish that this adapter has no scheduled SFENCE
+        // work left at the current sample.  It does not touch response ownership.
+        if (!memblock_sync_pkg::dispatch_l2tlb_lookup_active ||
+            !memblock_sync_pkg::l2tlb_release_admission_close_requested ||
+            memblock_sync_pkg::l2tlb_reset_active() ||
+            current_sample_seq == 0 ||
+            !memblock_sync_pkg::l2tlb_sample_ready(current_sample_seq)) begin
+            return;
+        end
+        if (pending_l2tlb_sfence_q.size() != 0 ||
+            memblock_sync_pkg::raw_sfence_q.size() != 0) begin
+            return;
+        end
+        memblock_sync_pkg::mark_l2tlb_adapter_drain_done(
+            memblock_sync_pkg::get_l2tlb_current_reset_epoch(),
+            memblock_sync_pkg::l2tlb_release_admission_close_generation);
+    endfunction:publish_l2tlb_adapter_drain_proof
 
     function void drain_lsq_timing_sidebands();
         memblock_sync_pkg::dispatch_raw_cancel_snapshot_t cancel_snapshot;

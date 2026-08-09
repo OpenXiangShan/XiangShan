@@ -777,7 +777,7 @@ S1 matcher 命中或 S2 matcher 命中后，都会把同一个 key 与其当时�
 
 `sfence_invalidate_pending_q` 只属于 live-entry invalidation flow；它不保存、取消或完成 L2TLB request token。
 L2TLB pending/driving token 的唯一 owner 是
-`mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md` 定义的 L2TLB lifecycle flow。两者共享
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md` 定义的 L2TLB lifecycle flow。两者共享
 同一个 `due_filter_flush_sample`，但不得互相扫描或修改对方队列。
 
 C1-C3 的 external response completion 同样只由该 lifecycle flow 处理。其 response-to-UID multicast 必须用

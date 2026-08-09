@@ -12,25 +12,212 @@ class L2tlb_agent_agent_monitor  extends tcnt_monitor_base#(virtual L2tlb_agent_
 
     `uvm_component_utils(L2tlb_agent_agent_monitor)
 
+    uvm_analysis_imp #(L2tlb_agent_agent_transport_sample,
+                       L2tlb_agent_agent_monitor) transport_sample_imp;
+    local longint unsigned last_transport_sample_seq;
+    local longint unsigned monitor_active_epoch;
+    local longint unsigned monitor_reset_pending_epoch;
+    local longint unsigned monitor_reset_sample_processed_epoch;
+    local longint unsigned monitor_reset_sample_processed_transport_sample_seq;
+    local longint unsigned monitor_reset_ack_floor_transport_sample_seq;
+    local longint unsigned monitor_last_reset_ack_transport_sample_seq;
+    local longint unsigned monitor_reset_ack_epoch;
+    local longint unsigned monitor_reset_ack_transport_sample_seq;
+    local bit monitor_processing;
+    local int unsigned reset_sample_count;
+
     extern function new(string name, uvm_component parent);
     extern virtual function void build_phase(uvm_phase phase);
     extern task run_phase(uvm_phase phase);
-    extern task mon_data();
+    extern virtual function void write(L2tlb_agent_agent_transport_sample sample);
+    extern virtual function void write_transport_sample(
+        L2tlb_agent_agent_transport_sample sample);
+    extern virtual function void begin_reset_epoch(
+        input longint unsigned reset_epoch);
+    extern virtual function bit reset_ackable(
+        input longint unsigned reset_epoch,
+        input longint unsigned reset_sample_transport_seq);
 endclass:L2tlb_agent_agent_monitor
 
 function L2tlb_agent_agent_monitor::new(string name, uvm_component parent);
     super.new(name,parent);
+    last_transport_sample_seq = 0;
+    monitor_active_epoch = 0;
+    monitor_reset_pending_epoch = 0;
+    monitor_reset_sample_processed_epoch = 0;
+    monitor_reset_sample_processed_transport_sample_seq = 0;
+    monitor_reset_ack_floor_transport_sample_seq = 0;
+    monitor_last_reset_ack_transport_sample_seq = 0;
+    monitor_reset_ack_epoch = 0;
+    monitor_reset_ack_transport_sample_seq = 0;
+    monitor_processing = 1'b0;
+    reset_sample_count = 0;
 endfunction:new
 
 function void L2tlb_agent_agent_monitor::build_phase(uvm_phase phase);
     super.build_phase(phase);
+    transport_sample_imp = new("transport_sample_imp", this);
 endfunction:build_phase
 
 task L2tlb_agent_agent_monitor::run_phase(uvm_phase phase);
     super.run_phase(phase);
-    this.mon_data();
+    // Transport sampling is owned by the driver.  Keeping the old mon_cb
+    // loop alive would create a second, potentially different observation of
+    // request fire and response timing.
 endtask:run_phase
 
+function void L2tlb_agent_agent_monitor::write(
+    L2tlb_agent_agent_transport_sample sample);
+    write_transport_sample(sample);
+endfunction:write
+
+function void L2tlb_agent_agent_monitor::write_transport_sample(
+    L2tlb_agent_agent_transport_sample sample);
+    memblock_l2tlb_drv_sample_t payload;
+
+    if (sample == null || !sample.get_payload(payload)) begin
+        `uvm_fatal(get_type_name(), "received invalid frozen L2TLB transport sample")
+    end
+    if (payload.transport_sample_seq == 0 ||
+        payload.transport_sample_seq != last_transport_sample_seq + 1) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("transport sample sequence is not consecutive old=%0d new=%0d",
+                             last_transport_sample_seq,
+                             payload.transport_sample_seq))
+    end
+    last_transport_sample_seq = payload.transport_sample_seq;
+    monitor_processing = 1'b1;
+
+    if (payload.sampled_reset_active) begin
+        // A physical reset can be observed before the CSR coordinator has
+        // published epoch 1.  Such a sample is diagnostic-only; it cannot
+        // acknowledge a runtime epoch with tuple {epoch=0, sample_seq}.
+        if (payload.sampled_reset_epoch == 0) begin
+            monitor_processing = 1'b0;
+            return;
+        end
+        if (monitor_active_epoch > payload.sampled_reset_epoch) begin
+            // Old reset samples are harmless after a newer epoch is active.
+            monitor_processing = 1'b0;
+            return;
+        end
+        if (monitor_active_epoch < payload.sampled_reset_epoch) begin
+            begin_reset_epoch(payload.sampled_reset_epoch);
+        end
+        // After this epoch has produced its exact reset tuple, remaining
+        // reset-active samples are quiescent analysis-only observations.
+        if (monitor_reset_pending_epoch == payload.sampled_reset_epoch) begin
+            reset_sample_count++;
+            if (reset_sample_count >
+                `MEMBLOCK_L2TLB_RESET_WATCHDOG_MAX_SAMPLES) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("L2TLB monitor reset ack watchdog expired epoch=%0d sample=%0d count=%0d pending=%0d processed=%0d/%0d floor=%0d ack=%0d/%0d",
+                                     payload.sampled_reset_epoch,
+                                     payload.transport_sample_seq,
+                                     reset_sample_count,
+                                     monitor_reset_pending_epoch,
+                                     monitor_reset_sample_processed_epoch,
+                                     monitor_reset_sample_processed_transport_sample_seq,
+                                     monitor_reset_ack_floor_transport_sample_seq,
+                                     monitor_reset_ack_epoch,
+                                     monitor_reset_ack_transport_sample_seq))
+            end
+        end
+        monitor_reset_sample_processed_epoch = payload.sampled_reset_epoch;
+        monitor_reset_sample_processed_transport_sample_seq =
+            payload.transport_sample_seq;
+        monitor_processing = 1'b0;
+        if (reset_ackable(payload.sampled_reset_epoch,
+                          payload.transport_sample_seq)) begin
+            memblock_sync_pkg::acknowledge_l2tlb_monitor_reset(
+                payload.sampled_reset_epoch,
+                payload.transport_sample_seq,
+                monitor_reset_sample_processed_epoch,
+                monitor_reset_sample_processed_transport_sample_seq,
+                get_full_name());
+            monitor_reset_ack_epoch = payload.sampled_reset_epoch;
+            monitor_reset_ack_transport_sample_seq =
+                payload.transport_sample_seq;
+            monitor_last_reset_ack_transport_sample_seq =
+                payload.transport_sample_seq;
+            monitor_reset_pending_epoch = 0;
+        end
+        return;
+    end
+
+    if (monitor_active_epoch != payload.sampled_reset_epoch &&
+        monitor_active_epoch != 0) begin
+        if (payload.sampled_reset_epoch > monitor_active_epoch) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("future non-reset L2TLB transport sample epoch=%0d active=%0d sample=%0d",
+                                 payload.sampled_reset_epoch,
+                                 monitor_active_epoch,
+                                 payload.transport_sample_seq))
+        end
+        // A normal sample from an old epoch cannot be used as a reset ack or
+        // final proof.  Keep transport sequence continuity and drop it.
+        monitor_processing = 1'b0;
+        return;
+    end
+    reset_sample_count = 0;
+    if (!payload.sampled_reset_active &&
+        $isunknown({payload.sampled_req_valid,
+                    payload.sampled_req_ready,
+                    payload.sampled_resp_valid})) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("L2TLB transport handshake contains X/Z sample=%0d valid=%b ready=%b resp_valid=%b",
+                             payload.transport_sample_seq,
+                             payload.sampled_req_valid,
+                             payload.sampled_req_ready,
+                             payload.sampled_resp_valid))
+    end
+    if (payload.sampled_final_inactive_proof_valid) begin
+        if (payload.sampled_final_inactive_proof_epoch !=
+                payload.sampled_reset_epoch ||
+            payload.sampled_final_inactive_proof_transport_sample_seq !=
+                payload.transport_sample_seq) begin
+            `uvm_fatal(get_type_name(), "invalid frozen final inactive proof")
+        end
+        memblock_sync_pkg::mark_l2tlb_monitor_final_sample_settled(
+            payload.sampled_final_inactive_proof_epoch,
+            payload.sampled_final_inactive_proof_transport_sample_seq);
+    end
+    monitor_processing = 1'b0;
+endfunction:write_transport_sample
+
+// Abstract responsibility: arm this monitor for one reset epoch and retain
+// the transport sequence floor that makes an old reset sample ineligible.
+function void L2tlb_agent_agent_monitor::begin_reset_epoch(
+    input longint unsigned reset_epoch);
+    if (reset_epoch == 0) begin
+        `uvm_fatal(get_type_name(), "cannot arm L2TLB monitor reset epoch zero")
+    end
+    monitor_active_epoch = reset_epoch;
+    monitor_reset_pending_epoch = reset_epoch;
+    monitor_reset_ack_floor_transport_sample_seq =
+        monitor_last_reset_ack_transport_sample_seq;
+    monitor_reset_sample_processed_epoch = 0;
+    monitor_reset_sample_processed_transport_sample_seq = 0;
+    reset_sample_count = 0;
+    memblock_sync_pkg::reset_l2tlb_monitor_runtime_state(reset_epoch);
+endfunction:begin_reset_epoch
+
+// Abstract responsibility: decide whether the exact frozen reset sample can
+// close the monitor's reset obligation; it never mutates package state.
+function bit L2tlb_agent_agent_monitor::reset_ackable(
+    input longint unsigned reset_epoch,
+    input longint unsigned reset_sample_transport_seq);
+    return !monitor_processing &&
+           monitor_reset_pending_epoch == reset_epoch &&
+           monitor_reset_sample_processed_epoch == reset_epoch &&
+           monitor_reset_sample_processed_transport_sample_seq ==
+               reset_sample_transport_seq &&
+           reset_sample_transport_seq >
+               monitor_reset_ack_floor_transport_sample_seq &&
+           reset_sample_transport_seq > monitor_last_reset_ack_transport_sample_seq;
+endfunction:reset_ackable
+
+/*
 task L2tlb_agent_agent_monitor::mon_data();
 
     logic io_ptw_req_0_ready           ;
@@ -302,5 +489,6 @@ task L2tlb_agent_agent_monitor::mon_data();
         //end
     end
 endtask:mon_data
+*/
 
 `endif

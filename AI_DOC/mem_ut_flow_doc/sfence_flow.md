@@ -1,6 +1,15 @@
-# mem_ut sfence/hfence flow
+# mem_ut sfence/hfence entry invalidation flow（V2 lifecycle 见 responder flow）
 
-本文档说明 mem_ut 测试框架中 sfence/hfence 离散 TLB invalidation 事件的真实函数调用链。当前实现把 CSR runtime 镜像和 sfence/hfence 事件拆成两类状态：CSR 是 latest snapshot，sfence/hfence 是 FIFO 事件。统一 service loop 按 `drain_csr_events()` -> `drain_sfence_events()` 的顺序处理，保证失效匹配使用最新 CSR runtime，同时不让 CSR-only 路径隐式消费 sfence。V2 `sfence_bits_flushPipe` 已完成 transaction 默认、driver 透明驱动和有效 payload 观测，但不写入 raw sfence，也不改变该失效链路。完整 core 的 `flushAfter` 由 ROB/CtrlBlock 产生，不是 MemBlock 本地行为；当前 standalone 测试框架无需据此增加 LSQ 暂停、年轻 uid kill、queue 回滚或 terminal 重收敛逻辑。
+本文档只说明 sfence/hfence raw event 到 live TLB entry 的 entry-level invalidation 语义。V2 L2TLB responder 的完整 transport sample、
+C0/C4 token 时序、reset、stop/final、单 owner 和 mailbox 生命周期见
+[`AI_DOC/mem_ut_flow_doc/tlb_l2tlb_responder_flow.md`](tlb_l2tlb_responder_flow.md) 的“V2 当前生效时序合同”，以及
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`。
+
+本文件原有的直接 `drain_sfence_events()` 调用链保留为 entry-level 历史基线；在 V2 coding 中不得把它理解为
+responder sequence 的 transport 消费路径。V2 当前由 dispatch adapter 的 `service_l2tlb_sfence_events()` 按 raw 自身
+C0 sample 调度 C4 live-entry 删除，responder sequence 只消费 driver 的 frozen sample。`sfence_bits_flushPipe` 仍是
+独立写回 sideband，不进入 raw entry invalidation；完整 core 的 `flushAfter` 仍由 ROB/CtrlBlock 产生，standalone
+框架不因此暂停 LSQ 或伪造年轻 uid kill。
 
 ## 1. 函数调用 Flow 图
 

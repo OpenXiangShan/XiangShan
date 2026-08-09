@@ -144,7 +144,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::reset_directed_owner_sta
 endtask:reset_directed_owner_state
 
 // 中文注释：directed sequence只等待 ctrl monitor/cancel snapshot owner推进的真实
-// DUT sample watermark；本 helper不调用 get_dut_sample_seq()，也不修改 sample time。
+// DUT sample watermark；本 helper只读取CSR monitor发布的global sample。
 task soft_test_memblock_pending_mmio_directed_sequence::wait_for_dut_sample_watermark(
     input longint unsigned target_sample_seq,
     input string scenario_name
@@ -153,7 +153,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::wait_for_dut_sample_wate
         `uvm_fatal(get_type_name(),
                    $sformatf("%s requested zero DUT sample watermark", scenario_name))
     end
-    while (memblock_sync_pkg::peek_latest_dut_sample_seq() < target_sample_seq) begin
+    while (memblock_sync_pkg::peek_current_dut_global_sample() < target_sample_seq) begin
         @(memblock_sync_pkg::dut_sample_seq);
     end
 endtask:wait_for_dut_sample_watermark
@@ -289,7 +289,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_monitor_raw_scenario
     raw.load_mmio_rob_value[0] = data.get_status(0).robIdx_value;
     raw.mmio_flush_epoch = memblock_sync_pkg::dispatch_flush_epoch;
     wait_for_dut_sample_watermark(1, "monitor-raw");
-    raw.mmio_sample_seq = memblock_sync_pkg::peek_latest_dut_sample_seq();
+    raw.mmio_sample_seq = memblock_sync_pkg::peek_current_dut_global_sample();
     raw.cycle = $time;
     monitor_adapter.apply_raw_ctrl_mmio_tags(raw);
     if (!data.uid_is_mmio_load(0) ||
@@ -329,7 +329,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_stale_load_overlap_s
     anchor.rob_flag = redirect.rob_key.flag;
     anchor.rob_value = redirect.rob_key.value;
     wait_for_dut_sample_watermark(1, "stale-load-overlap-anchor");
-    anchor.sample_seq = memblock_sync_pkg::peek_latest_dut_sample_seq();
+    anchor.sample_seq = memblock_sync_pkg::peek_current_dut_global_sample();
     anchor.cycle = $time;
     memblock_sync_pkg::push_raw_redirect_anchor(anchor);
     monitor_adapter.drain_lsq_timing_sidebands();
@@ -382,7 +382,7 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_new_owner_overlap_fa
     anchor.rob_flag = redirect.rob_key.flag;
     anchor.rob_value = redirect.rob_key.value;
     wait_for_dut_sample_watermark(1, "new-owner-overlap-anchor");
-    anchor.sample_seq = memblock_sync_pkg::peek_latest_dut_sample_seq();
+    anchor.sample_seq = memblock_sync_pkg::peek_current_dut_global_sample();
     anchor.cycle = $time;
     memblock_sync_pkg::push_raw_redirect_anchor(anchor);
     monitor_adapter.drain_lsq_timing_sidebands();

@@ -59,7 +59,11 @@ endclass:memblock_l2tlb_pending_req
 class memblock_l2tlb_base_sequence extends L2tlb_agent_agent_default_sequence;
 
     common_data_transaction data;
-    virtual L2tlb_agent_agent_interface l2tlb_vif;
+    L2tlb_agent_agent_sequencer l2tlb_sqr;
+    // The reset epoch is copied from the frozen transport sample currently
+    // being consumed.  Items created for that sample inherit this value;
+    // sequence code never needs to read the live VIF.
+    longint unsigned current_sample_reset_epoch;
 
     // 中文注释：seq_csr_common完成合法性检查和compile资源收敛后，由configure_from_plus()冻结。
     bit          enable;
@@ -77,6 +81,11 @@ class memblock_l2tlb_base_sequence extends L2tlb_agent_agent_default_sequence;
     memblock_l2tlb_pending_req pending_q[$];
     memblock_l2tlb_pending_req driving_req;
     bit driving_valid;
+    // C0 only records a barrier.  Pending requests remain serviceable until
+    // the corresponding V2 filter due sample (C4 by default).
+    memblock_sync_pkg::memblock_l2tlb_event_record_t barrier_q[$];
+    bit due_barrier_this_sample;
+    longint unsigned fire_visible_event_seq;
 
     // 中文注释：累计计数在同一sequence生命周期内跨DUT reset保持单调。
     // 每个accepted token必须落入completed、flush/reset canceled或当前outstanding之一。
@@ -103,13 +112,21 @@ class memblock_l2tlb_base_sequence extends L2tlb_agent_agent_default_sequence;
     bit stopping;
     int unsigned idle_count;
     string lifecycle_owner_name;
-
+    bit release_close_requested;
+    longint unsigned release_generation;
+    bit final_item_sent;
+    bit baseline_pending;
+    longint unsigned baseline_sent_sample_seq;
     // 中文注释：进入每个service tick时立即锁存的真实request握手字段。
     // 后续NBA等待和queue处理只读该快照，不重新读取live VIF。
-    bit sampled_req_valid;
-    bit sampled_req_ready;
-    bit [37:0] sampled_req_vpn;
-    bit [1:0] sampled_req_s2xlate;
+    logic sampled_req_valid;
+    logic sampled_req_ready;
+    logic [37:0] sampled_req_vpn;
+    logic [1:0] sampled_req_s2xlate;
+    logic sampled_req_fire;
+    logic sampled_resp_valid;
+    int unsigned consecutive_not_ready_samples;
+    longint unsigned last_not_ready_sample_seq;
 
     `uvm_object_utils(memblock_l2tlb_base_sequence)
 
@@ -118,9 +135,28 @@ class memblock_l2tlb_base_sequence extends L2tlb_agent_agent_default_sequence;
     extern virtual function void do_kill();
     extern virtual task body();
     extern virtual task drive_l2tlb_loop();
-    extern virtual task send_l2tlb_cycle(output bit has_progress,
-                                         output bit should_exit);
+    extern virtual task send_l2tlb_cycle(
+        input memblock_l2tlb_drv_sample_t sample,
+        output bit has_progress,
+        output bit should_exit,
+        output memblock_sync_pkg::memblock_l2tlb_transport_terminal_e terminal_kind);
     extern virtual task send_l2tlb_item(input L2tlb_agent_agent_xaction tr);
+    extern virtual task wait_for_l2tlb_transport_sample(
+        output L2tlb_agent_agent_transport_sample sample_ref,
+        output memblock_l2tlb_drv_sample_t sample);
+    extern virtual function void ack_l2tlb_transport_sample(
+        input longint unsigned transport_sample_seq,
+        input memblock_sync_pkg::memblock_l2tlb_transport_terminal_e terminal_kind);
+    // Abstract responsibility: consume a frozen sample that became stale
+    // before the semantic owner reached it, release its slot, and drive one
+    // inactive item so the driver can continue servicing the clock boundary.
+    extern virtual task drop_stale_l2tlb_transport_sample(
+        input memblock_l2tlb_drv_sample_t sample);
+    // Abstract responsibility: bound consecutive samples for which the global
+    // anchor or producer watermarks are not yet available.
+    extern virtual function void note_l2tlb_sample_not_ready(
+        input memblock_l2tlb_drv_sample_t sample,
+        input string reason);
     extern function void configure_from_plus();
     extern function void ensure_context();
     extern function void initialize_lifecycle_state();
@@ -130,11 +166,11 @@ class memblock_l2tlb_base_sequence extends L2tlb_agent_agent_default_sequence;
     extern function void check_l2tlb_lifecycle_accounting(input string audit_context);
     extern function void cancel_outstanding_by_reset();
     extern function memblock_l2tlb_pending_req capture_fired_request();
-    extern function void record_flush_killed_request(input longint unsigned event_seq,
-                                                     input time event_sample_time);
-    extern function int unsigned handle_l2tlb_flush_event(input longint unsigned event_seq,
-                                                          input time event_sample_time,
-                                                          output bit request_killed);
+    extern function int unsigned handle_l2tlb_flush_event(
+        input memblock_sync_pkg::memblock_l2tlb_event_record_t event_record);
+    extern function int unsigned apply_due_l2tlb_flush_barriers(
+        input longint unsigned current_sample_seq);
+    extern function bit get_request_csr_snapshot(output mmu_csr_runtime_state snapshot);
     extern function bit select_due_response(input longint unsigned next_sample_seq,
                                             output L2tlb_agent_agent_xaction cycle_tr);
     extern function void complete_driving_response();
@@ -142,6 +178,11 @@ class memblock_l2tlb_base_sequence extends L2tlb_agent_agent_default_sequence;
     extern function void clear_l2tlb_xaction(input L2tlb_agent_agent_xaction tr);
     extern function void fill_dtlb_resp_from_entry(input memblock_tlb_entry entry,
                                                    ref L2tlb_agent_agent_xaction resp);
+    extern function void stamp_lifecycle_item(
+        input L2tlb_agent_agent_xaction tr,
+        input memblock_sync_pkg::memblock_l2tlb_release_item_kind_e item_kind,
+        input longint unsigned generation,
+        input bit is_post_reset_baseline);
     extern function int unsigned choose_latency(output memblock_l2tlb_latency_bucket_e bucket);
 
 endclass:memblock_l2tlb_base_sequence
@@ -165,13 +206,14 @@ task memblock_l2tlb_base_sequence::pre_body();
 endtask:pre_body
 
 function void memblock_l2tlb_base_sequence::do_kill();
-    string current_owner;
-
-    // 中文注释：UVM sequence.kill()/stop_sequences()不会调用post_body；在被杀之前主动释放owner，
-    // 让driver的下一个观察边界离开阻塞get_next_item。正常自然退出时owner已清，该操作是幂等的。
-    if (lifecycle_owner_name != "") begin
-        void'(memblock_sync_pkg::try_release_l2tlb_lifecycle_owner(
-            lifecycle_owner_name, current_owner));
+    // UVM kill is not a lifecycle release path.  Releasing here would leave
+    // an unobserved final transport sample and let a later sequence take over
+    // an owner with live token state.
+    if (lifecycle_owner_name != "" &&
+        memblock_sync_pkg::l2tlb_lifecycle_owner_claimed) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("L2TLB sequence killed while owner is claimed: %s",
+                             lifecycle_owner_name))
     end
     super.do_kill();
 endfunction:do_kill
@@ -189,6 +231,25 @@ task memblock_l2tlb_base_sequence::body();
         `uvm_fatal(get_type_name(),
                    "MEMBLOCK_L2TLB_SEQ_EN is enabled but L2TLB connect takeover is not active; enable compile macro MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN")
     end
+    if (!memblock_sync_pkg::l2tlb_responder_enabled() ||
+        !memblock_sync_pkg::l2tlb_dispatch_active()) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("L2TLB responder started outside an enabled dispatch topology: initialized=%0d responder=%0d dispatch=%0d topology=%s",
+                             memblock_sync_pkg::l2tlb_testcase_lifecycle_initialized,
+                             memblock_sync_pkg::l2tlb_responder_enabled(),
+                             memblock_sync_pkg::l2tlb_dispatch_active(),
+                             memblock_sync_pkg::l2tlb_testcase_topology_name))
+    end
+
+    if (!$cast(l2tlb_sqr, m_sequencer) || l2tlb_sqr == null) begin
+        `uvm_fatal(get_type_name(), "L2TLB sequence must run on L2TLB agent sequencer")
+    end
+
+    // Owner claim is a post-reset lifecycle operation.  Waiting here avoids
+    // turning a sequence that starts during reset into a false owner-claim
+    // failure; the reset coordinator remains responsible for convergence.
+    wait (memblock_sync_pkg::reset_backend_done === 1'b1);
+    wait (memblock_sync_pkg::l2tlb_runtime_reset_active === 1'b0);
 
     lifecycle_owner_name = get_full_name();
     if (!memblock_sync_pkg::try_claim_l2tlb_lifecycle_owner(lifecycle_owner_name,
@@ -208,25 +269,50 @@ task memblock_l2tlb_base_sequence::body();
 
     drive_l2tlb_loop();
     check_l2tlb_lifecycle_accounting("owner_release");
-    if (outstanding_count() != 0) begin
-        `uvm_fatal(get_type_name(), "attempt to release L2TLB lifecycle owner with outstanding requests")
-    end
-    if (!memblock_sync_pkg::try_release_l2tlb_lifecycle_owner(lifecycle_owner_name,
-                                                              current_owner)) begin
+    if (memblock_sync_pkg::l2tlb_lifecycle_owner_claimed) begin
         `uvm_fatal(get_type_name(),
-                   $sformatf("L2TLB lifecycle owner release failed: requester=%s current=%s",
-                             lifecycle_owner_name, current_owner))
+                   $sformatf("L2TLB sequence exited with owner still claimed: %s",
+                             lifecycle_owner_name))
     end
 endtask:body
 
 task memblock_l2tlb_base_sequence::drive_l2tlb_loop();
+    string current_owner;
+
     forever begin
+        L2tlb_agent_agent_transport_sample sample_ref;
+        memblock_l2tlb_drv_sample_t sample;
         bit has_progress;
         bit should_exit;
+        memblock_sync_pkg::memblock_l2tlb_transport_terminal_e terminal_kind;
 
-        @(l2tlb_vif.drv_cb);
-        sample_seq++;
-        send_l2tlb_cycle(has_progress, should_exit);
+        wait_for_l2tlb_transport_sample(sample_ref, sample);
+        send_l2tlb_cycle(sample, has_progress, should_exit, terminal_kind);
+
+        if (final_item_sent && sample.sampled_final_inactive_proof_valid) begin
+            bit granted;
+            longint unsigned expected_reset_epoch;
+
+            expected_reset_epoch = sample.sampled_reset_epoch;
+            memblock_sync_pkg::wait_for_l2tlb_release_grant_or_reset(
+                lifecycle_owner_name,
+                expected_reset_epoch,
+                release_generation,
+                granted);
+            if (!granted) begin
+                // The next reset sample will cancel/re-arm the owner state.
+                final_item_sent = 1'b0;
+                release_close_requested = 1'b0;
+                continue;
+            end
+            if (!memblock_sync_pkg::try_release_l2tlb_lifecycle_owner(
+                    lifecycle_owner_name, current_owner)) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("L2TLB final release failed owner=%s current=%s",
+                                     lifecycle_owner_name, current_owner))
+            end
+            break;
+        end
         if (should_exit) begin
             break;
         end
@@ -235,87 +321,287 @@ endtask:drive_l2tlb_loop
 
 // 中文注释：每个drv_cb边界推进一次完整L2TLB lifecycle service。
 // 固定顺序为锁存fire、NBA后校验flush、确认response、同步CSR、处理flush/fire、调度下一cycle item。
-task memblock_l2tlb_base_sequence::send_l2tlb_cycle(output bit has_progress,
-                                                    output bit should_exit);
-    longint unsigned flush_event_seq;
-    time flush_sample_time;
-    bit flush_event_valid;
-    bit new_flush_event;
-    bit request_killed;
+task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
+    input memblock_l2tlb_drv_sample_t sample,
+    output bit has_progress,
+    output bit should_exit,
+    output memblock_sync_pkg::memblock_l2tlb_transport_terminal_e terminal_kind);
+    memblock_sync_pkg::memblock_l2tlb_event_record_t event_record;
     bit response_selected;
     bit hold_active;
     bit lifecycle_blocked;
+    bit request_csr_history_valid;
     bit next_ready;
     L2tlb_agent_agent_xaction cycle_tr;
     memblock_sync_pkg::dispatch_raw_csr_t ignored_runtime_csr;
+    memblock_sync_pkg::dispatch_raw_csr_t request_csr_raw;
     int unsigned latest_runtime_csr_seq;
 
     has_progress = 1'b0;
     should_exit = 1'b0;
-    sampled_req_valid = (l2tlb_vif.drv_cb.io_ptw_req_0_valid === 1'b1);
-    sampled_req_ready = (l2tlb_vif.mon_cb.io_ptw_req_0_ready === 1'b1);
-    sampled_req_vpn = l2tlb_vif.drv_cb.io_ptw_req_0_bits_vpn;
-    sampled_req_s2xlate = l2tlb_vif.drv_cb.io_ptw_req_0_bits_s2xlate;
+    terminal_kind = memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_CONSUMED;
+    sample_seq = sample.dut_sample_seq;
+    current_sample_reset_epoch = sample.sampled_reset_epoch;
+    sampled_req_valid = sample.sampled_req_valid;
+    sampled_req_ready = sample.sampled_req_ready;
+    sampled_req_vpn = sample.sampled_req_vpn;
+    sampled_req_s2xlate = sample.sampled_req_s2xlate;
+    sampled_req_fire = sample.sampled_req_fire;
+    sampled_resp_valid = sample.sampled_resp_valid;
 
-    uvm_wait_for_nba_region();
-    memblock_sync_pkg::get_latest_l2tlb_flush_event(flush_event_seq,
-                                                    flush_sample_time,
-                                                    flush_event_valid);
+    // The reset epoch belongs to the frozen transport sample. A sample that
+    // was published before a later reset may still occupy the one-slot
+    // mailbox, but it must never create token/UID work in the new epoch.
+    if (sample.sampled_reset_epoch <
+            memblock_sync_pkg::get_l2tlb_current_reset_epoch()) begin
+        drop_stale_l2tlb_transport_sample(sample);
+        terminal_kind = memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_DROPPED;
+        return;
+    end
+    if (sample.sampled_reset_epoch >
+            memblock_sync_pkg::get_l2tlb_current_reset_epoch()) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("future L2TLB transport sample epoch=%0d current=%0d transport=%0d",
+                             sample.sampled_reset_epoch,
+                             memblock_sync_pkg::get_l2tlb_current_reset_epoch(),
+                             sample.transport_sample_seq))
+    end
 
-    if (l2tlb_vif.rst_n !== 1'b1 ||
-        memblock_sync_pkg::reset_backend_done !== 1'b1) begin
+    if (sample.sampled_reset_active) begin
         cancel_outstanding_by_reset();
+        memblock_sync_pkg::reset_l2tlb_response_owner_runtime_state(
+            lifecycle_owner_name, sample.sampled_reset_epoch);
+        // Reset discards old event history but preserves the allocator's
+        // monotonic baseline.  Re-arm this owner at that baseline so only
+        // post-reset events can create a new C0/C4 barrier.
+        last_seen_flush_event_seq =
+            memblock_sync_pkg::last_allocated_l2tlb_event_seq;
+        fire_visible_event_seq = last_seen_flush_event_seq;
+        accept_hold_until_sample = 0;
         acceptance_opened_since_reset = 1'b0;
         ready_opportunity_since_lifecycle_block = 1'b0;
         csr_snapshot_valid = 1'b0;
-        if (!require_post_reset_csr_refresh) begin
-            void'(memblock_sync_pkg::get_latest_runtime_csr_snapshot(
-                ignored_runtime_csr, latest_runtime_csr_seq));
+        require_post_reset_csr_refresh = 1'b1;
+        if (memblock_sync_pkg::get_latest_runtime_csr_snapshot(
+                ignored_runtime_csr, latest_runtime_csr_seq)) begin
             reset_runtime_csr_seq_baseline = latest_runtime_csr_seq;
-            require_post_reset_csr_refresh = 1'b1;
+        end else begin
+            reset_runtime_csr_seq_baseline = 0;
         end
-        accept_hold_until_sample = 0;
+        baseline_pending = 1'b0;
+        baseline_sent_sample_seq = 0;
+        release_close_requested = 1'b0;
+        release_generation = 0;
+        final_item_sent = 1'b0;
         idle_count = 0;
         stopping = data.is_global_stop_requested();
-        if (flush_event_valid) begin
-            last_seen_flush_event_seq = flush_event_seq;
-        end
-        cycle_tr = create_l2tlb_xaction($sformatf("l2tlb_reset_idle_%0d", sample_seq));
+        cycle_tr = create_l2tlb_xaction($sformatf("l2tlb_reset_idle_%0d", sample.transport_sample_seq));
+        stamp_lifecycle_item(cycle_tr,
+                             memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_NORMAL,
+                             0, 1'b0);
+        ack_l2tlb_transport_sample(
+            sample.transport_sample_seq,
+            memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_DROPPED);
         send_l2tlb_item(cycle_tr);
-        should_exit = stopping;
+        terminal_kind = memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_DROPPED;
         return;
     end
 
-    if (flush_event_valid && flush_event_seq < last_seen_flush_event_seq) begin
-        `uvm_fatal(get_type_name(),
-                   $sformatf("L2TLB flush event sequence moved backwards: last=%0d latest=%0d",
-                             last_seen_flush_event_seq, flush_event_seq))
-    end
-    new_flush_event = flush_event_valid &&
-                      flush_event_seq > last_seen_flush_event_seq;
-    if (new_flush_event && acceptance_opened_since_reset &&
-        flush_sample_time != $time) begin
-        `uvm_fatal(get_type_name(),
-                   $sformatf("stale/future L2TLB flush event before lifecycle mutation: event_seq=%0d sample_time=%0t current_time=%0t",
-                             flush_event_seq, flush_sample_time, $time))
+    if (!sample.sample_valid) begin
+        note_l2tlb_sample_not_ready(sample, "sample_anchor_missing");
+        if (sample.sampled_req_ready !== 1'b0 ||
+            sample.sampled_req_fire || sample.sampled_resp_valid) begin
+            `uvm_fatal(get_type_name(),
+                       "invalid unanchored L2TLB transport sample contains fire/response")
+        end
+        cycle_tr = create_l2tlb_xaction($sformatf("l2tlb_unanchored_idle_%0d",
+                                                   sample.transport_sample_seq));
+        stamp_lifecycle_item(cycle_tr,
+                             memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_NORMAL,
+                             0, 1'b0);
+        ack_l2tlb_transport_sample(
+            sample.transport_sample_seq,
+            memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_CONSUMED);
+        send_l2tlb_item(cycle_tr);
+        return;
     end
 
-    if (driving_valid) begin
-        complete_driving_response();
-        has_progress = 1'b1;
+    // Terminal final proof is a transport fact, not a semantic CSR/event
+    // lookup.  Consume it before the NOT_READY branch so a producer watermark
+    // delay cannot strand the owner after the final item crossed the VIF.
+    if (sample.sampled_final_inactive_proof_valid) begin
+        if (!final_item_sent ||
+            sample.sampled_item_kind !=
+                memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_RELEASE_FINAL_INACTIVE ||
+            sample.sampled_item_owner_name != lifecycle_owner_name ||
+            sample.sampled_item_generation != release_generation ||
+            sample.sampled_item_reset_epoch != sample.sampled_reset_epoch ||
+            sample.sampled_req_ready !== 1'b0 ||
+            sample.sampled_req_fire ||
+            sample.sampled_resp_valid !== 1'b0 ||
+            !memblock_sync_pkg::monitor_final_sample_settled(
+                sample.sampled_reset_epoch, sample.transport_sample_seq)) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("invalid L2TLB final inactive proof sample=%0d owner=%s kind=%0d gen=%0d epoch=%0d ready=%b fire=%0d resp_valid=%b monitor_settled=%0d",
+                                 sample.transport_sample_seq,
+                                 sample.sampled_item_owner_name,
+                                 sample.sampled_item_kind,
+                                 sample.sampled_item_generation,
+                                 sample.sampled_item_reset_epoch,
+                                 sample.sampled_req_ready,
+                                 sample.sampled_req_fire,
+                                 sample.sampled_resp_valid,
+                                 memblock_sync_pkg::monitor_final_sample_settled(
+                                     sample.sampled_reset_epoch,
+                                     sample.transport_sample_seq)))
+        end
+        memblock_sync_pkg::begin_l2tlb_release_closing(lifecycle_owner_name);
+        ack_l2tlb_transport_sample(
+            sample.transport_sample_seq,
+            memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_CONSUMED);
+        terminal_kind = memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_CONSUMED;
+        return;
+    end
+
+    if (sample.sample_ready_result != memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_READY) begin
+        note_l2tlb_sample_not_ready(sample, "sample_producer_not_ready");
+        if (sample.sampled_req_ready !== 1'b0 ||
+            sample.sampled_req_fire || sample.sampled_resp_valid) begin
+            `uvm_fatal(get_type_name(),
+                       "NOT_READY L2TLB sample contains an active request/response")
+        end
+        cycle_tr = create_l2tlb_xaction($sformatf("l2tlb_not_ready_%0d", sample.transport_sample_seq));
+        stamp_lifecycle_item(cycle_tr,
+                             memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_NORMAL,
+                             0, 1'b0);
+        ack_l2tlb_transport_sample(
+            sample.transport_sample_seq,
+            memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_CONSUMED);
+        send_l2tlb_item(cycle_tr);
+        return;
+    end
+
+    consecutive_not_ready_samples = 0;
+    last_not_ready_sample_seq = 0;
+
+    if (sample.baseline_required) begin
+        if (sample.sampled_req_fire || sample.sampled_resp_valid) begin
+            `uvm_fatal(get_type_name(),
+                       "post-reset L2TLB baseline observed request/response activity")
+        end
+        if (!sample.baseline_proof_pending) begin
+            cycle_tr = create_l2tlb_xaction($sformatf("l2tlb_post_reset_baseline_%0d",
+                                                       sample.transport_sample_seq));
+            stamp_lifecycle_item(cycle_tr,
+                                 memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_NORMAL,
+                                 0, 1'b1);
+        end
+        else begin
+            if (sample.dut_sample_seq <= sample.baseline_sent_sample_seq ||
+                sample.dut_sample_seq - sample.baseline_sent_sample_seq >
+                    `MEMBLOCK_L2TLB_BASELINE_MAX_SAMPLE_DISTANCE) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("post-reset L2TLB baseline did not settle sent=%0d current=%0d",
+                                     sample.baseline_sent_sample_seq,
+                                     sample.dut_sample_seq))
+            end
+            cycle_tr = create_l2tlb_xaction($sformatf("l2tlb_post_reset_baseline_wait_%0d",
+                                                       sample.transport_sample_seq));
+            stamp_lifecycle_item(cycle_tr,
+                                 memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_NORMAL,
+                                 0, 1'b0);
+        end
+        ack_l2tlb_transport_sample(
+            sample.transport_sample_seq,
+            memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_CONSUMED);
+        send_l2tlb_item(cycle_tr);
+        return;
     end
 
     drain_csr_runtime_events();
-
-    request_killed = 1'b0;
-    if (new_flush_event) begin
-        void'(handle_l2tlb_flush_event(flush_event_seq,
-                                       flush_sample_time,
-                                       request_killed));
-        has_progress = 1'b1;
+    request_csr_history_valid =
+        memblock_sync_pkg::get_l2tlb_request_csr_history(sample_seq,
+                                                         request_csr_raw);
+    if (!request_csr_history_valid) begin
+        // C-2 history is part of READY for lifecycle consumers. Do not move
+        // the event cursor or interpret a request fire before it is present.
+        cycle_tr = create_l2tlb_xaction($sformatf("l2tlb_history_not_ready_%0d", sample_seq));
+        stamp_lifecycle_item(cycle_tr,
+                             memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_NORMAL,
+                             0, 1'b0);
+        ack_l2tlb_transport_sample(
+            sample.transport_sample_seq,
+            memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_CONSUMED);
+        send_l2tlb_item(cycle_tr);
+        return;
     end
 
-    if (request_fire() && !request_killed) begin
+    // Consume immutable event records by sequence. C0 records a barrier;
+    // an older event may only be skipped during pre-ready startup.
+    fire_visible_event_seq = last_seen_flush_event_seq;
+    while (memblock_sync_pkg::get_l2tlb_event_after(last_seen_flush_event_seq,
+                                                    event_record)) begin
+        if (event_record.anchor_sample_seq > sample_seq) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("future L2TLB event seq=%0d anchor=%0d current=%0d",
+                                 event_record.event_seq,
+                                 event_record.anchor_sample_seq,
+                                 sample_seq))
+        end
+        last_seen_flush_event_seq = event_record.event_seq;
+        if (event_record.anchor_sample_seq < sample_seq) begin
+            if (acceptance_opened_since_reset) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("late active L2TLB event seq=%0d anchor=%0d current=%0d",
+                                     event_record.event_seq,
+                                     event_record.anchor_sample_seq,
+                                     sample_seq))
+            end
+            accept_hold_until_sample =
+                sample_seq + MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES;
+            ready_opportunity_since_lifecycle_block = 1'b0;
+            has_progress = 1'b1;
+            continue;
+        end
+        void'(handle_l2tlb_flush_event(event_record));
+        has_progress = 1'b1;
+    end
+    if (last_seen_flush_event_seq >
+        memblock_sync_pkg::response_owner_event_cursor) begin
+        memblock_sync_pkg::retire_l2tlb_event_history_prefix(
+            last_seen_flush_event_seq);
+    end
+
+    due_barrier_this_sample =
+        apply_due_l2tlb_flush_barriers(sample_seq) != 0;
+
+    if (driving_valid && sampled_resp_valid) begin
+        if (due_barrier_this_sample) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("L2TLB response would fire on filter due sample=%0d",
+                                 sample_seq))
+        end
+        complete_driving_response();
+        has_progress = 1'b1;
+    end
+    else if (driving_valid && !sampled_resp_valid) begin
+        if (due_barrier_this_sample) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("L2TLB response remains driving at filter due sample=%0d",
+                                 sample_seq))
+        end
+        // Keep the selected response visible until the frozen transport sample
+        // proves that the DUT observed its valid pulse.
+        cycle_tr = driving_req.resp_tr;
+    end
+    else if (!driving_valid && sampled_resp_valid) begin
+        `uvm_fatal(get_type_name(),
+                   "L2TLB response valid observed without a driving response token")
+    end
+
+    // C0 request fire is real DUT admission and must always get a token,
+    // including the sample that first observes a fence.
+    if (request_fire()) begin
         if (!csr_snapshot_valid) begin
             `uvm_fatal(get_type_name(), "L2TLB request fired before first runtime CSR snapshot")
         end
@@ -327,8 +613,22 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(output bit has_progress,
         stopping = 1'b1;
     end
 
+    if (!release_close_requested && stopping) begin
+        memblock_sync_pkg::mark_l2tlb_owner_admission_settled(
+            lifecycle_owner_name, sample_seq);
+        release_generation = memblock_sync_pkg::close_l2tlb_admission_for_release(
+            lifecycle_owner_name, sample_seq);
+        release_close_requested = 1'b1;
+    end
+
+    if (!stopping && !release_close_requested) begin
+        memblock_sync_pkg::mark_l2tlb_owner_admission_settled(
+            lifecycle_owner_name, sample_seq);
+    end
+
     hold_active = sample_seq < accept_hold_until_sample;
-    lifecycle_blocked = !csr_snapshot_valid || hold_active;
+    lifecycle_blocked = !csr_snapshot_valid ||
+                        !request_csr_history_valid || hold_active;
     if (has_progress || lifecycle_blocked || stopping ||
         outstanding_count() != 0 || !acceptance_opened_since_reset ||
         !ready_opportunity_since_lifecycle_block) begin
@@ -344,9 +644,27 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(output bit has_progress,
         end
     end
 
-    cycle_tr = null;
+    if (release_close_requested &&
+        memblock_sync_pkg::l2tlb_release_admission_closed &&
+        !final_item_sent && outstanding_count() == 0 &&
+        !data.has_waiting_uid_tlb_record() &&
+        barrier_q.size() == 0) begin
+        memblock_sync_pkg::mark_l2tlb_response_drain_done(lifecycle_owner_name);
+        cycle_tr = create_l2tlb_xaction($sformatf("l2tlb_release_final_%0d", sample_seq));
+        stamp_lifecycle_item(cycle_tr,
+                             memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_RELEASE_FINAL_INACTIVE,
+                             release_generation, 1'b0);
+        final_item_sent = 1'b1;
+        ack_l2tlb_transport_sample(
+            sample.transport_sample_seq,
+            memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_CONSUMED);
+        send_l2tlb_item(cycle_tr);
+        return;
+    end
+
     response_selected = 1'b0;
-    if (csr_snapshot_valid && !hold_active) begin
+    if (cycle_tr == null && csr_snapshot_valid && request_csr_history_valid &&
+        !due_barrier_this_sample) begin
         response_selected = select_due_response(sample_seq + 1, cycle_tr);
         if (response_selected) begin
             has_progress = 1'b1;
@@ -356,28 +674,44 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(output bit has_progress,
         cycle_tr = create_l2tlb_xaction($sformatf("l2tlb_cycle_%0d", sample_seq));
     end
 
-    next_ready = !stopping && csr_snapshot_valid && !hold_active &&
+    next_ready = !stopping && !release_close_requested &&
+                 csr_snapshot_valid && request_csr_history_valid &&
+                 !hold_active &&
                  outstanding_count() < max_outstanding;
     cycle_tr.io_ptw_req_0_ready = next_ready;
     cycle_tr.pre_pkt_gap = 0;
     cycle_tr.post_pkt_gap = 0;
+    if (release_close_requested &&
+        !memblock_sync_pkg::l2tlb_release_admission_closed) begin
+        cycle_tr.io_ptw_req_0_ready = 1'b0;
+        stamp_lifecycle_item(cycle_tr,
+                             memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_RELEASE_STOP,
+                             release_generation, 1'b0);
+    end
+    else if (release_close_requested) begin
+        // Admission is already closed.  Keep any selected response visible;
+        // the item is now an ordinary inactive transport item and must not
+        // re-confirm RELEASE_STOP on every following cycle.
+        cycle_tr.io_ptw_req_0_ready = 1'b0;
+        stamp_lifecycle_item(cycle_tr,
+                             memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_NORMAL,
+                             0, 1'b0);
+    end
+    else begin
+        stamp_lifecycle_item(cycle_tr,
+                             memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_NORMAL,
+                             0, 1'b0);
+    end
     if (next_ready) begin
         acceptance_opened_since_reset = 1'b1;
     end
-    if (hold_active && cycle_tr.io_ptw_resp_valid) begin
-        `uvm_fatal(get_type_name(), "flush hold attempted to drive an L2TLB response")
-    end
-
+    ack_l2tlb_transport_sample(
+        sample.transport_sample_seq,
+        memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_CONSUMED);
     send_l2tlb_item(cycle_tr);
     if (next_ready) begin
         // 中文注释：finish_item返回后，ready机会才算真正交给driver/DUT。
         ready_opportunity_since_lifecycle_block = 1'b1;
-    end
-    if (stopping && outstanding_count() == 0) begin
-        if (cycle_tr.io_ptw_req_0_ready || cycle_tr.io_ptw_resp_valid) begin
-            `uvm_fatal(get_type_name(), "L2TLB stop exit requires a final inactive cycle item")
-        end
-        should_exit = 1'b1;
     end
 endtask:send_l2tlb_cycle
 
@@ -409,16 +743,15 @@ function void memblock_l2tlb_base_sequence::ensure_context();
     if (data == null) begin
         `uvm_fatal(get_type_name(), "failed to get common_data_transaction")
     end
-    if (!uvm_config_db#(virtual L2tlb_agent_agent_interface)::get(null, get_full_name(), "vif", l2tlb_vif) &&
-        !uvm_config_db#(virtual L2tlb_agent_agent_interface)::get(null, "uvm_test_top.env.u_L2tlb_agent_agent*", "vif", l2tlb_vif)) begin
-        `uvm_fatal(get_type_name(), "L2TLB virtual interface is not set")
-    end
 endfunction:ensure_context
 
 function void memblock_l2tlb_base_sequence::initialize_lifecycle_state();
     pending_q.delete();
+    barrier_q.delete();
     driving_req = null;
     driving_valid = 1'b0;
+    due_barrier_this_sample = 1'b0;
+    fire_visible_event_seq = 0;
     accepted_count = 0;
     completed_count = 0;
     flush_canceled_count = 0;
@@ -438,7 +771,90 @@ function void memblock_l2tlb_base_sequence::initialize_lifecycle_state();
     sampled_req_ready = 1'b0;
     sampled_req_vpn = '0;
     sampled_req_s2xlate = '0;
+    sampled_req_fire = 1'b0;
+    sampled_resp_valid = 1'b0;
+    consecutive_not_ready_samples = 0;
+    last_not_ready_sample_seq = 0;
+    current_sample_reset_epoch = 0;
+    release_close_requested = 1'b0;
+    release_generation = 0;
+    final_item_sent = 1'b0;
+    baseline_pending = 1'b0;
+    baseline_sent_sample_seq = 0;
 endfunction:initialize_lifecycle_state
+
+task memblock_l2tlb_base_sequence::wait_for_l2tlb_transport_sample(
+    output L2tlb_agent_agent_transport_sample sample_ref,
+    output memblock_l2tlb_drv_sample_t sample);
+    sample_ref = null;
+    sample = '{default:'0,
+               sample_ready_result:
+                   memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_NOT_READY,
+               sampled_item_kind:
+                   memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_NORMAL};
+    if (l2tlb_sqr == null) begin
+        `uvm_fatal(get_type_name(), "L2TLB transport sample requested before sequencer context")
+    end
+    l2tlb_sqr.wait_transport_sample(sample_ref);
+    if (sample_ref == null || !sample_ref.get_payload(sample)) begin
+        `uvm_fatal(get_type_name(), "failed to obtain frozen L2TLB transport sample")
+    end
+    if (sample.transport_sample_seq == 0 ||
+        (sample.dut_sample_seq == 0 && sample.sample_valid)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("invalid frozen L2TLB sample transport=%0d dut=%0d valid=%0d",
+                             sample.transport_sample_seq,
+                             sample.dut_sample_seq,
+                             sample.sample_valid))
+    end
+endtask:wait_for_l2tlb_transport_sample
+
+function void memblock_l2tlb_base_sequence::ack_l2tlb_transport_sample(
+    input longint unsigned transport_sample_seq,
+    input memblock_sync_pkg::memblock_l2tlb_transport_terminal_e terminal_kind);
+    if (l2tlb_sqr == null ||
+        !l2tlb_sqr.ack_transport_sample(transport_sample_seq, terminal_kind)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("failed to acknowledge L2TLB transport sample seq=%0d kind=%0d",
+                             transport_sample_seq, terminal_kind))
+    end
+endfunction:ack_l2tlb_transport_sample
+
+task memblock_l2tlb_base_sequence::drop_stale_l2tlb_transport_sample(
+    input memblock_l2tlb_drv_sample_t sample);
+    L2tlb_agent_agent_xaction cycle_tr;
+
+    cycle_tr = create_l2tlb_xaction($sformatf("l2tlb_stale_epoch_idle_%0d",
+                                               sample.transport_sample_seq));
+    stamp_lifecycle_item(cycle_tr,
+                         memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_NORMAL,
+                         0, 1'b0);
+    ack_l2tlb_transport_sample(
+        sample.transport_sample_seq,
+        memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_DROPPED);
+    send_l2tlb_item(cycle_tr);
+endtask:drop_stale_l2tlb_transport_sample
+
+function void memblock_l2tlb_base_sequence::note_l2tlb_sample_not_ready(
+    input memblock_l2tlb_drv_sample_t sample,
+    input string reason);
+    if (last_not_ready_sample_seq != sample.transport_sample_seq) begin
+        consecutive_not_ready_samples++;
+        last_not_ready_sample_seq = sample.transport_sample_seq;
+    end
+    if (consecutive_not_ready_samples >
+        `MEMBLOCK_L2TLB_SAMPLE_NOT_READY_MAX_SAMPLES) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("L2TLB sample readiness watchdog expired reason=%s epoch=%0d transport=%0d dut_sample=%0d count=%0d csr_watermark=%0d event_watermark=%0d",
+                             reason,
+                             sample.sampled_reset_epoch,
+                             sample.transport_sample_seq,
+                             sample.dut_sample_seq,
+                             consecutive_not_ready_samples,
+                             memblock_sync_pkg::csr_history_published_seq,
+                             memblock_sync_pkg::lifecycle_event_published_seq))
+    end
+endfunction:note_l2tlb_sample_not_ready
 
 function void memblock_l2tlb_base_sequence::drain_csr_runtime_events();
     memblock_sync_pkg::dispatch_raw_csr_t raw_csr;
@@ -457,12 +873,35 @@ function void memblock_l2tlb_base_sequence::drain_csr_runtime_events();
 endfunction:drain_csr_runtime_events
 
 function bit memblock_l2tlb_base_sequence::request_fire();
-    return sampled_req_valid && sampled_req_ready;
+    return sampled_req_fire;
 endfunction:request_fire
 
 function int unsigned memblock_l2tlb_base_sequence::outstanding_count();
     return pending_q.size() + (driving_valid ? 1 : 0);
 endfunction:outstanding_count
+
+function bit memblock_l2tlb_base_sequence::get_request_csr_snapshot(
+    output mmu_csr_runtime_state snapshot);
+    memblock_sync_pkg::dispatch_raw_csr_t raw_csr;
+
+    snapshot = null;
+    if (!memblock_sync_pkg::get_l2tlb_request_csr_history(sample_seq,
+                                                          raw_csr)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("missing V2 C-2 CSR history for request sample=%0d",
+                             sample_seq))
+        return 1'b0;
+    end
+    snapshot = mmu_csr_runtime_state::type_id::create(
+        $sformatf("l2tlb_request_csr_%0d", sample_seq));
+    if (snapshot == null) begin
+        `uvm_fatal(get_type_name(), "failed to allocate request CSR snapshot")
+        return 1'b0;
+    end
+    snapshot.reset();
+    snapshot.update_from_raw_csr(raw_csr);
+    return 1'b1;
+endfunction:get_request_csr_snapshot
 
 function void memblock_l2tlb_base_sequence::check_l2tlb_lifecycle_accounting(input string audit_context);
     longint unsigned accounted_count;
@@ -476,6 +915,14 @@ function void memblock_l2tlb_base_sequence::check_l2tlb_lifecycle_accounting(inp
                              flush_canceled_count, reset_canceled_count,
                              pending_q.size(), driving_valid, accounted_count))
     end
+    if (audit_context == "owner_release" &&
+        (barrier_q.size() != 0 ||
+         (data != null && data.has_waiting_uid_tlb_record()))) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("L2TLB lifecycle release is not quiescent barrier_count=%0d waiting_uid=%0d",
+                             barrier_q.size(),
+                             (data != null) ? data.has_waiting_uid_tlb_record() : 1'b0))
+    end
 endfunction:check_l2tlb_lifecycle_accounting
 
 function void memblock_l2tlb_base_sequence::cancel_outstanding_by_reset();
@@ -483,9 +930,12 @@ function void memblock_l2tlb_base_sequence::cancel_outstanding_by_reset();
 
     canceled_count = outstanding_count();
     reset_canceled_count += canceled_count;
+    void'(data.cancel_waiting_uid_tlb_records("l2tlb_runtime_reset"));
     pending_q.delete();
+    barrier_q.delete();
     driving_req = null;
     driving_valid = 1'b0;
+    due_barrier_this_sample = 1'b0;
     if (canceled_count != 0) begin
         `uvm_info(get_type_name(),
                   $sformatf("reset canceled %0d L2TLB tokens at sample=%0d",
@@ -515,7 +965,9 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
     next_request_token++;
     pending.vpn = sampled_req_vpn;
     pending.s2xlate = sampled_req_s2xlate;
-    data.get_mmu_csr_snapshot(pending.csr_snapshot);
+    if (!get_request_csr_snapshot(pending.csr_snapshot)) begin
+        pending.csr_snapshot = null;
+    end
     if (pending.csr_snapshot == null) begin
         `uvm_fatal(get_type_name(), "failed to capture request-time CSR snapshot")
     end
@@ -539,6 +991,9 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
                              pending.lookup_key.vpn,
                              returned_key.vpn))
     end
+    // The UID ledger records only a real DTLB/L2TLB request fire.  It is not
+    // inferred from issue time or from a later response lookup.
+    void'(data.mark_uid_tlb_record_request_fire(pending.lookup_key, sample_seq));
     pending.entry_snapshot = memblock_tlb_entry::type_id::create(
         $sformatf("l2tlb_entry_snapshot_%0d", pending.request_token));
     if (pending.entry_snapshot == null) begin
@@ -554,7 +1009,10 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
     pending.min_latency = choose_latency(pending.latency_bucket);
     pending.accept_sample_seq = sample_seq;
     pending.due_sample_seq = sample_seq + pending.min_latency;
-    pending.accept_flush_event_seq = last_seen_flush_event_seq;
+    // A request firing in the same sample as a new event belongs to the
+    // pre-event visibility window; C4 cancellation compares against this
+    // cursor, not the event just observed at C0.
+    pending.accept_flush_event_seq = fire_visible_event_seq;
     pending_q.push_back(pending);
     accepted_count++;
     `uvm_info(get_type_name(),
@@ -567,53 +1025,73 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
     return pending;
 endfunction:capture_fired_request
 
-function void memblock_l2tlb_base_sequence::record_flush_killed_request(
-    input longint unsigned event_seq,
-    input time event_sample_time);
-    longint unsigned token;
-
-    token = next_request_token;
-    next_request_token++;
-    accepted_count++;
-    flush_canceled_count++;
-    `uvm_info(get_type_name(),
-              $sformatf("flush-event-window canceled L2TLB token=%0d vpn=0x%0h s2xlate=%0d sample=%0d event_seq=%0d event_time=%0t",
-                        token, sampled_req_vpn, sampled_req_s2xlate,
-                        sample_seq, event_seq, event_sample_time),
-              UVM_LOW)
-    check_l2tlb_lifecycle_accounting("flush_window_cancel");
-endfunction:record_flush_killed_request
-
 function int unsigned memblock_l2tlb_base_sequence::handle_l2tlb_flush_event(
-    input longint unsigned event_seq,
-    input time event_sample_time,
-    output bit request_killed);
-    int unsigned drop_count;
-
-    request_killed = 1'b0;
-    drop_count = 0;
-    for (int idx = int'(pending_q.size()) - 1; idx >= 0; idx--) begin
-        if (pending_q[idx].accept_flush_event_seq < event_seq) begin
-            pending_q.delete(idx);
-            drop_count++;
-        end
+    input memblock_sync_pkg::memblock_l2tlb_event_record_t event_record);
+    if (event_record.event_seq == memblock_sync_pkg::MEMBLOCK_L2TLB_EVENT_SEQ_NONE ||
+        event_record.anchor_sample_seq != sample_seq) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("invalid current L2TLB barrier event_seq=%0d anchor=%0d sample=%0d",
+                             event_record.event_seq,
+                             event_record.anchor_sample_seq,
+                             sample_seq))
     end
-    flush_canceled_count += drop_count;
-    last_seen_flush_event_seq = event_seq;
+    barrier_q.push_back(event_record);
     accept_hold_until_sample = sample_seq + MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES;
     ready_opportunity_since_lifecycle_block = 1'b0;
-    if (acceptance_opened_since_reset && event_sample_time == $time && request_fire()) begin
-        record_flush_killed_request(event_seq, event_sample_time);
-        request_killed = 1'b1;
-    end
     `uvm_info(get_type_name(),
-              $sformatf("apply L2TLB flush event_seq=%0d event_time=%0t sample=%0d dropped=%0d killed_current=%0d hold_until=%0d",
-                        event_seq, event_sample_time, sample_seq,
-                        drop_count, request_killed, accept_hold_until_sample),
+              $sformatf("record L2TLB flush barrier event_seq=%0d anchor=%0d due=%0d hold_until=%0d",
+                        event_record.event_seq,
+                        event_record.anchor_sample_seq,
+                        event_record.anchor_sample_seq + MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES,
+                        accept_hold_until_sample),
               UVM_LOW)
-    check_l2tlb_lifecycle_accounting("flush_event");
-    return drop_count;
+    return 1;
 endfunction:handle_l2tlb_flush_event
+
+function int unsigned memblock_l2tlb_base_sequence::apply_due_l2tlb_flush_barriers(
+    input longint unsigned current_sample_seq);
+    int unsigned due_count;
+
+    due_count = 0;
+    while (barrier_q.size() != 0 &&
+           barrier_q[0].anchor_sample_seq + MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES <=
+           current_sample_seq) begin
+        memblock_sync_pkg::memblock_l2tlb_event_record_t barrier;
+        int unsigned barrier_cancel_count;
+
+        barrier = barrier_q.pop_front();
+        barrier_cancel_count = 0;
+        due_count++;
+        // A response selected for the due sample is checked by the caller
+        // before completion; only still-pending tokens are canceled here.
+        for (int idx = int'(pending_q.size()) - 1; idx >= 0; idx--) begin
+            if (pending_q[idx].accept_flush_event_seq < barrier.event_seq) begin
+                pending_q.delete(idx);
+                barrier_cancel_count++;
+            end
+        end
+        // C4 cancels only UID records with an observed request-fire marker in
+        // the pre-barrier visibility window.  UNBOUND records remain eligible
+        // for a later real request and are never canceled by this path.
+        void'(data.cancel_waiting_uid_tlb_records_through_sample(
+            barrier.anchor_sample_seq,
+            $sformatf("l2tlb_flush_due_event_%0d", barrier.event_seq)));
+        flush_canceled_count += barrier_cancel_count;
+        // The due sample itself emits an inactive cycle; reopen admission on
+        // the following sample.
+        accept_hold_until_sample = current_sample_seq + 1;
+        `uvm_info(get_type_name(),
+                  $sformatf("apply L2TLB due barrier event_seq=%0d due=%0d canceled=%0d",
+                            barrier.event_seq,
+                            barrier.anchor_sample_seq + MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES,
+                            barrier_cancel_count),
+                  UVM_LOW)
+    end
+    if (due_count != 0) begin
+        check_l2tlb_lifecycle_accounting("due_flush");
+    end
+    return due_count;
+endfunction:apply_due_l2tlb_flush_barriers
 
 function bit memblock_l2tlb_base_sequence::select_due_response(
     input longint unsigned next_sample_seq,
@@ -624,6 +1102,13 @@ function bit memblock_l2tlb_base_sequence::select_due_response(
     int unsigned choice;
 
     cycle_tr = null;
+    foreach (barrier_q[barrier_idx]) begin
+        if (barrier_q[barrier_idx].anchor_sample_seq +
+            MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES <= next_sample_seq) begin
+            // The response would be visible on the filter due sample.
+            return 1'b0;
+        end
+    end
     if (pending_q.size() == 0) begin
         return 1'b0;
     end
@@ -649,13 +1134,6 @@ function bit memblock_l2tlb_base_sequence::select_due_response(
         end
         selected_index = eligible_indices[choice];
     end
-    if (pending_q[selected_index].accept_flush_event_seq != last_seen_flush_event_seq) begin
-        `uvm_fatal(get_type_name(),
-                   $sformatf("selected stale L2TLB token=%0d accept_event=%0d current_event=%0d",
-                             pending_q[selected_index].request_token,
-                             pending_q[selected_index].accept_flush_event_seq,
-                             last_seen_flush_event_seq))
-    end
     driving_req = pending_q[selected_index];
     pending_q.delete(selected_index);
     driving_valid = 1'b1;
@@ -670,6 +1148,7 @@ endfunction:select_due_response
 function void memblock_l2tlb_base_sequence::complete_driving_response();
     int unsigned record_update_count;
     longint unsigned complete_sample_seq;
+    mmu_csr_runtime_state response_filter_csr_snapshot;
 
     if (!driving_valid || driving_req == null) begin
         `uvm_fatal(get_type_name(), "complete_driving_response got invalid driving slot")
@@ -683,9 +1162,15 @@ function void memblock_l2tlb_base_sequence::complete_driving_response();
                              driving_req.due_sample_seq,
                              complete_sample_seq))
     end
-    record_update_count = data.update_uid_tlb_records_by_entry(
-        driving_req.lookup_key,
-        driving_req.entry_snapshot);
+    if (!get_request_csr_snapshot(response_filter_csr_snapshot) ||
+        response_filter_csr_snapshot == null) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("missing response-visible C-2 CSR for L2TLB response sample=%0d",
+                             complete_sample_seq))
+    end
+    record_update_count = data.complete_waiting_uid_records_by_response(
+        driving_req.entry_snapshot,
+        response_filter_csr_snapshot);
     `uvm_info(get_type_name(),
               $sformatf("complete L2TLB token=%0d bucket=%0d min_latency=%0d accept=%0d due=%0d complete=%0d extra_wait=%0d uid_records=%0d pending=%0d",
                         driving_req.request_token,
@@ -785,6 +1270,40 @@ function void memblock_l2tlb_base_sequence::clear_l2tlb_xaction(input L2tlb_agen
     tr.pre_pkt_gap = 0;
     tr.post_pkt_gap = 0;
 endfunction:clear_l2tlb_xaction
+
+function void memblock_l2tlb_base_sequence::stamp_lifecycle_item(
+    input L2tlb_agent_agent_xaction tr,
+    input memblock_sync_pkg::memblock_l2tlb_release_item_kind_e item_kind,
+    input longint unsigned generation,
+    input bit is_post_reset_baseline);
+    longint unsigned item_epoch;
+
+    if (tr == null) begin
+        `uvm_fatal(get_type_name(), "stamp_lifecycle_item got null xaction")
+    end
+    item_epoch = current_sample_reset_epoch;
+    if (lifecycle_owner_name == "") begin
+        `uvm_fatal(get_type_name(), "cannot stamp L2TLB item without lifecycle owner")
+    end
+    if (is_post_reset_baseline &&
+        item_kind != memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_NORMAL) begin
+        `uvm_fatal(get_type_name(), "post-reset baseline metadata requires NORMAL item")
+    end
+    if (item_kind != memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_NORMAL &&
+        generation == 0) begin
+        `uvm_fatal(get_type_name(), "release L2TLB item requires non-zero generation")
+    end
+    if (item_kind == memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_NORMAL &&
+        generation != 0) begin
+        `uvm_fatal(get_type_name(), "NORMAL L2TLB item cannot carry release generation")
+    end
+
+    tr.item_kind = item_kind;
+    tr.item_generation = generation;
+    tr.item_reset_epoch = item_epoch;
+    tr.item_owner_name = lifecycle_owner_name;
+    tr.is_post_reset_baseline = is_post_reset_baseline;
+endfunction:stamp_lifecycle_item
 
 function void memblock_l2tlb_base_sequence::fill_dtlb_resp_from_entry(input memblock_tlb_entry entry,
                                                                       ref L2tlb_agent_agent_xaction resp);

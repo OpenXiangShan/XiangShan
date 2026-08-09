@@ -8,6 +8,155 @@
 `ifndef L2TLB_AGENT_AGENT_XACTION__SV
 `define L2TLB_AGENT_AGENT_XACTION__SV
 
+// Driver-owned immutable transport payload.  The struct deliberately contains
+// 4-state interface values; the driver is the only component that derives fire
+// from these values.  It contains no UVM handles, mailbox state, or TLB data.
+typedef struct {
+    longint unsigned transport_sample_seq;
+    longint unsigned dut_sample_seq;
+    bit              sample_valid;
+    bit              sampled_reset_active;
+    longint unsigned sampled_reset_epoch;
+    memblock_sync_pkg::memblock_l2tlb_sample_ready_result_e sample_ready_result;
+    time             sampled_time;
+
+    logic            sampled_req_valid;
+    logic            sampled_req_ready;
+    logic [37:0]     sampled_req_vpn;
+    logic [1:0]      sampled_req_s2xlate;
+    logic            sampled_req_fire;
+    logic            sampled_resp_valid;
+    logic [1:0]      sampled_resp_bits_s2xlate;
+    logic [34:0]     sampled_resp_bits_s1_entry_tag;
+    logic [15:0]     sampled_resp_bits_s1_entry_asid;
+    logic [13:0]     sampled_resp_bits_s1_entry_vmid;
+    logic            sampled_resp_bits_s1_entry_n;
+    logic [1:0]      sampled_resp_bits_s1_entry_pbmt;
+    logic            sampled_resp_bits_s1_entry_perm_d;
+    logic            sampled_resp_bits_s1_entry_perm_a;
+    logic            sampled_resp_bits_s1_entry_perm_g;
+    logic            sampled_resp_bits_s1_entry_perm_u;
+    logic            sampled_resp_bits_s1_entry_perm_x;
+    logic            sampled_resp_bits_s1_entry_perm_w;
+    logic            sampled_resp_bits_s1_entry_perm_r;
+    logic [1:0]      sampled_resp_bits_s1_entry_level;
+    logic            sampled_resp_bits_s1_entry_v;
+    logic [40:0]     sampled_resp_bits_s1_entry_ppn;
+    logic [2:0]      sampled_resp_bits_s1_addr_low;
+    logic [2:0]      sampled_resp_bits_s1_ppn_low_0;
+    logic [2:0]      sampled_resp_bits_s1_ppn_low_1;
+    logic [2:0]      sampled_resp_bits_s1_ppn_low_2;
+    logic [2:0]      sampled_resp_bits_s1_ppn_low_3;
+    logic [2:0]      sampled_resp_bits_s1_ppn_low_4;
+    logic [2:0]      sampled_resp_bits_s1_ppn_low_5;
+    logic [2:0]      sampled_resp_bits_s1_ppn_low_6;
+    logic [2:0]      sampled_resp_bits_s1_ppn_low_7;
+    logic            sampled_resp_bits_s1_valididx_0;
+    logic            sampled_resp_bits_s1_valididx_1;
+    logic            sampled_resp_bits_s1_valididx_2;
+    logic            sampled_resp_bits_s1_valididx_3;
+    logic            sampled_resp_bits_s1_valididx_4;
+    logic            sampled_resp_bits_s1_valididx_5;
+    logic            sampled_resp_bits_s1_valididx_6;
+    logic            sampled_resp_bits_s1_valididx_7;
+    logic            sampled_resp_bits_s1_pteidx_0;
+    logic            sampled_resp_bits_s1_pteidx_1;
+    logic            sampled_resp_bits_s1_pteidx_2;
+    logic            sampled_resp_bits_s1_pteidx_3;
+    logic            sampled_resp_bits_s1_pteidx_4;
+    logic            sampled_resp_bits_s1_pteidx_5;
+    logic            sampled_resp_bits_s1_pteidx_6;
+    logic            sampled_resp_bits_s1_pteidx_7;
+    logic            sampled_resp_bits_s1_pf;
+    logic            sampled_resp_bits_s1_af;
+    logic [37:0]     sampled_resp_bits_s2_entry_tag;
+    logic [13:0]     sampled_resp_bits_s2_entry_vmid;
+    logic            sampled_resp_bits_s2_entry_n;
+    logic [1:0]      sampled_resp_bits_s2_entry_pbmt;
+    logic [37:0]     sampled_resp_bits_s2_entry_ppn;
+    logic            sampled_resp_bits_s2_entry_perm_d;
+    logic            sampled_resp_bits_s2_entry_perm_a;
+    logic            sampled_resp_bits_s2_entry_perm_g;
+    logic            sampled_resp_bits_s2_entry_perm_u;
+    logic            sampled_resp_bits_s2_entry_perm_x;
+    logic            sampled_resp_bits_s2_entry_perm_w;
+    logic            sampled_resp_bits_s2_entry_perm_r;
+    logic [1:0]      sampled_resp_bits_s2_entry_level;
+    logic            sampled_resp_bits_s2_gpf;
+    logic            sampled_resp_bits_s2_gaf;
+
+    // Metadata belongs to the item that was driven before this sample.  It is
+    // never connected to DUT wires and is copied by the driver as provenance.
+    memblock_sync_pkg::memblock_l2tlb_release_item_kind_e sampled_item_kind;
+    longint unsigned sampled_item_generation;
+    longint unsigned sampled_item_reset_epoch;
+    string           sampled_item_owner_name;
+    bit              sampled_item_is_post_reset_baseline;
+    bit              baseline_required;
+    bit              baseline_proof_pending;
+    longint unsigned baseline_sent_sample_seq;
+
+    // This proof is written only by the driver before wrapper freeze.
+    bit              sampled_final_inactive_proof_valid;
+    longint unsigned sampled_final_inactive_proof_epoch;
+    longint unsigned sampled_final_inactive_proof_transport_sample_seq;
+} memblock_l2tlb_drv_sample_t;
+
+// The wrapper is the sole owner of the frozen payload.  Consumers receive a
+// value copy, so mailbox recycling cannot mutate a sample already observed by
+// the monitor or sequence.
+class L2tlb_agent_agent_transport_sample extends uvm_object;
+    local memblock_l2tlb_drv_sample_t payload_data;
+    local bit frozen;
+
+    `uvm_object_utils(L2tlb_agent_agent_transport_sample)
+
+    extern function new(string name="L2tlb_agent_agent_transport_sample");
+    extern function void fill_payload(input memblock_l2tlb_drv_sample_t payload);
+    extern function void freeze();
+    extern function bit get_payload(output memblock_l2tlb_drv_sample_t payload);
+    extern function bit is_frozen();
+endclass:L2tlb_agent_agent_transport_sample
+
+function L2tlb_agent_agent_transport_sample::new(string name="L2tlb_agent_agent_transport_sample");
+    super.new(name);
+    payload_data = '{default:'0,
+                    sample_ready_result:
+                        memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_NOT_READY,
+                    sampled_item_kind:
+                        memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_NORMAL};
+    frozen = 1'b0;
+endfunction:new
+
+function void L2tlb_agent_agent_transport_sample::fill_payload(
+    input memblock_l2tlb_drv_sample_t payload);
+    if (frozen) begin
+        `uvm_fatal("MEMBLOCK_L2TLB_TRANSPORT", "attempt to modify frozen transport sample")
+    end
+    payload_data = payload;
+endfunction:fill_payload
+
+function void L2tlb_agent_agent_transport_sample::freeze();
+    if (frozen) begin
+        `uvm_fatal("MEMBLOCK_L2TLB_TRANSPORT", "transport sample frozen twice")
+    end
+    frozen = 1'b1;
+endfunction:freeze
+
+function bit L2tlb_agent_agent_transport_sample::get_payload(
+    output memblock_l2tlb_drv_sample_t payload);
+    if (!frozen) begin
+        `uvm_fatal("MEMBLOCK_L2TLB_TRANSPORT", "read of unfrozen transport sample")
+        return 1'b0;
+    end
+    payload = payload_data;
+    return 1'b1;
+endfunction:get_payload
+
+function bit L2tlb_agent_agent_transport_sample::is_frozen();
+    return frozen;
+endfunction:is_frozen
+
 class L2tlb_agent_agent_xaction  extends tcnt_data_base;
     // L2TLB/PTW response template. Use scenario objects to build semantically
     // correct entries; these base constraints only enforce structural legality.
@@ -77,6 +226,14 @@ class L2tlb_agent_agent_xaction  extends tcnt_data_base;
     rand bit [1:0] io_ptw_resp_bits_s2_entry_level;
     rand bit io_ptw_resp_bits_s2_gpf   ;
     rand bit io_ptw_resp_bits_s2_gaf   ;
+
+    // Local lifecycle metadata.  These fields are intentionally non-rand and
+    // do not alter the existing request/response payload or its constraints.
+    memblock_sync_pkg::memblock_l2tlb_release_item_kind_e item_kind;
+    longint unsigned item_generation;
+    longint unsigned item_reset_epoch;
+    string item_owner_name;
+    bit is_post_reset_baseline;
 
     extern constraint default_io_ptw_req_0_ready_cons;
     extern constraint default_io_ptw_req_0_valid_cons;
@@ -473,6 +630,11 @@ constraint L2tlb_agent_agent_xaction::default_io_ptw_resp_bits_s2_gaf_cons{
 
 function L2tlb_agent_agent_xaction::new(string name = "L2tlb_agent_agent_xaction");
     super.new();
+    item_kind = memblock_sync_pkg::MEMBLOCK_L2TLB_ITEM_NORMAL;
+    item_generation = 0;
+    item_reset_epoch = 0;
+    item_owner_name = "";
+    is_post_reset_baseline = 1'b0;
 endfunction:new
 
 function void L2tlb_agent_agent_xaction::pack();
@@ -560,6 +722,11 @@ function string L2tlb_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sio_ptw_resp_bits_s2_entry_level = 0x%0h ",pkt_str,this.io_ptw_resp_bits_s2_entry_level);
     pkt_str = $sformatf("%sio_ptw_resp_bits_s2_gpf = 0x%0h ",pkt_str,this.io_ptw_resp_bits_s2_gpf);
     pkt_str = $sformatf("%sio_ptw_resp_bits_s2_gaf = 0x%0h ",pkt_str,this.io_ptw_resp_bits_s2_gaf);
+    pkt_str = $sformatf("%sitem_kind = %0d ",pkt_str,this.item_kind);
+    pkt_str = $sformatf("%sitem_generation = %0d ",pkt_str,this.item_generation);
+    pkt_str = $sformatf("%sitem_reset_epoch = %0d ",pkt_str,this.item_reset_epoch);
+    pkt_str = $sformatf("%sitem_owner_name = %s ",pkt_str,this.item_owner_name);
+    pkt_str = $sformatf("%sis_post_reset_baseline = %0d ",pkt_str,this.is_post_reset_baseline);
 
     return pkt_str;
 endfunction:psdisplay

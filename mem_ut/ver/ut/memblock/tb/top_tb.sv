@@ -40,6 +40,10 @@ module top_tb;
     `MEMBLOCK_CONNECT(env,top_tb.U_MEMBLOCK)
 
     initial begin
+        // Initialize the shared sample coordinator before any UVM monitor can
+        // observe a DUT clock edge. Later software-table resets must not
+        // rewind this global sample clock.
+        memblock_sync_pkg::initialize_l2tlb_sample_coordinator();
         memblock_sync_pkg::reset_backend_done = 1'b0;
         wait(tc_if.rst_n === 1'b0);
         wait(tc_if.rst_n === 1'b1);

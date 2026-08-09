@@ -80,6 +80,7 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
     logic [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] sq_deq_ptr_value;
     io_mem_to_ooo_ctrl_agent_agent_xaction  mon_tr;
     memblock_sync_pkg::dispatch_raw_ctrl_t raw_ctrl;
+    longint unsigned sample_seq;
     while(1) begin
         @this.vif.mon_mp.mon_cb;
         io_mem_to_ooo_topToBackendBypass_hartId = this.vif.mon_mp.mon_cb.io_mem_to_ooo_topToBackendBypass_hartId;
@@ -176,8 +177,15 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
                 `TCNT_CHECK_SIG_XZ(sq_deq_ptr_value,sq_deq_ptr_value,`MEMBLOCK_DUT_SQ_VALUE_W);
             end
         end
-        if(this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
+        if(this.vif.rst_n==1'b1 &&
+           memblock_sync_pkg::reset_backend_done==1'b1 &&
+           !memblock_sync_pkg::l2tlb_reset_active()) begin
             bit any_mmio_valid;
+
+            // This monitor is a same-edge consumer/producer only. The CSR
+            // monitor owns reset re-arm and advancement; ctrl data is only
+            // anchored after the shared reset boundary has closed.
+            memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
 
             any_mmio_valid = store_mmio_valid === 1'b1;
             foreach (load_mmio_valid[port]) begin
@@ -205,7 +213,7 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
                 // adapter/LSQ owner 只在对应 redirect target sample 消费一次。
                 cancel_snapshot.lq_cancel_count = io_mem_to_ooo_lqCancelCnt;
                 cancel_snapshot.sq_cancel_count = io_mem_to_ooo_sqCancelCnt;
-                cancel_snapshot.sample_seq = memblock_sync_pkg::get_dut_sample_seq($time);
+                cancel_snapshot.sample_seq = sample_seq;
                 cancel_snapshot.cycle = $time;
                 memblock_sync_pkg::push_raw_cancel_snapshot(cancel_snapshot);
             end
@@ -237,7 +245,7 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
                     raw_ctrl.mmio_flush_epoch = memblock_sync_pkg::dispatch_flush_epoch;
                     // 中文伪代码：MMIO valid 时把本次 monitor sample 的单调序号
                     // 固定到 raw；后续 adapter 不得用消费时刻的序号覆盖它。
-                    raw_ctrl.mmio_sample_seq = memblock_sync_pkg::get_dut_sample_seq($time);
+                    raw_ctrl.mmio_sample_seq = sample_seq;
                 end
                 raw_ctrl.memory_violation_valid = io_mem_to_ooo_memoryViolation_valid;
                 raw_ctrl.memory_violation_rob_valid = io_mem_to_ooo_memoryViolation_valid;

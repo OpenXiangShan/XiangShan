@@ -19,6 +19,7 @@ class memblock_dispatch_real_smoke_vseq extends virtual_base_sequence;
     extern virtual function void initialize_shared_memory_store();
     extern virtual task start_background_responders();
     extern virtual task start_core_dispatch_flow();
+    extern virtual task wait_for_explicit_l2tlb_start_barrier();
 
 endclass:memblock_dispatch_real_smoke_vseq
 
@@ -120,6 +121,7 @@ task memblock_dispatch_real_smoke_vseq::start_core_dispatch_flow();
             `uvm_do_on(lsqcommit_seq, p_sequencer.lsqcommit_sqr)
         end
         begin : start_l2tlb_sequence
+            wait_for_explicit_l2tlb_start_barrier();
             `uvm_do_on(l2tlb_seq, p_sequencer.L2tlb_sqr)
         end
         begin : start_main_sequence
@@ -127,5 +129,29 @@ task memblock_dispatch_real_smoke_vseq::start_core_dispatch_flow();
         end
     join
 endtask:start_core_dispatch_flow
+
+// 抽象职责：显式 real-dispatch vseq 在启动 L2TLB responder 前等待主表完成初始化。
+// 该屏障只属于 explicit vseq 拓扑；legacy default sequence 不调用它，普通无主表 testcase 不会被永久等待。
+task memblock_dispatch_real_smoke_vseq::wait_for_explicit_l2tlb_start_barrier();
+    common_data_transaction barrier_data;
+    int unsigned wait_count;
+
+    barrier_data = common_data_transaction::get();
+    if (barrier_data == null) begin
+        `uvm_fatal(get_type_name(), "failed to get common_data_transaction for L2TLB start barrier")
+    end
+    wait_count = 0;
+    while (!barrier_data.main_table_ready) begin
+        if (wait_count != 0 && (wait_count % 5000) == 0) begin
+            `uvm_warning(get_type_name(),
+                         $sformatf("still waiting for main table before explicit L2TLB start: wait_count=%0d main_trans_num=%0d next_uid=%0d",
+                                   wait_count,
+                                   barrier_data.main_trans_num,
+                                   barrier_data.next_uid))
+        end
+        #1;
+        wait_count++;
+    end
+endtask:wait_for_explicit_l2tlb_start_barrier
 
 `endif

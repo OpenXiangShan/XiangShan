@@ -22,6 +22,7 @@ package L2tlb_agent_agent_pkg;
     import tcnt_dec_base::*;
     import tcnt_common_method::*;
     import tcnt_base_pkg::*;
+    import memblock_sync_pkg::*;
 
     import L2tlb_agent_agent_dec::*;
 

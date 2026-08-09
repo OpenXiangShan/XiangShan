@@ -17,6 +17,9 @@
     initial begin \
         U_IF_NAME``_l2tlb_active = (`MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN != 0); \
         memblock_sync_pkg::l2tlb_responder_active = U_IF_NAME``_l2tlb_active; \
+        // Dispatch topology is selected later by the testcase lifecycle \
+        // coordinator.  Connect takeover only states that these wires can be \
+        // driven by the L2TLB responder. \
         U_IF_NAME.io_ptw_req_0_ready = '0; \
         U_IF_NAME.io_ptw_resp_valid = '0; \
         U_IF_NAME.io_ptw_resp_bits_s2xlate = '0; \

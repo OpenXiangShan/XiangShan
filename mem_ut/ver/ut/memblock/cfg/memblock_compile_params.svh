@@ -169,6 +169,35 @@
 `ifndef MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES
     `define MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES 4
 `endif
+// L2TLB sample/history contracts.  These are compile-time timing/capability
+// limits, not testcase knobs.
+`ifndef MEMBLOCK_DUT_L2TLB_CSR_PIPE_STAGES
+    `define MEMBLOCK_DUT_L2TLB_CSR_PIPE_STAGES 2
+`endif
+`ifndef MEMBLOCK_L2TLB_EVENT_HISTORY_MAX_DEPTH
+    `define MEMBLOCK_L2TLB_EVENT_HISTORY_MAX_DEPTH 64
+`endif
+`ifndef MEMBLOCK_L2TLB_SAMPLE_MAILBOX_DEPTH
+    `define MEMBLOCK_L2TLB_SAMPLE_MAILBOX_DEPTH 1
+`endif
+`ifndef MEMBLOCK_L2TLB_SAMPLE_PROBE_MAX_DELTA
+    `define MEMBLOCK_L2TLB_SAMPLE_PROBE_MAX_DELTA 2
+`endif
+`ifndef MEMBLOCK_L2TLB_SAMPLE_NOT_READY_MAX_SAMPLES
+    `define MEMBLOCK_L2TLB_SAMPLE_NOT_READY_MAX_SAMPLES 8
+`endif
+`ifndef MEMBLOCK_L2TLB_BASELINE_MAX_SAMPLE_DISTANCE
+    `define MEMBLOCK_L2TLB_BASELINE_MAX_SAMPLE_DISTANCE 8
+`endif
+`ifndef MEMBLOCK_L2TLB_RESET_WATCHDOG_MAX_SAMPLES
+    // Runtime reset must converge within a bounded number of post-reset
+    // samples.  This is a lifecycle diagnostic bound, not a DUT latency knob.
+    `define MEMBLOCK_L2TLB_RESET_WATCHDOG_MAX_SAMPLES 16
+`endif
+`ifndef MEMBLOCK_L2TLB_RESET_BACKEND_WAIT_MAX_SAMPLES
+    // Bootstrap diagnostic bound for a backend that never releases reset.
+    `define MEMBLOCK_L2TLB_RESET_BACKEND_WAIT_MAX_SAMPLES 64
+`endif
 
 // L2TLB connect-time takeover switch.
 // 1: mem_ut L2TLB_agent owns the DTLB <-> L2TLB response path.

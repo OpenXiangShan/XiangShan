@@ -687,7 +687,7 @@ sequence 的 pending/driving 状态。reset 边界读取一次 latest snapshot �
 > 其中“顶层 monitor 观察到 flush 后立即删除 `pending_q`”及“同拍 fire 直接记为
 > `flush-killed`”已经被证实早于 V2 `PTWNewFilter` 的实际清空边界，不能再作为当前实现依据。
 > 后续 coding 必须以
-> `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`
+> `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`
 > 为准：C0 只记录 event 并关闭后续 ready，C0 的真实 request fire 正常建 token；C4 先确认已经
 > 驱动的 response，再取消仍 pending 的旧 token。`sfence.bits.flushPipe` 不得作为 token 取消条件。
 

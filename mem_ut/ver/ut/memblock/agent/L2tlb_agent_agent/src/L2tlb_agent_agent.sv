@@ -33,6 +33,11 @@ endfunction:build_phase
 
 function void L2tlb_agent_agent::connect_phase(uvm_phase phase);
     super.connect_phase(phase);
+    if (this.drv == null || this.sqr == null || this.mon == null) begin
+        `uvm_fatal(get_type_name(), "L2TLB transport components were not constructed")
+    end
+    this.drv.bind_transport_slot_owner(this.sqr);
+    this.drv.transport_sample_ap.connect(this.mon.transport_sample_imp);
 endfunction:connect_phase
 
 `endif

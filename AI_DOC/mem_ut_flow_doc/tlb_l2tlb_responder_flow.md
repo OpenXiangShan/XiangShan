@@ -2,6 +2,180 @@
 
 本文档说明 V2 mem_ut 中 L2TLB responder 的真实函数调用链。当前 `L2TLB_agent` 位于 DTLB 与 L2TLB 的 request/response 连接点：request 方向是 DTLB 到 `L2TLB_agent`，response 方向是 `L2TLB_agent` 到 DTLB。它不建模 L2TLB 到 L2Cache、PTW page walk 或 memory 的下游访问。
 
+**当前生效版本说明：** V2 的 transport sample、C0/C4 flush、reset、stop/final 和 owner release 以本页新增的
+“V2 当前生效时序合同”以及
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`
+为准。原有第 1 节及其后章节保留旧 responder 行为，专门用于与修改前逻辑对比；其中的独立 live-VIF 采样、
+`record_flush_killed_request()`、sequence 直接消费 latest flush 和 phase kill 退出描述，不得作为 V2 coding 依据。
+
+## 0. V2 当前生效时序合同
+
+### 0.1 术语与抽象功能说明
+
+| 英文术语 | 当前 V2 flow 中的中文含义 | 代码对象/状态落点 | 典型例子 |
+|---|---|---|---|
+| `frozen transport sample` | driver 在一个真实 `drv_cb` 边界把 request、response、reset 和 item provenance 冻结成的不可变快照 | `memblock_l2tlb_drv_sample_t`、`L2tlb_agent_agent_transport_sample` | C0 同时保存 `valid/ready/fire`，后续不再读取 live VIF |
+| `global sample` | CSR monitor 在 post-reset monitor 边界唯一推进的跨组件时基 | `dut_sample_seq`、`advance_dut_global_sample()` | CSR、fence、ctrl、redirect 和 driver 使用同一个 sample N |
+| `C0/C4` | flush event 被采样的起点和 V2 filter 完成清理的到期边界 | `anchor_sample_seq`、`barrier_q` | C0 建 barrier，C4 才取消旧 pending token |
+| `flush barrier` | 从 C0 到 C4 期间阻止新 request admission 的记录 | `memblock_l2tlb_event_record_t`、`barrier_q` | barrier 未到期时 ready 必须为 0 |
+| `semantic owner` | 唯一解释 frozen sample、创建 token、调度 response 和释放 lifecycle 的 sequence | `memblock_l2tlb_base_sequence` | driver 不直接改 token/UID |
+| `transport mailbox` | driver 和 semantic owner 之间的单槽 sample 生命周期 | sequencer slot、`PUBLISHED/CONSUMED/DROPPED` | 未 ack 的 sample 不能被下一 sample 覆盖 |
+| `response-visible CSR` | DUT 在 response fire 拍对应的 C-2 CSR history，不是 UID 建立时的旧 snapshot | `get_request_csr_snapshot()` | response raw hit 使用 response 拍上下文 |
+| `producer barrier` | 当前 global sample 的 CSR/fence producer 都已报告完成检查的同步标志 | `sample_producer_done_mask` | 没有 fence 事件也必须报告 fence producer done |
+| `release grant` | parent 在 global stop 后向 owner 发出的单向最终释放许可 | `grant_l2tlb_final_release()` | owner 不能自己伪造 grant 或提前 clear claim |
+| `passive sampler` | 无 dispatch owner 时只采样/诊断物理接口、固定 inactive 的 driver 分支 | `L2tlb_agent_agent_driver` | passive 模式看到 DUT request valid 立即 fatal |
+
+### 0.2 关键函数的抽象功能
+
+| 函数/task | 抽象功能描述 |
+|---|---|
+| `advance_dut_global_sample()` | CSR monitor 为当前 post-reset monitor 边界建立唯一 global sample，并检查上一拍 producer barrier 已闭合；其它组件只读取结果。 |
+| `sample_previous_vif()` | driver 在真实 `drv_cb` 边界冻结上一 item 对应的接口值和 provenance；不建 token、不修改主表。 |
+| `publish_transport_sample()` | 将 frozen sample 同步送给 monitor，并在 owner 有效且 slot 空闲时发布给 semantic owner；只有成功发布后才置 mailbox non-empty。 |
+| `send_l2tlb_cycle()` | sequence 消费一份 sample，完成 response、C0/C4 barrier、request fire、stop/final item 和 sample ack。 |
+| `service_l2tlb_sfence_events()` | dispatch adapter 按 raw 自身 C0 sample 调度 live-entry invalidate，并在 C4 删除命中的 entry；不由 responder sequence 重复消费。 |
+| `recycle_transport_sample_at_drv_cb()` | 下一真实 driver callback 回收 owner 已 ack 的 slot，并在 final sample 回收后清理 provenance。 |
+
+### 0.3 函数调用 Flow 图
+
+```mermaid
+flowchart TD
+    A[CSR monitor::mon_data] --> B[advance_dut_global_sample]
+    B --> C[publish_l2tlb_csr_history]
+    D[fence/ctrl/redirect monitor] --> E[wait_for_l2tlb_sample_anchor]
+    E --> F[note event or publish raw sideband]
+    G[driver::main_phase] --> H[sample_previous_vif]
+    H --> I[publish_transport_sample]
+    I --> J[monitor::write_transport_sample]
+    I --> K[sequencer single-slot mailbox]
+    K --> L[sequence::send_l2tlb_cycle]
+    L --> M{request fire}
+    M -->|yes| N[capture_fired_request]
+    L --> O{C0 event}
+    O -->|yes| P[record barrier]
+    P --> Q[apply_due_l2tlb_flush_barriers at C4]
+    Q --> R[adapter service_l2tlb_sfence_events]
+    L --> S{response/final}
+    S -->|response| T[complete_driving_response]
+    S -->|final proof| U[begin release closing]
+    U --> V[parent release grant]
+    V --> W[ack and recycle at next drv_cb]
+    W --> X[owner release and driver return]
+```
+
+### 0.4 函数调用 Flow 图整体文字伪代码
+
+```text
+V2 L2TLB responder 主流程：
+
+1. CSR monitor 在 post-reset monitor 边界调用 advance_dut_global_sample，检查上一 sample 的 producer mask，
+   再发布本拍 CSR history；CSR monitor 是 global sample 的唯一推进者。
+2. fence、ctrl、redirect monitor 通过 wait_for_l2tlb_sample_anchor 读取同一 sample 序号，只发布各自 raw sideband，
+   不创建 response token，也不推进 global sample。
+3. driver 在真实 drv_cb 调用 sample_previous_vif，冻结上一 item 的 request/response/reset/provenance；
+   调用 publish_transport_sample 时先让 monitor 同步处理同一 wrapper，只有 owner slot 成功占用后才唤醒 sequence。
+4. sequence 取得 slot 后调用 send_l2tlb_cycle：
+   先处理真实 response fire 和 C0/C4 barrier，再处理本拍 request fire；C0 同拍 fire 必须创建 token，不能立即 kill。
+   C4 只取消仍 pending 且早于 barrier 的 token/UID fire marker；adapter 在自己的 due 阶段删除 live entry。
+5. sequence 把下一拍 response 或 inactive/stop/final item 放回 driver；每个 sample 必须先 ack 当前 slot，
+   driver 在下一真实 drv_cb 回收已完成 slot。
+6. global stop 后 parent 发一次 release grant；owner 等 final proof、response/UID/barrier/raw adapter 收敛后释放 claim，
+   driver 在 mailbox 和 slot 都为空时自然退出。任何未确认的 token、UID waiting、barrier 或 final sample 都禁止提前终止。
+```
+
+### 0.5 关键源码合同
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_main_dispatch_auto_build_main_table_base_sequence.sv`，task：`service_monitor_once()`。
+
+抽象功能描述：该 task 为一个 dispatch service tick 建立唯一的 runtime context 入口；它在 reset 未收敛时停止后续 batch，正常时每个 sample 只调用一次 L2TLB adapter service。
+
+```systemverilog
+task memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor_once();
+    memblock_sync_pkg::tick_dispatch_service_cycle();
+    collect_runtime_context_events();
+    if (memblock_sync_pkg::reset_backend_done !== 1'b1 ||
+        memblock_sync_pkg::l2tlb_reset_active()) begin
+        return;
+    end
+    if (monitor_adapter == null) begin
+        monitor_adapter = dispatch_monitor_event_adapter::type_id::create("monitor_adapter");
+    end
+    monitor_adapter.drain_lsq_timing_sidebands();
+    collect_monitor_event_batch();
+    exception_redirect_replay_task();
+    monitor_adapter.drain_lsq_timing_sidebands();
+    monitor_adapter.service_lsq_timing_reconcile();
+endtask
+```
+
+中文伪代码：该 task 先推进 service cycle，再调用 `collect_runtime_context_events()`，由它创建/绑定 adapter、同步 CSR 并处理 C0/C4 raw fence；如果 backend 或 runtime reset 未收敛，立即返回，避免后续 batch 消费 stale 状态。正常时确保 adapter 存在，先后处理 LSQ sideband、monitor batch、异常/redirect/replay，再做一次 sideband reconcile；同一 sample 的 L2TLB context service 不重复调用。
+
+源码位置：`mem_ut/ver/ut/memblock/agent/L2tlb_agent_agent/src/L2tlb_agent_agent_driver.sv`，task：`sample_previous_vif()`。
+
+抽象功能描述：该 task 将真实 driver callback 的物理事实冻结为一个不可变 sample，供 monitor 和 semantic owner 共享；它不推导软件语义。
+
+```systemverilog
+sample.transport_sample_seq = ++transport_sample_seq;
+sample.dut_sample_seq = memblock_sync_pkg::peek_current_dut_global_sample();
+sample.sample_valid = memblock_sync_pkg::dut_sample_time_valid &&
+                      memblock_sync_pkg::dut_sample_time == $time &&
+                      sample.dut_sample_seq != 0;
+sample.sampled_req_fire = (sample.sampled_req_valid === 1'b1) &&
+                          (sample.sampled_req_ready === 1'b1);
+```
+
+中文伪代码：driver 先递增物理 transport 序号，再只读 CSR monitor 已发布的 global sample；时间不匹配时把 sample 标为未就绪，不能自行创建新 sample。读取 request valid/ready 后仅在两者明确为 1 时计算 fire，X/Z 或 reset 状态不会被误当作有效握手；该结果随后由 owner 决定是否建 token。
+
+源码位置：`mem_ut/ver/ut/memblock/agent/L2tlb_agent_agent/src/L2tlb_agent_agent_driver.sv`，函数：`publish_transport_sample()`。
+
+抽象功能描述：该函数把同一个 frozen wrapper 同步交给 monitor 和单槽 mailbox，并保证 mailbox 状态只在真实 publish 成功后变为 non-empty。
+
+```systemverilog
+if (publish_semantic_sample) begin
+    if (!transport_slot_owner.publish_transport_sample(wrapper)) begin
+        `uvm_fatal(get_type_name(), "failed to reserve L2TLB transport sample slot")
+    end
+end
+transport_sample_ap.write(wrapper);
+if (publish_semantic_sample) begin
+    memblock_sync_pkg::mark_l2tlb_transport_sample_mailbox_nonempty();
+    void'(transport_slot_owner.notify_transport_sample_published());
+end
+```
+
+中文伪代码：如果 owner 已 claim、reset/final gate 允许且 slot 为空，先向 sequencer 预留 wrapper；预留失败立即 fatal。随后同步调用 monitor analysis port，保证 monitor 先处理同一 sample；只有 analysis 返回且 slot 仍为有效发布状态时，才标记 mailbox non-empty 并唤醒 owner。passive/reset-only sample只走 analysis，不进入 semantic mailbox。
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`，task：`send_l2tlb_cycle()`。
+
+抽象功能描述：该 task 是唯一 semantic owner 的逐 sample 仲裁入口，负责把 frozen physical fact 转成 token、barrier、response 和 release 状态；driver 和 adapter 不替它修改这些状态。
+
+```systemverilog
+if (sample.sampled_final_inactive_proof_valid) begin
+    memblock_sync_pkg::begin_l2tlb_release_closing(lifecycle_owner_name);
+    ack_l2tlb_transport_sample(sample.transport_sample_seq,
+                               memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_CONSUMED);
+    return;
+end
+apply_due_l2tlb_flush_barriers(sample.dut_sample_seq);
+if (sample.sampled_req_fire) begin
+    capture_fired_request();
+end
+```
+
+中文伪代码：final proof 分支优先验证并进入 closing，ack 当前 slot 后等待 parent grant；它不能被 NOT_READY 或普通 idle 分支覆盖。普通 sample 先消费当前 due barrier，C4 只清理仍 pending 的旧 token/UID marker；随后若 frozen sample 明确记录 request fire，调用 `capture_fired_request()` 用 request-time C-2 history 建立独立 token。响应完成由 `complete_driving_response()` 使用 response-visible CSR 处理，不能用 live latest 或 UID 建立时 CSR替代。
+
+### 0.6 状态与退出边界
+
+| 状态/对象 | 唯一写者 | 清理/消费时机 | 不能做的事情 |
+|---|---|---|---|
+| global sample | CSR monitor | runtime reset 由 coordinator 重新建 epoch，但不回退历史 sample | 其它 monitor、driver、sequence 不得 advance |
+| frozen sample | driver | owner `CONSUMED/DROPPED` 后下一 drv_cb recycle | monitor/sequence 不得改 payload |
+| token/UID waiting | semantic owner sequence | response complete、C4 cancel 或 reset cancel | driver/adapter 不得直接删除 |
+| live TLB entry | dispatch adapter | raw event 自身 C4 due | responder 不得重复 pop/apply raw fence |
+| final proof/mailbox | driver + sequencer slot | owner ack 后下一 drv_cb recycle | final helper 不得提前伪造 mailbox non-empty |
+| lifecycle owner | claim/release helpers | parent grant、final proof、所有账本收敛后 release | phase kill 不是正常退出条件 |
+
+
 ## 1. 术语与抽象功能说明
 
 ### 1.1 术语
@@ -24,6 +198,10 @@
 | `entry snapshot` | request fire 时从 live TLB entry 显式复制的不可变回复数据 | `memblock_l2tlb_pending_req::entry_snapshot` | 等待期间 live table 被 sfence 删除也不改变已接受 request 的 payload |
 | `UID record` | dispatch 主表 uid 对应的 TLB 等待记录；不是每笔 DTLB request 都必须具备 | `uid_tlb_record_by_uid` | prefetch 或无 UID request 的匹配数可以为 0 |
 | `ready opportunity` | reset或flush阻塞解除后至少发送一拍可接受ready的机会，不等同于真实request fire | `ready_opportunity_since_lifecycle_block` | hold结束且idle阈值为1时先发送ready，再允许退出 |
+
+> 以下原有第 1 节及后续历史章节从这里开始仅用于“修改前行为”对比。它们保留旧字段和旧函数名，不能覆盖本节 0
+> 定义的 V2 当前合同；尤其不能重新引入独立 `mon_cb` transport 采样、C0 同拍立即 kill、sequence 直接消费
+> latest flush 或 phase kill 作为正常退出。
 
 ### 1.2 Flow 抽象职责
 

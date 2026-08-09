@@ -151,6 +151,9 @@ class common_data_transaction extends uvm_object;
         memblock_sync_pkg::dispatch_flush_in_progress = 1'b0;
         memblock_sync_pkg::dispatch_flushsb_waiting_empty = 1'b0;
         memblock_sync_pkg::dispatch_flush_epoch = 0;
+        // The shared L2TLB sample coordinator is initialized by top_tb at
+        // time 0. This table reset only clears testcase-owned software state;
+        // it must not rewind a sample already published by CSR monitor.
         memblock_sync_pkg::clear_raw_monitor_queues();
         memblock_sync_pkg::dispatch_monitor_capture_en = 1'b1;
         active_redirect     = '{default:'0};
@@ -188,6 +191,7 @@ class common_data_transaction extends uvm_object;
         redirect_anchor_history_q.delete();
         main_table_by_uid = new[main_trans_num_i];
         status_by_uid     = new[main_trans_num_i];
+        cancel_waiting_uid_tlb_records("reset_all_tables");
         tlb_entry_by_key.delete();
         uid_tlb_record_by_uid.delete();
         clear_issue_queues();
@@ -501,11 +505,11 @@ class common_data_transaction extends uvm_object;
                                  rob_value, expected_kind))
             return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
         end
-        if (raw_sample_seq > memblock_sync_pkg::peek_latest_dut_sample_seq()) begin
+        if (raw_sample_seq > memblock_sync_pkg::peek_current_dut_global_sample()) begin
             `uvm_fatal("MMIO_RESOLVE",
                        $sformatf("future MMIO sample sequence=%0d latest=%0d ROB value=%0d",
                                  raw_sample_seq,
-                                 memblock_sync_pkg::peek_latest_dut_sample_seq(),
+                                 memblock_sync_pkg::peek_current_dut_global_sample(),
                                  rob_value))
             return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
         end
@@ -1796,7 +1800,7 @@ class common_data_transaction extends uvm_object;
             !cancel_record_q[record_idx].redirect_anchor_valid) begin
             return 1'b0;
         end
-        return memblock_sync_pkg::peek_latest_dut_sample_seq() >=
+        return memblock_sync_pkg::peek_current_dut_global_sample() >=
                    cancel_record_q[record_idx].redirect_lsq_sample_seq &&
                latest_drained_cancel_sample_seq >=
                    cancel_record_q[record_idx].redirect_lsq_sample_seq;
@@ -1852,6 +1856,7 @@ class common_data_transaction extends uvm_object;
         // 中文伪代码：在 retire_active_uid 清除 mapping 前登记软件 cancel，
         // 否则 scan 只能看到已经释放的 active_lq/sq 标志。
         note_lsq_cancel_for_uid(uid, memblock_sync_pkg::dispatch_flush_epoch);
+        cancel_waiting_uid_tlb_record_for_uid(uid, "redirect_flush");
         // redirect命中的旧动态实例不再等待writeback/commit；清queue/map后等待同uid重新admission。
         if (status.active) begin
             retire_active_uid(uid);
@@ -2020,7 +2025,7 @@ class common_data_transaction extends uvm_object;
         if (record_idx < 0 ||
             !redirect_payload_equal(redirect, cancel_record_q[record_idx].redirect) ||
             !cancel_record_q[record_idx].redirect_anchor_valid ||
-            memblock_sync_pkg::peek_latest_dut_sample_seq() <
+            memblock_sync_pkg::peek_current_dut_global_sample() <
                 cancel_record_q[record_idx].redirect_lsq_sample_seq ||
             latest_drained_cancel_sample_seq <
                 cancel_record_q[record_idx].redirect_lsq_sample_seq) begin
@@ -2635,6 +2640,14 @@ class common_data_transaction extends uvm_object;
         return tlb_entry_by_key.exists(key) && tlb_entry_by_key[key] != null;
     endfunction:has_tlb_entry
 
+    function bit tlb_lookup_key_equal(input memblock_tlb_lookup_key_t left,
+                                      input memblock_tlb_lookup_key_t right);
+        return left.vpn == right.vpn &&
+               left.asid == right.asid &&
+               left.vmid == right.vmid &&
+               left.s2xlate == right.s2xlate;
+    endfunction:tlb_lookup_key_equal
+
     function memblock_tlb_entry get_tlb_entry(input memblock_tlb_lookup_key_t key);
         if (!has_tlb_entry(key)) begin
             `uvm_fatal("COMMON_DATA", $sformatf("tlb_entry_by_key miss vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d",
@@ -2814,6 +2827,13 @@ class common_data_transaction extends uvm_object;
         return apply_sfence_invalidate(decode_raw_sfence(raw));
     endfunction:apply_raw_sfence
 
+    // Abstract responsibility: clear only the software-owned live L2TLB
+    // entry/range state at a runtime reset, while preserving the main table and
+    // UID history owned by other dispatch flows.
+    function void clear_dispatch_l2tlb_live_entries();
+        tlb_entry_by_key.delete();
+    endfunction:clear_dispatch_l2tlb_live_entries
+
     function memblock_tlb_entry build_tlb_entry_for_key_with_csr(
         input memblock_tlb_lookup_key_t key,
         input mmu_csr_runtime_state csr_snapshot);
@@ -2902,38 +2922,274 @@ class common_data_transaction extends uvm_object;
         record.init_context(uid, vpn, s2xlate, is_hypervisor_inst, csr_snapshot);
     endfunction:update_uid_tlb_record_context
 
-    function int unsigned update_uid_tlb_records_by_entry(input memblock_tlb_lookup_key_t key,
-                                                          input memblock_tlb_entry entry);
+    // 中文注释：UID TLB lifecycle helper 只维护 request/response/cancel 账本，
+    // 不直接修改主表 pass/fail/terminal，也不重新解释 lookup key。
+    function int unsigned mark_uid_tlb_record_request_fire(input memblock_tlb_lookup_key_t key,
+                                                           input longint unsigned sample_seq);
+        int unsigned marked_count;
+
+        if (sample_seq == 0) begin
+            `uvm_fatal("COMMON_DATA", "mark_uid_tlb_record_request_fire requires non-zero sample_seq")
+        end
+        if (sample_seq > memblock_sync_pkg::peek_current_dut_global_sample()) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("mark_uid_tlb_record_request_fire got future sample=%0d latest=%0d key vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d",
+                                 sample_seq,
+                                 memblock_sync_pkg::peek_current_dut_global_sample(),
+                                 key.vpn, key.asid, key.vmid, key.s2xlate))
+        end
+
+        marked_count = 0;
+        foreach (uid_tlb_record_by_uid[uid]) begin
+            memblock_uid_tlb_record record;
+
+            record = uid_tlb_record_by_uid[uid];
+            if (record == null || !record.record_valid ||
+                record.vpn != key.vpn || record.s2xlate != key.s2xlate) begin
+                continue;
+            end
+            if (record.lifecycle_state ==
+                    memblock_uid_tlb_record::MEMBLOCK_UID_TLB_RECORD_STATE_UNBOUND) begin
+                // One DTLB/L2TLB request may be shared by several same-key
+                // PTW filter waiters.  The marker proves a real request fire;
+                // it does not establish a token-to-UID ownership relation.
+                record.mark_request_fire(sample_seq);
+                marked_count++;
+            end
+        end
+
+        if (marked_count == 0) begin
+            `uvm_info("COMMON_DATA",
+                      $sformatf("no UNBOUND uid_tlb_record matches L2TLB request fire key vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d sample=%0d; allow duplicate/prefetch/no-UID request",
+                                key.vpn, key.asid, key.vmid, key.s2xlate, sample_seq),
+                      UVM_LOW)
+        end
+        return marked_count;
+    endfunction:mark_uid_tlb_record_request_fire
+
+    function int unsigned cancel_waiting_uid_tlb_record_for_uid(input memblock_uid_t uid,
+                                                                input string reason = "");
+        memblock_uid_tlb_record record;
+
+        check_uid(uid, "cancel_waiting_uid_tlb_record_for_uid");
+        if (!uid_tlb_record_by_uid.exists(uid) || uid_tlb_record_by_uid[uid] == null) begin
+            return 0;
+        end
+        record = uid_tlb_record_by_uid[uid];
+        if (!record.is_waiting()) begin
+            return 0;
+        end
+        record.mark_canceled();
+        `uvm_info("COMMON_DATA",
+                  $sformatf("cancel WAITING uid_tlb_record uid=%0d reason=%s key vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d sample=%0d",
+                            uid, reason,
+                            record.lookup_key.vpn,
+                            record.lookup_key.asid,
+                            record.lookup_key.vmid,
+                            record.lookup_key.s2xlate,
+                            record.request_fire_sample_seq),
+                  UVM_LOW)
+        return 1;
+    endfunction:cancel_waiting_uid_tlb_record_for_uid
+
+    function int unsigned cancel_waiting_uid_tlb_records(input string reason = "");
+        int unsigned cancel_count;
+
+        cancel_count = 0;
+        foreach (uid_tlb_record_by_uid[uid]) begin
+            if (uid_tlb_record_by_uid[uid] != null &&
+                uid_tlb_record_by_uid[uid].is_waiting()) begin
+                uid_tlb_record_by_uid[uid].mark_canceled();
+                cancel_count++;
+            end
+        end
+        if (cancel_count != 0) begin
+            `uvm_info("COMMON_DATA",
+                      $sformatf("cancel WAITING uid_tlb_records reason=%s count=%0d",
+                                reason, cancel_count),
+                      UVM_LOW)
+        end
+        return cancel_count;
+    endfunction:cancel_waiting_uid_tlb_records
+
+    function int unsigned cancel_waiting_uid_tlb_records_through_sample(
+        input longint unsigned anchor_sample_seq,
+        input string reason = "");
+        int unsigned cancel_count;
+
+        cancel_count = 0;
+        if (anchor_sample_seq == 0) begin
+            return 0;
+        end
+        foreach (uid_tlb_record_by_uid[uid]) begin
+            memblock_uid_tlb_record record;
+
+            record = uid_tlb_record_by_uid[uid];
+            if (record == null || !record.is_waiting() ||
+                !record.request_fire_valid ||
+                record.request_fire_sample_seq == 0 ||
+                record.request_fire_sample_seq > anchor_sample_seq) begin
+                continue;
+            end
+            record.mark_canceled();
+            cancel_count++;
+        end
+        if (cancel_count != 0) begin
+            `uvm_info("COMMON_DATA",
+                      $sformatf("cancel WAITING uid_tlb_records through sample reason=%s anchor=%0d count=%0d",
+                                reason, anchor_sample_seq, cancel_count),
+                      UVM_LOW)
+        end
+        return cancel_count;
+    endfunction:cancel_waiting_uid_tlb_records_through_sample
+
+    function bit has_waiting_uid_tlb_record();
+        foreach (uid_tlb_record_by_uid[uid]) begin
+            if (uid_tlb_record_by_uid[uid] != null &&
+                uid_tlb_record_by_uid[uid].is_waiting()) begin
+                return 1'b1;
+            end
+        end
+        return 1'b0;
+    endfunction:has_waiting_uid_tlb_record
+
+    // Abstract responsibility: reproduce the V2 PtwRespS2.hit() raw address,
+    // stage, sector, ASID/VMID and global matching rules for one response.
+    // This helper is intentionally independent of UID state.
+    function bit entry_matches_request_raw(
+        input memblock_tlb_entry entry,
+        input bit [51:0] request_vpn,
+        input bit [1:0] request_s2xlate,
+        input mmu_csr_runtime_state response_filter_csr_snapshot);
+        bit level_hit;
+        bit addr_low_hit;
+        bit asid_hit;
+        bit vmid_hit;
+        bit napot_or_super;
+        bit [15:0] response_asid;
+        bit [15:0] response_vmid;
+
+        if (entry == null || response_filter_csr_snapshot == null) begin
+            `uvm_fatal("COMMON_DATA", "entry_matches_request_raw got null input")
+        end
+        if (entry.s2xlate != request_s2xlate) begin
+            return 1'b0;
+        end
+
+        response_asid = response_filter_csr_snapshot.current_asid(request_s2xlate);
+        response_vmid = response_filter_csr_snapshot.current_vmid(request_s2xlate);
+        napot_or_super = (entry.level != 2'd0) || entry.pte_n;
+
+        // MMUBundle.scala's level_match checks all VPN portions above the
+        // effective page level.  The no-S2 sector path removes VPN[2:0]
+        // before applying valididx; the two-stage combined path and HPTW use
+        // the reconstructed full level-0 anchor.
+        if (request_s2xlate == 2'd0) begin
+            if (entry.pte_n && entry.level == 2'd0) begin
+                level_hit = entry.lookup_key.vpn[51:4] == request_vpn[51:4];
+            end
+            else begin
+                case (entry.level)
+                    2'd0: level_hit = entry.lookup_key.vpn[51:3] == request_vpn[51:3];
+                    2'd1: level_hit = entry.lookup_key.vpn[51:9] == request_vpn[51:9];
+                    2'd2: level_hit = entry.lookup_key.vpn[51:18] == request_vpn[51:18];
+                    default: level_hit = entry.lookup_key.vpn[51:27] == request_vpn[51:27];
+                endcase
+            end
+        end
+        else if (entry.pte_n && entry.level == 2'd0) begin
+            level_hit = entry.lookup_key.vpn[51:4] == request_vpn[51:4];
+        end
+        else begin
+            case (entry.level)
+                2'd0: level_hit = entry.lookup_key.vpn == request_vpn;
+                2'd1: level_hit = entry.lookup_key.vpn[51:9] == request_vpn[51:9];
+                2'd2: level_hit = entry.lookup_key.vpn[51:18] == request_vpn[51:18];
+                default: level_hit = entry.lookup_key.vpn[51:27] == request_vpn[51:27];
+            endcase
+        end
+
+        // PtwSectorResp.hit() is the no-S2 path.  A normal 4-KB sector still
+        // requires the response VPN's low sector bit to be valid; superpages
+        // and NAPOT entries cover all sectors.
+        addr_low_hit = napot_or_super || entry.valididx[request_vpn[2:0]];
+
+        if (request_s2xlate == 2'd0) begin
+            asid_hit = (entry.asid[15:0] == response_asid) || entry.pte_g;
+            vmid_hit = 1'b1;
+            return asid_hit && level_hit && addr_low_hit;
+        end
+
+        if (request_s2xlate == 2'd2) begin
+            // HptwResp.hit() uses only VMID and G-stage tag/level.  Its raw
+            // response has no ASID/global override.
+            vmid_hit = entry.vmid[15:0] == response_vmid;
+            return vmid_hit && level_hit;
+        end
+
+        // onlyStage1/allStage use PtwRespS2's combined S1 anchor.  The
+        // response's S1 global bit allows an ASID change; VMID remains part of
+        // the two-stage matcher.
+        asid_hit = (entry.asid[15:0] == response_asid) || entry.pte_g;
+        vmid_hit = entry.vmid[15:0] == response_vmid;
+        return asid_hit && vmid_hit && level_hit;
+    endfunction:entry_matches_request_raw
+
+    // Abstract responsibility: decide whether a response payload is visible to
+    // one UID under the CSR context that the DUT filter sees on this response
+    // sample.  It does not mutate either the record or the live TLB entry.
+    function bit entry_matches_uid_at_response(
+        input memblock_tlb_entry entry,
+        input memblock_uid_tlb_record record,
+        input mmu_csr_runtime_state response_filter_csr_snapshot);
+        if (entry == null || record == null ||
+            response_filter_csr_snapshot == null) begin
+            `uvm_fatal("COMMON_DATA", "entry_matches_uid_at_response got null input")
+        end
+        if (!record.is_waiting() || !record.request_fire_valid ||
+            record.request_fire_sample_seq == 0) begin
+            return 1'b0;
+        end
+        return entry_matches_request_raw(entry, record.vpn,
+                                         record.s2xlate,
+                                         response_filter_csr_snapshot);
+    endfunction:entry_matches_uid_at_response
+
+    // Abstract responsibility: multicast one observed L2TLB response to all
+    // real-fire UID waiters whose raw key matches under response-visible C-2
+    // CSR.  The token remains complete even when this returns zero.
+    function int unsigned complete_waiting_uid_records_by_response(
+        input memblock_tlb_entry entry,
+        input mmu_csr_runtime_state response_filter_csr_snapshot);
         int unsigned match_count;
 
-        if (entry == null) begin
-            `uvm_fatal("COMMON_DATA", "update_uid_tlb_records_by_entry got null entry")
+        if (entry == null || response_filter_csr_snapshot == null) begin
+            `uvm_fatal("COMMON_DATA", "complete_waiting_uid_records_by_response got null input")
         end
         match_count = 0;
         foreach (uid_tlb_record_by_uid[uid]) begin
             memblock_uid_tlb_record record;
 
             record = uid_tlb_record_by_uid[uid];
-            if (record == null || !record.record_valid || record.pte_valid) begin
+            if (record == null || record.pte_valid ||
+                !entry_matches_uid_at_response(entry, record,
+                                               response_filter_csr_snapshot)) begin
                 continue;
             end
-            if (record.vpn == key.vpn &&
-                record.s2xlate == key.s2xlate &&
-                record.asid == key.asid &&
-                record.vmid == key.vmid) begin
-                record.copy_entry_fields(entry);
-                set_status_field(record.uid, MEMBLOCK_STATUS_TLB_MAPPED, 1'b1);
-                match_count++;
-            end
+            record.copy_entry_fields(entry);
+            record.mark_completed();
+            set_status_field(record.uid, MEMBLOCK_STATUS_TLB_MAPPED, 1'b1);
+            match_count++;
         end
         if (match_count == 0) begin
             `uvm_info("COMMON_DATA",
-                      $sformatf("no pending uid_tlb_record matches L2TLB response key vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d; allow prefetch/no-UID request",
-                                key.vpn, key.asid, key.vmid, key.s2xlate),
+                      $sformatf("no WAITING uid_tlb_record matches L2TLB response key vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d under response-visible CSR; allow prefetch/old-context response",
+                                entry.lookup_key.vpn, entry.lookup_key.asid,
+                                entry.lookup_key.vmid, entry.lookup_key.s2xlate),
                       UVM_LOW)
         end
         return match_count;
-    endfunction:update_uid_tlb_records_by_entry
+    endfunction:complete_waiting_uid_records_by_response
 
     function memblock_uid_tlb_record get_uid_tlb_record(input memblock_uid_t uid);
         check_uid(uid, "get_uid_tlb_record");
