@@ -15,7 +15,53 @@ class basicTest extends tcnt_test_base ;
       function new(string name = "basicTest", uvm_component parent);
           super.new(name,parent);
           plus_args = new();
+          main_vseq_name = "";
       endfunction:new
+
+      function bit vseq_starts_l2tlb(input string vseq_name);
+          return vseq_name == "memblock_dispatch_real_smoke_vseq" ||
+                 vseq_name == "memblock_dispatch_real_cancel_reconcile_vseq";
+      endfunction:vseq_starts_l2tlb
+
+      function void initialize_l2tlb_testcase_lifecycle();
+          bit needs_response;
+          memblock_sync_pkg::memblock_l2tlb_responder_mode_e responder_mode;
+          memblock_sync_pkg::memblock_l2tlb_dispatch_topology_e dispatch_topology;
+          memblock_sync_pkg::memblock_l2tlb_start_mode_e start_mode;
+
+          // basicTest only starts the selected virtual sequence.  Keep the
+          // default responder plus from creating an unowned responder when
+          // that sequence is not a dispatch topology.
+          needs_response = seq_csr_common::get_l2tlb_seq_en() &&
+                           vseq_starts_l2tlb(main_vseq_name);
+          responder_mode = needs_response ?
+              memblock_sync_pkg::MEMBLOCK_L2TLB_RESPONDER_ENABLED :
+              memblock_sync_pkg::MEMBLOCK_L2TLB_RESPONDER_DISABLED;
+          dispatch_topology = vseq_starts_l2tlb(main_vseq_name) ?
+              memblock_sync_pkg::MEMBLOCK_L2TLB_TOPOLOGY_DISPATCH_ACTIVE :
+              memblock_sync_pkg::MEMBLOCK_L2TLB_TOPOLOGY_NO_DISPATCH;
+          if (!needs_response) begin
+              start_mode = memblock_sync_pkg::MEMBLOCK_L2TLB_START_DISABLED;
+          end
+          else if (vseq_starts_l2tlb(main_vseq_name)) begin
+              start_mode = memblock_sync_pkg::MEMBLOCK_L2TLB_START_EXPLICIT;
+          end
+          else begin
+              start_mode = memblock_sync_pkg::MEMBLOCK_L2TLB_START_DISABLED;
+          end
+          memblock_sync_pkg::initialize_l2tlb_testcase_lifecycle(
+              responder_mode,
+              dispatch_topology,
+              start_mode,
+              needs_response,
+              memblock_sync_pkg::l2tlb_responder_active,
+              get_type_name());
+          if (seq_csr_common::get_l2tlb_seq_en() && !needs_response) begin
+              `uvm_info(get_type_name(),
+                        "MEMBLOCK_L2TLB_SEQ_EN is ignored because the selected basicTest VSEQ has no dispatch topology",
+                        UVM_LOW)
+          end
+      endfunction:initialize_l2tlb_testcase_lifecycle
 
       virtual function void build_phase(uvm_phase phase);
 
@@ -158,6 +204,7 @@ class basicTest extends tcnt_test_base ;
 
       virtual function void end_of_elaboration_phase(uvm_phase phase);
         super.end_of_elaboration_phase(phase);
+        initialize_l2tlb_testcase_lifecycle();
         uvm_top.print_topology();
       endfunction:end_of_elaboration_phase
 

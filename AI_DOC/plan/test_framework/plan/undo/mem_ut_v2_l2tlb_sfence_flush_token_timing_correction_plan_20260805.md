@@ -1736,3 +1736,21 @@ release grant，再等唯一 owner 原子清除 claim==0。当前支持矩阵中
 
 本专项是对已归档 L2TLB lifecycle plan 的功能逻辑修正，不是纯字段改名。其余多 outstanding、response
 latency、payload、permission 和主表控制行为保持不变。
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+### [IMPLEMENTATION_DELTA] no-dispatch testcase 不启动 responder
+
+- 来源：coding 前编译/启动拓扑复查发现，公共 preset 默认保留
+  `MEMBLOCK_L2TLB_SEQ_EN=1`，但 `tc_sanity` 等 legacy testcase 没有 DTLB dispatch 主流程。
+- 原 plan：只规定 no-dispatch topology 不启动 semantic responder，但未明确公共 plus 已开启时的收敛动作。
+- 实现调整：`tc_base::initialize_l2tlb_testcase_lifecycle()` 和
+  `basicTest::initialize_l2tlb_testcase_lifecycle()` 将
+  `needs_response` 定义为 `MEMBLOCK_L2TLB_SEQ_EN && dispatch_topology_active`。
+  无 dispatch 时选择 `RESPONDER_DISABLED/START_DISABLED`，保留 connect takeover 的静态能力值，输出一条
+  `uvm_info`，不配置 default sequence，也不 claim lifecycle owner；有 dispatch 时仍按原 plus 和 explicit/default
+  启动合同执行。
+- 原因：公共默认 plus 表示环境具备该 responder 行为的配置，不代表每个 testcase 都存在可服务的 DTLB request
+  stream。若将该 plus 单独作为运行拓扑判定，会使无 dispatch smoke 在初始化阶段误报 fatal。
+- 影响范围：仅影响 testcase topology 初始化和 L2TLB sequence 是否启动；不改变 active connect wire 驱动、request
+  token、response payload、SFENCE/HFENCE matcher 或 live entry 生命周期。
