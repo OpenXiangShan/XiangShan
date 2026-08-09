@@ -38,6 +38,8 @@ object WritePartVdField extends BoolDecodeField[
         case VecS2MDMPattern() => y
         case VecIntRedPattern() => y
         case VecIntWRedPattern() => y
+        case VecFpRedPattern() => y
+        case VecFpWRedPattern() => y
         case _  =>
           if (lmul.get > 0 && lmul.get < 1)
             y
