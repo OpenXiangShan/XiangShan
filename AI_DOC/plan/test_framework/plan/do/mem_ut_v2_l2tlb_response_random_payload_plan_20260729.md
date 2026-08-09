@@ -1,6 +1,6 @@
 # V2 L2TLB Response 随机 Payload 扩展 Plan
 
-状态：`undo`，仅为待执行设计；尚未 coding、compile、smoke 或仿真验证。
+状态：`do`，coding、文档同步、compile 与定向 smoke 已完成；独立末轮 review 已 `FINAL PASS`。基础 `tc_sanity` 仍有已知 DCache L2 flush 无关失败，已在 implementation review 中记录为本专项之外的回归风险；本文件作为 response payload 的唯一 coding 权威。
 
 共享 lifecycle 约束：`AI_DOC/plan/test_framework/review_doc/undo/mem_ut_v2_l2tlb_single_owner_lifecycle_optimization_review_20260807.md`。
 本 plan 不重新定义 owner、global sample、runtime reset、global stop 或 release；其 payload/UID 逻辑必须服从该文件。
@@ -77,6 +77,7 @@ review 中的简称 `s1_mode_at_build/s2_mode_at_build` 在本 plan 统一采用
 | `pending snapshot` | 每次 accepted L2TLB request 从命中 live entry 逐字段复制出的独立 response 快照。 | live entry 后续被 fence 删除或 CSR 更新时，已接受 request 的 payload 不能被回写。 |
 | `UID record` | `uid_tlb_record_by_uid` 中保存发射上下文与最终绑定 payload 的历史记录。 | 它保留某个 UID 实际使用的 entry provenance，不能用后续 current CSR 覆盖。 |
 | `s1_translation_mode_at_build` / `s2_translation_mode_at_build` | 新 entry 创建时分别冻结的 S1/G-stage 翻译 mode。 | level 合法性、fence 的 tag 宽度和 superpage mask 必须使用创建时 mode，不能读取消费时 CSR。 |
+| `s1_pte_mode_at_build` / `s2_pte_mode_at_build` | 新 entry 创建时分别冻结的 S1/S2 PTE profile mode。 | `LEGAL`、`MIXED`、`EXCEPTION_BIASED` 的后续 LEGAL fixup 与 NAPOT 可解析性必须使用 entry 自己的 profile，不能在 pending、UID 或 response complete 阶段重新读取 plus。 |
 | `S1 GVA VPN width` | 由冻结的 S1 `satp/vsatp.mode` 决定的输入 GVA page-number 有效位宽。 | Sv39 为 `39-12=27` 位，Sv48 为 `48-12=36` 位；只用于 S1 输入地址解释。 |
 | `S2 GPA/GVPN width` | 由冻结的 S2 `hgatp.mode` 决定的 GPA/GVPN 有效位宽。 | Sv39x4 为 `GPAddrBitsSv39x4-offLen=29` 位，Sv48x4 为 `GPAddrBitsSv48x4-offLen=38` 位；不能用 S1 位宽替代。 |
 | `s1_stage_active` / `s2_stage_active` | 该 request 的 `s2xlate` 是否要求 S1/S2 response stage。 | inactive stage 不进入该 stage 的 payload 构造；active stage 必须是受支持的 paged mode，Bare request 不进入本 framework。 |
@@ -147,7 +148,8 @@ lookup miss
 ```text
 build_payload_for_key_with_csr(key, csr_snapshot):
   创建并 reset 新 entry，写入 key、stage activity、冻结 mode/root 与 CSR provenance。
-  按本 plan 的 S1/S2 独立 random/profile/fault/PPN/sector helper 构造 payload。
+  先随机 raw PTE 字段并冻结 profile、候选 level；再选择 effective fault。
+  只有无 effective fault 的 LEGAL stage 执行 PTE/level 合法化；最后构造 raw PPN、sector 与 PBMT。
   执行 BUILD 一致性校验后返回 entry。
   不调用 update_addr_fields()、choose_paddr()、randomize_pte_bits() 或旧全局 fixup_pte_legal()。
 ```
@@ -358,13 +360,14 @@ S1 AF 的尾端 OR。entry 的 effective fault 始终至多一个字段为 `1`�
 抽象功能描述：fault payload gate 在 effective fault 已选择后，决定当前 entry 是否继续执行正常翻译的
 PTE 语义合法化。它只改变 payload 构造分支，不删除 entry、不取消 pending request，也不建立 DCache owner。
 
-1. 先完成 raw level、PTE.N、PPN、permission 和 PBMT 的生成，以及两套 stage 的 profile 随机。
-2. `fault_stage_selected == NONE` 时，按本 plan 的普通 level/PTE.N/PPN 派生规则继续构造；各自为 `LEGAL`
-   的 stage 执行对应的 `fixup_pte_legal()`。
-3. `fault_stage_selected != NONE` 时，S1/S2 两套已生成的 raw `PTE.N`、候选 level、raw PPN、permission 和
-   PBMT 均保留，不因任一 fault 被清零或覆写；两套 stage 都不执行 `PTE.N -> level=0` 语义修正，也不执行
-   `LEGAL` permission/V/A/D 合法化。`fault_stage_selected` 只记录胜出 fault 属于 S1 还是 S2，不改变另一套
-   payload 的保存范围。
+1. 先随机两套 raw permission/PTE.N 并调用一次 `apply_pte_profile()`，再按冻结 translation mode 选择候选 level。
+   此时尚未构造 PPN、sector 或 PBMT。
+2. 完成唯一 effective fault 选择。`fault_stage_selected == NONE` 时，只有 `LEGAL` stage 执行
+   `fixup_pte_legal()`，并在 `PTE.N=1` 时把最终 level 收敛为 0。
+3. effective fault 已确定后才构造 raw PPN、S1 sector split 和 PBMT。`fault_stage_selected != NONE` 时，两套
+   stage 保留已冻结的 raw PTE/profile 和候选 level，不执行 `PTE.N -> level=0` 或 `LEGAL` permission/V/A/D
+   合法化；随后生成的 raw PPN、sector 与 PBMT 只满足 response 接口编码范围。`fault_stage_selected` 只记录
+   胜出 fault 属于 S1 还是 S2，不改变另一套 payload 的保存范围。
 4. `fault_stage_selected != NONE` 时只检查 response interface 的字段位宽和编码范围。不得为了 fault PPN
    额外执行 `genGVPN()`、异常 `gpaddr`、allStage S2 GVPN 范围或最终 PAddr 的精确派生；这些值不决定
    DUT 是否把本请求送往 DCache。
@@ -862,6 +865,7 @@ pmaAF  // legacy PMA sideband；不属于四个 raw/effective fault
 
 s1_stage_active / s2_stage_active
 s1_translation_mode_at_build / s2_translation_mode_at_build
+s1_pte_mode_at_build / s2_pte_mode_at_build
 s1_root_ppn_at_build / s2_root_ppn_at_build
 csr_context_seq_at_build / entry_generation
 ```
@@ -883,6 +887,7 @@ complete 时的 raw matcher 决定；prefetch、duplicate response 或本轮没�
 `pmaAF` 为 `bit`，
 `*_translation_mode_at_build` 与对应 CSR mode 同宽
 （当前为 4 bit），`*_root_ppn_at_build` 与对应 CSR root PPN 同宽（当前为 44 bit），
+`*_pte_mode_at_build` 为容纳 `LEGAL/MIXED/EXCEPTION_BIASED` 的 2 bit enum，
 `csr_context_seq_at_build` 为 `int unsigned`，`entry_generation` 为 `longint unsigned`。这些字段不能用
 `priv_mode`、共享 `level` 或可变的 `mmu_csr_state` handle 代替。
 它们是测试框架内部 entry/snapshot/UID 数据字段，不新增 DUT response interface port，也不新增 plus 参数。
@@ -900,7 +905,7 @@ reset/flush 清空 table 时不得回退或复用旧 generation。仅在 lookup 
 后续相同 key 的 request 再次 miss 并重建时获得新的 generation；因此它不能由 `csr_context_seq_at_build` 替代，
 因为同一 CSR version 下也可能发生 fence 后重建。
 
-`memblock_tlb_entry::copy_from()` 必须逐字段复制上述 provenance、S1 sector split PPN、one-hot mask 与 `pmaAF`
+`memblock_tlb_entry::copy_from()` 必须逐字段复制上述 provenance（包括 `*_pte_mode_at_build`）、S1 sector split PPN、one-hot mask 与 `pmaAF`
 到 pending snapshot；
 `memblock_uid_tlb_record::copy_entry_fields()` 只在 `complete_waiting_uid_records_by_response()` 的 raw hit
 校验通过后逐字段复制 payload 到对应 UID record。response driver 只能使用 `pending.entry_snapshot`，发包时不得重新读取 current CSR 或重新计算
@@ -1299,6 +1304,7 @@ UID record 同时保存 `s1_tag/s1_asid/s1_vmid/s2_tag/s2_vmid`，以及
 legacy `pmaAF`；不得把 `pmaAF` 改名、折叠或迁入上述四类 fault。
 UID record 还必须保存 `fault_stage_selected`、`s1_stage_active/s2_stage_active`、
 `s1_translation_mode_at_build/s2_translation_mode_at_build`、
+`s1_pte_mode_at_build/s2_pte_mode_at_build`、
 `s1_root_ppn_at_build/s2_root_ppn_at_build`、`csr_context_seq_at_build` 与 `entry_generation`。
 UID record 还必须保存 `uid_tlb_wait_epoch`、`uid_tlb_wait_state`、`uid_wait_start_sample_seq` 与
 `uid_tlb_first_request_fire_sample_seq`。其中后者在该等待实例尚未观察到对应 L2TLB request fire 时为 0，
@@ -1361,7 +1367,7 @@ DCache responder 的实际 A/C fire、range check 和 backing-line 懒分配继�
 - `pmaAF` 默认仍为 0，且本 plan 不生成其写者。对独立 PMA/PMP 专项直接写入的 legacy entry，pending/UID copy
   必须保持同值，response 的 S1 AF 必须等于 `fault_effective_s1_af || pmaAF`；不得把它写入四个 raw/effective
   fault、S2 GAF 或 fault priority。
-- 新 entry 的 `s1_stage_active/s2_stage_active`、冻结 S1/S2 mode/root、`csr_context_seq_at_build` 与
+- 新 entry 的 `s1_stage_active/s2_stage_active`、冻结 S1/S2 translation mode、PTE profile mode、root、`csr_context_seq_at_build` 与
   `entry_generation` 均由同一 DTLB-side request CSR snapshot/lookup miss 建立；pending snapshot 立即逐字段保存
   这些值，UID record 仅在对应 raw-hit response complete 后保存这些值，driver 不读取 current CSR 重建它们。
 - inactive stage 固定 `*_stage_active=0` 且 mode/root/payload 为初始化默认值，不进入 stage payload 构造。
@@ -1411,6 +1417,9 @@ DCache responder 的实际 A/C fire、range check 和 backing-line 懒分配继�
   权重或目标编码不可表达时才 `uvm_fatal`，不得把 DCache 窗口不命中当作随机重选条件。
 - S1 的八个 `R/W/X/U/G/A/D/V` 字段、S2 的七个 `R/W/X/U/G/A/D` 字段和三种 PBMT 均可由对应 plus
   权重驱动；S2 不提供 `V` 参数或字段，S1/S2 不发生意外镜像。
+- S2 canonical PPN 在任何路径均不得超过 V2 38-bit response wire；S1/S2 VMID 在写 response 前均不得有
+  `[15:14]` 非零。任一条件不满足均 `uvm_fatal`，不得截断后继续驱动，因为 14-bit response VMID 会被 DUT
+  零扩展比较且无法匹配 16-bit CSR VMID。
 - PTE profile truth table 必须被定向验证：无 effective fault 的 LEGAL S1 无论 V/A/D 原始权重为何，最终均为
   `V=1,A=1,D=1`；无 effective fault 的 LEGAL S2 最终均为 `A=1,D=1`，且全流程不存在 S2 V。
   在 MIXED、EXCEPTION_BIASED 与 effective-fault 三组路径中，分别设置 `A_1_WT=0,D_1_WT=100` 与
@@ -1468,3 +1477,139 @@ DCache responder 的实际 A/C fire、range check 和 backing-line 懒分配继�
 - `mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`
 
 本 plan 只定义测试框架 response 激励生成；不实现 Scala/RTL 正确性 checker、scoreboard 或功能覆盖率。
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+### 1. PTE profile provenance 冻结
+
+[IMPLEMENTATION_DELTA]
+
+来源：首轮实现 review 发现原 plan 虽定义 S1/S2 profile 参数，却没有把 profile 作为 entry 的长期 provenance。
+
+原 plan：pending/UID 只显式冻结 translation mode、root 和 CSR sequence；后续 NAPOT/profile consumer 可能重新读取
+当前 plus 配置。
+
+实现调整：新增并逐字段复制 `s1_pte_mode_at_build/s2_pte_mode_at_build`。builder 在 lookup miss 时读取一次
+`seq_csr_common::get_l2tlb_pte_mode()`；`finalize_pte_fields()`、NAPOT 可解析性检查、pending snapshot 与 UID
+payload 仅消费该冻结值。
+
+原因：同一个 live entry 的 payload 必须与创建时 profile 保持一致。若 testbench 后续修改 plus 或切换 preset，
+已接受 request 的 LEGAL fixup/NAPOT 判断不能改用新 profile。
+
+影响范围：`memblock_tlb_entry.sv`、`tlb_map_builder.sv`、`common_data_transaction.sv`；不改变 token、pending queue
+或 lifecycle owner。
+
+中文文字伪代码：
+
+```text
+lookup miss 创建 entry 时：读取一次每个 stage 的 PTE profile，并写入 entry。
+pending/UID copy 时：逐字段复制这个 profile。
+后续需要判断 LEGAL、MIXED 或 EXCEPTION_BIASED 时：只读取 entry 或 snapshot 中冻结的 profile；不再读取全局 plus。
+```
+
+### 2. raw/effective 构造顺序固定
+
+[IMPLEMENTATION_DELTA]
+
+来源：首轮实现 review 发现原 plan 的文字把 raw PPN/PBMT 放在 effective fault 选择之前，容易让 fault-path
+意外经过 LEGAL normal-leaf fixup。
+
+原 plan：raw PTE、level、PPN、permission、PBMT 一并生成后才描述 fault gate。
+
+实现调整：固定为“raw PTE + profile、候选 level -> effective fault -> 无 fault LEGAL fixup/final level -> raw
+PPN/sector/PBMT”。fault-path 不执行 normal LEGAL fixup 或 `PTE.N` level 收敛。
+
+原因：fault response 可以携带 raw payload，但不得被 normal leaf 的合法化逻辑覆写。
+
+影响范围：仅 entry build 的 helper 调用顺序；不改变 request acceptance、response latency 或 UID multicast。
+
+中文文字伪代码：
+
+```text
+先生成两套原始 PTE 并选择候选 level。
+选择唯一 effective fault。
+没有 fault 时，仅 LEGAL stage 收敛 PTE 和最终 level；有 fault 时保留原始字段。
+最后以已确定的字段写 PPN、S1 sector split 和 PBMT；所有路径仍做 wire 宽度检查。
+```
+
+### 3. response 宽度 fail-fast
+
+[IMPLEMENTATION_DELTA]
+
+来源：V2 response wire 的 S2 PPN 为 38 bit、VMID 为 14 bit；原 plan 只笼统要求“可编码”，没有定义所有构造与
+drive 路径的统一失败策略。实现复查同时发现每个 stage 只有两个 fault 候选，原实现临时使用四项数组并重复
+检查索引。
+
+实现调整：`encode_s2_entry_ppn()` 对完整 44-bit canonical PPN 的 `[43:38]` 非零直接报错；builder 建表时和
+`fill_dtlb_resp_from_entry()` drive 前均检查 VMID `[15:14]`。`seq_csr_common` 的 S1/S2 fault weight 容器收敛
+为各两个候选，配置校验只遍历真实候选。
+
+原因：截断会产生不可追踪的假 payload；尤其 DUT 会把 14-bit response VMID 零扩展后与 16-bit CSR VMID 比较，
+高两位非零的 CSR 值不可能命中。
+
+影响范围：仅输入/response 字段合法性检查；不新增地址模型或 fault 行为。
+
+### 4. 无真实 request-fire 的 UID 候选在 release cutoff 收敛
+
+[IMPLEMENTATION_DELTA]
+
+来源：针对真实 dispatch smoke 验证发现，issue 事件会先建立 UID TLB 候选，但 Bare/DTLB hit 路径可能根本不产生
+DTLB -> L2TLB request。原实现把该候选一直保持为 `WAITING`，release gate 因而把“没有待回复请求”误报为未完成
+L2TLB 生命周期。
+
+原 plan：issue 时建立 `WAITING`；`marker=0` 的实例在 C4 不因 flush 猜测取消，release 检查对所有剩余
+`WAITING` 直接 fatal。
+
+实现调整：issue 时仍保留候选记录和 bounded index，不改变 `WAITING`、C4 或 response multicast 语义。只有在
+owner 已经通过真实 transport sample 完成 admission cutoff，且 `pending_q`、driving slot 和 barrier 均为空时，调用
+`cancel_unbound_uid_tlb_records_at_release()`：对 `uid_tlb_first_request_fire_sample_seq==0` 的候选显式记录
+“本 epoch 未观察到真实 L2TLB request”，转为 `CANCELED` 并从 index 删除；对 marker 非零的 WAITING 仍打印完整
+上下文并 `uvm_fatal`。
+
+原因：`marker=0` 在 admission 已关闭后证明该 UID 没有进入 L2TLB responder 的 request-fire 账本，不能要求一个
+不存在的 response；而 marker 非零代表 DUT 已接受过真实 request，必须继续等待/完成，不能借 release 清理掩盖缺口。
+
+影响范围：仅 `common_data_transaction` 的 release-time UID 收敛和 L2TLB owner final drain；不调用
+`apply_dut_*`、不构造 response、不修改 token/pending/latency/flush 时序，也不允许在 cutoff 前取消候选。
+
+中文文字伪代码：
+
+```text
+issue：建立 UID TLB candidate，marker = 0。
+真实 DTLB->L2TLB fire：把匹配 candidate 标记为 marker != 0，继续按真实 response 回填。
+C4：只取消 marker != 0 且属于旧 barrier 的 WAITING；marker = 0 继续保留。
+release cutoff + token/barrier 全空：
+    marker = 0 -> 显式 CANCELED（证明没有 L2TLB request）；
+    marker != 0 且仍 WAITING -> uvm_fatal，打印 uid/key/epoch/fire sample。
+```
+
+### 5. `idle_stop` 只做诊断，不能关闭 active owner
+
+[IMPLEMENTATION_DELTA]
+
+来源：执行时复查发现共享 lifecycle 基线仍保留了旧分支：`idle_count` 达到
+`MEMBLOCK_L2TLB_IDLE_STOP_CYCLE` 后会写 `stopping=1`。这与本 plan 已经声明的唯一 owner 合同冲突，
+可能在 dispatch 仍会继续产生 DTLB request 时提前关闭 ready。
+
+原 plan：`idle_stop` 只作为低频 no-progress 诊断，`global_stop_requested` 是唯一正常退出来源。
+
+实现调整：保留原有 `idle_count` 计数条件，但达到阈值时只打印一次 `uvm_warning` 并将计数饱和在阈值；
+不写 `stopping`、不关闭 admission、不发送 release item。只有观察到公共 `global_stop_requested` 才进入既有
+admission close、pending drain 和 final inactive 流程。任何 progress、CSR/flush hold、outstanding 或尚未开放 ready
+仍会将诊断计数清零。
+
+原因：无请求间隔不是 owner 已完成的证明。若 idle 阈值自行停止 responder，下一笔合法 DTLB -> L2TLB request
+只能看到 `ready=0`，测试框架会将自身提前退出伪装成 DUT 无响应。
+
+影响范围：仅 `memblock_l2tlb_base_sequence::send_l2tlb_cycle()` 的 idle watchdog；不改 payload、token、
+pending queue、latency、flush C4、UID multicast 或 release gate 条件。
+
+中文文字伪代码：
+
+```text
+当前 sample 没有 progress、没有 lifecycle block、没有 outstanding，且已至少发出一拍 ready：
+    若 idle_count 尚未到阈值：递增计数；
+    若刚到阈值：打印一次 no-progress warning；保持 owner、ready 服务和 admission 原样。
+任意 progress、flush/CSR block、outstanding 或 global stop：清零 idle_count。
+只有 global_stop_requested：置 stopping，进入已有 release close 和排空流程。
+```

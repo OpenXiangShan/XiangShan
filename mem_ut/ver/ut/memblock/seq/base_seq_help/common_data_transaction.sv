@@ -10,6 +10,10 @@
 
 class common_data_transaction extends uvm_object;
 
+    typedef bit [53:0] memblock_uid_tlb_wait_shape_key_t;
+    localparam bit [3:0] MEMBLOCK_SV39_MODE = 4'd8;
+    localparam bit [3:0] MEMBLOCK_SV48_MODE = 4'd9;
+
     static common_data_transaction m_inst;
 
     int unsigned   main_trans_num;
@@ -24,7 +28,12 @@ class common_data_transaction extends uvm_object;
     main_control_transaction main_table_by_uid[];
     status_transaction       status_by_uid[];
     memblock_tlb_entry       tlb_entry_by_key[memblock_tlb_lookup_key_t];
+    // 中文注释：live entry 的单调身份；普通 reset/flush 只清 table，不回退该计数器。
+    longint unsigned         next_tlb_entry_generation;
     memblock_uid_tlb_record  uid_tlb_record_by_uid[memblock_uid_t];
+    // WAITING UID 的 request-fire 候选索引。key 只包含 DTLB request 可见的
+    // vpn/s2xlate；每个 bucket 受 DTLB filter 物理容量限制。
+    memblock_uid_t uid_waiting_by_vpn_s2xlate[memblock_uid_tlb_wait_shape_key_t][$];
     mmu_csr_runtime_state    mmu_csr_state;
     memblock_issue_q_item_t  load_issue_q[$];
     memblock_issue_q_item_t  sta_issue_q[$];
@@ -124,6 +133,8 @@ class common_data_transaction extends uvm_object;
         redirect_anchor_history_q.delete();
         mmu_csr_state       = mmu_csr_runtime_state::type_id::create("mmu_csr_state");
         mmu_csr_state.reset();
+        next_tlb_entry_generation = 0;
+        uid_waiting_by_vpn_s2xlate.delete();
     endfunction:new
 
     static function common_data_transaction get();
@@ -2662,8 +2673,6 @@ class common_data_transaction extends uvm_object;
             `uvm_fatal("COMMON_DATA", "insert_tlb_entry got null entry")
         end
         entry.lookup_key = key;
-        entry.asid       = key.asid;
-        entry.vmid       = key.vmid;
         entry.s2xlate    = key.s2xlate;
         tlb_entry_by_key[key] = entry;
     endfunction:insert_tlb_entry
@@ -2745,7 +2754,9 @@ class common_data_transaction extends uvm_object;
         if (entry == null) begin
             `uvm_fatal("COMMON_DATA", "sfence_match_entry got null entry")
         end
-        if (!payload.ignore_addr && !sfence_vpn_match(key.vpn, entry.level, payload.addr)) begin
+        if (!payload.ignore_addr && !sfence_vpn_match(key.vpn,
+                                                      entry.s1_stage_active ? entry.s1_level : entry.s2_level,
+                                                      payload.addr)) begin
             return 1'b0;
         end
 
@@ -2769,7 +2780,7 @@ class common_data_transaction extends uvm_object;
                 return 1'b0;
             end
             if (!payload.ignore_id) begin
-                if (entry.pte_g) begin
+                if (entry.s1_pte_g) begin
                     return 1'b0;
                 end
                 if (key.asid != payload.id) begin
@@ -2783,7 +2794,7 @@ class common_data_transaction extends uvm_object;
             return 1'b0;
         end
         if (!payload.ignore_id) begin
-            if (entry.pte_g) begin
+            if (entry.s1_pte_g) begin
                 return 1'b0;
             end
             if (key.asid != payload.id) begin
@@ -2834,6 +2845,13 @@ class common_data_transaction extends uvm_object;
         tlb_entry_by_key.delete();
     endfunction:clear_dispatch_l2tlb_live_entries
 
+    function longint unsigned allocate_tlb_entry_generation();
+        if (next_tlb_entry_generation == '1 || next_tlb_entry_generation + 1 == 0)
+            `uvm_fatal("COMMON_DATA", "TLB entry generation overflow");
+        next_tlb_entry_generation++;
+        return next_tlb_entry_generation;
+    endfunction:allocate_tlb_entry_generation
+
     function memblock_tlb_entry build_tlb_entry_for_key_with_csr(
         input memblock_tlb_lookup_key_t key,
         input mmu_csr_runtime_state csr_snapshot);
@@ -2847,11 +2865,13 @@ class common_data_transaction extends uvm_object;
         if (builder == null) begin
             `uvm_fatal("COMMON_DATA", "failed to create tlb_map_builder")
         end
-        entry = builder.build_tlb_entry_for_req(key.vpn[37:0], key.s2xlate, csr_snapshot);
+        entry = builder.build_payload_for_key_with_csr(key, csr_snapshot);
+        if (entry == null) begin
+            `uvm_fatal("COMMON_DATA", "builder returned null payload entry")
+        end
         entry.lookup_key = key;
-        entry.asid = key.asid;
-        entry.vmid = key.vmid;
         entry.s2xlate = key.s2xlate;
+        entry.entry_generation = allocate_tlb_entry_generation();
         return entry;
     endfunction:build_tlb_entry_for_key_with_csr
 
@@ -2881,18 +2901,226 @@ class common_data_transaction extends uvm_object;
                (main_tr.fuOpType[8:7] == 2'b00);
     endfunction:is_hypervisor_tlb_inst
 
+    function memblock_uid_tlb_wait_shape_key_t make_uid_tlb_wait_shape_key(
+        input bit [51:0] vpn,
+        input bit [1:0] s2xlate);
+        return {vpn, s2xlate};
+    endfunction:make_uid_tlb_wait_shape_key
+
+    // UID registration is sealed when the owner has requested release, before
+    // the later driver-side transport cutoff confirms admission closed.
+    function void check_l2tlb_uid_registration_open(input string caller);
+        if (memblock_sync_pkg::l2tlb_release_admission_close_requested ||
+            memblock_sync_pkg::l2tlb_release_admission_closed ||
+            memblock_sync_pkg::l2tlb_release_closing) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("%s called after L2TLB release admission seal requested=%0d closed=%0d closing=%0d",
+                                 caller,
+                                 memblock_sync_pkg::l2tlb_release_admission_close_requested,
+                                 memblock_sync_pkg::l2tlb_release_admission_closed,
+                                 memblock_sync_pkg::l2tlb_release_closing))
+        end
+    endfunction:check_l2tlb_uid_registration_open
+
+    // This bounded cleanup never changes a valid WAITING record.  It only
+    // removes a stale index handle after that record has already become
+    // invalid, COMPLETED, or CANCELED.
+    function void prune_uid_waiting_index_bucket(
+        input memblock_uid_tlb_wait_shape_key_t shape_key,
+        input string caller);
+        int                         idx;
+        memblock_uid_t              candidate_uid;
+        memblock_uid_tlb_record     candidate_record;
+
+        if (!uid_waiting_by_vpn_s2xlate.exists(shape_key)) begin
+            return;
+        end
+        for (idx = int'(uid_waiting_by_vpn_s2xlate[shape_key].size()) - 1;
+             idx >= 0;
+             idx--) begin
+            candidate_uid = uid_waiting_by_vpn_s2xlate[shape_key][idx];
+            if (!uid_tlb_record_by_uid.exists(candidate_uid) ||
+                uid_tlb_record_by_uid[candidate_uid] == null ||
+                !uid_tlb_record_by_uid[candidate_uid].record_valid ||
+                !uid_tlb_record_by_uid[candidate_uid].is_waiting()) begin
+                `uvm_info("COMMON_DATA",
+                          $sformatf("prune stale L2TLB WAITING index uid=%0d caller=%s",
+                                    candidate_uid, caller),
+                          UVM_LOW)
+                uid_waiting_by_vpn_s2xlate[shape_key].delete(idx);
+                continue;
+            end
+            candidate_record = uid_tlb_record_by_uid[candidate_uid];
+            if (candidate_record.uid != candidate_uid ||
+                make_uid_tlb_wait_shape_key(candidate_record.vpn,
+                                             candidate_record.s2xlate) != shape_key) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("L2TLB WAITING index corruption uid=%0d caller=%s",
+                                     candidate_uid, caller))
+            end
+        end
+        if (!uid_waiting_by_vpn_s2xlate.exists(shape_key)) begin
+            return;
+        end
+        if (uid_waiting_by_vpn_s2xlate[shape_key].size() == 0) begin
+            uid_waiting_by_vpn_s2xlate.delete(shape_key);
+        end else if (uid_waiting_by_vpn_s2xlate[shape_key].size() >
+                     MEMBLOCK_DUT_L2TLB_DFILTER_SIZE) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("L2TLB WAITING index bucket exceeds DTLB filter capacity caller=%s size=%0d max=%0d",
+                                 caller,
+                                 uid_waiting_by_vpn_s2xlate[shape_key].size(),
+                                 MEMBLOCK_DUT_L2TLB_DFILTER_SIZE))
+        end
+    endfunction:prune_uid_waiting_index_bucket
+
+    function void add_waiting_uid_to_index(input memblock_uid_t uid,
+                                            input memblock_uid_tlb_record record);
+        memblock_uid_tlb_wait_shape_key_t shape_key;
+        int                                idx;
+
+        if (record == null || !record.is_waiting() || record.uid != uid ||
+            record.lookup_key.vpn != record.vpn ||
+            record.lookup_key.s2xlate != record.s2xlate) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("invalid WAITING UID registration uid=%0d", uid))
+        end
+        shape_key = make_uid_tlb_wait_shape_key(record.vpn, record.s2xlate);
+        prune_uid_waiting_index_bucket(shape_key, "add_waiting_uid_to_index");
+        if (uid_waiting_by_vpn_s2xlate.exists(shape_key)) begin
+            for (idx = 0; idx < int'(uid_waiting_by_vpn_s2xlate[shape_key].size());
+                 idx++) begin
+                if (uid_waiting_by_vpn_s2xlate[shape_key][idx] == uid) begin
+                    `uvm_fatal("COMMON_DATA",
+                               $sformatf("duplicate L2TLB WAITING index uid=%0d", uid))
+                end
+            end
+            if (uid_waiting_by_vpn_s2xlate[shape_key].size() >=
+                MEMBLOCK_DUT_L2TLB_DFILTER_SIZE) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("L2TLB WAITING index capacity overflow uid=%0d size=%0d max=%0d",
+                                     uid,
+                                     uid_waiting_by_vpn_s2xlate[shape_key].size(),
+                                     MEMBLOCK_DUT_L2TLB_DFILTER_SIZE))
+            end
+        end
+        uid_waiting_by_vpn_s2xlate[shape_key].push_back(uid);
+    endfunction:add_waiting_uid_to_index
+
+    function void check_waiting_uid_index_membership(
+        input memblock_uid_t uid,
+        input memblock_uid_tlb_record record,
+        input string caller);
+        memblock_uid_tlb_wait_shape_key_t shape_key;
+        int                                member_count;
+        int                                idx;
+
+        if (record == null || !record.is_waiting() || record.uid != uid) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("%s got invalid WAITING UID record uid=%0d",
+                                 caller, uid))
+        end
+        shape_key = make_uid_tlb_wait_shape_key(record.vpn, record.s2xlate);
+        prune_uid_waiting_index_bucket(shape_key, caller);
+        member_count = 0;
+        if (uid_waiting_by_vpn_s2xlate.exists(shape_key)) begin
+            for (idx = 0; idx < int'(uid_waiting_by_vpn_s2xlate[shape_key].size());
+                 idx++) begin
+                if (uid_waiting_by_vpn_s2xlate[shape_key][idx] == uid) begin
+                    member_count++;
+                end
+            end
+        end
+        if (member_count != 1) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("%s expected one L2TLB WAITING index member uid=%0d got=%0d",
+                                 caller, uid, member_count))
+        end
+    endfunction:check_waiting_uid_index_membership
+
+    function void remove_waiting_uid_from_index(
+        input memblock_uid_t uid,
+        input memblock_uid_tlb_record record,
+        input string caller);
+        memblock_uid_tlb_wait_shape_key_t shape_key;
+        int                                idx;
+        int unsigned                       removed_count;
+
+        if (record == null || !record.record_valid || record.uid != uid) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("%s got invalid UID record for L2TLB index removal uid=%0d",
+                                 caller, uid))
+        end
+        shape_key = make_uid_tlb_wait_shape_key(record.vpn, record.s2xlate);
+        if (!uid_waiting_by_vpn_s2xlate.exists(shape_key)) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("%s missing L2TLB WAITING index bucket uid=%0d",
+                                 caller, uid))
+        end
+        removed_count = 0;
+        for (idx = int'(uid_waiting_by_vpn_s2xlate[shape_key].size()) - 1;
+             idx >= 0;
+             idx--) begin
+            if (uid_waiting_by_vpn_s2xlate[shape_key][idx] == uid) begin
+                uid_waiting_by_vpn_s2xlate[shape_key].delete(idx);
+                removed_count++;
+            end
+        end
+        if (removed_count != 1) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("%s expected one L2TLB WAITING index removal uid=%0d got=%0d",
+                                 caller, uid, removed_count))
+        end
+        if (uid_waiting_by_vpn_s2xlate[shape_key].size() == 0) begin
+            uid_waiting_by_vpn_s2xlate.delete(shape_key);
+        end else begin
+            prune_uid_waiting_index_bucket(shape_key, caller);
+        end
+    endfunction:remove_waiting_uid_from_index
+
+    function void clear_uid_waiting_by_vpn_s2xlate();
+        uid_waiting_by_vpn_s2xlate.delete();
+    endfunction:clear_uid_waiting_by_vpn_s2xlate
+
+    function bit uid_tlb_waiting_context_matches(
+        input memblock_uid_t uid,
+        input memblock_uid_tlb_record record,
+        input bit [51:0] vpn,
+        input bit [1:0] s2xlate,
+        input bit is_hypervisor_inst,
+        input mmu_csr_runtime_state csr_snapshot);
+        memblock_tlb_lookup_key_t expected_key;
+
+        if (csr_snapshot == null) begin
+            `uvm_fatal("COMMON_DATA",
+                       "uid_tlb_waiting_context_matches got null csr_snapshot")
+        end
+        if (record == null || !record.is_waiting() || record.csr_snapshot == null) begin
+            return 1'b0;
+        end
+        expected_key = csr_snapshot.make_lookup_key(vpn, s2xlate);
+        return record.uid == uid &&
+               record.vpn == vpn &&
+               record.s2xlate == s2xlate &&
+               record.is_hypervisor_inst == is_hypervisor_inst &&
+               record.lookup_key == expected_key &&
+               record.csr_snapshot.update_seq == csr_snapshot.update_seq;
+    endfunction:uid_tlb_waiting_context_matches
+
     function void register_uid_tlb_record_on_issue(input memblock_uid_t uid);
         main_control_transaction main_tr;
         mmu_csr_runtime_state    snapshot;
         bit [51:0]               vpn;
         bit [1:0]                s2xlate;
         bit                      is_hypervisor_inst;
+        longint unsigned         current_sample;
 
         check_uid(uid, "register_uid_tlb_record_on_issue");
-        if (uid_tlb_record_by_uid.exists(uid) &&
-            uid_tlb_record_by_uid[uid] != null &&
-            uid_tlb_record_by_uid[uid].pte_valid) begin
-            return;
+        check_l2tlb_uid_registration_open("register_uid_tlb_record_on_issue");
+        current_sample = memblock_sync_pkg::peek_current_dut_global_sample();
+        if (current_sample == 0) begin
+            `uvm_fatal("COMMON_DATA",
+                       "UID TLB registration requires a published DUT global sample")
         end
         main_tr = get_main_transaction(uid);
         get_mmu_csr_snapshot(snapshot);
@@ -2908,10 +3136,17 @@ class common_data_transaction extends uvm_object;
                                                 input bit is_hypervisor_inst,
                                                 input mmu_csr_runtime_state csr_snapshot);
         memblock_uid_tlb_record record;
+        longint unsigned        current_sample;
 
         check_uid(uid, "update_uid_tlb_record_context");
+        check_l2tlb_uid_registration_open("update_uid_tlb_record_context");
         if (csr_snapshot == null) begin
             `uvm_fatal("COMMON_DATA", "update_uid_tlb_record_context got null csr_snapshot")
+        end
+        current_sample = memblock_sync_pkg::peek_current_dut_global_sample();
+        if (current_sample == 0) begin
+            `uvm_fatal("COMMON_DATA",
+                       "update_uid_tlb_record_context requires a published DUT global sample")
         end
         if (!uid_tlb_record_by_uid.exists(uid) || uid_tlb_record_by_uid[uid] == null) begin
             record = memblock_uid_tlb_record::type_id::create($sformatf("uid_tlb_record_%0d", uid));
@@ -2919,52 +3154,180 @@ class common_data_transaction extends uvm_object;
         end else begin
             record = uid_tlb_record_by_uid[uid];
         end
-        record.init_context(uid, vpn, s2xlate, is_hypervisor_inst, csr_snapshot);
+        if (record.record_valid) begin
+            case (record.uid_tlb_wait_state)
+                memblock_uid_tlb_record::MEMBLOCK_UID_TLB_WAITING: begin
+                    if (record.csr_snapshot == null) begin
+                        `uvm_fatal("COMMON_DATA",
+                                   $sformatf("WAITING uid=%0d has null CSR snapshot", uid))
+                    end
+                    if (uid_tlb_waiting_context_matches(uid, record, vpn, s2xlate,
+                                                        is_hypervisor_inst,
+                                                        csr_snapshot)) begin
+                        check_waiting_uid_index_membership(
+                            uid, record, "update_uid_tlb_record_context");
+                        return;
+                    end
+                    `uvm_fatal("COMMON_DATA",
+                               $sformatf("uid=%0d attempts to replace an active L2TLB WAITING instance old_vpn=0x%0h old_asid=0x%0h old_vmid=0x%0h old_s2xlate=%0d old_csr_seq=%0d new_vpn=0x%0h new_s2xlate=%0d new_csr_seq=%0d",
+                                         uid,
+                                         record.lookup_key.vpn,
+                                         record.lookup_key.asid,
+                                         record.lookup_key.vmid,
+                                         record.lookup_key.s2xlate,
+                                         record.csr_snapshot.update_seq,
+                                         vpn,
+                                         s2xlate,
+                                         csr_snapshot.update_seq))
+                end
+                memblock_uid_tlb_record::MEMBLOCK_UID_TLB_COMPLETED: begin
+                    if (!record.pte_valid) begin
+                        `uvm_fatal("COMMON_DATA",
+                                   $sformatf("COMPLETED uid=%0d has pte_valid=0", uid))
+                    end
+                    // A real reissue starts a fresh WAITING epoch below.
+                    // init_context() resets only the new-attempt context and
+                    // derived fields; record.payload remains historical data.
+                end
+                memblock_uid_tlb_record::MEMBLOCK_UID_TLB_CANCELED: begin
+                    if (record.pte_valid) begin
+                        `uvm_fatal("COMMON_DATA",
+                                   $sformatf("CANCELED uid=%0d has pte_valid=1", uid))
+                    end
+                end
+                default: begin
+                    `uvm_fatal("COMMON_DATA",
+                               $sformatf("uid=%0d has invalid L2TLB wait state=%0d",
+                                         uid, record.uid_tlb_wait_state))
+                end
+            endcase
+        end
+        record.init_context(uid, vpn, s2xlate, is_hypervisor_inst, csr_snapshot,
+                            current_sample);
+        add_waiting_uid_to_index(uid, record);
     endfunction:update_uid_tlb_record_context
 
-    // 中文注释：UID TLB lifecycle helper 只维护 request/response/cancel 账本，
-    // 不直接修改主表 pass/fail/terminal，也不重新解释 lookup key。
-    function int unsigned mark_uid_tlb_record_request_fire(input memblock_tlb_lookup_key_t key,
-                                                           input longint unsigned sample_seq);
+    // Abstract responsibility: use the bounded shape index after a real
+    // DTLB->L2TLB request fire.  It records only fire provenance and does not
+    // create a token-to-UID ownership relation.
+    function int unsigned mark_waiting_uid_records_on_request_fire(
+        input memblock_tlb_lookup_key_t key,
+        input longint unsigned sample_seq);
         int unsigned marked_count;
+        int          idx;
+        memblock_uid_t uid;
+        memblock_uid_tlb_record record;
+        memblock_uid_tlb_wait_shape_key_t shape_key;
+        memblock_tlb_lookup_key_t request_key;
+        memblock_tlb_lookup_key_t request_candidate_key;
+        memblock_tlb_lookup_key_t candidate_key;
+        memblock_sync_pkg::dispatch_raw_csr_t request_raw_csr;
+        mmu_csr_runtime_state request_csr_snapshot;
 
+        check_l2tlb_uid_registration_open(
+            "mark_waiting_uid_records_on_request_fire");
         if (sample_seq == 0) begin
-            `uvm_fatal("COMMON_DATA", "mark_uid_tlb_record_request_fire requires non-zero sample_seq")
+            `uvm_fatal("COMMON_DATA",
+                       "mark_waiting_uid_records_on_request_fire requires non-zero sample_seq")
         end
         if (sample_seq > memblock_sync_pkg::peek_current_dut_global_sample()) begin
             `uvm_fatal("COMMON_DATA",
-                       $sformatf("mark_uid_tlb_record_request_fire got future sample=%0d latest=%0d key vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d",
+                       $sformatf("mark_waiting_uid_records_on_request_fire got future sample=%0d latest=%0d key vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d",
                                  sample_seq,
                                  memblock_sync_pkg::peek_current_dut_global_sample(),
                                  key.vpn, key.asid, key.vmid, key.s2xlate))
         end
 
-        marked_count = 0;
-        foreach (uid_tlb_record_by_uid[uid]) begin
-            memblock_uid_tlb_record record;
+        // Rebuild the exact C-2 request context rather than consulting the
+        // mutable runtime latest.  key must be the same key captured by the
+        // pending request at this real fire boundary.
+        if (!memblock_sync_pkg::get_l2tlb_request_csr_history(sample_seq,
+                                                               request_raw_csr) ||
+            !request_raw_csr.valid) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("missing valid L2TLB request C-2 CSR for request-fire sample=%0d",
+                                 sample_seq))
+        end
+        request_csr_snapshot = mmu_csr_runtime_state::type_id::create(
+            $sformatf("uid_request_fire_csr_%0d", sample_seq));
+        if (request_csr_snapshot == null) begin
+            `uvm_fatal("COMMON_DATA",
+                       "failed to allocate L2TLB request-fire C-2 CSR snapshot")
+        end
+        request_csr_snapshot.reset();
+        request_csr_snapshot.update_from_raw_csr(request_raw_csr);
+        request_key = request_csr_snapshot.make_lookup_key({12'b0, key.vpn},
+                                                            key.s2xlate);
+        if (request_key != key) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("L2TLB request-fire key is not from its C-2 CSR sample=%0d key vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d C-2 asid=0x%0h vmid=0x%0h",
+                                 sample_seq, key.vpn, key.asid, key.vmid,
+                                 key.s2xlate, request_key.asid,
+                                 request_key.vmid))
+        end
 
-            record = uid_tlb_record_by_uid[uid];
-            if (record == null || !record.record_valid ||
-                record.vpn != key.vpn || record.s2xlate != key.s2xlate) begin
-                continue;
-            end
-            if (record.lifecycle_state ==
-                    memblock_uid_tlb_record::MEMBLOCK_UID_TLB_RECORD_STATE_UNBOUND) begin
-                // One DTLB/L2TLB request may be shared by several same-key
-                // PTW filter waiters.  The marker proves a real request fire;
-                // it does not establish a token-to-UID ownership relation.
-                record.mark_request_fire(sample_seq);
-                marked_count++;
+        shape_key = make_uid_tlb_wait_shape_key(key.vpn, key.s2xlate);
+        prune_uid_waiting_index_bucket(
+            shape_key, "mark_waiting_uid_records_on_request_fire");
+        marked_count = 0;
+        if (uid_waiting_by_vpn_s2xlate.exists(shape_key)) begin
+            for (idx = 0; idx < int'(uid_waiting_by_vpn_s2xlate[shape_key].size());
+                 idx++) begin
+                uid = uid_waiting_by_vpn_s2xlate[shape_key][idx];
+                if (!uid_tlb_record_by_uid.exists(uid) ||
+                    uid_tlb_record_by_uid[uid] == null ||
+                    !uid_tlb_record_by_uid[uid].record_valid ||
+                    !uid_tlb_record_by_uid[uid].is_waiting()) begin
+                    `uvm_fatal("COMMON_DATA",
+                               $sformatf("L2TLB WAITING index changed during request-fire marking uid=%0d",
+                                         uid))
+                end
+                record = uid_tlb_record_by_uid[uid];
+                if (record.uid != uid || record.vpn != key.vpn ||
+                    record.s2xlate != key.s2xlate) begin
+                    `uvm_fatal("COMMON_DATA",
+                               $sformatf("L2TLB WAITING index shape mismatch uid=%0d",
+                                         uid))
+                end
+                if (record.csr_snapshot == null) begin
+                    `uvm_fatal("COMMON_DATA",
+                               $sformatf("WAITING uid=%0d has null request CSR snapshot",
+                                         uid))
+                end
+                // The bounded shape bucket is only a candidate filter.  First
+                // replay the pending request's C-2 context, then require the
+                // UID's own frozen request context to denote the same key.
+                request_candidate_key = request_csr_snapshot.make_lookup_key(
+                    {12'b0, record.vpn}, record.s2xlate);
+                candidate_key = record.csr_snapshot.make_lookup_key(
+                    {12'b0, record.vpn}, record.s2xlate);
+                if (request_candidate_key != key || candidate_key != key) begin
+                    continue;
+                end
+                if (record.uid_tlb_first_request_fire_sample_seq == 0) begin
+                    // One request fire may mark several waiting UIDs.  The
+                    // record remains independent of this request token.
+                    record.mark_request_fire(sample_seq);
+                    marked_count++;
+                end
             end
         end
 
         if (marked_count == 0) begin
             `uvm_info("COMMON_DATA",
-                      $sformatf("no UNBOUND uid_tlb_record matches L2TLB request fire key vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d sample=%0d; allow duplicate/prefetch/no-UID request",
+                      $sformatf("no unmarked WAITING UID matches L2TLB request fire key vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d sample=%0d; allow duplicate/prefetch/no-UID request",
                                 key.vpn, key.asid, key.vmid, key.s2xlate, sample_seq),
                       UVM_LOW)
         end
         return marked_count;
+    endfunction:mark_waiting_uid_records_on_request_fire
+
+    // Compatibility API for the existing responder call site.  key is frozen
+    // from that request's C-2 CSR snapshot before this helper is invoked.
+    function int unsigned mark_uid_tlb_record_request_fire(
+        input memblock_tlb_lookup_key_t key,
+        input longint unsigned sample_seq);
+        return mark_waiting_uid_records_on_request_fire(key, sample_seq);
     endfunction:mark_uid_tlb_record_request_fire
 
     function int unsigned cancel_waiting_uid_tlb_record_for_uid(input memblock_uid_t uid,
@@ -2980,6 +3343,8 @@ class common_data_transaction extends uvm_object;
             return 0;
         end
         record.mark_canceled();
+        remove_waiting_uid_from_index(
+            uid, record, "cancel_waiting_uid_tlb_record_for_uid");
         `uvm_info("COMMON_DATA",
                   $sformatf("cancel WAITING uid_tlb_record uid=%0d reason=%s key vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d sample=%0d",
                             uid, reason,
@@ -2987,7 +3352,7 @@ class common_data_transaction extends uvm_object;
                             record.lookup_key.asid,
                             record.lookup_key.vmid,
                             record.lookup_key.s2xlate,
-                            record.request_fire_sample_seq),
+                            record.uid_tlb_first_request_fire_sample_seq),
                   UVM_LOW)
         return 1;
     endfunction:cancel_waiting_uid_tlb_record_for_uid
@@ -2997,12 +3362,17 @@ class common_data_transaction extends uvm_object;
 
         cancel_count = 0;
         foreach (uid_tlb_record_by_uid[uid]) begin
-            if (uid_tlb_record_by_uid[uid] != null &&
-                uid_tlb_record_by_uid[uid].is_waiting()) begin
-                uid_tlb_record_by_uid[uid].mark_canceled();
+            memblock_uid_tlb_record record;
+
+            record = uid_tlb_record_by_uid[uid];
+            if (record != null && record.is_waiting()) begin
+                record.mark_canceled();
                 cancel_count++;
             end
         end
+        // Runtime reset owns every WAITING instance: state is transitioned
+        // above before the whole secondary index is discarded.
+        clear_uid_waiting_by_vpn_s2xlate();
         if (cancel_count != 0) begin
             `uvm_info("COMMON_DATA",
                       $sformatf("cancel WAITING uid_tlb_records reason=%s count=%0d",
@@ -3026,12 +3396,13 @@ class common_data_transaction extends uvm_object;
 
             record = uid_tlb_record_by_uid[uid];
             if (record == null || !record.is_waiting() ||
-                !record.request_fire_valid ||
-                record.request_fire_sample_seq == 0 ||
-                record.request_fire_sample_seq > anchor_sample_seq) begin
+                record.uid_tlb_first_request_fire_sample_seq == 0 ||
+                record.uid_tlb_first_request_fire_sample_seq > anchor_sample_seq) begin
                 continue;
             end
             record.mark_canceled();
+            remove_waiting_uid_from_index(
+                uid, record, "cancel_waiting_uid_tlb_records_through_sample");
             cancel_count++;
         end
         if (cancel_count != 0) begin
@@ -3043,6 +3414,41 @@ class common_data_transaction extends uvm_object;
         return cancel_count;
     endfunction:cancel_waiting_uid_tlb_records_through_sample
 
+    // Abstract responsibility: close UID TLB candidates that were registered
+    // at issue time but never became an actual DTLB->L2TLB request before the
+    // owner closed admission.  This is a proven no-request outcome, not a
+    // substitute for draining a real response.
+    function int unsigned cancel_unbound_uid_tlb_records_at_release(
+        input string reason = "");
+        int unsigned cancel_count;
+
+        cancel_count = 0;
+        foreach (uid_tlb_record_by_uid[uid]) begin
+            memblock_uid_tlb_record record;
+
+            record = uid_tlb_record_by_uid[uid];
+            if (record == null || !record.is_waiting() ||
+                record.uid_tlb_first_request_fire_sample_seq != 0) begin
+                continue;
+            end
+            record.mark_canceled();
+            remove_waiting_uid_from_index(
+                uid, record, "cancel_unbound_uid_tlb_records_at_release");
+            cancel_count++;
+            `uvm_info("COMMON_DATA",
+                      $sformatf("cancel unbound L2TLB UID candidate uid=%0d wait_epoch=%0d reason=%s key vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d",
+                                uid,
+                                record.uid_tlb_wait_epoch,
+                                reason,
+                                record.lookup_key.vpn,
+                                record.lookup_key.asid,
+                                record.lookup_key.vmid,
+                                record.lookup_key.s2xlate),
+                      UVM_LOW)
+        end
+        return cancel_count;
+    endfunction:cancel_unbound_uid_tlb_records_at_release
+
     function bit has_waiting_uid_tlb_record();
         foreach (uid_tlb_record_by_uid[uid]) begin
             if (uid_tlb_record_by_uid[uid] != null &&
@@ -3053,19 +3459,397 @@ class common_data_transaction extends uvm_object;
         return 1'b0;
     endfunction:has_waiting_uid_tlb_record
 
-    // Abstract responsibility: reproduce the V2 PtwRespS2.hit() raw address,
-    // stage, sector, ASID/VMID and global matching rules for one response.
-    // This helper is intentionally independent of UID state.
+    // Abstract responsibility: provide the normal-release caller a complete
+    // diagnostic count.  This low-frequency scan deliberately does not alter
+    // UID state or clean the index, because WAITING must block release.
+    function void check_l2tlb_release_uid_waiting(
+        output int unsigned waiting_count);
+        memblock_uid_tlb_record record;
+
+        waiting_count = 0;
+        foreach (uid_tlb_record_by_uid[uid]) begin
+            record = uid_tlb_record_by_uid[uid];
+            if (record == null || !record.record_valid ||
+                record.uid_tlb_wait_state !=
+                    memblock_uid_tlb_record::MEMBLOCK_UID_TLB_WAITING) begin
+                continue;
+            end
+            waiting_count++;
+            `uvm_info("COMMON_DATA",
+                      $sformatf("L2TLB release blocked by WAITING uid=%0d wait_epoch=%0d wait_start_sample=%0d key vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d pte_valid=%0d",
+                                uid,
+                                record.uid_tlb_wait_epoch,
+                                record.uid_wait_start_sample_seq,
+                                record.lookup_key.vpn,
+                                record.lookup_key.asid,
+                                record.lookup_key.vmid,
+                                record.lookup_key.s2xlate,
+                                record.pte_valid),
+                      UVM_LOW)
+        end
+    endfunction:check_l2tlb_release_uid_waiting
+
+    function bit tlb_request_s1_vpn_fits_mode(
+        input bit [51:0] vpn,
+        input bit [3:0] mode);
+        case (mode)
+            MEMBLOCK_SV39_MODE: return !(|vpn[51:27]);
+            MEMBLOCK_SV48_MODE: return !(|vpn[51:36]);
+            default: return 1'b0;
+        endcase
+    endfunction:tlb_request_s1_vpn_fits_mode
+
+    function bit tlb_request_s2_gvpn_fits_mode(
+        input bit [43:0] gvpn,
+        input bit [3:0] mode);
+        case (mode)
+            MEMBLOCK_SV39_MODE: return !(|gvpn[43:29]);
+            MEMBLOCK_SV48_MODE: return !(|gvpn[43:38]);
+            default: return 1'b0;
+        endcase
+    endfunction:tlb_request_s2_gvpn_fits_mode
+
+    function bit [43:0] resolve_tlb_request_ppn_from_raw(
+        input bit [43:0] canonical_ppn,
+        input bit [43:0] request_vpn,
+        input bit [1:0] level,
+        input bit pte_n);
+        case (level)
+            2'd3: return {canonical_ppn[43:27], request_vpn[26:0]};
+            2'd2: return {canonical_ppn[43:18], request_vpn[17:0]};
+            2'd1: return {canonical_ppn[43:9], request_vpn[8:0]};
+            default: begin
+                if (pte_n) begin
+                    return {canonical_ppn[43:4], request_vpn[3:0]};
+                end
+                return canonical_ppn;
+            end
+        endcase
+    endfunction:resolve_tlb_request_ppn_from_raw
+
+    function bit tlb_request_napot_ppn_is_resolvable(
+        input bit s1,
+        input bit pte_n,
+        input bit [43:0] canonical_ppn,
+        input bit [3:0] pte_mode,
+        input bit [51:0] request_vpn,
+        input bit [1:0] request_s2xlate);
+        if (!pte_n || canonical_ppn[3:0] == 4'b1000) begin
+            return 1'b1;
+        end
+        if (pte_mode ==
+            memblock_tlb_entry::MEMBLOCK_TLB_PTE_MODE_LEGAL) begin
+            `uvm_fatal("L2TLB_PAYLOAD_NAPOT",
+                       $sformatf("LEGAL %s NAPOT raw PPN=0x%0h is not encoded vpn=0x%0h s2xlate=%0d",
+                                 s1 ? "S1" : "S2", canonical_ppn,
+                                 request_vpn, request_s2xlate))
+        end
+        `uvm_info("L2TLB_PAYLOAD_NAPOT",
+                  $sformatf("non-LEGAL %s NAPOT raw PPN=0x%0h leaves derived fields invalid vpn=0x%0h s2xlate=%0d",
+                            s1 ? "S1" : "S2", canonical_ppn,
+                            request_vpn, request_s2xlate), UVM_LOW)
+        return 1'b0;
+    endfunction:tlb_request_napot_ppn_is_resolvable
+
+    function void note_tlb_request_derived_invalid(
+        input memblock_tlb_entry entry,
+        input bit [51:0] request_vpn,
+        input bit [1:0] request_s2xlate,
+        input string reason);
+        `uvm_info("COMMON_DATA",
+                  $sformatf("leave response-derived fields invalid generation=%0d vpn=0x%0h s2xlate=%0d reason=%s",
+                            entry.entry_generation, request_vpn,
+                            request_s2xlate, reason), UVM_LOW)
+    endfunction:note_tlb_request_derived_invalid
+
+    // Abstract responsibility: derive request-specific normal PPN/GVPN from
+    // one frozen raw response and the caller's VPN.  It neither mutates the
+    // entry nor uses a later runtime CSR, so pending capture and UID multicast
+    // can share it without copying an anchor's derived fields.
+    function void derive_tlb_request_fields(
+        input memblock_tlb_entry entry,
+        input bit [51:0] request_vpn,
+        input bit [1:0] request_s2xlate,
+        input mmu_csr_runtime_state response_csr,
+        output bit valid,
+        output bit [43:0] s1_ppn,
+        output bit [43:0] s2_ppn,
+        output bit [51:0] gvpn);
+        bit s1_expected;
+        bit s2_expected;
+        bit [3:0] s1_response_mode;
+        bit [3:0] s2_response_mode;
+        bit [43:0] s1_canonical_ppn;
+        bit [43:0] s2_canonical_ppn;
+        bit [43:0] resolved_s1_ppn;
+        bit [43:0] resolved_s2_ppn;
+        bit [43:0] s2_input_gvpn;
+
+        valid = 1'b0;
+        s1_ppn = '0;
+        s2_ppn = '0;
+        gvpn = '0;
+        if (entry == null || response_csr == null) begin
+            `uvm_fatal("COMMON_DATA",
+                       "derive_tlb_request_fields requires entry and response C-2 CSR")
+        end
+        if (entry.s2xlate != request_s2xlate) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("derived request s2xlate mismatch entry=%0d request=%0d",
+                                 entry.s2xlate, request_s2xlate))
+        end
+        if (entry.has_effective_fault()) begin
+            return;
+        end
+
+        s1_expected = 1'b0;
+        s2_expected = 1'b0;
+        s1_response_mode = '0;
+        s2_response_mode = '0;
+        case (request_s2xlate)
+            2'd0: begin
+                s1_expected = 1'b1;
+                s1_response_mode = response_csr.satp_mode;
+            end
+            2'd1: begin
+                s1_expected = 1'b1;
+                s1_response_mode = response_csr.vsatp_mode;
+            end
+            2'd2: begin
+                s2_expected = 1'b1;
+                s2_response_mode = response_csr.hgatp_mode;
+            end
+            2'd3: begin
+                s1_expected = 1'b1;
+                s2_expected = 1'b1;
+                s1_response_mode = response_csr.vsatp_mode;
+                s2_response_mode = response_csr.hgatp_mode;
+            end
+            default: begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("unsupported derived request s2xlate=%0d",
+                                     request_s2xlate))
+            end
+        endcase
+        if (entry.s1_stage_active != s1_expected ||
+            entry.s2_stage_active != s2_expected) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("derived request stage shape mismatch s2xlate=%0d",
+                                 request_s2xlate))
+        end
+        entry.validate_s1_sector_payload_consistency("REQUEST_DERIVED");
+        if (s1_expected &&
+            ((s1_response_mode != MEMBLOCK_SV39_MODE &&
+              s1_response_mode != MEMBLOCK_SV48_MODE) ||
+             s1_response_mode != entry.s1_translation_mode_at_build)) begin
+            note_tlb_request_derived_invalid(entry, request_vpn,
+                request_s2xlate,
+                "response-visible S1 mode is unsupported or differs from raw payload");
+            return;
+        end
+        if (s2_expected &&
+            ((s2_response_mode != MEMBLOCK_SV39_MODE &&
+              s2_response_mode != MEMBLOCK_SV48_MODE) ||
+             s2_response_mode != entry.s2_translation_mode_at_build)) begin
+            note_tlb_request_derived_invalid(entry, request_vpn,
+                request_s2xlate,
+                "response-visible S2 mode is unsupported or differs from raw payload");
+            return;
+        end
+
+        // Derived fields are only meaningful for an active normal leaf.  V2
+        // has no persisted S2 V bit, so S2 leaf-ness is established by R/W/X.
+        if (s1_expected &&
+            (!entry.s1_pte_v ||
+             !(entry.s1_pte_r || entry.s1_pte_w || entry.s1_pte_x))) begin
+            note_tlb_request_derived_invalid(entry, request_vpn,
+                request_s2xlate,
+                "active S1 payload is fake or a valid non-leaf");
+            return;
+        end
+        if (s2_expected &&
+            !(entry.s2_pte_r || entry.s2_pte_w || entry.s2_pte_x)) begin
+            note_tlb_request_derived_invalid(entry, request_vpn,
+                request_s2xlate,
+                "active S2 payload is fake or a non-leaf");
+            return;
+        end
+
+        resolved_s1_ppn = '0;
+        resolved_s2_ppn = '0;
+        if (s1_expected) begin
+            if (!tlb_request_s1_vpn_fits_mode(request_vpn,
+                                               s1_response_mode)) begin
+                note_tlb_request_derived_invalid(entry, request_vpn,
+                    request_s2xlate,
+                    "UID VPN does not fit response-visible S1 mode");
+                return;
+            end
+            s1_canonical_ppn = {entry.s1_entry_ppn_raw,
+                                entry.s1_ppn_low[request_vpn[2:0]]};
+            if (!tlb_request_napot_ppn_is_resolvable(
+                    1'b1, entry.s1_pte_n, s1_canonical_ppn,
+                    entry.s1_pte_mode_at_build,
+                    request_vpn, request_s2xlate)) begin
+                return;
+            end
+            resolved_s1_ppn = resolve_tlb_request_ppn_from_raw(
+                s1_canonical_ppn, {6'b0, request_vpn[37:0]},
+                entry.s1_level, entry.s1_pte_n);
+        end
+
+        if (s2_expected) begin
+            if (request_s2xlate == 2'd2) begin
+                if (|request_vpn[51:38]) begin
+                    note_tlb_request_derived_invalid(entry, request_vpn,
+                        request_s2xlate,
+                        "onlyStage2 UID VPN exceeds raw GVPN width");
+                    return;
+                end
+                s2_input_gvpn = {6'b0, request_vpn[37:0]};
+            end else begin
+                s2_input_gvpn = resolved_s1_ppn;
+            end
+            if (!tlb_request_s2_gvpn_fits_mode(s2_input_gvpn,
+                                                s2_response_mode)) begin
+                note_tlb_request_derived_invalid(entry, request_vpn,
+                    request_s2xlate,
+                    "UID GVPN does not fit response-visible S2 mode");
+                return;
+            end
+            s2_canonical_ppn = {6'b0, entry.s2_entry_ppn_raw};
+            if (!tlb_request_napot_ppn_is_resolvable(
+                    1'b0, entry.s2_pte_n, s2_canonical_ppn,
+                    entry.s2_pte_mode_at_build,
+                    request_vpn, request_s2xlate)) begin
+                return;
+            end
+            resolved_s2_ppn = resolve_tlb_request_ppn_from_raw(
+                s2_canonical_ppn, s2_input_gvpn, entry.s2_level,
+                entry.s2_pte_n);
+        end
+
+        if (request_s2xlate == 2'd3) begin
+            gvpn = {8'b0, resolved_s1_ppn};
+        end else begin
+            gvpn = {14'b0, request_vpn[37:0]};
+        end
+        s1_ppn = resolved_s1_ppn;
+        s2_ppn = resolved_s2_ppn;
+        valid = 1'b1;
+    endfunction:derive_tlb_request_fields
+
+    // Abstract responsibility: copy the generic request-specific derived
+    // result into one UID record after raw payload copy and before completion.
+    function void populate_uid_record_derived(
+        input memblock_uid_tlb_record record,
+        input memblock_tlb_entry entry,
+        input mmu_csr_runtime_state response_filter_csr_snapshot);
+        bit derived_valid;
+        bit [43:0] derived_s1_ppn;
+        bit [43:0] derived_s2_ppn;
+        bit [51:0] derived_gvpn;
+
+        if (record == null || entry == null ||
+            response_filter_csr_snapshot == null || record.payload == null ||
+            !record.is_waiting()) begin
+            `uvm_fatal("COMMON_DATA",
+                       "populate_uid_record_derived requires copied WAITING UID payload and response C-2 CSR")
+        end
+        if (record.s2xlate != entry.s2xlate ||
+            record.payload.s2xlate != entry.s2xlate ||
+            record.payload.entry_generation != entry.entry_generation) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("UID payload copy provenance mismatch uid=%0d", record.uid))
+        end
+        record.payload.validate_s1_sector_payload_consistency("UID_DERIVED",
+                                                               entry);
+        derive_tlb_request_fields(record.payload, record.vpn, record.s2xlate,
+                                  response_filter_csr_snapshot, derived_valid,
+                                  derived_s1_ppn, derived_s2_ppn, derived_gvpn);
+        record.request_derived_valid = derived_valid;
+        record.request_s1_resolved_ppn = derived_s1_ppn;
+        record.request_s2_resolved_ppn = derived_s2_ppn;
+        record.request_gvpn = derived_gvpn;
+    endfunction:populate_uid_record_derived
+
+    // PtwRespS2.hit() compares the response's raw VPN anchor rather than the
+    // framework lookup key.  This helper implements its level/NAPOT prefix
+    // comparison for the 38-bit V2 request VPN/GVPN width.
+    function bit raw_l2tlb_vpn_matches_level(
+        input bit [37:0] response_anchor_vpn,
+        input bit [51:0] request_vpn,
+        input bit [1:0] level,
+        input bit pte_n);
+        if (|request_vpn[51:38]) begin
+            return 1'b0;
+        end
+        case (level)
+            2'd0: begin
+                if (pte_n) begin
+                    return response_anchor_vpn[37:4] == request_vpn[37:4];
+                end
+                return response_anchor_vpn == request_vpn[37:0];
+            end
+            2'd1: return response_anchor_vpn[37:9] == request_vpn[37:9];
+            2'd2: return response_anchor_vpn[37:18] == request_vpn[37:18];
+            default: return response_anchor_vpn[37:27] == request_vpn[37:27];
+        endcase
+    endfunction:raw_l2tlb_vpn_matches_level
+
+    // PtwSectorResp.hit() is used only by noS2xlate.  A normal level-0
+    // response matches its tag and the request-selected valididx bit; its
+    // addr_low is not an address-match input in that path.
+    function bit s1_sector_response_matches_request(
+        input memblock_tlb_entry entry,
+        input bit [51:0] request_vpn);
+        bit [37:0] sector_base_vpn;
+
+        if (entry == null) begin
+            `uvm_fatal("COMMON_DATA",
+                       "s1_sector_response_matches_request got null entry")
+        end
+        if (|request_vpn[51:38]) begin
+            return 1'b0;
+        end
+        if (entry.s1_level == 2'd0 && !entry.s1_pte_n) begin
+            return entry.s1_tag == request_vpn[37:3] &&
+                   entry.s1_valididx[request_vpn[2:0]];
+        end
+        sector_base_vpn = {entry.s1_tag, 3'b000};
+        return raw_l2tlb_vpn_matches_level(sector_base_vpn, request_vpn,
+                                           entry.s1_level, entry.s1_pte_n);
+    endfunction:s1_sector_response_matches_request
+
+    // allStage accepts at the smaller of the two raw page sizes.  Its NAPOT
+    // condition is valid only when the other stage does not reduce coverage.
+    function void derive_allstage_lookup_shape(
+        input memblock_tlb_entry entry,
+        output bit [1:0] effective_level,
+        output bit effective_n);
+        if (entry == null || !entry.s1_stage_active ||
+            !entry.s2_stage_active) begin
+            `uvm_fatal("COMMON_DATA",
+                       "derive_allstage_lookup_shape requires active S1 and S2")
+        end
+        effective_level = (entry.s1_level < entry.s2_level) ?
+                          entry.s1_level : entry.s2_level;
+        effective_n = (entry.s1_pte_n && entry.s2_level != 2'd0) ||
+                      (entry.s2_pte_n && entry.s1_level != 2'd0) ||
+                      (entry.s1_pte_n && entry.s2_pte_n);
+    endfunction:derive_allstage_lookup_shape
+
+    // Abstract responsibility: reproduce V2 PtwRespS2.hit() exactly for one
+    // response payload.  It is a pure raw match: no lookup-key fallback,
+    // UID ownership, payload mutation, or timing side effect is permitted.
     function bit entry_matches_request_raw(
         input memblock_tlb_entry entry,
         input bit [51:0] request_vpn,
         input bit [1:0] request_s2xlate,
         input mmu_csr_runtime_state response_filter_csr_snapshot);
-        bit level_hit;
-        bit addr_low_hit;
-        bit asid_hit;
-        bit vmid_hit;
-        bit napot_or_super;
+        bit [37:0] s1_response_anchor_vpn;
+        bit [1:0]  allstage_level;
+        bit        allstage_n;
         bit [15:0] response_asid;
         bit [15:0] response_vmid;
 
@@ -3076,63 +3860,71 @@ class common_data_transaction extends uvm_object;
             return 1'b0;
         end
 
-        response_asid = response_filter_csr_snapshot.current_asid(request_s2xlate);
-        response_vmid = response_filter_csr_snapshot.current_vmid(request_s2xlate);
-        napot_or_super = (entry.level != 2'd0) || entry.pte_n;
-
-        // MMUBundle.scala's level_match checks all VPN portions above the
-        // effective page level.  The no-S2 sector path removes VPN[2:0]
-        // before applying valididx; the two-stage combined path and HPTW use
-        // the reconstructed full level-0 anchor.
-        if (request_s2xlate == 2'd0) begin
-            if (entry.pte_n && entry.level == 2'd0) begin
-                level_hit = entry.lookup_key.vpn[51:4] == request_vpn[51:4];
+        case (request_s2xlate)
+            2'd0: begin
+                if (!entry.s1_stage_active || entry.s2_stage_active) begin
+                    `uvm_fatal("COMMON_DATA",
+                               "noS2xlate entry has invalid stage-active shape")
+                end
+                response_asid =
+                    response_filter_csr_snapshot.current_asid(request_s2xlate);
+                return ((entry.s1_asid == response_asid) || entry.s1_pte_g) &&
+                       s1_sector_response_matches_request(entry, request_vpn);
             end
-            else begin
-                case (entry.level)
-                    2'd0: level_hit = entry.lookup_key.vpn[51:3] == request_vpn[51:3];
-                    2'd1: level_hit = entry.lookup_key.vpn[51:9] == request_vpn[51:9];
-                    2'd2: level_hit = entry.lookup_key.vpn[51:18] == request_vpn[51:18];
-                    default: level_hit = entry.lookup_key.vpn[51:27] == request_vpn[51:27];
-                endcase
+            2'd1: begin
+                if (!entry.s1_stage_active || entry.s2_stage_active) begin
+                    `uvm_fatal("COMMON_DATA",
+                               "onlyStage1 entry has invalid stage-active shape")
+                end
+                response_asid =
+                    response_filter_csr_snapshot.current_asid(request_s2xlate);
+                response_vmid =
+                    response_filter_csr_snapshot.current_vmid(request_s2xlate);
+                s1_response_anchor_vpn = {entry.s1_tag, entry.s1_addr_low};
+                return ((entry.s1_asid == response_asid) || entry.s1_pte_g) &&
+                       (entry.s1_vmid == response_vmid) &&
+                       raw_l2tlb_vpn_matches_level(s1_response_anchor_vpn,
+                                                   request_vpn,
+                                                   entry.s1_level,
+                                                   entry.s1_pte_n);
             end
-        end
-        else if (entry.pte_n && entry.level == 2'd0) begin
-            level_hit = entry.lookup_key.vpn[51:4] == request_vpn[51:4];
-        end
-        else begin
-            case (entry.level)
-                2'd0: level_hit = entry.lookup_key.vpn == request_vpn;
-                2'd1: level_hit = entry.lookup_key.vpn[51:9] == request_vpn[51:9];
-                2'd2: level_hit = entry.lookup_key.vpn[51:18] == request_vpn[51:18];
-                default: level_hit = entry.lookup_key.vpn[51:27] == request_vpn[51:27];
-            endcase
-        end
-
-        // PtwSectorResp.hit() is the no-S2 path.  A normal 4-KB sector still
-        // requires the response VPN's low sector bit to be valid; superpages
-        // and NAPOT entries cover all sectors.
-        addr_low_hit = napot_or_super || entry.valididx[request_vpn[2:0]];
-
-        if (request_s2xlate == 2'd0) begin
-            asid_hit = (entry.asid[15:0] == response_asid) || entry.pte_g;
-            vmid_hit = 1'b1;
-            return asid_hit && level_hit && addr_low_hit;
-        end
-
-        if (request_s2xlate == 2'd2) begin
-            // HptwResp.hit() uses only VMID and G-stage tag/level.  Its raw
-            // response has no ASID/global override.
-            vmid_hit = entry.vmid[15:0] == response_vmid;
-            return vmid_hit && level_hit;
-        end
-
-        // onlyStage1/allStage use PtwRespS2's combined S1 anchor.  The
-        // response's S1 global bit allows an ASID change; VMID remains part of
-        // the two-stage matcher.
-        asid_hit = (entry.asid[15:0] == response_asid) || entry.pte_g;
-        vmid_hit = entry.vmid[15:0] == response_vmid;
-        return asid_hit && vmid_hit && level_hit;
+            2'd2: begin
+                if (entry.s1_stage_active || !entry.s2_stage_active) begin
+                    `uvm_fatal("COMMON_DATA",
+                               "onlyStage2 entry has invalid stage-active shape")
+                end
+                response_vmid =
+                    response_filter_csr_snapshot.current_vmid(request_s2xlate);
+                return (entry.s2_vmid == response_vmid) &&
+                       raw_l2tlb_vpn_matches_level(entry.s2_tag, request_vpn,
+                                                   entry.s2_level,
+                                                   entry.s2_pte_n);
+            end
+            2'd3: begin
+                if (!entry.s1_stage_active || !entry.s2_stage_active) begin
+                    `uvm_fatal("COMMON_DATA",
+                               "allStage entry has invalid stage-active shape")
+                end
+                response_asid =
+                    response_filter_csr_snapshot.current_asid(request_s2xlate);
+                response_vmid =
+                    response_filter_csr_snapshot.current_vmid(request_s2xlate);
+                derive_allstage_lookup_shape(entry, allstage_level, allstage_n);
+                s1_response_anchor_vpn = {entry.s1_tag, entry.s1_addr_low};
+                return ((entry.s1_asid == response_asid) || entry.s1_pte_g) &&
+                       (entry.s1_vmid == response_vmid) &&
+                       raw_l2tlb_vpn_matches_level(s1_response_anchor_vpn,
+                                                   request_vpn,
+                                                   allstage_level,
+                                                   allstage_n);
+            end
+            default: begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("unsupported L2TLB s2xlate=%0d",
+                                     request_s2xlate))
+            end
+        endcase
+        return 1'b0;
     endfunction:entry_matches_request_raw
 
     // Abstract responsibility: decide whether a response payload is visible to
@@ -3146,8 +3938,7 @@ class common_data_transaction extends uvm_object;
             response_filter_csr_snapshot == null) begin
             `uvm_fatal("COMMON_DATA", "entry_matches_uid_at_response got null input")
         end
-        if (!record.is_waiting() || !record.request_fire_valid ||
-            record.request_fire_sample_seq == 0) begin
+        if (!record.is_waiting()) begin
             return 1'b0;
         end
         return entry_matches_request_raw(entry, record.vpn,
@@ -3156,7 +3947,7 @@ class common_data_transaction extends uvm_object;
     endfunction:entry_matches_uid_at_response
 
     // Abstract responsibility: multicast one observed L2TLB response to all
-    // real-fire UID waiters whose raw key matches under response-visible C-2
+    // WAITING UID records whose raw key matches under response-visible C-2
     // CSR.  The token remains complete even when this returns zero.
     function int unsigned complete_waiting_uid_records_by_response(
         input memblock_tlb_entry entry,
@@ -3171,13 +3962,18 @@ class common_data_transaction extends uvm_object;
             memblock_uid_tlb_record record;
 
             record = uid_tlb_record_by_uid[uid];
-            if (record == null || record.pte_valid ||
+            if (record == null || !record.is_waiting() ||
                 !entry_matches_uid_at_response(entry, record,
                                                response_filter_csr_snapshot)) begin
                 continue;
             end
             record.copy_entry_fields(entry);
+            populate_uid_record_derived(record, entry,
+                                        response_filter_csr_snapshot);
             record.mark_completed();
+            remove_waiting_uid_from_index(
+                record.uid, record,
+                "complete_waiting_uid_records_by_response");
             set_status_field(record.uid, MEMBLOCK_STATUS_TLB_MAPPED, 1'b1);
             match_count++;
         end

@@ -9,7 +9,7 @@
 | 核验 commit | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `build_memblock/rtl/MemBlock.sv`、`src/main/scala/xiangshan/cache/mmu`、V2 `l2tlb_interface_profile.md` |
-| 最后核验日期 | `2026-08-06` |
+| 最后核验日期 | `2026-08-09` |
 
 ## Agent 职责和边界
 
@@ -101,24 +101,30 @@ legacy `tc_base` default sequence和`basicTest + VSEQ_MAIN`显式sequence是两�
 | request valid/vpn/s2xlate | `L2tlb_agent_agent_interface` 输入字段 | active branch 从 `_inner_dtlbRepeater_*` force 到 interface | `memblock_l2tlb_base_sequence` 采样 | 不驱动 |
 | request ready | `io_ptw_req_0_ready` | active branch force 到 `_inner_ptw_io_tlb_1_req_0_ready` | responder 根据容量产生 | `send_pkt()` 驱动 |
 | response valid/payload | `io_ptw_resp_*` | active branch force 到 `_inner_ptw_io_tlb_1_resp_*` | TLB entry 构造 xaction | `send_pkt()` 驱动 |
-| s2 `perm_g/u` | xaction/interface 同名字段 | active branch逐字段连接 | 来自 `entry.pte_g/pte_u` | 不得常量化 |
+| s1/s2 `perm_g/u` | xaction/interface 同名字段 | active branch逐字段连接 | 分别来自 `entry.s1_pte_g/u`、`entry.s2_pte_g/u` | 不得常量化或互相镜像 |
 
 `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN=0` 时 interface 全部保持 inactive；该模式不是 passive mirror。
 
-## Permission 字段边界
+## Response Payload 字段边界
 
-当前测试框架只有一套 `memblock_tlb_entry.pte_*`，同时填入 S1/S2 permission。V2 active 接管路径
-中的 `s2_entry_perm_g/u` 必须真实连接 `entry.pte_g/pte_u`，但这不等价于 S1/S2 权限已经独立建模。
-独立两阶段权限属于后续专项。
+当前 V2 测试框架已经把 `memblock_tlb_entry` 拆为独立的 `s1_pte_*` 与 `s2_pte_*` payload：S1 有
+`R/W/X/U/G/A/D/V/N`，S2 有 `R/W/X/U/G/A/D/N`，不得定义或驱动不存在的 S2 `V`。active 接管路径必须将
+`s1_entry_perm_g/u` 直接取自 `s1_pte_g/u`，`s2_entry_perm_g/u` 直接取自 `s2_pte_g/u`；两者可由独立 plus
+权重在 lookup miss 时生成，pending snapshot 和 UID payload 只复制已冻结的结果。
+
+S1 PPN 通过 `s1_entry_ppn_raw + s1_ppn_low[8]` 的 sector split 驱动，`s1_pteidx[8]` 是 one-hot Bool，
+不能再使用旧的数值 `pteidx` 或共享 `ppn`。S2 使用独立 38-bit `s2_entry_ppn_raw`；完整 canonical S2 PPN
+高于 bit 37 时必须 fail-fast。S1/S2 VMID response wire 均为 14 bit，CSR `hgatp_vmid[15:14]` 非零时不得截断
+驱动，因为 DUT 会零扩展 response VMID 后比较。
 
 同样地，response 的 `s1_pf/s1_af` 与 `s2_gpf/s2_gaf` 分别来自 S1 `PtwSectorResp` 和 S2
 `HptwResp`。HPTW 保证同一笔 S2 response 的 GPF/GAF 互斥且 GAF 优先；L1 TLB 再按 `s2xlate`
 把生效的 S1/S2 AF、S1 PF、S2 GPF 收敛为单一异常。它们不是可以用一套 entry 任意复制的四个同义位。
 
 真实 RTL 的地址合成是 `s1_ppn = s1.genPPN(request_vpn)`，all-stage 再以 `s1_ppn` 为 GVPN 计算
-`s2_ppn = s2.genPPNS2(s1_ppn)`；每个 stage 的 `level` 决定其 PPN 要由输入 VPN 补回的低位数。当前
-单 entry UVM 模型让 S1/S2 共享 `level/ppn` 且固定 `s2_gaf=0`，故不覆盖独立两阶段 PPN、不同 level
-组合或 S2 GAF 的真实语义。详细依据见下列 GPF/AF flow。
+`s2_ppn = s2.genPPNS2(s1_ppn)`；每个 stage 的 `level` 决定其 PPN 要由输入 VPN 补回的低位数。当前 UVM
+payload 已独立保存 S1/S2 level、PPN、permission、PBMT、raw/effective fault 和 S2 GAF。无 effective fault
+的 LEGAL stage 才做 leaf/NAPOT 合法化；fault payload 保留 raw PTE 伴随字段且不建立 DCache 地址 owner。
 
 ## 关联 Flow
 
@@ -155,6 +161,7 @@ legacy `tc_base` default sequence和`basicTest + VSEQ_MAIN`显式sequence是两�
 | 2026-07-21 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 首次建立，无旧的 agent 长期文档 | 建立 V2 internal request/response、无ID、多 outstanding、内容匹配和 permission 字段边界 | 用户要求结合 Scala 源码设计 L2TLB responder queue 与回复次序 | V2 mem_ut L2TLB agent |
 | 2026-07-29 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 旧文档只说明 permission 共用 entry，未说明 fault/PPN 的两阶段语义 | 补充 response 四个 fault 的阶段归属、最终异常收敛、S1 到 S2 的串行 PPN 合成以及当前 UVM 单 entry 模型的覆盖缺口 | 用户要求结合 Scala 分析 L2TLB reply 的 fault、level 和 PPN 依赖 | V2 L2TLB agent response 建模与 testcase 预期 |
 | 2026-08-06 | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` | 旧文档允许在顶层 flush event 到达时提前取消 pending，且未说明 response UID 回填使用何时的 CSR | 明确 C0 只登记 epoch/due，C4 才取消仍未完成 token；request capture 与 response-to-UID raw hit 分别使用各自 DUT global sample 的 C-2 CSR，UID issue-time CSR 仅保留历史；同 sample CSR change 与 fence 仍只合并一个 lifecycle barrier | 复查 `PTWNewFilter` response matching、flush/回填边界及 L2TLB undo plan | V2 L2TLB responder flush、CSR history 与 UID 记账 |
+| 2026-08-09 | 本地 V2 payload 实现 | 文档仍描述一套共享 `entry.pte_*`、共享 PPN/level 且 S2 GAF 固定 0 | 同步独立 S1/S2 PTE、PPN、level、PBMT、four-fault payload、one-hot sector 与 width fail-fast 的实际实现 | V2 random payload plan coding 后长期接口文档需要消除旧模型描述 | V2 L2TLB response payload 与 agent 接口边界 |
 
 ## 待确认项
 

@@ -11,7 +11,7 @@ response/adapter drain、raw-fence intake close、当前 epoch required reset ac
 
 关联 plan：
 
-- AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md
+- AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md
 - AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md
 
 ## 专有名词与抽象功能说明

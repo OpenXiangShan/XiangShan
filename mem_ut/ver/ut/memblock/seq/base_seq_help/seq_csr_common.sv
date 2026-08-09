@@ -138,29 +138,19 @@ class seq_csr_common;
     static int unsigned pdest_base = 1;
     static int unsigned pdest_range = 128;
 
-    static int unsigned tlb_pte_r_1_wt = 8;
-    static int unsigned tlb_pte_r_0_wt = 1;
-    static int unsigned tlb_pte_w_1_wt = 6;
-    static int unsigned tlb_pte_w_0_wt = 1;
-    static int unsigned tlb_pte_x_1_wt = 4;
-    static int unsigned tlb_pte_x_0_wt = 1;
-    static int unsigned tlb_pte_u_1_wt = 1;
-    static int unsigned tlb_pte_u_0_wt = 8;
-    static int unsigned tlb_pte_g_1_wt = 1;
-    static int unsigned tlb_pte_g_0_wt = 8;
-    static int unsigned tlb_pte_a_1_wt = 8;
-    static int unsigned tlb_pte_a_0_wt = 1;
-    static int unsigned tlb_pte_d_1_wt = 8;
-    static int unsigned tlb_pte_d_0_wt = 1;
-    static int unsigned tlb_pte_n_1_wt = 1;
-    static int unsigned tlb_pte_n_0_wt = 8;
-    static int unsigned tlb_pte_v_1_wt = 9;
-    static int unsigned tlb_pte_v_0_wt = 1;
-    static int unsigned tlb_level_mode = 0;
-    static int unsigned tlb_level_fixed_value = 0;
-    static int unsigned tlb_level_random_low = 0;
-    static int unsigned tlb_level_random_high = 2;
-    static int unsigned tlb_pte_mode = 0;
+    // 中文注释：L2TLB payload 配置由 plus 读取、这里快照化并提供给 builder。
+    // 下标顺序固定为 R/W/X/U/G/A/D/N/V；S2 数组只有 R/W/X/U/G/A/D/N，没有 V。
+    static bit l2tlb_level_weight_en = 1'b0;
+    static int unsigned l2tlb_s1_fault_wt[2];
+    static int unsigned l2tlb_s2_fault_wt[2];
+    static int unsigned l2tlb_s1_level_wt[4];
+    static int unsigned l2tlb_s2_level_wt[4];
+    static int unsigned l2tlb_s1_pte_1_wt[9];
+    static int unsigned l2tlb_s2_pte_1_wt[8];
+    static int unsigned l2tlb_s1_pbmt_wt[3];
+    static int unsigned l2tlb_s2_pbmt_wt[3];
+    static int unsigned l2tlb_s1_pte_mode = 0;
+    static int unsigned l2tlb_s2_pte_mode = 0;
 
     // 中文注释：自动主表 normal transaction 的虚拟地址生成窗口。
     // 由 plus/default cfg 初始化，apply_legal_addr_template() 只读；默认值保持既有 Bare smoke 分布。
@@ -389,29 +379,52 @@ class seq_csr_common;
         pdest_base                  = get_non_negative_int("MEMBLOCK_PDEST_BASE", plus::MEMBLOCK_PDEST_BASE);
         pdest_range                 = get_non_negative_int("MEMBLOCK_PDEST_RANGE", plus::MEMBLOCK_PDEST_RANGE);
 
-        tlb_pte_r_1_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_R_1_WT", plus::MEMBLOCK_TLB_PTE_R_1_WT);
-        tlb_pte_r_0_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_R_0_WT", plus::MEMBLOCK_TLB_PTE_R_0_WT);
-        tlb_pte_w_1_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_W_1_WT", plus::MEMBLOCK_TLB_PTE_W_1_WT);
-        tlb_pte_w_0_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_W_0_WT", plus::MEMBLOCK_TLB_PTE_W_0_WT);
-        tlb_pte_x_1_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_X_1_WT", plus::MEMBLOCK_TLB_PTE_X_1_WT);
-        tlb_pte_x_0_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_X_0_WT", plus::MEMBLOCK_TLB_PTE_X_0_WT);
-        tlb_pte_u_1_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_U_1_WT", plus::MEMBLOCK_TLB_PTE_U_1_WT);
-        tlb_pte_u_0_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_U_0_WT", plus::MEMBLOCK_TLB_PTE_U_0_WT);
-        tlb_pte_g_1_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_G_1_WT", plus::MEMBLOCK_TLB_PTE_G_1_WT);
-        tlb_pte_g_0_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_G_0_WT", plus::MEMBLOCK_TLB_PTE_G_0_WT);
-        tlb_pte_a_1_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_A_1_WT", plus::MEMBLOCK_TLB_PTE_A_1_WT);
-        tlb_pte_a_0_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_A_0_WT", plus::MEMBLOCK_TLB_PTE_A_0_WT);
-        tlb_pte_d_1_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_D_1_WT", plus::MEMBLOCK_TLB_PTE_D_1_WT);
-        tlb_pte_d_0_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_D_0_WT", plus::MEMBLOCK_TLB_PTE_D_0_WT);
-        tlb_pte_n_1_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_N_1_WT", plus::MEMBLOCK_TLB_PTE_N_1_WT);
-        tlb_pte_n_0_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_N_0_WT", plus::MEMBLOCK_TLB_PTE_N_0_WT);
-        tlb_pte_v_1_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_V_1_WT", plus::MEMBLOCK_TLB_PTE_V_1_WT);
-        tlb_pte_v_0_wt              = get_non_negative_int("MEMBLOCK_TLB_PTE_V_0_WT", plus::MEMBLOCK_TLB_PTE_V_0_WT);
-        tlb_level_mode              = get_non_negative_int("MEMBLOCK_TLB_LEVEL_MODE", plus::MEMBLOCK_TLB_LEVEL_MODE);
-        tlb_level_fixed_value       = get_non_negative_int("MEMBLOCK_TLB_LEVEL_FIXED_VALUE", plus::MEMBLOCK_TLB_LEVEL_FIXED_VALUE);
-        tlb_level_random_low        = get_non_negative_int("MEMBLOCK_TLB_LEVEL_RANDOM_LOW", plus::MEMBLOCK_TLB_LEVEL_RANDOM_LOW);
-        tlb_level_random_high       = get_non_negative_int("MEMBLOCK_TLB_LEVEL_RANDOM_HIGH", plus::MEMBLOCK_TLB_LEVEL_RANDOM_HIGH);
-        tlb_pte_mode                = get_non_negative_int("MEMBLOCK_TLB_PTE_MODE", plus::MEMBLOCK_TLB_PTE_MODE);
+        l2tlb_level_weight_en = plus::MEMBLOCK_L2TLB_LEVEL_WEIGHT_EN;
+        l2tlb_s1_fault_wt[0] = get_non_negative_int("MEMBLOCK_L2TLB_S1_PF_1_WT", plus::MEMBLOCK_L2TLB_S1_PF_1_WT);
+        l2tlb_s1_fault_wt[1] = get_non_negative_int("MEMBLOCK_L2TLB_S1_AF_1_WT", plus::MEMBLOCK_L2TLB_S1_AF_1_WT);
+        l2tlb_s2_fault_wt[0] = get_non_negative_int("MEMBLOCK_L2TLB_S2_GPF_1_WT", plus::MEMBLOCK_L2TLB_S2_GPF_1_WT);
+        l2tlb_s2_fault_wt[1] = get_non_negative_int("MEMBLOCK_L2TLB_S2_GAF_1_WT", plus::MEMBLOCK_L2TLB_S2_GAF_1_WT);
+        l2tlb_s1_level_wt[0] = get_non_negative_int("MEMBLOCK_L2TLB_S1_LEVEL_0_WT", plus::MEMBLOCK_L2TLB_S1_LEVEL_0_WT);
+        l2tlb_s1_level_wt[1] = get_non_negative_int("MEMBLOCK_L2TLB_S1_LEVEL_1_WT", plus::MEMBLOCK_L2TLB_S1_LEVEL_1_WT);
+        l2tlb_s1_level_wt[2] = get_non_negative_int("MEMBLOCK_L2TLB_S1_LEVEL_2_WT", plus::MEMBLOCK_L2TLB_S1_LEVEL_2_WT);
+        l2tlb_s1_level_wt[3] = get_non_negative_int("MEMBLOCK_L2TLB_S1_LEVEL_3_WT", plus::MEMBLOCK_L2TLB_S1_LEVEL_3_WT);
+        l2tlb_s2_level_wt[0] = get_non_negative_int("MEMBLOCK_L2TLB_S2_LEVEL_0_WT", plus::MEMBLOCK_L2TLB_S2_LEVEL_0_WT);
+        l2tlb_s2_level_wt[1] = get_non_negative_int("MEMBLOCK_L2TLB_S2_LEVEL_1_WT", plus::MEMBLOCK_L2TLB_S2_LEVEL_1_WT);
+        l2tlb_s2_level_wt[2] = get_non_negative_int("MEMBLOCK_L2TLB_S2_LEVEL_2_WT", plus::MEMBLOCK_L2TLB_S2_LEVEL_2_WT);
+        l2tlb_s2_level_wt[3] = get_non_negative_int("MEMBLOCK_L2TLB_S2_LEVEL_3_WT", plus::MEMBLOCK_L2TLB_S2_LEVEL_3_WT);
+        l2tlb_s1_pte_mode = get_non_negative_int("MEMBLOCK_L2TLB_S1_PTE_MODE", plus::MEMBLOCK_L2TLB_S1_PTE_MODE);
+        l2tlb_s2_pte_mode = get_non_negative_int("MEMBLOCK_L2TLB_S2_PTE_MODE", plus::MEMBLOCK_L2TLB_S2_PTE_MODE);
+        l2tlb_s1_pte_1_wt[0] = get_non_negative_int("MEMBLOCK_L2TLB_S1_PTE_R_1_WT", plus::MEMBLOCK_L2TLB_S1_PTE_R_1_WT);
+        l2tlb_s1_pte_1_wt[1] = get_non_negative_int("MEMBLOCK_L2TLB_S1_PTE_W_1_WT", plus::MEMBLOCK_L2TLB_S1_PTE_W_1_WT);
+        l2tlb_s1_pte_1_wt[2] = get_non_negative_int("MEMBLOCK_L2TLB_S1_PTE_X_1_WT", plus::MEMBLOCK_L2TLB_S1_PTE_X_1_WT);
+        l2tlb_s1_pte_1_wt[3] = get_non_negative_int("MEMBLOCK_L2TLB_S1_PTE_U_1_WT", plus::MEMBLOCK_L2TLB_S1_PTE_U_1_WT);
+        l2tlb_s1_pte_1_wt[4] = get_non_negative_int("MEMBLOCK_L2TLB_S1_PTE_G_1_WT", plus::MEMBLOCK_L2TLB_S1_PTE_G_1_WT);
+        l2tlb_s1_pte_1_wt[5] = get_non_negative_int("MEMBLOCK_L2TLB_S1_PTE_A_1_WT", plus::MEMBLOCK_L2TLB_S1_PTE_A_1_WT);
+        l2tlb_s1_pte_1_wt[6] = get_non_negative_int("MEMBLOCK_L2TLB_S1_PTE_D_1_WT", plus::MEMBLOCK_L2TLB_S1_PTE_D_1_WT);
+        l2tlb_s1_pte_1_wt[7] = get_non_negative_int("MEMBLOCK_L2TLB_S1_PTE_N_1_WT", plus::MEMBLOCK_L2TLB_S1_PTE_N_1_WT);
+        l2tlb_s1_pte_1_wt[8] = get_non_negative_int("MEMBLOCK_L2TLB_S1_PTE_V_1_WT", plus::MEMBLOCK_L2TLB_S1_PTE_V_1_WT);
+        for (int i = 0; i < 8; i++) begin
+            string field_name;
+            case (i)
+                0: field_name = "R"; 1: field_name = "W"; 2: field_name = "X"; 3: field_name = "U";
+                4: field_name = "G"; 5: field_name = "A"; 6: field_name = "D"; default: field_name = "N";
+            endcase
+            l2tlb_s2_pte_1_wt[i] = get_non_negative_int(
+                $sformatf("MEMBLOCK_L2TLB_S2_PTE_%s_1_WT", field_name),
+                (i == 0) ? plus::MEMBLOCK_L2TLB_S2_PTE_R_1_WT :
+                (i == 1) ? plus::MEMBLOCK_L2TLB_S2_PTE_W_1_WT :
+                (i == 2) ? plus::MEMBLOCK_L2TLB_S2_PTE_X_1_WT :
+                (i == 3) ? plus::MEMBLOCK_L2TLB_S2_PTE_U_1_WT :
+                (i == 4) ? plus::MEMBLOCK_L2TLB_S2_PTE_G_1_WT :
+                (i == 5) ? plus::MEMBLOCK_L2TLB_S2_PTE_A_1_WT :
+                (i == 6) ? plus::MEMBLOCK_L2TLB_S2_PTE_D_1_WT : plus::MEMBLOCK_L2TLB_S2_PTE_N_1_WT);
+        end
+        l2tlb_s1_pbmt_wt[0] = get_non_negative_int("MEMBLOCK_L2TLB_S1_PBMT_0_WT", plus::MEMBLOCK_L2TLB_S1_PBMT_0_WT);
+        l2tlb_s1_pbmt_wt[1] = get_non_negative_int("MEMBLOCK_L2TLB_S1_PBMT_1_WT", plus::MEMBLOCK_L2TLB_S1_PBMT_1_WT);
+        l2tlb_s1_pbmt_wt[2] = get_non_negative_int("MEMBLOCK_L2TLB_S1_PBMT_2_WT", plus::MEMBLOCK_L2TLB_S1_PBMT_2_WT);
+        l2tlb_s2_pbmt_wt[0] = get_non_negative_int("MEMBLOCK_L2TLB_S2_PBMT_0_WT", plus::MEMBLOCK_L2TLB_S2_PBMT_0_WT);
+        l2tlb_s2_pbmt_wt[1] = get_non_negative_int("MEMBLOCK_L2TLB_S2_PBMT_1_WT", plus::MEMBLOCK_L2TLB_S2_PBMT_1_WT);
+        l2tlb_s2_pbmt_wt[2] = get_non_negative_int("MEMBLOCK_L2TLB_S2_PBMT_2_WT", plus::MEMBLOCK_L2TLB_S2_PBMT_2_WT);
 
         main_vaddr_base             = plus::MEMBLOCK_MAIN_VADDR_BASE;
         main_vaddr_range            = plus::MEMBLOCK_MAIN_VADDR_RANGE;
@@ -467,6 +480,37 @@ class seq_csr_common;
         l2tlb_resp_long_wt          = get_non_negative_int("MEMBLOCK_L2TLB_RESP_LONG_WT", plus::MEMBLOCK_L2TLB_RESP_LONG_WT);
         l2tlb_idle_stop_cycle       = get_non_negative_int("MEMBLOCK_L2TLB_IDLE_STOP_CYCLE", plus::MEMBLOCK_L2TLB_IDLE_STOP_CYCLE);
     endfunction:load_from_plus
+
+    // 中文注释：在 responder 开放 ready 前校验本专项的静态 payload 配置。
+    // 该函数只诊断配置，不选择 level/PBMT，也不修改 entry、pending 或 lifecycle 状态。
+    static function void check_l2tlb_payload_weight_cfg();
+        for (int i = 0; i < 4; i++) begin
+            if (l2tlb_s1_level_wt[i] > 100 || l2tlb_s2_level_wt[i] > 100) begin
+                if (l2tlb_level_weight_en) `uvm_fatal("SEQ_CSR_CFG", "enabled L2TLB level weight must be in [0:100]")
+            end
+        end
+        for (int i = 0; i < 2; i++) begin
+            if (l2tlb_s1_fault_wt[i] > 100 || l2tlb_s2_fault_wt[i] > 100)
+                `uvm_fatal("SEQ_CSR_CFG", "L2TLB fault weight must be in [0:100]");
+        end
+        for (int i = 0; i < 9; i++) begin
+            if (l2tlb_s1_pte_1_wt[i] > 100) `uvm_fatal("SEQ_CSR_CFG", "S1 PTE weight must be in [0:100]");
+        end
+        for (int i = 0; i < 8; i++) begin
+            if (l2tlb_s2_pte_1_wt[i] > 100) `uvm_fatal("SEQ_CSR_CFG", "S2 PTE weight must be in [0:100]");
+        end
+        for (int i = 0; i < 3; i++) begin
+            if (l2tlb_s1_pbmt_wt[i] > 100 || l2tlb_s2_pbmt_wt[i] > 100)
+                `uvm_fatal("SEQ_CSR_CFG", "L2TLB PBMT weight must be in [0:100]");
+        end
+        if (l2tlb_s1_pbmt_wt[0] + l2tlb_s1_pbmt_wt[1] + l2tlb_s1_pbmt_wt[2] == 0 ||
+            l2tlb_s2_pbmt_wt[0] + l2tlb_s2_pbmt_wt[1] + l2tlb_s2_pbmt_wt[2] == 0)
+            `uvm_fatal("SEQ_CSR_CFG", "S1/S2 PBMT weights must not be all zero");
+        if (l2tlb_s1_pte_mode > 2 || l2tlb_s2_pte_mode > 2)
+            `uvm_fatal("SEQ_CSR_CFG", "S1/S2 PTE mode must be LEGAL, MIXED or EXCEPTION_BIASED");
+        if (l2tlb_level_weight_en && main_mem_ranges_en)
+            `uvm_fatal("SEQ_CSR_CFG", "LEVEL_WEIGHT_EN requires MAIN_MEM_RANGES_EN=0");
+    endfunction:check_l2tlb_payload_weight_cfg
 
     static function void validate_and_clamp();
         bit [63:0] main_vaddr_upper;
@@ -665,26 +709,7 @@ class seq_csr_common;
                                boundary_cross_4k_wt);
         end
 
-        fatal_if_all_zero2("tlb_pte_r weights", tlb_pte_r_1_wt, tlb_pte_r_0_wt);
-        fatal_if_all_zero2("tlb_pte_w weights", tlb_pte_w_1_wt, tlb_pte_w_0_wt);
-        fatal_if_all_zero2("tlb_pte_x weights", tlb_pte_x_1_wt, tlb_pte_x_0_wt);
-        fatal_if_all_zero2("tlb_pte_u weights", tlb_pte_u_1_wt, tlb_pte_u_0_wt);
-        fatal_if_all_zero2("tlb_pte_g weights", tlb_pte_g_1_wt, tlb_pte_g_0_wt);
-        fatal_if_all_zero2("tlb_pte_a weights", tlb_pte_a_1_wt, tlb_pte_a_0_wt);
-        fatal_if_all_zero2("tlb_pte_d weights", tlb_pte_d_1_wt, tlb_pte_d_0_wt);
-        fatal_if_all_zero2("tlb_pte_n weights", tlb_pte_n_1_wt, tlb_pte_n_0_wt);
-        fatal_if_all_zero2("tlb_pte_v weights", tlb_pte_v_1_wt, tlb_pte_v_0_wt);
-        clamp_int("tlb_level_mode", tlb_level_mode, 0, 2);
-        clamp_int("tlb_level_fixed_value", tlb_level_fixed_value, 0, 3);
-        clamp_int("tlb_level_random_low", tlb_level_random_low, 0, 3);
-        clamp_int("tlb_level_random_high", tlb_level_random_high, 0, 3);
-        clamp_int("tlb_pte_mode", tlb_pte_mode, 0, 2);
-        if (tlb_level_random_high < tlb_level_random_low) begin
-            `uvm_warning("SEQ_CSR_CFG",
-                         $sformatf("tlb_level_random_high(%0d) < tlb_level_random_low(%0d), clamp high to low",
-                                   tlb_level_random_high, tlb_level_random_low))
-            tlb_level_random_high = tlb_level_random_low;
-        end
+        check_l2tlb_payload_weight_cfg();
     endfunction:validate_and_clamp
 
     // 中文注释：只检查编译期结构常量的可编码关系，不修改任何runtime参数。
@@ -1365,120 +1390,31 @@ class seq_csr_common;
         return pdest_range;
     endfunction:get_pdest_range
 
-    static function int unsigned get_tlb_pte_r_1_wt();
-        check_initialized("get_tlb_pte_r_1_wt");
-        return tlb_pte_r_1_wt;
-    endfunction:get_tlb_pte_r_1_wt
-
-    static function int unsigned get_tlb_pte_r_0_wt();
-        check_initialized("get_tlb_pte_r_0_wt");
-        return tlb_pte_r_0_wt;
-    endfunction:get_tlb_pte_r_0_wt
-
-    static function int unsigned get_tlb_pte_w_1_wt();
-        check_initialized("get_tlb_pte_w_1_wt");
-        return tlb_pte_w_1_wt;
-    endfunction:get_tlb_pte_w_1_wt
-
-    static function int unsigned get_tlb_pte_w_0_wt();
-        check_initialized("get_tlb_pte_w_0_wt");
-        return tlb_pte_w_0_wt;
-    endfunction:get_tlb_pte_w_0_wt
-
-    static function int unsigned get_tlb_pte_x_1_wt();
-        check_initialized("get_tlb_pte_x_1_wt");
-        return tlb_pte_x_1_wt;
-    endfunction:get_tlb_pte_x_1_wt
-
-    static function int unsigned get_tlb_pte_x_0_wt();
-        check_initialized("get_tlb_pte_x_0_wt");
-        return tlb_pte_x_0_wt;
-    endfunction:get_tlb_pte_x_0_wt
-
-    static function int unsigned get_tlb_pte_u_1_wt();
-        check_initialized("get_tlb_pte_u_1_wt");
-        return tlb_pte_u_1_wt;
-    endfunction:get_tlb_pte_u_1_wt
-
-    static function int unsigned get_tlb_pte_u_0_wt();
-        check_initialized("get_tlb_pte_u_0_wt");
-        return tlb_pte_u_0_wt;
-    endfunction:get_tlb_pte_u_0_wt
-
-    static function int unsigned get_tlb_pte_g_1_wt();
-        check_initialized("get_tlb_pte_g_1_wt");
-        return tlb_pte_g_1_wt;
-    endfunction:get_tlb_pte_g_1_wt
-
-    static function int unsigned get_tlb_pte_g_0_wt();
-        check_initialized("get_tlb_pte_g_0_wt");
-        return tlb_pte_g_0_wt;
-    endfunction:get_tlb_pte_g_0_wt
-
-    static function int unsigned get_tlb_pte_a_1_wt();
-        check_initialized("get_tlb_pte_a_1_wt");
-        return tlb_pte_a_1_wt;
-    endfunction:get_tlb_pte_a_1_wt
-
-    static function int unsigned get_tlb_pte_a_0_wt();
-        check_initialized("get_tlb_pte_a_0_wt");
-        return tlb_pte_a_0_wt;
-    endfunction:get_tlb_pte_a_0_wt
-
-    static function int unsigned get_tlb_pte_d_1_wt();
-        check_initialized("get_tlb_pte_d_1_wt");
-        return tlb_pte_d_1_wt;
-    endfunction:get_tlb_pte_d_1_wt
-
-    static function int unsigned get_tlb_pte_d_0_wt();
-        check_initialized("get_tlb_pte_d_0_wt");
-        return tlb_pte_d_0_wt;
-    endfunction:get_tlb_pte_d_0_wt
-
-    static function int unsigned get_tlb_pte_n_1_wt();
-        check_initialized("get_tlb_pte_n_1_wt");
-        return tlb_pte_n_1_wt;
-    endfunction:get_tlb_pte_n_1_wt
-
-    static function int unsigned get_tlb_pte_n_0_wt();
-        check_initialized("get_tlb_pte_n_0_wt");
-        return tlb_pte_n_0_wt;
-    endfunction:get_tlb_pte_n_0_wt
-
-    static function int unsigned get_tlb_pte_v_1_wt();
-        check_initialized("get_tlb_pte_v_1_wt");
-        return tlb_pte_v_1_wt;
-    endfunction:get_tlb_pte_v_1_wt
-
-    static function int unsigned get_tlb_pte_v_0_wt();
-        check_initialized("get_tlb_pte_v_0_wt");
-        return tlb_pte_v_0_wt;
-    endfunction:get_tlb_pte_v_0_wt
-
-    static function int unsigned get_tlb_level_mode();
-        check_initialized("get_tlb_level_mode");
-        return tlb_level_mode;
-    endfunction:get_tlb_level_mode
-
-    static function int unsigned get_tlb_level_fixed_value();
-        check_initialized("get_tlb_level_fixed_value");
-        return tlb_level_fixed_value;
-    endfunction:get_tlb_level_fixed_value
-
-    static function int unsigned get_tlb_level_random_low();
-        check_initialized("get_tlb_level_random_low");
-        return tlb_level_random_low;
-    endfunction:get_tlb_level_random_low
-
-    static function int unsigned get_tlb_level_random_high();
-        check_initialized("get_tlb_level_random_high");
-        return tlb_level_random_high;
-    endfunction:get_tlb_level_random_high
-
-    static function int unsigned get_tlb_pte_mode();
-        check_initialized("get_tlb_pte_mode");
-        return tlb_pte_mode;
-    endfunction:get_tlb_pte_mode
+    static function bit get_l2tlb_level_weight_en(); check_initialized("get_l2tlb_level_weight_en"); return l2tlb_level_weight_en; endfunction
+    static function int unsigned get_l2tlb_fault_1_wt(input bit s1, input int unsigned fault_idx);
+        check_initialized("get_l2tlb_fault_1_wt");
+        if (fault_idx > 1) `uvm_fatal("SEQ_CSR_CFG", "invalid L2TLB fault index");
+        return s1 ? l2tlb_s1_fault_wt[fault_idx] : l2tlb_s2_fault_wt[fault_idx];
+    endfunction
+    static function int unsigned get_l2tlb_level_wt(input bit s1, input int unsigned level_idx);
+        check_initialized("get_l2tlb_level_wt");
+        if (level_idx > 3) `uvm_fatal("SEQ_CSR_CFG", "invalid L2TLB level index");
+        return s1 ? l2tlb_s1_level_wt[level_idx] : l2tlb_s2_level_wt[level_idx];
+    endfunction
+    static function int unsigned get_l2tlb_pte_1_wt(input bit s1, input int unsigned field_idx);
+        check_initialized("get_l2tlb_pte_1_wt");
+        if (field_idx > (s1 ? 8 : 7)) `uvm_fatal("SEQ_CSR_CFG", "invalid L2TLB PTE field index");
+        return s1 ? l2tlb_s1_pte_1_wt[field_idx] : l2tlb_s2_pte_1_wt[field_idx];
+    endfunction
+    static function int unsigned get_l2tlb_pbmt_wt(input bit s1, input int unsigned pbmt_idx);
+        check_initialized("get_l2tlb_pbmt_wt");
+        if (pbmt_idx > 2) `uvm_fatal("SEQ_CSR_CFG", "invalid L2TLB PBMT index");
+        return s1 ? l2tlb_s1_pbmt_wt[pbmt_idx] : l2tlb_s2_pbmt_wt[pbmt_idx];
+    endfunction
+    static function int unsigned get_l2tlb_pte_mode(input bit s1);
+        check_initialized("get_l2tlb_pte_mode");
+        return s1 ? l2tlb_s1_pte_mode : l2tlb_s2_pte_mode;
+    endfunction
 
     static function bit [63:0] get_main_vaddr_base();
         check_initialized("get_main_vaddr_base");

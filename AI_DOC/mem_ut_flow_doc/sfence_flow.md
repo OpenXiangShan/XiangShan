@@ -838,7 +838,7 @@ endfunction
 
 内部子调用：
 
-- `sfence_match_entry()`：按地址、hv/hg、ASID/VMID、`pte_g` 判断单个 entry 是否命中。
+- `sfence_match_entry()`：按地址、hv/hg、ASID/VMID、S1 `pte_g` 判断单个 entry 是否命中。
 
 ## 16. `common_data_transaction::sfence_match_entry()`
 
@@ -851,7 +851,8 @@ endfunction
 ```systemverilog
 if (!payload.valid) return 1'b0;
 if (entry == null) `uvm_fatal("COMMON_DATA", "sfence_match_entry got null entry")
-if (!payload.ignore_addr && !sfence_vpn_match(key.vpn, entry.level, payload.addr)) return 1'b0;
+if (!payload.ignore_addr && !sfence_vpn_match(
+    key.vpn, entry.s1_stage_active ? entry.s1_level : entry.s2_level, payload.addr)) return 1'b0;
 
 if (payload.hg) begin
     if (!(key.s2xlate == 2'd2 || key.s2xlate == 2'd3)) return 1'b0;
@@ -863,7 +864,7 @@ if (payload.hv) begin
     if (!(key.s2xlate == 2'd1 || key.s2xlate == 2'd3)) return 1'b0;
     if (key.s2xlate == 2'd3 && mmu_csr_state != null && key.vmid != mmu_csr_state.hgatp_vmid) return 1'b0;
     if (!payload.ignore_id) begin
-        if (entry.pte_g) return 1'b0;
+        if (entry.s1_pte_g) return 1'b0;
         if (key.asid != payload.id) return 1'b0;
     end
     return 1'b1;
@@ -871,7 +872,7 @@ end
 
 if (key.s2xlate == 2'd2) return 1'b0;
 if (!payload.ignore_id) begin
-    if (entry.pte_g) return 1'b0;
+    if (entry.s1_pte_g) return 1'b0;
     if (key.asid != payload.id) return 1'b0;
 end
 return 1'b1;
@@ -883,7 +884,7 @@ return 1'b1;
 如果 payload.valid=0，返回不匹配。
 如果 entry=null，报告 uvm_fatal，因为 live TLB map 不允许空对象。
 如果 payload.ignore_addr=0：
-  调用 sfence_vpn_match，按 entry page level 比较 fence 地址覆盖范围；不覆盖则返回不匹配。
+  调用 sfence_vpn_match；entry 有 S1 stage 时使用 s1_level，否则使用 s2_level 比较 fence 地址覆盖范围；不覆盖则返回不匹配。
 如果 payload.hg=1：
   只接受 s2xlate=2 或 3 的 stage2/G-stage entry。
   ignore_id=0 时要求 key.vmid 等于 payload.id。
@@ -891,11 +892,11 @@ return 1'b1;
 否则如果 payload.hv=1：
   只接受 s2xlate=1 或 3 的 VS/G-stage 相关 entry。
   对 s2xlate=3 且 runtime state 存在的 entry，要求 key.vmid 等于当前 hgatp_vmid。
-  ignore_id=0 时先排除 pte_g global entry，再要求 key.asid 等于 payload.id。
+  ignore_id=0 时先排除 s1_pte_g global entry，再要求 key.asid 等于 payload.id。
   条件满足即返回匹配。
 否则进入普通 sfence：
   s2xlate=2 的纯 stage2 entry 返回不匹配。
-  ignore_id=0 时排除 pte_g global entry，并要求 key.asid 等于 payload.id。
+  ignore_id=0 时排除 s1_pte_g global entry，并要求 key.asid 等于 payload.id。
   其余情况返回匹配。
 ```
 

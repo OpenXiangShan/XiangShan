@@ -7,7 +7,7 @@
 | 当前状态 | 尚未 coding、编译或仿真；本文件不能作为已完成实现的证明 |
 | 审核目标 | 在一个 testcase 只运行一个 L2TLB responder owner 的前提下，收敛生命周期、时基、flush、reset 和退出边界 |
 | 语义边界 | `L2TLB_agent` 仍表示 DTLB -> L2TLB request 和 L2TLB -> DTLB response，不表示 L2Cache/PTW 下游模型 |
-| 关联实现文档 | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`、`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`、`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`、`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md` |
+| 关联实现文档 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`、`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`、`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`、`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md` |
 
 本文把待优化问题和优化后的行为分开描述。它不替代四份专项的字段、payload、range 或 stage matcher 方案；后续 coding
 时，生命周期冲突以本文的审核结论为准，具体功能仍按对应 `undo` coding plan 执行。
@@ -1017,7 +1017,7 @@ claim。reset detector、response owner、adapter 和 CSR monitor 的调用顺�
 **`service_l2tlb_sfence_events()` 抽象功能：** 在 dispatch service 中按 raw sample 安排 C4 live-entry 删除；它只修改
 adapter 所属 queue/map，不修改 response owner 的 pending token。
 
-## 8. 关联 Undo 文档对齐结论
+## 8. 关联专项文档对齐结论
 
 | 文档 | 本文给出的统一约束 |
 |---|---|
