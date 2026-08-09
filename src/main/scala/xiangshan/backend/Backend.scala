@@ -753,9 +753,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
         memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.uopIdx.foreach(_ := toMem(i)(j).bits.vpu.get.vuopIdx)
         memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.sqIdx.foreach(_ := toMem(i)(j).bits.sqIdx.get)
         memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
-        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.isVecPartReplay.foreach(_:= false.B)
-        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.vecReplayMask  .foreach(_:= 0.U)
-        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.vecReplayMbIdx .foreach(_:= 0.U)
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.isVecPartReplay.foreach(_ := toMem(i)(j).bits.isVecPartReplay.get)
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.vecReplayMask  .foreach(_ := toMem(i)(j).bits.vecReplayMask.get)
+        memScheduler.io.vecLoadFinalIssueResp(i)(j).bits.vecReplayMbIdx .foreach(_ := toMem(i)(j).bits.vecReplayMbIdx.get)
       }
 
       NewPipelineConnect(
