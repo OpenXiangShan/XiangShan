@@ -134,9 +134,13 @@ task csr_ctrl_agent_agent_monitor::mon_data();
     memblock_sync_pkg::dispatch_raw_csr_t last_runtime_csr;
     bit has_last_runtime_csr;
     bit runtime_payload_changed;
+    longint unsigned current_sample_seq;
+    longint unsigned reset_epoch;
+    int unsigned reset_wait_sample_count;
 
     last_runtime_csr = memblock_sync_pkg::make_empty_raw_csr();
     has_last_runtime_csr = 1'b0;
+    reset_wait_sample_count = 0;
     while(1) begin
         @this.vif.mon_mp.mon_cb;
         io_ooo_to_mem_tlbCsr_satp_mode = this.vif.mon_mp.mon_cb.io_ooo_to_mem_tlbCsr_satp_mode;
@@ -234,7 +238,9 @@ task csr_ctrl_agent_agent_monitor::mon_data();
         io_ooo_to_mem_csrCtrl_mem_trigger_debugMode = this.vif.mon_mp.mon_cb.io_ooo_to_mem_csrCtrl_mem_trigger_debugMode;
         io_ooo_to_mem_tlbCsr_priv_debug = this.vif.mon_mp.mon_cb.io_ooo_to_mem_tlbCsr_priv_debug;
 
-        if(this.cfg.xz_sw==tcnt_dec_base::ON && this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
+        if(this.cfg.xz_sw==tcnt_dec_base::ON && this.vif.rst_n==1'b1 &&
+           memblock_sync_pkg::reset_backend_done==1'b1 &&
+           !memblock_sync_pkg::l2tlb_reset_active()) begin
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_tlbCsr_satp_mode,io_ooo_to_mem_tlbCsr_satp_mode,4);
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_tlbCsr_satp_asid,io_ooo_to_mem_tlbCsr_satp_asid,16);
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_tlbCsr_satp_ppn,io_ooo_to_mem_tlbCsr_satp_ppn,44);
@@ -324,10 +330,35 @@ task csr_ctrl_agent_agent_monitor::mon_data();
 
         end
         if (this.vif.rst_n!=1'b1 || memblock_sync_pkg::reset_backend_done!=1'b1) begin
+            // CSR monitor owns publication of the shared L2TLB reset boundary.
+            // Direct owners consume the frozen epoch later; they do not infer
+            // reset from their local queue or a stale sequence item.
+            memblock_sync_pkg::begin_l2tlb_runtime_reset();
+            reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+            memblock_sync_pkg::reset_l2tlb_csr_runtime_state(reset_epoch);
+            reset_wait_sample_count = 0;
             has_last_runtime_csr = 1'b0;
             last_runtime_csr = memblock_sync_pkg::make_empty_raw_csr();
         end
         if(this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
+            if (memblock_sync_pkg::l2tlb_reset_active()) begin
+                reset_wait_sample_count++;
+                if (reset_wait_sample_count >
+                    `MEMBLOCK_L2TLB_RESET_WATCHDOG_MAX_SAMPLES) begin
+                    `uvm_fatal(get_type_name(),
+                               $sformatf("L2TLB reset coordinator watchdog expired epoch=%0d count=%0d ack=0x%0h required=0x%0h",
+                                         memblock_sync_pkg::get_l2tlb_current_reset_epoch(),
+                                         reset_wait_sample_count,
+                                         memblock_sync_pkg::l2tlb_runtime_reset_ack_mask,
+                                         memblock_sync_pkg::l2tlb_runtime_reset_required_ack_mask))
+                end
+            end
+            memblock_sync_pkg::end_l2tlb_runtime_reset();
+            if (!memblock_sync_pkg::l2tlb_reset_active()) begin
+            reset_wait_sample_count = 0;
+            // CSR monitor is the sole writer of the DUT global sample. All
+            // other same-edge producers anchor to this value and only peek.
+            current_sample_seq = memblock_sync_pkg::advance_dut_global_sample($time);
             raw_csr = memblock_sync_pkg::make_empty_raw_csr();
             raw_csr.valid             = 1'b1;
             raw_csr.satp_mode         = io_ooo_to_mem_tlbCsr_satp_mode;
@@ -363,15 +394,26 @@ task csr_ctrl_agent_agent_monitor::mon_data();
                 memblock_sync_pkg::raw_csr_payload_changed(last_runtime_csr, raw_csr);
             memblock_sync_pkg::publish_runtime_csr_snapshot(raw_csr,
                                                              runtime_payload_changed);
+            // History is written every sample, including an unchanged CSR
+            // payload, because the DUT consumes a fixed C-2 snapshot.
+            memblock_sync_pkg::publish_l2tlb_csr_history(raw_csr,
+                                                         current_sample_seq);
+            // Only translation-context changes invalidate the L2TLB filter.
+            // Runtime permission/debug/misalign snapshots remain observable
+            // metadata and must not become an implicit flush event.
             if (raw_csr.satp_changed || raw_csr.vsatp_changed ||
                 raw_csr.hgatp_changed || raw_csr.priv_virt_changed) begin
-                memblock_sync_pkg::note_l2tlb_flush_event($time);
+                memblock_sync_pkg::note_l2tlb_flush_event(
+                    $time, memblock_sync_pkg::MEMBLOCK_L2TLB_REASON_CSR);
             end
+            memblock_sync_pkg::mark_l2tlb_sample_producer_done(
+                current_sample_seq, 2'b01);
             if (memblock_sync_pkg::dispatch_monitor_capture_en) begin
                 memblock_sync_pkg::push_raw_csr(raw_csr);
             end
             last_runtime_csr = raw_csr;
             has_last_runtime_csr = 1'b1;
+            end
         end
         //if(xxxTODOxxx==1'b1) begin
         //    mon_tr = csr_ctrl_agent_agent_xaction::type_id::create("mon_tr");

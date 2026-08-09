@@ -7,7 +7,7 @@ L2Cache/PTW/memory 下游模型，也不评价 DUT 的 checker、scoreboard 或 
 关联 plan：
 
 - `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`
-- `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`
+- `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`
 - `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`
 - `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md`
 
@@ -123,7 +123,7 @@ closing 的顺序固定为：driver 写 final proof -> monitor 同步 settled ->
 当前顺序固定为：driver final proof -> monitor settled -> owner 写 `l2tlb_release_closing` -> 下一真实 `drv_cb` driver 回收 final mailbox。
 因此 `begin_l2tlb_release_closing()` 只等待 final proof 与 monitor settled；recycle proof/mailbox `EMPTY` 只由随后 parent/owner 复核
 `release_grantable()` 时要求。唯一可 coding 的详细伪代码位于
-`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md` 的
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md` 的
 `begin_l2tlb_release_closing()`、`release_grantable()` 与 normal body exit 小节；本意见与第 86-96 行的 canonical 时序一致，覆盖表中该行旧表述。
 
 ## 审查准则

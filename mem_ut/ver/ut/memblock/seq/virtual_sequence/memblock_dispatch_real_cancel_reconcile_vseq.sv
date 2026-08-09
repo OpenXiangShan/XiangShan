@@ -133,6 +133,7 @@ task memblock_dispatch_real_cancel_reconcile_vseq::start_core_dispatch_flow();
             `uvm_do_on(lsqcommit_seq, p_sequencer.lsqcommit_sqr)
         end
         begin : start_cancel_l2tlb_sequence
+            wait_for_explicit_l2tlb_start_barrier();
             `uvm_do_on(l2tlb_seq, p_sequencer.L2tlb_sqr)
         end
         begin : start_cancel_main_sequence

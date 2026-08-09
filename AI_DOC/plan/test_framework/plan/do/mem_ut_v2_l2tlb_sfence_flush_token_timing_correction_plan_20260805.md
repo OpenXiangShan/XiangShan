@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，仅为待执行设计；尚未 coding、compile、smoke 或仿真验证 |
+| 状态 | coding 完成；P0/P1 及其后发现的 baseline provenance/epoch-0 blocker 均已修复，explicit/base compile 与 smoke 均通过，独立终审已明确 `FINAL PASS`；本文件已归档至 `plan/do`。 |
 | 目标版本 | V2 (`mem_ut_uvm_v2`) |
 | 关联归档 plan | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md` |
 | 关联 live-entry plan | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md` |
@@ -1733,6 +1733,8 @@ release grant，再等唯一 owner 原子清除 claim==0。当前支持矩阵中
 | 生命周期功能修正 | owner 在 stop sample 自己确认/写 `admission_closed`，或不同文档未明确唯一写者。 | sequence 不能以 driver 实际冻结的 interface sample 替代 transport 事实；reset 后旧 item 也不能误匹配。 | owner 仅写 close request/投递带 `item_reset_epoch` 的 `RELEASE_STOP`；driver 在真实 `drv_cb` 冻结 kind/generation/reset_epoch/ready/fire 后调用 confirm helper，作为 `admission_closed/owner/generation/cutoff` 唯一直接写者；reset-active/stale item 必须 `item_done()` 后丢弃。 |
 | 生命周期功能修正 | history/event 未 ready 时只驱动 inactive 并等待。 | driver 若先于 CSR monitor 读取 sample 会错用上一拍；reset re-arm 下若直接生成 stop，则可能绕过当前 epoch 的 transport 基线。 | driver 先在同一 `drv_cb` bounded anchor/probe，确认 sample 后才 peek；sample 未建立或 NOT_READY 时冻结 fire/response 为 0 并只送 inactive。reset release 后先完成 NORMAL/inactive baseline，下一 drv_cb 才允许 global stop 建立 `RELEASE_STOP`。 |
 | 生命周期功能修正 | adapter queue 瞬时为空即可视为 release drain。 | fence monitor 仍可能在 grant 后入队 raw，留下无人服务的 C4 delete。 | fence monitor 在 close request 后完整处理一个 raw sample，再写与 current epoch/generation 匹配的 intake close；`release_grantable()` 同时要求 response drain、adapter queue drain 与 intake close，closed 后 raw valid fatal。 |
+| 生命周期功能修正 | `NOT_READY`/sample 无 anchor 时发送的普通 inactive 会覆盖上一 baseline item 的 provenance。 | 随后真实 sample 无法确认该 baseline，非零 epoch 的公共 release proof 可能永远缺失。 | baseline proof pending 期间，同 epoch 的普通 NORMAL/inactive 或 driver idle 均保留上一 baseline provenance，直到严格更晚真实 sample 证明完成或新 reset epoch 作废。 |
+| 生命周期功能修正 | testcase 启动的 epoch 0 会沿用 runtime-reset public-proof 调用路径。 | `mark_l2tlb_post_reset_baseline_done()` 明确拒绝 epoch 0，导致 startup baseline 被误报非法。 | epoch 0 只完成 driver 本地 baseline 收敛，不写公共 proof；close/release gate 对 epoch 0 保持既有豁免，非零 runtime-reset epoch 才写/读公共 proof。 |
 
 本专项是对已归档 L2TLB lifecycle plan 的功能逻辑修正，不是纯字段改名。其余多 outstanding、response
 latency、payload、permission 和主表控制行为保持不变。
@@ -1754,3 +1756,214 @@ latency、payload、permission 和主表控制行为保持不变。
   stream。若将该 plus 单独作为运行拓扑判定，会使无 dispatch smoke 在初始化阶段误报 fatal。
 - 影响范围：仅影响 testcase topology 初始化和 L2TLB sequence 是否启动；不改变 active connect wire 驱动、request
   token、response payload、SFENCE/HFENCE matcher 或 live entry 生命周期。
+
+### [IMPLEMENTATION_DELTA] sample coordinator 不得覆盖 topology
+
+- 来源：subagent 复核发现 `initialize_l2tlb_sample_coordinator()` 与 testcase
+  `end_of_elaboration` 之间没有语言级 happens-before 保证；若其晚执行，可能清掉已冻结的
+  `dispatch_l2tlb_lookup_active` 或已注册的 adapter service。
+- 原 plan：要求 testcase-start helper 初始化共享时基，但未明确 topology 字段和 adapter ownership 的唯一写者。
+- 实现调整：sample coordinator 不再清零 testcase topology、`dispatch_l2tlb_lookup_active` 或 adapter service
+  ownership；若在 lifecycle 已初始化、owner 已 claim 或 adapter 已注册后再次调用，直接 `uvm_fatal`。L2TLB
+  responder body 额外要求 `l2tlb_responder_enabled() && l2tlb_dispatch_active()`，不允许错误拓扑静默运行。
+- 原因：connect takeover 只表示 response wire capability，testcase lifecycle 才决定是否存在 dispatch service；
+  通用 sample reset 不能成为第二个 topology owner。
+- 影响范围：只收紧启动初始化和错误诊断；不改变 runtime reset 的各职责清理、response token、payload 或 fence
+  删除时序。
+
+### [IMPLEMENTATION_DELTA] final proof 与 mailbox PUBLISHED 状态分离
+
+- 来源：explicit dispatch smoke 在全部请求完成并置 global stop 后，L2TLB owner 未能完成 release；静态时序审查确认
+  final item 被 driver 采样后，final proof sample 没有进入 semantic mailbox。
+- 原 plan：规定 final inactive 的 frozen transport sample 必须作为一份 `PUBLISHED` sample 交给 owner `CONSUMED`，
+  但没有明确 final-confirm helper 不得提前修改 mailbox state。
+- 实现调整：`mark_l2tlb_final_inactive_at_drv_cb()` 只记录 final item 已在真实 `drv_cb` 被采样的
+  epoch/generation/transport sequence，不再写 `l2tlb_transport_sample_mailbox_empty_state=0`。
+  同一 callback 随后的 `publish_transport_sample()` 成功占用 sequencer slot 后，仍由既有
+  `mark_l2tlb_transport_sample_mailbox_nonempty()` 唯一写入 PUBLISHED/non-empty；owner ack 后由下一真实
+  `drv_cb` recycle 返回 EMPTY。
+- 原因：final confirm 发生时，上一 transport slot 已被本拍 recycle，final proof 的 wrapper 尚未 reserve/PUBLISHED。
+  提前标记 non-empty 会使 publish predicate 自己否决 final sample，sequence 无法 begin closing 或 ack，release grant
+  永远无法满足 recycle/mailbox EMPTY 条件。
+- 影响范围：只修复 final release 的 driver-to-sequence handoff；不改变 stop/final 的 DUT 采样条件、owner grant 条件、
+  token/UID drain、adapter/fence drain 或普通 transport sample 的单槽协议。
+
+### [IMPLEMENTATION_DELTA] stop/final terminal item 的二次采样收敛
+
+- 来源：末轮 transport/mailbox review 发现，`release_close_requested` 置位后，sequence 原实现每拍都把
+  当前 transaction 重标为 `RELEASE_STOP`，并清零 response valid；如果同一拍已有 due response，stop item
+  会吞掉该 response，下一拍还会再次触发 stop confirm。另一个边界是 final item 后若 sample 暂时为
+  `NOT_READY`，driver 的 idle item 会覆盖 final metadata，使 final proof 无法再次确认。
+- 实现调整：
+  1. close request 发出且 `l2tlb_release_admission_closed=0` 时只发送一次带 generation/epoch 的
+     `RELEASE_STOP`；close 已被真实 driver sample 确认后，后续 inactive item 改用 `NORMAL` metadata，
+     但保留当前 response transaction 的 `io_ptw_resp_valid` 和 payload，直到真实 response fire。
+  2. final inactive proof 在 sequence 的 `NOT_READY` 分支之前处理；它只要求 frozen sample 有效、ready/fire/
+     response 均为无效、monitor 已同步处理该 final sample，不能被 CSR/event watermark 暂时未就绪吞掉。
+  3. driver 保留 final item provenance 到对应 transport sample 完成 recycle，recycle 后才清 metadata；因此
+     一个 final sample 只能 confirm 一次，后续 callback 不会重复写 final state。
+  4. final sample recycle、mailbox EMPTY、transport slot EMPTY 且 lifecycle owner 已释放后，driver 自然返回；
+     不再依赖 UVM phase 结束强杀采样线程。
+- 原因：`RELEASE_STOP` 是一次 transport admission cutoff，不是持续 level；final proof 是一次性 terminal
+  handoff，不是可被后续 idle item 覆盖的 live level。保留 response 和 provenance 可以同时满足旧 response
+  drain 与一次性 close/final 校验。
+- 影响范围：只收敛 release stop/final 的重复确认、response 保留和 driver 退出；不改变 C0/C4 flush barrier、
+  token/UID 账本、CSR snapshot、payload matcher 或普通 response latency。
+
+### [IMPLEMENTATION_DELTA] final eligibility 必须等待本地 barrier 消费
+
+- 来源：末轮独立 lifecycle review 发现，global stop 后若 pending token 和 UID waiting 都为空，但 C0 已登记的
+  `barrier_q` 尚未到 due sample，原 final 条件仍可能成立。owner 随后进入 release grant 等待，不再执行本地
+  C4 barrier 消费。
+- 实现调整：final inactive 的准入条件增加 `barrier_q.size()==0`；`check_l2tlb_lifecycle_accounting("owner_release")`
+  同时把非空 `barrier_q` 视为未收敛并打印数量后 fatal。close 后在 barrier due 前继续发送普通 inactive item，直到
+  `apply_due_l2tlb_flush_barriers()` 消费本地 barrier，再建立 final。
+- 原因：adapter 的 live-entry 删除和 sequence 的 token/barrier 账本是两个独立消费者；response/UID 为空不能证明
+  C4 已完成。final 必须同时等待二者收敛，避免 release 后留下未处理的本地 barrier。
+- 影响范围：只收紧 final/release gate；不改变 C0 建 barrier、C4 due 延迟、旧 response 选择或 UID cancel 规则。
+
+### [IMPLEMENTATION_DELTA] flush hold 只关闭新的 request admission
+
+- 来源：末轮 review 发现 `send_l2tlb_cycle()` 的 response selector 附加了 `!hold_active`，且在 hold 期间只要
+  `cycle_tr.io_ptw_resp_valid=1` 就 fatal。这样 C1-C3 已经在 C0 之前或 C0 同拍建立的旧 token 无法完成合法 response，
+  与 V2 filter 在 C4 才完成 flush 的时序矛盾。
+- 修改前逻辑：`hold_active=1` 同时禁止 `next_ready` 与 `select_due_response()`，即使旧 token 的 due 在 C1-C3 也不允许发
+  response。
+- 修改后逻辑：
+
+  ```text
+  构造下一 cycle item：
+    若当前没有 driving response，且当前 sample 不是 C4 due：
+      从旧 pending token 中选择 next sample 不会落到 C4 的 response
+    next_ready = 非 stop、非 close、CSR/history ready、非 hold、未满 outstanding
+    不因为 hold 清除已选择或已 driving 的 response valid
+  ```
+
+  C4 的 `due_barrier_this_sample` 和 `select_due_response(next_sample)` 内的 due 检查仍禁止 response fire；因此本 delta
+  只恢复 C1-C3 的旧 response drain，不允许 C4 绕过 filter flush。
+- 状态副作用：`pending_q/driving_req` 在 C1-C3 可正常由 response fire 推进；`accept_hold_until_sample` 仍只控制新
+  `req_ready`，不改变 token 的 C4 cancel 条件。
+
+### [IMPLEMENTATION_DELTA] post-reset baseline 必须成为公共 release proof
+
+- 来源：末轮 review 发现 driver 虽验证了 baseline 后的无活动 sample，但只清本地
+  `post_reset_baseline_pending`。`close_l2tlb_admission_for_release()` 与 `release_grantable()` 没有读取共享 proof，
+  因而其他 lifecycle consumer 无法证明当前 reset epoch 已建立 transport 基线。
+- 修改前逻辑：baseline 只在 driver 私有字段中完成；close/release 可能仅凭局部时序进入 stop/final。
+- 修改后逻辑：
+
+  ```text
+  driver 观察到 baseline 后严格更晚的有效 sample：
+    断言 ready=0、request fire=0、response valid=0
+    调用 mark_l2tlb_post_reset_baseline_done(reset_epoch, dut_sample_seq)
+    再清 driver 本地 baseline pending
+
+  close_l2tlb_admission_for_release(owner, sample)：
+    epoch 非 0 且共享 baseline proof 缺失 -> uvm_fatal
+
+  release_grantable(owner, epoch)：
+    epoch 非 0 且共享 baseline proof 缺失 -> 返回 0
+  ```
+
+- 状态副作用：`l2tlb_post_reset_baseline_done_*` 成为当前 epoch 的唯一共享 proof；reset direct writer 仍负责清它。
+  epoch 0 保持历史 startup 行为，不会被该 gate 误阻塞。
+
+### [IMPLEMENTATION_DELTA] baseline provenance 不得被 `NOT_READY` 普通 inactive 覆盖
+
+- 来源：独立终审发现 baseline item 已送出、但下一 `drv_cb` 尚无 global sample 或 producer watermark 为
+  `NOT_READY` 时，sequence 会送一个未带 baseline tag 的 `NORMAL/inactive` item。旧
+  `update_last_driven_metadata()` 随即覆盖 `last_item_is_post_reset_baseline`，后续真实 sample 无从证明
+  先前 baseline。
+- 修改前逻辑：只保护 `RELEASE_FINAL_INACTIVE` provenance；`got_item=0` 或同 epoch 的普通 NORMAL/inactive
+  都会把 pending baseline metadata 清成普通 idle。
+- 修改后逻辑：在 `post_reset_baseline_pending=1`、上一 item 是当前 epoch tagged baseline、且 reset 未激活时：
+  同 epoch 的非 baseline `NORMAL/inactive` item 或 driver idle 不更新 metadata；前者的 `ready` 与 `resp_valid` 必须均为 0，
+  否则直接 `uvm_fatal`。其它 item 仍按原规则写入；一旦严格更晚
+  real sample 完成 baseline proof，或 reset 开始新 epoch，再由既有路径清除/替换 provenance。
+
+  ```text
+  update_last_driven_metadata(item, got_item, epoch, reset_active):
+    若 baseline proof pending 且 previous item 是同 epoch tagged baseline：
+      若本轮是 idle，或本轮 item 是同 epoch NORMAL/inactive 且没有 baseline tag：
+        断言 item.ready=0 且 item.resp_valid=0
+        保留 previous baseline provenance；返回
+    按既有 final provenance 和普通 item 规则更新 metadata
+
+  sample_previous_vif():
+    仅在严格更晚且 sample_valid 的 sample 中读取保留的 baseline provenance
+    ready/fire/resp_valid 必须均为 0
+    epoch 非 0：写公共 baseline proof
+    清 driver-local pending
+  ```
+
+- 原因：`NOT_READY` 只表示 semantic producer 尚未齐全，不代表前一拍 driver item 从 VIF 消失。baseline proof 是
+  transport 时序事实，必须保留到真实 sample 才能确认。
+- 状态副作用：不新增 DUT wire 或第二份 item；只延长 driver private metadata 的生命周期。sequence 仍只发送一份 tagged
+  baseline，所有后续 waiting item 仍会正常 `item_done()`，不会重复发送或重复确认 baseline。
+
+### [IMPLEMENTATION_DELTA] epoch 0 不调用 runtime-reset baseline public proof
+
+- 来源：同一终审发现 testcase startup 使用 virtual epoch 0，而公共 helper
+  `mark_l2tlb_post_reset_baseline_done()` 的合同只接受非零 runtime-reset epoch。若 driver 对 epoch 0 调用它，会在
+  正常启动路径产生错误 fatal。
+- 修改前逻辑：baseline 的“严格更晚真实 sample”分支没有区分 epoch 0 与 runtime reset epoch，可能将 epoch 0 传给
+  public proof helper。
+- 修改后逻辑：driver 对 epoch 0 仍等待同样的无 ready/fire/response 真实 sample，并清自身
+  `post_reset_baseline_pending`；但跳过 `mark_l2tlb_post_reset_baseline_done()`。`update_reset_quiescent()` 也在
+  runtime coordinator 尚未创建非零 epoch 时直接返回，不累计 runtime-reset watchdog 或写 RESPONSE ack。
+
+  ```text
+  baseline proof sample 到达：
+    检查 ready=0、fire=0、resp_valid=0
+    若 sampled_reset_epoch != 0：
+      写 l2tlb_post_reset_baseline_done(epoch, sample)
+    否则：
+      只完成 startup 的 driver-local baseline
+    清 post_reset_baseline_pending
+  ```
+
+- 原因：epoch 0 是 testcase-start 基线，不是一次由 reset coordinator 发布的 runtime-reset transaction；把二者混用会
+  违反 public helper 的 epoch ownership。
+- 状态副作用：非零 epoch 的 close/release 仍强制读取唯一公共 proof；epoch 0 的原有 startup close/release 行为不变，
+  不会因新增 gate 或 watchdog 误阻塞。
+
+### [IMPLEMENTATION_DELTA] 同步 V2 responder 与 SFENCE flow 文档
+
+- 来源：执行规则要求当前 flow 文档反映真实调用链；原 plan 主要描述 coding 落点，没有列出完整 flow 文档同步动作。
+- 原 plan：保留已有 SFENCE/L2TLB 分析文档作为背景，不改变源码行为描述。
+- 实现调整：在 `AI_DOC/mem_ut_flow_doc/tlb_l2tlb_responder_flow.md` 增加 V2 当前 transport/lifecycle 合同，
+  在 `AI_DOC/mem_ut_flow_doc/sfence_flow.md` 标明旧直接 drain 链路为 entry-level 历史基线，并指向当前 responder flow。
+- 原因：避免文档继续把独立 live-VIF 采样、旧 `drain_sfence_events()` 和 sequence 直接消费 latest flush 描述成 V2 当前行为。
+- 影响范围：仅更新 flow 文档职责和调用链说明，不增加新的 DUT payload、token 或 adapter 逻辑。
+
+## 历史验证记录与重新验收要求
+
+- implementation review：`AI_DOC/plan/test_framework/review_doc/undo/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_implementation_review_20260809.md`。
+- 修复 P0/P1 前的 explicit smoke：`memblock_dispatch_real_smoke_vseq`，仿真在 `482.800ns` 输出 `TEST_PASS`，
+  `UVM_ERROR=0`、`UVM_FATAL=0`。
+- 修复 P0/P1 前的基础 smoke：`virtual_base_sequence`，仿真在 `265.300ns` 输出 `TEST_PASS`，
+  `UVM_ERROR=0`、`UVM_FATAL=0`。
+- 以下为 P0/P1 修复后、最新两个 baseline blocker 修复前的历史重新验证记录：
+
+  ```text
+  make eda_compile tc=basicTest ts=memblock_dispatch_real_smoke_vseq \
+    mode=l2tlb_timing_p01_20260809 cfg=tc_dispatch_real_smoke
+  make eda_run tc=basicTest ts=memblock_dispatch_real_smoke_vseq \
+    mode=l2tlb_timing_p01_20260809 cfg=tc_dispatch_real_smoke wave=off \
+    plus_arg='+MEMBLOCK_MAIN_TRANS_NUM=2'
+  make eda_compile tc=basicTest ts=virtual_base_sequence mode=base_fun
+  make eda_run tc=basicTest ts=virtual_base_sequence mode=base_fun wave=off
+  ```
+
+  explicit smoke 在 `482.800ns`、base smoke 在 `265.300ns` 均输出 `TEST_PASS`，且均为
+  `UVM_ERROR=0`、`UVM_FATAL=0`；两次 compile exit code 均为 0。
+- 最新的 baseline provenance 与 epoch-0 修复改动 driver 关键时序分支，因此上述历史结果不能作为最终验收。已用同一组
+  explicit/base compile 与 smoke 命令完成重新执行：
+
+  | 验收项 | compile | smoke 结果 |
+  |---|---|---|
+  | explicit dispatch | `eda_compile` exit code 0 | `482.800ns TEST_PASS`，`UVM_ERROR=0`、`UVM_FATAL=0` |
+  | base no-dispatch | `eda_compile` exit code 0 | `265.300ns TEST_PASS`，`UVM_ERROR=0`、`UVM_FATAL=0` |
+
+  远端 VCS 的 `KDB-OPTIONS` 与旧 `.nfs*` 清理提示均未产生编译 error 或 UVM error/fatal；末轮独立 review 已明确
+  给出 `FINAL PASS`，满足归档条件。

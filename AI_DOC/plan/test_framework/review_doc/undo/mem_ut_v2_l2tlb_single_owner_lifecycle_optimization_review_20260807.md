@@ -7,7 +7,7 @@
 | 当前状态 | 尚未 coding、编译或仿真；本文件不能作为已完成实现的证明 |
 | 审核目标 | 在一个 testcase 只运行一个 L2TLB responder owner 的前提下，收敛生命周期、时基、flush、reset 和退出边界 |
 | 语义边界 | `L2TLB_agent` 仍表示 DTLB -> L2TLB request 和 L2TLB -> DTLB response，不表示 L2Cache/PTW 下游模型 |
-| 关联实现文档 | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`、`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`、`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`、`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md` |
+| 关联实现文档 | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`、`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`、`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`、`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md` |
 
 本文把待优化问题和优化后的行为分开描述。它不替代四份专项的字段、payload、range 或 stage matcher 方案；后续 coding
 时，生命周期冲突以本文的审核结论为准，具体功能仍按对应 `undo` coding plan 执行。
@@ -1022,7 +1022,7 @@ adapter 所属 queue/map，不修改 response owner 的 pending token。
 | 文档 | 本文给出的统一约束 |
 |---|---|
 | `mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md` | payload builder、raw/derived copy 和 UID response multicast 仍由该文档负责；不得新增第二个 owner/token queue。 |
-| `mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md` | C0/C4、C-2 history、response due、warm-up stop、raw-fence intake close 与 reset/release 使用本文 global sample/owner 边界。 |
+| `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md` | C0/C4、C-2 history、response due、warm-up stop、raw-fence intake close 与 reset/release 使用本文 global sample/owner 边界。 |
 | `mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md` | range candidate、rank、NAPOT 和统一 delete helper 由该文档负责；adapter 只调用 helper。 |
 | `mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md` | stage matcher、raw fence decode、topology gate 和 raw intake close 由该文档负责；raw fence destructive consumer 固定为 adapter。 |
 

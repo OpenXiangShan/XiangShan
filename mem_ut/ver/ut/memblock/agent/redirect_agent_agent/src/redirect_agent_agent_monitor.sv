@@ -39,6 +39,7 @@ task redirect_agent_agent_monitor::mon_data();
     logic io_redirect_bits_level       ;
     logic io_redirect_bits_robIdx_flag ;
     logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_redirect_bits_robIdx_value;
+    longint unsigned sample_seq;
 
     redirect_agent_agent_xaction  mon_tr;
     while(1) begin
@@ -56,8 +57,11 @@ task redirect_agent_agent_monitor::mon_data();
 
         end
         if(this.vif.rst_n===1'b1 && memblock_sync_pkg::reset_backend_done===1'b1 &&
+           !memblock_sync_pkg::l2tlb_reset_active() &&
            io_redirect_valid===1'b1) begin
             memblock_sync_pkg::dispatch_raw_redirect_anchor_t anchor;
+
+            memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
 
             // 中文伪代码：只记录顶层 redirect 真正被 monitor sample 到的 payload/序号，
             // 不调用 recovery handler，也不写 status/pass/fail/terminal。
@@ -65,7 +69,7 @@ task redirect_agent_agent_monitor::mon_data();
             anchor.level = io_redirect_bits_level;
             anchor.rob_flag = io_redirect_bits_robIdx_flag;
             anchor.rob_value = io_redirect_bits_robIdx_value;
-            anchor.sample_seq = memblock_sync_pkg::get_dut_sample_seq($time);
+            anchor.sample_seq = sample_seq;
             anchor.cycle = $time;
             memblock_sync_pkg::push_raw_redirect_anchor(anchor);
         end

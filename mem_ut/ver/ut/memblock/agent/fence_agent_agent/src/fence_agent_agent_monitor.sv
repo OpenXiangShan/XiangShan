@@ -44,6 +44,9 @@ task fence_agent_agent_monitor::mon_data();
     logic io_ooo_to_mem_sfence_bits_flushPipe;
     fence_agent_agent_xaction  mon_tr;
     memblock_sync_pkg::dispatch_raw_sfence_t raw_sfence;
+    longint unsigned sample_seq;
+    longint unsigned event_seq;
+    longint unsigned reset_epoch;
     while(1) begin
         @this.vif.mon_mp.mon_cb;
         io_ooo_to_mem_sfence_valid = this.vif.mon_mp.mon_cb.io_ooo_to_mem_sfence_valid;
@@ -56,7 +59,9 @@ task fence_agent_agent_monitor::mon_data();
 
         io_ooo_to_mem_sfence_bits_flushPipe = this.vif.mon_mp.mon_cb.io_ooo_to_mem_sfence_bits_flushPipe;
 
-        if(this.cfg.xz_sw==tcnt_dec_base::ON && this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
+        if(this.cfg.xz_sw==tcnt_dec_base::ON && this.vif.rst_n==1'b1 &&
+           memblock_sync_pkg::reset_backend_done==1'b1 &&
+           !memblock_sync_pkg::l2tlb_reset_active()) begin
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_valid,io_ooo_to_mem_sfence_valid,1);
             if (io_ooo_to_mem_sfence_valid===1'b1) begin
                 `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_bits_rs1,io_ooo_to_mem_sfence_bits_rs1,1);
@@ -68,22 +73,44 @@ task fence_agent_agent_monitor::mon_data();
                 `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_bits_flushPipe,io_ooo_to_mem_sfence_bits_flushPipe,1);
             end
         end
+        if (this.vif.rst_n !== 1'b1 ||
+            memblock_sync_pkg::reset_backend_done !== 1'b1 ||
+            memblock_sync_pkg::l2tlb_reset_active()) begin
+            // CSR monitor creates the epoch; this monitor only clears its
+            // producer-local state and acknowledges that epoch.
+            if (memblock_sync_pkg::l2tlb_reset_active()) begin
+                reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+                memblock_sync_pkg::reset_l2tlb_fence_runtime_state(reset_epoch);
+            end
+            continue;
+        end
         if(this.vif.rst_n==1'b1 &&
-           memblock_sync_pkg::reset_backend_done==1'b1 &&
-           io_ooo_to_mem_sfence_valid===1'b1) begin
-            // 中文注释：L2TLB lifecycle sideband独立于semantic raw capture gate。
-            // 每个post-reset有效sfence sample递增一次event，sequence以event_seq非破坏读取。
-            memblock_sync_pkg::note_l2tlb_flush_event($time);
+           memblock_sync_pkg::reset_backend_done==1'b1) begin
+            // Fence is a same-edge producer: anchor to the CSR monitor's
+            // sample, never advance the global clock here.
+            memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
             raw_sfence = memblock_sync_pkg::make_empty_raw_sfence();
-            raw_sfence.valid = 1'b1;
-            raw_sfence.rs1   = io_ooo_to_mem_sfence_bits_rs1;
-            raw_sfence.rs2   = io_ooo_to_mem_sfence_bits_rs2;
-            raw_sfence.addr  = io_ooo_to_mem_sfence_bits_addr;
-            raw_sfence.id    = io_ooo_to_mem_sfence_bits_id;
-            raw_sfence.hv    = io_ooo_to_mem_sfence_bits_hv;
-            raw_sfence.hg    = io_ooo_to_mem_sfence_bits_hg;
-            raw_sfence.cycle = memblock_sync_pkg::get_dispatch_service_cycle();
-            memblock_sync_pkg::push_raw_sfence(raw_sfence);
+            raw_sfence.sample_seq = sample_seq;
+            if (io_ooo_to_mem_sfence_valid===1'b1) begin
+                event_seq = memblock_sync_pkg::note_l2tlb_flush_event(
+                    $time, memblock_sync_pkg::MEMBLOCK_L2TLB_REASON_FENCE);
+                raw_sfence.valid = 1'b1;
+                raw_sfence.rs1   = io_ooo_to_mem_sfence_bits_rs1;
+                raw_sfence.rs2   = io_ooo_to_mem_sfence_bits_rs2;
+                raw_sfence.addr  = io_ooo_to_mem_sfence_bits_addr;
+                raw_sfence.id    = io_ooo_to_mem_sfence_bits_id;
+                raw_sfence.hv    = io_ooo_to_mem_sfence_bits_hv;
+                raw_sfence.hg    = io_ooo_to_mem_sfence_bits_hg;
+                raw_sfence.lifecycle_event_seq = event_seq;
+                raw_sfence.cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+                // No-dispatch mode has no semantic raw-fence FIFO.
+                if (memblock_sync_pkg::dispatch_l2tlb_lookup_active) begin
+                    memblock_sync_pkg::push_raw_sfence(raw_sfence);
+                end
+            end
+            // Even an empty sample must close the producer barrier.
+            memblock_sync_pkg::mark_l2tlb_sample_producer_done(
+                sample_seq, 2'b10);
         end
         //if(xxxTODOxxx==1'b1) begin
         //    mon_tr = fence_agent_agent_xaction::type_id::create("mon_tr");

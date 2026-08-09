@@ -717,7 +717,8 @@ function void memblock_lsqenq_dispatch_base_sequence::complete_v2_pending_sample
     if (!pending_sample_valid) begin
         return;
     end
-    sample_seq = memblock_sync_pkg::get_dut_sample_seq($time);
+    // LSQ enqueue service is a consumer; CSR monitor owns sample advancement.
+    sample_seq = memblock_sync_pkg::peek_current_dut_global_sample();
     foreach (pending_sample_tokens[idx]) begin
         if (!pending_sample_tokens[idx].valid) begin
             `uvm_fatal(get_type_name(), "pending LSQ reservation token is invalid")

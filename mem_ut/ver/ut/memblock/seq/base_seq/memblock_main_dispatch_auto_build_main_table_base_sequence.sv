@@ -55,9 +55,11 @@ endfunction:ensure_service_vif
 
 task memblock_main_dispatch_auto_build_main_table_base_sequence::service_real_dispatch_flow();
     memblock_flushsb_base_sequence flushsb_seq;
+    int unsigned l2tlb_owner_claim_wait_cycles;
 
     ensure_service_vif();
     flushsb_seq = memblock_flushsb_base_sequence::type_id::create("flushsb_seq");
+    l2tlb_owner_claim_wait_cycles = 0;
     fork
         flushsb_seq.start(null);
     join_none
@@ -72,18 +74,51 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_real_di
             route_all_issue_queues();
         end
         void'(all_transactions_terminal_done());
+        // Abstract responsibility: the parent owns the one-way release grant
+        // after this service tick has drained adapter-owned lifecycle work.
+        // The L2TLB responder only waits for this grant and never polls or
+        // grants its own release.
+        if (data.is_global_stop_requested() &&
+            memblock_sync_pkg::l2tlb_lifecycle_owner_claimed) begin
+            void'(memblock_sync_pkg::grant_l2tlb_final_release());
+        end
         if (data.is_global_stop_requested() &&
             !data.flushsb_request_pending()) begin
-            break;
+            if (memblock_sync_pkg::l2tlb_responder_active &&
+                seq_csr_common::get_l2tlb_seq_en() &&
+                !memblock_sync_pkg::l2tlb_lifecycle_owner_claimed &&
+                !memblock_sync_pkg::l2tlb_owner_claimed_once) begin
+                // An explicit vseq crosses main_table_ready asynchronously.
+                // Keep the parent service alive until that responder claims;
+                // otherwise a fast terminal table can strand the only owner.
+                l2tlb_owner_claim_wait_cycles++;
+                if (l2tlb_owner_claim_wait_cycles > 256) begin
+                    `uvm_fatal(get_type_name(),
+                               "global stop waited too long for enabled L2TLB lifecycle owner claim")
+                end
+            end
+            else if (!memblock_sync_pkg::l2tlb_responder_active ||
+                     !seq_csr_common::get_l2tlb_seq_en() ||
+                     (!memblock_sync_pkg::l2tlb_lifecycle_owner_claimed &&
+                      memblock_sync_pkg::l2tlb_owner_claimed_once)) begin
+                break;
+            end
         end
     end
 endtask:service_real_dispatch_flow
 
 task memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor_once();
     memblock_sync_pkg::tick_dispatch_service_cycle();
+    // L2TLB adapter reset and C4-aware raw-fence service are part of the
+    // dispatch service owner.  Run this first so a live reset does not let
+    // later batch handlers consume stale raw state.
+    collect_runtime_context_events();
+    if (memblock_sync_pkg::reset_backend_done !== 1'b1 ||
+        memblock_sync_pkg::l2tlb_reset_active()) begin
+        return;
+    end
     // 中文注释：本轮 raw int writeback、IQ feedback 和 memoryViolation 先收集成同一个 batch。
     // batch handler 先做 normalize 和 redirect-first 仲裁，只有未被 redirect 覆盖的 event 才能落状态。
-    collect_runtime_context_events();
     if (monitor_adapter == null) begin
         monitor_adapter = dispatch_monitor_event_adapter::type_id::create("monitor_adapter");
     end

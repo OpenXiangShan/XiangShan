@@ -18,6 +18,10 @@ class tc_dispatch_real_smoke extends tc_base;
         super.new(name, parent);
     endfunction:new
 
+    virtual function bit l2tlb_dispatch_topology_active();
+        return 1'b1;
+    endfunction:l2tlb_dispatch_topology_active
+
     virtual function void build_phase(uvm_phase phase);
         seq_csr_common::reload_from_plus();
 

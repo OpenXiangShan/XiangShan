@@ -200,6 +200,9 @@ task memblock_dispatch_base_sequence::pre_body();
         monitor_adapter = dispatch_monitor_event_adapter::type_id::create("monitor_adapter");
         monitor_adapter.bind_commit_handler(monitor_commit_handler);
     end
+    if (memblock_sync_pkg::l2tlb_dispatch_active()) begin
+        memblock_sync_pkg::register_l2tlb_adapter_service(get_full_name());
+    end
 endtask:pre_body
 
 task memblock_dispatch_base_sequence::body();
@@ -207,6 +210,10 @@ task memblock_dispatch_base_sequence::body();
 endtask:body
 
 task memblock_dispatch_base_sequence::post_body();
+    if (memblock_sync_pkg::l2tlb_adapter_service_active &&
+        memblock_sync_pkg::l2tlb_adapter_service_owner_name == get_full_name()) begin
+        memblock_sync_pkg::unregister_l2tlb_adapter_service(get_full_name());
+    end
     super.post_body();
 endtask:post_body
 
@@ -326,10 +333,20 @@ function void memblock_dispatch_base_sequence::collect_runtime_context_events();
     if (monitor_commit_handler != null) begin
         monitor_adapter.bind_commit_handler(monitor_commit_handler);
     end
-    // 中文注释：统一 service loop 显式先同步 CSR runtime，再消费 sfence/hfence。
-    // 其它查表或 writeback/ctrl 路径如果只需要最新 CSR，应只调用 drain_csr_events()。
+    if (memblock_sync_pkg::reset_backend_done !== 1'b1) begin
+        monitor_adapter.reset_l2tlb_sfence_state();
+        return;
+    end
+    if (memblock_sync_pkg::l2tlb_reset_active()) begin
+        // Runtime reset remains active until each direct writer has acked.
+        // Adapter reset is serviced on this negedge even after rst_n rises.
+        monitor_adapter.reset_l2tlb_sfence_state();
+        return;
+    end
+    // 中文注释：统一 service loop 显式先同步 CSR runtime；raw fence 由
+    // service_l2tlb_sfence_events() 按 sample/C4 due 统一归属 live-entry owner。
     monitor_adapter.drain_csr_events();
-    monitor_adapter.drain_sfence_events();
+    monitor_adapter.service_l2tlb_sfence_events();
 endfunction:collect_runtime_context_events
 
 task memblock_dispatch_base_sequence::collect_monitor_event_batch();
