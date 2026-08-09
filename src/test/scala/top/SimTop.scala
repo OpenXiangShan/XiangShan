@@ -33,9 +33,11 @@ import system.SoCParamsKey
 
 class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterfaces {
   val debugOpts = p(DebugOptionsKey)
+  val extllc_clk = IO(Input(Clock()))
 
   val l_soc = LazyModule(new XSTop())
   val soc = Module(l_soc.module)
+  val extllcClock = l_soc.EnableCHIAsyncBridge.map(_ => extllc_clk).getOrElse(clock)
   // Don't allow the top-level signals to be optimized out,
   // so that we can re-use this XiangShanSim for any generated Verilog RTL.
   dontTouch(soc.io)
@@ -55,7 +57,7 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   val l_simMMIO = LazyModule(new SimMMIO(l_soc.misc.peripheralNode.in.head._2)(p.alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(UARTLiteForDTS = false)
   })))
-  val simMMIO = Module(l_simMMIO.module)
+  val simMMIO = withClockAndReset(extllcClock, reset) { Module(l_simMMIO.module) }
   l_simMMIO.io_axi4.elements.head._2 <> soc.peripheral.viewAs[AXI4Bundle]
 
   val l_simAXIMem = AXI4MemorySlave(
@@ -64,7 +66,7 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
     useBlackBox = true,
     dynamicLatency = debugOpts.UseDRAMSim
   )
-  val simAXIMem = Module(l_simAXIMem.module)
+  val simAXIMem = withClockAndReset(extllcClock, reset) { Module(l_simAXIMem.module) }
   l_simAXIMem.io_axi4.elements.head._2 :<>= soc.memory.viewAs[AXI4Bundle].waiveAll
   val memIO = Option.when(DifftestModule.isFPGA) {
     DifftestMemCtrl.exposeIO(soc.memory.viewAs[AXI4Bundle], l_simAXIMem.io_axi4.elements.head._2)
@@ -72,6 +74,7 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   override def difftestMemIO: Option[DifftestMemIO] = memIO
 
   soc.io.clock := clock
+  soc.io.extllc_clk.foreach(_ := extllc_clk)
   soc.io.reset := (reset.asBool || soc.io.debug_reset).asAsyncReset
   soc.io.extIntrs := simMMIO.io.interrupt.intrVec
   soc.io.sram_config := 0.U

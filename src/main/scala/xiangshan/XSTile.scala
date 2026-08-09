@@ -54,10 +54,13 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val plic_int_node = l2top.inner.plic_int_node
   val debug_int_node = l2top.inner.debug_int_node
   val nmi_int_node = l2top.inner.nmi_int_node
-  memBlock.clint_int_sink := IntBuffer() := clint_int_node
-  memBlock.plic_int_sink :*= IntBuffer() :*= plic_int_node
-  memBlock.debug_int_sink := IntBuffer() := debug_int_node
-  memBlock.nmi_int_sink   := IntBuffer() := nmi_int_node
+  private val asyncInterrupts = EnableCHIAsyncBridge.isDefined && !soc.UseXSNoCTop
+  private def interruptBuffer =
+    if (asyncInterrupts) IntBuffer(3, cdc = true) else IntBuffer()
+  memBlock.clint_int_sink := interruptBuffer := clint_int_node
+  memBlock.plic_int_sink :*= interruptBuffer :*= plic_int_node
+  memBlock.debug_int_sink := interruptBuffer := debug_int_node
+  memBlock.nmi_int_sink   := interruptBuffer := nmi_int_node
   memBlock.beu_local_int_sink := l2top.inner.beu_local_int_source_buffer
 
   // =========== Components' Connection ============

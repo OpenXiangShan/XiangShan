@@ -27,7 +27,7 @@ import utility._
 import utility.sram.SramBroadcastBundle
 import huancun.{HCCacheParameters, HCCacheParamsKey, HuanCun, PrefetchRecv, TPmetaResp}
 import coupledL2.EnableCHI
-import coupledL2.tl2chi.CHILogger
+import coupledL2.tl2chi.{CHIAsyncBridgeSink, CHIAsyncBridgeSource, CHILogger, PortIO}
 import openLLC.{OpenLLC, OpenLLCParamKey, OpenNCB}
 import openLLC.TargetBinder._
 import cc.xiangshan.openncb._
@@ -88,6 +88,7 @@ trait HasDTSImp[+L <: BaseXSSoc] { this: LazyRawModuleImp =>
 class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 {
   private val useExternalLLC = p(UseExternalLLCKey)
+  private val useCHIAsyncBridge = EnableCHIAsyncBridge.isDefined
   require(!useExternalLLC || enableCHI, "External LLC requires CHI")
 
   val nocMisc = if (enableCHI) Some(LazyModule(new MemMisc())) else None
@@ -228,7 +229,9 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     core_with_l2(i).plic_int_node :*= misc.plic.intnode
     core_with_l2(i).debug_int_node := misc.debugModule.debug.dmOuter.dmOuter.intnode
     core_with_l2(i).nmi_int_node := nmiIntNode
-    misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
+    val beuInterruptBuffer =
+      if (useCHIAsyncBridge) IntBuffer(3, cdc = true) else IntBuffer()
+    misc.plic.intnode := beuInterruptBuffer := core_with_l2(i).beu_int_source
     if (!enableCHI) {
       misc.peripheral_ports.get(i) := core_with_l2(i).tl_uncache
     }
@@ -329,6 +332,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     val io = IO(new Bundle {
       val clock = Input(Clock())
+      val extllc_clk = EnableCHIAsyncBridge.map(_ => Input(Clock()))
       val reset = Input(AsyncReset())
       val sram_config = Input(UInt(16.W))
       val extIntrs = Input(UInt(NrExtIntr.W))
@@ -367,10 +371,14 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       })
     })
 
+    val extllc_clock = io.extllc_clk.getOrElse(io.clock)
     val reset_sync = withClockAndReset(io.clock, io.reset) { ResetGen() }
+    val extllc_reset_sync = io.extllc_clk
+      .map(_ => withClockAndReset(extllc_clock, io.reset) { ResetGen() })
+      .getOrElse(reset_sync)
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
     val chi_openllc_opt = Option.when(enableCHI && !useExternalLLC) {
-      withClockAndReset(io.clock, io.reset) {
+      withClockAndReset(extllc_clock, io.reset) {
         Module(new OpenLLC()(p.alter((site, here, up) => {
           case OpenLLCParamKey => soc.OpenLLCParamsOpt.get.copy(
             hartIds = tiles.map(_.HartId),
@@ -380,14 +388,15 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       }
     }
     chi_extllc_opt.foreach { externalLLC =>
-      externalLLC.module.io.clock := io.clock
+      externalLLC.module.io.clock := extllc_clock
       externalLLC.module.io.reset := io.reset.asBool
     }
     memory.viewAs[AXI4Bundle] <> misc.memory.elements.head._2
 
     // override LazyRawModuleImp's clock and reset
-    childClock := io.clock
-    childReset := reset_sync
+    childClock := extllc_clock
+    childReset := extllc_reset_sync
+    core_with_l2.foreach(_.module.clock := io.clock)
 
     // output
     io.debug_reset := misc.module.debug_module_io.debugIO.ndreset
@@ -445,7 +454,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     misc.module.scntIO.stop_en := false.B
     misc.module.rtc_clock := io.rtc_clock // syscnt clock
     misc.module.rtc_reset := ref_reset_sync.asAsyncReset
-    misc.module.bus_clock := io.clock
+    misc.module.bus_clock := extllc_clock
     misc.module.bus_reset := io.reset
 
     val clintTime = WireInit(0.U.asTypeOf(ValidIO(UInt(64.W))))
@@ -492,18 +501,44 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       core.module.io.dft_reset.foreach(dontTouch(_) := DontCare)
       core.module.io.reset_vector := io.riscv_rst_vec(i)
       core.module.io.reset_mtvec.foreach(_ := io.riscv_rst_mtvec.get(i))
-      core.module.io.lcrdy.foreach { lcrdy =>
-        lcrdy.req.rdy := true.B
-        lcrdy.dat.rdy := true.B
-        lcrdy.rsp.rdy := true.B
-        lcrdy.empty := true.B
+      if (!useCHIAsyncBridge) {
+        core.module.io.lcrdy.foreach { lcrdy =>
+          lcrdy.req.rdy := true.B
+          lcrdy.dat.rdy := true.B
+          lcrdy.rsp.rdy := true.B
+          lcrdy.empty := true.B
+        }
       }
     }
 
-    withClockAndReset(io.clock, io.reset) {
+    val downstreamCHI: Seq[PortIO] = if (enableCHI) {
+      core_with_l2.map { core =>
+        val coreCHI = core.module.io.chi.get
+        EnableCHIAsyncBridge match {
+          case Some(param) =>
+            val source = withClockAndReset(core.module.clock, core.module.reset) {
+              Module(new CHIAsyncBridgeSource(param))
+            }
+            val sink = withClockAndReset(extllc_clock, extllc_reset_sync) {
+              Module(new CHIAsyncBridgeSink(param))
+            }
+            source.io.enq <> coreCHI
+            sink.io.async <> source.io.async
+            core.module.io.lcrdy.foreach(_ <> source.io.lcrdy)
+            sink.io.powerAck.QREQ := false.B
+            sink.io.deq
+          case None =>
+            coreCHI
+        }
+      }
+    } else {
+      Seq.empty
+    }
+
+    withClockAndReset(extllc_clock, extllc_reset_sync) {
       if (enableCHI && useExternalLLC) {
         for ((core, i) <- core_with_l2.zipWithIndex) {
-          val coreCHI = core.module.io.chi.get
+          val coreCHI = downstreamCHI(i)
           val extLLCLogger = CHILogger(s"L2[${i}]_ExtLLC", true)
           val extLLCRN = chi_extllc_opt.get.module.io.rn(i)
           dontTouch(coreCHI)
@@ -514,7 +549,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       } else if (enableCHI) {
         val llcRouteId = NumCores * 2
         for ((core, i) <- core_with_l2.zipWithIndex) {
-          val coreCHI = core.module.io.chi.get
+          val coreCHI = downstreamCHI(i)
           val mmioLogger = CHILogger(s"L2[${i}]_MMIO", true)
           val llcLogger = CHILogger(s"L2[${i}]_LLC", true)
           val mmioRouteId = NumCores + i
@@ -592,11 +627,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     }
 
     misc.module.debug_module_io.resetCtrl.hartIsInReset := core_with_l2.map(_.module.io.hartIsInReset)
-    misc.module.debug_module_io.clock := io.clock
-    misc.module.debug_module_io.reset := reset_sync
+    misc.module.debug_module_io.clock := extllc_clock
+    misc.module.debug_module_io.reset := extllc_reset_sync
 
     misc.module.debug_module_io.debugIO.reset := misc.module.reset
-    misc.module.debug_module_io.debugIO.clock := io.clock
+    misc.module.debug_module_io.debugIO.clock := extllc_clock
     // TODO: delay 3 cycles?
     misc.module.debug_module_io.debugIO.dmactiveAck := misc.module.debug_module_io.debugIO.dmactive
     // jtag connector
@@ -608,11 +643,13 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       x.version     := io.systemjtag.version
     }
 
-    withClockAndReset(io.clock, reset_sync) {
+    withClockAndReset(extllc_clock, extllc_reset_sync) {
       // Modules are reset one by one
-      // reset ----> SYNC --> {SoCMisc, L3 Cache, Cores}
+      // reset ----> SYNC --> {SoCMisc, L3 Cache}
       val resetChain = Seq(Seq(misc.module) ++ l3cacheOpt.map(_.module))
-      ResetGen(resetChain, reset_sync, !debugOpts.ResetGen)
+      ResetGen(resetChain, extllc_reset_sync, !debugOpts.ResetGen)
+    }
+    withClockAndReset(io.clock, reset_sync) {
       // Ensure that cores could be reset when DM disable `hartReset` or l3cacheOpt.isEmpty.
       val dmResetReqVec = misc.module.debug_module_io.resetCtrl.hartResetReq.getOrElse(0.U.asTypeOf(Vec(core_with_l2.map(_.module).length, Bool())))
       val syncResetCores = if(l3cacheOpt.nonEmpty) l3cacheOpt.map(_.module).get.reset.asBool else misc.module.reset.asBool
