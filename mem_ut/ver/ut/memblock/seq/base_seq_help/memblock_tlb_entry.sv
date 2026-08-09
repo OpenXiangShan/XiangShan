@@ -1,20 +1,12 @@
 //=========================================================
 //File name    : memblock_tlb_entry.sv
-//Author       : OpenAI_Codex
 //Module name  : memblock_tlb_entry
-//Discribution : by-key TLB/PTE entry and per-uid record
-//Date         : 2026-06-01
+//Discribution : V2 L2TLB live/pending/UID payload records
 //=========================================================
 `ifndef MEMBLOCK_TLB_ENTRY__SV
 `define MEMBLOCK_TLB_ENTRY__SV
 
 class memblock_tlb_entry extends uvm_object;
-
-    typedef enum int unsigned {
-        MEMBLOCK_TLB_LEVEL_FIXED      = 0,
-        MEMBLOCK_TLB_LEVEL_RANDOM     = 1,
-        MEMBLOCK_TLB_LEVEL_DERIVED    = 2
-    } memblock_tlb_level_mode_e;
 
     typedef enum int unsigned {
         MEMBLOCK_TLB_PTE_MODE_LEGAL            = 0,
@@ -28,39 +20,86 @@ class memblock_tlb_entry extends uvm_object;
         MEMBLOCK_TLB_ACCESS_STORE   = 2
     } memblock_tlb_access_e;
 
+    typedef enum int unsigned {
+        MEMBLOCK_TLB_FAULT_STAGE_NONE = 0,
+        MEMBLOCK_TLB_FAULT_STAGE_S1   = 1,
+        MEMBLOCK_TLB_FAULT_STAGE_S2   = 2
+    } memblock_tlb_fault_stage_e;
+
     memblock_tlb_lookup_key_t lookup_key;
+    // The stored widths deliberately match the V2 PtwRespS2 wires.  The
+    // lookup key remains wider because it is a framework lookup identity,
+    // not a direct copy of either response tag.
+    bit [34:0] s1_tag;
+    bit [15:0] s1_asid;
+    bit [15:0] s1_vmid;
+    bit [37:0] s2_tag;
+    bit [15:0] s2_vmid;
+    bit [1:0]  s2xlate;
 
-    bit [63:0] vaddr;
-    bit [63:0] paddr;
-    bit [63:0] vpn;
-    bit [63:0] ppn;
+    // 中文注释：stage_active、mode/root 和 CSR sequence 只在 lookup miss 建表时冻结。
+    // 命中 entry、pending snapshot 和 UID 回填只能复制，不能用当前 CSR 重建。
+    bit        s1_stage_active;
+    bit        s2_stage_active;
+    bit [3:0]  s1_translation_mode_at_build;
+    bit [3:0]  s2_translation_mode_at_build;
+    // 中文注释：两个 PTE profile mode 在 lookup miss 时从 testcase 参数冻结。
+    // pending/UID 只复制该值，后续 PTE.N/NAPOT 判定不得重新读取可变全局配置。
+    bit [1:0]  s1_pte_mode_at_build;
+    bit [1:0]  s2_pte_mode_at_build;
+    bit [43:0] s1_root_ppn_at_build;
+    bit [43:0] s2_root_ppn_at_build;
+    int unsigned csr_context_seq_at_build;
+    longint unsigned entry_generation;
 
-    bit pte_r;
-    bit pte_w;
-    bit pte_x;
-    bit pte_u;
-    bit pte_g;
-    bit pte_a;
-    bit pte_d;
-    bit pte_n;
-    bit pte_v;
-    bit [1:0] pbmt;
-
-    bit tlbAF;
-    bit tlbPF;
-    bit tlbGPF;
+    // 中文注释：四个 raw fault 每次 miss 都独立随机；effective fault 只保留按 s2xlate
+    // 和权重优先级收敛后的唯一 DUT 可见 fault。pmaAF 是不参与该收敛的 legacy sideband。
+    bit fault_raw_s1_pf;
+    bit fault_raw_s1_af;
+    bit fault_raw_s2_gpf;
+    bit fault_raw_s2_gaf;
+    bit fault_effective_s1_pf;
+    bit fault_effective_s1_af;
+    bit fault_effective_s2_gpf;
+    bit fault_effective_s2_gaf;
+    memblock_tlb_fault_stage_e fault_stage_selected;
     bit pmaAF;
 
-    int unsigned asid;
-    int unsigned vmid;
-    bit [1:0]    s2xlate;
-    bit [1:0]    priv_mode;
-    bit [1:0]    level;
+    // 中文注释：S1 PPN 按 V2 sector 接口拆分；pteidx 是 one-hot Bool 数组，
+    // 不能作为数值 index 或通过 != 0 投影到 response wire。
+    bit [40:0] s1_entry_ppn_raw;
+    bit [43:0] s1_resolved_ppn;
+    bit        s1_resolved_ppn_valid;
+    bit [1:0]  s1_level;
+    bit        s1_pte_n;
+    bit [1:0]  s1_entry_pbmt;
+    bit        s1_pte_r;
+    bit        s1_pte_w;
+    bit        s1_pte_x;
+    bit        s1_pte_u;
+    bit        s1_pte_g;
+    bit        s1_pte_a;
+    bit        s1_pte_d;
+    bit        s1_pte_v;
+    bit [2:0]  s1_addr_low;
+    bit [2:0]  s1_ppn_low[8];
+    bit        s1_valididx[8];
+    bit        s1_pteidx[8];
 
-    bit [2:0]    addr_low;
-    bit [2:0]    ppn_low[8];
-    bit          valididx[8];
-    bit [2:0]    pteidx[8];
+    // 中文注释：V2 S2 response 没有 entry_v；下列字段只保存和驱动实际接口存在的 payload。
+    bit [37:0] s2_entry_ppn_raw;
+    bit [43:0] s2_resolved_ppn;
+    bit        s2_resolved_ppn_valid;
+    bit [1:0]  s2_level;
+    bit        s2_pte_n;
+    bit [1:0]  s2_entry_pbmt;
+    bit        s2_pte_r;
+    bit        s2_pte_w;
+    bit        s2_pte_x;
+    bit        s2_pte_u;
+    bit        s2_pte_g;
+    bit        s2_pte_a;
+    bit        s2_pte_d;
 
     longint unsigned create_cycle;
     longint unsigned last_hit_cycle;
@@ -73,408 +112,323 @@ class memblock_tlb_entry extends uvm_object;
     endfunction:new
 
     function void reset();
-        lookup_key     = '{default:'0};
-        vaddr          = '0;
-        paddr          = '0;
-        vpn            = '0;
-        ppn            = '0;
-        pte_r          = 1'b0;
-        pte_w          = 1'b0;
-        pte_x          = 1'b0;
-        pte_u          = 1'b0;
-        pte_g          = 1'b0;
-        pte_a          = 1'b0;
-        pte_d          = 1'b0;
-        pte_n          = 1'b0;
-        pte_v          = 1'b0;
-        pbmt           = '0;
-        tlbAF          = 1'b0;
-        tlbPF          = 1'b0;
-        tlbGPF         = 1'b0;
-        pmaAF          = 1'b0;
-        asid           = 0;
-        vmid           = 0;
-        s2xlate        = 2'd0;
-        priv_mode      = '0;
-        level          = '0;
-        addr_low       = '0;
-        create_cycle   = 0;
-        last_hit_cycle = 0;
-        foreach (ppn_low[idx]) begin
-            ppn_low[idx]  = '0;
-            valididx[idx] = 1'b0;
-            pteidx[idx]   = '0;
+        lookup_key = '{default:'0};
+        s1_tag = '0; s1_asid = '0; s1_vmid = '0; s2_tag = '0; s2_vmid = '0; s2xlate = '0;
+        s1_stage_active = 1'b0; s2_stage_active = 1'b0;
+        s1_translation_mode_at_build = '0; s2_translation_mode_at_build = '0;
+        s1_pte_mode_at_build = '0; s2_pte_mode_at_build = '0;
+        s1_root_ppn_at_build = '0; s2_root_ppn_at_build = '0;
+        csr_context_seq_at_build = 0; entry_generation = 0;
+        fault_raw_s1_pf = 0; fault_raw_s1_af = 0; fault_raw_s2_gpf = 0; fault_raw_s2_gaf = 0;
+        fault_effective_s1_pf = 0; fault_effective_s1_af = 0;
+        fault_effective_s2_gpf = 0; fault_effective_s2_gaf = 0;
+        fault_stage_selected = MEMBLOCK_TLB_FAULT_STAGE_NONE; pmaAF = 0;
+        s1_entry_ppn_raw = '0; s1_resolved_ppn = '0; s1_resolved_ppn_valid = 0;
+        s1_level = '0; s1_pte_n = 0; s1_entry_pbmt = '0;
+        s1_pte_r = 0; s1_pte_w = 0; s1_pte_x = 0; s1_pte_u = 0; s1_pte_g = 0;
+        s1_pte_a = 0; s1_pte_d = 0; s1_pte_v = 0; s1_addr_low = '0;
+        s2_entry_ppn_raw = '0; s2_resolved_ppn = '0; s2_resolved_ppn_valid = 0;
+        s2_level = '0; s2_pte_n = 0; s2_entry_pbmt = '0;
+        s2_pte_r = 0; s2_pte_w = 0; s2_pte_x = 0; s2_pte_u = 0; s2_pte_g = 0;
+        s2_pte_a = 0; s2_pte_d = 0;
+        create_cycle = 0; last_hit_cycle = 0;
+        foreach (s1_ppn_low[idx]) begin
+            s1_ppn_low[idx] = '0;
+            s1_valididx[idx] = 1'b0;
+            s1_pteidx[idx] = 1'b0;
         end
     endfunction:reset
 
-    // 中文注释：把request fire时刻的live TLB entry逐字段冻结到独立对象。
-    // L2TLB pending record调用；后续sfence删除或live metadata更新不会改变已排队response。
+    function bit has_effective_fault();
+        return fault_effective_s1_pf || fault_effective_s1_af ||
+               fault_effective_s2_gpf || fault_effective_s2_gaf;
+    endfunction:has_effective_fault
+
+    // 中文注释：在 build/copy/drive 边界验证冻结的 S1 sector payload，不修改 entry。
+    function bit [43:0] get_s1_selected_canonical_ppn();
+        return {s1_entry_ppn_raw, s1_ppn_low[s1_addr_low]};
+    endfunction:get_s1_selected_canonical_ppn
+
+    function bit s1_pteidx_is_onehot();
+        int unsigned onehot_count;
+
+        onehot_count = 0;
+        foreach (s1_pteidx[idx]) begin
+            onehot_count += s1_pteidx[idx];
+        end
+        return onehot_count == 1;
+    endfunction:s1_pteidx_is_onehot
+
+    // 中文注释：检查未参与翻译的 stage 是否保持 reset 默认 payload。
+    // raw fault history 是独立 debug 数据，允许保留随机结果，不在本校验中检查。
+    function void check_inactive_stage_defaults(input string phase);
+        if (!s1_stage_active) begin
+            if (s1_tag != '0 || s1_asid != '0 || s1_vmid != '0 ||
+                s1_translation_mode_at_build != '0 || s1_root_ppn_at_build != '0 ||
+                s1_pte_mode_at_build != '0 ||
+                s1_entry_ppn_raw != '0 || s1_resolved_ppn != '0 ||
+                s1_resolved_ppn_valid || s1_level != '0 || s1_pte_n ||
+                s1_entry_pbmt != '0 || s1_pte_r || s1_pte_w || s1_pte_x ||
+                s1_pte_u || s1_pte_g || s1_pte_a || s1_pte_d || s1_pte_v ||
+                s1_addr_low != '0) begin
+                `uvm_fatal("L2TLB_INACTIVE_STAGE_PAYLOAD",
+                           $sformatf("phase=%s inactive S1 carries payload", phase))
+            end
+            foreach (s1_ppn_low[idx]) begin
+                if (s1_ppn_low[idx] != '0 || s1_valididx[idx] || s1_pteidx[idx]) begin
+                    `uvm_fatal("L2TLB_INACTIVE_STAGE_PAYLOAD",
+                               $sformatf("phase=%s inactive S1 sector=%0d carries payload", phase, idx))
+                end
+            end
+        end
+        if (!s2_stage_active &&
+            (s2_tag != '0 || s2_vmid != '0 || s2_translation_mode_at_build != '0 ||
+             s2_pte_mode_at_build != '0 ||
+             s2_root_ppn_at_build != '0 || s2_entry_ppn_raw != '0 ||
+             s2_resolved_ppn != '0 || s2_resolved_ppn_valid || s2_level != '0 ||
+             s2_pte_n || s2_entry_pbmt != '0 || s2_pte_r || s2_pte_w ||
+             s2_pte_x || s2_pte_u || s2_pte_g || s2_pte_a || s2_pte_d)) begin
+            `uvm_fatal("L2TLB_INACTIVE_STAGE_PAYLOAD",
+                       $sformatf("phase=%s inactive S2 carries payload", phase))
+        end
+    endfunction:check_inactive_stage_defaults
+
+    function void validate_s1_sector_payload_consistency(
+        input string phase,
+        input memblock_tlb_entry source = null,
+        input bit [43:0] build_canonical_ppn = '0,
+        input bit build_canonical_ppn_valid = 1'b0);
+        int unsigned onehot_count;
+        bit          superpage_or_napot;
+        bit [43:0]   expected_selected_ppn;
+
+        if (!s1_stage_active) begin
+            return;
+        end
+        superpage_or_napot = s1_level != 0 || s1_pte_n;
+        onehot_count = 0;
+        foreach (s1_pteidx[idx]) begin
+            onehot_count += s1_pteidx[idx];
+        end
+        if (onehot_count != 1 || !s1_pteidx[s1_addr_low] ||
+            !s1_valididx[s1_addr_low]) begin
+            `uvm_fatal("L2TLB_S1_SECTOR_PAYLOAD",
+                       $sformatf("phase=%s invalid sector onehot=%0d addr_low=%0d valid=%0d",
+                                 phase, onehot_count, s1_addr_low,
+                                 s1_valididx[s1_addr_low]))
+        end
+        foreach (s1_ppn_low[idx]) begin
+            bit expected_valid;
+            bit [2:0] expected_ppn_low;
+
+            expected_valid = superpage_or_napot || idx == s1_addr_low;
+            expected_ppn_low = s1_ppn_low[s1_addr_low];
+            if (s1_pteidx[idx] != (idx == s1_addr_low)) begin
+                `uvm_fatal("L2TLB_S1_SECTOR_PAYLOAD",
+                           $sformatf("phase=%s pteidx is not one-hot at idx=%0d addr_low=%0d",
+                                     phase, idx, s1_addr_low))
+            end
+            if (s1_valididx[idx] != expected_valid) begin
+                `uvm_fatal("L2TLB_S1_SECTOR_PAYLOAD",
+                           $sformatf("phase=%s valididx shape mismatch idx=%0d got=%0d expected=%0d level=%0d n=%0d",
+                                     phase, idx, s1_valididx[idx], expected_valid,
+                                     s1_level, s1_pte_n))
+            end
+            if (expected_valid && s1_ppn_low[idx] != expected_ppn_low) begin
+                `uvm_fatal("L2TLB_S1_SECTOR_PAYLOAD",
+                           $sformatf("phase=%s split PPN drift idx=%0d got=0x%0h expected=0x%0h level=%0d n=%0d",
+                                     phase, idx, s1_ppn_low[idx], expected_ppn_low,
+                                     s1_level, s1_pte_n))
+            end
+            if (!expected_valid && s1_ppn_low[idx] != '0) begin
+                `uvm_fatal("L2TLB_S1_SECTOR_PAYLOAD",
+                           $sformatf("phase=%s invalid sector carries ppn_low idx=%0d value=0x%0h",
+                                     phase, idx, s1_ppn_low[idx]))
+            end
+        end
+        if (build_canonical_ppn_valid) begin
+            expected_selected_ppn = build_canonical_ppn;
+            if (get_s1_selected_canonical_ppn() != expected_selected_ppn) begin
+                `uvm_fatal("L2TLB_S1_SECTOR_PAYLOAD",
+                           $sformatf("phase=%s selected split PPN mismatch encoded=0x%0h expected=0x%0h addr_low=%0d",
+                                     phase,
+                                     get_s1_selected_canonical_ppn(),
+                                     expected_selected_ppn,
+                                     s1_addr_low))
+            end
+        end
+        if (source != null) begin
+            if (s1_addr_low != source.s1_addr_low ||
+                s1_entry_ppn_raw != source.s1_entry_ppn_raw) begin
+                `uvm_fatal("L2TLB_S1_SECTOR_PAYLOAD",
+                           $sformatf("phase=%s snapshot sector payload drift", phase))
+            end
+            foreach (s1_ppn_low[idx]) begin
+                if (s1_ppn_low[idx] != source.s1_ppn_low[idx] ||
+                    s1_valididx[idx] != source.s1_valididx[idx] ||
+                    s1_pteidx[idx] != source.s1_pteidx[idx]) begin
+                    `uvm_fatal("L2TLB_S1_SECTOR_PAYLOAD",
+                               $sformatf("phase=%s snapshot sector payload drift at idx=%0d",
+                                         phase, idx))
+                end
+            end
+        end
+    endfunction:validate_s1_sector_payload_consistency
+
+    // 中文注释：pending/UID 只能经本函数取得 live entry 的逐字段冻结副本。
+    // 复制完成立即检查 sector one-hot 和 split PPN，禁止在 driver 或 UID 回填时重随机。
     function void copy_from(input memblock_tlb_entry source);
         if (source == null) begin
             `uvm_fatal("TLB_ENTRY", "copy_from got null source")
         end
-        lookup_key = source.lookup_key;
-        vaddr = source.vaddr;
-        paddr = source.paddr;
-        vpn = source.vpn;
-        ppn = source.ppn;
-        pte_r = source.pte_r;
-        pte_w = source.pte_w;
-        pte_x = source.pte_x;
-        pte_u = source.pte_u;
-        pte_g = source.pte_g;
-        pte_a = source.pte_a;
-        pte_d = source.pte_d;
-        pte_n = source.pte_n;
-        pte_v = source.pte_v;
-        pbmt = source.pbmt;
-        tlbAF = source.tlbAF;
-        tlbPF = source.tlbPF;
-        tlbGPF = source.tlbGPF;
-        pmaAF = source.pmaAF;
-        asid = source.asid;
-        vmid = source.vmid;
-        s2xlate = source.s2xlate;
-        priv_mode = source.priv_mode;
-        level = source.level;
-        addr_low = source.addr_low;
-        create_cycle = source.create_cycle;
+        source.check_inactive_stage_defaults("COPY_SOURCE");
+        source.validate_s1_sector_payload_consistency("COPY_SOURCE");
+        lookup_key = source.lookup_key; s1_tag = source.s1_tag; s1_asid = source.s1_asid;
+        s1_vmid = source.s1_vmid; s2_tag = source.s2_tag; s2_vmid = source.s2_vmid;
+        s2xlate = source.s2xlate; s1_stage_active = source.s1_stage_active;
+        s2_stage_active = source.s2_stage_active;
+        s1_translation_mode_at_build = source.s1_translation_mode_at_build;
+        s2_translation_mode_at_build = source.s2_translation_mode_at_build;
+        s1_pte_mode_at_build = source.s1_pte_mode_at_build;
+        s2_pte_mode_at_build = source.s2_pte_mode_at_build;
+        s1_root_ppn_at_build = source.s1_root_ppn_at_build;
+        s2_root_ppn_at_build = source.s2_root_ppn_at_build;
+        csr_context_seq_at_build = source.csr_context_seq_at_build;
+        entry_generation = source.entry_generation;
+        fault_raw_s1_pf = source.fault_raw_s1_pf; fault_raw_s1_af = source.fault_raw_s1_af;
+        fault_raw_s2_gpf = source.fault_raw_s2_gpf; fault_raw_s2_gaf = source.fault_raw_s2_gaf;
+        fault_effective_s1_pf = source.fault_effective_s1_pf;
+        fault_effective_s1_af = source.fault_effective_s1_af;
+        fault_effective_s2_gpf = source.fault_effective_s2_gpf;
+        fault_effective_s2_gaf = source.fault_effective_s2_gaf;
+        fault_stage_selected = source.fault_stage_selected; pmaAF = source.pmaAF;
+        s1_entry_ppn_raw = source.s1_entry_ppn_raw; s1_resolved_ppn = source.s1_resolved_ppn;
+        s1_resolved_ppn_valid = source.s1_resolved_ppn_valid; s1_level = source.s1_level;
+        s1_pte_n = source.s1_pte_n; s1_entry_pbmt = source.s1_entry_pbmt;
+        s1_pte_r = source.s1_pte_r; s1_pte_w = source.s1_pte_w; s1_pte_x = source.s1_pte_x;
+        s1_pte_u = source.s1_pte_u; s1_pte_g = source.s1_pte_g; s1_pte_a = source.s1_pte_a;
+        s1_pte_d = source.s1_pte_d; s1_pte_v = source.s1_pte_v; s1_addr_low = source.s1_addr_low;
+        s2_entry_ppn_raw = source.s2_entry_ppn_raw; s2_resolved_ppn = source.s2_resolved_ppn;
+        s2_resolved_ppn_valid = source.s2_resolved_ppn_valid; s2_level = source.s2_level;
+        s2_pte_n = source.s2_pte_n; s2_entry_pbmt = source.s2_entry_pbmt;
+        s2_pte_r = source.s2_pte_r; s2_pte_w = source.s2_pte_w; s2_pte_x = source.s2_pte_x;
+        s2_pte_u = source.s2_pte_u; s2_pte_g = source.s2_pte_g; s2_pte_a = source.s2_pte_a;
+        s2_pte_d = source.s2_pte_d; create_cycle = source.create_cycle;
         last_hit_cycle = source.last_hit_cycle;
-        foreach (ppn_low[idx]) begin
-            ppn_low[idx] = source.ppn_low[idx];
-            valididx[idx] = source.valididx[idx];
-            pteidx[idx] = source.pteidx[idx];
+        foreach (s1_ppn_low[idx]) begin
+            s1_ppn_low[idx] = source.s1_ppn_low[idx];
+            s1_valididx[idx] = source.s1_valididx[idx];
+            s1_pteidx[idx] = source.s1_pteidx[idx];
         end
+        check_inactive_stage_defaults("COPY");
+        validate_s1_sector_payload_consistency("COPY", source);
     endfunction:copy_from
-
-    function void update_addr_fields(input bit [63:0] vaddr_i, input bit [63:0] paddr_i);
-        vaddr = vaddr_i;
-        paddr = paddr_i;
-        vpn   = vaddr_i[63:12];
-        ppn   = paddr_i[63:12];
-        addr_low = vaddr_i[14:12];
-        derive_index_fields();
-    endfunction:update_addr_fields
-
-    function void apply_csr_state(input mmu_csr_runtime_state csr_state,
-                                  input bit [1:0] s2xlate_i);
-        if (csr_state == null) begin
-            `uvm_fatal("TLB_ENTRY", "apply_csr_state got null csr_state")
-        end
-        s2xlate    = s2xlate_i;
-        lookup_key = csr_state.make_lookup_key(vpn, s2xlate_i);
-        asid       = lookup_key.asid;
-        vmid       = lookup_key.vmid;
-        priv_mode  = csr_state.current_priv_mode(1'b1);
-    endfunction:apply_csr_state
-
-    function void derive_index_fields();
-        for (int unsigned idx = 0; idx < 8; idx++) begin
-            valididx[idx] = 1'b0;
-            pteidx[idx]   = idx[2:0];
-            ppn_low[idx]  = ppn[2:0] + idx[2:0];
-        end
-        valididx[addr_low] = 1'b1;
-        level = choose_level();
-    endfunction:derive_index_fields
-
-    function bit [1:0] choose_level();
-        int unsigned mode;
-        int unsigned low;
-        int unsigned high;
-        int unsigned pick;
-        int unsigned fixed_level;
-
-        mode = seq_csr_common::get_tlb_level_mode();
-        case (mode)
-            MEMBLOCK_TLB_LEVEL_FIXED: begin
-                fixed_level = seq_csr_common::get_tlb_level_fixed_value();
-                return fixed_level[1:0];
-            end
-            MEMBLOCK_TLB_LEVEL_RANDOM: begin
-                low  = seq_csr_common::get_tlb_level_random_low();
-                high = seq_csr_common::get_tlb_level_random_high();
-                pick = $urandom_range(high, low);
-                return pick[1:0];
-            end
-            MEMBLOCK_TLB_LEVEL_DERIVED: begin
-                // Keep current behavior simple: default derive path still maps to base page level.
-                return addr_low[2] ? 2'd1 : 2'd0;
-            end
-            default: begin
-                return 2'd0;
-            end
-        endcase
-    endfunction:choose_level
-
-    function bit choose_weighted_bit(input int unsigned one_wt,
-                                     input int unsigned zero_wt);
-        int unsigned total;
-        int unsigned pick;
-
-        total = one_wt + zero_wt;
-        if (total == 0) begin
-            `uvm_fatal("TLB_ENTRY", "choose_weighted_bit got all-zero weights")
-        end
-        pick = $urandom_range(total - 1, 0);
-        return pick < one_wt;
-    endfunction:choose_weighted_bit
-
-    function void apply_pte_profile(input memblock_tlb_access_e access_kind = MEMBLOCK_TLB_ACCESS_UNKNOWN);
-        case (seq_csr_common::get_tlb_pte_mode())
-            MEMBLOCK_TLB_PTE_MODE_LEGAL: begin
-                // Legal mode keeps the random weights as-is, then relies on fixup for consistency.
-            end
-            MEMBLOCK_TLB_PTE_MODE_MIXED: begin
-                // Mixed mode keeps some suspicious combinations alive for coverage, while still
-                // allowing later fixup to enforce minimal consistency only.
-                if (!pte_v) begin
-                    pte_a = 1'b0;
-                    pte_d = 1'b0;
-                end
-            end
-            MEMBLOCK_TLB_PTE_MODE_EXCEPTION_BIASED: begin
-                if (access_kind == MEMBLOCK_TLB_ACCESS_STORE) begin
-                    pte_a = choose_weighted_bit(1, 3);
-                    pte_d = choose_weighted_bit(1, 4);
-                end else begin
-                    pte_a = choose_weighted_bit(1, 4);
-                    pte_d = 1'b0;
-                end
-                if (!pte_v) begin
-                    pte_a = 1'b0;
-                    pte_d = 1'b0;
-                end
-            end
-            default: begin
-            end
-        endcase
-    endfunction:apply_pte_profile
-
-    function void derive_ad_bits(input memblock_tlb_access_e access_kind = MEMBLOCK_TLB_ACCESS_UNKNOWN);
-        if (!pte_v) begin
-            pte_a = 1'b0;
-            pte_d = 1'b0;
-            return;
-        end
-        if (access_kind == MEMBLOCK_TLB_ACCESS_UNKNOWN) begin
-            pte_a = 1'b1;
-            pte_d = 1'b1;
-            return;
-        end
-        if (!pte_a) begin
-            pte_d = 1'b0;
-            return;
-        end
-        case (access_kind)
-            MEMBLOCK_TLB_ACCESS_STORE: begin
-                pte_d = pte_d && pte_w;
-            end
-            MEMBLOCK_TLB_ACCESS_LOAD: begin
-                pte_d = 1'b0;
-            end
-            default: begin
-                pte_d = pte_d && pte_w;
-            end
-        endcase
-    endfunction:derive_ad_bits
-
-    function void fixup_pte_legal(input memblock_tlb_access_e access_kind = MEMBLOCK_TLB_ACCESS_UNKNOWN);
-        int unsigned pte_mode;
-
-        pte_mode = seq_csr_common::get_tlb_pte_mode();
-        apply_pte_profile(access_kind);
-        if (!pte_v) begin
-            if (pte_mode == MEMBLOCK_TLB_PTE_MODE_LEGAL) begin
-                pte_r = 1'b0;
-                pte_w = 1'b0;
-                pte_x = 1'b0;
-            end
-            derive_ad_bits(access_kind);
-            return;
-        end
-        if (pte_mode == MEMBLOCK_TLB_PTE_MODE_LEGAL) begin
-            if (pte_w && !pte_r) begin
-                pte_r = 1'b1;
-            end
-            if (!(pte_r || pte_w || pte_x)) begin
-                pte_r = 1'b1;
-            end
-        end
-        derive_ad_bits(access_kind);
-    endfunction:fixup_pte_legal
 
 endclass:memblock_tlb_entry
 
 class memblock_uid_tlb_record extends uvm_object;
-
     typedef enum int unsigned {
-        MEMBLOCK_UID_TLB_RECORD_STATE_UNBOUND  = 0,
-        MEMBLOCK_UID_TLB_RECORD_STATE_WAITING  = 1,
-        MEMBLOCK_UID_TLB_RECORD_STATE_COMPLETED = 2,
-        MEMBLOCK_UID_TLB_RECORD_STATE_CANCELED = 3
-    } memblock_uid_tlb_record_state_e;
+        MEMBLOCK_UID_TLB_WAITING   = 0,
+        MEMBLOCK_UID_TLB_COMPLETED = 1,
+        MEMBLOCK_UID_TLB_CANCELED  = 2
+    } memblock_uid_tlb_wait_state_e;
 
     memblock_uid_t uid;
-    bit            record_valid;
-    bit            pte_valid;
-    // 中文注释：lifecycle 只补 UID 级 TLB 账本，不替代 record_valid/pte_valid 兼容语义。
-    // request_fire_* 只记录真实 fire 证据，便于按 key/sample 追踪 WAITING/COMPLETED/CANCELED。
-    memblock_uid_tlb_record_state_e lifecycle_state;
-    bit            request_fire_valid;
-    longint unsigned request_fire_sample_seq;
-    bit [51:0]     vpn;
-    bit [1:0]      s2xlate;
-    bit            is_hypervisor_inst;
-    int unsigned   asid;
-    int unsigned   vmid;
+    bit record_valid;
+    bit pte_valid;
+    bit [51:0] vpn;
+    bit [1:0] s2xlate;
+    bit is_hypervisor_inst;
     memblock_tlb_lookup_key_t lookup_key;
-    mmu_csr_runtime_state     csr_snapshot;
-
-    bit [63:0] paddr;
-    bit [63:0] ppn;
-    bit pte_r;
-    bit pte_w;
-    bit pte_x;
-    bit pte_u;
-    bit pte_g;
-    bit pte_a;
-    bit pte_d;
-    bit pte_n;
-    bit pte_v;
-    bit [1:0] pbmt;
-    bit tlbAF;
-    bit tlbPF;
-    bit tlbGPF;
-    bit pmaAF;
-    bit [1:0] level;
-
-    longint unsigned issue_cycle;
+    mmu_csr_runtime_state csr_snapshot;
+    // 中文注释：每次真实 issue 建立新的 WAITING epoch；response 或 flush/reset 只转换
+    // 当前状态，不能以 pte_valid=0 让历史 record 自动重新等待。
+    int unsigned uid_tlb_wait_epoch;
+    memblock_uid_tlb_wait_state_e uid_tlb_wait_state;
+    longint unsigned uid_wait_start_sample_seq;
+    longint unsigned uid_tlb_first_request_fire_sample_seq;
     longint unsigned pte_update_cycle;
+    memblock_tlb_entry payload;
+    bit request_derived_valid;
+    bit [43:0] request_s1_resolved_ppn;
+    bit [43:0] request_s2_resolved_ppn;
+    bit [51:0] request_gvpn;
 
     `uvm_object_utils(memblock_uid_tlb_record)
 
     function new(string name = "memblock_uid_tlb_record");
         super.new(name);
         csr_snapshot = mmu_csr_runtime_state::type_id::create({name, "_csr_snapshot"});
+        payload = memblock_tlb_entry::type_id::create({name, "_payload"});
         reset();
     endfunction:new
 
     function void reset();
-        uid                = 0;
-        record_valid       = 1'b0;
-        pte_valid          = 1'b0;
-        lifecycle_state    = MEMBLOCK_UID_TLB_RECORD_STATE_UNBOUND;
-        request_fire_valid = 1'b0;
-        request_fire_sample_seq = 0;
-        vpn                = '0;
-        s2xlate            = 2'd0;
-        is_hypervisor_inst = 1'b0;
-        asid               = 0;
-        vmid               = 0;
-        lookup_key         = '{default:'0};
-        if (csr_snapshot == null) begin
-            csr_snapshot = mmu_csr_runtime_state::type_id::create("csr_snapshot");
-        end
-        csr_snapshot.reset();
-        paddr              = '0;
-        ppn                = '0;
-        pte_r              = 1'b0;
-        pte_w              = 1'b0;
-        pte_x              = 1'b0;
-        pte_u              = 1'b0;
-        pte_g              = 1'b0;
-        pte_a              = 1'b0;
-        pte_d              = 1'b0;
-        pte_n              = 1'b0;
-        pte_v              = 1'b0;
-        pbmt               = '0;
-        tlbAF              = 1'b0;
-        tlbPF              = 1'b0;
-        tlbGPF             = 1'b0;
-        pmaAF              = 1'b0;
-        level              = '0;
-        issue_cycle        = 0;
-        pte_update_cycle   = 0;
+        uid = 0; record_valid = 0; pte_valid = 0; vpn = '0; s2xlate = '0;
+        is_hypervisor_inst = 0; lookup_key = '{default:'0};
+        if (csr_snapshot == null) csr_snapshot = mmu_csr_runtime_state::type_id::create("csr_snapshot");
+        if (payload == null) payload = memblock_tlb_entry::type_id::create("payload");
+        csr_snapshot.reset(); payload.reset(); uid_tlb_wait_epoch = 0;
+        uid_tlb_wait_state = MEMBLOCK_UID_TLB_CANCELED;
+        uid_wait_start_sample_seq = 0; uid_tlb_first_request_fire_sample_seq = 0;
+        pte_update_cycle = 0; request_derived_valid = 0; request_s1_resolved_ppn = '0;
+        request_s2_resolved_ppn = '0; request_gvpn = '0;
     endfunction:reset
 
     function void init_context(input memblock_uid_t uid_i,
                                input bit [51:0] vpn_i,
                                input bit [1:0] s2xlate_i,
                                input bit is_hypervisor_inst_i,
-                               input mmu_csr_runtime_state csr_snapshot_i);
-        if (csr_snapshot_i == null) begin
-            `uvm_fatal("UID_TLB_RECORD", "init_context got null csr_snapshot")
+                               input mmu_csr_runtime_state csr_snapshot_i,
+                               input longint unsigned sample_seq_i);
+        if (csr_snapshot_i == null || sample_seq_i == 0) begin
+            `uvm_fatal("UID_TLB_RECORD", "init_context needs valid CSR and sample sequence")
         end
-        uid                = uid_i;
-        record_valid       = 1'b1;
-        pte_valid          = 1'b0;
-        lifecycle_state    = MEMBLOCK_UID_TLB_RECORD_STATE_UNBOUND;
-        request_fire_valid = 1'b0;
-        request_fire_sample_seq = 0;
-        vpn                = vpn_i;
-        s2xlate            = s2xlate_i;
-        is_hypervisor_inst = is_hypervisor_inst_i;
-        csr_snapshot.copy_from(csr_snapshot_i);
-        lookup_key         = csr_snapshot.make_lookup_key(vpn_i, s2xlate_i);
-        asid               = lookup_key.asid;
-        vmid               = lookup_key.vmid;
-        issue_cycle        = memblock_sync_pkg::get_dispatch_service_cycle();
-        pte_update_cycle   = 0;
+        if (uid_tlb_wait_epoch == '1) begin
+            `uvm_fatal("UID_TLB_RECORD", "uid_tlb_wait_epoch overflow")
+        end
+        uid = uid_i; record_valid = 1; pte_valid = 0; vpn = vpn_i; s2xlate = s2xlate_i;
+        is_hypervisor_inst = is_hypervisor_inst_i; csr_snapshot.copy_from(csr_snapshot_i);
+        lookup_key = csr_snapshot.make_lookup_key(vpn_i, s2xlate_i);
+        uid_tlb_wait_epoch++; uid_tlb_wait_state = MEMBLOCK_UID_TLB_WAITING;
+        uid_wait_start_sample_seq = sample_seq_i; uid_tlb_first_request_fire_sample_seq = 0;
+        pte_update_cycle = 0; request_derived_valid = 0; request_s1_resolved_ppn = '0;
+        request_s2_resolved_ppn = '0; request_gvpn = '0;
     endfunction:init_context
 
     function void copy_entry_fields(input memblock_tlb_entry entry);
-        if (entry == null) begin
-            `uvm_fatal("UID_TLB_RECORD", "copy_entry_fields got null entry")
+        if (entry == null || !is_waiting()) begin
+            `uvm_fatal("UID_TLB_RECORD", "copy_entry_fields requires a WAITING record and entry")
         end
-        // Keep the UID request context intact.  A response entry is keyed by
-        // the request that produced it, while a later raw hit may complete a
-        // different same-shape UID under response-visible CSR context.
-        paddr            = entry.paddr;
-        ppn              = entry.ppn;
-        pte_r            = entry.pte_r;
-        pte_w            = entry.pte_w;
-        pte_x            = entry.pte_x;
-        pte_u            = entry.pte_u;
-        pte_g            = entry.pte_g;
-        pte_a            = entry.pte_a;
-        pte_d            = entry.pte_d;
-        pte_n            = entry.pte_n;
-        pte_v            = entry.pte_v;
-        pbmt             = entry.pbmt;
-        tlbAF            = entry.tlbAF;
-        tlbPF            = entry.tlbPF;
-        tlbGPF           = entry.tlbGPF;
-        pmaAF            = entry.pmaAF;
-        level            = entry.level;
-        // Payload copying is deliberately separate from the UID lifecycle
-        // transition.  The response owner marks a record COMPLETED only
-        // after it has proved that the record was WAITING and really fired.
-        pte_valid        = 1'b1;
+        payload.copy_from(entry);
         pte_update_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
     endfunction:copy_entry_fields
 
     function void mark_request_fire(input longint unsigned sample_seq_i);
-        request_fire_valid       = 1'b1;
-        request_fire_sample_seq  = sample_seq_i;
-        lifecycle_state          = MEMBLOCK_UID_TLB_RECORD_STATE_WAITING;
+        if (!is_waiting() || sample_seq_i == 0) begin
+            `uvm_fatal("UID_TLB_RECORD", "mark_request_fire requires WAITING record and sample")
+        end
+        if (uid_tlb_first_request_fire_sample_seq == 0) begin
+            uid_tlb_first_request_fire_sample_seq = sample_seq_i;
+        end
     endfunction:mark_request_fire
 
     function void mark_completed();
-        lifecycle_state = MEMBLOCK_UID_TLB_RECORD_STATE_COMPLETED;
+        if (!is_waiting()) `uvm_fatal("UID_TLB_RECORD", "only WAITING record can complete")
+        uid_tlb_wait_state = MEMBLOCK_UID_TLB_COMPLETED;
+        pte_valid = 1'b1;
     endfunction:mark_completed
 
     function void mark_canceled();
-        if (lifecycle_state == MEMBLOCK_UID_TLB_RECORD_STATE_WAITING) begin
-            lifecycle_state = MEMBLOCK_UID_TLB_RECORD_STATE_CANCELED;
+        if (is_waiting()) begin
+            uid_tlb_wait_state = MEMBLOCK_UID_TLB_CANCELED;
+            pte_valid = 1'b0;
         end
     endfunction:mark_canceled
 
     function bit is_waiting();
-        return record_valid &&
-               lifecycle_state == MEMBLOCK_UID_TLB_RECORD_STATE_WAITING;
+        return record_valid && uid_tlb_wait_state == MEMBLOCK_UID_TLB_WAITING;
     endfunction:is_waiting
-
 endclass:memblock_uid_tlb_record
 
 `endif

@@ -79,7 +79,7 @@ driver、flush hold、UID 历史或 DCache memory model。
 `hv=1` 路径读取消费时的 `mmu_csr_state.hgatp_vmid`，CSR 切换后可能按错误 VMID 删除 entry。
 
 本 plan 将匹配真源改为已经在
-`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md` 规定的两套字段：
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md` 规定的两套字段：
 
 ```text
 S1 matcher：s1_tag / s1_level / s1_pte_n / s1_valididx[] /

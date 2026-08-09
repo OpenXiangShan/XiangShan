@@ -447,10 +447,10 @@ inactive fail-fast 在正常 smoke 中未触发；B1 的 epoch-0 路径在 base 
 结果有效。VCS 日志中的 `KDB-OPTIONS`、默认 sequence `UVM_WARNING` 和远端临时目录清理提示未产生
 `UVM_ERROR/UVM_FATAL`，不影响本专项通过。
 
-本阶段不宣称以下两个 undo plan 已完成：
+本阶段不评价以下相邻专项的功能完成度：
 
-- `mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`：payload builder、独立 S1/S2 fault/permission/
-  level/PPN 仍需专项实现。
+- `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`：payload builder、独立
+  S1/S2 fault/permission/level/PPN 已由其自身专项实现并归档；本 timing review 不把该实现重新计入本阶段。
 - `mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`：range index、NAPOT coverage rank 和重叠 candidate
   仲裁仍需专项实现。
 

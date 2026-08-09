@@ -36,7 +36,7 @@
 本 plan 已归档，继续保留已落地的 request token、pending queue、latency/reorder、response sample、
 flush/reset 和 lifecycle owner 的历史实现说明。它不再定义后续 response payload 的 coding 规则。
 
-`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`
 是 S1/S2 response data model 的唯一权威，覆盖字段命名、fault、PPN、permission、PBMT、sector payload、
 snapshot copy 和 driver 映射。本 plan 中所有“共享 `entry.pte_*` 同时填 S1/S2”及由此派生的 response
 payload 描述仅保留为归档历史，不能作为新 coding 的实现依据。

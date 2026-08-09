@@ -28,11 +28,15 @@ response:
   _inner_ptw_io_tlb_1_resp_*
 ```
 
-其中 `_inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_g/u` 必须由
-`L2TLB_agent` 的 transaction/sequence 真实驱动。当前实现链路为：
+其中 `_inner_ptw_io_tlb_1_resp_bits_s1_entry_perm_g/u` 与
+`_inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_g/u` 必须由 `L2TLB_agent` 的
+transaction/sequence 按 stage 独立真实驱动。当前实现链路为：
 
 ```text
-memblock_tlb_entry.pte_g/pte_u
+memblock_tlb_entry.s1_pte_g/s1_pte_u
+  -> memblock_l2tlb_base_sequence::fill_dtlb_resp_from_entry()
+  -> L2tlb_agent_agent_xaction.io_ptw_resp_bits_s1_entry_perm_g/u
+memblock_tlb_entry.s2_pte_g/s2_pte_u
   -> memblock_l2tlb_base_sequence::fill_dtlb_resp_from_entry()
   -> L2tlb_agent_agent_xaction.io_ptw_resp_bits_s2_entry_perm_g/u
   -> L2tlb_agent_agent_driver / L2tlb_agent_agent_interface
@@ -41,7 +45,8 @@ memblock_tlb_entry.pte_g/pte_u
 ```
 
 不得在 `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN=1` 的 active 接管路径中把
-`s2_entry_perm_g/u` 固定为常量 0。
+任一 active stage 的 `entry_perm_g/u` 固定为常量 0；S2 response 没有 `entry_v`，
+也不得新增或驱动不存在的 S2 V 字段。
 
 ## 多 Outstanding 与 Response 次序
 

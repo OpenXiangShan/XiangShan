@@ -28,6 +28,9 @@ class memblock_l2tlb_pending_req extends uvm_object;
     mmu_csr_runtime_state csr_snapshot;
     memblock_tlb_lookup_key_t lookup_key;
     memblock_tlb_entry entry_snapshot;
+    // 中文注释：该 generation 与 snapshot 同源，标识本 token 命中的 live entry 时代。
+    // response 完成、flush 或 driver 重试都不能从 live table 重新读取或改写它。
+    longint unsigned pending_entry_generation;
     L2tlb_agent_agent_xaction resp_tr;
     // 中文注释：accept/due序号定义最早response边界；complete允许因端口竞争晚于due。
     longint unsigned accept_sample_seq;
@@ -36,6 +39,12 @@ class memblock_l2tlb_pending_req extends uvm_object;
     longint unsigned due_sample_seq;
     // 中文注释：接受request时已观察到的flush event版本；新event只取消更旧版本的pending。
     longint unsigned accept_flush_event_seq;
+    // Request-specific normal-translation debug state.  It is derived from
+    // this token's frozen snapshot, not from a later live-table lookup.
+    bit request_derived_valid;
+    bit [43:0] request_s1_resolved_ppn;
+    bit [43:0] request_s2_resolved_ppn;
+    bit [51:0] request_gvpn;
 
     `uvm_object_utils(memblock_l2tlb_pending_req)
 
@@ -47,12 +56,17 @@ class memblock_l2tlb_pending_req extends uvm_object;
         csr_snapshot = null;
         lookup_key = '{default:'0};
         entry_snapshot = null;
+        pending_entry_generation = 0;
         resp_tr = null;
         accept_sample_seq = 0;
         latency_bucket = L2TLB_LATENCY_1C;
         min_latency = 1;
         due_sample_seq = 0;
         accept_flush_event_seq = 0;
+        request_derived_valid = 1'b0;
+        request_s1_resolved_ppn = '0;
+        request_s2_resolved_ppn = '0;
+        request_gvpn = '0;
     endfunction:new
 endclass:memblock_l2tlb_pending_req
 
@@ -102,7 +116,7 @@ class memblock_l2tlb_base_sequence extends L2tlb_agent_agent_default_sequence;
     longint unsigned accept_hold_until_sample;
     bit acceptance_opened_since_reset;
     // 中文注释：reset或flush hold解除后，必须至少发出一拍可接受ready，
-    // 才允许idle-stop重新计数；该标志与reset freshness独立维护。
+    // 才允许no-progress诊断重新计数；该标志与reset freshness独立维护。
     bit ready_opportunity_since_lifecycle_block;
     bit csr_snapshot_valid;
     // 中文注释：DUT reset后必须等待CSR monitor发布一个更新的runtime snapshot sequence。
@@ -336,10 +350,12 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
     memblock_sync_pkg::dispatch_raw_csr_t ignored_runtime_csr;
     memblock_sync_pkg::dispatch_raw_csr_t request_csr_raw;
     int unsigned latest_runtime_csr_seq;
+    int unsigned release_waiting_count;
 
     has_progress = 1'b0;
     should_exit = 1'b0;
     terminal_kind = memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_CONSUMED;
+    release_waiting_count = 0;
     sample_seq = sample.dut_sample_seq;
     current_sample_reset_epoch = sample.sampled_reset_epoch;
     sampled_req_valid = sample.sampled_req_valid;
@@ -633,22 +649,37 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
         outstanding_count() != 0 || !acceptance_opened_since_reset ||
         !ready_opportunity_since_lifecycle_block) begin
         idle_count = 0;
-    end else begin
+    end else if (idle_count < idle_stop_cycle) begin
         idle_count++;
-        if (idle_count >= idle_stop_cycle) begin
-            stopping = 1'b1;
-            `uvm_info(get_type_name(),
-                      $sformatf("L2TLB responder idle-stop at sample=%0d idle_count=%0d",
-                                sample_seq, idle_count),
-                      UVM_LOW)
+        if (idle_count == idle_stop_cycle) begin
+            // idle threshold is only a diagnostic watchdog.  Closing
+            // admission here could leave a still-active dispatch flow without
+            // an L2TLB responder; only global_stop_requested may set stopping.
+            `uvm_warning(get_type_name(),
+                         $sformatf("L2TLB responder no-progress diagnostic at sample=%0d idle_count=%0d; keep owner active until global stop",
+                                   sample_seq, idle_count))
         end
     end
 
     if (release_close_requested &&
         memblock_sync_pkg::l2tlb_release_admission_closed &&
         !final_item_sent && outstanding_count() == 0 &&
-        !data.has_waiting_uid_tlb_record() &&
         barrier_q.size() == 0) begin
+        // An issue-time UID record is only a candidate until the responder
+        // observes its real request fire.  Once admission is closed and all
+        // transport work is drained, marker==0 proves that this UID took a
+        // DTLB-hit/Bare path and has no L2TLB response to wait for.
+        void'(data.cancel_unbound_uid_tlb_records_at_release(
+            "admission cutoff reached without L2TLB request fire"));
+        // At this point no token or barrier can produce another UID payload.
+        // Make any remaining WAITING instance a diagnosable lifecycle error;
+        // do not spin until the global UVM timeout.
+        data.check_l2tlb_release_uid_waiting(release_waiting_count);
+        if (release_waiting_count != 0) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("L2TLB release has %0d unresolved WAITING UID instance(s)",
+                                 release_waiting_count))
+        end
         memblock_sync_pkg::mark_l2tlb_response_drain_done(lifecycle_owner_name);
         cycle_tr = create_l2tlb_xaction($sformatf("l2tlb_release_final_%0d", sample_seq));
         stamp_lifecycle_item(cycle_tr,
@@ -736,6 +767,9 @@ function void memblock_l2tlb_base_sequence::configure_from_plus();
     resp_mid_wt = seq_csr_common::get_l2tlb_resp_mid_wt();
     resp_long_wt = seq_csr_common::get_l2tlb_resp_long_wt();
     idle_stop_cycle = seq_csr_common::get_l2tlb_idle_stop_cycle();
+    // The parameters have already been snapshotted by seq_csr_common::init;
+    // repeat the pure validation before this owner can make ready visible.
+    seq_csr_common::check_l2tlb_payload_weight_cfg();
 endfunction:configure_from_plus
 
 function void memblock_l2tlb_base_sequence::ensure_context();
@@ -1000,6 +1034,24 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
         `uvm_fatal(get_type_name(), "failed to create request-time L2TLB entry snapshot")
     end
     pending.entry_snapshot.copy_from(live_entry);
+    pending.pending_entry_generation = pending.entry_snapshot.entry_generation;
+    if (pending.pending_entry_generation == 0 ||
+        pending.pending_entry_generation != live_entry.entry_generation) begin
+        `uvm_fatal(get_type_name(), "L2TLB pending entry generation is not frozen from live entry")
+    end
+    // Derived addresses belong to this request, not to the first lookup that
+    // created the live entry.  In particular, a superpage/NAPOT response may
+    // raw-hit a different waiting VPN; derive it from that request's frozen
+    // VPN/GVPN and the request-visible CSR snapshot.
+    data.derive_tlb_request_fields(
+        pending.entry_snapshot,
+        {14'b0, pending.vpn},
+        pending.s2xlate,
+        pending.csr_snapshot,
+        pending.request_derived_valid,
+        pending.request_s1_resolved_ppn,
+        pending.request_s2_resolved_ppn,
+        pending.request_gvpn);
     pending.resp_tr = create_l2tlb_xaction(
         $sformatf("l2tlb_resp_token_%0d", pending.request_token));
     pending.resp_tr.io_ptw_req_0_valid = 1'b1;
@@ -1313,64 +1365,60 @@ function void memblock_l2tlb_base_sequence::fill_dtlb_resp_from_entry(input memb
 
     resp.io_ptw_resp_valid = 1'b1;
     resp.io_ptw_resp_bits_s2xlate = entry.s2xlate;
-    resp.io_ptw_resp_bits_s1_entry_tag = entry.lookup_key.vpn[34:0];
-    resp.io_ptw_resp_bits_s1_entry_asid = entry.asid[15:0];
-    resp.io_ptw_resp_bits_s1_entry_vmid = entry.vmid[13:0];
-    resp.io_ptw_resp_bits_s1_entry_n = entry.pte_n;
-    resp.io_ptw_resp_bits_s1_entry_pbmt = entry.pbmt;
-    resp.io_ptw_resp_bits_s1_entry_perm_d = entry.pte_d;
-    resp.io_ptw_resp_bits_s1_entry_perm_a = entry.pte_a;
-    resp.io_ptw_resp_bits_s1_entry_perm_g = entry.pte_g;
-    resp.io_ptw_resp_bits_s1_entry_perm_u = entry.pte_u;
-    resp.io_ptw_resp_bits_s1_entry_perm_x = entry.pte_x;
-    resp.io_ptw_resp_bits_s1_entry_perm_w = entry.pte_w;
-    resp.io_ptw_resp_bits_s1_entry_perm_r = entry.pte_r;
-    resp.io_ptw_resp_bits_s1_entry_level = entry.level;
-    resp.io_ptw_resp_bits_s1_entry_v = entry.pte_v;
-    resp.io_ptw_resp_bits_s1_entry_ppn = entry.ppn[40:0];
-    resp.io_ptw_resp_bits_s1_addr_low = entry.addr_low;
-    resp.io_ptw_resp_bits_s1_ppn_low_0 = entry.ppn_low[0];
-    resp.io_ptw_resp_bits_s1_ppn_low_1 = entry.ppn_low[1];
-    resp.io_ptw_resp_bits_s1_ppn_low_2 = entry.ppn_low[2];
-    resp.io_ptw_resp_bits_s1_ppn_low_3 = entry.ppn_low[3];
-    resp.io_ptw_resp_bits_s1_ppn_low_4 = entry.ppn_low[4];
-    resp.io_ptw_resp_bits_s1_ppn_low_5 = entry.ppn_low[5];
-    resp.io_ptw_resp_bits_s1_ppn_low_6 = entry.ppn_low[6];
-    resp.io_ptw_resp_bits_s1_ppn_low_7 = entry.ppn_low[7];
-    resp.io_ptw_resp_bits_s1_valididx_0 = entry.valididx[0];
-    resp.io_ptw_resp_bits_s1_valididx_1 = entry.valididx[1];
-    resp.io_ptw_resp_bits_s1_valididx_2 = entry.valididx[2];
-    resp.io_ptw_resp_bits_s1_valididx_3 = entry.valididx[3];
-    resp.io_ptw_resp_bits_s1_valididx_4 = entry.valididx[4];
-    resp.io_ptw_resp_bits_s1_valididx_5 = entry.valididx[5];
-    resp.io_ptw_resp_bits_s1_valididx_6 = entry.valididx[6];
-    resp.io_ptw_resp_bits_s1_valididx_7 = entry.valididx[7];
-    resp.io_ptw_resp_bits_s1_pteidx_0 = (entry.pteidx[0] != 0);
-    resp.io_ptw_resp_bits_s1_pteidx_1 = (entry.pteidx[1] != 0);
-    resp.io_ptw_resp_bits_s1_pteidx_2 = (entry.pteidx[2] != 0);
-    resp.io_ptw_resp_bits_s1_pteidx_3 = (entry.pteidx[3] != 0);
-    resp.io_ptw_resp_bits_s1_pteidx_4 = (entry.pteidx[4] != 0);
-    resp.io_ptw_resp_bits_s1_pteidx_5 = (entry.pteidx[5] != 0);
-    resp.io_ptw_resp_bits_s1_pteidx_6 = (entry.pteidx[6] != 0);
-    resp.io_ptw_resp_bits_s1_pteidx_7 = (entry.pteidx[7] != 0);
-    resp.io_ptw_resp_bits_s1_pf = entry.tlbPF;
-    resp.io_ptw_resp_bits_s1_af = entry.tlbAF || entry.pmaAF;
-    resp.io_ptw_resp_bits_s2_entry_tag = entry.lookup_key.vpn[37:0];
-    resp.io_ptw_resp_bits_s2_entry_vmid = entry.vmid[13:0];
-    resp.io_ptw_resp_bits_s2_entry_n = entry.pte_n;
-    resp.io_ptw_resp_bits_s2_entry_pbmt = entry.pbmt;
-    resp.io_ptw_resp_bits_s2_entry_ppn = entry.ppn[37:0];
-    resp.io_ptw_resp_bits_s2_entry_perm_d = entry.pte_d;
-    resp.io_ptw_resp_bits_s2_entry_perm_a = entry.pte_a;
-    // permission g/u继续直接来自request-time entry snapshot的pte_g/pte_u。
-    resp.io_ptw_resp_bits_s2_entry_perm_g = entry.pte_g;
-    resp.io_ptw_resp_bits_s2_entry_perm_u = entry.pte_u;
-    resp.io_ptw_resp_bits_s2_entry_perm_x = entry.pte_x;
-    resp.io_ptw_resp_bits_s2_entry_perm_w = entry.pte_w;
-    resp.io_ptw_resp_bits_s2_entry_perm_r = entry.pte_r;
-    resp.io_ptw_resp_bits_s2_entry_level = entry.level;
-    resp.io_ptw_resp_bits_s2_gpf = entry.tlbGPF;
-    resp.io_ptw_resp_bits_s2_gaf = 1'b0;
+    if (entry.pmaAF && entry.has_effective_fault())
+        `uvm_fatal("L2TLB_PMA_FAULT_MIX", "pmaAF cannot be combined with modeled TLB fault")
+    if (|entry.s1_vmid[15:14] || |entry.s2_vmid[15:14]) begin
+        `uvm_fatal("L2TLB_PAYLOAD_VMID_WIDTH",
+                   $sformatf("response VMID cannot be encoded s1=0x%0h s2=0x%0h",
+                             entry.s1_vmid, entry.s2_vmid))
+    end
+    entry.check_inactive_stage_defaults("DRIVE");
+    entry.validate_s1_sector_payload_consistency("DRIVE");
+    resp.io_ptw_resp_bits_s1_entry_tag = entry.s1_tag;
+    resp.io_ptw_resp_bits_s1_entry_asid = entry.s1_asid;
+    resp.io_ptw_resp_bits_s1_entry_vmid = entry.s1_vmid[13:0];
+    resp.io_ptw_resp_bits_s1_entry_n = entry.s1_pte_n;
+    resp.io_ptw_resp_bits_s1_entry_pbmt = entry.s1_entry_pbmt;
+    resp.io_ptw_resp_bits_s1_entry_perm_d = entry.s1_pte_d;
+    resp.io_ptw_resp_bits_s1_entry_perm_a = entry.s1_pte_a;
+    resp.io_ptw_resp_bits_s1_entry_perm_g = entry.s1_pte_g;
+    resp.io_ptw_resp_bits_s1_entry_perm_u = entry.s1_pte_u;
+    resp.io_ptw_resp_bits_s1_entry_perm_x = entry.s1_pte_x;
+    resp.io_ptw_resp_bits_s1_entry_perm_w = entry.s1_pte_w;
+    resp.io_ptw_resp_bits_s1_entry_perm_r = entry.s1_pte_r;
+    resp.io_ptw_resp_bits_s1_entry_level = entry.s1_level;
+    resp.io_ptw_resp_bits_s1_entry_v = entry.s1_pte_v;
+    resp.io_ptw_resp_bits_s1_entry_ppn = entry.s1_entry_ppn_raw;
+    resp.io_ptw_resp_bits_s1_addr_low = entry.s1_addr_low;
+    resp.io_ptw_resp_bits_s1_ppn_low_0 = entry.s1_ppn_low[0]; resp.io_ptw_resp_bits_s1_ppn_low_1 = entry.s1_ppn_low[1];
+    resp.io_ptw_resp_bits_s1_ppn_low_2 = entry.s1_ppn_low[2]; resp.io_ptw_resp_bits_s1_ppn_low_3 = entry.s1_ppn_low[3];
+    resp.io_ptw_resp_bits_s1_ppn_low_4 = entry.s1_ppn_low[4]; resp.io_ptw_resp_bits_s1_ppn_low_5 = entry.s1_ppn_low[5];
+    resp.io_ptw_resp_bits_s1_ppn_low_6 = entry.s1_ppn_low[6]; resp.io_ptw_resp_bits_s1_ppn_low_7 = entry.s1_ppn_low[7];
+    resp.io_ptw_resp_bits_s1_valididx_0 = entry.s1_valididx[0]; resp.io_ptw_resp_bits_s1_valididx_1 = entry.s1_valididx[1];
+    resp.io_ptw_resp_bits_s1_valididx_2 = entry.s1_valididx[2]; resp.io_ptw_resp_bits_s1_valididx_3 = entry.s1_valididx[3];
+    resp.io_ptw_resp_bits_s1_valididx_4 = entry.s1_valididx[4]; resp.io_ptw_resp_bits_s1_valididx_5 = entry.s1_valididx[5];
+    resp.io_ptw_resp_bits_s1_valididx_6 = entry.s1_valididx[6]; resp.io_ptw_resp_bits_s1_valididx_7 = entry.s1_valididx[7];
+    resp.io_ptw_resp_bits_s1_pteidx_0 = entry.s1_pteidx[0]; resp.io_ptw_resp_bits_s1_pteidx_1 = entry.s1_pteidx[1];
+    resp.io_ptw_resp_bits_s1_pteidx_2 = entry.s1_pteidx[2]; resp.io_ptw_resp_bits_s1_pteidx_3 = entry.s1_pteidx[3];
+    resp.io_ptw_resp_bits_s1_pteidx_4 = entry.s1_pteidx[4]; resp.io_ptw_resp_bits_s1_pteidx_5 = entry.s1_pteidx[5];
+    resp.io_ptw_resp_bits_s1_pteidx_6 = entry.s1_pteidx[6]; resp.io_ptw_resp_bits_s1_pteidx_7 = entry.s1_pteidx[7];
+    resp.io_ptw_resp_bits_s1_pf = entry.fault_effective_s1_pf;
+    resp.io_ptw_resp_bits_s1_af = entry.fault_effective_s1_af || entry.pmaAF;
+    resp.io_ptw_resp_bits_s2_entry_tag = entry.s2_tag;
+    resp.io_ptw_resp_bits_s2_entry_vmid = entry.s2_vmid[13:0];
+    resp.io_ptw_resp_bits_s2_entry_n = entry.s2_pte_n;
+    resp.io_ptw_resp_bits_s2_entry_pbmt = entry.s2_entry_pbmt;
+    resp.io_ptw_resp_bits_s2_entry_ppn = entry.s2_entry_ppn_raw;
+    resp.io_ptw_resp_bits_s2_entry_perm_d = entry.s2_pte_d;
+    resp.io_ptw_resp_bits_s2_entry_perm_a = entry.s2_pte_a;
+    resp.io_ptw_resp_bits_s2_entry_perm_g = entry.s2_pte_g;
+    resp.io_ptw_resp_bits_s2_entry_perm_u = entry.s2_pte_u;
+    resp.io_ptw_resp_bits_s2_entry_perm_x = entry.s2_pte_x;
+    resp.io_ptw_resp_bits_s2_entry_perm_w = entry.s2_pte_w;
+    resp.io_ptw_resp_bits_s2_entry_perm_r = entry.s2_pte_r;
+    resp.io_ptw_resp_bits_s2_entry_level = entry.s2_level;
+    resp.io_ptw_resp_bits_s2_gpf = entry.fault_effective_s2_gpf;
+    resp.io_ptw_resp_bits_s2_gaf = entry.fault_effective_s2_gaf;
 endfunction:fill_dtlb_resp_from_entry
 
 function int unsigned memblock_l2tlb_base_sequence::choose_latency(

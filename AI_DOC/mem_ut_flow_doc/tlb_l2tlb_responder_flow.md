@@ -189,7 +189,7 @@ end
 | `driving_req` | 已经放入当前 cycle item，等待下一 sample 确认完成的唯一 response | `driving_req`、`driving_valid` | V2 response 无 ready，下一 sample 即完成 |
 | `outstanding` | 已接受但尚未完成或取消的 token 总数 | `pending_q.size() + driving_valid` | 用它产生 request backpressure |
 | `due sample` | 一笔 request 最早允许被 DUT 采样 response 的 sample 序号 | `due_sample_seq` | 1C 档的 due 为 accept sample 加 1 |
-| `ordered` | 只允许 `pending_q` 队头到期后回复 | `resp_reorder_en=0` 或 `stopping=1` | 队头未到期时，后续已到期项也等待 |
+| `ordered` | 只允许 `pending_q` 队头到期后回复 | `resp_reorder_en=0`，或公共 global stop 已使 `stopping=1` | 队头未到期时，后续已到期项也等待 |
 | `reorder` | 从所有已到期 pending token 中随机选择一笔回复 | `resp_reorder_en=1` | 后接受的短延迟请求可先回复 |
 | `runtime CSR latest` | CSR monitor 独立发布、可重复读取且不受 dispatch semantic capture gate 控制的最新 MMU CSR 快照 | `runtime_csr_snapshot`、`runtime_csr_snapshot_seq` | responder 首次取得该快照后才开放 request ready |
 | `flush event` | CSR translation context changed 或有效 sfence sample 发布的非破坏性生命周期 sideband | `l2tlb_flush_event_seq/sample_time/valid` | responder 读取 latest，不 pop `raw_sfence_q` |
@@ -197,7 +197,7 @@ end
 | `lifecycle owner` | 唯一拥有 responder queue、token、ready 和 response 调度权的 sequence 实例 | `l2tlb_lifecycle_owner_claimed/name` | agent default sequence 与显式 virtual sequence不能并发拥有 |
 | `entry snapshot` | request fire 时从 live TLB entry 显式复制的不可变回复数据 | `memblock_l2tlb_pending_req::entry_snapshot` | 等待期间 live table 被 sfence 删除也不改变已接受 request 的 payload |
 | `UID record` | dispatch 主表 uid 对应的 TLB 等待记录；不是每笔 DTLB request 都必须具备 | `uid_tlb_record_by_uid` | prefetch 或无 UID request 的匹配数可以为 0 |
-| `ready opportunity` | reset或flush阻塞解除后至少发送一拍可接受ready的机会，不等同于真实request fire | `ready_opportunity_since_lifecycle_block` | hold结束且idle阈值为1时先发送ready，再允许退出 |
+| `ready opportunity` | reset或flush阻塞解除后至少发送一拍可接受ready的机会，不等同于真实request fire | `ready_opportunity_since_lifecycle_block` | hold结束后先发送ready，之后才允许累计无进展诊断 |
 
 > 以下原有第 1 节及后续历史章节从这里开始仅用于“修改前行为”对比。它们保留旧字段和旧函数名，不能覆盖本节 0
 > 定义的 V2 当前合同；尤其不能重新引入独立 `mon_cb` transport 采样、C0 同拍立即 kill、sequence 直接消费
@@ -262,17 +262,17 @@ flowchart TD
     AG -->|正常fire| AI[capture_fired_request]
     AG -->|否| AJ[不新增token]
     AI --> AK[request-time get/create entry并push pending_q]
-    AH --> AL[更新stop与idle及ready opportunity状态]
+    AH --> AL[更新global stop、无进展诊断及ready opportunity状态]
     AJ --> AL
     AK --> AL
     AL --> AM[select_due_response sample_seq+1]
     AM --> AN[计算下一拍ready并发送gap=0 cycle item]
-    AN --> AO{stopping且outstanding为0}
+    AN --> AO{global stop已使stopping且outstanding为0}
     AO -->|否| T
     AO -->|是| AP[最终inactive item]
-    AP --> AQ[check accounting并release owner]
+    AP --> AQ[final sample/closing/parent grant后release owner]
 
-    AM --> AR{ordered或stopping}
+    AM --> AR{ordered或global stop stopping}
     AR -->|是| AS[只检查pending_q头]
     AR -->|否| AT[从全部due项中随机选择]
     AS --> AU[写driving_req]
@@ -325,7 +325,7 @@ L2TLB responder 主流程：
 
 6. response调度：
    select_due_response以sample_seq+1为候选完成边界；
-   ordered或stopping只允许队头到期后进入driving；
+   ordered或由global stop置位的stopping只允许队头到期后进入driving；
    reorder从全部due项中随机选择一笔；
    选中项从pending_q移到唯一driving_req，尚未算完成；
    ready由CSR有效、非hold、非stopping和outstanding小于上限共同决定；reset/flush阻塞解除后第一次ready item完成发送时置ready opportunity；
@@ -338,8 +338,8 @@ L2TLB responder 主流程：
    completed计数加1并清driving slot。
 
 8. stop和退出：
-   global stop或idle stop只关闭新ready，不丢弃正常pending；idle stop只能在本次reset/flush阻塞后已提供ready opportunity时累计；
-   stopping时强制ordered排空，直到pending_q和driving均空；
+   只有global stop关闭新ready，不丢弃正常pending；idle阈值只能在本次reset/flush阻塞后已提供ready opportunity时累计并输出诊断，不能置stopping；
+   global stop置位的stopping强制ordered排空，直到pending_q和driving均空；
    发送最后一个ready=0、resp_valid=0的item；
    检查accepted等于completed、flush/reset canceled和outstanding之和；
    自然release lifecycle owner后退出。
@@ -584,7 +584,7 @@ end
 
 ### 6.2 `send_l2tlb_cycle()`
 
-抽象功能描述：该 task 是 responder 唯一的逐拍 lifecycle owner。输入是当前 sample 的 VIF 与公共 latest sideband，输出是供下一 sample 使用的唯一 cycle item，同时维护 request、response、flush、reset、stop 和 idle 状态。
+抽象功能描述：该 task 是 responder 唯一的逐拍 lifecycle owner。输入是当前 sample 的 VIF 与公共 latest sideband，输出是供下一 sample 使用的唯一 cycle item，同时维护 request、response、flush、reset、global stop 和无进展诊断状态。
 
 真实逻辑摘要：
 
@@ -629,11 +629,11 @@ if (next_ready)
 6. 获取并幂等应用runtime CSR latest；
 7. 若flush event前进，取消旧pending并建立hold；
 8. 若锁存的valid&&ready为1且没有被同拍flush kill，冻结并入队新request；
-9. 读取global stop；根据progress、CSR/hold block、是否已开放过ready、本次阻塞后是否已提供ready opportunity、stop和outstanding维护idle counter；
+9. 读取global stop；根据progress、CSR/hold block、是否已开放过ready、本次阻塞后是否已提供ready opportunity、outstanding和global stop维护无进展计数；达到阈值只输出一次诊断；
 10. CSR有效且不在hold时，最多选择一笔对sample_seq+1已到期的response；
 11. 若未选response，构造全清零cycle item；
 12. 根据stop、CSR、hold、容量计算下一拍ready；所有gap字段保持0；
-13. 发送唯一cycle item；ready item完成发送后记录本次阻塞后已提供机会；stopping且outstanding为0时要求该item完全inactive，并返回should_exit。
+13. 发送唯一cycle item；ready item完成发送后记录本次阻塞后已提供机会；只有global stop置位的stopping且outstanding为0时才要求该item完全inactive，并返回should_exit。
 ```
 
 ## 7. Request Fire 与 Outstanding 账本
@@ -764,7 +764,7 @@ cycle_tr = driving_req.resp_tr;
 
 ```text
 pending为空时返回未选中；
-ordered或stopping：只检查队头，未到期则本拍不回复；
+ordered或由global stop置位的stopping：只检查队头，未到期则本拍不回复；
 reorder：单次扫描全部pending，把due项索引收集到临时队列，再均匀随机一个；
 选择前要求token的accept flush版本等于当前last_seen版本，否则fatal；
 把token从pending移动到driving，并把冻结response作为本拍cycle item；
@@ -854,9 +854,9 @@ reset_canceled_count加canceled_count；
 调用方随后清本地CSR valid、ready开放状态、ready opportunity和hold，并把flush baseline对齐latest。
 ```
 
-### 9.3 Global Stop 与 Idle Stop
+### 9.3 Global Stop 与无进展诊断
 
-抽象功能描述：两种 stop 都只停止接受新 request，并让现有 outstanding 正常排空。global stop来自公共 data，idle stop只在没有 lifecycle block、没有 outstanding、没有 progress时累计。
+抽象功能描述：global stop 是唯一能停止接受新 request 并启动 owner release 的公共控制；无进展计数只在安全空闲窗口提供调试告警，不能拥有 stop、admission 或 release 语义。
 
 文字伪代码：
 
@@ -864,10 +864,10 @@ reset_canceled_count加canceled_count；
 观察global stop后置stopping；
 stopping使next_ready=0，并让response选择强制ordered；
 pending或driving存在时继续逐拍回复；
-idle counter在CSR未就绪、flush hold、尚未开放过ready、本次reset/flush阻塞后尚未提供ready opportunity、stopping、outstanding非空或有progress时清0；
-hold解除后的首个可接受sample先发送ready并置ready opportunity，下一sample才允许累计idle；
-达到idle阈值时置stopping；
-stopping且outstanding为0时发送最终inactive item，然后退出并release owner。
+无进展计数在CSR未就绪、flush hold、尚未开放过ready、本次reset/flush阻塞后尚未提供ready opportunity、global stop、outstanding非空或有progress时清0；
+hold解除后的首个可接受sample先发送ready并置ready opportunity，下一sample才允许累计无进展；
+达到idle阈值时只打印一次warning并保持计数饱和，不置stopping；
+只有global stop置位的stopping且outstanding为0时发送最终inactive item，然后退出并release owner。
 ```
 
 ## 10. Response Payload 与 G/U 字段链
@@ -879,19 +879,21 @@ stopping且outstanding为0时发送最终inactive item，然后退出并release 
 真实逻辑摘要：
 
 ```systemverilog
-resp.io_ptw_resp_bits_s1_entry_perm_g = entry.pte_g;
-resp.io_ptw_resp_bits_s1_entry_perm_u = entry.pte_u;
+resp.io_ptw_resp_bits_s1_entry_perm_g = entry.s1_pte_g;
+resp.io_ptw_resp_bits_s1_entry_perm_u = entry.s1_pte_u;
 ...
-resp.io_ptw_resp_bits_s2_entry_perm_g = entry.pte_g;
-resp.io_ptw_resp_bits_s2_entry_perm_u = entry.pte_u;
+resp.io_ptw_resp_bits_s2_entry_perm_g = entry.s2_pte_g;
+resp.io_ptw_resp_bits_s2_entry_perm_u = entry.s2_pte_u;
 ```
 
 G/U 完整链路：
 
 ```text
-memblock_tlb_entry entry_snapshot.pte_g/pte_u
+memblock_tlb_entry entry_snapshot.s1_pte_g/s1_pte_u
   -> L2tlb_agent_agent_xaction
      io_ptw_resp_bits_s1_entry_perm_g/u
+memblock_tlb_entry entry_snapshot.s2_pte_g/s2_pte_u
+  -> L2tlb_agent_agent_xaction
      io_ptw_resp_bits_s2_entry_perm_g/u
   -> L2tlb_agent_agent_driver::send_pkt()
   -> L2tlb_agent_agent_interface drv_cb
@@ -901,7 +903,7 @@ memblock_tlb_entry entry_snapshot.pte_g/pte_u
 
 response monitor 在 mon_cb 侧独立采样同一组 S1/S2 perm_g/perm_u 并执行 X/Z 检查；当前实现只保留采样值和 X/Z 诊断，`mon_tr` 填充及 `mon_item_port.write()` 仍未启用，因此本专项不把它描述为已完成的 analysis transaction publisher，也不反向修改 pending record 或主表状态。
 
-当前建模边界：S1 与 S2 字段接口链已经分别驱动，但两组 permission 都来自同一份 `entry_snapshot.pte_g/pte_u`。本专项没有建立独立 S1/S2 PTE 权限对象；需要独立阶段权限时应进入后续专项，不能把当前共享值解释成完整二阶段权限参考模型。
+当前建模边界：S1 与 S2 permission 都由各自冻结字段驱动，且只在 lookup miss 时分别随机一次。pending snapshot、UID 回填与 driver 重驱只复制 `s1_pte_*` / `s2_pte_*`，不得读取当前 plus 或把一侧权限镜像到另一侧。S2 没有 `V` 字段；S1 sector `pteidx[8]` 是 one-hot Bool，`ppn_low[8]` 是 canonical PPN 的 split 低位，均不再使用旧共享 PTE/PPN 表示。
 
 ### 10.2 `update_uid_tlb_records_by_entry()`
 
@@ -990,13 +992,12 @@ active responder要求DRV_0，generic全1/随机模式在reset phase被拒绝。
 ### 11.4 强制停序与 phase 结束
 
 ```text
-sequence.kill()/stop_sequences() 调用 memblock_l2tlb_base_sequence::do_kill()；
-do_kill 通过 package try_release 清除 owner，不依赖 post_body；
-driver 的 get_owned_item_or_abort 同时等待 get_next_item 和下一个 drv_cb 的 owner/phase 状态；
-owner 被清除或 phase 进入 READY_TO_END/ENDED/JUMPING/CLEANUP/DONE 时，取item分支被终止，驱动idle并返回；
-UVM 直接杀掉运行线程时，driver::phase_ended() 作为组件回调再次调用 try_release，防止 phase 结束后残留 stale owner；
+sequence.kill()/stop_sequences() 调用 `memblock_l2tlb_base_sequence::do_kill()`；
+若 owner 仍被 claim，`do_kill()` 立即 `uvm_fatal` 并保留 claim，不能通过 package helper 伪造 release；
+driver 的 `phase_ended()` 只报告 owner 仍被 claim 的 `uvm_error`，同样不清 owner；
+正常 release 必须等待 final inactive sample、closing、mailbox recycle、adapter/fence drain 和 parent grant，随后仅由匹配 owner 的 sequence 调用 `try_release_l2tlb_lifecycle_owner()`；
 强制 kill/stop_sequences 后在同一 phase 重新 handoff owner不属于当前支持范围；
-此路径不创建或完成任何新token，也不改写主表pass/fail/terminal。
+这些诊断路径不创建或完成任何新token，也不改写主表pass/fail/terminal。
 ```
 
 ## 12. 队列、状态与优先级
@@ -1012,8 +1013,8 @@ UVM 直接杀掉运行线程时，driver::phase_ended() 作为组件回调再次
 | `l2tlb_flush_event` | CSR/fence monitor | responder | latest只读；本地event seq去重 |
 | `tlb_entry_by_key` | get/create/build flow | request capture、sfence semantic flow | sfence可删除live entry；已冻结snapshot不受影响 |
 | `uid_tlb_record_by_uid` | dispatch issue上下文登记；response完成时回填 | PTW-back replay等消费者 | response complete时有匹配才置PTE valid |
-| `l2tlb_lifecycle_owner_*` | package claim/release；sequence `do_kill`；driver `phase_ended` 兜底 | sequence启动/退出/强制停序 | reset不清；自然release或强制清理时清 |
-| `ready_opportunity_since_lifecycle_block` | reset分支、flush helper、next_ready分支 | idle-stop判断 | reset/flush清0；首次重新生成ready=1时置1 |
+| `l2tlb_lifecycle_owner_*` | package claim/release；正常 sequence final grant consumer | sequence启动/正常退出；`do_kill`/`phase_ended` 仅诊断 | reset、强制 kill 和 phase 结束都不清；仅完整自然 release 时清 |
+| `ready_opportunity_since_lifecycle_block` | reset分支、flush helper、next_ready分支 | 无进展诊断计数 gate | reset/flush清0；首次重新生成ready=1时置1 |
 
 ### 12.2 单拍优先级
 
@@ -1025,7 +1026,7 @@ UVM 直接杀掉运行线程时，driver::phase_ended() 作为组件回调再次
 5. 应用runtime CSR latest；
 6. 处理新flush event和同拍killed fire；
 7. 接受正常request fire；
-8. 处理global/idle stop；
+8. 处理global stop和无进展诊断；
 9. 选择下一response；
 10. 计算下一ready并发送唯一cycle item；
 11. 满足排空条件时退出。
@@ -1060,8 +1061,10 @@ sample N+1：
 - `token` 不写入 DUT payload，DUT 仍依靠 response 内容匹配 outstanding request。
 - runtime CSR latest 是 snapshot，不是 FIFO；flush event latest 是 lifecycle sideband，不替代 semantic sfence queue。
 - response 端口没有 backpressure，因此 driving item在下一 sample完成；仍必须保留 driving slot到该边界。
-- S1/S2 `G/U` 接口字段都已驱动，但当前共享同一份 `pte_g/pte_u`，不表示独立二阶段权限模型已经完成。
+- S1/S2 `G/U` 接口字段分别来自冻结的 `s1_pte_g/u` 与 `s2_pte_g/u`；S2 不存在 `V` 字段，S1 sector
+  `pteidx` 是 one-hot Bool。两阶段 payload 的随机、snapshot 和 response drive 已独立，但本 flow 仍不承担
+  完整页表 walk 或 RM/checker 语义。
 - 合法 DTLB request 可以没有测试框架 UID；零匹配只记 info，不影响 token completion。
 - responder不修改主表 pass/fail/terminal，不分配 LSQ，不推进 ROB commit或LQ/SQ deq。
-- reset、flush canceled token不返回 response；global/idle stop则排空正常 outstanding后退出。
+- reset、flush canceled token不返回 response；只有global stop排空正常 outstanding后退出；idle阈值只输出诊断并保持owner运行。
 - 强制 `kill()`、`stop_sequences()` 后在同一次仿真重新 handoff owner不属于当前支持范围。
