@@ -23,8 +23,14 @@ Environment:
                Default 1200 unless already set.
   TB_RUN_ID    Optional suite ID prefix. Each case appends its bin stem.
   TB_SUITE_ARTIFACT_DIR
-               Parent for per-case run directories; defaults to
+               Root for dated suite directories; defaults to
                <repo>/src/test/python/Frontend/data/runs.
+  TB_SUITE_DATE
+               Optional suite date in YYYYMMDD format; defaults to the
+               invocation date.
+  TB_SUITE_TIME
+               Optional suite start time in HHMMSS format; defaults to the
+               invocation time.
   TB_BIN_TRACE_SUITE_CONTINUE_ON_FAIL
                Continue running later bins after a failure when set to 1.
 EOF
@@ -122,7 +128,9 @@ fi
 
 SUITE_ID_DEFAULT="frontend_bin_trace_suite_$(date +%Y%m%d_%H%M%S)_$$"
 SUITE_ID="${TB_RUN_ID:-${SUITE_ID_DEFAULT}}"
-SUITE_ARTIFACT_DIR="${TB_SUITE_ARTIFACT_DIR:-${FRONTEND_DIR}/data/runs}"
+SUITE_RUNS_ROOT="${TB_SUITE_ARTIFACT_DIR:-${FRONTEND_DIR}/data/runs}"
+SUITE_DATE="${TB_SUITE_DATE:-$(date +%Y%m%d)}"
+SUITE_TIME="${TB_SUITE_TIME:-$(date +%H%M%S)}"
 TB_LOG_LEVEL="${TB_LOG_LEVEL:-INFO}"
 TB_PYTEST_TIMEOUT_SECS="${TB_PYTEST_TIMEOUT_SECS:-1200}"
 TB_RUN_DUT="${TB_RUN_DUT:-1}"
@@ -133,11 +141,29 @@ if ! [[ "${SUITE_ID}" =~ ^[A-Za-z0-9_.=-]+$ ]]; then
   exit 2
 fi
 
-mkdir -p "${SUITE_ARTIFACT_DIR}"
+if ! [[ "${SUITE_DATE}" =~ ^[0-9]{8}$ ]]; then
+  echo "[frontend-bin-suite][error] TB_SUITE_DATE must use YYYYMMDD: ${SUITE_DATE}" >&2
+  exit 2
+fi
+
+if ! [[ "${SUITE_TIME}" =~ ^[0-9]{6}$ ]]; then
+  echo "[frontend-bin-suite][error] TB_SUITE_TIME must use HHMMSS: ${SUITE_TIME}" >&2
+  exit 2
+fi
+
+mkdir -p "${SUITE_RUNS_ROOT}"
+SUITE_RUNS_ROOT="$(cd "${SUITE_RUNS_ROOT}" && pwd -P)"
+SUITE_ARTIFACT_DIR="${SUITE_RUNS_ROOT}/suites/${SUITE_DATE}/${SUITE_TIME}_${SUITE_ID}"
+if [[ -e "${SUITE_ARTIFACT_DIR}" ]]; then
+  echo "[frontend-bin-suite][error] refusing to reuse existing suite root: ${SUITE_ARTIFACT_DIR}" >&2
+  exit 2
+fi
+mkdir -p "${SUITE_ARTIFACT_DIR}/cases"
 
 echo "[frontend-bin-suite] repo: ${REPO_DIR}"
 echo "[frontend-bin-suite] suite_id: ${SUITE_ID}"
-echo "[frontend-bin-suite] runs_dir: ${SUITE_ARTIFACT_DIR}"
+echo "[frontend-bin-suite] runs_root: ${SUITE_RUNS_ROOT}"
+echo "[frontend-bin-suite] suite_dir: ${SUITE_ARTIFACT_DIR}"
 echo "[frontend-bin-suite] case_count: ${#CASES[@]}"
 
 failed=()
@@ -159,7 +185,7 @@ for case_entry in "${CASES[@]}"; do
   case_name="$(basename "${case_path}")"
   case_stem="${case_name%.*}"
   case_run_id="${SUITE_ID}_${case_stem}"
-  case_artifact_dir="${SUITE_ARTIFACT_DIR}/${case_run_id}"
+  case_artifact_dir="${SUITE_ARTIFACT_DIR}/cases/${case_stem}"
   printf -v case_run_command '%q ' "${SCRIPT_DIR}/run_bin_trace_pipeline.sh" "${case_path}"
   case_run_command="${case_run_command% }"
   if TB_RUN_ID="${case_run_id}" \
@@ -189,7 +215,7 @@ echo "[frontend-bin-suite] trace entry counts:"
 for case_path in "${resolved_cases[@]}"; do
   stem="$(basename "${case_path}")"
   stem="${stem%.*}"
-  trace_path="${SUITE_ARTIFACT_DIR}/${SUITE_ID}_${stem}/inputs/${stem}.trace.jsonl"
+  trace_path="${SUITE_ARTIFACT_DIR}/cases/${stem}/inputs/${stem}.trace.jsonl"
   if [[ -f "${trace_path}" ]]; then
     printf '  %-48s %s\n' "${stem}" "$(wc -l < "${trace_path}")"
   else
@@ -204,4 +230,4 @@ fi
 
 echo "[frontend-bin-suite] done"
 echo "[frontend-bin-suite] suite_id=${SUITE_ID}"
-echo "[frontend-bin-suite] runs_dir=${SUITE_ARTIFACT_DIR}"
+echo "[frontend-bin-suite] suite_dir=${SUITE_ARTIFACT_DIR}"
