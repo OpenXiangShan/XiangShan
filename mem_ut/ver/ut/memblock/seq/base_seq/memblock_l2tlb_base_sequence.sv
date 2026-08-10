@@ -23,10 +23,14 @@ class memblock_l2tlb_pending_req extends uvm_object;
     longint unsigned request_token;
     bit [37:0] vpn;
     bit [1:0] s2xlate;
-    // 中文注释：request fire时冻结的CSR、lookup key、TLB entry和response payload。
+    // 中文注释：request fire时冻结的CSR、request key、canonical anchor key、
+    // TLB entry和response payload。range hit 时 request/anchor key 可不同，
+    // 但 driver 仍只消费冻结的 raw entry snapshot。
     // response等待期间live CSR/table变化不会回写这些快照。
     mmu_csr_runtime_state csr_snapshot;
-    memblock_tlb_lookup_key_t lookup_key;
+    memblock_tlb_lookup_key_t request_lookup_key;
+    memblock_tlb_lookup_key_t entry_anchor_key;
+    memblock_tlb_lookup_result_e lookup_result;
     memblock_tlb_entry entry_snapshot;
     // 中文注释：该 generation 与 snapshot 同源，标识本 token 命中的 live entry 时代。
     // response 完成、flush 或 driver 重试都不能从 live table 重新读取或改写它。
@@ -54,7 +58,9 @@ class memblock_l2tlb_pending_req extends uvm_object;
         vpn = '0;
         s2xlate = '0;
         csr_snapshot = null;
-        lookup_key = '{default:'0};
+        request_lookup_key = '{default:'0};
+        entry_anchor_key = '{default:'0};
+        lookup_result = MEMBLOCK_TLB_LOOKUP_MISS_BUILD;
         entry_snapshot = null;
         pending_entry_generation = 0;
         resp_tr = null;
@@ -982,7 +988,6 @@ endfunction:cancel_outstanding_by_reset
 function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_request();
     memblock_l2tlb_pending_req pending;
     memblock_tlb_entry live_entry;
-    memblock_tlb_lookup_key_t returned_key;
     bit created;
 
     if (outstanding_count() >= max_outstanding) begin
@@ -1005,12 +1010,14 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
     if (pending.csr_snapshot == null) begin
         `uvm_fatal(get_type_name(), "failed to capture request-time CSR snapshot")
     end
-    pending.lookup_key = pending.csr_snapshot.make_lookup_key({26'b0, pending.vpn},
-                                                               pending.s2xlate);
+    pending.request_lookup_key = pending.csr_snapshot.make_lookup_key(
+        {26'b0, pending.vpn}, pending.s2xlate);
     if (!data.get_or_create_tlb_entry_by_req_with_snapshot(pending.vpn,
                                                             pending.s2xlate,
                                                             pending.csr_snapshot,
-                                                            returned_key,
+                                                            pending.request_lookup_key,
+                                                            pending.entry_anchor_key,
+                                                            pending.lookup_result,
                                                             live_entry,
                                                             created) ||
         live_entry == null) begin
@@ -1018,16 +1025,26 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
                    $sformatf("failed to get/create L2TLB entry vpn=0x%0h s2xlate=%0d",
                              pending.vpn, pending.s2xlate))
     end
-    if (returned_key != pending.lookup_key) begin
+    if (pending.request_lookup_key !=
+        pending.csr_snapshot.make_lookup_key({26'b0, pending.vpn},
+                                              pending.s2xlate)) begin
         `uvm_fatal(get_type_name(),
-                   $sformatf("request-time L2TLB key drift token=%0d snapshot_vpn=0x%0h returned_vpn=0x%0h",
+                   $sformatf("request-time L2TLB key drift token=%0d snapshot_vpn=0x%0h request_vpn=0x%0h",
                              pending.request_token,
-                             pending.lookup_key.vpn,
-                             returned_key.vpn))
+                             pending.vpn,
+                             pending.request_lookup_key.vpn))
+    end
+    if (live_entry.lookup_key != pending.entry_anchor_key ||
+        live_entry.entry_generation == 0) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("L2TLB canonical anchor mismatch token=%0d request_vpn=0x%0h anchor_vpn=0x%0h",
+                             pending.request_token,
+                             pending.request_lookup_key.vpn,
+                             pending.entry_anchor_key.vpn))
     end
     // The UID ledger records only a real DTLB/L2TLB request fire.  It is not
     // inferred from issue time or from a later response lookup.
-    void'(data.mark_uid_tlb_record_request_fire(pending.lookup_key, sample_seq));
+    void'(data.mark_uid_tlb_record_request_fire(pending.request_lookup_key, sample_seq));
     pending.entry_snapshot = memblock_tlb_entry::type_id::create(
         $sformatf("l2tlb_entry_snapshot_%0d", pending.request_token));
     if (pending.entry_snapshot == null) begin
@@ -1068,8 +1085,9 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
     pending_q.push_back(pending);
     accepted_count++;
     `uvm_info(get_type_name(),
-              $sformatf("accept L2TLB token=%0d vpn=0x%0h s2xlate=%0d created=%0d due=%0d bucket=%0d outstanding=%0d",
+              $sformatf("accept L2TLB token=%0d vpn=0x%0h s2xlate=%0d lookup=%0d anchor_vpn=0x%0h created=%0d due=%0d bucket=%0d outstanding=%0d",
                         pending.request_token, pending.vpn, pending.s2xlate,
+                        pending.lookup_result, pending.entry_anchor_key.vpn,
                         created, pending.due_sample_seq,
                         pending.latency_bucket, outstanding_count()),
               UVM_LOW)
