@@ -590,7 +590,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // when demand request hit prefetch data, the latency is reset to 0.
   io.latency_flag_write.valid := s3_clear_pf_flag_en && !io.counter_filter_query.resp
-  io.latency_flag_write.bits.idx := get_idx(s3_vaddr)
+  io.latency_flag_write.bits.idx := get_dcache_idx(s3_vaddr)
   io.latency_flag_write.bits.way_en := s3_tag_match_way
   io.latency_flag_write.bits.latency := 0.U
 
