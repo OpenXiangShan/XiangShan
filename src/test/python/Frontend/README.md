@@ -112,10 +112,11 @@
 - `scripts/report_raw_code_coverage.py`
   - 用法: `python src/test/python/Frontend/scripts/report_raw_code_coverage.py --data-dir src/test/python/Frontend/data/runs/<run_id>/coverage`
   - 合并指定同版本 run/suite 的 `.dat`，按 raw 覆盖点输出总 `line/branch/expr/toggle` 覆盖率
-  - 使用 `--json-output <path> --run-id <run_id>` 固化机器可读 summary；汇编 suite 默认写入 `<suite_id>_report/code_coverage_summary.json`
+  - 使用 `--json-output <path> --run-id <run_id>` 固化机器可读 summary；suite 默认写入 `data/runs/suites/<YYYYMMDD>/<HHMMSS>_<suite_id>/report/code_coverage_summary.json`
   - 同时给出 `ifu_strict`、`ifu_core`、`icache`、`bpu`、`tlb_pmp`、`fault_path` 的 raw line 覆盖率拆分
 - `scripts/run_baremode_asm_suite.sh`
-  - 对每个 case 保留独立 run 目录，随后自动生成逐 artifact gate audit、只读反标结果和同签名 `observed` funcov aggregate。
+  - 每次启动固定写入 `data/runs/suites/<YYYYMMDD>/<HHMMSS>_<suite_id>/`；其中 `cases/<case_stem>/` 是单个用例的独立 run 目录，`report/` 是 suite 汇总。`TB_SUITE_DATE`、`TB_SUITE_TIME` 可用于受控复现，已存在的 suite 目录会直接拒绝，避免覆盖或混写证据。
+  - 随后自动生成逐 artifact gate audit、只读反标结果和同签名 `observed` funcov aggregate。
   - `observed` aggregate 只用于批量 summary/unhit；自动 `HIT` 仍只认逐 case、真实 DUT 且通过全部门禁的原始 artifact。
 - `scripts/asm_to_jsonl.sh`
   - 用法: `src/test/python/Frontend/scripts/asm_to_jsonl.sh <case.S> [bin_path] [trace_jsonl_path]`

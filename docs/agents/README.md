@@ -31,6 +31,14 @@ Use these documents in order for frontend verification work:
 9. `docs/testbench/Guide_Doc/` for broader testbench reference on fixtures,
    APIs, coverage, and test authoring.
 
+Before compiling Frontend or starting a real DUT regression, establish this
+baseline in the same session: read this map, `frontend-verification.md`, the
+applicable `docs/testbench/` guidance, and the Frontend README plus its
+testplan, testpoint, and functional-coverage documents. Inspect the selected
+test script and current DUT manifest before choosing a command. Reuse a
+manifest-compatible Verilator DUT; rebuild only when the artifact is missing
+or stale, or when the user explicitly requests a rebuild.
+
 Repository-wide background lives outside this directory:
 
 - `README.md` for top-level XiangShan orientation.

@@ -524,12 +524,14 @@ already set to match that case's run requirements.
 
 ### Artifacts
 
-Each run uses a unique root, normally
-`src/test/python/Frontend/data/runs/<run_id>/`. Code coverage, waveform,
-functional coverage, and case logs are kept together under `coverage/`,
-`waveforms/`, `funcov/`, and `logs/`. Bin-trace filenames include the binary
-stem and pytest case name, for example `<case>_test_bin_trace.fst` and
-`<case>_test_bin_trace.funcov.json`.
+Each direct run uses a unique root, normally
+`src/test/python/Frontend/data/runs/<run_id>/`. A suite instead uses
+`src/test/python/Frontend/data/runs/suites/<YYYYMMDD>/<HHMMSS>_<suite_id>/`,
+with each case under `cases/<case_stem>/` and suite aggregates under `report/`.
+Code coverage, waveform, functional coverage, and case logs remain together in
+each case root under `coverage/`, `waveforms/`, `funcov/`, and `logs/`.
+Bin-trace filenames include the binary stem and pytest case name, for example
+`<case>_test_bin_trace.fst` and `<case>_test_bin_trace.funcov.json`.
 
 Do not write new evidence to the old date directories or the global
 `data/funcov/` directory. Those locations contain historical artifacts only.
@@ -562,8 +564,9 @@ meet the following operational requirements:
   allowed
 - every run must generate a waveform artifact
 - every run must generate a readable log artifact
-- every run must use a unique `run_id` and artifact root, normally
-  `src/test/python/Frontend/data/runs/<run_id>/`
+- every direct run must use a unique `run_id` and artifact root, normally
+  `src/test/python/Frontend/data/runs/<run_id>/`; a suite must use a unique
+  dated suite root under `data/runs/suites/<YYYYMMDD>/<HHMMSS>_<suite_id>/`
 - code coverage, waveform, funcov, and logs from one run must not be mixed with
   another run's output directories
 - waveform and log filenames should be logically tied to the binary and test
@@ -711,9 +714,10 @@ than host-side test scaffolding.
   run root.
 - Waveform and log filenames must identify the testcase or binary; the run
   identity belongs in the parent directory and artifact metadata.
-- A suite must allocate a different run ID and directory for every case. It
-  may aggregate `.dat` files by glob after all cases finish, but it must not
-  make the cases write into one shared live directory.
+- A suite must allocate a different run ID and a separate
+  `cases/<case_stem>/` directory for every case. It may aggregate `.dat` files
+  into `report/` after all cases finish, but it must not make the cases write
+  into one shared live directory.
 - Historical date directories are read-only evidence and must not be reused as
   current run destinations.
 - Keep wrapper or pipeline logs for a DUT run in the same run root as the
