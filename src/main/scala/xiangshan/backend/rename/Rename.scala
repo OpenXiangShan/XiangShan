@@ -317,28 +317,28 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   compressUnit.io.actualValid := VecInit(io.in.map(_.valid))
   compressUnit.io.forceNoCompress := io.singleStep
-  val needRobFlags = compressUnit.io.out.needRobFlags
-  val firstRobFlags = compressUnit.io.out.firstRobFlags
-  val instrSizesVec = compressUnit.io.out.instrSizes
-  val formerMasksVec = compressUnit.io.out.formerMasks
-  val latterMasksVec = compressUnit.io.out.latterMasks
-  val compressMasksVec = formerMasksVec.zip(latterMasksVec).map { case (former, latter) => former | latter }
-  val compressType = compressUnit.io.out.compressType
-  val isFormer = compressUnit.io.out.isFormer
-  val needFlush = compressUnit.io.out.needFlush
-  val interrupt_safe = compressUnit.io.out.interrupt_safe
-  val RVC = compressUnit.io.out.RVC
-  val complexHasDest = compressUnit.io.out.complexHasDest
-  val hasStore = compressUnit.io.out.hasStore
-  val noCompressSource = compressUnit.io.out.noCompressSource
+  val isEntryTailLane = compressUnit.io.out.isEntryTailLane
+  val isEntryHeadLane = compressUnit.io.out.isEntryHeadLane
+  val formerSlotMaskVec = compressUnit.io.out.formerSlotMask
+  val latterSlotMaskVec = compressUnit.io.out.latterSlotMask
+  val compressMaskVec = formerSlotMaskVec.zip(latterSlotMaskVec).map { case (former, latter) => former | latter }
+  val entryInstrCount = compressMaskVec.map(PopCount(_))
+  val entryPairType = compressUnit.io.out.entryPairType
+  val slotIsFormer = formerSlotMaskVec.zipWithIndex.map { case (mask, lane) => mask(lane) }
+  val slotNeedFlushMask = compressUnit.io.out.slotNeedFlushMask
+  val interruptSafe = compressUnit.io.out.interruptSafe
+  val slotHeadRvcMask = compressUnit.io.out.slotHeadRvcMask
+  val complexSlotHasDest = compressUnit.io.out.complexSlotHasDest
+  val entryHasStore = compressUnit.io.out.entryHasStore
+  val noCompressReason = compressUnit.io.out.noCompressReason
 
   // speculatively assign the instruction with an robIdx
-  val validCount = PopCount(io.in.zip(needRobFlags).map { case (in, needRobFlag) =>
-    in.valid && in.bits.lastUop && needRobFlag
+  val validCount = PopCount(io.in.zip(isEntryTailLane).map { case (in, isEntryTail) =>
+    in.valid && in.bits.lastUop && isEntryTail
   }) // number of physical ROB entries allocated by the emitted uops
   val robIdxHead = RegInit(RobPtr(false.B, 0.U))
   val robIdxHeadNext = Mux(io.redirect.valid,
-      Mux(io.redirect.bits.robIdx.isFormer && io.redirect.bits.flushItself(), io.redirect.bits.robIdx.asFormer, io.redirect.bits.robIdx.addEntries(1.U).asFormer), // redirect: move ptr to given rob index
+      Mux(io.redirect.bits.robIdx.slotIsFormer && io.redirect.bits.flushItself(), io.redirect.bits.robIdx.asFormer, io.redirect.bits.robIdx.addEntries(1.U).asFormer), // redirect: move ptr to given rob index
            Mux(canOut, robIdxHead.addEntries(validCount).asFormer, // instructions successfully entered next stage: increase robIdx
                       /* default */  robIdxHead)) // no instructions passed by this cycle: stick to old value
   robIdxHead := robIdxHeadNext
@@ -453,7 +453,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val walkPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
 
-  val instrSize = Wire(Vec(RenameWidth, UInt((log2Ceil(RenameWidth + 1)).W)))
   val formerLenWidth = log2Ceil(RenameWidth * 4 + 1)
 
   // uop calculation
@@ -469,17 +468,17 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).loadWaitBit := io.waittable(i)
     uops(i).ftqPtr := io.in(i).bits.ftqPtr
     uops(i).ftqOffset := io.in(i).bits.ftqOffset
-    uops(i).compressType := compressType(i)
-    uops(i).needFlush := needFlush(i)
-    uops(i).interrupt_safe := interrupt_safe(i)
+    uops(i).entryPairType := entryPairType(i)
+    uops(i).slotNeedFlushMask := slotNeedFlushMask(i)
+    uops(i).interruptSafe := interruptSafe(i)
     uops(i).isRVC := io.in(i).bits.isRVC
-    uops(i).RVC := RVC(i)
-    uops(i).complexHasDest := complexHasDest(i)
-    uops(i).hasStore := hasStore(i)
-    uops(i).noCompressSource := noCompressSource(i)
-    uops(i).formerInstrCnt := PopCount(formerMasksVec(i))
-    uops(i).latterInstrCnt := PopCount(latterMasksVec(i))
-    val formerLenSum = formerMasksVec(i).asBools
+    uops(i).slotHeadRvcMask := slotHeadRvcMask(i)
+    uops(i).complexSlotHasDest := complexSlotHasDest(i)
+    uops(i).entryHasStore := entryHasStore(i)
+    uops(i).noCompressReason := noCompressReason(i)
+    uops(i).formerInstrCnt := PopCount(formerSlotMaskVec(i))
+    uops(i).latterInstrCnt := PopCount(latterSlotMaskVec(i))
+    val formerLenSum = formerSlotMaskVec(i).asBools
       .zip(io.in.map(_.bits.isRVC))
       .map { case (mask, isRVC) =>
         Mux(mask, Mux(isRVC, 2.U(formerLenWidth.W), 4.U(formerLenWidth.W)), 0.U(formerLenWidth.W))
@@ -515,19 +514,16 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
     io.in(i).ready := !io.in(0).valid || canOut
 
-    uops(i).robIdx := robIdxHead.addEntries(PopCount(io.in.zip(needRobFlags).take(i).map { case (in, needRobFlag) =>
-      in.valid && in.bits.lastUop && needRobFlag
+    uops(i).robIdx := robIdxHead.addEntries(PopCount(io.in.zip(isEntryTailLane).take(i).map { case (in, isEntryTail) =>
+      in.valid && in.bits.lastUop && isEntryTail
     })).asFormer
-    uops(i).robIdx.isFormer := isFormer(i)
+    uops(i).robIdx.slotIsFormer := slotIsFormer(i)
     uops(i).chanelIdx := i.U
-    uops(i).firstUop := io.in(i).bits.firstUop && firstRobFlags(i)
-    uops(i).lastUop := io.in(i).bits.lastUop && needRobFlags(i)
-    // instrSizesVec includes both architectural members of a fusion pair even
-    // though only one uop is emitted.
-    instrSize(i) := instrSizesVec(i)
-    val formerMask = formerMasksVec(i)
-    val latterMask = latterMasksVec(i)
-    val slotMask = Mux(isFormer(i), formerMask, latterMask)
+    uops(i).firstUop := io.in(i).bits.firstUop && isEntryHeadLane(i)
+    uops(i).lastUop := io.in(i).bits.lastUop && isEntryTailLane(i)
+    val formerMask = formerSlotMaskVec(i)
+    val latterMask = latterSlotMaskVec(i)
+    val slotMask = Mux(slotIsFormer(i), formerMask, latterMask)
     val slotLastMask = Reverse(PriorityEncoderOH(Reverse(slotMask)))
     uops(i).lastIsRVC := (slotLastMask & Cat(io.in.map(_.bits.isRVC).reverse)).orR
     uops(i).debug.foreach(_.fusionNum := PopCount(slotMask & Cat(io.isFusionVec.reverse)))
@@ -606,7 +602,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk && !io.vlCommits.isWalk && io.toLsqEnqCtrl.canAccept
     io.out(i).bits := uops(i)
     XSInfo(io.out(i).fire && (uops(i).formerInstrCnt > 1.U || uops(i).latterInstrCnt > 1.U),
-      p"[ROB-HD] lane=$i rob=${uops(i).robIdx.value} former=${uops(i).formerInstrCnt} latter=${uops(i).latterInstrCnt} mask=0x${Hexadecimal(compressMasksVec(i))}\n")
+      p"[ROB-HD] lane=$i rob=${uops(i).robIdx.value} former=${uops(i).formerInstrCnt} latter=${uops(i).latterInstrCnt} mask=0x${Hexadecimal(compressMaskVec(i))}\n")
     // dirty code
     if (i == 0) {
       io.out(i).bits.psrc(0) := Mux(io.out(i).bits.isLUI, 0.U, uops(i).psrc(0))
@@ -649,7 +645,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val inVec = io.in.map(_.bits)
   val isRVCVec = inVec.map(_.isRVC)
   val nonRVCNumVec = (0 until RenameWidth).map{
-    i => compressMasksVec(i).asBools.zip(isRVCVec).map{
+    i => compressMaskVec(i).asBools.zip(isRVCVec).map{
       case (mask, isRVC) => (mask && !isRVC).asUInt
     }
   }
@@ -693,7 +689,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val nonRVCNum = Wire(UInt((log2Ceil(RenameWidth + 1).W)))
     nonRVCNum := nonRVCNumVec(i).reduce(_ +& _)
     uops(i).traceBlockInPipe.iretire := chisel3.util.experimental.decode.decoder(
-      (instrSize(i) ## nonRVCNum),
+      (entryInstrCount(i) ## nonRVCNum),
       TruthTable(
         instrSizeTable.zipWithIndex.map { case (table, encode) =>
           (BitPat(((table._1 << log2Ceil(RenameWidth + 1)) + table._2).U((2 * log2Ceil(RenameWidth + 1)).W)),
@@ -705,7 +701,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // A fused follower has no emitted uop.  Carry each half's youngest
     // architectural classification on its emitted representative so ROB trace
     // state remains exact for both a full commit and a latter-half squash.
-    val traceSlotMask = Mux(isFormer(i), formerMasksVec(i), latterMasksVec(i))
+    val traceSlotMask = Mux(slotIsFormer(i), formerSlotMaskVec(i), latterSlotMaskVec(i))
     val traceLastMask = Reverse(PriorityEncoderOH(Reverse(traceSlotMask)))
     val traceLastIsRVC = (traceLastMask & Cat(isRVCVec.reverse)).orR
     uops(i).traceBlockInPipe.ilastsize := Mux(traceLastIsRVC, Ilastsize.HalfWord, Ilastsize.Word)
