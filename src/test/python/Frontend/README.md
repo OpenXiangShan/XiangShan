@@ -15,7 +15,8 @@
   - 顶层环境入口。
   - 暴露 `FrontendEnv`、`env`、`full_env`。
 - `conftest.py`
-  - 只负责路径初始化和 `data/` 目录准备。
+  - 负责路径初始化、`data/` 目录准备，以及 VCS batch pytest 的 session
+    级 DUT finalization。
 - `README.md`
   - 当前文件，作为 Frontend Python 验证目录入口说明。
 

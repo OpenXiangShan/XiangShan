@@ -41,6 +41,13 @@ def pytest_configure(config):
     )
 
 
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session, exitstatus):
+    from env.fixtures import finish_vcs_batch_dut
+
+    finish_vcs_batch_dut()
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     """Expose phase reports to the fixture that finalizes funcov artifacts."""

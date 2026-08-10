@@ -221,6 +221,18 @@ def _coverage_path(request, default_dir: Path) -> Path:
     return coverage_dir / f"{_artifact_tag(request)}.dat"
 
 
+def _vcs_batch_coverage_path(request, default_dir: Path) -> Path:
+    coverage_dir = Path(os.getenv("TB_COVERAGE_DIR", str(_artifact_root_dir(request, default_dir))))
+    coverage_dir.mkdir(parents=True, exist_ok=True)
+    return coverage_dir / f"{_safe_path_component(_effective_run_id())}_vcs_batch.dat"
+
+
+def _dut_coverage_path(request, default_dir: Path) -> Path:
+    if _vcs_batch_run_enabled():
+        return _vcs_batch_coverage_path(request, default_dir)
+    return _coverage_path(request, default_dir)
+
+
 def _coverage_ignore_path() -> str | None:
     raw = os.getenv("TB_LINE_COVERAGE_IGNORE", "").strip()
     if raw:
@@ -386,12 +398,14 @@ def create_dut(request):
         case_log_path = _log_path(request, data_dir)
         case_log_handler = _attach_case_log_handler(case_log_path)
     batch_run = _vcs_batch_run_enabled()
+    created_batch_dut = False
     if batch_run and _VCS_BATCH_DUT is not None:
         dut = _VCS_BATCH_DUT
     else:
         dut = create_frontend_dut(tc_name=tc_name, dut_logger=logger)
         if batch_run:
             _VCS_BATCH_DUT = dut
+            created_batch_dut = True
     if (
         request is not None
         and _is_enabled("TB_ENABLE_DUT_TESTS", default="0")
@@ -406,12 +420,14 @@ def create_dut(request):
     waveform_format = _waveform_format_from_dut(dut)
 
     waveform = _waveform_path(request, data_dir, waveform_format=waveform_format)
-    coverage = _coverage_path(request, data_dir)
+    coverage = _dut_coverage_path(request, data_dir)
     try:
         if _is_enabled("TB_ENABLE_FST_DUMP", default="1"):
             waveform.parent.mkdir(parents=True, exist_ok=True)
             dut.SetWaveform(str(waveform))
-        if _is_enabled("TB_ENABLE_DUT_COVERAGE", default="1"):
+        if _is_enabled("TB_ENABLE_DUT_COVERAGE", default="1") and (
+            not batch_run or created_batch_dut
+        ):
             dut.SetCoverage(str(coverage))
         logger.info(
             "dut created: tc=%s waveform=%s coverage=%s case_log=%s",
@@ -428,6 +444,16 @@ def create_dut(request):
     setattr(dut, "_frontend_case_log_handler", case_log_handler)
     setattr(dut, "_frontend_case_log_path", None if case_log_path is None else str(case_log_path))
     return dut
+
+
+def finish_vcs_batch_dut() -> None:
+    """Finalize the one reused VCS DUT after pytest has released all cases."""
+    global _VCS_BATCH_DUT
+    if not _vcs_batch_run_enabled() or _VCS_BATCH_DUT is None:
+        return
+    dut = _VCS_BATCH_DUT
+    _VCS_BATCH_DUT = None
+    dut.Finish()
 
 
 def _suppress_dut_finalizer_for_batch_run(dut) -> None:
@@ -447,7 +473,7 @@ def _suppress_dut_finalizer_for_batch_run(dut) -> None:
 def dut(request):
     dut = create_dut(request)
     _suppress_dut_finalizer_for_batch_run(dut)
-    coverage = _coverage_path(request, _data_dir())
+    coverage = _dut_coverage_path(request, _data_dir())
     if not vars(dut).get("_frontend_clock_initialized", False):
         dut.InitClock("clock")
         setattr(dut, "_frontend_clock_initialized", True)
@@ -482,7 +508,7 @@ def env(dut, request):
     funcov_dir = _funcov_dir()
     tag = _artifact_tag(request)
     waveform = _waveform_path(request, data_dir, waveform_format=_waveform_format_from_dut(dut))
-    coverage = _coverage_path(request, data_dir)
+    coverage = _dut_coverage_path(request, data_dir)
     recorder = None
     if _is_enabled("TB_ENABLE_FUNCTIONAL_COVERAGE", default="1"):
         targets = _funcov_targets(request)
