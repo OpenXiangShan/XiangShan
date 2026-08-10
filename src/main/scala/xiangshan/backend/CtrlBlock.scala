@@ -105,6 +105,7 @@ class CtrlBlockImp(
   private val memCtrl = Module(new MemCtrl(params))
 
   private val disableFusion = decode.io.csrCtrl.singlestep || !decode.io.csrCtrl.fusion_enable
+  private val msrConservativeNoFusion = true.B
 
   private val s0_robFlushRedirect = rob.io.flushOut
   private val s1_robFlushRedirect = Wire(Valid(new Redirect))
@@ -605,7 +606,7 @@ class CtrlBlockImp(
 
   val decodeHasException = decode.io.out.map(x => x.bits.exceptionVec.orR || (!TriggerAction.isNone(x.bits.trigger)))
   // fusion decoder
-  fusionDecoder.io.disableFusion := disableFusion
+  fusionDecoder.io.disableFusion := disableFusion || msrConservativeNoFusion
   for (i <- 0 until DecodeWidth) {
     fusionDecoder.io.in(i).valid := decode.io.out(i).valid && !decodeHasException(i)
     fusionDecoder.io.in(i).bits := decode.io.out(i).bits.instr
@@ -675,6 +676,8 @@ class CtrlBlockImp(
 
   rename.io.redirect := s1_s3_redirect
   rename.io.rgidReset := rob.io.msrRgid.reset
+  rob.io.msrCandidate.req := rename.io.msrCandidateReq
+  rename.io.msrCandidateResp := rob.io.msrCandidate.resp
   rename.io.rabCommits := rob.io.rabCommits
   rename.io.vlCommits := rob.io.vlCommits
   rename.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)

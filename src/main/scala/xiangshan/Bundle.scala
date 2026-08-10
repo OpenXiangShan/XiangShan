@@ -379,6 +379,15 @@ object MsrRgid {
   val Null = 0
 }
 
+object MsrConfig {
+  val StreamCount = 2
+  val EntriesPerStream = 128
+  val WpbEntriesPerStream = EntriesPerStream / 4
+  val StreamIdWidth = log2Ceil(StreamCount)
+  val StreamGenerationWidth = 32
+  val InstructionOffsetWidth = log2Ceil(EntriesPerStream + 1)
+}
+
 class RabCommitInfo(implicit p: Parameters) extends XSBundle {
   val ldest = UInt(LogicRegsWidth.W)
   val pdest = UInt(PhyRegIdxWidth.W)

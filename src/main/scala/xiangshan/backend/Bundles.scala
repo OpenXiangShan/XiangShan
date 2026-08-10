@@ -106,6 +106,7 @@ object Bundles {
   // Frontend --[CtrlBlock]--> DecodeInUop
   class DecodeInUop(implicit p: Parameters) extends XSBundle {
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
+    val msrPc = UInt(VAddrBits.W)
     val exceptionVec = ExceptSparseVec(ExceptionNO.fromFrontendSet)
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
@@ -121,6 +122,7 @@ object Bundles {
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       connectSamePort(this, source)
+      this.msrPc := source.pc
       this.isRVC := source.isRvc
       this.isFetchMalAddr := source.backendException
       this.debug.foreach(_.pc := source.pc)
@@ -135,6 +137,7 @@ object Bundles {
   // DecodeInUop --[Decode]--> DecodeOutUop
   class DecodeOutUop(implicit p: Parameters) extends XSBundle {
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
+    val msrPc = UInt(VAddrBits.W)
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
@@ -228,6 +231,21 @@ object Bundles {
     }
   }
 
+  class MsrCandidate(implicit p: Parameters) extends XSBundle {
+    val valid = Bool()
+    val streamId = UInt(MsrConfig.StreamIdWidth.W)
+    val streamGeneration = UInt(MsrConfig.StreamGenerationWidth.W)
+    val instructionOffset = UInt(MsrConfig.InstructionOffsetWidth.W)
+  }
+
+  class MsrCandidateRequest(implicit p: Parameters) extends XSBundle {
+    val valid = Bool()
+    val fire = Bool()
+    val pc = UInt(VAddrBits.W)
+    val ftqPtr = new FtqPtr
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+  }
+
   class RenameOutUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
@@ -239,6 +257,9 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    val msrPc = UInt(VAddrBits.W)
+    val msrInstr = UInt(32.W)
+    val msrCandidate = new MsrCandidate
     val commitType = CommitType()
 
     val srcType = Vec(numSrc, SrcType())

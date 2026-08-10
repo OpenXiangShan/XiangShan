@@ -24,7 +24,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.TopDownCounters._
-import xiangshan.backend.Bundles.{DecodeOutUop, RenameOutUop, connectSamePort}
+import xiangshan.backend.Bundles.{DecodeOutUop, MsrCandidate, MsrCandidateRequest, RenameOutUop, connectSamePort}
 import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_Z, XSDebugDecode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.{StoreBubbleReason, PipelineStallReason}
@@ -107,6 +107,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       val quarantine = Bool()
       val overflow = Bool()
     })
+    val msrCandidateReq = Output(Vec(RenameWidth, new MsrCandidateRequest))
+    val msrCandidateResp = Input(Vec(RenameWidth, new MsrCandidate))
   })
 
   io.in.zipWithIndex.map { case (o, i) =>
@@ -477,6 +479,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).crossFtqCommit := 0.U
     uops(i).ftqLastOffset := io.in(i).bits.ftqOffset
     uops(i).lastIsRVC := io.in(i).bits.isRVC
+    uops(i).msrInstr := io.in(i).bits.instr
+    uops(i).msrCandidate := io.msrCandidateResp(i)
+    io.msrCandidateReq(i).valid := io.in(i).valid && io.in(i).bits.firstUop
+    io.msrCandidateReq(i).fire := io.out(i).fire && io.in(i).bits.firstUop
+    io.msrCandidateReq(i).pc := io.in(i).bits.msrPc
+    io.msrCandidateReq(i).ftqPtr := io.in(i).bits.ftqPtr
+    io.msrCandidateReq(i).ftqOffset := io.in(i).bits.ftqOffset
     // alloc a new phy reg
     needV0Dest(i) := io.in(i).valid && needDestReg(Reg_V0, io.in(i).bits)
     needVlDest(i) := io.in(i).valid && needDestReg(Reg_Vl, io.in(i).bits)
