@@ -831,7 +831,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val sqDeqCnt        = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
       val rdataPtrExt     = Input(Vec(EnsbufferWidth, new SqPtr))
       val deqPtrExt       = Input(Vec(EnsbufferWidth, new SqPtr))
-      val validCnt        = Input(UInt(log2Ceil(StoreQueuePhysicalSize + 1).W))
+      val validCnt        = Input(UInt(log2Ceil(StoreQueueSize + 1).W))
       val fromVirtualStoreQueue = Flipped(new VirtualStoreQueueToPhysicalQueueIO(PhysicalQueuePtr))
       val fromUnalignQueue = Flipped(DecoupledIO(new Bundle {
         val paddr         = UInt(PAddrBits.W)
@@ -1562,7 +1562,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
   deqModule.io.fromUnalignQueue <> unalignQueue.io.toDeqModule
   deqModule.io.deqPtrExt        := deqPtrExt
   deqModule.io.rdataPtrExt      := rdataPtrExt
-  deqModule.io.validCnt         := validCount
+  deqModule.io.validCnt         := virtualValidCount
   io.exceptionInfo              := deqModule.io.exceptionInfo
 
   // unalignQueue connection
