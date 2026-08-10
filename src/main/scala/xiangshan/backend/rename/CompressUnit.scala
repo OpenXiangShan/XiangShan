@@ -43,11 +43,11 @@ object CompressType {
 
   def apply() = UInt(2.W)
 
-  def isNORMAL(compressType: UInt): Bool = compressType === NORMAL
-  def isCC(compressType: UInt): Bool = compressType === CC
-  def isCS(compressType: UInt): Bool = compressType === CS
-  def isSC(compressType: UInt): Bool = compressType === SC
-  def isNotNORMAL(compressType: UInt): Bool = compressType =/= NORMAL
+  def isNORMAL(entryPairType: UInt): Bool = entryPairType === NORMAL
+  def isCC(entryPairType: UInt): Bool = entryPairType === CC
+  def isCS(entryPairType: UInt): Bool = entryPairType === CS
+  def isSC(entryPairType: UInt): Bool = entryPairType === SC
+  def isNotNORMAL(entryPairType: UInt): Bool = entryPairType =/= NORMAL
 
   def isLoadStore(commitType: UInt): Bool = commitType(1)
   def lsInstIsStore(commitType: UInt): Bool = commitType(0)
@@ -55,7 +55,7 @@ object CompressType {
   def isBranch(commitType: UInt): Bool = commitType(0) && !commitType(1)
 }
 
-object NoCompressSource {
+object NoCompressReason {
   def compressed        = "b00".U
   def noEnoughInstr     = "b01".U
   def flushedHalf       = "b10".U
@@ -72,23 +72,21 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
     val actualValid = Vec(RenameWidth, Input(Bool()))
     val forceNoCompress = Input(Bool())
     val out = new Bundle {
-      val needRobFlags = Vec(RenameWidth, Output(Bool()))
-      val firstRobFlags = Vec(RenameWidth, Output(Bool()))
-      val instrSizes = Vec(RenameWidth, Output(UInt(log2Ceil(RenameWidth + 1).W)))
-      val formerMasks = Vec(RenameWidth, Output(UInt(RenameWidth.W)))
-      val latterMasks = Vec(RenameWidth, Output(UInt(RenameWidth.W)))
-      val compressType = Vec(RenameWidth, CompressType())
-      val isFormer = Vec(RenameWidth, Output(Bool()))
-      val needFlush = Vec(RenameWidth, Output(UInt(2.W)))
-      val interrupt_safe = Vec(RenameWidth, Output(Bool()))
-      val RVC = Vec(RenameWidth, Output(UInt(2.W)))
-      val complexHasDest = Vec(RenameWidth, Output(UInt(1.W)))
-      val hasStore = Vec(RenameWidth, Output(Bool()))
-      val noCompressSource = Vec(RenameWidth, NoCompressSource())
+      val isEntryTailLane = Vec(RenameWidth, Output(Bool()))
+      val isEntryHeadLane = Vec(RenameWidth, Output(Bool()))
+      val formerSlotMask = Vec(RenameWidth, Output(UInt(RenameWidth.W)))
+      val latterSlotMask = Vec(RenameWidth, Output(UInt(RenameWidth.W)))
+      val entryPairType = Vec(RenameWidth, CompressType())
+      val slotNeedFlushMask = Vec(RenameWidth, Output(UInt(2.W)))
+      val interruptSafe = Vec(RenameWidth, Output(Bool()))
+      val slotHeadRvcMask = Vec(RenameWidth, Output(UInt(2.W)))
+      val complexSlotHasDest = Vec(RenameWidth, Output(UInt(1.W)))
+      val entryHasStore = Vec(RenameWidth, Output(Bool()))
+      val noCompressReason = Vec(RenameWidth, NoCompressReason())
     }
   })
 
-  val needFlushVec = io.in.map { x =>
+  val slotNeedsFlushVec = io.in.map { x =>
     x.valid && (x.bits.exceptionVec.orR || TriggerAction.isDmode(x.bits.trigger) || x.bits.flushPipe)
   }
 
@@ -109,26 +107,24 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   })
 
   for (i <- 0 until RenameWidth) {
-    io.out.needRobFlags(i)      := false.B
-    io.out.firstRobFlags(i)     := false.B
-    io.out.instrSizes(i)        := 0.U
-    io.out.formerMasks(i)       := 0.U
-    io.out.latterMasks(i)       := 0.U
-    io.out.compressType(i)      := CompressType.NORMAL
-    io.out.isFormer(i)          := false.B
-    io.out.needFlush(i)         := 0.U
-    io.out.interrupt_safe(i)    := true.B
-    io.out.RVC(i)               := 0.U
-    io.out.complexHasDest(i)    := 0.U
-    io.out.hasStore(i)          := false.B
-    io.out.noCompressSource(i)  := NoCompressSource.compressed
+    io.out.isEntryTailLane(i)      := false.B
+    io.out.isEntryHeadLane(i)     := false.B
+    io.out.formerSlotMask(i)       := 0.U
+    io.out.latterSlotMask(i)       := 0.U
+    io.out.entryPairType(i)        := CompressType.NORMAL
+    io.out.slotNeedFlushMask(i)    := 0.U
+    io.out.interruptSafe(i)        := true.B
+    io.out.slotHeadRvcMask(i)      := 0.U
+    io.out.complexSlotHasDest(i)   := 0.U
+    io.out.entryHasStore(i)        := false.B
+    io.out.noCompressReason(i)     := NoCompressReason.compressed
   }
 
   val validVec = VecInit(io.in.map(_.valid))
   val actualValidVec = VecInit(io.actualValid.zip(validVec).map { case (actual, arch) => actual && arch })
   // TODO: move it to decode
   val isCboVec = VecInit(io.in.map(x => x.valid && FuType.isStore(x.bits.fuType) && LSUOpType.isCboAll(x.bits.fuOpType)))
-  val rawNoCompressTypeVec = VecInit(io.in.zip(isCboVec).zip(cannotCompressVec).zip(needFlushVec).map { case (((x, isCbo), cannotCompress), needFlush) =>
+  val rawNoCompressTypeVec = VecInit(io.in.zip(isCboVec).zip(cannotCompressVec).zip(slotNeedsFlushVec).map { case (((x, isCbo), cannotCompress), slotNeedsFlush) =>
     x.valid && (io.forceNoCompress ||
       FuType.isVArithMem(x.bits.fuType) ||
       FuType.isVset(x.bits.fuType) ||
@@ -137,7 +133,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
       FuType.isAMO(x.bits.fuType) ||
       isCbo ||
       cannotCompress ||
-      needFlush
+      slotNeedsFlush
     )
   })
   val noCompressTypeVec = rawNoCompressTypeVec
@@ -236,21 +232,20 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
   val unsafeMaskBits = Cat(io.in.zip(allowInterruptsVec).map { case (in, allow) => in.valid && !allow }.reverse)
   val actualMaskBits = Cat(actualValidVec.reverse)
   val storeMaskBits = Cat(io.in.map(in => in.valid && FuType.isStore(in.bits.fuType)).reverse)
-  val flushMaskBits = Cat(io.in.zip(needFlushVec).map { case (in, flush) => in.valid && flush }.reverse)
+  val flushMaskBits = Cat(io.in.zip(slotNeedsFlushVec).map { case (in, flush) => in.valid && flush }.reverse)
   val rvcMaskBits = Cat(io.in.map(in => in.valid && in.bits.isRVC).reverse)
 
   val entryMask = Wire(Vec(RenameWidth, UInt(RenameWidth.W)))
   val entryFormerMask = Wire(Vec(RenameWidth, UInt(RenameWidth.W)))
   val entryLatterMask = Wire(Vec(RenameWidth, UInt(RenameWidth.W)))
   val entryActualMask = Wire(Vec(RenameWidth, UInt(RenameWidth.W)))
-  val entryInstrCnt = Wire(Vec(RenameWidth, UInt(log2Ceil(RenameWidth + 1).W)))
-  val entryCompressType = Wire(Vec(RenameWidth, CompressType()))
-  val entryNeedFlush = Wire(Vec(RenameWidth, UInt(2.W)))
+  val entryPairType = Wire(Vec(RenameWidth, CompressType()))
+  val entrySlotNeedFlushMask = Wire(Vec(RenameWidth, UInt(2.W)))
   val entryInterruptSafe = Wire(Vec(RenameWidth, Bool()))
-  val entryRVC = Wire(Vec(RenameWidth, UInt(2.W)))
+  val entrySlotHeadRvcMask = Wire(Vec(RenameWidth, UInt(2.W)))
   val entryHasStore = Wire(Vec(RenameWidth, Bool()))
-  val entryComplexHasDest = Wire(Vec(RenameWidth, UInt(1.W)))
-  val entryNoCompressSource = Wire(Vec(RenameWidth, NoCompressSource()))
+  val entryComplexSlotHasDest = Wire(Vec(RenameWidth, UInt(1.W)))
+  val entryNoCompressReason = Wire(Vec(RenameWidth, NoCompressReason()))
 
   for (e <- 0 until RenameWidth) {
     val tokenInEntry = (0 until RenameWidth).map(t => tokenValid(t) && tokenEntryId(t) === e.U)
@@ -267,8 +262,6 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
       Mux(sel, mask, 0.U(RenameWidth.W))
     }.reduce(_ | _)
     entryActualMask(e) := entryMask(e) & actualMaskBits
-    entryInstrCnt(e) := PopCount(entryMask(e))
-
     val hasLatter = entryLatterMask(e).orR
     val formerIsComplex = tokenIsFormerInEntry.zip(tokenComplex).map { case (sel, c) => sel && c }.reduce(_ || _)
     val formerIsSimple = tokenIsFormerInEntry.zip(tokenSimple).map { case (sel, s) => sel && s }.reduce(_ || _)
@@ -278,7 +271,7 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
     val formerComplexHasDest = tokenIsFormerInEntry.zip(tokenComplexHasDest).map { case (sel, d) => sel && d }.reduce(_ || _)
     val latterComplexHasDest = tokenIsLatterInEntry.zip(tokenComplexHasDest).map { case (sel, d) => sel && d }.reduce(_ || _)
 
-    entryCompressType(e) := Mux(
+    entryPairType(e) := Mux(
       !hasLatter,
       CompressType.NORMAL,
       Mux(
@@ -295,21 +288,21 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
         )
       )
     )
-    entryNeedFlush(e) := Cat((entryLatterMask(e) & flushMaskBits).orR, (entryFormerMask(e) & flushMaskBits).orR)
+    entrySlotNeedFlushMask(e) := Cat((entryLatterMask(e) & flushMaskBits).orR, (entryFormerMask(e) & flushMaskBits).orR)
     entryInterruptSafe(e) := !(entryMask(e) & unsafeMaskBits).orR
     val formerFirstMask = PriorityEncoderOH(entryFormerMask(e))
     val latterFirstMask = PriorityEncoderOH(entryLatterMask(e))
-    entryRVC(e) := Cat((latterFirstMask & rvcMaskBits).orR, (formerFirstMask & rvcMaskBits).orR)
+    entrySlotHeadRvcMask(e) := Cat((latterFirstMask & rvcMaskBits).orR, (formerFirstMask & rvcMaskBits).orR)
     entryHasStore(e) := (entryMask(e) & storeMaskBits).orR
-    entryComplexHasDest(e) := Mux(
+    entryComplexSlotHasDest(e) := Mux(
       formerIsComplex,
       formerComplexHasDest,
       Mux(latterIsComplex, latterComplexHasDest, false.B)
     ).asUInt
-    entryNoCompressSource(e) := Mux(
+    entryNoCompressReason(e) := Mux(
       hasLatter || PopCount(entryFormerMask(e)) > 1.U,
-      NoCompressSource.compressed,
-      Mux(formerNoCompress, NoCompressSource.cannotCompress, NoCompressSource.noEnoughInstr)
+      NoCompressReason.compressed,
+      Mux(formerNoCompress, NoCompressReason.cannotCompress, NoCompressReason.noEnoughInstr)
     )
   }
 
@@ -328,19 +321,17 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
       } else {
         eActualMask(i - 1, 0).orR
       }
-      io.out.needRobFlags(i)      := !hasLaterActualInEntry
-      io.out.firstRobFlags(i)     := !hasEarlierActualInEntry
-      io.out.instrSizes(i)        := entryInstrCnt(entryId)
-      io.out.formerMasks(i)       := entryFormerMask(entryId)
-      io.out.latterMasks(i)       := entryLatterMask(entryId)
-      io.out.compressType(i)      := entryCompressType(entryId)
-      io.out.isFormer(i)          := !tokenIsSecond(tokenId)
-      io.out.needFlush(i)         := entryNeedFlush(entryId)
-      io.out.interrupt_safe(i)    := entryInterruptSafe(entryId)
-      io.out.RVC(i)               := entryRVC(entryId)
-      io.out.complexHasDest(i)    := entryComplexHasDest(entryId)
-      io.out.hasStore(i)          := entryHasStore(entryId)
-      io.out.noCompressSource(i)  := entryNoCompressSource(entryId)
+      io.out.isEntryTailLane(i)      := !hasLaterActualInEntry
+      io.out.isEntryHeadLane(i)     := !hasEarlierActualInEntry
+      io.out.formerSlotMask(i)       := entryFormerMask(entryId)
+      io.out.latterSlotMask(i)       := entryLatterMask(entryId)
+      io.out.entryPairType(i)        := entryPairType(entryId)
+      io.out.slotNeedFlushMask(i)    := entrySlotNeedFlushMask(entryId)
+      io.out.interruptSafe(i)        := entryInterruptSafe(entryId)
+      io.out.slotHeadRvcMask(i)      := entrySlotHeadRvcMask(entryId)
+      io.out.complexSlotHasDest(i)   := entryComplexSlotHasDest(entryId)
+      io.out.entryHasStore(i)        := entryHasStore(entryId)
+      io.out.noCompressReason(i)     := entryNoCompressReason(entryId)
     }
   }
 }
