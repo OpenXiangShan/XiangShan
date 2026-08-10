@@ -42,6 +42,11 @@ def _golden_completion_pending_work_count(backend_model) -> int:
     return _pending_work_count(backend_model)
 
 
+def _optional_backend_value(backend_model, method_name: str, default=None):
+    method = getattr(backend_model, method_name, None)
+    return method() if callable(method) else default
+
+
 def _read_nonnegative_int_env(name: str) -> int:
     raw = os.getenv(name, "").strip()
     if not raw:
@@ -139,35 +144,24 @@ class RunUntilGoldenTraceCompleteSequence:
                 next_cursor_report += 5000
 
             monitor_errors = env.monitor.get_errors()
-            if logger is not None and progress_interval > 0 and (cycles_run % progress_interval) == 0:
-                logger.info(
-                    (
-                        "run until golden progress checkpoint: cycles=%d cursor=%d/%d "
-                        "golden_pc=%s wrong_path_target_pc=%s recovery_target_pc=%s "
-                        "wrong_path_origin=%s recovery_stage=%s pending_work=%d monitor_errors=%d"
-                    ),
-                    cycles_run,
-                    int(trace.cursor),
-                    total_entries,
-                    format_optional_pc(current_golden_pc_getter(trace, env.backend_model)),
-                    format_optional_pc(env.backend_model._current_wrong_path_target_pc()),
-                    format_optional_pc(env.backend_model._current_recovery_target_pc()),
-                    (
-                        "none"
-                        if env.backend_model._active_wrong_path_origin_index() is None
-                        else str(int(env.backend_model._active_wrong_path_origin_index()))
-                    ),
-                    (
-                        "recovery"
-                        if env.backend_model._recovery_phase_active()
-                        else (
-                            "pre_redirect"
-                            if env.backend_model._has_active_wrong_path_episode()
-                            else "none"
-                        )
-                    ),
-                    _pending_work_count(env.backend_model),
-                    len(monitor_errors),
+            if progress_interval > 0 and (cycles_run % progress_interval) == 0:
+                wrong_path_target_pc = _optional_backend_value(env.backend_model, "_current_wrong_path_target_pc")
+                recovery_target_pc = _optional_backend_value(env.backend_model, "_current_recovery_target_pc")
+                wrong_path_origin = _optional_backend_value(env.backend_model, "_active_wrong_path_origin_index")
+                recovery_active = bool(_optional_backend_value(env.backend_model, "_recovery_phase_active", False))
+                wrong_path_active = bool(_optional_backend_value(env.backend_model, "_has_active_wrong_path_episode", False))
+                recovery_stage = "recovery" if recovery_active else "pre_redirect" if wrong_path_active else "none"
+                print(
+                    "[frontend] golden progress checkpoint: "
+                    f"cycles={cycles_run} cursor={int(trace.cursor)}/{total_entries} "
+                    f"golden_pc={format_optional_pc(current_golden_pc_getter(trace, env.backend_model))} "
+                    f"wrong_path_target_pc={format_optional_pc(wrong_path_target_pc)} "
+                    f"recovery_target_pc={format_optional_pc(recovery_target_pc)} "
+                    "wrong_path_origin="
+                    f"{('none' if wrong_path_origin is None else str(int(wrong_path_origin)))} "
+                    f"recovery_stage={recovery_stage} "
+                    f"pending_work={_pending_work_count(env.backend_model)} monitor_errors={len(monitor_errors)}",
+                    flush=True,
                 )
             if (
                 logger is not None

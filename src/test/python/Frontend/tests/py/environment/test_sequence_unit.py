@@ -182,6 +182,15 @@ def test_run_until_golden_trace_complete_uses_monitor_and_backend_model_contract
     assert result.completed is True
 
 
+def test_run_until_golden_trace_complete_prints_cycle_progress_checkpoint(capsys):
+    env = _GoldenTraceEnv()
+
+    result = RunUntilGoldenTraceCompleteSequence(max_cycles=2, progress_interval=1).run(env)
+
+    assert result.completed is True
+    assert "golden progress checkpoint: cycles=1 cursor=1/1" in capsys.readouterr().out
+
+
 def test_run_until_golden_trace_complete_stops_on_stagnant_cursor_limit():
     env = _StagnantGoldenTraceEnv()
 
