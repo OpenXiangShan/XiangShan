@@ -39,33 +39,69 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
     val MsrStreamGenerationWidth = MsrConfig.StreamGenerationWidth
     val MsrWpbOffsetWidth = log2Ceil(MsrWpbEntriesPerStream + 1)
     val MsrBlockPositionCount = 1 << FetchBlockInstOffsetWidth
+    val MsrInstSlotsPerRob = RenameWidth
+    val MsrRobInstCountWidth = log2Ceil(MsrInstSlotsPerRob + 1)
+    val MsrRobInstSlotWidth = log2Ceil(MsrInstSlotsPerRob)
 
-    val msrRobSrcUsed = RegInit(VecInit.fill(RobSize)(VecInit.fill(backendParams.numSrc)(false.B)))
-    val msrRobSrcRgid = RegInit(VecInit.fill(RobSize)(
+    // ROB compression can place several original instructions in one ROB entry.
+    // Preserve one metadata slot per original instruction so Squash Log offsets
+    // remain instruction-granular.
+    val msrRobInstCount = RegInit(VecInit.fill(RobSize)(0.U(MsrRobInstCountWidth.W)))
+    val msrRobSrcUsed = RegInit(VecInit.fill(RobSize)(VecInit.fill(MsrInstSlotsPerRob)(
+      VecInit.fill(backendParams.numSrc)(false.B)
+    )))
+    val msrRobSrcRgid = RegInit(VecInit.fill(RobSize)(VecInit.fill(MsrInstSlotsPerRob)(
       VecInit.fill(backendParams.numSrc)(MsrRgid.Null.U(MsrRgid.Width.W))
-    ))
-    val msrRobDestRgid = RegInit(VecInit.fill(RobSize)(MsrRgid.Null.U(MsrRgid.Width.W)))
-    val msrRobPdest = RegInit(VecInit.fill(RobSize)(0.U(PhyRegIdxWidth.W)))
-    val msrRobAlu = RegInit(VecInit.fill(RobSize)(false.B))
-    val msrRobReusableAlu = RegInit(VecInit.fill(RobSize)(false.B))
-    val msrRobPc = RegInit(VecInit.fill(RobSize)(0.U(VAddrBits.W)))
-    val msrRobInstr = RegInit(VecInit.fill(RobSize)(0.U(32.W)))
-    val msrRobFtqPtr = Reg(Vec(RobSize, new FtqPtr))
-    val msrRobFtqOffset = RegInit(VecInit.fill(RobSize)(0.U(FetchBlockInstOffsetWidth.W)))
+    )))
+    val msrRobDestRgid = RegInit(VecInit.fill(RobSize)(VecInit.fill(MsrInstSlotsPerRob)(
+      MsrRgid.Null.U(MsrRgid.Width.W)
+    )))
+    val msrRobPdest = RegInit(VecInit.fill(RobSize)(VecInit.fill(MsrInstSlotsPerRob)(
+      0.U(PhyRegIdxWidth.W)
+    )))
+    val msrRobAlu = RegInit(VecInit.fill(RobSize)(VecInit.fill(MsrInstSlotsPerRob)(false.B)))
+    val msrRobReusableAlu = RegInit(VecInit.fill(RobSize)(VecInit.fill(MsrInstSlotsPerRob)(false.B)))
+    val msrRobOwnsIntPReg = RegInit(VecInit.fill(RobSize)(VecInit.fill(MsrInstSlotsPerRob)(false.B)))
+    val msrRobReused = RegInit(VecInit.fill(RobSize)(VecInit.fill(MsrInstSlotsPerRob)(false.B)))
+    val msrRobPc = RegInit(VecInit.fill(RobSize)(VecInit.fill(MsrInstSlotsPerRob)(0.U(VAddrBits.W))))
+    val msrRobInstr = RegInit(VecInit.fill(RobSize)(VecInit.fill(MsrInstSlotsPerRob)(0.U(32.W))))
+    val msrRobFtqPtr = Reg(Vec(RobSize, Vec(MsrInstSlotsPerRob, new FtqPtr)))
+    val msrRobFtqOffset = RegInit(VecInit.fill(RobSize)(VecInit.fill(MsrInstSlotsPerRob)(
+      0.U(FetchBlockInstOffsetWidth.W)
+    )))
 
     val msrEnqAllocInt = VecInit(io.enq.req.map { req =>
-      io.enq.canAccept && req.valid && req.bits.firstUop && !io.redirect.valid &&
-        req.bits.rfWen && !req.bits.isMove
+      io.enq.canAccept && req.valid && req.bits.msrOriginalFirstUop && !io.redirect.valid &&
+        req.bits.rfWen && !req.bits.isMove && !req.bits.msrReused
     })
     val msrEnqReusableAlu = VecInit(io.enq.req.map { req =>
-      io.enq.canAccept && req.valid && req.bits.firstUop && !io.redirect.valid &&
-        FuType.isAlu(req.bits.fuType) && req.bits.rfWen && !req.bits.isMove &&
-        !req.bits.hasException && !req.bits.flushPipe && !req.bits.singleStep &&
-        req.bits.firstUop && req.bits.lastUop && req.bits.destRgid =/= MsrRgid.Null.U
+      io.enq.canAccept && req.valid && req.bits.msrOriginalFirstUop && !io.redirect.valid &&
+        req.bits.msrReusable && req.bits.destRgid =/= MsrRgid.Null.U
+    })
+    val msrEnqOwnsIntPReg = VecInit(io.enq.req.map { req =>
+      io.enq.canAccept && req.valid && req.bits.msrOriginalFirstUop && !io.redirect.valid &&
+        req.bits.rfWen && !req.bits.isMove
+    })
+    val msrInstEnqValid = VecInit(io.enq.req.map { req =>
+      io.enq.canAccept && req.valid && req.bits.msrOriginalFirstUop && !io.redirect.valid
+    })
+    val msrInstEnqCount = VecInit(io.enq.req.zip(msrInstEnqValid).map { case (req, valid) =>
+      Mux(valid, 1.U +& req.bits.msrFusionSecondValid, 0.U)
     })
 
     val msrMispredSample = redirectValidReg && redirectMisPredReg
-    val msrSquashedInst = PopCount(redirectNeedFlush)
+    val msrRobCompletesThisCycle = VecInit((0 until RobSize).map { robIdx =>
+      val writebackMatch = exuWBs.map { writeback =>
+        writeback.valid && writeback.bits.robIdx.value === robIdx.U
+      }
+      val writebackCount = Mux1H(writebackMatch, io.writebackNums.map(_.bits))
+      robEntries(robIdx).isWritebacked ||
+        (robEntries(robIdx).valid && writebackCount.orR && robEntries(robIdx).uopNum === writebackCount)
+    })
+    val msrSquashedRobEntries = PopCount(redirectNeedFlush)
+    val msrSquashedInst = (0 until RobSize).map { robIdx =>
+      Mux(redirectNeedFlush(robIdx), msrRobInstCount(robIdx), 0.U)
+    }.reduce(_ +& _)
     val msrRgidResetPending = RegInit(false.B)
     val msrRgidDrainCount = RegInit(0.U(log2Ceil(RobSize + 1).W))
     val msrRgidCommitCount = Mux(io.commits.isCommit, commitCnt, 0.U)
@@ -109,7 +145,7 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
     ))
     val msrLogDestRgid = RegInit(VecInit.fill(MsrTotalEntries)(MsrRgid.Null.U(MsrRgid.Width.W)))
     val msrLogPdest = RegInit(VecInit.fill(MsrTotalEntries)(0.U(PhyRegIdxWidth.W)))
-    // Observational hold state only: the real freelist is deliberately unchanged.
+    // True while the entry owns a PReg excluded from ordinary freelist allocation.
     val msrLogPdestRetained = RegInit(VecInit.fill(MsrTotalEntries)(false.B))
     val msrLogReusableAlu = RegInit(VecInit.fill(MsrTotalEntries)(false.B))
     val msrLogHasStaticHit = RegInit(VecInit.fill(MsrStreamCount)(false.B))
@@ -125,16 +161,25 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
     val msrLastCandidateFtqPtr = Reg(new FtqPtr)
     val msrLastCandidateBlockPc = RegInit(0.U(VAddrBits.W))
 
-    // redirectBegin is the entry immediately before the first flushed instruction.
-    // Walk forward in ROB age order so a bounded stream retains the closest 128 entries.
+    // redirectBegin is the ROB entry immediately before the first flushed entry.
+    // Walk instruction slots first, then advance to the next ROB entry, so a
+    // bounded stream retains the closest 128 original instructions.
     val msrCaptureRobIdx = Wire(Vec(MsrEntriesPerStream, UInt(log2Up(RobSize).W)))
+    val msrCaptureInstSlot = Wire(Vec(MsrEntriesPerStream, UInt(MsrRobInstSlotWidth.W)))
     msrCaptureRobIdx(0) := Mux(redirectBegin >= (RobSize - 1).U, 0.U, redirectBegin + 1.U)
+    msrCaptureInstSlot(0) := 0.U
     for (i <- 1 until MsrEntriesPerStream) {
-      msrCaptureRobIdx(i) := Mux(
-        msrCaptureRobIdx(i - 1) === (RobSize - 1).U,
-        0.U,
-        msrCaptureRobIdx(i - 1) + 1.U
-      )
+      val previousRobIdx = msrCaptureRobIdx(i - 1)
+      val previousSlot = msrCaptureInstSlot(i - 1)
+      val nextSlot = previousSlot +& 1.U
+      val hasNextSlot = redirectNeedFlush(previousRobIdx) &&
+        nextSlot < msrRobInstCount(previousRobIdx)
+      msrCaptureRobIdx(i) := Mux(hasNextSlot, previousRobIdx, Mux(
+          previousRobIdx === (RobSize - 1).U,
+          0.U,
+          previousRobIdx + 1.U
+        ))
+      msrCaptureInstSlot(i) := Mux(hasNextSlot, nextSlot, 0.U)
     }
 
     val msrCaptureValid = Wire(Vec(MsrEntriesPerStream, Bool()))
@@ -143,15 +188,18 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
     val msrCaptureBlockPc = Wire(Vec(MsrEntriesPerStream, UInt(VAddrBits.W)))
     for (entry <- 0 until MsrEntriesPerStream) {
       val robIdx = msrCaptureRobIdx(entry)
-      msrCaptureValid(entry) := redirectNeedFlush(robIdx)
-      msrCaptureBlockPc(entry) := msrRobPc(robIdx) -
-        (msrRobFtqOffset(robIdx) << instOffsetBits)
+      val instSlot = msrCaptureInstSlot(entry)
+      msrCaptureValid(entry) := redirectNeedFlush(robIdx) && instSlot < msrRobInstCount(robIdx)
+      msrCaptureBlockPc(entry) := msrRobPc(robIdx)(instSlot) -
+        (msrRobFtqOffset(robIdx)(instSlot) << instOffsetBits)
       if (entry == 0) {
         msrCaptureNewBlock(entry) := msrCaptureValid(entry)
       } else {
         val previousRobIdx = msrCaptureRobIdx(entry - 1)
+        val previousSlot = msrCaptureInstSlot(entry - 1)
         msrCaptureNewBlock(entry) := msrCaptureValid(entry) &&
-          (!msrCaptureValid(entry - 1) || msrRobFtqPtr(robIdx) =/= msrRobFtqPtr(previousRobIdx))
+          (!msrCaptureValid(entry - 1) ||
+            msrRobFtqPtr(robIdx)(instSlot) =/= msrRobFtqPtr(previousRobIdx)(previousSlot))
       }
       msrCaptureBlockOrdinal(entry) := Mux(
         msrCaptureValid(entry),
@@ -188,6 +236,8 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
     val msrCandidateDiscovery = Wire(Vec(RenameWidth, Bool()))
     val msrCandidateLayoutMismatch = Wire(Vec(RenameWidth, Bool()))
     val msrCandidateContextReject = Wire(Vec(RenameWidth, Bool()))
+    val msrCandidateAmbiguousPosition = Wire(Vec(RenameWidth, Bool()))
+    val msrCandidateAmbiguousReject = Wire(Vec(RenameWidth, Bool()))
 
     msrQueryActive(0) := msrCandidateStateCurrent
     msrQueryStreamId(0) := msrCandidateStreamId
@@ -213,6 +263,8 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
 
       val discoveryEntryMatch = Wire(Vec(MsrStreamCount, UInt(MsrWpbEntriesPerStream.W)))
       val discoveryStreamMatch = Wire(Vec(MsrStreamCount, Bool()))
+      val discoveryStreamUnique = Wire(Vec(MsrStreamCount, Bool()))
+      val discoveryStreamAmbiguous = Wire(Vec(MsrStreamCount, Bool()))
       val contextReject = Wire(Vec(MsrStreamCount, Bool()))
       for (stream <- 0 until MsrStreamCount) {
         val rawTagMatch = VecInit((0 until MsrWpbEntriesPerStream).map { block =>
@@ -232,14 +284,16 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
           case (tagMatch, predecessorMatch) => tagMatch && predecessorMatch
         }).asUInt
         discoveryStreamMatch(stream) := discoveryEntryMatch(stream).orR
+        discoveryStreamUnique(stream) := PopCount(discoveryEntryMatch(stream)) === 1.U
+        discoveryStreamAmbiguous(stream) := PopCount(discoveryEntryMatch(stream)) > 1.U
         contextReject(stream) := VecInit(rawTagMatch.zip(contextMatch).map {
           case (tagMatch, predecessorMatch) => tagMatch && !predecessorMatch
         }).asUInt.orR
       }
       val otherStream = ~msrNewestStream
-      val discoveryStreamId = Mux(discoveryStreamMatch(msrNewestStream), msrNewestStream, otherStream)
+      val discoveryStreamId = Mux(discoveryStreamUnique(msrNewestStream), msrNewestStream, otherStream)
       val discoveryValid = req.valid && newBlock && !continuationValid && msrStreamAdmission &&
-        (discoveryStreamMatch(msrNewestStream) || discoveryStreamMatch(otherStream))
+        (discoveryStreamUnique(msrNewestStream) || discoveryStreamUnique(otherStream))
       val discoveryWpbOffset = PriorityEncoder(discoveryEntryMatch(discoveryStreamId))
 
       val selectedValid = continuationValid || discoveryValid
@@ -258,15 +312,42 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
       })
       val instructionOffset = msrWpbFirstInstructionOffset(selectedWpbIndex) + instructionOrdinal
       val responseValid = req.valid && selectedValid && instructionStartPresent &&
-        instructionOffset < msrStreamLength(selectedStreamId)
+        instructionOffset < msrStreamLength(selectedStreamId) && msrStreamAdmission &&
+        !msrMispredSample && !io.redirect.valid
+      val selectedLogIndex = Cat(
+        selectedStreamId,
+        instructionOffset(log2Ceil(MsrEntriesPerStream) - 1, 0)
+      )
+      val selectedLogValid = responseValid &&
+        selectedGeneration === msrStreamGeneration(selectedStreamId) &&
+        msrLogValid(selectedLogIndex) && !msrLogConsumed(selectedLogIndex)
 
       io.msrCandidate.resp(lane).valid := responseValid
       io.msrCandidate.resp(lane).streamId := selectedStreamId
       io.msrCandidate.resp(lane).streamGeneration := selectedGeneration
       io.msrCandidate.resp(lane).instructionOffset := instructionOffset
+      io.msrCandidate.reuseInfo(lane).valid := selectedLogValid
+      io.msrCandidate.reuseInfo(lane).pc := msrLogPc(selectedLogIndex)
+      io.msrCandidate.reuseInfo(lane).instr := msrLogInstr(selectedLogIndex)
+      io.msrCandidate.reuseInfo(lane).completed := msrLogCompleted(selectedLogIndex)
+      io.msrCandidate.reuseInfo(lane).reusableAlu := msrLogReusableAlu(selectedLogIndex)
+      io.msrCandidate.reuseInfo(lane).srcUsed := msrLogSrcUsed(selectedLogIndex)
+      io.msrCandidate.reuseInfo(lane).srcRgid := msrLogSrcRgid(selectedLogIndex)
+      io.msrCandidate.reuseInfo(lane).destRgid := msrLogDestRgid(selectedLogIndex)
+      io.msrCandidate.reuseInfo(lane).pdest := msrLogPdest(selectedLogIndex)
+      io.msrCandidate.reuseInfo(lane).held := msrLogPdestRetained(selectedLogIndex)
       msrCandidateDiscovery(lane) := req.fire && responseValid && discoveryValid
       msrCandidateLayoutMismatch(lane) := req.fire && selectedValid && !instructionStartPresent
       msrCandidateContextReject(lane) := req.fire && newBlock && !continuationValid && contextReject.asUInt.orR
+      msrCandidateAmbiguousPosition(lane) := req.fire && newBlock && !continuationValid &&
+        discoveryStreamAmbiguous.asUInt.orR
+      msrCandidateAmbiguousReject(lane) := req.fire && newBlock && !continuationValid &&
+        discoveryStreamMatch.asUInt.orR && !discoveryStreamUnique.asUInt.orR
+
+      when(req.fire && discoveryValid) {
+        assert(PopCount(discoveryEntryMatch(discoveryStreamId)) === 1.U,
+          "MSR discovery accepted an ambiguous WPB position")
+      }
 
       msrQueryActive(lane + 1) := Mux(req.valid, responseValid, msrQueryActive(lane))
       msrQueryStreamId(lane + 1) := Mux(req.valid, selectedStreamId, msrQueryStreamId(lane))
@@ -289,6 +370,8 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
     val msrCandidateTupleValid = Wire(Vec(RenameWidth, Bool()))
     val msrCandidateStaticGuard = Wire(Vec(RenameWidth, Bool()))
     val msrCandidateNullRgidReject = Wire(Vec(RenameWidth, Bool()))
+    val msrCandidateRgidMismatch = Wire(Vec(RenameWidth, Bool()))
+    val msrCandidateClassReject = Wire(Vec(RenameWidth, Bool()))
     for (i <- 0 until RenameWidth) {
       val candidate = io.enq.req(i).bits.msrCandidate
       val instructionOffset = candidate.instructionOffset
@@ -324,6 +407,9 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
       val completedStaticMatch = msrCandidateStaticGuard(i) && msrLogCompleted(entryIndex)
       val reusableAluMatch = completedStaticMatch && msrLogReusableAlu(entryIndex) && msrEnqReusableAlu(i)
       val rgidMatch = reusableAluMatch && allSrcRgidMatch
+      msrCandidateRgidMismatch(i) := reusableAluMatch && !allSrcRgidMatch && !msrCandidateNullRgidReject(i)
+      msrCandidateClassReject(i) := completedStaticMatch &&
+        !(msrLogReusableAlu(entryIndex) && msrEnqReusableAlu(i))
       val allocatedInCurrentGroup = VecInit((0 until RenameWidth).map { lane =>
         msrEnqAllocInt(lane) && io.enq.req(lane).bits.pdest === msrLogPdest(entryIndex)
       }).asUInt.orR
@@ -353,27 +439,100 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
         "two current instructions selected the same Squash Log entry")
     }
 
+    val msrClaimEntryOH = Wire(Vec(RenameWidth, UInt(MsrTotalEntries.W)))
     for (lane <- 0 until RenameWidth) {
-      when(instEnqValidSeq(lane) && !io.redirect.valid) {
+      val claim = io.msrCandidate.claim(lane)
+      val candidate = claim.candidate
+      val entryIndex = Cat(
+        candidate.streamId,
+        candidate.instructionOffset(log2Ceil(MsrEntriesPerStream) - 1, 0)
+      )
+      val claimCurrent = candidate.valid &&
+        msrInstEnqValid(lane) && io.enq.req(lane).bits.msrReused &&
+        candidate.instructionOffset < MsrEntriesPerStream.U &&
+        candidate.instructionOffset < msrStreamLength(candidate.streamId) &&
+        msrStreamValid(candidate.streamId) &&
+        msrStreamGeneration(candidate.streamId) === candidate.streamGeneration &&
+        msrLogValid(entryIndex) && !msrLogConsumed(entryIndex) &&
+        msrLogPdestRetained(entryIndex) && msrLogPdest(entryIndex) === claim.pdest &&
+        msrLogMatchFullReuse(lane)
+
+      msrClaimEntryOH(lane) := Mux(claim.valid && claimCurrent, UIntToOH(entryIndex, MsrTotalEntries), 0.U)
+      when(claim.valid) {
+        assert(claimCurrent, "rename attempted to claim a stale or unheld Squash Log entry")
+      }
+    }
+    for (lane <- 0 until RenameWidth; prior <- 0 until lane) {
+      assert(!(msrClaimEntryOH(lane) & msrClaimEntryOH(prior)).orR,
+        "two rename lanes claimed the same Squash Log entry")
+    }
+    val msrClaimEntryMask = msrClaimEntryOH.reduce(_ | _)
+    when(io.redirect.valid) {
+      assert(!io.msrCandidate.claim.map(_.valid).reduce(_ || _),
+        "MSR claim must be suppressed while redirect is active")
+    }
+    val msrClaimStreamHit = VecInit((0 until MsrStreamCount).map { stream =>
+      msrClaimEntryMask((stream + 1) * MsrEntriesPerStream - 1, stream * MsrEntriesPerStream).orR
+    })
+
+    for (robIdx <- 0 until RobSize) {
+      val enqToRob = VecInit((0 until RenameWidth).map { lane =>
+        msrInstEnqValid(lane) && enqRobIdxSeq(lane) === robIdx.U
+      })
+      val enqCountToRob = (0 until RenameWidth).map { lane =>
+        Mux(enqToRob(lane), msrInstEnqCount(lane), 0.U)
+      }.reduce(_ +& _)
+      val oldCount = Mux(robEntries(robIdx).valid, msrRobInstCount(robIdx), 0.U)
+      when(enqToRob.asUInt.orR) {
+        val newCount = oldCount +& enqCountToRob
+        assert(newCount <= MsrInstSlotsPerRob.U,
+          "MSR ROB instruction metadata overflowed its per-entry slots")
+        msrRobInstCount(robIdx) := newCount
+      }
+    }
+    for (lane <- 0 until RenameWidth) {
+      when(msrInstEnqValid(lane)) {
         val robIdx = enqRobIdxSeq(lane)
+        val oldCount = Mux(robEntries(robIdx).valid, msrRobInstCount(robIdx), 0.U)
+        val priorInSameRob = if (lane == 0) 0.U else (0 until lane).map { prior =>
+          Mux(msrInstEnqValid(prior) && enqRobIdxSeq(prior) === robIdx, msrInstEnqCount(prior), 0.U)
+        }.reduce(_ +& _)
+        val instSlot = oldCount +& priorInSameRob
+        assert(instSlot < MsrInstSlotsPerRob.U,
+          "MSR instruction metadata selected an invalid ROB slot")
         for (src <- 0 until backendParams.numSrc) {
-          msrRobSrcUsed(robIdx)(src) := SrcType.isXp(io.enq.req(lane).bits.srcType(src)) &&
+          msrRobSrcUsed(robIdx)(instSlot)(src) := SrcType.isXp(io.enq.req(lane).bits.srcType(src)) &&
             io.enq.req(lane).bits.psrc(src) =/= 0.U
-          msrRobSrcRgid(robIdx)(src) := io.enq.req(lane).bits.srcRgid(src)
+          msrRobSrcRgid(robIdx)(instSlot)(src) := io.enq.req(lane).bits.srcRgid(src)
         }
-        msrRobDestRgid(robIdx) := io.enq.req(lane).bits.destRgid
-        msrRobPdest(robIdx) := io.enq.req(lane).bits.pdest
-        msrRobAlu(robIdx) := FuType.isAlu(io.enq.req(lane).bits.fuType)
-        msrRobReusableAlu(robIdx) := msrEnqReusableAlu(lane)
-        msrRobPc(robIdx) := io.enq.req(lane).bits.msrPc
-        msrRobInstr(robIdx) := io.enq.req(lane).bits.msrInstr
-        msrRobFtqPtr(robIdx) := io.enq.req(lane).bits.ftqPtr
-        msrRobFtqOffset(robIdx) := io.enq.req(lane).bits.ftqOffset
-        for (prior <- 0 until lane) {
-          when(instEnqValidSeq(prior)) {
-            assert(enqRobIdxSeq(prior) =/= robIdx,
-              "MSR instruction-granular capture requires one original instruction per ROB entry")
+        msrRobDestRgid(robIdx)(instSlot) := io.enq.req(lane).bits.destRgid
+        msrRobPdest(robIdx)(instSlot) := io.enq.req(lane).bits.pdest
+        msrRobAlu(robIdx)(instSlot) := FuType.isAlu(io.enq.req(lane).bits.fuType)
+        msrRobReusableAlu(robIdx)(instSlot) := msrEnqReusableAlu(lane)
+        msrRobOwnsIntPReg(robIdx)(instSlot) := msrEnqOwnsIntPReg(lane)
+        msrRobReused(robIdx)(instSlot) := io.enq.req(lane).bits.msrReused
+        msrRobPc(robIdx)(instSlot) := io.enq.req(lane).bits.msrPc
+        msrRobInstr(robIdx)(instSlot) := io.enq.req(lane).bits.msrInstr
+        msrRobFtqPtr(robIdx)(instSlot) := io.enq.req(lane).bits.ftqPtr
+        msrRobFtqOffset(robIdx)(instSlot) := io.enq.req(lane).bits.ftqOffset
+        when(io.enq.req(lane).bits.msrFusionSecondValid) {
+          val fusionSlot = instSlot +& 1.U
+          assert(fusionSlot < MsrInstSlotsPerRob.U,
+            "MSR fused instruction metadata selected an invalid ROB slot")
+          for (src <- 0 until backendParams.numSrc) {
+            msrRobSrcUsed(robIdx)(fusionSlot)(src) := false.B
+            msrRobSrcRgid(robIdx)(fusionSlot)(src) := MsrRgid.Null.U
           }
+          msrRobDestRgid(robIdx)(fusionSlot) := MsrRgid.Null.U
+          msrRobPdest(robIdx)(fusionSlot) := 0.U
+          msrRobAlu(robIdx)(fusionSlot) := io.enq.req(lane).bits.msrFusionSecondAlu
+          msrRobReusableAlu(robIdx)(fusionSlot) := false.B
+          msrRobOwnsIntPReg(robIdx)(fusionSlot) := false.B
+          msrRobReused(robIdx)(fusionSlot) := false.B
+          msrRobPc(robIdx)(fusionSlot) := io.enq.req(lane).bits.msrFusionSecondPc
+          msrRobInstr(robIdx)(fusionSlot) := io.enq.req(lane).bits.msrFusionSecondInstr
+          msrRobFtqPtr(robIdx)(fusionSlot) := io.enq.req(lane).bits.msrFusionSecondFtqPtr
+          msrRobFtqOffset(robIdx)(fusionSlot) := io.enq.req(lane).bits.msrFusionSecondFtqOffset
         }
       }
     }
@@ -406,22 +565,22 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
     val msrCompletedReusableAluRgidPRegIntactHitCount = PopCount(msrLogMatchFullReuse)
     val msrStreamStaticHit = VecInit((0 until MsrStreamCount).map { stream =>
       msrLogMatchOH.map(_((stream + 1) * MsrEntriesPerStream - 1, stream * MsrEntriesPerStream).orR)
-        .reduce(_ || _)
+        .reduce(_ || _) || msrClaimStreamHit(stream)
     })
     val msrStreamCompletedStaticHit = VecInit((0 until MsrStreamCount).map { stream =>
       msrLogMatchOH.zip(msrLogMatchCompleted).map { case (matched, completed) =>
         matched((stream + 1) * MsrEntriesPerStream - 1, stream * MsrEntriesPerStream).orR && completed
-      }.reduce(_ || _)
+      }.reduce(_ || _) || msrClaimStreamHit(stream)
     })
     val msrStreamFullReuseHit = VecInit((0 until MsrStreamCount).map { stream =>
       msrLogMatchOH.zip(msrLogMatchFullReuse).map { case (matched, fullReuse) =>
         matched((stream + 1) * MsrEntriesPerStream - 1, stream * MsrEntriesPerStream).orR && fullReuse
-      }.reduce(_ || _)
+      }.reduce(_ || _) || msrClaimStreamHit(stream)
     })
     val msrStreamSemanticHoldHit = VecInit((0 until MsrStreamCount).map { stream =>
       msrLogMatchOH.zip(msrLogMatchRgid).map { case (matched, semanticHold) =>
         matched((stream + 1) * MsrEntriesPerStream - 1, stream * MsrEntriesPerStream).orR && semanticHold
-      }.reduce(_ || _)
+      }.reduce(_ || _) || msrClaimStreamHit(stream)
     })
     val msrNewStreamStaticHitCount = PopCount(msrStreamStaticHit.zip(msrLogHasStaticHit).map {
       case (hit, hasHit) => hit && !hasHit
@@ -445,6 +604,91 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
     val msrLogOverwrittenBeforeCompletedStaticHit =
       msrLogOverwritten && !msrLogHasCompletedStaticHit(msrNextStream)
 
+    val msrRetainedPRegOH = VecInit((0 until MsrTotalEntries).map { entry =>
+      Mux(msrLogPdestRetained(entry), UIntToOH(msrLogPdest(entry), IntPhyRegs), 0.U(IntPhyRegs.W))
+    })
+    val msrRetainedPRegMask = msrRetainedPRegOH.reduce(_ | _)
+    val msrMatchedEntryMask = msrLogMatchOH.reduce(_ | _) & ~msrClaimEntryMask
+    val msrMatchedPRegReleaseMask = VecInit((0 until MsrTotalEntries).map { entry =>
+      Mux(
+        msrMatchedEntryMask(entry) && msrLogPdestRetained(entry),
+        UIntToOH(msrLogPdest(entry), IntPhyRegs),
+        0.U(IntPhyRegs.W)
+      )
+    }).reduce(_ | _)
+    val msrReplacedStreamReleaseMask = VecInit((0 until MsrTotalEntries).map { entry =>
+      val entryStream = entry / MsrEntriesPerStream
+      Mux(
+        msrCreateStream && msrNextStream === entryStream.U && msrLogPdestRetained(entry),
+        UIntToOH(msrLogPdest(entry), IntPhyRegs),
+        0.U(IntPhyRegs.W)
+      )
+    }).reduce(_ | _)
+    val msrReleaseAllHeld = io.msrRgid.overflow || msrCandidateStaticDivergence
+    val msrClaimPRegMask = VecInit(io.msrCandidate.claim.map { claim =>
+      Mux(claim.valid, UIntToOH(claim.pdest, IntPhyRegs), 0.U(IntPhyRegs.W))
+    }).reduce(_ | _)
+    val msrPRegReleaseMask = (msrMatchedPRegReleaseMask |
+      Mux(msrReleaseAllHeld, msrRetainedPRegMask, msrReplacedStreamReleaseMask)) & ~msrClaimPRegMask
+    val msrHeldAfterReleaseMask = io.msrPReg.held & ~msrPRegReleaseMask
+    val msrHeldAfterReleaseCount = PopCount(msrHeldAfterReleaseMask)
+    val msrHeldLimitCapacity = MsrConfig.MaxHeldPRegs.U - msrHeldAfterReleaseCount
+    val msrSquashedIntPRegCount = PopCount((0 until RobSize).flatMap { robIdx =>
+      (0 until MsrInstSlotsPerRob).map { instSlot =>
+        redirectNeedFlush(robIdx) && instSlot.U < msrRobInstCount(robIdx) &&
+          msrRobOwnsIntPReg(robIdx)(instSlot)
+      }
+    })
+    val msrRecoveredFreeCount = io.msrPReg.freeCount +& PopCount(msrPRegReleaseMask) +&
+      msrSquashedIntPRegCount
+    val msrFreeListHoldCapacity = Mux(
+      msrRecoveredFreeCount > RenameWidth.U,
+      msrRecoveredFreeCount - RenameWidth.U,
+      0.U
+    )
+    val msrHoldCapacity = Mux(
+      msrHeldLimitCapacity < msrFreeListHoldCapacity,
+      msrHeldLimitCapacity,
+      msrFreeListHoldCapacity
+    )
+    val msrCaptureHoldEligible = VecInit((0 until MsrEntriesPerStream).map { entry =>
+      val robIdx = msrCaptureRobIdx(entry)
+      val instSlot = msrCaptureInstSlot(entry)
+      msrCreateStream && msrCaptureTrackedValid(entry) && msrRobCompletesThisCycle(robIdx) &&
+        msrRobReusableAlu(robIdx)(instSlot) && msrRobPdest(robIdx)(instSlot) =/= 0.U
+    })
+    val msrCaptureHoldAdmit = VecInit((0 until MsrEntriesPerStream).map { entry =>
+      val priorEligible = if (entry == 0) 0.U else PopCount(msrCaptureHoldEligible.take(entry))
+      msrCaptureHoldEligible(entry) && priorEligible < msrHoldCapacity
+    })
+    val msrPRegHoldMask = VecInit((0 until MsrEntriesPerStream).map { entry =>
+      Mux(
+        msrCaptureHoldAdmit(entry),
+        UIntToOH(msrRobPdest(msrCaptureRobIdx(entry))(msrCaptureInstSlot(entry)), IntPhyRegs),
+        0.U(IntPhyRegs.W)
+      )
+    }).reduce(_ | _)
+
+    io.msrPReg.hold := msrPRegHoldMask
+    io.msrPReg.release := msrPRegReleaseMask
+
+    assert(PopCount(io.msrPReg.held) <= MsrConfig.MaxHeldPRegs.U,
+      "MSR held-PReg occupancy exceeded its admission limit")
+    assert(PopCount(msrRetainedPRegMask) === PopCount(msrLogPdestRetained),
+      "two Squash Log entries own the same held PReg")
+    assert(msrRetainedPRegMask === io.msrPReg.held,
+      "Squash Log and integer freelist disagree on held-PReg ownership")
+    assert((msrPRegHoldMask & msrHeldAfterReleaseMask).asUInt === 0.U,
+      "MSR attempted to hold a PReg already owned by another Squash Log entry")
+    assert(PopCount(msrPRegHoldMask) === PopCount(msrCaptureHoldAdmit),
+      "two newly captured Squash Log entries attempted to hold the same PReg")
+    when(msrCreateStream) {
+      assert(msrRecoveredFreeCount >= PopCount(msrCaptureHoldAdmit) + RenameWidth.U,
+        "MSR hold admission violated the integer freelist low watermark")
+    }
+    assert((msrPRegReleaseMask & msrClaimPRegMask).asUInt === 0.U,
+      "MSR attempted to release and claim the same PReg in one cycle")
+
     when(io.msrRgid.overflow) {
       msrStreamValid.foreach(_ := false.B)
       msrStreamLength.foreach(_ := 0.U)
@@ -467,23 +711,23 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
           for (entry <- 0 until MsrEntriesPerStream) {
             val logIdx = stream * MsrEntriesPerStream + entry
             val robIdx = msrCaptureRobIdx(entry)
+            val instSlot = msrCaptureInstSlot(entry)
             val captureValid = msrCaptureTrackedValid(entry)
             msrLogValid(logIdx) := captureValid
             msrLogConsumed(logIdx) := false.B
+            msrLogPdestRetained(logIdx) := captureValid && msrCaptureHoldAdmit(entry)
             when(captureValid) {
-              msrLogCompleted(logIdx) := robEntries(robIdx).isWritebacked
-              msrLogAlu(logIdx) := msrRobAlu(robIdx)
-              msrLogPc(logIdx) := msrRobPc(robIdx)
-              msrLogInstr(logIdx) := msrRobInstr(robIdx)
+              msrLogCompleted(logIdx) := msrRobCompletesThisCycle(robIdx)
+              msrLogAlu(logIdx) := msrRobAlu(robIdx)(instSlot)
+              msrLogPc(logIdx) := msrRobPc(robIdx)(instSlot)
+              msrLogInstr(logIdx) := msrRobInstr(robIdx)(instSlot)
               for (src <- 0 until backendParams.numSrc) {
-                msrLogSrcUsed(logIdx)(src) := msrRobSrcUsed(robIdx)(src)
-                msrLogSrcRgid(logIdx)(src) := msrRobSrcRgid(robIdx)(src)
+                msrLogSrcUsed(logIdx)(src) := msrRobSrcUsed(robIdx)(instSlot)(src)
+                msrLogSrcRgid(logIdx)(src) := msrRobSrcRgid(robIdx)(instSlot)(src)
               }
-              msrLogDestRgid(logIdx) := msrRobDestRgid(robIdx)
-              msrLogPdest(logIdx) := msrRobPdest(robIdx)
-              msrLogPdestRetained(logIdx) :=
-                robEntries(robIdx).isWritebacked && msrRobReusableAlu(robIdx)
-              msrLogReusableAlu(logIdx) := msrRobReusableAlu(robIdx)
+              msrLogDestRgid(logIdx) := msrRobDestRgid(robIdx)(instSlot)
+              msrLogPdest(logIdx) := msrRobPdest(robIdx)(instSlot)
+              msrLogReusableAlu(logIdx) := msrRobReusableAlu(robIdx)(instSlot)
             }
           }
           for (block <- 0 until MsrWpbEntriesPerStream) {
@@ -496,9 +740,10 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
             })
             val instructionMask = (0 until MsrEntriesPerStream).map { entry =>
               val robIdx = msrCaptureRobIdx(entry)
+              val instSlot = msrCaptureInstSlot(entry)
               Mux(
                 blockSelect(entry),
-                UIntToOH(msrRobFtqOffset(robIdx), MsrBlockPositionCount),
+                UIntToOH(msrRobFtqOffset(robIdx)(instSlot), MsrBlockPositionCount),
                 0.U(MsrBlockPositionCount.W)
               )
             }.reduce(_ | _)
@@ -521,9 +766,13 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
       msrNextStream := Mux(msrNextStream === (MsrStreamCount - 1).U, 0.U, msrNextStream + 1.U)
     }.elsewhen(!msrMispredSample) {
       for (i <- 0 until MsrTotalEntries) {
-        when(msrLogMatchOH.map(_(i)).reduce(_ || _)) {
+        when(msrLogMatchOH.map(_(i)).reduce(_ || _) || msrClaimEntryMask(i)) {
           msrLogConsumed(i) := true.B
+          msrLogPdestRetained(i) := false.B
         }
+      }
+      when(msrCandidateStaticDivergence) {
+        msrLogPdestRetained.foreach(_ := false.B)
       }
       for (stream <- 0 until MsrStreamCount) {
         when(msrStreamStaticHit(stream)) {
@@ -541,14 +790,12 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
       }
     }
 
-    when(!msrCreateStream) {
-      for (entry <- 0 until MsrTotalEntries) {
-        val pdestReallocated = VecInit((0 until RenameWidth).map { lane =>
-          msrEnqAllocInt(lane) && io.enq.req(lane).bits.pdest === msrLogPdest(entry)
-        }).asUInt.orR
-        when(pdestReallocated) {
-          msrLogPdestRetained(entry) := false.B
-        }
+    for (entry <- 0 until MsrTotalEntries) {
+      val pdestReallocated = VecInit((0 until RenameWidth).map { lane =>
+        msrEnqAllocInt(lane) && io.enq.req(lane).bits.pdest === msrLogPdest(entry)
+      }).asUInt.orR
+      when(msrLogPdestRetained(entry)) {
+        assert(!pdestReallocated, "integer freelist reallocated a Squash-Log-held PReg")
       }
     }
 
@@ -561,19 +808,44 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
         "MSR candidate WPB cursor exceeded the selected stream")
     }
 
-    val msrCompletedSquashedInst = PopCount(redirectNeedFlush.zip(robEntries).map { case (flush, entry) =>
-      flush && entry.isWritebacked
+    val msrCompletedSquashedInst = (0 until RobSize).map { robIdx =>
+      Mux(
+        redirectNeedFlush(robIdx) && msrRobCompletesThisCycle(robIdx),
+        msrRobInstCount(robIdx),
+        0.U
+      )
+    }.reduce(_ +& _)
+    val msrCompletedSquashedAluInst = PopCount((0 until RobSize).flatMap { robIdx =>
+      (0 until MsrInstSlotsPerRob).map { instSlot =>
+        redirectNeedFlush(robIdx) && msrRobCompletesThisCycle(robIdx) &&
+          instSlot.U < msrRobInstCount(robIdx) && msrRobAlu(robIdx)(instSlot)
+      }
     })
-    val msrCompletedSquashedAluInst = PopCount(redirectNeedFlush.zip(robEntries).zip(msrRobAlu).map {
-      case ((flush, entry), isAlu) => flush && entry.isWritebacked && isAlu
+    val msrReusedThenSquashedInst = PopCount((0 until RobSize).flatMap { robIdx =>
+      (0 until MsrInstSlotsPerRob).map { instSlot =>
+        redirectNeedFlush(robIdx) && instSlot.U < msrRobInstCount(robIdx) &&
+          msrRobReused(robIdx)(instSlot)
+      }
+    })
+    val msrReusedCommittedInst = PopCount(io.commits.commitValid.zip(deqPtrVec).map {
+      case (commitValid, deqPtr) =>
+        io.commits.isCommit && commitValid && VecInit((0 until MsrInstSlotsPerRob).map { instSlot =>
+          instSlot.U < msrRobInstCount(deqPtr.value) && msrRobReused(deqPtr.value)(instSlot)
+        }).asUInt.orR
     })
 
     XSPerfAccumulate("msr_mispred_with_squashed_inst", msrMispredSample && msrSquashedInst.orR)
     XSPerfAccumulate("msr_mispred_with_completed_inst", msrMispredSample && msrCompletedSquashedInst.orR)
     XSPerfAccumulate("msr_mispred_with_completed_alu_inst", msrMispredSample && msrCompletedSquashedAluInst.orR)
+    XSPerfAccumulate("msr_squashed_rob_entry", Mux(msrMispredSample, msrSquashedRobEntries, 0.U))
     XSPerfAccumulate("msr_squashed_inst", Mux(msrMispredSample, msrSquashedInst, 0.U))
     XSPerfAccumulate("msr_completed_squashed_inst", Mux(msrMispredSample, msrCompletedSquashedInst, 0.U))
     XSPerfAccumulate("msr_completed_squashed_alu_inst", Mux(msrMispredSample, msrCompletedSquashedAluInst, 0.U))
+    XSPerfAccumulate("msr_reused_then_squashed_inst", Mux(redirectValidReg, msrReusedThenSquashedInst, 0.U))
+    XSPerfAccumulate("msr_reused_committed_inst", msrReusedCommittedInst)
+    XSPerfAccumulate("msr_redirect_writeback_completed_inst", PopCount((0 until RobSize).map { robIdx =>
+      redirectNeedFlush(robIdx) && !robEntries(robIdx).isWritebacked && msrRobCompletesThisCycle(robIdx)
+    }))
     XSPerfAccumulate("msr_log_truncated", msrMispredSample &&
       (msrSquashedInst > MsrEntriesPerStream.U || msrCaptureBlockCount > MsrWpbEntriesPerStream.U))
     XSPerfAccumulate(
@@ -609,10 +881,38 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
       "msr_entry_captured",
       Mux(msrCreateStream, msrCaptureStreamLength, 0.U)
     )
+    XSPerfAccumulate("msr_entry_hold_attempt", PopCount(msrCaptureHoldEligible))
+    XSPerfAccumulate("msr_entry_held", PopCount(msrCaptureHoldAdmit))
+    XSPerfAccumulate(
+      "msr_entry_hold_reject_pressure",
+      PopCount(msrCaptureHoldEligible) - PopCount(msrCaptureHoldAdmit)
+    )
+    XSPerfAccumulate(
+      "msr_entry_hold_reject_low_watermark",
+      Mux(
+        PopCount(msrCaptureHoldEligible) > msrFreeListHoldCapacity,
+        PopCount(msrCaptureHoldEligible) - msrFreeListHoldCapacity,
+        0.U
+      )
+    )
+    XSPerfAccumulate("msr_entry_released", PopCount(msrPRegReleaseMask))
+    XSPerfAccumulate("msr_entry_released_on_match", PopCount(msrMatchedPRegReleaseMask))
+    XSPerfAccumulate("msr_entry_evicted", PopCount(msrReplacedStreamReleaseMask & ~msrClaimPRegMask))
+    XSPerfAccumulate(
+      "msr_entry_released_on_divergence",
+      Mux(msrCandidateStaticDivergence, PopCount(msrPRegReleaseMask), 0.U)
+    )
+    XSPerfAccumulate(
+      "msr_entry_released_on_rgid_overflow",
+      Mux(io.msrRgid.overflow, PopCount(msrPRegReleaseMask), 0.U)
+    )
+    XSPerfAccumulate("msr_entry_claimed", PopCount(msrClaimEntryMask))
     XSPerfAccumulate("msr_wpb_block_captured", Mux(msrCreateStream, msrCaptureWpbLength, 0.U))
     XSPerfAccumulate("msr_candidate_acquired", PopCount(msrCandidateDiscovery))
     XSPerfAccumulate("msr_candidate_layout_mismatch", PopCount(msrCandidateLayoutMismatch))
     XSPerfAccumulate("msr_candidate_context_reject", PopCount(msrCandidateContextReject))
+    XSPerfAccumulate("msr_candidate_ambiguous_position", PopCount(msrCandidateAmbiguousPosition))
+    XSPerfAccumulate("msr_candidate_ambiguous_reject", PopCount(msrCandidateAmbiguousReject))
     XSPerfAccumulate("msr_candidate_provenance_inst", PopCount(io.msrCandidate.req.zip(io.msrCandidate.resp).map {
       case (req, resp) => req.fire && resp.valid
     }))
@@ -621,6 +921,8 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
       msrCandidateTupleValid.zip(msrCandidateStaticGuard).map { case (valid, guard) => valid && !guard }
     ))
     XSPerfAccumulate("msr_rgid_null_reject", PopCount(msrCandidateNullRgidReject))
+    XSPerfAccumulate("msr_rgid_mismatch_reject", PopCount(msrCandidateRgidMismatch))
+    XSPerfAccumulate("msr_instruction_class_reject", PopCount(msrCandidateClassReject))
     XSPerfAccumulate("msr_stale_stream_generation", msrCandidateValid && !msrCandidateStateCurrent)
     XSPerfAccumulate("msr_rgid_drain_cycle", msrRgidResetPending)
     XSPerfAccumulate("msr_rgid_global_reset", msrRgidReset)

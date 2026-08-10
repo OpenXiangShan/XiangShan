@@ -383,6 +383,7 @@ object MsrConfig {
   val StreamCount = 2
   val EntriesPerStream = 128
   val WpbEntriesPerStream = EntriesPerStream / 4
+  val MaxHeldPRegs = 32
   val StreamIdWidth = log2Ceil(StreamCount)
   val StreamGenerationWidth = 32
   val InstructionOffsetWidth = log2Ceil(EntriesPerStream + 1)

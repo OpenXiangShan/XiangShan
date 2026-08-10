@@ -78,6 +78,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val msrCandidate = new Bundle {
       val req = Input(Vec(RenameWidth, new MsrCandidateRequest))
       val resp = Output(Vec(RenameWidth, new MsrCandidate))
+      val reuseInfo = Output(Vec(RenameWidth, new MsrReuseInfo))
+      val claim = Input(Vec(RenameWidth, new MsrClaim))
+    }
+    val msrPReg = new Bundle {
+      val hold = Output(UInt(IntPhyRegs.W))
+      val release = Output(UInt(IntPhyRegs.W))
+      val held = Input(UInt(IntPhyRegs.W))
+      val freeCount = Input(UInt(log2Ceil(IntPhyRegs + 1).W))
     }
     val enq = new RobEnqIO
     val flushOut = ValidIO(new Redirect)

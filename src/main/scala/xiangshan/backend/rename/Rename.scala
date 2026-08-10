@@ -24,7 +24,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.TopDownCounters._
-import xiangshan.backend.Bundles.{DecodeOutUop, MsrCandidate, MsrCandidateRequest, RenameOutUop, connectSamePort}
+import xiangshan.backend.Bundles.{DecodeOutUop, MsrCandidate, MsrCandidateRequest, MsrClaim, MsrReuseInfo, RenameOutUop, connectSamePort}
 import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_Z, XSDebugDecode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.{StoreBubbleReason, PipelineStallReason}
@@ -109,6 +109,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     })
     val msrCandidateReq = Output(Vec(RenameWidth, new MsrCandidateRequest))
     val msrCandidateResp = Input(Vec(RenameWidth, new MsrCandidate))
+    val msrReuseInfo = Input(Vec(RenameWidth, new MsrReuseInfo))
+    val msrClaim = Output(Vec(RenameWidth, new MsrClaim))
+    val msrPReg = new Bundle {
+      val hold = Input(UInt(IntPhyRegs.W))
+      val release = Input(UInt(IntPhyRegs.W))
+      val held = Output(UInt(IntPhyRegs.W))
+      val freeCount = Output(UInt(log2Ceil(IntPhyRegs + 1).W))
+    }
   })
 
   io.in.zipWithIndex.map { case (o, i) =>
@@ -123,6 +131,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val compressUnit = Module(new CompressUnit())
   // create free list and rat
   val intFreeList = Module(new MEFreeList(IntPhyRegs, RabCommitWidth))
+  intFreeList.msr.hold := io.msrPReg.hold
+  intFreeList.msr.release := io.msrPReg.release
+  io.msrPReg.held := intFreeList.msr.held
+  io.msrPReg.freeCount := intFreeList.msr.freeCount
   val fpFreeList = Module(new StdFreeList(FpPhyRegs - FpLogicRegs, FpLogicRegs, Reg_F, RabCommitWidth))
   val vecFreeList = Module(new StdFreeList(VfPhyRegs - VecLogicRegs, VecLogicRegs, Reg_V, RabCommitWidth, 31))
   val v0FreeList = Module(new StdFreeList(V0PhyRegs - V0LogicRegs, V0LogicRegs, Reg_V0, RabCommitWidth, 1))
@@ -340,10 +352,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   dontTouch(crossFtqNumVec)
   dontTouch(oddFtqVec)
   val isFusionPair = ((isFusionVec.asUInt << 1).asUInt | isFusionVec.asUInt)(RenameWidth-1, 0).asBools
-  compressUnit.io.in.zip(io.in).zip(io.validVec.zip(isFusionPair)).foreach{ case((sink, source), (valid, isFusion)) =>
+  compressUnit.io.in.zip(io.in).zip(io.validVec.zip(isFusionPair)).zipWithIndex.foreach {
+    case (((sink, source), (valid, isFusion)), lane) =>
     sink.valid := valid && !io.singleStep
     sink.bits := source.bits
-    sink.bits.canRobCompress := source.bits.canRobCompress && (backendParams.robCompressEn.B || isFusion)
+    sink.bits.canRobCompress := source.bits.canRobCompress && (backendParams.robCompressEn.B || isFusion) &&
+      !io.msrCandidateResp(lane).valid
   }
   compressUnit.io.oddFtqVec := oddFtqVec
   val needRobFlags = compressUnit.io.out.needRobFlags
@@ -365,6 +379,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     */
   val uops = Wire(Vec(RenameWidth, new RenameOutUop))
   val freshDestRgid = Wire(Vec(RenameWidth, UInt(MsrRgid.Width.W)))
+  val msrReuseHit = Wire(Vec(RenameWidth, Bool()))
   uops.zip(io.in.map(_.bits)).map{ case(uop, in) => {
     uop := 0.U.asTypeOf(uop)
     connectSamePort(uop, in)
@@ -481,6 +496,25 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).lastIsRVC := io.in(i).bits.isRVC
     uops(i).msrInstr := io.in(i).bits.instr
     uops(i).msrCandidate := io.msrCandidateResp(i)
+    uops(i).msrOriginalFirstUop := io.in(i).bits.firstUop
+    uops(i).msrFusionSecondValid := false.B
+    uops(i).msrFusionSecondPc := 0.U
+    uops(i).msrFusionSecondInstr := 0.U
+    uops(i).msrFusionSecondFtqPtr := 0.U.asTypeOf(uops(i).msrFusionSecondFtqPtr)
+    uops(i).msrFusionSecondFtqOffset := 0.U
+    uops(i).msrFusionSecondAlu := false.B
+    if (i < RenameWidth - 1) {
+      when(isFusionVec(i)) {
+        uops(i).msrFusionSecondValid := true.B
+        uops(i).msrFusionSecondPc := io.in(i + 1).bits.msrPc
+        uops(i).msrFusionSecondInstr := io.in(i + 1).bits.instr
+        uops(i).msrFusionSecondFtqPtr := io.in(i + 1).bits.ftqPtr
+        uops(i).msrFusionSecondFtqOffset := io.in(i + 1).bits.ftqOffset
+        uops(i).msrFusionSecondAlu := FuType.isAlu(io.in(i + 1).bits.fuType)
+      }
+    }
+    uops(i).msrReusable := false.B
+    uops(i).msrReused := false.B
     io.msrCandidateReq(i).valid := io.in(i).valid && io.in(i).bits.firstUop
     io.msrCandidateReq(i).fire := io.out(i).fire && io.in(i).bits.firstUop
     io.msrCandidateReq(i).pc := io.in(i).bits.msrPc
@@ -509,7 +543,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     v0FreeList.io.walkReq(i) := walkNeedV0Dest(i)
     vlFreeList.io.allocateReq(i) := needVlDest(i)
     vlFreeList.io.walkReq(i) := walkNeedVlDest(i)
-    intFreeList.io.allocateReq(i) := needIntDest(i) && !isMove(i)
+    intFreeList.io.allocateReq(i) := needIntDest(i) && !isMove(i) && !msrReuseHit(i)
     intFreeList.io.walkReq(i) := walkNeedIntDest(i) && !walkIsMove(i)
 
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
@@ -651,7 +685,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val rgidExhausted = RegInit(VecInit.tabulate(IntLogicRegs)(index => (index == 0).B))
   val rgidQuarantine = RegInit(false.B)
   val rgidAllocWen = VecInit((0 until RenameWidth).map { lane =>
-    intSpecWen(lane) && io.in(lane).bits.ldest =/= 0.U
+    intSpecWen(lane) && io.in(lane).bits.ldest =/= 0.U && !msrReuseHit(lane)
   })
   val maxRgid = ((1 << MsrRgid.Width) - 1).U(MsrRgid.Width.W)
 
@@ -895,6 +929,55 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       io.out(i).bits.imm := Cat(lui_imm, ld_imm)
     }
   }
+
+  for (i <- 0 until RenameWidth) {
+    val reuseInfo = io.msrReuseInfo(i)
+    val sourceRgidMatch = (0 until uops(i).numSrc).map { src =>
+      val currentSrcUsed = SrcType.isXp(io.out(i).bits.srcType(src)) && io.out(i).bits.psrc(src) =/= 0.U
+      reuseInfo.srcUsed(src) === currentSrcUsed &&
+        (!currentSrcUsed || (
+          io.out(i).bits.srcRgid(src) =/= MsrRgid.Null.U &&
+          reuseInfo.srcRgid(src) =/= MsrRgid.Null.U &&
+          io.out(i).bits.srcRgid(src) === reuseInfo.srcRgid(src)
+        ))
+    }.reduce(_ && _)
+    val reusableCurrent = io.in(i).valid && io.in(i).bits.firstUop && io.in(i).bits.lastUop &&
+      FuType.isAlu(io.in(i).bits.fuType) && io.in(i).bits.rfWen && !isMove(i) && !isFusionPair(i) &&
+      !io.in(i).bits.exceptionVec.orR && !TriggerAction.isDmode(io.in(i).bits.trigger) &&
+      !io.in(i).bits.flushPipe && !io.singleStep && io.in(i).bits.ldest =/= 0.U
+
+    io.out(i).bits.msrReusable := reusableCurrent
+    msrReuseHit(i) := reusableCurrent && io.msrCandidateResp(i).valid && reuseInfo.valid &&
+      reuseInfo.pc === io.in(i).bits.msrPc && reuseInfo.instr === io.in(i).bits.instr &&
+      reuseInfo.completed && reuseInfo.reusableAlu && reuseInfo.held &&
+      reuseInfo.destRgid =/= MsrRgid.Null.U && reuseInfo.pdest =/= 0.U && sourceRgidMatch
+
+    when(msrReuseHit(i)) {
+      io.out(i).bits.pdest := reuseInfo.pdest
+      io.out(i).bits.destRgid := reuseInfo.destRgid
+      io.out(i).bits.numWB := 0.U
+      io.out(i).bits.msrReused := true.B
+      assert(io.msrCandidateResp(i).valid, "MSR reuse hit lacked candidate provenance")
+      assert(io.msrPReg.held(reuseInfo.pdest), "MSR reuse hit selected a PReg not owned by the Squash Log")
+      assert(sourceRgidMatch, "MSR reuse hit bypassed the source RGID guard")
+      assert(instrSizesVec(i) === 1.U && compressMasksVec(i) === UIntToOH(i.U, RenameWidth),
+        "MSR reused instruction must occupy an independent ROB entry")
+    }
+
+    intFreeList.msr.claimReq(i) := msrReuseHit(i)
+    intFreeList.msr.claimFire(i) := io.out(i).fire && msrReuseHit(i)
+    intFreeList.msr.claimPReg(i) := reuseInfo.pdest
+    io.msrClaim(i).valid := io.out(i).fire && msrReuseHit(i)
+    io.msrClaim(i).candidate := io.msrCandidateResp(i)
+    io.msrClaim(i).pdest := reuseInfo.pdest
+  }
+
+  XSPerfAccumulate("msr_rename_reuse_hit", PopCount(msrReuseHit.zip(io.out).map {
+    case (hit, out) => hit && out.fire
+  }))
+  XSPerfAccumulate("msr_candidate_fusion_reject", PopCount(io.msrCandidateResp.zip(isFusionPair).map {
+    case (candidate, fusion) => candidate.valid && fusion
+  }))
 
   val genSnapshot = Cat(io.out.map(out => out.fire && out.bits.snapshot)).orR
   val lastCycleCreateSnpt = RegInit(false.B)

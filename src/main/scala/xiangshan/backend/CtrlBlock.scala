@@ -678,6 +678,12 @@ class CtrlBlockImp(
   rename.io.rgidReset := rob.io.msrRgid.reset
   rob.io.msrCandidate.req := rename.io.msrCandidateReq
   rename.io.msrCandidateResp := rob.io.msrCandidate.resp
+  rename.io.msrReuseInfo := rob.io.msrCandidate.reuseInfo
+  rob.io.msrCandidate.claim := rename.io.msrClaim
+  rename.io.msrPReg.hold := rob.io.msrPReg.hold
+  rename.io.msrPReg.release := rob.io.msrPReg.release
+  rob.io.msrPReg.held := rename.io.msrPReg.held
+  rob.io.msrPReg.freeCount := rename.io.msrPReg.freeCount
   rename.io.rabCommits := rob.io.rabCommits
   rename.io.vlCommits := rob.io.vlCommits
   rename.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)

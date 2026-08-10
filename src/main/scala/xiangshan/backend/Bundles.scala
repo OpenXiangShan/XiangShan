@@ -246,6 +246,25 @@ object Bundles {
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
   }
 
+  class MsrReuseInfo(implicit p: Parameters) extends XSBundle {
+    val valid = Bool()
+    val pc = UInt(VAddrBits.W)
+    val instr = UInt(32.W)
+    val completed = Bool()
+    val reusableAlu = Bool()
+    val srcUsed = Vec(backendParams.numSrc, Bool())
+    val srcRgid = Vec(backendParams.numSrc, UInt(MsrRgid.Width.W))
+    val destRgid = UInt(MsrRgid.Width.W)
+    val pdest = UInt(PhyRegIdxWidth.W)
+    val held = Bool()
+  }
+
+  class MsrClaim(implicit p: Parameters) extends XSBundle {
+    val valid = Bool()
+    val candidate = new MsrCandidate
+    val pdest = UInt(PhyRegIdxWidth.W)
+  }
+
   class RenameOutUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
@@ -260,6 +279,15 @@ object Bundles {
     val msrPc = UInt(VAddrBits.W)
     val msrInstr = UInt(32.W)
     val msrCandidate = new MsrCandidate
+    val msrOriginalFirstUop = Bool()
+    val msrFusionSecondValid = Bool()
+    val msrFusionSecondPc = UInt(VAddrBits.W)
+    val msrFusionSecondInstr = UInt(32.W)
+    val msrFusionSecondFtqPtr = new FtqPtr
+    val msrFusionSecondFtqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    val msrFusionSecondAlu = Bool()
+    val msrReusable = Bool()
+    val msrReused = Bool()
     val commitType = CommitType()
 
     val srcType = Vec(numSrc, SrcType())

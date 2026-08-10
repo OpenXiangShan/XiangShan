@@ -252,7 +252,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   val wbPregs = Seq(io.wbPregsInt, io.wbPregsFp, io.wbPregsVec, io.wbPregsV0)
   val idxRegType = Seq(idxRegTypeInt, idxRegTypeFp, idxRegTypeVec, idxRegTypeV0)
   val allocPregsValid = Wire(Vec(busyTables.size, Vec(RenameWidth, Bool())))
-  allocPregsValid(0) := VecInit(fromRename.map(x => x.valid && x.bits.rfWen && !x.bits.isMove))
+  allocPregsValid(0) := VecInit(fromRename.map(x =>
+    x.valid && x.bits.rfWen && !x.bits.isMove && !x.bits.msrReused
+  ))
   allocPregsValid(1) := VecInit(fromRename.map(x => x.valid && x.bits.fpWen))
   allocPregsValid(2) := VecInit(fromRename.map(x => x.valid && x.bits.vecWen))
   allocPregsValid(3) := VecInit(fromRename.map(x => x.valid && x.bits.v0Wen))
@@ -414,10 +416,12 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   allExuParams.zipWithIndex.map { case (exuParams, iqDeqIdx) => {
     val iqidx = allIssueParams.indexWhere(_.exuBlockParams.contains(exuParams))
     val selIQNumReg = PopCount(uopSelIQ.zipWithIndex.map { case (u, i) =>
-      RegNext(u(iqidx) && FuType.FuTypeOrR(fromRename(i).bits.fuType, exuParams.fuConfigs.map(_.fuType)) && fromRename(i).fire)
+      RegNext(u(iqidx) && FuType.FuTypeOrR(fromRename(i).bits.fuType, exuParams.fuConfigs.map(_.fuType)) &&
+        fromRename(i).fire && !fromRename(i).bits.msrReused)
     })
     val selIQNum = PopCount(uopSelIQ.zipWithIndex.map { case (u, i) =>
-      u(iqidx) && FuType.FuTypeOrR(fromRename(i).bits.fuType, exuParams.fuConfigs.map(_.fuType))
+      u(iqidx) && FuType.FuTypeOrR(fromRename(i).bits.fuType, exuParams.fuConfigs.map(_.fuType)) &&
+        !fromRename(i).bits.msrReused
     })
     needAppendIQValidNumVec(iqDeqIdx) := (if (enableDispatchIQBalanceOpt) selIQNum else 0.U)
   }}
@@ -560,7 +564,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   val uopSelIQMatrix = Wire(Vec(renameWidth, Vec(issueQueueNum, UInt(renameWidth.U.getWidth.W))))
   uopSelIQMatrix.zipWithIndex.map{ case (u, i) => {
     u.zipWithIndex.map{ case (uu, j) => {
-     uu := PopCount(uopSelIQ.take(i+1).map(x => x.zipWithIndex.filter(_._2 == j).map(_._1)).flatten)
+     uu := PopCount(uopSelIQ.take(i + 1).zipWithIndex.map { case (selected, lane) =>
+       selected(j) && !fromRename(lane).bits.msrReused
+     })
     }}
   }}
   val IQSelUop = Wire(Vec(IQEnqSum, ValidIO(new DispatchOutUop)))
@@ -572,7 +578,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   for (i <- 0 until RenameWidth){
     // update valid logic
     fromRenameUpdate(i).valid := fromRename(i).valid && allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) &&
-      !lsqRecoverStall && !fromRename(i).bits.isMove && !fromRename(i).bits.hasException && !fromRenameUpdate(i).bits.singleStep
+      !lsqRecoverStall && !fromRename(i).bits.isMove && !fromRename(i).bits.hasException &&
+      !fromRenameUpdate(i).bits.singleStep && !fromRename(i).bits.msrReused
     fromRename(i).ready := allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && !lsqRecoverStall
     // update src type if eliminate old vd
     fromRenameUpdate(i).bits.srcType(numRegSrcVf - 1) := Mux(ignoreOldVdVec(i), SrcType.no, fromRename(i).bits.srcType(numRegSrcVf - 1))
@@ -876,7 +883,21 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     io.enqRob.needAlloc(i) := fromRename(i).valid
     io.enqRob.req(i).valid := fromRename(i).fire
     io.enqRob.req(i).bits.connectEnqRobUop(updatedUop(i))
+    when(fromRename(i).fire && fromRename(i).bits.msrReused) {
+      assert(fromRename(i).bits.numWB === 0.U,
+        "MSR reused instruction still requested a writeback")
+      assert(!allocPregsValid(0)(i),
+        "MSR reused instruction marked its held PReg busy")
+      assert(!fromRenameUpdate(i).valid,
+        "MSR reused instruction entered an issue queue")
+    }
   }
+  val msrReusedFireCount = PopCount(fromRename.map(in => in.fire && in.bits.msrReused))
+  XSPerfAccumulate("msr_reused_inst", msrReusedFireCount)
+  XSPerfAccumulate("msr_saved_dispatch", msrReusedFireCount)
+  XSPerfAccumulate("msr_saved_issue", msrReusedFireCount)
+  XSPerfAccumulate("msr_saved_execute", msrReusedFireCount)
+  XSPerfAccumulate("msr_saved_writeback", msrReusedFireCount)
   val hasValidInstr = VecInit(fromRename.map(_.valid)).asUInt.orR
   val hasSpecialInstr = Cat((0 until RenameWidth).map(i => isBlockBackward(i))).orR
 
