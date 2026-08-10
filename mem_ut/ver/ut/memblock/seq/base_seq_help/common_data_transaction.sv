@@ -2977,16 +2977,262 @@ class common_data_transaction extends uvm_object;
         entry.range_index_keys.delete();
     endfunction:unregister_tlb_range_index
 
+    // Abstract responsibility: enumerate the bounded set of secondary-index
+    // buckets that could raw-hit one exact-miss request.  It does not inspect
+    // the table or arbitrate candidates; it only mirrors matcher granularity.
+    function void build_tlb_range_query_keys(
+        input memblock_tlb_lookup_key_t request_key,
+        output memblock_tlb_range_index_key_t keys[$]);
+        memblock_tlb_range_kind_e range_kind;
+        bit [1:0]                  level;
+        bit                        napot;
+        bit [15:0]                 vmid;
+
+        keys.delete();
+        case (request_key.s2xlate)
+            2'd0: begin
+                range_kind = MEMBLOCK_TLB_RANGE_KIND_S1;
+                vmid = '0;
+            end
+            2'd1: begin
+                range_kind = MEMBLOCK_TLB_RANGE_KIND_S1;
+                vmid = request_key.vmid;
+            end
+            2'd2: begin
+                range_kind = MEMBLOCK_TLB_RANGE_KIND_S2;
+                vmid = request_key.vmid;
+            end
+            2'd3: begin
+                range_kind = MEMBLOCK_TLB_RANGE_KIND_ALLSTAGE;
+                vmid = request_key.vmid;
+            end
+            default: begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("unsupported range request s2xlate=%0d", request_key.s2xlate))
+            end
+        endcase
+        for (int unsigned shape_idx = 0; shape_idx < 5; shape_idx++) begin
+            level = 2'd0;
+            napot = 1'b0;
+            case (shape_idx)
+                0: begin end
+                1: napot = 1'b1;
+                2: level = 2'd1;
+                3: level = 2'd2;
+                4: level = 2'd3;
+                default: begin
+                    `uvm_fatal("COMMON_DATA", "invalid L2TLB range query shape")
+                end
+            endcase
+            if (request_key.s2xlate == 2'd2) begin
+                keys.push_back(make_tlb_range_index_key(
+                    range_kind, request_key.s2xlate,
+                    1'b0, '0, vmid, level, napot, request_key.vpn));
+            end
+            else begin
+                // S1 raw hit allows either the request ASID bucket or a
+                // global mapping bucket; both must be considered explicitly.
+                keys.push_back(make_tlb_range_index_key(
+                    range_kind, request_key.s2xlate,
+                    1'b0, request_key.asid, vmid, level, napot,
+                    request_key.vpn));
+                keys.push_back(make_tlb_range_index_key(
+                    range_kind, request_key.s2xlate,
+                    1'b1, '0, vmid, level, napot, request_key.vpn));
+            end
+        end
+    endfunction:build_tlb_range_query_keys
+
+    // Abstract responsibility: return the raw coverage rank for an entry that
+    // has already passed the exact V2 raw matcher.  It is a deterministic
+    // overlap policy input and never changes the entry or response payload.
+    function memblock_tlb_range_coverage_rank_e get_tlb_range_match_coverage_rank(
+        input memblock_tlb_entry entry);
+        bit [1:0] level;
+        bit       napot;
+
+        if (entry == null) begin
+            `uvm_fatal("COMMON_DATA", "get_tlb_range_match_coverage_rank got null entry")
+        end
+        case (entry.s2xlate)
+            2'd0, 2'd1: begin
+                if (!entry.s1_stage_active || entry.s2_stage_active) begin
+                    `uvm_fatal("COMMON_DATA", "S1 range rank got invalid stage shape")
+                end
+                level = entry.s1_level;
+                napot = level == 2'd0 && entry.s1_pte_n;
+            end
+            2'd2: begin
+                if (entry.s1_stage_active || !entry.s2_stage_active) begin
+                    `uvm_fatal("COMMON_DATA", "S2 range rank got invalid stage shape")
+                end
+                level = entry.s2_level;
+                napot = level == 2'd0 && entry.s2_pte_n;
+            end
+            2'd3: begin
+                if (!entry.s1_stage_active || !entry.s2_stage_active) begin
+                    `uvm_fatal("COMMON_DATA", "allStage range rank got invalid stage shape")
+                end
+                derive_allstage_lookup_shape(entry, level, napot);
+                napot = level == 2'd0 && napot;
+            end
+            default: begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("unsupported range rank s2xlate=%0d", entry.s2xlate))
+            end
+        endcase
+        case (level)
+            2'd0: return napot ? MEMBLOCK_TLB_COVERAGE_64K : MEMBLOCK_TLB_COVERAGE_4K;
+            2'd1: return MEMBLOCK_TLB_COVERAGE_2M;
+            2'd2: return MEMBLOCK_TLB_COVERAGE_1G;
+            2'd3: return MEMBLOCK_TLB_COVERAGE_512G;
+            default: begin
+                `uvm_fatal("COMMON_DATA", "invalid range-rank level")
+            end
+        endcase
+        return MEMBLOCK_TLB_COVERAGE_4K;
+    endfunction:get_tlb_range_match_coverage_rank
+
+    // Abstract responsibility: use only request-relevant secondary buckets to
+    // find a canonical raw payload for an exact-miss request.  Bucket hit is a
+    // candidate filter; entry_matches_request_raw() remains the final truth.
+    function bit find_tlb_range_hit_by_req(
+        input memblock_tlb_lookup_key_t request_key,
+        input mmu_csr_runtime_state request_csr_snapshot,
+        output memblock_tlb_lookup_key_t anchor_key,
+        output memblock_tlb_entry entry);
+        memblock_tlb_range_index_key_t query_keys[$];
+        memblock_tlb_lookup_key_t seen_anchor_keys[$];
+        memblock_tlb_lookup_key_t candidate_anchor_keys[$];
+        memblock_tlb_range_index_key_t candidate_query_keys[$];
+        memblock_tlb_range_coverage_rank_e candidate_ranks[$];
+        memblock_tlb_entry candidate_entries[$];
+        memblock_tlb_lookup_key_t candidate_anchor;
+        memblock_tlb_entry candidate_entry;
+        memblock_tlb_range_coverage_rank_e max_rank;
+        int query_idx;
+        int bucket_idx;
+        int seen_idx;
+        int candidate_idx;
+        int selected_idx;
+        int unsigned max_rank_count;
+        bit seen;
+        string candidate_summary;
+
+        anchor_key = '{default:'0};
+        entry = null;
+        if (request_csr_snapshot == null) begin
+            `uvm_fatal("COMMON_DATA", "find_tlb_range_hit_by_req got null CSR snapshot")
+        end
+        build_tlb_range_query_keys(request_key, query_keys);
+        foreach (query_keys[query_idx]) begin
+            if (!tlb_anchor_keys_by_range_key.exists(query_keys[query_idx])) begin
+                continue;
+            end
+            foreach (tlb_anchor_keys_by_range_key[query_keys[query_idx]][bucket_idx]) begin
+                candidate_anchor =
+                    tlb_anchor_keys_by_range_key[query_keys[query_idx]][bucket_idx];
+                seen = 1'b0;
+                foreach (seen_anchor_keys[seen_idx]) begin
+                    if (tlb_lookup_key_equal(seen_anchor_keys[seen_idx], candidate_anchor)) begin
+                        seen = 1'b1;
+                    end
+                end
+                if (seen) begin
+                    continue;
+                end
+                seen_anchor_keys.push_back(candidate_anchor);
+                if (!has_tlb_entry(candidate_anchor)) begin
+                    `uvm_fatal("COMMON_DATA",
+                               "range index points to a missing canonical TLB entry")
+                end
+                candidate_entry = get_tlb_entry(candidate_anchor);
+                if (candidate_entry.lookup_key != candidate_anchor ||
+                    candidate_entry.range_index_keys.size() == 0) begin
+                    `uvm_fatal("COMMON_DATA",
+                               "range index points to an inconsistent canonical TLB entry")
+                end
+                if (!entry_matches_request_raw(candidate_entry, request_key.vpn,
+                                               request_key.s2xlate,
+                                               request_csr_snapshot)) begin
+                    `uvm_fatal("COMMON_DATA",
+                               $sformatf("range index/raw matcher disagreement request vpn=0x%0h anchor vpn=0x%0h s2xlate=%0d",
+                                         request_key.vpn, candidate_anchor.vpn,
+                                         request_key.s2xlate))
+                end
+                candidate_anchor_keys.push_back(candidate_anchor);
+                candidate_entries.push_back(candidate_entry);
+                candidate_ranks.push_back(
+                    get_tlb_range_match_coverage_rank(candidate_entry));
+                candidate_query_keys.push_back(query_keys[query_idx]);
+            end
+        end
+        if (candidate_entries.size() == 0) begin
+            return 1'b0;
+        end
+        if (candidate_entries.size() == 1) begin
+            anchor_key = candidate_anchor_keys[0];
+            entry = candidate_entries[0];
+            return 1'b1;
+        end
+
+        max_rank = MEMBLOCK_TLB_COVERAGE_4K;
+        foreach (candidate_ranks[candidate_idx]) begin
+            if (candidate_ranks[candidate_idx] > max_rank) begin
+                max_rank = candidate_ranks[candidate_idx];
+            end
+        end
+        max_rank_count = 0;
+        selected_idx = -1;
+        candidate_summary = "";
+        foreach (candidate_entries[candidate_idx]) begin
+            candidate_summary = {candidate_summary,
+                $sformatf(" [anchor vpn=0x%0h asid=0x%0h vmid=0x%0h gen=%0d level=%0d napot=%0d rank=%0d qkind=%0d]",
+                          candidate_anchor_keys[candidate_idx].vpn,
+                          candidate_anchor_keys[candidate_idx].asid,
+                          candidate_anchor_keys[candidate_idx].vmid,
+                          candidate_entries[candidate_idx].entry_generation,
+                          candidate_query_keys[candidate_idx].level,
+                          candidate_query_keys[candidate_idx].napot,
+                          candidate_ranks[candidate_idx],
+                          candidate_query_keys[candidate_idx].range_kind)};
+            if (candidate_ranks[candidate_idx] == max_rank) begin
+                max_rank_count++;
+                selected_idx = candidate_idx;
+            end
+        end
+        if (max_rank_count != 1 || selected_idx < 0) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("ambiguous L2TLB range hit request vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d max_rank=%0d candidates:%s",
+                                 request_key.vpn, request_key.asid,
+                                 request_key.vmid, request_key.s2xlate,
+                                 max_rank, candidate_summary))
+        end
+        anchor_key = candidate_anchor_keys[selected_idx];
+        entry = candidate_entries[selected_idx];
+        `uvm_info("COMMON_DATA",
+                  $sformatf("overlapping L2TLB range hit selects widest raw coverage request vpn=0x%0h s2xlate=%0d selected vpn=0x%0h gen=%0d rank=%0d candidates:%s",
+                            request_key.vpn, request_key.s2xlate,
+                            anchor_key.vpn, entry.entry_generation,
+                            max_rank, candidate_summary), UVM_LOW)
+        return 1'b1;
+    endfunction:find_tlb_range_hit_by_req
+
     function bit get_or_create_tlb_entry_by_req(input bit [37:0] vpn,
                                                 input bit [1:0] s2xlate,
                                                 output memblock_tlb_lookup_key_t key,
                                                 output memblock_tlb_entry entry,
                                                 output bit created);
+        memblock_tlb_lookup_key_t entry_anchor_key;
+        memblock_tlb_lookup_result_e lookup_result;
+
         key = make_tlb_key_by_req(vpn, s2xlate);
         return get_or_create_tlb_entry_by_req_with_snapshot(vpn,
                                                              s2xlate,
                                                              mmu_csr_state,
                                                              key,
+                                                             entry_anchor_key,
+                                                             lookup_result,
                                                              entry,
                                                              created);
     endfunction:get_or_create_tlb_entry_by_req
@@ -2997,25 +3243,43 @@ class common_data_transaction extends uvm_object;
         input bit [37:0] vpn,
         input bit [1:0] s2xlate,
         input mmu_csr_runtime_state csr_snapshot,
-        output memblock_tlb_lookup_key_t key,
+        output memblock_tlb_lookup_key_t request_key,
+        output memblock_tlb_lookup_key_t entry_anchor_key,
+        output memblock_tlb_lookup_result_e lookup_result,
         output memblock_tlb_entry entry,
         output bit created);
         if (csr_snapshot == null) begin
             `uvm_fatal("COMMON_DATA", "get_or_create_tlb_entry_by_req_with_snapshot got null csr_snapshot")
         end
-        key = csr_snapshot.make_lookup_key({26'b0, vpn}, s2xlate);
-        if (has_tlb_entry(key)) begin
-            entry = tlb_entry_by_key[key];
+        request_key = csr_snapshot.make_lookup_key({26'b0, vpn}, s2xlate);
+        entry_anchor_key = '{default:'0};
+        lookup_result = MEMBLOCK_TLB_LOOKUP_MISS_BUILD;
+        if (has_tlb_entry(request_key)) begin
+            entry = tlb_entry_by_key[request_key];
+            if (entry.range_index_keys.size() == 0) begin
+                `uvm_fatal("COMMON_DATA", "exact L2TLB hit has no registered range index ownership")
+            end
             entry.last_hit_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+            entry_anchor_key = request_key;
+            lookup_result = MEMBLOCK_TLB_LOOKUP_EXACT_HIT;
             created = 1'b0;
             return 1'b1;
         end
-        entry = build_tlb_entry_for_key_with_csr(key, csr_snapshot);
-        insert_tlb_entry(key, entry);
-        if (!register_tlb_range_index(key, entry)) begin
-            tlb_entry_by_key.delete(key);
+        if (find_tlb_range_hit_by_req(request_key, csr_snapshot,
+                                      entry_anchor_key, entry)) begin
+            entry.last_hit_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+            lookup_result = MEMBLOCK_TLB_LOOKUP_RANGE_HIT;
+            created = 1'b0;
+            return 1'b1;
+        end
+        entry = build_tlb_entry_for_key_with_csr(request_key, csr_snapshot);
+        insert_tlb_entry(request_key, entry);
+        if (!register_tlb_range_index(request_key, entry)) begin
+            tlb_entry_by_key.delete(request_key);
             `uvm_fatal("COMMON_DATA", "failed to register new canonical TLB entry in range index")
         end
+        entry_anchor_key = request_key;
+        lookup_result = MEMBLOCK_TLB_LOOKUP_MISS_BUILD;
         created = 1'b1;
         return 1'b1;
     endfunction:get_or_create_tlb_entry_by_req_with_snapshot
