@@ -55,4 +55,4 @@ private[top] object XSCachedParametersOptional {
   } 
 }
 
-private[top] case object CachedParameterKey extends Field[Boolean](false)
+private[top] case object CachedParameterKey extends Field[Boolean](true)

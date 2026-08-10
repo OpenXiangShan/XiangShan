@@ -232,9 +232,9 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(DumpCSR = true)
           }), tail)
-        case "--cached-parameters"::tail => {
+        case "--disable-cached-parameters"::tail => {
           nextOption(config.alter((site, here, up) => {
-            case CachedParameterKey => true
+            case CachedParameterKey => false
           }), tail)
         }
         case option :: tail =>
