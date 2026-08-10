@@ -1720,8 +1720,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // replacement algorithm
+  require(cacheParams.replacer.contains("setplru"),
+    s"zihintntl DCache NTL currently requires replacer=setplru, got ${cacheParams.replacer}")
   val replacer = new NtlSetAssocLRU(nSets, nWays) // PLRU that supports NTL (zihintntl) access
-  // val replacer = ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets)
   val replWayReqs = ldu.map(_.io.replace_way) ++ Seq(mainPipe.io.replace_way) ++ stu.map(_.io.replace_way)
 
   if (dwpuParam.enCfPred) {
