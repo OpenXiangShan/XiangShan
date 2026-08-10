@@ -515,9 +515,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).valid := false.B
     exceptionBuffer.io.storeAddrIn(StorePipelineWidth + i).bits := 0.U.asTypeOf(new LsPipelineBundle)
 
-    when (io.storeAddrIn(i).fire && io.storeAddrIn(i).bits.updateAddrValid) {
-      val addr_valid = !io.storeAddrIn(i).bits.miss
-      addrvalid(stWbIndex) := addr_valid //!io.storeAddrIn(i).bits.mmio
+    when (io.storeAddrIn(i).fire &&
+          io.storeAddrIn(i).bits.updateAddrValid &&
+          !io.storeAddrIn(i).bits.miss) {
+      addrvalid(stWbIndex) := true.B
       nc(stWbIndex) := io.storeAddrIn(i).bits.nc
 
     }
@@ -530,15 +531,17 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       paddrModule.io.wdata(i) := io.storeAddrIn(i).bits.paddr
       paddrModule.io.wmask(i) := io.storeAddrIn(i).bits.mask
       paddrModule.io.wlineflag(i) := io.storeAddrIn(i).bits.wlineflag
-      paddrModule.io.wen(i) := true.B
+      paddrModule.io.wen(i) := !io.storeAddrIn(i).bits.miss
 
       vaddrModule.io.waddr(i) := stWbIndex
       vaddrModule.io.wdata(i) := io.storeAddrIn(i).bits.vaddr
       vaddrModule.io.wmask(i) := io.storeAddrIn(i).bits.mask
       vaddrModule.io.wlineflag(i) := io.storeAddrIn(i).bits.wlineflag
-      vaddrModule.io.wen(i) := true.B
+      vaddrModule.io.wen(i) := !io.storeAddrIn(i).bits.miss
 
-      debug_paddr(paddrModule.io.waddr(i)) := paddrModule.io.wdata(i)
+      when (paddrModule.io.wen(i)) {
+        debug_paddr(paddrModule.io.waddr(i)) := paddrModule.io.wdata(i)
+      }
 
       // mmio(stWbIndex) := io.storeAddrIn(i).bits.mmio
     }
