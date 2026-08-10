@@ -91,7 +91,20 @@ task fence_agent_agent_monitor::mon_data();
             memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
             raw_sfence = memblock_sync_pkg::make_empty_raw_sfence();
             raw_sfence.sample_seq = sample_seq;
+            raw_sfence.sample_time = $time;
+            raw_sfence.reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
             if (io_ooo_to_mem_sfence_valid===1'b1) begin
+                // release 的 raw intake 已在前一个完整 sample 封闭。此时不能先
+                // 分配 lifecycle event 再由 FIFO producer 报错，否则会留下无人
+                // 消费的 event history。
+                if (memblock_sync_pkg::dispatch_l2tlb_lookup_active &&
+                    memblock_sync_pkg::l2tlb_raw_fence_intake_closed) begin
+                    `uvm_fatal(get_type_name(),
+                               $sformatf("SFENCE/HFENCE arrived after raw intake close sample=%0d epoch=%0d generation=%0d",
+                                         sample_seq,
+                                         raw_sfence.reset_epoch,
+                                         memblock_sync_pkg::l2tlb_raw_fence_intake_closed_generation))
+                end
                 event_seq = memblock_sync_pkg::note_l2tlb_flush_event(
                     $time, memblock_sync_pkg::MEMBLOCK_L2TLB_REASON_FENCE);
                 raw_sfence.valid = 1'b1;
@@ -103,10 +116,9 @@ task fence_agent_agent_monitor::mon_data();
                 raw_sfence.hg    = io_ooo_to_mem_sfence_bits_hg;
                 raw_sfence.lifecycle_event_seq = event_seq;
                 raw_sfence.cycle = memblock_sync_pkg::get_dispatch_service_cycle();
-                // No-dispatch mode has no semantic raw-fence FIFO.
-                if (memblock_sync_pkg::dispatch_l2tlb_lookup_active) begin
-                    memblock_sync_pkg::push_raw_sfence(raw_sfence);
-                end
+                // 同步包按固定 topology 决定 dispatch-active 入 FIFO 或
+                // no-dispatch 丢弃；不能由 monitor 猜测 CSR context 是否已经到达。
+                memblock_sync_pkg::push_raw_sfence(raw_sfence);
             end
             // Even an empty sample must close the producer barrier.
             memblock_sync_pkg::mark_l2tlb_sample_producer_done(

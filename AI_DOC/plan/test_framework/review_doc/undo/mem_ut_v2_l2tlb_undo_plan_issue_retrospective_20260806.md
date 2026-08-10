@@ -9,7 +9,7 @@ L2Cache/PTW/memory 下游模型，也不评价 DUT 的 checker、scoreboard 或 
 - `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`
 - `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`
 - `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`
-- `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md`
+- `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md`
 
 ## 术语与抽象功能说明
 
@@ -1103,3 +1103,19 @@ mailbox 的 `transport_sample_seq` 与 DUT global sample 必须分离：前者�
 driver 是唯一把 terminal slot 回收为 EMPTY 的写者；ENABLED topology 的 RESPONSE reset ack 只有 owner reset-done、本地 stale
 item 清理和 mailbox EMPTY 全部成立后才能发送，driver 随后进入本 epoch reset-quiescent，不再发布新的 semantic mailbox sample，
 防止 reset re-arm 留下旧 sample。
+
+#### 当前状态更正（2026-08-10）
+
+本回溯文档上方所有“四份 `undo` plan 均尚未 coding/验证”的表述均是当时的历史状态，保留用于解释问题演进，不能作为
+当前项目状态。当前权威状态如下：
+
+| 专项 | 当前路径与状态 |
+|---|---|
+| response random payload | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`；coding、compile、定向 smoke 和独立末轮 review 已完成。 |
+| token timing correction | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`；coding、compile、smoke 和独立末轮 review 已完成。 |
+| stage-aware live-entry invalidation | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md`；coding、静态检查、远端 compile、基础 smoke 与 real-dispatch smoke 已完成。 |
+| range lookup/NAPOT | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`；仍是待执行专项。 |
+
+单 owner 审核合同不改变这些专项的归档状态。后续 coding 仅可针对仍在 `plan/undo` 的专项执行；已归档的 `plan/do` 文档只用于
+确认已实现行为、历史决策和回归边界，不能被重新解释成新的 coding 入口。本文中的旧 API、旧 reset/release 摘要也继续仅为
+历史材料；当前实现语义以单 owner 审核稿和对应专项文件头的状态说明为准。

@@ -113,6 +113,10 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor
     // dispatch service owner.  Run this first so a live reset does not let
     // later batch handlers consume stale raw state.
     collect_runtime_context_events();
+    if (monitor_adapter == null) begin
+        monitor_adapter = dispatch_monitor_event_adapter::type_id::create("monitor_adapter");
+    end
+    monitor_adapter.service_l2tlb_sfence_events();
     if (memblock_sync_pkg::reset_backend_done !== 1'b1 ||
         memblock_sync_pkg::l2tlb_reset_active()) begin
         return;

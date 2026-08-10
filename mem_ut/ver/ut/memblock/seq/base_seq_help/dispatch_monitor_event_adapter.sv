@@ -19,12 +19,10 @@ class dispatch_monitor_event_adapter extends uvm_object;
     common_data_transaction data;
     lsq_commit_handler      monitor_commit_handler;
 
-    typedef struct {
-        memblock_sync_pkg::dispatch_raw_sfence_t raw;
-        longint unsigned due_sample_seq;
-    } pending_l2tlb_sfence_t;
-    pending_l2tlb_sfence_t pending_l2tlb_sfence_q[$];
     longint unsigned adapter_reset_serviced_epoch;
+    // 每个 dispatch service sample 只允许一次 destructive raw-fence service。
+    // C4 pending work 的唯一真源在 common_data_transaction，adapter 不再维护镜像队列。
+    longint unsigned last_l2tlb_sfence_service_sample_seq;
 
     `uvm_object_utils(dispatch_monitor_event_adapter)
 
@@ -32,8 +30,8 @@ class dispatch_monitor_event_adapter extends uvm_object;
         super.new(name);
         data = common_data_transaction::get();
         monitor_commit_handler = null;
-        pending_l2tlb_sfence_q.delete();
         adapter_reset_serviced_epoch = 0;
+        last_l2tlb_sfence_service_sample_seq = 0;
     endfunction:new
 
     function void bind_commit_handler(input lsq_commit_handler handler);
@@ -41,11 +39,11 @@ class dispatch_monitor_event_adapter extends uvm_object;
     endfunction:bind_commit_handler
 
     function void reset_l2tlb_sfence_state();
-        // Runtime reset owns the epoch boundary. The adapter only drops its
-        // private scheduled work and its package FIFO/live-entry state; it does
-        // not clear CSR/fence history or any response-owner state.
+        // Runtime reset owns the epoch boundary. The adapter only clears its
+        // package FIFO and common-data live-entry work; CSR context/history and
+        // response-owner state remain owned by their direct writers.
         ensure_handles();
-        pending_l2tlb_sfence_q.delete();
+        last_l2tlb_sfence_service_sample_seq = 0;
         if (memblock_sync_pkg::l2tlb_reset_active() &&
             memblock_sync_pkg::get_l2tlb_current_reset_epoch() != 0) begin
             longint unsigned reset_epoch;
@@ -876,62 +874,145 @@ class dispatch_monitor_event_adapter extends uvm_object;
 
     function void drain_l2tlb_sfence_events(input longint unsigned current_sample_seq);
         memblock_sync_pkg::dispatch_raw_sfence_t raw_sfence;
-        pending_l2tlb_sfence_t pending;
+        memblock_sync_pkg::dispatch_raw_sfence_t consumed_sfence;
+        memblock_sfence_payload_t payload;
+        longint unsigned current_reset_epoch;
 
         ensure_handles();
+        if (current_sample_seq == 0) begin
+            return;
+        end
+        if (memblock_sync_pkg::csr_history_published_seq < current_sample_seq ||
+            memblock_sync_pkg::lifecycle_event_published_seq < current_sample_seq) begin
+            return;
+        end
+        if (memblock_sync_pkg::csr_history_published_seq > current_sample_seq ||
+            memblock_sync_pkg::lifecycle_event_published_seq > current_sample_seq) begin
+            `uvm_fatal("DISP_RAW_SFENCE",
+                       $sformatf("raw-fence service watermark mismatch current=%0d csr=%0d lifecycle=%0d",
+                                 current_sample_seq,
+                                 memblock_sync_pkg::csr_history_published_seq,
+                                 memblock_sync_pkg::lifecycle_event_published_seq))
+        end
         if (!memblock_sync_pkg::dispatch_l2tlb_lookup_active) begin
+            if (memblock_sync_pkg::raw_sfence_q.size() != 0) begin
+                `uvm_fatal("DISP_RAW_SFENCE",
+                           $sformatf("no-dispatch topology retained raw fence count=%0d",
+                                     memblock_sync_pkg::raw_sfence_q.size()))
+            end
             return;
         end
-        if (current_sample_seq == 0 ||
-            !memblock_sync_pkg::l2tlb_sample_ready(current_sample_seq)) begin
-            return;
-        end
-        while (memblock_sync_pkg::pop_raw_sfence(raw_sfence)) begin
+        current_reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+        while (memblock_sync_pkg::peek_raw_sfence(raw_sfence)) begin
             if (raw_sfence.sample_seq == 0 ||
-                raw_sfence.sample_seq > current_sample_seq ||
-                raw_sfence.lifecycle_event_seq ==
+                raw_sfence.sample_seq > current_sample_seq) begin
+                `uvm_fatal("DISP_RAW_SFENCE",
+                           $sformatf("invalid raw fence sample=%0d current=%0d reset=%0d/%0d",
+                                     raw_sfence.sample_seq, current_sample_seq,
+                                     raw_sfence.reset_epoch, current_reset_epoch))
+            end
+            if (raw_sfence.reset_epoch < current_reset_epoch) begin
+                if (!memblock_sync_pkg::pop_raw_sfence(consumed_sfence)) begin
+                    `uvm_fatal("DISP_RAW_SFENCE", "stale raw fence peek/pop lost queue head")
+                end
+                `uvm_info("DISP_RAW_SFENCE",
+                          $sformatf("drop stale raw fence sample=%0d epoch=%0d current_epoch=%0d",
+                                    consumed_sfence.sample_seq,
+                                    consumed_sfence.reset_epoch,
+                                    current_reset_epoch), UVM_LOW)
+                continue;
+            end
+            if (raw_sfence.reset_epoch > current_reset_epoch) begin
+                `uvm_fatal("DISP_RAW_SFENCE",
+                           $sformatf("future raw fence epoch=%0d current=%0d sample=%0d",
+                                     raw_sfence.reset_epoch, current_reset_epoch,
+                                     raw_sfence.sample_seq))
+            end
+            if (raw_sfence.lifecycle_event_seq ==
                     memblock_sync_pkg::MEMBLOCK_L2TLB_EVENT_SEQ_NONE ||
                 raw_sfence.lifecycle_event_seq >
                     memblock_sync_pkg::last_allocated_l2tlb_event_seq) begin
                 `uvm_fatal("DISP_RAW_SFENCE",
-                           $sformatf("invalid raw fence provenance sample=%0d current=%0d event_seq=%0d last_event=%0d",
-                                     raw_sfence.sample_seq, current_sample_seq,
+                           $sformatf("invalid raw fence event provenance sample=%0d event_seq=%0d last_event=%0d",
+                                     raw_sfence.sample_seq,
                                      raw_sfence.lifecycle_event_seq,
                                      memblock_sync_pkg::last_allocated_l2tlb_event_seq))
             end
-            pending.raw = raw_sfence;
-            pending.due_sample_seq = raw_sfence.sample_seq +
-                                     MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES;
-            pending_l2tlb_sfence_q.push_back(pending);
+            if (!raw_sfence.context_valid) begin
+                if (raw_sfence.sample_seq == current_sample_seq) begin
+                    return;
+                end
+                `uvm_fatal("DISP_RAW_SFENCE",
+                           $sformatf("raw fence missed same-sample CSR context raw_sample=%0d current=%0d hv=%0d hg=%0d addr=0x%0h id=0x%0h",
+                                     raw_sfence.sample_seq, current_sample_seq,
+                                     raw_sfence.hv, raw_sfence.hg,
+                                     raw_sfence.addr, raw_sfence.id))
+            end
+            if (raw_sfence.context_reset_epoch != raw_sfence.reset_epoch ||
+                raw_sfence.csr_sample_seq != raw_sfence.sample_seq) begin
+                `uvm_fatal("DISP_RAW_SFENCE",
+                           $sformatf("raw fence context provenance mismatch sample=%0d csr_sample=%0d raw_epoch=%0d context_epoch=%0d",
+                                     raw_sfence.sample_seq, raw_sfence.csr_sample_seq,
+                                     raw_sfence.reset_epoch,
+                                     raw_sfence.context_reset_epoch))
+            end
+            payload = data.decode_raw_sfence(raw_sfence);
+            if (!data.schedule_sfence_invalidate(payload,
+                                                  raw_sfence.sample_seq,
+                                                  raw_sfence.reset_epoch,
+                                                  raw_sfence.lifecycle_event_seq)) begin
+                `uvm_fatal("DISP_RAW_SFENCE", "raw fence schedule returned failure")
+            end
+            if (!memblock_sync_pkg::pop_raw_sfence(consumed_sfence) ||
+                consumed_sfence.sample_seq != raw_sfence.sample_seq ||
+                consumed_sfence.reset_epoch != raw_sfence.reset_epoch ||
+                consumed_sfence.lifecycle_event_seq != raw_sfence.lifecycle_event_seq) begin
+                `uvm_fatal("DISP_RAW_SFENCE", "scheduled raw fence did not pop the peeked queue head")
+            end
         end
     endfunction:drain_l2tlb_sfence_events
 
     function void apply_due_l2tlb_sfence_events(input longint unsigned current_sample_seq);
-        pending_l2tlb_sfence_t pending;
-
         ensure_handles();
-        while (pending_l2tlb_sfence_q.size() != 0 &&
-               pending_l2tlb_sfence_q[0].due_sample_seq <= current_sample_seq) begin
-            pending = pending_l2tlb_sfence_q.pop_front();
-            // C4 is the first destructive point. Keep apply_raw_sfence as the
-            // existing live-entry owner and invoke it only after due sample.
-            void'(data.apply_raw_sfence(pending.raw));
-        end
+        void'(data.apply_due_sfence_invalidate(
+            current_sample_seq,
+            memblock_sync_pkg::get_l2tlb_current_reset_epoch()));
     endfunction:apply_due_l2tlb_sfence_events
 
     function void service_l2tlb_sfence_events();
         longint unsigned current_sample_seq;
 
         ensure_handles();
-        if (memblock_sync_pkg::reset_backend_done !== 1'b1) begin
+        if (memblock_sync_pkg::reset_backend_done !== 1'b1 ||
+            memblock_sync_pkg::l2tlb_reset_active()) begin
             reset_l2tlb_sfence_state();
             return;
         end
         current_sample_seq = memblock_sync_pkg::peek_current_dut_global_sample();
         if (current_sample_seq == 0 ||
-            !memblock_sync_pkg::l2tlb_sample_ready(current_sample_seq)) begin
+            memblock_sync_pkg::csr_history_published_seq < current_sample_seq ||
+            memblock_sync_pkg::lifecycle_event_published_seq < current_sample_seq) begin
             return;
         end
+        if (memblock_sync_pkg::csr_history_published_seq > current_sample_seq ||
+            memblock_sync_pkg::lifecycle_event_published_seq > current_sample_seq) begin
+            `uvm_fatal("DISP_RAW_SFENCE",
+                       $sformatf("service watermark mismatch current=%0d csr=%0d lifecycle=%0d",
+                                 current_sample_seq,
+                                 memblock_sync_pkg::csr_history_published_seq,
+                                 memblock_sync_pkg::lifecycle_event_published_seq))
+        end
+        if (last_l2tlb_sfence_service_sample_seq == current_sample_seq) begin
+            `uvm_fatal("DISP_RAW_SFENCE",
+                       $sformatf("duplicate raw-fence service sample=%0d", current_sample_seq))
+        end
+        if (last_l2tlb_sfence_service_sample_seq > current_sample_seq) begin
+            `uvm_fatal("DISP_RAW_SFENCE",
+                       $sformatf("raw-fence service sample regressed previous=%0d current=%0d",
+                                 last_l2tlb_sfence_service_sample_seq,
+                                 current_sample_seq))
+        end
+        last_l2tlb_sfence_service_sample_seq = current_sample_seq;
         drain_l2tlb_sfence_events(current_sample_seq);
         apply_due_l2tlb_sfence_events(current_sample_seq);
         publish_l2tlb_adapter_drain_proof(current_sample_seq);
@@ -948,7 +1029,7 @@ class dispatch_monitor_event_adapter extends uvm_object;
             !memblock_sync_pkg::l2tlb_sample_ready(current_sample_seq)) begin
             return;
         end
-        if (pending_l2tlb_sfence_q.size() != 0 ||
+        if (data.has_pending_sfence_invalidate() ||
             memblock_sync_pkg::raw_sfence_q.size() != 0) begin
             return;
         end

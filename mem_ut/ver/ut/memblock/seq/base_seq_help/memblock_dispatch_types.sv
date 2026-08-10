@@ -270,6 +270,15 @@ typedef struct packed {
     bit [1:0]  s2xlate;
 } memblock_tlb_lookup_key_t;
 
+typedef enum int unsigned {
+    // HS/S-stage SFENCE.VMA，只作用于 noS2xlate 的 S1 entry。
+    MEMBLOCK_SFENCE_TARGET_HS_S1 = 0,
+    // 虚拟态 SFENCE.VMA 或 HFENCE.VVMA，作用于 VS S1 entry。
+    MEMBLOCK_SFENCE_TARGET_VS_S1 = 1,
+    // HFENCE.GVMA，作用于 G-stage S2 entry。
+    MEMBLOCK_SFENCE_TARGET_G_S2  = 2
+} memblock_sfence_target_stage_e;
+
 typedef struct {
     bit               valid;
     bit               ignore_addr;
@@ -278,6 +287,19 @@ typedef struct {
     bit [15:0]        id;
     bit               hv;
     bit               hg;
+    // 中文注释：target_stage 和 S1/S2 地址均在 raw fence 采样时确定。
+    // matcher 只读这些冻结字段，不能在 drain 时从 current CSR 重算 stage。
+    memblock_sfence_target_stage_e target_stage;
+    bit [37:0]        s1_vpn;
+    bit [51:0]        s2_gvpn;
+    bit               priv_virt_at_sample;
+    bit [15:0]        hgatp_vmid_at_sample;
+    bit [3:0]         satp_mode_at_sample;
+    bit [3:0]         vsatp_mode_at_sample;
+    bit [3:0]         hgatp_mode_at_sample;
+    longint unsigned  sample_seq;
+    longint unsigned  reset_epoch;
+    longint unsigned  lifecycle_event_seq;
     longint unsigned  cycle;
 } memblock_sfence_payload_t;
 

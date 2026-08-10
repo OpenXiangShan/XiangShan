@@ -1,6 +1,6 @@
 # V2 SFENCE/HFENCE 分阶段 Live Entry 失效专项 Plan
 
-状态：`undo`，仅为待执行设计；尚未 coding、compile、smoke 或仿真验证。
+状态：`已完成 coding，已归档`。本轮已完成静态检查、远端 `eda_compile`、基础 smoke 与 real-dispatch smoke。
 
 共享 lifecycle 约束：`AI_DOC/plan/test_framework/review_doc/undo/mem_ut_v2_l2tlb_single_owner_lifecycle_optimization_review_20260807.md`。
 本 plan 只负责 raw fence/context 与 live-entry/range-index 删除，不重新定义 owner、global sample、runtime reset、global stop 或 release。
@@ -806,21 +806,78 @@ ROB 提交后产生的 `flushAfter` redirect 清除年轻指令；V2 MemBlock �
 
 ## V2 DUT Over-Fence 边界
 
-本 plan 明确选择 architecture matcher 作为默认实现。V2 `TLBStorage.scala` 已有局部保守行为：虚拟态普通
-`SFENCE.VMA` 与 `HFENCE.VVMA` 可忽略非 x0 `rs1` 地址，`HFENCE.GVMA` 也不以计算出的 GVPN 做 local entry
-地址选择。这种 widening 可以删除更多 entry，但不能替代上述 S1/S2 语义。
+本 plan 明确选择 architecture matcher 作为默认实现。这里的 live entry 是测试框架的“已完成翻译
+logical model”，不是 V2 `TLBStorage` 的 local L1 entry，也不是 `PageTableCache` 的 L2 cache entry。因此，
+本 matcher 只按 entry 自己冻结的 S1/S2 payload、地址范围和 ID 语义做精确失效；它不声称逐项复刻任何一处
+V2 内部缓存实现。
 
-本 plan 不实现该 V2 widening，也不增加 runtime/compile profile 开关。若后续 responder 确实要复现该 V2
-local DTLB 行为，必须新建明确命名的专项 plan，并遵守：
+V2 `TLBStorage.scala` 的虚拟态 `SFENCE.VMA`/`HFENCE.VVMA`、以及 `HFENCE.GVMA` 存在局部保守
+over-fence；`PageTableCache.scala` 的 `HFENCE.GVMA x0,*` 又有不同的 `onlyStage1` 清理规则。两者的
+eligible `s2xlate` 集合和地址行为都不同，不能抽象成“只把 `addr_ok` 设为 true”的通用开关。
+
+本专项不实现上述任一 over-fence，也不增加 runtime/compile profile 开关。若后续要验证某个具体 V2
+cache 的 source-equivalent flush，必须另建专项，明确该模型对应 `TLBStorage` 还是 `PageTableCache`，并定义
+目标 entry 类别、eligible `s2xlate`、地址与 VMID/ASID 规则；不得修改本 logical live-entry matcher。
+
+本专项不通过共享 `entry.level`、`key.vpn` 或 `pte_g` 实现 widening。`allStage` 的 S1/S2 命中始终使用各自
+stage 的 level/tag/N/sector 字段，任一 stage 命中均删除完整 logical entry。
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+### [IMPLEMENTATION_DELTA] adapter 的 C4 work 真源
+
+**来源：** 执行前独立 review 发现原 adapter 仍保留私有 `pending_l2tlb_sfence_q`，并调用已经移除的
+`apply_raw_sfence()`，导致无法编译且与 C4 queue 的唯一 owner 冲突。
+
+**原 plan：** adapter 应作为 raw FIFO 的唯一 destructive consumer，但未把当前旧私有 queue 的迁移落点写成
+实际 API。
+
+**实现调整：** 删除 adapter 私有 pending queue，改为：
 
 ```text
-architecture matcher 已选定 target stage 与 allowed s2xlate
-  -> 保留 VS 的 sampled VMID、S1 ASID/global 规则或 G-stage VMID 规则
-  -> 仅把本 stage 的 addr_ok 扩大为 true
-  -> 删除完整命中的 live entry
+adapter peek raw FIFO 队首
+  -> 校验 reset epoch、event provenance 和同 sample CSR context
+  -> data.decode_raw_sfence(raw)
+  -> data.schedule_sfence_invalidate(...)
+  -> schedule 成功后 pop 同一队首
+  -> 每个 service sample 调用 data.apply_due_sfence_invalidate(...)
 ```
 
-本专项不把 widening 静默混入默认 matcher，也不通过共享 `entry.level`、`key.vpn` 或 `pte_g` 实现它。
+`common_data_transaction::sfence_invalidate_pending_q` 是唯一 C4 work 真源；release drain proof 同时检查该
+queue 和 raw FIFO 都为空。这样 adapter 不再拥有第二份 due 状态，也不存在 C0 立即删除入口。
+
+### [IMPLEMENTATION_DELTA] 唯一调度点与冻结字段检查
+
+**来源：** review 发现 `collect_runtime_context_events()` 仍直接 service raw fence，且 `rs1=x0` 时 matcher 会绕过
+stage/mode/level 结构检查。
+
+**实现调整：** `collect_runtime_context_events()` 只同步 CSR；
+`memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor_once()` 在其后每个 sample 恰好调用一次
+`service_l2tlb_sfence_events()`。matcher 在完成 `s2xlate` eligibility 判断后，无论 `rs1` 是否为 x0 都先调用
+`validate_frozen_stage_level()`；S1 matcher 只读取 `tag/level/PTE.N/valididx`，不再为地址命中读取
+`ppn_low` 或 `pteidx`。
+
+### [IMPLEMENTATION_DELTA] CSR context 队尾绑定与 reset writer 边界
+
+**来源：** review 发现 CSR context 发布逐项扫描 raw FIFO，且 CSR reset 和 adapter reset 都清同一 context。
+
+**实现调整：** 一个 fence interface 每个 sample 最多产生一条 raw，FIFO 按 sample 有序；CSR monitor 只检查/绑定
+当前 sample 的队尾，旧 sample 仍未绑定即 fatal。CSR monitor 是 `l2tlb_sfence_csr_context` 的 reset clear 唯一
+writer；adapter reset 只清 raw FIFO、live entry 和 adapter proof。
+
+### [IMPLEMENTATION_DELTA] 本轮验证结果
+
+- `git diff --check` 通过。
+- `rg` 确认 `apply_raw_sfence`、`apply_sfence_invalidate`、`drain_sfence_events` 和 adapter 私有 pending queue 无可达残留。
+- `make eda_compile tc=basicTest ts=virtual_base_sequence mode=base_fun` 通过。
+- VCS 曾遗留一个占用 `base_fun/exec/simv.daidir/work.lib++/tdc.sdb` 的 orphan `vcs1`，使 `eda_run` 的冗余重编译报告
+  `VFS_SDB_ERROR`。终止该遗留工具进程并删除该生成数据库后，重新 `eda_compile` 通过；这不是 SystemVerilog 或 DUT
+  行为失败。
+- 在已成功编译的 `simv` 上执行 `make eda_batch_run tc=basicTest ts=virtual_base_sequence mode=base_fun` 通过，
+  `UVM_ERROR=0`、`UVM_FATAL=0`。
+- 在同一已编译 `simv` 上执行
+  `make eda_batch_run tc=basicTest ts=memblock_dispatch_real_smoke_vseq mode=base_fun cfg=tc_dispatch_real_smoke` 通过，
+  覆盖真实 dispatch、L2TLB responder、writeback、ROB commit 和 LQ deq，`UVM_ERROR=0`、`UVM_FATAL=0`。
 
 ## 失败策略与定向验证
 

@@ -312,7 +312,19 @@ package memblock_sync_pkg;
         bit               hv;
         bit               hg;
         longint unsigned  sample_seq;
+        time              sample_time;
+        // 中文注释：raw fence 必须绑定产生它的 runtime reset epoch 与 CSR context。
+        // adapter 只消费同 epoch、同 sample 已绑定的 item，避免旧 fence 删除新 entry。
+        longint unsigned  reset_epoch;
         longint unsigned  lifecycle_event_seq;
+        bit               context_valid;
+        longint unsigned  context_reset_epoch;
+        bit               priv_virt_at_sample;
+        bit [15:0]        hgatp_vmid_at_sample;
+        bit [3:0]         satp_mode_at_sample;
+        bit [3:0]         vsatp_mode_at_sample;
+        bit [3:0]         hgatp_mode_at_sample;
+        longint unsigned  csr_sample_seq;
         longint unsigned  cycle;
     } dispatch_raw_sfence_t;
 
@@ -351,6 +363,18 @@ package memblock_sync_pkg;
         bit                 valid;
     } memblock_l2tlb_csr_history_entry_t;
 
+    typedef struct {
+        bit               valid;
+        longint unsigned  sample_seq;
+        time              sample_time;
+        longint unsigned  reset_epoch;
+        bit               priv_virt_at_sample;
+        bit [15:0]        hgatp_vmid_at_sample;
+        bit [3:0]         satp_mode_at_sample;
+        bit [3:0]         vsatp_mode_at_sample;
+        bit [3:0]         hgatp_mode_at_sample;
+    } memblock_l2tlb_sfence_csr_context_t;
+
     dispatch_raw_int_wb_t      raw_int_wb_q[$];
     dispatch_raw_iq_feedback_t raw_iq_feedback_q[$];
     dispatch_raw_ctrl_t        raw_ctrl_q[$];
@@ -360,6 +384,9 @@ package memblock_sync_pkg;
     dispatch_raw_cancel_snapshot_t raw_cancel_snapshot_q[$];
     dispatch_raw_redirect_anchor_t raw_redirect_anchor_q[$];
     dispatch_raw_sfence_t      raw_sfence_q[$];
+    // 中文注释：CSR monitor 每个 DUT sample 发布一份短生命周期 context。
+    // 同拍 fence 先到时 raw 留在 FIFO 等待绑定；下拍仍未绑定即为 monitor 时序错误。
+    memblock_l2tlb_sfence_csr_context_t l2tlb_sfence_csr_context;
     dispatch_raw_csr_t         latest_raw_csr;
     bit                        latest_raw_csr_valid;
     int unsigned               latest_raw_csr_seq;
@@ -536,10 +563,35 @@ package memblock_sync_pkg;
         item.hv    = 1'b0;
         item.hg    = 1'b0;
         item.sample_seq = 0;
+        item.sample_time = 0;
+        item.reset_epoch = 0;
         item.lifecycle_event_seq = MEMBLOCK_L2TLB_EVENT_SEQ_NONE;
+        item.context_valid = 1'b0;
+        item.context_reset_epoch = 0;
+        item.priv_virt_at_sample = 1'b0;
+        item.hgatp_vmid_at_sample = '0;
+        item.satp_mode_at_sample = '0;
+        item.vsatp_mode_at_sample = '0;
+        item.hgatp_mode_at_sample = '0;
+        item.csr_sample_seq = 0;
         item.cycle = 0;
         return item;
     endfunction:make_empty_raw_sfence
+
+    function memblock_l2tlb_sfence_csr_context_t make_empty_l2tlb_sfence_csr_context();
+        memblock_l2tlb_sfence_csr_context_t context;
+
+        context.valid = 1'b0;
+        context.sample_seq = 0;
+        context.sample_time = 0;
+        context.reset_epoch = 0;
+        context.priv_virt_at_sample = 1'b0;
+        context.hgatp_vmid_at_sample = '0;
+        context.satp_mode_at_sample = '0;
+        context.vsatp_mode_at_sample = '0;
+        context.hgatp_mode_at_sample = '0;
+        return context;
+    endfunction:make_empty_l2tlb_sfence_csr_context
 
     function bit raw_csr_payload_changed(input dispatch_raw_csr_t prev,
                                          input dispatch_raw_csr_t cur);
@@ -866,6 +918,7 @@ package memblock_sync_pkg;
         sample_producer_active_seq = 0;
         sample_producer_done_mask = 2'b00;
         sample_producer_reason_mask = 2'b00;
+        l2tlb_sfence_csr_context = make_empty_l2tlb_sfence_csr_context();
         lifecycle_event_published_seq = 0;
         csr_history_published_seq = 0;
         foreach (l2tlb_csr_history[idx]) begin
@@ -901,8 +954,9 @@ package memblock_sync_pkg;
     endfunction:reset_l2tlb_fence_runtime_state
 
     // Adapter direct-writer reset. This helper clears package-owned raw state
-    // only; the adapter sends its ACK after clearing its live table and range
-    // index.
+    // only; CSR monitor remains the sole writer that clears the short-lived
+    // SFENCE CSR context. The adapter sends its ACK after clearing its live
+    // table and range index.
     function void reset_l2tlb_adapter_runtime_state(
         input longint unsigned reset_epoch);
         if (!l2tlb_runtime_reset_active ||
@@ -2014,9 +2068,158 @@ package memblock_sync_pkg;
         return 1'b1;
     endfunction:get_latest_raw_csr
 
+    // Abstract responsibility: copy one immutable CSR sample into a raw fence
+    // from the same DUT sample/reset epoch. It never changes FIFO order and
+    // does not decide whether the fence should invalidate an entry.
+    function dispatch_raw_sfence_t bind_raw_sfence_context(
+        input dispatch_raw_sfence_t item,
+        input memblock_l2tlb_sfence_csr_context_t context);
+        dispatch_raw_sfence_t bound_item;
+
+        bound_item = item;
+        if (!context.valid || item.sample_seq != context.sample_seq) begin
+            return bound_item;
+        end
+        if (item.reset_epoch != context.reset_epoch) begin
+            `uvm_fatal("MEMBLOCK_L2TLB_SFENCE_CONTEXT",
+                       $sformatf("raw/context reset epoch mismatch raw=%0d context=%0d sample=%0d",
+                                 item.reset_epoch, context.reset_epoch,
+                                 item.sample_seq))
+        end
+        if (item.context_valid) begin
+            if (item.context_reset_epoch != context.reset_epoch ||
+                item.csr_sample_seq != context.sample_seq ||
+                item.priv_virt_at_sample != context.priv_virt_at_sample ||
+                item.hgatp_vmid_at_sample != context.hgatp_vmid_at_sample ||
+                item.satp_mode_at_sample != context.satp_mode_at_sample ||
+                item.vsatp_mode_at_sample != context.vsatp_mode_at_sample ||
+                item.hgatp_mode_at_sample != context.hgatp_mode_at_sample) begin
+                `uvm_fatal("MEMBLOCK_L2TLB_SFENCE_CONTEXT",
+                           $sformatf("raw fence context changed sample=%0d", item.sample_seq))
+            end
+            return bound_item;
+        end
+        bound_item.context_valid = 1'b1;
+        bound_item.context_reset_epoch = context.reset_epoch;
+        bound_item.priv_virt_at_sample = context.priv_virt_at_sample;
+        bound_item.hgatp_vmid_at_sample = context.hgatp_vmid_at_sample;
+        bound_item.satp_mode_at_sample = context.satp_mode_at_sample;
+        bound_item.vsatp_mode_at_sample = context.vsatp_mode_at_sample;
+        bound_item.hgatp_mode_at_sample = context.hgatp_mode_at_sample;
+        bound_item.csr_sample_seq = context.sample_seq;
+        return bound_item;
+    endfunction:bind_raw_sfence_context
+
+    // Abstract responsibility: publish the CSR context that interprets raw
+    // SFENCE/HFENCE bits for one DUT sample. The CSR monitor is its sole
+    // caller; a later adapter only reads the frozen fields on the raw item.
+    function void publish_l2tlb_sfence_csr_context(
+        input dispatch_raw_csr_t raw_csr,
+        input longint unsigned sample_seq,
+        input longint unsigned reset_epoch,
+        input time sample_time);
+        memblock_l2tlb_sfence_csr_context_t context;
+
+        if (!raw_csr.valid || !dut_sample_time_valid || sample_seq == 0 ||
+            sample_seq != dut_sample_seq || sample_time != dut_sample_time) begin
+            `uvm_fatal("MEMBLOCK_L2TLB_SFENCE_CONTEXT",
+                       $sformatf("invalid CSR context publication sample=%0d current=%0d time=%0t/%0t valid=%0d",
+                                 sample_seq, dut_sample_seq, sample_time,
+                                 dut_sample_time, raw_csr.valid))
+        end
+        if (l2tlb_runtime_reset_active || reset_epoch != l2tlb_current_reset_epoch) begin
+            `uvm_fatal("MEMBLOCK_L2TLB_SFENCE_CONTEXT",
+                       $sformatf("CSR context reset epoch mismatch sample=%0d context=%0d current=%0d reset_active=%0d",
+                                 sample_seq, reset_epoch,
+                                 l2tlb_current_reset_epoch,
+                                 l2tlb_runtime_reset_active))
+        end
+        context = make_empty_l2tlb_sfence_csr_context();
+        context.valid = 1'b1;
+        context.sample_seq = sample_seq;
+        context.sample_time = sample_time;
+        context.reset_epoch = reset_epoch;
+        context.priv_virt_at_sample = raw_csr.priv_virt;
+        context.hgatp_vmid_at_sample = raw_csr.hgatp_vmid;
+        context.satp_mode_at_sample = raw_csr.satp_mode;
+        context.vsatp_mode_at_sample = raw_csr.vsatp_mode;
+        context.hgatp_mode_at_sample = raw_csr.hgatp_mode;
+
+        if (l2tlb_sfence_csr_context.valid &&
+            l2tlb_sfence_csr_context.sample_seq == sample_seq &&
+            l2tlb_sfence_csr_context.reset_epoch == reset_epoch) begin
+            if (l2tlb_sfence_csr_context.priv_virt_at_sample != context.priv_virt_at_sample ||
+                l2tlb_sfence_csr_context.hgatp_vmid_at_sample != context.hgatp_vmid_at_sample ||
+                l2tlb_sfence_csr_context.satp_mode_at_sample != context.satp_mode_at_sample ||
+                l2tlb_sfence_csr_context.vsatp_mode_at_sample != context.vsatp_mode_at_sample ||
+                l2tlb_sfence_csr_context.hgatp_mode_at_sample != context.hgatp_mode_at_sample) begin
+                `uvm_fatal("MEMBLOCK_L2TLB_SFENCE_CONTEXT",
+                           $sformatf("CSR context duplicate changed payload sample=%0d", sample_seq))
+            end
+        end
+        else begin
+            if (l2tlb_sfence_csr_context.valid &&
+                l2tlb_sfence_csr_context.sample_seq >= sample_seq) begin
+                `uvm_fatal("MEMBLOCK_L2TLB_SFENCE_CONTEXT",
+                           $sformatf("CSR context sample did not advance previous=%0d current=%0d",
+                                     l2tlb_sfence_csr_context.sample_seq,
+                                     sample_seq))
+            end
+            l2tlb_sfence_csr_context = context;
+        end
+
+        // 同一接口每个 sample 最多产生一条 fence，FIFO 也按 sample 顺序入队。
+        // 因而只需检查/绑定当前 sample 的队尾，不能每拍扫描积压 raw FIFO。
+        if (raw_sfence_q.size() != 0) begin
+            if (!raw_sfence_q[$].context_valid &&
+                raw_sfence_q[$].sample_seq < sample_seq) begin
+                `uvm_fatal("MEMBLOCK_L2TLB_SFENCE_CONTEXT",
+                           $sformatf("raw fence missed same-sample CSR context raw_sample=%0d publish_sample=%0d",
+                                     raw_sfence_q[$].sample_seq, sample_seq))
+            end
+            if (raw_sfence_q[$].sample_seq > sample_seq) begin
+                `uvm_fatal("MEMBLOCK_L2TLB_SFENCE_CONTEXT",
+                           $sformatf("raw fence sample advanced ahead of CSR context raw_sample=%0d publish_sample=%0d",
+                                     raw_sfence_q[$].sample_seq, sample_seq))
+            end
+            if (raw_sfence_q[$].sample_seq == sample_seq) begin
+                raw_sfence_q[$] = bind_raw_sfence_context(raw_sfence_q[$], context);
+            end
+        end
+    endfunction:publish_l2tlb_sfence_csr_context
+
     function void push_raw_sfence(input dispatch_raw_sfence_t item);
-        if (item.valid && dispatch_l2tlb_lookup_active &&
-            l2tlb_raw_fence_intake_closed) begin
+        dispatch_raw_sfence_t bound_item;
+
+        if (!item.valid) begin
+            return;
+        end
+        if (!l2tlb_testcase_lifecycle_initialized) begin
+            `uvm_fatal("MEMBLOCK_L2TLB_TOPOLOGY",
+                       "raw fence observed before testcase L2TLB topology was initialized")
+        end
+        if (item.sample_seq == 0 || item.reset_epoch > l2tlb_current_reset_epoch) begin
+            `uvm_fatal("MEMBLOCK_L2TLB_SFENCE_CONTEXT",
+                       $sformatf("invalid/future raw fence sample=%0d raw_epoch=%0d current_epoch=%0d",
+                                 item.sample_seq, item.reset_epoch,
+                                 l2tlb_current_reset_epoch))
+        end
+        if (item.reset_epoch < l2tlb_current_reset_epoch) begin
+            `uvm_info("MEMBLOCK_L2TLB_SFENCE_CONTEXT",
+                      $sformatf("drop stale raw fence sample=%0d raw_epoch=%0d current_epoch=%0d",
+                                item.sample_seq, item.reset_epoch,
+                                l2tlb_current_reset_epoch), UVM_LOW)
+            return;
+        end
+        if (!dispatch_l2tlb_lookup_active) begin
+            if (item.lifecycle_event_seq != MEMBLOCK_L2TLB_EVENT_SEQ_NONE) begin
+                `uvm_fatal("MEMBLOCK_L2TLB_TOPOLOGY",
+                           $sformatf("no-dispatch raw fence has response event seq=%0d",
+                                     item.lifecycle_event_seq))
+            end
+            return;
+        end
+        if (l2tlb_raw_fence_intake_closed) begin
             `uvm_fatal("MEMBLOCK_L2TLB_RELEASE",
                        $sformatf("raw fence arrived after intake close sample=%0d close_sample=%0d epoch=%0d generation=%0d",
                                  item.sample_seq,
@@ -2024,13 +2227,29 @@ package memblock_sync_pkg;
                                  l2tlb_raw_fence_intake_closed_reset_epoch,
                                  l2tlb_raw_fence_intake_closed_generation))
         end
-        // L2TLB fence intake is a topology-owned sideband.  It must remain
-        // independent of the semantic dispatch capture gate so the C0 event
-        // barrier and the later live-entry invalidation observe the same fence.
-        if (dispatch_l2tlb_lookup_active && item.valid) begin
-            raw_sfence_q.push_back(item);
+        bound_item = item;
+        if (l2tlb_sfence_csr_context.valid &&
+            l2tlb_sfence_csr_context.sample_seq == item.sample_seq) begin
+            bound_item = bind_raw_sfence_context(item, l2tlb_sfence_csr_context);
         end
+        else if (l2tlb_sfence_csr_context.valid &&
+                 l2tlb_sfence_csr_context.sample_seq > item.sample_seq) begin
+            `uvm_fatal("MEMBLOCK_L2TLB_SFENCE_CONTEXT",
+                       $sformatf("raw fence arrived after its CSR context expired raw_sample=%0d latest_context=%0d",
+                                 item.sample_seq,
+                                 l2tlb_sfence_csr_context.sample_seq))
+        end
+        raw_sfence_q.push_back(bound_item);
     endfunction:push_raw_sfence
+
+    function bit peek_raw_sfence(output dispatch_raw_sfence_t item);
+        if (raw_sfence_q.size() == 0) begin
+            item = make_empty_raw_sfence();
+            return 1'b0;
+        end
+        item = raw_sfence_q[0];
+        return 1'b1;
+    endfunction:peek_raw_sfence
 
     function bit pop_raw_sfence(output dispatch_raw_sfence_t item);
         if (raw_sfence_q.size() == 0) begin
@@ -2138,6 +2357,7 @@ package memblock_sync_pkg;
         sample_producer_active_seq = 0;
         sample_producer_done_mask = 2'b00;
         sample_producer_reason_mask = 2'b00;
+        l2tlb_sfence_csr_context = make_empty_l2tlb_sfence_csr_context();
     endfunction:initialize_l2tlb_sample_coordinator
 
     function void clear_raw_monitor_queues();
@@ -2148,6 +2368,7 @@ package memblock_sync_pkg;
         raw_cancel_snapshot_q.delete();
         raw_redirect_anchor_q.delete();
         raw_sfence_q.delete();
+        l2tlb_sfence_csr_context = make_empty_l2tlb_sfence_csr_context();
         latest_raw_csr = make_empty_raw_csr();
         latest_raw_csr_valid = 1'b0;
         latest_raw_csr_seq = 0;
