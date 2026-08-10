@@ -251,7 +251,7 @@ export PYTHONPATH="${FRONTEND_DIR}:${FRONTEND_PYLIB}:${PYTHONPATH:-}"
 if [[ "${SKIP_NEMU}" == "0" ]]; then
   PIPELINE_STAGE="trace_generation"
   PIPELINE_REASON="trace_generation_failed"
-  "${PYTHON_BIN}" "${FRONTEND_DIR}/tools/nemu_bin_to_golden_trace.py" \
+  env -u LD_PRELOAD "${PYTHON_BIN}" "${FRONTEND_DIR}/tools/nemu_bin_to_golden_trace.py" \
     "${BIN_PATH}" "${TRACE_PATH}" \
     --nemu-exec "${NEMU_EXEC}" \
     --nemu-log "${NEMU_LOG_PATH}" \
