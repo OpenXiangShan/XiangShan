@@ -36,6 +36,11 @@ class common_data_transaction extends uvm_object;
     main_control_transaction main_table_by_uid[];
     status_transaction       status_by_uid[];
     memblock_tlb_entry       tlb_entry_by_key[memblock_tlb_lookup_key_t];
+    // 中文注释：secondary index 只将一个 raw range shape 映射到有限个
+    // canonical anchor key。payload 仍只保存在 tlb_entry_by_key，查询时必须
+    // 回到 canonical table 复核，不能把 payload 或 pending handle 存进 index。
+    memblock_tlb_lookup_key_t
+        tlb_anchor_keys_by_range_key[memblock_tlb_range_index_key_t][$];
     // 中文注释：adapter 成功消费 raw fence 后只在此登记 C4 删除工作。
     // 该队列不拥有 L2TLB token/UID；runtime reset 或 C4 delete 后由本类清除。
     memblock_pending_sfence_invalidate_t sfence_invalidate_pending_q[$];
@@ -216,6 +221,7 @@ class common_data_transaction extends uvm_object;
         status_by_uid     = new[main_trans_num_i];
         cancel_waiting_uid_tlb_records("reset_all_tables");
         tlb_entry_by_key.delete();
+        tlb_anchor_keys_by_range_key.delete();
         sfence_invalidate_pending_q.delete();
         uid_tlb_record_by_uid.delete();
         clear_issue_queues();
@@ -2690,6 +2696,287 @@ class common_data_transaction extends uvm_object;
         tlb_entry_by_key[key] = entry;
     endfunction:insert_tlb_entry
 
+    // Abstract responsibility: make one secondary-index key from a raw
+    // response shape.  It applies exactly the level/NAPOT mask consumed by
+    // the ordinary raw matcher and does not access either table.
+    function memblock_tlb_range_index_key_t make_tlb_range_index_key(
+        input memblock_tlb_range_kind_e range_kind,
+        input bit [1:0] s2xlate,
+        input bit asid_global,
+        input bit [15:0] asid,
+        input bit [15:0] vmid,
+        input bit [1:0] level,
+        input bit napot,
+        input bit [51:0] vpn);
+        memblock_tlb_range_index_key_t key;
+
+        if (napot && level != 2'd0) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("range index cannot use NAPOT with non-zero level=%0d", level))
+        end
+        key = '{default:'0};
+        key.range_kind = range_kind;
+        key.s2xlate = s2xlate;
+        key.asid_global = asid_global;
+        key.asid = asid_global ? '0 : asid;
+        key.vmid = vmid;
+        key.level = level;
+        key.napot = napot;
+        key.normalized_vpn = vpn;
+        if (napot) begin
+            key.normalized_vpn[3:0] = '0;
+        end
+        else begin
+            case (level)
+                2'd0: begin end
+                2'd1: key.normalized_vpn[8:0] = '0;
+                2'd2: key.normalized_vpn[17:0] = '0;
+                2'd3: key.normalized_vpn[26:0] = '0;
+                default: begin
+                    `uvm_fatal("COMMON_DATA", "invalid L2TLB range level")
+                end
+            endcase
+        end
+        return key;
+    endfunction:make_tlb_range_index_key
+
+    // Abstract responsibility: enumerate the finite raw-hit shape keys owned
+    // by one completed canonical entry.  It is pure with respect to table and
+    // index state; registration and deletion are handled by separate helpers.
+    function void build_entry_range_index_keys(
+        input memblock_tlb_entry entry,
+        output memblock_tlb_range_index_key_t keys[$]);
+        bit [51:0] raw_anchor_vpn;
+        bit [1:0]  effective_level;
+        bit        effective_napot;
+        bit        use_napot;
+        bit        asid_global;
+        bit [15:0] indexed_asid;
+        bit [15:0] indexed_vmid;
+
+        keys.delete();
+        if (entry == null || entry.entry_generation == 0) begin
+            `uvm_fatal("COMMON_DATA", "build_entry_range_index_keys got invalid entry")
+        end
+        entry.check_inactive_stage_defaults("RANGE_INDEX_BUILD");
+        entry.validate_s1_sector_payload_consistency("RANGE_INDEX_BUILD");
+        case (entry.s2xlate)
+            2'd0: begin
+                if (!entry.s1_stage_active || entry.s2_stage_active) begin
+                    `uvm_fatal("COMMON_DATA", "noS2xlate range entry has invalid stage shape")
+                end
+                asid_global = entry.s1_pte_g;
+                indexed_asid = entry.s1_asid;
+                indexed_vmid = '0;
+                if (entry.s1_level == 2'd0 && !entry.s1_pte_n) begin
+                    foreach (entry.s1_valididx[idx]) begin
+                        if (entry.s1_valididx[idx]) begin
+                            raw_anchor_vpn = {14'b0, entry.s1_tag, idx[2:0]};
+                            keys.push_back(make_tlb_range_index_key(
+                                MEMBLOCK_TLB_RANGE_KIND_S1, entry.s2xlate,
+                                asid_global, indexed_asid, indexed_vmid,
+                                2'd0, 1'b0, raw_anchor_vpn));
+                        end
+                    end
+                end
+                else begin
+                    raw_anchor_vpn = {14'b0, entry.s1_tag, 3'b000};
+                    use_napot = entry.s1_level == 2'd0 && entry.s1_pte_n;
+                    keys.push_back(make_tlb_range_index_key(
+                        MEMBLOCK_TLB_RANGE_KIND_S1, entry.s2xlate,
+                        asid_global, indexed_asid, indexed_vmid,
+                        entry.s1_level, use_napot, raw_anchor_vpn));
+                end
+            end
+            2'd1: begin
+                if (!entry.s1_stage_active || entry.s2_stage_active) begin
+                    `uvm_fatal("COMMON_DATA", "onlyStage1 range entry has invalid stage shape")
+                end
+                raw_anchor_vpn = {14'b0, entry.s1_tag, entry.s1_addr_low};
+                use_napot = entry.s1_level == 2'd0 && entry.s1_pte_n;
+                keys.push_back(make_tlb_range_index_key(
+                    MEMBLOCK_TLB_RANGE_KIND_S1, entry.s2xlate,
+                    entry.s1_pte_g, entry.s1_asid, entry.s1_vmid,
+                    entry.s1_level, use_napot, raw_anchor_vpn));
+            end
+            2'd2: begin
+                if (entry.s1_stage_active || !entry.s2_stage_active) begin
+                    `uvm_fatal("COMMON_DATA", "onlyStage2 range entry has invalid stage shape")
+                end
+                raw_anchor_vpn = {14'b0, entry.s2_tag};
+                use_napot = entry.s2_level == 2'd0 && entry.s2_pte_n;
+                keys.push_back(make_tlb_range_index_key(
+                    MEMBLOCK_TLB_RANGE_KIND_S2, entry.s2xlate,
+                    1'b0, '0, entry.s2_vmid, entry.s2_level,
+                    use_napot, raw_anchor_vpn));
+            end
+            2'd3: begin
+                if (!entry.s1_stage_active || !entry.s2_stage_active) begin
+                    `uvm_fatal("COMMON_DATA", "allStage range entry has invalid stage shape")
+                end
+                derive_allstage_lookup_shape(entry, effective_level, effective_napot);
+                raw_anchor_vpn = {14'b0, entry.s1_tag, entry.s1_addr_low};
+                use_napot = effective_level == 2'd0 && effective_napot;
+                keys.push_back(make_tlb_range_index_key(
+                    MEMBLOCK_TLB_RANGE_KIND_ALLSTAGE, entry.s2xlate,
+                    entry.s1_pte_g, entry.s1_asid, entry.s1_vmid,
+                    effective_level, use_napot, raw_anchor_vpn));
+            end
+            default: begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("unsupported range entry s2xlate=%0d", entry.s2xlate))
+            end
+        endcase
+        if (keys.size() == 0) begin
+            `uvm_fatal("COMMON_DATA", "canonical entry produced no range index key")
+        end
+    endfunction:build_entry_range_index_keys
+
+    // Abstract responsibility: validate the normal-leaf NAPOT encoding before
+    // a new canonical entry becomes discoverable through the range index.  It
+    // never repairs raw fields and deliberately leaves fault passthrough alone.
+    function void validate_normal_napot_payload(
+        input memblock_tlb_lookup_key_t anchor_key,
+        input memblock_tlb_entry entry);
+        bit [3:0] s1_napot_low;
+
+        if (entry == null || entry.lookup_key != anchor_key) begin
+            `uvm_fatal("COMMON_DATA", "validate_normal_napot_payload got inconsistent anchor entry")
+        end
+        if (entry.has_effective_fault()) begin
+            return;
+        end
+        if (entry.s1_stage_active && entry.s1_pte_n) begin
+            entry.validate_s1_sector_payload_consistency("NAPOT_VALIDATE");
+            if (entry.s1_level != 2'd0) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("S1 normal NAPOT has non-zero level=%0d anchor vpn=0x%0h",
+                                     entry.s1_level, anchor_key.vpn))
+            end
+            s1_napot_low = {entry.s1_entry_ppn_raw[0],
+                            entry.s1_ppn_low[entry.s1_addr_low]};
+            if (entry.s1_pte_mode_at_build ==
+                    memblock_tlb_entry::MEMBLOCK_TLB_PTE_MODE_LEGAL &&
+                s1_napot_low != 4'b1000) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("LEGAL S1 NAPOT encoding invalid anchor vpn=0x%0h low=0x%0h",
+                                     anchor_key.vpn, s1_napot_low))
+            end
+        end
+        if (entry.s2_stage_active && entry.s2_pte_n) begin
+            if (entry.s2_level != 2'd0) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("S2 normal NAPOT has non-zero level=%0d anchor vpn=0x%0h",
+                                     entry.s2_level, anchor_key.vpn))
+            end
+            if (entry.s2_pte_mode_at_build ==
+                    memblock_tlb_entry::MEMBLOCK_TLB_PTE_MODE_LEGAL &&
+                entry.s2_entry_ppn_raw[3:0] != 4'b1000) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("LEGAL S2 NAPOT encoding invalid anchor vpn=0x%0h low=0x%0h",
+                                     anchor_key.vpn, entry.s2_entry_ppn_raw[3:0]))
+            end
+        end
+    endfunction:validate_normal_napot_payload
+
+    // Abstract responsibility: atomically publish all finite range buckets for
+    // one canonical entry after the entry is already in the live table.
+    function bit register_tlb_range_index(
+        input memblock_tlb_lookup_key_t anchor_key,
+        input memblock_tlb_entry entry);
+        memblock_tlb_range_index_key_t keys[$];
+        int key_idx;
+        int prior_idx;
+        int bucket_idx;
+        bit duplicate_anchor;
+
+        if (entry == null || !tlb_entry_by_key.exists(anchor_key) ||
+            tlb_entry_by_key[anchor_key] != entry ||
+            entry.lookup_key != anchor_key || entry.entry_generation == 0) begin
+            `uvm_fatal("COMMON_DATA", "range-index registration got non-canonical entry")
+        end
+        if (entry.range_index_keys.size() != 0) begin
+            `uvm_fatal("COMMON_DATA", "range-index registration repeated for canonical entry")
+        end
+        validate_normal_napot_payload(anchor_key, entry);
+        build_entry_range_index_keys(entry, keys);
+
+        // Validate the complete publication set before changing any bucket, so
+        // a failure cannot leave a half-registered live entry behind.
+        foreach (keys[key_idx]) begin
+            for (prior_idx = 0; prior_idx < key_idx; prior_idx++) begin
+                if (keys[prior_idx] == keys[key_idx]) begin
+                    `uvm_fatal("COMMON_DATA", "canonical entry produced duplicate range index key")
+                end
+            end
+            duplicate_anchor = 1'b0;
+            if (tlb_anchor_keys_by_range_key.exists(keys[key_idx])) begin
+                if (tlb_anchor_keys_by_range_key[keys[key_idx]].size() >=
+                    MEMBLOCK_TLB_RANGE_CANDIDATE_MAX) begin
+                    `uvm_fatal("COMMON_DATA",
+                               $sformatf("range index bucket exceeds max=%0d", MEMBLOCK_TLB_RANGE_CANDIDATE_MAX))
+                end
+                foreach (tlb_anchor_keys_by_range_key[keys[key_idx]][bucket_idx]) begin
+                    if (tlb_lookup_key_equal(
+                            tlb_anchor_keys_by_range_key[keys[key_idx]][bucket_idx],
+                            anchor_key)) begin
+                        duplicate_anchor = 1'b1;
+                    end
+                end
+            end
+            if (duplicate_anchor) begin
+                `uvm_fatal("COMMON_DATA", "canonical anchor is already registered in range index bucket")
+            end
+        end
+        foreach (keys[key_idx]) begin
+            tlb_anchor_keys_by_range_key[keys[key_idx]].push_back(anchor_key);
+            entry.range_index_keys.push_back(keys[key_idx]);
+        end
+        return 1'b1;
+    endfunction:register_tlb_range_index
+
+    // Abstract responsibility: remove exactly the buckets previously published
+    // by one canonical entry.  It uses the entry-owned key list rather than
+    // re-deriving shapes or scanning the live table during deletion.
+    function void unregister_tlb_range_index(
+        input memblock_tlb_lookup_key_t anchor_key,
+        input memblock_tlb_entry entry);
+        int key_idx;
+        int bucket_idx;
+        int unsigned removed_count;
+        memblock_tlb_range_index_key_t range_key;
+
+        if (entry == null || entry.lookup_key != anchor_key ||
+            entry.range_index_keys.size() == 0) begin
+            `uvm_fatal("COMMON_DATA", "range-index unregistration got invalid canonical entry")
+        end
+        foreach (entry.range_index_keys[key_idx]) begin
+            range_key = entry.range_index_keys[key_idx];
+            if (!tlb_anchor_keys_by_range_key.exists(range_key)) begin
+                `uvm_fatal("COMMON_DATA", "range-index unregistration lost bucket")
+            end
+            removed_count = 0;
+            for (bucket_idx = int'(tlb_anchor_keys_by_range_key[range_key].size()) - 1;
+                 bucket_idx >= 0;
+                 bucket_idx--) begin
+                if (tlb_lookup_key_equal(
+                        tlb_anchor_keys_by_range_key[range_key][bucket_idx],
+                        anchor_key)) begin
+                    tlb_anchor_keys_by_range_key[range_key].delete(bucket_idx);
+                    removed_count++;
+                end
+            end
+            if (removed_count != 1) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("range-index unregistration expected one anchor got=%0d", removed_count))
+            end
+            if (tlb_anchor_keys_by_range_key[range_key].size() == 0) begin
+                tlb_anchor_keys_by_range_key.delete(range_key);
+            end
+        end
+        entry.range_index_keys.delete();
+    endfunction:unregister_tlb_range_index
+
     function bit get_or_create_tlb_entry_by_req(input bit [37:0] vpn,
                                                 input bit [1:0] s2xlate,
                                                 output memblock_tlb_lookup_key_t key,
@@ -2725,6 +3012,10 @@ class common_data_transaction extends uvm_object;
         end
         entry = build_tlb_entry_for_key_with_csr(key, csr_snapshot);
         insert_tlb_entry(key, entry);
+        if (!register_tlb_range_index(key, entry)) begin
+            tlb_entry_by_key.delete(key);
+            `uvm_fatal("COMMON_DATA", "failed to register new canonical TLB entry in range index")
+        end
         created = 1'b1;
         return 1'b1;
     endfunction:get_or_create_tlb_entry_by_req_with_snapshot
@@ -2982,8 +3273,8 @@ class common_data_transaction extends uvm_object;
     endfunction:schedule_sfence_invalidate
 
     // Abstract responsibility: remove one canonical live entry through the
-    // sole delete API. Range/NAPOT indexing is not present until the next
-    // plan; that plan extends this helper with exact index unregistration.
+    // sole delete API. It first unregisters all entry-owned range buckets, so
+    // no future request can observe an anchor whose raw payload was deleted.
     function void delete_live_tlb_entry_by_anchor_key(
         input memblock_tlb_lookup_key_t key,
         input string reason);
@@ -2998,6 +3289,7 @@ class common_data_transaction extends uvm_object;
                   $sformatf("delete live TLB entry reason=%s generation=%0d vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d",
                             reason, entry.entry_generation, key.vpn, key.asid,
                             key.vmid, key.s2xlate), UVM_LOW)
+        unregister_tlb_range_index(key, entry);
         tlb_entry_by_key.delete(key);
     endfunction:delete_live_tlb_entry_by_anchor_key
 
@@ -3059,6 +3351,7 @@ class common_data_transaction extends uvm_object;
     // table and UID history owned by other dispatch flows.
     function void clear_dispatch_l2tlb_live_entries();
         sfence_invalidate_pending_q.delete();
+        tlb_anchor_keys_by_range_key.delete();
         tlb_entry_by_key.delete();
     endfunction:clear_dispatch_l2tlb_live_entries
 
