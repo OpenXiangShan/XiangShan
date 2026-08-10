@@ -266,12 +266,15 @@ class MainBtbAlignBank(
       branch.valid && branch.bits.attribute.isConditional && meta.position === branch.bits.cfiPosition
     }
     val actualTaken = Mux1H(hitMask, t1_branches.map(_.bits.taken))
-    actualTakenMak(i) := actualTaken
 
     val entryOverridden = t1_entryNeedWrite && t1_entryWayMask(i)
 
     t1_counterWayMask(i) := entryOverridden || hitMask.reduce(_ || _)
     t1_newCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, meta.counter.getUpdate(actualTaken))
+  }
+  t1_meta.zipWithIndex.foreach { case (meta, i) =>
+    val hitMask = t1_branches.map(branch => branch.valid && meta.position === branch.bits.cfiPosition)
+    actualTakenMak(i) := Mux1H(hitMask, t1_branches.map(_.bits.taken))
   }
 
   private val t2_fire            = RegNext(t1_fire, init = false.B)
