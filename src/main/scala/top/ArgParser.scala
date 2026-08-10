@@ -232,6 +232,11 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(DumpCSR = true)
           }), tail)
+        case "--cached-parameters"::tail => {
+          nextOption(config.alter((site, here, up) => {
+            case CachedParameterKey => true
+          }), tail)
+        }
         case option :: tail =>
           // unknown option, maybe a firrtl option, skip
           firrtlOpts :+= option
