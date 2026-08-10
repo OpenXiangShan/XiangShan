@@ -48,6 +48,7 @@ def _data_dir() -> Path:
 
 
 _DEFAULT_RUN_ID: str | None = None
+_VCS_BATCH_DUT = None
 
 
 def _effective_run_id() -> str:
@@ -140,6 +141,24 @@ def _funcov_targets(request) -> dict[str, list[str]]:
 def _is_enabled(name: str, default: str = "1") -> bool:
     raw = os.getenv(name, default).strip().lower()
     return raw not in {"0", "false", "off", "no"}
+
+
+def _vcs_batch_run_enabled() -> bool:
+    return (
+        os.getenv("TB_FRONTEND_SIM", "").strip().lower() == "vcs"
+        and _is_enabled("TB_SKIP_DUT_FINISH", default="0")
+    )
+
+
+def _clear_dut_clock_callbacks(dut) -> None:
+    xclock = getattr(dut, "xclock", None)
+    if xclock is None:
+        return
+    for method_name in ("ClearRisCallBacks", "ClearFalCallBacks"):
+        method = getattr(xclock, method_name, None)
+        if callable(method):
+            method()
+    xclock.exceptions = None
 
 
 def _read_int_env(name: str, default: str) -> int:
@@ -357,6 +376,7 @@ def _attach_case_log_handler(path: Path) -> logging.Handler:
 
 
 def create_dut(request):
+    global _VCS_BATCH_DUT
     configure_env_logging()
     tc_name = request.node.name if request is not None else "frontend"
     data_dir = _data_dir()
@@ -365,7 +385,13 @@ def create_dut(request):
     if _is_enabled("TB_ENABLE_CASE_LOG", default="1"):
         case_log_path = _log_path(request, data_dir)
         case_log_handler = _attach_case_log_handler(case_log_path)
-    dut = create_frontend_dut(tc_name=tc_name, dut_logger=logger)
+    batch_run = _vcs_batch_run_enabled()
+    if batch_run and _VCS_BATCH_DUT is not None:
+        dut = _VCS_BATCH_DUT
+    else:
+        dut = create_frontend_dut(tc_name=tc_name, dut_logger=logger)
+        if batch_run:
+            _VCS_BATCH_DUT = dut
     if (
         request is not None
         and _is_enabled("TB_ENABLE_DUT_TESTS", default="0")
@@ -422,7 +448,9 @@ def dut(request):
     dut = create_dut(request)
     _suppress_dut_finalizer_for_batch_run(dut)
     coverage = _coverage_path(request, _data_dir())
-    dut.InitClock("clock")
+    if not vars(dut).get("_frontend_clock_initialized", False):
+        dut.InitClock("clock")
+        setattr(dut, "_frontend_clock_initialized", True)
     yield dut
     try:
         if hasattr(dut, "FlushWaveform"):
@@ -442,6 +470,8 @@ def dut(request):
             logger.exception("dut case log handler teardown failed")
     if not _is_enabled("TB_SKIP_DUT_FINISH", default="0"):
         dut.Finish()
+    elif _vcs_batch_run_enabled():
+        _clear_dut_clock_callbacks(dut)
 
 
 @pytest.fixture(scope="function")

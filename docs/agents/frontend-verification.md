@@ -336,8 +336,9 @@ script-level env vars:
   `TB_ENV_LOG_LEVEL`, then `INFO`.
 - `TB_PYTEST_DISABLE_RERUNFAILURES=0|1`: keep or disable
   `-p no:rerunfailures`; default is `1` in this tree.
-- `TB_SKIP_DUT_FINISH=1`: suppress fixture teardown `dut.Finish()` for an
-  explicit DUT batch-run strategy. It is not pass evidence by itself.
+- `TB_SKIP_DUT_FINISH=1` with `TB_FRONTEND_SIM=vcs`: reuse one VCS DUT for
+  the pytest process, clear per-case clock callbacks after teardown, and skip
+  `dut.Finish()` until process exit. It is not pass evidence by itself.
 - `TB_TRACE_START_INDEX=...`: start golden comparison from the given jsonl
   index when loading a bin trace.
 - `TB_RESET_VECTOR=...`: start DUT fetch from the given PC instead of the
