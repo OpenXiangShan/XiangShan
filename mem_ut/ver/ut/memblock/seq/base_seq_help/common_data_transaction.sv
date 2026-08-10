@@ -14,6 +14,14 @@ class common_data_transaction extends uvm_object;
     localparam bit [3:0] MEMBLOCK_SV39_MODE = 4'd8;
     localparam bit [3:0] MEMBLOCK_SV48_MODE = 4'd9;
 
+    typedef struct {
+        memblock_sfence_payload_t payload;
+        longint unsigned          anchor_sample_seq;
+        longint unsigned          due_sample_seq;
+        longint unsigned          reset_epoch;
+        longint unsigned          lifecycle_event_seq;
+    } memblock_pending_sfence_invalidate_t;
+
     static common_data_transaction m_inst;
 
     int unsigned   main_trans_num;
@@ -28,6 +36,9 @@ class common_data_transaction extends uvm_object;
     main_control_transaction main_table_by_uid[];
     status_transaction       status_by_uid[];
     memblock_tlb_entry       tlb_entry_by_key[memblock_tlb_lookup_key_t];
+    // 中文注释：adapter 成功消费 raw fence 后只在此登记 C4 删除工作。
+    // 该队列不拥有 L2TLB token/UID；runtime reset 或 C4 delete 后由本类清除。
+    memblock_pending_sfence_invalidate_t sfence_invalidate_pending_q[$];
     // 中文注释：live entry 的单调身份；普通 reset/flush 只清 table，不回退该计数器。
     longint unsigned         next_tlb_entry_generation;
     memblock_uid_tlb_record  uid_tlb_record_by_uid[memblock_uid_t];
@@ -134,6 +145,7 @@ class common_data_transaction extends uvm_object;
         mmu_csr_state       = mmu_csr_runtime_state::type_id::create("mmu_csr_state");
         mmu_csr_state.reset();
         next_tlb_entry_generation = 0;
+        sfence_invalidate_pending_q.delete();
         uid_waiting_by_vpn_s2xlate.delete();
     endfunction:new
 
@@ -204,6 +216,7 @@ class common_data_transaction extends uvm_object;
         status_by_uid     = new[main_trans_num_i];
         cancel_waiting_uid_tlb_records("reset_all_tables");
         tlb_entry_by_key.delete();
+        sfence_invalidate_pending_q.delete();
         uid_tlb_record_by_uid.delete();
         clear_issue_queues();
         clear_feedback_events();
@@ -2716,132 +2729,336 @@ class common_data_transaction extends uvm_object;
         return 1'b1;
     endfunction:get_or_create_tlb_entry_by_req_with_snapshot
 
-    function memblock_sfence_payload_t decode_raw_sfence(input memblock_sync_pkg::dispatch_raw_sfence_t raw);
+    // Abstract responsibility: translate one context-bound raw fence into the
+    // immutable stage-specific payload used by the C4 live-entry deleter. It
+    // does not inspect the live table or modify L2TLB request token state.
+    function memblock_sfence_payload_t decode_raw_sfence(
+        input memblock_sync_pkg::dispatch_raw_sfence_t raw);
         memblock_sfence_payload_t payload;
 
+        if (!raw.valid || raw.sample_seq == 0 || !raw.context_valid ||
+            raw.csr_sample_seq != raw.sample_seq ||
+            raw.context_reset_epoch != raw.reset_epoch ||
+            raw.reset_epoch != memblock_sync_pkg::get_l2tlb_current_reset_epoch()) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("invalid raw SFENCE context valid=%0d sample=%0d csr_sample=%0d raw_epoch=%0d context_epoch=%0d current_epoch=%0d",
+                                 raw.valid, raw.sample_seq, raw.csr_sample_seq,
+                                 raw.reset_epoch, raw.context_reset_epoch,
+                                 memblock_sync_pkg::get_l2tlb_current_reset_epoch()))
+        end
+        if (raw.hv && raw.hg) begin
+            `uvm_fatal("COMMON_DATA", "SFENCE raw cannot assert hv and hg together")
+        end
+
         payload = '{default:'0};
-        payload.valid       = raw.valid;
+        payload.valid       = 1'b1;
         payload.ignore_addr = raw.rs1;
         payload.ignore_id   = raw.rs2;
         payload.addr        = raw.addr;
         payload.id          = raw.id;
         payload.hv          = raw.hv;
         payload.hg          = raw.hg;
+        payload.priv_virt_at_sample = raw.priv_virt_at_sample;
+        payload.hgatp_vmid_at_sample = raw.hgatp_vmid_at_sample;
+        payload.satp_mode_at_sample = raw.satp_mode_at_sample;
+        payload.vsatp_mode_at_sample = raw.vsatp_mode_at_sample;
+        payload.hgatp_mode_at_sample = raw.hgatp_mode_at_sample;
+        payload.sample_seq = raw.sample_seq;
+        payload.reset_epoch = raw.reset_epoch;
+        payload.lifecycle_event_seq = raw.lifecycle_event_seq;
         payload.cycle       = raw.cycle;
+
+        if (raw.hg) begin
+            payload.target_stage = MEMBLOCK_SFENCE_TARGET_G_S2;
+            // HFENCE.GVMA carries GPA >> 2. Recover the GVPN only once here.
+            payload.s2_gvpn = {12'b0, raw.addr[49:10]};
+        end
+        else begin
+            payload.s1_vpn = raw.addr[49:12];
+            if (raw.hv || raw.priv_virt_at_sample) begin
+                payload.target_stage = MEMBLOCK_SFENCE_TARGET_VS_S1;
+            end
+            else begin
+                payload.target_stage = MEMBLOCK_SFENCE_TARGET_HS_S1;
+            end
+        end
         return payload;
     endfunction:decode_raw_sfence
 
-    function bit sfence_vpn_match(input bit [51:0] entry_vpn,
-                                  input bit [1:0] entry_level,
-                                  input bit [49:0] addr);
-        bit [51:0] addr_vpn;
+    // Abstract responsibility: reject a live entry whose frozen translation
+    // stage/mode/level cannot represent the stage matcher about to consume it.
+    // It is a pure structural check and never repairs fields from current CSR.
+    function void validate_frozen_stage_level(
+        input memblock_sfence_target_stage_e target_stage,
+        input memblock_tlb_entry entry);
+        bit stage_active;
+        bit [3:0] mode;
+        bit [1:0] level;
+        bit stage_shape_valid;
 
-        addr_vpn = {14'b0, addr[49:12]};
-        case (entry_level)
-            2'd0: return entry_vpn[37:0]  == addr_vpn[37:0];
-            2'd1: return entry_vpn[37:9]  == addr_vpn[37:9];
-            2'd2: return entry_vpn[37:18] == addr_vpn[37:18];
-            default: return entry_vpn[37:27] == addr_vpn[37:27];
+        if (entry == null) begin
+            `uvm_fatal("COMMON_DATA", "validate_frozen_stage_level got null entry")
+        end
+        case (target_stage)
+            MEMBLOCK_SFENCE_TARGET_HS_S1: begin
+                stage_active = entry.s1_stage_active;
+                mode = entry.s1_translation_mode_at_build;
+                level = entry.s1_level;
+                stage_shape_valid = entry.s2xlate == 2'd0;
+            end
+            MEMBLOCK_SFENCE_TARGET_VS_S1: begin
+                stage_active = entry.s1_stage_active;
+                mode = entry.s1_translation_mode_at_build;
+                level = entry.s1_level;
+                stage_shape_valid = entry.s2xlate == 2'd1 || entry.s2xlate == 2'd3;
+            end
+            MEMBLOCK_SFENCE_TARGET_G_S2: begin
+                stage_active = entry.s2_stage_active;
+                mode = entry.s2_translation_mode_at_build;
+                level = entry.s2_level;
+                stage_shape_valid = entry.s2xlate == 2'd2 || entry.s2xlate == 2'd3;
+            end
+            default: begin
+                `uvm_fatal("COMMON_DATA", "unknown SFENCE target stage")
+                return;
+            end
         endcase
-    endfunction:sfence_vpn_match
+        if (!stage_active || !stage_shape_valid ||
+            !(mode inside {MEMBLOCK_SV39_MODE, MEMBLOCK_SV48_MODE}) ||
+            (mode == MEMBLOCK_SV39_MODE && level == 2'd3)) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("invalid frozen SFENCE stage target=%0d s2xlate=%0d active=%0d mode=%0d level=%0d generation=%0d",
+                                 target_stage, entry.s2xlate, stage_active,
+                                 mode, level, entry.entry_generation))
+        end
+    endfunction:validate_frozen_stage_level
 
+    // Abstract responsibility: decide whether a frozen S1 live entry covers
+    // the S1 VPN carried by an HS/VS fence. It only reads S1 fields and does
+    // not use S2 level, current CSR, PPN split data, or pteidx as an address.
+    function bit sfence_s1_addr_match(
+        input memblock_tlb_entry entry,
+        input bit [37:0] fence_vpn,
+        input memblock_sfence_target_stage_e target_stage);
+        bit [37:0] anchor_vpn;
+
+        validate_frozen_stage_level(target_stage, entry);
+        if (!tlb_request_s1_vpn_fits_mode({14'b0, fence_vpn},
+                                          entry.s1_translation_mode_at_build)) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("S1 fence VPN=0x%0h exceeds frozen mode=%0d generation=%0d",
+                                 fence_vpn, entry.s1_translation_mode_at_build,
+                                 entry.entry_generation))
+        end
+        if (!entry.s1_pte_n && entry.s1_level == 2'd0) begin
+            return entry.s1_tag == fence_vpn[37:3] &&
+                   entry.s1_valididx[fence_vpn[2:0]];
+        end
+        anchor_vpn = {entry.s1_tag, 3'b000};
+        return raw_l2tlb_vpn_matches_level(anchor_vpn, {14'b0, fence_vpn},
+                                           entry.s1_level, entry.s1_pte_n);
+    endfunction:sfence_s1_addr_match
+
+    // Abstract responsibility: decide whether a frozen S2 live entry covers
+    // the GVPN recovered from HFENCE.GVMA. It only reads S2 fields and never
+    // derives a replacement GVPN from request VPN, S1 PPN, or current CSR.
+    function bit sfence_s2_addr_match(input memblock_tlb_entry entry,
+                                      input bit [51:0] fence_gvpn);
+        if (|fence_gvpn[51:44] ||
+            !tlb_request_s2_gvpn_fits_mode(fence_gvpn[43:0],
+                                            entry.s2_translation_mode_at_build)) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("S2 fence GVPN=0x%0h exceeds frozen mode=%0d generation=%0d",
+                                 fence_gvpn, entry.s2_translation_mode_at_build,
+                                 entry.entry_generation))
+        end
+        validate_frozen_stage_level(MEMBLOCK_SFENCE_TARGET_G_S2, entry);
+        return raw_l2tlb_vpn_matches_level(entry.s2_tag, fence_gvpn,
+                                           entry.s2_level, entry.s2_pte_n);
+    endfunction:sfence_s2_addr_match
+
+    // Abstract responsibility: test one live entry against one already
+    // decoded fence. It returns only match/not-match; C4 deletion is owned by
+    // apply_due_sfence_invalidate(), and it never reads mutable mmu_csr_state.
     function bit sfence_match_entry(input memblock_sfence_payload_t payload,
                                     input memblock_tlb_lookup_key_t key,
                                     input memblock_tlb_entry entry);
+        bit addr_ok;
+        bit id_ok;
+        bit vmid_ok;
+
         if (!payload.valid) begin
             return 1'b0;
         end
-        if (entry == null) begin
-            `uvm_fatal("COMMON_DATA", "sfence_match_entry got null entry")
+        if (entry == null || entry.entry_generation == 0 ||
+            key.s2xlate != entry.s2xlate) begin
+            `uvm_fatal("COMMON_DATA", "sfence_match_entry got inconsistent live entry")
         end
-        if (!payload.ignore_addr && !sfence_vpn_match(key.vpn,
-                                                      entry.s1_stage_active ? entry.s1_level : entry.s2_level,
-                                                      payload.addr)) begin
-            return 1'b0;
-        end
-
-        if (payload.hg) begin
-            if (!(key.s2xlate == 2'd2 || key.s2xlate == 2'd3)) begin
-                return 1'b0;
-            end
-            if (!payload.ignore_id && key.vmid != payload.id) begin
-                return 1'b0;
-            end
-            return 1'b1;
-        end
-
-        if (payload.hv) begin
-            if (!(key.s2xlate == 2'd1 || key.s2xlate == 2'd3)) begin
-                return 1'b0;
-            end
-            if (key.s2xlate == 2'd3 &&
-                mmu_csr_state != null &&
-                key.vmid != mmu_csr_state.hgatp_vmid) begin
-                return 1'b0;
-            end
-            if (!payload.ignore_id) begin
-                if (entry.s1_pte_g) begin
+        entry.check_inactive_stage_defaults("SFENCE_MATCH");
+        case (payload.target_stage)
+            MEMBLOCK_SFENCE_TARGET_HS_S1: begin
+                if (key.s2xlate != 2'd0) begin
                     return 1'b0;
                 end
-                if (key.asid != payload.id) begin
+                validate_frozen_stage_level(MEMBLOCK_SFENCE_TARGET_HS_S1,
+                                            entry);
+                addr_ok = payload.ignore_addr ||
+                          sfence_s1_addr_match(entry, payload.s1_vpn,
+                                               MEMBLOCK_SFENCE_TARGET_HS_S1);
+                id_ok = payload.ignore_id ||
+                        (!entry.s1_pte_g && entry.s1_asid == payload.id);
+                return addr_ok && id_ok;
+            end
+            MEMBLOCK_SFENCE_TARGET_VS_S1: begin
+                if (!(key.s2xlate inside {2'd1, 2'd3})) begin
                     return 1'b0;
                 end
+                validate_frozen_stage_level(MEMBLOCK_SFENCE_TARGET_VS_S1,
+                                            entry);
+                addr_ok = payload.ignore_addr ||
+                          sfence_s1_addr_match(entry, payload.s1_vpn,
+                                               MEMBLOCK_SFENCE_TARGET_VS_S1);
+                // VS-stage always retains the sampled VMID, including rs2=x0.
+                vmid_ok = entry.s1_vmid == payload.hgatp_vmid_at_sample;
+                id_ok = payload.ignore_id ||
+                        (!entry.s1_pte_g && entry.s1_asid == payload.id);
+                return addr_ok && vmid_ok && id_ok;
             end
-            return 1'b1;
-        end
-
-        if (key.s2xlate == 2'd2) begin
-            return 1'b0;
-        end
-        if (!payload.ignore_id) begin
-            if (entry.s1_pte_g) begin
-                return 1'b0;
+            MEMBLOCK_SFENCE_TARGET_G_S2: begin
+                if (!(key.s2xlate inside {2'd2, 2'd3})) begin
+                    return 1'b0;
+                end
+                validate_frozen_stage_level(MEMBLOCK_SFENCE_TARGET_G_S2,
+                                            entry);
+                addr_ok = payload.ignore_addr ||
+                          sfence_s2_addr_match(entry, payload.s2_gvpn);
+                id_ok = payload.ignore_id ||
+                        (entry.s2_vmid[13:0] == payload.id[13:0]);
+                return addr_ok && id_ok;
             end
-            if (key.asid != payload.id) begin
-                return 1'b0;
+            default: begin
+                `uvm_fatal("COMMON_DATA", "sfence_match_entry got unknown target stage")
             end
-        end
-        return 1'b1;
+        endcase
+        return 1'b0;
     endfunction:sfence_match_entry
 
-    function int unsigned apply_sfence_invalidate(input memblock_sfence_payload_t payload);
+    // Abstract responsibility: record one C0 fence as a future C4 destructive
+    // action after the adapter has accepted its raw FIFO item. It does not
+    // scan live entries or affect pending response token/UID ownership.
+    function bit schedule_sfence_invalidate(
+        input memblock_sfence_payload_t payload,
+        input longint unsigned anchor_sample_seq,
+        input longint unsigned reset_epoch,
+        input longint unsigned lifecycle_event_seq);
+        memblock_pending_sfence_invalidate_t pending;
+
+        if (!payload.valid || anchor_sample_seq == 0 ||
+            payload.sample_seq != anchor_sample_seq ||
+            payload.reset_epoch != reset_epoch ||
+            reset_epoch != memblock_sync_pkg::get_l2tlb_current_reset_epoch() ||
+            lifecycle_event_seq == memblock_sync_pkg::MEMBLOCK_L2TLB_EVENT_SEQ_NONE ||
+            lifecycle_event_seq > memblock_sync_pkg::last_allocated_l2tlb_event_seq) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("invalid SFENCE schedule anchor=%0d payload_sample=%0d reset=%0d/%0d event=%0d",
+                                 anchor_sample_seq, payload.sample_seq,
+                                 reset_epoch,
+                                 memblock_sync_pkg::get_l2tlb_current_reset_epoch(),
+                                 lifecycle_event_seq))
+        end
+        pending.payload = payload;
+        pending.anchor_sample_seq = anchor_sample_seq;
+        pending.due_sample_seq = anchor_sample_seq +
+                                 MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES;
+        pending.reset_epoch = reset_epoch;
+        pending.lifecycle_event_seq = lifecycle_event_seq;
+        if (sfence_invalidate_pending_q.size() != 0 &&
+            pending.due_sample_seq <
+                sfence_invalidate_pending_q[$].due_sample_seq) begin
+            `uvm_fatal("COMMON_DATA", "SFENCE invalidate queue due order regressed")
+        end
+        sfence_invalidate_pending_q.push_back(pending);
+        return 1'b1;
+    endfunction:schedule_sfence_invalidate
+
+    // Abstract responsibility: remove one canonical live entry through the
+    // sole delete API. Range/NAPOT indexing is not present until the next
+    // plan; that plan extends this helper with exact index unregistration.
+    function void delete_live_tlb_entry_by_anchor_key(
+        input memblock_tlb_lookup_key_t key,
+        input string reason);
+        memblock_tlb_entry entry;
+
+        if (!tlb_entry_by_key.exists(key) || tlb_entry_by_key[key] == null) begin
+            `uvm_fatal("COMMON_DATA",
+                       $sformatf("live TLB delete lost canonical key reason=%s", reason))
+        end
+        entry = tlb_entry_by_key[key];
+        `uvm_info("COMMON_DATA",
+                  $sformatf("delete live TLB entry reason=%s generation=%0d vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d",
+                            reason, entry.entry_generation, key.vpn, key.asid,
+                            key.vmid, key.s2xlate), UVM_LOW)
+        tlb_entry_by_key.delete(key);
+    endfunction:delete_live_tlb_entry_by_anchor_key
+
+    // Abstract responsibility: perform only C4-or-later live-entry deletion
+    // for queued fences in the current reset epoch. It scans the bounded live
+    // entry map, never main/status tables or L2TLB pending response tokens.
+    function int unsigned apply_due_sfence_invalidate(
+        input longint unsigned dut_sample_seq,
+        input longint unsigned current_reset_epoch);
+        memblock_pending_sfence_invalidate_t pending;
         memblock_tlb_lookup_key_t delete_keys[$];
+        int unsigned deleted_count;
 
-        if (!payload.valid) begin
-            return 0;
-        end
-        foreach (tlb_entry_by_key[key]) begin
-            if (sfence_match_entry(payload, key, tlb_entry_by_key[key])) begin
-                delete_keys.push_back(key);
+        deleted_count = 0;
+        while (sfence_invalidate_pending_q.size() != 0 &&
+               sfence_invalidate_pending_q[0].due_sample_seq <= dut_sample_seq) begin
+            pending = sfence_invalidate_pending_q.pop_front();
+            if (pending.reset_epoch < current_reset_epoch) begin
+                `uvm_info("COMMON_DATA",
+                          $sformatf("drop stale SFENCE invalidate anchor=%0d epoch=%0d current=%0d",
+                                    pending.anchor_sample_seq, pending.reset_epoch,
+                                    current_reset_epoch), UVM_LOW)
+                continue;
             end
-        end
-        foreach (delete_keys[idx]) begin
-            tlb_entry_by_key.delete(delete_keys[idx]);
-        end
-        if (delete_keys.size() != 0) begin
+            if (pending.reset_epoch > current_reset_epoch ||
+                pending.payload.reset_epoch != pending.reset_epoch) begin
+                `uvm_fatal("COMMON_DATA",
+                           "future/inconsistent SFENCE invalidate reached due sample")
+            end
+            delete_keys.delete();
+            foreach (tlb_entry_by_key[key]) begin
+                if (sfence_match_entry(pending.payload, key,
+                                       tlb_entry_by_key[key])) begin
+                    delete_keys.push_back(key);
+                end
+            end
+            foreach (delete_keys[idx]) begin
+                delete_live_tlb_entry_by_anchor_key(delete_keys[idx],
+                                                    "SFENCE/HFENCE C4");
+            end
+            deleted_count += delete_keys.size();
             `uvm_info("COMMON_DATA",
-                      $sformatf("sfence invalidate deleted %0d TLB entries hv=%0d hg=%0d ignore_addr=%0d ignore_id=%0d addr=0x%0h id=0x%0h cycle=%0d",
-                                delete_keys.size(),
-                                payload.hv,
-                                payload.hg,
-                                payload.ignore_addr,
-                                payload.ignore_id,
-                                payload.addr,
-                                payload.id,
-                                payload.cycle),
-                      UVM_LOW)
+                      $sformatf("apply due SFENCE/HFENCE target=%0d anchor=%0d due=%0d event=%0d deleted=%0d",
+                                pending.payload.target_stage,
+                                pending.anchor_sample_seq,
+                                pending.due_sample_seq,
+                                pending.lifecycle_event_seq,
+                                delete_keys.size()), UVM_LOW)
         end
-        return delete_keys.size();
-    endfunction:apply_sfence_invalidate
+        return deleted_count;
+    endfunction:apply_due_sfence_invalidate
 
-    function int unsigned apply_raw_sfence(input memblock_sync_pkg::dispatch_raw_sfence_t raw);
-        return apply_sfence_invalidate(decode_raw_sfence(raw));
-    endfunction:apply_raw_sfence
+    function bit has_pending_sfence_invalidate();
+        return sfence_invalidate_pending_q.size() != 0;
+    endfunction:has_pending_sfence_invalidate
 
     // Abstract responsibility: clear only the software-owned live L2TLB
-    // entry/range state at a runtime reset, while preserving the main table and
-    // UID history owned by other dispatch flows.
+    // entry/invalidate state at a runtime reset, while preserving the main
+    // table and UID history owned by other dispatch flows.
     function void clear_dispatch_l2tlb_live_entries();
+        sfence_invalidate_pending_q.delete();
         tlb_entry_by_key.delete();
     endfunction:clear_dispatch_l2tlb_live_entries
 

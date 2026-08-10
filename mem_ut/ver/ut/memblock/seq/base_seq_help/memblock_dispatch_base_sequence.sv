@@ -343,10 +343,9 @@ function void memblock_dispatch_base_sequence::collect_runtime_context_events();
         monitor_adapter.reset_l2tlb_sfence_state();
         return;
     end
-    // 中文注释：统一 service loop 显式先同步 CSR runtime；raw fence 由
-    // service_l2tlb_sfence_events() 按 sample/C4 due 统一归属 live-entry owner。
+    // 中文注释：此 helper 只同步 CSR runtime。raw fence 必须由主 dispatch
+    // service 在本 sample 唯一调用 adapter 的 service_l2tlb_sfence_events()。
     monitor_adapter.drain_csr_events();
-    monitor_adapter.service_l2tlb_sfence_events();
 endfunction:collect_runtime_context_events
 
 task memblock_dispatch_base_sequence::collect_monitor_event_batch();

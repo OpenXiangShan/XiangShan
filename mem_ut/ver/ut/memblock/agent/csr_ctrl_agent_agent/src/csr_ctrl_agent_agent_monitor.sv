@@ -398,6 +398,14 @@ task csr_ctrl_agent_agent_monitor::mon_data();
             // payload, because the DUT consumes a fixed C-2 snapshot.
             memblock_sync_pkg::publish_l2tlb_csr_history(raw_csr,
                                                          current_sample_seq);
+            // 中文注释：SFENCE/HFENCE 的 stage 解释必须使用该 fence 同拍的
+            // CSR，而不能在 adapter drain 时读取 latest。该发布独立于 semantic
+            // raw capture gate，晚到的同拍 fence 会由同步包补齐 context。
+            memblock_sync_pkg::publish_l2tlb_sfence_csr_context(
+                raw_csr,
+                current_sample_seq,
+                memblock_sync_pkg::get_l2tlb_current_reset_epoch(),
+                $time);
             // Only translation-context changes invalidate the L2TLB filter.
             // Runtime permission/debug/misalign snapshots remain observable
             // metadata and must not become an implicit flush event.

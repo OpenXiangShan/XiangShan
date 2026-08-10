@@ -79,7 +79,8 @@ CSR runtime sync 主流程：
 2. service loop 同步阶段：
    service_real_dispatch_flow 每拍调用 service_monitor_once。
    service_monitor_once 先调用 collect_runtime_context_events。
-   collect_runtime_context_events 先 drain_csr_events，再 drain_sfence_events。
+   collect_runtime_context_events 只 drain_csr_events。
+   返回 `service_monitor_once()` 后，唯一的 `service_l2tlb_sfence_events()` 另行处理 raw fence；它不属于 CSR runtime mirror 更新。
    drain_csr_events 从 memblock_sync_pkg 读取 latest raw CSR snapshot。
    如果 snapshot 有效且 seq 未重复：
      common_data_transaction::apply_raw_csr_runtime 更新 mmu_csr_state。
@@ -593,7 +594,9 @@ make_lookup_key：
 - `mmu_csr_state`：`common_data_transaction` 内的运行时 CSR 镜像，TLB 建表和 uid TLB record 都从这里读实时 CSR。
 - `update_seq`：CSR runtime 语义变化计数，目前用于 debug/追踪，不再作为 TLB key 命中强制条件。
 - `hd_misalign_ld/st_enable`、`priv_debug`：当前只保存和复制；没有 sequence、主表、权限或终态 consumer。
-- `raw_sfence_q`：独立 FIFO，和 CSR latest snapshot 分开；只由 `drain_sfence_events()` 消费。
+- `raw_sfence_q`：独立 FIFO，和 CSR latest snapshot 分开；只由
+  `dispatch_monitor_event_adapter::service_l2tlb_sfence_events()` 内部的 `drain_l2tlb_sfence_events()` 消费，并在 C4
+  通过 `apply_due_sfence_invalidate()` 删除 logical live entry。
 
 ## 10. 分支优先级
 

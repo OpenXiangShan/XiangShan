@@ -4,13 +4,13 @@
 |---|---|
 | 文档类型 | `review_doc/undo`；问题回顾和优化方案说明，不是独立 coding plan |
 | 目标版本 | V2 (`mem_ut_uvm_v2`) |
-| 当前状态 | 尚未 coding、编译或仿真；本文件不能作为已完成实现的证明 |
+| 当前状态 | 审核文档，不独立承载 coding、编译或仿真；本文件不能作为任一关联专项已完成实现的证明，具体状态以各专项文件头和 implementation review 为准。 |
 | 审核目标 | 在一个 testcase 只运行一个 L2TLB responder owner 的前提下，收敛生命周期、时基、flush、reset 和退出边界 |
 | 语义边界 | `L2TLB_agent` 仍表示 DTLB -> L2TLB request 和 L2TLB -> DTLB response，不表示 L2Cache/PTW 下游模型 |
-| 关联实现文档 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`、`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`、`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`、`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md` |
+| 关联实现文档 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`、`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`、`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`、`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md` |
 
-本文把待优化问题和优化后的行为分开描述。它不替代四份专项的字段、payload、range 或 stage matcher 方案；后续 coding
-时，生命周期冲突以本文的审核结论为准，具体功能仍按对应 `undo` coding plan 执行。
+本文把待优化问题和优化后的行为分开描述。它不替代四份专项的字段、payload、range 或 stage matcher 方案；后续新增或
+未完成的 coding 遇到生命周期冲突时以本文的审核结论为准，具体功能以对应专项的当前路径和文件头状态执行。
 
 ## 1. 术语与抽象功能说明
 
@@ -616,7 +616,7 @@ grant_l2tlb_final_release():
 owner 消费 grant 后，`release_l2tlb_lifecycle_owner()` 才能清 claim；parent 以
 `l2tlb_lifecycle_owner_claimed==0` 判断完成，不能引入或依赖另一个 release-done 镜像位。
 
-为避免四份 undo plan 使用不同函数名，coding 时只保留两个对外阶段：
+为避免四份关联专项使用不同函数名，后续 coding 只保留两个对外阶段：
 `begin_l2tlb_release_closing(owner)` 建立 closing，`release_l2tlb_lifecycle_owner(owner)` 完成最终释放。
 时序 plan 中的 `prepare_l2tlb_lifecycle_owner_release()` 是第二个阶段内部的只读检查 helper，
 `try_release_l2tlb_lifecycle_owner()` 是其内部原子写入 primitive；它们都不是独立 release 入口，不能被 driver、parent、
@@ -830,7 +830,8 @@ release_grantable：
 ```
 
 本修正不增加 `memblock_env`、RM 或 scoreboard 的外部 producer，也不改变 sample mailbox 的终态协议、L2TLB payload、
-C0/C4 barrier、range matcher 或 UID multicast。当前源码尚未 coding；本节是后续实现的明确落点。
+C0/C4 barrier、range matcher 或 UID multicast。本节只说明跨专项合同；该 transport 修改的源码、compile 与 smoke 状态
+以 timing correction plan 和对应 implementation review 的记录为准，不在本文重复判定。
 
 ## 4. 优化后的完整行为
 
@@ -1021,16 +1022,17 @@ adapter 所属 queue/map，不修改 response owner 的 pending token。
 
 | 文档 | 本文给出的统一约束 |
 |---|---|
-| `mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md` | payload builder、raw/derived copy 和 UID response multicast 仍由该文档负责；不得新增第二个 owner/token queue。 |
+| `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md` | payload builder、raw/derived copy 和 UID response multicast 仍由该归档文档负责；不得新增第二个 owner/token queue。 |
 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md` | C0/C4、C-2 history、response due、warm-up stop、raw-fence intake close 与 reset/release 使用本文 global sample/owner 边界。 |
-| `mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md` | range candidate、rank、NAPOT 和统一 delete helper 由该文档负责；adapter 只调用 helper。 |
-| `mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md` | stage matcher、raw fence decode、topology gate 和 raw intake close 由该文档负责；raw fence destructive consumer 固定为 adapter。 |
+| `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md` | range candidate、rank、NAPOT 和统一 delete helper 由该待执行文档负责；adapter 只调用 helper。 |
+| `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md` | stage matcher、raw fence decode、topology gate 和 raw intake close 由该归档文档负责；raw fence destructive consumer 固定为 adapter。 |
 
-四份 `undo` 文档的单 owner 审核修正现已写入文档，但尚未 coding/验证：timing correction plan 覆盖 token/UID、
-global sample、reset/release；stage-aware plan 覆盖 raw fence producer/watermark/adapter C4 delete；range lookup plan
-覆盖 range candidate/index；random payload plan 覆盖 response payload/UID multicast。若仍以旧生命周期名称引用已移动文件，
-应改为引用本 review 文档；本 review 文档不再被当作 coding plan 路径。coding 时先读取本 review 的生命周期结论，
-再读取对应 `undo` 专项的具体实现方案；`plan/do` 只作为历史归档参考，不作为本轮 coding 权威。
+四份专项的当前状态必须以各自文件头为准，不能继续概括为“四份 `undo` 均未 coding”：timing correction 与 response
+random payload 已归档至 `plan/do`，并记录了完成的 compile/smoke 与独立终审；stage-aware 已归档至 `plan/do`，已完成静态检查、
+远端 compile、基础 smoke 和 real-dispatch smoke；只有 range lookup/NAPOT 仍为 `plan/undo` 的待执行专项。
+本文只提供跨专项的单 owner 生命周期合同，不代替上述状态记录，也不把任一归档 plan 重新变成待执行 plan。后续对仍待执行的
+range lookup/NAPOT coding，先读取本文的生命周期结论，再读取该 `undo` 专项的具体实现方案；已归档 `plan/do` 只作为已实现
+行为和历史决策的证据，不作为新的重复 coding 入口。
 
 ## 9. 审核结论与未完成边界
 
@@ -1038,9 +1040,10 @@ global sample、reset/release；stage-aware plan 覆盖 raw fence producer/water
 raw fence 单一消费者与 intake close、runtime reset epoch/ack、response/adapter queue drain/release 和异常退出保护。它们均属于测试框架生命周期逻辑，不能由
 payload 或 RM 专项隐式补齐。
 
-当前未完成：上述优化尚未 coding，未生成 implementation review，未远端编译/仿真。该文件保留在
-`AI_DOC/plan/test_framework/review_doc/undo`，历史问题回溯文档不删除或覆盖；只有 coding 和最后一轮 review 完成后，才根据
-项目文档归档规则决定是否移动相关 plan/review。
+本文仍未形成独立 coding 实现，不能把审核结论本身当作 compile/smoke 通过证明；但这不等于所有关联专项都未实现。
+当前剩余明确待执行范围是 range lookup/NAPOT 专项。本文保留在
+`AI_DOC/plan/test_framework/review_doc/undo`，继续作为历史问题与跨专项合同的复核材料；各专项 plan/review 的归档与验证
+状态只以对应文档头和 implementation review 为准。
 
 ## 10. 末轮一致性修正
 
@@ -1075,5 +1078,6 @@ final inactive：
 
 reset coordinator 仅负责 epoch、请求和 ack 收敛；response owner 直接清 token/UID/barrier 后发布 owner-reset-done，driver 清本地 item 后唯一写 response ack，
 fence monitor 直接清 raw producer settled/intake-close/context-dedup 并写 FENCE ack，adapter 直接清 raw/context/pending-invalidate/live-entry/range-index，CSR monitor 直接清 history/CSR context。上述 direct-writer
-边界优先于任何“coordinator 清 adapter queue”或“response owner/driver 共同清 token”的旧描述。该修正仍是文档方案，
-未表示源码已经实现或完成仿真验证。
+边界优先于任何“coordinator 清 adapter queue”或“response owner/driver 共同清 token”的旧描述。本节只规定跨专项的
+生命周期语义；实际实现、compile、smoke 和 runtime blocker 的状态必须分别以对应 `plan/do`、`plan/undo` 与
+implementation review 记录为准。

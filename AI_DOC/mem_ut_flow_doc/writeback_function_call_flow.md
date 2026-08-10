@@ -39,7 +39,7 @@ flowchart TD
     I1 -. immutable generation source .-> C15
     A[memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor_once] --> B[memblock_dispatch_base_sequence::collect_runtime_context_events]
     B --> B1[dispatch_monitor_event_adapter::drain_csr_events]
-    B --> B2[dispatch_monitor_event_adapter::drain_sfence_events]
+    A --> B2[dispatch_monitor_event_adapter::service_l2tlb_sfence_events]
 
     A --> C[memblock_dispatch_base_sequence::collect_monitor_event_batch]
     C --> C1[dispatch_monitor_event_adapter::collect_writeback_events_batch]
@@ -288,20 +288,23 @@ V2 coding后目标逻辑摘要：
 ```systemverilog
 memblock_sync_pkg::tick_dispatch_service_cycle();
 collect_runtime_context_events();
+monitor_adapter.service_l2tlb_sfence_events();
 collect_monitor_event_batch();
 exception_redirect_replay_task();
 ```
 
 功能解释：
 
-`service_monitor_once()` 是真实 DUT smoke flow 每个 service cycle 的 monitor 服务入口。它先推进测试框架自己的 service cycle 计数，然后同步 CSR latest snapshot 并显式消费 sfence/hfence FIFO，再收集同一轮 monitor raw event，最后消费 recovery queue。
+`service_monitor_once()` 是真实 DUT smoke flow 每个 service cycle 的 monitor 服务入口。它先推进测试框架自己的 service cycle 计数，
+由 collector 同步 CSR latest snapshot，再在唯一调用点执行 C4-aware sfence/hfence service，随后收集同一轮 monitor raw event，最后消费 recovery queue。
 
 文字伪代码：
 
 ```text
 每一轮 service cycle：
   调用 tick_dispatch_service_cycle：推进测试框架 service cycle 计数，供 event cycle 和 timeout 使用；
-  调用 collect_runtime_context_events：先同步 CSR runtime 和 sfence/hfence 事件，保证后续事件解释使用最新上下文；
+  调用 collect_runtime_context_events：只同步 CSR runtime，保证后续事件解释使用最新上下文；
+  调用 service_l2tlb_sfence_events：作为 raw fence 的唯一 destructive consumer，按 C0 登记、C4 删除 live entry；
   调用 collect_monitor_event_batch：收集本轮 writeback / IQ feedback / memoryViolation raw event，并作为同一个 batch 做 redirect-first 仲裁；
   调用 exception_redirect_replay_task：消费 recovery queue 中的 redirect / replay / fault，执行 redirect drive、replay pending 或 fault 消费。
 ```
@@ -314,16 +317,15 @@ V2 coding后目标逻辑摘要：
 
 ```systemverilog
 monitor_adapter.drain_csr_events();
-monitor_adapter.drain_sfence_events();
 ```
 
 功能解释：
 
-该函数不是 writeback 状态更新本身，但它必须在 writeback batch 前执行。原因是后续 TLB、CSR runtime、sfence 失效等状态都可能影响当前 batch 的上下文解释。它只更新运行时上下文，不处理 writeback pass/fault。
+该函数不是 writeback 状态更新本身，但它必须在 writeback batch 前执行。原因是后续 TLB、CSR runtime、sfence 失效等状态都可能影响当前 batch 的上下文解释。它只更新 CSR 运行时上下文，不处理 writeback pass/fault 或 raw fence FIFO。
 
 入口准备逻辑：
 
-`collect_runtime_context_events()` 依赖 `monitor_adapter`。base sequence 在使用 adapter 前会确保相关对象已创建并绑定：CSR/sfence 运行时上下文由 `common_data_transaction` 直接更新；`dispatch_monitor_event_adapter` 持有的 `lsq_commit_handler` 主要供 ctrl deq 同步使用，不是 `drain_sfence_events()` 的处理主体。这里的准备动作不改变 writeback 状态，只保证 adapter 能访问 commit/TLB/CSR runtime 相关 helper。
+`collect_runtime_context_events()` 依赖 `monitor_adapter`。base sequence 在使用 adapter 前会确保相关对象已创建并绑定：CSR runtime 由 `common_data_transaction` 更新；`dispatch_monitor_event_adapter` 持有的 `lsq_commit_handler` 主要供 ctrl deq 同步使用。raw fence 由紧随其后的 `service_l2tlb_sfence_events()` 独立处理，不属于 collector。这里的准备动作不改变 writeback 状态，只保证 adapter 能访问 commit/TLB/CSR runtime 相关 helper。
 
 文字伪代码：
 
@@ -332,11 +334,12 @@ monitor_adapter.drain_sfence_events();
   调用 drain_csr_events：同步 CSR runtime snapshot，不处理 writeback 状态；
     drain_csr_events 内部调用 memblock_sync_pkg::get_latest_raw_csr 获取最新 CSR raw snapshot；
     如果存在新 CSR snapshot，调用 data.apply_raw_csr_runtime 更新 common_data_transaction 中的 runtime CSR 镜像；
-  调用 drain_sfence_events：消费 sfence/hfence raw event，并按 fence payload 失效 TLB entry；
-    drain_sfence_events 内部循环调用 memblock_sync_pkg::pop_raw_sfence 弹出离散 fence 事件；
-    每个 fence 事件调用 data.apply_raw_sfence；
-    apply_raw_sfence 内部会 decode_raw_sfence，再通过 apply_sfence_invalidate、sfence_match_entry 和 sfence_vpn_match 找到并失效匹配的 tlb_entry_by_key；
-  不在这里处理 writeback、replay 或 redirect。
+  不在这里处理 raw fence、writeback、replay 或 redirect；
+  collector 返回后，service_monitor_once 调用 service_l2tlb_sfence_events：
+    adapter 从 raw_sfence_q 队首 peek，校验同 sample CSR context 后 decode fence；
+    成功 schedule 到 sfence_invalidate_pending_q 后才 pop 队首；
+    到 C4 才调用 apply_due_sfence_invalidate 扫描并删除命中的 tlb_entry_by_key；
+  raw fence service 不更新 writeback pass/fault，也不处理 replay 或 redirect。
 ```
 
 ## 5. `collect_monitor_event_batch()`

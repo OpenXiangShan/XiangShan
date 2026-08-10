@@ -5,7 +5,7 @@
 | 状态 | coding 完成；P0/P1 及其后发现的 baseline provenance/epoch-0 blocker 均已修复，explicit/base compile 与 smoke 均通过，独立终审已明确 `FINAL PASS`；本文件已归档至 `plan/do`。 |
 | 目标版本 | V2 (`mem_ut_uvm_v2`) |
 | 关联归档 plan | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md` |
-| 关联 live-entry plan | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md` |
+| 关联 live-entry plan | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md` |
 | 共享生命周期审核结论 | `AI_DOC/plan/test_framework/review_doc/undo/mem_ut_v2_l2tlb_single_owner_lifecycle_optimization_review_20260807.md`；本文件服从其单 owner、sample、reset、response/adapter queue drain、raw-fence intake close 和 release grant 合同 |
 | 权威源码 | `src/main/scala/xiangshan/mem/MemBlock.scala`、`src/main/scala/xiangshan/cache/mmu/Repeater.scala` |
 | 修改范围 | `memblock_sync_pkg.sv`、fence/CSR monitor、`memblock_dispatch_base_sequence.sv`、`memblock_main_dispatch_auto_build_main_table_base_sequence.sv`、`dispatch_monitor_event_adapter.sv`、`memblock_l2tlb_base_sequence.sv`、`L2tlb_agent_agent_xaction.sv`、`L2tlb_agent_agent_driver.sv`、相关 testcase/vseq 启动协调；不修改 DTLB/L2TLB interface payload |
