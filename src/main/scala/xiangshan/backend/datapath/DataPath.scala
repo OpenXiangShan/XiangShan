@@ -113,6 +113,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
           arbInSeq(srcIdx).bits.bankValidVec.foreach(_ := intRFBankRen(iqIdx)(exuIdx).get(srcIdx))
           arbInSeq(srcIdx).bits.addr := fromIQDeqOg1Payload(iqIdx)(exuIdx).psrc(srcIdx)
           arbInSeq(srcIdx).bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx
+          arbInSeq(srcIdx).bits.chanelIdx := fromIQ(iqIdx)(exuIdx).bits.chanelIdx
           arbInSeq(srcIdx).bits.issueValid := fromIQ(iqIdx)(exuIdx).valid
         } else {
           arbInSeq(srcIdx).valid := false.B
@@ -129,6 +130,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
           arbInSeq(srcIdx).valid := fpRFRen(iqIdx)(exuIdx).get(srcIdx)
           arbInSeq(srcIdx).bits.addr := fromIQDeqOg1Payload(iqIdx)(exuIdx).psrc(srcIdx)
           arbInSeq(srcIdx).bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx
+          arbInSeq(srcIdx).bits.chanelIdx := fromIQ(iqIdx)(exuIdx).bits.chanelIdx
           arbInSeq(srcIdx).bits.issueValid := fromIQ(iqIdx)(exuIdx).valid
         } else {
           arbInSeq(srcIdx).valid := false.B
@@ -146,6 +148,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
           arbInSeq(srcIdx).valid := vecRFRen(iqIdx)(exuIdx).get(srcIdx)
           arbInSeq(srcIdx).bits.addr := fromIQDeqOg1Payload(iqIdx)(exuIdx).psrc(srcIdx)
           arbInSeq(srcIdx).bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx
+          arbInSeq(srcIdx).bits.chanelIdx := fromIQ(iqIdx)(exuIdx).bits.chanelIdx
           arbInSeq(srcIdx).bits.issueValid := fromIQ(iqIdx)(exuIdx).valid
         } else {
           arbInSeq(srcIdx).valid := false.B
@@ -163,6 +166,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
           arbInSeq(srcIdx).valid := v0RFRen(iqIdx)(exuIdx).get(srcIdx)
           arbInSeq(srcIdx).bits.addr := fromIQDeqOg1Payload(iqIdx)(exuIdx).psrc(srcIdx)
           arbInSeq(srcIdx).bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx
+          arbInSeq(srcIdx).bits.chanelIdx := fromIQ(iqIdx)(exuIdx).bits.chanelIdx
           arbInSeq(srcIdx).bits.issueValid := fromIQ(iqIdx)(exuIdx).valid
         } else {
           arbInSeq(srcIdx).valid := false.B
@@ -177,6 +181,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       arbInSeq.headOption.foreach(_.valid := vlRFRen(iqIdx)(exuIdx).get)
       arbInSeq.headOption.foreach(_.bits.addr := fromIQDeqOg1Payload(iqIdx)(exuIdx).psrcVl.get)
       arbInSeq.headOption.foreach(_.bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx)
+      arbInSeq.headOption.foreach(_.bits.chanelIdx := fromIQ(iqIdx)(exuIdx).bits.chanelIdx)
       arbInSeq.headOption.foreach(_.bits.issueValid := fromIQ(iqIdx)(exuIdx).valid)
     }
   }

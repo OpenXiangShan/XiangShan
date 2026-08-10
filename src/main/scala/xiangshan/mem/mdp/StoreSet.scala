@@ -506,7 +506,8 @@ class LFST(implicit p: Parameters) extends XSModule {
   (0 until backendParams.StaExuCnt).map(i => {
     // TODO: opt timing
     (0 until LFSTWidth).map(j => {
-      when(io.storeIssue(i).valid && io.storeIssue(i).bits.storeSetHit && io.storeIssue(i).bits.robIdx.value === robIdxVec(io.storeIssue(i).bits.ssid)(j).value){
+      when(io.storeIssue(i).valid && io.storeIssue(i).bits.storeSetHit &&
+        io.storeIssue(i).bits.robIdx.isSameSlot(robIdxVec(io.storeIssue(i).bits.ssid)(j))) {
         validVec(io.storeIssue(i).bits.ssid)(j) := false.B
       }
     })

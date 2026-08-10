@@ -176,7 +176,7 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val sfence = Input(new SfenceBundle)
   val tlbCsr = Input(new TlbCsrBundle)
   val lsqio = new Bundle {
-    val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
+    val lcommit = Input(UInt(log2Up(2 * CommitWidth + 1).W))
     val scommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val commit = Input(Bool())
     val pendingPtr = Input(new RobPtr)

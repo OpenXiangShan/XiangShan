@@ -10,6 +10,7 @@ import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.{LqPtr, SqPtr}
 import utility.PerfCCT
 
@@ -290,6 +291,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     entriesIO.enq.zipWithIndex.foreach { case (enq, enqIdx) =>
       enq.valid                                                 := s0_doEnqSelValidVec(enqIdx)
       enq.bits.status.robIdx                                    := s0_enqBits(enqIdx).robIdx
+      enq.bits.status.chanelIdx                                 := s0_enqBits(enqIdx).chanelIdx
       enq.bits.status.fuType                                    := IQFuType.readFuType(VecInit(s0_enqBits(enqIdx).fuType.asBools), params.getFuCfgs.map(_.fuType))
       val numLsrc = s0_enqBits(enqIdx).srcType.size.min(enq.bits.status.srcStatus.map(_.srcType).size)
       for(j <- 0 until numLsrc) {
@@ -792,7 +794,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
             wakeUpQueue.io.enq.bits.lat := Mux(wakeupFromExu.valid, 0.U, getDeqLat(i, deqBeforeDly(i).bits.fuType))
             wakeUpQueue.io.enq.bits.uop.is0Lat.foreach(_ := Mux(wakeupFromExu.valid, false.B, getDeqLat(i, deqBeforeDly(i).bits.fuType) === 0.U))
             // wakeupFromExu's valid need after flush
-            wakeUpQueue.io.enq.bits.uop.robIdx := Mux(wakeupFromExu.valid, 0.U.asTypeOf(wakeUpQueue.io.enq.bits.uop.robIdx), deqBeforeDly(i).bits.robIdx)
+            wakeUpQueue.io.enq.bits.uop.robIdx := Mux(wakeupFromExu.valid, RobPtr(false.B, 0.U), deqBeforeDly(i).bits.robIdx)
           }
           else if (params.inFpSchd){
             wakeUpQueue.io.enq.valid := deqBeforeDly(i).valid && !FuType.isUncertain(deqBeforeDly(i).bits.fuType)
@@ -809,7 +811,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
             wakeUpQueue.io.enq.bits.lat := Mux(deqBeforeDly(i).valid, getDeqLat(i, deqBeforeDly(i).bits.fuType), 0.U)
             // fp don't have 0 lat fu
             // wakeupFromExu's valid need after flush
-            wakeUpQueue.io.enq.bits.uop.robIdx := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.robIdx, 0.U.asTypeOf(wakeUpQueue.io.enq.bits.uop.robIdx))
+            wakeUpQueue.io.enq.bits.uop.robIdx := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.robIdx, RobPtr(false.B, 0.U))
           }
         }
         else{
@@ -884,6 +886,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.pdest := deqEntryVec(i).bits.payload.pdest
     deq.bits.pdestVl.foreach(_ := deqEntryVec(i).bits.payload.pdestVl.get)
     deq.bits.robIdx := deqEntryVec(i).bits.status.robIdx
+    deq.bits.chanelIdx := deqEntryVec(i).bits.status.chanelIdx
 
     val deqDataSources = deqEntryVec.map(_.bits.status.srcStatus.map(_.dataSources))
     deq.bits.dataSources.zip(deqDataSources(i)).foreach { case (sink, source) => sink := source}

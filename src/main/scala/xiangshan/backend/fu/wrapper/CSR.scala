@@ -137,11 +137,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.trap.bits.isHls := csrIn.exception.bits.isHls
   csrMod.io.fromRob.trap.bits.isFetchMalAddr := csrIn.exception.bits.isFetchMalAddr
   csrMod.io.fromRob.trap.bits.isForVSnonLeafPTE := csrIn.exception.bits.isForVSnonLeafPTE
+  csrMod.io.fromRob.trap.bits.slotIsFormer := csrIn.exception.bits.slotIsFormer
 
   csrMod.io.fromRob.commit.fflags := setFflags
   csrMod.io.fromRob.commit.fsDirty := setFsDirty
-  csrMod.io.fromRob.commit.vxsat.valid := setVxsat.valid
-  csrMod.io.fromRob.commit.vxsat.bits := setVxsat.bits
+  csrMod.io.fromRob.commit.vxsat := setVxsat
   csrMod.io.fromRob.commit.vsDirty := setVsDirty
   csrMod.io.fromRob.commit.vstart := setVstart
   csrMod.io.fromRob.commit.vl := vlFromPreg
@@ -391,6 +391,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.flush_l2_enable                  := csrMod.io.status.custom.flush_l2_enable
       // Rename
       custom.fusion_enable            := csrMod.io.status.custom.fusion_enable
+      custom.high_density_rob_compression_enable := csrMod.io.status.custom.high_density_rob_compression_enable
       custom.wfi_enable               := csrMod.io.status.custom.wfi_enable
       // distribute csr write signal
       // write to frontend and memory

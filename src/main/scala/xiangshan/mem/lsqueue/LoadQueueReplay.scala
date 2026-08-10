@@ -889,8 +889,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   for (i <- 0 until LoadQueueReplaySize) {
     val fbk = io.vecFeedback
     for (j <- 0 until VecLoadPipelineWidth) {
-      vecLdCanceltmp(i)(j) := allocated(i) && fbk(j).valid && fbk(j).bits.isFlush && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
-      vecLdCommittmp(i)(j) := allocated(i) && fbk(j).valid && fbk(j).bits.isCommit && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
+      vecLdCanceltmp(i)(j) := allocated(i) && fbk(j).valid && fbk(j).bits.isFlush && uop(i).robIdx.isSameSlot(fbk(j).bits.robidx) && uop(i).uopIdx === fbk(j).bits.uopidx
+      vecLdCommittmp(i)(j) := allocated(i) && fbk(j).valid && fbk(j).bits.isCommit && uop(i).robIdx.isSameSlot(fbk(j).bits.robidx) && uop(i).uopIdx === fbk(j).bits.uopidx
     }
     vecLdCancel(i) := vecLdCanceltmp(i).reduce(_ || _)
     vecLdCommit(i) := vecLdCommittmp(i).reduce(_ || _)
@@ -924,7 +924,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val (a_v, a_uop) = (a._1, a._2)
     val (b_v, b_uop) = (b._1, b._2)
 
-    val res = Mux(a_v && b_v, Mux(isAfter(a_uop.uop.robIdx, b_uop.uop.robIdx), b_uop, a_uop),
+    val res = Mux(a_v && b_v, Mux(a_uop.uop.robIdx.isAfterSlot(b_uop.uop.robIdx), b_uop, a_uop),
                   Mux(a_v, a_uop,
                       Mux(b_v, b_uop,
                                 a_uop)))

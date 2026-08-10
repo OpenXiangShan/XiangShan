@@ -690,14 +690,14 @@ class LoadUnitS1(param: ExeUnitParams)(
   val nukeQueryValids = io.staNukeQueryReq.map(_.valid)
   val nukeQueryReqs = io.staNukeQueryReq.map(_.bits)
   val nukePAddrMatches = nukeQueryReqs.map(req => nukePAddrMatch(req.paddr, req.matchType, paddr))
-  val nukeStoreOlders = nukeQueryReqs.map(req => isAfter(robIdx, req.robIdx))
+  val nukeStoreOlders = nukeQueryReqs.map(req => robIdx.isAfterSlot(req.robIdx))
   val nukeMaskMatches = nukeQueryReqs.map(req => (req.mask & in.mask).orR)
   val nuke = Cat((nukeQueryValids lazyZip nukePAddrMatches lazyZip nukeStoreOlders lazyZip nukeMaskMatches).map {
     case (valid, paddrMatch, storeOlder, maskMatch) => valid && paddrMatch && storeOlder && maskMatch
   }).orR && paddrEffective
   // if nuke is storeSetHit store, let load fast replay
   val fastReplayNukeFirst = isStoreSetHit && nukeQueryReqs.zip(nukeQueryValids).map{case (req, v) =>
-    req.robIdx === waitRobIdx && v}.reduce(_ || _)
+    req.robIdx.isSameSlot(waitRobIdx) && v}.reduce(_ || _)
 
   /**
     * Pipeline connect
@@ -1013,7 +1013,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val nukeQueryValids = io.staNukeQueryReq.map(_.valid)
   val nukeQueryReqs = io.staNukeQueryReq.map(_.bits)
   val nukePAddrMatches = nukeQueryReqs.map(req => nukePAddrMatch(req.paddr, req.matchType, paddr))
-  val nukeStoreOlders = nukeQueryReqs.map(req => isAfter(robIdx, req.robIdx))
+  val nukeStoreOlders = nukeQueryReqs.map(req => robIdx.isAfterSlot(req.robIdx))
   val nukeMaskMatches = nukeQueryReqs.map(req => (req.mask & in.mask).orR)
   val nuke = Cat((nukeQueryValids lazyZip nukePAddrMatches lazyZip nukeStoreOlders lazyZip nukeMaskMatches).map {
     case (valid, paddrMatch, storeOlder, maskMatch) => valid && paddrMatch && storeOlder && maskMatch
@@ -1021,7 +1021,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   // if nuke is storeSetHit store, let load fast replay
   val prevStageFastReplayNukeFirst = in.fastReplayNukeFirst.get
   val fastReplayNukeFirst = isStoreSetHit && nukeQueryReqs.zip(nukeQueryValids).map{case (req, v) =>
-    req.robIdx === waitRobIdx && v}.reduce(_ || _) || prevStageFastReplayNukeFirst
+    req.robIdx.isSameSlot(waitRobIdx) && v}.reduce(_ || _) || prevStageFastReplayNukeFirst
 
   /**
     * Preliminary assessment of the load exit

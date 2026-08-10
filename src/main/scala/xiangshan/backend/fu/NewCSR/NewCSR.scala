@@ -150,6 +150,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isHls = Bool()
         val isFetchMalAddr = Bool()
         val isForVSnonLeafPTE = Bool()
+        val slotIsFormer = Bool()
       })
       val commit = Input(new RobCommitCSR)
       val robDeqPtr = Input(new RobPtr)
@@ -271,6 +272,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trapIsFetchMalAddr = io.fromRob.trap.bits.isFetchMalAddr
   val trapIsFetchBkpt = io.fromRob.trap.bits.isFetchBkpt
   val trapIsForVSnonLeafPTE = io.fromRob.trap.bits.isForVSnonLeafPTE
+  val trapIsFormer = io.fromRob.trap.bits.slotIsFormer
 
   // debug_intrrupt
   val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
@@ -633,10 +635,12 @@ class NewCSR(implicit val p: Parameters) extends Module
       case m: HasRobCommitBundle =>
         // Todo: move RegNext from ROB to CSR
         m.robCommit.instNum := io.fromRob.commit.instNum
-        m.robCommit.fflags  := RegNextWithEnable(io.fromRob.commit.fflags)
+        for (i <- 0 until 5) {
+          m.robCommit.fflags(i)  := RegNext(io.fromRob.commit.fflags(i), false.B)
+        }
         m.robCommit.fsDirty := GatedValidRegNext(io.fromRob.commit.fsDirty)
         m.robCommit.vsDirty := GatedValidRegNext(io.fromRob.commit.vsDirty)
-        m.robCommit.vxsat   := RegNextWithEnable(io.fromRob.commit.vxsat)
+        m.robCommit.vxsat   := RegNext(io.fromRob.commit.vxsat, false.B)
         m.robCommit.vtype   := RegNextWithEnable(io.fromRob.commit.vtype)
         m.robCommit.vl      := DelayN           (io.fromRob.commit.vl, 2) // not used yet
         m.robCommit.vstart  := RegNextWithEnable(io.fromRob.commit.vstart)
@@ -1453,6 +1457,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.custom.hd_misalign_ld_enable            := smblockctl.regOut.HD_MISALIGN_LD_ENABLE.asBool
 
   io.status.custom.fusion_enable           := srnctl.regOut.FUSION_ENABLE.asBool
+  io.status.custom.high_density_rob_compression_enable := srnctl.regOut.HIGH_DENSITY_ROB_COMPRESSION_ENABLE.asBool
   io.status.custom.wfi_enable              := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
 
   io.status.custom.power_down_enable := mcorepwr.regOut.POWER_DOWN_ENABLE.asBool
@@ -1652,6 +1657,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffArchEvent.interrupt := RegEnable(interruptNO, hasTrap)
     diffArchEvent.exception := RegEnable(exceptionNO, hasTrap)
     diffArchEvent.exceptionPC := RegEnable(exceptionPC, hasTrap)
+    diffArchEvent.isFormer := RegEnable(trapIsFormer, hasTrap)
     diffArchEvent.hasNMI := RegEnable(hasNMI, hasTrap)
     diffArchEvent.virtualInterruptIsHvictlInject := RegNext(virtualInterruptIsHvictlInject && interrupt)
     diffArchEvent.irToHS := RegEnable(irToHS, hasTrap)

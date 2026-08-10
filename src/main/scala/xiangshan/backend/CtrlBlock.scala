@@ -107,9 +107,12 @@ class CtrlBlockImp(
   private val disableFusion = decode.io.csrCtrl.singlestep || !decode.io.csrCtrl.fusion_enable
 
   private val s0_robFlushRedirect = rob.io.flushOut
+  private val s0_robFlushPcInfo = rob.io.flushPcInfo
   private val s1_robFlushRedirect = Wire(Valid(new Redirect))
+  private val s1_robFlushPcInfo = Wire(chiselTypeOf(rob.io.flushPcInfo))
   s1_robFlushRedirect.valid := GatedValidRegNext(s0_robFlushRedirect.valid, false.B)
   s1_robFlushRedirect.bits := RegEnable(s0_robFlushRedirect.bits, s0_robFlushRedirect.valid)
+  s1_robFlushPcInfo := RegEnable(s0_robFlushPcInfo, s0_robFlushRedirect.valid)
 
   pcMem.io.ren.get(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.valid
   pcMem.io.raddr(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.bits.ftqIdx.value
@@ -118,6 +121,7 @@ class CtrlBlockImp(
     robFlushPCOffset := s0_robFlushRedirect.bits.getPcOffset()
   }
   private val s1_robFlushPc = pcMem.io.rdata(pcMemRdIndexes("robFlush").head).toUInt + robFlushPCOffset
+  private val s1_robFlushPcAdjusted = s1_robFlushPc + s1_robFlushPcInfo.formerLen
   private val s3_redirectGen = redirectGen.io.stage2Redirect
   private val s1_s3_redirect = Mux(s1_robFlushRedirect.valid, s1_robFlushRedirect, s3_redirectGen)
   private val s2_s4_pendingRedirectValid = RegInit(false.B)
@@ -172,6 +176,7 @@ class CtrlBlockImp(
     val oldestRedirect = findOldestRedirect(findOldestRedirect(s2_s4_redirect, s3_s5_redirect), s1_s3_redirect)
     val killedByOlder = x.bits.robIdx.needFlush(oldestRedirect)
     val delayed = Wire(Valid(UInt(io.fromWB.wbData.size.U.getWidth.W)))
+    // delayed.valid := GatedValidRegNext(valid)
     delayed.valid := GatedValidRegNext(valid && !killedByOlder)
     val isIntSche = intScheWbData.contains(x)
     val isFpSche = fpScheWbData.contains(x)
@@ -199,7 +204,7 @@ class CtrlBlockImp(
     }
     val sameRobidxBools = VecInit(canSameRobidxWbData.map( wb => {
       val killedByOlderThat = wb.bits.robIdx.needFlush(oldestRedirect)
-      (wb.bits.robIdx === x.bits.robIdx) && wb.valid && x.valid && !killedByOlderThat && !killedByOlder
+      wb.bits.robIdx.isSameEntry(x.bits.robIdx) && wb.valid && x.valid && !killedByOlderThat && !killedByOlder
     }).toSeq)
     delayed.bits := RegEnable(PopCount(sameRobidxBools), x.valid)
     delayed
@@ -209,6 +214,7 @@ class CtrlBlockImp(
   val loadReplay = Wire(ValidIO(new Redirect))
   loadReplay.valid := GatedValidRegNext(memViolation.valid)
   loadReplay.bits := RegEnable(memViolation.bits, memViolation.valid)
+  loadReplay.bits.isFromLoad := true.B
   loadReplay.bits.debugIsCtrl := false.B
   loadReplay.bits.debugIsMemVio := true.B
 
@@ -340,6 +346,7 @@ class CtrlBlockImp(
   redirectGen.io.hartId := io.fromTop.hartId
   redirectGen.io.oldestExuRedirect.valid := oldestExuRedirect.valid
   redirectGen.io.oldestExuRedirect.bits := oldestExuRedirect.bits
+  redirectGen.io.oldestExuRedirect.bits.isFromLoad := false.B
   redirectGen.io.loadReplay <> loadReplay
   val loadRedirectTargetOffset = Reg(UInt(VAddrBits.W))
   when(memViolation.valid) {
@@ -358,6 +365,7 @@ class CtrlBlockImp(
   redirectGen.io.loadReplay.bits.pc := loadRedirectStartPcRead + loadRedirectPcOffset
 
   redirectGen.io.robFlush := s1_robFlushRedirect
+  redirectGen.io.robFlush.bits.isFromLoad := false.B
 
   val s4_flushFromRobValidAhead = DelayN(s1_robFlushRedirect.valid, 3)
   val s5_flushFromRobValid = GatedValidRegNext(s4_flushFromRobValidAhead)
@@ -408,8 +416,8 @@ class CtrlBlockImp(
   // T4: get csr.trapTarget from csr
   // T5: io.frontend.toFtq
   val s2_robFlushPc = RegEnable(Mux(s1_robFlushRedirect.bits.flushItself(),
-    s1_robFlushPc, // replay inst
-    s1_robFlushPc + Mux(s1_robFlushRedirect.bits.isRVC, 2.U, 4.U) // flush pipe
+    s1_robFlushPcAdjusted, // replay inst
+    s1_robFlushPcAdjusted + Mux(s1_robFlushPcInfo.flushIsRVC, 2.U, 4.U) // flush pipe
   ), s1_robFlushRedirect.valid)
   private val s4_csrIsTrap = DelayN(rob.io.exception.valid, 3)
   private val s4_trapTargetFromCsr = io.robio.csr.trapTarget
@@ -565,11 +573,12 @@ class CtrlBlockImp(
   snpt.io.enqData.robIdx := rename.io.out.map(_.bits.robIdx)
   snpt.io.enqData.isCFI := rename.io.out.map(_.bits.snapshot)
   snpt.io.deq := snpt.io.valids(snpt.io.deqPtr.value) && rob.io.commits.isCommit &&
-    Cat(rob.io.commits.commitValid.zip(rob.io.commits.robIdx).map(x => x._1 && x._2 === snpt.io.snapshots(snpt.io.deqPtr.value).robIdx.head)).orR
+    Cat(rob.io.commits.commitValid.zip(rob.io.commits.robIdx).map(x => x._1 && x._2.isSameEntry(snpt.io.snapshots(snpt.io.deqPtr.value).robIdx.head))).orR
   snpt.io.redirect := s1_s3_redirect.valid
   val flushVec = VecInit(snpt.io.snapshots.map { snapshot =>
     val notCFIMask = snapshot.isCFI.map(~_)
-    val shouldFlush = snapshot.robIdx.map(robIdx => robIdx >= s1_s3_redirect.bits.robIdx || robIdx.value === s1_s3_redirect.bits.robIdx.value)
+    val shouldFlush = snapshot.robIdx.map(robIdx =>
+      robIdx.isNotBeforeSlot(s1_s3_redirect.bits.robIdx) || robIdx.isSameEntry(s1_s3_redirect.bits.robIdx))
     val shouldFlushMask = (1 to RenameWidth).map(shouldFlush take _ reduce (_ || _))
     s1_s3_redirect.valid && Cat(shouldFlushMask.zip(notCFIMask).map(x => x._1 | x._2)).andR
   })
@@ -580,15 +589,15 @@ class CtrlBlockImp(
   val useSnpt = VecInit.tabulate(RenameSnapshotNum){ case idx =>
     val snptRobidx = snpt.io.snapshots(idx).robIdx.head
     // (redirectRobidx.value =/= snptRobidx.value) for only flag diffrence
-    snpt.io.valids(idx) && ((redirectRobidx > snptRobidx) && (redirectRobidx.value =/= snptRobidx.value) ||
-      !s1_s3_redirect.bits.flushItself() && redirectRobidx === snptRobidx)
+    snpt.io.valids(idx) && (redirectRobidx.isAfterSlot(snptRobidx) && !(redirectRobidx.value === snptRobidx.value && redirectRobidx.flag =/= snptRobidx.flag) ||
+      !s1_s3_redirect.bits.flushItself() && redirectRobidx.isSameSlot(snptRobidx))
   }.reduceTree(_ || _)
   val snptSelect = MuxCase(
     0.U(log2Ceil(RenameSnapshotNum).W),
     (1 to RenameSnapshotNum).map(i => (snpt.io.enqPtr - i.U).value).map{case idx =>
       val thisSnapRobidx = snpt.io.snapshots(idx).robIdx.head
-      (snpt.io.valids(idx) && (redirectRobidx > thisSnapRobidx && (redirectRobidx.value =/= thisSnapRobidx.value) ||
-        !s1_s3_redirect.bits.flushItself() && redirectRobidx === thisSnapRobidx), idx)
+      (snpt.io.valids(idx) && (redirectRobidx.isAfterSlot(thisSnapRobidx) && !(redirectRobidx.value === thisSnapRobidx.value && redirectRobidx.flag =/= thisSnapRobidx.flag) ||
+        !s1_s3_redirect.bits.flushItself() && redirectRobidx.isSameSlot(thisSnapRobidx)), idx)
     }
   )
 
@@ -626,7 +635,6 @@ class CtrlBlockImp(
     dispatch.io.renameIn(i).bits := decodePipeRename(i).bits
     rename.io.validVec(i) := decodePipeRename(i).valid
     rename.io.isFusionVec(i) := false.B
-    rename.io.fusionCross2FtqVec(i) := false.B
     decode.io.debugOutValid.foreach{ validVec => validVec(i) := decodePipeRename(i).valid}
   }
 
@@ -639,16 +647,9 @@ class CtrlBlockImp(
     when (fusionDecoder.io.out(i).valid) {
       fusionDecoder.io.out(i).bits.update(rename.io.in(i).bits)
       fusionDecoder.io.out(i).bits.update(dispatch.io.renameIn(i).bits)
-      val cross2Ftq = decodePipeRename(i).bits.isLastInFtqEntry && decodePipeRename(i + 1).bits.isLastInFtqEntry && backendParams.robCompressEn.B
-      val cross1Ftq = decodePipeRename(i).bits.isLastInFtqEntry || decodePipeRename(i + 1).bits.isLastInFtqEntry
-      rename.io.in(i + 1).bits.isLastInFtqEntry := cross1Ftq
-      rename.io.in(i + 1).bits.canRobCompress := !cross2Ftq
       // if second instruciton of fusion is move and it can also be fusion, it will not act as a move
       rename.io.in(i + 1).bits.isMove := false.B
-      rename.io.in(i).bits.isLastInFtqEntry := false.B
-      rename.io.in(i).bits.canRobCompress := !cross2Ftq
       rename.io.isFusionVec(i) := true.B
-      rename.io.fusionCross2FtqVec(i) := cross2Ftq
     }
   }
 
@@ -731,7 +732,7 @@ class CtrlBlockImp(
   enqRob.resp := rob.io.enq.resp
   enqRob.needAlloc := RegNext(dispatch.io.enqRob.needAlloc)
   enqRob.req.zip(dispatch.io.enqRob.req).map { case (sink, source) =>
-    sink.valid := RegNext(source.valid && !rob.io.redirect.valid)
+    sink.valid := RegNext(source.valid && !rob.io.redirect.valid) && !s1_s3_redirect.valid
     sink.bits := RegEnable(source.bits, source.valid)
   }
   dispatch.io.enqRob.canAccept := enqRob.canAcceptForDispatch && !enqRob.req.map(x => x.valid && x.bits.blockBackward && enqRob.canAccept).reduce(_ || _)
@@ -818,7 +819,7 @@ class CtrlBlockImp(
 
   io.robio.csr.perfinfo.retiredInstr <> RegNext(rob.io.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.io.exception
-  io.robio.exception.bits.pc := s1_robFlushPc
+  io.robio.exception.bits.pc := s1_robFlushPcAdjusted
   // bju resolve
   io.frontend.toFtq.resolve := io.fromBJUResolve
   // wfi

@@ -207,7 +207,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
     val fbk = io.fromVMergeBuffer
     for (j <- 0 until VecStorePipelineWidth) {
       vecCommittmp(i)(j) := fbk(j).valid && (fbk(j).bits.isCommit || fbk(j).bits.isFlush) &&
-        dataEntries(i).robIdx === fbk(j).bits.robidx && dataEntries(i).uopIdx === fbk(j).bits.uopidx
+        dataEntries(i).robIdx.isSameSlot(fbk(j).bits.robidx) && dataEntries(i).uopIdx === fbk(j).bits.uopidx
     }
     // vector feedback may occur with deqCancel/needCancel at the same time
     vecCommit(i) := vecCommittmp(i).reduce(_ || _) && !needCancel(i) && !deqCancel && ctrlEntries(i).allocated
@@ -232,7 +232,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
     // forward stage 0
     val s0Req = io.mdpQuery(i)
     val s0MdpHitVec = WireInit(VecInit((0 until StoreQueueSize).map(j =>
-      s0Req.bits.loadWaitBit && dataEntries(j).robIdx === s0Req.bits.waitForRobIdx && ctrlEntries(j).allocated)))
+      s0Req.bits.loadWaitBit && dataEntries(j).robIdx.isSameSlot(s0Req.bits.waitForRobIdx) && ctrlEntries(j).allocated)))
 
     // forward stage 1
     val s1ReqValid  = RegNext(s0Req.valid && s0Req.bits.loadWaitBit)
@@ -286,7 +286,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
 
   enqPtrVec := enqPtrVecNext
 
-  val headIsRetired = isBefore(dataEntries(deqPtrHead.value).robIdx, robHeadPtr) && ctrlEntries(deqPtrHead.value).allocated
+  val headIsRetired = dataEntries(deqPtrHead.value).robIdx.isBeforeSlot(robHeadPtr) && ctrlEntries(deqPtrHead.value).allocated
   //redirect logic
   switch(state) {
     is(WalkState.idle) {
@@ -308,9 +308,9 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   val deqRobIdxVec = VecInit(deqPtrVec.map(ptr => dataEntries(ptr.value).robIdx))
   val deqAllocatedVec = VecInit(deqPtrVec.map(ptr => ctrlEntries(ptr.value).allocated))
   val deqReqNumVec = VecInit(deqPtrVec.map(ptr => dataEntries(ptr.value).reqNum.asUInt))
-  val retireBaseVec = VecInit((0 until CommitWidth).map(i => isBefore(deqRobIdxVec(i), robHeadPtr) && deqAllocatedVec(i)))
+  val retireBaseVec = VecInit((0 until CommitWidth).map(i => deqRobIdxVec(i).isBeforeSlot(robHeadPtr) && deqAllocatedVec(i)))
   val deqMbCommitVec = VecInit(deqPtrVec.map(ptr => ctrlEntries(ptr.value).vecMbCommit))
-  val mbCommitVec = VecInit((0 until CommitWidth).map(i => (deqRobIdxVec(i) === robHeadPtr) && deqMbCommitVec(i) && deqAllocatedVec(i)))
+  val mbCommitVec = VecInit((0 until CommitWidth).map(i => deqRobIdxVec(i).isSameSlot(robHeadPtr) && deqMbCommitVec(i) && deqAllocatedVec(i)))
   val retireCount = PopCount(retireVec)
   val preCommitRelease = WireInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
   val retireCarryVec = Wire(Vec(CommitWidth, Bool()))
@@ -337,7 +337,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
 
   // precommit store, it will be write to sbuffer before rob retire.
   val preCommitEntry = ctrlEntries(preCommitPtr.value)
-  val preCommitMoveValid = dataEntries(preCommitPtr.value).robIdx === robHeadPtr &&
+  val preCommitMoveValid = dataEntries(preCommitPtr.value).robIdx.isSameSlot(robHeadPtr) &&
     preCommitEntry.allocated && (!preCommitEntry.isVec || preCommitEntry.vecMbCommit)
 
   val preCommitPtrNext = WireInit(preCommitPtr)
