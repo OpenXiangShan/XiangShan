@@ -234,18 +234,18 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
-    val RVC = UInt(2.W)
+    val slotHeadRvcMask = UInt(2.W)
     val fixedTaken = Bool()
     val predTaken = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
-    val compressType = CompressType()
-    val complexHasDest = UInt(1.W)
-    val hasStore = Bool()
-    val noCompressSource = UInt(2.W)
-    val needFlush = UInt(2.W)
-    val interrupt_safe = Bool()
+    val entryPairType = CompressType()
+    val complexSlotHasDest = UInt(1.W)
+    val entryHasStore = Bool()
+    val noCompressReason = UInt(2.W)
+    val slotNeedFlushMask = UInt(2.W)
+    val interruptSafe = Bool()
     val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
     val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
     val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
@@ -345,7 +345,7 @@ object Bundles {
   class DispatchOutBaseUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     // from frontend
-    val RVC = UInt(2.W)
+    val slotHeadRvcMask = UInt(2.W)
     val isRVC = Bool()
     val fixedTaken = Bool()
     val predTaken = Bool()
@@ -564,7 +564,7 @@ object Bundles {
     val isFetchMalAddr  = Bool()
     val hasException    = Bool()
     val trigger         = TriggerAction()
-    val RVC             = UInt(2.W)
+    val slotHeadRvcMask = UInt(2.W)
     val isRVC           = Bool()
     val fixedTaken      = Bool()
     val predTaken       = Bool()
@@ -587,12 +587,12 @@ object Bundles {
     val blockBackward   = Bool()
     val flushPipe       = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val canRobCompress  = Bool()
-    val compressType    = CompressType()
-    val complexHasDest = UInt(1.W)
-    val hasStore = Bool()
-    val noCompressSource = UInt(2.W)
-    val needFlush = UInt(2.W)
-    val interrupt_safe = Bool()
+    val entryPairType    = CompressType()
+    val complexSlotHasDest = UInt(1.W)
+    val entryHasStore = Bool()
+    val noCompressReason = UInt(2.W)
+    val slotNeedFlushMask = UInt(2.W)
+    val interruptSafe = Bool()
     val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
     val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
     val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
@@ -1708,7 +1708,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val trigger = TriggerAction()
     val isForVSnonLeafPTE = Bool()
     // Identifies the faulting slot when two instructions share one ROB entry.
-    val isFormer = Bool()
+    val slotIsFormer = Bool()
   }
 
   object UopIdx {
