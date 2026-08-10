@@ -76,8 +76,8 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.toFrontendBJUResolve.get.valid := io.out.valid
   io.toFrontendBJUResolve.get.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
   io.toFrontendBJUResolve.get.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
-  io.toFrontendBJUResolve.get.bits.pc := PrunedAddrInit(pcExtend)
-  io.toFrontendBJUResolve.get.bits.target := PrunedAddrInit(addModule.io.target)
+  io.toFrontendBJUResolve.get.bits.pc := PrunedAddrInit(pcExtend).truncate(VAddrBits)
+  io.toFrontendBJUResolve.get.bits.target := PrunedAddrInit(addModule.io.target).truncate(VAddrBits)
   io.toFrontendBJUResolve.get.bits.taken := dataModule.io.taken
   io.toFrontendBJUResolve.get.bits.mispredict := isMisPred
   io.toFrontendBJUResolve.get.bits.attribute.branchType := BranchAttribute.BranchType.Conditional
