@@ -60,6 +60,11 @@ localparam int unsigned MEMBLOCK_CANCEL_SNAPSHOT_QUEUE_MAX_DEPTH =
 // L2TLB responder只读这些typed localparam，用于queue上界、参数收敛和ready恢复边界。
 localparam int unsigned MEMBLOCK_DUT_L2TLB_DFILTER_SIZE =
     `MEMBLOCK_DUT_L2TLB_DFILTER_SIZE;
+// 中文注释：同一 raw range shape 的 candidate 数量上限。设置：由 V2
+// compile profile 固定；使用：range index 注册时限制单个 bucket，避免普通
+// request lookup 退化为无界全表扫描。
+localparam int unsigned MEMBLOCK_TLB_RANGE_CANDIDATE_MAX =
+    `MEMBLOCK_TLB_RANGE_CANDIDATE_MAX;
 localparam int unsigned MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES =
     `MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES;
 localparam int unsigned MEMBLOCK_DUT_L2TLB_CSR_PIPE_STAGES =
@@ -269,6 +274,45 @@ typedef struct packed {
     bit [15:0] vmid;
     bit [1:0]  s2xlate;
 } memblock_tlb_lookup_key_t;
+
+// 中文注释：range_kind 描述 secondary index 复用哪一套 DUT raw-hit
+// 形状。s2xlate 仍保留在 key 中，防止相同上下文的不同翻译组合混桶。
+typedef enum bit [1:0] {
+    MEMBLOCK_TLB_RANGE_KIND_S1       = 2'd0,
+    MEMBLOCK_TLB_RANGE_KIND_S2       = 2'd1,
+    MEMBLOCK_TLB_RANGE_KIND_ALLSTAGE = 2'd2
+} memblock_tlb_range_kind_e;
+
+// 中文注释：lookup result 只记录 request 对 canonical live entry 的复用
+// 来源，供 token audit/debug 使用；它不参与 DUT response wire 或 UID 完成。
+typedef enum bit [1:0] {
+    MEMBLOCK_TLB_LOOKUP_EXACT_HIT  = 2'd0,
+    MEMBLOCK_TLB_LOOKUP_RANGE_HIT  = 2'd1,
+    MEMBLOCK_TLB_LOOKUP_MISS_BUILD = 2'd2
+} memblock_tlb_lookup_result_e;
+
+// 中文注释：exact miss 的多个 raw-hit candidate 按地址覆盖范围仲裁。
+// 枚举值由小到大单调排列，不能用于 exact hit 或改变 raw matcher。
+typedef enum int unsigned {
+    MEMBLOCK_TLB_COVERAGE_4K   = 0,
+    MEMBLOCK_TLB_COVERAGE_64K  = 1,
+    MEMBLOCK_TLB_COVERAGE_2M   = 2,
+    MEMBLOCK_TLB_COVERAGE_1G   = 3,
+    MEMBLOCK_TLB_COVERAGE_512G = 4
+} memblock_tlb_range_coverage_rank_e;
+
+// Packed associative-map key for a canonical entry's raw range shape.
+// asid_global=1 时 asid 固定为 0；S2-only 也固定 asid/asid_global 为 0。
+typedef struct packed {
+    memblock_tlb_range_kind_e range_kind;
+    bit [1:0]                  s2xlate;
+    bit                        asid_global;
+    bit [15:0]                 asid;
+    bit [15:0]                 vmid;
+    bit [1:0]                  level;
+    bit                        napot;
+    bit [51:0]                 normalized_vpn;
+} memblock_tlb_range_index_key_t;
 
 typedef enum int unsigned {
     // HS/S-stage SFENCE.VMA，只作用于 noS2xlate 的 S1 entry。

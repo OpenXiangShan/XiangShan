@@ -27,6 +27,10 @@ class memblock_tlb_entry extends uvm_object;
     } memblock_tlb_fault_stage_e;
 
     memblock_tlb_lookup_key_t lookup_key;
+    // 中文注释：仅 canonical live entry 保存自己已注册的 range index key，
+    // 供统一 delete helper 精确反注册。pending/UID snapshot 复制 raw payload
+    // 时必须清空该队列，不能把 live-index ownership 带到 request 私有对象。
+    memblock_tlb_range_index_key_t range_index_keys[$];
     // The stored widths deliberately match the V2 PtwRespS2 wires.  The
     // lookup key remains wider because it is a framework lookup identity,
     // not a direct copy of either response tag.
@@ -113,6 +117,7 @@ class memblock_tlb_entry extends uvm_object;
 
     function void reset();
         lookup_key = '{default:'0};
+        range_index_keys.delete();
         s1_tag = '0; s1_asid = '0; s1_vmid = '0; s2_tag = '0; s2_vmid = '0; s2xlate = '0;
         s1_stage_active = 1'b0; s2_stage_active = 1'b0;
         s1_translation_mode_at_build = '0; s2_translation_mode_at_build = '0;
@@ -283,6 +288,9 @@ class memblock_tlb_entry extends uvm_object;
         end
         source.check_inactive_stage_defaults("COPY_SOURCE");
         source.validate_s1_sector_payload_consistency("COPY_SOURCE");
+        // range_index_keys 是 canonical table 的删除所有权，snapshot 只能复制
+        // response payload/provenance，不能取得 index ownership。
+        range_index_keys.delete();
         lookup_key = source.lookup_key; s1_tag = source.s1_tag; s1_asid = source.s1_asid;
         s1_vmid = source.s1_vmid; s2_tag = source.s2_tag; s2_vmid = source.s2_vmid;
         s2xlate = source.s2xlate; s1_stage_active = source.s1_stage_active;
