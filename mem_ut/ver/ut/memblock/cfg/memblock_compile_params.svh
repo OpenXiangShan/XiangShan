@@ -166,6 +166,12 @@
 `ifndef MEMBLOCK_DUT_L2TLB_DFILTER_SIZE
     `define MEMBLOCK_DUT_L2TLB_DFILTER_SIZE 32
 `endif
+// 一个 range-index bucket 最多保留的 canonical entry 数量。该值必须至少
+// 覆盖 DTLB filter 的物理在途窗口，因此默认直接派生自 dfilterSize；它是
+// compile-time 结构上限，不允许建立 runtime plus 镜像。
+`ifndef MEMBLOCK_TLB_RANGE_CANDIDATE_MAX
+    `define MEMBLOCK_TLB_RANGE_CANDIDATE_MAX `MEMBLOCK_DUT_L2TLB_DFILTER_SIZE
+`endif
 `ifndef MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES
     `define MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES 4
 `endif
