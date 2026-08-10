@@ -71,7 +71,19 @@ RUN_ID_DEFAULT="frontend_${CASE_STEM}_$(date +%Y%m%d_%H%M%S)_$$"
 TB_RUN_ID="${TB_RUN_ID:-${RUN_ID_DEFAULT}}"
 TB_ARTIFACT_DIR="${TB_ARTIFACT_DIR:-${FRONTEND_DIR}/data/runs/${TB_RUN_ID}}"
 TB_COVERAGE_DIR="${TB_COVERAGE_DIR:-${TB_ARTIFACT_DIR}/coverage}"
-TB_FUNCOV_TARGET_TESTCASES="${TB_FUNCOV_TARGET_TESTCASES:-${CASE_STEM}}"
+if [[ -z "${TB_FUNCOV_TARGET_TESTCASES+x}" ]]; then
+  # Keep active registry cases scoped to their testcase.  Newly added assembly
+  # inputs may be valid DUT stimuli before their suggested testcase is added to
+  # the canonical registry; let those cases run with an unscoped observation
+  # recorder instead of failing during fixture setup.
+  PILOT_CSV="${FRONTEND_DIR}/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
+  if rg -q ",${CASE_STEM}(,|$)" "${PILOT_CSV}"; then
+    TB_FUNCOV_TARGET_TESTCASES="${CASE_STEM}"
+  else
+    TB_FUNCOV_TARGET_TESTCASES=""
+    echo "[frontend] funcov testcase not in canonical registry; using unscoped observation: ${CASE_STEM}"
+  fi
+fi
 TRACE_PATH="${TB_TRACE_PATH:-${TB_ARTIFACT_DIR}/inputs/${CASE_STEM}.trace.jsonl}"
 NEMU_LOG_PATH="${NEMU_LOG_PATH:-${TB_ARTIFACT_DIR}/inputs/${CASE_STEM}.nemu.log}"
 if ! [[ "${TB_RUN_ID}" =~ ^[A-Za-z0-9_.=-]+$ ]]; then

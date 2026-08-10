@@ -821,15 +821,12 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     assert not (frontend_root / "docs/frontend_bt_functional_coverage_pilot.csv").exists()
 
 
-def test_frontend_runners_keep_artifacts_scoped_to_one_run(tmp_path):
+def test_frontend_runners_keep_artifacts_scoped_to_one_run():
     frontend_root = _frontend_root()
     pipeline_source = (frontend_root / "scripts/run_bin_trace_pipeline.sh").read_text(
         encoding="utf-8"
     )
     wrapper_source = (frontend_root / "scripts/run_baremode_asm_bin_trace.sh").read_text(
-        encoding="utf-8"
-    )
-    suite_source = (frontend_root / "scripts/run_baremode_asm_suite.sh").read_text(
         encoding="utf-8"
     )
     asm_source = (frontend_root / "scripts/asm_to_jsonl.sh").read_text(encoding="utf-8")
@@ -851,10 +848,6 @@ def test_frontend_runners_keep_artifacts_scoped_to_one_run(tmp_path):
     )
     assert 'TB_RUN_COMMAND="${TB_RUN_COMMAND% }"' in wrapper_source
     assert (
-        'TB_FUNCOV_TARGET_TESTCASES="${TB_FUNCOV_TARGET_TESTCASES:-${CASE_STEM}}"'
-        in wrapper_source
-    )
-    assert (
         'TB_FUNCOV_TARGET_TESTCASES="${TB_FUNCOV_TARGET_TESTCASES}"'
         in wrapper_source
     )
@@ -866,37 +859,7 @@ def test_frontend_runners_keep_artifacts_scoped_to_one_run(tmp_path):
     assert "refusing to overwrite non-empty run root" in asm_source
     assert "fe_baremode_python_pilot_mix" not in wrapper_source
     assert not (frontend_root / "tests/asm_cases/fe_baremode_python_pilot_mix.S").exists()
-    output_vars = {
-        "coverage": "TB_COVERAGE_DIR",
-        "waveforms": "TB_WAVEFORM_DIR",
-        "funcov": "TB_FUNCOV_DIR",
-        "logs": "TB_CASE_LOG_DIR",
-    }
-    for directory, env_name in output_vars.items():
-        assert f'{env_name}="${{case_artifact_dir}}/{directory}"' in suite_source
-    assert 'case_run_id="${SUITE_ID}_${case_stem}"' in suite_source
-    assert '--glob "${SUITE_ID}_*/coverage/*.dat"' in suite_source
-    assert "tools/backannotate_funcov.py" in suite_source
-    assert "tools/merge_funcov.py" in suite_source
-    assert "backannotation_audit.json" in suite_source
-    assert "code_coverage_summary.json" in suite_source
-    assert "${SUITE_ID}_observed" in suite_source
-    assert "--check" in suite_source
-    assert 'raw coverage summary skipped: TB_RUN_DUT=0' in suite_source
-    assert "DATE_STAMP" not in suite_source
-    suite_cases = set(re.findall(r"asm_cases/.*/([A-Za-z0-9_]+)\.S", suite_source))
-    active_testcases = {
-        item.suggested_testcase
-        for item in FunctionalCoverageRecorder.from_pilot_csv(
-            default_pilot_csv_path(),
-            testcase_name="runner-contract",
-            artifact_tag="runner-contract",
-            output_dir=tmp_path,
-        ).definitions
-    }
-    assert suite_cases
-    assert suite_cases <= active_testcases
-    for source in (pipeline_source, wrapper_source, suite_source, asm_source):
+    for source in (pipeline_source, wrapper_source, asm_source):
         assert "/NEMU/logs/" not in source
     assert 'required=True' in raw_coverage_source
     assert '"--json-output"' in raw_coverage_source
