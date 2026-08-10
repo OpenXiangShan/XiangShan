@@ -415,16 +415,24 @@ class StoreUnitS1(param: ExeUnitParams)(
   val updateLFSTValid = fire && tlbHit && isScalar && !isUnalignTail && legalIssue
 
   /**
-    * Generate replay feedback for the RS.
-    * A miss here means the request must be replayed after translation ready.
+    * Generate replay feedback for scalar stores.
+    *
+    * A regular store reports its own TLB result. For a split unaligned store, the head does not
+    * report feedback; the tail combines the TLB results of both parts into one feedback.
+    *
+    * For a cross-page unaligned store, successful feedback also requires the UnalignQueue to accept
+    * the second physical address.
+    *
     * A illegalIssue means the request is out of range and must be replayed by RS.
     */
   val canFeedBack = isScalar && !isUnalignHead // unalign head should not feed back.
   val illegalScalarIssue = isScalar && illegalIssue
   val feedBackValid = fire && canFeedBack || illegalScalarIssue // if is illegalIssue, always feedback miss
-  val unalignTailHit = tlbHit && io.unalignHeadTlbHit && (!cross4KPage || io.toUnalignQueue.ready)
+  val unalignBothTlbHit = tlbHit && io.unalignHeadTlbHit
+  val unalignTailHit = unalignBothTlbHit && (!cross4KPage || io.toUnalignQueue.ready)
   val feedBackHit = Mux(isUnalignTail, unalignTailHit, tlbHit) && legalIssue
   val needRSReplay = feedBackValid && !feedBackHit
+  val toUnalignQueueValid = fire && isUnalignTail && cross4KPage && unalignBothTlbHit
 
   /**
     * Information sent to the StoreQueue:
@@ -527,7 +535,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   io.toSqAddr.valid := toSqAddrValid
   io.toSqAddr.bits := toSqAddr
 
-  io.toUnalignQueue.valid := fire && isUnalignTail && cross4KPage
+  io.toUnalignQueue.valid := toUnalignQueueValid
   io.toUnalignQueue.bits.sqIdx := uop.sqIdx
   io.toUnalignQueue.bits.paddr := paddr
   io.toUnalignQueue.bits.robIdx := robIdx
