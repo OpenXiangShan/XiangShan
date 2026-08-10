@@ -13,6 +13,7 @@ from env.funcov.py.icache import (
     sample_icache_hitmiss_coverage,
 )
 from env.funcov.py.icache.icache_mainpipe_funcov import (
+    _DATA_BANKS,
     _MAIN,
     _SIGNALS,
 )
@@ -99,6 +100,145 @@ def test_icache_waylookup_sampler_contract_has_one_key_per_leaf():
 def test_icache_hitmiss_sampler_contract_has_one_key_per_leaf():
     assert len(ICACHE_HITMISS_SAMPLER_BIN_KEYS) == 10
     assert len(set(ICACHE_HITMISS_SAMPLER_BIN_KEYS)) == 10
+
+
+def _set_mainpipe_single_bank_range(recorder, *, offset: int, mask: list[int]) -> None:
+    recorder.set_key("s1_valid", 1)
+    recorder.set_key("cross0", 0)
+    recorder.env.dut.set(_MAIN + "s1_req_0_vAddr_0_addr", int(offset))
+    recorder.env.dut.set(_MAIN + "s1_sramRespValid", int(mask[-1]))
+    for bank, value in enumerate(mask[:-1]):
+        recorder.env.dut.set(_MAIN + f"s1_bankSramValid_0_{bank}", int(value))
+
+
+def test_mainpipe_single_line_bank_range_requires_expected_bank_mask():
+    recorder = _Recorder()
+    _set_mainpipe_single_bank_range(
+        recorder,
+        offset=0x08,
+        mask=[0, 0, 1, 1, 1, 1, 1, 1],
+    )
+
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 10)
+
+    assert _hit(recorder, "icache_mainpipe_s1_sram", "single_line_bank_range")
+
+    recorder = _Recorder()
+    _set_mainpipe_single_bank_range(
+        recorder,
+        offset=0x08,
+        mask=[0, 1, 1, 1, 1, 1, 1, 1],
+    )
+
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 11)
+
+    assert not _hit(recorder, "icache_mainpipe_s1_sram", "single_line_bank_range")
+
+
+def _set_mainpipe_should_fetch(recorder, values):
+    for index, value in enumerate(values):
+        recorder.env.dut.set(_MAIN + f"s1_shouldFetch_{index}", int(value))
+
+
+def _set_mainpipe_single_sram_hit(recorder, *, fetch_finish=1, miss_req=0, should=(0, 0, 0, 0)):
+    recorder.set_key("s1_valid", 1)
+    recorder.set_key("cross0", 0)
+    recorder.set_key("fetch_finish", fetch_finish)
+    recorder.set_key("miss_req_valid", miss_req)
+    recorder.set_key("pmp_instr", 0)
+    _set_mainpipe_should_fetch(recorder, should)
+    recorder.env.dut.set(_MAIN + "s1_sramRespValid", 1)
+    recorder.env.dut.set(_MAIN + "s1_wayLookupEntry_0_waymask_0", 1)
+    recorder.env.dut.set(_MAIN + "s1_hits_0_0", 1)
+
+
+def test_mainpipe_single_sram_hit_requires_completion_without_miss():
+    recorder = _Recorder()
+    _set_mainpipe_single_sram_hit(recorder)
+
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 12)
+
+    assert _hit(recorder, "icache_mainpipe_s1_sram", "single_line_sram_hit")
+
+    recorder = _Recorder()
+    _set_mainpipe_single_sram_hit(recorder, fetch_finish=0)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 13)
+    assert not _hit(recorder, "icache_mainpipe_s1_sram", "single_line_sram_hit")
+
+    recorder = _Recorder()
+    _set_mainpipe_single_sram_hit(recorder, miss_req=1)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 14)
+    assert not _hit(recorder, "icache_mainpipe_s1_sram", "single_line_sram_hit")
+
+    recorder = _Recorder()
+    _set_mainpipe_single_sram_hit(recorder, should=(0, 1, 0, 0))
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 15)
+    assert not _hit(recorder, "icache_mainpipe_s1_sram", "single_line_sram_hit")
+
+
+def _set_mainpipe_crossline_sram_hit(recorder, *, bank_mask=(1, 1, 1, 1, 1, 1, 1, 1)):
+    _set_mainpipe_single_sram_hit(recorder)
+    recorder.set_key("cross0", 1)
+    recorder.env.dut.set(_MAIN + "s1_sramValid_0_1", 1)
+    recorder.env.dut.set(_MAIN + "s1_wayLookupEntry_0_waymask_1", 1)
+    recorder.env.dut.set(_MAIN + "s1_hits_0_1", 1)
+    recorder.env.dut.set(_MAIN + "s1_req_0_vAddr_0_addr", 0x18)
+    for bank, value in enumerate(bank_mask[:-1]):
+        recorder.env.dut.set(_MAIN + f"s1_bankSramValid_0_{bank}", int(value))
+    recorder.env.dut.set(_MAIN + "s1_sramRespValid", int(bank_mask[-1]))
+
+
+def test_mainpipe_crossline_sram_hit_and_bank_mapping_require_checkpoint_signals():
+    recorder = _Recorder()
+    _set_mainpipe_crossline_sram_hit(recorder)
+
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 16)
+
+    assert _hit(recorder, "icache_mainpipe_s1_sram", "cross_line_dual_sram_hit")
+    assert _hit(recorder, "icache_mainpipe_s1_sram", "cross_line_bank_mapping")
+
+    recorder = _Recorder()
+    _set_mainpipe_crossline_sram_hit(recorder)
+    recorder.env.dut.set(_MAIN + "s1_hits_0_1", 0)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 17)
+    assert not _hit(recorder, "icache_mainpipe_s1_sram", "cross_line_dual_sram_hit")
+
+    recorder = _Recorder()
+    _set_mainpipe_crossline_sram_hit(recorder, bank_mask=(1, 1, 0, 1, 1, 1, 1, 1))
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 18)
+    assert not _hit(recorder, "icache_mainpipe_s1_sram", "cross_line_bank_mapping")
+
+
+def _set_mainpipe_dual_request_independent(recorder):
+    recorder.set_key("s1_valid", 1)
+    recorder.set_key("req1_valid", 1)
+    recorder.set_key("cross0", 0)
+    recorder.set_key("cross1", 1)
+    recorder.set_key("fetch_finish", 1)
+    _set_mainpipe_should_fetch(recorder, (0, 0, 0, 0))
+    for req in range(2):
+        for line in range(2):
+            recorder.env.dut.set(_MAIN + f"s1_wayLookupEntry_{req}_waymask_{line}", req + line + 1)
+            recorder.env.dut.set(_MAIN + f"s1_hits_{req}_{line}", 0)
+    recorder.env.dut.set(_MAIN + "s1_hits_0_0", 1)
+    recorder.env.dut.set(_MAIN + "s1_hits_1_0", 1)
+    recorder.env.dut.set(_MAIN + "s1_hits_1_1", 1)
+
+
+def test_mainpipe_dual_request_independent_rejects_invalid_line_hit():
+    recorder = _Recorder()
+    _set_mainpipe_dual_request_independent(recorder)
+
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 19)
+
+    assert _hit(recorder, "icache_mainpipe_s1_sram", "dual_request_independent")
+
+    recorder = _Recorder()
+    _set_mainpipe_dual_request_independent(recorder)
+    recorder.env.dut.set(_MAIN + "s1_hits_0_1", 1)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 20)
+
+    assert not _hit(recorder, "icache_mainpipe_s1_sram", "dual_request_independent")
 
 
 def _set_single_hit(recorder):
@@ -679,13 +819,40 @@ def test_global_s1_flush_does_not_require_checkpoint_outputs():
     assert _hit(recorder, "icache_mainpipe_s1_flush", "global_flush_clears_s1")
 
 
-def test_ftq_and_waylookup_skew_is_sampled_without_single_side_fire():
+def test_ftq_and_waylookup_skew_requires_atomic_join_and_s1_latch():
     recorder = _Recorder()
-    recorder.set_key("ftq_valid", 1)
-    recorder.set_key("from_valid", 0)
-    recorder.set_key("io_flush", 0)
+    for key, value in {
+        "ftq_valid": 1,
+        "ftq_ready": 0,
+        "from_valid": 0,
+        "from_ready": 0,
+        "data_valid": 0,
+        "data_ready": 1,
+        "s0_flush": 0,
+        "io_flush": 0,
+    }.items():
+        recorder.set_key(key, value)
 
     sample_icache_mainpipe_coverage(recorder, recorder.env, 15)
+
+    assert not _hit(recorder, "icache_mainpipe_s0_entry", "ftq_waylookup_skew")
+
+    for key, value in {
+        "from_valid": 1,
+        "ftq_ready": 1,
+        "from_ready": 1,
+        "data_valid": 1,
+        "data_ready": 1,
+        "s1_valid": 0,
+    }.items():
+        recorder.set_key(key, value)
+
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 16)
+
+    assert not _hit(recorder, "icache_mainpipe_s0_entry", "ftq_waylookup_skew")
+
+    recorder.set_key("s1_valid", 1)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 17)
 
     assert _hit(recorder, "icache_mainpipe_s0_entry", "ftq_waylookup_skew")
 

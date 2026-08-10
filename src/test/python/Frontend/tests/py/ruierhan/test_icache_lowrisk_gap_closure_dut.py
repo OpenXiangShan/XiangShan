@@ -13,6 +13,10 @@ import pytest
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _initialize_cacheable_stream,
 )
+from tests.py.jiabowen.test_two_fetch_directed_flow_dut import (
+    _load_and_reset as _load_two_fetch_loop,
+    _warm_frontend_execution as _warm_two_fetch_execution,
+)
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -36,6 +40,22 @@ def _run_until(env, predicate, *, max_cycles: int, label: str) -> None:
             "stats": env.get_stats(),
             "monitor_errors": env.monitor.get_errors(),
         }
+    )
+
+
+def _wait_funcov_hit(
+    env,
+    group: str,
+    bin_name: str,
+    *,
+    max_cycles: int,
+    label: str | None = None,
+) -> None:
+    _run_until(
+        env,
+        lambda: env.functional_coverage.key_hit(group, bin_name),
+        max_cycles=max_cycles,
+        label=label or f"{group}.{bin_name}",
     )
 
 
@@ -140,6 +160,105 @@ def test_icache_lowrisk_prefetch_soft_requests(lowrisk_cleanup) -> None:
         lambda: int(env.icache_agent.get_stats()["req_count"]) >= 1,
         max_cycles=512,
         label="soft-prefetch or Fetch cache request",
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-674", "BIN-602")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_mainpipe_s0_entry_two_fetch_dut(lowrisk_cleanup) -> None:
+    env = lowrisk_cleanup
+    _load_two_fetch_loop(env)
+    _warm_two_fetch_execution(env)
+
+    _wait_funcov_hit(
+        env,
+        "icache_mainpipe_s0_entry",
+        "dual_request_data_read",
+        max_cycles=4096,
+        label="dual FTQ/WayLookup request plus DataArray read",
+    )
+    _wait_funcov_hit(
+        env,
+        "icache_mainpipe_s0_entry",
+        "ftq_waylookup_skew",
+        max_cycles=4096,
+        label="FTQ/WayLookup skew followed by atomic join and s1 latch",
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-674", "BIN-603")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_mainpipe_s0_entry_data_backpressure_dut(lowrisk_cleanup) -> None:
+    env = lowrisk_cleanup
+    base = 0x8000_0000
+
+    _load_nops(env, base, words=512)
+    _run_until(
+        env,
+        lambda: int(env.backend_model.get_stats().get("commit_count", 0)) >= 4,
+        max_cycles=3000,
+        label="warmup commits before backend pressure",
+    )
+    env.backend_model.set_can_accept(0)
+    env.step(16)
+    env.backend_model.set_can_accept(1)
+    _wait_funcov_hit(
+        env,
+        "icache_mainpipe_s0_entry",
+        "data_array_backpressure",
+        max_cycles=4096,
+        label="WayLookup held while DataArray request is not ready",
+    )
+    _wait_funcov_hit(
+        env,
+        "icache_mainpipe_s0_entry",
+        "ftq_waylookup_skew",
+        max_cycles=4096,
+        label="FTQ/WayLookup skew followed by atomic join and s1 latch",
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-610")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_mainpipe_single_bank_range_dut(env) -> None:
+    base = 0x8008_0000
+    target = base + 0x08
+
+    _load_nops(env, base, words=512)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=16,
+        miss_rate=1.0,
+        seed=0x6610,
+    )
+    env.initialize(reset_vector=target, bare_mode=True, reset_cycles=20)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(target)
+
+    _run_until(
+        env,
+        lambda: int(env.icache_agent.get_stats()["resp_line_count"]) >= 1,
+        max_cycles=1024,
+        label="initial target line refill",
+    )
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=16,
+        miss_rate=0.0,
+        seed=0x6611,
+    )
+    env.backend_model.inject_redirect(target, "ctrl_redirect", delay_cycles=0)
+    _run_until(
+        env,
+        lambda: env.functional_coverage.key_hit(
+            "icache_mainpipe_s1_sram",
+            "single_line_bank_range",
+        ),
+        max_cycles=1024,
+        label="single-line nonzero-bank SRAM hit",
     )
     assert not env.monitor.get_errors()
 

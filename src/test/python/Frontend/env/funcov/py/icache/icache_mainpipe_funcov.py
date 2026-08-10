@@ -5,6 +5,7 @@ from typing import Any, Iterable, Optional
 
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
 _ICACHE = "Frontend_top.Frontend.inner_icache."
+_DATA_BANKS = 8
 
 _S1_CROSS = (
     (_MAIN + "s1_req_0_isCrossLine", _MAIN + "accessTrace_crossLine"),
@@ -96,7 +97,6 @@ _SIGNALS = {
     ),
     "data_req1_valid": (_ICACHE + "dataArray.io_read_req_bits_1_valid",),
     "io_flush": (
-        _MAIN + "io_flush",
         _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
     ),
     "s0_flush": (_MAIN + "s0_flush", _MAIN + "__Vtogcov__s0_flush"),
@@ -110,10 +110,7 @@ _SIGNALS = {
     "toifu_valid": (_MAIN + "io_toIfu_req_valid",),
     "toifu_ready": (_MAIN + "io_toIfu_req_ready",),
     "s1_fire": (_MAIN + "s1_fire",),
-    "fetch_finish": (
-        _MAIN + "__Vtogcov__s1_fetchFinish",
-        _MAIN + "io_toIfu_req_valid",
-    ),
+    "fetch_finish": (_MAIN + "io_toIfu_req_valid",),
     "miss_req_valid": (_MAIN + "__Vtogcov__io_missReq_valid",),
     "miss_req_ready": (_MAIN + "__Vtogcov__io_missReq_ready",),
     "miss_req_vset": (
@@ -239,6 +236,19 @@ def _bits(values: Iterable[Optional[int]]) -> tuple[int, ...]:
     return tuple(int(value or 0) for value in values)
 
 
+def _all_zero(values: Iterable[Optional[int]]) -> bool:
+    values = tuple(values)
+    return _known(values) and all(int(value) == 0 for value in values)
+
+
+def _s1_bank_sram_names(req: int, bank: int) -> tuple[str, ...]:
+    if bank < _DATA_BANKS - 1:
+        return (_MAIN + f"s1_bankSramValid_{req}_{bank}",)
+    if req == 0:
+        return (_MAIN + "s1_sramRespValid",)
+    return (_MAIN + "s1_sramValid_1_0",)
+
+
 def _mark(
     recorder,
     group: str,
@@ -267,6 +277,8 @@ def reset_icache_mainpipe_coverage_state(recorder) -> None:
         "error_refill_pending": False,
         "s2_global_flush_seen": False,
         "s2_bpu_only_seen": False,
+        "ftq_waylookup_skew_pending": False,
+        "ftq_waylookup_join_pending": False,
     }
 
 
@@ -302,9 +314,10 @@ def _snapshot(recorder) -> dict[str, Any]:
             "bank_sram": _read_names(
                 recorder,
                 tuple(
-                    _MAIN + f"s1_bankSramValid_{req}_{bank}"
+                    name
                     for req in range(2)
-                    for bank in range(7)
+                    for bank in range(_DATA_BANKS)
+                    for name in _s1_bank_sram_names(req, bank)
                 ),
             ),
             "mshr": _read_names(
@@ -320,7 +333,7 @@ def _snapshot(recorder) -> dict[str, Any]:
                 tuple(
                     _MAIN + f"s1_bankMshrValid_{req}_{bank}"
                     for req in range(2)
-                    for bank in range(7)
+                    for bank in range(_DATA_BANKS)
                 ),
             ),
             "should": _vec(recorder, "s1_shouldFetch", 4),
@@ -377,7 +390,7 @@ def _snapshot(recorder) -> dict[str, Any]:
                 tuple(
                     _MAIN + f"s2_bankSramValid_{req}_{bank}"
                     for req in range(2)
-                    for bank in range(8)
+                    for bank in range(_DATA_BANKS)
                 ),
             ),
             "s2_sram_hits": _read_names(
@@ -444,15 +457,17 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
     prior_refill_match = bool(prev) and _on(prev["miss_resp_valid"]) and any(
         _bits(prev["mshr"])
     )
-    global_s0_flush = _on(s["io_flush"])
+    global_s0_flush = _on(s["s0_flush"]) and _off(s["bpu_valid"])
     bpu_s0_flush = _on(s["s0_flush"]) and _on(s["bpu_valid"])
-    global_s1_flush = _on(s["io_flush"])
+    global_s1_flush = _on(s["s1_flush"]) and _off(s["bpu_valid"])
     bpu_s1_flush = _on(s["s1_flush"]) and _on(s["bpu_valid"])
+    ftq_fire = _on(s["ftq_valid"]) and _on(s["ftq_ready"])
+    from_fire = _on(s["from_valid"]) and _on(s["from_ready"])
+    data_fire = _on(s["data_valid"]) and _on(s["data_ready"])
 
-    # A bin is sampled when the testpoint's Condition is present.  Signals
-    # listed by the testpoint as Checkpoint remain useful evidence, but must
-    # never be conjoined here: doing that turns a coverage sample into a
-    # (silent) correctness checker and makes a failing checkpoint look unhit.
+    # Most bins sample the testpoint Condition and keep Checkpoint signals as
+    # evidence.  Bins that explicitly describe a temporal handshake, such as
+    # ftq_waylookup_skew, track the required sequence in recorder state.
     s0_accept_condition = (
         _on(s["from_valid"])
         and _on(s["data_ready"])
@@ -460,17 +475,37 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         and _off(s["s0_flush"])
     )
 
+    if global_s0_flush:
+        state["ftq_waylookup_skew_pending"] = False
+        state["ftq_waylookup_join_pending"] = False
     _mark(
         recorder,
         "icache_mainpipe_s0_entry",
         "ftq_waylookup_skew",
         cycle,
+        bool(state["ftq_waylookup_join_pending"]) and _on(s["s1_valid"]),
+        {**evidence, "skew_join_observed_prev_cycle": True},
+    )
+    state["ftq_waylookup_join_pending"] = False
+    skew_condition = (
         _known((s["ftq_valid"], s["from_valid"]))
         and (_on(s["ftq_valid"]) != _on(s["from_valid"]))
         and (_on(s["ftq_valid"]) or _on(s["from_valid"]))
-        and _off(s["io_flush"]),
-        evidence,
+        and _off(s["s0_flush"])
+        and not ftq_fire
+        and not from_fire
     )
+    if skew_condition:
+        state["ftq_waylookup_skew_pending"] = True
+    if (
+        state["ftq_waylookup_skew_pending"]
+        and ftq_fire
+        and from_fire
+        and data_fire
+        and _off(s["s0_flush"])
+    ):
+        state["ftq_waylookup_join_pending"] = True
+        state["ftq_waylookup_skew_pending"] = False
 
     _mark(
         recorder,
@@ -528,7 +563,6 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         cycle,
         _on(s["from_valid"])
         and bpu_s0_flush
-        and _off(s["io_flush"])
         and _on(s["data_ready"])
         and _on(s["s1_ready"]),
         evidence,
@@ -540,7 +574,6 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         cycle,
         _on(s["from_valid"])
         and _on(s["bpu_valid"])
-        and _off(s["io_flush"])
         and _off(s["s0_flush"])
         and _on(s["data_ready"])
         and _on(s["s1_ready"]),
@@ -553,6 +586,18 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         int(_on(s["req1_valid"])),
         int(_on(s["req1_valid"]) and _on(s["cross1"])),
     )
+    line_valid_bits = tuple(line_valid)
+    req0_line_valid = line_valid_bits[:2]
+    req1_line_valid = line_valid_bits[2:]
+    req0_hits = hits[:2]
+    req1_hits = hits[2:]
+    req0_should = should[:2]
+    req1_should = should[2:]
+    single_line_hit_complete = (
+        _on(s["fetch_finish"])
+        and _off(s["miss_req_valid"])
+        and _all_zero(s["should"])
+    )
     _mark(
         recorder,
         "icache_mainpipe_s1_sram",
@@ -564,6 +609,9 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         and _on(s["sram_valid"][0])
         and _known(s["waymask"][:1])
         and int(s["waymask"][0]) != 0
+        and _known(s["hits"][:1])
+        and hits[0] == 1
+        and single_line_hit_complete
         and _off(s["pmp_instr"]),
         evidence,
     )
@@ -577,11 +625,21 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         and _known(s["sram_valid"][:2])
         and _bits(s["sram_valid"][:2]) == (1, 1)
         and _known(s["waymask"][:2])
-        and all(int(value) != 0 for value in s["waymask"][:2]),
+        and all(int(value) != 0 for value in s["waymask"][:2])
+        and _known(s["hits"][:2])
+        and hits[:2] == (1, 1)
+        and single_line_hit_complete,
         evidence,
     )
     start_offset0 = (
         None if s["start_vaddr"][0] is None else int(s["start_vaddr"][0]) & 0x3F
+    )
+    bank_sram0 = s["bank_sram"][:_DATA_BANKS]
+    start_bank0 = None if start_offset0 is None else (start_offset0 & 0x1C) >> 2
+    expected_single_line_banks = (
+        ()
+        if start_bank0 is None
+        else tuple(1 if bank >= start_bank0 else 0 for bank in range(_DATA_BANKS))
     )
     _mark(
         recorder,
@@ -591,7 +649,9 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         _on(s["s1_valid"])
         and _off(s["cross0"])
         and start_offset0 is not None
-        and start_offset0 >= 8,
+        and start_offset0 >= 8
+        and _known(bank_sram0)
+        and _bits(bank_sram0) == expected_single_line_banks,
         evidence,
     )
     _mark(
@@ -604,8 +664,23 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         and start_offset0 is not None
         and 0 < start_offset0 < 64
         and _known(s["sram_valid"][:2])
-        and _bits(s["sram_valid"][:2]) == (1, 1),
+        and _bits(s["sram_valid"][:2]) == (1, 1)
+        and _known(bank_sram0)
+        and _bits(bank_sram0) == tuple(1 for _ in range(_DATA_BANKS)),
         evidence,
+    )
+    req0_has_valid_hit = any(
+        valid and hit for valid, hit in zip(req0_line_valid, req0_hits)
+    )
+    req1_has_valid_hit = any(
+        valid and hit for valid, hit in zip(req1_line_valid, req1_hits)
+    )
+    no_invalid_line_hit = all(
+        valid or not hit for valid, hit in zip(line_valid_bits, hits)
+    )
+    pending_line_blocks_finish = (
+        not any(should)
+        or (_known((s["fetch_finish"],)) and _off(s["fetch_finish"]))
     )
     _mark(
         recorder,
@@ -615,10 +690,18 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         _on(s["s1_valid"])
         and _on(s["req1_valid"])
         and _known(s["waymask"])
+        and _known(s["hits"])
+        and _known(s["should"])
         and (
             s["waymask"][:2] != s["waymask"][2:]
-            or _on(s["cross0"]) != _on(s["cross1"])
-        ),
+            or req0_line_valid != req1_line_valid
+            or req0_hits != req1_hits
+            or req0_should != req1_should
+        )
+        and req0_has_valid_hit
+        and req1_has_valid_hit
+        and no_invalid_line_hit
+        and pending_line_blocks_finish,
         evidence,
     )
 
@@ -667,8 +750,7 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         "bpu_match_clears_s1",
         cycle,
         _on(s["s1_valid"])
-        and bpu_s1_flush
-        and _off(s["io_flush"]),
+        and bpu_s1_flush,
         evidence,
     )
     _mark(
@@ -678,7 +760,6 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         cycle,
         _on(s["s1_valid"])
         and _on(s["bpu_valid"])
-        and _off(s["io_flush"])
         and _off(s["s1_flush"]),
         evidence,
     )
@@ -931,12 +1012,11 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         prior_s1_fire and (meta_error or data_error),
         evidence,
     )
-    if prior_s1_fire and _on(s["io_flush"]):
+    if prior_s1_fire and global_s1_flush:
         state["s2_global_flush_seen"] = True
     if (
         prior_s1_fire
         and _on(s["bpu_valid"])
-        and _off(s["io_flush"])
         and _off(s["s0_flush"])
         and _off(s["s1_flush"])
     ):
@@ -960,12 +1040,11 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         cycle,
         state["error_refill_pending"]
         and _on(s["s1_fire"])
-        and _off(s["io_flush"])
         and _off(s["s1_flush"]),
         evidence,
     )
     if state["error_refill_pending"] and (
-        _on(s["s1_fire"]) or _on(s["io_flush"]) or _on(s["s1_flush"])
+        _on(s["s1_fire"]) or _on(s["s1_flush"])
     ):
         state["error_refill_pending"] = False
     if error_refill:
