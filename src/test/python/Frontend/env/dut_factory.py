@@ -7,6 +7,29 @@ from logging import Logger, getLogger
 logger = getLogger("env.dut_factory")
 
 
+def _install_vcs_vpi_name_adapter(dut) -> None:
+    if os.getenv("TB_FRONTEND_SIM", "").strip().lower() != "vcs":
+        return
+    get_internal = getattr(dut, "GetInternalSignal", None)
+    if not callable(get_internal):
+        return
+
+    def get_vcs_internal_signal(name, *args, **kwargs):
+        relative_name = str(name)
+        if relative_name.startswith("TOP."):
+            relative_name = relative_name[len("TOP.") :]
+        if relative_name.startswith("Frontend_top."):
+            relative_name = relative_name[len("Frontend_top.") :]
+        relative_name = relative_name.replace("__Vtogcov__", "")
+        if "." not in relative_name:
+            pin = getattr(dut, relative_name, None)
+            if pin is not None:
+                return pin
+        return get_internal(relative_name, *args, **kwargs)
+
+    dut.GetInternalSignal = get_vcs_internal_signal
+
+
 class FakeSignal:
     def __init__(self, value: int = 0) -> None:
         self.value = int(value)
@@ -89,6 +112,7 @@ def create_frontend_dut(tc_name: str = "frontend", dut_logger: Logger | None = N
         active_logger.warning("compiled Frontend DUT not found; using fallback fake DUT for tc=%s", tc_name)
         return FakeDUTFrontend()
     dut = DUTFrontend()
+    _install_vcs_vpi_name_adapter(dut)
     setattr(dut, "_is_fake_frontend_dut", False)
     setattr(dut, "_frontend_is_fake_dut", False)
     return dut
