@@ -60,7 +60,6 @@ case class YamlConfig(
   CHIAddrWidth: Option[Int],
   CVMParams: Option[CVMParameters],
   EnableBitmapCheck: Option[Boolean],
-  EnableBitmapCheckDefault: Option[Boolean],
 )
 
 object YamlParser {
