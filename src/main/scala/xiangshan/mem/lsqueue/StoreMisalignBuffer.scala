@@ -224,11 +224,11 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val sameUop = io.sqControl.toStoreMisalignBuffer.uop.robIdx === req.uop.robIdx &&
     io.sqControl.toStoreMisalignBuffer.uop.uopIdx === req.uop.uopIdx
 
-  io.sqControl.toStoreQueue.crossPageWithHit := sameSqPtr && isCrossPage
-  io.sqControl.toStoreQueue.crossPageCanDeq := !isCrossPage || bufferState === s_block
+  io.sqControl.toStoreQueue.crossPageWithHit := sameSqPtr && isCrossPage && req_valid
+  io.sqControl.toStoreQueue.crossPageCanDeq := bufferState === s_block
   io.sqControl.toStoreQueue.paddr := Cat(splitStoreResp(1).paddr(splitStoreResp(1).paddr.getWidth - 1, 3), 0.U(3.W))
 
-  io.sqControl.toStoreQueue.withSamePtr := sameUop && req.isvec && robMatch && isCrossPage
+  io.sqControl.toStoreQueue.withSamePtr := sameUop && req.isvec && robMatch && isCrossPage && bufferState === s_block
 
   //state transition
   switch(bufferState) {
