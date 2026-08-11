@@ -69,7 +69,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
 
     val vls = Bool()
     val interruptSafe = Bool()
-    val fpWen = Bool()
     val rfWen = Bool()
 
     val commitType = CommitType()
@@ -77,17 +76,13 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val slotHeadRvcMask = UInt(2.W)
     val predTaken = Bool()
-    val isVset = Bool()
-    val isRVC = Bool()
     val needVTB = Bool()
-    val isHls = Bool()
 
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
     // Preserve the former slot's exact trace classification so a latter-slot
     // squash can rebuild the surviving physical entry without stale metadata.
     val formerTraceBlockInPipe = new TracePipe(IretireWidthEncoded)
 
-    val mmio = Bool()
     val slotNeedFlushMask = UInt(2.W)
 
     // Entry-level fields continue to describe the former slot. Rob.scala keeps
@@ -135,13 +130,9 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val interruptSafe = Bool()
     val slotHeadRvcMask = UInt(2.W)
     val predTaken = Bool()
-    val isRVC = Bool()
-    val isVset = Bool()
     val needVTB = Bool()
-    val isHls = Bool()
     val isVls = Bool()
     val vls = Bool()
-    val mmio = Bool()
     val commitType = CommitType()
     val entryHasStore = Bool()
     val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
@@ -150,7 +141,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
 
-    val fpWen = Bool()
     val rfWen = Bool()
     val slotNeedFlushMask = UInt(2.W)
     // trace
@@ -183,14 +173,9 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.ftqOffset := robEnq.ftqOffset
     robEntry.slotHeadRvcMask := robEnq.slotHeadRvcMask
     robEntry.predTaken := robEnq.predTaken
-    robEntry.isRVC := robEnq.isRVC
-    robEntry.isVset := robEnq.isVset
     robEntry.needVTB := robEnq.isVset || robEnq.vpu.isVleff
-    robEntry.isHls := robEnq.isHls
     robEntry.vls := robEnq.vlsInstr
-    robEntry.mmio := false.B
     robEntry.rfWen := robEnq.rfWen
-    robEntry.fpWen := robEnq.dirtyFs
     robEntry.interruptSafe := robEnq.interruptSafe
     robEntry.slotNeedFlushMask := robEnq.slotNeedFlushMask
     // trace
@@ -244,17 +229,12 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.realDestSize := robEntry.realDestSize
     robCommitEntry.interruptSafe := robEntry.interruptSafe
     robCommitEntry.rfWen := robEntry.rfWen
-    robCommitEntry.fpWen := robEntry.fpWen
 
-    robCommitEntry.isRVC := robEntry.isRVC
     robCommitEntry.needVTB := robEntry.needVTB
     robCommitEntry.slotHeadRvcMask := robEntry.slotHeadRvcMask
     robCommitEntry.predTaken := robEntry.predTaken
-    robCommitEntry.isVset := robEntry.isVset
-    robCommitEntry.isHls := robEntry.isHls
     robCommitEntry.isVls := robEntry.vls
     robCommitEntry.vls := robEntry.vls // TODO: it is Duplicate
-    robCommitEntry.mmio := robEntry.mmio
     robCommitEntry.ftqIdx := robEntry.ftqIdx
     robCommitEntry.ftqOffset := robEntry.ftqOffset
     robCommitEntry.commitType := robEntry.commitType
