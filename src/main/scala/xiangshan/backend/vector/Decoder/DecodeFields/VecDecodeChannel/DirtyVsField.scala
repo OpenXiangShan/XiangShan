@@ -12,6 +12,8 @@ object DirtyVsField extends BoolDecodeField[VecInstPattern] {
     op match {
       case _: VecLoadInstPattern | _: VecStoreInstPattern | _: VecConfigInstPattern =>
         y
+      case _: ScaMultUopInstPattern =>
+        n
       case p: VecArithInstPattern =>
         (!(GpWenField.usedNames ++ FpWenField.usedNames).contains(p.name)).toBitPat
     }
