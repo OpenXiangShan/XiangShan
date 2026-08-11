@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `f3bdd04b3763147e714a786d078e0cb90460a31d` |
+| 核验 commit | `6a1b2d947e3d9629d5b9b3fb238b31f245251463` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `src/main/scala/xiangshan/cache/dcache`、`src/main/scala/xiangshan/frontend/icache`、`src/main/scala/xiangshan/cache/mmu`、`src/main/scala/xiangshan/L2Top.scala`、`coupledL2/src/main/scala/coupledL2`、`rocket-chip/src/main/scala/tilelink` |
-| 最后核验日期 | `2026-08-03` |
+| 最后核验日期 | `2026-08-10` |
 
 ## Flow 范围
 
@@ -474,6 +474,22 @@ MissEntry 在每个 D fire：
 不是 DCache 放宽 TileLink 合法激励范围。测试框架应在 responder 创建 response 时归一化：
 `GrantData.corrupt = raw_corrupt || raw_denied`；不能依赖 DCache 的该路径来验证 denied-only GrantData。
 
+### 4.3.4 DCache `corrupt` 从 beat 到 cache line 的收敛
+
+`TLBundleD.corrupt` 是 data beat 字段，当前 L1-L2 bus 为 256 bit，所以一条 64B `GrantData`
+有两个 32B beat。DCache MissEntry 在每个 `D.fire` 执行累计 OR；任意一个 beat 的 `corrupt=1`
+都会使该 refill 的 `TLError.tl_corrupt=1`。MainPipe 随 refilled line 的 `idx + way_en` 将这份
+两 bit 的 `TLError {tl_denied, tl_corrupt}` 写入 `L1ErrorMetaArray`。后续 load hit 读到同一
+set/way 的 error meta 后，按整条 64B line 报告该错误。
+
+相反，DCache 向 L2 发送 `ProbeAckData/ReleaseData` 时，WritebackQueue 一次保存 64B data 和一个
+`WritebackReq.corrupt`；它把同一 bit 复制到两个 32B C beat。data array 的 line read 会对 8 个
+64-bit bank 的 ECC error 做 OR，因此外部 C 接口没有 bank/byte 级错误位置。对测试框架/RM，C data
+transaction 的 corrupt key 应是 `address & ~64'h3f`，并只在完整 data transaction 收敛后按 64B
+line 标记为不可比较。无数据 `ProbeAck/Release` 不可被解释为 overlay 的 corrupt data writeback。
+
+该结论的顶层字段和测试框架边界见 [DCache agent](../../../interface/v2/agents/dcache_agent.md)。
+
 ### 4.4 Get 与 DCache 最新数据的关系
 
 ICache/PTW `Get` 本身不是 coherent owner，但读取结果必须是最新数据。若 L2 目录显示
@@ -898,7 +914,10 @@ CoupledL2 permission promotion 必须从 V3 源码单独确认，不能直接复
 - `coupledL2/src/main/scala/coupledL2/tl2chi/MSHR.scala:446-450,759-804`、`SourceB.scala:58-64`：Probe 使用
   directory alias，`B.data={alias, needData}`，完成后保留或更新 directory alias。
 - `src/main/scala/xiangshan/cache/dcache/DCacheWrapper.scala:118-123,943-980,1627-1642`：DCache source range 和 D opcode router。
+- `src/main/scala/xiangshan/cache/L1Cache.scala:42-97`、`src/main/scala/xiangshan/Parameters.scala:874`：DCache block 为 64B、外部 data beat 为 256 bit，故一条 data transaction 为两个 32B beat，`get_block_addr()` 清除低 6 位。
+- `src/main/scala/xiangshan/cache/dcache/DCacheWrapper.scala:355-362,1198-1210`、`src/main/scala/xiangshan/cache/dcache/meta/AsynchronousMetaArray.scala:38-58,197-263`：`TLError` 为 `{tl_denied, tl_corrupt}`，`L1ErrorMetaArray` 按 set/way 保存该 line 的持久 error meta。
 - `src/main/scala/xiangshan/cache/dcache/DCacheWrapper.scala:695-703,1634-1642`、`src/main/scala/xiangshan/cache/dcache/mainpipe/MissQueue.scala:690-691,821,922-923`：DCache 将 GrantData 的 `denied/corrupt` 原样接入并独立累计，refill-to-LDQ error 使用二者 OR；该内部容错传播不改变 TileLink `denied -> corrupt` 格式要求。
+- `src/main/scala/xiangshan/cache/dcache/data/BankedDataArray.scala:584-595`、`src/main/scala/xiangshan/cache/dcache/mainpipe/MainPipe.scala:586-593,997-1004`、`src/main/scala/xiangshan/cache/dcache/mainpipe/WritebackQueue.scala:163-270`：DCache line read 对全部 bank 的 error 做 OR，完整 64B writeback 的一个 `corrupt` bit 被复制到所有 C data beat。
 - `src/main/scala/xiangshan/Parameters.scala:330-339`：当前 DCache MSHR/release 参数。
 - `rocket-chip/src/main/scala/tilelink/Bundles.scala:235-250`、`rocket-chip/src/main/scala/tilelink/Monitor.scala:302-359`：D channel 的 `denied` 对数据类 message 必须蕴含 `corrupt`；`AccessAck/Grant/HintAck/ReleaseAck` 等无数据回复的 `corrupt` 必须为 0，并按 manager `mayDenyGet/mayDenyPut` 约束 denied。
 - `rocket-chip/src/main/scala/tilelink/Metadata.scala:52-114`：DCache `onAccess/onGrant` 权限状态转换。
@@ -930,6 +949,7 @@ CoupledL2 permission promotion 必须从 V3 源码单独确认，不能直接复
 | 日期 | commit | 旧结论 | 新结论 | 修订原因 | 影响范围 |
 |---|---|---|---|---|---|
 | 2026-08-03 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 轻量 Probe plan 曾把 `Probe(toB)` 仅允许 `TtoB/BtoB`、把 `NtoN` 直接称为不合法回复 | 明确 C `param` 是 DCache 实际权限转换回报；`NtoN` 对 V2 TileLink 合法，但对由 active record 主动发起的 Probe 表示软件副本已失配，应报错并收敛，不应随机生成、阻塞 owner 或留给用户选择 | 用户要求以 V2 Scala/TileLink 语义确定 Probe C `param` 和 `NtoN` 的接受边界 | V2 DCache ProbeQueue/MainPipe/WritebackQueue、CoupledL2 B/C、mem_ut 轻量 L2 Probe responder |
+| 2026-08-10 | `6a1b2d947e3d9629d5b9b3fb238b31f245251463` | 仅说明 `GrantData.corrupt` 会累计，未明确 DCache 内部 error meta 与 DCache C writeback 的地址粒度 | 明确 D beat 的 error 会 OR 成整条 64B refill 的 `TLError.tl_corrupt` 并按 set/way 持久保存；DCache C data transaction 同样以完整 64B line 为 corrupt 粒度，两个 32B beat 共享同一 bit | 用户要求从 V2 Scala 源码确认 DCache `corrupt` 的表示范围 | V2 DCache MissQueue、MainPipe、data/error meta array、WritebackQueue，以及 RM 的 writeback-corrupt 地址键 |
 | 2026-08-03 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 容易将 DCache 接收端对 `GrantData.denied/corrupt` 的独立传播误解为可合法驱动 `denied=1, corrupt=0` | 明确 DCache MissQueue 会原样累计两位，且以 `denied || corrupt` 向 refill/load-forward 报错；但 `GrantData(1/0)` 仍违反 TileLink，responder 必须归一化为 `1/1` | 用户追问 Uncache 的非法输入容错是否同样存在于 DCache，复核 DCacheWrapper、MissQueue 与 TileLink Monitor | V2 DCache GrantData 接收、L2/DCache responder、mem_ut DCache error injection |
 | 2026-08-03 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 先前仅依据 Uncache 本地锁存逻辑，错误写成 Uncache 可把 `denied/corrupt` 四种组合都作为协议激励 | 修订为按 D opcode 受 TileLink 格式约束：`AccessAckData` 必须 `denied -> corrupt`，`AccessAck` 必须 `corrupt=0`；Uncache 内部仍以 denied 优先映射 access fault，错误 D response 仍须完成 source 对应 entry | 用户追问 DCache 与 Uncache 的 `denied/corrupt` 限制差异，要求复核协议源码 | V2 Uncache、TileLink D channel、LoadQueueUncache、StoreQueue、mem_ut Uncache responder |
 | 2026-08-03 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 仅描述 CBO 通过 pending_cbo 关联 CBOAck，未明确 DCache CMO 请求入口的并发能力 | V2 `CMOUnit` 通过单请求四状态 FSM 串行处理 CBO；下一笔 CBO 在上一笔 CBOAck 回传 LSQ 前不能 fire，L2 普通 MSHR 并发不改变该结论 | 用户询问 DUT 是否支持多笔 CBO，追踪 CMOUnit、StoreQueue 和 DCache/L2 连接 | DCache CMO A/CBOAck、StoreQueue CBO 状态、mem_ut CBO responder 并发边界 |

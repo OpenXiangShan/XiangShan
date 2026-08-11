@@ -74,15 +74,24 @@ task fence_agent_agent_monitor::mon_data();
             end
         end
         if (this.vif.rst_n !== 1'b1 ||
-            memblock_sync_pkg::reset_backend_done !== 1'b1 ||
-            memblock_sync_pkg::l2tlb_reset_active()) begin
+            memblock_sync_pkg::reset_backend_done !== 1'b1) begin
+            continue;
+        end
+        if (memblock_sync_pkg::l2tlb_reset_active()) begin
             // CSR monitor creates the epoch; this monitor only clears its
             // producer-local state and acknowledges that epoch.
+            reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+            memblock_sync_pkg::reset_l2tlb_fence_runtime_state(reset_epoch);
+
+            // The CSR monitor may close the reset handshake later in this
+            // same clocking-block callback.  Recheck in the NBA region so the
+            // first post-reset sample is either seen by both producers or by
+            // neither; do not leave its producer barrier half closed.
+            uvm_wait_for_nba_region();
+            #0;
             if (memblock_sync_pkg::l2tlb_reset_active()) begin
-                reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
-                memblock_sync_pkg::reset_l2tlb_fence_runtime_state(reset_epoch);
+                continue;
             end
-            continue;
         end
         if(this.vif.rst_n==1'b1 &&
            memblock_sync_pkg::reset_backend_done==1'b1) begin

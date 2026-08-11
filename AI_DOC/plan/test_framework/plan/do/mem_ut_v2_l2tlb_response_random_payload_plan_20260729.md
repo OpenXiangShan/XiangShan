@@ -50,10 +50,11 @@ driver `phase_ended()` 永远不是 release caller，active owner 遇到它们�
 绕过 pending token、driving response、barrier 或 UID `WAITING` 检查。raw fence 与 pending invalidate 属 dispatch adapter 的
 独立职责；response owner 不处理其队列，但 parent 的共享 release gate 必须确认 adapter 已 drain 且 fence monitor 已停止新 raw intake。
 
-release gate 的 UID 检查范围固定为整个 `uid_tlb_record_by_uid`：凡 `record_valid=1` 且
-`uid_tlb_wait_state==WAITING` 的 record 都必须已经收敛，不按 token、lookup key、UID 年龄或 owner 名称再做
+release gate 的 UID 检查范围固定为整个 `uid_tlb_record_by_uid`：在 driver 已确认 admission cutoff 且
+`pending_q`、driving slot、barrier 全空后，owner 必须先将 marker=0 的 unbound UID 显式转为 `CANCELED` 并移出二级 index；随后凡
+`record_valid=1` 且 `uid_tlb_wait_state==WAITING` 的 record 都必须已经收敛，不按 token、lookup key、UID 年龄或 owner 名称再做
 筛选。当前测试框架同一时刻只允许一个 L2TLB lifecycle owner，且不支持把未完成 UID 等待实例交给下一 owner；
-因此任何遗留 `WAITING` 都是本 owner 未完成的生命周期工作，必须阻止 release。该全表扫描只发生在正常 global-stop 的
+因此 cleanup 后任何遗留 `WAITING` 都是本 owner 未完成的生命周期工作，必须阻止 release。该全表扫描只发生在正常 global-stop 的
 低频 release 路径，不进入每拍 ready/response selector。parent 的 global stop 只停止新 routing；唯一 owner 在下一真实
 `drv_cb` 先完成此前已驱动 ready 窗口的 request capture/UID registration，写 admission-settled watermark 后调用
 `close_l2tlb_admission_for_release()` 写当前 epoch close request；从该 flag 写入之后，UID setter 和 request capture 的任何后续调用
@@ -1099,7 +1100,9 @@ UID 等待维护一个有界二级索引 `uid_waiting_by_vpn_s2xlate[shape_key]`
 
 抽象功能描述：`check_l2tlb_release_uid_waiting()` 只在 L2TLB lifecycle 正常 global-stop release 前，
 统计仍未收敛的 UID 等待实例并输出诊断。它不建立 token、不回填 payload、不改变 UID 状态，也不按 owner 名称推断
-归属；当前单-owner 合同要求所有有效 `WAITING` record 都在 release 前清零。
+归属；调用它之前，caller 必须已经确认 admission cutoff 且 `pending_q`、driving slot、barrier 全空，并调用
+`cancel_unbound_uid_tlb_records_at_release()` 清理 marker=0 的 no-request candidate。当前单-owner 合同要求 cleanup 后所有有效
+`WAITING` record 都在 release 前清零。
 
 ```text
 check_l2tlb_release_uid_waiting(output int unsigned waiting_count):
@@ -1113,6 +1116,8 @@ check_l2tlb_release_uid_waiting(output int unsigned waiting_count):
   返回 waiting_count
 
 release caller:
+  等待 admission cutoff 已由真实 transport sample 确认，且 pending_q、driving slot、barrier 全空。
+  调用 cancel_unbound_uid_tlb_records_at_release()：仅 marker=0 的 WAITING 转为 CANCELED 并从 index 删除。
   调用本 helper。
   若 waiting_count != 0：以 UVM_FATAL 拒绝 release；不得把这些 record 标为 CANCELED、不得清表伪装收敛、
                      也不得把它们交给下一 lifecycle owner。
@@ -1162,17 +1167,41 @@ mark_waiting_uid_records_on_request_fire(pending):
   foreach candidate_uid:
       record = uid_tlb_record_by_uid[candidate_uid]
       若 record 为 null、!record.record_valid 或 state != WAITING：继续并清理悬挂索引项。
-      candidate_key = pending.csr_snapshot.make_lookup_key(record.vpn, record.s2xlate)
-      若 candidate_key != pending.request_lookup_key：继续。
+      request_candidate_key = pending.csr_snapshot.make_lookup_key(
+          record.vpn, record.s2xlate)
+      若 request_candidate_key != pending.request_lookup_key：继续。
+      禁止使用 record.csr_snapshot 重新生成 candidate_key；该字段只保留 issue-time
+          历史/debug 信息，不能作为 request-fire marker 的拒绝条件。
       若 record.uid_tlb_first_request_fire_sample_seq == 0：
           record.uid_tlb_first_request_fire_sample_seq = pending.request_fire_sample_seq
   不建立 candidate_uid -> pending.request_token 的绑定；一个 fire 可以标记多个 WAITING record。
 ```
 
-中文文字伪代码：request fire 的可见信息只有 VPN、`s2xlate` 与 C-2 DTLB-side CSR；因此先用二级索引缩小
-候选，再用同一 CSR 生成 request key 做一致性确认。标记只表示该等待实例确实进入过 L2TLB request 生命周期，
+中文文字伪代码：request fire 的有效上下文是本次 pending 保存的 VPN、`s2xlate` 和 C-2 DTLB-side CSR；因此先用
+二级索引缩小候选，再只用该 pending CSR 为候选 UID 重建 request key。UID issue 时冻结的 CSR 只用于历史/debug，
+即使它与 request-fire CSR 不同，也不能因此拒绝 marker。标记只表示该等待实例确实进入过 L2TLB request 生命周期，
 不是说该 token 只属于它。未观察到 request fire 的 WAITING record 保持 marker=0，后续真实 request 到来时再标记；
 这类 record 不会被本次 C4 barrier 按 responder 规则误取消。
+
+### P1 追加约束：UID request-fire marker 的 CSR 来源
+
+抽象功能描述：request-fire marker helper 将一次真实 DTLB request fire 与可能受其影响的 WAITING UID 建立
+request 生命周期 provenance。它消费 request fire 时冻结的 C-2 CSR，不重新解释 UID issue 时的 CSR；它不创建 ROB
+redirect，也不负责 response completion。
+
+```text
+C0：UID U 在 CSR=A 下 issue，建立 WAITING，记录 issue-time CSR=A。
+C1：CSR 上下文切换为 B，请求仍未 fire。
+C2：request 真正 fire，pending 保存的 C-2 CSR=B。
+    用 B 生成 request_lookup_key；按 {vpn,s2xlate} 找候选 UID；
+    即使 U 的 issue-time CSR=A，也允许 U 建立 request-fire marker。
+C4：只按 marker 和 barrier anchor 取消仍未完成的旧等待实例。
+```
+
+当前实现同步要求：`capture_fired_request()` 已负责保存 request-fire C-2 CSR/key；
+`mark_waiting_uid_records_on_request_fire()` 不得再用 `record.csr_snapshot` 做第二次硬匹配。
+若需要验证 CSR 指令提交后年轻 LSU 被 ROB redirect 清除并重发，应另行接入真实 redirect 专项；该专项不属于
+request-fire marker 修正本身。
 
 #### response complete 与 flush/reset cancel
 
@@ -1308,7 +1337,8 @@ UID record 还必须保存 `fault_stage_selected`、`s1_stage_active/s2_stage_ac
 `s1_root_ppn_at_build/s2_root_ppn_at_build`、`csr_context_seq_at_build` 与 `entry_generation`。
 UID record 还必须保存 `uid_tlb_wait_epoch`、`uid_tlb_wait_state`、`uid_wait_start_sample_seq` 与
 `uid_tlb_first_request_fire_sample_seq`。其中后者在该等待实例尚未观察到对应 L2TLB request fire 时为 0，
-一旦观察到首个 fire 就冻结为该 fire 的 DUT global sample；它只用于 C4 取消边界，不是 token 或 UID owner。
+一旦观察到首个 fire 就冻结为该 fire 的 DUT global sample；它用于 C4 取消边界，以及 admission cutoff 后识别 marker=0 的
+unbound UID release-time 收敛，不是 token 或 UID owner。
 其中 `entry_generation` 是实际复制的 response payload provenance，不承担 UID 与 token 一对一关联；
 `uid_tlb_wait_epoch` 在 UID 每次新的 TLB 等待上下文建立时递增，不能复用或回绕。
 
@@ -1578,7 +1608,7 @@ owner 已经通过真实 transport sample 完成 admission cutoff，且 `pending
 issue：建立 UID TLB candidate，marker = 0。
 真实 DTLB->L2TLB fire：把匹配 candidate 标记为 marker != 0，继续按真实 response 回填。
 C4：只取消 marker != 0 且属于旧 barrier 的 WAITING；marker = 0 继续保留。
-release cutoff + token/barrier 全空：
+release cutoff + pending_q、driving slot、barrier 全空：
     marker = 0 -> 显式 CANCELED（证明没有 L2TLB request）；
     marker != 0 且仍 WAITING -> uvm_fatal，打印 uid/key/epoch/fire sample。
 ```

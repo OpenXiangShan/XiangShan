@@ -86,7 +86,7 @@ function void L2tlb_agent_agent_driver::phase_ended(uvm_phase phase);
     // phase callbacks are diagnostic only.  Releasing here would bypass the
     // final inactive sample and grant gate owned by the sequence/parent.
     if (memblock_sync_pkg::l2tlb_lifecycle_owner_claimed) begin
-        `uvm_error(get_type_name(),
+        `uvm_fatal(get_type_name(),
                    $sformatf("phase ended while L2TLB lifecycle owner remains claimed: %s",
                              memblock_sync_pkg::l2tlb_lifecycle_owner_name))
     end
