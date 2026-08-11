@@ -308,6 +308,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val latterSlotMaskVec = compressUnit.io.out.latterSlotMask
   val compressMaskVec = formerSlotMaskVec.zip(latterSlotMaskVec).map { case (former, latter) => former | latter }
   val entryInstrCount = compressMaskVec.map(PopCount(_))
+  val formerInstrCount = formerSlotMaskVec.map(PopCount(_))
+  val latterInstrCount = latterSlotMaskVec.map(PopCount(_))
   val entryPairType = compressUnit.io.out.entryPairType
   val slotIsFormer = formerSlotMaskVec.zipWithIndex.map { case (mask, lane) => mask(lane) }
   val slotNeedFlushMask = compressUnit.io.out.slotNeedFlushMask
@@ -451,15 +453,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).complexSlotHasDest := complexSlotHasDest(i)
     uops(i).entryHasStore := entryHasStore(i)
     uops(i).noCompressReason := noCompressReason(i)
-    uops(i).formerInstrCnt := PopCount(formerSlotMaskVec(i))
-    uops(i).latterInstrCnt := PopCount(latterSlotMaskVec(i))
-    val formerLenSum = formerSlotMaskVec(i).asBools
-      .zip(io.in.map(_.bits.isRVC))
-      .map { case (mask, isRVC) =>
-        Mux(mask, Mux(isRVC, 2.U(formerLenWidth.W), 4.U(formerLenWidth.W)), 0.U(formerLenWidth.W))
-      }
-      .reduce(_ +& _)
-    uops(i).formerLen := formerLenSum(formerLenWidth - 1, 0)
     // alloc a new phy reg
     needVlDest(i) := io.in(i).valid && needDestReg(Reg_Vl, io.in(i).bits)
     needVecDest(i) := io.in(i).valid && needDestReg(Reg_V, io.in(i).bits)
@@ -602,6 +595,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val isRVCVec = inVec.map(_.isRVC)
   val nonRVCNumVec = (0 until RenameWidth).map{
     i => compressMaskVec(i).asBools.zip(isRVCVec).map{
+      case (mask, isRVC) => (mask && !isRVC).asUInt
+    }
+  }
+  val formerNonRVCNumVec = (0 until RenameWidth).map{
+    i => formerSlotMaskVec(i).asBools.zip(isRVCVec).map{
       case (mask, isRVC) => (mask && !isRVC).asUInt
     }
   }

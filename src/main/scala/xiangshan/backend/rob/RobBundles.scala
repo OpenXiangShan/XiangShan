@@ -58,14 +58,10 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val entryPairType = CompressType()
     val noCompressReason = UInt(2.W) // used for Perf
 
-    val formerUopNum = UInt(log2Up(MaxUopSize + 1).W)
-    val latterUopNum = UInt(log2Up(MaxUopSize + 1).W)
+    val uopState = UInt(PackedUopStateWidth.W)
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val complexSlotHasDest = UInt(1.W)
     val entryHasStore = Bool()
-    val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
 
     val vls = Bool()
     val interruptSafe = Bool()
@@ -130,8 +126,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val commit_w = Bool()
     val entryPairType = CompressType()
     val noCompressReason = UInt(2.W)
-    val formerUopNum = UInt(log2Up(MaxUopSize + 1).W)
-    val latterUopNum = UInt(log2Up(MaxUopSize + 1).W)
+    val uopState = UInt(PackedUopStateWidth.W)
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val interrupt_safe = Bool()
     val fflagsWen = Bool()
@@ -144,9 +139,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val vls = Bool()
     val commitType = CommitType()
     val entryHasStore = Bool()
-    val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
 
@@ -154,6 +146,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val slotNeedFlushMask = UInt(2.W)
     // trace
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
+    val formerTraceIretire = UInt(IretireWidthEncoded.W)
     // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
@@ -162,6 +155,9 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth + 1).W))
     // debug_end
+
+    def formerUopNum: UInt = decodeFormerUopNum(entryPairType, uopState)
+    def latterUopNum: UInt = decodeLatterUopNum(entryPairType, uopState)
   }
 
   def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop): Unit = {
@@ -218,14 +214,13 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.topdownCancelTimeFixVec.foreach(_.foreach(_ := 0.U))
   }
 
-  def connectCommitEntry(robCommitEntry: RobCommitEntryBundle, robEntry: RobEntryBundle): Unit = {
+  def connectCommitEntry(robCommitEntry: RobCommitEntryBundle, robEntry: RobEntryBundle)(implicit p: Parameters): Unit = {
     robCommitEntry.walk_v := robEntry.valid
     robCommitEntry.commit_v := robEntry.valid
-    robCommitEntry.commit_w := robEntry.formerUopNum === 0.U && robEntry.latterUopNum === 0.U
+    robCommitEntry.commit_w := robEntry.isWritebacked
     robCommitEntry.entryPairType := robEntry.entryPairType
     robCommitEntry.noCompressReason := robEntry.noCompressReason
-    robCommitEntry.formerUopNum := robEntry.formerUopNum
-    robCommitEntry.latterUopNum := robEntry.latterUopNum
+    robCommitEntry.uopState := robEntry.uopState
     robCommitEntry.realDestSize := robEntry.realDestSize
     robCommitEntry.interruptSafe := robEntry.interruptSafe
     robCommitEntry.rfWen := robEntry.rfWen
@@ -246,6 +241,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.dirtyVs := robEntry.dirtyVs
     robCommitEntry.needFlush := robEntry.needFlush
     robCommitEntry.traceBlockInPipe := robEntry.traceBlockInPipe
+    robCommitEntry.formerTraceIretire := robEntry.formerTraceBlockInPipe.iretire
     robCommitEntry.debug_pc.foreach(_ := robEntry.debug_pc.get)
     robCommitEntry.debug_instr.foreach(_ := robEntry.debug_instr.get)
     robCommitEntry.basicDebug.foreach(_ := robEntry.basicDebug.get)
