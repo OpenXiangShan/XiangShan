@@ -64,6 +64,7 @@ case class ExeUnitParams(
   val readVfRf: Boolean = numVfSrc > 0
   val readV0Rf: Boolean = fuConfigs.exists(_.readV0)
   val readVlRf: Boolean = fuConfigs.exists(_.readVl)
+  val readVstart: Boolean = hasLoadFu
   val writeIntRf: Boolean = fuConfigs.map(_.writeIntRf).reduce(_ || _)
   val writeFpRf: Boolean = fuConfigs.map(_.writeFpRf).reduce(_ || _)
   val writeVecRf: Boolean = fuConfigs.map(_.writeVecRf).reduce(_ || _)

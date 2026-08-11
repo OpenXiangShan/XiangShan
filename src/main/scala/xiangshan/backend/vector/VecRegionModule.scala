@@ -406,7 +406,33 @@ class VecRegionImp(
       wakeup.delay := BypassDelay.delay0
   }
 
-  out.toVecExcpMod := 0.U.asTypeOf(out.toVecExcpMod)
+  val (fromVecExcp, toVecExcp) = (in.fromVecExcpMod, out.toVecExcpMod)
+  val vecExcpUseVpRdPorts = fromVecExcp.r.indices
+  val vecExcpUseVpWrPorts = fromVecExcp.w.indices
+  require(fromVecExcp.r.size <= numVpReadPort)
+  require(fromVecExcp.w.size <= numVpWritePort)
+
+  fromVecExcp.r.zip(toVecExcp.rdata).zip(vecExcpUseVpRdPorts).foreach {
+    case ((req, resp), readPort) =>
+      val readVp = req.valid && !req.bits.isV0
+      when(readVp) {
+        vpRaddr(readPort) := req.bits.addr
+      }
+      resp.valid := RegNext(req.valid)
+      resp.bits := Mux(
+        RegEnable(!req.bits.isV0, req.valid),
+        vpRdata(readPort),
+        0.U,
+      )
+  }
+
+  fromVecExcp.w.zip(vecExcpUseVpWrPorts).foreach { case (req, writePort) =>
+    when(req.valid && !req.bits.isV0) {
+      vpWen(writePort) := true.B
+      vpWaddr(writePort) := req.bits.newVdAddr
+      vpWdata(writePort) := req.bits.newVdData
+    }
+  }
 
   out.diff.foreach(_.diffVl := vlDiffReadData.get.head)
   vlDiffReadAddr.foreach(_ := in.diff.get.diffVlRat)

@@ -571,6 +571,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   io.mem.redirect := ctrlBlock.io.redirect
   io.mem.intIssue.flatten.zip(intRegion.io.toMemExu.get.flatten).foreach { case (sink, source) =>
     connectExuInput(sink, source)
+    sink.bits.vstart.foreach(_ := csrio.vpu.vstart)
     val enableMdp = Constantin.createRecord("EnableMdp", true)
     sink.bits.pc.foreach(_ := source.bits.data.pc.get + (source.bits.ctrl.ftqOffset.get << instOffsetBits))
     sink.bits.loadWaitBit.foreach(_ := Mux(enableMdp, source.bits.loadWaitBit.get, false.B))

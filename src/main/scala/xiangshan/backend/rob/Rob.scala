@@ -613,7 +613,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqHasException = deqNeedFlushAndHitExceptionGenState && exceptionGenStateIsException && RegNext(RegNext(deqPtrEntry.commit_w))
   val deqHasFlushPipe = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.flushPipe && !deqHasException && RegNext(RegNext(deqPtrEntry.commit_w))
   val deqHasReplayInst = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.replayInst
-  val deqIsVlsException = deqHasException && deqPtrEntry.isVls && !exceptionDataRead.bits.isEnqExcp
+  val deqVecLoadExceptionNeedsMerge = deqHasException &&
+    exceptionDataRead.bits.vstartEn &&
+    exceptionDataRead.bits.isVecLoad &&
+    exceptionDataRead.bits.vstart =/= 0.U &&
+    !exceptionDataRead.bits.isEnqExcp
+  val deqIsVlsException = deqHasException &&
+    (deqPtrEntry.isVls || deqVecLoadExceptionNeedsMerge) &&
+    !exceptionDataRead.bits.isEnqExcp
   // delay 2 cycle wait exceptionGen out
   // vls exception can be committed only when RAB commit all its reg pairs
   deqVlsCanCommit := RegNext(RegNext(deqIsVlsException && deqPtrEntry.commit_w)) && rab.io.status.commitEnd
@@ -710,7 +717,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.crossPageIPFFix := RegEnable(exceptionDataRead.bits.crossPageIPFFix, exceptionHappen)
   io.exception.bits.isInterrupt := RegEnable(intrEnable, exceptionHappen)
   io.exception.bits.isHls := RegEnable(deqPtrEntry.isHls, exceptionHappen)
-  io.exception.bits.vls := RegEnable(deqPtrEntry.vls, exceptionHappen)
+  io.exception.bits.vls := RegEnable(deqPtrEntry.vls || deqVecLoadExceptionNeedsMerge, exceptionHappen)
   io.exception.bits.trigger := RegEnable(exceptionDataRead.bits.trigger, exceptionHappen)
 
   // data will be one cycle after valid
@@ -768,7 +775,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val resetVstart = dirty_vs && !io.vstartIsZero
 
-  vecExcpInfo.valid := exceptionHappen && !intrEnable && exceptionDataRead.bits.vstartEn && exceptionDataRead.bits.isVecLoad && !exceptionDataRead.bits.isEnqExcp
+  vecExcpInfo.valid := exceptionHappen && !intrEnable && deqVecLoadExceptionNeedsMerge
   when (exceptionHappen) {
     vecExcpInfo.bits.nf := exceptionDataRead.bits.nf
     vecExcpInfo.bits.vsew := exceptionDataRead.bits.vsew
@@ -1260,20 +1267,20 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.crossPageIPFFix := false.B
     val trigger = wb.bits.trigger.getOrElse(TriggerAction.None).asTypeOf(exc_wb.bits.trigger)
     exc_wb.bits.trigger := trigger
-    exc_wb.bits.vstartEn := false.B // Todo[Vector]: support vector ls exception
-    exc_wb.bits.vstart := 0.U // Todo[Vector]: support vector ls exception
-    exc_wb.bits.vuopIdx :=  0.U // Todo[Vector]: support vector ls exception
-    exc_wb.bits.isVecLoad := false.B // Todo[Vector]: support vector ls exception
-    exc_wb.bits.isVlm := false.B // Todo[Vector]: support vector ls exception
-    exc_wb.bits.isStrided := false.B // Todo[Vector]: remove it
-    exc_wb.bits.isIndexed := false.B // Todo[Vector]: remove it
-    exc_wb.bits.isWhole := false.B // Todo[Vector]: remove it
-    exc_wb.bits.nf := 0.U // Todo[Vector]: support vector ls exception
-    exc_wb.bits.vsew := 0.U // Todo[Vector]: support vector ls exception
-    exc_wb.bits.veew := 0.U // Todo[Vector]: support vector ls exception
-    exc_wb.bits.vlmul := 0.U // Todo[Vector]: support vector ls exception
+    val vLoadMeta = wb.bits.vLoadMeta
+    exc_wb.bits.vstartEn := (if (vLoadMeta.nonEmpty) wb.bits.exceptionVec.orR || TriggerAction.isDmode(trigger) else 0.U)
+    exc_wb.bits.vstart := vLoadMeta.map(_.vstart).getOrElse(0.U)
+    exc_wb.bits.vuopIdx := vLoadMeta.map(_.vuopIdx).getOrElse(0.U)
+    exc_wb.bits.isVecLoad := vLoadMeta.map(_.isVecLoad).getOrElse(false.B)
+    exc_wb.bits.isVlm := vLoadMeta.map(_.isVlm).getOrElse(false.B)
+    exc_wb.bits.isStrided := vLoadMeta.map(_.isStrided).getOrElse(false.B) // strided need two mode tmp vreg
+    exc_wb.bits.isIndexed := vLoadMeta.map(_.isIndexed).getOrElse(false.B) // indexed and nf=0 need non-sequential uopidx -> vdidx
+    exc_wb.bits.isWhole := vLoadMeta.map(_.isWhole).getOrElse(false.B) // indexed and nf=0 need non-sequential uopidx -> vdidx
+    exc_wb.bits.nf := vLoadMeta.map(_.nf).getOrElse(0.U)
+    exc_wb.bits.vsew := vLoadMeta.map(_.vsew).getOrElse(0.U)
+    exc_wb.bits.veew := vLoadMeta.map(_.veew).getOrElse(0.U)
+    exc_wb.bits.vlmul := vLoadMeta.map(_.vlmul).getOrElse(0.U)
   }
-
   fflagsDataRead := (0 until CommitWidth).map(i => robEntries(deqPtrVec(i).value).fflags)
   vxsatDataRead := (0 until CommitWidth).map(i => robEntries(deqPtrVec(i).value).vxsat)
 
