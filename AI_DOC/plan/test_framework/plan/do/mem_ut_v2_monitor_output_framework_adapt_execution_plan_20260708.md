@@ -468,3 +468,19 @@ field automation 和 monitor sample local 中删除失效字段。
 当前 scalar-only unsupported gate 不读取这两个已删除字段；它继续仅以两个 `writebackVldu_*_valid`
 判断是否 fatal。因此该兼容不会生成 vector event、不会改变 raw/status/pass/fail/terminal，也不会改变
 现有 `vdIdxInField` 的采样、显示或未来 transaction 承载能力。
+
+## 20260811 V2 control observation 与 TopDown 接口兼容
+
+[IMPLEMENTATION_DELTA]
+
+最新 `MemBlock` 将 `io_fromTopToBackend_msiInfo_bits` 和
+`io_mem_to_ooo_topToBackendBypass_msiInfo_bits` 同步收窄为 12 位。前者在当前
+`dut_inst.sv` 仅为 valid=0、bits=0 的顶层 tie-off；后者由既有
+`io_mem_to_ooo_ctrl_agent` monitor 观察。因此本次将顶层 input/output wire、agent interface、
+xaction、monitor local 与 X/Z 检查宽度统一为 `[11:0]`，不改变 valid 时序、deferred analysis 或
+任何 DUT input stimulus。
+
+TopDown 同轮删除 `lqEmpty`、`sqEmpty` 和 input `noUopsIssued`，新增 output
+`replayAllocate`、`sqFull` 和 `sbFull`。这些端口当前没有 UVM agent、sequence、RM 或 scoreboard
+consumer；本次只在 `dut_inst.sv` 保留 output wire/实例连接以完成 RTL 闭合，不新增无消费者的 agent，
+也不把状态/性能提示误写入 scalar dispatch 语义路径。

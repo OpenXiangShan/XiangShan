@@ -494,3 +494,103 @@ force 与 xaction field automation 的同步删除；这些细节不新增任何
 `vdIdx(?!InField)` 残留；`vdIdxInField` 在 dut instance、connect、interface、xaction 和 monitor 中
 仍完整；`git diff --check -- mem_ut/ver/ut/memblock` 通过。未运行远端 VCS，因为仍有 TopDown 与
 `msiInfo` 顶层差异待处理，统一闭合后再执行编译/仿真。
+
+## 8. 功能单元四：V2 TopDown 端口与 MSI 12 位 payload 适配
+
+### 8.1 RTL 差异与职责分类
+
+当前生成后的 `MemBlock.sv` 删除了 `io_topDownInfo_toBackend_lqEmpty`、
+`io_topDownInfo_toBackend_sqEmpty` 和 input `io_topDownInfo_toBackend_noUopsIssued`；新增的
+`io_topDownInfo_toBackend_replayAllocate`、`io_topDownInfo_toBackend_sqFull`、
+`io_topDownInfo_toBackend_sbFull` 都是 1-bit DUT output。现有 mem_ut 中这六个名称只出现于
+`dut_inst.sv`，没有 agent、sequence、RM、scoreboard 或状态机消费者。
+
+同时，DUT top-level input `io_fromTopToBackend_msiInfo_bits` 和 output
+`io_mem_to_ooo_topToBackendBypass_msiInfo_bits` 都从 13 位变为 12 位。前者没有 agent owner，当前
+顶层初始块固定 `valid=0`、`bits=0`；后者由 `io_mem_to_ooo_ctrl_agent` 的 output observation/XZ
+路径采样，analysis producer 仍为 deferred。
+
+| 变化 | DUT 方向 | 测试框架处理 | 对运行期逻辑的影响 |
+|---|---|---|---|
+| `lqEmpty`、`sqEmpty` 删除 | output | 删除过时 wire/实例连接。 | 无消费者，不影响 sequence 或状态。 |
+| `noUopsIssued` 删除 | input | 删除 reg、初始 0 tie-off 和实例连接。 | 不再向不存在的 DUT input 驱动默认值。 |
+| `replayAllocate`、`sqFull`、`sbFull` 新增 | output | 新增 output wire/实例连接。 | 只保证 elaboration 闭合；不建立无消费者 agent。 |
+| top-level/top-to-backend `msiInfo_bits` | input/output | input tie-off 与 control-agent 观察链统一为 12 位。 | 保持 valid=0 和 deferred monitor 行为；X/Z 检查缩为 12 位。 |
+
+不新增 TopDown agent 的原因是三条新增端口都没有现有 UVM consumer，也不会反向影响 MemBlock。
+创建 agent 会额外引入 transaction、analysis FIFO、RM 端口或无意义观察 loop，却不能为当前 scalar
+dispatch、redirect、LSQ 或结束条件增加可验证行为；本轮明确保留为 top-level observation wire，并在
+后续真正需要 performance/topdown checker 时再建立专项 owner。
+
+### 8.2 MSI 位宽的 interface、transaction 与 monitor 同步
+
+源码位置：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_ctrl_agent_agent/src/io_mem_to_ooo_ctrl_agent_agent_xaction.sv`，字段：
+`io_mem_to_ooo_topToBackendBypass_msiInfo_bits`。
+
+抽象功能描述：该字段承载 DUT 输出到 backend 的 MSI payload，供 control monitor 的观测 transaction
+表示使用；它不驱动 DUT，当前也不触发 analysis-port 生产或公共状态更新。
+
+```systemverilog
+// 中文注释：V2 MemBlock 输出到 backend 的 MSI payload，最新 RTL 固定为 12 位。
+// 该字段仅由 control monitor 采样；当前 deferred analysis 不把它驱动回 DUT。
+rand bit [11:0] io_mem_to_ooo_topToBackendBypass_msiInfo_bits;
+```
+
+中文伪代码：transaction 将 payload 宽度固定为 12 位，使 field automation、显示和比较不会再保留
+不存在的 bit 12。字段只接受 monitor 从 DUT output 采集的值；它不会成为 driver 输入，也不会改变
+当前 deferred analysis 的 producer 状态，因此本次位宽收窄不引入新的刺激或状态写者。
+
+源码位置：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_ctrl_agent_agent/src/io_mem_to_ooo_ctrl_agent_agent_monitor.sv`，任务：
+`io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data()` 的 MSI 采样/XZ 分支。
+
+抽象功能描述：该分支在 reset 后观察 top-to-backend MSI payload，并按实际总线宽度执行 X/Z 检查；
+它不将观察值转换为 semantic raw event。
+
+```systemverilog
+logic [11:0] io_mem_to_ooo_topToBackendBypass_msiInfo_bits;
+
+io_mem_to_ooo_topToBackendBypass_msiInfo_bits =
+    this.vif.mon_mp.mon_cb.io_mem_to_ooo_topToBackendBypass_msiInfo_bits;
+`TCNT_CHECK_SIG_XZ(io_mem_to_ooo_topToBackendBypass_msiInfo_bits,
+                   io_mem_to_ooo_topToBackendBypass_msiInfo_bits, 12);
+```
+
+中文伪代码：monitor 在既有 post-reset callback 读取 12 位 DUT output，再把完全相同的 12 位范围交给
+X/Z 宏检查。检查通过后不入队、不修改 status；检查失败只沿用 monitor 的既有错误报告语义。由于
+`io_fromTopToBackend_msiInfo_valid` 在当前 top-level tie-off 为 0，默认 sanity flow 不会凭空产生
+MSI transaction。
+
+### 8.3 TopDown 实例闭合
+
+源码位置：`mem_ut/ver/ut/memblock/tb/dut_inst.sv`，`MemBlock U_MEMBLOCK` 的 TopDown port map。
+
+抽象功能描述：该 port map 将生成后 Verilog 的纯 output 状态线暴露给 testbench，确保顶层实例与
+DUT 集合一致；它不驱动 output，也不将这些性能/容量提示纳入验证框架状态机。
+
+```systemverilog
+wire io_topDownInfo_toBackend_replayAllocate;
+wire io_topDownInfo_toBackend_sqFull;
+wire io_topDownInfo_toBackend_sbFull;
+
+.io_topDownInfo_toBackend_replayAllocate(io_topDownInfo_toBackend_replayAllocate),
+.io_topDownInfo_toBackend_sqFull(io_topDownInfo_toBackend_sqFull),
+.io_topDownInfo_toBackend_sbFull(io_topDownInfo_toBackend_sbFull),
+```
+
+中文伪代码：testbench 为三个新增 DUT output 各声明一个 wire，并将同名端口连接到该 wire。没有任何
+driver、force 或 initial 赋值写这些 wire；它们仅保留输出观察可能性。旧 `lqEmpty`、`sqEmpty` 连接和
+`noUopsIssued` 的 reg/初始赋值同时删除，因此不会存在旧 input tie-off 或失效 port map。
+
+### 8.4 Plan 对齐与主 agent Review
+
+关联 plan：
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md`。
+该 plan 已新增 `[IMPLEMENTATION_DELTA]`，记录 MSI 12 位观察链与 TopDown 无消费者边界。原 plan
+未逐项枚举这些上游端口差异，属于最新 DUT 驱动的实现补充；处理结论为保持当前精确端口集合，不保留
+13-bit compatibility field 或已删除 TopDown input。
+
+主 agent 最终静态 review 已完成：生成 RTL 与 `dut_inst.sv` 的动态端口集合比较结果为空；旧
+TopDown 名称零残留；所有相关 MSI 声明、transaction、interface、monitor local 和 X/Z width 都是
+12；`git diff --check -- mem_ut/ver/ut/memblock AI_DOC/plan/test_framework` 通过。此单元不增加
+高频扫描、queue、map 或 lifecycle owner。下一步执行远端 VCS compile/run，以验证全部已闭合的
+顶层端口和 SystemVerilog 类型。

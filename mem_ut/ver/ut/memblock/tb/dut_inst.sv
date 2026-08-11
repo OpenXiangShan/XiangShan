@@ -752,7 +752,7 @@ wire io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug;
 wire io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31;
 wire io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43;
 wire io_mem_to_ooo_topToBackendBypass_msiInfo_valid;
-wire [12:0] io_mem_to_ooo_topToBackendBypass_msiInfo_bits;
+wire [11:0] io_mem_to_ooo_topToBackendBypass_msiInfo_bits;
 wire io_mem_to_ooo_topToBackendBypass_clintTime_valid;
 wire [63:0] io_mem_to_ooo_topToBackendBypass_clintTime_bits;
 wire io_mem_to_ooo_topToBackendBypass_l2FlushDone;
@@ -1097,7 +1097,7 @@ wire io_l2_pmp_resp_ld;
 wire io_l2_pmp_resp_mmio;
 reg io_l2_flush_done;
 reg io_fromTopToBackend_msiInfo_valid;
-reg [12:0] io_fromTopToBackend_msiInfo_bits;
+reg [11:0] io_fromTopToBackend_msiInfo_bits;
 reg io_fromTopToBackend_clintTime_valid;
 reg [63:0] io_fromTopToBackend_clintTime_bits;
 wire [47:0] io_inner_reset_vector;
@@ -1305,10 +1305,10 @@ reg io_wfi_wfiReq;
 wire io_wfi_wfiSafe;
 reg io_topDownInfo_fromL2Top_l2Miss;
 reg io_topDownInfo_fromL2Top_l3Miss;
-wire io_topDownInfo_toBackend_lqEmpty;
-wire io_topDownInfo_toBackend_sqEmpty;
+wire io_topDownInfo_toBackend_replayAllocate;
+wire io_topDownInfo_toBackend_sqFull;
+wire io_topDownInfo_toBackend_sbFull;
 wire io_topDownInfo_toBackend_l1Miss;
-reg io_topDownInfo_toBackend_noUopsIssued;
 wire io_topDownInfo_toBackend_l2TopMiss_l2Miss;
 wire io_topDownInfo_toBackend_l2TopMiss_l3Miss;
 reg io_dft_ram_hold;
@@ -2083,7 +2083,6 @@ initial begin
     io_wfi_wfiReq = '0;
     io_topDownInfo_fromL2Top_l2Miss = '0;
     io_topDownInfo_fromL2Top_l3Miss = '0;
-    io_topDownInfo_toBackend_noUopsIssued = '0;
     io_dft_ram_hold = '0;
     io_dft_ram_bypass = '0;
     io_dft_ram_bp_clken = '0;
@@ -3394,10 +3393,10 @@ MemBlock U_MEMBLOCK (
     .io_wfi_wfiSafe ( io_wfi_wfiSafe ),
     .io_topDownInfo_fromL2Top_l2Miss ( io_topDownInfo_fromL2Top_l2Miss ),
     .io_topDownInfo_fromL2Top_l3Miss ( io_topDownInfo_fromL2Top_l3Miss ),
-    .io_topDownInfo_toBackend_lqEmpty ( io_topDownInfo_toBackend_lqEmpty ),
-    .io_topDownInfo_toBackend_sqEmpty ( io_topDownInfo_toBackend_sqEmpty ),
+    .io_topDownInfo_toBackend_replayAllocate ( io_topDownInfo_toBackend_replayAllocate ),
+    .io_topDownInfo_toBackend_sqFull ( io_topDownInfo_toBackend_sqFull ),
+    .io_topDownInfo_toBackend_sbFull ( io_topDownInfo_toBackend_sbFull ),
     .io_topDownInfo_toBackend_l1Miss ( io_topDownInfo_toBackend_l1Miss ),
-    .io_topDownInfo_toBackend_noUopsIssued ( io_topDownInfo_toBackend_noUopsIssued ),
     .io_topDownInfo_toBackend_l2TopMiss_l2Miss ( io_topDownInfo_toBackend_l2TopMiss_l2Miss ),
     .io_topDownInfo_toBackend_l2TopMiss_l3Miss ( io_topDownInfo_toBackend_l2TopMiss_l3Miss ),
     .io_dft_ram_hold ( io_dft_ram_hold ),

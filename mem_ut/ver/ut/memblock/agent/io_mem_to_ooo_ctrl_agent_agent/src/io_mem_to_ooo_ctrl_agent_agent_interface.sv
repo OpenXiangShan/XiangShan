@@ -42,7 +42,7 @@ interface io_mem_to_ooo_ctrl_agent_agent_interface  (input bit clk,input bit rst
     logic io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31;
     logic io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43;
     logic io_mem_to_ooo_topToBackendBypass_msiInfo_valid;
-    logic [12:0] io_mem_to_ooo_topToBackendBypass_msiInfo_bits;
+    logic [11:0] io_mem_to_ooo_topToBackendBypass_msiInfo_bits;
     logic io_mem_to_ooo_topToBackendBypass_clintTime_valid;
     logic [63:0] io_mem_to_ooo_topToBackendBypass_clintTime_bits;
     logic io_mem_to_ooo_topToBackendBypass_l2FlushDone;
