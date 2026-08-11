@@ -69,7 +69,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
 
     val vls = Bool()
     val interruptSafe = Bool()
-    val fpWen = Bool()
     val rfWen = Bool()
     val dirtyVs = Bool()
     val commitType = CommitType()
@@ -77,8 +76,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val slotHeadRvcMask = UInt(2.W)
     val predTaken = Bool()
-    val isVset = Bool()
-    val isRVC = Bool()
     val needVTB = Bool()
     val isHls = Bool()
     // data end
@@ -142,13 +139,9 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val vxsat = Bool()
     val RVC = UInt(2.W)
     val predTaken = Bool()
-    val isRVC = Bool()
-    val isVset = Bool()
     val needVTB = Bool()
-    val isHls = Bool()
     val isVls = Bool()
     val vls = Bool()
-    val mmio = Bool()
     val commitType = CommitType()
     val entryHasStore = Bool()
     val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
@@ -157,7 +150,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
 
-    val fpWen = Bool()
     val rfWen = Bool()
     val slotNeedFlushMask = UInt(2.W)
     // trace
@@ -184,9 +176,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.needVTB := robEnq.isVset
     robEntry.isHls := robEnq.isHls
     robEntry.vls := robEnq.vlsInstr
-    robEntry.mmio := false.B
     robEntry.rfWen := robEnq.rfWen
-    robEntry.fpWen := robEnq.dirtyFs
     robEntry.interruptSafe := robEnq.interruptSafe
     robEntry.slotNeedFlushMask := robEnq.slotNeedFlushMask
     // trace
@@ -247,11 +237,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.needVTB := robEntry.needVTB
     robCommitEntry.slotHeadRvcMask := robEntry.slotHeadRvcMask
     robCommitEntry.predTaken := robEntry.predTaken
-    robCommitEntry.isVset := robEntry.isVset
-    robCommitEntry.isHls := robEntry.isHls
     robCommitEntry.isVls := robEntry.vls
     robCommitEntry.vls := robEntry.vls // TODO: it is Duplicate
-    robCommitEntry.mmio := robEntry.mmio
     robCommitEntry.ftqIdx := robEntry.ftqIdx
     robCommitEntry.ftqOffset := robEntry.ftqOffset
     robCommitEntry.commitType := robEntry.commitType
