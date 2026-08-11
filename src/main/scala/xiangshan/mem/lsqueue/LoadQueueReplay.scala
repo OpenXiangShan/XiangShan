@@ -767,6 +767,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       s1_vecReplay.mask,
       genVWmask(replay_req_vaddr, replay_req_size)
     )
+    replay_req(i).bits.vlByteMask.foreach(_ := DontCare)
     replay_req(i).bits.occupySource := DontCare
     replay_req(i).bits.mshrId.get := s1_replayMSHRId
     replay_req(i).bits.replayQueueIdx.get := s1_replayIdx(i)

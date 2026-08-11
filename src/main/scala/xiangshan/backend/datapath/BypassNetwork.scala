@@ -217,6 +217,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     }
     exuInput.bits.vl.foreach { _ := fromDPs(exuIdx).bits.vl.get }
     exuInput.bits.v0.foreach { _ := fromDPs(exuIdx).bits.v0.get }
+    exuInput.bits.vstart.foreach { _ := 0.U }
 
     if (exuParm.hasBrhFu || exuParm.hasCSR || exuParm.hasFence) {
       val thisPcOffset = exuInput.bits.getPcOffset()

@@ -477,8 +477,6 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.exceptionInfo.bits.vaNeedExt         := false.B
   io.exceptionInfo.bits.isHyper           := false.B
   io.exceptionInfo.bits.uopIdx            := 0.U.asTypeOf(io.exceptionInfo.bits.uopIdx)
-  io.exceptionInfo.bits.vl                := 0.U.asTypeOf(io.exceptionInfo.bits.vl)
-  io.exceptionInfo.bits.vstart            := 0.U.asTypeOf(io.exceptionInfo.bits.vstart)
 
   // Send TLB feedback to store issue queue
   // we send feedback right after we receives request
@@ -534,6 +532,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   }
   io.out.toRob.bits.robIdx := uop.robIdx
   io.out.toRob.bits.exceptionVec := exceptionVec
+  io.out.toRob.bits.vLoadMeta.foreach(_ := 0.U.asTypeOf(new xiangshan.backend.Bundles.VLoadMeta))
   io.out.toRob.bits.trigger.foreach(_ := trigger)
   io.out.toRob.bits.isRVC.foreach(_ := uop.isRVC)
   io.out.toRob.bits.lqIdx.foreach(_ := uop.lqIdx)

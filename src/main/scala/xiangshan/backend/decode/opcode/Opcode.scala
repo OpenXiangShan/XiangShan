@@ -429,6 +429,8 @@ object Opcode {
     def isAllUS   (op: UInt): Bool = Cat(Seq(US, WHOLE, MASK).map(_ === getMemOpType(op))).orR
     // vle, vse
     def isUStride (op: UInt): Bool = getMemOpType(op) === US
+    // vleff
+    def isFof     (op: UInt): Bool = op(4) && getMemOpType(op) === US
     // vlnr, vsnf
     def isWhole   (op: UInt): Bool = getMemOpType(op) === WHOLE
     // vlm, vsm
