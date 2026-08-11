@@ -733,3 +733,36 @@ mem_ut/ver/ut/memblock/sim/base_fun/log/tc=tc_sanity_ts=virtual_base_sequence_cf
 VLS、MSI、vector writeback、TopDown、`msiInfo` 位宽和 L2 flush level 生命周期影响均已同步到测试框架。
 本轮没有未关闭的源码 review 问题。剩余风险仅为尚未建立专用 L2 flush request/done stimulus 的功能覆盖，
 不影响默认 `tc_sanity` 适配验收。
+
+### 10.1 补充 `basicTest` 多场景回归
+
+为确认默认 `tc_sanity` 之外的真实发射、redirect 取消和 MMIO raw-event 路径也可使用当前
+`build/rtl` DUT，本轮在同一远端 VCS 编译目录 `basic_v2_20260811` 依次执行以下 `basicTest`
+场景。每项均使用固定 seed `666666`，日志中均出现 `TEST_PASS`，并且
+`UVM_ERROR : 0`、`UVM_FATAL : 0`。
+
+| 虚拟序列 | cfg | 主要覆盖内容 | 结果日志 |
+|---|---|---|---|
+| `memblock_pending_mmio_directed_vseq` | `default` | pending-MMIO 所有权约束、redirect 同拍过期事件丢弃和异常/正常退役。 | `mem_ut/ver/ut/memblock/sim/basic_v2_20260811/log/tc=basicTest_ts=memblock_pending_mmio_directed_vseq_cfg=default_seed=666666_rtl_.log` |
+| `memblock_dispatch_real_smoke_vseq` | `tc_dispatch_real_smoke` | 真实标量 load 发射、DCache/L2TLB 响应端交互和 LSQ 退役。 | `mem_ut/ver/ut/memblock/sim/basic_v2_20260811/log/tc=basicTest_ts=memblock_dispatch_real_smoke_vseq_cfg=tc_dispatch_real_smoke_seed=666666_rtl_.log` |
+| `memblock_dispatch_real_cancel_reconcile_vseq` | `tc_dispatch_real_cancel_reconcile_smoke` | `flushAfter` redirect 后的取消/对账、load/store 发射和 LQ/SQ 回收。 | `mem_ut/ver/ut/memblock/sim/basic_v2_20260811/log/tc=basicTest_ts=memblock_dispatch_real_cancel_reconcile_vseq_cfg=tc_dispatch_real_cancel_reconcile_smoke_seed=666666_rtl_.log` |
+
+这些回归覆盖的状态机和 transaction 生命周期均在本轮最新 DUT 适配范围内；没有出现端口未连接、
+字段位宽不匹配、记分板错误或运行期 fatal。因此不需要新增测试框架源码修改。
+
+### 10.2 VCS 生成缓存异常及处置记录
+
+运行第三项回归的首次编译入口报出 `Error-[VFS_SDB_ERROR]`，VCS 明确指出
+`basic_v2_20260811/exec/simv.daidir/work.lib++/tdc.sdb` 已损坏。该文件是 VCS 生成的、被忽略的
+增量编译数据库，不是 RTL、UVM 源码、filelist 或配置输入；前两项回归已经完成编译和仿真，也没有
+报告 interface 或运行期逻辑错误。
+
+处置仅为删除该报错路径下的单个可再生 `tdc.sdb` 文件后原命令重试。重试重新完成编译，并通过
+`memblock_dispatch_real_cancel_reconcile_vseq`。因此本项记录为工具缓存恢复，而非 DUT 或测试框架
+适配缺陷：没有为该异常修改、提交或掩盖任何测试框架功能逻辑。
+
+### 10.3 本次补充回归结论
+
+`tc_sanity/base_fun` 以及本节三项额外 `basicTest` 均已通过。最新 V2 `build/rtl` DUT 在 MMIO
+事件归属、真实 dispatch、redirect 取消和 LSQ 回收路径上未发现新的框架适配问题；当前没有待修复的
+测试框架源码问题或新增功能适配 commit。
