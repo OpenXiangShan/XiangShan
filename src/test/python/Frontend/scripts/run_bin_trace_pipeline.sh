@@ -1,4 +1,23 @@
 #!/usr/bin/env bash
+# Run one ready-to-run bin through NEMU trace generation and DUT comparison.
+# Example from the repository root with the Python runtime already available:
+#
+#   TB_NEMU_EXEC=ready-to-run/riscv64-nemu-interpreter \
+#     src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh \
+#       ready-to-run/<case>.bin
+#
+# To reuse an existing JSONL trace instead of regenerating it, provide the
+# trace as the second argument and set TB_SKIP_NEMU=1. Use
+# run_bin_trace_suite.sh for a selected multi-bin regression list.
+#
+# The DUT stage is bounded by TB_PYTEST_TIMEOUT_SECS. NEMU trace generation is
+# expected to finish from the finite program input; add an outer timeout only
+# as a whole-pipeline watchdog, using a limit based on measured runtime.
+#
+# Each run creates a unique artifact directory under
+# src/test/python/Frontend/data/runs/ by default. A complete pass reports a
+# completed golden trace with cursor=total, pending_work=0, and
+# monitor_errors=0. See --help for optional paths and runtime controls.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

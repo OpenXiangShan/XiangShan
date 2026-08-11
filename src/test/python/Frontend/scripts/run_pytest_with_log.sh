@@ -1,4 +1,17 @@
 #!/usr/bin/env bash
+# Run Frontend pytest and tee its output to a regression log.
+#
+# Usage: src/test/python/Frontend/scripts/run_pytest_with_log.sh [pytest arguments...]
+# Without pytest arguments, runs the Frontend tests directory.
+#
+# Environment:
+#   TB_ENABLE_DUT_TESTS=1            Enable DUT integration tests.
+#   TB_REG_LOG_DIR=<dir>             Log directory (default: Frontend/logs).
+#   TB_REG_LOG_FILE=<path>           Explicit log path; overrides the timestamped default.
+#   TB_ENV_LOG_LEVEL=<level>         Environment log level (default: INFO).
+#   TB_LOG_CLI_LEVEL=<level>         Pytest CLI log level (default: TB_ENV_LOG_LEVEL, then INFO).
+#   TB_PYTEST_DISABLE_RERUNFAILURES=0
+#                                     Keep pytest rerunfailures enabled (default: disabled).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
