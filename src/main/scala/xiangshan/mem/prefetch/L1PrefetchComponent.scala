@@ -300,7 +300,7 @@ class MLPReqFilterBundle(implicit p: Parameters) extends XSBundle with HasL1Pref
 
   def may_be_replace(valid: Bool): Bool = {
     // either invalid or has sent out all reqs out
-    !valid || RegNext(PopCount(sent_vec) === BIT_VEC_WITDH.U)
+    !valid || RegNext(valid) && RegNext(PopCount(sent_vec) === BIT_VEC_WITDH.U)
   }
 
   def get_pf_addr(): UInt = {
