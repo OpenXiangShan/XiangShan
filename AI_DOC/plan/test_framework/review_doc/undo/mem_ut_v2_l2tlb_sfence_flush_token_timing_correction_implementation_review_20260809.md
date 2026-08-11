@@ -64,8 +64,8 @@
   -> 下一 drv_cb recycle；owner 已 release 且 mailbox EMPTY 后 driver return
 ```
 
-这部分是功能时序修正，不是简单字段适配；L2TLB response payload 的随机构造和 NAPOT/range index 仍由各自
-undo plan 负责，本 review 不把它们标记为完成。
+这部分是功能时序修正，不是简单字段适配；L2TLB response payload 的随机构造已由独立 `plan/do` 专项完成，
+但不属于本 timing review 的重复验收范围；只有 NAPOT/range index 仍由其 `plan/undo` 专项负责。
 
 ## 3. 关键实现 Review
 
@@ -451,8 +451,8 @@ inactive fail-fast 在正常 smoke 中未触发；B1 的 epoch-0 路径在 base 
 
 - `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`：payload builder、独立
   S1/S2 fault/permission/level/PPN 已由其自身专项实现并归档；本 timing review 不把该实现重新计入本阶段。
-- `mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`：range index、NAPOT coverage rank 和重叠 candidate
-  仲裁仍需专项实现。
+- `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`：range index、NAPOT coverage rank
+  和重叠 candidate 仲裁已由提交 `6a1b2d947e` 实现并归档；本 timing review 不重新计入其完成度。
 
 P0 与 P1 专项 subagent 已在修复后分别给出 `PASS`；其后 B0/B1 又修改了 driver 的 baseline/proof 分支，因此历史
 验证和旧 `FINAL PASS` 不能作为当前结论。本 agent 末轮复核还发现并删除了
@@ -562,6 +562,88 @@ dispatch sample 一次，属于按原 plan 回正实现，不形成未解决的�
 ## 11. 当前结论与重新验收
 
 P0/P1 与其后 B0/B1 修复均已写入工作树；B0/B1 后的 explicit/base compile 与 smoke 已通过。独立终审明确给出
-`FINAL PASS`，本专项无已知 blocker；执行 plan 可归档到 `plan/do`。后续 response payload 与 range/NAPOT 语义仍由
-各自 undo plan 负责，不能因本专项通过而视为已经实现。
-后续 response payload 和 range/NAPOT 语义仍由各自 undo plan 负责，不能因为本专项通过而视为已经实现。
+`FINAL PASS`，本专项无已知 blocker；执行 plan 可归档到 `plan/do`。response payload 与 range/NAPOT 均已由各自独立
+`plan/do` 专项完成；本 timing 专项通过不重复声称覆盖它们。
+
+## 12. 2026-08-10 收尾修正与重新验收
+
+本节优先级高于第 11 节中较早的 `FINAL PASS` 记录。第 11 节保留为当时工作树的历史验收；以下两项修正完成并经过
+新一轮独立 review 后，才能再次给出最终结论。
+
+### 12.1 reset release sample anchor 修正
+
+**功能特性：** 在 runtime reset 解除的同一 clocking-block 边界，让 CSR 和 fence monitor 无论先后调度都完成同一个
+global sample 的 producer barrier。
+
+**修改前逻辑：** CSR monitor 在本拍结束 reset 后直接跳过 sample。它规避了“fence 先运行”时的半个 barrier，
+却在“CSR 先运行”时让随后运行的 fence monitor 等待不存在的同拍 anchor；基础 smoke 报出
+`no CSR sample anchor at time=170.000ns`。
+
+**修改后逻辑：** CSR monitor 在 reset 实际解除后照常发布首个 post-reset sample。fence monitor 若先观察到
+reset active，先完成 fence reset ack，再在同一时刻的 NBA/delta 区域复查；只有 reset 仍 active 才结束本拍，
+否则继续读取 CSR anchor、采样 `sfence` 并写 FENCE done。`sfence.valid=1` 在 release 边也不会被静默丢弃。
+
+**正确性检查：** CSR/fence 两种调度顺序都只会得到“完整同拍 barrier”或“reset 仍未结束而无 sample”两种结果；
+不会留下 CSR-only sample，也不会让 fence 在无 anchor 的 release 边 fatal。
+
+### 12.2 no-owner stop、request fail-fast 与 phase ended 修正
+
+**功能特性：** 保证 `DISABLED/NO_OWNER + NO_DISPATCH` testcase 在 global stop 时不创建 release grant，也不掩盖残留 owner。
+
+**修改前逻辑：** parent 在确认 responder mode 前，只要看到 `l2tlb_lifecycle_owner_claimed` 就可能调用
+`grant_l2tlb_final_release()`；随后才进入 no-owner 分支。错误状态会被先赋予 grant，违反 no-owner 不 claim、不 release 的
+生命周期边界。
+
+**修改后逻辑：** no-owner 分支先验证 dispatch/response 均关闭，且 `owner_claimed`、`owner_claimed_once`、
+`release_granted` 都为 0，然后直接结束等待。仅 enabled、dispatch-active、需要 response 的分支可以在真实 owner claim
+存在时调用 `grant_l2tlb_final_release()`。
+
+**正确性检查：** 正常 no-owner testcase 不再等待 owner，也不会生成 grant；如果 topology 或历史状态残留 owner/grant，
+立即 `uvm_fatal`，不会把错误状态伪装成正常收尾。
+
+**相邻防御行为：** `L2tlb_agent_agent_monitor` 在 testcase topology 已初始化、非 reset 且 responder disabled 时，
+观察到 `sampled_req_valid===1` 立即 `uvm_fatal`，并打印 transport sample、DUT sample、VPN、`s2xlate` 和 topology；
+它不等待永远不会出现的 `valid && ready`。`L2tlb_agent_agent_driver::phase_ended()` 若仍观察到 active owner claim，
+同样立即 `uvm_fatal`，不调用 release helper、不清 claim，也不补发 inactive item。二者分别防止错误 request 在
+no-owner topology 中永久悬挂，以及 phase 强制结束掩盖未收敛 owner。
+
+### 12.3 重新验收记录
+
+在独立 mode `l2tlb_single_owner_final` 中完成以下验收，避免遗留 `base_fun` VCS partition 进程干扰：
+
+| 验收项 | 命令 | 结果 |
+|---|---|---|
+| base no-dispatch | `make eda_compile tc=basicTest ts=virtual_base_sequence mode=l2tlb_single_owner_final`；`make eda_run tc=basicTest ts=virtual_base_sequence mode=l2tlb_single_owner_final wave=off` | compile 成功；`265.300ns TEST_PASS`，`UVM_ERROR=0`、`UVM_FATAL=0` |
+| real dispatch | `make eda_compile tc=basicTest ts=memblock_dispatch_real_smoke_vseq mode=l2tlb_single_owner_final cfg=tc_dispatch_real_smoke`；`make eda_run tc=basicTest ts=memblock_dispatch_real_smoke_vseq mode=l2tlb_single_owner_final cfg=tc_dispatch_real_smoke wave=off` | compile 成功；`427.800ns TEST_PASS`，`UVM_ERROR=0`、`UVM_FATAL=0` |
+
+关联执行 plan 为
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`；上述收尾
+`IMPLEMENTATION_DELTA` 已同步写回。
+
+最终独立只读 review 已完成：reset-anchor/producer-barrier 复核与 no-owner/owner-release 复核均明确给出
+`FINAL PASS`，没有新增源码、plan 或 review 遗漏。结合第 12.3 节的 base/real-dispatch 重新验收，本专项当前无已知
+blocker；本文件和关联执行 plan 可以作为当前已实现行为的归档证据。response payload 与 range/NAPOT 均保持各自独立
+`plan/do` 已完成状态，不属于本 timing review 的重复覆盖。
+
+## 12.4 本轮 P2 coding：close/cutoff 前置保护
+
+**关联 plan：** `mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md` 的
+`IMPLEMENTATION_DELTA` close/cutoff 条目。
+
+**源码：** `mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`，
+`capture_fired_request()`。
+
+**抽象功能描述：** 在真实 request fire 转换为软件生命周期记录前，确认 responder admission 仍开放；关闭后出现的新
+fire 属于 DUT/driver 时序违规，立即诊断，而不是留下无法归属的 token。
+
+**修改后逻辑：**
+
+```text
+本拍先观察到 request fire：
+  若 local close 尚未置位且 shared admission 尚未 seal：继续创建 token/pending，并写 request-fire marker；
+  若 local close 或 shared seal 已置位：在任何状态分配前 uvm_fatal。
+stop 在本 task 后续才写入 close，因此 C0 同拍 fire 仍然合法。
+```
+
+本项没有修改 token payload、C0/C4 取消规则或 release drain；只把 cutoff 检查前移到状态分配之前。源码、flow、analysis
+和 plan 已同步，`git diff --check` 通过；专项 compile/smoke 待三个 P2 修改全部完成后统一执行。

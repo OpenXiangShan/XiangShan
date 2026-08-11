@@ -990,6 +990,15 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
     memblock_tlb_entry live_entry;
     bit created;
 
+    // A real fire is still accepted before the same-sample stop path seals
+    // admission.  Once the local or shared cutoff is visible, reject the
+    // fire before allocating a token, pending record, or UID marker.
+    if (release_close_requested) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("L2TLB request fired after local admission cutoff sample=%0d vpn=0x%0h s2xlate=%0d",
+                             sample_seq, sampled_req_vpn, sampled_req_s2xlate))
+    end
+    data.check_l2tlb_uid_registration_open("capture_fired_request");
     if (outstanding_count() >= max_outstanding) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("L2TLB request fired at full queue: outstanding=%0d max=%0d",
