@@ -1,9 +1,6 @@
 # mem_ut RM 只读 API 封装实现评审
 
-关联执行计划：
-
-- 执行输入：AI_DOC/plan/test_framework/plan/undo/mem_ut_rm_readonly_api_encapsulation_plan_20260809.md
-- 归档目标：AI_DOC/plan/test_framework/plan/do/mem_ut_rm_readonly_api_encapsulation_plan_20260809.md
+关联执行计划（已归档）：AI_DOC/plan/test_framework/plan/do/mem_ut_rm_readonly_api_encapsulation_plan_20260809.md
 
 评审日期：2026-08-11
 

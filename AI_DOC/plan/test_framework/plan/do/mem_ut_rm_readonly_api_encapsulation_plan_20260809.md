@@ -1,5 +1,9 @@
 # mem_ut 测试框架 RM 只读 API class 最小封装计划
 
+状态：已执行并归档（2026-08-11）。
+
+实现评审：[mem_ut_rm_readonly_api_encapsulation_implementation_review_20260811.md](../../review_doc/undo/mem_ut_rm_readonly_api_encapsulation_implementation_review_20260811.md)。
+
 ## 1. 专有名词与计划边界
 
 | 术语 | 当前含义 | 代码落点或示例 |
