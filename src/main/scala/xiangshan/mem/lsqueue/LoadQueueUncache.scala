@@ -482,7 +482,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
 
   /******************************************************************
    * Forward Logic
-   * 
+   *
    * s1 response paddr, s2 response forwardData
    ******************************************************************/
 
@@ -600,6 +600,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     redirect.bits             := DontCare
     redirect.bits.isRVC       := reqSelUops(i).isRVC
     redirect.bits.robIdx      := reqSelUops(i).robIdx
+    redirect.bits.satpFlush   := false.B
     redirect.bits.ftqIdx      := reqSelUops(i).ftqPtr
     redirect.bits.ftqOffset   := reqSelUops(i).ftqOffset
     redirect.bits.level       := RedirectLevel.flush

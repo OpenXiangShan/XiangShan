@@ -1707,6 +1707,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.rollback.bits := DontCare
   io.rollback.bits.isRVC := uop.isRVC
   io.rollback.bits.robIdx := robIdx
+  io.rollback.bits.satpFlush := false.B
   io.rollback.bits.ftqIdx := uop.ftqPtr
   io.rollback.bits.ftqOffset := uop.ftqOffset
   io.rollback.bits.level := rollbackLevel

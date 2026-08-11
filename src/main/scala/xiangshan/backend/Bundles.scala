@@ -107,6 +107,7 @@ object Bundles {
   class DecodeInUop(implicit p: Parameters) extends XSBundle {
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
     val exceptionVec = ExceptSparseVec(ExceptionNO.fromFrontendSet)
+    val satpFlushFirstFetchFault = Bool()
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
@@ -136,6 +137,7 @@ object Bundles {
   class DecodeOutUop(implicit p: Parameters) extends XSBundle {
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
+    val satpFlushFirstFetchFault = Bool()
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
@@ -231,6 +233,7 @@ object Bundles {
   class RenameOutUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
+    val satpFlushFirstFetchFault = Bool()
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
@@ -1394,6 +1397,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val vxsat        = Option.when(params.writeVxsat)(Bool())
     val exceptionVec = ExceptSparseVec(params.exceptionOut)
     val flushPipe    = Option.when(params.flushPipe)(Bool())
+    val satpFlush    = Option.when(params.satpFlush)(Bool())
     val trigger      = Option.when(params.trigger)(TriggerAction())
     val isRVC        = Option.when(params.needIsRVC)(Bool())
     val replay       = Option.when(params.replayInst)(Bool())
@@ -1668,6 +1672,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
   class WriteBackRobBundle(val params: ExeUnitParams, backendParams: BackendParams)(implicit p: Parameters) extends Bundle with BundleSource {
     val robIdx        = new RobPtr()(p)
     val flushPipe     = Option.when(params.flushPipe)(Bool())
+    val satpFlush     = Option.when(params.satpFlush)(Bool())
     val replay        = Option.when(params.replayInst)(Bool())
     val redirect      = Option.when(params.hasRedirect)(ValidIO(new Redirect))
     val fflags        = Option.when(params.writeFflags)(UInt(5.W))
@@ -1703,6 +1708,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val instr = UInt(32.W)
     val commitType = CommitType()
     val exceptionVec = ExceptSparseVec() // TODO: optimize valid indices
+    val satpFlushFirstFetchFault = Bool()
     val isPcBkpt = Bool()
     val isFetchMalAddr = Bool()
     val gpaddr = UInt(XLEN.W)
