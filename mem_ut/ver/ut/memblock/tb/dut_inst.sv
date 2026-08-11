@@ -924,7 +924,6 @@ wire io_mem_to_ooo_writebackVldu_0_bits_uop_robIdx_flag;
 wire [7:0] io_mem_to_ooo_writebackVldu_0_bits_uop_robIdx_value;
 wire io_mem_to_ooo_writebackVldu_0_bits_uop_replayInst;
 wire [127:0] io_mem_to_ooo_writebackVldu_0_bits_data;
-wire [2:0] io_mem_to_ooo_writebackVldu_0_bits_vdIdx;
 wire [2:0] io_mem_to_ooo_writebackVldu_0_bits_vdIdxInField;
 wire io_mem_to_ooo_writebackVldu_0_bits_debug_isMMIO;
 wire io_mem_to_ooo_writebackVldu_0_bits_debug_isNCIO;
@@ -962,7 +961,6 @@ wire io_mem_to_ooo_writebackVldu_1_bits_uop_robIdx_flag;
 wire [7:0] io_mem_to_ooo_writebackVldu_1_bits_uop_robIdx_value;
 wire io_mem_to_ooo_writebackVldu_1_bits_uop_replayInst;
 wire [127:0] io_mem_to_ooo_writebackVldu_1_bits_data;
-wire [2:0] io_mem_to_ooo_writebackVldu_1_bits_vdIdx;
 wire [2:0] io_mem_to_ooo_writebackVldu_1_bits_vdIdxInField;
 wire io_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid;
 wire io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit;
@@ -3015,7 +3013,6 @@ MemBlock U_MEMBLOCK (
     .io_mem_to_ooo_writebackVldu_0_bits_uop_robIdx_value ( io_mem_to_ooo_writebackVldu_0_bits_uop_robIdx_value ),
     .io_mem_to_ooo_writebackVldu_0_bits_uop_replayInst ( io_mem_to_ooo_writebackVldu_0_bits_uop_replayInst ),
     .io_mem_to_ooo_writebackVldu_0_bits_data ( io_mem_to_ooo_writebackVldu_0_bits_data ),
-    .io_mem_to_ooo_writebackVldu_0_bits_vdIdx ( io_mem_to_ooo_writebackVldu_0_bits_vdIdx ),
     .io_mem_to_ooo_writebackVldu_0_bits_vdIdxInField ( io_mem_to_ooo_writebackVldu_0_bits_vdIdxInField ),
     .io_mem_to_ooo_writebackVldu_0_bits_debug_isMMIO ( io_mem_to_ooo_writebackVldu_0_bits_debug_isMMIO ),
     .io_mem_to_ooo_writebackVldu_0_bits_debug_isNCIO ( io_mem_to_ooo_writebackVldu_0_bits_debug_isNCIO ),
@@ -3053,7 +3050,6 @@ MemBlock U_MEMBLOCK (
     .io_mem_to_ooo_writebackVldu_1_bits_uop_robIdx_value ( io_mem_to_ooo_writebackVldu_1_bits_uop_robIdx_value ),
     .io_mem_to_ooo_writebackVldu_1_bits_uop_replayInst ( io_mem_to_ooo_writebackVldu_1_bits_uop_replayInst ),
     .io_mem_to_ooo_writebackVldu_1_bits_data ( io_mem_to_ooo_writebackVldu_1_bits_data ),
-    .io_mem_to_ooo_writebackVldu_1_bits_vdIdx ( io_mem_to_ooo_writebackVldu_1_bits_vdIdx ),
     .io_mem_to_ooo_writebackVldu_1_bits_vdIdxInField ( io_mem_to_ooo_writebackVldu_1_bits_vdIdxInField ),
     .io_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid ( io_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid ),
     .io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit ( io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit ),

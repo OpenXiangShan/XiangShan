@@ -50,7 +50,6 @@
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vstart = RTL_PATH.io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vstart; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vta = RTL_PATH.io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vta; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vuopIdx = RTL_PATH.io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vuopIdx; \
-        force U_IF_NAME.io_mem_to_ooo_writebackVldu_0_bits_vdIdx = RTL_PATH.io_mem_to_ooo_writebackVldu_0_bits_vdIdx; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_0_bits_vdIdxInField = RTL_PATH.io_mem_to_ooo_writebackVldu_0_bits_vdIdxInField; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_0_valid = RTL_PATH.io_mem_to_ooo_writebackVldu_0_valid; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_1_bits_data = RTL_PATH.io_mem_to_ooo_writebackVldu_1_bits_data; \
@@ -85,7 +84,6 @@
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vstart = RTL_PATH.io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vstart; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vta = RTL_PATH.io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vta; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vuopIdx = RTL_PATH.io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vuopIdx; \
-        force U_IF_NAME.io_mem_to_ooo_writebackVldu_1_bits_vdIdx = RTL_PATH.io_mem_to_ooo_writebackVldu_1_bits_vdIdx; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_1_bits_vdIdxInField = RTL_PATH.io_mem_to_ooo_writebackVldu_1_bits_vdIdxInField; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_1_valid = RTL_PATH.io_mem_to_ooo_writebackVldu_1_valid; \
     end \
@@ -126,7 +124,6 @@
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vstart = RTL_PATH.io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vstart; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vta = RTL_PATH.io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vta; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vuopIdx = RTL_PATH.io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vuopIdx; \
-        force U_IF_NAME.io_mem_to_ooo_writebackVldu_0_bits_vdIdx = RTL_PATH.io_mem_to_ooo_writebackVldu_0_bits_vdIdx; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_0_bits_vdIdxInField = RTL_PATH.io_mem_to_ooo_writebackVldu_0_bits_vdIdxInField; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_0_valid = RTL_PATH.io_mem_to_ooo_writebackVldu_0_valid; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_1_bits_data = RTL_PATH.io_mem_to_ooo_writebackVldu_1_bits_data; \
@@ -161,7 +158,6 @@
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vstart = RTL_PATH.io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vstart; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vta = RTL_PATH.io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vta; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vuopIdx = RTL_PATH.io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vuopIdx; \
-        force U_IF_NAME.io_mem_to_ooo_writebackVldu_1_bits_vdIdx = RTL_PATH.io_mem_to_ooo_writebackVldu_1_bits_vdIdx; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_1_bits_vdIdxInField = RTL_PATH.io_mem_to_ooo_writebackVldu_1_bits_vdIdxInField; \
         force U_IF_NAME.io_mem_to_ooo_writebackVldu_1_valid = RTL_PATH.io_mem_to_ooo_writebackVldu_1_valid; \
     end \
