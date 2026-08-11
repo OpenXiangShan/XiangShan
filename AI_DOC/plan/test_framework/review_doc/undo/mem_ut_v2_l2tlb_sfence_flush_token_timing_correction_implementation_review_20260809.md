@@ -646,7 +646,7 @@ stop 在本 task 后续才写入 close，因此 C0 同拍 fire 仍然合法。
 ```
 
 本项没有修改 token payload、C0/C4 取消规则或 release drain；只把 cutoff 检查前移到状态分配之前。源码、flow、analysis
-和 plan 已同步，`git diff --check` 通过；专项 compile/smoke 待三个 P2 修改全部完成后统一执行。
+和 plan 已同步，`git diff --check` 通过。
 
 ## 12.5 本轮 P2 coding：pre-ready baseline 独立建模
 
@@ -697,4 +697,19 @@ get_l2tlb_event_after(cursor):
 ```
 
 修改集中在 `memblock_sync_pkg.sv` 的两个公共 helper，不改变 event 的合法合并、C0/C4 barrier、token payload 或 latency。
-源码、flow、analysis 和 plan 已同步，静态 `git diff --check` 通过；专项 compile/smoke 待本轮 commit 后执行。
+源码、flow、analysis 和 plan 已同步，静态 `git diff --check` 通过。
+
+## 12.7 本轮 P2 最终验证
+
+| 验收项 | 命令 | 结果 |
+|---|---|---|
+| 基础 no-dispatch compile | `make eda_compile tc=basicTest ts=virtual_base_sequence mode=l2tlb_p2_final` | exit 0 |
+| 基础 no-dispatch smoke | `make eda_run tc=basicTest ts=virtual_base_sequence mode=l2tlb_p2_final wave=off` | `265.300ns TEST_PASS`；`UVM_ERROR=0`、`UVM_FATAL=0` |
+| 真实 dispatch compile | `make eda_compile tc=basicTest ts=memblock_dispatch_real_smoke_vseq mode=l2tlb_p2_final cfg=tc_dispatch_real_smoke` | exit 0 |
+| 真实 dispatch smoke | `make eda_run tc=basicTest ts=memblock_dispatch_real_smoke_vseq mode=l2tlb_p2_final cfg=tc_dispatch_real_smoke wave=off` | `427.800ns TEST_PASS`；`UVM_ERROR=0`、`UVM_FATAL=0` |
+
+本轮三个 P2 功能均已完成 coding、文档同步和基础/真实 dispatch 验证；未发现 compile error、UVM error 或 UVM fatal。
+`NO_OWNER passive driver` 不属于本轮已批准的三个 P2 条目，未混入本次修改。
+
+**FINAL PASS：** 本轮 close/cutoff 前置保护、pre-ready baseline 独立建模、reason 去重与 event sequence 连续性检查均与
+执行 plan 一致，可以归档当前 implementation review。

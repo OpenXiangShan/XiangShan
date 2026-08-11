@@ -2153,3 +2153,15 @@ latency、payload、permission 和主表控制行为保持不变。
 
   远端 VCS 的 `KDB-OPTIONS` 与旧 `.nfs*` 清理提示均未产生编译 error 或 UVM error/fatal；末轮独立 review 已明确
   给出 `FINAL PASS`，满足归档条件。
+
+## 本轮 P2 最终执行记录
+
+- `make eda_compile tc=basicTest ts=virtual_base_sequence mode=l2tlb_p2_final`：exit 0。
+- `make eda_run tc=basicTest ts=virtual_base_sequence mode=l2tlb_p2_final wave=off`：
+  `265.300ns TEST_PASS`，`UVM_ERROR=0`、`UVM_FATAL=0`。
+- `make eda_compile tc=basicTest ts=memblock_dispatch_real_smoke_vseq mode=l2tlb_p2_final cfg=tc_dispatch_real_smoke`：exit 0。
+- `make eda_run tc=basicTest ts=memblock_dispatch_real_smoke_vseq mode=l2tlb_p2_final cfg=tc_dispatch_real_smoke wave=off`：
+  `427.800ns TEST_PASS`，`UVM_ERROR=0`、`UVM_FATAL=0`。
+
+close/cutoff 前置保护、pre-ready baseline 独立建模、reason 去重与 event sequence 连续性检查均已完成 coding 和验证；
+`NO_OWNER passive driver` 不属于本轮批准范围。
