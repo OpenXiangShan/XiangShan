@@ -19,6 +19,10 @@ memory backend，但不共享协议 queue、timer、D hold、source、sink 或�
 | `ordered/reorder` | record 的返回选择模式 | `*_RSP_REORDER_EN` | 两通道分别配置 |
 | `memory lifecycle owner` | 每 testcase 唯一清空与配置 shared memory 的入口 | real-smoke virtual sequence | responder 只在 legacy topology 未初始化时兜底调用 |
 | `write batch` | 已确认 fire、下一 shared-memory sample 才提交的写集合 | `dcache_write_batch/uncache_write_batch` | 同拍固定先 DCache、后 Uncache |
+| `readonly observer` | 在既有 DCache/Uncache 动作完成后记录 resident、C-data、writeback 与 corrupt 事实的旁路状态 | `mem_access_base_sequence` static observer | 不决定协议、batch 或 memory 写入 |
+| `aggregate snapshot` | DCache owner 一次发布的 resident/pending/drain 值型摘要 | `dcache_aggregate_snapshot` | API 只复制已发布快照 |
+| `corrupt mask` | 已观察到但不能正常比较的 overlay byte 范围 | `write_overlay_corrupt_byte_mask` | corrupt C response 置位；既有正常提交按 byte 清除 |
+| `overlay readiness` | RM 查询 committed overlay 前必须满足的单一 DCache 门槛 | `dcache_overlay_read_ready` | `valid=1 && ready=1` 才允许读取 |
 
 ## 2. 调用 Flow
 
@@ -40,6 +44,10 @@ flowchart TD
 
     B --> O[shared backing/overlay]
     H --> O
+    C --> P[passive DCache observer]
+    O --> P
+    P --> Q[aggregate snapshot + corrupt mask]
+    Q --> R[memblock_rm_readonly_api value view]
 ```
 
 ### 2.1 函数调用 Flow 图整体文字伪代码
@@ -58,6 +66,10 @@ Uncache：
   真实 store 写入 Uncache write batch，Get 固化 merged read data；
   建立 AccessAck 或 AccessAckData record；
   用 Uncache 自己的 timer 和选择模式返回 D，D.ready=0 时保持 current D hold。
+
+只读 observer：
+  DCache map/C-data/batch 与 Uncache batch 都先完成既有动作；observer 随后记录事实并重算 aggregate；
+  API 只读取已发布 snapshot、已建立 backing 或已经提交的 overlay，不等待、不提交 batch、不进行 lazy allocation。
 
 任何一侧的 D.ready backpressure、timer、record 满或 GrantAck wait 都不直接阻塞另一侧。
 ```
@@ -79,6 +91,91 @@ TileLink response、不分配 sink，也不管理 DCache/Uncache scheduler。
 `MEMBLOCK_MAIN_MEM_RANGES_EN=1` 时，DCache 与 Uncache 都受 `PADDR_BASE/RANGE` 严格范围检查；为
 `0` 时两侧允许 48-bit physical address sparse lazy allocation。该开关不限制主表虚拟地址、TLB PPN
 构造或任意 TileLink 字段宽度。
+
+### 3.2 被动 observer 与 RM 只读 API
+
+抽象功能描述：observer 在既有 DCache/Uncache shared-memory 写已经入队或已经提交后记录必要事实；
+memblock_rm_readonly_api 只复制 observer 已发布的摘要或已有 memory map。二者不负责 response 调度、
+不修改 batch，也不替 RM 等待下一 sample。
+
+#### 3.2.1 `commit_shared_mem_write_batch()` 的提交后观察
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv`。
+
+抽象功能描述：该函数仍是既有 shared-memory batch 的唯一提交入口；新增调用只在 overlay 已被原路径
+写入后记录 DCache/Uncache 的旁路事实，不改变 DCache 先于 Uncache 的提交顺序。
+
+```systemverilog
+foreach (dcache_write_batch[i]) begin
+    apply_shared_mem_write(dcache_write_batch[i]);
+    observe_dcache_write_committed(dcache_write_batch[i]);
+end
+foreach (uncache_write_batch[i]) begin
+    apply_shared_mem_write(uncache_write_batch[i]);
+    observe_uncache_write_committed(uncache_write_batch[i]);
+end
+```
+
+中文伪代码：先让每个已入队 DCache event 按原有 helper 写入 overlay，然后 observer 把该 event 标记为
+已经提交；随后按原有优先级处理 Uncache event，并只清除其实际覆盖 byte 的 corrupt 标记。两个 observer
+均在 apply_shared_mem_write 之后执行，所以它们不能让数据提前可见，也不会重排 batch。
+
+#### 3.2.2 `read_memory_map()`
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_rm_readonly_api.sv`，函数
+`read_memory_map()`。
+
+抽象功能描述：该 private helper 只检查既有 shared-memory lifecycle 和 byte map，返回 backing 或 committed
+overlay 的独立 value view；它不调用 DUT memory-facing task，也不会创建 backing/overlay line。
+
+```systemverilog
+if (!mem_access_base_sequence::is_shared_memory_lifecycle_initialized()) begin
+    return report_query_miss(overlay ? "committed_overlay" : "initialized_backing",
+                             "shared-memory lifecycle is not initialized");
+end
+if (mem_access_base_sequence::write_overlay_corrupt_byte_mask.exists(line_addr) &&
+    mem_access_base_sequence::write_overlay_corrupt_byte_mask[line_addr][byte_offset]) begin
+    corrupt_hit = 1'b1;
+    view.corrupt_byte_mask[i] = 1'b1;
+end
+```
+
+中文伪代码：先确认 shared-memory lifecycle 已由现有测试框架建立；若不存在，统一报 UVM_ERROR 并返回
+无效 value view。overlay 查询先检查 corrupt mask，再检查 byte-valid overlay；普通 miss 不回退 backing。
+该 helper 从不调用 commit_shared_mem_write_batch 或 ensure_main_line。
+
+#### 3.2.3 `get_dcache_overlay_readiness_for_rm()`
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_rm_readonly_api.sv`，函数
+`get_dcache_overlay_readiness_for_rm()`。
+
+抽象功能描述：该 public API 只复制已经发布的 aggregate readiness；它不访问 DCache 私有 map，也不会把
+normal 未 ready 变成错误。
+
+```systemverilog
+if (!mem_access_base_sequence::peek_dcache_aggregate_snapshot(snapshot)) begin
+    return report_query_miss("dcache_overlay_readiness",
+                             "DCache owner or observer snapshot is not published");
+end
+view.valid = 1'b1;
+view.ready = snapshot.dcache_overlay_read_ready;
+return 1'b1;
+```
+
+中文伪代码：先读取已有 aggregate snapshot；owner 未发布或 observer 不可用时统一报 UVM_ERROR 并返回
+valid=0。snapshot 有效但尚未 drain 时返回 valid=1、ready=0；只有 ready=1 才表示调用方可按自己的时机
+读取 committed overlay。该查询不提交 batch、不初始化 memory。
+
+#### 3.2.4 DCache observer 的值域
+
+observer 的 resident count 只统计 `cached_line_by_addr` 中 `alias_valid=1` 的协议驻留 line，不表示
+payload clean/dirty 或数据一定完整。C-data 首拍使 assembly pending，正常 64 B writeback 的低/高两个
+32 B fragment 都由既有 commit 观察到后，才结束该 line 的 fragment pending；corrupt C response 置整条
+64 B 的 byte mask。Uncache 后续 store 仅能清除自己已经提交的 byte，不能把未覆盖 byte 伪装成可比较。
+
+aggregate 只有 owner 已发布且 observer 完整时才有效。其 `dcache_overlay_read_ready` 同时要求：无 resident、
+无 pending writeback、无 fragment pending、无 assembly、无 corrupt byte；它不是 L2 flush DONE，也不承诺
+将来不会再接受新的 Acquire/Uncache 写。
 
 ## 4. DCache Response Pipeline
 
@@ -176,6 +273,8 @@ D hold。DCache 还必须等待 GrantAck、Hint、Probe/C assembly 收敛；Unca
 - Uncache 新增 V2 opcode 白名单、16 笔容量和长 D.ready hold warning；
 - shared memory 的 backing/overlay、byte mask、write batch 以及 DCache/Uncache 同拍写入顺序保持原
   有公共后端语义；
+- 新增只读 observer 与唯一 `memblock_rm_readonly_api` class：只在既有动作完成后记录 resident、
+  assembly、fragment、corrupt 和 aggregate；API 仅返回 value view，不接入 RM/checker、不驱动 DUT；
 - 本 flow 已实现 D-error response snapshot，但它只驱动合法 Uncache D 字段，不接入主表、LSQ、
   pass/fail 或 terminal。多 Probe/toB、alias、CBO closure 和完整 L2 flush 仍必须由相应专项 plan
   在现有 response pipeline 上扩展，不能恢复旧的单 pending 状态机。
