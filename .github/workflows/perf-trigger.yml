@@ -38,17 +38,11 @@ on:
         options:
           - gcc15-spec06-0.3c
           - gcc15-spec06-1.0c
-          - gcc15-spec06-legacy-0.3c
-          - gcc15-spec06-legacy-0.8c
-          - gcc15-spec06-legacy-1.0c
           - xscc-spec06-0.3c
           - xscc-spec06-0.8c
           - xscc-spec06-1.0c
           - gcc15-rv64gc-spec26-0.3c
           - gcc15-rv64gc-spec26-1.0c
-          - gcc12-spec06-0.3c
-          - gcc12-spec06-0.8c
-          - gcc12-spec06-1.0c
           - custom
           - dryrun
         default: gcc15-spec06-1.0c
@@ -98,4 +92,3 @@ jobs:
         servers: ${{ github.event.inputs.servers }}
         checkpoint_path: ${{ github.event.inputs.checkpoint_path }}
         json_path: ${{ github.event.inputs.json_path }}
-        perf_report_dir: /nfs/home/cirunner/perf-report-custom

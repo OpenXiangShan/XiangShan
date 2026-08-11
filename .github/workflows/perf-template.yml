@@ -52,10 +52,11 @@ on:
         description: JSON file path for SPEC checkpoints. Ignore this unless benchmark_type is set to custom
         required: false
         type: string
-      perf_report_dir:
-        description: Directory for all spec reports
-        required: true
+      artifact_name:
+        description: Name of the uploaded score artifact
+        required: false
         type: string
+        default: score
     outputs:
       SHORT_SHA:
         description: Short git commit sha used in this run
@@ -63,9 +64,6 @@ on:
       DATE:
         description: Commit date in yymmdd format used in this run
         value: ${{ jobs.run.outputs.DATE }}
-      PERF_DIR:
-        description: Base directory for performance reports
-        value: ${{ inputs.perf_report_dir }}
       SPEC_DIR:
         description: Output report directory for this performance run
         value: ${{ jobs.run.outputs.SPEC_DIR }}
@@ -138,7 +136,7 @@ jobs:
             echo "CST_COMPILE_OPT=" >> $GITHUB_ENV
             echo "CST_RUN_OPT=" >> $GITHUB_ENV
           fi
-          SPEC_DIR="${{ inputs.perf_report_dir }}/cr${DATE}-${SHORT_SHA}${SPEC_TAG}"
+          SPEC_DIR="/nfs/home/cirunner/perf-report/cr${DATE}-${SHORT_SHA}${SPEC_TAG}"
 
           DRY_RUN_OPT=""
 
@@ -218,7 +216,7 @@ jobs:
 
               echo "dryrun testing:"
               echo "    default SPEC_DIR: ${SPEC_DIR}"
-              SPEC_DIR="${{ inputs.perf_report_dir }}/dryrun${SPEC_TAG}"
+              SPEC_DIR="/nfs/home/cirunner/perf-report/dryrun${SPEC_TAG}"
               echo "    dryrun SPEC_DIR: ${SPEC_DIR}"
               DRY_RUN_OPT="--dry-run"
               ;;
@@ -311,5 +309,5 @@ jobs:
       - name: Upload report
         uses: actions/upload-artifact@v7
         with:
-          name: score
+          name: ${{ inputs.artifact_name }}
           path: ${{ steps.set_env.outputs.SCORE_FILE }}
