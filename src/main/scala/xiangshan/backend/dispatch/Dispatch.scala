@@ -627,7 +627,16 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
         val thisSrcHasInt = allFuThisIQ.map(x => {x.srcData.map(xx => {if (j < xx.size) IntRegSrcDataSet.contains(xx(j)) else false}).reduce(_ || _)}).reduce(_ || _)
         val thisSrcHasFp  = allFuThisIQ.map(x => {x.srcData.map(xx => {if (j < xx.size) FpRegSrcDataSet.contains(xx(j))  else false}).reduce(_ || _)}).reduce(_ || _)
         val thisSrcHasVec = allFuThisIQ.map(x => {x.srcData.map(xx => {if (j < xx.size) VecRegSrcDataSet.contains(xx(j)) else false}).reduce(_ || _)}).reduce(_ || _)
-        val selSrcState = Seq(thisSrcHasInt || maskForStd, thisSrcHasFp || maskForStd, thisSrcHasVec || maskForVStd)
+        // Vector loads are scheduled by the integer issue queue.  Their
+        // third source slot carries oldVd, so it must use the VP busy-table
+        // state even though the FU source metadata does not classify it as a
+        // regular vector source.
+        val oldVdForVLoad = issue.needOldVdLazyRead && (j == 2)
+        val selSrcState = Seq(
+          thisSrcHasInt || maskForStd,
+          thisSrcHasFp || maskForStd,
+          thisSrcHasVec || maskForVStd || oldVdForVLoad,
+        )
         IQSelUop(temp).bits.srcState(j) := PriorityMux(oh, allSrcState)(j).zip(selSrcState).filter(_._2 == true).map(_._1).foldLeft(false.B)(_ || _).asUInt
       }
       IQSelUop(temp).bits.srcStateV0 := PriorityMux(oh, allSrcStateV0)

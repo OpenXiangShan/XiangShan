@@ -108,6 +108,8 @@ class VecReplayInfo(implicit p: Parameters) extends XSBundle with HasVLSUParamet
   val vecActive = Bool()
   val is_first_ele = Bool()
   val mask = UInt((VLEN/8).W)
+  val vlBytes = UInt(log2Ceil(VLEN / 8 + 1).W)
+  val useVstart = Bool()
 }
 
 class AgeDetector(numEntries: Int, numEnq: Int, regOut: Boolean = true)(implicit p: Parameters) extends XSModule {
@@ -768,6 +770,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       genVWmask(replay_req_vaddr, replay_req_size)
     )
     replay_req(i).bits.vlByteMask.foreach(_ := DontCare)
+    replay_req(i).bits.vlBytes.foreach(_ := Mux(s1_vecReplay.isvec, s1_vecReplay.vlBytes, 0.U))
+    replay_req(i).bits.useVstart.foreach(_ := s1_vecReplay.isvec && s1_vecReplay.useVstart)
     replay_req(i).bits.occupySource := DontCare
     replay_req(i).bits.mshrId.get := s1_replayMSHRId
     replay_req(i).bits.replayQueueIdx.get := s1_replayIdx(i)
@@ -885,6 +889,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       vecReplay(enqIndex).vecActive := enq.bits.vecActive
       vecReplay(enqIndex).is_first_ele := enq.bits.is_first_ele
       vecReplay(enqIndex).mask         := enq.bits.mask
+      vecReplay(enqIndex).vlBytes      := enq.bits.vlBytes
+      vecReplay(enqIndex).useVstart    := enq.bits.useVstart
 
       vaddr(enqIndex) := enq.bits.vaddr
 

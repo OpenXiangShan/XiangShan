@@ -137,6 +137,9 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
       srcStatusV0.srcState := entryReg.status.srcStatusV0.get.srcState | enqDelayOut1.srcV0WakeUpByWB.get
       srcStatusV0.dataSource.value := DataSource.reg // change it when support fast wakeup.
     }
+    currentStatus.srcStatusOldVd.foreach { case srcStatusOldVd =>
+      srcStatusOldVd.srcState := entryReg.status.srcStatusOldVd.get.srcState | enqDelayOut1.oldVdWakeUpByWB.get
+    }
   }
 
   if (params.hasIQWakeUp) {

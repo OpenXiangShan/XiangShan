@@ -292,6 +292,12 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     // numSrc are different
     sink.bits.srcType.zip(source.bits.srcType).map(x => x._1 := x._2)
     sink.bits.psrc.zip(source.bits.psrc).map(x => x._1 := x._2)
+    sink.bits.oldVdPsrc.foreach(_ := source.bits.psrc(2)(VfPhyRegIdxWidth - 1, 0))
+    sink.bits.oldVdSrcState.foreach(_ := Mux(
+      SrcType.isVp(source.bits.srcType(2)),
+      source.bits.srcState(2),
+      SrcState.rdy,
+    ))
     sink.bits.srcState.zip(source.bits.srcState).map(x => x._1 := x._2)
     sink.bits.psrcV0.foreach(_ := source.bits.psrcV0)
     sink.bits.srcStateV0.foreach(_ := source.bits.srcStateV0)
@@ -357,6 +363,16 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     x.io.fromVlWb := 0.U.asTypeOf(x.io.fromVlWb)
   }
   intRegion.io.fromIntWb := intRegion.io.toIntPreg
+  intRegion.io.fromVfWb.zip(vecRegion.out.vpWb).foreach { case (sink, source) =>
+    sink.wen := source.wen
+    sink.pdest := source.pdest
+    sink.data := source.data
+    sink.rfWen := false.B
+    sink.fpWen := false.B
+    sink.vecWen := source.wen
+    sink.v0Wen := false.B
+    sink.vlWen := false.B
+  }
   fpRegion.in.fromTop.hartId := io.fromTop.hartId
   fpRegion.in.flush := ctrlBlock.io.toIssueBlock.flush
   fpRegion.in.fromDispatch.uops.flatten
@@ -482,14 +498,21 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       sink.valid := source.toRob.valid
       sink.bits.fromOldExuOutput(source)
   }
-
   vecRegion.in.fromMem.v0Wb.flatten lazyZip io.mem.vecWriteback.flatten foreach {
     case (sink, source) =>
       sink.wen := source.toV0Rf.map(_.valid).getOrElse(false.B)
       sink.pdest := source.pdest
       sink.data := source.toV0Rf.map(_.bits).getOrElse(0.U)
   }
-
+  vecRegion.in.fromMem.vldToRVP zip io.mem.vecWriteback.flatten foreach {
+    case (sink, source) =>
+      sink.valid := source.vldToRVP.map(_.valid).getOrElse(false.B)
+      sink.bits := source.vldToRVP.map(_.bits).getOrElse(0.U)
+  }
+  vecRegion.in.fromMem.vldS3MergeInfo zip io.mem.vecWriteback.flatten foreach {
+    case (sink, source) =>
+      sink := source.vldMergeInfo.getOrElse(0.U.asTypeOf(sink))
+  }
   vecRegion.in.fromMem.vldS3WakeUp := io.mem.vldS3WakeUp
 
   vecRegion.in.diff.foreach(_.diffVlRat := ctrlBlock.io.diff_vl_rat.get)
@@ -498,6 +521,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   vecRegion.in.fromCSR.frm := csrio.fpu.frm
   vecRegion.in.fromCSR.vxrm := csrio.vpu.vxrm
+  vecRegion.in.fromCSR.vstart := csrio.vpu.vstart
 
   vecRegion.in.vlWb0WakeUp := vecRegion.out.vlWb0WakeUp
 

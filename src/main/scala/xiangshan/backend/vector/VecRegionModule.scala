@@ -20,19 +20,20 @@ import chisel3.util._
 import difftest.{DiffPhyVecRegState, DifftestModule}
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import org.chipsalliance.cde.config.Parameters
-import utility._
+import utility.InstSeqNum
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.Bundles.IssueQueueIQWakeUpBundle
 import xiangshan.backend.datapath.DataConfig._
-import xiangshan.backend.datapath.RdConfig.RdConfig
+import xiangshan.backend.datapath.RdConfig.{RdConfig, VfRD}
 import xiangshan.backend.fu.fpu.Bundles.Frm
-import xiangshan.backend.fu.vector.Bundles.Vxrm
+import xiangshan.backend.fu.vector.Bundles.{Vl, Vxrm}
 import xiangshan.backend.regfile.{FpRegFile, PregParams, VfRegFile}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, WakeUpBundle}
 import xiangshan.backend.vector.VecRegionModule._
 import xiangshan.backend.vector.fu.VecFuConfig
+import xiangshan.backend.vector.util.RegUtil._
 import xiangshan.backend.float.FltIssueQueue.FltWakeUpBundle
 import xiangshan.backend.{ExcpModToVprf, VprfToExcpMod}
 import xiangshan.mem.StoreQueueDataWrite
@@ -272,6 +273,10 @@ class VecRegionImp(
   private val vldS4VpWb = Reg(chiselTypeOf(vldS3VpWb))
   private val vldS5VpWb = Reg(chiselTypeOf(vldS3VpWb))
   private val vldS6VpWb = Reg(chiselTypeOf(vldS3VpWb))
+  private val vldS3MergeInfo = in.fromMem.vldS3MergeInfo
+  private val vldS4MergeInfo = VecInit(vldS3MergeInfo.map(x => GatedRegNext(x)))
+  private val vldS5MergeInfo = VecInit(vldS4MergeInfo.map(x => GatedRegNext(x)))
+  private val vldS6MergeInfo = VecInit(vldS5MergeInfo.map(x => GatedRegNext(x)))
 
   private val vldS6RobWb: Seq[Seq[ValidIO[Exu.ToRob]]] = in.fromMem.vldS3RobWb.map { iqWB => iqWB.map {
     exuWB => Pipe(exuWB, 3)
@@ -337,12 +342,92 @@ class VecRegionImp(
   vpWen := vpWbDataPath.out.wb0.map(_.wen)
   vpWaddr := vpWbDataPath.out.wb0.map(_.pdest)
   vpWdata := vpWbDataPath.out.wb0.map(_.data)
-  vpRaddr := issuePipes
+  vpRaddr.foreach(_ := 0.U)
+
+  private val vldOldVdReadPortIds = backendParams.getOldVdRdPortIndices
+
+  require(
+    vldOldVdReadPortIds.size == backendParams.LdExuCnt,
+    s"Vector load old-vd read ports must be configured in Parameters.scala: " +
+      s"got ${vldOldVdReadPortIds.size}, expect ${backendParams.LdExuCnt}"
+  )
+
+  private val vpIssueRaddr = issuePipes
     .flatMap(_.flatMap(_.out.is1VpRdAddrNext))
     .groupBy(_.rdConfig.port)
     .toSeq
     .sortBy { case (port, raddr) => port }
-    .map { case (port, raddrSeq) => raddrSeq.ensuring(_.size == 1).head.addr }
+    .map { case (port, raddrSeq) => port -> raddrSeq.ensuring(_.size == 1).head.addr }
+  require(vpIssueRaddr.map(_._1).forall(_ < numVpReadPort))
+  require((vpIssueRaddr.map(_._1).toSet intersect vldOldVdReadPortIds.toSet).isEmpty)
+  for ((port, addr) <- vpIssueRaddr) {
+    vpRaddr(port) := addr
+  }
+
+  private val vldS4OldVdReadData = Wire(Vec(vldOldVdReadPortIds.size, Valid(UInt(VLEN.W))))
+  private val vldS5OldVdReadData = RegInit(0.U.asTypeOf(chiselTypeOf(vldS4OldVdReadData)))
+  private val vldS6OldVdReadData = RegInit(0.U.asTypeOf(chiselTypeOf(vldS4OldVdReadData)))
+  private val vldS4VStart = Wire(Vec(vldOldVdReadPortIds.size, Valid(Vl())))
+  private val vldS5VStart = RegInit(0.U.asTypeOf(chiselTypeOf(vldS4VStart)))
+  private val vldS6VStart = RegInit(0.U.asTypeOf(chiselTypeOf(vldS4VStart)))
+  for ((readPort, i) <- vldOldVdReadPortIds.zipWithIndex) {
+    val vldReadValid = in.fromMem.vldToRVP(i).valid
+    val vstartReadData = RegEnable(
+      Mux(in.fromMem.vldS3MergeInfo(i).bits.useVstart, in.fromCSR.vstart, 0.U.asTypeOf(Vl())),
+      0.U.asTypeOf(Vl()),
+      vldReadValid
+    )
+    vpRaddr(readPort) := Mux(vldReadValid, in.fromMem.vldToRVP(i).bits, 0.U)
+    vldS4OldVdReadData(i).valid := RegNext(vldReadValid, false.B)
+    vldS4OldVdReadData(i).bits := Mux(vldS4OldVdReadData(i).valid, vpRdata(readPort), 0.U)
+    vldS4VStart(i).valid := vldS4OldVdReadData(i).valid
+    vldS4VStart(i).bits := Mux(vldS4VStart(i).valid, vstartReadData, 0.U.asTypeOf(Vl()))
+  }
+  vldS5OldVdReadData := vldS4OldVdReadData
+  vldS6OldVdReadData := vldS5OldVdReadData
+  vldS5VStart := vldS4VStart
+  vldS6VStart := vldS5VStart
+  dontTouch(vldS4OldVdReadData)
+
+  private val vldS6VpWbMerged = Wire(chiselTypeOf(vldS6VpWb))
+  vldS6VpWbMerged := vldS6VpWb
+  private val vldMergeUnits = Seq.fill(backendParams.LdExuCnt)(Module(new VLdMergeUnit))
+  private val vldS6VpWbFlat = vldS6VpWb.flatten
+  require(
+    vldS6VpWbFlat.size == backendParams.LdExuCnt,
+    s"Vector load writeback ports must match load exu count: ${vldS6VpWbFlat.size} != ${backendParams.LdExuCnt}"
+  )
+  for (i <- vldMergeUnits.indices) {
+    val mgu = vldMergeUnits(i)
+    val wb = vldS6VpWbFlat(i)
+    val oldVd = vldS6OldVdReadData(i)
+    val mergeInfo = vldS6MergeInfo(i)
+    mgu.in.vStart := vldS6VStart(i).bits
+    mgu.in.vldMergeInfo := mergeInfo
+    mgu.in.oldVd := oldVd.bits
+    mgu.in.vd := wb.data
+    when(wb.wen) {
+      assert(oldVd.valid, "Vector load merge missing old vd data")
+    }
+  }
+  for ((mergedWb, mgu) <- vldS6VpWbMerged.flatten.zip(vldMergeUnits)) {
+    when(mergedWb.wen) {
+      mergedWb.data := mgu.out.vd
+    }
+  }
+
+  require(
+    vpWbDataPath.in.fromExus.flatten.flatten.size ==
+      (issuePipes.map(_.map(_.out.vpWbNext).collect { case x if x.nonEmpty => x.get }) ++
+        vldS6VpWbMerged).flatten.size
+  )
+
+  vpWbDataPath.in.fromExus.flatten.flatten
+    .zip(Seq(
+      issuePipes.map(_.map(_.out.vpWbNext).collect { case x if x.nonEmpty => x.get }),
+      vldS6VpWbMerged,
+    ).flatten.flatten)
+    .foreach { case (sink, source) => sink := source }
 
   vlWen := in.fromIntRegion.vlWb0Next.map(_.wen)
   vlWaddr := in.fromIntRegion.vlWb0Next.map(_.pdest)
@@ -550,6 +635,7 @@ object VecRegionModule {
     val fromCSR = new Bundle {
       val vxrm = Vxrm()
       val frm = Frm()
+      val vstart = Vl()
     }
 
     val fromVecExcpMod = new ExcpModToVprf(maxMergeNumPerCycle * 2, maxMergeNumPerCycle)
@@ -564,8 +650,10 @@ object VecRegionModule {
 
     val vldS3WakeUp: Vec[WakeUpBundle] = Vec(backendParams.LdExuCnt, new WakeUpBundle(backendParams.vpPregParams))
     val vldS3VpWbNext: MixedVec[MixedVec[Exu.ToRf]] = intRegion.genExuToRfBundle(backendParams.vpPregParams)
+    val vldS3MergeInfo = Vec(backendParams.LdExuCnt, ValidIO(new VLdMergeUnit.VldMergeInfo))
     val vldS3RobWb: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = intRegion.genExuToRobBundle(ValidIO(_), _.needVpWen)
     val v0Wb: MixedVec[MixedVec[Exu.ToRf]] = intRegion.genExuToRfBundle(backendParams.v0PregParams)
+    val vldToRVP = Vec(backendParams.LdExuCnt, Valid(UInt(VfPhyRegIdxWidth.W)))
   }
 
   class Out(implicit p: Parameters, param: RegionParam) extends XSBundle {
