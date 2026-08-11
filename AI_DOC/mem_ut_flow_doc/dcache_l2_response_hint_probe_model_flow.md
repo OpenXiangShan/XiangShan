@@ -30,6 +30,9 @@ DCache responder 内部生命周期；V2 主表/LSQ 的主动 CBO flow 仍保持
 | `flush snapshot` | `l2Flush` DRAIN 完成时固定下来的 ACTIVE line 集合 | `l2_flush_snapshot_line_q` | 只在一次 DRAIN->PROBE 边界建立；新 Grant 不会追加入本轮 |
 | `flush state` | 轻量 L2 flush 的 level-request 本地状态机 | `l2_flush_state` | `IDLE -> DRAIN -> PROBE -> DONE -> IDLE` |
 | `deferred Acquire` | 已 A.fire 但必须先清除旧 alias 的新 alias Acquire | `line_record.deferred_acquire` | alias conflict 时保存；旧 alias Probe(toN) 收敛后交回普通 A response builder |
+| `readonly observer` | 协议动作完成后投影 resident、assembly、fragment 与 corrupt 事实的旁路记录 | `mem_access_base_sequence` static state | 不控制 A/B/C/D/E 或 Probe 时序 |
+| `aggregate snapshot` | owner 已发布的 DCache 当前驻留/drain 值型摘要 | `dcache_aggregate_snapshot` | 未来 RM 通过 API 读取，不扫描 line map |
+| `overlay readiness` | committed overlay 对 RM 可读的统一 DCache 门槛 | `dcache_overlay_read_ready` | 必须同时无 resident、pending、assembly、fragment 与 corrupt |
 
 ## 2. 调用 Flow
 
@@ -51,6 +54,10 @@ flowchart TD
     H --> J[service_hint]
     R --> S[capture_l2_flush_snapshot / submit_probe(toN)]
     C --> K[try_start_probe multi-batch]
+    D --> O[passive resident observer]
+    E --> O
+    O --> T[publish dcache aggregate snapshot]
+    T --> U[memblock_rm_readonly_api readiness]
     I --> L[send_dcache_xaction]
     J --> L
     K --> L
@@ -68,6 +75,8 @@ flowchart TD
   E.fire 必须按 sink 匹配 GrantAck wait，命中后更新 line record 为 ACTIVE；
   C.fire 用 line 筛选唯一 WAIT_C probe record；ProbeAckData 的第一拍锁定 token，第二拍只允许同 token
   继续 assembly，Release 类最终建立 ReleaseAck record；
+  observer 在 C-data 首拍记录 assembly pending，在完整 corrupt C response 收敛前记录整条 64 B corrupt
+  byte 范围；正常 C-data 仍按原路径入 write batch，只有既有 commit 完成后 observer 才确认 fragment；
   A.fire 解码 Acquire/CBO；若 Acquire alias 与 ACTIVE line record 不同，先保存 deferred Acquire 并建立
   Probe(toN)；CBO miss 直接建立 CBOAck，CBO hit 则先保存 CBO context/error snapshot 并建立
   Clean->toB、Flush/Inval->toN 的 Probe，只有匹配 C response 收敛后才能建立 CBOAck；
@@ -298,11 +307,46 @@ record，因此同 batch 不会重复；16 条 record 满时停止继续建立�
 done level，直到 `io_outer_l2_flush_en=0` 清空 flush-local snapshot 回到 IDLE。它不调用
 `clear_runtime_state()`，不会取消正常 D/E/Probe owner，也不模拟完整 CoupledL2 set/way 扫描。
 
+### 6.2 DCache readonly observer
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv`，函数
+`observe_dcache_c_assembly_start()`、`observe_dcache_corrupt_line()`、
+`observe_dcache_write_enqueued()`、`observe_dcache_write_committed()`。
+
+抽象功能描述：这些 helper 只在既有 DCache lifecycle 动作之后记录 API 所需的旁路事实。它们不替换
+`cached_line_by_addr`、不决定 Probe target、不改变 ReleaseAck/Probe closure，也不调用 shared-memory
+commit；无法确认事实时只让 aggregate unavailable。
+
+真实逻辑摘要：
+
+```systemverilog
+if (!dcache_corrupt_byte_mask_by_line.exists(dcache_line)) begin
+    dcache_corrupt_byte_mask_by_line[dcache_line] = 64'hffff_ffff_ffff_ffff;
+    dcache_aggregate_snapshot.observed_corrupt_line_count++;
+end
+write_overlay_corrupt_byte_mask[line_addr[47:10]] |= line_mask;
+publish_dcache_aggregate_snapshot();
+```
+
+中文伪代码：当既有 ProbeAckData 或 ReleaseData 已确认 corrupt 时，先以 64 B DCache line 为粒度置全
+corrupt byte，再以 1 KiB backing line 为粒度更新 API 查询 mask；随后重新计算 aggregate。该调用位于
+complete_probe_record 或 remove_cached_line 之前，所以协议 resident 可以继续按原路径收敛，但 API 不会
+把缺失的 payload 当作正常 overlay。重复观察同一 line 不重复增加 corrupt line count。
+
+正常 C-data 的首拍会置 assembly pending；两个 32 B fragment 均经过原 batch commit 后，observer 才会
+清除整条 64 B 的 corrupt 范围。Uncache 已提交 store 只能清除其实际 byte 覆盖范围。任何未登记 commit、
+计数下溢或 fragment 不完整都会置 observer_ready=0，而不是改变 DCache C-channel response。
+
 ## 7. Reset、Stop 与边界
 
 `clear_runtime_state()` 在 reset 时清除 `dcache_rsp_q`、timer、current D hold、GrantAck wait、Hint queue、
 C reservation、CBO context/reservation、Probe 和 cache map。shared backing/overlay 的清空只由 testcase 的 memory lifecycle owner
 在 responder 启动前完成；reset 不应重新清空公共 memory。
+
+reset 分支同时使 readonly aggregate snapshot 失效并清除未完成 fragment 观察；首次从已发布快照进入
+invalid 时递增 observer generation，reset 保持期间不重复递增。reset 解除后的第一个正常 sample 发布
+新的 owner baseline。这个旁路动作不触发 commit、不改变 reset 时的 idle item，也不把 L2 flush DONE 当作
+“DCache 当前为空”的真源。
 
 global stop 的退出条件包括：flush state 已回到 IDLE、无 queued/current D record、无运行 timer、无 GrantAck
 wait、无 Hint、无 B hold、`probe_record_q` 为空、无 C assembly/reservation、无 armed A/C snapshot 和当前
@@ -333,6 +377,8 @@ Uncache TL-UL A/D responder 的独立 queue 和 delay 见
   再把预留 response slot 转为 CBOAck。CBO error 在 A.fire 固定，CBOAck D.fire 只清 context；
 - 新增保护：命中 CBO 预检 Probe capacity；同一 physical line 的 Release/ReleaseData 与未收敛 Probe
   fail-fast，不静默删除 Probe owner；
+- 新增 readonly observer：既有 map/C-data/batch 完成点被动发布 resident、fragment、corrupt 与 drain
+  snapshot；唯一 API class 只读该摘要和已提交 memory，不暴露 cached_line_by_addr，也不改变协议流程；
 - 保留原有 A/C/E/Probe/overlay 和 global-stop 所有权，不把 responder 状态写入主表或 status table。
 
 当前默认 delay 为 `1..10` cycle、顺序返回。D-error 随机注入已由

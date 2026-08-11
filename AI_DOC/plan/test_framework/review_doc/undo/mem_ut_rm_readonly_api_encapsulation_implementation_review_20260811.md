@@ -427,6 +427,12 @@ rg -n "common_data_transaction::get\(|ensure_main_line\(|read_shared_mem_for_dut
 
 首次尝试 base_fun 时远端 VCS 报 VFS_SDB_ERROR，指出历史 tdc.sdb 数据库损坏；只清理本轮生成缓存后分区/elaboration 可继续。为避免远端遗留 base_fun partcomp 进程和缓存互相影响，本轮最终验证使用独立 mode、partcmp_op=off、wave=off，没有杀掉无关进程，也没有把该环境问题归因于本次代码。
 
+### 9.4 Flow 文档同步
+
+已同步 DCache/Uncache Memory Responder Flow 和 DCache 轻量 L2 Response、Hint 与 Probe Flow：两者都说明
+shared-memory batch 先按既有路径提交、observer 后记录事实、API 不触发提交或懒分配；DCache flow 还说明
+C-data corrupt 的记录先于协议收敛、reset aggregate invalid/rebaseline 以及 readiness 不是 L2 flush DONE。
+
 ## 10. 非本次修改的逻辑分析
 
 当前 git status --short 中下列内容不是本 plan 的修改，本次没有 stage、回滚或解释其功能正确性：

@@ -4,6 +4,11 @@
 
 实现评审：[mem_ut_rm_readonly_api_encapsulation_implementation_review_20260811.md](../../review_doc/undo/mem_ut_rm_readonly_api_encapsulation_implementation_review_20260811.md)。
 
+关联 flow 已同步：
+
+- [DCache/Uncache Memory Responder Flow](../../../../mem_ut_flow_doc/dcache_sbuffer_memory_responder_flow.md)
+- [DCache 轻量 L2 Response、Hint 与 Probe Flow](../../../../mem_ut_flow_doc/dcache_l2_response_hint_probe_model_flow.md)
+
 ## 1. 专有名词与计划边界
 
 | 术语 | 当前含义 | 代码落点或示例 |
