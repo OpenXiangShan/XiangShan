@@ -40,20 +40,64 @@ import scala.collection.immutable.Nil
 
 
 object RobBundles extends HasCircularQueuePtrHelper {
+  def NormalUopNumWidth(implicit p: Parameters): Int = log2Up(p(XSCoreParamsKey).MaxUopSize + 1)
+  def CompressedSlotUopNumWidth(implicit p: Parameters): Int = log2Ceil(2 * p(XSCoreParamsKey).RenameWidth)
+  def PackedUopStateWidth(implicit p: Parameters): Int = {
+    math.max(NormalUopNumWidth + 1, 2 * CompressedSlotUopNumWidth)
+  }
+
+  private def fitUopStateWidth(value: UInt, width: Int): UInt = {
+    val valueWidth = value.getWidth
+    if (valueWidth == width) {
+      value
+    } else if (valueWidth > width) {
+      value(width - 1, 0)
+    } else {
+      Cat(0.U((width - valueWidth).W), value)
+    }
+  }
+
+  def encodeUopState(entryPairType: UInt, formerUopNum: UInt, latterUopNum: UInt)(implicit p: Parameters): UInt = {
+    val normalState = fitUopStateWidth(formerUopNum, PackedUopStateWidth)
+    val compressedState = fitUopStateWidth(
+      Cat(
+        fitUopStateWidth(latterUopNum, CompressedSlotUopNumWidth),
+        fitUopStateWidth(formerUopNum, CompressedSlotUopNumWidth)
+      ),
+      PackedUopStateWidth
+    )
+    Mux(CompressType.isNORMAL(entryPairType), normalState, compressedState)
+  }
+
+  def decodeFormerUopNum(entryPairType: UInt, uopState: UInt)(implicit p: Parameters): UInt = {
+    Mux(
+      CompressType.isNORMAL(entryPairType),
+      uopState(NormalUopNumWidth - 1, 0),
+      fitUopStateWidth(uopState(CompressedSlotUopNumWidth - 1, 0), NormalUopNumWidth)
+    )
+  }
+
+  def decodeLatterUopNum(entryPairType: UInt, uopState: UInt)(implicit p: Parameters): UInt = {
+    Mux(
+      CompressType.isNORMAL(entryPairType),
+      0.U(NormalUopNumWidth.W),
+      fitUopStateWidth(
+        uopState(2 * CompressedSlotUopNumWidth - 1, CompressedSlotUopNumWidth),
+        NormalUopNumWidth
+      )
+    )
+  }
+
   class RobEntryBundle(implicit p: Parameters) extends XSBundle {
     val valid = Bool()
 
     val entryPairType = CompressType()
     val noCompressReason = UInt(2.W) // used for Perf
 
-    val formerUopNum = UInt(log2Up(MaxUopSize + 1).W)
-    val latterUopNum = UInt(log2Up(MaxUopSize + 1).W)
+    val uopState = UInt(PackedUopStateWidth.W)
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val complexSlotHasDest = UInt(1.W)
     val entryHasStore = Bool()
-    val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
 
     val vls = Bool()
     val interruptSafe = Bool()
@@ -66,8 +110,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val needVTB = Bool()
 
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
-    // Preserve the former slot's exact trace classification so a latter-slot
-    // squash can rebuild the surviving physical entry without stale metadata.
+    // Preserve the former slot's exact trace metadata so a latter-slot squash
+    // can rebuild the surviving physical entry without stale metadata.
     val formerTraceBlockInPipe = new TracePipe(IretireWidthEncoded)
     val slotNeedFlushMask = UInt(2.W)
 
@@ -92,6 +136,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val topdownIssued    = OptionWrapper(backendParams.debugEn, Bool())
     val topdownIssueTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
 
+    def formerUopNum: UInt = decodeFormerUopNum(entryPairType, uopState)
+    def latterUopNum: UInt = decodeLatterUopNum(entryPairType, uopState)
     def isWritebacked: Bool = !formerUopNum.orR && !latterUopNum.orR
     def isUopWritebacked: Bool = !formerUopNum.orR && !latterUopNum.orR
   }
@@ -102,8 +148,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val commit_w = Bool()
     val entryPairType = CompressType()
     val noCompressReason = UInt(2.W)
-    val formerUopNum = UInt(log2Up(MaxUopSize + 1).W)
-    val latterUopNum = UInt(log2Up(MaxUopSize + 1).W)
+    val uopState = UInt(PackedUopStateWidth.W)
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val interruptSafe = Bool()
     val slotHeadRvcMask = UInt(2.W)
@@ -113,9 +158,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val vls = Bool()
     val commitType = CommitType()
     val entryHasStore = Bool()
-    val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
 
@@ -123,6 +165,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val slotNeedFlushMask = UInt(2.W)
     // trace
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
+    val formerTraceIretire = UInt(IretireWidthEncoded.W)
     // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
@@ -132,19 +175,18 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth + 1).W))
     // debug_end
+
+    def formerUopNum: UInt = decodeFormerUopNum(entryPairType, uopState)
+    def latterUopNum: UInt = decodeLatterUopNum(entryPairType, uopState)
   }
 
-  def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop): Unit = {
+  def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop)(implicit p: Parameters): Unit = {
     robEntry.entryPairType := robEnq.entryPairType
     robEntry.noCompressReason := robEnq.noCompressReason
 
-    robEntry.formerUopNum := robEnq.formerNumWB
-    robEntry.latterUopNum := robEnq.latterNumWB
+    robEntry.uopState := encodeUopState(robEnq.entryPairType, robEnq.formerNumWB, robEnq.latterNumWB)
     robEntry.complexSlotHasDest := robEnq.complexSlotHasDest
     robEntry.entryHasStore := robEnq.entryHasStore
-    robEntry.formerInstrCnt := robEnq.formerInstrCnt
-    robEntry.latterInstrCnt := robEnq.latterInstrCnt
-    robEntry.formerLen := robEnq.formerLen
 
     robEntry.commitType := robEnq.commitType
     robEntry.ftqIdx := robEnq.ftqPtr
@@ -179,14 +221,13 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.topdownIssueTime.foreach(_ := 0.U)
   }
 
-  def connectCommitEntry(robCommitEntry: RobCommitEntryBundle, robEntry: RobEntryBundle): Unit = {
+  def connectCommitEntry(robCommitEntry: RobCommitEntryBundle, robEntry: RobEntryBundle)(implicit p: Parameters): Unit = {
     robCommitEntry.walk_v := robEntry.valid
     robCommitEntry.commit_v := robEntry.valid
-    robCommitEntry.commit_w := robEntry.formerUopNum === 0.U && robEntry.latterUopNum === 0.U
+    robCommitEntry.commit_w := robEntry.isWritebacked
     robCommitEntry.entryPairType := robEntry.entryPairType
     robCommitEntry.noCompressReason := robEntry.noCompressReason
-    robCommitEntry.formerUopNum := robEntry.formerUopNum
-    robCommitEntry.latterUopNum := robEntry.latterUopNum
+    robCommitEntry.uopState := robEntry.uopState
     robCommitEntry.realDestSize := robEntry.realDestSize
     robCommitEntry.interruptSafe := robEntry.interruptSafe
     robCommitEntry.rfWen := robEntry.rfWen
@@ -199,11 +240,9 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.ftqOffset := robEntry.ftqOffset
     robCommitEntry.commitType := robEntry.commitType
     robCommitEntry.entryHasStore := robEntry.entryHasStore
-    robCommitEntry.formerInstrCnt := robEntry.formerInstrCnt
-    robCommitEntry.latterInstrCnt := robEntry.latterInstrCnt
-    robCommitEntry.formerLen := robEntry.formerLen
     robCommitEntry.slotNeedFlushMask := robEntry.slotNeedFlushMask
     robCommitEntry.traceBlockInPipe := robEntry.traceBlockInPipe
+    robCommitEntry.formerTraceIretire := robEntry.formerTraceBlockInPipe.iretire
     robCommitEntry.debug_pc.foreach(_ := robEntry.debug_pc.get)
     robCommitEntry.debug_instr.foreach(_ := robEntry.debug_instr.get)
     robCommitEntry.debug_ldest.foreach(_ := robEntry.debug_ldest.get)

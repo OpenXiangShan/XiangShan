@@ -205,17 +205,34 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   private val traceEncodeTable = (1 to RenameWidth).flatMap { instrNum =>
     (0 to instrNum).map(nonRVCNum => (instrNum, nonRVCNum))
   }
-  private def encodeTraceIretire(instrCount: UInt, nonRVCCount: UInt): UInt = {
+  private val traceDecodeTable = traceEncodeTable.map { case (instrNum, nonRVCNum) =>
+    (instrNum, instrNum + nonRVCNum)
+  }
+  private def decodeTraceInstrCount(traceIretire: UInt): UInt = {
     chisel3.util.experimental.decode.decoder(
-      instrCount ## nonRVCCount,
+      traceIretire,
       TruthTable(
-        traceEncodeTable.zipWithIndex.map { case ((instrNum, nonRVCNum), encode) =>
-          val key = (instrNum << traceInstrCountWidth) + nonRVCNum
-          BitPat(key.U((2 * traceInstrCountWidth).W)) -> BitPat((encode + 1).U(IretireWidthEncoded.W))
+        traceDecodeTable.zipWithIndex.map { case ((instrNum, _), encode) =>
+          BitPat((encode + 1).U(IretireWidthEncoded.W)) -> BitPat(instrNum.U(traceInstrCountWidth.W))
         },
-        BitPat.N(IretireWidthEncoded)
+        BitPat.N(traceInstrCountWidth)
       )
     )
+  }
+  private def decodeTraceHalfWords(traceIretire: UInt): UInt = {
+    chisel3.util.experimental.decode.decoder(
+      traceIretire,
+      TruthTable(
+        traceDecodeTable.zipWithIndex.map { case ((_, halfWords), encode) =>
+          BitPat((encode + 1).U(IretireWidthEncoded.W)) -> BitPat(halfWords.U(IretireWidthCommited.W))
+        },
+        BitPat.N(IretireWidthCommited)
+      )
+    )
+  }
+  private def traceHalfWordsToBytes(halfWords: UInt): UInt = {
+    val formerLenWidth = log2Ceil(RenameWidth * 4 + 1)
+    Cat(halfWords, 0.U(1.W))(formerLenWidth - 1, 0)
   }
 
   // robEntries enqueue
@@ -227,10 +244,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
     when(enqOH.asUInt.orR && !io.redirect.valid){
       // TODO: enq
-      connectEnq(robEntries(i), Mux1H(enqOH, io.enq.req.map(_.bits)))
+      val entryHeadUop = Mux1H(enqOH, io.enq.req.map(_.bits))
+      connectEnq(robEntries(i), entryHeadUop)
       val youngestEnqUop = PriorityMux(entryEnqValid.reverse, io.enq.req.map(_.bits).reverse)
       robEntries(i).traceBlockInPipe.itype := youngestEnqUop.traceBlockInPipe.itype
       robEntries(i).traceBlockInPipe.ilastsize := youngestEnqUop.traceBlockInPipe.ilastsize
+      robEntries(i).formerTraceBlockInPipe.iretire := entryHeadUop.formerTraceIretire
       val formerEntryEnqValid = entryEnqValid.zip(io.enq.req).map { case (valid, req) =>
         valid && req.bits.robIdx.slotIsFormer
       }
@@ -250,16 +269,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       when(downgradeToFormer) {
         robEntries(i).entryPairType := CompressType.NORMAL
         robEntries(i).noCompressReason := NoCompressReason.flushedHalf
-        val formerHalfWords = robEntries(i).formerLen >> 1
-        val formerNonRVC = Wire(UInt(traceInstrCountWidth.W))
-        assert(formerHalfWords >= robEntries(i).formerInstrCnt)
-        formerNonRVC := formerHalfWords - robEntries(i).formerInstrCnt
-        robEntries(i).traceBlockInPipe.iretire := encodeTraceIretire(
-          robEntries(i).formerInstrCnt,
-          formerNonRVC
-        )
-        robEntries(i).traceBlockInPipe.itype := robEntries(i).formerTraceBlockInPipe.itype
-        robEntries(i).traceBlockInPipe.ilastsize := robEntries(i).formerTraceBlockInPipe.ilastsize
+        robEntries(i).traceBlockInPipe := robEntries(i).formerTraceBlockInPipe
       }
     }
   }
@@ -316,14 +326,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val rawInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(bankAddrWidth-1, 0)))).toSeq
   val commitInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(bankAddrWidth-1,0)))).toSeq
   val walkInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(walkPtrVec(i).value(bankAddrWidth-1, 0)))).toSeq
-  val commitInstrCntByEntry = rawInfo.map { info =>
-    val survivingLatterInstrCnt = Mux(
-      CompressType.isNotNORMAL(info.entryPairType),
-      info.latterInstrCnt,
-      0.U
-    )
-    info.formerInstrCnt +& survivingLatterInstrCnt
-  }
   for (i <- 0 until CommitWidth) {
     connectCommitEntry(robDeqGroup(i), robBanksRdataThisLineUpdate(i))
     when(allCommitted){
@@ -344,25 +346,31 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     )
   */
   val iretireCommit = Wire(Vec(CommitWidth, UInt(IretireWidthCommited.W)))
-  val instrSizeCommit   = Wire(Vec(CommitWidth, UInt((log2Ceil(RenameWidth + 1)).W)))
-  val instrSizeTable = (1 to RenameWidth).map( instrNum =>
-    (instrNum to (2 * instrNum)).map(iretireNum => (instrNum, iretireNum))
-  ).flatten
+  val instrSizeCommit = Wire(Vec(CommitWidth, UInt(traceInstrCountWidth.W)))
+  val formerInstrCntCommit = Wire(Vec(CommitWidth, UInt(traceInstrCountWidth.W)))
+  val latterInstrCntCommit = Wire(Vec(CommitWidth, UInt(traceInstrCountWidth.W)))
+  val formerHalfWordsCommit = Wire(Vec(CommitWidth, UInt(IretireWidthCommited.W)))
+  val formerLenCommit = Wire(Vec(CommitWidth, UInt(log2Ceil(RenameWidth * 4 + 1).W)))
 
-  rawInfo.zip(instrSizeCommit).zip(iretireCommit).map { case((raw, instr), iretire) =>
-    iretire := chisel3.util.experimental.decode.decoder(
-      raw.traceBlockInPipe.iretire,
-      TruthTable(
-        instrSizeTable.zipWithIndex.map{case(table, encode) => (BitPat((encode + 1).U(IretireWidthEncoded.W)), BitPat(table._2.U(IretireWidthCommited.W)))},
-        BitPat.N(IretireWidthCommited))
+  for (i <- 0 until CommitWidth) {
+    iretireCommit(i) := decodeTraceHalfWords(rawInfo(i).traceBlockInPipe.iretire)
+    instrSizeCommit(i) := decodeTraceInstrCount(rawInfo(i).traceBlockInPipe.iretire)
+    formerInstrCntCommit(i) := decodeTraceInstrCount(rawInfo(i).formerTraceIretire)
+    formerHalfWordsCommit(i) := decodeTraceHalfWords(rawInfo(i).formerTraceIretire)
+    latterInstrCntCommit(i) := Mux(
+      CompressType.isNotNORMAL(rawInfo(i).entryPairType),
+      instrSizeCommit(i) - formerInstrCntCommit(i),
+      0.U
     )
-    instr := chisel3.util.experimental.decode.decoder(
-      raw.traceBlockInPipe.iretire,
-      TruthTable(
-        instrSizeTable.zipWithIndex.map{case(table, encode) => (BitPat((encode + 1).U(IretireWidthEncoded.W)), BitPat(table._1.U((log2Ceil(RenameWidth + 1)).W)))},
-        BitPat.N((log2Ceil(RenameWidth + 1))))
-    )
+    formerLenCommit(i) := traceHalfWordsToBytes(formerHalfWordsCommit(i))
+    when(rawInfo(i).commit_v && CompressType.isNotNORMAL(rawInfo(i).entryPairType)) {
+      assert(instrSizeCommit(i) >= formerInstrCntCommit(i))
+    }
+    when(rawInfo(i).commit_v && CompressType.isNORMAL(rawInfo(i).entryPairType)) {
+      assert(latterInstrCntCommit(i) === 0.U)
+    }
   }
+  val commitInstrCntByEntry = instrSizeCommit.toSeq
   for (i <- 0 until CommitWidth) {
     commitInfo(i).ftqOffset := 0.U
     commitInfo(i).ftqIdx := rawInfo(i).ftqIdx - 1.U
@@ -846,7 +854,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.flushPcInfo.formerLen := Mux(
     needModifyFtqIdxOffset || flushIsFormer || deqPtrEntry.predTaken,
     0.U.asTypeOf(io.flushPcInfo.formerLen),
-    deqPtrEntry.formerLen
+    formerLenCommit(0)
   )
   io.flushPcInfo.flushIsRVC := Mux(
     needModifyFtqIdxOffset,
@@ -1078,7 +1086,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     printf(p"[CROB-STUCK] deq=${Hexadecimal(deqPtr.value)} valid=${deqPtrEntry.commit_v} " +
       p"realDest=${deqPtrEntry.realDestSize} " +
       p"ctype=${Binary(deqPtrEntry.entryPairType)} slotNeedFlush=${Binary(deqPtrEntry.slotNeedFlushMask)} " +
-      p"formerCnt=${deqPtrEntry.formerInstrCnt} latterCnt=${deqPtrEntry.latterInstrCnt} " +
+      p"formerCnt=${formerInstrCntCommit(0)} latterCnt=${latterInstrCntCommit(0)} " +
       p"formerUopNum=${deqPtrEntry.formerUopNum} latterUopNum=${deqPtrEntry.latterUopNum} " +
       p"headPC=${Hexadecimal(debugMeta(debug_microOp(deqPtr.value).head).pc)} " +
       p"tailPC=${Hexadecimal(debugMeta(debug_microOp(deqPtr.value)(1)).pc)}\n")
@@ -1424,6 +1432,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val redirectHitThisEntry = robEntries(i).valid &&
       io.redirect.valid &&
       io.redirect.bits.robIdx.value === i.U
+    val redirectClearsLatter = redirectHitThisEntry &&
+      CompressType.isNotNORMAL(entryPairType) && (
+        io.redirect.bits.robIdx.slotIsFormer && !io.redirect.bits.flushItself() ||
+        !io.redirect.bits.robIdx.slotIsFormer && io.redirect.bits.flushItself()
+      )
     val (nextFormerUopNum, nextLatterUopNum) = calcNextSlotUopNum(
       entryValid = robEntries(i).valid,
       entryFormerUopNum = robEntries(i).formerUopNum,
@@ -1440,17 +1453,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       formerWbCntRaw = formerWbCnt,
       latterWbCntRaw = latterWbCnt
     )
-    robEntries(i).formerUopNum := nextFormerUopNum
-    robEntries(i).latterUopNum := nextLatterUopNum
+    val enqEntryPairType = PriorityMux(instCanEnqSeq, io.enq.req.map(_.bits.entryPairType))
+    val nextEntryPairTypeForUopState = Mux(
+      isFirstEnq,
+      enqEntryPairType,
+      Mux(redirectClearsLatter, CompressType.NORMAL, entryPairType)
+    )
+    robEntries(i).uopState := encodeUopState(
+      nextEntryPairTypeForUopState,
+      nextFormerUopNum,
+      nextLatterUopNum
+    )
 
     // trace
-    val redirectClearsLatter = robEntries(i).valid &&
-      CompressType.isNotNORMAL(robEntries(i).entryPairType) &&
-      io.redirect.valid &&
-      io.redirect.bits.robIdx.value === i.U && (
-        io.redirect.bits.robIdx.slotIsFormer && !io.redirect.bits.flushItself() ||
-        !io.redirect.bits.robIdx.slotIsFormer && io.redirect.bits.flushItself()
-      )
     val youngestSlotIsFormer = CompressType.isNORMAL(robEntries(i).entryPairType) || redirectClearsLatter
     val taken = branchWBs.map(writeback =>
       writeback.valid &&
@@ -1505,6 +1520,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val redirectHitThisEntry = needUpdate(i).valid &&
       io.redirect.valid &&
       io.redirect.bits.robIdx.value === needUpdateRobIdx(i)
+    val entryPairType = robBanksRdata(i).entryPairType
+    val redirectClearsLatter = redirectHitThisEntry &&
+      CompressType.isNotNORMAL(entryPairType) && (
+        io.redirect.bits.robIdx.slotIsFormer && !io.redirect.bits.flushItself() ||
+        !io.redirect.bits.robIdx.slotIsFormer && io.redirect.bits.flushItself()
+      )
     val (nextFormerUopNum, nextLatterUopNum) = calcNextSlotUopNum(
       entryValid = needUpdate(i).valid,
       entryFormerUopNum = robBanksRdata(i).formerUopNum,
@@ -1521,17 +1542,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       formerWbCntRaw = formerWbCnt,
       latterWbCntRaw = latterWbCnt
     )
-    needUpdate(i).formerUopNum := nextFormerUopNum
-    needUpdate(i).latterUopNum := nextLatterUopNum
+    val enqEntryPairType = PriorityMux(instCanEnqSeq, io.enq.req.map(_.bits.entryPairType))
+    val nextEntryPairTypeForUopState = Mux(
+      !needUpdate(i).valid && instCanEnqFlag,
+      enqEntryPairType,
+      Mux(redirectClearsLatter, CompressType.NORMAL, entryPairType)
+    )
+    needUpdate(i).uopState := encodeUopState(
+      nextEntryPairTypeForUopState,
+      nextFormerUopNum,
+      nextLatterUopNum
+    )
 
     // trace
-    val redirectClearsLatter = robBanksRdata(i).valid &&
-      CompressType.isNotNORMAL(robBanksRdata(i).entryPairType) &&
-      io.redirect.valid &&
-      io.redirect.bits.robIdx.value === needUpdateRobIdx(i) && (
-        io.redirect.bits.robIdx.slotIsFormer && !io.redirect.bits.flushItself() ||
-        !io.redirect.bits.robIdx.slotIsFormer && io.redirect.bits.flushItself()
-      )
     val youngestSlotIsFormer = CompressType.isNORMAL(robBanksRdata(i).entryPairType) || redirectClearsLatter
     val taken = branchWBs.map(writeback =>
       writeback.valid &&
@@ -2108,7 +2131,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
           val splitDest = (vecDest << 1).asUInt
           Seq(splitDest, splitDest + 1.U)
         }
-        val halfInstrCnt = Mux(j.U === 0.U, io.commits.info(i).formerInstrCnt, io.commits.info(i).latterInstrCnt)
+        val halfInstrCnt = Mux(j.U === 0.U, formerInstrCntCommit(i), latterInstrCntCommit(i))
         difftest.nFused := Mux(halfInstrCnt > 0.U, halfInstrCnt - 1.U, 0.U)
         when(difftest.valid) {
           assert(instrSize >= 1.U)
