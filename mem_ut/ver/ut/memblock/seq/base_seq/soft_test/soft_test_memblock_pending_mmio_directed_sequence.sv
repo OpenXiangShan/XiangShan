@@ -320,12 +320,15 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_stale_load_overlap_s
     redirect.valid = 1'b1;
     redirect.flush_itself = 1'b1;
     redirect.level = 1'b1;
+    redirect.is_vls_exception = 1'b0;
     redirect.rob_key = owner_key;
     data.request_redirect_flush(redirect);
 
     anchor = memblock_sync_pkg::make_empty_raw_redirect_anchor();
     anchor.valid = 1'b1;
     anchor.level = redirect.level;
+    anchor.is_vls_exception = redirect.is_vls_exception;
+    anchor.effective_level = memblock_redirect_effective_level(redirect);
     anchor.rob_flag = redirect.rob_key.flag;
     anchor.rob_value = redirect.rob_key.value;
     wait_for_dut_sample_watermark(1, "stale-load-overlap-anchor");
@@ -373,12 +376,15 @@ task soft_test_memblock_pending_mmio_directed_sequence::run_new_owner_overlap_fa
     redirect.valid = 1'b1;
     redirect.flush_itself = 1'b1;
     redirect.level = 1'b1;
+    redirect.is_vls_exception = 1'b0;
     redirect.rob_key = owner_key;
     data.request_redirect_flush(redirect);
 
     anchor = memblock_sync_pkg::make_empty_raw_redirect_anchor();
     anchor.valid = 1'b1;
     anchor.level = redirect.level;
+    anchor.is_vls_exception = redirect.is_vls_exception;
+    anchor.effective_level = memblock_redirect_effective_level(redirect);
     anchor.rob_flag = redirect.rob_key.flag;
     anchor.rob_value = redirect.rob_key.value;
     wait_for_dut_sample_watermark(1, "new-owner-overlap-anchor");

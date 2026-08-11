@@ -235,6 +235,7 @@ task memblock_dispatch_real_cancel_reconcile_vseq::drive_directed_redirect_when_
         redirect.valid = 1'b1;
         redirect.flush_itself = 1'b0;
         redirect.level = 1'b0;
+        redirect.is_vls_exception = 1'b0;
         redirect.rob_key = anchor_status.get_rob_key();
         if (!rob_order_util::rob_need_flush(victim_load_status.get_rob_key(), redirect) ||
             !rob_order_util::rob_need_flush(victim_store_status.get_rob_key(), redirect)) begin

@@ -62,11 +62,17 @@ class rob_order_util;
     static function bit rob_need_flush(input memblock_rob_key_t uop_rob,
                                        input memblock_redirect_payload_t redirect);
         bit same_rob;
+        bit effective_flush_itself;
         if (!redirect.valid) begin
             return 1'b0;
         end
         same_rob = rob_to_map_key(uop_rob) == rob_to_map_key(redirect.rob_key);
-        return (redirect.flush_itself && same_rob) || rob_is_after(uop_rob, redirect.rob_key);
+        // VLS exception 会把 DUT 实际使用的 redirect level 压为 0。VLS 分支必须
+        // 复用 payload 的唯一有效 level helper；非 VLS 路径保持原 flush_itself 语义。
+        effective_flush_itself = redirect.is_vls_exception ?
+                                  memblock_redirect_effective_level(redirect) :
+                                  redirect.flush_itself;
+        return (effective_flush_itself && same_rob) || rob_is_after(uop_rob, redirect.rob_key);
     endfunction:rob_need_flush
 
 endclass:rob_order_util

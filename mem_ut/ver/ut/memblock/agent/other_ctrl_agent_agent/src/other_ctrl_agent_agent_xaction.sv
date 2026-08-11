@@ -19,6 +19,8 @@ class other_ctrl_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_outer_l2_flush_en      ;
     rand bit io_outer_power_down_en    ;
     rand bit io_outer_cpu_critical_error;
+    // DUT 输出直通镜像，只由 other_ctrl monitor 采样，不参与 driver 随机化。
+    bit io_outer_msi_ack;
     rand bit io_inner_beu_errors_icache_ecc_error_valid;
     rand bit [47:0] io_inner_beu_errors_icache_ecc_error_bits;
     rand bit io_outer_beu_errors_icache_ecc_error_valid;
@@ -61,6 +63,7 @@ class other_ctrl_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_outer_l2_flush_en, UVM_ALL_ON);
         `uvm_field_int(io_outer_power_down_en, UVM_ALL_ON);
         `uvm_field_int(io_outer_cpu_critical_error, UVM_ALL_ON);
+        `uvm_field_int(io_outer_msi_ack, UVM_ALL_ON);
         `uvm_field_int(io_inner_beu_errors_icache_ecc_error_valid, UVM_ALL_ON);
         `uvm_field_int(io_inner_beu_errors_icache_ecc_error_bits, UVM_ALL_ON);
         `uvm_field_int(io_outer_beu_errors_icache_ecc_error_valid, UVM_ALL_ON);
@@ -174,6 +177,7 @@ function string other_ctrl_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sio_outer_l2_flush_en = 0x%0h ",pkt_str,this.io_outer_l2_flush_en);
     pkt_str = $sformatf("%sio_outer_power_down_en = 0x%0h ",pkt_str,this.io_outer_power_down_en);
     pkt_str = $sformatf("%sio_outer_cpu_critical_error = 0x%0h ",pkt_str,this.io_outer_cpu_critical_error);
+    pkt_str = $sformatf("%sio_outer_msi_ack = 0x%0h ",pkt_str,this.io_outer_msi_ack);
     pkt_str = $sformatf("%sio_inner_beu_errors_icache_ecc_error_valid = 0x%0h ",pkt_str,this.io_inner_beu_errors_icache_ecc_error_valid);
     pkt_str = $sformatf("%sio_inner_beu_errors_icache_ecc_error_bits = 0x%0h ",pkt_str,this.io_inner_beu_errors_icache_ecc_error_bits);
     pkt_str = $sformatf("%sio_outer_beu_errors_icache_ecc_error_valid = 0x%0h ",pkt_str,this.io_outer_beu_errors_icache_ecc_error_valid);
@@ -252,6 +256,11 @@ function bit other_ctrl_agent_agent_xaction::compare(uvm_object rhs, uvm_compare
         if(this.io_outer_cpu_critical_error!=rhs_.io_outer_cpu_critical_error) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_outer_cpu_critical_error=0x%0h while the rhs_.io_outer_cpu_critical_error=0x%0h",this.io_outer_cpu_critical_error,rhs_.io_outer_cpu_critical_error),UVM_NONE)
+        end
+
+        if(this.io_outer_msi_ack!=rhs_.io_outer_msi_ack) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_outer_msi_ack=0x%0h while the rhs_.io_outer_msi_ack=0x%0h",this.io_outer_msi_ack,rhs_.io_outer_msi_ack),UVM_NONE)
         end
 
 

@@ -265,7 +265,10 @@ package memblock_sync_pkg;
     // 不把该 sideband 重新包装成 recovery event。
     typedef struct {
         bit                                      valid;
+        // level 保留顶层原始输入；effective_level 按 VLS 规则保存 DUT 有效值。
         bit                                      level;
+        bit                                      is_vls_exception;
+        bit                                      effective_level;
         bit                                      rob_flag;
         bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0]     rob_value;
         longint unsigned                         sample_seq;
@@ -513,6 +516,8 @@ package memblock_sync_pkg;
         dispatch_raw_redirect_anchor_t item;
         item.valid = 1'b0;
         item.level = 1'b0;
+        item.is_vls_exception = 1'b0;
+        item.effective_level = 1'b0;
         item.rob_flag = 1'b0;
         item.rob_value = '0;
         item.sample_seq = 0;

@@ -37,6 +37,7 @@ task redirect_agent_agent_monitor::mon_data();
 
     logic io_redirect_valid            ;
     logic io_redirect_bits_level       ;
+    logic io_redirect_bits_isVlsException;
     logic io_redirect_bits_robIdx_flag ;
     logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_redirect_bits_robIdx_value;
     longint unsigned sample_seq;
@@ -46,12 +47,14 @@ task redirect_agent_agent_monitor::mon_data();
         @this.vif.mon_mp.mon_cb;
         io_redirect_valid = this.vif.mon_mp.mon_cb.io_redirect_valid;
         io_redirect_bits_level = this.vif.mon_mp.mon_cb.io_redirect_bits_level;
+        io_redirect_bits_isVlsException = this.vif.mon_mp.mon_cb.io_redirect_bits_isVlsException;
         io_redirect_bits_robIdx_flag = this.vif.mon_mp.mon_cb.io_redirect_bits_robIdx_flag;
         io_redirect_bits_robIdx_value = this.vif.mon_mp.mon_cb.io_redirect_bits_robIdx_value;
 
         if(this.cfg.xz_sw==tcnt_dec_base::ON && this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
             `TCNT_CHECK_SIG_XZ(io_redirect_valid,io_redirect_valid,1);
             `TCNT_CHECK_SIG_XZ(io_redirect_bits_level,io_redirect_bits_level,1);
+            `TCNT_CHECK_SIG_XZ(io_redirect_bits_isVlsException,io_redirect_bits_isVlsException,1);
             `TCNT_CHECK_SIG_XZ(io_redirect_bits_robIdx_flag,io_redirect_bits_robIdx_flag,1);
             `TCNT_CHECK_SIG_XZ(io_redirect_bits_robIdx_value,io_redirect_bits_robIdx_value,`MEMBLOCK_DUT_ROB_VALUE_W);
 
@@ -67,6 +70,8 @@ task redirect_agent_agent_monitor::mon_data();
             // 不调用 recovery handler，也不写 status/pass/fail/terminal。
             anchor.valid = 1'b1;
             anchor.level = io_redirect_bits_level;
+            anchor.is_vls_exception = io_redirect_bits_isVlsException;
+            anchor.effective_level = io_redirect_bits_isVlsException ? 1'b0 : io_redirect_bits_level;
             anchor.rob_flag = io_redirect_bits_robIdx_flag;
             anchor.rob_value = io_redirect_bits_robIdx_value;
             anchor.sample_seq = sample_seq;
@@ -80,6 +85,7 @@ task redirect_agent_agent_monitor::mon_data();
         //    mon_tr = redirect_agent_agent_xaction::type_id::create("mon_tr");
         //    mon_tr.io_redirect_valid = io_redirect_valid;
         //    mon_tr.io_redirect_bits_level = io_redirect_bits_level;
+        //    mon_tr.io_redirect_bits_isVlsException = io_redirect_bits_isVlsException;
         //    mon_tr.io_redirect_bits_robIdx_flag = io_redirect_bits_robIdx_flag;
         //    mon_tr.io_redirect_bits_robIdx_value = io_redirect_bits_robIdx_value;
 

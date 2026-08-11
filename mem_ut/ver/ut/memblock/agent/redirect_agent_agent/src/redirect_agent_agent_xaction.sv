@@ -15,6 +15,9 @@ class redirect_agent_agent_xaction  extends tcnt_data_base;
     // RedirectLevel in Scala: flushAfter=0, flush=1.
     rand bit io_redirect_valid         ;
     rand bit io_redirect_bits_level    ;
+    // 通用 redirect flow 不产生 VLS 异常；该字段不参与随机化且默认值为 0，
+    // 保持既有随机 redirect 的行为不变。定向 VLS 场景可显式置位。
+    bit io_redirect_bits_isVlsException;
     rand bit io_redirect_bits_robIdx_flag;
     rand bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_redirect_bits_robIdx_value;
     extern constraint default_io_redirect_valid_cons;
@@ -33,6 +36,7 @@ class redirect_agent_agent_xaction  extends tcnt_data_base;
     `uvm_object_utils_begin(redirect_agent_agent_xaction)
         `uvm_field_int(io_redirect_valid, UVM_ALL_ON);
         `uvm_field_int(io_redirect_bits_level, UVM_ALL_ON);
+        `uvm_field_int(io_redirect_bits_isVlsException, UVM_ALL_ON);
         `uvm_field_int(io_redirect_bits_robIdx_flag, UVM_ALL_ON);
         `uvm_field_int(io_redirect_bits_robIdx_value, UVM_ALL_ON);
     `uvm_object_utils_end
@@ -83,6 +87,7 @@ function string redirect_agent_agent_xaction::psdisplay(string prefix = "");
     //end
     pkt_str = $sformatf("%sio_redirect_valid = 0x%0h ",pkt_str,this.io_redirect_valid);
     pkt_str = $sformatf("%sio_redirect_bits_level = 0x%0h ",pkt_str,this.io_redirect_bits_level);
+    pkt_str = $sformatf("%sio_redirect_bits_isVlsException = 0x%0h ",pkt_str,this.io_redirect_bits_isVlsException);
     pkt_str = $sformatf("%sio_redirect_bits_robIdx_flag = 0x%0h ",pkt_str,this.io_redirect_bits_robIdx_flag);
     pkt_str = $sformatf("%sio_redirect_bits_robIdx_value = 0x%0h ",pkt_str,this.io_redirect_bits_robIdx_value);
     return pkt_str;
@@ -112,6 +117,11 @@ function bit redirect_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer 
         if(this.io_redirect_bits_level!=rhs_.io_redirect_bits_level) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_redirect_bits_level=0x%0h while the rhs_.io_redirect_bits_level=0x%0h",this.io_redirect_bits_level,rhs_.io_redirect_bits_level),UVM_NONE)
+        end
+
+        if(this.io_redirect_bits_isVlsException!=rhs_.io_redirect_bits_isVlsException) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_redirect_bits_isVlsException=0x%0h while the rhs_.io_redirect_bits_isVlsException=0x%0h",this.io_redirect_bits_isVlsException,rhs_.io_redirect_bits_isVlsException),UVM_NONE)
         end
 
         if(this.io_redirect_bits_robIdx_flag!=rhs_.io_redirect_bits_robIdx_flag) begin

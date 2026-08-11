@@ -1005,3 +1005,25 @@ all_transactions_success 使用 success_prefix_uid 做 O(1) 结束判断
 
 - 未采用 `success_uid_count/active_uid_count/...` 多计数器方案；当前使用公共 `success_prefix_uid` 实现 `all_transactions_success()` O(1) 结束判断。全表扫描仅用于 timeout/debug 打印。
 - issue queue lazy invalidation、priority bucket 和 timeout report limit 仍作为后续优化项。
+
+### 16.1 20260811 V2 redirect VLS 与 MSI 控制端口接口兼容
+
+[IMPLEMENTATION_DELTA]
+
+本补充已落地，限定第 2、5、9、11 和 14 节中“由 `rob_need_flush()` 统一判断 redirect
+覆盖”的 V2 接口语义，不改变本 plan 的公共扫描窗口、redirect reissue 或性能设计。
+
+1. `memblock_redirect_payload_t` 新增 `is_vls_exception`。VLS 时 raw `level` 仍作为 DUT 输入
+   记录，但 `memblock_redirect_effective_level()` 产生的 effective level 固定为 0。
+2. `rob_order_util::rob_need_flush()` 在判断同一 ROB 是否取消时使用 effective 语义：
+   `is_vls_exception=1` 时不因 raw `flush_itself` 取消同 ROB；更年轻 ROB 继续按
+   `rob_is_after()` 判断。因此 redirect reissue 的扫描、stale event 过滤和 commit 防御都与
+   最新 RTL 一致。
+3. 默认 non-VLS 为 0；memoryViolation adapter 生成 redirect 时也显式设置
+   `is_vls_exception=0`，维持所有历史基础路径的行为。
+4. VLS 标志同时进入 redirect anchor、cancel record 对账和事件去重，避免 raw `level` 相同而
+   sideband 不同的 redirect 被错误合并。新增字段与判断都是常数时间操作，不扩大
+   `apply_redirect_flush_range()` 的扫描窗口或改变 10 万笔性能边界。
+5. 同轮新增的 `io_ooo_to_mem_backendToTopBypass_msiAck` 由 `backendToTopBypass_agent` 驱动，
+   `io_outer_msi_ack` 只由 `other_ctrl_agent` monitor 采样；该 MSI 接口适配不增加 RM/checker/
+   coverage 实现，也不参与本 plan 的 reissue 状态机。

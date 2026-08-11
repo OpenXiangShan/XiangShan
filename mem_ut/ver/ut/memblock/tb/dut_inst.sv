@@ -210,8 +210,10 @@ reg io_redirect_valid;
 reg io_redirect_bits_robIdx_flag;
 reg [7:0] io_redirect_bits_robIdx_value;
 reg io_redirect_bits_level;
+reg io_redirect_bits_isVlsException;
 reg io_ooo_to_mem_backendToTopBypass_cpuHalted;
 reg io_ooo_to_mem_backendToTopBypass_cpuCriticalError;
+reg io_ooo_to_mem_backendToTopBypass_msiAck;
 reg io_ooo_to_mem_sfence_valid;
 reg io_ooo_to_mem_sfence_bits_rs1;
 reg io_ooo_to_mem_sfence_bits_rs2;
@@ -1106,6 +1108,7 @@ wire io_outer_cpu_halt;
 wire io_outer_l2_flush_en;
 wire io_outer_power_down_en;
 wire io_outer_cpu_critical_error;
+wire io_outer_msi_ack;
 reg io_inner_beu_errors_icache_ecc_error_valid;
 reg [47:0] io_inner_beu_errors_icache_ecc_error_bits;
 wire io_outer_beu_errors_icache_ecc_error_valid;
@@ -1441,8 +1444,10 @@ initial begin
     io_redirect_bits_robIdx_flag = '0;
     io_redirect_bits_robIdx_value = '0;
     io_redirect_bits_level = '0;
+    io_redirect_bits_isVlsException = '0;
     io_ooo_to_mem_backendToTopBypass_cpuHalted = '0;
     io_ooo_to_mem_backendToTopBypass_cpuCriticalError = '0;
+    io_ooo_to_mem_backendToTopBypass_msiAck = '0;
     io_ooo_to_mem_sfence_valid = '0;
     io_ooo_to_mem_sfence_bits_rs1 = '0;
     io_ooo_to_mem_sfence_bits_rs2 = '0;
@@ -2296,8 +2301,10 @@ MemBlock U_MEMBLOCK (
     .io_redirect_bits_robIdx_flag ( io_redirect_bits_robIdx_flag ),
     .io_redirect_bits_robIdx_value ( io_redirect_bits_robIdx_value ),
     .io_redirect_bits_level ( io_redirect_bits_level ),
+    .io_redirect_bits_isVlsException ( io_redirect_bits_isVlsException ),
     .io_ooo_to_mem_backendToTopBypass_cpuHalted ( io_ooo_to_mem_backendToTopBypass_cpuHalted ),
     .io_ooo_to_mem_backendToTopBypass_cpuCriticalError ( io_ooo_to_mem_backendToTopBypass_cpuCriticalError ),
+    .io_ooo_to_mem_backendToTopBypass_msiAck ( io_ooo_to_mem_backendToTopBypass_msiAck ),
     .io_ooo_to_mem_sfence_valid ( io_ooo_to_mem_sfence_valid ),
     .io_ooo_to_mem_sfence_bits_rs1 ( io_ooo_to_mem_sfence_bits_rs1 ),
     .io_ooo_to_mem_sfence_bits_rs2 ( io_ooo_to_mem_sfence_bits_rs2 ),
@@ -3192,6 +3199,7 @@ MemBlock U_MEMBLOCK (
     .io_outer_l2_flush_en ( io_outer_l2_flush_en ),
     .io_outer_power_down_en ( io_outer_power_down_en ),
     .io_outer_cpu_critical_error ( io_outer_cpu_critical_error ),
+    .io_outer_msi_ack ( io_outer_msi_ack ),
     .io_inner_beu_errors_icache_ecc_error_valid ( io_inner_beu_errors_icache_ecc_error_valid ),
     .io_inner_beu_errors_icache_ecc_error_bits ( io_inner_beu_errors_icache_ecc_error_bits ),
     .io_outer_beu_errors_icache_ecc_error_valid ( io_outer_beu_errors_icache_ecc_error_valid ),

@@ -607,14 +607,30 @@ class common_data_transaction extends uvm_object;
                 end
                 if (redirect_anchor_history_q[anchor_idx].level !=
                         cancel_record_q[record_idx_for_anchor].redirect.level ||
+                    redirect_anchor_history_q[anchor_idx].is_vls_exception !=
+                        cancel_record_q[record_idx_for_anchor].redirect.is_vls_exception ||
+                    redirect_anchor_history_q[anchor_idx].effective_level !=
+                        memblock_redirect_effective_level(
+                            cancel_record_q[record_idx_for_anchor].redirect) ||
                     redirect_anchor_history_q[anchor_idx].rob_flag !=
                         cancel_record_q[record_idx_for_anchor].redirect.rob_key.flag ||
                     redirect_anchor_history_q[anchor_idx].rob_value !=
                         cancel_record_q[record_idx_for_anchor].redirect.rob_key.value) begin
                     `uvm_fatal("MMIO_RESOLVE",
-                               $sformatf("LOAD MMIO anchor FIFO mismatch sample=%0d record=%0d",
+                               $sformatf("LOAD MMIO anchor FIFO mismatch sample=%0d record=%0d expected raw/effective/vls/rob=%0d/%0d/%0d/%0d/%0d observed=%0d/%0d/%0d/%0d/%0d",
                                          raw_sample_seq,
-                                         cancel_record_q[record_idx_for_anchor].cancel_record_id))
+                                         cancel_record_q[record_idx_for_anchor].cancel_record_id,
+                                         cancel_record_q[record_idx_for_anchor].redirect.level,
+                                         memblock_redirect_effective_level(
+                                             cancel_record_q[record_idx_for_anchor].redirect),
+                                         cancel_record_q[record_idx_for_anchor].redirect.is_vls_exception,
+                                         cancel_record_q[record_idx_for_anchor].redirect.rob_key.flag,
+                                         cancel_record_q[record_idx_for_anchor].redirect.rob_key.value,
+                                         redirect_anchor_history_q[anchor_idx].level,
+                                         redirect_anchor_history_q[anchor_idx].effective_level,
+                                         redirect_anchor_history_q[anchor_idx].is_vls_exception,
+                                         redirect_anchor_history_q[anchor_idx].rob_flag,
+                                         redirect_anchor_history_q[anchor_idx].rob_value))
                     return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
                 end
                 overlap_redirect = cancel_record_q[record_idx_for_anchor].redirect;
@@ -1651,15 +1667,22 @@ class common_data_transaction extends uvm_object;
             end
             anchor = redirect_anchor_history_q.pop_front();
             if (anchor.level != cancel_record_q[record_idx].redirect.level ||
+                anchor.is_vls_exception !=
+                    cancel_record_q[record_idx].redirect.is_vls_exception ||
+                anchor.effective_level !=
+                    memblock_redirect_effective_level(cancel_record_q[record_idx].redirect) ||
                 anchor.rob_flag != cancel_record_q[record_idx].redirect.rob_key.flag ||
                 anchor.rob_value != cancel_record_q[record_idx].redirect.rob_key.value) begin
                 `uvm_fatal("LSQ_CANCEL",
-                           $sformatf("redirect anchor FIFO mismatch record=%0d expected level/rob=%0d/%0d/%0d observed=%0d/%0d/%0d",
+                           $sformatf("redirect anchor FIFO mismatch record=%0d expected raw/effective/vls/rob=%0d/%0d/%0d/%0d/%0d observed=%0d/%0d/%0d/%0d/%0d",
                                      cancel_record_q[record_idx].cancel_record_id,
                                      cancel_record_q[record_idx].redirect.level,
+                                     memblock_redirect_effective_level(cancel_record_q[record_idx].redirect),
+                                     cancel_record_q[record_idx].redirect.is_vls_exception,
                                      cancel_record_q[record_idx].redirect.rob_key.flag,
                                      cancel_record_q[record_idx].redirect.rob_key.value,
-                                     anchor.level, anchor.rob_flag, anchor.rob_value))
+                                     anchor.level, anchor.effective_level, anchor.is_vls_exception,
+                                     anchor.rob_flag, anchor.rob_value))
             end
             if (record_idx > 0 &&
                 cancel_record_q[record_idx - 1].valid &&
@@ -1825,6 +1848,7 @@ class common_data_transaction extends uvm_object;
             redirect.valid != cancel_record_q[record_idx].redirect.valid ||
             redirect.flush_itself != cancel_record_q[record_idx].redirect.flush_itself ||
             redirect.level != cancel_record_q[record_idx].redirect.level ||
+            redirect.is_vls_exception != cancel_record_q[record_idx].redirect.is_vls_exception ||
             redirect.rob_key != cancel_record_q[record_idx].redirect.rob_key ||
             !cancel_record_q[record_idx].redirect_drive_done_valid ||
             !cancel_record_q[record_idx].redirect_anchor_valid) begin
@@ -1946,6 +1970,7 @@ class common_data_transaction extends uvm_object;
         return left.valid == right.valid &&
                left.flush_itself == right.flush_itself &&
                left.level == right.level &&
+               left.is_vls_exception == right.is_vls_exception &&
                left.rob_key.flag == right.rob_key.flag &&
                left.rob_key.value == right.rob_key.value;
     endfunction:redirect_payload_equal

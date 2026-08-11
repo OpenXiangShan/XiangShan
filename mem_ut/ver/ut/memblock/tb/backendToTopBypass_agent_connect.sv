@@ -17,11 +17,13 @@
     initial begin \
         force RTL_PATH.io_ooo_to_mem_backendToTopBypass_cpuCriticalError = U_IF_NAME.io_ooo_to_mem_backendToTopBypass_cpuCriticalError; \
         force RTL_PATH.io_ooo_to_mem_backendToTopBypass_cpuHalted = U_IF_NAME.io_ooo_to_mem_backendToTopBypass_cpuHalted; \
+        force RTL_PATH.io_ooo_to_mem_backendToTopBypass_msiAck = U_IF_NAME.io_ooo_to_mem_backendToTopBypass_msiAck; \
     end \
     `else \
     initial begin \
         force U_IF_NAME.io_ooo_to_mem_backendToTopBypass_cpuCriticalError = RTL_PATH.io_ooo_to_mem_backendToTopBypass_cpuCriticalError; \
         force U_IF_NAME.io_ooo_to_mem_backendToTopBypass_cpuHalted = RTL_PATH.io_ooo_to_mem_backendToTopBypass_cpuHalted; \
+        force U_IF_NAME.io_ooo_to_mem_backendToTopBypass_msiAck = RTL_PATH.io_ooo_to_mem_backendToTopBypass_msiAck; \
     end \
     `endif
 
