@@ -12,6 +12,7 @@ class mem_access_base_sequence extends uvm_sequence;
 
     typedef bit [47:0]   mem_addr_t;
     typedef bit [37:0]   mem_line_addr_t;
+    typedef bit [41:0]   dcache_line_addr_t;
     typedef bit [8191:0] mem_line_data_t;
     typedef bit [1023:0] mem_line_mask_t;
 
@@ -80,6 +81,11 @@ class mem_access_base_sequence extends uvm_sequence;
     static dcache_aggregate_snapshot_t dcache_aggregate_snapshot;
     static bit                         dcache_owner_claimed = 1'b0;
     static longint unsigned            dcache_owner_generation = 0;
+    // 中文注释：observer 只保存已入队/已提交 fragment 的 byte 覆盖事实。
+    // 一条 64 B line 的低、高 32 B 均提交后才结束该 line 的未完成观察窗口；不创建 ticket。
+    static bit [63:0]                  dcache_fragment_pending_bytes[dcache_line_addr_t];
+    static bit [63:0]                  dcache_fragment_committed_bytes[dcache_line_addr_t];
+    static longint unsigned            dcache_incomplete_fragment_line_count = 0;
 
     `uvm_object_utils(mem_access_base_sequence)
 
@@ -108,6 +114,25 @@ class mem_access_base_sequence extends uvm_sequence;
     extern static function void publish_dcache_aggregate_snapshot();
     extern static function bit peek_dcache_aggregate_snapshot(
         output dcache_aggregate_snapshot_t snapshot
+    );
+    extern static function void publish_dcache_owner_baseline();
+    extern static function void invalidate_dcache_runtime_observer();
+    extern static function void observe_dcache_line_transition(
+        input bit old_alias_valid,
+        input bit new_alias_valid
+    );
+    extern static function void observe_dcache_map_cleared();
+    extern static function void observe_dcache_c_assembly_start();
+    extern static function void observe_dcache_c_assembly_complete();
+    extern static function void observe_dcache_corrupt_line(input mem_addr_t line_addr);
+    extern static function void observe_dcache_write_enqueued(
+        input shared_mem_write_event_t write_event
+    );
+    extern static function void observe_dcache_write_committed(
+        input shared_mem_write_event_t write_event
+    );
+    extern static function void observe_uncache_write_committed(
+        input shared_mem_write_event_t write_event
     );
     extern static function void apply_shared_mem_write(input shared_mem_write_event_t write_event);
     extern static function void commit_shared_mem_write_batch();
@@ -289,6 +314,9 @@ function void mem_access_base_sequence::clear_dcache_observer_state();
     dcache_aggregate_snapshot = '{default:'0};
     dcache_owner_claimed      = 1'b0;
     dcache_owner_generation   = 0;
+    dcache_fragment_pending_bytes.delete();
+    dcache_fragment_committed_bytes.delete();
+    dcache_incomplete_fragment_line_count = 0;
 endfunction:clear_dcache_observer_state
 
 function bit mem_access_base_sequence::claim_dcache_observer_owner();
@@ -328,6 +356,7 @@ function void mem_access_base_sequence::publish_dcache_aggregate_snapshot();
         dcache_aggregate_snapshot.observer_ready &&
         (dcache_aggregate_snapshot.resident_line_count == 0) &&
         (dcache_aggregate_snapshot.pending_writeback_count == 0) &&
+        (dcache_incomplete_fragment_line_count == 0) &&
         !dcache_aggregate_snapshot.c_assembly_pending &&
         (dcache_aggregate_snapshot.observed_corrupt_line_count == 0);
     // 中文注释：RM 的唯一读取门槛从同一 snapshot 推导，不让调用方自行拼接多个 live 字段。
@@ -345,6 +374,241 @@ function bit mem_access_base_sequence::peek_dcache_aggregate_snapshot(
            dcache_aggregate_snapshot.owner_valid &&
            dcache_aggregate_snapshot.observer_ready;
 endfunction:peek_dcache_aggregate_snapshot
+
+function void mem_access_base_sequence::publish_dcache_owner_baseline();
+    if (!dcache_owner_claimed || !shared_mem_lifecycle_initialized) begin
+        return;
+    end
+    dcache_aggregate_snapshot.owner_valid = 1'b1;
+    dcache_aggregate_snapshot.published = 1'b1;
+    dcache_aggregate_snapshot.generation = dcache_owner_generation;
+    dcache_aggregate_snapshot.resident_line_count = 0;
+    dcache_aggregate_snapshot.pending_writeback_count = 0;
+    dcache_aggregate_snapshot.c_assembly_pending = 1'b0;
+    dcache_aggregate_snapshot.observer_ready = 1'b1;
+    dcache_fragment_pending_bytes.delete();
+    dcache_fragment_committed_bytes.delete();
+    dcache_incomplete_fragment_line_count = 0;
+    publish_dcache_aggregate_snapshot();
+endfunction:publish_dcache_owner_baseline
+
+function void mem_access_base_sequence::invalidate_dcache_runtime_observer();
+    // 中文注释：runtime reset/owner 暂停只使旁路快照暂不可读，并清除未完成 fragment
+    // 观察；已提交 overlay/corrupt byte mask 仍归 shared-memory lifecycle 管理。
+    dcache_aggregate_snapshot.published = 1'b0;
+    dcache_aggregate_snapshot.owner_valid = dcache_owner_claimed;
+    dcache_aggregate_snapshot.observer_ready = 1'b0;
+    dcache_aggregate_snapshot.dcache_drain_complete = 1'b0;
+    dcache_aggregate_snapshot.dcache_overlay_read_ready = 1'b0;
+    dcache_aggregate_snapshot.pending_writeback_count = 0;
+    dcache_aggregate_snapshot.c_assembly_pending = 1'b0;
+    dcache_fragment_pending_bytes.delete();
+    dcache_fragment_committed_bytes.delete();
+    dcache_incomplete_fragment_line_count = 0;
+endfunction:invalidate_dcache_runtime_observer
+
+function void mem_access_base_sequence::observe_dcache_line_transition(
+    input bit old_alias_valid,
+    input bit new_alias_valid
+);
+    if (!dcache_owner_claimed) begin
+        return;
+    end
+    if (!old_alias_valid && new_alias_valid) begin
+        dcache_aggregate_snapshot.resident_line_count++;
+    end
+    else if (old_alias_valid && !new_alias_valid) begin
+        if (dcache_aggregate_snapshot.resident_line_count == 0) begin
+            dcache_aggregate_snapshot.observer_ready = 1'b0;
+        end
+        else begin
+            dcache_aggregate_snapshot.resident_line_count--;
+        end
+    end
+    publish_dcache_aggregate_snapshot();
+endfunction:observe_dcache_line_transition
+
+function void mem_access_base_sequence::observe_dcache_map_cleared();
+    if (!dcache_owner_claimed) begin
+        return;
+    end
+    dcache_aggregate_snapshot.resident_line_count = 0;
+    dcache_fragment_pending_bytes.delete();
+    dcache_fragment_committed_bytes.delete();
+    dcache_incomplete_fragment_line_count = 0;
+    dcache_aggregate_snapshot.pending_writeback_count = 0;
+    dcache_aggregate_snapshot.c_assembly_pending = 1'b0;
+    dcache_aggregate_snapshot.observer_ready = 1'b0;
+    publish_dcache_aggregate_snapshot();
+endfunction:observe_dcache_map_cleared
+
+function void mem_access_base_sequence::observe_dcache_c_assembly_start();
+    if (dcache_owner_claimed) begin
+        dcache_aggregate_snapshot.c_assembly_pending = 1'b1;
+        publish_dcache_aggregate_snapshot();
+    end
+endfunction:observe_dcache_c_assembly_start
+
+function void mem_access_base_sequence::observe_dcache_c_assembly_complete();
+    if (dcache_owner_claimed) begin
+        dcache_aggregate_snapshot.c_assembly_pending = 1'b0;
+        publish_dcache_aggregate_snapshot();
+    end
+endfunction:observe_dcache_c_assembly_complete
+
+function void mem_access_base_sequence::observe_dcache_corrupt_line(input mem_addr_t line_addr);
+    mem_addr_t      byte_addr;
+    mem_line_addr_t backing_line;
+    bit [9:0]       byte_offset;
+    mem_line_mask_t line_mask;
+    bit             was_present;
+
+    if (!dcache_owner_claimed) begin
+        return;
+    end
+    line_mask = '0;
+    for (int unsigned byte_idx = 0; byte_idx < 64; byte_idx++) begin
+        byte_addr   = line_addr + mem_addr_t'(byte_idx);
+        backing_line = byte_addr[47:10];
+        byte_offset = byte_addr[9:0];
+        line_mask[byte_offset] = 1'b1;
+    end
+    was_present = write_overlay_corrupt_byte_mask.exists(line_addr[47:10]) &&
+                  ((write_overlay_corrupt_byte_mask[line_addr[47:10]] & line_mask) != '0);
+    write_overlay_corrupt_byte_mask[line_addr[47:10]] |= line_mask;
+    if (!was_present) begin
+        dcache_aggregate_snapshot.observed_corrupt_line_count++;
+    end
+    publish_dcache_aggregate_snapshot();
+endfunction:observe_dcache_corrupt_line
+
+function void mem_access_base_sequence::observe_dcache_write_enqueued(
+    input shared_mem_write_event_t write_event
+);
+    mem_addr_t           byte_addr;
+    dcache_line_addr_t   dcache_line;
+    bit [5:0]             line_byte;
+    bit [63:0]            event_bytes;
+    bit                   had_line;
+
+    if (!dcache_owner_claimed) begin
+        return;
+    end
+    if (dcache_aggregate_snapshot.pending_writeback_count == '1) begin
+        dcache_aggregate_snapshot.observer_ready = 1'b0;
+    end
+    else begin
+        dcache_aggregate_snapshot.pending_writeback_count++;
+    end
+    foreach (write_event.byte_mask[i]) begin
+        if (!write_event.byte_mask[i]) begin
+            continue;
+        end
+        byte_addr = write_event.addr + mem_addr_t'(i);
+        dcache_line = byte_addr[47:6];
+        line_byte = byte_addr[5:0];
+        event_bytes = '0;
+        event_bytes[line_byte] = 1'b1;
+        had_line = dcache_fragment_pending_bytes.exists(dcache_line);
+        if (!had_line) begin
+            dcache_fragment_pending_bytes[dcache_line] = '0;
+            dcache_fragment_committed_bytes[dcache_line] = '0;
+            dcache_incomplete_fragment_line_count++;
+        end
+        dcache_fragment_pending_bytes[dcache_line] |= event_bytes;
+    end
+    publish_dcache_aggregate_snapshot();
+endfunction:observe_dcache_write_enqueued
+
+function void mem_access_base_sequence::observe_dcache_write_committed(
+    input shared_mem_write_event_t write_event
+);
+    mem_addr_t         byte_addr;
+    dcache_line_addr_t dcache_line;
+    bit [5:0]           line_byte;
+    bit [63:0]          event_bytes;
+    mem_line_mask_t     corrupt_mask;
+    mem_addr_t           corrupt_byte_addr;
+    mem_line_addr_t      corrupt_backing_line;
+
+    if (!dcache_owner_claimed) begin
+        return;
+    end
+    if (dcache_aggregate_snapshot.pending_writeback_count == 0) begin
+        dcache_aggregate_snapshot.observer_ready = 1'b0;
+    end
+    else begin
+        dcache_aggregate_snapshot.pending_writeback_count--;
+    end
+    foreach (write_event.byte_mask[i]) begin
+        if (!write_event.byte_mask[i]) begin
+            continue;
+        end
+        byte_addr = write_event.addr + mem_addr_t'(i);
+        dcache_line = byte_addr[47:6];
+        line_byte = byte_addr[5:0];
+        event_bytes = '0;
+        event_bytes[line_byte] = 1'b1;
+        if (!dcache_fragment_committed_bytes.exists(dcache_line)) begin
+            dcache_aggregate_snapshot.observer_ready = 1'b0;
+        end
+        else begin
+            dcache_fragment_committed_bytes[dcache_line] |= event_bytes;
+        end
+    end
+    foreach (dcache_fragment_committed_bytes[committed_line]) begin
+        if (dcache_fragment_committed_bytes[committed_line] == 64'hffff_ffff_ffff_ffff) begin
+            dcache_incomplete_fragment_line_count--;
+            // 仅在低/高两个 fragment 均提交后清除该 DCache line 的 corrupt byte mask。
+            corrupt_mask = '0;
+            corrupt_backing_line = mem_line_addr_t'(committed_line[41:4]);
+            for (int unsigned byte_idx = 0; byte_idx < 64; byte_idx++) begin
+                corrupt_byte_addr = {committed_line, 6'b0} + mem_addr_t'(byte_idx);
+                corrupt_mask[corrupt_byte_addr[9:0]] = 1'b1;
+            end
+            if (write_overlay_corrupt_byte_mask.exists(corrupt_backing_line) &&
+                ((write_overlay_corrupt_byte_mask[corrupt_backing_line] & corrupt_mask) != '0)) begin
+                write_overlay_corrupt_byte_mask[corrupt_backing_line] &= ~corrupt_mask;
+                if (write_overlay_corrupt_byte_mask[corrupt_backing_line] == '0) begin
+                    write_overlay_corrupt_byte_mask.delete(corrupt_backing_line);
+                    if (dcache_aggregate_snapshot.observed_corrupt_line_count != 0) begin
+                        dcache_aggregate_snapshot.observed_corrupt_line_count--;
+                    end
+                end
+            end
+            dcache_fragment_pending_bytes.delete(committed_line);
+            dcache_fragment_committed_bytes.delete(committed_line);
+        end
+    end
+    publish_dcache_aggregate_snapshot();
+endfunction:observe_dcache_write_committed
+
+function void mem_access_base_sequence::observe_uncache_write_committed(
+    input shared_mem_write_event_t write_event
+);
+    mem_addr_t      byte_addr;
+    mem_line_addr_t backing_line;
+    bit [9:0]       byte_offset;
+
+    foreach (write_event.byte_mask[i]) begin
+        if (!write_event.byte_mask[i]) begin
+            continue;
+        end
+        byte_addr = write_event.addr + mem_addr_t'(i);
+        backing_line = byte_addr[47:10];
+        byte_offset = byte_addr[9:0];
+        if (write_overlay_corrupt_byte_mask.exists(backing_line)) begin
+            write_overlay_corrupt_byte_mask[backing_line][byte_offset] = 1'b0;
+            if (write_overlay_corrupt_byte_mask[backing_line] == '0) begin
+                write_overlay_corrupt_byte_mask.delete(backing_line);
+                if (dcache_aggregate_snapshot.observed_corrupt_line_count != 0) begin
+                    dcache_aggregate_snapshot.observed_corrupt_line_count--;
+                end
+            end
+        end
+    end
+    publish_dcache_aggregate_snapshot();
+endfunction:observe_uncache_write_committed
 
 function void mem_access_base_sequence::apply_shared_mem_write(input shared_mem_write_event_t write_event);
     mem_addr_t      byte_addr;
@@ -367,10 +631,12 @@ function void mem_access_base_sequence::commit_shared_mem_write_batch();
     // 中文注释：先提交 DCache C 写回，再提交 Uncache store；同拍同 byte 冲突固定以后者为准。
     foreach (dcache_write_batch[i]) begin
         apply_shared_mem_write(dcache_write_batch[i]);
+        observe_dcache_write_committed(dcache_write_batch[i]);
     end
     dcache_write_batch.delete();
     foreach (uncache_write_batch[i]) begin
         apply_shared_mem_write(uncache_write_batch[i]);
+        observe_uncache_write_committed(uncache_write_batch[i]);
     end
     uncache_write_batch.delete();
 endfunction:commit_shared_mem_write_batch
@@ -505,7 +771,10 @@ task mem_access_base_sequence::shared_mem_access_task(
         write_event.byte_mask   = byte_mask;
         write_event.store_data  = store_data;
         case (write_owner)
-            SHARED_MEM_WRITE_DCACHE:  dcache_write_batch.push_back(write_event);
+            SHARED_MEM_WRITE_DCACHE: begin
+                dcache_write_batch.push_back(write_event);
+                observe_dcache_write_enqueued(write_event);
+            end
             SHARED_MEM_WRITE_UNCACHE: uncache_write_batch.push_back(write_event);
             default: begin
                 `uvm_fatal(get_type_name(), $sformatf("unsupported shared memory write owner=%0d", write_owner))
@@ -958,6 +1227,7 @@ function void dcache_mem__access_base_sequence::clear_runtime_state(bit clear_ca
     clear_c_assembly_state();
     clear_cbo_context();
     if (clear_cache_map) begin
+        observe_dcache_map_cleared();
         cached_line_by_addr.delete();
     end
 endfunction:clear_runtime_state
@@ -1200,9 +1470,12 @@ endtask:load_grant_line
 
 function void dcache_mem__access_base_sequence::record_cached_line(input bit [47:0] addr, input bit [1:0] line_alias);
     bit [47:0] line_addr;
+    bit old_alias_valid;
     dcache_cached_line_record_t line_record;
 
     line_addr = line_addr64(addr);
+    old_alias_valid = cached_line_by_addr.exists(line_addr) &&
+                      cached_line_by_addr[line_addr].alias_valid;
     line_record.line_addr              = line_addr;
     line_record.active_alias           = line_alias;
     line_record.alias_valid            = 1'b1;
@@ -1215,14 +1488,18 @@ function void dcache_mem__access_base_sequence::record_cached_line(input bit [47
     line_record.deferred_sink          = '0;
     line_record.deferred_accept_cycle  = '0;
     cached_line_by_addr[line_addr]     = line_record;
+    observe_dcache_line_transition(old_alias_valid, line_record.alias_valid);
 endfunction:record_cached_line
 
 function void dcache_mem__access_base_sequence::remove_cached_line(input bit [47:0] addr, input string reason);
     bit [47:0] key;
+    bit old_alias_valid;
 
     key = line_addr64(addr);
     if (cached_line_by_addr.exists(key)) begin
+        old_alias_valid = cached_line_by_addr[key].alias_valid;
         cached_line_by_addr.delete(key);
+        observe_dcache_line_transition(old_alias_valid, 1'b0);
     end else begin
         `uvm_info(get_type_name(),
                   $sformatf("remove_cached_line miss for line=0x%0h reason=%s", key, reason),
@@ -1235,9 +1512,12 @@ function void dcache_mem__access_base_sequence::mark_cached_line_grant_wait(
     input bit [1:0]  line_alias
 );
     bit [47:0] line_addr;
+    bit old_alias_valid;
     dcache_cached_line_record_t line_record;
 
     line_addr = line_addr64(addr);
+    old_alias_valid = cached_line_by_addr.exists(line_addr) &&
+                      cached_line_by_addr[line_addr].alias_valid;
     line_record.line_addr              = line_addr;
     line_record.active_alias           = line_alias;
     line_record.alias_valid            = 1'b0;
@@ -1250,6 +1530,7 @@ function void dcache_mem__access_base_sequence::mark_cached_line_grant_wait(
     line_record.deferred_sink          = '0;
     line_record.deferred_accept_cycle  = '0;
     cached_line_by_addr[line_addr]     = line_record;
+    observe_dcache_line_transition(old_alias_valid, line_record.alias_valid);
 endfunction:mark_cached_line_grant_wait
 
 function int unsigned dcache_mem__access_base_sequence::sample_dcache_response_delay();
@@ -1803,9 +2084,12 @@ task dcache_mem__access_base_sequence::complete_probe_record(
 
     case (probe_record.target_cap)
         TL_CAP_TOB: begin
+            bit old_alias_valid;
+            old_alias_valid = line_record.alias_valid;
             line_record.alias_valid     = 1'b1;
             line_record.lifecycle_state = DCACHE_LINE_ACTIVE;
             cached_line_by_addr[probe_record.line_addr] = line_record;
+            observe_dcache_line_transition(old_alias_valid, line_record.alias_valid);
             probe_record_q.delete(probe_index);
             if (probe_record.owner == DCACHE_PROBE_OWNER_CBO) begin
                 complete_cbo_probe(probe_record, complete_cycle);
@@ -1821,6 +2105,7 @@ task dcache_mem__access_base_sequence::complete_probe_record(
                 release_deferred_acquire_resources(line_record);
                 probe_record_q.delete(probe_index);
                 cached_line_by_addr.delete(probe_record.line_addr);
+                observe_dcache_line_transition(line_record.alias_valid, 1'b0);
                 accept_dcache_a_request(deferred_acquire, complete_cycle);
             end else begin
                 probe_record_q.delete(probe_index);
@@ -2424,6 +2709,7 @@ task dcache_mem__access_base_sequence::complete_probe_c_assembly(input longint u
         end
     end
     else begin
+        observe_dcache_corrupt_line(c_assembly_line);
         `uvm_error(get_type_name(),
                    $sformatf("ProbeAckData is corrupt; skip writeback but still close Probe token=%0d line=0x%0h",
                              c_assembly_probe_token, c_assembly_line))
@@ -2432,6 +2718,7 @@ task dcache_mem__access_base_sequence::complete_probe_c_assembly(input longint u
                           1'b1,
                           !c_assembly_corrupt_seen,
                           complete_cycle);
+    observe_dcache_c_assembly_complete();
     clear_c_assembly_state();
 endtask:complete_probe_c_assembly
 
@@ -2455,6 +2742,9 @@ task dcache_mem__access_base_sequence::complete_release_c_assembly(input longint
                                  c_assembly_line, corrupt, denied))
         end
     end
+    else begin
+        observe_dcache_corrupt_line(c_assembly_line);
+    end
     remove_cached_line(c_assembly_line, "release_or_writeback");
     if (!c_assembly_response_reserved) begin
         `uvm_fatal(get_type_name(), "ReleaseData completed without a reserved ReleaseAck response slot")
@@ -2471,6 +2761,7 @@ task dcache_mem__access_base_sequence::complete_release_c_assembly(input longint
     // 将 assembly reservation 原子转换为真正 record；它不应额外占用第二个 capacity。
     c_assembly_response_reserved = 1'b0;
     enqueue_dcache_response(response_record);
+    observe_dcache_c_assembly_complete();
     clear_c_assembly_state();
 endtask:complete_release_c_assembly
 
@@ -2610,6 +2901,7 @@ task dcache_mem__access_base_sequence::start_c_assembly(
             c_assembly_param          = c_req_xact.auto_inner_dcache_client_out_c_bits_param;
             c_assembly_probe_token    = probe_record.token;
             probe_record_q[probe_index].state = DCACHE_PROBE_STATE_C_ASSEMBLY;
+            observe_dcache_c_assembly_start();
             consume_c_beat(c_req_xact, accept_cycle);
         end
         TL_C_OPCODE_RELEASE: begin
@@ -2661,6 +2953,7 @@ task dcache_mem__access_base_sequence::start_c_assembly(
                 `uvm_fatal(get_type_name(), "ReleaseData C.fire occurred without a reservable ReleaseAck response slot")
             end
             c_assembly_response_reserved = 1'b1;
+            observe_dcache_c_assembly_start();
             consume_c_beat(c_req_xact, accept_cycle);
         end
         default: begin
@@ -2899,11 +3192,17 @@ task dcache_mem__access_base_sequence::body();
                                        mem_addr_t'(seq_csr_common::get_paddr_base()),
                                        seq_csr_common::get_paddr_range());
     end
+    if (!claim_dcache_observer_owner()) begin
+        `uvm_error(get_type_name(),
+                   "DCache observer owner claim failed; responder will not publish RM aggregate state")
+        return;
+    end
     check_l2_model_cfg();
     service_cycle    = 0;
     last_drive_cycle = 0;
     stop_wait_cycles = 0;
     clear_runtime_state(1'b1);
+    publish_dcache_owner_baseline();
 
     forever begin
         // 中文注释：上一轮 item 已在前一个 drv_cb 边界更新到 clocking output；
@@ -2949,6 +3248,10 @@ task dcache_mem__access_base_sequence::body();
             last_drive_cycle = service_cycle;
             service_cycle++;
             continue;
+        end
+
+        if (!mem_access_base_sequence::dcache_aggregate_snapshot.published) begin
+            publish_dcache_owner_baseline();
         end
 
         // 本拍返回调度只能看见进入本拍前已经存在的 record；本拍 A/C.fire 新建的
@@ -3060,6 +3363,7 @@ task dcache_mem__access_base_sequence::body();
             last_drive_cycle = service_cycle;
             service_cycle++;
             memblock_sync_pkg::dcache_responder_done = 1'b1;
+            release_dcache_observer_owner();
             `uvm_info(get_type_name(), "DCache responder published terminal idle and stopped", UVM_LOW)
             break;
         end
