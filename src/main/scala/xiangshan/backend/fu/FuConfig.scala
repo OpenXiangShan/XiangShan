@@ -165,6 +165,7 @@ case class FuConfig (
   def needVecCtrl: Boolean = {
     import FuType._
     Seq(
+      ldu,
       vialu,
       vimac,
       vidiv,

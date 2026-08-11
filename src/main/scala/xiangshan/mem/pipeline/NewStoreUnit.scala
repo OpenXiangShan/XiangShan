@@ -807,6 +807,7 @@ class StoreUnitS3(param: ExeUnitParams)(
   io.stout.toRob.bits.sqIdx.foreach(_ := sxData.uop.sqIdx)
   io.stout.toRob.bits.lqIdx.foreach(_ := sxData.uop.lqIdx)
   io.stout.toRob.bits.exceptionVec extendFrom sxData.uop.exceptionVec.selectByFu(StaCfg)
+  io.stout.toRob.bits.vLoadMeta.foreach(_ := 0.U.asTypeOf(new xiangshan.backend.Bundles.VLoadMeta))
   io.stout.toRob.bits.debugInfo.isMMIO.foreach(_ := sxData.mmio.get)
   io.stout.toRob.bits.debugInfo.isNCIO.foreach(_ := sxData.nc.get && !sxData.memBackTypeMM.get)
   io.stout.toRob.bits.debugInfo.isPerfCnt.foreach(_ := false.B)
@@ -824,8 +825,6 @@ class StoreUnitS3(param: ExeUnitParams)(
   io.exceptionInfo.bits.vaNeedExt := sxData.tlbException.get.vaNeedExt
   io.exceptionInfo.bits.isHyper := sxData.tlbException.get.isHyper
   io.exceptionInfo.bits.uopIdx := 0.U.asTypeOf(io.exceptionInfo.bits.uopIdx)
-  io.exceptionInfo.bits.vl := 0.U.asTypeOf(io.exceptionInfo.bits.vl)
-  io.exceptionInfo.bits.vstart := 0.U.asTypeOf(io.exceptionInfo.bits.vstart)
 }
 
 class StoreUnitS4(param: ExeUnitParams)(
