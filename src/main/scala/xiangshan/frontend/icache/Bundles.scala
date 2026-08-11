@@ -208,6 +208,7 @@ class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
 class ICacheMeta(implicit p: Parameters) extends ICacheBundle {
   val exception:          ExceptionType = new ExceptionType
   val pmpMmio:            Bool          = Bool()
+  val hasSatpFlush:       Bool          = Bool()
   val isBackendException: Bool          = Bool()
   val isForVSnonLeafPTE:  Bool          = Bool()
   val itlbPbmt:           UInt          = UInt(Pbmt.width.W)
