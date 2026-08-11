@@ -416,3 +416,81 @@ agent 的 clocking 方向、xaction/driver/monitor 字段覆盖、types 在 `rob
 |---|---|---|
 | 既有 RTL/接口分析 | `AI_DOC/analysis/interface/v2/**`、`AI_DOC/analysis/rtl/v2/**` | 不属于当前 UVM 接口接线或测试框架逻辑适配，保持原状且不 stage。 |
 | 后续 DUT 适配 | vector writeback、TopDown、`msiInfo` 宽度相关的文件 | 尚未修改或 review，后续以独立功能单元和 commit 处理。 |
+
+## 7. 功能单元三：V2 vector writeback 删除 `vdIdx` 字段
+
+### 7.1 功能目标与影响边界
+
+最新 `build/rtl/MemBlock.sv` 在两个 vector writeback payload 中保留
+`vdIdxInField[2:0]`，但不再声明 `vdIdx[2:0]`。旧 testbench 同时声明并连接两个字段会导致
+`dut_inst.sv` 端口不存在、connect macro 层级不存在，不能通过 elaboration。
+
+本单元完整删除两条失效字段的顶层 wire、实例连接、四组 connect force、interface clocking 字段、
+xaction field automation 和 monitor local/sample 赋值。该 agent 是顶层 DUT output observer，当前
+scalar-only flow 对任何 vector `valid` 非 0 仍立即 fatal，且没有 sequence、RM、scoreboard、公共状态或
+transaction producer 消费 `vdIdx`；因此字段删除只恢复接口闭合，不改变测试框架运行期状态机。
+
+### 7.2 保留字段和 monitor 行为
+
+源码位置：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_vec_wb_agent_agent/src/io_mem_to_ooo_vec_wb_agent_agent_monitor.sv`，任务：
+`io_mem_to_ooo_vec_wb_agent_agent_monitor::mon_data()`。
+
+抽象功能描述：该任务持续采样 vector writeback 输出，并在 scalar-only 环境检测到任何有效 vector
+writeback 时终止测试；它不将 vector payload 写入 semantic raw queue 或公共 transaction 状态。
+
+```systemverilog
+io_mem_to_ooo_writebackVldu_0_bits_vdIdxInField =
+    this.vif.mon_mp.mon_cb.io_mem_to_ooo_writebackVldu_0_bits_vdIdxInField;
+io_mem_to_ooo_writebackVldu_1_bits_vdIdxInField =
+    this.vif.mon_mp.mon_cb.io_mem_to_ooo_writebackVldu_1_bits_vdIdxInField;
+
+if (io_mem_to_ooo_writebackVldu_0_valid !== 1'b0 ||
+    io_mem_to_ooo_writebackVldu_1_valid !== 1'b0) begin
+    `uvm_fatal("MEMBLOCK_VEC_WB_UNSUPPORTED", "scalar-only flow observed writebackVldu")
+end
+```
+
+中文伪代码：monitor 保留对两个 `vdIdxInField` 的采样，因为该字段仍是最新 DUT payload 的组成部分。
+随后它继续对两个 valid 做四态安全检查：只要任一端口为 1、X 或 Z，就报告 scalar-only flow 不支持的
+fatal；两个 valid 都为 0 时不生成 event，也不写 raw queue、status、pass/fail 或 terminal。已删除的
+`vdIdx` 不再有 interface、transaction 或 monitor 读取者，因此不会在这个流程中留下悬空引用。
+
+### 7.3 接线与 transaction 清理
+
+源码位置：`mem_ut/ver/ut/memblock/tb/dut_inst.sv`、
+`mem_ut/ver/ut/memblock/tb/io_mem_to_ooo_vec_wb_agent_connect.sv` 和 vector-WB agent 的
+interface/xaction。
+
+抽象功能描述：这些声明与连接共同定义 DUT output 到 observer agent 的字段集合；本次使集合精确等于
+生成后 Verilog，且不改变仍存在字段的位宽或方向。
+
+```systemverilog
+wire [2:0] io_mem_to_ooo_writebackVldu_0_bits_vdIdxInField;
+wire [2:0] io_mem_to_ooo_writebackVldu_1_bits_vdIdxInField;
+
+.io_mem_to_ooo_writebackVldu_0_bits_vdIdxInField
+    (io_mem_to_ooo_writebackVldu_0_bits_vdIdxInField),
+.io_mem_to_ooo_writebackVldu_1_bits_vdIdxInField
+    (io_mem_to_ooo_writebackVldu_1_bits_vdIdxInField),
+```
+
+中文伪代码：顶层 testbench 只声明并实例化最新 RTL 仍提供的两个 `vdIdxInField` output。connect macro
+把这两个 output 镜像到 agent interface，xaction 的 UVM field automation 只保留该字段，monitor 再从
+clocking block 采样它。旧 `vdIdx` 的 wire、端口连接、force、field macro 和局部变量均被同时删除，
+避免任一层仍访问不存在的 RTL 路径。
+
+### 7.4 Plan 对齐、Review 与验证状态
+
+相关 plan：
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md`。
+该 plan 原有的 scalar-only vector valid gate 保持不变；本轮新写入的 `[IMPLEMENTATION_DELTA]` 仅记录
+上游删除 `vdIdx` 后的字段集合闭合。
+
+实现与原 plan 不一致的部分是原 plan 未枚举这两个具体 payload 字段，原因是字段删除来自最新 DUT。
+处理结论是保留当前精确接口集合，不保留兼容字段。Plan 未说明但 Coding 落实的细节为四组 connect
+force 与 xaction field automation 的同步删除；这些细节不新增任何运行期逻辑或性能路径。
+
+主 agent review 已检查：两个已删除端口不存在于最新 RTL；`rg` 对 memblock 环境没有任何
+`vdIdx(?!InField)` 残留；`vdIdxInField` 在 dut instance、connect、interface、xaction 和 monitor 中
+仍完整；`git diff --check -- mem_ut/ver/ut/memblock` 通过。未运行远端 VCS，因为仍有 TopDown 与
+`msiInfo` 顶层差异待处理，统一闭合后再执行编译/仿真。

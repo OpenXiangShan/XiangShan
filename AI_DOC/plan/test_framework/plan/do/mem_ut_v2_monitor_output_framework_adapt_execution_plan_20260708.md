@@ -454,3 +454,17 @@ STA IQ monitor跨专项边界：
 - 未单独 force 注入 `writebackVldu` 的 `1/X/Z` 负向场景；该检查由源码静态核对确认，负向动态验证不在本轮 scope。
 
 最终独立 subagent review 已返回 `FINAL PASS`。本 plan 随 implementation review 归档到 `plan/do`。
+
+## 20260811 V2 vector writeback 字段删除兼容
+
+[IMPLEMENTATION_DELTA]
+
+最新 `build/rtl/MemBlock.sv` 已删除
+`io_mem_to_ooo_writebackVldu_0_bits_vdIdx` 和
+`io_mem_to_ooo_writebackVldu_1_bits_vdIdx`，但保留两个
+`vdIdxInField` 字段。本次只从 `dut_inst.sv`、vector-WB connect macro、agent interface、xaction
+field automation 和 monitor sample local 中删除失效字段。
+
+当前 scalar-only unsupported gate 不读取这两个已删除字段；它继续仅以两个 `writebackVldu_*_valid`
+判断是否 fatal。因此该兼容不会生成 vector event、不会改变 raw/status/pass/fail/terminal，也不会改变
+现有 `vdIdxInField` 的采样、显示或未来 transaction 承载能力。

@@ -53,7 +53,6 @@ interface io_mem_to_ooo_vec_wb_agent_agent_interface  (input bit clk,input bit r
     logic [7:0] io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vstart;
     logic io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vta;
     logic [6:0] io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vuopIdx;
-    logic [2:0] io_mem_to_ooo_writebackVldu_0_bits_vdIdx;
     logic [2:0] io_mem_to_ooo_writebackVldu_0_bits_vdIdxInField;
     logic io_mem_to_ooo_writebackVldu_0_valid;
     logic [127:0] io_mem_to_ooo_writebackVldu_1_bits_data;
@@ -88,7 +87,6 @@ interface io_mem_to_ooo_vec_wb_agent_agent_interface  (input bit clk,input bit r
     logic [7:0] io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vstart;
     logic io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vta;
     logic [6:0] io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vuopIdx;
-    logic [2:0] io_mem_to_ooo_writebackVldu_1_bits_vdIdx;
     logic [2:0] io_mem_to_ooo_writebackVldu_1_bits_vdIdxInField;
     logic io_mem_to_ooo_writebackVldu_1_valid;
 
@@ -132,7 +130,6 @@ interface io_mem_to_ooo_vec_wb_agent_agent_interface  (input bit clk,input bit r
         input  io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vstart;
         input  io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vta;
         input  io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vuopIdx;
-        input  io_mem_to_ooo_writebackVldu_0_bits_vdIdx;
         input  io_mem_to_ooo_writebackVldu_0_bits_vdIdxInField;
         input  io_mem_to_ooo_writebackVldu_0_valid;
         input  io_mem_to_ooo_writebackVldu_1_bits_data;
@@ -167,7 +164,6 @@ interface io_mem_to_ooo_vec_wb_agent_agent_interface  (input bit clk,input bit r
         input  io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vstart;
         input  io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vta;
         input  io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vuopIdx;
-        input  io_mem_to_ooo_writebackVldu_1_bits_vdIdx;
         input  io_mem_to_ooo_writebackVldu_1_bits_vdIdxInField;
         input  io_mem_to_ooo_writebackVldu_1_valid;
     endclocking:drv_cb
@@ -212,7 +208,6 @@ interface io_mem_to_ooo_vec_wb_agent_agent_interface  (input bit clk,input bit r
         input  io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vstart;
         input  io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vta;
         input  io_mem_to_ooo_writebackVldu_0_bits_uop_vpu_vuopIdx;
-        input  io_mem_to_ooo_writebackVldu_0_bits_vdIdx;
         input  io_mem_to_ooo_writebackVldu_0_bits_vdIdxInField;
         input  io_mem_to_ooo_writebackVldu_0_valid;
         input  io_mem_to_ooo_writebackVldu_1_bits_data;
@@ -247,7 +242,6 @@ interface io_mem_to_ooo_vec_wb_agent_agent_interface  (input bit clk,input bit r
         input  io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vstart;
         input  io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vta;
         input  io_mem_to_ooo_writebackVldu_1_bits_uop_vpu_vuopIdx;
-        input  io_mem_to_ooo_writebackVldu_1_bits_vdIdx;
         input  io_mem_to_ooo_writebackVldu_1_bits_vdIdxInField;
         input  io_mem_to_ooo_writebackVldu_1_valid;
     endclocking:mon_cb
