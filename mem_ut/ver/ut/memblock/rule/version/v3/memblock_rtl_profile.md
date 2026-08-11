@@ -10,15 +10,15 @@
 | main class | `top.MemBlockTopMain` |
 | 默认 config | `TLConfig` |
 | 默认 issue | `E.b` |
-| 默认输出目录 | `build_memblock/rtl` |
+| 默认输出目录 | `build/rtl` |
 
 ## 期望产物
 
 ```text
-build_memblock/rtl/filelist.f
-build_memblock/rtl/ClockGate.sv
-build_memblock/rtl/MemBlock.sv
-build_memblock/rtl/MemBlockTop.sv
+build/rtl/filelist.f
+build/rtl/ClockGate.sv
+build/rtl/MemBlock.sv
+build/rtl/MemBlockTop.sv
 ```
 
 必要时，V3 脚本可以修补 `filelist.f`，将 `ClockGate.sv` 插入到

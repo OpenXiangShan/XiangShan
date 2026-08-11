@@ -204,7 +204,7 @@ find mem_ut/ver/ut/memblock/agent -path '*_interface.sv' | sort
 find mem_ut/ver/ut/memblock/subagent -path '*_interface.sv' | sort
 rg -n "U_IF_NAME\\.|RTL_PATH\\.|force " mem_ut/ver/ut/memblock/tb/*_agent_connect.sv
 rg -n "mon_cb\\.|drv_cb\\." mem_ut/ver/ut/memblock/agent mem_ut/ver/ut/memblock/subagent
-rg -n "module MemBlock|input |output " build/rtl/MemBlock.sv build_memblock/rtl/MemBlock.sv
+rg -n "module MemBlock|input |output " build/rtl/MemBlock.sv
 git diff --check -- AI_DOC AGENTS.md mem_ut/ver/ut/memblock/rule
 ```
 

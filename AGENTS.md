@@ -288,7 +288,7 @@ cd mem_ut/ver/ut/memblock/sim
 必须保证：
 
 ```text
-$MEMBLOCK_XS_HOME/build_memblock/rtl/filelist.f
+$MEMBLOCK_XS_HOME/build/rtl/filelist.f
 ```
 
 路径有效。
@@ -368,7 +368,7 @@ V2 独立 worktree 默认由 `eda01_entry.sh` 自动导出：
 核心要求：
 
 - 从 `mem_ut/ver/ut/memblock/tb/top_tb.sv` 展开的所有 RTL 交接 interface 入手
-- 检查 `build_memblock/rtl` 中 Verilog RTL 顶层端口和内部模块接口是否变化
+- 检查 `build/rtl` 中 Verilog RTL 顶层端口和内部模块接口是否变化
 - 如有变化，同步更新对应 `tb/*_agent_connect.sv`、agent interface、transaction/xaction、driver 驱动字段、monitor 采集字段
 - 如影响 env、RM、sequence、cfg，也必须同步修改
 

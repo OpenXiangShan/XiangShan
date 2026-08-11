@@ -5,8 +5,8 @@
 V2 DUT 接口适配必须以生成后的 V2 Verilog 为权威来源：
 
 ```text
-build_memblock/rtl/filelist.f
-build_memblock/rtl/MemBlock.sv
+build/rtl/filelist.f
+build/rtl/MemBlock.sv
 ```
 
 Scala 源码只用于理解 `valid/ready`、index 和 bundle 语义，不能替代生成后 Verilog
@@ -20,17 +20,15 @@ Scala 源码只用于理解 `valid/ready`、index 和 bundle 语义，不能替�
 已观察到的生成后 DUT 顶层事实：
 
 ```text
-build_memblock/rtl/MemBlock.sv
+build/rtl/MemBlock.sv
   module MemBlock
   io_outer_cpu_halt
   io_l2_tlb_req_*
   io_l2_pmp_resp_*
 ```
 
-当前 profile 不存在 `build_memblock/rtl/MemBlockTop.sv`。`build/rtl/MemBlock.sv`
-可以辅助比对，且当前内容与权威 `build_memblock/rtl/MemBlock.sv` 一致；但
-filelist 和后续接口适配仍必须只以 `build_memblock/rtl` 为权威，避免两个生成
-目录后续分叉。
+当前 profile 不存在 `build/rtl/MemBlockTop.sv`。接口检查和 filelist 均以
+`build/rtl` 为唯一权威生成目录。
 
 当前 halt/reset 控制连接状态：
 

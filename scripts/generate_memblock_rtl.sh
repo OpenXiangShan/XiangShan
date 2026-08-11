@@ -4,14 +4,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 XS_HOME="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
-TARGET_BUILD_DIR="${TARGET_BUILD_DIR:-build_memblock}"
+TARGET_BUILD_DIR="${TARGET_BUILD_DIR:-build}"
 TARGET_RTL_DIR="${TARGET_RTL_DIR:-${TARGET_BUILD_DIR}/rtl}"
 REFERENCE_RTL_DIR="${REFERENCE_RTL_DIR:-build/rtl}"
 CONFIG="${CONFIG:-DefaultConfig}"
 CHISEL_TARGET="${CHISEL_TARGET:-systemverilog}"
 JVM_XMX="${JVM_XMX:-40G}"
 JVM_XSS="${JVM_XSS:-256m}"
-CHECK_REFERENCE="${CHECK_REFERENCE:-1}"
+CHECK_REFERENCE="${CHECK_REFERENCE:-0}"
 FORCE_REGENERATE="${FORCE_REGENERATE:-1}"
 
 export MEMBLOCK_XS_HOME="${MEMBLOCK_XS_HOME:-${XS_HOME}}"
@@ -101,7 +101,7 @@ mv "${filelist_tmp}" "${TARGET_RTL_DIR}/filelist.f"
 
 if [[ -e "${TARGET_RTL_DIR}/MemBlockTop.sv" ]]; then
   echo "error: stale standalone MemBlockTop.sv exists in ${TARGET_RTL_DIR}" >&2
-  echo "hint: V2 must generate build_memblock through top.TopMain, not top.MemBlockTopMain" >&2
+  echo "hint: V2 must generate build/rtl through top.TopMain, not top.MemBlockTopMain" >&2
   exit 1
 fi
 

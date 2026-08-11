@@ -5,9 +5,9 @@
 V3 DUT 接口适配以生成后的 V3 Verilog 为权威来源：
 
 ```text
-build_memblock/rtl/filelist.f
-build_memblock/rtl/MemBlock.sv
-build_memblock/rtl/MemBlockTop.sv
+build/rtl/filelist.f
+build/rtl/MemBlock.sv
+build/rtl/MemBlockTop.sv
 ```
 
 ## 当前状态

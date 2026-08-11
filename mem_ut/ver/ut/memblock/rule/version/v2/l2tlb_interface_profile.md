@@ -8,7 +8,7 @@ DTLB 到 L2TLB 的 request 路径，以及 L2TLB 到 DTLB 的 response 路径。
 
 ## 当前状态
 
-V2 生成后的 `build_memblock/rtl/MemBlock.sv` 已暴露顶层
+V2 生成后的 `build/rtl/MemBlock.sv` 已暴露顶层
 `io_l2_tlb_req_*` request/response 端口和 `io_l2_pmp_resp_*` 端口。顶层
 `io_l2_tlb_req_*` 是 L2/L2Cache 侧向
 MemBlock 内部 TLB/L2TLB 发起地址查询的 requestor 口，不是 mem_ut
@@ -105,12 +105,12 @@ lifecycle owner。
 - `AI_DOC/analysis/interface/v2/agents/l2tlb_agent.md`
 
 这些是生成后 Verilog 的内部 wire 名，随 RTL 重新生成可能变化。后续更新 V2
-RTL 后必须重新检查权威 `build_memblock/rtl/MemBlock.sv` 中这些内部信号是否仍存在。
+RTL 后必须重新检查权威 `build/rtl/MemBlock.sv` 中这些内部信号是否仍存在。
 
 已观察到的顶层端口族：
 
 ```text
-build_memblock/rtl/MemBlock.sv
+build/rtl/MemBlock.sv
   io_l2_tlb_req_req_ready
   io_l2_tlb_req_req_valid
   io_l2_tlb_req_req_bits_vaddr
