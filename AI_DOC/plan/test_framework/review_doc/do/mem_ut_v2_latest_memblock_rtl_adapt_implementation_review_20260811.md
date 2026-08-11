@@ -268,9 +268,9 @@ record、不修改 active map，只为 redirect flush、writeback 过滤和 dire
 
 已完成的静态检查包括：三个端口在最新 `MemBlock.sv` 中的集合、方向和 RTL 直通关系；各自
 agent 的 connect/interface/xaction/driver/monitor 覆盖；VLS raw/effective anchor 对账；以及
-`git diff --check -- mem_ut/ver/ut/memblock`。远端 `make eda_compile tc=tc_sanity mode=base_fun`
+ `git diff --check -- mem_ut/ver/ut/memblock`。远端 `make eda_compile tc=tc_sanity mode=base_fun`
 已通过；修复前的 `make eda_run tc=tc_sanity mode=base_fun` 在 200060.300ns 因 L2 flush level
-请求被撤销失败，根因和修复见第 9 节。该失败不构成仿真通过结论，修复后仍须重新执行 compile/run。
+请求被撤销失败，根因和修复见第 9 节。修复后的 compile/run 已通过，最终结果见第 9.5 节和第 10 节。
 
 主 agent 第二轮 review 需要在给出“无问题”结论前逐项确认：
 
@@ -496,8 +496,8 @@ force 与 xaction field automation 的同步删除；这些细节不新增任何
 
 主 agent review 已检查：两个已删除端口不存在于最新 RTL；`rg` 对 memblock 环境没有任何
 `vdIdx(?!InField)` 残留；`vdIdxInField` 在 dut instance、connect、interface、xaction 和 monitor 中
-仍完整；`git diff --check -- mem_ut/ver/ut/memblock` 通过。未运行远端 VCS，因为仍有 TopDown 与
-`msiInfo` 顶层差异待处理，统一闭合后再执行编译/仿真。
+仍完整；`git diff --check -- mem_ut/ver/ut/memblock` 通过。该段记录的是 TopDown 与 `msiInfo`
+闭合前的静态 review 阶段；全部接口差异闭合后的远端编译和仿真结果见第 10 节。
 
 ## 8. 功能单元四：V2 TopDown 端口与 MSI 12 位 payload 适配
 
@@ -666,13 +666,17 @@ sequence 若要发起 flush，必须在自身拥有完整握手时显式替代�
 CSR driver 覆盖和 V2 RTL 直通链路。FSDB 文件存在，但本节点的 `fsdb_reader` 无法打开该远端生成
 FSDB；本结论以同一 run 的 fatal 日志和可复核的源码/RTL 链路为准。
 
-修复后尚未重新运行远端编译和仿真，验收待执行：
+修复后从 `mem_ut/ver/ut/memblock/sim` 执行
+`make eda_run tc=tc_sanity mode=base_fun`。首次增量编译只遇到 VCS 明确指向的生成缓存
+`base_fun/exec/simv.daidir/work.lib++/tdc.sdb` 损坏；仅删除该可再生文件后重试，编译完成且没有
+interface、constraint、层级或端口错误。重试后的仿真在 `1400000.000ns` 输出
+`TEST CASE PASSED`，报告汇总为 `UVM_ERROR : 0`、`UVM_FATAL : 0`，此前的 L2 flush 提前撤销 fatal
+未再出现。
 
-1. `make eda_compile tc=tc_sanity mode=base_fun` 必须继续无接口或约束相关编译错误。
-2. `make eda_run tc=tc_sanity mode=base_fun` 不得再出现 L2 flush request 提前撤销 fatal，且必须
-   达到 `TEST CASE PASSED`、`UVM_ERROR=0`、`UVM_FATAL=0`。
-3. 后续新增专用 L2 flush sequence 时，需要单独验证 request 从置 1 到 done 再撤销的完整
-   handshake；本轮不把该专项 stimulus 冒充为 generic CSR 随机化能力。
+本 testcase 仍会在无 dispatch 主表拓扑下打印 LSQ enqueue/commit 等待告警；这些告警不含
+`UVM_ERROR` 或 `UVM_FATAL`，不影响本次验收。后续新增专用 L2 flush sequence 时，仍须单独验证
+request 从置 1 到 done 再撤销的完整 handshake；本轮不把该专项 stimulus 冒充为 generic CSR
+随机化能力。
 
 ### 9.6 Plan 对齐检查
 
@@ -695,7 +699,7 @@ plan 对完整 level handshake 的要求。
 子 agent 自查：已确认 `csr_ctrl_agent_agent_default_sequence::body()` 的 10 次 `uvm_do(req)` 都会受到该
 默认约束；CSR driver 仍只按 item 值驱动、DCache responder 的 level state machine 未改；V2 RTL 中
 `flush_l2_enable -> io_outer_l2_flush_en` 直通关系存在。针对 memblock 源码和测试框架文档的
-`git diff --check` 均通过；修复后远端 compile/run 尚待主 agent 触发和复核。
+`git diff --check` 均通过；远端 compile/run 结果见第 9.5 节。
 
 ### 9.9 主 agent 第 2 轮静态 Review
 
@@ -712,3 +716,20 @@ plan 对完整 level handshake 的要求。
 结论：第 1 轮发现的 review 文档结构问题已修复；第 2 轮未发现新的功能或文档问题。本功能允许单独
 提交。后续专用 L2 flush sequence 必须显式关闭该默认 constraint，并独占 request 从置位、等待 done 到
 撤销的完整生命周期；该 future feature 不属于本次 generic CSR 适配的行为范围。
+
+## 10. 远端验证与最终 Review
+
+本轮所有 V2 最新 RTL 适配功能均已完成静态端口集合、方向、位宽和 agent 覆盖复核，并使用远端
+`make eda_run tc=tc_sanity mode=base_fun` 完成回归。最终日志路径为：
+
+```text
+mem_ut/ver/ut/memblock/sim/base_fun/log/tc=tc_sanity_ts=virtual_base_sequence_cfg=default_seed=666666_rtl_.log
+```
+
+验收结果：`TEST CASE PASSED`、`UVM_ERROR=0`、`UVM_FATAL=0`。本轮入口的 VCS 生成缓存损坏已按工具
+提示仅清理 `tdc.sdb` 后恢复；后续重新编译和仿真不应把该可再生产物故障归因于 DUT 或测试框架代码。
+
+主 agent 最终 review 结论：当前 `build/rtl/MemBlock.sv` 与 `dut_inst.sv` 的顶层端口集合闭合，已识别的
+VLS、MSI、vector writeback、TopDown、`msiInfo` 位宽和 L2 flush level 生命周期影响均已同步到测试框架。
+本轮没有未关闭的源码 review 问题。剩余风险仅为尚未建立专用 L2 flush request/done stimulus 的功能覆盖，
+不影响默认 `tc_sanity` 适配验收。
