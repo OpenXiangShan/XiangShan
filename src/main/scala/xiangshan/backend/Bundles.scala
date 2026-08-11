@@ -26,6 +26,7 @@ import xiangshan.mem.VecMissalignedDebugBundle
 import utility._
 import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.decode.opcode.Opcode.Opcode
+import xiangshan.backend.vector.VLdMergeUnit.VldMergeInfo
 
 
 object Bundles {
@@ -73,24 +74,6 @@ object Bundles {
     sink.bits.sqIdx.foreach(_ := source.bits.sqIdx.get)
     sink.bits.robIdx := source.bits.robIdx
     sink.bits.selImm := 0.U
-  }
-
-  def connectMemNewExuOutput(sink: DecoupledIO[NewExuOutput], source: DecoupledIO[ExuOutput]) = {
-    sink.valid := source.valid
-    source.ready := sink.ready
-    connectSamePort(sink.bits.toRob.bits, source.bits)
-    connectSamePort(sink.bits, source.bits)
-    sink.bits.toRob.valid             := source.valid
-    sink.bits.toIntRf.foreach(_.valid := source.bits.intWen.get)
-    sink.bits.toIntRf.foreach(_.bits  := source.bits.data(0))
-    sink.bits.toFpRf. foreach(_.valid := source.bits.fpWen.get)
-    sink.bits.toFpRf. foreach(_.bits  := source.bits.data(0))
-    sink.bits.toVecRf.foreach(_.valid := source.bits.vecWen.get)
-    sink.bits.toVecRf.foreach(_.bits  := source.bits.data(0))
-    sink.bits.toV0Rf. foreach(_.valid := source.bits.v0Wen.get)
-    sink.bits.toV0Rf. foreach(_.bits  := source.bits.data(0))
-    sink.bits.toVlRf. foreach(_.valid := source.bits.vlWen.get)
-    sink.bits.toVlRf. foreach(_.bits  := source.bits.data(0))
   }
 
   def connectWriteBackRob(sink: WriteBackRobBundle, source: NewExuOutput) = {
@@ -465,6 +448,8 @@ object Bundles {
     // from rename
     val robIdx    = new RobPtr
     val psrc      = Vec(numSrc, UInt(PhyRegIdxWidth.W))
+    val oldVdPsrc = Option.when(params.needOldVdLazyRead)(UInt(VfPhyRegIdxWidth.W))
+    val oldVdSrcState = Option.when(params.needOldVdLazyRead)(SrcState())
     val psrcV0    = Option.when(params.readV0Rf)(UInt(V0PhyRegIdxWidth.W))
     val psrcVl    = Option.when(params.readVlRf)(UInt(VlPhyRegIdxWidth.W))
     val pdest     = UInt(PhyRegIdxWidth.W)
@@ -509,6 +494,7 @@ object Bundles {
     val uopIdx   = Option.when(params.inVfSchd || params.isMemAddrIQ)(UopIdx())
     val lastUop  = Option.when(params.inVfSchd || params.isMemAddrIQ)(Bool())
     // from rename
+    val oldVdPsrc = Option.when(params.needOldVdLazyRead)(UInt(VfPhyRegIdxWidth.W))
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // for mdp
     val storeSetHit    = Option.when(params.isLdAddrIQ || params.isStAddrIQ)(Bool())
@@ -540,6 +526,7 @@ object Bundles {
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // psrc are used in datapath to generate regfile's bank Ren
     val psrc      = Vec(params.numRegSrc, UInt(params.rdPregIdxWidth.W))
+    val oldVdPsrc = Option.when(params.needOldVdLazyRead)(UInt(VfPhyRegIdxWidth.W))
     val psrcV0    = Option.when(params.readV0Rf)(UInt(V0PhyRegIdxWidth.W))
     val psrcVl    = Option.when(params.readVlRf)(UInt(VlPhyRegIdxWidth.W))
     // for mdp
@@ -940,6 +927,7 @@ object Bundles {
     val exuSources     = Option.when(exuParams.isIQWakeUpSink)(Vec(exuParams.numRegSrc, ExuSource(exuParams)))
     val loadDependency = OptionWrapper(exuParams.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val isRVC          = Option.when(exuParams.needIsRVC)(Bool())
+    val oldVdPsrc      = Option.when(exuParams.needOldVdLazyRead)(UInt(VfPhyRegIdxWidth.W))
     val predTaken      = Option.when(exuParams.needTaken)(Bool())
     val fuOpType       = FuOpType()
     val selImm         = Option.when(exuParams.needImm)(SelImm())
@@ -999,6 +987,7 @@ object Bundles {
       this.exuSources.foreach(_ := source.exuSources.get)
 
       this.loadDependency.foreach(_ := source.loadDependency.get)
+      this.oldVdPsrc.foreach(_ := 0.U)
 
       this.perfDebugInfo.foreach(_ := source.perfDebugInfo.get)
       this.debug_seqNum.foreach(_  := source.debug_seqNum.get)
@@ -1055,6 +1044,7 @@ object Bundles {
 
       this.lqIdx.foreach(_ := source.lqIdx.get)
       this.sqIdx.foreach(_ := source.sqIdx.get)
+      this.oldVdPsrc.foreach(_ := source.oldVdPsrc.get)
     }
   }
 
@@ -1179,6 +1169,7 @@ object Bundles {
     // only vector load store need
     val lqIdx = OptionWrapper(params.hasLoadFu, new LqPtr)
     val sqIdx = OptionWrapper(params.hasLoadFu || params.hasStoreAddrFu || params.hasStdFu || params.hasVStdFu, new SqPtr)
+    val oldVdPsrc = Option.when(params.needOldVdLazyRead)(UInt(VfPhyRegIdxWidth.W))
     val dataSources = Vec(params.numRegSrc, DataSource())
     val exuSources = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuSource(params)))
     val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
@@ -1221,6 +1212,7 @@ object Bundles {
       this.ssid          .foreach(_ := source.ssid.get)
       this.lqIdx         .foreach(_ := source.lqIdx.get)
       this.sqIdx         .foreach(_ := source.sqIdx.get)
+      this.oldVdPsrc     .foreach(_ := source.oldVdPsrc.get)
     }
 
     def toDynInst(): DynInst = {
@@ -1255,6 +1247,9 @@ object Bundles {
       uop.vtype          := this.vtype.getOrElse(0.U.asTypeOf(VType()))
       uop.vm             := this.vm.getOrElse(false.B)
       uop.uopIdx         := this.uopIdx.getOrElse(0.U)
+      this.oldVdPsrc.foreach { oldVdPsrc =>
+        uop.psrc(2) := oldVdPsrc
+      }
       uop.frm            := this.frm.getOrElse(0.U.asTypeOf(Frm()))
       uop.isRVC          := this.isRVC.getOrElse(false.B)
       uop.rasAction      := this.rasAction.getOrElse(0.U)
@@ -1334,6 +1329,7 @@ object Bundles {
     val ssid           = Option.when(params.hasLoadExu || params.hasStoreAddrExu)(UInt(SSIDWidth.W))
     val lqIdx          = Option.when(params.hasLoadExu)(new LqPtr)
     val sqIdx          = Option.when(params.hasLoadExu || params.hasStoreAddrFu || params.hasStdFu || params.hasVStdFu)(new SqPtr)
+    val oldVdPsrc      = Option.when(params.needOldVdLazyRead)(UInt(VfPhyRegIdxWidth.W))
     val perfDebugInfo  = Option.when(backendParams.debugEn)(new PerfDebugInfo())
     val debug_seqNum   = Option.when(backendParams.debugEn)(InstSeqNum())
   }
@@ -1437,6 +1433,8 @@ object Bundles {
     val toVecRf        = Option.when(params.writeVecRf)(ValidIO(UInt(VLEN.W)))
     val toV0Rf         = Option.when(params.writeV0Rf)(ValidIO(UInt(params.destDataBitsMax.W)))
     val toVlRf         = Option.when(params.writeVlRf)(ValidIO(UInt(params.destDataBitsMax.W)))
+    val vldMergeInfo   = Option.when(params.needOldVdLazyRead)(ValidIO(new VldMergeInfo))
+    val vldToRVP       = Option.when(params.needOldVdLazyRead)(ValidIO(UInt(VfPhyRegIdxWidth.W)))
     val redirect       = Option.when(params.hasRedirect)(ValidIO(new Redirect))
     val isFromLoadUnit = Option.when(params.hasLoadFu)(Bool())
     val debug          = new DebugBundle
@@ -1491,6 +1489,11 @@ object Bundles {
       res.toFpRf.zip(toFpRf).foreach { case (dst, src) =>
         dst.valid := src.valid
         dst.bits  := src.bits.data
+      }
+      res.vldMergeInfo.foreach(info => info := 0.U.asTypeOf(info))
+      res.vldToRVP.foreach { req =>
+        req.valid := false.B
+        req.bits := 0.U
       }
       res.pdest := ((toIntRf, toFpRf) match {
         case (Some(int), Some(fp)) => Mux(int.valid, int.bits.pdest, fp.bits.pdest)

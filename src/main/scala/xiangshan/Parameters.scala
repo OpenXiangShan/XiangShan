@@ -389,6 +389,7 @@ case class XSCoreParameters
           vlRD = VlRD(4, 0),
           v0WB = V0WB(4, 0),
           v0RD = V0RD(4, 0),
+          oldVdRD = VfRD(14, 0),
         ),
       ), numEntries = 20, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
@@ -402,6 +403,7 @@ case class XSCoreParameters
           vlRD = VlRD(5, 0),
           v0WB = V0WB(5, 0),
           v0RD = V0RD(5, 0),
+          oldVdRD = VfRD(15, 0),
         ),
       ), numEntries = 20, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
@@ -415,6 +417,7 @@ case class XSCoreParameters
           vlRD = VlRD(6, 0),
           v0WB = V0WB(6, 0),
           v0RD = V0RD(6, 0),
+          oldVdRD = VfRD(16, 0),
         ),
       ), numEntries = 20, numEnq = 2, numComp = 12),
       IssueBlockParams(Seq(
