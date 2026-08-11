@@ -13,6 +13,9 @@ mode 从对应 sample 的 CSR history 获得。
 | `frozen transport sample` | driver 在 `drv_cb` 固化的 interface 状态与 item provenance。 | `memblock_l2tlb_drv_sample_t`、mailbox wrapper | sequence 不重读 live VIF。 |
 | `global sample` | CSR monitor 在每个 post-reset `mon_cb` 唯一推进的测试框架周期号。 | `dut_sample_seq` | monitor、driver、adapter 都只读同一编号。 |
 | `C-2 CSR history` | V2 filter 实际可见的 CSR 历史项。 | `get_l2tlb_request_csr_history()` | request C 时 lookup 使用 CSR C-2。 |
+| `issue-time CSR` | UID 建立 WAITING 时冻结的历史 CSR，不代表 request 最终 fire 时 DUT 使用的 CSR。 | `memblock_uid_tlb_record.csr_snapshot` | UID 在 CSR=A 下 issue、稍后在 CSR=B 下真正发 request。 |
+| `request-fire CSR` | 本次 DTLB request `valid && ready` 成立时，V2 filter 实际可见的 C-2 CSR。 | `memblock_l2tlb_pending_req.csr_snapshot` | 用它构造本次 token 的 request lookup key。 |
+| `UID request-fire marker` | WAITING UID 已被某次真实 request fire 覆盖的首个 global sample；0 表示尚未观察到请求。 | `uid_tlb_first_request_fire_sample_seq` | C4 只取消 marker 已建立且不晚于 C0 的旧等待实例。 |
 | `flush barrier` | C0 fence/CSR event 到 C4 filter flush 的 lifecycle 记录。 | `barrier_q` | C0 fire 正常建 token，C4 才取消旧 pending token。 |
 | `logical live entry` | canonical raw response payload 的缓存对象。 | `tlb_entry_by_key` | adapter 的 C4 delete 后重新 build。 |
 | `adapter raw-fence owner` | 唯一可 pop/decode/schedule/apply raw fence 的 dispatch 组件。 | `dispatch_monitor_event_adapter` | responder sequence 不读取 `raw_sfence_q`。 |
@@ -24,6 +27,7 @@ mode 从对应 sample 的 CSR history 获得。
 |---|---|
 | `advance_dut_global_sample()` | CSR monitor 为当前 monitor sample 分配唯一 global sample；其它模块只能读取。 |
 | `capture_fired_request()` | 将已 fire 的 request 与 C-2 CSR snapshot 转成独立 token，并冻结 entry snapshot。 |
+| `mark_waiting_uid_records_on_request_fire()` | 用本次 token 的 request-fire C-2 CSR 为同 shape 的 WAITING UID 写 marker；不以 UID issue-time CSR 拒绝候选，也不绑定唯一 token。 |
 | `select_due_response()` | 从到期 token 中按 ordered/reorder 规则选一笔 response；不创建 token。 |
 | `complete_driving_response()` | 在真实 response sample 后完成 token，并以 response-visible CSR 对 waiting UID 做 raw-hit multicast。 |
 | `handle_l2tlb_flush_event()` | 为当前 sample event 建 C0/C4 token/UID barrier；不消费 raw fence FIFO。 |
@@ -73,7 +77,8 @@ flowchart TD
 ```text
 1. CSR monitor 每个 post-reset monitor sample 先推进 global sample，再发布完整 CSR history。
 2. driver 在真实 drv_cb 冻结 request valid/vpn/s2xlate、ready、response 和 metadata，写入单槽 mailbox。
-3. owner 消费该 mailbox。request fire 时按当前 sample 的 C-2 CSR 创建 request lookup key。
+3. owner 消费该 mailbox。request fire 时按当前 sample 的 C-2 CSR 创建 request lookup key，并为同
+   `{vpn,s2xlate}` 的 WAITING UID 写 request-fire marker；UID issue-time CSR 只保留历史/debug，不能拒绝该 marker。
 4. exact hit 复用 canonical logical entry；range lookup 专项完成后 exact miss 可以按 secondary range index 复用 entry；
    两者都要深拷贝 entry 到 token 私有 snapshot。miss 才随机 build 新 entry。
 5. token 到 due sample 后按 ordered/reorder 选择 response。response fire 后才完成 token，并使用 response fire 拍 C-2 CSR
@@ -90,10 +95,40 @@ response payload；它不处理 future fence raw 或直接驱动 response。
 
 ```text
 读取 request 的 vpn/s2xlate。
+在分配任何 token 或 UID marker 前检查 local/shared admission cutoff；close 后若仍观察到真实 fire 立即 fatal。
 从当前 global sample 查询 C-2 CSR history；warm-up 未完成时 ready 保持 0，已 fire 后缺失 history 则 fatal。
 调用 common_data 的 get_or_create lookup API 得到 canonical entry；随后逐字段 copy 到 token entry_snapshot。
+调用 mark_waiting_uid_records_on_request_fire：只使用 token 保存的 request-fire C-2 CSR 在 bounded
+{vpn,s2xlate} bucket 中确认候选 UID，并写首次 fire sample；不使用 UID issue-time CSR 做第二次 key 比较。
 分配 request_token、due_sample 和 latency bucket，push pending_q。
 ```
+
+### UID request-fire marker
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`，函数：
+`mark_waiting_uid_records_on_request_fire()`。
+
+抽象功能描述：该 helper 在一笔 request 已实际 fire 后，为可能进入同一 DTLB filter request 生命周期的
+WAITING UID 写入首个 fire sample。它只维护 UID cancel provenance，不把 token 归属到单个 UID，也不完成
+response 回填或制造 redirect。
+
+```text
+request_key = pending.request_lookup_key  // 由 pending 的 request-fire C-2 CSR 构造
+shape_key = {pending.vpn, pending.s2xlate}
+遍历该 bounded bucket：
+  跳过无效或非 WAITING record；
+  用 pending.csr_snapshot + record.vpn/s2xlate 重建 request_candidate_key；
+  若 request_candidate_key 不等于 request_key：跳过；
+  禁止用 record.csr_snapshot 重建第二个 candidate key；
+  marker 为 0 时，写入本次真实 request fire 的 sample。
+```
+
+最小例子：UID 在 CSR=A 下 issue，CSR 切换后 request 在 C-2 CSR=B 下 fire。此时 B 是 marker 的唯一
+上下文；A 仅用于说明 UID 的历史来源。若因 A 与 B 不同而不写 marker，C4 cancel 和后续 UID 生命周期都会失去
+已发生 request fire 的证据。
+
+当前文档合同要求上述规则成立；源码中若仍把 `record.csr_snapshot` 作为硬匹配条件，则属于 P1 待修正项，
+不能把该情况标记为已完成。
 
 ### Response completion
 
@@ -193,5 +228,6 @@ make eda_compile tc=basicTest ts=virtual_base_sequence mode=base_fun
 ```
 
 基础 `eda_run` 被远端 VCS KDB/NFS `SIGSEGV` 阻断，未进入 runtime。range/NAPOT exact-miss lookup、secondary index
-注册/注销和 64 KiB NAPOT validation 由后续
-`mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md` 完成；在其完成前 stage-aware C4 delete 只删除 canonical map entry。
+注册/注销和 64 KiB NAPOT validation 已由
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md` 完成；stage-aware C4 delete
+通过统一 delete helper 同时删除 canonical map entry 与其 range index。

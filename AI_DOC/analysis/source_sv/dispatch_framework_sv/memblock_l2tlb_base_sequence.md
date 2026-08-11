@@ -16,6 +16,9 @@
 | driving slot | 已选中并等待下一 DUT sample 确认完成的唯一 response | driving_req/driving_valid |
 | due sample | 最早允许 response 被 DUT 采样的 sample 序号 | due_sample_seq |
 | runtime CSR latest | CSR monitor 发布的可重复读取最新快照 | get_latest_runtime_csr_snapshot() |
+| request-fire C-2 CSR | 当前真实 request fire 对应、由 V2 filter 实际可见的 CSR history 项 | pending.csr_snapshot、get_request_csr_snapshot() |
+| issue-time CSR | UID 进入 WAITING 时保存的历史 CSR；它不等同于 request 实际 fire 时的 CSR | memblock_uid_tlb_record.csr_snapshot |
+| UID request-fire marker | WAITING UID 首次被真实 request fire 覆盖的 global sample | uid_tlb_first_request_fire_sample_seq |
 | flush event | CSR changed 或 sfence 产生的非破坏性生命周期 sideband | get_latest_l2tlb_flush_event() |
 | lifecycle owner | 唯一拥有 ready、queue、token 和 response 调度权的 sequence | memblock_sync_pkg owner state |
 | ready opportunity | reset或flush阻塞解除后至少发送一拍可接受ready的机会，不等同于request fire | ready_opportunity_since_lifecycle_block |
@@ -266,6 +269,10 @@ driving_req 在下一 sample 完成前仍占容量，因此不能在 select_due_
 
 抽象功能描述：该函数在 fire 边界构造冻结的 pending record，完成 request-time 查表和 response payload 准备，但不提前更新 UID record。
 
+执行边界：真实 fire 仍在同拍 stop/close 写入之前被正常接收；但一旦本地
+`release_close_requested` 或共享 admission seal 已经可见，函数先 fatal，再创建 pending、分配 token 或写入 UID marker。
+这样可以区分合法的 C0 同拍 fire 与 cutoff 之后的非法 fire。
+
 源码关键逻辑：
 
 ~~~systemverilog
@@ -273,7 +280,7 @@ pending.request_token = next_request_token;
 next_request_token++;
 pending.vpn = sampled_req_vpn;
 pending.s2xlate = sampled_req_s2xlate;
-data.get_mmu_csr_snapshot(pending.csr_snapshot);
+get_request_csr_snapshot(pending.csr_snapshot);
 pending.lookup_key = pending.csr_snapshot.make_lookup_key(
     {26'b0, pending.vpn}, pending.s2xlate);
 data.get_or_create_tlb_entry_by_req(..., returned_key, live_entry, created);
@@ -293,14 +300,36 @@ accepted_count++;
 ~~~text
 检查 outstanding 未达到 max；
 分配 token 并复制 sampled request；
-取得当前 MMU CSR 副本，用同一副本构造 lookup key；
+取得本次 request-fire 的 C-2 CSR 副本，用同一副本构造 lookup key；
 命中或创建 live TLB entry，返回 key 与 snapshot key 不一致时 fatal；
 显式 copy_from 保存 entry snapshot，避免后续 live table 变化污染回复；
 从 entry snapshot 填 resp_tr；
 按三档权重计算 due sample 并保存接受时 flush 版本；
 push pending_q、accepted 加 1、检查生命周期等式；
-此时不调用 update_uid_tlb_records_by_entry。
+调用 UID request-fire marker helper；该 helper 只用本次 pending 的 C-2 CSR/key 为 bounded
+WAITING candidate 写 marker，不以 UID issue-time CSR 拒绝候选。
+此时不调用 response-to-UID completion helper。
 ~~~
+
+#### P1：UID request-fire marker 的 CSR 来源
+
+抽象功能描述：`mark_waiting_uid_records_on_request_fire()` 在 `capture_fired_request()` 已确认真实握手后，
+把本次 request 生命周期写入可能关联的 UID waiting record。它不分配 token、不回填 payload，也不负责 ROB
+redirect；其唯一 CSR 输入是本次 request-fire 的 C-2 snapshot。
+
+正确的文字伪代码：
+
+~~~text
+从 {pending.vpn, pending.s2xlate} 的 bounded waiting bucket 读取候选 UID；
+对每个有效 WAITING UID，用 pending.csr_snapshot 重建 request key；
+该 key 与 pending.request_lookup_key 一致时，若 marker 为 0 则写入当前 fire sample；
+不得使用 record.csr_snapshot（UID issue-time CSR）重新构造第二个 key 作为拒绝条件。
+~~~
+
+当前源码复核状态：`capture_fired_request()` 已保存 request-fire C-2 snapshot；但
+`common_data_transaction::mark_waiting_uid_records_on_request_fire()` 仍额外从 `record.csr_snapshot`
+构造 `candidate_key` 并执行硬比较。因此上述 P1 合同目前仅完成 request capture 一侧，UID marker 一侧仍待
+coding 修正；本文不能将该项记为已完成。
 
 ### 5.3 check_l2tlb_lifecycle_accounting() 与 cancel_outstanding_by_reset()
 
