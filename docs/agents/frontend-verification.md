@@ -8,68 +8,22 @@ Most agent work in this repository is expected to target the frontend Python
 verification stack under `src/test/python/Frontend/`, not the whole XiangShan
 tree. Start here unless the task explicitly says otherwise.
 
-## File Map
+## Entry Points
 
-- `src/test/python/Frontend/Frontend_api.py`: stable root-level DUT fixture
-  and `api_Frontend_*` re-export facade.
-- `src/test/python/Frontend/Frontend_env.py`: stable root-level
-  `FrontendEnv` / fixture re-export facade.
-- `src/test/python/Frontend/env/frontend_env.py`: top-level environment
-  orchestration across DUT-facing collaborators.
-- `src/test/python/Frontend/env/backend_model.py`: backend-side semantic model
-  and resolve/redirect behavior.
-- `src/test/python/Frontend/env/api.py`: public helper APIs used by tests and scripts.
-- `src/test/python/Frontend/env/request_apis.py`: lower-level request helpers
-  used by `env/api.py` for program load, redirect, and golden-trace execution.
-- `src/test/python/Frontend/env/fixtures.py`: shared pytest fixtures and
-  artifact setup. Prefer these over custom setup.
-- `src/test/python/Frontend/env/dut_factory.py`: DUT construction entry used by
-  fixtures.
-- `src/test/python/Frontend/env/nemu_trace_pipeline.py`: NEMU trace generation
-  helpers used by the API layer.
+Use `src/test/python/Frontend/README.md` for the source-tree layout, script
+index, and standard build/test commands. Its implementation map is the only
+directory map maintained for this environment.
+
+The harness-critical locations are:
+
+- `src/test/python/Frontend/env/fixtures.py`: shared DUT fixture, artifact
+  setup, and VCS batch finalization.
+- `src/test/python/Frontend/conftest.py`: pytest session hook for VCS batch
+  finalization.
+- `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh`: single-bin
+  runner that creates the run identity and artifact root.
 - `src/test/python/Frontend/docs/03_funcov_model/skills.md`: the sole
-  functional-coverage modeling, testcase-targeting, artifact, and
-  back-annotation methodology.
-- `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh`: standard
-  single-case bin-trace entry that now auto-creates `TB_RUN_ID` /
-  `TB_ARTIFACT_DIR` and routes waveform, coverage, funcov, and case-log
-  outputs into that run layout.
-- `src/test/python/Frontend/scripts/run_bin_trace_suite.sh`: curated
-  ready-to-run bin-trace regression wrapper. Pass selected bins as arguments or
-  with `--list-file <path>`; it runs the single-case pipeline for each selected
-  bin.
-- `src/test/python/Frontend/env/agents/`: DUT-facing side agents such as
-  ICache, PTW, uncache, and backend drive logic.
-- `src/test/python/Frontend/env/model/`: semantic model helpers, golden trace
-  state, FTQ scoreboards, and backend runtime state.
-- `src/test/python/Frontend/env/monitor.py`: shared monitor-side data
-  structures and helpers used by the active monitor layer.
-- `src/test/python/Frontend/env/monitors/`: DUT observation and frontend-monitor logic.
-- `src/test/python/Frontend/env/bundles/`: DUT interface bundle binding and signal contract layer.
-- `src/test/python/Frontend/env/sequences/`: reusable env-side operational sequences.
-- `src/test/python/Frontend/tools/nemu_bin_to_golden_trace.py`: build golden trace
-  jsonl from a frontend bin through NEMU.
-- `src/test/python/Frontend/tools/nemu_log_to_golden_trace.py`: convert existing
-  NEMU logs into frontend golden trace json/jsonl.
-- `src/test/python/Frontend/tools/run_dut_with_bin_trace.py`: load a bin and
-  golden trace into the frontend DUT environment for bring-up/debug.
-- `src/test/python/Frontend/scripts/fst_to_fsdb.sh`: convert a frontend `.fst`
-  waveform to `.fsdb` through a temporary `.vcd`.
-- `src/test/python/Frontend/tests/`: active frontend regressions. Keep shared
-  `conftest.py` here.
-- `build-frontend/pylib-verilator/Frontend/`: generated Verilator Python
-  bindings, shared objects, signal map, and `Frontend_top.sv`.
-- `build-frontend/pylib-vcs/Frontend/`: generated VCS Python bindings, shared
-  objects, signal map, and `Frontend_top.sv`.
-- `build-frontend/rtl/`: generated RTL artifacts useful for cross-checking DUT behavior.
-- `build-frontend/frontend_build_manifest.<sim>.json`: generated with the
-  corresponding `pylib-<sim>` package; binds that package, generated RTL tree,
-  build configuration, and signal-contract hashes. `<sim>` is `verilator` or
-  `vcs`.
-- `ready-to-run/`: example DUT binaries used by frontend bin-trace investigations.
-- `NEMU/logs/`: legacy/imported trace inputs used to reconstruct old failing
-  windows; new runner-generated trace and raw NEMU logs belong under the run's
-  `inputs/` directory.
+  functional-coverage modeling and back-annotation methodology.
 
 ## Source Of Truth
 
@@ -291,6 +245,15 @@ do this by passing `-p no:rerunfailures`. If you invoke `pytest` directly,
 include the same flag unless you intentionally need that plugin outside the
 sandbox.
 
+For direct `pytest`:
+
+- `-p no:rerunfailures`: disable the environment-level rerun plugin in
+  sandboxed/manual runs unless you intentionally need it.
+- `TB_ENABLE_DUT_TESTS=1`: required for DUT integration cases guarded by the
+  existing `_RUN_DUT` pattern.
+- A DUT batch regression is complete only if pytest reaches the final summary
+  and the selected/completed case count matches the intended target.
+
 Run the default non-DUT frontend regression flow from the repo root:
 
 ```bash
@@ -303,50 +266,14 @@ Run the DUT-enabled frontend regression flow explicitly:
 TB_ENABLE_DUT_TESTS=1 src/test/python/Frontend/scripts/run_pytest_with_log.sh
 ```
 
-Run a narrower frontend test:
+`run_pytest_with_log.sh` accepts optional pytest arguments and documents its
+log-directory, log-file, log-level, and rerun-plugin controls in its header.
+It does not enable DUT integration by itself.
 
-```bash
-TB_ENABLE_DUT_TESTS=1 python -m pytest -p no:rerunfailures \
-  src/test/python/Frontend/tests/test_multi_branch.py -v
-```
-
-Common direct-`pytest` arguments worth keeping consistent:
-
-- `-p no:rerunfailures`: disable the environment-level rerun plugin in
-  sandboxed/manual runs unless you intentionally need it.
-- `-s`: keep live stdout/stderr visible while debugging DUT/env interaction.
-- `-o log_cli=true --log-cli-level=INFO`: print env logs to the terminal; raise
-  the level only when the extra noise is justified.
-- `-v`: keep testcase nodeids visible so logs/artifacts can be matched back to
-  the exact run.
-- `TB_ENABLE_DUT_TESTS=1`: required for DUT integration cases guarded by the
-  existing `_RUN_DUT` pattern.
-- A DUT batch regression is complete only if pytest reaches the final summary
-  and the selected/completed case count matches the intended target.
-
-`src/test/python/Frontend/scripts/run_pytest_with_log.sh` already sets the
-logging-related pytest arguments above and disables `rerunfailures` by default.
-It does not enable DUT integration by itself. Use direct `pytest` mainly when
-you need a narrower target or explicit env vars.
-
-`src/test/python/Frontend/scripts/run_pytest_with_log.sh` also accepts these
-script-level env vars:
-
-- `TB_LOG_CLI_LEVEL=...`: override the CLI log level; defaults to
-  `TB_ENV_LOG_LEVEL`, then `INFO`.
-- `TB_PYTEST_DISABLE_RERUNFAILURES=0|1`: keep or disable
-  `-p no:rerunfailures`; default is `1` in this tree.
-- `TB_SKIP_DUT_FINISH=1` with `TB_FRONTEND_SIM=vcs`: reuse one VCS DUT for
-  the pytest process, clear per-case clock callbacks after teardown, and call
-  `dut.Finish()` once from pytest session teardown. This produces one
-  run-scoped aggregate VDB result; it is not pass evidence by itself.
-- `TB_TRACE_START_INDEX=...`: start golden comparison from the given jsonl
-  index when loading a bin trace.
-- `TB_RESET_VECTOR=...`: start DUT fetch from the given PC instead of the
-  default `0x80000000`; defaults to `TB_BASE_ADDR` in the bin-trace pipeline.
-- `TB_REG_LOG_DIR=...`: override the default regression-log directory.
-- `TB_REG_LOG_FILE=...`: write the tee'd regression log to an explicit file
-  path instead of the timestamped default.
+With `TB_FRONTEND_SIM=vcs`, `TB_SKIP_DUT_FINISH=1` reuses one VCS DUT for the
+pytest process. Per-case teardown clears clock callbacks; pytest session
+teardown calls `dut.Finish()` once. This produces one run-scoped aggregate VDB
+result; it is not pass evidence by itself.
 
 Run the fast frontend smoke guard used by the local change hook:
 
@@ -382,35 +309,24 @@ filename. Keep ELF/map artifacts only for address inspection and disassembly.
 
 ### Standard Entry
 
-The script generates the NEMU golden trace first, then runs
-`tests/test_bin_trace_dut.py::test_bin_trace` with the pipeline-only
-environment variables set consistently.
+Run one ready-to-run bin through the pipeline:
 
 ```bash
-source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
-
-BIN_TRACE_ENV=(
-  TB_NEMU_EXEC=ready-to-run/riscv64-nemu-interpreter
-)
-
-timeout --foreground 1200 env "${BIN_TRACE_ENV[@]}" \
 src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.bin
 ```
 
 ### Regression List
 
-Use `run_bin_trace_suite.sh` for an explicitly selected ready-to-run bin-trace
-regression:
+Run an explicitly selected ready-to-run bin-trace regression:
 
 ```bash
-timeout --foreground 2400 env "${BIN_TRACE_ENV[@]}" \
 src/test/python/Frontend/scripts/run_bin_trace_suite.sh \
   ready-to-run/cfi_mix_case.bin \
   ready-to-run/cfi_random_5inst_case.bin
 ```
 
 Do not add a tracked default active-bin list. Keep the selected bin set explicit
-in the command line or in a user-provided `--list-file <path>` outside the
+on the command line or in a user-provided `--list-file <path>` outside the
 commit unless the list itself is intentionally under review. Leave long-running
 workloads out unless they are explicitly requested for that run.
 
@@ -419,19 +335,26 @@ Useful suite controls:
 - `src/test/python/Frontend/scripts/run_bin_trace_suite.sh --list <bin ...>`:
   print the selected bins without running them.
 - `src/test/python/Frontend/scripts/run_bin_trace_suite.sh --list-file <path>`:
-  run a different list file.
+  run a selected list file.
 - `TB_BIN_TRACE_SUITE_CONTINUE_ON_FAIL=1`: continue later bins after a case
   failure.
 
-`run_bin_trace_pipeline.sh` defaults both env logging and pytest CLI logging to
-`INFO`, and defaults `PYTEST_ADDOPTS` to
+The pipeline defaults logging to `INFO`, `TB_TRACE_STAGNANT_CYCLES_LIMIT` to
+`20000`, `TB_TRACE_STALL_SNAPSHOT_INTERVAL` to `5000`, and
+`TB_PYTEST_TIMEOUT_SECS` to `6400` for the DUT stage. `PYTEST_ADDOPTS` defaults to
 `-s -o log_cli=true --log-cli-level=<cli-level>`. Use `TB_LOG_LEVEL=WARNING`
-to quiet both env and pytest CLI logs, or use `TB_ENV_LOG_LEVEL` /
-`TB_LOG_CLI_LEVEL` to override them separately.
-It also defaults `TB_TRACE_STAGNANT_CYCLES_LIMIT` to `20000`,
-`TB_TRACE_STALL_SNAPSHOT_INTERVAL` to `5000`, `TB_TRACE_TARGET_CURSOR` to `0`,
-and `TB_PYTEST_TIMEOUT_SECS` to `6400`; set them explicitly only when a case
-needs different observability, stop, or wall-clock timeout behavior.
+to quiet both environment and pytest CLI logs, or use `TB_ENV_LOG_LEVEL` /
+`TB_LOG_CLI_LEVEL` to override them separately. The suite wrapper currently
+uses a 1200-second DUT-stage default for each case; set
+`TB_PYTEST_TIMEOUT_SECS` explicitly for long bins rather than treating that
+default as a universal limit.
+Long cases may lower routine logging and extend the timeout, but must retain
+progress or stall observability.
+
+NEMU trace generation is expected to finish from the finite program input and
+has no separate fixed timeout. An outer `timeout` is an optional whole-pipeline
+watchdog for infrastructure-risky runs; when used, choose it from measured
+trace-generation plus DUT time and leave enough cleanup margin.
 
 ### Variants
 
@@ -440,18 +363,17 @@ binary. The following form is for importing a previously generated legacy
 trace; omitted paths default under the new run's `inputs/` directory:
 
 ```bash
-timeout --foreground 1200 env "${BIN_TRACE_ENV[@]}" \
+TB_SKIP_NEMU=1 \
 src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh \
   ready-to-run/<case>.bin \
-  NEMU/logs/<case>.trace.jsonl \
-  NEMU/logs/<case>.nemu.log
+  NEMU/logs/<case>.trace.jsonl
 ```
 
 Set `TB_RUN_DUT=0` only when you intentionally want to generate or refresh the
 NEMU trace without running the DUT:
 
 ```bash
-timeout --foreground 1200 env "${BIN_TRACE_ENV[@]}" TB_RUN_DUT=0 \
+TB_RUN_DUT=0 \
 src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.bin
 ```
 
@@ -463,13 +385,18 @@ Other `run_bin_trace_pipeline.sh` knobs worth recording:
   intentionally want a shorter debug input.
 - `TB_SKIP_NEMU=1`: skip NEMU trace generation and reuse the explicit or
   default JSONL trace path. Required when the trace was generated separately.
+- `TB_TRACE_START_INDEX=...`: start golden comparison from a JSONL index for
+  local diagnosis only. It does not restore DUT, BPU, or FTQ state, so it is
+  not a valid mid-trace restart or full-pass workflow.
+- `TB_RESET_VECTOR=...`: choose the DUT reset/start PC; defaults to
+  `TB_BASE_ADDR` in the bin-trace pipeline.
 - `TB_LOG_LEVEL=...`: set both env and pytest CLI log levels; defaults to
   `INFO`. `INFO` prints `INFO`/`WARNING`/`ERROR`; `WARNING` prints only
   `WARNING`/`ERROR`.
 - `TB_ENV_LOG_LEVEL=...`: override only the environment logger level.
 - `TB_LOG_CLI_LEVEL=...`: override only pytest CLI log level.
-- `TB_PYTEST_TARGET=...`: replace the default
-  `tests/test_bin_trace_dut.py::test_bin_trace` nodeid.
+- Bin cases must be started through `run_bin_trace_pipeline.sh` or
+  `run_bin_trace_suite.sh`; do not invoke the underlying pytest case directly.
 - `TB_TRACE_MAX_CYCLES=...`: bound DUT execution cycles for a debug run; `0`
   keeps the run-to-completion behavior.
 - `TB_TRACE_TARGET_CURSOR=...`: stop once this golden-trace cursor is reached.
@@ -485,92 +412,28 @@ Other `run_bin_trace_pipeline.sh` knobs worth recording:
 - `PYTHON=...`: choose a non-default Python executable for the helper tools and
   pytest stage.
 
-Use direct `pytest` only when the golden trace has already been prepared and
-the pipeline-only environment variables are set explicitly:
-
-```bash
-timeout --foreground 900 env "${BIN_TRACE_ENV[@]}" \
-TB_ENABLE_DUT_TESTS=1 \
-TB_BIN_TRACE_PIPELINE=1 \
-TB_BIN_PATH=ready-to-run/<case>.bin \
-TB_TRACE_PATH=NEMU/logs/<case>.trace.jsonl \
-TB_BASE_ADDR=0x80000000 \
-TB_TRACE_TARGET_CURSOR=0 \
-python -m pytest -p no:rerunfailures -v \
-  src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
-```
-
-For this direct-`pytest` path, keep the required environment variables explicit:
-
-- `TB_ENABLE_DUT_TESTS=1`: enable DUT integration instead of the fake-DUT path.
-- `TB_BIN_TRACE_PIPELINE=1`: satisfy the pipeline-only gate on
-  `test_bin_trace`.
-- `TB_BIN_PATH=...`: point the testcase at the exact ready-to-run binary.
-- `TB_TRACE_PATH=...`: point the testcase at the prepared golden trace file.
-- `TB_BASE_ADDR=...`: keep the DUT load base consistent with the binary image.
-- `TB_TRACE_TARGET_CURSOR=...`: optional cursor target for a bounded debug
-  window; `0` disables it.
-- `TB_TRACE_STAGNANT_CYCLES_LIMIT=...`: keep stagnant-cycle early-stop enabled
-  so the run fails on real forward-progress stalls instead of hanging silently.
-
-Do not treat the bare command
-`TB_ENABLE_DUT_TESTS=1 python -m pytest ...::test_bin_trace`
-as a complete bin-case workflow. The test is pipeline-gated and requires the
-bin/trace environment above.
-
-More generally: direct `pytest` is only valid for a bin-trace case when the
-trace input, bin path, runtime bounds, and observability-related environment are
-already set to match that case's run requirements.
-
-### Artifacts
-
-Each direct run uses a unique root, normally
-`src/test/python/Frontend/data/runs/<run_id>/`. A suite instead uses
-`src/test/python/Frontend/data/runs/suites/<YYYYMMDD>/<HHMMSS>_<suite_id>/`,
-with each case under `cases/<case_stem>/` and suite aggregates under `report/`.
-Code coverage, waveform, functional coverage, and case logs remain together in
-each case root under `coverage/`, `waveforms/`, `funcov/`, and `logs/`.
-Bin-trace filenames include the binary stem and pytest case name, for example
-`<case>_test_bin_trace.fst` and `<case>_test_bin_trace.funcov.json`.
-
-Do not write new evidence to the old date directories or the global
-`data/funcov/` directory. Those locations contain historical artifacts only.
-
-Monitor/checker redirect-recovery errors are real failures and must not be
-filtered out by a legacy helper.
-
-`src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace` is a
-run-to-completion entrypoint. Do not use it as a load-only or partial-step
-smoke path. By default it runs until golden completion; set
-`TB_TRACE_MAX_CYCLES` to a positive integer only when you intentionally want a
-bounded debug run, or set `TB_TRACE_TARGET_CURSOR` to stop at a specific
-golden cursor. In bounded mode, exhausting the explicit cycle budget or reaching
-the target cursor is only bounded-window evidence; only `status=completed`
-with the full trace consumed is full bin-trace regression pass evidence.
-Observed DUT/env misbehavior such as monitor errors or stagnant-cycle early-stop
-must still fail the run.
-
-For direct `pytest`, use an outer `timeout` guard explicitly. The
-`TB_PYTEST_TIMEOUT_SECS` knob is consumed by `scripts/run_bin_trace_pipeline.sh`; it
-does not add a wall-clock bound by itself when you bypass the pipeline script.
+Run bin cases only through `run_bin_trace_pipeline.sh` for one binary or
+`run_bin_trace_suite.sh` for a selected list. The runners provide the required
+pipeline gate, trace input, runtime bounds, and artifact layout; direct pytest
+invocation is not a supported bin-case workflow.
 
 ## Bin-Trace Requirements
 
-Any DUT bin-trace case, especially
-`src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace`, must
-meet the following operational requirements:
+Any DUT bin-trace case must meet the following operational requirements:
 
-- every run must have a hard runtime upper bound; unbounded bin runs are not
-  allowed
+- the DUT stage must have a hard runtime upper bound through
+  `TB_PYTEST_TIMEOUT_SECS`
 - every run must generate a waveform artifact
 - every run must generate a readable log artifact
-- every direct run must use a unique `run_id` and artifact root, normally
+- every run must use a unique `run_id` and artifact root, normally
   `src/test/python/Frontend/data/runs/<run_id>/`; a suite must use a unique
   dated suite root under `data/runs/suites/<YYYYMMDD>/<HHMMSS>_<suite_id>/`
 - code coverage, waveform, funcov, and logs from one run must not be mixed with
   another run's output directories
 - waveform and log filenames should be logically tied to the binary and test
   case, so the reproduction can be matched back to the exact run
+- historical date directories and `data/funcov/` are read-only evidence, not
+  current run destinations
 
 In addition, bin-trace runs must have explicit runtime observability. Do not
 run them as opaque long-running jobs with no bounded diagnostics. A valid
@@ -592,9 +455,9 @@ Therefore:
   golden-trace cursor stops advancing (pipeline default: `20000`)
 - for pipeline runs, use `TB_PYTEST_TIMEOUT_SECS` to set the DUT-stage timeout;
   default is `6400` seconds
-- in interactive debug sessions, do not launch open-ended DUT bin runs; always
-  keep `TB_TRACE_STAGNANT_CYCLES_LIMIT` and `TB_PYTEST_TIMEOUT_SECS` enabled
-  and prefer wrapping the pipeline command with an outer `timeout` guard
+- in interactive debug sessions, keep `TB_TRACE_STAGNANT_CYCLES_LIMIT` and
+  `TB_PYTEST_TIMEOUT_SECS` enabled; add an outer `timeout` guard only when a
+  whole-pipeline watchdog is needed
 - when debugging a stuck bin-trace case, prefer enabling progress/stall
   reporting before changing semantic logic
 - for any bin-trace reproduction, use the local
@@ -643,7 +506,7 @@ verdi -sv \
   "$NOOP_HOME/build-frontend/pylib-vcs/Frontend/Frontend_top.sv" \
   -F "$NOOP_HOME/build-frontend/rtl/filelist.funcov.f" \
   -top Frontend_top \
-  -ssf "$NOOP_HOME/src/test/python/Frontend/data/<date>/<case>.fsdb"
+  -ssf "$NOOP_HOME/src/test/python/Frontend/data/runs/<run_id>/waveforms/<case>.fsdb"
 ```
 
 Use `-F`, not `-f`, so relative RTL paths inside the generated filelist are
@@ -652,13 +515,21 @@ resolved from the filelist directory. Include the picker/VCS wrapper
 `-top Frontend_top`; the generated RTL module `FrontendTop` is the DUT under
 that wrapper, not the FSDB top.
 
-Rebuild the frontend Python DUT artifacts from the repo root:
+## Artifact Naming
 
-```bash
-source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
-cd "$NOOP_HOME"
-make frontend -j
-```
+- Use one unique `run_id` for every invocation and keep its outputs under one
+  run root.
+- A bin-trace run keeps coverage, waveforms, funcov, and logs in separate
+  subdirectories of `src/test/python/Frontend/data/runs/<run_id>/`.
+- Waveform and log filenames use the testcase/binary artifact tag; by default
+  they are `<tag>.<wave-ext>` and `<tag>.log`.
+- Case logs are enabled by default through `TB_ENABLE_CASE_LOG=1`; set it to
+  `0` only when intentionally suppressing a per-case log.
+- `TB_WAVEFORM_PATH`, `TB_WAVEFORM_DIR`, `TB_CASE_LOG_PATH`, and
+  `TB_COVERAGE_DIR` override default artifact locations. Every override used by
+  a regression or suite must remain unique to that run.
+- Historical date directories are read-only evidence and must not be reused as
+  current run destinations.
 
 ## Test Authoring Rules
 

@@ -194,33 +194,32 @@ active list。长时间运行的大 case 只在需要时手动加入本次命令
 src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.bin
 ```
 
+bin runner 会为 DUT 阶段使用 `TB_PYTEST_TIMEOUT_SECS`；NEMU trace 生成默认
+按有限程序执行至完成，不单独设置固定超时。若基础设施不稳定或需要限制
+整个 pipeline，可按该 case 的实测总耗时自行增加外层 `timeout`，不要把固定
+秒数当作所有 bin 的通用上限。
+
 - 如果需要限定调试窗口，可额外设置 `TB_TRACE_TARGET_CURSOR=<index>`。
   到达该 cursor 只表示该窗口内未发现错误，不是完整 bin-trace 回归通过证据。
 
 - 详细测试参数、bin-trace 环境变量、runtime bound、artifact 规则和
-  direct `pytest` 约束，统一见 `docs/agents/frontend-verification.md`。
+  shell runner 使用约束，统一见 `docs/agents/frontend-verification.md`。
 
 ## 覆盖率闭环
 
-Frontend BT 只保留两条职责不同的覆盖率链：
+功能覆盖率证明目标场景被激励；checker、assertion、monitor 或 trace 对比证明
+DUT 行为正确；代码覆盖率用于发现 RTL 空洞，三者不能互相替代。
 
-1. 功能覆盖率：
-   `测试点主表 -> 03_funcov_model/frontend_bt_functional_coverage_pilot.csv -> env/funcov/__init__.py + env/funcov/py/icache/__init__.py + env/funcov/py/icache/icache_mainpipe_funcov.py + env/funcov/py/icache/icache_prefetchpipe_funcov.py + env/funcov/py/icache/icache_missunit_funcov.py + env/funcov/py/icache/icache_waylookup_funcov.py + env/funcov/py/icache/icache_hitmiss_funcov.py -> env/functional_coverage.py -> data/runs/<run_id>/funcov/*.funcov.json -> tools/backannotate_funcov.py`。
-   registry 当前共 380 行，其中 `Coverpoint` 完整并与 sampler 一一对应的 231 行会装入 runtime；其余 149 行均为 `UNMAPPED` 历史规划。ICache MainPipe、PrefetchPipe、MissUnit、WayLookup、hit/miss 路径分别维护 42、33、31、42、10 个覆盖点于 `env/funcov/py/icache/` 下；IFU 的 CFVec 与 compact/RVC 覆盖点分别维护在 `env/funcov/py/ifu/cfvec_funcov.py` 和 `env/funcov/py/ifu/compact_funcov.py`，FTQ two-fetch 覆盖点按请求、WayLookup、MainPipe、IFU delivery、checker 分组维护，`sampler.py` 仅作为兼容聚合入口。带 `旧BPU_FTQ` 路径的历史行全部保持 `Coverpoint` 为空，不能进入采样或自动反标。
-   标准 bin-trace 脚本会自动生成 `TB_RUN_ID` / `TB_ARTIFACT_DIR`；fixture 会将 pytest `funcov_bins` 标记或与汇编 case stem 精确匹配的 registry 行写入 `coverage_targets`。
-   `make frontend` 在对应 package 构建成功后生成 `build-frontend/frontend_build_manifest.<sim>.json`。funcov 按 `TB_FRONTEND_SIM` 选择 manifest，且只在其源码状态干净、`simulator` 与已选 package 一致、DUT/RTL/signal-contract 哈希与当前编译产物一致时接受其中的 `dut_source_sha`。
-2. 代码覆盖率：
-   `dut.SetCoverage() -> Verilator .dat -> toffee set_line_coverage() -> report_raw_code_coverage.py/gen_coverage_html.sh`。
-
-功能覆盖率证明目标场景被激励；checker、assertion、monitor 或 trace 对比证明 DUT 行为正确。代码覆盖率用于发现 RTL 空洞，三者不能互相替代。完整建模、真实 DUT 证据、版本隔离、自动反标和人工 `CLOSED` 规则见
-`docs/03_funcov_model/skills.md`。
+功能覆盖率建模、artifact 门禁、反标和人工 `CLOSED` 的唯一规则见
+`src/test/python/Frontend/docs/03_funcov_model/skills.md`。Verilator `.dat` 的汇总和 HTML 入口见上文
+`scripts/report_raw_code_coverage.py` 与 `scripts/gen_coverage_html.sh`。
 
 ## 文档分工
 
 - 目录结构、入口分层和当前实现定位，以当前 README 为准。
-- frontend 验证流程、bin-trace 运行要求、artifact 规则和提交约束，统一见
+- frontend harness contract、bin-trace 运行要求和提交约束，统一见
   `docs/agents/frontend-verification.md`。
 - 测试点驱动的功能覆盖率建模、回归、版本门禁和反标规范，统一见
-  `docs/03_funcov_model/skills.md`。
+  `src/test/python/Frontend/docs/03_funcov_model/skills.md`。
 - DUT / monitor / env mismatch 的分析方法，统一见
   `docs/agents/frontend-debugging.md`。

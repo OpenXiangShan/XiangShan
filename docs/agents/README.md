@@ -6,30 +6,27 @@ repository. Treat the project root as `$NOOP_HOME`.
 The root `AGENTS.md` is intentionally short and should point here instead of
 carrying detailed instructions inline.
 
-Use these documents in order for frontend verification work:
+For frontend verification, start with
+`docs/agents/frontend-verification.md`. It defines the harness contract and
+links to the source-tree entrypoint.
 
-1. `docs/agents/frontend-verification.md` for the default workflow, file map,
-   commands, and change hygiene under `src/test/python/Frontend/`.
-2. `docs/agents/frontend-debugging.md` for DUT, monitor, or env mismatch
-   analysis.
-3. `docs/agents/frontend-uncache-boundaries.md` for instruction uncache
-   boundary cases around MMIO/non-cacheable frontend fetch.
-4. `docs/agents/frontend-icache-rtl-update-b7e4c56fa-0053df46b.md` for the
-   ICache RTL delta and verification impact between the two named frontend
-   branch synchronization points.
-5. `docs/agents/frontend-mmio-nonmmio-switch-risks.md` for Chisel-level risk
-   points when frontend fetch switches between MMIO and non-MMIO regions.
-6. `docs/agents/frontend-backend-agent.md` for normative backend-agent
-   semantics.
-   Before changing backend-agent semantics or related code, run section
-   `实现一致性最小检查项` in order: `必须项` first, then `建议项`.
-7. `docs/agents/frontend-backend-model-review.md` for code-level reading
-   guidance and current hotspots in
-   `src/test/python/Frontend/env/backend_model.py`.
-8. `docs/agents/frontend-backend-controlflow/README.md` for RTL/control-flow
-   background around `resolve`, `redirect`, `commit`, and `callRetCommit`.
-9. `docs/testbench/Guide_Doc/` for broader testbench reference on fixtures,
-   APIs, coverage, and test authoring.
+Read an additional document only when the task needs it:
+
+- DUT, monitor, or environment mismatch:
+  `docs/agents/frontend-debugging.md`.
+- Backend-agent semantics or its implementation:
+  `docs/agents/frontend-backend-agent.md`, then
+  `docs/agents/frontend-backend-model-review.md`.
+- `resolve`, `redirect`, `commit`, or `callRetCommit` RTL background:
+  `docs/agents/frontend-backend-controlflow/README.md`.
+- Instruction-uncache or MMIO/non-MMIO boundaries:
+  `docs/agents/frontend-uncache-boundaries.md` and, when applicable,
+  `docs/agents/frontend-mmio-nonmmio-switch-risks.md`.
+- General testbench APIs and fixture reference: `docs/testbench/Guide_Doc/`.
+
+Before changing backend-agent semantics, run
+`frontend-backend-agent.md` section `实现一致性最小检查项` in order: `必须项`,
+then `建议项`.
 
 Before compiling Frontend or starting a real DUT regression, establish this
 baseline in the same session: read this map, `frontend-verification.md`, the
