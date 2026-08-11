@@ -91,7 +91,7 @@ class MptOutputSwitchBox(implicit p: Parameters) extends XSModule with MPTCacheP
   val mptOutReqPA   = Reg(UInt(ppnLen.W))
 
   val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed ||
-    io.csr.priv.virt_changed || (if (HasMptCheck) io.csr.mmpt.changed else false.B)
+    io.csr.priv.virt_changed || io.csr.mmpt.changed
 
   when(io.mptOut.valid) {
     mptOutDataReg := mptOutDataWire
@@ -398,7 +398,13 @@ class MPTPipeData(implicit p: Parameters) extends XSBundle with MPTCacheParam {
 }
 
 object MPTPipeWithReset {
-  def apply(enqValid: Bool, enqBits: MPTPipe, reset: Bool, latency: Int): Valid[MPTPipe] = {
+  def apply(
+      enqValid: Bool,
+      enqBits: MPTPipe,
+      reset: Bool,
+      latency: Int,
+      clearData: Bool = false.B
+  ): Valid[MPTPipe] = {
     require(latency >= 0, "Pipe latency must be greater than or equal to zero!")
 
     if (latency == 0) {
@@ -413,12 +419,18 @@ object MPTPipeWithReset {
       // data has no reset
       val mptPipeControl = RegEnable(mptPipeControlIn, 0.U.asTypeOf(mptPipeControlIn), enqValid) // control has reset
       val b              = Wire(chiselTypeOf(enqBits))
+      // kill ordinary in-flight requests on context-changing flush, but keep
+      // fence flushCache requests alive.
+      when(clearData) {
+        mptPipeControl.dataValid := false.B
+        mptPipeControl.mptOnly   := false.B
+      }
       when(reset) {
         mptPipeControl := 0.U.asTypeOf(mptPipeControlIn)
         v := false.B
       }
       b.applySplitData(mptPipeControl, mptPipeData) // merge pipe control and data signal
-      apply(v, b, reset, latency - 1)
+      apply(v, b, reset, latency - 1, clearData)
     }
   }
 }
@@ -478,6 +490,8 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
     }
   }
   val flushAll      = mfenceActive || io.csr.mmpt.changed
+  val flushPipeOnly = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed ||
+    io.csr.priv.virt_changed || io.csr.mmpt.changed
 
   val pipeFlowEn = Wire(Bool())
   val refilling     = Wire(Bool())
@@ -512,13 +526,13 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
 
   val pipeInputs = Wire(new MPTPipe)
 
-  val stageReq     = MPTPipeWithReset(pipeFlowEn, pipeInputs, flushAll, 1)
+  val stageReq     = MPTPipeWithReset(pipeFlowEn, pipeInputs, flushAll, 1, flushPipeOnly)
   val stageDelayin = stageReq.bits
-  val stageDelay   = MPTPipeWithReset(pipeFlowEn, stageDelayin, flushAll, 1)
+  val stageDelay   = MPTPipeWithReset(pipeFlowEn, stageDelayin, flushAll, 1, flushPipeOnly)
   val stageCheckin = stageDelay.bits
-  val stageCheck   = MPTPipeWithReset(pipeFlowEn, stageCheckin, flushAll, 1)
+  val stageCheck   = MPTPipeWithReset(pipeFlowEn, stageCheckin, flushAll, 1, flushPipeOnly)
   val stageRespin  = stageCheck.bits
-  val stageResp    = MPTPipeWithReset(pipeFlowEn, stageRespin, flushAll, 1)
+  val stageResp    = MPTPipeWithReset(pipeFlowEn, stageRespin, flushAll, 1, flushPipeOnly)
 
   // priority
   // 1. fence PA
@@ -769,7 +783,7 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
   // In this case, hitPerms actually holds the result from the previous pipeline stage.
 
   respHitRegTmp    := respHitReg
-  io.respHit.valid := respHitReg && !refilling && !fencePA
+  io.respHit.valid := respHitReg && !refilling && !fencePA && !flushPipeOnly
   val (sphitReg, l0hitReg) = (RegEnable(sphit, pipeFlowEn), RegEnable(l0Hit, pipeFlowEn))
   io.respHit.bits.perm := Mux1H(
     Seq(sphitReg, l0hitReg),
@@ -790,7 +804,7 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
 
   val respMissReg = RegEnable(!hitPerms & stageCheck.bits.dataValid, false.B, pipeFlowEn)
   // read regardless of dataValid
-  io.respMiss.valid := respMissReg && !refilling && !fencePA
+  io.respMiss.valid := respMissReg && !refilling && !fencePA && !flushPipeOnly
   io.respMiss.bits.hitLevel := RegEnable(hitAddrLevel, pipeFlowEn)
   io.respMiss.bits.ppn     := RegEnable(hitAddrData, pipeFlowEn)
   io.respMiss.bits.source  := stageResp.bits.source
@@ -921,6 +935,10 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
     respHitReg := false.B
     respMissReg := false.B
   }
+  when(flushPipeOnly) {
+    respHitReg := false.B
+    respMissReg := false.B
+  }
 }
 // // // MptMissQueue START // // //
 
@@ -959,7 +977,8 @@ class MptMissQueueIO(implicit p: Parameters) extends MMUIOBaseBundle with MPTCac
 class MptMissQueue(implicit p: Parameters) extends XSModule with MPTCacheParam {
   val io = IO(new MptMissQueueIO)
 
-  val flush = io.sfence.valid || io.csr.mmpt.changed
+  val flush = io.csr.satp.changed || io.csr.vsatp.changed ||
+io.csr.hgatp.changed || io.csr.priv.virt_changed || io.sfence.valid || io.csr.mmpt.changed
   val reqFIFO = Module(new Queue(new MissCacheBundle(), entries = 4, pipe = true, hasFlush = true)).io
   // FIFO queue,record offset
   val fifoNotEmpty = reqFIFO.deq.valid
