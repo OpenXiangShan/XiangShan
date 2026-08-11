@@ -12,6 +12,9 @@
 | UVM | 本项目用于驱动、采样和检查 DUT 的 SystemVerilog 验证框架。 | `mem_ut/ver/ut/memblock` | 后续 interface、driver、monitor 适配的执行主体。 |
 | VLS exception | 向 MemBlock 说明当前 redirect 属于 vector load/store exception 的控制标志。 | `io_redirect_bits_isVlsException`、`is_vls_exception` | 为 1 时 RTL 将 raw `level` 的实际生效值压为 0。 |
 | sideband | 不属于主 request payload、但会改变控制或状态观察结果的附加信号。 | `msiAck`、`io_outer_msi_ack` | backend 驱动 `msiAck`，DUT 将其直通到顶层输出。 |
+| level handshake | 请求端将 level 保持到响应端确认完成的双向控制协议。 | `io_ooo_to_mem_csrCtrl_flush_l2_enable`、`io_outer_l2_flush_en`、`io_l2_flush_done` | generic CSR item 不能只发一拍 1；专项 flush owner 必须等待 done。 |
+| DRAIN | L2 flush responder 在建立 snapshot 前自然收敛已存在 D/E/B/C owner 的状态。 | `DCACHE_L2_FLUSH_DRAIN`、`is_l2_flush_drain_complete()` | request 到来前的 owner 可完成，新的 A.ready 被关闭。 |
+| flush owner | 负责一次完整 L2 flush 请求从置位到观察 done 再撤销的 sequence/driver。 | 后续专用 CSR sequence | 默认 CSR random sequence 不具备该所有权。 |
 | raw level | driver 实际送往 DUT 的原始 redirect level。 | `memblock_redirect_payload_t.level` | VLS 场景中 raw level 可以为 1，但不等于 DUT 生效值。 |
 | effective level | 应用 VLS 规则后的 DUT 实际 redirect level。 | `memblock_redirect_effective_level()`、redirect anchor | `is_vls_exception=1` 时为 0，用于对账和同 ROB flush 判定。 |
 | anchor | monitor 记录的一次已被 DUT 采样的 redirect 事实，用于与 cancel record 对账。 | `dispatch_raw_redirect_anchor_t` | raw/effective level、ROB key 和 sample 序号必须属于同一次 redirect。 |
@@ -265,8 +268,9 @@ record、不修改 active map，只为 redirect flush、writeback 过滤和 dire
 
 已完成的静态检查包括：三个端口在最新 `MemBlock.sv` 中的集合、方向和 RTL 直通关系；各自
 agent 的 connect/interface/xaction/driver/monitor 覆盖；VLS raw/effective anchor 对账；以及
-`git diff --check -- mem_ut/ver/ut/memblock`。本单元尚未运行远端 VCS 编译或仿真，因此不能把
-静态检查替代为仿真通过结论。
+`git diff --check -- mem_ut/ver/ut/memblock`。远端 `make eda_compile tc=tc_sanity mode=base_fun`
+已通过；修复前的 `make eda_run tc=tc_sanity mode=base_fun` 在 200060.300ns 因 L2 flush level
+请求被撤销失败，根因和修复见第 9 节。该失败不构成仿真通过结论，修复后仍须重新执行 compile/run。
 
 主 agent 第二轮 review 需要在给出“无问题”结论前逐项确认：
 
@@ -594,3 +598,117 @@ TopDown 名称零残留；所有相关 MSI 声明、transaction、interface、mo
 12；`git diff --check -- mem_ut/ver/ut/memblock AI_DOC/plan/test_framework` 通过。此单元不增加
 高频扫描、queue、map 或 lifecycle owner。下一步执行远端 VCS compile/run，以验证全部已闭合的
 顶层端口和 SystemVerilog 类型。
+
+## 9. 功能单元五：L2 flush level 请求的 CSR 随机化隔离
+
+### 9.1 失败现象与适配归类
+
+远端命令 `make eda_compile tc=tc_sanity mode=base_fun` 已完成编译，但修复前的
+`make eda_run tc=tc_sanity mode=base_fun` 在 200060.300ns 以如下 fatal 结束：
+`L2 flush request was withdrawn before DRAIN completed`。日志位于
+`mem_ut/ver/ut/memblock/sim/base_fun/log/tc=tc_sanity_ts=virtual_base_sequence_cfg=default_seed=666666_rtl_.log`。
+
+这是最新 V2 DUT 控制语义在测试框架中的遗漏：顶层连接本身正确，但 CSR generic random item
+把一个必须由完整 request/done 生命周期拥有的控制输入当成普通逐 item 随机字段。它不是
+`io_outer_msi_ack`/VLS 接线问题，也不是 DUT 对 `io_outer_l2_flush_en` 的端口方向错误。
+
+### 9.2 修改前逻辑和根因
+
+`tc_sanity` 继承的 `csr_ctrl_agent_agent_default_sequence` 在 main phase 连续随机 10 个 CSR
+transaction。`io_ooo_to_mem_csrCtrl_flush_l2_enable` 原来的默认 constraint 为空，因此任一
+generic item 都可以随机为 1；随后的 generic item 或 driver idle 又可将它写回 0。
+
+当前 V2 RTL 将该 input 直接投影为 `io_outer_l2_flush_en`，`other_ctrl_agent_connect.sv` 再把
+它只读连接到 DCache responder。`dcache_mem__access_base_sequence::service_l2_flush()` 在看到
+1 时进入 `DCACHE_L2_FLUSH_DRAIN`，只在 DRAIN、snapshot 和 Probe 完成后进入 DONE 并驱动
+`io_l2_flush_done=1`；DONE 前收到 0 明确报告本次 fatal。因此一拍随机 1 不满足已有 level
+handshake，而不是 DCache 对已确认 request 的正常取消处理。
+
+### 9.3 修改后逻辑
+
+在 CSR xaction 的默认约束中将该字段固定为 0。该约束只影响 generic `req.randomize()` 的默认
+结果；CSR driver 的 `send_pkt()`、idle 驱动、DCache DRAIN/Probe/DONE 状态机和 `io_l2_flush_done`
+驱动均未改变。未来需要覆盖 L2 flush 时，专用 flush owner 必须显式管理该字段的约束和生命周期：
+置 1 后持续驱动，观察到 `io_l2_flush_done=1` 后才撤销，不能复用 generic 默认 random item。
+
+源码位置：`mem_ut/ver/ut/memblock/agent/csr_ctrl_agent_agent/src/csr_ctrl_agent_agent_xaction.sv`，
+约束：`default_io_ooo_to_mem_csrCtrl_flush_l2_enable_cons`。
+
+抽象功能描述：该约束为没有 L2 flush 生命周期所有权的 generic CSR transaction 提供安全默认值；
+它消费随机化请求并限制该单一字段为 0，不驱动 DUT、不观察 done、也不替代未来专用 sequence 的
+request/done 协议。
+
+```systemverilog
+constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_flush_l2_enable_cons {
+    io_ooo_to_mem_csrCtrl_flush_l2_enable == 1'b0;
+}
+```
+中文伪代码：generic CSR transaction 随机化时，先把 L2 flush request 固定为 0；随后
+`send_pkt()` 只能将 0 送到 DUT，不会使 DCache 进入 DRAIN。该约束不读取 done；未来专用
+sequence 若要发起 flush，必须在自身拥有完整握手时显式替代该默认约束并保持 request。
+
+### 9.4 调用关系和正确性检查
+
+| 调用顺序 | 对象 | 本功能中的职责 |
+|---|---|---|
+| 1 | `csr_ctrl_agent_agent_default_sequence::body()` | 连续创建 generic CSR item；修复后每个 item 的 flush 字段均随机为 0。 |
+| 2 | `csr_ctrl_agent_agent_driver::send_pkt()` | 按 transaction 字段驱动 DUT input，不解释或延长请求生命周期。 |
+| 3 | V2 `MemBlock.sv` | 将 `io_ooo_to_mem_csrCtrl_flush_l2_enable` 直接投影为 `io_outer_l2_flush_en`。 |
+| 4 | `dcache_mem__access_base_sequence::service_l2_flush()` | 只有真正的专用 level request 才进入 DRAIN，完成后驱动 done。 |
+
+修复前，generic random 的一拍高电平能使第 4 步进入 DRAIN，下一项低电平立即违反 level
+合同。修复后，generic CSR 流不再触发该状态机，既有普通 CSR 随机字段仍可保持随机化；没有在
+每拍 DCache loop 中新增扫描、队列或状态，因此不改变高频路径复杂度。
+
+### 9.5 验证状态与风险边界
+
+已确认修复前编译通过且仿真失败位置、CSR default sequence 的 10 次 randomize、空默认 constraint、
+CSR driver 覆盖和 V2 RTL 直通链路。FSDB 文件存在，但本节点的 `fsdb_reader` 无法打开该远端生成
+FSDB；本结论以同一 run 的 fatal 日志和可复核的源码/RTL 链路为准。
+
+修复后尚未重新运行远端编译和仿真，验收待执行：
+
+1. `make eda_compile tc=tc_sanity mode=base_fun` 必须继续无接口或约束相关编译错误。
+2. `make eda_run tc=tc_sanity mode=base_fun` 不得再出现 L2 flush request 提前撤销 fatal，且必须
+   达到 `TEST CASE PASSED`、`UVM_ERROR=0`、`UVM_FATAL=0`。
+3. 后续新增专用 L2 flush sequence 时，需要单独验证 request 从置 1 到 done 再撤销的完整
+   handshake；本轮不把该专项 stimulus 冒充为 generic CSR 随机化能力。
+
+### 9.6 Plan 对齐检查
+
+关联 plan 为 `AI_DOC/plan/test_framework/plan/do/mem_ut_dcache_multi_probe_tob_control_plan_20260730.md`。
+该 plan 已规定 request 必须在 DONE 前保持为 1，DCache responder 当前实现与之相符；plan 未定义
+generic CSR random item 可以发起 flush。此次约束将 generic 输入限制为 0，是为落实该既有合同的
+最小适配，不改变 plan 中 DRAIN/Probe/DONE 的实现语义。
+
+### 9.7 实现与 Plan 不一致项
+
+未发现实现与 Plan 不一致项；当前 coding 通过限制无 owner 的 generic CSR random item，保持了
+plan 对完整 level handshake 的要求。
+
+### 9.8 Plan 未说明但 Coding 落实的细节
+
+| 细节功能 | 为什么 plan 未覆盖 | 在本特性中的作用 | 是否需要回写 plan |
+|---|---|---|---|
+| CSR xaction 默认约束固定 `flush_l2_enable=0` | plan 描述 DCache responder 的 request 合同，没有展开 generic CSR transaction 的随机化边界。 | 阻止没有 flush owner 的一拍随机请求进入 DRAIN，保留专用 sequence 的 future stimulus 空间。 | 当前 review 已记录；未来新增专用 flush sequence 时，应在该专项 plan 中写明如何替代默认约束并等待 done。 |
+
+子 agent 自查：已确认 `csr_ctrl_agent_agent_default_sequence::body()` 的 10 次 `uvm_do(req)` 都会受到该
+默认约束；CSR driver 仍只按 item 值驱动、DCache responder 的 level state machine 未改；V2 RTL 中
+`flush_l2_enable -> io_outer_l2_flush_en` 直通关系存在。针对 memblock 源码和测试框架文档的
+`git diff --check` 均通过；修复后远端 compile/run 尚待主 agent 触发和复核。
+
+### 9.9 主 agent 第 2 轮静态 Review
+
+主 agent 独立复核了最新 `build/rtl/MemBlock.sv` 中
+`io_ooo_to_mem_csrCtrl_flush_l2_enable -> io_outer_l2_flush_en` 的直通关系、CSR default sequence 的
+`uvm_do(req)` 随机化入口、CSR driver 的单拍 item 驱动方式，以及 DCache responder 对 DRAIN 前 request
+不得撤销的既有检查。当前环境不存在已经使用该字段的专用 flush sequence 或对该 constraint 调用
+`constraint_mode()` 的调用者，因此默认约束固定为 0 不会截断现有的已声明 stimulus。
+
+该修改没有变更 driver、connect、DCache service loop 或 request/done 状态机，也没有在每拍路径新增
+扫描、queue、map 或计数器。review 文档的功能单元顺序已复核为第 6、7、8、9 节连续且唯一；
+`git diff --check -- mem_ut/ver/ut/memblock AI_DOC/plan/test_framework/review_doc/do` 通过。
+
+结论：第 1 轮发现的 review 文档结构问题已修复；第 2 轮未发现新的功能或文档问题。本功能允许单独
+提交。后续专用 L2 flush sequence 必须显式关闭该默认 constraint，并独占 request 从置位、等待 done 到
+撤销的完整生命周期；该 future feature 不属于本次 generic CSR 适配的行为范围。

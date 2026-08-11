@@ -512,7 +512,9 @@ constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_power_dow
 }
 
 constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_flush_l2_enable_cons{
-
+    // L2 flush 是 request/done level handshake。通用 CSR random item 不拥有完整
+    // 生命周期，必须保持 0；后续专项 sequence 需自行保持 request 到观察到 done。
+    io_ooo_to_mem_csrCtrl_flush_l2_enable == 1'b0;
 }
 
 constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_distribute_csr_w_valid_cons{
