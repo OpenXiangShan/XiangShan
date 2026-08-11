@@ -39,6 +39,10 @@ class mem_access_base_sequence extends uvm_sequence;
     static mem_line_data_t          main_mem[mem_line_addr_t];
     static mem_line_data_t          write_overlay_mem[mem_line_addr_t];
     static mem_line_mask_t          write_overlay_byte_valid[mem_line_addr_t];
+    // 中文注释：每条 overlay line 的 byte 级不可信标记。置位表示该 byte 的
+    // DCache 数据型 C response 已被 observer 观察为 corrupt；只有既有正常提交
+    // 事实覆盖到对应 byte 后才允许清除。该表只供只读 API/observer 使用，不参与 DUT 读写。
+    static mem_line_mask_t          write_overlay_corrupt_byte_mask[mem_line_addr_t];
     static mem_range_t              main_mem_ranges[$];
     static bit                      main_mem_range_configured = 1'b0;
     // 中文注释：同一物理采样时刻的 memory-facing 写先进入两个来源队列。
@@ -53,6 +57,29 @@ class mem_access_base_sequence extends uvm_sequence;
     // 设置：real-smoke virtual sequence 在 fork responder 前完成初始化后置位；清零：下一次
     // initialize_shared_memory_state() 先清空旧状态。legacy default topology 仅在该位为 0 时兜底初始化。
     static bit                      shared_mem_lifecycle_initialized = 1'b0;
+
+    // 中文注释：DCache aggregate 是给 RM API 的值型旁路快照，不是 DCache 私有 map 的
+    // 第二份真源。resident/pending/assembly/corrupt 均由既有动作完成后的 observer 更新；
+    // snapshot 一次性发布，避免查询读到字段混合的中间状态。
+    typedef struct packed {
+        bit                  published;
+        bit                  owner_valid;
+        longint unsigned     generation;
+        longint unsigned     resident_line_count;
+        longint unsigned     pending_writeback_count;
+        longint unsigned     observed_corrupt_line_count;
+        bit                  c_assembly_pending;
+        bit                  observer_ready;
+        bit                  dcache_drain_complete;
+        bit                  dcache_overlay_read_ready;
+        longint unsigned     drain_epoch;
+        longint unsigned     drain_transition_sample;
+        longint unsigned     drain_transition_time;
+    } dcache_aggregate_snapshot_t;
+
+    static dcache_aggregate_snapshot_t dcache_aggregate_snapshot;
+    static bit                         dcache_owner_claimed = 1'b0;
+    static longint unsigned            dcache_owner_generation = 0;
 
     `uvm_object_utils(mem_access_base_sequence)
 
@@ -75,6 +102,13 @@ class mem_access_base_sequence extends uvm_sequence;
         input longint unsigned capacity
     );
     extern static function bit is_shared_memory_lifecycle_initialized();
+    extern static function void clear_dcache_observer_state();
+    extern static function bit claim_dcache_observer_owner();
+    extern static function void release_dcache_observer_owner();
+    extern static function void publish_dcache_aggregate_snapshot();
+    extern static function bit peek_dcache_aggregate_snapshot(
+        output dcache_aggregate_snapshot_t snapshot
+    );
     extern static function void apply_shared_mem_write(input shared_mem_write_event_t write_event);
     extern static function void commit_shared_mem_write_batch();
     extern static function void begin_shared_mem_sample(input longint unsigned sample_time);
@@ -223,12 +257,14 @@ function void mem_access_base_sequence::clear_shared_memory_state();
     main_mem.delete();
     write_overlay_mem.delete();
     write_overlay_byte_valid.delete();
+    write_overlay_corrupt_byte_mask.delete();
     dcache_write_batch.delete();
     uncache_write_batch.delete();
     shared_mem_sample_valid          = 1'b0;
     shared_mem_sample_time           = 0;
     shared_mem_lifecycle_initialized = 1'b0;
     clear_main_mem_ranges();
+    clear_dcache_observer_state();
 endfunction:clear_shared_memory_state
 
 function void mem_access_base_sequence::initialize_shared_memory_state(
@@ -246,6 +282,69 @@ endfunction:initialize_shared_memory_state
 function bit mem_access_base_sequence::is_shared_memory_lifecycle_initialized();
     return shared_mem_lifecycle_initialized;
 endfunction:is_shared_memory_lifecycle_initialized
+
+function void mem_access_base_sequence::clear_dcache_observer_state();
+    // 中文注释：生命周期初始化清除旧 owner 的旁路快照；不触碰 DCache sequence 私有 map。
+    // runtime reset/owner 退出由 DCache responder 通过同一 helper 失效快照，RM 只能看到 invalid。
+    dcache_aggregate_snapshot = '{default:'0};
+    dcache_owner_claimed      = 1'b0;
+    dcache_owner_generation   = 0;
+endfunction:clear_dcache_observer_state
+
+function bit mem_access_base_sequence::claim_dcache_observer_owner();
+    // 中文注释：basicTest 只允许一个 DCache responder 发布公共 aggregate。重复 claim
+    // 不清理、不覆盖旧状态，调用者可据返回值停止发布；shared memory 未初始化时不兜底初始化。
+    if (!shared_mem_lifecycle_initialized) begin
+        return 1'b0;
+    end
+    if (dcache_owner_claimed) begin
+        return 1'b0;
+    end
+    dcache_owner_claimed    = 1'b1;
+    dcache_owner_generation++;
+    dcache_aggregate_snapshot = '{default:'0};
+    dcache_aggregate_snapshot.owner_valid = 1'b1;
+    dcache_aggregate_snapshot.generation  = dcache_owner_generation;
+    dcache_aggregate_snapshot.observer_ready = 1'b1;
+    dcache_aggregate_snapshot.published = 1'b0;
+    publish_dcache_aggregate_snapshot();
+    return 1'b1;
+endfunction:claim_dcache_observer_owner
+
+function void mem_access_base_sequence::release_dcache_observer_owner();
+    // 中文注释：owner 退出只使 DCache aggregate 不再可读；已经提交的 backing/overlay
+    // 仍由 shared-memory lifecycle 管理，不能在这里清除或重建。
+    dcache_aggregate_snapshot.published  = 1'b0;
+    dcache_aggregate_snapshot.owner_valid = 1'b0;
+    dcache_aggregate_snapshot.observer_ready = 1'b0;
+    dcache_aggregate_snapshot.dcache_drain_complete = 1'b0;
+    dcache_aggregate_snapshot.dcache_overlay_read_ready = 1'b0;
+    dcache_owner_claimed = 1'b0;
+endfunction:release_dcache_observer_owner
+
+function void mem_access_base_sequence::publish_dcache_aggregate_snapshot();
+    dcache_aggregate_snapshot.dcache_drain_complete =
+        dcache_aggregate_snapshot.owner_valid &&
+        dcache_aggregate_snapshot.observer_ready &&
+        (dcache_aggregate_snapshot.resident_line_count == 0) &&
+        (dcache_aggregate_snapshot.pending_writeback_count == 0) &&
+        !dcache_aggregate_snapshot.c_assembly_pending &&
+        (dcache_aggregate_snapshot.observed_corrupt_line_count == 0);
+    // 中文注释：RM 的唯一读取门槛从同一 snapshot 推导，不让调用方自行拼接多个 live 字段。
+    // 新 Acquire/C-data/batch/corrupt 观察由后续 observer 更新输入字段并再次调用本函数。
+    dcache_aggregate_snapshot.dcache_overlay_read_ready =
+        dcache_aggregate_snapshot.published &&
+        dcache_aggregate_snapshot.dcache_drain_complete;
+endfunction:publish_dcache_aggregate_snapshot
+
+function bit mem_access_base_sequence::peek_dcache_aggregate_snapshot(
+    output dcache_aggregate_snapshot_t snapshot
+);
+    snapshot = dcache_aggregate_snapshot;
+    return dcache_aggregate_snapshot.published &&
+           dcache_aggregate_snapshot.owner_valid &&
+           dcache_aggregate_snapshot.observer_ready;
+endfunction:peek_dcache_aggregate_snapshot
 
 function void mem_access_base_sequence::apply_shared_mem_write(input shared_mem_write_event_t write_event);
     mem_addr_t      byte_addr;
