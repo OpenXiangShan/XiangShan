@@ -23,7 +23,9 @@ class io_mem_to_ooo_ctrl_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31;
     rand bit io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43;
     rand bit io_mem_to_ooo_topToBackendBypass_msiInfo_valid;
-    rand bit [12:0] io_mem_to_ooo_topToBackendBypass_msiInfo_bits;
+    // 中文注释：V2 MemBlock 输出到 backend 的 MSI payload，最新 RTL 固定为 12 位。
+    // 该字段仅由 control monitor 采样；当前 deferred analysis 不把它驱动回 DUT。
+    rand bit [11:0] io_mem_to_ooo_topToBackendBypass_msiInfo_bits;
     rand bit io_mem_to_ooo_topToBackendBypass_clintTime_valid;
     rand bit [63:0] io_mem_to_ooo_topToBackendBypass_clintTime_bits;
     rand bit io_mem_to_ooo_topToBackendBypass_l2FlushDone;
