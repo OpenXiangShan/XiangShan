@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` |
+| 核验 commit | `6a1b2d947e3d9629d5b9b3fb238b31f245251463` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `build_memblock/rtl/MemBlock.sv`、`src/main/scala/xiangshan/cache/dcache`、`coupledL2/src/main/scala/coupledL2` |
-| 最后核验日期 | `2026-08-04` |
+| 最后核验日期 | `2026-08-10` |
 
 ## 1. Agent 职责与边界
 
@@ -370,15 +370,44 @@ D 通道错误字段必须按 opcode 驱动，不能随意组合：
 | `CBOAck` | CMOUnit 传给 LSQ `CMOResp.denied` | CMOUnit 传给 LSQ `CMOResp.corrupt` | 默认两者均为 0。`MEMBLOCK_L2_CBO_ACK_*_WT` 在 CBO A.fire 时独立采样并保存；miss 立即、hit 在 Probe C 完成后建立同 source 的 Ack。 |
 | `ReleaseAck` | 必须为 0 | 必须为 0 | 轻量 responder 固定 0；非 0 属于协议违例，不能用作 writeback error 注入。 |
 
+### 7.4.1 DCache 中 `corrupt` 的实际粒度
+
+`corrupt` 不是一个全局地址范围，也不是 DCache data array 内逐字节保存的状态。必须区分
+TileLink wire、回填后的 error meta 和 DCache 写回三层：
+
+| 场景 | Scala 中的表示 | 实际粒度 |
+|---|---|---|
+| L2 -> DCache `GrantData` | 每个 D-channel data beat 各有一个 `TLBundleD.corrupt` bit | 总线传输 beat；当前为 32B/beat |
+| 已完成的 DCache refill | `MissEntry` 对所有已接收 beat 执行 `corrupt := d.bits.corrupt || corrupt`，再把结果写入 `TLError.tl_corrupt` | 64B cache line；任一 beat 为 1 即整 line 标记为 corrupt |
+| DCache 内部持久状态 | `L1ErrorMetaArray` 以 `idx + way_en` 保存 `TLError {tl_denied, tl_corrupt}`；后续 load hit 读取该 line 的 extra meta | 64B cache line；没有 byte、8B bank 或 32B half 的 error mask |
+| DCache -> L2 `ProbeAckData` / `ReleaseData` | `WritebackReq` 同时保存 64B `data` 和一个 `corrupt` bit；WritebackQueue 将该 bit 复制到该 transaction 的每个 C beat | 一笔 64B C data transaction；当前为两个 32B beat，两个 beat 的 bit 相同 |
+
+这里的物理错误来源可以更细：DCache data array 一次 `readline` 会读完整 line 的 8 个 64-bit
+bank，`readline_error_delayed` 对 8 个 bank 的 ECC error 做 OR。因而只要其中一个 bank 出错，
+MainPipe 就把整个 writeback transaction 的 `corrupt` 置 1；C channel 不会告诉 L2/RM 是哪一个
+8B bank 出错。tag ECC error 则会使 `hasData=0`，即发出无数据 `ProbeAck/Release`，不能把这类
+无数据消息当成 overlay 的 corrupt data writeback。
+
+因此，面向 RM 的 C data corrupt 地址键应统一使用 cache-line 对齐地址：
+
+```text
+line_addr = address & ~64'h3f
+```
+
+仅在 `ProbeAckData` 或 `ReleaseData` 的完整 C transaction 完成时，才以该键把完整 64B line
+标记为不可比较；不应把第一拍或第二拍单独建成 32B key，也不应推导为某个 byte 的错误。这个
+测试框架标记是对 DUT C 写回数据可信度的模型化，不等同于直接读取 DUT 内部 `L1ErrorMetaArray`。
+
 当前 `dcache_mem__access_base_sequence` 的默认 normal 模式仍将 D 错误位驱为 0；只有显式设置
 六个 D-error runtime 权重时才生成错误 response。DCache `GrantData` 与 `CBOAck` 在 coherent
 response record 创建时保存错误快照，Uncache `AccessAckData/AccessAck` 则在
 `sbuffer_mem_access_base_sequence::create_uncache_response_record()` 创建 TL-UL response record
 时处理。scheduler、D hold、GrantAck/E、主表、LSQ、pass/fail 与 terminal 不重新解释或重采样这些位。
 
-DUT C `ProbeAckData/ReleaseData` 的 `corrupt` 仍被逐 beat 汇总；任一 beat corrupt 时跳过向测试框架
-memory overlay 写回，但仍完成 Probe/Release 生命周期。该 D-error 能力只构造合法 response stimulus，
-不建立 L2 directory、下游错误原因模型、RM 或 scoreboard。
+DUT C `ProbeAckData/ReleaseData` 的 `corrupt` 由 monitor 按 beat 采样以适配 TileLink 格式；但当前
+V2 WritebackQueue 对同一 64B transaction 的所有 C beat 发送同一个 bit。任一 data beat corrupt 时，
+测试框架按对应的完整 64B line 跳过 memory overlay 写回，但仍完成 Probe/Release 生命周期。该 D-error
+能力只构造合法 response stimulus，不建立 L2 directory、下游错误原因模型、RM 或 scoreboard。
 
 因此本轮约束为：
 
@@ -489,6 +518,7 @@ coherence replacement 或真实 L2 prefetch predictor。当前必须保证的是
 | DCache 累积 Grant 错误并传递 forward/refill error | `src/main/scala/xiangshan/cache/dcache/mainpipe/MissQueue.scala:657-695,817-821,930-938` |
 | CBOAck 的 denied/corrupt 传递至 CMO/LSQ | `src/main/scala/xiangshan/cache/dcache/mainpipe/MissQueue.scala:299-370,1229-1237` |
 | DCache C response 的 corrupt 来源 | `src/main/scala/xiangshan/cache/dcache/mainpipe/MainPipe.scala:997-1004`、`src/main/scala/xiangshan/cache/dcache/mainpipe/WritebackQueue.scala:226-270` |
+| DCache `corrupt` 的 line/beat 聚合与持久 error meta | `src/main/scala/xiangshan/cache/L1Cache.scala:42-97`、`src/main/scala/xiangshan/cache/dcache/DCacheWrapper.scala:43-58,355-362,1198-1210`、`src/main/scala/xiangshan/cache/dcache/data/BankedDataArray.scala:584-595`、`src/main/scala/xiangshan/cache/dcache/mainpipe/MissQueue.scala:657-695,917-938`、`src/main/scala/xiangshan/cache/dcache/mainpipe/MainPipe.scala:586-593,911-914,997-1004`、`src/main/scala/xiangshan/cache/dcache/meta/AsynchronousMetaArray.scala:38-58,197-263` |
 | TileLink 对 B Probe、C no-data、D Grant/ReleaseAck 错误字段的约束 | `rocket-chip/src/main/scala/tilelink/Monitor.scala:165-215,242-276,304-338` |
 | 当前轻量 responder 对 B/D 错误位和 C data corrupt 的处理 | `mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv:529-551,964-1003,1063-1173,1528-1534` |
 | A CBO、D Grant/ReleaseAck 的 TileLink 构造字段 | `rocket-chip/src/main/scala/tilelink/Edges.scala:343-402,679-707` |
@@ -526,6 +556,12 @@ DCache 消费。轻量 responder 默认只驱动正常 0，DUT C data corrupt �
 新增：D-error 专项已实现六个公共 runtime 权重。DCache `GrantData`、`CBOAck` 和 Uncache
 `AccessAckData/AccessAck` 只在各自 response record 创建点生成并保存合法错误组合；错误位不会进入
 主表、LSQ commit/deq、pass/fail 或 terminal 的软件判断。
+
+2026-08-10，commit `6a1b2d947e3d9629d5b9b3fb238b31f245251463`：补充 DCache `corrupt`
+粒度。D-channel `GrantData.corrupt` 是每个 32B beat 的传输字段，但 DCache 对一笔 64B refill
+做 OR 并以 `TLError` 写入 `L1ErrorMetaArray`，后续以 line 为粒度报告；DCache C-channel 的
+`ProbeAckData/ReleaseData.corrupt` 也来自一笔完整 64B writeback，两个 C beat 共享同一 bit。
+因此 RM 的 writeback-corrupt 地址键必须是 64B line 地址，不能建立 byte 或 32B half 粒度的状态。
 
 2026-08-04，commit `7861962dba6f1b6ceb1da7996764b31d3207b5e6`：新增 Fence/HFENCE
 边界。普通 `FENCE` 只排空旧 store；HFENCE 失效翻译状态；DCache agent 不得以 sfence/hfence

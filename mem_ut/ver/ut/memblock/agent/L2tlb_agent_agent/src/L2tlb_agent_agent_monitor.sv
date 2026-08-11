@@ -171,6 +171,17 @@ function void L2tlb_agent_agent_monitor::write_transport_sample(
                              payload.sampled_req_ready,
                              payload.sampled_resp_valid))
     end
+    if (memblock_sync_pkg::l2tlb_testcase_lifecycle_initialized &&
+        !memblock_sync_pkg::l2tlb_responder_enabled() &&
+        payload.sampled_req_valid === 1'b1) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("NO_OWNER observed L2TLB request transport=%0d dut_sample=%0d vpn=0x%0h s2xlate=0x%0h topology=%s",
+                             payload.transport_sample_seq,
+                             payload.dut_sample_seq,
+                             payload.sampled_req_vpn,
+                             payload.sampled_req_s2xlate,
+                             memblock_sync_pkg::l2tlb_testcase_topology_name))
+    end
     if (payload.sampled_final_inactive_proof_valid) begin
         if (payload.sampled_final_inactive_proof_epoch !=
                 payload.sampled_reset_epoch ||

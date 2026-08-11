@@ -199,9 +199,10 @@ live entry 的 `*_translation_mode_at_build`，也不参与既有 entry 的 leve
 
 同步包接口保持最小变更：扩展现有 `push_raw_sfence(raw)` 处理同 sample、同 reset epoch context 的立即绑定或等待绑定；新增
 `peek_raw_sfence(raw)` 查看队首，保留现有 `pop_raw_sfence(raw)` 只在
-`schedule_sfence_invalidate()` 成功登记 C4 work 后调用。runtime reset 的专用 adapter reset helper 清除 context 协调器的
-等待绑定状态，fence monitor reset helper 清除本地 producer watermark/intake-close；避免旧 context 关联到新 fence；
-`clear_raw_monitor_queues()` 不得清 global sample。
+`schedule_sfence_invalidate()` 成功登记 C4 work 后调用。runtime reset 的 CSR monitor reset helper 是
+`l2tlb_sfence_csr_context` 的唯一清除者；adapter reset helper 只清 `raw_sfence_q`、adapter drain proof、
+pending invalidate 与 live-entry/range-index，fence monitor reset helper 只清本地 producer watermark/intake-close。
+这样旧 context 不会关联到新 fence，且没有两个 direct writer 竞争同一 context；`clear_raw_monitor_queues()` 不得清 global sample。
 
 `dispatch_l2tlb_lookup_active` 是 testcase topology state，须由 testcase-start coordinator 在首个 post-reset monitor
 sample 前通过一个最小 package setter 固定写入；初始未设置或之后被改写均为 `uvm_fatal`。本轮固定 topology，不实现

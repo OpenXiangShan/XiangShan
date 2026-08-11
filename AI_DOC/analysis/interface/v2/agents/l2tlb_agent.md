@@ -71,6 +71,11 @@ response complete 时对所有 `WAITING` record 执行同一 raw hit matcher：�
 UID 的 raw payload/generation 相同，但各自的 resolved PPN/GVPN 必须用自己的 VPN 派生。C4 flush 取消仍
 `WAITING` 的旧 instance，真 reissue 才建立新 waiting epoch。
 
+UID request-fire marker 与 response multicast 是两件事。marker 只记录“某个 WAITING UID 已经被真实
+DTLB request fire 覆盖”，它的 key 必须由该 request 的 VPN、`s2xlate` 和 request-fire C-2 CSR 构造。
+UID issue 时冻结的 `record.csr_snapshot` 仅保留历史/debug，不能作为 marker 的第二个硬匹配条件；否则 CSR
+在 issue 与真实 fire 之间变化时，DUT 已接收的 request 会在软件账本中丢失 fire provenance。
+
 UID multicast 的 matcher 必须使用 response fire 当前 DUT global sample 的 top C-2 CSR，而不是 UID record
 建立时冻结的 CSR。CSR 在顶层 C0 切换后，C2/C3 的旧 token response 已按新 ASID/VMID 做 raw hit：若不命中，
 token 仍是一次正常 response completion，但该 UID 继续 `WAITING`，等待 C4 cancel 或后续真实命中。
@@ -162,6 +167,7 @@ payload 已独立保存 S1/S2 level、PPN、permission、PBMT、raw/effective fa
 | 2026-07-29 | `f3bdd04b3763147e714a786d078e0cb90460a31d` | 旧文档只说明 permission 共用 entry，未说明 fault/PPN 的两阶段语义 | 补充 response 四个 fault 的阶段归属、最终异常收敛、S1 到 S2 的串行 PPN 合成以及当前 UVM 单 entry 模型的覆盖缺口 | 用户要求结合 Scala 分析 L2TLB reply 的 fault、level 和 PPN 依赖 | V2 L2TLB agent response 建模与 testcase 预期 |
 | 2026-08-06 | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` | 旧文档允许在顶层 flush event 到达时提前取消 pending，且未说明 response UID 回填使用何时的 CSR | 明确 C0 只登记 epoch/due，C4 才取消仍未完成 token；request capture 与 response-to-UID raw hit 分别使用各自 DUT global sample 的 C-2 CSR，UID issue-time CSR 仅保留历史；同 sample CSR change 与 fence 仍只合并一个 lifecycle barrier | 复查 `PTWNewFilter` response matching、flush/回填边界及 L2TLB undo plan | V2 L2TLB responder flush、CSR history 与 UID 记账 |
 | 2026-08-09 | 本地 V2 payload 实现 | 文档仍描述一套共享 `entry.pte_*`、共享 PPN/level 且 S2 GAF 固定 0 | 同步独立 S1/S2 PTE、PPN、level、PBMT、four-fault payload、one-hot sector 与 width fail-fast 的实际实现 | V2 random payload plan coding 后长期接口文档需要消除旧模型描述 | V2 L2TLB response payload 与 agent 接口边界 |
+| 2026-08-11 | P1 UID marker 复核 | request-fire C-2 CSR 已用于 token，却可能被 UID issue-time CSR 的额外比较否决 | 明确 marker 只能以 request-fire C-2 CSR/key 判定；issue-time CSR 不参与 marker 接纳 | 避免 CSR 在 issue 与 fire 之间变化时丢失 UID request provenance | V2 UID marker、C4 cancel 与后续 redirect/reissue 边界 |
 
 ## 待确认项
 

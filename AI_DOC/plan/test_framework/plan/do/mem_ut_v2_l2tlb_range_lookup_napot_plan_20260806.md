@@ -1,6 +1,6 @@
 # V2 L2TLB 普通范围 Lookup 与 NAPOT Payload 复用专项 Plan
 
-状态：`undo`，仅为待执行设计；尚未 coding、compile、smoke 或仿真验证。
+状态：`do`，coding 已完成并归档；核心实现为提交 `6a1b2d947e`（V2 L2TLB range lookup reuse）。本文件保留实现的行为合同和回归边界，不再作为新的 coding 入口。
 
 共享 lifecycle 约束：`AI_DOC/plan/test_framework/review_doc/undo/mem_ut_v2_l2tlb_single_owner_lifecycle_optimization_review_20260807.md`。
 本 plan 只负责 exact/range/NAPOT candidate 与 index，不重新定义 owner、sample、reset、global stop 或 release。

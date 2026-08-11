@@ -2,7 +2,9 @@
 
 关联执行 plan：`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`
 
-当前状态：代码、文档同步、VCS compile 与定向 real-dispatch smoke 已完成；独立末轮 review 已 `FINAL PASS`，关联 plan 可归档。
+历史状态：代码、文档同步、VCS compile 与定向 real-dispatch smoke 已完成；独立末轮 review 曾给出 `FINAL PASS`。
+追加复核状态（2026-08-11）：发现 P1“UID request-fire marker 额外使用 issue-time CSR”的实现/合同偏差；本轮仅同步
+plan、flow、分析和 review 文档，未修改源码或重跑仿真。因此原 `FINAL PASS` 不能作为该 P1 已完成的结论。
 
 ## 1. 术语与抽象功能说明
 
@@ -20,6 +22,8 @@
 | `canonical PPN` | 可按 PTE.N/NAPOT 规则解释的完整页号 | builder 的临时 `canonical_ppn` | LEGAL NAPOT 的低四位固定为 `1000` |
 | `request-derived PPN/GVPN` | 针对本次 request VPN 从冻结 raw payload 派生的调试/后续消费值 | pending/UID `request_*` 字段 | 同一 superpage 的两个 VPN 可有不同 derived PPN |
 | `request token` | 每次 `valid && ready` fire 的独立响应实例编号 | `pending_q`、`request_token` | token 不等于唯一 UID |
+| `issue-time CSR` | UID 进入 WAITING 时冻结的历史 CSR，不是 request 实际 fire 时的唯一上下文 | `memblock_uid_tlb_record.csr_snapshot` | CSR 在 issue 与 fire 之间切换时，它可不同于 request CSR |
+| `UID request-fire marker` | UID waiting instance 首次被真实 DTLB request fire 覆盖的 sample | `uid_tlb_first_request_fire_sample_seq` | C4 cancel 只消费非零且不晚于 anchor 的 marker |
 | `raw matcher` | 复现 DUT response 的 tag/level/sector/ASID/VMID 内容匹配 | `entry_matches_request_raw()` | 不按 exact lookup key 或 UID 年龄猜测命中 |
 | `response-visible C-2 CSR` | DUT response filter 在该 sample 实际看到的 CSR 历史快照 | `get_request_csr_snapshot()` | CSR 改变后旧 response 可能完成 token 但不回填 UID |
 | `entry generation` | live entry 每次新建时的单调时代编号 | `entry_generation`、`next_tlb_entry_generation` | fence 删除后同 key 重建必须得到更大编号 |
@@ -331,6 +335,10 @@ request-derived 字段、V2 response drive 和旧 builder 收敛均已实现。
 
 当前未发现 token owner、pending queue、response latency 或 L2TLB 方向被改成下游 L2Cache/PTW 模型的情况。
 
+P1 追加说明：上述“request fire 使用 C-2 CSR/raw matcher”的描述只代表目标合同；当前
+`mark_waiting_uid_records_on_request_fire()` 仍对 `record.csr_snapshot` 生成的 key 执行额外硬比较，不能把本节
+视为该 helper 的已完成实现证明。
+
 ## 10. 验证记录
 
 已通过：
@@ -434,3 +442,32 @@ builder wrapper、UID request-fire/C4/release、idle watchdog、参数入口、i
 - `git diff --check` 通过，未发现格式 blocker。
 
 最终结论：本专项无已知 blocker，关联 plan 可以从 `undo` 归档到 `do` 并独立本地提交。
+
+## 13. 追加复核：UID request-fire marker 的 issue-time CSR 偏差（P1）
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`，函数：
+`mark_waiting_uid_records_on_request_fire()`。
+
+抽象功能描述：该 helper 在 responder 已确认一笔真实 DTLB request fire 后，为同 shape 的 WAITING UID 写入
+request-fire provenance，供 C4 cancel 使用。它不创建 token、不回填 response、也不决定 ROB redirect。
+
+发现的问题：`capture_fired_request()` 已使用 request-fire C-2 CSR 创建 `pending.request_lookup_key`，但 marker
+helper 又以 UID issue-time `record.csr_snapshot` 构造 `candidate_key`，并要求它也等于本次 request key。CSR 在 UID issue
+与 request fire 之间发生变化时，真实 request 会被 DUT 接收，而软件不写 marker。
+
+修正合同：
+
+```text
+request_key = pending.request_lookup_key  // 唯一来自 request-fire C-2 CSR
+从 {vpn,s2xlate} bounded waiting bucket 选择候选 UID。
+对每个有效 WAITING UID：
+  用 pending.csr_snapshot + UID 的 vpn/s2xlate 重建 request_candidate_key；
+  若该 key 命中 request_key，则写首次 request-fire marker；
+  不得读取 record.csr_snapshot 作为 marker 接纳条件。
+```
+
+最小时序：UID 在 CSR=A 下 issue，CSR 切到 B 后 request 在 B 的 C-2 上下文 fire。A 不等于 B 不表示 request 非法；
+marker 必须写入。C4 仅取消已写 marker 且早于/等于 barrier anchor 的未完成 instance；真实 ROB redirect 则继续由
+既有 redirect owner 处理，不能由 CSR changed 伪造。
+
+本轮状态：文档已同步，源码尚未按此条修改，未新增编译或 smoke 结果。该 P1 是当前待 coding 项。

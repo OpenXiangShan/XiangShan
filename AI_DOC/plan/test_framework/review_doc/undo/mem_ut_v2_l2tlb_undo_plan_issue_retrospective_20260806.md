@@ -8,7 +8,7 @@ L2Cache/PTW/memory 下游模型，也不评价 DUT 的 checker、scoreboard 或 
 
 - `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`
 - `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`
-- `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`
+- `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`
 - `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md`
 
 ## 术语与抽象功能说明
@@ -56,7 +56,9 @@ ready/fire/response、token、driving response、barrier/hold 或 `WAITING` UID 
 并从 current sample 起设置 4 拍 `pre_ready_hold_until_sample`；它不建立 C0/C4 cancel。一旦 acceptance 已开放，
 `event.sample_seq < current_sample` 必须在任何 barrier/token/UID 修改前 `uvm_fatal`，`event.sample_seq > current_sample` 同样 fatal。
 当前 sample 的 event 才能按其原始 C0 建 barrier。该修正记录在
-`mem_ut_v2_l2tlb_single_owner_lifecycle_optimization_review_20260807.md` 与 timing correction `undo` plan，后续 coding 以二者为准。
+`mem_ut_v2_l2tlb_single_owner_lifecycle_optimization_review_20260807.md` 与
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`；后者是已实现行为约束，
+不是新的 coding 入口。
 response owner 在本拍语义结算后是唯一可回收 `event_seq <= response_owner_event_cursor` history 前缀的写者；CSR/fence producer
 只 append/merge，队列满且没有已消费前缀时必须 fatal，`last_allocated_l2tlb_event_seq` 不回绕。
 
@@ -649,6 +651,22 @@ C4 的 `cancel_waiting_uid_records_for_flush()` 只取消 `WAITING && marker!=0 
 `uid_tlb_first_request_fire_sample_seq` 仍是每个 UID waiting attempt 的唯一 C4 取消依据。单 owner 不意味着 issue
 就等于 request fire；marker=0 的等待必须保留，直到真实 request fire、redirect/kill 或 reset 由相应 owner 明确终结。
 
+#### 审核修改意见补充（P1：UID request-fire marker 不得使用 issue-time CSR）
+
+上方“用本次 request key 确认”的最终合同必须进一步固定 CSR 来源：`capture_fired_request()` 在真实
+`valid && ready` 边界取得本次 request 的 C-2 CSR，并以它构造 `pending.request_lookup_key`。随后
+`mark_waiting_uid_records_on_request_fire()` 只可用该 pending C-2 CSR 与候选 UID 的 VPN/`s2xlate` 重建
+request key；不得再使用 `record.csr_snapshot` 生成第二个 candidate key 后拒绝 marker。
+
+最小例子：UID 在 CSR=A 下 issue，CSR 已切换为 B，而请求在 B 可见的 C-2 边界才 fire。A 与 B 不同是合法时序，
+不能因此把已被 DUT 接收的 request 记成 UID 未 fire。issue-time CSR 继续用于历史/debug；C4 仍只根据写入成功的
+marker 和 barrier anchor 决定是否取消未完成实例。
+
+该 P1 不要求测试框架在 CSR changed 时伪造 ROB redirect。真实 `io_redirect` 到来时仍由既有 redirect owner 取消并
+允许 UID reissue；只有需要验证 CSR 指令提交导致年轻 LSU 被全核 flush/reissue 的 testcase，才另建 ROB-CSR
+commit/redirect 专项。当前本回溯已同步该规则，源码 marker helper 尚待按此合同修正，不能把原有 `FINAL PASS`
+结论外推为该 P1 已完成。
+
 ### 16. NAPOT 编码校验不能越过 PTE profile 边界
 
 问题是什么：random payload plan 已规定只有无 fault `LEGAL` stage 的 `PTE.N=1` 才将 PPN low-4 确定性写成
@@ -701,7 +719,7 @@ copy 和 driver 只复制固定 `s2_tag`，不重新调用该 helper。
 ## 单 owner 拓扑优化后的统一方案
 
 > **历史章节标记：** 本节及其原始伪代码是问题回顾中的旧汇总草案。它们保留用于解释当时为什么需要修正，
-> 不是可执行 coding 合同；后续 coding 只能依据单 Owner 生命周期审核稿和 timing correction `undo` plan 的最新 canonical
+> 不是可执行 coding 合同；后续 coding 只能依据单 Owner 生命周期审核稿和已归档 timing correction plan 的最新 canonical
 > state table。文中若出现“最终 coding 合同”、直接 `peek`、parent 直接 close 或仅双 drain，均以下方审核修改意见为准。
 
 ### 1. 固定拓扑与最小状态
@@ -1075,7 +1093,7 @@ reset coordinator 不直接改 mailbox。driver 每个 `drv_cb` 先 recycle term
 reset coordinator 只分配 epoch、发 reset request、等待各 direct writer ack；response owner、driver、fence monitor、adapter、
 CSR monitor 分别清理自己的状态，response-owner cursor 只能由 response owner 对齐，CSR monitor 不得改写它。上述审核意见覆盖
 本回顾文档中更早的 parent 直接 close、coordinator 直接清队列或 warm-up 直接 stop 的简写；后续 coding 只以单 owner review
-和对应 timing correction `undo` plan 的 canonical 规则为准。
+和对应已归档 timing correction plan 的 canonical 规则为准。
 
 `DISABLED/NO_OWNER + NO_DISPATCH` 不启动 responder sequence、不会 claim 或创建 token，但不是“不运行任何采样逻辑”：
 L2TLB driver 必须保留 passive sampler 分支，固定 `ready=0/resp_valid=0`、不调用 `get_next_item()`、不发布 sequence mailbox，
@@ -1114,8 +1132,8 @@ item 清理和 mailbox EMPTY 全部成立后才能发送，driver 随后进入�
 | response random payload | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`；coding、compile、定向 smoke 和独立末轮 review 已完成。 |
 | token timing correction | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`；coding、compile、smoke 和独立末轮 review 已完成。 |
 | stage-aware live-entry invalidation | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md`；coding、静态检查、远端 compile、基础 smoke 与 real-dispatch smoke 已完成。 |
-| range lookup/NAPOT | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`；仍是待执行专项。 |
+| range lookup/NAPOT | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`；coding 已完成并归档（`6a1b2d947e`）。 |
 
-单 owner 审核合同不改变这些专项的归档状态。后续 coding 仅可针对仍在 `plan/undo` 的专项执行；已归档的 `plan/do` 文档只用于
+单 owner 审核合同不改变这些专项的归档状态。当前没有仍在 `plan/undo` 的 L2TLB coding 专项；四份 `plan/do` 文档只用于
 确认已实现行为、历史决策和回归边界，不能被重新解释成新的 coding 入口。本文中的旧 API、旧 reset/release 摘要也继续仅为
 历史材料；当前实现语义以单 owner 审核稿和对应专项文件头的状态说明为准。

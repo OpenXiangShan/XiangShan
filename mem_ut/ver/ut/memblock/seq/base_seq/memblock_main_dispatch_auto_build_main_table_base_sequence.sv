@@ -74,19 +74,35 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_real_di
             route_all_issue_queues();
         end
         void'(all_transactions_terminal_done());
-        // Abstract responsibility: the parent owns the one-way release grant
-        // after this service tick has drained adapter-owned lifecycle work.
-        // The L2TLB responder only waits for this grant and never polls or
-        // grants its own release.
-        if (data.is_global_stop_requested() &&
-            memblock_sync_pkg::l2tlb_lifecycle_owner_claimed) begin
-            void'(memblock_sync_pkg::grant_l2tlb_final_release());
-        end
         if (data.is_global_stop_requested() &&
             !data.flushsb_request_pending()) begin
-            if (memblock_sync_pkg::l2tlb_responder_active &&
-                seq_csr_common::get_l2tlb_seq_en() &&
-                !memblock_sync_pkg::l2tlb_lifecycle_owner_claimed &&
+            if (!memblock_sync_pkg::l2tlb_testcase_lifecycle_initialized) begin
+                `uvm_fatal(get_type_name(),
+                           "global stop reached before L2TLB testcase topology initialization")
+            end
+            if (!memblock_sync_pkg::l2tlb_responder_enabled()) begin
+                if (memblock_sync_pkg::l2tlb_dispatch_active() ||
+                    memblock_sync_pkg::l2tlb_testcase_needs_response ||
+                    memblock_sync_pkg::l2tlb_lifecycle_owner_claimed ||
+                    memblock_sync_pkg::l2tlb_owner_claimed_once ||
+                    memblock_sync_pkg::l2tlb_release_granted) begin
+                    `uvm_fatal(get_type_name(),
+                               "disabled L2TLB responder has dispatch/response or owner/release state")
+                end
+                break;
+            end
+            if (!memblock_sync_pkg::l2tlb_dispatch_active() ||
+                !memblock_sync_pkg::l2tlb_testcase_needs_response) begin
+                `uvm_fatal(get_type_name(),
+                           "enabled L2TLB responder has an incompatible dispatch/response topology")
+            end
+            // Abstract responsibility: only the enabled response topology may
+            // receive the parent's one-way release grant.  A disabled/no-owner
+            // testcase must never manufacture a grant while reaching stop.
+            if (memblock_sync_pkg::l2tlb_lifecycle_owner_claimed) begin
+                void'(memblock_sync_pkg::grant_l2tlb_final_release());
+            end
+            if (!memblock_sync_pkg::l2tlb_lifecycle_owner_claimed &&
                 !memblock_sync_pkg::l2tlb_owner_claimed_once) begin
                 // An explicit vseq crosses main_table_ready asynchronously.
                 // Keep the parent service alive until that responder claims;
@@ -97,10 +113,8 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_real_di
                                "global stop waited too long for enabled L2TLB lifecycle owner claim")
                 end
             end
-            else if (!memblock_sync_pkg::l2tlb_responder_active ||
-                     !seq_csr_common::get_l2tlb_seq_en() ||
-                     (!memblock_sync_pkg::l2tlb_lifecycle_owner_claimed &&
-                      memblock_sync_pkg::l2tlb_owner_claimed_once)) begin
+            else if (!memblock_sync_pkg::l2tlb_lifecycle_owner_claimed &&
+                     memblock_sync_pkg::l2tlb_owner_claimed_once) begin
                 break;
             end
         end

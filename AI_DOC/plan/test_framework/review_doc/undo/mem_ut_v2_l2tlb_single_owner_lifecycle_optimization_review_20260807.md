@@ -7,7 +7,7 @@
 | 当前状态 | 审核文档，不独立承载 coding、编译或仿真；本文件不能作为任一关联专项已完成实现的证明，具体状态以各专项文件头和 implementation review 为准。 |
 | 审核目标 | 在一个 testcase 只运行一个 L2TLB responder owner 的前提下，收敛生命周期、时基、flush、reset 和退出边界 |
 | 语义边界 | `L2TLB_agent` 仍表示 DTLB -> L2TLB request 和 L2TLB -> DTLB response，不表示 L2Cache/PTW 下游模型 |
-| 关联实现文档 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`、`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`、`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`、`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md` |
+| 关联实现文档 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md`、`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md`、`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md`、`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md` |
 
 本文把待优化问题和优化后的行为分开描述。它不替代四份专项的字段、payload、range 或 stage matcher 方案；后续新增或
 未完成的 coding 遇到生命周期冲突时以本文的审核结论为准，具体功能以对应专项的当前路径和文件头状态执行。
@@ -139,7 +139,8 @@
 | `record_l2tlb_flush_barrier()` | 把 C0 flush 转成 C4 due barrier，暂时关闭后续 admission，不立即取消 C0 已 fire 工作。 |
 | `apply_due_l2tlb_flush_barriers()` | 在 C4 取消仍未完成的旧 token 和符合 marker 条件的 UID；不负责替 adapter 删除 live entry。 |
 | `service_l2tlb_sfence_events()` | adapter 独占 raw fence 的 peek、解码、排程、pop 和 C4 live-entry/range-index 删除。 |
-| `l2tlb_response_drain_done()` | 只读判断 response owner 的 pending/driving/barrier/WAITING 是否收敛。 |
+| `cancel_unbound_uid_tlb_records_at_release()` | 仅在 driver 已确认 admission cutoff，且 `pending_q`、driving slot、barrier 均为空时，由 response owner 将 `uid_tlb_first_request_fire_sample_seq==0` 的 `WAITING` UID 显式转为 `CANCELED` 并移出 bounded index；它证明该 UID 在本 epoch 从未形成真实 DTLB -> L2TLB request，不构造 response、不改 token，也不调用任何 DUT deq/apply helper。marker 非零的 `WAITING` 不得由此 helper 清理。 |
+| `l2tlb_response_drain_done()` | 在上述 release-time unbound cleanup 之后，只读判断 response owner 的 pending/driving/barrier 与剩余 `WAITING` 是否收敛；残留的 marker 非零 `WAITING` 必须打印 uid/key/epoch/fire sample 后 fatal。cutoff 前的 marker=0 不属于 drain failure，不能提前取消。 |
 | `dispatch_l2tlb_live_entry_drain_done()` | 只读判断 adapter 的 raw/context/pending invalidate 是否收敛；它不替代 raw producer close，no-dispatch 时由固定拓扑直接成立。 |
 | `close_dispatch_raw_fence_intake_for_release()` | fence monitor 在完整处理 close request 后的一个 raw sample 后，写 current epoch/generation 的 raw producer close；它不 pop FIFO、不删除 live entry。 |
 | `grant_l2tlb_final_release()` | parent 在 global stop 后继续 service，等待 owner 在当前 epoch 完成 close/stop；仅当 driver 已确认 admission closed 且指定 owner/current epoch 的 `release_grantable()` 成立时，原子写完整 owner/epoch/generation grant 后 trigger `l2tlb_release_state_changed_ev`；`NO_OWNER` 不写 grant，也不代替 owner 清理队列。 |
@@ -471,7 +472,7 @@ dispatch_l2tlb_lookup_active=1：允许 adapter 建表/消费 raw fence；唯一
 其中 `reset_required_ack_mask` 由 testcase initializer 一次写入，reset coordinator 只按该 mask 等待；不能等待不存在的
 sequence 或 adapter。普通 no-dispatch testcase 使用第一行；未来 standalone responder 必须另建 parent 后才能使用第三行。
 
-四份关联 `undo` plan 必须共享这张矩阵。不得再把 `ENABLED + NO_DISPATCH` 写为“只有 response drain 的现有支持路径”；它是
+四份关联专项 plan 必须共享这张矩阵。不得再把 `ENABLED + NO_DISPATCH` 写为“只有 response drain 的现有支持路径”；它是
 未来 standalone parent 专项完成前的启动前 fatal。
 
 `NO_OWNER` 与 `NO_DISPATCH` 不是同义词：前者没有 responder，后者是 dispatch live-entry flow 的固定关闭状态。若某个
@@ -481,6 +482,11 @@ testcase 需要真正的 L2TLB response，必须显式选择 responder-active to
 coordinator 仍然运行并清理各自 history/producer context、发布 reset epoch ack；该 ack 不依赖 L2TLB responder sequence、driver ready 或
 dispatch adapter。只有 `RESPONSE` 和 `ADAPTER` ack 可以因拓扑被标记为 N/A/已满足。这样 no-owner 不会因等待不存在的
 sequence 卡住 reset 收敛，也不会被错误地当成一个空 responder。
+
+global-stop parent 必须只读取已经固定的 `l2tlb_responder_enabled()`、`l2tlb_dispatch_active()` 和
+`l2tlb_testcase_needs_response`，不得再从 connect takeover `l2tlb_responder_active` 或 runtime plus
+`MEMBLOCK_L2TLB_SEQ_EN` 推导当前 topology。`DISABLED/NO_OWNER + NO_DISPATCH` 直接结束 parent 的 L2TLB 等待分支，
+不等待 claim、不发 grant；反之 enabled/dispatch-active 但没有 response 需求或没有 dispatch 都是初始化合同错误，必须 fatal。
 
 ### 3.11 runtime reset 没有统一 epoch 和 ack 闭环
 
@@ -533,6 +539,10 @@ warm-up 再重新开放 ready；`DISABLED/NO_OWNER` 保持无 owner，不重新 
          保留不随 history 清空的 last_allocated_l2tlb_event_seq，完成后回 csr_ack=epoch；response owner 在自己的 reset handler 中
          将 response_owner_event_cursor 和 last_seen_flush_event_seq 对齐该 baseline，不能由 CSR monitor 改写 response-owner cursor
   每个职责仅在自己的清理已完成后写 ack；按 reset_required_ack_mask 收齐 ack 且 rst_n 恢复 -> reset_active=0
+  reset_active 从 1 变为 0 的那个 CSR monitor callback：只完成 reset release，不调用 advance_dut_global_sample()、
+    不创建 CSR history 或 producer-done sample；因为同一 posedge 若 fence monitor 先运行，它仍会正确看到 reset-active 并跳过 FENCE done。
+  下一真实 posedge 才是第一个 post-reset global sample：CSR monitor advance/history/done 与 fence monitor anchor/done
+    都在 reset 已经解除的前提下执行，producer barrier 必须从这一拍同时起步。
   若 responder_mode == ENABLED：同一 owner re-arm -> 先完成 current epoch NORMAL/inactive baseline -> 等 C-2 history/sample-ready=READY -> ready=0/1 按正常流程恢复；
     若 global stop 仍为 1，owner 只能在 baseline 后的下一 READY drv_cb 发布 admission-settled，再建立当前 epoch 的 close/RELEASE_STOP
   若 responder_mode == DISABLED：保持 NO_OWNER，不 claim、不 re-arm、不恢复 responder ready
@@ -566,7 +576,7 @@ pending invalidate。
 **优化后方案：** release 顺序固定为“parent 提出 global stop -> owner 在真实 sample 封闭 admission 并收敛旧工作 -> parent 发 grant -> owner 最后 release”：
 parent 请求 global stop 后停止新 routing，但不在 negedge 直接写 close request；此前 posedge 已驱动的 `ready=1` 仍可能在下一拍 fire。
 owner 在下一真实 `drv_cb` 先 capture 该 fire、完成 UID 更新；仅当该 sample 为 READY 且 baseline 已完成时写 admission-settled watermark，再在同一拍写 close request、分配单调
-release generation 并生成带 current reset epoch 的 `RELEASE_STOP/ready=0` item。close request 写入后不再接受新的 UID registration/token capture。owner 继续处理/取消已有工作，response drain 成立后发送带 current reset epoch 的 `RELEASE_FINAL_INACTIVE` kind 和 generation 的独立 item；driver
+release generation 并生成带 current reset epoch 的 `RELEASE_STOP/ready=0` item。close request 写入后不再接受新的 UID registration/token capture。driver 确认 admission cutoff 后，owner 继续处理/取消已有工作；只有 `pending_q`、driving slot 和 barrier 都为空时，才调用 `cancel_unbound_uid_tlb_records_at_release()`，将 marker=0 的 UID 显式转为 `CANCELED`。marker 非零但仍为 `WAITING` 的 UID 必须 fatal，不能借 release 清表。随后 response drain 才成立并发送带 current reset epoch 的 `RELEASE_FINAL_INACTIVE` kind 和 generation 的独立 item；driver
 在真实 `drv_cb` 边界确认该 item 并置 final-inactive done，monitor 再同步确认相同 epoch/transport 序号 settled 后，owner 才调用 `begin_l2tlb_release_closing()`；其中 `final_inactive_item_done` 只能由 driver 在
 真实 `drv_cb` 边界完成匹配 kind/generation 的 inactive item 后置位，不能由 sequence 创建 item 或 `finish_item()` 返回直接伪造。parent 与 owner 都使用
 `release_grantable(owner, current_reset_epoch)` 统一复核当前 `close_requested/request_owner_name`、匹配 generation 的
@@ -589,7 +599,7 @@ current sample 时才调用 `close_l2tlb_admission_for_release(owner, current_sa
 close_request_reset_epoch/close_generation`，并在同一 driver item 生成 `item_kind=RELEASE_STOP、item_generation=close_generation、item_reset_epoch=current_reset_epoch、req_ready=0`。
 该 seal 不能提前写 `admission_closed` 或伪造 cutoff。close request 写入后的任何 capture/register 调用均 `uvm_fatal`；此前已经完成的 fire/UID
 registration 保持合法。driver 在随后的真实 `drv_cb` 边界冻结 item kind/generation/reset_epoch、ready 与 fire；仅匹配的 RELEASE_STOP 且
-`sampled_req_ready=0 && sampled_req_fire=0`、sample 晚于 close request 时才由 driver 原子写入 `admission_closed/owner/generation/cutoff`。owner 完成 response drain 后
+`sampled_req_ready=0 && sampled_req_fire=0`、sample 晚于 close request 时才由 driver 原子写入 `admission_closed/owner/generation/cutoff`。此后 owner 先 drain token/driving/barrier；三者皆空时只取消 marker=0 的 unbound UID，marker 非零的残留 `WAITING` 立即 fatal。完成该 release-time cleanup 后 response drain 才成立，owner 再
 发送独立的 `RELEASE_FINAL_INACTIVE` item；driver 真实采样匹配 owner/generation/reset_epoch 的 `sampled_req_ready=0 && sampled_req_fire=0 && sampled_resp_valid=0` 后才置 final-inactive
 done，monitor 同步确认同一 epoch/transport 序号 settled 后，`begin_l2tlb_release_closing()` 才只写 closing，绝不执行 `try_release`。adapter drain 与 owner 流程并行；fence monitor
 必须在 close request 后完整处理一个 raw sample，再写匹配 epoch/generation 的 intake closed。parent 最后用带
@@ -654,8 +664,10 @@ owner 消费 grant 后，`release_l2tlb_lifecycle_owner()` 才能清 claim；par
 | `tlb_entry_by_key`、range index | adapter 的 C4 delete helper、payload/range builder | response owner只复制 snapshot |
 | release grant | parent coordinator | owner消费并 release |
 
-每次 request fire 仍独立建 token；response complete 扫描合法 waiting UID，允许 0/1/多个命中；C4 marker=0 的 UID 不静默
-取消，global stop 仍视为未收敛并最终 watchdog/fatal。
+每次 request fire 仍独立建 token；response complete 扫描合法 waiting UID，允许 0/1/多个命中；C4 不静默取消 marker=0 的 UID。
+它在 admission cutoff 前保持 `WAITING`，因为未来仍可能观察到真实 request fire；仅在 cutoff 已确认且 token/driving/barrier 全空后，
+response owner 才用 `cancel_unbound_uid_tlb_records_at_release()` 将该 unbound record 显式转为 `CANCELED`。marker 非零的残留
+`WAITING` 仍是未完成真实 request，global stop 必须 fatal，不能静默释放。
 
 ### 3.15 `MEMBLOCK_L2TLB_IDLE_STOP_CYCLE` 不能触发 active owner 退出
 
@@ -898,7 +910,8 @@ global stop
   -> close request 写入后任何新的 UID/token capture 立即 fatal；driver 在真实 drv_cb 只用匹配 RELEASE_STOP kind/generation 和 fire=0 写 admission_closed/cutoff
   -> fence monitor 先处理 close request 后的一个完整 raw sample，再写匹配 current reset epoch/current close generation 的 raw-fence intake closed；closed 后有效 raw fence fatal
   -> intake closed 写入前 fence monitor 不能随 phase end 退出；若没有后续 sample，parent 只能报 lifecycle timeout/fatal，不能绕过该 proof 发 grant
-  -> owner 完成 response drain 后发送独立 RELEASE_FINAL_INACTIVE item
+  -> owner 先 drain token/driving/barrier；三者皆空后对 marker=0 的 unbound UID 执行一次 release-time CANCELED 转换并删除 index，
+     marker!=0 的残留 WAITING 立即 fatal；随后 response drain 才成立并发送独立 RELEASE_FINAL_INACTIVE item
   -> driver 在真实 drv_cb 采样匹配 final item，且冻结的 `sampled_req_fire=0`、`ready=0`、`resp_valid=0` 后置
      final_inactive_item_done 与 final_inactive_transport_sample_seq；driver 先预留 mailbox slot，再同步调用 monitor analysis_imp，
      monitor 应已处理该 sample
@@ -929,7 +942,7 @@ global stop
 | 11 owner/local sample | global sample + 单 owner re-arm | 本文/timing |
 | 12 raw fence gate | topology coordinator 固定 | stage-aware + 本文 |
 | 13 range index 单值 | 使用有界 candidate list | range |
-| 14 release 漏 WAITING/phase 清理 | response/adapter queue drain + grant，异常不直 release | 本文/timing；另需 raw-fence intake close |
+| 14 release 漏 WAITING/phase 清理 | cutoff 后只取消 marker=0 的 unbound UID；marker 非零 WAITING 继续 fatal，再进行 response/adapter queue drain + grant，异常不直 release | 本文/timing；另需 raw-fence intake close |
 | 15 marker 用 wait-start | 只使用 request-fire marker | timing/random payload |
 | 16 NAPOT 越过 profile | 不在本文改 payload | random payload/range |
 | 17 allStage anchor 依赖 derived PPN | 不在本文改 builder | random payload/range |
@@ -991,7 +1004,7 @@ parent：global stop、停止新 routing、drain 只读汇总、release grant；
 | flush 功能修正 | C0 立即删 pending，并伪造 `record_flush_killed_request()`。 | C0 request 已真实 fire，V2 到 C4 才 flush。 | C0 建 barrier；C1-C3 可完成；C4 禁止 fire 并取消未完成旧 token/UID。 |
 | consumer 功能修正 | dispatch service 直接调用 `drain_sfence_events()`。 | C0 提前删 live entry且可能双消费。 | adapter 唯一 destructive consumer，按 raw anchor 到 C4 删除 canonical/range index。 |
 | reset 功能修正 | 通用 raw clear 清 global sample，owner 本地处理 reset。 | 旧 event/due 可能影响新周期。 | 以 `rst_n` 下降沿建立 reset epoch，协调 response/fence monitor/adapter/CSR ack；保留 owner/topology/global sample。 |
-| stop/release 功能修正 | main flow 在主表 terminal 和 flushSb 完成后退出。 | L2TLB/adapter 仍可能有 pending 工作；parent negedge 也不能追溯关闭此前已驱动的 ready 窗口，raw FIFO 瞬时为空也不能证明 fence monitor 不会再入队，reset 后旧 item 还可能残留；final sample 若没有 owner terminal ack，driver 无法 recycle，grant 也会互等。 | parent 只提出 global stop/停止 routing；driver 先完成本拍 bounded anchor/probe 后才读取 current sample；owner 在下一真实 sample capture 已发 fire 后写 admission-settled 与当前 epoch close request。reset release 先完成 NORMAL/inactive baseline，下一 drv_cb 才允许 stop；每个 stale item 必须 `item_done()` 后强制 inactive 丢弃。driver 只接受匹配 generation/epoch 的 stop，且 final item同样要求冻结 fire=0/ready=0/resp_valid=0；owner 消费 frozen final sample 后先写 closing、再 CONSUMED ack，driver 下一 drv_cb 回收 mailbox 并写 recycle proof；fence monitor 再完整处理一个 raw sample并写同 epoch/generation intake close，closed 后 raw valid fatal；adapter 并行 drain；parent 仅在完整 `release_grantable(owner, current_reset_epoch)` 为真时原子写 grant 并 trigger wakeup，该谓词还要求 mailbox EMPTY、当前 epoch required ack 和非 reset；owner 唤醒后最后清 claim。 |
+| stop/release 功能修正 | main flow 在主表 terminal 和 flushSb 完成后退出。 | L2TLB/adapter 仍可能有 pending 工作；parent negedge 也不能追溯关闭此前已驱动的 ready 窗口，raw FIFO 瞬时为空也不能证明 fence monitor 不会再入队，reset 后旧 item 还可能残留；final sample 若没有 owner terminal ack，driver 无法 recycle，grant 也会互等。 | parent 只提出 global stop/停止 routing；driver 先完成本拍 bounded anchor/probe 后才读取 current sample；owner 在下一真实 sample capture 已发 fire 后写 admission-settled 与当前 epoch close request。reset release 先完成 NORMAL/inactive baseline，下一 drv_cb 才允许 stop；每个 stale item 必须 `item_done()` 后强制 inactive 丢弃。driver 确认 admission cutoff 且 token/driving/barrier 清空后，owner 只把 marker=0 的 unbound UID 转为 `CANCELED`；marker 非零 WAITING 继续 fatal。driver 只接受匹配 generation/epoch 的 stop，且 final item同样要求冻结 fire=0/ready=0/resp_valid=0；owner 消费 frozen final sample 后先写 closing、再 CONSUMED ack，driver 下一 drv_cb 回收 mailbox 并写 recycle proof；fence monitor 再完整处理一个 raw sample并写同 epoch/generation intake close，closed 后 raw valid fatal；adapter 并行 drain；parent 仅在完整 `release_grantable(owner, current_reset_epoch)` 为真时原子写 grant 并 trigger wakeup，该谓词还要求 mailbox EMPTY、当前 epoch required ack 和非 reset；owner 唤醒后最后清 claim。 |
 | idle-stop 功能修正 | `IDLE_STOP_CYCLE` 会让 active sequence 自行 stopping/退出。 | 破坏 owner 持续到 parent grant 的合同。 | 只输出 no-progress 诊断；global stop 是唯一正常退出触发。 |
 | 异常路径功能修正 | `do_kill()`、driver `phase_ended()` 直接 release。 | 隐藏未收敛状态，function 也不能驱动时钟任务。 | active owner 的 `do_kill()` 和 `phase_ended()` 都只 fatal/保留 claim；唯一 release 要求 final inactive、closing、grant、response/adapter queue drain 和 raw-fence intake close。 |
 | 保持不变 | 每次 request fire 的 token 数量、latency/reorder、payload、range candidate 和 UID multicast 语义。 | 单 owner 只收敛所有权，不改变接口请求/响应语义。 | 继续由四份专项负责。 |
@@ -1024,15 +1037,14 @@ adapter 所属 queue/map，不修改 response owner 的 pending token。
 |---|---|
 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_random_payload_plan_20260729.md` | payload builder、raw/derived copy 和 UID response multicast 仍由该归档文档负责；不得新增第二个 owner/token queue。 |
 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md` | C0/C4、C-2 history、response due、warm-up stop、raw-fence intake close 与 reset/release 使用本文 global sample/owner 边界。 |
-| `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md` | range candidate、rank、NAPOT 和统一 delete helper 由该待执行文档负责；adapter 只调用 helper。 |
+| `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_range_lookup_napot_plan_20260806.md` | range candidate、rank、NAPOT 和统一 delete helper 已完成并归档（`6a1b2d947e`）；adapter 只调用 helper。 |
 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_sfence_hfence_stage_aware_live_entry_invalidation_plan_20260804.md` | stage matcher、raw fence decode、topology gate 和 raw intake close 由该归档文档负责；raw fence destructive consumer 固定为 adapter。 |
 
 四份专项的当前状态必须以各自文件头为准，不能继续概括为“四份 `undo` 均未 coding”：timing correction 与 response
 random payload 已归档至 `plan/do`，并记录了完成的 compile/smoke 与独立终审；stage-aware 已归档至 `plan/do`，已完成静态检查、
-远端 compile、基础 smoke 和 real-dispatch smoke；只有 range lookup/NAPOT 仍为 `plan/undo` 的待执行专项。
-本文只提供跨专项的单 owner 生命周期合同，不代替上述状态记录，也不把任一归档 plan 重新变成待执行 plan。后续对仍待执行的
-range lookup/NAPOT coding，先读取本文的生命周期结论，再读取该 `undo` 专项的具体实现方案；已归档 `plan/do` 只作为已实现
-行为和历史决策的证据，不作为新的重复 coding 入口。
+远端 compile、基础 smoke 和 real-dispatch smoke；range lookup/NAPOT 也已归档至 `plan/do`，核心实现为 `6a1b2d947e`。
+本文只提供跨专项的单 owner 生命周期合同，不代替上述状态记录，也不把任一归档 plan 重新变成待执行 plan。当前没有待执行的
+L2TLB coding 专项；四份已归档 `plan/do` 仅作为已实现行为和历史决策的证据，不作为新的重复 coding 入口。
 
 ## 9. 审核结论与未完成边界
 
@@ -1040,8 +1052,8 @@ range lookup/NAPOT coding，先读取本文的生命周期结论，再读取该 
 raw fence 单一消费者与 intake close、runtime reset epoch/ack、response/adapter queue drain/release 和异常退出保护。它们均属于测试框架生命周期逻辑，不能由
 payload 或 RM 专项隐式补齐。
 
-本文仍未形成独立 coding 实现，不能把审核结论本身当作 compile/smoke 通过证明；但这不等于所有关联专项都未实现。
-当前剩余明确待执行范围是 range lookup/NAPOT 专项。本文保留在
+本文仍未形成独立 coding 实现，不能把审核结论本身当作 compile/smoke 通过证明；但四份关联 L2TLB 专项均已完成并归档。
+本文保留在
 `AI_DOC/plan/test_framework/review_doc/undo`，继续作为历史问题与跨专项合同的复核材料；各专项 plan/review 的归档与验证
 状态只以对应文档头和 implementation review 为准。
 
@@ -1081,3 +1093,23 @@ fence monitor 直接清 raw producer settled/intake-close/context-dedup 并写 F
 边界优先于任何“coordinator 清 adapter queue”或“response owner/driver 共同清 token”的旧描述。本节只规定跨专项的
 生命周期语义；实际实现、compile、smoke 和 runtime blocker 的状态必须分别以对应 `plan/do`、`plan/undo` 与
 implementation review 记录为准。
+
+## 11. 2026-08-10 审核补充
+
+### 11.1 reset release 不是可丢弃的空拍
+
+审核发现“CSR 在 release callback 不发布 sample”的临时方案不满足单 owner 的 global-sample 合同：CSR 先运行时，
+fence monitor 已看到 reset inactive，却没有同拍 anchor 可读。最终方案把 release 边定义为第一个 post-reset sample；
+若 fence 先运行，它只在同一 NBA/delta 窗口等待 CSR 结束 reset，随后仍按同拍 anchor 写 FENCE producer done。
+因此任何调度顺序都不会留下半个 producer barrier，也不会漏掉 release 边的 `sfence.valid`。
+
+### 11.2 no-owner 必须同时禁止 grant 和历史 owner 残留
+
+审核发现 parent 不能仅依赖“当前是否 claim”来判断 grant 时机。对于 `DISABLED/NO_OWNER + NO_DISPATCH`，
+`l2tlb_lifecycle_owner_claimed`、`l2tlb_owner_claimed_once` 和 `l2tlb_release_granted` 都必须为 0；否则说明本 testcase
+错误启动过 owner 或留下了 release 状态，应当 fatal。只有 `ENABLED + DISPATCH_ACTIVE + needs_response` 且仍持有真实
+claim 的 lifecycle 才允许 parent 发 `grant_l2tlb_final_release()`。
+
+这两项实现和重新验收由
+`mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_implementation_review_20260809.md` 第 12 节作为权威记录；
+本审核文档继续只提供问题归类和跨专项生命周期约束。
