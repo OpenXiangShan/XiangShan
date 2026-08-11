@@ -117,10 +117,10 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
 
   // we use t0_setIdx to pre-read stateBank for better timing, it's a tightly-coupled design,
   // so we require t1 to touch the same set
-  // assert(
-  //   !(
-  //     io.train.t1_touch.valid && RegEnable(io.train.t0_setIdx, io.train.t0_fire) =/= io.train.t1_touch.bits.setIdx
-  //   ),
-  //   "pipeline mismatch: t1 touch should be for the same set as t0 train"
-  // )
+  assert(
+    !(
+      io.train.t1_touch.valid && RegEnable(io.train.t0_setIdx, io.train.t0_fire) =/= io.train.t1_touch.bits.setIdx
+    ),
+    "pipeline mismatch: t1 touch should be for the same set as t0 train"
+  )
 }
