@@ -156,6 +156,27 @@ class memblock_rm_readonly_api extends uvm_object;
         bit                  ready;
     } dcache_overlay_readiness_view_t;
 
+    // 中文注释：dispatch 上下文是 RM 关联 UID 表项、当前采样和 flush/replay
+    // 生命周期的只读标量快照。它不暴露或消费任一内部 queue；其中 pending 计数
+    // 只表示调用瞬间已有 PTW-wait replay 项数，不能用于驱动或推进 replay。
+    typedef struct packed {
+        bit                  valid;
+        bit                  main_table_ready;
+        int unsigned         main_trans_num;
+        memblock_uid_t       next_uid;
+        bit                  global_stop_requested;
+        bit                  reset_backend_done;
+        bit                  flush_in_progress;
+        int unsigned         redirect_phase;
+        bit                  redirect_drive_inflight;
+        int unsigned         global_issue_epoch;
+        int unsigned         dispatch_flush_epoch;
+        bit                  dispatch_flush_in_progress;
+        int unsigned         ptw_wait_replay_count;
+        longint unsigned     current_dut_sample_seq;
+        longint unsigned     latest_drained_cancel_sample_seq;
+    } framework_context_view_t;
+
     static memblock_rm_readonly_api m_inst;
 
     `uvm_object_utils(memblock_rm_readonly_api)
@@ -173,6 +194,9 @@ class memblock_rm_readonly_api extends uvm_object;
     extern function bit read_issue_membership_for_rm(
         input  memblock_uid_t uid,
         output issue_membership_view_t view
+    );
+    extern function bit read_framework_context_for_rm(
+        output framework_context_view_t view
     );
     extern function bit read_uid_by_rob_for_rm(
         input  memblock_rob_key_t key,
@@ -448,6 +472,33 @@ function bit memblock_rm_readonly_api::read_issue_membership_for_rm(
     return 1'b1;
 endfunction:read_issue_membership_for_rm
 
+function bit memblock_rm_readonly_api::read_framework_context_for_rm(
+    output framework_context_view_t view
+);
+    common_data_transaction data;
+
+    view = '{default:'0};
+    if (!try_get_common_data(data)) begin
+        return report_query_miss("framework_context", "common data owner is not initialized");
+    end
+    view.valid                            = 1'b1;
+    view.main_table_ready                 = data.main_table_ready;
+    view.main_trans_num                   = data.main_trans_num;
+    view.next_uid                         = data.next_uid;
+    view.global_stop_requested            = data.global_stop_requested;
+    view.reset_backend_done               = memblock_sync_pkg::reset_backend_done;
+    view.flush_in_progress                = data.flush_in_progress;
+    view.redirect_phase                   = data.redirect_phase;
+    view.redirect_drive_inflight          = data.redirect_drive_inflight;
+    view.global_issue_epoch               = data.global_issue_epoch;
+    view.dispatch_flush_epoch             = memblock_sync_pkg::dispatch_flush_epoch;
+    view.dispatch_flush_in_progress       = memblock_sync_pkg::dispatch_flush_in_progress;
+    view.ptw_wait_replay_count            = data.ptw_wait_replay_q.size();
+    view.current_dut_sample_seq           = memblock_sync_pkg::peek_current_dut_global_sample();
+    view.latest_drained_cancel_sample_seq = data.latest_drained_cancel_sample_seq;
+    return 1'b1;
+endfunction:read_framework_context_for_rm
+
 function bit memblock_rm_readonly_api::read_uid_by_rob_for_rm(
     input  memblock_rob_key_t key,
     output memblock_uid_t uid
@@ -548,6 +599,10 @@ function bit memblock_rm_readonly_api::read_memory_map(
     bit              corrupt_hit;
 
     view = '{default:'0};
+    if (!mem_access_base_sequence::is_shared_memory_lifecycle_initialized()) begin
+        return report_query_miss(overlay ? "committed_overlay" : "initialized_backing",
+                                 "shared-memory lifecycle is not initialized");
+    end
     miss = 1'b0;
     corrupt_hit = 1'b0;
     foreach (byte_mask[i]) begin

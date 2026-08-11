@@ -219,3 +219,13 @@ corrupt 命中是成功的保护性结果，不是 miss；它返回 `valid=1, co
 - 新增 byte-granular `write_overlay_corrupt_byte_mask` 旁路表。数据型 C response 已被既有代码判为 corrupt 时记录整条 64 B；Uncache batch 已实际提交后只清除其覆盖 byte。
 - DCache batch 入队/提交处增加旁路 fragment 记录：低、高两个 32B fragment 均被观察到既有 commit 后，才结束该 line 的未完成观察窗口；observer 不新增 ticket、不改变 batch 顺序。
 - 该阶段仍未实现 RM 调用或 checker；所有状态只通过后续 API value view 读取。
+
+### [IMPLEMENTATION_DELTA] 阶段三：只读生命周期门控与 corrupt 计数收敛
+
+- 增加 `read_framework_context_for_rm()`，只复制已有 dispatch owner 的主表就绪、UID 进度、reset/flush、replay pending 数和当前 sample 等标量上下文；不返回 queue 本体，不修改任何调度状态。
+- `read_initialized_backing_for_rm()` 与 `read_committed_overlay_for_rm()` 在访问 map 前先检查既有 shared-memory lifecycle；生命周期未初始化时统一 `UVM_ERROR + valid=0`，仍不创建 line 或 owner。
+- 将 aggregate 的 corrupt 计数改为以 64 B DCache line 为粒度的旁路 byte mask。1KiB `write_overlay_corrupt_byte_mask` 继续是 API 的逐 byte 查询真源；新增的 64 B map 只用于准确维护“仍有多少条 corrupt DCache line”，避免相邻多条 64 B line 落入同一 1KiB backing line 时提前或滞后减计数。
+- 正常 DCache 写回仍只在低、高两个既有 32 B fragment 均观察到 commit 后清除整条 64 B corrupt 范围；Uncache commit 只清除自身实际覆盖的 byte。fragment 观察缺少已登记输入或发生计数下溢时，仅使 aggregate unavailable，不回写 DCache 私有 map 或 batch。
+- `dcache_drain_epoch` 与 transition sample/time 仅在已发布 aggregate 从未 drain 变为 drain 的边沿记录，表示门槛转换而非 overlay 最近提交时间。DCache aggregate 仍实际存放在 shared-memory owner `mem_access_base_sequence`，而非 `common_data_transaction`，以保持共享 memory/observer 状态只有一个生命周期 owner；该变化不增加第二个对外 API class。
+- DCache responder 在 reset 采样期间先使当前 aggregate `published=0`、清除未完成 observer 片段并只在第一次失效时递增 generation；reset 保持期间不重复递增。reset 解除后的第一个正常采样边界重新发布基线。该过程不强制提交当前 sample，仍由既有下一次 `begin_shared_mem_sample()` 提交上一 sample 的 batch。
+- fragment commit observer 只检查本次 commit event 实际触及的 64 B line 集合，不遍历全部 fragment map；因此不会把事件驱动观察退化为每次提交的全表扫描，未改变 batch 的入队、提交或 overlay 可见性顺序。
