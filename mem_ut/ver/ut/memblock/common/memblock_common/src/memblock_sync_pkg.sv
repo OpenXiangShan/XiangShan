@@ -1702,6 +1702,30 @@ package memblock_sync_pkg;
             `uvm_fatal("MEMBLOCK_L2TLB_EVENT",
                        $sformatf("invalid L2TLB event reason mask=0x%0h", reason_mask))
         end
+        // The first producer may call this function before publishing its
+        // producer-done bit.  Establish the reason ledger for this sample at
+        // the event boundary, while preserving the missed-barrier check.
+        if (sample_producer_active_seq != dut_sample_seq) begin
+            if (sample_producer_active_seq != 0 &&
+                sample_producer_done_mask != 2'b11) begin
+                `uvm_fatal("MEMBLOCK_L2TLB_EVENT",
+                           $sformatf("flush reason advanced before producer barrier closed sample=%0d mask=0x%0h new_sample=%0d reason=0x%0h",
+                                     sample_producer_active_seq,
+                                     sample_producer_done_mask,
+                                     dut_sample_seq,
+                                     reason_mask))
+            end
+            sample_producer_active_seq = dut_sample_seq;
+            sample_producer_done_mask = 2'b00;
+            sample_producer_reason_mask = 2'b00;
+        end
+        if ((sample_producer_reason_mask & reason_mask) != 2'b00) begin
+            `uvm_fatal("MEMBLOCK_L2TLB_EVENT",
+                       $sformatf("duplicate L2TLB flush reason sample=%0d old_reason=0x%0h new_reason=0x%0h",
+                                 dut_sample_seq,
+                                 sample_producer_reason_mask,
+                                 reason_mask))
+        end
         if (l2tlb_flush_event_history.size() != 0 &&
             l2tlb_flush_event_history[$].anchor_sample_seq == dut_sample_seq) begin
             l2tlb_flush_event_history[$].reason_mask |= reason_mask;
@@ -1751,9 +1775,20 @@ package memblock_sync_pkg;
 
     function bit get_l2tlb_event_after(input longint unsigned cursor,
                                        output memblock_l2tlb_event_record_t event_record);
+        longint unsigned expected_seq;
+
         event_record = '{default:'0};
+        expected_seq = cursor + 1;
         foreach (l2tlb_flush_event_history[idx]) begin
             if (l2tlb_flush_event_history[idx].event_seq > cursor) begin
+                if (l2tlb_flush_event_history[idx].event_seq != expected_seq) begin
+                    `uvm_fatal("MEMBLOCK_L2TLB_EVENT",
+                               $sformatf("L2TLB event sequence gap cursor=%0d expected=%0d actual=%0d history_index=%0d",
+                                         cursor,
+                                         expected_seq,
+                                         l2tlb_flush_event_history[idx].event_seq,
+                                         idx))
+                end
                 event_record = l2tlb_flush_event_history[idx];
                 return 1'b1;
             end

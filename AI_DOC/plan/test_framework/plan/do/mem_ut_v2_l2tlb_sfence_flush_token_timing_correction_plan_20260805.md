@@ -2119,8 +2119,8 @@ latency、payload、permission 和主表控制行为保持不变。
   一个合并后的 sample reason mask。
 - 影响范围：只加强 event provenance、reason 去重和 cursor 完整性检查；不改变同 sample 不同 reason 的合法合并、C0/C4
   barrier 数量、token payload、response latency 或 active responder 的正常调度。
-- 当前状态：本轮只补充执行 plan；源码尚未按本条修改，coding 后需增加重复 reason、合法 reason 合并、event_seq 跳号和
-  reset 后连续编号场景的静态/定向检查。
+- 当前状态：已完成 coding；`note_l2tlb_flush_event()` 对同 sample reason 做重叠检查，
+  `get_l2tlb_event_after()` 要求 event sequence 严格连续；无 dispatch topology 同样维护 reason overlap 检查。
 
 ## 历史验证记录与重新验收要求
 
