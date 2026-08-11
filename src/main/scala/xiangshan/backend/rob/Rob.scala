@@ -228,12 +228,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     when(enqOH.asUInt.orR && !io.redirect.valid){
       // TODO: enq
       connectEnq(robEntries(i), Mux1H(enqOH, io.enq.req.map(_.bits)))
-      // Rename carries slot-exact metadata.  Aggregate only the fields that are
-      // physically stored once per ROB entry, while retaining exact RobPtrs for
-      // the CSR dirty-state trackers below.
-      robEntries(i).fpWen := VecInit(entryEnqValid.zip(io.enq.req).map {
-        case (valid, req) => valid && req.bits.dirtyFs
-      }).asUInt.orR
       val youngestEnqUop = PriorityMux(entryEnqValid.reverse, io.enq.req.map(_.bits).reverse)
       robEntries(i).traceBlockInPipe.itype := youngestEnqUop.traceBlockInPipe.itype
       robEntries(i).traceBlockInPipe.ilastsize := youngestEnqUop.traceBlockInPipe.ilastsize
