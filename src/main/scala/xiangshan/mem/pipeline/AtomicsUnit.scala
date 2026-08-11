@@ -61,17 +61,17 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------
   val List(
-    s_invalid, 
-    s_tlb_and_flush_sbuffer_req, 
-    s_pm, 
-    s_wait_flush_sbuffer_resp, 
-    s_cache_req, 
+    s_invalid,
+    s_tlb_and_flush_sbuffer_req,
+    s_pm,
+    s_wait_flush_sbuffer_resp,
+    s_cache_req,
     s_cache_resp,
-    s_cache_resp_latch, 
-    s_finish, 
-    s_finish2, 
-    s_extra_wb2, 
-    s_extra_wb, 
+    s_cache_resp_latch,
+    s_finish,
+    s_finish2,
+    s_extra_wb2,
+    s_extra_wb,
   ) = Enum(11)
   val state = RegInit(s_invalid)
   val out_valid = RegInit(false.B)
@@ -316,6 +316,9 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
       (pmp.ld || exception_pa_mmio_nc) && isLr
     exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st ||
       (pmp.ld || exception_pa_mmio_nc) && !isLr
+    // if used atomic access mmio region, should report *accessFault first.
+    exceptionVec(loadAddrMisaligned)  := exceptionVec(loadAddrMisaligned) && !exception_pa_mmio_nc
+    exceptionVec(storeAddrMisaligned) := exceptionVec(storeAddrMisaligned) && !exception_pa_mmio_nc
   }
 
   when (state === s_wait_flush_sbuffer_resp) {
