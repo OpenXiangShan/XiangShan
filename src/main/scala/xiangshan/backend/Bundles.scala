@@ -245,9 +245,6 @@ object Bundles {
     val noCompressReason = UInt(2.W)
     val slotNeedFlushMask = UInt(2.W)
     val interruptSafe = Bool()
-    val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
     val commitType = CommitType()
 
     val srcType = Vec(numSrc, SrcType())
@@ -296,6 +293,7 @@ object Bundles {
     val dirtyFs = Bool()
     val dirtyVs = Bool()
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
+    val formerTraceIretire = UInt(IretireWidthEncoded.W)
     // Take snapshot at this CFI inst
     val snapshot = Bool()
     val storeSetHit = Bool() // inst has been allocated an store set
@@ -642,9 +640,6 @@ object Bundles {
     val noCompressReason = UInt(2.W)
     val slotNeedFlushMask = UInt(2.W)
     val interruptSafe = Bool()
-    val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
-    val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
     val fusionNum       = UInt(log2Ceil(RenameWidth + 1).W)
     val selImm          = SelImm()
     val imm             = UInt(32.W)

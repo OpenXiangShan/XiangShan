@@ -308,6 +308,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val latterSlotMaskVec = compressUnit.io.out.latterSlotMask
   val compressMaskVec = formerSlotMaskVec.zip(latterSlotMaskVec).map { case (former, latter) => former | latter }
   val entryInstrCount = compressMaskVec.map(PopCount(_))
+  val formerInstrCount = formerSlotMaskVec.map(PopCount(_))
+  val latterInstrCount = latterSlotMaskVec.map(PopCount(_))
   val entryPairType = compressUnit.io.out.entryPairType
   val slotIsFormer = formerSlotMaskVec.zipWithIndex.map { case (mask, lane) => mask(lane) }
   val slotNeedFlushMask = compressUnit.io.out.slotNeedFlushMask
@@ -451,15 +453,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).complexSlotHasDest := complexSlotHasDest(i)
     uops(i).entryHasStore := entryHasStore(i)
     uops(i).noCompressReason := noCompressReason(i)
-    uops(i).formerInstrCnt := PopCount(formerSlotMaskVec(i))
-    uops(i).latterInstrCnt := PopCount(latterSlotMaskVec(i))
-    val formerLenSum = formerSlotMaskVec(i).asBools
-      .zip(io.in.map(_.bits.isRVC))
-      .map { case (mask, isRVC) =>
-        Mux(mask, Mux(isRVC, 2.U(formerLenWidth.W), 4.U(formerLenWidth.W)), 0.U(formerLenWidth.W))
-      }
-      .reduce(_ +& _)
-    uops(i).formerLen := formerLenSum(formerLenWidth - 1, 0)
     // alloc a new phy reg
     needVlDest(i) := io.in(i).valid && needDestReg(Reg_Vl, io.in(i).bits)
     needVecDest(i) := io.in(i).valid && needDestReg(Reg_V, io.in(i).bits)
@@ -511,6 +504,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val entryLatterNumWB = Mux(summedLatterNumWB >= droppedLatterNumWB, summedLatterNumWB - droppedLatterNumWB, 0.U)
     assert(entryFormerNumWB <= (MaxUopSize * 2).U)
     assert(entryLatterNumWB <= (MaxUopSize * 2).U)
+    when(CompressType.isNORMAL(entryPairType(i))) {
+      assert(entryLatterNumWB === 0.U)
+    }.otherwise {
+      assert(entryFormerNumWB <= (2 * (RenameWidth - 1)).U)
+      assert(entryLatterNumWB <= (2 * (RenameWidth - 1)).U)
+    }
     uops(i).formerNumWB := entryFormerNumWB
     uops(i).latterNumWB := entryLatterNumWB
     val hasExceptionExceptFlushPipe = uops(i).exceptionVec.orR || TriggerAction.isDmode(uops(i).trigger)
@@ -567,8 +566,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       io.out(i).bits.srcType(0) := SrcType.no
     }
 
-    XSInfo(io.out(i).fire && (uops(i).formerInstrCnt > 1.U || uops(i).latterInstrCnt > 1.U),
-      p"[ROB-HD] lane=$i rob=${uops(i).robIdx.value} former=${uops(i).formerInstrCnt} latter=${uops(i).latterInstrCnt} mask=0x${Hexadecimal(compressMaskVec(i))}\n")
+    XSInfo(io.out(i).fire && (formerInstrCount(i) > 1.U || latterInstrCount(i) > 1.U),
+      p"[ROB-HD] lane=$i rob=${uops(i).robIdx.value} former=${formerInstrCount(i)} latter=${latterInstrCount(i)} mask=0x${Hexadecimal(compressMaskVec(i))}\n")
     // dirty code
     if (i == 0) {
       val jrFollowsLink = (io.in(0).bits.isJ || io.in(0).bits.isJr) && io.in(0).bits.lastUop && !io.in(0).bits.firstUop
@@ -618,6 +617,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       case (mask, isRVC) => (mask && !isRVC).asUInt
     }
   }
+  val formerNonRVCNumVec = (0 until RenameWidth).map{
+    i => formerSlotMaskVec(i).asBools.zip(isRVCVec).map{
+      case (mask, isRVC) => (mask && !isRVC).asUInt
+    }
+  }
 
   /*
   encode: instrNum, nonRVCNum => commitinfo.iretire
@@ -659,6 +663,18 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     nonRVCNum := nonRVCNumVec(i).reduce(_ +& _)
     uops(i).traceBlockInPipe.iretire := chisel3.util.experimental.decode.decoder(
       (entryInstrCount(i) ## nonRVCNum),
+      TruthTable(
+        instrSizeTable.zipWithIndex.map { case (table, encode) =>
+          (BitPat(((table._1 << log2Ceil(RenameWidth + 1)) + table._2).U((2 * log2Ceil(RenameWidth + 1)).W)),
+            BitPat((encode + 1).U(IretireWidthEncoded.W)))
+        },
+        BitPat.N(IretireWidthEncoded)
+      )
+    )
+    val formerNonRVCNum = Wire(UInt((log2Ceil(RenameWidth + 1).W)))
+    formerNonRVCNum := formerNonRVCNumVec(i).reduce(_ +& _)
+    uops(i).formerTraceIretire := chisel3.util.experimental.decode.decoder(
+      (formerInstrCount(i) ## formerNonRVCNum),
       TruthTable(
         instrSizeTable.zipWithIndex.map { case (table, encode) =>
           (BitPat(((table._1 << log2Ceil(RenameWidth + 1)) + table._2).U((2 * log2Ceil(RenameWidth + 1)).W)),
