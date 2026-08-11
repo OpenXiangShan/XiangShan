@@ -672,3 +672,29 @@ ready 计算：
 运行期新 event 仍走既有 `handle_l2tlb_flush_event()` 和 `accept_hold_until_sample`，driver 的 transport baseline 仍由
 driver 私有状态维护。本项没有改变 response latency、payload、C4 cancel 或 release grant 语义；源码、flow、analysis 和
 plan 已同步，`git diff --check` 通过。
+
+## 12.6 本轮 P2 coding：reason 去重与 event sequence 连续性
+
+**关联 plan：** `mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md` 的
+`IMPLEMENTATION_DELTA` reason/event sequence 条目。
+
+**抽象功能描述：** 约束 flush event 的来源账本和消费游标，区分同拍不同原因的合法合并、重复原因的错误发布，以及 event
+历史缺号的错误消费。
+
+**修改后逻辑：**
+
+```text
+note_l2tlb_flush_event(sample, reason):
+  为当前 sample 建立 reason ledger；
+  old_reason & reason != 0 -> uvm_fatal；
+  不同 reason -> 合法 OR 合并，不新增 event_seq；
+  无 dispatch topology 也执行上述 reason overlap 检查。
+
+get_l2tlb_event_after(cursor):
+  找到第一条 event_seq > cursor；
+  要求 event_seq == cursor + 1，否则 uvm_fatal；
+  通过后才返回 event。
+```
+
+修改集中在 `memblock_sync_pkg.sv` 的两个公共 helper，不改变 event 的合法合并、C0/C4 barrier、token payload 或 latency。
+源码、flow、analysis 和 plan 已同步，静态 `git diff --check` 通过；专项 compile/smoke 待本轮 commit 后执行。

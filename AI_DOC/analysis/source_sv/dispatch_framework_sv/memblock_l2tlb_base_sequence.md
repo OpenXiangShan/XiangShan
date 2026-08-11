@@ -211,6 +211,7 @@ if (next_ready)
 读取 flush latest；
 reset/backend 未就绪时取消所有 outstanding、对齐 flush baseline、发送 inactive 并返回；
 正常状态先检查 event_seq 不倒退，ready 曾开放后迟到或未来 event 在状态变更前 fatal；owner 首次开放 ready 前检查 transport、pending、barrier 和 WAITING UID 为空；
+event history 读取要求第一条待消费记录等于 `last_seen_flush_event_seq + 1`，否则 fatal；同 sample 的相同 reason 不得重复发布。
 确认上一拍 driving response；
 读取并幂等应用 runtime CSR latest；
 处理新 flush event 和同拍被 kill 的 fire；
@@ -451,6 +452,9 @@ accept_hold_until_sample = sample_seq + MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES；
 ~~~
 
 迟到 event 在进入 helper 前已经 fatal，不能错误取消新 flush 后的 request。startup 阶段 ready从未开放，只建立保守 hold，不创建 killed token。
+
+`get_l2tlb_event_after()` 的抽象职责是按 owner cursor 读取下一条 event，并验证历史没有缺号；它不负责创建、合并或删除
+event。读取第一条 `event_seq > cursor` 后，必须满足 `event_seq == cursor + 1`，否则立即 fatal。
 
 ### 7.2 生命周期 owner 与 stop
 

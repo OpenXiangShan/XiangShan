@@ -18,6 +18,7 @@ mode 从对应 sample 的 CSR history 获得。
 | `UID request-fire marker` | WAITING UID 已被某次真实 request fire 覆盖的首个 global sample；0 表示尚未观察到请求。 | `uid_tlb_first_request_fire_sample_seq` | C4 只取消 marker 已建立且不晚于 C0 的旧等待实例。 |
 | `flush barrier` | C0 fence/CSR event 到 C4 filter flush 的 lifecycle 记录。 | `barrier_q` | C0 fire 正常建 token，C4 才取消旧 pending token。 |
 | `pre-ready baseline` | owner 首次开放 ready 前对历史 event 和空状态的启动校验。 | `owner_start_baseline_done`、`pre_ready_hold_until_sample` | 旧 event 只推进 cursor/hold，不建立新的 C0/C4 barrier。 |
+| `reason overlap` | 同一 global sample 内同一 flush 来源被重复发布。 | `sample_producer_reason_mask` | CSR 与 FENCE 可合并；同一 reason 重复立即 fatal。 |
 | `logical live entry` | canonical raw response payload 的缓存对象。 | `tlb_entry_by_key` | adapter 的 C4 delete 后重新 build。 |
 | `adapter raw-fence owner` | 唯一可 pop/decode/schedule/apply raw fence 的 dispatch 组件。 | `dispatch_monitor_event_adapter` | responder sequence 不读取 `raw_sfence_q`。 |
 | `owner` | 唯一拥有 responder token、ready、response 与 release 的 sequence 实例。 | `l2tlb_lifecycle_owner_*` | legacy default 和显式 vseq 不能并发启动。 |
@@ -49,6 +50,7 @@ dispatch-active。
   另一个 default sequence 或显式 vseq 再 claim 时立即 fatal。
   首次开放 ready 前检查当前 transport、pending response、barrier 和 WAITING UID 均为空；启动期历史 event 只推进 cursor，
   不调用 active flush handler。
+  每个新 event 必须是 owner cursor 的下一个连续 event_seq；缺号不允许静默跳过。
 
 关闭 responder：
   global stop 只停止 routing。
