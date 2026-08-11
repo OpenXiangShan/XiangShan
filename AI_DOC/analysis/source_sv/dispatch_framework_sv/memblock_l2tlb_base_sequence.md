@@ -53,7 +53,7 @@ record 只存在于 pending_q 或 driving_req 中。response 完成、flush 取�
 | 配置 | enable、max_outstanding、resp_reorder_en、三档 latency/weight、idle_stop_cycle | 保存 seq_csr_common 已校验的运行参数 |
 | 容器 | pending_q、driving_req、driving_valid | 形成 bounded outstanding |
 | 账本 | accepted_count、completed_count、flush_canceled_count、reset_canceled_count、next_request_token | 验证每个 fire 的最终归类 |
-| 生命周期 | sample_seq、last_seen_flush_event_seq、accept_hold_until_sample、acceptance_opened_since_reset、ready_opportunity_since_lifecycle_block、csr_snapshot_valid、reset_runtime_csr_seq_baseline、require_post_reset_csr_refresh、stopping、idle_count | 控制 sample、flush、reset后的CSR刷新、hold、ready重开机会和 stop |
+| 生命周期 | sample_seq、last_seen_flush_event_seq、accept_hold_until_sample、pre_ready_hold_until_sample、owner_start_baseline_done、acceptance_opened_since_reset、ready_opportunity_since_lifecycle_block、csr_snapshot_valid、reset_runtime_csr_seq_baseline、require_post_reset_csr_refresh、stopping、idle_count | 分离启动历史 event 的 baseline hold 与运行期 C0/C4 flush hold |
 | 输入快照 | sampled_req_valid、sampled_req_ready、sampled_req_vpn、sampled_req_s2xlate | 避免 NBA 或后续 delta 重新读取 live VIF |
 
 ## 3. 启动、配置和上下文
@@ -210,7 +210,7 @@ if (next_ready)
 等待 NBA，使 CSR/fence monitor 完成本边界发布；
 读取 flush latest；
 reset/backend 未就绪时取消所有 outstanding、对齐 flush baseline、发送 inactive 并返回；
-正常状态先检查 event_seq 不倒退，ready 曾开放后迟到或未来 event 在状态变更前 fatal；
+正常状态先检查 event_seq 不倒退，ready 曾开放后迟到或未来 event 在状态变更前 fatal；owner 首次开放 ready 前检查 transport、pending、barrier 和 WAITING UID 为空；
 确认上一拍 driving response；
 读取并幂等应用 runtime CSR latest；
 处理新 flush event 和同拍被 kill 的 fire；
@@ -439,6 +439,8 @@ check_l2tlb_lifecycle_accounting("response_complete");
 倒序扫描 pending_q，删除 accept_flush_event_seq < event_seq 的 record；
 删除数加入 flush_canceled_count；
 更新 last_seen_flush_event_seq；
+若 event 属于 owner 启动前已存在的历史 event：只更新
+pre_ready_hold_until_sample，不调用 active flush handler，不建立 barrier 或取消 token/UID；
 accept_hold_until_sample = sample_seq + MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES；
 清ready_opportunity_since_lifecycle_block，hold解除后必须先重新发送一拍ready；
 若 ready 曾开放、event_time 等于当前 $time 且 request_fire 为 1：

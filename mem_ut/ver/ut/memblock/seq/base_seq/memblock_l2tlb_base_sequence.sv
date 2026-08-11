@@ -120,7 +120,11 @@ class memblock_l2tlb_base_sequence extends L2tlb_agent_agent_default_sequence;
     longint unsigned sample_seq;
     longint unsigned last_seen_flush_event_seq;
     longint unsigned accept_hold_until_sample;
+    // 启动期历史 event 的保守等待，不代表运行期 C0/C4 barrier。
+    longint unsigned pre_ready_hold_until_sample;
     bit acceptance_opened_since_reset;
+    // 首次向 DUT 开放 ready 前，启动 transport/semantic 空状态已验证。
+    bit owner_start_baseline_done;
     // 中文注释：reset或flush hold解除后，必须至少发出一拍可接受ready，
     // 才允许no-progress诊断重新计数；该标志与reset freshness独立维护。
     bit ready_opportunity_since_lifecycle_block;
@@ -135,7 +139,6 @@ class memblock_l2tlb_base_sequence extends L2tlb_agent_agent_default_sequence;
     bit release_close_requested;
     longint unsigned release_generation;
     bit final_item_sent;
-    bit baseline_pending;
     longint unsigned baseline_sent_sample_seq;
     // 中文注释：进入每个service tick时立即锁存的真实request握手字段。
     // 后续NBA等待和queue处理只读该快照，不重新读取live VIF。
@@ -357,11 +360,13 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
     memblock_sync_pkg::dispatch_raw_csr_t request_csr_raw;
     int unsigned latest_runtime_csr_seq;
     int unsigned release_waiting_count;
+    bit startup_history_seen;
 
     has_progress = 1'b0;
     should_exit = 1'b0;
     terminal_kind = memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_CONSUMED;
     release_waiting_count = 0;
+    startup_history_seen = 1'b0;
     sample_seq = sample.dut_sample_seq;
     current_sample_reset_epoch = sample.sampled_reset_epoch;
     sampled_req_valid = sample.sampled_req_valid;
@@ -410,8 +415,9 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
         end else begin
             reset_runtime_csr_seq_baseline = 0;
         end
-        baseline_pending = 1'b0;
         baseline_sent_sample_seq = 0;
+        pre_ready_hold_until_sample = 0;
+        owner_start_baseline_done = 1'b0;
         release_close_requested = 1'b0;
         release_generation = 0;
         final_item_sent = 1'b0;
@@ -558,6 +564,22 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
         return;
     end
 
+    // Establish the owner-start baseline before interpreting old history.
+    // Startup alignment must not silently inherit transport or semantic work
+    // from a previous owner/reset epoch.
+    if (!owner_start_baseline_done && !acceptance_opened_since_reset) begin
+        data.check_l2tlb_release_uid_waiting(release_waiting_count);
+        if (sampled_req_fire || sampled_resp_valid ||
+            pending_q.size() != 0 || driving_valid || barrier_q.size() != 0 ||
+            release_waiting_count != 0) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("L2TLB owner startup baseline is not empty sample=%0d req_fire=%0d resp_valid=%0d pending=%0d driving=%0d barriers=%0d waiting_uid=%0d",
+                                 sample_seq, sampled_req_fire, sampled_resp_valid,
+                                 pending_q.size(), driving_valid, barrier_q.size(),
+                                 release_waiting_count))
+        end
+    end
+
     // Consume immutable event records by sequence. C0 records a barrier;
     // an older event may only be skipped during pre-ready startup.
     fire_visible_event_seq = last_seen_flush_event_seq;
@@ -579,9 +601,12 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
                                      event_record.anchor_sample_seq,
                                      sample_seq))
             end
-            accept_hold_until_sample =
-                sample_seq + MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES;
-            ready_opportunity_since_lifecycle_block = 1'b0;
+            pre_ready_hold_until_sample =
+                (pre_ready_hold_until_sample >
+                 sample_seq + MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES) ?
+                    pre_ready_hold_until_sample :
+                    sample_seq + MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES;
+            startup_history_seen = 1'b1;
             has_progress = 1'b1;
             continue;
         end
@@ -592,6 +617,11 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
         memblock_sync_pkg::response_owner_event_cursor) begin
         memblock_sync_pkg::retire_l2tlb_event_history_prefix(
             last_seen_flush_event_seq);
+    end
+
+    if (startup_history_seen) begin
+        owner_start_baseline_done = 1'b1;
+        ready_opportunity_since_lifecycle_block = 1'b0;
     end
 
     due_barrier_this_sample =
@@ -648,7 +678,8 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
             lifecycle_owner_name, sample_seq);
     end
 
-    hold_active = sample_seq < accept_hold_until_sample;
+    hold_active = (sample_seq < accept_hold_until_sample) ||
+                  (sample_seq < pre_ready_hold_until_sample);
     lifecycle_blocked = !csr_snapshot_valid ||
                         !request_csr_history_valid || hold_active;
     if (has_progress || lifecycle_blocked || stopping ||
@@ -715,6 +746,19 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
                  csr_snapshot_valid && request_csr_history_valid &&
                  !hold_active &&
                  outstanding_count() < max_outstanding;
+    if (next_ready && !owner_start_baseline_done) begin
+        data.check_l2tlb_release_uid_waiting(release_waiting_count);
+        if (sampled_req_fire || sampled_resp_valid ||
+            pending_q.size() != 0 || driving_valid || barrier_q.size() != 0 ||
+            release_waiting_count != 0) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("L2TLB owner startup baseline is not empty sample=%0d req_fire=%0d resp_valid=%0d pending=%0d driving=%0d barriers=%0d waiting_uid=%0d",
+                                 sample_seq, sampled_req_fire, sampled_resp_valid,
+                                 pending_q.size(), driving_valid, barrier_q.size(),
+                                 release_waiting_count))
+        end
+        owner_start_baseline_done = 1'b1;
+    end
     cycle_tr.io_ptw_req_0_ready = next_ready;
     cycle_tr.pre_pkt_gap = 0;
     cycle_tr.post_pkt_gap = 0;
@@ -819,8 +863,9 @@ function void memblock_l2tlb_base_sequence::initialize_lifecycle_state();
     release_close_requested = 1'b0;
     release_generation = 0;
     final_item_sent = 1'b0;
-    baseline_pending = 1'b0;
     baseline_sent_sample_seq = 0;
+    pre_ready_hold_until_sample = 0;
+    owner_start_baseline_done = 1'b0;
 endfunction:initialize_lifecycle_state
 
 task memblock_l2tlb_base_sequence::wait_for_l2tlb_transport_sample(
