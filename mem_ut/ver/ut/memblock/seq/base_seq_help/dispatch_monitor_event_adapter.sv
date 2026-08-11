@@ -695,6 +695,7 @@ class dispatch_monitor_event_adapter extends uvm_object;
         wb_event.redirect.valid         = 1'b1;
         wb_event.redirect.flush_itself  = raw.memory_violation_level;
         wb_event.redirect.level         = raw.memory_violation_level;
+        wb_event.redirect.is_vls_exception = 1'b0;
         wb_event.has_rob                = raw_rob_to_key(raw.memory_violation_rob_valid,
                                                          raw.memory_violation_rob_flag,
                                                          raw.memory_violation_rob_value,

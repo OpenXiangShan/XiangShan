@@ -84,6 +84,7 @@ endtask:main_phase
 task redirect_agent_agent_driver::send_pkt(redirect_agent_agent_xaction tr);
     vif.drv_mp.drv_cb.io_redirect_valid <= tr.io_redirect_valid;
     vif.drv_mp.drv_cb.io_redirect_bits_level <= tr.io_redirect_bits_level;
+    vif.drv_mp.drv_cb.io_redirect_bits_isVlsException <= tr.io_redirect_bits_isVlsException;
     vif.drv_mp.drv_cb.io_redirect_bits_robIdx_flag <= tr.io_redirect_bits_robIdx_flag;
     vif.drv_mp.drv_cb.io_redirect_bits_robIdx_value <= tr.io_redirect_bits_robIdx_value;
 
@@ -94,6 +95,7 @@ task redirect_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode)
     if(drv_mode==tcnt_dec_base::DRV_0) begin
         vif.drv_mp.drv_cb.io_redirect_valid <= '0;
         vif.drv_mp.drv_cb.io_redirect_bits_level <= '0;
+        vif.drv_mp.drv_cb.io_redirect_bits_isVlsException <= '0;
         vif.drv_mp.drv_cb.io_redirect_bits_robIdx_flag <= '0;
         vif.drv_mp.drv_cb.io_redirect_bits_robIdx_value <= '0;
 
@@ -101,6 +103,7 @@ task redirect_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode)
     else if(drv_mode==tcnt_dec_base::DRV_1) begin
         vif.drv_mp.drv_cb.io_redirect_valid <= '1;
         vif.drv_mp.drv_cb.io_redirect_bits_level <= '1;
+        vif.drv_mp.drv_cb.io_redirect_bits_isVlsException <= '1;
         vif.drv_mp.drv_cb.io_redirect_bits_robIdx_flag <= '1;
         vif.drv_mp.drv_cb.io_redirect_bits_robIdx_value <= '1;
 
@@ -108,6 +111,7 @@ task redirect_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode)
     else if(drv_mode==tcnt_dec_base::DRV_X) begin
         vif.drv_mp.drv_cb.io_redirect_valid <= 'x;
         vif.drv_mp.drv_cb.io_redirect_bits_level <= 'x;
+        vif.drv_mp.drv_cb.io_redirect_bits_isVlsException <= 'x;
         vif.drv_mp.drv_cb.io_redirect_bits_robIdx_flag <= 'x;
         vif.drv_mp.drv_cb.io_redirect_bits_robIdx_value <= 'x;
 
@@ -115,6 +119,7 @@ task redirect_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode)
     else if(drv_mode==tcnt_dec_base::DRV_RAND) begin
         vif.drv_mp.drv_cb.io_redirect_valid <= $urandom;
         vif.drv_mp.drv_cb.io_redirect_bits_level <= $urandom;
+        vif.drv_mp.drv_cb.io_redirect_bits_isVlsException <= $urandom;
         vif.drv_mp.drv_cb.io_redirect_bits_robIdx_flag <= $urandom;
         vif.drv_mp.drv_cb.io_redirect_bits_robIdx_value <= $urandom;
 
@@ -122,6 +127,7 @@ task redirect_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode)
     else if(drv_mode==tcnt_dec_base::DRV_LST) begin
         vif.drv_mp.drv_cb.io_redirect_valid <= '0;
         vif.drv_mp.drv_cb.io_redirect_bits_level <= '0;
+        vif.drv_mp.drv_cb.io_redirect_bits_isVlsException <= '0;
         vif.drv_mp.drv_cb.io_redirect_bits_robIdx_flag <= '0;
         vif.drv_mp.drv_cb.io_redirect_bits_robIdx_value <= '0;
 

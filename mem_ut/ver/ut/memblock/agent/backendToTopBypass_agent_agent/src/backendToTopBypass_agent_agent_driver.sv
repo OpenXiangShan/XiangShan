@@ -85,6 +85,7 @@ task backendToTopBypass_agent_agent_driver::send_pkt(backendToTopBypass_agent_ag
     vif.drv_mp.drv_cb.io_ooo_to_mem_backendToTopBypass_cpuCriticalError <= tr.io_ooo_to_mem_backendToTopBypass_cpuCriticalError;
 
     vif.drv_mp.drv_cb.io_ooo_to_mem_backendToTopBypass_cpuHalted <= tr.io_ooo_to_mem_backendToTopBypass_cpuHalted;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_backendToTopBypass_msiAck <= tr.io_ooo_to_mem_backendToTopBypass_msiAck;
 
 endtask:send_pkt
 
@@ -93,22 +94,27 @@ task backendToTopBypass_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e
     if(drv_mode==tcnt_dec_base::DRV_0) begin
         vif.drv_mp.drv_cb.io_ooo_to_mem_backendToTopBypass_cpuHalted <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_backendToTopBypass_cpuCriticalError <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_backendToTopBypass_msiAck <= '0;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_1) begin
         vif.drv_mp.drv_cb.io_ooo_to_mem_backendToTopBypass_cpuCriticalError <= '1;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_backendToTopBypass_msiAck <= '1;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_X) begin
         vif.drv_mp.drv_cb.io_ooo_to_mem_backendToTopBypass_cpuCriticalError <= 'x;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_backendToTopBypass_msiAck <= 'x;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_RAND) begin
         vif.drv_mp.drv_cb.io_ooo_to_mem_backendToTopBypass_cpuCriticalError <= $urandom;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_backendToTopBypass_msiAck <= $urandom;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_LST) begin
         vif.drv_mp.drv_cb.io_ooo_to_mem_backendToTopBypass_cpuCriticalError <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_backendToTopBypass_msiAck <= '0;
 
     end
 

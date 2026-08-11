@@ -111,7 +111,8 @@ class dispatch_monitor_batch_handler extends uvm_object;
                lhs.rob_key.flag == rhs.rob_key.flag &&
                lhs.rob_key.value == rhs.rob_key.value &&
                lhs.redirect.flush_itself == rhs.redirect.flush_itself &&
-               lhs.redirect.level == rhs.redirect.level;
+               lhs.redirect.level == rhs.redirect.level &&
+               lhs.redirect.is_vls_exception == rhs.redirect.is_vls_exception;
     endfunction:same_redirect_event
 
     function bit normalize_event_batch(input memblock_wb_event_t events[$],

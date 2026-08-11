@@ -135,6 +135,7 @@ function void memblock_redirect_dispatch_base_sequence::clear_redirect_xaction(i
     end
     tr.io_redirect_valid = 1'b0;
     tr.io_redirect_bits_level = 1'b0;
+    tr.io_redirect_bits_isVlsException = 1'b0;
     tr.io_redirect_bits_robIdx_flag = 1'b0;
     tr.io_redirect_bits_robIdx_value = '0;
 endfunction:clear_redirect_xaction
@@ -144,6 +145,7 @@ function void memblock_redirect_dispatch_base_sequence::assign_redirect_xaction(
     clear_redirect_xaction(tr);
     tr.io_redirect_valid = 1'b1;
     tr.io_redirect_bits_level = payload.level;
+    tr.io_redirect_bits_isVlsException = payload.is_vls_exception;
     tr.io_redirect_bits_robIdx_flag = payload.rob_key.flag;
     tr.io_redirect_bits_robIdx_value = payload.rob_key.value;
 endfunction:assign_redirect_xaction

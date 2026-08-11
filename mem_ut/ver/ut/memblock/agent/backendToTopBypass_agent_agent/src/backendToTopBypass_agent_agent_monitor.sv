@@ -36,20 +36,24 @@ task backendToTopBypass_agent_agent_monitor::mon_data();
     logic io_ooo_to_mem_backendToTopBypass_cpuCriticalError;
 
     logic io_ooo_to_mem_backendToTopBypass_cpuHalted;
+    logic io_ooo_to_mem_backendToTopBypass_msiAck;
     backendToTopBypass_agent_agent_xaction  mon_tr;
     while(1) begin
         @this.vif.mon_mp.mon_cb;
         io_ooo_to_mem_backendToTopBypass_cpuCriticalError = this.vif.mon_mp.mon_cb.io_ooo_to_mem_backendToTopBypass_cpuCriticalError;
 
         io_ooo_to_mem_backendToTopBypass_cpuHalted = this.vif.mon_mp.mon_cb.io_ooo_to_mem_backendToTopBypass_cpuHalted;
+        io_ooo_to_mem_backendToTopBypass_msiAck = this.vif.mon_mp.mon_cb.io_ooo_to_mem_backendToTopBypass_msiAck;
 
         if(this.cfg.xz_sw==tcnt_dec_base::ON && this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_backendToTopBypass_cpuCriticalError,io_ooo_to_mem_backendToTopBypass_cpuCriticalError,1);
+            `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_backendToTopBypass_msiAck,io_ooo_to_mem_backendToTopBypass_msiAck,1);
 
         end
         //if(xxxTODOxxx==1'b1) begin
         //    mon_tr = backendToTopBypass_agent_agent_xaction::type_id::create("mon_tr");
         //    mon_tr.io_ooo_to_mem_backendToTopBypass_cpuCriticalError = io_ooo_to_mem_backendToTopBypass_cpuCriticalError;
+        //    mon_tr.io_ooo_to_mem_backendToTopBypass_msiAck = io_ooo_to_mem_backendToTopBypass_msiAck;
 
         //    mon_tr.channel_id = this.cfg.channel_id;
         //    mon_tr.unpack();

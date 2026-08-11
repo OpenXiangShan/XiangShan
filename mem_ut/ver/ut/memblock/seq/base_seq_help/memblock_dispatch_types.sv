@@ -256,9 +256,19 @@ typedef bit [MEMBLOCK_SQ_VALUE_W:0]  memblock_sq_map_key_t;
 typedef struct packed {
     bit                valid;
     bit                flush_itself;
+    // level 保留顶层 redirect 原始输入。模型需要 VLS 覆盖后的有效 level 时，
+    // 必须调用下方 helper；is_vls_exception=1 时生成 RTL 将有效 level 压为 0。
     bit                level;
+    bit                is_vls_exception;
     memblock_rob_key_t rob_key;
 } memblock_redirect_payload_t;
+
+function automatic bit memblock_redirect_effective_level(
+    input memblock_redirect_payload_t redirect
+);
+    // VLS exception 的 level 覆盖只影响语义投影，不改写原始顶层输入记录。
+    return redirect.is_vls_exception ? 1'b0 : redirect.level;
+endfunction
 
 typedef enum int unsigned {
     MEMBLOCK_REDIRECT_PHASE_IDLE                = 0,

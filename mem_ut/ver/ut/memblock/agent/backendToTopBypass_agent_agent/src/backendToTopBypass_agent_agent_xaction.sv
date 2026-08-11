@@ -14,6 +14,9 @@ class backendToTopBypass_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_ooo_to_mem_backendToTopBypass_cpuCriticalError;
 
     rand bit io_ooo_to_mem_backendToTopBypass_cpuHalted;
+    // msiAck 是 backend 输入脉冲；该字段不参与随机化且默认值为 0，
+    // 保持默认 sequence 的空闲低电平，定向场景可显式置位。
+    bit io_ooo_to_mem_backendToTopBypass_msiAck;
     extern constraint default_io_ooo_to_mem_backendToTopBypass_cpuCriticalError_cons;
 
     extern function new(string name="backendToTopBypass_agent_agent_xaction");
@@ -28,6 +31,7 @@ class backendToTopBypass_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_ooo_to_mem_backendToTopBypass_cpuCriticalError, UVM_ALL_ON);
 
         `uvm_field_int(io_ooo_to_mem_backendToTopBypass_cpuHalted, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_backendToTopBypass_msiAck, UVM_ALL_ON);
     `uvm_object_utils_end
 
 endclass:backendToTopBypass_agent_agent_xaction
@@ -65,6 +69,7 @@ function string backendToTopBypass_agent_agent_xaction::psdisplay(string prefix 
     //    pkt_str = $sformatf("%spload_q[%0d]=0x%2h  ",pkt_str,i,this.pload_q[i]);
     //end
     pkt_str = $sformatf("%sio_ooo_to_mem_backendToTopBypass_cpuCriticalError = 0x%0h ",pkt_str,this.io_ooo_to_mem_backendToTopBypass_cpuCriticalError);
+    pkt_str = $sformatf("%sio_ooo_to_mem_backendToTopBypass_msiAck = 0x%0h ",pkt_str,this.io_ooo_to_mem_backendToTopBypass_msiAck);
 
     return pkt_str;
 endfunction:psdisplay
@@ -89,6 +94,11 @@ function bit backendToTopBypass_agent_agent_xaction::compare(uvm_object rhs, uvm
         if(this.io_ooo_to_mem_backendToTopBypass_cpuCriticalError!=rhs_.io_ooo_to_mem_backendToTopBypass_cpuCriticalError) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_backendToTopBypass_cpuCriticalError=0x%0h while the rhs_.io_ooo_to_mem_backendToTopBypass_cpuCriticalError=0x%0h",this.io_ooo_to_mem_backendToTopBypass_cpuCriticalError,rhs_.io_ooo_to_mem_backendToTopBypass_cpuCriticalError),UVM_NONE)
+        end
+
+        if(this.io_ooo_to_mem_backendToTopBypass_msiAck!=rhs_.io_ooo_to_mem_backendToTopBypass_msiAck) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_backendToTopBypass_msiAck=0x%0h while the rhs_.io_ooo_to_mem_backendToTopBypass_msiAck=0x%0h",this.io_ooo_to_mem_backendToTopBypass_msiAck,rhs_.io_ooo_to_mem_backendToTopBypass_msiAck),UVM_NONE)
         end
 
 

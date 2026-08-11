@@ -25,6 +25,7 @@
         force U_IF_NAME.io_outer_l2_flush_en = RTL_PATH.io_outer_l2_flush_en; \
         force U_IF_NAME.io_outer_power_down_en = RTL_PATH.io_outer_power_down_en; \
         force U_IF_NAME.io_outer_cpu_critical_error = RTL_PATH.io_outer_cpu_critical_error; \
+        force U_IF_NAME.io_outer_msi_ack = RTL_PATH.io_outer_msi_ack; \
         force RTL_PATH.io_inner_beu_errors_icache_ecc_error_valid = U_IF_NAME.io_inner_beu_errors_icache_ecc_error_valid; \
         force RTL_PATH.io_inner_beu_errors_icache_ecc_error_bits = U_IF_NAME.io_inner_beu_errors_icache_ecc_error_bits; \
         force U_IF_NAME.io_outer_beu_errors_icache_ecc_error_valid = RTL_PATH.io_outer_beu_errors_icache_ecc_error_valid; \
@@ -44,6 +45,7 @@
         force U_IF_NAME.io_outer_l2_flush_en = RTL_PATH.io_outer_l2_flush_en; \
         force U_IF_NAME.io_outer_power_down_en = RTL_PATH.io_outer_power_down_en; \
         force U_IF_NAME.io_outer_cpu_critical_error = RTL_PATH.io_outer_cpu_critical_error; \
+        force U_IF_NAME.io_outer_msi_ack = RTL_PATH.io_outer_msi_ack; \
         force U_IF_NAME.io_inner_beu_errors_icache_ecc_error_valid = RTL_PATH.io_inner_beu_errors_icache_ecc_error_valid; \
         force U_IF_NAME.io_inner_beu_errors_icache_ecc_error_bits = RTL_PATH.io_inner_beu_errors_icache_ecc_error_bits; \
         force U_IF_NAME.io_outer_beu_errors_icache_ecc_error_valid = RTL_PATH.io_outer_beu_errors_icache_ecc_error_valid; \

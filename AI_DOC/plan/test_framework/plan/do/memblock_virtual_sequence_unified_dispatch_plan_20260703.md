@@ -996,3 +996,25 @@ mem_ut/scr/verif/project_cfg_xrun.mk
 mem_ut/ver/ut/memblock/sim/Makefile
 mem_ut/ver/ut/memblock/sim/remote_eda_make.sh
 ```
+
+### 13.5 20260811 V2 redirect VLS 与 MSI 控制端口接口兼容
+
+[IMPLEMENTATION_DELTA]
+
+该补充已经随最新 V2 `build/rtl/MemBlock.sv` 的端口适配落地，用于约束本 plan 中由
+`memblock_dispatch_real_smoke_vseq` 启动的 redirect sequence 与相关 agent 的实际接口语义。
+
+已落地行为：
+
+1. `io_redirect_bits_isVlsException` 是 `redirect_agent` 驱动的 DUT input。redirect payload
+   保留 raw `level` 并新增 `is_vls_exception`；`is_vls_exception=1` 时语义层 effective level 为 0。
+2. `rob_order_util::rob_need_flush()` 使用上述 effective 语义判断同 ROB：VLS 时 raw
+   `flush_itself` 不取消同一 ROB；更年轻 ROB 仍使用原有 `rob_is_after()` 判断。
+3. 默认 redirect item、现有 directed sequence 和 memoryViolation 生成路径均显式设置
+   `is_vls_exception=0`，所以本 plan 原有的非 VLS dispatch/cancel/recovery 基础行为不变。
+4. `io_ooo_to_mem_backendToTopBypass_msiAck` 是 `backendToTopBypass_agent` 驱动的 DUT input；
+   `io_outer_msi_ack` 是 `other_ctrl_agent` 只读采样的 DUT output。后者不由 virtual sequence、
+   backend agent 或任何 driver 反向驱动。
+
+该接口兼容只补齐 vseq 所调度 agent 的 payload/连接/状态语义，不增加新的 virtual sequence、
+RM/checker 或 coverage 流程。

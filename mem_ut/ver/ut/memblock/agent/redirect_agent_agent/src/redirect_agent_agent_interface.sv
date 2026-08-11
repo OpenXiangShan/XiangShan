@@ -21,6 +21,7 @@ interface redirect_agent_agent_interface  (input bit clk,input bit rst_n);
 
     logic io_redirect_valid            ;
     logic io_redirect_bits_level       ;
+    logic io_redirect_bits_isVlsException;
     logic io_redirect_bits_robIdx_flag ;
     logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_redirect_bits_robIdx_value;
 
@@ -30,6 +31,7 @@ interface redirect_agent_agent_interface  (input bit clk,input bit rst_n);
         `endif
         output io_redirect_valid;
         output io_redirect_bits_level;
+        output io_redirect_bits_isVlsException;
         output io_redirect_bits_robIdx_flag;
         output io_redirect_bits_robIdx_value;
 
@@ -41,6 +43,7 @@ interface redirect_agent_agent_interface  (input bit clk,input bit rst_n);
         `endif
         input  io_redirect_valid;
         input  io_redirect_bits_level;
+        input  io_redirect_bits_isVlsException;
         input  io_redirect_bits_robIdx_flag;
         input  io_redirect_bits_robIdx_value;
 
