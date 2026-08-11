@@ -26,7 +26,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput, UopIdx, EnqRobUop}
+import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
@@ -92,8 +92,16 @@ object RobBundles extends HasCircularQueuePtrHelper {
     // debug_end
     // topdown
     val topdownIssued    = OptionWrapper(backendParams.debugEn, Bool())
+    val topdownCanceled  = OptionWrapper(backendParams.debugEn, Bool())
+    val topdownRobHead   = OptionWrapper(backendParams.debugEn, Bool())
+    val topdownIdealIssue  = OptionWrapper(backendParams.debugEn, Bool())
     val topdownIssueTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
-
+    val topdownLastIssueTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
+    val topdownRobHeadTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
+    val topdownIdealIssueTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
+    val topdownCancelSource = OptionWrapper(backendParams.debugEn, IQCancelSource())
+    val topdownCancelTimeVec = OptionWrapper(backendParams.debugEn, Vec(IQCancelSource.num, UInt(XLEN.W)))
+    val topdownCancelTimeFixVec = OptionWrapper(backendParams.debugEn, Vec(IQCancelSource.num, UInt(XLEN.W)))
     def isWritebacked: Bool = !uopNum.orR
     def isUopWritebacked: Bool = !uopNum.orR
 
@@ -168,7 +176,16 @@ object RobBundles extends HasCircularQueuePtrHelper {
       robEntry.debug_sim_trig.foreach(_ := debug.debug_sim_trig)
     }
     robEntry.topdownIssued.foreach(_ := false.B)
+    robEntry.topdownCanceled.foreach(_ := false.B)
+    robEntry.topdownRobHead.foreach(_ := false.B)
+    robEntry.topdownIdealIssue.foreach(_ := false.B)
     robEntry.topdownIssueTime.foreach(_ := 0.U)
+    robEntry.topdownLastIssueTime.foreach(_ := 0.U)
+    robEntry.topdownRobHeadTime.foreach(_ := 0.U)
+    robEntry.topdownIdealIssueTime.foreach(_ := 0.U)
+    robEntry.topdownCancelSource.foreach(_ := IQCancelSource.none)
+    robEntry.topdownCancelTimeVec.foreach(_.foreach(_ := 0.U))
+    robEntry.topdownCancelTimeFixVec.foreach(_.foreach(_ := 0.U))
   }
 
   def connectCommitEntry(robCommitEntry: RobCommitEntryBundle, robEntry: RobEntryBundle): Unit = {

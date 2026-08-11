@@ -52,7 +52,7 @@ optional arguments:
 # python top_down.py -b <...>/base_perf_report -r <...>/ref_perf_report -j <...>/checkpoint.json --base-issue 6 --ref-issue 8 --base-label Base --ref-label Feature1
 ```
 
-脚本运行结束后，会生成 `results` 目录：
+默认配置下，脚本运行结束后会生成 `results` 目录：
 
 ```shell
 # tree results
@@ -60,30 +60,36 @@ results
 ├── result_backend.png
 ├── result_custom.png
 ├── result_frontend.png
+├── result_intel_topdown.png
 ├── result_mem.png
+├── result_robhead.png
 ├── results_base.csv
 ├── results_ref.csv
 ├── results-weighted_base.csv
 ├── results-weighted_ref.csv
 └── result_total.png
 
-0 directories, 9 files
+0 directories, 11 files
 ```
 
 其中：
 
 - `result_total.png` 为 Top-down 总体粗粒度聚合堆叠条形图，用于展示各 benchmark 在整体视角下的瓶颈构成。
 - `result_frontend.png`、`result_backend.png`、`result_mem.png` 和 `result_custom.png` 分别对前端、后端、访存及自定义子维度进行进一步拆分，便于从特定维度开展更细粒度的瓶颈分析。
+- `result_intel_topdown.png` 为类似 Intel Top-down 口径的派生分析图，将执行槽位拆分为 `Base`、`FetchLatencyBound`、`FetchBandwidthBound`、`BadSpec`、`CoreBound`、`L1Bound`、`L2Bound`、`L3Bound`、`MemBound` 和 `StoreBound`。
+- `result_robhead.png` 为 ROB 头部等待原因分析图，将 `wait*Cycle` 计数器归一化拆分为 `mul`、`ldu`、`stu`、`fma`、`fdivsqrt` 和 `other`。
 - `results_base.csv` 与 `results_ref.csv` 保存原始统计结果，按采样点记录各 Top-down 计数器数值。
 - `results-weighted_base.csv` 与 `results-weighted_ref.csv` 则基于原始统计结果，结合各采样点对应权重完成加权汇总，可用于人工检查、后续分析或重新绘图。
 
-### config.py 使用方法
+### configs.py 使用方法
 
 `configs.py` 是 Top-down 分析工具的配置文件，主要可配置项包括：
 
 - **自定义子维度**：用户可在 `configs.py` 中修改 `xs_custom_rename_map`，以将部分阻塞归因重新聚类并生成对应图表。具体格式可参考其他子维度的重命名映射，例如 `xs_frontend_rename_map`。
 - **benchmark_list**：用户可通过配置 `benchmark_list` 选择部分 checkpoint 子项进行单独绘图分析；若未额外指定，则默认对全部 checkpoint 作图。`INT_ONLY` 和 `FP_ONLY` 可用于快速筛选仅整数或仅浮点 benchmark。
 - **xx_ANALYSE**：用户可通过配置此类选项，关闭部分子维度的绘图分析。
+- **INTEL_TOPDOWN_ANALYSE**：打开后额外生成 `result_intel_topdown.png`。该分析依赖 `targets` 中的 `if_fetch_bubble`、`if_fetch_bubble_eq_max`、`inst_spec`、`recovery_bubble`、`mem_stall_anyload`、`mem_stall_store`、`mem_stall_l1miss`、`mem_stall_l2miss`、`mem_stall_l3miss` 和 `total_cycles` 等计数器，并需要正确的 issue width。
+- **ROBHEAD_ANALYSE**：打开后额外生成 `result_robhead.png`。该分析依赖 `targets` 中的 `waitAluCycle`、`waitMulCycle`、`waitDivCycle`、`waitBrhCycle`、`waitJmpCycle`、`waitCsrCycle`、`waitFenCycle`、`waitBkuCycle`、`waitLduCycle`、`waitStuCycle`、`waitAtmCycle`、`waitfaluCycle`、`waitfmacCycle`、`waitfcvtCycle`、`waitfDivSqrtCycle` 和 `waitfcmpCycle` 等 ROB 头部等待周期计数器。
 
 ### draw.py 使用方法
 
@@ -103,6 +109,8 @@ options:
                         base label (default: BASE)
   --ref-label REF_LABEL
                         ref label (default: REF)
+  --issue-width ISSUE_WIDTH
+                        issue width for intel topdown analyse (default: 8)
 ```
 
 使用示例如下：
@@ -110,7 +118,10 @@ options:
 ```shell
 # python3 draw.py --base-label Base --ref-label Feature1
 # python3 draw.py -b <...>/xxxresults-weighted_base.csv -r <...>/xxxresults-weighted_ref.csv --base-label Base --ref-label Feature1
+# python3 draw.py -b results/results-weighted_base.csv --base-label Base --issue-width 8
 ```
+
+`draw.py` 会根据 `configs.py` 中开启的 `TOTAL_ANALYSE`、`BACKEND_ANALYSE`、`FRONTEND_ANALYSE`、`MEM_ANALYSE`、`CUSTOM_ANALYSE`、`INTEL_TOPDOWN_ANALYSE` 和 `ROBHEAD_ANALYSE` 依次生成对应图表。直接运行 `top_down.py` 时，绘图阶段的 issue width 会由 `--base-issue`、`--ref-issue` 推导；单独运行 `draw.py` 重新绘图时，需要通过 `--issue-width` 指定 Intel Top-down 分析使用的 issue width，默认值为 8。
 
 ---
 
@@ -168,7 +179,7 @@ Example commands:
 # python top_down.py -b <...>/base_perf_report -r <...>/ref_perf_report -j <...>/checkpoint.json --base-issue 6 --ref-issue 8 --base-label Base --ref-label Feature1
 ```
 
-After execution, a `results` directory will be generated:
+With the default configuration, a `results` directory will be generated after execution:
 
 ```shell
 # tree results
@@ -176,20 +187,24 @@ results
 ├── result_backend.png
 ├── result_custom.png
 ├── result_frontend.png
+├── result_intel_topdown.png
 ├── result_mem.png
+├── result_robhead.png
 ├── results_base.csv
 ├── results_ref.csv
 ├── results-weighted_base.csv
 ├── results-weighted_ref.csv
 └── result_total.png
 
-0 directories, 9 files
+0 directories, 11 files
 ```
 
 Among them:
 
 - `result_total.png` is the coarse-grained stacked bar chart for overall Top-down analysis, showing the bottleneck composition of each benchmark from a global perspective.
 - `result_frontend.png`, `result_backend.png`, `result_mem.png`, and `result_custom.png` further break down the frontend, backend, memory, and custom sub-dimensions, respectively, making it easier to perform fine-grained bottleneck analysis from specific viewpoints.
+- `result_intel_topdown.png` is a derived Intel-like Top-down view. It partitions execution slots into `Base`, `FetchLatencyBound`, `FetchBandwidthBound`, `BadSpec`, `CoreBound`, `L1Bound`, `L2Bound`, `L3Bound`, `MemBound`, and `StoreBound`.
+- `result_robhead.png` is a ROB-head wait reason view. It normalizes `wait*Cycle` counters into `mul`, `ldu`, `stu`, `fma`, `fdivsqrt`, and `other`.
 - `results_base.csv` and `results_ref.csv` store the raw statistical results, recording the values of each Top-down counter at each sampling point.
 - `results-weighted_base.csv` and `results-weighted_ref.csv` provide weighted summaries based on the raw results and the corresponding weights of sampling points, and can be used for manual inspection, further analysis, or redrawing figures.
 
@@ -200,6 +215,8 @@ Among them:
 - **Custom sub-dimensions**: Users can modify `xs_custom_rename_map` in `configs.py` to regroup selected stall attributions and generate customized plots. The format can refer to the rename maps of other sub-dimensions, such as `xs_frontend_rename_map`.
 - **benchmark_list**: Users can configure `benchmark_list` to select a subset of checkpoints for standalone plotting and analysis. If not specified, all checkpoints will be plotted by default. `INT_ONLY` and `FP_ONLY` can be used to quickly generate plots for integer-only or floating-point-only benchmarks.
 - **xx_ANALYSE**: Users can disable plotting for selected sub-dimensions through this type of option.
+- **INTEL_TOPDOWN_ANALYSE**: When enabled, the tool additionally generates `result_intel_topdown.png`. This analysis depends on counters in `targets`, including `if_fetch_bubble`, `if_fetch_bubble_eq_max`, `inst_spec`, `recovery_bubble`, `mem_stall_anyload`, `mem_stall_store`, `mem_stall_l1miss`, `mem_stall_l2miss`, `mem_stall_l3miss`, and `total_cycles`, and requires the correct issue width.
+- **ROBHEAD_ANALYSE**: When enabled, the tool additionally generates `result_robhead.png`. This analysis depends on ROB-head wait cycle counters in `targets`, including `waitAluCycle`, `waitMulCycle`, `waitDivCycle`, `waitBrhCycle`, `waitJmpCycle`, `waitCsrCycle`, `waitFenCycle`, `waitBkuCycle`, `waitLduCycle`, `waitStuCycle`, `waitAtmCycle`, `waitfaluCycle`, `waitfmacCycle`, `waitfcvtCycle`, `waitfDivSqrtCycle`, and `waitfcmpCycle`.
 
 ### How to use draw.py
 
@@ -219,6 +236,8 @@ options:
                         base label (default: BASE)
   --ref-label REF_LABEL
                         ref label (default: REF)
+  --issue-width ISSUE_WIDTH
+                        issue width for intel topdown analyse (default: 8)
 ```
 
 Example commands:
@@ -226,4 +245,7 @@ Example commands:
 ```shell
 # python3 draw.py --base-label Base --ref-label Feature1
 # python3 draw.py -b <...>/xxxresults-weighted_base.csv -r <...>/xxxresults-weighted_ref.csv --base-label Base --ref-label Feature1
+# python3 draw.py -b results/results-weighted_base.csv --base-label Base --issue-width 8
 ```
+
+`draw.py` generates the enabled figures according to `TOTAL_ANALYSE`, `BACKEND_ANALYSE`, `FRONTEND_ANALYSE`, `MEM_ANALYSE`, `CUSTOM_ANALYSE`, `INTEL_TOPDOWN_ANALYSE`, and `ROBHEAD_ANALYSE` in `configs.py`. When running `top_down.py` directly, the issue width used by the plotting stage is inferred from `--base-issue` and `--ref-issue`. When rerunning `draw.py` standalone, use `--issue-width` to specify the issue width for Intel Top-down analysis. The default value is 8.

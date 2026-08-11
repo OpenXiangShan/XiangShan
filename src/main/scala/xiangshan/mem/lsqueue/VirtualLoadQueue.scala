@@ -55,8 +55,6 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     // tolsqEnqCtrl
     val lqRedirect  = ValidIO(new LqPtr)
     val lqRecoverStall = Output(Bool())
-    // for topdown
-    val noUopsIssued = Input(Bool())
   })
 
   println("VirtualLoadQueue: size: " + VirtualLoadQueueSize)
@@ -287,17 +285,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   QueuePerf(VirtualLoadQueueSize, PopCount(vecValidVec), !allowEnqueue)
   io.lqFull := !allowEnqueue
 
-  def NLoadNotCompleted = 1
-  val validCountReg = RegNext(validCount)
-  val noUopsIssued = io.noUopsIssued
-  val stallLoad = io.noUopsIssued && (validCountReg >= NLoadNotCompleted.U)
-  val memStallAnyLoad = RegNext(stallLoad)
-
-  XSPerfAccumulate("mem_stall_anyload", memStallAnyLoad)
-
-  val perfEvents: Seq[(String, UInt)] = Seq(
-    ("MEMSTALL_ANY_LOAD", memStallAnyLoad),
-  )
+  val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent()
 
   // debug info

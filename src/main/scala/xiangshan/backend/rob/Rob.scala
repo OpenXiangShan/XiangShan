@@ -29,13 +29,14 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.BundleLiterals._
 import difftest._
+import difftest.common._
+import difftest.plugin.topdown._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import utils._
 import xiangshan._
 import xiangshan.PerfDebugInfo
-import xiangshan.backend.GPAMemEntry
-import xiangshan.backend.{BackendParams, RatToVecExcpMod, RegWriteFromRab, VecExcpInfo}
+import xiangshan.backend.{BackendParams, Bundles, GPAMemEntry, RatToVecExcpMod, RegWriteFromRab, VecExcpInfo}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -49,6 +50,8 @@ import xiangshan.backend.rob.RobBundles._
 import xiangshan.backend.trace._
 import chisel3.experimental.BundleLiterals._
 import chisel3.util.experimental.decode.TruthTable
+import xiangshan.TopDownCounters._
+import xiangshan.backend.dispatch._
 
 class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
@@ -120,12 +123,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val excpInfo = ValidIO(new VecExcpInfo)
     })
     val IssueQueueDeqSum  = backendParams.allIssueParams.map(_.numDeq).sum
+    val iqEntryNum = backendParams.allIssueParams.map(_.numEntries).sum
     val debug_ls = Flipped(new DebugLSIO)
-    val debugRobHeadFuType = Output(FuType())
     val debugBlockBackward = Option.when(backendParams.debugEn)(Output(Bool()))
     val debugWaitForward   = Option.when(backendParams.debugEn)(Output(Bool()))
-    val debugIQDeqRobIdxVec = Option.when(backendParams.debugEn)(Vec(IssueQueueDeqSum, Flipped(ValidIO(new RobPtr()))))
-    val debugRobHeadStall = Option.when(backendParams.debugEn)(Output(Bool()))
+    val topdownIQInfoVec = Option.when(backendParams.debugEn)(Input(Vec(iqEntryNum, Flipped(ValidIO(new TopdownIQExtendedInfo())))))
+    val debugRobHeadStall = Option.when(backendParams.debugEn)(ValidIO(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))
     val debugEnqLsq = Input(new LsqEnqIO)
     val debugHeadLsIssue = Input(Bool())
     val lsTopdownInfo = Vec(LduCnt + HyuCnt, Input(new LsTopdownInfo))
@@ -133,6 +136,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val toCore = new RobCoreTopDownIO
       val toDispatch = new RobDispatchTopDownIO
       val robHeadLqIdx = Valid(new LqPtr)
+      val fromCore = new CoreDispatchTopDownIO
     }
     val debugRolling = new RobDebugRollingIO
     val debugInstrAddrTransType = Input(new AddrTransType)
@@ -367,9 +371,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val fflagsDataRead = Wire(Vec(CommitWidth, UInt(5.W)))
   val vxsatDataRead = Wire(Vec(CommitWidth, Bool()))
   io.robDeqPtr := deqPtr
-
-  // topdown
-  io.debugRobHeadFuType := robEntries(deqPtr.value).debug_fuType.getOrElse(0.U.asTypeOf(FuType()))
 
 
   /**
@@ -1369,6 +1370,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("waitStuCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.stu.U)
   XSPerfAccumulate("waitAtmCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.mou.U)
 
+  XSPerfAccumulate("waitfaluCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.falu.U)
+  XSPerfAccumulate("waitfmacCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fmac.U)
+  XSPerfAccumulate("waitfcvtCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fcvt.U)
+  XSPerfAccumulate("waitfDivSqrtCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fDivSqrt.U)
+  XSPerfAccumulate("waitfcmpCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fcmp.U)
+
   XSPerfAccumulate("waitVfaluCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.vfalu.U)
   XSPerfAccumulate("waitVfmaCycle" , deqNotWritebacked && deqHeadInfoFuType === FuType.vfma.U)
   XSPerfAccumulate("waitVfdivCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.vfdiv.U)
@@ -1524,6 +1531,25 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   // topdown
+  val notIssue = !debug_lsIssue(deqPtr.value)
+  val tlbReplay = io.debugTopDown.fromCore.fromMem.robHeadTlbReplay
+  val tlbMiss = io.debugTopDown.fromCore.fromMem.robHeadTlbMiss
+  val vioReplay = io.debugTopDown.fromCore.fromMem.robHeadLoadVio
+  val mshrReplay = io.debugTopDown.fromCore.fromMem.robHeadLoadMSHR
+  val l1Miss = io.debugTopDown.fromCore.fromMem.robHeadMissInDCache
+  val l2Miss = io.debugTopDown.fromCore.l2MissMatch
+  val l3Miss = io.debugTopDown.fromCore.l3MissMatch
+  val ldReason = Mux(l3Miss, LoadMemStall.id.U,
+    Mux(l2Miss, LoadL3Stall.id.U,
+      Mux(l1Miss, LoadL2Stall.id.U,
+        Mux(notIssue, MemNotReadyStall.id.U,
+          Mux(tlbMiss, LoadTLBStall.id.U,
+            Mux(tlbReplay, LoadTLBStall.id.U,
+              Mux(mshrReplay, LoadMSHRReplayStall.id.U,
+                Mux(vioReplay, LoadVioReplayStall.id.U,
+                  LoadL1Stall.id.U))))))))
+
+
   val allIssueParams = backendParams.allIssueParams.filter(_.StdCnt == 0)
   val allExuParams = allIssueParams.map(_.exuBlockParams).flatten
   val allFuConfigs = allExuParams.map(_.fuConfigs).flatten.toSet.toSeq
@@ -1532,32 +1558,137 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val bypassLatency = 3.U
   val writeBackLatency = 1.U
 
-  val candidateVec = Option.when(backendParams.debugEn)(Wire(Vec(RobSize, Vec(io.IssueQueueDeqSum, Bool()))))
-  candidateVec.foreach( _ := VecInit.tabulate(RobSize, io.IssueQueueDeqSum){ (index, i) =>
-    val deq = io.debugIQDeqRobIdxVec.get(i)
-    deq.valid && (deq.bits.value === index.U)
-  })
-  for (i <- 0 until RobSize) {
-    when(robEntries(i).valid){
-      robEntries(i).topdownIssued.foreach(_ := candidateVec.get(i).reduce(_ || _) || robEntries(i).topdownIssued.get)
-    }
-  }
+
   if (backendParams.debugEn) {
-    dontTouch(candidateVec.get)
-  }
-
-  for (i <- 0 until RobSize) {
-    when(robEntries(i).valid){
-      val hasWriteBack = robEntries(i).uopNum === 0.U
-      robEntries(i).topdownIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
-        robEntries(i).topdownIssueTime.get +& robEntries(i).topdownIssued.get) )
+    val topdownRobInfoCollect = Module(new TopdownRobInfoCollect(io.iqEntryNum, RobSize))
+    topdownRobInfoCollect.io.in.zip(io.topdownIQInfoVec.get).foreach{ case (sink, source) =>
+      sink.valid := source.valid
+      sink.robIdx := source.bits.robIdx.value
+      sink.robFlag := source.bits.robIdx.flag
+      sink.issued := source.bits.issued
+      sink.cancelSource := source.bits.cancelSource
+      sink.idealIssueTime := source.bits.idealIssueTime
     }
-  }
+    val topdownRobCandidate = topdownRobInfoCollect.io.out
+    for (i <- 0 until RobSize) {
+      when(robEntries(i).valid){
+        val hasWriteBack = robEntries(i).uopNum === 0.U
+        val isRobHead = i.U === deqPtr.value
 
-  io.debugRobHeadStall.foreach{ case stall =>
-    val deqEntry = robEntries(deqPtr.value)
-    val deqEntryNormalLatency = Mux1H(deqEntry.debug_fuType.get, sortedFulatency) +& bypassLatency +& writeBackLatency
-    stall := deqEntry.valid && (robEntries(deqPtr.value).topdownIssueTime.get > deqEntryNormalLatency)
+        val topdownIQInfoCandidate = Mux(topdownRobCandidate(i).valid, topdownRobCandidate(i),
+          0.U.asTypeOf(new TopdownRobInfo))
+        val topdownIQInfoValid = topdownIQInfoCandidate.valid
+        val topdownIQIssued = topdownIQInfoCandidate.issued
+        val topdownIQIdealIssue = topdownIQInfoCandidate.idealIssueTime
+
+        val topdownIQCancelSource = topdownIQInfoCandidate.cancelSource
+
+        val topdownIssuedUpdate = topdownIQIssued || robEntries(i).topdownIssued.get
+        val topdownCanceled= !topdownIQIssued && robEntries(i).topdownIssued.get && topdownIQInfoValid &&
+          topdownIQCancelSource =/= IQCancelSource.none
+        val topdownCanceledUpdate = topdownCanceled || robEntries(i).topdownCanceled.get
+        val topdownRobHeadUpdate = isRobHead || robEntries(i).topdownRobHead.get
+        val topdownIdealIssueUpdate = topdownIQIdealIssue || robEntries(i).topdownIdealIssue.get
+        val topdownCancelSrcUpdate = Mux(topdownCanceled, topdownIQCancelSource,
+          robEntries(i).topdownCancelSource.get)
+        val topdownCancelTimeUpdate = topdownCanceled
+        robEntries(i).topdownCanceled.foreach(_ := topdownCanceledUpdate)
+        robEntries(i).topdownIssued.foreach(_ := topdownIssuedUpdate)
+        robEntries(i).topdownRobHead.foreach(_ := topdownRobHeadUpdate)
+        robEntries(i).topdownIdealIssue.foreach(_ := topdownIdealIssueUpdate)
+
+        robEntries(i).topdownIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
+          robEntries(i).topdownIssueTime.get +& topdownIssuedUpdate))
+        robEntries(i).topdownLastIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
+          Mux(topdownCanceled, 0.U,
+            robEntries(i).topdownLastIssueTime.get +& topdownIssuedUpdate)
+        ))
+        robEntries(i).topdownRobHeadTime.foreach(_ := Mux(hasWriteBack , 0.U,
+          robEntries(i).topdownRobHeadTime.get +& topdownRobHeadUpdate))
+        // only caculate rising edge of ideal issue
+        robEntries(i).topdownIdealIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
+          Mux(topdownIQIdealIssue && !robEntries(i).topdownIdealIssue.get , 1.U,
+            robEntries(i).topdownIdealIssueTime.get +& robEntries(i).topdownIdealIssue.get)
+        ))
+        robEntries(i).topdownCancelSource.foreach(_ := topdownCancelSrcUpdate)
+        robEntries(i).topdownCancelTimeVec.foreach(_.zipWithIndex.foreach{ case (cancelTime, index) =>
+          val cancelMatch = topdownCancelSrcUpdate === index.asUInt
+          cancelTime := Mux(hasWriteBack, 0.U,
+            Mux(topdownCanceled && cancelMatch, robEntries(i).topdownCancelTimeVec.get(index) + robEntries(i).topdownLastIssueTime.get,
+              robEntries(i).topdownCancelTimeVec.get(index) +& (cancelMatch & topdownCancelTimeUpdate)))
+        })
+      }
+    }
+    io.debugRobHeadStall.foreach{ case stall =>
+      val deqEntry = robEntries(deqPtr.value)
+      val deqEntryNormalLatency = Mux1H(deqEntry.debug_fuType.get, sortedFulatency) +& bypassLatency +& writeBackLatency
+      val issueTime = deqEntry.topdownIssueTime.get
+      val lastIssueTime = deqEntry.topdownLastIssueTime.get
+      val idealIssueTime = deqEntry.topdownIdealIssueTime.get
+      val robHeadTime = deqEntry.topdownRobHeadTime.get
+
+      val topdownIQInfoCandidate = topdownRobCandidate(deqPtr.value)
+      val issued = topdownIQInfoCandidate.issued && topdownIQInfoCandidate.valid
+
+      when(deqEntry.valid){
+        assert(issueTime >= lastIssueTime)
+        assert(issueTime <= idealIssueTime)
+      }
+      val waitTime = idealIssueTime - robHeadTime
+      val idealWaitTime = idealIssueTime - issueTime
+      val robHeadFutype = deqEntry.debug_fuType.get
+      val robHeadExecStall = deqEntry.valid && (lastIssueTime > deqEntryNormalLatency) && (lastIssueTime > waitTime)
+      val robHeadNotIssued = deqEntry.valid && (!deqEntry.topdownIssued.get && !issued)
+      val robHeadIssueCancel = deqEntry.valid && deqEntry.topdownCanceled.get && (issueTime > deqEntryNormalLatency)
+      // issueDelay priority than cancel; only calculate idealWaitTime stall
+      val robHeadIssueDelay = deqEntry.valid && (idealIssueTime > deqEntryNormalLatency) &&
+        (robHeadTime < idealWaitTime)
+      val robHeadExecStallReason =  MuxCase(OtherNotReadyStall.id.U, Seq(
+        FuType.isAMO(robHeadFutype)          -> AtomicStall.id.U          ,
+        FuType.isStoreVstore(robHeadFutype)  -> StoreStall.id.U           ,
+        FuType.isLoadVload(robHeadFutype)    -> ldReason                  ,
+        FuType.isDivSqrt(robHeadFutype)      -> DivStall.id.U             ,
+        FuType.isInt(robHeadFutype)          -> IntNotReadyStall.id.U     ,
+        FuType.isFArith(robHeadFutype)       -> FPNotReadyStall.id.U      ,
+      ))
+
+      val robHeadCancelSource = deqEntry.topdownCancelSource.get
+
+      val cancelTimeVec = deqEntry.topdownCancelTimeVec.get
+      val cancelTimeFixVec = deqEntry.topdownCancelTimeFixVec.get
+      val fixedCancelTimeVec = cancelTimeVec.zip(cancelTimeFixVec).map{ case (time, fix) =>
+        Mux(time < fix, 0.U, time - fix)
+      }
+      val maxCancelTime = fixedCancelTimeVec.reduce{ (a,b) => Mux(a > b, a, b)}
+      val maxCancelTimeVec = VecInit(fixedCancelTimeVec.map(_ === maxCancelTime)).asUInt
+      val lastMaxCancelTimeOH = Reverse(PriorityEncoderOH(Reverse(maxCancelTimeVec)))
+      val lastMaxIdx = OHToUInt(lastMaxCancelTimeOH)
+      val cancelTimeFixUpdateVec = VecInit(cancelTimeFixVec.zip(lastMaxCancelTimeOH.asBools).map{
+        case (time, hit) => time +& hit
+      })
+
+      if (backendParams.debugEn){
+        dontTouch(VecInit(lastMaxCancelTimeOH.asBools))
+      }
+
+
+      val cancelStallReason = MuxCase(IssueCancelStallOther.id.U, Seq(
+        IQCancelSource.isog0(lastMaxIdx) -> IssueCancelStallOg0.id.U  ,
+        IQCancelSource.isog1(lastMaxIdx) -> IssueCancelStallOg1.id.U  ,
+        IQCancelSource.isld(lastMaxIdx)  -> IssueCancelStallLd.id.U   ,
+        IQCancelSource.isst(lastMaxIdx)  -> IssueCancelStallSt.id.U   ,
+      ))
+      deqEntry.topdownCancelTimeFixVec.foreach(_ := cancelTimeFixUpdateVec)
+
+
+      stall.valid := robHeadExecStall || robHeadNotIssued || robHeadIssueCancel || robHeadIssueDelay
+      stall.bits := MuxCase(BackendOtherCoreStall.id.U, Seq(
+        robHeadNotIssued                    -> RobHeadNotIssued.id.U     ,
+        robHeadExecStall                    -> robHeadExecStallReason    ,
+        robHeadIssueDelay                   -> IssueDelayStall.id.U      ,
+        robHeadIssueCancel                  -> cancelStallReason         ,
+      ))
+    }
   }
 
   //difftest signals
