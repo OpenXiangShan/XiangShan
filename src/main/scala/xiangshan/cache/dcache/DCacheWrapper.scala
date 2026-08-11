@@ -1741,7 +1741,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // replacement algorithm
-  val replacer = ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets)
+  val replacer = ReplacementPolicy.fromString(cacheParams.replacer.get, nWays, nSets, seedBySet = true)
   val replWayReqs = ldu.map(_.io.replace_way) ++ Seq(mainPipe.io.replace_way) ++ stu.map(_.io.replace_way)
 
   if (dwpuParam.enCfPred) {
