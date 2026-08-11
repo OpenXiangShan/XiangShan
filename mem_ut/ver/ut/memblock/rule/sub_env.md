@@ -3,7 +3,7 @@
   1 在memblock/subenv/文件夹新键以module命名
   的：<modulenam>_env文件夹，之后所有sub_env相关文件均放入这个文件夹内部；
   2 基于该module在XiangShan/
-  build_memblock的verilog文件中找到对应的module文件,提取该模块顶层IO按照agent概念分类汇总一个agent拆分方案
+  build/rtl 的 Verilog 文件中找到对应的 module 文件，提取该模块顶层 IO，按照 agent 概念分类汇总一个 agent 拆分方案
   文档（文档中需要包含agent分类以及各个agent对应内部input和output信号）放入<modulenam>_env文件夹，并提示用
   户review;
   3 用户reviewc成功之后基于agent拆封方案文档，参考已有agent目录中demo_agent，在<modulenam>_env文件夹中

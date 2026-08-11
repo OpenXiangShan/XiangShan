@@ -35,7 +35,7 @@ scripts/generate_memblock_rtl.sh
 
 脚本应支持通过环境变量覆盖默认值。通用变量包括：
 
-- `TARGET_DIR`：RTL 输出目录，默认 `build_memblock/rtl`
+- `TARGET_DIR`：RTL 输出目录，默认 `build/rtl`
 - `CONFIG`：生成使用的 config，默认值由版本 profile 定义
 - `JVM_XMX`、`JVM_XSS`：JVM 参数
 - `MEMBLOCK_FIRTOOL` 或 `FIRTOOL`：firtool 覆盖入口，如该版本需要外部 firtool
@@ -57,9 +57,9 @@ config，而不是直接回退到共享旧版 firtool。
 生成成功后必须检查当前 profile 定义的产物。默认 mem_ut 期望：
 
 ```text
-build_memblock/rtl/filelist.f
-build_memblock/rtl/MemBlock.sv
-build_memblock/rtl/MemBlockTop.sv
+build/rtl/filelist.f
+build/rtl/MemBlock.sv
+build/rtl/MemBlockTop.sv
 ```
 
 如果某版本使用等价产物或生成路径不同，必须在对应 profile 中明确记录，并同步
@@ -70,7 +70,7 @@ build_memblock/rtl/MemBlockTop.sv
 `mem_ut/ver/ut/memblock/cfg/rtl.f` 应引用当前工作树的 RTL：
 
 ```text
--F $MEMBLOCK_XS_HOME/build_memblock/rtl/filelist.f
+-F $MEMBLOCK_XS_HOME/build/rtl/filelist.f
 ```
 
 `MEMBLOCK_XS_HOME` 必须指向当前 XiangShan worktree 根目录。`MEMBLOCK_PROJECT`
@@ -81,7 +81,7 @@ profile 中明确 `<worktree-name>`，避免 V2/V3 多 worktree 共存时误读�
 
 ## 与远端编译仿真的关系
 
-本规则只负责生成 `build_memblock/rtl`。
+本规则只负责生成 `build/rtl`。
 
 生成 RTL 后，如需验证 UVM 编译仿真，继续按：
 

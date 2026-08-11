@@ -5,7 +5,7 @@
 当出现以下任一情况时，必须使用本规则：
 
 - 用户要求适配最新 DUT、同步最新 RTL 接口、检查 DUT 接口变化
-- 更新最新代码并重新生成 `build_memblock/rtl` 后
+- 更新最新代码并重新生成 `build/rtl` 后
 - VCS 编译出现 DUT 端口、层级路径、interface 信号或 agent 字段不匹配
 - 新增、删除、重命名或调整 memblock 顶层端口、内部模块接口、probe/bind/force 路径
 
@@ -44,9 +44,9 @@ mem_ut/ver/ut/memblock/tb/*_agent_connect.sv
 
 1. 生成后的 Verilog RTL：
    ```text
-   build_memblock/rtl/MemBlock.sv
-   build_memblock/rtl/MemBlockTop.sv
-   build_memblock/rtl/filelist.f
+   build/rtl/MemBlock.sv
+   build/rtl/MemBlockTop.sv
+   build/rtl/filelist.f
    ```
 2. `top_tb.sv` 展开的 testbench 接线链路。
 3. `src/main/scala/xiangshan` 中的 Scala 源码，仅用于理解 valid/ready、idx、bundle 语义和合法行为，不作为最终端口名、位宽、方向依据。
@@ -221,7 +221,7 @@ mem_ut/ver/ut/memblock/rule/memblock_cfg_add_rule.md
 从仓库根目录执行静态检查：
 
 ```bash
-rg -n "旧端口名|旧层级路径|旧字段名" mem_ut/ver/ut/memblock build_memblock/rtl
+rg -n "旧端口名|旧层级路径|旧字段名" mem_ut/ver/ut/memblock build/rtl
 rg -n 'MEMBLOCK_CONNECT|_AGENT_CONNECT|uvm_config_db#\(virtual' mem_ut/ver/ut/memblock/tb
 git diff --check -- mem_ut/ver/ut/memblock
 ```

@@ -373,8 +373,7 @@ simulator_out.txt
 *.log
 *.err
 
-# Generated RTL snapshots
-/build_memblock/
+# Generated RTL is covered by the project-wide build ignore rule above.
 /mem_ut/ver/ut/memblock/sim/*/exec/
 /mem_ut/ver/ut/memblock/sim/*/log/
 /mem_ut/ver/ut/memblock/sim/*/wave/

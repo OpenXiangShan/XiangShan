@@ -156,7 +156,7 @@ vcs: command not found
 `rtl.f` 中依赖如下路径：
 
 ```text
-$MEMBLOCK_XS_HOME/build_memblock/rtl/filelist.f
+$MEMBLOCK_XS_HOME/build/rtl/filelist.f
 ```
 
 因此：

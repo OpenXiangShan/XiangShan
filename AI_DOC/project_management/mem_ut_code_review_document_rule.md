@@ -364,5 +364,5 @@ review 文档完成前必须检查：
 |---|---|---|---|
 | 文档搬迁/整理 | `AI_DOC/...` | 非本次逻辑 | 仅路径整理或项目管理结构调整。 |
 | 其他功能逻辑 | `mem_ut/...` | 另行 review | 属于 redirect/global-stop/100k 等其他功能。 |
-| 生成产物 | `build_memblock/` | 非源码 review | 仿真或 RTL 生成输出。 |
+| 生成产物 | `build/` | 非源码 review | 仿真或 RTL 生成输出。 |
 ```

@@ -34,12 +34,12 @@ harness/main。默认 config 为 `KunminghuV2Config`；只有后续 V2 验证明
 mem_ut 环境仍期望以下产物：
 
 ```text
-build_memblock/rtl/filelist.f
-build_memblock/rtl/MemBlock.sv
+build/rtl/filelist.f
+build/rtl/MemBlock.sv
 ```
 
-当前 V2 独立 harness 的有效 filelist 直接以 `MemBlock.sv` 为 DUT 顶层产物，
-没有生成 `build_memblock/rtl/MemBlockTop.sv`。后续不得把不存在的 wrapper
+当前 V2 整核 `top.TopMain` flow 的有效 filelist 直接以 `MemBlock.sv` 为 DUT 顶层产物，
+没有生成 `build/rtl/MemBlockTop.sv`。后续不得把不存在的 wrapper
 列为接口检查或测试框架 plan 的必需输入。如果 V2 生成入口再次改变产物名，
 必须在同一次变更中更新脚本和 `mem_ut/ver/ut/memblock/cfg/rtl.f`，并在本
 profile 记录映射关系。
@@ -52,7 +52,7 @@ V2 使用独立 worktree，因此 `mem_ut/ver/ut/memblock/cfg/rtl.f` 不得硬�
 当前 V2 规则为：
 
 ```text
--F $MEMBLOCK_XS_HOME/build_memblock/rtl/filelist.f
+-F $MEMBLOCK_XS_HOME/build/rtl/filelist.f
 ```
 
 `scripts/generate_memblock_rtl.sh` 和 `mem_ut/ver/ut/memblock/sim/eda01_entry.sh`
@@ -61,8 +61,8 @@ V2 使用独立 worktree，因此 `mem_ut/ver/ut/memblock/cfg/rtl.f` 不得硬�
 ## 当前状态
 
 当前 worktree 的 V2 RTL 生成已通过；mem_ut 实际编译入口使用
-`build_memblock/rtl/filelist.f`，DUT 顶层接口权威文件为
-`build_memblock/rtl/MemBlock.sv`。`build/rtl` 只可用于辅助比对，不是第二权威。
+`build/rtl/filelist.f`，DUT 顶层接口权威文件为
+`build/rtl/MemBlock.sv`。
 生成结果和历史失败细节记录在：
 
 ```text
