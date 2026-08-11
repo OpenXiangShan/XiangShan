@@ -212,3 +212,10 @@ corrupt 命中是成功的保护性结果，不是 miss；它返回 `valid=1, co
 - dispatch 主表、status、ROB/LQ/SQ 反查、TLB 和 UID-TLB 查询均直接探测已有 static owner/table/map，复制到 API 自定义值型 view；不会调用创建型或 fatal 型 getter。
 - 初始化 backing 与已提交 overlay 查询共用非创建的 byte 级探测逻辑；当前 overlay corrupt mask 和 DCache aggregate 的 observer 更新在后续阶段实现，尚未把 `ready` 发布为有效状态。
 - 本阶段只完成测试框架 API 封装，不实现 RM/checker 调用，也不改变 DUT memory-facing 主流程。
+
+### [IMPLEMENTATION_DELTA] 阶段二：backing/overlay 查询与写回事实 observer
+
+- `main_mem`、`write_overlay_mem` 和 byte-valid map 继续由既有 memory-facing 流程维护；API 只按请求 byte 探测已有 map，不调用懒分配或 DUT 访问 task。
+- 新增 byte-granular `write_overlay_corrupt_byte_mask` 旁路表。数据型 C response 已被既有代码判为 corrupt 时记录整条 64 B；Uncache batch 已实际提交后只清除其覆盖 byte。
+- DCache batch 入队/提交处增加旁路 fragment 记录：低、高两个 32B fragment 均被观察到既有 commit 后，才结束该 line 的未完成观察窗口；observer 不新增 ticket、不改变 batch 顺序。
+- 该阶段仍未实现 RM 调用或 checker；所有状态只通过后续 API value view 读取。
