@@ -647,3 +647,28 @@ stop 在本 task 后续才写入 close，因此 C0 同拍 fire 仍然合法。
 
 本项没有修改 token payload、C0/C4 取消规则或 release drain；只把 cutoff 检查前移到状态分配之前。源码、flow、analysis
 和 plan 已同步，`git diff --check` 通过；专项 compile/smoke 待三个 P2 修改全部完成后统一执行。
+
+## 12.5 本轮 P2 coding：pre-ready baseline 独立建模
+
+**关联 plan：** `mem_ut_v2_l2tlb_sfence_flush_token_timing_correction_plan_20260805.md` 的
+`IMPLEMENTATION_DELTA` pre-ready baseline 条目。
+
+**抽象功能描述：** 为 responder owner 启动时已经存在的历史 flush event 建立独立的 cursor/ready 等待状态，避免把启动
+清场误当成运行期 C0/C4 flush；首次开放 ready 前同时证明 transport、response、barrier 和 UID WAITING 状态为空。
+
+**修改后逻辑：**
+
+```text
+owner 尚未完成 startup baseline 且尚未开放 ready：
+  先检查 sampled fire/response、pending_q、driving slot、barrier_q 和 UID WAITING；非空立即 fatal；
+  早于当前 sample 的历史 event 只推进 cursor，并更新 pre_ready_hold_until_sample；不建立 barrier、不取消 token/UID；
+  startup 历史 event 消费完成后置 owner_start_baseline_done。
+
+ready 计算：
+  hold_active = 当前 sample 仍小于 accept_hold 或 pre_ready_hold；
+  hold 结束且 CSR/history 已就绪后才开放 ready。
+```
+
+运行期新 event 仍走既有 `handle_l2tlb_flush_event()` 和 `accept_hold_until_sample`，driver 的 transport baseline 仍由
+driver 私有状态维护。本项没有改变 response latency、payload、C4 cancel 或 release grant 语义；源码、flow、analysis 和
+plan 已同步，`git diff --check` 通过。

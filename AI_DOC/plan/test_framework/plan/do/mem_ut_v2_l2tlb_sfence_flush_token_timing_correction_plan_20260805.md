@@ -1352,7 +1352,9 @@ owner handoff、inactive-gap、高水位 reconcile 和 dispatch topology transit
 live-entry 状态。
 
 ```text
-CSR monitor：每个 post-reset posedge 调用 advance_dut_global_sample($time) 一次，发布该 sample 的 CSR history。
+CSR monitor：每个 reset 已经在 callback 入口前解除的 post-reset posedge 调用 advance_dut_global_sample($time) 一次，
+  发布该 sample 的 CSR history。若本 callback 观察到 reset_active 从 1 变为 0，只完成 reset release，不 advance、不发布 history/done；
+  下一真实 posedge 才是第一个由 CSR/FENCE producer 同时参与的 post-reset sample。
 fence/redirect/ctrl 等同 posedge monitor：先调用 wait_for_l2tlb_sample_anchor($time)，再读取 peek_current_dut_global_sample()
   并把该返回值写入 raw；不得推进 sample。只在本 sample NBA/发布窗口结束后仍没有 anchor 时 uvm_fatal。
 CSR monitor 和 fence monitor 每个 sample 都调用 mark_l2tlb_sample_producer_done(sample_seq, producer_kind)，
@@ -1719,6 +1721,11 @@ release grant，再等唯一 owner 原子清除 claim==0。当前支持矩阵中
   `memblock_dispatch_real_cancel_reconcile_vseq` 显式启动 L2TLB sequence
 时，`tc_base` 不得同时配置其 default sequence；legacy testcase 使用 default sequence 时不得再通过 vseq 启动它。
 
+global-stop 分支判断 `NO_OWNER` 时只读取 `l2tlb_responder_enabled()`、`l2tlb_dispatch_active()` 和
+`l2tlb_testcase_needs_response` 这三个 testcase lifecycle 真源。不得使用 connect capability
+`l2tlb_responder_active` 或 `MEMBLOCK_L2TLB_SEQ_EN` plus 作为第二拓扑权威：前者只表示 wire 是否被接管，后者只参与
+testcase-start 选择，二者都不能说明本 testcase 是否已经启动 responder owner。
+
 ## 7. 与原测试框架逻辑对比
 
 | 类型 | 原逻辑 | 修改原因 | 修改后逻辑 |
@@ -1927,6 +1934,62 @@ latency、payload、permission 和主表控制行为保持不变。
 - 状态副作用：非零 epoch 的 close/release 仍强制读取唯一公共 proof；epoch 0 的原有 startup close/release 行为不变，
   不会因新增 gate 或 watchdog 误阻塞。
 
+### [IMPLEMENTATION_DELTA] reset release 同拍必须完成完整 producer-barrier sample
+
+- 来源：上一版 delta 试图在 reset 从 active 变为 inactive 的 CSR callback 中跳过 global sample，避免 fence monitor
+  先看到 reset 时漏写 FENCE done。但基础 smoke 在 `170ns` 证明该方案仍有反向调度竞态：CSR 先结束 reset 并跳过
+  anchor，随后执行的 fence monitor 已看到 reset inactive，调用 `wait_for_l2tlb_sample_anchor($time)` 后找不到 anchor 而 fatal。
+- 被替换的逻辑：CSR monitor 在 release callback 中 `continue`，该 callback 不建立 CSR sample；fence monitor 对同拍
+  reset 状态没有二次确认。该方案既可能产生缺 FENCE done 的半个 sample，也可能产生 fence 等待不存在 anchor 的空拍。
+- 修改后逻辑：release 边本身就是首个 post-reset semantic sample。CSR monitor 仍是唯一 writer：只有 reset 已真正结束时，
+  它立即推进 global sample、发布 CSR history 并写 CSR producer done。fence monitor 若一开始看到 reset active，先完成自己的
+  reset 清理/ack，再在同一仿真时刻的 NBA/delta 区域重新读取 reset；若 CSR 已在该窗口结束 reset，则继续绑定同拍 anchor，
+  正常采样 `sfence` 并写 FENCE producer done；若 reset 仍 active，才结束本拍。
+
+  ```text
+  CSR monitor：
+    end_l2tlb_runtime_reset()
+    若 reset 仍 active：本拍不发布 sample
+    否则：推进 global sample，发布 CSR history，写 CSR producer done
+
+  fence monitor：
+    若本拍初始看到 reset active：清 fence 私有 reset 状态并写 ack
+    在同一时间的 NBA/delta 重新检查 reset
+    若 reset 仍 active：结束本拍
+    否则：等待同拍 CSR anchor，采样 sfence，始终写 FENCE producer done
+  ```
+
+- 原因：两类 monitor 的 clocking-block callback 没有固定先后顺序；必须让两种顺序都形成完整的同拍
+  CSR/FENCE producer pair，不能通过静默丢弃 reset-release 边规避竞态。若该边 `sfence.valid=1`，它也必须被正常记录为
+  C0，不能静默 drop。
+- 影响范围：只修改 reset release 的 monitor 同拍同步；global sample 不回绕，C-2 history、token、UID、C0/C4 和
+  payload 语义保持不变。
+
+### [IMPLEMENTATION_DELTA] `NO_OWNER` 的 stop 与 request fail-fast 使用固定 topology
+
+- 来源：归档后 review 发现 no-dispatch testcase 即使 runtime plus 仍为 1，也会按 lifecycle 初始化为
+  `DISABLED/NO_OWNER`；parent 若仍以 connect capability/plus 等待 claim，会把合法 no-owner 误报为 claim timeout。
+  同时 passive driver 固定 `ready=0`，若 monitor 不检查 `req_valid`，误配置 request 会永久悬挂。
+- 修改后逻辑：global-stop parent 只以 `l2tlb_responder_enabled()`、`l2tlb_dispatch_active()` 和
+  `l2tlb_testcase_needs_response` 选择分支。合法 `DISABLED/NO_OWNER + NO_DISPATCH` 立即结束 L2TLB wait，
+  不等待 claim、不发 grant；任何不支持的组合 fatal。L2TLB monitor 在非 reset、已初始化 topology 下发现
+  disabled responder 的 frozen `sampled_req_valid==1` 时立即 fatal，并打印 transport sample、DUT sample、VPN、s2xlate 和 topology。
+- stop 分支还必须先检查 no-owner 不变量：`l2tlb_lifecycle_owner_claimed`、`l2tlb_owner_claimed_once` 与
+  `l2tlb_release_granted` 均为 0。只有 `ENABLED + DISPATCH_ACTIVE + needs_response` 的 topology，且当前真的仍有
+  owner claim，parent 才可调用 `grant_l2tlb_final_release()`。
+- 原因：connect takeover 与 plus 不是 testcase 当前 responder 生命周期真源；fail-fast 也不能等待不会发生的
+  `valid && ready` fire。
+- 影响范围：只收紧错误 topology 诊断和 no-owner stop；不改变 active responder 的 token、response、flush 或 release 流程。
+
+### [IMPLEMENTATION_DELTA] `phase_ended()` 保持 fail-fast
+
+- 来源：单 owner 合同要求 active owner 只能通过 global-stop/final inactive/grant 正常释放；driver 的 `phase_ended()`
+  虽然不再 release，却仍只报 `uvm_error`，会让 testcase 在保留 claim 的情况下继续结束。
+- 修改后逻辑：若 phase callback 仍看到 claimed owner，直接 `uvm_fatal` 并保留 claim；该 function 不驱动 idle、
+  不确认 stop/final，也不调用 release helper。
+- 原因：phase 结束时仍持有 owner 代表 lifecycle 未收敛，是不可恢复的测试框架状态而非普通诊断。
+- 影响范围：只改变异常终止等级；正常 global-stop release 行为不变。
+
 ### [IMPLEMENTATION_DELTA] 同步 V2 responder 与 SFENCE flow 文档
 
 - 来源：执行规则要求当前 flow 文档反映真实调用链；原 plan 主要描述 coding 落点，没有列出完整 flow 文档同步动作。
@@ -1935,6 +1998,129 @@ latency、payload、permission 和主表控制行为保持不变。
   在 `AI_DOC/mem_ut_flow_doc/sfence_flow.md` 标明旧直接 drain 链路为 entry-level 历史基线，并指向当前 responder flow。
 - 原因：避免文档继续把独立 live-VIF 采样、旧 `drain_sfence_events()` 和 sequence 直接消费 latest flush 描述成 V2 当前行为。
 - 影响范围：仅更新 flow 文档职责和调用链说明，不增加新的 DUT payload、token 或 adapter 逻辑。
+
+### [IMPLEMENTATION_DELTA] P2：close/cutoff 必须在 token 分配前拒绝 request fire（待 coding）
+
+- 来源：追加 lifecycle review 发现，`send_l2tlb_cycle()` 已在当前 frozen sample 观察到 `request_fire()` 后调用
+  `capture_fired_request()`；该函数先创建 `pending`、递增 `next_request_token`，并可能通过 lookup 创建 live entry，直到
+  `mark_waiting_uid_records_on_request_fire()` 才由 UID helper 检查 admission seal。若 close 已经写入，fatal 发生在
+  软件 token/live-entry 副作用之后，违反本 plan 的“close/cutoff 后不创建新工作”合同。
+- 术语边界：`close_requested` 是 owner 在已经结算本 sample 既有 admission 后写入的软件封口；
+  `admission_closed/cutoff` 是 driver 后续真实采样 `ready=0 && fire=0` 后写入的接口关闭证明。二者都不删除已经在
+  close 前真实 fire 的 token；旧 token 仍按 response、C4 cancel 或 reset cancel 之一收敛。
+- 修改后逻辑：在 `capture_fired_request()` 的第一段、任何 `pending` object、live entry、request token 或 UID marker
+  创建之前执行以下 guard：
+
+  ```text
+  capture_fired_request():
+    若 sequence.release_close_requested==1：uvm_fatal。
+    调用 data.check_l2tlb_uid_registration_open("capture_fired_request")：
+      release_admission_close_requested / admission_closed / release_closing 任一为 1 -> uvm_fatal。
+    仅 guard 全部通过后：
+      执行既有 outstanding 检查；
+      创建 pending、递增 token、lookup/build live entry、写 UID request-fire marker；
+      push pending_q 并更新 accepted 账本。
+  ```
+
+- 同拍顺序保持不变：本拍 frozen `request_fire` 来自此前已经驱动的 `ready`。若此时 close 尚未写入，必须先正常
+  `capture_fired_request()`，随后 owner 才能写 close request 并发送 `RELEASE_STOP`；不得为了提前检查而把 global-stop/
+  close 分支移到 fire capture 前，否则会错误丢弃关闭前已被 DUT 接收的合法 request。只有已经存在 close/cutoff 的后续
+  sample 再观察到 fire 才属于不支持状态，且必须在任何软件分配前 fail-fast。
+- 影响范围：仅收紧非法 post-close fire 的 fail-fast 时点；不改变 C0 同拍 fire、C1-C3 response、C4 cancel、
+  admission cutoff 的 driver 写者、token 账本、payload 或 ROB redirect 边界。
+- 当前状态：已完成 coding；`capture_fired_request()` 在 token/pending/UID 状态分配前检查 local/shared admission cutoff。
+  同拍先观察到的合法 fire 仍在 close 写入前完成 capture。
+
+### [IMPLEMENTATION_DELTA] P2：pre-ready baseline 与 active flush hold 分离（待 coding）
+
+- 来源：追加 lifecycle review 发现，owner 启动时可能看到已经在更早 sample 产生的历史 event；当前 sequence 主要使用
+  `accept_hold_until_sample` 处理该情况，但没有独立的 owner-start baseline 状态和严格空状态证明。
+- 问题含义：启动前历史 event 只是需要对齐 event cursor 的旧记录，不代表当前 sample 发生了新的 C0 flush。若把它直接写入
+  `accept_hold_until_sample`，就会把“启动清场”与“运行期 DUT filter 清理”混为一谈，可能在未确认 token/UID 为空时开放 ready，
+  或错误建立 barrier/cancel 工作。
+- 修改前逻辑：发现 `event.anchor_sample_seq < current_sample` 且 `acceptance_opened_since_reset==0` 时，直接更新
+  `accept_hold_until_sample`；没有 `owner_start_baseline_done`、没有独立 `pre_ready_hold_until_sample`，也没有一次性严格检查
+  request/response/token/UID 状态是否为空。
+- 修改后状态：将当前未使用的 `baseline_pending` 替换为 `owner_start_baseline_done`，并新增
+  `pre_ready_hold_until_sample`。二者只由 response owner 在 testcase start/reset re-arm 清零和推进；driver 已有的
+  `post_reset_baseline_pending`/公共 transport baseline proof 继续由 driver 维护，不能与 owner event baseline 合并。
+- 修改后逻辑：
+
+  ```text
+  owner 第一次开放 ready 前：
+    若 owner_start_baseline_done==0：
+      要求 sampled_req_fire==0；
+      要求 sampled_resp_valid==0；
+      要求 pending_q 为空、driving_valid==0、barrier_q 为空；
+      要求全部有效 UID WAITING 数量为 0；任一条件不满足 -> uvm_fatal。
+
+      从 response_owner_event_cursor+1 连续检查历史 event：
+        event.sample_seq < current_sample：只推进 event cursor/last_seen，
+          不调用 handle_l2tlb_flush_event()，不建立 C0/C4 barrier，不取消 token/UID；
+        event.sample_seq == current_sample：按正常 C0 event 建 barrier；
+        event.sample_seq > current_sample：uvm_fatal。
+
+      若本次只消费了启动前历史 event：
+        pre_ready_hold_until_sample = max(
+          pre_ready_hold_until_sample,
+          current_sample + MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES);
+        owner_start_baseline_done = 1'b1；
+        本拍继续发送 ready=0 的普通 inactive item。
+
+  ready 计算：
+    hold_until = max(accept_hold_until_sample, pre_ready_hold_until_sample)；
+    hold_until 未到期或 owner-start baseline 未完成时，next_ready=0；
+    只有正常生成首个 next_ready=1 后，才置 acceptance_opened_since_reset=1。
+  ```
+
+- 语义边界：`pre_ready_hold_until_sample` 只表示启动前历史 event 的保守等待，不参与 C4 token/UID cancel；
+  `accept_hold_until_sample` 仍只表示真实运行期 C0 flush barrier。两者都可能使 ready 为 0，但不能互相替代。
+- 影响范围：仅补齐 owner 启动时的 event cursor、ready 基线和空状态检查；不扫描或清理 dispatch adapter 的 live entry/raw fence，
+  不改变 driver transport baseline、active C0/C4、token payload、response latency 或 ROB redirect 边界。
+- 当前状态：已完成 coding；response owner 使用独立的 `owner_start_baseline_done` 与
+  `pre_ready_hold_until_sample` 对齐启动历史 event，并在首次开放 ready 前验证空状态。
+
+### [IMPLEMENTATION_DELTA] P2：重复 reason 与 event sequence 跳号必须 fail-fast（待 coding）
+
+- 来源：追加 lifecycle review 发现，`note_l2tlb_flush_event()` 对同 sample 的 reason 直接执行 OR，无法区分“同拍两个不同
+  flush 原因的合法合并”和“同一个 producer/monitor 重复发布相同原因”；`get_l2tlb_event_after()` 只检查
+  `event_seq > cursor`，可能静默跳过中间 event。
+- 术语边界：`reason_mask` 表示 event 的来源原因，`CSR_CHANGE` 与 `FENCE` 是两个独立 reason；`event_seq` 是每个新
+  lifecycle event 的单调编号；`response_owner_event_cursor`/`last_seen_flush_event_seq` 表示 response owner 已连续消费到的
+  event 编号。它们不代表 DUT 的 CSR 值、fence 数量或 token 数量。
+- 修改前逻辑：
+
+  ```text
+  同 sample 已有 reason_mask=CSR_CHANGE，新来 CSR_CHANGE：
+    直接 OR，静默接受重复 reason。
+
+  cursor=3，history 下一条 event_seq=5：
+    只因 5 > 3 就返回 event 5，event 4 被静默跳过。
+  ```
+
+- 修改后逻辑：
+
+  ```text
+  note_l2tlb_flush_event(sample, new_reason):
+    校验 new_reason 非零且只包含 CSR_CHANGE/FENCE；
+    若同 sample 已有 event：
+      若 old_reason_mask & new_reason != 0：uvm_fatal，报告重复 reason/sample/event_seq；
+      否则：允许不同 reason 合并，old_reason_mask |= new_reason；不分配第二个 event_seq；
+    若没有同 sample event：按既有单调分配规则创建一个新 event。
+
+  get_l2tlb_event_after(cursor):
+    找到第一条 event 后，计算 expected_seq = cursor + 1；
+    若 event.event_seq != expected_seq：uvm_fatal，报告 cursor/expected/actual/history；
+    只有严格连续时才把 event 返回给 owner。
+  ```
+
+- 无 dispatch topology 时不创建 response-side event history，但仍需对当前 sample 的 producer reason mask 做相同的
+  重叠检查，防止重复 CSR/FENCE reason 被 watermark OR 静默隐藏。不同 producer 在同 sample 上报不同 reason 仍然允许形成
+  一个合并后的 sample reason mask。
+- 影响范围：只加强 event provenance、reason 去重和 cursor 完整性检查；不改变同 sample 不同 reason 的合法合并、C0/C4
+  barrier 数量、token payload、response latency 或 active responder 的正常调度。
+- 当前状态：本轮只补充执行 plan；源码尚未按本条修改，coding 后需增加重复 reason、合法 reason 合并、event_seq 跳号和
+  reset 后连续编号场景的静态/定向检查。
 
 ## 历史验证记录与重新验收要求
 
