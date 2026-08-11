@@ -275,6 +275,26 @@ case class BackendParams(
   }
 
   /**
+   * Get oldvd vector regfile read port params
+   *
+   * @return Seq[port -> Seq[(exuIdx, priority)] ]
+   */
+  def getOldVdRdPortParams: Seq[(Int, Seq[(Int, Int)])] = {
+    allRealExuParams
+      .filter(_.oldVdRD != null)
+      .map(x => x.oldVdRD -> x.exuIdx)
+      .groupBy { case (rdCfg, exuIdx) => rdCfg.port }
+      .map {
+        case (port, rdIdxSeq) =>
+          port -> rdIdxSeq.map { case (rd, exuIdx) => (exuIdx, rd.priority) }
+      }
+      .toSeq
+      .sortBy { case (port, _) => port }
+  }
+
+  def getOldVdRdPortIndices = getOldVdRdPortParams.map(_._1)
+
+  /**
     * Get regfile write back port params
     *
     * @param dataCfg [[IntData]] or [[VecData]]
@@ -332,6 +352,7 @@ case class BackendParams(
     dataCfg match {
       case VlData() => this.getVlRdPortParams.map(_._1)
       case V0Data() => this.getV0RdPortParams.map(_._1)
+      case VecData() => this.getRdPortParams(dataCfg).map(_._1) ++ this.getOldVdRdPortIndices
       case _ => this.getRdPortParams(dataCfg).map(_._1)
     }
   }
@@ -356,8 +377,8 @@ case class BackendParams(
     rdCfgs
   }
 
-  def getRdCfgsIntSch[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
-    val rdCfgs: Seq[Seq[Seq[RdConfig]]] = intSchdParams.get.issueBlockParams.map(
+  def getRdCfgs[T <: RdConfig](schdBlockParams: SchdBlockParams)(implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
+    val rdCfgs: Seq[Seq[Seq[RdConfig]]] = schdBlockParams.issueBlockParams.map(
       _.exuBlockParams.map(
         _.rfrPortConfigs.map(
           _.collectFirst { case x: T => x }
@@ -365,31 +386,20 @@ case class BackendParams(
         )
       )
     )
+
     rdCfgs
+  }
+
+  def getRdCfgsIntSch[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
+    this.getRdCfgs[T](intSchdParams.get)(tag)
   }
 
   def getRdCfgsFltSch[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
-    val rdCfgs: Seq[Seq[Seq[RdConfig]]] = fpSchdParams.get.issueBlockParams.map(
-      _.exuBlockParams.map(
-        _.rfrPortConfigs.map(
-          _.collectFirst { case x: T => x }
-            .getOrElse(NoRD())
-        )
-      )
-    )
-    rdCfgs
+    this.getRdCfgs[T](fpSchdParams.get)(tag)
   }
 
   def getRdCfgsVecSch[T <: RdConfig](implicit tag: ClassTag[T]): Seq[Seq[Seq[RdConfig]]] = {
-    val rdCfgs: Seq[Seq[Seq[RdConfig]]] = vecSchdParams.get.issueBlockParams.map(
-      _.exuBlockParams.map(
-        _.rfrPortConfigs.map(
-          _.collectFirst { case x: T => x }
-            .getOrElse(NoRD())
-        )
-      )
-    )
-    rdCfgs
+    this.getRdCfgs[T](vecSchdParams.get)(tag)
   }
 
   def getVlRdCfgs: Seq[Seq[Seq[VlRD]]] = {
@@ -447,6 +457,7 @@ case class BackendParams(
   def getFpRfReadSize = {
     this.fpPregParams.numRead.getOrElse(this.getRdPortIndices(FpData()).size)
   }
+
   /**
     * Get size of read ports of vec regfile
     *

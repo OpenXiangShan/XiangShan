@@ -28,10 +28,14 @@ class VldMaskGen(implicit p: Parameters) extends XSModule {
   private val activeBytesUopMask = Mux1H(uopIdxOH, Seq.tabulate(uopIdxOH.getWidth)(x =>
     activeBytesFullMask((x + 1) * VldMaskGen.uopBytes - 1, x * VldMaskGen.uopBytes)
   ))
+  private val vstartBytesUopMask = Mux1H(uopIdxOH, Seq.tabulate(uopIdxOH.getWidth)(x =>
+    vstartBytesFullMask((x + 1) * VldMaskGen.uopBytes - 1, x * VldMaskGen.uopBytes)
+  ))
   private val v0BytesUopMask = Mux(in.vm, Fill(VldMaskGen.uopBytes, 1.U), in.v0Mask)
-  // Whole-register loads/stores (vlnr/vlm, memOpType MASK) are unaffected by vl/vstart:
-  // each uop covers its whole register.
-  out.mask := Mux(in.isWhole, Fill(VldMaskGen.uopBytes, 1.U), activeBytesUopMask & v0BytesUopMask)
+  // Whole-register loads/stores (vlnr/vlm, memOpType MASK) ignore vl, so each uop covers its whole
+  // register, but they are not exempt from vstart: the elements before vstart stay untouched.
+  out.mask := Mux(in.isWhole, Fill(VldMaskGen.uopBytes, 1.U), activeBytesUopMask) &
+    ~vstartBytesUopMask & v0BytesUopMask
 
   private val vlBytesFull = Mux1H(eewOH, Seq.tabulate(eewCases)(x => (vlExt << x)(byteCountShiftWidth - 1, 0)))
   private val uopByteOffWidth = log2Ceil(VldMaskGen.uopBytes)
@@ -63,6 +67,7 @@ class VldMaskGen(implicit p: Parameters) extends XSModule {
     val countOH = UIntToOH(count(maxBytesLog2 - 1, 0), maxBytes)
     Fill(maxBytes, isFull) | ~prefixOrFromLSB(countOH)
   }
+  out.useVstart := in.vstart =/= 0.U
 }
 
 object VldMaskGen{
@@ -81,5 +86,6 @@ object VldMaskGen{
   class Out(implicit p: Parameters) extends XSBundle {
     val mask = UInt(uopBytes.W)
     val vlBytes = UInt(vlBytesWidth.W)
+    val useVstart = Bool()
   }
 }

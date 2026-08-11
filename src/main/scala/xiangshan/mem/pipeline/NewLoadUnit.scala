@@ -136,6 +136,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   val replay = Wire(new LoadStageIO)
   connectSamePort(replay, io.replay.bits)
   replay.vlByteMask.foreach(_ := io.replay.bits.mask)
+  replay.vlBytes.foreach(_ := io.replay.bits.vlBytes.get)
+  replay.useVstart.foreach(_ := io.replay.bits.useVstart.get)
   replay.mask := Mux(
     io.replay.bits.accessType.isVector(),
     vectorMaskGen(io.replay.bits.vaddr, io.replay.bits.uop.fuOpType, io.replay.bits.mask),
@@ -155,6 +157,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   fastReplay.valid := io.fastReplay.valid
   connectSamePort(fastReplay.bits, io.fastReplay.bits)
   fastReplay.bits.vlByteMask.foreach(_ := io.fastReplay.bits.vlByteMask.get)
+  fastReplay.bits.vlBytes.foreach(_ := io.fastReplay.bits.vlBytes.get)
+  fastReplay.bits.useVstart.foreach(_ := io.fastReplay.bits.useVstart.get)
   fastReplay.bits.noQuery.get := true.B
   fastReplay.bits.entrance := io.fastReplay.bits.entrance | LoadEntrance.fastReplay.U
   fastReplay.bits.DontCareUnalign() // assign later in sink
@@ -245,6 +249,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.DontCareReplayFromLRQFields()
   scalarIssue.bits.DontCareVectorFields()
   scalarIssue.bits.vlByteMask.get := vldMaskGen.out.mask
+  scalarIssue.bits.vlBytes.get := vldMaskGen.out.vlBytes
+  scalarIssue.bits.useVstart.get := vldMaskGen.out.useVstart
   scalarIssue.bits.hasROBEntry := true.B
   scalarIssue.bits.missDbUpdated := false.B
   scalarIssue.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
@@ -1625,6 +1631,20 @@ class LoadUnitS3(param: ExeUnitParams)(
     port.valid := vldVecRfWriteback
     port.bits := DontCare
   }
+  vldout.vldToRVP.foreach { req =>
+    req.valid := vldVecRfWriteback
+    req.bits := uop.psrc(2)(VfPhyRegIdxWidth - 1, 0)
+  }
+  vldout.vldMergeInfo.foreach { info =>
+    info.valid := vldVecRfWriteback
+    info.bits.uopIdx := uop.uopIdx
+    info.bits.mask := in.vlByteMask.get
+    info.bits.vlBytes := in.vlBytes.get
+    info.bits.eew := LSUOpType.vecElemSize(uop.fuOpType)
+    info.bits.vma := uop.vtype.vma
+    info.bits.vta := uop.vtype.vta
+    info.bits.useVstart := in.useVstart.get
+  }
   vldout.toV0Rf.foreach { case port =>
     port.valid := uop.v0Wen && pipeIn.valid && endPipe && shouldWakeup
     port.bits := DontCare
@@ -1650,7 +1670,9 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.fullva := exceptionFullva
   lqWrite.paddr := paddr
   lqWrite.gpaddr := exceptionGpaddr
-  lqWrite.mask := Mux(isVector, Mux(s4HeadValid, s4Head.vlByteMask.get, in.vlByteMask.get), mask)
+  lqWrite.mask := Mux(isVector, in.vlByteMask.get, mask)
+  lqWrite.vlBytes := Mux(isVector, in.vlBytes.get, 0.U)
+  lqWrite.useVstart := isVector && in.useVstart.get
   lqWrite.nc := in.nc.get || in.isNCReplay()
   lqWrite.mmio := in.mmio.get
   lqWrite.memBackTypeMM := !in.pmp.get.mmio

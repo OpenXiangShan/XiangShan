@@ -340,6 +340,11 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           v0SrcStatus.psrc                                      := s0_enqBits(enqIdx).psrcV0.get
           v0SrcStatus.dataSource.value                          := DataSource.reg // Todo: update when support vl wake up
       }
+      enq.bits.status.srcStatusOldVd.foreach {
+        srcStatusOldVd =>
+          srcStatusOldVd.srcState                               := s0_enqBits(enqIdx).oldVdSrcState.get
+          srcStatusOldVd.psrc                                   := s0_enqBits(enqIdx).oldVdPsrc.get
+      }
       enq.bits.status.blocked                                   := false.B
       enq.bits.status.issued                                    := false.B
       enq.bits.status.firstIssue                                := true.B
