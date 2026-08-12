@@ -141,18 +141,17 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   /**
    * NTL (Non-Temporal Locality) hint attach: bind hint at slot i to memory target at slot i+1 (or next cycle slot)
    */
-  val ntlAddedSimpleDecodedInst = WireDefault(simpleDecodedInst)
   val inFires = io.in.map(_.fire)
   for (i <- 0 until DecodeWidth - 1) {
-    when (inFires(i) && simpleDecodedInst(i).isNtlHint && inFires(i + 1) && ntlAddedSimpleDecodedInst(i + 1).isMemAll) {
-      ntlAddedSimpleDecodedInst(i + 1).ntl.valid := true.B
-      ntlAddedSimpleDecodedInst(i + 1).ntl.bits  := NtlType(simpleDecodedInst(i).lsrc(1))
+    when (inFires(i) && simpleDecodedInst(i).isNtlHint && inFires(i + 1) && simpleDecodedInst(i + 1).isMemAll) {
+      simpleDecodedInst(i + 1).ntl.valid := true.B
+      simpleDecodedInst(i + 1).ntl.bits  := NtlType(simpleDecodedInst(i).lsrc(1))
     }
   }
   val pendingNtl = RegInit(0.U.asTypeOf(Valid(NtlType())))
-  when (pendingNtl.valid && inFires(0) && ntlAddedSimpleDecodedInst(0).isMemAll) {
-    ntlAddedSimpleDecodedInst(0).ntl.valid := true.B
-    ntlAddedSimpleDecodedInst(0).ntl.bits  := pendingNtl.bits
+  when (pendingNtl.valid && inFires(0) && simpleDecodedInst(0).isMemAll) {
+    simpleDecodedInst(0).ntl.valid := true.B
+    simpleDecodedInst(0).ntl.bits  := pendingNtl.bits
   }
   val lastFireSlotOH = (0 until DecodeWidth).map { i =>
     if (i == DecodeWidth - 1) inFires(i) else inFires(i) && !inFires(i + 1)
@@ -191,7 +190,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   /** existance of complex instructions among first few simple decoders' results, which needs decoding */
   val complexValid = VecInit((isComplexVec zip noMoreThanRenameReady).map(x => x._1 & x._2)).asUInt.orR
   /** selected complex instruction for complex decoder */
-  val complexInst = PriorityMuxDefault(isComplexVec.zip(ntlAddedSimpleDecodedInst), 0.U.asTypeOf(new DecodeOutUop))
+  val complexInst = PriorityMuxDefault(isComplexVec.zip(simpleDecodedInst), 0.U.asTypeOf(new DecodeOutUop))
   /** selected complex micro operation information for complex decoder */
   val complexUopInfo = PriorityMuxDefault(isComplexVec.zip(decoders.map(_.io.deq.uopInfo)), 0.U.asTypeOf(new UopInfo))
 
@@ -265,7 +264,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
    * use simple decoded insts to fill the rest space in DecodeWidth.
    */
   for (i <- 0 until DecodeWidth) {
-    finalDecodedInst(i) := Mux(complexNum > i.U, complexDecodedInst(i), ntlAddedSimpleDecodedInst(i.U - complexNum))
+    finalDecodedInst(i) := Mux(complexNum > i.U, complexDecodedInst(i), simpleDecodedInst(i.U - complexNum))
     finalDecodedInstValid(i) := Mux(complexNum > i.U, complexDecodedInstValid(i), simplePrefixVec(i.U - complexNum))
   }
 
