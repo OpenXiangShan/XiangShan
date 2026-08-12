@@ -451,7 +451,7 @@ def _tf_next_ptr(flag: int, value: int, size: int) -> tuple[int, int]:
 def _tf_ptr_at_or_after(left: tuple[int, int], right: tuple[int, int]) -> bool:
     left_flag, left_value = (int(left[0]), int(left[1]))
     right_flag, right_value = (int(right[0]), int(right[1]))
-    return bool((left_flag != right_flag) ^ (left_value >= right_value))
+    return bool((left_flag != right_flag) ^ (left_value > right_value))
 
 
 def _tf_mainpipe_fail_reason(recorder) -> dict[str, bool] | None:

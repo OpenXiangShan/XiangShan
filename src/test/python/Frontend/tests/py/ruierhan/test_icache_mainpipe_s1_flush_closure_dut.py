@@ -37,6 +37,14 @@ _SIGNALS = {
     "bpu_valid": (
         _MAIN + "io_flushFromBpu_s3_valid",
     ),
+    "bpu_flag": (
+        _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_flag",
+        _MAIN + "io_flushFromBpu_s3_bits_flag",
+    ),
+    "bpu_value": (
+        _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_value",
+        _MAIN + "io_flushFromBpu_s3_bits_value",
+    ),
     "s1_valid": _aliases(_MAIN + "s1_valid"),
     "s1_ready": _aliases(_MAIN + "s1_ready"),
     "s1_fire": _aliases(_MAIN + "s1_fire"),
@@ -44,6 +52,7 @@ _SIGNALS = {
     "s1_fetch_finish": (
         _MAIN + "io_toIfu_req_valid",
     ),
+    "s1_ftq0_flag": _aliases(_MAIN + "s1_req_0_ftqIdx_flag"),
     "s1_ftq0_value": _aliases(_MAIN + "s1_req_0_ftqIdx_value"),
     "miss_req_valid": (
         _MAIN + "__Vtogcov__io_missReq_valid",
@@ -100,6 +109,23 @@ def _try_read(env, names: Sequence[str]) -> int | None:
 def _read(env, key: str, default: int = 0) -> int:
     value = _try_read(env, _SIGNALS[key])
     return int(default) if value is None else int(value)
+
+
+def _can_read(env, key: str) -> bool:
+    return _try_read(env, _SIGNALS[key]) is not None
+
+
+def _require_bpu_s3_ftq_observable(env) -> None:
+    missing = [
+        key
+        for key in ("bpu_flag", "bpu_value", "s1_ftq0_flag", "s1_ftq0_value")
+        if not _can_read(env, key)
+    ]
+    if missing:
+        pytest.xfail(
+            "BPU s3 flag/value or MainPipe s1 ftqIdx are not exported: "
+            + ",".join(missing)
+        )
 
 
 def _snapshot(env) -> dict:
@@ -314,11 +340,8 @@ def test_tc_icache_mainpipe_s1_global_flush_pending_miss(env) -> None:
 
 @pytest.mark.funcov_bins("BIN-617")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-@pytest.mark.xfail(
-    reason="BPU s3 flag/value are not exported in the current Verilator signal map; closure is indirect only",
-    strict=False,
-)
 def test_tc_icache_mainpipe_s1_bpu_match(env) -> None:
+    _require_bpu_s3_ftq_observable(env)
     _initialize_bpu_s3_stream(env)
     _drive_bpu_s3_until_s1_hit(
         env,
@@ -330,11 +353,8 @@ def test_tc_icache_mainpipe_s1_bpu_match(env) -> None:
 
 @pytest.mark.funcov_bins("BIN-618")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-@pytest.mark.xfail(
-    reason="BPU s3 flag/value are not exported in the current Verilator signal map; closure is indirect only",
-    strict=False,
-)
 def test_tc_icache_mainpipe_s1_bpu_miss(env) -> None:
+    _require_bpu_s3_ftq_observable(env)
     _initialize_bpu_s3_stream(env)
     _drive_bpu_s3_until_s1_hit(
         env,
