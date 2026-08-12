@@ -259,9 +259,8 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
 
   def startPc: PrunedAddr = startPcVec.get.head // get one duplicate and use its head (startPc for first alignBank)
 
-  // we masked out all branches after the first mispredict branch in Bpu top (refer to Bpu.scala t0_firstMispredictMask)
-  // so, we can assert that branches.map(b => b.valid && b.bits.mispredict) is at-most-one-hot
-  // NOTE: do not use this on Bpu.io.fromFtq.train, it does not ensure the above assertion
+  // FTQ masks out all branches after the first mispredicted branch before sending training to BPU,
+  // so branches.map(b => b.valid && b.bits.mispredict) is at-most-one-hot.
   def mispredictBranch: Valid[BranchInfo] =
     Mux1H(branches.map(b => (b.valid && b.bits.mispredict, b)))
 }
