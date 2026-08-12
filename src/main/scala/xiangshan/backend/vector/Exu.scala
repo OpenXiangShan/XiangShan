@@ -112,6 +112,7 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
         validIO.valid -> validIO.bits.data.vec.get.normal
       )).suggestName(s"ex${i}_vd")
 
+      mgu.in.valid := ex(i).valid
       mgu.in.ctrl.vma := ex(i).bits.ctrl.vtype.get.vma
       mgu.in.ctrl.vta := ex(i).bits.ctrl.vtype.get.vta
       mgu.in.data.mask := Fill(vlenb, ex(i).bits.ctrl.vm.get) | ex(i).bits.data.v0.get // Todo: use vlenb v0
