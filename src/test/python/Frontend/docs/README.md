@@ -10,6 +10,8 @@
    - 唯一测试点、状态、testcase 和 evidence 主表。
 3. `03_funcov_model/frontend_bt_functional_coverage_pilot.csv`
    - 唯一 active coverage registry；`pilot` 仅为兼容保留的历史文件名。
+4. `04_alignment/Frontend_BT_设计验证对齐材料模板.md`
+   - 设计与验证周度对齐材料模板，包含版本基线、验证状态、变更影响和遗留事项。
 
 ## 保留目录
 
@@ -21,6 +23,8 @@
 - `03_funcov_model/`
   - `skills.md`：当前闭环规范。
   - `frontend_bt_functional_coverage_pilot.csv`：当前唯一 coverage registry。
+- `04_alignment/`
+  - `Frontend_BT_设计验证对齐材料模板.md`：只包含字段、统计口径和表格的对齐模板，待评审后填写实际数据。
 
 ## 使用约定
 
