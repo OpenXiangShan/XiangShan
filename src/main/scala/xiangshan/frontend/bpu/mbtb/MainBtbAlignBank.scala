@@ -189,11 +189,6 @@ class MainBtbAlignBank(
   private val s3_replacerSetIdx = RegEnable(getReplacerSetIndex(s2_startPc), s2_fire)
   private val s3_takenMask      = io.s3_takenMask
 
-  // touch taken entries only: not-taken conditional entries are considered not very useful and should be killed first
-  replacer.io.predict.touch.valid        := s3_fire && s3_takenMask.reduce(_ || _)
-  replacer.io.predict.touch.bits.setIdx  := s3_replacerSetIdx
-  replacer.io.predict.touch.bits.wayMask := s3_takenMask.asUInt
-
   /* *** t0 ***
    * read replacer in advance for better timing
    */
@@ -273,8 +268,10 @@ class MainBtbAlignBank(
     t1_newCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, meta.counter.getUpdate(actualTaken))
   }
   t1_meta.zipWithIndex.foreach { case (meta, i) =>
-    val hitMask = t1_branches.map(branch => branch.valid && meta.position === branch.bits.cfiPosition)
-    actualTakenMak(i) := Mux1H(hitMask, t1_branches.map(_.bits.taken))
+    val hitMask = t1_branches.map(branch =>
+      branch.valid && meta.position === branch.bits.cfiPosition && meta.rawHit && branch.bits.taken
+    )
+    actualTakenMak(i) := hitMask.reduce(_ || _)
   }
 
   private val t1_replacerSetIdx  = getReplacerSetIndex(t1_startPc)
@@ -288,6 +285,10 @@ class MainBtbAlignBank(
   replacer.io.train.t1_touch.bits.setIdx  := t1_replacerSetIdx
   replacer.io.train.t1_touch.bits.wayMask := t1_entryWayMask
 
+  // touch taken entries only: not-taken conditional entries are considered not very useful and should be killed first
+  // Timing may be tight here, so the touch is delayed by one cycle.
+  // Side effect: touch ordering may be incorrect when the same setIdx is hit.
+  // Safety: the !t2_entryNeedWrite guard prevents eviction of a freshly allocated entr
   replacer.io.predict.touch.valid        := t2_actualTakenMask.reduce(_ || _) && t2_fire && !t2_entryNeedWrite
   replacer.io.predict.touch.bits.setIdx  := t2_replacerSetIdx
   replacer.io.predict.touch.bits.wayMask := t2_actualTakenMask.asUInt
