@@ -97,10 +97,6 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   io.prediction.bits.target      := getFullTarget(s1_startPc, s1_hitEntry.slot1.target, s1_hitEntry.slot1.targetCarry)
   io.prediction.bits.attribute   := s1_hitEntry.slot1.attribute
 
-  // update replacer
-  replacer.io.predTouch.valid := s1_hit && s1_fire
-  replacer.io.predTouch.bits  := s1_hitIdx
-
   /* *** train stage 0 ***
    * - read entries
    * - check if hits entries
@@ -237,8 +233,11 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   }
 
   // update replacer
-  replacer.io.trainTouch.valid := t1_fire
+  replacer.io.trainTouch.valid := t1_fire && t1_allocate
   replacer.io.trainTouch.bits  := t1_updateIdx
+
+  replacer.io.predTouch.valid := t1_fire && t1_hit && t1_actualTaken
+  replacer.io.predTouch.bits  := t1_updateIdx
 
   /* *** perf *** */
   XSPerfAccumulate("predHit", s1_hit && s1_fire)
