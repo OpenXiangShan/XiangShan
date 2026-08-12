@@ -494,7 +494,20 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t3_canAllocate          = t3_canAllocateTableMask.orR
   private val t3_allocate             = t3_needAllocate && t3_canAllocate
 
-  private val t3_allocateTableOH = PriorityEncoderOH(t3_canAllocateTableMask)
+  // Keep a 15-bit maximal-period LFSR (period 2^15 - 1) even though only the low NumTables bits are used.
+  // The longer period avoids short-period correlation with allocation/training events at negligible hardware cost.
+  // Its taps are {15, 14}, requiring only one feedback XOR; a shorter 8-bit maximal-period LFSR uses four taps.
+  // Randomly filter allocation candidates, then prefer the shorter-history table among the remaining candidates.
+  // Fall back to the original candidate mask when the random mask filters out every candidate.
+  require(NumTables <= 15, s"TAGE NumTables ($NumTables) must be less than the 15-bit LFSR width")
+  private val t3_allocateTableRandomMask    = random.LFSR(width = 15)(NumTables - 1, 0)
+  private val t3_randomCanAllocateTableMask = t3_canAllocateTableMask & t3_allocateTableRandomMask
+  private val t3_preferredAllocateTableMask = Mux(
+    t3_randomCanAllocateTableMask.orR,
+    t3_randomCanAllocateTableMask,
+    t3_canAllocateTableMask
+  )
+  private val t3_allocateTableOH = PriorityEncoderOH(t3_preferredAllocateTableMask)
   private val t3_allocateWayMask = Mux1H(t3_allocateTableOH, t3_allTableCanAllocateWayMask)
   private val t3_allocateWayOH   = PriorityEncoderOH(t3_allocateWayMask)
   dontTouch(t3_allocateTableOH)
