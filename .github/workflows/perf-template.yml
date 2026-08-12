@@ -21,7 +21,7 @@ on:
         required: false
         type: string
         description: Benchmark type
-        default: gcc15-spec06-1.0c
+        default: spec06-gcc15-1.0c
       benchmarks:
         description: Specific benchmarks to run (comma-separated), leave empty to run all
         required: false
@@ -142,17 +142,17 @@ jobs:
 
           # set CKPT_HOME
           case "${{ inputs.benchmark_type }}" in
-            gcc15-spec06*)
+            spec06-gcc15*)
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260604/checkpoint" >> $GITHUB_ENV
               ;;
-            xscc-spec06*)
+            spec06-xscc*)
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0" >> $GITHUB_ENV
               ;;
-            gcc15-spec26*)
+            spec26-gcc15*)
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec26_rate_gcc15_rv64gcb_260718/checkpoint" >> $GITHUB_ENV
               ;;
-            gcc15-rv64gc-spec26*)
-              echo "Warning: The current spec26 checkpoint is compiled without b extension, performance may not be ideal" >> $GITHUB_STEP_SUMMARY
+            spec26-rv64gc-gcc15*)
+              echo "Warning: This checkpoint is compiled without b extension, performance may not be ideal, consider using -gcb version." >> $GITHUB_STEP_SUMMARY
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec26_gcc15_rv64gc_base_260517/checkpoint" >> $GITHUB_ENV
               ;;
             custom)
@@ -165,31 +165,31 @@ jobs:
 
           # set CKPT_JSON_PATH
           case "${{ inputs.benchmark_type }}" in
-            gcc15-spec06-0.3c)
+            spec06-gcc15-0.3c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260604/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
               ;;
-            gcc15-spec06-1.0c)
+            spec06-gcc15-1.0c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260604/json/checkpoints_all.json" >> $GITHUB_ENV
               ;;
-            xscc-spec06-0.3c)
+            spec06-xscc-0.3c)
               echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/xscc-spec06-0.3.json" >> $GITHUB_ENV
               ;;
-            xscc-spec06-0.8c)
+            spec06-xscc-0.8c)
               echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/xscc-spec06-0.8.json" >> $GITHUB_ENV
               ;;
-            xscc-spec06-1.0c)
+            spec06-xscc-1.0c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
               ;;
-            gcc15-spec26-0.3c)
+            spec26-gcc15-0.3c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec26_rate_gcc15_rv64gcb_260718/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
               ;;
-            gcc15-spec26-1.0c)
+            spec26-gcc15-1.0c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec26_rate_gcc15_rv64gcb_260718/json/checkpoints_all.json" >> $GITHUB_ENV
               ;;
-            gcc15-rv64gc-spec26-0.3c)
+            spec26-rv64gc-gcc15-0.3c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec26_gcc15_rv64gc_base_260517/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
               ;;
-            gcc15-rv64gc-spec26-1.0c)
+            spec26-rv64gc-gcc15-1.0c)
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec26_gcc15_rv64gc_base_260517/json/checkpoints_all.json" >> $GITHUB_ENV
               ;;
             custom)

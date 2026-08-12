@@ -36,18 +36,18 @@ on:
         required: false
         type: choice
         options:
-          - gcc15-spec06-0.3c
-          - gcc15-spec06-1.0c
-          - xscc-spec06-0.3c
-          - xscc-spec06-0.8c
-          - xscc-spec06-1.0c
-          - gcc15-spec26-0.3c
-          - gcc15-spec26-1.0c
-          - gcc15-rv64gc-spec26-0.3c
-          - gcc15-rv64gc-spec26-1.0c
+          - spec06-gcc15-0.3c
+          - spec06-gcc15-1.0c
+          - spec06-xscc-0.3c
+          - spec06-xscc-0.8c
+          - spec06-xscc-1.0c
+          - spec26-gcc15-0.3c
+          - spec26-gcc15-1.0c
+          - spec26-rv64gc-gcc15-0.3c
+          - spec26-rv64gc-gcc15-1.0c
           - custom
           - dryrun
-        default: gcc15-spec06-1.0c
+        default: spec06-gcc15-1.0c
       benchmarks:
         description: Specific benchmarks to run (comma-separated), leave empty to run all
         required: false
