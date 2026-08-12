@@ -14,7 +14,7 @@
 |---|---|---|---|---|
 | [DCache agent](agents/dcache_agent.md) | `auto_inner_dcache_client_out_a/b/c/d/e`、`user_alias`、`user_vaddr`、`user_needHint`、`echo_isKeyword`、FENCE、HFENCE.GVMA、HFENCE.VVMA、`s1_kill/s2_kill`、CBO、`b_data[2:1]`、`b_data[0]`、Probe、ProbeAckData、GrantAck、source、sink、`corrupt`、`TLError`、`L1ErrorMetaArray` | MemBlock DCache TileLink client、DCacheWrapper、LoadPipe、StorePipe、MissQueue、WritebackQueue、CoupledL2 SourceB/SinkA/MainPipe | A/C/E DUT request、B/D responder response；Fence 仅经 LSU kill 间接影响 | Memory flushPipe、DCache-L2 refill hint 与 L2 flush done、L2 内侧 TileLink 请求、权限与回复 flow |
 | [Int writeback agent](agents/int_writeback_agent.md) | `writebackLda`、`writebackSta`、`writebackStd`、`replayInst`、`trigger`、`flushPipe`、split lane | MemBlock、LoadUnit、StoreUnit、StoreQueue、Backend int writeback | `io_mem_to_ooo_writebackLda/Sta/Std_*_valid` | memory trigger、memory flushPipe、ROB/ExceptionGen flow |
-| [L2TLB agent](agents/l2tlb_agent.md) | `dtlbRepeater`、`inner_ptw`、`vpn`、`s2xlate`、PtwReq、CSR history、C-2、multi-outstanding、raw hit、UID multicast、due response、C4、barrier | MemBlock internal DTLB/L2TLB request-response | `_inner_dtlbRepeater_io_ptw_req_0_*`、`_inner_ptw_io_tlb_1_*`、`ptwResp_valid` | DTLB-L2TLB 多请求与 Response 次序 flow、Memory flushPipe flow、PMP/PMA flow |
+| [L2TLB agent](agents/l2tlb_agent.md) | `dtlbRepeater`、`inner_ptw`、`vpn`、`s2xlate`、PtwReq、CSR history、`priv_virt_changed`、`dvirt`、MPRV、MPV、C-2、multi-outstanding、raw hit、UID multicast、due response、C4、barrier | MemBlock internal DTLB/L2TLB request-response | `_inner_dtlbRepeater_io_ptw_req_0_*`、`_inner_ptw_io_tlb_1_*`、`ptwResp_valid`、`priv_virt_changed` | DTLB-L2TLB 多请求与 Response 次序 flow、Memory flushPipe flow、PMP/PMA flow |
 
 ## 维护规则
 

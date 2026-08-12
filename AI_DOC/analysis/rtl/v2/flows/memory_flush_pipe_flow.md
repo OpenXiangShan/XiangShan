@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` |
+| 核验 commit | `d1db8e1cb72570ee7e75bde1c83253d4ceb2582f` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `src/main/scala/xiangshan`；DUT 生成基线见 `mem_ut/ver/ut/memblock/rule/version/v2/memblock_rtl_profile.md` |
-| 最后核验日期 | `2026-08-06` |
+| 最后核验日期 | `2026-08-11` |
 
 ## Flow 范围
 
@@ -626,6 +626,25 @@ redirect 点自身也需要被清掉。
 | PTW filter/repeater flush | PTW filter/repeater | `sfence.valid` 或 translation CSR changed | 清空 entry、指针、inflight counter | TLB/PTW request 合并与返回 | 不区分 `bits.flushPipe` |
 | ROB `flushAfter` redirect | ROB/CtrlBlock | 队头无异常 `flushPipe` 指令可提交 | redirect 广播后各模块本地清除 | frontend/rename/dispatch/issue/mem/LSQ | 清 younger，不清自身 |
 
+### `priv_virt_changed` 的 translation-context flush
+
+V2 `priv_virt_changed` 的生产者不是 SFENCE/HFENCE，也不是 `flushPipe`。CSR wrapper 将
+`tlb.priv.virt` 接到 NewCSR 的 `dvirt`，并用 `DataChanged(tlb.priv.virt)` 产生该位。
+`DataChanged` 比较当前值与保存的前值，并在发现不同的同一拍更新保存值，故一次有效数据访问虚拟化态
+翻转只形成一拍脉冲。`dvirt` 在普通情况下等于当前 `V`，但 MPRV 生效、`MPP != M` 且 NMIE/debug 条件满足时
+选择 `mstatus.MPV`；所以这个 flush 也可由 MPRV/MPV 导致的有效数据访问上下文切换触发。
+
+MemBlock 对顶层 `tlbCsr` 先做两级 `RegNext`，DTLB `PTWNewFilter` 再对 change 条件使用
+`FenceDelay=2`。故顶层 C0 的 pulse 在 C4 清掉 DTLB filter 的 valid、三类指针、计数和 inflight counter；
+同一机制也屏蔽 CSR-change 同拍的外层 PTW response 回填。L2TLB 将其作为本地 `flush`：清 `tlbCounter` 和
+miss queue，终止 PTW/LLPTW/HPTW 活动状态，并用 `flush_latch` 让 flush 前已发 memory request 的晚到 response
+只完成资源回收、不得 refill page-table cache 或回送旧翻译结果。PageTableCache 对 change 阻止 refill，
+但源码没有把该 change 写成 SFENCE/HFENCE 那样的按条目 cache valid 清除。
+
+该路径不生成 ROB `flushAfter`，也不直接清 LSQ、DCache 或物理 cache line；它只刷新 translation context
+相关的 in-flight/filter 状态。后续 translation 使用变化后的 `priv_virt` 决定 S1/S2 stage 与 ASID/VMID
+匹配语义。
+
 ## 关联文档
 
 - [memory trigger flow](memory_trigger_flow.md)：同一 MemExuOutput 写回中的 trigger 异常路径。
@@ -647,6 +666,7 @@ redirect 点自身也需要被清掉。
 - `src/main/scala/xiangshan/backend/decode/DecodeUnit.scala:228-231`：SFENCE/FENCE Decode 置位。
 - `src/main/scala/xiangshan/backend/decode/DecodeUnit.scala:454-460`、`src/main/scala/xiangshan/backend/decode/VecDecoder.scala:743-746`：Svinval 边界和 `VSETVL` 的 flushPipe 属性。
 - `src/main/scala/xiangshan/backend/fu/NewCSR/NewCSR.scala:953-999,1247-1250`、`src/main/scala/xiangshan/backend/fu/wrapper/CSR.scala:65,268,311-314`：当前生效 CSR flushPipe 公式及写回连接。
+- `src/main/scala/xiangshan/backend/fu/NewCSR/NewCSR.scala:1461-1465`、`backend/fu/wrapper/CSR.scala:296-297`、`utility/Hold.scala:78-85`：`dvirt` 的有效态选择和 `priv_virt_changed` 的单拍变化检测。
 - `src/main/scala/xiangshan/Bundle.scala:597-612`、`src/main/scala/xiangshan/backend/fu/Fence.scala:59-91`：`SfenceBundle` 字段、`rs1/rs2` 的 x0 编码、ASID/VMID payload、`s_wait/s_tlb/s_fence` 状态、`flushSb`、普通 `FENCE` 不置 `sfence.valid`，以及 SFENCE/HFENCE 的 payload/写回 fanout。
 - `src/main/scala/xiangshan/XSCore.scala:190,228`、`src/main/scala/xiangshan/mem/MemBlock.scala:1765-1775`：Fence `flushSb` 到 SBuffer/Uncache flush 和 `sbIsEmpty` 返回路径。
 - `src/main/scala/xiangshan/mem/sbuffer/Sbuffer.scala:227-232,534-575,625-692`：`x_drain_all` 状态和排空时向 DCache 发送 `M_XWR`。
@@ -700,6 +720,7 @@ redirect 点自身也需要被清掉。
 | 2026-08-04 | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` | 将 S2 `g_perm` 整体称为“permission 字段”，但未区分其中 `.g` 与真正参与 G-stage permission 的字段 | 明确 `entries.g_perm.g` 结构上保存/传递却不影响 local hit、fence 或 `perm_check()`；只有 `pf/af/A/D/R/W/X` 具有 G-stage 功能语义 | 用户追问 S2 `g_perm.g` 是否实际影响 fence 或翻译行为 | V2 HPTW/PtwCache/L1 DTLB |
 | 2026-08-05 | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` | 只概括“ROB 提交后产生 flushAfter”，未给出队头、ExceptionGen、异常优先级和其它 producer 的精确条件 | 明确 ROB 仅在队头同 key 完成、无异常且 `flushPipe/replayInst` 时发 `flushOut`；`flushPipe` 对应 `flushAfter`，replay/异常/interrupt 对应 `flush`；分支误预测和 `xRET` 也可直接产生 `flushAfter` | 用户追问 ROB 提交后的 flushAfter redirect 的行为和场景 | V2 ROB/CtrlBlock/Fence/Branch/CSR |
 | 2026-08-06 | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` | 只说明 filter 会在延迟后清空 state，未把 `PTWNewFilter` 对同拍 response valid、response-time CSR matcher 与 responder 完成边界写清楚 | 明确 response fire 在 filter flush due sample 不产生可信 DTLB completion；CSR change 的 response matcher 在 C2 已切换到 top C-2 context、C4 才清 entry；同 sample CSR/fence 在验证 lifecycle 中共用一个 barrier，但 RTL 输入事件仍独立 | 复查 L2TLB undo plan 的 C4 严格截止和 CSR/fence barrier 语义 | V2 PTWNewFilter、L2TLB responder、CSR/fence flush timing |
+| 2026-08-11 | `d1db8e1cb72570ee7e75bde1c83253d4ceb2582f` | translation CSR changed 未区分 `priv_virt_changed` 的产生条件与 cache/queue 实际清除范围 | 明确 `priv_virt_changed=DataChanged(dvirt)`，并记录 MPRV/MPV 覆盖、C4 filter 清理、L2TLB outstanding/miss queue/walker 清理、late memory response 抑制 refill，以及不产生 ROB/LSQ/DCache 全局 flush 的边界 | 用户要求结合 Scala 分析该信号的 flush 影响 | V2 CSR、MemBlock DTLB、PTW、L2TLB |
 
 ## 待确认项
 

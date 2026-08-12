@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` |
+| 核验 commit | `d1db8e1cb72570ee7e75bde1c83253d4ceb2582f` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `build_memblock/rtl/MemBlock.sv`、`src/main/scala/xiangshan/cache/mmu`、V2 `l2tlb_interface_profile.md` |
-| 最后核验日期 | `2026-08-09` |
+| 最后核验日期 | `2026-08-11` |
 
 ## Agent 职责和边界
 
@@ -96,6 +96,34 @@ CSR change 与 fence 是两个独立的 DUT 事件；测试框架只在它们的
 这只是 responder 的生命周期记账，不表示 RTL 将两个输入合成为一条信号；不同 sample 必须建立不同
 barrier。
 
+### `priv_virt_changed` 的 RTL 产生式与 flush 范围
+
+`priv_virt` 不是单纯的当前特权态 `V`。CSR wrapper 将它连接到 NewCSR 的数据访问有效虚拟化态
+`dvirt`；当允许 MPRV 生效且 `MPP != M` 时，`dvirt` 选择 `mstatus.MPV`，否则选择当前 `V`。
+因此进入或退出 VS/VU，也可能是 MPRV、MPV、debug 或 NMIE 条件改变而令有效数据访问虚拟化态翻转，
+都可能使 `priv_virt` 改变。
+
+`priv_virt_changed = DataChanged(priv_virt)`。`DataChanged` 将前一拍观察值保存在寄存器中，仅在当前值
+与该寄存器不同时置位，并在该拍把寄存器更新为当前值。因此稳定的 `priv_virt=0` 或 `1` 不会持续置位
+`priv_virt_changed`；一次 0/1 翻转产生一个时钟周期的脉冲。它不是 CSR write valid，也不应由验证环境
+按 `priv_virt` 的高电平长期驱动。
+
+该脉冲与三种 translation CSR 的 `changed` 并列为 MMU context flush 条件。顶层进入 MemBlock 后先经过
+两级 `RegNext`，DTLB `PTWNewFilter` 再经 `FenceDelay=2` 产生实际 filter flush，所以顶层 CSR sample C0
+的 change 在 C4 清除 DTLB filter。C0 到 C3 间已经接受的 request 仍可能存在；验证 responder 只能登记
+barrier 和保持 ready 为低，不能在 C0 提前删除 token。
+
+在 C4，`PTWNewFilter` 清除所有 filter `v`、enqueue/issue/dequeue 指针、计数与 inflight counter；MemBlock
+同时抑制 CSR-change 同拍的外层 PTW response 有效。L2TLB 则将 `tlbCounter` 归零、flush miss queue、停止
+PTW/LLPTW/HPTW 当前状态，禁止该拍 memory response refill。对 flush 前已发 memory request，只置
+`flush_latch`；晚到 memory response 仍用于释放 `waiting_resp`，但不能 refill cache 或重新向 DTLB 返回旧
+translation。PageTableCache 对该 change 停止各级 refill，但不像 SFENCE/HFENCE 的地址/ASID/VMID 操作那样
+在此处逐项清其 cache valid bits。
+
+这不是 ROB `flushAfter`、LSQ redirect、DCache line invalidate 或全核 pipeline flush。`priv_virt_changed`
+的直接作用域是翻译上下文、DTLB/PTW/L2TLB 的未完成 translation 生命周期；后续 request 将以变化后的
+`priv_virt` 选择相应的 stage、ASID 和 VMID 语义。
+
 legacy `tc_base` default sequence和`basicTest + VSEQ_MAIN`显式sequence是两个独立合法入口；同一testcase
 不得同时启动两者。owner helper只维护公共 lifecycle/UID waiting 状态，UVM错误由sequence层报告。
 
@@ -152,6 +180,8 @@ payload 已独立保存 S1/S2 level、PPN、permission、PBMT、raw/effective fa
 - `src/main/scala/xiangshan/cache/mmu/MMUBundle.scala:1124-1136,1326-1414`：request/response payload 与内容匹配。
 - `src/main/scala/xiangshan/cache/mmu/Repeater.scala:163-289,338-440,465-620`：filter entry 保存、raw-hit 遍历、response 延迟/广播和 flush 清除；V2 DTLB 实际使用 `PTWNewFilter`，旧 `PTWFilter` 的显式 valid 清除仅作对照。
 - `src/main/scala/xiangshan/mem/MemBlock.scala:739-741`：PTW response 在 sfence/CSR change 边界的外层寄存与回填屏蔽。
+- `src/main/scala/xiangshan/backend/fu/NewCSR/NewCSR.scala:1461-1465`、`backend/fu/wrapper/CSR.scala:296-297`、`utility/Hold.scala:78-85`：`dvirt` 的 MPRV/MPV 覆盖条件，以及 `DataChanged` 的单拍变化检测实现。
+- `src/main/scala/xiangshan/cache/mmu/Repeater.scala:372,615-624`、`L2TLB.scala:91,198-203,539-541,688-699`：CSR context change 的 C4 filter 清除、L2TLB outstanding 归零、late memory response 的 flush latch 与 refill 抑制。
 - `src/main/scala/xiangshan/cache/mmu/L2TLB.scala:628-685`：多路径 response 到 per-source output。
 - `src/main/scala/xiangshan/cache/mmu/L2TLB.scala:183-223`、
   `src/main/scala/xiangshan/cache/mmu/PageTableWalker.scala:711-1085`：每次 request/response 计数与
@@ -168,6 +198,7 @@ payload 已独立保存 S1/S2 level、PPN、permission、PBMT、raw/effective fa
 | 2026-08-06 | `7861962dba6f1b6ceb1da7996764b31d3207b5e6` | 旧文档允许在顶层 flush event 到达时提前取消 pending，且未说明 response UID 回填使用何时的 CSR | 明确 C0 只登记 epoch/due，C4 才取消仍未完成 token；request capture 与 response-to-UID raw hit 分别使用各自 DUT global sample 的 C-2 CSR，UID issue-time CSR 仅保留历史；同 sample CSR change 与 fence 仍只合并一个 lifecycle barrier | 复查 `PTWNewFilter` response matching、flush/回填边界及 L2TLB undo plan | V2 L2TLB responder flush、CSR history 与 UID 记账 |
 | 2026-08-09 | 本地 V2 payload 实现 | 文档仍描述一套共享 `entry.pte_*`、共享 PPN/level 且 S2 GAF 固定 0 | 同步独立 S1/S2 PTE、PPN、level、PBMT、four-fault payload、one-hot sector 与 width fail-fast 的实际实现 | V2 random payload plan coding 后长期接口文档需要消除旧模型描述 | V2 L2TLB response payload 与 agent 接口边界 |
 | 2026-08-11 | P1 UID marker 复核 | request-fire C-2 CSR 已用于 token，却可能被 UID issue-time CSR 的额外比较否决 | 明确 marker 只能以 request-fire C-2 CSR/key 判定；issue-time CSR 不参与 marker 接纳 | 避免 CSR 在 issue 与 fire 之间变化时丢失 UID request provenance | V2 UID marker、C4 cancel 与后续 redirect/reissue 边界 |
+| 2026-08-11 | `d1db8e1cb72570ee7e75bde1c83253d4ceb2582f` | 只笼统称 translation CSR changed，未说明 `priv_virt_changed` 的有效态来源和实际清除范围 | 明确其为 `DataChanged(dvirt)` 的单拍脉冲；`dvirt` 受 V 与 MPRV/MPV 等条件影响，并补充 C4 filter、L2TLB outstanding、walker 和晚到 memory response 的处理边界 | 用户要求结合 V2 Scala 追踪 `priv_virt_changed` 的 flush 影响 | V2 MemBlock DTLB/PTW/L2TLB 与 mem_ut responder |
 
 ## 待确认项
 
