@@ -5,7 +5,10 @@ from pathlib import Path
 import Frontend_api
 import Frontend_env
 import pytest
+import env
+from env import FrontendMonitor
 from env import api as env_api
+from env.monitors.frontend_monitor import FrontendMonitor as CanonicalFrontendMonitor
 from env.runtime import fixtures
 from env.core.frontend_env import FrontendEnv
 from env.runtime.pylib import frontend_offset_path, frontend_pylib_path
@@ -59,6 +62,14 @@ def test_frontend_env_re_exports_env_objects():
     assert Frontend_env.env is fixtures.env
     assert Frontend_env.full_env is fixtures.full_env
     assert sorted(Frontend_env.__all__) == ["FrontendEnv", "env", "full_env"]
+
+
+def test_env_root_re_exports_frontend_monitor():
+    assert FrontendMonitor is CanonicalFrontendMonitor
+    assert env.FrontendMonitor is CanonicalFrontendMonitor
+    namespace = {}
+    exec("from env import *", namespace)
+    assert namespace["FrontendMonitor"] is CanonicalFrontendMonitor
 
 
 def test_frontend_pylib_path_selects_sim_package(monkeypatch):
