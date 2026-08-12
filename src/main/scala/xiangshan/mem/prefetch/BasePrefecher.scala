@@ -52,6 +52,7 @@ class PrefetchCtrl(implicit p: Parameters) extends XSBundle {
   val l2_pf_pbop_enable = Bool()
   val l2_pf_vbop_enable = Bool()
   val l2_pf_tp_enable = Bool()
+  val l2_pf_cdp_enable = Bool()
   val l2_pf_delay_latency = UInt(10.W)
   val berti_enable = Bool()
 
@@ -62,6 +63,7 @@ class PrefetchCtrl(implicit p: Parameters) extends XSBundle {
     res.l2_pbop_en := l2_pf_pbop_enable
     res.l2_vbop_en := l2_pf_vbop_enable
     res.l2_tp_en := l2_pf_tp_enable
+    res.l2_cdp_en := l2_pf_cdp_enable
     res.l2_pf_delay_latency := l2_pf_delay_latency
     res
   }
