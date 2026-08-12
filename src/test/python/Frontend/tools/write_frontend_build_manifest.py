@@ -145,7 +145,9 @@ def main() -> int:
     status_output = _git(
         repo_root,
         "status",
-        "--porcelain=v1",
+        # Use the unversioned spelling for compatibility with older Git
+        # releases that do not recognize the versioned form.
+        "--porcelain",
         "--untracked-files=all",
         "--ignore-submodules=untracked",
     )
