@@ -403,9 +403,55 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
         (!(t0_meta.useScPred(predIdx) && t0_meta.scPred(predIdx) === taken) || !(t0_meta.useScPred(predIdx) &&
           t0_meta.tagePredValid(predIdx) && t0_meta.scPred(predIdx) === t0_meta.tagePred(predIdx)))
     })
+  private val t0_writeValidVecRef =
+    VecInit(t0_branches.zip(t0_branchesScIdxHitVec).zip(t0_branchesScIdxVec).zip(t0_writeTakenVec).map {
+      case (((b, hit), predIdx), taken) =>
+        b.valid && b.bits.attribute.isConditional && hit && t0_meta.tagePredValid(predIdx) &&
+        (t0_meta.scPred(predIdx) =/= taken || !t0_meta.sumAboveThres(predIdx))
+    })
+  private val t0_writeValidBothVec =
+    VecInit(t0_writeValidVec.zip(t0_writeValidVecRef).map { case (impl, ref) => impl && ref })
+  private val t0_writeValidImplOnlyVec =
+    VecInit(t0_writeValidVec.zip(t0_writeValidVecRef).map { case (impl, ref) => impl && !ref })
+  private val t0_writeValidRefOnlyVec =
+    VecInit(t0_writeValidVec.zip(t0_writeValidVecRef).map { case (impl, ref) => !impl && ref })
+  private val t0_writeValidImplOnlyScCorrectTageWrongVec = VecInit(
+    t0_writeValidImplOnlyVec.zip(t0_branchesScIdxVec).zip(t0_writeTakenVec).map {
+      case ((implOnly, predIdx), taken) =>
+        implOnly && t0_meta.scPred(predIdx) === taken && t0_meta.scPred(predIdx) =/= t0_meta.tagePred(predIdx)
+    }
+  )
+  private val t0_useScPredSumAboveThresMismatchVec = VecInit(
+    t0_branches.zip(t0_branchesScIdxHitVec).zip(t0_branchesScIdxVec).map {
+      case ((branch, hit), predIdx) =>
+        branch.valid && branch.bits.attribute.isConditional && hit && t0_meta.tagePredValid(predIdx) &&
+        t0_meta.useScPred(predIdx) =/= t0_meta.sumAboveThres(predIdx)
+    }
+  )
+
   private val t0_needWrite    = t0_writeValidVec.reduce(_ || _)
+  private val t0_needWriteRef = t0_writeValidVecRef.reduce(_ || _)
   private val t0_bankConflict = t0_needWrite && s0_fire && t0_bankMask === s0_bankMask
   io.trainReady := !t0_bankConflict
+
+  XSPerfAccumulate("t0_writeValid_impl_branches", Mux(t0_fire, PopCount(t0_writeValidVec), 0.U))
+  XSPerfAccumulate("t0_writeValid_ref_branches", Mux(t0_fire, PopCount(t0_writeValidVecRef), 0.U))
+  XSPerfAccumulate("t0_writeValid_both_branches", Mux(t0_fire, PopCount(t0_writeValidBothVec), 0.U))
+  XSPerfAccumulate("t0_writeValid_impl_only_branches", Mux(t0_fire, PopCount(t0_writeValidImplOnlyVec), 0.U))
+  XSPerfAccumulate("t0_writeValid_ref_only_branches", Mux(t0_fire, PopCount(t0_writeValidRefOnlyVec), 0.U))
+  XSPerfAccumulate(
+    "t0_writeValid_impl_only_sc_correct_tage_wrong_branches",
+    Mux(t0_fire, PopCount(t0_writeValidImplOnlyScCorrectTageWrongVec), 0.U)
+  )
+  XSPerfAccumulate(
+    "t0_useScPred_sumAboveThres_mismatch_branches",
+    Mux(t0_fire, PopCount(t0_useScPredSumAboveThresMismatchVec), 0.U)
+  )
+  XSPerfAccumulate("t0_needWrite_impl", t0_fire && t0_needWrite)
+  XSPerfAccumulate("t0_needWrite_ref", t0_fire && t0_needWriteRef)
+  XSPerfAccumulate("t0_needWrite_impl_only", t0_fire && t0_needWrite && !t0_needWriteRef)
+  XSPerfAccumulate("t0_needWrite_ref_only", t0_fire && !t0_needWrite && t0_needWriteRef)
+
   pathTable.zip(t0_pathIdx).foreach { case (table, idx) =>
     table.io.trainReadReq.valid         := t0_fire && t0_needWrite && PathEnable.B
     table.io.trainReadReq.bits.setIdx   := idx
@@ -430,7 +476,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   biasTable.io.trainReadReq.bits.bankMask := t0_bankMask
 
   dontTouch(t0_bankConflict)
-  XSPerfAccumulate("t0_writeConflict", t0_bankConflict)
+  XSPerfAccumulate("t0_writeConflict", t0_bankConflict && t0_fire)
 
   /*
    *  train pipeline stage 1
