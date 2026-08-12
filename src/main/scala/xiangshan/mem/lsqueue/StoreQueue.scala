@@ -317,16 +317,17 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   // rdataPtrExtNext and rdataPtrExtNext+1 entry will be read from dataModule
   val rdataPtrExtNext = Wire(Vec(EnsbufferWidth, new SqPtr))
   val sqReadCnt = WireInit(0.U(log2Ceil(EnsbufferWidth + 1).W))
-  val readyReadGoVec = WireInit(VecInit((0 until EnsbufferWidth).map(i =>
-    if(i == 0) {
-      dataBuffer.io.enq(i).fire && dataBuffer.io.enq(i).bits.sqNeedDeq ||
-      allocated(rdataPtrExt(i).value) && completed(rdataPtrExt(i).value) && nc(rdataPtrExt(i).value) ||
-      io.mmioStout.fire || io.vecmmioStout.fire
+  val readyReadGoVec = Wire(Vec(EnsbufferWidth, Bool()))
+  for (i <- 0 until EnsbufferWidth) {
+    if (i == 0) {
+      readyReadGoVec(i) := dataBuffer.io.enq(i).fire && dataBuffer.io.enq(i).bits.sqNeedDeq ||
+        allocated(rdataPtrExt(i).value) && completed(rdataPtrExt(i).value) && nc(rdataPtrExt(i).value) ||
+        io.mmioStout.fire || io.vecmmioStout.fire
     } else {
-      dataBuffer.io.enq(i).fire && dataBuffer.io.enq(i).bits.sqNeedDeq ||
-      allocated(rdataPtrExt(i).value) && completed(rdataPtrExt(i).value) && nc(rdataPtrExt(i).value)
+      readyReadGoVec(i) := dataBuffer.io.enq(i).fire && dataBuffer.io.enq(i).bits.sqNeedDeq ||
+        allocated(rdataPtrExt(i).value) && completed(rdataPtrExt(i).value) && nc(rdataPtrExt(i).value) && readyReadGoVec(i - 1)
     }
-  )))
+  }
   sqReadCnt := PopCount(readyReadGoVec)  
   rdataPtrExtNext := rdataPtrExt.map(_ + sqReadCnt)
 
@@ -970,7 +971,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   ncReq.bits.robIdx := uop(GatedRegNext(rdataPtrExtNext(0)).value).robIdx
   ncReq.bits.memBackTypeMM := memBackTypeMM(GatedRegNext(rdataPtrExtNext(0)).value)
   ncReq.bits.nc := true.B
-  ncReq.bits.id := rptr0
+  ncReq.bits.id := ncWaitRespPtrReg
 
   ncResp.ready := io.uncache.resp.ready
   ncResp.valid := io.uncache.resp.fire && io.uncache.resp.bits.nc
