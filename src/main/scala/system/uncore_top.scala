@@ -1395,6 +1395,8 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val dmint   = IO(dmTop.module.dmint.cloneType)
     val req_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for request die
     val self_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for current die
+    val reqIdSync = RegNext(req_id, 0.U(params.DieIDWidth.W))
+    val selfIdSync = RegNext(self_id, 1.U(params.DieIDWidth.W))
     childClock := clock
     childReset := reset
     // instance aplic
@@ -1408,7 +1410,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     }
     // connect io
     val noc2msi = s_noc2msi.viewAs[AXI4Bundle]
-    val noc2msiSelfId = self_id.pad(4)
+    val noc2msiSelfId = selfIdSync.pad(4)
     def routeNoc2msiAddr(addr: UInt, isLocal: Bool): UInt = {
       Mux(isLocal, Cat(0.U(4.W), addr(43, 0)), addr)
     }
@@ -1463,8 +1465,8 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     dmTop.module.m_sba2noc.foreach(_ <> m_sba2noc.get)
     dmio <> dmTop.module.dmio
     dmint <> dmTop.module.dmint
-    dmTop.module.req_id := req_id
-    dmTop.module.self_id := self_id
+    dmTop.module.req_id := reqIdSync
+    dmTop.module.self_id := selfIdSync
   // syscnt connect
     syscnt.module.rtc_clock       := rtc_clock
     syscnt.module.rtc_reset       := rtc_reset
