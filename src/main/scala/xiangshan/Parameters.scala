@@ -40,6 +40,7 @@ import xiangshan.cache.wpu.WPUParameters
 import xiangshan.frontend._
 import xiangshan.mem.prefetch._
 import scala.math.{max, pow}
+import xiangshan.cache.L1DBPParams
 
 case object XSTileKey extends Field[Seq[XSCoreParameters]]
 
@@ -802,6 +803,7 @@ trait HasXSParameter {
   def icacheCtrlAddress = coreParams.frontendParameters.icacheParameters.ctrlUnitParameters.Address // valid only when icacheCtrlEnabled is true
 
   def dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
+  def l1dbpParameters = dcacheParameters.l1DBPParams.getOrElse(L1DBPParams())
 
   // dcache block cacheline when lr for LRSCCycles - LRSCBackOff cycles
   // for constrained LR/SC loop

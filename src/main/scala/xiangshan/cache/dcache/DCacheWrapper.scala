@@ -58,6 +58,7 @@ case class DCacheParameters
   enableDataEcc: Boolean = false,
   enableTagEcc: Boolean = false,
   cacheCtrlAddressOpt: Option[AddressSet] = None,
+  l1DBPParams: Option[L1DBPParams] = None,
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
@@ -97,6 +98,7 @@ trait HasDCacheParameters
   with HasL1CacheParameters {
   val cacheParams = dcacheParameters
   val cfg = cacheParams
+  val l1dbpParams = l1dbpParameters
   def l2ClientPcBitsOpt: Option[Int] = p(XSCoreParamsKey).L2CacheParamsOpt
     .flatMap(_.clientCaches.find(_.name == "dcache"))
     .flatMap(_.pcBitOpt)
@@ -221,6 +223,13 @@ trait HasDCacheParameters
   val tagWritePort = metaWritePort + 1
   val errWritePort = tagWritePort + 1
   val wbPort = errWritePort + 1
+
+  // dbp
+  val l1dbpEnabled = cacheParams.l1DBPParams.nonEmpty
+  val l1dbpcounterMax = l1dbpParams.counterMax
+  val l1dbpPcIndexWidth = log2Ceil(l1dbpParams.pcPredictorEntries)
+  val l1dbpSampleBits = l1dbpParams.sampleBits
+  val l1dbpNumSampleSets = nSets >> l1dbpParams.sampleBits
 
   def set_to_dcache_div(set: UInt) = {
     require(set.getWidth >= DCacheSetBits)
@@ -354,9 +363,26 @@ trait HasDCacheParameters
   }
   val numReplaceRespPorts = 2
 
+  def isL1DBPSampleSet(set: UInt): Bool = {
+    val setWidth = set.getWidth
+    require(setWidth > 0 && l1dbpParams.sampleBits < setWidth,
+      s"L1DBP sampleBits must be in [1, ${setWidth - 1}]")
+    set(setWidth - 1, setWidth - l1dbpParams.sampleBits) ===
+      set(l1dbpParams.sampleBits - 1, 0)
+  }
+
+  def getL1DBPSampleIndex(set: UInt): UInt = {
+    val setWidth = set.getWidth
+    require(setWidth > 0 && l1dbpParams.sampleBits < setWidth,
+      s"L1DBP sampleBits must be in [1, ${setWidth - 1}]")
+    set(setWidth - l1dbpParams.sampleBits - 1, 0)
+  }
+
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
   require(full_divide(beatBits, rowBits), s"beatBits($beatBits) must be multiple of rowBits($rowBits)")
+  require(l1dbpParams.sampleBits >= 1 && l1dbpParams.sampleBits < idxBits,
+    s"L1DBP sampleBits must be in [1, ${idxBits - 1}]")
 }
 
 abstract class DCacheModule(implicit p: Parameters) extends L1CacheModule
@@ -982,6 +1008,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   println("  WPUEnableCfPred: " + dwpuParam.enCfPred)
   println("  WPUAlgorithm: " + dwpuParam.algoName)
   println("  HasCMO: " + HasCMO)
+  println("  L1DBP: " + cacheParams.l1DBPParams)
 
   // HybridUnit is no longer supported
   require(backendParams.HyuCnt == 0)
@@ -1014,6 +1041,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val latencyArray = Option.when(GenLatencyArray)(Module(new L1RefillLatencyArray(
     readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth
   )))
+  val sampledPCArray = cacheParams.l1DBPParams.map(_ => Module(new L1DSampledPCArray))
 
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 1))
   val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
@@ -1056,6 +1084,21 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.wfi <> missQueue.io.wfi
   io.refillTrain := missQueue.io.refill_train
   mainPipe.io.prefetch_req <> io.prefetch_req
+  sampledPCArray match {
+    case Some(sampleArray) =>
+      sampleArray.io.read <> mainPipe.io.l1dbp.read
+      sampleArray.io.write := mainPipe.io.l1dbp.write
+      mainPipe.io.l1dbp.sampleResp := sampleArray.io.resp
+
+      // SampledPCArray is implemented as a single-port SRAM. MainPipe's
+      // existing tag-write arbitration guarantees that a sampled read and
+      // write cannot be requested in the same cycle.
+      assert(!(mainPipe.io.l1dbp.read.valid && mainPipe.io.l1dbp.write.valid),
+        "SampledPCArray SRAM read/write conflict must be covered by tag SRAM arbitration")
+    case None =>
+      mainPipe.io.l1dbp.read.ready := true.B
+      mainPipe.io.l1dbp.sampleResp := 0.U.asTypeOf(mainPipe.io.l1dbp.sampleResp)
+  }
 
   // l1 dcache controller
   outer.cacheCtrlOpt.foreach {

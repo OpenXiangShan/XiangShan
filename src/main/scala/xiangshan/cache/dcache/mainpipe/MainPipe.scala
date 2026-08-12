@@ -169,6 +169,14 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     // pass to Prefetch Monitor for statistic
     val prefetch_stat = Output(new PipePrefetchStatBundle)
 
+    // sampled PC metadata array. The array itself lives in DCacheWrapper;
+    // MainPipe only supplies the pipeline-timed read/write requests.
+    val l1dbp = new Bundle {
+      val read = DecoupledIO(new L1DSampledPCRead)
+      val sampleResp = Input(Vec(nWays, new L1DBPSampleEntry))
+      val write = ValidIO(new L1DSampledPCWrite)
+    }
+
     // data sram
     val data_read = Vec(LoadPipelineWidth, Input(Bool()))
     val data_read_intend = Output(Bool())
@@ -309,6 +317,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s0_fire = req.valid && s0_can_go
 
   req.ready := s0_can_go
+
+  io.l1dbp.read.valid := s0_fire && isL1DBPSampleSet(s0_idx)
+  io.l1dbp.read.bits.set := getL1DBPSampleIndex(s0_idx)
 
   val bank_write = VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, s0_req.store_mask).orR)).asUInt
   val bank_full_write = VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, s0_req.store_mask).andR)).asUInt
@@ -843,6 +854,18 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_can_go = s3_probe_can_go || s3_store_can_go || s3_amo_can_go || s3_miss_can_go || s3_replace_can_go || s3_prefetch_can_go
   val s3_update_data_cango = s3_store_can_go || s3_amo_can_go || s3_miss_can_go // used to speed up data_write gen
   val s3_fire = s3_valid && s3_can_go
+
+  // Until the predictor supplies a new sample entry, a replacement installs
+  // an invalid entry. This follows the same sampled-set/way write protocol
+  // as the eventual predictor path and prevents stale metadata surviving a
+  // line replacement.
+  io.l1dbp.write.valid := s3_fire && s3_req.miss && s3_need_replacement &&
+    isL1DBPSampleSet(s3_idx)
+  io.l1dbp.write.bits.set := getL1DBPSampleIndex(s3_idx)
+  io.l1dbp.write.bits.wayEn := s3_way_en
+  io.l1dbp.write.bits.entry.valid := false.B
+  io.l1dbp.write.bits.entry.payload := 0.U
+
   when (s2_fire_to_s3) {
     s3_valid := true.B
   }.elsewhen (s3_fire) {

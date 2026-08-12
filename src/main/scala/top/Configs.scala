@@ -43,7 +43,7 @@ import freechips.rocketchip.devices.debug._
 import xscache.openLLC.OpenLLCParam
 import freechips.rocketchip.diplomacy._
 import xiangshan.backend.regfile._
-import xiangshan.cache.DCacheParameters
+import xiangshan.cache.{DCacheParameters, L1DBPParams}
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import device.EnableJtag
 import xscache.coupledL2._
@@ -288,7 +288,8 @@ case class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => 
         nMaxPrefetchEntry = 6,
         enableTagEcc = true,
         enableDataEcc = true,
-        cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
+        cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f)),
+        l1DBPParams = Some(L1DBPParams())
       ))
     ))
 })
