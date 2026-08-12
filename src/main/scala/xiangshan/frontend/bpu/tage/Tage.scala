@@ -137,11 +137,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val providerTableOH = getLongestHistTableOH(hitTableMask)
     val provider        = Mux1H(providerTableOH, allTableTagMatchResults)
 
-    // find the alt, the table with the second longest history among the hit tables
-    val hitTableMaskNoProvider = hitTableMask.zip(providerTableOH).map { case (a, b) => a && !b }
-    val hasAlt                 = hasProvider && hitTableMaskNoProvider.reduce(_ || _)
-    val altTableOH             = getLongestHistTableOH(hitTableMaskNoProvider)
-    val alt                    = Mux1H(altTableOH, allTableTagMatchResults)
+    // HCPRED selects the longest-history matching entry whose counter is not weak as the alternate prediction.
+    val nonWeakHitTableMask = allTableTagMatchResults.map(result => result.hit && !result.takenCtr.isWeak)
+    val hasAlt              = nonWeakHitTableMask.reduce(_ || _)
+    val altTableOH          = getLongestHistTableOH(nonWeakHitTableMask)
+    val alt                 = Mux1H(altTableOH, allTableTagMatchResults)
 
     val useProvider = hasProvider && !(useAltOnNa && provider.takenCtr.isWeak)
 
@@ -365,9 +365,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       providerTableOH := getLongestHistTableOH(hitTableMask).asUInt
       provider        := Mux1H(providerTableOH, allTableTagMatchResults)
 
-      val hitTableMaskNoProvider = hitTableMask.zip(providerTableOH.asBools).map { case (a, b) => a && !b }
-      hasAlt     := hasProvider && hitTableMaskNoProvider.reduce(_ || _)
-      altTableOH := getLongestHistTableOH(hitTableMaskNoProvider).asUInt
+      val nonWeakHitTableMask = allTableTagMatchResults.map(result => result.hit && !result.takenCtr.isWeak)
+      hasAlt     := nonWeakHitTableMask.reduce(_ || _)
+      altTableOH := getLongestHistTableOH(nonWeakHitTableMask).asUInt
       alt        := Mux1H(altTableOH, allTableTagMatchResults)
 
       useProvider   := hasProvider && (!useAltOnNa || !provider.takenCtr.isWeak)
@@ -396,8 +396,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     val needUpdateAltCtr = !alt.takenCtr.shouldHold(actualTaken) && useAlt
 
-    val incUseAltOnNa = hasProvider && provider.takenCtr.isWeak && altOrBasePred === actualTaken
-    val decUseAltOnNa = hasProvider && provider.takenCtr.isWeak && altOrBasePred =/= actualTaken
+    // Only train the selector when provider and HCPRED/base disagree.
+    // Equal predictions provide no information about which path should be preferred.
+    val trainUseAltOnNa = hasProvider && provider.takenCtr.isWeak && providerPred =/= altOrBasePred
+    val incUseAltOnNa   = trainUseAltOnNa && altOrBasePred === actualTaken
+    val decUseAltOnNa   = trainUseAltOnNa && providerPred === actualTaken
 
     val trainInfo = Wire(new TrainInfo).suggestName(s"t2_branch_${i}_trainInfo")
     trainInfo.valid := isCond && mbtbHit // Only consider update if conditional branch
