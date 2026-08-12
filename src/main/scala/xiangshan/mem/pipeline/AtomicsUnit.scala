@@ -462,6 +462,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     stdCnt := 0.U
     pdest1Valid := false.B
     pdest2Valid := false.B
+    exceptionVec := ExceptSparseVec.zeros(param.exceptionOut)
   }
 
   /**
