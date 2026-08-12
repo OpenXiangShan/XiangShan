@@ -170,6 +170,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
    */
   t1_fire := RegNext(t0_fire, false.B)
   t1_tag  := RegEnable(t0_tag, t0_fire)
+  private val t1_hasOverride = RegNext(io.fastTrain.get.bits.hasOverride, false.B)
   private val t1_actualTaken = RegEnable(t0_actualTaken, t0_fire)
   private val t1_position    = RegEnable(t0_position, t0_fire)
   private val t1_target      = RegEnable(t0_target, t0_fire)
@@ -225,7 +226,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   }
 
   // select the entry: if hit, use the hit entry, otherwise use the victim from replacer (first not useful, or Plru)
-  t1_allocate  := !t1_hit && t1_actualTaken
+  t1_allocate  := !t1_hit && t1_actualTaken && t1_hasOverride
   t1_updateIdx := Mux(t1_hit, t1_hitIdx, replacer.io.victim)
   // and write back the updated entry
   when(t1_fire && (t1_hit || t1_allocate)) { // update entry if hit, or alloc entry only for taken branches
