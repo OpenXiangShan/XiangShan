@@ -106,12 +106,13 @@ case class XSCoreParameters
   LoadQueueRAWSize: Int = 56, // NOTE: make sure that LoadQueueRAWSize is power of 2.
   RollbackGroupSize: Int = 8,
   LoadQueueReplaySize: Int = 120,
+  LoadDependenceScoreBoardWidth: Int = 4,
   LoadUncacheBufferSize: Int = 16,
   LoadQueueNWriteBanks: Int = 8, // NOTE: make sure that LoadQueueRARSize/LoadQueueRAWSize is divided by LoadQueueNWriteBanks
-  StoreQueueSize: Int = 64,
+  StoreQueuePhysicalSize: Int = 64, // preferably a power of 2
+  StoreQueueMultiple: Int = 2, // preferably a power of 2
+  StoreQueueSnapshotInterval: Int = 1, // must a power of 2
   SQUnalignQueueSize: Int = 2,
-  StoreQueueNWriteBanks: Int = 8, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
-  StoreQueueForwardWithMask: Boolean = true,
   VlsQueueSize: Int = 8,
   RobSize: Int = 352,
   RabSize: Int = 352,
@@ -311,7 +312,7 @@ case class XSCoreParameters
     "shvstvecd", "smaia", "smcdeleg", "smcntrpmf", "smcsrind", "smdbltrp", "smmpm", "smnpm", "smrnmi", "smstateen",
     "ss1p13", "ssaia", "ssccfg", "ssccptr", "sscofpmf", "sscounterenw", "sscsrind", "ssdbltrp", "ssnpm",
     "sspm", "ssstateen", "ssstrict", "sstc", "sstvala", "sstvecd", "ssu64xl", "supm", "sv39",
-    "sv48", "svade", "svbare", "svinval", "svnapot", "svpbmt", "za64rs", "zacas", "zawrs", "zba",
+    "sv48", "svade", "svbare", "svinval", "svnapot", "svpbmt", "za64rs", "zabha", "zacas", "zawrs", "zba",
     "zbb", "zbc", "zbkb", "zbkc", "zbkx", "zbs", "zcb", "zcmop", "zfa", "zfh", "zfhmin", "zic64b",
     "zicbom", "zicbop", "zicboz", "ziccamoa", "ziccif", "zicclsm", "ziccrse", "zicntr", "zicond",
     "zicsr", "zifencei", "zihintntl", "zihintpause", "zihpm", "zimop", "zkn", "zknd", "zkne", "zknh",
@@ -715,15 +716,17 @@ trait HasXSParameter {
   val RAWlgSelectGroupSize = log2Ceil(RollbackGroupSize)
   val RAWTotalDelayCycles = scala.math.ceil(log2Ceil(LoadQueueRAWSize).toFloat / RAWlgSelectGroupSize).toInt + 1 - 2
   def LoadQueueReplaySize = coreParams.LoadQueueReplaySize
+  def LoadDependenceScoreBoardWidth = coreParams.LoadDependenceScoreBoardWidth
   def LoadUncacheBufferSize = coreParams.LoadUncacheBufferSize
   def LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
-  def StoreQueueSize = coreParams.StoreQueueSize
+  def StoreQueuePhysicalSize = coreParams.StoreQueuePhysicalSize
+  def StoreQueueMultiple = coreParams.StoreQueueMultiple
+  def StoreQueueSize = StoreQueuePhysicalSize * StoreQueueMultiple
+  def StoreQueueSnapshotInterval = coreParams.StoreQueueSnapshotInterval
   def SQUnalignQueueSize = coreParams.SQUnalignQueueSize
-  def StoreQueueForceWriteSbufferUpper = coreParams.StoreQueueSize - 4
+  def StoreQueueForceWriteSbufferUpper = coreParams.StoreQueuePhysicalSize - 4
   def StoreQueueForceWriteSbufferLower = StoreQueueForceWriteSbufferUpper - 5
-  def VirtualLoadQueueMaxStoreQueueSize = VirtualLoadQueueSize max StoreQueueSize
-  def StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
-  def StoreQueueForwardWithMask = coreParams.StoreQueueForwardWithMask
+  def VirtualLoadQueueMaxStoreQueueSize = VirtualLoadQueueSize max StoreQueuePhysicalSize
   def VlsQueueSize = coreParams.VlsQueueSize
 
   def MemIQSizeMax = backendParams.intSchdParams.get.issueBlockParams.map(_.numEntries).max
@@ -803,6 +806,7 @@ trait HasXSParameter {
   def icacheCtrlAddress = coreParams.frontendParameters.icacheParameters.ctrlUnitParameters.Address // valid only when icacheCtrlEnabled is true
 
   def dcacheParameters = coreParams.dcacheParametersOpt.getOrElse(DCacheParameters())
+  def numMemChannelsFromDcache = coreParams.dcacheParametersOpt.map(_.numMemChannels).getOrElse(1)
 
   // dcache block cacheline when lr for LRSCCycles - LRSCBackOff cycles
   // for constrained LR/SC loop
@@ -822,9 +826,10 @@ trait HasXSParameter {
   def LWTUse2BitCounter = true
   // store set parameters
   def SSITSize = WaitTableSize
-  def LFSTSize = 32
+  def LFSTSize = 64
   def SSIDWidth = log2Up(LFSTSize)
-  def LFSTWidth = 4
+  def LFSTWidth = 2
+  def strictResetPeriod = 8192
   def StoreSetEnable = true // LWT will be disabled if SS is enabled
   def LFSTEnable = true
 

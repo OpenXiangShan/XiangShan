@@ -39,7 +39,6 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
       val valid:         Vec[Bool] = Vec(FetchPorts, Bool())
       val perfFaultType: Vec[UInt] = Vec(FetchPorts, PreDecodeFaultType())
       val startVAddr:    Vec[UInt] = Vec(FetchPorts, UInt(VAddrBits.W))
-      val target:        Vec[UInt] = Vec(FetchPorts, UInt(VAddrBits.W))
       val taken:         Vec[Bool] = Vec(FetchPorts, Bool())
       val selectBlock:   Bool      = Bool()
       val misPred:       Bool      = Bool()
@@ -149,16 +148,6 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
     XSPerfAccumulate(f"squashCycles_bpWrong_preDecode_targetFault_fetchPort_${i}", checkTargetFault(i))
     XSPerfAccumulate(f"squashCycles_bpWrong_preDecode_notCFIFault_fetchPort_${i}", checkNotCFIFault(i))
     XSPerfAccumulate(f"squashCycles_bpWrong_preDecode_invalidTakenFault_fetchPort_${i}", checkInvalidTaken(i))
-
-    XSDebug(
-      checkRetFault(i),
-      "fetch:%x  startAddr:%x  nextStartAddr:%x  taken:%d     takenEndOffset:%d\n",
-      i.U,
-      checkPerfInfo.startVAddr(i),
-      checkPerfInfo.target(i),
-      checkPerfInfo.taken(i),
-      checkPerfInfo.misEndOffset(i)
-    )
   }
 
   /* *** Perf *** */

@@ -30,7 +30,9 @@ import utility.UIntToMask
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfRolling
 import utility.XSPerfSeqAccumulate
+import utility.XSPerfSeqRolling
 import xiangshan.RedirectLevel
 import xiangshan.TopDownCounters
 import xiangshan.backend.CtrlToFtqIO
@@ -44,8 +46,8 @@ import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
+import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
-import xiangshan.frontend.TwoFetchInfo
 import xiangshan.frontend.TwoPrefetchCase
 import xiangshan.frontend.bpu.BpuCommitMeta
 import xiangshan.frontend.bpu.BpuPredictionSource
@@ -55,8 +57,9 @@ import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.HalfAlignHelper
-import xiangshan.frontend.icache.ICacheCacheLineHelper
+import xiangshan.frontend.icache.ICacheDataHelper
 import xiangshan.frontend.icache.ICacheToFtqIO
+import xiangshan.frontend.icache.TwoFetchFailReason
 
 class Ftq(implicit p: Parameters) extends FtqModule
     with HalfAlignHelper
@@ -64,7 +67,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     with HasCircularQueuePtrHelper
     with IfuRedirectReceiver
     with BackendRedirectReceiver
-    with ICacheCacheLineHelper {
+    with ICacheDataHelper {
 
   class FtqIO extends FtqBundle {
     val fromBpu: BpuToFtqIO = Flipped(new BpuToFtqIO)
@@ -90,19 +93,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // and commitPtr points to the entry to be committed by backend.
   private val bpuPtr    = RegInit(FtqPtrVec())
   private val pfPtr     = RegInit(FtqPtrVec(2))
-  private val ifuPtr    = RegInit(FtqPtrVec(3))
-  private val ifuWbPtr  = RegInit(FtqPtrVec())
+  private val fetchPtr  = RegInit(FtqPtrVec(3))
   private val commitPtr = RegInit(FtqPtrVec(2))
 
-  XSError(bpuPtr < ifuPtr && !isFull(bpuPtr(0), ifuPtr(0)), "ifuPtr runs ahead of bpuPtr")
-  // TODO: Reconsider this
+  XSError(bpuPtr < fetchPtr && !isFull(bpuPtr(0), fetchPtr(0)), "fetchPtr runs ahead of bpuPtr")
 //  XSError(bpuPtr < pfPtr && !isFull(bpuPtr(0), pfPtr(0)), "pfPtr runs ahead of bpuPtr")
-//  XSError(ifuWbPtr < commitPtr && !isFull(ifuWbPtr(0), commitPtr(0)), "ifuWbPtr runs ahead of commitPtr")
 
   // entryQueue stores predictions made by BPU.
   private val entryQueue = Reg(Vec(FtqSize, new FtqEntry))
-
-  private val twoFetchInfoVec = Reg(Vec(FtqSize, new TwoFetchInfo))
 
   // metaQueueRedirect stores speculation information needed by BPU when redirect happens.
   private val metaQueueRedirect = Reg(Vec(FtqSize, new BpuRedirectMeta))
@@ -123,7 +121,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val (backendRedirectFtqIdxInAdvance, backendRedirect) = receiveBackendRedirect(io.fromBackend)
 
   private val specTopAddr = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.topRetAddr.toUInt
-  private val (ifuRedirectFtqIdxInAdvance, ifuRedirect) = receiveIfuRedirect(
+  private val (ifuRedirectFtqIdxInAdvance, ifuRedirect, ifuResolve) = receiveIfuRedirect(
     io.fromIfu.wbRedirect,
     specTopAddr,
     backendRedirect.valid
@@ -138,20 +136,20 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   private val redirect = Mux(backendRedirect.valid, backendRedirect, ifuRedirect)
 
-  // Instruction page fault and instruction access fault are sent from backend with redirect requests.
-  // When IPF and IAF are sent, backendPcFaultIfuPtr points to the FTQ entry whose first instruction
-  // raises IPF or IAF, which is ifuWbPtr_write or IfuPtr_write.
-  // Only when IFU has written back that FTQ entry can backendIpf and backendIaf be false because this
-  // makes sure that IAF and IPF are correctly raised instead of being flushed by redirect requests.
+  // Instruction page fault, guest page fault, and access fault are checked by backend and sent with redirect requests.
   private val backendException    = RegInit(ExceptionType.None)
   private val backendExceptionPtr = RegInit(FtqPtr(false.B, 0.U))
   when(backendRedirect.valid) {
     val exception = ExceptionType.fromBackend(backendRedirect.bits)
     backendException := exception
     when(exception.hasException) {
-      backendExceptionPtr := ifuWbPtr(0)
+      backendExceptionPtr := backendRedirect.bits.newFtqIdx
     }
-  }.elsewhen(ifuWbPtr(0) =/= backendExceptionPtr) {
+  }.elsewhen(distanceBetween(fetchPtr(0), backendExceptionPtr) >= 3.U) {
+    // We cannot clear backendException flag too early (e.g. once fetch fire),
+    // bpu may do an override and the flag can be lost in such case.
+    // Here we use a magic number 3 (the length of ifu pipeline):
+    //   if fetchPtr is ahead 3 fetch blocks, the marked block should be in ibuffer and cannot be flushed by bpu.
     backendException := ExceptionType.None
   }
 
@@ -169,7 +167,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // We limit the distance between BP and IF and stall counts of BP train so that branch update can be written back to
   // BPU
   io.fromBpu.prediction.ready := distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U &&
-    distanceBetween(bpuPtr(0), ifuPtr(0)) < BpRunAheadDistance.U &&
+    distanceBetween(bpuPtr(0), fetchPtr(0)) < BpRunAheadDistance.U &&
     bpTrainStallCnt < BpTrainStallLimit.U
   io.fromBpu.meta.ready := true.B
 
@@ -194,19 +192,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
 
   when((prediction.fire || bpuS3Redirect) && !redirect.valid) {
-    entryQueue(predictionPtr.value).startPc        := prediction.bits.startPc
-    entryQueue(predictionPtr.value).takenCfiOffset := prediction.bits.takenCfiOffset
-  }
-
-  when(io.fromICache.fromPrefetch.valid) {
-    val ftqIdx       = io.fromICache.fromPrefetch.bits.ftqIdx
-    val twoFetchInfo = io.fromICache.fromPrefetch.bits.twoFetchInfo
-    twoFetchInfoVec(ftqIdx.value) := twoFetchInfo(0).bits
-    twoFetchInfoVec((ftqIdx + 1.U).value) := Mux(
-      twoFetchInfo(1).valid,
-      twoFetchInfo(1).bits,
-      0.U.asTypeOf(new TwoFetchInfo)
-    )
+    entryQueue(predictionPtr.value).startPc     := prediction.bits.startPc
+    entryQueue(predictionPtr.value).taken       := prediction.bits.taken
+    entryQueue(predictionPtr.value).endPosition := prediction.bits.endPosition
   }
 
   private val s3PerfQueue = WireInit(perfQueue)
@@ -232,8 +220,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val twoPrefetchValid = io.toICache.toPrefetch.bits.twoPrefetchCase.valid
     pfPtr := Mux(twoPrefetchValid, pfPtr + 2.U, pfPtr + 1.U)
   }
-  when(io.toIfu.req.fire) {
-    ifuPtr := ifuPtr + 1.U
+  when(io.toICache.toMainPipe.fire) {
+    fetchPtr := Mux(io.fromICache.fromMainPipe.realTwoFetchValid, fetchPtr + 2.U, fetchPtr + 1.U)
   }
 
   // TODO: wait for Ifu/ICache to remove bpu s2 flush
@@ -250,8 +238,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
       when(pfPtr >= ftqIdx) {
         pfPtr := ftqIdx
       }
-      when(ifuPtr >= ftqIdx) {
-        ifuPtr := ftqIdx
+      when(fetchPtr >= ftqIdx) {
+        fetchPtr := ftqIdx
       }
     }
   }
@@ -283,14 +271,15 @@ class Ftq(implicit p: Parameters) extends FtqModule
       // and they cannot have known exception, otherwise we'll prefetch on the wrong path
       !(backendException.hasException && (backendExceptionPtr === pfPtr(0) || backendExceptionPtr === pfPtr(1)))
 
-  // (io.toICache.toPrefetch.fire && canTwoPrefetch) is passed to apply(..., canAssert) to prevent assert(x-state)
+  // (io.toICache.toPrefetch.fire && twoPrefetchValid) is passed to apply(..., canAssert) to prevent assert(x-state)
   private val twoPrefetchCase = TwoPrefetchCase(prefetchReq, io.toICache.toPrefetch.fire && canTwoPrefetch)
 
   // FIXME: backend redirect delay should be more than ITLB csr delay
   io.toICache.toPrefetch.valid := bpuPtr(0) > pfPtr(0) && !redirect.valid
   io.toICache.toPrefetch.bits.req.zipWithIndex.foreach { case (req, i) =>
     req.startVAddr       := prefetchReq(i).startVAddr
-    req.nextLineVAddr    := req.startVAddr + blockBytes.U
+    req.nextLineVAddr    := prefetchReq(i).nextLineVAddr
+    req.vSetIdx          := prefetchReq(i).vSetIdx
     req.isCrossLine      := prefetchReq(i).isCrossLine
     req.ftqIdx           := pfPtr(i)
     req.backendException := Mux(backendExceptionPtr === pfPtr(i), backendException, ExceptionType.None)
@@ -298,31 +287,35 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
   io.toICache.toPrefetch.bits.twoPrefetchCase := Mux(canTwoPrefetch, twoPrefetchCase, TwoPrefetchCase.Conflict)
 
-  private val ifuReqValid = bpuPtr(0) > ifuPtr(0) && !redirect.valid &&
-    distanceBetween(ifuPtr(0), commitPtr(0)) < (FtqSize - 1).U
+  // --------------------------------------------------------------------------------
+  // 2-fetch
+  // --------------------------------------------------------------------------------
 
-  io.toICache.fetchReq.valid                   := ifuReqValid
-  io.toICache.fetchReq.bits.startVAddr         := entryQueue(ifuPtr(0).value).startPc
-  io.toICache.fetchReq.bits.nextCachelineVAddr := entryQueue(ifuPtr(0).value).startPc + (CacheLineSize / 8).U
-  io.toICache.fetchReq.bits.ftqIdx             := ifuPtr(0)
-  io.toICache.fetchReq.bits.takenCfiOffset     := entryQueue(ifuPtr(0).value).takenCfiOffset.bits
-  io.toICache.fetchReq.bits.isBackendException := backendException.hasException && backendExceptionPtr === ifuPtr(0)
-
-  io.toIfu.req.valid                    := ifuReqValid
-  io.toIfu.req.bits.fetch(0).valid      := ifuReqValid
-  io.toIfu.req.bits.fetch(0).startVAddr := entryQueue(ifuPtr(0).value).startPc
-  io.toIfu.req.bits.fetch(0).nextStartVAddr := MuxCase(
-    entryQueue(ifuPtr(1).value).startPc,
-    Seq(
-      (bpuPtr(0) === ifuPtr(0)) -> prediction.bits.target,
-      (bpuPtr(0) === ifuPtr(1)) -> prediction.bits.startPc
-    )
+  private val fetchReq = VecInit(
+    Wire(new FtqFetchReq).fromFtqEntry(entryQueue(fetchPtr(0).value)),
+    Wire(new FtqFetchReq).fromFtqEntry(entryQueue(fetchPtr(1).value))
   )
-  io.toIfu.req.bits.fetch(0).nextCachelineVAddr := io.toIfu.req.bits.fetch(0).startVAddr + (CacheLineSize / 8).U
-  io.toIfu.req.bits.fetch(0).ftqIdx             := ifuPtr(0)
-  io.toIfu.req.bits.fetch(0).takenCfiOffset     := entryQueue(ifuPtr(0).value).takenCfiOffset
 
-  io.toIfu.req.bits.fetch(1) := 0.U.asTypeOf(new FetchRequestBundle)
+  private val rawTwoFetchValid = distanceBetween(bpuPtr(0), fetchPtr(0)) > 3.U &&
+    (fetchReq(0).size +& fetchReq(1).size) <= FetchBlockInstNum.U && // the unit of fetchReq size is half-word
+    fetchReq(0).vPageNumber === fetchReq(1).vPageNumber &&
+    !(backendException.hasException && (
+      backendExceptionPtr === fetchPtr(0) || backendExceptionPtr === fetchPtr(1)
+    ))
+
+  io.toICache.toMainPipe.valid := bpuPtr(0) > fetchPtr(0) && !redirect.valid &&
+    distanceBetween(fetchPtr(0), commitPtr(0)) < (FtqSize - 1).U
+  io.toICache.toMainPipe.bits.req.zipWithIndex.foreach { case (req, i) =>
+    req.valid               := (if (i == 0) true.B else rawTwoFetchValid)
+    req.startVAddr          := fetchReq(i).startVAddr
+    req.nextLineVAddr       := fetchReq(i).nextLineVAddr
+    req.taken               := fetchReq(i).taken
+    req.endPosition         := fetchReq(i).endPosition
+    req.bankSel             := fetchReq(i).bankSel
+    req.ftqIdx              := fetchPtr(i)
+    req.vSetIdx             := fetchReq(i).vSetIdx
+    req.hasBackendException := backendException.hasException && backendExceptionPtr === fetchPtr(i)
+  }
 
   // --------------------------------------------------------------------------------
   // Interaction with backend
@@ -338,13 +331,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   io.toICache.redirectFlush := redirect.valid
   when(redirect.valid) {
-    val newEntryPtr = Mux(
-      RedirectLevel.flushItself(redirect.bits.level) &&
-        (redirect.bits.ftqOffset === 0.U || redirect.bits.ftqOffset === 1.U && !redirect.bits.isRVC),
-      redirect.bits.ftqIdx,
-      redirect.bits.ftqIdx + 1.U
-    )
-    Seq(bpuPtr, ifuPtr, pfPtr).foreach(_ := newEntryPtr)
+    val newFtqIdx = redirect.bits.newFtqIdx // redirect.newFtqIdx is a def, make it a val here to prevent dup logic
+    Seq(bpuPtr, pfPtr, fetchPtr).foreach(_ := newFtqIdx)
   }
 
   io.toIfu.redirect.valid := backendRedirect.valid
@@ -367,17 +355,27 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
 
   resolveQueue.io.backendResolve := io.fromBackend.resolve
+  resolveQueue.io.ifuResolve     := ifuResolve
 
   private val trainCache      = RegInit(0.U.asTypeOf(Valid(new BpuTrain)))
   private val trainIndexCache = RegInit(0.U.asTypeOf(new FtqPtr))
 
   resolveQueue.io.bpuTrain.ready := !trainCache.valid || io.toBpu.train.fire
 
-  private val flushTrain = backendRedirect.valid && trainIndexCache > backendRedirect.bits.ftqIdx
+  private val flushTrainCache =
+    backendRedirect.valid && trainCache.valid && trainIndexCache > backendRedirect.bits.ftqIdx
 
-  when(flushTrain) {
+  when(flushTrainCache) {
     trainCache.valid := false.B
   }.elsewhen(resolveQueue.io.bpuTrain.fire) {
+    // Due to timing considerations, resolve queue does not flush resolves in the first cycle of a redirect. As a
+    // result, these resolves may be enqueued and flushed in the next cycle. However, they may also be dequeued in the
+    // next cycle without being flushed in time. Therefore, the redirect is propagated one cycle later here to prevent
+    // this case.
+    val needFlush = backendRedirect.valid && resolveQueue.io.bpuTrain.bits.ftqIdx > backendRedirect.bits.ftqIdx ||
+      RegNext(backendRedirect.valid) && resolveQueue.io.bpuTrain.bits.ftqIdx > RegNext(backendRedirect.bits.ftqIdx)
+
+    trainCache.valid     := !needFlush
     trainCache.bits.meta := metaQueueResolve(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
     trainCache.bits.startPcVec.foreach { dup =>
       dup.zipWithIndex.foreach { case (startPc, i) =>
@@ -387,15 +385,15 @@ class Ftq(implicit p: Parameters) extends FtqModule
           startPc := getAlignedPc(resolveQueue.io.bpuTrain.bits.startPc + (i << FetchBlockAlignWidth).U)
       }
     }
-    trainCache.bits.branches := resolveQueue.io.bpuTrain.bits.branches
-    trainCache.bits.perfMeta := perfQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value).bpuPerf
-    trainCache.valid         := true.B
-    trainIndexCache          := resolveQueue.io.bpuTrain.bits.ftqIdx
+    trainCache.bits.branches     := resolveQueue.io.bpuTrain.bits.branches
+    trainCache.bits.perfMeta     := perfQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value).bpuPerf
+    trainCache.bits.debug_source := resolveQueue.io.bpuTrain.bits.debug_source
+    trainIndexCache              := resolveQueue.io.bpuTrain.bits.ftqIdx
   }.elsewhen(io.toBpu.train.fire) {
     trainCache.valid := false.B
   }
 
-  io.toBpu.train.valid := trainCache.valid && !flushTrain
+  io.toBpu.train.valid := trainCache.valid && !flushTrainCache
   io.toBpu.train.bits  := trainCache.bits
 
   // default next state receives s3 prediction meta
@@ -483,11 +481,13 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // only driven by clock, not valid-ready
   topdownStage := io.fromBpu.topdownReasons
   topdownStage.backendRedirectOverride(io.backendRedirectTopdown)
-  io.toIfu.req.bits.topdownInfo := topdownStage
+  io.toIfu.topdownInfo := topdownStage
 
   when(!(distanceBetween(bpuPtr(0), commitPtr(0)) < FtqSize.U)) {
     topdownStage.reasons(TopDownCounters.FtqFullStall.id) := true.B
-  }.elsewhen(!(distanceBetween(bpuPtr(0), ifuPtr(0)) < BpRunAheadDistance.U && bpTrainStallCnt < BpTrainStallLimit.U)) {
+  }.elsewhen(
+    !(distanceBetween(bpuPtr(0), fetchPtr(0)) < BpRunAheadDistance.U && bpTrainStallCnt < BpTrainStallLimit.U)
+  ) {
     topdownStage.reasons(TopDownCounters.FtqUpdateBubble.id) := true.B
   }
 
@@ -618,22 +618,38 @@ class Ftq(implicit p: Parameters) extends FtqModule
       commitPerfMeta.mispredictBranchInfo
     ))
   )
+
+  private val mispredictAttr = commitPerfMeta.mispredictBranchInfo.attribute
   XSPerfSeqAccumulate(
     "commit_branch_mispredicts_type",
     perf_commitHasMispredict,
     Seq(
-      ("conditional", commitPerfMeta.mispredictBranchInfo.attribute.isConditional),
-      ("direct", commitPerfMeta.mispredictBranchInfo.attribute.isDirect),
-      ("indirect", commitPerfMeta.mispredictBranchInfo.attribute.isIndirect),
-      (
-        "indirect_retcall",
-        commitPerfMeta.mispredictBranchInfo.attribute.isReturnAndCall
-          && commitPerfMeta.mispredictBranchInfo.attribute.isIndirect
-      ),
-      ("call", commitPerfMeta.mispredictBranchInfo.attribute.isCall),
-      ("ret", commitPerfMeta.mispredictBranchInfo.attribute.isReturn)
+      ("conditional", mispredictAttr.isConditional),
+      ("direct", mispredictAttr.isDirect),
+      ("indirect", mispredictAttr.isIndirect),
+      ("indirect_retcall", mispredictAttr.isReturnAndCall && mispredictAttr.isIndirect),
+      ("call", mispredictAttr.isCall),
+      ("ret", mispredictAttr.isReturn)
     )
   )
+
+  XSPerfSeqRolling(
+    "rolling_commit_mispredict",
+    perf_commitHasMispredict,
+    Seq(
+      ("conditional", mispredictAttr.isConditional),
+      ("direct", mispredictAttr.isDirect),
+      ("indirect", mispredictAttr.isIndirect),
+      ("indirect_retcall", mispredictAttr.isReturnAndCall && mispredictAttr.isIndirect),
+      ("call", mispredictAttr.isCall),
+      ("ret", mispredictAttr.isReturn)
+    ),
+    10000,
+    clock,
+    reset
+  )
+
+  XSPerfRolling("rolling_ifu_redirect", io.fromIfu.wbRedirect.valid, 10000, clock, reset)
 
   XSPerfHistogram(
     "distance_between_bpu_commit",
@@ -644,14 +660,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
   )
   XSPerfHistogram(
     "distance_between_ifu_commit",
-    distanceBetween(ifuPtr(0), commitPtr(0)),
+    distanceBetween(fetchPtr(0), commitPtr(0)),
     true.B,
     0,
     FtqSize + 1
   )
   XSPerfHistogram(
     "distance_between_bpu_ifu",
-    distanceBetween(bpuPtr(0), ifuPtr(0)),
+    distanceBetween(bpuPtr(0), fetchPtr(0)),
     true.B,
     0,
     FtqSize + 1
@@ -677,6 +693,30 @@ class Ftq(implicit p: Parameters) extends FtqModule
       ("page_conflict", prefetchReq(0).vPageNumber =/= prefetchReq(1).vPageNumber),
       ("sram_conflict", twoPrefetchCase.isConflict)
     ),
+    withPriority = true
+  )
+  XSPerfAccumulate(
+    "total_fetch",
+    io.toICache.toMainPipe.fire
+  )
+  XSPerfAccumulate(
+    "1fetch",
+    io.toICache.toMainPipe.fire && !io.fromICache.fromMainPipe.realTwoFetchValid
+  )
+  XSPerfAccumulate(
+    "2fetch",
+    io.toICache.toMainPipe.fire && io.fromICache.fromMainPipe.realTwoFetchValid
+  )
+  XSPerfSeqAccumulate(
+    "2fetch_fail_reason",
+    io.toICache.toMainPipe.fire && !io.fromICache.fromMainPipe.realTwoFetchValid,
+    Seq(
+      ("fb_not_enough", distanceBetween(bpuPtr(0), fetchPtr(0)) <= 3.U),
+      ("fb1_exception", backendException.hasException && backendExceptionPtr === fetchPtr(0)),
+      ("fb2_exception", backendException.hasException && backendExceptionPtr === fetchPtr(1)),
+      ("total_size", (fetchReq(0).size +& fetchReq(1).size) > FetchBlockInstNum.U),
+      ("page_conflict", fetchReq(0).vPageNumber =/= fetchReq(1).vPageNumber)
+    ) ++ TwoFetchFailReason.getValidSeq(io.fromICache.fromMainPipe.perf_twoFetchFailReason),
     withPriority = true
   )
 }

@@ -33,7 +33,7 @@ jobs:
         target:
           - /nfs/home/ci-runner/emu-basics         # EMU Basics Test
           - /nfs/home/ci-runner/emu-performance    # EMU Performance Test
-          - /nfs/home/ci-runner/perf-report-custom # Performance Regression
+          - /nfs/home/ci-runner/perf-report        # Performance Regression
           - /nfs/home/ci-runner/xs-wave            # EMU Miscs Test
           - /nfs/home/ci-runner/xs-perf            # EMU Miscs Test
       max-parallel: 1 # prevent using too much resources

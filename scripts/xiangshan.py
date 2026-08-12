@@ -85,7 +85,8 @@ class XSArgs(object):
         self.emu_optimize = args.emu_optimize
         self.xprop = 1 if args.xprop else None
         self.issue = args.issue
-        self.with_chiseldb = 1 if args.dump_db else 0
+        self.with_chiseldb = 1 if args.enable_db or args.enable_rolling else 0
+        self.with_rollingdb = 1 if args.enable_rolling else None
         # emu arguments
         self.max_instr = args.max_instr
         self.ram_size = args.ram_size
@@ -96,7 +97,8 @@ class XSArgs(object):
             self.diff = self.diff.replace("nemu-interpreter", "spike")
         self.fork = not args.disable_fork
         self.disable_diff = args.no_diff
-        self.dump_db = args.dump_db
+        self.dump_db = args.enable_db or args.enable_rolling
+        self.db_path = args.db_path
         self.gcpt_restore_bin = args.gcpt_restore_bin
         self.instr_trace = args.instr_trace
         self.pgo = args.pgo
@@ -146,6 +148,7 @@ class XSArgs(object):
             (self.emu_optimize,  "EMU_OPTIMIZE"),
             (self.xprop,         "ENABLE_XPROP"),
             (self.with_chiseldb, "WITH_CHISELDB"),
+            (self.with_rollingdb, "WITH_ROLLINGDB"),
             (self.yaml_config,   "YAML_CONFIG"),
             (self.pgo,           "PGO_WORKLOAD"),
             (self.pgo_max_cycle, "PGO_MAX_CYCLE"),
@@ -165,6 +168,7 @@ class XSArgs(object):
             (self.diff,      "diff"),
             (self.seed,      "seed"),
             (self.ram_size,  "ram-size"),
+            (self.db_path,   "db-path"),
         ]
         args = filter(lambda arg: arg[0] is not None, emu_args)
         return args
@@ -276,7 +280,7 @@ class XiangShan(object):
     def run_emu(self, workload):
         print("Running XiangShan emu with the following configurations:")
         self.show()
-        emu_args = " ".join(map(lambda arg: f"--{arg[1]} {arg[0]}", self.args.get_emu_args()))
+        emu_args = " ".join(map(lambda arg: f"--{arg[1]} {shlex.quote(str(arg[0]))}", self.args.get_emu_args()))
         print("workload:", workload)
         instr_trace = self.__get_ci_workloads_instr_trace(self.args.instr_trace)
         instr_trace_valid = len(instr_trace) != 0
@@ -529,6 +533,7 @@ class XiangShan(object):
         ]
         zcb_test = map(lambda x: os.path.join(base_dir, x), workloads)
         return zcb_test
+
     def __get_ci_iopmptest(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads/iopmp"
         workloads = [
@@ -536,6 +541,23 @@ class XiangShan(object):
         ]
         iopmp_test = map(lambda x: os.path.join(base_dir, x), workloads)
         return iopmp_test
+
+    def __get_ci_crosspage_fetch_test(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads/crosspage-fetch"
+        workloads = [
+            "crosspage_pad2b_page1_exec_page2_exec-riscv64-xs.bin",       # normal
+            "crosspage_pad2b_page1_exec_page2_exec_io-riscv64-xs.bin",    # normal -> mmio
+            "crosspage_pad2b_page1_exec_page2_none-riscv64-xs.bin",       # normal -> page fault
+            "crosspage_pad2b_page1_exec_page2_io-riscv64-xs.bin",         # normal -> mmio page fault
+            "crosspage_pad2b_page1_exec_io_page2_exec-riscv64-xs.bin",    # mmio -> normal
+            "crosspage_pad2b_page1_exec_io_page2_exec_io-riscv64-xs.bin", # mmio
+            "crosspage_pad2b_page1_exec_io_page2_none-riscv64-xs.bin",    # mmio -> page fault
+            "crosspage_pad2b_page1_exec_io_page2_io-riscv64-xs.bin",      # mmio -> mmio page fault
+            "crosspage_pad2b_page1_none_page2_exec-riscv64-xs.bin",       # page fault
+            "crosspage_pad2b_page1_none_page2_exec_io-riscv64-xs.bin",    # page fault -> mmio
+        ]
+        return map(lambda x: os.path.join(base_dir, x), workloads)
+
     def __get_ci_mc(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads"
         workloads = [
@@ -622,7 +644,8 @@ class XiangShan(object):
             # "rvv-test": self.__get_ci_rvvtest,
             "f16_test": self.__get_ci_F16test,
             "zcb-test": self.__get_ci_zcbtest,
-            "iopmp-test": self.__get_ci_iopmptest
+            "iopmp-test": self.__get_ci_iopmptest,
+            "crosspage-fetch-test": self.__get_ci_crosspage_fetch_test,
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)
@@ -654,7 +677,8 @@ class XiangShan(object):
             # "rvv-test": self.__get_ci_rvvtest,
             "f16_test": self.__get_ci_F16test,
             "zcb-test": self.__get_ci_zcbtest,
-            "iopmp-test": self.__get_ci_iopmptest
+            "iopmp-test": self.__get_ci_iopmptest,
+            "crosspage-fetch-test": self.__get_ci_crosspage_fetch_test,
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)
@@ -802,7 +826,9 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, help="run emu with the given random seed")
     parser.add_argument('--flash', type=str, help="Path to flash image for copy_and_run")
     # both makefile and emu arguments
-    parser.add_argument('--dump-db', action='store_true', help='enable chiseldb dump')
+    parser.add_argument('--dump-db', '--enable-db', dest='enable_db', action='store_true', help='enable chiseldb dump')
+    parser.add_argument('--enable-rolling', action='store_true', help='enable rolling db dump, implies --enable-db')
+    parser.add_argument('--db-path', type=str, help='dump chiseldb to the specified file path')
     parser.add_argument('--pgo', nargs='?', type=str, help='workload for pgo (null to disable pgo)')
     parser.add_argument('--pgo-max-cycle', nargs='?', default=400000, type=int, help='maximun cycle to train pgo')
     parser.add_argument('--pgo-emu-args', nargs='?', default='--no-diff', type=str, help='emu arguments for pgo')

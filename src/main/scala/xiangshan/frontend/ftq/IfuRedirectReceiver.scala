@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.Redirect
 import xiangshan.RedirectLevel
+import xiangshan.Resolve
 import xiangshan.frontend.FrontendRedirect
 
 trait IfuRedirectReceiver extends HasFtqParameters {
@@ -26,8 +27,9 @@ trait IfuRedirectReceiver extends HasFtqParameters {
       wbRedirect:      Valid[FrontendRedirect],
       specTopAddr:     UInt,
       backendRedirect: Bool
-  ): (Valid[FtqPtr], Valid[Redirect]) = {
+  ): (Valid[FtqPtr], Valid[Redirect], Valid[Resolve]) = {
     val redirect = WireInit(0.U.asTypeOf(Valid(new Redirect)))
+    val resolve  = WireInit(0.U.asTypeOf(Valid(new Resolve)))
 
     redirect.valid          := wbRedirect.valid && !backendRedirect
     redirect.bits.ftqIdx    := wbRedirect.bits.ftqIdx
@@ -40,10 +42,20 @@ trait IfuRedirectReceiver extends HasFtqParameters {
     redirect.bits.taken     := wbRedirect.bits.taken
     redirect.bits.isMisPred := true.B
 
+    resolve.valid           := wbRedirect.valid && !backendRedirect && wbRedirect.bits.canTrain
+    resolve.bits.ftqIdx     := wbRedirect.bits.ftqIdx
+    resolve.bits.ftqOffset  := wbRedirect.bits.ftqOffset
+    resolve.bits.pc         := wbRedirect.bits.pc
+    resolve.bits.target     := Mux(wbRedirect.bits.attribute.isReturn, specTopAddr, wbRedirect.bits.target)
+    resolve.bits.taken      := wbRedirect.bits.taken
+    resolve.bits.mispredict := true.B
+    resolve.bits.attribute  := wbRedirect.bits.attribute
+    resolve.bits.debug_isRVC.foreach(_ := wbRedirect.bits.isRVC)
+
     val ftqIdx = Wire(Valid(new FtqPtr))
     ftqIdx.valid := redirect.valid
     ftqIdx.bits  := redirect.bits.ftqIdx
 
-    (ftqIdx, RegNext(redirect))
+    (ftqIdx, RegNext(redirect), RegNext(resolve, init = 0.U.asTypeOf(Valid(new Resolve))))
   }
 }

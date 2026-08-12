@@ -31,7 +31,7 @@ import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyMo
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup}
 import freechips.rocketchip.tilelink._
-import freechips.rocketchip.util.{AsyncQueueParams}
+import freechips.rocketchip.util.{AsyncQueueParams, AsyncQueueSource, AsyncBundle}
 import top.BusPerfMonitor
 import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry, PMAConst}
 import xiangshan.{DebugOptionsKey, PMParameKey, XSTileKey}
@@ -570,7 +570,10 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
     val cacheable_check = IO(new TLPMAIO)
-    val clintTime = IO(Output(ValidIO(UInt(64.W))))
+    val clintTime = IO(EnableClintAsyncBridge match {
+      case Some(param) => new AsyncBundle(UInt(64.W), param)
+      case None => (ValidIO(UInt(64.W)))
+    })
     val scntIO = IO(new Bundle {
       val update_en = Input(Bool())
       val update_value = Input(UInt(timeWidth.W))
@@ -602,7 +605,17 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     val pll_lock = RegNext(next = pll0_lock, init = false.B)
 
     // timer instance
-    clintTime :=   syscnt.module.io.time // syscnt ->timeasync
+    EnableClintAsyncBridge match {
+      case Some(param) =>
+        withClockAndReset(rtc_clock, rtc_reset) {
+          val time_source = Module(new AsyncQueueSource(UInt(64.W), param))
+          time_source.io.enq.valid := syscnt.module.io.time.valid
+          time_source.io.enq.bits := syscnt.module.io.time.bits
+          clintTime <> time_source.io.async
+        }
+      case None =>
+        clintTime <> syscnt.module.io.time
+    }
     timer.module.io.time <> syscnt.module.io.time
     timer.module.io.hartId := 0.U
 

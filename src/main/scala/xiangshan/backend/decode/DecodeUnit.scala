@@ -34,6 +34,7 @@ import xiangshan.backend.fu.vector.Bundles.{VType, Vl, VSew}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.decode.isa.CSRs
 import xiangshan.backend.decode.Zimop._
+import xiangshan.backend.decode.Zabha._
 import yunsuan.{FcmpOpCode, MULOpType, VfaluType, VfcvtType, VfmaType, VfmaOpCode}
 
 /**
@@ -256,6 +257,28 @@ object XDecode extends DecodeConstants {
     WRS_STO -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.csr, CSROpType.wrs_sto, SelImm.X , noSpec = T, blockBack = T),
 
     // RV64A
+    AMOADD_B  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoadd_b , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOXOR_B  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoxor_b , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOSWAP_B -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoswap_b, SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOAND_B  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoand_b , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOOR_B   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoor_b  , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMIN_B  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomin_b , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMINU_B -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amominu_b, SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMAX_B  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomax_b , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMAXU_B -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomaxu_b, SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOCAS_B  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amocas_b, SelImm.X, uopSplitType = UopSplitType.AMO_CAS_BHWD, xWen = T, noSpec = T, blockBack = T),
+
+    AMOADD_H  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoadd_h , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOXOR_H  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoxor_h , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOSWAP_H -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoswap_h, SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOAND_H  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoand_h , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOOR_H   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoor_h  , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMIN_H  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomin_h , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMINU_H -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amominu_h, SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMAX_H  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomax_h , SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOMAXU_H -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomaxu_h, SelImm.X, xWen = T, noSpec = T, blockBack = T),
+    AMOCAS_H  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amocas_h, SelImm.X, uopSplitType = UopSplitType.AMO_CAS_BHWD, xWen = T, noSpec = T, blockBack = T),
+
     AMOADD_W  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoadd_w , SelImm.X, xWen = T, noSpec = T, blockBack = T),
     AMOXOR_W  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoxor_w , SelImm.X, xWen = T, noSpec = T, blockBack = T),
     AMOSWAP_W -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoswap_w, SelImm.X, xWen = T, noSpec = T, blockBack = T),
@@ -265,7 +288,7 @@ object XDecode extends DecodeConstants {
     AMOMINU_W -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amominu_w, SelImm.X, xWen = T, noSpec = T, blockBack = T),
     AMOMAX_W  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomax_w , SelImm.X, xWen = T, noSpec = T, blockBack = T),
     AMOMAXU_W -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomaxu_w, SelImm.X, xWen = T, noSpec = T, blockBack = T),
-    AMOCAS_W  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amocas_w, SelImm.X, uopSplitType = UopSplitType.AMO_CAS_W, xWen = T, noSpec = T, blockBack = T),
+    AMOCAS_W  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amocas_w, SelImm.X, uopSplitType = UopSplitType.AMO_CAS_BHWD, xWen = T, noSpec = T, blockBack = T),
 
     AMOADD_D  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoadd_d , SelImm.X, xWen = T, noSpec = T, blockBack = T),
     AMOXOR_D  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amoxor_d , SelImm.X, xWen = T, noSpec = T, blockBack = T),
@@ -276,7 +299,7 @@ object XDecode extends DecodeConstants {
     AMOMINU_D -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amominu_d, SelImm.X, xWen = T, noSpec = T, blockBack = T),
     AMOMAX_D  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomax_d , SelImm.X, xWen = T, noSpec = T, blockBack = T),
     AMOMAXU_D -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amomaxu_d, SelImm.X, xWen = T, noSpec = T, blockBack = T),
-    AMOCAS_D  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amocas_d, SelImm.X, uopSplitType = UopSplitType.AMO_CAS_D, xWen = T, noSpec = T, blockBack = T),
+    AMOCAS_D  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amocas_d, SelImm.X, uopSplitType = UopSplitType.AMO_CAS_BHWD, xWen = T, noSpec = T, blockBack = T),
 
     AMOCAS_Q  -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.mou, LSUOpType.amocas_q, SelImm.X, uopSplitType = UopSplitType.AMO_CAS_Q, xWen = T, noSpec = T, blockBack = T),
 

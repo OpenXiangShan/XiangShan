@@ -59,9 +59,12 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
   // =========== Components' Connection ============
   // L1 to l1_xbar
-  coreParams.dcacheParametersOpt.map { _ =>
-    l2top.inner.misc_l2_pmu := l2top.inner.l1d_logger := memBlock.dcache_port :=
-      memBlock.l1d_to_l2_buffer.node := memBlock.dcache.clientNode
+  coreParams.dcacheParametersOpt.map { params =>
+    val clientNodes = memBlock.dcache.clientNodes
+    (memBlock.dcache_port zip memBlock.l1d_to_l2_buffer zip clientNodes).zipWithIndex.foreach {
+      case (((port, buffer), clientNode), i) =>
+        l2top.inner.misc_l2_pmu := l2top.inner.l1d_logger(i) := port := buffer.node := clientNode
+    }
   }
 
   l2top.inner.misc_l2_pmu := l2top.inner.l1i_logger := memBlock.frontendBridge.icache_node
@@ -180,9 +183,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       l2top.module.io.pfCtrlFromCore := core.module.io.l2PfCtrl
 
       l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
-      core.module.io.l2_hint.bits.sourceId := l2top.module.io.l2_hint.bits.sourceId
-      core.module.io.l2_hint.bits.isKeyword := l2top.module.io.l2_hint.bits.isKeyword
-      core.module.io.l2_hint.valid := l2top.module.io.l2_hint.valid
+      core.module.io.l2_hint <> l2top.module.io.l2_hint
 
       core.module.io.l2PfqBusy := false.B
       core.module.io.debugTopDown.l2MissMatch := l2top.module.io.debugTopDown.l2MissMatch
@@ -196,9 +197,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     } else {
 
       l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
-      core.module.io.l2_hint.bits.sourceId := l2top.module.io.l2_hint.bits.sourceId
-      core.module.io.l2_hint.bits.isKeyword := l2top.module.io.l2_hint.bits.isKeyword
-      core.module.io.l2_hint.valid := l2top.module.io.l2_hint.valid
+      core.module.io.l2_hint <> l2top.module.io.l2_hint
 
       core.module.io.l2PfqBusy := false.B
       core.module.io.debugTopDown.l2MissMatch := false.B

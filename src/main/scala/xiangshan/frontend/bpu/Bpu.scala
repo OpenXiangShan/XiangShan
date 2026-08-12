@@ -382,18 +382,18 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_rasTargetDiff          = ras.io.topRetAddr =/= s3_s1Prediction.target
 
   private val s3_takenMask = VecInit(s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
-    val tagePred = s3_tagePrediction(i)
-    val useSc    = s3_scUsed(i)
-    val scTaken  = s3_scTakenMask(i)
+    val useTage   = s3_tagePrediction.takenVec(i).valid
+    val tageTaken = s3_tagePrediction.takenVec(i).bits
+    val useSc     = s3_scUsed(i)
+    val scTaken   = s3_scTakenMask(i)
 
     s3_jumpTakenVec(i) ||
     (s3_isBrVec(i) &&
       MuxCase(
         entry.bits.taken, // default: base table
         Seq(
-          useSc                -> scTaken,
-          tagePred.useProvider -> tagePred.providerPred,
-          tagePred.hasAlt      -> tagePred.altPred
+          useSc   -> scTaken,
+          useTage -> tageTaken
         )
       ))
   })
@@ -523,20 +523,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       }
   }
 
-  phr.io.train.s0_stall             := s0_stall
-  phr.io.train.stageCtrl            := stageCtrl
-  phr.io.train.redirect             := redirect
-  phr.io.train.s3_override          := s3_override
-  phr.io.train.s3_phrMeta           := s3_phrMeta
-  phr.io.train.s3_prediction        := s3_prediction
-  phr.io.train.s3_startPc           := s3_startPc.get
-  phr.io.s1Train.valid              := s1_fire
-  phr.io.s1Train.taken              := s1_prediction.taken
-  phr.io.s1Train.startPc            := s1_startPc.get
-  phr.io.s1Train.abtbValid          := s1_abtbValid
-  phr.io.s1Train.abtbFirstTakenBrOH := s1_abtbFirstTakenBrOH
-  phr.io.s1Train.ubtbPrediction     := s1_ubtbPredWithURas
-  phr.io.s1Train.abtbPrediction     := s1_abtbPredWithURas
+  phr.io.train.s0_stall      := s0_stall
+  phr.io.train.stageCtrl     := stageCtrl
+  phr.io.train.redirect      := redirect
+  phr.io.train.s3_override   := s3_override
+  phr.io.train.s3_phrMeta    := s3_phrMeta
+  phr.io.train.s3_prediction := s3_prediction
+  phr.io.train.s3_startPc    := s3_startPc.get
+  phr.io.s1Train.valid       := s1_fire
+  phr.io.s1Train.startPc     := s1_startPc.get
+  phr.io.s1Train.prediction  := s1_prediction
 
   phr.io.commit.valid := io.fromFtq.train.fire
   phr.io.commit.bits.fromBpuTrain(train)
@@ -682,8 +678,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   XSPerfHistogram(
     "fetchBlockSize",
     Mux(
-      io.toFtq.prediction.bits.takenCfiOffset.valid,
-      io.toFtq.prediction.bits.takenCfiOffset.bits,
+      io.toFtq.prediction.bits.taken,
+      getFtqOffset(io.toFtq.prediction.bits.startPc, io.toFtq.prediction.bits.endPosition),
       FetchBlockInstNum.U
     ),
     io.toFtq.prediction.fire,

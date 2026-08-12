@@ -33,6 +33,7 @@ import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.issue.EntryBundles.RespType
 import xiangshan.backend.issue._
+import difftest.plugin.topdown.TopdownIQInfoCollect
 
 
 class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModule with HasCriticalErrors {
@@ -183,6 +184,23 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     imp.io.s2Resp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
     imp.io.s2Resp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
   }
+  val stDataIQs = issueQueues.filter(iq => iq.param.StdCnt > 0)
+  if (params.isIntSchd) {
+    val lrqWakeupFromIQ = (stAddrIQs ++ stDataIQs).flatMap(_.io.wakeupToLRQ.get)
+    val lrqWakeupCancelFromIQ = (stAddrIQs ++ stDataIQs).flatMap(_.io.wakeupToLRQCancel.get)
+    io.wakeupToLRQ.get.flatten.zip(lrqWakeupFromIQ).foreach { case (sink, source) => sink := source }
+    io.wakeupToLRQCancel.get.flatten.zip(lrqWakeupCancelFromIQ).foreach { case (sink, source) => sink := source }
+  }
+
+  val stdIQs = issueQueues.filter(iq => iq.param.StdCnt > 0)
+  stdIQs.zipWithIndex.foreach { case(imp, i) =>
+    val feedBack = io.stdFeedback.get(i).feedbackSlow
+    imp.io.s1Resp.get.head.failed := feedBack.valid && !feedBack.bits.hit
+    imp.io.s1Resp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
+    imp.io.s1Resp.get.head.fuType := 0.U
+    imp.io.s1Resp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
+    imp.io.s1Resp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
+  }
   val vecStuIQs = issueQueues.filter(iq => iq.param.VstuCnt > 0)
   vecStuIQs.zipWithIndex.foreach { case(imp, i) =>
     imp.io.memIO.get.lqDeqPtr.get := io.lqDeqPtr.get
@@ -258,7 +276,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     }
   }
   // std dispatch
-  val stDataIQs = issueQueues.filter(iq => iq.param.StdCnt > 0)
   val staEnqs = stAddrIQs.map(_.io.enq).flatten
   val stdEnqs = stDataIQs.map(_.io.enq).flatten.take(staEnqs.size)
   val noStdExuParams = params.issueBlockParams.map(x => Seq.fill(x.numEnq)(x.exuBlockParams)).flatten.filter { x => x.map(!_.hasStdFu).reduce(_ && _) }
@@ -502,7 +519,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         val thisIQ = issueQueues.filter(x => x.param.allExuParams.contains(toMem(i)(j).bits.params)).head
         if (thisIQ.io.s0Resp.nonEmpty) {
           thisIQ.io.s0Resp.get(j).failed := toMem(i)(j).valid && !toMem(i)(j).ready
-          thisIQ.io.s0Resp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ).B
+          thisIQ.io.s0Resp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ || thisIQ.param.isStdIQ).B
           thisIQ.io.s0Resp.get(j).fuType := toMem(i)(j).bits.ctrl.fuType
           thisIQ.io.s0Resp.get(j).sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
           thisIQ.io.s0Resp.get(j).lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
@@ -510,7 +527,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         // for intRegion's loadUnit
         if (thisIQ.io.snResp.nonEmpty) {
           thisIQ.io.snResp.get(j).failed := false.B
-          thisIQ.io.snResp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ).B
+          thisIQ.io.snResp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ || thisIQ.param.isStdIQ).B
           thisIQ.io.snResp.get(j).fuType := toMem(i)(j).bits.ctrl.fuType
           thisIQ.io.snResp.get(j).sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
           thisIQ.io.snResp.get(j).lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
@@ -776,11 +793,47 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     issueQueueEnqHasIssuedVec(sta) := Mux(staValidNum(i) > stdValidNum(i), staEnqHasIssuedVec(i), stdEnqHasIssuedVec(i))
   }
 
-  val issueQueueDeqVec = issueQueues.flatMap(_.io.deqDelay)
-  io.debugIQDeqRobIdxVec.foreach(_.zip(issueQueueDeqVec).foreach{ case(sink, source) =>
-    sink.valid := source.valid
-    sink.bits := source.bits.robIdx
+
+  val srcReadyVec = issueQueues.flatMap(_.io.srcReadyVec)
+  val validVec = issueQueues.flatMap(_.io.validVec)
+  val allIssueParams = backendParams.allIssueParams.filter(_.StdCnt == 0)
+  val allExuParams = allIssueParams.map(_.exuBlockParams).flatten
+  val allFuConfigs = allExuParams.map(_.fuConfigs).flatten.toSet.toSeq
+  val sortedFuConfigs = allFuConfigs.sortBy(_.fuType.id)
+
+  val fuConfigsInIssueParams = allIssueParams.map(_.allExuParams.map(_.fuConfigs).flatten.toSet.toSeq)
+  val fuMapPipelineNum = sortedFuConfigs.map( fu => {
+    val fuInIQIdx = fuConfigsInIssueParams.zipWithIndex.filter { case (f, i) => f.contains(fu) }.map(_._2)
+    var pipeLineNum = fuInIQIdx.length
+    if (fu.fuType == FuType.stu) {
+      pipeLineNum = pipeLineNum * 2
+    }
+    println(s"fu : ${fu.name} pipelinenum: ${pipeLineNum}")
+    pipeLineNum.asUInt
   })
+
+  if(backendParams.debugEn) {
+    val topdownIQInfoVec = issueQueues.flatMap(_.io.topdownIQInfoVec.get)
+    val topdownIQInfoCollect = Module(new TopdownIQInfoCollect(io.iqEntryNum))
+    topdownIQInfoCollect.io.in.zip(topdownIQInfoVec).foreach{ case (sink, source) =>
+      sink.valid := source.valid
+      sink.robIdx := source.bits.robIdx.value
+      sink.robFlag := source.bits.robIdx.flag
+      sink.srcReady := source.bits.srcReady
+      val currentPipelineNum = Mux1H(source.bits.fuType, fuMapPipelineNum)
+      sink.pipeNum := currentPipelineNum
+      sink.cancelSource := source.bits.cancelSource
+      sink.futype := OHToUInt(source.bits.fuType)
+      sink.issued := source.bits.issued
+    }
+    io.topdownIQInfoVec.foreach( _.zip(topdownIQInfoVec).zip(topdownIQInfoCollect.io.out).foreach{
+      case ((sink, source), ideal) =>
+        sink.valid := source.valid
+        // connect base info
+        connectSamePort(sink.bits, source.bits)
+        sink.bits.idealIssueTime := ideal.idealIssueTime
+    })
+  }
 
 
 
@@ -860,9 +913,13 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val wakeupFromF2I = Option.when(params.isIntSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
   val cross = new ExuCrossRegion(params)
   val toMemExu = Option.when(!params.isFpSchd)(params.genNewExuInputCopySrcBundleMemBlock)
+  //to Mem, wake up LoadQueueReplay
+  val wakeupToLRQ = Option.when(params.isIntSchd)(intSchdParam.genMemWakeupLRQBundle)
+  val wakeupToLRQCancel = Option.when(params.isIntSchd)(intSchdParam.genMemWakeupCancelBundle)
   // fromMem
   val wakeupFromLDU = Option.when(params.isIntSchd)(Vec(params.LdExuCnt, Flipped(Valid(new MemWakeUpBundle))))
   val staFeedback = Option.when(params.isIntSchd)(Flipped(Vec(params.StaCnt, new MemRSFeedbackIO)))
+  val stdFeedback = Option.when(params.isIntSchd)(Flipped(Vec(params.StdCnt, new MemRSFeedbackIO)))
   val vstuFeedback = Option.when(params.isVecSchd)(Flipped(Vec(params.VstuCnt, new MemRSFeedbackIO(isVector = true))))
   val fromVecExcpMod = Option.when(params.isVecSchd)(Input(new ExcpModToVprf(maxMergeNumPerCycle * 2, maxMergeNumPerCycle)))
   val csrio = Option.when(params.hasCSR)(new CSRFileIO)
@@ -941,8 +998,8 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   // TopDown
   val uopTopDown = new UopTopDown
   val iqDeqSum = params.issueBlockParams.map(_.numDeq).sum
+  val iqEntryNum = params.issueBlockParams.map(_.numEntries).sum
   val debugIQValidNumVec = Option.when(backendParams.debugEn)(Vec(IQNum, Output(UInt(maxIQSize.U.getWidth.W))))
   val debugIQEnqHasIssuedVec = Option.when(backendParams.debugEn)(Vec(IQNum, Output(Bool())))
-  val debugIQDeqRobIdxVec = Option.when(backendParams.debugEn)(Vec(iqDeqSum, ValidIO(new RobPtr())))
+  val topdownIQInfoVec = Option.when(backendParams.debugEn)(Output(Vec(iqEntryNum, ValidIO(new TopdownIQExtendedInfo()))))
 }
-

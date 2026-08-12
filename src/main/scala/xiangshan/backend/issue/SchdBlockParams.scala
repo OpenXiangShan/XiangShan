@@ -103,7 +103,7 @@ case class SchdBlockParams(
   def needSrcVxrm: Boolean = issueBlockParams.map(_.needSrcVxrm).reduce(_ || _)
 
   def writeVConfig: Boolean = issueBlockParams.map(_.writeVConfig).reduce(_ || _)
-  
+
   def writeVType: Boolean = issueBlockParams.map(_.writeVType).reduce(_ || _)
 
   def numRedirect: Int = issueBlockParams.map(_.numRedirect).sum
@@ -152,6 +152,14 @@ case class SchdBlockParams(
     MixedVec(this.issueBlockParams.filter(_.isMemBlockIQ).map(_.genNewExuInputDecoupledCopySrcBundle))
   }
 
+  def genMemWakeupLRQBundle(implicit p: Parameters): MixedVec[MixedVec[ValidIO[IssueQueueLRQWakeUpBundle]]] = {
+    MixedVec(this.issueBlockParams.filter(_.isStoreIQ).map(_.genMemWakeupLRQBundle))
+  }
+
+  def genMemWakeupCancelBundle(implicit p: Parameters): MixedVec[MixedVec[IssueQueueLRQWakeUpCancelBundle]] = {
+    MixedVec(this.issueBlockParams.filter(_.isStoreIQ).map(_.genMemWakeupCancelBundle))
+  }
+
   def genExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = {
     MixedVec(this.issueBlockParams.map(_.genExuOutputDecoupledBundle))
   }
@@ -187,7 +195,7 @@ case class SchdBlockParams(
   def genExuOutputDecoupledBundleNoMemBlock(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = {
     MixedVec(this.issueBlockParams.filterNot(_.isMemBlockIQ).map(_.genExuOutputDecoupledBundle))
   }
-  
+
   def genNewExuOutputDecoupledBundleNoMemBlock(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = {
     MixedVec(this.issueBlockParams.filterNot(_.isMemBlockIQ).map(_.genNewExuOutputDecoupledBundle))
   }

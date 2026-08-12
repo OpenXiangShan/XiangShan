@@ -34,6 +34,7 @@ import xiangshan.frontend.bpu.ras.RasRedirectMeta
 import xiangshan.frontend.bpu.sc.ScMeta
 import xiangshan.frontend.bpu.tage.TageMeta
 import xiangshan.frontend.bpu.utage.MicroTageMeta
+import xiangshan.frontend.ftq.ResolveSource
 
 /* *** public const & type *** */
 class BranchAttribute extends Bundle {
@@ -194,18 +195,19 @@ class BpuCtrl extends Bundle {
 }
 
 // Bpu -> Ftq
-class BpuPrediction(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
-  val startPc:        PrunedAddr  = PrunedAddr(VAddrBits)
-  val target:         PrunedAddr  = PrunedAddr(VAddrBits)
-  val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+class BpuPrediction(implicit p: Parameters) extends BpuBundle {
+  val startPc:     PrunedAddr = PrunedAddr(VAddrBits)
+  val target:      PrunedAddr = PrunedAddr(VAddrBits)
+  val taken:       Bool       = Bool()
+  val endPosition: UInt       = UInt(CfiPositionWidth.W)
   // override valid
   val s3Override: Bool = Bool()
 
   def fromStage(startPc: PrunedAddr, prediction: Prediction): Unit = {
-    this.startPc              := startPc
-    this.takenCfiOffset.valid := prediction.taken
-    this.takenCfiOffset.bits  := getFtqOffset(startPc, prediction.cfiPosition)
-    this.target               := prediction.target
+    this.startPc     := startPc
+    this.target      := prediction.target
+    this.taken       := prediction.taken
+    this.endPosition := prediction.cfiPosition
   }
 }
 
@@ -253,6 +255,8 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val meta:     BpuResolveMeta         = new BpuResolveMeta
   val perfMeta: BpuPerfMeta            = new BpuPerfMeta
 
+  val debug_source: UInt = ResolveSource()
+
   def startPc: PrunedAddr = startPcVec.get.head // get one duplicate and use its head (startPc for first alignBank)
 
   // we masked out all branches after the first mispredict branch in Bpu top (refer to Bpu.scala t0_firstMispredictMask)
@@ -272,6 +276,8 @@ class Train(NumStartPcVecDup: Int = 1)(implicit p: Parameters) extends BpuTrain 
     this.branches   := that.branches
     this.meta       := that.meta
     this.perfMeta   := that.perfMeta
+
+    this.debug_source := that.debug_source
   }
 }
 

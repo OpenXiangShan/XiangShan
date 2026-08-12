@@ -29,6 +29,7 @@ import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.prefetch._
 
 import scala.math._
+import utils.OptionWrapper
 
 object Bundles {
 
@@ -84,7 +85,7 @@ object Bundles {
     val rep_info = new LoadToLsqReplayIO
   }
 
-  class StoreForwardReqS0(implicit p: Parameters) extends XSBundle {
+  class StoreForwardReqS0(implicit p: Parameters) extends MemBlockBundle {
     val vaddr = UInt(VAddrBits.W)
     val sqIdx = new SqPtr
     val size = UInt(MemorySize.Size.width.W)
@@ -97,6 +98,8 @@ object Bundles {
     val ssid = UInt(SSIDWidth.W)
     val storeSetHit = Bool() // inst has been allocated an store set
     val waitForRobIdx = new RobPtr // store set predicted previous store robIdx
+
+    val debug_robIdx = OptionWrapper(debugEn, new RobPtr)
   }
 
   class StoreForwardReqS1(implicit p: Parameters) extends XSBundle {
@@ -122,6 +125,25 @@ object Bundles {
     val matchInvalid = Bool()
     val addrInvalid = Valid(new SqPtr)
     val dataInvalid = Valid(new SqPtr)
+    val perfMdpAddrValid = Bool()
+    val perfMdpAddrStrict = Bool()
+    val perfMdpAddrHit = Bool()
+    val perfWaitStoreRetired = Bool()
+  }
+
+  class PerfMdpAddr(implicit p: Parameters) extends XSBundle {
+    val loadUnitNonStrictHit = Bool()
+    val loadUnitNonStrictMiss = Bool()
+    val loadUnitStrictHit = Bool()
+    val loadUnitStrictMiss = Bool()
+    val replayNonStrictHit = Bool()
+    val replayNonStrictMiss = Bool()
+    val replayStrictHit = Bool()
+    val replayStrictMiss = Bool()
+    val waitStoreRetired = Bool()
+    val perfAtRobHead = Bool()
+    val perfAtLqHead = Bool()
+    val perfLqFull = Bool()
   }
 
   class UncacheForwardResp(implicit p: Parameters) extends SbufferForwardResp // ?

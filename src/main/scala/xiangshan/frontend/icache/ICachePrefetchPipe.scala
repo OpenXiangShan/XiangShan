@@ -33,8 +33,7 @@ import xiangshan.frontend.ftq.FtqToPrefetchBundle
 class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     with ICacheAddrHelper
     with ICacheMetaHelper
-    with ICacheMissUpdateHelper
-    with ICacheDataHelper {
+    with ICacheMissUpdateHelper {
 
   class ICachePrefetchPipeIO(implicit p: Parameters) extends ICacheBundle {
     // control
@@ -43,7 +42,6 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     val flush:       Bool = Input(Bool())
 
     val fromFtq:       DecoupledIO[FtqToPrefetchBundle] = Flipped(Decoupled(new FtqToPrefetchBundle))
-    val toFtq:         Valid[PrefetchToFtqBundle]       = Valid(new PrefetchToFtqBundle)
     val flushFromBpu:  BpuFlushInfo                     = Flipped(new BpuFlushInfo)
     val itlb:          TlbRequestIO                     = new TlbRequestIO
     val itlbFlushPipe: Bool                             = Output(Bool())
@@ -92,7 +90,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s0_twoPrefetchCase  = io.fromFtq.bits.twoPrefetchCase
 
   private val s0_readMetaVAddr  = s0_twoPrefetchCase.selectMetaVAddr(s0_req)
-  private val s0_readMetaSetIdx = VecInit(s0_readMetaVAddr.map(get_idx))
+  private val s0_readMetaSetIdx = s0_twoPrefetchCase.selectMetaSetIdx(s0_req)
   private val s0_readDoubleLine = s0_twoPrefetchCase.selectIsCrossLine(s0_req)
 
   fromBpuS0Flush := !s0_isSoftPrefetch && io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid)
@@ -289,6 +287,8 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     VecInit(get_idx(s1_req(1).startVAddr), get_idx(s1_req(1).nextLineVAddr))
   )
 
+  private val s1_isMmio = Wire(Bool())
+
   // Disallow enqueuing wayLookup when SRAM write occurs.
   toWayLookup.zipWithIndex.foreach { case (port, i) =>
     port.valid :=
@@ -303,20 +303,21 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
         // first port is always valid, the second port is valid only if we can do 2-prefetch
         (if (i == 0) true.B else s1_twoPrefetchCase.valid)
 
-    port.bits.ftqIdx := s1_req(i).ftqIdx
-
+    port.bits.ftqIdx            := s1_req(i).ftqIdx
     port.bits.entry.vSetIdx     := VecInit(get_idx(s1_req(i).startVAddr), get_idx(s1_req(i).nextLineVAddr))
     port.bits.entry.waymask     := VecInit(s1_reqMetaInfo(i).map(_.waymask))
     port.bits.entry.pTag        := s1_pTag
     port.bits.entry.maybeRvcMap := VecInit(s1_reqMetaInfo(i).map(_.maybeRvcMap))
     port.bits.entry.metaCodes   := VecInit(s1_reqMetaInfo(i).map(_.metaCodes))
+    port.bits.entry.isMmio      := s1_isMmio
     port.bits.entry.itlbPbmt    := s1_itlbPbmt
 
     port.bits.exceptionEntry.itlbException     := s1_itlbException
     port.bits.exceptionEntry.gpAddr            := s1_gpAddr(i)(PAddrBitsMax - 1, 0)
     port.bits.exceptionEntry.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
 
-    port.bits.entry.debug_startVAddr := s1_req(i).startVAddr
+    port.bits.entry.debug_ftqIdx.foreach(_ := s1_req(i).ftqIdx)
+    port.bits.entry.debug_startVAddr.foreach(_ := s1_req(i).startVAddr)
 
     when(port.fire) {
       val waymasksVec = s1_reqMetaInfo(i).map(_.waymask.asTypeOf(Vec(nWays, Bool())))
@@ -352,16 +353,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s1_exceptionOut = s1_itlbException || s1_pmpException
 
   // merge pmp mmio and itlb pbmt
-  private val s1_isMmio = s1_pmpMmio || Pbmt.isUncache(s1_itlbPbmt)
-
-  io.toFtq.valid                             := s1_fire && !s1_isSoftPrefetch
-  io.toFtq.bits.ftqIdx                       := s1_ftqIdx
-  io.toFtq.bits.twoFetchInfo(0).valid        := true.B
-  io.toFtq.bits.twoFetchInfo(0).bits.isMmio  := s1_isMmio
-  io.toFtq.bits.twoFetchInfo(0).bits.wayMask := VecInit(s1_reqMetaInfo(0).map(_.waymask))
-  io.toFtq.bits.twoFetchInfo(1).valid        := s1_twoPrefetchCase.valid
-  io.toFtq.bits.twoFetchInfo(1).bits.isMmio  := s1_isMmio
-  io.toFtq.bits.twoFetchInfo(1).bits.wayMask := VecInit(s1_reqMetaInfo(1).map(_.waymask))
+  s1_isMmio := s1_pmpMmio || Pbmt.isUncache(s1_itlbPbmt)
 
   /**
     ******************************************************************************

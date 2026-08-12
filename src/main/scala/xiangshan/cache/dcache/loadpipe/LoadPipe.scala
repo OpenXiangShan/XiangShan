@@ -60,6 +60,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     // banked data read conflict
     val bank_conflict_slow = Input(Bool())
+    val rr_bank_conflict_slow = Input(Bool())
 
     // send miss request to miss queue
     val miss_req    = DecoupledIO(new MissReq)
@@ -126,9 +127,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s0_vaddr = s0_req.vaddr
   val s0_replayCarry = s0_req.replayCarry
   val s0_load128Req = io.load128Req
-  val s0_bank_oh_64 = UIntToOH(addr_to_dcache_bank(s0_vaddr))
-  val s0_bank_oh_128 = (s0_bank_oh_64 << 1.U).asUInt | s0_bank_oh_64.asUInt
-  val s0_bank_oh = Mux(s0_load128Req, s0_bank_oh_128, s0_bank_oh_64)
+  val s0_base_bank = addr_to_dcache_bank(s0_vaddr)
+  val s0_bank_mask_128b = bankMaskFromBase(s0_base_bank, DCacheVWordBankCount)
+  val s0_bank_mask_normal = byteMaskToBankMask(s0_vaddr, s0_req.mask)
+  val s0_bank_oh = Mux(s0_load128Req, s0_bank_mask_128b, s0_bank_mask_normal)
   assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
 
@@ -149,11 +151,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val tag_read = io.tag_read.bits
 
   // Tag read for new requests
-  meta_read.idx := get_idx(io.lsu.req.bits.vaddr)
+  meta_read.idx := get_dcache_idx(io.lsu.req.bits.vaddr)
   meta_read.way_en := ~0.U(nWays.W)
   // meta_read.tag := DontCare
 
-  tag_read.idx := get_idx(io.lsu.req.bits.vaddr)
+  tag_read.idx := get_dcache_idx(io.lsu.req.bits.vaddr)
   tag_read.way_en := ~0.U(nWays.W)
 
   // --------------------------------------------------------------------------------
@@ -274,7 +276,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // io.replace_way.set.valid := RegNext(s0_fire)
   io.replace_way.set.valid := false.B
-  io.replace_way.set.bits := get_idx(s1_vaddr)
+  io.replace_way.set.bits := get_dcache_idx(s1_vaddr)
   io.replace_way.dmWay := get_direct_map_way(s1_vaddr)
   val s1_invalid_vec = wayMap(w => !meta_resp(w).coh.isValid())
   val s1_have_invalid_way = s1_invalid_vec.asUInt.orR
@@ -402,7 +404,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh && !s2_wpu_pred_fail
 
-  val s2_data128bit = Cat(io.banked_data_resp(1).raw_data, io.banked_data_resp(0).raw_data)
+  val s2_data128bit = Cat((0 until DCacheVWordBankCount).reverse.map(i => io.banked_data_resp(i).raw_data))
   val s2_resp_data  = s2_data128bit
 
   val s2_is_prefetch = s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U
@@ -512,6 +514,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.debug_s1_hit_way := s1_tag_match_way_dup_dc
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
   io.lsu.s2_bank_conflict := io.bank_conflict_slow
+  io.lsu.s2_rr_bank_conflict := io.rr_bank_conflict_slow
   io.lsu.s2_wpu_pred_fail := s2_wpu_pred_fail_and_real_hit
   io.lsu.s2_mq_nack       := (resp.bits.miss && (s2_nack_no_mshr || io.miss_req.bits.cancel || io.wbq_block_miss_req ) || s2_btot_occupy_fail)
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
@@ -523,6 +526,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s3_valid = RegNext(s2_valid)
   val s3_load128Req = RegEnable(s2_load128Req, s2_fire)
+  val s3_read_error_lane_mask = RegEnable(bankMaskToReadErrorLaneMask(s2_bank_oh, addrToVWordBankBase(s2_vaddr)), s2_fire)
   val s3_vaddr = RegEnable(s2_vaddr, s2_fire)
   val s3_paddr = RegEnable(s2_paddr, s2_fire)
   val s3_hit = RegEnable(s2_hit, s2_fire)
@@ -531,12 +535,21 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_is_prefetch = s3_req_instrtype === DCACHE_PREFETCH_SOURCE.U
 
   val s3_banked_data_resp_word = RegEnable(s2_resp_data, s2_fire)
-  val s3_data_error = Mux(s3_load128Req, io.read_error_delayed.asUInt.orR, io.read_error_delayed(0)) && s3_hit
+  val s3_data_error = Mux(
+    s3_load128Req,
+    io.read_error_delayed.asUInt.orR,
+    (io.read_error_delayed.asUInt & s3_read_error_lane_mask).orR
+  ) && s3_hit
   val s3_tag_error = RegEnable(s2_tag_error, s2_fire)
   val s3_tl_error = RegEnable(s2_tl_error, s2_fire)
   val s3_flag_error = s3_tl_error.asUInt.orR
   val s3_hit_prefetch = RegEnable(s2_hit_prefetch, s2_fire)
   val s3_error = s3_tag_error || s3_flag_error || s3_data_error
+
+  // Register the S2 kill (includes load breakpoint trigger exception) so that
+  // hit-side replacement/access-flag metadata updates in S3 can be suppressed
+  // for loads that are architecturally killed by an exception.
+  val s3_kill = RegEnable(io.lsu.s2_kill, s2_fire)
 
   // error_delayed signal will be used to update uop.exception 1 cycle after load writeback
   resp.bits.error_delayed := s3_error && (s3_hit || s3_tag_error) && s3_valid
@@ -556,37 +569,37 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // report tag error / l2 corrupted to CACHE_ERROR csr
   io.error.valid := s3_error && s3_valid
 
-  io.replace_access.valid := s3_valid && s3_hit
-  io.replace_access.bits.set := RegNext(RegNext(get_idx(s1_req.vaddr)))
+  io.replace_access.valid := s3_valid && s3_hit && !s3_kill
+  io.replace_access.bits.set := RegNext(RegNext(get_dcache_idx(s1_req.vaddr)))
   io.replace_access.bits.way := RegNext(RegNext(OHToUInt(s1_tag_match_way_dup_dc)))
 
   // update access bit
-  io.access_flag_write.valid := s3_valid && s3_hit && !s3_is_prefetch
-  io.access_flag_write.bits.idx := get_idx(s3_vaddr)
+  io.access_flag_write.valid := s3_valid && s3_hit && !s3_is_prefetch && !s3_kill
+  io.access_flag_write.bits.idx := get_dcache_idx(s3_vaddr)
   io.access_flag_write.bits.way_en := s3_tag_match_way
   io.access_flag_write.bits.flag := true.B
 
   // clear prefetch source when prefetch hit
   // so that next load to the same line won't be considered as prefetch hit
   // A prefetch block will only be counted once
-  val s3_clear_pf_flag_en = s3_valid && s3_hit && !s3_is_prefetch && isFromL1Prefetch(s3_hit_prefetch)
+  val s3_clear_pf_flag_en = s3_valid && s3_hit && !s3_is_prefetch && !s3_kill && isFromL1Prefetch(s3_hit_prefetch)
   io.prefetch_flag_write.valid := s3_clear_pf_flag_en && !io.counter_filter_query.resp
-  io.prefetch_flag_write.bits.idx := get_idx(s3_vaddr)
+  io.prefetch_flag_write.bits.idx := get_dcache_idx(s3_vaddr)
   io.prefetch_flag_write.bits.way_en := s3_tag_match_way
   io.prefetch_flag_write.bits.source := L1_HW_PREFETCH_CLEAR
 
   // when demand request hit prefetch data, the latency is reset to 0.
   io.latency_flag_write.valid := s3_clear_pf_flag_en && !io.counter_filter_query.resp
-  io.latency_flag_write.bits.idx := get_idx(s3_vaddr)
+  io.latency_flag_write.bits.idx := get_dcache_idx(s3_vaddr)
   io.latency_flag_write.bits.way_en := s3_tag_match_way
   io.latency_flag_write.bits.latency := 0.U
 
   io.counter_filter_query.req.valid := s3_clear_pf_flag_en
-  io.counter_filter_query.req.bits.idx := get_idx(s3_vaddr)
+  io.counter_filter_query.req.bits.idx := get_dcache_idx(s3_vaddr)
   io.counter_filter_query.req.bits.way := OHToUInt(s3_tag_match_way)
 
   io.counter_filter_enq.valid := io.prefetch_flag_write.valid
-  io.counter_filter_enq.bits.idx := get_idx(s3_vaddr)
+  io.counter_filter_enq.bits.idx := get_dcache_idx(s3_vaddr)
   io.counter_filter_enq.bits.way := OHToUInt(s3_tag_match_way)
 
   hit_pf_in_cache := s3_clear_pf_flag_en && !io.counter_filter_query.resp

@@ -198,6 +198,9 @@ if __name__ == '__main__':
 
     base_scale = 1.0
     ref_scale  = 1.0
+    base_issue = 8.0 if opt.base_issue is None else float(opt.base_issue)
+    ref_issue = 8.0 if opt.ref_issue is None else float(opt.ref_issue)
+    draw_issue_width = 8.0
 
     if opt.base_stat_dir and opt.ref_stat_dir:
         if opt.base_issue is None or opt.ref_issue is None:
@@ -217,8 +220,13 @@ if __name__ == '__main__':
 
         print(f"[INFO] issue widths: base={b}, ref={r}")
         print(f"[INFO] computed scales: BASE scale={base_scale:.6f}, REF scale={ref_scale:.6f}")
+        draw_issue_width = max(b, r)
     else:
         print("[INFO] only one stat dir provided -> scale=1.0")
+        if opt.base_stat_dir:
+            draw_issue_width = base_issue
+        elif opt.ref_stat_dir:
+            draw_issue_width = ref_issue
 
     if opt.base_stat_dir:
         print(f"[INFO] Run BASE with scale={base_scale:.6f}")
@@ -234,5 +242,4 @@ if __name__ == '__main__':
 
     if not out_csv_paths:
         raise SystemExit("Error: please provide at least one of --base-stat-dir or --ref-stat-dir")
-    draw(out_csv_paths, labels)
-
+    draw(out_csv_paths, labels, draw_issue_width)

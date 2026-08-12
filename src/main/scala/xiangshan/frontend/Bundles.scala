@@ -43,9 +43,10 @@ import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.HasICacheParameters
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICachePerfInfo
-import xiangshan.frontend.icache.ICacheRespBundle
 import xiangshan.frontend.icache.ICacheTopdownInfo
-import xiangshan.frontend.icache.MainPipeToIfuIO
+import xiangshan.frontend.icache.MainPipeToIfuReq
+import xiangshan.frontend.icache.WayLookupBundle
+import xiangshan.frontend.icache.WayLookupWriteBundle
 import xiangshan.frontend.instruncache.InstrUncacheReq
 import xiangshan.frontend.instruncache.InstrUncacheResp
 
@@ -71,10 +72,10 @@ class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
 class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
 
   // fast path: Timing critical
-  val valid:              Bool       = Bool()
-  val startVAddr:         PrunedAddr = PrunedAddr(VAddrBits)
-  val nextCachelineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
-  val nextStartVAddr:     PrunedAddr = PrunedAddr(VAddrBits)
+  val valid:         Bool       = Bool()
+  val startVAddr:    PrunedAddr = PrunedAddr(VAddrBits)
+  val nextLineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  val target:        PrunedAddr = PrunedAddr(VAddrBits)
   // slow path
   val ftqIdx:         FtqPtr      = new FtqPtr
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
@@ -82,47 +83,37 @@ class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with ICa
   def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset.bits)
 
   override def toPrintable: Printable =
-    p"[start] ${Hexadecimal(startVAddr.toUInt)} [next] ${Hexadecimal(nextCachelineVAddr.toUInt)}" +
-      p"[tgt] ${Hexadecimal(nextStartVAddr.toUInt)} [ftqIdx] $ftqIdx [jmp] v:${takenCfiOffset.valid}" +
+    p"[start] ${Hexadecimal(startVAddr.toUInt)} [next] ${Hexadecimal(nextLineVAddr.toUInt)}" +
+      p"[tgt] ${Hexadecimal(target.toUInt)} [ftqIdx] $ftqIdx [jmp] v:${takenCfiOffset.valid}" +
       p" offset: ${takenCfiOffset.bits}\n"
 }
 
-class FtqPrefetchRequest(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
-  val startVAddr:         PrunedAddr    = PrunedAddr(VAddrBits)
-  val nextCachelineVAddr: PrunedAddr    = PrunedAddr(VAddrBits)
-  val ftqIdx:             FtqPtr        = new FtqPtr
-  val takenCfiOffset:     UInt          = UInt(CfiPositionWidth.W)
-  val backendException:   ExceptionType = new ExceptionType
-
-  def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset)
-}
-
-class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
-  val startVAddr:         PrunedAddr = PrunedAddr(VAddrBits)
-  val nextCachelineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
-  val ftqIdx:             FtqPtr     = new FtqPtr
-  val takenCfiOffset:     UInt       = UInt(CfiPositionWidth.W)
-  val isBackendException: Bool       = Bool()
-
-  def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset)
+class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
+  val valid:               Bool            = Bool()
+  val vAddr:               Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
+  def startVAddr:          PrunedAddr      = vAddr(0)
+  def nextLineVAddr:       PrunedAddr      = vAddr(1)
+  val taken:               Bool            = Bool()
+  val endPosition:         UInt            = UInt(CfiPositionWidth.W)
+  val bankSel:             Vec[UInt]       = Vec(PortNumber, UInt(DataBanks.W))
+  val ftqIdx:              FtqPtr          = new FtqPtr
+  val vSetIdx:             Vec[UInt]       = Vec(PortNumber, UInt(idxBits.W))
+  val hasBackendException: Bool            = Bool()
 }
 
 class FtqToICacheIO(implicit p: Parameters) extends FrontendBundle {
   val toPrefetch:    DecoupledIO[FtqToPrefetchBundle] = Decoupled(new FtqToPrefetchBundle)
-  val fetchReq:      DecoupledIO[FtqFetchRequest]     = Decoupled(new FtqFetchRequest)
+  val toMainPipe:    DecoupledIO[FtqToMainPipeBundle] = Decoupled(new FtqToMainPipeBundle)
   val flushFromBpu:  BpuFlushInfo                     = new BpuFlushInfo
   val redirectFlush: Bool                             = Output(Bool())
 }
 
-class ICacheToIfuIO(implicit p: Parameters) extends FrontendBundle {
-  val fetchResp:  Valid[ICacheRespBundle] = Valid(new ICacheRespBundle)
-  val topdown:    ICacheTopdownInfo       = Output(new ICacheTopdownInfo)
-  val perf:       ICachePerfInfo          = Output(new ICachePerfInfo)
-  val fetchReady: Bool                    = Output(Bool())
-}
-
-class IfuToICacheIO(implicit p: Parameters) extends FrontendBundle {
-  val stall: Bool = Output(Bool())
+class ICacheToIfuIO(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
+  val req:        DecoupledIO[Vec[MainPipeToIfuReq]] = DecoupledIO(Vec(FetchPorts, new MainPipeToIfuReq))
+  val corrupt:    Vec[Vec[Bool]]                     = Vec(FetchPorts, Vec(PortNumber, Bool()))
+  val topdown:    ICacheTopdownInfo                  = Output(new ICacheTopdownInfo)
+  val perf:       ICachePerfInfo                     = Output(new ICachePerfInfo)
+  val fetchReady: Bool                               = Output(Bool())
 }
 
 class IfuToInstrUncacheIO(implicit p: Parameters) extends FrontendBundle {
@@ -134,19 +125,17 @@ class InstrUncacheToIfuIO(implicit p: Parameters) extends FrontendBundle {
 }
 
 class FtqToIfuIO(implicit p: Parameters) extends FrontendBundle {
-  class FtqToIfuReq extends Bundle {
-    val fetch:       Vec[FetchRequestBundle] = Vec(FetchPorts, new FetchRequestBundle)
-    val topdownInfo: FrontendTopDownBundle   = new FrontendTopDownBundle
-  }
-  val req:          DecoupledIO[FtqToIfuReq] = Decoupled(new FtqToIfuReq)
-  val redirect:     Valid[Redirect]          = Valid(new Redirect)
-  val flushFromBpu: BpuFlushInfo             = new BpuFlushInfo
+  val redirect:     Valid[Redirect]       = Valid(new Redirect)
+  val flushFromBpu: BpuFlushInfo          = new BpuFlushInfo
+  val topdownInfo:  FrontendTopDownBundle = new FrontendTopDownBundle
 }
 
 class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
   val ftqIdx: FtqPtr = new FtqPtr
-  val pc:     UInt   = UInt(VAddrBits.W)
-  val taken:  Bool   = Bool()
+  //
+  val canTrain: Bool = Bool()
+  val pc:       UInt = UInt(VAddrBits.W)
+  val taken:    Bool = Bool()
   // The early end position may not always be a branch instruction.
   val ftqOffset: UInt            = UInt(FetchBlockInstOffsetWidth.W) // maybe use later
   val isRVC:     Bool            = Bool()                            // seems unused for now, keep it.

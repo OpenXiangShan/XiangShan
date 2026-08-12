@@ -23,6 +23,7 @@ import utility.HasCircularQueuePtrHelper
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfSeqAccumulate
 import xiangshan.frontend.ftq.BpuFlushInfo
 import xiangshan.frontend.ftq.FtqPtr
 
@@ -34,7 +35,8 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     val flush:        Bool         = Input(Bool())
     val flushFromBpu: BpuFlushInfo = Input(new BpuFlushInfo)
 
-    val read: DecoupledIO[WayLookupBundle] = DecoupledIO(new WayLookupBundle)
+    val toMainPipe:   DecoupledIO[WayLookupToMainPipeBundle] = DecoupledIO(new WayLookupToMainPipeBundle)
+    val fromMainPipe: MainPipeToWayLookupBundle              = Input(new MainPipeToWayLookupBundle)
 
     val write: Vec[DecoupledIO[WayLookupWriteBundle]] = Vec(FetchPorts, Flipped(DecoupledIO(new WayLookupWriteBundle)))
 
@@ -65,11 +67,9 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
 
   private val numValidEntries = distanceBetween(writePtr, readPtr)
   private val numFreeEntries  = WayLookupSize.U - numValidEntries
-  dontTouch(numValidEntries)
-  dontTouch(numFreeEntries)
 
   // NOTE: May be unportable, we have bp3 == pf2 now, and WayLookup is written in pf1,
-  // so the tailing 0 (already bypassed to if1) or 1 (if1 stall, stored here) entries might be flushed by bp3,
+  // so up to one tail entry still in WayLookup might be flushed by bp3,
   // therefore, when shouldFlushByStage3, we need to move back writePtr by 0 (empty) or 1.
   // If in future we have bp4 (or even more) flush, this might not be enough.
   // NOTE: With 2-prefetch, writePtr - 2.U still does not need to be flushed,
@@ -91,8 +91,9 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   when(io.flush) {
     readPtr.value := 0.U
     readPtr.flag  := false.B
-  }.elsewhen(io.read.fire) {
-    readPtr := readPtr + 1.U
+  }.elsewhen(io.toMainPipe.fire) {
+    val deqCnt = Mux(io.fromMainPipe.realTwoFetchValid, 2.U, 1.U)
+    readPtr := readPtr + deqCnt
   }
 
   when(io.flush) {
@@ -105,7 +106,6 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   // we can store only the first exception encountered, as exceptions must trigger a redirection (and thus a flush)
   private val exceptionEntry = RegInit(0.U.asTypeOf(Valid(new WayLookupExceptionEntry)))
   private val exceptionPtr   = RegInit(ICacheWayLookupPtr(false.B, 0.U))
-  private val exceptionHit   = exceptionPtr === readPtr && exceptionEntry.valid
 
   when(io.flush || bpuS3FlushValid && exceptionPtr === bpuS3FlushPtr) {
     // When flushed by bp3
@@ -129,18 +129,26 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     }.reduce(_ || _)
   })
   // if the entry is being updated, we should not read it (i.e. read.valid should be false)
-  private val updateStall = entryUpdate(readPtr.value)
+  private val updateStall = VecInit((0 until MaxFetchReqNum).map(i => entryUpdate((readPtr + i.U).value)))
 
   /* *** read *** */
-  // if the entry is empty, but there is a valid write, we can bypass it to read port (maybe timing critical)
-  private val canBypass = empty && io.write.head.valid && !exceptionEntry.valid
-  private val canRead   = !empty && !updateStall
-  io.read.valid := canRead || canBypass
-  when(canBypass) {
-    io.read.bits := io.write.head.bits
-  }.otherwise {
-    io.read.bits.entry          := entries(readPtr.value)
-    io.read.bits.exceptionEntry := Mux(exceptionHit, exceptionEntry.bits, 0.U.asTypeOf(new WayLookupExceptionEntry))
+  private val canDeq    = !empty && !updateStall(0)
+  private val canDeqTwo = numValidEntries > 1.U && !updateStall(0) && !updateStall(1)
+
+  private val fetchReqEntry = VecInit((0 until MaxFetchReqNum).map(i => entries((readPtr + i.U).value)))
+  private val fetchReqExceptionEntry = VecInit((0 until MaxFetchReqNum).map { i =>
+    Mux(
+      exceptionEntry.valid && exceptionPtr === (readPtr + i.U),
+      exceptionEntry.bits,
+      0.U.asTypeOf(new WayLookupExceptionEntry)
+    )
+  })
+
+  io.toMainPipe.valid := canDeq && !io.flush
+  io.toMainPipe.bits.wayLookupInfo.zipWithIndex.foreach { case (info, i) =>
+    info.valid               := (if (i == 0) true.B else canDeqTwo)
+    info.bits.entry          := fetchReqEntry(i)
+    info.bits.exceptionEntry := fetchReqExceptionEntry(i)
   }
 
   /**
@@ -182,8 +190,8 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     0,
     WayLookupSize
   )
-  XSPerfAccumulate("emptyHasBypass", empty && io.write.head.valid)
-  XSPerfAccumulate("emptyNoBypass", empty && !io.write.head.valid)
+  XSPerfAccumulate("write", io.write.head.fire)
+  XSPerfAccumulate("empty_when_write", empty && io.write.head.fire)
   // exception stall cycles
   XSPerfAccumulate("waitingForExceptionRead", exceptionEntry.valid && !empty)
   XSPerfAccumulate("waitingForExceptionFlush", exceptionEntry.valid && empty)
