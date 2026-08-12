@@ -35,7 +35,7 @@ class PTWConfig:
     hgatp_ppn: int = 0
     response_source: str = "nemu"
     compare_drive_source: str = "nemu"
-    nemu_ptw_adapter: str = "env.nemu_ptw_adapter_template:build_ptw_resp"
+    nemu_ptw_adapter: str = "env.nemu.ptw_adapter_template:build_ptw_resp"
     req_ready_strategy: str = "always"
     req_ready_probability: float = 1.0
     req_ready_high_cycles: int = 1

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..transactions import ProgramImage
+from ..core.transactions import ProgramImage
 
 
 @dataclass(frozen=True)

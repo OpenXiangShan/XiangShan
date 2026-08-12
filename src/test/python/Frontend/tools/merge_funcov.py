@@ -12,8 +12,8 @@ FRONTEND_ROOT = Path(__file__).resolve().parents[1]
 if str(FRONTEND_ROOT) not in sys.path:
     sys.path.insert(0, str(FRONTEND_ROOT))
 
-from env.artifact_provenance import file_sha256
-from env.functional_coverage import FunctionalCoverageRecorder
+from env.runtime.artifact_provenance import file_sha256
+from env.funcov.recorder import FunctionalCoverageRecorder
 
 
 def _target_union(paths: list[Path]) -> dict[str, list[str]]:

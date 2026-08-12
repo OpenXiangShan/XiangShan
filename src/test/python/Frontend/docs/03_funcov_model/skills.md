@@ -43,7 +43,7 @@ AI 可以分析代码、提出测试点和预期，但不能独立批准从 DUT 
 
 - 测试点主表：`../02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv`
 - coverage registry：`frontend_bt_functional_coverage_pilot.csv`
-- 功能覆盖率 recorder、调度和 event 采样：`../../env/functional_coverage.py`
+- 功能覆盖率 recorder、调度和 event 采样：`../../env/funcov/recorder.py`
 - 模块级周期采样 predicate：`../../env/funcov/__init__.py`、
   `../../env/funcov/py/icache/__init__.py`、
   `../../env/funcov/py/icache/icache_mainpipe_funcov.py`、
@@ -58,7 +58,7 @@ AI 可以分析代码、提出测试点和预期，但不能独立批准从 DUT 
 
 `pilot` 仅为历史兼容文件名，不表示仍处于试点阶段。原 `docs/frontend_bt_functional_coverage_pilot.csv` 重复副本已删除，不得重新建立平行 registry。
 
-功能覆盖率只允许一套 runtime 链：fixture 装配一个 `FunctionalCoverageRecorder`，由 `functional_coverage.py` 统一调度 event/cycle 采样，通用模块 predicate 放在 `funcov/__init__.py`，ICache MainPipe、PrefetchPipe、MissUnit、WayLookup 与 hit/miss predicate 放在 `funcov/py/icache/` 子包中，并通过其 `__init__.py` 注册到同一个 recorder。不得再通过 `coverage_def.py`、toffee `CovGroup`、SV covergroup 或其他 Python 文件并行维护相同 group/point/bin 的第二份命中逻辑。VCS/Verdi 功能覆盖率可以用于临时调试和交叉检查，但不能作为 canonical 反标证据。
+功能覆盖率只允许一套 runtime 链：fixture 装配一个 `FunctionalCoverageRecorder`，由 `funcov/recorder.py` 统一调度 event/cycle 采样，通用模块 predicate 放在 `funcov/__init__.py`，ICache MainPipe、PrefetchPipe、MissUnit、WayLookup 与 hit/miss predicate 放在 `funcov/py/icache/` 子包中，并通过其 `__init__.py` 注册到同一个 recorder。不得再通过 `coverage_def.py`、toffee `CovGroup`、SV covergroup 或其他 Python 文件并行维护相同 group/point/bin 的第二份命中逻辑。VCS/Verdi 功能覆盖率可以用于临时调试和交叉检查，但不能作为 canonical 反标证据。
 
 registry 中只有 `Coverpoint` 完整、已反标到唯一叶子且已有 sampler 映射的行才是 active model。保留的历史规划行在迁移完成前只算 `UNMAPPED`，即使旧 predicate 偶然命中也不能自动反标或计入闭环分子。
 
@@ -135,13 +135,13 @@ src/test/python/Frontend/scripts/run_baremode_asm_bin_trace.sh \
 src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh <case.bin>
 ```
 
-Python testcase 使用 `env/sequences/`、`env/api.py` 和现有 agent 构造额外激励。优先扩展语义兼容的长期 testcase；只有现有 testcase 无法清楚表达场景时才新增。
+Python testcase 使用 `env/sequences/`、`env/api/` 和现有 agent 构造额外激励。优先扩展语义兼容的长期 testcase；只有现有 testcase 无法清楚表达场景时才新增。
 
 禁止缩短 trace、降低目标 cursor、隐藏 monitor error 或放宽 checker 将失败包装为通过。
 
 ## 7. 功能覆盖率建模
 
-coverage registry 定义 `Bin_ID -> Coverage_Group -> Coverpoint -> Bin_Name`，`functional_coverage.py` 负责加载定义、统一调度、event 采样、记录命中和输出 artifact，`funcov/__init__.py` 及其 ICache 子模块维护模块级周期采样 predicate。它们共同组成唯一可执行功能覆盖率实现。
+coverage registry 定义 `Bin_ID -> Coverage_Group -> Coverpoint -> Bin_Name`，`funcov/recorder.py` 负责加载定义、统一调度、event 采样、记录命中和输出 artifact，`funcov/__init__.py` 及其 ICache 子模块维护模块级周期采样 predicate。它们共同组成唯一可执行功能覆盖率实现。
 
 建模规则：
 

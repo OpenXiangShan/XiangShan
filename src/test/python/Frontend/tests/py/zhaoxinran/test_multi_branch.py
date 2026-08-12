@@ -6,7 +6,7 @@ from typing import Iterable
 import pytest
 
 from env.sequences import CheckPcSequence, LoadProgramSequence, RunUntilCommitSequence
-from env.transactions import CommitTarget, PcSequenceExpectation, ProgramImage
+from env.core.transactions import CommitTarget, PcSequenceExpectation, ProgramImage
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"

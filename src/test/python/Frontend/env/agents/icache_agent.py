@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, Optional
 
 from ..bundles import ICacheBundle
-from ..memory_model import MemoryModel
+from ..model.memory_model import MemoryModel
 
 
 @dataclass

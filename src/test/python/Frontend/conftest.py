@@ -19,7 +19,7 @@ _DATA_DIR = os.path.join(_TEST_ROOT, 'data')
 if _TEST_ROOT not in sys.path:
     sys.path.insert(0, _TEST_ROOT)
 
-from env.pylib import frontend_pylib_path
+from env.runtime.pylib import frontend_pylib_path
 
 _PYLIB_PATH = str(frontend_pylib_path())
 
@@ -43,7 +43,7 @@ def pytest_configure(config):
 
 @pytest.hookimpl(trylast=True)
 def pytest_sessionfinish(session, exitstatus):
-    from env.fixtures import finish_vcs_batch_dut
+    from env.runtime.fixtures import finish_vcs_batch_dut
 
     finish_vcs_batch_dut()
 

@@ -2,8 +2,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from env.funcov.py.ifu.sampler import sample_cfvec_coverage
-from env.functional_coverage import FunctionalCoverageRecorder, default_pilot_csv_path
-from env.rvc_decoder import expand_rvc
+from env.funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_path
+from env.support.rvc_decoder import expand_rvc
 
 
 _PREFIX = "Frontend_top.Frontend.inner_ifu.__Vtogcov__"

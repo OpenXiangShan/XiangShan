@@ -1,12 +1,12 @@
 # Frontend Functional Coverage Code
 
 This directory contains implementation predicates registered by
-`env/functional_coverage.py`. It does not define a second functional-coverage
+`env/funcov/recorder.py`. It does not define a second functional-coverage
 methodology or coverage registry.
 
 ## Implementation map
 
-- `env/functional_coverage.py`: loads the canonical registry, coordinates
+- `env/funcov/recorder.py`: loads the canonical registry, coordinates
   recorder sampling, and writes functional-coverage artifacts.
 - `env/funcov/__init__.py`: shared registration and common predicate entry
   points.

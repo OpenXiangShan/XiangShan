@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Tuple
 
-from ..transactions import ProgramImage
+from ..core.transactions import ProgramImage
 
 
 _NOP = 0x00000013

@@ -7,12 +7,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, Optional
 
-from .agents.backend_agent import BackendAgent
-from .agents.icache_agent import ICacheAgent
-from .agents.ptw_agent import PTWAgent
-from .agents.uncache_agent import UncacheAgent
+from ..agents.backend_agent import BackendAgent
+from ..agents.icache_agent import ICacheAgent
+from ..agents.ptw_agent import PTWAgent
+from ..agents.uncache_agent import UncacheAgent
 from .backend_model import BackendModel
-from .bundles import (
+from ..bundles import (
     BackendCtrlBundle,
     BackendFromFtqBundle,
     BackendObserveBundle,
@@ -27,12 +27,12 @@ from .bundles import (
     bind_bundle_required,
 )
 from .checkers import PTWFullPpnChecker, PTWRespInputChecker
-from .env_config import BAREMODE_ENV_CONFIG, DEFAULT_ENV_CONFIG, EnvConfig, SV39_ENV_CONFIG
-from .logging_utils import configure_env_logging, parse_log_level
-from .model import GoldenTrace, MemoryModel, PageTableModel
-from .model.branch_checker import BranchChecker
-from .monitors.backend_observe_monitor import BackendObserveMonitor
-from .monitors.frontend_monitor import FrontendMonitor
+from ..support.env_config import BAREMODE_ENV_CONFIG, DEFAULT_ENV_CONFIG, EnvConfig, SV39_ENV_CONFIG
+from ..support.logging_utils import configure_env_logging, parse_log_level
+from ..model import GoldenTrace, MemoryModel, PageTableModel
+from ..model.branch_checker import BranchChecker
+from ..monitors.backend_observe_monitor import BackendObserveMonitor
+from ..monitors.frontend_monitor import FrontendMonitor
 
 
 class FrontendEnv:

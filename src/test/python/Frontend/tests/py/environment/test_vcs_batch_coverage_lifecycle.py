@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from env import fixtures
+from env.runtime import fixtures
 
 
 class _FakeVcsDut:

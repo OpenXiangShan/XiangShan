@@ -9,8 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import env.fixtures as fixtures_module
-import env.functional_coverage as functional_coverage_module
+import env.runtime.fixtures as fixtures_module
+import env.funcov.recorder as functional_coverage_module
 from env.funcov import (
     CFVEC_SAMPLER_BIN_KEYS,
     IFU_CFVEC_SAMPLER_BIN_KEYS,
@@ -48,15 +48,15 @@ from env.funcov.py.icache import (
     ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS,
     ICACHE_HITMISS_SAMPLER_BIN_KEYS,
 )
-from env.artifact_provenance import load_frontend_build_manifest, write_frontend_build_manifest
-from env.functional_coverage import (
+from env.runtime.artifact_provenance import load_frontend_build_manifest, write_frontend_build_manifest
+from env.funcov.recorder import (
     FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS,
     FunctionalCoverageRecorder,
     current_funcov_sampler_sha256,
     default_pilot_csv_path,
     funcov_sampler_paths,
 )
-from env.pylib import frontend_offset_path
+from env.runtime.pylib import frontend_offset_path
 from tools.backannotate_funcov import (
     PilotBin,
     _current_sampler_sha256,
@@ -794,9 +794,9 @@ def test_two_fetch_backannotation_matches_registry_and_sampler():
 def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     repo_root = _repo_root()
     frontend_root = repo_root / "src/test/python/Frontend"
-    fixture_source = (frontend_root / "env/fixtures.py").read_text(encoding="utf-8")
+    fixture_source = (frontend_root / "env/runtime/fixtures.py").read_text(encoding="utf-8")
     sampler_source = (frontend_root / "env/funcov/__init__.py").read_text(encoding="utf-8")
-    recorder_source = (frontend_root / "env/functional_coverage.py").read_text(encoding="utf-8")
+    recorder_source = (frontend_root / "env/funcov/recorder.py").read_text(encoding="utf-8")
     recorder = FunctionalCoverageRecorder.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="contract",
@@ -1003,7 +1003,7 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
 
 
 def test_effective_run_id_honors_explicit_value_after_default_generation(monkeypatch):
-    import env.fixtures as fixtures_module
+    import env.runtime.fixtures as fixtures_module
 
     previous_default = fixtures_module._DEFAULT_RUN_ID
     try:

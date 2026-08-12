@@ -47,13 +47,13 @@
 ## 分层约定
 
 - 根目录负责稳定导入入口，不重复实现 `env/` 内逻辑。
-- `env/fixtures.py` 是 DUT fixture 与环境装配的真实实现位置。
-- `env/api.py` 是公共 `api_Frontend_*` helper 的真实实现位置。
-- `env/request_apis.py` 是 `env/api.py` 下层请求式 helper 的真实实现位置。
-- `env/frontend_env.py` 是 `FrontendEnv` 的真实实现位置。
-- `env/dut_factory.py` 负责真实 DUT 构造。
-- `env/nemu_trace_pipeline.py` 负责从 bin 驱动 NEMU trace 生成。
-- `env/functional_coverage.py` 负责功能覆盖率事件记录与产物输出。
+- `env/runtime/fixtures.py` 是 DUT fixture 与环境装配的真实实现位置。
+- `env/api/__init__.py` 是公共 `api_Frontend_*` helper 的真实实现位置。
+- `env/api/request_apis.py` 是 API 下层请求式 helper 的真实实现位置。
+- `env/core/frontend_env.py` 是 `FrontendEnv` 的真实实现位置。
+- `env/runtime/dut_factory.py` 负责真实 DUT 构造。
+- `env/nemu/trace_pipeline.py` 负责从 bin 驱动 NEMU trace 生成。
+- `env/funcov/recorder.py` 负责功能覆盖率事件记录与产物输出。
 - `env/funcov/__init__.py` 负责通用 canonical group/coverpoint/bin 的 DUT 周期级采样，
   `env/funcov/py/icache/` 下的
   `icache_mainpipe_funcov.py`、`icache_prefetchpipe_funcov.py`、
@@ -61,7 +61,7 @@
   `icache_hitmiss_funcov.py` 分别负责 ICache MainPipe、PrefetchPipe、
   MissUnit、WayLookup 与 hit/miss 路径功能覆盖率模型；
   不再维护平行的 toffee 功能覆盖率定义。
-- `env/monitor.py` 与 `env/monitors/` 共同承担 monitor 侧数据结构和 DUT 观测逻辑。
+- `env/monitors/` 承担 monitor 侧数据结构和 DUT 观测逻辑。
 - `env/bundles/`、coverage 和启动控制里出现的信号名，必须以当前生成出来的 DUT 接口为准。
   不允许长期保留已经不在 DUT 中出现的历史信号；缺失信号要么从 bundle/coverage 中删除，要么被明确建模为可选信号。
 
@@ -72,9 +72,9 @@
 1. `README.md`
 2. `Frontend_api.py`
 3. `Frontend_env.py`
-4. `env/frontend_env.py`
-5. `env/api.py`
-6. `env/fixtures.py`
+4. `env/core/frontend_env.py`
+5. `env/api/__init__.py`
+6. `env/runtime/fixtures.py`
 7. `tests/py/environment/test_layout_import_compat.py`
 8. `tests/py/zhaoxinran/test_bin_trace_dut.py`
 9. `tests/py/zhaoxinran/test_multi_branch.py`

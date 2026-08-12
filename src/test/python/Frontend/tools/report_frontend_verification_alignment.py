@@ -28,7 +28,7 @@ REPO_ROOT = FRONTEND_ROOT.parents[3]
 if str(FRONTEND_ROOT) not in sys.path:
     sys.path.insert(0, str(FRONTEND_ROOT))
 
-from env.functional_coverage import current_funcov_sampler_sha256, funcov_sampler_paths
+from env.funcov.recorder import current_funcov_sampler_sha256, funcov_sampler_paths
 
 
 PRIMARY_STATUSES = ("UNMAPPED", "MODELED", "PARTIAL", "HIT", "CLOSED")

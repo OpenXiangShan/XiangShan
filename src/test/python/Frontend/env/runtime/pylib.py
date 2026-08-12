@@ -13,7 +13,7 @@ def frontend_pylib_path() -> Path:
     if sim not in {"verilator", "vcs"}:
         raise RuntimeError("TB_FRONTEND_SIM must be one of: verilator vcs")
 
-    repo_root = Path(__file__).resolve().parents[5]
+    repo_root = Path(__file__).resolve().parents[6]
     return repo_root / "build-frontend" / f"pylib-{sim}"
 
 

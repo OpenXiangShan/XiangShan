@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from env.monitor import Observation
+from env.monitors import Observation
 from env.model.golden_trace import GoldenTrace, TraceEntry
 from env.sequences import CheckPcSequence, InjectRedirectSequence, LoadGoldenTraceSequence, RunUntilGoldenTraceCompleteSequence
-from env.transactions import GoldenTraceSource, PcSequenceExpectation, RedirectTxn
+from env.core.transactions import GoldenTraceSource, PcSequenceExpectation, RedirectTxn
 
 
 class _NoRawDutAccess:

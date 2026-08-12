@@ -12,7 +12,7 @@ _FRONTEND_ROOT = _TOOLS_ROOT.parent
 if str(_FRONTEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_FRONTEND_ROOT))
 
-from env.pylib import frontend_pylib_path
+from env.runtime.pylib import frontend_pylib_path
 
 _PYLIB = frontend_pylib_path()
 
@@ -21,8 +21,8 @@ for _path in (str(_PYLIB),):
         sys.path.insert(0, _path)
 
 from env.api import api_Frontend_load_golden_trace, api_Frontend_load_program_file
-from env.frontend_env import FrontendEnv
-from env.trace import GoldenTrace
+from env.core.frontend_env import FrontendEnv
+from env.model import GoldenTrace
 
 
 def _parse_int(s: str) -> int:

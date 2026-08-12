@@ -17,7 +17,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from env.pylib import frontend_pylib_path
+from env.runtime.pylib import frontend_pylib_path
 
 _PYLIB_PATH = str(frontend_pylib_path())
 
@@ -41,7 +41,7 @@ from env.api import (
     api_Frontend_set_bp_ctrl_enable,
     api_Frontend_set_log_level,
 )
-from env.fixtures import create_dut, dut
+from env.runtime.fixtures import create_dut, dut
 
 
 __all__ = [

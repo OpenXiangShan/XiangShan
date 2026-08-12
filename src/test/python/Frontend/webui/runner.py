@@ -6,11 +6,11 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from env.dut_factory import create_frontend_dut
-from env.frontend_env import FrontendEnv
-from env.logging_utils import configure_env_logging
-from env.nemu_trace_pipeline import generate_nemu_trace_from_bin
-from env.trace import GoldenTrace
+from env.runtime.dut_factory import create_frontend_dut
+from env.core.frontend_env import FrontendEnv
+from env.support.logging_utils import configure_env_logging
+from env.nemu.trace_pipeline import generate_nemu_trace_from_bin
+from env.model import GoldenTrace
 
 from .event_bus import EventBus
 

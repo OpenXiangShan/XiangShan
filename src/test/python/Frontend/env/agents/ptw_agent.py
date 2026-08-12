@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional
 
 from ..bundles import PTWBundle
-from ..memory_model import PageTableModel
+from ..model.page_table_model import PageTableModel
 from ..model.ptw_response_source import NemuPtwResponseSource, PTWRequestSnapshot
 
 

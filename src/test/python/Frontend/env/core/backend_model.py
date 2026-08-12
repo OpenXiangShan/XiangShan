@@ -5,10 +5,10 @@ from collections import deque
 from dataclasses import replace
 from typing import Callable, Deque, Dict, Optional
 
-from .agents.backend_agent import BackendAgent
-from .bundles import BackendCtrlBundle, BackendFromFtqBundle, BackendObserveBundle, FrontendInfoBundle, bind_bundle_optional
-from .model.backend_runtime import BackendCycleActions, BackendObservationSnapshot
-from .model.backend_state import (
+from ..agents.backend_agent import BackendAgent
+from ..bundles import BackendCtrlBundle, BackendFromFtqBundle, BackendObserveBundle, FrontendInfoBundle, bind_bundle_optional
+from ..model.backend_runtime import BackendCycleActions, BackendObservationSnapshot
+from ..model.backend_state import (
     ActiveWrongPathEpisode,
     BackendEvent,
     BackendState,
@@ -30,8 +30,8 @@ from .model.backend_state import (
     RESOLVE_STATE_PENDING,
     RESOLVE_STATE_SKIPPED,
 )
-from .model.ftq_scoreboard import FtqScoreboard
-from .trace import GoldenTrace, TraceEntry
+from ..model.ftq_scoreboard import FtqScoreboard
+from ..model.golden_trace import GoldenTrace, TraceEntry
 
 _MIN_BACKEND_DELAY = 3
 _GOLDEN_TRACE_RESOLVE_MIN_DELAY = 3

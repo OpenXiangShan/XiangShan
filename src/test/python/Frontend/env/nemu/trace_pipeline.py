@@ -1,8 +1,6 @@
 """Run NEMU and materialize trace files for the frontend env.
 
-This module stays in ``env`` during the current refactor phase. The
-package split did not require a dedicated ``tools/`` package yet, so Task 9
-documents the decision and leaves the file in place.
+This module owns the NEMU trace workflow for the frontend environment.
 """
 
 from __future__ import annotations
@@ -12,11 +10,11 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .nemu_trace_converter import convert_nemu_log_file
+from .trace_converter import convert_nemu_log_file
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[5]
+    return Path(__file__).resolve().parents[6]
 
 
 def _default_nemu_exec_path() -> Path:

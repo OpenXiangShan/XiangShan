@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..transactions import PcSequenceExpectation, RedirectTxn
+from ..core.transactions import PcSequenceExpectation, RedirectTxn
 
 
 def _recent_pcs(env, limit: int = 16) -> list[int]:

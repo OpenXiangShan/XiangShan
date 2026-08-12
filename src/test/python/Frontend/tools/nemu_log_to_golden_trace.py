@@ -11,7 +11,7 @@ for _path in (str(_FRONTEND_ROOT), str(_PYLIB)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from env.nemu_trace_converter import main
+from env.nemu.trace_converter import main
 
 
 if __name__ == "__main__":

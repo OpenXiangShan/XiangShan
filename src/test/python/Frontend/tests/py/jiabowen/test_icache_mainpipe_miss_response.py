@@ -7,8 +7,8 @@ from typing import Callable, Sequence
 import pytest
 
 from env.agents.icache_agent import ICacheAgent
-from env.memory_model import MemoryModel
-from env.pylib import frontend_offset_path
+from env.model import MemoryModel
+from env.runtime.pylib import frontend_offset_path
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"

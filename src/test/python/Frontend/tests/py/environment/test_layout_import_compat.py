@@ -1,12 +1,20 @@
 # coding=utf-8
 
+from pathlib import Path
+
 import Frontend_api
 import Frontend_env
 import pytest
 from env import api as env_api
-from env import fixtures
-from env.frontend_env import FrontendEnv
-from env.pylib import frontend_offset_path, frontend_pylib_path
+from env.runtime import fixtures
+from env.core.frontend_env import FrontendEnv
+from env.runtime.pylib import frontend_offset_path, frontend_pylib_path
+
+
+def test_env_root_contains_only_package_init():
+    env_root = Path(__file__).resolve().parents[3] / "env"
+
+    assert sorted(path.name for path in env_root.glob("*.py")) == ["__init__.py"]
 
 
 def test_frontend_api_re_exports_env_api_and_fixtures():

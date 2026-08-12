@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ....rvc_decoder import expand_rvc
+from ....support.rvc_decoder import expand_rvc
 
 
 def _translate_fetch_addr(env, va: int) -> tuple[Optional[int], dict]:

@@ -23,12 +23,10 @@ from .api import (
     api_Frontend_set_log_level,
 )
 from .agents import ICacheAgent, PTWAgent, UncacheAgent
-from .backend_model import BackendModel
-from .frontend_env import FrontendEnv
-from .logging_utils import configure_env_logging
-from .memory_model import MemoryModel, PageTableModel
-from .monitor import BranchChecker, FrontendMonitor
-from .trace import GoldenTrace, TraceEntry
+from .core.backend_model import BackendModel
+from .core.frontend_env import FrontendEnv
+from .support.logging_utils import configure_env_logging
+from .model import BranchChecker, GoldenTrace, MemoryModel, PageTableModel, TraceEntry
 
 __all__ = [
     "FrontendEnv",

@@ -5,7 +5,7 @@ import os
 from dataclasses import dataclass
 from typing import Callable
 
-from ..transactions import CommitTarget, GoldenTraceSource
+from ..core.transactions import CommitTarget, GoldenTraceSource
 
 
 def _default_format_optional_pc(value) -> str:

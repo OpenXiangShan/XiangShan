@@ -1,7 +1,7 @@
 # Frontend BackendModel 审阅笔记
 
 本文档是对
-`src/test/python/Frontend/env/backend_model.py`
+`src/test/python/Frontend/env/core/backend_model.py`
 的代码级审阅整理，目标是让读者在不通读整文件的情况下快速建立模型，并明确当前高价值风险点。
 
 如果本文与

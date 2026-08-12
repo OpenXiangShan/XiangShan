@@ -6,9 +6,9 @@ from typing import Iterable, Sequence
 import pytest
 
 from env.funcov.py.ftq.sampler import _TWO_FETCH_SIGNALS
-from env.pylib import frontend_offset_path
+from env.runtime.pylib import frontend_offset_path
 from env.sequences import LoadProgramSequence
-from env.transactions import ProgramImage
+from env.core.transactions import ProgramImage
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"

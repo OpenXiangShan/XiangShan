@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from env.artifact_provenance import (
+from env.runtime.artifact_provenance import (
     load_frontend_build_manifest,
     write_frontend_build_manifest,
 )
-from env.functional_coverage import CoverageBinDef, FunctionalCoverageRecorder
+from env.funcov.recorder import CoverageBinDef, FunctionalCoverageRecorder
 from tools import backannotate_funcov
 
 
@@ -156,7 +156,7 @@ def test_funcov_artifact_records_absolute_manifest_path(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TB_DUT_BUILD_MANIFEST", "relative/build-manifest.json")
-    monkeypatch.setattr("env.functional_coverage.load_frontend_build_manifest", fake_load)
+    monkeypatch.setattr("env.funcov.recorder.load_frontend_build_manifest", fake_load)
     definition = CoverageBinDef(
         bin_id="BIN-999",
         stage="unit",

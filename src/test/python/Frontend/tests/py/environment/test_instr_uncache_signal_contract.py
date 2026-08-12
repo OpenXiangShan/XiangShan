@@ -1,4 +1,4 @@
-from env.pylib import frontend_offset_path
+from env.runtime.pylib import frontend_offset_path
 
 
 _IFU_PREV_HALF_RVI_SIGNALS = (

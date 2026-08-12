@@ -23,8 +23,8 @@ _IMPORT_ROOT = Path(__file__).resolve().parents[1]
 if str(_IMPORT_ROOT) not in sys.path:
     sys.path.insert(0, str(_IMPORT_ROOT))
 
-from env.artifact_provenance import load_frontend_build_manifest
-from env.functional_coverage import current_funcov_sampler_sha256, funcov_sampler_paths
+from env.runtime.artifact_provenance import load_frontend_build_manifest
+from env.funcov.recorder import current_funcov_sampler_sha256, funcov_sampler_paths
 
 
 STATUSES = {"UNMAPPED", "MODELED", "PARTIAL", "HIT", "CLOSED", "BLOCKED", "N-A", "SV_FUNCOV"}

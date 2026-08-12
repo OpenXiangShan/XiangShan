@@ -4,7 +4,7 @@ from collections import deque
 
 import pytest
 
-from env.backend_model import BackendModel
+from env.core.backend_model import BackendModel
 from env.model.backend_state import ActiveWrongPathEpisode
 from env.model.backend_state import BackendEvent
 from env.model.backend_state import ROB_COMMIT_STATE_COMMITTED
@@ -14,8 +14,8 @@ from env.model.backend_state import PATH_STATE_WRONG
 from env.model.backend_state import QueueInstr
 from env.model.backend_state import GOLDEN_MATCH_STATE_UNKNOWN
 from env.model.backend_state import RESOLVE_STATE_NOT_NEEDED
-from env.trace import GoldenTrace
-from env.trace import TraceEntry
+from env.model import GoldenTrace
+from env.model import TraceEntry
 
 
 class _Signal:

@@ -8,10 +8,10 @@ from typing import Sequence
 
 import pytest
 
-from env.pylib import frontend_offset_path
+from env.runtime.pylib import frontend_offset_path
 
 from env.sequences import InjectRedirectSequence, LoadProgramSequence, RunUntilCommitSequence
-from env.transactions import CommitTarget, ProgramImage, RedirectTxn
+from env.core.transactions import CommitTarget, ProgramImage, RedirectTxn
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from env.nemu_trace_converter import convert_nemu_log_lines
+from env.nemu.trace_converter import convert_nemu_log_lines
 
 
 def test_convert_nemu_log_lines_keeps_debug_after_interleaved_execute_lines() -> None:

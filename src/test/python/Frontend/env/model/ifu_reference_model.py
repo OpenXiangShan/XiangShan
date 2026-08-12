@@ -5,7 +5,7 @@ from typing import Iterable, List, Sequence, Tuple
 
 from ..core import ScoreboardResult
 from ..monitors.frontend_monitor import Observation
-from ..transactions import IFUFetchTransaction
+from ..core.transactions import IFUFetchTransaction
 
 
 def _fetch_path_from_pc(pc: int) -> str:

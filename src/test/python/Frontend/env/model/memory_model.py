@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from ..exceptions import AddressError
+from ..support.exceptions import AddressError
 
 DEFAULT_MMIO_RANGES: Tuple[Tuple[int, int], ...] = (
     (0x00000000, 0x10000000),

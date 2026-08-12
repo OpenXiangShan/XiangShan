@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 from ..common.dut import _read
 from ..common.fetch_memory import _read_expected_fetch_raw, _recover_unavailable_instr
-from ....rvc_decoder import expand_rvc
+from ....support.rvc_decoder import expand_rvc
 
 
 _IFU_INTERNAL_PREFIXES = (

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable, Sequence
 
-from .sequences import (
+from ..sequences import (
     CheckPcSequence,
     InitializeFrontendSequence,
     InjectRedirectSequence,
@@ -13,7 +13,7 @@ from .sequences import (
     RunUntilCommitSequence,
     RunUntilGoldenTraceCompleteSequence,
 )
-from .transactions import (
+from ..core.transactions import (
     BpCtrlConfig,
     CommitTarget,
     GoldenTraceSource,

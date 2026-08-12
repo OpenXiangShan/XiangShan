@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from .model.page_table_model import PageTableModel
+from ..model.page_table_model import PageTableModel
 
 
 _MEMORY: dict[int, int] = {}

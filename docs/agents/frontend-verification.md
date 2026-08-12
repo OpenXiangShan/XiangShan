@@ -16,7 +16,7 @@ directory map maintained for this environment.
 
 The harness-critical locations are:
 
-- `src/test/python/Frontend/env/fixtures.py`: shared DUT fixture, artifact
+- `src/test/python/Frontend/env/runtime/fixtures.py`: shared DUT fixture, artifact
   setup, and VCS batch finalization.
 - `src/test/python/Frontend/conftest.py`: pytest session hook for VCS batch
   finalization.
@@ -472,14 +472,14 @@ Implementation Notes:
   `TB_TRACE_STALL_SNAPSHOT_INTERVAL`
 - waveform dumping is enabled by default, but can still be disabled with
   `TB_ENABLE_FST_DUMP=0`
-- `env/fixtures.py` accepts `TB_WAVEFORM_PATH`, `TB_WAVEFORM_DIR`, and
+- `env/runtime/fixtures.py` accepts `TB_WAVEFORM_PATH`, `TB_WAVEFORM_DIR`, and
   `TB_CASE_LOG_PATH` as explicit artifact-path overrides
 - golden progress is printed by the Python golden-trace runner as the cursor
   advances; `TB_TRACE_PROGRESS_INTERVAL` only enables additional logger
   checkpoints and is not required for normal progress visibility
 - stall snapshots are printed every `TB_TRACE_STALL_SNAPSHOT_INTERVAL`
   stagnant cycles; the script default is `5000`, and `0` disables snapshots
-- paired per-case log files are created by `env/fixtures.py` when `TB_BIN_PATH`
+- paired per-case log files are created by `env/runtime/fixtures.py` when `TB_BIN_PATH`
   is set
 
 ## Utilities
@@ -540,7 +540,7 @@ that wrapper, not the FSDB top.
   under `src/test/python/Frontend/tests/asm_cases/<author>/`.
 - Name tests `test_*.py`.
 - Gate DUT-only cases with `TB_ENABLE_DUT_TESTS=1` and existing `_RUN_DUT` patterns.
-- Reuse fixtures from `src/test/python/Frontend/env/fixtures.py`.
+- Reuse fixtures from `src/test/python/Frontend/env/runtime/fixtures.py`.
 - Frontend line coverage `.dat` files are registered with
   `toffee_test.reporter.set_line_coverage` during DUT fixture teardown by
   default. Reviewed file waives belong in
@@ -595,7 +595,7 @@ than host-side test scaffolding.
   waveform and case log. Do not create a separate ad-hoc log directory for a
   run whose artifacts already live under that run root.
 
-Current default implementation details in `env/fixtures.py`:
+Current default implementation details in `env/runtime/fixtures.py`:
 
 - waveform, case log, coverage `.dat`, and funcov default under
   `src/test/python/Frontend/data/runs/<run_id>/`

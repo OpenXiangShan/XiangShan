@@ -15,7 +15,7 @@ from toffee_test.reporter import set_line_coverage
 
 from .pylib import frontend_pylib_path
 
-_HERE = Path(__file__).resolve().parents[1]
+_HERE = Path(__file__).resolve().parents[2]
 _REPO_ROOT = _HERE.parents[3]
 
 
@@ -29,20 +29,20 @@ for _path in (str(_PYLIB_PATH), str(_HERE)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from .api import api_Frontend_load_program
+from ..api import api_Frontend_load_program
 from .artifact_provenance import file_sha256
 from .dut_factory import create_frontend_dut, is_fake_frontend_dut
-from .env_config import DEFAULT_ENV_CONFIG
-from .functional_coverage import FunctionalCoverageRecorder, default_pilot_csv_path
-from .frontend_env import FrontendEnv
-from .logging_utils import configure_env_logging
+from ..support.env_config import DEFAULT_ENV_CONFIG
+from ..funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_path
+from ..core.frontend_env import FrontendEnv
+from ..support.logging_utils import configure_env_logging
 
 
 logger = getLogger("env.fixtures")
 
 
 def _data_dir() -> Path:
-    p = Path(__file__).resolve().parents[1] / "data"
+    p = Path(__file__).resolve().parents[2] / "data"
     p.mkdir(parents=True, exist_ok=True)
     return p
 

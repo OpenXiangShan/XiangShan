@@ -11,24 +11,24 @@ from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from .artifact_provenance import (
+from ..runtime.artifact_provenance import (
     file_sha256,
     frontend_build_manifest_path,
     frontend_simulator,
     load_frontend_build_manifest,
 )
-from .funcov import (
+from . import (
     CFVEC_SAMPLER_BIN_KEYS,
     IFU_CFVEC_SAMPLER_BIN_KEYS,
     sample_cfvec_coverage,
 )
-from .funcov.py.ftq.sampler import (
+from .py.ftq.sampler import (
     TWO_FETCH_SAMPLER_BIN_KEYS,
     initialize_ftq_coverage_state,
     reset_ftq_coverage_state,
     sample_two_fetch_coverage,
 )
-from .funcov.py.icache import (
+from .py.icache import (
     ICACHE_MISSUNIT_SAMPLER_BIN_KEYS,
     ICACHE_MAINPIPE_SAMPLER_BIN_KEYS,
     ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS,
@@ -45,12 +45,12 @@ from .funcov.py.icache import (
     reset_icache_hitmiss_coverage_state,
     sample_icache_hitmiss_coverage,
 )
-from .pylib import frontend_pylib_path
-from .rvc_decoder import expand_rvc
+from ..runtime.pylib import frontend_pylib_path
+from ..support.rvc_decoder import expand_rvc
 
 
 def _frontend_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parents[2]
 
 
 def default_pilot_csv_path() -> Path:
@@ -84,24 +84,24 @@ def funcov_sampler_paths() -> dict[str, Path]:
 
     root = Path(__file__).resolve().parent
     return {
-        "functional_coverage.py": root / "functional_coverage.py",
-        "funcov/__init__.py": root / "funcov" / "__init__.py",
-        "funcov/py/ftq/sampler.py": root / "funcov" / "py" / "ftq" / "sampler.py",
-        "funcov/py/ftq/two_fetch_funcov.py": root / "funcov" / "py" / "ftq" / "two_fetch_funcov.py",
-        "funcov/py/ftq/ftq_request_funcov.py": root / "funcov" / "py" / "ftq" / "ftq_request_funcov.py",
-        "funcov/py/ftq/waylookup_funcov.py": root / "funcov" / "py" / "ftq" / "waylookup_funcov.py",
-        "funcov/py/ftq/mainpipe_funcov.py": root / "funcov" / "py" / "ftq" / "mainpipe_funcov.py",
-        "funcov/py/ftq/ifu_delivery_funcov.py": root / "funcov" / "py" / "ftq" / "ifu_delivery_funcov.py",
-        "funcov/py/ftq/checker_funcov.py": root / "funcov" / "py" / "ftq" / "checker_funcov.py",
-        "funcov/py/icache/__init__.py": root / "funcov" / "py" / "icache" / "__init__.py",
-        "funcov/py/icache/icache_mainpipe_funcov.py": root / "funcov" / "py" / "icache" / "icache_mainpipe_funcov.py",
-        "funcov/py/icache/icache_prefetchpipe_funcov.py": root / "funcov" / "py" / "icache" / "icache_prefetchpipe_funcov.py",
-        "funcov/py/icache/icache_missunit_funcov.py": root / "funcov" / "py" / "icache" / "icache_missunit_funcov.py",
-        "funcov/py/icache/icache_waylookup_funcov.py": root / "funcov" / "py" / "icache" / "icache_waylookup_funcov.py",
-        "funcov/py/icache/icache_hitmiss_funcov.py": root / "funcov" / "py" / "icache" / "icache_hitmiss_funcov.py",
-        "funcov/py/ifu/sampler.py": root / "funcov" / "py" / "ifu" / "sampler.py",
-        "funcov/py/ifu/cfvec_funcov.py": root / "funcov" / "py" / "ifu" / "cfvec_funcov.py",
-        "funcov/py/ifu/compact_funcov.py": root / "funcov" / "py" / "ifu" / "compact_funcov.py",
+        "funcov/recorder.py": root / "recorder.py",
+        "funcov/__init__.py": root / "__init__.py",
+        "funcov/py/ftq/sampler.py": root / "py" / "ftq" / "sampler.py",
+        "funcov/py/ftq/two_fetch_funcov.py": root / "py" / "ftq" / "two_fetch_funcov.py",
+        "funcov/py/ftq/ftq_request_funcov.py": root / "py" / "ftq" / "ftq_request_funcov.py",
+        "funcov/py/ftq/waylookup_funcov.py": root / "py" / "ftq" / "waylookup_funcov.py",
+        "funcov/py/ftq/mainpipe_funcov.py": root / "py" / "ftq" / "mainpipe_funcov.py",
+        "funcov/py/ftq/ifu_delivery_funcov.py": root / "py" / "ftq" / "ifu_delivery_funcov.py",
+        "funcov/py/ftq/checker_funcov.py": root / "py" / "ftq" / "checker_funcov.py",
+        "funcov/py/icache/__init__.py": root / "py" / "icache" / "__init__.py",
+        "funcov/py/icache/icache_mainpipe_funcov.py": root / "py" / "icache" / "icache_mainpipe_funcov.py",
+        "funcov/py/icache/icache_prefetchpipe_funcov.py": root / "py" / "icache" / "icache_prefetchpipe_funcov.py",
+        "funcov/py/icache/icache_missunit_funcov.py": root / "py" / "icache" / "icache_missunit_funcov.py",
+        "funcov/py/icache/icache_waylookup_funcov.py": root / "py" / "icache" / "icache_waylookup_funcov.py",
+        "funcov/py/icache/icache_hitmiss_funcov.py": root / "py" / "icache" / "icache_hitmiss_funcov.py",
+        "funcov/py/ifu/sampler.py": root / "py" / "ifu" / "sampler.py",
+        "funcov/py/ifu/cfvec_funcov.py": root / "py" / "ifu" / "cfvec_funcov.py",
+        "funcov/py/ifu/compact_funcov.py": root / "py" / "ifu" / "compact_funcov.py",
     }
 
 

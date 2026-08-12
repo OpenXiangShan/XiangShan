@@ -4,9 +4,9 @@ import logging
 import os
 from typing import Sequence
 
-from .env_config import DEFAULT_ENV_CONFIG
-from .logging_utils import configure_env_logging, parse_log_level
-from .nemu_trace_pipeline import generate_nemu_trace_from_bin
+from ..nemu.trace_pipeline import generate_nemu_trace_from_bin
+from ..support.env_config import DEFAULT_ENV_CONFIG
+from ..support.logging_utils import configure_env_logging, parse_log_level
 from .request_apis import (
     check_pc_sequence,
     inject_redirect,
@@ -22,7 +22,7 @@ from .request_apis import (
     run_until_commit,
     run_until_golden_trace_complete,
 )
-from .signal_utils import get_sig
+from ..support.signal_utils import get_sig
 
 
 logger = logging.getLogger("env.api")

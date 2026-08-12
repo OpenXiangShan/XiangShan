@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from env.functional_coverage import FunctionalCoverageRecorder, default_pilot_csv_path
+from env.funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_path
 
 
 def test_baremode_asm_suite_discovers_and_scopes_all_cases(tmp_path: Path) -> None:

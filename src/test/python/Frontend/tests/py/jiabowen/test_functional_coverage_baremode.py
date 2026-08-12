@@ -7,7 +7,7 @@ import pytest
 
 from env.model.ifu_reference_model import IFUFetchMonitorAdapter, SequentialIFUReferenceModel
 from env.sequences import BaremodeSequentialIFUScenario, CheckPcSequence, InjectRedirectSequence, LoadProgramSequence, RunUntilCommitSequence
-from env.transactions import CommitTarget, PcSequenceExpectation, ProgramImage, RedirectTxn
+from env.core.transactions import CommitTarget, PcSequenceExpectation, ProgramImage, RedirectTxn
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"

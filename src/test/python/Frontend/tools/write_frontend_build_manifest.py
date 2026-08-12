@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 FRONTEND_ROOT = Path(__file__).resolve().parents[1]
-PROVENANCE_ROOT = FRONTEND_ROOT / "env"
+PROVENANCE_ROOT = FRONTEND_ROOT / "env" / "runtime"
 if str(PROVENANCE_ROOT) not in sys.path:
     sys.path.insert(0, str(PROVENANCE_ROOT))
 

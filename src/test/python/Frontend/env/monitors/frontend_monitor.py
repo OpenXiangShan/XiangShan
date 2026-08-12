@@ -8,7 +8,7 @@ from ..bundles import BackendObserveBundle
 from ..model.branch_checker import BranchChecker
 from ..model.memory_model import MemoryModel
 from ..model.page_table_model import PageTableModel
-from ..rvc_decoder import expand_rvc
+from ..support.rvc_decoder import expand_rvc
 
 
 @dataclass

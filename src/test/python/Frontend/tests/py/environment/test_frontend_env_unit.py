@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from env.env_config import DEFAULT_ENV_CONFIG, SV39_ENV_CONFIG
-from env.dut_factory import FakeDUTFrontend
-from env.frontend_env import FrontendEnv
+from env.support.env_config import DEFAULT_ENV_CONFIG, SV39_ENV_CONFIG
+from env.runtime.dut_factory import FakeDUTFrontend
+from env.core.frontend_env import FrontendEnv
 
 
 def test_bare_mode_initialize_keeps_fetch_in_machine_mode() -> None:
