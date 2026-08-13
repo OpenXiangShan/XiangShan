@@ -95,10 +95,10 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
   println(s"FPGASoC cores: $NumCores banks: $L3NBanks block size: $L3BlockSize bus size: $L3OuterBusWidth")
 
   val core_with_l2 = tiles.map(coreParams =>
-    LazyModule(new XSTile()(p.alter((site, here, up) => {
+    LazyModule(new XSTile()(XSCachedParametersOptional(p(CachedParameterKey), p.alter((site, here, up) => {
       case XSCoreParamsKey => coreParams
       case PerfCounterOptionsKey => up(PerfCounterOptionsKey).copy(perfDBHartID = coreParams.HartId)
-    })))
+    }))))
   )
   val chi_llcBridge_opt = Option.when(enableCHI)(
     LazyModule(new OpenNCB()(p.alter((site, here, up) => {
