@@ -574,7 +574,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     deq.fire && deq.bits.robIdx === ctrlBlock.io.robio.robDeqPtr
   ).reduce(_ || _)
   ctrlBlock.io.robio.topdownIQInfoVec.foreach(_ := intRegion.io.topdownIQInfoVec.get ++
-    fpRegion.io.topdownIQInfoVec.get ++ vecRegion.out.toDispatch.topdownIQInfoVec.get)
+    fpRegion.io.topdownIQInfoVec.get)
 
   // mem io
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq
