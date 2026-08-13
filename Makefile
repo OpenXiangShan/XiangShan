@@ -147,6 +147,10 @@ ifeq ($(DISABLE_XMR),1)
 COMMON_EXTRA_ARGS += --disable-xmr
 endif
 
+ifeq ($(CACHED_PARAM_DISABLE),1)
+COMMON_EXTRA_ARGS += --disable-cached-parameters
+endif
+
 # configuration from yaml file
 ifneq ($(YAML_CONFIG),)
 COMMON_EXTRA_ARGS += --yaml-config $(YAML_CONFIG)
