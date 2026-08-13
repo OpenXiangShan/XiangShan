@@ -91,6 +91,10 @@ cd mem_ut/ver/ut/memblock/sim
 
 - [ai_doc_language_rule.md](AI_DOC/project_management/ai_doc_language_rule.md)
 
+当前项目代码修改授权规则为：
+
+- [code_modification_authorization_rule.md](AI_DOC/project_management/code_modification_authorization_rule.md)
+
 当前 `mem_ut` 测试环境逻辑构建规则为：
 
 - [mem_ut_test_framework_logic_build_rule.md](AI_DOC/project_management/mem_ut_test_framework_logic_build_rule.md)
@@ -177,6 +181,12 @@ plan、项目管理文档、日志或仿真结果时，默认不触发 RTL 知�
 后续新增、修改或复查任何项目内文档，包括 `AI_DOC`、`mem_ut/ver/ut/memblock/rule`
 和 `AGENTS.md` 中的说明性内容时，必须先阅读
 `AI_DOC/project_management/ai_doc_language_rule.md`，并默认使用中文编写文档正文。
+
+后续修改任何会影响实现、测试行为或构建结果的代码、测试源码、脚本、Makefile、filelist、宏、
+参数、cfg、interface、transaction/xaction 或连接文件前，必须先阅读
+`AI_DOC/project_management/code_modification_authorization_rule.md`。只有用户在当前任务中明确要求
+“开始代码修改/开始 coding/可以修改代码”，或明确要求按指定 plan 执行代码修改时，才允许进行代码写操作；
+分析、草案、方案、文档、review、解释、检查和无歧义 coding 授权之外的“继续”默认只读，不得自行推断进入 coding。
 
 后续新增、修改或 review `mem_ut` 测试框架运行期逻辑、测试用例构建逻辑、
 sequence 主循环、monitor service loop、handler、adapter、scheduler 或公共状态维护逻辑时，
