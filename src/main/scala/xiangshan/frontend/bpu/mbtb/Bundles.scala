@@ -34,7 +34,7 @@ object TakenCounter extends SaturateCounterFactory {
 
 class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   // whether the entry is valid
-  val valid: Bool = Bool()
+  def valid: Bool = !attribute.isNone
 
   val tag:       UInt            = UInt(TagWidth.W)
   val attribute: BranchAttribute = new BranchAttribute

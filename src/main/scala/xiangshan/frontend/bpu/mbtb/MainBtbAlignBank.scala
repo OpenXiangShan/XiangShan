@@ -233,13 +233,12 @@ class MainBtbAlignBank(
       //   a. it's an OtherIndirect-type branch (to update target and play the role of Ittage's base table).
       t1_mispredictInfo.bits.attribute.needIttage ||
       //   b. attribute changed, probably indicating a software self-modification.
-      !(t1_mispredictInfo.bits.attribute === Mux1H(t1_hitMask, t1_meta.map(_.attribute)))
+      t1_mispredictInfo.bits.attribute =/= Mux1H(t1_hitMask, t1_meta.map(_.attribute))
   )
   // Use hit wayMask if hit, else use replacer's victim way
   private val t1_entryWayMask = Mux(t1_hit, t1_hitMask, t1_victimMask)
 
   private val t1_entry = Wire(new MainBtbEntry)
-  t1_entry.valid           := true.B
   t1_entry.tag             := getTag(t1_startPc)
   t1_entry.attribute       := t1_mispredictInfo.bits.attribute
   t1_entry.position        := t1_mispredictInfo.bits.cfiPosition
