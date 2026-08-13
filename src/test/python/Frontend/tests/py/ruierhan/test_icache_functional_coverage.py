@@ -78,8 +78,8 @@ def _hit(recorder, group, bin_name):
 
 
 def test_icache_mainpipe_sampler_contract_has_one_key_per_leaf():
-    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 42
-    assert len(set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)) == 42
+    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 43
+    assert len(set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)) == 43
 
 
 def test_icache_prefetchpipe_sampler_contract_has_one_key_per_leaf():
@@ -1028,6 +1028,7 @@ def test_mainpipe_bpu_s1_flush_match_and_miss_use_ftq_pointer():
     for key, value in {
         "s1_valid": 1,
         "s1_flush": 1,
+        "io_flush": 0,
         "bpu_valid": 1,
         "bpu_flag": 0,
         "bpu_value": 7,
@@ -1043,6 +1044,7 @@ def test_mainpipe_bpu_s1_flush_match_and_miss_use_ftq_pointer():
     for key, value in {
         "s1_valid": 1,
         "s1_flush": 0,
+        "io_flush": 0,
         "bpu_valid": 1,
         "bpu_flag": 0,
         "bpu_value": 8,
@@ -1053,6 +1055,34 @@ def test_mainpipe_bpu_s1_flush_match_and_miss_use_ftq_pointer():
 
     sample_icache_mainpipe_coverage(recorder, recorder.env, 6)
     assert _hit(recorder, "icache_mainpipe_s1_flush", "bpu_miss_keeps_s1")
+
+
+def test_mainpipe_bpu_s1_bins_require_global_flush_low_and_known_pointers():
+    recorder = _Recorder()
+    for key, value in {
+        "s1_valid": 1,
+        "s1_flush": 1,
+        "io_flush": 1,
+        "bpu_valid": 1,
+        "bpu_flag": 0,
+        "bpu_value": 7,
+        "s1_ftq_flag": 0,
+        "s1_ftq_value": 7,
+    }.items():
+        recorder.set_key(key, value)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 7)
+    assert not _hit(recorder, "icache_mainpipe_s1_flush", "bpu_match_clears_s1")
+
+    recorder = _Recorder()
+    for key, value in {
+        "s1_valid": 1,
+        "s1_flush": 1,
+        "io_flush": 0,
+        "bpu_valid": 1,
+    }.items():
+        recorder.set_key(key, value)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 8)
+    assert not _hit(recorder, "icache_mainpipe_s1_flush", "bpu_match_clears_s1")
 
 
 def test_missunit_backpressure_samples_condition_not_stable_payload_checkpoint():
@@ -1080,13 +1110,19 @@ def test_missunit_backpressure_samples_condition_not_stable_payload_checkpoint()
     assert _hit(recorder, "icache_mainpipe_s1_miss", "missunit_backpressure_stable")
 
 
-def test_global_s1_flush_does_not_require_checkpoint_outputs():
+def test_global_s1_flush_samples_io_flush_without_checkpoint_outputs():
     recorder = _Recorder()
+    _set_mainpipe_single_sram_hit(recorder)
     for key, value in {
-        "s1_valid": 1,
-        "s1_flush": 1,
+        "s1_flush": 0,
         "io_flush": 1,
         "bpu_valid": 0,
+        "req1_valid": 0,
+        "cross1": 0,
+        "pmp_mmio": 0,
+        "is_mmio": 0,
+        "itlb_exception": 0,
+        "exception": 0,
         # These are deliberately the opposite of the expected checkpoint.
         "toifu_valid": 1,
         "s1_fire": 1,
@@ -1095,7 +1131,23 @@ def test_global_s1_flush_does_not_require_checkpoint_outputs():
 
     sample_icache_mainpipe_coverage(recorder, recorder.env, 15)
 
-    assert _hit(recorder, "icache_mainpipe_s1_flush", "global_flush_clears_s1")
+    assert _hit(recorder, "icache_mainpipe_s1_flush", "global_flush_clears_s1_hit")
+
+
+def test_global_s1_flush_pending_miss_samples_separate_bin():
+    recorder = _Recorder()
+    recorder.set_key("s1_valid", 1)
+    recorder.set_key("io_flush", 1)
+    recorder.env.dut.set(_MAIN + "s1_shouldFetch_0", 1)
+
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 16)
+
+    assert _hit(
+        recorder,
+        "icache_mainpipe_s1_flush",
+        "global_flush_clears_s1_pending_miss",
+    )
+    assert not _hit(recorder, "icache_mainpipe_s1_flush", "global_flush_clears_s1_hit")
 
 
 def test_ftq_and_waylookup_skew_requires_atomic_join_and_s1_latch():
@@ -1155,14 +1207,19 @@ def test_registered_refill_is_cancelled_by_next_cycle_flush():
     for key, value in {
         "s1_valid": 1,
         "miss_resp_valid": 1,
+        "io_flush": 0,
         "s1_flush": 0,
     }.items():
         recorder.set_key(key, value)
     recorder.env.dut.set(_MAIN + "s1_mshrValid_0_0", 1)
+    recorder.env.dut.set(_MAIN + "s1_shouldFetch_0", 1)
     sample_icache_mainpipe_coverage(recorder, recorder.env, 30)
 
     recorder.set_key("miss_resp_valid", 0)
-    recorder.set_key("s1_flush", 1)
+    recorder.set_key("io_flush", 1)
+    recorder.set_key("s1_flush", 0)
+    recorder.env.dut.set(_MAIN + "s1_mshrValid_0_0", 0)
+    recorder.env.dut.set(_MAIN + "s1_mshrValidReg_0_0", 1)
     sample_icache_mainpipe_coverage(recorder, recorder.env, 31)
 
     assert _hit(
@@ -1172,50 +1229,32 @@ def test_registered_refill_is_cancelled_by_next_cycle_flush():
     )
 
 
-def test_error_refill_state_is_scoped_to_the_next_new_request():
+def test_late_refill_samples_flush_before_refill_without_response_or_send():
     recorder = _Recorder()
     for key, value in {
         "s1_valid": 1,
-        "miss_resp_valid": 1,
-        "miss_resp_corrupt": 1,
         "s1_flush": 0,
-        "io_flush": 0,
+        "io_flush": 1,
+        "bpu_valid": 0,
+        "miss_resp_valid": 0,
+    }.items():
+        recorder.set_key(key, value)
+    recorder.env.dut.set(_MAIN + "s1_shouldFetch_0", 1)
+
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 20)
+    assert _hit(recorder, "icache_mainpipe_s1_flush", "late_refill_ignored_after_flush")
+
+
+def test_same_cycle_refill_flush_requires_global_flush_and_match():
+    recorder = _Recorder()
+    for key, value in {
+        "s1_valid": 1,
+        "io_flush": 1,
+        "s1_flush": 0,
+        "miss_resp_valid": 1,
     }.items():
         recorder.set_key(key, value)
     recorder.env.dut.set(_MAIN + "s1_mshrValid_0_0", 1)
-    sample_icache_mainpipe_coverage(recorder, recorder.env, 32)
 
-    recorder.set_key("miss_resp_valid", 0)
-    recorder.set_key("miss_resp_corrupt", 0)
-    recorder.set_key("s1_fire", 1)
-    sample_icache_mainpipe_coverage(recorder, recorder.env, 33)
-
-    assert _hit(
-        recorder,
-        "icache_mainpipe_s1_refill",
-        "error_state_cleared_on_new_request",
-    )
-
-
-def test_late_refill_is_counted_only_after_flushed_sent_miss():
-    recorder = _Recorder()
-    for key, value in {
-        "s1_valid": 1,
-        "s1_flush": 1,
-        "bpu_valid": 0,
-        "miss_resp_valid": 0,
-        "toifu_valid": 0,
-    }.items():
-        recorder.set_key(key, value)
-    recorder.env.dut.set(_MAIN + "s1_hasSend_valid", 1)
-
-    sample_icache_mainpipe_coverage(recorder, recorder.env, 20)
-    assert not _hit(recorder, "icache_mainpipe_s1_flush", "late_refill_ignored_after_flush")
-
-    recorder.set_key("s1_valid", 0)
-    recorder.set_key("s1_flush", 0)
-    recorder.set_key("miss_resp_valid", 1)
-    recorder.env.dut.set(_MAIN + "s1_hasSend_valid", 0)
-    sample_icache_mainpipe_coverage(recorder, recorder.env, 21)
-
-    assert _hit(recorder, "icache_mainpipe_s1_flush", "late_refill_ignored_after_flush")
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 22)
+    assert _hit(recorder, "icache_mainpipe_s1_flush", "flush_wins_matching_refill")

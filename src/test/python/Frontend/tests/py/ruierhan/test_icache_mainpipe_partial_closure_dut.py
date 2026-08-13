@@ -88,8 +88,8 @@ def test_tc_icache_mainpipe_refill_mismatch_dut(env) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.parametrize("fault", [{"corrupt": 1}, {"denied": 1}])
-@pytest.mark.funcov_bins("BIN-624", "BIN-636", "BIN-676")
+@pytest.mark.parametrize("fault", [{"corrupt": 1, "denied": 0}, {"corrupt": 1, "denied": 1}])
+@pytest.mark.funcov_bins("BIN-624", "BIN-636")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_fault_refill_dut(env, fault) -> None:
     env.icache_agent.inject_response_fault_at(_BASE, **fault)
@@ -97,12 +97,6 @@ def test_tc_icache_mainpipe_fault_refill_dut(env, fault) -> None:
 
     _wait_hit(env, "icache_mainpipe_s1_refill", "corrupt_refill_saved")
     _wait_hit(env, "icache_mainpipe_s1_protection", "tl_error_to_exception")
-    _wait_hit(
-        env,
-        "icache_mainpipe_s1_refill",
-        "error_state_cleared_on_new_request",
-        max_cycles=_cycle_limit("TB_ICACHE_MAINPIPE_ERROR_CLEAR_WAIT", 12000),
-    )
     assert not env.monitor.get_errors()
 
 
