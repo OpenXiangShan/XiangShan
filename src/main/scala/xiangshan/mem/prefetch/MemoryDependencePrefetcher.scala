@@ -28,15 +28,17 @@ import xiangshan.mem.trace._
   */
 case class MdpParams(
   immBits: Int = 12,
-  mdtEntries: Int = 16,
-  bstEntries: Int = 8,
-  bsmtEntries: Int = 8,
+  mdtEntries: Int = 64,
+  bstEntries: Int = 16,
+  bsmtEntries: Int = 16,
   bsmtDepthBlocks: Int = 1,
   counterBits: Int = 3,
   confInit: Int = 1,
   confThreshold: Int = 4,
   immCntInit: Int = 4,
   immCntThreshold: Int = 2,
+  immConfThreshold: Int = 5,
+  chainConfThreshold: Int = 3,
   bstConfThreshold: Int = 3,
   trainFilterSize: Int = 12,
   chasingFilterSize: Int = 32,
@@ -47,8 +49,12 @@ case class MdpParams(
   override def name: String = "mdp"
   override def tlbPlace = TLBPlace.dtlb_pf
   require(chasingDepth >= 1)
-  require(bsmtEntries == 8)
+  require(mdtEntries == 64)
+  require(bstEntries == 16)
+  require(bsmtEntries == 16)
   require(bsmtDepthBlocks >= 1)
+  require(immConfThreshold >= 1 && immConfThreshold <= (1 << counterBits) - 1)
+  require(chainConfThreshold >= 1 && chainConfThreshold <= (1 << counterBits) - 1)
 }
 
 trait HasMdpParameters extends HasL1PrefetchHelper {
@@ -66,6 +72,8 @@ trait HasMdpParameters extends HasL1PrefetchHelper {
   val MDP_CONF_THRESHOLD = mdpParams.confThreshold
   val MDP_IMM_CNT_INIT = mdpParams.immCntInit
   val MDP_IMM_CNT_THRESHOLD = mdpParams.immCntThreshold
+  val MDP_IMM_CONF_THRESHOLD = mdpParams.immConfThreshold
+  val MDP_CHAIN_CONF_THRESHOLD = mdpParams.chainConfThreshold
   val MDP_BST_CONF_THRESHOLD = mdpParams.bstConfThreshold
   val MDP_CHASING_DEPTH = mdpParams.chasingDepth
 
@@ -242,6 +250,10 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
   private val lineOffsetWidth = DCacheLineOffset
   private val vlineWidth = VAddrBits - lineOffsetWidth
   private val plineWidth = PAddrBits - lineOffsetWidth
+  // Match L2 BOP's default first-TLB-replay cooldown. The count is intentionally
+  // local to MDP because only the selected chasing sources use this policy.
+  private val tlbRetryWaitCycles = 10
+  private val tlbRetryWaitWidth = log2Ceil(tlbRetryWaitCycles + 1)
 
   class Entry extends DCacheBundle {
     val vline = UInt(vlineWidth.W)
@@ -249,6 +261,12 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
     val pvalid = Bool()
     // Set after a TLB miss so retries can be distinguished from first attempts.
     val tlbMiss = Bool()
+    // Protect source metadata until the three-stage TLB response is consumed.
+    val tlbInFlight = Bool()
+    // V0.6: only legacy/chain chasing requests use a bounded second TLB probe.
+    val tlbRetryControlled = Bool()
+    val tlbRetryArmed = Bool()
+    val tlbRetryWait = UInt(tlbRetryWaitWidth.W)
     val triggerPC = UInt(VAddrBits.W)
     val triggerVA = UInt(VAddrBits.W)
     val pfSource = UInt(L1PfSourceBits.W)
@@ -282,12 +300,27 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
   val entries = Reg(Vec(size, new Entry))
   val valids = RegInit(VecInit(Seq.fill(size)(false.B)))
   val replacer = new ValidPseudoLRU(size)
+  val tlbReqArb = Module(new RRArbiterInit(new TlbReq, size))
+  val pfIdxArb = Module(new RRArbiterInit(UInt(indexWidth.W), size))
+  // This is independent of source writes (the arbiter reads registered entry
+  // state), so it also protects a slot during the cycle its first TLB request
+  // is selected, before tlbInFlight is visible in the next cycle.
+  val tlbIssueOH = VecInit(tlbReqArb.io.in.map(_.fire))
 
   val srcLine = io.srcReq.bits.prefetchVA(VAddrBits - 1, lineOffsetWidth)
   val matchVec = VecInit((0 until size).map(i => io.srcReq.valid && valids(i) && entries(i).vline === srcLine))
   val invalidVec = VecInit(valids.map(! _))
-  val replaceCandidates = Mux(invalidVec.asUInt.orR, invalidVec, VecInit(Seq.fill(size)(true.B)))
-  val replaceIdx = replacer.way(replaceCandidates.reverse)._2
+  // A bounded retry is stateful. Do not let the Valid-only source overwrite an
+  // entry while it is spending its mandated cooldown; if every slot is waiting,
+  // drop the new best-effort candidate explicitly rather than losing retry state.
+  val reusableVec = VecInit((0 until size).map(i =>
+    !entries(i).tlbRetryArmed && !entries(i).tlbInFlight && !tlbIssueOH(i)
+  ))
+  val hasWritableSlot = invalidVec.asUInt.orR || reusableVec.asUInt.orR
+  val replaceCandidates = Mux(invalidVec.asUInt.orR, invalidVec, reusableVec)
+  val fallbackCandidates = VecInit(Seq.fill(size)(true.B))
+  val replacementMask = Mux(hasWritableSlot, replaceCandidates, fallbackCandidates)
+  val replaceIdx = replacer.way(replacementMask.reverse)._2
   val srcIdx = Wire(UInt(indexWidth.W))
   val hasMatch = matchVec.asUInt.orR
   srcIdx := Mux(hasMatch, OHToUInt(matchVec), replaceIdx)
@@ -297,13 +330,27 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
     entries(srcIdx).mdpChainValid && !io.srcReq.bits.mdpChainValid
   val preserveExistingHint = io.srcReq.valid && hasMatch &&
     entries(srcIdx).mdpPfHint && !io.srcReq.bits.mdpPfHint
-  val preserveExistingContext = preserveExistingChain || preserveExistingHint
+  // Do not let a same-line best-effort candidate reset an armed 10-cycle
+  // retry. The candidate has no backpressure, so preserving the lifecycle is
+  // safer than silently turning a bounded retry into an unbounded one.
+  val preserveRetryLifecycle = io.srcReq.valid && hasMatch && entries(srcIdx).tlbRetryArmed
+  val preserveTlbInFlight = io.srcReq.valid && hasMatch && entries(srcIdx).tlbInFlight
+  val preserveTlbIssue = io.srcReq.valid && hasMatch && tlbIssueOH(srcIdx)
+  val preserveExistingContext = preserveExistingChain || preserveExistingHint ||
+    preserveRetryLifecycle || preserveTlbInFlight || preserveTlbIssue
+  val srcWrites = io.srcReq.valid && (hasMatch || hasWritableSlot) && !preserveExistingContext
 
-  when(io.srcReq.valid && !preserveExistingContext) {
+  when(srcWrites) {
     entries(srcIdx).vline := srcLine
     entries(srcIdx).pline := 0.U
     entries(srcIdx).pvalid := false.B
     entries(srcIdx).tlbMiss := false.B
+    entries(srcIdx).tlbInFlight := false.B
+    entries(srcIdx).tlbRetryControlled :=
+      isFromMdpLegacyChasing(io.srcReq.bits.pfSource) ||
+        isFromMdpChasingChain(io.srcReq.bits.pfSource)
+    entries(srcIdx).tlbRetryArmed := false.B
+    entries(srcIdx).tlbRetryWait := 0.U
     entries(srcIdx).triggerPC := io.srcReq.bits.triggerPC
     entries(srcIdx).triggerVA := io.srcReq.bits.triggerVA
     entries(srcIdx).pfSource := io.srcReq.bits.pfSource
@@ -323,10 +370,20 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
 
   // Each untranslated entry competes for one TLB request.  The three-cycle
   // in-flight mask prevents the same entry from issuing again before response.
-  val tlbReqArb = Module(new RRArbiterInit(new TlbReq, size))
-  val pfIdxArb = Module(new RRArbiterInit(UInt(indexWidth.W), size))
-  val s0_tlbFireOH = VecInit(tlbReqArb.io.in.map(_.fire))
+  val s0_tlbFireOH = tlbIssueOH
   val s0_tlbRetry = VecInit((0 until size).map(i => s0_tlbFireOH(i) && entries(i).tlbMiss)).asUInt.orR
+  val s0_tlbRetryControlled = VecInit((0 until size).map(i =>
+    s0_tlbFireOH(i) && entries(i).tlbRetryControlled
+  )).asUInt.orR
+  val s0_tlbRetryArmed = VecInit((0 until size).map(i =>
+    s0_tlbFireOH(i) && entries(i).tlbRetryArmed
+  )).asUInt.orR
+  val s0_tlbRetryLegacy = VecInit((0 until size).map(i =>
+    s0_tlbFireOH(i) && isFromMdpLegacyChasing(entries(i).pfSource)
+  )).asUInt.orR
+  val s0_tlbRetryChain = VecInit((0 until size).map(i =>
+    s0_tlbFireOH(i) && isFromMdpChasingChain(entries(i).pfSource)
+  )).asUInt.orR
   // Advance a pulse, not a held index.  Clearing each empty stage is required
   // so notInFlight releases the entry after its s3 response; RegEnable would
   // retain the last one-hot indefinitely and could block a replacement entry.
@@ -336,9 +393,15 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
   val notInFlight = VecInit((0 until size).map(i =>
     !s1_tlbFireOH(i) && !s2_tlbFireOH(i) && !s3_tlbFireOH(i)
   ))
+  val tlbRetryWaiting = VecInit((0 until size).map(i =>
+    valids(i) && entries(i).tlbRetryArmed && entries(i).tlbRetryWait.orR
+  ))
 
   for (i <- 0 until size) {
-    tlbReqArb.io.in(i).valid := valids(i) && !entries(i).pvalid && notInFlight(i)
+    when(tlbRetryWaiting(i)) {
+      entries(i).tlbRetryWait := entries(i).tlbRetryWait - 1.U
+    }
+    tlbReqArb.io.in(i).valid := valids(i) && !entries(i).pvalid && notInFlight(i) && !tlbRetryWaiting(i)
     tlbReqArb.io.in(i).bits.vaddr := entries(i).vaddr
     tlbReqArb.io.in(i).bits.cmd := TlbCmd.read
     tlbReqArb.io.in(i).bits.isPrefetch := true.B
@@ -353,20 +416,37 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
     tlbReqArb.io.in(i).bits.hyperinst := false.B
     tlbReqArb.io.in(i).bits.pmp_addr := DontCare
   }
+  for (i <- 0 until size) {
+    when(tlbReqArb.io.in(i).fire) {
+      entries(i).tlbInFlight := true.B
+    }
+  }
   tlbReqArb.io.out.ready := true.B
 
   val s1_tlbReqValid = RegNext(tlbReqArb.io.out.valid, false.B)
   val s1_tlbReqBits = RegEnable(tlbReqArb.io.out.bits, tlbReqArb.io.out.valid)
   val s1_vaddr = RegEnable(tlbReqArb.io.out.bits.vaddr, tlbReqArb.io.out.valid)
   val s1_tlbRetry = RegNext(s0_tlbRetry, false.B)
+  val s1_tlbRetryControlled = RegNext(s0_tlbRetryControlled, false.B)
+  val s1_tlbRetryArmed = RegNext(s0_tlbRetryArmed, false.B)
+  val s1_tlbRetryLegacy = RegNext(s0_tlbRetryLegacy, false.B)
+  val s1_tlbRetryChain = RegNext(s0_tlbRetryChain, false.B)
+  val s2_tlbRetryControlled = RegNext(s1_tlbRetryControlled, false.B)
+  val s2_tlbRetryArmed = RegNext(s1_tlbRetryArmed, false.B)
+  val s2_tlbRetryLegacy = RegNext(s1_tlbRetryLegacy, false.B)
+  val s2_tlbRetryChain = RegNext(s1_tlbRetryChain, false.B)
+  val s3_tlbRetryControlled = RegNext(s2_tlbRetryControlled, false.B)
+  val s3_tlbRetryArmed = RegNext(s2_tlbRetryArmed, false.B)
+  val s3_tlbRetryLegacy = RegNext(s2_tlbRetryLegacy, false.B)
+  val s3_tlbRetryChain = RegNext(s2_tlbRetryChain, false.B)
   io.tlbReq.req.valid := s1_tlbReqValid
   io.tlbReq.req.bits := s1_tlbReqBits
   io.tlbReq.req_kill := false.B
   io.tlbReq.resp.ready := true.B
 
-  // A TLB miss retains the virtual entry.  Once the three-cycle in-flight mask
-  // clears, RR arbitration retries it just like MutiLevelPrefetchFilter.  Only
-  // translation/access faults and stale responses prevent a translated send.
+  // A non-controlled source preserves V0.5's immediate retry behavior. Legacy
+  // chasing and chain chasing instead wait ten cycles after their first miss;
+  // a second miss drops the candidate so a translation failure cannot flood TLB.
   val s2_tlbRespValid = io.tlbReq.resp.valid
   val s2_tlbRespBits = io.tlbReq.resp.bits
   val s2_vaddr = RegEnable(s1_vaddr, s1_tlbReqValid)
@@ -375,27 +455,53 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
   val s3_vaddr = RegEnable(s2_vaddr, s2_tlbRespValid)
   val s3_index = OHToUInt(s3_tlbFireOH.asUInt)
   val s3_overwritten = entries(s3_index).vaddr =/= s3_vaddr
-  val s3_sameCycleOverwrite = io.srcReq.valid && srcIdx === s3_index &&
+  val s3_sameCycleOverwrite = srcWrites && srcIdx === s3_index &&
     srcLine =/= s3_vaddr(VAddrBits - 1, lineOffsetWidth)
   val s3_stale = s3_overwritten || s3_sameCycleOverwrite
   val s3_responseMatches = s3_tlbRespValid && s3_tlbFireOH.asUInt.orR && !s3_stale
   val s3_tlbMiss = s3_responseMatches && s3_tlbRespBits.miss
   val s3_tlbHit = s3_responseMatches && !s3_tlbRespBits.miss
+  val s3_tlbRetryFirstMiss = s3_tlbMiss && s3_tlbRetryControlled && !s3_tlbRetryArmed
+  val s3_tlbRetrySecondMiss = s3_tlbMiss && s3_tlbRetryControlled && s3_tlbRetryArmed
   val s3_fault = s3_tlbHit && (
     !PmemRanges.map(_.cover(s3_tlbRespBits.paddr.head)).reduce(_ || _) ||
     s3_tlbRespBits.excp.head.pf.ld || s3_tlbRespBits.excp.head.gpf.ld || s3_tlbRespBits.excp.head.af.ld ||
     io.pmpResp.mmio || Pbmt.isUncache(s3_tlbRespBits.pbmt.head) || io.pmpResp.ld
   )
 
+  when(s3_tlbFireOH.asUInt.orR) {
+    // Release the metadata lock even when a bad/missing response is counted;
+    // the existing retry path then retains its original forward progress.
+    entries(s3_index).tlbInFlight := false.B
+  }
+
   when(s3_tlbMiss) {
-    entries(s3_index).tlbMiss := true.B
+    when(s3_tlbRetrySecondMiss) {
+      valids(s3_index) := false.B
+      entries(s3_index).tlbMiss := false.B
+      entries(s3_index).tlbRetryControlled := false.B
+      entries(s3_index).tlbRetryArmed := false.B
+      entries(s3_index).tlbRetryWait := 0.U
+    }.otherwise {
+      entries(s3_index).tlbMiss := true.B
+      when(s3_tlbRetryFirstMiss) {
+        entries(s3_index).tlbRetryArmed := true.B
+        entries(s3_index).tlbRetryWait := tlbRetryWaitCycles.U
+      }
+    }
   }.elsewhen(s3_fault) {
     valids(s3_index) := false.B
     entries(s3_index).tlbMiss := false.B
+    entries(s3_index).tlbRetryControlled := false.B
+    entries(s3_index).tlbRetryArmed := false.B
+    entries(s3_index).tlbRetryWait := 0.U
   }.elsewhen(s3_tlbHit) {
     entries(s3_index).pline := s3_tlbRespBits.paddr.head(PAddrBits - 1, lineOffsetWidth)
     entries(s3_index).pvalid := true.B
     entries(s3_index).tlbMiss := false.B
+    entries(s3_index).tlbRetryControlled := false.B
+    entries(s3_index).tlbRetryArmed := false.B
+    entries(s3_index).tlbRetryWait := 0.U
   }
 
   // Translated entries share one L1 request port.  The MDP source tag lets the
@@ -425,7 +531,7 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
   io.l1Req.bits.mdpOrigin := entries(pfIdx).mdpOrigin
 
   when(pfIdxArb.io.out.fire &&
-    (!(io.srcReq.valid && srcIdx === pfIdx) || preserveExistingContext)) {
+    (!srcWrites || srcIdx =/= pfIdx || preserveExistingContext)) {
     valids(pfIdx) := false.B
   }
 
@@ -434,10 +540,16 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
   assert(PopCount(s0_tlbFireOH) <= 1.U, "L1 MDP TLB request selection must be one-hot")
   assert(!io.tlbReq.req.valid || io.tlbReq.req.ready, "L1 MDP non-blocking TLB request must not be blocked")
   assert(!io.tlbReq.resp.valid || s2_tlbFireOH.asUInt.orR, "L1 MDP TLB response has no matching request")
-  val s4_tlbMiss = RegNext(s3_tlbMiss, false.B)
-  val s4_tlbMissIndex = RegEnable(s3_index, s3_tlbMiss)
+  val s4_tlbMiss = RegNext(s3_tlbMiss && !s3_tlbRetrySecondMiss, false.B)
+  val s4_tlbMissIndex = RegEnable(s3_index, s3_tlbMiss && !s3_tlbRetrySecondMiss)
   when(s4_tlbMiss) {
     assert(valids(s4_tlbMissIndex), "L1 MDP TLB miss must retain its prefetch entry for retry")
+  }
+  for (i <- 0 until size) {
+    assert(!valids(i) || !entries(i).tlbRetryArmed || entries(i).tlbRetryControlled,
+      "L1 MDP only controlled chasing sources may arm a delayed TLB retry")
+    assert(!tlbReqArb.io.in(i).fire || !tlbRetryWaiting(i),
+      "L1 MDP must not issue a TLB retry during its cooldown")
   }
   when(io.tlbReq.req.fire) {
     assert(io.tlbReq.req.bits.vaddr(lineOffsetWidth - 1, 0) === 0.U,
@@ -450,7 +562,10 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
 
   // Performance counters are kept at the end of the class.
   XSPerfAccumulate("mdp_pf_buffer_src", io.srcReq.valid)
+  XSPerfAccumulate("mdp_pf_buffer_retry_full_drop", io.srcReq.valid && !hasMatch && !hasWritableSlot)
   XSPerfAccumulate("mdp_pf_buffer_prevent_downgrade", preserveExistingContext)
+  XSPerfAccumulate("mdp_pf_buffer_preserve_tlb_inflight", preserveTlbInFlight)
+  XSPerfAccumulate("mdp_pf_buffer_preserve_tlb_issue", preserveTlbIssue)
   XSPerfAccumulate("mdp_pf_buffer_preserve_hint", preserveExistingHint)
   XSPerfAccumulate("mdp_pf_buffer_preserve_chain", preserveExistingChain)
   Seq(
@@ -473,6 +588,18 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
   XSPerfAccumulate("mdp_tlb_req_without_resp", s2_tlbFireOH.asUInt.orR && !io.tlbReq.resp.valid)
   XSPerfAccumulate("mdp_tlb_miss", s3_tlbMiss)
   XSPerfAccumulate("mdp_tlb_miss_retry", io.tlbReq.req.fire && s1_tlbRetry)
+  XSPerfAccumulate("mdp_tlb_retry_wait_cycles", PopCount(tlbRetryWaiting))
+  XSPerfAccumulate("mdp_tlb_retry_delay_arm", s3_tlbRetryFirstMiss)
+  XSPerfAccumulate("mdp_tlb_retry_after_10", io.tlbReq.req.fire && s1_tlbRetryControlled && s1_tlbRetryArmed)
+  XSPerfAccumulate("mdp_tlb_retry_second_miss_drop", s3_tlbRetrySecondMiss)
+  XSPerfAccumulate("mdp_tlb_retry_delay_arm_legacy", s3_tlbRetryFirstMiss && s3_tlbRetryLegacy)
+  XSPerfAccumulate("mdp_tlb_retry_delay_arm_chain", s3_tlbRetryFirstMiss && s3_tlbRetryChain)
+  XSPerfAccumulate("mdp_tlb_retry_after_10_legacy",
+    io.tlbReq.req.fire && s1_tlbRetryControlled && s1_tlbRetryArmed && s1_tlbRetryLegacy)
+  XSPerfAccumulate("mdp_tlb_retry_after_10_chain",
+    io.tlbReq.req.fire && s1_tlbRetryControlled && s1_tlbRetryArmed && s1_tlbRetryChain)
+  XSPerfAccumulate("mdp_tlb_retry_second_miss_drop_legacy", s3_tlbRetrySecondMiss && s3_tlbRetryLegacy)
+  XSPerfAccumulate("mdp_tlb_retry_second_miss_drop_chain", s3_tlbRetrySecondMiss && s3_tlbRetryChain)
   XSPerfAccumulate("mdp_tlb_fault", s3_fault)
   XSPerfAccumulate("mdp_tlb_stale", s3_tlbRespValid && s3_stale)
   XSPerfAccumulate("mdp_l1_pf_fire", io.l1Req.fire)
@@ -495,9 +622,14 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     val hashPC = UInt(HASH_TAG_WIDTH.W)
     val imm = UInt(MDP_IMM_BITS.W)
     val immCnt = UInt(MDP_COUNTER_BITS.W)
+    // immCnt retains V0.5's replacement hysteresis. immConf independently
+    // records consecutive confirmations of the currently selected immediate.
+    val immConf = UInt(MDP_COUNTER_BITS.W)
     // Once two confident dependent-load PCs are observed in train0, chainImm
     // records the second MDT immediate used after the first chasing request.
+    val chainDependentHash = UInt(HASH_TAG_WIDTH.W)
     val chainImm = UInt(MDP_IMM_BITS.W)
+    val chainConf = UInt(MDP_COUNTER_BITS.W)
     val chainValid = Bool()
     val chainLoadSize = UInt(2.W)
     val chainLoadUnsigned = Bool()
@@ -516,13 +648,24 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     val mdtIdx = UInt(log2Up(MDP_MDT_ENTRIES).W)
     val oldImm = UInt(MDP_IMM_BITS.W)
     val oldImmCnt = UInt(MDP_COUNTER_BITS.W)
+    val oldImmConf = UInt(MDP_COUNTER_BITS.W)
+    val oldImmStable = Bool()
     val oldConf = UInt(MDP_COUNTER_BITS.W)
     val dependentHit = Bool()
+    val dependentHash = UInt(HASH_TAG_WIDTH.W)
     val dependentImm = UInt(MDP_IMM_BITS.W)
+    val dependentImmConf = UInt(MDP_COUNTER_BITS.W)
+    val dependentImmStable = Bool()
+    val oldChainDependentHash = UInt(HASH_TAG_WIDTH.W)
     val oldChainImm = UInt(MDP_IMM_BITS.W)
+    val oldChainConf = UInt(MDP_COUNTER_BITS.W)
     val oldChainValid = Bool()
+    val chainTrainEligible = Bool()
+    val chainCandidateSame = Bool()
     val chainUpdated = Bool()
     val newChainImm = UInt(MDP_IMM_BITS.W)
+    val newChainConf = UInt(MDP_COUNTER_BITS.W)
+    val newChainValid = Bool()
     val chainLoadSize = UInt(2.W)
     val chainLoadUnsigned = Bool()
   }
@@ -533,7 +676,12 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     val pc = UInt(VAddrBits.W)
     val vaddr = UInt(VAddrBits.W)
     val imm = UInt(MDP_IMM_BITS.W)
+    val conf = UInt(MDP_COUNTER_BITS.W)
+    val immConf = UInt(MDP_COUNTER_BITS.W)
+    val immStable = Bool()
     val chainImm = UInt(MDP_IMM_BITS.W)
+    val chainConf = UInt(MDP_COUNTER_BITS.W)
+    val chainStable = Bool()
     val chainValid = Bool()
     val chainLoadSize = UInt(2.W)
     val chainLoadUnsigned = Bool()
@@ -619,6 +767,7 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   val s1_train0Idx = RegEnable(s0_train0Idx, io.train0.fire)
   val s1_train0OldEntry = RegEnable(mdt(s0_train0Idx), io.train0.fire)
   val s1_train0DependentHit = RegEnable(s0_train0DependentHit, io.train0.fire)
+  val s1_train0DependentHash = RegEnable(s0_train0DependentHash, io.train0.fire)
   val s1_train0DependentEntry = RegEnable(s0_train0DependentEntry, io.train0.fire)
   when(io.train0.fire) {
     s1_train0Valid := true.B
@@ -626,70 +775,147 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     s1_train0Valid := false.B
   }
 
-  // train0 s1: update MDT.  This is the only stage that writes MDT state.
-  val s1_train0ChainCanUpdate = s1_train0Valid && s1_train0Bits.wakedup &&
-    s1_train0Hit && s1_train0DependentHit &&
-    s1_train0OldEntry.conf >= MDP_CONF_THRESHOLD.U &&
-    s1_train0DependentEntry.conf >= MDP_CONF_THRESHOLD.U
-  val s1_train0OldChainS = s1_train0OldEntry.chainImm.asSInt.pad(MDP_IMM_BITS + 1)
-  val s1_train0DependentImmS = s1_train0DependentEntry.imm.asSInt.pad(MDP_IMM_BITS + 1)
-  val s1_train0ChainDiff = Mux(
-    s1_train0OldChainS >= s1_train0DependentImmS,
-    (s1_train0OldChainS - s1_train0DependentImmS).asUInt,
-    (s1_train0DependentImmS - s1_train0OldChainS).asUInt
+  // train0 s1: update MDT. This is the only stage that writes MDT state.
+  // `conf` tracks the producer-PC dependency itself and is intentionally
+  // independent of immediate variation. `immConf` tracks the selected
+  // cacheline-local immediate, which is the separate eligibility gate.
+  val s1_train0ImmSame = s1_train0OldEntry.imm === s1_train0Bits.imm
+  // MDP prefetches a whole 64-byte line. Treat offsets within 32 bytes as one
+  // cacheline-local mapping, and retain the lower signed offset for that line.
+  val s1_train0OldImmSigned = Cat(
+    Fill(2, s1_train0OldEntry.imm(MDP_IMM_BITS - 1)), s1_train0OldEntry.imm
+  ).asSInt
+  val s1_train0NewImmSigned = Cat(
+    Fill(2, s1_train0Bits.imm(MDP_IMM_BITS - 1)), s1_train0Bits.imm
+  ).asSInt
+  val s1_train0OldImmLower = s1_train0OldImmSigned <= s1_train0NewImmSigned
+  val s1_train0ImmAbsDiff = Mux(
+    s1_train0OldImmLower,
+    s1_train0NewImmSigned - s1_train0OldImmSigned,
+    s1_train0OldImmSigned - s1_train0NewImmSigned
   )
-  val s1_train0ChainNear = s1_train0OldEntry.chainValid && s1_train0ChainDiff <= 1.U
-  val s1_train0ChainMin = Mux(
-    s1_train0OldChainS <= s1_train0DependentImmS,
-    s1_train0OldEntry.chainImm,
-    s1_train0DependentEntry.imm
+  val s1_train0ImmSameLine = s1_train0ImmAbsDiff <= 32.S
+  val s1_train0LineImm = Mux(
+    s1_train0OldImmLower,
+    s1_train0OldEntry.imm,
+    s1_train0Bits.imm
   )
-  val s1_train0NewChainImm = Mux(
-    s1_train0ChainNear,
-    s1_train0ChainMin,
-    s1_train0DependentEntry.imm
+  val s1_train0ConfInc = Mux(
+    s1_train0OldEntry.conf === mdpCounterMax.U,
+    s1_train0OldEntry.conf,
+    s1_train0OldEntry.conf + 1.U
   )
-  when(s1_train0Valid && s1_train0Bits.wakedup) {
+  val s1_train0ImmConfInc = Mux(
+    s1_train0OldEntry.immConf === mdpCounterMax.U,
+    s1_train0OldEntry.immConf,
+    s1_train0OldEntry.immConf + 1.U
+  )
+  val s1_train0ImmCntDec = Mux(
+    s1_train0OldEntry.immCnt === 0.U,
+    0.U,
+    s1_train0OldEntry.immCnt - 1.U
+  )
+  val s1_train0ImmConfDec = Mux(
+    s1_train0OldEntry.immConf === 0.U,
+    0.U,
+    s1_train0OldEntry.immConf - 1.U
+  )
+  val s1_train0OldImmStable =
+    s1_train0OldEntry.immConf >= MDP_IMM_CONF_THRESHOLD.U
+  val s1_train0DependentImmStable = s1_train0DependentHit &&
+    s1_train0DependentEntry.immConf >= MDP_IMM_CONF_THRESHOLD.U
+  val s1_train0ChainCanTrain = s1_train0Valid && s1_train0Bits.wakedup &&
+    s1_train0Hit && s1_train0DependentHit && s1_train0ImmSameLine &&
+    s1_train0OldEntry.conf >= MDP_CONF_THRESHOLD.U && s1_train0OldImmStable &&
+    s1_train0DependentEntry.conf >= MDP_CONF_THRESHOLD.U && s1_train0DependentImmStable
+  val s1_train0ChainCandidateSame = s1_train0OldEntry.chainConf.orR &&
+    s1_train0OldEntry.chainDependentHash === s1_train0DependentHash &&
+    s1_train0OldEntry.chainImm === s1_train0DependentEntry.imm &&
+    s1_train0OldEntry.chainLoadSize === s1_train0Bits.loadSize &&
+    s1_train0OldEntry.chainLoadUnsigned === s1_train0Bits.loadUnsigned
+  val s1_train0ChainConfInc = Mux(
+    s1_train0OldEntry.chainConf === mdpCounterMax.U,
+    s1_train0OldEntry.chainConf,
+    s1_train0OldEntry.chainConf + 1.U
+  )
+  val s1_train0NewChainConf = Mux(
+    s1_train0ChainCandidateSame,
+    s1_train0ChainConfInc,
+    1.U(MDP_COUNTER_BITS.W)
+  )
+  val s1_train0NewChainValid =
+    s1_train0NewChainConf >= MDP_CHAIN_CONF_THRESHOLD.U
+  val s1_train0ChainCandidateChanged = s1_train0Valid && s1_train0Bits.wakedup &&
+    s1_train0ChainCanTrain &&
+    !s1_train0ChainCandidateSame
+  // A descriptor is only valid for a stable producer/dependent pair.  Reset a
+  // partially trained or valid descriptor when a later wakeup cannot confirm
+  // that pair, instead of allowing stale chain state to survive a PC change.
+  val s1_train0ChainContextLost = s1_train0Valid && s1_train0Bits.wakedup &&
+    s1_train0Hit && s1_train0OldEntry.chainConf.orR && !s1_train0ChainCanTrain
+  val s1_train0MdtWriteActive = s1_train0Valid && s1_train0Bits.wakedup
+  when(s1_train0MdtWriteActive) {
     val entry = mdt(s1_train0Idx)
-    val oldImm = s1_train0OldEntry.imm.asSInt.pad(MDP_IMM_BITS + 1)
-    val newImm = s1_train0Bits.imm.asSInt.pad(MDP_IMM_BITS + 1)
-    // V0.4 treats only an exactly repeated immediate as confirmation of the
-    // current dependence.  A near value is a mismatch and must decay immCnt.
-    val immSame = oldImm === newImm
-    val immCntDec = Mux(s1_train0OldEntry.immCnt === 0.U, 0.U, s1_train0OldEntry.immCnt - 1.U)
-
     when(s1_train0Hit) {
-      entry.conf := Mux(
-        s1_train0OldEntry.conf === mdpCounterMax.U,
-        s1_train0OldEntry.conf,
-        s1_train0OldEntry.conf + 1.U
-      )
-      when(immSame) {
-        entry.imm := s1_train0OldEntry.imm
+      // Every producer-PC hit confirms the long-term dependency. Immediate
+      // stability is tracked separately below and must not reduce `conf`.
+      entry.conf := s1_train0ConfInc
+      when(s1_train0ImmSameLine) {
+        entry.imm := s1_train0LineImm
         entry.immCnt := Mux(
-          s1_train0OldEntry.immCnt === mdpCounterMax.U,
-          s1_train0OldEntry.immCnt,
-          s1_train0OldEntry.immCnt + 1.U
+          s1_train0ImmSame,
+          Mux(
+            s1_train0OldEntry.immCnt === mdpCounterMax.U,
+            s1_train0OldEntry.immCnt,
+            s1_train0OldEntry.immCnt + 1.U
+          ),
+          s1_train0OldEntry.immCnt
         )
+        entry.immConf := s1_train0ImmConfInc
+        when(s1_train0ChainCanTrain) {
+          entry.chainDependentHash := s1_train0DependentHash
+          entry.chainImm := s1_train0DependentEntry.imm
+          entry.chainConf := s1_train0NewChainConf
+          entry.chainValid := s1_train0NewChainValid
+          entry.chainLoadSize := s1_train0Bits.loadSize
+          entry.chainLoadUnsigned := s1_train0Bits.loadUnsigned
+        }.elsewhen(s1_train0ChainContextLost) {
+          // A different/missing or unstable dependent mapping invalidates the
+          // descriptor; it must earn confidence again before it can be sent.
+          entry.chainDependentHash := 0.U
+          entry.chainImm := 0.U
+          entry.chainValid := false.B
+          entry.chainConf := 0.U
+          entry.chainLoadSize := 0.U
+          entry.chainLoadUnsigned := false.B
+        }
       }.otherwise {
-        entry.immCnt := immCntDec
-        when(immCntDec < MDP_IMM_CNT_THRESHOLD.U) {
+        // Crossing the 32-byte line-local tolerance weakens only immediate
+        // state. The producer-PC confidence remains intact.
+        entry.immConf := s1_train0ImmConfDec
+        entry.immCnt := s1_train0ImmCntDec
+        when(s1_train0ImmCntDec < MDP_IMM_CNT_THRESHOLD.U) {
           entry.imm := s1_train0Bits.imm
           entry.immCnt := MDP_IMM_CNT_INIT.U
         }
-      }
-      when(s1_train0ChainCanUpdate) {
-        entry.chainImm := s1_train0NewChainImm
-        entry.chainValid := true.B
-        entry.chainLoadSize := s1_train0Bits.loadSize
-        entry.chainLoadUnsigned := s1_train0Bits.loadUnsigned
+        // Never carry a descriptor across a cacheline change. A line-local
+        // merge above is allowed to retain the trained second hop.
+        entry.chainDependentHash := 0.U
+        entry.chainImm := 0.U
+        entry.chainConf := 0.U
+        entry.chainValid := false.B
+        entry.chainLoadSize := 0.U
+        entry.chainLoadUnsigned := false.B
       }
     }.otherwise {
       entry.hashPC := s1_train0Hash
       entry.imm := s1_train0Bits.imm
       entry.immCnt := MDP_IMM_CNT_INIT.U
+      entry.immConf := 1.U
       entry.conf := MDP_CONF_INIT.U
+      entry.chainDependentHash := 0.U
       entry.chainImm := 0.U
+      entry.chainConf := 0.U
       entry.chainValid := false.B
       entry.chainLoadSize := 0.U
       entry.chainLoadUnsigned := false.B
@@ -700,33 +926,78 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
 
   // trigger s0: all LDUs query MDT in parallel.  Only lookup results are
   // captured here; the hint decision is intentionally delayed to s1.
+  val triggerMdtResponseValid = Wire(Vec(backendParams.LduCnt, Bool()))
+  val triggerMdtHit = Wire(Vec(backendParams.LduCnt, Bool()))
+  val triggerMdtConf = Wire(Vec(backendParams.LduCnt, UInt(MDP_COUNTER_BITS.W)))
+  val triggerMdtImmConf = Wire(Vec(backendParams.LduCnt, UInt(MDP_COUNTER_BITS.W)))
+  val triggerMdtChainConf = Wire(Vec(backendParams.LduCnt, UInt(MDP_COUNTER_BITS.W)))
+  val triggerMdtImmStable = Wire(Vec(backendParams.LduCnt, Bool()))
+  val triggerMdtChainStable = Wire(Vec(backendParams.LduCnt, Bool()))
+  val triggerMdtConfident = Wire(Vec(backendParams.LduCnt, Bool()))
+  val triggerMdtChainStale = Wire(Vec(backendParams.LduCnt, Bool()))
   for (i <- 0 until backendParams.LduCnt) {
     val s0_triggerHash = pc_hash_tag(io.trigger(i).bits.pc)
     val s0_triggerMatchVec = VecInit(mdt.map(e => e.valid && e.hashPC === s0_triggerHash))
     val s0_triggerHit = s0_triggerMatchVec.asUInt.orR
     val s0_triggerEntry = Mux1H(s0_triggerMatchVec, mdt)
+    val s0_triggerChainDependentMatchVec = VecInit(mdt.map(e =>
+      e.valid && e.hashPC === s0_triggerEntry.chainDependentHash
+    ))
+    val s0_triggerChainDependentHit = s0_triggerChainDependentMatchVec.asUInt.orR
+    val s0_triggerChainDependentEntry = Mux1H(s0_triggerChainDependentMatchVec, mdt)
+    // A chain descriptor is a cached reference to another MDT entry. Recheck
+    // that entry at send time so a dependent immediate transition cannot leave
+    // a producer issuing a stale second chasing step before it trains again.
+    val s0_triggerChainUsable = s0_triggerHit && s0_triggerEntry.chainValid &&
+      s0_triggerEntry.chainConf >= MDP_CHAIN_CONF_THRESHOLD.U &&
+      s0_triggerChainDependentHit &&
+      s0_triggerChainDependentEntry.conf >= MDP_CONF_THRESHOLD.U &&
+      s0_triggerChainDependentEntry.immConf >= MDP_IMM_CONF_THRESHOLD.U &&
+      s0_triggerChainDependentEntry.imm === s0_triggerEntry.chainImm
 
     val s1_triggerValid = RegNext(io.trigger(i).valid, false.B)
     val s1_triggerBits = RegEnable(io.trigger(i).bits, io.trigger(i).valid)
     val s1_triggerHit = RegEnable(s0_triggerHit, io.trigger(i).valid)
     val s1_triggerEntry = RegEnable(s0_triggerEntry, io.trigger(i).valid)
+    val s1_triggerChainUsable = RegEnable(
+      s0_triggerChainUsable && !s1_train0MdtWriteActive,
+      io.trigger(i).valid
+    )
 
-    // trigger s1: chasingPf permission depends only on MDT confidence.  The
-    // request identity is returned unchanged so LDU can assert exact alignment.
-    val s1_triggerConfident = s1_triggerHit && s1_triggerEntry.conf >= MDP_CONF_THRESHOLD.U
+    // trigger s1: a high PC confidence alone is insufficient after an
+    // immediate transition. Require a separately confirmed current immediate.
+    val s1_triggerMdtConfident = s1_triggerHit &&
+      s1_triggerEntry.conf >= MDP_CONF_THRESHOLD.U
+    val s1_triggerImmStable = s1_triggerHit &&
+      s1_triggerEntry.immConf >= MDP_IMM_CONF_THRESHOLD.U
+    triggerMdtResponseValid(i) := s1_triggerValid
+    triggerMdtHit(i) := s1_triggerHit
+    triggerMdtConf(i) := s1_triggerEntry.conf
+    triggerMdtImmConf(i) := s1_triggerEntry.immConf
+    triggerMdtChainConf(i) := s1_triggerEntry.chainConf
+    triggerMdtImmStable(i) := s1_triggerImmStable
+    val s1_triggerChainSendable = s1_triggerChainUsable && !s1_train0MdtWriteActive
+    triggerMdtChainStable(i) := s1_triggerChainSendable
+    triggerMdtConfident(i) := s1_triggerMdtConfident
+    triggerMdtChainStale(i) := s1_triggerHit && s1_triggerEntry.chainValid &&
+      !s1_triggerChainSendable
     // TODO: pfHintMDP needs an additional register after hint generation.  The
     // LDU and LoadPipe request-identity pipelines must be delayed with it.
-    io.l1PfHint(i).valid := s1_triggerValid && s1_triggerConfident
+    io.l1PfHint(i).valid := s1_triggerValid && s1_triggerMdtConfident && s1_triggerImmStable
     io.l1PfHint(i).bits.imm := s1_triggerEntry.imm
-    io.l1PfHint(i).bits.mdpChainImm := s1_triggerEntry.chainImm
-    io.l1PfHint(i).bits.mdpChainValid := s1_triggerEntry.chainValid
-    io.l1PfHint(i).bits.mdpChainLoadSize := s1_triggerEntry.chainLoadSize
-    io.l1PfHint(i).bits.mdpChainLoadUnsigned := s1_triggerEntry.chainLoadUnsigned
+    io.l1PfHint(i).bits.mdpChainImm := Mux(s1_triggerChainSendable, s1_triggerEntry.chainImm, 0.U)
+    io.l1PfHint(i).bits.mdpChainValid := s1_triggerChainSendable
+    io.l1PfHint(i).bits.mdpChainLoadSize :=
+      Mux(s1_triggerChainSendable, s1_triggerEntry.chainLoadSize, 0.U)
+    io.l1PfHint(i).bits.mdpChainLoadUnsigned :=
+      s1_triggerChainSendable && s1_triggerEntry.chainLoadUnsigned
     io.l1PfHint(i).bits.mdpOrigin := MdpPfOrigin.legacy
     io.l1PfHint(i).bits.pc := s1_triggerBits.pc
     io.l1PfHint(i).bits.vaddr := s1_triggerBits.vaddr
     io.l1PfHint(i).bits.lduId := s1_triggerBits.lduId
     io.l1PfHint(i).bits.robIdx := s1_triggerBits.robIdx
+    assert(PopCount(s0_triggerChainDependentMatchVec) <= 1.U,
+      "MDP trigger chain-dependent lookup must match at most one MDT entry")
   }
 
   // train1 s0: query MDT once, then atomically fork the training event to BSeT
@@ -736,16 +1007,29 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   val s0_train1MdtHit = s0_train1MdtMatchVec.asUInt.orR
   val s0_train1MdtEntry = Mux1H(s0_train1MdtMatchVec, mdt)
   val s0_train1MdtIdx = OHToUInt(s0_train1MdtMatchVec)
+  val s0_train1ChainDependentMatchVec = VecInit(mdt.map(e =>
+    e.valid && e.hashPC === s0_train1MdtEntry.chainDependentHash
+  ))
+  val s0_train1ChainDependentHit = s0_train1ChainDependentMatchVec.asUInt.orR
+  val s0_train1ChainDependentEntry = Mux1H(s0_train1ChainDependentMatchVec, mdt)
+  val s0_train1ChainUsable = s0_train1MdtHit && s0_train1MdtEntry.chainValid &&
+    s0_train1MdtEntry.chainConf >= MDP_CHAIN_CONF_THRESHOLD.U &&
+    s0_train1ChainDependentHit &&
+    s0_train1ChainDependentEntry.conf >= MDP_CONF_THRESHOLD.U &&
+    s0_train1ChainDependentEntry.immConf >= MDP_IMM_CONF_THRESHOLD.U &&
+    s0_train1ChainDependentEntry.imm === s0_train1MdtEntry.chainImm
   val train1MdtInfo = Wire(new MdpMdtInfoBundle)
   train1MdtInfo.hit := s0_train1MdtHit
   train1MdtInfo.index := s0_train1MdtIdx
   train1MdtInfo.hashPC := s0_train1Hash
   train1MdtInfo.conf := s0_train1MdtEntry.conf
   train1MdtInfo.imm := s0_train1MdtEntry.imm
-  train1MdtInfo.chainImm := s0_train1MdtEntry.chainImm
-  train1MdtInfo.chainValid := s0_train1MdtEntry.chainValid
-  train1MdtInfo.chainLoadSize := s0_train1MdtEntry.chainLoadSize
-  train1MdtInfo.chainLoadUnsigned := s0_train1MdtEntry.chainLoadUnsigned
+  train1MdtInfo.immConf := s0_train1MdtEntry.immConf
+  val s0_train1ChainSendable = s0_train1ChainUsable && !s1_train0MdtWriteActive
+  train1MdtInfo.chainImm := Mux(s0_train1ChainSendable, s0_train1MdtEntry.chainImm, 0.U)
+  train1MdtInfo.chainValid := s0_train1ChainSendable
+  train1MdtInfo.chainLoadSize := Mux(s0_train1ChainSendable, s0_train1MdtEntry.chainLoadSize, 0.U)
+  train1MdtInfo.chainLoadUnsigned := s0_train1ChainSendable && s0_train1MdtEntry.chainLoadUnsigned
 
   val bset = Module(new BaseStrideTable)
   val bsmt = Module(new BaseStreamTable(mdpParams.bsmtEntries, mdpParams.bsmtDepthBlocks))
@@ -754,9 +1038,11 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   bset.io.train.valid := io.train1.valid && train1TablesReady
   bset.io.train.bits := io.train1.bits
   bset.io.mdtInfo := train1MdtInfo
+  bset.io.mdtWriteActive := s1_train0MdtWriteActive
   bsmt.io.train.valid := io.train1.valid && train1TablesReady
   bsmt.io.train.bits := io.train1.bits
   bsmt.io.mdtInfo := train1MdtInfo
+  bsmt.io.mdtWriteActive := s1_train0MdtWriteActive
   assert(bset.io.train.fire === bsmt.io.train.fire,
     "BSeT and BSmT must consume every train1 event atomically")
 
@@ -885,16 +1171,35 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   train0Log.mdtIdx := s1_train0Idx
   train0Log.oldImm := s1_train0OldEntry.imm
   train0Log.oldImmCnt := s1_train0OldEntry.immCnt
+  train0Log.oldImmConf := s1_train0OldEntry.immConf
+  train0Log.oldImmStable := s1_train0Hit && s1_train0OldImmStable
   train0Log.oldConf := s1_train0OldEntry.conf
   train0Log.dependentHit := s1_train0DependentHit
+  train0Log.dependentHash := Mux(s1_train0DependentHit, s1_train0DependentHash, 0.U)
   train0Log.dependentImm := Mux(s1_train0DependentHit, s1_train0DependentEntry.imm, 0.U)
+  train0Log.dependentImmConf := Mux(s1_train0DependentHit, s1_train0DependentEntry.immConf, 0.U)
+  train0Log.dependentImmStable := s1_train0DependentImmStable
+  train0Log.oldChainDependentHash := s1_train0OldEntry.chainDependentHash
   train0Log.oldChainImm := s1_train0OldEntry.chainImm
+  train0Log.oldChainConf := s1_train0OldEntry.chainConf
   train0Log.oldChainValid := s1_train0OldEntry.chainValid
-  train0Log.chainUpdated := s1_train0ChainCanUpdate
+  train0Log.chainTrainEligible := s1_train0ChainCanTrain
+  train0Log.chainCandidateSame := s1_train0ChainCandidateSame
+  train0Log.chainUpdated := s1_train0ChainCanTrain
   train0Log.newChainImm := Mux(
-    s1_train0ChainCanUpdate,
-    s1_train0NewChainImm,
-    s1_train0OldEntry.chainImm
+    s1_train0ChainCanTrain,
+    s1_train0DependentEntry.imm,
+    Mux(s1_train0ImmSameLine && !s1_train0ChainContextLost, s1_train0OldEntry.chainImm, 0.U)
+  )
+  train0Log.newChainConf := Mux(
+    s1_train0ChainCanTrain,
+    s1_train0NewChainConf,
+    Mux(s1_train0ImmSameLine && !s1_train0ChainContextLost, s1_train0OldEntry.chainConf, 0.U)
+  )
+  train0Log.newChainValid := Mux(
+    s1_train0ChainCanTrain,
+    s1_train0NewChainValid,
+    s1_train0ImmSameLine && !s1_train0ChainContextLost && s1_train0OldEntry.chainValid
   )
   train0Log.chainLoadSize := s1_train0Bits.loadSize
   train0Log.chainLoadUnsigned := s1_train0Bits.loadUnsigned
@@ -907,7 +1212,12 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     hintLog.pc := io.l1PfHint(i).bits.pc
     hintLog.vaddr := io.l1PfHint(i).bits.vaddr
     hintLog.imm := io.l1PfHint(i).bits.imm
+    hintLog.conf := triggerMdtConf(i)
+    hintLog.immConf := triggerMdtImmConf(i)
+    hintLog.immStable := triggerMdtImmStable(i)
     hintLog.chainImm := io.l1PfHint(i).bits.mdpChainImm
+    hintLog.chainConf := triggerMdtChainConf(i)
+    hintLog.chainStable := triggerMdtChainStable(i)
     hintLog.chainValid := io.l1PfHint(i).bits.mdpChainValid
     hintLog.chainLoadSize := io.l1PfHint(i).bits.mdpChainLoadSize
     hintLog.chainLoadUnsigned := io.l1PfHint(i).bits.mdpChainLoadUnsigned
@@ -946,30 +1256,50 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   assert(PopCount(s0_train0MatchVec) <= 1.U)
   assert(PopCount(s0_train0DependentMatchVec) <= 1.U)
   assert(PopCount(s0_train1MdtMatchVec) <= 1.U)
+  assert(PopCount(s0_train1ChainDependentMatchVec) <= 1.U)
 
   XSPerfAccumulate("mdp_train0", io.train0.fire)
   XSPerfAccumulate("mdp_train0_hit", s1_train0Valid && s1_train0Hit)
   XSPerfAccumulate("mdp_train0_alloc", s1_train0Valid && !s1_train0Hit)
-  XSPerfAccumulate("mdp_mdt_imm_same", s1_train0Valid && s1_train0Hit &&
-    s1_train0OldEntry.imm === s1_train0Bits.imm)
+  XSPerfAccumulate("mdp_mdt_imm_same", s1_train0Valid && s1_train0Hit && s1_train0ImmSame)
+  XSPerfAccumulate("mdp_mdt_imm_cacheline_merge", s1_train0Valid && s1_train0Hit &&
+    s1_train0ImmSameLine && !s1_train0ImmSame)
+  XSPerfAccumulate("mdp_mdt_imm_crossline_change", s1_train0Valid && s1_train0Hit &&
+    !s1_train0ImmSameLine)
+  XSPerfAccumulate("mdp_mdt_conf_inc", s1_train0Valid && s1_train0Hit)
+  // Retained for r1 analysis compatibility: conf no longer decays because a
+  // producer's immediate changes.
+  XSPerfAccumulate("mdp_mdt_conf_dec", false.B)
+  XSPerfAccumulate("mdp_mdt_imm_conf_inc", s1_train0Valid && s1_train0Hit &&
+    s1_train0ImmSameLine)
+  // Retained for r1 analysis compatibility: r2 decays instead of clearing.
+  XSPerfAccumulate("mdp_mdt_imm_conf_reset", false.B)
+  XSPerfAccumulate("mdp_mdt_imm_conf_decay", s1_train0Valid && s1_train0Hit &&
+    !s1_train0ImmSameLine)
   XSPerfAccumulate("mdp_mdt_imm_mismatch_decay", s1_train0Valid && s1_train0Hit &&
-    s1_train0OldEntry.imm =/= s1_train0Bits.imm &&
+    !s1_train0ImmSameLine &&
     s1_train0OldEntry.immCnt > MDP_IMM_CNT_THRESHOLD.U)
   XSPerfAccumulate("mdp_mdt_imm_mismatch_replace", s1_train0Valid && s1_train0Hit &&
-    s1_train0OldEntry.imm =/= s1_train0Bits.imm &&
+    !s1_train0ImmSameLine &&
     Mux(s1_train0OldEntry.immCnt === 0.U, 0.U, s1_train0OldEntry.immCnt - 1.U) <
       MDP_IMM_CNT_THRESHOLD.U)
-  XSPerfAccumulate("mdp_mdt_chain_update", s1_train0ChainCanUpdate)
-  XSPerfAccumulate("mdp_mdt_chain_update_initial", s1_train0ChainCanUpdate &&
-    !s1_train0OldEntry.chainValid)
-  XSPerfAccumulate("mdp_mdt_chain_update_near_keep", s1_train0ChainCanUpdate &&
-    s1_train0ChainNear && s1_train0OldChainS <= s1_train0DependentImmS)
-  XSPerfAccumulate("mdp_mdt_chain_update_near_smaller", s1_train0ChainCanUpdate &&
-    s1_train0ChainNear && s1_train0OldChainS > s1_train0DependentImmS)
-  XSPerfAccumulate("mdp_mdt_chain_update_far_replace", s1_train0ChainCanUpdate &&
-    s1_train0OldEntry.chainValid && !s1_train0ChainNear)
+  XSPerfAccumulate("mdp_mdt_chain_train_eligible", s1_train0ChainCanTrain)
+  XSPerfAccumulate("mdp_mdt_chain_candidate_same", s1_train0ChainCanTrain &&
+    s1_train0ChainCandidateSame)
+  XSPerfAccumulate("mdp_mdt_chain_candidate_change", s1_train0ChainCanTrain &&
+    !s1_train0ChainCandidateSame)
+  XSPerfAccumulate("mdp_mdt_chain_conf_inc", s1_train0ChainCanTrain &&
+    s1_train0ChainCandidateSame)
+  XSPerfAccumulate("mdp_mdt_chain_valid", s1_train0ChainCanTrain && s1_train0NewChainValid)
+  XSPerfAccumulate("mdp_mdt_chain_invalidate_imm_mismatch", s1_train0Valid &&
+    s1_train0Hit && !s1_train0ImmSameLine && s1_train0OldEntry.chainValid)
+  XSPerfAccumulate("mdp_mdt_chain_invalidate_context_lost", s1_train0ChainContextLost)
   XSPerfAccumulate("mdp_train1", io.train1.fire)
   XSPerfAccumulate("mdp_train1_mdt_hit", io.train1.fire && s0_train1MdtHit)
+  XSPerfAccumulate("mdp_train1_chain_stale_block", io.train1.fire &&
+    s0_train1MdtEntry.chainValid && !s0_train1ChainUsable)
+  XSPerfAccumulate("mdp_train1_chain_write_block", io.train1.fire &&
+    s0_train1MdtEntry.chainValid && s1_train0MdtWriteActive)
   XSPerfAccumulate("mdp_stride_pf_s2", stridePfReq.valid)
   XSPerfAccumulate("mdp_stream_pf_s2", rawStreamPfReq.valid)
   XSPerfAccumulate("mdp_base_pf_same_line", basePfSameLine)
@@ -991,5 +1321,11 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   for (i <- 0 until backendParams.LduCnt) {
     XSPerfAccumulate(s"mdp_trigger_$i", io.trigger(i).valid)
     XSPerfAccumulate(s"mdp_hint_$i", io.l1PfHint(i).valid)
+    XSPerfAccumulate(s"mdp_hint_imm_unstable_skip_$i", triggerMdtResponseValid(i) &&
+      triggerMdtConfident(i) && !triggerMdtImmStable(i))
+    XSPerfAccumulate(s"mdp_hint_chain_stale_block_$i", triggerMdtResponseValid(i) &&
+      triggerMdtChainStale(i))
+    XSPerfAccumulate(s"mdp_hint_chain_write_block_$i", triggerMdtResponseValid(i) &&
+      s1_train0MdtWriteActive && triggerMdtHit(i))
   }
 }

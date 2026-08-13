@@ -25,6 +25,9 @@ class MdpMdtInfoBundle(implicit p: Parameters) extends XSBundle with HasMdpParam
   val hashPC = UInt(HASH_TAG_WIDTH.W)
   val conf = UInt(MDP_COUNTER_BITS.W)
   val imm = UInt(MDP_IMM_BITS.W)
+  // The base prefetchers must not emit from a newly changed immediate merely
+  // because the PC-level MDT confidence is high.
+  val immConf = UInt(MDP_COUNTER_BITS.W)
   val chainImm = UInt(MDP_IMM_BITS.W)
   val chainValid = Bool()
   val chainLoadSize = UInt(2.W)
@@ -49,6 +52,7 @@ class BaseStrideTableTrainDBEntry(implicit p: Parameters) extends XSBundle with 
   val mdtIdx = UInt(log2Up(MDP_MDT_ENTRIES).W)
   val mdtConf = UInt(MDP_COUNTER_BITS.W)
   val mdtImm = UInt(MDP_IMM_BITS.W)
+  val mdtImmConf = UInt(MDP_COUNTER_BITS.W)
   val mdtChainImm = UInt(MDP_IMM_BITS.W)
   val mdtChainValid = Bool()
   val tableHit = Bool()
@@ -94,6 +98,9 @@ class BaseStrideTable(implicit p: Parameters) extends XSModule with HasMdpParame
   val io = IO(new Bundle {
     val train = Flipped(DecoupledIO(new TrainReqBundle))
     val mdtInfo = Input(new MdpMdtInfoBundle)
+    // A concurrent MDT train0 write may invalidate a captured chain descriptor.
+    // Keep the primary stride carrier, but suppress its one-shot second hop.
+    val mdtWriteActive = Input(Bool())
     val stridePf = ValidIO(new MdpSourcePrefetchReq)
   })
 
@@ -164,7 +171,8 @@ class BaseStrideTable(implicit p: Parameters) extends XSModule with HasMdpParame
   )
 
   private val canPrefetch = s1Valid && s1MdtInfo.hit &&
-    s1MdtInfo.conf >= MDP_CONF_THRESHOLD.U && s1Hit &&
+    s1MdtInfo.conf >= MDP_CONF_THRESHOLD.U &&
+    s1MdtInfo.immConf >= MDP_IMM_CONF_THRESHOLD.U && s1Hit &&
     s1StrideValid && s1StrideMatch && confInc >= MDP_BST_CONF_THRESHOLD.U
 
   when(s1Valid && s1MdtInfo.hit) {
@@ -200,9 +208,12 @@ class BaseStrideTable(implicit p: Parameters) extends XSModule with HasMdpParame
   private val s2Decr = RegEnable(s1OldEntry.decr, canPrefetch)
   private val s2Imm = RegEnable(s1MdtInfo.imm, canPrefetch)
   private val s2ChainImm = RegEnable(s1MdtInfo.chainImm, canPrefetch)
-  private val s2ChainValid = RegEnable(s1MdtInfo.chainValid, canPrefetch)
+  // A concurrent train0 write can change the descriptor after s1 sampled it.
+  // Preserve the base stride request, but do not register its stale second hop.
+  private val s2ChainValid = RegEnable(s1MdtInfo.chainValid && !io.mdtWriteActive, canPrefetch)
   private val s2ChainLoadSize = RegEnable(s1MdtInfo.chainLoadSize, canPrefetch)
   private val s2ChainLoadUnsigned = RegEnable(s1MdtInfo.chainLoadUnsigned, canPrefetch)
+  private val s2ChainSendable = s2ChainValid && !io.mdtWriteActive
   private val s2PrefetchVaddr = Mux(
     s2Decr,
     s2Train.vaddr - s2Stride,
@@ -219,10 +230,10 @@ class BaseStrideTable(implicit p: Parameters) extends XSModule with HasMdpParame
   io.stridePf.bits.mdpVaddr := s2PrefetchVaddr
   io.stridePf.bits.mdpLoadSize := s2Train.loadSize
   io.stridePf.bits.mdpLoadUnsigned := s2Train.loadUnsigned
-  io.stridePf.bits.mdpChainImm := s2ChainImm
-  io.stridePf.bits.mdpChainValid := s2ChainValid
-  io.stridePf.bits.mdpChainLoadSize := s2ChainLoadSize
-  io.stridePf.bits.mdpChainLoadUnsigned := s2ChainLoadUnsigned
+  io.stridePf.bits.mdpChainImm := Mux(s2ChainSendable, s2ChainImm, 0.U)
+  io.stridePf.bits.mdpChainValid := s2ChainSendable
+  io.stridePf.bits.mdpChainLoadSize := Mux(s2ChainSendable, s2ChainLoadSize, 0.U)
+  io.stridePf.bits.mdpChainLoadUnsigned := s2ChainSendable && s2ChainLoadUnsigned
   io.stridePf.bits.mdpOrigin := MdpPfOrigin.stride
 
   // Optional detailed trace: BSeT/BSmT tables are intentionally not basic DBs.
@@ -239,6 +250,7 @@ class BaseStrideTable(implicit p: Parameters) extends XSModule with HasMdpParame
   trainLog.mdtIdx := s1MdtInfo.index
   trainLog.mdtConf := s1MdtInfo.conf
   trainLog.mdtImm := s1MdtInfo.imm
+  trainLog.mdtImmConf := s1MdtInfo.immConf
   trainLog.mdtChainImm := s1MdtInfo.chainImm
   trainLog.mdtChainValid := s1MdtInfo.chainValid
   trainLog.tableHit := s1Hit
@@ -280,6 +292,9 @@ class BaseStrideTable(implicit p: Parameters) extends XSModule with HasMdpParame
   XSPerfAccumulate("mdp_bset_train_blocked", io.train.valid && !io.train.ready)
   XSPerfAccumulate("mdp_bset_mdt_hit", s1Valid && s1MdtInfo.hit)
   XSPerfAccumulate("mdp_bset_mdt_miss_skip", s1Valid && !s1MdtInfo.hit)
+  XSPerfAccumulate("mdp_bset_imm_unstable_skip", s1Valid && s1MdtInfo.hit &&
+    s1MdtInfo.conf >= MDP_CONF_THRESHOLD.U &&
+    s1MdtInfo.immConf < MDP_IMM_CONF_THRESHOLD.U)
   XSPerfAccumulate("mdp_bset_entry_hit", s1Valid && s1MdtInfo.hit && s1Hit)
   XSPerfAccumulate("mdp_bset_entry_alloc", s1Valid && s1MdtInfo.hit && !s1Hit)
   XSPerfAccumulate("mdp_bset_delta_zero", s1Valid && s1MdtInfo.hit && s1Hit && !s1StrideValid)
@@ -289,4 +304,8 @@ class BaseStrideTable(implicit p: Parameters) extends XSModule with HasMdpParame
   XSPerfAccumulate("mdp_bset_conf_dec", s1Valid && s1MdtInfo.hit && s1Hit && s1StrideValid && !s1StrideMatch)
   XSPerfAccumulate("mdp_bset_stride_replace", s1Valid && s1MdtInfo.hit && s1Hit && replaceStride)
   XSPerfAccumulate("mdp_bset_pf_generated", io.stridePf.valid)
+  XSPerfAccumulate("mdp_bset_chain_capture_write_block",
+    canPrefetch && s1MdtInfo.chainValid && io.mdtWriteActive)
+  XSPerfAccumulate("mdp_bset_chain_write_block",
+    io.stridePf.valid && s2ChainValid && io.mdtWriteActive)
 }

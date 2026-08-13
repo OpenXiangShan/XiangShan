@@ -31,12 +31,13 @@ class BaseStreamTableTrainDBEntry(implicit p: Parameters) extends XSBundle with 
   val mdtIdx = UInt(log2Up(MDP_MDT_ENTRIES).W)
   val mdtConf = UInt(MDP_COUNTER_BITS.W)
   val mdtImm = UInt(MDP_IMM_BITS.W)
+  val mdtImmConf = UInt(MDP_COUNTER_BITS.W)
   val mdtChainImm = UInt(MDP_IMM_BITS.W)
   val mdtChainValid = Bool()
   val regionTag = UInt(REGION_TAG_BITS.W)
   val regionBit = UInt(REGION_BITS.W)
   val tableHit = Bool()
-  val tableIdx = UInt(3.W)
+  val tableIdx = UInt(log2Up(MDP_BSMT_ENTRIES).W)
   val plusNeighborActive = Bool()
   val minusNeighborActive = Bool()
   val oldBitVec = UInt(BIT_VEC_WITDH.W)
@@ -58,7 +59,7 @@ class BaseStreamTableTrainDBEntry(implicit p: Parameters) extends XSBundle with 
 
 /** MDP Base Stream Table (BSmT).
   *
-  * This is an eight-entry, MDP-gated version of the region bit-vector stream
+  * This is a sixteen-entry, MDP-gated version of the region bit-vector stream
   * detector in L1StreamPrefetcher.  It intentionally emits one exact base-load
   * address rather than a region request: the line is fetched by the common MDP
   * buffer, while the byte offset is retained for the subsequent chasing load.
@@ -73,10 +74,10 @@ class BaseStreamTableTrainDBEntry(implicit p: Parameters) extends XSBundle with 
   * changing the training algorithm.
   */
 class BaseStreamTable(
-  entryCount: Int = 8,
+  entryCount: Int = 16,
   depthBlocks: Int = 1
 )(implicit p: Parameters) extends XSModule with HasMdpParameters {
-  require(entryCount == 8, "MDP BaseStreamTable must contain exactly eight entries")
+  require(entryCount == 16, "MDP BaseStreamTable must contain exactly sixteen entries")
   require(depthBlocks >= 1, "BSmT lookahead depth must be at least one cache block")
 
   private val activeThreshold = BIT_VEC_WITDH - 4
@@ -85,6 +86,8 @@ class BaseStreamTable(
   val io = IO(new Bundle {
     val train = Flipped(DecoupledIO(new TrainReqBundle))
     val mdtInfo = Input(new MdpMdtInfoBundle)
+    // See BSeT: a concurrent MDT write may invalidate a one-shot chain hop.
+    val mdtWriteActive = Input(Bool())
     val streamPf = ValidIO(new MdpSourcePrefetchReq)
   })
 
@@ -170,7 +173,8 @@ class BaseStreamTable(
   // is decreasing evidence, and once learned the direction remains decreasing.
   private val newDecr = Mux(s1Hit, s1OldEntry.decr || s1PlusHit, s1PlusHit)
   private val canPrefetch = s1Valid && s1MdtInfo.hit &&
-    s1MdtInfo.conf >= MDP_CONF_THRESHOLD.U && newLine && newActive
+    s1MdtInfo.conf >= MDP_CONF_THRESHOLD.U &&
+    s1MdtInfo.immConf >= MDP_IMM_CONF_THRESHOLD.U && newLine && newActive
 
   when(s1Valid && s1MdtInfo.hit) {
     val entry = entries(s1Idx)
@@ -188,9 +192,12 @@ class BaseStreamTable(
   private val s2Train = RegEnable(s1Train, canPrefetch)
   private val s2Imm = RegEnable(s1MdtInfo.imm, canPrefetch)
   private val s2ChainImm = RegEnable(s1MdtInfo.chainImm, canPrefetch)
-  private val s2ChainValid = RegEnable(s1MdtInfo.chainValid, canPrefetch)
+  // Match BSeT: a train0 write concurrent with s1 invalidates this old hop.
+  // Keep the stream carrier, while preventing the stale second hop from s2.
+  private val s2ChainValid = RegEnable(s1MdtInfo.chainValid && !io.mdtWriteActive, canPrefetch)
   private val s2ChainLoadSize = RegEnable(s1MdtInfo.chainLoadSize, canPrefetch)
   private val s2ChainLoadUnsigned = RegEnable(s1MdtInfo.chainLoadUnsigned, canPrefetch)
+  private val s2ChainSendable = s2ChainValid && !io.mdtWriteActive
   private val s2Decr = RegEnable(newDecr, canPrefetch)
   private val depthBytes = (depthBlocks * blockBytes).U(VAddrBits.W)
   private val s2PrefetchVaddr = Mux(
@@ -209,10 +216,10 @@ class BaseStreamTable(
   io.streamPf.bits.mdpVaddr := s2PrefetchVaddr
   io.streamPf.bits.mdpLoadSize := s2Train.loadSize
   io.streamPf.bits.mdpLoadUnsigned := s2Train.loadUnsigned
-  io.streamPf.bits.mdpChainImm := s2ChainImm
-  io.streamPf.bits.mdpChainValid := s2ChainValid
-  io.streamPf.bits.mdpChainLoadSize := s2ChainLoadSize
-  io.streamPf.bits.mdpChainLoadUnsigned := s2ChainLoadUnsigned
+  io.streamPf.bits.mdpChainImm := Mux(s2ChainSendable, s2ChainImm, 0.U)
+  io.streamPf.bits.mdpChainValid := s2ChainSendable
+  io.streamPf.bits.mdpChainLoadSize := Mux(s2ChainSendable, s2ChainLoadSize, 0.U)
+  io.streamPf.bits.mdpChainLoadUnsigned := s2ChainSendable && s2ChainLoadUnsigned
   io.streamPf.bits.mdpOrigin := MdpPfOrigin.stream
 
   // Optional detailed trace: it is compiled out unless explicitly promoted to
@@ -235,6 +242,7 @@ class BaseStreamTable(
   trainLog.mdtIdx := s1MdtInfo.index
   trainLog.mdtConf := s1MdtInfo.conf
   trainLog.mdtImm := s1MdtInfo.imm
+  trainLog.mdtImmConf := s1MdtInfo.immConf
   trainLog.mdtChainImm := s1MdtInfo.chainImm
   trainLog.mdtChainValid := s1MdtInfo.chainValid
   trainLog.regionTag := s1RegionTag
@@ -289,6 +297,9 @@ class BaseStreamTable(
   XSPerfAccumulate("mdp_bsmt_train_blocked", io.train.valid && !io.train.ready)
   XSPerfAccumulate("mdp_bsmt_mdt_hit", s1Valid && s1MdtInfo.hit)
   XSPerfAccumulate("mdp_bsmt_mdt_miss_skip", s1Valid && !s1MdtInfo.hit)
+  XSPerfAccumulate("mdp_bsmt_imm_unstable_skip", s1Valid && s1MdtInfo.hit &&
+    s1MdtInfo.conf >= MDP_CONF_THRESHOLD.U &&
+    s1MdtInfo.immConf < MDP_IMM_CONF_THRESHOLD.U)
   XSPerfAccumulate("mdp_bsmt_entry_hit", s1Valid && s1MdtInfo.hit && s1Hit)
   XSPerfAccumulate("mdp_bsmt_entry_alloc", s1Valid && s1MdtInfo.hit && !s1Hit)
   XSPerfAccumulate("mdp_bsmt_new_line", s1Valid && s1MdtInfo.hit && newLine)
@@ -299,6 +310,10 @@ class BaseStreamTable(
   XSPerfAccumulate("mdp_bsmt_activate_threshold", s1Valid && s1MdtInfo.hit && activatedByThreshold)
   XSPerfAccumulate("mdp_bsmt_activate_neighbor", s1Valid && s1MdtInfo.hit && activatedByNeighbor)
   XSPerfAccumulate("mdp_bsmt_pf_generated", io.streamPf.valid)
+  XSPerfAccumulate("mdp_bsmt_chain_capture_write_block",
+    canPrefetch && s1MdtInfo.chainValid && io.mdtWriteActive)
+  XSPerfAccumulate("mdp_bsmt_chain_write_block",
+    io.streamPf.valid && s2ChainValid && io.mdtWriteActive)
   XSPerfAccumulate("mdp_bsmt_pf_generated_incr", io.streamPf.valid && !s2Decr)
   XSPerfAccumulate("mdp_bsmt_pf_generated_decr", io.streamPf.valid && s2Decr)
   XSPerfHistogram(

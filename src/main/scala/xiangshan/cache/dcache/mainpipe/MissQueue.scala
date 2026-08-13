@@ -1174,6 +1174,16 @@ for(i <- 0 until reqNum) {
   // Select the original load bytes from the completed refill line and apply
   // the request's signed/unsigned extension before sending data back to MDP.
   val mdpRefillLine = refill_and_store_data_update.asUInt
+  val mdpLoadBytesMinusOne = MuxLookup(req.mdpLoadSize, 0.U(blockOffBits.W))(Seq(
+    0.U -> 0.U(blockOffBits.W),
+    1.U -> 1.U(blockOffBits.W),
+    2.U -> 3.U(blockOffBits.W),
+    3.U -> 7.U(blockOffBits.W)
+  ))
+  // A refill provides one cache line only. Do not zero-extend a cross-line
+  // value and use it as a pointer; a later complete load can retrain MDP.
+  val mdpLoadLastByte = req.mdpVaddr(blockOffBits - 1, 0) +& mdpLoadBytesMinusOne
+  val mdpLoadFitsRefillLine = !mdpLoadLastByte(blockOffBits)
   val mdpRawData = (mdpRefillLine >> (req.mdpVaddr(blockOffBits - 1, 0) << 3))(XLEN - 1, 0)
   val mdpLoadData = MuxLookup(req.mdpLoadSize, mdpRawData)(Seq(
     0.U -> Mux(req.mdpLoadUnsigned, ZeroExt(mdpRawData(7, 0), XLEN), SignExt(mdpRawData(7, 0), XLEN)),
@@ -1187,7 +1197,8 @@ for(i <- 0 until reqNum) {
   // the current Grant's error bits in this combinational gate as well.
   val mdpRefillError = denied || corrupt ||
     (io.mem_grant.fire && (io.mem_grant.bits.denied || io.mem_grant.bits.corrupt))
-  io.mdp_chasing_pf.valid := refill_done && hasData && req.pfHintMDP && !mdpRefillError
+  io.mdp_chasing_pf.valid := refill_done && hasData && req.pfHintMDP &&
+    mdpLoadFitsRefillLine && !mdpRefillError
   io.mdp_chasing_pf.bits.data := mdpLoadData
   io.mdp_chasing_pf.bits.imm := req.mdpImm
   io.mdp_chasing_pf.bits.pc := req.mdpPC
@@ -1217,6 +1228,8 @@ for(i <- 0 until reqNum) {
   XSPerfAccumulate("mdp_hint_mshr_preserve_chain",
     mdpHintMshrMerge && existingMdpChain && !incomingMdpChain)
   XSPerfAccumulate("mdp_hint_mshr_refill", io.mdp_chasing_pf.valid)
+  XSPerfAccumulate("mdp_chasing_pf_crossline_drop",
+    refill_done && hasData && req.pfHintMDP && !mdpLoadFitsRefillLine && !mdpRefillError)
   XSPerfAccumulate("mdp_chain_mshr_alloc", mdpHintMshrAlloc && miss_req_pipe_reg_bits.mdpChainValid)
   XSPerfAccumulate("mdp_chain_mshr_merge", mdpHintMshrMerge && miss_req_pipe_reg_bits.mdpChainValid)
   XSPerfAccumulate("mdp_chain_mshr_refill", io.mdp_chasing_pf.valid && req.mdpChainValid)
