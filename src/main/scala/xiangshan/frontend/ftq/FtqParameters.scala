@@ -22,7 +22,7 @@ import xiangshan.frontend.HasFrontendParameters
 case class FtqParameters(
     FtqSize:            Int = 64,
     ResolveQueueSize:   Int = 16,
-    BpRunAheadDistance: Int = 8,
+    BpRunAheadDistance: Int = 16,
     BpTrainStallLimit:  Int = 8,
     CommitQueueSize:    Int = 64,
     // drop resolve requests if there have been no mispredicts for a long period
