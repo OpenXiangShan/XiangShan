@@ -25,8 +25,8 @@ import xiangshan.MatchTriggerIO
 import xiangshan.TriggerAction
 import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.backend.fu.util.SdtrigExt
+import xiangshan.frontend.Pc
 import xiangshan.frontend.PreDecodeInfo
-import xiangshan.frontend.PrunedAddr
 
 // IFU trigger pre-marks instructions that may be executed.
 // Actual triggering is determined by the backend (pre-match stage).
@@ -36,7 +36,7 @@ class FrontendTrigger(implicit p: Parameters) extends IfuModule with SdtrigExt {
     val triggered:       Vec[UInt]                 = Output(Vec(IBufferEnqueueWidth, TriggerAction()))
 
     val pds: Vec[PreDecodeInfo] = Input(Vec(IBufferEnqueueWidth, new PreDecodeInfo))
-    val pc:  Vec[PrunedAddr]    = Input(Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits)))
+    val pc:  Vec[Pc]            = Input(Vec(IBufferEnqueueWidth, Pc()))
     val data: Vec[UInt] =
       if (HasCExtension) Input(Vec(IBufferEnqueueWidth + 1, UInt(16.W)))
       else Input(Vec(IBufferEnqueueWidth, UInt(32.W)))

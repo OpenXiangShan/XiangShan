@@ -33,7 +33,7 @@ import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.ftq.{FtqPtr, FtqRead, HasFtqParameters}
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.GuardedPc
 import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, SqPtr, ToLsqEnqCtrl}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, VecScheduler}
 import xiangshan.backend.trace._
@@ -100,7 +100,7 @@ class CtrlBlockImp(
   val redirectGen = Module(new RedirectGenerator)
   val lsqEnqCtrl = Module(new LsqEnqCtrl)
   private def hasRen: Boolean = true
-  private val pcMem = Module(new SyncDataModuleTemplate(PrunedAddr(GuardedVAddrBits), FtqSize, numPcMemRead, 1, "BackendPC", hasRen = hasRen))
+  private val pcMem = Module(new SyncDataModuleTemplate(GuardedPc(), FtqSize, numPcMemRead, 1, "BackendPC", hasRen = hasRen))
   private val rob = wrapper.rob.module
   private val memCtrl = Module(new MemCtrl(params))
 
@@ -222,11 +222,11 @@ class CtrlBlockImp(
     val offset = RegEnable(io.fromMem.mdpTrain.bits.getPcOffset(), mdpTrainValid)
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
-    // pcMem.rdata includes a guard bit used only by exception-related path, do truncate explicitly
-    memCtrl.io.memPredUpdate.ldpc := XORFold((pcMem.io.rdata(pcMemIdx).truncate(VAddrBits).toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
+    // pcMem.rdata includes a guard bit used only by exception-related path, do .unGuard explicitly
+    memCtrl.io.memPredUpdate.ldpc := XORFold((pcMem.io.rdata(pcMemIdx).unGuard.toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
 
     // update wait table, will be remove in the future
-    memCtrl.io.memPredUpdate.waddr := XORFold((pcMem.io.rdata(pcMemIdx).truncate(VAddrBits).toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
+    memCtrl.io.memPredUpdate.waddr := XORFold((pcMem.io.rdata(pcMemIdx).unGuard.toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
     memCtrl.io.memPredUpdate.wdata := true.B
   }
   for ((pcMemIdx, i) <- pcMemRdIndexes("memPredStore").zipWithIndex) {
@@ -235,7 +235,7 @@ class CtrlBlockImp(
     val offset = RegEnable(io.fromMem.mdpTrain.bits.getStPcOffset(), mdpTrainValid)
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
-    memCtrl.io.memPredUpdate.stpc := XORFold((pcMem.io.rdata(pcMemIdx).truncate(VAddrBits).toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
+    memCtrl.io.memPredUpdate.stpc := XORFold((pcMem.io.rdata(pcMemIdx).unGuard.toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
   }
   memCtrl.io.memPredUpdate.valid := RegNext(mdpTrainValid) // pc is ready, 1 cycle later
 
@@ -260,8 +260,8 @@ class CtrlBlockImp(
     val roffset = io.toDataPath.pcToDataPathIO.fromDataPathFtqOffset(i)
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
-    // pcMem.rdata includes a guard bit used only by exception-related path, do truncate explicitly
-    io.toDataPath.pcToDataPathIO.toDataPathPC(i) := pcMem.io.rdata(pcMemIdx).truncate(VAddrBits).toUInt
+    // pcMem.rdata includes a guard bit used only by exception-related path, do .unGuard explicitly
+    io.toDataPath.pcToDataPathIO.toDataPathPC(i) := pcMem.io.rdata(pcMemIdx).unGuard.toUInt
   }
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("bjuTarget").zipWithIndex) {
@@ -270,7 +270,7 @@ class CtrlBlockImp(
     val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value + 1.U
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
-    io.toDataPath.pcToDataPathIO.toDataPathTargetPC(i) := pcMem.io.rdata(pcMemIdx).truncate(VAddrBits).toUInt
+    io.toDataPath.pcToDataPathIO.toDataPathTargetPC(i) := pcMem.io.rdata(pcMemIdx).unGuard.toUInt
   }
 
   val baseIdx = params.BrhCnt
@@ -281,14 +281,14 @@ class CtrlBlockImp(
     val roffset = io.toDataPath.pcToDataPathIO.fromDataPathFtqOffset(baseIdx+i)
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
-    io.toDataPath.pcToDataPathIO.toDataPathPC(baseIdx+i) := pcMem.io.rdata(pcMemIdx).truncate(VAddrBits).toUInt
+    io.toDataPath.pcToDataPathIO.toDataPathPC(baseIdx+i) := pcMem.io.rdata(pcMemIdx).unGuard.toUInt
   }
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("hybrid").zipWithIndex) {
     // load read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
     pcMem.io.ren.get(pcMemIdx) := io.memHyPcRead(i).valid
     pcMem.io.raddr(pcMemIdx) := io.memHyPcRead(i).ptr.value
-    io.memHyPcRead(i).data := pcMem.io.rdata(pcMemIdx).truncate(VAddrBits).toUInt + (RegEnable(io.memHyPcRead(i).offset, io.memHyPcRead(i).valid) << instOffsetBits)
+    io.memHyPcRead(i).data := pcMem.io.rdata(pcMemIdx).unGuard.toUInt + (RegEnable(io.memHyPcRead(i).offset, io.memHyPcRead(i).valid) << instOffsetBits)
   }
 
   if (EnableStorePrefetchSMS) {
@@ -296,7 +296,7 @@ class CtrlBlockImp(
       pcMem.io.ren.get(pcMemIdx) := io.memStPcRead(i).valid
       pcMem.io.raddr(pcMemIdx) := io.memStPcRead(i).ptr.value
       // memStPcRead.data is not right bucasue memStPcRead don't have isRVC
-      io.memStPcRead(i).data := pcMem.io.rdata(pcMemIdx).truncate(VAddrBits).toUInt + (RegEnable(io.memStPcRead(i).offset, io.memStPcRead(i).valid) << instOffsetBits)
+      io.memStPcRead(i).data := pcMem.io.rdata(pcMemIdx).unGuard.toUInt + (RegEnable(io.memStPcRead(i).offset, io.memStPcRead(i).valid) << instOffsetBits)
     }
   } else {
     io.memStPcRead.foreach(_.data := 0.U)
@@ -315,7 +315,7 @@ class CtrlBlockImp(
     val traceValid = trace.toPcMem.blocks(i).valid
     pcMem.io.ren.get(pcMemIdx) := traceValid
     pcMem.io.raddr(pcMemIdx) := trace.toPcMem.blocks(i).bits.ftqIdx.get.value
-    tracePcStart(i) := pcMem.io.rdata(pcMemIdx).truncate(VAddrBits).toUInt
+    tracePcStart(i) := pcMem.io.rdata(pcMemIdx).unGuard.toUInt
   }
 
   // Trap/Xret only occur in block(0).

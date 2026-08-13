@@ -22,7 +22,8 @@ import utils.EnumUInt
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchRequestBundle
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.ibuffer.IBufPtr
@@ -53,8 +54,8 @@ object PreDecodeFaultType extends EnumUInt(7) {
 /* ***** Ifu last half ***** */
 // record the situation in which fallThruAddr falls into the middle of an RVI inst
 class LastHalfEntry(implicit p: Parameters) extends IfuBundle {
-  val valid:    Bool       = Bool()
-  val middlePC: PrunedAddr = PrunedAddr(VAddrBits)
+  val valid:    Bool = Bool()
+  val middlePC: Pc   = Pc()
 }
 
 class InstrIndexEntry(implicit p: Parameters) extends IfuBundle {
@@ -65,7 +66,7 @@ class InstrIndexEntry(implicit p: Parameters) extends IfuBundle {
 class FetchBlock(implicit p: Parameters) extends IfuBundle {
   val valid:          Bool        = Bool()
   val ftqIdx:         FtqPtr      = new FtqPtr
-  val startVAddr:     PrunedAddr  = PrunedAddr(GuardedVAddrBits)
+  val startVAddr:     GuardedPc   = GuardedPc()
   val takenCfiOffset: Valid[UInt] = Valid(UInt(FetchBlockInstOffsetWidth.W))
   val range:          UInt        = UInt(FetchBlockInstNum.W)
   val size:           UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
@@ -144,14 +145,14 @@ class Instruction(implicit p: Parameters) extends IfuBundle with HasICacheParame
 }
 
 class PredCheckRedirect(implicit p: Parameters) extends IfuBundle {
-  val target:       PrunedAddr      = PrunedAddr(GuardedVAddrBits)
+  val target:       GuardedPc       = GuardedPc()
   val misIdx:       Valid[UInt]     = Valid(UInt(log2Ceil(IBufferEnqueueWidth).W))
   val taken:        Bool            = Bool()
   val invalidTaken: Bool            = Bool()
   val isRVC:        Bool            = Bool()
   val selectBlock:  Bool            = Bool()
   val attribute:    BranchAttribute = new BranchAttribute
-  val mispredPc:    PrunedAddr      = PrunedAddr(VAddrBits)
+  val mispredPc:    Pc              = Pc()
   val endOffset:    UInt            = UInt(FetchBlockInstOffsetWidth.W)
 }
 
@@ -181,9 +182,9 @@ class IfuRedirectInternal(implicit p: Parameters) extends IfuBundle {
   val instrCount:     UInt    = UInt(log2Ceil(FetchBlockInstNum + 1).W)
   val prevIBufEnqPtr: IBufPtr = new IBufPtr
   // A fallthrough does not always correspond to a half RVI instruction.
-  val isHalfInstr: Bool       = Bool()
-  val halfPc:      PrunedAddr = PrunedAddr(GuardedVAddrBits)
-  val halfData:    UInt       = UInt(16.W)
+  val isHalfInstr: Bool      = Bool()
+  val halfPc:      GuardedPc = GuardedPc()
+  val halfData:    UInt      = UInt(16.W)
 }
 
 class InstrCompactBundle(width: Int)(implicit p: Parameters) extends IfuBundle {

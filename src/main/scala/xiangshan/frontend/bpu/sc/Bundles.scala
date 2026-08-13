@@ -19,7 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterFactory
 import xiangshan.frontend.bpu.SaturateCounterInit
@@ -96,8 +96,8 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
 
 class ScConditionalBranchTrace(implicit p: Parameters) extends ScBundle with HasScParameters {
   private def ScEntryWidth = (new ScEntry).getWidth
-  val startPc: PrunedAddr = PrunedAddr(VAddrBits)
-  val cfiPc:   UInt       = UInt(VAddrBits.W)
+  val startPc: Pc   = Pc()
+  val cfiPc:   UInt = UInt(VAddrBits.W)
   // tage provider info
   val providerValid: Bool = Bool()
   val providerTaken: Bool = Bool()

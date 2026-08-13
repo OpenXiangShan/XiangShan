@@ -8,7 +8,7 @@ import xiangshan.RedirectLevel
 import xiangshan.backend.fu.{FuConfig, FuncUnit, JumpDataModule, PipedFuncUnit}
 import xiangshan.JumpOpType
 import xiangshan.backend.datapath.DataConfig.VAddrData
-import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.PcInit
 import xiangshan.frontend.bpu.BranchAttribute
 
 class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
@@ -68,8 +68,8 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   io.toFrontendBJUResolve.get.valid := io.out.valid && !JumpOpType.jumpOpisAuipc(func)
   io.toFrontendBJUResolve.get.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
   io.toFrontendBJUResolve.get.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
-  io.toFrontendBJUResolve.get.bits.pc := PrunedAddrInit(pc).truncate(VAddrBits)
-  io.toFrontendBJUResolve.get.bits.target := PrunedAddrInit(jumpDataModule.io.target).truncate(VAddrBits)
+  io.toFrontendBJUResolve.get.bits.pc := PcInit(pc(VAddrBits - 1, 0))
+  io.toFrontendBJUResolve.get.bits.target := PcInit(jumpDataModule.io.target(VAddrBits - 1, 0))
   io.toFrontendBJUResolve.get.bits.taken := true.B
   io.toFrontendBJUResolve.get.bits.mispredict := needTrain
   io.toFrontendBJUResolve.get.bits.attribute.branchType := MuxCase(

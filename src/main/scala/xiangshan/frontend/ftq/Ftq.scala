@@ -46,8 +46,7 @@ import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
-import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.PcInit
 import xiangshan.frontend.TwoPrefetchCase
 import xiangshan.frontend.bpu.BpuCommitMeta
 import xiangshan.frontend.bpu.BpuPredictionSource
@@ -354,7 +353,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toIfu.redirect.bits := DontCare
 
   io.toBpu.redirect.valid          := redirect.valid
-  io.toBpu.redirect.bits.cfiPc     := getCfiPcFromOffset(PrunedAddrInit(redirect.bits.pc), redirect.bits.ftqOffset)
+  io.toBpu.redirect.bits.cfiPc     := getCfiPcFromOffset(PcInit(redirect.bits.pc), redirect.bits.ftqOffset)
   io.toBpu.redirect.bits.target    := redirect.bits.target
   io.toBpu.redirect.bits.taken     := redirect.bits.taken
   io.toBpu.redirect.bits.attribute := redirect.bits.attribute
@@ -511,7 +510,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   // XSPerfCounters
   private val redirectCfiOffset = getAlignedPosition(
-    PrunedAddrInit(redirect.bits.pc),
+    PcInit(redirect.bits.pc),
     redirect.bits.ftqOffset
   )._1
   private val redirectPerfMeta = perfQueue(backendRedirect.bits.ftqIdx.value).bpuPerf

@@ -322,7 +322,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     port.bits.exceptionEntry.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
 
     port.bits.entry.debug_ftqIdx.foreach(_ := s1_req(i).ftqIdx)
-    port.bits.entry.debug_startVAddr.foreach(_ := s1_req(i).startVAddr.truncate(VAddrBits))
+    port.bits.entry.debug_startVAddr.foreach(_ := s1_req(i).startVAddr.unGuard)
 
     when(port.fire) {
       val waymasksVec = s1_reqMetaInfo(i).map(_.waymask.asTypeOf(Vec(nWays, Bool())))

@@ -62,7 +62,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      -------------------------------------------------------------------------------------------------------------- */
 
   private val s0_fire    = io.stageCtrl.s0_fire && io.enable
-  private val s0_startPc = io.startPc.truncate(VAddrBits)
+  private val s0_startPc = io.startPc.unGuard
 
   private val s0_foldedHist = getFoldedHist(io.fromPhr.foldedPathHist)
   private val s0_setIdx = VecInit((tables zip s0_foldedHist).map { case (table, hist) =>

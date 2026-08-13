@@ -23,7 +23,7 @@ import utility.ChiselDB
 import utility.ParallelPriorityMux
 import utility.XSPerfAccumulate
 import utility.XSPerfSeqAccumulate
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.CompareMatrix
@@ -53,8 +53,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     val s1PathHist:       PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val overridePathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
 
-    val s1StartPc:       PrunedAddr = Input(new PrunedAddr(VAddrBits))
-    val overrideStartPc: PrunedAddr = Input(new PrunedAddr(VAddrBits))
+    val s1StartPc:       Pc = Input(new Pc)
+    val overrideStartPc: Pc = Input(new Pc)
   }
   val io: MicroTageIO = IO(new MicroTageIO)
   io.trainReady := true.B
@@ -67,7 +67,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val a2_fire                = io.stageCtrl.s1_fire
   private val overrideValid          = io.overrideValid
   private val redirectValid          = io.redirectValid
-  private val a0_indexPc             = io.startPc.truncate(VAddrBits)
+  private val a0_indexPc             = io.startPc.unGuard
   private val a0_indexFoldedPathHist = io.normalPathHist
 
   /* *** submodules *** */

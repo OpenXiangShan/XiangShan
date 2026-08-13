@@ -19,7 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.HasFastTrainIO
@@ -39,7 +39,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     val abtbResultPos: Vec[UInt]                  = Output(Vec(NumAheadBtbPredictionEntries, UInt(CfiPositionWidth.W)))
     val abtbPos:       Vec[UInt]                  = Output(Vec(NumAheadBtbPredictionEntries, UInt(CfiPositionWidth.W)))
     val meta:          AheadBtbMeta               = Output(new AheadBtbMeta)
-    val debug_startPc: PrunedAddr                 = Output(PrunedAddr(VAddrBits))
+    val debug_startPc: Pc                         = Output(Pc())
     val normalPathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
   }
   val io: AheadBtbIO = IO(new AheadBtbIO)
@@ -235,7 +235,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }
 
   // used for check abtb output
-  io.debug_startPc := s2_startPc.truncate(VAddrBits)
+  io.debug_startPc := s2_startPc.unGuard
 
   replacers.zipWithIndex.foreach { case (r, i) =>
     r.io.readValid   := s2_valid && s2_hit && s2_bankMask(i)

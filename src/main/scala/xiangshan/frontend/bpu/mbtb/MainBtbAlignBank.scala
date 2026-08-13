@@ -21,7 +21,8 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import utility.XSPerfSeqAccumulate
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.StageCtrl
@@ -34,9 +35,9 @@ class MainBtbAlignBank(
       class Req extends Bundle {
         // NOTE: this startPc is not from Bpu top, it's calculated in MainBtb top
         // i.e. (VecInit.tabulate(NumAlignBanks)(startPc + _ * alignSize))(alignIdx) rotated right by startAlignIdx
-        val startPc:       PrunedAddr = new PrunedAddr(GuardedVAddrBits)
-        val posHigherBits: UInt       = UInt(AlignBankIdxLen.W)
-        val crossPage:     Bool       = Bool()
+        val startPc:       GuardedPc = new GuardedPc
+        val posHigherBits: UInt      = UInt(AlignBankIdxLen.W)
+        val crossPage:     Bool      = Bool()
       }
 
       class Resp extends Bundle {
@@ -55,7 +56,7 @@ class MainBtbAlignBank(
       class Req extends Bundle {
         val needWrite: Bool = Bool()
         // similar to Read.Req.startPc, calculated in MainBtb top
-        val startPc:  PrunedAddr             = new PrunedAddr(VAddrBits)
+        val startPc:  Pc                     = new Pc
         val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
         val meta:     Vec[MainBtbMetaEntry]  = Vec(NumWay, new MainBtbMetaEntry)
         // mispredictBranch is actually Mux1H(branches.map(b => b.valid && b.mispredict), b.bits),
@@ -78,7 +79,7 @@ class MainBtbAlignBank(
     val s3_takenMask: Vec[Bool] = Input(Vec(NumWay, Bool()))
 
     // fast path of train pc, used to read replacer in advance for better timing
-    val t0_startPc: PrunedAddr = Input(new PrunedAddr(VAddrBits))
+    val t0_startPc: Pc = Input(new Pc)
   }
 
   val io: MainBtbAlignBankIO = IO(new MainBtbAlignBankIO)

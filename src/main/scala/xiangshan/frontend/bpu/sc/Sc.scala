@@ -108,7 +108,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   /*
    *  predict pipeline stage 0
    */
-  private val s0_startPc  = io.startPc.truncate(VAddrBits)
+  private val s0_startPc  = io.startPc.unGuard
   private val s0_bankMask = getBankMask(s0_startPc)
   private val s0_pathIdx = PathTableInfos.zip(pathTable).map { case (info, table) =>
     table.getPathTableIdx(

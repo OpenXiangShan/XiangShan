@@ -29,7 +29,7 @@ import org.chipsalliance.cde.config.Parameters
 
 import xiangshan.frontend.IfuToBackendIO
 import xiangshan.frontend.PreDecodeInfo
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BpuCtrl
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ftq.FtqPtr
@@ -293,8 +293,8 @@ object Redirect extends HasCircularQueuePtrHelper {
 class Resolve(implicit p: Parameters) extends XSBundle {
   val ftqIdx: FtqPtr = new FtqPtr
   val ftqOffset: UInt = UInt(FetchBlockInstOffsetWidth.W)
-  val pc: PrunedAddr = PrunedAddr(VAddrBits)
-  val target: PrunedAddr = PrunedAddr(VAddrBits)
+  val pc: Pc = Pc()
+  val target: Pc = Pc()
   val taken: Bool = Bool()
   val mispredict: Bool = Bool()
   val attribute: BranchAttribute = new BranchAttribute
