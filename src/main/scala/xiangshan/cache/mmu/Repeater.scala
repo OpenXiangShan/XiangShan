@@ -465,7 +465,9 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   }
 
   when (io.ptw.req(0).fire =/= io.ptw.resp.fire) {
-    inflight_counter := Mux(io.ptw.req(0).fire, inflight_counter + 1.U, inflight_counter - 1.U)
+    // a response of a request flushed away still fires, so the decrement needs a floor
+    inflight_counter := Mux(io.ptw.req(0).fire, inflight_counter + 1.U,
+                            Mux(inflight_counter === 0.U, 0.U, inflight_counter - 1.U))
   }
 
   val canEnqueue = Wire(Bool()) // NOTE: actually enqueue
