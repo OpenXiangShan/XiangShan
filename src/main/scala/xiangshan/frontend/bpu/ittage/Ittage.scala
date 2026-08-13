@@ -32,8 +32,8 @@ import utility.SelectTwoInterRes
 import utility.XSDebug
 import utility.XSPerfAccumulate
 import xiangshan.XSModule
-import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.SaturateCounter
@@ -88,9 +88,9 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   private val s2_resps = VecInit(tables.map(t => t.io.resp))
 
-  private val s2_ittageTarget      = Wire(PrunedAddr(GuardedVAddrBits))
-  private val s2_providerTarget    = Wire(PrunedAddr(GuardedVAddrBits))
-  private val s2_altProviderTarget = Wire(PrunedAddr(GuardedVAddrBits))
+  private val s2_ittageTarget      = Wire(GuardedPc())
+  private val s2_providerTarget    = Wire(GuardedPc())
+  private val s2_altProviderTarget = Wire(GuardedPc())
   private val s2_provided          = Wire(Bool())
   private val s2_provider          = Wire(UInt(log2Ceil(NumTables).W))
   private val s2_altProvided       = Wire(Bool())
@@ -189,7 +189,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   // Predict
   tables.foreach { t =>
     t.io.req.valid           := s1_fire && s1_isIndirect // TODO: s1_isIndirect for low power
-    t.io.req.bits.startPc    := s1_startPc.truncate(VAddrBits)
+    t.io.req.bits.startPc    := s1_startPc.unGuard
     t.io.req.bits.foldedHist := io.s1_foldedPhr
   }
 
@@ -229,9 +229,9 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   }
 
   // When the entry corresponding to the pointer is valid and does not use PCRegion, use rTable region.
-  private val regionTargets = Wire(Vec(NumTables, PrunedAddr(GuardedVAddrBits)))
+  private val regionTargets = Wire(Vec(NumTables, GuardedPc()))
   for (i <- 0 until NumTables) {
-    regionTargets(i) := PrunedAddrInit(Mux(
+    regionTargets(i) := GuardedPcInit(Mux(
       rTable.io.respHit(i) && !regionReadTargetOffset(i).usePcRegion,
       Cat(
         s2_startPc(GuardedVAddrBits - 1),
@@ -242,16 +242,16 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     ))
   }
 
-  private val providerCatTarget = PrunedAddrInit(providerInfo.maskTarget.zipWithIndex.map {
+  private val providerCatTarget = GuardedPcInit(providerInfo.maskTarget.zipWithIndex.map {
     case (mask, i) => mask & regionTargets(i).toUInt
   }.reduce(_ | _))
 
-  private val altProviderCatTarget = PrunedAddrInit(altProviderInfo.maskTarget.zipWithIndex.map {
+  private val altProviderCatTarget = GuardedPcInit(altProviderInfo.maskTarget.zipWithIndex.map {
     case (mask, i) => mask & regionTargets(i).toUInt
   }.reduce(_ | _))
 
   s2_ittageTarget := MuxCase(
-    0.U.asTypeOf(PrunedAddr(GuardedVAddrBits)),
+    0.U.asTypeOf(GuardedPc()),
     Seq(
       (provided && !(providerNull && altProvided)) -> providerCatTarget,
       (providerNull && altProvided)                -> altProviderCatTarget
@@ -268,7 +268,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   io.prediction.hit    := s3_fire && s3_provided
   io.prediction.target := s3_ittageTarget
 //  when(io.prediction.hit) {
-//    assert(io.prediction.target =/= 0.U.asTypeOf(PrunedAddr(VAddrBits)))
+//    assert(io.prediction.target =/= 0.U.asTypeOf(GuardedPc()))
 //  }
 
   s2_provided          := provided
@@ -292,8 +292,8 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   ittageMeta.providerUsefulCnt := s3_providerUsefulCnt
   ittageMeta.providerCnt       := s3_providerCnt
   ittageMeta.altProviderCnt    := s3_altProviderCnt
-  ittageMeta.providerTarget    := s3_providerTarget.truncate(VAddrBits)
-  ittageMeta.altProviderTarget := s3_altProviderTarget.truncate(VAddrBits)
+  ittageMeta.providerTarget    := s3_providerTarget.unGuard
+  ittageMeta.altProviderTarget := s3_altProviderTarget.unGuard
   ittageMeta.debug_predCycle.foreach(_ := GTimer())
   // Create a mask fo tables which did not hit our query, and also contain useless entries
   // and also uses a longer history than the provider

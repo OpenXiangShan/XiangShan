@@ -9,7 +9,7 @@ import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.fu.{BranchModule, FuConfig, FuncUnit}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.{RedirectLevel, SelImm, XSModule}
-import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.PcInit
 import xiangshan.frontend.bpu.BranchAttribute
 
 class AddrAddModule(implicit p: Parameters) extends XSModule {
@@ -76,8 +76,8 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.toFrontendBJUResolve.get.valid := io.out.valid
   io.toFrontendBJUResolve.get.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
   io.toFrontendBJUResolve.get.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
-  io.toFrontendBJUResolve.get.bits.pc := PrunedAddrInit(pcExtend).truncate(VAddrBits)
-  io.toFrontendBJUResolve.get.bits.target := PrunedAddrInit(addModule.io.target).truncate(VAddrBits)
+  io.toFrontendBJUResolve.get.bits.pc := PcInit(pcExtend(VAddrBits - 1, 0))
+  io.toFrontendBJUResolve.get.bits.target := PcInit(addModule.io.target(VAddrBits - 1, 0))
   io.toFrontendBJUResolve.get.bits.taken := dataModule.io.taken
   io.toFrontendBJUResolve.get.bits.mispredict := isMisPred
   io.toFrontendBJUResolve.get.bits.attribute.branchType := BranchAttribute.BranchType.Conditional

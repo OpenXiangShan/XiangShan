@@ -34,13 +34,13 @@ import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendRedirect
 import xiangshan.frontend.FtqToIfuIO
+import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.ICacheToIfuIO
 import xiangshan.frontend.IfuToBackendIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.IfuToInstrUncacheIO
 import xiangshan.frontend.InstrUncacheToIfuIO
 import xiangshan.frontend.PreDecodeInfo
-import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.PmpCheckBundle
@@ -210,7 +210,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_prevIBufEnqPtr     = RegInit(0.U.asTypeOf(new IBufPtr))
   private val s1_prevEndIsHalfRvi   = RegEnable(s0_prevEndIsHalfRvi, s0_fire)
   private val s1_prevEndHalfRviData = RegInit(0.U(16.W))
-  private val s1_prevEndHalfRviPc   = RegInit(0.U.asTypeOf(PrunedAddr(GuardedVAddrBits)))
+  private val s1_prevEndHalfRviPc   = RegInit(0.U.asTypeOf(GuardedPc()))
 
   private val s1_instrData    = RegEnable(s0_icacheData.data, s0_fire)
   private val s1_icacheMetaIn = RegEnable(s0_icacheMeta, s0_fire)
@@ -301,7 +301,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // backendRedirect has the highest priority
   when(backendRedirect) {
     s1_prevEndHalfRviData := 0.U
-    s1_prevEndHalfRviPc   := 0.U.asTypeOf(PrunedAddr(GuardedVAddrBits))
+    s1_prevEndHalfRviPc   := 0.U.asTypeOf(GuardedPc())
   }.elsewhen(wbRedirect.valid) {
     s1_prevEndHalfRviData := wbRedirect.halfData
     s1_prevEndHalfRviPc   := wbRedirect.halfPc
@@ -389,7 +389,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   dontTouch(s2_blockSel)
 
   private val s2_alignedPdInfoVec     = Wire(Vec(IBufferEnqueueWidth, new PreDecodeInfo))
-  private val s2_alignedJumpOffsetVec = Wire(Vec(IBufferEnqueueWidth, PrunedAddr(GuardedVAddrBits)))
+  private val s2_alignedJumpOffsetVec = Wire(Vec(IBufferEnqueueWidth, GuardedPc()))
   s2_alignedInstrVec.zipWithIndex.foreach { case (instr, i) =>
     val jalOffset = getJalOffset(instr.data, instr.isRvc)
     val brOffset  = getBrOffset(instr.data, instr.isRvc)
@@ -410,12 +410,12 @@ class Ifu(implicit p: Parameters) extends IfuModule
   /* ** unache state handle ** */
   private val uncacheBusy = RegInit(false.B)
   // For uncache cross-page instr, the real PC is in the prev fetch block.
-  private val uncachePc = RegInit(0.U.asTypeOf(PrunedAddr(GuardedVAddrBits)))
+  private val uncachePc = RegInit(0.U.asTypeOf(GuardedPc()))
   // Uncache cross-page may hit seq fetch or mispred, check required.
   private val uncacheResendCheck = RegInit(false.B)
   when(s2_flush) {
     uncacheBusy := false.B
-    uncachePc   := 0.U.asTypeOf(PrunedAddr(GuardedVAddrBits))
+    uncachePc   := 0.U.asTypeOf(GuardedPc())
   }.elsewhen(uncacheUnit.io.req.fire) {
     uncacheBusy := true.B
     uncachePc   := Mux(s2_prevEndIsHalfRvi, s2_prevEndHalfPc, s2_alignedInstrPcVec(s2_alignShiftNum))
@@ -475,7 +475,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   /* ** frontend Trigger  ** */
   frontendTrigger.io.pds := s2_alignedPdInfoVec
   frontendTrigger.io.pc := VecInit(
-    s2_alignedInstrPcVec.map(_.truncate(VAddrBits))
+    s2_alignedInstrPcVec.map(_.unGuard)
   )
   frontendTrigger.io.data            := 0.U.asTypeOf(Vec(IBufferEnqueueWidth + 1, UInt(16.W)))
   frontendTrigger.io.frontendTrigger := io.frontendTrigger
@@ -488,7 +488,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.enqEnable := s2_fixedInstrValid
   io.toIBuffer.bits.isRvc     := s2_expandedInstrVec.map(_.isRvc)
   io.toIBuffer.bits.pc := VecInit(
-    s2_alignedInstrPcVec.map(_.truncate(VAddrBits))
+    s2_alignedInstrPcVec.map(_.unGuard)
   ) // for debug
   io.toIBuffer.bits.prevIBufEnqPtr := s2_prevIBufEnqPtr
   io.toIBuffer.bits.ftqPtr.zipWithIndex.foreach { case (ftqPtr, i) =>
@@ -607,7 +607,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
       uncacheRvcExpander.io.out.bits
     )
 
-    io.toIBuffer.bits.pc(s2_alignShiftNum)                    := uncachePc.truncate(VAddrBits)
+    io.toIBuffer.bits.pc(s2_alignShiftNum)                    := uncachePc.unGuard
     io.toIBuffer.bits.isRvc(s2_alignShiftNum)                 := uncacheIsRvc
     io.toIBuffer.bits.instrEndOffset(s2_alignShiftNum).offset := Mux(uncacheIsRvc || s2_prevEndIsHalfRvi, 0.U, 1.U)
 

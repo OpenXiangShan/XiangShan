@@ -114,3 +114,58 @@ object PrunedAddrInit {
     address
   }
 }
+
+class Pc(_l: Int)(implicit p: Parameters) extends PrunedAddr(_l, strictAssign = true) {
+  require(_l == VAddrBits)
+  // Hack: we cannot do this(VAddrBits):
+  //       methods are not accessible before parent class construction (thus in auxiliary constructor),
+  //       here we use an empty XSBundle object to access VAddrBits
+  def this()(implicit p: Parameters) = this(new XSBundle {}.VAddrBits)(p)
+
+  override def +(offset: UInt):       Pc = PcInit(toUInt + offset)
+  override def +(that:   PrunedAddr): Pc = PcInit(toUInt + that.toUInt)
+
+  def signGuard: GuardedPc = this.signExt(GuardedVAddrBits).asTypeOf(new GuardedPc)
+  def zeroGuard: GuardedPc = this.zeroExt(GuardedVAddrBits).asTypeOf(new GuardedPc)
+  def guard(bit: Bool):      GuardedPc = Cat(bit, this.addr).asTypeOf(new GuardedPc)
+  def guard(ref: GuardedPc): GuardedPc = guard(ref.getGuard)
+}
+
+object Pc {
+  def apply()(implicit p: Parameters): Pc = new Pc
+}
+
+object PcInit {
+  def apply(fullPc: UInt)(implicit p: Parameters): Pc = {
+    val pc = Wire(new Pc)
+    pc := fullPc
+    pc
+  }
+}
+
+class GuardedPc(_l: Int)(implicit p: Parameters) extends PrunedAddr(_l, strictAssign = true) {
+  require(_l == GuardedVAddrBits)
+  // Hack: we cannot do this(VAddrBits):
+  //       methods are not accessible before parent class construction (thus in auxiliary constructor),
+  //       here we use an empty XSBundle object to access VAddrBits
+  def this()(implicit p: Parameters) = this(new XSBundle {}.GuardedVAddrBits)(p)
+
+  override def +(offset: UInt):       GuardedPc = GuardedPcInit(toUInt + offset)
+  override def +(that:   PrunedAddr): GuardedPc = GuardedPcInit(toUInt + that.toUInt)
+
+  def getGuard: Bool = addr(_l - instOffsetBits - 1) // highest bit
+
+  def unGuard: Pc = this.truncate(VAddrBits).asTypeOf(new Pc)
+}
+
+object GuardedPc {
+  def apply()(implicit p: Parameters): GuardedPc = new GuardedPc
+}
+
+object GuardedPcInit {
+  def apply(fullGuardedPc: UInt)(implicit p: Parameters): GuardedPc = {
+    val pc = Wire(new GuardedPc)
+    pc := fullGuardedPc
+    pc
+  }
+}

@@ -29,8 +29,8 @@ import utils.DuplicateInit
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
+import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.history.commonhr.CommonHR
 import xiangshan.frontend.bpu.history.commonhr.CommonHRMeta
@@ -140,11 +140,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val debug_bpId = RegInit(0.U(XLEN.W))
 
-  private val s0_startPc    = DuplicateInit(NumStartPcDuplicate, PrunedAddrInit(0.U(GuardedVAddrBits.W)))
+  private val s0_startPc    = DuplicateInit(NumStartPcDuplicate, GuardedPcInit(0.U(GuardedVAddrBits.W)))
   private val s0_startPcReg = RegEnable(s0_startPc, !s0_stall)
 
   when(RegNext(RegNext(reset.asBool)) && !reset.asBool) {
-    s0_startPcReg := io.resetVector.zeroExt(GuardedVAddrBits)
+    s0_startPcReg.foreach(_ := io.resetVector.zeroExt(GuardedVAddrBits))
   }
 
   private val s1_startPc = RegEnable(s0_startPc, s0_fire)
@@ -185,7 +185,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val fastTrain = Wire(Valid(new FastTrain))
   fastTrain.valid                := s3_valid
-  fastTrain.bits.startPc         := s3_startPc.get.truncate(VAddrBits)
+  fastTrain.bits.startPc         := s3_startPc.get.unGuard
   fastTrain.bits.finalPrediction := s3_prediction
   fastTrain.bits.abtbMeta        := s3_abtbMeta
   fastTrain.bits.utageMeta       := s3_utageMeta
@@ -222,8 +222,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   utage.io.s1PathHist       := phr.io.s1_foldedPhr
   utage.io.overridePathHist := phr.io.s3_foldedPhr
 
-  utage.io.s1StartPc       := s1_prediction.target.truncate(VAddrBits)
-  utage.io.overrideStartPc := s3_prediction.target.truncate(VAddrBits)
+  utage.io.s1StartPc       := s1_prediction.target.unGuard
+  utage.io.overrideStartPc := s3_prediction.target.unGuard
 
   // uras
   uras.io.specIn.startPc                := s1_startPc.get
@@ -529,9 +529,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   phr.io.train.s3_override   := s3_override
   phr.io.train.s3_phrMeta    := s3_phrMeta
   phr.io.train.s3_prediction := s3_prediction
-  phr.io.train.s3_startPc    := s3_startPc.get.truncate(VAddrBits)
+  phr.io.train.s3_startPc    := s3_startPc.get.unGuard
   phr.io.s1Train.valid       := s1_fire
-  phr.io.s1Train.startPc     := s1_startPc.get.truncate(VAddrBits)
+  phr.io.s1Train.startPc     := s1_startPc.get.unGuard
   phr.io.s1Train.prediction  := s1_prediction
 
   phr.io.commit.valid := io.fromFtq.train.fire
@@ -553,25 +553,25 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       (s1_cfiPc.addr(CompareAddrLowWidth - 1, 0) > s1_prediction.target.addr(CompareAddrLowWidth - 1, 0))
 
   commonHR.io.stageCtrl                 := stageCtrl
-  commonHR.io.s0_startPc.get            := s0_startPc.get.truncate(VAddrBits)
+  commonHR.io.s0_startPc.get            := s0_startPc.get.unGuard
   commonHR.io.s1_imliTaken              := s1_imliTaken
-  commonHR.io.s2StartPc                 := s2_startPc.get.truncate(VAddrBits)
+  commonHR.io.s2StartPc                 := s2_startPc.get.unGuard
   commonHR.io.s2CondHitMask             := VecInit(mbtb.io.result.map(e => e.valid && e.bits.attribute.isConditional))
   commonHR.io.s2CfiPositions            := VecInit(mbtb.io.result.map(_.bits.cfiPosition))
-  commonHR.io.s2CfiTargets              := VecInit(mbtb.io.result.map(_.bits.target.truncate(VAddrBits)))
-  commonHR.io.update.startPc            := s3_startPc.get.truncate(VAddrBits)
-  commonHR.io.update.target             := s3_prediction.target.truncate(VAddrBits)
+  commonHR.io.s2CfiTargets              := VecInit(mbtb.io.result.map(_.bits.target.unGuard))
+  commonHR.io.update.startPc            := s3_startPc.get.unGuard
+  commonHR.io.update.target             := s3_prediction.target.unGuard
   commonHR.io.update.taken              := s3_taken
   commonHR.io.update.s3Override         := s3_override
   commonHR.io.update.attributes         := VecInit(s3_mbtbResult.map(_.bits.attribute))
-  commonHR.io.update.targets            := VecInit(s3_mbtbResult.map(_.bits.target.truncate(VAddrBits)))
+  commonHR.io.update.targets            := VecInit(s3_mbtbResult.map(_.bits.target.unGuard))
   commonHR.io.update.firstTakenBranchOH := s3_firstTakenBranchOH
   commonHR.io.update.firstTakenBranch   := s3_firstTakenBranch
   commonHR.io.update.position           := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
   commonHR.io.update.condHitMask        := s3_condHitMask
   commonHR.io.redirect.valid            := redirect.valid
   commonHR.io.redirect.cfiPc            := redirect.bits.cfiPc
-  commonHR.io.redirect.target           := redirect.bits.target.truncate(VAddrBits)
+  commonHR.io.redirect.target           := redirect.bits.target.unGuard
   commonHR.io.redirect.taken            := redirect.bits.taken
   commonHR.io.redirect.attribute        := redirect.bits.attribute
   commonHR.io.redirect.meta             := redirect.bits.meta.commonHRMeta
@@ -589,7 +589,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** check abtb output *** */
   when(io.toFtq.prediction.fire && abtb.io.prediction.map(_.valid).reduce(_ || _)) {
-    assert(abtb.io.debug_startPc === s1_startPc.head.truncate(VAddrBits))
+    assert(abtb.io.debug_startPc === s1_startPc.head.unGuard)
   }
 
   /* *** Debug Meta *** */
@@ -619,7 +619,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_s1PredictionSource = RegEnable(s2_s1PredictionSource, s2_fire)
 
   private val s3_perfMeta = Wire(new BpuPerfMeta)
-  s3_perfMeta.startPc             := s3_startPc.head.truncate(VAddrBits)
+  s3_perfMeta.startPc             := s3_startPc.head.unGuard
   s3_perfMeta.bpId                := debug_bpId
   s3_perfMeta.s1Prediction        := s3_s1Prediction
   s3_perfMeta.s3Prediction        := s3_prediction

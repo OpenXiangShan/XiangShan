@@ -18,6 +18,8 @@ package xiangshan.frontend.ifu
 import chisel3._
 import chisel3.util._
 import utility.SignExt
+import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.BranchAttribute
@@ -72,8 +74,8 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
     val blocks   = VecInit((0 until numBlocks).map(i => Mux(selectOH(i), Fill(blockSize, 1.U(1.W)), 0.U(blockSize.W))))
     Cat(blocks.reverse)
   }
-  def catPC(low: UInt, high: UInt, high1: UInt): PrunedAddr =
-    PrunedAddrInit(Mux(
+  def catPC(low: UInt, high: UInt, high1: UInt): GuardedPc =
+    GuardedPcInit(Mux(
       low(PcCutPoint),
       Cat(high1, low(PcCutPoint - 1, 0)),
       Cat(high, low(PcCutPoint - 1, 0))
@@ -86,11 +88,11 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
       Cat(0.U(1.W), fetchBlock(0).startVAddr(PcCutPoint - 1, 0))
     ) + (instr.startOffset << 1)
 
-  def getInstrPc(instr: Instruction, fetchBlock: Vec[FetchBlock]): PrunedAddr = {
+  def getInstrPc(instr: Instruction, fetchBlock: Vec[FetchBlock]): GuardedPc = {
     val pcLower = getInstrPcLowerBits(instr, fetchBlock)
     Mux(
       instr.isCrossBlockInstr,
-      PrunedAddrInit(fetchBlock(1).startVAddr.toUInt - 2.U),
+      GuardedPcInit(fetchBlock(1).startVAddr.toUInt - 2.U),
       catPC(
         pcLower,
         Mux(instr.blockSel, fetchBlock(1).pcUpperBits, fetchBlock(0).pcUpperBits),
@@ -99,7 +101,7 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
     )
   }
 
-  def catPC(lowVec: Vec[UInt], high: UInt, high1: UInt): Vec[PrunedAddr] =
+  def catPC(lowVec: Vec[UInt], high: UInt, high1: UInt): Vec[GuardedPc] =
     VecInit(lowVec.map(catPC(_, high, high1)))
 
   def cutICacheData(cacheline: UInt): Vec[UInt] = {

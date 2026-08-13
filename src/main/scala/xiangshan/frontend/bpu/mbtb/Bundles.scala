@@ -19,7 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.SaturateCounter
@@ -89,7 +89,7 @@ class MainBtbAlignBankTrace(implicit p: Parameters) extends MainBtbBundle {
 
 class MainBtbTrace(implicit p: Parameters) extends MainBtbBundle {
 
-  val startPc:     PrunedAddr      = PrunedAddr(VAddrBits)
+  val startPc:     Pc              = Pc()
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val attribute:   BranchAttribute = new BranchAttribute
 
