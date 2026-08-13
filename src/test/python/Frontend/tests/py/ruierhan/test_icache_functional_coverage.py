@@ -800,6 +800,50 @@ def test_single_request_entry_bin():
     assert not _hit(recorder, "icache_mainpipe_s0_entry", "dual_request_data_read")
 
 
+def test_mainpipe_global_s0_flush_samples_condition_not_checkpoint():
+    recorder = _Recorder()
+    for key, value in {
+        "ftq_valid": 1,
+        "from_valid": 1,
+        "data_ready": 1,
+        "s1_ready": 1,
+        "io_flush": 1,
+        # Deliberately violate the checkpoint so a checker can report it.
+        "s0_flush": 0,
+        "from_ready": 1,
+        "data_valid": 1,
+        "s1_valid": 1,
+    }.items():
+        recorder.set_key(key, value)
+
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 2)
+
+    assert _hit(recorder, "icache_mainpipe_s0_flush", "global_flush_cancels_entry")
+
+
+def test_mainpipe_global_s0_flush_requires_both_inputs_and_io_flush():
+    base = {
+        "ftq_valid": 1,
+        "from_valid": 1,
+        "data_ready": 1,
+        "s1_ready": 1,
+        "io_flush": 1,
+        "s0_flush": 1,
+    }
+    for missing_key in ("ftq_valid", "from_valid", "io_flush"):
+        recorder = _Recorder()
+        for key, value in {**base, missing_key: 0}.items():
+            recorder.set_key(key, value)
+
+        sample_icache_mainpipe_coverage(recorder, recorder.env, 3)
+
+        assert not _hit(
+            recorder,
+            "icache_mainpipe_s0_flush",
+            "global_flush_cancels_entry",
+        )
+
+
 def test_mainpipe_bpu_s0_flush_uses_precise_ftq_match_when_available():
     recorder = _Recorder()
     for key, value in {
@@ -807,7 +851,9 @@ def test_mainpipe_bpu_s0_flush_uses_precise_ftq_match_when_available():
         "from_valid": 1,
         "data_ready": 1,
         "s1_ready": 1,
-        "s0_flush": 1,
+        "io_flush": 0,
+        # Deliberately violate the checkpoint; Condition coverage must hit.
+        "s0_flush": 0,
         "bpu_valid": 1,
         "bpu_flag": 0,
         "bpu_value": 3,
@@ -825,6 +871,7 @@ def test_mainpipe_bpu_s0_flush_uses_precise_ftq_match_when_available():
         "from_valid": 1,
         "data_ready": 1,
         "s1_ready": 1,
+        "io_flush": 0,
         "s0_flush": 1,
         "bpu_valid": 1,
         "bpu_flag": 0,
@@ -845,6 +892,7 @@ def test_mainpipe_bpu_s0_flush_requires_observable_ftq_pointer_match():
         "from_valid": 1,
         "data_ready": 1,
         "s1_ready": 1,
+        "io_flush": 0,
         "s0_flush": 1,
         "bpu_valid": 1,
     }.items():
@@ -861,6 +909,7 @@ def test_mainpipe_bpu_s0_flush_requires_ftq_valid():
         "from_valid": 1,
         "data_ready": 1,
         "s1_ready": 1,
+        "io_flush": 0,
         "s0_flush": 1,
         "bpu_valid": 1,
         "bpu_flag": 0,
@@ -881,7 +930,9 @@ def test_mainpipe_bpu_s0_miss_requires_ftq_valid_and_precise_relation():
         "from_valid": 1,
         "data_ready": 1,
         "s1_ready": 1,
-        "s0_flush": 0,
+        "io_flush": 0,
+        # Deliberately violate the checkpoint; Condition coverage must hit.
+        "s0_flush": 1,
         "bpu_valid": 1,
         "bpu_flag": 0,
         "bpu_value": 4,
@@ -899,6 +950,7 @@ def test_mainpipe_bpu_s0_miss_requires_ftq_valid_and_precise_relation():
         "from_valid": 1,
         "data_ready": 1,
         "s1_ready": 1,
+        "io_flush": 0,
         "s0_flush": 0,
         "bpu_valid": 1,
         "bpu_flag": 0,
@@ -917,6 +969,7 @@ def test_mainpipe_bpu_s0_miss_requires_ftq_valid_and_precise_relation():
         "from_valid": 1,
         "data_ready": 1,
         "s1_ready": 1,
+        "io_flush": 0,
         "s0_flush": 0,
         "bpu_valid": 1,
     }.items():
@@ -931,6 +984,7 @@ def test_mainpipe_bpu_s0_miss_requires_ftq_valid_and_precise_relation():
         "from_valid": 1,
         "data_ready": 1,
         "s1_ready": 1,
+        "io_flush": 0,
         "s0_flush": 0,
         "bpu_valid": 1,
         "bpu_flag": 0,
@@ -942,6 +996,31 @@ def test_mainpipe_bpu_s0_miss_requires_ftq_valid_and_precise_relation():
 
     sample_icache_mainpipe_coverage(recorder, recorder.env, 9)
     assert not _hit(recorder, "icache_mainpipe_s0_flush", "bpu_miss_allows_entry")
+
+
+def test_mainpipe_bpu_s0_bins_require_global_flush_low():
+    for bin_name, bpu_value in (
+        ("bpu_match_cancels_entry", 3),
+        ("bpu_miss_allows_entry", 4),
+    ):
+        recorder = _Recorder()
+        for key, value in {
+            "ftq_valid": 1,
+            "from_valid": 1,
+            "data_ready": 1,
+            "s1_ready": 1,
+            "io_flush": 1,
+            "bpu_valid": 1,
+            "bpu_flag": 0,
+            "bpu_value": bpu_value,
+            "s0_ftq_flag": 0,
+            "s0_ftq_value": 3,
+        }.items():
+            recorder.set_key(key, value)
+
+        sample_icache_mainpipe_coverage(recorder, recorder.env, 10)
+
+        assert not _hit(recorder, "icache_mainpipe_s0_flush", bin_name)
 
 
 def test_mainpipe_bpu_s1_flush_match_and_miss_use_ftq_pointer():

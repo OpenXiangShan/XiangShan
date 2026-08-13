@@ -516,8 +516,7 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
     prior_refill_match = bool(prev) and _on(prev["miss_resp_valid"]) and any(
         _bits(prev["mshr"])
     )
-    global_s0_flush = _on(s["s0_flush"]) and _off(s["bpu_valid"])
-    bpu_s0_flush = _on(s["s0_flush"]) and _on(s["bpu_valid"])
+    global_s0_flush = _on(s["io_flush"])
     global_s1_flush = _on(s["s1_flush"]) and _off(s["bpu_valid"])
     bpu_s1_flush = _on(s["s1_flush"]) and _on(s["bpu_valid"])
     s0_bpu_match = _bpu_flush_matches_or_before_current(s, "s0")
@@ -613,7 +612,8 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         "icache_mainpipe_s0_flush",
         "global_flush_cancels_entry",
         cycle,
-        _on(s["from_valid"])
+        _on(s["ftq_valid"])
+        and _on(s["from_valid"])
         and global_s0_flush
         and _on(s["data_ready"])
         and _on(s["s1_ready"]),
@@ -626,7 +626,8 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         cycle,
         _on(s["ftq_valid"])
         and _on(s["from_valid"])
-        and bpu_s0_flush
+        and _off(s["io_flush"])
+        and _on(s["bpu_valid"])
         and s0_bpu_match is True
         and _on(s["data_ready"])
         and _on(s["s1_ready"]),
@@ -639,8 +640,8 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         cycle,
         _on(s["ftq_valid"])
         and _on(s["from_valid"])
+        and _off(s["io_flush"])
         and _on(s["bpu_valid"])
-        and _off(s["s0_flush"])
         and s0_bpu_miss is True
         and _on(s["data_ready"])
         and _on(s["s1_ready"]),
