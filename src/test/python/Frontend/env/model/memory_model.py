@@ -26,6 +26,7 @@ class PTE:
     g: int = 0
     a: int = 1
     d: int = 0
+    n: int = 0
     level: int = 0
     asid: int = 0
     vmid: int = 0

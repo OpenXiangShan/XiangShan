@@ -3,6 +3,13 @@ from .program_sequences import LoadProgramFileSequence, LoadProgramSequence
 from .redirect_sequences import CheckPcSequence, InjectRedirectSequence
 from .reset_sequences import InitializeFrontendSequence, ResetFrontendSequence
 from .trace_sequences import LoadGoldenTraceSequence, RunUntilCommitSequence, RunUntilGoldenTraceCompleteSequence
+from .translation_scenarios import (
+    TranslationPmpPmaEntry,
+    TranslationPte,
+    TranslationScenario,
+    TranslationScenarioBuilder,
+    TranslationScenarioState,
+)
 
 __all__ = [
     "CheckPcSequence",
@@ -15,4 +22,9 @@ __all__ = [
     "ResetFrontendSequence",
     "RunUntilCommitSequence",
     "RunUntilGoldenTraceCompleteSequence",
+    "TranslationPmpPmaEntry",
+    "TranslationPte",
+    "TranslationScenario",
+    "TranslationScenarioBuilder",
+    "TranslationScenarioState",
 ]
