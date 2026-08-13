@@ -226,10 +226,10 @@ trait HasDCacheParameters
 
   // dbp
   val l1dbpEnabled = cacheParams.l1DBPParams.nonEmpty
-  val l1dbpcounterMax = l1dbpParams.counterMax
   val l1dbpPcIndexWidth = log2Ceil(l1dbpParams.pcPredictorEntries)
   val l1dbpSampleBits = l1dbpParams.sampleBits
   val l1dbpNumSampleSets = nSets >> l1dbpParams.sampleBits
+  val l1dbpPcPredictorEntries = l1dbpParams.pcPredictorEntries
 
   def set_to_dcache_div(set: UInt) = {
     require(set.getWidth >= DCacheSetBits)

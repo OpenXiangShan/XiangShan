@@ -16,29 +16,14 @@ import xiangshan.mem.HasL1PrefetchSourceParameter
 case class L1DBPParams(
   sampleBits: Int = 2,
   pcPredictorEntries: Int = 8192,
-  accessedIncrement: Int = 1,
   bypassHoldCycles: Int = 4,
-  counterWidth: Int = 2,
   pcHash: (UInt, Int) => UInt = (pc, width) => XORFold(pc >> 1, width)
 ) {
   require(sampleBits >= 1, "L1DBP sampleBits must be positive")
   require(pcPredictorEntries >= 2 && isPow2(pcPredictorEntries),
     "L1DBP PC predictor entries must be a power of two and at least two")
-  require(counterWidth >= 1, "L1DBP counter width must be positive")
-  val counterMax = (1 << counterWidth) - 1
-  require(accessedIncrement >= 1 && accessedIncrement <= counterMax,
-    s"L1DBP accessed counter increment must be in [1, $counterMax]")
   require(bypassHoldCycles >= 1 && bypassHoldCycles <= 16,
     "L1DBP bypass hold cycles must be in [1, 16]")
-  require(pcPredictorEntries >= 2 && isPow2(pcPredictorEntries),
-    "L1DBP PC predictor entries must be a power of two and at least two")
-  require(accessedIncrement >= 1 && accessedIncrement <= counterMax,
-    s"L1DBP accessed counter increment must be in [1, $counterMax]")
-  require(bypassHoldCycles >= 1 && bypassHoldCycles <= 16,
-    "L1DBP bypass hold cycles must be in [1, 16]")
-  require(counterWidth >= 1,
-    "L1DBP counter width must be positive")
-
 }
 
 object L1DBPOrigin {
@@ -48,7 +33,89 @@ object L1DBPOrigin {
   val stride = 2.U(width.W)
 }
 
-class L1DBP(readPorts: Int, writePorts: Int, enableBypass: Boolean = false)(implicit p: Parameters)
-  extends DCacheModule {
+class L1DBPRead(implicit p: Parameters) extends DCacheBundle {
+  val idx = UInt(l1dbpPcIndexWidth.W)
 
+  def pfIdx = idx(0).asUInt
+}
+
+class L1DBPResp(implicit p: Parameters) extends DCacheBundle {
+  val dead = Bool()
+}
+
+class L1DBPUpdate(implicit p: Parameters) extends DCacheBundle {
+  val origin = UInt(L1DBPOrigin.width.W)
+  val idx = UInt(l1dbpPcIndexWidth.W)
+  val accessed = Bool()
+
+  def pfIdx = idx(0).asUInt
+}
+
+class L1DBP(implicit p: Parameters) extends DCacheModule {
+  val io = IO(new Bundle {
+    val demandQuery = Flipped(Vec(LduCnt, ValidIO(new L1DBPRead)))
+    val demandResp = Output(Vec(LduCnt, ValidIO(new L1DBPResp)))
+    val pftQuery = Flipped(Vec(1, ValidIO(new L1DBPRead)))
+    val pftResp = Output(Vec(1, ValidIO(new L1DBPResp)))
+    val update = Flipped(ValidIO(new L1DBPUpdate))
+  })
+
+  def scUpdate(state: UInt, accessed: Bool): UInt = {
+    val accessedUpdate = Mux(state === 3.U, 3.U, state + 1.U)
+    val notAccessedUpdate = Mux(state(1) === 0.U, 0.U, state - 2.U)
+    Mux(accessed, accessedUpdate, notAccessedUpdate)
+  }
+
+  val s1Upd = WireInit(0.U.asTypeOf(io.update))
+  s1Upd.valid := RegNext(io.update.valid, false.B)
+  s1Upd.bits := RegEnable(io.update.bits, io.update.valid)
+
+  val pcSCArray = RegInit(VecInit(Seq.fill(l1dbpPcPredictorEntries)(0.U(2.W))))
+  val pfSCArray = RegInit(VecInit(Seq.fill(2)(0.U(2.W))))
+
+  io.demandQuery.zip(io.demandResp).foreach { case (query, resp) =>
+    val s1Query = WireInit(0.U.asTypeOf(Valid(new L1DBPRead)))
+    s1Query.valid := RegNext(query.valid, false.B)
+    s1Query.bits := RegEnable(query.bits, query.valid)
+    val s0BypassEn = io.update.valid && io.update.bits.idx === s1Query.bits.idx &&
+      io.update.bits.origin === L1DBPOrigin.demand
+    val s1BypassEn = s1Upd.valid && s1Upd.bits.idx === s1Query.bits.idx &&
+      s1Upd.bits.origin === L1DBPOrigin.demand
+    val s1PCArrayRead = pcSCArray(s1Query.bits.idx)
+    val bypassByS1 = Mux(s1BypassEn, scUpdate(s1PCArrayRead, s1Upd.bits.accessed), s1PCArrayRead)
+    val bypassByS0 = Mux(s0BypassEn, scUpdate(bypassByS1, io.update.bits.accessed), bypassByS1)
+    resp.valid := s1Query.valid
+    resp.bits.dead := bypassByS0 === 0.U
+  }
+
+  io.pftQuery.zip(io.pftResp).foreach { case (query, resp) =>
+    val s1Query = WireInit(0.U.asTypeOf(Valid(new L1DBPRead)))
+    s1Query.valid := RegNext(query.valid, false.B)
+    s1Query.bits := RegEnable(query.bits, query.valid)
+    val s0BypassEn = io.update.valid && io.update.bits.pfIdx === s1Query.bits.pfIdx &&
+      io.update.bits.origin =/= L1DBPOrigin.demand
+    val s1BypassEn = s1Upd.valid && s1Upd.bits.pfIdx === s1Query.bits.pfIdx &&
+      s1Upd.bits.origin =/= L1DBPOrigin.demand
+    val s1PfArrayRead = pfSCArray(s1Query.bits.pfIdx)
+    val bypassByS1 = Mux(s1BypassEn, scUpdate(s1PfArrayRead, s1Upd.bits.accessed), s1PfArrayRead)
+    val bypassByS0 = Mux(s0BypassEn, scUpdate(bypassByS1, io.update.bits.accessed), bypassByS1)
+    resp.valid := s1Query.valid
+    resp.bits.dead := bypassByS0 === 0.U
+  }
+
+  val pcWen = s1Upd.valid && s1Upd.bits.origin === L1DBPOrigin.demand
+  val pcWOH = UIntToOH(s1Upd.bits.idx, l1dbpPcPredictorEntries)
+  (0 until l1dbpPcPredictorEntries).foreach { i =>
+    when(pcWen && pcWOH(i)) {
+      pcSCArray(i) := scUpdate(pcSCArray(i), s1Upd.bits.accessed)
+    }
+  }
+
+  val pfWen = s1Upd.valid && s1Upd.bits.origin =/= L1DBPOrigin.demand
+  val pfWOH = UIntToOH(s1Upd.bits.pfIdx, 2)
+  (0 until 2).foreach { i =>
+    when(pfWen && pfWOH(i)) {
+      pfSCArray(i) := scUpdate(pfSCArray(i), s1Upd.bits.accessed)
+    }
+  }
 }
