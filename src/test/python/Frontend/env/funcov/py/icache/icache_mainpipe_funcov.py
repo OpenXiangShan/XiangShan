@@ -159,6 +159,11 @@ _SIGNALS = {
     "miss_resp_paddr": (_MAIN + "__Vtogcov__io_missResp_bits_blkPAddr",),
     "miss_resp_corrupt": (_MAIN + "__Vtogcov__io_missResp_bits_corrupt",),
     "miss_resp_denied": (_MAIN + "__Vtogcov__io_missResp_bits_denied",),
+    "mshr_reg": tuple(
+        _MAIN + f"s1_mshrValidReg_{req}_{line}"
+        for req in range(2)
+        for line in range(2)
+    ),
     "pmp_instr": (_MAIN + "io_pmp_resp_instr",),
     "pmp_mmio": (_MAIN + "io_pmp_resp_mmio",),
     "itlb_exception": (
@@ -272,6 +277,42 @@ def _bits(values: Iterable[Optional[int]]) -> tuple[int, ...]:
     return tuple(int(value or 0) for value in values)
 
 
+def _pure_cache_hit(
+    s: dict[str, Any],
+    hits: tuple[Optional[int], ...],
+    mshr_reg: tuple[Optional[int], ...],
+) -> bool:
+    """Return true only when every valid fetch line is a non-refill hit."""
+    if not _on(s["s1_valid"]) or not _off(s["s1_flush"]):
+        return False
+    if _on(s["pmp_mmio"]) or _on(s["is_mmio"]):
+        return False
+    if _on(s["itlb_exception"]) or _on(s["exception"]):
+        return False
+    if not _known((s["cross0"], s["cross1"], s["req1_valid"])):
+        return False
+    if not _known(hits) or not _known(mshr_reg):
+        return False
+
+    # MainPipe has one mandatory line for request 0; the remaining lines are
+    # present only for cross-line/request-1 fetches.
+    valid_lines = [True, _on(s["cross0"]), _on(s["req1_valid"]),
+                   _on(s["req1_valid"]) and _on(s["cross1"])]
+    hit_bits = _bits(hits)
+    mshr_reg_bits = _bits(mshr_reg)
+    return all(not valid_lines[index] or hit_bits[index] for index in range(4)) and not any(
+        mshr_reg_bits[index] for index in range(4)
+    )
+
+
+def _last_pending_refill(should: tuple[int, ...], mshr: tuple[int, ...]) -> int | None:
+    pending = [index for index, value in enumerate(should) if value]
+    matches = [index for index in pending if mshr[index]]
+    if len(pending) == 1 and len(matches) == 1:
+        return matches[0]
+    return None
+
+
 def _s1_bank_sram_names(req: int, bank: int) -> tuple[str, ...]:
     if bank < _DATA_BANKS - 1:
         return (_MAIN + f"s1_bankSramValid_{req}_{bank}",)
@@ -338,6 +379,8 @@ def reset_icache_mainpipe_coverage_state(recorder) -> None:
         "s2_bpu_only_seen": False,
         "ftq_waylookup_skew_pending": False,
         "ftq_waylookup_join_pending": False,
+        "refill_completion_pending": None,
+        "hit_stall_active": False,
     }
 
 
@@ -468,6 +511,14 @@ def _snapshot(recorder) -> dict[str, Any]:
                     for line in range(2)
                 ),
             ),
+            "mshr_reg": _read_names(
+                recorder,
+                tuple(
+                    _MAIN + f"s1_mshrValidReg_{req}_{line}"
+                    for req in range(2)
+                    for line in range(2)
+                ),
+            ),
         }
     )
     return scalar
@@ -485,6 +536,7 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
     should = _bits(s["should"])
     hits = _bits(s["hits"])
     mshr = _bits(s["mshr"])
+    mshr_reg = _bits(s["mshr_reg"])
     has_send = _bits(s["has_send"])
     corrupt = _bits(s["s2_corrupt"])
     local_ecc_enable = (
@@ -506,6 +558,7 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
             "should_fetch": should,
             "hits": hits,
             "mshr_valid": mshr,
+            "mshr_valid_reg": mshr_reg,
             "has_send": has_send,
             "s2_corrupt": corrupt,
         }
@@ -513,6 +566,21 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
 
     pending_miss = _on(s["s1_valid"]) and any(should)
     refill_match = _on(s["miss_resp_valid"]) and any(mshr)
+    pure_cache_hit = _pure_cache_hit(s, hits, mshr_reg)
+    last_pending_line = (
+        _last_pending_refill(should, mshr)
+        if (
+            _on(s["s1_valid"])
+            and _off(s["s1_flush"])
+            and _on(s["miss_resp_valid"])
+            and _off(s["toifu_valid"])
+            and not _on(s["pmp_mmio"])
+            and not _on(s["is_mmio"])
+            and not _on(s["itlb_exception"])
+            and not _on(s["exception"])
+        )
+        else None
+    )
     prior_refill_match = bool(prev) and _on(prev["miss_resp_valid"]) and any(
         _bits(prev["mshr"])
     )
@@ -746,27 +814,55 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         evidence,
     )
 
+    hit_stall = (
+        pure_cache_hit
+        and _on(s["toifu_valid"])
+        and _off(s["toifu_ready"])
+    )
+    hit_stall_start = hit_stall and not state["hit_stall_active"]
+    if hit_stall and state["refill_completion_pending"] is None:
+        state["hit_stall_active"] = True
+    elif not hit_stall:
+        state["hit_stall_active"] = False
+
     _mark(
         recorder,
         "icache_mainpipe_s1_backpressure",
         "hit_response_stall",
         cycle,
-        _on(s["s1_valid"])
-        and _on(s["fetch_finish"])
-        and _off(s["toifu_ready"])
-        and _off(s["s1_flush"]),
+        hit_stall_start,
         evidence,
+    )
+
+    if last_pending_line is not None:
+        state["refill_completion_pending"] = {
+            "line": last_pending_line,
+            "cycle": cycle,
+        }
+    refill_pending = state["refill_completion_pending"]
+    refill_completion_stall = (
+        refill_pending is not None
+        and cycle == refill_pending["cycle"] + 1
+        and _on(s["s1_valid"])
+        and _off(s["s1_flush"])
+        and _on(s["fetch_finish"])
+        and _on(s["toifu_valid"])
+        and _off(s["toifu_ready"])
+        and mshr_reg[refill_pending["line"]] == 1
     )
     _mark(
         recorder,
         "icache_mainpipe_s1_backpressure",
         "refill_completion_stall",
         cycle,
-        refill_match
-        and _off(s["toifu_ready"])
-        and _off(s["s1_flush"]),
+        refill_completion_stall,
         evidence,
     )
+    if refill_completion_stall or (
+        refill_pending is not None
+        and (_on(s["s1_flush"]) or not _on(s["s1_valid"]))
+    ):
+        state["refill_completion_pending"] = None
     _mark(
         recorder,
         "icache_mainpipe_s1_backpressure",
