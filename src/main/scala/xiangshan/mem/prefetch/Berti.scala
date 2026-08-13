@@ -61,6 +61,10 @@ trait HasBertiHelper extends HasCircularQueuePtrHelper with HasDCacheParameters 
   def HtLineOffsetWidth: Int = DCacheLineOffset
   def DtPcTagWidth: Int = 10
   def DtCntWidth: Int = 4
+  // Width of the global timestamp (currTime and tsp). Wide enough that the elapsed
+  // distance (currTime - tsp) never exceeds 2^TimestampWidth in practice, avoiding
+  // aliasing from a double counter wrap. (latency keeps LATENCY_WIDTH bits.)
+  def TimestampWidth: Int = 32
 
   def useByteAddr: Boolean = bertiParams.use_byte_addr
   def usePLRU: Boolean = bertiParams.ht_replacement_policy == "plru"
@@ -169,7 +173,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   class Entry()(implicit p: Parameters) extends BertiBundle {
     val pcTag = UInt(HtPcTagWidth.W)
     val baseVAddr = UInt(HtLineVAddrWidth.W)
-    val tsp = UInt(LATENCY_WIDTH.W)
+    val tsp = UInt(TimestampWidth.W)
 
     def alloc(_pcTag: UInt, _baseVAddr: UInt, _tsp: UInt): Unit = {
       pcTag := _pcTag
@@ -201,7 +205,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   val entries = Reg(Vec(HtSetSize, Vec(HtWaySize, new Entry)))
   val valids = RegInit(0.U.asTypeOf(Vec(HtSetSize, Vec(HtWaySize, Bool()))))
   val decrModes = RegInit(0.U.asTypeOf(Vec(HtSetSize, Bool())))
-  val currTime = GTimer()
+  val currTime = GTimer()(TimestampWidth - 1, 0)
   // PLRU: replace record
   val replacer = Option.when(usePLRU)(ReplacementPolicy.fromString("setplru", HtWaySize, HtSetSize))
   // FIFO: for FIFO replace policy
@@ -266,8 +270,8 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     when(matchVec.orR){
       val hitWay = OHToUInt(matchVec)
       val pair = getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(hitWay).baseVAddr)
-      stat_find_delta := latency =/= 0.U && (currTime - latency > entries(set)(hitWay).tsp)
-      res.valid := latency =/= 0.U && (currTime - latency > entries(set)(hitWay).tsp) && pair._1
+      stat_find_delta := latency =/= 0.U && (currTime - entries(set)(hitWay).tsp > latency)
+      res.valid := latency =/= 0.U && (currTime - entries(set)(hitWay).tsp > latency) && pair._1
       res.pc := pc
       res.delta := pair._2
       replacer.get.access(set, hitWay)
@@ -312,7 +316,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     val tag = getTag(pc)
     val way = learnPtrs.get(set).value
     val pair = getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(way).baseVAddr)
-    stat_find_delta := valids(set)(way) && latency =/= 0.U && tag === entries(set)(way).pcTag && (currTime - latency > entries(set)(way).tsp)
+    stat_find_delta := valids(set)(way) && latency =/= 0.U && tag === entries(set)(way).pcTag && (currTime - entries(set)(way).tsp > latency)
     res.pc := pc
     res.valid := stat_find_delta && pair._1
     when (decrModes(set) ^ pair._2(pair._2.getWidth-1)){
