@@ -33,6 +33,15 @@ function memblock_main_dispatch_auto_build_main_table_base_sequence::new(string 
 endfunction:new
 
 task memblock_main_dispatch_auto_build_main_table_base_sequence::body();
+    memblock_sync_pkg::memblock_control_worker_topology_mode_e topology_mode;
+
+    topology_mode = memblock_sync_pkg::get_control_worker_topology_mode();
+    if (topology_mode != memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_DISABLED &&
+        topology_mode != memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_AUTO_MAIN_TABLE) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("generic auto main sequence is incompatible with topology mode=%0d",
+                             topology_mode))
+    end
     build_main_table();
     `uvm_info(get_type_name(),
               $sformatf("real dispatch smoke main table ready: main_trans_num=%0d",

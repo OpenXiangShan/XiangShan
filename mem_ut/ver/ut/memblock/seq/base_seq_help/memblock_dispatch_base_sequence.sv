@@ -10,6 +10,14 @@
 
 class memblock_dispatch_base_sequence extends uvm_sequence;
 
+    // 中文注释：AUTO 建表期的 CSR/SFence 预约状态。next_uid 只在 [0,N) 有效；
+    // 越过 N 的候选直接丢弃，绝不挤占末尾 check_store 保留位。
+    typedef struct {
+        bit               enabled;
+        bit               target_valid;
+        longint unsigned  next_uid;
+    } memblock_control_reservation_plan_t;
+
     common_data_transaction data;
     lsq_ctrl_model          lsq_ctrl;
     issue_queue_scheduler   issue_sched;
@@ -31,6 +39,7 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
     extern virtual task post_body();
     extern virtual task build_main_table();
     extern virtual task build_random_main_table(input int unsigned main_trans_num_i);
+    extern virtual task build_control_auto_main_table(input int unsigned normal_main_trans_num);
     extern virtual task import_manual_main_table();
     extern virtual task route_all_issue_queues();
     extern virtual function void collect_csr_runtime_events();
@@ -43,6 +52,25 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
     extern virtual function void randomize_main_transaction(input main_control_transaction tr,
                                                             input memblock_uid_t uid,
                                                             input memblock_rob_key_t rob_key);
+    extern virtual function void reschedule_control_reservation(
+        ref memblock_control_reservation_plan_t plan,
+        input longint unsigned base_uid,
+        input int min_interval,
+        input int max_interval,
+        input int unsigned normal_main_trans_num);
+    extern virtual function main_control_transaction make_control_main_transaction(
+        input string tr_name,
+        input memblock_uid_t uid,
+        input memblock_op_class_e op_class,
+        input memblock_rob_key_t rob_key);
+    extern virtual function void validate_control_main_table_entry(
+        input main_control_transaction tr,
+        input string caller);
+    extern virtual function void check_main_table_control_policy(
+        input string caller);
+    extern virtual function void check_control_auto_main_table_structure(
+        input int unsigned normal_main_trans_num,
+        input string caller);
     extern virtual function memblock_op_class_e select_op_class_by_weight();
     extern virtual function void apply_minimal_op_template(input main_control_transaction tr);
     extern virtual function void apply_legal_addr_template(input main_control_transaction tr);
@@ -218,15 +246,42 @@ task memblock_dispatch_base_sequence::post_body();
 endtask:post_body
 
 task memblock_dispatch_base_sequence::build_main_table();
+    memblock_sync_pkg::memblock_control_worker_topology_mode_e topology_mode;
+
     if (data == null) begin
         data = common_data_transaction::get();
     end
 
-    if (seq_csr_common::get_use_manual_main_table()) begin
-        import_manual_main_table();
-    end else begin
-        build_random_main_table(seq_csr_common::get_main_trans_num());
-    end
+    topology_mode = memblock_sync_pkg::get_control_worker_topology_mode();
+    case (topology_mode)
+        memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_DISABLED: begin
+            // 中文注释：DISABLED 保持旧 generic random/manual plus 语义；控制分类在建表后
+            // 统一拒绝，避免没有 worker 的表项进入运行期。
+            if (seq_csr_common::get_use_manual_main_table()) begin
+                import_manual_main_table();
+            end else begin
+                build_random_main_table(seq_csr_common::get_main_trans_num());
+            end
+            check_main_table_control_policy("build_main_table.DISABLED");
+        end
+        memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_AUTO_MAIN_TABLE: begin
+            if (seq_csr_common::get_use_manual_main_table()) begin
+                `uvm_fatal(get_type_name(),
+                           "AUTO_MAIN_TABLE requires MEMBLOCK_USE_MANUAL_MAIN_TABLE=0")
+            end
+            build_control_auto_main_table(seq_csr_common::get_main_trans_num());
+        end
+        memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_MANUAL_MAIN_TABLE,
+        memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_MANUAL_CONTROL_TABLE: begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("generic build_main_table is incompatible with control topology mode=%0d",
+                                 topology_mode))
+        end
+        default: begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("unsupported frozen control topology mode=%0d", topology_mode))
+        end
+    endcase
 endtask:build_main_table
 
 task memblock_dispatch_base_sequence::build_random_main_table(input int unsigned main_trans_num_i);
@@ -270,6 +325,139 @@ task memblock_dispatch_base_sequence::build_random_main_table(input int unsigned
     init_status_for_main_table();
     data.check_main_table_complete();
 endtask:build_random_main_table
+
+// 抽象职责：AUTO 模式只构造固定 N+1 主表。UID [0,N) 保持原随机访存构造，
+// 但可被 CSR/SFence 预约替换；UID N 无条件为 check_store，且所有 UID 使用连续 ROB key。
+task memblock_dispatch_base_sequence::build_control_auto_main_table(
+    input int unsigned normal_main_trans_num
+);
+    memblock_control_reservation_plan_t csr_plan;
+    memblock_control_reservation_plan_t sfence_plan;
+    memblock_rob_key_t rob_key;
+    memblock_uid_t recent_load_uid_q[$];
+    memblock_uid_t recent_store_uid_q[$];
+    int unsigned addr_ref_window;
+    int unsigned total_main_trans_num;
+
+    if (normal_main_trans_num == 0) begin
+        `uvm_fatal(get_type_name(), "AUTO control main table requires MEMBLOCK_MAIN_TRANS_NUM>0")
+    end
+    total_main_trans_num = normal_main_trans_num + 1;
+    if (total_main_trans_num <= normal_main_trans_num) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("AUTO control main table length overflow N=%0d", normal_main_trans_num))
+    end
+    if (data == null) begin
+        data = common_data_transaction::get();
+    end
+
+    data.reset_all_tables(total_main_trans_num);
+    csr_plan = '{default:'0};
+    sfence_plan = '{default:'0};
+    csr_plan.enabled = seq_csr_common::get_csr_control_enable();
+    sfence_plan.enabled = seq_csr_common::get_sfence_control_enable();
+    if (csr_plan.enabled) begin
+        reschedule_control_reservation(csr_plan,
+                                       0,
+                                       seq_csr_common::get_csr_control_min_interval(),
+                                       seq_csr_common::get_csr_control_max_interval(),
+                                       normal_main_trans_num);
+    end
+    if (sfence_plan.enabled) begin
+        reschedule_control_reservation(sfence_plan,
+                                       0,
+                                       seq_csr_common::get_sfence_control_min_interval(),
+                                       seq_csr_common::get_sfence_control_max_interval(),
+                                       normal_main_trans_num);
+    end
+
+    rob_key = choose_rob_start_key();
+    addr_ref_window = choose_addr_ref_window();
+    if (seq_csr_common::get_boundary_profile_gen_en()) begin
+        build_boundary_candidate_cache();
+    end else begin
+        boundary_candidate_cache_built = 1'b0;
+        boundary_profile_cache.delete();
+    end
+
+    for (int unsigned idx = 0; idx < normal_main_trans_num; idx++) begin
+        memblock_uid_t uid;
+        main_control_transaction tr;
+        bit csr_hit;
+        bit sfence_hit;
+
+        uid = data.alloc_uid();
+        csr_hit = csr_plan.target_valid && csr_plan.next_uid == uid;
+        sfence_hit = sfence_plan.target_valid && sfence_plan.next_uid == uid;
+        if (csr_hit) begin
+            tr = make_control_main_transaction($sformatf("csr_control_uid_%0d", uid),
+                                               uid,
+                                               MEMBLOCK_OP_CLASS_CSR_CONTROL,
+                                               rob_key);
+            // 中文注释：同位命中时 CSR 优先；SFence 的本次目标视为已消费并以相同
+            // base UID 重新预约，不能遗留到下一 slot。
+            reschedule_control_reservation(csr_plan,
+                                           uid,
+                                           seq_csr_common::get_csr_control_min_interval(),
+                                           seq_csr_common::get_csr_control_max_interval(),
+                                           normal_main_trans_num);
+            if (sfence_hit) begin
+                reschedule_control_reservation(sfence_plan,
+                                               uid,
+                                               seq_csr_common::get_sfence_control_min_interval(),
+                                               seq_csr_common::get_sfence_control_max_interval(),
+                                               normal_main_trans_num);
+            end
+        end else if (sfence_hit) begin
+            tr = make_control_main_transaction($sformatf("sfence_control_uid_%0d", uid),
+                                               uid,
+                                               MEMBLOCK_OP_CLASS_SFENCE_CONTROL,
+                                               rob_key);
+            reschedule_control_reservation(sfence_plan,
+                                           uid,
+                                           seq_csr_common::get_sfence_control_min_interval(),
+                                           seq_csr_common::get_sfence_control_max_interval(),
+                                           normal_main_trans_num);
+        end else begin
+            tr = main_control_transaction::type_id::create($sformatf("main_uid_%0d", uid));
+            randomize_main_transaction(tr, uid, rob_key);
+            prune_recent_uid_q(recent_load_uid_q, uid, addr_ref_window);
+            prune_recent_uid_q(recent_store_uid_q, uid, addr_ref_window);
+            apply_addr_reuse_window(tr, uid, recent_load_uid_q, recent_store_uid_q);
+            if (seq_csr_common::get_boundary_profile_gen_en()) begin
+                sync_boundary_profile_after_addr_reuse(
+                    tr, $sformatf("AUTO control uid=%0d boundary after addr reuse", uid));
+            end
+            push_recent_uid(tr, uid, recent_load_uid_q, recent_store_uid_q);
+        end
+        data.set_main_transaction(uid, tr);
+        rob_key = rob_order_util::rob_advance(rob_key, 1);
+    end
+
+    begin
+        memblock_uid_t check_store_uid;
+        main_control_transaction check_store_tr;
+
+        check_store_uid = data.alloc_uid();
+        if (check_store_uid != normal_main_trans_num) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("AUTO check_store UID mismatch expected=%0d actual=%0d",
+                                 normal_main_trans_num, check_store_uid))
+        end
+        check_store_tr = make_control_main_transaction(
+            $sformatf("check_store_uid_%0d", check_store_uid),
+            check_store_uid,
+            MEMBLOCK_OP_CLASS_CHECK_STORE,
+            rob_key);
+        data.set_main_transaction(check_store_uid, check_store_tr);
+    end
+
+    init_status_for_main_table();
+    data.check_main_table_complete();
+    check_main_table_control_policy("build_control_auto_main_table");
+    check_control_auto_main_table_structure(normal_main_trans_num,
+                                            "build_control_auto_main_table");
+endtask:build_control_auto_main_table
 
 task memblock_dispatch_base_sequence::import_manual_main_table();
     int unsigned manual_num;
@@ -450,6 +638,86 @@ function void memblock_dispatch_base_sequence::randomize_main_transaction(input 
     tr.update_vaddr();
     validate_main_table_entry(tr, $sformatf("random uid=%0d", uid));
 endfunction:randomize_main_transaction
+
+// 抽象职责：从本次命中 UID 重新采样 CSR/SFence 的下一预约目标。目标不在普通区间时
+// 立即清为无效，保证永远不会截断、扩表或落入末尾 check_store。
+function void memblock_dispatch_base_sequence::reschedule_control_reservation(
+    ref memblock_control_reservation_plan_t plan,
+    input longint unsigned base_uid,
+    input int min_interval,
+    input int max_interval,
+    input int unsigned normal_main_trans_num
+);
+    int unsigned interval;
+    longint unsigned candidate_uid;
+
+    plan.target_valid = 1'b0;
+    plan.next_uid = 0;
+    if (!plan.enabled) begin
+        return;
+    end
+    if (min_interval < 1 || max_interval < min_interval) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("control reservation interval invalid min=%0d max=%0d",
+                             min_interval, max_interval))
+    end
+    interval = $urandom_range(max_interval, min_interval);
+    candidate_uid = base_uid + interval;
+    if (candidate_uid < base_uid || candidate_uid >= normal_main_trans_num) begin
+        return;
+    end
+    plan.next_uid = candidate_uid;
+    plan.target_valid = 1'b1;
+endfunction:reschedule_control_reservation
+
+// 抽象职责：创建一个只携带 UID/ROB 与控制分类的主表条目；不调用普通地址、LSQ、
+// fuType/fuOpType 或地址复用逻辑，保证后续 admission 可以在普通 flow 前分流。
+function main_control_transaction memblock_dispatch_base_sequence::make_control_main_transaction(
+    input string tr_name,
+    input memblock_uid_t uid,
+    input memblock_op_class_e op_class,
+    input memblock_rob_key_t rob_key
+);
+    main_control_transaction tr;
+
+    if (!is_control_op_class(op_class)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("make_control_main_transaction got non-control op_class=%0d", op_class))
+    end
+    tr = main_control_transaction::type_id::create(tr_name);
+    if (tr == null) begin
+        `uvm_fatal(get_type_name(), $sformatf("failed to create control transaction %0s", tr_name))
+    end
+    tr.uid = uid;
+    tr.op_class = op_class;
+    tr.boundary_profile = MEMBLOCK_BOUNDARY_PROFILE_UNKNOWN;
+    tr.boundary_size_bytes = 0;
+    tr.lsq_flow = MEMBLOCK_LSQ_FLOW_NONE;
+    tr.fuType = '0;
+    tr.fuOpType = '0;
+    tr.src_0 = '0;
+    tr.imm = '0;
+    tr.vaddr = '0;
+    tr.robIdx_flag = rob_key.flag;
+    tr.robIdx_value = rob_key.value;
+    tr.lqIdx_flag = 1'b0;
+    tr.lqIdx_value = '0;
+    tr.sqIdx_flag = 1'b0;
+    tr.sqIdx_value = '0;
+    tr.numLsElem = memblock_num_ls_elem_t'(0);
+    tr.tlbAF = 1'b0;
+    tr.tlbPF = 1'b0;
+    tr.tlbGPF = 1'b0;
+    tr.PBMT = '0;
+    tr.pmaAF = 1'b0;
+    tr.corrupt = 1'b0;
+    tr.denied = 1'b0;
+    tr.delay = 0;
+    tr.send_pri = 0;
+    tr.send_pri_std = 0;
+    validate_control_main_table_entry(tr, "make_control_main_transaction");
+    return tr;
+endfunction:make_control_main_transaction
 
 function memblock_op_class_e memblock_dispatch_base_sequence::select_op_class_by_weight();
     int unsigned sel;
@@ -2106,7 +2374,17 @@ function void memblock_dispatch_base_sequence::init_status_for_main_table();
         `uvm_fatal(get_type_name(), "init_status_for_main_table called before main table build")
     end
     for (int unsigned uid = 0; uid < data.main_trans_num; uid++) begin
-        void'(data.init_status_for_uid(uid));
+        status_transaction status;
+        main_control_transaction tr;
+
+        status = data.init_status_for_uid(uid);
+        tr = data.get_main_transaction(uid);
+        if (is_control_op_class(tr.op_class)) begin
+            // 中文注释：状态表在建表期保存静态控制种类和同一 ROB key；运行期状态仍保持
+            // NONE，直到 control admission 建立 WAIT_OLDER_ROB_COMMIT 屏障。
+            status.control_kind = control_kind_from_op_class(tr.op_class);
+            status.control_state = MEMBLOCK_CONTROL_STATE_NONE;
+        end
     end
 endfunction:init_status_for_main_table
 
@@ -2114,6 +2392,10 @@ function void memblock_dispatch_base_sequence::validate_main_table_entry(input m
                                                                          input string caller);
     if (tr == null) begin
         `uvm_fatal(get_type_name(), $sformatf("%s got null transaction", caller))
+    end
+    if (is_control_op_class(tr.op_class)) begin
+        validate_control_main_table_entry(tr, caller);
+        return;
     end
     if (tr.op_class == MEMBLOCK_OP_CLASS_AMO ||
         tr.fuType == MEMBLOCK_FUTYPE_MOU ||
@@ -2187,5 +2469,124 @@ function void memblock_dispatch_base_sequence::validate_main_table_entry(input m
         end
     endcase
 endfunction:validate_main_table_entry
+
+// 抽象职责：只校验控制主表条目的静态中性结构。它不推导普通访存 behavior，也不检查
+// 地址、边界或 LSQ 语义，避免未来控制扩展意外触发普通 fuType/LSQ 约束。
+function void memblock_dispatch_base_sequence::validate_control_main_table_entry(
+    input main_control_transaction tr,
+    input string caller
+);
+    if (tr == null || !is_control_op_class(tr.op_class)) begin
+        `uvm_fatal(get_type_name(), $sformatf("%0s got invalid control transaction", caller))
+    end
+    if (!tr.validate_main_transaction()) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%0s control uid=%0d has inconsistent neutral address fields",
+                             caller, tr.uid))
+    end
+    if (tr.robIdx_value >= MEMBLOCK_ROB_SIZE) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%0s control uid=%0d ROB value=%0d exceeds size=%0d",
+                             caller, tr.uid, tr.robIdx_value, MEMBLOCK_ROB_SIZE))
+    end
+    if (tr.lsq_flow != MEMBLOCK_LSQ_FLOW_NONE || tr.numLsElem != 0 ||
+        tr.lqIdx_flag || tr.lqIdx_value != '0 || tr.sqIdx_flag || tr.sqIdx_value != '0 ||
+        tr.fuType != '0 || tr.fuOpType != '0 || tr.src_0 != '0 || tr.imm != '0 || tr.vaddr != '0 ||
+        tr.boundary_profile != MEMBLOCK_BOUNDARY_PROFILE_UNKNOWN ||
+        tr.boundary_size_bytes != 0 || tr.delay != 0 || tr.send_pri != 0 || tr.send_pri_std != 0 ||
+        tr.tlbAF || tr.tlbPF || tr.tlbGPF || tr.PBMT != '0 || tr.pmaAF || tr.corrupt || tr.denied) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%0s control uid=%0d must not carry ordinary LSQ/address payload",
+                             caller, tr.uid))
+    end
+endfunction:validate_control_main_table_entry
+
+// 抽象职责：根据已经冻结的 topology 检查已完成主表是否允许控制分类；该 helper 不改变表、
+// UID 或 ROB，只在 builder 返回边界 fail-fast，避免错误拓扑把控制项送入 legacy runtime。
+function void memblock_dispatch_base_sequence::check_main_table_control_policy(
+    input string caller
+);
+    memblock_sync_pkg::memblock_control_worker_topology_mode_e topology_mode;
+    int unsigned control_count;
+
+    if (data == null || !data.main_table_ready) begin
+        `uvm_fatal(get_type_name(), $sformatf("%0s requires a completed main table", caller))
+    end
+    topology_mode = memblock_sync_pkg::get_control_worker_topology_mode();
+    control_count = 0;
+    for (int unsigned uid = 0; uid < data.main_trans_num; uid++) begin
+        if (is_control_op_class(data.get_main_transaction(uid).op_class)) begin
+            control_count++;
+        end
+    end
+    case (topology_mode)
+        memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_DISABLED,
+        memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_MANUAL_MAIN_TABLE: begin
+            if (control_count != 0) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("%0s topology mode=%0d forbids control op_class count=%0d",
+                                     caller, topology_mode, control_count))
+            end
+        end
+        memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_AUTO_MAIN_TABLE: begin
+            if (control_count == 0) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("%0s AUTO topology built no control entries", caller))
+            end
+        end
+        memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_MANUAL_CONTROL_TABLE: begin
+            if (control_count == 0) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("%0s MANUAL_CONTROL topology requires at least one control entry", caller))
+            end
+        end
+        default: begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("%0s got unsupported topology mode=%0d", caller, topology_mode))
+        end
+    endcase
+endfunction:check_main_table_control_policy
+
+// 抽象职责：验证 AUTO 的固定长度/位置/ROB 连续性约束。它在建表完成时只线性扫描一次，
+// 不属于运行期 service，不会引入 per-cycle 全表遍历。
+function void memblock_dispatch_base_sequence::check_control_auto_main_table_structure(
+    input int unsigned normal_main_trans_num,
+    input string caller
+);
+    memblock_rob_key_t expected_rob_key;
+
+    if (data.main_trans_num != normal_main_trans_num + 1) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%0s AUTO main table length=%0d expected=%0d",
+                             caller, data.main_trans_num, normal_main_trans_num + 1))
+    end
+    expected_rob_key = data.get_main_transaction(0).get_rob_key();
+    for (int unsigned uid = 0; uid < data.main_trans_num; uid++) begin
+        main_control_transaction tr;
+        memblock_rob_key_t actual_rob_key;
+
+        tr = data.get_main_transaction(uid);
+        actual_rob_key = tr.get_rob_key();
+        if (actual_rob_key.flag != expected_rob_key.flag ||
+            actual_rob_key.value != expected_rob_key.value) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("%0s uid=%0d ROB is not continuous expected=%0d:%0d actual=%0d:%0d",
+                                 caller, uid, expected_rob_key.flag, expected_rob_key.value,
+                                 tr.robIdx_flag, tr.robIdx_value))
+        end
+        if (uid < normal_main_trans_num) begin
+            if (tr.op_class == MEMBLOCK_OP_CLASS_CHECK_STORE) begin
+                `uvm_fatal(get_type_name(),
+                           $sformatf("%0s check_store illegally reserved uid=%0d before last slot",
+                                     caller, uid))
+            end
+        end else if (tr.op_class != MEMBLOCK_OP_CLASS_CHECK_STORE) begin
+            `uvm_fatal(get_type_name(),
+                       $sformatf("%0s final uid=%0d must be check_store op_class=%0d",
+                                 caller, uid, tr.op_class))
+        end
+        expected_rob_key = rob_order_util::rob_advance(expected_rob_key, 1);
+    end
+endfunction:check_control_auto_main_table_structure
 
 `endif
