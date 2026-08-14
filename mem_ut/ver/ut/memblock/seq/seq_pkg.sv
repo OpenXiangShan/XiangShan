@@ -93,6 +93,8 @@ package seq_pkg;
     `include "memblock_issue_dispatch_base_sequence.sv"
     `include "memblock_lsqcommit_dispatch_base_sequence.sv"
     `include "memblock_flushsb_base_sequence.sv"
+    `include "memblock_csr_control_base_sequence.sv"
+    `include "memblock_sfence_control_base_sequence.sv"
     `include "memblock_redirect_dispatch_base_sequence.sv"
     `include "memblock_l2tlb_base_sequence.sv"
     `include "memblock_main_dispatch_auto_build_main_table_base_sequence.sv"

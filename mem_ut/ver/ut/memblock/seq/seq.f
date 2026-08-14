@@ -35,6 +35,8 @@ seq_pkg.sv
 // ./base_seq/memblock_issue_dispatch_base_sequence.sv
 // ./base_seq/memblock_lsqcommit_dispatch_base_sequence.sv
 // ./base_seq/memblock_flushsb_base_sequence.sv
+// ./base_seq/memblock_csr_control_base_sequence.sv
+// ./base_seq/memblock_sfence_control_base_sequence.sv
 // ./base_seq/memblock_redirect_dispatch_base_sequence.sv
 // ./base_seq/memblock_l2tlb_base_sequence.sv
 // ./base_seq/memblock_main_dispatch_auto_build_main_table_base_sequence.sv

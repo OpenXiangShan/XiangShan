@@ -396,7 +396,10 @@ typedef enum int unsigned {
     MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_ASSERT    = 12,
     MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_DONE            = 13,
     MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_IDLE            = 14,
-    MEMBLOCK_CONTROL_STATE_CONTROL_COMMIT_READY          = 15
+    MEMBLOCK_CONTROL_STATE_CONTROL_COMMIT_READY          = 15,
+    // 中文注释：check_store 已观察到当前 owner 的 L2 done 高电平，正在等待 CSR worker
+    // 交付同一 owner 的低电平 RELEASE；不能和 ASSERT 发送完成或 done-low 混用。
+    MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_RELEASE    = 16
 } memblock_control_state_e;
 
 typedef enum int unsigned {
@@ -423,6 +426,11 @@ typedef struct {
     memblock_sync_pkg::dispatch_raw_csr_t   csr_baseline;
     int unsigned                             csr_baseline_snapshot_seq;
     int unsigned                             runtime_snapshot_seq_before_drive;
+    // 中文注释：CSR worker 按 baseline 构造后期望 monitor 观察到的运行期字段。
+    // 写入：configure_csr_control_xaction()；读取：service 的 snapshot completion 分支。
+    // 作用：禁止把已发送 xaction 当作完成事实，必须由新 monitor snapshot 匹配该期望值。
+    bit                                      expected_runtime_csr_valid;
+    memblock_sync_pkg::dispatch_raw_csr_t   expected_runtime_csr;
     int unsigned                             control_reset_epoch;
 } memblock_csr_control_action_t;
 
@@ -431,6 +439,9 @@ typedef struct {
     memblock_sfence_payload_t               expected_fence;
     longint unsigned                        pre_drive_event_seq;
     longint unsigned                        l2tlb_reset_epoch_at_arm;
+    // 中文注释：worker 在 start_item() 前置位，允许 adapter 捕获同拍 C0；
+    // finish_item() 后只允许 service 消费该 record，不能由 armed 本身完成状态。
+    bit                                      sfence_c0_match_armed;
 } memblock_sfence_control_action_t;
 
 typedef struct {
@@ -438,6 +449,30 @@ typedef struct {
     int unsigned             control_reset_epoch;
     longint unsigned         release_baseline_observation_seq;
 } memblock_l2_flush_release_request_t;
+
+// 中文注释：flushSb 的 owner 化完成记录。设置：update_sb_is_empty() 只在 sendover 后
+// 消费新鲜 high observation 时写入；清除：control service 用 req_id+owner 确认后删除。
+// 作用：periodic 或其它 directed flushSb 的 sbIsEmpty 不能解除当前控制屏障。
+typedef struct {
+    bit                         valid;
+    int unsigned                req_id;
+    memblock_control_owner_t    owner;
+    longint unsigned            observation_seq;
+    longint unsigned            cycle;
+} memblock_flushsb_completion_t;
+
+// 抽象职责：比较两个已绑定 control action 的唯一身份。无效 owner 绝不视为相等，
+// 防止尚未开始动作的静态屏障误消费旧 token、completion 或 RELEASE 请求。
+function automatic bit memblock_control_owner_equal(
+    input memblock_control_owner_t left,
+    input memblock_control_owner_t right
+);
+    return left.valid && right.valid &&
+           left.uid == right.uid &&
+           left.dynamic_epoch == right.dynamic_epoch &&
+           left.action_generation == right.action_generation &&
+           left.kind == right.kind;
+endfunction:memblock_control_owner_equal
 
 function automatic bit is_control_op_class(input memblock_op_class_e op_class);
     return op_class == MEMBLOCK_OP_CLASS_CSR_CONTROL ||

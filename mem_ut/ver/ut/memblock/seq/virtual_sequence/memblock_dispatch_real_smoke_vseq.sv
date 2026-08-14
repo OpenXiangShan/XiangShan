@@ -20,6 +20,7 @@ class memblock_dispatch_real_smoke_vseq extends virtual_base_sequence;
     extern virtual task start_background_responders();
     extern virtual task start_core_dispatch_flow();
     extern virtual task wait_for_explicit_l2tlb_start_barrier();
+    extern virtual function bit uses_explicit_control_workers();
 
 endclass:memblock_dispatch_real_smoke_vseq
 
@@ -68,7 +69,18 @@ function void memblock_dispatch_real_smoke_vseq::require_real_smoke_sqr();
     require_agent_sqr("dcache", p_sequencer.dcache_sqr);
     require_agent_sqr("sbuffer", p_sequencer.sbuffer_sqr);
     require_agent_sqr("redirect", p_sequencer.redirect_sqr);
+    if (uses_explicit_control_workers()) begin
+        require_agent_sqr("csr_ctrl", p_sequencer.csr_ctrl_sqr);
+        require_agent_sqr("fence", p_sequencer.fence_sqr);
+    end
 endfunction:require_real_smoke_sqr
+
+// 抽象职责：VSEQ 只读取已冻结的 topology snapshot 决定是否显式启动两个 worker。
+// 它不写 plus/mode，也不从 VSEQ 名称反推控制语义，确保 worker 与 main dispatch
+// 位于同一场景生命周期域而不和 agent default producer 并发。
+function bit memblock_dispatch_real_smoke_vseq::uses_explicit_control_workers();
+    return memblock_sync_pkg::uses_control_barrier_topology();
+endfunction:uses_explicit_control_workers
 
 function void memblock_dispatch_real_smoke_vseq::initialize_shared_memory_store();
     // 中文注释：本 vseq 是 real-smoke topology 的唯一 shared memory lifecycle owner。
@@ -107,6 +119,8 @@ task memblock_dispatch_real_smoke_vseq::start_core_dispatch_flow();
     memblock_lsqcommit_dispatch_base_sequence               lsqcommit_seq;
     memblock_l2tlb_base_sequence                            l2tlb_seq;
     memblock_main_dispatch_auto_build_main_table_base_sequence main_seq;
+    memblock_csr_control_base_sequence                      csr_control_seq;
+    memblock_sfence_control_base_sequence                   sfence_control_seq;
 
     // 中文注释：agent sequence 只在对应真实 agent sequencer 上启动，主 orchestration
     // sequence 在 virtual sequencer 上启动；fork/join 和原 real-smoke 并发边界保持不变。
@@ -126,6 +140,16 @@ task memblock_dispatch_real_smoke_vseq::start_core_dispatch_flow();
         end
         begin : start_main_sequence
             `uvm_do_on(main_seq, p_sequencer)
+        end
+        begin : start_csr_control_worker
+            if (uses_explicit_control_workers()) begin
+                `uvm_do_on(csr_control_seq, p_sequencer.csr_ctrl_sqr)
+            end
+        end
+        begin : start_sfence_control_worker
+            if (uses_explicit_control_workers()) begin
+                `uvm_do_on(sfence_control_seq, p_sequencer.fence_sqr)
+            end
         end
     join
 endtask:start_core_dispatch_flow

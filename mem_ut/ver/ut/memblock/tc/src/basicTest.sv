@@ -93,6 +93,21 @@ class basicTest extends tcnt_test_base ;
             seq_csr_common::initialize_control_worker_topology_from_plus(get_type_name());
             seq_csr_common::check_control_worker_dispatch_capability(
                 vseq_supports_control_worker_topology(main_vseq_name), main_vseq_name);
+            // 中文注释：第二种拓扑下 CSR/Fence worker 由选中的 VSEQ 显式启动。
+            // main_phase 默认 sequence 仍安装无 producer 的 idle 基类，避免 agent 自身
+            // fallback/default sequence 在同一 sequencer 上随机发送 item 与 worker 竞争。
+            if (memblock_sync_pkg::uses_control_barrier_topology()) begin
+                uvm_config_db#(uvm_object_wrapper)::set(
+                    this,
+                    "env.u_csr_ctrl_agent_agent.sqr.main_phase",
+                    "default_sequence",
+                    tcnt_default_sequence_base#(csr_ctrl_agent_agent_xaction)::type_id::get());
+                uvm_config_db#(uvm_object_wrapper)::set(
+                    this,
+                    "env.u_fence_agent_agent.sqr.main_phase",
+                    "default_sequence",
+                    tcnt_default_sequence_base#(fence_agent_agent_xaction)::type_id::get());
+            end
             `uvm_info(get_type_name(),$sformatf("usr_test_vseq_name:%0s",main_vseq_name),UVM_LOW)
             main_vseq_wrapper = uvm_factory::get().find_wrapper_by_name(main_vseq_name);
             if (main_vseq_wrapper == null) begin

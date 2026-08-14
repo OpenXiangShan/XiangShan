@@ -68,6 +68,15 @@ class status_transaction extends uvm_object;
     memblock_sync_pkg::dispatch_raw_csr_t  control_runtime_csr_snapshot;
     int unsigned                            control_runtime_csr_snapshot_seq;
     int unsigned                            control_runtime_snapshot_seq_before_drive;
+    // 中文注释：CSR action 的 monitor 期望值与 check_store 的稳定 CSR baseline。
+    // 设置：control worker 配置/交付边界；读取：control service 的 runtime snapshot、
+    // L2 ASSERT/RELEASE 分支；terminal/reset 时随 status 生命周期清零。
+    bit                                     control_expected_runtime_csr_valid;
+    memblock_sync_pkg::dispatch_raw_csr_t  control_expected_runtime_csr;
+    bit                                     control_expected_sfence_valid;
+    memblock_sfence_payload_t              control_expected_sfence;
+    bit                                     control_l2_csr_baseline_valid;
+    memblock_sync_pkg::dispatch_raw_csr_t  control_l2_csr_baseline;
     // 中文注释：SFence/check_store completion 的 request/event/done 基线。
     // 每个字段由对应 service 分支写入，owner 变化或 status reset 时清零，防止旧 sample 误完成。
     int unsigned              control_flushsb_req_id;
@@ -185,6 +194,12 @@ class status_transaction extends uvm_object;
         control_runtime_csr_snapshot = '{default:'0};
         control_runtime_csr_snapshot_seq = 0;
         control_runtime_snapshot_seq_before_drive = 0;
+        control_expected_runtime_csr_valid = 1'b0;
+        control_expected_runtime_csr = '{default:'0};
+        control_expected_sfence_valid = 1'b0;
+        control_expected_sfence = '{default:'0};
+        control_l2_csr_baseline_valid = 1'b0;
+        control_l2_csr_baseline = '{default:'0};
         control_flushsb_req_id = 0;
         control_sfence_event_seq = 0;
         control_assert_done_baseline_seq = 0;
