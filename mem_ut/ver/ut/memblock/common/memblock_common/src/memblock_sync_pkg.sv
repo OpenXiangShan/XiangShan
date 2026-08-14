@@ -12,6 +12,8 @@
 
 package memblock_sync_pkg;
 
+    import uvm_pkg::*;
+
     // 中文注释：控制屏障的静态拓扑模式。plus 解析后仅允许初始化一次；
     // sequence/worker/service 只读此快照，不能通过 testcase 或 VSEQ 推断/改写模式。
     typedef enum int unsigned {
@@ -67,7 +69,6 @@ package memblock_sync_pkg;
     function bit uses_auto_control_barrier_topology();
         return get_control_worker_topology_mode() == MEMBLOCK_CONTROL_TOPOLOGY_AUTO_MAIN_TABLE;
     endfunction:uses_auto_control_barrier_topology
-    import uvm_pkg::*;
 
     bit reset_backend_done = 1'b0;
     // Runtime reset is a shared lifecycle boundary.  The CSR monitor is the
