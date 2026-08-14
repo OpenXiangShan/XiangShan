@@ -21,6 +21,7 @@ class BackendObserveBundle(Bundle):
     cfvec_ftq_ptr_value = SignalList("io_backend_cfVec_#_bits_ftqPtr_value", 8)
     cfvec_ftq_offset = SignalList("io_backend_cfVec_#_bits_ftqOffset", 8)
     cfvec_is_last_in_ftq_entry = SignalList("io_backend_cfVec_#_bits_isLastInFtqEntry", 8)
+    cfvec_cross_page_ipf_fix = SignalList("io_backend_cfVec_#_bits_crossPageIPFFix", 8)
     cfvec_exception_vec = [SignalList(f"io_backend_cfVec_{slot}_bits_exceptionVec_#", 24) for slot in range(8)]
     redirect_valid = Signal()
     redirect_bits_pc = Signal()

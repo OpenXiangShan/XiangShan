@@ -39,6 +39,7 @@ from ..model import GoldenTrace, MemoryModel, PageTableModel
 from ..model.branch_checker import BranchChecker
 from ..monitors.backend_observe_monitor import BackendObserveMonitor
 from ..monitors.frontend_monitor import FrontendMonitor
+from ..monitors.translation_permission_oracle import TranslationPermissionOracle
 
 
 class FrontendEnv:
@@ -71,6 +72,7 @@ class FrontendEnv:
         self._nemu_vsatp_override: Optional[int] = None
         self._nemu_hgatp_override: Optional[int] = None
         self.current_cycle = 0
+        self.translation_epoch = 0
         self._cycle_observers = []
         self.csr_write_log = []
         self._pmp_pma_cfg_words = {"pmp": {}, "pma": {}}
@@ -115,6 +117,7 @@ class FrontendEnv:
             "ptw_agent": PTWAgent(self.page_table),
             "ptw_full_ppn_checker": PTWFullPpnChecker(),
             "ptw_resp_input_checker": PTWRespInputChecker(),
+            "translation_oracle": TranslationPermissionOracle(),
             "backend_agent": BackendAgent(),
             "backend_model": BackendModel(
                 ftq_size=self.config.backend.ftq_size,
@@ -141,6 +144,7 @@ class FrontendEnv:
         self.ptw_agent = collaborators["ptw_agent"]
         self.ptw_full_ppn_checker = collaborators["ptw_full_ppn_checker"]
         self.ptw_resp_input_checker = collaborators["ptw_resp_input_checker"]
+        self.translation_oracle = collaborators["translation_oracle"]
         self.backend_agent = collaborators["backend_agent"]
         self.backend_model = collaborators["backend_model"]
 
@@ -214,6 +218,7 @@ class FrontendEnv:
         self.ptw_agent.set_nemu_sync_hook(self._sync_nemu_ptw_state)
         self.ptw_full_ppn_checker.bind_env(self)
         self.ptw_resp_input_checker.bind_env(self)
+        self.translation_oracle.bind_env(self)
         self.backend_agent.bind(self.backend_ctrl_if)
         self.backend_observe_monitor.bind(self._backend_observe_bind_target())
         self.monitor.bind(self.backend_observe_if)
@@ -246,6 +251,7 @@ class FrontendEnv:
             self.ptw_agent,
             self.ptw_full_ppn_checker,
             self.ptw_resp_input_checker,
+            self.translation_oracle,
             self.monitor,
             self.backend_model,
         )
@@ -609,6 +615,7 @@ class FrontendEnv:
         self.ptw_resp_input_checker.on_clock_edge(cycle)
         self._begin_backend_cycle(cycle)
         self.monitor.on_clock_edge(cycle)
+        self.translation_oracle.on_clock_edge(cycle)
         self._drive_backend_cycle(cycle)
         for observer in list(self._cycle_observers):
             observer(int(cycle), self)
@@ -760,6 +767,7 @@ class FrontendEnv:
         for signal in asserted:
             self._write(signal, 1)
         if asserted:
+            self.translation_epoch += 1
             step_cycles = max(1, int(cycles))
             end_cycle = self.step(step_cycles)
             if end_cycle is not None:
@@ -774,6 +782,7 @@ class FrontendEnv:
                     "hgatp": bool(hgatp),
                     "priv_virt": bool(priv_virt),
                     "cycles": step_cycles,
+                    "translation_epoch": int(self.translation_epoch),
                 },
             )
             return step_cycles
@@ -896,12 +905,13 @@ class FrontendEnv:
         self._write(self.ptw_if.sfence_bits_hv, fields["hv"])
         self._write(self.ptw_if.sfence_bits_hg, fields["hg"])
         self._write(self.ptw_if.sfence_valid, 1)
+        self.translation_epoch += 1
         fields["cycle"] = int(self.current_cycle)
         end_cycle = self.step(pulse_cycles)
         if end_cycle is not None:
             self.current_cycle = max(int(self.current_cycle), int(end_cycle))
         self._write(self.ptw_if.sfence_valid, 0)
-        self._emit_event("control.sfence", fields)
+        self._emit_event("control.sfence", {**fields, "translation_epoch": int(self.translation_epoch)})
         return dict(fields)
 
     def update_translation_context(
@@ -941,7 +951,7 @@ class FrontendEnv:
             cycles=cycles,
         )
         record = {"changed": changed, "cycles": int(pulse_cycles)}
-        self._emit_event("control.translation_context", record)
+        self._emit_event("control.translation_context", {**record, "translation_epoch": int(self.translation_epoch)})
         return record
 
     def set_log_level(self, level: str) -> int:
@@ -997,6 +1007,12 @@ class FrontendEnv:
     def get_errors(self) -> list:
         return self.monitor.get_errors()
 
+    def arm_translation_scenario(self, state) -> dict:
+        return self.translation_oracle.arm(state, translation_epoch=self.translation_epoch)
+
+    def assert_translation_scenario(self) -> dict:
+        return self.translation_oracle.assert_complete()
+
     def get_stats(self) -> dict:
         out = {
             "monitor": self.monitor.get_stats(),
@@ -1004,6 +1020,7 @@ class FrontendEnv:
             "uncache": self.uncache_agent.get_stats(),
             "ptw": self.ptw_agent.get_stats(),
             "ptw_resp_input_checker": self.ptw_resp_input_checker.get_stats(),
+            "translation_oracle": self.translation_oracle.get_stats(),
             "backend": self.backend_model.get_stats(),
             "branch": self.branch_checker.get_stats(),
         }
