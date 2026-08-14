@@ -73,14 +73,16 @@ FORWARD_VARS=(
 
 build_make_assignments() {
     local -a result=()
-    local name value quoted
+    local name value
     for name in "${FORWARD_VARS[@]}"; do
         value="${!name-}"
         if [[ ("$name" == "MEMBLOCK_XS_HOME" || "$name" == "MEMBLOCK_PROJECT") && -z "$value" ]]; then
             continue
         fi
-        quoted="$(printf "%q" "$value")"
-        result+=("${name}=${quoted}")
+        # remote_entry_cmd() quotes each complete assignment exactly once.  Do
+        # not pre-escape spaces here: a second %q would preserve the first
+        # backslash and turn multi-key plus_arg into one simulator argument.
+        result+=("${name}=${value}")
     done
     printf '%s\n' "${result[@]}"
 }
