@@ -465,6 +465,9 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.dtlb.req.bits.memidx.is_st       := isVSegStore
   io.dtlb.req.bits.debug.robIdx       := instMicroOp.uop.robIdx
   io.dtlb.req.bits.no_translate       := false.B
+  if(HasShadowStack) {
+    io.dtlb.req.bits.shadowStackUser.get    := false.B
+  }
   io.dtlb.req.bits.debug.pc           := instMicroOp.uop.pc
   io.dtlb.req.bits.debug.isFirstIssue := DontCare
   io.dtlb.req_kill                    := false.B
@@ -1014,4 +1017,3 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.exceptionInfo.bits.isHyper       := false.B
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.orR && !isEmpty(enqPtr, deqPtr)
 }
-

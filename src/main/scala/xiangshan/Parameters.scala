@@ -53,6 +53,7 @@ case class XSCoreParameters
   VLEN: Int = 128,
   ELEN: Int = 64,
   HSXLEN: Int = 64,
+  HasShadowStack: Boolean = true,
   HasMptCheck: Boolean = false, //enable mpt
   HasMptCheckDefault: Boolean = false, // hardwired testing code: fake 2M MPT table
   HasMptCheckDefault4k: Boolean = false, // hardwired testing code: fake 4k MPT table
@@ -93,7 +94,7 @@ case class XSCoreParameters
   // TODO: New frontend parameters system below. Replace the old parameters above during development.
   frontendParameters: FrontendParameters = FrontendParameters(),
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
-  IntLogicRegs: Int = 32,
+  IntLogicRegsBase: Int = 32,
   FpLogicRegs: Int = 32 + 1 + 1, // 1: I2F, 1: stride
   VecLogicRegs: Int = 32 + 15, // 15: tmp
   V0LogicRegs: Int = 1, // V0
@@ -303,21 +304,31 @@ case class XSCoreParameters
   softPTWDelay: Int = 1,
   wfiResume: Boolean = true,
 ){
+  // Zicfiss split uops use one hidden logical register for SSP and one for
+  // the same-address ordering load dependency.
+  val IntLogicRegs: Int = IntLogicRegsBase + (if (HasShadowStack) 2 else 0)
+
   def ISABase = "rv64i"
-  def ISAExtensions = Seq(
-    // single letter extensions, in canonical order
-    "i", "m", "a", "f", "d", "c", /* "b", */ "v", "h",
-    // multi-letter extensions, sorted alphanumerically
-    "sdtrig", "sha", "shcounterenw", "shgatpa", "shlcofideleg", "shtvala", "shvsatpa", "shvstvala",
-    "shvstvecd", "smaia", "smcdeleg", "smcntrpmf", "smcsrind", "smdbltrp", "smmpm", "smnpm", "smrnmi", "smstateen",
-    "ss1p13", "ssaia", "ssccfg", "ssccptr", "sscofpmf", "sscounterenw", "sscsrind", "ssdbltrp", "ssnpm",
-    "sspm", "ssstateen", "ssstrict", "sstc", "sstvala", "sstvecd", "ssu64xl", "supm", "sv39",
-    "sv48", "svade", "svbare", "svinval", "svnapot", "svpbmt", "za64rs", "zabha", "zacas", "zawrs", "zba",
-    "zbb", "zbc", "zbkb", "zbkc", "zbkx", "zbs", "zcb", "zcmop", "zfa", "zfh", "zfhmin", "zic64b",
-    "zicbom", "zicbop", "zicboz", "ziccamoa", "ziccif", "zicclsm", "ziccrse", "zicntr", "zicond",
-    "zicsr", "zifencei", "zihintntl", "zihintpause", "zihpm", "zimop", "zkn", "zknd", "zkne", "zknh",
-    "zksed", "zksh", "zkt", "zvbb", "zvfh", "zvfhmin", "zvkt", "zvl128b", "zvl32b", "zvl64b"
-  )
+  def ISAExtensions = {
+    // Keep the device-tree extension list canonical, but only advertise Zicfiss
+    // when the corresponding hardware is present.
+    val zicfiss = if (HasShadowStack) Seq("zicfiss") else Seq.empty[String]
+    Seq(
+      // single letter extensions, in canonical order
+      "i", "m", "a", "f", "d", "c", /* "b", */ "v", "h",
+      // multi-letter extensions, sorted alphanumerically
+      "sdtrig", "sha", "shcounterenw", "shgatpa", "shlcofideleg", "shtvala", "shvsatpa", "shvstvala",
+      "shvstvecd", "smaia", "smcdeleg", "smcntrpmf", "smcsrind", "smdbltrp", "smmpm", "smnpm", "smrnmi", "smstateen",
+      "ss1p13", "ssaia", "ssccfg", "ssccptr", "sscofpmf", "sscounterenw", "sscsrind", "ssdbltrp", "ssnpm",
+      "sspm", "ssstateen", "ssstrict", "sstc", "sstvala", "sstvecd", "ssu64xl", "supm", "sv39",
+      "sv48", "svade", "svbare", "svinval", "svnapot", "svpbmt", "za64rs", "zabha", "zacas", "zawrs", "zba",
+      "zbb", "zbc", "zbkb", "zbkc", "zbkx", "zbs", "zcb", "zcmop", "zfa", "zfh", "zfhmin", "zic64b",
+      "zicbom", "zicbop", "zicboz", "ziccamoa", "ziccif", "zicclsm", "ziccrse"
+    ) ++ zicfiss ++ Seq(
+      "zicntr", "zicond", "zicsr", "zifencei", "zihintntl", "zihintpause", "zihpm", "zimop", "zkn", "zknd", "zkne", "zknh",
+      "zksed", "zksh", "zkt", "zvbb", "zvfh", "zvfhmin", "zvkt", "zvl128b", "zvl32b", "zvl64b"
+    )
+  }
 
   def vlWidth = log2Up(VLEN) + 1
 
@@ -371,15 +382,33 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams("ALU5", Seq(AluCfg, MulCfg), Seq(IntWB(port = 5, 0)), Seq(Seq(IntRD(10, 0)), Seq(IntRD(11, 1))), true, 2)
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
-      IssueBlockParams(Seq(
-        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(6, 0), FpWB(4, 0)), Seq(Seq(IntRD(7, 0))), true, 2),
-      ), numEntries = 20, numEnq = 2, numComp = 12),
-      IssueBlockParams(Seq(
-        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(7, 0), FpWB(5, 0)), Seq(Seq(IntRD(9, 0))), true, 2),
-      ), numEntries = 20, numEnq = 2, numComp = 12),
-      IssueBlockParams(Seq(
-        ExeUnitParams("LDU2", Seq(LduCfg), Seq(IntWB(8, 0), FpWB(6, 0)), Seq(Seq(IntRD(11, 0))), true, 2),
-      ), numEntries = 20, numEnq = 2, numComp = 12),
+      if (HasShadowStack)(
+        IssueBlockParams(Seq(
+          ExeUnitParams("LDU0", Seq(LduCfgWithShadowStack), Seq(IntWB(6, 0), FpWB(4, 0)), Seq(Seq(IntRD(7, 0)), Seq(IntRD(12, 0))), true, 2),
+          ), numEntries = 16, numEnq = 2, numComp = 12),
+      ) else (
+        IssueBlockParams(Seq(
+          ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(6, 0), FpWB(4, 0)), Seq(Seq(IntRD(7, 0))), true, 2),
+          ), numEntries = 20, numEnq = 2, numComp = 12)
+      ),
+      if (HasShadowStack)(
+        IssueBlockParams(Seq(
+          ExeUnitParams("LDU1", Seq(LduCfgWithShadowStack), Seq(IntWB(7, 0), FpWB(5, 0)), Seq(Seq(IntRD(9, 0)), Seq(IntRD(13, 0))), true, 2),
+        ), numEntries = 20, numEnq = 2, numComp = 12),
+      ) else (
+        IssueBlockParams(Seq(
+          ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(7, 0), FpWB(5, 0)), Seq(Seq(IntRD(9, 0))), true, 2),
+        ), numEntries = 20, numEnq = 2, numComp = 12)
+      ),
+      if (HasShadowStack)(
+        IssueBlockParams(Seq(
+          ExeUnitParams("LDU2", Seq(LduCfgWithShadowStack), Seq(IntWB(8, 0), FpWB(6, 0)), Seq(Seq(IntRD(11, 0)), Seq(IntRD(14, 0))), true, 2),
+          ), numEntries = 20, numEnq = 2, numComp = 12)
+      ) else (
+        IssueBlockParams(Seq(
+          ExeUnitParams("LDU2", Seq(LduCfg), Seq(IntWB(8, 0), FpWB(6, 0)), Seq(Seq(IntRD(11, 0))), true, 2),
+          ), numEntries = 20, numEnq = 2, numComp = 12)
+      ),
       IssueBlockParams(Seq(
         ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(FakeIntWB()), Seq(Seq(IntRD(6, 1)))),
       ), numEntries = 16, numEnq = 2, numComp = 12),
@@ -583,6 +612,7 @@ trait HasXSParameter {
   def hartIdLen = p(MaxHartIdBits)
   val xLen = XLEN
   assert(!(HasMptCheck == true && HasBitmapCheck == true), "Conflicts: MPT and Bitmap can't be used together")
+  def HasShadowStack = coreParams.HasShadowStack
   def HasMptCheck = coreParams.HasMptCheck && !coreParams.HasBitmapCheck
   def HasMptCheckDefault = coreParams.HasMptCheckDefault
   def HasMptCheckDefault4k = coreParams.HasMptCheckDefault4k

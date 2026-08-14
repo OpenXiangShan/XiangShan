@@ -10,7 +10,7 @@ import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{HgatpMode, SatpMode}
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.AddrTransType
-
+import xiangshan.HasXSParameter
 
 class TrapEntryVSEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
 
@@ -20,7 +20,7 @@ class TrapEntryVSEventOutput extends Bundle with EventUpdatePrivStateOutput with
   val vstval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
 }
 
-class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSREventBase {
+class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSREventBase with HasXSParameter {
   val in = IO(new TrapEntryEventInput)
   val out = IO(new TrapEntryVSEventOutput)
 
@@ -90,8 +90,20 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
     (isFetchExcp || isFetchBkpt) && fetchIsVirt ||
     (isMemExcp || isMemBkpt) && memIsVirt
   private val tvalFillInst     = isIllegalInst
+  // Zicfiss: internal Zicfiss/Zicfilp bits both report architectural software-check cause 18.
+  private val isZicfissSoftwareCheck = isException && zicfissSoftwareCheck.U === highPrioTrapNO
+  private val isZicfilpSoftwareCheck = isException && zicfilpSoftwareCheck.U === highPrioTrapNO
+  private val isSoftwareCheck = isZicfissSoftwareCheck || isZicfilpSoftwareCheck
+  private val softwareCheckTval = Mux(isZicfissSoftwareCheck, 3.U, 2.U)
+  private val trapExceptionCode = Mux(isZicfissSoftwareCheck, softwareCheck.U, highPrioTrapNO)
 
-  private val tval = Mux1H(Seq(
+  private val tval = Mux1H(if (HasShadowStack) Seq(
+    tvalFillPc       -> trapPC,
+    tvalFillPcPlus2  -> (trapPC + 2.U),
+    tvalFillMemVaddr -> trapMemVA,
+    tvalFillInst     -> trapInst,
+    (isSoftwareCheck) -> softwareCheckTval,
+  ) else Seq(
     tvalFillPc       -> trapPC,
     tvalFillPcPlus2  -> (trapPC + 2.U),
     tvalFillMemVaddr -> trapMemVA,
@@ -116,7 +128,11 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   // SPVP is not PrivMode enum type, so asUInt and shrink the width
   out.vsepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
   out.vscause.bits.Interrupt     := isInterrupt
-  out.vscause.bits.ExceptionCode := Mux(virtualInterruptIsHvictlInject && isInterrupt, hvictlIID, highPrioTrapNO)
+  out.vscause.bits.ExceptionCode := Mux(
+    virtualInterruptIsHvictlInject && isInterrupt,
+    hvictlIID,
+    if (HasShadowStack) trapExceptionCode else highPrioTrapNO
+  )
   out.vstval.bits.ALL            := Mux(isFetchMalAddrExcp, in.fetchMalTval, tval)
   dontTouch(tvalFillGVA)
 }

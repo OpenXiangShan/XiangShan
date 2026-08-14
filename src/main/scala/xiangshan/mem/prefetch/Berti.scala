@@ -910,6 +910,9 @@ extends DCacheModule {
     tlbReqArb.io.in(i).bits.vaddr := entries(i).getPrefetchVA
     tlbReqArb.io.in(i).bits.cmd := TlbCmd.read
     tlbReqArb.io.in(i).bits.isPrefetch := true.B
+    if (HasShadowStack) {
+      tlbReqArb.io.in(i).bits.shadowStackUser.get := false.B
+    }
     tlbReqArb.io.in(i).bits.size := 3.U
     tlbReqArb.io.in(i).bits.kill := false.B
     tlbReqArb.io.in(i).bits.no_translate := false.B

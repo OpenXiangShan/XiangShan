@@ -236,10 +236,17 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.VEC_I_LDST -> (numOfUopVLoadStoreIndexed +& 1.U),
     UopSplitType.AMO_CAS_BHWD -> 2.U,
     UopSplitType.AMO_CAS_Q -> 4.U,
+    // Zicfiss: SSPUSH uses csrr, shadow-stack store, a same-address ordering
+    // load, SSP decrement, and csrw.
+    UopSplitType.ZICFISS_SSPUSH -> 5.U,
+    UopSplitType.ZICFISS_SSPOPCHK -> 3.U,
   ))
 
   // vector instruction's uop UopSplitType are not SCA_SIM, and when the number of uop is 1, we can regard it as a simple instruction
-  isComplex := io.in.preInfo.isVecArith || io.in.preInfo.isVecMem || io.in.preInfo.isAmoCAS
+  // Zicfiss: shadow-stack push/pop-check use the complex decode path.
+  val isZicfissComplex = UopSplitType.isZicfiss(typeOfSplit)
+  isComplex := io.in.preInfo.isVecArith || io.in.preInfo.isVecMem || io.in.preInfo.isAmoCAS ||
+    (if(HasShadowStack) isZicfissComplex else false.B)
   io.out.uopInfo.numOfWB := numOfWB
   io.out.uopInfo.lmul := lmul
 

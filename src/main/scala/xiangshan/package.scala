@@ -532,6 +532,10 @@ package object xiangshan {
     def jalr       = "b111_1001".U
     def auipc      = "b111_1010".U
 
+    // Internal Zicfiss uop. src2 is an ordering-load dependency;
+    // the datapath result is always src1 - XLEN/8.
+    def sspdec     = "b111_1110".U
+
     // misc optype
     def and        = "b100_0000".U
     def andn       = "b100_0001".U
@@ -617,6 +621,7 @@ package object xiangshan {
 
     def isZicond(func: UInt): Bool  = func(6, 4).andR && !func(3)
     def isJmp(func: UInt): Bool     = func(6, 3).andR && !func(2)
+    def isSspDec(func: UInt): Bool  = func === sspdec
 
     def apply() = UInt(FuOpTypeWidth.W)
   }
@@ -753,6 +758,18 @@ package object xiangshan {
 
     def isPrefetch(op: UInt): Bool = op(3) && (op(5, 4) === "b000".U) && (op(8, 7) === "b00".U)
 
+    // Zicfiss shadow stack load/store/amo.
+    // Keep size in bit(1, 0), same as normal LSU ops.
+    def ssamoswap_w = "b110010".U
+    def ssamoswap_d = "b110011".U
+    def sspush    = "b111011".U
+    def sspopchk  = "b111111".U
+    def isShadowStackLoad(op: UInt): Bool = op === sspopchk
+    def isShadowStackStore(op: UInt): Bool = op === sspush
+    def isShadowStackAmo(op: UInt): Bool = op === ssamoswap_w || op === ssamoswap_d
+
+    def isZicfiss(fuOpType: UInt): Bool = fuOpType === ssamoswap_w || fuOpType === ssamoswap_d ||
+      fuOpType === sspush || fuOpType === sspopchk
     // store pipeline
     // normal store
     // bit encoding: | store 00 | size(2bit) |
@@ -1056,6 +1073,10 @@ package object xiangshan {
 
     def AMO_CAS_BHWD     = "b110101".U // B/H/W/D: 2 uops
     def AMO_CAS_Q        = "b110111".U // amocas_q
+    // Zicfiss: split SSPUSH into shadow-stack memory and ssp update uops.
+    def ZICFISS_SSPUSH   = "b100110".U
+    // Zicfiss: split SSPOPCHK into shadow-stack check and ssp update uops.
+    def ZICFISS_SSPOPCHK = "b101000".U
     // dummy means that the instruction is a complex instruction but uop number is 1
     def dummy     = "b111111".U
 
@@ -1063,7 +1084,8 @@ package object xiangshan {
 
     def apply() = UInt(6.W)
     def needSplit(UopSplitType: UInt) = UopSplitType(4) || UopSplitType(5)
-
+    // Zicfiss: helper for shadow-stack split instructions.
+    def isZicfiss(UopSplitType: UInt): Bool = UopSplitType === ZICFISS_SSPUSH || UopSplitType === ZICFISS_SSPOPCHK
     def isAMOCAS(UopSplitType: UInt): Bool = UopSplitType === AMO_CAS_BHWD || UopSplitType === AMO_CAS_Q
   }
 
@@ -1086,6 +1108,8 @@ package object xiangshan {
     def storePageFault      = 15
     def doubleTrap          = 16
     def softwareCheck       = 18
+    def zicfissSoftwareCheck = 17 // software-check-exception of Zicfiss cause = 18, tval = 3
+    def zicfilpSoftwareCheck = 18 // software-check-exception of Zicfilp cause = 18, tval = 2
     def hardwareError       = 19
     def instrGuestPageFault = 20
     def loadGuestPageFault  = 21
@@ -1109,7 +1133,8 @@ package object xiangshan {
     def EX_LPF    = loadPageFault
     def EX_SPF    = storePageFault
     def EX_DT     = doubleTrap
-    def EX_SWC    = softwareCheck
+    def EX_SWC1   = zicfissSoftwareCheck
+    def EX_SWC2   = zicfilpSoftwareCheck
     def EX_HWE    = hardwareError
     def EX_IGPF   = instrGuestPageFault
     def EX_LGPF   = loadGuestPageFault
@@ -1138,7 +1163,7 @@ package object xiangshan {
       instrPageFault,
       instrGuestPageFault,
       instrAccessFault,
-      softwareCheck,
+      zicfilpSoftwareCheck,
       illegalInstr,
       virtualInstr,
       instrAddrMisaligned,
@@ -1151,9 +1176,10 @@ package object xiangshan {
       loadGuestPageFault,
       storeAccessFault,
       loadAccessFault,
+      zicfissSoftwareCheck,
       hardwareError
     )
-
+    // softwarecheck has 2 different priorities, use different internal code
     def getHigherExcpThan(excp: Int): Seq[Int] = {
       val idx = this.priorities.indexOf(excp, 0)
       require(idx != -1, s"The irq($excp) does not exists in IntPriority Seq")

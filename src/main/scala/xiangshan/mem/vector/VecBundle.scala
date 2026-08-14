@@ -177,6 +177,9 @@ class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLS
     out.hasROBEntry := true.B
     out.missDbUpdated := false.B
     out.occupySource := DontCare
+    out.sspCheckValue.foreach(_ := DontCare)
+    out.sspValue.foreach(_ := DontCare)
+    out.sspNextValue.foreach(_ := DontCare)
     out
   }
 

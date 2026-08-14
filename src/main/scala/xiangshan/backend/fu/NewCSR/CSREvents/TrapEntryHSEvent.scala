@@ -10,6 +10,7 @@ import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}
 import xiangshan.backend.fu.NewCSR.CSRDefines.SatpMode
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.AddrTransType
+import xiangshan.HasXSParameter
 
 
 class TrapEntryHSEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
@@ -24,7 +25,7 @@ class TrapEntryHSEventOutput extends Bundle with EventUpdatePrivStateOutput with
   val htinst  = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
 }
 
-class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSREventBase {
+class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSREventBase with HasXSParameter {
   val in = IO(new TrapEntryEventInput)
   val out = IO(new TrapEntryHSEventOutput)
 
@@ -82,7 +83,20 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
     (isMemExcp || isMemBkpt) && (memIsVirt || isHlsExcp)
   private val tvalFillInst     = isIllegalInst
 
-  private val tval = Mux1H(Seq(
+  // Zicfiss: internal Zicfiss/Zicfilp bits both report architectural software-check cause 18.
+  private val isZicfissSoftwareCheck = isException && ExceptionNO.zicfissSoftwareCheck.U === highPrioTrapNO
+  private val isZicfilpSoftwareCheck = isException && ExceptionNO.zicfilpSoftwareCheck.U === highPrioTrapNO
+  private val isSoftwareCheck = isZicfissSoftwareCheck || isZicfilpSoftwareCheck
+  private val softwareCheckTval = Mux(isZicfissSoftwareCheck, 3.U, 2.U)
+  private val trapExceptionCode = Mux(isZicfissSoftwareCheck, ExceptionNO.softwareCheck.U, highPrioTrapNO)
+
+  private val tval = Mux1H(if (HasShadowStack) Seq(
+    (tvalFillPc                        ) -> trapPC,
+    (tvalFillPcPlus2                   ) -> (trapPC + 2.U),
+    (tvalFillMemVaddr || isLSGuestExcp ) -> trapMemVA,
+    (tvalFillInst                      ) -> trapInst,
+    (isSoftwareCheck) -> softwareCheckTval,
+  ) else Seq(
     (tvalFillPc                        ) -> trapPC,
     (tvalFillPcPlus2                   ) -> (trapPC + 2.U),
     (tvalFillMemVaddr || isLSGuestExcp ) -> trapMemVA,
@@ -120,7 +134,7 @@ class TrapEntryHSEventModule(implicit val p: Parameters) extends Module with CSR
   out.hstatus.bits.GVA          := tvalFillGVA
   out.sepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
   out.scause.bits.Interrupt     := isInterrupt
-  out.scause.bits.ExceptionCode := highPrioTrapNO
+  out.scause.bits.ExceptionCode := (if (HasShadowStack) trapExceptionCode else highPrioTrapNO)
   out.stval.bits.ALL            := Mux(isFetchMalAddrExcp, in.fetchMalTval, tval)
   out.htval.bits.ALL            := tval2 >> 2
   out.htinst.bits.ALL           := Mux(isFetchGuestExcp && in.trapIsForVSnonLeafPTE || isLSGuestExcp && in.memExceptionIsForVSnonLeafPTE, 0x3000.U, 0.U)

@@ -135,7 +135,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val vl_old_pdest  = Wire(Vec(RabCommitWidth, UInt(PhyRegIdxWidth.W)))
 
   // debug arch ports
-  val debug_int_rat = Option.when(backendParams.debugEn)(Wire(Vec(32, UInt(PhyRegIdxWidth.W))))
+  val debug_int_rat = Option.when(backendParams.debugEn)(Wire(Vec((if (HasShadowStack) IntLogicRegs else 32),
+    UInt(PhyRegIdxWidth.W))))
   val debug_fp_rat  = Option.when(backendParams.debugEn)(Wire(Vec(32, UInt(PhyRegIdxWidth.W))))
   val debug_vec_rat = Option.when(backendParams.debugEn)(Wire(Vec(31, UInt(PhyRegIdxWidth.W))))
   val debug_v0_rat  = Option.when(backendParams.debugEn)(Wire(Vec(1,  UInt(PhyRegIdxWidth.W))))

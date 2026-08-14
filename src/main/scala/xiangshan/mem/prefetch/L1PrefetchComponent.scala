@@ -551,6 +551,9 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     l1_tlb_req_arb.io.in(i).bits.vaddr := l1_array(i).get_tlb_va()
     l1_tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
     l1_tlb_req_arb.io.in(i).bits.isPrefetch := true.B
+    if(HasShadowStack) {
+      l1_tlb_req_arb.io.in(i).bits.shadowStackUser.get := false.B
+    }
     l1_tlb_req_arb.io.in(i).bits.size := 3.U
     l1_tlb_req_arb.io.in(i).bits.kill := false.B
     l1_tlb_req_arb.io.in(i).bits.no_translate := false.B
@@ -568,6 +571,9 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     l2_tlb_req_arb.io.in(i).bits.vaddr := l2_array(i).get_tlb_va()
     l2_tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
     l2_tlb_req_arb.io.in(i).bits.isPrefetch := true.B
+    if(HasShadowStack) {
+      l2_tlb_req_arb.io.in(i).bits.shadowStackUser.get := false.B
+    }
     l2_tlb_req_arb.io.in(i).bits.size := 3.U
     l2_tlb_req_arb.io.in(i).bits.kill := false.B
     l2_tlb_req_arb.io.in(i).bits.no_translate := false.B

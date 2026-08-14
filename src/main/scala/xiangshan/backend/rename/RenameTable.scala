@@ -59,7 +59,7 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
     case Reg_Vl => 1
   }
   val rdataNums = reg_t match {
-    case Reg_I => 32
+    case Reg_I => (if (HasShadowStack) IntLogicRegs else 32)
     case Reg_F => 32
     case Reg_V => 31 // no v0
     case Reg_V0 => 1 // v0
@@ -239,9 +239,9 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val vl_old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val int_need_free = Vec(RabCommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
-
     // for debug assertions
-    val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val debug_int_rat = if (backendParams.debugEn) Some(Vec((if (HasShadowStack) IntLogicRegs else 32),
+      Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_fp_rat  = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_vec_rat = if (backendParams.debugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_v0_rat  = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None

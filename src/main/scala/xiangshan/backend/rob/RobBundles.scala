@@ -107,7 +107,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
 
   }
 
-  class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
+  class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle with HasXSParameter {
     val walk_v = Bool()
     val commit_v = Bool()
     val commit_w = Bool()
@@ -143,7 +143,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val dirtyVs = Bool()
   }
 
-  def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop): Unit = {
+  def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop)(implicit p: Parameters): Unit = {
     robEntry.wflags := robEnq.wfflags
     robEntry.commitType := robEnq.commitType
     robEntry.ftqIdx := robEnq.ftqPtr
@@ -152,7 +152,9 @@ object RobBundles extends HasCircularQueuePtrHelper {
     // robEntry.needVTB will be asserted by the first uop, so set it false here
     robEntry.needVTB := robEnq.isVset || robEnq.vpu.isVleff
     robEntry.isHls := robEnq.isHls
-    robEntry.rfWen := robEnq.rfWen
+    // Zicfiss: internal integer logical registers, such as IntSSPTmpReg,
+    // participate in rename but must not appear as architectural commit writes.
+    robEntry.rfWen := robEnq.rfWen && (if (p(XSCoreParamsKey).HasShadowStack) robEnq.ldest < 32.U else true.B)
     robEntry.fpWen := robEnq.dirtyFs
     robEntry.dirtyVs := robEnq.dirtyVs
     // flushPipe needFlush but not exception

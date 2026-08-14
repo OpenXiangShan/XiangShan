@@ -1021,7 +1021,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enqRobIdxSeq = io.enq.req.map(req => req.bits.robIdx.value)
   val enqUopNumVec = VecInit(io.enq.req.map(req => req.bits.numUops))
   val enqWBNumVec = VecInit(io.enq.req.map(req => req.bits.numWB))
-  private val enqWriteStdVec = VecInit(io.enq.req.map(req => req.bits.stdwriteNeed))
+  private val enqWriteStdVec = VecInit(io.enq.req.map{req =>
+    val isZicfissSplitStoreHead = req.bits.commitType === CommitType.STORE &&
+      FuType.isCsr(req.bits.fuType) && req.bits.ldest >= 32.U
+    req.bits.stdwriteNeed || (if (HasShadowStack) isZicfissSplitStoreHead else false.B)})
+  // Complex decode counts SSPUSH's store as one uop, while the backend sends
+  // separate STA and STD writebacks for it.
+  private val enqSspushExtraWbVec = VecInit(io.enq.req.map { req =>
+    if (HasShadowStack) {
+      req.bits.commitType === CommitType.STORE && FuType.isCsr(req.bits.fuType) && req.bits.ldest >= 32.U
+    } else {
+      false.B
+    }
+  })
 
   val fflags_wb = fflagsWBs
   val vxsat_wb = vxsatWBs
@@ -1042,7 +1054,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
     val enqUopNum = PriorityMux(instCanEnqSeq, enqUopNumVec)
     val enqWBNum = PriorityMux(instCanEnqSeq, enqWBNumVec)
-    val enqWriteStd = PriorityMux(instCanEnqSeq, enqWriteStdVec)
+    val enqSspushExtraWb = PriorityMux(instCanEnqSeq, enqSspushExtraWbVec)
 
     val canWbSeq = exuWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
     val wbCnt = Mux1H(canWbSeq, io.writebackNums.map(_.bits))
@@ -1060,7 +1072,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       robEntries(i).uopNum := robEntries(i).uopNum - wbCnt
     }.elsewhen(!robEntries(i).valid && instCanEnqFlag) {
       // enq set num of uops
-      robEntries(i).uopNum := enqWBNum
+      robEntries(i).uopNum := enqWBNum +& enqSspushExtraWb
     }.elsewhen(robEntries(i).valid) {
       // update by writing back
       robEntries(i).uopNum := robEntries(i).uopNum - wbCnt
@@ -1109,7 +1121,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
     val enqUopNum = PriorityMux(instCanEnqSeq, enqUopNumVec)
     val enqWBNum = PriorityMux(instCanEnqSeq, enqWBNumVec)
-    val enqWriteStd = PriorityMux(instCanEnqSeq, enqWriteStdVec)
+    val enqSspushExtraWb = PriorityMux(instCanEnqSeq, enqSspushExtraWbVec)
 
     val canWbSeq = exuWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i))
     val wbCnt = Mux1H(canWbSeq, io.writebackNums.map(_.bits))
@@ -1127,7 +1139,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       needUpdate(i).uopNum := robBanksRdata(i).uopNum - wbCnt
     }.elsewhen(!needUpdate(i).valid && instCanEnqFlag) {
       // enq set num of uops
-      needUpdate(i).uopNum := enqWBNum
+      needUpdate(i).uopNum := enqWBNum +& enqSspushExtraWb
     }.elsewhen(needUpdate(i).valid) {
       // update by writing back
       needUpdate(i).uopNum := robBanksRdata(i).uopNum - wbCnt

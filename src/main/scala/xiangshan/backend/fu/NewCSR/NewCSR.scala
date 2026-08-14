@@ -7,7 +7,7 @@ import org.chipsalliance.cde.config.Parameters
 import top.{ArgParser, Generator}
 import utility._
 import utils.OptionWrapper
-import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
+import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, HasShadowStackEnvBundle, PrivState, RobCommitCSR}
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSRFunc._
@@ -226,6 +226,11 @@ class NewCSR(implicit val p: Parameters) extends Module
         val hstatus = UInt(2.W)
         val senvcfg = UInt(2.W)
       }
+      val SSEVec = new Bundle {
+        val menvcfgSSE = Bool()
+        val henvcfgSSE = Bool()
+        val senvcfgSSE = Bool()
+      }
     })
 
     val toDecode = new CSRToDecode
@@ -322,6 +327,15 @@ class NewCSR(implicit val p: Parameters) extends Module
   val legalMret  = permitMod.io.out.hasLegalMret
   val legalMNret = permitMod.io.out.hasLegalMNret
   val legalDret  = permitMod.io.out.hasLegalDret
+
+  // Zicfiss: whether enable shadow stack for current privilege mode.
+  // M-mode does not activate Zicfiss.
+  val enableZicfiss =
+    isModeHS && menvcfg.regOut.SSE.asBool ||
+    isModeHU && menvcfg.regOut.SSE.asBool && senvcfg.regOut.SSE.asBool ||
+    isModeVS && menvcfg.regOut.SSE.asBool && henvcfg.regOut.SSE.asBool ||
+    isModeVU && menvcfg.regOut.SSE.asBool && henvcfg.regOut.SSE.asBool && senvcfg.regOut.SSE.asBool
+  dontTouch(enableZicfiss)
 
   private val wenLegalReg = GatedValidRegNext(wenLegal)
 
@@ -537,6 +551,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   permitMod.io.in.xenvcfg.menvcfg := menvcfg.rdata
   permitMod.io.in.xenvcfg.henvcfg := henvcfg.rdata
+  permitMod.io.in.xenvcfg.senvcfg.foreach(_ := senvcfg.rdata)
 
   permitMod.io.in.status.mstatusFSOff  :=  mstatus.regOut.FS === ContextStatus.Off
   permitMod.io.in.status.mstatusVSOff  :=  mstatus.regOut.VS === ContextStatus.Off
@@ -758,6 +773,15 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.henvcfg := henvcfg.regOut
         m.menvcfg := menvcfg.regOut
       case _ =>
+    }
+    if (HasShadowStack) {
+      mod match {
+        case m: HasShadowStackEnvBundle =>
+          m.menvcfg := menvcfg.regOut
+          m.henvcfg := henvcfg.regOut
+          m.privState := privState
+        case _ =>
+      }
     }
     mod match {
       case m: HasIpIeBundle =>
@@ -1550,6 +1574,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.tlb.pmm.henvcfg := RegNext(henvcfg.regOut.PMM.asUInt)
   io.tlb.pmm.hstatus := RegNext(hstatus.regOut.HUPMM.asUInt)
   io.tlb.pmm.senvcfg := RegNext(senvcfg.regOut.PMM.asUInt)
+  io.tlb.SSEVec.menvcfgSSE := (if (HasShadowStack) RegNext(menvcfg.regOut.SSE.asUInt) else DontCare)
+  io.tlb.SSEVec.henvcfgSSE := (if (HasShadowStack) RegNext(henvcfg.regOut.SSE.asUInt) else DontCare)
+  io.tlb.SSEVec.senvcfgSSE := (if (HasShadowStack) RegNext(senvcfg.regOut.SSE.asUInt) else DontCare)
 
   io.toDecode.illegalInst.mfence.foreach(_ := !isModeM)
 
@@ -1569,6 +1596,24 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.toDecode.illegalInst.wrs_nto    := !isModeM && mstatus.regOut.TW
   io.toDecode.virtualInst.wrs_nto    := privState.V && !mstatus.regOut.TW && hstatus.regOut.VTW
   io.toDecode.illegalInst.frm        := frmIsReserved
+  // Zicfiss
+  if(HasShadowStack) {
+    io.toDecode.enableZicfiss.get := enableZicfiss
+
+    // SSAMOSWAP has mode-specific exception classification. In M-mode the
+    // instruction must proceed to the AMO/TLB path and fault as a shadow-
+    // stack memory access, rather than being rejected during decode.
+    io.toDecode.illegalInst.ssamoswap.get :=
+      !isModeM && (
+        !menvcfg.regOut.SSE.asBool ||
+        (isModeHU && !senvcfg.regOut.SSE.asBool)
+      )
+    io.toDecode.virtualInst.ssamoswap.get :=
+      menvcfg.regOut.SSE.asBool && (
+        (isModeVS && !henvcfg.regOut.SSE.asBool) ||
+        (isModeVU && (!henvcfg.regOut.SSE.asBool || !senvcfg.regOut.SSE.asBool))
+      )
+  }
   // Ref: The RISC-V Instruction Set Manual Volume I - 20.5. Control and Status Register State
   io.toDecode.illegalInst.cboZ       := !isModeM && !menvcfg.regOut.CBZE || isModeHU && !senvcfg.regOut.CBZE
   io.toDecode.virtualInst.cboZ       := menvcfg.regOut.CBZE && (
@@ -1627,7 +1672,17 @@ class NewCSR(implicit val p: Parameters) extends Module
     val hartId = io.fromTop.hartId
     val trapValid = pendingTrap && !io.fromVecExcpMod.busy
     val interrupt = trapHandleMod.io.out.causeNO.Interrupt.asBool
-    val trapNO = Mux(virtualInterruptIsHvictlInject && interrupt, hvictl.regOut.IID.asUInt, trapHandleMod.io.out.causeNO.ExceptionCode.asUInt)
+    val rawTrapNO = trapHandleMod.io.out.causeNO.ExceptionCode.asUInt
+    val architecturalTrapNO = Mux(
+      !interrupt && rawTrapNO === ExceptionNO.zicfissSoftwareCheck.U,
+      ExceptionNO.softwareCheck.U,
+      rawTrapNO
+    )
+    val trapNO = Mux(
+      virtualInterruptIsHvictlInject && interrupt,
+      hvictl.regOut.IID.asUInt,
+      if(HasShadowStack) architecturalTrapNO else rawTrapNO
+    )
     val hasNMI = nmi && hasTrap
     val interruptNO = Mux(interrupt, trapNO, 0.U)
     val exceptionNO = Mux(!interrupt, trapNO, 0.U)

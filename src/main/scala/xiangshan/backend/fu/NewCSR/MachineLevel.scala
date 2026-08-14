@@ -19,6 +19,7 @@ import xiangshan.backend.decode.isa.CSRs
 import system.HasSoCParameter
 import utility.ZeroExt
 import scala.collection.immutable.SeqMap
+import xiangshan.HasXSParameter
 
 trait MachineLevel { self: NewCSR =>
   // Machine level Custom Read/Write
@@ -778,7 +779,7 @@ class Mtval2Bundle extends FieldInitBundle(Some("Guest physical address or addit
 
 class MhpmcounterBundle extends FieldInitBundle(Some("Hardware performance-monitoring counter value."))
 
-class MEnvCfg extends EnvCfg {
+class MEnvCfg(implicit p: Parameters) extends EnvCfg {
   if (CSRConfig.EXT_SSTC) {
     this.STCE.setRW().withReset(1.U)
   }

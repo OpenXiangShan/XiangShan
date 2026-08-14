@@ -254,6 +254,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val scheduled = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val uop = Reg(Vec(LoadQueueReplaySize, new DynInst))
   val isNC = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
+  val sspCheckValues = Option.when(HasShadowStack) {
+    Reg(Vec(LoadQueueReplaySize, UInt(XLEN.W)))
+  }
+  val sspValues = Option.when(HasShadowStack) {
+    Reg(Vec(LoadQueueReplaySize, UInt(XLEN.W)))
+  }
   val vecReplay = Reg(Vec(LoadQueueReplaySize, new VecReplayInfo))
   val vaddrModule = Module(new LqVAddrModule(
     gen = UInt(VAddrBits.W),
@@ -683,10 +689,25 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val s2_replayCauses = RegEnable(cause(s1_replayIdx), s1_can_go(i))
     s2_cancelReplay(i) := s2_replayUop.robIdx.needFlush(io.redirect)
 
+    val s2_sspCheckValue = sspCheckValues.map { values =>
+      RegEnable(values(s1_replayIdx), s1_can_go(i))
+    }
+    val s2_sspValue = sspValues.map { values =>
+      RegEnable(values(s1_replayIdx), s1_can_go(i))
+    }
+
     s2_can_go(i) := DontCare
     val replay_req_vaddr = vaddrModule.io.rdata(i)
     val replay_req_size = LSUOpType.size(s2_replayUop.fuOpType)
     replay_req(i).valid := s2_oldestSel(i).valid && !s2_cancelReplay(i)
+    s2_sspCheckValue.foreach { value =>
+      replay_req(i).bits.sspCheckValue.get := value
+    }
+    s2_sspValue.foreach { value =>
+      replay_req(i).bits.sspValue.get := value
+    }
+    replay_req(i).bits.sspNextValue.foreach(_ := DontCare)
+
     replay_req(i).bits.entrance := Mux(
       s2_replayCauses(LoadReplayCauses.C_DM) || s2_replayCauses(LoadReplayCauses.C_UNCACHE),
       LoadEntrance.replayHiPrio.U,
@@ -794,6 +815,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       freeList.io.doAllocate(w) := !enq.bits.isLoadReplay
 
       //  Allocate new entry
+      sspCheckValues.foreach { values =>
+        values(enqIndex) := enq.bits.sspCheckValue.get
+      }
+      sspValues.foreach { values =>
+        values(enqIndex) := enq.bits.sspValue.get
+      }
       allocated(enqIndex) := true.B
       scheduled(enqIndex) := false.B
       uop(enqIndex)       := enq.bits.uop

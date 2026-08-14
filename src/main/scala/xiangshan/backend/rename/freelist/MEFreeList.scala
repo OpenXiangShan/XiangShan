@@ -24,7 +24,7 @@ import utils._
 import utility._
 
 
-class MEFreeList(size: Int, commitWidth: Int)(implicit p: Parameters) extends BaseFreeList(size, commitWidth) with HasPerfEvents {
+class MEFreeList(size: Int, commitWidth: Int)(implicit p: Parameters) extends BaseFreeList(size, commitWidth) with HasPerfEvents with HasXSParameter{
   val freeList = RegInit(VecInit(
     // originally {1, 2, ..., size - 1} are free. Register 0-31 are mapped to x0.
     Seq.tabulate(size - 1)(i => (i + 1).U(PhyRegIdxWidth.W)) :+ 0.U(PhyRegIdxWidth.W)))
@@ -98,8 +98,8 @@ class MEFreeList(size: Int, commitWidth: Int)(implicit p: Parameters) extends Ba
 
   if(backendParams.debugEn){
     val debugArchHeadPtr = RegNext(RegNext(archHeadPtr, FreeListPtr(false, 0)), FreeListPtr(false, 0)) // two-cycle delay from refCounter
-    val debugArchRAT = RegNext(RegNext(io.debug_rat.get, VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W)))), VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
-    val debugUniqPR = Seq.tabulate(32)(i => i match {
+    val debugArchRAT = RegNext(RegNext(io.debug_rat.get, VecInit(Seq.fill(IntLogicRegs)(0.U(PhyRegIdxWidth.W)))), VecInit(Seq.fill(IntLogicRegs)(0.U(PhyRegIdxWidth.W))))
+    val debugUniqPR = Seq.tabulate(IntLogicRegs)(i => i match {
       case 0 => true.B
       case _ => !debugArchRAT.take(i).map(_ === debugArchRAT(i)).reduce(_ || _)
     })

@@ -14,7 +14,6 @@ import xiangshan.backend.decode.isa.CSRs
 import scala.collection.immutable.SeqMap
 
 trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
-
   val fcsr = Module(new CSRModule("Fcsr", new CSRBundle {
     val NX = WARL(0, wNoFilter).withDescription("Inexact accrued exception flag.")
     val UF = WARL(1, wNoFilter).withDescription("Underflow accrued exception flag.")
@@ -129,6 +128,13 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   }))
     .setAddr(CSRs.vlenb)
 
+  // Zicfiss: shadow stack pointer CSR.
+  val ssp = if (HasShadowStack) Some(Module(new CSRModule("Ssp", new CSRBundle {
+    // XiangShan is RV64-only here, so ssp[2:0] are read-only zero.
+    val ssp = RW(63, 3).withReset(0.U)
+  }))
+    .setAddr(CSRs.ssp)) else None
+
   val cycle = Module(new CSRModule("cycle", new CSRBundle {
     val cycle = RO(63, 0).withDescription("Counter value.")
   }) with HasMHPMSink with HasDebugStopBundle {
@@ -206,8 +212,9 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     CSRs.cycle  -> (cycle.w           -> cycle.rdata),
     CSRs.time   -> (time.w            -> time.rdata),
     CSRs.instret -> (instret.w        -> instret.rdata),
-  ) ++ hpmcounters.map(counter => (counter.addr -> (counter.w -> counter.rdata)))
-
+  ) ++ hpmcounters.map(counter => (counter.addr -> (counter.w -> counter.rdata))) ++
+    (if (HasShadowStack) SeqMap(CSRs.ssp -> (ssp.get.w -> ssp.get.rdata)) else SeqMap())
+    // Zicfiss: ssp CSR read/write mapping
   val unprivilegedCSRMods: Seq[CSRModule[_]] = Seq(
     fcsr,
     vcsr,
@@ -218,7 +225,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     cycle,
     time,
     instret,
-  ) ++ hpmcounters
+  ) ++ hpmcounters ++ (if (HasShadowStack) Seq(ssp.get) else Seq())
 
   val unprivilegedCSROutMap: SeqMap[Int, UInt] = SeqMap(
     CSRs.fflags  -> fcsr.fflags.asUInt,
@@ -234,7 +241,8 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     CSRs.cycle   -> cycle.rdata,
     CSRs.time    -> time.rdata,
     CSRs.instret -> instret.rdata,
-  ) ++ hpmcounters.map(counter => (counter.addr -> counter.rdata))
+  ) ++ hpmcounters.map(counter => (counter.addr -> counter.rdata)) ++
+    (if (HasShadowStack) SeqMap(CSRs.ssp -> ssp.get.rdata.asUInt) else SeqMap())
 }
 
 class CSRVTypeBundle extends CSRBundle {

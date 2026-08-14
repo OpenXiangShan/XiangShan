@@ -524,7 +524,7 @@ class TlbMbmcBundle(implicit p: Parameters) extends MbmcStruct {
   }
 }
 
-class MmptStruct(implicit p: Parameters) extends XSBundle { // add new mpt csr 
+class MmptStruct(implicit p: Parameters) extends XSBundle { // add new mpt csr
     val mode = UInt(4.W)
     val sdid = UInt(6.W)
     val optOutInNode = UInt(1.W) // skip intermediate node MPT check
@@ -562,7 +562,11 @@ class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
     val hstatus = UInt(2.W)
     val senvcfg = UInt(2.W)
   }
-
+  val SSEVec = new Bundle {
+    val menvcfgSSE = Bool()
+    val henvcfgSSE = Bool()
+    val senvcfgSSE = Bool()
+  }
   override def toPrintable: Printable = {
     p"Satp mode:0x${Hexadecimal(satp.mode)} asid:0x${Hexadecimal(satp.asid)} ppn:0x${Hexadecimal(satp.ppn)} " +
       p"Priv mxr:${priv.mxr} sum:${priv.sum} imode:${priv.imode} dmode:${priv.dmode}"

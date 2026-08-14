@@ -147,7 +147,7 @@ class TLBFA(
           resp.bits.mptperm.get(d).x := mptperm.get(0).x
           resp.bits.mptperm.get(d).w := mptperm.get(0).w
           resp.bits.mptperm.get(d).r := mptperm.get(0).r
-          resp.bits.mptperm.get(d).af.get := false.B
+          // resp.bits.mptperm.get(d).af.get := false.B
         }
       }
     } else {
@@ -164,7 +164,7 @@ class TLBFA(
             resp.bits.mptperm.get(d).x := mptpermtmp.x
             resp.bits.mptperm.get(d).w := mptpermtmp.w
             resp.bits.mptperm.get(d).r := mptpermtmp.r
-            resp.bits.mptperm.get(d).af.get := false.B
+            // resp.bits.mptperm.get(d).af.get := false.B
           }
         }
       }
