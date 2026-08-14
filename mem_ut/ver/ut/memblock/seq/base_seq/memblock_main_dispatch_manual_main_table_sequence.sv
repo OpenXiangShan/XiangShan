@@ -27,7 +27,14 @@ function memblock_main_dispatch_manual_main_table_sequence::new(string name = "m
 endfunction:new
 
 task memblock_main_dispatch_manual_main_table_sequence::body();
+    if (memblock_sync_pkg::get_control_worker_topology_mode() !=
+        memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_MANUAL_MAIN_TABLE) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("manual main sequence requires MANUAL_MAIN_TABLE mode, got %0d",
+                             memblock_sync_pkg::get_control_worker_topology_mode()))
+    end
     build_directed_mixed_main_table();
+    check_main_table_control_policy("memblock_main_dispatch_manual_main_table_sequence");
     `uvm_info(get_type_name(),
               $sformatf("real mixed dispatch smoke main table ready: main_trans_num=%0d",
                         data.main_trans_num),
