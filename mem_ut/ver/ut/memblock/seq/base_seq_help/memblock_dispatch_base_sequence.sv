@@ -28,6 +28,11 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
     lsq_commit_handler monitor_commit_handler;
     memblock_control_barrier_service control_barrier_service;
     dispatch_monitor_event_adapter monitor_adapter;
+    // 中文注释：主 dispatch sequence 的公共运行期 helper 初始化完成标记。
+    // 写入：pre_body() 或 build_main_table() 首次进入时。
+    // 作用：child sequence 经 uvm_do_on 启动时不会执行 pre_body()，因此建表入口必须
+    // 自行保证 helper 已构造且 LSQ runtime 已复位；同一 sequence 内不得重复复位。
+    bit dispatch_runtime_helpers_initialized;
     main_control_transaction manual_main_table_by_rob[int unsigned];
     memblock_boundary_profile_candidate_t boundary_profile_cache[$];
     bit boundary_candidate_cache_built;
@@ -38,6 +43,7 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
     extern virtual task pre_body();
     extern virtual task body();
     extern virtual task post_body();
+    extern virtual task ensure_dispatch_runtime_helpers();
     extern virtual task build_main_table();
     extern virtual task build_random_main_table(input int unsigned main_trans_num_i);
     extern virtual task build_control_auto_main_table(input int unsigned normal_main_trans_num);
@@ -195,10 +201,21 @@ endclass:memblock_dispatch_base_sequence
 function memblock_dispatch_base_sequence::new(string name = "memblock_dispatch_base_sequence");
     super.new(name);
     boundary_candidate_cache_built = 1'b0;
+    dispatch_runtime_helpers_initialized = 1'b0;
 endfunction:new
 
 task memblock_dispatch_base_sequence::pre_body();
     super.pre_body();
+    ensure_dispatch_runtime_helpers();
+endtask:pre_body
+
+// 抽象职责：为主 dispatch flow 构造一次共享数据、handler、adapter 与 control service，
+// 并复位本轮 LSQ runtime。该函数可由 pre_body() 或建表入口调用，保证 uvm_do_on
+// 启动的 child sequence 不依赖不会执行的 pre_body()；它不建表、不分配 UID。
+task memblock_dispatch_base_sequence::ensure_dispatch_runtime_helpers();
+    if (dispatch_runtime_helpers_initialized) begin
+        return;
+    end
     seq_csr_common::init();
     data = common_data_transaction::get();
     if (lsq_ctrl == null) begin
@@ -236,7 +253,8 @@ task memblock_dispatch_base_sequence::pre_body();
     if (memblock_sync_pkg::l2tlb_dispatch_active()) begin
         memblock_sync_pkg::register_l2tlb_adapter_service(get_full_name());
     end
-endtask:pre_body
+    dispatch_runtime_helpers_initialized = 1'b1;
+endtask:ensure_dispatch_runtime_helpers
 
 task memblock_dispatch_base_sequence::body();
     `uvm_info(get_type_name(), "Task1 skeleton only; dispatch framework flow is not enabled yet.", UVM_LOW)
@@ -253,9 +271,7 @@ endtask:post_body
 task memblock_dispatch_base_sequence::build_main_table();
     memblock_sync_pkg::memblock_control_worker_topology_mode_e topology_mode;
 
-    if (data == null) begin
-        data = common_data_transaction::get();
-    end
+    ensure_dispatch_runtime_helpers();
 
     topology_mode = memblock_sync_pkg::get_control_worker_topology_mode();
     case (topology_mode)

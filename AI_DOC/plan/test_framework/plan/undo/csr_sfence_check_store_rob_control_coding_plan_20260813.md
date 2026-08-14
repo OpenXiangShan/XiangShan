@@ -700,6 +700,18 @@ main_phase：
 
 影响范围：修改 worker 启动/关闭责任、`basicTest` 与 legacy real-smoke 的 mode 兼容检查、VSEQ 入口和相关 preset；不改变 plus 为唯一 topology 输入、控制标记/ROB/CSR/SFence/flushSb/L2 flush 的主体状态机，也不改变普通 mode=`0/2` 的 legacy 行为。
 
+### [IMPLEMENTATION_DELTA] 主 dispatch helper 在建表入口保证初始化
+
+来源：专项 `basicTest + memblock_dispatch_real_smoke_vseq` 首次运行显示，`uvm_do_on()` 以 `call_pre_post=0` 启动其 child main sequence，因此 `memblock_dispatch_base_sequence::pre_body()` 不会执行。新加入的 `control_barrier_service` 原本仅在该回调中构造，AUTO 建表完成后调用 bootstrap 时发生空对象访问。
+
+原 plan：主 dispatch sequence 的 `pre_body()` 在建表前完成 data、LSQ runtime、handler、adapter 与 control barrier service 的初始化；后续 `build_main_table()` 直接进入 AUTO/legacy 分流。
+
+实现调整：新增幂等的 `ensure_dispatch_runtime_helpers()`。`pre_body()` 与 `build_main_table()` 都调用它；首次调用统一构造上述 helper、复位本轮 LSQ runtime，并在 active topology 时注册现有 L2TLB adapter service。函数不建表、不分配 UID、不推进控制状态。这样显式 VSEQ child 启动与未来直接 `start(..., call_pre_post=1)` 的入口得到相同初始化结果。
+
+原因：保持项目规定的 VSEQ 经 `uvm_do_on` 调度方式，不为解决单个 helper 初始化而修改所有 child sequence 的 `call_pre_post` 语义；同时避免控制 service 与既有 dispatch helper 走两套初始化路径。
+
+影响范围：`memblock_dispatch_base_sequence` 的内部初始化边界和专项仿真；不改变任何 worker、ROB、CSR、SFence、flushSb 或 L2 flush 对外状态机。
+
 ## 与初步 plan 差异说明
 
 本章只记录相对于两份 flow 草案和现有框架行为的功能实现差异，coding 时以正文前述最终 flow 为准。
