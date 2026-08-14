@@ -159,8 +159,8 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val fixedIsJumpNext      = RegEnable(fixedIsJump, io.req.valid)
   private val endOffsetNext        = RegEnable(endOffset, io.req.valid)
   private val finalPcNext          = RegEnable(finalPc, io.req.valid)
+  private val fixedTakenNext       = RegEnable(fixedTaken, io.req.valid)
   private val wbValid              = RegNext(io.req.valid, init = false.B)
-  private val fixedTakenNext       = RegNext(fixedTaken, init = false.B)
 
   private val fixedTarget = Mux(
     fixedIsJumpNext,
