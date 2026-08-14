@@ -1,5 +1,6 @@
 package xiangshan.backend.vector.Decoder.Uop
 
+import chisel3._
 import chisel3.util.BitPat
 import xiangshan.backend.decode.opcode.Opcode.Opcode
 import xiangshan.backend.decode.opcode.Opcode.AluOpcodes._
@@ -20,9 +21,62 @@ import xiangshan.backend.decode.opcode.Opcode.JmpOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.StuOpcodes._
 import xiangshan.backend.decode.opcode.Opcode._
 import xiangshan.backend.decode.opcode.OpcodeTraits._
+import xiangshan.backend.vector.Decoder.Types.DecodeSelImm
+import xiangshan.CommitType
+import xiangshan.backend.decode.isa.CSRs
 
 
 object ScalaUopTable {
+  // Split uops may select instruction registers or a fixed logical register.
+  sealed abstract class LogicalRegSel(val encode: Int)
+  object LogicalRegSel {
+    case object Rs1 extends LogicalRegSel(1 << 6)
+    case class Rs2(offset: Int = 0) extends LogicalRegSel((2 << 6) | (offset & 0x3f))
+    case object Rs3 extends LogicalRegSel(3 << 6)
+    case object Rd extends LogicalRegSel(4 << 6)
+    case class RdOffset(offset: Int) extends LogicalRegSel((5 << 6) | (offset & 0x3f))
+    case class Const(index: Int) extends LogicalRegSel((7 << 6) | (index & 0x3f)) {
+      require(index >= 0 && index < 64)
+    }
+    val Zero = Const(0)
+    val width = 9
+  }
+
+  // The value is the packed immediate consumed by ImmUnion, before extension.
+  case class UopImmSpec(sel: UInt, value: Int => BigInt)
+  case class UopMetadata(
+    src1: LogicalRegSel = LogicalRegSel.Rs1,
+    src2: LogicalRegSel = LogicalRegSel.Rs2(),
+    src3: LogicalRegSel = LogicalRegSel.Rs3,
+    dest: LogicalRegSel = LogicalRegSel.Rd,
+    imm: Option[UopImmSpec] = None,
+    commitType: Option[UInt] = None,
+  ) extends OpcodeTrait
+
+  private def withMetadata(op: Opcode, metadata: UopMetadata): Opcode = {
+    val copied = op.copy()
+    copied.setTraits((op.getTraits + metadata).toSeq: _*)
+    copied
+  }
+
+  private def copyWithout(op: Opcode, traits: OpcodeTrait*): Opcode = {
+    val copied = op.copy()
+    copied.setTraits((op.getTraits -- traits).toSeq: _*)
+    copied
+  }
+
+  private def copyWith(op: Opcode, traits: OpcodeTrait*): Opcode = {
+    val copied = op.copy()
+    copied.setTraits((op.getTraits ++ traits).toSeq: _*)
+    copied
+  }
+
+  def metadata(op: Opcode): UopMetadata = {
+    val entries = op.getTraits.collect { case m: UopMetadata => m }
+    require(entries.size <= 1, s"Multiple operand definitions for ${op.name}")
+    entries.headOption.getOrElse(UopMetadata())
+  }
+
   val tableI = {
     import xiangshan.backend.decode.isa.Instructions.{I64Type, IType}
 
@@ -429,11 +483,22 @@ object ScalaUopTable {
     import xiangshan.backend.decode.isa.Instructions.{ZACAS64Type,ZACASType}
 
     val tableZacas64 = ZACAS64Type.mapUopcodes(
-      _.AMOCAS_Q -> Seq(amocas_q_0, amocas_q_1, amocas_q_2, amocas_q_3),
+      _.AMOCAS_Q -> Seq(
+        withMetadata(amocas_q_0, UopMetadata(src1 = LogicalRegSel.Zero)),
+        withMetadata(amocas_q_1, UopMetadata(src1 = LogicalRegSel.Rs1, src2 = LogicalRegSel.Rd, dest = LogicalRegSel.Rd)),
+        withMetadata(amocas_q_2, UopMetadata(src1 = LogicalRegSel.Zero, src2 = LogicalRegSel.Rs2(1))),
+        withMetadata(amocas_q_3, UopMetadata(src1 = LogicalRegSel.Zero, src2 = LogicalRegSel.RdOffset(1), dest = LogicalRegSel.RdOffset(1))),
+      ),
     )
     val tableZacas = ZACASType.mapUopcodes(
-      _.AMOCAS_D -> Seq(amocas_d_0, amocas_d_1),
-      _.AMOCAS_W -> Seq(amocas_w_0, amocas_w_1),
+      _.AMOCAS_D -> Seq(
+        withMetadata(amocas_d_0, UopMetadata(src1 = LogicalRegSel.Zero)),
+        withMetadata(amocas_d_1, UopMetadata(src1 = LogicalRegSel.Rs1, src2 = LogicalRegSel.Rd, dest = LogicalRegSel.Rd)),
+      ),
+      _.AMOCAS_W -> Seq(
+        withMetadata(amocas_w_0, UopMetadata(src1 = LogicalRegSel.Zero)),
+        withMetadata(amocas_w_1, UopMetadata(src1 = LogicalRegSel.Rs1, src2 = LogicalRegSel.Rd, dest = LogicalRegSel.Rd)),
+      ),
     )
 
     tableZacas ++ tableZacas64
@@ -443,8 +508,14 @@ object ScalaUopTable {
     import xiangshan.backend.decode.isa.Instructions.ZABHA_ZACASType
 
     ZABHA_ZACASType.mapUopcodes(
-      _.AMOCAS_B -> Seq(amocas_b_0, amocas_b_1),
-      _.AMOCAS_H -> Seq(amocas_h_0, amocas_h_1),
+      _.AMOCAS_B -> Seq(
+        withMetadata(amocas_b_0, UopMetadata(src1 = LogicalRegSel.Zero)),
+        withMetadata(amocas_b_1, UopMetadata(src1 = LogicalRegSel.Rs1, src2 = LogicalRegSel.Rd, dest = LogicalRegSel.Rd)),
+      ),
+      _.AMOCAS_H -> Seq(
+        withMetadata(amocas_h_0, UopMetadata(src1 = LogicalRegSel.Zero)),
+        withMetadata(amocas_h_1, UopMetadata(src1 = LogicalRegSel.Rs1, src2 = LogicalRegSel.Rd, dest = LogicalRegSel.Rd)),
+      ),
     )
   }
 
@@ -683,6 +754,47 @@ object ScalaUopTable {
     )
 
     tableSvinval ++ tableSvinvalH
+  }
+
+  val tableZicfiss = {
+    import xiangshan.backend.decode.isa.Instructions.ZICFISSType
+    import LogicalRegSel._
+
+    val sspTmp = Const(32)
+    val sspOrder = Const(33)
+    val readImm = UopImmSpec(DecodeSelImm.Z, _ => BigInt((1 << 17) | CSRs.ssp))
+    val writeImm = UopImmSpec(DecodeSelImm.Z, _ => BigInt((1 << 12) | CSRs.ssp))
+    val stepImm = UopImmSpec(DecodeSelImm.I, xlen => BigInt(-xlen / 8) & 0xfff)
+    val zeroImm = UopImmSpec(DecodeSelImm.I, _ => BigInt(0))
+    val noImm = UopImmSpec(DecodeSelImm.NO, _ => BigInt(0))
+
+    def split(op: Opcode, src1: LogicalRegSel, src2: LogicalRegSel, dest: LogicalRegSel,
+              imm: UopImmSpec, commit: UInt): Opcode =
+      withMetadata(op, UopMetadata(src1, src2, Zero, dest, Some(imm), Some(commit)))
+
+    val readSsp = copyWith(copyWithout(set, BlockBack), GpWen)
+    val writeSsp = split(copyWithout(wrt, NoSpec, GpWen), sspTmp, Zero, Zero, writeImm, CommitType.NORMAL)
+    val push = Seq(
+      split(readSsp, Zero, Zero, sspTmp, readImm, CommitType.STORE),
+      split(sspush, sspTmp, Rs2(), Zero, stepImm.copy(sel = DecodeSelImm.S), CommitType.STORE),
+      split(ld, sspTmp, Zero, sspOrder, stepImm, CommitType.LOAD),
+      split(copyWith(sspdec, GpWen), sspTmp, sspOrder, sspTmp, noImm, CommitType.NORMAL),
+      writeSsp,
+    )
+    val pop = Seq(
+      split(readSsp, Zero, Zero, sspTmp, readImm, CommitType.LOAD),
+      split(copyWith(sspopchk, GpWen), sspTmp, Rs1, sspTmp, zeroImm, CommitType.LOAD),
+      writeSsp,
+    )
+    ZICFISSType.mapUopcodes(
+      _.SSPUSH_X1 -> push,
+      _.SSPUSH_X5 -> push,
+      _.SSPOPCHK_X1 -> pop,
+      _.SSPOPCHK_X5 -> pop,
+      _.SSRDP -> Seq(split(copyWith(set, GpWen), Zero, Zero, Rd, readImm, CommitType.NORMAL)),
+      _.SSAMOSWAP_W -> Seq(ssamoswap_w),
+      _.SSAMOSWAP_D -> Seq(ssamoswap_d),
+    )
   }
 
   val tableSmmtt = {

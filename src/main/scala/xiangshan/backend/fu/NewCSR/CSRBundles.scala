@@ -8,6 +8,7 @@ import xiangshan.backend.fu.NewCSR.CSRDefines.{CSRROField => RO, CSRRWField => R
 import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.fpu.Bundles.Fflags
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxsat}
+import xiangshan.HasXSParameter
 import xiangshan.frontend.bpu.BpuCtrl
 import xiangshan.mem.prefetch.PrefetchCtrl
 import chisel3.experimental.noPrefix
@@ -64,7 +65,7 @@ object CSRBundles {
     val ALL = RO(width - 1, 0).withReset(0.U).withDescription(description)
   }
 
-  abstract class EnvCfg extends CSRBundle {
+  abstract class EnvCfg(implicit val p: Parameters) extends CSRBundle with HasXSParameter {
     // Set all fields not supported as RO in base class
     val STCE  =      RO(    63)           .withReset(0.U).withDescription("Enable supervisor and virtual-supervisor timer compare CSRs from the Sstc extension.")
     val PBMTE =      RO(    62)           .withReset(0.U).withDescription("Enable page-based memory types during address translation from the Svpbmt extension.")
@@ -75,9 +76,19 @@ object CSRBundles {
     val CBZE  =      RW(     7)           .withReset(1.U).withDescription("Enable cache-block zero operations from the Zicboz extension.")
     val CBCFE =      RW(     6)           .withReset(1.U).withDescription("Enable cache-block clean-and-flush operations from the Zicbom extension.")
     val CBIE  = EnvCBIE( 5,  4, wNoEffect).withReset(EnvCBIE.Inval).withDescription("Enable cache-block invalidate operations from the Zicbom extension.")
-    val SSE   =      RO(     3)           .withReset(0.U).withDescription("Enable the Zicfiss shadow-stack extension below M-mode.")
+    val SSE   = (if (HasShadowStack) RW(3) else RO(3))
+      .withReset(0.U).withDescription("Enable the Zicfiss shadow-stack extension below M-mode.")
     val LPE   =      RO(     2)           .withReset(0.U).withDescription("Enable the Zicfilp landing-pad extension.")
     val FIOM  =      RO(     0)           .withReset(0.U).withDescription("Fence of I/O implies memory ordering.")
+  }
+
+  // xenvcfg.SSE has hierarchical visibility rules. The lower-level CSR
+  // modules use this bundle to mask the effective value and to ignore writes
+  // while an upper-level SSE bit is closed.
+  trait HasShadowStackEnvBundle { self: CSRModule[_] =>
+    val menvcfg = IO(Input(new MEnvCfg))
+    val henvcfg = IO(Input(new HEnvCfg))
+    val privState = IO(Input(new PrivState))
   }
 
   class PrivState extends Bundle { self =>
