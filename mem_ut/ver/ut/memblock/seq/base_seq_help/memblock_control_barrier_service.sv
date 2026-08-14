@@ -283,7 +283,18 @@ function void memblock_control_barrier_service::enqueue_csr_action(
         snapshot_seq < baseline.first_snapshot_seq) begin
         `uvm_fatal(get_type_name(), "CSR action attempted to use a non-current runtime baseline")
     end
-    action = '{default:'0};
+    action = '{
+        default: '0,
+        owner: '{
+            valid: 1'b0,
+            uid: 0,
+            dynamic_epoch: 0,
+            action_generation: 0,
+            kind: MEMBLOCK_CONTROL_KIND_NONE
+        },
+        completion_profile: MEMBLOCK_CONTROL_COMPLETION_NONE,
+        l2_flush_phase: MEMBLOCK_L2_FLUSH_PHASE_NONE
+    };
     action.owner = status.control_owner;
     action.completion_profile = MEMBLOCK_CONTROL_COMPLETION_RUNTIME_CSR_SNAPSHOT;
     action.csr_baseline_valid = 1'b1;
@@ -434,7 +445,20 @@ function void memblock_control_barrier_service::enqueue_sfence_action(
         !memblock_sync_pkg::l2tlb_post_reset_baseline_done(reset_epoch)) begin
         return;
     end
-    action = '{default:'0};
+    action = '{
+        default: '0,
+        owner: '{
+            valid: 1'b0,
+            uid: 0,
+            dynamic_epoch: 0,
+            action_generation: 0,
+            kind: MEMBLOCK_CONTROL_KIND_NONE
+        },
+        expected_fence: '{
+            default: '0,
+            target_stage: MEMBLOCK_SFENCE_TARGET_HS_S1
+        }
+    };
     action.owner = status.control_owner;
     status.control_action_enqueued = 1'b1;
     status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
@@ -532,7 +556,18 @@ function void memblock_control_barrier_service::enqueue_check_store_l2_assert(
         snapshot_seq < baseline.first_snapshot_seq) begin
         `uvm_fatal(get_type_name(), "check_store L2 ASSERT attempted to use a non-current CSR baseline")
     end
-    action = '{default:'0};
+    action = '{
+        default: '0,
+        owner: '{
+            valid: 1'b0,
+            uid: 0,
+            dynamic_epoch: 0,
+            action_generation: 0,
+            kind: MEMBLOCK_CONTROL_KIND_NONE
+        },
+        completion_profile: MEMBLOCK_CONTROL_COMPLETION_NONE,
+        l2_flush_phase: MEMBLOCK_L2_FLUSH_PHASE_NONE
+    };
     action.owner = status.control_owner;
     action.completion_profile = MEMBLOCK_CONTROL_COMPLETION_L2_FLUSH_LEVEL;
     action.l2_flush_phase = MEMBLOCK_L2_FLUSH_PHASE_ASSERT;
@@ -564,7 +599,16 @@ function void memblock_control_barrier_service::enqueue_check_store_l2_release(
         observation.observation_seq <= status.control_assert_done_baseline_seq) begin
         `uvm_fatal(get_type_name(), "invalid check_store L2 RELEASE completion")
     end
-    request = '{default:'0};
+    request = '{
+        default: '0,
+        owner: '{
+            valid: 1'b0,
+            uid: 0,
+            dynamic_epoch: 0,
+            action_generation: 0,
+            kind: MEMBLOCK_CONTROL_KIND_NONE
+        }
+    };
     request.owner = status.control_owner;
     request.control_reset_epoch = status.control_reset_epoch;
     request.release_baseline_observation_seq = observation.observation_seq;

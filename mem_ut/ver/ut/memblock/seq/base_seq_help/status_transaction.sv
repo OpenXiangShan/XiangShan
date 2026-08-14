@@ -203,7 +203,10 @@ class status_transaction extends uvm_object;
         control_expected_runtime_csr_valid = 1'b0;
         control_expected_runtime_csr = '{default:'0};
         control_expected_sfence_valid = 1'b0;
-        control_expected_sfence = '{default:'0};
+        control_expected_sfence = '{
+            default: '0,
+            target_stage: MEMBLOCK_SFENCE_TARGET_HS_S1
+        };
         control_l2_csr_baseline_valid = 1'b0;
         control_l2_csr_baseline = '{default:'0};
         control_flushsb_req_id = 0;
