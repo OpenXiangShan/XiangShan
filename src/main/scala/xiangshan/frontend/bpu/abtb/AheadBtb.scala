@@ -364,7 +364,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     r.io.writeSetIdx := b.io.writeResp.bits.setIdx
     r.io.writeWayIdx := b.io.writeResp.bits.wayIdx
   }
-
+  // update replacer -- Allocation touch and training touch are triggered at different times,
+  // so they cannot share the same interface.
   replacers.zipWithIndex.foreach { case (r, i) =>
     r.io.readValid   := t2_fire && t2_trainTaken && t2_bankMask(i) && t2_hit
     r.io.readSetIdx  := t2_setIdx
