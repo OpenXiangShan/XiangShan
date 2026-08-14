@@ -182,16 +182,24 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
            memblock_sync_pkg::reset_backend_done==1'b1 &&
            !memblock_sync_pkg::l2tlb_reset_active()) begin
             bit any_mmio_valid;
+            bit control_reset_ack_sample;
+            int unsigned control_reset_epoch;
 
             // This monitor is a same-edge consumer/producer only. The CSR
             // monitor owns reset re-arm and advancement; ctrl data is only
             // anchored after the shared reset boundary has closed.
             memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
 
-            // 中文注释：控制屏障的 sbIsEmpty 事实独立于 semantic raw capture gate 发布。
-            // 即使当前没有 flushSb request，序号也持续递增，后续 sendover 可排除旧 level。
-            memblock_sync_pkg::publish_control_sb_is_empty_observation(
-                io_mem_to_ooo_sbIsEmpty, sample_seq);
+            // 中文注释：首个 post-reset sample 只完成 ctrl monitor ack；ready 后的
+            // 下一 sample 才发布 sbIsEmpty，使 sendover 不会消费 request 前的高电平。
+            control_reset_ack_sample =
+                memblock_sync_pkg::control_ctrl_monitor_reset_ack_needed(control_reset_epoch);
+            if (control_reset_ack_sample) begin
+                memblock_sync_pkg::ack_control_ctrl_monitor_reset(control_reset_epoch);
+            end else begin
+                memblock_sync_pkg::publish_control_sb_is_empty_observation(
+                    io_mem_to_ooo_sbIsEmpty, sample_seq);
+            end
 
             any_mmio_valid = store_mmio_valid === 1'b1;
             foreach (load_mmio_valid[port]) begin
@@ -265,11 +273,14 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
                 raw_ctrl.sb_is_empty = io_mem_to_ooo_sbIsEmpty;
                 if (!memblock_sync_pkg::get_latest_control_sb_is_empty_observation(
                         sb_is_empty_observation)) begin
-                    `uvm_fatal("CTRL_MONITOR",
-                               "ctrl raw is missing same-sample sbIsEmpty observation")
+                    if (memblock_sync_pkg::dispatch_flushsb_waiting_empty) begin
+                        `uvm_fatal("CTRL_MONITOR",
+                                   "ctrl raw is missing same-sample sbIsEmpty observation")
+                    end
+                end else begin
+                    raw_ctrl.sb_is_empty_observation_seq =
+                        sb_is_empty_observation.observation_seq;
                 end
-                raw_ctrl.sb_is_empty_observation_seq =
-                    sb_is_empty_observation.observation_seq;
                 raw_ctrl.cycle = $time;
                 memblock_sync_pkg::push_raw_ctrl(raw_ctrl);
             end

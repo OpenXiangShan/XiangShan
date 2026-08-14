@@ -137,6 +137,8 @@ task csr_ctrl_agent_agent_monitor::mon_data();
     longint unsigned current_sample_seq;
     longint unsigned reset_epoch;
     int unsigned reset_wait_sample_count;
+    int unsigned control_reset_epoch;
+    bit control_reset_ack_sample;
 
     last_runtime_csr = memblock_sync_pkg::make_empty_raw_csr();
     has_last_runtime_csr = 1'b0;
@@ -389,11 +391,20 @@ task csr_ctrl_agent_agent_monitor::mon_data();
             raw_csr.h_pbmt_en         = io_ooo_to_mem_tlbCsr_hPBMTE;
             raw_csr.cycle             = $time;
 
-            runtime_payload_changed =
-                !has_last_runtime_csr ||
-                memblock_sync_pkg::raw_csr_payload_changed(last_runtime_csr, raw_csr);
-            memblock_sync_pkg::publish_runtime_csr_snapshot(raw_csr,
-                                                             runtime_payload_changed);
+            // 中文注释：当前 control epoch 的第一拍只确认 CSR monitor 已采到
+            // post-reset payload；ready 后下一拍才允许发布 runtime snapshot，防止旧
+            // latest 在 service 创建 token 前成为伪 baseline。
+            control_reset_ack_sample =
+                memblock_sync_pkg::control_csr_monitor_reset_ack_needed(control_reset_epoch);
+            if (control_reset_ack_sample) begin
+                memblock_sync_pkg::ack_control_csr_monitor_reset(control_reset_epoch);
+            end else begin
+                runtime_payload_changed =
+                    !has_last_runtime_csr ||
+                    memblock_sync_pkg::raw_csr_payload_changed(last_runtime_csr, raw_csr);
+                memblock_sync_pkg::publish_runtime_csr_snapshot(raw_csr,
+                                                                 runtime_payload_changed);
+            end
             // History is written every sample, including an unchanged CSR
             // payload, because the DUT consumes a fixed C-2 snapshot.
             memblock_sync_pkg::publish_l2tlb_csr_history(raw_csr,
