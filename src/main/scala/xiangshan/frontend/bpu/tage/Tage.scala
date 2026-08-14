@@ -156,6 +156,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     io.toSc.providerTakenCtrVec(i).bits  := provider.takenCtr
 
     io.meta.entries(i).useProvider       := useProvider
+    io.meta.entries(i).hasProvider       := hasProvider
     io.meta.entries(i).hasAlt            := hasAlt
     io.meta.entries(i).providerTableIdx  := providerTableIdx
     io.meta.entries(i).providerWayIdx    := OHToUInt(provider.hitWayMaskOH)
@@ -199,15 +200,17 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     (mbtbHit, baseCtr, meta)
   }.unzip3
 
-  // if all hit conditional branches use provider and no mispredict, use meta to train
-  private val t0_useMeta = t0_branches.zipWithIndex.map { case (branch, i) =>
+  // Meta stores enough state for provider-only training. Re-read SRAM when an alternate
+  // table entry is needed, or when the prediction was wrong and allocation state is needed.
+  private val t0_needRead = t0_branches.zipWithIndex.map { case (branch, i) =>
     val mbtbHit      = t0_mbtbHitMask(i)
     val isCond       = t0_condMask(i)
     val useProvider  = t0_meta(i).useProvider
+    val hasAlt       = t0_meta(i).hasAlt
     val mispredicted = branch.bits.mispredict
-    !(mbtbHit && isCond) || (useProvider && !mispredicted)
-  }.reduce(_ && _)
-  private val t0_needRead = !t0_useMeta
+    mbtbHit && isCond && (mispredicted || (!useProvider && hasAlt))
+  }.reduce(_ || _)
+  private val t0_useMeta = !t0_needRead
 
   private val t0_readBankConflict = t0_hasCond && t0_needRead && s0_fire && t0_bankIdx === s0_bankIdx
   io.trainReady := !t0_readBankConflict
@@ -343,11 +346,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val altOrBasePred = Wire(Bool())
 
     when(t2_useMeta) {
-      hasProvider     := true.B
-      providerTableOH := UIntToOH(meta.providerTableIdx, NumTables)
+      hasProvider     := meta.hasProvider
+      providerTableOH := Mux(meta.hasProvider, UIntToOH(meta.providerTableIdx, NumTables), 0.U)
 
-      provider.hit          := true.B
-      provider.hitWayMaskOH := UIntToOH(meta.providerWayIdx, MaxNumWays)
+      provider.hit          := meta.hasProvider
+      provider.hitWayMaskOH := Mux(meta.hasProvider, UIntToOH(meta.providerWayIdx, MaxNumWays), 0.U)
       provider.tag          := t2_rawTag(meta.providerTableIdx) ^ position
       provider.takenCtr     := meta.providerTakenCtr
       provider.usefulCtr    := meta.providerUsefulCtr
@@ -373,7 +376,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val altConf       = Mux(t2_useMeta, meta.altConf, Mux(hasAlt, !alt.takenCtr.isWeak, t2_baseCtr(i).isSaturate))
     val useAltOnNaIdx = Cat(OHToUInt(providerTableOH), altConf)
     val useAltOnNa    = useAltOnNaVec(useAltOnNaIdx).isPositive
-    useProvider := Mux(t2_useMeta, true.B, hasProvider && !(useAltOnNa && provider.takenCtr.isWeak))
+    useProvider := Mux(t2_useMeta, meta.useProvider, hasProvider && !(useAltOnNa && provider.takenCtr.isWeak))
     useAlt      := !t2_useMeta && !useProvider && hasAlt
 
     val providerPred = provider.takenCtr.isPositive
