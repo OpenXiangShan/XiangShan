@@ -892,7 +892,8 @@ class common_data_transaction extends uvm_object;
 
     // 中文注释：主动 flow 的统一运行期 drain 判定。该函数只读取 queue size、
     // associative-map count 和控制位，不扫描 main/status 主表；所有异步 producer、
-    // recovery、LSQ cancel 与 flushSb 生命周期收敛后才返回 1。
+    // recovery、LSQ cancel、flushSb 以及 active topology 的 worker shutdown 生命周期
+    // 都收敛后才返回 1。
     function bit runtime_drain_complete();
         return memblock_sync_pkg::raw_monitor_queue_size() == 0 &&
                exception_event_q.size() == 0 &&
@@ -917,7 +918,10 @@ class common_data_transaction extends uvm_object;
                pending_sq_cancel_count == 0 &&
                !redirect_sample_anchor_pending() &&
                !cancel_snapshot_buffer_pending() &&
-               memblock_sync_pkg::lsq_timing_sideband_queue_size() == 0;
+               memblock_sync_pkg::lsq_timing_sideband_queue_size() == 0 &&
+               (!memblock_sync_pkg::uses_control_barrier_topology() ||
+                (control_action_drain_complete() &&
+                 control_workers_shutdown_complete()));
     endfunction:runtime_drain_complete
 
     function void request_global_stop_if_done();
@@ -1321,10 +1325,16 @@ class common_data_transaction extends uvm_object;
         ->sfence_control_action_available_ev;
     endfunction:request_control_worker_shutdown
 
+    // 抽象职责：给 global stop 前的 worker shutdown 提供不含 worker ack 的控制动作
+    // 收敛谓词。它不扫描 status 表；terminal 前缀由调用者先证明，这里只确认没有
+    // barrier、action、owner flushSb 或 RELEASE 仍可能唤醒 worker。
     function bit control_action_drain_complete();
-        return csr_control_action_q.size() == 0 &&
+        return !active_control_barrier_valid &&
+               csr_control_action_q.size() == 0 &&
                sfence_control_action_q.size() == 0 &&
-               l2_flush_release_request_q.size() == 0;
+               l2_flush_release_request_q.size() == 0 &&
+               !flushsb_request_pending() &&
+               !flushsb_completed.valid;
     endfunction:control_action_drain_complete
 
     function bit control_worker_can_exit(input bit is_csr_worker);

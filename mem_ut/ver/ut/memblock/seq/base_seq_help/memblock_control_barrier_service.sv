@@ -35,6 +35,7 @@ class memblock_control_barrier_service extends uvm_object;
     extern virtual function void begin_control_runtime_reset(input string reason);
     extern virtual function bit control_runtime_is_ready();
     extern virtual function void service_once();
+    extern virtual function void service_control_worker_shutdown();
     extern virtual function void service_active_control_barrier();
     extern virtual function void bind_control_owner(input status_transaction status);
     extern virtual function void enqueue_csr_action(input status_transaction status);
@@ -195,6 +196,23 @@ function void memblock_control_barrier_service::service_once();
     end
     service_active_control_barrier();
 endfunction:service_once
+
+// 抽象职责：在所有 UID 已 terminal_done 且 control action drain 完成后，先请求两个
+// 显式 worker 退出。它不设置 global stop；global stop 仍由 common drain 谓词在
+// 两条 exited acknowledgement 都到达后统一决定，从而切断 stop/worker 的循环依赖。
+function void memblock_control_barrier_service::service_control_worker_shutdown();
+    ensure_handles();
+    if (!memblock_sync_pkg::uses_control_barrier_topology()) begin
+        return;
+    end
+    if (!bootstrap_started) begin
+        `uvm_fatal(get_type_name(), "active control topology reached worker shutdown before bootstrap")
+    end
+    if (!data.transaction_done() || !data.control_action_drain_complete()) begin
+        return;
+    end
+    data.request_control_worker_shutdown();
+endfunction:service_control_worker_shutdown
 
 // 抽象职责：处理 active_control_barrier_uid 的静态等待、CSR token 与 CSR monitor
 // 完成分支。SFence/check_store 的 owner 和 flushSb/L2 事实将由后续分支复用同一入口；

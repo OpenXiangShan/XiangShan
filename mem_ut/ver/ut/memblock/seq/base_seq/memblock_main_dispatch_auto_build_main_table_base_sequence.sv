@@ -170,7 +170,11 @@ function bit memblock_main_dispatch_auto_build_main_table_base_sequence::all_tra
         return 1'b0;
     end
     // 10万笔场景下不能每拍全表扫描；terminal_done前缀跨过所有已终态uid，
-    // 因此由顶层单点检查terminal_done前缀并请求global stop，子sequence只读stop标志退出。
+    // 因此由顶层单点检查 terminal_done 前缀。active control topology 必须先请求
+    // 两个 worker shutdown；runtime_drain_complete() 收到 exited ack 后才允许 stop。
+    if (control_barrier_service != null) begin
+        control_barrier_service.service_control_worker_shutdown();
+    end
     data.request_global_stop_if_done();
     return data.is_global_stop_requested();
 endfunction:all_transactions_terminal_done
