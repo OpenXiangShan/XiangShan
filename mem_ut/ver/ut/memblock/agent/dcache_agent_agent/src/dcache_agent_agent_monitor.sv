@@ -92,6 +92,7 @@ task dcache_agent_agent_monitor::mon_data();
     logic io_l2_flush_done;
 
     dcache_agent_agent_xaction  mon_tr;
+    longint unsigned             sample_seq;
     while(1) begin
         @this.vif.mon_mp.mon_cb;
         auto_inner_dcache_client_out_a_ready = this.vif.mon_mp.mon_cb.auto_inner_dcache_client_out_a_ready;
@@ -211,6 +212,17 @@ task dcache_agent_agent_monitor::mon_data();
             `TCNT_CHECK_SIG_XZ(io_l2_hint_bits_isKeyword,io_l2_hint_bits_isKeyword,1);
             `TCNT_CHECK_SIG_XZ(io_l2_flush_done,io_l2_flush_done,1);
 
+        end
+        // 中文注释：check_store 的完成条件必须是 DCache responder 实际驱动到
+        // io_l2_flush_done 的 level，而非 TopToBackendBypass 的调试观察。CSR monitor
+        // 仍是全局 sample 序号唯一写者，本 monitor 只在同拍锚定后发布唯一 L2 done
+        // observation；ASSERT/RELEASE 分别用新 high/low sample 完成控制屏障。
+        if (this.vif.rst_n === 1'b1 &&
+            memblock_sync_pkg::reset_backend_done === 1'b1 &&
+            !memblock_sync_pkg::l2tlb_reset_active()) begin
+            memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
+            memblock_sync_pkg::publish_control_l2_flush_done_observation(
+                io_l2_flush_done, sample_seq);
         end
         //if(xxxTODOxxx==1'b1) begin
         //    mon_tr = dcache_agent_agent_xaction::type_id::create("mon_tr");

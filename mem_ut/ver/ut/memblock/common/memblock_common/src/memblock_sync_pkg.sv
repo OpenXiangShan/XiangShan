@@ -1984,15 +1984,21 @@ package memblock_sync_pkg;
         return observation.valid;
     endfunction:get_latest_control_sb_is_empty_observation
 
-    // 抽象职责：发布 L2 flush done 的 owner-neutral level 事实。check_store 在
-    // ASSERT/RELEASE 边界冻结 observation_seq 后，只消费同一 monitor 产生的新 high/low。
+    // 抽象职责：由 DCache agent monitor 发布 L2 flush done 的 owner-neutral level
+    // 事实。check_store 在 ASSERT/RELEASE 边界冻结 observation_seq 后，只消费
+    // io_l2_flush_done 产生的新 high/low；ctrl monitor 的 TopToBackendBypass 观察
+    // 不是本控制协议的完成源，禁止调用本函数。
     function void publish_control_l2_flush_done_observation(
-        input bit level,
+        input logic level,
         input longint unsigned sample_seq
     );
         if (sample_seq == 0) begin
             `uvm_fatal("MEMBLOCK_CONTROL_OBSERVATION",
                        "L2 flush done observation has zero sample sequence")
+        end
+        if (level !== 1'b0 && level !== 1'b1) begin
+            `uvm_fatal("MEMBLOCK_CONTROL_OBSERVATION",
+                       "L2 flush done observation is X/Z")
         end
         control_l2_flush_done_observation.valid = 1'b1;
         control_l2_flush_done_observation.level = level;

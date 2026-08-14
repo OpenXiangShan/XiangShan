@@ -188,12 +188,10 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
             // anchored after the shared reset boundary has closed.
             memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
 
-            // 中文注释：控制屏障的 level 事实独立于 semantic raw capture gate 发布。
+            // 中文注释：控制屏障的 sbIsEmpty 事实独立于 semantic raw capture gate 发布。
             // 即使当前没有 flushSb request，序号也持续递增，后续 sendover 可排除旧 level。
             memblock_sync_pkg::publish_control_sb_is_empty_observation(
                 io_mem_to_ooo_sbIsEmpty, sample_seq);
-            memblock_sync_pkg::publish_control_l2_flush_done_observation(
-                io_mem_to_ooo_topToBackendBypass_l2FlushDone, sample_seq);
 
             any_mmio_valid = store_mmio_valid === 1'b1;
             foreach (load_mmio_valid[port]) begin
