@@ -653,6 +653,10 @@ typedef struct {
     // control service 仅以 req_id+owner 消费完成记录，普通 periodic 请求保持 owner_valid=0。
     bit                       owner_valid;
     memblock_control_owner_t  owner;
+    // 中文注释：同一 request 在 LSQ commit driver finish_item() 返回后冻结的
+    // sbIsEmpty latest observation 序号。后续 raw 只有序号更大时才能完成该 request，
+    // 防止发送前已经为高的 level 被误认为本次 flushSb 完成。
+    longint unsigned          sb_is_empty_observation_seq_at_sendover;
 } memblock_flushsb_req_t;
 
 typedef enum bit [1:0] {

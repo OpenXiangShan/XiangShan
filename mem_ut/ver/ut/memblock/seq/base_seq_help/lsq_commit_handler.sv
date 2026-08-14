@@ -895,7 +895,7 @@ class lsq_commit_handler extends uvm_object;
         memblock_sq_key_t sq_ptr;
 
         ensure_handles();
-        data.update_sb_is_empty(raw.sb_is_empty);
+        data.update_sb_is_empty(raw);
         if (raw.sq_deq == 0 && raw.sq_deq_ptr_valid) begin
             `uvm_fatal("LSQ_COMMIT", "sqDeq pointer is valid while sqDeq count is zero")
         end
