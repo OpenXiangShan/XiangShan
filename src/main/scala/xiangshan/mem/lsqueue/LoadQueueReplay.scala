@@ -280,6 +280,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val scheduled = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val uop = Reg(Vec(LoadQueueReplaySize, new DynInst))
   val isNC = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
+  val sspCheckValues = Option.when(HasShadowStack) {
+    Reg(Vec(LoadQueueReplaySize, UInt(XLEN.W)))
+  }
+  val sspValues = Option.when(HasShadowStack) {
+    Reg(Vec(LoadQueueReplaySize, UInt(XLEN.W)))
+  }
   val vecReplay = Reg(Vec(LoadQueueReplaySize, new VecReplayInfo))
   val vaddr = Reg(Vec(LoadQueueReplaySize, UInt(VAddrBits.W)))
   val cause = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(LoadReplayCauses.allCauses.W))))
@@ -749,6 +755,19 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
     val replay_req_size = LSUOpType.size(s1_replayUop(i).fuOpType)
     replay_req(i).valid := s1_oldestSel(i).valid && !s1_flushed && !s1_needFlush
+    sspCheckValues.foreach { values =>
+      replay_req(i).bits.sspCheckValue.get := Mux1H(
+        s1_replayIdxOH(i),
+        (0 until LoadQueueReplaySize / LoadPipelineWidth).map(j => values(j * LoadPipelineWidth + i))
+      )
+    }
+    sspValues.foreach { values =>
+      replay_req(i).bits.sspValue.get := Mux1H(
+        s1_replayIdxOH(i),
+        (0 until LoadQueueReplaySize / LoadPipelineWidth).map(j => values(j * LoadPipelineWidth + i))
+      )
+    }
+    replay_req(i).bits.sspNextValue.foreach(_ := DontCare)
     replay_req(i).bits.entrance := Mux(
       s1_replayCauses(LoadReplayCauses.C_DM) || s1_replayCauses(LoadReplayCauses.C_UNCACHE),
       LoadEntrance.replayHiPrio.U,
@@ -866,6 +885,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       freeList.io.doAllocate(w) := !enq.bits.isLoadReplay
 
       //  Allocate new entry
+      sspCheckValues.foreach { values =>
+        values(enqIndex) := enq.bits.sspCheckValue.get
+      }
+      sspValues.foreach { values =>
+        values(enqIndex) := enq.bits.sspValue.get
+      }
       allocated(enqIndex) := true.B
       scheduled(enqIndex) := false.B
       uop(enqIndex)       := enq.bits.uop

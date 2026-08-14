@@ -501,6 +501,9 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.dtlb.req.bits.checkfullva := true.B
   io.dtlb.resp.ready      := true.B
   io.dtlb.req.bits.cmd    := Mux(isLr, TlbCmd.atom_read, TlbCmd.atom_write)
+  if(HasShadowStack) {
+      io.dtlb.req.bits.shadowStackUser.get :=  LSUOpType.isShadowStackAmo(uop.fuOpType)
+  }
   io.dtlb.req.bits.debug.pc := uop.pc
   io.dtlb.req.bits.debug.robIdx := uop.robIdx
   io.dtlb.req.bits.debug.isFirstIssue := false.B
@@ -533,7 +536,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     port.bits.pdest := Mux(state === s_finish2, pdest2, pdest1)
   }
   io.out.toRob.bits.robIdx := uop.robIdx
-  io.out.toRob.bits.exceptionVec := exceptionVec
+  io.out.toRob.bits.exceptionVec extendFrom exceptionVec
   io.out.toRob.bits.trigger.foreach(_ := trigger)
   io.out.toRob.bits.isRVC.foreach(_ := uop.isRVC)
   io.out.toRob.bits.lqIdx.foreach(_ := uop.lqIdx)
@@ -558,6 +561,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     LSUOpType.AmoOp.lr   -> M_XLR,
     LSUOpType.AmoOp.sc   -> M_XSC,
     LSUOpType.AmoOp.swap -> M_XA_SWAP,
+    LSUOpType.AmoOp.sswap -> M_XA_SWAP,
     LSUOpType.AmoOp.add  -> M_XA_ADD,
     LSUOpType.AmoOp.xor  -> M_XA_XOR,
     LSUOpType.AmoOp.and  -> M_XA_AND,

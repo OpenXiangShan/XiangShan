@@ -131,6 +131,11 @@ case class HfenceGVMAInstPattern()(implicit rawInst: BitPat) extends SystemInstP
 
 case class HfenceVVMAInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
 
+case class SspushInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
+case class SspopchkInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
+case class SsrdpInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
+case class SsamoswapInstPattern()(implicit rawInst: BitPat) extends IntRTypePattern
+
 case class MfenceInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
 
 case class WaitForInterruptInstPattern()(implicit rawInst: BitPat) extends SystemInstPattern
@@ -424,6 +429,7 @@ object InstPattern {
       case CUSTOM_1 => null
       case AMO =>
         funct5.rawString match {
+          case "01001" => SsamoswapInstPattern()
           case "00010" => AmoLrInstPattern()
           case "00101" =>
             func3.rawString match {
@@ -496,6 +502,9 @@ object InstPattern {
               case s if rawStringMatches(s, "1011111?????") => MfenceInstPattern()
               case _ => PrivInstPattern()
             }
+          case "100" if rawInst == Instructions.SSPUSH_X1 || rawInst == Instructions.SSPUSH_X5 => SspushInstPattern()
+          case "100" if rawInst == Instructions.SSPOPCHK_X1 || rawInst == Instructions.SSPOPCHK_X5 => SspopchkInstPattern()
+          case "100" if rawInst == Instructions.SSRDP => SsrdpInstPattern()
           case "100" =>
             func7(0).rawString match {
               case "0" => HyperLoadInstPattern()

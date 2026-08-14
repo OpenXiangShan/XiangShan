@@ -11,15 +11,13 @@ import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.decode.isa.Extensions.ExtBase
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
-import xiangshan.backend.decode.isa.Instructions.ZICBOType
+import xiangshan.backend.decode.isa.Instructions._
 import xiangshan.backend.decode.opcode.Opcode
 import xiangshan.backend.fu.FuType
-import xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel._
 import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.Frm
-import xiangshan.backend.vector.Decoder.DecodePatterns.RdZeroPattern
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil._
-import xiangshan.backend.vector.Decoder.{DecodeChannelInput, NumUopOH, SrcRenType}
+import xiangshan.backend.vector.Decoder.{DecodeChannelInput, NumUopOH}
 import xiangshan.backend.vector.Decoder.Types.{DecodeSelImm, NumWB}
 import xiangshan.backend.vector.Decoder.Uop.UopInfoRenameSimple
 import xiangshan.backend.vector.Decoder.util._
@@ -31,6 +29,7 @@ import xiangshan._
 class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(implicit val p: Parameters) extends Module with HasSimpleSettings with HasXSParameter {
   import xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel._
   import SimpleDecodeChannel._
+  override def maxSimpleSplitUopNum: Int = if (HasShadowStack) 5 else 2
 
   @public val in = IO(Input(new DecodeChannelInput))
   @public val out = IO(Output(new SimpleDecodeChannelOutput(maxSimpleSplitUopNum)))
@@ -58,18 +57,22 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
   val uopInfoFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new UopInfoField(i, extensions))
   val opcodeFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new OpcodeField(i, extensions))
   val fuTypeFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new FuTypeField(i, extensions))
+  val lsrc1Fields = Seq.tabulate(maxSimpleSplitUopNum)(i => new LogicalRegField(i, 0, extensions))
+  val lsrc2Fields = Seq.tabulate(maxSimpleSplitUopNum)(i => new LogicalRegField(i, 1, extensions))
+  val lsrc3Fields = Seq.tabulate(maxSimpleSplitUopNum)(i => new LogicalRegField(i, 2, extensions))
+  val ldestFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new LogicalRegField(i, 3, extensions))
+  val uopImmInfoFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new UopImmInfoField(i, extensions, XLEN))
+  val uopCommitTypeFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new UopCommitTypeField(i, extensions))
   val numUopOhField = new NumUopOhField(extensions)
   val numUopField = new NumUopField(extensions)
 
   val isJFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new IsJField(i))
   val isJrFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new IsJrField(i))
 
-  val fields = uopInfoFields ++ opcodeFields ++ fuTypeFields ++ isJFields ++ isJrFields ++ Seq(
-    IsMopField,
+  val fields = uopInfoFields ++ opcodeFields ++ fuTypeFields ++ lsrc1Fields ++ lsrc2Fields ++
+    lsrc3Fields ++ ldestFields ++ uopImmInfoFields ++ uopCommitTypeFields ++ isJFields ++ isJrFields ++ Seq(
     FrmRenField,
     FFlagsWenField,
-    SelImmField,
-    CommitTypeField,
     CanRobCompressField,
     numUopField,
     numUopOhField,
@@ -89,26 +92,30 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
   val uopInfos = uopInfoFields.map(field => result(field))
   val opcodes = opcodeFields.map(field => result(field))
   val fuTypes = fuTypeFields.map(field => result(field))
+  val lsrc1Specs = lsrc1Fields.map(field => result(field))
+  val lsrc2Specs = lsrc2Fields.map(field => result(field))
+  val lsrc3Specs = lsrc3Fields.map(field => result(field))
+  val ldestSpecs = ldestFields.map(field => result(field))
+  val uopImmInfos = uopImmInfoFields.map(field => result(field))
+  val uopCommitTypes = uopCommitTypeFields.map(field => result(field))
 
   val cboOpcode = resultInstCboI2f(CboOpcodeField)
-
-  val isMop  = result(IsMopField)
-  val selImm = result(SelImmField)
 
   val isJs          = isJFields.map(field => result(field))
   val isJrs         = isJrFields.map(field => result(field))
   val frmRen         = result(FrmRenField)
   val fflagsWen      = result(FFlagsWenField)
-  val commitType     = result(CommitTypeField)
   val canRobCompress = result(CanRobCompressField)
   val numUop         = result(numUopField)
   val numUopOH       = result(numUopOhField)
   val numWb          = result(NumWbField)
 
-  val imm = LookupTree(selImm.bits, ImmUnion.immSelMap.map {
-    case (sel, enum) =>
-      sel -> enum.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == enum.len)
-  })
+  val uopImms = uopImmInfos.map { info =>
+    val standard = LookupTree(info.selImm.bits, ImmUnion.immSelMap.map {
+      case (sel, enum) => sel -> enum.minBitsFromInstr(rawInst).ensuring(_.getWidth == enum.len)
+    })
+    Mux(info.constant.valid, info.constant.bits, standard)
+  }
 
   val needFs = result(NeedFsField)
   val privCause = result(PrivExceptionCauseField)
@@ -122,6 +129,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     (PrivExceptionCause.sfencePart, in.fromCSR.illegalInst.sfencePart,             in.fromCSR.virtualInst.sfencePart),
     (PrivExceptionCause.hfenceGVMA, in.fromCSR.illegalInst.hfenceGVMA,             in.fromCSR.virtualInst.hfence),
     (PrivExceptionCause.hfenceVVMA, in.fromCSR.illegalInst.hfenceVVMA,             in.fromCSR.virtualInst.hfence),
+    (PrivExceptionCause.ssamoswap, in.fromCSR.illegalInst.ssamoswap.getOrElse(false.B), in.fromCSR.virtualInst.ssamoswap.getOrElse(false.B)),
     (PrivExceptionCause.mfence,     in.fromCSR.illegalInst.mfence.getOrElse(false.B), false.B),
     (PrivExceptionCause.hlsv,       in.fromCSR.illegalInst.hlsv,                   in.fromCSR.virtualInst.hlsv),
     (PrivExceptionCause.wfi,        in.fromCSR.illegalInst.wfi,                    in.fromCSR.virtualInst.wfi),
@@ -143,23 +151,27 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
 
   for (i <- 0 until maxSimpleSplitUopNum) {
     val frmExceptionII = out.uop(i).bits.frmRen && (out.uop(i).bits.frmIll || (out.uop(i).bits.frm === Frm.DYN && in.fromCSR.illegalInst.frm))
+    val logicalSrc1 = LogicalRegField.decodeSelector(lsrc1Specs(i), instFields)
+    val logicalSrc2 = LogicalRegField.decodeSelector(lsrc2Specs(i), instFields)
+    val logicalSrc3 = LogicalRegField.decodeSelector(lsrc3Specs(i), instFields)
+    val logicalDest = LogicalRegField.decodeSelector(ldestSpecs(i), instFields)
 
     out.uop(i).valid := uopInfos(i).valid
     out.uop(i).bits.renameInfo := uopInfos(i).bits
-    out.uop(i).bits.renameInfo.gpWen := uopInfos(i).bits.gpWen && instFields.RD =/= 0.U
+    out.uop(i).bits.renameInfo.gpWen := uopInfos(i).bits.gpWen && logicalDest =/= 0.U
     out.uop(i).bits.fuType := fuTypes(i)
     out.uop(i).bits.opcode := opcodes(i) | cboOpcode
-    out.uop(i).bits.lsrc1 := instFields.RS1
-    out.uop(i).bits.lsrc2 := instFields.RS2
-    out.uop(i).bits.lsrc3 := instFields.FS3
+    out.uop(i).bits.lsrc1 := logicalSrc1
+    out.uop(i).bits.lsrc2 := logicalSrc2
+    out.uop(i).bits.lsrc3 := logicalSrc3
     out.uop(i).bits.frmRen := frmRen
     out.uop(i).bits.fflagsWen := fflagsWen
-    out.uop(i).bits.ldest := instFields.RD
+    out.uop(i).bits.ldest := logicalDest
     out.uop(i).bits.frm := instFields.RM
     out.uop(i).bits.frmIll := instFields.RM === 5.U || instFields.RM === 6.U
-    out.uop(i).bits.selImm := selImm
-    out.uop(i).bits.imm := imm
-    out.uop(i).bits.commitType := commitType
+    out.uop(i).bits.selImm := uopImmInfos(i).selImm
+    out.uop(i).bits.imm := uopImms(i)
+    out.uop(i).bits.commitType := uopCommitTypes(i)
     out.uop(i).bits.canRobCompress := canRobCompress
     out.uop(i).bits.numWb := numWb
     out.uop(i).bits.uopIdx := i.U
@@ -167,11 +179,12 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], extensions: Seq[ExtBase])(i
     out.uop(i).bits.isLastUop := i.U === numUop
     out.uop(i).bits.isJ := isJs(i)
     out.uop(i).bits.isJr := isJrs(i)
-    out.uop(i).bits.isMove := (isMop || rawInst === isMove) && instFields.RD =/= 0.U
+    out.uop(i).bits.isMove := rawInst === isMove && logicalDest =/= 0.U
     out.uop(i).bits.exceptionII := frmExceptionII || fsOffExceptionII || privExceptionII
     out.uop(i).bits.exceptionVI := privExceptionVI
   }
   out.uopNumOH := numUopOH
+
 }
 
 object SimpleDecodeChannel {
@@ -179,12 +192,12 @@ object SimpleDecodeChannel {
     val fuType: UInt = FuType()
     val opcode: UInt = Opcode()
     val renameInfo = new UopInfoRenameSimple
-    val lsrc1 = UInt(5.W)
-    val lsrc2 = UInt(5.W)
-    val lsrc3 = UInt(5.W)
+    val lsrc1 = UInt(6.W)
+    val lsrc2 = UInt(6.W)
+    val lsrc3 = UInt(6.W)
     val frmRen = Bool()
     val fflagsWen = Bool()
-    val ldest = UInt(5.W)
+    val ldest = UInt(6.W)
     val frm = Frm()
     val frmIll = Bool()
     val selImm = ValidIO(DecodeSelImm())

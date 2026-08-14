@@ -215,7 +215,7 @@ class ExuParam(
 
   def needImm = immTypes.nonEmpty
 
-  def hasLdu: Boolean = fuConfigs.contains(VecFuConfig.LduCfg)
+  def hasLdu: Boolean = fuConfigs.exists(_.fuType == FuType.ldu)
 
   def hasSta: Boolean = fuConfigs.contains(VecFuConfig.StaCfg)
 

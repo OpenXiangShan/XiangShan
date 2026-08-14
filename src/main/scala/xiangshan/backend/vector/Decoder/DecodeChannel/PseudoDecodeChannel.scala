@@ -11,6 +11,7 @@ import top.ArgParser
 import xiangshan.{XSCoreParameters, XSCoreParamsKey}
 import xiangshan.CommitType
 import xiangshan.backend.decode.isa.PseudoInstructions
+import xiangshan.backend.decode.isa.Instructions.{MOP_R_N, MOP_RR_N, SSPUSH_X1, SSPUSH_X5, SSPOPCHK_X1, SSPOPCHK_X5, SSRDP}
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.decode.opcode.Opcode
 import xiangshan.backend.decode.opcode.Opcode.{AluOpcodes, JmpOpcodes, Opcode, VSetOpcodes}
@@ -62,11 +63,16 @@ class PseudoDecodeChannel(
     canRobCompressField,
     isJField,
     isJrField,
+    isMoveField,
   )
 
   val table = new DecodeTable(patterns, fields)
+  val zicfissMopTable = new DecodeTable(zicfissMopPatterns, Seq(legalField))
+  val ssrdpTable = new DecodeTable(Seq(SSRDP_PATTERN), Seq(legalField))
 
   val bundle = table.decode(in.rawInst)
+  val isAllocatedZicfissMop = zicfissMopTable.decode(in.rawInst)(legalField) ||
+    (ssrdpTable.decode(in.rawInst)(legalField) && instBitFields.RD =/= 0.U)
 
   val selImm = Wire(ValidIO(DecodeSelImm()))
   val imm = Wire(UInt(32.W))
@@ -81,15 +87,16 @@ class PseudoDecodeChannel(
     )
   )
 
-  out.valid := bundle(legalField)
+  val shadowStackEnabled = in.fromCSR.enableZicfiss.getOrElse(false.B)
+  out.valid := bundle(legalField) && !(isAllocatedZicfissMop && shadowStackEnabled)
   out.bits.fuType := bundle(fuTypeField)
   out.bits.opcode := bundle(opcodeField)
   out.bits.src1RenType := bundle(src1Field)
   out.bits.src2RenType := bundle(src2Field)
-  out.bits.lsrc1 := instBitFields.RS1
+  out.bits.lsrc1 := Mux(bundle(isMoveField), 0.U, instBitFields.RS1)
   out.bits.lsrc2 := instBitFields.RS2
   out.bits.ldest := instBitFields.RD
-  out.bits.gpWen := bundle(gpWenField)
+  out.bits.gpWen := bundle(gpWenField) && (!bundle(isMoveField) || out.bits.ldest =/= 0.U)
   out.bits.fpWen := bundle(fpWenField)
   out.bits.noSpec := bundle(noSpecField)
   out.bits.blockBack := bundle(blockBackField)
@@ -100,6 +107,7 @@ class PseudoDecodeChannel(
   out.bits.canRobCompress := bundle(canRobCompressField)
   out.bits.isJ := bundle(isJField)
   out.bits.isJr := bundle(isJrField)
+  out.bits.isMove := bundle(isMoveField) && out.bits.ldest =/= 0.U
   out.bits.exceptionII := bundle(needVecEnableField) && in.fromCSR.illegalInst.vsIsOff
 }
 
@@ -146,6 +154,7 @@ object PseudoDecodeChannel {
     val canRobCompress = Bool()
     val isJ = Bool()
     val isJr = Bool()
+    val isMove = Bool()
     val exceptionII = Bool()
   }
 
@@ -160,7 +169,17 @@ object PseudoDecodeChannel {
 
     val J            = PseudoInstPattern(PseudoInstructions.J)
     val JALR_RD_ZERO = PseudoInstPattern(PseudoInstructions.JALR_RD_ZERO)
+    val MOP_R        = PseudoInstPattern(MOP_R_N)
+    val MOP_RR       = PseudoInstPattern(MOP_RR_N)
   }
+
+  val zicfissMopPatterns = Seq(
+    PseudoInstPattern(SSPUSH_X1),
+    PseudoInstPattern(SSPUSH_X5),
+    PseudoInstPattern(SSPOPCHK_X1),
+    PseudoInstPattern(SSPOPCHK_X5),
+  )
+  val SSRDP_PATTERN = PseudoInstPattern(SSRDP)
 
   class DecodeFieldGen[-T <: InstPattern, +D <: Data](
     gen: => D,
@@ -189,6 +208,8 @@ object PseudoDecodeChannel {
     CSRRVLENB     -> (AluOpcodes.add.copy() - Src1Gp - Src2En - Src2Gp + Src2Imm(DecodeSelImm.CSRRVLENB) + NeedVecEnable),
     J             -> (JmpOpcodes.j),
     JALR_RD_ZERO  -> (JmpOpcodes.jr),
+    MOP_R         -> (AluOpcodes.add.S2xRemove + CannotRobCompress),
+    MOP_RR        -> (AluOpcodes.add.S2xRemove + CannotRobCompress),
   )
 
   val legalField = new DecodeFieldGen(
@@ -324,6 +345,11 @@ object PseudoDecodeChannel {
   val isJrField = new DecodeFieldGen(
     Bool(),
     (op: InstPattern) => (op == JALR_RD_ZERO).toBitPat
+  )
+
+  val isMoveField = new DecodeFieldGen(
+    Bool(),
+    (op: InstPattern) => (op == MOP_R || op == MOP_RR).toBitPat,
   )
 
   def makeCSRRBitPat(csrno: Int): BitPat = {

@@ -55,6 +55,8 @@ object Bundles {
     val uop = new DynInst
     val vaddr = UInt(VAddrBits.W)
     val fullva = UInt(XLEN.W)
+    val sspCheckValue = Option.when(HasShadowStack)(UInt(XLEN.W))
+    val sspValue = Option.when(HasShadowStack)(UInt(XLEN.W))
     val paddr = UInt(PAddrBits.W)
     val gpaddr = UInt(XLEN.W)
     val mask = UInt((VLEN/8).W)

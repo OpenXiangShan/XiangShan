@@ -2,13 +2,14 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import xiangshan.ExceptionNO
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, PrivState, XtvecBundle}
 import xiangshan.backend.fu.NewCSR.CSRDefines.XtvecMode
 import xiangshan.backend.fu.NewCSR.CSRBundleImplicitCast._
+import xiangshan.HasXSParameter
 
-
-class TrapHandleModule extends Module {
+class TrapHandleModule(implicit val p: Parameters) extends Module with HasXSParameter {
   val io = IO(new TrapHandleIO)
 
   private val trapInfo = io.in.trapInfo
@@ -50,9 +51,18 @@ class TrapHandleModule extends Module {
   private val highestPrioIR  = hasIRVec.asUInt
   private val highestPrioEX  = highestPrioEXVec.asUInt
 
-  private val mEXVec  = highestPrioEX
-  private val hsEXVec = highestPrioEX & medeleg
-  private val vsEXVec = highestPrioEX & medeleg & hedeleg
+  // Zicfiss: internally bit 17 distinguishes shadow-stack faults,
+  // but delegation must use architectural software-check cause 18.
+  private val highestPrioEXForDeleg = Cat(
+    highestPrioEX(63, 19),
+    highestPrioEX(18) || highestPrioEX(17), // architectural bit 18
+    false.B,                                // internal bit 17 disappears
+    highestPrioEX(16, 0)
+  )
+
+  private val mEXVec  = (if (HasShadowStack) highestPrioEXForDeleg else highestPrioEX)
+  private val hsEXVec = (if (HasShadowStack) highestPrioEXForDeleg else highestPrioEX) & medeleg
+  private val vsEXVec = (if (HasShadowStack) highestPrioEXForDeleg else highestPrioEX) & medeleg & hedeleg
 
   // nmi handle in MMode only and default handler is mtvec
   private val  mHasIR = hasIR

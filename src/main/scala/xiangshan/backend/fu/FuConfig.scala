@@ -485,6 +485,12 @@ object FuConfig {
     readV0 = true,
     readVType = true,
   )
+  // new ldu for cfi
+  val LduCfgWithShadowStack: FuConfig = LduCfg.copy(
+    srcData = Seq(Seq(IntData(), IntData())),
+    exceptionOut = LduCfg.exceptionOut :+ zicfissSoftwareCheck,
+    //add new source and new exception type for ssp compare
+  )
 
   val StaCfg: FuConfig = FuConfig (
     name = "sta",

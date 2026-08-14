@@ -116,6 +116,8 @@ object Extensions {
 
   case object Zicbo extends UnprivExt(Seq(ZICBOType), tableZicbo)
 
+  case object Zicfiss extends UnprivExt(Seq(ZICFISSType), tableZicfiss)
+
   case object Zicond extends UnprivExt(Seq(ZICONDType), tableZicond)
 
   case object Zicsr extends UnprivExt(Seq(ZICSRType), tableZicsr)
@@ -167,7 +169,7 @@ object Extensions {
     Zifencei, Zknd, Zkne, Zknh, Zksed, Zksh,
     // Zcb, Zcmop,
     ZfaF, ZfaD, ZfaZfh, Zfh, Zfhmin, ZfhminD,
-  ) ++ Option.when(p(XSCoreParamsKey).HasMptCheck && !p(XSCoreParamsKey).HasBitmapCheck)(Smmtt).toSeq
+  ) ++ Option.when(p(XSCoreParamsKey).HasMptCheck && !p(XSCoreParamsKey).HasBitmapCheck)(Smmtt).toSeq ++ Option.when(p(XSCoreParamsKey).HasShadowStack)(Zicfiss).toSeq
 
   trait HasInst { self: ExtBase =>
     val types: Seq[InstType]

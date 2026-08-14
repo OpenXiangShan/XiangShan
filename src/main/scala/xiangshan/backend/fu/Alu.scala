@@ -194,6 +194,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   val isSh2add  = ALUOpType.isSh2add(func)
   val isSh3add  = ALUOpType.isSh3add(func)
   val isSh4add  = ALUOpType.isSh4add(func)
+  val isSspDec  = ALUOpType.isSspDec(func)
 
   val adduwSrc     = ZeroExt(src1(31, 0), XLEN)
   val oddaddSrc    = ZeroExt(src1(0), XLEN)
@@ -295,13 +296,17 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
   rotateRightShiftWordModule.io.rorwSrc := src1
 
   // add
-  val addSrc1 = Mux1H(Seq(
+  val addSrc1 = Mux(isSspDec, src1, Mux1H(Seq(
     isAddw      -> adduwSrc,
     isOddaddw   -> oddaddSrc,
     isSubw      -> src1,
     isLui32addw -> lui32addSrc1,
-  ))
-  val addSrc2 = Mux(isLui32addw, lui32addSrc2, src2)
+  )))
+  val addSrc2 = Mux(
+    isSspDec,
+    (-(XLEN / 8)).S(XLEN.W).asUInt,
+    Mux(isLui32addw, lui32addSrc2, src2)
+  )
   val addModule = Module(new AddModule)
   addModule.io.src(0) := addSrc1
   addModule.io.src(1) := addSrc2
@@ -434,6 +439,7 @@ class AluDataModule(implicit p: Parameters) extends XSModule {
     isRolw    -> SignExt(rolw, XLEN),
     isRorw    -> SignExt(rorw, XLEN),
     isZicond  -> condRes,
+    isSspDec  -> add,
   ))
 
   io.result := aluRes

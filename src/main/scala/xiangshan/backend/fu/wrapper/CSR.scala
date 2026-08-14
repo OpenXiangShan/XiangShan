@@ -313,6 +313,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
 
   // pointer masking extension
   tlb.pmm := csrMod.io.tlb.pmm
+  if (HasShadowStack) {
+    tlb.SSEVec := csrMod.io.tlb.SSEVec
+  } else {
+    tlb.SSEVec := DontCare
+  }
 
   /** Since some CSR read instructions are allowed to be pipelined, ready/valid signals should be modified */
   io.in.ready := csrMod.io.in.ready // Todo: Async read imsic may block CSR
@@ -517,6 +522,13 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
      * raise [[EX_II]] when !isModeM && MEnvCfg.CBIE = EnvCBIE.Off || isModeHU && SEnvCfg.CBIE = EnvCBIE.Off
      */
     val cboI = Bool()
+
+    /**
+     * Illegal SSAMOSWAP when the current non-M privilege level does not
+     * have the required SSE enablement. M-mode deliberately does not set
+     * this bit: SSAMOSWAP must reach the memory-protection checks in M-mode.
+     */
+    val ssamoswap = Option.when(HasShadowStack)(Bool())
   }
 
   val virtualInst = new Bundle {
@@ -576,6 +588,9 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
      * ) <br/>
      */
     val cboI = Bool()
+
+    /** SSAMOSWAP trapped as a virtual-instruction in VS/VU. */
+    val ssamoswap = Option.when(HasShadowStack)(Bool())
   }
 
   val special = new Bundle {
@@ -597,4 +612,6 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
 
   // rename single step
   val singlestep = Bool()
+  //  Zicfiss
+  val enableZicfiss = Option.when(HasShadowStack)(Bool())
 }

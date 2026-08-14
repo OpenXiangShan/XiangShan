@@ -538,7 +538,11 @@ class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
     val hstatus = UInt(2.W)
     val senvcfg = UInt(2.W)
   }
-
+  val SSEVec = new Bundle {
+    val menvcfgSSE = Bool()
+    val henvcfgSSE = Bool()
+    val senvcfgSSE = Bool()
+  }
   override def toPrintable: Printable = {
     p"Satp mode:0x${Hexadecimal(satp.mode)} asid:0x${Hexadecimal(satp.asid)} ppn:0x${Hexadecimal(satp.ppn)} " +
       p"Priv mxr:${priv.mxr} sum:${priv.sum} imode:${priv.imode} dmode:${priv.dmode}"

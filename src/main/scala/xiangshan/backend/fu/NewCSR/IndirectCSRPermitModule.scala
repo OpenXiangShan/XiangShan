@@ -2,9 +2,10 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 
-abstract class IndirectCSRWindowPermitModule extends Module {
+abstract class IndirectCSRWindowPermitModule(implicit val p: Parameters) extends Module {
   val io = IO(new Bundle() {
     val in = Input(new Bundle {
       val csrAccess = new csrAccessIO
@@ -55,7 +56,7 @@ abstract class IndirectCSRWindowPermitModule extends Module {
   protected final val effectiveSiregSelect = Mux(isVirtual, vsiselect, siselect)
 }
 
-class IndirectSmcdelegPermitModule extends IndirectCSRWindowPermitModule {
+class IndirectSmcdelegPermitModule(implicit p: Parameters) extends IndirectCSRWindowPermitModule {
   private val menvcfgCDE = io.in.xenvcfg.menvcfg(60)
   // Counter delegation is defined only for the supervisor-level siselect window.
   // CSRIND only control direct access.
@@ -86,7 +87,7 @@ class IndirectSmcdelegPermitModule extends IndirectCSRWindowPermitModule {
   io.out.indirectCSR_EX_VI := rwSiregX_EX_VI
 }
 
-class IndirectAIAPermitModule extends IndirectCSRWindowPermitModule {
+class IndirectAIAPermitModule(implicit p: Parameters) extends IndirectCSRWindowPermitModule {
   private val mstateen0 = io.in.xstateen.mstateen0
 
   private val miregInAIA = Iselect.isInAIA(miselect)
@@ -119,7 +120,7 @@ class IndirectAIAPermitModule extends IndirectCSRWindowPermitModule {
   io.out.indirectCSR_EX_VI := rwSireg_EX_VI || rwSireg2_6_EX_VI
 }
 
-class IndirectIMSICPermitModule extends IndirectCSRWindowPermitModule {
+class IndirectIMSICPermitModule(implicit p: Parameters) extends IndirectCSRWindowPermitModule {
   private val mstateen0 = io.in.xstateen.mstateen0
   private val hstateen0 = io.in.xstateen.hstateen0
   private val mvienSEIE = io.in.aia.mvienSEIE
@@ -154,7 +155,7 @@ class IndirectIMSICPermitModule extends IndirectCSRWindowPermitModule {
   io.out.indirectCSR_EX_VI := rwSireg_EX_VI || rwSireg2_6_EX_VI
 }
 
-class IndirectOtherPermitModule extends IndirectCSRWindowPermitModule {
+class IndirectOtherPermitModule(implicit p: Parameters) extends IndirectCSRWindowPermitModule {
   private val miregInOther = Iselect.isInOthers(miselect)
   private val siregInOther = Iselect.isInOthers(effectiveSiregSelect)
   private val vsiregInOther = Iselect.isInOthers(vsiselect)
@@ -170,7 +171,7 @@ class IndirectOtherPermitModule extends IndirectCSRWindowPermitModule {
   io.out.indirectCSR_EX_VI := false.B
 }
 
-class IndirectCSRPermitModule extends Module {
+class IndirectCSRPermitModule(implicit val p: Parameters) extends Module {
   val io = IO(new Bundle() {
     val in = Input(new Bundle {
       val csrAccess = new csrAccessIO

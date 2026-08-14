@@ -688,7 +688,7 @@ package object xiangshan {
 
     def apply() = UInt(6.W)
     def needSplit(UopSplitType: UInt) = UopSplitType(4) || UopSplitType(5)
-
+    // Zicfiss: helper for shadow-stack split instructions.
     def isAMOCAS(UopSplitType: UInt): Bool = UopSplitType === AMO_CAS_BHWD || UopSplitType === AMO_CAS_Q
   }
 
@@ -711,6 +711,8 @@ package object xiangshan {
     def storePageFault      = 15
     def doubleTrap          = 16
     def softwareCheck       = 18
+    def zicfissSoftwareCheck = 17 // software-check-exception of Zicfiss cause = 18, tval = 3
+    def zicfilpSoftwareCheck = 18 // software-check-exception of Zicfilp cause = 18, tval = 2
     def hardwareError       = 19
     def instrGuestPageFault = 20
     def loadGuestPageFault  = 21
@@ -734,7 +736,8 @@ package object xiangshan {
     def EX_LPF    = loadPageFault
     def EX_SPF    = storePageFault
     def EX_DT     = doubleTrap
-    def EX_SWC    = softwareCheck
+    def EX_SWC1   = zicfissSoftwareCheck
+    def EX_SWC2   = zicfilpSoftwareCheck
     def EX_HWE    = hardwareError
     def EX_IGPF   = instrGuestPageFault
     def EX_LGPF   = loadGuestPageFault
@@ -763,7 +766,7 @@ package object xiangshan {
       instrPageFault,
       instrGuestPageFault,
       instrAccessFault,
-      softwareCheck,
+      zicfilpSoftwareCheck,
       illegalInstr,
       virtualInstr,
       instrAddrMisaligned,
@@ -776,9 +779,10 @@ package object xiangshan {
       loadGuestPageFault,
       storeAccessFault,
       loadAccessFault,
+      zicfissSoftwareCheck,
       hardwareError
     )
-
+    // softwarecheck has 2 different priorities, use different internal code
     def getHigherExcpThan(excp: Int): Seq[Int] = {
       val idx = this.priorities.indexOf(excp, 0)
       require(idx != -1, s"The irq($excp) does not exists in IntPriority Seq")
