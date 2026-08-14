@@ -80,7 +80,13 @@ class status_transaction extends uvm_object;
     // 中文注释：SFence/check_store completion 的 request/event/done 基线。
     // 每个字段由对应 service 分支写入，owner 变化或 status reset 时清零，防止旧 sample 误完成。
     int unsigned              control_flushsb_req_id;
-    longint unsigned          control_sfence_event_seq;
+    bit                       control_flushsb_request_queued;
+    // 中文注释：C0 arm 在 start_item() 前冻结 event/reset baseline；C0/C4 只能匹配
+    // 同一 owner、同一 L2TLB reset epoch 且 event_seq 严格大于该 pre-drive 序号的记录。
+    bit                       control_sfence_c0_armed;
+    longint unsigned          control_sfence_pre_drive_event_seq;
+    longint unsigned          control_sfence_c0_event_seq;
+    longint unsigned          control_l2tlb_reset_epoch_at_arm;
     longint unsigned          control_assert_done_baseline_seq;
     longint unsigned          control_release_done_baseline_seq;
 
@@ -201,7 +207,11 @@ class status_transaction extends uvm_object;
         control_l2_csr_baseline_valid = 1'b0;
         control_l2_csr_baseline = '{default:'0};
         control_flushsb_req_id = 0;
-        control_sfence_event_seq = 0;
+        control_flushsb_request_queued = 1'b0;
+        control_sfence_c0_armed = 1'b0;
+        control_sfence_pre_drive_event_seq = 0;
+        control_sfence_c0_event_seq = 0;
+        control_l2tlb_reset_epoch_at_arm = 0;
         control_assert_done_baseline_seq = 0;
         control_release_done_baseline_seq = 0;
         lsq_reservation_state = MEMBLOCK_LSQ_RESERVATION_NONE;

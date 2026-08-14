@@ -39,6 +39,9 @@ class memblock_control_barrier_service extends uvm_object;
     extern virtual function void bind_control_owner(input status_transaction status);
     extern virtual function void enqueue_csr_action(input status_transaction status);
     extern virtual function void complete_csr_runtime_snapshot(input status_transaction status);
+    extern virtual function void service_sfence_control(input status_transaction status);
+    extern virtual function void enqueue_control_flushsb_request(input status_transaction status);
+    extern virtual function void enqueue_sfence_action(input status_transaction status);
     extern virtual function bit csr_payload_equal(
         input memblock_sync_pkg::dispatch_raw_csr_t expected,
         input memblock_sync_pkg::dispatch_raw_csr_t observed
@@ -244,6 +247,12 @@ function void memblock_control_barrier_service::service_active_control_barrier()
         end
         MEMBLOCK_CONTROL_STATE_WAIT_CSR_RUNTIME_SNAPSHOT:
             complete_csr_runtime_snapshot(status);
+        MEMBLOCK_CONTROL_STATE_WAIT_FLUSHSB_REQ,
+        MEMBLOCK_CONTROL_STATE_WAIT_SB_EMPTY,
+        MEMBLOCK_CONTROL_STATE_SFENCE_REQ,
+        MEMBLOCK_CONTROL_STATE_SFENCE_SENDOVER,
+        MEMBLOCK_CONTROL_STATE_WAIT_L2TLB_FLUSH_EFFECTIVE:
+            service_sfence_control(status);
         default: begin
             // SFence/check_store action states are intentionally left for their
             // dedicated completion flows; no ordinary issue/commit path may
@@ -325,6 +334,114 @@ function void memblock_control_barrier_service::complete_csr_runtime_snapshot(
     status.control_state = MEMBLOCK_CONTROL_STATE_CONTROL_COMMIT_READY;
     status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
 endfunction:complete_csr_runtime_snapshot
+
+// 抽象职责：推进 SFence 的 owner flushSb、worker action、C0 和 C4 completion。
+// 它只读取 request/adapter observation，并由持久 queue 唤醒 worker；不直接驱动
+// fence interface，也不依据固定等待拍数判断完成。
+function void memblock_control_barrier_service::service_sfence_control(
+    input status_transaction status
+);
+    memblock_flushsb_completion_t completion;
+    memblock_control_sfence_observation_t observation;
+
+    case (status.control_state)
+        MEMBLOCK_CONTROL_STATE_WAIT_FLUSHSB_REQ: begin
+            if (!status.control_flushsb_request_queued) begin
+                enqueue_control_flushsb_request(status);
+            end
+            if (status.control_flushsb_request_queued &&
+                data.control_flushsb_sendover_seen(status.control_owner,
+                                                    status.control_flushsb_req_id)) begin
+                status.control_state = MEMBLOCK_CONTROL_STATE_WAIT_SB_EMPTY;
+                status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+            end
+        end
+        MEMBLOCK_CONTROL_STATE_WAIT_SB_EMPTY: begin
+            if (data.try_consume_control_flushsb_completion(
+                    status.control_owner, status.control_flushsb_req_id, completion)) begin
+                status.control_flushsb_request_queued = 1'b0;
+                status.control_state = MEMBLOCK_CONTROL_STATE_SFENCE_REQ;
+                status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+                enqueue_sfence_action(status);
+            end
+        end
+        MEMBLOCK_CONTROL_STATE_SFENCE_REQ: begin
+            if (!status.control_action_enqueued) begin
+                enqueue_sfence_action(status);
+            end
+        end
+        MEMBLOCK_CONTROL_STATE_SFENCE_SENDOVER: begin
+            if (data.get_control_sfence_c0_observation(status.control_owner,
+                                                        observation)) begin
+                status.control_sfence_c0_event_seq = observation.lifecycle_event_seq;
+                status.control_state = MEMBLOCK_CONTROL_STATE_WAIT_L2TLB_FLUSH_EFFECTIVE;
+                status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+            end
+        end
+        MEMBLOCK_CONTROL_STATE_WAIT_L2TLB_FLUSH_EFFECTIVE: begin
+            if (data.try_consume_control_sfence_effective_observation(
+                    status.control_owner, status.control_sfence_c0_event_seq,
+                    status.control_l2tlb_reset_epoch_at_arm, observation)) begin
+                status.control_state = MEMBLOCK_CONTROL_STATE_CONTROL_COMMIT_READY;
+                status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+            end
+        end
+        default: begin
+            `uvm_fatal(get_type_name(), "SFence service received an unsupported control state")
+        end
+    endcase
+endfunction:service_sfence_control
+
+// 抽象职责：向现有 flushSb FIFO 写入一个带 control owner 的请求，并将生成的 req_id
+// 回填当前 status。LSQ commit sequence 仍是唯一 driver consumer；本函数不等待
+// sbIsEmpty，也不会让 event 代替 queue 中的持久请求。
+function void memblock_control_barrier_service::enqueue_control_flushsb_request(
+    input status_transaction status
+);
+    memblock_flushsb_req_t request;
+
+    if (!status.control_owner.valid || status.control_flushsb_request_queued ||
+        !(status.control_kind inside {MEMBLOCK_CONTROL_KIND_SFENCE,
+                                      MEMBLOCK_CONTROL_KIND_CHECK_STORE})) begin
+        `uvm_fatal(get_type_name(), "invalid control status while enqueueing flushSb")
+    end
+    data.push_owner_flushsb_request(status.control_owner, request);
+    status.control_flushsb_req_id = request.req_id;
+    status.control_flushsb_request_queued = 1'b1;
+    status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+endfunction:enqueue_control_flushsb_request
+
+// 抽象职责：在 sbIsEmpty completion 后把 canonical SFence token 放入持久 action
+// queue。L2TLB responder/adapter owner 尚未 ready 时保持 SFENCE_REQ 等待；已知
+// 拓扑缺失则 fail-fast，避免控制 barrier 无声卡死。
+function void memblock_control_barrier_service::enqueue_sfence_action(
+    input status_transaction status
+);
+    memblock_sfence_control_action_t action;
+    longint unsigned reset_epoch;
+
+    if (!status.control_owner.valid ||
+        status.control_state != MEMBLOCK_CONTROL_STATE_SFENCE_REQ ||
+        status.control_action_enqueued) begin
+        `uvm_fatal(get_type_name(), "invalid status while enqueueing SFence action")
+    end
+    if (!memblock_sync_pkg::l2tlb_adapter_service_active) begin
+        `uvm_fatal(get_type_name(), "SFence control requires an active L2TLB adapter service")
+    end
+    if (!memblock_sync_pkg::l2tlb_lifecycle_owner_claimed) begin
+        return;
+    end
+    reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
+    if (reset_epoch == 0 ||
+        !memblock_sync_pkg::l2tlb_post_reset_baseline_done(reset_epoch)) begin
+        return;
+    end
+    action = '{default:'0};
+    action.owner = status.control_owner;
+    status.control_action_enqueued = 1'b1;
+    status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+    data.enqueue_sfence_control_action(action);
+endfunction:enqueue_sfence_action
 
 // 抽象职责：比较 CSR monitor 的完整 runtime payload，忽略 valid/cycle 这两个
 // transport 字段。复用已有 raw_csr_payload_changed() 的字段覆盖，避免维护第二份
