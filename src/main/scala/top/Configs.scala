@@ -91,9 +91,9 @@ class MinimalConfig(n: Int = 1) extends Config(
           LoadUncacheBufferSize = 8,
           LoadQueueNWriteBanks = 4, // NOTE: make sure that LoadQueue{RAR, RAW, Replay}Size is divided by LoadQueueNWriteBanks.
           RollbackGroupSize = 8,
-          StoreQueueSize = 20,
-          StoreQueueNWriteBanks = 4, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
-          StoreQueueForwardWithMask = true,
+          StoreQueuePhysicalSize = 16, // preferably a power of 2
+          StoreQueueMultiple = 2, // preferably a power of 2
+          StoreQueueSnapshotInterval = 1, // must a power of 2
           // ============ VLSU ============
           VlMergeBufferSize = 16,
           VsMergeBufferSize = 8,
@@ -272,7 +272,7 @@ class MinimalConfig(n: Int = 1) extends Config(
     })
 )
 
-case class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => {
+case class WithNKBL1D(n: Int, ways: Int = 8, numMemChannels: Int = 1) extends Config((site, here, up) => {
   case XSTileKey =>
     val sets = n * 1024 / ways / 64
     up(XSTileKey).map(_.copy(
@@ -286,6 +286,7 @@ case class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => 
         nProbeEntries = 8,
         nReleaseEntries = 18,
         nMaxPrefetchEntry = 6,
+        numMemChannels = numMemChannels,
         enableTagEcc = true,
         enableDataEcc = true,
         cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
@@ -300,7 +301,8 @@ case class L2CacheConfig
   inclusive: Boolean = true,
   banks: Int = 1,
   tp: Boolean = true,
-  nl: Boolean = false, 
+  nl: Boolean = false,
+  cdp: Boolean = true,
   enablePC: Boolean = false, // Enable PC field for L1Param
   enableFlush: Boolean = false
 ) extends Config((site, here, up) => {
@@ -337,6 +339,7 @@ case class L2CacheConfig
         prefetch = Seq(BOPParameters()) ++
           (if (tp) Seq(TPParameters()) else Nil) ++
           (if (nl) Seq(NLParameters()) else Nil) ++
+          (if (cdp) Seq(CDPParameters()) else Nil) ++
           (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
         enableL2Flush = enableFlush,
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
@@ -505,10 +508,6 @@ class CVMCompile extends Config((site, here, up) => {
     HasBitmapCheckDefault = false))
 })
 
-class BPUFlushCompile extends Config((site, here, up) => {
-  case XSTileKey => up(XSTileKey).map(_.copy(HasBpuFlush = true))
-})
-
 class CVMTestCompile extends Config((site, here, up) => {
   case CVMParamsKey => up(CVMParamsKey).copy(
     KeyIDBits = 5,
@@ -518,6 +517,10 @@ class CVMTestCompile extends Config((site, here, up) => {
   case XSTileKey => up(XSTileKey).map(_.copy(
     HasBitmapCheck =true,
     HasBitmapCheckDefault = true))
+})
+
+class BPUFlushCompile extends Config((site, here, up) => {
+  case XSTileKey => up(XSTileKey).map(_.copy(HasBpuFlush = true))
 })
 
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
@@ -537,7 +540,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 class DefaultConfig(n: Int = 1) extends Config(
   OpenLLCConfig("16MB", ways = 16, banks = 4)
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
-    ++ WithNKBL1D(64, ways = 4)
+    ++ WithNKBL1D(64, ways = 4, numMemChannels = 2)
     ++ new BaseConfig(n)
 )
 
@@ -546,13 +549,13 @@ class CVMConfig(n: Int = 1) extends Config(
     ++ new DefaultConfig(n)
 ) with DeprecatedConfigWarning
 
-class BPUFlushConfig(n: Int = 1) extends Config(
-  new BPUFlushCompile
+class CVMTestConfig(n: Int = 1) extends Config(
+  new CVMTestCompile
     ++ new DefaultConfig(n)
 ) with DeprecatedConfigWarning
 
-class CVMTestConfig(n: Int = 1) extends Config(
-  new CVMTestCompile
+class BPUFlushConfig(n: Int = 1) extends Config(
+  new BPUFlushCompile
     ++ new DefaultConfig(n)
 ) with DeprecatedConfigWarning
 

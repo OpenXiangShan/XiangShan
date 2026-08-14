@@ -72,7 +72,10 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   }
 
   io.sramResetDone := tables.map(_.io.sramResetDone).reduce(_ && _)
-  if (HasBpuFlush) { io.resetDone.get := true.B }
+  // context flush placeholder: real flush scheme comes later
+  if (HasBpuFlush) {
+    io.resetDone.get := true.B
+  }
 
   private val useAltOnNa = RegInit((1 << (UseAltOnNaWidth - 1)).U(UseAltOnNaWidth.W))
   private val tickCnt    = RegInit(TickCounter.Zero)

@@ -41,8 +41,6 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
 
     val predict: Predict = new Predict
     val train:   Train   = new Train
-
-    val contextFlush: Bool = Input(Bool())
   }
 
   val io: MainBtbReplacerIO = IO(new MainBtbReplacerIO)
@@ -50,8 +48,7 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   private val predictStateGen = Module(ReplacerStateGen(Replacer, NumWay, accessSize = NumWay))
   private val trainStateGen   = Module(ReplacerStateGen(Replacer, NumWay))
   private val victimStateGen  = Module(ReplacerStateGen(Replacer, NumWay))
-  private val stateBank       = Module(new ReplacerState(NumSets, predictStateGen.StateWidth, hasContextFlush = true))
-  stateBank.io.contextFlush.get := io.contextFlush
+  private val stateBank       = Module(new ReplacerState(NumSets, predictStateGen.StateWidth))
 
   /* *** predict *** */
   // read current state

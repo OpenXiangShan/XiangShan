@@ -100,8 +100,7 @@ class IndirectAIAPermitModule extends IndirectCSRWindowPermitModule {
 
   private val rwSireg_EX_II = (
     !isVirtual && Iselect.isOdd(siselect) ||
-    isModeHS && !mstateen0.AIA.asBool ||
-    isModeVS && !mstateen0.AIA.asBool
+    isModeHS && !mstateen0.AIA.asBool
   ) && siregInAIA && isSireg
 
   private val rwSireg_EX_VI = isModeVS && siregInAIA && isSireg

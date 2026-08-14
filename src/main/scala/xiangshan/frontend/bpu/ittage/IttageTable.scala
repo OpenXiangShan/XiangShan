@@ -271,11 +271,11 @@ class IttageTable(
       bank.io.r.req.valid && buffer.io.read.head.valid
     }).asUInt.orR
   )
-  private val targetBankReady = writeBuffers
+  private val updateOverwrite = writeBuffers
     .zip(updateBankMask.asBools)
-    .map { case (buffer, sel) => buffer.io.write.head.ready && sel }
+    .map { case (buffer, sel) => buffer.io.overwrite.head && sel }
     .reduce(_ || _)
-  XSPerfAccumulate("ittage_table_update_drop", io.update.valid && !targetBankReady)
+  XSPerfAccumulate("ittage_table_update_overwrite", io.update.valid && updateOverwrite)
 
   if (debug) {
     val u    = io.update

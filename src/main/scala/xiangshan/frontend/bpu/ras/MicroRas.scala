@@ -62,7 +62,10 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
   }
   val io = IO(new MicroRasIO)
   io.sramResetDone := true.B
-  if (HasBpuFlush) { io.resetDone.get := true.B }
+  // context flush placeholder: real flush scheme comes later
+  if (HasBpuFlush) {
+    io.resetDone.get := true.B
+  }
   io.trainReady    := true.B
 
   // Track whether S2/S3 stages contain pending push/pop operations

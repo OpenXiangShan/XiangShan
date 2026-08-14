@@ -40,6 +40,8 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   private val satp    = current.satp
   private val vsatp   = current.vsatp
   private val hgatp   = current.hgatp
+  private val oldSatp = current.oldSatp
+  private val oldVsatp = current.oldVsatp
 
   private val hasTrap                      = in.hasTrap
   private val debugMode                    = in.debugMode
@@ -50,6 +52,7 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   private val hasSingleStep                = in.hasSingleStep
   private val criticalErrorStateEnterDebug = in.criticalErrorStateEnterDebug
   private val isFetchMalAddr               = in.isFetchMalAddr
+  private val satpFlushFirstFetchFault     = in.satpFlushFirstFetchFault
 
   private val hasExceptionInDmode = debugMode && hasTrap
   val cause = MuxCase(DcsrCause.None.asUInt, Seq(
@@ -62,8 +65,8 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
 
   private val trapPC = genTrapVA(
     iMode,
-    satp,
-    vsatp,
+    oldSatp,
+    oldVsatp,
     hgatp,
     in.trapPc,
   )
@@ -88,7 +91,9 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   out.dcsr.bits.V             := current.privState.V.asUInt
   out.dcsr.bits.PRV           := current.privState.PRVM.asUInt
   out.dcsr.bits.CAUSE         := cause
-  out.dpc.bits.epc            := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
+  out.dpc.bits.epc            := Mux(satpFlushFirstFetchFault,
+                                  trapPC(63, 1),
+                                  Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1)))
 
   out.targetPc.bits.pc        := RegEnable(debugPc, valid || hasExceptionInDmode)
   out.targetPc.bits.raiseIPF  := false.B

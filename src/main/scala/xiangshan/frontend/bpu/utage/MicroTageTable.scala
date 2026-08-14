@@ -45,10 +45,8 @@ class MicroTageTable(
     val req:           Valid[MicroTageReq] = Input(Valid(new MicroTageReq))
     val resps:         MicroTageResp       = Output(new MicroTageResp)
     val train:         MicroTageTrain      = new MicroTageTrain(numSets)
-   val usefulReset:   Bool                = Input(Bool())
-   val sramResetDone: Bool                = Output(Bool())
-    val contextFlush:  Bool                = Input(Bool())
-    val bpuFlushing:   Bool                = Input(Bool())
+    val usefulReset:   Bool                = Input(Bool())
+    val sramResetDone: Bool                = Output(Bool())
   }
   val io = IO(new MicroTageTableIO)
   // Write buffer to handle write conflicts
@@ -62,16 +60,11 @@ class MicroTageTable(
       way = 1,
       singlePort = true,
       shouldReset = true,
-      extraReset  = true,
       withClockGate = true,
       hasMbist = hasMbist,
       hasSramCtl = hasSramCtl,
       suffix = Option("bpu_utage")
     )).suggestName(s"utage_entry_sram_bank${bankIdx}")
-  }
-
-  entrySram.foreach { bank =>
-    bank.extra_reset.get := io.contextFlush
   }
 
   // Calculate bank selection for read access
@@ -100,10 +93,7 @@ class MicroTageTable(
   private val bufferReadEntry = wbuffer.io.resp.readEntry
   // Convert SRAM response to proper type
   private val sramRealReadEntry = WireDefault(0.U.asTypeOf(new MicroTageEntry))
-  private val sramReadEntry = Mux(io.bpuFlushing,
-    0.U.asTypeOf(new MicroTageEntry),
-    bankReadEntries.asTypeOf(new MicroTageEntry)
-  )
+  private val sramReadEntry     = bankReadEntries.asTypeOf(new MicroTageEntry)
   sramRealReadEntry := sramReadEntry
 
   // Select data from buffer (if hit) or SRAM (if miss)
@@ -122,8 +112,6 @@ class MicroTageTable(
   wbuffer.io.train <> io.train
   wbuffer.io.writeSuccess := writeSuccess
   wbuffer.io.usefulReset  := io.usefulReset
-  wbuffer.io.contextFlush := io.contextFlush
-  wbuffer.io.bpuFlushing  := io.bpuFlushing
 
   private val tryWrite       = wbuffer.io.tryWrite.valid
   private val writeBankId    = getBankId(wbuffer.io.tryWrite.bits.writeIndex, numBanks)

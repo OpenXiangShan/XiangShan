@@ -13,7 +13,6 @@ env:
   NEMU_HOME: /nfs/home/share/ci-workloads/NEMU
   AM_HOME: /nfs/home/share/ci-workloads/nexus-am
   PERF_HOME: /nfs/home/ci-runner/emu-performance/${{ github.run_number }}
-  CKPT_HOME_LEGACY: /nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0
   CKPT_HOME: /nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260604/checkpoint
 
 jobs:
@@ -76,118 +75,6 @@ jobs:
           else
             echo "cluster=open" >> ${GITHUB_OUTPUT}
           fi
-
-  run-legacy:
-    name: EMU - Performance - Run (Legacy)
-    needs: build
-    runs-on:
-      - ${{ needs.build.outputs.cluster }} # use same cluster as builder to avoid cross-cluster network copy & pgo issue
-      - runner
-    timeout-minutes: 300
-    continue-on-error: false
-    strategy:
-      matrix:
-        include:
-          - name: perlbench_splitmail
-            ckpt: 3995
-          - name: bzip2_liberty
-            ckpt: 739
-          - name: gcc_s04
-            ckpt: 2772
-          - name: mcf
-            ckpt: 6388
-          - name: gobmk_nngs
-            ckpt: 453
-          - name: hmmer_nph3
-            ckpt: 33214
-          - name: sjeng
-            ckpt: 64284
-          - name: libquantum
-            ckpt: 81539
-          - name: h264ref_foreman.main
-            ckpt: 10053
-          - name: omnetpp
-            ckpt: 14042
-          - name: astar_rivers
-            ckpt: 8728
-          - name: xalancbmk
-            ckpt: 9874
-          - name: bwaves
-            ckpt: 30350
-          - name: gamess_gradient
-            ckpt: 36450
-          - name: milc
-            ckpt: 7124
-          - name: zeusmp
-            ckpt: 45598
-          - name: gromacs
-            ckpt: 2907
-          - name: cactusADM
-            ckpt: 61235
-          - name: leslie3d
-            ckpt: 37552
-          - name: namd
-            ckpt: 75757
-          - name: dealII
-            ckpt: 13061
-          - name: soplex_ref
-            ckpt: 10774
-          - name: povray
-            ckpt: 8362
-          - name: calculix
-            ckpt: 53456
-          - name: GemsFDTD
-            ckpt: 49458
-          - name: tonto
-            ckpt: 69015
-          - name: lbm
-            ckpt: 31064
-          - name: wrf
-            ckpt: 112496
-          - name: sphinx3
-            ckpt: 141036
-      fail-fast: false
-      max-parallel: 12
-    steps:
-      - name: Cleanup orphan EMU
-        run: |
-          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
-      - uses: actions/checkout@v7
-        with:
-          submodules: true
-      - name: Get artifact
-        run: |
-          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
-          mkdir -p build
-          echo "Getting EMU binary from ${PERF_HOME}/emu"
-          cp -L ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
-      - name: Run SPEC06 Test - ${{ matrix.name }}
-        id: run
-        shell: bash
-        run: |
-          export CKPT=$(find "${CKPT_HOME_LEGACY}/${{ matrix.name }}/${{ matrix.ckpt }}" -type f \( -name "*.gz" -o -name "*.zstd" \) | head -n 1)
-          echo "Running checkpoint: ${CKPT}"
-          # TODO: remove --disable-fork to enable lightSSS when gsim supports it
-          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
-            --wave-dump ${PERF_HOME} \
-            --numa --threads 1 \
-            --max-instr 5000000 \
-            --disable-fork \
-            ${CKPT} \
-            2> stderr.log | tee stdout.log
-          grep -oP 'IPC = \K\d+\.\d+' stdout.log > "${PERF_HOME}/ipc-legacy-${{ matrix.name }}_${{ matrix.ckpt }}"
-          echo "IPC: $(cat "${PERF_HOME}/ipc-legacy-${{ matrix.name }}_${{ matrix.ckpt }}")"
-      - name: Archive log
-        if: ${{ always() && steps.run.outcome != 'skipped' }}
-        run: |
-          # if run step failed, do not sort
-          if [[ "${{ steps.run.outcome }}" == "failure" ]]; then
-            cat stderr.log
-          else
-            mv stderr.log stderr.log.raw
-            cat stderr.log.raw | sort | tee stderr.log
-          fi
-          tar -czvf "${PERF_HOME}/legacy-${{ matrix.name }}_${{ matrix.ckpt }}.tar.gz" stdout.log stderr.log
 
   run:
     name: EMU - Performance - Run
@@ -306,7 +193,6 @@ jobs:
     needs:
       - build # needed to get the cluster info
       - run
-      - run-legacy
     runs-on:
       - ${{ needs.build.outputs.cluster }} # use same cluster as builder/runner to access NFS
       - runner

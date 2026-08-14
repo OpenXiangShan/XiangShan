@@ -611,7 +611,9 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   val s3_tlb_resp_valid = RegNext(s2_tlb_resp_valid)
   val s3_tlb_resp = RegEnable(s2_tlb_resp, s2_tlb_resp_valid)
   val s3_tlb_update_index = RegEnable(s2_tlb_update_index, s2_tlb_resp_valid)
-  val s3_tlb_evict = RegNext(s2_tlb_evict)
+  val s3_l1_tlb_evict = s1_l1_alloc && (s1_l1_index === s3_tlb_update_index)
+  val s3_l2_tlb_evict = s1_l2_alloc && ((s1_l2_index + MLP_L1_SIZE.U) === s3_tlb_update_index)
+  val s3_tlb_evict = RegNext(s2_tlb_evict) || s3_l1_tlb_evict || s3_l2_tlb_evict
   val s3_pmp_resp = io.pmp_resp
   val s3_update_valid = s3_tlb_resp_valid && !s3_tlb_evict && !s3_tlb_resp.miss
   val s3_drop = s3_update_valid && (
@@ -849,6 +851,7 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   val stride_train = IO(Flipped(Vec(backendParams.LduCnt + backendParams.HyuCnt, ValidIO(new TrainReqBundle()))))
   val l2PfqBusy = IO(Input(Bool()))
   val strideEnable = IO(Input(Bool()))
+  val streamEnable = IO(Input(Bool()))
 
   val stride_train_filter = Module(new TrainFilter(STRIDE_FILTER_SIZE, "stride"))
   val stride_meta_array = Module(new StrideMetaArray)
@@ -857,36 +860,35 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   val pf_queue_filter = Module(new MutiLevelPrefetchFilter)
 
   // for now, if the stream is disabled, train and prefetch process will continue, without sending out and reqs
-  val enable = io.enable
   // Stream 0, Stride 1
   val stream_pf_ctrl = pf_ctrl(0)
   val stride_pf_ctrl = pf_ctrl(1)
 
   stream_train_filter.io.ldTrainOpt.get.zipWithIndex.foreach {
     case (ld_in, i) => {
-      ld_in.valid := io.ld_in(i).valid && enable
+      ld_in.valid := io.ld_in(i).valid && streamEnable
       ld_in.bits := io.ld_in(i).bits
     }
   }
-  stream_train_filter.io.enable := enable
+  stream_train_filter.io.enable := streamEnable
   stream_train_filter.io.flush := stream_pf_ctrl.flush
 
   stride_train_filter.io.ldTrainOpt.get.zipWithIndex.foreach {
     case (ld_in, i) => {
-      ld_in.valid := stride_train(i).valid && enable
+      ld_in.valid := stride_train(i).valid && strideEnable
       ld_in.bits := stride_train(i).bits
     }
   }
-  stride_train_filter.io.enable := enable
+  stride_train_filter.io.enable := strideEnable
   stride_train_filter.io.flush := stride_pf_ctrl.flush
 
-  stream_bit_vec_array.io.enable := enable
+  stream_bit_vec_array.io.enable := streamEnable
   stream_bit_vec_array.io.flush := stream_pf_ctrl.flush
   stream_bit_vec_array.io.dynamic_depth := stream_pf_ctrl.dynamic_depth
   stream_bit_vec_array.io.confidence := stream_pf_ctrl.confidence
   stream_bit_vec_array.io.train_req <> stream_train_filter.io.trainReq
 
-  stride_meta_array.io.enable := enable && strideEnable
+  stride_meta_array.io.enable := strideEnable
   stride_meta_array.io.flush := stride_pf_ctrl.flush
   stride_meta_array.io.dynamic_depth := 0.U
   stride_meta_array.io.confidence := stride_pf_ctrl.confidence
@@ -895,38 +897,42 @@ class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamP
   stride_meta_array.io.stream_lookup_resp <> stream_bit_vec_array.io.stream_lookup_resp
 
   // stream has higher priority than stride
-  pf_queue_filter.io.l1_prefetch_req.valid := stream_bit_vec_array.io.l1_prefetch_req.valid && stream_pf_ctrl.enable || stride_meta_array.io.l1_prefetch_req.valid && stride_pf_ctrl.enable
+  val stream_pf_valid1 = stream_bit_vec_array.io.l1_prefetch_req.valid && stream_pf_ctrl.enable && streamEnable
+  val stride_pf_valid1 = stride_meta_array.io.l1_prefetch_req.valid && stride_pf_ctrl.enable && strideEnable
+  pf_queue_filter.io.l1_prefetch_req.valid := stream_pf_valid1 || stride_pf_valid1
   pf_queue_filter.io.l1_prefetch_req.bits := Mux(
-    stream_bit_vec_array.io.l1_prefetch_req.valid && stream_pf_ctrl.enable,
+    stream_pf_valid1,
     stream_bit_vec_array.io.l1_prefetch_req.bits,
     stride_meta_array.io.l1_prefetch_req.bits
   )
 
-  pf_queue_filter.io.l2_l3_prefetch_req.valid := stream_bit_vec_array.io.l2_l3_prefetch_req.valid && stream_pf_ctrl.enable || stride_meta_array.io.l2_l3_prefetch_req.valid && stride_pf_ctrl.enable
+  val stream_pf_valid2 = stream_bit_vec_array.io.l2_l3_prefetch_req.valid && stream_pf_ctrl.enable && streamEnable
+  val stride_pf_valid2 = stride_meta_array.io.l2_l3_prefetch_req.valid && stride_pf_ctrl.enable && strideEnable
+  pf_queue_filter.io.l2_l3_prefetch_req.valid := stream_pf_valid2 || stride_pf_valid2
   pf_queue_filter.io.l2_l3_prefetch_req.bits := Mux(
-    stream_bit_vec_array.io.l2_l3_prefetch_req.valid && stream_pf_ctrl.enable,
+    stream_pf_valid2,
     stream_bit_vec_array.io.l2_l3_prefetch_req.bits,
     stride_meta_array.io.l2_l3_prefetch_req.bits
   )
 
-  io.l1_req.valid := pf_queue_filter.io.l1_req.valid && enable
+  io.l1_req.valid := pf_queue_filter.io.l1_req.valid && io.enable
   io.l1_req.bits := pf_queue_filter.io.l1_req.bits
 
   pf_queue_filter.io.l1_req.ready := io.l1_req.ready
   pf_queue_filter.io.tlb_req <> io.tlb_req
   pf_queue_filter.io.pmp_resp := io.pmp_resp
-  pf_queue_filter.io.enable := enable
+  pf_queue_filter.io.enable := io.enable
 
   pf_queue_filter.io.flush := pf_ctrl.map(_.flush).reduce(_ || _)
   pf_queue_filter.io.l2PfqBusy := l2PfqBusy
 
   val l2_in_pmem = PmemRanges.map(_.cover(pf_queue_filter.io.l2_pf_addr.bits.addr)).reduce(_ || _)
-  io.l2_req.valid := pf_queue_filter.io.l2_pf_addr.valid && l2_in_pmem && enable
+  io.l2_req.valid := pf_queue_filter.io.l2_pf_addr.valid && l2_in_pmem && io.enable
   io.l2_req.bits := pf_queue_filter.io.l2_pf_addr.bits
   pf_queue_filter.io.l2_pf_addr.ready := io.l2_req.ready
 
   val l3_in_pmem = PmemRanges.map(_.cover(pf_queue_filter.io.l3_pf_addr.bits.addr)).reduce(_ || _)
-  io.l3_req.valid := pf_queue_filter.io.l3_pf_addr.valid && l3_in_pmem && enable
+  io.l3_req.valid := pf_queue_filter.io.l3_pf_addr.valid && l3_in_pmem && io.enable
   io.l3_req.bits := pf_queue_filter.io.l3_pf_addr.bits
   pf_queue_filter.io.l3_pf_addr.ready := io.l3_req.ready
 }

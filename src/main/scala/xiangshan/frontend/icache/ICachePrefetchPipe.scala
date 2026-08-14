@@ -33,8 +33,7 @@ import xiangshan.frontend.ftq.FtqToPrefetchBundle
 class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     with ICacheAddrHelper
     with ICacheMetaHelper
-    with ICacheMissUpdateHelper
-    with ICacheDataHelper {
+    with ICacheMissUpdateHelper {
 
   class ICachePrefetchPipeIO(implicit p: Parameters) extends ICacheBundle {
     // control
@@ -43,7 +42,6 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     val flush:       Bool = Input(Bool())
 
     val fromFtq:       DecoupledIO[FtqToPrefetchBundle] = Flipped(Decoupled(new FtqToPrefetchBundle))
-    val toFtq:         Valid[PrefetchToFtqBundle]       = Valid(new PrefetchToFtqBundle)
     val flushFromBpu:  BpuFlushInfo                     = Flipped(new BpuFlushInfo)
     val itlb:          TlbRequestIO                     = new TlbRequestIO
     val itlbFlushPipe: Bool                             = Output(Bool())
@@ -92,7 +90,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s0_twoPrefetchCase  = io.fromFtq.bits.twoPrefetchCase
 
   private val s0_readMetaVAddr  = s0_twoPrefetchCase.selectMetaVAddr(s0_req)
-  private val s0_readMetaSetIdx = VecInit(s0_readMetaVAddr.map(get_idx))
+  private val s0_readMetaSetIdx = s0_twoPrefetchCase.selectMetaSetIdx(s0_req)
   private val s0_readDoubleLine = s0_twoPrefetchCase.selectIsCrossLine(s0_req)
 
   fromBpuS0Flush := !s0_isSoftPrefetch && io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid)
@@ -356,15 +354,6 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
 
   // merge pmp mmio and itlb pbmt
   s1_isMmio := s1_pmpMmio || Pbmt.isUncache(s1_itlbPbmt)
-
-  io.toFtq.valid                             := s1_fire && !s1_isSoftPrefetch
-  io.toFtq.bits.ftqIdx                       := s1_ftqIdx
-  io.toFtq.bits.twoFetchInfo(0).valid        := true.B
-  io.toFtq.bits.twoFetchInfo(0).bits.isMmio  := s1_isMmio
-  io.toFtq.bits.twoFetchInfo(0).bits.wayMask := VecInit(s1_reqMetaInfo(0).map(_.waymask))
-  io.toFtq.bits.twoFetchInfo(1).valid        := s1_twoPrefetchCase.valid
-  io.toFtq.bits.twoFetchInfo(1).bits.isMmio  := s1_isMmio
-  io.toFtq.bits.twoFetchInfo(1).bits.wayMask := VecInit(s1_reqMetaInfo(1).map(_.waymask))
 
   /**
     ******************************************************************************

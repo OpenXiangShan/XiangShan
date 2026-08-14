@@ -23,8 +23,7 @@ class ReplacerState(
     NumSets:           Int,
     StateBits:         Int,
     NumExtraReadPort:  Int = 0,
-    NumExtraWritePort: Int = 0,
-    hasContextFlush:   Boolean = false
+    NumExtraWritePort: Int = 0
 ) extends Module {
   class ReplacerStateIO extends Bundle {
     class Read extends Bundle {
@@ -40,8 +39,6 @@ class ReplacerState(
     // magic number 2: we need at least 2 ports for predict/train read/write
     val read:  Vec[Read]         = Vec(2 + NumExtraReadPort, new Read)
     val write: Vec[Valid[Write]] = Vec(2 + NumExtraWritePort, Flipped(Valid(new Write)))
-
-    val contextFlush: Option[Bool] = Option.when(hasContextFlush)(Input(Bool()))
 
     def predictRead: Read      = read.head
     def trainRead:   Read      = read.last
@@ -60,8 +57,6 @@ class ReplacerState(
 
   private val states = RegInit(VecInit(Seq.fill(NumSets)(0.U.asTypeOf(UInt(StateBits.W)))))
 
-  private val contextFlush = io.contextFlush.getOrElse(false.B)
-
   /* *** write *** */
   // NOTE: when write-write conflict (write same setIdx), port with higher physical idx will take effect,
   //       therefore, with the default parameter (2 ports), trainWrite has higher priority than predictWrite
@@ -71,10 +66,6 @@ class ReplacerState(
     when(port.valid) {
       states(port.bits.setIdx) := port.bits.state
     }
-  }
-  // last-connect override: contextFlush forces all PLRU states to 0 in a single cycle
-  when(contextFlush) {
-    states.foreach(_ := 0.U)
   }
 
   /* *** read *** */

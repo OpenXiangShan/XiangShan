@@ -107,6 +107,7 @@ object Bundles {
   class DecodeInUop(implicit p: Parameters) extends XSBundle {
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
     val exceptionVec = ExceptSparseVec(ExceptionNO.fromFrontendSet)
+    val satpFlushFirstFetchFault = Bool()
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
@@ -136,6 +137,7 @@ object Bundles {
   class DecodeOutUop(implicit p: Parameters) extends XSBundle {
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
+    val satpFlushFirstFetchFault = Bool()
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
@@ -231,6 +233,7 @@ object Bundles {
   class RenameOutUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
+    val satpFlushFirstFetchFault = Bool()
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
@@ -290,6 +293,8 @@ object Bundles {
     val ssid = UInt(SSIDWidth.W)
     val singleStep = Bool() // debug module
     val numLsElem = NumLsElem()
+    val lsqIdxStart = new LSIdx
+    val lsqIdxEnd = new LSIdx
     val hasException = Bool()
     val ftqLastOffset = UInt(FetchBlockInstOffsetWidth.W) // store ftqoffset before change in rename
     val lastIsRVC = Bool() // store isrvc before change in rename
@@ -328,6 +333,36 @@ object Bundles {
       this.isXSTrap     := FuType.isAlu(source.fuType) && (source.fuOpType === ALUOpType.xstrap)
       this.replayInst   := false.B
     }
+  }
+
+  object IQCancelSource {
+    def apply() = UInt(3.W)
+
+    val none = 0.U(3.W)
+    val og0  = 1.U(3.W)
+    val og1  = 2.U(3.W)
+    val ld   = 3.U(3.W)
+    val st   = 4.U(3.W)
+
+    val all = Seq(og0, og1, ld, st)
+    val num = all.length
+
+    def isnone(cancelSource: UInt): Bool = cancelSource === none
+    def isog0(cancelSource: UInt): Bool = cancelSource === og0
+    def isog1(cancelSource: UInt): Bool = cancelSource === og1
+    def isld(cancelSource: UInt): Bool = cancelSource === ld
+    def isst(cancelSource: UInt): Bool = cancelSource === st
+  }
+  class TopdownIQInfo(implicit p: Parameters) extends XSBundle {
+    val robIdx = new RobPtr
+    val fuType = FuType()
+    val cancelSource = IQCancelSource()
+    val srcReady = Bool()
+    val issued = Bool()
+  }
+
+  class TopdownIQExtendedInfo(implicit p: Parameters) extends TopdownIQInfo {
+    val idealIssueTime = Bool()
   }
 
   class DispatchOutBaseUop(implicit p: Parameters) extends XSBundle {
@@ -523,6 +558,7 @@ object Bundles {
     // from dispatch
     val srcLoadDependency = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val debug             = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
+    val debugLastIssueCancelSource = OptionWrapper(backendParams.debugEn, IQCancelSource())
   }
   class ExuToRob(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val robIdx = new RobPtr
@@ -808,6 +844,15 @@ object Bundles {
       this.pdestVl := exuInput.pdestVl.getOrElse(0.U)
       connectSamePort(this, exuInput)
     }
+  }
+
+  class IssueQueueLRQWakeUpBundle(implicit p: Parameters) extends XSBundle {
+    val sqIdx = new SqPtr
+  }
+
+  class IssueQueueLRQWakeUpCancelBundle(implicit p: Parameters) extends XSBundle {
+    val og0Cancel = Bool()
+    val og1Cancel = Bool()
   }
 
   class VPUCtrlSignals(implicit p: Parameters) extends XSBundle {
@@ -1180,7 +1225,7 @@ object Bundles {
       uop.v0Wen          := this.v0Wen.getOrElse(false.B)
       uop.vlWen          := this.vlWen.getOrElse(false.B)
       uop.flushPipe      := this.flushPipe.getOrElse(false.B)
-      uop.pc             := this.pc.getOrElse(0.U) + (this.ftqOffset.getOrElse(0.U) << instOffsetBits)
+      uop.pc             := this.pc.getOrElse(0.U)
       uop.loadWaitBit    := this.loadWaitBit.getOrElse(false.B)
       uop.waitForRobIdx  := this.waitForRobIdx.getOrElse(0.U.asTypeOf(new RobPtr))
       uop.storeSetHit    := this.storeSetHit.getOrElse(false.B)
@@ -1352,6 +1397,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val vxsat        = Option.when(params.writeVxsat)(Bool())
     val exceptionVec = ExceptSparseVec(params.exceptionOut)
     val flushPipe    = Option.when(params.flushPipe)(Bool())
+    val satpFlush    = Option.when(params.satpFlush)(Bool())
     val trigger      = Option.when(params.trigger)(TriggerAction())
     val isRVC        = Option.when(params.needIsRVC)(Bool())
     val replay       = Option.when(params.replayInst)(Bool())
@@ -1378,7 +1424,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val perfDebugInfo  = Option.when(backendParams.debugEn)(new PerfDebugInfo())
     val debug_seqNum   = Option.when(backendParams.debugEn)(InstSeqNum())
   }
-  
+
   class MemDebugBundle(implicit p: Parameters) extends XSBundle {
     val isMMIO = Option.when(backendParams.basicDebugEn)(Bool())
     val isNCIO = Option.when(backendParams.basicDebugEn)(Bool())
@@ -1626,6 +1672,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
   class WriteBackRobBundle(val params: ExeUnitParams, backendParams: BackendParams)(implicit p: Parameters) extends Bundle with BundleSource {
     val robIdx        = new RobPtr()(p)
     val flushPipe     = Option.when(params.flushPipe)(Bool())
+    val satpFlush     = Option.when(params.satpFlush)(Bool())
     val replay        = Option.when(params.replayInst)(Bool())
     val redirect      = Option.when(params.hasRedirect)(ValidIO(new Redirect))
     val fflags        = Option.when(params.writeFflags)(UInt(5.W))
@@ -1661,6 +1708,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val instr = UInt(32.W)
     val commitType = CommitType()
     val exceptionVec = ExceptSparseVec() // TODO: optimize valid indices
+    val satpFlushFirstFetchFault = Bool()
     val isPcBkpt = Bool()
     val isFetchMalAddr = Bool()
     val gpaddr = UInt(XLEN.W)

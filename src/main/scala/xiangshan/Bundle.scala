@@ -96,6 +96,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptSparseVec(ExceptionNO.fromFrontendSet)
+  val satpFlushFirstFetchFault = Bool()
   val backendException = Bool()
   val trigger = TriggerAction()
   val isRvc = Bool()
@@ -224,9 +225,17 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
 
   val fullTarget: UInt = UInt(XLEN.W) // only used for tval storage in backend
 
+  val satpFlush = Bool()
+
   val stFtqIdx = new FtqPtr // for load violation predict
   val stFtqOffset: UInt = UInt(FetchBlockInstOffsetWidth.W)
   val stIsRVC  = Bool()
+
+  def newFtqIdx: FtqPtr = Mux(
+    RedirectLevel.flushItself(level) && (ftqOffset === 0.U || ftqOffset === 1.U && !isRVC),
+    ftqIdx,
+    ftqIdx + 1.U
+  )
 
   val debug_runahead_checkpoint_id = UInt(64.W)
   val debugIsCtrl = Bool()
@@ -518,7 +527,7 @@ class TlbMbmcBundle(implicit p: Parameters) extends MbmcStruct {
   }
 }
 
-class MmptStruct(implicit p: Parameters) extends XSBundle { // add new mpt csr 
+class MmptStruct(implicit p: Parameters) extends XSBundle { // add new mpt csr
     val mode = UInt(4.W)
     val sdid = UInt(6.W)
     val optOutInNode = UInt(1.W) // skip intermediate node MPT check
@@ -545,6 +554,7 @@ class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
     val spvp = UInt(1.W)
     val imode = UInt(2.W)
     val dmode = UInt(2.W)
+    val debug = Bool()
   }
   val mPBMTE = Bool()
   val hPBMTE = Bool()
@@ -593,6 +603,53 @@ class MemPredUpdateReq(implicit p: Parameters) extends XSBundle  {
   // by default, ldpc/stpc should be xor folded
   val ldpc = UInt(MemPredPCWidth.W)
   val stpc = UInt(MemPredPCWidth.W)
+}
+
+class StoreSetPredDBEntry(implicit p: Parameters) extends XSBundle {
+  val timeCnt = UInt(64.W)
+  val robIdx = UInt(log2Ceil(RobSize).W)
+  val foldPc = UInt(MemPredPCWidth.W)
+  val isStore = Bool()
+  val ssid = UInt(SSIDWidth.W)
+  val ssitStrict = Bool()
+  val lfstShouldWait = Bool()
+  val lfstNotIssuedStoreGt1 = Bool()
+  val finalLoadWaitBit = Bool()
+  val finalLoadWaitStrict = Bool()
+}
+
+class StoreSetTrainDBEntry(implicit p: Parameters) extends XSBundle {
+  val timeCnt = UInt(64.W)
+  val ldFoldPc = UInt(MemPredPCWidth.W)
+  val stFoldPc = UInt(MemPredPCWidth.W)
+}
+
+class StoreSetUpdateDBEntry(implicit p: Parameters) extends XSBundle {
+  val timeCnt = UInt(64.W)
+  val ldFoldPc = UInt(MemPredPCWidth.W)
+  val stFoldPc = UInt(MemPredPCWidth.W)
+  val loadOldSSID = UInt(SSIDWidth.W)
+  val storeOldSSID = UInt(SSIDWidth.W)
+  val loadOldStrict = Bool()
+  val winnerSSID = UInt(SSIDWidth.W)
+  val newLoadSSID = UInt(SSIDWidth.W)
+  val newLoadStrict = Bool()
+  val updateType = UInt(3.W)
+}
+
+class StoreSetLoadUnitCheckDBEntry(implicit p: Parameters) extends XSBundle {
+  val timeCnt = UInt(64.W)
+  val robIdx = UInt(log2Ceil(RobSize).W)
+  val foldPc = UInt(MemPredPCWidth.W)
+  val ssid = UInt(SSIDWidth.W)
+  val loadSqIdx = UInt(log2Ceil(StoreQueueSize).W)
+  val storeSqIdx = UInt(log2Ceil(StoreQueueSize).W)
+  val loadWaitBit = Bool()
+  val loadWaitStrict = Bool()
+  val mdpAddrValid = Bool()
+  val mdpAddrStrict = Bool()
+  val mdpAddrHit = Bool()
+  val storeSqIdxValid = Bool()
 }
 
 class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
@@ -801,10 +858,10 @@ class L2ToL1Hint(implicit p: Parameters) extends XSBundle with HasDCacheParamete
 }
 
 class TopDownInfo(implicit p: Parameters) extends XSBundle {
-  val lqEmpty = Input(Bool())
-  val sqEmpty = Input(Bool())
+  val replayAllocate = Input(Bool())
+  val sqFull  = Input(Bool())
+  val sbFull  = Input(Bool())
   val l1Miss = Input(Bool())
-  val noUopsIssued = Output(Bool())
   val l2TopMiss = Input(new TopDownFromL2Top)
 }
 

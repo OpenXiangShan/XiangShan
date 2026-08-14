@@ -19,8 +19,8 @@ import chisel3._
 import chisel3.util._
 import ftq.BpuFlushInfo
 import ftq.FtqPtr
+import ftq.FtqToMainPipeBundle
 import ftq.FtqToPrefetchBundle
-import ftq.FtqToWayLookupBundle
 import org.chipsalliance.cde.config.Parameters
 import utility.InstSeqNum
 import utility.XSError
@@ -88,37 +88,30 @@ class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with ICa
       p" offset: ${takenCfiOffset.bits}\n"
 }
 
-class FtqPrefetchRequest(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
-  val startVAddr:         PrunedAddr    = PrunedAddr(VAddrBits)
-  val nextCachelineVAddr: PrunedAddr    = PrunedAddr(VAddrBits)
-  val ftqIdx:             FtqPtr        = new FtqPtr
-  val takenCfiOffset:     UInt          = UInt(CfiPositionWidth.W)
-  val backendException:   ExceptionType = new ExceptionType
-
-  def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset)
-}
-
-class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
-  val valid:               Bool        = Bool()
-  val startVAddr:          PrunedAddr  = PrunedAddr(VAddrBits)
-  val nextLineVAddr:       PrunedAddr  = PrunedAddr(VAddrBits)
-  val takenCfiOffset:      Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
-  val isCrossLine:         Bool        = Bool()
-  val ftqIdx:              FtqPtr      = new FtqPtr
-  val bankSel:             Vec[UInt]   = Vec(PortNumber, UInt(DataBanks.W))
-  val vSetIdx:             Vec[UInt]   = Vec(PortNumber, UInt(idxBits.W))
-  val hasBackendException: Bool        = Bool()
+class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
+  val valid:               Bool            = Bool()
+  val vAddr:               Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
+  def startVAddr:          PrunedAddr      = vAddr(0)
+  def nextLineVAddr:       PrunedAddr      = vAddr(1)
+  val taken:               Bool            = Bool()
+  val endPosition:         UInt            = UInt(CfiPositionWidth.W)
+  val bankSel:             Vec[UInt]       = Vec(PortNumber, UInt(DataBanks.W))
+  val ftqIdx:              FtqPtr          = new FtqPtr
+  val vSetIdx:             Vec[UInt]       = Vec(PortNumber, UInt(idxBits.W))
+  val hasBackendException: Bool            = Bool()
+  val hasSatpFlush:        Bool            = Bool()
 }
 
 class FtqToICacheIO(implicit p: Parameters) extends FrontendBundle {
-  val toPrefetch:    DecoupledIO[FtqToPrefetchBundle]  = Decoupled(new FtqToPrefetchBundle)
-  val toWayLookup:   DecoupledIO[FtqToWayLookupBundle] = Decoupled(new FtqToWayLookupBundle)
-  val flushFromBpu:  BpuFlushInfo                      = new BpuFlushInfo
-  val redirectFlush: Bool                              = Output(Bool())
+  val toPrefetch:    DecoupledIO[FtqToPrefetchBundle] = Decoupled(new FtqToPrefetchBundle)
+  val toMainPipe:    DecoupledIO[FtqToMainPipeBundle] = Decoupled(new FtqToMainPipeBundle)
+  val flushFromBpu:  BpuFlushInfo                     = new BpuFlushInfo
+  val redirectFlush: Bool                             = Output(Bool())
 }
 
-class ICacheToIfuIO(implicit p: Parameters) extends FrontendBundle {
+class ICacheToIfuIO(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
   val req:        DecoupledIO[Vec[MainPipeToIfuReq]] = DecoupledIO(Vec(FetchPorts, new MainPipeToIfuReq))
+  val corrupt:    Vec[Vec[Bool]]                     = Vec(FetchPorts, Vec(PortNumber, Bool()))
   val topdown:    ICacheTopdownInfo                  = Output(new ICacheTopdownInfo)
   val perf:       ICachePerfInfo                     = Output(new ICachePerfInfo)
   val fetchReady: Bool                               = Output(Bool())
@@ -320,6 +313,7 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
 
   val exceptionType:      ExceptionType = new ExceptionType
   val isBackendException: Bool          = Bool()
+  val hasSatpFlush:       Bool          = Bool()
   val exceptionCrossPage: Bool          = Bool()
   val exceptionMask:      Vec[Bool]     = Vec(IBufferEnqueueWidth, Bool())
 

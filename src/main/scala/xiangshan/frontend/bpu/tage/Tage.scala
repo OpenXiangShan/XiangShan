@@ -20,6 +20,7 @@ import chisel3.util._
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
 import utility.ChiselDB
+import utility.DataHoldBypass
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.frontend.bpu.BasePredictor
@@ -32,11 +33,11 @@ import xiangshan.frontend.bpu.TageTableInfo
  */
 class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters with TopHelper with HalfAlignHelper {
   class TageIO(implicit p: Parameters) extends BasePredictorIO {
-    val fromPhr:     PhrToTageIO         = new PhrToTageIO
-    val fromMainBtb: MainBtbToTageIO     = new MainBtbToTageIO
-    val toSc:        TageToScIO          = new TageToScIO
-    val prediction:  Vec[TagePrediction] = Output(Vec(NumBtbResultEntries, new TagePrediction))
-    val meta:        TageMeta            = Output(new TageMeta)
+    val fromPhr:     PhrToTageIO     = new PhrToTageIO
+    val fromMainBtb: MainBtbToTageIO = new MainBtbToTageIO
+    val toSc:        TageToScIO      = new TageToScIO
+    val prediction:  TagePrediction  = Output(new TagePrediction)
+    val meta:        TageMeta        = Output(new TageMeta)
 
     val debug_trainValid: Bool = Input(Bool())
   }
@@ -54,23 +55,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   /* *** reset *** */
   io.sramResetDone := tables.map(_.io.sramResetDone).reduce(_ && _)
-  if (HasBpuFlush) { io.resetDone.get := true.B }
-
-  // context-switch flush completion handshake
-  private val entryResetDone    = tables.map(_.io.sramResetDone).reduce(_ && _)
-  private val usefulResetDone   = !tables.map(_.io.usefulResetInFlight).reduce(_ || _)
-  private val writeBuffersEmpty = tables.map(_.io.writeBuffersEmpty).reduce(_ && _)
-  private val tableResetDone    = entryResetDone && usefulResetDone && writeBuffersEmpty
-
-  private val contextResetPending = RegInit(true.B)
-  when(io.contextFlush) {
-    contextResetPending := true.B
-  }.elsewhen(tableResetDone) {
-    contextResetPending := false.B
+  // context flush placeholder: real flush scheme comes later
+  if (HasBpuFlush) {
+    io.resetDone.get := true.B
   }
-
-  private val inResetWindow = io.contextFlush || (contextResetPending && !tableResetDone)
-  io.resetDone := !inResetWindow
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 0
@@ -90,9 +78,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
-    table.io.contextFlush  := io.contextFlush
-    table.io.inResetWindow := inResetWindow
-    table.io.readReq(0).valid         := s0_fire && !inResetWindow
+    table.io.readReq(0).valid         := s0_fire
     table.io.readReq(0).bits.setIdx   := s0_setIdx(tableIdx)
     table.io.readReq(0).bits.bankMask := s0_bankMask
   }
@@ -114,10 +100,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     })
   })
 
-  private val s1ReadRespRaw   = VecInit(tables.map(_.io.readResp(0)))
-  private val s1ReadRespValid = RegNext(s0_fire && !inResetWindow)
-  private val s1ReadRespHold  = RegEnable(s1ReadRespRaw, s1ReadRespValid)
-  private val s1_readResp     = Mux(s1ReadRespValid, s1ReadRespRaw, s1ReadRespHold)
+  private val s1_readResp = DataHoldBypass(VecInit(tables.map(_.io.readResp(0))), RegNext(s0_fire))
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 2
@@ -166,21 +149,18 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     val useProvider = hasProvider && !(useAltOnNa && provider.takenCtr.isWeak)
 
-    // get prediction for each branch
-    io.prediction(i).useProvider  := !io.bpuFlushing && useProvider
-    io.prediction(i).providerPred := !io.bpuFlushing && provider.takenCtr.isPositive
-    io.prediction(i).hasAlt       := !io.bpuFlushing && hasAlt
-    io.prediction(i).altPred      := !io.bpuFlushing && alt.takenCtr.isPositive
+    io.prediction.takenVec(i).valid := useProvider || hasAlt
+    io.prediction.takenVec(i).bits  := Mux(useProvider, provider.takenCtr.isPositive, alt.takenCtr.isPositive)
 
-    io.toSc.providerTakenCtrVec(i).valid := !io.bpuFlushing && hasProvider && branch.valid
-    io.toSc.providerTakenCtrVec(i).bits  := Mux(io.bpuFlushing, 0.U.asTypeOf(provider.takenCtr), provider.takenCtr)
+    io.toSc.providerTakenCtrVec(i).valid := hasProvider && branch.valid
+    io.toSc.providerTakenCtrVec(i).bits  := provider.takenCtr
 
-    io.meta.entries(i).useProvider       := !io.bpuFlushing && useProvider
-    io.meta.entries(i).providerTableIdx  := Mux(io.bpuFlushing, 0.U, OHToUInt(providerTableOH))
-    io.meta.entries(i).providerWayIdx    := Mux(io.bpuFlushing, 0.U, OHToUInt(provider.hitWayMaskOH))
-    io.meta.entries(i).providerTakenCtr  := Mux(io.bpuFlushing, 0.U.asTypeOf(provider.takenCtr), provider.takenCtr)
-    io.meta.entries(i).providerUsefulCtr := Mux(io.bpuFlushing, 0.U.asTypeOf(provider.usefulCtr), provider.usefulCtr)
-    io.meta.entries(i).altOrBasePred     := !io.bpuFlushing && Mux(hasAlt, alt.takenCtr.isPositive, branch.bits.taken)
+    io.meta.entries(i).useProvider       := useProvider
+    io.meta.entries(i).providerTableIdx  := OHToUInt(providerTableOH)
+    io.meta.entries(i).providerWayIdx    := OHToUInt(provider.hitWayMaskOH)
+    io.meta.entries(i).providerTakenCtr  := provider.takenCtr
+    io.meta.entries(i).providerUsefulCtr := provider.usefulCtr
+    io.meta.entries(i).altOrBasePred     := Mux(hasAlt, alt.takenCtr.isPositive, branch.bits.taken)
 
     XSPerfAccumulate(
       s"s2_branch_${i}_multihit_on_same_table",
@@ -204,7 +184,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_condMask = VecInit(t0_branches.map(branch => branch.valid && branch.bits.attribute.isConditional))
   private val t0_hasCond  = t0_condMask.reduce(_ || _)
 
-  private val t0_fire = io.stageCtrl.t0_fire && t0_hasCond && io.enable && !io.bpuFlushing
+  private val t0_fire = io.stageCtrl.t0_fire && t0_hasCond && io.enable
 
   private val (t0_mbtbHitMask, t0_basePred, t0_meta) = t0_branches.map { branch =>
     val mbtbMeta  = io.train.meta.mbtb.entries.flatten
@@ -228,7 +208,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_needRead = !t0_useMeta
 
   private val t0_readBankConflict = t0_hasCond && t0_needRead && s0_fire && t0_bankIdx === s0_bankIdx
-  io.trainReady := io.bpuFlushing || !t0_readBankConflict
+  io.trainReady := !t0_readBankConflict
 
   // t0_readBankConflict can be high even there's no train.valid, causing perf counters to be inaccurate
   // so we use a debug_ signal for perf counters
@@ -285,8 +265,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      - compute temp tag
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t1FireReg   = RegNext(t0_fire, init = false.B)
-  private val t1_fire     = t1FireReg && !io.bpuFlushing
+  private val t1_fire     = RegNext(t0_fire, init = false.B)
   private val t1_startPc  = RegEnable(t0_startPc, t0_fire)
   private val t1_branches = RegEnable(t0_branches, t0_fire)
 
@@ -310,8 +289,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     - generate train info for each branch
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t2FireReg   = RegNext(t1_fire, init = false.B)
-  private val t2_fire     = t2FireReg && !io.bpuFlushing
+  private val t2_fire     = RegNext(t1_fire, init = false.B)
   private val t2_branches = RegEnable(t1_branches, t1_fire)
   private val t2_startPc  = RegEnable(t1_startPc, t1_fire)
   dontTouch(t2_startPc)
@@ -470,8 +448,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      - allocate a new entry when mispredict
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t3FireReg              = RegNext(t2_fire, init = false.B)
-  private val t3_fire                = t3FireReg && !io.bpuFlushing
+  private val t3_fire                = RegNext(t2_fire, init = false.B)
   private val t3_branches            = RegEnable(t2_branches, t2_fire)
   private val t3_startPc             = RegEnable(t2_startPc, t2_fire)
   private val t3_setIdx              = RegEnable(t2_setIdx, t2_fire)
@@ -543,7 +520,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   }
 
   private val t3_usefulResetStart = t3_fire && usefulResetCtr.isSaturatePositive && !usefulResetInFlight
-  private val usefulResetStart    = io.contextFlush || (t3_usefulResetStart && !io.bpuFlushing)
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
     implicit val info: TageTableInfo = TableInfos(tableIdx)
@@ -605,16 +581,16 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.io.writeReq.bits.usefulCtrs      := writeUsefulCtrs
     table.io.writeReq.bits.actualTakenMask := actualTakenMask
 
-    table.io.usefulResetStart := usefulResetStart
+    table.io.usefulResetStart := t3_usefulResetStart
   }
 
-  when(usefulResetStart) {
+  when(t3_usefulResetStart) {
     usefulResetInFlight := true.B
   }.elsewhen(usefulResetInFlight && !tables.map(_.io.usefulResetInFlight).reduce(_ || _)) {
     usefulResetInFlight := false.B
   }
 
-  when(usefulResetStart) {
+  when(t3_usefulResetStart) {
     usefulResetCtr.resetZero()
   }.elsewhen(t3_fire && t3_needAllocate && !t3_canAllocate && !usefulResetInFlight) {
     usefulResetCtr.selfIncrease()
@@ -642,22 +618,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
         ctr.selfDecrease()
       }
     }
-  }
-
-  /* --------------------------------------------------------------------------------------------------------------
-     context-switch flush: clear pipeline / policy state on the flush beat
-     -------------------------------------------------------------------------------------------------------------- */
-  when(io.contextFlush) {
-    // drop in-flight training valids so stale requests can't revive after the window
-    t1FireReg := false.B
-    t2FireReg := false.B
-    t3FireReg := false.B
-    // clear held read responses so stale provider info can't cross the flush beat
-    s1ReadRespHold := 0.U.asTypeOf(s1ReadRespHold)
-    s2_readResp    := 0.U.asTypeOf(s2_readResp)
-    // restore policy registers to initial values (last-connect overrides training updates)
-    usefulResetCtr.resetZero()
-    useAltOnNaVec.foreach(_.resetZero())
   }
 
   /* --------------------------------------------------------------------------------------------------------------

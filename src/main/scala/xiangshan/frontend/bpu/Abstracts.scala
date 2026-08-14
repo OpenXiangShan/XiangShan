@@ -44,9 +44,11 @@ abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
   val fastTrain: Option[Valid[FastTrain]] = None
 
   val sramResetDone: Bool = Output(Bool())
-  val contextFlush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
-  val bpuFlushing:  Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
-  val resetDone:    Option[Bool] = Option.when(HasBpuFlush)(Output(Bool()))
+
+  // context flush handshake (not generated when HasBpuFlush is off)
+  val contextFlush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool())) // BPU -> predictor: clear pulse (1-cycle)
+  val bpuFlushing:  Option[Bool] = Option.when(HasBpuFlush)(Input(Bool())) // BPU -> predictor: whole flush window level
+  val resetDone:    Option[Bool] = Option.when(HasBpuFlush)(Output(Bool())) // predictor -> BPU: clear done
 }
 
 trait HasFastTrainIO extends BasePredictorIO {

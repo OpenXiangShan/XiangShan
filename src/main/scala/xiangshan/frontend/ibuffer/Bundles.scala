@@ -89,6 +89,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     result.exceptionType      := exception.exceptionType
     result.exceptionCrossPage := exception.exceptionCrossPage
     result.isBackendException := exception.isBackendException
+    result.hasSatpFlush       := exception.hasSatpFlush
     result.triggered          := triggered
     result.isLastInFtqEntry   := isLastInFtqEntry
     result.debug_seqNum       := debug_seqNum
@@ -101,11 +102,13 @@ class IBufExceptionEntry(implicit p: Parameters) extends IBufferBundle {
   val exceptionType:      ExceptionType = new ExceptionType
   val exceptionCrossPage: Bool          = Bool()
   val isBackendException: Bool          = Bool()
+  val hasSatpFlush:       Bool          = Bool()
 
   def fromFetch(fetch: FetchToIBuffer): IBufExceptionEntry = {
     exceptionType      := fetch.exceptionType
     exceptionCrossPage := fetch.exceptionCrossPage
     isBackendException := fetch.isBackendException
+    hasSatpFlush       := fetch.hasSatpFlush
     this
   }
 }
@@ -124,6 +127,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val exceptionType:      ExceptionType = new ExceptionType
   val exceptionCrossPage: Bool          = Bool()
   val isBackendException: Bool          = Bool()
+  val hasSatpFlush:       Bool          = Bool()
   val triggered:          UInt          = TriggerAction()
   val isLastInFtqEntry:   Bool          = Bool()
   val instrEndOffset:     UInt          = UInt(FetchBlockInstOffsetWidth.W)
@@ -141,6 +145,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.exceptionVec(ExceptionNO.illegalInstr)        := exceptionType.isIll
     cf.exceptionVec(ExceptionNO.hardwareError)       := exceptionType.isHwe
     cf.backendException                              := isBackendException
+    cf.satpFlushFirstFetchFault                      := hasSatpFlush && exceptionType.hasException
     cf.trigger                                       := triggered
     cf.isRvc                                         := isRvc
     cf.fixedTaken                                    := fixedTaken

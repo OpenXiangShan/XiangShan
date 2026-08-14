@@ -43,7 +43,10 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   addrFields.show(indent = 4)
 
   io.sramResetDone := true.B
-  if (HasBpuFlush) { io.resetDone.get := true.B }
+  // context flush placeholder: real flush scheme comes later
+  if (HasBpuFlush) {
+    io.resetDone.get := true.B
+  }
   io.trainReady    := true.B
 
   /* *** submodules *** */

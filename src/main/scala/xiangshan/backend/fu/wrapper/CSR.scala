@@ -36,6 +36,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val vlFromPreg = csrIn.vpu.vl
 
   val flushPipe = Wire(Bool())
+  val satpFlush = Wire(Bool())
   val flush = io.flush.valid
 
   /** Alias of input signals */
@@ -65,6 +66,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val csrMod = Module(new NewCSR)
   val trapInstMod = Module(new TrapInstMod)
   val trapTvalMod = Module(new TrapTvalMod)
+  val satpFlushMod = Module(new SatpFlushMod)
 
   private val privState = csrMod.io.status.privState
   // The real reg value in CSR, with no read mask
@@ -121,6 +123,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromMem.excpVA  := csrIn.memExceptionVAddr
   csrMod.io.fromMem.excpGPA := csrIn.memExceptionGPAddr
   csrMod.io.fromMem.excpIsForVSnonLeafPTE := csrIn.memExceptionIsForVSnonLeafPTE
+  csrMod.io.oldSatpMode  := satpFlushMod.out.oldSatpMode
+  csrMod.io.oldVsatpMode := satpFlushMod.out.oldVsatpMode
+  csrMod.io.oldPrivState := satpFlushMod.out.oldPrivState
 
   csrMod.io.fromRob.trap.valid := csrIn.exception.valid
   csrMod.io.fromRob.trap.bits.pc := csrIn.exception.bits.pc
@@ -137,6 +142,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrMod.io.fromRob.trap.bits.isHls := csrIn.exception.bits.isHls
   csrMod.io.fromRob.trap.bits.isFetchMalAddr := csrIn.exception.bits.isFetchMalAddr
   csrMod.io.fromRob.trap.bits.isForVSnonLeafPTE := csrIn.exception.bits.isForVSnonLeafPTE
+  csrMod.io.fromRob.trap.bits.satpFlushFirstFetchFault := csrIn.exception.bits.satpFlushFirstFetchFault
 
   csrMod.io.fromRob.commit.fflags := setFflags
   csrMod.io.fromRob.commit.fsDirty := setFsDirty
@@ -202,6 +208,12 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   trapTvalMod.io.fromCtrlBlock.flush := io.flush
   trapTvalMod.io.fromCtrlBlock.robDeqPtr := io.csrio.get.robDeqPtr
 
+  satpFlushMod.in.satp.valid  := csrMod.io.status.satp.valid
+  satpFlushMod.in.satp.bits   := csrMod.io.status.satp.bits
+  satpFlushMod.in.vsatp.valid := csrMod.io.status.vsatp.valid
+  satpFlushMod.in.vsatp.bits  := csrMod.io.status.vsatp.bits
+  satpFlushMod.in.privState   := csrMod.io.status.privState
+
   val imsic = Module(new aia.IMSIC_WRAP(soc.IMSICParams))
   imsic.fromCSR.addr.valid := csrMod.toAIA.addr.valid
   imsic.fromCSR.addr.bits.addr := csrMod.toAIA.addr.bits.addr
@@ -253,6 +265,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val isXRet = valid && func === CSROpType.jmp && !isEcall && !isEbreak
 
   flushPipe := csrMod.io.out.bits.flushPipe
+  satpFlush := csrMod.io.status.satp.valid || csrMod.io.status.vsatp.valid
 
   // tlb
   val tlb = Wire(new TlbCsrBundle)
@@ -292,6 +305,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.priv.virt_changed := DataChanged(tlb.priv.virt)
   tlb.priv.imode := csrMod.io.tlb.imode
   tlb.priv.dmode := csrMod.io.tlb.dmode
+  tlb.priv.debug := csrMod.io.tlb.debug
 
   // Svpbmt extension enable
   tlb.mPBMTE := csrMod.io.tlb.mPBMTE
@@ -311,6 +325,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     exceptionVec.map(x => DelayNWithValid(x, csrModOutValid, 3)._2)
   )
   io.out.bits.ctrl.flushPipe.get := Mux(isXRetReg, flushPipe, DelayNWithValid(flushPipe, csrModOutValid, 3)._2)
+  io.out.bits.ctrl.satpFlush.get := Mux(isXRetReg, satpFlush, DelayNWithValid(satpFlush, csrModOutValid, 3)._2)
   io.out.bits.res.data := DelayNWithValid(csrMod.io.out.bits.rData, csrModOutValid, 3)._2
 
   /** initialize NewCSR's io_out_ready from wrapper's io */
@@ -428,7 +443,7 @@ class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter {
 
 class CSRToDecode(implicit p: Parameters) extends XSBundle {
   val illegalInst = new Bundle {
-    
+
     val mfence = Option.when(HasMptCheck) (Bool())
     /**
      * illegal sfence.vma, sinval.vma

@@ -67,10 +67,8 @@ class BypassShadowBuffer(
     val resp:         Resp            = Output(new Resp)
     val train:        MicroTageTrain  = new MicroTageTrain(numSets)
     val tryWrite:     Valid[WriteReq] = Output(Valid(new WriteReq))
-   val writeSuccess: Bool            = Input(Bool())
-   val usefulReset:  Bool            = Input(Bool())
-    val contextFlush: Bool            = Input(Bool())
-    val bpuFlushing:  Bool            = Input(Bool())
+    val writeSuccess: Bool            = Input(Bool())
+    val usefulReset:  Bool            = Input(Bool())
   }
   val io = IO(new BypassBufferIO)
   class BufferEntry extends Bundle {
@@ -204,12 +202,12 @@ class BypassShadowBuffer(
     if (tableId < NumTables / 2) UsefulCounter.WeakNegative else UsefulCounter.WeakPositive,
     oldUseful.getUpdate(io.train.t1_update.bits.needUseful)
   )
-  when((doAlloc || (io.train.t1_update.valid && io.train.t1_update.bits.usefulValid)) && !io.bpuFlushing) {
+  when(doAlloc || (io.train.t1_update.valid && io.train.t1_update.bits.usefulValid)) {
     t1_trainReadUseful := newUseful
   }
 
   // Useful counter reset logic
-  when(io.usefulReset && !io.bpuFlushing) {
+  when(io.usefulReset) {
     for (bankIdx <- 0 until numBanks) {
       for (setIdx <- 0 until numSets / numBanks) {
         val entry = usefulEntries(bankIdx)(setIdx)
@@ -230,8 +228,7 @@ class BypassShadowBuffer(
   newBufferEntry.entryData.bits  := newMicroTageEntry
 
   private val t1_hasWrite = writeBufferValid
-  private val allowBufferWrite = t1_hasWrite && !io.bpuFlushing
-  when(allowBufferWrite) {
+  when(t1_hasWrite) {
     entries(enqPtr.value) := newBufferEntry
     enqPtr                := enqPtr + 1.U
     priorityMask          := Fill(numEntry, 1.U(1.W)) >> ~enqPtr.value
@@ -252,12 +249,12 @@ class BypassShadowBuffer(
     statusEntries(deqPtr.value).dirty := false.B
   }
 
-  when(allowBufferWrite) {
+  when(t1_hasWrite) {
     statusEntries(enqPtr.value).valid := true.B
     statusEntries(enqPtr.value).dirty := true.B
   }
 
-  when(allowBufferWrite && t1_hasHit) {
+  when(t1_hasWrite && t1_hasHit) {
     statusEntries(t1_cleanId).dirty := false.B
   }
 
@@ -265,27 +262,10 @@ class BypassShadowBuffer(
   // Early writeback to distribute SRAM write operations and avoid write pressure concentration
   // that exacerbates read/write conflicts on individual entries.
   forceWrite                  := distanceBetween(enqPtr, deqPtr) > (numEntry - 2).U
-  io.tryWrite.valid           := statusEntries(deqPtr.value).valid && statusEntries(deqPtr.value).dirty && !io.bpuFlushing
+  io.tryWrite.valid           := statusEntries(deqPtr.value).valid && statusEntries(deqPtr.value).dirty
   io.tryWrite.bits.writeIndex := entries(deqPtr.value).index
   io.tryWrite.bits.writeData  := entries(deqPtr.value).entryData.bits
   io.tryWrite.bits.forceWrite := forceWrite && statusEntries(deqPtr.value).valid && statusEntries(deqPtr.value).dirty
-
-  // Flush all buffer state and useful entries on context switch (last-connect).
-  when(io.contextFlush) {
-    entries := 0.U.asTypeOf(entries)
-    for (i <- 0 until numEntry) {
-      statusEntries(i).valid := false.B
-      statusEntries(i).dirty := false.B
-    }
-    enqPtr             := 0.U.asTypeOf(enqPtr)
-    deqPtr             := 0.U.asTypeOf(deqPtr)
-    priorityMask       := 0.U.asTypeOf(priorityMask)
-    a1_chosenFirstMask := 0.U.asTypeOf(a1_chosenFirstMask)
-    a1_firstHit        := 0.U.asTypeOf(a1_firstHit)
-    a1_entryHit        := 0.U.asTypeOf(a1_entryHit)
-    forceWrite         := false.B
-    usefulEntries      := 0.U.asTypeOf(usefulEntries)
-  }
 
   // ==========================================================================
   // Buffer Performance Diagnostic Counters

@@ -60,6 +60,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     // banked data read conflict
     val bank_conflict_slow = Input(Bool())
+    val rr_bank_conflict_slow = Input(Bool())
 
     // send miss request to miss queue
     val miss_req    = DecoupledIO(new MissReq)
@@ -513,6 +514,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.debug_s1_hit_way := s1_tag_match_way_dup_dc
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
   io.lsu.s2_bank_conflict := io.bank_conflict_slow
+  io.lsu.s2_rr_bank_conflict := io.rr_bank_conflict_slow
   io.lsu.s2_wpu_pred_fail := s2_wpu_pred_fail_and_real_hit
   io.lsu.s2_mq_nack       := (resp.bits.miss && (s2_nack_no_mshr || io.miss_req.bits.cancel || io.wbq_block_miss_req ) || s2_btot_occupy_fail)
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
@@ -544,6 +546,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_hit_prefetch = RegEnable(s2_hit_prefetch, s2_fire)
   val s3_error = s3_tag_error || s3_flag_error || s3_data_error
 
+  // Register the S2 kill (includes load breakpoint trigger exception) so that
+  // hit-side replacement/access-flag metadata updates in S3 can be suppressed
+  // for loads that are architecturally killed by an exception.
+  val s3_kill = RegEnable(io.lsu.s2_kill, s2_fire)
+
   // error_delayed signal will be used to update uop.exception 1 cycle after load writeback
   resp.bits.error_delayed := s3_error && (s3_hit || s3_tag_error) && s3_valid
   resp.bits.tl_error_delayed.tl_denied := s3_tl_error.tl_denied & s3_valid
@@ -562,12 +569,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // report tag error / l2 corrupted to CACHE_ERROR csr
   io.error.valid := s3_error && s3_valid
 
-  io.replace_access.valid := s3_valid && s3_hit
+  io.replace_access.valid := s3_valid && s3_hit && !s3_kill
   io.replace_access.bits.set := RegNext(RegNext(get_dcache_idx(s1_req.vaddr)))
   io.replace_access.bits.way := RegNext(RegNext(OHToUInt(s1_tag_match_way_dup_dc)))
 
   // update access bit
-  io.access_flag_write.valid := s3_valid && s3_hit && !s3_is_prefetch
+  io.access_flag_write.valid := s3_valid && s3_hit && !s3_is_prefetch && !s3_kill
   io.access_flag_write.bits.idx := get_dcache_idx(s3_vaddr)
   io.access_flag_write.bits.way_en := s3_tag_match_way
   io.access_flag_write.bits.flag := true.B
@@ -575,7 +582,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // clear prefetch source when prefetch hit
   // so that next load to the same line won't be considered as prefetch hit
   // A prefetch block will only be counted once
-  val s3_clear_pf_flag_en = s3_valid && s3_hit && !s3_is_prefetch && isFromL1Prefetch(s3_hit_prefetch)
+  val s3_clear_pf_flag_en = s3_valid && s3_hit && !s3_is_prefetch && !s3_kill && isFromL1Prefetch(s3_hit_prefetch)
   io.prefetch_flag_write.valid := s3_clear_pf_flag_en && !io.counter_filter_query.resp
   io.prefetch_flag_write.bits.idx := get_dcache_idx(s3_vaddr)
   io.prefetch_flag_write.bits.way_en := s3_tag_match_way
@@ -583,7 +590,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // when demand request hit prefetch data, the latency is reset to 0.
   io.latency_flag_write.valid := s3_clear_pf_flag_en && !io.counter_filter_query.resp
-  io.latency_flag_write.bits.idx := get_idx(s3_vaddr)
+  io.latency_flag_write.bits.idx := get_dcache_idx(s3_vaddr)
   io.latency_flag_write.bits.way_en := s3_tag_match_way
   io.latency_flag_write.bits.latency := 0.U
 
@@ -623,19 +630,19 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   miss_trace.paddr := get_block_addr(s2_paddr)
   mshr_trace.paddr := get_block_addr(s2_paddr)
 
-  val table_load = ChiselDB.createTable("LoadTrace" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
+  val table_load = ChiselDB.createTable("LoadTrace" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = true)
   val site_load = "LoadPipe_load" + id.toString
   table_load.log(load_trace, s2_valid && s2_req.isFirstIssue && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U), site_load, clock, reset)
 
-  val table_pf = ChiselDB.createTable("LoadPfTrace" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
+  val table_pf = ChiselDB.createTable("LoadPfTrace" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = true)
   val site_pf = "LoadPipe_pf" + id.toString
   table_pf.log(pf_trace, s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U), site_pf, clock, reset)
 
-  val table_miss = ChiselDB.createTable("LoadTraceMiss" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
+  val table_miss = ChiselDB.createTable("LoadTraceMiss" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = true)
   val site_load_miss = "LoadPipe_load_miss" + id.toString
   table_miss.log(miss_trace, s2_valid && s2_req.isFirstIssue && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && real_miss, site_load_miss, clock, reset)
 
-  val table_mshr = ChiselDB.createTable("LoadPfMshr" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = false)
+  val table_mshr = ChiselDB.createTable("LoadPfMshr" + id.toString + "_hart"+ p(XSCoreParamsKey).HartId.toString, new LoadPfDbBundle, basicDB = true)
   val site_mshr = "LoadPipe_mshr" + id.toString
   table_mshr.log(mshr_trace, s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U) && io.miss_req.fire, site_mshr, clock, reset)
 

@@ -98,7 +98,10 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       imliTable.io.sramResetDone :+
       biasTable.io.sramResetDone
   ).reduce(_ && _)
-  if (HasBpuFlush) { io.resetDone.get := true.B }
+  // context flush placeholder: real flush scheme comes later
+  if (HasBpuFlush) {
+    io.resetDone.get := true.B
+  }
 
   /*
    * ghr stage ctrl signals

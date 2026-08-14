@@ -28,6 +28,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.LazyModuleImp
 import org.chipsalliance.cde.config.Parameters
 import utility.HasPerfEvents
+import utility.RegNextWithEnable
 import utility.XSPerfAccumulate
 import utils.AddrField
 import xiangshan.L1CacheErrorInfo
@@ -74,6 +75,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   println(s"  DataBanks: $DataBanks banks")
   println(s"  DataEccUnit: $DataEccUnit bits")
   println(s"  DataSramWidth(data + ecc + padding): $ICacheDataBits + $DataEccBits + $DataPaddingBits = $DataSramWidth")
+  println(s"  MetaSramWidth(meta + ecc): $MetaBits + $MetaEccBits = $MetaSramWidth")
   println(s"  Ecc(meta, data): $MetaEcc, $DataEcc")
   println(s"  AliasTagBits: $AliasTagBits")
   println(s"  CtrlUnit:")
@@ -174,8 +176,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   prefetcher.io.fromFtq.bits        := io.fromFtq.toPrefetch.bits
   prefetcher.io.fromFtq.bits.req(0) := Mux(softPrefetchValid, softPrefetch, io.fromFtq.toPrefetch.bits.req(0))
   io.fromFtq.toPrefetch.ready       := prefetcher.io.fromFtq.ready && !softPrefetchValid
-  io.toFtq.fromPrefetch             := prefetcher.io.toFtq
-  io.toFtq.fromWayLookup            := wayLookup.io.toFtq
 
   missUnit.io.hartId := io.hartId
   missUnit.io.fencei := io.fencei
@@ -192,11 +192,13 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   mainPipe.io.eccEnable    := eccEnable
   mainPipe.io.hartId       := io.hartId
   mainPipe.io.missResp     := missUnit.io.resp
+  mainPipe.io.fromFtq <> io.fromFtq.toMainPipe
   mainPipe.io.fromWayLookup <> wayLookup.io.toMainPipe
+  io.toFtq.fromMainPipe := mainPipe.io.toFtq
 
   wayLookup.io.flush        := io.fromFtq.redirectFlush
   wayLookup.io.flushFromBpu := io.fromFtq.flushFromBpu
-  wayLookup.io.fromFtq <> io.fromFtq.toWayLookup
+  wayLookup.io.fromMainPipe := mainPipe.io.toWayLookup
   wayLookup.io.write <> prefetcher.io.wayLookupWrite
   wayLookup.io.update := missUnit.io.resp
 
@@ -210,10 +212,11 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   io.itlbFlushPipe := prefetcher.io.itlbFlushPipe
 
   // notify IFU that Icache pipeline is available
-  io.toIfu.fetchReady := wayLookup.io.fromFtq.ready
+  io.toIfu.fetchReady := io.fromFtq.toMainPipe.ready
 
   // send final accepted fetch bundle
   io.toIfu.req <> mainPipe.io.toIfu.req
+  io.toIfu.corrupt := mainPipe.io.toIfu.corrupt
 
   // perf
   io.toIfu.perf.hits         := mainPipe.io.perf.rawHits
@@ -234,15 +237,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   bus.a <> missUnit.io.memAcquire
 
-  // Parity error port
-  private val errors      = mainPipe.io.errors
-  private val errorsValid = errors.map(e => e.valid).reduce(_ | _)
-  io.error.bits <> RegEnable(
-    PriorityMux(errors.map(e => e.valid -> e.bits)),
-    0.U.asTypeOf(errors(0).bits),
-    errorsValid
-  )
-  io.error.valid := RegNext(errorsValid, false.B)
+  // send parity error to BEU
+  io.error <> RegNextWithEnable(mainPipe.io.error)
 
   XSPerfAccumulate(
     "softPrefetch_drop_not_ready",

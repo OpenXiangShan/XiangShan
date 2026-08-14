@@ -192,6 +192,7 @@ class BpuCtrl(implicit p: Parameters) extends BpuBundle {
   val scEnable:     Bool = Bool()
   val ittageEnable: Bool = Bool()
   val rasEnable:    Bool = Bool()
+  // BPU context flush enables (not generated when HasBpuFlush is off)
   val bpuFlushEn:        Option[Bool] = Option.when(HasBpuFlush)(Bool())
   val ubtbFlushEnable:   Option[Bool] = Option.when(HasBpuFlush)(Bool())
   val abtbFlushEnable:   Option[Bool] = Option.when(HasBpuFlush)(Bool())

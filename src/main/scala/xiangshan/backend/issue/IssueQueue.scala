@@ -12,6 +12,7 @@ import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.mem.{LqPtr, SqPtr}
 import utility.PerfCCT
+import xiangshan.backend.rob.RobPtr
 
 class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
   // Inputs
@@ -22,6 +23,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val og1Resp = Vec(params.numDeq, Flipped(new IssueQueueRespBundle))
   val og2Resp = Option.when(params.needOg2Resp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
   val s0Resp = Option.when(params.needS0Resp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
+  val s1Resp = Option.when(params.needS1Resp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
   val s2Resp = Option.when(params.needS2Resp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
   // Vec Mem Resp, uncertain
   val snResp = Option.when(params.needSnResp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
@@ -34,6 +36,9 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val wakeupFromF2I: Option[ValidIO[IssueQueueIQWakeUpBundle]] = Option.when(params.needWakeupFromF2I)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
   val wakeupFromWBDelayed: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeupFromIQDelayed: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
+  //to Mem, wake up LoadQueueReplay
+  val wakeupToLRQ = Option.when(params.isStAddrIQ || params.isStdIQ)(params.genIOWakeUpLRQValidBundle)
+  val wakeupToLRQCancel = Option.when(params.isStAddrIQ || params.isStdIQ)(params.genIOWakeUpCancelBundle)
   val vlFromIntIsZero = Input(Bool())
   val vlFromIntIsVlmax = Input(Bool())
   val vlFromVfIsZero = Input(Bool())
@@ -54,6 +59,8 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val fuTypeVec = Output(Vec(params.numEntries, FuType()))
   val canIssueVec = Output(Vec(params.numEntries, Bool()))
   val srcReadyVec = Output(Vec(params.numEntries, Bool()))
+  val topdownIQInfoVec = Option.when(backendParams.debugEn)(Output(Vec(params.numEntries, ValidIO(new TopdownIQInfo()))))
+  val debugRobIdxVec =  Option.when(backendParams.debugEn)(Output(Vec(params.numEntries, new RobPtr())))
 
   val deqDelay: MixedVec[DecoupledIO[Og0InUop]] = params.genIssueDecoupledBundle// = deq.cloneType
   val deqOg1Payload: MixedVec[IssueQueueDeqOg1Payload] = params.genIssueDeqOg1PayloadBundle
@@ -215,10 +222,28 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   val srcReadyVec = VecInit(entries.io.srcReady.asBools)
   val validVecRegNext = VecInit(entries.io.validRegNext.asBools)
   val issuedVecRegNext = VecInit(entries.io.issuedRegNext.asBools)
+  val fuTypeVec = Wire(Vec(params.numEntries, FuType()))
   io.validVec := validVec
   io.issuedVec := issuedVec
   io.canIssueVec := canIssueVec
   io.srcReadyVec := srcReadyVec
+  io.debugRobIdxVec.foreach(_ := entries.io.debugRobIdxVec.get)
+  io.topdownIQInfoVec.foreach{ case infoVec =>
+    val cancelSourceVec = entries.io.debugCancelSourceVec.get
+    val debugSrcReadyVec = entries.io.debugSrcReadyVec.get
+    val robIdxVec = entries.io.debugRobIdxVec.get
+    infoVec.zip(cancelSourceVec).zip(validVec).zip(robIdxVec)
+      .zip(debugSrcReadyVec).zip(fuTypeVec).zip(issuedVec).foreach{
+      case ((((((sink, cancel),valid),robIdx), srcReady), fuType), issued) =>{
+        sink.valid := valid
+        sink.bits.robIdx := robIdx
+        sink.bits.cancelSource := cancel
+        sink.bits.srcReady := srcReady
+        sink.bits.fuType := fuType
+        sink.bits.issued := issued
+      }
+    }
+  }
   dontTouch(canIssueVec)
   val deqFirstIssueVec = entries.io.isFirstIssue
 
@@ -229,7 +254,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   // (deqIdx)(srcIdx)
   val finalExuSources: Option[Vec[Vec[ExuSource]]] = exuSources.map(x => VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, x))))
 
-  val fuTypeVec = Wire(Vec(params.numEntries, FuType()))
+
   io.fuTypeVec := fuTypeVec
   val deqEntryVec = Wire(Vec(params.numDeq, ValidIO(new EntryBundle(isDeq = true))))
   val canIssueMergeAllBusy = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
@@ -332,11 +357,13 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       // dirty code, for uopidx and lastUop's assign
       enq.bits.payload.og1Payload.vpu.foreach(_.vuopIdx         := s0_enqBits(enqIdx).uopIdx.get)
       enq.bits.payload.og1Payload.vpu.foreach(_.lastUop         := s0_enqBits(enqIdx).lastUop.get)
+      enq.bits.payload.debugLastIssueCancelSource.foreach(_     := IQCancelSource.none)
     }
     entriesIO.og0Resp                                           := io.og0Resp
     entriesIO.og1Resp                                           := io.og1Resp
     entriesIO.og2Resp.foreach(_                                 := io.og2Resp.get)
     entriesIO.s0Resp.foreach(_                                  := io.s0Resp.get)
+    entriesIO.s1Resp.foreach(_                                  := io.s1Resp.get)
     entriesIO.s2Resp.foreach(_                                  := io.s2Resp.get)
     entriesIO.snResp.foreach(_                                  := io.snResp.get)
     for(deqIdx <- 0 until params.numDeq) {
@@ -948,6 +975,41 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     dontTouch(io.deqDelay)
     dontTouch(deqBeforeDly)
   }
+  // sta wake up LRQ in og1, std wake up LRQ in og0.
+  io.wakeupToLRQ.foreach { case wakeupOption =>
+    wakeupOption.zipWithIndex.foreach { case (wakeup, i) =>
+      if (param.isStAddrIQ) { // sta iq
+        val wakeupValid = io.deqDelay(i).fire
+        wakeup.valid := RegNext(wakeupValid) // next cycle is og1
+        wakeup.bits.sqIdx := RegNext(entries.io.deqOg1Payload(i).sqIdx.get)
+      }
+      else { // std iq
+        val wakeupValid = deqBeforeDly(i).fire
+        wakeup.valid := RegNext(wakeupValid) // next cycle is og0
+        wakeup.bits.sqIdx := entries.io.deqOg1Payload(i).sqIdx.get
+      }
+
+    }
+  }
+  io.wakeupToLRQCancel.foreach { case wakeupCancelOption =>
+    wakeupCancelOption.zip(param.exuBlockParams.filter(_.hasStoreFu)).zipWithIndex.foreach { case ((wakeupCancel, exuParam), i) =>
+      if (param.isStAddrIQ) { // sta iq: wakeup reaches LRQ in og1; cancel can happen in og1/s0/s1.
+        val og0Fire = io.deqDelay(i).fire
+        val og1Fire = RegNext(og0Fire)
+        val og1LoadDependency = RegEnable(io.deqDelay(i).bits.loadDependency.get, og0Fire)
+        val og1LoadCancel = LoadShouldCancel(Some(og1LoadDependency), io.ldCancel)
+        wakeupCancel.og0Cancel := false.B
+        wakeupCancel.og1Cancel := RegNext(og1Fire && (io.og1Cancel(exuParam.exuIdx) || og1LoadCancel))
+      }
+      else { // std iq: wakeup reaches LRQ in og0; cancel can happen in og0/og1/s0/s1.
+        val og0Fire = RegNext(deqBeforeDly(i).fire)
+        val og1Fire = RegNext(og0Fire)
+        wakeupCancel.og0Cancel := RegNext(og0Fire && io.og0Cancel(exuParam.exuIdx))
+        wakeupCancel.og1Cancel := RegNext(og1Fire && io.og1Cancel(exuParam.exuIdx))
+      }
+    }
+  }
+
   io.wakeupToIQ.zipWithIndex.foreach { case (wakeup, i) =>
     if (wakeUpQueues(i).nonEmpty) {
       wakeup.valid := wakeUpQueues(i).get.io.deq.valid
@@ -1006,10 +1068,11 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   }
   val finalSuccess = if (param.needSnResp) io.snResp.get.map(_.finalSuccess)
                      else if (param.needS2Resp) io.s2Resp.get.map(_.finalSuccess)
+                     else if (param.needS1Resp) io.s1Resp.get.map(_.finalSuccess)
                      else if (param.needS0Resp) io.s0Resp.get.map(_.finalSuccess)
                      else if (param.needOg2Resp) io.og2Resp.get.map(_.finalSuccess)
                      else io.og1Resp.map(_.finalSuccess)
-  val og1RespIsFinal = !param.needSnResp && !param.needS2Resp && !param.needS0Resp && !param.needOg2Resp
+  val og1RespIsFinal = !param.needSnResp && !param.needS2Resp && !param.needS1Resp && !param.needS0Resp && !param.needOg2Resp
   val issuedCnt0 = Mux(entryIssuedCntDeq0 > 3.U, 3.U, entryIssuedCntDeq0)
   val issuedCnt1 = Mux(entryIssuedCntDeq1 > 3.U, 3.U, entryIssuedCntDeq1)
   val finalResp0 = og1RespIsFinal.B & deqBeforeDly.head.valid

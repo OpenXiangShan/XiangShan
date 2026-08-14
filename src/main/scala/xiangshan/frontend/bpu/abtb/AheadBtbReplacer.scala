@@ -29,7 +29,7 @@ class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
   val io: ReplacerIO = IO(new ReplacerIO)
 
   // use PlruStateGen calculate next state and replace way
-  private val states           = Module(new ReplacerState(NumSets, NumWays - 1, NumExtraReadPort = 1, hasContextFlush = true))
+  private val states           = Module(new ReplacerState(NumSets, NumWays - 1, NumExtraReadPort = 1))
   private val predReplacerGen  = Module(new PlruStateGen(NumWays, AccessSize = NumWays))
   private val writeReplacerGen = Module(new PlruStateGen(NumWays))
   private val writeTouch       = Wire(Valid(UInt(WayIdxWidth.W)))
@@ -41,7 +41,6 @@ class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
   states.io.trainWrite.valid       := io.writeValid
   states.io.trainWrite.bits.setIdx := io.writeSetIdx
   states.io.trainWrite.bits.state  := writeReplacerGen.io.nextState
-  states.io.contextFlush.get       := io.contextFlush
   writeReplacerGen.io.state        := states.io.trainRead.state
   writeReplacerGen.io.touches      := Seq(writeTouch)
 
@@ -65,36 +64,21 @@ class AheadBtbReplacer(implicit p: Parameters) extends AheadBtbModule {
     // use ReplacementPolicy class caclulate next state replace way
     val replacer = ReplacementPolicy.fromString(Some("setplru"), NumWays, NumSets)
 
-    // 4-way PLRU clear sequence: each set touches way 1 then way 3, foldLeft drives all PLRU bits to 0
-    val flushSets = (0 until NumSets).flatMap(s => Seq(s.U, s.U))
-    val flushTouches = (0 until NumSets).flatMap { _ =>
-      Seq(1.U, 3.U).map { w =>
-        val v = Wire(Valid(UInt(WayIdxWidth.W)))
-        v.valid := io.contextFlush
-        v.bits  := w
-        v
-      }
-    }
-
-    when(io.contextFlush) {
-      replacer.access(flushSets, flushTouches)
+    val readWriteConflict = io.readValid && io.writeValid && (io.readSetIdx === io.writeSetIdx)
+    when(readWriteConflict) {
+      replacer.access(io.writeSetIdx, io.writeWayIdx)
     }.otherwise {
-      val readWriteConflict = io.readValid && io.writeValid && (io.readSetIdx === io.writeSetIdx)
-      when(readWriteConflict) {
+      when(io.writeValid) {
         replacer.access(io.writeSetIdx, io.writeWayIdx)
-      }.otherwise {
-        when(io.writeValid) {
-          replacer.access(io.writeSetIdx, io.writeWayIdx)
+      }
+      when(io.readValid) {
+        val touchSets = Seq.fill(NumWays)(io.readSetIdx)
+        val touchWays = Seq.fill(NumWays)(Wire(Valid(UInt(WayIdxWidth.W))))
+        touchWays.zip(io.readWayMask).zipWithIndex.foreach { case ((t, r), i) =>
+          t.valid := r
+          t.bits  := i.U
         }
-        when(io.readValid) {
-          val touchSets = Seq.fill(NumWays)(io.readSetIdx)
-          val touchWays = Seq.fill(NumWays)(Wire(Valid(UInt(WayIdxWidth.W))))
-          touchWays.zip(io.readWayMask).zipWithIndex.foreach { case ((t, r), i) =>
-            t.valid := r
-            t.bits  := i.U
-          }
-          replacer.access(touchSets, touchWays)
-        }
+        replacer.access(touchSets, touchWays)
       }
     }
     val replacerWay  = replacer.way(io.replaceSetIdx)

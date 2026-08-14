@@ -17,12 +17,9 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
-import ftq.FtqBundle
 import ftq.FtqPrefetchReq
-import icache.HasICacheParameters
 import icache.MetaInfo
 import icache.PrefetchReqBundle
-import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 
 // As 2-prefetch / 2-fetch support is spread across Ftq/Ifu/ICache,
@@ -42,6 +39,19 @@ class TwoPrefetchCase extends Bundle {
       Seq(
         isOverlap2   -> VecInit(reqVec(1).startVAddr, reqVec(1).nextLineVAddr),
         isInterleave -> VecInit(reqVec(0).startVAddr, reqVec(1).startVAddr)
+      )
+    )
+
+  // timing optimization:
+  // To avoid introducing a very wide adder on the meta SRAM read path,
+  // vSetIdx(1) comes from vSetIdx(0) + 1.U rather than get_idx(nextLineVAddr).
+  def selectMetaSetIdx(reqVec: Vec[PrefetchReqBundle]): Vec[UInt] =
+    MuxCase(
+      // unable to do 2-prefetch, or isSameLine or isOverlap1, both use req1's start and nextLine
+      reqVec(0).vSetIdx,
+      Seq(
+        isOverlap2   -> reqVec(1).vSetIdx,
+        isInterleave -> VecInit(reqVec(0).vSetIdx(0), reqVec(1).vSetIdx(0))
       )
     )
 
@@ -148,9 +158,4 @@ object TwoPrefetchCase {
      */
     def Interleave: UInt = 8.U(width.W)
   }
-}
-
-class TwoFetchInfo(implicit p: Parameters) extends FtqBundle with HasICacheParameters {
-  val isMmio:  Bool      = Bool()
-  val wayMask: Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
 }

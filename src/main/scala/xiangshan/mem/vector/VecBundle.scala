@@ -267,6 +267,7 @@ class storeMisaignIO(implicit p: Parameters) extends Bundle{
 class VSplitIO(param: ExeUnitParams, isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
   val in                  = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true))) // from iq
+  val sqDeqPtr            = OptionWrapper(isVStore, Input(new SqPtr))
   val toMergeBuffer       = new ToMergeBufferIO(isVStore) //to merge buffer req mergebuffer entry
   val out                 = Decoupled(new VecPipeBundle(isVStore))// to scala pipeline
   val vstd                = OptionWrapper(isVStore, Valid(new StoreQueueDataWrite))
@@ -276,6 +277,7 @@ class VSplitIO(param: ExeUnitParams, isVStore: Boolean=false)(implicit p: Parame
 class VSplitPipelineIO(param: ExeUnitParams, isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
   val in                  = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true)))
+  val sqDeqPtr            = OptionWrapper(isVStore, Input(new SqPtr))
   val toMergeBuffer       = new ToMergeBufferIO(isVStore) // req mergebuffer entry, inactive elem issue
   val out                 = Decoupled(new VLSBundle())// to split buffer
 }

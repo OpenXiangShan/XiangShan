@@ -528,8 +528,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   s2_s0_set_conflict := s2_valid && s0_idx === s2_idx && !s2_isPrefetch
   s2_s0_set_conflict_store := s2_valid && store_idx === s2_idx && !s2_isPrefetch
 
-  // Grow permission fail
-  // Only in case BtoT will both cache and missqueue be occupied
+  // BtoT grow blocked: too many in-flight BtoT occupies in this set; replay store
   val s2_has_more_then_3_ways_BtoT = PopCount(io.btot_ways_for_set) > (nWays-2).U
   val s2_grow_perm_fail = s2_has_more_then_3_ways_BtoT && s2_grow_perm
   XSError(s2_valid && s2_grow_perm && io.btot_ways_for_set.andR,
@@ -540,7 +539,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_replace_block = io.replace.block && io.replace.req.valid
   val s2_req_miss_without_data = Mux(s2_valid, s2_req.miss && !io.refill_info.valid, false.B)
   val s2_can_go_to_mq_no_data = (s2_req_miss_without_data && RegEnable(s2_req_miss_without_data && !io.mainpipe_info.s2_replay_to_mq, false.B, s2_valid)) // miss_req in s2 but refill data is invalid, can block 1 cycle
-  val s2_can_go_to_mq_evict_fail = s2_replace_block // dcache and miss queue both occupy the same set, (BtoT scheme)
+  val s2_can_go_to_mq_evict_fail = s2_replace_block // refill eviction conflicts with in-flight MSHR (BtoT); replay to MQ for another evict way
   val s2_can_go_to_mq_replay = s2_can_go_to_mq_no_data || s2_can_go_to_mq_evict_fail
   val s2_can_go_to_mq = RegEnable(s1_pregen_can_go_to_mq, s1_fire)
   val s2_can_go_to_s3 = (s2_sc || s2_req.replace || s2_req.probe ||

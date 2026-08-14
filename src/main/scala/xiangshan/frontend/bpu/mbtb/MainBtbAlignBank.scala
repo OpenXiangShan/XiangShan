@@ -68,8 +68,6 @@ class MainBtbAlignBank(
     }
 
     val sramResetDone: Bool      = Output(Bool())
-    val contextFlush:  Bool      = Input(Bool())
-    val bpuFlushing:   Bool      = Input(Bool())
     val stageCtrl:     StageCtrl = Input(new StageCtrl)
 
     val read:  Read                  = new Read
@@ -97,12 +95,6 @@ class MainBtbAlignBank(
 
   io.sramResetDone := internalBanks.map(_.io.sramResetDone).reduce(_ && _)
 
-  internalBanks.foreach { b =>
-    b.io.contextFlush := io.contextFlush
-    b.io.bpuFlushing  := io.bpuFlushing
-  }
-  replacer.io.contextFlush := io.contextFlush
-
   /* *** s0 ***
    * send read req to internal banks (srams)
    */
@@ -120,7 +112,7 @@ class MainBtbAlignBank(
   assert(!s0_fire || s0_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.read.req.valid       := s0_fire && s0_internalBankMask(i) && !io.bpuFlushing
+    b.io.read.req.valid       := s0_fire && s0_internalBankMask(i)
     b.io.read.req.bits.setIdx := s0_setIdx
   }
 
@@ -134,19 +126,13 @@ class MainBtbAlignBank(
   private val s1_crossPage        = RegEnable(s0_crossPage, s0_fire)
   private val s1_internalBankMask = RegEnable(s0_internalBankMask, s0_fire)
 
-  private val s1_rawEntries = Mux(io.bpuFlushing,
-    0.U.asTypeOf(Vec(NumWay, new MainBtbEntry)),
-    Mux1H(
-      s1_internalBankMask,
-      internalBanks.map(_.io.read.resp.entries)
-    )
+  private val s1_rawEntries = Mux1H(
+    s1_internalBankMask,
+    internalBanks.map(_.io.read.resp.entries)
   )
-  private val s1_rawCounters = Mux(io.bpuFlushing,
-    VecInit.fill(NumWay)(TakenCounter.Zero),
-    Mux1H(
-      s1_internalBankMask,
-      internalBanks.map(_.io.read.resp.counters)
-    )
+  private val s1_rawCounters = Mux1H(
+    s1_internalBankMask,
+    internalBanks.map(_.io.read.resp.counters)
   )
 
   io.read.s1_positions := VecInit(s1_rawEntries.map(e => Cat(s1_posHigherBits, e.position)))
@@ -203,27 +189,8 @@ class MainBtbAlignBank(
   private val s3_replacerSetIdx = RegEnable(getReplacerSetIndex(s2_startPc), s2_fire)
   private val s3_takenMask      = io.s3_takenMask
 
-  // contextFlush: clear S1/S2/S3 pipeline registers at end of T cycle (last-assignment-wins overrides RegEnable)
-  // NOTE: s1_startPc / s2_startPc are PrunedAddr(VAddrBits); their custom := requires UInt width == VAddrBits.
-  when(io.contextFlush) {
-    // S1
-    s1_startPc          := 0.U(VAddrBits.W)
-    s1_posHigherBits    := 0.U
-    s1_crossPage        := false.B
-    s1_internalBankMask := 0.U
-    // S2
-    s2_startPc          := 0.U(VAddrBits.W)
-    s2_posHigherBits    := 0.U
-    s2_crossPage        := false.B
-    s2_internalBankMask := 0.U
-    s2_rawEntries       := 0.U.asTypeOf(s2_rawEntries)
-    s2_rawCounters      := 0.U.asTypeOf(s2_rawCounters)
-    // S3
-    s3_replacerSetIdx   := 0.U
-  }
-
   // touch taken entries only: not-taken conditional entries are considered not very useful and should be killed first
-  replacer.io.predict.touch.valid        := s3_fire && s3_takenMask.reduce(_ || _) && !io.bpuFlushing
+  replacer.io.predict.touch.valid        := s3_fire && s3_takenMask.reduce(_ || _)
   replacer.io.predict.touch.bits.setIdx  := s3_replacerSetIdx
   replacer.io.predict.touch.bits.wayMask := s3_takenMask.asUInt
 
@@ -266,13 +233,12 @@ class MainBtbAlignBank(
       //   a. it's an OtherIndirect-type branch (to update target and play the role of Ittage's base table).
       t1_mispredictInfo.bits.attribute.needIttage ||
       //   b. attribute changed, probably indicating a software self-modification.
-      !(t1_mispredictInfo.bits.attribute === Mux1H(t1_hitMask, t1_meta.map(_.attribute)))
+      t1_mispredictInfo.bits.attribute =/= Mux1H(t1_hitMask, t1_meta.map(_.attribute))
   )
   // Use hit wayMask if hit, else use replacer's victim way
   private val t1_entryWayMask = Mux(t1_hit, t1_hitMask, t1_victimMask)
 
   private val t1_entry = Wire(new MainBtbEntry)
-  t1_entry.valid           := true.B
   t1_entry.tag             := getTag(t1_startPc)
   t1_entry.attribute       := t1_mispredictInfo.bits.attribute
   t1_entry.position        := t1_mispredictInfo.bits.cfiPosition
@@ -290,7 +256,7 @@ class MainBtbAlignBank(
   }
 
   // update replacer
-  replacer.io.train.t1_touch.valid        := t1_fire && t1_entryNeedWrite && !io.bpuFlushing
+  replacer.io.train.t1_touch.valid        := t1_fire && t1_entryNeedWrite
   replacer.io.train.t1_touch.bits.setIdx  := getReplacerSetIndex(t1_startPc)
   replacer.io.train.t1_touch.bits.wayMask := t1_entryWayMask
 

@@ -31,8 +31,6 @@ class MicroBtbReplacer(implicit p: Parameters) extends MicroBtbModule {
     val victim: UInt = Output(UInt(log2Up(NumEntries).W))
 
     val perf: ReplacerPerfInfo = Output(new ReplacerPerfInfo)
-
-    val contextFlush: Bool = Input(Bool())
   }
 
   val io: MicroBtbReplacerIO = IO(new MicroBtbReplacerIO)
@@ -47,20 +45,8 @@ class MicroBtbReplacer(implicit p: Parameters) extends MicroBtbModule {
   // if all entries are useful, select by replacement policy
   io.victim := Mux(notUseful, notUsefulIdx, replacer.way)
 
-  // PLRU flush: touch W1, W3, ..., W31 (16 touches) drives all PLRU bits to 0
-  private val flushTouches = (0 until 16).map { i =>
-    val v = Wire(Valid(UInt(log2Up(NumEntries).W)))
-    v.valid := io.contextFlush
-    v.bits  := (2 * i + 1).U
-    v
-  }
-
   // touch Plru
-  when(io.contextFlush) {
-    replacer.access(flushTouches)
-  }.otherwise {
-    replacer.access(Seq(io.predTouch, io.trainTouch))
-  }
+  replacer.access(Seq(io.predTouch, io.trainTouch))
 
   /* *** perf *** */
   io.perf.replaceNotUseful := notUseful

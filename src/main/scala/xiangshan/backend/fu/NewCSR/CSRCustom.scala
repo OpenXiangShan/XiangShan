@@ -75,14 +75,15 @@ class SbpctlBundle(implicit val p: Parameters) extends CSRBundle with HasXSParam
   val MBTB_ENABLE   = RW(2).withReset(true.B).withDescription("Enable the macro-BTB predictor.")
   val ABTB_ENABLE   = RW(1).withReset(true.B).withDescription("Enable the alternate branch target buffer.")
   val UBTB_ENABLE   = RW(0).withReset(true.B).withDescription("Enable the micro-BTB predictor.")
-  val BPU_FLUSH_EN        = Option.when(HasBpuFlush)(RW(7).withReset(true.B))
-  val RAS_FLUSH_ENABLE    = Option.when(HasBpuFlush)(RW(14).withReset(true.B))
-  val ITTAGE_FLUSH_ENABLE = Option.when(HasBpuFlush)(RW(13).withReset(true.B))
-  val SC_FLUSH_ENABLE     = Option.when(HasBpuFlush)(RW(12).withReset(true.B))
-  val TAGE_FLUSH_ENABLE   = Option.when(HasBpuFlush)(RW(11).withReset(true.B))
-  val MBTB_FLUSH_ENABLE   = Option.when(HasBpuFlush)(RW(10).withReset(true.B))
-  val ABTB_FLUSH_ENABLE   = Option.when(HasBpuFlush)(RW(9).withReset(true.B))
-  val UBTB_FLUSH_ENABLE   = Option.when(HasBpuFlush)(RW(8).withReset(true.B))
+  // BPU context flush enables (not generated when HasBpuFlush is off)
+  val BPU_FLUSH_EN        = Option.when(HasBpuFlush)(RW(7) .withReset(true.B).withDescription("Enable the BPU context flush mechanism."))
+  val UBTB_FLUSH_ENABLE   = Option.when(HasBpuFlush)(RW(8) .withReset(true.B).withDescription("Enable uBTB flush on BPU context flush."))
+  val ABTB_FLUSH_ENABLE   = Option.when(HasBpuFlush)(RW(9) .withReset(true.B).withDescription("Enable aBTB flush on BPU context flush."))
+  val MBTB_FLUSH_ENABLE   = Option.when(HasBpuFlush)(RW(10).withReset(true.B).withDescription("Enable mBTB flush on BPU context flush."))
+  val TAGE_FLUSH_ENABLE   = Option.when(HasBpuFlush)(RW(11).withReset(true.B).withDescription("Enable TAGE flush on BPU context flush."))
+  val SC_FLUSH_ENABLE     = Option.when(HasBpuFlush)(RW(12).withReset(true.B).withDescription("Enable SC flush on BPU context flush."))
+  val ITTAGE_FLUSH_ENABLE = Option.when(HasBpuFlush)(RW(13).withReset(true.B).withDescription("Enable ITTAGE flush on BPU context flush."))
+  val RAS_FLUSH_ENABLE    = Option.when(HasBpuFlush)(RW(14).withReset(true.B).withDescription("Enable RAS flush on BPU context flush."))
 }
 
 class SpfctlBundle extends CSRBundle {

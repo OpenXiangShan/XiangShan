@@ -49,10 +49,10 @@ import xiangshan.frontend.bpu.utage.MicroTageMeta
 class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   class BpuIO extends Bundle {
     val ctrl:        BpuCtrl    = Input(new BpuCtrl)
-    val flush:       Bool       = Input(Bool())
     val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
     val fromFtq:     FtqToBpuIO = Flipped(new FtqToBpuIO)
     val toFtq:       BpuToFtqIO = new BpuToFtqIO
+    // phase-1 flush trigger from Frontend (not generated when HasBpuFlush is off)
     val flush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
   }
 
@@ -92,38 +92,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   /* *** CSR ctrl sub-predictor enable *** */
   private val ctrl      = DelayN(io.ctrl, 2) // delay 2 cycle for timing
   private val constCtrl = Constantin.createRecord("constCtrl")
-
-  if (HasBpuFlush) {
-    def getSubFlushEnable(p: BasePredictor): Bool = p match {
-      case _: FallThroughPredictor => true.B
-      case _: MicroBtb              => ctrl.ubtbFlushEnable.get
-      case _: AheadBtb              => ctrl.abtbFlushEnable.get
-      case _: MicroTage             => true.B
-      case _: MicroRas              => true.B
-      case _: MainBtb               => ctrl.mbtbFlushEnable.get
-      case _: Tage                  => ctrl.tageFlushEnable.get
-      case _: Sc                    => ctrl.scFlushEnable.get
-      case _: Ittage                => ctrl.ittageFlushEnable.get
-      case _: Ras                   => ctrl.rasFlushEnable.get
-      case other => throw new IllegalArgumentException(s"Unsupported BPU flush predictor: ${other.getClass.getName}")
-    }
-
-    val fc = Module(new BpuFlushCtrl(predictors.length))
-    fc.io.flush      := io.flush.get
-    fc.io.redirectEn := io.fromFtq.redirect.valid
-    fc.io.bpuFlushEn := ctrl.bpuFlushEn.get
-
-    val currentFlushMask = VecInit(predictors.map(p => getSubFlushEnable(p))).asUInt
-    fc.io.flushMask := currentFlushMask
-
-    predictors.zipWithIndex.foreach { case (p, i) =>
-      p.io.contextFlush.get := fc.io.contextFlush && fc.io.activeFlushMask(i)
-      p.io.bpuFlushing.get  := fc.io.bpuFlushing && fc.io.activeFlushMask(i)
-    }
-    fc.io.resetDone := predictors.zipWithIndex.map { case (p, i) =>
-      !fc.io.activeFlushMask(i) || p.io.resetDone.get
-    }.reduce(_ && _)
-  }
 
   fallThrough.io.enable := true.B // fallThrough is always enabled
   utage.io.enable       := true.B
@@ -225,43 +193,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   fastTrain.bits.utageMeta       := s3_utageMeta
   fastTrain.bits.hasOverride     := s3_override
 
-  /* *** context-switch flush state machine *** */
-  val s_idle :: s_waiting :: s_flushing :: s_done :: Nil = Enum(4)
-  private val flushState                                 = RegInit(s_idle)
-
-  private val bpuFlushEn   = ctrl.bpuFlushEn
-  private val contextFlush = (flushState === s_waiting) && redirect.valid
-  private val bpuFlushing  = contextFlush || (flushState === s_flushing)
-
-  def getSubFlushEnable(p: BasePredictor): Bool = p match {
-    case _: MicroBtb => ctrl.ubtbFlushEnable
-    case _: AheadBtb => ctrl.abtbFlushEnable
-    case _: MainBtb  => ctrl.mbtbFlushEnable
-    case _: Tage     => ctrl.tageFlushEnable
-    case _: Sc       => ctrl.scFlushEnable
-    case _: Ittage   => ctrl.ittageFlushEnable
-    case _: Ras      => ctrl.rasFlushEnable
-    case _ => true.B
-  }
-
-  private val resetDone    = predictors.map(_.io.resetDone).reduce(_ && _)
-  private val allResetDone = RegInit(false.B)
-  when(contextFlush) {
-    allResetDone := false.B
-  }.elsewhen(resetDone) {
-    allResetDone := true.B
-  }
-
-  when((flushState === s_idle) && io.flush && bpuFlushEn) {
-    flushState := s_waiting
-  }.elsewhen((flushState === s_waiting) && redirect.valid) {
-    flushState := s_flushing
-  }.elsewhen((flushState === s_flushing) && allResetDone) {
-    flushState := s_done
-  }.elsewhen(flushState === s_done) {
-    flushState := s_idle
-  }
-
   predictors.foreach { p =>
     p.io.startPc   := s0_startPc.get
     p.io.stageCtrl := stageCtrl
@@ -274,10 +205,49 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     p.io.train.fromBpuTrain(train)
     // fastTrain is an Option[Valid[BpuFastTrain]], we need .foreach
     p.io.fastTrain.foreach(_ := fastTrain)
-    p.io.contextFlush := contextFlush && getSubFlushEnable(p)
-    p.io.bpuFlushing  := bpuFlushing && getSubFlushEnable(p)
   }
-  io.fromFtq.train.ready := bpuFlushing || predictors.map(_.io.trainReady).reduce(_ && _)
+  io.fromFtq.train.ready := predictors.map(_.io.trainReady).reduce(_ && _)
+
+  /* *** BPU context flush (structurally eliminated when HasBpuFlush is off) *** */
+  if (HasBpuFlush) {
+    // encode per-predictor CSR flush enables in predictors order;
+    // exhaustive over all current predictor types, fail at elaboration on unknown ones
+    def getSubFlushEnable(p: BasePredictor): Bool = p match {
+      case _: MicroBtb => ctrl.ubtbFlushEnable.get
+      case _: AheadBtb => ctrl.abtbFlushEnable.get
+      case _: MainBtb  => ctrl.mbtbFlushEnable.get
+      case _: Tage     => ctrl.tageFlushEnable.get
+      case _: Sc       => ctrl.scFlushEnable.get
+      case _: Ittage   => ctrl.ittageFlushEnable.get
+      case _: Ras      => ctrl.rasFlushEnable.get
+      case _: FallThroughPredictor => true.B
+      case _: MicroTage            => true.B
+      case _: MicroRas             => true.B
+      case other => throw new IllegalArgumentException(
+        s"missing BPU flush-mask mapping for ${other.getClass.getName}"
+      )
+    }
+
+    val fc = Module(new BpuFlushCtrl(predictors.length))
+    fc.io.flush      := io.flush.get
+    fc.io.redirectEn := io.fromFtq.redirect.valid
+    fc.io.bpuFlushEn := ctrl.bpuFlushEn.get
+
+    // encode CSR enables in predictors order, latched by BpuFlushCtrl on phase-1 acceptance
+    val currentFlushMask = VecInit(predictors.map(p => getSubFlushEnable(p))).asUInt
+    fc.io.flushMask := currentFlushMask
+
+    // aggregate done only for predictors selected by this transaction's mask
+    fc.io.resetDone := predictors.zipWithIndex.map { case (p, i) =>
+      !fc.io.activeFlushMask(i) || p.io.resetDone.get
+    }.reduce(_ && _)
+
+    // per-predictor dispatch gated by the latched activeFlushMask
+    predictors.zipWithIndex.foreach { case (p, i) =>
+      p.io.contextFlush.get := fc.io.contextFlush && fc.io.activeFlushMask(i)
+      p.io.bpuFlushing.get  := fc.io.bpuFlushing  && fc.io.activeFlushMask(i)
+    }
+  }
 
   /* *** predictor specific inputs *** */
   abtb.io.redirectValid  := redirect.valid
@@ -455,18 +425,18 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_rasTargetDiff          = ras.io.topRetAddr =/= s3_s1Prediction.target
 
   private val s3_takenMask = VecInit(s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
-    val tagePred = s3_tagePrediction(i)
-    val useSc    = s3_scUsed(i)
-    val scTaken  = s3_scTakenMask(i)
+    val useTage   = s3_tagePrediction.takenVec(i).valid
+    val tageTaken = s3_tagePrediction.takenVec(i).bits
+    val useSc     = s3_scUsed(i)
+    val scTaken   = s3_scTakenMask(i)
 
     s3_jumpTakenVec(i) ||
     (s3_isBrVec(i) &&
       MuxCase(
         entry.bits.taken, // default: base table
         Seq(
-          useSc                -> scTaken,
-          tagePred.useProvider -> tagePred.providerPred,
-          tagePred.hasAlt      -> tagePred.altPred
+          useSc   -> scTaken,
+          useTage -> tageTaken
         )
       ))
   })
@@ -596,20 +566,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       }
   }
 
-  phr.io.train.s0_stall             := s0_stall
-  phr.io.train.stageCtrl            := stageCtrl
-  phr.io.train.redirect             := redirect
-  phr.io.train.s3_override          := s3_override
-  phr.io.train.s3_phrMeta           := s3_phrMeta
-  phr.io.train.s3_prediction        := s3_prediction
-  phr.io.train.s3_startPc           := s3_startPc.get
-  phr.io.s1Train.valid              := s1_fire
-  phr.io.s1Train.taken              := s1_prediction.taken
-  phr.io.s1Train.startPc            := s1_startPc.get
-  phr.io.s1Train.abtbValid          := s1_abtbValid
-  phr.io.s1Train.abtbFirstTakenBrOH := s1_abtbFirstTakenBrOH
-  phr.io.s1Train.ubtbPrediction     := s1_ubtbPredWithURas
-  phr.io.s1Train.abtbPrediction     := s1_abtbPredWithURas
+  phr.io.train.s0_stall      := s0_stall
+  phr.io.train.stageCtrl     := stageCtrl
+  phr.io.train.redirect      := redirect
+  phr.io.train.s3_override   := s3_override
+  phr.io.train.s3_phrMeta    := s3_phrMeta
+  phr.io.train.s3_prediction := s3_prediction
+  phr.io.train.s3_startPc    := s3_startPc.get
+  phr.io.s1Train.valid       := s1_fire
+  phr.io.s1Train.startPc     := s1_startPc.get
+  phr.io.s1Train.prediction  := s1_prediction
 
   phr.io.commit.valid := io.fromFtq.train.fire
   phr.io.commit.bits.fromBpuTrain(train)
@@ -755,8 +721,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   XSPerfHistogram(
     "fetchBlockSize",
     Mux(
-      io.toFtq.prediction.bits.takenCfiOffset.valid,
-      io.toFtq.prediction.bits.takenCfiOffset.bits,
+      io.toFtq.prediction.bits.taken,
+      getFtqOffset(io.toFtq.prediction.bits.startPc, io.toFtq.prediction.bits.endPosition),
       FetchBlockInstNum.U
     ),
     io.toFtq.prediction.fire,

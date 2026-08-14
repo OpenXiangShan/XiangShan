@@ -51,14 +51,10 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val alignBanks = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new MainBtbAlignBank(alignIdx)))
 
   io.sramResetDone := alignBanks.map(_.io.sramResetDone).reduce(_ && _)
-  if (HasBpuFlush) { io.resetDone.get := true.B }
-
-  // 40 SRAMs (2 AlignBank × 4 InternalBank × (4 EntrySRAM + 1 CounterSRAM)) via extraReset clear in 256 cycles;
-  // flushPending latches the clear window, resetDone rises at T+258 (256 SRAM clear + 1 flushPending reg + 1 sramResetDone reg).
-  private val flushPending = RegInit(false.B)
-  when(io.contextFlush) { flushPending := true.B }
-    .elsewhen(flushPending && io.sramResetDone) { flushPending := false.B }
-  io.resetDone := !flushPending && !io.contextFlush
+  // context flush placeholder: real flush scheme comes later
+  if (HasBpuFlush) {
+    io.resetDone.get := true.B
+  }
 
   io.trainReady := true.B
 
@@ -69,8 +65,6 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     b.io.stageCtrl.s2_fire := s2_fire
     b.io.stageCtrl.s3_fire := s3_fire
     b.io.stageCtrl.t0_fire := t0_fire
-    b.io.contextFlush      := io.contextFlush
-    b.io.bpuFlushing       := io.bpuFlushing
   }
 
   /* *** s0 ***
@@ -152,12 +146,6 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
    */
   private val t1_fire  = RegNext(t0_fire, init = false.B) && io.enable
   private val t1_train = RegEnable(t0_train, t0_fire)
-
-  // bpuFlushing clears t1_train to block T+1+ train-side writes (entry/counter/touch);
-  // T-cycle residual writes are blocked by FP5/FP7/FP9 gating at !bpuFlushing.
-  when(io.bpuFlushing) {
-    t1_train := 0.U.asTypeOf(t1_train)
-  }
 
   private val t1_rotator    = RegEnable(t0_rotator, t0_fire)
   private val t1_startPcVec = RegEnable(t0_startPcVec, t0_fire)
