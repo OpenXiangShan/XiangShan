@@ -88,6 +88,20 @@ class common_data_transaction extends uvm_object;
     bit            active_control_barrier_valid;
     memblock_uid_t active_control_barrier_uid;
 
+    // 中文注释：控制 worker 的持久工作项和唤醒事件。service 是唯一 producer，
+    // CSR/Fence worker 分别是唯一 consumer；event 只用于唤醒，queue 才是动作真源。
+    memblock_csr_control_action_t      csr_control_action_q[$];
+    memblock_sfence_control_action_t   sfence_control_action_q[$];
+    memblock_l2_flush_release_request_t l2_flush_release_request_q[$];
+    event                               csr_control_action_available_ev;
+    event                               sfence_control_action_available_ev;
+    event                               control_worker_shutdown_ev;
+    // 中文注释：shutdown 由 service 在所有 control action drain 后请求；两个 worker
+    // 分别确认退出，global stop 必须等确认齐备，避免空 worker 与终止条件循环依赖。
+    bit                                 control_workers_shutdown_requested;
+    bit                                 csr_control_worker_exited;
+    bit                                 sfence_control_worker_exited;
+
     bit                         flush_in_progress;
     memblock_redirect_payload_t active_redirect;
     memblock_redirect_phase_e   redirect_phase;
@@ -100,9 +114,16 @@ class common_data_transaction extends uvm_object;
     bit                         issue_freeze_ack;
     // flushSb待处理请求队列。所有producer只入队，LSQ commit sequence是唯一consumer。
     memblock_flushsb_req_t      flushsb_req_q[$];
+    // 中文注释：attached 表示请求已经绑定到尚未 finish_item 的 lsqcommit xaction；
+    // active 表示该 xaction 已由 driver sendover，才允许 sbIsEmpty 完成。
+    memblock_flushsb_req_t      attached_flushsb_req;
+    bit                         attached_flushsb_req_valid;
     // 当前已经随lsqcommit xaction drive到DUT、正在等待sbIsEmpty的请求备份。
     memblock_flushsb_req_t      active_flushsb_req;
     bit                         active_flushsb_req_valid;
+    // 中文注释：owner 请求的 completed slot 有界保存一条 immutable completion；
+    // service 必须按 owner+req_id 消费后清空，防止旧 high observation 误匹配下一请求。
+    memblock_flushsb_completion_t flushsb_completed;
     int unsigned                next_flushsb_req_id;
     bit                         flushsb_waiting_empty;
     longint unsigned            flushsb_start_cycle;
@@ -129,8 +150,11 @@ class common_data_transaction extends uvm_object;
         global_issue_epoch  = 0;
         issue_freeze_ack    = 1'b0;
         flushsb_req_q.delete();
+        attached_flushsb_req = '{default:'0};
+        attached_flushsb_req_valid = 1'b0;
         active_flushsb_req  = '{default:'0};
         active_flushsb_req_valid = 1'b0;
+        flushsb_completed = '{default:'0};
         next_flushsb_req_id = 0;
         flushsb_waiting_empty = 1'b0;
         flushsb_start_cycle = 0;
@@ -159,6 +183,12 @@ class common_data_transaction extends uvm_object;
         uid_waiting_by_vpn_s2xlate.delete();
         active_control_barrier_valid = 1'b0;
         active_control_barrier_uid = 0;
+        csr_control_action_q.delete();
+        sfence_control_action_q.delete();
+        l2_flush_release_request_q.delete();
+        control_workers_shutdown_requested = 1'b0;
+        csr_control_worker_exited = 1'b0;
+        sfence_control_worker_exited = 1'b0;
     endfunction:new
 
     static function common_data_transaction get();
@@ -201,8 +231,11 @@ class common_data_transaction extends uvm_object;
         global_issue_epoch  = 0;
         issue_freeze_ack    = 1'b0;
         flushsb_req_q.delete();
+        attached_flushsb_req = '{default:'0};
+        attached_flushsb_req_valid = 1'b0;
         active_flushsb_req  = '{default:'0};
         active_flushsb_req_valid = 1'b0;
+        flushsb_completed = '{default:'0};
         next_flushsb_req_id = 0;
         flushsb_waiting_empty = 1'b0;
         flushsb_start_cycle = 0;
@@ -240,6 +273,12 @@ class common_data_transaction extends uvm_object;
         uid_by_sq.delete();
         active_control_barrier_valid = 1'b0;
         active_control_barrier_uid = 0;
+        csr_control_action_q.delete();
+        sfence_control_action_q.delete();
+        l2_flush_release_request_q.delete();
+        control_workers_shutdown_requested = 1'b0;
+        csr_control_worker_exited = 1'b0;
+        sfence_control_worker_exited = 1'b0;
         if (mmu_csr_state == null) begin
             mmu_csr_state = mmu_csr_runtime_state::type_id::create("mmu_csr_state");
         end
@@ -1033,6 +1072,214 @@ class common_data_transaction extends uvm_object;
         active_control_barrier_valid = 1'b0;
         active_control_barrier_uid = 0;
     endfunction:release_control_barrier_after_terminal
+
+    // 抽象职责：清除本 testcase 尚未交付的 control worker 工作项和 shutdown 回执。
+    // 建表或 control runtime reset 的唯一调用者使用它建立新的控制代际；它不改主表、
+    // status、ROB 或 flushSb normal request，避免把运行期动作清理误当成重建主表。
+    function void reset_control_action_runtime();
+        csr_control_action_q.delete();
+        sfence_control_action_q.delete();
+        l2_flush_release_request_q.delete();
+        control_workers_shutdown_requested = 1'b0;
+        csr_control_worker_exited = 1'b0;
+        sfence_control_worker_exited = 1'b0;
+    endfunction:reset_control_action_runtime
+
+    // 抽象职责：持久化一个已绑定 owner 的 CSR 工作项，再唤醒 CSR worker。
+    // event 丢失不会丢动作，因为 worker 每次醒来都重新检查 queue；本函数不推进
+    // status，调用者必须先完成 owner/state 校验和状态写入。
+    function void enqueue_csr_control_action(input memblock_csr_control_action_t action);
+        if (!action.owner.valid) begin
+            `uvm_fatal("CONTROL_ACTION", "enqueue_csr_control_action got invalid owner")
+        end
+        if (control_workers_shutdown_requested || csr_control_worker_exited) begin
+            `uvm_fatal("CONTROL_ACTION", "cannot enqueue CSR action after worker shutdown/exited")
+        end
+        csr_control_action_q.push_back(action);
+        ->csr_control_action_available_ev;
+    endfunction:enqueue_csr_control_action
+
+    // 抽象职责：CSR worker 从 FIFO 取出唯一待交付 action；为空时只返回 0，
+    // 不等待 event，避免把 queue state 与 event 唤醒语义混为一体。
+    function bit try_pop_csr_control_action(output memblock_csr_control_action_t action);
+        if (csr_control_action_q.size() == 0) begin
+            action = '{default:'0};
+            return 1'b0;
+        end
+        action = csr_control_action_q.pop_front();
+        return 1'b1;
+    endfunction:try_pop_csr_control_action
+
+    // 抽象职责：记录 CSR worker 的 driver sendover，而非 monitor 完成。该 helper
+    // 归档本 action 的 expected runtime 字段与 drive 前 snapshot 序号，供 service 在
+    // 后续 monitor sample 中验证；它不提前写 runtime completion snapshot。
+    function void mark_csr_control_sendover(input memblock_csr_control_action_t action);
+        status_transaction status;
+
+        if (!action.owner.valid ||
+            action.completion_profile != MEMBLOCK_CONTROL_COMPLETION_RUNTIME_CSR_SNAPSHOT ||
+            !action.expected_runtime_csr_valid) begin
+            `uvm_fatal("CONTROL_ACTION", "invalid CSR action at sendover")
+        end
+        status = get_status(action.owner.uid);
+        if (!memblock_control_owner_equal(status.control_owner, action.owner) ||
+            status.control_state != MEMBLOCK_CONTROL_STATE_CSR_CONFIG_PENDING ||
+            !status.control_action_enqueued) begin
+            `uvm_fatal("CONTROL_ACTION",
+                       $sformatf("CSR sendover owner/state mismatch uid=%0d state=%0d enqueued=%0d",
+                                 action.owner.uid, status.control_state,
+                                 status.control_action_enqueued))
+        end
+        status.control_expected_runtime_csr_valid = 1'b1;
+        status.control_expected_runtime_csr = action.expected_runtime_csr;
+        status.control_runtime_snapshot_seq_before_drive =
+            action.runtime_snapshot_seq_before_drive;
+        status.control_action_enqueued = 1'b0;
+        status.control_state = MEMBLOCK_CONTROL_STATE_CSR_SENDOVER;
+        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+    endfunction:mark_csr_control_sendover
+
+    // 抽象职责：持久化 SFence action 并唤醒唯一 fence worker。token 含 C0 arm
+    // 前的基线字段；本函数不读取 monitor event，也不把 event 当作 action 真源。
+    function void enqueue_sfence_control_action(input memblock_sfence_control_action_t action);
+        if (!action.owner.valid) begin
+            `uvm_fatal("CONTROL_ACTION", "enqueue_sfence_control_action got invalid owner")
+        end
+        if (control_workers_shutdown_requested || sfence_control_worker_exited) begin
+            `uvm_fatal("CONTROL_ACTION", "cannot enqueue SFence action after worker shutdown/exited")
+        end
+        sfence_control_action_q.push_back(action);
+        ->sfence_control_action_available_ev;
+    endfunction:enqueue_sfence_control_action
+
+    function bit try_pop_sfence_control_action(output memblock_sfence_control_action_t action);
+        if (sfence_control_action_q.size() == 0) begin
+            action = '{default:'0};
+            return 1'b0;
+        end
+        action = sfence_control_action_q.pop_front();
+        return 1'b1;
+    endfunction:try_pop_sfence_control_action
+
+    // 抽象职责：在 SFence start_item() 之前登记 C0 匹配资格和 immutable event baseline。
+    // Fence monitor 与 driver 可同拍运行，因此不得把这一步放到 finish_item() 返回后。
+    function void arm_sfence_control_c0_match(
+        input memblock_sfence_control_action_t action
+    );
+        status_transaction status;
+
+        if (!action.owner.valid || !action.sfence_c0_match_armed) begin
+            `uvm_fatal("CONTROL_ACTION", "cannot arm invalid SFence action")
+        end
+        status = get_status(action.owner.uid);
+        if (!memblock_control_owner_equal(status.control_owner, action.owner) ||
+            status.control_state != MEMBLOCK_CONTROL_STATE_SFENCE_REQ ||
+            !status.control_action_enqueued) begin
+            `uvm_fatal("CONTROL_ACTION",
+                       $sformatf("SFence C0 arm owner/state mismatch uid=%0d state=%0d enqueued=%0d",
+                                 action.owner.uid, status.control_state,
+                                 status.control_action_enqueued))
+        end
+        status.control_expected_sfence_valid = 1'b1;
+        status.control_expected_sfence = action.expected_fence;
+        status.control_sfence_event_seq = action.pre_drive_event_seq;
+        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+    endfunction:arm_sfence_control_c0_match
+
+    // 抽象职责：记录 SFence driver sendover。C0/C4 仍由 adapter/monitor 事实推进，
+    // 此处仅把状态从已 arm 的 SFENCE_REQ 转成可消费 C0 的 SFENCE_SENDOVER。
+    function void mark_sfence_control_sendover(
+        input memblock_sfence_control_action_t action
+    );
+        status_transaction status;
+
+        if (!action.owner.valid || !action.sfence_c0_match_armed) begin
+            `uvm_fatal("CONTROL_ACTION", "invalid SFence action at sendover")
+        end
+        status = get_status(action.owner.uid);
+        if (!memblock_control_owner_equal(status.control_owner, action.owner) ||
+            status.control_state != MEMBLOCK_CONTROL_STATE_SFENCE_REQ ||
+            !status.control_action_enqueued) begin
+            `uvm_fatal("CONTROL_ACTION",
+                       $sformatf("SFence sendover owner/state mismatch uid=%0d state=%0d enqueued=%0d",
+                                 action.owner.uid, status.control_state,
+                                 status.control_action_enqueued))
+        end
+        status.control_action_enqueued = 1'b0;
+        status.control_state = MEMBLOCK_CONTROL_STATE_SFENCE_SENDOVER;
+        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+    endfunction:mark_sfence_control_sendover
+
+    // 抽象职责：把 check_store 的 done-high 转换为 owner 化 RELEASE 请求。CSR worker
+    // 优先消费该 queue，确保同一 sequencer 在 high hold 期间不会误交付普通 CSR action。
+    function void enqueue_l2_flush_release_request(
+        input memblock_l2_flush_release_request_t request
+    );
+        if (!request.owner.valid || request.control_reset_epoch == 0) begin
+            `uvm_fatal("CONTROL_ACTION", "enqueue_l2_flush_release_request got invalid request")
+        end
+        if (l2_flush_release_request_q.size() != 0) begin
+            `uvm_fatal("CONTROL_ACTION", "only one active L2 flush RELEASE request is supported")
+        end
+        l2_flush_release_request_q.push_back(request);
+        ->csr_control_action_available_ev;
+    endfunction:enqueue_l2_flush_release_request
+
+    function bit try_pop_l2_flush_release_request(
+        output memblock_l2_flush_release_request_t request
+    );
+        if (l2_flush_release_request_q.size() == 0) begin
+            request = '{default:'0};
+            return 1'b0;
+        end
+        request = l2_flush_release_request_q.pop_front();
+        return 1'b1;
+    endfunction:try_pop_l2_flush_release_request
+
+    // 抽象职责：service 在 terminal prefix 和 control action drain 均完成后请求两个
+    // worker 退出；worker 醒来后还会复查 queue，避免 shutdown/event 与最后 token 竞态。
+    function void request_control_worker_shutdown();
+        if (control_workers_shutdown_requested) begin
+            return;
+        end
+        control_workers_shutdown_requested = 1'b1;
+        ->control_worker_shutdown_ev;
+        ->csr_control_action_available_ev;
+        ->sfence_control_action_available_ev;
+    endfunction:request_control_worker_shutdown
+
+    function bit control_action_drain_complete();
+        return csr_control_action_q.size() == 0 &&
+               sfence_control_action_q.size() == 0 &&
+               l2_flush_release_request_q.size() == 0;
+    endfunction:control_action_drain_complete
+
+    function bit control_worker_can_exit(input bit is_csr_worker);
+        if (!control_workers_shutdown_requested) begin
+            return 1'b0;
+        end
+        if (is_csr_worker) begin
+            return csr_control_action_q.size() == 0 &&
+                   l2_flush_release_request_q.size() == 0;
+        end
+        return sfence_control_action_q.size() == 0;
+    endfunction:control_worker_can_exit
+
+    function void mark_control_worker_exited(input bit is_csr_worker);
+        if (!control_workers_shutdown_requested) begin
+            `uvm_fatal("CONTROL_ACTION", "worker exited before shutdown was requested")
+        end
+        if (is_csr_worker) begin
+            csr_control_worker_exited = 1'b1;
+        end else begin
+            sfence_control_worker_exited = 1'b1;
+        end
+    endfunction:mark_control_worker_exited
+
+    function bit control_workers_shutdown_complete();
+        return control_workers_shutdown_requested &&
+               csr_control_worker_exited && sfence_control_worker_exited;
+    endfunction:control_workers_shutdown_complete
 
     function void set_status_field(input memblock_uid_t uid,
                                    input memblock_status_field_e field,
