@@ -686,6 +686,20 @@ main_phase：
 11. C0/C4 只能匹配 `l2tlb_current_reset_epoch`；`control_reset_epoch` 只保护 CSR/`sbIsEmpty`/L2 done 控制事实，二者不得互相替代。
 12. `control_runtime_ready` 只允许 producer 开始发布当前代 observation，不等于当前 CSR snapshot 已可用；CSR action 必须再等 `control_csr_runtime_baseline`，并冻结其对应 seq/payload 后才入 action queue。
 
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+### [IMPLEMENTATION_DELTA] control worker 改为 VSEQ 显式启动
+
+来源：coding 前读取 `AI_DOC/project_management/mem_ut_virtual_sequence_rule.md` 后发现，原 plan 以 testcase phase `default_sequence` 安装 CSR/Fence control worker 的方式，与当前“agent sequence 由顶层 VSEQ 经 `p_sequencer` 启动”的项目规则冲突；用户已明确要求改为第二种方式，并要求保留其它控制入口支持。
+
+原 plan：`tc_base`、`basicTest` 和 `tc_dispatch_real_smoke` 在 build/config 阶段按 topology mode 覆盖 CSR/Fence sequencer 的 `main_phase.default_sequence`，由 phase 自动启动 `memblock_csr_control_base_sequence` 与 `memblock_sfence_control_base_sequence`。
+
+实现调整：两个 worker 的实现类、token/event 协议和 shutdown acknowledgement 保持不变，但不再作为 phase `default_sequence` 安装。`memblock_dispatch_real_smoke_vseq` 在 AUTO topology 下使用 `p_sequencer.csr_ctrl_sqr` 和 `p_sequencer.fence_sqr` 显式并行启动两个 worker；新增 MANUAL_CONTROL 专项 VSEQ 复用相同 worker 启动路径并启动专用 manual-control main sequence。`basicTest` 继续作为 VSEQ 场景入口；已有 `tc_dispatch_real_smoke` 在 mode=`1` 时改为启动同一 real-smoke VSEQ，并在该 topology 下关闭全部会与 VSEQ 冲突的 legacy phase default producer。普通 direct-manual/cancel-reconcile testcase 保持 mode=`2` 的既有 default topology；它们若请求 active control mode 则在入口 fail-fast，避免出现无 worker 的控制表。
+
+原因：VSEQ 是场景内 agent sequence 的唯一生命周期 owner；将 worker 与 main dispatch、LSQ、L2TLB 和 responder 放在同一 VSEQ 并发域，才能保证每个 sequencer 只有一个 producer，并符合当前 VSEQ 调度规则。
+
+影响范围：修改 worker 启动/关闭责任、`basicTest` 与 legacy real-smoke 的 mode 兼容检查、VSEQ 入口和相关 preset；不改变 plus 为唯一 topology 输入、控制标记/ROB/CSR/SFence/flushSb/L2 flush 的主体状态机，也不改变普通 mode=`0/2` 的 legacy 行为。
+
 ## 与初步 plan 差异说明
 
 本章只记录相对于两份 flow 草案和现有框架行为的功能实现差异，coding 时以正文前述最终 flow 为准。
