@@ -1001,6 +1001,44 @@ class seq_csr_common;
         return control_worker_topology_mode;
     endfunction:get_control_worker_topology_mode
 
+    // 抽象职责：把已完成范围校验的公共 plus 值冻结到 common 层的唯一 topology 槽。
+    // testcase build 期调用；后续 VSEQ、main sequence 和 worker 只读该槽，不能自行改写 mode。
+    static function void initialize_control_worker_topology_from_plus(
+        input string initializer
+    );
+        memblock_sync_pkg::memblock_control_worker_topology_mode_e mode;
+
+        check_initialized("initialize_control_worker_topology_from_plus");
+        case (control_worker_topology_mode)
+            0: mode = memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_DISABLED;
+            1: mode = memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_AUTO_MAIN_TABLE;
+            2: mode = memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_MANUAL_MAIN_TABLE;
+            3: mode = memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_MANUAL_CONTROL_TABLE;
+            default: begin
+                // validate_and_clamp() 已经 fail-fast；保留此处是为了防止调用顺序被后续改坏。
+                `uvm_fatal("SEQ_CSR_CFG",
+                           $sformatf("cannot freeze invalid control topology mode=%0d",
+                                     control_worker_topology_mode))
+            end
+        endcase
+        memblock_sync_pkg::initialize_control_worker_topology(mode, initializer);
+    endfunction:initialize_control_worker_topology_from_plus
+
+    // 抽象职责：只校验 active control topology 是否有可承载 worker/main flow 的 dispatch 场景。
+    // 它不从 testcase/VSEQ 名称反推 mode，也不修改已冻结的 topology snapshot。
+    static function void check_control_worker_dispatch_capability(
+        input bit dispatch_capable,
+        input string scenario_name
+    );
+        check_initialized("check_control_worker_dispatch_capability");
+        if (memblock_sync_pkg::uses_control_barrier_topology() && !dispatch_capable) begin
+            `uvm_fatal("MEMBLOCK_CONTROL_TOPOLOGY",
+                       $sformatf("active control topology mode=%0d requires a dispatch-capable scenario, got %0s",
+                                 memblock_sync_pkg::get_control_worker_topology_mode(),
+                                 scenario_name))
+        end
+    endfunction:check_control_worker_dispatch_capability
+
     static function bit get_csr_control_enable();
         check_initialized("get_csr_control_enable");
         return csr_control_enable;

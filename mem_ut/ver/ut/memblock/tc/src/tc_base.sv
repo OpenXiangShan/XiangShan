@@ -42,6 +42,9 @@ function void `TC_NAME::build_phase(uvm_phase phase);
 
     super.build_phase(phase);
     seq_csr_common::reload_from_plus();
+    // 中文注释：控制 mode 只在 testcase build 期由 plus 冻结一次。tc_base 及其派生
+    // testcase 不得根据后续选择的 sequence 重写该 snapshot。
+    seq_csr_common::initialize_control_worker_topology_from_plus(get_type_name());
     if(!uvm_config_db#(virtual tc_if)::get(this, "", "vif", vif)) begin
         `uvm_fatal(get_type_name(),$sformatf("virtual interface must be set for vif(tc_if)!!!"))
     end
@@ -53,6 +56,10 @@ function void `TC_NAME::build_phase(uvm_phase phase);
     end
     l2tlb_main_vseq_name = main_vseq_name;
     skip_legacy_l2tlb_default = vseq_starts_l2tlb(main_vseq_name);
+    // tc_base 的 real-dispatch 派生 testcase 通过 virtual capability 表达能否承载控制 flow；
+    // 普通 legacy testcase 若误设 active mode，应在 build 期 fail-fast。
+    seq_csr_common::check_control_worker_dispatch_capability(
+        l2tlb_dispatch_topology_active(), get_type_name());
 
   ///reg_model = aa_test_reg_model::type_id::create("reg_model",this);
   ///reg_model.configure(null, "");

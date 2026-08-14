@@ -23,6 +23,13 @@ class basicTest extends tcnt_test_base ;
                  vseq_name == "memblock_dispatch_real_cancel_reconcile_vseq";
       endfunction:vseq_starts_l2tlb
 
+      // 中文注释：只有这两个专项 VSEQ 可以成为 active control topology 的显式
+      // worker/main sequence owner；普通 VSEQ 不能因为 plus=1/3 被隐式扩展为控制场景。
+      function bit vseq_supports_control_worker_topology(input string vseq_name);
+          return vseq_name == "memblock_dispatch_real_smoke_vseq" ||
+                 vseq_name == "memblock_dispatch_manual_control_vseq";
+      endfunction:vseq_supports_control_worker_topology
+
       function void initialize_l2tlb_testcase_lifecycle();
           bit needs_response;
           memblock_sync_pkg::memblock_l2tlb_responder_mode_e responder_mode;
@@ -81,6 +88,11 @@ class basicTest extends tcnt_test_base ;
             if (!$value$plusargs("VSEQ_MAIN=%s", main_vseq_name)) begin
                 void'(uvm_cmdline_proc.get_arg_value("+VSEQ_MAIN=", main_vseq_name));
             end
+            // 中文注释：basicTest 先解析 VSEQ_MAIN，再冻结 topology 并校验场景能力；
+            // VSEQ 本身只读 snapshot，不拥有 mode 的设置或修正权限。
+            seq_csr_common::initialize_control_worker_topology_from_plus(get_type_name());
+            seq_csr_common::check_control_worker_dispatch_capability(
+                vseq_supports_control_worker_topology(main_vseq_name), main_vseq_name);
             `uvm_info(get_type_name(),$sformatf("usr_test_vseq_name:%0s",main_vseq_name),UVM_LOW)
             main_vseq_wrapper = uvm_factory::get().find_wrapper_by_name(main_vseq_name);
             if (main_vseq_wrapper == null) begin
