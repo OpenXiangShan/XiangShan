@@ -83,6 +83,11 @@ class common_data_transaction extends uvm_object;
     memblock_uid_t uid_by_lq[memblock_lq_map_key_t];
     memblock_uid_t uid_by_sq[memblock_sq_map_key_t];
 
+    // 中文注释：控制标记只允许存在一个静态屏障。它在 control admission 时建立，
+    // 在该 UID terminal_done 后由 control service 解除；普通 LSQ admission 不得越过它。
+    bit            active_control_barrier_valid;
+    memblock_uid_t active_control_barrier_uid;
+
     bit                         flush_in_progress;
     memblock_redirect_payload_t active_redirect;
     memblock_redirect_phase_e   redirect_phase;
@@ -152,6 +157,8 @@ class common_data_transaction extends uvm_object;
         next_tlb_entry_generation = 0;
         sfence_invalidate_pending_q.delete();
         uid_waiting_by_vpn_s2xlate.delete();
+        active_control_barrier_valid = 1'b0;
+        active_control_barrier_uid = 0;
     endfunction:new
 
     static function common_data_transaction get();
@@ -231,6 +238,8 @@ class common_data_transaction extends uvm_object;
         uid_by_active_rob.delete();
         uid_by_lq.delete();
         uid_by_sq.delete();
+        active_control_barrier_valid = 1'b0;
+        active_control_barrier_uid = 0;
         if (mmu_csr_state == null) begin
             mmu_csr_state = mmu_csr_runtime_state::type_id::create("mmu_csr_state");
         end
@@ -845,6 +854,7 @@ class common_data_transaction extends uvm_object;
                uid_by_active_rob.num() == 0 &&
                uid_by_lq.num() == 0 &&
                uid_by_sq.num() == 0 &&
+               !active_control_barrier_valid &&
                !has_pending_redirect_drive() &&
                !flush_in_progress &&
                !active_redirect.valid &&
@@ -889,6 +899,140 @@ class common_data_transaction extends uvm_object;
         end
         return dispatch_progress.max_enqueued_uid + 1;
     endfunction:get_next_new_admit_uid
+
+    // 抽象职责：识别主表中的控制标记。它只读取静态 op_class，不推导普通访存
+    // behavior，也不修改 admission、ROB 或状态表。
+    function bit uid_is_control_marker(input memblock_uid_t uid);
+        check_uid(uid, "uid_is_control_marker");
+        return is_control_op_class(get_main_transaction(uid).op_class);
+    endfunction:uid_is_control_marker
+
+    // 抽象职责：控制静态屏障阻止其后的 UID admission；屏障自身用于 redirect 后
+    // 恢复连续 admission 前缀时仍可被重新经过一次。
+    function bit control_barrier_blocks_admission(input memblock_uid_t uid);
+        if (!active_control_barrier_valid) begin
+            return 1'b0;
+        end
+        return uid > active_control_barrier_uid;
+    endfunction:control_barrier_blocks_admission
+
+    // 抽象职责：为 CSR/SFence/check_store 建立不占 LSQ 的 active ROB 实例与静态屏障。
+    // 它只复用公共 ROB map/admission prefix；不分配 LQ/SQ、不产生 issue work。
+    function void activate_control_uid(input memblock_uid_t uid);
+        main_control_transaction main_tr;
+        status_transaction       status;
+        memblock_control_kind_e  expected_kind;
+
+        check_uid(uid, "activate_control_uid");
+        if (get_next_new_admit_uid() != uid) begin
+            `uvm_fatal("CONTROL_ADMISSION",
+                       $sformatf("control admission uid=%0d is not the next prefix uid=%0d",
+                                 uid, get_next_new_admit_uid()))
+        end
+        if (active_control_barrier_valid) begin
+            `uvm_fatal("CONTROL_ADMISSION",
+                       $sformatf("cannot admit control uid=%0d while barrier uid=%0d is active",
+                                 uid, active_control_barrier_uid))
+        end
+        main_tr = get_main_transaction(uid);
+        status = get_status(uid);
+        if (!is_control_op_class(main_tr.op_class) || status.active || status.enq ||
+            status.terminal_done) begin
+            `uvm_fatal("CONTROL_ADMISSION",
+                       $sformatf("invalid fresh control admission uid=%0d op=%0d active/enq/done=%0d/%0d/%0d",
+                                 uid, main_tr.op_class, status.active, status.enq,
+                                 status.terminal_done))
+        end
+        expected_kind = control_kind_from_op_class(main_tr.op_class);
+        if (status.control_kind != expected_kind ||
+            status.control_state != MEMBLOCK_CONTROL_STATE_NONE ||
+            main_tr.lsq_flow != MEMBLOCK_LSQ_FLOW_NONE || main_tr.numLsElem != 0 ||
+            main_tr.lqIdx_flag || main_tr.lqIdx_value != '0 ||
+            main_tr.sqIdx_flag || main_tr.sqIdx_value != '0) begin
+            `uvm_fatal("CONTROL_ADMISSION",
+                       $sformatf("control uid=%0d has non-neutral static state kind/state=%0d/%0d",
+                                 uid, status.control_kind, status.control_state))
+        end
+
+        activate_uid(uid, 1'b0, 1'b0);
+        set_status_field(uid, MEMBLOCK_STATUS_ENQ, 1'b1);
+        set_status_field(uid, MEMBLOCK_STATUS_ISSUE_READY, 1'b1);
+        set_status_field(uid, MEMBLOCK_STATUS_LSQ_DEQ, 1'b1);
+        status.control_state = MEMBLOCK_CONTROL_STATE_WAIT_OLDER_ROB_COMMIT;
+        status.control_owner.valid = 1'b0;
+        status.control_owner.uid = 0;
+        status.control_owner.dynamic_epoch = 0;
+        status.control_owner.action_generation = 0;
+        status.control_owner.kind = MEMBLOCK_CONTROL_KIND_NONE;
+        status.control_action_generation = 0;
+        status.control_action_enqueued = 1'b0;
+        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+        active_control_barrier_uid = uid;
+        active_control_barrier_valid = 1'b1;
+    endfunction:activate_control_uid
+
+    // 抽象职责：redirect 回退后重新跨过已保留的静态控制标记，只恢复 admission
+    // prefix，不重建 active ROB、不分配新 owner，也不修改 dynamic_epoch。
+    function void restore_control_admission_prefix(input memblock_uid_t uid);
+        status_transaction status;
+
+        check_uid(uid, "restore_control_admission_prefix");
+        status = get_status(uid);
+        if (!active_control_barrier_valid || active_control_barrier_uid != uid ||
+            get_next_new_admit_uid() != uid || !uid_is_control_marker(uid) ||
+            !status.active || !status.enq || status.terminal_done ||
+            status.control_state != MEMBLOCK_CONTROL_STATE_WAIT_OLDER_ROB_COMMIT ||
+            status.control_action_enqueued || status.control_owner.valid) begin
+            `uvm_fatal("CONTROL_ADMISSION",
+                       $sformatf("cannot restore static control prefix uid=%0d barrier=%0d/%0d active/enq/done=%0d/%0d/%0d state=%0d",
+                                 uid, active_control_barrier_valid,
+                                 active_control_barrier_uid, status.active, status.enq,
+                                 status.terminal_done, status.control_state))
+        end
+        mark_uid_enqueued(uid);
+        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+    endfunction:restore_control_admission_prefix
+
+    // 抽象职责：确认 redirect 命中的是尚未拥有动作实例的静态控制标记。该 helper
+    // 不清状态、不撤 ROB map、不计入 LSQ cancel，也不推进 dynamic_epoch。
+    function void preserve_static_control_marker_on_redirect(
+        input memblock_uid_t uid,
+        input memblock_redirect_payload_t redirect
+    );
+        status_transaction status;
+
+        check_uid(uid, "preserve_static_control_marker_on_redirect");
+        status = get_status(uid);
+        if (!redirect.valid || !uid_is_control_marker(uid) ||
+            !active_control_barrier_valid || active_control_barrier_uid != uid ||
+            !status.active || !status.enq || status.terminal_done ||
+            status.control_state != MEMBLOCK_CONTROL_STATE_WAIT_OLDER_ROB_COMMIT ||
+            status.control_action_enqueued || status.control_owner.valid) begin
+            `uvm_fatal("CONTROL_REDIRECT",
+                       $sformatf("redirect cannot preserve control uid=%0d state=%0d owner_valid=%0d action_enqueued=%0d",
+                                 uid, status.control_state, status.control_owner.valid,
+                                 status.control_action_enqueued))
+        end
+    endfunction:preserve_static_control_marker_on_redirect
+
+    // 抽象职责：控制 worker 在 terminal_done 已被公共 commit/retire 固化后解除 barrier，
+    // 使后续 UID 恢复 admission；它不负责 commit 或状态推进。
+    function void release_control_barrier_after_terminal(input memblock_uid_t uid);
+        status_transaction status;
+
+        check_uid(uid, "release_control_barrier_after_terminal");
+        status = get_status(uid);
+        if (!active_control_barrier_valid || active_control_barrier_uid != uid ||
+            !uid_is_control_marker(uid) || !status.terminal_done || status.active) begin
+            `uvm_fatal("CONTROL_BARRIER",
+                       $sformatf("cannot release barrier uid=%0d active_barrier=%0d/%0d terminal/active=%0d/%0d",
+                                 uid, active_control_barrier_valid,
+                                 active_control_barrier_uid, status.terminal_done,
+                                 status.active))
+        end
+        active_control_barrier_valid = 1'b0;
+        active_control_barrier_uid = 0;
+    endfunction:release_control_barrier_after_terminal
 
     function void set_status_field(input memblock_uid_t uid,
                                    input memblock_status_field_e field,
@@ -1901,6 +2045,10 @@ class common_data_transaction extends uvm_object;
         if (!redirect.valid) begin
             `uvm_fatal("COMMON_DATA", "prepare_uid_for_redirect_reissue requires valid redirect")
         end
+        if (uid_is_control_marker(uid)) begin
+            `uvm_fatal("CONTROL_REDIRECT",
+                       $sformatf("control uid=%0d must use static preserve or fatal redirect handling", uid))
+        end
         status = get_status(uid);
         if (status.terminal_done) begin
             `uvm_fatal("COMMON_DATA",
@@ -2102,6 +2250,16 @@ class common_data_transaction extends uvm_object;
             end
             rob_key = status.get_rob_key();
             if (rob_order_util::rob_need_flush(rob_key, redirect)) begin
+                if (uid_is_control_marker(uid)) begin
+                    if (status.control_state ==
+                        MEMBLOCK_CONTROL_STATE_WAIT_OLDER_ROB_COMMIT) begin
+                        preserve_static_control_marker_on_redirect(uid, redirect);
+                        continue;
+                    end
+                    `uvm_fatal("CONTROL_REDIRECT",
+                               $sformatf("redirect covers started control uid=%0d state=%0d; the barrier forbids this recovery",
+                                         uid, status.control_state))
+                end
                 if (!found_flushed || uid < oldest_flushed_uid) begin
                     oldest_flushed_uid = uid;
                     found_flushed = 1'b1;
@@ -2643,6 +2801,10 @@ class common_data_transaction extends uvm_object;
     function void try_retire_committed_uid(input memblock_uid_t uid);
         status_transaction status;
 
+        if (uid_is_control_marker(uid)) begin
+            `uvm_fatal("CONTROL_COMMIT",
+                       $sformatf("control uid=%0d must use try_retire_control_committed_uid", uid))
+        end
         status = get_status(uid);
         if (!status.active || !status.rob_commit) begin
             return;
@@ -2681,6 +2843,39 @@ class common_data_transaction extends uvm_object;
                   UVM_LOW)
         retire_active_uid(uid);
     endfunction:try_retire_committed_uid
+
+    // 抽象职责：完成已获 control commit 的无 LSQ 标记。它不检查普通 writeback、
+    // pass 或 issue target；控制 service 先把状态推进到 CONTROL_COMMIT_READY。
+    function void try_retire_control_committed_uid(input memblock_uid_t uid);
+        status_transaction status;
+
+        check_uid(uid, "try_retire_control_committed_uid");
+        if (!uid_is_control_marker(uid)) begin
+            `uvm_fatal("CONTROL_COMMIT",
+                       $sformatf("control retire got ordinary uid=%0d", uid))
+        end
+        status = get_status(uid);
+        if (!status.active || !status.rob_commit ||
+            status.control_state != MEMBLOCK_CONTROL_STATE_CONTROL_COMMIT_READY) begin
+            return;
+        end
+        if (!active_control_barrier_valid || active_control_barrier_uid != uid ||
+            status.active_lq_mapped || status.active_sq_mapped ||
+            status.redirect_pending || status.flushed || status.issue_killed ||
+            active_redirect.valid) begin
+            `uvm_fatal("CONTROL_COMMIT",
+                       $sformatf("invalid control retire uid=%0d barrier=%0d/%0d lq/sq=%0d/%0d redirect=%0d/%0d/%0d",
+                                 uid, active_control_barrier_valid,
+                                 active_control_barrier_uid,
+                                 status.active_lq_mapped,
+                                 status.active_sq_mapped,
+                                 status.redirect_pending, status.flushed,
+                                 active_redirect.valid))
+        end
+        set_status_field(uid, MEMBLOCK_STATUS_SUCCESS, 1'b1);
+        set_status_field(uid, MEMBLOCK_STATUS_TERMINAL_DONE, 1'b1);
+        retire_active_uid(uid);
+    endfunction:try_retire_control_committed_uid
 
     function memblock_tlb_lookup_key_t make_tlb_key_by_req(input bit [37:0] vpn,
                                                            input bit [1:0] s2xlate);

@@ -114,6 +114,9 @@ class lsq_commit_handler extends uvm_object;
         status_transaction status;
 
         ensure_handles();
+        if (is_control_op_class(data.get_main_transaction(uid).op_class)) begin
+            return 1'b0;
+        end
         status = data.get_status(uid);
         return status.active &&
                status.writeback &&
@@ -132,6 +135,9 @@ class lsq_commit_handler extends uvm_object;
         status_transaction status;
 
         ensure_handles();
+        if (is_control_op_class(data.get_main_transaction(uid).op_class)) begin
+            return 1'b0;
+        end
         status = data.get_status(uid);
         if (!status.active || status.rob_commit ||
             status.replay_pending || status.redirect_pending ||
@@ -155,8 +161,25 @@ class lsq_commit_handler extends uvm_object;
             return 1'b0;
         end
         return uid_is_normal_commit_candidate(uid) ||
-               uid_is_fault_terminal_candidate(uid);
+               uid_is_fault_terminal_candidate(uid) ||
+               uid_is_control_commit_candidate(uid);
     endfunction:uid_is_commit_candidate
+
+    // 抽象职责：判断当前 active ROB head 是否已被 control service 完成其专用动作。
+    // 它不读取普通 writeback/pass/target 状态，也不推进 cursor。
+    function bit uid_is_control_commit_candidate(input memblock_uid_t uid);
+        status_transaction status;
+
+        ensure_handles();
+        if (!is_control_op_class(data.get_main_transaction(uid).op_class)) begin
+            return 1'b0;
+        end
+        status = data.get_status(uid);
+        return status.active && status.enq && status.issue_ready &&
+               status.control_state == MEMBLOCK_CONTROL_STATE_CONTROL_COMMIT_READY &&
+               !status.rob_commit && !status.redirect_pending && !status.flushed &&
+               !status.issue_killed && !status.terminal_done;
+    endfunction:uid_is_control_commit_candidate
 
     function void advance_commit_cursor_past_done();
         ensure_handles();
@@ -279,6 +302,32 @@ class lsq_commit_handler extends uvm_object;
         return data.get_status(uid).get_rob_key() == modeled_rob_deq_ptr;
     endfunction:select_fault_head_candidate
 
+    // 抽象职责：只选择正位于 modeled ROB head 的 control UID；普通 normal/fault
+    // selector 都不会把该 UID 当作访存 commit 候选。
+    function bit select_control_head_candidate(output memblock_uid_t uid);
+        memblock_uid_t resolved_uid;
+
+        uid = 0;
+        ensure_handles();
+        ensure_modeled_rob_deq_ptr_initialized();
+        if (data.issue_blocked_by_global_flush() || fault_head_waiting) begin
+            return 1'b0;
+        end
+        rebase_framework_head_from_commit_cursor();
+        if (!modeled_head_valid || commit_cursor_uid >= data.main_trans_num) begin
+            return 1'b0;
+        end
+        uid = commit_cursor_uid;
+        if (!uid_is_control_commit_candidate(uid)) begin
+            return 1'b0;
+        end
+        if (!resolve_sideband_head_uid(resolved_uid) || resolved_uid != uid ||
+            data.get_status(uid).get_rob_key() != modeled_rob_deq_ptr) begin
+            return 1'b0;
+        end
+        return 1'b1;
+    endfunction:select_control_head_candidate
+
     // 根据 fault UID 的权威主表操作分类生成 ROB exception commit type 的 store bit。
     // 该 helper 不修改 handler、status 或 LSQ 状态。
     function bit fault_uid_is_store_exception(input memblock_uid_t uid);
@@ -294,6 +343,9 @@ class lsq_commit_handler extends uvm_object;
         main_tr = data.get_main_transaction(uid);
         if (main_tr == null) begin
             `uvm_fatal("LSQ_COMMIT", $sformatf("fault uid=%0d has null main transaction", uid))
+        end
+        if (is_control_op_class(main_tr.op_class)) begin
+            return 1'b0;
         end
         behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
         return memblock_op_behavior_util::is_scalar_rob_store_commit(behavior);
@@ -354,7 +406,8 @@ class lsq_commit_handler extends uvm_object;
         end
         // Fault head 的 pendingPtr 仍需保持，但 fault token 不是 normal commit，
         // 不得把该指令解释成 pending store/MMIO load。
-        if (has_head && !has_fault_head && !fault_head_waiting) begin
+        if (has_head && !has_fault_head && !fault_head_waiting &&
+            !is_control_op_class(data.get_main_transaction(head_uid).op_class)) begin
             memblock_op_behavior_t head_behavior;
 
             head_behavior = lsq_ctrl_model::derive_op_behavior(data.get_main_transaction(head_uid));
@@ -468,6 +521,46 @@ class lsq_commit_handler extends uvm_object;
         commit_cursor_uid = uids[uids.size() - 1] + 1;
         rebase_framework_head_from_commit_cursor();
     endfunction:mark_rob_commit_batch
+
+    // 抽象职责：记录一个 control ROB head 的提交并推进公共 commit cursor。它不生成
+    // pending store/MMIO 或 scommit 语义，terminal 条件完全由 control state 决定。
+    function bit mark_control_rob_commit_uid(input memblock_uid_t uid);
+        status_transaction status;
+        memblock_uid_t resolved_uid;
+        memblock_rob_key_t control_rob_key;
+
+        ensure_handles();
+        ensure_modeled_rob_deq_ptr_initialized();
+        if (data.issue_blocked_by_global_flush()) begin
+            return 1'b0;
+        end
+        if (fault_head_waiting || uid != commit_cursor_uid ||
+            !uid_is_control_commit_candidate(uid)) begin
+            `uvm_fatal("CONTROL_COMMIT",
+                       $sformatf("invalid control commit uid=%0d cursor=%0d fault_waiting=%0d",
+                                 uid, commit_cursor_uid, fault_head_waiting))
+        end
+        if (!resolve_sideband_head_uid(resolved_uid) || resolved_uid != uid ||
+            data.get_status(uid).get_rob_key() != modeled_rob_deq_ptr) begin
+            `uvm_fatal("CONTROL_COMMIT",
+                       $sformatf("control uid=%0d does not match modeled ROB head", uid))
+        end
+        status = data.get_status(uid);
+        control_rob_key = status.get_rob_key();
+        status.rob_commit = 1'b1;
+        status.lsq_deq = 1'b1;
+        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+        data.try_retire_control_committed_uid(uid);
+        if (!status.terminal_done || status.active) begin
+            `uvm_fatal("CONTROL_COMMIT",
+                       $sformatf("control uid=%0d failed to reach terminal_done after commit", uid))
+        end
+        committed_rob_watermark = control_rob_key;
+        committed_rob_watermark_valid = 1'b1;
+        commit_cursor_uid = uid + 1;
+        rebase_framework_head_from_commit_cursor();
+        return 1'b1;
+    endfunction:mark_control_rob_commit_uid
 
     function bit mark_fault_rob_commit_uid(input memblock_uid_t uid);
         status_transaction status;

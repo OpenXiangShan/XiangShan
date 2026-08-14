@@ -108,11 +108,15 @@ task memblock_lsqcommit_dispatch_base_sequence::send_lsqcommit_cycle(input int u
     bit                           has_commit;
     bit                           has_fault_head;
     memblock_uid_t                fault_uid;
+    bit                           has_control_head;
+    memblock_uid_t                control_uid;
     bit                           has_flushsb_progress;
 
     has_commit = 1'b0;
     has_fault_head = 1'b0;
     fault_uid = 0;
+    has_control_head = 1'b0;
+    control_uid = 0;
     has_flushsb_progress = 1'b0;
     has_progress = 1'b0;
     terminal_idle_published = 1'b0;
@@ -127,6 +131,9 @@ task memblock_lsqcommit_dispatch_base_sequence::send_lsqcommit_cycle(input int u
     end
     commit_handler.build_lsqcommit_xaction(tr, commit_uids, has_commit,
                                            has_fault_head, fault_uid);
+    if (!has_commit && !has_fault_head) begin
+        has_control_head = commit_handler.select_control_head_candidate(control_uid);
+    end
     tr.set_name($sformatf("lsqcommit_dispatch_tr_%0d", cycle_idx));
     if (data.try_pop_flushsb_request(flushsb_req)) begin
         tr.io_ooo_to_mem_flushSb = 1'b1;
@@ -142,9 +149,12 @@ task memblock_lsqcommit_dispatch_base_sequence::send_lsqcommit_cycle(input int u
         commit_handler.mark_rob_commit_batch(commit_uids);
     end else if (has_fault_head) begin
         commit_handler.mark_fault_rob_commit_uid(fault_uid);
+    end else if (has_control_head) begin
+        void'(commit_handler.mark_control_rob_commit_uid(control_uid));
     end
     has_progress = has_commit ||
                    has_fault_head ||
+                   has_control_head ||
                    has_flushsb_progress ||
                    data.flushsb_busy();
     terminal_idle_published = data.is_global_stop_requested() &&
