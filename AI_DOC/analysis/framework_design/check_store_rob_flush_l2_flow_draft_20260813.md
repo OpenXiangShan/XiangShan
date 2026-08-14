@@ -1,13 +1,25 @@
 # `check_store` ROB 屏障与 L2Cache Flush Flow 草案
 
+<!-- 实施状态见后续“实现对齐（2026-08-14）”。 -->
+
 | 项目 | 内容 |
 |---|---|
-| 状态 | 设计草案，尚未实现 |
+| 状态 | 主体已实现；保留原始草案作为设计决策记录 |
 | 日期 | 2026-08-13 |
 | 适用范围 | `mem_ut_uvm_v2` 分支的 memblock dispatch 测试框架 |
 | 目标 | 在全部普通访存之后追加一笔 `op_class=check_store` 控制标记，并以它串行完成 SBuffer 清空和 L2Cache flush |
 
-本文只描述 `check_store` 的抽象处理流程和现有测试框架的复用边界。它独立于 CSR/SFence ROB 屏障草案；`check_store` 不是普通 store，也不承担 SFence 或 L2TLB flush 语义。
+本文原始内容描述 `check_store` 的抽象处理流程和测试框架复用边界。2026-08-14 已与 CSR/SFence ROB 屏障一起落地；归档后以
+`AI_DOC/plan/test_framework/plan/do/csr_sfence_check_store_rob_control_coding_plan_20260813.md`、implementation review 和当前源码为准。本文保留原始草案作为设计决策记录，若与下列“实现对齐”冲突，必须以后者为准。
+
+## 实现对齐（2026-08-14）
+
+- AUTO 主表实际长度为 `N+1`，UID `N` 固定为 `MEMBLOCK_OP_CLASS_CHECK_STORE`；它占连续 ROB，但不进入 LSQ、issue 或普通 store 行为。
+- `check_store` 的实际状态顺序是 `CHECK_STORE_FLUSHSB_PENDING -> CHECK_STORE_WAIT_SB_EMPTY -> CHECK_STORE_L2_CSR_ASSERT -> WAIT_L2_FLUSH_DONE -> CHECK_STORE_L2_CSR_RELEASE -> WAIT_L2_FLUSH_IDLE -> CONTROL_COMMIT_READY -> terminal_done`。
+- owner `flushSb` 必须先经历 attached 和 `finish_item()` 后的 driver sendover；只有 sendover 后的新鲜 `sbIsEmpty=1` raw 才完成 SBuffer 阶段。
+- `L2_FLUSH_LEVEL` 仅发送一次 ASSERT item 与一次 RELEASE item。CSR driver 在 ASSERT `send_pkt()` 后深拷贝完整 CSR baseline 到私有 `l2_flush_level_hold`，在无 item 周期独自保持 `flush_l2_enable=1`；worker 不连续发送 HOLD item，避免双重写者。
+- service 在 ASSERT sendover 后只接受 observation 序号更大的 `io_l2_flush_done=1`，把 owner 化 RELEASE 请求放入 `l2_flush_release_request_q`；worker 交付 RELEASE 后，service 再只接受更新序号的 done=0，随后才允许 control ROB commit。
+- `io_mem_to_ooo_topToBackendBypass_l2FlushDone` 仅作 debug 观察，不是第二个完成源。运行中 redirect/reset 覆盖已 admission 的控制动作目前明确 fail-fast，不执行不完整的取消重建。
 
 ## 术语
 
@@ -69,7 +81,7 @@ flowchart TD
 
 首先，`check_store` 向既有 `flushsb_req_q` 登记一笔带 owner 的 `flushSb` 请求。这里的“登记”只表示请求进入公共队列；控制状态不能因调用 `push_flushsb_request()` 返回而认为 DUT 已经收到了 `flushSb`。
 
-现有 LSQ commit sequence 是唯一的 `flushSb` driver。它在正常 service 周期内从公共队列取出请求，把 `flushSb` 合并到当前 `lsqcommit` transaction，并通过 `mark_flushsb_driven()` 把该请求设置为 active。此后公共状态进入等待 SBuffer 清空的阶段，在该阶段不会再取出第二笔 `flushSb` 请求。
+现有 LSQ commit sequence 是唯一的 `flushSb` driver。它在正常 service 周期内从公共队列取出请求，把 `flushSb` 合并到当前 `lsqcommit` transaction，并在 `start_item()` 前调用 `mark_flushsb_request_attached_to_lsqcommit_xaction()`。只有同一 item 的 `finish_item()` 返回后调用 `mark_flushsb_request_driver_sendover()`，请求才成为 active 并进入等待 SBuffer 清空阶段；attached 阶段与 sendover 前均不会取出第二笔请求，也不会消费 `sbIsEmpty`。
 
 ctrl monitor 会在等待阶段持续观察 `io_mem_to_ooo_sbIsEmpty`。该观察结果按照既有 raw ctrl、deferred service 和 `lsq_commit_handler` 链路进入 `update_sb_is_empty()`。只有当前 active 请求仍属于该 `check_store`，并且该路径确认 `sbIsEmpty=1` 时，SBuffer 清空阶段才完成。
 
@@ -96,28 +108,22 @@ completion profile 必须显式为 `L2_FLUSH_LEVEL`，不得按普通 CSR 的 `R
 ```text
 owner_uid + owner_dynamic_epoch + action_generation
 completion_profile = L2_FLUSH_LEVEL
-phase = ASSERT / HOLD / RELEASE
+phase = ASSERT / RELEASE
 ```
 
-单次把 `flush_l2_enable=1` 交给 CSR driver 不构成“保持”。现有 CSR driver 在没有下一笔 item 时会进入 idle，并把该字段驱回 0；
-而 DCache responder 在 `DRAIN` 或 `PROBE` 看到 request 被撤销会报错。因此 `L2_FLUSH_LEVEL` worker 必须从 ASSERT 开始持续产生
-`flush_l2_enable=1`、`pre_pkt_gap=0`、`post_pkt_gap=0` 的 CSR xaction，直至当前 owner 已消费匹配的 done-high 事实。每次
-`start_item/finish_item` 只表示一拍接口交付；worker 在该 item 完成后若尚未 done，必须立即准备下一笔 HOLD item，不能在两笔高电平
-item 之间等待 event 或让 driver 走 idle。
+单次 ASSERT item 交给 CSR driver 后，driver 立即深拷贝完整 CSR xaction 到私有 `l2_flush_level_hold`。其后即使 CSR sequencer 没有
+item，`drive_idle()` 也会用该 hold 驱动所有 CSR baseline 字段并保持 `flush_l2_enable=1`；因此 worker 不发送连续 HOLD item。完成
+done-high 事实后，service 写入 owner 化 RELEASE 请求并唤醒仍独占 sequencer 的 CSR worker；worker 仅构造一次
+`flush_l2_enable=0` 的 RELEASE item。RELEASE 通过 owner 校验后由 driver 驱动 low 并清除 hold；service 仍须等待更新序号的 done-low，
+不能把 ASSERT 或 RELEASE sendover 当作 L2 flush 完成。
 
-完成事实到达后，worker 构造一次 `flush_l2_enable=0` 的 RELEASE item；RELEASE 发出后，driver idle 保持 0 是合法的。普通 CSR
-snapshot profile 的 `CSR_SENDOVER` 不能作为 L2 flush 完成状态：L2 profile 的每一次接口交付只记录对应 ASSERT/HOLD/RELEASE 的
-sendover 事实，控制状态机仍必须继续等待 done-high 或 done-low。
-
-CSR sequencer 在 `L2_FLUSH_LEVEL` 生命周期内必须只有一个 producer owner。最小第一版采用控制基础 sequence 独占该 sequencer 从
-ASSERT 到 RELEASE 的整个区间；启用 `check_store` L2 flush 的 testcase 不得并行启动 legacy generic CSR default sequence，也不得让
-其他 CSR action token 插入 HOLD item 之间。不能仅依赖 UVM priority 假定不会插入低电平 item，因为任意 generic CSR item 或 driver
-idle 都会违反本 level handshake。
+CSR sequencer 在 ASSERT 到 RELEASE 区间保持同一 worker 的所有权，普通 CSR token 不能插入该区间。唯一的 level 写者是 driver：
+worker 只保留 token/RELEASE 的 sequence 所有权，避免 worker 连续 item 与 driver idle 同时维护高电平。
 
 ### Done 原始观察、归属与释放闭环
 
-现有 DCache responder 已产生 `io_l2_flush_done`，但当前 DCache monitor 只采样和做 X/Z 检查，尚未向控制状态机发布可归属的完成事实。
-本专项实施时只增加一个有界的原始观察槽，例如 `l2_flush_done_observation`，由 DCache monitor 每个有效 sample 覆盖发布：
+现有 DCache responder 已产生 `io_l2_flush_done`，DCache monitor 已向 `memblock_sync_pkg` 发布有界的
+`control_l2_flush_done_observation`。该槽由每个有效 sample 覆盖更新：
 
 ```text
 valid + level + observation_seq + reset_epoch
@@ -131,8 +137,8 @@ owner 的 `action_generation` 和动作阶段完成归属。DCache monitor 不�
 ```text
 1. ASSERT 前：确认当前 done observation 为低，并记录 assert_baseline_observation_seq；
    若 done 已高或尚无有效低基线，不启动新一轮 L2 flush，报告状态不一致。
-2. ASSERT/HOLD：仅接受 observation_seq 大于 assert baseline 的 done=1；
-   首次匹配后将该 generation 标记为 done_high_consumed，并停止产生新的 HOLD item。
+2. ASSERT 后：仅接受 observation_seq 大于 assert baseline 的 done=1；
+   首次匹配后将该 generation 标记为 done-high，并写入 RELEASE 请求；driver 继续使用自己的 hold 维持 high，直到 RELEASE 真正交付。
 3. RELEASE：记录 release_baseline_observation_seq，发送 flush_l2_enable=0。
 4. WAIT_IDLE：仅接受 observation_seq 大于 release baseline 的 done=0；
    该低电平说明 responder 已在 DONE 中看见 request 撤销并回到 IDLE，随后才进入 commit-ready。
@@ -157,8 +163,8 @@ owner 的 `action_generation` 和动作阶段完成归属。DCache monitor 不�
 | `CHECK_STORE_FLUSHSB_PENDING` | 已登记带 owner 的 `flushSb` 请求，等待既有 LSQ commit consumer 取走并驱动。 | 请求成为 active `flushSb`。 |
 | `CHECK_STORE_WAIT_SB_EMPTY` | `flushSb` 已发出，等待既有 ctrl 链路确认对应 SBuffer 已空。 | 匹配 owner 的 `sbIsEmpty` 完成。 |
 | `CHECK_STORE_L2_CSR_ASSERT` | SBuffer 已空，分配当前 action generation，确认 done-low 基线后发送首笔 `flush_l2_enable=1`。 | ASSERT item 已交付，进入保持型 request 阶段。 |
-| `CHECK_STORE_WAIT_L2_FLUSH_DONE` | CSR control worker 连续发送 `flush_l2_enable=1` 的 HOLD item；DCache responder 正在 DRAIN/PROBE。 | 本 generation 在 assert baseline 之后唯一消费到 `io_l2_flush_done=1`。 |
-| `CHECK_STORE_L2_CSR_RELEASE` | L2 flush 已完成，停止 HOLD，记录 release baseline 并发送 `flush_l2_enable=0`。 | RELEASE item 已交付，进入等待 responder 退出 DONE。 |
+| `CHECK_STORE_WAIT_L2_FLUSH_DONE` | CSR driver 的私有 hold 持续驱动 `flush_l2_enable=1`；DCache responder 正在 DRAIN/PROBE。 | 本 generation 在 assert baseline 之后唯一消费到 `io_l2_flush_done=1`。 |
+| `CHECK_STORE_L2_CSR_RELEASE` | L2 flush 已完成，service 记录 release baseline 并通过 CSR worker 发送一次 `flush_l2_enable=0`。 | RELEASE item 已交付，进入等待 responder 退出 DONE。 |
 | `CHECK_STORE_WAIT_L2_FLUSH_IDLE` | request 已撤销，等待新于 release baseline 的 `io_l2_flush_done=0`。 | responder 已离开 `DONE` 并回到 `IDLE`。 |
 | `CHECK_STORE_COMMIT_READY` | 所有控制动作均已闭合，允许走专用 commit candidate 分支。 | `rob_commit`。 |
 | `terminal_done` | 控制条目已经 retire。 | 清除 barrier，并允许后续 UID 继续 admission。 |

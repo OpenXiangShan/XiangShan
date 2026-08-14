@@ -2,13 +2,22 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | 设计草稿，尚未实现 |
+| 状态 | 主体已实现；保留原始草案作为设计决策记录 |
 | 日期 | 2026-08-13 |
 | 适用范围 | `mem_ut_uvm_v2` 分支的 memblock dispatch 测试框架 |
 | 目标 | 在访存主表中插入带连续 `robIdx` 的 CSR/SFence 控制标记，并以该标记建立顺序屏障 |
 
-本文是对拟议行为的抽象说明，不描述当前已经落地的源码调用链。现有 `AI_DOC/mem_ut_flow_doc/sfence_flow.md` 和
-`AI_DOC/mem_ut_flow_doc/csr_runtime_sync_flow.md` 仍只描述当前实现。
+本文原始内容是对拟议行为的抽象说明。2026-08-14 已按
+`AI_DOC/plan/test_framework/plan/do/csr_sfence_check_store_rob_control_coding_plan_20260813.md`
+完成实现；归档后以该 plan、implementation review 与当前源码为准。本文保留原始草案用来解释设计决策，若与下列“实现对齐”冲突，必须以后者为准。
+
+## 实现对齐（2026-08-14）
+
+- 控制 worker 使用第二种启动方式：仅 `basicTest` 的 `memblock_dispatch_real_smoke_vseq`（AUTO）与 `memblock_dispatch_manual_control_vseq`（MANUAL_CONTROL）通过 `p_sequencer` 显式启动；任何 legacy testcase 或无关 VSEQ 请求 active mode 均 fail-fast。
+- `flushSb` 已从单一 `mark_flushsb_driven()` 拆为 `mark_flushsb_request_attached_to_lsqcommit_xaction()` 和 `mark_flushsb_request_driver_sendover()`。attached 仅代表请求附加到 xaction；sendover 发生在 `finish_item()` 返回后，才打开 `sbIsEmpty` 消费，并冻结新鲜 observation 序号下界。
+- `sbIsEmpty` 由 ctrl monitor 每个有效 sample 发布 owner-neutral latest observation，deferred raw 保存 immutable observation 序号；`update_sb_is_empty(raw)` 仅完成 sendover 后、序号更新且 level=1 的 active 请求。owner 请求随后由 service 以 `req_id + owner` 消费。
+- SFence 只有在 owner `flushSb` completion 后入 `sfence_control_action_q`；worker 在 `start_item()` 前 arm C0，`finish_item()` 后仅进入 `SFENCE_SENDOVER`，再等待 C0 record 与 C4 effective record。C0/C4 采用现有 L2TLB lifecycle，不用固定两拍或固定等待替代。
+- CSR 最终归档的是 CSR monitor 发布的 runtime snapshot；driver sendover 只记录接口交付。`flush_l2_enable` 不属于 CSR snapshot completion，属于 `check_store` 的独立 L2 level 闭环。
 
 ## 术语与边界
 
@@ -262,36 +271,32 @@ flushSb sequence 或直接竞争消费 raw ctrl 事件。
 
 ### 当前 `flushSb` 实现的准确含义
 
-“往 queue 中放一笔请求”是 SFence producer 所需的最小动作，但它只表示请求登记成功，不表示 DUT 已经收到 `flushSb`，也不表示
-SBuffer 已经清空。当前真实链路如下：
+“往 queue 中放一笔请求”仍是 SFence producer 的最小动作，但只表示登记成功，不表示 DUT 已收到 `flushSb` 或 SBuffer 已空。当前真实链路如下：
 
 ```text
-SFence 控制状态机
-  -> common_data_transaction::push_flushsb_request()
+SFence control service
+  -> enqueue_control_flushsb_request()
+  -> common_data_transaction::push_owner_flushsb_request()
   -> flushsb_req_q
   -> memblock_lsqcommit_dispatch_base_sequence::send_lsqcommit_cycle()
   -> try_pop_flushsb_request()
   -> lsqcommit xaction.io_ooo_to_mem_flushSb = 1
-  -> mark_flushsb_driven()
-  -> DUT 返回 io_mem_to_ooo_sbIsEmpty=1
-  -> raw ctrl / lsq_commit_handler::apply_raw_ctrl_deq()
-  -> common_data_transaction::update_sb_is_empty()
-  -> SFence 控制状态机进入 SFENCE_REQ
+  -> mark_flushsb_request_attached_to_lsqcommit_xaction()
+  -> start_item()/finish_item()
+  -> mark_flushsb_request_driver_sendover()
+  -> ctrl monitor raw with immutable sb_is_empty_observation_seq
+  -> common_data_transaction::update_sb_is_empty(raw)
+  -> owner completion slot
+  -> SFence control service consumes req_id + owner and enters SFENCE_REQ
 ```
 
-当前框架对请求有三个阶段：
+当前请求有三个精确阶段：
 
-1. **待消费**：请求位于 `flushsb_req_q`。所有 producer 只入队；只有 LSQ commit sequence 可以出队。
-2. **已附加到待发送 xaction、等待完成**：`try_pop_flushsb_request()` 成功后，LSQ commit sequence 将当前 `lsqcommit` xaction 的
-   `io_ooo_to_mem_flushSb` 置 1，并调用当前的 `mark_flushsb_driven()`。当前源码是在 `start_item/finish_item` 之前调用该函数，
-   因而它严格表示“请求已经从公共队列取出并纳入本次 LSQ commit xaction”，不是独立的 DUT pin monitor 确认点。此时设置
-   `flushsb_waiting_empty=1`，不允许下一笔请求出队。
-3. **已完成**：ctrl raw 被 `apply_raw_ctrl_deq()` 消费后调用 `update_sb_is_empty(raw.sb_is_empty)`；当等待状态下采到
-   `sb_is_empty=1`，才清除 active request 和 waiting 标志。
+1. **待消费**：请求位于 `flushsb_req_q`；所有 producer 只入队，LSQ commit sequence 是唯一 consumer。
+2. **attached**：`try_pop_flushsb_request()` 成功后，sequence 将 `io_ooo_to_mem_flushSb` 置 1，并在 `start_item()` 前调用 `mark_flushsb_request_attached_to_lsqcommit_xaction()`。此时请求已附加到 xaction，但还不能消费 `sbIsEmpty`。
+3. **sendover 后等待/完成**：同一 xaction 的 `finish_item()` 返回后调用 `mark_flushsb_request_driver_sendover()`，它冻结 latest observation 序号并打开 `flushsb_waiting_empty`。`update_sb_is_empty(raw)` 只接受序号严格大于该 baseline 的 level=1 raw；owner 请求写入 completed slot，再由 control service 按 `req_id + owner` 消费。
 
-因此 SFence 状态不应在 `push_flushsb_request()` 返回后直接进入 `SFENCE_REQ`，而应至少等待“请求已被 LSQ commit xaction 消费并附加到待发送 xaction”以及
-“对应的 `sbIsEmpty` 完成”两个边界。若 `lsqcommit` sequence 未启用，或者当前处于 redirect/global flush 阻塞，队列请求会保持待消费，
-SFence 屏障也必须保持等待。
+因此 SFence 不能在入队或 attached 后直接进入 `SFENCE_REQ`；必须等待 driver sendover 以及属于自己的新鲜 `sbIsEmpty` 完成。若 LSQ commit sequence 未启用，或 redirect/global flush 正在阻塞，队列请求保持待消费，屏障保持等待。
 
 ### SFence action 的事件与队列契约
 
@@ -299,9 +304,9 @@ SFence 屏障也必须保持等待。
 
 ```text
 WAIT_FLUSHSB_REQ：
-  控制状态机调用 enqueue_sfence_flushsb_request(owner)：
+  控制状态机调用 enqueue_control_flushsb_request(status)：
     为当前 uid + dynamic_epoch 构造带 owner 的 flushSb 请求；
-    调用既有 push_flushsb_request() 将请求放入 flushsb_req_q；
+    调用 push_owner_flushsb_request() 将请求放入 flushsb_req_q，并回填 req_id；
     不触发 flushSb 专用 event。
 
   既有 LSQ commit sequence：
@@ -335,7 +340,7 @@ memblock_sfence_control_base_sequence：
 这里需要明确区分“请求进入既有 `flushSb` 服务链”与“基础 SFence sequence 可以发射接口”的两个时刻：
 
 1. **`WAIT_FLUSHSB_REQ` 不新增 SFence 专用 `flushSb` event。** 控制状态机只通过
-   `enqueue_sfence_flushsb_request(owner)` 将带 owner 的请求放入既有 `flushsb_req_q`。该 queue 是 `flushSb` 请求的真源，
+   `enqueue_control_flushsb_request(status)` 和 `push_owner_flushsb_request()` 将带 owner 的请求放入既有 `flushsb_req_q`。该 queue 是 `flushSb` 请求的真源，
    既有 LSQ commit sequence 在其正常 service cycle 中轮询并消费该 queue；因此这里不存在“SFence event 驱动 flushSb”的新路径，
    也不能增加第二个 consumer。`flushSb` 实际被附加到 `lsqcommit` xaction 的确认，仍由既有
    `mark_flushsb_request_attached_to_lsqcommit_xaction()` 记录。
@@ -355,18 +360,17 @@ memblock_sfence_control_base_sequence：
 `drive_sfence_control_xaction()` 只负责将已配置 xaction 交给 Fence agent driver，并记录接口交付结束；它不能把
 `SFENCE_SENDOVER` 误判为 monitor C0 或 L2TLB flush 完成。
 
-本方案实施时，建议将现有 `mark_flushsb_driven()` 重命名为
-`mark_flushsb_request_attached_to_lsqcommit_xaction()`。该名称的主语是已出队的 `flushSb` request，终点是本拍待发送的
-`lsqcommit` xaction；它不使用 `driven`、`sent` 或 `done`，从名称上排除“driver 已完成发送”或“DUT 已观察到 pulse”的误解。
-这只是现有公共状态更新 API 的语义更名，不增加新的 pin monitor、driver-ack 或完成事件。
+实现已将旧 `mark_flushsb_driven()` 拆成一对语义固定的 helper：
+`mark_flushsb_request_attached_to_lsqcommit_xaction()` 只记录“已附加到待发送 xaction”；
+`mark_flushsb_request_driver_sendover()` 只在 `finish_item()` 返回后记录 driver 交付、打开 waiting-empty 并冻结 observation baseline。
+两者共同避免把 queue 消费误写成 DUT 接口交付或 `sbIsEmpty` 完成；不新增 pin monitor、第二个 driver 或第二个 consumer。
 
 当前 `lsqcommit` xaction 可以在同一拍携带普通 pending/commit 字段和 `flushSb` pulse；`flushSb` 不是独立的第二种 commit transaction。
 因此 SFence 不需要自己创建或驱动 `lsqcommit_agent_agent_xaction`，只需要通过公共入口入队，由现有 LSQ commit consumer 负责合并和发送。
 
-当前 `memblock_flushsb_req_t` 只有 `req_id`、`enqueue_cycle` 和 `source`，`update_sb_is_empty()` 只按
-“当前存在 active 请求且采到 `sbIsEmpty=1`”完成，不校验请求 ID。对于只有一个 directed producer 的简单场景，这足以驱动基础 flow；
-接入 CSR/SFence ROB 屏障后，建议把 `owner_uid + dynamic_epoch`（或等价 owner token）加入请求，并让完成路径返回/发布已完成请求，
-以便只解除对应 SFence 标记。这样 periodic flushSb 或其他 directed 请求的 `sbIsEmpty` 完成不会误推进 SFence 控制条目。
+当前 `memblock_flushsb_req_t` 已包含可选 owner 与 sendover observation baseline；owner 请求由 completed slot 保留
+`req_id + owner + observation_seq`。`update_sb_is_empty(raw)` 既检查 active request 已 sendover，也检查 raw 的 immutable
+observation 序号大于 baseline；control service 再按 `req_id + owner` 消费。因此 periodic 或其它 directed 请求的完成不能推进 SFence 控制条目。
 
 ### 测试框架当前是如何“等到” `io_mem_to_ooo_sbIsEmpty`
 
@@ -381,9 +385,9 @@ memblock_sfence_control_base_sequence：
    交给 batch handler。
 4. semantic batch 处理完成后，`apply_deferred_ctrl_updates_batch()` 按队首调用
    `dispatch_monitor_event_adapter::apply_raw_ctrl_deq()`，再进入 `lsq_commit_handler::apply_raw_ctrl_deq()`。
-5. `lsq_commit_handler::apply_raw_ctrl_deq()` 首先调用 `common_data_transaction::update_sb_is_empty(raw.sb_is_empty)`。
-   当公共状态中 `flushsb_waiting_empty=1` 且该 raw 的 `sb_is_empty=1` 时，清除 `active_flushsb_req`、waiting 标志以及
-   `dispatch_flushsb_waiting_empty`。
+5. `lsq_commit_handler::apply_raw_ctrl_deq()` 首先调用 `common_data_transaction::update_sb_is_empty(raw)`。
+   当 request 已 sendover、`raw.sb_is_empty=1` 且 `raw.sb_is_empty_observation_seq` 新于 request baseline 时，普通请求直接清 active；
+   owner 请求还会写入 completed slot，等待 control service 按 `req_id + owner` 消费。
 
 因此“等待”表现为 SFence 控制状态机在每轮 service 后检查公共状态（例如当前请求是否仍 pending/waiting，或是否收到带 owner 的
 完成记录），而不是新增一个直接监听 `sbIsEmpty` 的线程。raw 队首若因 LQ/SQ 预检或 resync 不通过，会留在 deferred queue，后续
@@ -395,8 +399,8 @@ service tick 重试；这也是 SFence 不能只等待一个仿真周期的原�
 | 控制状态 | 进入条件 | 抽象行为 | 离开条件 |
 |---|---|---|---|
 | `WAIT_OLDER_ROB_COMMIT` | 控制标记已成为静态屏障 owner。 | 保持年轻 UID admission 阻塞，允许前序访存按既有 redirect/reissue 恢复；不创建 `flushSb` 请求或 SFence action token。 | `commit_cursor_uid == uid`，且本轮 redirect-first/recovery 已完成、无 active/pending redirect。 |
-| `WAIT_FLUSHSB_REQ` | 前序 ROB 已形成稳定提交前缀。 | 绑定当前 `dynamic_epoch` 作为本次控制动作 owner；调用 `enqueue_sfence_flushsb_request(owner)`，经既有 `push_flushsb_request()` 写入带 owner 的请求；不触发 flushSb event，随后等待唯一 LSQ commit consumer。 | 匹配 owner 的请求已从公共队列取出并附加到待发送的 `lsqcommit` xaction。 |
-| `WAIT_SB_EMPTY` | 匹配 `flushSb` 请求已附加到待发送的 `lsqcommit` xaction。 | 等待 ctrl monitor 经既有 `update_sb_is_empty()` 路径确认 SBuffer 为空，并得到匹配 owner 的完成记录。 | 调用 `enqueue_sfence_control_action(owner)` 后，token 已写入 `sfence_control_action_q` 且已触发 `sfence_control_action_available_ev`。 |
+| `WAIT_FLUSHSB_REQ` | 前序 ROB 已形成稳定提交前缀。 | 绑定当前 `dynamic_epoch` 作为本次控制动作 owner；调用 `enqueue_control_flushsb_request()`，经 `push_owner_flushsb_request()` 写入带 owner 和 req_id 的请求；不触发 flushSb event，随后等待唯一 LSQ commit consumer。 | 匹配 owner 请求完成 driver sendover。 |
+| `WAIT_SB_EMPTY` | 匹配 `flushSb` 请求已 driver sendover。 | 等待 ctrl monitor 经 `update_sb_is_empty(raw)` 路径确认新鲜 SBuffer empty，并得到匹配 owner 的 completed record。 | 调用 `enqueue_sfence_control_action(owner)` 后，token 已写入 `sfence_control_action_q` 且已触发 `sfence_control_action_available_ev`。 |
 | `SFENCE_REQ` | 对应 action token 已入队。 | `memblock_sfence_control_base_sequence` 以队列为真源、以 event 为唤醒，从 `sfence_control_action_q` 取出 token；调用 `configure_sfence_control_xaction()` 和 `drive_sfence_control_xaction()` 发射接口。 | SFence driver 已完成本次接口交付。 |
 | `SFENCE_SENDOVER` | SFence driver 已完成接口驱动。 | 保持现有 fence monitor 到 L2TLB flush 的单一路径；不手工再向 L2TLB 建立第二个 flush 请求。等待 monitor 观测到本控制条目对应的 `io_ooo_to_mem_sfence_valid`，并将该 sample 记为 `C0`。 | 已匹配到本 `uid + dynamic_epoch` 的 SFence monitor 事件。 |
 | `WAIT_L2TLB_FLUSH_EFFECTIVE` | 已记录 `C0`。 | 保持年轻 UID admission 阻塞，等待 `C0 + MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES`；V2 当前取值为 4。到期 sample 由既有 L2TLB lifecycle adapter 完成 filter flush/token 取消等状态更新。 | `C4` 对应工作已被 adapter 消费；在下一次 admission/service 边界进入 commit-ready。 |
@@ -482,7 +486,7 @@ global reset、testcase abort 等全局终止路径独立处理；它们不赋�
 | 阻止年轻条目 | 现有 ordered admission 与 global flush 闸门 | 增加单个 control barrier owner 条件。 |
 | 前序 redirect | 既有 redirect-first 仲裁、redirect recovery 和提交前缀 | `WAIT_OLDER_ROB_COMMIT` 保持静态屏障；只有 recovery 收敛后才能创建控制动作，不把控制标记放入普通 redirect reissue。 |
 | 状态记录 | `status_transaction` | 增加控制类型、状态、CSR monitor runtime snapshot 及其序号、SFence 请求归属字段。 |
-| `flushSb` 与空缓冲确认 | `push_flushsb_request()`、LSQ commit driver、`update_sb_is_empty()` | 给请求/完成关系增加 owner UID 与 epoch；SFence 只调用 `enqueue_sfence_flushsb_request()` 入既有队列，不新增 flushSb event 或第二个 consumer。 |
+| `flushSb` 与空缓冲确认 | `push_owner_flushsb_request()`、LSQ commit driver、`update_sb_is_empty(raw)` | owner 请求使用 req_id、owner 和 sendover observation baseline；SFence 只调用 `enqueue_control_flushsb_request()` 入既有队列，不新增 flushSb event 或第二个 consumer。 |
 | CSR/SFence 接口驱动 | 现有 CSR/Fence agent 和基础 sequence | 新增受 token 驱动的薄适配层；SFence token 写入 `sfence_control_action_q` 后触发 `sfence_control_action_available_ev`，基础 sequence 以 queue 为真源消费；CSR 完成复用 `runtime_csr_snapshot` monitor 发布，不复制 driver 或建立第二个 CSR monitor。 |
 | L2TLB 刷新 | 现有 CSR/Fence monitor 与 L2TLB 生命周期处理 | SFence 以 monitor `C0` 为锚点复用 `MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES=4`；不新增 L2TLB queue、monitor consumer 或独立刷新协议。 |
 | 终态与释放 | 既有 `rob_commit -> terminal_done -> retire` | 为 control-ready 条目加入 commit candidate 分支。 |
@@ -516,10 +520,7 @@ LSQ commit consumer。这样无需为 `sbIsEmpty` 新建 monitor 或 driver，�
 
 ## 方案采用的 `flushSb` 确认边界与命名
 
-1. **第一版采用 xaction 附加点**：当前 `mark_flushsb_driven()` 位于 `start_item/finish_item` 之前；实施时将其更名为
-   `mark_flushsb_request_attached_to_lsqcommit_xaction()`，严格表示请求已从公共队列取出并附加到待发送的 `lsqcommit` xaction。
-   它不区分“sequence 已交给 driver”和“DUT monitor 已观察到 pulse”。控制状态机以该附加点进入 `WAIT_SB_EMPTY`，并以既有
-   `sbIsEmpty` monitor 回采作为完成事实；不新增 flushSb pin monitor 或 driver-ack。
+1. **当前实现采用两个边界**：`mark_flushsb_request_attached_to_lsqcommit_xaction()` 位于 `start_item()` 前，只表示请求已从公共队列取出并附加到待发送的 `lsqcommit` xaction；`mark_flushsb_request_driver_sendover()` 位于 `finish_item()` 返回后，才表示 driver 已交付本次 pulse、进入 `WAIT_SB_EMPTY` 并冻结新鲜 observation baseline。只有后者之后的 `sbIsEmpty` monitor raw 才是完成候选；不新增 flushSb pin monitor 或 driver-ack。
 
 ## 结论
 
