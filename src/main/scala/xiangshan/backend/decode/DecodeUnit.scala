@@ -34,7 +34,6 @@ import xiangshan.backend.fu.vector.Bundles.{VType, Vl, VSew}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.decode.isa.CSRs
 import xiangshan.backend.decode.Zimop._
-import xiangshan.backend.decode.Zicfiss._
 import xiangshan.backend.decode.Zabha._
 import yunsuan.{FcmpOpCode, MULOpType, VfaluType, VfcvtType, VfmaType, VfmaOpCode}
 
