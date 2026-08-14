@@ -40,6 +40,8 @@ class CSRControlBundle(Bundle):
     io_csrCtrl_pf_ctrl_l1I_pf_enable = Signal()
     io_csrCtrl_fsIsOff = Signal()
     io_csrCtrl_distribute_csr_w_valid = Signal()
+    io_csrCtrl_distribute_csr_w_bits_addr = Signal()
+    io_csrCtrl_distribute_csr_w_bits_data = Signal()
 
     def drive_idle(
         self,
@@ -74,3 +76,5 @@ class CSRControlBundle(Bundle):
         self.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
         self.io_csrCtrl_fsIsOff.value = 0
         self.io_csrCtrl_distribute_csr_w_valid.value = 0
+        self.io_csrCtrl_distribute_csr_w_bits_addr.value = 0
+        self.io_csrCtrl_distribute_csr_w_bits_data.value = 0

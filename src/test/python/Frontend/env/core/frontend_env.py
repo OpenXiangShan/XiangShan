@@ -29,6 +29,12 @@ from ..bundles import (
 from .checkers import PTWFullPpnChecker, PTWRespInputChecker
 from ..support.env_config import BAREMODE_ENV_CONFIG, DEFAULT_ENV_CONFIG, EnvConfig, SV39_ENV_CONFIG
 from ..support.logging_utils import configure_env_logging, parse_log_level
+from ..support.pmp_pma import (
+    PmpPmaConfig,
+    csr_addresses_for_entry,
+    encode_pmp_pma_addr,
+    encode_pmp_pma_cfg,
+)
 from ..model import GoldenTrace, MemoryModel, PageTableModel
 from ..model.branch_checker import BranchChecker
 from ..monitors.backend_observe_monitor import BackendObserveMonitor
@@ -66,6 +72,8 @@ class FrontendEnv:
         self._nemu_hgatp_override: Optional[int] = None
         self.current_cycle = 0
         self._cycle_observers = []
+        self.csr_write_log = []
+        self._pmp_pma_cfg_words = {"pmp": {}, "pma": {}}
         self.bp_ctrl_ubtb_enable = 1 if int(bp_ctrl_ubtb_enable) else 0
         self.bp_ctrl_abtb_enable = 1 if int(bp_ctrl_abtb_enable) else 0
         self.bp_ctrl_mbtb_enable = 1 if int(bp_ctrl_mbtb_enable) else 0
@@ -753,7 +761,9 @@ class FrontendEnv:
             self._write(signal, 1)
         if asserted:
             step_cycles = max(1, int(cycles))
-            self.step(step_cycles)
+            end_cycle = self.step(step_cycles)
+            if end_cycle is not None:
+                self.current_cycle = max(int(self.current_cycle), int(end_cycle))
             for signal in asserted:
                 self._write(signal, 0)
             self._emit_event(
@@ -768,6 +778,171 @@ class FrontendEnv:
             )
             return step_cycles
         return 0
+
+    def write_distributed_csr(self, addr: int, data: int, *, settle_cycles: int = 0) -> dict:
+        """Drive one complete distributed CSR write and retain its transaction record."""
+
+        csr_addr = int(addr)
+        csr_data = int(data)
+        if not 0 <= csr_addr < (1 << 12):
+            raise ValueError(f"CSR address is outside the 12-bit DUT interface: 0x{csr_addr:x}")
+        if not 0 <= csr_data < (1 << 64):
+            raise ValueError(f"CSR data is outside the 64-bit DUT interface: 0x{csr_data:x}")
+        if int(settle_cycles) < 0:
+            raise ValueError("settle_cycles must be non-negative")
+
+        self._write(self.csr_ctrl_if.io_csrCtrl_distribute_csr_w_bits_addr, csr_addr)
+        self._write(self.csr_ctrl_if.io_csrCtrl_distribute_csr_w_bits_data, csr_data)
+        self._write(self.csr_ctrl_if.io_csrCtrl_distribute_csr_w_valid, 1)
+        start_cycle = int(self.current_cycle)
+        end_cycle = self.step(1)
+        if end_cycle is not None:
+            self.current_cycle = max(int(self.current_cycle), int(end_cycle))
+        self._write(self.csr_ctrl_if.io_csrCtrl_distribute_csr_w_valid, 0)
+        if int(settle_cycles):
+            end_cycle = self.step(int(settle_cycles))
+            if end_cycle is not None:
+                self.current_cycle = max(int(self.current_cycle), int(end_cycle))
+        record = {
+            "cycle": start_cycle,
+            "addr": csr_addr,
+            "data": csr_data,
+            "settle_cycles": int(settle_cycles),
+        }
+        self.csr_write_log.append(record)
+        self._emit_event("control.distributed_csr_write", record)
+        return dict(record)
+
+    def _write_pmp_pma_entry(
+        self,
+        kind: str,
+        index: int,
+        config: PmpPmaConfig,
+        addr: int,
+        *,
+        size: Optional[int] = None,
+        settle_cycles: int = 0,
+    ) -> dict:
+        normalized_kind = str(kind).lower()
+        cfg_csr, addr_csr, byte_offset = csr_addresses_for_entry(normalized_kind, int(index))
+        cfg_byte = encode_pmp_pma_cfg(config)
+        encoded_addr = encode_pmp_pma_addr(addr, config, size=size)
+        cfg_word = int(self._pmp_pma_cfg_words[normalized_kind].get(cfg_csr, 0))
+        byte_mask = 0xFF << (8 * byte_offset)
+        cfg_word = (cfg_word & ~byte_mask) | (cfg_byte << (8 * byte_offset))
+        self.write_distributed_csr(cfg_csr, cfg_word, settle_cycles=settle_cycles)
+        self.write_distributed_csr(addr_csr, encoded_addr, settle_cycles=settle_cycles)
+        self._pmp_pma_cfg_words[normalized_kind][cfg_csr] = cfg_word
+        record = {
+            "kind": normalized_kind,
+            "index": int(index),
+            "cfg": cfg_byte,
+            "cfg_csr": cfg_csr,
+            "addr_csr": addr_csr,
+            "encoded_addr": encoded_addr,
+        }
+        self._emit_event(f"control.{normalized_kind}_entry_write", record)
+        return record
+
+    def write_pmp_entry(
+        self,
+        index: int,
+        config: PmpPmaConfig,
+        addr: int,
+        *,
+        size: Optional[int] = None,
+        settle_cycles: int = 0,
+    ) -> dict:
+        return self._write_pmp_pma_entry("pmp", index, config, addr, size=size, settle_cycles=settle_cycles)
+
+    def write_pma_entry(
+        self,
+        index: int,
+        config: PmpPmaConfig,
+        addr: int,
+        *,
+        size: Optional[int] = None,
+        settle_cycles: int = 0,
+    ) -> dict:
+        return self._write_pmp_pma_entry("pma", index, config, addr, size=size, settle_cycles=settle_cycles)
+
+    def pulse_sfence(
+        self,
+        *,
+        addr: int = 0,
+        rs1: int = 0,
+        rs2: int = 0,
+        ident: int = 0,
+        hv: int = 0,
+        hg: int = 0,
+        cycles: int = 1,
+    ) -> dict:
+        """Drive one SFENCE/HFENCE pulse through the public PTW bundle."""
+
+        pulse_cycles = max(1, int(cycles))
+        fields = {
+            "addr": int(addr),
+            "rs1": int(bool(rs1)),
+            "rs2": int(bool(rs2)),
+            "id": int(ident),
+            "hv": int(bool(hv)),
+            "hg": int(bool(hg)),
+            "cycles": pulse_cycles,
+        }
+        self._write(self.ptw_if.sfence_bits_addr, fields["addr"])
+        self._write(self.ptw_if.sfence_bits_rs1, fields["rs1"])
+        self._write(self.ptw_if.sfence_bits_rs2, fields["rs2"])
+        self._write(self.ptw_if.sfence_bits_id, fields["id"])
+        self._write(self.ptw_if.sfence_bits_hv, fields["hv"])
+        self._write(self.ptw_if.sfence_bits_hg, fields["hg"])
+        self._write(self.ptw_if.sfence_valid, 1)
+        fields["cycle"] = int(self.current_cycle)
+        end_cycle = self.step(pulse_cycles)
+        if end_cycle is not None:
+            self.current_cycle = max(int(self.current_cycle), int(end_cycle))
+        self._write(self.ptw_if.sfence_valid, 0)
+        self._emit_event("control.sfence", fields)
+        return dict(fields)
+
+    def update_translation_context(
+        self,
+        *,
+        satp_mode: Optional[int] = None,
+        satp_asid: Optional[int] = None,
+        satp_ppn: Optional[int] = None,
+        vsatp_mode: Optional[int] = None,
+        vsatp_asid: Optional[int] = None,
+        vsatp_ppn: Optional[int] = None,
+        hgatp_mode: Optional[int] = None,
+        hgatp_vmid: Optional[int] = None,
+        hgatp_ppn: Optional[int] = None,
+        priv_imode: Optional[int] = None,
+        priv_virt: Optional[int] = None,
+        cycles: int = 1,
+    ) -> dict:
+        """Update exposed TLB translation context fields and pulse affected changed pins."""
+
+        groups = {
+            "satp": ((satp_mode, self.csr_ctrl_if.io_tlbCsr_satp_mode), (satp_asid, self.csr_ctrl_if.io_tlbCsr_satp_asid), (satp_ppn, self.csr_ctrl_if.io_tlbCsr_satp_ppn)),
+            "vsatp": ((vsatp_mode, self.csr_ctrl_if.io_tlbCsr_vsatp_mode), (vsatp_asid, self.csr_ctrl_if.io_tlbCsr_vsatp_asid), (vsatp_ppn, self.csr_ctrl_if.io_tlbCsr_vsatp_ppn)),
+            "hgatp": ((hgatp_mode, self.csr_ctrl_if.io_tlbCsr_hgatp_mode), (hgatp_vmid, self.csr_ctrl_if.io_tlbCsr_hgatp_vmid), (hgatp_ppn, self.csr_ctrl_if.io_tlbCsr_hgatp_ppn)),
+            "priv_virt": ((priv_imode, self.csr_ctrl_if.io_tlbCsr_priv_imode), (priv_virt, self.csr_ctrl_if.io_tlbCsr_priv_virt)),
+        }
+        changed = {name: any(value is not None for value, _signal in members) for name, members in groups.items()}
+        for members in groups.values():
+            for value, signal in members:
+                if value is not None:
+                    self._write(signal, int(value))
+        pulse_cycles = self.pulse_tlb_csr_changes(
+            satp=changed["satp"],
+            vsatp=changed["vsatp"],
+            hgatp=changed["hgatp"],
+            priv_virt=changed["priv_virt"],
+            cycles=cycles,
+        )
+        record = {"changed": changed, "cycles": int(pulse_cycles)}
+        self._emit_event("control.translation_context", record)
+        return record
 
     def set_log_level(self, level: str) -> int:
         value = parse_log_level(level)

@@ -251,6 +251,11 @@ For direct `pytest`:
   sandboxed/manual runs unless you intentionally need it.
 - `TB_ENABLE_DUT_TESTS=1`: required for DUT integration cases guarded by the
   existing `_RUN_DUT` pattern.
+- If a pytest result contains skips caused by `TB_ENABLE_DUT_TESTS` being unset,
+  that result is not a final verification result. Immediately rerun the same
+  selected cases with `TB_ENABLE_DUT_TESTS=1`; only skips caused by a separate,
+  documented prerequisite (for example missing bin/trace input) may remain and
+  must be reported explicitly.
 - A DUT batch regression is complete only if pytest reaches the final summary
   and the selected/completed case count matches the intended target.
 

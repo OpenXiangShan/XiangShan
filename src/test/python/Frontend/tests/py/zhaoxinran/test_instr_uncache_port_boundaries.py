@@ -12,6 +12,7 @@ from env.runtime.pylib import frontend_offset_path
 
 from env.sequences import InjectRedirectSequence, LoadProgramSequence, RunUntilCommitSequence
 from env.core.transactions import CommitTarget, ProgramImage, RedirectTxn
+from env.support import PmpPmaConfig
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -37,13 +38,6 @@ _INSTR_UNCACHE_INVALID = 0
 _INSTR_UNCACHE_REFILL_REQ = 1
 _INSTR_UNCACHE_REFILL_RESP = 2
 _INSTR_UNCACHE_SEND_RESP = 3
-_PMPCFG0 = 0x3A0
-_PMPADDR0 = 0x3B0
-_PMACFG0 = 0x7C0
-_PMAADDR0 = 0x7C8
-_RWX_NAPOT_4K = 0x1F
-_PMA_RWX_MMIO_NAPOT_4K = _RWX_NAPOT_4K
-_PMA_RWX_CACHEABLE_NAPOT_4K = 0x7F
 _SV39_PAGE_SIZE = 0x1000
 _CROSS_PAGE_PC = _MMIO_BASE + _SV39_PAGE_SIZE - 2
 _SV39_RANDOM_VADDR_MIN = 0x40000000
@@ -315,35 +309,34 @@ def _initialize_sv39_fetch(env, *, reset_vector: int) -> None:
     env.monitor.set_expected_pc(int(reset_vector))
 
 
-def _write_distributed_csr(env, *, addr: int, data: int) -> None:
-    env.dut.io_csrCtrl_distribute_csr_w_bits_addr.value = int(addr)
-    env.dut.io_csrCtrl_distribute_csr_w_bits_data.value = int(data)
-    env.dut.io_csrCtrl_distribute_csr_w_valid.value = 1
-    env.step(1)
-    env.dut.io_csrCtrl_distribute_csr_w_valid.value = 0
-    env.step(4)
-
-
-def _napot_addr(*, base_addr: int, size: int) -> int:
-    return (int(base_addr) + (int(size) // 2 - 1)) >> 2
-
-
 def _configure_exec_cacheable_pma(env, *, base_addr: int, size: int) -> None:
-    napot_addr = _napot_addr(base_addr=int(base_addr), size=int(size))
-    _write_distributed_csr(env, addr=_PMACFG0, data=_PMA_RWX_CACHEABLE_NAPOT_4K)
-    _write_distributed_csr(env, addr=_PMAADDR0, data=napot_addr)
+    env.write_pma_entry(
+        0,
+        PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+        int(base_addr),
+        size=int(size),
+        settle_cycles=4,
+    )
 
 
 def _configure_exec_mmio_pma(env, *, base_addr: int, size: int) -> None:
-    napot_addr = _napot_addr(base_addr=int(base_addr), size=int(size))
-    _write_distributed_csr(env, addr=_PMACFG0, data=_PMA_RWX_MMIO_NAPOT_4K)
-    _write_distributed_csr(env, addr=_PMAADDR0, data=napot_addr)
+    env.write_pma_entry(
+        0,
+        PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=False),
+        int(base_addr),
+        size=int(size),
+        settle_cycles=4,
+    )
 
 
 def _configure_exec_pmp(env, *, base_addr: int, size: int) -> None:
-    napot_addr = _napot_addr(base_addr=int(base_addr), size=int(size))
-    _write_distributed_csr(env, addr=_PMPCFG0, data=_RWX_NAPOT_4K)
-    _write_distributed_csr(env, addr=_PMPADDR0, data=napot_addr)
+    env.write_pmp_entry(
+        0,
+        PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+        int(base_addr),
+        size=int(size),
+        settle_cycles=4,
+    )
 
 
 def _configure_exec_cacheable_pma_4k(env, *, base_addr: int) -> None:
@@ -713,16 +706,7 @@ def _force_redirect_to(env, target_pc: int) -> None:
 
 
 def _pulse_sfence(env, *, addr: int = 0, rs1: int = 0, rs2: int = 0, cycles: int = 1) -> None:
-    env.dut.io_sfence_bits_addr.value = int(addr)
-    env.dut.io_sfence_bits_rs1.value = int(rs1)
-    env.dut.io_sfence_bits_rs2.value = int(rs2)
-    env.dut.io_sfence_bits_id.value = 0
-    env.dut.io_sfence_bits_hv.value = 0
-    env.dut.io_sfence_bits_hg.value = 0
-    env.dut.io_sfence_valid.value = 1
-    assert _read_dut_signal(env, "io_sfence_valid", 0) == 1
-    env.step(max(1, int(cycles)))
-    env.dut.io_sfence_valid.value = 0
+    env.pulse_sfence(addr=addr, rs1=rs1, rs2=rs2, cycles=cycles)
 
 
 def _count_mmio_observations(env) -> int:
