@@ -158,6 +158,10 @@ class TrainInfo(implicit p: Parameters) extends TageBundle {
   val providerOldUsefulCtr: SaturateCounter = UsefulCounter()
   val providerNewUsefulCtr: SaturateCounter = UsefulCounter()
 
+  // Matching ways in shorter-history tables whose useful counters can be reset
+  // after a confident provider has been trained.
+  val resetUsefulTableMask: Vec[UInt] = Vec(NumTables, UInt(MaxNumWays.W))
+
   val hasAlt:          Bool            = Bool()
   val useAlt:          Bool            = Bool()
   val altTableOH:      UInt            = UInt(NumTables.W)

@@ -388,6 +388,18 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val incProviderUsefulCtr = hasProvider && providerPred === actualTaken && providerPred =/= altOrBasePred
     val providerNewUsefulCtr = provider.usefulCtr.getIncrease(en = incProviderUsefulCtr)
 
+    // A confident, correct provider makes matching shorter-history entries
+    // redundant for this branch. The meta path has no SRAM response, so only
+    // the explicit training read path can generate these reset requests.
+    val shorterHistoryTableMask  = Mux(hasProvider, providerTableOH - 1.U, 0.U)
+    val providerStrongAndCorrect = useProvider && finalPred === actualTaken && provider.takenCtr.isSaturate
+    val resetUsefulTableMask = VecInit(allTableTagMatchResults.zipWithIndex.map {
+      case (result, tableIdx) =>
+        val resetUseful = !t2_useMeta && providerStrongAndCorrect && shorterHistoryTableMask(tableIdx) &&
+          result.hit && !result.usefulCtr.isSaturateNegative
+        Mux(resetUseful, result.hitWayMaskOH, 0.U(MaxNumWays.W))
+    })
+
     // allocate when mispredict, but except when:
     // 1. already on the highest table
     // 2. providerPred is not used, providerPred is right and provider is weak
@@ -418,6 +430,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     trainInfo.providerEntry.takenCtr := providerNewTakenCtr
     trainInfo.providerOldUsefulCtr   := provider.usefulCtr
     trainInfo.providerNewUsefulCtr   := providerNewUsefulCtr
+    trainInfo.resetUsefulTableMask   := resetUsefulTableMask
 
     trainInfo.hasAlt            := hasAlt
     trainInfo.useAlt            := useAlt
@@ -537,67 +550,100 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   private val t3_usefulResetStart = t3_fire && usefulResetCtr.isSaturatePositive && !usefulResetInFlight
 
+  private class WayWrite extends Bundle {
+    val valid:    Bool      = Bool()
+    val entryEn:  Bool      = Bool()
+    val usefulEn: Bool      = Bool()
+    val entry:    TageEntry = new TageEntry
+    val usefulCtr = UsefulCounter()
+    val actualTaken: Bool = Bool()
+  }
+
+  private val t3_resetUsefulIssued = Wire(Vec(NumTables, UInt(MaxNumWays.W)))
+
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
     implicit val info: TageTableInfo = TableInfos(tableIdx)
 
-    val writeWayMask    = Wire(Vec(NumWays, Bool()))
-    val writeEntryEn    = Wire(Vec(NumWays, Bool()))
-    val writeUsefulEn   = Wire(Vec(NumWays, Bool()))
-    val writeEntries    = Wire(Vec(NumWays, new TageEntry))
-    val writeUsefulCtrs = Wire(Vec(NumWays, UsefulCounter()))
-    val actualTakenMask = Wire(Vec(NumWays, Bool()))
+    val wayWrites         = Wire(Vec(NumWays, new WayWrite))
+    val resetUsefulIssued = Wire(Vec(NumWays, Bool()))
 
     (0 until NumWays).foreach { wayIdx =>
-      val (providerWriteCtr, providerWriteUseful, altWriteCtr) = t3_trainInfoVec.map { info =>
-        val providerNeedUpdateCtr =
-          info.valid && info.needUpdateProviderCtr && info.providerTableOH(tableIdx) && info.providerWayOH(wayIdx)
-        val providerNeedUpdateUseful =
-          info.valid && info.needUpdateProviderUseful && info.providerTableOH(tableIdx) && info.providerWayOH(wayIdx)
-        val altNeedUpdateCtr = info.valid && info.needUpdateAltCtr && info.altTableOH(tableIdx) && info.altWayOH(wayIdx)
-        (providerNeedUpdateCtr, providerNeedUpdateUseful, altNeedUpdateCtr)
-      }.unzip3
-
-      val hitProvider = providerWriteCtr.reduce(_ || _) || providerWriteUseful.reduce(_ || _)
-      val hitProviderMask = (providerWriteCtr zip providerWriteUseful).map {
-        case (writeCtr, writeUseful) =>
-          writeCtr || writeUseful
+      val providerMatch = t3_trainInfoVec.map { trainInfo =>
+        trainInfo.valid && trainInfo.providerTableOH(tableIdx) && trainInfo.providerWayOH(wayIdx)
       }
-      val hitAlt = altWriteCtr.reduce(_ || _)
+      val providerCtrReq = providerMatch.zip(t3_trainInfoVec).map { case (matched, trainInfo) =>
+        matched && trainInfo.needUpdateProviderCtr
+      }
+      val providerUsefulReq = providerMatch.zip(t3_trainInfoVec).map { case (matched, trainInfo) =>
+        matched && trainInfo.needUpdateProviderUseful
+      }
+      val altCtrReq = t3_trainInfoVec.map { trainInfo =>
+        trainInfo.valid && trainInfo.needUpdateAltCtr &&
+        trainInfo.altTableOH(tableIdx) && trainInfo.altWayOH(wayIdx)
+      }
+      val resetUsefulReq = t3_trainInfoVec.map { trainInfo =>
+        trainInfo.valid && trainInfo.resetUsefulTableMask(tableIdx)(wayIdx)
+      }
+
+      val providerCtrEn    = providerCtrReq.reduce(_ || _)
+      val providerUsefulEn = providerUsefulReq.reduce(_ || _)
+      val providerEn       = providerCtrEn || providerUsefulEn
+      val altEn            = altCtrReq.reduce(_ || _)
+      val resetUsefulEn    = resetUsefulReq.reduce(_ || _) && !providerEn && !altEn
+
+      val providerReq = (providerCtrReq zip providerUsefulReq).map { case (ctrReq, usefulReq) =>
+        ctrReq || usefulReq
+      }
       when(t3_fire) {
-        assert(PopCount(hitProviderMask) <= 1.U)
-        assert(PopCount(altWriteCtr) <= 1.U)
-        assert(!(hitProvider && hitAlt))
+        assert(PopCount(providerReq) <= 1.U)
+        assert(PopCount(altCtrReq) <= 1.U)
+        assert(!(providerEn && altEn))
       }
 
-      val providerInfo = Mux1H(hitProviderMask, t3_trainInfoVec)
-      val altInfo      = Mux1H(altWriteCtr, t3_trainInfoVec)
+      val providerInfo = Mux1H(providerReq, t3_trainInfoVec)
+      val altInfo      = Mux1H(altCtrReq, t3_trainInfoVec)
 
-      val updateEn                = hitProvider || hitAlt
-      val updateEntry             = Mux(hitProvider, providerInfo.providerEntry, altInfo.altEntry)
-      val updateUsefulCtr         = Mux(hitProvider, providerInfo.providerNewUsefulCtr, altInfo.altOldUsefulCtr)
-      val updateBranchActualTaken = Mux(hitProvider, providerInfo.actualTaken, altInfo.actualTaken)
+      val trainWrite = Wire(new WayWrite)
+      trainWrite.valid    := providerEn || altEn || resetUsefulEn
+      trainWrite.entryEn  := providerCtrEn || altEn
+      trainWrite.usefulEn := providerUsefulEn || resetUsefulEn
+      trainWrite.entry    := Mux(providerEn, providerInfo.providerEntry, altInfo.altEntry)
+      trainWrite.usefulCtr := Mux(
+        providerEn,
+        providerInfo.providerNewUsefulCtr,
+        Mux(resetUsefulEn, UsefulCounter.Zero, altInfo.altOldUsefulCtr)
+      )
+      trainWrite.actualTaken := Mux(
+        providerEn,
+        providerInfo.actualTaken,
+        Mux(altEn, altInfo.actualTaken, false.B)
+      )
 
       val allocateEn = t3_allocate && t3_allocateTableOH(tableIdx) && t3_allocateWayOH(wayIdx)
 
-      writeWayMask(wayIdx)    := updateEn || allocateEn
-      writeEntryEn(wayIdx)    := providerWriteCtr.reduce(_ || _) || hitAlt || allocateEn
-      writeUsefulEn(wayIdx)   := providerWriteUseful.reduce(_ || _) || allocateEn
-      writeEntries(wayIdx)    := Mux(allocateEn, t3_allocateEntry, updateEntry)
-      writeUsefulCtrs(wayIdx) := Mux(allocateEn, UsefulCounter.Init, updateUsefulCtr)
-      actualTakenMask(wayIdx) := Mux(allocateEn, t3_allocateBranch.bits.taken, updateBranchActualTaken)
+      wayWrites(wayIdx).valid       := allocateEn || trainWrite.valid
+      wayWrites(wayIdx).entryEn     := allocateEn || trainWrite.entryEn
+      wayWrites(wayIdx).usefulEn    := allocateEn || trainWrite.usefulEn
+      wayWrites(wayIdx).entry       := Mux(allocateEn, t3_allocateEntry, trainWrite.entry)
+      wayWrites(wayIdx).usefulCtr   := Mux(allocateEn, UsefulCounter.Init, trainWrite.usefulCtr)
+      wayWrites(wayIdx).actualTaken := Mux(allocateEn, t3_allocateBranch.bits.taken, trainWrite.actualTaken)
+
+      resetUsefulIssued(wayIdx) := t3_fire && resetUsefulEn && !allocateEn
     }
 
-    table.io.writeReq.valid                := t3_fire && writeWayMask.reduce(_ || _)
+    table.io.writeReq.valid                := t3_fire && wayWrites.map(_.valid).reduce(_ || _)
     table.io.writeReq.bits.setIdx          := t3_setIdx(tableIdx)
     table.io.writeReq.bits.bankMask        := t3_bankMask
-    table.io.writeReq.bits.wayMask         := writeWayMask.asUInt
-    table.io.writeReq.bits.writeEntryEn    := writeEntryEn
-    table.io.writeReq.bits.writeUsefulEn   := writeUsefulEn
-    table.io.writeReq.bits.entries         := writeEntries
-    table.io.writeReq.bits.usefulCtrs      := writeUsefulCtrs
-    table.io.writeReq.bits.actualTakenMask := actualTakenMask
+    table.io.writeReq.bits.wayMask         := VecInit(wayWrites.map(_.valid)).asUInt
+    table.io.writeReq.bits.writeEntryEn    := VecInit(wayWrites.map(_.entryEn))
+    table.io.writeReq.bits.writeUsefulEn   := VecInit(wayWrites.map(_.usefulEn))
+    table.io.writeReq.bits.entries         := VecInit(wayWrites.map(_.entry))
+    table.io.writeReq.bits.usefulCtrs      := VecInit(wayWrites.map(_.usefulCtr))
+    table.io.writeReq.bits.actualTakenMask := VecInit(wayWrites.map(_.actualTaken))
 
     table.io.usefulResetStart := t3_usefulResetStart
+
+    t3_resetUsefulIssued(tableIdx) := resetUsefulIssued.asUInt.pad(MaxNumWays)
   }
 
   when(t3_usefulResetStart) {
@@ -713,8 +759,16 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   XSPerfAccumulate("allocate_needed", t3_fire && t3_needAllocate)
   XSPerfAccumulate("allocate_success", t3_fire && t3_allocate)
   XSPerfAccumulate("allocate_failure", t3_fire && t3_needAllocate && !t3_canAllocate)
+  XSPerfAccumulate(
+    "reset_redundant_useful",
+    PopCount(t3_resetUsefulIssued.flatMap(_.asBools))
+  )
   for (i <- 0 until NumTables) {
     XSPerfAccumulate(s"table_${i}_allocate", t3_fire && t3_allocate && t3_allocateTableOH(i))
+    XSPerfAccumulate(
+      s"table_${i}_reset_redundant_useful",
+      PopCount(t3_resetUsefulIssued(i))
+    )
     XSPerfAccumulate(
       s"allocate_branch_provider_is_table_${i}",
       t3_fire && t3_allocateBranchTrainInfo.hasProvider && t3_allocateBranchTrainInfo.providerTableOH(i)
