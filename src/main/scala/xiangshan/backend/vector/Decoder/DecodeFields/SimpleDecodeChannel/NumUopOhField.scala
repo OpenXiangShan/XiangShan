@@ -19,6 +19,10 @@ class NumUopOhField(extensions: Seq[ExtBase]) extends DecodeField[
   override def genTable(op: InstPattern): BitPat = {
     val uopSeq = UopInfoFieldSimple.genUopSeq(op, extensions)
 
+    // Scalar shadow-stack splits use exact counts in the existing four-bit field.
+    if (op.isInstanceOf[SspushInstPattern] || op.isInstanceOf[SspopchkInstPattern])
+      return uopSeq.length.U(NumUopOH.width.W).toBitPat
+
     uopSeq.length match {
       // produce 1 uop to hold illegal instruction info
       case 0 => NumUopOH.N1.toBitPat

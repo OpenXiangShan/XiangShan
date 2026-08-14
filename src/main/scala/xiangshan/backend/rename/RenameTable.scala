@@ -63,7 +63,8 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
     case Reg_F => FpLogicRegs
     case Reg_V => VecStdLogicRegs // with v0
     case Reg_Vl => VlLogicRegs // vl
-    // FIXME: rebase
+  }
+  val diffRdataNums = reg_t match {
     case Reg_I => diffRatParams.intEntries
     case Reg_F => diffRatParams.fpEntries
     case Reg_V => diffRatParams.vecEntries
@@ -84,7 +85,7 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
     val old_pdest = Vec(RabCommitWidth, Output(UInt(PhyRegIdxWidth.W)))
     val need_free = Vec(RabCommitWidth, Output(Bool()))
     val snpt = Input(new SnapshotPort)
-    val diffRatBase = if (backendParams.basicDebugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
+    val diffRatBase = if (backendParams.basicDebugEn) Some(Vec(diffRdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_rdata = if (backendParams.debugEn) Some(Vec(rdataNums, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_vl = if (backendParams.debugEn) reg_t match {
       case Reg_Vl => Some(Output(UInt(PhyRegIdxWidth.W)))
@@ -170,7 +171,7 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
   // Reusing it keeps Difftest aligned with the functional checkpoint, redirect, and walk recovery path.
   io.diffRatBase.foreach { base =>
     reg_t match {
-      case _ => base := VecInit(spec_table_next.take(rdataNums))
+      case _ => base := VecInit(spec_table_next.take(diffRdataNums))
     }
   }
 }
