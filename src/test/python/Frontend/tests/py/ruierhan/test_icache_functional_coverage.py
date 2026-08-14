@@ -1085,10 +1085,11 @@ def test_mainpipe_bpu_s1_bins_require_global_flush_low_and_known_pointers():
     assert not _hit(recorder, "icache_mainpipe_s1_flush", "bpu_match_clears_s1")
 
 
-def test_missunit_backpressure_samples_condition_not_stable_payload_checkpoint():
+def test_missunit_backpressure_requires_two_consecutive_stall_cycles():
     recorder = _Recorder()
     for key, value in {
         "s1_valid": 1,
+        "s1_flush": 0,
         "miss_req_ready": 0,
         "miss_req_vset": 3,
         "miss_req_paddr": 0x80000000,
@@ -1101,12 +1102,32 @@ def test_missunit_backpressure_samples_condition_not_stable_payload_checkpoint()
     sample_icache_mainpipe_coverage(recorder, recorder.env, 10)
     assert not _hit(recorder, "icache_mainpipe_s1_miss", "missunit_backpressure_stable")
 
-    # Payload stability is a Checkpoint.  Change it while completing the
-    # Condition sequence (ready low, then recovery); the bin must still hit.
+    # Payload stability is a Checkpoint, so it is not part of this Condition.
     recorder.set_key("miss_req_vset", 7)
     recorder.set_key("miss_req_paddr", 0x90000000)
-    recorder.set_key("miss_req_ready", 1)
     sample_icache_mainpipe_coverage(recorder, recorder.env, 11)
+    assert _hit(recorder, "icache_mainpipe_s1_miss", "missunit_backpressure_stable")
+
+
+def test_missunit_backpressure_sequence_resets_when_s1_is_flushed():
+    recorder = _Recorder()
+    for key, value in {
+        "s1_valid": 1,
+        "s1_flush": 0,
+        "miss_req_ready": 0,
+    }.items():
+        recorder.set_key(key, value)
+    recorder.env.dut.set(_MAIN + "s1_shouldFetch_0", 1)
+
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 20)
+    recorder.set_key("s1_flush", 1)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 21)
+    recorder.set_key("s1_flush", 0)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 22)
+
+    assert not _hit(recorder, "icache_mainpipe_s1_miss", "missunit_backpressure_stable")
+
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 23)
     assert _hit(recorder, "icache_mainpipe_s1_miss", "missunit_backpressure_stable")
 
 
@@ -1190,15 +1211,34 @@ def test_ftq_and_waylookup_skew_requires_atomic_join_and_s1_latch():
 
 def test_four_line_arbiter_samples_request_condition_before_priority_checkpoint():
     recorder = _Recorder()
-    recorder.set_key("s1_valid", 1)
-    recorder.set_key("miss_req_ready", 1)
+    for key, value in {
+        "s1_valid": 1,
+        "s1_flush": 0,
+        "req1_valid": 1,
+        "cross0": 1,
+        "cross1": 1,
+        "miss_req_ready": 1,
+    }.items():
+        recorder.set_key(key, value)
     # Do not provide missReq.valid or hasSend observations: those belong to
     # the fixed-priority Checkpoint, not to the four-line stimulus Condition.
     for index in range(4):
         recorder.env.dut.set(_MAIN + f"s1_shouldFetch_{index}", 1)
 
-    sample_icache_mainpipe_coverage(recorder, recorder.env, 16)
+    for cycle in range(16, 19):
+        sample_icache_mainpipe_coverage(recorder, recorder.env, cycle)
+        assert not _hit(recorder, "icache_mainpipe_s1_miss", "four_line_fixed_priority")
 
+    recorder.set_key("cross1", 0)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 19)
+    assert not _hit(recorder, "icache_mainpipe_s1_miss", "four_line_fixed_priority")
+
+    recorder.set_key("cross1", 1)
+    for cycle in range(20, 23):
+        sample_icache_mainpipe_coverage(recorder, recorder.env, cycle)
+        assert not _hit(recorder, "icache_mainpipe_s1_miss", "four_line_fixed_priority")
+
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 23)
     assert _hit(recorder, "icache_mainpipe_s1_miss", "four_line_fixed_priority")
 
 

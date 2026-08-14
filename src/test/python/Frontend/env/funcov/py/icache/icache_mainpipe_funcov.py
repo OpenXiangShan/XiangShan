@@ -394,7 +394,8 @@ def _mark(
 def reset_icache_mainpipe_coverage_state(recorder) -> None:
     recorder._icache_mainpipe_cov_state = {
         "prev": None,
-        "miss_backpressure_seen": False,
+        "four_line_ready_cycles": 0,
+        "miss_backpressure_cycles": 0,
         "s2_global_flush_seen": False,
         "s2_bpu_only_seen": False,
         "ftq_waylookup_skew_pending": False,
@@ -1025,32 +1026,53 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         evidence,
     )
 
+    four_line_ready = (
+        _on(s["s1_valid"])
+        and _off(s["s1_flush"])
+        and _on(s["req1_valid"])
+        and _on(s["cross0"])
+        and _on(s["cross1"])
+        and should == (1, 1, 1, 1)
+        and _on(s["miss_req_ready"])
+    )
+    state["four_line_ready_cycles"] = (
+        min(int(state["four_line_ready_cycles"]) + 1, 4)
+        if four_line_ready
+        else 0
+    )
     _mark(
         recorder,
         "icache_mainpipe_s1_miss",
         "four_line_fixed_priority",
         cycle,
-        should == (1, 1, 1, 1) and _on(s["miss_req_ready"]),
-        evidence,
+        state["four_line_ready_cycles"] >= 4,
+        {
+            **evidence,
+            "four_line_ready_cycles": state["four_line_ready_cycles"],
+        },
     )
-    recovered_from_miss_backpressure = (
-        state["miss_backpressure_seen"]
-        and _on(s["s1_valid"])
+    miss_backpressure = (
+        _on(s["s1_valid"])
+        and _off(s["s1_flush"])
         and any(should)
-        and _on(s["miss_req_ready"])
+        and _off(s["miss_req_ready"])
+    )
+    state["miss_backpressure_cycles"] = (
+        min(int(state["miss_backpressure_cycles"]) + 1, 2)
+        if miss_backpressure
+        else 0
     )
     _mark(
         recorder,
         "icache_mainpipe_s1_miss",
         "missunit_backpressure_stable",
         cycle,
-        recovered_from_miss_backpressure,
-        evidence,
+        state["miss_backpressure_cycles"] >= 2,
+        {
+            **evidence,
+            "miss_backpressure_cycles": state["miss_backpressure_cycles"],
+        },
     )
-    if _on(s["s1_valid"]) and any(should) and _off(s["miss_req_ready"]):
-        state["miss_backpressure_seen"] = True
-    elif recovered_from_miss_backpressure or _on(s["s1_flush"]):
-        state["miss_backpressure_seen"] = False
     _mark(
         recorder,
         "icache_mainpipe_s1_miss",
