@@ -82,6 +82,7 @@ package seq_pkg;
     `include "dispatch_monitor_batch_handler.sv"
     `include "exception_redirect_replay_handler.sv"
     `include "lsq_commit_handler.sv"
+    `include "memblock_control_barrier_service.sv"
     `include "dispatch_monitor_event_adapter.sv"
     `include "memblock_dispatch_base_sequence.sv"
     `include "soft_test_memblock_dispatch_smoke_sequence.sv"

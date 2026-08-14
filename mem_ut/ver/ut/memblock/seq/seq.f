@@ -23,6 +23,7 @@ seq_pkg.sv
 // ./base_seq_help/dispatch_monitor_batch_handler.sv
 // ./base_seq_help/exception_redirect_replay_handler.sv
 // ./base_seq_help/lsq_commit_handler.sv
+// ./base_seq_help/memblock_control_barrier_service.sv
 // ./base_seq_help/dispatch_monitor_event_adapter.sv
 // ./base_seq_help/memblock_dispatch_base_sequence.sv
 // ./base_seq_help/mem_base_sequence.sv
