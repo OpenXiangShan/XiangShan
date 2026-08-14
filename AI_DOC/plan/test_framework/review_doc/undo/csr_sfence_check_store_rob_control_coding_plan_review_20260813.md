@@ -5,7 +5,7 @@
 | 状态 | Plan review 通过，尚未 coding |
 | 日期 | 2026-08-13 |
 | 适用版本 | `mem_ut_uvm_v2` |
-| 被审对象 | `AI_DOC/plan/test_framework/plan/undo/csr_sfence_check_store_rob_control_coding_plan_20260813.md` |
+| 被审对象 | `AI_DOC/plan/test_framework/plan/do/csr_sfence_check_store_rob_control_coding_plan_20260813.md` |
 | 草案依据 | `AI_DOC/analysis/framework_design/csr_sfence_rob_control_barrier_flow_draft_20260813.md`、`AI_DOC/analysis/framework_design/check_store_rob_flush_l2_flow_draft_20260813.md` |
 | 本轮实现状态 | 未修改 SystemVerilog、cfg、Makefile、RTL 或脚本；未执行编译和仿真。 |
 

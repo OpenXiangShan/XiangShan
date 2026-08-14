@@ -2,13 +2,15 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | 待 coding |
+| 状态 | coding 已完成，implementation review 通过，已归档 |
 | 日期 | 2026-08-13 |
 | 适用版本 | `mem_ut_uvm_v2` |
 | 输入草案 | `AI_DOC/analysis/framework_design/csr_sfence_rob_control_barrier_flow_draft_20260813.md`、`AI_DOC/analysis/framework_design/check_store_rob_flush_l2_flow_draft_20260813.md` |
 | 本文定位 | 将两份草案合并为可实施的测试框架 flow；不修改 DUT、RM、checker 或 coverage。 |
 
 本文以两个草案已经确认的主体语义为准：CSR/SFence 是主表中的控制标记，`check_store` 是自动主表最后一个控制标记；三者都占用连续 `robIdx`，但都不进入普通 LSQ/issue 流程。本文只规定首版需要落地的测试框架行为和边界，后续具体 CSR/SFence payload 扩展只进入本文固定的配置函数，不改变控制屏障协议。
+
+实施状态说明：2026-08-14 已完成本 plan 的代码实现与专项 smoke。控制 worker 最终采用本文 `IMPLEMENTATION_DELTA` 规定的第二种启动方式，即仅由 `basicTest` 的专项 VSEQ 显式启动；本正文中任何仍称为 phase `default_sequence` 的历史描述均由该 delta 覆盖，不构成当前实现行为。
 
 ## 专有名词与对象职责
 
@@ -337,9 +339,9 @@ try_retire_control_committed_uid():
 `memblock_control_barrier_service` 是独立 helper，持有 `common_data_transaction` 与 `lsq_commit_handler` 的引用。topology 判定只读取由公共 plus 冻结的 mode snapshot，不通过 testcase 类名、派生类名、`VSEQ_MAIN`、`MEMBLOCK_USE_MANUAL_MAIN_TABLE` 或其他运行期现象猜测：`uses_control_barrier_topology()` 对 `AUTO_MAIN_TABLE` 和 `MANUAL_CONTROL_MAIN_TABLE` 返回 1；`uses_auto_control_barrier_topology()` 只用于自动 `N+1` 建表、CSR/SFence 随机预约和末尾 `check_store`。`MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE` 是唯一配置输入，`memblock_sync_pkg` 中的 snapshot 是唯一运行期读取对象；`reset_all_tables()` 不得清除或改写该 snapshot。
 
 1. 在 `memblock_sync_pkg` 定义 `memblock_control_worker_topology_mode_e={DISABLED=0,AUTO_MAIN_TABLE=1,MANUAL_MAIN_TABLE=2,MANUAL_CONTROL_MAIN_TABLE=3}`，并由 `seq_csr_common::get_control_worker_topology_mode()` 返回已经过范围校验的值。新增 `initialize_control_worker_topology_from_plus()`：它将 plus 值冻结到 `memblock_sync_pkg`；同一测试中再次调用只能读到相同值，否则 `uvm_fatal`。`tc_base` 在 `seq_csr_common::reload_from_plus()` 后调用它；`basicTest` 则必须先解析 `VSEQ_MAIN`、得到场景是否具备 dispatch capability，再调用它和后续 compatibility check，绝不能让 VSEQ 写 mode。与此同时提供只读纯判定 `uses_auto_control_barrier_topology()` 和 `uses_control_barrier_topology()`，以及派生位 `control_worker_topology_active=uses_control_barrier_topology()`。这些 helper 只检查 snapshot，不读取或校验 `MEMBLOCK_USE_MANUAL_MAIN_TABLE`。
-2. 新增 `configure_control_worker_default_sequences_from_mode()`，其抽象职责是：在现有 testcase 已完成 legacy/default-sequence 配置后，若 mode 为 AUTO 或 MANUAL_CONTROL，则将 CSR/Fence sequencer 的 `main_phase.default_sequence` 替换为两个 control worker；若 mode 为 DISABLED 或 MANUAL_MAIN，则不覆盖既有 generic/legacy default。该 helper 在安装 worker 前先按当前 testcase/VSEQ 已知的 dispatch capability 做 mode/场景一致性检查：software-only/no-dispatch 传 mode=`1/3` 必须立即 fatal。`tc_base`、`tc_dispatch_real_smoke` 和 `basicTest` 必须在各自最后一次默认 sequence 写入后调用该 helper；它允许重复调用，但只允许写入相同 control worker 配置。这样 direct-manual testcase 即使继承 real-smoke build 逻辑，也只由 plus 决定是否覆盖 worker，不能因继承关系误得到 AUTO worker。
+2. 控制 worker 不安装到 agent phase `default_sequence`。`basicTest` 解析 `VSEQ_MAIN` 后只允许两个具备 dispatch 能力的专项 VSEQ 在 active mode 启动 worker：`memblock_dispatch_real_smoke_vseq` 对应 AUTO，`memblock_dispatch_manual_control_vseq` 对应 MANUAL_CONTROL。二者在 `body()` 中通过 `p_sequencer.csr_ctrl_sqr` 和 `p_sequencer.fence_sqr` 显式并行启动 `memblock_csr_control_base_sequence` 与 `memblock_sfence_control_base_sequence`，并与主 dispatch/responder 生命周期一起收敛。mode 为 DISABLED 或 MANUAL_MAIN 时不启动控制 worker；任何 legacy testcase、software-only/no-dispatch 场景或非允许 VSEQ 传 mode=`1/3` 均在入口 `uvm_fatal`。这样每个 active sequencer 只有一个 producer，且 VSEQ 是 worker 的唯一生命周期 owner。
 3. testcase 和 VSEQ 不新增 `get_control_worker_topology_mode()`、allowlist 或任何 mode 写入逻辑。它们仍负责选择自身的场景与 main sequence；main sequence 在 body 入口只校验 plus snapshot 是否与自己的 builder 能力匹配：`memblock_main_dispatch_auto_build_main_table_base_sequence` 接受 DISABLED 或 AUTO；DISABLED 保持既有 generic `build_main_table()` 行为，AUTO 要求 `MEMBLOCK_USE_MANUAL_MAIN_TABLE=0` 并进入 `build_control_auto_main_table(N)`；普通 direct-manual/cancel-reconcile sequence 只接受 MANUAL_MAIN；新增 direct manual-control sequence 只接受 MANUAL_CONTROL。任一 mismatch 均 `uvm_fatal`，不能根据 VSEQ/testcase 名称重写 plus，也不能切换到别的 builder。
-4. 现有 `tc_dispatch_real_mixed_wb_smoke`、`tc_dispatch_real_mixed_sta_wb_smoke` 和 cancel-reconcile 的 preset cfg 必须显式提供 mode=`2`，从而在其 direct manual builder 启动前完成匹配；它们不再覆写 mode getter。`tc_dispatch_real_smoke` 与 `basicTest + memblock_dispatch_real_smoke_vseq` 在 mode=`0` 时保持 legacy generic main-table 行为，在专项 AUTO cfg 中设为 mode=`1` 后才生成控制主表。未来手工控制 testcase/VSEQ 只需选择其专用 direct manual-control sequence，并由对应 preset/命令行设 mode=`3`；VSEQ 本身不登记或设置该值。
+4. 现有 `tc_dispatch_real_mixed_wb_smoke`、`tc_dispatch_real_mixed_sta_wb_smoke` 和 cancel-reconcile 的 preset cfg 显式提供 mode=`2`，从而在其 direct manual builder 启动前完成匹配；它们不再覆写 mode getter。`basicTest + memblock_dispatch_real_smoke_vseq` 在 mode=`0` 时保持 legacy generic main-table 行为，在专项 AUTO cfg 中设为 mode=`1` 后才生成控制主表；`tc_dispatch_real_smoke` 本身不支持 mode=`1`，请求时 fail-fast。手工控制只使用 `basicTest + memblock_dispatch_manual_control_vseq`，并由对应 preset/命令行设 mode=`3`；VSEQ 本身不登记或设置该值。
 5. software-only 与无 dispatch topology testcase 若传 mode=`1` 或 mode=`3`，在 build/config 完成、启动 worker 前立即 `uvm_fatal`；mode=`2` 也只能由能够启动普通 direct-manual main sequence 的场景使用。此项是 plus 配置与场景选择的必要一致性校验，不是从场景反推或覆盖 mode。`MEMBLOCK_USE_MANUAL_MAIN_TABLE` 仍仅保留在 DISABLED generic builder 的 legacy random/import 分流中。
 
 只有 `control_worker_topology_active=1` 的路径可启动新增 worker、control barrier service、bootstrap 和 worker shutdown。**无论 topology mode 为何，既有 `service_real_dispatch_flow()` 都必须照常运行**；manual 主表 sequence 继承 auto base 时尤其不能因为 mode 不是 AUTO 就跳过原有 dispatch/monitor/issue/commit service。bootstrap 的唯一真实调用点是任一控制主表的共同 post-build hook：在 AUTO 的 `build_main_table()` 或 MANUAL_CONTROL 的 directed main-table builder **返回后**、`service_real_dispatch_flow()` 前调用一次 `initialize_control_runtime_bootstrap()`，建立首个 `control_reset_epoch=1`、清空旧 observation 并发布 `control_reset_request`；不能放在建表前，因为建表会调用 `reset_all_tables()` 清 testcase runtime 状态。control runtime handshake 的 epoch/request/ready、CSR driver ack 和三条 producer ack 固定存放在 `memblock_sync_pkg`，或由 `reset_all_tables()` 明确豁免；建表只能清主表、status、ROB/LSQ runtime，不能清这些 bootstrap 字段。MANUAL_MAIN_TABLE 和 software-only 路径不调用该 helper，也不执行 control bootstrap-ready 检查。现有 `service_real_dispatch_flow()` 在 `rst_n!=1` 或 `reset_backend_done!=1` 时会在调用 `service_monitor_once()` 前直接 `continue`，因此新增 control reset gate 不能只放在后者内部；任一 active control topology 的外层 reset 分支必须先调用 `control_barrier_service.begin_control_runtime_reset(PHYSICAL_RESET)`，再 `continue`。正常 service 中的 active-control topology reset early-return 也调用同一 helper，以覆盖 L2TLB reset 等不经过外层物理 reset判断的边界。调用顺序固定为：
@@ -551,30 +553,35 @@ WAIT_L2_FLUSH_IDLE：
 
 ## Worker 启动拓扑与 legacy/default sequence 互斥
 
-当前 CSR/Fence sequencer 在没有 `default_sequence` 配置时会 fallback 启动通用 sequence；`tc_base` 和 `tc_dispatch_real_smoke` 也会为这两个 sequencer 配置 legacy/generic default。首版必须显式替换，而不能在 virtual sequence 中额外 `uvm_do_on` 一个 worker。
+最终实现采用第二种方式：控制 worker 由专项顶层 VSEQ 显式启动，不使用 agent phase `default_sequence`。`basicTest` 是 active control topology 的唯一 testcase 入口；`memblock_dispatch_real_smoke_vseq` 仅在 AUTO mode 启动两条 worker，`memblock_dispatch_manual_control_vseq` 仅在 MANUAL_CONTROL mode 启动两条 worker。legacy testcase 和无关 VSEQ 不允许 active mode，避免没有 worker 或存在两个 producer 的拓扑。
 
 控制 worker 不能把 `data.is_global_stop_requested()` 作为唯一退出条件：现有 `all_transactions_terminal_done()` 会直接调用 `request_global_stop_if_done()`，而 global stop 又依赖 runtime drain，容易让空 worker 永久等待或让 stop 先于 worker 收敛。新增 `control_worker_topology_active`、`control_workers_shutdown_requested` 和 `control_workers_shutdown_ev`，均由主 control service/拓扑初始化唯一写入。先由 `control_action_drain_complete()`（只检查 active barrier、action queue、owner flushSb completed slot、未闭合 L2 hold，不要求 worker ack）确认动作已收敛；再置 shutdown request 并 trigger shutdown event；CSR/Fence worker 的空队列等待条件固定为“先检查 queue；队列空且 shutdown 未请求时等待 action event 或 shutdown event；收到任一事件后重查”。两个 worker 在确认各自无正在驱动的 token 后写自己的 `worker_exited` acknowledgement。`runtime_drain_complete()` 仅在 `control_worker_topology_active=1` 时要求 shutdown request 和两条 ack；无 control-worker topology 时完全绕过这些条件。必须修改 `all_transactions_terminal_done()`/主 service 的调用顺序，使其先执行 control service 的 drain/shutdown，再允许 `request_global_stop_if_done()` 读取最终 runtime drain；不得用 global stop 反向触发 worker 退出。
 
 最终拓扑固定如下：
 
 ```text
-testcase build_phase：
-  env.u_csr_ctrl_agent_agent.sqr.main_phase.default_sequence
-    = memblock_csr_control_base_sequence
-  env.u_fence_agent_agent.sqr.main_phase.default_sequence
-    = memblock_sfence_control_base_sequence
+basicTest::main_phase：
+  创建并显式启动被 +VSEQ_MAIN 选择的顶层 VSEQ
 
-main_phase：
-  两个 sequencer 各只启动一个 control worker
+memblock_dispatch_real_smoke_vseq::body（仅 AUTO）：
+  通过 p_sequencer.csr_ctrl_sqr 启动 memblock_csr_control_base_sequence
+  通过 p_sequencer.fence_sqr 启动 memblock_sfence_control_base_sequence
+  同一 VSEQ 并行启动原有 main dispatch、LSQ、issue、L2TLB 和 responder
+
+memblock_dispatch_manual_control_vseq::body（仅 MANUAL_CONTROL）：
+  使用同一对 sequencer 显式启动两个 worker
+  并行启动专用 direct manual-control main sequence 与既有 responder
+
+worker 主循环：
   worker 在 queue 为空时等待自己的 action event
   main dispatch service 产生 token/request 并消费 monitor/adapter completion
   所有 UID terminal_done、control drain 完成后由主 service 请求 worker shutdown
   worker 收到 shutdown 后确认无 in-flight token，再退出并发布 exited acknowledgement
 ```
 
-控制标记只由 `build_control_auto_main_table()` 在 mode=`1` 的 AUTO 路径追加；真实入口仍是 `tc_dispatch_real_smoke` 及 `basicTest + memblock_dispatch_real_smoke_vseq` 的 generic main-table build，但它们不再自动启用控制专项。`MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE=0` 时二者保持原有 generic main-table 行为；专项 preset 设为 `1` 后才启用自动控制表。普通 direct-manual/cancel-reconcile 以 preset mode=`2` 进入其原 builder；未来专项 direct manual-control sequence 以 mode=`3` 进入控制 builder。`uses_auto_control_barrier_topology()` 只控制自动 `N+1` 建表与随机预约；`uses_control_barrier_topology()` 对 AUTO/MANUAL_CONTROL 都为真，控制 worker、bootstrap、control service 和 shutdown。普通 manual table 和 software-only sequence 即使复用 auto sequence 的 service helper，也不得进入本专项 topology，**但仍必须运行已有 `service_real_dispatch_flow()`**。不得同时保留 `csr_ctrl_agent_agent_default_sequence`、`fence_agent_agent_default_sequence`、`tcnt_default_sequence_base` 或 virtual sequence 显式启动的第二 producer。
+控制标记只由 `build_control_auto_main_table()` 在 mode=`1` 的 AUTO 路径追加；真实 active 入口仅为 `basicTest + memblock_dispatch_real_smoke_vseq`，它在专项 preset 设为 `1` 后生成自动控制表并显式启动 worker。`MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE=0` 时该 VSEQ 保持原有 generic main-table 行为。普通 direct-manual/cancel-reconcile 以 preset mode=`2` 进入其原 builder；`basicTest + memblock_dispatch_manual_control_vseq` 以 mode=`3` 进入控制 builder。`uses_auto_control_barrier_topology()` 只控制自动 `N+1` 建表与随机预约；`uses_control_barrier_topology()` 对 AUTO/MANUAL_CONTROL 都为真，控制 worker、bootstrap、control service 和 shutdown。普通 manual table 和 software-only sequence 即使复用 auto sequence 的 service helper，也不得进入本专项 topology，**但仍必须运行已有 `service_real_dispatch_flow()`**。不得同时保留 legacy/generic CSR/Fence producer 与 VSEQ 显式 worker。
 
-`memblock_dispatch_real_smoke_vseq` 若被本专项 testcase 采用，只负责既有 LSQ/issue/L2TLB/主表 orchestration；不得读取、写入或覆盖 control topology mode，也不得重复启动 CSR/Fence worker。testcase build/config 阶段已经根据 plus snapshot 完成同一 default-sequence 覆盖。启动前检查 active control topology 的 CSR/Fence 两条 sequencer 都已配置为 control worker，否则直接 `uvm_fatal`，避免 generic item 与 `L2_FLUSH_LEVEL` 高电平 item 交错。software-only 与普通 manual directed testcase 不得因本专项自动主表规则被隐式追加 `check_store`；它们需要覆盖控制条目时必须选择专用 direct manual-control sequence，并以 `+MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE=3` 启用完整 control topology。
+`memblock_dispatch_real_smoke_vseq` 在 active AUTO 时既负责原有 LSQ/issue/L2TLB/主表 orchestration，也负责显式启动 CSR/Fence worker；它不得读取、写入或覆盖 control topology mode。启动前检查 active control topology 的 CSR/Fence 两条 sequencer 非空且未由其他 producer 占用，否则直接 `uvm_fatal`，避免 generic item 与 `L2_FLUSH_LEVEL` 高电平 item 交错。software-only、`tc_dispatch_real_smoke` 与普通 manual directed testcase 不得因本专项自动主表规则被隐式追加 `check_store`；它们请求 mode=`1/3` 时 fail-fast。手工控制只能选择专用 VSEQ 并以 `+MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE=3` 启用完整 control topology。
 
 ## Redirect、reset、abort 与超时策略
 
@@ -622,14 +629,14 @@ main_phase：
 | `seq/base_seq/memblock_sfence_control_base_sequence.sv` | 新增 | SFence queue worker。 |
 | `seq/seq.f`、`seq/seq_pkg.sv` | 修改 | 以依赖顺序加入新增 helper/sequence。 |
 | `env/plus.sv`、`seq/base_seq_help/seq_csr_common.sv`、`seq/plus_cfg/default.cfg` | 修改 | 新增 `MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE`，并与六个 CSR/SFence 间隔参数一并完成读取、范围校验、getter 和默认 cfg；mode 默认固定为 `0`。 |
-| `tc/src/tc_base.sv`、`tc/src/basicTest.sv`、`tc/src/tc_dispatch_real_smoke.sv`、现有 direct-manual/cancel-reconcile 的 `seq/plus_cfg/*.cfg`、新增专项 cfg/testcase、`tc/tc.f`、`tc/tc_pkg.sv` | 修改/新增 | `tc_base`/`basicTest` 从 `seq_csr_common` getter 冻结 plus mode snapshot，所有 legacy/default sequence 写入完成后按 mode 覆盖 CSR/Fence worker；`tc_dispatch_real_smoke` 在自身 generic default 写入后重复调用同一 helper，确保最终覆盖顺序正确。删除 testcase getter 和 VSEQ allowlist 的 mode 写入；manual/cancel preset 显式写 `2`，AUTO/手工控制专项 preset 分别写 `1/3`。主 sequence 只读取 snapshot 并校验 builder/mode 匹配，保留所有既有 manual dispatch service。 |
+| `tc/src/tc_base.sv`、`tc/src/basicTest.sv`、现有 direct-manual/cancel-reconcile 的 `seq/plus_cfg/*.cfg`、新增专项 cfg、`seq/virtual_sequence/memblock_dispatch_real_smoke_vseq.sv`、`seq/virtual_sequence/memblock_dispatch_manual_control_vseq.sv` | 修改/新增 | `tc_base`/`basicTest` 从 `seq_csr_common` getter 冻结 plus mode snapshot；只有 `basicTest` 的两个专项 VSEQ 经 `p_sequencer` 显式启动 CSR/Fence worker。legacy testcase 和非允许 VSEQ 在 mode=`1/3` 入口 fail-fast；manual/cancel preset 显式写 `2`，AUTO/手工控制专项 preset 分别写 `1/3`。主 sequence 只读取 snapshot 并校验 builder/mode 匹配，保留所有既有 manual dispatch service。 |
 
 任何新增 sequence/testcase 都必须按现有 `seq.f`/`seq_pkg.sv`/`tc.f`/`tc_pkg.sv` 管理顺序加入；参数按现有公共 plus 参数路径管理，不能把 runtime status 伪装成 plus 参数。
 
 ## 实施顺序
 
 1. 先添加类型、控制 status、owner 比较/helper 和参数；只完成编译期可见性，不接入运行期。
-2. 接入 `MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE` 的 plus 读取、范围校验、不可变 snapshot、mode/builder mismatch fail-fast、worker shutdown/ack 和 worker default-sequence 互斥；先验证 mode=`0` 的 legacy testcase 与 mode=`2` 的现有 direct-manual testcase 均不启动 worker，mode=`1/3` 的空控制队列也能自然结束。
+2. 接入 `MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE` 的 plus 读取、范围校验、不可变 snapshot、mode/builder mismatch fail-fast、worker shutdown/ack 和 VSEQ 显式 worker 的 producer 互斥；先验证 mode=`0` 的 legacy testcase 与 mode=`2` 的现有 direct-manual testcase 均不启动 worker，`basicTest` 的 mode=`1/3` 空控制队列也能自然结束。
 3. 修改自动建表为 `N+1` 与三个 `op_class`，先增加 structural dump/assertion：CSR/SFence 只在 `[0,N)`，UID `N` 必是 `check_store`，ROB 连续。
 4. 接入 control-active admission、屏障 gate、静态 redirect preserve/rejoin；保持 action queue 为空时不允许越过控制 UID。
 5. 接入 control commit/retire 分支，使一个人工置为 `CONTROL_COMMIT_READY` 的 control UID 能完整 `terminal_done`，验证 cursor/ROB map 不受影响。
@@ -694,7 +701,7 @@ main_phase：
 
 原 plan：`tc_base`、`basicTest` 和 `tc_dispatch_real_smoke` 在 build/config 阶段按 topology mode 覆盖 CSR/Fence sequencer 的 `main_phase.default_sequence`，由 phase 自动启动 `memblock_csr_control_base_sequence` 与 `memblock_sfence_control_base_sequence`。
 
-实现调整：两个 worker 的实现类、token/event 协议和 shutdown acknowledgement 保持不变，但不再作为 phase `default_sequence` 安装。`memblock_dispatch_real_smoke_vseq` 在 AUTO topology 下使用 `p_sequencer.csr_ctrl_sqr` 和 `p_sequencer.fence_sqr` 显式并行启动两个 worker；新增 MANUAL_CONTROL 专项 VSEQ 复用相同 worker 启动路径并启动专用 manual-control main sequence。`basicTest` 继续作为 VSEQ 场景入口；已有 `tc_dispatch_real_smoke` 在 mode=`1` 时改为启动同一 real-smoke VSEQ，并在该 topology 下关闭全部会与 VSEQ 冲突的 legacy phase default producer。普通 direct-manual/cancel-reconcile testcase 保持 mode=`2` 的既有 default topology；它们若请求 active control mode 则在入口 fail-fast，避免出现无 worker 的控制表。
+实现调整：两个 worker 的实现类、token/event 协议和 shutdown acknowledgement 保持不变，但不再作为 phase `default_sequence` 安装。`memblock_dispatch_real_smoke_vseq` 在 AUTO topology 下使用 `p_sequencer.csr_ctrl_sqr` 和 `p_sequencer.fence_sqr` 显式并行启动两个 worker；新增 MANUAL_CONTROL 专项 VSEQ 复用相同 worker 启动路径并启动专用 manual-control main sequence。`basicTest` 是这两个 active VSEQ 的唯一 testcase 场景入口；已有 `tc_dispatch_real_smoke` 及其它 legacy testcase 在 mode=`1/3` 时直接 fail-fast，而不再尝试间接启动 real-smoke VSEQ。普通 direct-manual/cancel-reconcile testcase 保持 mode=`2` 的既有 default topology；它们若请求 active control mode 同样在入口 fail-fast，避免出现无 worker 的控制表。
 
 原因：VSEQ 是场景内 agent sequence 的唯一生命周期 owner；将 worker 与 main dispatch、LSQ、L2TLB 和 responder 放在同一 VSEQ 并发域，才能保证每个 sequencer 只有一个 producer，并符合当前 VSEQ 调度规则。
 
@@ -978,9 +985,9 @@ testcase build/config：
   plus.sv 读取 MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE
   seq_csr_common 校验值只能为 0..3，并返回对应枚举
   initialize_control_worker_topology_from_plus() 将该值冻结到 memblock_sync_pkg
-  default-sequence 配置完成后，configure_control_worker_default_sequences_from_mode()
-  只在 mode=1/3 时覆盖 CSR/Fence 为 control worker
-  testcase 与 VSEQ 不写 mode；reset_all_tables() 不清 snapshot
+  testcase 不安装 CSR/Fence control worker；VSEQ 也不写 mode
+  仅 basicTest 的两个允许 VSEQ 可在 mode=1/3 使用 frozen snapshot 显式启动 worker
+  reset_all_tables() 不清 snapshot
 
 generic main sequence：
   mode=0：执行既有 generic build_main_table()，允许 legacy manual plus 维持旧 random/import 分流，但 post-build 拒绝控制 op_class
