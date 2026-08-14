@@ -364,8 +364,97 @@ typedef enum int unsigned {
     MEMBLOCK_OP_CLASS_STORE    = 3,
     MEMBLOCK_OP_CLASS_PREFETCH = 4,
     MEMBLOCK_OP_CLASS_AMO      = 5,
-    MEMBLOCK_OP_CLASS_CBO      = 6
+    MEMBLOCK_OP_CLASS_CBO      = 6,
+    // 中文注释：占用 UID/ROB、等待前序提交的 CSR 控制标记；不进入 LSQ 或 issue。
+    MEMBLOCK_OP_CLASS_CSR_CONTROL = 7,
+    // 中文注释：占用 UID/ROB、先 flushSb 再完成 C0/C4 生命周期的 SFence 控制标记。
+    MEMBLOCK_OP_CLASS_SFENCE_CONTROL = 8,
+    // 中文注释：自动主表末尾的 L2Cache flush 控制标记；不属于普通 store LSQ 流程。
+    MEMBLOCK_OP_CLASS_CHECK_STORE = 9
 } memblock_op_class_e;
+
+typedef enum int unsigned {
+    MEMBLOCK_CONTROL_KIND_NONE        = 0,
+    MEMBLOCK_CONTROL_KIND_CSR         = 1,
+    MEMBLOCK_CONTROL_KIND_SFENCE      = 2,
+    MEMBLOCK_CONTROL_KIND_CHECK_STORE = 3
+} memblock_control_kind_e;
+
+typedef enum int unsigned {
+    MEMBLOCK_CONTROL_STATE_NONE                         = 0,
+    MEMBLOCK_CONTROL_STATE_WAIT_OLDER_ROB_COMMIT        = 1,
+    MEMBLOCK_CONTROL_STATE_CSR_CONFIG_PENDING           = 2,
+    MEMBLOCK_CONTROL_STATE_CSR_SENDOVER                 = 3,
+    MEMBLOCK_CONTROL_STATE_WAIT_CSR_RUNTIME_SNAPSHOT    = 4,
+    MEMBLOCK_CONTROL_STATE_WAIT_FLUSHSB_REQ             = 5,
+    MEMBLOCK_CONTROL_STATE_WAIT_SB_EMPTY                = 6,
+    MEMBLOCK_CONTROL_STATE_SFENCE_REQ                   = 7,
+    MEMBLOCK_CONTROL_STATE_SFENCE_SENDOVER              = 8,
+    MEMBLOCK_CONTROL_STATE_WAIT_L2TLB_FLUSH_EFFECTIVE   = 9,
+    MEMBLOCK_CONTROL_STATE_CHECK_STORE_FLUSHSB_PENDING  = 10,
+    MEMBLOCK_CONTROL_STATE_CHECK_STORE_WAIT_SB_EMPTY    = 11,
+    MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_ASSERT    = 12,
+    MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_DONE            = 13,
+    MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_IDLE            = 14,
+    MEMBLOCK_CONTROL_STATE_CONTROL_COMMIT_READY          = 15
+} memblock_control_state_e;
+
+typedef enum int unsigned {
+    MEMBLOCK_CONTROL_COMPLETION_NONE                 = 0,
+    MEMBLOCK_CONTROL_COMPLETION_RUNTIME_CSR_SNAPSHOT = 1,
+    MEMBLOCK_CONTROL_COMPLETION_L2_FLUSH_LEVEL       = 2
+} memblock_control_completion_profile_e;
+
+// 中文注释：action owner 是控制动作的唯一版本身份。
+// 设置：control barrier service 在静态等待结束后绑定；清除：terminal/abort/reset 收敛。
+// 作用：旧 token、旧 completion 或旧 RELEASE 不能推进/清除新 dynamic 实例。
+typedef struct {
+    bit                     valid;
+    memblock_uid_t          uid;
+    int unsigned            dynamic_epoch;
+    int unsigned            action_generation;
+    memblock_control_kind_e kind;
+} memblock_control_owner_t;
+
+typedef struct {
+    memblock_control_owner_t                owner;
+    memblock_control_completion_profile_e   completion_profile;
+    bit                                      csr_baseline_valid;
+    memblock_sync_pkg::dispatch_raw_csr_t   csr_baseline;
+    int unsigned                             csr_baseline_snapshot_seq;
+    int unsigned                             runtime_snapshot_seq_before_drive;
+    int unsigned                             control_reset_epoch;
+} memblock_csr_control_action_t;
+
+typedef struct {
+    memblock_control_owner_t                owner;
+    memblock_sfence_payload_t               expected_fence;
+    longint unsigned                        pre_drive_event_seq;
+    longint unsigned                        l2tlb_reset_epoch_at_arm;
+} memblock_sfence_control_action_t;
+
+typedef struct {
+    memblock_control_owner_t owner;
+    int unsigned             control_reset_epoch;
+    longint unsigned         release_baseline_observation_seq;
+} memblock_l2_flush_release_request_t;
+
+function automatic bit is_control_op_class(input memblock_op_class_e op_class);
+    return op_class == MEMBLOCK_OP_CLASS_CSR_CONTROL ||
+           op_class == MEMBLOCK_OP_CLASS_SFENCE_CONTROL ||
+           op_class == MEMBLOCK_OP_CLASS_CHECK_STORE;
+endfunction:is_control_op_class
+
+function automatic memblock_control_kind_e control_kind_from_op_class(
+    input memblock_op_class_e op_class
+);
+    case (op_class)
+        MEMBLOCK_OP_CLASS_CSR_CONTROL:    return MEMBLOCK_CONTROL_KIND_CSR;
+        MEMBLOCK_OP_CLASS_SFENCE_CONTROL: return MEMBLOCK_CONTROL_KIND_SFENCE;
+        MEMBLOCK_OP_CLASS_CHECK_STORE:    return MEMBLOCK_CONTROL_KIND_CHECK_STORE;
+        default:                           return MEMBLOCK_CONTROL_KIND_NONE;
+    endcase
+endfunction:control_kind_from_op_class
 
 // boundary_profile 是主表生成侧的地址边界标签，只描述激励构造目标。
 // DUT结果正确性、coverage命中和RM对比不读取该字段做通过/失败判断。
@@ -525,6 +614,10 @@ typedef struct {
     longint unsigned          enqueue_cycle;
     // 请求来源标签：0=directed/unknown，1=periodic，后续可扩展其它producer。
     int unsigned              source;
+    // 中文注释：owner_valid 为 1 表示请求属于控制屏障；LSQ commit 是唯一 consumer，
+    // control service 仅以 req_id+owner 消费完成记录，普通 periodic 请求保持 owner_valid=0。
+    bit                       owner_valid;
+    memblock_control_owner_t  owner;
 } memblock_flushsb_req_t;
 
 typedef enum bit [1:0] {

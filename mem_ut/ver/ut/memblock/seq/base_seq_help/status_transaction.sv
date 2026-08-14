@@ -54,6 +54,27 @@ class status_transaction extends uvm_object;
     bit active_lq_mapped;
     bit active_sq_mapped;
 
+    // 中文注释：控制标记的静态类别、阶段和唯一 owner。
+    // 控制 admission/service/已验证 worker sendover 写入；terminal_done 后由 service 清 barrier。
+    // 普通访存保持 KIND_NONE/STATE_NONE，不得借此字段进入控制流程。
+    memblock_control_kind_e   control_kind;
+    memblock_control_state_e  control_state;
+    memblock_control_owner_t  control_owner;
+    int unsigned              control_action_generation;
+    bit                       control_action_enqueued;
+    int unsigned              control_reset_epoch;
+    // 中文注释：CSR 完成时归档 monitor 已观察到的 runtime snapshot，而不是已发送 xaction。
+    bit                                     control_runtime_csr_snapshot_valid;
+    memblock_sync_pkg::dispatch_raw_csr_t  control_runtime_csr_snapshot;
+    int unsigned                            control_runtime_csr_snapshot_seq;
+    int unsigned                            control_runtime_snapshot_seq_before_drive;
+    // 中文注释：SFence/check_store completion 的 request/event/done 基线。
+    // 每个字段由对应 service 分支写入，owner 变化或 status reset 时清零，防止旧 sample 误完成。
+    int unsigned              control_flushsb_req_id;
+    longint unsigned          control_sfence_event_seq;
+    longint unsigned          control_assert_done_baseline_seq;
+    longint unsigned          control_release_done_baseline_seq;
+
     // 中文注释：这些字段只描述 LSQ 动态实例是否已经跨过 DUT sample 边界，
     // 不改变 pass/fail/terminal 语义，也不替代 batch flush epoch。
     memblock_lsq_reservation_state_e lsq_reservation_state;
@@ -150,6 +171,20 @@ class status_transaction extends uvm_object;
         terminal_done     = 1'b0;
         active_lq_mapped  = 1'b0;
         active_sq_mapped  = 1'b0;
+        control_kind = MEMBLOCK_CONTROL_KIND_NONE;
+        control_state = MEMBLOCK_CONTROL_STATE_NONE;
+        control_owner = '{default:'0};
+        control_action_generation = 0;
+        control_action_enqueued = 1'b0;
+        control_reset_epoch = 0;
+        control_runtime_csr_snapshot_valid = 1'b0;
+        control_runtime_csr_snapshot = '{default:'0};
+        control_runtime_csr_snapshot_seq = 0;
+        control_runtime_snapshot_seq_before_drive = 0;
+        control_flushsb_req_id = 0;
+        control_sfence_event_seq = 0;
+        control_assert_done_baseline_seq = 0;
+        control_release_done_baseline_seq = 0;
         lsq_reservation_state = MEMBLOCK_LSQ_RESERVATION_NONE;
         lsq_reservation_launch_epoch = 0;
         lsq_reservation_sample_seq = 0;
