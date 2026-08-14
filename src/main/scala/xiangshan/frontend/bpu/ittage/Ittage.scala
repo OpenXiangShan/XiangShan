@@ -72,7 +72,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   }
 
   io.sramResetDone := tables.map(_.io.sramResetDone).reduce(_ && _)
-  io.resetDone     := true.B
+  if (HasBpuFlush) { io.resetDone.get := true.B }
 
   private val useAltOnNa = RegInit((1 << (UseAltOnNaWidth - 1)).U(UseAltOnNaWidth.W))
   private val tickCnt    = RegInit(TickCounter.Zero)
@@ -285,7 +285,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   ittageMeta.provider.bits     := s3_provider
   ittageMeta.altProvider.valid := s3_altProvided
   ittageMeta.altProvider.bits  := s3_altProvider
-  ittageMeta.altDiffers        := s3_providerTarget =/= s3_altProviderTarget
+  ittageMeta.altDiffers        := s3_altProvided && s3_providerTarget =/= s3_altProviderTarget
   ittageMeta.providerUsefulCnt := s3_providerUsefulCnt
   ittageMeta.providerCnt       := s3_providerCnt
   ittageMeta.altProviderCnt    := s3_altProviderCnt

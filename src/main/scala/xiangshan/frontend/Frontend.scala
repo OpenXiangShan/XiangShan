@@ -169,15 +169,23 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
           tlbCsr.mbmc.KEYIDEN.asBool,
           tlbCsr.mbmc.CMODE.asBool,
           tlbCsr.priv.imode,
+          tlbCsr.priv.debug,
           pmp.io.pmp,
           pmp.io.pma,
           requestor.req
         )
       } else {
-        checker.apply(tlbCsr.mbmc.CMODE.asBool, tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, requestor.req)
+        checker.apply(
+          tlbCsr.mbmc.CMODE.asBool,
+          tlbCsr.priv.imode,
+          tlbCsr.priv.debug,
+          pmp.io.pmp,
+          pmp.io.pma,
+          requestor.req
+        )
       }
     } else {
-      checker.apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, requestor.req)
+      checker.apply(tlbCsr.priv.imode, tlbCsr.priv.debug, pmp.io.pmp, pmp.io.pma, requestor.req)
     }
     requestor.resp := checker.resp
   }
@@ -222,9 +230,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   // ICache-Ftq
   icache.io.fromFtq <> ftq.io.toICache
-  ftq.io.fromICache.fromPrefetch  := icache.io.toFtq.fromPrefetch
-  ftq.io.fromICache.fromWayLookup := icache.io.toFtq.fromWayLookup
-  icache.io.flush                 := DontCare
+  ftq.io.fromICache.fromMainPipe := icache.io.toFtq.fromMainPipe
+  icache.io.flush                := DontCare
 
   // Ifu-ICache
   ifu.io.fromICache <> icache.io.toIfu
@@ -233,7 +240,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   icache.io.csrPfEnable := RegNext(csrCtrl.pf_ctrl.l1I_pf_enable)
   val fencei_reg = RegNext(io.fencei)
   icache.io.fencei := fencei_reg
-  bpu.io.flush     := fencei_reg
+  if (HasBpuFlush) { bpu.io.flush.get := fencei_reg }
 
   // IFU-Ibuffer
   ifu.io.toIBuffer <> ibuffer.io.in

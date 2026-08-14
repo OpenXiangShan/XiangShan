@@ -53,6 +53,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
     val fromFtq:     FtqToBpuIO = Flipped(new FtqToBpuIO)
     val toFtq:       BpuToFtqIO = new BpuToFtqIO
+    val flush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
   }
 
   val io: BpuIO = IO(new BpuIO)
@@ -91,6 +92,38 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   /* *** CSR ctrl sub-predictor enable *** */
   private val ctrl      = DelayN(io.ctrl, 2) // delay 2 cycle for timing
   private val constCtrl = Constantin.createRecord("constCtrl")
+
+  if (HasBpuFlush) {
+    def getSubFlushEnable(p: BasePredictor): Bool = p match {
+      case _: FallThroughPredictor => true.B
+      case _: MicroBtb              => ctrl.ubtbFlushEnable.get
+      case _: AheadBtb              => ctrl.abtbFlushEnable.get
+      case _: MicroTage             => true.B
+      case _: MicroRas              => true.B
+      case _: MainBtb               => ctrl.mbtbFlushEnable.get
+      case _: Tage                  => ctrl.tageFlushEnable.get
+      case _: Sc                    => ctrl.scFlushEnable.get
+      case _: Ittage                => ctrl.ittageFlushEnable.get
+      case _: Ras                   => ctrl.rasFlushEnable.get
+      case other => throw new IllegalArgumentException(s"Unsupported BPU flush predictor: ${other.getClass.getName}")
+    }
+
+    val fc = Module(new BpuFlushCtrl(predictors.length))
+    fc.io.flush      := io.flush.get
+    fc.io.redirectEn := io.fromFtq.redirect.valid
+    fc.io.bpuFlushEn := ctrl.bpuFlushEn.get
+
+    val currentFlushMask = VecInit(predictors.map(p => getSubFlushEnable(p))).asUInt
+    fc.io.flushMask := currentFlushMask
+
+    predictors.zipWithIndex.foreach { case (p, i) =>
+      p.io.contextFlush.get := fc.io.contextFlush && fc.io.activeFlushMask(i)
+      p.io.bpuFlushing.get  := fc.io.bpuFlushing && fc.io.activeFlushMask(i)
+    }
+    fc.io.resetDone := predictors.zipWithIndex.map { case (p, i) =>
+      !fc.io.activeFlushMask(i) || p.io.resetDone.get
+    }.reduce(_ && _)
+  }
 
   fallThrough.io.enable := true.B // fallThrough is always enabled
   utage.io.enable       := true.B

@@ -54,7 +54,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
 
   // Ras used Regfile instead of SRAM to store entires
   io.sramResetDone := true.B
-  io.resetDone     := true.B
+  if (HasBpuFlush) { io.resetDone.get := true.B }
 
   io.trainReady := true.B
 

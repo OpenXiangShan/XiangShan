@@ -43,7 +43,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   addrFields.show(indent = 4)
 
   io.sramResetDone := true.B
-  io.resetDone     := !io.contextFlush
+  if (HasBpuFlush) { io.resetDone.get := true.B }
   io.trainReady    := true.B
 
   /* *** submodules *** */
@@ -51,7 +51,6 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   private val replacer = Module(new MicroBtbReplacer)
   replacer.io.usefulCnt := VecInit(entries.map(_.usefulCnt))
-  replacer.io.contextFlush := io.contextFlush
 
   /* *** predict stage 0 ***
    * - io.startPc timing might be bad, simply cache it
@@ -81,12 +80,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   private val s1_startPc = RegEnable(s0_startPc, s0_fire)
 
-  private val s1_hitOH       = RegInit(0.U(NumEntries.W))
-  when(io.contextFlush) {
-    s1_hitOH := 0.U(NumEntries.W)
-  }.elsewhen(s0_fire) {
-    s1_hitOH := s0_hitOH
-  }
+  private val s1_hitOH       = RegEnable(s0_hitOH, s0_fire)
   private val s1_hitT1Victim = RegEnable(s0_hitT1Victim, s0_fire)
 
   // if hit t1 victim, the original entry pointed by s1_hitOH is overwritten in this cycle, treat as a miss
@@ -105,7 +99,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   io.prediction.bits.attribute   := s1_hitEntry.slot1.attribute
 
   // update replacer
-  replacer.io.predTouch.valid := s1_hit && s1_fire && !io.bpuFlushing
+  replacer.io.predTouch.valid := s1_hit && s1_fire
   replacer.io.predTouch.bits  := s1_hitIdx
 
   /* *** train stage 0 ***
@@ -122,7 +116,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val t0_attribute   = Wire(new BranchAttribute)
 
   if (UseFastTrain) {
-    t0_fire        := io.fastTrain.get.valid && io.enable && !io.bpuFlushing
+    t0_fire        := io.fastTrain.get.valid && io.enable
     t0_startPc     := io.fastTrain.get.bits.startPc
     t0_actualTaken := io.fastTrain.get.bits.finalPrediction.taken
     t0_position    := io.fastTrain.get.bits.finalPrediction.cfiPosition
@@ -130,7 +124,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
     t0_attribute   := io.fastTrain.get.bits.finalPrediction.attribute
   } else {
     // FIXME: not sure if first mispredict is the best, maybe first taken?
-    t0_fire        := io.stageCtrl.t0_fire && io.train.mispredictBranch.valid && io.enable && !io.bpuFlushing
+    t0_fire        := io.stageCtrl.t0_fire && io.train.mispredictBranch.valid && io.enable
     t0_startPc     := io.train.startPc
     t0_actualTaken := io.train.mispredictBranch.bits.taken
     t0_position    := io.train.mispredictBranch.bits.cfiPosition
@@ -196,24 +190,6 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val t1_hitPositionSame  = RegEnable(t0_hitPositionSame, t0_fire)
   private val t1_hitAttributeSame = RegEnable(t0_hitAttributeSame, t0_fire)
   private val t1_hitTargetSame    = RegEnable(t0_hitTargetSame, t0_fire)
-
-  // contextFlush 当拍清零 t1 训练流水线寄存器组残留(后赋值覆盖 RegEnable)
-  when(io.contextFlush) {
-    t1_tag               := 0.U
-    t1_actualTaken       := false.B
-    t1_position          := 0.U
-    t1_target            := 0.U
-    t1_attribute         := 0.U.asTypeOf(t1_attribute)
-    t1_targetCarry.foreach(_ := 0.U.asTypeOf(t1_targetCarry.get))
-    t1_hit               := false.B
-    t1_hitIdx            := 0.U
-    t1_hitEntry          := 0.U.asTypeOf(t1_hitEntry)
-    t1_hitNotUseful      := false.B
-    t1_hitPositionSame   := false.B
-    t1_hitAttributeSame  := false.B
-    t1_hitTargetSame     := false.B
-  }
-
   // only when t1 is updating/allocating can t0 hit it
   t0_hitT1Update := t1_fire && t0_tag === t1_tag && (t1_hit || t1_allocate)
   // init a new entry
@@ -257,14 +233,12 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   t1_allocate  := !t1_hit && t1_actualTaken
   t1_updateIdx := Mux(t1_hit, t1_hitIdx, replacer.io.victim)
   // and write back the updated entry
-  when(io.contextFlush) {
-    entries.foreach(_ := 0.U.asTypeOf(new MicroBtbEntry))
-  }.elsewhen(t1_fire && (t1_hit || t1_allocate)) { // update entry if hit, or alloc entry only for taken branches
+  when(t1_fire && (t1_hit || t1_allocate)) { // update entry if hit, or alloc entry only for taken branches
     entries(t1_updateIdx) := t1_updatedEntry
   }
 
   // update replacer
-  replacer.io.trainTouch.valid := t1_fire && !io.bpuFlushing
+  replacer.io.trainTouch.valid := t1_fire
   replacer.io.trainTouch.bits  := t1_updateIdx
 
   /* *** perf *** */

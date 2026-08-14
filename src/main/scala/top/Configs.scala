@@ -505,6 +505,10 @@ class CVMCompile extends Config((site, here, up) => {
     HasBitmapCheckDefault = false))
 })
 
+class BPUFlushCompile extends Config((site, here, up) => {
+  case XSTileKey => up(XSTileKey).map(_.copy(HasBpuFlush = true))
+})
+
 class CVMTestCompile extends Config((site, here, up) => {
   case CVMParamsKey => up(CVMParamsKey).copy(
     KeyIDBits = 5,
@@ -539,6 +543,11 @@ class DefaultConfig(n: Int = 1) extends Config(
 
 class CVMConfig(n: Int = 1) extends Config(
   new CVMCompile
+    ++ new DefaultConfig(n)
+) with DeprecatedConfigWarning
+
+class BPUFlushConfig(n: Int = 1) extends Config(
+  new BPUFlushCompile
     ++ new DefaultConfig(n)
 ) with DeprecatedConfigWarning
 

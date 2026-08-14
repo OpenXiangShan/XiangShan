@@ -59,6 +59,7 @@ case class XSCoreParameters
   HasMptInodeOpt: Boolean = false, // hardwired testing code: skip mpt check for non-leaf ptw nodes
   HasBitmapCheck: Boolean = true,
   HasBitmapCheckDefault: Boolean = false,
+  HasBpuFlush: Boolean = true,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
   HasHExtension: Boolean = true,
@@ -587,6 +588,7 @@ trait HasXSParameter {
   def HasMptInodeOpt = coreParams.HasMptInodeOpt
   def HasBitmapCheck = coreParams.HasBitmapCheck
   def HasBitmapCheckDefault = coreParams.HasBitmapCheckDefault
+  def HasBpuFlush: Boolean = coreParams.HasBpuFlush
 
   /** prefetch config */
   def prefetcherSeq = coreParams.prefetcher

@@ -181,7 +181,7 @@ object BpuPredictionSource {
 
 /* *** public *** */
 // Csr -> Bpu
-class BpuCtrl extends Bundle {
+class BpuCtrl(implicit p: Parameters) extends BpuBundle {
   // s1 predictor enable
   val ubtbEnable: Bool = Bool()
   val abtbEnable: Bool = Bool()
@@ -192,30 +192,30 @@ class BpuCtrl extends Bundle {
   val scEnable:     Bool = Bool()
   val ittageEnable: Bool = Bool()
   val rasEnable:    Bool = Bool()
-  // BPU context-switch flush enable
-  val bpuFlushEn:        Bool = Bool()
-  val ubtbFlushEnable:   Bool = Bool()
-  val abtbFlushEnable:   Bool = Bool()
-  val mbtbFlushEnable:   Bool = Bool()
-  val tageFlushEnable:   Bool = Bool()
-  val scFlushEnable:     Bool = Bool()
-  val ittageFlushEnable: Bool = Bool()
-  val rasFlushEnable:    Bool = Bool()
+  val bpuFlushEn:        Option[Bool] = Option.when(HasBpuFlush)(Bool())
+  val ubtbFlushEnable:   Option[Bool] = Option.when(HasBpuFlush)(Bool())
+  val abtbFlushEnable:   Option[Bool] = Option.when(HasBpuFlush)(Bool())
+  val mbtbFlushEnable:   Option[Bool] = Option.when(HasBpuFlush)(Bool())
+  val tageFlushEnable:   Option[Bool] = Option.when(HasBpuFlush)(Bool())
+  val scFlushEnable:     Option[Bool] = Option.when(HasBpuFlush)(Bool())
+  val ittageFlushEnable: Option[Bool] = Option.when(HasBpuFlush)(Bool())
+  val rasFlushEnable:    Option[Bool] = Option.when(HasBpuFlush)(Bool())
 }
 
 // Bpu -> Ftq
-class BpuPrediction(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
-  val startPc:        PrunedAddr  = PrunedAddr(VAddrBits)
-  val target:         PrunedAddr  = PrunedAddr(VAddrBits)
-  val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+class BpuPrediction(implicit p: Parameters) extends BpuBundle {
+  val startPc:     PrunedAddr = PrunedAddr(VAddrBits)
+  val target:      PrunedAddr = PrunedAddr(VAddrBits)
+  val taken:       Bool       = Bool()
+  val endPosition: UInt       = UInt(CfiPositionWidth.W)
   // override valid
   val s3Override: Bool = Bool()
 
   def fromStage(startPc: PrunedAddr, prediction: Prediction): Unit = {
-    this.startPc              := startPc
-    this.takenCfiOffset.valid := prediction.taken
-    this.takenCfiOffset.bits  := getFtqOffset(startPc, prediction.cfiPosition)
-    this.target               := prediction.target
+    this.startPc     := startPc
+    this.target      := prediction.target
+    this.taken       := prediction.taken
+    this.endPosition := prediction.cfiPosition
   }
 }
 

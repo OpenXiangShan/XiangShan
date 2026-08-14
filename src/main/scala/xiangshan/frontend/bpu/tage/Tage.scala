@@ -54,6 +54,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   /* *** reset *** */
   io.sramResetDone := tables.map(_.io.sramResetDone).reduce(_ && _)
+  if (HasBpuFlush) { io.resetDone.get := true.B }
 
   // context-switch flush completion handshake
   private val entryResetDone    = tables.map(_.io.sramResetDone).reduce(_ && _)

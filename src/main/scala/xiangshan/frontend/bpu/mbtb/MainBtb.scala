@@ -51,6 +51,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val alignBanks = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new MainBtbAlignBank(alignIdx)))
 
   io.sramResetDone := alignBanks.map(_.io.sramResetDone).reduce(_ && _)
+  if (HasBpuFlush) { io.resetDone.get := true.B }
 
   // 40 SRAMs (2 AlignBank × 4 InternalBank × (4 EntrySRAM + 1 CounterSRAM)) via extraReset clear in 256 cycles;
   // flushPending latches the clear window, resetDone rises at T+258 (256 SRAM clear + 1 flushPending reg + 1 sramResetDone reg).

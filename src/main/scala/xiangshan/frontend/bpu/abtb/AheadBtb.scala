@@ -61,6 +61,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }
 
   io.sramResetDone := banks.map(_.io.sramResetDone).reduce(_ && _)
+  if (HasBpuFlush) { io.resetDone.get := true.B }
 
   private val flushPending = RegInit(false.B)
   when(io.contextFlush) { flushPending := true.B }

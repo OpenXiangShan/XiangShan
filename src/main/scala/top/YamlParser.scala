@@ -61,6 +61,7 @@ case class YamlConfig(
   CVMParams: Option[CVMParameters],
   EnableBitmapCheck: Option[Boolean],
   EnableBitmapCheckDefault: Option[Boolean],
+  EnableBpuFlush: Option[Boolean],
 )
 
 object YamlParser {
@@ -211,6 +212,11 @@ object YamlParser {
     yamlConfig.EnableBitmapCheckDefault.foreach { enable =>
       newConfig = newConfig.alter((site, here, up) => {
         case XSTileKey => up(XSTileKey).map(_.copy(HasBitmapCheckDefault = enable))
+      })
+    }
+    yamlConfig.EnableBpuFlush.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case XSTileKey => up(XSTileKey).map(_.copy(HasBpuFlush = enable))
       })
     }
     newConfig
