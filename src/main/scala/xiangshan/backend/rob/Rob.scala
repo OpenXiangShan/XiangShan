@@ -121,12 +121,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val logicPhyRegMap = Vec(RabCommitWidth, ValidIO(new RegWriteFromRab))
       val excpInfo = ValidIO(new VecExcpInfo)
     })
-    val IssueQueueDeqSum  = backendParams.allIssueParams.map(_.numDeq).sum
-    val iqEntryNum = backendParams.allIssueParams.map(_.numEntries).sum
+
     val debug_ls = Flipped(new DebugLSIO)
     val debugBlockBackward = Option.when(backendParams.debugEn)(Output(Bool()))
     val debugWaitForward   = Option.when(backendParams.debugEn)(Output(Bool()))
-    val topdownIQInfoVec = Option.when(backendParams.debugEn)(Input(Vec(iqEntryNum, Flipped(ValidIO(new TopdownIQExtendedInfo())))))
+    val topdownIQInfoVec = Option.when(backendParams.debugEn)(Input(Vec(backendParams.iqEntryNum, Flipped(ValidIO(new TopdownIQExtendedInfo())))))
     val debugRobHeadStall = Option.when(backendParams.debugEn)(ValidIO(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))
     val debugEnqLsq = Input(new LsqEnqIO)
     val debugHeadLsIssue = Input(Bool())
@@ -1554,7 +1553,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
 
   if (backendParams.debugEn) {
-    val topdownRobInfoCollect = Module(new TopdownRobInfoCollect(io.iqEntryNum, RobSize))
+    val topdownRobInfoCollect = Module(new TopdownRobInfoCollect(backendParams.iqEntryNum, RobSize))
     topdownRobInfoCollect.io.in.zip(io.topdownIQInfoVec.get).foreach{ case (sink, source) =>
       sink.valid := source.valid
       sink.robIdx := source.bits.robIdx.value

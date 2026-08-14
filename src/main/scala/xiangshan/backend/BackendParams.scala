@@ -85,6 +85,12 @@ case class BackendParams(
   def allRealExuParams =
     allExuParams.filterNot(_.fakeUnit)
 
+  // TODO: add vecSchdParams when it is ready
+  def iqEntryNum = Seq(
+    intSchdParams.get,
+    fpSchdParams.get,
+  ).flatMap(_.issueBlockParams).map(_.numEntries).sum
+
   def intPregParams: IntPregParams = pregParams.collectFirst { case x: IntPregParams => x }.get
   def fpPregParams: FpPregParams = pregParams.collectFirst { case x: FpPregParams => x }.get
   def vfPregParams: VfPregParams = pregParams.collectFirst { case x: VfPregParams => x }.get

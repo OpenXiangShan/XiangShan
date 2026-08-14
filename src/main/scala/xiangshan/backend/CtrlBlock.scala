@@ -989,10 +989,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val memHyPcRead = Vec(params.HyuCnt, Flipped(new FtqRead(UInt(VAddrBits.W))))
 
   val csrCtrl = Input(new CustomCSRCtrlIO)
-  val iqEntryNum = Seq(
-    backendParams.intSchdParams.get,
-    backendParams.fpSchdParams.get,
-  ).flatMap(_.issueBlockParams).map(_.numEntries).sum
+
   val robio = new Bundle {
     val csr = new RobCSRIO
     val exception = ValidIO(new ExceptionInfo)
@@ -1010,7 +1007,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val robidx = Input(new RobPtr)
       val pc     = Output(UInt(VAddrBits.W))
     })
-    val topdownIQInfoVec = Option.when(backendParams.debugEn)(Input(Vec(iqEntryNum, Flipped(ValidIO(new TopdownIQExtendedInfo())))))
+    val topdownIQInfoVec = Option.when(backendParams.debugEn)(Input(Vec(backendParams.iqEntryNum, Flipped(ValidIO(new TopdownIQExtendedInfo())))))
   }
 
   val toDecode = new Bundle {
