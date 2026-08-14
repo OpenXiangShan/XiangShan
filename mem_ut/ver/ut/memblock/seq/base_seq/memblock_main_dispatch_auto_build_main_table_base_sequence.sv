@@ -145,6 +145,12 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor
     monitor_adapter.service_l2tlb_sfence_events();
     if (memblock_sync_pkg::reset_backend_done !== 1'b1 ||
         memblock_sync_pkg::l2tlb_reset_active()) begin
+        // 中文注释：L2TLB runtime reset 也会在此 early-return 前穿过 control
+        // reset gate。若任一 UID 已 admission，service 会按首版约束直接 fatal；
+        // 否则由下一 epoch 的 driver/monitor handshake 重建可消费 baseline。
+        if (control_barrier_service != null) begin
+            control_barrier_service.begin_control_runtime_reset("L2TLB runtime reset");
+        end
         return;
     end
     // 中文注释：本轮 raw int writeback、IQ feedback 和 memoryViolation 先收集成同一个 batch。
