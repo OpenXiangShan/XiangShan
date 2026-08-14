@@ -215,6 +215,9 @@ object Opcode {
     val xorzexth   = Value(bb"110_0101")
     val orcblsb    = Value(bb"110_0110")
     val orcbzexth  = Value(bb"110_0111")
+    val sspdec = IntRType(bb"111_1110")
+    def isSspDec(func: UInt): Bool = func === sspdec.encode
+
     // for xstrap
     val xstrap     = IntIType(bb"111_1111") + BlockBack // CustomTrapPattern
 
@@ -442,6 +445,9 @@ object Opcode {
 
   trait LduOpcodes extends Opcodes with LsuTrait with DataType {
     protected val uopPrefetch = bb"1"
+    val sspopchk = IntRType(SCALAR1, nonH, nonX, sign, D, bb"0")
+    def isShadowStackLoad(op: UInt): Bool = op === sspopchk.encode
+
     protected val uopLoad = bb"0"
 
     // normal load
@@ -576,6 +582,7 @@ object Opcode {
 
     val difftestLduOpMap: Seq[(BitPat, UInt)] = Seq(
       LduOp.ls    -> LduDifftestOpcode.ls   ,
+      (SCALAR1 ## nonH ## nonX ## sign) -> LduDifftestOpcode.ls,
       LduOp.lu    -> LduDifftestOpcode.lu   ,
       LduOp.hlvs  -> LduDifftestOpcode.hlvs ,
       LduOp.hlvu  -> LduDifftestOpcode.hlvu ,
@@ -584,6 +591,9 @@ object Opcode {
   }
 
   trait StuOpcodes extends Opcodes with LsuTrait with DataType {
+    val sspush = IntBSType(SCALAR2, nonH, nonX, sign, D, bb"0")
+    def isShadowStackStore(op: UInt): Bool = op === sspush.encode
+
     protected val uopStore = bb"0"
     protected val uopCbo = bb"1"
 
@@ -698,6 +708,7 @@ object Opcode {
       val lr   = bb"000"
       val sc   = bb"001"
       val swap = bb"100"
+      val sswap = bb"110"
       val cas  = bb"101"
     }
 
@@ -711,6 +722,10 @@ object Opcode {
       val minu = bb"110"
       val maxu = bb"111"
     }
+
+    val ssamoswap_w = IntRType(SCALAR, NoALU.sswap, W, noALU) + NoSpec + BlockBack
+    val ssamoswap_d = IntRType(SCALAR, NoALU.sswap, D, noALU) + NoSpec + BlockBack
+    def isShadowStackAmo(op: UInt): Bool = getAmoOp(op) === AmoOp.sswap
 
     // atomics
     //                       4b        3b        3b   1b
@@ -797,6 +812,7 @@ object Opcode {
       val lr   = NoALU.lr     ## noALU
       val sc   = NoALU.sc     ## noALU
       val swap = NoALU.swap   ## noALU
+      val sswap = NoALU.sswap ## noALU
       val cas  = NoALU.cas    ## noALU
       val add  = WithALU.add  ## withALU
       val xor  = WithALU.xor  ## withALU
@@ -840,6 +856,7 @@ object Opcode {
       AmoOp.lr   -> DifftestOpcode.lr,
       AmoOp.sc   -> DifftestOpcode.sc,
       AmoOp.swap -> DifftestOpcode.amoswap,
+      AmoOp.sswap -> DifftestOpcode.amoswap,
       AmoOp.cas  -> DifftestOpcode.amocas,
       AmoOp.add  -> DifftestOpcode.amoadd,
       AmoOp.xor  -> DifftestOpcode.amoxor,

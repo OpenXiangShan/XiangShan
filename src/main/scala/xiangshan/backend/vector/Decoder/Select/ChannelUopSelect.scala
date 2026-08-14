@@ -254,15 +254,17 @@ object ChannelUopSelectUtil extends HasVectorSettings {
     alluops
   }
 
-  def genUopNumPatterns2(numChannel: Int, numM2M4M8Channel: (Int, Int, Int)): ArrayBuffer[ArrayBuffer[ArrayBuffer[Int]]] = {
+  def genUopNumPatterns2(numChannel: Int, numM2M4M8Channel: (Int, Int, Int), scalarSplitCounts: Seq[Int] = Seq.empty): ArrayBuffer[ArrayBuffer[ArrayBuffer[Int]]] = {
     val MaxM2UopIdx = numM2M4M8Channel._1
     val MaxM4UopIdx = numM2M4M8Channel._2
     val MaxM8UopIdx = numM2M4M8Channel._3
 
+    val counts = (Seq(0, 1, 2, 4, 8) ++ scalarSplitCounts).distinct.sorted
+    require(counts.forall(n => n >= 0 && n <= maxSplitUopNum))
     val firstUopPatterns = {
       for {
         uopBufferCount <- 0 until maxSplitUopNum
-        uopNum <- Seq(0, 1, 2, 4, 8)
+        uopNum <- counts
       } yield {
         ArrayBuffer(uopBufferCount, uopNum)
       }
@@ -279,17 +281,18 @@ object ChannelUopSelectUtil extends HasVectorSettings {
         pattern.last match {
           case 0 =>
             alluops(i) += pattern.clone()
-          case 1 | 2 | 4 | 8 if nUop > i =>
+          case _ if nUop > i =>
             alluops(i) += pattern.clone()
           case _ =>
-            alluops(i) += (pattern :+ 0)
-            alluops(i) += (pattern :+ 1)
-            if (curMopIdx <= MaxM2UopIdx)
-              alluops(i) += (pattern :+ 2)
-            if (curMopIdx <= MaxM4UopIdx)
-              alluops(i) += (pattern :+ 4)
-            if (curMopIdx <= MaxM8UopIdx)
-              alluops(i) += (pattern :+ 8)
+            counts.foreach { count =>
+              val supported = count match {
+                case 0 | 1 => true
+                case 2 => curMopIdx <= MaxM2UopIdx
+                case 3 | 4 => curMopIdx <= MaxM4UopIdx
+                case _ => curMopIdx <= MaxM8UopIdx
+              }
+              if (supported) alluops(i) += (pattern :+ count)
+            }
         }
       }
     }

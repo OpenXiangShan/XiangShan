@@ -192,7 +192,9 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
     this.predTaken := robEnq.predTaken
     this.needVTB := robEnq.isVset
     this.vls := robEnq.isVectorMemory
-    this.rfWen := robEnq.rfWen
+    // Hidden SSP registers must not appear as architectural register writes.
+    this.rfWen := robEnq.rfWen &&
+      (if (HasShadowStack) robEnq.ldest < 32.U else true.B)
     this.interruptSafe := robEnq.interruptSafe
     this.slotNeedFlushMask := robEnq.slotNeedFlushMask
     // trace

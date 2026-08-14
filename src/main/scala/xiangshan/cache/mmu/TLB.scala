@@ -135,6 +135,14 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val info = Wire(new TlbAccessCheckInfo)
     info.cmd := req_out(i).cmd
     info.hlvx := req_out(i).hlvx
+    if (HasShadowStack) {
+      info.isShadowStack.get := req_out(i).shadowStackUser.get
+      info.sse.get := csr.SSEVec.menvcfgSSE && MuxLookup(info.s2xlate, false.B)(Seq(
+        noS2xlate -> true.B,
+        onlyStage1 -> csr.SSEVec.henvcfgSSE,
+        allStage -> csr.SSEVec.henvcfgSSE
+      ))
+    }
     info.isHyper := req_out_v(i) && req_out(i).hyperinst
     info.mode := Mux(info.isHyper, csr.priv.spvp, mode_tmp)
     val isVirt = virt_out(i) || info.isHyper
@@ -198,7 +206,8 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     val addr = Mux(noTranslateReg, req(i).bits.pmp_addr, pmp_addr(i))
     io.pmpMode(i) := pmpMode(i)
     val pmpCmd = Mux(req_out(i).hlvx, TlbCmd.read_exec, req_out(i).cmd)
-    pmp_check(addr, req_out(i).size, pmpCmd, noTranslateReg, i)
+    pmp_check(addr, req_out(i).size, pmpCmd, noTranslateReg, i,
+      req_out(i).shadowStackUser.getOrElse(false.B))
     for (d <- 0 until nRespDups) {
       val mptTemp = Option.when(HasMptCheck)(mptPerm.get(i)(d))
       access_check(perm(i)(d), i, d, g_perm(i)(d), pbmt(i)(d), g_pbmt(i)(d), preCheck(i).preFault, mptPerm = mptTemp)
@@ -325,11 +334,16 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     result
   }
 
-  def pmp_check(addr: UInt, size: UInt, cmd: UInt, noTranslate: Bool, idx: Int): Unit = {
+  def pmp_check(addr: UInt, size: UInt, cmd: UInt, noTranslate: Bool, idx: Int,
+    isShadowStackAccess: Bool = false.B): Unit = {
     pmp(idx).valid := resp(idx).valid || noTranslate
     pmp(idx).bits.addr := addr
     pmp(idx).bits.size := size
-    pmp(idx).bits.cmd := cmd
+    // W=1, R=0 is a reserved PMP encoding, so checking W also guarantees R.
+    // SSPOPCHK is the only shadow-stack request whose original TLB command is read.
+    pmp(idx).bits.cmd := (if (HasShadowStack) {
+      Mux(isShadowStackAccess && cmd === TlbCmd.read, TlbCmd.write, cmd)
+    } else cmd)
   }
 
   def access_check(perm: TlbPermBundle, idx: Int, nDups: Int,
@@ -346,21 +360,22 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     resp(idx).bits.isForVSnonLeafPTE := check.io.out.isForVSnonLeafPTE
     resp(idx).bits.pbmt(nDups) := check.io.out.pbmt
     val cmd = accessInfo(idx).cmd
+    val isShadowStack = accessInfo(idx).isShadowStack.getOrElse(false.B)
     val isLd = TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd)
     val isSt = TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)
     val isInst = TlbCmd.isExec(cmd)
     when (RegNext(preFault.pf || preFault.gpf || preFault.af)) {
       resp(idx).bits.isForVSnonLeafPTE := false.B
-      resp(idx).bits.excp(nDups).pf.ld := RegNext(preFault.pf) && isLd
-      resp(idx).bits.excp(nDups).pf.st := RegNext(preFault.pf) && isSt
+      resp(idx).bits.excp(nDups).pf.ld := RegNext(preFault.pf) && isLd && !isShadowStack
+      resp(idx).bits.excp(nDups).pf.st := RegNext(preFault.pf) && (isSt || isShadowStack)
       resp(idx).bits.excp(nDups).pf.instr := RegNext(preFault.pf) && isInst
 
-      resp(idx).bits.excp(nDups).gpf.ld := RegNext(preFault.gpf) && isLd
-      resp(idx).bits.excp(nDups).gpf.st := RegNext(preFault.gpf) && isSt
+      resp(idx).bits.excp(nDups).gpf.ld := RegNext(preFault.gpf) && isLd && !isShadowStack
+      resp(idx).bits.excp(nDups).gpf.st := RegNext(preFault.gpf) && (isSt || isShadowStack)
       resp(idx).bits.excp(nDups).gpf.instr := RegNext(preFault.gpf) && isInst
 
-      resp(idx).bits.excp(nDups).af.ld := RegNext(preFault.af) && TlbCmd.isRead(cmd)
-      resp(idx).bits.excp(nDups).af.st := RegNext(preFault.af) && TlbCmd.isWrite(cmd)
+      resp(idx).bits.excp(nDups).af.ld := RegNext(preFault.af) && TlbCmd.isRead(cmd) && !isShadowStack
+      resp(idx).bits.excp(nDups).af.st := RegNext(preFault.af) && (TlbCmd.isWrite(cmd) || isShadowStack)
       resp(idx).bits.excp(nDups).af.instr := RegNext(preFault.af) && isInst
 
       resp(idx).bits.excp(nDups).vaNeedExt := false.B
@@ -555,69 +570,109 @@ class TlbAccessCheck(implicit p: Parameters) extends TlbModule with HasCSRConst 
   val af = (!onlyS2 && perm.af) || ((onlyS2 || allS2xlate) && g_perm.af)
 
   // Stage 1 perm check
-  val pf = perm.pf
   val isLd = TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd)
   val isSt = TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)
   val isInst = TlbCmd.isExec(cmd)
-  val ldUpdate = !perm.a && isLd // update A/D through exception
-  val stUpdate = (!perm.a || !perm.d) && isSt // update A/D through exception
-  val instrUpdate = !perm.a && isInst // update A/D through exception
-  val modeCheck = !(accessInfo.mode === ModeU && !perm.u || accessInfo.mode === ModeS && perm.u && (!accessInfo.sum || accessInfo.ifetch))
-  val ldPermFail = !(modeCheck && Mux(hlvx, perm.x, perm.r || accessInfo.s1Mxr && perm.x))
-  val stPermFail = !(modeCheck && perm.w)
-  val instrPermFail = !(modeCheck && perm.x)
-  val ldPf = (ldPermFail || pf) && isLd
-  val stPf = (stPermFail || pf) && isSt
-  val instrPf = (instrPermFail || pf) && isInst
+  val isShadowStack = accessInfo.isShadowStack.getOrElse(false.B)
+  val sspEn = accessInfo.sse.getOrElse(false.B)
   val isFakePte = !perm.v.get && !perm.pf && !perm.af && !onlyS2
   val isNonLeaf = !(perm.r || perm.w || perm.x) && perm.v.get && !perm.pf && !perm.af
   val s1_valid = accessInfo.translateEnable && !onlyS2
+  val isSspEncoding = Option.when(HasShadowStack) (perm.w && !perm.r && !perm.x)
+  val isSspReadOnlyEncoding = Option.when(HasShadowStack) (!perm.w && perm.r && !perm.x)
+  // Only classify an S/VS-stage PTE by XWR after a valid leaf PTE has been obtained.
+  // Invalid/non-resident PTEs must retain their page fault instead of being
+  // reclassified as an SS access fault merely because XWR is not 010/001.
+  val canCheckSspPageType = Option.when(HasShadowStack) (
+    s1_valid && perm.v.get && !perm.pf && !perm.af && !isFakePte && !isNonLeaf
+  )
+  val isSspPage = Option.when(HasShadowStack) (
+    canCheckSspPageType.get && sspEn && isSspEncoding.get
+  )
+  val isSspReadOnlyPage = Option.when(HasShadowStack) (
+    canCheckSspPageType.get && isSspReadOnlyEncoding.get
+  )
+  val reservedSspEncodingPf = Option.when(HasShadowStack) (
+    canCheckSspPageType.get && !sspEn && isSspEncoding.get
+  )
+
+  // A valid leaf page of a type other than 010/001 is an access fault for
+  // an SS instruction. Bare/only-stage-2 has no S/VS PTE to provide the SS
+  // attribute and is therefore also an access fault.
+  // write ssp page with non-ssp instruction cause ssp-af.
+  val sspWrongPageAf = Option.when(HasShadowStack) ( // store af
+    isShadowStack && canCheckSspPageType.get &&
+      !isSspPage.get && !isSspReadOnlyPage.get && !reservedSspEncodingPf.get
+  )
+  val sspBareAf = Option.when(HasShadowStack) (isShadowStack && !s1_valid) // store af
+  val sspPermAf = Option.when(HasShadowStack) (sspWrongPageAf.get || sspBareAf.get) // store af
+  val writeSspAf = Option.when(HasShadowStack) (isSspPage.get && isSt && !isShadowStack) // store af
+  val sspPermPf = Option.when(HasShadowStack) (isShadowStack && isSspReadOnlyPage.get) // sore pf
+  val instFetchSspAf = Option.when(HasShadowStack) (isInst && isSspPage.get) // inst af
+
+  val pf = perm.pf || reservedSspEncodingPf.getOrElse(false.B) || sspPermPf.getOrElse(false.B)
+  val ldUpdate = !perm.a && isLd && !isShadowStack // update A/D through exception
+  val stUpdate = ((!perm.a || !perm.d) && isSt) || (!perm.a && isLd && isShadowStack) // update A/D through exception
+  val instrUpdate = !perm.a && isInst // update A/D through exception
+  val modeCheck = !(accessInfo.mode === ModeU && !perm.u || accessInfo.mode === ModeS && perm.u && (!accessInfo.sum || accessInfo.ifetch))
+  val ldPermFail = !(modeCheck && (Mux(hlvx, perm.x, perm.r || accessInfo.s1Mxr && perm.x) || isSspPage.getOrElse(false.B)))
+  val stPermFail = !(modeCheck && perm.w)
+  val instrPermFail = !(modeCheck && perm.x)
+  val ldPf = (ldPermFail || pf) && isLd && !isShadowStack
+  val stPf = (stPermFail || pf) && (isSt || isShadowStack)
+  val instrPf = (instrPermFail || pf) && isInst
 
   // Stage 2 perm check
   val gpf = g_perm.pf
-  val g_ldUpdate = !g_perm.a && isLd
-  val g_stUpdate = (!g_perm.a || !g_perm.d) && isSt
+  val g_ldUpdate = !g_perm.a && isLd && !isShadowStack
+  val g_stUpdate = ((!g_perm.a || !g_perm.d) && isSt) || (!g_perm.a && isLd && isShadowStack)
   val g_instrUpdate = !g_perm.a && isInst
   val g_ldPermFail = !Mux(hlvx, g_perm.x, (g_perm.r || accessInfo.s2Mxr && g_perm.x))
   val g_stPermFail = !g_perm.w
   val g_instrPermFail = !g_perm.x
-  val ldGpf = (g_ldPermFail || gpf) && isLd
-  val stGpf = (g_stPermFail || gpf) && isSt
+  val ldGpf = (g_ldPermFail || gpf) && isLd && !isShadowStack
+  val stGpf = (g_stPermFail || gpf || (isShadowStack && !(g_perm.w && g_perm.r))) && (isSt || isShadowStack)
   val instrGpf = (g_instrPermFail || gpf) && isInst
   val s2_valid = accessInfo.translateEnable && (onlyS2 || allS2xlate)
 
   val fault_valid = s1_valid || s2_valid
 
+  val isSspAf = sspPermAf.getOrElse(false.B) || writeSspAf.getOrElse(false.B)
+  val isAf = af || isSspAf || instFetchSspAf.getOrElse(false.B)
+
   // when pf and gpf can't happens simultaneously
-  val hasPf = (ldPf || ldUpdate || stPf || stUpdate || instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
+  val hasPf = (ldPf || ldUpdate || stPf || stUpdate || instrPf || instrUpdate) && s1_valid && !isAf && !isFakePte && !isNonLeaf
   // isForVSnonLeafPTE is used only when gpf happens and it caused by a G-stage translation which supports VS-stage translation
   // it will be sent to CSR in order to modify the m/htinst.
   // Ref: The RISC-V Instruction Set Manual: Volume II: Privileged Architecture - 19.6.3. Transformed Instruction or Pseudoinstruction for mtinst or htinst
   val isForVSnonLeafPTE = isNonLeaf || isFakePte
   io.out.isForVSnonLeafPTE := isForVSnonLeafPTE
-  io.out.excp.pf.ld := (ldPf || ldUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
-  io.out.excp.pf.st := (stPf || stUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
-  io.out.excp.pf.instr := (instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
+  io.out.excp.pf.ld := (ldPf || ldUpdate) && s1_valid && !isAf && !isFakePte && !isNonLeaf
+  io.out.excp.pf.st := (stPf || stUpdate) && s1_valid && !isAf && !isFakePte && !isNonLeaf
+  io.out.excp.pf.instr := (instrPf || instrUpdate) && s1_valid && !isAf && !isFakePte && !isNonLeaf
   // NOTE: pf need && with !af, page fault has higher priority than access fault
   // but ptw may also have access fault, then af happens, the translation is wrong.
   // In this case, pf has lower priority than af
 
-  io.out.excp.gpf.ld := (ldGpf || g_ldUpdate) && s2_valid && !af && !hasPf
-  io.out.excp.gpf.st := (stGpf || g_stUpdate) && s2_valid && !af && !hasPf
-  io.out.excp.gpf.instr := (instrGpf || g_instrUpdate) && s2_valid && !af && !hasPf
+  io.out.excp.gpf.ld := (ldGpf || g_ldUpdate) && s2_valid && !isAf && !hasPf
+  io.out.excp.gpf.st := (stGpf || g_stUpdate) && s2_valid && !isAf && !hasPf
+  io.out.excp.gpf.instr := (instrGpf || g_instrUpdate) && s2_valid && !isAf && !hasPf
 
   val mptValid = accessInfo.mptCheckOnly
   val mptPerm = io.in.mptPerm
   val mptInstf = Option.when(HasMptCheck)(!mptPerm.get.x && isInst)
-  val mptWf = Option.when(HasMptCheck)(!(mptPerm.get.r && mptPerm.get.w) && isSt)
+  val mptWf = Option.when(HasMptCheck)(!(mptPerm.get.r && mptPerm.get.w) && (isSt || isShadowStack))
   val mptRf = Option.when(HasMptCheck)(!mptPerm.get.r && isLd)
   val mptAf = Option.when(HasMptCheck)(mptPerm.get.af.get)
-  io.out.excp.af.ld := (af && TlbCmd.isRead(cmd) && fault_valid) ||
-    (if (HasMptCheck) ((mptRf.get || (mptAf.get && TlbCmd.isRead(cmd))) && mptValid.get) else false.B)
-  io.out.excp.af.st := (af && TlbCmd.isWrite(cmd) && fault_valid) ||
-    (if (HasMptCheck) ((mptWf.get || (mptAf.get && TlbCmd.isWrite(cmd))) && mptValid.get) else false.B)
+  io.out.excp.af.ld := (af && TlbCmd.isRead(cmd) && !isShadowStack && fault_valid) ||
+    (if (HasMptCheck) ((mptRf.get || (mptAf.get && TlbCmd.isRead(cmd))) && !isShadowStack && mptValid.get) else false.B)
+  io.out.excp.af.st := (af && (TlbCmd.isWrite(cmd) || isShadowStack) && fault_valid) ||
+    (if (HasMptCheck) ((Mux(isShadowStack, mptRf.get || mptWf.get || (mptAf.get && TlbCmd.isRead(cmd)), mptWf.get) ||
+      (mptAf.get && TlbCmd.isWrite(cmd))) && mptValid.get) else false.B) ||
+    isSspAf
   io.out.excp.af.instr := (af && TlbCmd.isExec(cmd) && fault_valid) ||
-    (if (HasMptCheck) ((mptInstf.get || (mptAf.get && TlbCmd.isExec(cmd))) && mptValid.get) else false.B)
+    (if (HasMptCheck) ((mptInstf.get || (mptAf.get && TlbCmd.isExec(cmd))) && mptValid.get) else false.B) ||
+    instFetchSspAf.getOrElse(false.B)
 
   io.out.excp.vaNeedExt := true.B
   io.out.excp.isHyper := accessInfo.isHyper

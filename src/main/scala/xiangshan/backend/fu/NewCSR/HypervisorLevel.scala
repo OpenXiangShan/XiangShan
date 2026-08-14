@@ -80,6 +80,15 @@ trait HypervisorLevel { self: NewCSR =>
     when(!menvcfg.DTE) {
       regOut.DTE := 0.U
     }
+    if (HasShadowStack) {
+      // menvcfg.SSE=0 makes henvcfg.SSE read-only zero. The explicit
+      // self-assignment also prevents the generic CSRModule write path from
+      // updating the hidden register while the parent bit is closed.
+      when(!menvcfg.SSE) {
+        regOut.SSE := 0.U
+        reg.SSE := reg.SSE
+      }
+    }
   }).setAddr(CSRs.henvcfg)
 
   val htval = Module(new CSRModule("Htval", new XtvalBundle) with TrapEntryHSEventSinkBundle)
@@ -361,7 +370,7 @@ class HgatpBundle extends CSRBundle {
   val PPN = RW(43, 0).withReset(0.U).withDescription("Root page-table physical page number for G-stage translation.")
 }
 
-class HEnvCfg extends EnvCfg {
+class HEnvCfg(implicit p: Parameters) extends EnvCfg {
   if (CSRConfig.EXT_SSTC) {
     this.STCE.setRW().withReset(1.U)
   }
