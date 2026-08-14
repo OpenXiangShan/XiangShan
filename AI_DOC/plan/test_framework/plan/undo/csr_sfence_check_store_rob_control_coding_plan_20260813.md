@@ -19,16 +19,17 @@
 | `check_store` 保留位 | 自动主表最后一个 UID，固定为 `N`，其 `op_class=MEMBLOCK_OP_CLASS_CHECK_STORE`。CSR/SFence 随机计划不得占用该 UID。 | `N=10000` 时 UID `10000` 是第 10001 条表项。 |
 | 控制标记 | `CSR_CONTROL`、`SFENCE_CONTROL` 或 `CHECK_STORE` 三类不进入 LSQ/issue 的主表条目。 | UID 15 被 CSR 预约后，UID 15 不再生成普通 load/store。 |
 | control-active | 控制标记已进入 `uid_by_active_rob`，可被当前 modeled ROB head/commit cursor 识别；但没有 LQ/SQ map、LSQ reservation 或 issue queue 项。 | 控制 UID 10 可成为 ROB head，但没有 `lqIdx`/`sqIdx`。 |
-| control topology mode | testcase 或 `basicTest` 的 VSEQ allowlist 在 build/config 阶段写入的主表构建和控制 worker 拓扑。它不是从 testcase 类名、`MEMBLOCK_USE_MANUAL_MAIN_TABLE` 或其他 plusarg 推测的临时判断；`DISABLED` 为默认值，`AUTO_MAIN_TABLE`、`MANUAL_MAIN_TABLE`、`MANUAL_CONTROL_MAIN_TABLE` 分别表示自动控制表、普通手工表、手工控制表。 | `AUTO_MAIN_TABLE` 自动生成 `N+1` 表；`MANUAL_CONTROL_MAIN_TABLE` 允许手工表显式放控制标记。 |
+| control topology mode | 公共 plus `MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE` 在 testcase build 前经 `plus.sv -> seq_csr_common` 解析并冻结的主表构建和控制 worker 拓扑。它不是从 testcase 类名、`VSEQ_MAIN`、`MEMBLOCK_USE_MANUAL_MAIN_TABLE` 或其他运行期现象推测的临时判断；值 `0/1/2/3` 分别表示 `DISABLED`、`AUTO_MAIN_TABLE`、`MANUAL_MAIN_TABLE`、`MANUAL_CONTROL_MAIN_TABLE`。 | `AUTO_MAIN_TABLE` 自动生成 `N+1` 表；`MANUAL_CONTROL_MAIN_TABLE` 允许手工表显式放控制标记。 |
 | 静态等待屏障 | 控制标记处于 `WAIT_OLDER_ROB_COMMIT` 的阶段。它阻止年轻 UID admission，但尚未绑定 action owner，也不属于普通 redirect/reissue 实例。 | UID 10 等 UID 0..9 连续 terminal done。 |
 | action owner | 已开始实际控制动作的唯一身份，至少为 `uid + dynamic_epoch + action_generation`。 | 同一 UID 的旧 token 不能完成 redirect/reset 后的新动作。 |
 | action token | 放入 CSR 或 SFence 持久 queue 的工作项。event 仅唤醒 worker，token 才是动作存在和所有权依据。 | `csr_control_action_q` 中的一项 CSR 配置动作。 |
 | completion profile | 控制动作的完成事实种类。首版只有 `RUNTIME_CSR_SNAPSHOT` 与 `L2_FLUSH_LEVEL`。 | 普通 CSR 等 runtime snapshot；`check_store` 等 L2 done high/low。 |
 | `flushSb` attached | 请求已从 `flushsb_req_q` 被唯一 LSQ commit consumer 取走，并附加到待发送 `lsqcommit` xaction。它不是 driver 已送出、更不是 DUT monitor 已确认 pulse。 | attached 后请求仍处于 `WAIT_FLUSHSB_REQ`，不能消费 `sbIsEmpty`。 |
 | `flushSb` sendover | LSQ commit sequence 的 `finish_item()` 已由 driver 的 `item_done()` 返回，表示本次 `flushSb=1` 已交付到 driver interface。它仍不等于 monitor 对 DUT 结果的确认。 | sendover 后才进入 `WAIT_SB_EMPTY`，随后只接受 owner 化且新于 sendover baseline 的 `sbIsEmpty=1`。 |
-| C0/C4 | SFence monitor 观察到 `sfence.valid` 的 sample 为 C0；既有 L2TLB adapter 对应 lifecycle event 完成生效的 sample 为 C4。V2 延迟常量为 `MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES=4`。 | C0 后不能立即 release admission。 |
+| C0/C4 | SFence monitor 观察到 `sfence.valid` 的 sample 为 C0；既有 L2TLB adapter 对应 lifecycle event 完成生效的 sample 为 C4。两者都绑定当前 `l2tlb_current_reset_epoch`，不能与本专项的 `control_reset_epoch` 混用。V2 延迟常量为 `MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES=4`。 | C0 后不能立即 release admission。 |
 | done observation | DCache monitor 发布的 `io_l2_flush_done` 最新采样，含每次采样递增的序号。它不携带 UID，也不直接写 `status_transaction`。 | `check_store` 只消费 assert 之后的首个 high 与 release 之后的首个 low。 |
 | control-runtime producer ack | CSR、DCache、ctrl monitor 观察到当前 `control_reset_request` 后各自首个有效采样发布的代际确认。它适用于初始 bootstrap 与后续 reset，只证明 producer 已进入当前 `control_reset_epoch`，不能作为 CSR snapshot、`sbIsEmpty` 或 L2 done 完成事实。 | 三条 ack 与 CSR driver ack 齐备后才打开 `control_runtime_ready`；下一采样起才发布可消费 observation。 |
+| control CSR baseline | CSR monitor 在当前 `control_reset_epoch` 的 ready 后首次发布 runtime snapshot 的有效性与最小序号。它只证明 global latest 已属于当前 control epoch，不是任何 action 长期复用的 CSR payload。 | ready 打开但 baseline 尚未到达时，`CSR_CONFIG_PENDING` 保持等待；到达后每个 CSR/L2 action 仍单独冻结启动时的 latest snapshot。 |
 | C0 armed | SFence worker 已在把 item 交给 driver 前冻结 event baseline 并登记当前 owner/payload 的 C0 匹配资格。它允许 adapter 接住 driver/monitor 同拍产生的 C0，但本身不表示接口已交付。 | C0 可以先被记录；`finish_item()` 后的 `SFENCE_SENDOVER` 才允许 service 消费该 record。 |
 
 以下函数名在首版固定，后续专项只能在其配置入口内扩展：
@@ -77,7 +78,7 @@ data.main_trans_num：          N + 1
 
 这里的 `N` 是“末尾 `check_store` 之前的固定表位数”。若控制随机命中某个 slot，该 slot 从普通访存变为控制标记，故真实普通访存条数会相应减少。这是同时满足“固定 UID `N` 为 `check_store`”和“不为控制标记扩展表长度”的唯一语义；日志、dump 和 testcase 名称不得再把启用控制后的 `N` 误写成“保证生成 N 笔普通访存”。若未来需要保证 `N` 笔真实普通访存，必须另行设计会随控制个数增长的总表长度，不能隐式改变本方案。
 
-手工主表保持原语义：不自动追加 `check_store`，不自动应用 CSR/SFence 间隔预约。普通手工表声明 `MANUAL_MAIN_TABLE`，其中出现控制 `op_class` 直接 `uvm_fatal`；directed testcase 如需控制条目，必须显式声明 `MANUAL_CONTROL_MAIN_TABLE`、构造三种 `op_class` 和连续 `robIdx`，从而启动完整 control worker/barrier/bootstrap flow。
+手工主表保持原语义：不自动追加 `check_store`，不自动应用 CSR/SFence 间隔预约。普通手工表以 `+MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE=2` 选择 `MANUAL_MAIN_TABLE`，其中出现控制 `op_class` 直接 `uvm_fatal`；directed testcase 如需控制条目，必须以值 `3` 选择 `MANUAL_CONTROL_MAIN_TABLE`、构造三种 `op_class` 和连续 `robIdx`，从而启动完整 control worker/barrier/bootstrap flow。
 
 ### 主表构建入口与 legacy 手工 plus 的边界
 
@@ -94,7 +95,8 @@ AUTO_MAIN_TABLE：
 DISABLED：
   generic build_main_table() 保持既有 legacy 行为：plus 为 1 时导入既有普通手工表，
   plus 为 0 时调用既有普通随机建表；两条路径都不注入控制标记、不追加 check_store、
-  不启动 control worker。
+  不启动 control worker。post-build 发现任一 CSR/SFence/check_store op_class 立即 uvm_fatal；
+  带控制条目的 legacy manual import 必须改用 MANUAL_CONTROL_MAIN_TABLE。
 
 MANUAL_MAIN_TABLE：
   只能由 direct manual builder 调用 clear/set/import_manual_main_table() 建表；
@@ -110,9 +112,20 @@ MANUAL_CONTROL_MAIN_TABLE：
 
 `build_control_auto_main_table()` 是本专项新增的自动控制建表 helper；既有 `build_random_main_table()` 保留为 `DISABLED` legacy random path，避免把 `N+1` 和 `check_store` 隐式施加到无关 testcase。任一 direct builder 误调用 generic `build_main_table()`，或 `AUTO_MAIN_TABLE` 误进入 legacy manual 分支，均直接 `uvm_fatal`，不得根据 plus 静默切换 mode。
 
-### plus 参数和建表校验
+### 控制拓扑 plus 参数、间隔 plus 参数和建表校验
 
-新增六个公共 plus 参数，默认都不生成 CSR/SFence 标记：
+新增一个互斥的公共控制拓扑 plus 参数。它是四个 mode 的唯一配置源，默认 `0`，以保证所有既有 testcase 在未更新 cfg 时保持无控制专项的 legacy 行为：
+
+| plus 参数 | 类型 | 取值 | 语义 |
+|---|---|---|---|
+| `MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE` | `int` | `0` | `DISABLED`：不启动 control worker、barrier service、bootstrap 或 control drain；generic main sequence 保持既有 random/manual legacy 建表语义。 |
+| `MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE` | `int` | `1` | `AUTO_MAIN_TABLE`：只允许 generic auto main sequence；生成 `N+1`、预约 CSR/SFence、末尾固定 `check_store`，并启动完整控制拓扑。 |
+| `MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE` | `int` | `2` | `MANUAL_MAIN_TABLE`：只允许普通 direct-manual/cancel-reconcile main sequence；拒绝控制 `op_class`，不启动控制拓扑。 |
+| `MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE` | `int` | `3` | `MANUAL_CONTROL_MAIN_TABLE`：只允许专项 direct manual-control main sequence；手工构造控制条目并启动完整控制拓扑。 |
+
+`plus.sv` 以 `int` 读取该参数；`seq_csr_common` 保留 signed raw 值，新增纯校验 `check_control_worker_topology_mode()` 并由 `validate_and_clamp()` 调用，对范围 `[0:3]` 做 fail-fast 校验而不做 clamp；随后 `get_control_worker_topology_mode()` 返回已校验的枚举值。公共初始化 helper 在 build/config 阶段从该 getter 向 `memblock_sync_pkg` 写入一次不可变 mode snapshot；后续 testcase、VSEQ、main sequence、worker 和 service 只读该 snapshot，任何第二写者或运行中改写均 `uvm_fatal`。不采用四个独立 bit plus，避免出现多个 mode 同时为 1 的冲突配置。
+
+新增六个公共间隔 plus 参数，默认都不生成 CSR/SFence 标记：
 
 | 类型 | 使能 | 最小间隔 | 最大间隔 |
 |---|---|---|---|
@@ -124,8 +137,9 @@ MANUAL_CONTROL_MAIN_TABLE：
 1. `enable=0` 时对应 min/max 不参与预约。
 2. `enable=1` 时必须满足 `min_interval >= 1` 且 `max_interval >= min_interval`；`build_control_auto_main_table()` 在 AUTO 路径开始前调用公共校验 helper，非法配置直接 `uvm_fatal`。MANUAL_CONTROL 不消费这六个参数，不能因无关 interval 值被拒绝。
 3. `N` 仍必须非零；自动表总长度 `N+1` 溢出时直接 `uvm_fatal`。
-4. 这六个 key 必须同步进入 `env/plus.sv`、`seq_csr_common.sv` 的静态字段/读取/校验/getter，以及 `seq/plus_cfg/default.cfg`。专项 testcase cfg 只覆盖需要的 key。
-5. 不新增 `check_store` 使能开关。自动主表无条件保留末尾 `check_store`；手工表无条件不追加。
+4. `MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE` 与这六个 key 必须同步进入 `env/plus.sv`、`seq_csr_common.sv` 的静态字段/读取/校验/getter，以及 `seq/plus_cfg/default.cfg`。默认 cfg 固定写 mode=`0`。现有 direct-manual/cancel-reconcile preset 必须显式写 mode=`2`；新增 AUTO 和 MANUAL_CONTROL 专项 preset 分别写 mode=`1` 与 mode=`3`。用户命令行 `plus_arg` 仍可按既有优先级覆盖 preset。
+5. mode 只选择控制主表/worker 拓扑；`VSEQ_MAIN`、testcase 类和 sequence 类只选择场景与 main sequence，不能写入或覆盖 mode。若所选 main sequence 与 mode 不匹配，必须在 body 入口 `uvm_fatal`，不能隐式改 mode、切换 builder 或回退为其他模式。
+6. 不新增 `check_store` 使能开关。自动主表无条件保留末尾 `check_store`；手工表无条件不追加。
 
 ### 双计划预约算法
 
@@ -178,14 +192,15 @@ build_control_auto_main_table(N):
 | `memblock_control_completion_profile_e` | `RUNTIME_CSR_SNAPSHOT`、`L2_FLUSH_LEVEL` | token 决定完成事实来源，禁止把 L2 flush 当作 CSR snapshot。 |
 | `memblock_control_owner_t` | `valid, uid, dynamic_epoch, action_generation, kind` | 所有 token、完成记录、状态迁移使用同一 owner 比较函数。 |
 | `memblock_csr_control_action_t` | owner、profile、expected runtime 字段、snapshot baseline、L2 phase | CSR queue 的持久工作项。 |
-| `memblock_sfence_control_action_t` | owner、expected fence 字段、`start_item()` 前冻结的 C0 event baseline/reset epoch、`sfence_c0_match_armed` | SFence queue 的持久工作项；armed 或 sendover owner 都可接收同拍 C0，service 只在 sendover 后消费。 |
+| `memblock_sfence_control_action_t` | owner、expected fence 字段、`start_item()` 前冻结的 C0 event baseline、`l2tlb_reset_epoch_at_arm`、`sfence_c0_match_armed` | SFence queue 的持久工作项；armed 或 sendover owner 都可接收同拍 C0，service 只在 sendover 后消费。 |
 | L2 done wire observation | `memblock_sync_pkg` 定义的 primitive `valid/level/observation_seq/control_reset_epoch` latest 槽；DCache monitor 只发布它。`control_reset_epoch` 是控制生命周期自己的 reset 代际，不复用 L2TLB epoch；ASSERT/RELEASE baseline 与 high/low 匹配必须同代。 | seq 层 service 读取 wire observation 后转换为本地高层完成事实。 |
 | `sbIsEmpty` wire observation | `memblock_sync_pkg` 定义的 primitive `valid/level/observation_seq/control_reset_epoch` latest 槽；ctrl monitor 为每个有效 sample 发布。它与 owner 分离，控制 service 通过 request 的 sendover baseline 归属。 | request sendover 前为高的旧 level 不得完成新 request。 |
 | `dispatch_raw_ctrl_t.sb_is_empty_observation_seq` | common/sync 层 raw struct 的 primitive 字段；与 raw ctrl 一起冻结的 `sbIsEmpty` observation 序号。它是 raw 的不可变 provenance，不得在 deferred 消费时从 latest 槽重新读取。 | raw 在 sample 20 采集、sample 24 才消费时，仍使用 sample 20 的序号。 |
-| C0/C4 wire lifecycle record | `memblock_sync_pkg` 以 `lifecycle_event_seq + reset_epoch` 为键保存的 primitive payload、anchor/due、claim code 和消费位；armed 控制 fence 的 C0 可在 sendover 前落记录，普通 fence 在 C4 后按既有逻辑回收。 | seq 层将匹配 record 转为控制 action 的 C0/C4 完成事实。 |
+| C0/C4 wire lifecycle record | `memblock_sync_pkg` 以 `lifecycle_event_seq + l2tlb_reset_epoch` 为键保存的 primitive payload、anchor/due、claim code 和消费位；armed 控制 fence 的 C0 可在 sendover 前落记录，普通 fence 在 C4 后按既有逻辑回收。它不使用 `control_reset_epoch`。 | seq 层将匹配 record 转为控制 action 的 C0/C4 完成事实。 |
 | `l2_flush_level_hold` | 唯一 CSR driver hold 状态，至少包含 `valid`、owner(uid/epoch/generation)、完整 CSR baseline 和 `release_requested`。driver 是该私有 hold 的唯一写者；control service 只能发布 reset request，不能直接清 hold。 | ASSERT 后即使 sequencer 暂无 item，driver idle 仍依据同一 baseline 保持 `flush_l2_enable=1`。 |
 | `L2_FLUSH_ASSERT/RELEASE` metadata | 写入 `csr_ctrl_agent_agent_xaction` 的非 DUT 字段，携带 owner 和动作类型；sequence 只填写 metadata，driver 在真实 item 边界建立/清除 hold。 | sequence 不直接访问 driver 私有变量；ASSERT item 完成后由 driver 深拷贝 baseline。 |
 | `control_post_reset_producer_ack` | 以 `control_reset_epoch + producer_kind` 保存 CSR/DCache/ctrl 三个 producer 的首个 post-reset sample 确认；每个 producer 只有一个有界槽。 | `complete_control_runtime_reset()` 只检查这三个 ack 与 driver ack，不读取任何控制完成 observation。 |
+| `control_csr_runtime_baseline` | CSR monitor 在当前 control epoch 的 ready 后首次实际发布 runtime snapshot 时写入 `valid/epoch/first_snapshot_seq` 的有界槽。它只作为 action 可读取 global latest 的代际 gate；每个 action 从 latest API 一次读取当前 raw/seq 并冻结到自己的 token。 | `CSR_CONFIG_PENDING` 等该槽与当前 epoch 匹配后才创建 token。 |
 | `l2_flush_release_request_q` | control service 写入、CSR worker 消费的有界 owner 化 RELEASE 请求队列；每项包含完整 owner、control reset epoch 和 release baseline。它是 high 完成到 RELEASE 驱动之间的持久交接，不依赖 worker 是否正好在某个检查点运行。 | `WAIT_L2_FLUSH_DONE` 只 push 一次；worker 按 owner pop 后生成 `L2_FLUSH_RELEASE` item，并回写 consumed/sendover 事实。 |
 | control-runtime bootstrap | 任一 active control topology 的主表构建完成后建立首个 `control_reset_epoch` 和 reset request 的一次性初始化；它不等待物理 reset edge，也不创建控制 token。 | AUTO 或 manual-control 主表完成后共同 hook 调用 `initialize_control_runtime_bootstrap()`，随后由四个 producer ack 打开 runtime ready。 |
 
@@ -193,7 +208,7 @@ build_control_auto_main_table(N):
 
 该边界必须落实到文件接口：agent xaction/driver 的字段类型只能是 `bit`、定宽 packed integer 或现有 agent/common 可见的 primitive typedef；不得在 agent package 的声明、constraint、driver helper、`memblock_sync_pkg` API 参数或 common package struct 中写 `memblock_control_owner_t`、`memblock_control_kind_e`、`memblock_control_completion_profile_e`、`memblock_l2_flush_done_observation_t`、`sfence_lifecycle_observation` 等 seq 层类型。`owner_kind_code`/`action_kind_code` 使用固定数值编码，并在 seq 层提供唯一 `decode_control_wire_metadata()` 转换；未知编码、metadata version 不匹配或 owner 字段不完整时立即 `uvm_fatal`。`memblock_sync_pkg` 还必须独立定义和保存 L2 done、`sbIsEmpty`、C0/C4 的 primitive wire observation/record，并只提供 publish/get/clear API；DCache/ctrl/Fence monitor 仅调用这些 API。seq 层 `memblock_control_barrier_service` 读取 wire record 后再转换成高层 owner/完成事实，`status_transaction` 只保存已匹配结果。新增 agent/common 文件仍按现有 filelist 的 agent/common 在前、seq 在后的顺序加入，不能通过反向 import 绕过编译依赖。
 
-`status_transaction` 为控制条目新增控制元数据，至少包含：控制类型/状态、静态 barrier 标记、已绑定 owner、`control_commit_ready`、CSR runtime snapshot baseline/expected/已归档 snapshot 和 seq、CSR control reset generation、`flushSb` request id、SFence C0 lifecycle event id/due sample、L2 assert/release observation baseline、`control_reset_epoch`、high/low 是否已经消费、RELEASE request id/queued/consumed/sendover 标志。普通访存状态不复用这些字段，control 状态默认 `NONE`。
+`status_transaction` 为控制条目新增控制元数据，至少包含：控制类型/状态、静态 barrier 标记、已绑定 owner、`control_commit_ready`、CSR runtime snapshot baseline/expected/已归档 snapshot 和 seq、CSR control reset generation、`flushSb` request id、SFence C0 lifecycle event id/due sample/`l2tlb_reset_epoch_at_arm`、L2 assert/release observation baseline、`control_reset_epoch`、high/low 是否已经消费、RELEASE request id/queued/consumed/sendover 标志。普通访存状态不复用这些字段，control 状态默认 `NONE`。
 
 `common_data_transaction` 新增以下唯一来源：
 
@@ -203,7 +218,7 @@ build_control_auto_main_table(N):
 | `csr_control_action_q`、`sfence_control_action_q` | token 的持久 FIFO；控制动作按屏障串行，队列仍保留用于 worker 启动先后和 event 不丢失。 |
 | `csr_control_action_available_ev`、`sfence_control_action_available_ev` | `uvm_event`，只用于唤醒 worker。入队完成、状态更新完成后才 trigger。 |
 | owner 化 `flushSb` 生命周期记录 | 全局只允许一个 active request 和一个有界 completed owner slot；按 `req_id` 保存 attached、sendover baseline 与 completed 副本，control service 以 request id 直接查询，消费确认后立即清 slot，reset/abort 也清理。 |
-| SFence C0/C4 wire lifecycle record | adapter 通过 `memblock_sync_pkg` 发布/持久保存 primitive `lifecycle_event_seq + reset_epoch + sample` 事实；不携带 UID、不让 monitor 写 status。seq service 负责转换和 owner 匹配。 |
+| SFence C0/C4 wire lifecycle record | adapter 通过 `memblock_sync_pkg` 发布/持久保存 primitive `lifecycle_event_seq + l2tlb_reset_epoch + sample` 事实；不携带 UID、不让 monitor 写 status。seq service 负责转换和 owner 匹配。 |
 | L2 done wire observation | DCache monitor 向 `memblock_sync_pkg` 覆盖发布 primitive latest 槽；不建无限 raw queue。 |
 
 现有 `memblock_flushsb_req_t` 必须增加可选 `owner_valid`、`owner_uid`、`owner_dynamic_epoch`、`owner_kind`、`action_generation`。周期性或既有 directed 请求保持 `owner_valid=0`；只有 owner 化请求才写入生命周期记录。为兼容现有 legacy producer，保留 `push_flushsb_request(source)` 的无 owner 入口，另增加 `push_owner_flushsb_request(owner, output req)`；后者负责分配 `req_id`、入队并把完整 request 返回给控制 service，避免调用方自行复制 request id。现有 `mark_flushsb_driven()` 拆成两个语义固定的 helper：
@@ -319,34 +334,33 @@ try_retire_control_committed_uid():
 
 ## 控制 service 的调用顺序
 
-`memblock_control_barrier_service` 是独立 helper，持有 `common_data_transaction` 与 `lsq_commit_handler` 的引用。topology 判定只读取 testcase build/config 阶段写入的显式 mode，不通过 testcase 类名、派生类名、`MEMBLOCK_USE_MANUAL_MAIN_TABLE` 或其他 plusarg 猜测：`uses_control_barrier_topology()` 对 `AUTO_MAIN_TABLE` 和 `MANUAL_CONTROL_MAIN_TABLE` 返回 1；`uses_auto_control_barrier_topology()` 只用于自动 `N+1` 建表、CSR/SFence 随机预约和末尾 `check_store`。mode 是 testcase-owned runtime state，保存于 `memblock_sync_pkg`；testcase/VSEQ allowlist 是唯一写者，sequence/service 只读，`reset_all_tables()` 不得清除或改写该 mode。
+`memblock_control_barrier_service` 是独立 helper，持有 `common_data_transaction` 与 `lsq_commit_handler` 的引用。topology 判定只读取由公共 plus 冻结的 mode snapshot，不通过 testcase 类名、派生类名、`VSEQ_MAIN`、`MEMBLOCK_USE_MANUAL_MAIN_TABLE` 或其他运行期现象猜测：`uses_control_barrier_topology()` 对 `AUTO_MAIN_TABLE` 和 `MANUAL_CONTROL_MAIN_TABLE` 返回 1；`uses_auto_control_barrier_topology()` 只用于自动 `N+1` 建表、CSR/SFence 随机预约和末尾 `check_store`。`MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE` 是唯一配置输入，`memblock_sync_pkg` 中的 snapshot 是唯一运行期读取对象；`reset_all_tables()` 不得清除或改写该 snapshot。
 
-1. 定义 `memblock_control_worker_topology_mode_e={DISABLED,AUTO_MAIN_TABLE,MANUAL_MAIN_TABLE,MANUAL_CONTROL_MAIN_TABLE}`，默认 `DISABLED`；同时提供只读纯判定 `uses_auto_control_barrier_topology()` 和 `uses_control_barrier_topology()`，以及派生位 `control_worker_topology_active=uses_control_barrier_topology()`。这三个 helper 只检查 mode，不读取或校验 `MEMBLOCK_USE_MANUAL_MAIN_TABLE`。
-2. `tc_base` 新增 virtual `get_control_worker_topology_mode()`，默认返回 `DISABLED`；其 `build_phase()` 在创建 env/default sequence 前写入该返回值。`tc_dispatch_real_smoke` 覆写该 getter 返回 `AUTO_MAIN_TABLE`；`tc_dispatch_real_store_smoke` 等真正自动路径自然继承。`configure_real_smoke_default_sequences()` 不得无条件覆盖 CSR/Fence：它先读取已写入的 mode，只有 AUTO 或 MANUAL_CONTROL 才替换为两个 control worker，MANUAL_MAIN/DISABLED 则保留该 testcase 原有 generic/legacy default。这样派生的 direct-manual testcase 即使复用 real-smoke build_phase，也不会得到错误 worker。
-3. `tc_dispatch_real_mixed_wb_smoke` 覆写该 getter 返回 `MANUAL_MAIN_TABLE`。由于 virtual dispatch 在其父类 build_phase 中已经生效，它启动 `memblock_main_dispatch_manual_main_table_sequence` 前 mode 已是 MANUAL；其 direct builder 不依赖、也不校验 `MEMBLOCK_USE_MANUAL_MAIN_TABLE`。`tc_dispatch_real_mixed_sta_wb_smoke` 通过继承该覆写保持 MANUAL。后续任何覆写 `run_real_smoke_sequence()`、或使用 `memblock_main_dispatch_manual_main_table_sequence` / `memblock_main_dispatch_cancel_reconcile_sequence` 的 testcase/VSEQ，必须在同一层显式选择 MANUAL 或 MANUAL_CONTROL，不能因为祖先是 `tc_dispatch_real_smoke` 就继承 AUTO。该 mode 发现 CSR/SFence/`check_store` 主表项立即 `uvm_fatal`，以保证普通手工 testcase 不会意外启动控制协议。
-4. 新增专项 direct testcase 覆写 getter 返回 `MANUAL_CONTROL_MAIN_TABLE`，并在其专用 manual-control builder 中显式构造 CSR/SFence/`check_store` 与连续 `robIdx`。该 builder 不自动 `N+1` 追加或间隔预约，但完整启用 barrier service、bootstrap、reset gate、drain/worker shutdown；同一个按-mode 的 default-sequence helper 会把其 CSR/Fence default 替换为 control worker。
-5. `basicTest` 增加明确的 `get_control_worker_topology_mode_for_vseq(main_vseq_name)` allowlist：默认 `DISABLED`；`memblock_dispatch_real_smoke_vseq` 映射为 `AUTO_MAIN_TABLE`；当前 `memblock_dispatch_real_cancel_reconcile_vseq` 映射为 `MANUAL_MAIN_TABLE`；未来手工控制 VSEQ 必须以显式注册项映射为 `MANUAL_CONTROL_MAIN_TABLE`。在解析 `VSEQ_MAIN` 后立即写 mode，并只在 AUTO/MANUAL_CONTROL 时覆盖 CSR/Fence worker default。不得按 VSEQ 类名包含关系、testcase 类名或 plusarg 猜测；未注册 VSEQ 即使名称相似也保持 `DISABLED`。
-6. `basicTest` 的 AUTO VSEQ 仍经 generic `build_main_table()`，因而只在该入口要求 `MEMBLOCK_USE_MANUAL_MAIN_TABLE=0`；它不通过 plus 改写 mode。software-only、其他 basicTest VSEQ 和普通 manual table 保持 `DISABLED` 或 `MANUAL_MAIN_TABLE`，继续使用原 generic/legacy producer 与 stop 语义。
+1. 在 `memblock_sync_pkg` 定义 `memblock_control_worker_topology_mode_e={DISABLED=0,AUTO_MAIN_TABLE=1,MANUAL_MAIN_TABLE=2,MANUAL_CONTROL_MAIN_TABLE=3}`，并由 `seq_csr_common::get_control_worker_topology_mode()` 返回已经过范围校验的值。新增 `initialize_control_worker_topology_from_plus()`：它将 plus 值冻结到 `memblock_sync_pkg`；同一测试中再次调用只能读到相同值，否则 `uvm_fatal`。`tc_base` 在 `seq_csr_common::reload_from_plus()` 后调用它；`basicTest` 则必须先解析 `VSEQ_MAIN`、得到场景是否具备 dispatch capability，再调用它和后续 compatibility check，绝不能让 VSEQ 写 mode。与此同时提供只读纯判定 `uses_auto_control_barrier_topology()` 和 `uses_control_barrier_topology()`，以及派生位 `control_worker_topology_active=uses_control_barrier_topology()`。这些 helper 只检查 snapshot，不读取或校验 `MEMBLOCK_USE_MANUAL_MAIN_TABLE`。
+2. 新增 `configure_control_worker_default_sequences_from_mode()`，其抽象职责是：在现有 testcase 已完成 legacy/default-sequence 配置后，若 mode 为 AUTO 或 MANUAL_CONTROL，则将 CSR/Fence sequencer 的 `main_phase.default_sequence` 替换为两个 control worker；若 mode 为 DISABLED 或 MANUAL_MAIN，则不覆盖既有 generic/legacy default。该 helper 在安装 worker 前先按当前 testcase/VSEQ 已知的 dispatch capability 做 mode/场景一致性检查：software-only/no-dispatch 传 mode=`1/3` 必须立即 fatal。`tc_base`、`tc_dispatch_real_smoke` 和 `basicTest` 必须在各自最后一次默认 sequence 写入后调用该 helper；它允许重复调用，但只允许写入相同 control worker 配置。这样 direct-manual testcase 即使继承 real-smoke build 逻辑，也只由 plus 决定是否覆盖 worker，不能因继承关系误得到 AUTO worker。
+3. testcase 和 VSEQ 不新增 `get_control_worker_topology_mode()`、allowlist 或任何 mode 写入逻辑。它们仍负责选择自身的场景与 main sequence；main sequence 在 body 入口只校验 plus snapshot 是否与自己的 builder 能力匹配：`memblock_main_dispatch_auto_build_main_table_base_sequence` 接受 DISABLED 或 AUTO；DISABLED 保持既有 generic `build_main_table()` 行为，AUTO 要求 `MEMBLOCK_USE_MANUAL_MAIN_TABLE=0` 并进入 `build_control_auto_main_table(N)`；普通 direct-manual/cancel-reconcile sequence 只接受 MANUAL_MAIN；新增 direct manual-control sequence 只接受 MANUAL_CONTROL。任一 mismatch 均 `uvm_fatal`，不能根据 VSEQ/testcase 名称重写 plus，也不能切换到别的 builder。
+4. 现有 `tc_dispatch_real_mixed_wb_smoke`、`tc_dispatch_real_mixed_sta_wb_smoke` 和 cancel-reconcile 的 preset cfg 必须显式提供 mode=`2`，从而在其 direct manual builder 启动前完成匹配；它们不再覆写 mode getter。`tc_dispatch_real_smoke` 与 `basicTest + memblock_dispatch_real_smoke_vseq` 在 mode=`0` 时保持 legacy generic main-table 行为，在专项 AUTO cfg 中设为 mode=`1` 后才生成控制主表。未来手工控制 testcase/VSEQ 只需选择其专用 direct manual-control sequence，并由对应 preset/命令行设 mode=`3`；VSEQ 本身不登记或设置该值。
+5. software-only 与无 dispatch topology testcase 若传 mode=`1` 或 mode=`3`，在 build/config 完成、启动 worker 前立即 `uvm_fatal`；mode=`2` 也只能由能够启动普通 direct-manual main sequence 的场景使用。此项是 plus 配置与场景选择的必要一致性校验，不是从场景反推或覆盖 mode。`MEMBLOCK_USE_MANUAL_MAIN_TABLE` 仍仅保留在 DISABLED generic builder 的 legacy random/import 分流中。
 
 只有 `control_worker_topology_active=1` 的路径可启动新增 worker、control barrier service、bootstrap 和 worker shutdown。**无论 topology mode 为何，既有 `service_real_dispatch_flow()` 都必须照常运行**；manual 主表 sequence 继承 auto base 时尤其不能因为 mode 不是 AUTO 就跳过原有 dispatch/monitor/issue/commit service。bootstrap 的唯一真实调用点是任一控制主表的共同 post-build hook：在 AUTO 的 `build_main_table()` 或 MANUAL_CONTROL 的 directed main-table builder **返回后**、`service_real_dispatch_flow()` 前调用一次 `initialize_control_runtime_bootstrap()`，建立首个 `control_reset_epoch=1`、清空旧 observation 并发布 `control_reset_request`；不能放在建表前，因为建表会调用 `reset_all_tables()` 清 testcase runtime 状态。control runtime handshake 的 epoch/request/ready、CSR driver ack 和三条 producer ack 固定存放在 `memblock_sync_pkg`，或由 `reset_all_tables()` 明确豁免；建表只能清主表、status、ROB/LSQ runtime，不能清这些 bootstrap 字段。MANUAL_MAIN_TABLE 和 software-only 路径不调用该 helper，也不执行 control bootstrap-ready 检查。现有 `service_real_dispatch_flow()` 在 `rst_n!=1` 或 `reset_backend_done!=1` 时会在调用 `service_monitor_once()` 前直接 `continue`，因此新增 control reset gate 不能只放在后者内部；任一 active control topology 的外层 reset 分支必须先调用 `control_barrier_service.begin_control_runtime_reset(PHYSICAL_RESET)`，再 `continue`。正常 service 中的 active-control topology reset early-return 也调用同一 helper，以覆盖 L2TLB reset 等不经过外层物理 reset判断的边界。调用顺序固定为：
 
 ```text
-AUTO main sequence body：
--> 读取已由 testcase/VSEQ 写入的 mode；若不是 AUTO，直接 uvm_fatal，防止误把 direct-manual flow 送入 generic body
--> 创建并绑定新增 control barrier service
--> build_main_table()；该 generic 入口仅在此处校验 MEMBLOCK_USE_MANUAL_MAIN_TABLE=0，并调用 build_control_auto_main_table(N)
--> 在共同 post-build hook 调 initialize_control_runtime_bootstrap()（AUTO 与 MANUAL_CONTROL 都适用，仅一次建立 epoch/request，不创建 token）
--> service_real_dispatch_flow()
+generic main sequence body：
+-> 读取唯一 plus mode snapshot；若为 DISABLED，执行既有 build_main_table()，随后校验表中不存在 control op_class，不创建 control barrier service、不调用 bootstrap
+-> 若为 AUTO，创建并绑定新增 control barrier service；校验 MEMBLOCK_USE_MANUAL_MAIN_TABLE=0，再调用 build_control_auto_main_table(N)
+-> 若为 MANUAL_MAIN 或 MANUAL_CONTROL，直接 uvm_fatal，防止把 direct-manual flow 送入 generic body
+-> 仅 AUTO 在共同 post-build hook 调 initialize_control_runtime_bootstrap()（仅一次建立 epoch/request，不创建 token）
+-> 所有允许的 mode 都继续 service_real_dispatch_flow()
 
 MANUAL_CONTROL main sequence body：
--> 读取 mode；若不是 MANUAL_CONTROL_MAIN_TABLE 直接 uvm_fatal
+-> 读取 plus mode snapshot；若不是 MANUAL_CONTROL_MAIN_TABLE 直接 uvm_fatal
 -> 创建并绑定同一 control barrier service
 -> 调专用 direct manual-control builder；该 builder 完成 import/校验但不读 MEMBLOCK_USE_MANUAL_MAIN_TABLE
 -> 调相同 post-build hook 初始化 bootstrap
 -> service_real_dispatch_flow()
 
 MANUAL_MAIN main sequence body：
--> 读取 mode；若不是 MANUAL_MAIN_TABLE 直接 uvm_fatal
+-> 读取 plus mode snapshot；若不是 MANUAL_MAIN_TABLE 直接 uvm_fatal
 -> 调既有 direct manual builder/import，不创建 control barrier service、不调用 bootstrap
 -> service_real_dispatch_flow()
 
@@ -364,7 +378,7 @@ service_real_dispatch_flow 每拍：
 -> 本轮结束后现有 route_all_issue_queues()
 ```
 
-reset release 后采用明确的两阶段协议，不能让 ready 与 observation publish 相互等待：CSR、DCache、ctrl monitor 在观察到当前 `control_reset_epoch` 对应的 `control_reset_request` 后，各自在首个有效 post-reset sample **无条件**写入 `post-reset producer ack(control_reset_epoch, sample_seq)`；该 ack 不更新 runtime snapshot、`sbIsEmpty` latest/raw 或 L2 done latest，因而不能完成任何控制动作。CSR driver 也必须消费同一 request 并发布 `driver_reset_ack(control_reset_epoch)`。`service_monitor_once()` 在 driver ack 与三个 producer ack 齐备、control topology ready 后调用 `complete_control_runtime_reset()`，置 `control_runtime_ready=1`。从各 producer 的**下一**有效 sample 起，才按当前 `control_reset_epoch` 发布可消费 CSR snapshot、`sbIsEmpty` 和 L2 done observation；C0/C4 也只消费 ready 后建立的 lifecycle record。在 `control_runtime_ready=0` 期间，`service_once()` 不创建 token/request，也不消费 CSR snapshot、`sbIsEmpty`、C0/C4 或 L2 done completion。正常路径中，该位置保证 C0/C4、CSR raw、`sbIsEmpty` deferred raw 与 redirect-first 仲裁已先完成。service 每次只查询 `active_control_barrier_uid` 对应的单条 status、精确 request/event id 和 latest done observation；不遍历历史主表、全部状态表或无界 raw queue。
+reset release 后采用明确的两阶段协议，不能让 ready 与 observation publish 相互等待：CSR、DCache、ctrl monitor 在观察到当前 `control_reset_epoch` 对应的 `control_reset_request` 后，各自在首个有效 post-reset sample **无条件**写入 `post-reset producer ack(control_reset_epoch, sample_seq)`；该 ack 不更新 runtime snapshot、`sbIsEmpty` latest/raw 或 L2 done latest，因而不能完成任何控制动作。CSR monitor 在该 ack 点同时清自己的 `has_last_runtime_csr`/producer-local baseline，但不清全局 snapshot 序号；这样 ready 后的首个实际 CSR sample 必然按“新 producer baseline”发布。CSR driver 也必须消费同一 request 并发布 `driver_reset_ack(control_reset_epoch)`。`service_monitor_once()` 在 driver ack 与三个 producer ack 齐备、control topology ready 后调用 `complete_control_runtime_reset()`，置 `control_runtime_ready=1`。从各 producer 的**下一**有效 sample 起，才按当前 `control_reset_epoch` 发布可消费 CSR snapshot、`sbIsEmpty` 和 L2 done observation；CSR monitor 在首次 runtime snapshot 发布时写 `control_csr_runtime_baseline(valid, epoch, first_snapshot_seq)`。该槽仅证明 current epoch 已有有效 global latest；后续每个 action 均通过 existing latest API 单次读取当前 raw/seq 并冻结到 token，不能长期复用首次 payload。C0/C4 只消费 ready 后建立、且与 token 的 `l2tlb_reset_epoch_at_arm` 相同的 lifecycle record。在 `control_runtime_ready=0` 期间，`service_once()` 不创建 token/request，也不消费 CSR snapshot、`sbIsEmpty`、C0/C4 或 L2 done completion。正常路径中，该位置保证 C0/C4、CSR raw、`sbIsEmpty` deferred raw 与 redirect-first 仲裁已先完成。service 每次只查询 `active_control_barrier_uid` 对应的单条 status、精确 request/event id 和 latest done observation；不遍历历史主表、全部状态表或无界 raw queue。
 
 物理 reset 分支的文字伪代码如下，确保外层 `continue` 不绕过 reset 清理：
 
@@ -425,7 +439,9 @@ worker 主循环：
   其他 profile：uvm_fatal
 ```
 
-`configure_csr_control_xaction()` 首版固定使用 `CSR_CONTROL_PROFILE_V1`，以当前 monitor runtime baseline 复制完整 xaction，然后只做一个可证明的 SATP 变化：保留当前合法 `satp_mode` 和 `satp_ppn`；若 baseline `satp_asid == 16'hffff` 则写 `16'h0000`，否则写 `satp_asid + 16'h0001`；置 `satp_changed=1`，其余 `dispatch_raw_csr_t` 字段保持 baseline。若该结果与 baseline 仍无变化，fallback 为 `satp_asid ^= 16'h0001`；若 `raw_csr_payload_changed(baseline, expected)` 仍为假，直接 `uvm_fatal`。token 保存 expected runtime 字段和 baseline，monitor 必须能依据这些字段发布新 snapshot；不得把主表记录成 CSR payload，也不得选择值不变、monitor 不会发布新 snapshot 的 no-op 配置。后续 CSR 专项扩展只能进入该函数，不改变 `RUNTIME_CSR_SNAPSHOT` 完成协议。
+`CSR_CONFIG_PENDING` 的 service 分支先检查 `control_csr_runtime_baseline.valid=1`、其 epoch 等于当前 `control_reset_epoch`；随后调用现有 `get_latest_runtime_csr_snapshot(raw, seq)` 一次并要求 `seq >= first_snapshot_seq`，将该次返回的**当前** `raw + seq` 深拷贝到 token/status。条件未齐只保持当前状态，不能用 reset 前 latest、worker 本地缓存或发送过的 xaction 代替。该 action-local copy 不依赖 snapshot history；后续 CSR 标记或 `check_store` 可以各自重新冻结更新后的 latest 配置，不能复用启动 epoch 的第一份 payload。满足后才 enqueue token。
+
+`configure_csr_control_xaction()` 首版固定使用 `CSR_CONTROL_PROFILE_V1`。它必须创建一个**不 randomize** 的 `csr_ctrl_agent_agent_xaction`，先以确定的零值/既有 driver-safe 默认字段初始化完整 xaction，再逐字段映射 token 中已冻结的 `dispatch_raw_csr_t` monitor baseline；`pre_pkt_gap=0`、`post_pkt_gap=0`、`flush_l2_enable=0` 和所有控制 metadata 也必须显式写定。不得把 `dispatch_raw_csr_t` 当作“完整 xaction”直接 copy，因为当前 raw snapshot 不包含所有 CSR driver 字段。随后只做一个可证明的 SATP 变化：保留当前合法 `satp_mode` 和 `satp_ppn`；若 baseline `satp_asid == 16'hffff` 则写 `16'h0000`，否则写 `satp_asid + 16'h0001`；只置本 action 所有的 `satp_changed=1`，并强制清零 `vsatp_changed`、`hgatp_changed`、`priv_virt_changed` 以及所有一次性 CSR write/trigger valid。不得把采样到的旧 change/write pulse 重驱给 DUT。若该结果与 baseline 仍无变化，fallback 为 `satp_asid ^= 16'h0001`；若 `raw_csr_payload_changed(baseline, expected)` 仍为假，直接 `uvm_fatal`。token 保存 expected runtime 字段和 baseline，monitor 必须能依据这些字段发布新 snapshot；不得把主表记录成 CSR payload，也不得选择值不变、monitor 不会发布新 snapshot 的 no-op 配置。后续 CSR 专项扩展只能进入该函数，不改变 `RUNTIME_CSR_SNAPSHOT` 完成协议。
 
 `drive_csr_control_xaction()` 在 `start_item` 前记录 `runtime_csr_snapshot_seq_before_drive`，完成 `finish_item` 后仅调用受 owner 校验的 `mark_csr_control_sendover()`。`CSR_SENDOVER` 只代表 sequence 已完成接口交付，不代表 runtime snapshot 已确认。
 
@@ -472,20 +488,20 @@ monitor snapshot 与 token 的 expected runtime 字段匹配
 
 `configure_sfence_control_xaction()` 首版固定生成 canonical 基础 SFence payload：`io_ooo_to_mem_sfence_valid=1`、`pre_pkt_gap=0`、`post_pkt_gap=0`、`rs1=0`、`rs2=0`、`addr=0`、`id=0`、`hv=0`、`hg=0`、`flushPipe=0`。该函数同时把上述字段复制到 token 的 expected fence 字段；不允许依赖现有 xaction 的随机默认值（尤其不能让 `valid=0` 导致 Fence monitor 不创建 C0），也不在配置函数内等待、驱动或更新完成状态。后续 SFence/HFENCE 具体 payload 扩展只能进入该函数，C0/C4 owner 匹配协议保持不变。
 
-`drive_sfence_control_xaction()` 的抽象时序约束是：在 `start_item()` 之前从同步包读取并冻结 `last_allocated_l2tlb_event_seq` 与当前 reset epoch，写入 token/status，并先置 `sfence_c0_match_armed=1` 作为 C0 pre-drive 匹配资格；随后完成 `start_item/finish_item`，只记录 sendover。adapter 在 C0 到达时接受 armed 或 sendover owner，先保存 record；control service 只在 sendover 后消费该 record。不能在 `finish_item()` 后才建立 baseline 或 armed，因为 fence driver 和 monitor 可能在同一 posedge 交付并观察 C0。
+`drive_sfence_control_xaction()` 的抽象时序约束是：在 `start_item()` 之前从同步包读取并冻结 `last_allocated_l2tlb_event_seq` 与当前 `l2tlb_current_reset_epoch`，写入 token/status 的 `l2tlb_reset_epoch_at_arm`，并先置 `sfence_c0_match_armed=1` 作为 C0 pre-drive 匹配资格；随后完成 `start_item/finish_item`，只记录 sendover。此处不得读取或写入 `control_reset_epoch` 作为 C0/C4 的匹配 epoch。adapter 在 C0 到达时接受 armed 或 sendover owner，先保存 record；control service 只在 sendover 后消费该 record。不能在 `finish_item()` 后才建立 baseline 或 armed，因为 fence driver 和 monitor 可能在同一 posedge 交付并观察 C0。
 
 SFence topology 检查必须拆成三个时点，避免把尚未注册的运行期对象误判为建表错误：
 
-1. **建表/topology 初始化前**：只检查 testcase-owned 的静态 control topology mode、静态 dispatch topology和 `dispatch_l2tlb_lookup_active`；此时不读取 `MEMBLOCK_USE_MANUAL_MAIN_TABLE`，也不读取尚未由 dispatch sequence `pre_body()` 注册的 `l2tlb_adapter_service_active` 或 owner。
+1. **建表/topology 初始化前**：只检查由 `MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE` 冻结的静态 control topology mode、静态 dispatch topology和 `dispatch_l2tlb_lookup_active`；此时不读取 `MEMBLOCK_USE_MANUAL_MAIN_TABLE`，也不读取尚未由 dispatch sequence `pre_body()` 注册的 `l2tlb_adapter_service_active` 或 owner。
 2. **`pre_body()` 完成后的 service-ready/main-table-ready 边界**：确认 `l2tlb_adapter_service_active` 已置位、注册 owner 等于当前 main dispatch service，并确认 capture gate/monitor adapter 已准备；缺失或 owner 不匹配立即 `uvm_fatal`，再允许 SFence action 进入可运行状态。
-3. **SFence action 真正启动前**：重新检查异步建立的唯一 L2TLB lifecycle/responder owner、当前 adapter owner 和 reset epoch；任一缺失或不匹配直接 `uvm_fatal`。现有 `fence_agent_agent_monitor` 在 no-dispatch topology 下会丢弃 raw fence，因此不能等到 C0/C4 超时后才诊断。
+3. **SFence action 真正启动前**：重新检查异步建立的唯一 L2TLB lifecycle/responder owner、当前 adapter owner 和 `l2tlb_current_reset_epoch`；owner/topology 缺失或不匹配直接 `uvm_fatal`。若 owner 已正确建立但 `l2tlb_post_reset_baseline_done(l2tlb_current_reset_epoch)=0`，`SFENCE_REQ` 保持等待、不得 arm/drive，直到既有 responder 发布 baseline proof；这属于正常异步初始化，沿用控制状态超时诊断，不得误报 topology fatal。现有 `fence_agent_agent_monitor` 在 no-dispatch topology 下会丢弃 raw fence，因此不能等到 C0/C4 超时后才诊断。
 
 接口交付后，Fence monitor 仍按现有方式在观察到 `io_ooo_to_mem_sfence_valid` 时生成 raw SFence 和 lifecycle event。为了把 C0/C4 精确归属给控制 owner，补充两个 owner-neutral adapter 事实：
 
-1. `schedule_sfence_invalidate()` 成功接收并登记 raw fence 后，先判断是否存在 `sfence_c0_match_armed=1` 或已 `SFENCE_SENDOVER` 的可匹配 owner（按 payload、`start_item()` 前冻结的 pre-drive event baseline 和 reset epoch）；只有可匹配的控制 fence 才在有界 map 中保存 `sfence_c0_observation`。C0 record 保留到对应 sendover 后由 service 消费，或在 reset/abort 时清除。无匹配的 generic/manual fence 仍沿用既有 C4 work，但不占用 control lifecycle map。
-2. `apply_due_sfence_invalidate()` 实际消费该 event、执行既有 C4 filter 删除/取消后，发布并保存同一 event id 的 `sfence_effective_observation`，包含 due sample 和 reset epoch；即使删除条目数为 0，也必须发布完成事实。已被 control token claim 的记录在 service 确认 owner 后删除；未被 claim 的 generic 记录在 C4 更新后立即回收。reset/epoch 变化时清理整张有界 observation map。
+1. `schedule_sfence_invalidate()` 成功接收并登记 raw fence 后，先判断是否存在 `sfence_c0_match_armed=1` 或已 `SFENCE_SENDOVER` 的可匹配 owner（按 payload、`start_item()` 前冻结的 pre-drive event baseline 和 `l2tlb_reset_epoch_at_arm`）；只有可匹配的控制 fence 才在有界 map 中保存 `sfence_c0_observation`。C0 record 保留到对应 sendover 后由 service 消费，或在 L2TLB reset/abort 时清除。无匹配的 generic/manual fence 仍沿用既有 C4 work，但不占用 control lifecycle map。
+2. `apply_due_sfence_invalidate()` 实际消费该 event、执行既有 C4 filter 删除/取消后，发布并保存同一 event id 的 `sfence_effective_observation`，包含 due sample 和 `l2tlb_reset_epoch`；即使删除条目数为 0，也必须发布完成事实。已被 control token claim 的记录在 service 确认 owner 后删除；未被 claim 的 generic 记录在 C4 更新后立即回收。L2TLB epoch 变化时清理整张有界 observation map。
 
-control service 在 `SFENCE_SENDOVER` 只接受 pre-drive baseline 之后、payload 匹配且 event id 新于该 baseline 的 C0 observation，记录 event id 后进入 `WAIT_L2TLB_FLUSH_EFFECTIVE`。`drive_sfence_control_xaction()` 必须在 `start_item()` 之前读取并冻结 `last_allocated_l2tlb_event_seq` 与当前 reset epoch 到 token/status，并先置 `sfence_c0_match_armed=1`；`finish_item()` 返回后只写 SFence sendover，不得重新采样或覆盖 baseline/armed。adapter 可在 sendover 前用 armed owner 接住同拍 C0，但 service 只有在 sendover 后才消费该 record。这样 driver 与 monitor 同一 posedge 产生 C0 时，C0 event 仍满足 `event_seq > pre-drive baseline`。它只接受同一 event id 的 C4 effective observation 才置 `CONTROL_COMMIT_READY`；不能只读取“当前 pending queue 为空”或 latest level。拓扑检查按上文三个时点执行：建表前只做静态检查；`pre_body()`/service-ready 后检查 adapter 注册和 owner；动作启动前检查动态 lifecycle/responder owner。任一对应时点的条件不满足都 `uvm_fatal`，因为现有 `fence_agent_agent_monitor` 在 no-dispatch topology 下会丢弃 raw fence。
+control service 在 `SFENCE_REQ` 已确认现有 L2TLB post-reset baseline proof 后才 enqueue action。`SFENCE_SENDOVER` 只接受 pre-drive baseline 之后、payload 匹配、`l2tlb_reset_epoch` 等于 token 的 `l2tlb_reset_epoch_at_arm`、且 event id 新于该 baseline 的 C0 observation，记录 event id 后进入 `WAIT_L2TLB_FLUSH_EFFECTIVE`。`drive_sfence_control_xaction()` 必须在 `start_item()` 之前读取并冻结 `last_allocated_l2tlb_event_seq` 与当前 `l2tlb_current_reset_epoch` 到 token/status，并先置 `sfence_c0_match_armed=1`；`finish_item()` 返回后只写 SFence sendover，不得重新采样或覆盖 baseline/armed。adapter 可在 sendover 前用 armed owner 接住同拍 C0，但 service 只有在 sendover 后才消费该 record。这样 driver 与 monitor 同一 posedge 产生 C0 时，C0 event 仍满足 `event_seq > pre-drive baseline`。它只接受同一 event id、同一 `l2tlb_reset_epoch` 的 C4 effective observation 才置 `CONTROL_COMMIT_READY`；不能只读取“当前 pending queue 为空”或 latest level。拓扑检查按上文三个时点执行：建表前只做静态检查；`pre_body()`/service-ready 后检查 adapter 注册和 owner；动作启动前检查动态 lifecycle/responder owner 与 post-reset baseline proof。owner/topology 不一致必须 `uvm_fatal`，baseline 尚未到达则保持 `SFENCE_REQ`，因为现有 `fence_agent_agent_monitor` 在 no-dispatch topology 下会丢弃 raw fence。
 
 不得以 `finish_item` 返回、`sfence_invalidate_pending_q` 为空、固定等两拍、或本地时间猜测替代 C4 completion。V2 的 `MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES=4` 仍由既有 adapter 使用；控制 service消费的是 adapter 已完成的准确 event。
 
@@ -531,7 +547,7 @@ WAIT_L2_FLUSH_IDLE：
   标记 done_low 已消费，状态转 CONTROL_COMMIT_READY
 ```
 
-`flush_l2_enable=1` 的单个 item 不等于保持型请求：当前 CSR driver 在没有 item 时会调用 `drive_idle()` 并把该字段驱回 0，而 DCache responder 在 `DRAIN`/`PROBE` 中观察撤销会 fatal。因此 `L2_FLUSH_LEVEL` 从 ASSERT 到 RELEASE 必须独占 CSR sequencer，且正常 CSR token 不得在该 owner 的 hold 有效时被消费。为使 worker 不直接写 driver 私有状态，在 `csr_ctrl_agent_agent_xaction` 增加非 DUT metadata：`control_action_kind={L2_FLUSH_ASSERT,L2_FLUSH_RELEASE}`、owner(uid/dynamic_epoch/action_generation) 和 baseline-valid 标志。worker 只在 ASSERT/RELEASE xaction 中填写 metadata 与完整 CSR baseline；driver 是 `l2_flush_level_hold` 的唯一写者：收到 ASSERT item 并完成 `send_pkt()` 后深拷贝完整 xaction 为 baseline，校验 owner 后建立 hold；每个 idle sample 读取该 hold，基于保存的 baseline 驱动所有 CSR 字段，仅覆盖 `flush_l2_enable=1`。因此不再产生连续 HOLD xaction，也不让 worker承担 level 保持职责。done-high 后 control service 只把带 owner/epoch/baseline 的 RELEASE 请求写入有界 `l2_flush_release_request_q` 并触发既有 CSR action event；worker 优先从该队列取出后发送 RELEASE item；driver 收到匹配 owner 的 RELEASE item 后驱动 low，`item_done()` 返回后按同一 owner 清 hold，worker 回写 release sendover。旧 owner 的 RELEASE、reset 或 abort 不能清新 generation，均按 owner 校验，否则 `uvm_fatal`。它不改变普通 CSR item 的字段语义，也不引入第二个 CSR driver。`io_mem_to_ooo_topToBackendBypass_l2FlushDone` 只能用于 debug 一致性打印，不能成为第二个推进来源。
+`flush_l2_enable=1` 的单个 item 不等于保持型请求：当前 CSR driver 在没有 item 时会调用 `drive_idle()` 并把该字段驱回 0，而 DCache responder 在 `DRAIN`/`PROBE` 中观察撤销会 fatal。因此 `L2_FLUSH_LEVEL` 从 ASSERT 到 RELEASE 必须独占 CSR sequencer，且正常 CSR token 不得在该 owner 的 hold 有效时被消费。为使 worker 不直接写 driver 私有状态，在 `csr_ctrl_agent_agent_xaction` 增加非 DUT metadata：`control_action_kind={L2_FLUSH_ASSERT,L2_FLUSH_RELEASE}`、owner(uid/dynamic_epoch/action_generation) 和 baseline-valid 标志。进入 `CHECK_STORE_L2_CSR_ASSERT` 时，service 先确认 control CSR baseline gate 属于当前 epoch，再调用现有 latest API 一次冻结**当前** raw CSR 配置到 L2 token；ASSERT/RELEASE 都基于该 token-local copy 做确定性 raw-to-xaction 映射。这样位于 `check_store` 前的 CSR control 配置不会被回退。映射后强制清零 `satp_changed`、`vsatp_changed`、`hgatp_changed`、`priv_virt_changed` 和全部一次性 CSR write/trigger valid；随后才覆盖 `flush_l2_enable` 与 metadata。这样 L2 flush hold 不会把采样时恰好为高的 CSR change pulse 持续重驱给 DUT。不得把不完整 raw snapshot 或随机未约束字段交给 driver。driver 是 `l2_flush_level_hold` 的唯一写者：收到 ASSERT item 并完成 `send_pkt()` 后深拷贝完整 xaction 为 baseline，校验 owner 后建立 hold；每个 idle sample 读取该 hold，基于保存的 baseline 驱动所有 CSR 字段，仅覆盖 `flush_l2_enable=1`。因此不再产生连续 HOLD xaction，也不让 worker承担 level 保持职责。done-high 后 control service 只把带 owner/epoch/baseline 的 RELEASE 请求写入有界 `l2_flush_release_request_q` 并触发既有 CSR action event；worker 优先从该队列取出后发送 RELEASE item；driver 收到匹配 owner 的 RELEASE item 后驱动 low，`item_done()` 返回后按同一 owner 清 hold，worker 回写 release sendover。旧 owner 的 RELEASE、reset 或 abort 不能清新 generation，均按 owner 校验，否则 `uvm_fatal`。它不改变普通 CSR item 的字段语义，也不引入第二个 CSR driver。`io_mem_to_ooo_topToBackendBypass_l2FlushDone` 只能用于 debug 一致性打印，不能成为第二个推进来源。
 
 ## Worker 启动拓扑与 legacy/default sequence 互斥
 
@@ -556,9 +572,9 @@ main_phase：
   worker 收到 shutdown 后确认无 in-flight token，再退出并发布 exited acknowledgement
 ```
 
-控制标记只由 `build_control_auto_main_table()` 在 AUTO 路径追加；真实入口是 `tc_dispatch_real_smoke` 及 `basicTest + memblock_dispatch_real_smoke_vseq` 的 generic main-table build。`tc_base` 的 virtual mode getter 默认 `DISABLED`，`tc_dispatch_real_smoke` 覆写为 AUTO，`tc_dispatch_real_mixed_wb_smoke` 覆写为 MANUAL，专项 direct testcase 覆写为 `MANUAL_CONTROL_MAIN_TABLE`；`basicTest` 则仅依明确 `VSEQ_MAIN` allowlist 写同一 mode。direct-manual 的 builder 不通过 plus 选择 mode，也不被 generic `build_main_table()` 接管。`uses_auto_control_barrier_topology()` 只控制自动 `N+1` 建表与随机预约；`uses_control_barrier_topology()` 对 AUTO/MANUAL_CONTROL 都为真，控制 worker、bootstrap、control service 和 shutdown。普通 manual table 和 software-only sequence 即使复用 auto sequence 的 service helper，也不得进入本专项 topology，**但仍必须运行已有 `service_real_dispatch_flow()`**。不得同时保留 `csr_ctrl_agent_agent_default_sequence`、`fence_agent_agent_default_sequence`、`tcnt_default_sequence_base` 或 virtual sequence 显式启动的第二 producer。
+控制标记只由 `build_control_auto_main_table()` 在 mode=`1` 的 AUTO 路径追加；真实入口仍是 `tc_dispatch_real_smoke` 及 `basicTest + memblock_dispatch_real_smoke_vseq` 的 generic main-table build，但它们不再自动启用控制专项。`MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE=0` 时二者保持原有 generic main-table 行为；专项 preset 设为 `1` 后才启用自动控制表。普通 direct-manual/cancel-reconcile 以 preset mode=`2` 进入其原 builder；未来专项 direct manual-control sequence 以 mode=`3` 进入控制 builder。`uses_auto_control_barrier_topology()` 只控制自动 `N+1` 建表与随机预约；`uses_control_barrier_topology()` 对 AUTO/MANUAL_CONTROL 都为真，控制 worker、bootstrap、control service 和 shutdown。普通 manual table 和 software-only sequence 即使复用 auto sequence 的 service helper，也不得进入本专项 topology，**但仍必须运行已有 `service_real_dispatch_flow()`**。不得同时保留 `csr_ctrl_agent_agent_default_sequence`、`fence_agent_agent_default_sequence`、`tcnt_default_sequence_base` 或 virtual sequence 显式启动的第二 producer。
 
-`memblock_dispatch_real_smoke_vseq` 若被本专项 testcase 采用，只负责既有 LSQ/issue/L2TLB/主表 orchestration；不得重复启动 CSR/Fence worker。其 testcase 配置也必须采用同一 default-sequence 覆盖。启动前检查 active control topology 的 CSR/Fence 两条 sequencer 都已配置为 control worker，否则直接 `uvm_fatal`，避免 generic item 与 `L2_FLUSH_LEVEL` 高电平 item 交错。software-only 与普通 manual directed testcase 不得因本专项自动主表规则被隐式追加 `check_store`；它们需要覆盖控制条目时必须显式选择 `MANUAL_CONTROL_MAIN_TABLE`、启用完整 control topology 并构造控制主表。
+`memblock_dispatch_real_smoke_vseq` 若被本专项 testcase 采用，只负责既有 LSQ/issue/L2TLB/主表 orchestration；不得读取、写入或覆盖 control topology mode，也不得重复启动 CSR/Fence worker。testcase build/config 阶段已经根据 plus snapshot 完成同一 default-sequence 覆盖。启动前检查 active control topology 的 CSR/Fence 两条 sequencer 都已配置为 control worker，否则直接 `uvm_fatal`，避免 generic item 与 `L2_FLUSH_LEVEL` 高电平 item 交错。software-only 与普通 manual directed testcase 不得因本专项自动主表规则被隐式追加 `check_store`；它们需要覆盖控制条目时必须选择专用 direct manual-control sequence，并以 `+MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE=3` 启用完整 control topology。
 
 ## Redirect、reset、abort 与超时策略
 
@@ -567,13 +583,13 @@ main_phase：
 | 控制尚在 `WAIT_OLDER_ROB_COMMIT`，老 UID redirect | 保留静态控制标记，普通老 UID 按既有 reissue；恢复 admission prefix 后重新等待连续 commit。 |
 | 控制动作已开始，普通 redirect 覆盖 control ROB | `uvm_fatal`；不得取消、重建或重发 CSR/SFence/`check_store`。 |
 | token、`sbIsEmpty`、C0/C4、done observation owner/epoch/generation 不匹配 | 不推进当前状态；若声称属于当前动作但字段矛盾则 `uvm_fatal`。 |
-| global/physical reset，自动主表已建立且存在 active/started control barrier | 首版直接 `uvm_fatal` 并 testcase abort；不得清 control status/barrier 后继续使用保留的 main table/active ROB。现有 reset 后重建主表、重启 testcase 的路径才允许进入新的 control reset epoch。 |
-| global/physical reset，无已建立的 active/started control barrier | 清 action queue、event wait state、owner 化 flushSb 生命周期记录、L2 observation 有效位、worker shutdown/exited 状态和未绑定控制临时状态；reset 前 high/完成记录不得复用。 |
+| global/physical 或 L2TLB runtime reset，控制主表已有任一 UID admission | 首版直接 `uvm_fatal` 并 testcase abort；不能只因控制 marker 尚未 active 就保留普通 UID 的旧 status/ROB/LSQ 资源继续运行。只有完整“清主表/ROB 后重建并重启 dispatch”的后续协议才可支持该场景。 |
+| bootstrap 或首次 UID admission 之前的 reset | 可清 action queue、event wait state、owner 化 flushSb 生命周期记录、L2 observation 有效位、worker shutdown/exited 状态和未绑定控制临时状态；reset 前 high/完成记录不得复用。 |
 | testcase abort，L2 flush 尚未进入 DCache `DRAIN/PROBE` | 按 owner 取消未消费 token/flushSb request，清空本地控制状态。 |
 | testcase abort，L2 flush 已在 `DRAIN/PROBE` | 首版 `uvm_fatal` 或要求先走 DUT reset；不得静默拉低 `flush_l2_enable` 后伪造取消。 |
 | `flushSb`、控制动作、L2 flush 长时间无完成 | 复用现有 flushSb timeout，并新增控制状态超时诊断；首版只打印足够 owner/state/queue/sample 信息后按专项配置 fatal，不能无限等待。 |
 
-`begin_control_runtime_reset()` 在检查/清理任何 control status 前必须先判定：若 `data.main_trans_num!=0` 且存在 `active_control_barrier_uid`、任何 control-active ROB map 或任一已绑定 owner，则当前测试已开始执行控制主表，首版立即 `uvm_fatal` 并请求 testcase abort；不能静默清状态后继续。只有 AUTO 或 MANUAL_CONTROL 主表尚未建立或尚未 admission 任一 control UID 时才允许走 reset 清理和 post-reset ack/ready 协议。该 fail-fast 边界保持已有主表/ROB 的 reset 恢复语义不被本专项部分重建逻辑破坏；后续若需支持运行中 reset，必须单独设计“清 main table/ROB 后重建并重启对应 dispatch”的完整协议。
+`begin_control_runtime_reset()` 在检查/清理任何 control status 前必须先判定：若 `data.dispatch_progress.max_enqueued_uid_valid=1`、`uid_by_active_rob.num()!=0`、存在 `active_control_barrier_uid` 或任一已绑定 owner，则已有普通或控制 UID 获得运行期 admission/ROB 资源，首版立即 `uvm_fatal` 并请求 testcase abort；不能静默清 control 局部状态后继续使用保留的普通 main table/ROB/LSQ 状态。只有 AUTO 或 MANUAL_CONTROL 主表尚未建立，或主表虽已建立但 `max_enqueued_uid_valid=0` 且所有 active map/barrier/owner 均为空的启动窗口，才允许走 reset 清理和 post-reset ack/ready 协议。清理时必须同时失效 `control_csr_runtime_baseline`，使下一 epoch 的 CSR action 重新等待 CSR monitor 的首份 post-ready snapshot。该 fail-fast 边界保持已有主表/ROB 的 reset 恢复语义不被本专项部分重建逻辑破坏；后续若需支持运行中 reset，必须单独设计“清 main table/ROB 后重建并重启对应 dispatch”的完整协议。
 
 `control_action_drain_complete()` 是不含 worker ack 的前置谓词，只读取 active barrier、CSR/SFence action queue、owner 化 pending/completed `flushSb`、有界 `l2_flush_release_request_q`、未闭合 `L2_FLUSH_LEVEL` 和 in-flight token。`all_transactions_terminal_done()` 或其调用方必须在检测到 terminal prefix 完成后先调用 control service 的 `service_once()`；若 `control_worker_topology_active=1` 且 `control_action_drain_complete()` 成立，则设置 `control_workers_shutdown_requested=1` 并 trigger `control_workers_shutdown_ev`，然后等待两条 worker ack。`runtime_drain_complete()` 必须纳入 active barrier、action queue、owner 化 pending/completed `flushSb`、有界 `l2_flush_release_request_q`、未闭合 `L2_FLUSH_LEVEL`、已请求的 worker shutdown 和两条 worker exited acknowledgement；若 topology inactive，则绕过 worker 条件。只有该最终谓词成立后，`request_global_stop_if_done()` 才能置 global stop；不得用 global stop 反向触发 worker 退出。
 
@@ -593,27 +609,27 @@ main_phase：
 | `seq/base_seq/memblock_lsqenq_dispatch_base_sequence.sv` | 修改 | control admission、静态控制 marker rejoin、年轻 admission gate、候选 batch 截断。 |
 | `seq/base_seq_help/lsq_commit_handler.sv` | 修改 | control head candidate、control commit/retire、避免控制项的 behavior 推导。 |
 | `seq/base_seq/memblock_lsqcommit_dispatch_base_sequence.sv` | 修改 | 调用改名 flushSb API，发送后提交单个 control head。 |
-| `seq/base_seq/memblock_main_dispatch_auto_build_main_table_base_sequence.sv` 与新增 manual-control 主 sequence | 修改/新增 | AUTO sequence 在入口要求 AUTO mode、通过 generic build 进入 `build_control_auto_main_table()`；manual-control sequence 在入口要求 MANUAL_CONTROL mode、通过 direct builder import；两者共用 `uses_control_barrier_topology()` 的 worker/service、共同 post-build bootstrap、物理 reset gate、redirect/reconcile 后 control service 和控制 drain stop。既有 manual sequence 入口要求 MANUAL mode 且继续运行原 service。 |
+| `seq/base_seq/memblock_main_dispatch_auto_build_main_table_base_sequence.sv` 与新增 manual-control 主 sequence | 修改/新增 | generic main sequence 只接受 plus mode=`0/1`：`0` 保持旧 `build_main_table()`，`1` 进入 `build_control_auto_main_table()`；manual-control sequence 只接受 mode=`3`、通过 direct builder import；两者按 `uses_control_barrier_topology()` 选择 worker/service、共同 post-build bootstrap、物理 reset gate、redirect/reconcile 后 control service 和控制 drain stop。既有 manual/cancel-reconcile sequence 只接受 mode=`2` 且继续运行原 service。 |
 | `seq/base_seq_help/dispatch_monitor_event_adapter.sv` | 修改 | 发布并更新按 `lifecycle_event_seq` 索引、可供 control service 消费后清理的 C0/C4 lifecycle completion。 |
-| `common/memblock_common/src/memblock_sync_pkg.sv` | 修改 | 持久保存 testcase-owned `control_worker_topology_mode`/派生 active、control-runtime bootstrap/reset epoch、request/ready、driver/producer ack，以及 primitive L2 done、`sbIsEmpty`、C0/C4 wire observation/storage/API；禁止引用 seq 层 observation/owner 类型。 |
-| `agent/dcache_agent_agent/src/dcache_agent_agent_monitor.sv` | 修改 | 每个有效 sample 发布带 `control_reset_epoch` 的 `io_l2_flush_done` latest observation。 |
-| `agent/io_mem_to_ooo_ctrl_agent_agent/src/io_mem_to_ooo_ctrl_agent_agent_monitor.sv` | 修改 | 每个有效 sample 发布 owner-neutral `sbIsEmpty` latest observation；不直接写 control status。 |
-| `agent/csr_ctrl_agent_agent/src/csr_ctrl_agent_agent_monitor.sv` | 复用为主，必要时仅接线 | 保持 runtime snapshot 发布职责，不直接写 control status；不新增或读取不存在的 snapshot reset epoch。 |
-| `agent/csr_ctrl_agent_agent/src/csr_ctrl_agent_agent_driver.sv` | 修改 | 作为 `l2_flush_level_hold` 唯一写者，消费 xaction 的 ASSERT/RELEASE metadata，完成 baseline 深拷贝、idle 保持、owner 校验和 reset 清理。 |
+| `common/memblock_common/src/memblock_sync_pkg.sv` | 修改 | 定义四值 topology enum，持久保存由 plus 一次冻结的 `control_worker_topology_mode`/派生 active、control-runtime bootstrap/reset epoch、request/ready、driver/producer ack、含 first snapshot seq 的 `control_csr_runtime_baseline` gate，以及 primitive L2 done、`sbIsEmpty`、C0/C4 wire observation/storage/API；禁止引用 seq 层 observation/owner 类型。 |
+| `agent/dcache_agent_agent/src/dcache_agent_agent_monitor.sv` | 修改 | 消费 control reset request 并发布 producer ack；每个 ready 后有效 sample 发布带 `control_reset_epoch` 的 `io_l2_flush_done` latest observation。 |
+| `agent/io_mem_to_ooo_ctrl_agent_agent/src/io_mem_to_ooo_ctrl_agent_agent_monitor.sv` | 修改 | 消费 control reset request 并发布 producer ack；每个 ready 后有效 sample 发布 owner-neutral `sbIsEmpty` latest observation；不直接写 control status。 |
+| `agent/csr_ctrl_agent_agent/src/csr_ctrl_agent_agent_monitor.sv` | 修改 | 保持 runtime snapshot 发布职责；消费 control reset request 后发布 producer ack、清 producer-local baseline，并在 ready 后首份 snapshot 发布 `control_csr_runtime_baseline`；不直接写 control status，也不伪造 snapshot reset epoch。 |
+| `agent/csr_ctrl_agent_agent/src/csr_ctrl_agent_agent_driver.sv` | 修改 | 作为 `l2_flush_level_hold` 唯一写者，消费 control reset request/发布 driver ack，并消费 xaction 的 ASSERT/RELEASE metadata，完成 baseline 深拷贝、idle 保持、owner 校验和 reset 清理。 |
 | `agent/csr_ctrl_agent_agent/src/csr_ctrl_agent_agent_xaction.sv` | 修改 | 增加非 DUT 的 `L2_FLUSH_ASSERT/RELEASE`、owner 和 baseline metadata；不改变 DUT 字段约束。 |
 | `agent/fence_agent_agent/src/fence_agent_agent_monitor.sv` | 复用为主 | 保持 raw SFence/C0 采集职责，不直接写 control status。 |
 | `seq/base_seq/memblock_csr_control_base_sequence.sv` | 新增 | CSR queue worker、`RUNTIME_CSR_SNAPSHOT` 与 `L2_FLUSH_LEVEL` 驱动。 |
 | `seq/base_seq/memblock_sfence_control_base_sequence.sv` | 新增 | SFence queue worker。 |
 | `seq/seq.f`、`seq/seq_pkg.sv` | 修改 | 以依赖顺序加入新增 helper/sequence。 |
-| `env/plus.sv`、`seq/base_seq_help/seq_csr_common.sv`、`seq/plus_cfg/default.cfg` | 修改 | 六个 CSR/SFence 间隔参数、读取、合法性检查、getter、默认 cfg。 |
-| `tc/src/tc_base.sv`、`tc/src/basicTest.sv`、`tc/src/tc_dispatch_real_smoke.sv`、`tc/src/tc_dispatch_real_mixed_wb_smoke.sv`、使用 manual/cancel-reconcile main sequence 的现有 testcase 或专项派生 testcase、`tc/tc.f`、`tc/tc_pkg.sv` | 修改/新增 | `tc_base` 提供默认 DISABLED 的 virtual mode getter；real smoke 覆写 AUTO，mixed manual 覆写 MANUAL，专项 testcase 覆写 MANUAL_CONTROL；所有 direct-manual/cancel-reconcile 派生入口显式保持 MANUAL 或 MANUAL_CONTROL；`basicTest` 用明确 VSEQ allowlist 写 mode。AUTO/MANUAL_CONTROL 用 worker 替换 CSR/Fence legacy default，普通 direct-manual 显式禁用；主 sequence 只读取该 mode，不按类名/plusarg 推断，并保留所有既有 manual dispatch service。 |
+| `env/plus.sv`、`seq/base_seq_help/seq_csr_common.sv`、`seq/plus_cfg/default.cfg` | 修改 | 新增 `MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE`，并与六个 CSR/SFence 间隔参数一并完成读取、范围校验、getter 和默认 cfg；mode 默认固定为 `0`。 |
+| `tc/src/tc_base.sv`、`tc/src/basicTest.sv`、`tc/src/tc_dispatch_real_smoke.sv`、现有 direct-manual/cancel-reconcile 的 `seq/plus_cfg/*.cfg`、新增专项 cfg/testcase、`tc/tc.f`、`tc/tc_pkg.sv` | 修改/新增 | `tc_base`/`basicTest` 从 `seq_csr_common` getter 冻结 plus mode snapshot，所有 legacy/default sequence 写入完成后按 mode 覆盖 CSR/Fence worker；`tc_dispatch_real_smoke` 在自身 generic default 写入后重复调用同一 helper，确保最终覆盖顺序正确。删除 testcase getter 和 VSEQ allowlist 的 mode 写入；manual/cancel preset 显式写 `2`，AUTO/手工控制专项 preset 分别写 `1/3`。主 sequence 只读取 snapshot 并校验 builder/mode 匹配，保留所有既有 manual dispatch service。 |
 
 任何新增 sequence/testcase 都必须按现有 `seq.f`/`seq_pkg.sv`/`tc.f`/`tc_pkg.sv` 管理顺序加入；参数按现有公共 plus 参数路径管理，不能把 runtime status 伪装成 plus 参数。
 
 ## 实施顺序
 
 1. 先添加类型、控制 status、owner 比较/helper 和参数；只完成编译期可见性，不接入运行期。
-2. 接入仅适用于自动 dispatch 的 testcase topology 选择、worker shutdown/ack 和 worker default-sequence 互斥；在控制条目尚未生成前先验证 worker 不会阻塞无控制动作的 phase 结束。
+2. 接入 `MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE` 的 plus 读取、范围校验、不可变 snapshot、mode/builder mismatch fail-fast、worker shutdown/ack 和 worker default-sequence 互斥；先验证 mode=`0` 的 legacy testcase 与 mode=`2` 的现有 direct-manual testcase 均不启动 worker，mode=`1/3` 的空控制队列也能自然结束。
 3. 修改自动建表为 `N+1` 与三个 `op_class`，先增加 structural dump/assertion：CSR/SFence 只在 `[0,N)`，UID `N` 必是 `check_store`，ROB 连续。
 4. 接入 control-active admission、屏障 gate、静态 redirect preserve/rejoin；保持 action queue 为空时不允许越过控制 UID。
 5. 接入 control commit/retire 分支，使一个人工置为 `CONTROL_COMMIT_READY` 的 control UID 能完整 `terminal_done`，验证 cursor/ROB map 不受影响。
@@ -629,24 +645,28 @@ main_phase：
 
 | 场景 | 配置或构造 | 关键验收点 |
 |---|---|---|
-| 固定末尾保留 | `N=100`、CSR/SFence 关闭 | 实际 `main_trans_num=101`，UID 100 唯一 `check_store`，ROB 连续。 |
-| CSR 间隔 | CSR enable，`min=max=15` | UID 15 为 CSR，snapshot 必须来自 monitor，control terminal 后才放行 UID 16。 |
-| SFence 间隔 | SFence enable，固定目标 | topology 已启用且唯一 L2TLB lifecycle owner 已建立；`flushSb` attached、driver sendover、sendover 后的新鲜匹配 `sbIsEmpty`、pre-drive baseline 后（含同拍）的 C0、C4、commit、terminal 顺序完整且不能跳步。 |
-| SFence 无 dispatch | `MEMBLOCK_SFENCE_CONTROL_ENABLE=1` 且 no-dispatch topology | 建表/topology 初始化阶段依据 testcase-owned 静态 topology 直接 `uvm_fatal`，不能静默丢 raw fence 后永久等待。 |
+| 固定末尾保留 | `MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE=1`、`N=100`、CSR/SFence 关闭 | 实际 `main_trans_num=101`，UID 100 唯一 `check_store`，ROB 连续。 |
+| CSR 间隔 | mode=`1`，CSR enable，`min=max=15` | UID 15 为 CSR，snapshot 必须来自 monitor，control terminal 后才放行 UID 16。 |
+| SFence 间隔 | mode=`1`，SFence enable，固定目标 | topology 已启用且唯一 L2TLB lifecycle owner 已建立；`flushSb` attached、driver sendover、sendover 后的新鲜匹配 `sbIsEmpty`、pre-drive baseline 后（含同拍）的 C0、C4、commit、terminal 顺序完整且不能跳步。 |
+| SFence 无 dispatch | mode=`1`、`MEMBLOCK_SFENCE_CONTROL_ENABLE=1`，但选择 no-dispatch 场景 | 建表/topology 初始化阶段依据 plus 冻结的静态 mode 与实际 dispatch capability 的不匹配直接 `uvm_fatal`，不能静默丢 raw fence 后永久等待。 |
 | SFence adapter owner 缺失 | dispatch active 但 `l2tlb_adapter_service_active`、注册 owner 或 lifecycle owner 缺失 | 控制动作启动前直接 `uvm_fatal`，不能进入 `SFENCE_REQ`。 |
+| SFence L2TLB baseline 等待 | owner 已建立但 `l2tlb_post_reset_baseline_done(current_epoch)=0` | 保持 `SFENCE_REQ`，不 arm/drive；baseline proof 到达后才入 action queue，超时走控制状态诊断。 |
 | 同目标优先级 | CSR/SFence 都固定同一目标 | 当前 UID 为 CSR，SFence 旧目标被消费并重新预约，不重复命中。 |
 | 越界目标 | `min=max >= N` | 不生成 CSR/SFence，UID N 仍是 `check_store`，不扩表。 |
 | redirect 静态等待 | 控制 UID 10，UID 8 redirect 至 5 | UID 10 不产生 token/request，UID 5..9 重发后才启动控制动作。 |
 | redirect 覆盖动作 | CSR/SFence/check_store 已开始后构造覆盖其 ROB 的 redirect | 专项 `uvm_fatal`，不得 silent reissue。 |
 | `check_store` L2 level | 所有前序完成后触发末尾标记 | `flushSb -> sbIsEmpty -> high hold -> done high -> release -> done low -> commit`，高电平期间无 CSR idle gap。 |
-| worker 互斥 | 启动 AUTO 或 MANUAL_CONTROL 专项 testcase | CSR/Fence sequencer 都只存在 control worker；没有 legacy/generic item 与控制 token 并发。 |
+| worker 互斥 | 启动 mode=`1` 或 mode=`3` 的专项 testcase | CSR/Fence sequencer 都只存在 control worker；没有 legacy/generic item 与控制 token 并发。 |
 | worker 退出 | 自动 real-dispatch 场景中 CSR/SFence 均未命中 | 主 service 先完成不含 ack 的 control action drain，再置 topology active 的 shutdown request 并 trigger event；两个空闲 worker 均发 exited acknowledgement；最后才允许 global stop，phase 能自然结束。 |
 | control reset release | reset 中释放 control request，随后首个 post-reset sample | 外层 reset gate 先发 request；CSR driver 清私有 hold 并 ack；CSR/DCache/ctrl 首个 sample 先发 producer ack，三类 ack 齐备后 complete，下一 sample 才发布可消费 observation；ready 前无 completion/token 消费。 |
-| control-runtime bootstrap | 初始 `rst_n` 已经释放、尚未出现物理 reset tick 时启动 AUTO 或 MANUAL_CONTROL topology | 任一控制主表构建返回后、service 启动前共同 hook 一次性建立 epoch/request；CSR driver 与 CSR/DCache/ctrl 以观察到该 request 后的首个 sample 回 ack，四个 ack 齐备后 ready，下一 sample 才允许 completion。 |
+| control-runtime bootstrap | 初始 `rst_n` 已经释放、尚未出现物理 reset tick 时启动 mode=`1` 或 mode=`3` topology | 任一控制主表构建返回后、service 启动前共同 hook 一次性建立 epoch/request；CSR driver 与 CSR/DCache/ctrl 以观察到该 request 后的首个 sample 回 ack，四个 ack 齐备后 ready；CSR monitor 的下一 sample 发布本 epoch `control_csr_runtime_baseline.first_snapshot_seq`，CSR token 必须在此后从 current latest 冻结自己的 baseline。 |
 | SFence 同拍 C0 | driver 交付 SFence 与 Fence monitor 在同一采样边界产生 C0 | `start_item()` 前冻结 `last_allocated_l2tlb_event_seq` 并置 `sfence_c0_match_armed`，同拍新 event 以更大 seq 被记录；`finish_item()` 后 service 才消费；不得用 finish 后 baseline 或仅匹配 sendover。 |
-| active-control reset | AUTO 或 MANUAL_CONTROL 主表已建立且 CSR/SFence/`check_store` 已 control-active 或已绑定 owner 时触发 reset | 立即 `uvm_fatal`/testcase abort；不得清局部控制状态后继续跑旧 main table/ROB。 |
-| topology 隔离 | software-only、普通 manual real dispatch、无关 `basicTest` vseq | 不替换 generic/default CSR/Fence producer，也不等待 control worker shutdown；MANUAL_CONTROL 是显式例外，必须启动完整 control topology。 |
-| direct-manual 派生隔离 | `tc_dispatch_real_mixed_wb_smoke`/mixed STA 派生或 `memblock_dispatch_real_cancel_reconcile_vseq` | mode 为 MANUAL，保留其既有 manual builder 和 generic CSR/Fence default；不得因继承 real-smoke 类/VSEQ 而进入 AUTO 或追加 `check_store`。 |
+| reset after admission | mode=`1/3` 任一普通或控制 UID 已 admission，随后触发 global/physical 或 L2TLB runtime reset | 立即 `uvm_fatal`/testcase abort；不得仅因 control marker 尚未 active 而清局部状态后继续跑旧 main table/ROB。 |
+| topology 隔离 | software-only、普通 manual real dispatch、无关 `basicTest` vseq，分别使用 mode=`0/2` | 不替换 generic/default CSR/Fence producer，也不等待 control worker shutdown；mode=`3` 是显式例外，必须启动完整 control topology。 |
+| DISABLED 控制条目 | mode=`0` 且 legacy generic/manual import 中显式构造 CSR/SFence/check_store op_class | post-build 立即 `uvm_fatal`；不得因无 control worker 而进入静默等待。 |
+| direct-manual 派生隔离 | `tc_dispatch_real_mixed_wb_smoke`/mixed STA 派生或 `memblock_dispatch_real_cancel_reconcile_vseq`，其 preset mode=`2` | 保留其既有 manual builder 和 generic CSR/Fence default；不得因继承 real-smoke 类/VSEQ 而进入 AUTO 或追加 `check_store`。 |
+| mode 非法值 | `MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE=-1` 或 `4` | `seq_csr_common::validate_and_clamp()` 在 build 前 `uvm_fatal`；不得 clamp、忽略或回退。 |
+| mode/sequence 不匹配 | generic main sequence 配 mode=`2/3`，或 direct-manual sequence 配 mode=`0/1`，或 direct manual-control sequence 配非 `3` | 对应 main sequence body 入口 `uvm_fatal`；不得由 testcase/VSEQ 重写 plus 或切换 builder。 |
 | 长度边界 | `N=1`、`N=10000` | `N+1` 分配不溢出，control service 只处理单 barrier，无每拍全表扫描。 |
 
 验证采用 V2 远端流程：先在 `mem_ut/ver/ut/memblock/sim` 执行对应 testcase 的 `make eda_compile`，再执行 `make eda_run`；最终日志需满足 `TEST CASE PASSED`、`UVM_ERROR=0`、`UVM_FATAL=0`。涉及预期 fatal 的 negative testcase 应单独把 fatal 视为命中条件，不能混入正常 smoke 通过标准。
@@ -654,7 +674,7 @@ main_phase：
 ## Coding 前主审确认项
 
 1. 本 plan 把 `MEMBLOCK_MAIN_TRANS_NUM=N` 定义为固定普通区间长度而非启用控制后仍保证存在的真实访存条数；这是保留 `UID=N` 固定 `check_store` 的必要解释。
-2. `check_store` 只由 `build_control_auto_main_table()` 在 AUTO mode 追加，不能回写到既有 `build_random_main_table()`；对应 AUTO testcase 必须按 topology 配置 control worker，不能只给单个新 testcase 补 worker 后让其他 AUTO 流卡住，也不能把 worker 无条件装入不使用 control main table 的 testcase。手工控制条目必须显式使用 `MANUAL_CONTROL_MAIN_TABLE`，普通 `MANUAL_MAIN_TABLE` 不允许悄然承载控制条目。
+2. `check_store` 只由 `build_control_auto_main_table()` 在 `MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE=1` 时追加，不能回写到既有 `build_random_main_table()`；对应 AUTO 专项 cfg 必须按 mode 配置 control worker，不能只给单个新 testcase 补 worker 后让其他 AUTO 流卡住，也不能把 worker 无条件装入不使用 control main table 的 testcase。手工控制条目必须以 mode=`3` 进入 `MANUAL_CONTROL_MAIN_TABLE`，普通 mode=`2` 不允许悄然承载控制条目。
 3. `flush_l2_enable` 的 level hold 由 CSR driver 的唯一 `l2_flush_level_hold` 维持，不依赖 CSR worker 连续 high item 交付；coding 时必须用 waveform/monitor 日志验证 ASSERT 到 RELEASE 之间所有 CSR driver idle sample 仍保持高电平。
 4. C4 completion 必须由既有 adapter 实际消费 lifecycle event 后发布，而不是仅凭控制状态机计算到期 sample。
 5. 当前 runtime CSR snapshot 只在 payload changed 时递增。初版配置函数必须保证 monitor 可见变化；no-op CSR 配置属于后续扩展，需要新增独立 acknowledge 或每拍观察序号。
@@ -662,6 +682,9 @@ main_phase：
 7. `sbIsEmpty` 完成必须以 sendover 后的新 observation 为准；不可仅以 attached、active request 或已有 high level 推进。deferred raw 必须携带 immutable observation seq，completed owner slot 消费后立即清理。
 8. `L2_FLUSH_LEVEL` hold 必须保存 owner 与完整 CSR baseline；done-high 到 RELEASE 的交接使用有界 owner 化 `l2_flush_release_request_q`，driver idle、RELEASE、reset 都按 owner 校验，不能只用一个无主 boolean 或瞬时 event。
 9. CSR runtime snapshot 不携带 reset epoch；完成条件只使用 reset generation 边界和 `snapshot_seq > baseline`。L2 done 使用独立 `control_reset_epoch`。
+10. `dispatch_raw_csr_t` 不是完整 CSR agent xaction。首版配置函数必须构造不 randomize 的完整 xaction、显式映射 monitor 可见字段并固定剩余安全字段；ASSERT/RELEASE 复用同一映射，避免未约束字段随机改变 DUT CSR 输入。
+11. C0/C4 只能匹配 `l2tlb_current_reset_epoch`；`control_reset_epoch` 只保护 CSR/`sbIsEmpty`/L2 done 控制事实，二者不得互相替代。
+12. `control_runtime_ready` 只允许 producer 开始发布当前代 observation，不等于当前 CSR snapshot 已可用；CSR action 必须再等 `control_csr_runtime_baseline`，并冻结其对应 seq/payload 后才入 action queue。
 
 ## 与初步 plan 差异说明
 
@@ -786,10 +809,10 @@ schedule_sfence_invalidate(payload,event)：
 apply_due_sfence_invalidate(sample)：
   按既有 due queue 执行 bounded live-entry 删除
   无论删除数量是否为 0，都把 claimed lifecycle_observation[event] 更新为 C4_EFFECTIVE
-  保存 due sample、reset epoch、payload 和 deleted_count
+  保存 due sample、l2tlb_reset_epoch、payload 和 deleted_count
 
 control service：
-  只按 token 的 event id、payload、reset epoch 查询 C0/C4 record
+  只按 token 的 event id、payload、l2tlb_reset_epoch 查询 C0/C4 record
   C4_EFFECTIVE 被当前 owner 消费后删除 record
   unclaimed generic record 不保留；reset 或过期记录清理整张有界 map；超过容量属于框架状态错误并 fatal
 ```
@@ -812,7 +835,8 @@ CSR drive 完成后读取 latest snapshot
 
 ```text
 普通 CSR：
-  drive 前记录 snapshot_seq_before_drive 和当前 CSR control reset generation
+  `CSR_CONFIG_PENDING` 先等当前 control epoch 的 control_csr_runtime_baseline
+  将该 monitor baseline 冻结到 token 后才 drive，并记录 snapshot_seq_before_drive
   只接受 seq > baseline 且 payload changed/expected 匹配的 monitor runtime snapshot
   reset generation 变化或无新 seq 时不完成；snapshot 本身不读取不存在的 reset_epoch
 
@@ -837,7 +861,7 @@ driver 没有 item 时 drive_idle()，把 flush_l2_enable 拉低
 
 ```text
 ASSERT：
-  worker 构造一次完整 CSR baseline，并在 xaction 非 DUT metadata 写入 L2_FLUSH_ASSERT + owner
+  worker 构造一次完整 CSR baseline，清 CSR changed/write pulse，并在 xaction 非 DUT metadata 写入 L2_FLUSH_ASSERT + owner
   driver 完成 send_pkt() 后深拷贝完整 xaction 为 baseline，并由 driver 建立 l2_flush_level_hold(valid=1, owner, release_requested=0)
 
 HOLD：
@@ -904,52 +928,98 @@ driver：
 
 差异影响：`flush_l2_enable` 的持续高电平只有 driver 一个写者，worker 仍保留 token、ASSERT/RELEASE 的 sequence 所有权和 sequencer 独占。该修正不改变草案要求的 `flushSb -> done-high -> release -> done-low -> commit` 顺序，但减少了高频 item 创建和竞态面。
 
-### 差异八：控制拓扑从 legacy 手工 plus 中解耦
+### 差异八：控制拓扑改由专用 plus 统一选择
 
-修改目的：当前 `build_main_table()` 仅以 `MEMBLOCK_USE_MANUAL_MAIN_TABLE` 选择随机建表或导入手工表；它并不知道 CSR/SFence worker、控制标记或 `check_store`。若把该 plus 同时当作 control topology 的真源，direct-manual testcase 会因未传 plus 被误判为 AUTO，或为了通过断言被迫依赖与自身 builder 无关的运行参数。
+修改目的：当前 `build_main_table()` 仅以 `MEMBLOCK_USE_MANUAL_MAIN_TABLE` 选择随机建表或导入手工表；它并不知道 CSR/SFence worker、控制标记或 `check_store`。此前方案再由 testcase/VSEQ 写 mode，会让场景入口同时拥有“选择 sequence”和“选择控制拓扑”两项责任，且 direct-manual 派生场景容易因继承关系写错 mode。需要把四个互斥 mode 收敛为公共 plus 输入，同时继续保留 legacy manual plus 的原始建表含义。
 
 修改前文字伪代码：
 
 ```text
-任一 main sequence：
-  读取 MEMBLOCK_USE_MANUAL_MAIN_TABLE
-  决定 import_manual_main_table() 或 build_random_main_table()
-  control worker/topology 也根据该 plus 或 sequence 名称推测
+testcase/VSEQ：
+  选择场景与 main sequence
+  testcase getter 或 VSEQ allowlist 再写 control topology mode
+
+main sequence：
+  读取 testcase/VSEQ 写入的 mode
+  再读取 MEMBLOCK_USE_MANUAL_MAIN_TABLE 决定 generic build 分支
+  direct-manual 派生路径需要额外覆写 mode，避免继承 AUTO
 ```
 
 修改后文字伪代码：
 
 ```text
 testcase build/config：
-  tc_base 的 virtual getter 默认返回 DISABLED
-  direct testcase 覆写 getter 返回 AUTO、MANUAL 或 MANUAL_CONTROL
-  basicTest 只按 VSEQ_MAIN 明确 allowlist 映射 mode
-  将 mode 写入 memblock_sync_pkg；reset_all_tables() 不清它
+  plus.sv 读取 MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE
+  seq_csr_common 校验值只能为 0..3，并返回对应枚举
+  initialize_control_worker_topology_from_plus() 将该值冻结到 memblock_sync_pkg
+  default-sequence 配置完成后，configure_control_worker_default_sequences_from_mode()
+  只在 mode=1/3 时覆盖 CSR/Fence 为 control worker
+  testcase 与 VSEQ 不写 mode；reset_all_tables() 不清 snapshot
 
-AUTO main sequence：
-  校验 mode 为 AUTO，且 legacy manual plus 为 0
-  generic build_main_table() 调用 build_control_auto_main_table(N)
-  该 helper 生成 N+1、预约 CSR/SFence 并追加 check_store
+generic main sequence：
+  mode=0：执行既有 generic build_main_table()，允许 legacy manual plus 维持旧 random/import 分流，但 post-build 拒绝控制 op_class
+  mode=1：校验 legacy manual plus 为 0，调用 build_control_auto_main_table(N)
+  mode=2/3：直接 fatal，要求使用各自 direct main sequence
 
 MANUAL / MANUAL_CONTROL direct sequence：
-  校验各自显式 mode
-  直接调用其 manual builder 和 import，不读取 legacy manual plus
+  只接受 mode=2 或 mode=3
+  直接调用各自 manual builder 和 import，不读取 legacy manual plus
   MANUAL 拒绝所有控制 op_class；MANUAL_CONTROL 只接受显式构造的控制标记
   两类路径都继续进入已有 service_real_dispatch_flow()
 ```
 
-差异影响：保留现有 plus 对 DISABLED legacy generic build 的兼容行为，但使控制 worker、bootstrap 和屏障服务有唯一 testcase/VSEQ 所有者。自动控制表仍能 fail-fast 防止误走 manual plus 分支；普通手工和手工控制 builder 均不再依赖不相关 plus，也不会因为 plus 值改变而静默切换控制语义。继承 real-smoke 的 direct-manual testcase/VSEQ 必须显式注册为 MANUAL，避免仅因继承链或默认 sequence 覆盖而误启动 worker。
+差异影响：`MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE` 成为控制 worker、bootstrap 和屏障服务的唯一配置源；`VSEQ_MAIN` 只负责场景选择，不能再改变 mode。默认值 `0` 保留未更新 testcase 的 legacy 行为；现有 direct-manual/cancel-reconcile preset 显式升级为 `2`，AUTO/手工控制专项 preset 分别使用 `1/3`。自动控制表仍 fail-fast 防止误走 legacy manual plus 分支；普通手工和手工控制 builder 均不会因继承链或 VSEQ 名称而静默切换控制语义。
+
+### 差异九：CSR action 使用当前 control epoch baseline，L2 profile 不重驱 CSR pulse
+
+修改目的：`control_runtime_ready` 只表示 CSR/DCache/ctrl producer 已完成当前 epoch 的接入确认；其后的首个 CSR sample 只证明 global latest 已进入当前 epoch，而每个 CSR/L2 action 都必须保留自己的当前 monitor 配置。并且原始 snapshot 中的 `*_changed`/write valid 可能是一次性 pulse，L2 flush hold 不能把它们持续保持。
+
+修改前文字伪代码：
+
+```text
+control runtime ready 后：
+  CSR worker 直接读取 global latest snapshot 构造 action
+
+L2 ASSERT/HOLD：
+  从 raw snapshot 复制字段，只把 flush_l2_enable 改为 1
+  若 raw 中有 changed/write pulse，也随 hold 一直驱动
+```
+
+修改后文字伪代码：
+
+```text
+CSR monitor：
+  收到 control_reset_request 的 ack sample 只确认 producer 已进入 epoch，并清自己的 local baseline
+  ready 后首个实际 runtime snapshot 发布时，写 control_csr_runtime_baseline(epoch, snapshot_seq)
+
+CSR_CONFIG_PENDING：
+  等 baseline 的 epoch 等于当前 control_reset_epoch
+  从 global latest 一次读取 raw+seq，要求 seq >= first_snapshot_seq
+  冻结本 action 的当前 payload 到 token，再入 CSR action queue
+
+普通 CSR configure：
+  只保留本 action 的 satp_changed=1
+  清 vsatp/hgatp/virt changed 与所有一次性 write/trigger valid，避免重驱 baseline sample 中的旧 pulse
+
+L2 ASSERT/RELEASE：
+  在 ASSERT 前以同一 gate 从 global latest 一次冻结当前 CSR 配置
+  用该 action-local copy 做确定性 raw-to-xaction 映射构造完整 baseline
+  清 satp/vsatp/hgatp/virt changed 与所有一次性 write/trigger valid
+  只覆盖 flush_l2_enable 和 owner metadata；driver hold 仅保持这一稳定 baseline
+```
+
+差异影响：普通 CSR 仍只以 monitor 观察到的新 snapshot 完成；`check_store` 仍只以 L2 done high/low 完成。新增 epoch gate、每 action current-snapshot freeze 和 pulse 清零只排除 bootstrap 早到旧 snapshot、较早 CSR 配置被回退、以及无关 CSR pulse 被 level hold 重复驱动的实现风险，不改变草案顺序。
 
 ### 新增 reset helper 详细文字伪代码
 
 ```text
 begin_control_runtime_reset(reset_reason)：
-  抽象功能描述：由主 control service 在 reset 边界唯一调用，先拒绝已开始控制主表的运行中 reset，再对尚未 admission control 的场景递增控制 reset epoch 并清理不能跨 reset 复用的控制事实；不修改主表 UID/ROB 分配。
+  抽象功能描述：由主 control service 在 reset 边界唯一调用，先拒绝任一 UID 已 admission 的运行中 reset，再对尚未 admission 任一 UID 的启动窗口递增控制 reset epoch 并清理不能跨 reset 复用的控制事实；不修改主表 UID/ROB 分配。
   输入 reset reason、当前 control topology；输出新的 control_reset_epoch
   若本次 reset 已处理则返回当前 epoch
-  若 main table 已建立且 active_control_barrier、control-active ROB map 或已绑定 owner 任一存在：输出 uid/owner/state 后 uvm_fatal 并 abort；不得清控制状态后继续
+  若 max_enqueued_uid_valid、active ROB map、active_control_barrier 或已绑定 owner 任一存在：输出 uid/owner/state 后 uvm_fatal 并 abort；不得清局部控制状态后继续
   递增 control_reset_epoch
-  清未绑定控制临时状态、action queue、l2_flush_release_request_q、owner flushSb active/completed slot、C0/C4 observation map、L2 done valid 和 worker ack
+  清未绑定控制临时状态、action queue、l2_flush_release_request_q、owner flushSb active/completed slot、C0/C4 observation map、L2 done valid、control_csr_runtime_baseline 的 valid/first_snapshot_seq 和 worker ack
   置 control_reset_request=1、control_runtime_ready=0；不直接写 CSR driver 私有 l2_flush_level_hold
   CSR driver 在自身 reset/观察 request 后按 owner 清 hold，完成后发布 driver_reset_ack(epoch)
 
