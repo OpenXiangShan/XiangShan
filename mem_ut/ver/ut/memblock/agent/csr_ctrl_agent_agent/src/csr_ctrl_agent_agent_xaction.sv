@@ -103,6 +103,21 @@ class csr_ctrl_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_ooo_to_mem_csrCtrl_hd_misalign_st_enable;
     rand bit io_ooo_to_mem_csrCtrl_mem_trigger_debugMode;
     rand bit io_ooo_to_mem_tlbCsr_priv_debug;
+
+    // 中文注释：以下字段仅供 CSR control worker 与 driver 交接 L2 flush level
+    // 所有权，不连接 DUT 端口。ASSERT 建立 driver 私有 hold，RELEASE 仅能清除
+    // 完全匹配 uid/dynamic_epoch/action_generation/kind 的 hold。
+    localparam int unsigned CONTROL_L2_FLUSH_ACTION_NONE    = 0;
+    localparam int unsigned CONTROL_L2_FLUSH_ACTION_ASSERT  = 1;
+    localparam int unsigned CONTROL_L2_FLUSH_ACTION_RELEASE = 2;
+    bit          control_l2_flush_metadata_valid;
+    bit          control_l2_flush_baseline_valid;
+    int unsigned control_l2_flush_action_kind;
+    int unsigned control_l2_flush_owner_uid;
+    int unsigned control_l2_flush_owner_dynamic_epoch;
+    int unsigned control_l2_flush_owner_action_generation;
+    int unsigned control_l2_flush_owner_kind_code;
+    int unsigned control_l2_flush_control_reset_epoch;
     extern constraint default_io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_hd_misalign_st_enable_cons;
     extern constraint default_io_ooo_to_mem_tlbCsr_priv_debug_cons;
@@ -293,6 +308,14 @@ class csr_ctrl_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_ooo_to_mem_csrCtrl_hd_misalign_st_enable, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_mem_trigger_debugMode, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_tlbCsr_priv_debug, UVM_ALL_ON);
+        `uvm_field_int(control_l2_flush_metadata_valid, UVM_ALL_ON);
+        `uvm_field_int(control_l2_flush_baseline_valid, UVM_ALL_ON);
+        `uvm_field_int(control_l2_flush_action_kind, UVM_ALL_ON);
+        `uvm_field_int(control_l2_flush_owner_uid, UVM_ALL_ON);
+        `uvm_field_int(control_l2_flush_owner_dynamic_epoch, UVM_ALL_ON);
+        `uvm_field_int(control_l2_flush_owner_action_generation, UVM_ALL_ON);
+        `uvm_field_int(control_l2_flush_owner_kind_code, UVM_ALL_ON);
+        `uvm_field_int(control_l2_flush_control_reset_epoch, UVM_ALL_ON);
     `uvm_object_utils_end
 
 endclass:csr_ctrl_agent_agent_xaction

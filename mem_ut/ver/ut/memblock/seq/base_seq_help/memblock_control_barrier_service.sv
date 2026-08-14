@@ -40,8 +40,11 @@ class memblock_control_barrier_service extends uvm_object;
     extern virtual function void enqueue_csr_action(input status_transaction status);
     extern virtual function void complete_csr_runtime_snapshot(input status_transaction status);
     extern virtual function void service_sfence_control(input status_transaction status);
+    extern virtual function void service_check_store_control(input status_transaction status);
     extern virtual function void enqueue_control_flushsb_request(input status_transaction status);
     extern virtual function void enqueue_sfence_action(input status_transaction status);
+    extern virtual function void enqueue_check_store_l2_assert(input status_transaction status);
+    extern virtual function void enqueue_check_store_l2_release(input status_transaction status);
     extern virtual function bit csr_payload_equal(
         input memblock_sync_pkg::dispatch_raw_csr_t expected,
         input memblock_sync_pkg::dispatch_raw_csr_t observed
@@ -253,10 +256,16 @@ function void memblock_control_barrier_service::service_active_control_barrier()
         MEMBLOCK_CONTROL_STATE_SFENCE_SENDOVER,
         MEMBLOCK_CONTROL_STATE_WAIT_L2TLB_FLUSH_EFFECTIVE:
             service_sfence_control(status);
+        MEMBLOCK_CONTROL_STATE_CHECK_STORE_FLUSHSB_PENDING,
+        MEMBLOCK_CONTROL_STATE_CHECK_STORE_WAIT_SB_EMPTY,
+        MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_ASSERT,
+        MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_DONE,
+        MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_RELEASE,
+        MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_IDLE:
+            service_check_store_control(status);
         default: begin
-            // SFence/check_store action states are intentionally left for their
-            // dedicated completion flows; no ordinary issue/commit path may
-            // advance a control marker while this service owns the barrier.
+            // CONTROL_COMMIT_READY 交给已有 control commit/retire 分支；其它状态
+            // 不得由普通 issue/commit 路径推进当前 barrier。
         end
     endcase
 endfunction:service_active_control_barrier
@@ -442,6 +451,132 @@ function void memblock_control_barrier_service::enqueue_sfence_action(
     status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
     data.enqueue_sfence_control_action(action);
 endfunction:enqueue_sfence_action
+
+// 抽象职责：推进 check_store 的 flushSb、L2 ASSERT、done-high、RELEASE 和 done-low
+// 状态。它只消费既有 owner flushSb completion 与 ctrl monitor latest done observation；
+// CSR driver 的 high hold 完全由 worker/driver 维护，本函数不直接驱动任何接口。
+function void memblock_control_barrier_service::service_check_store_control(
+    input status_transaction status
+);
+    memblock_flushsb_completion_t completion;
+    memblock_sync_pkg::memblock_control_level_observation_t observation;
+
+    if (!status.control_owner.valid ||
+        status.control_owner.kind != MEMBLOCK_CONTROL_KIND_CHECK_STORE ||
+        status.control_reset_epoch != control_runtime_epoch) begin
+        `uvm_fatal(get_type_name(), "check_store control status lost its owner or runtime epoch")
+    end
+    case (status.control_state)
+        MEMBLOCK_CONTROL_STATE_CHECK_STORE_FLUSHSB_PENDING: begin
+            if (!status.control_flushsb_request_queued) begin
+                enqueue_control_flushsb_request(status);
+            end
+            if (status.control_flushsb_request_queued &&
+                data.control_flushsb_sendover_seen(status.control_owner,
+                                                    status.control_flushsb_req_id)) begin
+                status.control_state = MEMBLOCK_CONTROL_STATE_CHECK_STORE_WAIT_SB_EMPTY;
+                status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+            end
+        end
+        MEMBLOCK_CONTROL_STATE_CHECK_STORE_WAIT_SB_EMPTY: begin
+            if (data.try_consume_control_flushsb_completion(
+                    status.control_owner, status.control_flushsb_req_id, completion)) begin
+                status.control_flushsb_request_queued = 1'b0;
+                status.control_state = MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_ASSERT;
+                status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+            end
+        end
+        MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_ASSERT: begin
+            if (!status.control_action_enqueued) begin
+                enqueue_check_store_l2_assert(status);
+            end
+        end
+        MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_DONE: begin
+            if (memblock_sync_pkg::get_latest_control_l2_flush_done_observation(observation) &&
+                observation.observation_seq > status.control_assert_done_baseline_seq &&
+                observation.level) begin
+                enqueue_check_store_l2_release(status);
+            end
+        end
+        MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_RELEASE: begin
+            // CSR worker 在匹配 RELEASE item sendover 后推进到 WAIT_L2_FLUSH_IDLE。
+        end
+        MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_IDLE: begin
+            if (memblock_sync_pkg::get_latest_control_l2_flush_done_observation(observation) &&
+                observation.observation_seq > status.control_release_done_baseline_seq &&
+                !observation.level) begin
+                status.control_state = MEMBLOCK_CONTROL_STATE_CONTROL_COMMIT_READY;
+                status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+            end
+        end
+        default:
+            `uvm_fatal(get_type_name(), "check_store service received an unsupported control state")
+    endcase
+endfunction:service_check_store_control
+
+// 抽象职责：在 sbIsEmpty 后冻结当前 CSR runtime baseline，排队一次 L2 ASSERT。
+// 当前 done 必须已为 low；若仍为 high，保持 ASSERT 状态等待，不把旧完成当作新请求完成。
+function void memblock_control_barrier_service::enqueue_check_store_l2_assert(
+    input status_transaction status
+);
+    memblock_csr_control_action_t action;
+    memblock_sync_pkg::dispatch_raw_csr_t snapshot;
+    memblock_sync_pkg::memblock_control_level_observation_t observation;
+    int unsigned snapshot_seq;
+
+    if (!status.control_owner.valid ||
+        status.control_state != MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_ASSERT ||
+        status.control_action_enqueued ||
+        status.control_reset_epoch != control_runtime_epoch) begin
+        `uvm_fatal(get_type_name(), "invalid check_store L2 ASSERT status")
+    end
+    if (!memblock_sync_pkg::get_latest_control_l2_flush_done_observation(observation) ||
+        observation.level) begin
+        return;
+    end
+    if (!memblock_sync_pkg::get_latest_runtime_csr_snapshot(snapshot, snapshot_seq)) begin
+        return;
+    end
+    action = '{default:'0};
+    action.owner = status.control_owner;
+    action.completion_profile = MEMBLOCK_CONTROL_COMPLETION_L2_FLUSH_LEVEL;
+    action.l2_flush_phase = MEMBLOCK_L2_FLUSH_PHASE_ASSERT;
+    action.csr_baseline_valid = 1'b1;
+    action.csr_baseline = snapshot;
+    action.csr_baseline_snapshot_seq = snapshot_seq;
+    action.control_reset_epoch = status.control_reset_epoch;
+    status.control_l2_csr_baseline_valid = 1'b1;
+    status.control_l2_csr_baseline = snapshot;
+    status.control_action_enqueued = 1'b1;
+    status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+    data.enqueue_csr_control_action(action);
+endfunction:enqueue_check_store_l2_assert
+
+// 抽象职责：把当前 owner 的 done-high 转成一个持久 RELEASE 请求。状态先切到
+// CHECK_STORE_L2_CSR_RELEASE，再唤醒 CSR worker，确保 worker 永远不会看到旧状态。
+function void memblock_control_barrier_service::enqueue_check_store_l2_release(
+    input status_transaction status
+);
+    memblock_l2_flush_release_request_t request;
+    memblock_sync_pkg::memblock_control_level_observation_t observation;
+
+    if (!status.control_owner.valid ||
+        status.control_state != MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_DONE ||
+        !status.control_l2_csr_baseline_valid ||
+        status.control_reset_epoch != control_runtime_epoch ||
+        !memblock_sync_pkg::get_latest_control_l2_flush_done_observation(observation) ||
+        !observation.level ||
+        observation.observation_seq <= status.control_assert_done_baseline_seq) begin
+        `uvm_fatal(get_type_name(), "invalid check_store L2 RELEASE completion")
+    end
+    request = '{default:'0};
+    request.owner = status.control_owner;
+    request.control_reset_epoch = status.control_reset_epoch;
+    request.release_baseline_observation_seq = observation.observation_seq;
+    status.control_state = MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_RELEASE;
+    status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+    data.enqueue_l2_flush_release_request(request);
+endfunction:enqueue_check_store_l2_release
 
 // 抽象职责：比较 CSR monitor 的完整 runtime payload，忽略 valid/cycle 这两个
 // transport 字段。复用已有 raw_csr_payload_changed() 的字段覆盖，避免维护第二份

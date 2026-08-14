@@ -1150,6 +1150,66 @@ class common_data_transaction extends uvm_object;
         status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
     endfunction:mark_csr_control_sendover
 
+    // 抽象职责：在 check_store ASSERT 的 finish_item() 返回后冻结 done observation
+    // 下界，并把状态交给 service 等待 monitor 已观察到的新 high。driver 已经建立
+    // 私有 high hold；这里不读取或修改 driver 状态，也不把 sendover 当作 done-high。
+    function void mark_l2_flush_assert_sendover(
+        input memblock_csr_control_action_t action
+    );
+        status_transaction status;
+        memblock_sync_pkg::memblock_control_level_observation_t observation;
+
+        if (!action.owner.valid || !action.csr_baseline_valid ||
+            action.completion_profile != MEMBLOCK_CONTROL_COMPLETION_L2_FLUSH_LEVEL ||
+            action.l2_flush_phase != MEMBLOCK_L2_FLUSH_PHASE_ASSERT ||
+            action.control_reset_epoch == 0 ||
+            !memblock_sync_pkg::get_latest_control_l2_flush_done_observation(observation)) begin
+            `uvm_fatal("CONTROL_ACTION", "invalid L2 flush ASSERT sendover")
+        end
+        status = get_status(action.owner.uid);
+        if (!memblock_control_owner_equal(status.control_owner, action.owner) ||
+            status.control_state != MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_ASSERT ||
+            !status.control_action_enqueued ||
+            status.control_reset_epoch != action.control_reset_epoch) begin
+            `uvm_fatal("CONTROL_ACTION",
+                       $sformatf("L2 ASSERT sendover owner/state mismatch uid=%0d state=%0d enqueued=%0d",
+                                 action.owner.uid, status.control_state,
+                                 status.control_action_enqueued))
+        end
+        status.control_l2_csr_baseline_valid = 1'b1;
+        status.control_l2_csr_baseline = action.csr_baseline;
+        status.control_assert_done_baseline_seq = observation.observation_seq;
+        status.control_action_enqueued = 1'b0;
+        status.control_state = MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_DONE;
+        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+    endfunction:mark_l2_flush_assert_sendover
+
+    // 抽象职责：在 check_store RELEASE 的 finish_item() 返回后冻结 done-low 的
+    // observation 下界。只有 service 后续观察到更新后的低电平才能完成 control marker。
+    function void mark_l2_flush_release_sendover(
+        input memblock_l2_flush_release_request_t request
+    );
+        status_transaction status;
+        memblock_sync_pkg::memblock_control_level_observation_t observation;
+
+        if (!request.owner.valid || request.control_reset_epoch == 0 ||
+            !memblock_sync_pkg::get_latest_control_l2_flush_done_observation(observation)) begin
+            `uvm_fatal("CONTROL_ACTION", "invalid L2 flush RELEASE sendover")
+        end
+        status = get_status(request.owner.uid);
+        if (!memblock_control_owner_equal(status.control_owner, request.owner) ||
+            status.control_state != MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_RELEASE ||
+            !status.control_l2_csr_baseline_valid ||
+            status.control_reset_epoch != request.control_reset_epoch) begin
+            `uvm_fatal("CONTROL_ACTION",
+                       $sformatf("L2 RELEASE sendover owner/state mismatch uid=%0d state=%0d",
+                                 request.owner.uid, status.control_state))
+        end
+        status.control_release_done_baseline_seq = observation.observation_seq;
+        status.control_state = MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_IDLE;
+        status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+    endfunction:mark_l2_flush_release_sendover
+
     // 抽象职责：持久化 SFence action 并唤醒唯一 fence worker。token 含 C0 arm
     // 前的基线字段；本函数不读取 monitor event，也不把 event 当作 action 真源。
     function void enqueue_sfence_control_action(input memblock_sfence_control_action_t action);

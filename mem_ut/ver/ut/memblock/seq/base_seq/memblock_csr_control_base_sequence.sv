@@ -28,8 +28,30 @@ class memblock_csr_control_base_sequence extends uvm_sequence #(csr_ctrl_agent_a
         input memblock_csr_control_action_t action,
         input csr_ctrl_agent_agent_xaction tr
     );
+    extern virtual task configure_l2_flush_assert_xaction(
+        input memblock_csr_control_action_t action,
+        output csr_ctrl_agent_agent_xaction tr
+    );
+    extern virtual task configure_l2_flush_release_xaction(
+        input memblock_l2_flush_release_request_t request,
+        output csr_ctrl_agent_agent_xaction tr
+    );
+    extern virtual task drive_l2_flush_assert_xaction(
+        input memblock_csr_control_action_t action,
+        input csr_ctrl_agent_agent_xaction tr
+    );
+    extern virtual task drive_l2_flush_release_xaction(
+        input memblock_l2_flush_release_request_t request,
+        input csr_ctrl_agent_agent_xaction tr
+    );
     extern virtual function void initialize_csr_xaction_from_runtime(
         input memblock_sync_pkg::dispatch_raw_csr_t runtime,
+        input csr_ctrl_agent_agent_xaction tr
+    );
+    extern virtual function void initialize_l2_flush_control_metadata(
+        input memblock_control_owner_t owner,
+        input int unsigned control_reset_epoch,
+        input int unsigned action_kind,
         input csr_ctrl_agent_agent_xaction tr
     );
 
@@ -44,7 +66,11 @@ endfunction:new
 
 task memblock_csr_control_base_sequence::body();
     memblock_csr_control_action_t action;
+    memblock_l2_flush_release_request_t release_request;
+    memblock_control_owner_t l2_flush_hold_owner;
     csr_ctrl_agent_agent_xaction tr;
+    bit l2_flush_hold_active;
+    int unsigned l2_flush_hold_control_reset_epoch;
 
     seq_csr_common::init();
     data = common_data_transaction::get();
@@ -54,17 +80,70 @@ task memblock_csr_control_base_sequence::body();
     if (!memblock_sync_pkg::uses_control_barrier_topology()) begin
         `uvm_fatal(get_type_name(), "CSR control worker started outside active control topology")
     end
+    l2_flush_hold_active = 1'b0;
+    l2_flush_hold_owner = '{default:'0};
+    l2_flush_hold_control_reset_epoch = 0;
 
     forever begin
-        if (data.try_pop_csr_control_action(action)) begin
-            if (action.completion_profile !=
-                MEMBLOCK_CONTROL_COMPLETION_RUNTIME_CSR_SNAPSHOT) begin
-                `uvm_fatal(get_type_name(),
-                           $sformatf("CSR worker got unsupported completion profile=%0d uid=%0d",
-                                     action.completion_profile, action.owner.uid))
+        // 中文注释：ASSERT 到 RELEASE 间由同一 worker 保留 sequencer 所有权。
+        // 这不是重复发送 high item；driver 的私有 hold 负责逐拍维持 high。
+        if (l2_flush_hold_active) begin
+            if (data.try_pop_l2_flush_release_request(release_request)) begin
+                if (!memblock_control_owner_equal(release_request.owner,
+                                                   l2_flush_hold_owner) ||
+                    release_request.control_reset_epoch !=
+                        l2_flush_hold_control_reset_epoch) begin
+                    `uvm_fatal(get_type_name(),
+                               "L2 flush RELEASE does not match CSR worker held owner")
+                end
+                configure_l2_flush_release_xaction(release_request, tr);
+                drive_l2_flush_release_xaction(release_request, tr);
+                l2_flush_hold_active = 1'b0;
+                l2_flush_hold_owner = '{default:'0};
+                l2_flush_hold_control_reset_epoch = 0;
+                continue;
             end
-            configure_csr_control_xaction(action, tr);
-            drive_csr_control_xaction(action, tr);
+            if (data.try_pop_csr_control_action(action)) begin
+                `uvm_fatal(get_type_name(),
+                           "CSR action arrived while L2 flush high hold is awaiting RELEASE")
+            end
+            if (data.control_worker_can_exit(1'b1)) begin
+                `uvm_fatal(get_type_name(),
+                           "CSR worker shutdown was requested while L2 flush hold is active")
+            end
+            wait_for_csr_work_or_shutdown();
+            continue;
+        end
+        if (data.try_pop_l2_flush_release_request(release_request)) begin
+            `uvm_fatal(get_type_name(),
+                       "CSR worker received L2 flush RELEASE without an active ASSERT hold")
+        end
+        if (data.try_pop_csr_control_action(action)) begin
+            case (action.completion_profile)
+                MEMBLOCK_CONTROL_COMPLETION_RUNTIME_CSR_SNAPSHOT: begin
+                    if (action.l2_flush_phase != MEMBLOCK_L2_FLUSH_PHASE_NONE) begin
+                        `uvm_fatal(get_type_name(),
+                                   "ordinary CSR action carries an unexpected L2 flush phase")
+                    end
+                    configure_csr_control_xaction(action, tr);
+                    drive_csr_control_xaction(action, tr);
+                end
+                MEMBLOCK_CONTROL_COMPLETION_L2_FLUSH_LEVEL: begin
+                    if (action.l2_flush_phase != MEMBLOCK_L2_FLUSH_PHASE_ASSERT) begin
+                        `uvm_fatal(get_type_name(),
+                                   "CSR action queue only accepts L2 flush ASSERT tokens")
+                    end
+                    configure_l2_flush_assert_xaction(action, tr);
+                    drive_l2_flush_assert_xaction(action, tr);
+                    l2_flush_hold_active = 1'b1;
+                    l2_flush_hold_owner = action.owner;
+                    l2_flush_hold_control_reset_epoch = action.control_reset_epoch;
+                end
+                default:
+                    `uvm_fatal(get_type_name(),
+                               $sformatf("CSR worker got unsupported completion profile=%0d uid=%0d",
+                                         action.completion_profile, action.owner.uid))
+            endcase
             continue;
         end
         if (data.control_worker_can_exit(1'b1)) begin
@@ -96,7 +175,8 @@ task memblock_csr_control_base_sequence::configure_csr_control_xaction(
 
     if (!action.owner.valid || !action.csr_baseline_valid ||
         action.completion_profile !=
-            MEMBLOCK_CONTROL_COMPLETION_RUNTIME_CSR_SNAPSHOT) begin
+            MEMBLOCK_CONTROL_COMPLETION_RUNTIME_CSR_SNAPSHOT ||
+        action.l2_flush_phase != MEMBLOCK_L2_FLUSH_PHASE_NONE) begin
         `uvm_fatal(get_type_name(), "CSR action is missing owner/baseline/profile")
     end
     tr = csr_ctrl_agent_agent_xaction::type_id::create(
@@ -172,6 +252,15 @@ function void memblock_csr_control_base_sequence::initialize_csr_xaction_from_ru
     tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_valid = 1'b0;
     tr.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_valid = 1'b0;
     tr.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_valid = 1'b0;
+    tr.control_l2_flush_metadata_valid = 1'b0;
+    tr.control_l2_flush_baseline_valid = 1'b0;
+    tr.control_l2_flush_action_kind =
+        csr_ctrl_agent_agent_xaction::CONTROL_L2_FLUSH_ACTION_NONE;
+    tr.control_l2_flush_owner_uid = 0;
+    tr.control_l2_flush_owner_dynamic_epoch = 0;
+    tr.control_l2_flush_owner_action_generation = 0;
+    tr.control_l2_flush_owner_kind_code = 0;
+    tr.control_l2_flush_control_reset_epoch = 0;
 endfunction:initialize_csr_xaction_from_runtime
 
 // 抽象职责：将已经配置的 action 交给 CSR driver，并只在 finish_item() 返回后登记
@@ -192,5 +281,126 @@ task memblock_csr_control_base_sequence::drive_csr_control_xaction(
     finish_item(tr);
     data.mark_csr_control_sendover(action);
 endtask:drive_csr_control_xaction
+
+// 抽象职责：把 seq 层 owner 转成 CSR agent 可见的 primitive metadata。agent 不解释
+// control kind，只在 driver 内逐字段比较，从而避免 agent package 依赖 seq typedef。
+function void memblock_csr_control_base_sequence::initialize_l2_flush_control_metadata(
+    input memblock_control_owner_t owner,
+    input int unsigned control_reset_epoch,
+    input int unsigned action_kind,
+    input csr_ctrl_agent_agent_xaction tr
+);
+    if (!owner.valid || control_reset_epoch == 0 || tr == null ||
+        !(action_kind inside {
+            csr_ctrl_agent_agent_xaction::CONTROL_L2_FLUSH_ACTION_ASSERT,
+            csr_ctrl_agent_agent_xaction::CONTROL_L2_FLUSH_ACTION_RELEASE})) begin
+        `uvm_fatal(get_type_name(), "invalid L2 flush CSR metadata initialization")
+    end
+    tr.control_l2_flush_metadata_valid = 1'b1;
+    tr.control_l2_flush_baseline_valid = 1'b1;
+    tr.control_l2_flush_action_kind = action_kind;
+    tr.control_l2_flush_owner_uid = owner.uid;
+    tr.control_l2_flush_owner_dynamic_epoch = owner.dynamic_epoch;
+    tr.control_l2_flush_owner_action_generation = owner.action_generation;
+    tr.control_l2_flush_owner_kind_code = owner.kind;
+    tr.control_l2_flush_control_reset_epoch = control_reset_epoch;
+endfunction:initialize_l2_flush_control_metadata
+
+// 抽象职责：从 check_store 冻结的 CSR baseline 创建一次 high ASSERT item。该函数只
+// 填 xaction；driver 建立 hold、service 等待 done-high 均不在这里执行。
+task memblock_csr_control_base_sequence::configure_l2_flush_assert_xaction(
+    input memblock_csr_control_action_t action,
+    output csr_ctrl_agent_agent_xaction tr
+);
+    if (!action.owner.valid || !action.csr_baseline_valid ||
+        action.completion_profile != MEMBLOCK_CONTROL_COMPLETION_L2_FLUSH_LEVEL ||
+        action.l2_flush_phase != MEMBLOCK_L2_FLUSH_PHASE_ASSERT ||
+        action.control_reset_epoch == 0) begin
+        `uvm_fatal(get_type_name(), "invalid L2 flush ASSERT action")
+    end
+    tr = csr_ctrl_agent_agent_xaction::type_id::create(
+        $sformatf("l2_flush_assert_uid_%0d_gen_%0d", action.owner.uid,
+                  action.owner.action_generation));
+    if (tr == null) begin
+        `uvm_fatal(get_type_name(), "failed to create L2 flush ASSERT xaction")
+    end
+    initialize_csr_xaction_from_runtime(action.csr_baseline, tr);
+    // L2 level hold 不得持续重驱 runtime snapshot 中的一次性 CSR pulse。
+    tr.io_ooo_to_mem_tlbCsr_satp_changed = 1'b0;
+    tr.io_ooo_to_mem_tlbCsr_vsatp_changed = 1'b0;
+    tr.io_ooo_to_mem_tlbCsr_hgatp_changed = 1'b0;
+    tr.io_ooo_to_mem_tlbCsr_priv_virt_changed = 1'b0;
+    tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_valid = 1'b0;
+    tr.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_valid = 1'b0;
+    tr.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_valid = 1'b0;
+    tr.pre_pkt_gap = 0;
+    tr.post_pkt_gap = 0;
+    tr.io_ooo_to_mem_csrCtrl_flush_l2_enable = 1'b1;
+    initialize_l2_flush_control_metadata(
+        action.owner, action.control_reset_epoch,
+        csr_ctrl_agent_agent_xaction::CONTROL_L2_FLUSH_ACTION_ASSERT, tr);
+endtask:configure_l2_flush_assert_xaction
+
+// 抽象职责：为同一 check_store owner 构造一次 low RELEASE item。它只读取 status 中
+// ASSERT 时冻结的 CSR baseline，不能读取随后变化的 global runtime snapshot。
+task memblock_csr_control_base_sequence::configure_l2_flush_release_xaction(
+    input memblock_l2_flush_release_request_t request,
+    output csr_ctrl_agent_agent_xaction tr
+);
+    status_transaction status;
+
+    if (!request.owner.valid || request.control_reset_epoch == 0) begin
+        `uvm_fatal(get_type_name(), "invalid L2 flush RELEASE request")
+    end
+    status = data.get_status(request.owner.uid);
+    if (!memblock_control_owner_equal(status.control_owner, request.owner) ||
+        status.control_state != MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_RELEASE ||
+        !status.control_l2_csr_baseline_valid ||
+        status.control_reset_epoch != request.control_reset_epoch) begin
+        `uvm_fatal(get_type_name(), "L2 flush RELEASE status/owner/baseline mismatch")
+    end
+    tr = csr_ctrl_agent_agent_xaction::type_id::create(
+        $sformatf("l2_flush_release_uid_%0d_gen_%0d", request.owner.uid,
+                  request.owner.action_generation));
+    if (tr == null) begin
+        `uvm_fatal(get_type_name(), "failed to create L2 flush RELEASE xaction")
+    end
+    initialize_csr_xaction_from_runtime(status.control_l2_csr_baseline, tr);
+    tr.io_ooo_to_mem_tlbCsr_satp_changed = 1'b0;
+    tr.io_ooo_to_mem_tlbCsr_vsatp_changed = 1'b0;
+    tr.io_ooo_to_mem_tlbCsr_hgatp_changed = 1'b0;
+    tr.io_ooo_to_mem_tlbCsr_priv_virt_changed = 1'b0;
+    tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_valid = 1'b0;
+    tr.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_valid = 1'b0;
+    tr.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_valid = 1'b0;
+    tr.pre_pkt_gap = 0;
+    tr.post_pkt_gap = 0;
+    tr.io_ooo_to_mem_csrCtrl_flush_l2_enable = 1'b0;
+    initialize_l2_flush_control_metadata(
+        request.owner, request.control_reset_epoch,
+        csr_ctrl_agent_agent_xaction::CONTROL_L2_FLUSH_ACTION_RELEASE, tr);
+endtask:configure_l2_flush_release_xaction
+
+// 抽象职责：在 ASSERT driver item 完成后仅登记 sendover 与最新 done 序号下界。
+// driver 已在同一 item 边界建立 hold；此处不把 sendover 当作 done-high。
+task memblock_csr_control_base_sequence::drive_l2_flush_assert_xaction(
+    input memblock_csr_control_action_t action,
+    input csr_ctrl_agent_agent_xaction tr
+);
+    start_item(tr);
+    finish_item(tr);
+    data.mark_l2_flush_assert_sendover(action);
+endtask:drive_l2_flush_assert_xaction
+
+// 抽象职责：交付唯一的 RELEASE item 并记录 low completion 的新鲜 observation 下界。
+// driver 在 item 边界按 owner 清 hold；service 仍必须等待 monitor 观察到 done-low。
+task memblock_csr_control_base_sequence::drive_l2_flush_release_xaction(
+    input memblock_l2_flush_release_request_t request,
+    input csr_ctrl_agent_agent_xaction tr
+);
+    start_item(tr);
+    finish_item(tr);
+    data.mark_l2_flush_release_sendover(request);
+endtask:drive_l2_flush_release_xaction
 
 `endif
