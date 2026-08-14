@@ -11,6 +11,62 @@
 `include "memblock_compile_params.svh"
 
 package memblock_sync_pkg;
+
+    // 中文注释：控制屏障的静态拓扑模式。plus 解析后仅允许初始化一次；
+    // sequence/worker/service 只读此快照，不能通过 testcase 或 VSEQ 推断/改写模式。
+    typedef enum int unsigned {
+        MEMBLOCK_CONTROL_TOPOLOGY_DISABLED             = 0,
+        MEMBLOCK_CONTROL_TOPOLOGY_AUTO_MAIN_TABLE      = 1,
+        MEMBLOCK_CONTROL_TOPOLOGY_MANUAL_MAIN_TABLE    = 2,
+        MEMBLOCK_CONTROL_TOPOLOGY_MANUAL_CONTROL_TABLE = 3
+    } memblock_control_worker_topology_mode_e;
+
+    bit control_worker_topology_initialized = 1'b0;
+    memblock_control_worker_topology_mode_e control_worker_topology_mode =
+        MEMBLOCK_CONTROL_TOPOLOGY_DISABLED;
+    bit control_worker_topology_active = 1'b0;
+    string control_worker_topology_initializer = "";
+
+    // 抽象职责：把已经校验的公共 plus mode 冻结为本 testcase 的唯一 runtime topology。
+    // 同一 mode 的重复调用是幂等的；不同 mode 的第二写者直接 fatal，避免场景入口竞争。
+    function void initialize_control_worker_topology(
+        input memblock_control_worker_topology_mode_e mode,
+        input string initializer
+    );
+        if (control_worker_topology_initialized) begin
+            if (control_worker_topology_mode != mode) begin
+                `uvm_fatal("MEMBLOCK_CONTROL_TOPOLOGY",
+                           $sformatf("topology already frozen to %0d by %0s, cannot rewrite to %0d by %0s",
+                                     control_worker_topology_mode,
+                                     control_worker_topology_initializer,
+                                     mode,
+                                     initializer))
+            end
+            return;
+        end
+        control_worker_topology_mode = mode;
+        control_worker_topology_active =
+            mode == MEMBLOCK_CONTROL_TOPOLOGY_AUTO_MAIN_TABLE ||
+            mode == MEMBLOCK_CONTROL_TOPOLOGY_MANUAL_CONTROL_TABLE;
+        control_worker_topology_initializer = initializer;
+        control_worker_topology_initialized = 1'b1;
+    endfunction:initialize_control_worker_topology
+
+    function memblock_control_worker_topology_mode_e get_control_worker_topology_mode();
+        if (!control_worker_topology_initialized) begin
+            `uvm_fatal("MEMBLOCK_CONTROL_TOPOLOGY", "control worker topology read before initialization")
+        end
+        return control_worker_topology_mode;
+    endfunction:get_control_worker_topology_mode
+
+    function bit uses_control_barrier_topology();
+        return get_control_worker_topology_mode() == MEMBLOCK_CONTROL_TOPOLOGY_AUTO_MAIN_TABLE ||
+               get_control_worker_topology_mode() == MEMBLOCK_CONTROL_TOPOLOGY_MANUAL_CONTROL_TABLE;
+    endfunction:uses_control_barrier_topology
+
+    function bit uses_auto_control_barrier_topology();
+        return get_control_worker_topology_mode() == MEMBLOCK_CONTROL_TOPOLOGY_AUTO_MAIN_TABLE;
+    endfunction:uses_auto_control_barrier_topology
     import uvm_pkg::*;
 
     bit reset_backend_done = 1'b0;

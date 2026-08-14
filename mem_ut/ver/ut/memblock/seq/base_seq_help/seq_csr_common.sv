@@ -15,6 +15,17 @@ class seq_csr_common;
 
     static int unsigned main_trans_num = 1;
     static bit          use_manual_main_table = 1'b0;
+    // 中文注释：控制 worker topology 的 plus 快照。load_from_plus() 写入，
+    // check_control_worker_topology_mode() 只校验合法范围；测试运行期不得改写它。
+    static int          control_worker_topology_mode = 0;
+    // 中文注释：AUTO 主表的 CSR/SFence 预约参数。enable 为 0 时 interval 不消费；
+    // enable 为 1 时 check_control_interval_config() 要求 min>=1 且 max>=min。
+    static bit          csr_control_enable = 1'b0;
+    static int          csr_control_min_interval = 1;
+    static int          csr_control_max_interval = 1;
+    static bit          sfence_control_enable = 1'b0;
+    static int          sfence_control_min_interval = 1;
+    static int          sfence_control_max_interval = 1;
     static int unsigned enq_per_cycle = 4;
     // 控制get_enq_per_cycle()是否按ZERO/MIDDLE/MAX权重采样[0:物理slot数]目标上限。
     static bit          enq_per_cycle_rand_en = 1'b0;
@@ -266,6 +277,13 @@ class seq_csr_common;
     static function void load_from_plus();
         main_trans_num              = get_non_negative_int("MEMBLOCK_MAIN_TRANS_NUM", plus::MEMBLOCK_MAIN_TRANS_NUM);
         use_manual_main_table       = plus::MEMBLOCK_USE_MANUAL_MAIN_TABLE;
+        control_worker_topology_mode = plus::MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE;
+        csr_control_enable          = plus::MEMBLOCK_CSR_CONTROL_ENABLE;
+        csr_control_min_interval    = plus::MEMBLOCK_CSR_CONTROL_MIN_INTERVAL;
+        csr_control_max_interval    = plus::MEMBLOCK_CSR_CONTROL_MAX_INTERVAL;
+        sfence_control_enable       = plus::MEMBLOCK_SFENCE_CONTROL_ENABLE;
+        sfence_control_min_interval = plus::MEMBLOCK_SFENCE_CONTROL_MIN_INTERVAL;
+        sfence_control_max_interval = plus::MEMBLOCK_SFENCE_CONTROL_MAX_INTERVAL;
         enq_per_cycle               = get_non_negative_int("MEMBLOCK_ENQ_PER_CYCLE", plus::MEMBLOCK_ENQ_PER_CYCLE);
         enq_per_cycle_rand_en       = plus::MEMBLOCK_ENQ_PER_CYCLE_RAND_EN;
         enq_per_cycle_zero_weight   = get_non_negative_int("MEMBLOCK_ENQ_PER_CYCLE_ZERO_WEIGHT",
@@ -512,10 +530,43 @@ class seq_csr_common;
             `uvm_fatal("SEQ_CSR_CFG", "LEVEL_WEIGHT_EN requires MAIN_MEM_RANGES_EN=0");
     endfunction:check_l2tlb_payload_weight_cfg
 
+    // 抽象职责：只校验控制 worker topology plus 的枚举范围；不冻结、不改写运行期状态。
+    static function void check_control_worker_topology_mode();
+        if (control_worker_topology_mode < 0 || control_worker_topology_mode > 3) begin
+            `uvm_fatal("SEQ_CSR_CFG",
+                       $sformatf("MEMBLOCK_CONTROL_WORKER_TOPOLOGY_MODE=%0d must be within [0:3]",
+                                 control_worker_topology_mode))
+        end
+    endfunction:check_control_worker_topology_mode
+
+    // 抽象职责：只校验已启用控制标记的预约间隔；enable=0 时该组 interval 不参与语义。
+    static function void check_control_interval_config(input string control_name,
+                                                       input bit enabled,
+                                                       input int min_interval,
+                                                       input int max_interval);
+        if (!enabled) begin
+            return;
+        end
+        if (min_interval < 1 || max_interval < min_interval) begin
+            `uvm_fatal("SEQ_CSR_CFG",
+                       $sformatf("%0s control interval is invalid: min=%0d max=%0d; require min>=1 and max>=min",
+                                 control_name, min_interval, max_interval))
+        end
+    endfunction:check_control_interval_config
+
     static function void validate_and_clamp();
         bit [63:0] main_vaddr_upper;
 
         check_compile_param_consistency();
+        check_control_worker_topology_mode();
+        check_control_interval_config("CSR",
+                                      csr_control_enable,
+                                      csr_control_min_interval,
+                                      csr_control_max_interval);
+        check_control_interval_config("SFence",
+                                      sfence_control_enable,
+                                      sfence_control_min_interval,
+                                      sfence_control_max_interval);
         fatal_if_zero("main_trans_num", main_trans_num);
         fatal_if_zero("main_vaddr_range", main_vaddr_range);
         fatal_if_zero("paddr_range", paddr_range);
@@ -944,6 +995,41 @@ class seq_csr_common;
         check_initialized("get_main_trans_num");
         return main_trans_num;
     endfunction:get_main_trans_num
+
+    static function int get_control_worker_topology_mode();
+        check_initialized("get_control_worker_topology_mode");
+        return control_worker_topology_mode;
+    endfunction:get_control_worker_topology_mode
+
+    static function bit get_csr_control_enable();
+        check_initialized("get_csr_control_enable");
+        return csr_control_enable;
+    endfunction:get_csr_control_enable
+
+    static function int get_csr_control_min_interval();
+        check_initialized("get_csr_control_min_interval");
+        return csr_control_min_interval;
+    endfunction:get_csr_control_min_interval
+
+    static function int get_csr_control_max_interval();
+        check_initialized("get_csr_control_max_interval");
+        return csr_control_max_interval;
+    endfunction:get_csr_control_max_interval
+
+    static function bit get_sfence_control_enable();
+        check_initialized("get_sfence_control_enable");
+        return sfence_control_enable;
+    endfunction:get_sfence_control_enable
+
+    static function int get_sfence_control_min_interval();
+        check_initialized("get_sfence_control_min_interval");
+        return sfence_control_min_interval;
+    endfunction:get_sfence_control_min_interval
+
+    static function int get_sfence_control_max_interval();
+        check_initialized("get_sfence_control_max_interval");
+        return sfence_control_max_interval;
+    endfunction:get_sfence_control_max_interval
 
     static function bit get_use_manual_main_table();
         check_initialized("get_use_manual_main_table");
