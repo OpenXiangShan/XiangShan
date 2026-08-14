@@ -97,10 +97,6 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   io.prediction.bits.target      := getFullTarget(s1_startPc, s1_hitEntry.slot1.target, s1_hitEntry.slot1.targetCarry)
   io.prediction.bits.attribute   := s1_hitEntry.slot1.attribute
 
-  // update replacer
-  replacer.io.predTouch.valid := s1_hit && s1_fire
-  replacer.io.predTouch.bits  := s1_hitIdx
-
   /* *** train stage 0 ***
    * - read entries
    * - check if hits entries
@@ -174,6 +170,8 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
    */
   t1_fire := RegNext(t0_fire, false.B)
   t1_tag  := RegEnable(t0_tag, t0_fire)
+  private val t1_useAbtb     = RegNext(io.fastTrain.get.bits.useAbtb)
+  private val t1_hasOverride = RegNext(io.fastTrain.get.bits.hasOverride)
   private val t1_actualTaken = RegEnable(t0_actualTaken, t0_fire)
   private val t1_position    = RegEnable(t0_position, t0_fire)
   private val t1_target      = RegEnable(t0_target, t0_fire)
@@ -237,8 +235,11 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   }
 
   // update replacer
-  replacer.io.trainTouch.valid := t1_fire
+  replacer.io.trainTouch.valid := t1_fire && t1_allocate
   replacer.io.trainTouch.bits  := t1_updateIdx
+
+  replacer.io.predTouch.valid := t1_fire && t1_hit && (!t1_useAbtb || t1_hasOverride)
+  replacer.io.predTouch.bits  := t1_updateIdx
 
   /* *** perf *** */
   XSPerfAccumulate("predHit", s1_hit && s1_fire)

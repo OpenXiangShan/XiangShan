@@ -287,6 +287,7 @@ class FastTrain(implicit p: Parameters) extends BpuBundle {
   val startPc:         Pc            = Pc()
   val finalPrediction: Prediction    = new Prediction
   val hasOverride:     Bool          = Bool()
+  val useAbtb:         Bool          = Bool()
   val abtbMeta:        AheadBtbMeta  = new AheadBtbMeta
   val utageMeta:       MicroTageMeta = new MicroTageMeta
 }
