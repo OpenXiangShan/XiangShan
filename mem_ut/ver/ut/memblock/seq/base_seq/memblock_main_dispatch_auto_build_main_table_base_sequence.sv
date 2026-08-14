@@ -76,6 +76,9 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_real_di
         @(negedge service_vif.clk);
         if (service_vif.rst_n !== 1'b1 ||
             memblock_sync_pkg::reset_backend_done !== 1'b1) begin
+            if (control_barrier_service != null) begin
+                control_barrier_service.begin_control_runtime_reset("physical reset");
+            end
             continue;
         end
         service_monitor_once();
@@ -157,6 +160,9 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor
     // 执行一次 reconcile，避免一拍两次推进 deadline/record 生命周期。
     monitor_adapter.drain_lsq_timing_sidebands();
     monitor_adapter.service_lsq_timing_reconcile();
+    if (control_barrier_service != null) begin
+        control_barrier_service.service_once();
+    end
 endtask:service_monitor_once
 
 function bit memblock_main_dispatch_auto_build_main_table_base_sequence::all_transactions_terminal_done();

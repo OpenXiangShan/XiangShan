@@ -26,6 +26,7 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
     dispatch_monitor_batch_handler monitor_batch_handler;
     exception_redirect_replay_handler exception_handler;
     lsq_commit_handler monitor_commit_handler;
+    memblock_control_barrier_service control_barrier_service;
     dispatch_monitor_event_adapter monitor_adapter;
     main_control_transaction manual_main_table_by_rob[int unsigned];
     memblock_boundary_profile_candidate_t boundary_profile_cache[$];
@@ -224,6 +225,10 @@ task memblock_dispatch_base_sequence::pre_body();
         monitor_commit_handler = lsq_commit_handler::get();
         monitor_commit_handler.bind_lsq_ctrl(lsq_ctrl);
     end
+    if (control_barrier_service == null) begin
+        control_barrier_service = memblock_control_barrier_service::type_id::create(
+            "control_barrier_service");
+    end
     if (monitor_adapter == null) begin
         monitor_adapter = dispatch_monitor_event_adapter::type_id::create("monitor_adapter");
         monitor_adapter.bind_commit_handler(monitor_commit_handler);
@@ -282,6 +287,9 @@ task memblock_dispatch_base_sequence::build_main_table();
                        $sformatf("unsupported frozen control topology mode=%0d", topology_mode))
         end
     endcase
+    if (memblock_sync_pkg::uses_control_barrier_topology()) begin
+        control_barrier_service.initialize_control_runtime_bootstrap();
+    end
 endtask:build_main_table
 
 task memblock_dispatch_base_sequence::build_random_main_table(input int unsigned main_trans_num_i);
