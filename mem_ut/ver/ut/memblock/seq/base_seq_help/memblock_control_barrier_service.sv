@@ -396,8 +396,8 @@ function void memblock_control_barrier_service::enqueue_control_flushsb_request(
 endfunction:enqueue_control_flushsb_request
 
 // 抽象职责：在 sbIsEmpty completion 后把 canonical SFence token 放入持久 action
-// queue。L2TLB responder/adapter owner 尚未 ready 时保持 SFENCE_REQ 等待；已知
-// 拓扑缺失则 fail-fast，避免控制 barrier 无声卡死。
+// queue。拓扑、adapter 或 lifecycle owner 缺失均为配置/生命周期错误；只有 owner
+// 已建立后的 post-reset transport baseline 尚未证明时允许保持 SFENCE_REQ 等待。
 function void memblock_control_barrier_service::enqueue_sfence_action(
     input status_transaction status
 );
@@ -409,11 +409,25 @@ function void memblock_control_barrier_service::enqueue_sfence_action(
         status.control_action_enqueued) begin
         `uvm_fatal(get_type_name(), "invalid status while enqueueing SFence action")
     end
+    if (!memblock_sync_pkg::l2tlb_testcase_lifecycle_initialized ||
+        !memblock_sync_pkg::l2tlb_responder_enabled() ||
+        !memblock_sync_pkg::l2tlb_dispatch_active() ||
+        !memblock_sync_pkg::dispatch_l2tlb_lookup_active) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("SFence control requires an enabled L2TLB dispatch topology: initialized=%0d responder=%0d dispatch=%0d lookup=%0d",
+                             memblock_sync_pkg::l2tlb_testcase_lifecycle_initialized,
+                             memblock_sync_pkg::l2tlb_responder_enabled(),
+                             memblock_sync_pkg::l2tlb_dispatch_active(),
+                             memblock_sync_pkg::dispatch_l2tlb_lookup_active))
+    end
     if (!memblock_sync_pkg::l2tlb_adapter_service_active) begin
         `uvm_fatal(get_type_name(), "SFence control requires an active L2TLB adapter service")
     end
     if (!memblock_sync_pkg::l2tlb_lifecycle_owner_claimed) begin
-        return;
+        `uvm_fatal(get_type_name(),
+                   $sformatf("SFence control requires a claimed L2TLB lifecycle owner: claimed_once=%0d owner=%0s",
+                             memblock_sync_pkg::l2tlb_owner_claimed_once,
+                             memblock_sync_pkg::l2tlb_lifecycle_owner_name))
     end
     reset_epoch = memblock_sync_pkg::get_l2tlb_current_reset_epoch();
     if (reset_epoch == 0 ||

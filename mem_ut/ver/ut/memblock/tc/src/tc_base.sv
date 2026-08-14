@@ -56,10 +56,11 @@ function void `TC_NAME::build_phase(uvm_phase phase);
     end
     l2tlb_main_vseq_name = main_vseq_name;
     skip_legacy_l2tlb_default = vseq_starts_l2tlb(main_vseq_name);
-    // tc_base 的 real-dispatch 派生 testcase 通过 virtual capability 表达能否承载控制 flow；
-    // 普通 legacy testcase 若误设 active mode，应在 build 期 fail-fast。
+    // 中文注释：第二种拓扑只允许 basicTest 的显式 VSEQ 持有 CSR/Fence worker。
+    // tc_base 及其 legacy real-dispatch 派生 testcase 不得因自己有 L2TLB dispatch
+    // 就被误判为 control worker owner；active mode 在 build 期直接 fail-fast。
     seq_csr_common::check_control_worker_dispatch_capability(
-        l2tlb_dispatch_topology_active(), get_type_name());
+        1'b0, get_type_name());
 
   ///reg_model = aa_test_reg_model::type_id::create("reg_model",this);
   ///reg_model.configure(null, "");
