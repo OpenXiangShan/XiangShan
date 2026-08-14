@@ -41,6 +41,8 @@ class DecodeChannels(
 )(
   implicit p: Parameters
 ) extends Module with HasVectorSettings with HasSimpleSettings {
+  override def maxSimpleSplitUopNum: Int = if (p(XSCoreParamsKey).HasShadowStack) 5 else 2
+
   val MaxM2UopIdx = numM2M4M8Channel._1
   val MaxM4UopIdx = numM2M4M8Channel._2
   val MaxM8UopIdx = numM2M4M8Channel._3
@@ -163,6 +165,7 @@ class DecodeChannels(
     uopWidth = uopWidth,
     uopBufferLength = uopBufferSize,
     numM2M4M8Channel = numM2M4M8Channel,
+    scalarSplitCounts = if (p(XSCoreParamsKey).HasShadowStack) Seq(3, 5) else Seq.empty,
   ))
 
   val uopSelectMod = Module(new UopSelectModule(
@@ -329,9 +332,9 @@ class DecodeChannelOutput extends Bundle {
   val src2Type = DecodeSrcType()
   val src3Ren = Bool()
   val src3Type = DecodeSrcType()
-  val lsrc1 = UInt(5.W)
-  val lsrc2 = UInt(5.W)
-  val lsrc3 = UInt(5.W)
+  val lsrc1 = UInt(6.W)
+  val lsrc2 = UInt(6.W)
+  val lsrc3 = UInt(6.W)
   val vlRen = Bool()
   val v0Ren = Bool()
   val frmRen = Bool()
@@ -341,7 +344,7 @@ class DecodeChannelOutput extends Bundle {
   val gpWen = Bool()
   val fpWen = Bool()
   val vpWen = Bool()
-  val ldest = UInt(5.W)
+  val ldest = UInt(6.W)
 
   val vlWen = Bool()
   val vxsatWen = Bool()
@@ -638,7 +641,7 @@ object DecodeChannelOutput {
     uop.isLastUop := true.B
     uop.src12Rev := false.B
 
-    uop.isMove := false.B
+    uop.isMove := puop.isMove
 
     uop.isJ := puop.isJ
     uop.isJr := puop.isJr

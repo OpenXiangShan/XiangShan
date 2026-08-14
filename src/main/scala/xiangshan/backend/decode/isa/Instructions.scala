@@ -458,6 +458,11 @@ object Instructions {
   def SRLI               :BitPat = BitPat("b000000???????????101?????0010011")
   def SRLIW              :BitPat = BitPat("b0000000??????????101?????0011011")
   def SRLW               :BitPat = BitPat("b0000000??????????101?????0111011")
+  def SSPUSH_X1          :BitPat = PseudoInstructions.SSPUSH_X1
+  def SSPUSH_X5          :BitPat = PseudoInstructions.SSPUSH_X5
+  def SSPOPCHK_X1        :BitPat = PseudoInstructions.SSPOPCHK_X1
+  def SSPOPCHK_X5        :BitPat = PseudoInstructions.SSPOPCHK_X5
+  def SSRDP             :BitPat = PseudoInstructions.SSRDP
   def SSAMOSWAP_D        :BitPat = BitPat("b01001????????????011?????0101111")
   def SSAMOSWAP_W        :BitPat = BitPat("b01001????????????010?????0101111")
   def SUB                :BitPat = BitPat("b0100000??????????000?????0110011")
@@ -2918,12 +2923,17 @@ object Instructions {
   }
 
   object ZICFISSType extends InstType {
-    def SSAMOSWAP_D        = outer.SSAMOSWAP_D
-    def SSAMOSWAP_W        = outer.SSAMOSWAP_W
+    def SSPUSH_X1          = outer.SSPUSH_X1
+    def SSPUSH_X5          = outer.SSPUSH_X5
+    def SSPOPCHK_X1        = outer.SSPOPCHK_X1
+    def SSPOPCHK_X5        = outer.SSPOPCHK_X5
+    def SSRDP             = outer.SSRDP
+    def SSAMOSWAP_D       = outer.SSAMOSWAP_D
+    def SSAMOSWAP_W       = outer.SSAMOSWAP_W
 
     val allWithNames = withNameSeq(
-      SSAMOSWAP_D,
-      SSAMOSWAP_W,
+      SSPUSH_X1, SSPUSH_X5, SSPOPCHK_X1, SSPOPCHK_X5, SSRDP,
+      SSAMOSWAP_D, SSAMOSWAP_W,
     )
   }
 
