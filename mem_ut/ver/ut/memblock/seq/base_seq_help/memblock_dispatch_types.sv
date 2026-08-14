@@ -461,6 +461,19 @@ typedef struct {
     longint unsigned            cycle;
 } memblock_flushsb_completion_t;
 
+// 中文注释：L2TLB adapter 已观察到的 control SFence C0/C4 事实。adapter 写入
+// owner-neutral raw fence 后按当前 armed owner 转换为该记录；control service 是唯一
+// consumer，按 owner+event+reset epoch 匹配，不能由 monitor 直接写 status。
+typedef struct {
+    bit                         valid;
+    memblock_control_owner_t    owner;
+    memblock_sfence_payload_t   payload;
+    longint unsigned            lifecycle_event_seq;
+    longint unsigned            reset_epoch;
+    longint unsigned            anchor_sample_seq;
+    longint unsigned            due_sample_seq;
+} memblock_control_sfence_observation_t;
+
 // 抽象职责：比较两个已绑定 control action 的唯一身份。无效 owner 绝不视为相等，
 // 防止尚未开始动作的静态屏障误消费旧 token、completion 或 RELEASE 请求。
 function automatic bit memblock_control_owner_equal(

@@ -101,8 +101,8 @@ task memblock_sfence_control_base_sequence::configure_sfence_control_xaction(
 
     action.expected_fence = '{default:'0};
     action.expected_fence.valid = 1'b1;
-    action.expected_fence.ignore_addr = 1'b1;
-    action.expected_fence.ignore_id = 1'b1;
+    action.expected_fence.ignore_addr = 1'b0;
+    action.expected_fence.ignore_id = 1'b0;
     action.expected_fence.addr = '0;
     action.expected_fence.id = '0;
     action.expected_fence.hv = 1'b0;

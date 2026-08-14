@@ -87,6 +87,11 @@ class common_data_transaction extends uvm_object;
     // 在该 UID terminal_done 后由 control service 解除；普通 LSQ admission 不得越过它。
     bit            active_control_barrier_valid;
     memblock_uid_t active_control_barrier_uid;
+    // 中文注释：当前唯一控制 SFence 的 C0/C4 adapter observation。写入：已有
+    // L2TLB adapter 在 schedule/apply 边界；读取/清除：control barrier service。
+    // 这两个槽不保存 generic fence，避免普通 SFence 干扰控制 owner。
+    memblock_control_sfence_observation_t control_sfence_c0_observation;
+    memblock_control_sfence_observation_t control_sfence_effective_observation;
 
     // 中文注释：控制 worker 的持久工作项和唤醒事件。service 是唯一 producer，
     // CSR/Fence worker 分别是唯一 consumer；event 只用于唤醒，queue 才是动作真源。
@@ -183,6 +188,8 @@ class common_data_transaction extends uvm_object;
         uid_waiting_by_vpn_s2xlate.delete();
         active_control_barrier_valid = 1'b0;
         active_control_barrier_uid = 0;
+        control_sfence_c0_observation = '{default:'0};
+        control_sfence_effective_observation = '{default:'0};
         csr_control_action_q.delete();
         sfence_control_action_q.delete();
         l2_flush_release_request_q.delete();
@@ -273,6 +280,8 @@ class common_data_transaction extends uvm_object;
         uid_by_sq.delete();
         active_control_barrier_valid = 1'b0;
         active_control_barrier_uid = 0;
+        control_sfence_c0_observation = '{default:'0};
+        control_sfence_effective_observation = '{default:'0};
         csr_control_action_q.delete();
         sfence_control_action_q.delete();
         l2_flush_release_request_q.delete();
@@ -1080,6 +1089,8 @@ class common_data_transaction extends uvm_object;
         csr_control_action_q.delete();
         sfence_control_action_q.delete();
         l2_flush_release_request_q.delete();
+        control_sfence_c0_observation = '{default:'0};
+        control_sfence_effective_observation = '{default:'0};
         control_workers_shutdown_requested = 1'b0;
         csr_control_worker_exited = 1'b0;
         sfence_control_worker_exited = 1'b0;
@@ -1182,7 +1193,9 @@ class common_data_transaction extends uvm_object;
         end
         status.control_expected_sfence_valid = 1'b1;
         status.control_expected_sfence = action.expected_fence;
-        status.control_sfence_event_seq = action.pre_drive_event_seq;
+        status.control_sfence_c0_armed = 1'b1;
+        status.control_sfence_pre_drive_event_seq = action.pre_drive_event_seq;
+        status.control_l2tlb_reset_epoch_at_arm = action.l2tlb_reset_epoch_at_arm;
         status.last_event_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
     endfunction:arm_sfence_control_c0_match
 
@@ -3965,6 +3978,115 @@ class common_data_transaction extends uvm_object;
         return 1'b0;
     endfunction:sfence_match_entry
 
+    // 抽象职责：比较控制 worker 预约的 canonical SFence 与 adapter 从 raw fence
+    // 解码的 payload。只比较 DUT 语义字段，sample/event/reset provenance 由调用者
+    // 单独校验，避免把同一事件的 transport 元数据误作 payload 差异。
+    function bit control_sfence_payload_matches(
+        input memblock_sfence_payload_t expected,
+        input memblock_sfence_payload_t observed
+    );
+        return expected.valid && observed.valid &&
+               expected.ignore_addr == observed.ignore_addr &&
+               expected.ignore_id == observed.ignore_id &&
+               expected.addr == observed.addr && expected.id == observed.id &&
+               expected.hv == observed.hv && expected.hg == observed.hg &&
+               expected.target_stage == observed.target_stage;
+    endfunction:control_sfence_payload_matches
+
+    // 抽象职责：adapter 在 C0 schedule 边界把匹配的 raw fence 固化为 owner 化
+    // observation。它不改 control_state；service 仅在 worker sendover 后消费该槽。
+    function void record_control_sfence_c0_observation(
+        input memblock_sfence_payload_t payload,
+        input longint unsigned reset_epoch,
+        input longint unsigned lifecycle_event_seq,
+        input longint unsigned anchor_sample_seq
+    );
+        status_transaction status;
+
+        if (!active_control_barrier_valid) begin
+            return;
+        end
+        status = get_status(active_control_barrier_uid);
+        if (status.control_kind != MEMBLOCK_CONTROL_KIND_SFENCE ||
+            !status.control_owner.valid || !status.control_expected_sfence_valid ||
+            !status.control_sfence_c0_armed ||
+            !(status.control_state inside {MEMBLOCK_CONTROL_STATE_SFENCE_REQ,
+                                            MEMBLOCK_CONTROL_STATE_SFENCE_SENDOVER,
+                                            MEMBLOCK_CONTROL_STATE_WAIT_L2TLB_FLUSH_EFFECTIVE}) ||
+            lifecycle_event_seq <= status.control_sfence_pre_drive_event_seq ||
+            reset_epoch != status.control_l2tlb_reset_epoch_at_arm ||
+            !control_sfence_payload_matches(status.control_expected_sfence, payload)) begin
+            return;
+        end
+        if (control_sfence_c0_observation.valid) begin
+            if (control_sfence_c0_observation.lifecycle_event_seq == lifecycle_event_seq &&
+                memblock_control_owner_equal(control_sfence_c0_observation.owner,
+                                             status.control_owner)) begin
+                return;
+            end
+            `uvm_fatal("CONTROL_SFENCE",
+                       "second control SFence C0 observation arrived before prior record was consumed")
+        end
+        control_sfence_c0_observation.valid = 1'b1;
+        control_sfence_c0_observation.owner = status.control_owner;
+        control_sfence_c0_observation.payload = payload;
+        control_sfence_c0_observation.lifecycle_event_seq = lifecycle_event_seq;
+        control_sfence_c0_observation.reset_epoch = reset_epoch;
+        control_sfence_c0_observation.anchor_sample_seq = anchor_sample_seq;
+        control_sfence_c0_observation.due_sample_seq = 0;
+    endfunction:record_control_sfence_c0_observation
+
+    // 抽象职责：adapter 在既有 C4 delete 已实际执行后，发布同一 C0 event 的
+    // effective observation。即使没有匹配 TLB entry 需要删除，C4 已生效仍必须可见。
+    function void record_control_sfence_effective_observation(
+        input memblock_pending_sfence_invalidate_t pending
+    );
+        if (!control_sfence_c0_observation.valid ||
+            control_sfence_c0_observation.lifecycle_event_seq !=
+                pending.lifecycle_event_seq ||
+            control_sfence_c0_observation.reset_epoch != pending.reset_epoch) begin
+            return;
+        end
+        if (control_sfence_effective_observation.valid) begin
+            `uvm_fatal("CONTROL_SFENCE",
+                       "duplicate control SFence effective observation")
+        end
+        control_sfence_effective_observation = control_sfence_c0_observation;
+        control_sfence_effective_observation.due_sample_seq = pending.due_sample_seq;
+    endfunction:record_control_sfence_effective_observation
+
+    function bit get_control_sfence_c0_observation(
+        input memblock_control_owner_t owner,
+        output memblock_control_sfence_observation_t observation
+    );
+        observation = '{default:'0};
+        if (!control_sfence_c0_observation.valid ||
+            !memblock_control_owner_equal(control_sfence_c0_observation.owner, owner)) begin
+            return 1'b0;
+        end
+        observation = control_sfence_c0_observation;
+        return 1'b1;
+    endfunction:get_control_sfence_c0_observation
+
+    function bit try_consume_control_sfence_effective_observation(
+        input memblock_control_owner_t owner,
+        input longint unsigned lifecycle_event_seq,
+        input longint unsigned reset_epoch,
+        output memblock_control_sfence_observation_t observation
+    );
+        observation = '{default:'0};
+        if (!control_sfence_effective_observation.valid ||
+            !memblock_control_owner_equal(control_sfence_effective_observation.owner, owner) ||
+            control_sfence_effective_observation.lifecycle_event_seq != lifecycle_event_seq ||
+            control_sfence_effective_observation.reset_epoch != reset_epoch) begin
+            return 1'b0;
+        end
+        observation = control_sfence_effective_observation;
+        control_sfence_effective_observation = '{default:'0};
+        control_sfence_c0_observation = '{default:'0};
+        return 1'b1;
+    endfunction:try_consume_control_sfence_effective_observation
+
     // Abstract responsibility: record one C0 fence as a future C4 destructive
     // action after the adapter has accepted its raw FIFO item. It does not
     // scan live entries or affect pending response token/UID ownership.
@@ -4000,6 +4122,9 @@ class common_data_transaction extends uvm_object;
             `uvm_fatal("COMMON_DATA", "SFENCE invalidate queue due order regressed")
         end
         sfence_invalidate_pending_q.push_back(pending);
+        record_control_sfence_c0_observation(payload, reset_epoch,
+                                              lifecycle_event_seq,
+                                              anchor_sample_seq);
         return 1'b1;
     endfunction:schedule_sfence_invalidate
 
@@ -4061,6 +4186,7 @@ class common_data_transaction extends uvm_object;
                 delete_live_tlb_entry_by_anchor_key(delete_keys[idx],
                                                     "SFENCE/HFENCE C4");
             end
+            record_control_sfence_effective_observation(pending);
             deleted_count += delete_keys.size();
             `uvm_info("COMMON_DATA",
                       $sformatf("apply due SFENCE/HFENCE target=%0d anchor=%0d due=%0d event=%0d deleted=%0d",
