@@ -306,8 +306,22 @@ package memblock_sync_pkg;
         bit [49:0]        memory_violation_target;
         bit               memory_violation_level;
         bit               sb_is_empty;
+        // 中文注释：ctrl monitor 为 sbIsEmpty 采样分配的不可变 observation 序号。
+        // 设置：monitor 每个有效 sample 发布 latest 后写入 raw；读取：flushSb
+        // 生命周期在 deferred raw 重试时仍以该原始序号判断 sendover 后的新鲜完成。
+        longint unsigned  sb_is_empty_observation_seq;
         longint unsigned  cycle;
     } dispatch_raw_ctrl_t;
+
+    // 中文注释：控制屏障消费的 level 型 monitor 事实。monitor 是唯一写者，
+    // service 只读取 latest+单调序号，不能把某个控制 UID 或状态表写进该对象。
+    // sequence 用 sendover/ASSERT/RELEASE 时冻结的序号排除旧 high/low level。
+    typedef struct {
+        bit               valid;
+        bit               level;
+        longint unsigned  observation_seq;
+        longint unsigned  sample_seq;
+    } memblock_control_level_observation_t;
 
     // 中文伪代码：ctrl monitor 每个 post-reset sample 都记录一次 held cancel level，
     // 即使两个 count 都为 0 也入队；该队列不属于 semantic ctrl raw batch。
@@ -444,6 +458,10 @@ package memblock_sync_pkg;
     dispatch_raw_cancel_snapshot_t raw_cancel_snapshot_q[$];
     dispatch_raw_redirect_anchor_t raw_redirect_anchor_q[$];
     dispatch_raw_sfence_t      raw_sfence_q[$];
+    // 中文注释：两个控制 level 的共享 latest observation。设置：现有 ctrl monitor；
+    // 读取：control barrier service / flushSb 生命周期；不作为 raw queue 的替代品。
+    memblock_control_level_observation_t control_sb_is_empty_observation = '{default:'0};
+    memblock_control_level_observation_t control_l2_flush_done_observation = '{default:'0};
     // 中文注释：CSR monitor 每个 DUT sample 发布一份短生命周期 context。
     // 同拍 fence 先到时 raw 留在 FIFO 等待绑定；下拍仍未绑定即为 monitor 时序错误。
     memblock_l2tlb_sfence_csr_context_t l2tlb_sfence_csr_context;
@@ -556,6 +574,7 @@ package memblock_sync_pkg;
         item.memory_violation_target    = '0;
         item.memory_violation_level     = 1'b0;
         item.sb_is_empty                 = 1'b0;
+        item.sb_is_empty_observation_seq = 0;
         item.cycle                      = 0;
         return item;
     endfunction:make_empty_raw_ctrl
@@ -1940,6 +1959,53 @@ package memblock_sync_pkg;
         item = runtime_csr_snapshot;
         return 1'b1;
     endfunction:get_latest_runtime_csr_snapshot
+
+    // 抽象职责：由 ctrl monitor 为每个有效 DUT sample 发布 sbIsEmpty 的 latest
+    // 事实。序号即使 level 不变也递增，使 flushSb request 可严格要求 sendover 后
+    // 的新 sample；该 helper 不判断当前是否存在控制 action。
+    function void publish_control_sb_is_empty_observation(
+        input bit level,
+        input longint unsigned sample_seq
+    );
+        if (sample_seq == 0) begin
+            `uvm_fatal("MEMBLOCK_CONTROL_OBSERVATION",
+                       "sbIsEmpty observation has zero sample sequence")
+        end
+        control_sb_is_empty_observation.valid = 1'b1;
+        control_sb_is_empty_observation.level = level;
+        control_sb_is_empty_observation.observation_seq++;
+        control_sb_is_empty_observation.sample_seq = sample_seq;
+    endfunction:publish_control_sb_is_empty_observation
+
+    function bit get_latest_control_sb_is_empty_observation(
+        output memblock_control_level_observation_t observation
+    );
+        observation = control_sb_is_empty_observation;
+        return observation.valid;
+    endfunction:get_latest_control_sb_is_empty_observation
+
+    // 抽象职责：发布 L2 flush done 的 owner-neutral level 事实。check_store 在
+    // ASSERT/RELEASE 边界冻结 observation_seq 后，只消费同一 monitor 产生的新 high/low。
+    function void publish_control_l2_flush_done_observation(
+        input bit level,
+        input longint unsigned sample_seq
+    );
+        if (sample_seq == 0) begin
+            `uvm_fatal("MEMBLOCK_CONTROL_OBSERVATION",
+                       "L2 flush done observation has zero sample sequence")
+        end
+        control_l2_flush_done_observation.valid = 1'b1;
+        control_l2_flush_done_observation.level = level;
+        control_l2_flush_done_observation.observation_seq++;
+        control_l2_flush_done_observation.sample_seq = sample_seq;
+    endfunction:publish_control_l2_flush_done_observation
+
+    function bit get_latest_control_l2_flush_done_observation(
+        output memblock_control_level_observation_t observation
+    );
+        observation = control_l2_flush_done_observation;
+        return observation.valid;
+    endfunction:get_latest_control_l2_flush_done_observation
 
     function void push_raw_int_wb(input dispatch_raw_int_wb_t item);
         if (dispatch_monitor_capture_en && item.valid) begin

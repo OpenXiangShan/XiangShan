@@ -5433,6 +5433,9 @@ class common_data_transaction extends uvm_object;
         req.req_id        = next_flushsb_req_id;
         req.enqueue_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
         req.source        = source;
+        req.owner_valid   = 1'b0;
+        req.owner         = '{default:'0};
+        req.sb_is_empty_observation_seq_at_sendover = 0;
         next_flushsb_req_id++;
         flushsb_req_q.push_back(req);
         `uvm_info("COMMON_DATA",
@@ -5444,12 +5447,51 @@ class common_data_transaction extends uvm_object;
                   UVM_LOW)
     endfunction:push_flushsb_request
 
+    // 抽象职责：为控制屏障生成带唯一 owner 的 flushSb 请求。它和周期性请求共用
+    // 原有 FIFO/LSQ commit consumer；不会直接驱动接口，也不会把 owner 写进 monitor。
+    function void push_owner_flushsb_request(
+        input memblock_control_owner_t owner,
+        output memblock_flushsb_req_t req
+    );
+        if (!owner.valid) begin
+            `uvm_fatal("CONTROL_FLUSHSB", "owner flushSb request has invalid owner")
+        end
+        if ((attached_flushsb_req_valid && attached_flushsb_req.owner_valid) ||
+            (active_flushsb_req_valid && active_flushsb_req.owner_valid) ||
+            flushsb_completed.valid) begin
+            `uvm_fatal("CONTROL_FLUSHSB",
+                       "cannot enqueue a second owner flushSb request before prior completion is consumed")
+        end
+        foreach (flushsb_req_q[idx]) begin
+            if (flushsb_req_q[idx].owner_valid) begin
+                `uvm_fatal("CONTROL_FLUSHSB",
+                           "owner flushSb request already exists in pending FIFO")
+            end
+        end
+        req = '{default:'0};
+        req.req_id        = next_flushsb_req_id;
+        req.enqueue_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+        req.source        = 0;
+        req.owner_valid   = 1'b1;
+        req.owner         = owner;
+        req.sb_is_empty_observation_seq_at_sendover = 0;
+        next_flushsb_req_id++;
+        flushsb_req_q.push_back(req);
+        `uvm_info("COMMON_DATA",
+                  $sformatf("push owner flushSb request: req_id=%0d uid=%0d epoch=%0d gen=%0d kind=%0d queue_size=%0d",
+                            req.req_id, owner.uid, owner.dynamic_epoch,
+                            owner.action_generation, owner.kind,
+                            flushsb_req_q.size()),
+                  UVM_LOW)
+    endfunction:push_owner_flushsb_request
+
     function bit has_pending_flushsb_request();
         return flushsb_req_q.size() != 0;
     endfunction:has_pending_flushsb_request
 
     function bit flushsb_busy();
-        return flushsb_waiting_empty;
+        return attached_flushsb_req_valid || flushsb_waiting_empty ||
+               active_flushsb_req_valid;
     endfunction:flushsb_busy
 
     function bit flushsb_request_pending();
@@ -5473,28 +5515,67 @@ class common_data_transaction extends uvm_object;
         return 1'b1;
     endfunction:try_pop_flushsb_request
 
-    function void mark_flushsb_driven(input memblock_flushsb_req_t req,
-                                      input longint unsigned cycle);
-        active_flushsb_req       = req;
+    // 抽象职责：记录 flushSb 已附着到尚未 finish_item 的 LSQ commit xaction。
+    // 该阶段不能开启 sbIsEmpty 完成捕获，避免旧 high 在 driver 尚未实际交付前完成请求。
+    function void mark_flushsb_request_attached_to_lsqcommit_xaction(
+        input memblock_flushsb_req_t req,
+        input longint unsigned cycle
+    );
+        if (attached_flushsb_req_valid || active_flushsb_req_valid ||
+            flushsb_waiting_empty) begin
+            `uvm_fatal("CONTROL_FLUSHSB", "flushSb attach while another request is active")
+        end
+        attached_flushsb_req = req;
+        attached_flushsb_req_valid = 1'b1;
+        flushsb_start_cycle = cycle;
+        last_sb_is_empty = 1'b0;
+        flushsb_timeout_warned = 1'b0;
+    endfunction:mark_flushsb_request_attached_to_lsqcommit_xaction
+
+    // 抽象职责：在同一 LSQ commit item 的 finish_item() 返回后登记真实 driver
+    // sendover，并冻结 latest sbIsEmpty observation 作为新鲜完成的下界。
+    function void mark_flushsb_request_driver_sendover(
+        input memblock_flushsb_req_t req,
+        input longint unsigned cycle
+    );
+        memblock_sync_pkg::memblock_control_level_observation_t observation;
+
+        if (!attached_flushsb_req_valid ||
+            attached_flushsb_req.req_id != req.req_id ||
+            active_flushsb_req_valid || flushsb_waiting_empty) begin
+            `uvm_fatal("CONTROL_FLUSHSB", "flushSb sendover does not match attached request")
+        end
+        void'(memblock_sync_pkg::get_latest_control_sb_is_empty_observation(observation));
+        active_flushsb_req = attached_flushsb_req;
+        active_flushsb_req.sb_is_empty_observation_seq_at_sendover =
+            observation.observation_seq;
         active_flushsb_req_valid = 1'b1;
-        flushsb_waiting_empty    = 1'b1;
-        flushsb_start_cycle      = cycle;
-        last_sb_is_empty         = 1'b0;
-        flushsb_timeout_warned   = 1'b0;
+        attached_flushsb_req = '{default:'0};
+        attached_flushsb_req_valid = 1'b0;
+        flushsb_waiting_empty = 1'b1;
+        flushsb_start_cycle = cycle;
+        last_sb_is_empty = 1'b0;
+        flushsb_timeout_warned = 1'b0;
         memblock_sync_pkg::dispatch_flushsb_waiting_empty = 1'b1;
         `uvm_info("COMMON_DATA",
-                  $sformatf("drive flushSb request: req_id=%0d source=%0d enqueue_cycle=%0d start_cycle=%0d queue_size=%0d",
-                            req.req_id,
-                            req.source,
-                            req.enqueue_cycle,
-                            cycle,
-                            flushsb_req_q.size()),
+                  $sformatf("flushSb driver sendover: req_id=%0d source=%0d owner=%0d uid=%0d baseline_obs=%0d",
+                            active_flushsb_req.req_id, active_flushsb_req.source,
+                            active_flushsb_req.owner_valid,
+                            active_flushsb_req.owner.uid,
+                            active_flushsb_req.sb_is_empty_observation_seq_at_sendover),
                   UVM_LOW)
-    endfunction:mark_flushsb_driven
+    endfunction:mark_flushsb_request_driver_sendover
 
-    function void update_sb_is_empty(input bit sb_is_empty);
-        last_sb_is_empty = sb_is_empty;
-        if (flushsb_waiting_empty && sb_is_empty) begin
+    // 抽象职责：消费 immutable ctrl raw 的 sbIsEmpty 采样，并只完成已经 sendover
+    // 且 observation 序号更新的 active request。owner request 的完成事实保留到
+    // control service 按 req_id+owner 确认，普通请求仍沿用完成后直接清 active 的语义。
+    function void update_sb_is_empty(
+        input memblock_sync_pkg::dispatch_raw_ctrl_t raw
+    );
+        last_sb_is_empty = raw.sb_is_empty;
+        if (flushsb_waiting_empty && raw.sb_is_empty &&
+            raw.sb_is_empty_observation_seq >
+                active_flushsb_req.sb_is_empty_observation_seq_at_sendover) begin
             `uvm_info("COMMON_DATA",
                       $sformatf("flushSb request completed: req_id=%0d source=%0d start_cycle=%0d done_cycle=%0d",
                                 active_flushsb_req.req_id,
@@ -5502,6 +5583,17 @@ class common_data_transaction extends uvm_object;
                                 flushsb_start_cycle,
                                 memblock_sync_pkg::get_dispatch_service_cycle()),
                       UVM_LOW)
+            if (active_flushsb_req.owner_valid) begin
+                if (flushsb_completed.valid) begin
+                    `uvm_fatal("CONTROL_FLUSHSB",
+                               "owner flushSb completion slot was not consumed before next completion")
+                end
+                flushsb_completed.valid = 1'b1;
+                flushsb_completed.req_id = active_flushsb_req.req_id;
+                flushsb_completed.owner = active_flushsb_req.owner;
+                flushsb_completed.observation_seq = raw.sb_is_empty_observation_seq;
+                flushsb_completed.cycle = memblock_sync_pkg::get_dispatch_service_cycle();
+            end
             flushsb_waiting_empty    = 1'b0;
             active_flushsb_req       = '{default:'0};
             active_flushsb_req_valid = 1'b0;
@@ -5510,6 +5602,36 @@ class common_data_transaction extends uvm_object;
             memblock_sync_pkg::dispatch_flushsb_waiting_empty = 1'b0;
         end
     endfunction:update_sb_is_empty
+
+    // 抽象职责：让 control service 判断 owner 请求是否已经越过 driver sendover。
+    // completed slot 也代表该事实已经发生，避免 monitor 完成过快时 service 漏掉中间 active 状态。
+    function bit control_flushsb_sendover_seen(
+        input memblock_control_owner_t owner,
+        input int unsigned req_id
+    );
+        return (active_flushsb_req_valid && active_flushsb_req.owner_valid &&
+                active_flushsb_req.req_id == req_id &&
+                memblock_control_owner_equal(active_flushsb_req.owner, owner)) ||
+               (flushsb_completed.valid && flushsb_completed.req_id == req_id &&
+                memblock_control_owner_equal(flushsb_completed.owner, owner));
+    endfunction:control_flushsb_sendover_seen
+
+    // 抽象职责：由当前 control owner 取得并清除自己的 sbIsEmpty 完成事实。
+    // 非匹配 owner/req_id 只返回 0，调用者保持等待；不会误消费周期性 flushSb。
+    function bit try_consume_control_flushsb_completion(
+        input memblock_control_owner_t owner,
+        input int unsigned req_id,
+        output memblock_flushsb_completion_t completion
+    );
+        completion = '{default:'0};
+        if (!flushsb_completed.valid || flushsb_completed.req_id != req_id ||
+            !memblock_control_owner_equal(flushsb_completed.owner, owner)) begin
+            return 1'b0;
+        end
+        completion = flushsb_completed;
+        flushsb_completed = '{default:'0};
+        return 1'b1;
+    endfunction:try_consume_control_flushsb_completion
 
     function void warn_flushsb_timeout_if_needed(input int unsigned timeout);
         longint unsigned age;

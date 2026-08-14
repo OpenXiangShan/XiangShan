@@ -80,6 +80,7 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
     logic [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] sq_deq_ptr_value;
     io_mem_to_ooo_ctrl_agent_agent_xaction  mon_tr;
     memblock_sync_pkg::dispatch_raw_ctrl_t raw_ctrl;
+    memblock_sync_pkg::memblock_control_level_observation_t sb_is_empty_observation;
     longint unsigned sample_seq;
     while(1) begin
         @this.vif.mon_mp.mon_cb;
@@ -187,6 +188,13 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
             // anchored after the shared reset boundary has closed.
             memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
 
+            // 中文注释：控制屏障的 level 事实独立于 semantic raw capture gate 发布。
+            // 即使当前没有 flushSb request，序号也持续递增，后续 sendover 可排除旧 level。
+            memblock_sync_pkg::publish_control_sb_is_empty_observation(
+                io_mem_to_ooo_sbIsEmpty, sample_seq);
+            memblock_sync_pkg::publish_control_l2_flush_done_observation(
+                io_mem_to_ooo_topToBackendBypass_l2FlushDone, sample_seq);
+
             any_mmio_valid = store_mmio_valid === 1'b1;
             foreach (load_mmio_valid[port]) begin
                 any_mmio_valid |= load_mmio_valid[port] === 1'b1;
@@ -257,6 +265,13 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
                 raw_ctrl.memory_violation_is_rvc = io_mem_to_ooo_memoryViolation_bits_isRVC;
                 raw_ctrl.memory_violation_level = io_mem_to_ooo_memoryViolation_bits_level;
                 raw_ctrl.sb_is_empty = io_mem_to_ooo_sbIsEmpty;
+                if (!memblock_sync_pkg::get_latest_control_sb_is_empty_observation(
+                        sb_is_empty_observation)) begin
+                    `uvm_fatal("CTRL_MONITOR",
+                               "ctrl raw is missing same-sample sbIsEmpty observation")
+                end
+                raw_ctrl.sb_is_empty_observation_seq =
+                    sb_is_empty_observation.observation_seq;
                 raw_ctrl.cycle = $time;
                 memblock_sync_pkg::push_raw_ctrl(raw_ctrl);
             end

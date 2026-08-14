@@ -137,13 +137,18 @@ task memblock_lsqcommit_dispatch_base_sequence::send_lsqcommit_cycle(input int u
     tr.set_name($sformatf("lsqcommit_dispatch_tr_%0d", cycle_idx));
     if (data.try_pop_flushsb_request(flushsb_req)) begin
         tr.io_ooo_to_mem_flushSb = 1'b1;
-        data.mark_flushsb_driven(flushsb_req,
-                                 memblock_sync_pkg::get_dispatch_service_cycle());
+        data.mark_flushsb_request_attached_to_lsqcommit_xaction(
+            flushsb_req, memblock_sync_pkg::get_dispatch_service_cycle());
         has_flushsb_progress = 1'b1;
     end
 
     start_item(tr);
     finish_item(tr);
+
+    if (has_flushsb_progress) begin
+        data.mark_flushsb_request_driver_sendover(
+            flushsb_req, memblock_sync_pkg::get_dispatch_service_cycle());
+    end
 
     if (has_commit) begin
         commit_handler.mark_rob_commit_batch(commit_uids);
