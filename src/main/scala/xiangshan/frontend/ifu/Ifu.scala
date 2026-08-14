@@ -523,10 +523,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.foldpc := s2_alignedFoldPc
   // mark the exception only on first instruction
   io.toIBuffer.bits.exceptionType := s2_icacheMeta(0).exception || s2_rvcException
-  // backendException only needs to be set for the first instruction.
+  // backend flags only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
   io.toIBuffer.bits.isBackendException := s2_icacheMeta(0).isBackendException
+  io.toIBuffer.bits.hasSatpFlush       := s2_icacheMeta(0).hasSatpFlush
   // if we have last half RV-I instruction, and has exception, we need to tell backend to caculate the correct pc
   io.toIBuffer.bits.exceptionCrossPage := s2_icacheMeta(0).exception.hasException && s2_prevEndIsHalfRvi
   // if icache respond with exception, it's marked on entire cacheline,

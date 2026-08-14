@@ -316,8 +316,10 @@ class RobExceptionInfo(exceptList: Seq[Int]=ExceptionNO.all)(implicit p: Paramet
   // 0: is execute exception, 1: is fetch exception
   val isEnqExcp = Bool()
   val exceptionVec = ExceptSparseVec(exceptList)
+  val satpFlushFirstFetchFault = Bool()
   val isFetchMalAddr = Bool()
   val flushPipe = Bool()
+  val satpFlush = Bool()
   val isVset = Bool()
   val replayInst = Bool() // redirect to that inst itself
   val singleStep = Bool() // TODO add frontend hit beneath

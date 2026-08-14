@@ -99,6 +99,7 @@ class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with HasICa
   val ftqIdx:              FtqPtr          = new FtqPtr
   val vSetIdx:             Vec[UInt]       = Vec(PortNumber, UInt(idxBits.W))
   val hasBackendException: Bool            = Bool()
+  val hasSatpFlush:        Bool            = Bool()
 }
 
 class FtqToICacheIO(implicit p: Parameters) extends FrontendBundle {
@@ -312,6 +313,7 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
 
   val exceptionType:      ExceptionType = new ExceptionType
   val isBackendException: Bool          = Bool()
+  val hasSatpFlush:       Bool          = Bool()
   val exceptionCrossPage: Bool          = Bool()
   val exceptionMask:      Vec[Bool]     = Vec(IBufferEnqueueWidth, Bool())
 

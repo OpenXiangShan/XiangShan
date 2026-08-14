@@ -32,6 +32,8 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   private val vsatp = current.vsatp
   private val hgatp = current.hgatp
   private val isDTExcp = current.hasDTExcp
+  private val oldSatp = current.oldSatp
+  private val oldVsatp = current.oldVsatp
 
   private val highPrioTrapNO = in.causeNO.ExceptionCode.asUInt
   private val isException = !in.causeNO.Interrupt.asBool
@@ -39,13 +41,21 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
 
   private val trapPC = genTrapVA(
     iMode,
-    satp,
-    vsatp,
+    oldSatp,
+    oldVsatp,
     hgatp,
     in.trapPc,
   )
 
   private val trapPCGPA = in.trapPcGPA
+
+  private val trapPCGPAFromSatpFlush = genTrapVA(
+    iMode,
+    oldSatp,
+    oldVsatp,
+    hgatp,
+    in.trapPcGPA,
+  )
 
   private val trapMemVA = in.memExceptionVAddr
 
@@ -69,6 +79,7 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
 
   private val isLSGuestExcp    = isException && ExceptionNO.getLSGuestPageFault.map(_.U === highPrioTrapNO).reduce(_ || _)
   private val isFetchGuestExcp = isException && ExceptionNO.EX_IGPF.U === highPrioTrapNO
+  private val satpFlushFirstFetchFault = in.satpFlushFirstFetchFault
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
   // We fill pc here
   private val tvalFillPc       = (isFetchExcp || isFetchGuestExcp) && !fetchCrossPage || isFetchBkpt
@@ -94,6 +105,13 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
     (isLSGuestExcp                                         ) -> trapMemGPA,
   ))
 
+  private val tval2FromSatpFlush = Mux1H(Seq(
+    (isFetchGuestExcp && isFetchMalAddr                    ) -> in.fetchMalTval,
+    (isFetchGuestExcp && !isFetchMalAddr && !fetchCrossPage) -> trapPCGPAFromSatpFlush,
+    (isFetchGuestExcp && !isFetchMalAddr && fetchCrossPage ) -> (trapPCGPAFromSatpFlush + 2.U),
+    (isLSGuestExcp                                         ) -> trapMemGPA,
+  ))
+
   private val precause = Cat(isInterrupt, highPrioTrapNO)
 
   out := DontCare
@@ -113,11 +131,17 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   out.mstatus.bits.MPIE         := current.mstatus.MIE
   out.mstatus.bits.MIE          := 0.U
   out.mstatus.bits.MDT          := 1.U
-  out.mepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
+  out.mepc.bits.epc             := Mux(satpFlushFirstFetchFault,
+                                    trapPC(63, 1),
+                                    Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1)))
   out.mcause.bits.Interrupt     := isInterrupt && !isDTExcp
   out.mcause.bits.ExceptionCode := Mux(isDTExcp, ExceptionNO.EX_DT.U, highPrioTrapNO)
-  out.mtval.bits.ALL            := Mux(isFetchMalAddrExcp, in.fetchMalTval, tval)
-  out.mtval2.bits.ALL           := Mux(isDTExcp, precause, tval2 >> 2)
+  out.mtval.bits.ALL            := Mux(satpFlushFirstFetchFault,
+                                    tval,
+                                    Mux(isFetchMalAddrExcp, in.fetchMalTval, tval))
+  out.mtval2.bits.ALL           := Mux(isDTExcp,
+                                    precause,
+                                    Mux(satpFlushFirstFetchFault, tval2FromSatpFlush >> 2, tval2 >> 2))
   out.mtinst.bits.ALL           := Mux(isFetchGuestExcp && in.trapIsForVSnonLeafPTE || isLSGuestExcp && in.memExceptionIsForVSnonLeafPTE, 0x3000.U, 0.U)
 
   dontTouch(isLSGuestExcp)
