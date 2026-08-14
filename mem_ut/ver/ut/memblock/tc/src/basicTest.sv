@@ -20,6 +20,7 @@ class basicTest extends tcnt_test_base ;
 
       function bit vseq_starts_l2tlb(input string vseq_name);
           return vseq_name == "memblock_dispatch_real_smoke_vseq" ||
+                 vseq_name == "memblock_dispatch_manual_control_vseq" ||
                  vseq_name == "memblock_dispatch_real_cancel_reconcile_vseq";
       endfunction:vseq_starts_l2tlb
 
