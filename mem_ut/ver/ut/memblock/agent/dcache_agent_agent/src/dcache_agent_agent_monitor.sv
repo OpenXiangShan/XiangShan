@@ -220,9 +220,18 @@ task dcache_agent_agent_monitor::mon_data();
         if (this.vif.rst_n === 1'b1 &&
             memblock_sync_pkg::reset_backend_done === 1'b1 &&
             !memblock_sync_pkg::l2tlb_reset_active()) begin
+            int unsigned control_reset_epoch;
+
             memblock_sync_pkg::wait_for_l2tlb_sample_anchor($time, sample_seq);
-            memblock_sync_pkg::publish_control_l2_flush_done_observation(
-                io_l2_flush_done, sample_seq);
+            // 中文注释：首个 post-reset sample 只确认 DCache monitor 已进入当前
+            // control epoch；ready 后下一 sample 才把 io_l2_flush_done 发布为完成事实。
+            if (memblock_sync_pkg::control_dcache_monitor_reset_ack_needed(
+                    control_reset_epoch)) begin
+                memblock_sync_pkg::ack_control_dcache_monitor_reset(control_reset_epoch);
+            end else begin
+                memblock_sync_pkg::publish_control_l2_flush_done_observation(
+                    io_l2_flush_done, sample_seq);
+            end
         end
         //if(xxxTODOxxx==1'b1) begin
         //    mon_tr = dcache_agent_agent_xaction::type_id::create("mon_tr");

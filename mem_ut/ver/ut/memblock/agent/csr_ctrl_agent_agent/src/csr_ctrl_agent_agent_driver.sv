@@ -41,6 +41,7 @@ class csr_ctrl_agent_agent_driver  extends tcnt_driver_base#(virtual csr_ctrl_ag
         input csr_ctrl_agent_agent_xaction tr
     );
     extern function void clear_l2_flush_level_hold(input string reason);
+    extern function bit service_control_runtime_reset_request();
 endclass:csr_ctrl_agent_agent_driver
 
 function csr_ctrl_agent_agent_driver::new(string name, uvm_component parent);
@@ -83,6 +84,11 @@ task csr_ctrl_agent_agent_driver::main_phase(uvm_phase phase);
     //while(1) begin
     if(this.cfg.sqr_sw==tcnt_dec_base::ON && this.cfg.drv_sw==tcnt_dec_base::ON) begin
         while(1) begin
+            if (service_control_runtime_reset_request()) begin
+                @this.vif.drv_mp.drv_cb;
+                this.drive_idle(this.cfg.drv_mode);
+                continue;
+            end
             seq_item_port.try_next_item(req);
             if(req!=null) begin
                 repeat(req.pre_pkt_gap) begin
@@ -111,6 +117,19 @@ task csr_ctrl_agent_agent_driver::main_phase(uvm_phase phase);
         end
     end
 endtask:main_phase
+
+// 抽象职责：CSR driver 作为 control reset 四路 ack 的唯一 driver 写者，先清除私有
+// L2 flush hold 再确认当前 epoch。返回 1 时本拍只允许驱动 idle，不能交付旧 token。
+function bit csr_ctrl_agent_agent_driver::service_control_runtime_reset_request();
+    int unsigned control_reset_epoch;
+
+    if (!memblock_sync_pkg::control_csr_driver_reset_ack_needed(control_reset_epoch)) begin
+        return 1'b0;
+    end
+    clear_l2_flush_level_hold("control_runtime_reset_request");
+    memblock_sync_pkg::ack_control_csr_driver_reset(control_reset_epoch);
+    return 1'b1;
+endfunction:service_control_runtime_reset_request
 
 // 抽象职责：校验一个非 DUT L2 flush metadata 是否足以唯一标识 driver hold。
 // 它只判断 item 自身格式，不读取或修改 hold；ASSERT/RELEASE 的时序和 owner 对比

@@ -29,6 +29,41 @@ package memblock_sync_pkg;
     bit control_worker_topology_active = 1'b0;
     string control_worker_topology_initializer = "";
 
+    // 中文注释：当前 active-control runtime 的 CSR 基线许可。CSR monitor 在四路
+    // reset ack 完成后的首个 sample 写入；service 只有看到同一 epoch 的 valid
+    // baseline 后才能创建 CSR/L2 action，避免读取建表或 reset 前的 latest snapshot。
+    typedef struct {
+        bit          valid;
+        int unsigned reset_epoch;
+        int unsigned first_snapshot_seq;
+    } memblock_control_csr_runtime_baseline_t;
+
+    // 中文注释：控制屏障消费的 level 型 monitor 事实。monitor 是唯一写者，
+    // service 只读取 latest+单调序号；request 新 epoch 时统一清 valid，后续
+    // ASSERT/RELEASE 或 flushSb sendover 以新的 observation_seq 排除旧电平。
+    typedef struct {
+        bit               valid;
+        bit               level;
+        longint unsigned  observation_seq;
+        longint unsigned  sample_seq;
+    } memblock_control_level_observation_t;
+
+    // 中文注释：control reset/request 握手只服务 AUTO/MANUAL_CONTROL topology。
+    // service 在建表后或启动窗口 reset 时发起 request 并递增 epoch；CSR driver 与
+    // CSR/DCache/ctrl monitor 各自只写所属 ack。四路齐备后 package 置 runtime_ready，
+    // 三个 monitor 的下一 sample 才允许发布可被控制状态机消费的事实。
+    bit          control_reset_request_active = 1'b0;
+    int unsigned control_reset_epoch = 0;
+    bit          control_runtime_ready = 1'b0;
+    string       control_reset_request_reason = "";
+    int unsigned control_csr_driver_reset_ack_epoch = 0;
+    int unsigned control_csr_monitor_reset_ack_epoch = 0;
+    int unsigned control_dcache_monitor_reset_ack_epoch = 0;
+    int unsigned control_ctrl_monitor_reset_ack_epoch = 0;
+    memblock_control_csr_runtime_baseline_t control_csr_runtime_baseline = '{default:'0};
+    memblock_control_level_observation_t control_sb_is_empty_observation = '{default:'0};
+    memblock_control_level_observation_t control_l2_flush_done_observation = '{default:'0};
+
     // 抽象职责：把已经校验的公共 plus mode 冻结为本 testcase 的唯一 runtime topology。
     // 同一 mode 的重复调用是幂等的；不同 mode 的第二写者直接 fatal，避免场景入口竞争。
     function void initialize_control_worker_topology(
@@ -69,6 +104,138 @@ package memblock_sync_pkg;
     function bit uses_auto_control_barrier_topology();
         return get_control_worker_topology_mode() == MEMBLOCK_CONTROL_TOPOLOGY_AUTO_MAIN_TABLE;
     endfunction:uses_auto_control_barrier_topology
+
+    // 抽象职责：判断当前 testcase 是否真的需要 control reset handshake。monitor 在
+    // topology 尚未初始化的启动阶段调用它会得到 0，而不会因读取 mode snapshot 过早 fatal。
+    function bit control_runtime_handshake_active();
+        return control_worker_topology_initialized && control_worker_topology_active;
+    endfunction:control_runtime_handshake_active
+
+    // 抽象职责：发起一个新的 control runtime epoch，并失效旧的控制观察/CSR baseline。
+    // 仅 service 调用；重复观察同一个未完成 request 保持幂等，不能重复递增 epoch。
+    function void request_control_runtime_reset(input string reason);
+        if (!control_runtime_handshake_active()) begin
+            return;
+        end
+        if (control_reset_request_active) begin
+            return;
+        end
+        control_reset_epoch++;
+        if (control_reset_epoch == 0) begin
+            `uvm_fatal("MEMBLOCK_CONTROL_RESET", "control reset epoch wrapped")
+        end
+        control_reset_request_active = 1'b1;
+        control_runtime_ready = 1'b0;
+        control_reset_request_reason = reason;
+        control_csr_driver_reset_ack_epoch = 0;
+        control_csr_monitor_reset_ack_epoch = 0;
+        control_dcache_monitor_reset_ack_epoch = 0;
+        control_ctrl_monitor_reset_ack_epoch = 0;
+        control_csr_runtime_baseline = '{default:'0};
+        control_sb_is_empty_observation = '{default:'0};
+        control_l2_flush_done_observation = '{default:'0};
+    endfunction:request_control_runtime_reset
+
+    function int unsigned get_control_runtime_reset_epoch();
+        if (!control_runtime_handshake_active() || control_reset_epoch == 0) begin
+            `uvm_fatal("MEMBLOCK_CONTROL_RESET", "control reset epoch read before active bootstrap")
+        end
+        return control_reset_epoch;
+    endfunction:get_control_runtime_reset_epoch
+
+    function bit control_runtime_reset_requested(output int unsigned epoch);
+        epoch = control_reset_epoch;
+        return control_runtime_handshake_active() && control_reset_request_active && epoch != 0;
+    endfunction:control_runtime_reset_requested
+
+    function bit control_csr_driver_reset_ack_needed(output int unsigned epoch);
+        epoch = control_reset_epoch;
+        return control_runtime_handshake_active() && control_reset_request_active &&
+               control_csr_driver_reset_ack_epoch != epoch;
+    endfunction:control_csr_driver_reset_ack_needed
+
+    function bit control_csr_monitor_reset_ack_needed(output int unsigned epoch);
+        epoch = control_reset_epoch;
+        return control_runtime_handshake_active() && control_reset_request_active &&
+               control_csr_monitor_reset_ack_epoch != epoch;
+    endfunction:control_csr_monitor_reset_ack_needed
+
+    function bit control_dcache_monitor_reset_ack_needed(output int unsigned epoch);
+        epoch = control_reset_epoch;
+        return control_runtime_handshake_active() && control_reset_request_active &&
+               control_dcache_monitor_reset_ack_epoch != epoch;
+    endfunction:control_dcache_monitor_reset_ack_needed
+
+    function bit control_ctrl_monitor_reset_ack_needed(output int unsigned epoch);
+        epoch = control_reset_epoch;
+        return control_runtime_handshake_active() && control_reset_request_active &&
+               control_ctrl_monitor_reset_ack_epoch != epoch;
+    endfunction:control_ctrl_monitor_reset_ack_needed
+
+    // 抽象职责：在四个独立 writer 均确认已清理/采到 post-reset sample 后打开
+    // runtime ready。ack 所有权固定，避免 service 或无关 monitor 代写另一组件的 bit。
+    function void complete_control_runtime_reset_if_ready();
+        if (!control_reset_request_active) begin
+            return;
+        end
+        if (control_csr_driver_reset_ack_epoch == control_reset_epoch &&
+            control_csr_monitor_reset_ack_epoch == control_reset_epoch &&
+            control_dcache_monitor_reset_ack_epoch == control_reset_epoch &&
+            control_ctrl_monitor_reset_ack_epoch == control_reset_epoch) begin
+            control_reset_request_active = 1'b0;
+            control_runtime_ready = 1'b1;
+        end
+    endfunction:complete_control_runtime_reset_if_ready
+
+    function void ack_control_csr_driver_reset(input int unsigned epoch);
+        if (!control_runtime_handshake_active() || !control_reset_request_active ||
+            epoch == 0 || epoch != control_reset_epoch) begin
+            `uvm_fatal("MEMBLOCK_CONTROL_RESET", "invalid CSR driver control reset acknowledgement")
+        end
+        control_csr_driver_reset_ack_epoch = epoch;
+        complete_control_runtime_reset_if_ready();
+    endfunction:ack_control_csr_driver_reset
+
+    function void ack_control_csr_monitor_reset(input int unsigned epoch);
+        if (!control_runtime_handshake_active() || !control_reset_request_active ||
+            epoch == 0 || epoch != control_reset_epoch) begin
+            `uvm_fatal("MEMBLOCK_CONTROL_RESET", "invalid CSR monitor control reset acknowledgement")
+        end
+        control_csr_monitor_reset_ack_epoch = epoch;
+        complete_control_runtime_reset_if_ready();
+    endfunction:ack_control_csr_monitor_reset
+
+    function void ack_control_dcache_monitor_reset(input int unsigned epoch);
+        if (!control_runtime_handshake_active() || !control_reset_request_active ||
+            epoch == 0 || epoch != control_reset_epoch) begin
+            `uvm_fatal("MEMBLOCK_CONTROL_RESET", "invalid DCache monitor control reset acknowledgement")
+        end
+        control_dcache_monitor_reset_ack_epoch = epoch;
+        complete_control_runtime_reset_if_ready();
+    endfunction:ack_control_dcache_monitor_reset
+
+    function void ack_control_ctrl_monitor_reset(input int unsigned epoch);
+        if (!control_runtime_handshake_active() || !control_reset_request_active ||
+            epoch == 0 || epoch != control_reset_epoch) begin
+            `uvm_fatal("MEMBLOCK_CONTROL_RESET", "invalid ctrl monitor control reset acknowledgement")
+        end
+        control_ctrl_monitor_reset_ack_epoch = epoch;
+        complete_control_runtime_reset_if_ready();
+    endfunction:ack_control_ctrl_monitor_reset
+
+    function bit control_runtime_ready_for_current_epoch();
+        return control_runtime_handshake_active() && control_runtime_ready &&
+               !control_reset_request_active && control_reset_epoch != 0;
+    endfunction:control_runtime_ready_for_current_epoch
+
+    function bit get_control_csr_runtime_baseline(
+        output memblock_control_csr_runtime_baseline_t baseline
+    );
+        baseline = control_csr_runtime_baseline;
+        return control_runtime_ready_for_current_epoch() && baseline.valid &&
+               baseline.reset_epoch == control_reset_epoch &&
+               baseline.first_snapshot_seq != 0;
+    endfunction:get_control_csr_runtime_baseline
 
     bit reset_backend_done = 1'b0;
     // Runtime reset is a shared lifecycle boundary.  The CSR monitor is the
@@ -313,16 +480,6 @@ package memblock_sync_pkg;
         longint unsigned  cycle;
     } dispatch_raw_ctrl_t;
 
-    // 中文注释：控制屏障消费的 level 型 monitor 事实。monitor 是唯一写者，
-    // service 只读取 latest+单调序号，不能把某个控制 UID 或状态表写进该对象。
-    // sequence 用 sendover/ASSERT/RELEASE 时冻结的序号排除旧 high/low level。
-    typedef struct {
-        bit               valid;
-        bit               level;
-        longint unsigned  observation_seq;
-        longint unsigned  sample_seq;
-    } memblock_control_level_observation_t;
-
     // 中文伪代码：ctrl monitor 每个 post-reset sample 都记录一次 held cancel level，
     // 即使两个 count 都为 0 也入队；该队列不属于 semantic ctrl raw batch。
     typedef struct {
@@ -458,10 +615,6 @@ package memblock_sync_pkg;
     dispatch_raw_cancel_snapshot_t raw_cancel_snapshot_q[$];
     dispatch_raw_redirect_anchor_t raw_redirect_anchor_q[$];
     dispatch_raw_sfence_t      raw_sfence_q[$];
-    // 中文注释：两个控制 level 的共享 latest observation。设置：现有 ctrl monitor；
-    // 读取：control barrier service / flushSb 生命周期；不作为 raw queue 的替代品。
-    memblock_control_level_observation_t control_sb_is_empty_observation = '{default:'0};
-    memblock_control_level_observation_t control_l2_flush_done_observation = '{default:'0};
     // 中文注释：CSR monitor 每个 DUT sample 发布一份短生命周期 context。
     // 同拍 fence 先到时 raw 留在 FIFO 等待绑定；下拍仍未绑定即为 monitor 时序错误。
     memblock_l2tlb_sfence_csr_context_t l2tlb_sfence_csr_context;
@@ -1940,12 +2093,24 @@ package memblock_sync_pkg;
                lifecycle_event_published_seq >= sample_seq;
     endfunction:l2tlb_sample_ready
 
+    // 抽象职责：发布 CSR monitor 已观察到的 runtime snapshot。当前 control epoch
+    // ready 后的首份 sample 即使 payload 不变也强制发布并登记 baseline；后续仍只在
+    // payload 改变时递增，避免旧 snapshot 被新 action 当作当前代完成证据。
     function void publish_runtime_csr_snapshot(input dispatch_raw_csr_t item,
                                                input bit payload_changed);
-        if (item.valid && payload_changed) begin
+        bit force_current_control_baseline;
+
+        force_current_control_baseline = control_runtime_ready_for_current_epoch() &&
+                                         !control_csr_runtime_baseline.valid;
+        if (item.valid && (payload_changed || force_current_control_baseline)) begin
             runtime_csr_snapshot = item;
             runtime_csr_snapshot_valid = 1'b1;
             runtime_csr_snapshot_seq++;
+            if (force_current_control_baseline) begin
+                control_csr_runtime_baseline.valid = 1'b1;
+                control_csr_runtime_baseline.reset_epoch = control_reset_epoch;
+                control_csr_runtime_baseline.first_snapshot_seq = runtime_csr_snapshot_seq;
+            end
         end
     endfunction:publish_runtime_csr_snapshot
 

@@ -16,16 +16,11 @@ class memblock_control_barrier_service extends uvm_object;
     common_data_transaction data;
     lsq_commit_handler      commit_handler;
 
-    // 中文注释：bootstrap epoch 只属于本 service 的 control runtime 代际。建表完成时
-    // 冻结三类 monitor observation 的下界；后续 sample 均越过下界后才允许控制 UID
-    // 创建动作，避免把建表前的 latest 误归属给新表。
+    // 中文注释：bootstrap_started 只记录控制主表已经完成 post-build hook。实际 epoch、
+    // reset request、四路 ack、runtime ready 与 CSR baseline 全部由 sync_pkg 单点维护；
+    // service 不再私有保存 monitor observation 下界，避免不同 consumer 使用不同代际。
     bit               bootstrap_started;
-    bit               runtime_ready;
     bit               reset_in_progress;
-    int unsigned      control_runtime_epoch;
-    int unsigned      bootstrap_csr_snapshot_seq;
-    longint unsigned  bootstrap_sb_observation_seq;
-    longint unsigned  bootstrap_l2_done_observation_seq;
 
     `uvm_object_utils(memblock_control_barrier_service)
 
@@ -60,12 +55,7 @@ function memblock_control_barrier_service::new(
     data = null;
     commit_handler = null;
     bootstrap_started = 1'b0;
-    runtime_ready = 1'b0;
     reset_in_progress = 1'b0;
-    control_runtime_epoch = 0;
-    bootstrap_csr_snapshot_seq = 0;
-    bootstrap_sb_observation_seq = 0;
-    bootstrap_l2_done_observation_seq = 0;
 endfunction:new
 
 function void memblock_control_barrier_service::ensure_handles();
@@ -80,13 +70,9 @@ function void memblock_control_barrier_service::ensure_handles();
     end
 endfunction:ensure_handles
 
-// 抽象职责：在 active control main table 完成后建立首个控制运行期代际。该函数
-// 只冻结 monitor 事实的起始序号并清空未交付 action；不修改主表、ROB 或 status。
+// 抽象职责：在 active control main table 完成后发起首个 control reset handshake。
+// 它只清空未交付 action 并请求当前 epoch 的 driver/monitor ack；不修改主表、ROB 或 status。
 function void memblock_control_barrier_service::initialize_control_runtime_bootstrap();
-    memblock_sync_pkg::dispatch_raw_csr_t ignored_csr;
-    memblock_sync_pkg::memblock_control_level_observation_t observation;
-    int unsigned csr_seq;
-
     ensure_handles();
     if (!memblock_sync_pkg::uses_control_barrier_topology()) begin
         return;
@@ -94,19 +80,9 @@ function void memblock_control_barrier_service::initialize_control_runtime_boots
     if (bootstrap_started) begin
         return;
     end
-    control_runtime_epoch++;
-    if (control_runtime_epoch == 0) begin
-        `uvm_fatal(get_type_name(), "control runtime epoch wrapped during bootstrap")
-    end
-    void'(memblock_sync_pkg::get_latest_runtime_csr_snapshot(ignored_csr, csr_seq));
-    bootstrap_csr_snapshot_seq = csr_seq;
-    void'(memblock_sync_pkg::get_latest_control_sb_is_empty_observation(observation));
-    bootstrap_sb_observation_seq = observation.observation_seq;
-    void'(memblock_sync_pkg::get_latest_control_l2_flush_done_observation(observation));
-    bootstrap_l2_done_observation_seq = observation.observation_seq;
     data.reset_control_action_runtime();
+    memblock_sync_pkg::request_control_runtime_reset("control bootstrap");
     bootstrap_started = 1'b1;
-    runtime_ready = 1'b0;
     reset_in_progress = 1'b0;
 endfunction:initialize_control_runtime_bootstrap
 
@@ -116,10 +92,6 @@ endfunction:initialize_control_runtime_bootstrap
 function void memblock_control_barrier_service::begin_control_runtime_reset(
     input string reason
 );
-    memblock_sync_pkg::dispatch_raw_csr_t ignored_csr;
-    memblock_sync_pkg::memblock_control_level_observation_t observation;
-    int unsigned csr_seq;
-
     ensure_handles();
     if (!memblock_sync_pkg::uses_control_barrier_topology() || !bootstrap_started) begin
         return;
@@ -128,54 +100,31 @@ function void memblock_control_barrier_service::begin_control_runtime_reset(
         return;
     end
     if (data.active_control_barrier_valid ||
-        data.dispatch_progress.max_enqueued_uid_valid) begin
+        data.dispatch_progress.max_enqueued_uid_valid ||
+        data.uid_by_active_rob.num() != 0) begin
         `uvm_fatal(get_type_name(),
-                   $sformatf("control runtime reset after admission is unsupported: reason=%0s barrier=%0d uid=%0d max_enq_valid=%0d",
+                   $sformatf("control runtime reset after admission is unsupported: reason=%0s barrier=%0d uid=%0d max_enq_valid=%0d active_rob=%0d",
                              reason, data.active_control_barrier_valid,
                              data.active_control_barrier_uid,
-                             data.dispatch_progress.max_enqueued_uid_valid))
+                             data.dispatch_progress.max_enqueued_uid_valid,
+                             data.uid_by_active_rob.num()))
     end
-    control_runtime_epoch++;
-    if (control_runtime_epoch == 0) begin
-        `uvm_fatal(get_type_name(), "control runtime epoch wrapped during reset")
-    end
-    void'(memblock_sync_pkg::get_latest_runtime_csr_snapshot(ignored_csr, csr_seq));
-    bootstrap_csr_snapshot_seq = csr_seq;
-    void'(memblock_sync_pkg::get_latest_control_sb_is_empty_observation(observation));
-    bootstrap_sb_observation_seq = observation.observation_seq;
-    void'(memblock_sync_pkg::get_latest_control_l2_flush_done_observation(observation));
-    bootstrap_l2_done_observation_seq = observation.observation_seq;
     data.reset_control_action_runtime();
-    runtime_ready = 1'b0;
+    memblock_sync_pkg::request_control_runtime_reset(reason);
     reset_in_progress = 1'b1;
 endfunction:begin_control_runtime_reset
 
-// 抽象职责：确认三个既有 monitor 都已经在 bootstrap/reset 后发布至少一个新事实。
-// 该 ready 只保护控制动作的观察边界，不把 raw queue、worker sendover 或控制完成
+// 抽象职责：确认 sync_pkg 的四路 reset ack 已完成，且 CSR monitor 已发布当前 epoch
+// 的首份 runtime baseline。ready 只保护控制动作的观察边界，不把 queue 或 sendover
 // 误当作 producer 初始化完成。
 function bit memblock_control_barrier_service::control_runtime_is_ready();
-    memblock_sync_pkg::dispatch_raw_csr_t csr_snapshot;
-    memblock_sync_pkg::memblock_control_level_observation_t sb_observation;
-    memblock_sync_pkg::memblock_control_level_observation_t l2_done_observation;
-    int unsigned csr_seq;
+    memblock_sync_pkg::memblock_control_csr_runtime_baseline_t baseline;
 
-    if (runtime_ready) begin
-        return 1'b1;
-    end
     if (!bootstrap_started ||
-        !memblock_sync_pkg::get_latest_runtime_csr_snapshot(csr_snapshot, csr_seq) ||
-        !memblock_sync_pkg::get_latest_control_sb_is_empty_observation(sb_observation) ||
-        !memblock_sync_pkg::get_latest_control_l2_flush_done_observation(l2_done_observation)) begin
+        !memblock_sync_pkg::control_runtime_ready_for_current_epoch() ||
+        !memblock_sync_pkg::get_control_csr_runtime_baseline(baseline)) begin
         return 1'b0;
     end
-    // runtime CSR seq 只在 payload 改变时递增；bootstrap 时已经冻结的有效 latest
-    // 本身可作为首个 CSR action baseline，不能强行等待一次无语义的新变化。
-    if (csr_seq < bootstrap_csr_snapshot_seq ||
-        sb_observation.observation_seq <= bootstrap_sb_observation_seq ||
-        l2_done_observation.observation_seq <= bootstrap_l2_done_observation_seq) begin
-        return 1'b0;
-    end
-    runtime_ready = 1'b1;
     reset_in_progress = 1'b0;
     return 1'b1;
 endfunction:control_runtime_is_ready
@@ -307,7 +256,7 @@ function void memblock_control_barrier_service::bind_control_owner(
     status.control_owner.dynamic_epoch = status.dynamic_epoch;
     status.control_owner.action_generation = status.control_action_generation;
     status.control_owner.kind = status.control_kind;
-    status.control_reset_epoch = control_runtime_epoch;
+    status.control_reset_epoch = memblock_sync_pkg::get_control_runtime_reset_epoch();
 endfunction:bind_control_owner
 
 // 抽象职责：把当前 runtime CSR snapshot 冻结为 CSR action token 并唤醒专用 worker。
@@ -318,13 +267,21 @@ function void memblock_control_barrier_service::enqueue_csr_action(
 );
     memblock_csr_control_action_t action;
     memblock_sync_pkg::dispatch_raw_csr_t snapshot;
+    memblock_sync_pkg::memblock_control_csr_runtime_baseline_t baseline;
     int unsigned snapshot_seq;
 
     if (!status.control_owner.valid ||
         status.control_state != MEMBLOCK_CONTROL_STATE_CSR_CONFIG_PENDING ||
-        status.control_action_enqueued ||
+        status.control_action_enqueued) begin
+        `uvm_fatal(get_type_name(), "CSR action enqueue has invalid status")
+    end
+    if (!memblock_sync_pkg::get_control_csr_runtime_baseline(baseline) ||
         !memblock_sync_pkg::get_latest_runtime_csr_snapshot(snapshot, snapshot_seq)) begin
-        `uvm_fatal(get_type_name(), "CSR action enqueue has invalid status or no runtime snapshot")
+        return;
+    end
+    if (status.control_reset_epoch != baseline.reset_epoch ||
+        snapshot_seq < baseline.first_snapshot_seq) begin
+        `uvm_fatal(get_type_name(), "CSR action attempted to use a non-current runtime baseline")
     end
     action = '{default:'0};
     action.owner = status.control_owner;
@@ -481,7 +438,7 @@ function void memblock_control_barrier_service::service_check_store_control(
 
     if (!status.control_owner.valid ||
         status.control_owner.kind != MEMBLOCK_CONTROL_KIND_CHECK_STORE ||
-        status.control_reset_epoch != control_runtime_epoch) begin
+        status.control_reset_epoch != memblock_sync_pkg::get_control_runtime_reset_epoch()) begin
         `uvm_fatal(get_type_name(), "check_store control status lost its owner or runtime epoch")
     end
     case (status.control_state)
@@ -540,20 +497,26 @@ function void memblock_control_barrier_service::enqueue_check_store_l2_assert(
     memblock_csr_control_action_t action;
     memblock_sync_pkg::dispatch_raw_csr_t snapshot;
     memblock_sync_pkg::memblock_control_level_observation_t observation;
+    memblock_sync_pkg::memblock_control_csr_runtime_baseline_t baseline;
     int unsigned snapshot_seq;
 
     if (!status.control_owner.valid ||
         status.control_state != MEMBLOCK_CONTROL_STATE_CHECK_STORE_L2_CSR_ASSERT ||
         status.control_action_enqueued ||
-        status.control_reset_epoch != control_runtime_epoch) begin
+        status.control_reset_epoch != memblock_sync_pkg::get_control_runtime_reset_epoch()) begin
         `uvm_fatal(get_type_name(), "invalid check_store L2 ASSERT status")
     end
     if (!memblock_sync_pkg::get_latest_control_l2_flush_done_observation(observation) ||
         observation.level) begin
         return;
     end
-    if (!memblock_sync_pkg::get_latest_runtime_csr_snapshot(snapshot, snapshot_seq)) begin
+    if (!memblock_sync_pkg::get_control_csr_runtime_baseline(baseline) ||
+        !memblock_sync_pkg::get_latest_runtime_csr_snapshot(snapshot, snapshot_seq)) begin
         return;
+    end
+    if (status.control_reset_epoch != baseline.reset_epoch ||
+        snapshot_seq < baseline.first_snapshot_seq) begin
+        `uvm_fatal(get_type_name(), "check_store L2 ASSERT attempted to use a non-current CSR baseline")
     end
     action = '{default:'0};
     action.owner = status.control_owner;
@@ -581,7 +544,7 @@ function void memblock_control_barrier_service::enqueue_check_store_l2_release(
     if (!status.control_owner.valid ||
         status.control_state != MEMBLOCK_CONTROL_STATE_WAIT_L2_FLUSH_DONE ||
         !status.control_l2_csr_baseline_valid ||
-        status.control_reset_epoch != control_runtime_epoch ||
+        status.control_reset_epoch != memblock_sync_pkg::get_control_runtime_reset_epoch() ||
         !memblock_sync_pkg::get_latest_control_l2_flush_done_observation(observation) ||
         !observation.level ||
         observation.observation_seq <= status.control_assert_done_baseline_seq) begin
