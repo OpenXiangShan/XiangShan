@@ -168,10 +168,13 @@ class TranslationPermissionOracle:
             return
         actual_path = str(path)
         actual_pa = int(pa)
-        self._record(cycle, "fetch_request", path=actual_path, pa=actual_pa)
         if self.active["expected_path"] == "fault":
+            self._record(cycle, "fetch_request", path=actual_path, pa=actual_pa)
             self._error(cycle, "unexpected_fetch_after_fault", path=actual_path, pa=actual_pa)
             return
+        if self.active["fetch_seen"]:
+            return
+        self._record(cycle, "fetch_request", path=actual_path, pa=actual_pa)
         expected_path = "icache" if self.active["expected_path"] == "cacheable" else "uncache"
         expected_pa = int(self.active["expected_outcome"].get("pa", 0))
         compare_pa = expected_pa & ~0x3F if expected_path == "icache" else expected_pa
@@ -194,8 +197,10 @@ class TranslationPermissionOracle:
         if not actual_faults:
             return
         actual_fault = actual_faults[0] if len(actual_faults) == 1 else "multiple"
-        self._record(cycle, "cfvec_exception", pc=int(pc), fault=actual_fault, cross_page=bool(cross_page))
         expected_fault = self.active["expected_fault"]
+        if expected_fault is not None and self.active["fault_seen"]:
+            return
+        self._record(cycle, "cfvec_exception", pc=int(pc), fault=actual_fault, cross_page=bool(cross_page))
         if expected_fault is None:
             self._error(cycle, "unexpected_cfvec_exception", pc=int(pc), actual_fault=actual_fault)
             return

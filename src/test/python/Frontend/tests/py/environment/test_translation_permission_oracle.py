@@ -50,6 +50,24 @@ def test_oracle_accepts_cacheable_pa_from_icache_request() -> None:
     assert all(record["scenario_id"] == "oracle-cacheable" for record in stats["records"])
 
 
+def test_oracle_uses_first_normal_fetch_as_translation_evidence() -> None:
+    env, state = _state(
+        scenario_id="oracle-cacheable-stream",
+        va=0x8020_0004,
+        pa=0x8040_0004,
+        pte=TranslationPte(v=1, r=1, x=1, a=1),
+    )
+
+    _observe_matching_ptw(env, state)
+    first_pa = state.expected_outcome["pa"] & ~0x3F
+    env.translation_oracle.observe_fetch_request(12, path="icache", pa=first_pa)
+    env.translation_oracle.observe_fetch_request(13, path="icache", pa=first_pa + 0x40)
+
+    stats = env.assert_translation_scenario()
+    assert stats["error_count"] == 0
+    assert [record["kind"] for record in stats["records"]] == ["armed", "ptw_request", "ptw_response", "fetch_request"]
+
+
 def test_oracle_maps_generated_cfvec_page_fault_bit() -> None:
     env, state = _state(
         scenario_id="oracle-page-fault",
@@ -62,6 +80,23 @@ def test_oracle_maps_generated_cfvec_page_fault_bit() -> None:
     env.translation_oracle.observe_cfvec(12, pc=state.scenario.va, exception_bits={12: 1}, cross_page=False)
 
     assert env.assert_translation_scenario()["error_count"] == 0
+
+
+def test_oracle_uses_first_expected_fault_as_exception_evidence() -> None:
+    env, state = _state(
+        scenario_id="oracle-page-fault-stream",
+        va=0x8020_1000,
+        pa=0x8040_1000,
+        pte=TranslationPte(v=1, r=1, x=0, a=1),
+    )
+
+    _observe_matching_ptw(env, state)
+    env.translation_oracle.observe_cfvec(12, pc=state.scenario.va, exception_bits={12: 1})
+    env.translation_oracle.observe_cfvec(13, pc=state.scenario.va + 0x40, exception_bits={12: 1})
+
+    stats = env.assert_translation_scenario()
+    assert stats["error_count"] == 0
+    assert [record["kind"] for record in stats["records"]] == ["armed", "ptw_request", "ptw_response", "cfvec_exception"]
 
 
 def test_oracle_rejects_wrong_cfvec_fault_type_with_scenario_context() -> None:

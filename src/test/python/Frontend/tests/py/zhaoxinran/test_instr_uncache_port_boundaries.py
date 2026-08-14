@@ -10,7 +10,15 @@ import pytest
 
 from env.runtime.pylib import frontend_offset_path
 
-from env.sequences import InjectRedirectSequence, LoadProgramSequence, RunUntilCommitSequence
+from env.sequences import (
+    InjectRedirectSequence,
+    LoadProgramSequence,
+    RunUntilCommitSequence,
+    TranslationPmpPmaEntry,
+    TranslationPte,
+    TranslationScenario,
+    TranslationScenarioBuilder,
+)
 from env.core.transactions import CommitTarget, ProgramImage, RedirectTxn
 from env.support import PmpPmaConfig
 
@@ -1341,12 +1349,40 @@ def test_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_tps("ATP-113")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_cacheable_non_mmio_uses_icache_path(env):
-    _prepare_sv39_mapped_cnop_stream(env, vaddr=_NORMAL_BASE, paddr=_NORMAL_PHYS_BASE, pbmt=_PBMT_PMA)
     _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
-    _configure_exec_pmp_4k(env, base_addr=_NORMAL_PHYS_BASE)
-    _configure_exec_cacheable_pma_4k(env, base_addr=_NORMAL_PHYS_BASE)
+    scenario = TranslationScenario(
+        scenario_id="atp-113-sv39-cacheable-dut",
+        va=_NORMAL_BASE,
+        pa=_NORMAL_PHYS_BASE,
+        payload=int(_CNOP).to_bytes(2, "little") * 256,
+        expected_path="cacheable",
+        expected_result="miss_refill",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=_NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+                addr=_NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(scenario.va)
+    env.arm_translation_scenario(state)
     _force_redirect_to(env, _NORMAL_BASE)
 
     commits = RunUntilCommitSequence(target=CommitTarget(target_count=6, max_cycles=6000)).run(env)
@@ -1362,6 +1398,88 @@ def test_uncache_cacheable_non_mmio_uses_icache_path(env):
     assert any(int(obs.pc) == _NORMAL_BASE for obs in env.monitor.observations)
     assert _NORMAL_PHYS_BASE not in env.uncache_agent.get_stats().get("request_addrs", [])
     assert int(env.ptw_agent.get_stats().get("resp_count", 0)) >= 1
+    assert env.assert_translation_scenario()["error_count"] == 0
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_tps("ATP-124")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_sv39_execute_denied_reports_instruction_page_fault(env):
+    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    scenario = TranslationScenario(
+        scenario_id="atp-124-sv39-execute-denied-dut",
+        va=_NORMAL_BASE,
+        pa=_NORMAL_PHYS_BASE,
+        payload=int(_CNOP).to_bytes(2, "little") * 32,
+        s1_pte=TranslationPte(v=1, r=1, x=0, a=1),
+        expected_path="fault",
+        expected_result="page_fault",
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(scenario.va)
+    env.arm_translation_scenario(state)
+    _force_redirect_to(env, scenario.va)
+
+    for _ in range(6000):
+        env.step(1)
+        active = env.translation_oracle.get_active()
+        if active is not None and active["fault_seen"]:
+            break
+
+    env.step(32)
+
+    assert int(env.ptw_agent.get_stats().get("resp_count", 0)) >= 1
+    assert env.assert_translation_scenario()["error_count"] == 0
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_tps("ATP-076")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_sv39_pmp_execute_denied_reports_instruction_access_fault(env):
+    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    scenario = TranslationScenario(
+        scenario_id="atp-076-sv39-pmp-execute-denied-dut",
+        va=_NORMAL_BASE,
+        pa=_NORMAL_PHYS_BASE,
+        payload=int(_CNOP).to_bytes(2, "little") * 32,
+        expected_path="fault",
+        expected_result="access_fault",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=False),
+                addr=_NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+                addr=_NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(scenario.va)
+    env.arm_translation_scenario(state)
+    _force_redirect_to(env, scenario.va)
+
+    for _ in range(6000):
+        env.step(1)
+        active = env.translation_oracle.get_active()
+        if active is not None and active["fault_seen"]:
+            break
+
+    env.step(32)
+
+    assert int(env.ptw_agent.get_stats().get("resp_count", 0)) >= 1
+    assert env.assert_translation_scenario()["error_count"] == 0
     assert not env.monitor.get_errors()
 
 
