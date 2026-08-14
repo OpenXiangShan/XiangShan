@@ -75,6 +75,7 @@ class memblock_lsqenq_dispatch_base_sequence extends lsqenq_agent_agent_default_
     extern function void complete_v2_pending_sample(inout bit has_progress);
     extern function void clear_v2_pending_sample();
     extern function void complete_admission(input memblock_uid_t uid);
+    extern function bit admit_control_marker_if_ready(output bit has_progress);
     extern function bit admit_non_lsq_if_ready(output bit has_progress);
 
 endclass:memblock_lsqenq_dispatch_base_sequence
@@ -167,6 +168,10 @@ task memblock_lsqenq_dispatch_base_sequence::send_lsqenq_cycle(input int unsigne
         end
     end
     admission_progress = 1'b0;
+    if (admit_control_marker_if_ready(admission_progress)) begin
+        has_progress |= admission_progress;
+        return;
+    end
     if (admit_non_lsq_if_ready(admission_progress)) begin
         has_progress |= admission_progress;
         return;
@@ -312,6 +317,9 @@ function bit memblock_lsqenq_dispatch_base_sequence::next_uid_needs_lsq_admissio
                                                                              output main_control_transaction main_tr,
                                                                              output memblock_op_behavior_t behavior);
     ensure_helpers();
+    uid = 0;
+    main_tr = null;
+    behavior = lsq_ctrl_model::make_default_behavior();
     if (admission_blocked_by_flush()) begin
         return 1'b0;
     end
@@ -319,8 +327,12 @@ function bit memblock_lsqenq_dispatch_base_sequence::next_uid_needs_lsq_admissio
     if (uid < data.main_trans_num) begin
         status_transaction status;
 
-        status = data.get_status(uid);
         main_tr = data.get_main_transaction(uid);
+        if (data.control_barrier_blocks_admission(uid) ||
+            is_control_op_class(main_tr.op_class)) begin
+            return 1'b0;
+        end
+        status = data.get_status(uid);
         behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
         if (status.terminal_done || status.active || status.enq ||
             status.exception_pending || status.replay_pending) begin
@@ -329,9 +341,6 @@ function bit memblock_lsqenq_dispatch_base_sequence::next_uid_needs_lsq_admissio
         // redirect_pending/flushed表示旧动态实例已被kill；同uid现在允许按公共高水位重新admission。
         return 1'b1;
     end
-    uid = 0;
-    main_tr = null;
-    behavior = lsq_ctrl_model::make_default_behavior();
     return 1'b0;
 endfunction:next_uid_needs_lsq_admission
 
@@ -383,7 +392,15 @@ function bit memblock_lsqenq_dispatch_base_sequence::collect_lsq_candidates(outp
         if (uid >= data.main_trans_num) begin
             break;
         end
+        if (data.control_barrier_blocks_admission(uid)) begin
+            break;
+        end
         main_tr = data.get_main_transaction(uid);
+        // 中文注释：控制标记占用 admission 前缀但绝不进入本次 LSQ batch；在
+        // derive_op_behavior() 前停止，避免中性 fuType 被普通路径误判。
+        if (is_control_op_class(main_tr.op_class)) begin
+            break;
+        end
         status = data.get_status(uid);
         if (status.terminal_done || status.active || status.enq ||
             status.exception_pending || status.replay_pending) begin
@@ -752,9 +769,44 @@ function void memblock_lsqenq_dispatch_base_sequence::clear_v2_pending_sample();
 endfunction:clear_v2_pending_sample
 
 function void memblock_lsqenq_dispatch_base_sequence::complete_admission(input memblock_uid_t uid);
+    if (is_control_op_class(data.get_main_transaction(uid).op_class)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("control uid=%0d must not enter ordinary complete_admission", uid))
+    end
     drain_csr_runtime_events();
     issue_sched.prepare_issue_route_for_uid(uid);
 endfunction:complete_admission
+
+// 抽象职责：在普通 LSQ/non-LSQ admission 前处理控制 UID。它只调用公共控制
+// admission API 或 redirect 后 prefix 恢复，不构造 LSQ xaction、不调用 issue scheduler。
+function bit memblock_lsqenq_dispatch_base_sequence::admit_control_marker_if_ready(
+    output bit has_progress
+);
+    memblock_uid_t uid;
+    main_control_transaction main_tr;
+    status_transaction status;
+
+    has_progress = 1'b0;
+    if (admission_blocked_by_flush()) begin
+        return 1'b0;
+    end
+    uid = data.get_next_new_admit_uid();
+    if (uid >= data.main_trans_num || data.control_barrier_blocks_admission(uid)) begin
+        return 1'b0;
+    end
+    main_tr = data.get_main_transaction(uid);
+    if (!is_control_op_class(main_tr.op_class)) begin
+        return 1'b0;
+    end
+    status = data.get_status(uid);
+    if (status.active || status.enq) begin
+        data.restore_control_admission_prefix(uid);
+    end else begin
+        data.activate_control_uid(uid);
+    end
+    has_progress = 1'b1;
+    return 1'b1;
+endfunction:admit_control_marker_if_ready
 
 function bit memblock_lsqenq_dispatch_base_sequence::admit_non_lsq_if_ready(output bit has_progress);
     memblock_uid_t uid;

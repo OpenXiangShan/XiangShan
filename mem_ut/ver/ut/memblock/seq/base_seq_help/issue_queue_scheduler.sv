@@ -27,13 +27,20 @@ class issue_queue_scheduler extends uvm_object;
 
     function void prepare_issue_route_for_uid(input memblock_uid_t uid);
         status_transaction status;
+        main_control_transaction main_tr;
 
         ensure_data();
         status = data.get_status(uid);
+        main_tr = data.get_main_transaction(uid);
         if (!status.active || !status.enq) begin
             `uvm_fatal("ISSUE_Q", $sformatf("prepare_issue_route_for_uid uid=%0d requires active enqueued status", uid))
         end
         data.set_status_field(uid, MEMBLOCK_STATUS_ISSUE_READY, 1'b1);
+        // 中文注释：控制 UID 仅借用公共 admission 可见性，不能创建 load/STA/STD
+        // issue item；完成条件由 control service 与专用 commit 分支维护。
+        if (is_control_op_class(main_tr.op_class)) begin
+            return;
+        end
         route_uid(uid);
     endfunction:prepare_issue_route_for_uid
 
@@ -186,10 +193,13 @@ class issue_queue_scheduler extends uvm_object;
         memblock_op_behavior_t   behavior;
 
         ensure_data();
+        main_tr = data.get_main_transaction(uid);
+        if (is_control_op_class(main_tr.op_class)) begin
+            return;
+        end
         if (!is_uid_route_ready(uid)) begin
             return;
         end
-        main_tr  = data.get_main_transaction(uid);
         behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
         if (behavior.route_load) begin
             route_target(uid, MEMBLOCK_ISSUE_TARGET_LOAD, behavior);
