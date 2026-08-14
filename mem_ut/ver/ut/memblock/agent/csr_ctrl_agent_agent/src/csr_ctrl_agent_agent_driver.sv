@@ -12,16 +12,46 @@ class csr_ctrl_agent_agent_driver  extends tcnt_driver_base#(virtual csr_ctrl_ag
 
     `uvm_component_utils(csr_ctrl_agent_agent_driver)
 
+    // 中文注释：L2 flush 高电平的唯一持有者。ASSERT item 的 send_pkt() 建立完整
+    // CSR baseline；无 item 的 idle 周期仍使用该 baseline 驱动 high。RELEASE item
+    // 只有 owner 完全匹配时才能清除，避免旧 token 拉低新一代请求。
+    bit                              l2_flush_level_hold_valid;
+    csr_ctrl_agent_agent_xaction     l2_flush_level_hold_tr;
+    int unsigned                     l2_flush_level_hold_uid;
+    int unsigned                     l2_flush_level_hold_dynamic_epoch;
+    int unsigned                     l2_flush_level_hold_action_generation;
+    int unsigned                     l2_flush_level_hold_kind_code;
+    int unsigned                     l2_flush_level_hold_control_reset_epoch;
+
     extern function new(string name, uvm_component parent);
     extern virtual function void build_phase(uvm_phase phase);
     extern virtual task reset_phase(uvm_phase phase);
     extern task main_phase(uvm_phase phase);
     extern task send_pkt(csr_ctrl_agent_agent_xaction tr);
+    extern task drive_pkt_fields(csr_ctrl_agent_agent_xaction tr);
+    extern task drive_l2_flush_level_hold();
     extern task drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
+    extern function bit control_l2_flush_metadata_complete(
+        input csr_ctrl_agent_agent_xaction tr
+    );
+    extern function bit control_l2_flush_owner_matches_hold(
+        input csr_ctrl_agent_agent_xaction tr
+    );
+    extern function void capture_l2_flush_level_hold(
+        input csr_ctrl_agent_agent_xaction tr
+    );
+    extern function void clear_l2_flush_level_hold(input string reason);
 endclass:csr_ctrl_agent_agent_driver
 
 function csr_ctrl_agent_agent_driver::new(string name, uvm_component parent);
     super.new(name,parent);
+    l2_flush_level_hold_valid = 1'b0;
+    l2_flush_level_hold_tr = null;
+    l2_flush_level_hold_uid = 0;
+    l2_flush_level_hold_dynamic_epoch = 0;
+    l2_flush_level_hold_action_generation = 0;
+    l2_flush_level_hold_kind_code = 0;
+    l2_flush_level_hold_control_reset_epoch = 0;
 endfunction:new
 
 function void csr_ctrl_agent_agent_driver::build_phase(uvm_phase phase);
@@ -30,6 +60,7 @@ endfunction:build_phase
 
 task csr_ctrl_agent_agent_driver::reset_phase(uvm_phase phase);
 
+    clear_l2_flush_level_hold("reset_phase");
     super.reset_phase(phase);
     phase.raise_objection(this);
 
@@ -81,7 +112,131 @@ task csr_ctrl_agent_agent_driver::main_phase(uvm_phase phase);
     end
 endtask:main_phase
 
+// 抽象职责：校验一个非 DUT L2 flush metadata 是否足以唯一标识 driver hold。
+// 它只判断 item 自身格式，不读取或修改 hold；ASSERT/RELEASE 的时序和 owner 对比
+// 仍由 send_pkt() 负责。
+function bit csr_ctrl_agent_agent_driver::control_l2_flush_metadata_complete(
+    input csr_ctrl_agent_agent_xaction tr
+);
+    return tr != null && tr.control_l2_flush_metadata_valid &&
+           tr.control_l2_flush_baseline_valid &&
+           tr.control_l2_flush_control_reset_epoch != 0 &&
+           (tr.control_l2_flush_action_kind ==
+                csr_ctrl_agent_agent_xaction::CONTROL_L2_FLUSH_ACTION_ASSERT ||
+            tr.control_l2_flush_action_kind ==
+                csr_ctrl_agent_agent_xaction::CONTROL_L2_FLUSH_ACTION_RELEASE);
+endfunction:control_l2_flush_metadata_complete
+
+// 抽象职责：只比较 RELEASE item 与当前 driver 私有 hold 的 primitive owner 字段。
+// agent 层不引用 seq 层 owner typedef，避免 package 反向依赖。
+function bit csr_ctrl_agent_agent_driver::control_l2_flush_owner_matches_hold(
+    input csr_ctrl_agent_agent_xaction tr
+);
+    return l2_flush_level_hold_valid && tr != null &&
+           tr.control_l2_flush_owner_uid == l2_flush_level_hold_uid &&
+           tr.control_l2_flush_owner_dynamic_epoch ==
+               l2_flush_level_hold_dynamic_epoch &&
+           tr.control_l2_flush_owner_action_generation ==
+               l2_flush_level_hold_action_generation &&
+           tr.control_l2_flush_owner_kind_code == l2_flush_level_hold_kind_code &&
+           tr.control_l2_flush_control_reset_epoch ==
+               l2_flush_level_hold_control_reset_epoch;
+endfunction:control_l2_flush_owner_matches_hold
+
+// 抽象职责：在 ASSERT 已经交付到 DUT interface 后深拷贝完整 CSR item，建立唯一
+// high-level hold。后续 idle 只复用该固定 baseline，不创建连续 high item。
+function void csr_ctrl_agent_agent_driver::capture_l2_flush_level_hold(
+    input csr_ctrl_agent_agent_xaction tr
+);
+    if (l2_flush_level_hold_valid || tr == null ||
+        !control_l2_flush_metadata_complete(tr) ||
+        tr.control_l2_flush_action_kind !=
+            csr_ctrl_agent_agent_xaction::CONTROL_L2_FLUSH_ACTION_ASSERT ||
+        tr.io_ooo_to_mem_csrCtrl_flush_l2_enable != 1'b1) begin
+        `uvm_fatal(get_type_name(), "invalid L2 flush ASSERT while establishing driver hold")
+    end
+    l2_flush_level_hold_tr = csr_ctrl_agent_agent_xaction::type_id::create(
+        $sformatf("l2_flush_hold_uid_%0d_gen_%0d", tr.control_l2_flush_owner_uid,
+                  tr.control_l2_flush_owner_action_generation));
+    if (l2_flush_level_hold_tr == null) begin
+        `uvm_fatal(get_type_name(), "failed to allocate L2 flush driver hold baseline")
+    end
+    l2_flush_level_hold_tr.copy(tr);
+    l2_flush_level_hold_tr.io_ooo_to_mem_csrCtrl_flush_l2_enable = 1'b1;
+    l2_flush_level_hold_valid = 1'b1;
+    l2_flush_level_hold_uid = tr.control_l2_flush_owner_uid;
+    l2_flush_level_hold_dynamic_epoch = tr.control_l2_flush_owner_dynamic_epoch;
+    l2_flush_level_hold_action_generation = tr.control_l2_flush_owner_action_generation;
+    l2_flush_level_hold_kind_code = tr.control_l2_flush_owner_kind_code;
+    l2_flush_level_hold_control_reset_epoch =
+        tr.control_l2_flush_control_reset_epoch;
+endfunction:capture_l2_flush_level_hold
+
+// 抽象职责：在合法 RELEASE 或物理 reset 边界清除 driver 私有 hold。正常 RELEASE
+// 先由 send_pkt() 完成 owner 校验；该 helper 本身不接受任意 sequence 直接调用。
+function void csr_ctrl_agent_agent_driver::clear_l2_flush_level_hold(input string reason);
+    l2_flush_level_hold_valid = 1'b0;
+    l2_flush_level_hold_tr = null;
+    l2_flush_level_hold_uid = 0;
+    l2_flush_level_hold_dynamic_epoch = 0;
+    l2_flush_level_hold_action_generation = 0;
+    l2_flush_level_hold_kind_code = 0;
+    l2_flush_level_hold_control_reset_epoch = 0;
+endfunction:clear_l2_flush_level_hold
+
+// 抽象职责：在 CSR driver 没有 sequence item 时保持同一 ASSERT 的完整 CSR baseline。
+// 它刻意绕过 send_pkt() 的 metadata 状态迁移，防止每个 idle sample 重复建立 hold。
+task csr_ctrl_agent_agent_driver::drive_l2_flush_level_hold();
+    if (!l2_flush_level_hold_valid || l2_flush_level_hold_tr == null) begin
+        `uvm_fatal(get_type_name(), "L2 flush hold is valid without a baseline xaction")
+    end
+    drive_pkt_fields(l2_flush_level_hold_tr);
+endtask:drive_l2_flush_level_hold
+
+// 抽象职责：在真实 item 边界处理 ASSERT/RELEASE 的 owner 生命周期，然后驱动完整
+// CSR payload。普通 item 不能与 high hold 并发，避免两条 producer 同时维护 level。
 task csr_ctrl_agent_agent_driver::send_pkt(csr_ctrl_agent_agent_xaction tr);
+    if (tr == null) begin
+        `uvm_fatal(get_type_name(), "cannot drive a null CSR item")
+    end
+    if (!tr.control_l2_flush_metadata_valid) begin
+        if (tr.control_l2_flush_action_kind !=
+                csr_ctrl_agent_agent_xaction::CONTROL_L2_FLUSH_ACTION_NONE ||
+            tr.control_l2_flush_baseline_valid) begin
+            `uvm_fatal(get_type_name(), "CSR item has partial L2 flush metadata")
+        end
+        if (l2_flush_level_hold_valid) begin
+            `uvm_fatal(get_type_name(), "ordinary CSR item arrived while L2 flush hold is active")
+        end
+        drive_pkt_fields(tr);
+        return;
+    end
+    if (!control_l2_flush_metadata_complete(tr)) begin
+        `uvm_fatal(get_type_name(), "CSR item has incomplete L2 flush metadata")
+    end
+    case (tr.control_l2_flush_action_kind)
+        csr_ctrl_agent_agent_xaction::CONTROL_L2_FLUSH_ACTION_ASSERT: begin
+            if (l2_flush_level_hold_valid ||
+                tr.io_ooo_to_mem_csrCtrl_flush_l2_enable != 1'b1) begin
+                `uvm_fatal(get_type_name(), "invalid L2 flush ASSERT ownership or level")
+            end
+            drive_pkt_fields(tr);
+            capture_l2_flush_level_hold(tr);
+        end
+        csr_ctrl_agent_agent_xaction::CONTROL_L2_FLUSH_ACTION_RELEASE: begin
+            if (!control_l2_flush_owner_matches_hold(tr) ||
+                tr.io_ooo_to_mem_csrCtrl_flush_l2_enable != 1'b0) begin
+                `uvm_fatal(get_type_name(), "L2 flush RELEASE does not match the active driver hold")
+            end
+            drive_pkt_fields(tr);
+            clear_l2_flush_level_hold("matching_release");
+        end
+        default:
+            `uvm_fatal(get_type_name(), "unknown L2 flush action metadata")
+    endcase
+endtask:send_pkt
+
+task csr_ctrl_agent_agent_driver::drive_pkt_fields(csr_ctrl_agent_agent_xaction tr);
     vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_mode <= tr.io_ooo_to_mem_tlbCsr_satp_mode;
     vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_asid <= tr.io_ooo_to_mem_tlbCsr_satp_asid;
     vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_ppn <= tr.io_ooo_to_mem_tlbCsr_satp_ppn;
@@ -177,9 +332,14 @@ task csr_ctrl_agent_agent_driver::send_pkt(csr_ctrl_agent_agent_xaction tr);
     vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_mem_trigger_debugMode <= tr.io_ooo_to_mem_csrCtrl_mem_trigger_debugMode;
     vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_priv_debug <= tr.io_ooo_to_mem_tlbCsr_priv_debug;
 
-endtask:send_pkt
+endtask:drive_pkt_fields
 
 task csr_ctrl_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
+
+    if (l2_flush_level_hold_valid) begin
+        drive_l2_flush_level_hold();
+        return;
+    end
 
     if(drv_mode==tcnt_dec_base::DRV_0) begin
         vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_bp_ctrl_btb_enable <= '0;

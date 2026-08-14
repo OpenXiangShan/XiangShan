@@ -408,6 +408,15 @@ typedef enum int unsigned {
     MEMBLOCK_CONTROL_COMPLETION_L2_FLUSH_LEVEL       = 2
 } memblock_control_completion_profile_e;
 
+// 中文注释：L2 flush level token 在 CSR worker 内部的单次交付阶段。
+// ASSERT 建立 driver 私有 high hold；RELEASE 只允许匹配同一 owner 的 hold 拉低。
+// 普通 CSR token 固定为 NONE，不能误触发 L2 flush metadata。
+typedef enum int unsigned {
+    MEMBLOCK_L2_FLUSH_PHASE_NONE    = 0,
+    MEMBLOCK_L2_FLUSH_PHASE_ASSERT  = 1,
+    MEMBLOCK_L2_FLUSH_PHASE_RELEASE = 2
+} memblock_l2_flush_phase_e;
+
 // 中文注释：action owner 是控制动作的唯一版本身份。
 // 设置：control barrier service 在静态等待结束后绑定；清除：terminal/abort/reset 收敛。
 // 作用：旧 token、旧 completion 或旧 RELEASE 不能推进/清除新 dynamic 实例。
@@ -422,6 +431,7 @@ typedef struct {
 typedef struct {
     memblock_control_owner_t                owner;
     memblock_control_completion_profile_e   completion_profile;
+    memblock_l2_flush_phase_e                l2_flush_phase;
     bit                                      csr_baseline_valid;
     memblock_sync_pkg::dispatch_raw_csr_t   csr_baseline;
     int unsigned                             csr_baseline_snapshot_seq;
