@@ -52,6 +52,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
     val fromFtq:     FtqToBpuIO = Flipped(new FtqToBpuIO)
     val toFtq:       BpuToFtqIO = new BpuToFtqIO
+    // phase-1 flush trigger from Frontend (not generated when HasBpuFlush is off)
+    val flush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
   }
 
   val io: BpuIO = IO(new BpuIO)
@@ -205,6 +207,47 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     p.io.fastTrain.foreach(_ := fastTrain)
   }
   io.fromFtq.train.ready := predictors.map(_.io.trainReady).reduce(_ && _)
+
+  /* *** BPU context flush (structurally eliminated when HasBpuFlush is off) *** */
+  if (HasBpuFlush) {
+    // encode per-predictor CSR flush enables in predictors order;
+    // exhaustive over all current predictor types, fail at elaboration on unknown ones
+    def getSubFlushEnable(p: BasePredictor): Bool = p match {
+      case _: MicroBtb => ctrl.ubtbFlushEnable.get
+      case _: AheadBtb => ctrl.abtbFlushEnable.get
+      case _: MainBtb  => ctrl.mbtbFlushEnable.get
+      case _: Tage     => ctrl.tageFlushEnable.get
+      case _: Sc       => ctrl.scFlushEnable.get
+      case _: Ittage   => ctrl.ittageFlushEnable.get
+      case _: Ras      => ctrl.rasFlushEnable.get
+      case _: FallThroughPredictor => true.B
+      case _: MicroTage            => true.B
+      case _: MicroRas             => true.B
+      case other => throw new IllegalArgumentException(
+        s"missing BPU flush-mask mapping for ${other.getClass.getName}"
+      )
+    }
+
+    val fc = Module(new BpuFlushCtrl(predictors.length))
+    fc.io.flush      := io.flush.get
+    fc.io.redirectEn := io.fromFtq.redirect.valid
+    fc.io.bpuFlushEn := ctrl.bpuFlushEn.get
+
+    // encode CSR enables in predictors order, latched by BpuFlushCtrl on phase-1 acceptance
+    val currentFlushMask = VecInit(predictors.map(p => getSubFlushEnable(p))).asUInt
+    fc.io.flushMask := currentFlushMask
+
+    // aggregate done only for predictors selected by this transaction's mask
+    fc.io.resetDone := predictors.zipWithIndex.map { case (p, i) =>
+      !fc.io.activeFlushMask(i) || p.io.resetDone.get
+    }.reduce(_ && _)
+
+    // per-predictor dispatch gated by the latched activeFlushMask
+    predictors.zipWithIndex.foreach { case (p, i) =>
+      p.io.contextFlush.get := fc.io.contextFlush && fc.io.activeFlushMask(i)
+      p.io.bpuFlushing.get  := fc.io.bpuFlushing  && fc.io.activeFlushMask(i)
+    }
+  }
 
   /* *** predictor specific inputs *** */
   abtb.io.redirectValid  := redirect.valid

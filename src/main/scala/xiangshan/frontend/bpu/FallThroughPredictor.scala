@@ -30,6 +30,10 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
   val io: FallThroughPredictorIO = IO(new FallThroughPredictorIO)
 
   io.sramResetDone := true.B
+  // context flush placeholder: real flush scheme comes later
+  if (HasBpuFlush) {
+    io.resetDone.get := true.B
+  }
 
   io.trainReady := true.B
 

@@ -519,6 +519,10 @@ class CVMTestCompile extends Config((site, here, up) => {
     HasBitmapCheckDefault = true))
 })
 
+class BPUFlushCompile extends Config((site, here, up) => {
+  case XSTileKey => up(XSTileKey).map(_.copy(HasBpuFlush = true))
+})
+
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
   OpenLLCConfig("512KB")
     ++ L2CacheConfig("256KB", inclusive = true)
@@ -547,6 +551,11 @@ class CVMConfig(n: Int = 1) extends Config(
 
 class CVMTestConfig(n: Int = 1) extends Config(
   new CVMTestCompile
+    ++ new DefaultConfig(n)
+) with DeprecatedConfigWarning
+
+class BPUFlushConfig(n: Int = 1) extends Config(
+  new BPUFlushCompile
     ++ new DefaultConfig(n)
 ) with DeprecatedConfigWarning
 

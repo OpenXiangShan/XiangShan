@@ -53,6 +53,10 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val replacers = Seq.fill(NumBanks)(Module(new AheadBtbReplacer))
 
   io.sramResetDone := banks.map(_.io.sramResetDone).reduce(_ && _)
+  // context flush placeholder: real flush scheme comes later
+  if (HasBpuFlush) {
+    io.resetDone.get := true.B
+  }
 
   io.trainReady := true.B
 

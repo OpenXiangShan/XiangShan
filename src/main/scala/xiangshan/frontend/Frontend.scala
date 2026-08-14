@@ -238,7 +238,10 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   // ICache-Backend
   icache.io.csrPfEnable := RegNext(csrCtrl.pf_ctrl.l1I_pf_enable)
-  icache.io.fencei      := RegNext(io.fencei)
+  // shared register for iCache flush and BPU phase-1 flush trigger
+  val fencei_reg = RegNext(io.fencei)
+  icache.io.fencei      := fencei_reg
+  if (HasBpuFlush) { bpu.io.flush.get := fencei_reg }
 
   // IFU-Ibuffer
   ifu.io.toIBuffer <> ibuffer.io.in
