@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from .memory_model import PTE
 
@@ -18,10 +18,15 @@ class PageTableModel:
         self.mode = mode.lower()
         self.pte_map: Dict[int, PTE] = {}
         self.stage2_pte_map: Dict[int, PTE] = {}
+        # PTW response faults describe walk/access failures, not PTE fields.
+        self._stage1_fault_map: Dict[int, Tuple[int, int]] = {}
+        self._stage2_fault_map: Dict[int, Tuple[int, int]] = {}
 
     def clear(self) -> None:
         self.pte_map.clear()
         self.stage2_pte_map.clear()
+        self._stage1_fault_map.clear()
+        self._stage2_fault_map.clear()
 
     def set_mode(self, mode: str) -> None:
         mode = mode.lower()
@@ -48,7 +53,7 @@ class PageTableModel:
         vmid: int = 0,
         pbmt: int = 0,
     ) -> None:
-        self.pte_map[int(vpn)] = PTE(
+        self.pte_map[self._pte_key(vpn, level)] = PTE(
             ppn=int(ppn),
             v=int(v),
             r=int(r),
@@ -83,7 +88,7 @@ class PageTableModel:
         vmid: int = 0,
         pbmt: int = 0,
     ) -> None:
-        self.stage2_pte_map[int(gvpn)] = PTE(
+        self.stage2_pte_map[self._pte_key(gvpn, level)] = PTE(
             ppn=int(ppn),
             v=int(v),
             r=int(r),
@@ -100,95 +105,204 @@ class PageTableModel:
             pbmt=int(pbmt),
         )
 
-    def translate(self, va: int) -> Tuple[int, bool, dict]:
-        if self.mode == "bare":
-            return va, True, {"mode": "bare"}
+    def set_stage1_response_fault(self, vpn: int, *, page_fault: int = 0, access_fault: int = 0) -> None:
+        """Inject response-side S-stage faults without changing the returned PTE."""
+        self._stage1_fault_map[int(vpn)] = (int(page_fault), int(access_fault))
 
-        vpn = va >> 12
-        pte = self.pte_map.get(vpn)
+    def set_stage2_response_fault(self, gvpn: int, *, guest_page_fault: int = 0, guest_access_fault: int = 0) -> None:
+        """Inject response-side G-stage faults without changing the returned PTE."""
+        self._stage2_fault_map[int(gvpn)] = (int(guest_page_fault), int(guest_access_fault))
+
+    @classmethod
+    def _pte_key(cls, vpn: int, level: int) -> int:
+        level = max(0, int(level))
+        lower_bits = level * cls._VPN_LEVEL_BITS
+        return int(vpn) & ~((1 << lower_bits) - 1) if lower_bits else int(vpn)
+
+    @classmethod
+    def _lookup_pte(cls, pte_map: Dict[int, PTE], vpn: int) -> Optional[PTE]:
+        vpn = int(vpn)
+        for level in range(3):
+            pte = pte_map.get(cls._pte_key(vpn, level))
+            if pte is not None and int(pte.level) == level:
+                return pte
+        return None
+
+    @staticmethod
+    def _pte_metadata(prefix: str, pte: Optional[PTE]) -> dict:
         if pte is None:
-            if vpn in self.stage2_pte_map:
-                stage2_pte = self.stage2_pte_map.get(vpn)
-                if stage2_pte is None or stage2_pte.v == 0 or stage2_pte.x == 0:
-                    return 0, False, {"mode": "sv39", "page_fault": True, "reason": "stage2_perm"}
-                gpa_ppn = self._compose_ppn(vpn, stage2_pte)
-                pa = (gpa_ppn << 12) | (va & 0xFFF)
-                return pa, True, {
-                    "mode": "sv39",
-                    "stage2": True,
-                    "stage1_ok": False,
-                    "stage2_ok": True,
-                    "stage2_level": stage2_pte.level,
-                    "stage2_v": stage2_pte.v,
-                    "stage2_x": stage2_pte.x,
-                    "stage2_r": stage2_pte.r,
-                }
-            return 0, False, {"mode": "sv39", "page_fault": True, "reason": "miss"}
+            return {}
+        return {
+            f"{prefix}_level": int(pte.level),
+            f"{prefix}_v": int(pte.v),
+            f"{prefix}_r": int(pte.r),
+            f"{prefix}_w": int(pte.w),
+            f"{prefix}_x": int(pte.x),
+            f"{prefix}_u": int(pte.u),
+            f"{prefix}_a": int(pte.a),
+            f"{prefix}_pbmt": int(pte.pbmt),
+        }
 
-        if pte.v == 0 or pte.x == 0:
-            return 0, False, {"mode": "sv39", "page_fault": True, "reason": "perm"}
+    @staticmethod
+    def _outcome_metadata(fault: Optional[str], reason: str) -> dict:
+        if fault is None:
+            return {"outcome": "normal", "fault": None, "reason": "ok"}
+        return {
+            "outcome": f"instruction_{fault}",
+            "fault": fault,
+            "reason": reason,
+        }
 
-        stage1_ppn = self._compose_ppn(vpn, pte)
+    @staticmethod
+    def _fetch_path(pbmt: int) -> str:
+        return {0: "pma", 1: "uncache", 2: "mmio", 3: "fault"}.get(int(pbmt), "fault")
+
+    def _stage1_fault(self, vpn: int, pte: Optional[PTE], priv_imode: int) -> Tuple[Optional[str], str]:
+        forced_pf, forced_af = self._stage1_fault_map.get(int(vpn), (0, 0))
+        if forced_af:
+            return "access_fault", "stage1_access_fault"
+        if forced_pf or pte is None or int(pte.v) == 0:
+            return "page_fault", "stage1_missing_or_invalid"
+        if int(pte.w) and not int(pte.r):
+            return "page_fault", "stage1_write_without_read"
+        if not (int(pte.r) or int(pte.w) or int(pte.x)):
+            return "page_fault", "stage1_nonleaf"
+        if not int(pte.x):
+            return "page_fault", "stage1_execute_denied"
+        if not int(pte.a):
+            return "page_fault", "stage1_accessed_clear"
+        if int(priv_imode) == 0 and not int(pte.u):
+            return "page_fault", "stage1_user_denied"
+        if int(priv_imode) == 1 and int(pte.u):
+            return "page_fault", "stage1_supervisor_denied"
+        if int(pte.pbmt) == 3:
+            return "page_fault", "stage1_pbmt_reserved"
+        return None, "ok"
+
+    def _stage2_fault(self, gvpn: int, pte: Optional[PTE]) -> Tuple[Optional[str], str]:
+        forced_gpf, forced_gaf = self._stage2_fault_map.get(int(gvpn), (0, 0))
+        if forced_gaf:
+            return "access_fault", "stage2_guest_access_fault"
+        if forced_gpf or pte is None or int(pte.v) == 0:
+            return "guest_page_fault", "stage2_missing_or_invalid"
+        if int(pte.w) and not int(pte.r):
+            return "guest_page_fault", "stage2_write_without_read"
+        if not (int(pte.r) or int(pte.w) or int(pte.x)):
+            return "guest_page_fault", "stage2_nonleaf"
+        if not int(pte.x):
+            return "guest_page_fault", "stage2_execute_denied"
+        if not int(pte.a):
+            return "guest_page_fault", "stage2_accessed_clear"
+        if int(pte.pbmt) == 3:
+            return "guest_page_fault", "stage2_pbmt_reserved"
+        return None, "ok"
+
+    def _infer_s2xlate(self, vpn: int) -> int:
         if not self.stage2_pte_map:
+            return self._ONLY_STAGE1
+        if self._lookup_pte(self.pte_map, vpn) is None and self._lookup_pte(self.stage2_pte_map, vpn) is not None:
+            return self._ONLY_STAGE2
+        return self._ALL_STAGE
+
+    def translate(
+        self,
+        va: int,
+        *,
+        s2xlate: Optional[int] = None,
+        priv_imode: int = 1,
+    ) -> Tuple[int, bool, dict]:
+        """Return PA and the architectural instruction-fetch outcome for one address.
+
+        ``s2xlate`` follows the PTW request encoding.  Omitting it retains the
+        legacy map-inference behavior used by existing model-only tests.
+        """
+        va = int(va)
+        vpn = va >> 12
+        if s2xlate is None:
+            if self.mode == "bare":
+                return va, True, {
+                    "mode": "bare",
+                    "stage2": False,
+                    "stage1_ok": True,
+                    "translated_pa": va,
+                    "fetch_path": "pma",
+                    **self._outcome_metadata(None, "ok"),
+                }
+            s2xlate = self._infer_s2xlate(vpn)
+        s2xlate = int(s2xlate)
+        if s2xlate not in {self._NO_S2XLATE, self._ONLY_STAGE1, self._ONLY_STAGE2, self._ALL_STAGE}:
+            raise ValueError(f"unsupported s2xlate: {s2xlate}")
+
+        metadata = {"mode": self.mode, "s2xlate": s2xlate, "stage2": s2xlate in {self._ONLY_STAGE2, self._ALL_STAGE}}
+        if s2xlate == self._ONLY_STAGE2:
+            stage2_pte = self._lookup_pte(self.stage2_pte_map, vpn)
+            fault, reason = self._stage2_fault(vpn, stage2_pte)
+            metadata.update(self._pte_metadata("stage2", stage2_pte))
+            metadata["stage1_ok"] = False
+            metadata["stage2_ok"] = fault is None
+            if stage2_pte is not None and int(stage2_pte.v):
+                metadata["stage2_pa"] = self._compose_ppn(vpn, stage2_pte) << 12
+            if fault is not None:
+                metadata.update(self._outcome_metadata(fault, reason))
+                return 0, False, metadata
+            host_ppn = self._compose_ppn(vpn, stage2_pte)
+            pa = (host_ppn << 12) | (va & 0xFFF)
+            metadata.update({"stage2_pa": host_ppn << 12, "translated_pa": pa, "fetch_path": self._fetch_path(stage2_pte.pbmt)})
+            metadata.update(self._outcome_metadata(None, "ok"))
+            return pa, True, metadata
+
+        if self.mode == "bare":
+            stage1_ppn = vpn
+            stage1_pte = None
+            stage1_fault = None
+            stage1_reason = "ok"
+            metadata["stage1_ok"] = True
+        else:
+            stage1_pte = self._lookup_pte(self.pte_map, vpn)
+            stage1_fault, stage1_reason = self._stage1_fault(vpn, stage1_pte, priv_imode)
+            metadata.update(self._pte_metadata("stage1", stage1_pte))
+            metadata["stage1_ok"] = stage1_fault is None
+            if stage1_pte is not None and int(stage1_pte.v):
+                metadata["stage1_pa"] = self._compose_ppn(vpn, stage1_pte) << 12
+            if stage1_fault is not None and (
+                s2xlate != self._ALL_STAGE
+                or stage1_fault == "access_fault"
+                or stage1_pte is None
+                or int(stage1_pte.v) == 0
+            ):
+                metadata.update(self._outcome_metadata(stage1_fault, stage1_reason))
+                return 0, False, metadata
+            stage1_ppn = self._compose_ppn(vpn, stage1_pte)
+
+        metadata["stage1_pa"] = stage1_ppn << 12
+        if s2xlate != self._ALL_STAGE:
             pa = (stage1_ppn << 12) | (va & 0xFFF)
-            return pa, True, {
-                "mode": "sv39",
-                "stage2": False,
-                "stage1_ok": True,
-                "stage1_level": pte.level,
-                "v": pte.v,
-                "x": pte.x,
-                "r": pte.r,
-            }
+            pbmt = 0 if stage1_pte is None else int(stage1_pte.pbmt)
+            metadata.update({"stage2": False, "translated_pa": pa, "fetch_path": self._fetch_path(pbmt)})
+            metadata.update(self._outcome_metadata(None, "ok"))
+            return pa, True, metadata
 
-        stage2_pte = self.stage2_pte_map.get(stage1_ppn)
-        if stage2_pte is None:
-            return 0, False, {
-                "mode": "sv39",
-                "page_fault": True,
-                "reason": "stage2_miss",
-                "stage1_ok": True,
-                "stage1_level": pte.level,
-                "stage1_v": pte.v,
-                "stage1_x": pte.x,
-                "stage1_r": pte.r,
-                "stage1_pa": stage1_ppn << 12,
-            }
-        if stage2_pte.v == 0 or stage2_pte.x == 0:
-            return 0, False, {
-                "mode": "sv39",
-                "page_fault": True,
-                "reason": "stage2_perm",
-                "stage1_ok": True,
-                "stage1_level": pte.level,
-                "stage1_v": pte.v,
-                "stage1_x": pte.x,
-                "stage1_r": pte.r,
-                "stage1_pa": stage1_ppn << 12,
-                "stage2_level": stage2_pte.level,
-                "stage2_v": stage2_pte.v,
-                "stage2_x": stage2_pte.x,
-                "stage2_r": stage2_pte.r,
-            }
-
+        stage2_pte = self._lookup_pte(self.stage2_pte_map, stage1_ppn)
+        stage2_fault, stage2_reason = self._stage2_fault(stage1_ppn, stage2_pte)
+        metadata.update(self._pte_metadata("stage2", stage2_pte))
+        metadata["stage2_ok"] = stage2_fault is None
+        if stage2_pte is not None and int(stage2_pte.v):
+            metadata["stage2_pa"] = self._compose_ppn(stage1_ppn, stage2_pte) << 12
+        if stage2_fault == "access_fault":
+            metadata.update(self._outcome_metadata(stage2_fault, stage2_reason))
+            return 0, False, metadata
+        if stage1_fault is not None:
+            metadata.update(self._outcome_metadata(stage1_fault, stage1_reason))
+            return 0, False, metadata
+        if stage2_fault is not None:
+            metadata.update(self._outcome_metadata(stage2_fault, stage2_reason))
+            return 0, False, metadata
         host_ppn = self._compose_ppn(stage1_ppn, stage2_pte)
         pa = (host_ppn << 12) | (va & 0xFFF)
-        return pa, True, {
-            "mode": "sv39",
-            "stage2": True,
-            "stage1_ok": True,
-            "stage2_ok": True,
-            "stage1_level": pte.level,
-            "stage2_level": stage2_pte.level,
-            "v": pte.v,
-            "x": pte.x,
-            "r": pte.r,
-            "stage2_v": stage2_pte.v,
-            "stage2_x": stage2_pte.x,
-            "stage2_r": stage2_pte.r,
-            "stage1_pa": stage1_ppn << 12,
-            "stage2_pa": host_ppn << 12,
-        }
+        pbmt = int(stage2_pte.pbmt) if int(stage2_pte.pbmt) else int(stage1_pte.pbmt) if stage1_pte is not None else 0
+        metadata.update({"stage2_pa": host_ppn << 12, "translated_pa": pa, "fetch_path": self._fetch_path(pbmt)})
+        metadata.update(self._outcome_metadata(None, "ok"))
+        return pa, True, metadata
 
     @classmethod
     def _build_sector_arrays(cls, vpn: int, ppn: int, level: int, valid: int) -> Tuple[int, list[int], list[int], list[int]]:
@@ -226,8 +340,10 @@ class PageTableModel:
                 "s2_gaf": 0,
             }
 
-        pte = self.stage2_pte_map.get(gvpn)
-        gpf = 1 if pte is None or int(pte.v) == 0 else 0
+        pte = self._lookup_pte(self.stage2_pte_map, gvpn)
+        forced_gpf, forced_gaf = self._stage2_fault_map.get(gvpn, (0, 0))
+        gpf = 1 if forced_gpf or pte is None or int(pte.v) == 0 else 0
+        gaf = 1 if forced_gaf else 0
         if pte is None:
             pte = PTE(ppn=0, v=0, r=0, x=0, level=0)
         return {
@@ -245,7 +361,7 @@ class PageTableModel:
             "s2_entry_v": pte.v,
             "s2_entry_ppn": pte.ppn,
             "s2_gpf": gpf,
-            "s2_gaf": 0,
+            "s2_gaf": gaf,
         }
 
     @staticmethod
@@ -364,13 +480,16 @@ class PageTableModel:
             pte = PTE(ppn=vpn, level=0)
             pf = 0
         else:
-            pte = self.pte_map.get(vpn)
-            pf = 1 if pte is None or int(pte.v) == 0 else 0
+            pte = self._lookup_pte(self.pte_map, vpn)
+            forced_pf, forced_af = self._stage1_fault_map.get(vpn, (0, 0))
+            pf = 1 if forced_pf or pte is None or int(pte.v) == 0 else 0
             if pte is None:
                 pte = PTE(ppn=0, v=0, r=0, x=0, level=0)
 
         stage1_resp = self._build_stage1_resp(vpn, pte, pf)
-        if int(s2xlate) == self._ALL_STAGE and pf == 0:
+        if self.mode != "bare":
+            stage1_resp["s1_af"] = int(forced_af)
+        if int(s2xlate) == self._ALL_STAGE and int(pte.v) == 1:
             stage2_resp = self._build_stage2_resp(self._compose_ppn(vpn, pte), s2xlate)
         elif int(s2xlate) in {self._NO_S2XLATE, self._ONLY_STAGE1}:
             stage2_resp = self._build_stage2_resp(0, self._NO_S2XLATE)

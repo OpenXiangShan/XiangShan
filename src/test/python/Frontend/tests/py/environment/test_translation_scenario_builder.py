@@ -67,6 +67,9 @@ def test_builder_applies_one_sv39_description_to_page_table_memory_and_context()
         "s2xlate": 0,
         "get_gpa": 0,
     }
+    assert state.expected_outcome["pa"] == scenario.pa
+    assert state.expected_outcome["outcome"] == "normal"
+    assert state.expected_outcome["fetch_path"] == "uncache"
     assert len(state.pmp_writes) == 1
     assert len(state.pma_writes) == 1
 
@@ -88,7 +91,7 @@ def test_builder_composes_all_stage_mapping_from_gpa_to_pa() -> None:
         priv_virt=1,
     )
 
-    TranslationScenarioBuilder(env).build(scenario)
+    state = TranslationScenarioBuilder(env).build(scenario)
 
     pa, ok, metadata = env.page_table.translate(scenario.va)
     assert ok is True
@@ -101,6 +104,31 @@ def test_builder_composes_all_stage_mapping_from_gpa_to_pa() -> None:
     assert env.dut.io_tlbCsr_vsatp_mode.value == 8
     assert env.dut.io_tlbCsr_hgatp_mode.value == 8
     assert env.dut.io_tlbCsr_hgatp_vmid.value == 7
+    assert state.expected_outcome["pa"] == scenario.pa
+    assert state.expected_outcome["outcome"] == "normal"
+
+
+def test_builder_binds_page_fault_outcome_without_rewriting_the_pte() -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id="sv39-x-denied",
+        va=0x80200000,
+        pa=0x80400000,
+        payload=b"\x13\x00\x00\x00",
+        s1_pte=TranslationPte(v=1, r=1, x=0, a=1),
+        expected_path="fault",
+        expected_result="page_fault",
+    )
+
+    state = TranslationScenarioBuilder(env).build(scenario)
+    response = env.page_table.build_ptw_resp(scenario.va >> 12)
+
+    assert response["s1_entry_v"] == 1
+    assert response["s1_entry_perm_x"] == 0
+    assert response["s1_pf"] == 0
+    assert state.expected_outcome["ok"] is False
+    assert state.expected_outcome["outcome"] == "instruction_page_fault"
+    assert state.expected_outcome["reason"] == "stage1_execute_denied"
 
 
 @pytest.mark.parametrize(

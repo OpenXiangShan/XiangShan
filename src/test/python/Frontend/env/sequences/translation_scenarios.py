@@ -96,6 +96,7 @@ class TranslationScenario:
 class TranslationScenarioState:
     scenario: TranslationScenario
     expected_ptw_request: dict
+    expected_outcome: dict
     context: dict
     pmp_writes: Tuple[dict, ...]
     pma_writes: Tuple[dict, ...]
@@ -213,6 +214,11 @@ class TranslationScenarioBuilder:
             self._map_stage1_pages(self.env, scenario, int(scenario.pa))
 
         self.env.ptw_agent.configure(mode="sv39", response_source="model", compare_drive_source="model")
+        expected_pa, expected_ok, expected_metadata = self.env.page_table.translate(
+            int(scenario.va),
+            s2xlate=s2xlate,
+            priv_imode=int(scenario.priv_imode),
+        )
         self.env.load_program(scenario.payload, int(scenario.pa))
         context = self.env.update_translation_context(
             satp_mode=_SV39_MODE,
@@ -243,6 +249,7 @@ class TranslationScenarioBuilder:
                 "s2xlate": s2xlate,
                 "get_gpa": int(scenario.get_gpa),
             },
+            expected_outcome={"pa": expected_pa, "ok": expected_ok, **expected_metadata},
             context=context,
             pmp_writes=pmp_writes,
             pma_writes=pma_writes,
