@@ -105,7 +105,7 @@ Dispatch / ROB
 5. 同周期 producer-consumer 旁路同时传递 `pdest` 和 `destRgid`；
 6. 同一个 rename group 多次写同一逻辑寄存器时分配不同 RGID；
 7. reused mapping 继承日志中的 `destRgid`，不分配新 generation；
-8. generation 耗尽后进入 quarantine，清空 stream/held 状态，经过 ROB-sized commit drain 后 reset；
+8. 前 8 次 generation 耗尽只将对应逻辑寄存器标记为不可复用并使用 NULL RGID；第 9 次耗尽，或已捕获的 Squash Log 全部变为空时，才进入 quarantine，清空 stream/held 状态，经过 ROB-sized commit drain 后 reset；
 9. NULL source RGID 不允许命中复用。
 
 ### 4.2 2x128 stream 和 WPB 定位

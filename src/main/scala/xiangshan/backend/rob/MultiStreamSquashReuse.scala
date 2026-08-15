@@ -107,22 +107,6 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
     val msrRgidCommitCount = Mux(io.commits.isCommit, commitCnt, 0.U)
     val msrRgidDrainNext = msrRgidDrainCount +& msrRgidCommitCount
     val msrRgidReset = msrRgidResetPending && msrRgidDrainNext >= RobSize.U
-
-    when(io.msrRgid.overflow) {
-      msrRgidResetPending := true.B
-      msrRgidDrainCount := 0.U
-    }.elsewhen(msrRgidResetPending) {
-      when(msrRgidReset) {
-        msrRgidResetPending := false.B
-        msrRgidDrainCount := 0.U
-      }.otherwise {
-        msrRgidDrainCount := msrRgidDrainNext
-      }
-    }
-    io.msrRgid.reset := msrRgidReset
-
-    val msrStreamAdmission = !io.msrRgid.quarantine && !msrRgidResetPending && !io.msrRgid.overflow
-    val msrCreateStream = msrMispredSample && msrSquashedInst.orR && msrStreamAdmission
     val msrNextStream = RegInit(0.U(log2Ceil(MsrStreamCount).W))
     val msrNewestStream = RegInit(0.U(MsrStreamIdWidth.W))
     val msrStreamValid = RegInit(VecInit.fill(MsrStreamCount)(false.B))
@@ -152,6 +136,32 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
     val msrLogHasCompletedStaticHit = RegInit(VecInit.fill(MsrStreamCount)(false.B))
     val msrLogHasSemanticHoldHit = RegInit(VecInit.fill(MsrStreamCount)(false.B))
     val msrLogHasFullReuseHit = RegInit(VecInit.fill(MsrStreamCount)(false.B))
+
+    val msrLogHadEntries = RegInit(false.B)
+    val msrLogOccupied = msrLogValid.zip(msrLogConsumed).map {
+      case (valid, consumed) => valid && !consumed
+    }.reduce(_ || _)
+    // An empty SL is a reset trigger only after this mechanism has actually
+    // captured entries. This avoids resetting continuously during startup.
+    val msrCaptureWillRefill = msrMispredSample && msrSquashedInst.orR
+    val msrLogBecameEmpty = msrLogHadEntries && !msrLogOccupied && !msrCaptureWillRefill
+    val msrRgidResetTrigger = io.msrRgid.overflow || msrLogBecameEmpty
+
+    when(msrRgidResetTrigger) {
+      msrRgidResetPending := true.B
+      msrRgidDrainCount := 0.U
+    }.elsewhen(msrRgidResetPending) {
+      when(msrRgidReset) {
+        msrRgidResetPending := false.B
+        msrRgidDrainCount := 0.U
+      }.otherwise {
+        msrRgidDrainCount := msrRgidDrainNext
+      }
+    }
+    io.msrRgid.reset := msrRgidReset
+
+    val msrStreamAdmission = !io.msrRgid.quarantine && !msrRgidResetPending && !msrRgidResetTrigger
+    val msrCreateStream = msrMispredSample && msrSquashedInst.orR && msrStreamAdmission
 
     val msrCandidateValid = RegInit(false.B)
     val msrCandidateStreamId = RegInit(0.U(MsrStreamIdWidth.W))
@@ -238,6 +248,11 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
     val msrCandidateContextReject = Wire(Vec(RenameWidth, Bool()))
     val msrCandidateAmbiguousPosition = Wire(Vec(RenameWidth, Bool()))
     val msrCandidateAmbiguousReject = Wire(Vec(RenameWidth, Bool()))
+    // A candidate is transported alongside the rename lane. If two lanes map
+    // to the same SL entry, only the oldest lane may consume/reuse it; the
+    // query cursor still advances through every valid request below.
+    val msrSelectedLogIndex = Wire(Vec(RenameWidth, UInt(log2Ceil(MsrTotalEntries).W)))
+    val msrSelectedLogValid = Wire(Vec(RenameWidth, Bool()))
 
     msrQueryActive(0) := msrCandidateStateCurrent
     msrQueryStreamId(0) := msrCandidateStreamId
@@ -321,12 +336,19 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
       val selectedLogValid = responseValid &&
         selectedGeneration === msrStreamGeneration(selectedStreamId) &&
         msrLogValid(selectedLogIndex) && !msrLogConsumed(selectedLogIndex)
+      val duplicateSelectedLog = (0 until lane).map { prior =>
+        msrSelectedLogValid(prior) && selectedLogIndex === msrSelectedLogIndex(prior)
+      }.reduceOption(_ || _).getOrElse(false.B)
+      val candidateResponseValid = responseValid && !duplicateSelectedLog
+      val candidateLogValid = selectedLogValid && !duplicateSelectedLog
+      msrSelectedLogIndex(lane) := selectedLogIndex
+      msrSelectedLogValid(lane) := selectedLogValid
 
-      io.msrCandidate.resp(lane).valid := responseValid
+      io.msrCandidate.resp(lane).valid := candidateResponseValid
       io.msrCandidate.resp(lane).streamId := selectedStreamId
       io.msrCandidate.resp(lane).streamGeneration := selectedGeneration
       io.msrCandidate.resp(lane).instructionOffset := instructionOffset
-      io.msrCandidate.reuseInfo(lane).valid := selectedLogValid
+      io.msrCandidate.reuseInfo(lane).valid := candidateLogValid
       io.msrCandidate.reuseInfo(lane).pc := msrLogPc(selectedLogIndex)
       io.msrCandidate.reuseInfo(lane).instr := msrLogInstr(selectedLogIndex)
       io.msrCandidate.reuseInfo(lane).completed := msrLogCompleted(selectedLogIndex)
@@ -447,15 +469,15 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
         candidate.streamId,
         candidate.instructionOffset(log2Ceil(MsrEntriesPerStream) - 1, 0)
       )
+      // Claim is generated at rename, before this instruction reaches ROB enqueue.
+      // Validate its transported tuple against Squash Log ownership, not io.enq.
       val claimCurrent = candidate.valid &&
-        msrInstEnqValid(lane) && io.enq.req(lane).bits.msrReused &&
         candidate.instructionOffset < MsrEntriesPerStream.U &&
         candidate.instructionOffset < msrStreamLength(candidate.streamId) &&
         msrStreamValid(candidate.streamId) &&
         msrStreamGeneration(candidate.streamId) === candidate.streamGeneration &&
         msrLogValid(entryIndex) && !msrLogConsumed(entryIndex) &&
-        msrLogPdestRetained(entryIndex) && msrLogPdest(entryIndex) === claim.pdest &&
-        msrLogMatchFullReuse(lane)
+        msrLogPdestRetained(entryIndex) && msrLogPdest(entryIndex) === claim.pdest
 
       msrClaimEntryOH(lane) := Mux(claim.valid && claimCurrent, UIntToOH(entryIndex, MsrTotalEntries), 0.U)
       when(claim.valid) {
@@ -630,16 +652,19 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
     }).reduce(_ | _)
     val msrPRegReleaseMask = (msrMatchedPRegReleaseMask |
       Mux(msrReleaseAllHeld, msrRetainedPRegMask, msrReplacedStreamReleaseMask)) & ~msrClaimPRegMask
-    val msrHeldAfterReleaseMask = io.msrPReg.held & ~msrPRegReleaseMask
-    val msrHeldAfterReleaseCount = PopCount(msrHeldAfterReleaseMask)
-    val msrHeldLimitCapacity = MsrConfig.MaxHeldPRegs.U - msrHeldAfterReleaseCount
+    // Capture and claim are mutually exclusive. Compute capture admission only
+    // from replacement releases, so a claim cannot feed back through hold into
+    // rename's freelist readiness.
+    val msrHeldForCaptureMask = io.msrPReg.held & ~msrReplacedStreamReleaseMask
+    val msrHeldForCaptureCount = PopCount(msrHeldForCaptureMask)
+    val msrHeldLimitCapacity = MsrConfig.MaxHeldPRegs.U - msrHeldForCaptureCount
     val msrSquashedIntPRegCount = PopCount((0 until RobSize).flatMap { robIdx =>
       (0 until MsrInstSlotsPerRob).map { instSlot =>
         redirectNeedFlush(robIdx) && instSlot.U < msrRobInstCount(robIdx) &&
           msrRobOwnsIntPReg(robIdx)(instSlot)
       }
     })
-    val msrRecoveredFreeCount = io.msrPReg.freeCount +& PopCount(msrPRegReleaseMask) +&
+    val msrRecoveredFreeCount = io.msrPReg.freeCount +& PopCount(msrReplacedStreamReleaseMask) +&
       msrSquashedIntPRegCount
     val msrFreeListHoldCapacity = Mux(
       msrRecoveredFreeCount > RenameWidth.U,
@@ -678,18 +703,20 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
       "two Squash Log entries own the same held PReg")
     assert(msrRetainedPRegMask === io.msrPReg.held,
       "Squash Log and integer freelist disagree on held-PReg ownership")
-    assert((msrPRegHoldMask & msrHeldAfterReleaseMask).asUInt === 0.U,
+    assert((msrPRegHoldMask & msrHeldForCaptureMask).asUInt === 0.U,
       "MSR attempted to hold a PReg already owned by another Squash Log entry")
     assert(PopCount(msrPRegHoldMask) === PopCount(msrCaptureHoldAdmit),
       "two newly captured Squash Log entries attempted to hold the same PReg")
     when(msrCreateStream) {
+      assert(!io.msrCandidate.claim.map(_.valid).reduce(_ || _),
+        "MSR stream capture and held-result claim must not occur together")
       assert(msrRecoveredFreeCount >= PopCount(msrCaptureHoldAdmit) + RenameWidth.U,
         "MSR hold admission violated the integer freelist low watermark")
     }
     assert((msrPRegReleaseMask & msrClaimPRegMask).asUInt === 0.U,
       "MSR attempted to release and claim the same PReg in one cycle")
 
-    when(io.msrRgid.overflow) {
+    when(msrRgidResetTrigger) {
       msrStreamValid.foreach(_ := false.B)
       msrStreamLength.foreach(_ := 0.U)
       msrStreamWpbLength.foreach(_ := 0.U)
@@ -701,7 +728,9 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
       msrLogHasCompletedStaticHit.foreach(_ := false.B)
       msrLogHasSemanticHoldHit.foreach(_ := false.B)
       msrLogHasFullReuseHit.foreach(_ := false.B)
+      msrLogHadEntries := false.B
     }.elsewhen(msrCreateStream) {
+      msrLogHadEntries := true.B
       for (stream <- 0 until MsrStreamCount) {
         when(msrNextStream === stream.U) {
           msrStreamValid(stream) := true.B
@@ -925,6 +954,7 @@ trait HasMultiStreamSquashReuse { this: RobImp =>
     XSPerfAccumulate("msr_instruction_class_reject", PopCount(msrCandidateClassReject))
     XSPerfAccumulate("msr_stale_stream_generation", msrCandidateValid && !msrCandidateStateCurrent)
     XSPerfAccumulate("msr_rgid_drain_cycle", msrRgidResetPending)
+    XSPerfAccumulate("msr_rgid_reset_trigger", msrRgidResetTrigger)
     XSPerfAccumulate("msr_rgid_global_reset", msrRgidReset)
   }
 }

@@ -384,6 +384,8 @@ object MsrConfig {
   val EntriesPerStream = 128
   val WpbEntriesPerStream = EntriesPerStream / 4
   val MaxHeldPRegs = 32
+  // The paper defers a global reset until the ninth overflow event.
+  val RgidOverflowResetAfter = 8
   val StreamIdWidth = log2Ceil(StreamCount)
   val StreamGenerationWidth = 32
   val InstructionOffsetWidth = log2Ceil(EntriesPerStream + 1)

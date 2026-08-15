@@ -109,7 +109,7 @@ class MEFreeList(size: Int, commitWidth: Int)(implicit p: Parameters) extends Ba
 
     laneSelectedPhyReg(lane) := laneStages(lane)(selectedIndex)
     laneStages(lane + 1) := laneStages(lane)
-    when(operationReq(lane)) {
+    when(doNormalRename && operationReq(lane)) {
       assert(candidateOH.orR, "integer freelist could not find the requested allocation candidate")
       laneStages(lane + 1)(headIndex) := laneStages(lane)(selectedIndex)
       laneStages(lane + 1)(selectedIndex) := laneStages(lane)(headIndex)
@@ -124,6 +124,8 @@ class MEFreeList(size: Int, commitWidth: Int)(implicit p: Parameters) extends Ba
     when(msr.claimReq(i)) {
       assert(msr.claimPReg(i) =/= 0.U, "MSR attempted to claim p0")
       assert(!io.allocateReq(i), "MSR claim lane also requested an ordinary PReg allocation")
+    }
+    when(doNormalRename && msr.claimReq(i)) {
       assert(io.allocatePhyReg(i) === msr.claimPReg(i),
         "integer freelist did not allocate the claimed held PReg")
     }

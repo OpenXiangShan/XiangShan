@@ -683,6 +683,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     (if (index == 0) MsrRgid.Null else 2).U(MsrRgid.Width.W)
   })
   val rgidExhausted = RegInit(VecInit.tabulate(IntLogicRegs)(index => (index == 0).B))
+  // Keep running through the first eight per-register RGID exhaustion events.
+  // The ninth event starts the global reset protocol in the ROB.
+  val rgidOverflowCount = RegInit(0.U(4.W))
   val rgidQuarantine = RegInit(false.B)
   val rgidAllocWen = VecInit((0 until RenameWidth).map { lane =>
     intSpecWen(lane) && io.in(lane).bits.ldest =/= 0.U && !msrReuseHit(lane)
@@ -705,6 +708,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
 
   val rgidExhaustionEvent = WireInit(false.B)
+  val rgidGlobalResetEvent = rgidExhaustionEvent &&
+    rgidOverflowCount >= MsrConfig.RgidOverflowResetAfter.U
   for (lreg <- 1 until IntLogicRegs) {
     val definitions = PopCount((0 until RenameWidth).map { lane =>
       rgidAllocWen(lane) && io.in(lane).bits.ldest === lreg.U
@@ -726,13 +731,22 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   nextRgid(0) := MsrRgid.Null.U
   rgidExhausted(0) := true.B
   when(io.rgidReset) {
+    rgidOverflowCount := 0.U
     rgidQuarantine := false.B
   }.elsewhen(rgidExhaustionEvent) {
-    rgidQuarantine := true.B
+    when(rgidOverflowCount =/= 15.U) {
+      rgidOverflowCount := rgidOverflowCount + 1.U
+    }
+    when(rgidGlobalResetEvent) {
+      rgidQuarantine := true.B
+    }
   }
 
   io.rgidStatus.quarantine := rgidQuarantine
-  io.rgidStatus.overflow := rgidExhaustionEvent
+  // Keep the ROB invalidation path out of the same-cycle reuse decision. Rename
+  // enters quarantine on a global reset event; the registered pulse releases
+  // held state on the following cycle.
+  io.rgidStatus.overflow := RegNext(rgidGlobalResetEvent, false.B)
 
   val previousNextRgid = RegNext(nextRgid)
   val previousExhausted = RegNext(rgidExhausted)
@@ -901,12 +915,16 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
     for (src <- 0 until uops(i).numSrc) {
       val intSource = SrcType.isXp(io.in(i).bits.srcType(src))
-      io.out(i).bits.srcRgid(src) := io.out.take(i).map(_.bits.destRgid).zip(bypassCond(src)(i - 1).asBools)
+      val bypassedSrcRgid = io.out.take(i).map(_.bits.destRgid).zip(bypassCond(src)(i - 1).asBools)
         .foldLeft(uops(i).srcRgid(src)) { case (current, (producerRgid, bypass)) =>
           Mux(intSource && bypass, producerRgid, current)
         }
+      io.out(i).bits.srcRgid(src) := (if (src == 0) {
+        Mux(io.out(i).bits.isLUI, MsrRgid.Null.U, bypassedSrcRgid)
+      } else {
+        bypassedSrcRgid
+      })
     }
-    io.out(i).bits.srcRgid(0) := Mux(io.out(i).bits.isLUI, MsrRgid.Null.U, io.out(i).bits.srcRgid(0))
     io.out(i).bits.psrcVl := MuxCase(
       uops(i).psrcVl,
       (bypassCondVl(i-1).asBools zip io.out.take(i).map(_.bits.pdestVl)).reverse
