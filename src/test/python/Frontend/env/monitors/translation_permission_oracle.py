@@ -2,12 +2,19 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
+from ..support.pmp_pma import reconstruct_pmp_request_addr
+
 
 _EXCEPTION_BITS = {
     1: "instruction_access_fault",
     12: "instruction_page_fault",
     20: "instruction_guest_page_fault",
 }
+
+_MAINPIPE_S1_VALID = "Frontend_top.Frontend.inner_icache.mainPipe.s1_valid"
+_MAINPIPE_START_VADDR = "Frontend_top.Frontend.inner_icache.mainPipe.s1_req_0_vAddr_0_addr"
+_MAINPIPE_PTAG = "Frontend_top.Frontend.inner_icache.mainPipe.s1_wayLookupEntry_0_pTag"
+_PMP_REQUEST_SIZE_BYTES = 8
 
 
 class TranslationPermissionOracle:
@@ -96,6 +103,10 @@ class TranslationPermissionOracle:
             "response_seen": False,
             "fetch_seen": False,
             "fault_seen": False,
+            "pmp_request_seen": False,
+            "permission_check_required": bool(state.scenario.pmp_entries or state.scenario.pma_entries)
+            and expected_fault in {None, "instruction_access_fault"},
+            "pmp_signal_unavailable": False,
         }
         self._icache_cursor = len(getattr(getattr(self.env, "icache_agent", None), "request_records", []))
         self._uncache_cursor = len(getattr(getattr(self.env, "uncache_agent", None), "request_addrs", []))
@@ -190,6 +201,78 @@ class TranslationPermissionOracle:
             return
         self.active["fetch_seen"] = True
 
+    def observe_mainpipe_pmp_request(self, cycle: int, *, addr: int) -> None:
+        if self.active is None or not self.active["permission_check_required"]:
+            return
+        if self.active["pmp_request_seen"]:
+            return
+        actual_addr = int(addr)
+        expected_addr = int(self.active["expected_outcome"].get("pa", 0))
+        self._record(
+            cycle,
+            "mainpipe_pmp_request",
+            addr=actual_addr,
+            size=_PMP_REQUEST_SIZE_BYTES,
+            end=actual_addr + _PMP_REQUEST_SIZE_BYTES - 1,
+        )
+        if actual_addr != expected_addr:
+            self._error(
+                cycle,
+                "mainpipe_pmp_request_addr_mismatch",
+                expected_addr=expected_addr,
+                actual_addr=actual_addr,
+                size=_PMP_REQUEST_SIZE_BYTES,
+            )
+            return
+        self.active["pmp_request_seen"] = True
+
+    def _read_internal_signal(self, name: str) -> Optional[int]:
+        dut = getattr(self.env, "dut", None)
+        if dut is None or bool(getattr(dut, "_is_fake_frontend_dut", False)):
+            return None
+        getter = getattr(dut, "GetInternalSignal", None)
+        if not callable(getter):
+            return None
+        try:
+            signal = getter(name)
+            value = getattr(signal, "value", None)
+            return None if value is None else int(value)
+        except Exception:
+            return None
+
+    def _sample_mainpipe_pmp_request(self, cycle: int) -> None:
+        if self.active is None or not self.active["permission_check_required"]:
+            return
+        if not self.active["response_seen"] or self.active["pmp_request_seen"]:
+            return
+        valid = self._read_internal_signal(_MAINPIPE_S1_VALID)
+        if valid is None:
+            if not self.active["pmp_signal_unavailable"]:
+                self._error(cycle, "mainpipe_pmp_signal_unavailable", signal=_MAINPIPE_S1_VALID)
+                self.active["pmp_signal_unavailable"] = True
+            return
+        if not valid:
+            return
+        start_vaddr_pruned = self._read_internal_signal(_MAINPIPE_START_VADDR)
+        p_tag = self._read_internal_signal(_MAINPIPE_PTAG)
+        if start_vaddr_pruned is None or p_tag is None:
+            if not self.active["pmp_signal_unavailable"]:
+                self._error(
+                    cycle,
+                    "mainpipe_pmp_signal_unavailable",
+                    missing=[
+                        name
+                        for name, value in ((_MAINPIPE_START_VADDR, start_vaddr_pruned), (_MAINPIPE_PTAG, p_tag))
+                        if value is None
+                    ],
+                )
+                self.active["pmp_signal_unavailable"] = True
+            return
+        self.observe_mainpipe_pmp_request(
+            cycle,
+            addr=reconstruct_pmp_request_addr(p_tag, start_vaddr_pruned),
+        )
+
     def observe_cfvec(self, cycle: int, *, pc: int, exception_bits: dict[int, int], cross_page: bool = False) -> None:
         if self.active is None:
             return
@@ -233,6 +316,7 @@ class TranslationPermissionOracle:
                 get_gpa=int(expectation.get("get_gpa", 0)),
                 response=dict(expectation["resp"]),
             )
+        self._sample_mainpipe_pmp_request(cycle)
         icache_records = self.env.icache_agent.request_records
         for record in icache_records[self._icache_cursor :]:
             self.observe_fetch_request(record["cycle"], path="icache", pa=record["address"])
@@ -267,6 +351,8 @@ class TranslationPermissionOracle:
                 missing.append("cfvec_exception")
         elif not self.active["fetch_seen"]:
             missing.append("fetch_request")
+        if self.active["permission_check_required"] and not self.active["pmp_request_seen"]:
+            missing.append("mainpipe_pmp_request")
         if missing:
             self._error(getattr(self.env, "current_cycle", 0), "missing_observation", missing=missing)
         if self.errors:

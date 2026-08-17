@@ -10,6 +10,7 @@ from .pmp_pma import (
     csr_addresses_for_entry,
     encode_pmp_pma_addr,
     encode_pmp_pma_cfg,
+    reconstruct_pmp_request_addr,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "csr_addresses_for_entry",
     "encode_pmp_pma_addr",
     "encode_pmp_pma_cfg",
+    "reconstruct_pmp_request_addr",
 ]

@@ -104,6 +104,16 @@ def encode_pmp_pma_addr(addr: int, config: PmpPmaConfig, *, size: int | None = N
     return (physical_addr + region_size // 2 - 1) >> 2
 
 
+def reconstruct_pmp_request_addr(p_tag: int, start_vaddr_pruned: int) -> int:
+    """Reconstruct MainPipe's 8-byte PMP request address from RTL-visible inputs."""
+
+    physical_tag = int(p_tag)
+    virtual_addr_pruned = int(start_vaddr_pruned)
+    if physical_tag < 0 or virtual_addr_pruned < 0:
+        raise ValueError("PMP request address inputs must be non-negative")
+    return (physical_tag << 12) | ((virtual_addr_pruned & 0x7FF) << 1)
+
+
 __all__ = [
     "PMA_ADDR_BASE",
     "PMA_CFG_BASE",
@@ -115,4 +125,5 @@ __all__ = [
     "csr_addresses_for_entry",
     "encode_pmp_pma_addr",
     "encode_pmp_pma_cfg",
+    "reconstruct_pmp_request_addr",
 ]

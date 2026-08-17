@@ -4,7 +4,7 @@ import pytest
 
 from env.model import PmpPmaPermissionModel
 from env.sequences import TranslationPmpPmaEntry
-from env.support import PmpPmaConfig
+from env.support import PmpPmaConfig, reconstruct_pmp_request_addr
 
 
 def _entry(kind: str, index: int, config: PmpPmaConfig, addr: int, size: int | None = None) -> TranslationPmpPmaEntry:
@@ -88,3 +88,10 @@ def test_unmatched_pma_uses_the_denied_noncacheable_default() -> None:
     assert result.pma_match_index is None
     assert result.pma_execute_denied is True
     assert result.pma_cacheable is False
+
+
+def test_reconstruct_pmp_request_addr_preserves_only_the_page_offset_bits() -> None:
+    p_tag = 0x12345
+    start_vaddr_pruned = 0x7A5_6FF
+
+    assert reconstruct_pmp_request_addr(p_tag, start_vaddr_pruned) == (p_tag << 12) | 0xDFE

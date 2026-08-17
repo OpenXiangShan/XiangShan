@@ -3,8 +3,26 @@ from __future__ import annotations
 import pytest
 
 from env.core.frontend_env import FrontendEnv
-from env.runtime.dut_factory import FakeDUTFrontend
-from env.sequences import TranslationPte, TranslationScenario, TranslationScenarioBuilder
+from env.runtime.dut_factory import FakeDUTFrontend, FakeSignal
+from env.sequences import TranslationPmpPmaEntry, TranslationPte, TranslationScenario, TranslationScenarioBuilder
+from env.support import PmpPmaConfig
+
+
+_MAINPIPE_S1_VALID = "Frontend_top.Frontend.inner_icache.mainPipe.s1_valid"
+_MAINPIPE_START_VADDR = "Frontend_top.Frontend.inner_icache.mainPipe.s1_req_0_vAddr_0_addr"
+_MAINPIPE_PTAG = "Frontend_top.Frontend.inner_icache.mainPipe.s1_wayLookupEntry_0_pTag"
+
+
+class _PmpProbeDut(FakeDUTFrontend):
+    _is_fake_frontend_dut = False
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._frontend_is_fake_dut = False
+        self._internal_signals = {}
+
+    def GetInternalSignal(self, name: str):
+        return self._internal_signals.get(name)
 
 
 def _state(*, scenario_id: str, va: int, pa: int, pte: TranslationPte):
@@ -166,3 +184,74 @@ def test_oracle_marks_pre_fence_response_stale_in_new_epoch() -> None:
     stale_record = next(record for record in env.translation_oracle.get_stats()["records"] if record["kind"] == "stale_ptw_response")
     assert stale_record["response_epoch"] != env.translation_epoch
     assert env.translation_oracle.get_active()["response_seen"] is True
+
+
+def test_oracle_reconstructs_mainpipe_pmp_request_address_after_translation() -> None:
+    dut = _PmpProbeDut()
+    env = FrontendEnv(dut, register_callbacks=False)
+    scenario = TranslationScenario(
+        scenario_id="oracle-mainpipe-pmp-request",
+        va=0x8020_0404,
+        pa=0x8040_0404,
+        payload=b"\x13\x00\x00\x00",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), 0x8040_0000, size=0x1000
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.arm_translation_scenario(state)
+    _observe_matching_ptw(env, state)
+    dut._internal_signals.update(
+        {
+            _MAINPIPE_S1_VALID: FakeSignal(1),
+            _MAINPIPE_START_VADDR: FakeSignal(scenario.va >> 1),
+            _MAINPIPE_PTAG: FakeSignal(scenario.pa >> 12),
+        }
+    )
+
+    env.translation_oracle.on_clock_edge(12)
+    env.translation_oracle.observe_fetch_request(13, path="icache", pa=scenario.pa & ~0x3F)
+
+    stats = env.assert_translation_scenario()
+    pmp_record = next(record for record in stats["records"] if record["kind"] == "mainpipe_pmp_request")
+    assert (pmp_record["addr"], pmp_record["size"], pmp_record["end"]) == (scenario.pa, 8, scenario.pa + 7)
+
+
+def test_oracle_does_not_require_pmp_request_after_page_fault() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    state = TranslationScenarioBuilder(env).build(
+        TranslationScenario(
+            scenario_id="oracle-page-fault-before-pmp",
+            va=0x8020_0404,
+            pa=0x8040_0404,
+            payload=b"\x13\x00\x00\x00",
+            s1_pte=TranslationPte(v=1, r=1, x=0, a=1),
+            pmp_entries=(
+                TranslationPmpPmaEntry(
+                    "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), 0x8040_0000, size=0x1000
+                ),
+            ),
+        )
+    )
+
+    active = env.arm_translation_scenario(state)
+
+    assert active["expected_fault"] == "instruction_page_fault"
+    assert active["permission_check_required"] is False
+
+
+def test_oracle_rejects_mismatched_reconstructed_mainpipe_pmp_request_address() -> None:
+    env, state = _state(
+        scenario_id="oracle-mainpipe-pmp-request-mismatch",
+        va=0x8020_0404,
+        pa=0x8040_0404,
+        pte=TranslationPte(v=1, r=1, x=1, a=1),
+    )
+    env.translation_oracle.active["permission_check_required"] = True
+    env.translation_oracle.active["response_seen"] = True
+    env.translation_oracle.observe_mainpipe_pmp_request(12, addr=state.expected_outcome["pa"] + 2)
+
+    with pytest.raises(AssertionError, match="mainpipe_pmp_request_addr_mismatch"):
+        env.assert_translation_scenario()
