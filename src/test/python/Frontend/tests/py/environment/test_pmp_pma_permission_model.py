@@ -11,20 +11,20 @@ def _entry(kind: str, index: int, config: PmpPmaConfig, addr: int, size: int | N
     return TranslationPmpPmaEntry(kind=kind, index=index, config=config, addr=addr, size=size)
 
 
-def test_pmp_na4_and_napot_require_the_complete_instruction_range() -> None:
+def test_pmp_napot_requires_the_complete_instruction_range() -> None:
     result = PmpPmaPermissionModel.check_instruction(
-        0x1000,
-        size=4,
-        pmp_entries=(_entry("pmp", 0, PmpPmaConfig(match="na4", execute=True), 0x1000),),
+        0x1FF8,
+        size=8,
+        pmp_entries=(_entry("pmp", 0, PmpPmaConfig(match="napot", execute=True), 0x1000, 0x1000),),
         pma_enabled=False,
     )
     assert result.pmp_match_index == 0
     assert result.execute_allowed is True
 
     outside = PmpPmaPermissionModel.check_instruction(
-        0x1002,
-        size=4,
-        pmp_entries=(_entry("pmp", 0, PmpPmaConfig(match="na4", execute=True), 0x1000),),
+        0x1FFC,
+        size=8,
+        pmp_entries=(_entry("pmp", 0, PmpPmaConfig(match="napot", execute=True), 0x1000, 0x1000),),
         pma_enabled=False,
     )
     assert outside.pmp_match_index is None

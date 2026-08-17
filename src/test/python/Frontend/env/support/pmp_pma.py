@@ -9,6 +9,7 @@ PMP_ADDR_BASE = 0x3B0
 PMA_CFG_BASE = 0x7C0
 PMA_ADDR_BASE = 0x7C8
 PMP_PMA_ENTRY_COUNT = 32
+PMP_PMA_PLATFORM_GRAIN_BYTES = 0x1000
 _CFG_ENTRIES_PER_CSR = 8
 
 
@@ -80,9 +81,13 @@ def encode_pmp_pma_addr(addr: int, config: PmpPmaConfig, *, size: int | None = N
     """
 
     physical_addr = int(addr)
-    if physical_addr < 0 or physical_addr & 0x3:
-        raise ValueError("PMP/PMA address must be non-negative and 4-byte aligned")
+    if physical_addr < 0 or physical_addr % PMP_PMA_PLATFORM_GRAIN_BYTES:
+        raise ValueError(
+            f"PMP/PMA address must be non-negative and {PMP_PMA_PLATFORM_GRAIN_BYTES}-byte aligned"
+        )
     match = _match_value(config.match)
+    if match == 2:
+        raise ValueError("NA4 is unavailable when the Frontend PMP/PMA platform grain is 4 KiB")
     if match != 3:
         if size is not None:
             raise ValueError("size is only valid for NAPOT PMP/PMA entries")
@@ -90,8 +95,10 @@ def encode_pmp_pma_addr(addr: int, config: PmpPmaConfig, *, size: int | None = N
     if size is None:
         raise ValueError("NAPOT PMP/PMA entries require size")
     region_size = int(size)
-    if region_size < 8 or region_size & (region_size - 1):
-        raise ValueError("NAPOT size must be a power of two of at least 8 bytes")
+    if region_size < PMP_PMA_PLATFORM_GRAIN_BYTES or region_size & (region_size - 1):
+        raise ValueError(
+            f"NAPOT size must be a power of two of at least {PMP_PMA_PLATFORM_GRAIN_BYTES} bytes"
+        )
     if physical_addr & (region_size - 1):
         raise ValueError("NAPOT base address must align to its size")
     return (physical_addr + region_size // 2 - 1) >> 2
@@ -103,6 +110,7 @@ __all__ = [
     "PMP_ADDR_BASE",
     "PMP_CFG_BASE",
     "PMP_PMA_ENTRY_COUNT",
+    "PMP_PMA_PLATFORM_GRAIN_BYTES",
     "PmpPmaConfig",
     "csr_addresses_for_entry",
     "encode_pmp_pma_addr",

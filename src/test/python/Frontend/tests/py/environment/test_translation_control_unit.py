@@ -36,6 +36,8 @@ def test_pmp_pma_cfg_and_address_encoding_matches_frontend_layout() -> None:
         (PmpPmaConfig(match="napot", write=True), 0x80000000, 0x1000),
         (PmpPmaConfig(match="napot"), 0x80000000, 0x1800),
         (PmpPmaConfig(match="napot"), 0x80000004, 0x1000),
+        (PmpPmaConfig(match="napot"), 0x80000000, 0x800),
+        (PmpPmaConfig(match="na4"), 0x80000000, None),
         (PmpPmaConfig(match="tor"), 0x80000000, 0x1000),
     ],
 )

@@ -170,6 +170,43 @@ def test_builder_binds_explicit_pmp_pma_execute_denial_as_access_fault(
 
 
 @pytest.mark.parametrize(
+    "boundary_kind",
+    ["pmp", "pma"],
+)
+def test_builder_rejects_na4_entries_for_the_current_frontend_platform(boundary_kind: str) -> None:
+    env = _env()
+    pmp_entry = TranslationPmpPmaEntry(
+        "pmp",
+        0,
+        PmpPmaConfig(match="na4" if boundary_kind == "pmp" else "napot", read=True, execute=True),
+        0x80400000,
+        size=None if boundary_kind == "pmp" else 0x1000,
+    )
+    pma_entry = TranslationPmpPmaEntry(
+        "pma",
+        0,
+        PmpPmaConfig(match="na4" if boundary_kind == "pma" else "napot", read=True, execute=True, cacheable=True),
+        0x80400000,
+        size=None if boundary_kind == "pma" else 0x1000,
+    )
+    scenario = TranslationScenario(
+        scenario_id=f"{boundary_kind}-na4-unavailable",
+        va=0x80200000,
+        pa=0x80400000,
+        payload=b"\x13\x00\x00\x00",
+        pmp_entries=(pmp_entry,),
+        pma_entries=(pma_entry,),
+    )
+
+    with pytest.raises(ValueError, match="NA4 is unavailable"):
+        TranslationScenarioBuilder(env).build(scenario)
+
+    assert env.page_table.pte_map == {}
+    assert env.memory.mem == {}
+    assert env.csr_write_log == []
+
+
+@pytest.mark.parametrize(
     "scenario_id,s1_pf,s1_af,s2_gpf,s2_gaf,expected_outcome",
     [
         ("atp-140", 1, 0, 0, 0, "instruction_page_fault"),
