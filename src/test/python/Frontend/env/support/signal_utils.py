@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 
 
 def has_sig(dut: Any, name: str) -> bool:
@@ -20,6 +20,18 @@ def get_sig(dut: Any, name: str, default: int = 0) -> int:
         return int(pin.value)
     except Exception:
         return default
+
+
+def read_internal_signal(dut: Any, name: str) -> Optional[int]:
+    getter = getattr(dut, "GetInternalSignal", None)
+    if not callable(getter):
+        return None
+    try:
+        pin = getter(name)
+        value = getattr(pin, "value", None)
+        return None if value is None else int(value)
+    except Exception:
+        return None
 
 
 def set_sig(dut: Any, name: str, value: int) -> bool:

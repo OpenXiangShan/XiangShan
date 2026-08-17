@@ -35,11 +35,15 @@ from ..support.pmp_pma import (
     encode_pmp_pma_addr,
     encode_pmp_pma_cfg,
 )
+from ..support.signal_utils import read_internal_signal
 from ..model import GoldenTrace, MemoryModel, PageTableModel
 from ..model.branch_checker import BranchChecker
 from ..monitors.backend_observe_monitor import BackendObserveMonitor
 from ..monitors.frontend_monitor import FrontendMonitor
 from ..monitors.translation_permission_oracle import TranslationPermissionOracle
+
+
+_ITLB_PTW_REQ_GET_GPA = "Frontend_top.Frontend.inner_itlb.io_ptw_req_0_bits_getGpa"
 
 
 class FrontendEnv:
@@ -215,6 +219,7 @@ class FrontendEnv:
         self.uncache_agent.bind(self.uncache_if)
         self.ptw_agent.bind(self.ptw_if)
         self.ptw_agent.set_request_context_provider(self._build_ptw_request_context)
+        self.ptw_agent.set_request_get_gpa_provider(lambda: read_internal_signal(self.dut, _ITLB_PTW_REQ_GET_GPA))
         self.ptw_agent.set_nemu_sync_hook(self._sync_nemu_ptw_state)
         self.ptw_full_ppn_checker.bind_env(self)
         self.ptw_resp_input_checker.bind_env(self)

@@ -11,6 +11,9 @@ from env.support import PmpPmaConfig
 _MAINPIPE_S1_VALID = "Frontend_top.Frontend.inner_icache.mainPipe.s1_valid"
 _MAINPIPE_START_VADDR = "Frontend_top.Frontend.inner_icache.mainPipe.s1_req_0_vAddr_0_addr"
 _MAINPIPE_PTAG = "Frontend_top.Frontend.inner_icache.mainPipe.s1_wayLookupEntry_0_pTag"
+_PREFETCHPIPE_S1_VALID = "Frontend_top.Frontend.inner_icache.prefetcher.s1_valid"
+_PREFETCHPIPE_PMP_ADDR = "Frontend_top.Frontend.inner_icache.prefetcher.io_pmp_req_bits_addr"
+_ITLB_PTW_REQ_GET_GPA = "Frontend_top.Frontend.inner_itlb.io_ptw_req_0_bits_getGpa"
 
 
 class _PmpProbeDut(FakeDUTFrontend):
@@ -208,10 +211,46 @@ def test_oracle_accepts_the_second_page_ptw_transaction_after_the_first_fetch() 
     second_response = env.page_table.build_ptw_resp(second["vpn"])
     env.translation_oracle.observe_ptw_request(13, **{key: second[key] for key in ("vpn", "s2xlate", "get_gpa")})
     env.translation_oracle.observe_ptw_response(14, **{key: second[key] for key in ("vpn", "s2xlate", "get_gpa")}, response=second_response)
+    env.translation_oracle.observe_fetch_request(15, path="icache", pa=state.expected_page_outcomes[1]["pa"] & ~0x3F)
 
     stats = env.assert_translation_scenario()
     assert stats["error_count"] == 0
     assert stats["active"]["responded_ptw_vpns"] == [first["vpn"], second["vpn"]]
+    assert stats["active"]["fetched_pages"] == [0, 1]
+
+
+def test_oracle_rejects_second_page_fetch_with_the_wrong_pma_path() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    scenario = TranslationScenario(
+        scenario_id="oracle-cross-page-pma-path",
+        va=0x8020_0FFE,
+        pa=0x8040_0FFE,
+        payload=b"\x13\x00\x00\x00",
+        page_count=2,
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                "pma", 0, PmpPmaConfig(match="napot", read=True, execute=True, cacheable=True), 0x8040_0000, size=0x1000
+            ),
+            TranslationPmpPmaEntry(
+                "pma", 1, PmpPmaConfig(match="napot", read=True, execute=True, cacheable=False), 0x8040_1000, size=0x1000
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.arm_translation_scenario(state)
+    first = state.expected_ptw_request
+    first_response = env.page_table.build_ptw_resp(first["vpn"])
+    env.translation_oracle.observe_ptw_request(10, **{key: first[key] for key in ("vpn", "s2xlate", "get_gpa")})
+    env.translation_oracle.observe_ptw_response(11, **{key: first[key] for key in ("vpn", "s2xlate", "get_gpa")}, response=first_response)
+    env.translation_oracle.observe_fetch_request(12, path="icache", pa=state.expected_page_outcomes[0]["pa"] & ~0x3F)
+    second = {**first, "vpn": first["vpn"] + 1}
+    second_response = env.page_table.build_ptw_resp(second["vpn"])
+    env.translation_oracle.observe_ptw_request(13, **{key: second[key] for key in ("vpn", "s2xlate", "get_gpa")})
+    env.translation_oracle.observe_ptw_response(14, **{key: second[key] for key in ("vpn", "s2xlate", "get_gpa")}, response=second_response)
+    env.translation_oracle.observe_fetch_request(15, path="icache", pa=state.expected_page_outcomes[1]["pa"] & ~0x3F)
+
+    with pytest.raises(AssertionError, match="translated_pa_or_path_mismatch"):
+        env.assert_translation_scenario()
 
 
 def test_oracle_reconstructs_mainpipe_pmp_request_address_after_translation() -> None:
@@ -283,3 +322,109 @@ def test_oracle_rejects_mismatched_reconstructed_mainpipe_pmp_request_address() 
 
     with pytest.raises(AssertionError, match="mainpipe_pmp_request_addr_mismatch"):
         env.assert_translation_scenario()
+
+
+def test_oracle_records_prefetchpipe_pmp_request_from_portable_address_signal() -> None:
+    dut = _PmpProbeDut()
+    env = FrontendEnv(dut, register_callbacks=False)
+    scenario = TranslationScenario(
+        scenario_id="oracle-prefetchpipe-pmp-request",
+        va=0x8020_0404,
+        pa=0x8040_0404,
+        payload=b"\x13\x00\x00\x00",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), 0x8040_0000, size=0x1000
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.arm_translation_scenario(state)
+    _observe_matching_ptw(env, state)
+    dut._internal_signals.update(
+        {
+            _MAINPIPE_S1_VALID: FakeSignal(0),
+            _PREFETCHPIPE_S1_VALID: FakeSignal(1),
+            _PREFETCHPIPE_PMP_ADDR: FakeSignal(scenario.pa),
+        }
+    )
+
+    env.translation_oracle.on_clock_edge(12)
+    env.translation_oracle.observe_fetch_request(13, path="icache", pa=scenario.pa & ~0x3F)
+
+    stats = env.assert_translation_scenario()
+    record = next(item for item in stats["records"] if item["kind"] == "prefetchpipe_pmp_request")
+    assert (record["addr"], record["size"], record["end"], record["page"]) == (
+        scenario.pa,
+        8,
+        scenario.pa + 7,
+        0,
+    )
+
+
+def test_oracle_reads_internal_itlb_get_gpa_when_the_top_level_ptw_field_is_absent() -> None:
+    dut = _PmpProbeDut()
+    env = FrontendEnv(dut, register_callbacks=False)
+    scenario = TranslationScenario(
+        scenario_id="oracle-internal-get-gpa",
+        va=0x8020_0404,
+        gpa=0x8040_0404,
+        pa=0x8060_0404,
+        payload=b"\x13\x00\x00\x00",
+        s2xlate=3,
+        get_gpa=1,
+        hgatp_vmid=3,
+        s1_pte=TranslationPte(vmid=3),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.arm_translation_scenario(state)
+    dut.io_ptw_req_0_valid.value = 1
+    dut.io_ptw_req_0_ready.value = 1
+    dut.io_ptw_req_0_bits_vpn.value = state.expected_ptw_request["vpn"]
+    dut.io_ptw_req_0_bits_s2xlate.value = state.expected_ptw_request["s2xlate"]
+    dut.io_ptw_req_0_bits_getGpa.value = 0
+    dut._internal_signals[_ITLB_PTW_REQ_GET_GPA] = FakeSignal(1)
+
+    env.translation_oracle.on_clock_edge(12)
+
+    request = next(record for record in env.translation_oracle.get_stats()["records"] if record["kind"] == "ptw_request")
+    assert request["actual"] == {
+        "vpn": state.expected_ptw_request["vpn"],
+        "s2xlate": state.expected_ptw_request["s2xlate"],
+        "get_gpa": 1,
+    }
+
+
+def test_oracle_requires_the_guest_fault_gpa_followup_ptw_transaction() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    scenario = TranslationScenario(
+        scenario_id="oracle-guest-fault-gpa-followup",
+        va=0x8020_0404,
+        gpa=0x8040_0404,
+        pa=0x8060_0404,
+        payload=b"\x13\x00\x00\x00",
+        s2xlate=3,
+        hgatp_vmid=3,
+        s1_pte=TranslationPte(vmid=3),
+        s2_gpf=1,
+        expected_path="fault",
+        expected_result="guest_fault",
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.arm_translation_scenario(state)
+    first = state.expected_ptw_request
+    followup = {**first, "get_gpa": 1}
+
+    for cycle, request in ((10, first), (12, followup)):
+        response = env.page_table.build_ptw_resp(
+            request["vpn"], s2xlate=request["s2xlate"], get_gpa=request["get_gpa"]
+        )
+        env.translation_oracle.observe_ptw_request(cycle, **{key: request[key] for key in ("vpn", "s2xlate", "get_gpa")})
+        env.translation_oracle.observe_ptw_response(cycle + 1, **{key: request[key] for key in ("vpn", "s2xlate", "get_gpa")}, response=response)
+    env.translation_oracle.observe_cfvec(14, pc=scenario.va, exception_bits={20: 1})
+
+    stats = env.assert_translation_scenario()
+    assert stats["active"]["requested_ptw_request_keys"] == [
+        (first["vpn"], first["s2xlate"], 0),
+        (followup["vpn"], followup["s2xlate"], 1),
+    ]

@@ -1463,6 +1463,7 @@ def test_uncache_sv39_all_stage_uses_stage2_physical_address(env):
 @pytest.mark.parametrize(
     "scenario_id,s1_pf,s1_af,s2_gpf,s2_gaf",
     [
+        pytest.param("atp-134-vs-leaf-gpf-dut", 0, 0, 1, 0, marks=pytest.mark.funcov_tps("ATP-134")),
         pytest.param("atp-140-s1-pf-s2-leaf-dut", 1, 0, 0, 0, marks=pytest.mark.funcov_tps("ATP-140")),
         pytest.param("atp-141-s1-af-s2-leaf-dut", 0, 1, 0, 0, marks=pytest.mark.funcov_tps("ATP-141")),
         pytest.param("atp-142-s1-pf-s2-gpf-dut", 1, 0, 1, 0, marks=pytest.mark.funcov_tps("ATP-142")),

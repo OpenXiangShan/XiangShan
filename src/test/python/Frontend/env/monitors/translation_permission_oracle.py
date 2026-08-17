@@ -14,6 +14,9 @@ _EXCEPTION_BITS = {
 _MAINPIPE_S1_VALID = "Frontend_top.Frontend.inner_icache.mainPipe.s1_valid"
 _MAINPIPE_START_VADDR = "Frontend_top.Frontend.inner_icache.mainPipe.s1_req_0_vAddr_0_addr"
 _MAINPIPE_PTAG = "Frontend_top.Frontend.inner_icache.mainPipe.s1_wayLookupEntry_0_pTag"
+_PREFETCHPIPE_S1_VALID = "Frontend_top.Frontend.inner_icache.prefetcher.s1_valid"
+_PREFETCHPIPE_PMP_ADDR = "Frontend_top.Frontend.inner_icache.prefetcher.io_pmp_req_bits_addr"
+_ITLB_PTW_REQ_GET_GPA = "Frontend_top.Frontend.inner_itlb.io_ptw_req_0_bits_getGpa"
 _PMP_REQUEST_SIZE_BYTES = 8
 
 
@@ -90,6 +93,7 @@ class TranslationPermissionOracle:
 
     def arm(self, state, *, translation_epoch: int) -> dict:
         expected_fault = self._expected_fault(state)
+        page_outcomes = [dict(outcome) for outcome in getattr(state, "expected_page_outcomes", (state.expected_outcome,))]
         expected_ptw_requests = [
             {
                 "scenario_id": str(state.scenario.scenario_id),
@@ -99,6 +103,30 @@ class TranslationPermissionOracle:
             }
             for page in range(int(state.scenario.page_count))
         ]
+        if expected_fault == "instruction_guest_page_fault":
+            expected_ptw_requests.extend(
+                {
+                    "scenario_id": str(state.scenario.scenario_id),
+                    "vpn": (int(state.scenario.va) >> 12) + page,
+                    "s2xlate": int(state.expected_ptw_request["s2xlate"]),
+                    "get_gpa": 1,
+                }
+                for page in range(int(state.scenario.page_count))
+            )
+        expected_fetches = []
+        for page, outcome in enumerate(page_outcomes):
+            if not outcome.get("ok", False):
+                continue
+            path = "icache" if outcome["expected_path"] == "cacheable" else "uncache"
+            pa = int(outcome["pa"])
+            expected_fetches.append(
+                {
+                    "page": page,
+                    "vpn": int(outcome["va"]) >> 12,
+                    "path": path,
+                    "pa": pa & ~0x3F if path == "icache" else pa,
+                }
+            )
         self.active = {
             "scenario_id": str(state.scenario.scenario_id),
             "translation_epoch": int(translation_epoch),
@@ -107,6 +135,8 @@ class TranslationPermissionOracle:
             "expected_ptw_request": dict(state.expected_ptw_request),
             "expected_ptw_requests": expected_ptw_requests,
             "expected_outcome": dict(state.expected_outcome),
+            "expected_page_outcomes": page_outcomes,
+            "expected_fetches": expected_fetches,
             "expected_path": "fault" if expected_fault else str(state.scenario.expected_path),
             "expected_fault": expected_fault,
             "request_seen": False,
@@ -114,11 +144,16 @@ class TranslationPermissionOracle:
             "fetch_seen": False,
             "fault_seen": False,
             "pmp_request_seen": False,
+            "permission_request_seen": False,
+            "prefetchpipe_pmp_requests": [],
             "permission_check_required": bool(state.scenario.pmp_entries or state.scenario.pma_entries)
             and expected_fault in {None, "instruction_access_fault"},
             "pmp_signal_unavailable": False,
             "requested_ptw_vpns": [],
             "responded_ptw_vpns": [],
+            "requested_ptw_request_keys": [],
+            "responded_ptw_request_keys": [],
+            "fetched_pages": [],
         }
         self._icache_cursor = len(getattr(getattr(self.env, "icache_agent", None), "request_records", []))
         self._uncache_cursor = len(getattr(getattr(self.env, "uncache_agent", None), "request_addrs", []))
@@ -151,6 +186,9 @@ class TranslationPermissionOracle:
         record = {**actual, "translation_epoch": int(getattr(self.env, "translation_epoch", self.active["translation_epoch"]))}
         self._ptw_requests.append(record)
         self.active["request_seen"] = True
+        request_key = (int(actual["vpn"]), int(actual["s2xlate"]), int(actual["get_gpa"]))
+        if request_key not in self.active["requested_ptw_request_keys"]:
+            self.active["requested_ptw_request_keys"].append(request_key)
         if int(actual["vpn"]) not in self.active["requested_ptw_vpns"]:
             self.active["requested_ptw_vpns"].append(int(actual["vpn"]))
         self._record(cycle, "ptw_request", actual=actual)
@@ -201,6 +239,9 @@ class TranslationPermissionOracle:
             )
             return
         self.active["response_seen"] = True
+        response_key = (int(actual["vpn"]), int(actual["s2xlate"]), int(actual["get_gpa"]))
+        if response_key not in self.active["responded_ptw_request_keys"]:
+            self.active["responded_ptw_request_keys"].append(response_key)
         if int(actual["vpn"]) not in self.active["responded_ptw_vpns"]:
             self.active["responded_ptw_vpns"].append(int(actual["vpn"]))
 
@@ -213,22 +254,44 @@ class TranslationPermissionOracle:
             self._record(cycle, "fetch_request", path=actual_path, pa=actual_pa)
             self._error(cycle, "unexpected_fetch_after_fault", path=actual_path, pa=actual_pa)
             return
+        matching_fetches = [
+            item
+            for item in self.active["expected_fetches"]
+            if int(item["pa"]) == actual_pa and int(item["page"]) not in self.active["fetched_pages"]
+        ]
+        if matching_fetches:
+            expected = matching_fetches[0]
+            self._record(cycle, "fetch_request", page=expected["page"], path=actual_path, pa=actual_pa)
+            if actual_path != expected["path"]:
+                self._error(
+                    cycle,
+                    "translated_pa_or_path_mismatch",
+                    page=expected["page"],
+                    expected_path=expected["path"],
+                    actual_path=actual_path,
+                    expected_pa=expected["pa"],
+                    actual_pa=actual_pa,
+                )
+                return
+            self.active["fetched_pages"].append(int(expected["page"]))
+            self.active["fetch_seen"] = True
+            return
         if self.active["fetch_seen"]:
             return
-        self._record(cycle, "fetch_request", path=actual_path, pa=actual_pa)
-        expected_path = "icache" if self.active["expected_path"] == "cacheable" else "uncache"
-        expected_pa = int(self.active["expected_outcome"].get("pa", 0))
-        compare_pa = expected_pa & ~0x3F if expected_path == "icache" else expected_pa
-        if actual_path != expected_path or actual_pa != compare_pa:
+        expected = self.active["expected_fetches"][0]
+        self._record(cycle, "fetch_request", page=expected["page"], path=actual_path, pa=actual_pa)
+        if actual_path != expected["path"] or actual_pa != int(expected["pa"]):
             self._error(
                 cycle,
                 "translated_pa_or_path_mismatch",
-                expected_path=expected_path,
+                page=expected["page"],
+                expected_path=expected["path"],
                 actual_path=actual_path,
-                expected_pa=compare_pa,
+                expected_pa=expected["pa"],
                 actual_pa=actual_pa,
             )
             return
+        self.active["fetched_pages"].append(int(expected["page"]))
         self.active["fetch_seen"] = True
 
     def observe_mainpipe_pmp_request(self, cycle: int, *, addr: int) -> None:
@@ -255,6 +318,31 @@ class TranslationPermissionOracle:
             )
             return
         self.active["pmp_request_seen"] = True
+        self.active["permission_request_seen"] = True
+
+    def observe_prefetchpipe_pmp_request(self, cycle: int, *, addr: int) -> None:
+        """Record PrefetchPipe permission checks without requiring a speculative target."""
+        if self.active is None or not self.active["permission_check_required"]:
+            return
+        actual_addr = int(addr)
+        page_base = actual_addr & ~0xFFF
+        expected_page = next(
+            (
+                page
+                for page, outcome in enumerate(self.active["expected_page_outcomes"])
+                if int(outcome.get("pa", 0)) & ~0xFFF == page_base
+            ),
+            None,
+        )
+        record = {
+            "addr": actual_addr,
+            "size": _PMP_REQUEST_SIZE_BYTES,
+            "end": actual_addr + _PMP_REQUEST_SIZE_BYTES - 1,
+            "page": expected_page,
+        }
+        self.active["prefetchpipe_pmp_requests"].append(record)
+        self.active["permission_request_seen"] = True
+        self._record(cycle, "prefetchpipe_pmp_request", **record)
 
     def _read_internal_signal(self, name: str) -> Optional[int]:
         dut = getattr(self.env, "dut", None)
@@ -303,6 +391,22 @@ class TranslationPermissionOracle:
             addr=reconstruct_pmp_request_addr(p_tag, start_vaddr_pruned),
         )
 
+    def _sample_prefetchpipe_pmp_request(self, cycle: int) -> None:
+        if self.active is None or not self.active["permission_check_required"]:
+            return
+        valid = self._read_internal_signal(_PREFETCHPIPE_S1_VALID)
+        if not valid:
+            return
+        addr = self._read_internal_signal(_PREFETCHPIPE_PMP_ADDR)
+        if addr is not None:
+            self.observe_prefetchpipe_pmp_request(cycle, addr=addr)
+
+    def _read_ptw_request_get_gpa(self, ptw_if) -> int:
+        internal_get_gpa = self._read_internal_signal(_ITLB_PTW_REQ_GET_GPA)
+        if internal_get_gpa is not None:
+            return internal_get_gpa
+        return self._read(ptw_if.req_0_bits_get_gpa)
+
     def observe_cfvec(self, cycle: int, *, pc: int, exception_bits: dict[int, int], cross_page: bool = False) -> None:
         if self.active is None:
             return
@@ -335,7 +439,7 @@ class TranslationPermissionOracle:
                 cycle,
                 vpn=self._read(ptw_if.req_0_bits_vpn),
                 s2xlate=self._read(ptw_if.req_0_bits_s2xlate),
-                get_gpa=self._read(ptw_if.req_0_bits_get_gpa),
+                get_gpa=self._read_ptw_request_get_gpa(ptw_if),
             )
         expectation = getattr(self.env.ptw_agent, "get_last_drive_expectation", lambda: None)()
         if ptw_if is not None and self._read(ptw_if.resp_valid) and expectation:
@@ -347,6 +451,7 @@ class TranslationPermissionOracle:
                 response=dict(expectation["resp"]),
             )
         self._sample_mainpipe_pmp_request(cycle)
+        self._sample_prefetchpipe_pmp_request(cycle)
         icache_records = self.env.icache_agent.request_records
         for record in icache_records[self._icache_cursor :]:
             self.observe_fetch_request(record["cycle"], path="icache", pa=record["address"])
@@ -372,18 +477,27 @@ class TranslationPermissionOracle:
         if self.active is None:
             raise AssertionError("translation oracle has no armed scenario")
         missing = []
-        expected_vpns = {int(request["vpn"]) for request in self.active["expected_ptw_requests"]}
-        if not expected_vpns.issubset(self.active["requested_ptw_vpns"]):
+        expected_ptw_request_keys = {
+            (int(request["vpn"]), int(request["s2xlate"]), int(request["get_gpa"]))
+            for request in self.active["expected_ptw_requests"]
+        }
+        if not expected_ptw_request_keys.issubset(self.active["requested_ptw_request_keys"]):
             missing.append("ptw_request")
-        if not expected_vpns.issubset(self.active["responded_ptw_vpns"]):
+        if not expected_ptw_request_keys.issubset(self.active["responded_ptw_request_keys"]):
             missing.append("ptw_response")
         if self.active["expected_path"] == "fault":
             if not self.active["fault_seen"]:
                 missing.append("cfvec_exception")
-        elif not self.active["fetch_seen"]:
-            missing.append("fetch_request")
-        if self.active["permission_check_required"] and not self.active["pmp_request_seen"]:
-            missing.append("mainpipe_pmp_request")
+        else:
+            missing_pages = [
+                int(item["page"])
+                for item in self.active["expected_fetches"]
+                if int(item["page"]) not in self.active["fetched_pages"]
+            ]
+            if missing_pages:
+                missing.append(f"fetch_page_{missing_pages}")
+        if self.active["permission_check_required"] and not self.active["permission_request_seen"]:
+            missing.append("permission_request")
         if missing:
             self._error(getattr(self.env, "current_cycle", 0), "missing_observation", missing=missing)
         if self.errors:

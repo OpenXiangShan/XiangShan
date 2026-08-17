@@ -45,6 +45,7 @@ class PTWAgent:
         self._nemu_source: Optional[NemuPtwResponseSource] = None
         self.nemu_sync_hook: Optional[Callable[..., None]] = None
         self.request_context_provider: Optional[Callable[[], Dict[str, int]]] = None
+        self.request_get_gpa_provider: Optional[Callable[[], Optional[int]]] = None
         self.pending = deque()
         self.active_resp: Optional[_PTWPending] = None
         self.last_drive_expectation: Optional[dict] = None
@@ -85,6 +86,9 @@ class PTWAgent:
 
     def set_request_context_provider(self, provider: Optional[Callable[[], Dict[str, int]]]) -> None:
         self.request_context_provider = provider
+
+    def set_request_get_gpa_provider(self, provider: Optional[Callable[[], Optional[int]]]) -> None:
+        self.request_get_gpa_provider = provider
 
     def set_nemu_sync_hook(self, hook: Optional[Callable[..., None]]) -> None:
         self.nemu_sync_hook = hook
@@ -441,6 +445,10 @@ class PTWAgent:
             vpn = self._read(self.interface.req_0_bits_vpn, 0)
             s2xlate = self._read(self.interface.req_0_bits_s2xlate, 0)
             get_gpa = self._read(self.interface.req_0_bits_get_gpa, 0)
+            if self.request_get_gpa_provider is not None:
+                internal_get_gpa = self.request_get_gpa_provider()
+                if internal_get_gpa is not None:
+                    get_gpa = int(internal_get_gpa)
             memidx_is_ld = self._read(self.interface.req_0_bits_memidx_is_ld, 0)
             memidx_is_st = self._read(self.interface.req_0_bits_memidx_is_st, 0)
             memidx_idx = self._read(self.interface.req_0_bits_memidx_idx, 0)
