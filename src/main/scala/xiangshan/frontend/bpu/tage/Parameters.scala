@@ -23,27 +23,27 @@ import xiangshan.frontend.bpu.TageTableInfo
 case class TageParameters(
     TableInfos: Seq[TageTableInfo] = Seq(
       // (NumSetsLog2, NumWays, HistoryLength); NumSets is the number of sets in each bank.
-      new TageTableInfo(9, 2, 4),
-      new TageTableInfo(9, 2, 9),
-      new TageTableInfo(9, 2, 17),
-      new TageTableInfo(9, 2, 29),
-      new TageTableInfo(9, 2, 56),
-      new TageTableInfo(9, 2, 109),
-      new TageTableInfo(9, 2, 211),
-      new TageTableInfo(9, 2, 397)
+      new TageTableInfo(7, 4, 4),
+      new TageTableInfo(8, 2, 9),
+      new TageTableInfo(8, 5, 17),
+      new TageTableInfo(9, 3, 29),
+      new TageTableInfo(7, 6, 56),
+      new TageTableInfo(7, 4, 109),
+      new TageTableInfo(7, 3, 211),
+      new TageTableInfo(7, 3, 397)
     ),
     NumBanks:              Int = 4,  // to alleviate read-write conflicts in single-port SRAM
-    TagWidth:              Int = 13, // default active tag width
+    TagWidth:              Int = 12, // default active tag width
     TakenCtrWidth:         Int = 3,
-    UsefulCtrWidth:        Int = 2,  // default active useful counter width
+    UsefulCtrWidth:        Int = 1,  // default active useful counter width
     UsefulCtrInitValue:    Int = 0,
     NumUsefulCtrSramFolds: Int = 8,
     WriteBufferSize:       Int = 8,
     UsefulResetCtrWidth:   Int = 8,
     UseAltOnNaWidth:       Int = 7,
     NumUseAltOnNa:         Int = 128,
-    MinNumSets:            Int = 512,
-    MaxNumSets:            Int = 4096,
+    MinNumSets:            Int = 128,
+    MaxNumSets:            Int = 1024,
     MinNumWays:            Int = 2,
     MaxNumWays:            Int = 8,
     MinTagWidth:           Int = 10,
