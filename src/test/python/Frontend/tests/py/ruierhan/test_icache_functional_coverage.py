@@ -83,8 +83,8 @@ def test_icache_mainpipe_sampler_contract_has_one_key_per_leaf():
 
 
 def test_icache_prefetchpipe_sampler_contract_has_one_key_per_leaf():
-    assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 34
-    assert len(set(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS)) == 34
+    assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 37
+    assert len(set(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS)) == 37
 
 
 def test_icache_missunit_sampler_contract_has_one_key_per_leaf():
@@ -952,18 +952,332 @@ def test_prefetch_soft_ftq_same_cycle_requires_ready_unflushed_entry():
     )
 
 
-def test_prefetch_dual_layout_bin_requires_all_four_legal_cases():
-    recorder = _Recorder()
-    recorder.set_prefetch_key("s1_valid", 1)
+def test_prefetch_s1_itlb_flush_samples_redirect_or_matching_bpu_source():
+    for cycle, source in enumerate(("redirect", "bpu"), start=10):
+        recorder = _Recorder()
+        for key, value in {
+            "s1_valid": 1,
+            "s1_wait_itlb": 1,
+            "s1_soft": 0,
+            "global_flush": int(source == "redirect"),
+            "bpu_valid": int(source == "bpu"),
+            "bpu_flag": 0,
+            "bpu_value": 4,
+            "s1_ftq_flag": 0,
+            "s1_ftq_value": 4,
+        }.items():
+            recorder.set_prefetch_key(key, value)
+        sample_icache_prefetchpipe_coverage(recorder, recorder.env, cycle)
+        assert _hit(
+            recorder,
+            "icache_prefetchpipe_s1_meta",
+            "flush_cancels_itlb_wait",
+        )
 
-    for cycle, layout in enumerate((1, 2, 4), start=10):
+    for soft, bpu_value in ((0, 5), (1, 4)):
+        recorder = _Recorder()
+        for key, value in {
+            "s1_valid": 1,
+            "s1_wait_itlb": 1,
+            "s1_soft": soft,
+            "global_flush": 0,
+            "bpu_valid": 1,
+            "bpu_flag": 0,
+            "bpu_value": bpu_value,
+            "s1_ftq_flag": 0,
+            "s1_ftq_value": 4,
+        }.items():
+            recorder.set_prefetch_key(key, value)
+        sample_icache_prefetchpipe_coverage(recorder, recorder.env, 12)
+        assert not _hit(
+            recorder,
+            "icache_prefetchpipe_s1_meta",
+            "flush_cancels_itlb_wait",
+        )
+
+
+def test_prefetch_itlb_resend_requires_miss_then_same_transaction_success():
+    recorder = _Recorder()
+    for key, value in {
+        "s1_valid": 1,
+        "s1_flush": 0,
+        "s1_wait_itlb": 0,
+        "itlb_req_valid": 1,
+        "itlb_resp_miss": 1,
+        "s1_tlb_finish": 0,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 20)
+    assert not _hit(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "itlb_miss_resend_meta_retry",
+    )
+
+    recorder.set_prefetch_key("s1_wait_itlb", 1)
+    recorder.set_prefetch_key("itlb_resp_miss", 0)
+    recorder.set_prefetch_key("s1_tlb_finish", 1)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 21)
+    assert _hit(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "itlb_miss_resend_meta_retry",
+    )
+
+    no_miss = _Recorder()
+    for key, value in {
+        "s1_valid": 1,
+        "s1_flush": 0,
+        "s1_wait_itlb": 1,
+        "itlb_req_valid": 1,
+        "itlb_resp_miss": 0,
+        "s1_tlb_finish": 1,
+    }.items():
+        no_miss.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(no_miss, no_miss.env, 22)
+    assert not _hit(
+        no_miss,
+        "icache_prefetchpipe_s1_meta",
+        "itlb_miss_resend_meta_retry",
+    )
+
+
+def test_prefetch_meta_resend_requires_two_blocked_cycles_then_recovery():
+    recorder = _Recorder()
+    for key, value in {
+        "s1_valid": 1,
+        "s1_state": 2,
+        "s1_flush": 0,
+        "meta_req_valid": 1,
+        "meta_ready": 0,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 30)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 31)
+    assert not _hit(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "meta_resend_backpressure_recovery",
+    )
+
+    recorder.set_prefetch_key("meta_ready", 1)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 32)
+    assert _hit(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "meta_resend_backpressure_recovery",
+    )
+
+    one_blocked = _Recorder()
+    for key, value in {
+        "s1_valid": 1,
+        "s1_state": 2,
+        "s1_flush": 0,
+        "meta_req_valid": 1,
+        "meta_ready": 0,
+    }.items():
+        one_blocked.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(one_blocked, one_blocked.env, 33)
+    one_blocked.set_prefetch_key("meta_ready", 1)
+    sample_icache_prefetchpipe_coverage(one_blocked, one_blocked.env, 34)
+    assert not _hit(
+        one_blocked,
+        "icache_prefetchpipe_s1_meta",
+        "meta_resend_backpressure_recovery",
+    )
+
+
+def _set_prefetch_full_waylookup(recorder, *, exception_valid=0, num_valid=32):
+    for key, value in {
+        "s1_valid": 1,
+        "s1_state": 3,
+        "s1_soft": 0,
+        "s1_two_case": 1,
+        "s1_flush": 0,
+        "s1_ftq_flag": 0,
+        "s1_ftq_value": 6,
+        "way0_valid": 1,
+        "way1_valid": 1,
+        "way0_ready": 0,
+        "way1_ready": 0,
+        "waylookup_num_valid": num_valid,
+        "waylookup_exception_valid": exception_valid,
+        "refill_valid": 0,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+
+
+def test_prefetch_waylookup_recovery_requires_capacity_full_not_exception_stall():
+    recorder = _Recorder()
+    _set_prefetch_full_waylookup(recorder)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 40)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 41)
+    recorder.set_prefetch_key("waylookup_num_valid", 30)
+    recorder.set_prefetch_key("way0_ready", 1)
+    recorder.set_prefetch_key("way1_ready", 1)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 42)
+    assert _hit(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "waylookup_backpressure_recovery",
+    )
+
+    for exception_valid, num_valid in ((1, 32), (0, 31)):
+        blocked = _Recorder()
+        _set_prefetch_full_waylookup(
+            blocked,
+            exception_valid=exception_valid,
+            num_valid=num_valid,
+        )
+        sample_icache_prefetchpipe_coverage(blocked, blocked.env, 43)
+        sample_icache_prefetchpipe_coverage(blocked, blocked.env, 44)
+        blocked.set_prefetch_key("way0_ready", 1)
+        blocked.set_prefetch_key("way1_ready", 1)
+        sample_icache_prefetchpipe_coverage(blocked, blocked.env, 45)
+        assert not _hit(
+            blocked,
+            "icache_prefetchpipe_s1_meta",
+            "waylookup_backpressure_recovery",
+        )
+
+
+def _set_prefetch_clean_refill(recorder):
+    for key, value in {
+        "s1_valid": 1,
+        "refill_valid": 1,
+        "refill_corrupt": 0,
+        "refill_denied": 0,
+        "s1_mshr_valid": 1,
+        "refill_vset": 7,
+        "s1_set0": 7,
+        "s1_set1": 8,
+        "s1_ptag_same": 1,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+
+
+def test_prefetch_clean_refill_rejects_denied_response():
+    recorder = _Recorder()
+    _set_prefetch_clean_refill(recorder)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 50)
+    assert _hit(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "clean_refill_updates_meta",
+    )
+
+    denied = _Recorder()
+    _set_prefetch_clean_refill(denied)
+    denied.set_prefetch_key("refill_denied", 1)
+    sample_icache_prefetchpipe_coverage(denied, denied.env, 51)
+    assert not _hit(
+        denied,
+        "icache_prefetchpipe_s1_meta",
+        "clean_refill_updates_meta",
+    )
+
+
+def test_prefetch_replacement_requires_per_port_one_hot_old_hit():
+    recorder = _Recorder()
+    _set_prefetch_clean_refill(recorder)
+    for key, value in {
+        "s1_ptag_same": 0,
+        "refill_waymask": 2,
+        "s1_old_way0": 2,
+        "s1_old_way1": 4,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 60)
+    assert _hit(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "same_way_new_tag_invalidates_old",
+    )
+
+    for old0, old1 in ((0, 2), (3, 0)):
+        mismatch = _Recorder()
+        _set_prefetch_clean_refill(mismatch)
+        for key, value in {
+            "s1_ptag_same": 0,
+            "refill_waymask": 2,
+            "s1_old_way0": old0,
+            "s1_old_way1": old1,
+        }.items():
+            mismatch.set_prefetch_key(key, value)
+        sample_icache_prefetchpipe_coverage(mismatch, mismatch.env, 61)
+        assert not _hit(
+            mismatch,
+            "icache_prefetchpipe_s1_meta",
+            "same_way_new_tag_invalidates_old",
+        )
+
+
+def test_prefetch_dual_layouts_are_independent_bins():
+    layouts = {
+        1: "dual_layout_same_line",
+        2: "dual_layout_overlap1",
+        4: "dual_layout_overlap2",
+        8: "dual_layout_interleave",
+    }
+    for cycle, (layout, expected_bin) in enumerate(layouts.items(), start=70):
+        recorder = _Recorder()
+        recorder.set_prefetch_key("s1_valid", 1)
+        recorder.set_prefetch_key("s1_soft", 0)
         recorder.set_prefetch_key("s1_two_case", layout)
         sample_icache_prefetchpipe_coverage(recorder, recorder.env, cycle)
-    assert not _hit(recorder, "icache_prefetchpipe_s1_meta", "four_dual_layouts")
+        assert _hit(recorder, "icache_prefetchpipe_s1_meta", expected_bin)
+        assert all(
+            not _hit(recorder, "icache_prefetchpipe_s1_meta", other_bin)
+            for other_bin in set(layouts.values()) - {expected_bin}
+        )
 
-    recorder.set_prefetch_key("s1_two_case", 8)
-    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 13)
-    assert _hit(recorder, "icache_prefetchpipe_s1_meta", "four_dual_layouts")
+
+def test_prefetch_soft_probe_requires_correlated_meta_response_after_tlb_finish():
+    recorder = _Recorder()
+    for key, value in {
+        "from_valid": 1,
+        "from_soft": 1,
+        "s0_fire": 1,
+        "meta_req_valid": 1,
+        "meta_ready": 1,
+        "s1_flush": 0,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 80)
+
+    for key, value in {
+        "from_valid": 0,
+        "from_soft": 0,
+        "s0_fire": 0,
+        "meta_req_valid": 0,
+        "s1_valid": 1,
+        "s1_soft": 1,
+        "s1_tlb_finish": 1,
+        "s1_sram_valid0": 1,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 81)
+    assert _hit(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "soft_probe_no_waylookup_ftq",
+    )
+
+    uncorrelated = _Recorder()
+    for key, value in {
+        "s1_valid": 1,
+        "s1_soft": 1,
+        "s1_tlb_finish": 1,
+        "s1_sram_valid0": 1,
+        "s1_flush": 0,
+    }.items():
+        uncorrelated.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(uncorrelated, uncorrelated.env, 82)
+    assert not _hit(
+        uncorrelated,
+        "icache_prefetchpipe_s1_meta",
+        "soft_probe_no_waylookup_ftq",
+    )
 
 
 def test_prefetch_redirect_boundary_requires_ready_low_and_high():

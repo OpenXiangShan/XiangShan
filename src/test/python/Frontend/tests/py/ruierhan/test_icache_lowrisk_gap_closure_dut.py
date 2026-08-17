@@ -129,7 +129,8 @@ def test_icache_lowrisk_mainpipe_flush_refill(env) -> None:
 
 
 @pytest.mark.funcov_bins(
-    "BIN-655", "BIN-656", "BIN-657", "BIN-663", "BIN-677", "BIN-661"
+    "BIN-655", "BIN-656", "BIN-657", "BIN-663", "BIN-677",
+    "BIN-661", "BIN-778", "BIN-779", "BIN-780"
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_prefetch_soft_requests(lowrisk_cleanup) -> None:

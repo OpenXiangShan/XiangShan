@@ -7,6 +7,7 @@ from .flush_from_bpu import BpuS3Flush, ftq_ptr_matches_or_before
 
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
 _ICACHE = "Frontend_top.Frontend.inner_icache."
+_WAYLOOKUP = _ICACHE + "wayLookup."
 
 
 def _on(value: Optional[int]) -> bool:
@@ -47,7 +48,10 @@ ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS = frozenset(
         ("icache_prefetchpipe_s1_meta", "waylookup_backpressure_recovery"),
         ("icache_prefetchpipe_s1_meta", "clean_refill_updates_meta"),
         ("icache_prefetchpipe_s1_meta", "same_way_new_tag_invalidates_old"),
-        ("icache_prefetchpipe_s1_meta", "four_dual_layouts"),
+        ("icache_prefetchpipe_s1_meta", "dual_layout_same_line"),
+        ("icache_prefetchpipe_s1_meta", "dual_layout_overlap1"),
+        ("icache_prefetchpipe_s1_meta", "dual_layout_overlap2"),
+        ("icache_prefetchpipe_s1_meta", "dual_layout_interleave"),
         ("icache_prefetchpipe_s1_meta", "conflict_first_request_only"),
         ("icache_prefetchpipe_s1_meta", "soft_probe_no_waylookup_ftq"),
         ("icache_prefetchpipe_s1_completion", "prefetch_disabled_no_s2"),
@@ -130,6 +134,16 @@ _PREFETCH_SIGNALS = {
         _PREFETCH + "io_wayLookupWrite_1_valid",
         _PREFETCH + "__Vtogcov__io_wayLookupWrite_1_valid",
     ),
+    "way1_ready": (
+        _PREFETCH + "io_wayLookupWrite_1_ready",
+        _PREFETCH + "__Vtogcov__io_wayLookupWrite_1_ready",
+        # ICacheWayLookup intentionally drives both write ready signals together;
+        # generated RTL may therefore retain only port 0.
+        _PREFETCH + "io_wayLookupWrite_0_ready",
+        _PREFETCH + "__Vtogcov__io_wayLookupWrite_0_ready",
+    ),
+    "waylookup_num_valid": (_WAYLOOKUP + "numValidEntries",),
+    "waylookup_exception_valid": (_WAYLOOKUP + "exceptionEntry_valid",),
     "global_flush": (_ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",),
     "bpu_valid": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",),
     "bpu_flag": (
@@ -162,6 +176,7 @@ _PREFETCH_SIGNALS = {
     ),
     "refill_vset": (_MAIN + "__Vtogcov__io_missResp_bits_vSetIdx",),
     "refill_corrupt": (_MAIN + "__Vtogcov__io_missResp_bits_corrupt",),
+    "refill_denied": (_MAIN + "__Vtogcov__io_missResp_bits_denied",),
     "refill_waymask": (_ICACHE + "missUnit.__Vtogcov__io_resp_bits_waymask",),
     "s1_mshr_valid": (
         _PREFETCH + "s1_mshrValid",
@@ -186,6 +201,10 @@ _PREFETCH_SIGNALS = {
     "s1_old_way1": (
         _PREFETCH + "s1_metaInfoReg_r_1_waymask",
         _PREFETCH + "__Vtogcov__s1_metaInfoReg_r_1_waymask",
+    ),
+    "s1_sram_valid0": (
+        _PREFETCH + "s1_sramValid_0",
+        _PREFETCH + "__Vtogcov__s1_sramValid_0",
     ),
     "s2_valid": (_PREFETCH + "s2_valid", _PREFETCH + "__Vtogcov__s2_valid"),
     "s2_double": (
@@ -251,13 +270,14 @@ def _read_prefetch(recorder, key: str) -> Optional[int]:
 
 def reset_icache_prefetchpipe_coverage_state(recorder) -> None:
     recorder._icache_prefetchpipe_cov_state = {
-        "itlb_wait_seen": False,
-        "meta_resend_blocked": False,
-        "waylookup_blocked": False,
+        "itlb_miss_pending": False,
+        "meta_blocked_cycles": 0,
+        "waylookup_full_cycles": 0,
+        "waylookup_ftq": None,
+        "soft_meta_read_pending": False,
         "s2_blocked": False,
         "clean_mshr_pending": False,
         "missunit_backpressure": False,
-        "dual_layouts": set(),
         "redirect_ready": set(),
     }
 
@@ -356,44 +376,146 @@ def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
         evidence,
     )
     s1_state = s["s1_state"]
-    if _on(s["s1_valid"]) and _on(s["s1_wait_itlb"]):
-        state["itlb_wait_seen"] = True
+    if _on(s["s1_flush"]) or _off(s["s1_valid"]):
+        state["itlb_miss_pending"] = False
+    if (
+        _on(s["s1_valid"])
+        and _on(s["itlb_req_valid"])
+        and _on(s["itlb_resp_miss"])
+        and _off(s["s1_flush"])
+    ):
+        state["itlb_miss_pending"] = True
+    itlb_resend_success = (
+        state["itlb_miss_pending"]
+        and _on(s["s1_valid"])
+        and _on(s["s1_wait_itlb"])
+        and _on(s["itlb_req_valid"])
+        and _off(s["itlb_resp_miss"])
+        and _on(s["s1_tlb_finish"])
+        and _off(s["s1_flush"])
+    )
     _mark_prefetch(
         recorder,
         "icache_prefetchpipe_s1_meta",
         "itlb_miss_resend_meta_retry",
         cycle,
-        state["itlb_wait_seen"]
-        and _on(s["s1_valid"])
-        and _off(s["s1_wait_itlb"])
-        and _on(s["s1_tlb_finish"])
-        and s1_state == 1
-        and _on(s["meta_req_valid"]),
+        itlb_resend_success,
         evidence,
     )
-    if s1_state == 2 and _off(s["meta_ready"]):
-        state["meta_resend_blocked"] = True
+    if itlb_resend_success:
+        state["itlb_miss_pending"] = False
+
+    meta_blocked = (
+        _on(s["s1_valid"])
+        and s1_state == 2
+        and _on(s["meta_req_valid"])
+        and _off(s["meta_ready"])
+        and _off(s["s1_flush"])
+    )
+    if meta_blocked:
+        state["meta_blocked_cycles"] += 1
+    meta_recovered = (
+        state["meta_blocked_cycles"] >= 2
+        and _on(s["s1_valid"])
+        and s1_state == 2
+        and _on(s["meta_req_valid"])
+        and _on(s["meta_ready"])
+        and _off(s["s1_flush"])
+    )
     _mark_prefetch(
         recorder,
         "icache_prefetchpipe_s1_meta",
         "meta_resend_backpressure_recovery",
         cycle,
-        state["meta_resend_blocked"]
-        and ((s1_state == 2 and _on(s["meta_ready"])) or s1_state == 3),
+        meta_recovered,
         evidence,
     )
-    if s1_state == 3 and _on(s["way0_valid"]) and _off(s["way0_ready"]):
-        state["waylookup_blocked"] = True
+    if meta_recovered or not meta_blocked:
+        state["meta_blocked_cycles"] = 0
+
+    s1_ftq = _ftq_ptr(s, "s1")
+    waylookup_full_blocked = (
+        _on(s["s1_valid"])
+        and s1_state == 3
+        and _off(s["s1_soft"])
+        and s["s1_two_case"] in (1, 2, 4, 8)
+        and _on(s["way0_valid"])
+        and _on(s["way1_valid"])
+        and _off(s["way0_ready"])
+        and _off(s["way1_ready"])
+        and s["waylookup_num_valid"] == 32
+        and _off(s["waylookup_exception_valid"])
+        and _off(s["refill_valid"])
+        and _off(s["s1_flush"])
+        and s1_ftq is not None
+    )
+    if waylookup_full_blocked:
+        if state["waylookup_ftq"] != s1_ftq:
+            state["waylookup_full_cycles"] = 0
+            state["waylookup_ftq"] = s1_ftq
+        state["waylookup_full_cycles"] += 1
+    waylookup_recovered = (
+        state["waylookup_full_cycles"] >= 2
+        and state["waylookup_ftq"] == s1_ftq
+        and _on(s["s1_valid"])
+        and s1_state == 3
+        and _on(s["way0_valid"])
+        and _on(s["way1_valid"])
+        and _on(s["way0_ready"])
+        and _on(s["way1_ready"])
+        and _off(s["s1_flush"])
+    )
     _mark_prefetch(
         recorder,
         "icache_prefetchpipe_s1_meta",
         "waylookup_backpressure_recovery",
         cycle,
-        state["waylookup_blocked"]
-        and _on(s["way0_valid"])
-        and _on(s["way0_ready"]),
+        waylookup_recovered,
         evidence,
     )
+    waylookup_capacity_wait = (
+        state["waylookup_full_cycles"] >= 2
+        and state["waylookup_ftq"] == s1_ftq
+        and _on(s["s1_valid"])
+        and s1_state == 3
+        and _on(s["way0_valid"])
+        and _on(s["way1_valid"])
+        and _off(s["way0_ready"])
+        and _off(s["way1_ready"])
+        and _off(s["waylookup_exception_valid"])
+        and _off(s["s1_flush"])
+    )
+    if waylookup_recovered or (
+        not waylookup_full_blocked and not waylookup_capacity_wait
+    ):
+        state["waylookup_full_cycles"] = 0
+        state["waylookup_ftq"] = None
+
+    soft_meta_pending = bool(state["soft_meta_read_pending"])
+    if soft_meta_pending and _off(s["s1_valid"]):
+        state["soft_meta_read_pending"] = False
+        soft_meta_pending = False
+    soft_meta_response = soft_meta_pending and _on(s["s1_sram_valid0"])
+    soft_meta_complete = (
+        soft_meta_response
+        and _on(s["s1_valid"])
+        and _on(s["s1_soft"])
+        and _on(s["s1_tlb_finish"])
+        and _off(s["s1_flush"])
+    )
+    if soft_meta_response or _on(s["s1_flush"]):
+        state["soft_meta_read_pending"] = False
+    soft_meta_read_fire = (
+        _on(s["meta_req_valid"])
+        and _on(s["meta_ready"])
+        and (
+            (soft_request and _on(s["s0_fire"]))
+            or (_on(s["s1_valid"]) and _on(s["s1_soft"]))
+        )
+        and _off(s["s1_flush"])
+    )
+    if soft_meta_read_fire:
+        state["soft_meta_read_pending"] = True
     _mark_prefetch(
         recorder,
         "icache_prefetchpipe_s0_entry",
@@ -541,7 +663,13 @@ def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
         cycle,
         _on(s["s1_valid"])
         and _on(s["s1_wait_itlb"])
-        and _on(s["itlb_flush"]),
+        and (
+            _on(s["global_flush"])
+            or (
+                _off(s["s1_soft"])
+                and bpu_s1_match is True
+            )
+        ),
         evidence,
     )
     set_values = {value for value in (s["s1_set0"], s["s1_set1"]) if value is not None}
@@ -550,6 +678,7 @@ def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
         _on(s["s1_valid"])
         and _on(s["refill_valid"])
         and _off(s["refill_corrupt"])
+        and _off(s["refill_denied"])
         and _on(s["s1_mshr_valid"])
         and refill_set_match
     )
@@ -561,16 +690,23 @@ def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
         clean_refill and _on(s["s1_ptag_same"]),
         evidence,
     )
-    old_waymask = 0
-    for key in ("s1_old_way0", "s1_old_way1"):
-        if s[key] is not None:
-            old_waymask |= int(s[key])
-    same_way_new_tag = (
-        clean_refill
-        and _off(s["s1_ptag_same"])
-        and s["refill_waymask"] is not None
-        and (old_waymask & int(s["refill_waymask"])) != 0
-    )
+    same_way_new_tag = False
+    if clean_refill and _off(s["s1_ptag_same"]) and s["refill_waymask"] is not None:
+        refill_waymask = int(s["refill_waymask"])
+        for set_key, way_key in (
+            ("s1_set0", "s1_old_way0"),
+            ("s1_set1", "s1_old_way1"),
+        ):
+            old_waymask = s[way_key]
+            if (
+                s[set_key] == s["refill_vset"]
+                and old_waymask is not None
+                and int(old_waymask) != 0
+                and int(old_waymask).bit_count() == 1
+                and int(old_waymask) == refill_waymask
+            ):
+                same_way_new_tag = True
+                break
     _mark_prefetch(
         recorder,
         "icache_prefetchpipe_s1_meta",
@@ -579,16 +715,22 @@ def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
         same_way_new_tag,
         evidence,
     )
-    if _on(s["s1_valid"]) and s["s1_two_case"] in (1, 2, 4, 8):
-        state["dual_layouts"].add(int(s["s1_two_case"]))
-    _mark_prefetch(
-        recorder,
-        "icache_prefetchpipe_s1_meta",
-        "four_dual_layouts",
-        cycle,
-        state["dual_layouts"] == {1, 2, 4, 8},
-        evidence,
-    )
+    for layout, bin_name in (
+        (1, "dual_layout_same_line"),
+        (2, "dual_layout_overlap1"),
+        (4, "dual_layout_overlap2"),
+        (8, "dual_layout_interleave"),
+    ):
+        _mark_prefetch(
+            recorder,
+            "icache_prefetchpipe_s1_meta",
+            bin_name,
+            cycle,
+            _on(s["s1_valid"])
+            and _off(s["s1_soft"])
+            and s["s1_two_case"] == layout,
+            evidence,
+        )
     _mark_prefetch(
         recorder,
         "icache_prefetchpipe_s1_meta",
@@ -605,9 +747,7 @@ def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
         "icache_prefetchpipe_s1_meta",
         "soft_probe_no_waylookup_ftq",
         cycle,
-        _on(s["s1_valid"])
-        and _on(s["s1_soft"])
-        and _on(s["s1_tlb_finish"]),
+        soft_meta_complete,
         evidence,
     )
 

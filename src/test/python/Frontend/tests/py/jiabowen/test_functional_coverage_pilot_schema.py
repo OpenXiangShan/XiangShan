@@ -16,7 +16,7 @@ IFU_FUNCOV_BIN_IDS = {
 ICACHE_PREFETCH_FUNCOV_BIN_IDS = {
     *(f"BIN-{index:03d}" for index in range(650, 674)),
     *(f"BIN-{index:03d}" for index in range(677, 686)),
-    "BIN-777",
+    *(f"BIN-{index:03d}" for index in range(777, 781)),
 }
 
 ICACHE_MISSUNIT_FUNCOV_BIN_IDS = {
