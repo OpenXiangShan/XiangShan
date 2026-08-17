@@ -122,13 +122,13 @@ case class XSCoreParameters
   EnableBackendV2Config: Boolean = false,
   EnableDispatchIQBalanceOpt: Boolean = true,
   intPreg: PregParams = IntPregParams(
-    numEntries = 224,
+    numEntries = 352,
     numBank    = 4,
     numRead    = None,
     numWrite   = None,
   ),
   fpPreg: PregParams = FpPregParams(
-    numEntries = 256,
+    numEntries = 352,
     numBank    = 1,
     numRead    = None,
     numWrite   = None,
