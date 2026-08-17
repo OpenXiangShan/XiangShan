@@ -587,7 +587,7 @@ def test_canonical_registry_matches_the_single_sampler_contract():
     assert len(CFVEC_SAMPLER_BIN_KEYS) == 17
     assert len(IFU_CFVEC_SAMPLER_BIN_KEYS) == 26
     assert len(TWO_FETCH_SAMPLER_BIN_KEYS) == 41
-    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 43
+    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 47
     assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 33
     assert len(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS) == 31
     assert len(ICACHE_HITMISS_SAMPLER_BIN_KEYS) == 10

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from .flush_from_bpu import BpuS3Flush, ftq_ptr_matches_or_before
+
 
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
 _ICACHE = "Frontend_top.Frontend.inner_icache."
@@ -33,7 +35,8 @@ ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS = frozenset(
         ("icache_prefetchpipe_s0_entry", "itlb_or_meta_backpressure"),
         ("icache_prefetchpipe_s0_entry", "s1_busy_backpressure"),
         ("icache_prefetchpipe_s0_entry", "redirect_flush_blocks_hw"),
-        ("icache_prefetchpipe_s0_entry", "bpu_flush_match_only"),
+        ("icache_prefetchpipe_s0_entry", "bpu_flush_match_blocks_hw"),
+        ("icache_prefetchpipe_s0_entry", "bpu_flush_miss_allows_hw"),
         ("icache_prefetchpipe_s0_entry", "soft_ignores_bpu_flush"),
         ("icache_prefetchpipe_s0_entry", "soft_priority_over_ftq"),
         ("icache_prefetchpipe_s0_entry", "multi_soft_single_accept"),
@@ -129,6 +132,18 @@ _PREFETCH_SIGNALS = {
     ),
     "global_flush": (_ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",),
     "bpu_valid": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",),
+    "bpu_flag": (
+        _PREFETCH + "io_flushFromBpu_s3_bits_flag",
+        _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_flag",
+    ),
+    "bpu_value": (
+        _PREFETCH + "io_flushFromBpu_s3_bits_value",
+        _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_value",
+    ),
+    "s0_ftq_flag": (_PREFETCH + "io_fromFtq_bits_req_0_ftqIdx_flag",),
+    "s0_ftq_value": (_PREFETCH + "io_fromFtq_bits_req_0_ftqIdx_value",),
+    "s1_ftq_flag": (_PREFETCH + "s1_ftqIdx_flag",),
+    "s1_ftq_value": (_PREFETCH + "s1_ftqIdx_value",),
     "ftq_prefetch_valid": (_ICACHE + "io_fromFtq_toPrefetch_valid",),
     "soft_pending": (
         _ICACHE + "softPrefetchValid",
@@ -236,8 +251,6 @@ def _read_prefetch(recorder, key: str) -> Optional[int]:
 
 def reset_icache_prefetchpipe_coverage_state(recorder) -> None:
     recorder._icache_prefetchpipe_cov_state = {
-        "bpu_match_seen": False,
-        "bpu_miss_seen": False,
         "itlb_wait_seen": False,
         "meta_resend_blocked": False,
         "waylookup_blocked": False,
@@ -267,6 +280,25 @@ def _mark_prefetch(
         )
 
 
+def _ftq_ptr(s: dict[str, Any], prefix: str) -> tuple[int, int] | None:
+    flag = s.get(f"{prefix}_ftq_flag")
+    value = s.get(f"{prefix}_ftq_value")
+    if flag is None or value is None:
+        return None
+    return int(flag), int(value)
+
+
+def _bpu_flush_match(s: dict[str, Any], prefix: str) -> bool | None:
+    return ftq_ptr_matches_or_before(
+        BpuS3Flush(
+            valid=s.get("bpu_valid"),
+            flag=s.get("bpu_flag"),
+            value=s.get("bpu_value"),
+        ),
+        _ftq_ptr(s, prefix),
+    )
+
+
 def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
     del env
     state = getattr(recorder, "_icache_prefetchpipe_cov_state", None)
@@ -281,7 +313,14 @@ def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
     }
     hw_request = _on(s["from_valid"]) and _off(s["from_soft"])
     soft_request = _on(s["from_valid"]) and _on(s["from_soft"])
+    # This pipe uses a non-blocking ITLB port whose request ready is an RTL invariant.
     entry_resources_ready = _on(s["s1_ready"]) and _on(s["meta_ready"])
+    bpu_s0_match = _bpu_flush_match(s, "s0")
+    bpu_s1_match = _bpu_flush_match(s, "s1") if _on(s["s1_valid"]) else False
+    bpu_does_not_block_entry = (
+        _off(s["bpu_valid"])
+        or (bpu_s0_match is False and bpu_s1_match is False)
+    )
 
     _mark_prefetch(
         recorder,
@@ -298,7 +337,11 @@ def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
         cycle,
         _off(s["soft_pending"])
         and _on(s["ftq_prefetch_valid"])
-        and any(_on(s[key]) for key in ("soft0_valid", "soft1_valid", "soft2_valid")),
+        and any(_on(s[key]) for key in ("soft0_valid", "soft1_valid", "soft2_valid"))
+        and hw_request
+        and entry_resources_ready
+        and _off(s["global_flush"])
+        and bpu_does_not_block_entry,
         evidence,
     )
     _mark_prefetch(
@@ -409,22 +452,28 @@ def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
         evidence,
     )
 
-    bpu_comparison = (
+    bpu_entry_scenario = (
         hw_request
         and _on(s["bpu_valid"])
         and _off(s["global_flush"])
         and entry_resources_ready
     )
-    if bpu_comparison and _on(s["from_ready"]):
-        state["bpu_miss_seen"] = True
-    if bpu_comparison and _off(s["from_ready"]):
-        state["bpu_match_seen"] = True
     _mark_prefetch(
         recorder,
         "icache_prefetchpipe_s0_entry",
-        "bpu_flush_match_only",
+        "bpu_flush_match_blocks_hw",
         cycle,
-        state["bpu_match_seen"] and state["bpu_miss_seen"],
+        bpu_entry_scenario and bpu_s0_match is True,
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s0_entry",
+        "bpu_flush_miss_allows_hw",
+        cycle,
+        bpu_entry_scenario
+        and bpu_s0_match is False
+        and bpu_s1_match is False,
         evidence,
     )
     _mark_prefetch(

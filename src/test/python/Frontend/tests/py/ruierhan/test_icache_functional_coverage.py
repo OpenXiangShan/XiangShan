@@ -78,13 +78,13 @@ def _hit(recorder, group, bin_name):
 
 
 def test_icache_mainpipe_sampler_contract_has_one_key_per_leaf():
-    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 43
-    assert len(set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)) == 43
+    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 47
+    assert len(set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)) == 47
 
 
 def test_icache_prefetchpipe_sampler_contract_has_one_key_per_leaf():
-    assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 33
-    assert len(set(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS)) == 33
+    assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 34
+    assert len(set(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS)) == 34
 
 
 def test_icache_missunit_sampler_contract_has_one_key_per_leaf():
@@ -138,6 +138,65 @@ def test_mainpipe_single_line_bank_range_requires_expected_bank_mask():
 def _set_mainpipe_should_fetch(recorder, values):
     for index, value in enumerate(values):
         recorder.env.dut.set(_MAIN + f"s1_shouldFetch_{index}", int(value))
+
+
+def _set_mainpipe_protection_miss(recorder):
+    for key, value in {
+        "s1_valid": 1,
+        "s1_flush": 0,
+        "cross0": 0,
+        "req1_valid": 0,
+        "backend_exception": 0,
+        "itlb_exception": 0,
+        "exception": 0,
+        "pmp_instr": 0,
+        "pmp_mmio": 0,
+        "pbmt": 0,
+    }.items():
+        recorder.set_key(key, value)
+    recorder.env.dut.set(_MAIN + "s1_hits_0_0", 0)
+
+
+def test_mainpipe_pmp_exception_bin_excludes_flush_and_backend_exception():
+    recorder = _Recorder()
+    _set_mainpipe_protection_miss(recorder)
+    recorder.set_key("pmp_instr", 1)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 1)
+    assert _hit(recorder, "icache_mainpipe_s1_protection", "pmp_exception_suppresses_miss")
+
+    for blocker in ("s1_flush", "backend_exception"):
+        recorder = _Recorder()
+        _set_mainpipe_protection_miss(recorder)
+        recorder.set_key("pmp_instr", 1)
+        recorder.set_key(blocker, 1)
+        sample_icache_mainpipe_coverage(recorder, recorder.env, 2)
+        assert not _hit(
+            recorder,
+            "icache_mainpipe_s1_protection",
+            "pmp_exception_suppresses_miss",
+        )
+
+
+def test_mainpipe_uncache_sources_sample_independent_bins():
+    cases = (
+        ("pmp_mmio_suppresses_refill", {"pmp_mmio": 1, "pbmt": 0}),
+        ("pbmt_uncache_suppresses_refill", {"pmp_mmio": 0, "pbmt": 1}),
+        ("pbmt_uncache_suppresses_refill", {"pmp_mmio": 0, "pbmt": 2}),
+    )
+    all_bins = {name for name, _ in cases}
+
+    for cycle, (expected_bin, overrides) in enumerate(cases, start=10):
+        recorder = _Recorder()
+        _set_mainpipe_protection_miss(recorder)
+        for key, value in overrides.items():
+            recorder.set_key(key, value)
+        sample_icache_mainpipe_coverage(recorder, recorder.env, cycle)
+
+        assert _hit(recorder, "icache_mainpipe_s1_protection", expected_bin)
+        assert all(
+            not _hit(recorder, "icache_mainpipe_s1_protection", other_bin)
+            for other_bin in all_bins - {expected_bin}
+        )
 
 
 def _set_mainpipe_single_sram_hit(recorder, *, fetch_finish=1, miss_req=0, should=(0, 0, 0, 0)):
@@ -654,25 +713,243 @@ def test_prefetch_ftq_accept_samples_entry_condition():
     assert _hit(recorder, "icache_prefetchpipe_s0_entry", "ftq_accept_all_ready")
 
 
-def test_prefetch_bpu_compare_requires_match_and_miss_cases():
-    recorder = _Recorder()
+def _set_prefetch_entry_scenario(recorder):
     for key, value in {
         "from_valid": 1,
         "from_soft": 0,
-        "bpu_valid": 1,
-        "global_flush": 0,
         "s1_ready": 1,
         "meta_ready": 1,
-        "from_ready": 0,
+        "global_flush": 0,
+        "bpu_valid": 0,
+        "s1_valid": 0,
+        "s0_ftq_flag": 0,
+        "s0_ftq_value": 4,
+        "s1_ftq_flag": 0,
+        "s1_ftq_value": 4,
     }.items():
         recorder.set_prefetch_key(key, value)
 
-    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 2)
-    assert not _hit(recorder, "icache_prefetchpipe_s0_entry", "bpu_flush_match_only")
 
-    recorder.set_prefetch_key("from_ready", 1)
+def test_prefetch_redirect_flush_requires_dynamic_entry_resources_ready():
+    recorder = _Recorder()
+    _set_prefetch_entry_scenario(recorder)
+    recorder.set_prefetch_key("global_flush", 1)
+    recorder.set_prefetch_key("meta_ready", 0)
+
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 2)
+    assert not _hit(recorder, "icache_prefetchpipe_s0_entry", "redirect_flush_blocks_hw")
+
+    recorder.set_prefetch_key("meta_ready", 1)
     sample_icache_prefetchpipe_coverage(recorder, recorder.env, 3)
-    assert _hit(recorder, "icache_prefetchpipe_s0_entry", "bpu_flush_match_only")
+    assert _hit(recorder, "icache_prefetchpipe_s0_entry", "redirect_flush_blocks_hw")
+
+
+def test_prefetch_bpu_match_and_miss_are_independent_bins():
+    match_recorder = _Recorder()
+    _set_prefetch_entry_scenario(match_recorder)
+    for key, value in {
+        "bpu_valid": 1,
+        "bpu_flag": 0,
+        "bpu_value": 4,
+    }.items():
+        match_recorder.set_prefetch_key(key, value)
+
+    sample_icache_prefetchpipe_coverage(match_recorder, match_recorder.env, 4)
+    assert _hit(
+        match_recorder,
+        "icache_prefetchpipe_s0_entry",
+        "bpu_flush_match_blocks_hw",
+    )
+    assert not _hit(
+        match_recorder,
+        "icache_prefetchpipe_s0_entry",
+        "bpu_flush_miss_allows_hw",
+    )
+
+    miss_recorder = _Recorder()
+    _set_prefetch_entry_scenario(miss_recorder)
+    for key, value in {
+        "bpu_valid": 1,
+        "bpu_flag": 0,
+        "bpu_value": 5,
+    }.items():
+        miss_recorder.set_prefetch_key(key, value)
+
+    sample_icache_prefetchpipe_coverage(miss_recorder, miss_recorder.env, 5)
+    assert _hit(
+        miss_recorder,
+        "icache_prefetchpipe_s0_entry",
+        "bpu_flush_miss_allows_hw",
+    )
+    assert not _hit(
+        miss_recorder,
+        "icache_prefetchpipe_s0_entry",
+        "bpu_flush_match_blocks_hw",
+    )
+
+
+def test_prefetch_bpu_miss_bin_excludes_flush_of_current_s1_request():
+    recorder = _Recorder()
+    _set_prefetch_entry_scenario(recorder)
+    for key, value in {
+        "bpu_valid": 1,
+        "bpu_flag": 0,
+        "bpu_value": 5,
+        "s1_valid": 1,
+        "s1_ftq_flag": 0,
+        "s1_ftq_value": 6,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 6)
+    assert not _hit(
+        recorder,
+        "icache_prefetchpipe_s0_entry",
+        "bpu_flush_miss_allows_hw",
+    )
+
+
+def test_prefetch_soft_entry_bins_cover_their_complete_trigger_conditions():
+    soft_bpu = _Recorder()
+    for key, value in {
+        "from_valid": 1,
+        "from_soft": 1,
+        "bpu_valid": 1,
+        "global_flush": 0,
+        "s0_fire": 1,
+    }.items():
+        soft_bpu.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(soft_bpu, soft_bpu.env, 7)
+    assert _hit(soft_bpu, "icache_prefetchpipe_s0_entry", "soft_ignores_bpu_flush")
+    blocked_soft_bpu = _Recorder()
+    for key in ("from_valid", "from_soft", "bpu_valid", "global_flush", "s0_fire"):
+        value = 1
+        blocked_soft_bpu.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(blocked_soft_bpu, blocked_soft_bpu.env, 8)
+    assert not _hit(
+        blocked_soft_bpu,
+        "icache_prefetchpipe_s0_entry",
+        "soft_ignores_bpu_flush",
+    )
+
+    soft_priority = _Recorder()
+    for key, value in {
+        "from_valid": 1,
+        "from_soft": 1,
+        "soft_pending": 1,
+        "ftq_prefetch_valid": 1,
+        "s0_fire": 1,
+    }.items():
+        soft_priority.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(soft_priority, soft_priority.env, 9)
+    assert _hit(
+        soft_priority,
+        "icache_prefetchpipe_s0_entry",
+        "soft_priority_over_ftq",
+    )
+    no_soft_selection = _Recorder()
+    for key, value in {
+        "from_valid": 1,
+        "from_soft": 0,
+        "soft_pending": 1,
+        "ftq_prefetch_valid": 1,
+        "s0_fire": 1,
+    }.items():
+        no_soft_selection.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(no_soft_selection, no_soft_selection.env, 10)
+    assert not _hit(
+        no_soft_selection,
+        "icache_prefetchpipe_s0_entry",
+        "soft_priority_over_ftq",
+    )
+
+    multi_soft = _Recorder()
+    for key, value in {
+        "soft_pending": 0,
+        "soft0_valid": 1,
+        "soft1_valid": 1,
+        "soft2_valid": 0,
+    }.items():
+        multi_soft.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(multi_soft, multi_soft.env, 11)
+    assert _hit(
+        multi_soft,
+        "icache_prefetchpipe_s0_entry",
+        "multi_soft_single_accept",
+    )
+    pending_multi_soft = _Recorder()
+    for key, value in {
+        "soft_pending": 1,
+        "soft0_valid": 1,
+        "soft1_valid": 1,
+    }.items():
+        pending_multi_soft.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(pending_multi_soft, pending_multi_soft.env, 12)
+    assert not _hit(
+        pending_multi_soft,
+        "icache_prefetchpipe_s0_entry",
+        "multi_soft_single_accept",
+    )
+
+
+def test_prefetch_soft_ftq_same_cycle_requires_ready_unflushed_entry():
+    recorder = _Recorder()
+    _set_prefetch_entry_scenario(recorder)
+    for key, value in {
+        "soft_pending": 0,
+        "ftq_prefetch_valid": 1,
+        "soft0_valid": 1,
+        "soft1_valid": 0,
+        "soft2_valid": 0,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 10)
+    assert _hit(
+        recorder,
+        "icache_prefetchpipe_s0_entry",
+        "soft_ftq_same_cycle_capture",
+    )
+
+    for blocker, value in (
+        ("s1_ready", 0),
+        ("meta_ready", 0),
+        ("global_flush", 1),
+    ):
+        blocked = _Recorder()
+        _set_prefetch_entry_scenario(blocked)
+        for key, signal_value in {
+            "soft_pending": 0,
+            "ftq_prefetch_valid": 1,
+            "soft0_valid": 1,
+            blocker: value,
+        }.items():
+            blocked.set_prefetch_key(key, signal_value)
+        sample_icache_prefetchpipe_coverage(blocked, blocked.env, 11)
+        assert not _hit(
+            blocked,
+            "icache_prefetchpipe_s0_entry",
+            "soft_ftq_same_cycle_capture",
+        )
+
+    bpu_blocked = _Recorder()
+    _set_prefetch_entry_scenario(bpu_blocked)
+    for key, value in {
+        "soft_pending": 0,
+        "ftq_prefetch_valid": 1,
+        "soft0_valid": 1,
+        "bpu_valid": 1,
+        "bpu_flag": 0,
+        "bpu_value": 4,
+    }.items():
+        bpu_blocked.set_prefetch_key(key, value)
+
+    sample_icache_prefetchpipe_coverage(bpu_blocked, bpu_blocked.env, 12)
+    assert not _hit(
+        bpu_blocked,
+        "icache_prefetchpipe_s0_entry",
+        "soft_ftq_same_cycle_capture",
+    )
 
 
 def test_prefetch_dual_layout_bin_requires_all_four_legal_cases():
@@ -1298,3 +1575,184 @@ def test_same_cycle_refill_flush_requires_global_flush_and_match():
 
     sample_icache_mainpipe_coverage(recorder, recorder.env, 22)
     assert _hit(recorder, "icache_mainpipe_s1_flush", "flush_wins_matching_refill")
+
+
+def _prime_mainpipe_s2(recorder, *, bank_mshr: int | None = None) -> None:
+    for key, value in {
+        "s1_fire": 1,
+        "req1_valid": 0,
+        "cross0": 0,
+        "cross1": 0,
+    }.items():
+        recorder.set_key(key, value)
+    if bank_mshr is not None:
+        recorder.env.dut.set(
+            _MAIN + f"s1_bankMshrValidReg_0_{bank_mshr}",
+            1,
+        )
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 40)
+    for key, value in {
+        "s1_fire": 0,
+        "s2_valid": 1,
+        "local_ecc_enable": 1,
+    }.items():
+        recorder.set_key(key, value)
+    recorder.env.dut.set(_MAIN + "s2_isCrossLine_0", 0)
+    recorder.env.dut.set(_MAIN + "s2_isCrossLine_1", 0)
+
+
+def _set_mainpipe_meta_source(
+    recorder,
+    *,
+    line_index: int,
+    hitnum: int,
+    mismatch: bool,
+) -> None:
+    req, line = divmod(line_index, 2)
+    suffix = "" if line_index == 0 else f"_{line_index}"
+    recorder.env.dut.set(
+        _MAIN + f"s2_corruptInfo_metaCorrupt_hitNum{suffix}",
+        hitnum,
+    )
+    recorder.env.dut.set(_MAIN + "s2_pTag", 0)
+    recorder.env.dut.set(
+        _MAIN + f"s2_wayLookupEntry_{req}_maybeRvcMap_{line}",
+        0,
+    )
+    recorder.env.dut.set(
+        _MAIN + f"s2_wayLookupEntry_{req}_metaCodes_{line}",
+        int(mismatch),
+    )
+
+
+def test_mainpipe_meta_ecc_bins_sample_distinct_source_conditions():
+    cases = (
+        (1, True, "meta_code_mismatch_single_way"),
+        (2, False, "meta_multiway_hit"),
+        (0, True, "meta_code_mismatch_zero_way_ignored"),
+    )
+    all_bins = {case[2] for case in cases}
+    for hitnum, mismatch, expected in cases:
+        recorder = _Recorder()
+        _prime_mainpipe_s2(recorder)
+        _set_mainpipe_meta_source(
+            recorder,
+            line_index=0,
+            hitnum=hitnum,
+            mismatch=mismatch,
+        )
+        sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+        assert _hit(recorder, "icache_mainpipe_s2_ecc", expected)
+        for other in all_bins - {expected}:
+            assert not _hit(recorder, "icache_mainpipe_s2_ecc", other)
+
+
+def test_mainpipe_meta_invalid_line_has_separate_masking_bin():
+    recorder = _Recorder()
+    _prime_mainpipe_s2(recorder)
+    _set_mainpipe_meta_source(
+        recorder,
+        line_index=1,
+        hitnum=1,
+        mismatch=True,
+    )
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+    assert _hit(recorder, "icache_mainpipe_s2_ecc", "meta_invalid_line_masked")
+    assert not _hit(
+        recorder,
+        "icache_mainpipe_s2_ecc",
+        "meta_code_mismatch_single_way",
+    )
+
+
+def _set_mainpipe_data_source(
+    recorder,
+    *,
+    bank: int,
+    bank_valid: int,
+    port_hit: int,
+    offset: int = 0,
+) -> None:
+    recorder.env.dut.set(_MAIN + "s2_offset_0", offset)
+    recorder.env.dut.set(_MAIN + f"s2_sramDatas_0_{bank}", 1)
+    recorder.env.dut.set(_MAIN + f"s2_sramCodes_0_{bank}", 0)
+    recorder.env.dut.set(_MAIN + f"s2_bankSramValid_0_{bank}", bank_valid)
+    recorder.env.dut.set(_MAIN + "s2_sramHits_0_0", port_hit)
+
+
+def test_mainpipe_data_ecc_selected_and_unselected_bins_are_distinct():
+    recorder = _Recorder()
+    _prime_mainpipe_s2(recorder)
+    _set_mainpipe_data_source(recorder, bank=0, bank_valid=1, port_hit=1)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+    assert _hit(
+        recorder,
+        "icache_mainpipe_s2_ecc",
+        "data_ecc_selected_valid_sram_bank",
+    )
+    assert not _hit(
+        recorder,
+        "icache_mainpipe_s2_ecc",
+        "data_ecc_unselected_bank_ignored",
+    )
+
+    recorder = _Recorder()
+    _prime_mainpipe_s2(recorder)
+    _set_mainpipe_data_source(recorder, bank=1, bank_valid=1, port_hit=1)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+    assert _hit(
+        recorder,
+        "icache_mainpipe_s2_ecc",
+        "data_ecc_unselected_bank_ignored",
+    )
+    assert not _hit(
+        recorder,
+        "icache_mainpipe_s2_ecc",
+        "data_ecc_selected_valid_sram_bank",
+    )
+
+
+def test_mainpipe_data_ecc_mshr_bypass_and_port_miss_bins():
+    recorder = _Recorder()
+    _prime_mainpipe_s2(recorder, bank_mshr=0)
+    _set_mainpipe_data_source(recorder, bank=0, bank_valid=0, port_hit=0)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+    assert _hit(
+        recorder,
+        "icache_mainpipe_s2_ecc",
+        "data_ecc_mshr_bypass_skips_sram_bank",
+    )
+
+    recorder = _Recorder()
+    _prime_mainpipe_s2(recorder)
+    _set_mainpipe_data_source(recorder, bank=0, bank_valid=1, port_hit=0)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+    assert _hit(
+        recorder,
+        "icache_mainpipe_s2_ecc",
+        "data_ecc_port_miss_ignored",
+    )
+
+
+def test_mainpipe_s2_global_and_bpu_flush_bins_are_independent():
+    recorder = _Recorder()
+    for key, value in {
+        "s2_valid": 1,
+        "io_flush": 1,
+        "bpu_valid": 0,
+    }.items():
+        recorder.set_key(key, value)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 50)
+    assert _hit(recorder, "icache_mainpipe_s2_ecc", "global_flush_clears_s2")
+    assert not _hit(recorder, "icache_mainpipe_s2_ecc", "bpu_s3_flush_keeps_s2")
+
+    recorder = _Recorder()
+    for key, value in {
+        "s2_valid": 1,
+        "io_flush": 0,
+        "bpu_valid": 1,
+    }.items():
+        recorder.set_key(key, value)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 51)
+    assert _hit(recorder, "icache_mainpipe_s2_ecc", "bpu_s3_flush_keeps_s2")
+    assert not _hit(recorder, "icache_mainpipe_s2_ecc", "global_flush_clears_s2")

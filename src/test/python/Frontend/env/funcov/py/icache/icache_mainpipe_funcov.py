@@ -76,14 +76,19 @@ ICACHE_MAINPIPE_SAMPLER_BIN_KEYS = frozenset(
         ("icache_mainpipe_s1_miss", "invalid_line_no_miss"),
         ("icache_mainpipe_s1_protection", "itlb_over_pmp_priority"),
         ("icache_mainpipe_s1_protection", "pmp_exception_suppresses_miss"),
-        ("icache_mainpipe_s1_protection", "mmio_pbmt_suppresses_refill"),
+        ("icache_mainpipe_s1_protection", "pmp_mmio_suppresses_refill"),
+        ("icache_mainpipe_s1_protection", "pbmt_uncache_suppresses_refill"),
         ("icache_mainpipe_s1_protection", "tl_error_to_exception"),
-        ("icache_mainpipe_s1_protection", "dual_request_shared_protection"),
-        ("icache_mainpipe_s2_ecc", "meta_code_or_multiway_corrupt"),
-        ("icache_mainpipe_s2_ecc", "data_ecc_selected_bank_only"),
-        ("icache_mainpipe_s2_ecc", "mshr_bypass_skips_data_ecc"),
-        ("icache_mainpipe_s2_ecc", "corrupt_sideband_per_line"),
-        ("icache_mainpipe_s2_ecc", "global_flush_clears_s2_bpu_does_not"),
+        ("icache_mainpipe_s2_ecc", "meta_code_mismatch_single_way"),
+        ("icache_mainpipe_s2_ecc", "meta_multiway_hit"),
+        ("icache_mainpipe_s2_ecc", "meta_code_mismatch_zero_way_ignored"),
+        ("icache_mainpipe_s2_ecc", "meta_invalid_line_masked"),
+        ("icache_mainpipe_s2_ecc", "data_ecc_selected_valid_sram_bank"),
+        ("icache_mainpipe_s2_ecc", "data_ecc_unselected_bank_ignored"),
+        ("icache_mainpipe_s2_ecc", "data_ecc_mshr_bypass_skips_sram_bank"),
+        ("icache_mainpipe_s2_ecc", "data_ecc_port_miss_ignored"),
+        ("icache_mainpipe_s2_ecc", "global_flush_clears_s2"),
+        ("icache_mainpipe_s2_ecc", "bpu_s3_flush_keeps_s2"),
     }
 )
 
@@ -135,6 +140,7 @@ _SIGNALS = {
         _MAIN + "__Vtogcov__s1_req_0_ftqIdx_value",
     ),
     "req1_valid": (_MAIN + "s1_req_1_valid",),
+    "backend_exception": (_MAIN + "s1_req_0_hasBackendException",),
     "cross0": _S1_CROSS[0],
     "cross1": _S1_CROSS[1],
     "toifu_valid": (_MAIN + "io_toIfu_req_valid",),
@@ -176,6 +182,7 @@ _SIGNALS = {
     "pbmt": (_MAIN + "s1_wayLookupEntry_0_itlbPbmt",),
     "ecc_enable": (_MAIN + "io_eccEnable", _ICACHE + "io_eccEnable"),
     "local_ecc_enable": (_MAIN + "eccEnable", _MAIN + "__Vtogcov__eccEnable"),
+    "s2_valid": (_MAIN + "s2_valid", _MAIN + "__Vtogcov__s2_valid"),
     "error_valid": (_MAIN + "io_error_valid", _MAIN + "__Vtogcov__io_error_valid"),
     "error_meta": (_MAIN + "io_error_bits_source_tag",),
     "error_data": (_MAIN + "io_error_bits_source_data",),
@@ -202,6 +209,7 @@ _EVIDENCE_SCALARS = frozenset(
         "s1_ftq_flag",
         "s1_ftq_value",
         "req1_valid",
+        "backend_exception",
         "cross0",
         "cross1",
         "toifu_valid",
@@ -222,6 +230,7 @@ _EVIDENCE_SCALARS = frozenset(
         "pbmt",
         "ecc_enable",
         "local_ecc_enable",
+        "s2_valid",
         "error_valid",
     }
 )
@@ -276,6 +285,55 @@ def _known(values: Iterable[Optional[int]]) -> bool:
 
 def _bits(values: Iterable[Optional[int]]) -> tuple[int, ...]:
     return tuple(int(value or 0) for value in values)
+
+
+def _parity(value: Optional[int]) -> Optional[int]:
+    if value is None:
+        return None
+    return int(value).bit_count() & 1
+
+
+def _ecc_mismatch(data: Optional[int], code: Optional[int]) -> bool:
+    parity = _parity(data)
+    return parity is not None and code is not None and parity != (int(code) & 1)
+
+
+def _meta_ecc_mismatch(
+    ptag: Optional[int], maybe_rvc_map: Optional[int], code: Optional[int]
+) -> bool:
+    tag_parity = _parity(ptag)
+    rvc_parity = _parity(maybe_rvc_map)
+    return (
+        tag_parity is not None
+        and rvc_parity is not None
+        and code is not None
+        and (tag_parity ^ rvc_parity) != (int(code) & 1)
+    )
+
+
+def _s2_valid_lines(prev: Optional[dict[str, Any]], s: dict[str, Any]) -> tuple[bool, ...]:
+    if not prev or not _on(prev["s1_fire"]):
+        return (False, False, False, False)
+    req1_valid = _on(prev["req1_valid"])
+    cross = s["s2_cross"]
+    return (
+        True,
+        _on(cross[0]),
+        req1_valid,
+        req1_valid and _on(cross[1]),
+    )
+
+
+def _s2_bank_selected(offset: Optional[int], line: int, bank: int, cross: bool) -> bool:
+    if offset is None:
+        return False
+    bank_low = (int(offset) >> 3) & (_DATA_BANKS - 1)
+    # ICacheMainPipe passes s2_valid as getBankSel's end offset, so the high
+    # bank is zero whenever the s2 context is active.
+    bank_high = 0
+    if line == 0:
+        return bank >= bank_low and (cross or bank <= bank_high)
+    return cross and bank <= bank_high
 
 
 def _pure_cache_hit(
@@ -396,8 +454,6 @@ def reset_icache_mainpipe_coverage_state(recorder) -> None:
         "prev": None,
         "four_line_ready_cycles": 0,
         "miss_backpressure_cycles": 0,
-        "s2_global_flush_seen": False,
-        "s2_bpu_only_seen": False,
         "ftq_waylookup_skew_pending": False,
         "ftq_waylookup_join_pending": False,
         "refill_completion_pending": None,
@@ -460,6 +516,14 @@ def _snapshot(recorder) -> dict[str, Any]:
                     for bank in range(_DATA_BANKS)
                 ),
             ),
+            "bank_mshr_reg": _read_names(
+                recorder,
+                tuple(
+                    _MAIN + f"s1_bankMshrValidReg_{req}_{bank}"
+                    for req in range(2)
+                    for bank in range(_DATA_BANKS)
+                ),
+            ),
             "should": _vec(recorder, "s1_shouldFetch", 4),
             "has_send": _vec(recorder, "s1_hasSend_valid", 4, first_unsuffixed=True),
             "arb_valid": _read_names(
@@ -507,6 +571,47 @@ def _snapshot(recorder) -> dict[str, Any]:
                     + "s2_corruptInfo_metaCorrupt_hitNum"
                     + ("" if index == 0 else f"_{index}")
                     for index in range(4)
+                ),
+            ),
+            "s2_meta_maps": _read_names(
+                recorder,
+                tuple(
+                    _MAIN + f"s2_wayLookupEntry_{req}_maybeRvcMap_{line}"
+                    for req in range(2)
+                    for line in range(2)
+                ),
+            ),
+            "s2_meta_codes": _read_names(
+                recorder,
+                tuple(
+                    _MAIN + f"s2_wayLookupEntry_{req}_metaCodes_{line}"
+                    for req in range(2)
+                    for line in range(2)
+                ),
+            ),
+            "s2_ptag": _read_names(recorder, (_MAIN + "s2_pTag",)),
+            "s2_cross": _read_names(
+                recorder,
+                tuple(_MAIN + f"s2_isCrossLine_{req}" for req in range(2)),
+            ),
+            "s2_offset": _read_names(
+                recorder,
+                tuple(_MAIN + f"s2_offset_{req}" for req in range(2)),
+            ),
+            "s2_sram_data": _read_names(
+                recorder,
+                tuple(
+                    _MAIN + f"s2_sramDatas_{req}_{bank}"
+                    for req in range(2)
+                    for bank in range(_DATA_BANKS)
+                ),
+            ),
+            "s2_sram_code": _read_names(
+                recorder,
+                tuple(
+                    _MAIN + f"s2_sramCodes_{req}_{bank}"
+                    for req in range(2)
+                    for bank in range(_DATA_BANKS)
                 ),
             ),
             "s2_bank_sram": _read_names(
@@ -745,6 +850,17 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         int(_on(s["req1_valid"])),
         int(_on(s["req1_valid"]) and _on(s["cross1"])),
     )
+    protection_shape_known = _known((s["cross0"], s["req1_valid"])) and (
+        not _on(s["req1_valid"]) or s["cross1"] is not None
+    )
+    valid_line_miss = protection_shape_known and all(
+        not valid or hit is not None
+        for valid, hit in zip(line_valid, s["hits"])
+    ) and any(
+        valid and _off(hit)
+        for valid, hit in zip(line_valid, s["hits"])
+    )
+    no_backend_exception = _off(s["backend_exception"])
     req0_hits = hits[:2]
     req1_hits = hits[2:]
     req0_should = should[:2]
@@ -1109,22 +1225,39 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         "pmp_exception_suppresses_miss",
         cycle,
         _on(s["s1_valid"])
+        and _off(s["s1_flush"])
         and _off(s["itlb_exception"])
         and _on(s["pmp_instr"])
-        and any(
-            valid and not hit
-            for valid, hit in zip(line_valid, hits)
-        ),
+        and no_backend_exception
+        and valid_line_miss,
         evidence,
     )
     _mark(
         recorder,
         "icache_mainpipe_s1_protection",
-        "mmio_pbmt_suppresses_refill",
+        "pmp_mmio_suppresses_refill",
         cycle,
         _on(s["s1_valid"])
-        and (_on(s["pmp_mmio"]) or s["pbmt"] in (1, 2))
-        and any(valid and not hit for valid, hit in zip(line_valid, hits)),
+        and _off(s["s1_flush"])
+        and _off(s["exception"])
+        and no_backend_exception
+        and _on(s["pmp_mmio"])
+        and s["pbmt"] == 0
+        and valid_line_miss,
+        evidence,
+    )
+    _mark(
+        recorder,
+        "icache_mainpipe_s1_protection",
+        "pbmt_uncache_suppresses_refill",
+        cycle,
+        _on(s["s1_valid"])
+        and _off(s["s1_flush"])
+        and _off(s["exception"])
+        and no_backend_exception
+        and _off(s["pmp_mmio"])
+        and s["pbmt"] in (1, 2)
+        and valid_line_miss,
         evidence,
     )
     _mark(
@@ -1136,84 +1269,105 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         and (_on(s["miss_resp_corrupt"]) or _on(s["miss_resp_denied"])),
         evidence,
     )
-    _mark(
-        recorder,
-        "icache_mainpipe_s1_protection",
-        "dual_request_shared_protection",
-        cycle,
-        _on(s["s1_valid"])
-        and _on(s["req1_valid"])
-        and (
-            _on(s["itlb_exception"])
-            or _on(s["pmp_instr"])
-            or _on(s["pmp_mmio"])
-            or s["pbmt"] in (1, 2)
-        ),
-        evidence,
-    )
-
     prior_s1_fire = bool(prev) and _on(prev["s1_fire"])
-    meta_hitnum = _bits(s["s2_meta_hitnum"])
-    meta_error = _on(s["error_meta"]) or (
-        _on(s["error_valid"]) and any(value > 1 for value in meta_hitnum)
-    )
-    data_error = _on(s["error_data"]) or (
-        _on(s["error_valid"])
-        and _off(s["error_meta"])
-        and any(_bits(s["s2_bank_sram"]))
-    )
-    _mark(
-        recorder,
-        "icache_mainpipe_s2_ecc",
-        "meta_code_or_multiway_corrupt",
-        cycle,
-        prior_s1_fire and _on(local_ecc_enable) and meta_error,
-        evidence,
-    )
-    _mark(
-        recorder,
-        "icache_mainpipe_s2_ecc",
-        "data_ecc_selected_bank_only",
-        cycle,
-        prior_s1_fire
-        and _on(local_ecc_enable)
-        and data_error
-        and any(_bits(s["s2_sram_hits"])),
-        evidence,
-    )
-    prior_mshr_bank = bool(prev) and any(_bits(prev["bank_mshr"]))
-    _mark(
-        recorder,
-        "icache_mainpipe_s2_ecc",
-        "mshr_bypass_skips_data_ecc",
-        cycle,
-        prior_s1_fire
-        and prior_mshr_bank,
-        evidence,
-    )
-    _mark(
-        recorder,
-        "icache_mainpipe_s2_ecc",
-        "corrupt_sideband_per_line",
-        cycle,
-        prior_s1_fire and (meta_error or data_error),
-        evidence,
-    )
-    if prior_s1_fire and global_s1_flush:
-        state["s2_global_flush_seen"] = True
-    if (
-        prior_s1_fire
-        and _on(s["bpu_valid"])
-        and _off(s["s0_flush"])
-        and _off(s["s1_flush"])
+    s2_context = prior_s1_fire and _on(s["s2_valid"]) and _on(local_ecc_enable)
+    valid_lines = _s2_valid_lines(prev, s)
+    meta_single_way: list[int] = []
+    meta_multiway: list[int] = []
+    meta_zero_way: list[int] = []
+    meta_invalid_line: list[int] = []
+    ptag = s["s2_ptag"][0]
+    for index, (hitnum, maybe_rvc_map, code) in enumerate(
+        zip(s["s2_meta_hitnum"], s["s2_meta_maps"], s["s2_meta_codes"])
     ):
-        state["s2_bpu_only_seen"] = True
+        if hitnum is None:
+            continue
+        count = int(hitnum)
+        mismatch = _meta_ecc_mismatch(ptag, maybe_rvc_map, code)
+        if valid_lines[index]:
+            if count == 1 and mismatch:
+                meta_single_way.append(index)
+            elif count > 1:
+                meta_multiway.append(index)
+            elif count == 0 and mismatch:
+                meta_zero_way.append(index)
+        elif count > 1 or (count == 1 and mismatch):
+            meta_invalid_line.append(index)
+
+    for bin_name, matches in (
+        ("meta_code_mismatch_single_way", meta_single_way),
+        ("meta_multiway_hit", meta_multiway),
+        ("meta_code_mismatch_zero_way_ignored", meta_zero_way),
+        ("meta_invalid_line_masked", meta_invalid_line),
+    ):
+        _mark(
+            recorder,
+            "icache_mainpipe_s2_ecc",
+            bin_name,
+            cycle,
+            s2_context and bool(matches),
+            {**evidence, "s2_matching_lines": tuple(matches)},
+        )
+
+    selected_valid: list[tuple[int, int, int]] = []
+    unselected: list[tuple[int, int, int]] = []
+    mshr_bypass: list[tuple[int, int, int]] = []
+    port_miss: list[tuple[int, int, int]] = []
+    prior_bank_mshr = prev["bank_mshr_reg"] if prev else (None,) * (2 * _DATA_BANKS)
+    for req in range(2):
+        cross = _on(s["s2_cross"][req])
+        for line in range(2):
+            line_index = req * 2 + line
+            if not valid_lines[line_index]:
+                continue
+            port_hit = s["s2_sram_hits"][line_index]
+            for bank in range(_DATA_BANKS):
+                bank_index = req * _DATA_BANKS + bank
+                if not _ecc_mismatch(
+                    s["s2_sram_data"][bank_index], s["s2_sram_code"][bank_index]
+                ):
+                    continue
+                selected = _s2_bank_selected(s["s2_offset"][req], line, bank, cross)
+                bank_valid = s["s2_bank_sram"][bank_index]
+                item = (req, line, bank)
+                if selected and _on(bank_valid) and _on(port_hit):
+                    selected_valid.append(item)
+                if not selected and _on(bank_valid) and _on(port_hit):
+                    unselected.append(item)
+                if selected and _off(bank_valid) and _on(prior_bank_mshr[bank_index]):
+                    mshr_bypass.append(item)
+                if selected and _on(bank_valid) and _off(port_hit):
+                    port_miss.append(item)
+
+    for bin_name, matches in (
+        ("data_ecc_selected_valid_sram_bank", selected_valid),
+        ("data_ecc_unselected_bank_ignored", unselected),
+        ("data_ecc_mshr_bypass_skips_sram_bank", mshr_bypass),
+        ("data_ecc_port_miss_ignored", port_miss),
+    ):
+        _mark(
+            recorder,
+            "icache_mainpipe_s2_ecc",
+            bin_name,
+            cycle,
+            s2_context and bool(matches),
+            {**evidence, "s2_matching_req_line_banks": tuple(matches)},
+        )
+
     _mark(
         recorder,
         "icache_mainpipe_s2_ecc",
-        "global_flush_clears_s2_bpu_does_not",
+        "global_flush_clears_s2",
         cycle,
-        state["s2_global_flush_seen"] and state["s2_bpu_only_seen"],
+        _on(s["s2_valid"]) and _on(s["io_flush"]) and _off(s["bpu_valid"]),
+        evidence,
+    )
+    _mark(
+        recorder,
+        "icache_mainpipe_s2_ecc",
+        "bpu_s3_flush_keeps_s2",
+        cycle,
+        _on(s["s2_valid"]) and _off(s["io_flush"]) and _on(s["bpu_valid"]),
         evidence,
     )
 

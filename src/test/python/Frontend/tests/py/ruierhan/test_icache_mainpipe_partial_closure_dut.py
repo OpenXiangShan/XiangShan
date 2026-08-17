@@ -199,36 +199,28 @@ def test_tc_icache_mainpipe_pmp_fault_dut(env) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-635")
+@pytest.mark.funcov_bins("BIN-638")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_uncache_suppress_dut(env) -> None:
     _run_pbmt_nc_redirect(env)
-    _wait_hit(env, "icache_mainpipe_s1_protection", "mmio_pbmt_suppresses_refill")
+    _wait_hit(env, "icache_mainpipe_s1_protection", "pbmt_uncache_suppresses_refill")
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-637")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-@pytest.mark.xfail(
-    reason="needs a directed dual-fetch transaction aligned with PMP/PBMT protection in the same MainPipe s1 window",
-    strict=False,
-)
-def test_tc_icache_mainpipe_dual_protection_dut(env) -> None:
-    pytest.xfail(
-        "needs a directed dual-fetch transaction aligned with PMP/PBMT protection in the same MainPipe s1 window"
-    )
-    _run_pbmt_nc_redirect(env)
-    _wait_hit(env, "icache_mainpipe_s1_protection", "dual_request_shared_protection")
-
-
-@pytest.mark.funcov_bins("BIN-645")
+@pytest.mark.funcov_bins("BIN-645", "BIN-776")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_s2_flush_dut(env) -> None:
     _run_large_loop_multi_segment(env)
     _wait_hit(
         env,
         "icache_mainpipe_s2_ecc",
-        "global_flush_clears_s2_bpu_does_not",
+        "global_flush_clears_s2",
+        max_cycles=_cycle_limit("TB_ICACHE_MAINPIPE_S2_FLUSH_WAIT", 12000),
+    )
+    _wait_hit(
+        env,
+        "icache_mainpipe_s2_ecc",
+        "bpu_s3_flush_keeps_s2",
         max_cycles=_cycle_limit("TB_ICACHE_MAINPIPE_S2_FLUSH_WAIT", 12000),
     )
     assert not env.monitor.get_errors()
@@ -237,13 +229,26 @@ def test_tc_icache_mainpipe_s2_flush_dut(env) -> None:
 @pytest.mark.parametrize(
     ("bin_id", "bin_name"),
     [
-        ("BIN-641", "meta_code_or_multiway_corrupt"),
-        ("BIN-642", "data_ecc_selected_bank_only"),
-        ("BIN-643", "mshr_bypass_skips_data_ecc"),
-        ("BIN-644", "corrupt_sideband_per_line"),
+        ("BIN-641", "meta_code_mismatch_single_way"),
+        ("BIN-770", "meta_multiway_hit"),
+        ("BIN-771", "meta_code_mismatch_zero_way_ignored"),
+        ("BIN-772", "meta_invalid_line_masked"),
+        ("BIN-642", "data_ecc_selected_valid_sram_bank"),
+        ("BIN-773", "data_ecc_unselected_bank_ignored"),
+        ("BIN-774", "data_ecc_mshr_bypass_skips_sram_bank"),
+        ("BIN-775", "data_ecc_port_miss_ignored"),
     ],
 )
-@pytest.mark.funcov_bins("BIN-641", "BIN-642", "BIN-643", "BIN-644")
+@pytest.mark.funcov_bins(
+    "BIN-641",
+    "BIN-642",
+    "BIN-770",
+    "BIN-771",
+    "BIN-772",
+    "BIN-773",
+    "BIN-774",
+    "BIN-775",
+)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.xfail(
     reason="current Python ICache environment exposes TL response faults but not Meta/DataArray ECC injection hooks",
