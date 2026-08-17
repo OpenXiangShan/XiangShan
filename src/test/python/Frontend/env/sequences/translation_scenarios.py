@@ -83,6 +83,10 @@ class TranslationScenario:
     hgatp_ppn: int = 0
     priv_imode: int = 1
     priv_virt: int = 0
+    s1_pf: int = 0
+    s1_af: int = 0
+    s2_gpf: int = 0
+    s2_gaf: int = 0
     pmp_entries: Tuple[TranslationPmpPmaEntry, ...] = ()
     pma_entries: Tuple[TranslationPmpPmaEntry, ...] = ()
     expected_path: Literal["cacheable", "uncache", "fault"] = "cacheable"
@@ -135,6 +139,28 @@ class TranslationScenarioBuilder:
         if not 0 <= int(pte.pbmt) < 4:
             raise ValueError(f"{stage} PTE PBMT must fit the two-bit PTW response field")
 
+    @staticmethod
+    def _validate_response_faults(scenario: TranslationScenario) -> None:
+        fault_bits = {
+            "s1_pf": scenario.s1_pf,
+            "s1_af": scenario.s1_af,
+            "s2_gpf": scenario.s2_gpf,
+            "s2_gaf": scenario.s2_gaf,
+        }
+        for name, value in fault_bits.items():
+            if int(value) not in {0, 1}:
+                raise ValueError(f"response fault {name} must be 0 or 1")
+        if int(scenario.s1_pf) and int(scenario.s1_af):
+            raise ValueError("S-stage response cannot assert both s1_pf and s1_af")
+        if int(scenario.s2_gpf) and int(scenario.s2_gaf):
+            raise ValueError("G-stage response cannot assert both s2_gpf and s2_gaf")
+        if int(scenario.s2xlate) == _S2XLATE_ONLY_STAGE2 and (int(scenario.s1_pf) or int(scenario.s1_af)):
+            raise ValueError("only-stage2 translation cannot inject S-stage response faults")
+        if int(scenario.s2xlate) in {_S2XLATE_NONE, _S2XLATE_ONLY_STAGE1} and (
+            int(scenario.s2_gpf) or int(scenario.s2_gaf)
+        ):
+            raise ValueError("translation without G-stage cannot inject G-stage response faults")
+
     def validate(self, scenario: TranslationScenario) -> None:
         if not str(scenario.scenario_id):
             raise ValueError("translation scenario_id must be non-empty")
@@ -168,6 +194,7 @@ class TranslationScenarioBuilder:
                 raise ValueError("all-stage stage-1 PTE VMID must match hgatp_vmid")
         self._validate_pte(scenario.s1_pte, "stage-1")
         self._validate_pte(scenario.s2_pte, "stage-2")
+        self._validate_response_faults(scenario)
         for entry in scenario.pmp_entries:
             if entry.kind != "pmp":
                 raise ValueError("pmp_entries must contain PMP entries")
@@ -214,6 +241,20 @@ class TranslationScenarioBuilder:
             self._map_stage2_pages(self.env, scenario, int(scenario.gpa))
         else:
             self._map_stage1_pages(self.env, scenario, int(scenario.pa))
+
+        if int(scenario.s1_pf) or int(scenario.s1_af):
+            self.env.page_table.set_stage1_response_fault(
+                int(scenario.va) >> 12,
+                page_fault=int(scenario.s1_pf),
+                access_fault=int(scenario.s1_af),
+            )
+        if int(scenario.s2_gpf) or int(scenario.s2_gaf):
+            stage2_vpn = int(scenario.gpa if s2xlate == _S2XLATE_ALL_STAGE else scenario.va) >> 12
+            self.env.page_table.set_stage2_response_fault(
+                stage2_vpn,
+                guest_page_fault=int(scenario.s2_gpf),
+                guest_access_fault=int(scenario.s2_gaf),
+            )
 
         self.env.ptw_agent.configure(mode="sv39", response_source="model", compare_drive_source="model")
         expected_pa, expected_ok, expected_metadata = self.env.page_table.translate(

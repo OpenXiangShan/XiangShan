@@ -1460,6 +1460,57 @@ def test_uncache_sv39_all_stage_uses_stage2_physical_address(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.parametrize(
+    "scenario_id,s1_pf,s1_af,s2_gpf,s2_gaf",
+    [
+        pytest.param("atp-140-s1-pf-s2-leaf-dut", 1, 0, 0, 0, marks=pytest.mark.funcov_tps("ATP-140")),
+        pytest.param("atp-141-s1-af-s2-leaf-dut", 0, 1, 0, 0, marks=pytest.mark.funcov_tps("ATP-141")),
+        pytest.param("atp-142-s1-pf-s2-gpf-dut", 1, 0, 1, 0, marks=pytest.mark.funcov_tps("ATP-142")),
+        pytest.param("atp-143-s1-pf-s2-gaf-dut", 1, 0, 0, 1, marks=pytest.mark.funcov_tps("ATP-143")),
+        pytest.param("atp-144-s1-af-s2-gpf-dut", 0, 1, 1, 0, marks=pytest.mark.funcov_tps("ATP-144")),
+        pytest.param("atp-145-s1-af-s2-gaf-dut", 0, 1, 0, 1, marks=pytest.mark.funcov_tps("ATP-145")),
+    ],
+)
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_sv39_all_stage_response_fault_priority(env, scenario_id, s1_pf, s1_af, s2_gpf, s2_gaf):
+    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    scenario = TranslationScenario(
+        scenario_id=scenario_id,
+        va=_NORMAL_BASE,
+        gpa=_NORMAL_PHYS_BASE,
+        pa=_NORMAL_ALT_PHYS_BASE,
+        payload=int(_CNOP).to_bytes(2, "little") * 32,
+        s2xlate=3,
+        s1_pte=TranslationPte(asid=5, vmid=7),
+        s2_pte=TranslationPte(vmid=7),
+        vsatp_asid=5,
+        hgatp_vmid=7,
+        priv_virt=1,
+        s1_pf=s1_pf,
+        s1_af=s1_af,
+        s2_gpf=s2_gpf,
+        s2_gaf=s2_gaf,
+        expected_path="fault",
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(scenario.va)
+    env.arm_translation_scenario(state)
+    _force_redirect_to(env, scenario.va)
+
+    for _ in range(6000):
+        env.step(1)
+        active = env.translation_oracle.get_active()
+        if active is not None and active["fault_seen"]:
+            break
+
+    env.step(32)
+
+    assert int(env.ptw_agent.get_stats().get("resp_count", 0)) >= 1
+    assert env.assert_translation_scenario()["error_count"] == 0
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_tps("ATP-124")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_sv39_execute_denied_reports_instruction_page_fault(env):

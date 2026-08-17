@@ -132,6 +132,83 @@ def test_builder_binds_page_fault_outcome_without_rewriting_the_pte() -> None:
 
 
 @pytest.mark.parametrize(
+    "scenario_id,s1_pf,s1_af,s2_gpf,s2_gaf,expected_outcome",
+    [
+        ("atp-140", 1, 0, 0, 0, "instruction_page_fault"),
+        ("atp-141", 0, 1, 0, 0, "instruction_access_fault"),
+        ("atp-142", 1, 0, 1, 0, "instruction_page_fault"),
+        ("atp-143", 1, 0, 0, 1, "instruction_access_fault"),
+        ("atp-144", 0, 1, 1, 0, "instruction_access_fault"),
+        ("atp-145", 0, 1, 0, 1, "instruction_access_fault"),
+    ],
+)
+def test_builder_composes_all_stage_response_fault_priority(
+    scenario_id: str,
+    s1_pf: int,
+    s1_af: int,
+    s2_gpf: int,
+    s2_gaf: int,
+    expected_outcome: str,
+) -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id=scenario_id,
+        va=0x80200000,
+        gpa=0x80400000,
+        pa=0x80600000,
+        payload=b"\x13\x00\x00\x00",
+        s2xlate=3,
+        s1_pte=TranslationPte(asid=5, vmid=7),
+        s2_pte=TranslationPte(vmid=7),
+        vsatp_asid=5,
+        hgatp_vmid=7,
+        priv_virt=1,
+        s1_pf=s1_pf,
+        s1_af=s1_af,
+        s2_gpf=s2_gpf,
+        s2_gaf=s2_gaf,
+        expected_path="fault",
+    )
+
+    state = TranslationScenarioBuilder(env).build(scenario)
+    response = env.page_table.build_ptw_resp(scenario.va >> 12, s2xlate=3)
+
+    assert tuple(response[name] for name in ("s1_pf", "s1_af", "s2_gpf", "s2_gaf")) == (
+        s1_pf,
+        s1_af,
+        s2_gpf,
+        s2_gaf,
+    )
+    assert state.expected_outcome["outcome"] == expected_outcome
+
+
+@pytest.mark.parametrize(
+    "scenario,match",
+    [
+        (
+            TranslationScenario("both-s1-faults", 0x80200000, 0x80400000, b"\x13", s1_pf=1, s1_af=1),
+            "both s1_pf and s1_af",
+        ),
+        (
+            TranslationScenario("both-s2-faults", 0x80200000, 0x80400000, b"\x13", s2xlate=2, s2_gpf=1, s2_gaf=1),
+            "both s2_gpf and s2_gaf",
+        ),
+        (
+            TranslationScenario("s1-fault-only-s2", 0x80200000, 0x80400000, b"\x13", s2xlate=2, s1_pf=1),
+            "only-stage2",
+        ),
+        (
+            TranslationScenario("s2-fault-only-s1", 0x80200000, 0x80400000, b"\x13", s2_gpf=1),
+            "without G-stage",
+        ),
+    ],
+)
+def test_builder_rejects_unrepresentable_response_fault_combinations(scenario, match: str) -> None:
+    with pytest.raises(ValueError, match=match):
+        TranslationScenarioBuilder(_env()).build(scenario)
+
+
+@pytest.mark.parametrize(
     "scenario,match",
     [
         (
