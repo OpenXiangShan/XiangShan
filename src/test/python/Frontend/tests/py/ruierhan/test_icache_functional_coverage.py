@@ -1397,11 +1397,12 @@ def test_prefetch_soft_probe_requires_correlated_meta_response_after_tlb_finish(
     )
 
 
-def test_prefetch_redirect_boundary_requires_ready_low_and_high():
+def test_prefetch_redirect_boundary_requires_ready_high_only():
     recorder = _Recorder()
     for key, value in {
         "s2_valid": 1,
         "s2_miss0": 1,
+        "miss_valid": 1,
         "global_flush": 1,
         "miss_ready": 0,
     }.items():
@@ -1427,10 +1428,15 @@ def test_prefetch_corrupt_refill_matches_s2_not_new_s1_set():
     recorder = _Recorder()
     for key, value in {
         "s2_valid": 1,
-        "s2_miss0": 1,
+        "s2_double": 0,
+        "s2_sram0": 0,
+        "s2_exception": 0,
+        "s2_mmio": 0,
+        "s2_ptag": 0x12,
         "refill_valid": 1,
         "refill_corrupt": 1,
         "refill_vset": 7,
+        "refill_paddr": 0x12 << 6,
         "s2_set0": 7,
         "s2_set1": 8,
         # A concurrent newer s1 request must not affect the s2 association.
@@ -1451,19 +1457,165 @@ def test_prefetch_corrupt_refill_matches_s2_not_new_s1_set():
 def test_prefetch_miss_backpressure_then_recovery_samples_state_transition():
     recorder = _Recorder()
     for key, value in {
+        "s2_valid": 1,
+        "s2_double": 0,
+        "s2_ptag": 0x14,
+        "s2_set0": 5,
         "miss_valid": 1,
         "miss_ready": 0,
+        "global_flush": 0,
+        "refill_valid": 0,
     }.items():
         recorder.set_prefetch_key(key, value)
     sample_icache_prefetchpipe_coverage(recorder, recorder.env, 23)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 24)
 
     recorder.set_prefetch_key("miss_ready", 1)
-    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 24)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 25)
     assert _hit(
         recorder,
         "icache_prefetchpipe_s2_miss",
         "missunit_backpressure_recovery",
     )
+
+
+def test_prefetch_s2_hit_samples_sram_or_exact_clean_refill_scenarios():
+    sram_hit = _Recorder()
+    for key, value in {
+        "s2_valid": 1,
+        "s2_double": 0,
+        "s2_sram0": 1,
+    }.items():
+        sram_hit.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(sram_hit, sram_hit.env, 26)
+    assert _hit(sram_hit, "icache_prefetchpipe_s2_miss", "sram_or_clean_mshr_hit")
+
+    clean_refill = _Recorder()
+    for key, value in {
+        "s2_valid": 1,
+        "s2_double": 0,
+        "s2_sram0": 0,
+        "s2_ptag": 0x21,
+        "s2_set0": 6,
+        "refill_valid": 1,
+        "refill_corrupt": 0,
+        "refill_vset": 6,
+        "refill_paddr": 0x21 << 6,
+    }.items():
+        clean_refill.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(clean_refill, clean_refill.env, 27)
+    assert _hit(
+        clean_refill,
+        "icache_prefetchpipe_s2_miss",
+        "sram_or_clean_mshr_hit",
+    )
+
+
+def test_prefetch_clean_refill_cancel_requires_exact_s2_match():
+    recorder = _Recorder()
+    for key, value in {
+        "s2_valid": 1,
+        "s2_double": 0,
+        "s2_ptag": 0x31,
+        "s2_set0": 9,
+        "miss_valid": 1,
+        "miss_ready": 0,
+        "global_flush": 0,
+        "refill_valid": 0,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 28)
+
+    for key, value in {
+        "refill_valid": 1,
+        "refill_corrupt": 0,
+        "refill_vset": 9,
+        "refill_paddr": 0x32 << 6,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 29)
+    assert not _hit(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "clean_mshr_cancels_backpressured_miss",
+    )
+
+    for key, value in {
+        "refill_paddr": 0x31 << 6,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 30)
+    assert _hit(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "clean_mshr_cancels_backpressured_miss",
+    )
+
+
+def test_prefetch_protection_condition_uses_s1_meta_miss_and_raw_source():
+    recorder = _Recorder()
+    for key, value in {
+        "s1_real_fire": 1,
+        "s1_double": 0,
+        "s1_sram_hit0": 0,
+        "s1_pbmt": 1,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 30)
+    assert _hit(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "exception_or_mmio_suppresses",
+    )
+
+
+def test_prefetch_bpu_flush_requires_tracked_s2_ftq_match():
+    recorder = _Recorder()
+    for key, value in {
+        "s1_real_fire": 1,
+        "s1_soft": 0,
+        "s1_ftq_flag": 0,
+        "s1_ftq_value": 5,
+        "s2_valid": 0,
+        "global_flush": 0,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 31)
+
+    for key, value in {
+        "s1_real_fire": 0,
+        "s2_valid": 1,
+        "miss_valid": 1,
+        "bpu_valid": 1,
+        "bpu_flag": 0,
+        "bpu_value": 5,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 32)
+    assert _hit(recorder, "icache_prefetchpipe_s2_miss", "bpu_flush_keeps_s2")
+
+    nonmatch = _Recorder()
+    for key, value in {
+        "s1_real_fire": 1,
+        "s1_soft": 0,
+        "s1_ftq_flag": 0,
+        "s1_ftq_value": 5,
+        "s2_valid": 0,
+        "global_flush": 0,
+    }.items():
+        nonmatch.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(nonmatch, nonmatch.env, 33)
+    for key, value in {
+        "s1_real_fire": 0,
+        "s2_valid": 1,
+        "miss_valid": 1,
+        "bpu_valid": 1,
+        "bpu_flag": 0,
+        "bpu_value": 6,
+    }.items():
+        nonmatch.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(nonmatch, nonmatch.env, 34)
+    assert not _hit(nonmatch, "icache_prefetchpipe_s2_miss", "bpu_flush_keeps_s2")
 
 
 def test_prefetch_nonmatching_clean_refill_is_scoped_to_s2_sets():
