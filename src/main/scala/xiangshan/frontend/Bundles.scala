@@ -88,16 +88,6 @@ class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with ICa
       p" offset: ${takenCfiOffset.bits}\n"
 }
 
-class FtqPrefetchRequest(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
-  val startVAddr:         PrunedAddr    = PrunedAddr(VAddrBits)
-  val nextCachelineVAddr: PrunedAddr    = PrunedAddr(VAddrBits)
-  val ftqIdx:             FtqPtr        = new FtqPtr
-  val takenCfiOffset:     UInt          = UInt(CfiPositionWidth.W)
-  val backendException:   ExceptionType = new ExceptionType
-
-  def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset)
-}
-
 class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
   val valid:               Bool            = Bool()
   val vAddr:               Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
@@ -109,6 +99,7 @@ class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with HasICa
   val ftqIdx:              FtqPtr          = new FtqPtr
   val vSetIdx:             Vec[UInt]       = Vec(PortNumber, UInt(idxBits.W))
   val hasBackendException: Bool            = Bool()
+  val hasSatpFlush:        Bool            = Bool()
 }
 
 class FtqToICacheIO(implicit p: Parameters) extends FrontendBundle {
@@ -322,6 +313,7 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
 
   val exceptionType:      ExceptionType = new ExceptionType
   val isBackendException: Bool          = Bool()
+  val hasSatpFlush:       Bool          = Bool()
   val exceptionCrossPage: Bool          = Bool()
   val exceptionMask:      Vec[Bool]     = Vec(IBufferEnqueueWidth, Bool())
 

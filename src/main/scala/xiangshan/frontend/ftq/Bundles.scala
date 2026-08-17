@@ -127,7 +127,7 @@ class FtqPrefetchReq(implicit p: Parameters) extends FtqBundle with ICacheCacheL
     startVAddr    := entry.startPc
     nextLineVAddr := entry.startPc + blockBytes.U
     isCrossLine   := super.isCrossLine(startVAddr, entry.endPosition)
-    vSetIdx       := VecInit(get_idx(startVAddr), get_idx(nextLineVAddr))
+    vSetIdx       := VecInit(get_idx(startVAddr), get_idx(startVAddr) + 1.U)
     this
   }
 }

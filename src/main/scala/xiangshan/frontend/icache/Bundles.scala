@@ -208,6 +208,7 @@ class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
 class ICacheMeta(implicit p: Parameters) extends ICacheBundle {
   val exception:          ExceptionType = new ExceptionType
   val pmpMmio:            Bool          = Bool()
+  val hasSatpFlush:       Bool          = Bool()
   val isBackendException: Bool          = Bool()
   val isForVSnonLeafPTE:  Bool          = Bool()
   val itlbPbmt:           UInt          = UInt(Pbmt.width.W)
@@ -251,6 +252,7 @@ class MainPipeToWayLookupBundle(implicit p: Parameters) extends ICacheBundle {
 class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
   val startVAddr:       PrunedAddr    = PrunedAddr(VAddrBits)
   val nextLineVAddr:    PrunedAddr    = PrunedAddr(VAddrBits)
+  val vSetIdx:          Vec[UInt]     = Vec(PortNumber, UInt(idxBits.W))
   val isCrossLine:      Bool          = Bool()
   val ftqIdx:           FtqPtr        = new FtqPtr
   val backendException: ExceptionType = new ExceptionType
@@ -259,6 +261,7 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
   def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): PrefetchReqBundle = {
     startVAddr       := req.vaddr
     nextLineVAddr    := DontCare
+    vSetIdx          := VecInit(get_idx(startVAddr), 0.U(idxBits.W))
     isCrossLine      := false.B
     ftqIdx           := DontCare
     backendException := ExceptionType.None

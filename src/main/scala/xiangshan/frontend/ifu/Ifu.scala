@@ -185,7 +185,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s1_fire  := s1_valid && s2_ready
   s1_ready := s1_fire || !s1_valid
 
-  private val s1_hasException      = RegEnable(s0_hasException, s0_fire)
   private val s1_fetchBlock        = RegEnable(s0_fetchBlock, s0_fire)
   private val s1_totalEndPos       = RegEnable(s0_totalEndPos, s0_fire)
   private val s1_instrEndMask      = RegEnable(s0_instrEndMask, s0_fire)
@@ -209,13 +208,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   )
 
   dontTouch(s1_fetchBlock)
-  private val s1_instrCount = Mux(
-    s1_invalidTaken(0),
-    PopCount(s1_firstRawInstrEndMask),
-    s1_specInstrCount
-  )
-  private val s1_instrValid =
-    Mux(s1_instrCount === FetchBlockInstNum.U, ~0.U(FetchBlockInstNum.W), UIntToMask(s1_instrCount, FetchBlockInstNum))
   private val s1_prevIBufEnqPtr     = RegInit(0.U.asTypeOf(new IBufPtr))
   private val s1_prevEndIsHalfRvi   = RegEnable(s0_prevEndIsHalfRvi, s0_fire)
   private val s1_prevEndHalfRviData = RegInit(0.U(16.W))
@@ -234,6 +226,15 @@ class Ifu(implicit p: Parameters) extends IfuModule
       s1_valid
     )
   }
+
+  private val s1_firstInstrCount = PopCount(s1_firstRawInstrEndMask)
+  private val s1_instrCount = Mux(
+    s1_icacheMeta(0).exception.hasException,
+    1.U((log2Ceil(FetchBlockInstNum) + 1).W),
+    Mux(s1_invalidTaken(0), s1_firstInstrCount, s1_specInstrCount)
+  )
+  private val s1_instrValid =
+    Mux(s1_instrCount === FetchBlockInstNum.U, ~0.U(FetchBlockInstNum.W), UIntToMask(s1_instrCount, FetchBlockInstNum))
 
   private val s1_predTakenMask = VecInit((0 until FetchPorts).map { i =>
     Mux(
@@ -320,7 +321,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }.elsewhen(uncacheRedirect.valid) {
     s1_prevIBufEnqPtr := uncacheRedirect.prevIBufEnqPtr + uncacheRedirect.instrCount
   }.elsewhen(s1_fire && !s1_icacheMeta(0).isUncache) {
-    s1_prevIBufEnqPtr := s1_prevIBufEnqPtr + s1_specInstrCount
+    s1_prevIBufEnqPtr := s1_prevIBufEnqPtr + s1_instrCount
   }
 
   // reqIsUncache is used to limit the number of fetch requests and enable special pre-decode configurations.
@@ -522,10 +523,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.foldpc := s2_alignedFoldPc
   // mark the exception only on first instruction
   io.toIBuffer.bits.exceptionType := s2_icacheMeta(0).exception || s2_rvcException
-  // backendException only needs to be set for the first instruction.
+  // backend flags only needs to be set for the first instruction.
   // Other instructions in the same block may have pf or af set,
   // which is a side effect of the first instruction and actually not necessary.
   io.toIBuffer.bits.isBackendException := s2_icacheMeta(0).isBackendException
+  io.toIBuffer.bits.hasSatpFlush       := s2_icacheMeta(0).hasSatpFlush
   // if we have last half RV-I instruction, and has exception, we need to tell backend to caculate the correct pc
   io.toIBuffer.bits.exceptionCrossPage := s2_icacheMeta(0).exception.hasException && s2_prevEndIsHalfRvi
   // if icache respond with exception, it's marked on entire cacheline,

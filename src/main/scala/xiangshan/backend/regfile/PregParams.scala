@@ -1,5 +1,6 @@
 package xiangshan.backend.regfile
 
+import chisel3._
 import chisel3.util._
 import xiangshan.backend.datapath.DataConfig._
 
@@ -16,6 +17,16 @@ abstract class PregParams {
   def bankRaddrWidth = log2Ceil(numBank)
   // addr for read each bank
   def arbiterAddrWidth = addrWidth - bankRaddrWidth
+
+  def bankIndex(addr: UInt): UInt = {
+    require(numBank > 0 && isPow2(numBank), s"numBank must be a positive power of two, but got $numBank")
+    if (numBank == 1) 0.U else addr(bankRaddrWidth - 1, 0)
+  }
+
+  def bankAddr(addr: UInt): UInt = {
+    require(numBank > 0 && isPow2(numBank), s"numBank must be a positive power of two, but got $numBank")
+    addr(addrWidth - 1, bankRaddrWidth)
+  }
 }
 
 case class IntPregParams(

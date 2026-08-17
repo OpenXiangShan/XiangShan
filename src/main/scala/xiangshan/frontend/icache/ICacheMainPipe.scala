@@ -406,6 +406,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     req.icacheMeta.exception          := s1_exceptionOut
     req.icacheMeta.pmpMmio            := s1_pmpMmio
     req.icacheMeta.isBackendException := s1_req(i).hasBackendException
+    req.icacheMeta.hasSatpFlush       := s1_req(i).hasSatpFlush
     req.icacheMeta.isForVSnonLeafPTE  := s1_exceptionInfo(i).isForVSnonLeafPTE
     req.icacheMeta.itlbPbmt           := s1_wayLookupEntry(i).itlbPbmt
     req.icacheMeta.pAddr              := getPAddrFromPTag(s1_vAddr(2 * i), s1_pTag)

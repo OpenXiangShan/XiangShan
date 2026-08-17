@@ -96,6 +96,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val pc = UInt(VAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptSparseVec(ExceptionNO.fromFrontendSet)
+  val satpFlushFirstFetchFault = Bool()
   val backendException = Bool()
   val trigger = TriggerAction()
   val isRvc = Bool()
@@ -223,6 +224,8 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
   val isMisPred: Bool = Bool()
 
   val fullTarget: UInt = UInt(XLEN.W) // only used for tval storage in backend
+
+  val satpFlush = Bool()
 
   val stFtqIdx = new FtqPtr // for load violation predict
   val stFtqOffset: UInt = UInt(FetchBlockInstOffsetWidth.W)
@@ -524,7 +527,7 @@ class TlbMbmcBundle(implicit p: Parameters) extends MbmcStruct {
   }
 }
 
-class MmptStruct(implicit p: Parameters) extends XSBundle { // add new mpt csr 
+class MmptStruct(implicit p: Parameters) extends XSBundle { // add new mpt csr
     val mode = UInt(4.W)
     val sdid = UInt(6.W)
     val optOutInNode = UInt(1.W) // skip intermediate node MPT check
@@ -855,10 +858,10 @@ class L2ToL1Hint(implicit p: Parameters) extends XSBundle with HasDCacheParamete
 }
 
 class TopDownInfo(implicit p: Parameters) extends XSBundle {
-  val lqEmpty = Input(Bool())
-  val sqEmpty = Input(Bool())
+  val replayAllocate = Input(Bool())
+  val sqFull  = Input(Bool())
+  val sbFull  = Input(Bool())
   val l1Miss = Input(Bool())
-  val noUopsIssued = Output(Bool())
   val l2TopMiss = Input(new TopDownFromL2Top)
 }
 

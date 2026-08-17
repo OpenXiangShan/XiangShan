@@ -163,7 +163,8 @@ case class XSCoreParameters
     *      please set constant "modeStrideBerti" in PrefetcherWrapper.scala to "bothOn".
     *      TODO: separate Stream and Stride prefetcher in the future.
     */
-  prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), SMSParams()),
+  prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), BertiParams(), SMSParams()),
+  modeStrideBerti: Int = 0b01, // 00 bothOff, 01 strideOnBertiOff, 10 strideOffBertiOn, 11 bothOn
   IfuRedirectNum: Int = 1,
   LoadPipelineWidth: Int = 3,
   StorePipelineWidth: Int = 2,

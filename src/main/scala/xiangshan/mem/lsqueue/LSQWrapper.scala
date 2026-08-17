@@ -150,7 +150,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val ldExceptionInfo = ValidIO(new MemExceptionInfo)
     // top-down
     val debugTopDown = new LoadQueueTopDownIO
-    val noUopsIssued = Input(Bool())
+    val replayAllocate = Output(Bool())
 
     val diffStore = OptionWrapper(debugEn, Flipped(new DiffStoreIO))
   })
@@ -331,7 +331,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   }
 
   loadQueue.io.debugTopDown <> io.debugTopDown
-  loadQueue.io.noUopsIssed := io.noUopsIssued
+  loadQueue.io.replayAllocate <> io.replayAllocate
 
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.toUncacheBuffer.resp.valid))
   assert(!(loadQueue.io.uncache.idResp.valid && storeQueue.io.toUncacheBuffer.idResp.valid))

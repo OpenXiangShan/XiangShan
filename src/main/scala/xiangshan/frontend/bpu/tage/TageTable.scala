@@ -233,7 +233,7 @@ class TageTable(
   )
   XSPerfAccumulate(s"tage_write_total_${tableIdx}", Mux(io.writeReq.valid, PopCount(io.writeReq.bits.wayMask), 0.U))
   XSPerfAccumulate(
-    "drop_write",
-    PopCount(entryWriteBuffers.flatMap(writePorts => writePorts.io.write.map(p => p.valid && !p.ready)))
+    "overwrite",
+    PopCount(entryWriteBuffers.flatMap(_.io.overwrite))
   )
 }
