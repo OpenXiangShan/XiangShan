@@ -64,9 +64,11 @@ _TWO_FETCH_SIGNALS = {
         "Frontend_top.Frontend.inner_ftq.backendException_value",
     ),
     "ftq_backend_exception_ptr_flag": (
+        "Frontend_top.Frontend.inner_ftq.backendFlagPtr_flag",
         "Frontend_top.Frontend.inner_ftq.backendExceptionPtr_flag",
     ),
     "ftq_backend_exception_ptr_value": (
+        "Frontend_top.Frontend.inner_ftq.backendFlagPtr_value",
         "Frontend_top.Frontend.inner_ftq.backendExceptionPtr_value",
     ),
     "bpu_ptr_flag": (
