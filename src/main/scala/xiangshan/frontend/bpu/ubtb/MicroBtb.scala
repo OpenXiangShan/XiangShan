@@ -228,7 +228,8 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   // select the entry: if hit, use the hit entry, otherwise use the victim from replacer (first not useful, or Plru)
   // t1_allocate  := !t1_hit && t1_actualTaken && (!t1_useAbtb || t1_hasOverride)
-  t1_allocate  := !t1_hit && t1_actualTaken && t1_hasOverride
+  t1_allocate  := !t1_hit && t1_actualTaken && !t1_useAbtb
+  // t1_allocate  := !t1_hit && t1_actualTaken && t1_hasOverride
   t1_updateIdx := Mux(t1_hit, t1_hitIdx, replacer.io.victim)
   // and write back the updated entry
   when(t1_fire && (t1_hit || t1_allocate)) { // update entry if hit, or alloc entry only for taken branches
