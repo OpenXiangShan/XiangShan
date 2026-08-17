@@ -132,6 +132,44 @@ def test_builder_binds_page_fault_outcome_without_rewriting_the_pte() -> None:
 
 
 @pytest.mark.parametrize(
+    "pmp_execute,pma_execute,expected_reason",
+    [
+        (False, True, "pmp_execute_denied"),
+        (True, False, "pma_execute_denied"),
+        (False, False, "pmp_pma_execute_denied"),
+    ],
+)
+def test_builder_binds_explicit_pmp_pma_execute_denial_as_access_fault(
+    pmp_execute: bool,
+    pma_execute: bool,
+    expected_reason: str,
+) -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id=f"permission-{expected_reason}",
+        va=0x80200000,
+        pa=0x80400000,
+        payload=b"\x13\x00\x00\x00",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=pmp_execute), 0x80400000, size=0x1000
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                "pma", 0, PmpPmaConfig(match="napot", read=True, execute=pma_execute, cacheable=True), 0x80400000, size=0x1000
+            ),
+        ),
+    )
+
+    state = TranslationScenarioBuilder(env).build(scenario)
+
+    assert state.expected_outcome["outcome"] == "instruction_access_fault"
+    assert state.expected_outcome["reason"] == expected_reason
+    assert state.expected_outcome["permission"]["execute_allowed"] is False
+
+
+@pytest.mark.parametrize(
     "scenario_id,s1_pf,s1_af,s2_gpf,s2_gaf,expected_outcome",
     [
         ("atp-140", 1, 0, 0, 0, "instruction_page_fault"),

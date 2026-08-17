@@ -3,6 +3,7 @@ from .branch_checker import BranchChecker
 from .golden_trace import GoldenTrace, TraceEntry
 from .memory_model import MemoryModel
 from .page_table_model import PageTableModel
+from .pmp_pma_model import PmpPmaCheckResult, PmpPmaPermissionModel
 from .ptw_response_source import NemuPtwResponseSource, PTWRequestSnapshot
 
 __all__ = [
@@ -13,6 +14,8 @@ __all__ = [
     "MemoryModel",
     "NemuPtwResponseSource",
     "PageTableModel",
+    "PmpPmaCheckResult",
+    "PmpPmaPermissionModel",
     "PTWRequestSnapshot",
     "TraceEntry",
 ]

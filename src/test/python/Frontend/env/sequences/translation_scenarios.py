@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Optional, Tuple
 
 from ..core.transactions import ProgramImage
+from ..model.pmp_pma_model import PmpPmaPermissionModel
 from ..support.pmp_pma import PmpPmaConfig, csr_addresses_for_entry, encode_pmp_pma_addr, encode_pmp_pma_cfg
 
 
@@ -262,6 +263,25 @@ class TranslationScenarioBuilder:
             s2xlate=s2xlate,
             priv_imode=int(scenario.priv_imode),
         )
+        if expected_ok:
+            permission = PmpPmaPermissionModel.check_instruction(
+                expected_pa,
+                pmp_entries=scenario.pmp_entries,
+                pma_entries=scenario.pma_entries,
+                priv_imode=int(scenario.priv_imode),
+                pmp_enabled=bool(scenario.pmp_entries),
+                pma_enabled=bool(scenario.pma_entries),
+            )
+            expected_metadata["permission"] = permission.as_dict()
+            if not permission.execute_allowed:
+                expected_ok = False
+                expected_metadata.update(
+                    {
+                        "outcome": "instruction_access_fault",
+                        "fault": "access_fault",
+                        "reason": permission.reason,
+                    }
+                )
         self.env.load_program(scenario.payload, int(scenario.pa))
         context = self.env.update_translation_context(
             satp_mode=_SV39_MODE,
