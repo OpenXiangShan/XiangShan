@@ -1402,6 +1402,64 @@ def test_uncache_cacheable_non_mmio_uses_icache_path(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_tps("ATP-119")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_sv39_all_stage_uses_stage2_physical_address(env):
+    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    scenario = TranslationScenario(
+        scenario_id="atp-119-sv39-all-stage-dut",
+        va=_NORMAL_BASE,
+        gpa=_NORMAL_PHYS_BASE,
+        pa=_NORMAL_ALT_PHYS_BASE,
+        payload=int(_CNOP).to_bytes(2, "little") * 256,
+        s2xlate=3,
+        s1_pte=TranslationPte(asid=5, vmid=7),
+        s2_pte=TranslationPte(vmid=7),
+        vsatp_asid=5,
+        hgatp_vmid=7,
+        priv_virt=1,
+        expected_path="cacheable",
+        expected_result="miss_refill",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=_NORMAL_ALT_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+                addr=_NORMAL_ALT_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(scenario.va)
+    env.arm_translation_scenario(state)
+    _force_redirect_to(env, scenario.va)
+
+    commits = RunUntilCommitSequence(target=CommitTarget(target_count=6, max_cycles=6000)).run(env)
+
+    assert commits >= 6, {
+        "ptw": env.ptw_agent.get_stats(),
+        "icache": env.icache_agent.get_stats(),
+        "uncache": env.uncache_agent.get_stats(),
+    }
+    env.step(32)
+
+    assert int(env.ptw_agent.get_stats().get("resp_count", 0)) >= 1
+    assert _NORMAL_PHYS_BASE not in env.uncache_agent.get_stats().get("request_addrs", [])
+    assert env.assert_translation_scenario()["error_count"] == 0
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_tps("ATP-124")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_sv39_execute_denied_reports_instruction_page_fault(env):
@@ -1480,6 +1538,106 @@ def test_uncache_sv39_pmp_execute_denied_reports_instruction_access_fault(env):
 
     assert int(env.ptw_agent.get_stats().get("resp_count", 0)) >= 1
     assert env.assert_translation_scenario()["error_count"] == 0
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_tps("ATP-035")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_csr_changed_before_ptw_response_discards_stale_translation(env):
+    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    env.ptw_agent.configure(latency=64, response_source="model", compare_drive_source="model")
+    old_scenario = TranslationScenario(
+        scenario_id="atp-035-old-context",
+        va=_NORMAL_BASE,
+        pa=_NORMAL_PHYS_BASE,
+        payload=int(_CNOP).to_bytes(2, "little") * 32,
+        satp_asid=1,
+        s1_pte=TranslationPte(asid=1),
+        expected_path="cacheable",
+        expected_result="miss_refill",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=_NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+                addr=_NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+    )
+    old_state = TranslationScenarioBuilder(env).build(old_scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(old_scenario.va)
+    env.arm_translation_scenario(old_state)
+    _force_redirect_to(env, old_scenario.va)
+
+    for _ in range(6000):
+        if int(env.ptw_agent.get_stats().get("req_count", 0)) >= 1:
+            break
+        env.step(1)
+    assert int(env.ptw_agent.get_stats().get("req_count", 0)) >= 1
+
+    env.update_translation_context(satp_asid=2)
+    new_scenario = TranslationScenario(
+        scenario_id="atp-035-new-context",
+        va=_NORMAL_BASE,
+        pa=_NORMAL_ALT_PHYS_BASE,
+        payload=int(_CNOP).to_bytes(2, "little") * 32,
+        satp_asid=2,
+        s1_pte=TranslationPte(asid=2),
+        expected_path="cacheable",
+        expected_result="miss_refill",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=_NORMAL_ALT_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+                addr=_NORMAL_ALT_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+    )
+    new_state = TranslationScenarioBuilder(env).build(new_scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(new_scenario.va)
+    env.arm_translation_scenario(new_state)
+
+    for _ in range(6000):
+        if any(record["kind"] == "stale_ptw_response" for record in env.translation_oracle.get_stats()["records"]):
+            break
+        env.step(1)
+    assert any(record["kind"] == "stale_ptw_response" for record in env.translation_oracle.get_stats()["records"])
+    env.step(32)
+
+    _force_redirect_to(env, new_scenario.va)
+
+    for _ in range(6000):
+        active = env.translation_oracle.get_active()
+        if active is not None and active["response_seen"] and active["fetch_seen"]:
+            break
+        env.step(1)
+
+    stats = env.assert_translation_scenario()
+    assert int(env.ptw_agent.get_stats().get("resp_count", 0)) >= 2
+    assert any(record["kind"] == "stale_ptw_response" for record in stats["records"])
     assert not env.monitor.get_errors()
 
 

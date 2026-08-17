@@ -163,7 +163,6 @@ def test_oracle_marks_pre_fence_response_stale_in_new_epoch() -> None:
     env.translation_oracle.observe_ptw_request(21, **{key: new_request[key] for key in ("vpn", "s2xlate", "get_gpa")})
     env.translation_oracle.observe_ptw_response(22, **{key: new_request[key] for key in ("vpn", "s2xlate", "get_gpa")}, response=new_response)
 
-    error = env.translation_oracle.get_stats()["errors"][-1]
-    assert error["reason"] == "stale_ptw_response"
-    assert error["translation_epoch"] == env.translation_epoch
+    stale_record = next(record for record in env.translation_oracle.get_stats()["records"] if record["kind"] == "stale_ptw_response")
+    assert stale_record["response_epoch"] != env.translation_epoch
     assert env.translation_oracle.get_active()["response_seen"] is True

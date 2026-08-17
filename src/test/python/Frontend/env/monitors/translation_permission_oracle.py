@@ -151,7 +151,7 @@ class TranslationPermissionOracle:
         )
         request_epoch = None if request_index is None else self._ptw_requests.pop(request_index)["translation_epoch"]
         if request_epoch is not None and int(request_epoch) != int(self.active["translation_epoch"]):
-            self._error(cycle, "stale_ptw_response", response_epoch=request_epoch, actual=actual)
+            self._record(cycle, "stale_ptw_response", response_epoch=request_epoch, actual=actual)
             return
         mismatches = {
             key: {"expected": int(expected[key]), "actual": int(actual[key])}

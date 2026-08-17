@@ -83,7 +83,7 @@ def test_builder_composes_all_stage_mapping_from_gpa_to_pa() -> None:
         pa=0x0000_0000_8060_0004,
         payload=b"\x13\x00\x00\x00",
         s2xlate=3,
-        s1_pte=TranslationPte(v=1, r=1, x=1, asid=5),
+        s1_pte=TranslationPte(v=1, r=1, x=1, asid=5, vmid=7),
         s2_pte=TranslationPte(v=1, r=1, x=1, n=1, vmid=7),
         satp_asid=5,
         vsatp_asid=5,
@@ -149,6 +149,22 @@ def test_builder_binds_page_fault_outcome_without_rewriting_the_pte() -> None:
         (
             TranslationScenario("short-pages", 0x80200FF0, 0x80400FF0, b"\x13" * 17),
             "page_count",
+        ),
+        (
+            TranslationScenario(
+                "all-stage-vmid-mismatch",
+                0x80200000,
+                0x80600000,
+                b"\x13",
+                gpa=0x80400000,
+                s2xlate=3,
+                s1_pte=TranslationPte(asid=5, vmid=0),
+                s2_pte=TranslationPte(vmid=7),
+                vsatp_asid=5,
+                hgatp_vmid=7,
+                priv_virt=1,
+            ),
+            "VMID",
         ),
     ],
 )

@@ -164,6 +164,8 @@ class TranslationScenarioBuilder:
                 raise ValueError("VA and GPA must have the same page offset")
             if int(scenario.gpa) & (_PAGE_SIZE - 1) != int(scenario.pa) & (_PAGE_SIZE - 1):
                 raise ValueError("GPA and PA must have the same page offset")
+            if int(scenario.s1_pte.vmid) != int(scenario.hgatp_vmid):
+                raise ValueError("all-stage stage-1 PTE VMID must match hgatp_vmid")
         self._validate_pte(scenario.s1_pte, "stage-1")
         self._validate_pte(scenario.s2_pte, "stage-2")
         for entry in scenario.pmp_entries:
