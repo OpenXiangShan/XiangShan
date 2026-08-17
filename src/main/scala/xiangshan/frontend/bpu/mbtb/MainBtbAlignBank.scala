@@ -255,7 +255,6 @@ class MainBtbAlignBank(
   private val t1_newCounters    = Wire(Vec(NumWay, TakenCounter()))
   private val t1_counterWayMask = Wire(Vec(NumWay, Bool()))
 
-  private val t1_actualTakenMask = Wire(Vec(NumWay, Bool()))
   t1_meta.zipWithIndex.foreach { case (meta, i) =>
     val hitMask = t1_branches.map { branch =>
       branch.valid && branch.bits.attribute.isConditional && meta.position === branch.bits.cfiPosition
@@ -267,12 +266,12 @@ class MainBtbAlignBank(
     t1_counterWayMask(i) := entryOverridden || hitMask.reduce(_ || _)
     t1_newCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, meta.counter.getUpdate(actualTaken))
   }
-  t1_meta.zipWithIndex.foreach { case (meta, i) =>
+  private val t1_actualTakenMask = VecInit(t1_meta.zipWithIndex.map { case (meta, i) =>
     val hitMask = t1_branches.map(branch =>
       branch.valid && meta.position === branch.bits.cfiPosition && meta.rawHit && branch.bits.taken
     )
-    t1_actualTakenMask(i) := hitMask.reduce(_ || _)
-  }
+    hitMask.reduce(_ || _)
+  })
   private val t1_actualTakenOH = PriorityEncoderOH(t1_actualTakenMask.asUInt)
 
   private val t1_replacerSetIdx = getReplacerSetIndex(t1_startPc)
@@ -280,10 +279,6 @@ class MainBtbAlignBank(
   replacer.io.train.t1_touch.valid        := t1_fire && (t1_entryNeedWrite || t1_actualTakenMask.reduce(_ || _))
   replacer.io.train.t1_touch.bits.setIdx  := t1_replacerSetIdx
   replacer.io.train.t1_touch.bits.wayMask := Mux(t1_entryNeedWrite, t1_entryWayMask, t1_actualTakenOH)
-
-  replacer.io.predict.touch.valid        := false.B
-  replacer.io.predict.touch.bits.setIdx  := 0.U
-  replacer.io.predict.touch.bits.wayMask := 0.U
 
   // write counter anytime when needed
   private val t1_counterNeedWrite = t1_counterWayMask.reduce(_ || _)
