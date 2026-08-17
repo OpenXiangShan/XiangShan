@@ -4,7 +4,7 @@ import logging
 import random
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Sequence
 
 from ..bundles import PTWBundle
 from ..model.page_table_model import PageTableModel
@@ -41,6 +41,8 @@ class PTWAgent:
         self._rng = random.Random(1)
         self.response_source = "model"
         self.compare_drive_source = "nemu"
+        self.response_overrides: Dict[tuple[int, int, int], Dict[str, Any]] = {}
+        self.response_override_hit_count = 0
         self.nemu_ptw_adapter = ""
         self._nemu_source: Optional[NemuPtwResponseSource] = None
         self.nemu_sync_hook: Optional[Callable[..., None]] = None
@@ -122,6 +124,7 @@ class PTWAgent:
         response_source: Optional[str] = None,
         compare_drive_source: Optional[str] = None,
         nemu_ptw_adapter: Optional[str] = None,
+        response_overrides: Optional[Sequence[Dict[str, Any]]] = None,
     ) -> None:
         if latency is None:
             latency = self.latency_min
@@ -154,6 +157,8 @@ class PTWAgent:
             self._nemu_source = None
         if mode is not None:
             self.page_table.set_mode(mode)
+        if response_overrides is not None:
+            self.set_response_overrides(response_overrides)
         self.logger.info(
             "configured: latency=[%d,%d] mode=%s ready=%s prob=%.3f high=%d low=%d sfence_flush=%s strict_bare=%s response_source=%s compare_drive_source=%s",
             self.latency_min,
@@ -168,6 +173,49 @@ class PTWAgent:
             self.response_source,
             self.compare_drive_source,
         )
+
+    def _normalize_response_overrides(self, overrides: Sequence[Dict[str, Any]]) -> Dict[tuple[int, int, int], Dict[str, Any]]:
+
+        known_fields = set(self.page_table.build_ptw_resp(0).keys())
+        identity_fields = {"s2xlate", "get_gpa", "memidx_is_ld", "memidx_is_st", "memidx_idx"}
+        array_fields = {"s1_ppn_low", "s1_valididx", "s1_pteidx"}
+        normalized: Dict[tuple[int, int, int], Dict[str, Any]] = {}
+        for override in overrides:
+            try:
+                key = (int(override["vpn"]), int(override["s2xlate"]), int(override.get("get_gpa", 0)))
+                patch = dict(override["patch"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("PTW response override requires vpn, s2xlate and patch") from exc
+            if key[0] < 0 or key[1] < 0 or key[2] not in {0, 1}:
+                raise ValueError(f"invalid PTW response override key: {key}")
+            if not patch:
+                raise ValueError("PTW response override patch must not be empty")
+            unknown = set(patch) - known_fields
+            if unknown:
+                raise ValueError(f"unsupported PTW response override fields: {sorted(unknown)}")
+            fixed = set(patch) & identity_fields
+            if fixed:
+                raise ValueError(f"PTW response override cannot change request identity: {sorted(fixed)}")
+            for field, value in patch.items():
+                if field in array_fields:
+                    if not isinstance(value, (list, tuple)) or len(value) != 8:
+                        raise ValueError(f"PTW response override {field} must contain eight entries")
+                    patch[field] = [int(item) for item in value]
+                else:
+                    patch[field] = int(value)
+            if key in normalized:
+                raise ValueError(f"duplicate PTW response override for request {key}")
+            normalized[key] = patch
+        return normalized
+
+    def validate_response_overrides(self, overrides: Sequence[Dict[str, Any]]) -> None:
+        self._normalize_response_overrides(overrides)
+
+    def set_response_overrides(self, overrides: Sequence[Dict[str, Any]]) -> None:
+        """Install request-keyed PTW response patches for directed scenarios."""
+
+        self.response_overrides = self._normalize_response_overrides(overrides)
+        self.response_override_hit_count = 0
 
     @staticmethod
     def _flatten_compare_fields(value: Any, prefix: str = "") -> Dict[str, Any]:
@@ -305,8 +353,10 @@ class PTWAgent:
 
     def _build_response(self, snapshot: PTWRequestSnapshot) -> dict:
         if self.response_source == "nemu":
-            return self._build_nemu_response(snapshot)
-        model_resp = self._build_model_response(snapshot)
+            response = self._build_nemu_response(snapshot)
+        else:
+            model_resp = self._build_model_response(snapshot)
+            response = model_resp
         if self.response_source == "compare":
             nemu_resp = self._build_nemu_response(snapshot)
             driven_source = self.compare_drive_source
@@ -317,8 +367,13 @@ class PTWAgent:
                 nemu_resp=nemu_resp,
                 driven_source=driven_source,
             )
-            return nemu_resp if driven_source == "nemu" else model_resp
-        return model_resp
+            response = nemu_resp if driven_source == "nemu" else model_resp
+        key = (int(snapshot.vpn), int(snapshot.s2xlate), int(snapshot.get_gpa))
+        patch = self.response_overrides.get(key)
+        if patch is None:
+            return response
+        self.response_override_hit_count += 1
+        return {**response, **patch}
 
     def _driven_source(self) -> str:
         if self.response_source == "compare":
@@ -592,6 +647,8 @@ class PTWAgent:
             "compare_match_count": self.compare_match_count,
             "compare_mismatch_count": self.compare_mismatch_count,
             "last_compare_diff": self.last_compare_diff,
+            "response_override_count": len(self.response_overrides),
+            "response_override_hit_count": self.response_override_hit_count,
         }
 
 

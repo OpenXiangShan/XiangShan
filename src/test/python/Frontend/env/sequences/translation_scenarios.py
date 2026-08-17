@@ -62,6 +62,24 @@ class TranslationPmpPmaEntry:
 
 
 @dataclass(frozen=True)
+class TranslationPtwResponseOverride:
+    """Patch one model-built PTW response identified by its request fields."""
+
+    vpn: int
+    s2xlate: int
+    get_gpa: int = 0
+    patch: Tuple[Tuple[str, object], ...] = ()
+
+    def as_agent_config(self) -> dict:
+        return {
+            "vpn": int(self.vpn),
+            "s2xlate": int(self.s2xlate),
+            "get_gpa": int(self.get_gpa),
+            "patch": dict(self.patch),
+        }
+
+
+@dataclass(frozen=True)
 class TranslationScenario:
     """One reproducible Sv39 translation setup shared by model and DUT."""
 
@@ -79,6 +97,7 @@ class TranslationScenario:
     ptw_response_latency: int = 3
     ptw_response_latency_max: Optional[int] = None
     ptw_response_seed: int = 1
+    ptw_response_overrides: Tuple[TranslationPtwResponseOverride, ...] = ()
     satp_asid: int = 0
     satp_ppn: int = 0
     vsatp_asid: int = 0
@@ -193,6 +212,17 @@ class TranslationScenarioBuilder:
             raise ValueError("PTW response latency must be non-negative")
         if scenario.ptw_response_latency_max is not None and int(scenario.ptw_response_latency_max) < int(scenario.ptw_response_latency):
             raise ValueError("PTW response latency_max must be at least latency")
+        override_keys = set()
+        for override in scenario.ptw_response_overrides:
+            key = (int(override.vpn), int(override.s2xlate), int(override.get_gpa))
+            if key in override_keys:
+                raise ValueError(f"duplicate PTW response override for request {key}")
+            override_keys.add(key)
+            if not override.patch:
+                raise ValueError("PTW response override patch must not be empty")
+        self.env.ptw_agent.validate_response_overrides(
+            tuple(override.as_agent_config() for override in scenario.ptw_response_overrides)
+        )
         if int(scenario.s2xlate) == _S2XLATE_ALL_STAGE:
             if scenario.gpa is None:
                 raise ValueError("all-stage translation requires gpa")
@@ -309,6 +339,7 @@ class TranslationScenarioBuilder:
             mode="sv39",
             response_source="model",
             compare_drive_source="model",
+            response_overrides=tuple(override.as_agent_config() for override in scenario.ptw_response_overrides),
         )
         expected_page_outcomes = tuple(
             self._expected_page_outcome(
@@ -358,6 +389,7 @@ class TranslationScenarioBuilder:
 
 __all__ = [
     "TranslationPmpPmaEntry",
+    "TranslationPtwResponseOverride",
     "TranslationPte",
     "TranslationScenario",
     "TranslationScenarioBuilder",

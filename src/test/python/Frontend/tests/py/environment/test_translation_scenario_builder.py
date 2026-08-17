@@ -3,10 +3,12 @@ from __future__ import annotations
 import pytest
 
 from env.core.frontend_env import FrontendEnv
+from env.model.ptw_response_source import PTWRequestSnapshot
 from env.runtime.dut_factory import FakeDUTFrontend
 from env.sequences import (
     TranslationPmpPmaEntry,
     TranslationPte,
+    TranslationPtwResponseOverride,
     TranslationScenario,
     TranslationScenarioBuilder,
 )
@@ -15,6 +17,30 @@ from env.support import PmpPmaConfig
 
 def _env() -> FrontendEnv:
     return FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+
+
+def _ptw_request(vpn: int, *, s2xlate: int = 0, get_gpa: int = 0) -> PTWRequestSnapshot:
+    return PTWRequestSnapshot(
+        sequence_id=1,
+        cycle=1,
+        vpn=vpn,
+        s2xlate=s2xlate,
+        get_gpa=get_gpa,
+        memidx_is_ld=0,
+        memidx_is_st=0,
+        memidx_idx=0,
+        priv_imode=1,
+        satp_mode=8,
+        vsatp_mode=0,
+        hgatp_mode=0,
+        sfence_valid=0,
+        sfence_bits_rs1=0,
+        sfence_bits_rs2=0,
+        sfence_bits_addr=0,
+        sfence_bits_id=0,
+        sfence_bits_hv=0,
+        sfence_bits_hg=0,
+    )
 
 
 def test_builder_applies_one_sv39_description_to_page_table_memory_and_context() -> None:
@@ -93,6 +119,52 @@ def test_builder_applies_declared_ptw_response_timing() -> None:
     assert stats["latency_min"] == 5
     assert stats["latency_max"] == 9
     assert stats["req_ready_strategy"] == "always"
+
+
+def test_builder_applies_request_keyed_ptw_response_override() -> None:
+    env = _env()
+    vpn = 0x8020_0000 >> 12
+    scenario = TranslationScenario(
+        scenario_id="sv39-sector-response-override",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        payload=b"\x13\x00\x00\x00",
+        ptw_response_overrides=(
+            TranslationPtwResponseOverride(
+                vpn=vpn,
+                s2xlate=0,
+                patch=(("s1_valididx", (0, 0, 0, 0, 0, 0, 0, 0)),),
+            ),
+        ),
+    )
+
+    TranslationScenarioBuilder(env).build(scenario)
+
+    request = _ptw_request(vpn)
+    response = env.ptw_agent._build_model_response(request)
+    assert response["s1_valididx"] != [0] * 8
+    overridden = env.ptw_agent._build_response(request)
+    assert overridden["s1_valididx"] == [0] * 8
+    assert env.ptw_agent.get_stats()["response_override_hit_count"] == 1
+
+
+def test_builder_rejects_invalid_ptw_response_override_before_mutating_env() -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id="invalid-ptw-response-override",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        payload=b"\x13\x00\x00\x00",
+        ptw_response_overrides=(
+            TranslationPtwResponseOverride(vpn=0x8020_0000 >> 12, s2xlate=0, patch=(("unknown", 1),)),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="unsupported PTW response override fields"):
+        TranslationScenarioBuilder(env).build(scenario)
+
+    assert env.page_table.pte_map == {}
+    assert env.memory.mem == {}
 
 
 def test_builder_rejects_invalid_ptw_response_latency_range() -> None:

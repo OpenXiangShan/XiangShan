@@ -6,6 +6,7 @@ from .trace_sequences import LoadGoldenTraceSequence, RunUntilCommitSequence, Ru
 from .translation_scenarios import (
     TranslationPmpPmaEntry,
     TranslationPte,
+    TranslationPtwResponseOverride,
     TranslationScenario,
     TranslationScenarioBuilder,
     TranslationScenarioState,
@@ -24,6 +25,7 @@ __all__ = [
     "RunUntilGoldenTraceCompleteSequence",
     "TranslationPmpPmaEntry",
     "TranslationPte",
+    "TranslationPtwResponseOverride",
     "TranslationScenario",
     "TranslationScenarioBuilder",
     "TranslationScenarioState",
