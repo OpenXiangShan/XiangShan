@@ -103,6 +103,7 @@ class TranslationScenario:
 @dataclass(frozen=True)
 class TranslationScenarioState:
     scenario: TranslationScenario
+    translation_epoch: int
     expected_ptw_request: dict
     expected_outcome: dict
     expected_page_outcomes: Tuple[dict, ...]
@@ -340,6 +341,7 @@ class TranslationScenarioBuilder:
         )
         return TranslationScenarioState(
             scenario=scenario,
+            translation_epoch=int(self.env.translation_epoch),
             expected_ptw_request={
                 "scenario_id": str(scenario.scenario_id),
                 "vpn": int(scenario.va) >> 12,

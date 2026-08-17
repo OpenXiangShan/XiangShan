@@ -1013,7 +1013,12 @@ class FrontendEnv:
         return self.monitor.get_errors()
 
     def arm_translation_scenario(self, state) -> dict:
-        return self.translation_oracle.arm(state, translation_epoch=self.translation_epoch)
+        state_epoch = int(state.translation_epoch)
+        if state_epoch != int(self.translation_epoch):
+            raise ValueError(
+                f"cannot arm translation scenario from epoch {state_epoch} after environment advanced to {self.translation_epoch}"
+            )
+        return self.translation_oracle.arm(state, translation_epoch=state_epoch)
 
     def assert_translation_scenario(self) -> dict:
         return self.translation_oracle.assert_complete()

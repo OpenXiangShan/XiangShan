@@ -53,6 +53,7 @@ def test_builder_applies_one_sv39_description_to_page_table_memory_and_context()
     state = TranslationScenarioBuilder(env).build(scenario)
 
     assert state.scenario is scenario
+    assert state.translation_epoch == env.translation_epoch
     assert env.memory.read_block(scenario.pa, len(scenario.payload)) == scenario.payload
     mapped = env.page_table.pte_map[scenario.va >> 12]
     assert (mapped.ppn, mapped.asid, mapped.n, mapped.pbmt) == (scenario.pa >> 12, 3, 1, 1)
@@ -107,6 +108,23 @@ def test_builder_rejects_invalid_ptw_response_latency_range() -> None:
 
     with pytest.raises(ValueError, match="latency_max"):
         TranslationScenarioBuilder(env).build(scenario)
+
+
+def test_environment_rejects_arming_a_state_after_translation_context_changed() -> None:
+    env = _env()
+    state = TranslationScenarioBuilder(env).build(
+        TranslationScenario(
+            scenario_id="sv39-stale-scenario-state",
+            va=0x8020_0000,
+            pa=0x8040_0000,
+            payload=b"\x13\x00\x00\x00",
+        )
+    )
+
+    env.update_translation_context(satp_asid=1)
+
+    with pytest.raises(ValueError, match="cannot arm translation scenario from epoch"):
+        env.arm_translation_scenario(state)
 
 
 def test_builder_derives_each_page_fetch_path_from_pma() -> None:
