@@ -96,8 +96,16 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val fetchPtr  = RegInit(FtqPtrVec(3))
   private val commitPtr = RegInit(FtqPtrVec(2))
 
+  // pnrPtr is the "Point of No Return" of Bpu: the oldest entry Bpu can still take back. Every older entry has left
+  // Bpu's last override stage, so it cannot be flushed from within Ftq, and can safely be handed to later pipelines
+  private val pnrPtr = RegInit(FtqPtrVec())
+
   XSError(bpuPtr < fetchPtr && !isFull(bpuPtr(0), fetchPtr(0)), "fetchPtr runs ahead of bpuPtr")
-//  XSError(bpuPtr < pfPtr && !isFull(bpuPtr(0), pfPtr(0)), "pfPtr runs ahead of bpuPtr")
+  XSError(bpuPtr < pfPtr && !isFull(bpuPtr(0), pfPtr(0)), "pfPtr runs ahead of bpuPtr")
+  XSError(pnrPtr > bpuPtr && !isFull(pnrPtr(0), bpuPtr(0)), "pnrPtr runs ahead of bpuPtr")
+
+  // an entry has passed the point of no return, so Bpu can no longer override it
+  private def passedPnr(ptr: FtqPtr): Bool = pnrPtr > ptr
 
   // entryQueue stores predictions made by BPU.
   private val entryQueue = Reg(Vec(FtqSize, new FtqEntry))
@@ -213,6 +221,21 @@ class Ftq(implicit p: Parameters) extends FtqModule
     s3PerfQueue(s3BpuPtr).mispredict := false.B
   }
 
+  // The entry sitting in s3 always leaves s3 in the next cycle, whether or not it overrides, and an override writes
+  // its final prediction straight into Ftq instead of sending it around the Bpu pipeline again. So by the next cycle
+  // it has passed the point of no return, and pnrPtr can be advanced past it.
+  // A redirect resets pnrPtr along with the other pointers, see the redirect section below.
+  when(io.fromBpu.meta.valid) {
+    pnrPtr := io.fromBpu.s3FtqPtr + 1.U
+  }
+
+  // The entry in s3 can still be overridden, so pnrPtr must never have passed it. In steady state pnrPtr equals
+  // s3FtqPtr, so this also catches pnrPtr being advanced too far.
+  XSError(
+    io.fromBpu.meta.valid && pnrPtr > io.fromBpu.s3FtqPtr,
+    "pnrPtr passed the entry that is still in Bpu s3\n"
+  )
+
   resolveQueue.io.bpuEnqueue    := bpuEnqueue
   resolveQueue.io.bpuEnqueuePtr := predictionPtr
 
@@ -258,18 +281,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
   )
 
   private val canTwoPrefetch =
-    // magic number 3: to simplify ICache/Ifu bpuFlush logic, we ask the second fetch block to be flushed within Ftq,
-    // i.e. the following 2-prefetch (fb0/1) is safe, as fb1 had passed bpu s3 (which is the last chance of override).
+    // to simplify ICache/Ifu bpuFlush logic, we ask the second fetch block to be flushed within Ftq, so it must have
+    // passed the point of no return. The first one may still be overridden, ICache/Ifu can flush it themselves.
     // bpu -> | fb4 | fb3 | fb2 | fb1 | fb0 | -> prefetch
-    //        bpuPtr                   pfPtr
-    //      bpu s1    s2    s3
-    // and the following is not, we mark canTwoPrefetch=false
-    // bpu -> | fb3 | fb2 | fb1 | fb0 | -> prefetch
-    //        bpuPtr             pfPtr
-    //      bpu s1    s2    s3
-    // Therefore, we check if distanceBetween(bpuPtr(0), pfPtr(0)) (i.e. bpuPtr - pfPtr) > 3
-    // NOTE: this is not portable, if we change the stage count of Bpu, we need to change this too
-    distanceBetween(bpuPtr(0), pfPtr(0)) > 3.U &&
+    //        bpuPtr             pnrPtr      pfPtr
+    passedPnr(pfPtr(1)) &&
       // they also need to be on the same page, to prevent extra itlb port
       prefetchReq(0).vPageNumber === prefetchReq(1).vPageNumber &&
       // and they cannot have known exception or pending satp flush, or we may mark them on the wrong fetch block
@@ -304,7 +320,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     Wire(new FtqFetchReq).fromFtqEntry(entryQueue(fetchPtr(1).value))
   )
 
-  private val rawTwoFetchValid = distanceBetween(bpuPtr(0), fetchPtr(0)) > 3.U &&
+  // as in 2-prefetch, the second fetch block must have passed the point of no return
+  private val rawTwoFetchValid = passedPnr(fetchPtr(1)) &&
     (fetchReq(0).size +& fetchReq(1).size) <= FetchBlockInstNum.U && // the unit of fetchReq size is half-word
     fetchReq(0).vPageNumber === fetchReq(1).vPageNumber &&
     !(hasBackendFlag && (backendFlagPtr === fetchPtr(0) || backendFlagPtr === fetchPtr(1)))
@@ -347,6 +364,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   when(redirect.valid) {
     val newFtqIdx = redirect.bits.newFtqIdx // redirect.newFtqIdx is a def, make it a val here to prevent dup logic
     Seq(bpuPtr, pfPtr, fetchPtr).foreach(_ := newFtqIdx)
+    // nothing from newFtqIdx on has been written yet, so everything before it has passed the point of no return.
+    // This is assigned after the s3 update above, so a redirect wins over it, as it does for the other pointers.
+    pnrPtr := newFtqIdx
   }
 
   io.toIfu.redirect.valid := backendRedirect.valid
@@ -701,7 +721,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     "2prefetch_fail_reason",
     io.toICache.toPrefetch.fire && !io.toICache.toPrefetch.bits.twoPrefetchCase.valid,
     Seq(
-      ("fb_not_enough", distanceBetween(bpuPtr(0), pfPtr(0)) <= 3.U),
+      ("fb_not_passed_pnr", !passedPnr(pfPtr(1))),
       ("fb1_exception", backendException.hasException && backendFlagPtr === pfPtr(0)),
       ("fb2_exception", backendException.hasException && backendFlagPtr === pfPtr(1)),
       ("page_conflict", prefetchReq(0).vPageNumber =/= prefetchReq(1).vPageNumber),
@@ -725,7 +745,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     "2fetch_fail_reason",
     io.toICache.toMainPipe.fire && !io.fromICache.fromMainPipe.realTwoFetchValid,
     Seq(
-      ("fb_not_enough", distanceBetween(bpuPtr(0), fetchPtr(0)) <= 3.U),
+      ("fb_not_passed_pnr", !passedPnr(fetchPtr(1))),
       ("fb1_exception", backendException.hasException && backendFlagPtr === fetchPtr(0)),
       ("fb2_exception", backendException.hasException && backendFlagPtr === fetchPtr(1)),
       ("total_size", (fetchReq(0).size +& fetchReq(1).size) > FetchBlockInstNum.U),
