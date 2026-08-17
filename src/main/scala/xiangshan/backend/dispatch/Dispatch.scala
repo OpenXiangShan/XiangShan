@@ -598,8 +598,13 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
         val priorSelections = scalarLduIQIdx.map { iqIdx =>
           PopCount(result.take(uopIdx).map(_(iqIdx)))
         }
+        // Do not use issue-queue ready here: ready is derived from the dispatch
+        // selection/block matrix below, so feeding it back into steering creates
+        // a combinational loop. Occupancy is the stable admission signal; the
+        // existing block/retry path still handles other downstream backpressure.
         val canAccept = scalarLduIQIdx.zipWithIndex.map { case (iqIdx, localIdx) =>
-          io.toIssueQueues(iqEnqStart(iqIdx)).ready && priorSelections(localIdx) < allIssueParams(iqIdx).numEnq.U
+          io.IQValidNumVec(scalarLduExuIdx(localIdx)) < allIssueParams(iqIdx).numEntries.U &&
+            priorSelections(localIdx) < allIssueParams(iqIdx).numEnq.U
         }
         val effectiveCount = scalarLduExuIdx.zip(priorSelections).map { case (exuIdx, prior) =>
           io.IQValidNumVec(exuIdx) +& prior
@@ -737,7 +742,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   if (enableLongLoadLduSteering) {
     val reservedIqIdx = scalarLduIQIdx.last
     val regularIqIdx = scalarLduIQIdx.dropRight(1)
-    val lduReady = scalarLduIQIdx.map(iqIdx => io.toIssueQueues(iqEnqStart(iqIdx)).ready)
+    val lduReady = scalarLduIQIdx.zip(scalarLduExuIdx).map { case (iqIdx, exuIdx) =>
+      io.IQValidNumVec(exuIdx) < allIssueParams(iqIdx).numEntries.U
+    }
     val longDependentLoad = fromRename.map { in =>
       in.valid && FuType.isLoad(in.bits.fuType) && SrcType.isXp(in.bits.srcType(0)) && longMissIntNext(in.bits.psrc(0))
     }
