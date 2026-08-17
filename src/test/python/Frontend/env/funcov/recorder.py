@@ -19,7 +19,11 @@ from ..runtime.artifact_provenance import (
 )
 from . import (
     CFVEC_SAMPLER_BIN_KEYS,
+    IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS,
     IFU_CFVEC_SAMPLER_BIN_KEYS,
+    initialize_ifu_cacheable_pipeline_state,
+    reset_ifu_cacheable_pipeline_state,
+    sample_ifu_cacheable_pipeline_coverage,
     sample_cfvec_coverage,
 )
 from .py.ftq.sampler import (
@@ -102,6 +106,7 @@ def funcov_sampler_paths() -> dict[str, Path]:
         "funcov/py/ifu/sampler.py": root / "py" / "ifu" / "sampler.py",
         "funcov/py/ifu/cfvec_funcov.py": root / "py" / "ifu" / "cfvec_funcov.py",
         "funcov/py/ifu/compact_funcov.py": root / "py" / "ifu" / "compact_funcov.py",
+        "funcov/py/ifu/cacheable_pipeline_funcov.py": root / "py" / "ifu" / "cacheable_pipeline_funcov.py",
     }
 
 
@@ -159,6 +164,7 @@ UNCACHE_EVENT_SAMPLER_BIN_KEYS = frozenset(
 FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS = frozenset(
     set(CFVEC_SAMPLER_BIN_KEYS)
     | set(IFU_CFVEC_SAMPLER_BIN_KEYS)
+    | set(IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS)
     | set(TWO_FETCH_SAMPLER_BIN_KEYS)
     | set(UNCACHE_EVENT_SAMPLER_BIN_KEYS)
     | set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)
@@ -276,6 +282,7 @@ class FunctionalCoverageRecorder:
         self._two_fetch_ftq_pending = False
         self._two_fetch_last_dual_cycle: Optional[int] = None
         initialize_ftq_coverage_state(self)
+        initialize_ifu_cacheable_pipeline_state(self)
         self._dut_signal_cache: Dict[str, Any] = {}
         self._missing_dut_signals: set[str] = set()
 
@@ -634,6 +641,7 @@ class FunctionalCoverageRecorder:
         self._two_fetch_last_dual_cycle = None
         self._two_fetch_last_waylookup_write_state = None
         reset_ftq_coverage_state(self)
+        reset_ifu_cacheable_pipeline_state(self)
         reset_icache_mainpipe_coverage_state(self)
         reset_icache_prefetchpipe_coverage_state(self)
         reset_icache_missunit_coverage_state(self)
@@ -653,6 +661,7 @@ class FunctionalCoverageRecorder:
 
         sample_two_fetch_coverage(self, env, cycle)
         sample_cfvec_coverage(self, env, cycle)
+        sample_ifu_cacheable_pipeline_coverage(self, env, cycle)
         sample_icache_mainpipe_coverage(self, env, cycle)
         sample_icache_prefetchpipe_coverage(self, env, cycle)
         sample_icache_missunit_coverage(self, env, cycle)

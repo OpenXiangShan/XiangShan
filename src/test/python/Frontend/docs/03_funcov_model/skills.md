@@ -74,7 +74,7 @@ registry 中只有 `Coverpoint` 完整、已反标到唯一叶子且已有 sampl
 - `Checkpoint`：证明行为正确所需的事务结果、信号值、顺序、PC、异常、指针或状态变化。
 - `Object`：驱动对象、采样对象和关键接口，不得为空。
 - checker、assertion、scoreboard 或 trace 检查方式。
-- 唯一 coverage 反标：`covergroup <group>, coverpoint <point>, bins <bin> (BIN-xxx)`。
+- 唯一 coverage 反标。叶子粒度与整个 coverpoint 一致时使用 `covergroup <group>, coverpoint <point>`；叶子已经细化到具体取值组合时使用 `covergroup <group>, coverpoint <point>, bins <bin> (BIN-xxx)`。
 - 主责任 testcase 和真实 DUT evidence。
 
 Condition 只描述如何构成场景，Checkpoint 只描述如何证明结果。不得把“检查某信号正确”写成测试场景，也不得把激励步骤写入 Checkpoint。
@@ -145,8 +145,11 @@ coverage registry 定义 `Bin_ID -> Coverage_Group -> Coverpoint -> Bin_Name`，
 
 建模规则：
 
-- 一个叶子只绑定一个 group/point/bin。
-- 一个 Bin_ID 只归属一个叶子。
+- 一个叶子只绑定一个 coverage 落脚点：整个 `(group, point)`，或更细粒度的 `(group, point, bin)`。
+- 同一个 coverpoint 只能采用一种反标粒度：由一个叶子拥有整个 point，或由多个兄弟叶子分别拥有其唯一 bin；禁止 point 级和 bin 级归属重叠。
+- point 级叶子在该 coverpoint 收到至少一次有效采样时命中；其子 bins 只用于展示取值分布，不要求全部命中。若每个子 bin 都是独立验证要求，必须拆成兄弟叶子并分别使用 bin 级反标。
+- 禁止一个叶子绑定多个独立 point/bin，也禁止用未在测试点定义中声明的多个 bin 的 AND、OR 或聚合命中结果定义该叶子的 `HIT`。
+- 一个 Bin_ID 只归属一个 bin 级叶子，或归属于唯一 point 级叶子的分布明细。
 - `(group, point, bin)` 全局唯一。
 - 需要多个条件联合时建立独立 cross point、cross bin 和对应叶子。
 - ready/valid 接口优先在 `fire` 采样。
@@ -237,7 +240,7 @@ src/test/python/Frontend/scripts/gen_coverage_html.sh <run-dir>/coverage
 2. 版本兼容性签名完整且匹配。
 3. pytest PASS，退出码为 0。
 4. monitor、checker、assertion 和 reference/trace 无未豁免错误。
-5. 目标 `(group, point, bin)` 在同一 run 中命中。
+5. 同一 run 中，point 级目标至少产生一次有效子 bin 采样，或 bin 级目标的指定 `(group, point, bin)` 命中。
 6. 日志、波形、funcov 和 codecov artifact 属于同一 run。
 
 bin 被触发但 testcase 失败时不得标记 `HIT`。`CLOSED` 只能人工写入，自动工具不得生成、降级或覆盖。

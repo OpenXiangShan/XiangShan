@@ -1,7 +1,6 @@
 import csv
 import hashlib
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -138,8 +137,6 @@ def _set_cfvec_entries(dut, entries):
 
 
 def _eligible_provenance():
-    frontend_root = _frontend_root()
-
     def file_sha256(path):
         return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -585,7 +582,7 @@ def test_canonical_registry_matches_the_single_sampler_contract():
             for row in csv.DictReader(handle)
             if row["Coverpoint"].strip()
         }
-    assert len(active) == 231
+    assert len(active) == 247
     assert active == set(FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS)
     assert len(CFVEC_SAMPLER_BIN_KEYS) == 17
     assert len(IFU_CFVEC_SAMPLER_BIN_KEYS) == 26
@@ -813,7 +810,7 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     assert "s1_icacheMeta_0_pmpMmio" not in recorder_source
     assert "s1_icacheMetaIn_0_itlbPbmt" in recorder_source
     assert "s1_icacheMetaIn_0_pmpMmio" in recorder_source
-    assert len(recorder.definitions) == 231
+    assert len(recorder.definitions) == 247
     assert all(item.coverpoint for item in recorder.definitions)
     assert "FunctionalCoverageRecorder.from_pilot_csv" in fixture_source
     assert "set_line_coverage" in fixture_source
@@ -1128,6 +1125,19 @@ def test_funcov_targets_resolve_from_exact_registry_testcase(tmp_path):
         "BIN-537",
         "BIN-538",
         "BIN-539",
+        "BIN-801",
+        "BIN-802",
+        "BIN-803",
+        "BIN-804",
+        "BIN-805",
+        "BIN-806",
+        "BIN-807",
+        "BIN-808",
+        "BIN-809",
+        "BIN-810",
+        "BIN-811",
+        "BIN-813",
+        "BIN-816",
     ]
 
 

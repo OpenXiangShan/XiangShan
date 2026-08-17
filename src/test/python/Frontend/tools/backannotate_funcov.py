@@ -23,14 +23,24 @@ _IMPORT_ROOT = Path(__file__).resolve().parents[1]
 if str(_IMPORT_ROOT) not in sys.path:
     sys.path.insert(0, str(_IMPORT_ROOT))
 
-from env.runtime.artifact_provenance import load_frontend_build_manifest
-from env.funcov.recorder import current_funcov_sampler_sha256, funcov_sampler_paths
+from env.runtime.artifact_provenance import load_frontend_build_manifest  # noqa: E402
+from env.funcov.recorder import current_funcov_sampler_sha256, funcov_sampler_paths  # noqa: E402
 
 
-STATUSES = {"UNMAPPED", "MODELED", "PARTIAL", "HIT", "CLOSED", "BLOCKED", "N-A", "SV_FUNCOV"}
-REFERENCE_RE = re.compile(
+STATUSES = {
+    "UNMAPPED",
+    "MODELED",
+    "PARTIAL",
+    "HIT",
+    "CLOSED",
+    "BLOCKED",
+    "N-A",
+    "SV_FUNCOV",
+}
+BIN_REFERENCE_RE = re.compile(
     r"^covergroup ([^,;]+), coverpoint ([^,;]+), bins ([^ (;]+) \((BIN-\d+)\)$"
 )
+POINT_REFERENCE_RE = re.compile(r"^covergroup ([^,;]+), coverpoint ([^,;()]+)$")
 BIN_ID_RE = re.compile(r"^BIN-\d+$")
 
 _PASS_OUTCOMES = {"pass", "passed", "ok", "success", "successful"}
@@ -111,6 +121,8 @@ _CANONICAL_REGISTRY = (
     / "03_funcov_model"
     / "frontend_bt_functional_coverage_pilot.csv"
 )
+
+
 @dataclass(frozen=True)
 class PilotBin:
     bin_id: str
@@ -118,6 +130,15 @@ class PilotBin:
     coverpoint: str
     bin_name: str
     testcase: str
+
+
+@dataclass(frozen=True)
+class CoverageReference:
+    kind: str
+    group: str
+    coverpoint: str
+    bin_name: str | None = None
+    bin_id: str | None = None
 
 
 def _read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
@@ -128,7 +149,9 @@ def _read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
 
 def _write_csv(path: Path, fields: list[str], rows: Iterable[dict[str, str]]) -> None:
     with path.open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore", lineterminator="\n")
+        writer = csv.DictWriter(
+            f, fieldnames=fields, extrasaction="ignore", lineterminator="\n"
+        )
         writer.writeheader()
         writer.writerows(rows)
 
@@ -154,7 +177,9 @@ def validate_pilot_schema(path: Path) -> dict[str, int]:
         if not group or not bin_name:
             raise ValueError(f"line {line}: incomplete coverage mapping for {bin_id}")
         if bin_id in bin_ids:
-            raise ValueError(f"line {line}: duplicate Bin_ID {bin_id}; first defined at line {bin_ids[bin_id]}")
+            raise ValueError(
+                f"line {line}: duplicate Bin_ID {bin_id}; first defined at line {bin_ids[bin_id]}"
+            )
         bin_ids[bin_id] = line
 
         mapping_key = (group, point, bin_name)
@@ -178,7 +203,12 @@ def validate_pilot_schema(path: Path) -> dict[str, int]:
                 )
             legacy_ids[legacy_id] = line
 
-    return {"rows": len(rows), "bin_ids": len(bin_ids), "mapping_keys": len(mapping_keys), "legacy_ids": len(legacy_ids)}
+    return {
+        "rows": len(rows),
+        "bin_ids": len(bin_ids),
+        "mapping_keys": len(mapping_keys),
+        "legacy_ids": len(legacy_ids),
+    }
 
 
 def load_pilot(path: Path, *, bin_prefix: str | None = None) -> dict[str, PilotBin]:
@@ -209,9 +239,31 @@ def load_pilot(path: Path, *, bin_prefix: str | None = None) -> dict[str, PilotB
     return result
 
 
-def parse_reference(value: str) -> tuple[str, str, str, str] | None:
-    match = REFERENCE_RE.fullmatch(str(value or "").strip())
-    return match.groups() if match else None
+def parse_reference(value: str) -> CoverageReference | None:
+    text = str(value or "").strip()
+    match = BIN_REFERENCE_RE.fullmatch(text)
+    if match:
+        group, point, bin_name, bin_id = match.groups()
+        return CoverageReference("bin", group, point, bin_name, bin_id)
+    match = POINT_REFERENCE_RE.fullmatch(text)
+    if match:
+        group, point = match.groups()
+        return CoverageReference("point", group, point)
+    return None
+
+
+def _pilot_bins_for_reference(
+    ref: CoverageReference,
+    pilot: dict[str, PilotBin],
+) -> list[PilotBin]:
+    if ref.kind == "bin":
+        item = pilot.get(str(ref.bin_id))
+        return [] if item is None else [item]
+    return [
+        item
+        for item in pilot.values()
+        if (item.group, item.coverpoint) == (ref.group, ref.coverpoint)
+    ]
 
 
 def validate_mapping(
@@ -227,6 +279,8 @@ def validate_mapping(
         raise ValueError(f"testpoint missing columns: {sorted(missing)}")
 
     mapped: dict[str, int] = {}
+    point_owners: dict[tuple[str, str], int] = {}
+    bin_owned_points: dict[tuple[str, str], int] = {}
     for line, row in enumerate(rows, start=2):
         status = row["status"].strip()
         if status and status not in STATUSES:
@@ -234,22 +288,59 @@ def validate_mapping(
         coverage = row["coverage"].strip()
         if not coverage:
             continue
-        if bin_prefix is not None and bin_prefix not in coverage:
-            continue
         ref = parse_reference(coverage)
         if ref is None:
-            raise ValueError(f"line {line}: leaf must bind exactly one group/point/bin")
-        group, point, bin_name, bin_id = ref
+            if bin_prefix is not None and bin_prefix not in coverage:
+                continue
+            raise ValueError(
+                f"line {line}: leaf must bind exactly one covergroup/coverpoint or "
+                "one covergroup/coverpoint/bin"
+            )
+        point_key = (ref.group, ref.coverpoint)
+        if ref.kind == "point":
+            items = _pilot_bins_for_reference(ref, pilot)
+            if not items:
+                if bin_prefix is not None:
+                    continue
+                raise ValueError(f"line {line}: unknown pilot coverpoint {point_key}")
+            if point_key in point_owners:
+                raise ValueError(
+                    f"line {line}: coverpoint {point_key} already owned by line "
+                    f"{point_owners[point_key]}"
+                )
+            if point_key in bin_owned_points:
+                raise ValueError(
+                    f"line {line}: coverpoint {point_key} mixes point-level ownership "
+                    f"with bin-level ownership at line {bin_owned_points[point_key]}"
+                )
+            point_owners[point_key] = line
+            for item in items:
+                mapped[item.bin_id] = line
+            continue
+
+        bin_id = str(ref.bin_id)
         if bin_prefix is not None and not bin_id.startswith(bin_prefix):
             continue
         expected = pilot.get(bin_id)
         if expected is None:
             raise ValueError(f"line {line}: unknown pilot bin {bin_id}")
-        if (group, point, bin_name) != (expected.group, expected.coverpoint, expected.bin_name):
+        if (ref.group, ref.coverpoint, ref.bin_name) != (
+            expected.group,
+            expected.coverpoint,
+            expected.bin_name,
+        ):
             raise ValueError(f"line {line}: pilot mismatch for {bin_id}")
+        if point_key in point_owners:
+            raise ValueError(
+                f"line {line}: coverpoint {point_key} mixes bin-level ownership "
+                f"with point-level ownership at line {point_owners[point_key]}"
+            )
         if bin_id in mapped:
-            raise ValueError(f"line {line}: {bin_id} already owned by line {mapped[bin_id]}")
+            raise ValueError(
+                f"line {line}: {bin_id} already owned by line {mapped[bin_id]}"
+            )
         mapped[bin_id] = line
+        bin_owned_points.setdefault(point_key, line)
 
     missing_bins = sorted(set(pilot) - set(mapped))
     if missing_bins:
@@ -302,12 +393,24 @@ def _current_sampler_sha256() -> str | None:
 
 def _manifest_value_matches(field: str, recorded: Any, runtime: Any) -> bool:
     if field == "source_sha_override":
-        return isinstance(recorded, bool) and isinstance(runtime, bool) and recorded is runtime
+        return (
+            isinstance(recorded, bool)
+            and isinstance(runtime, bool)
+            and recorded is runtime
+        )
     if field == "source_delta_files":
-        return isinstance(recorded, list) and isinstance(runtime, list) and recorded == runtime
+        return (
+            isinstance(recorded, list)
+            and isinstance(runtime, list)
+            and recorded == runtime
+        )
     recorded_text = str(recorded or "").strip()
     runtime_text = str(runtime or "").strip()
-    return recorded_text == runtime_text if field == "build_config" else recorded_text.lower() == runtime_text.lower()
+    return (
+        recorded_text == runtime_text
+        if field == "build_config"
+        else recorded_text.lower() == runtime_text.lower()
+    )
 
 
 def _compatibility_value_present(field: str, value: Any) -> bool:
@@ -346,7 +449,9 @@ def _runtime_manifest_gate(provenance: dict) -> list[str]:
     else:
         reasons.extend(f"build_manifest_runtime:{reason}" for reason in runtime_reasons)
     for field in _RUNTIME_MANIFEST_FIELDS:
-        if not _manifest_value_matches(field, provenance.get(field), runtime.get(field)):
+        if not _manifest_value_matches(
+            field, provenance.get(field), runtime.get(field)
+        ):
             reasons.append(f"build_manifest_runtime_mismatch:{field}")
     return reasons
 
@@ -425,7 +530,11 @@ def evaluate_artifact(raw: Any) -> dict:
     reported as ``unverified`` instead of being guessed as a pass.
     """
     if not isinstance(raw, dict):
-        return {"kind": "invalid", "eligible": False, "reasons": ["artifact_root_not_object"]}
+        return {
+            "kind": "invalid",
+            "eligible": False,
+            "reasons": ["artifact_root_not_object"],
+        }
     artifact_errors = raw.get("_artifact_errors")
     if artifact_errors:
         return {
@@ -461,7 +570,8 @@ def evaluate_artifact(raw: Any) -> dict:
             )
             if invalid_target_bin_ids:
                 reasons.append(
-                    "invalid_coverage_targets:bin_ids=" + ",".join(invalid_target_bin_ids)
+                    "invalid_coverage_targets:bin_ids="
+                    + ",".join(invalid_target_bin_ids)
                 )
 
     provenance = _as_mapping(raw.get("provenance"))
@@ -470,27 +580,43 @@ def evaluate_artifact(raw: Any) -> dict:
     # without having a compiled-DUT manifest to validate.
     runtime_contract = bool(
         str(provenance.get("build_manifest_path") or "").strip()
-        or ("build_manifest_status" in provenance and "build_manifest_reasons" in provenance)
+        or (
+            "build_manifest_status" in provenance
+            and "build_manifest_reasons" in provenance
+        )
     )
-    required_provenance = (*_REQUIRED_PROVENANCE, *_RUNTIME_PROVENANCE_FIELDS) if runtime_contract else _REQUIRED_PROVENANCE
+    required_provenance = (
+        (*_REQUIRED_PROVENANCE, *_RUNTIME_PROVENANCE_FIELDS)
+        if runtime_contract
+        else _REQUIRED_PROVENANCE
+    )
     for key in required_provenance:
         value = provenance.get(key)
         if value is None or str(value).strip() in {"", "unavailable", "unknown"}:
             reasons.append(f"missing_provenance:{key}")
-        elif key in _SHA256_PROVENANCE and re.fullmatch(r"[0-9a-fA-F]{64}", str(value).strip()) is None:
+        elif (
+            key in _SHA256_PROVENANCE
+            and re.fullmatch(r"[0-9a-fA-F]{64}", str(value).strip()) is None
+        ):
             reasons.append(f"invalid_provenance:{key}")
     source_sha = str(provenance.get("dut_source_sha") or "").strip()
-    if runtime_contract and str(provenance.get("simulator") or "").strip().lower() not in {"verilator", "vcs"}:
+    if runtime_contract and str(
+        provenance.get("simulator") or ""
+    ).strip().lower() not in {"verilator", "vcs"}:
         reasons.append("invalid_provenance:simulator")
-    if source_sha not in {"", "unavailable", "unknown"} and re.fullmatch(
-        r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", source_sha
-    ) is None:
+    if (
+        source_sha not in {"", "unavailable", "unknown"}
+        and re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", source_sha) is None
+    ):
         reasons.append("invalid_provenance:dut_source_sha")
-    for key in ("implementation_sha", "design_baseline_sha") if runtime_contract else ():
+    for key in (
+        ("implementation_sha", "design_baseline_sha") if runtime_contract else ()
+    ):
         value = str(provenance.get(key) or "").strip()
-        if value not in {"", "unavailable", "unknown"} and re.fullmatch(
-            r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", value
-        ) is None:
+        if (
+            value not in {"", "unavailable", "unknown"}
+            and re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", value) is None
+        ):
             reasons.append(f"invalid_provenance:{key}")
     override = provenance.get("source_sha_override")
     if runtime_contract and not isinstance(override, bool):
@@ -499,14 +625,22 @@ def evaluate_artifact(raw: Any) -> dict:
     if runtime_contract and policy not in {"none", "observability_only"}:
         reasons.append("invalid_provenance:source_delta_policy")
     delta_files = provenance.get("source_delta_files")
-    if runtime_contract and (not isinstance(delta_files, list) or any(not isinstance(item, str) for item in delta_files)):
+    if runtime_contract and (
+        not isinstance(delta_files, list)
+        or any(not isinstance(item, str) for item in delta_files)
+    ):
         reasons.append("invalid_provenance:source_delta_files")
     elif runtime_contract and not override and (policy != "none" or delta_files):
         reasons.append("source_delta_without_override")
     elif runtime_contract and override and policy != "observability_only":
         reasons.append("source_delta_policy_not_allowlisted")
-    if all(_compatibility_value_present(field, provenance.get(field)) for field in _COMPATIBILITY_FIELDS):
-        compatibility_payload = {field: provenance[field] for field in _COMPATIBILITY_FIELDS}
+    if all(
+        _compatibility_value_present(field, provenance.get(field))
+        for field in _COMPATIBILITY_FIELDS
+    ):
+        compatibility_payload = {
+            field: provenance[field] for field in _COMPATIBILITY_FIELDS
+        }
         expected_signature = hashlib.sha256(
             json.dumps(
                 compatibility_payload,
@@ -515,7 +649,10 @@ def evaluate_artifact(raw: Any) -> dict:
                 separators=(",", ":"),
             ).encode("utf-8")
         ).hexdigest()
-        if str(provenance.get("compatibility_signature") or "").strip().lower() != expected_signature:
+        if (
+            str(provenance.get("compatibility_signature") or "").strip().lower()
+            != expected_signature
+        ):
             reasons.append("compatibility_signature_mismatch")
 
     source_csv = str(raw.get("source_csv") or "").strip()
@@ -524,25 +661,35 @@ def evaluate_artifact(raw: Any) -> dict:
     current_registry_sha256 = _file_sha256(_CANONICAL_REGISTRY)
     if current_registry_sha256 is None:
         reasons.append("current_registry_unavailable")
-    elif str(provenance.get("registry_sha256") or "").strip().lower() != current_registry_sha256:
+    elif (
+        str(provenance.get("registry_sha256") or "").strip().lower()
+        != current_registry_sha256
+    ):
         reasons.append("registry_version_mismatch")
 
     current_sampler_sha256 = _current_sampler_sha256()
     if current_sampler_sha256 is None:
         reasons.append("current_sampler_unavailable")
-    elif str(provenance.get("sampler_sha256") or "").strip().lower() != current_sampler_sha256:
+    elif (
+        str(provenance.get("sampler_sha256") or "").strip().lower()
+        != current_sampler_sha256
+    ):
         reasons.append("sampler_version_mismatch")
 
     definitions = raw.get("definitions")
     if not isinstance(definitions, list):
         reasons.append("missing_or_invalid_definitions")
-    elif str(provenance.get("definitions_sha256") or "").strip().lower() != _json_sha256(definitions):
+    elif str(
+        provenance.get("definitions_sha256") or ""
+    ).strip().lower() != _json_sha256(definitions):
         reasons.append("definitions_sha256_mismatch")
     manifest_status = str(provenance.get("build_manifest_status") or "").strip().lower()
     if manifest_status != "valid":
         reasons.append(f"build_manifest:{manifest_status or 'missing'}")
     manifest_reasons = provenance.get("build_manifest_reasons")
-    if runtime_contract and (not isinstance(manifest_reasons, list) or manifest_reasons):
+    if runtime_contract and (
+        not isinstance(manifest_reasons, list) or manifest_reasons
+    ):
         reasons.append("build_manifest_reasons_present")
     if runtime_contract:
         reasons.extend(_runtime_manifest_gate(provenance))
@@ -564,9 +711,10 @@ def evaluate_artifact(raw: Any) -> dict:
         if value in {"", "unknown", "unavailable"}:
             reasons.append(f"missing_run_metadata:{field}")
     testcase_sha256 = str(run.get("testcase_sha256") or "").strip()
-    if testcase_sha256 not in {"", "unknown", "unavailable"} and re.fullmatch(
-        r"[0-9a-fA-F]{64}", testcase_sha256
-    ) is None:
+    if (
+        testcase_sha256 not in {"", "unknown", "unavailable"}
+        and re.fullmatch(r"[0-9a-fA-F]{64}", testcase_sha256) is None
+    ):
         reasons.append("invalid_run_metadata:testcase_sha256")
     if _as_int(run.get("seed")) is None:
         reasons.append("missing_run_metadata:seed")
@@ -575,20 +723,25 @@ def evaluate_artifact(raw: Any) -> dict:
         if _as_int(seeds.get(field)) is None:
             reasons.append(f"missing_run_seed:{field}")
 
-    if str(raw.get("testcase_name") or "").strip() == "test_bin_trace" or run.get("bin_path"):
+    if str(raw.get("testcase_name") or "").strip() == "test_bin_trace" or run.get(
+        "bin_path"
+    ):
         for field in ("bin_path", "bin_sha256", "trace_path", "trace_sha256"):
             value = str(run.get(field) or "").strip()
             if value in {"", "unknown", "unavailable"}:
                 reasons.append(f"missing_run_metadata:{field}")
         for field in ("bin_sha256", "trace_sha256"):
             value = str(run.get(field) or "").strip()
-            if value not in {"", "unknown", "unavailable"} and re.fullmatch(
-                r"[0-9a-fA-F]{64}", value
-            ) is None:
+            if (
+                value not in {"", "unknown", "unavailable"}
+                and re.fullmatch(r"[0-9a-fA-F]{64}", value) is None
+            ):
                 reasons.append(f"invalid_run_metadata:{field}")
 
     input_identities = [("testcase_path", "testcase_sha256")]
-    if str(raw.get("testcase_name") or "").strip() == "test_bin_trace" or run.get("bin_path"):
+    if str(raw.get("testcase_name") or "").strip() == "test_bin_trace" or run.get(
+        "bin_path"
+    ):
         input_identities.extend(
             [("bin_path", "bin_sha256"), ("trace_path", "trace_sha256")]
         )
@@ -736,18 +889,58 @@ def _artifact_targets(raw: dict) -> dict[str, set[str]]:
 
 
 def _has_explicit_targets(targets: dict[str, set[str]]) -> bool:
-    return any(targets.get(key) for key in ("bin_ids", "hit_keys", "tp_ids", "testcases"))
+    return any(
+        targets.get(key) for key in ("bin_ids", "hit_keys", "tp_ids", "testcases")
+    )
 
 
-def _target_matches(raw: dict, tag: str, item: PilotBin, bin_id: str, key: str) -> bool:
+def _target_matches_reference(
+    raw: dict,
+    tag: str,
+    ref: CoverageReference,
+    items: list[PilotBin],
+    testcase: str,
+) -> bool:
     targets = _artifact_targets(raw)
+    bin_ids = {item.bin_id for item in items}
+    hit_keys = {f"{item.group}::{item.coverpoint}::{item.bin_name}" for item in items}
+    point_key = f"{ref.group}::{ref.coverpoint}"
     if targets["bin_ids"] or targets["hit_keys"]:
-        return bin_id in targets["bin_ids"] or key in targets["hit_keys"]
-    if item.testcase and item.testcase in targets["testcases"]:
+        return bool(
+            bin_ids & targets["bin_ids"]
+            or hit_keys & targets["hit_keys"]
+            or point_key in targets["hit_keys"]
+        )
+    testcases = {item.testcase for item in items if item.testcase}
+    if testcase:
+        testcases.add(testcase)
+    if testcases & targets["testcases"]:
         return True
     if _has_explicit_targets(targets):
         return False
-    return bool(item.testcase and item.testcase in tag)
+    return any(candidate in tag for candidate in testcases)
+
+
+def _target_matches(raw: dict, tag: str, item: PilotBin, bin_id: str, key: str) -> bool:
+    """Preserve the bin-level target helper used by existing contract tests."""
+    if (item.bin_id, f"{item.group}::{item.coverpoint}::{item.bin_name}") != (
+        bin_id,
+        key,
+    ):
+        return False
+    return _target_matches_reference(
+        raw,
+        tag,
+        CoverageReference(
+            "bin",
+            item.group,
+            item.coverpoint,
+            item.bin_name,
+            item.bin_id,
+        ),
+        [item],
+        item.testcase,
+    )
 
 
 def _dut_evidence_entry(raw: dict, tag: str, hit_count: int) -> str:
@@ -829,12 +1022,15 @@ def backannotate(
         ref = parse_reference(row["coverage"])
         if ref is None:
             continue
-        group, point, bin_name, bin_id = ref
-        item = pilot.get(bin_id)
-        if item is None:
+        items = _pilot_bins_for_reference(ref, pilot)
+        if not items:
             continue
 
-        row["testcase"] = item.testcase
+        suggested_testcases = {item.testcase for item in items if item.testcase}
+        if ref.kind == "bin":
+            row["testcase"] = items[0].testcase
+        elif not row["testcase"].strip() and len(suggested_testcases) == 1:
+            row["testcase"] = next(iter(suggested_testcases))
         status = row["status"].strip() or "MODELED"
         if status == "CLOSED":
             counts["closed_preserved"] += 1
@@ -842,36 +1038,58 @@ def backannotate(
         if status in {"BLOCKED", "N-A"}:
             continue
 
-        key = f"{group}::{point}::{bin_name}"
         model_entries = []
         dut_entries = []
         rejected_entries = []
         dut_seen_for_testcase = False
         for path, raw, kind in artifacts:
             hits = _as_mapping(raw.get("hits"))
-            hit_record = _as_mapping(hits.get(key))
-            legacy_hit_count = max(
-                _as_int(_as_mapping(hits.get(f"{group}::{bin_name}")).get("hits")) or 0,
-                _as_int(_as_mapping(hits.get(f"{group}::::{bin_name}")).get("hits")) or 0,
+            hit_count = sum(
+                _as_int(
+                    _as_mapping(
+                        hits.get(f"{item.group}::{item.coverpoint}::{item.bin_name}")
+                    ).get("hits")
+                )
+                or 0
+                for item in items
             )
-            hit = hit_record.get("hits", 0)
+            legacy_hit_count = max(
+                (
+                    _as_int(_as_mapping(hits.get(legacy_key)).get("hits")) or 0
+                    for item in items
+                    for legacy_key in (
+                        f"{item.group}::{item.bin_name}",
+                        f"{item.group}::::{item.bin_name}",
+                    )
+                ),
+                default=0,
+            )
             tag = str(raw.get("artifact_tag") or path.stem)
-            target_matches = _target_matches(raw, tag, item, bin_id, key)
+            target_matches = _target_matches_reference(
+                raw,
+                tag,
+                ref,
+                items,
+                row["testcase"].strip(),
+            )
             if kind in {"dut", "invalid"}:
                 gate = evaluate_artifact(raw)
-                hit_count = _as_int(hit) or 0
                 if target_matches:
                     dut_seen_for_testcase = True
                 if target_matches and gate["eligible"] and hit_count > 0:
                     dut_entries.append(_dut_evidence_entry(raw, tag, hit_count))
                 elif kind == "dut" and target_matches and legacy_hit_count > 0:
                     rejected_entries.append(f"DUT_REJECTED:{tag}:legacy_hit_key")
-                elif target_matches and not gate["eligible"] and (hit_count > 0 or gate["reasons"]):
+                elif (
+                    target_matches
+                    and not gate["eligible"]
+                    and (hit_count > 0 or gate["reasons"])
+                ):
                     reason = ",".join(gate["reasons"])
                     prefix = "DUT_REJECTED" if kind == "dut" else "ARTIFACT_REJECTED"
                     rejected_entries.append(f"{prefix}:{tag}:{reason}")
             else:
-                if target_matches or (_as_int(hit) or 0) > 0:
+                if target_matches or hit_count > 0:
                     model_entries.append(f"MODEL:{tag}")
 
         row["evidence"] = _append_evidence(
@@ -899,9 +1117,17 @@ def main() -> int:
     parser.add_argument("--pilot", type=Path, required=True)
     parser.add_argument("--testpoints", type=Path)
     parser.add_argument("--artifact", type=Path, action="append", default=[])
-    parser.add_argument("--bin-prefix", help="optional scoped Bin_ID prefix, for example BIN-5")
-    parser.add_argument("--check", action="store_true", help="validate only; do not write")
-    parser.add_argument("--schema-check", action="store_true", help="validate global pilot identifiers only")
+    parser.add_argument(
+        "--bin-prefix", help="optional scoped Bin_ID prefix, for example BIN-5"
+    )
+    parser.add_argument(
+        "--check", action="store_true", help="validate only; do not write"
+    )
+    parser.add_argument(
+        "--schema-check",
+        action="store_true",
+        help="validate global pilot identifiers only",
+    )
     parser.add_argument(
         "--audit-json",
         type=Path,

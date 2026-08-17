@@ -10,7 +10,11 @@ versions, simulators, or two different coverage semantics.
 
 from .py.ifu.sampler import (
     CFVEC_SAMPLER_BIN_KEYS as IFU_CFVEC_SAMPLER_BIN_KEYS,
+    IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS,
     _classify_cfi_kind,
+    initialize_ifu_cacheable_pipeline_state,
+    reset_ifu_cacheable_pipeline_state,
+    sample_ifu_cacheable_pipeline_coverage,
     sample_cfvec_coverage,
 )
 from .py.ftq.sampler import (
@@ -47,8 +51,14 @@ CFVEC_SAMPLER_BIN_KEYS = frozenset(
 __all__ = [
     "CFVEC_SAMPLER_BIN_KEYS",
     "IFU_CFVEC_SAMPLER_BIN_KEYS",
+    "IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS",
     "TWO_FETCH_COVERPOINTS",
     "TWO_FETCH_SAMPLER_BIN_KEYS",
+    "_TWO_FETCH_SIGNALS",
+    "_classify_cfi_kind",
     "sample_cfvec_coverage",
+    "initialize_ifu_cacheable_pipeline_state",
+    "reset_ifu_cacheable_pipeline_state",
+    "sample_ifu_cacheable_pipeline_coverage",
     "sample_two_fetch_coverage",
 ]
