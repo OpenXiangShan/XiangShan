@@ -56,11 +56,11 @@ class BranchAttribute extends Bundle {
   def isReturn:        Bool = rasAction === BranchAttribute.RasAction.Pop
   def isReturnAndCall: Bool = rasAction === BranchAttribute.RasAction.PopAndPush
 
-  // hasPop = isPop || isPushAndPop, hasPush = isPush || isPushAndPop
+  // hasPop = isPop || isPopAndPush, hasPush = isPush || isPopAndPush
   def hasPop:  Bool = rasAction(BranchAttribute.RasAction.popBit)
   def hasPush: Bool = rasAction(BranchAttribute.RasAction.pushBit)
 
-  def needIttage: Bool = isIndirect && !hasPop
+  def needIttage: Bool = isIndirect && !isReturn
 
   def =/=(that: BranchAttribute): Bool =
     this.branchType =/= that.branchType || this.rasAction =/= that.rasAction

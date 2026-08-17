@@ -26,14 +26,14 @@ import xiangshan.frontend.bpu.BranchAttribute
 
 class RasEntry(implicit p: Parameters) extends RasBundle {
   val retAddr: PrunedAddr = PrunedAddr(VAddrBits)
-  val ctr:     UInt       = UInt(StackCounterWidth.W) // layer of nested call functions
+  // val ctr:     UInt       = UInt(StackCounterWidth.W) // layer of nested call functions
 }
 
 object RasEntry {
   def apply(retAddr: PrunedAddr, ctr: UInt)(implicit p: Parameters): RasEntry = {
     val e = Wire(new RasEntry)
     e.retAddr := retAddr
-    e.ctr     := ctr
+    // e.ctr     := ctr
     e
   }
 }
@@ -55,7 +55,7 @@ object RasPtr {
 
 class RasInternalMeta(implicit p: Parameters) extends RasBundle {
   val ssp:  UInt   = UInt(log2Up(CommitStackSize).W)
-  val sctr: UInt   = UInt(StackCounterWidth.W)
+  // val sctr: UInt   = UInt(StackCounterWidth.W)
   val tosw: RasPtr = new RasPtr
   val tosr: RasPtr = new RasPtr
   val nos:  RasPtr = new RasPtr
@@ -65,7 +65,7 @@ object RasInternalMeta {
   def apply(ssp: UInt, sctr: UInt, tosw: RasPtr, tosr: RasPtr, nos: RasPtr)(implicit p: Parameters): RasInternalMeta = {
     val e = Wire(new RasInternalMeta)
     e.ssp  := ssp
-    e.sctr := sctr
+    // e.sctr := sctr
     e.tosw := tosw
     e.tosr := tosr
     e.nos  := nos

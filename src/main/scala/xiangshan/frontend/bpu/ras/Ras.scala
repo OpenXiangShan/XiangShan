@@ -65,19 +65,20 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   private val stackNearOverflow = stack.specNearOverflow
   private val specPush          = io.specIn.valid && io.specIn.bits.attribute.isCall
   private val specPop           = io.specIn.valid && io.specIn.bits.attribute.isReturn
+  private val specPopAndPush    = io.specIn.valid && io.specIn.bits.attribute.isReturnAndCall
 
   private val specIn       = io.specIn.bits
   private val specAlignPc  = specIn.startPc & alignMask
   private val specPushAddr = specAlignPc + (specIn.cfiPosition << 1.U).asUInt + 2.U
   stack.spec.pushValid := specPush && !stackNearOverflow
   stack.spec.popValid  := specPop && !stackNearOverflow
-
+  stack.spec.popAndPushValid := specPopAndPush && !stackNearOverflow
   stack.spec.pushAddr := PrunedAddrInit(specPushAddr)
   stack.spec.fire     := io.specIn.valid
 
   private val redirectMeta = Wire(new RasRedirectMeta)
   redirectMeta.ssp        := stack.meta.ssp
-  redirectMeta.sctr       := stack.meta.sctr
+  // redirectMeta.sctr       := stack.meta.sctr
   redirectMeta.tosr       := stack.meta.tosr
   redirectMeta.tosw       := stack.meta.tosw
   redirectMeta.nos        := stack.meta.nos
@@ -100,6 +101,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   stack.redirect.valid  := redirect.valid && (isBefore(redirectTOSW, stackTOSW) || !stackNearOverflow)
   stack.redirect.isCall := redirect.bits.attribute.isCall
   stack.redirect.isRet  := redirect.bits.attribute.isReturn
+  stack.redirect.isRetCall := redirect.bits.attribute.isReturnAndCall
   stack.redirect.meta   := redirect.bits.meta.ras
   // Redirected branch PC points to end of instruction.
   stack.redirect.callAddr := redirect.bits.cfiPc + 2.U
@@ -110,6 +112,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   stack.commit.valid     := commitValid
   stack.commit.pushValid := commitValid && commitInfo.attribute.isCall
   stack.commit.popValid  := commitValid && commitInfo.attribute.isReturn
+  stack.commit.popAndPushValid := commitValid && commitInfo.attribute.isReturnAndCall
   stack.commit.pushAddr  := commitPushAddr
   stack.commit.metaTosw  := commitInfo.meta.ras.tosw
   stack.commit.metaSsp   := commitInfo.meta.ras.ssp
@@ -124,10 +127,10 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   for (i <- 0 until SpecQueueSize) {
     XSDebug(
       specFire,
-      "  (%d)   0x%x      %d       %d",
+      "  (%d)   0x%x      %d",
       i.U,
       specDebug.specQueue(i).retAddr.toUInt,
-      specDebug.specQueue(i).ctr,
+      // specDebug.specQueue(i).ctr,
       specDebug.specNos(i).value
     )
     XSDebug(specFire && i.U === stack.meta.tosw.value, "   <----TOSW")
@@ -139,10 +142,10 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   for (i <- 0 until CommitStackSize) {
     XSDebug(
       specFire,
-      "  (%d)   0x%x      %d",
+      "  (%d)   0x%x",
       i.U,
       specDebug.commitStack(i).retAddr.toUInt,
-      specDebug.commitStack(i).ctr
+      // specDebug.commitStack(i).ctr
     )
   }
 }
