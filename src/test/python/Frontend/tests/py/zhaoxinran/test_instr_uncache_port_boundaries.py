@@ -1592,6 +1592,88 @@ def test_uncache_sv39_pmp_execute_denied_reports_instruction_access_fault(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_tps("ATP-090")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_sv39_cross_page_rvi_uses_second_page_pma_path(env):
+    cross_page_va = _NORMAL_BASE + _SV39_PAGE_SIZE - 2
+    cross_page_pa = _NORMAL_PHYS_BASE + _SV39_PAGE_SIZE - 2
+    next_page_pa = _NORMAL_PHYS_BASE + _SV39_PAGE_SIZE
+    payload = int(_ADDI_X0_X0_0).to_bytes(4, "little") + int(_CNOP).to_bytes(2, "little") * 64
+
+    _initialize_sv39_fetch(env, reset_vector=cross_page_va)
+    scenario = TranslationScenario(
+        scenario_id="atp-090-cross-page-pma-dut",
+        va=cross_page_va,
+        pa=cross_page_pa,
+        payload=payload,
+        page_count=2,
+        expected_path="cacheable",
+        expected_result="miss_refill",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=_NORMAL_PHYS_BASE,
+                size=_SV39_PAGE_SIZE,
+            ),
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=1,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=next_page_pa,
+                size=_SV39_PAGE_SIZE,
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+                addr=_NORMAL_PHYS_BASE,
+                size=_SV39_PAGE_SIZE,
+            ),
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=1,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=False),
+                addr=next_page_pa,
+                size=_SV39_PAGE_SIZE,
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(cross_page_va)
+    env.arm_translation_scenario(state)
+    _force_redirect_to(env, cross_page_va)
+
+    assert _wait_for_request_addr(env, next_page_pa, max_cycles=12000), {
+        "ptw": env.ptw_agent.get_stats(),
+        "icache": env.icache_agent.get_stats(),
+        "uncache": env.uncache_agent.get_stats(),
+    }
+    assert _wait_for_observed_pc(env, cross_page_va, max_cycles=12000), {
+        "ptw": env.ptw_agent.get_stats(),
+        "icache": env.icache_agent.get_stats(),
+        "uncache": env.uncache_agent.get_stats(),
+        "observed": [(int(obs.pc), int(obs.instr), bool(obs.is_rvc)) for obs in env.monitor.observations[-16:]],
+    }
+
+    observed = next(obs for obs in env.monitor.observations if int(obs.pc) == cross_page_va)
+    icache_records = env.icache_agent.get_stats()["request_records"]
+    uncache_stats = env.uncache_agent.get_stats()
+    oracle_stats = env.assert_translation_scenario()
+
+    assert any(int(record["address"]) == (cross_page_pa & ~0x3F) for record in icache_records), icache_records
+    assert next_page_pa in uncache_stats["request_addrs"], uncache_stats
+    assert int(observed.instr) == _ADDI_X0_X0_0
+    assert not bool(observed.is_rvc)
+    assert env.monitor.exception_mark_count == 0
+    assert oracle_stats["error_count"] == 0
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_tps("ATP-035")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_csr_changed_before_ptw_response_discards_stale_translation(env):

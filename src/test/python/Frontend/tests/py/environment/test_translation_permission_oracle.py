@@ -186,6 +186,34 @@ def test_oracle_marks_pre_fence_response_stale_in_new_epoch() -> None:
     assert env.translation_oracle.get_active()["response_seen"] is True
 
 
+def test_oracle_accepts_the_second_page_ptw_transaction_after_the_first_fetch() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    state = TranslationScenarioBuilder(env).build(
+        TranslationScenario(
+            scenario_id="oracle-cross-page",
+            va=0x8020_0FFE,
+            pa=0x8040_0FFE,
+            payload=b"\x13\x00\x00\x00",
+            page_count=2,
+        )
+    )
+    env.arm_translation_scenario(state)
+    first = state.expected_ptw_request
+    first_response = env.page_table.build_ptw_resp(first["vpn"])
+    env.translation_oracle.observe_ptw_request(10, **{key: first[key] for key in ("vpn", "s2xlate", "get_gpa")})
+    env.translation_oracle.observe_ptw_response(11, **{key: first[key] for key in ("vpn", "s2xlate", "get_gpa")}, response=first_response)
+    env.translation_oracle.observe_fetch_request(12, path="icache", pa=state.expected_outcome["pa"] & ~0x3F)
+
+    second = {**first, "vpn": first["vpn"] + 1}
+    second_response = env.page_table.build_ptw_resp(second["vpn"])
+    env.translation_oracle.observe_ptw_request(13, **{key: second[key] for key in ("vpn", "s2xlate", "get_gpa")})
+    env.translation_oracle.observe_ptw_response(14, **{key: second[key] for key in ("vpn", "s2xlate", "get_gpa")}, response=second_response)
+
+    stats = env.assert_translation_scenario()
+    assert stats["error_count"] == 0
+    assert stats["active"]["responded_ptw_vpns"] == [first["vpn"], second["vpn"]]
+
+
 def test_oracle_reconstructs_mainpipe_pmp_request_address_after_translation() -> None:
     dut = _PmpProbeDut()
     env = FrontendEnv(dut, register_callbacks=False)

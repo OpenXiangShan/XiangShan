@@ -90,12 +90,22 @@ class TranslationPermissionOracle:
 
     def arm(self, state, *, translation_epoch: int) -> dict:
         expected_fault = self._expected_fault(state)
+        expected_ptw_requests = [
+            {
+                "scenario_id": str(state.scenario.scenario_id),
+                "vpn": (int(state.scenario.va) >> 12) + page,
+                "s2xlate": int(state.expected_ptw_request["s2xlate"]),
+                "get_gpa": int(state.expected_ptw_request["get_gpa"]),
+            }
+            for page in range(int(state.scenario.page_count))
+        ]
         self.active = {
             "scenario_id": str(state.scenario.scenario_id),
             "translation_epoch": int(translation_epoch),
             "va": int(state.scenario.va),
             "payload_size": len(state.scenario.payload),
             "expected_ptw_request": dict(state.expected_ptw_request),
+            "expected_ptw_requests": expected_ptw_requests,
             "expected_outcome": dict(state.expected_outcome),
             "expected_path": "fault" if expected_fault else str(state.scenario.expected_path),
             "expected_fault": expected_fault,
@@ -107,6 +117,8 @@ class TranslationPermissionOracle:
             "permission_check_required": bool(state.scenario.pmp_entries or state.scenario.pma_entries)
             and expected_fault in {None, "instruction_access_fault"},
             "pmp_signal_unavailable": False,
+            "requested_ptw_vpns": [],
+            "responded_ptw_vpns": [],
         }
         self._icache_cursor = len(getattr(getattr(self.env, "icache_agent", None), "request_records", []))
         self._uncache_cursor = len(getattr(getattr(self.env, "uncache_agent", None), "request_addrs", []))
@@ -120,27 +132,43 @@ class TranslationPermissionOracle:
         if self.active is None:
             return
         actual = {"vpn": int(vpn), "s2xlate": int(s2xlate), "get_gpa": int(get_gpa)}
-        expected = self.active["expected_ptw_request"]
-        if self.active["fetch_seen"] or self.active["fault_seen"]:
+        expected = next(
+            (
+                request
+                for request in self.active["expected_ptw_requests"]
+                if int(request["vpn"]) == int(actual["vpn"])
+                and int(request["s2xlate"]) == int(actual["s2xlate"])
+                and int(request["get_gpa"]) == int(actual["get_gpa"])
+            ),
+            None,
+        )
+        if self.active["fault_seen"]:
             self._error(cycle, "unexpected_followup_ptw_request", actual=actual)
+            return
+        if expected is None:
+            self._error(cycle, "ptw_request_mismatch", expected=self.active["expected_ptw_requests"], actual=actual)
             return
         record = {**actual, "translation_epoch": int(getattr(self.env, "translation_epoch", self.active["translation_epoch"]))}
         self._ptw_requests.append(record)
         self.active["request_seen"] = True
+        if int(actual["vpn"]) not in self.active["requested_ptw_vpns"]:
+            self.active["requested_ptw_vpns"].append(int(actual["vpn"]))
         self._record(cycle, "ptw_request", actual=actual)
-        mismatches = {
-            key: {"expected": int(expected[key]), "actual": int(actual[key])}
-            for key in ("vpn", "s2xlate", "get_gpa")
-            if int(expected[key]) != int(actual[key])
-        }
-        if mismatches:
-            self._error(cycle, "ptw_request_mismatch", expected=expected, actual=actual, mismatches=mismatches)
 
     def observe_ptw_response(self, cycle: int, *, vpn: int, s2xlate: int, get_gpa: int, response: dict) -> None:
         if self.active is None:
             return
         actual = {"vpn": int(vpn), "s2xlate": int(s2xlate), "get_gpa": int(get_gpa)}
-        expected = self.active["expected_ptw_request"]
+        expected = next(
+            (
+                request
+                for request in self.active["expected_ptw_requests"]
+                if int(request["vpn"]) == int(actual["vpn"])
+                and int(request["s2xlate"]) == int(actual["s2xlate"])
+                and int(request["get_gpa"]) == int(actual["get_gpa"])
+            ),
+            None,
+        )
         response_record = {
             "ppn": int(response.get("s1_entry_ppn", 0)),
             "pbmt": int(response.get("s1_entry_pbmt", 0)),
@@ -164,15 +192,17 @@ class TranslationPermissionOracle:
         if request_epoch is not None and int(request_epoch) != int(self.active["translation_epoch"]):
             self._record(cycle, "stale_ptw_response", response_epoch=request_epoch, actual=actual)
             return
-        mismatches = {
-            key: {"expected": int(expected[key]), "actual": int(actual[key])}
-            for key in ("vpn", "s2xlate", "get_gpa")
-            if int(expected[key]) != int(actual[key])
-        }
-        if mismatches:
-            self._error(cycle, "ptw_response_context_mismatch", expected=expected, actual=actual, mismatches=mismatches)
+        if expected is None:
+            self._error(
+                cycle,
+                "ptw_response_context_mismatch",
+                expected=self.active["expected_ptw_requests"],
+                actual=actual,
+            )
             return
         self.active["response_seen"] = True
+        if int(actual["vpn"]) not in self.active["responded_ptw_vpns"]:
+            self.active["responded_ptw_vpns"].append(int(actual["vpn"]))
 
     def observe_fetch_request(self, cycle: int, *, path: str, pa: int) -> None:
         if self.active is None:
@@ -342,9 +372,10 @@ class TranslationPermissionOracle:
         if self.active is None:
             raise AssertionError("translation oracle has no armed scenario")
         missing = []
-        if not self.active["request_seen"]:
+        expected_vpns = {int(request["vpn"]) for request in self.active["expected_ptw_requests"]}
+        if not expected_vpns.issubset(self.active["requested_ptw_vpns"]):
             missing.append("ptw_request")
-        if not self.active["response_seen"]:
+        if not expected_vpns.issubset(self.active["responded_ptw_vpns"]):
             missing.append("ptw_response")
         if self.active["expected_path"] == "fault":
             if not self.active["fault_seen"]:
