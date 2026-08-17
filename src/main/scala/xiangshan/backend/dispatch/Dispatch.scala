@@ -99,6 +99,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   val maxIQSize = allIssueParams.map(_.numEntries).max + (if (enableDispatchIQBalanceOpt) 6 else 0)
   val IQEnqSum = allIssueParams.map(_.numEnq).sum
   val issueQueueNum = allIssueParams.size
+  private val scalarLduIQIdx = allIssueParams.zipWithIndex.collect { case (iq, idx) if iq.isLdAddrIQ => idx }
+  private val scalarLduExuIdx = scalarLduIQIdx.map(iqIdx => allExuParams.indexOf(allIssueParams(iqIdx).exuBlockParams.head))
+  private val iqEnqStart = allIssueParams.map(_.numEnq).scanLeft(0)(_ + _).dropRight(1)
+  private val enableLongLoadLduSteering = scalarLduIQIdx.size == 3
 
   val io = IO(new Bundle {
     // from rename
@@ -286,8 +290,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
 
   // A new confirmed miss wins over an old completion in the same cycle. A physical
   // register allocation has final priority so a stale producer can never tag its reuse.
-  longMissInt := ((longMissInt & ~longMissClearInt) | longMissSetInt) & ~longMissAllocInt
-  longMissFp := ((longMissFp & ~longMissClearFp) | longMissSetFp) & ~longMissAllocFp
+  val longMissIntNext = ((longMissInt & ~longMissClearInt) | longMissSetInt) & ~longMissAllocInt
+  val longMissFpNext = ((longMissFp & ~longMissClearFp) | longMissSetFp) & ~longMissAllocFp
+  longMissInt := longMissIntNext
+  longMissFp := longMissFpNext
   io.longMissInt := longMissInt
   io.longMissFp := longMissFp
 
@@ -569,6 +575,71 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   }}
   val uopSelIQSingle = Wire(Vec(needSingleIQ.size, Vec(issueQueueNum, Bool())))
   uopSelIQSingle := VecInit(needSingleIQ.map(_._2).flatten.map(x => VecInit((1.U(issueQueueNum.W) << x)(issueQueueNum-1, 0).asBools)))
+
+  /**
+    * Soft-partition the three scalar LDU IQs without introducing a hard reservation.
+    * Long-load-dependent address uops prefer LDU2; ordinary loads prefer LDU0/1.
+    * If no preferred IQ can accept another uop in this rename group, selection expands
+    * to every scalar LDU IQ. The final fallback still chooses a preferred IQ when all
+    * three are blocked, allowing the existing retry path to re-evaluate next cycle.
+    */
+  private def buildLduSteering(
+    valids: Seq[Bool],
+    fuTypes: Seq[UInt],
+    psrcs: Seq[Vec[UInt]],
+    srcTypes: Seq[Vec[UInt]]
+  ): Vec[Vec[Bool]] = {
+    val result = Wire(Vec(renameWidth, Vec(issueQueueNum, Bool())))
+    result.foreach(_ := VecInit(Seq.fill(issueQueueNum)(false.B)))
+    if (enableLongLoadLduSteering) {
+      for (uopIdx <- 0 until renameWidth) {
+        val isScalarLoad = valids(uopIdx) && FuType.isLoad(fuTypes(uopIdx))
+        val isLongDependent = isScalarLoad && SrcType.isXp(srcTypes(uopIdx)(0)) && longMissIntNext(psrcs(uopIdx)(0))
+        val priorSelections = scalarLduIQIdx.map { iqIdx =>
+          PopCount(result.take(uopIdx).map(_(iqIdx)))
+        }
+        val canAccept = scalarLduIQIdx.zipWithIndex.map { case (iqIdx, localIdx) =>
+          io.toIssueQueues(iqEnqStart(iqIdx)).ready && priorSelections(localIdx) < allIssueParams(iqIdx).numEnq.U
+        }
+        val effectiveCount = scalarLduExuIdx.zip(priorSelections).map { case (exuIdx, prior) =>
+          io.IQValidNumVec(exuIdx) +& prior
+        }
+        val preferred = Seq(!isLongDependent, !isLongDependent, isLongDependent)
+        val belowHighWatermark = effectiveCount.zip(scalarLduIQIdx).map { case (count, iqIdx) =>
+          count < (allIssueParams(iqIdx).numEntries - allIssueParams(iqIdx).numEnq).U
+        }
+        val preferredBelowHigh = canAccept.zip(preferred).zip(belowHighWatermark).map {
+          case ((available, prefer), belowHigh) => available && prefer && belowHigh
+        }
+        val alternative = canAccept.zip(preferred).map { case (available, prefer) => available && !prefer }
+        val preferredAny = canAccept.zip(preferred).map { case (available, prefer) => available && prefer }
+        val preferredBelowHighAvailable = preferredBelowHigh.reduce(_ || _)
+        val alternativeAvailable = alternative.reduce(_ || _)
+        val preferredAnyAvailable = preferredAny.reduce(_ || _)
+        val eligible = preferred.indices.map { idx =>
+          Mux(preferredBelowHighAvailable, preferredBelowHigh(idx),
+            Mux(alternativeAvailable, alternative(idx), Mux(preferredAnyAvailable, preferredAny(idx), preferred(idx))))
+        }
+        val minimum = eligible.zipWithIndex.map { case (candidate, candidateIdx) =>
+          val strictlyLighterExists = eligible.zip(effectiveCount).zipWithIndex.map {
+            case ((otherEligible, otherCount), otherIdx) =>
+              if (otherIdx != candidateIdx) otherEligible && otherCount < effectiveCount(candidateIdx) else false.B
+          }.reduce(_ || _)
+          candidate && !strictlyLighterExists
+        }
+        val selectedLocal = PriorityEncoderOH(VecInit(minimum).asUInt)
+        scalarLduIQIdx.zipWithIndex.foreach { case (iqIdx, localIdx) =>
+          result(uopIdx)(iqIdx) := isScalarLoad && selectedLocal(localIdx)
+        }
+      }
+    }
+    result
+  }
+
+  val lduSteerFromRename = buildLduSteering(
+    fromRename.map(_.valid), fromRename.map(_.bits.fuType), fromRename.map(_.bits.psrc), fromRename.map(_.bits.srcType)
+  )
+
   uopSelIQ.zipWithIndex.map{ case (u, i) => {
     when(io.toRenameAllFire){
       u := Mux(renameIn(i).valid,
@@ -588,10 +659,20 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
       u := 0.U.asTypeOf(u)
     }
   }}
+  val effectiveUopSelIQ = Wire(Vec(renameWidth, Vec(issueQueueNum, Bool())))
+  effectiveUopSelIQ.zipWithIndex.foreach { case (effective, i) =>
+    effective := Mux(enableLongLoadLduSteering.B && FuType.isLoad(fromRename(i).bits.fuType),
+      lduSteerFromRename(i), uopSelIQ(i))
+    if (enableLongLoadLduSteering) {
+      when(fromRename(i).valid && FuType.isLoad(fromRename(i).bits.fuType)) {
+        assert(PopCount(effective) === 1.U, "scalar load must select exactly one LDU IQ")
+      }
+    }
+  }
   val uopSelIQMatrix = Wire(Vec(renameWidth, Vec(issueQueueNum, UInt(renameWidth.U.getWidth.W))))
   uopSelIQMatrix.zipWithIndex.map{ case (u, i) => {
     u.zipWithIndex.map{ case (uu, j) => {
-     uu := PopCount(uopSelIQ.take(i+1).map(x => x.zipWithIndex.filter(_._2 == j).map(_._1)).flatten)
+     uu := PopCount(effectiveUopSelIQ.take(i+1).map(x => x.zipWithIndex.filter(_._2 == j).map(_._1)).flatten)
     }}
   }}
   val IQSelUop = Wire(Vec(IQEnqSum, ValidIO(new DispatchOutUop)))
@@ -652,6 +733,32 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   }}.transpose
   uopBlockMatrix.zip(uopBlockMatrixForAssign).map(x => x._1 := VecInit(x._2))
   uopBlockByIQ := uopBlockMatrix.map(_.reduce(_ || _))
+
+  if (enableLongLoadLduSteering) {
+    val reservedIqIdx = scalarLduIQIdx.last
+    val regularIqIdx = scalarLduIQIdx.dropRight(1)
+    val lduReady = scalarLduIQIdx.map(iqIdx => io.toIssueQueues(iqEnqStart(iqIdx)).ready)
+    val longDependentLoad = fromRename.map { in =>
+      in.valid && FuType.isLoad(in.bits.fuType) && SrcType.isXp(in.bits.srcType(0)) && longMissIntNext(in.bits.psrc(0))
+    }
+    val normalLoad = fromRename.map(in => in.valid && FuType.isLoad(in.bits.fuType)).zip(longDependentLoad)
+      .map { case (load, longDependent) => load && !longDependent }
+    val dispatched = fromRename.map(_.fire)
+    val selectedReserved = effectiveUopSelIQ.map(_(reservedIqIdx))
+    val selectedRegular = effectiveUopSelIQ.map(sel => regularIqIdx.map(sel(_)).reduce(_ || _))
+
+    XSPerfAccumulate("dispatch_long_load_dependent", PopCount(dispatched.zip(longDependentLoad).map { case (fire, long) => fire && long }))
+    XSPerfAccumulate("dispatch_long_dep_to_reserved_iq", PopCount(dispatched.zip(longDependentLoad).zip(selectedReserved)
+      .map { case ((fire, long), reserved) => fire && long && reserved }))
+    XSPerfAccumulate("dispatch_long_dep_fallback", PopCount(dispatched.zip(longDependentLoad).zip(selectedRegular)
+      .map { case ((fire, long), regular) => fire && long && regular }))
+    XSPerfAccumulate("dispatch_long_dep_no_alternative_iq", PopCount(longDependentLoad.map(long => long && !lduReady.reduce(_ || _))))
+    XSPerfAccumulate("dispatch_normal_load_to_regular_iq", PopCount(dispatched.zip(normalLoad).zip(selectedRegular)
+      .map { case ((fire, normal), regular) => fire && normal && regular }))
+    XSPerfAccumulate("dispatch_normal_load_borrow_reserved_iq", PopCount(dispatched.zip(normalLoad).zip(selectedReserved)
+      .map { case ((fire, normal), reserved) => fire && normal && reserved }))
+  }
+
   io.toIssueQueues.zip(IQSelUop).map(x => {
     x._1.valid := x._2.valid
     x._1.bits := x._2.bits
