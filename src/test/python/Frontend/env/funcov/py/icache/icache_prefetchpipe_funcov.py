@@ -527,22 +527,46 @@ def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
         and _off(s["global_flush"]),
         evidence,
     )
-    if s1_state == 4 and _off(s["s2_ready"]):
+    s2_waiting = (
+        _on(s["s1_valid"])
+        and _on(s["pf_enable"])
+        and _off(s["s1_flush"])
+        and s1_state == 4
+    )
+    if state["s2_blocked"] and not s2_waiting:
+        state["s2_blocked"] = False
+    if s2_waiting and _off(s["s2_ready"]):
         state["s2_blocked"] = True
+    s2_recovered = state["s2_blocked"] and s2_waiting and _on(s["s2_ready"])
     _mark_prefetch(
         recorder,
         "icache_prefetchpipe_s1_completion",
         "s2_busy_enters_s2_recovery",
         cycle,
-        state["s2_blocked"] and s1_state == 4 and _on(s["s2_ready"]),
+        s2_recovered,
         evidence,
     )
+    if s2_recovered:
+        state["s2_blocked"] = False
+
+    enqway_can_complete = (
+        s1_state == 3
+        and _on(s["s2_ready"])
+        and (
+            _on(s["s1_soft"])
+            or (_off(s["refill_valid"]) and _on(s["way0_ready"]))
+        )
+    )
+    enters2_can_complete = s1_state == 4 and _on(s["s2_ready"])
     _mark_prefetch(
         recorder,
         "icache_prefetchpipe_s1_completion",
         "flush_blocks_s1_completion",
         cycle,
-        _on(s["s1_valid"]) and _on(s["s1_flush"]) and _on(s["pf_enable"]),
+        _on(s["s1_valid"])
+        and _on(s["s1_flush"])
+        and _on(s["pf_enable"])
+        and (enqway_can_complete or enters2_can_complete),
         evidence,
     )
     _mark_prefetch(

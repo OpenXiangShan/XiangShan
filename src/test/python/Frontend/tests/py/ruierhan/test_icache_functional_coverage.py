@@ -713,6 +713,123 @@ def test_prefetch_ftq_accept_samples_entry_condition():
     assert _hit(recorder, "icache_prefetchpipe_s0_entry", "ftq_accept_all_ready")
 
 
+def _set_prefetch_s1_completion_scenario(recorder, **overrides):
+    values = {
+        "s1_valid": 1,
+        "pf_enable": 1,
+        "s1_flush": 0,
+        "s1_state": 4,
+        "s1_soft": 0,
+        "s2_ready": 0,
+        "way0_ready": 0,
+        "refill_valid": 0,
+    }
+    values.update(overrides)
+    for key, value in values.items():
+        recorder.set_prefetch_key(key, value)
+
+
+def test_prefetch_s2_busy_recovery_requires_qualified_wait_episode():
+    recorder = _Recorder()
+    _set_prefetch_s1_completion_scenario(recorder)
+
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 1)
+    assert not _hit(
+        recorder,
+        "icache_prefetchpipe_s1_completion",
+        "s2_busy_enters_s2_recovery",
+    )
+
+    recorder.set_prefetch_key("s2_ready", 1)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 2)
+    assert _hit(
+        recorder,
+        "icache_prefetchpipe_s1_completion",
+        "s2_busy_enters_s2_recovery",
+    )
+
+
+def test_prefetch_s2_busy_recovery_clears_on_disqualification():
+    for disqualifier in ("s1_valid", "pf_enable"):
+        recorder = _Recorder()
+        _set_prefetch_s1_completion_scenario(recorder)
+        sample_icache_prefetchpipe_coverage(recorder, recorder.env, 1)
+
+        recorder.set_prefetch_key(disqualifier, 0)
+        sample_icache_prefetchpipe_coverage(recorder, recorder.env, 2)
+
+        recorder.set_prefetch_key(disqualifier, 1)
+        recorder.set_prefetch_key("s2_ready", 1)
+        sample_icache_prefetchpipe_coverage(recorder, recorder.env, 3)
+        assert not _hit(
+            recorder,
+            "icache_prefetchpipe_s1_completion",
+            "s2_busy_enters_s2_recovery",
+        )
+
+    recorder = _Recorder()
+    _set_prefetch_s1_completion_scenario(recorder)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 4)
+    recorder.set_prefetch_key("s1_flush", 1)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 5)
+    recorder.set_prefetch_key("s1_flush", 0)
+    recorder.set_prefetch_key("s2_ready", 1)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 6)
+    assert not _hit(
+        recorder,
+        "icache_prefetchpipe_s1_completion",
+        "s2_busy_enters_s2_recovery",
+    )
+
+
+def test_prefetch_flush_completion_requires_enqway_or_enters2_eligibility():
+    positive_scenarios = (
+        {"s1_state": 3, "s1_soft": 0, "way0_ready": 1, "s2_ready": 1},
+        {"s1_state": 3, "s1_soft": 1, "way0_ready": 0, "s2_ready": 1},
+        {"s1_state": 4, "s2_ready": 1},
+    )
+    for cycle, scenario in enumerate(positive_scenarios, start=1):
+        recorder = _Recorder()
+        _set_prefetch_s1_completion_scenario(
+            recorder,
+            s1_flush=1,
+            **scenario,
+        )
+        sample_icache_prefetchpipe_coverage(recorder, recorder.env, cycle)
+        assert _hit(
+            recorder,
+            "icache_prefetchpipe_s1_completion",
+            "flush_blocks_s1_completion",
+        )
+
+    negative_scenarios = (
+        {"s1_state": 1, "s2_ready": 1},
+        {"s1_state": 3, "s1_soft": 0, "way0_ready": 0, "s2_ready": 1},
+        {"s1_state": 3, "s1_soft": 0, "way0_ready": 1, "s2_ready": 0},
+        {
+            "s1_state": 3,
+            "s1_soft": 0,
+            "way0_ready": 1,
+            "s2_ready": 1,
+            "refill_valid": 1,
+        },
+        {"s1_state": 4, "s2_ready": 0},
+    )
+    for cycle, scenario in enumerate(negative_scenarios, start=10):
+        recorder = _Recorder()
+        _set_prefetch_s1_completion_scenario(
+            recorder,
+            s1_flush=1,
+            **scenario,
+        )
+        sample_icache_prefetchpipe_coverage(recorder, recorder.env, cycle)
+        assert not _hit(
+            recorder,
+            "icache_prefetchpipe_s1_completion",
+            "flush_blocks_s1_completion",
+        )
+
+
 def _set_prefetch_entry_scenario(recorder):
     for key, value in {
         "from_valid": 1,
