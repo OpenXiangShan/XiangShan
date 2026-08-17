@@ -4,6 +4,14 @@ set -euo pipefail
 REPO_DIR="$(git rev-parse --show-toplevel)"
 cd "${REPO_DIR}"
 
+scala_files="$(git diff --cached --name-only --diff-filter=ACMR -- src/main/scala)"
+
+if [[ -n "${scala_files}" ]]; then
+  echo "ERROR: commits that modify src/main/scala are prohibited in this worktree." >&2
+  echo "${scala_files}" >&2
+  exit 1
+fi
+
 TESTPOINT_CSV="src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
 
 if git diff --cached --name-only --diff-filter=ACMR -- "${TESTPOINT_CSV}" | grep -Fxq "${TESTPOINT_CSV}"; then
