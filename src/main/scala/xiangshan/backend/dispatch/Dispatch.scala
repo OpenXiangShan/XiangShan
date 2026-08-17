@@ -124,6 +124,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     }
     val og0Cancel = Input(ExuVec())
     val ldCancel = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
+    val longLoadMiss = Vec(backendParams.LdExuCnt, Flipped(Valid(new LongLoadStatusBundle)))
+    val longLoadComplete = Vec(backendParams.LdExuCnt, Flipped(Valid(new LongLoadStatusBundle)))
+    val hasLongLoadWaiter = Input(Bool())
+    val longMissInt = Output(UInt(IntPhyRegs.W))
+    val longMissFp = Output(UInt(FpPhyRegs.W))
     // to vlbusytable
     val vlWriteBackInfo = new Bundle {
       val vlFromIntIsZero  = Input(Bool())
@@ -261,6 +266,34 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
       sink.bits := fromRename(i).bits.pdest
     }}
   })
+
+  private def pregMask(events: Iterable[ValidIO[LongLoadStatusBundle]], entries: Int, selectFp: Boolean): UInt =
+    events.map(e => Mux(e.valid && e.bits.isFp === selectFp.B, UIntToOH(e.bits.pdest, entries), 0.U(entries.W)))
+      .foldLeft(0.U(entries.W))(_ | _)
+
+  private def allocMask(events: Iterable[ValidIO[UInt]], entries: Int): UInt =
+    events.map(e => Mux(e.valid, UIntToOH(e.bits, entries), 0.U(entries.W)))
+      .foldLeft(0.U(entries.W))(_ | _)
+
+  val longMissInt = RegInit(0.U(IntPhyRegs.W))
+  val longMissFp = RegInit(0.U(FpPhyRegs.W))
+  val longMissSetInt = pregMask(io.longLoadMiss, IntPhyRegs, selectFp = false)
+  val longMissSetFp = pregMask(io.longLoadMiss, FpPhyRegs, selectFp = true)
+  val longMissClearInt = pregMask(io.longLoadComplete, IntPhyRegs, selectFp = false)
+  val longMissClearFp = pregMask(io.longLoadComplete, FpPhyRegs, selectFp = true)
+  val longMissAllocInt = allocMask(allocPregs(0), IntPhyRegs)
+  val longMissAllocFp = allocMask(allocPregs(1), FpPhyRegs)
+
+  // A new confirmed miss wins over an old completion in the same cycle. A physical
+  // register allocation has final priority so a stale producer can never tag its reuse.
+  longMissInt := ((longMissInt & ~longMissClearInt) | longMissSetInt) & ~longMissAllocInt
+  longMissFp := ((longMissFp & ~longMissClearFp) | longMissSetFp) & ~longMissAllocFp
+  io.longMissInt := longMissInt
+  io.longMissFp := longMissFp
+
+  XSPerfAccumulate("long_load_miss_notify", PopCount(io.longLoadMiss.map(_.valid)))
+  XSPerfAccumulate("long_load_complete_notify", PopCount(io.longLoadComplete.map(_.valid)))
+  XSPerfAccumulate("long_load_outstanding_count", PopCount(longMissInt) +& PopCount(longMissFp))
   val wakeUp = io.wakeUpAll.wakeUpInt ++ io.wakeUpAll.wakeUpFp ++ io.wakeUpAll.wakeUpVec
   busyTables.zip(wbPregs).zip(allocPregs).map{ case ((b, w), a) => {
     b.io.wakeUpInt := io.wakeUpAll.wakeUpInt
@@ -893,6 +926,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   XSPerfAccumulate("stall_cycle", dispatchBlock)
   XSPerfAccumulate("stall_cycle_rob", stall_rob)
   XSPerfAccumulate("stall_cycle_iq", dispatchBlock && uopBlockByIQ.asUInt.orR)
+  XSPerfAccumulate("stall_cycle_iq_with_long_load_waiter",
+    dispatchBlock && uopBlockByIQ.asUInt.orR && io.hasLongLoadWaiter)
+  XSPerfAccumulate("stall_cycle_iq_without_long_load_waiter",
+    dispatchBlock && uopBlockByIQ.asUInt.orR && !io.hasLongLoadWaiter)
   XSPerfAccumulate("stall_cycle_allowDispatch", dispatchBlock && !allowDispatch.asUInt.orR)
   XSPerfAccumulate("stall_cycle_lsqFull", dispatchBlock && !lsqCanAccept)
 

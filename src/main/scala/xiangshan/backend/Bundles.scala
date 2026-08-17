@@ -726,6 +726,16 @@ object Bundles {
     val vlWen = Bool() // fof may write vl
     val pdest = UInt(backendParams.pregIdxWidth.W)
   }
+
+  /**
+    * Profiling-only notification for tracking scalar loads after a confirmed DCache miss.
+    * Unlike MemWakeUpBundle, this bundle carries final miss/completion semantics and must
+    * never be used as a speculative wakeup.
+    */
+  class LongLoadStatusBundle(implicit p: Parameters) extends XSBundle {
+    val pdest = UInt(backendParams.pregIdxWidth.W)
+    val isFp = Bool()
+  }
   /**
     *
     * @param pregIdxWidth index width of preg

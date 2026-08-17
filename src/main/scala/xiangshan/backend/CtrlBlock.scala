@@ -746,6 +746,9 @@ class CtrlBlockImp(
   dispatch.io.wakeUpAll.wakeUpVec := io.toDispatch.wakeUpVec
   dispatch.io.IQValidNumVec := io.toDispatch.IQValidNumVec
   dispatch.io.ldCancel := io.toDispatch.ldCancel
+  dispatch.io.longLoadMiss := io.toDispatch.longLoadMiss
+  dispatch.io.longLoadComplete := io.toDispatch.longLoadComplete
+  dispatch.io.hasLongLoadWaiter := io.toDispatch.hasLongLoadWaiter
   dispatch.io.og0Cancel := io.toDispatch.og0Cancel
   dispatch.io.wbPregsInt := io.toDispatch.wbPregsInt
   dispatch.io.wbPregsFp := io.toDispatch.wbPregsFp
@@ -787,6 +790,8 @@ class CtrlBlockImp(
     dispatch.ready := iq.ready
   }}
   io.toIssueBlock.flush := s1_s3_redirect
+  io.toIssueBlock.longMissInt := dispatch.io.longMissInt
+  io.toIssueBlock.longMissFp := dispatch.io.longMissFp
 
   pcMem.io.wen.head   := GatedValidRegNext(io.frontend.fromFtq.wen)
   pcMem.io.waddr.head := RegEnable(io.frontend.fromFtq.ftqIdx, io.frontend.fromFtq.wen)
@@ -892,6 +897,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val toIssueBlock = new Bundle {
     val flush = ValidIO(new Redirect)
+    val longMissInt = Output(UInt(IntPhyRegs.W))
+    val longMissFp = Output(UInt(FpPhyRegs.W))
     val intUopsNum = backendParams.intSchdParams.get.issueBlockParams.filter(_.StdCnt == 0).map(_.numEnq).sum
     val fpUopsNum = backendParams.fpSchdParams.get.issueBlockParams.map(_.numEnq).sum
     val vfUopsNum = backendParams.vecSchdParams.get.issueBlockParams.map(_.numEnq).sum
@@ -917,6 +924,9 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val IQValidNumVec = Vec(exuNum, Input(UInt(maxIQSize.U.getWidth.W)))
     val og0Cancel = Input(ExuVec())
     val ldCancel = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
+    val longLoadMiss = Vec(backendParams.LdExuCnt, Flipped(Valid(new LongLoadStatusBundle)))
+    val longLoadComplete = Vec(backendParams.LdExuCnt, Flipped(Valid(new LongLoadStatusBundle)))
+    val hasLongLoadWaiter = Input(Bool())
     val wbPregsInt = Vec(backendParams.numPregWb(IntData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val wbPregsFp = Vec(backendParams.numPregWb(FpData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val wbPregsVec = Vec(backendParams.numPregWb(VecData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))

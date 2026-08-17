@@ -23,7 +23,7 @@ import top.{ArgParser, Generator}
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemWakeUpBundle, MemWriteBack, UopIdx, connectSamePort}
+import xiangshan.backend.Bundles.{ExuInput, ExuOutput, LongLoadStatusBundle, MemWakeUpBundle, MemWriteBack, UopIdx, connectSamePort}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.fpu.FPU
@@ -881,6 +881,7 @@ class LoadUnitS2(param: ExeUnitParams)(
       val paddr = ValidIO(UInt(PAddrBits.W))
       val pc = Output(UInt(VAddrBits.W))
     })
+    val longLoadMiss = ValidIO(new LongLoadStatusBundle)
   })
 
   val pipeIn = io_pipeIn.get
@@ -1216,6 +1217,10 @@ class LoadUnitS2(param: ExeUnitParams)(
   io.debugInfo.paddr.valid := pipeIn.valid && !kill
   io.debugInfo.paddr.bits := paddr
   io.debugInfo.pc := uop.pc
+  io.longLoadMiss.valid := pipeIn.fire && !kill && accessType.isScalar() && cause(C_DM) &&
+    (uop.rfWen || uop.fpWen)
+  io.longLoadMiss.bits.pdest := uop.pdest
+  io.longLoadMiss.bits.isFp := uop.fpWen
 
   /**
    *  Perf counters
@@ -1319,6 +1324,7 @@ class LoadUnitS3(param: ExeUnitParams)(
       val replayCnt = UInt(XLEN.W)
       val robIdx = UInt(log2Ceil(RobSize).W)
     })
+    val longLoadComplete = ValidIO(new LongLoadStatusBundle)
   })
 
   val pipeIn = io_pipeIn.get
@@ -1498,6 +1504,9 @@ class LoadUnitS3(param: ExeUnitParams)(
   ldout.toRob.bits.debugInfo.vaddr.foreach(_ := vaddr)
   ldout.toRob.bits.debugInfo.perfDebugInfo.foreach(_ := uop.perfDebugInfo)
   ldout.toRob.bits.debugInfo.debug_seqNum.foreach(_ := uop.debug_seqNum)
+  io.longLoadComplete.valid := ldoutValid && shouldWakeup && (uop.rfWen || uop.fpWen)
+  io.longLoadComplete.bits.pdest := uop.pdest
+  io.longLoadComplete.bits.isFp := uop.fpWen
 
   // Writeback to LQ
   val lqWriteValid = pipeIn.valid && !doFastReplay && endPipe
@@ -1941,6 +1950,8 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   // IQ wakeup and load cancel
   val wakeup = ValidIO(new MemWakeUpBundle)
   val cancel = Output(Bool())
+  val longLoadMiss = ValidIO(new LongLoadStatusBundle)
+  val longLoadComplete = ValidIO(new LongLoadStatusBundle)
   val perfRobHeadPtr = Input(new RobPtr)
   val perfLqHeadPtr = Input(new LqPtr)
   val perfLqFull = Input(Bool())
@@ -2027,6 +2038,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.tldForward.foreach(_.s0Req := s0.io.tldForwardReq)
   io.uncacheBypass.s0Req := s0.io.uncacheBypassReq
   io.wakeup := s0.io.wakeup
+  io.longLoadMiss := s2.io.longLoadMiss
 
   // S1
   s1.io.redirect := io.redirect
@@ -2091,6 +2103,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.rawNukeQuery.revokeLastLastCycle := s3.io.revokeLastLastCycle
   io.rollback := s3.io.rollback
   io.cancel := s3.io.cancel
+  io.longLoadComplete := s3.io.longLoadComplete
   s3.io.perfRobHeadPtr := io.perfRobHeadPtr
   s3.io.perfLqHeadPtr := io.perfLqHeadPtr
   s3.io.perfLqFull := io.perfLqFull

@@ -41,6 +41,11 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   val issueQueues = params.issueBlockParams.map { case iqParam =>
      Module(new IssueQueueImp()(p,iqParam)).suggestName("issueQueue" + iqParam.allExuParams.map(_.name).reduce(_ + _) + "_" + iqParam.getIQFuName)
   }
+  issueQueues.foreach { iq =>
+    iq.io.longMissInt := io.longMissInt
+    iq.io.longMissFp := io.longMissFp
+  }
+  io.hasLongLoadWaiter := issueQueues.map(_.io.hasLongLoadWaiter).reduce(_ || _)
   issueQueues.map(x =>{
     println(s"[Region] iqParam.getIQName = ${x.param.getIQName}")
     println(s"[Region] Class name: ${x.getClass.getSimpleName}")
@@ -890,6 +895,9 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val fromDispatch = MixedVec(params.issueBlockParams.filter(_.StdCnt == 0).map(x => Flipped(Vec(x.numEnq, DecoupledIO(new RegionInUop(x))))))
   val hartId = Input(UInt(8.W))
   val flush = Flipped(ValidIO(new Redirect))
+  val longMissInt = Input(UInt(IntPhyRegs.W))
+  val longMissFp = Input(UInt(FpPhyRegs.W))
+  val hasLongLoadWaiter = Output(Bool())
   val ldCancel = Vec(backendParams.LduCnt, Flipped(new LoadCancelIO))
   val fromPcTargetMem = Option.when(params.isIntSchd)(Flipped(new PcToDataPathIO(backendParams)))
   val diffVlRat = Option.when(backendParams.basicDebugEn && params.isVecSchd)(Input(Vec(1, UInt(log2Up(VlPhyRegs).W))))

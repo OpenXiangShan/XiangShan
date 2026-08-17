@@ -59,6 +59,9 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val fuTypeVec = Output(Vec(params.numEntries, FuType()))
   val canIssueVec = Output(Vec(params.numEntries, Bool()))
   val srcReadyVec = Output(Vec(params.numEntries, Bool()))
+  val longMissInt = Input(UInt(IntPhyRegs.W))
+  val longMissFp = Input(UInt(FpPhyRegs.W))
+  val hasLongLoadWaiter = Output(Bool())
   val topdownIQInfoVec = Option.when(backendParams.debugEn)(Output(Vec(params.numEntries, ValidIO(new TopdownIQInfo()))))
   val debugRobIdxVec =  Option.when(backendParams.debugEn)(Output(Vec(params.numEntries, new RobPtr())))
 
@@ -1135,6 +1138,41 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   // ready instr count
   private val readyEntriesCnt = PopCount(validVec.zip(canIssueVec).map(x => x._1 && x._2))
   XSPerfHistogram("ready_cnt", readyEntriesCnt, true.B, 0, params.numEntries + 1)
+
+  // Shadow profiling only: these signals never feed enqueue, select, wakeup, or entry state.
+  private val srcWaitLongLoad = entries.io.srcStatus.map { entrySrcs =>
+    entrySrcs.map { src =>
+      val waitInt = SrcType.isXp(src.srcType) && io.longMissInt(src.psrc)
+      val waitFp = SrcType.isFp(src.srcType) && io.longMissFp(src.psrc)
+      SrcState.isBusy(src.srcState) && (waitInt || waitFp)
+    }
+  }
+  private val entryWaitLongLoad = srcWaitLongLoad.map(waits => VecInit(waits).asUInt.orR)
+  private val entryWaitOnlyLongLoad = entries.io.srcStatus.zip(srcWaitLongLoad).zipWithIndex.map { case ((entrySrcs, waits), entryIdx) =>
+    entryWaitLongLoad(entryIdx) &&
+      entrySrcs.zip(waits).map { case (src, wait) => !SrcState.isBusy(src.srcState) || wait }.reduce(_ && _)
+  }
+  private val waitingEntry = validVec.zip(issuedVec).map { case (valid, issued) => valid && !issued }
+  private val validWaitLongLoad = waitingEntry.zip(entryWaitLongLoad).map { case (valid, wait) => valid && wait }
+  private val validWaitOnlyLongLoad = waitingEntry.zip(entryWaitOnlyLongLoad).map { case (valid, wait) => valid && wait }
+
+  io.hasLongLoadWaiter := validWaitLongLoad.reduce(_ || _)
+  XSPerfAccumulate("valid_not_ready", PopCount(validVec.zip(canIssueVec).map { case (v, r) => v && !r }))
+  XSPerfAccumulate("valid_wait_long_load", PopCount(validWaitLongLoad))
+  XSPerfAccumulate("valid_wait_only_long_load", PopCount(validWaitOnlyLongLoad))
+  FuType.functionNameMap.foreach { case (fuType, fuName) =>
+    if (params.getFuCfgs.exists(_.fuType == fuType)) {
+      XSPerfAccumulate(s"valid_wait_long_load_futype_${fuName}",
+        PopCount(validWaitLongLoad.zip(fuTypeVec).map { case (wait, fu) => wait && fu === fuType.U }))
+      XSPerfAccumulate(s"valid_wait_only_long_load_futype_${fuName}",
+        PopCount(validWaitOnlyLongLoad.zip(fuTypeVec).map { case (wait, fu) => wait && fu === fuType.U }))
+    }
+  }
+  srcWaitLongLoad.transpose.zipWithIndex.foreach { case (srcWaits, srcIdx) =>
+    XSPerfAccumulate(s"valid_wait_long_load_src${srcIdx}",
+      PopCount(waitingEntry.zip(srcWaits).map { case (valid, wait) => valid && wait }))
+  }
+  XSPerfAccumulate("iq_enq_blocked_with_long_load_waiter", !io.enq.head.ready && io.hasLongLoadWaiter)
   // only split when more than 1 func type
   if (params.getFuCfgs.size > 0) {
     for (t <- FuType.functionNameMap.keys) {

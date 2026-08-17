@@ -234,6 +234,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.toDispatch.debugIQEnqHasIssuedVec.foreach(_ := intRegion.io.debugIQEnqHasIssuedVec.get ++
     fpRegion.io.debugIQEnqHasIssuedVec.get ++ vecRegion.io.debugIQEnqHasIssuedVec.get)
   ctrlBlock.io.toDispatch.ldCancel := io.mem.ldCancel
+  ctrlBlock.io.toDispatch.longLoadMiss := io.mem.longLoadMiss
+  ctrlBlock.io.toDispatch.longLoadComplete := io.mem.longLoadComplete
+  ctrlBlock.io.toDispatch.hasLongLoadWaiter := intRegion.io.hasLongLoadWaiter ||
+    fpRegion.io.hasLongLoadWaiter || vecRegion.io.hasLongLoadWaiter
   // Todo: when add cross domain wake up, it is necessary to add assertions that fp and vec do not have 0 lat fu.
   ctrlBlock.io.toDispatch.og0Cancel := intRegion.io.og0Cancel
   ctrlBlock.io.toDispatch.wbPregsInt.zip(intRegion.io.toIntPreg).map(x => {
@@ -278,6 +282,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   intRegion.io.hartId := io.fromTop.hartId
   intRegion.io.flush := ctrlBlock.io.toIssueBlock.flush
+  intRegion.io.longMissInt := ctrlBlock.io.toIssueBlock.longMissInt
+  intRegion.io.longMissFp := ctrlBlock.io.toIssueBlock.longMissFp
   intRegion.io.fromDispatch.flatten.zip(ctrlBlock.io.toIssueBlock.intUops).map { case (sink, source) => {
     sink.valid := source.valid
     connectSamePort(sink.bits, source.bits)
@@ -334,6 +340,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   fpRegion.io.hartId := io.fromTop.hartId
   fpRegion.io.flush := ctrlBlock.io.toIssueBlock.flush
+  fpRegion.io.longMissInt := ctrlBlock.io.toIssueBlock.longMissInt
+  fpRegion.io.longMissFp := ctrlBlock.io.toIssueBlock.longMissFp
   fpRegion.io.fromDispatch.flatten.zip(ctrlBlock.io.toIssueBlock.fpUops).map{ case (sink, source) =>
     sink.valid := source.valid
     connectSamePort(sink.bits, source.bits)
@@ -349,6 +357,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   vecRegion.io.hartId := io.fromTop.hartId
   vecRegion.io.flush := ctrlBlock.io.toIssueBlock.flush
+  vecRegion.io.longMissInt := ctrlBlock.io.toIssueBlock.longMissInt
+  vecRegion.io.longMissFp := ctrlBlock.io.toIssueBlock.longMissFp
   vecRegion.io.fromDispatch.flatten.zip(ctrlBlock.io.toIssueBlock.vfUops).foreach { case (sink, source) =>
     sink.valid := source.valid
     connectSamePort(sink.bits, source.bits)
@@ -653,6 +663,8 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val vlduIqFeedback = Flipped(Vec(params.VlduCnt, new MemRSFeedbackIO(isVector = true)))
   val ldCancel = Vec(params.LdExuCnt, Input(new LoadCancelIO))
   val wakeup = Vec(params.LdExuCnt, Flipped(Valid(new MemWakeUpBundle)))
+  val longLoadMiss = Vec(params.LdExuCnt, Flipped(Valid(new LongLoadStatusBundle)))
+  val longLoadComplete = Vec(params.LdExuCnt, Flipped(Valid(new LongLoadStatusBundle)))
   val storePcRead = Vec(params.StaCnt, Output(UInt(VAddrBits.W)))
   val hyuPcRead = Vec(params.HyuCnt, Output(UInt(VAddrBits.W)))
   // Input
