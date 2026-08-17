@@ -206,7 +206,9 @@ abstract class RFBankReadArbiterBase(val params: RFRdArbParams)(implicit p: Para
       arbiters.get.zipWithIndex.map{ case (arbiter, i) => {
           arbiter.io.in.zip(inGroup(portIdx)).zipWithIndex.foreach { case ((arbiterIn, ioIn), idx) =>
             arbiterIn.valid := (if(params.pregParams.numBank == 1) ioIn.valid else ioIn.bits.bankValidVec.get(i))
-            arbiterIn.bits := ioIn.bits
+            arbiterIn.bits.addr := pregParams.bankAddr(ioIn.bits.addr)
+            arbiterIn.bits.robIdx := ioIn.bits.robIdx
+            arbiterIn.bits.issueValid := ioIn.bits.issueValid
             ioIn.ready := arbiters.get.map(x => x.io.in(idx).ready).reduce(_ && _)
           }
         }
