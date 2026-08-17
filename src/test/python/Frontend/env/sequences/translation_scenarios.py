@@ -76,6 +76,9 @@ class TranslationScenario:
     gpa: Optional[int] = None
     s2xlate: int = _S2XLATE_NONE
     get_gpa: int = 0
+    ptw_response_latency: int = 3
+    ptw_response_latency_max: Optional[int] = None
+    ptw_response_seed: int = 1
     satp_asid: int = 0
     satp_ppn: int = 0
     vsatp_asid: int = 0
@@ -102,6 +105,7 @@ class TranslationScenarioState:
     scenario: TranslationScenario
     expected_ptw_request: dict
     expected_outcome: dict
+    expected_page_outcomes: Tuple[dict, ...]
     context: dict
     pmp_writes: Tuple[dict, ...]
     pma_writes: Tuple[dict, ...]
@@ -184,6 +188,10 @@ class TranslationScenarioBuilder:
             _S2XLATE_ALL_STAGE,
         }:
             raise ValueError(f"unsupported s2xlate value: {scenario.s2xlate}")
+        if int(scenario.ptw_response_latency) < 0:
+            raise ValueError("PTW response latency must be non-negative")
+        if scenario.ptw_response_latency_max is not None and int(scenario.ptw_response_latency_max) < int(scenario.ptw_response_latency):
+            raise ValueError("PTW response latency_max must be at least latency")
         if int(scenario.s2xlate) == _S2XLATE_ALL_STAGE:
             if scenario.gpa is None:
                 raise ValueError("all-stage translation requires gpa")
@@ -230,6 +238,40 @@ class TranslationScenarioBuilder:
                 **pte_kwargs,
             )
 
+    def _expected_page_outcome(self, scenario: TranslationScenario, va: int) -> dict:
+        expected_pa, expected_ok, expected_metadata = self.env.page_table.translate(
+            int(va),
+            s2xlate=int(scenario.s2xlate),
+            priv_imode=int(scenario.priv_imode),
+        )
+        if expected_ok:
+            permission = PmpPmaPermissionModel.check_instruction(
+                expected_pa,
+                pmp_entries=scenario.pmp_entries,
+                pma_entries=scenario.pma_entries,
+                priv_imode=int(scenario.priv_imode),
+                pmp_enabled=bool(scenario.pmp_entries),
+                pma_enabled=bool(scenario.pma_entries),
+            )
+            expected_metadata["permission"] = permission.as_dict()
+            if not permission.execute_allowed:
+                expected_ok = False
+                expected_metadata.update(
+                    {
+                        "outcome": "instruction_access_fault",
+                        "fault": "access_fault",
+                        "reason": permission.reason,
+                    }
+                )
+
+        if not expected_ok:
+            expected_path = "fault"
+        elif expected_metadata.get("fetch_path") != "pma":
+            expected_path = "uncache"
+        else:
+            expected_path = "uncache" if expected_metadata["permission"]["pma_mmio"] else "cacheable"
+        return {"va": int(va), "pa": expected_pa, "ok": expected_ok, "expected_path": expected_path, **expected_metadata}
+
     def build(self, scenario: TranslationScenario) -> TranslationScenarioState:
         self.validate(scenario)
 
@@ -257,31 +299,23 @@ class TranslationScenarioBuilder:
                 guest_access_fault=int(scenario.s2_gaf),
             )
 
-        self.env.ptw_agent.configure(mode="sv39", response_source="model", compare_drive_source="model")
-        expected_pa, expected_ok, expected_metadata = self.env.page_table.translate(
-            int(scenario.va),
-            s2xlate=s2xlate,
-            priv_imode=int(scenario.priv_imode),
+        self.env.ptw_agent.configure(
+            latency=int(scenario.ptw_response_latency),
+            latency_max=(
+                None if scenario.ptw_response_latency_max is None else int(scenario.ptw_response_latency_max)
+            ),
+            seed=int(scenario.ptw_response_seed),
+            mode="sv39",
+            response_source="model",
+            compare_drive_source="model",
         )
-        if expected_ok:
-            permission = PmpPmaPermissionModel.check_instruction(
-                expected_pa,
-                pmp_entries=scenario.pmp_entries,
-                pma_entries=scenario.pma_entries,
-                priv_imode=int(scenario.priv_imode),
-                pmp_enabled=bool(scenario.pmp_entries),
-                pma_enabled=bool(scenario.pma_entries),
+        expected_page_outcomes = tuple(
+            self._expected_page_outcome(
+                scenario,
+                int(scenario.va) if page == 0 else (int(scenario.va) & ~(_PAGE_SIZE - 1)) + page * _PAGE_SIZE,
             )
-            expected_metadata["permission"] = permission.as_dict()
-            if not permission.execute_allowed:
-                expected_ok = False
-                expected_metadata.update(
-                    {
-                        "outcome": "instruction_access_fault",
-                        "fault": "access_fault",
-                        "reason": permission.reason,
-                    }
-                )
+            for page in range(int(scenario.page_count))
+        )
         self.env.load_program(scenario.payload, int(scenario.pa))
         context = self.env.update_translation_context(
             satp_mode=_SV39_MODE,
@@ -312,7 +346,8 @@ class TranslationScenarioBuilder:
                 "s2xlate": s2xlate,
                 "get_gpa": int(scenario.get_gpa),
             },
-            expected_outcome={"pa": expected_pa, "ok": expected_ok, **expected_metadata},
+            expected_outcome=dict(expected_page_outcomes[0]),
+            expected_page_outcomes=expected_page_outcomes,
             context=context,
             pmp_writes=pmp_writes,
             pma_writes=pma_writes,

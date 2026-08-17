@@ -1679,12 +1679,12 @@ def test_uncache_sv39_cross_page_rvi_uses_second_page_pma_path(env):
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_csr_changed_before_ptw_response_discards_stale_translation(env):
     _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
-    env.ptw_agent.configure(latency=64, response_source="model", compare_drive_source="model")
     old_scenario = TranslationScenario(
         scenario_id="atp-035-old-context",
         va=_NORMAL_BASE,
         pa=_NORMAL_PHYS_BASE,
         payload=int(_CNOP).to_bytes(2, "little") * 32,
+        ptw_response_latency=64,
         satp_asid=1,
         s1_pte=TranslationPte(asid=1),
         expected_path="cacheable",
@@ -1726,6 +1726,7 @@ def test_uncache_csr_changed_before_ptw_response_discards_stale_translation(env)
         va=_NORMAL_BASE,
         pa=_NORMAL_ALT_PHYS_BASE,
         payload=int(_CNOP).to_bytes(2, "little") * 32,
+        ptw_response_latency=64,
         satp_asid=2,
         s1_pte=TranslationPte(asid=2),
         expected_path="cacheable",

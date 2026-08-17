@@ -74,6 +74,67 @@ def test_builder_applies_one_sv39_description_to_page_table_memory_and_context()
     assert len(state.pma_writes) == 1
 
 
+def test_builder_applies_declared_ptw_response_timing() -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id="sv39-ptw-response-timing",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        payload=b"\x13\x00\x00\x00",
+        ptw_response_latency=5,
+        ptw_response_latency_max=9,
+        ptw_response_seed=23,
+    )
+
+    TranslationScenarioBuilder(env).build(scenario)
+
+    stats = env.ptw_agent.get_stats()
+    assert stats["latency_min"] == 5
+    assert stats["latency_max"] == 9
+    assert stats["req_ready_strategy"] == "always"
+
+
+def test_builder_rejects_invalid_ptw_response_latency_range() -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id="sv39-invalid-ptw-response-timing",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        payload=b"\x13\x00\x00\x00",
+        ptw_response_latency=5,
+        ptw_response_latency_max=4,
+    )
+
+    with pytest.raises(ValueError, match="latency_max"):
+        TranslationScenarioBuilder(env).build(scenario)
+
+
+def test_builder_derives_each_page_fetch_path_from_pma() -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id="sv39-cross-page-pma-path",
+        va=0x8020_0FFE,
+        pa=0x8040_0FFE,
+        payload=b"\x13\x00\x00\x00",
+        page_count=2,
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                "pma", 0, PmpPmaConfig(match="napot", read=True, execute=True, cacheable=True), 0x8040_0000, size=0x1000
+            ),
+            TranslationPmpPmaEntry(
+                "pma", 1, PmpPmaConfig(match="napot", read=True, execute=True, cacheable=False), 0x8040_1000, size=0x1000
+            ),
+        ),
+    )
+
+    state = TranslationScenarioBuilder(env).build(scenario)
+
+    assert [(outcome["va"], outcome["pa"], outcome["expected_path"]) for outcome in state.expected_page_outcomes] == [
+        (0x8020_0FFE, 0x8040_0FFE, "cacheable"),
+        (0x8020_1000, 0x8040_1000, "uncache"),
+    ]
+
+
 def test_builder_composes_all_stage_mapping_from_gpa_to_pa() -> None:
     env = _env()
     scenario = TranslationScenario(
