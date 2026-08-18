@@ -234,6 +234,7 @@ object FuConfig {
       Seq(IntData()), // jal -> Seq(ja, link)
     ),
     piped = true,
+    writeIntRf = true,
     immType = Set(Imm_I(), Imm_J(), Imm_AUIPC_JALR()),
   )
 
