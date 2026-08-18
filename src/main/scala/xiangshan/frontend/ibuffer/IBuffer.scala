@@ -289,7 +289,13 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
           deq.bits.toIBufOutEntry(0.U.asTypeOf(firstException.bits))
         )
       }.elsewhen(outputEntriesIsNotFull && !resumingVType) {
-        outFromDeq.valid := deq.valid
+        // valid mirrors bits: old entries keep outReg.valid, new entries use the
+        // same shifted deqEntries index as the bits path
+        outFromDeq.valid := Mux(
+          i.U < outputEntriesValidNum,
+          outReg.valid,
+          VecInit(deqEntries.take(i + 1).map(_.valid))(i.U - outputEntriesValidNum)
+        )
         outFromDeq.bits := Mux(
           i.U < outputEntriesValidNum,
           outReg.bits,
@@ -338,7 +344,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     }.elsewhen(decodeCanAccept) {
       vtypeGen.in.insts(i).valid := outputEntriesFromDeqNext(i).valid
     }.elsewhen(outputEntriesIsNotFull) {
-      vtypeGen.in.insts(i).valid := Mux(i.U < outputEntriesValidNum, false.B, true.B)
+      // Only lanes carrying a genuinely new deq entry are fed to VTypeGen.
+      vtypeGen.in.insts(i).valid := Mux(i.U < outputEntriesValidNum, false.B, outputEntriesFromDeqNext(i).valid)
     }.otherwise {
       vtypeGen.in.insts(i).valid := false.B
     }
@@ -412,7 +419,6 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   private val outputEntriesValidNumNext = Wire(UInt(DecodeWidth.U.getWidth.W))
   XSError(outputEntriesValidNumNext > DecodeWidth.U, "Ibuffer: outputEntriesValidNumNext > DecodeWidth.U")
-  private val validVec = UIntToMask(outputEntriesValidNumNext(DecodeWidth.U.getWidth - 1, 0), DecodeWidth)
   when(resumingVType) {
     outputEntriesValidNumNext := outputEntriesValidNum
   }.elsewhen(decodeCanAccept) {
@@ -429,15 +435,17 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val readStage1: Vec[IBufEntry] =
     VecInit.tabulate(NumReadBank)(bankID => Mux1H(UIntToOH(deqInBankPtr(bankID).value), bankedIBufView(bankID)))
   for (i <- 0 until DecodeWidth) {
-    deqEntries(i).valid := validVec(i)
+    // Genuine dequeue validity: only the numDeq lanes actually consumed this cycle are valid.
+    // Under bypass no real data is read from ibuf, so the deq read window is invalid.
+    deqEntries(i).valid := (i.U < numDeq) && !useBypass
     deqEntries(i).bits  := Mux1H(UIntToOH(deqBankPtrVec(i).value), readStage1)
   }
   // Pointer maintenance
   deqBankPtrVecNext := VecInit(deqBankPtrVec.map(_ + numDeq))
   deqPtrVecNext     := VecInit(deqPtrVec.map(_ + numDeq))
   deqInBankPtrNext.zip(deqInBankPtr).zipWithIndex.foreach { case ((ptrNext, ptr), idx) =>
-    // validVec[k] == bankValid[deqBankPtr + k]
-    // So bankValid[n] == validVec[n - deqBankPtr]
+    // bank n holds the (n - deqBankPtr mod NumReadBank)-th dequeued entry;
+    // it advances iff that entry is within the numDeq consumed this cycle
     val validIdx = Mux(
       idx.asUInt >= deqBankPtr.value,
       idx.asUInt - deqBankPtr.value,
