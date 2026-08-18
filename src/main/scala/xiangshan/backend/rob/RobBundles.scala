@@ -146,7 +146,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val commit_w = Bool()
     val entryPairType = CompressType()
     val noCompressReason = UInt(2.W)
-    val uopState = UInt(PackedUopStateWidth.W)
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val interruptSafe = Bool()
     val slotHeadRvcMask = UInt(2.W)
@@ -174,8 +173,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth + 1).W))
     // debug_end
 
-    def formerUopNum: UInt = decodeFormerUopNum(entryPairType, uopState)
-    def latterUopNum: UInt = decodeLatterUopNum(entryPairType, uopState)
   }
 
   def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop)(implicit p: Parameters): Unit = {
@@ -219,13 +216,16 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.topdownIssueTime.foreach(_ := 0.U)
   }
 
-  def connectCommitEntry(robCommitEntry: RobCommitEntryBundle, robEntry: RobEntryBundle)(implicit p: Parameters): Unit = {
+  def connectCommitEntry(
+    robCommitEntry: RobCommitEntryBundle,
+    robEntry: RobEntryBundle,
+    commitW: Bool
+  )(implicit p: Parameters): Unit = {
     robCommitEntry.walk_v := robEntry.valid
     robCommitEntry.commit_v := robEntry.valid
-    robCommitEntry.commit_w := robEntry.isWritebacked
+    robCommitEntry.commit_w := commitW
     robCommitEntry.entryPairType := robEntry.entryPairType
     robCommitEntry.noCompressReason := robEntry.noCompressReason
-    robCommitEntry.uopState := robEntry.uopState
     robCommitEntry.realDestSize := robEntry.realDestSize
     robCommitEntry.interruptSafe := robEntry.interruptSafe
     robCommitEntry.rfWen := robEntry.rfWen
