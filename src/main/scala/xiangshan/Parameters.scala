@@ -538,6 +538,7 @@ case class DebugOptions
   ResetGen: Boolean = false,
   EnableDifftest: Boolean = false,
   AlwaysBasicDiff: Boolean = true,
+  FullBasicDiff: Boolean = false,
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
   PerfLevel: String = "VERBOSE",
