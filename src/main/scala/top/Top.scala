@@ -135,6 +135,61 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
   val nmiIntNode = IntSourceNode(IntSourcePortSimple(1, NumCores, (new NonmaskableInterruptIO).elements.size))
   val nmi = InModuleBody(nmiIntNode.makeIOs())
+  private def imsicParamsForHart(hartIndex: Int): aia.IMSICParams = {
+    val params = soc.IMSICParams
+    params.copy(
+      mAddr = params.mAddr + (hartIndex.toLong << params.intFileMemWidth),
+      sgAddr = params.sgAddr + (hartIndex.toLong << (params.intFileMemWidth + log2Ceil(1 + params.geilen)))
+    )
+  }
+  val imsic_bus_tops = Seq.tabulate(NumCores) { i =>
+    LazyModule(new imsic_bus_top()(p.alter((_, _, up) => {
+      case SoCParamsKey => up(SoCParamsKey).copy(IMSICParams = imsicParamsForHart(i))
+    })))
+  }
+  imsic_bus_tops.zipWithIndex.foreach { case (imsic_bus_top, i) =>
+    imsic_bus_top.aplic_axi4.foreach { aplic_axi4 =>
+      val hartImsicParams = imsicParamsForHart(i)
+      aplic_axi4 := aia.AXI4Map { addrSet =>
+        val base = addrSet.base.toLong
+        val (groupID, memberID) = soc.APLICParams.hartIndex_to_gh(i)
+        val mOffset = (groupID.toLong << soc.APLICParams.groupStrideWidth) +
+          (memberID.toLong << soc.APLICParams.mStrideWidth)
+        val sgOffset = (groupID.toLong << soc.APLICParams.groupStrideWidth) +
+          (memberID.toLong << soc.APLICParams.sgStrideWidth)
+        if (base == hartImsicParams.mAddr) {
+          soc.APLICParams.mBaseAddr + mOffset
+        } else if (base == hartImsicParams.sgAddr) {
+          soc.APLICParams.sgBaseAddr + sgOffset
+        } else if (base == hartImsicParams.tee_mAddr) {
+          soc.APLICParams.mBaseAddr + mOffset
+        } else if (base == hartImsicParams.tee_sgAddr) {
+          soc.APLICParams.sgBaseAddr + sgOffset
+        } else {
+          base
+        }
+      } := misc.aplic.toIMSIC
+    }
+    imsic_bus_top.axi_mem_xbar.foreach { imsicXbar =>
+      if (enableCHI) {
+        imsicXbar :=
+          AXI4Buffer() :=
+          AXI4UserYanker() :=
+          TLToAXI4() :=
+          TLFragmenter(4, 8, holdFirstDeny = true) :=
+          TLWidthWidget(8) :=
+          misc.device_xbar.get
+      } else {
+        imsicXbar :=
+          AXI4Buffer() :=
+          AXI4UserYanker() :=
+          TLToAXI4() :=
+          TLFragmenter(4, 8, holdFirstDeny = true) :=
+          TLWidthWidget(8) :=
+          misc.peripheralXbar.get
+      }
+    }
+  }
 
   for (i <- 0 until NumCores) {
     core_with_l2(i).clint_int_node := misc.timer.intnode
@@ -265,7 +320,38 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     io.pll0_ctrl <> misc.module.pll0_ctrl
 
-    val msiInfo = WireInit(0.U.asTypeOf(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
+    val imsic_axi4 = Option.when(NumCores == 1)(imsic_bus_tops.head.axi4.map { x =>
+      IO(Flipped(new VerilogAXI4Record(x.elts.head.params.copy(addrBits = 32))))
+    }).flatten
+    val imsic_axi4s = Option.when(NumCores > 1)(imsic_bus_tops.head.axi4.map { x =>
+      IO(Vec(NumCores, Flipped(new VerilogAXI4Record(x.elts.head.params.copy(addrBits = 32)))))
+    }).flatten
+    imsic_bus_tops.zipWithIndex.foreach { case (imsic_bus_top, i) =>
+      imsic_bus_top.axi4.foreach { x =>
+        val imsic_axi4_port = if (NumCores == 1) imsic_axi4.get else imsic_axi4s.get(i)
+        imsic_axi4_port.viewAs[AXI4Bundle] <> x.elements.head._2
+      }
+      imsic_bus_top.tl_m.foreach { x =>
+        val imsic_m_tl = IO(chiselTypeOf(x.getWrappedValue))
+        imsic_m_tl.suggestName(if (NumCores == 1) "imsic_m_tl" else s"imsic_${i}_m_tl")
+        x <> imsic_m_tl
+      }
+      imsic_bus_top.tl_s.foreach { x =>
+        val imsic_s_tl = IO(chiselTypeOf(x.getWrappedValue))
+        imsic_s_tl.suggestName(if (NumCores == 1) "imsic_s_tl" else s"imsic_${i}_s_tl")
+        x <> imsic_s_tl
+      }
+      imsic_bus_top.module.msi.foreach { x =>
+        val imsic = IO(chiselTypeOf(x))
+        imsic.suggestName(if (NumCores == 1) "imsic" else s"imsic_${i}")
+        x <> imsic
+      }
+      imsic_bus_top.module.teemsi.foreach { x =>
+        val teemsi = IO(chiselTypeOf(x))
+        teemsi.suggestName(if (NumCores == 1) "teemsi" else s"teemsi_${i}")
+        x <> teemsi
+      }
+    }
     // syscnt io input descrip
     val ref_reset_sync = withClockAndReset(io.rtc_clock, io.reset) { ResetGen() }
     misc.module.scntIO.update_en := false.B
@@ -290,8 +376,16 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
-      core.module.io.msiInfo := msiInfo
-      core.module.io.teemsiInfo.foreach(_ := msiInfo)
+      core.module.io.msiInfo.valid := imsic_bus_tops(i).module.msiio.vld_req
+      core.module.io.msiInfo.bits := imsic_bus_tops(i).module.msiio.data
+      imsic_bus_tops(i).module.msiio.vld_ack := core.module.io.msiAck
+      imsic_bus_tops(i).module.teemsiio zip core.module.io.teemsiInfo foreach { case (teemsiio, teemsiInfo) =>
+        teemsiInfo.valid := teemsiio.vld_req
+        teemsiInfo.bits := teemsiio.data
+      }
+      imsic_bus_tops(i).module.teemsiio zip core.module.io.teemsiAck foreach { case (teemsiio, teemsiAck) =>
+        teemsiio.vld_ack := teemsiAck
+      }
       core.module.io.clintTime := clintTime
       io.riscv_wfi(i) := core.module.io.cpu_wfi
       io.riscv_critical_error(i) := core.module.io.cpu_crtical_error
