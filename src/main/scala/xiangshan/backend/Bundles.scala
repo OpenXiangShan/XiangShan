@@ -30,6 +30,12 @@ import xiangshan.backend.decode.opcode.Opcode.Opcode
 
 
 object Bundles {
+  def NormalUopNumWidth(implicit p: Parameters): Int =
+    log2Up(p(XSCoreParamsKey).MaxUopSize + 1)
+
+  def CompressedSlotUopNumWidth(implicit p: Parameters): Int =
+    log2Ceil(2 * p(XSCoreParamsKey).RenameWidth)
+
   /**
    * Connect same name and same width port like sinkBundle := sourceBundle.
    *

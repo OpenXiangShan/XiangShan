@@ -405,6 +405,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     case (st, in) => st := Mux(in.exceptionVec.asUInt.orR, false.B, FuType.isStore(in.fuType))
   }
 
+  val dropMask = Cat(isMove.reverse) | Cat(fusionValidVec.reverse)
+  val numWBIs2Mask = Cat(io.in.map(_.bits.numWB === 2.U).reverse)
+  def compactSlotNumWB(mask: UInt): UInt = {
+    PopCount(mask & ~dropMask) +& PopCount(mask & numWBIs2Mask)
+  }
+
   val walkNeedIntDest = WireDefault(VecInit(Seq.fill(RenameWidth)(false.B)))
   val walkNeedFpDest = WireDefault(VecInit(Seq.fill(RenameWidth)(false.B)))
   val walkNeedVecDest = WireDefault(VecInit(Seq.fill(RenameWidth)(false.B)))
