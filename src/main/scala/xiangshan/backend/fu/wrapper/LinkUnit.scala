@@ -18,15 +18,11 @@ class LinkUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   val nextPcOffset = io.in.bits.data.nextPcOffset.get
 
   val isAuipc: Bool = LinkOpType.linkUopisAuipc(func)
-  val isFusedAuipcJalrLink: Bool = LinkOpType.linkUopisFusedAuipcJalrLink(func)
   val isLink: Bool = LinkOpType.linkUopisLink(func)
 
   io.in.ready := io.out.ready
   io.out.valid := io.in.valid
-  val linkResult = pc +& nextPcOffset +& 4.U
-  io.out.bits.res.data := Mux(isFusedAuipcJalrLink,
-    linkResult(XLEN - 1, 0),
-    pc + Mux(isAuipc, SignExt(imm, XLEN), nextPcOffset))
+  io.out.bits.res.data := pc + Mux(isAuipc, SignExt(imm, XLEN), nextPcOffset)
 
   connect0LatencyCtrlSingal
 }

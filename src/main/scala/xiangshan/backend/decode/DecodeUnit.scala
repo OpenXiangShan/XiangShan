@@ -695,6 +695,15 @@ case class Imm_LUI32() extends Imm(32, SelImm.IMM_LUI32){
   }
 }
 
+// Raw AUIPC hi20 and JALR lo12 packed by the backend fusion matcher.
+// Keep this out of ImmUnion.imms so ordinary decode immediate storage remains
+// capped at 20 bits; issue blocks containing NewJumpUnit opt in explicitly.
+case class Imm_AUIPC_JALR() extends Imm(32, SelImm.IMM_AUIPC_JALR) {
+  override def do_toImm32(minBits: UInt): UInt = minBits
+
+  override def minBitsFromInstr(instr: UInt): UInt = instr
+}
+
 case class Imm_VRORVI() extends Imm(6, SelImm.IMM_VRORVI){
   override def do_toImm32(minBits: UInt): UInt = ZeroExt(minBits, 32)
 
@@ -715,6 +724,7 @@ object ImmUnion {
   val VSETVLI = Imm_VSETVLI()
   val VSETIVLI = Imm_VSETIVLI()
   val LUI32 = Imm_LUI32()
+  val AUIPC_JALR = Imm_AUIPC_JALR()
   val VRORVI = Imm_VRORVI()
 
   // do not add special type lui32 to this, keep ImmUnion max len being 20.

@@ -24,7 +24,11 @@ class NewJumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(c
   private val isJr = NewJumpOpType.jumpUopisjr(func) || isFusedJr
   private val fusedHi = SignExt(Cat(imm(31, 12), 0.U(12.W)), XLEN)
   private val fusedLo = SignExt(imm(11, 0), XLEN)
-  private val fusedTarget = (pc - 4.U) + fusedHi + fusedLo
+  private val jalrFtqOffset = (io.in.bits.ctrl.ftqOffset.get << instOffsetBits).asUInt
+  private val jalrRvcOffset = Mux(io.in.bits.ctrl.isRVC.get, 0.U, 2.U)
+  private val jalrPcOffset = SignExt(jalrFtqOffset -& jalrRvcOffset, XLEN)
+  private val auipcPc = pc + jalrPcOffset - 4.U
+  private val fusedTarget = auipcPc + fusedHi + fusedLo
   private val normalTarget = Mux(isJr, src, pc) + SignExt(imm, XLEN)
   private val jumpTarget = Mux(isFusedJr, fusedTarget & (~1.U(XLEN.W)), normalTarget)
 
