@@ -88,8 +88,8 @@ def test_icache_prefetchpipe_sampler_contract_has_one_key_per_leaf():
 
 
 def test_icache_missunit_sampler_contract_has_one_key_per_leaf():
-    assert len(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS) == 31
-    assert len(set(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS)) == 31
+    assert len(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS) == 30
+    assert len(set(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS)) == 30
 
 
 def _set_fetch_mshr_allocate_inputs(recorder, *, prefetch=0, flush=0, fencei=0):
@@ -224,6 +224,96 @@ def test_missunit_capacity_bins_do_not_duplicate_merge_coverage():
     sample_icache_missunit_coverage(recorder, recorder.env, 107)
     assert _hit(recorder, "icache_missunit_dedup", "prefetch_merge_any_mshr")
     assert not _hit(recorder, "icache_missunit_capacity", "prefetch_full_backpressure")
+
+
+def _set_missunit_dedup_inputs(
+    recorder,
+    *,
+    request="fetch",
+    existing_index=None,
+    issue=0,
+    same_cycle_fetch_prefetch=False,
+):
+    fetch_valid = request == "fetch" or same_cycle_fetch_prefetch
+    prefetch_valid = request == "prefetch" or same_cycle_fetch_prefetch
+    signals = {
+        _MAIN + "__Vtogcov__io_missReq_valid": int(fetch_valid),
+        _MAIN + "__Vtogcov__io_missReq_ready": 1,
+        _MAIN + "__Vtogcov__io_missReq_bits_blkPAddr": 0x400,
+        _MAIN + "__Vtogcov__io_missReq_bits_vSetIdx": 4,
+        _MISS + "fetchHit": int(request == "fetch" and existing_index is not None),
+        _MISS + "io_prefetchReq_valid": int(prefetch_valid),
+        _MISS + "io_prefetchReq_ready": 1,
+        _MISS + "__Vtogcov__io_prefetchReq_bits_blkPAddr": 0x400,
+        _MISS + "__Vtogcov__io_prefetchReq_bits_vSetIdx": 4,
+        _MISS + "prefetchHit": int(prefetch_valid),
+        _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush": 0,
+        _TOP + "io_fencei": 0,
+    }
+    for name, value in signals.items():
+        recorder.set_missunit_signal(name, value)
+    for index in range(14):
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.valid", 0)
+    if existing_index is not None:
+        recorder.set_missunit_signal(_MISS + f"allMshr_{existing_index}.valid", 1)
+        recorder.set_missunit_signal(_MISS + f"allMshr_{existing_index}.issue", issue)
+        recorder.set_missunit_signal(_MISS + f"allMshr_{existing_index}.flush", 0)
+        recorder.set_missunit_signal(_MISS + f"allMshr_{existing_index}.fencei", 0)
+        recorder.set_missunit_signal(_MISS + f"allMshr_{existing_index}.blkPAddr", 0x400)
+        recorder.set_missunit_signal(_MISS + f"allMshr_{existing_index}.vSetIdx", 4)
+
+
+def test_missunit_dedup_accepts_fetch_and_prefetch_mshr_before_or_after_issue():
+    for request, existing_index, bin_name in (
+        ("fetch", 4, "fetch_merge_any_mshr"),
+        ("prefetch", 0, "prefetch_merge_any_mshr"),
+    ):
+        for issue in (0, 1):
+            recorder = _Recorder()
+            _set_missunit_dedup_inputs(
+                recorder,
+                request=request,
+                existing_index=existing_index,
+                issue=issue,
+            )
+            sample_icache_missunit_coverage(recorder, recorder.env, 108 + issue)
+            assert _hit(recorder, "icache_missunit_dedup", bin_name)
+
+
+def test_missunit_dedup_requires_existing_mshr_and_clean_controls():
+    for request, bin_name in (
+        ("fetch", "fetch_merge_any_mshr"),
+        ("prefetch", "prefetch_merge_any_mshr"),
+    ):
+        recorder = _Recorder()
+        _set_missunit_dedup_inputs(recorder, request=request, existing_index=None)
+        sample_icache_missunit_coverage(recorder, recorder.env, 110)
+        assert not _hit(recorder, "icache_missunit_dedup", bin_name)
+
+        for control_signal in (
+            _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
+            _TOP + "io_fencei",
+        ):
+            recorder = _Recorder()
+            _set_missunit_dedup_inputs(
+                recorder,
+                request=request,
+                existing_index=0 if request == "fetch" else 4,
+            )
+            recorder.set_missunit_signal(control_signal, 1)
+            sample_icache_missunit_coverage(recorder, recorder.env, 111)
+            assert not _hit(recorder, "icache_missunit_dedup", bin_name)
+
+
+def test_missunit_prefetch_dedup_excludes_same_cycle_fetch_merge():
+    recorder = _Recorder()
+    _set_missunit_dedup_inputs(
+        recorder,
+        request="prefetch",
+        same_cycle_fetch_prefetch=True,
+    )
+    sample_icache_missunit_coverage(recorder, recorder.env, 112)
+    assert not _hit(recorder, "icache_missunit_dedup", "prefetch_merge_any_mshr")
 
 
 def test_missunit_capacity_bins_require_full_pool_and_clean_control():
@@ -770,6 +860,89 @@ def test_missunit_fifo_issue_order_requires_source_to_match_fifo_head():
 
     sample_icache_missunit_coverage(recorder, recorder.env, 6)
     assert _hit(recorder, "icache_missunit_acquire", "prefetch_fifo_issue_order")
+
+
+def _set_missunit_acquire_controls(recorder, *, ready=1, flush=0, fencei=0):
+    for name, value in {
+        _TOP + "auto_inner_icache_client_out_a_ready": ready,
+        _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush": flush,
+        _TOP + "io_fencei": fencei,
+    }.items():
+        recorder.set_missunit_signal(name, value)
+
+
+def test_missunit_fetch_prefetch_priority_samples_competition_conditions_only():
+    recorder = _Recorder()
+    _set_missunit_acquire_controls(recorder)
+    recorder.set_missunit_signal(_MISS + "acquireArb.io_in_0_valid", 1)
+    recorder.set_missunit_signal(_MISS + "prefetchArb.io_out_valid", 1)
+
+    sample_icache_missunit_coverage(recorder, recorder.env, 7)
+
+    assert _hit(recorder, "icache_missunit_acquire", "fetch_priority_over_prefetch")
+
+    for missing_signal in (
+        _MISS + "acquireArb.io_in_0_valid",
+        _MISS + "prefetchArb.io_out_valid",
+        _TOP + "auto_inner_icache_client_out_a_ready",
+    ):
+        recorder = _Recorder()
+        _set_missunit_acquire_controls(recorder)
+        recorder.set_missunit_signal(_MISS + "acquireArb.io_in_0_valid", 1)
+        recorder.set_missunit_signal(_MISS + "prefetchArb.io_out_valid", 1)
+        recorder.set_missunit_signal(missing_signal, 0)
+        sample_icache_missunit_coverage(recorder, recorder.env, 8)
+        assert not _hit(recorder, "icache_missunit_acquire", "fetch_priority_over_prefetch")
+
+
+def test_missunit_fetch_index_priority_requires_two_candidates_and_clean_controls():
+    recorder = _Recorder()
+    _set_missunit_acquire_controls(recorder)
+    recorder.set_missunit_signal(_MISS + "acquireArb.io_in_0_valid", 1)
+    recorder.set_missunit_signal(_MISS + "acquireArb.io_in_2_valid", 1)
+
+    sample_icache_missunit_coverage(recorder, recorder.env, 9)
+
+    assert _hit(recorder, "icache_missunit_acquire", "fetch_index_priority")
+
+    recorder = _Recorder()
+    _set_missunit_acquire_controls(recorder, flush=1)
+    recorder.set_missunit_signal(_MISS + "acquireArb.io_in_0_valid", 1)
+    recorder.set_missunit_signal(_MISS + "acquireArb.io_in_2_valid", 1)
+    sample_icache_missunit_coverage(recorder, recorder.env, 10)
+    assert not _hit(recorder, "icache_missunit_acquire", "fetch_index_priority")
+
+
+def test_missunit_acquire_backpressure_requires_two_blocked_cycles_and_recovery():
+    recorder = _Recorder()
+    _set_missunit_acquire_controls(recorder, ready=0)
+    recorder.set_missunit_signal(_TOP + "auto_inner_icache_client_out_a_valid", 1)
+
+    sample_icache_missunit_coverage(recorder, recorder.env, 11)
+    assert not _hit(recorder, "icache_missunit_acquire", "acquire_backpressure_recovery")
+    sample_icache_missunit_coverage(recorder, recorder.env, 12)
+    assert not _hit(recorder, "icache_missunit_acquire", "acquire_backpressure_recovery")
+
+    recorder.set_missunit_signal(_TOP + "auto_inner_icache_client_out_a_ready", 1)
+    sample_icache_missunit_coverage(recorder, recorder.env, 13)
+    assert _hit(recorder, "icache_missunit_acquire", "acquire_backpressure_recovery")
+
+
+def test_missunit_acquire_backpressure_window_resets_on_control_or_invalid():
+    for interruption, signal_name in (
+        (1, _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush"),
+        (0, _TOP + "auto_inner_icache_client_out_a_valid"),
+    ):
+        recorder = _Recorder()
+        _set_missunit_acquire_controls(recorder, ready=0)
+        recorder.set_missunit_signal(_TOP + "auto_inner_icache_client_out_a_valid", 1)
+        sample_icache_missunit_coverage(recorder, recorder.env, 14)
+        recorder.set_missunit_signal(signal_name, interruption)
+        sample_icache_missunit_coverage(recorder, recorder.env, 15)
+        recorder.set_missunit_signal(signal_name, 0 if interruption else 1)
+        recorder.set_missunit_signal(_TOP + "auto_inner_icache_client_out_a_ready", 1)
+        sample_icache_missunit_coverage(recorder, recorder.env, 16)
+        assert not _hit(recorder, "icache_missunit_acquire", "acquire_backpressure_recovery")
 
 
 def test_missunit_sram_suppression_requires_valid_response():

@@ -35,7 +35,6 @@ ICACHE_MISSUNIT_SAMPLER_BIN_KEYS = frozenset(
         ("icache_missunit_acquire", "fetch_index_priority"),
         ("icache_missunit_acquire", "prefetch_fifo_enqueue"),
         ("icache_missunit_acquire", "prefetch_fifo_issue_order"),
-        ("icache_missunit_acquire", "prefetch_starvation_recovery"),
         ("icache_missunit_acquire", "acquire_backpressure_recovery"),
         ("icache_missunit_dedup", "fetch_merge_any_mshr"),
         ("icache_missunit_dedup", "prefetch_merge_any_mshr"),
@@ -181,8 +180,7 @@ def _mshr_response_valid(mshrs: list[dict[str, Optional[int]]], source: Optional
 
 def reset_icache_missunit_coverage_state(recorder) -> None:
     recorder._icache_missunit_cov_state = {
-        "prefetch_starved": False,
-        "acquire_blocked": False,
+        "acquire_blocked_cycles": 0,
         "clean_beats": 0,
         "error_response_seen": False,
         "last_refill_source": None,
@@ -413,7 +411,6 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
     any_prefetch = _any_status(mshrs, range(4, 14), "valid")
     acquire_fire = _on(signals["acquire_valid"]) and _on(signals["acquire_ready"])
     source = signals["acquire_source"]
-    fetch_acquire_fire = acquire_fire and source is not None and int(source) < 4
     prefetch_acquire_fire = acquire_fire and source is not None and int(source) >= 4
     fifo_head = None
     if signals["fifo_deq_value"] is not None:
@@ -423,6 +420,23 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
 
     flush = _on(signals["flush"])
     fencei = _on(signals["fencei"])
+    controls_clear = _off(signals["flush"]) and _off(signals["fencei"])
+    fetch_existing_mshr_hit = _same_key_exists(
+        mshrs, range(14), signals["fetch_paddr"], signals["fetch_vset"]
+    )
+    prefetch_existing_mshr_hit = _same_key_exists(
+        mshrs, range(14), signals["prefetch_paddr"], signals["prefetch_vset"]
+    )
+    same_cycle_fetch_prefetch_key = (
+        fetch_valid
+        and prefetch_valid
+        and signals["fetch_paddr"] is not None
+        and signals["prefetch_paddr"] is not None
+        and signals["fetch_vset"] is not None
+        and signals["prefetch_vset"] is not None
+        and int(signals["fetch_paddr"]) == int(signals["prefetch_paddr"])
+        and int(signals["fetch_vset"]) == int(signals["prefetch_vset"])
+    )
     fetch_mshr_allocate = (
         fetch_demux_fire
         and _off(signals["prefetch_valid"])
@@ -562,11 +576,20 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
 
     _mark(
         recorder, "icache_missunit_acquire", "fetch_priority_over_prefetch", cycle,
-        fetch_acquire_fire and _on(signals["prefetch_arb_valid"]), evidence,
+        fetch_candidates >= 1
+        and _on(signals["prefetch_arb_valid"])
+        and _on(signals["acquire_ready"])
+        and _off(signals["flush"])
+        and _off(signals["fencei"]),
+        evidence,
     )
     _mark(
         recorder, "icache_missunit_acquire", "fetch_index_priority", cycle,
-        fetch_acquire_fire and fetch_candidates >= 2, evidence,
+        fetch_candidates >= 2
+        and _on(signals["acquire_ready"])
+        and _off(signals["flush"])
+        and _off(signals["fencei"]),
+        evidence,
     )
     _mark(
         recorder, "icache_missunit_acquire", "prefetch_fifo_enqueue", cycle,
@@ -583,21 +606,54 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
         recorder, "icache_missunit_acquire", "prefetch_fifo_issue_order", cycle,
         fifo_issue_order, evidence,
     )
-    if fetch_candidates and _on(signals["prefetch_arb_valid"]):
-        state["prefetch_starved"] = True
-    _mark(
-        recorder, "icache_missunit_acquire", "prefetch_starvation_recovery", cycle,
-        state["prefetch_starved"] and prefetch_acquire_fire and not fetch_candidates, evidence,
-    )
-    if _on(signals["acquire_valid"]) and _off(signals["acquire_ready"]):
-        state["acquire_blocked"] = True
-    _mark(
-        recorder, "icache_missunit_acquire", "acquire_backpressure_recovery", cycle,
-        state["acquire_blocked"] and acquire_fire, evidence,
-    )
+    if _on(signals["acquire_valid"]) and controls_clear and _off(signals["acquire_ready"]):
+        state["acquire_blocked_cycles"] += 1
+    elif _on(signals["acquire_valid"]) and controls_clear and _on(signals["acquire_ready"]):
+        recovered_after_backpressure = state["acquire_blocked_cycles"] >= 2
+        state["acquire_blocked_cycles"] = 0
+        _mark(
+            recorder,
+            "icache_missunit_acquire",
+            "acquire_backpressure_recovery",
+            cycle,
+            recovered_after_backpressure,
+            evidence,
+        )
+    else:
+        state["acquire_blocked_cycles"] = 0
 
-    _mark(recorder, "icache_missunit_dedup", "fetch_merge_any_mshr", cycle, fetch_valid and fetch_hit, evidence)
-    _mark(recorder, "icache_missunit_dedup", "prefetch_merge_any_mshr", cycle, prefetch_valid and prefetch_hit, evidence)
+    fetch_merge_any_mshr = (
+        fetch_fire
+        and controls_clear
+        and fetch_hit
+        and fetch_existing_mshr_hit
+    )
+    prefetch_merge_any_mshr = (
+        prefetch_fire
+        and controls_clear
+        and prefetch_hit
+        and prefetch_existing_mshr_hit
+        and not same_cycle_fetch_prefetch_key
+    )
+    evidence["fetch_existing_mshr_hit"] = fetch_existing_mshr_hit
+    evidence["prefetch_existing_mshr_hit"] = prefetch_existing_mshr_hit
+    evidence["same_cycle_fetch_prefetch_key"] = same_cycle_fetch_prefetch_key
+    _mark(
+        recorder,
+        "icache_missunit_dedup",
+        "fetch_merge_any_mshr",
+        cycle,
+        fetch_merge_any_mshr,
+        evidence,
+    )
+    _mark(
+        recorder,
+        "icache_missunit_dedup",
+        "prefetch_merge_any_mshr",
+        cycle,
+        prefetch_merge_any_mshr,
+        evidence,
+    )
     fetch_mismatch = fetch_demux_fire and any_mshr and not _same_key_exists(mshrs, range(14), signals["fetch_paddr"], signals["fetch_vset"])
     prefetch_mismatch = prefetch_demux_fire and any_mshr and not _same_key_exists(mshrs, range(14), signals["prefetch_paddr"], signals["prefetch_vset"])
     _mark(recorder, "icache_missunit_dedup", "key_mismatch_no_merge", cycle, fetch_mismatch or prefetch_mismatch, evidence)
