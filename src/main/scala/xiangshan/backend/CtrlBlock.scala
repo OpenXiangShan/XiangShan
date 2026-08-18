@@ -42,6 +42,8 @@ import xiangshan.Redirect.findOldestRedirect
 import xiangshan.TopDownCounters._
 import xiangshan.backend.vector.{Decoder, VecIssueQueue}
 import xiangshan.backend.vector.Decoder.DecodeStage
+import xiangshan.backend.decode.opcode.Opcode.{LinkOpcodes, NewJmpOpcodes}
+import xiangshan.backend.fu.FuType
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val redirect = Valid(new Redirect)
@@ -121,6 +123,10 @@ class CtrlBlockImp(
   private val memCtrl = Module(new MemCtrl(params))
 
   private val disableFusion = decode.in.fromCSR.singlestep || !decode.in.fromCSR.custom.fusion_enable
+  // Stage 1 is always enabled on this branch. Stage 2 is toggled for the
+  // separately measured 3-to-2 experiment and intentionally does not use ROB
+  // compression.
+  private val enableAuipcJalrStage2 = false
 
   private val s0_robFlushRedirect = rob.io.flushOut
   private val s1_robFlushRedirect = Wire(Valid(new Redirect))
@@ -692,6 +698,35 @@ class CtrlBlockImp(
       rename.io.in(i).bits.canRobCompress := !cross2Ftq
       rename.io.isFusionVec(i) := true.B
       rename.io.fusionCross2FtqVec(i) := cross2Ftq
+    }
+  }
+
+  // Stage 1: retain AUIPC, JALR-link, and JALR-jump uops, but remove the
+  // integer source dependency from the jump uop and carry both immediates in
+  // a packed form to NewJumpUnit.  Restrict matching to one FTQ entry and to
+  // architecturally equivalent rd/rs1/rd operands.
+  if (!enableAuipcJalrStage2) {
+    for (i <- 0 until RenameWidth - 2) {
+      val a = decodePipeRename(i).bits
+      val b = decodePipeRename(i + 1).bits
+      val c = decodePipeRename(i + 2).bits
+      val safe = decodePipeRename(i).valid && decodePipeRename(i + 1).valid && decodePipeRename(i + 2).valid &&
+        !disableFusion && !a.exceptionVec.orR && !b.exceptionVec.orR && !c.exceptionVec.orR &&
+        TriggerAction.isNone(a.trigger) && TriggerAction.isNone(b.trigger) && TriggerAction.isNone(c.trigger) &&
+        !a.isLastInFtqEntry && (a.ftqPtr === b.ftqPtr) && (b.ftqPtr === c.ftqPtr) &&
+        a.fuType === FuType.link.U && LinkOpcodes.linkUopisAuipc(a.fuOpType) &&
+        b.fuType === FuType.link.U && LinkOpcodes.linkUopisLink(b.fuOpType) && b.isJR && b.firstUop &&
+        c.fuType === FuType.njmp.U && c.isJR && c.isJr && c.lastUop &&
+        a.ldest =/= 0.U && a.ldest === c.lsrc(0) && a.ldest === c.ldest
+      XSPerfAccumulate("auipc_jalr_stage1_match", safe)
+      when (safe) {
+        rename.io.in(i + 2).bits.fuOpType := NewJmpOpcodes.fusedJr
+        rename.io.in(i + 2).bits.srcType(0) := SrcType.no
+        rename.io.in(i + 2).bits.imm := Cat(a.instr(31, 12), c.instr(31, 20))
+        dispatch.io.renameIn(i + 2).bits.fuOpType := NewJmpOpcodes.fusedJr
+        dispatch.io.renameIn(i + 2).bits.srcType(0) := SrcType.no
+        dispatch.io.renameIn(i + 2).bits.imm := Cat(a.instr(31, 12), c.instr(31, 20))
+      }
     }
   }
 

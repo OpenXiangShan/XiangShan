@@ -241,7 +241,8 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     if (exuParm.hasBrhFu || exuParm.hasCSR || exuParm.hasFence) {
       val thisPcOffset = exuInput.bits.getPcOffset()
       val nextPcOffset = exuInput.bits.getNextPcOffset()
-      val isJR = FuType.isNewJump(fuType) && NewJumpOpType.jumpUopisjr(fuOpType)
+      val isJR = FuType.isNewJump(fuType) &&
+        (NewJumpOpType.jumpUopisjr(fuOpType) || NewJumpOpType.jumpUopisFusedJr(fuOpType))
       val immBJU = imm + Mux(isJR, 0.U, SignExt(thisPcOffset, imm.getWidth))
       val immCsrFence = fromDPs(exuIdx).bits.imm.get
       exuInput.bits.imm := Mux((FuType.isCsr(fuType) || FuType.isFence(fuType)) && exuParm.hasCSR.B, immCsrFence, immBJU)

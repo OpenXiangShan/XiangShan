@@ -394,9 +394,13 @@ object Opcode {
   object NewJmpOpcodes extends Opcodes {
     val j  = Value(bb"111_1100")          + Src2Imm(DecodeSelImm.UJ) + CannotRobCompress
     val jr = Value(bb"111_1101") + Src1Gp + Src2Imm(DecodeSelImm.I)  + CannotRobCompress
+    // JALR target formed directly from a preceding AUIPC and this JALR.
+    // The packed immediate is consumed by NewJumpUnit; it has no register source.
+    val fusedJr = Value(bb"111_1110") + CannotRobCompress
 
     def jumpUopisj(op: UInt) = !op(0)
     def jumpUopisjr(op: UInt) = op(0)
+    def jumpUopisFusedJr(op: UInt) = op === fusedJr.encode
   }
 
   object MulOpcodes extends Opcodes {

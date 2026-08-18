@@ -20,8 +20,13 @@ class NewJumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(c
 
   // j:  pc       + imm -> pc
   // ja: GPR[rs1] + imm -> pc
-  private val isJr = NewJumpOpType.jumpUopisjr(func)
-  private val jumpTarget = Mux(isJr, src, pc) + SignExt(imm, XLEN)
+  private val isFusedJr = NewJumpOpType.jumpUopisFusedJr(func)
+  private val isJr = NewJumpOpType.jumpUopisjr(func) || isFusedJr
+  private val fusedHi = SignExt(Cat(imm(31, 12), 0.U(12.W)), XLEN)
+  private val fusedLo = SignExt(imm(11, 0), XLEN)
+  private val fusedTarget = (pc - 4.U) + fusedHi + fusedLo
+  private val normalTarget = Mux(isJr, src, pc) + SignExt(imm, XLEN)
+  private val jumpTarget = Mux(isFusedJr, fusedTarget & (~1.U(XLEN.W)), normalTarget)
 
   private val fixedTaken = io.in.bits.ctrl.predictInfo.get.fixedTaken
   private val predTaken = io.in.bits.ctrl.predictInfo.get.predTaken
