@@ -88,8 +88,8 @@ def test_icache_prefetchpipe_sampler_contract_has_one_key_per_leaf():
 
 
 def test_icache_missunit_sampler_contract_has_one_key_per_leaf():
-    assert len(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS) == 30
-    assert len(set(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS)) == 30
+    assert len(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS) == 31
+    assert len(set(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS)) == 31
 
 
 def _set_fetch_mshr_allocate_inputs(recorder, *, prefetch=0, flush=0, fencei=0):
@@ -953,15 +953,39 @@ def test_missunit_sram_suppression_requires_valid_response():
         _MISS + "idNext": 0,
         _MISS + "allMshr_0.flush": 0,
         _MISS + "allMshr_0.fencei": 0,
+        _MISS + "corruptReg": 0,
+        _MISS + "deniedReg": 0,
     }.items():
         recorder.set_missunit_signal(name, value)
 
     sample_icache_missunit_coverage(recorder, recorder.env, 7)
     assert not _hit(recorder, "icache_missunit_flush", "redirect_suppresses_sram_write")
 
-    recorder.set_missunit_signal(_MISS + "allMshr_0.valid", 1)
+    recorder.set_missunit_signal(_ICACHE + "__Vtogcov__io_fromFtq_redirectFlush", 0)
     sample_icache_missunit_coverage(recorder, recorder.env, 8)
+    recorder.set_missunit_signal(_MISS + "allMshr_0.valid", 1)
+    recorder.set_missunit_signal(_ICACHE + "__Vtogcov__io_fromFtq_redirectFlush", 1)
+    sample_icache_missunit_coverage(recorder, recorder.env, 9)
     assert _hit(recorder, "icache_missunit_flush", "redirect_suppresses_sram_write")
+
+
+def test_missunit_redirect_keeps_fetch_mshr_bins_split_by_issue_state():
+    for issue, bin_name in (
+        (0, "redirect_keeps_unissued_fetch_mshr"),
+        (1, "redirect_keeps_issued_fetch_mshr"),
+    ):
+        recorder = _Recorder()
+        recorder.set_missunit_signal(
+            _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush", 0
+        )
+        recorder.set_missunit_signal(_MISS + "allMshr_0.valid", 1)
+        recorder.set_missunit_signal(_MISS + "allMshr_0.issue", issue)
+        sample_icache_missunit_coverage(recorder, recorder.env, 10)
+        recorder.set_missunit_signal(
+            _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush", 1
+        )
+        sample_icache_missunit_coverage(recorder, recorder.env, 11)
+        assert _hit(recorder, "icache_missunit_flush", bin_name)
 
 
 def test_missunit_source_route_uses_final_beat_context():
