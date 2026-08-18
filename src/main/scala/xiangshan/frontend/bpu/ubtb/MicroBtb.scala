@@ -75,7 +75,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
    * - generate prediction
    * - update replacer
    */
-  private val s1_fire = io.stageCtrl.s1_fire && io.enable
+  private val s1_fire    = io.stageCtrl.s1_fire && io.enable
 
   private val s1_startPc = RegEnable(s0_startPc, s0_fire)
 
