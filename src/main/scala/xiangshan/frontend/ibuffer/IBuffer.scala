@@ -289,12 +289,13 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
           deq.bits.toIBufOutEntry(0.U.asTypeOf(firstException.bits))
         )
       }.elsewhen(outputEntriesIsNotFull && !resumingVType) {
-        // valid mirrors bits: old entries keep outReg.valid, new entries use the
-        // same shifted deqEntries index as the bits path
+        // valid mirrors bits: old entries keep outReg.valid; new entries are
+        // valid iff they lie within the numDeq dequeued this cycle.
+        // useBypass is always 0 in this branch (!decodeCanAccept), so no need to gate it.
         outFromDeq.valid := Mux(
           i.U < outputEntriesValidNum,
           outReg.valid,
-          VecInit(deqEntries.take(i + 1).map(_.valid))(i.U - outputEntriesValidNum)
+          (i.U - outputEntriesValidNum) < numDeq
         )
         outFromDeq.bits := Mux(
           i.U < outputEntriesValidNum,
@@ -344,8 +345,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     }.elsewhen(decodeCanAccept) {
       vtypeGen.in.insts(i).valid := outputEntriesFromDeqNext(i).valid
     }.elsewhen(outputEntriesIsNotFull) {
-      // Only lanes carrying a genuinely new deq entry are fed to VTypeGen.
-      vtypeGen.in.insts(i).valid := Mux(i.U < outputEntriesValidNum, false.B, outputEntriesFromDeqNext(i).valid)
+      // Only lanes carrying a genuinely new deq entry (within numDeq) are fed to VTypeGen.
+      vtypeGen.in.insts(i).valid := Mux(i.U < outputEntriesValidNum, false.B, (i.U - outputEntriesValidNum) < numDeq)
     }.otherwise {
       vtypeGen.in.insts(i).valid := false.B
     }
