@@ -42,9 +42,13 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   println(f"  Address fields:")
   addrFields.show(indent = 4)
 
+  // type placeholder: all consumers below live inside if (HasBpuFlush) guards.
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get  else false.B
+
   io.sramResetDone := true.B
   if (HasBpuFlush) {
-    io.resetDone.get := !io.contextFlush.get
+    io.resetDone.get := !contextFlush
   }
   io.trainReady    := true.B
 
@@ -86,8 +90,9 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val s1_startPc = RegEnable(s0_startPc, s0_fire)
 
   private val s1_hitOH       = RegEnable(s0_hitOH, s0_fire)
+  // contextFlush: clear stale one-hot from the old context (SPEC 02 §4.3.1)
   if (HasBpuFlush) {
-    when(io.contextFlush.get) {
+    when(contextFlush) {
       s1_hitOH := 0.U(NumEntries.W)
     }
   }
@@ -109,7 +114,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   io.prediction.bits.attribute   := s1_hitEntry.slot1.attribute
 
   // update replacer
-  replacer.io.predTouch.valid := s1_hit && s1_fire && (if (HasBpuFlush) !io.bpuFlushing.get else true.B)
+  replacer.io.predTouch.valid := s1_hit && s1_fire && (if (HasBpuFlush) !bpuFlushing else true.B)
   replacer.io.predTouch.bits  := s1_hitIdx
 
   /* *** train stage 0 ***
@@ -126,7 +131,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val t0_attribute   = Wire(new BranchAttribute)
 
   if (UseFastTrain) {
-    t0_fire        := io.fastTrain.get.valid && io.enable && (if (HasBpuFlush) !io.bpuFlushing.get else true.B)
+    t0_fire        := io.fastTrain.get.valid && io.enable && (if (HasBpuFlush) !bpuFlushing else true.B)
     t0_startPc     := io.fastTrain.get.bits.startPc
     t0_actualTaken := io.fastTrain.get.bits.finalPrediction.taken
     t0_position    := io.fastTrain.get.bits.finalPrediction.cfiPosition
@@ -134,7 +139,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
     t0_attribute   := io.fastTrain.get.bits.finalPrediction.attribute
   } else {
     // FIXME: not sure if first mispredict is the best, maybe first taken?
-    t0_fire        := io.stageCtrl.t0_fire && io.train.mispredictBranch.valid && io.enable && (if (HasBpuFlush) !io.bpuFlushing.get else true.B)
+    t0_fire        := io.stageCtrl.t0_fire && io.train.mispredictBranch.valid && io.enable && (if (HasBpuFlush) !bpuFlushing else true.B)
     t0_startPc     := io.train.startPc
     t0_actualTaken := io.train.mispredictBranch.bits.taken
     t0_position    := io.train.mispredictBranch.bits.cfiPosition
@@ -201,7 +206,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val t1_hitAttributeSame = RegEnable(t0_hitAttributeSame, t0_fire)
   private val t1_hitTargetSame    = RegEnable(t0_hitTargetSame, t0_fire)
   // contextFlush: clear t1 pipeline registers (defensive, see SPEC §4.4.1)
-  if (HasBpuFlush) { when(io.contextFlush.get) {
+  if (HasBpuFlush) { when(contextFlush) {
     t1_tag               := 0.U
     t1_actualTaken       := false.B
     t1_position          := 0.U
@@ -260,7 +265,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   t1_updateIdx := Mux(t1_hit, t1_hitIdx, replacer.io.victim)
   // and write back the updated entry
   if (HasBpuFlush) {
-    when(io.contextFlush.get) { // flush priority: clear all entries
+    when(contextFlush) { // flush priority: clear all entries
       entries.foreach(_ := 0.U.asTypeOf(new MicroBtbEntry))
     }.elsewhen(t1_fire && (t1_hit || t1_allocate)) { // block t1 writeback on flush cycle
       entries(t1_updateIdx) := t1_updatedEntry
@@ -272,7 +277,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   }
 
   // update replacer
-  replacer.io.trainTouch.valid := t1_fire && (if (HasBpuFlush) !io.bpuFlushing.get else true.B)
+  replacer.io.trainTouch.valid := t1_fire && (if (HasBpuFlush) !bpuFlushing else true.B)
   replacer.io.trainTouch.bits  := t1_updateIdx
 
   /* *** perf *** */
