@@ -422,6 +422,11 @@ Run bin cases only through `run_bin_trace_pipeline.sh` for one binary or
 pipeline gate, trace input, runtime bounds, and artifact layout; direct pytest
 invocation is not a supported bin-case workflow.
 
+Although the runners use pytest internally for the DUT stage, a bin-trace case
+is a bin/trace integration regression, not a Python testcase. Exclude bin-trace
+cases from all-Python testcase selection and pass/fail counts; report them only
+through their shell-runner result.
+
 ## Bin-Trace Requirements
 
 Any DUT bin-trace case must meet the following operational requirements:
