@@ -23,7 +23,7 @@ import xscache.coupledL2.{IsKeywordKey, IsKeywordField, MemBackTypeMMField, MemP
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
-import xscache.common.{AliasField, PrefetchField}
+import xscache.common.{AliasField, L1DBPBypassCandidateField, L1DBPFinalBypassKey, PrefetchField}
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils._
@@ -955,6 +955,7 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 
   val reqFields: Seq[BundleFieldBase] = Seq(
     PrefetchField(),
+    L1DBPBypassCandidateField(),
     ReqSourceField(),
     VaddrField(VAddrBits - blockOffBits),
     MemBackTypeMMField(),
@@ -972,7 +973,8 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
       supportsProbe = TransferSizes(cfg.blockBytes)
     )),
     requestFields = reqFields,
-    echoFields = echoFields
+    echoFields = echoFields,
+    responseKeys = Seq(L1DBPFinalBypassKey)
   )
 
   val clientNode = TLClientNode(Seq(clientParameters))
@@ -1042,6 +1044,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     readPorts = PrefetchArrayReadPort, writePorts = 1 + LoadPipelineWidth
   )))
   val sampledPCArray = cacheParams.l1DBPParams.map(_ => Module(new L1DSampledPCArray))
+  val predictionArray = cacheParams.l1DBPParams.map(_ => Module(new L1DBPPredictionArray))
+  val l1dbp = cacheParams.l1DBPParams.map(_ => Module(new L1DBP))
 
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 1))
   val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
@@ -1084,20 +1088,42 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.wfi <> missQueue.io.wfi
   io.refillTrain := missQueue.io.refill_train
   mainPipe.io.prefetch_req <> io.prefetch_req
+  l1dbp match {
+    case Some(predictor) =>
+      ldu.zipWithIndex.foreach { case (loadPipe, i) =>
+        predictor.io.demandQuery(i) := loadPipe.io.l1dbp.query
+        loadPipe.io.l1dbp.resp := predictor.io.demandResp(i)
+      }
+      predictor.io.pftQuery(0) := mainPipe.io.l1dbp.pftQuery
+      mainPipe.io.l1dbp.pftResp := predictor.io.pftResp(0)
+      predictor.io.update := mainPipe.io.l1dbp.update
+    case None =>
+      ldu.foreach { loadPipe =>
+        loadPipe.io.l1dbp.resp.valid := RegNext(loadPipe.io.l1dbp.query.valid, false.B)
+        loadPipe.io.l1dbp.resp.bits.dead := false.B
+      }
+      mainPipe.io.l1dbp.pftResp.valid := RegNext(mainPipe.io.l1dbp.pftQuery.valid, false.B)
+      mainPipe.io.l1dbp.pftResp.bits.dead := false.B
+  }
   sampledPCArray match {
     case Some(sampleArray) =>
       sampleArray.io.read <> mainPipe.io.l1dbp.read
       sampleArray.io.write := mainPipe.io.l1dbp.write
       mainPipe.io.l1dbp.sampleResp := sampleArray.io.resp
 
-      // SampledPCArray is implemented as a single-port SRAM. MainPipe's
-      // existing tag-write arbitration guarantees that a sampled read and
-      // write cannot be requested in the same cycle.
-      assert(!(mainPipe.io.l1dbp.read.valid && mainPipe.io.l1dbp.write.valid),
-        "SampledPCArray SRAM read/write conflict must be covered by tag SRAM arbitration")
+      assert(!(mainPipe.io.l1dbp.read.fire && mainPipe.io.l1dbp.write.valid),
+        "SampledPCArray must not accept a read while writing")
     case None =>
       mainPipe.io.l1dbp.read.ready := true.B
       mainPipe.io.l1dbp.sampleResp := 0.U.asTypeOf(mainPipe.io.l1dbp.sampleResp)
+  }
+  predictionArray match {
+    case Some(predArray) =>
+      predArray.io.readSet := mainPipe.io.l1dbp.read.bits.set
+      predArray.io.write := mainPipe.io.l1dbp.predWrite
+      mainPipe.io.l1dbp.predResp := predArray.io.resp
+    case None =>
+      mainPipe.io.l1dbp.predResp := 0.U.asTypeOf(mainPipe.io.l1dbp.predResp)
   }
 
   // l1 dcache controller

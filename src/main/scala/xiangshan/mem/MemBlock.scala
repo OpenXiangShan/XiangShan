@@ -934,6 +934,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     lsq.io.l2_hint.valid := l2_hint.valid
     lsq.io.l2_hint.bits.sourceId := l2_hint.bits.sourceId
     lsq.io.l2_hint.bits.isKeyword := l2_hint.bits.isKeyword
+    lsq.io.l2_hint.bits.l1dbpFinalBypass := l2_hint.bits.l1dbpFinalBypass
 
     lsq.io.tlb_hint <> dtlbRepeater.io.hint.get
 

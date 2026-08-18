@@ -73,6 +73,12 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val pf_source = UInt(L1PfSourceBits.W)
   val access = Bool()
 
+
+  val l1dbpPayload = UInt(l1dbpPcIndexWidth.W)
+  val l1dbpTrainValid = Bool()
+  val l1dbpPredDead = Bool()
+  val l1dbpBypassCandidate = Bool()
+
   val id = UInt(reqIdWidth.W)
 
   def isLoad: Bool = source === LOAD_SOURCE.U
@@ -99,6 +105,12 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.error := false.B
     req.id := store.id
     req.miss_fail_cause_evict_btot := false.B
+    req.pf_source := L1_HW_PREFETCH_NULL
+    req.access := false.B
+    req.l1dbpPayload := 0.U
+    req.l1dbpTrainValid := false.B
+    req.l1dbpPredDead := false.B
+    req.l1dbpBypassCandidate := false.B
     req
   }
 
@@ -118,6 +130,10 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.miss_fail_cause_evict_btot := false.B
     req.pf_source := prefetch.pf_source.value
     req.access := false.B
+    req.l1dbpPayload := Mux(isFromStride(prefetch.pf_source.value), 1.U, 0.U)
+    req.l1dbpTrainValid := isFromStream(prefetch.pf_source.value) || isFromStride(prefetch.pf_source.value)
+    req.l1dbpPredDead := false.B
+    req.l1dbpBypassCandidate := false.B
     req.id := 0.U
     req
   }
@@ -175,6 +191,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
       val read = DecoupledIO(new L1DSampledPCRead)
       val sampleResp = Input(Vec(nWays, new L1DBPSampleEntry))
       val write = ValidIO(new L1DSampledPCWrite)
+      val predResp = Input(Vec(nWays, new L1DBPPredictionEntry))
+      val predWrite = ValidIO(new L1DBPPredictionWrite)
+      val pftQuery = ValidIO(new L1DBPRead)
+      val pftResp = Input(ValidIO(new L1DBPResp))
+      val update = ValidIO(new L1DBPUpdate)
     }
 
     // data sram
@@ -303,23 +324,32 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   )
 
   val store_idx = get_dcache_idx(io.store_req.bits.vaddr)
-  // manually assign store_req.ready for better timing
-  // now store_req set conflict check is done in parallel with req arbiter
-  store_req.ready := io.meta_read.ready && io.tag_read.ready && s1_ready && !store_set_conflict &&
-    !io.probe_req.valid && !io.refill_req.valid && !prefetch_req.valid
-  // Prefetch request has lower priority, so it needs to check higher priority requests
-  prefetch_req.ready := io.meta_read.ready && io.tag_read.ready && s1_ready && !set_conflict &&
-    !io.probe_req.valid && !io.refill_req.valid
   val s0_req = req.bits
   val s0_idx = get_dcache_idx(s0_req.vaddr)
+  val s0_l1dbp_sample_set = isL1DBPSampleSet(s0_idx)
+  val s0_base_ready = io.meta_read.ready && io.tag_read.ready && s1_ready && !set_conflict
+  // manually assign store_req.ready for better timing
+  // now store_req set conflict check is done in parallel with req arbiter
+  val s0_sample_ready = !s0_l1dbp_sample_set || io.l1dbp.read.ready
+  store_req.ready := io.meta_read.ready && io.tag_read.ready && s0_sample_ready && s1_ready && !store_set_conflict &&
+    !io.probe_req.valid && !io.refill_req.valid && !prefetch_req.valid
+  // Prefetch request has lower priority, so it needs to check higher priority requests
+  prefetch_req.ready := io.meta_read.ready && io.tag_read.ready && s0_sample_ready && s1_ready && !set_conflict &&
+    !io.probe_req.valid && !io.refill_req.valid
   val s0_need_tag = io.tag_read.valid
-  val s0_can_go = io.meta_read.ready && io.tag_read.ready && s1_ready && !set_conflict
+  val s0_can_go = s0_base_ready && s0_sample_ready
   val s0_fire = req.valid && s0_can_go
 
   req.ready := s0_can_go
 
-  io.l1dbp.read.valid := s0_fire && isL1DBPSampleSet(s0_idx)
+  io.l1dbp.read.valid := req.valid && s0_l1dbp_sample_set && s0_base_ready
   io.l1dbp.read.bits.set := getL1DBPSampleIndex(s0_idx)
+  assert(io.l1dbp.read.fire === (s0_fire && s0_l1dbp_sample_set))
+  val s0_l1dbp_pft_idx = Mux(isFromStride(s0_req.pf_source), 1.U, 0.U)
+  io.l1dbp.pftQuery.valid := s0_fire && !s0_req.miss && !s0_req.probe && !s0_req.replace &&
+    s0_req.isPrefetch &&
+    (isFromStream(s0_req.pf_source) || isFromStride(s0_req.pf_source))
+  io.l1dbp.pftQuery.bits.idx := s0_l1dbp_pft_idx
 
   val bank_write = VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, s0_req.store_mask).orR)).asUInt
   val bank_full_write = VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, s0_req.store_mask).andR)).asUInt
@@ -364,6 +394,22 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // s1: read data
   val s1_valid = RegInit(false.B)
   val s1_req = RegEnable(s0_req, s0_fire)
+
+  // SampledPCArray is a one-cycle SRAM: use the fresh response in s1 and hold it if s1 stalls.
+  val s1_l1dbp_sample_resp_fresh = GatedValidRegNext(io.l1dbp.read.fire)
+  val s1_l1dbp_sample_resp_hold = RegEnable(io.l1dbp.sampleResp, s1_l1dbp_sample_resp_fresh)
+  val s1_l1dbp_sample_resp = Mux(
+    s1_l1dbp_sample_resp_fresh,
+    io.l1dbp.sampleResp,
+    s1_l1dbp_sample_resp_hold
+  )
+  val s1_l1dbp_pred_resp = RegEnable(io.l1dbp.predResp, io.l1dbp.read.fire)
+  val s1_l1dbp_extra_meta_resp = Wire(Vec(nWays, new DCacheExtraMeta))
+  s1_l1dbp_extra_meta_resp := Mux(
+    GatedValidRegNext(s0_fire),
+    io.extra_meta_resp,
+    RegEnable(s1_l1dbp_extra_meta_resp, s1_valid)
+  )
 
   val meta_resp = Wire(Vec(nWays, (new Meta).asUInt))
   val s1_repl_way_en = WireInit(0.U(nWays.W))
@@ -467,6 +513,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
                       Mux(s1_need_replacement, s1_repl_way_en, s1_tag_ecc_match_way))
   val s1_way = Mux(io.pseudo_error.valid && s1_has_real_tag_eq_way, s1_real_tag_match_way,
                    Mux(s1_need_replacement, s1_repl_way, OHToUInt(s1_tag_ecc_match_way)))
+  val s1_l1dbp_sample = ParallelMux(s1_way_en.asBools, s1_l1dbp_sample_resp)
+  val s1_l1dbp_pred = ParallelMux(s1_way_en.asBools, s1_l1dbp_pred_resp)
+  val s1_l1dbp_pf_source = ParallelMux(s1_way_en.asBools,
+    (0 until nWays).map(w => s1_l1dbp_extra_meta_resp(w).prefetch))
+  val s1_l1dbp_accessed = ParallelMux(s1_way_en.asBools,
+    (0 until nWays).map(w => s1_l1dbp_extra_meta_resp(w).access))
   assert(!RegNext(s1_fire && PopCount(s1_way_en) > 1.U))
 
   val s1_tag = s1_hit_tag
@@ -485,6 +537,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // s2: select data, return resp if this is a store miss
   val s2_valid = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
+  val s2_l1dbp_pft_dead = RegEnable(io.l1dbp.pftResp.bits.dead, false.B, s1_fire)
+  val s2_l1dbp_sample = RegEnable(s1_l1dbp_sample, s1_fire)
+  val s2_l1dbp_pred = RegEnable(s1_l1dbp_pred, s1_fire)
+  val s2_l1dbp_pf_source = RegEnable(s1_l1dbp_pf_source, s1_fire)
+  val s2_l1dbp_accessed = RegEnable(s1_l1dbp_accessed, s1_fire)
   val s2_tag_errors = RegEnable(s1_tag_errors, s1_fire)
   val s2_tag_match = RegEnable(s1_tag_match, s1_fire)
   val s2_has_real_tag_eq_way = RegEnable(s1_has_real_tag_eq_way, s1_fire)
@@ -554,6 +611,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_can_go_to_mq_evict_fail = s2_replace_block // dcache and miss queue both occupy the same set, (BtoT scheme)
   val s2_can_go_to_mq_replay = s2_can_go_to_mq_no_data || s2_can_go_to_mq_evict_fail
   val s2_can_go_to_mq = RegEnable(s1_pregen_can_go_to_mq, s1_fire)
+  // A dead non-sampled pure prefetch has no L1 consumer. Drop it before the
+  // MissQueue so it does not allocate an MSHR merely to discard the response.
+  val s2_drop_dead_prefetch = s2_valid && s2_can_go_to_mq &&
+    s2_req.isPrefetch && s2_req.l1dbpTrainValid && s2_l1dbp_pft_dead &&
+    !isL1DBPSampleSet(s2_idx)
   val s2_can_go_to_s3 = (s2_sc || s2_req.replace || s2_req.probe ||
     Mux(
       s2_req.miss,
@@ -562,7 +624,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     )
   ) && s3_ready
   assert(RegNext(!(s2_valid && s2_can_go_to_s3 && s2_can_go_to_mq && s2_can_go_to_mq_replay)))
-  val s2_can_go = s2_can_go_to_s3 || s2_can_go_to_mq || s2_can_go_to_mq_replay
+  val s2_can_go = s2_can_go_to_s3 || s2_can_go_to_mq || s2_can_go_to_mq_replay ||
+    s2_drop_dead_prefetch
   val s2_fire = s2_valid && s2_can_go
   val s2_fire_to_s3 = s2_valid && s2_can_go_to_s3
   when (s1_fire) {
@@ -612,6 +675,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_way_en = RegEnable(s2_way_en, s2_fire_to_s3)
   val s3_banked_store_wmask = RegEnable(s2_banked_store_wmask, s2_fire_to_s3)
   val s3_idx = RegEnable(s2_idx, s2_fire_to_s3)
+  val s3_l1dbp_sample = RegEnable(s2_l1dbp_sample, s2_fire_to_s3)
+  val s3_l1dbp_pred = RegEnable(s2_l1dbp_pred, s2_fire_to_s3)
+  val s3_l1dbp_pf_source = RegEnable(s2_l1dbp_pf_source, s2_fire_to_s3)
+  val s3_l1dbp_accessed = RegEnable(s2_l1dbp_accessed, s2_fire_to_s3)
   val s3_store_data_merged_without_cache = RegEnable(s2_store_data_merged_without_cache, s2_fire_to_s3)
   val s3_merge_mask = RegEnable(VecInit(s2_merge_mask.map(~_)), s2_fire_to_s3)
   val s3_isPrefetch = !s3_req.replace && !s3_req.probe && !s3_req.miss && s3_req.isPrefetch
@@ -855,16 +922,69 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_update_data_cango = s3_store_can_go || s3_amo_can_go || s3_miss_can_go // used to speed up data_write gen
   val s3_fire = s3_valid && s3_can_go
 
-  // Until the predictor supplies a new sample entry, a replacement installs
-  // an invalid entry. This follows the same sampled-set/way write protocol
-  // as the eventual predictor path and prevents stale metadata surviving a
-  // line replacement.
-  io.l1dbp.write.valid := s3_fire && s3_req.miss && s3_need_replacement &&
-    isL1DBPSampleSet(s3_idx)
+  val s3_l1dbp_sample_set = isL1DBPSampleSet(s3_idx)
+  val s3_l1dbp_install = s3_req.miss && s3_need_replacement
+  val s3_l1dbp_probe_invalidate = s3_req.probe && s3_tag_match &&
+    s3_coh.isValid() && probe_new_coh.state === ClientStates.Nothing
+  val s3_l1dbp_lifetime_end = s3_l1dbp_install && s3_coh.isValid() ||
+    s3_l1dbp_probe_invalidate
+
+  io.l1dbp.write.valid := s3_fire && s3_l1dbp_sample_set &&
+    (s3_l1dbp_install || s3_l1dbp_probe_invalidate)
   io.l1dbp.write.bits.set := getL1DBPSampleIndex(s3_idx)
   io.l1dbp.write.bits.wayEn := s3_way_en
-  io.l1dbp.write.bits.entry.valid := false.B
-  io.l1dbp.write.bits.entry.payload := 0.U
+  io.l1dbp.write.bits.entry.valid := s3_l1dbp_install && s3_req.l1dbpTrainValid
+  io.l1dbp.write.bits.entry.payload := s3_req.l1dbpPayload
+  io.l1dbp.predWrite.valid := io.l1dbp.write.valid
+  io.l1dbp.predWrite.bits.set := io.l1dbp.write.bits.set
+  io.l1dbp.predWrite.bits.wayEn := io.l1dbp.write.bits.wayEn
+  io.l1dbp.predWrite.bits.entry.valid := io.l1dbp.write.bits.entry.valid
+  io.l1dbp.predWrite.bits.entry.dead := s3_req.l1dbpPredDead
+
+  val s3_l1dbp_demand = s3_l1dbp_pf_source === L1_HW_PREFETCH_NULL
+  val s3_l1dbp_clear = isPrefetchClear(s3_l1dbp_pf_source)
+  val s3_l1dbp_stream = isFromStream(s3_l1dbp_pf_source) ||
+    s3_l1dbp_clear && !s3_l1dbp_sample.payload(0)
+  val s3_l1dbp_stride = isFromStride(s3_l1dbp_pf_source) ||
+    s3_l1dbp_clear && s3_l1dbp_sample.payload(0)
+  val s3_l1dbp_supported = s3_l1dbp_demand || s3_l1dbp_stream || s3_l1dbp_stride
+
+  io.l1dbp.update.valid := s3_fire && s3_l1dbp_sample_set && s3_l1dbp_lifetime_end &&
+    s3_l1dbp_sample.valid && s3_l1dbp_supported
+  // Demand entries carry a PC predictor index.  Prefetch entries, including
+  // prefetch-clear events, carry only the stream/stride class in bit 0; using
+  // the full sampled payload here would feed a PC index to the two-entry
+  // prefetch predictor and trigger its range assertion.
+  io.l1dbp.update.bits.idx := Mux(
+    s3_l1dbp_demand,
+    s3_l1dbp_sample.payload,
+    s3_l1dbp_sample.payload(0)
+  )
+  io.l1dbp.update.bits.origin := Mux(
+    s3_l1dbp_demand,
+    L1DBPOrigin.demand,
+    Mux(s3_l1dbp_stride, L1DBPOrigin.stride, L1DBPOrigin.stream)
+  )
+  io.l1dbp.update.bits.accessed := s3_l1dbp_accessed
+
+  val s3_l1dbp_accuracy_valid = s3_fire && s3_l1dbp_sample_set && s3_l1dbp_lifetime_end &&
+    s3_l1dbp_sample.valid && s3_l1dbp_supported && s3_l1dbp_pred.valid
+  val s3_l1dbp_actual_dead = !s3_l1dbp_accessed
+  XSPerfAccumulate("l1dbp_accuracy_samples", s3_l1dbp_accuracy_valid)
+  XSPerfAccumulate("l1dbp_accuracy_correct",
+    s3_l1dbp_accuracy_valid && (s3_l1dbp_pred.dead === s3_l1dbp_actual_dead))
+  XSPerfAccumulate("l1dbp_accuracy_pred_dead_actual_dead",
+    s3_l1dbp_accuracy_valid && s3_l1dbp_pred.dead && s3_l1dbp_actual_dead)
+  XSPerfAccumulate("l1dbp_accuracy_pred_dead_actual_live",
+    s3_l1dbp_accuracy_valid && s3_l1dbp_pred.dead && !s3_l1dbp_actual_dead)
+  XSPerfAccumulate("l1dbp_accuracy_pred_live_actual_dead",
+    s3_l1dbp_accuracy_valid && !s3_l1dbp_pred.dead && s3_l1dbp_actual_dead)
+  XSPerfAccumulate("l1dbp_accuracy_pred_live_actual_live",
+    s3_l1dbp_accuracy_valid && !s3_l1dbp_pred.dead && !s3_l1dbp_actual_dead)
+
+  when (s3_fire && s3_l1dbp_sample_set && s3_l1dbp_lifetime_end && s3_l1dbp_sample.valid) {
+    assert(s3_l1dbp_supported, "valid L1DBP sample must have a supported pf_source")
+  }
 
   when (s2_fire_to_s3) {
     s3_valid := true.B
@@ -933,7 +1053,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.data_readline.bits.way := s1_way
   io.data_readline.bits.addr := s1_req.vaddr
 
-  io.miss_req.valid := s2_valid && s2_can_go_to_mq
+  io.miss_req.valid := s2_valid && s2_can_go_to_mq && !s2_drop_dead_prefetch
   val miss_req = io.miss_req.bits
   miss_req := DontCare
   miss_req.source := s2_req.source
@@ -951,11 +1071,16 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.id := s2_req.id
   miss_req.cancel := s2_grow_perm_fail
   miss_req.pc := 0.U // MainPipe requests (Store Buffer writeback) don't have a single corresponding PC
+  miss_req.l1dbpPayload := s2_req.l1dbpPayload
+  miss_req.l1dbpTrainValid := s2_req.isPrefetch && s2_req.l1dbpTrainValid
+  miss_req.l1dbpPredDead := s2_l1dbp_pft_dead
+  miss_req.l1dbpBypassCandidate := l1dbpEnabled.B && s2_req.isPrefetch && s2_req.l1dbpTrainValid &&
+    s2_l1dbp_pft_dead && !isL1DBPSampleSet(s2_idx)
   miss_req.full_overwrite := s2_req.isStore && s2_req.store_mask.andR
   miss_req.isBtoT := s2_grow_perm
   miss_req.occupy_way := s2_tag_ecc_match_way
 
-  io.wbq_conflict_check.valid := s2_valid && s2_can_go_to_mq
+  io.wbq_conflict_check.valid := s2_valid && s2_can_go_to_mq && !s2_drop_dead_prefetch
   io.wbq_conflict_check.bits := s2_req.addr
 
   /**
@@ -1059,6 +1184,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   XSPerfAccumulate("prefetch_write_valid_pf", io.prefetch_flag_write.valid && isFromL1Prefetch(s3_req.pf_source))
   XSPerfAccumulate("mainpipe_update_prefetchArray", io.prefetch_flag_write.valid)
   XSPerfAccumulate("mainpipe_s2_miss_req", s2_valid && s2_req.miss)
+  XSPerfAccumulate("l1dbp_dead_prefetch_dropped", s2_drop_dead_prefetch)
   XSPerfAccumulate("mainpipe_s2_block_penalty", s2_valid && s2_req.miss && !io.refill_info.valid)
   XSPerfAccumulate("mainpipe_s2_missqueue_replay", s2_valid && s2_can_go_to_mq_replay)
   XSPerfAccumulate("mainpipe_slot_conflict_1_2", (s1_idx === s2_idx && s1_way_en === s2_way_en && s1_req.miss && s2_req.miss && s1_valid && s2_valid ))
@@ -1081,6 +1207,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.tag_write_intend := s3_req.miss && s3_valid
   XSPerfAccumulate("fake_tag_write_intend", io.tag_write_intend && !io.tag_write.valid)
   XSPerfAccumulate("mainpipe_tag_write", io.tag_write.valid)
+  XSPerfAccumulate("l1dbp_refill_sample_set",
+    io.tag_write.valid && isL1DBPSampleSet(s3_idx))
+  XSPerfAccumulate("l1dbp_refill_nonsample_set",
+    io.tag_write.valid && !isL1DBPSampleSet(s3_idx))
 
   io.replace.req.valid := s2_valid && s2_need_eviction && !s2_refill_tag_eq_way
   io.replace.req.bits.addr := get_block_addr(Cat(s2_tag, get_untag(s2_req.vaddr)))

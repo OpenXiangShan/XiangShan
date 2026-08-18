@@ -100,7 +100,7 @@ trait HasL1CacheParameters extends HasXSParameter
                  hashBitPairs(addr, PAddrBits - 1, pgIdxBits),               // hash vaddr[47:12]
                  addr(untagBits - 1 - (untagBits-pgUntagBits), blockOffBits) // vaddr[11:6]
                 )(idxBits - 1, 0)
-      case 2 => addr(untagBits - 1, blockOffBits) // vaddr[13:6]
+      case 2 => addr(blockOffBits + idxBits - 1, blockOffBits)
       case _ => throw new IllegalArgumentException(s"Invalid L1DCache index modeId: $modeId")
     }
   }

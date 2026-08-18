@@ -222,6 +222,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.fetch_to_mem.itlb <> frontend.io.ptw
   memBlock.io.l2_hint.valid := io.l2_hint.valid
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
+  memBlock.io.l2_hint.bits.l1dbpFinalBypass := io.l2_hint.bits.l1dbpFinalBypass
   memBlock.io.l2_tlb_req <> io.l2_tlb_req
   memBlock.io.l2_pmp_resp <> io.l2_pmp_resp
   memBlock.io.l2_hint.bits.isKeyword := io.l2_hint.bits.isKeyword

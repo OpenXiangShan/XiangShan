@@ -182,6 +182,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
       core.module.io.l2_hint.bits.sourceId := l2top.module.io.l2_hint.bits.sourceId
       core.module.io.l2_hint.bits.isKeyword := l2top.module.io.l2_hint.bits.isKeyword
+      core.module.io.l2_hint.bits.l1dbpFinalBypass := l2top.module.io.l2_hint.bits.l1dbpFinalBypass
       core.module.io.l2_hint.valid := l2top.module.io.l2_hint.valid
 
       core.module.io.l2PfqBusy := false.B
@@ -198,6 +199,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
       core.module.io.l2_hint.bits.sourceId := l2top.module.io.l2_hint.bits.sourceId
       core.module.io.l2_hint.bits.isKeyword := l2top.module.io.l2_hint.bits.isKeyword
+      core.module.io.l2_hint.bits.l1dbpFinalBypass := l2top.module.io.l2_hint.bits.l1dbpFinalBypass
       core.module.io.l2_hint.valid := l2top.module.io.l2_hint.valid
 
       core.module.io.l2PfqBusy := false.B

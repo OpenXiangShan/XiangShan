@@ -16,14 +16,13 @@ import xiangshan.mem.HasL1PrefetchSourceParameter
 case class L1DBPParams(
   sampleBits: Int = 2,
   pcPredictorEntries: Int = 8192,
-  bypassHoldCycles: Int = 4,
+  debugMode: Boolean = false,
+  enablePrefetchPrediction: Boolean = true,
   pcHash: (UInt, Int) => UInt = (pc, width) => XORFold(pc >> 1, width)
 ) {
   require(sampleBits >= 1, "L1DBP sampleBits must be positive")
   require(pcPredictorEntries >= 2 && isPow2(pcPredictorEntries),
     "L1DBP PC predictor entries must be a power of two and at least two")
-  require(bypassHoldCycles >= 1 && bypassHoldCycles <= 16,
-    "L1DBP bypass hold cycles must be in [1, 16]")
 }
 
 object L1DBPOrigin {
@@ -72,6 +71,23 @@ class L1DBP(implicit p: Parameters) extends DCacheModule {
 
   val pcSCArray = RegInit(VecInit(Seq.fill(l1dbpPcPredictorEntries)(0.U(2.W))))
   val pfSCArray = RegInit(VecInit(Seq.fill(2)(0.U(2.W))))
+  val forceDead = l1dbpParams.debugMode.B
+  val enablePrefetchPrediction = l1dbpParams.enablePrefetchPrediction.B
+
+  io.pftQuery.foreach { query =>
+    when (query.valid) {
+      assert(query.bits.idx <= 1.U, "L1DBP prefetch query index must be Stream(0) or Stride(1)")
+    }
+  }
+  when (io.update.valid) {
+    assert(io.update.bits.origin === L1DBPOrigin.demand ||
+      io.update.bits.origin === L1DBPOrigin.stream ||
+      io.update.bits.origin === L1DBPOrigin.stride,
+      "L1DBP update origin must be Demand, Stream, or Stride")
+  }
+  when (io.update.valid && io.update.bits.origin =/= L1DBPOrigin.demand) {
+    assert(io.update.bits.idx <= 1.U, "L1DBP prefetch update index must be Stream(0) or Stride(1)")
+  }
 
   io.demandQuery.zip(io.demandResp).foreach { case (query, resp) =>
     val s1Query = WireInit(0.U.asTypeOf(Valid(new L1DBPRead)))
@@ -85,7 +101,7 @@ class L1DBP(implicit p: Parameters) extends DCacheModule {
     val bypassByS1 = Mux(s1BypassEn, scUpdate(s1PCArrayRead, s1Upd.bits.accessed), s1PCArrayRead)
     val bypassByS0 = Mux(s0BypassEn, scUpdate(bypassByS1, io.update.bits.accessed), bypassByS1)
     resp.valid := s1Query.valid
-    resp.bits.dead := bypassByS0 === 0.U
+    resp.bits.dead := forceDead || bypassByS0 === 0.U
   }
 
   io.pftQuery.zip(io.pftResp).foreach { case (query, resp) =>
@@ -96,11 +112,15 @@ class L1DBP(implicit p: Parameters) extends DCacheModule {
       io.update.bits.origin =/= L1DBPOrigin.demand
     val s1BypassEn = s1Upd.valid && s1Upd.bits.pfIdx === s1Query.bits.pfIdx &&
       s1Upd.bits.origin =/= L1DBPOrigin.demand
-    val s1PfArrayRead = pfSCArray(s1Query.bits.pfIdx)
+    val s1PfArrayRead = if (l1dbpParams.enablePrefetchPrediction) {
+      pfSCArray(s1Query.bits.pfIdx)
+    } else {
+      1.U(2.W)
+    }
     val bypassByS1 = Mux(s1BypassEn, scUpdate(s1PfArrayRead, s1Upd.bits.accessed), s1PfArrayRead)
     val bypassByS0 = Mux(s0BypassEn, scUpdate(bypassByS1, io.update.bits.accessed), bypassByS1)
     resp.valid := s1Query.valid
-    resp.bits.dead := bypassByS0 === 0.U
+    resp.bits.dead := enablePrefetchPrediction && (forceDead || bypassByS0 === 0.U)
   }
 
   val pcWen = s1Upd.valid && s1Upd.bits.origin === L1DBPOrigin.demand
@@ -111,7 +131,11 @@ class L1DBP(implicit p: Parameters) extends DCacheModule {
     }
   }
 
-  val pfWen = s1Upd.valid && s1Upd.bits.origin =/= L1DBPOrigin.demand
+  val pfWen = if (l1dbpParams.enablePrefetchPrediction) {
+    s1Upd.valid && s1Upd.bits.origin =/= L1DBPOrigin.demand
+  } else {
+    false.B
+  }
   val pfWOH = UIntToOH(s1Upd.bits.pfIdx, 2)
   (0 until 2).foreach { i =>
     when(pfWen && pfWOH(i)) {

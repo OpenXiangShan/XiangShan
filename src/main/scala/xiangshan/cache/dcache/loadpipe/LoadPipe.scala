@@ -96,6 +96,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     val counter_filter_query = new CounterFilterQueryBundle
     val counter_filter_enq = new ValidIO(new CounterFilterDataBundle())
+
+    val l1dbp = new Bundle {
+      val query = ValidIO(new L1DBPRead)
+      val resp = Input(ValidIO(new L1DBPResp))
+    }
   })
 
   assert(RegNext(io.meta_read.ready))
@@ -130,6 +135,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s0_bank_mask_128b = bankMaskFromBase(s0_base_bank, DCacheVWordBankCount)
   val s0_bank_mask_normal = byteMaskToBankMask(s0_vaddr, s0_req.mask)
   val s0_bank_oh = Mux(s0_load128Req, s0_bank_mask_128b, s0_bank_mask_normal)
+  val s0_l1dbp_idx = l1dbpParams.pcHash(io.lsu.s0_pc, l1dbpPcIndexWidth)
+  io.l1dbp.query.valid := s0_fire && s0_req.instrtype === LOAD_SOURCE.U
+  io.l1dbp.query.bits.idx := s0_l1dbp_idx
   assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
 
@@ -399,6 +407,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s2_hit_prefetch = RegEnable(s1_hit_prefetch, s1_fire)
   val s2_hit_access = RegEnable(s1_hit_access, s1_fire)
+  val s2_l1dbp_dead = RegEnable(io.l1dbp.resp.bits.dead, false.B, s1_fire)
   val s2_hit_refill_latency = RegEnable(s1_hit_refill_latency, s1_fire)
 
   val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh && !s2_wpu_pred_fail
@@ -430,6 +439,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.req_coh := s2_hit_coh
   io.miss_req.bits.cancel := io.lsu.s2_kill || s2_tag_error || s2_btot_occupy_fail
   io.miss_req.bits.pc := io.lsu.s2_pc
+  io.miss_req.bits.l1dbpPayload := l1dbpParams.pcHash(io.lsu.s2_pc, l1dbpPcIndexWidth)
+  io.miss_req.bits.l1dbpTrainValid := s2_instrtype === LOAD_SOURCE.U
+  io.miss_req.bits.l1dbpPredDead := s2_l1dbp_dead
+  io.miss_req.bits.l1dbpBypassCandidate := l1dbpEnabled.B &&
+    s2_instrtype === LOAD_SOURCE.U && s2_l1dbp_dead &&
+    !isL1DBPSampleSet(get_dcache_idx(s2_vaddr))
   io.miss_req.bits.lqIdx := io.lsu.req.bits.lqIdx
   io.miss_req.bits.isBtoT := s2_grow_perm_btot
   io.miss_req.bits.occupy_way := s2_tag_match_way
@@ -650,6 +665,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   XSPerfAccumulate("load_replay_for_dcache_wpu_pred_fail", io.lsu.resp.fire && resp.bits.replay && s2_wpu_pred_fail)
   XSPerfAccumulate("load_hit", io.lsu.resp.fire && !real_miss)
   XSPerfAccumulate("load_miss", io.lsu.resp.fire && real_miss)
+  XSPerfAccumulate("l1dbp_demand_query", io.l1dbp.query.valid)
+  XSPerfAccumulate("l1dbp_demand_miss_sample_set",
+    io.miss_req.fire && io.miss_req.bits.isFromLoad && isL1DBPSampleSet(get_dcache_idx(s2_vaddr)))
+  XSPerfAccumulate("l1dbp_demand_miss_nonsample_set",
+    io.miss_req.fire && io.miss_req.bits.isFromLoad && !isL1DBPSampleSet(get_dcache_idx(s2_vaddr)))
+  XSPerfAccumulate("l1dbp_demand_bypass_candidate",
+    io.miss_req.fire && io.miss_req.bits.l1dbpBypassCandidate)
   XSPerfAccumulate("load_succeed", io.lsu.resp.fire && !resp.bits.miss && !resp.bits.replay)
   XSPerfAccumulate("load_miss_or_conflict", io.lsu.resp.fire && resp.bits.miss)
   XSPerfAccumulate("actual_ld_fast_wakeup", s1_fire && s1_tag_match_dup_dc && !io.disable_ld_fast_wakeup)

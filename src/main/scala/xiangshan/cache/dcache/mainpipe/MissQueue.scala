@@ -39,6 +39,7 @@ import xiangshan.mem.trace._
 import xiangshan.mem.Bundles.SbufferForwardReq
 import freechips.rocketchip.util.UIntToAugmentedUInt
 import freechips.rocketchip.util.SeqToAugmentedSeq
+import xscache.common.{L1DBPBypassCandidateKey, L1DBPFinalBypassKey}
 
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
@@ -47,6 +48,10 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val addr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
   val pc = UInt(VAddrBits.W)
+  val l1dbpPayload = UInt(l1dbpPcIndexWidth.W)
+  val l1dbpTrainValid = Bool()
+  val l1dbpPredDead = Bool()
+  val l1dbpBypassCandidate = Bool()
 
   val lqIdx = new LqPtr
   // store
@@ -300,6 +305,8 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
       growPermissions = grow_param
     )._2
     acquire := Mux(req.full_overwrite, acquirePerm, acquireBlock)
+    acquire.user.lift(L1DBPBypassCandidateKey).foreach(_ :=
+      req.l1dbpBypassCandidate && !req.full_overwrite && grow_param === TLPermissions.NtoB)
     // resolve cache alias by L2
     acquire.user.lift(AliasKey).foreach(_ :=  get_alias(req.vaddr))
     // pass vaddr to l2
@@ -550,12 +557,15 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val w_mainpipe_resp = RegInit(true.B)
   val w_refill_resp = RegInit(true.B)
   val w_l2hint = RegInit(true.B)
+  val l1dbpFinalBypass = RegInit(false.B)
+  val l1dbpFinalBypassValid = RegInit(false.B)
 
   val no_pending = RegInit(true.B)
 
   val mainpipe_req_fired = RegInit(true.B)
 
-  val release_entry = s_grantack && w_mainpipe_resp && w_refill_resp
+  val refill_complete = Mux(l1dbpFinalBypass, w_grantlast, w_refill_resp)
+  val release_entry = s_grantack && w_mainpipe_resp && refill_complete
 
   val acquire_not_sent = !s_acquire && !io.mem_acquire.ready
   val data_not_refilled = !w_grantfirst
@@ -661,6 +671,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     w_grantfirst := false.B
     w_grantlast := false.B
     w_l2hint := false.B
+    l1dbpFinalBypass := false.B
+    l1dbpFinalBypassValid := false.B
     mainpipe_req_fired := false.B
 
     no_pending := !io.acquire_fired_by_pipe_reg
@@ -706,6 +718,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   when (io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel) {
+    val oldL1DBPPayload = req.l1dbpPayload
+    val oldL1DBPTrainValid = req.l1dbpTrainValid
+    val oldL1DBPPredDead = req.l1dbpPredDead
     assert(RegNext(secondary_fire) || RegNext(RegNext(primary_fire)), p"after 1 cycle of secondary_fire or 2 cycle of primary_fire, entry will be merged:${io.id}")
     assert(miss_req_pipe_reg_bits.req_coh.state <= req.req_coh.state || (prefetch && !access))
     assert(!(miss_req_pipe_reg_bits.isFromAMO || req.isFromAMO))
@@ -717,6 +732,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     when (miss_req_pipe_reg_bits.isFromStore) {
       req := miss_req_pipe_reg_bits
+      req.l1dbpPayload := oldL1DBPPayload
+      req.l1dbpTrainValid := oldL1DBPTrainValid
+      req.l1dbpPredDead := oldL1DBPPredDead
       req.isBtoT := miss_req_pipe_reg_bits.isBtoT
       req.occupy_way := miss_req_pipe_reg_bits.occupy_way
       evict_BtoT_way := false.B
@@ -727,10 +745,20 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       assert(is_alias_match(req.vaddr, miss_req_pipe_reg_bits.vaddr), "alias bits should be the same when merging store")
     }
 
+    when (req.isFromStore && miss_req_pipe_reg_bits.isFromLoad &&
+      !oldL1DBPTrainValid && miss_req_pipe_reg_bits.l1dbpTrainValid) {
+      req.l1dbpPayload := miss_req_pipe_reg_bits.l1dbpPayload
+      req.l1dbpTrainValid := true.B
+      req.l1dbpPredDead := miss_req_pipe_reg_bits.l1dbpPredDead
+    }
+
     should_refill_data := should_refill_data_reg || miss_req_pipe_reg_bits.isFromLoad
     should_refill_data_reg := should_refill_data
     when (!input_req_is_prefetch) {
       access := true.B // when merge non-prefetch req, set access bit
+    }
+    when (!s_acquire) {
+      req.l1dbpBypassCandidate := false.B
     }
     secondary_fired := true.B
   }
@@ -768,6 +796,21 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.wfi.wfiSafe := GatedValidRegNext(no_pending && io.wfi.wfiReq)
 
   when (io.mem_grant.fire) {
+    val dFinalBypass = io.mem_grant.bits.user.lift(L1DBPFinalBypassKey).getOrElse(false.B)
+    when (dFinalBypass) {
+      assert(io.mem_grant.bits.opcode === TLMessages.GrantData &&
+        io.mem_grant.bits.param === TLPermissions.toB &&
+        !io.mem_grant.bits.denied && !io.mem_grant.bits.corrupt,
+        "L1DBP may only bypass a successful GrantData toB")
+    }
+    when (io.mem_grant.bits.opcode === TLMessages.GrantData) {
+      when (l1dbpFinalBypassValid) {
+        assert(l1dbpFinalBypass === dFinalBypass,
+          "L1DBP final bypass must be identical in Hint and every GrantData beat")
+      }
+      l1dbpFinalBypass := dFinalBypass
+      l1dbpFinalBypassValid := true.B
+    }
     w_grantfirst := true.B
     grant_param := io.mem_grant.bits.param
     when (edge.hasData(io.mem_grant.bits)) {
@@ -825,7 +868,18 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   when (io.l2_hint.valid) {
+    when (l1dbpFinalBypassValid) {
+      assert(l1dbpFinalBypass === io.l2_hint.bits.l1dbpFinalBypass,
+        "L1DBP final bypass must be identical in Hint and GrantData")
+    }
+    when (io.mem_grant.fire) {
+      assert(io.mem_grant.bits.user.lift(L1DBPFinalBypassKey).getOrElse(false.B) ===
+        io.l2_hint.bits.l1dbpFinalBypass,
+        "same-cycle L1DBP Hint and Grant must agree")
+    }
     w_l2hint := true.B
+    l1dbpFinalBypass := io.l2_hint.bits.l1dbpFinalBypass
+    l1dbpFinalBypassValid := true.B
   }
 
   def before_req_sent_can_merge(new_req: MissReqWoStoreData): Bool = {
@@ -952,6 +1006,10 @@ for(i <- 0 until reqNum) {
     growPermissions = grow_param
   )._2
   io.mem_acquire.bits := Mux(full_overwrite, acquirePerm, acquireBlock)
+  io.mem_acquire.bits.user.lift(L1DBPBypassCandidateKey).foreach(_ :=
+    req.l1dbpBypassCandidate && !secondary_fire &&
+      !(io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel) &&
+      !full_overwrite && grow_param === TLPermissions.NtoB)
   // resolve cache alias by L2
   io.mem_acquire.bits.user.lift(AliasKey).foreach( _ := get_alias(req.vaddr))
   // pass vaddr to l2
@@ -987,11 +1045,11 @@ for(i <- 0 until reqNum) {
 
   val grantack = RegEnable(edge.GrantAck(io.mem_grant.bits), io.mem_grant.fire)
   assert(RegNext(!io.mem_grant.fire || edge.isRequest(io.mem_grant.bits)))
-  io.mem_finish.valid := !s_grantack && w_grantfirst
+  io.mem_finish.valid := !s_grantack && Mux(l1dbpFinalBypass, w_grantlast, w_grantfirst)
   io.mem_finish.bits := grantack
 
   // Send mainpipe_req when receive hint from L2 or receive data without hint
-  io.main_pipe_req.valid := !s_mainpipe_req && (w_l2hint || w_grantlast)
+  io.main_pipe_req.valid := !s_mainpipe_req && (w_l2hint || w_grantlast) && !l1dbpFinalBypass
   io.main_pipe_req.bits := DontCare
   io.main_pipe_req.bits.miss := true.B
   io.main_pipe_req.bits.miss_id := io.id
@@ -1007,8 +1065,14 @@ for(i <- 0 until reqNum) {
   io.main_pipe_req.bits.id := req.id
   io.main_pipe_req.bits.pf_source := req.pf_source
   io.main_pipe_req.bits.access := access
+  io.main_pipe_req.bits.l1dbpPayload := req.l1dbpPayload
+  io.main_pipe_req.bits.l1dbpTrainValid := req.l1dbpTrainValid
+  io.main_pipe_req.bits.l1dbpPredDead := req.l1dbpPredDead
+  io.main_pipe_req.bits.l1dbpBypassCandidate := req.l1dbpBypassCandidate
   io.main_pipe_req.bits.occupy_way := req.occupy_way
   io.main_pipe_req.bits.miss_fail_cause_evict_btot := evict_BtoT_way
+  assert(!(l1dbpFinalBypass && io.main_pipe_req.valid),
+    "an L1DBP bypass MSHR must not refill MainPipe")
 
   io.probe.block := req_valid && w_grantlast &&
     get_block_addr(req.addr) === get_block_addr(io.probe.req.bits.addr) &&
@@ -1028,7 +1092,7 @@ for(i <- 0 until reqNum) {
 
   io.occupy_way := req.occupy_way
 
-  io.refill_info.valid := req_valid && w_grantlast
+  io.refill_info.valid := req_valid && w_grantlast && !l1dbpFinalBypass
   io.refill_info.bits.store_data := refill_and_store_data.asUInt
   io.refill_info.bits.store_mask := ~0.U(blockBytes.W)
   io.refill_info.bits.miss_param := grant_param
@@ -1041,7 +1105,8 @@ for(i <- 0 until reqNum) {
     0.U
   )
 
-  io.refill_train.valid := req_valid && w_grantlast
+  // TODO: add a dedicated Berti training policy for data bypassed around L1D.
+  io.refill_train.valid := req_valid && w_grantlast && !l1dbpFinalBypass
   io.refill_train.bits.pc := req.pc
   io.refill_train.bits.paddr := req.addr
   io.refill_train.bits.vaddr := req.vaddr
@@ -1054,6 +1119,17 @@ for(i <- 0 until reqNum) {
   io.refill_train.bits.isHwPrefetch := DontCare
 
   XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
+  XSPerfAccumulate("l1dbp_acquire_bypass_candidate",
+    io.mem_acquire.fire && io.mem_acquire.bits.user.lift(L1DBPBypassCandidateKey).getOrElse(false.B))
+  XSPerfAccumulate("l1dbp_hint_final_bypass",
+    io.l2_hint.valid && io.l2_hint.bits.l1dbpFinalBypass)
+  XSPerfAccumulate("l1dbp_grant_last_final_bypass",
+    io.mem_grant.fire && refill_done &&
+      io.mem_grant.bits.user.lift(L1DBPFinalBypassKey).getOrElse(false.B))
+  XSPerfAccumulate("l1dbp_bypass_grantack",
+    io.mem_finish.fire && l1dbpFinalBypass)
+  XSPerfAccumulate("l1dbp_bypass_illegal_mainpipe_req",
+    io.main_pipe_req.fire && l1dbpFinalBypassValid && l1dbpFinalBypass)
   XSPerfAccumulate("miss_refill_without_hint", io.main_pipe_req.fire && !mainpipe_req_fired && !w_l2hint)
   XSPerfAccumulate("miss_refill_replay", io.main_pipe_replay)
   XSPerfAccumulate("miss_refill_evict_BtoT_way", io.main_pipe_evict_BtoT_way)
@@ -1536,8 +1612,41 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
    */
   // Update parallel pipeline registers
   for (i <- 0 until reqNum) {
+    val otherReqs = (0 until reqNum).filter(_ != i)
+    val sameBlockAccepted = otherReqs.map { j =>
+      query_fire(j) && blockMatch(io.queryMQ(i).req.bits, io.queryMQ(j).req.bits) &&
+        aliasMatch(io.queryMQ(i).req.bits, io.queryMQ(j).req.bits)
+    }
+    val sameCycleMerge = sameBlockAccepted.reduceOption(_ || _).getOrElse(false.B)
+    val sameCycleLoadSamples = otherReqs.zip(sameBlockAccepted).map { case (j, accepted) =>
+      (accepted && io.queryMQ(j).req.bits.isFromLoad && io.queryMQ(j).req.bits.l1dbpTrainValid) ->
+        io.queryMQ(j).req.bits.l1dbpPayload
+    }
+    val sameCycleLoadPredictions = otherReqs.zip(sameBlockAccepted).map { case (j, accepted) =>
+      (accepted && io.queryMQ(j).req.bits.isFromLoad && io.queryMQ(j).req.bits.l1dbpTrainValid) ->
+        io.queryMQ(j).req.bits.l1dbpPredDead
+    }
+    val sameCycleLoadSample = if (sameCycleLoadSamples.nonEmpty) {
+      ParallelPriorityMux(sameCycleLoadSamples)
+    } else {
+      0.U(l1dbpPcIndexWidth.W)
+    }
+    val sameCycleLoadSampleValid = sameCycleLoadSamples.map(_._1).reduceOption(_ || _).getOrElse(false.B)
+    val sameCycleLoadPredDead = if (sameCycleLoadPredictions.nonEmpty) {
+      ParallelPriorityMux(sameCycleLoadPredictions)
+    } else {
+      false.B
+    }
     when (io.queryMQ(i).req.valid) {
       parallel_pipe_regs(i).req := io.queryMQ(i).req.bits
+      parallel_pipe_regs(i).req.l1dbpBypassCandidate :=
+        io.queryMQ(i).req.bits.l1dbpBypassCandidate && !sameCycleMerge
+      when (io.queryMQ(i).req.bits.isFromStore && !io.queryMQ(i).req.bits.l1dbpTrainValid &&
+        sameCycleLoadSampleValid) {
+        parallel_pipe_regs(i).req.l1dbpPayload := sameCycleLoadSample
+        parallel_pipe_regs(i).req.l1dbpTrainValid := true.B
+        parallel_pipe_regs(i).req.l1dbpPredDead := sameCycleLoadPredDead
+      }
     }
     parallel_pipe_regs(i).alloc := ((analysis.strategy(i) & 1.U) =/= 0.U) &&
                                     (analysis.compress_group(i) === i.U) &&
@@ -1762,6 +1871,14 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   for(i <- 0 until reqNum) {
     acquire_from_pipereg_vec(i).valid := parallel_pipe_regs(i).alloc && !can_merge_store_from_pipe(i) && !io.wfi.wfiReq
     acquire_from_pipereg_vec(i).bits := parallel_pipe_regs(i).get_acquire(io.l2_pf_store_only)
+    val acceptedMerge = (0 until reqNum).map { j =>
+      query_fire(j) && can_merge_from_pipe(j) &&
+        can_merge_from_pipe_mshr(j) === parallel_pipe_regs(i).mshr_id
+    }.reduce(_ || _)
+    val pipeGrowParam = parallel_pipe_regs(i).req.req_coh.onAccess(parallel_pipe_regs(i).req.cmd)._2
+    acquire_from_pipereg_vec(i).bits.user.lift(L1DBPBypassCandidateKey).foreach(_ :=
+      parallel_pipe_regs(i).req.l1dbpBypassCandidate && !acceptedMerge &&
+        !parallel_pipe_regs(i).req.full_overwrite && pipeGrowParam === TLPermissions.NtoB)
 
     XSPerfAccumulate(s"acquire_fire_from_pipereg_$i", acquire_from_pipereg_vec(i).fire)
     XSPerfAccumulate(s"parallel_pipe_regs_valid_$i", parallel_pipe_regs(i).reg_valid())
@@ -1769,6 +1886,30 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val acquire_sources = Seq(cmo_unit.io.req_chanA) ++ acquire_from_pipereg_vec ++ entries.map(_.io.mem_acquire)
   TLArbiter.lowest(edge, io.mem_acquire, acquire_sources:_*)
+  when (io.mem_acquire.fire &&
+    io.mem_acquire.bits.user.lift(L1DBPBypassCandidateKey).getOrElse(false.B)) {
+    assert(io.mem_acquire.bits.opcode === TLMessages.AcquireBlock &&
+      io.mem_acquire.bits.param === TLPermissions.NtoB,
+      "L1DBP candidate may only be sent on AcquireBlock NtoB")
+  }
+  XSPerfAccumulate("l1dbp_acquire_candidate_after_arb",
+    io.mem_acquire.fire &&
+      io.mem_acquire.bits.user.lift(L1DBPBypassCandidateKey).getOrElse(false.B))
+  XSPerfAccumulate("l1d_acquireblock_ntob",
+    io.mem_acquire.fire && io.mem_acquire.bits.opcode === TLMessages.AcquireBlock &&
+      io.mem_acquire.bits.param === TLPermissions.NtoB)
+  XSPerfAccumulate("l1d_acquireblock_ntot",
+    io.mem_acquire.fire && io.mem_acquire.bits.opcode === TLMessages.AcquireBlock &&
+      io.mem_acquire.bits.param === TLPermissions.NtoT)
+  XSPerfAccumulate("l1d_acquireblock_btot",
+    io.mem_acquire.fire && io.mem_acquire.bits.opcode === TLMessages.AcquireBlock &&
+      io.mem_acquire.bits.param === TLPermissions.BtoT)
+  XSPerfAccumulate("l1d_acquireperm_ntot",
+    io.mem_acquire.fire && io.mem_acquire.bits.opcode === TLMessages.AcquirePerm &&
+      io.mem_acquire.bits.param === TLPermissions.NtoT)
+  XSPerfAccumulate("l1d_acquireperm_btot",
+    io.mem_acquire.fire && io.mem_acquire.bits.opcode === TLMessages.AcquirePerm &&
+      io.mem_acquire.bits.param === TLPermissions.BtoT)
   TLArbiter.lowest(edge, io.mem_finish, entries.map(_.io.mem_finish):_*)
 
   // amo's main pipe req out
