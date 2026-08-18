@@ -52,8 +52,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val isXSTrap = Bool()
   }
 
-  def NormalUopNumWidth(implicit p: Parameters): Int = log2Up(p(XSCoreParamsKey).MaxUopSize * 2 + 1)
-  def CompressedSlotUopNumWidth(implicit p: Parameters): Int = log2Ceil(2 * p(XSCoreParamsKey).RenameWidth)
   def PackedUopStateWidth(implicit p: Parameters): Int = {
     math.max(NormalUopNumWidth + 1, 2 * CompressedSlotUopNumWidth)
   }
