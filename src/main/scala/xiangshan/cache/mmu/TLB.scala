@@ -739,9 +739,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       XSPerfAccumulate("first_miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i) && RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid))
       XSPerfAccumulate("miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i))
     }
+    XSPerfAccumulate(s"ptw_req${i}", ptw.req(i).fire)
+    XSPerfAccumulate(s"tlb_replay${i}", io.tlbreplay(i))
   }
   XSPerfAccumulate("ptw_resp_count", ptw.resp.fire)
   XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire && ptw.resp.bits.s1.pf)
+  XSPerfAccumulate("refill_count", refill)
 
   // Log
   for(i <- 0 until Width) {

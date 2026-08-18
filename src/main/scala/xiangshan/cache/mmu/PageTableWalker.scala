@@ -679,17 +679,22 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   XSDebug(p"[ptw] level:${level} notFound:${pageFault}\n")
 
   // perf
-  XSPerfAccumulate("fsm_count", io.req.fire)
-  for (i <- 0 until PtwWidth) {
-    XSPerfAccumulate(s"fsm_count_source${i}", io.req.fire && io.req.bits.req_info.source === i.U)
+  XSPerfAccumulate("ptw_fsm_req_count", io.req.fire)
+  for (i <- 0 until sourceWidth) {
+    XSPerfAccumulate(s"ptw_fsm_req_count_source${i}", io.req.fire && io.req.bits.req_info.source === i.U)
   }
-  XSPerfAccumulate("fsm_busy", !idle)
-  XSPerfAccumulate("fsm_idle", idle)
-  XSPerfAccumulate("resp_blocked", io.resp.valid && !io.resp.ready)
-  XSPerfAccumulate("ptw_ppn_af", io.resp.fire && ppn_af)
-  XSPerfAccumulate("mem_count", mem.req.fire)
-  XSPerfAccumulate("mem_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire, true))
-  XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)
+  XSPerfAccumulate("ptw_fsm_busy_cycle", !idle)
+  XSPerfAccumulate("ptw_fsm_idle_cycle", idle)
+  XSPerfAccumulate("ptw_fsm_resp_blocked_cycle", io.resp.valid && !io.resp.ready)
+  XSPerfAccumulate("ptw_ppn_af_count", io.resp.fire && ppn_af)
+  XSPerfAccumulate("ptw_resp_count", io.resp.fire)
+  XSPerfAccumulate("ptw_hptw_req_count", io.hptw.req.fire)
+  XSPerfAccumulate("ptw_mem_req_count", mem.req.fire)
+  for (i <- 0 until sourceWidth) {
+    XSPerfAccumulate(s"ptw_mem_req_count_source${i}", mem.req.fire && source === i.U)
+  }
+  XSPerfAccumulate("ptw_mem_wait_cycle", BoolStopWatch(mem.req.fire, mem.resp.fire, true))
+  XSPerfAccumulate("ptw_mem_req_blocked_cycle", mem.req.valid && !mem.req.ready)
 
   val perfEvents = Seq(
     ("fsm_count         ", io.req.fire                                     ),
@@ -1299,18 +1304,18 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
 
   XSPerfAccumulate("llptw_in_count", io.in.fire)
-  XSPerfAccumulate("llptw_in_block", io.in.valid && !io.in.ready)
-  for (i <- 0 until 7) {
-    XSPerfAccumulate(s"enq_state${i}", io.in.fire && enq_state === i.U)
+  XSPerfAccumulate("llptw_in_blocked_cycle", io.in.valid && !io.in.ready)
+  XSPerfAccumulate("llptw_mem_req_count", io.mem.req.fire)
+  XSPerfAccumulate("llptw_mem_busy_cycle", PopCount(is_waiting) =/= 0.U)
+  XSPerfAccumulate("llptw_entry_occupancy_cycle", PopCount(is_emptys.map(!_)))
+  XSPerfAccumulate("llptw_mem_wait_entry_cycle", PopCount(is_waiting))
+  for (i <- 0 until sourceWidth) {
+    XSPerfAccumulate(s"llptw_in_count_source${i}", io.in.fire && io.in.bits.req_info.source === i.U)
+    XSPerfAccumulate(s"llptw_mem_req_count_source${i}", io.mem.req.fire && mem_arb.io.out.bits.req_info.source === i.U)
   }
-  for (i <- 0 until (l2tlbParams.llptwsize + 1)) {
-    XSPerfAccumulate(s"util${i}", PopCount(is_emptys.map(!_)) === i.U)
-    XSPerfAccumulate(s"mem_util${i}", PopCount(is_mems) === i.U)
-    XSPerfAccumulate(s"waiting_util${i}", PopCount(is_waiting) === i.U)
-  }
-  XSPerfAccumulate("mem_count", io.mem.req.fire)
-  XSPerfAccumulate("mem_cycle", PopCount(is_waiting) =/= 0.U)
-  XSPerfAccumulate("blocked_in", io.in.valid && !io.in.ready)
+  XSPerfAccumulate("llptw_out_count", io.out.fire)
+  XSPerfAccumulate("llptw_cache_retry_count", io.cache.fire)
+  XSPerfAccumulate("llptw_hptw_req_count", io.hptw.req.fire)
 
   val perfEvents = Seq(
     ("tlbllptw_incount           ", io.in.fire               ),
@@ -1705,4 +1710,12 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
       bitmap_checkfailed := false.B
     }
   }
+
+  XSPerfAccumulate("hptw_req_count", io.req.fire)
+  XSPerfAccumulate("hptw_req_blocked_cycle", io.req.valid && !io.req.ready)
+  XSPerfAccumulate("hptw_busy_cycle", !idle)
+  XSPerfAccumulate("hptw_resp_count", io.resp.fire)
+  XSPerfAccumulate("hptw_mem_req_count", io.mem.req.fire)
+  XSPerfAccumulate("hptw_mem_req_blocked_cycle", io.mem.req.valid && !io.mem.req.ready)
+
 }

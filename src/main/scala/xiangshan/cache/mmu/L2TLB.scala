@@ -1020,15 +1020,20 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   for (i <- 0 until PtwWidth) {
     XSPerfAccumulate(s"req_count${i}", io.tlb(i).req(0).fire)
     XSPerfAccumulate(s"req_blocked_count_${i}", io.tlb(i).req(0).valid && !io.tlb(i).req(0).ready)
+    XSPerfAccumulate(s"resp_count${i}", io.tlb(i).resp.fire)
+    XSPerfAccumulate(s"cache_resp_count${i}", mergeArb(i).in(outArbCachePort).fire)
+    XSPerfAccumulate(s"ptw_resp_count${i}", mergeArb(i).in(outArbFsmPort).fire)
+    XSPerfAccumulate(s"llptw_resp_count${i}", mergeArb(i).in(outArbMqPort).fire)
+    XSPerfAccumulate(s"resp_fault_count${i}", io.tlb(i).resp.fire && (io.tlb(i).resp.bits.s1.pf || io.tlb(i).resp.bits.s1.af || io.tlb(i).resp.bits.s2.gpf || io.tlb(i).resp.bits.s2.gaf))
   }
   XSPerfAccumulate(s"req_blocked_by_mq", arb1.io.out.valid && missQueue.io.out.valid)
-  for (i <- 0 until (MemReqWidth + 1)) {
-    XSPerfAccumulate(s"mem_req_util${i}", PopCount(waiting_resp) === i.U)
-  }
+  XSPerfAccumulate("req_outstanding_cycle", tlbCounter)
+  XSPerfAccumulate("req_full_cycle", tlbCounter === MissQueueSize.U)
   XSPerfAccumulate("mem_cycle", PopCount(waiting_resp) =/= 0.U)
+  XSPerfAccumulate("mem_outstanding_cycle", PopCount(waiting_resp))
   XSPerfAccumulate("mem_count", mem.a.fire)
   for (i <- 0 until PtwWidth) {
-    XSPerfAccumulate(s"llptw_ppn_af${i}", mergeArb(i).in(outArbMqPort).valid && mergeArb(i).in(outArbMqPort).bits.s1.entry(OHToUInt(mergeArb(i).in(outArbMqPort).bits.s1.pteidx)).af && !llptw_out.bits.af)
+    XSPerfAccumulate(s"llptw_ppn_af${i}", mergeArb(i).in(outArbMqPort).fire && mergeArb(i).in(outArbMqPort).bits.s1.entry(OHToUInt(mergeArb(i).in(outArbMqPort).bits.s1.pteidx)).af && !llptw_out.bits.af)
     XSPerfAccumulate(s"access_fault${i}", io.tlb(i).resp.fire && io.tlb(i).resp.bits.s1.af)
   }
 
