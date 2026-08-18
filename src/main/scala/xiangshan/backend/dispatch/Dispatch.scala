@@ -577,20 +577,21 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   uopSelIQSingle := VecInit(needSingleIQ.map(_._2).flatten.map(x => VecInit((1.U(issueQueueNum.W) << x)(issueQueueNum-1, 0).asBools)))
 
   /**
-    * Soft-partition the three scalar LDU IQs without introducing a hard reservation.
-    * Long-load-dependent address uops prefer LDU2; ordinary loads prefer LDU0/1.
-    * If no preferred IQ can accept another uop in this rename group, selection expands
-    * to every scalar LDU IQ. The final fallback still chooses a preferred IQ when all
-    * three are blocked, allowing the existing retry path to re-evaluate next cycle.
+    * Preserve the existing three-way load balancing for ordinary scalar loads and
+    * override only confirmed long-load-dependent address uops. Those uops prefer
+    * LDU2 only while it is no heavier than the IQ chosen by normal balancing.
+    * This avoids reducing normal-load bandwidth from three queues to two merely to
+    * reserve capacity for the comparatively rare long-load-dependent case.
     */
   private def buildLduSteering(
     valids: Seq[Bool],
     fuTypes: Seq[UInt],
     psrcs: Seq[Vec[UInt]],
-    srcTypes: Seq[Vec[UInt]]
+    srcTypes: Seq[Vec[UInt]],
+    fallbackSelections: Seq[Vec[Bool]]
   ): Vec[Vec[Bool]] = {
     val result = Wire(Vec(renameWidth, Vec(issueQueueNum, Bool())))
-    result.foreach(_ := VecInit(Seq.fill(issueQueueNum)(false.B)))
+    result.zip(fallbackSelections).foreach { case (selected, fallback) => selected := fallback }
     if (enableLongLoadLduSteering) {
       for (uopIdx <- 0 until renameWidth) {
         val isScalarLoad = valids(uopIdx) && FuType.isLoad(fuTypes(uopIdx))
@@ -609,32 +610,16 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
         val effectiveCount = scalarLduExuIdx.zip(priorSelections).map { case (exuIdx, prior) =>
           io.IQValidNumVec(exuIdx) +& prior
         }
-        val preferred = Seq(!isLongDependent, !isLongDependent, isLongDependent)
-        val belowHighWatermark = effectiveCount.zip(scalarLduIQIdx).map { case (count, iqIdx) =>
-          count < (allIssueParams(iqIdx).numEntries - allIssueParams(iqIdx).numEnq).U
-        }
-        val preferredBelowHigh = canAccept.zip(preferred).zip(belowHighWatermark).map {
-          case ((available, prefer), belowHigh) => available && prefer && belowHigh
-        }
-        val alternative = canAccept.zip(preferred).map { case (available, prefer) => available && !prefer }
-        val preferredAny = canAccept.zip(preferred).map { case (available, prefer) => available && prefer }
-        val preferredBelowHighAvailable = preferredBelowHigh.reduce(_ || _)
-        val alternativeAvailable = alternative.reduce(_ || _)
-        val preferredAnyAvailable = preferredAny.reduce(_ || _)
-        val eligible = preferred.indices.map { idx =>
-          Mux(preferredBelowHighAvailable, preferredBelowHigh(idx),
-            Mux(alternativeAvailable, alternative(idx), Mux(preferredAnyAvailable, preferredAny(idx), preferred(idx))))
-        }
-        val minimum = eligible.zipWithIndex.map { case (candidate, candidateIdx) =>
-          val strictlyLighterExists = eligible.zip(effectiveCount).zipWithIndex.map {
-            case ((otherEligible, otherCount), otherIdx) =>
-              if (otherIdx != candidateIdx) otherEligible && otherCount < effectiveCount(candidateIdx) else false.B
-          }.reduce(_ || _)
-          candidate && !strictlyLighterExists
-        }
-        val selectedLocal = PriorityEncoderOH(VecInit(minimum).asUInt)
+        val preferredIdx = scalarLduIQIdx.size - 1
+        val preferredAvailable = canAccept(preferredIdx)
+        val originallySelected = scalarLduIQIdx.map(fallbackSelections(uopIdx)(_))
+        val originalCount = Mux1H(originallySelected, effectiveCount)
+        val redirectToPreferred = preferredAvailable && effectiveCount(preferredIdx) <= originalCount
         scalarLduIQIdx.zipWithIndex.foreach { case (iqIdx, localIdx) =>
-          result(uopIdx)(iqIdx) := isScalarLoad && selectedLocal(localIdx)
+          when(isLongDependent) {
+            result(uopIdx)(iqIdx) := Mux(redirectToPreferred,
+              (localIdx == preferredIdx).B, fallbackSelections(uopIdx)(iqIdx))
+          }
         }
       }
     }
@@ -642,7 +627,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   }
 
   val lduSteerFromRename = buildLduSteering(
-    fromRename.map(_.valid), fromRename.map(_.bits.fuType), fromRename.map(_.bits.psrc), fromRename.map(_.bits.srcType)
+    fromRename.map(_.valid), fromRename.map(_.bits.fuType), fromRename.map(_.bits.psrc), fromRename.map(_.bits.srcType),
+    uopSelIQ
   )
 
   uopSelIQ.zipWithIndex.map{ case (u, i) => {
@@ -666,8 +652,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   }}
   val effectiveUopSelIQ = Wire(Vec(renameWidth, Vec(issueQueueNum, Bool())))
   effectiveUopSelIQ.zipWithIndex.foreach { case (effective, i) =>
-    effective := Mux(enableLongLoadLduSteering.B && FuType.isLoad(fromRename(i).bits.fuType),
-      lduSteerFromRename(i), uopSelIQ(i))
+    effective := lduSteerFromRename(i)
     if (enableLongLoadLduSteering) {
       when(fromRename(i).valid && FuType.isLoad(fromRename(i).bits.fuType)) {
         assert(PopCount(effective) === 1.U, "scalar load must select exactly one LDU IQ")
