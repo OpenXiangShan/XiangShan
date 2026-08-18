@@ -957,6 +957,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     newLoadUnits(i).io.pmp <> pmp_check(i).resp
     // st-ld violation query
     newLoadUnits(i).io.staNukeQueryReq <> storeUnits.map(_.io.staNukeQueryReq)
+    newLoadUnits(i).io.staS2HeadNukeQueryReq <> storeUnits.map(_.io.staS2HeadNukeQueryReq)
 
     // load replay
     newLoadUnits(i).io.replay <> lsq.io.replay(i)

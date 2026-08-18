@@ -556,6 +556,7 @@ class LoadUnitS1(param: ExeUnitParams)(
 
     // Nuke check with StoreUnit
     val staNukeQueryReq = Flipped(Vec(StorePipelineWidth, ValidIO(new StoreNukeQueryReq)))
+    val staS2HeadNukeQueryReq = Flipped(Vec(StorePipelineWidth, ValidIO(new StoreNukeQueryReq)))
 
     // prefetch train hint
     val prefetchTrainHint = Output(Bool())
@@ -687,8 +688,9 @@ class LoadUnitS1(param: ExeUnitParams)(
   /**
     * Nuke check with StoreUnit
     */
-  val nukeQueryValids = io.staNukeQueryReq.map(_.valid)
-  val nukeQueryReqs = io.staNukeQueryReq.map(_.bits)
+  val allNukeReqs = io.staNukeQueryReq ++ io.staS2HeadNukeQueryReq
+  val nukeQueryValids = allNukeReqs.map(_.valid)
+  val nukeQueryReqs = allNukeReqs.map(_.bits)
   val nukePAddrMatches = nukeQueryReqs.map(req => nukePAddrMatch(req.paddr, req.matchType, paddr))
   val nukeStoreOlders = nukeQueryReqs.map(req => isAfter(robIdx, req.robIdx))
   val nukeMaskMatches = nukeQueryReqs.map(req => (req.mask & in.mask).orR)
@@ -1958,6 +1960,7 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val uncacheBypass = new UncacheBypass
   // Nuke check with StoreUnit
   val staNukeQueryReq = Flipped(Vec(StorePipelineWidth, ValidIO(new StoreNukeQueryReq)))
+  val staS2HeadNukeQueryReq = Flipped(Vec(StorePipelineWidth, ValidIO(new StoreNukeQueryReq)))
   // Nuke check with RAR / RAW
   val rarNukeQuery = new LoadRARNukeQuery
   val rawNukeQuery = new LoadRAWNukeQuery
@@ -2051,6 +2054,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   }
   s1.io.uncacheBypassResp := io.uncacheBypass.s1Resp
   s1.io.staNukeQueryReq := io.staNukeQueryReq
+  s1.io.staS2HeadNukeQueryReq := io.staS2HeadNukeQueryReq
   io.prefetchTrainHintS1 := s1.io.prefetchTrainHint
   io.swInstrPrefetch := s1.io.swInstrPrefetch
   s1.io.csrTrigger := io.csrTrigger
