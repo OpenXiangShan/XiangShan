@@ -30,6 +30,12 @@ import xiangshan.backend.decode.opcode.Opcode.Opcode
 
 
 object Bundles {
+  def NormalUopNumWidth(implicit p: Parameters): Int =
+    log2Up(p(XSCoreParamsKey).MaxUopSize * 2 + 1)
+
+  def CompressedSlotUopNumWidth(implicit p: Parameters): Int =
+    log2Ceil(2 * p(XSCoreParamsKey).RenameWidth)
+
   /**
    * Connect same name and same width port like sinkBundle := sourceBundle.
    *
@@ -277,8 +283,8 @@ object Bundles {
     val oldVType = VType()
     val firstUop = Bool()
     val lastUop = Bool()
-    val formerNumWB = UInt(log2Up(MaxUopSize * 2 + 1).W) // rob need this
-    val latterNumWB = UInt(log2Up(MaxUopSize * 2 + 1).W) // rob need this
+    val formerNumWB = UInt(NormalUopNumWidth.W) // rob need this
+    val latterNumWB = UInt(CompressedSlotUopNumWidth.W) // rob need this
     val latency = Latency()
     // rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
@@ -660,8 +666,8 @@ object Bundles {
     val firstUop        = Bool()
     val lastUop         = Bool()
     val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
-    val formerNumWB     = UInt(log2Up(MaxUopSize * 2 + 1).W) // rob need this
-    val latterNumWB     = UInt(log2Up(MaxUopSize * 2 + 1).W) // rob need this
+    val formerNumWB     = UInt(NormalUopNumWidth.W) // rob need this
+    val latterNumWB     = UInt(CompressedSlotUopNumWidth.W) // rob need this
     val latency         = Latency()
     val commitType      = CommitType()
     // rename
