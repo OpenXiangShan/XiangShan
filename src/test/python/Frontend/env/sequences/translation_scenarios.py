@@ -82,7 +82,7 @@ class TranslationPtwResponseOverride:
 
 @dataclass(frozen=True)
 class TranslationSectorLane:
-    """One S-stage level-0 sector lane returned by a PTW response."""
+    """One S-stage level-0 lane's valididx/PPN declaration in a PTW response."""
 
     lane: int
     ppn: int
@@ -434,9 +434,12 @@ class TranslationScenarioBuilder:
                 self.env.page_table.map_page(
                     sector_base + int(entry.lane),
                     int(entry.ppn),
-                    **{**lane_pte, "v": int(entry.valid)},
+                    **{**lane_pte, "v": int(entry.pte_present)},
                 )
-            self.env.page_table.enable_stage1_sector_response(int(scenario.va) >> 12)
+            self.env.page_table.enable_stage1_sector_response(
+                int(scenario.va) >> 12,
+                lane_valid={int(entry.lane): int(entry.valid) for entry in scenario.s1_sector_lanes},
+            )
 
         if int(scenario.s1_pf) or int(scenario.s1_af):
             self.env.page_table.set_stage1_response_fault(

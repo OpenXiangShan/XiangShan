@@ -81,10 +81,11 @@ class TranslationPermissionOracle:
         self._emit(cycle, f"translation.{reason}", entry, level="WARNING")
 
     @staticmethod
-    def _expected_fault(state) -> Optional[str]:
-        outcome = str(state.expected_outcome.get("outcome", ""))
-        if outcome in _EXCEPTION_BITS.values():
-            return outcome
+    def _expected_fault(state, outcome: Optional[dict] = None) -> Optional[str]:
+        selected_outcome = state.expected_outcome if outcome is None else outcome
+        outcome_name = str(selected_outcome.get("outcome", ""))
+        if outcome_name in _EXCEPTION_BITS.values():
+            return outcome_name
         return {
             "page_fault": "instruction_page_fault",
             "access_fault": "instruction_access_fault",
@@ -104,7 +105,7 @@ class TranslationPermissionOracle:
         ):
             raise ValueError("translation oracle page_indexes must select declared scenario pages")
         page_outcomes = [all_page_outcomes[page] for page in selected_pages]
-        expected_fault = self._expected_fault(state)
+        expected_fault = self._expected_fault(state, page_outcomes[0])
         expected_ptw_requests = [] if not expect_ptw or (
             str(state.scenario.mode).lower() == "bare" and int(state.scenario.s2xlate) == 0
         ) else [
