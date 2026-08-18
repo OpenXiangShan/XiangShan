@@ -28,10 +28,6 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
       val wayMask: UInt = UInt(NumWay.W)
     }
 
-    class Predict extends Bundle {
-      val touch: Valid[Touch] = Flipped(Valid(new Touch))
-    }
-
     class Train extends Bundle {
       val t0_setIdx: UInt         = Input(UInt(SetIdxLen.W))
       val t0_fire:   Bool         = Input(Bool())
@@ -39,39 +35,20 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
       val t1_touch:  Valid[Touch] = Flipped(Valid(new Touch))
     }
 
-    val predict: Predict = new Predict
-    val train:   Train   = new Train
+    val train: Train = new Train
   }
 
   val io: MainBtbReplacerIO = IO(new MainBtbReplacerIO)
 
-  private val predictStateGen = Module(ReplacerStateGen(Replacer, NumWay, accessSize = NumWay))
-  private val trainStateGen   = Module(ReplacerStateGen(Replacer, NumWay))
-  private val victimStateGen  = Module(ReplacerStateGen(Replacer, NumWay))
-  private val stateBank       = Module(new ReplacerState(NumSets, predictStateGen.StateWidth))
+  private val trainStateGen  = Module(ReplacerStateGen(Replacer, NumWay))
+  private val victimStateGen = Module(ReplacerStateGen(Replacer, NumWay))
+  private val stateBank      = Module(new ReplacerState(NumSets, trainStateGen.StateWidth))
 
-  /* *** predict *** */
-  // read current state
-  stateBank.io.predictRead.setIdx := io.predict.touch.bits.setIdx
-  private val predictState = stateBank.io.predictRead.state
-
-  // compose touch way vec
-  private val predictTouchWay = VecInit((0 until NumWay).map { i =>
-    val wayValid = Wire(Valid(UInt(log2Up(NumWay).W)))
-    wayValid.valid := io.predict.touch.valid && io.predict.touch.bits.wayMask(i)
-    wayValid.bits  := i.U
-    wayValid
-  })
-
-  // generate next state
-  predictStateGen.io.state   := predictState
-  predictStateGen.io.touches := predictTouchWay
-  private val predictNextState = predictStateGen.io.nextState
-
-  // write back next state
-  stateBank.io.predictWrite.valid       := io.predict.touch.valid
-  stateBank.io.predictWrite.bits.setIdx := io.predict.touch.bits.setIdx
-  stateBank.io.predictWrite.bits.state  := predictNextState
+  // Shared class, fields zeroed out (interface unused here)
+  stateBank.io.predictRead.setIdx       := 0.U
+  stateBank.io.predictWrite.valid       := false.B
+  stateBank.io.predictWrite.bits.setIdx := 0.U
+  stateBank.io.predictWrite.bits.state  := 0.U
 
   /* *** train t0 *** */
   // read current state
@@ -80,14 +57,7 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   // if t1 is about to write the same set as t0 read, we need to use the updated state (trainStateGen.io.nextState)
   private val trainNextState = trainStateGen.io.nextState
   private val trainSameSet   = io.train.t1_touch.valid && (io.train.t1_touch.bits.setIdx === io.train.t0_setIdx)
-  private val predictSameSet = io.predict.touch.valid && (io.predict.touch.bits.setIdx === io.train.t0_setIdx)
-  private val trainState = MuxCase(
-    stateBank.io.trainRead.state,
-    Seq(
-      trainSameSet   -> trainNextState, // trainNextState has higher priority, see ReplacerState.scala
-      predictSameSet -> predictNextState
-    )
-  )
+  private val trainState     = Mux(trainSameSet, trainNextState, stateBank.io.trainRead.state)
 
   // generate victim
   victimStateGen.io.state   := trainState

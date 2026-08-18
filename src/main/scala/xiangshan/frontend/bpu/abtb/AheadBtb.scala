@@ -237,12 +237,6 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   // used for check abtb output
   io.debug_startPc := s2_startPc
 
-  replacers.zipWithIndex.foreach { case (r, i) =>
-    r.io.readValid   := s2_valid && s2_hit && s2_bankMask(i)
-    r.io.readSetIdx  := s2_setIdx
-    r.io.readWayMask := s2_hitMask
-  }
-
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 0
      - receive train request
@@ -336,6 +330,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val t2_needWriteNewEntry = RegNext(t1_needWriteNewEntry)
   private val t2_needCorrectTarget = RegNext(t1_needCorrectTarget)
   private val t2_writeEntry        = RegNext(t1_writeEntry)
+  private val t2_hit               = RegNext(t1_hit)
+  private val t2_hitMask           = RegNext(VecInit(t1_hitMask))
+  private val t2_trainTaken        = RegNext(t1_trainTaken)
 
   banks.zipWithIndex.foreach { case (b, i) =>
     when(t2_fire && t2_needWriteNewEntry && t2_bankMask(i)) {
@@ -366,6 +363,13 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     r.io.writeValid  := b.io.writeResp.valid
     r.io.writeSetIdx := b.io.writeResp.bits.setIdx
     r.io.writeWayIdx := b.io.writeResp.bits.wayIdx
+  }
+  // update replacer -- Allocation touch and training touch are triggered at different times,
+  // so they cannot share the same interface.
+  replacers.zipWithIndex.foreach { case (r, i) =>
+    r.io.readValid   := t2_fire && t2_trainTaken && t2_bankMask(i) && t2_hit
+    r.io.readSetIdx  := t2_setIdx
+    r.io.readWayMask := t2_hitMask
   }
 
   /* --------------------------------------------------------------------------------------------------------------
