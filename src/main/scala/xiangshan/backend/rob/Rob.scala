@@ -301,6 +301,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   })
   val robBanksRdataThisLineUpdate = Wire(Vec(CommitWidth, new RobEntryBundle))
   val robBanksRdataNextLineUpdate = Wire(Vec(CommitWidth, new RobEntryBundle))
+  val needUpdateCommitW = Wire(Vec(2 * CommitWidth, Bool()))
   val commitValidThisLine = Wire(Vec(CommitWidth, Bool()))
   val hasCommitted = RegInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   val donotNeedWalk = RegInit(VecInit(Seq.fill(CommitWidth)(false.B)))
@@ -330,9 +331,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val commitInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(deqPtrVec(i).value(bankAddrWidth-1,0)))).toSeq
   val walkInfo = VecInit((0 until CommitWidth).map(i => robDeqGroup(walkPtrVec(i).value(bankAddrWidth-1, 0)))).toSeq
   for (i <- 0 until CommitWidth) {
-    connectCommitEntry(robDeqGroup(i), robBanksRdataThisLineUpdate(i))
+    connectCommitEntry(robDeqGroup(i), robBanksRdataThisLineUpdate(i), needUpdateCommitW(i))
     when(allCommitted){
-      connectCommitEntry(robDeqGroup(i), robBanksRdataNextLineUpdate(i))
+      connectCommitEntry(robDeqGroup(i), robBanksRdataNextLineUpdate(i), needUpdateCommitW(i + CommitWidth))
     }
   }
 
@@ -1085,12 +1086,24 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }.otherwise {
     noCommitCycleCnt := noCommitCycleCnt + 1.U
   }
+  // Read the architectural ROB entry explicitly for the debug-only counters.
+  // `robDeqGroup` is a `RobCommitEntryBundle`, which intentionally no longer
+  // carries the shadow uop state used to derive these values.
+  val deqPtrRobEntry: RobEntryBundle = robEntries(deqPtr.value)
+  val deqPtrFormerUopNum = RobBundles.decodeFormerUopNum(
+    deqPtrRobEntry.entryPairType,
+    deqPtrRobEntry.uopState
+  )
+  val deqPtrLatterUopNum = RobBundles.decodeLatterUopNum(
+    deqPtrRobEntry.entryPairType,
+    deqPtrRobEntry.uopState
+  )
   when(noCommitCycleCnt === 14999.U) {
     printf(p"[CROB-STUCK] deq=${Hexadecimal(deqPtr.value)} valid=${deqPtrEntry.commit_v} " +
       p"realDest=${deqPtrEntry.realDestSize} " +
       p"ctype=${Binary(deqPtrEntry.entryPairType)} slotNeedFlush=${Binary(deqPtrEntry.slotNeedFlushMask)} " +
       p"formerCnt=${formerInstrCntCommit(0)} latterCnt=${latterInstrCntCommit(0)} " +
-      p"formerUopNum=${deqPtrEntry.formerUopNum} latterUopNum=${deqPtrEntry.latterUopNum} " +
+      p"formerUopNum=${deqPtrFormerUopNum} latterUopNum=${deqPtrLatterUopNum} " +
       p"headPC=${Hexadecimal(debugMeta(debug_microOp(deqPtr.value).head).pc)} " +
       p"tailPC=${Hexadecimal(debugMeta(debug_microOp(deqPtr.value)(1)).pc)}\n")
   }
@@ -1638,6 +1651,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       nextFormerUopNum,
       nextLatterUopNum
     )
+    needUpdateCommitW(i) := !nextFormerUopNum.orR && !nextLatterUopNum.orR
 
     val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.fflagsWen.getOrElse(false.B))
     val fflagsRes = fflagsCanWbSeq.zip(fflags_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.fflags.get, 0.U) }.fold(false.B)(_ | _)
