@@ -773,7 +773,7 @@ object BackendV2SchdParams {
   def iqWakeUpParams = {
     Seq(
       WakeUpConfig(
-        Seq("ALU0", "ALU1", "ALU2", "ALU3", "LDU0", "LDU1", "LDU2") ->
+        Seq("ALU0", "ALU1", "ALU2", "ALU3", "BJU0", "BJU1", "BJU2", "LDU0", "LDU1", "LDU2") ->
         Seq("ALU0", "ALU1", "ALU2", "ALU3", "LDU0", "LDU1", "LDU2", "STA0", "STA1", "STD0", "STD1", "BJU0", "BJU1", "BJU2")
       ),
       WakeUpConfig(

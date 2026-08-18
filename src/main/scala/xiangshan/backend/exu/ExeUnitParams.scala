@@ -125,7 +125,12 @@ case class ExeUnitParams(
     else this.getIntWBPort.get.port == exuF2IWBPort
   }
   def needReadRegCache: Boolean = backendParam.regCacheEn && (isIntExeUnit || isMemExeUnit && readIntRf)
-  def needWriteRegCache: Boolean = isIntExeUnit && isIQWakeUpSource || isMemExeUnit && isIQWakeUpSource && readIntRf
+  // Only ALUs and load-like memory units have reg-cache write ports. Other
+  // integer fast-wakeup sources (for example a fused-link BJU) forward through
+  // the bypass network but must not change the reg-cache port count.
+  def needWriteRegCache: Boolean =
+    isIntExeUnit && hasAluFu && isIQWakeUpSource ||
+      isMemExeUnit && isIQWakeUpSource && readIntRf
 
   def numCopySrc: Int = fuConfigs.map(x => if(x.srcNeedCopy) 1 else 0).reduce(_ + _)
   def idxCopySrc: Seq[Int] = (0 until fuConfigs.length).map { idx =>

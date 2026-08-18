@@ -77,7 +77,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   val loadCancel = if (needLoadCancel) io.ldCancel else 0.U.asTypeOf(io.ldCancel)
   val allWakeUp = io.wakeUpInt ++ io.wakeUpFp
   val wakeUpIn = pregWB match {
-    case IntWB(_, _) => allWakeUp.filter{x => x.bits.params.writeIntRf && (x.bits.params.hasLoadExu || x.bits.params.hasAluFu)}
+    case IntWB(_, _) => allWakeUp.filter{x => x.bits.params.writeIntRf && (x.bits.params.hasLoadExu || x.bits.params.hasAluFu || x.bits.params.hasNewJmpFu)}
     case FpWB(_, _) => allWakeUp.filter{x => x.bits.params.writeFpRf && !x.bits.params.isIntExeUnit}
     case V0WB(_, _) => allWakeUp.filter(_.bits.params.writeV0Rf)
     // avoid load fast wakes, since load cancel signal not connected to vlbusytable, may have bug for vsetvli
