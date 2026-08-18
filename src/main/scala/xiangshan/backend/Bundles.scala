@@ -30,6 +30,12 @@ import utility._
 
 
 object Bundles {
+  def NormalUopNumWidth(implicit p: Parameters): Int =
+    log2Up(p(XSCoreParamsKey).MaxUopSize + 1)
+
+  def CompressedSlotUopNumWidth(implicit p: Parameters): Int =
+    log2Ceil(2 * p(XSCoreParamsKey).RenameWidth)
+
   /**
    * Connect same name and same width port like sinkBundle := sourceBundle.
    *
@@ -273,8 +279,8 @@ object Bundles {
     val firstUop = Bool()
     val lastUop = Bool()
     val numUops = UInt(log2Up(MaxUopSize).W) // rob need this
-    val formerNumWB = UInt(log2Up(MaxUopSize + 1).W) // rob need this
-    val latterNumWB = UInt(log2Up(MaxUopSize + 1).W) // rob need this
+    val formerNumWB = UInt(NormalUopNumWidth.W) // rob need this
+    val latterNumWB = UInt(CompressedSlotUopNumWidth.W) // rob need this
     // rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val psrcIntForMove = UInt(PhyRegIdxWidth.W)
@@ -605,8 +611,8 @@ object Bundles {
     val firstUop        = Bool()
     val lastUop         = Bool()
     val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
-    val formerNumWB     = UInt(log2Up(MaxUopSize + 1).W) // rob need this
-    val latterNumWB     = UInt(log2Up(MaxUopSize + 1).W) // rob need this
+    val formerNumWB     = UInt(NormalUopNumWidth.W) // rob need this
+    val latterNumWB     = UInt(CompressedSlotUopNumWidth.W) // rob need this
     val commitType      = CommitType()
     // rename
     val srcState        = Vec(numSrc, SrcState())

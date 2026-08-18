@@ -24,7 +24,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.TopDownCounters._
-import xiangshan.backend.Bundles.{DecodeOutUop, RenameOutUop, connectSamePort}
+import xiangshan.backend.Bundles.{CompressedSlotUopNumWidth, DecodeOutUop, NormalUopNumWidth, RenameOutUop, connectSamePort}
 import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_Z, XSDebugDecode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.{StoreBubbleReason, PipelineStallReason}
@@ -437,6 +437,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     case (st, in) => st := Mux(in.exceptionVec.asUInt.orR, false.B, FuType.isStore(in.fuType))
   }
 
+  val dropMask = Cat(isMove.reverse) | Cat(fusionValidVec.reverse)
+  val numWBIs2Mask = Cat(io.in.map(_.bits.numWB === 2.U).reverse)
+  def compactSlotNumWB(mask: UInt): UInt = {
+    PopCount(mask & ~dropMask) +& PopCount(mask & numWBIs2Mask)
+  }
+
   val walkNeedIntDest = WireDefault(VecInit(Seq.fill(RenameWidth)(false.B)))
   val walkNeedFpDest = WireDefault(VecInit(Seq.fill(RenameWidth)(false.B)))
   val walkNeedVecDest = WireDefault(VecInit(Seq.fill(RenameWidth)(false.B)))
@@ -517,19 +523,31 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val slotLastMask = Reverse(PriorityEncoderOH(Reverse(slotMask)))
     uops(i).lastIsRVC := (slotLastMask & Cat(io.in.map(_.bits.isRVC).reverse)).orR
     uops(i).debug.foreach(_.fusionNum := PopCount(slotMask & Cat(io.isFusionVec.reverse)))
-    val dropMask = Cat(isMove.reverse) | Cat(fusionValidVec.reverse)
-    val summedFormerNumWB = VecInit((0 until RenameWidth).map { k =>
-      Mux(formerMask(k), io.in(k).bits.numWB, 0.U(log2Up(MaxUopSize).W))
-    }).reduce(_ +& _)
-    val summedLatterNumWB = VecInit((0 until RenameWidth).map { k =>
-      Mux(latterMask(k), io.in(k).bits.numWB, 0.U(log2Up(MaxUopSize).W))
-    }).reduce(_ +& _)
-    val droppedFormerNumWB = PopCount(formerMask & dropMask)
-    val droppedLatterNumWB = PopCount(latterMask & dropMask)
-    val entryFormerNumWB = Mux(summedFormerNumWB >= droppedFormerNumWB, summedFormerNumWB - droppedFormerNumWB, 0.U)
-    val entryLatterNumWB = Mux(summedLatterNumWB >= droppedLatterNumWB, summedLatterNumWB - droppedLatterNumWB, 0.U)
+
+    val hasWideFormer = formerMask(i) && io.in(i).bits.numWB > 2.U
+    for (k <- 0 until RenameWidth) {
+      when(latterMask(k)) {
+        assert(io.in(k).bits.numWB === 1.U || io.in(k).bits.numWB === 2.U)
+      }
+      when(!hasWideFormer && formerMask(k)) {
+        assert(io.in(k).bits.numWB === 1.U || io.in(k).bits.numWB === 2.U)
+      }
+    }
+    when(hasWideFormer) {
+      assert(formerMask === (BigInt(1) << i).U(RenameWidth.W))
+      assert(latterMask === 0.U)
+      assert(CompressType.isNORMAL(entryPairType(i)))
+    }
+
+    val compactFormerRaw = compactSlotNumWB(formerMask)
+    val compactLatterRaw = compactSlotNumWB(latterMask)
+    val compactFormerNumWB = compactFormerRaw.pad(NormalUopNumWidth)
+    val wideFormerNumWB = io.in(i).bits.numWB - dropMask(i)
+    val entryFormerNumWB = Mux(hasWideFormer, wideFormerNumWB, compactFormerNumWB)
+    val entryLatterNumWB = compactLatterRaw(CompressedSlotUopNumWidth - 1, 0)
+
     assert(entryFormerNumWB <= MaxUopSize.U)
-    assert(entryLatterNumWB <= MaxUopSize.U)
+    assert(compactLatterRaw <= (2 * (RenameWidth - 1)).U)
     when(CompressType.isNORMAL(entryPairType(i))) {
       assert(entryLatterNumWB === 0.U)
     }.otherwise {

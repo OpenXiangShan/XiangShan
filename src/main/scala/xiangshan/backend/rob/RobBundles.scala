@@ -26,7 +26,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput, UopIdx, EnqRobUop}
+import xiangshan.backend.Bundles.{CompressedSlotUopNumWidth, DynInst, EnqRobUop, ExceptionInfo, ExuOutput, NormalUopNumWidth, UopIdx}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
@@ -40,8 +40,6 @@ import scala.collection.immutable.Nil
 
 
 object RobBundles extends HasCircularQueuePtrHelper {
-  def NormalUopNumWidth(implicit p: Parameters): Int = log2Up(p(XSCoreParamsKey).MaxUopSize + 1)
-  def CompressedSlotUopNumWidth(implicit p: Parameters): Int = log2Ceil(2 * p(XSCoreParamsKey).RenameWidth)
   def PackedUopStateWidth(implicit p: Parameters): Int = {
     math.max(NormalUopNumWidth + 1, 2 * CompressedSlotUopNumWidth)
   }
