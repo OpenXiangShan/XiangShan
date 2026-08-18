@@ -157,6 +157,97 @@ def test_missunit_fetch_allocate_rejects_non_single_or_blocked_requests():
     assert not _hit(recorder, "icache_missunit_request", "fetch_mshr_allocate")
 
 
+def _set_full_missunit_capacity_inputs(recorder, *, prefetch=False, duplicate=False):
+    request_paddr = 0x900 if not duplicate else (0x404 if prefetch else 0x400)
+    request_vset = 11 if not duplicate else (8 if prefetch else 4)
+    signals = {
+        _MAIN + "__Vtogcov__io_missReq_valid": 0 if prefetch else 1,
+        _MISS + "io_prefetchReq_valid": 1 if prefetch else 0,
+        _MISS + "fetchHit": 1 if (not prefetch and duplicate) else 0,
+        _MISS + "prefetchHit": 1 if (prefetch and duplicate) else 0,
+        _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush": 0,
+        _TOP + "io_fencei": 0,
+    }
+    if prefetch:
+        signals.update(
+            {
+                _MISS + "io_prefetchReq_ready": 1 if duplicate else 0,
+                _MISS + "__Vtogcov__io_prefetchReq_bits_blkPAddr": request_paddr,
+                _MISS + "__Vtogcov__io_prefetchReq_bits_vSetIdx": request_vset,
+            }
+        )
+    else:
+        signals.update(
+            {
+                _MAIN + "__Vtogcov__io_missReq_ready": 1 if duplicate else 0,
+                _MAIN + "__Vtogcov__io_missReq_bits_blkPAddr": request_paddr,
+                _MAIN + "__Vtogcov__io_missReq_bits_vSetIdx": request_vset,
+            }
+        )
+    for name, value in signals.items():
+        recorder.set_missunit_signal(name, value)
+
+    for index in range(14):
+        in_full_pool = index >= 4 if prefetch else index < 4
+        recorder.set_missunit_signal(
+            _MISS + f"allMshr_{index}.valid", int(in_full_pool)
+        )
+        recorder.set_missunit_signal(
+            _MISS + f"allMshr_{index}.blkPAddr", 0x400 + index
+        )
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.vSetIdx", 4 + index)
+
+
+def test_missunit_capacity_bins_only_sample_nonduplicate_backpressure():
+    recorder = _Recorder()
+    _set_full_missunit_capacity_inputs(recorder)
+    sample_icache_missunit_coverage(recorder, recorder.env, 104)
+    assert _hit(recorder, "icache_missunit_capacity", "fetch_full_backpressure")
+    assert not _hit(recorder, "icache_missunit_capacity", "prefetch_full_backpressure")
+
+    recorder = _Recorder()
+    _set_full_missunit_capacity_inputs(recorder, prefetch=True)
+    sample_icache_missunit_coverage(recorder, recorder.env, 105)
+    assert _hit(recorder, "icache_missunit_capacity", "prefetch_full_backpressure")
+    assert not _hit(recorder, "icache_missunit_capacity", "fetch_full_backpressure")
+
+
+def test_missunit_capacity_bins_do_not_duplicate_merge_coverage():
+    recorder = _Recorder()
+    _set_full_missunit_capacity_inputs(recorder, duplicate=True)
+    sample_icache_missunit_coverage(recorder, recorder.env, 106)
+    assert _hit(recorder, "icache_missunit_dedup", "fetch_merge_any_mshr")
+    assert not _hit(recorder, "icache_missunit_capacity", "fetch_full_backpressure")
+
+    recorder = _Recorder()
+    _set_full_missunit_capacity_inputs(recorder, prefetch=True, duplicate=True)
+    sample_icache_missunit_coverage(recorder, recorder.env, 107)
+    assert _hit(recorder, "icache_missunit_dedup", "prefetch_merge_any_mshr")
+    assert not _hit(recorder, "icache_missunit_capacity", "prefetch_full_backpressure")
+
+
+def test_missunit_capacity_bins_require_full_pool_and_clean_control():
+    for prefetch, free_index, bin_name in (
+        (False, 0, "fetch_full_backpressure"),
+        (True, 4, "prefetch_full_backpressure"),
+    ):
+        recorder = _Recorder()
+        _set_full_missunit_capacity_inputs(recorder, prefetch=prefetch)
+        recorder.set_missunit_signal(_MISS + f"allMshr_{free_index}.valid", 0)
+        sample_icache_missunit_coverage(recorder, recorder.env, 108)
+        assert not _hit(recorder, "icache_missunit_capacity", bin_name)
+
+        for control_signal in (
+            _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
+            _TOP + "io_fencei",
+        ):
+            recorder = _Recorder()
+            _set_full_missunit_capacity_inputs(recorder, prefetch=prefetch)
+            recorder.set_missunit_signal(control_signal, 1)
+            sample_icache_missunit_coverage(recorder, recorder.env, 109)
+            assert not _hit(recorder, "icache_missunit_capacity", bin_name)
+
+
 def test_icache_waylookup_sampler_contract_has_one_key_per_leaf():
     assert len(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS) == 42
     assert len(set(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS)) == 42
@@ -512,24 +603,119 @@ def test_hitmiss_merge_and_plru_bins_use_current_missunit_state():
     assert _hit(recorder, "icache_miss_path", "plru_victim_on_miss")
 
 
-def test_missunit_same_key_merge_accepts_rtl_prefetch_hit():
-    recorder = _Recorder()
+def _set_missunit_concurrent_request(
+    recorder,
+    *,
+    fetch_paddr,
+    prefetch_paddr,
+    fetch_vset,
+    prefetch_vset,
+    prefetch_hit=0,
+):
     for name, value in {
         _MAIN + "__Vtogcov__io_missReq_valid": 1,
-        _MAIN + "__Vtogcov__io_missReq_bits_blkPAddr": 0x100,
-        _MAIN + "__Vtogcov__io_missReq_bits_vSetIdx": 3,
+        _MAIN + "__Vtogcov__io_missReq_bits_blkPAddr": fetch_paddr,
+        _MAIN + "__Vtogcov__io_missReq_bits_vSetIdx": fetch_vset,
         _MISS + "io_prefetchReq_valid": 1,
-        _MISS + "__Vtogcov__io_prefetchReq_bits_blkPAddr": 0x100,
-        _MISS + "__Vtogcov__io_prefetchReq_bits_vSetIdx": 3,
+        _MISS + "__Vtogcov__io_prefetchReq_bits_blkPAddr": prefetch_paddr,
+        _MISS + "__Vtogcov__io_prefetchReq_bits_vSetIdx": prefetch_vset,
         _MISS + "fetchHit": 0,
-        # RTL sets this for the same-cycle fetch/prefetch merge.
-        _MISS + "prefetchHit": 1,
+        _MISS + "prefetchHit": prefetch_hit,
+        _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush": 0,
+        _TOP + "io_fencei": 0,
     }.items():
         recorder.set_missunit_signal(name, value)
+    for index in range(14):
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.valid", 0)
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.blkPAddr", 0)
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.vSetIdx", 0)
+
+
+def test_missunit_concurrent_request_bins_require_complete_miss_conditions():
+    cases = (
+        ("same_key_fetch_prefetch_merge", 0x100, 0x100, 3, 3, 1),
+        ("distinct_key_parallel_allocate", 0x100, 0x140, 3, 3, 0),
+        ("same_paddr_diff_vset_separate", 0x100, 0x100, 3, 4, 0),
+    )
+    for cycle, (
+        bin_name,
+        fetch_paddr,
+        prefetch_paddr,
+        fetch_vset,
+        prefetch_vset,
+        prefetch_hit,
+    ) in enumerate(cases, 1):
+        recorder = _Recorder()
+        _set_missunit_concurrent_request(
+            recorder,
+            fetch_paddr=fetch_paddr,
+            prefetch_paddr=prefetch_paddr,
+            fetch_vset=fetch_vset,
+            prefetch_vset=prefetch_vset,
+            prefetch_hit=prefetch_hit,
+        )
+        sample_icache_missunit_coverage(recorder, recorder.env, cycle)
+        assert _hit(recorder, "icache_missunit_request", bin_name)
+
+
+def test_missunit_concurrent_request_bins_reject_controls_and_existing_mshr():
+    for control_signal in (
+        _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
+        _TOP + "io_fencei",
+    ):
+        recorder = _Recorder()
+        _set_missunit_concurrent_request(
+            recorder,
+            fetch_paddr=0x100,
+            prefetch_paddr=0x100,
+            fetch_vset=3,
+            prefetch_vset=3,
+            prefetch_hit=1,
+        )
+        recorder.set_missunit_signal(control_signal, 1)
+        sample_icache_missunit_coverage(recorder, recorder.env, 10)
+        assert not _hit(recorder, "icache_missunit_request", "same_key_fetch_prefetch_merge")
+
+    recorder = _Recorder()
+    _set_missunit_concurrent_request(
+        recorder,
+        fetch_paddr=0x100,
+        prefetch_paddr=0x100,
+        fetch_vset=3,
+        prefetch_vset=3,
+    )
+    sample_icache_missunit_coverage(recorder, recorder.env, 10)
+    assert not _hit(recorder, "icache_missunit_request", "same_key_fetch_prefetch_merge")
+
+    recorder = _Recorder()
+    _set_missunit_concurrent_request(
+        recorder,
+        fetch_paddr=0x100,
+        prefetch_paddr=0x100,
+        fetch_vset=3,
+        prefetch_vset=3,
+        prefetch_hit=1,
+    )
+    recorder.set_missunit_signal(_MISS + "allMshr_0.valid", 1)
+    recorder.set_missunit_signal(_MISS + "allMshr_0.blkPAddr", 0x100)
+    recorder.set_missunit_signal(_MISS + "allMshr_0.vSetIdx", 3)
+    sample_icache_missunit_coverage(recorder, recorder.env, 11)
+    assert not _hit(recorder, "icache_missunit_request", "same_key_fetch_prefetch_merge")
+
+
+def test_missunit_distinct_ptag_bin_excludes_same_ptag_different_block():
+    recorder = _Recorder()
+    _set_missunit_concurrent_request(
+        recorder,
+        fetch_paddr=0x100,
+        prefetch_paddr=0x101,
+        fetch_vset=3,
+        prefetch_vset=3,
+    )
 
     sample_icache_missunit_coverage(recorder, recorder.env, 1)
 
-    assert _hit(recorder, "icache_missunit_request", "same_key_fetch_prefetch_merge")
+    assert not _hit(recorder, "icache_missunit_request", "distinct_key_parallel_allocate")
 
 
 def test_missunit_refill_counts_grant_data_opcode_5():

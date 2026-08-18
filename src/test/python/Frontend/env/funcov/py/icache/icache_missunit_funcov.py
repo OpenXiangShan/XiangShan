@@ -29,8 +29,8 @@ ICACHE_MISSUNIT_SAMPLER_BIN_KEYS = frozenset(
         ("icache_missunit_request", "same_key_fetch_prefetch_merge"),
         ("icache_missunit_request", "distinct_key_parallel_allocate"),
         ("icache_missunit_request", "same_paddr_diff_vset_separate"),
-        ("icache_missunit_capacity", "fetch_full_duplicate_merge"),
-        ("icache_missunit_capacity", "prefetch_full_duplicate_merge"),
+        ("icache_missunit_capacity", "fetch_full_backpressure"),
+        ("icache_missunit_capacity", "prefetch_full_backpressure"),
         ("icache_missunit_acquire", "fetch_priority_over_prefetch"),
         ("icache_missunit_acquire", "fetch_index_priority"),
         ("icache_missunit_acquire", "prefetch_fifo_enqueue"),
@@ -145,6 +145,31 @@ def _same_key_exists(
         and int(item["vset"]) == int(vset)
         for item in (mshrs[index] for index in indexes)
     )
+
+
+def _mshr_key_miss(
+    mshrs: list[dict[str, Optional[int]]],
+    paddr: Optional[int],
+    vset: Optional[int],
+) -> bool:
+    """Require a known non-match against every valid MSHR."""
+    if paddr is None or vset is None:
+        return False
+    for item in mshrs:
+        if not _on(item["valid"]):
+            continue
+        if item["paddr"] is None or item["vset"] is None:
+            return False
+        if int(item["paddr"]) == int(paddr) and int(item["vset"]) == int(vset):
+            return False
+    return True
+
+
+def _ptag_from_blk(paddr: Optional[int]) -> Optional[int]:
+    if paddr is None:
+        return None
+    # ICache getPTagFromBlk removes the 4-KiB page's cacheline-index bits.
+    return int(paddr) >> 6
 
 
 def _mshr_response_valid(mshrs: list[dict[str, Optional[int]]], source: Optional[int]) -> bool:
@@ -432,39 +457,108 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
         recorder, "icache_missunit_request", "prefetch_mshr_allocate", cycle,
         prefetch_demux_fire, evidence,
     )
+    fetch_mshr_miss = _mshr_key_miss(
+        mshrs, signals["fetch_paddr"], signals["fetch_vset"]
+    )
+    prefetch_mshr_miss = _mshr_key_miss(
+        mshrs, signals["prefetch_paddr"], signals["prefetch_vset"]
+    )
+    fetch_ptag = _ptag_from_blk(signals["fetch_paddr"])
+    prefetch_ptag = _ptag_from_blk(signals["prefetch_paddr"])
+    concurrent_miss_base = (
+        fetch_valid
+        and prefetch_valid
+        and fetch_mshr_miss
+        and prefetch_mshr_miss
+        and _off(signals["flush"])
+        and _off(signals["fencei"])
+        and bool(fetch_free_indexes)
+        and bool(_free_indexes(mshrs, range(4, 14)))
+    )
+    evidence["fetch_mshr_miss"] = fetch_mshr_miss
+    evidence["prefetch_mshr_miss"] = prefetch_mshr_miss
+    evidence["fetch_ptag"] = fetch_ptag
+    evidence["prefetch_ptag"] = prefetch_ptag
     same_key = (
-        fetch_valid and prefetch_valid
+        concurrent_miss_base
+        and _off(signals["fetch_hit"])
+        # With no existing matching MSHR, this can only be the RTL's
+        # same-cycle fetch/prefetch merge.
+        and _on(signals["prefetch_hit"])
         and signals["fetch_paddr"] is not None
         and signals["prefetch_paddr"] is not None
         and signals["fetch_vset"] is not None
         and signals["prefetch_vset"] is not None
         and int(signals["fetch_paddr"]) == int(signals["prefetch_paddr"])
         and int(signals["fetch_vset"]) == int(signals["prefetch_vset"])
-        # prefetchHit includes this same-cycle fetch/prefetch merge in RTL.
-        and not fetch_hit
     )
-    different_paddr = (
-        fetch_valid and prefetch_valid
-        and signals["fetch_paddr"] is not None
-        and signals["prefetch_paddr"] is not None
-        and int(signals["fetch_paddr"]) != int(signals["prefetch_paddr"])
-        and not fetch_hit and not prefetch_hit
+    different_ptag_same_vset = (
+        concurrent_miss_base
+        and _off(signals["fetch_hit"])
+        and _off(signals["prefetch_hit"])
+        and fetch_ptag is not None
+        and prefetch_ptag is not None
+        and signals["fetch_vset"] is not None
+        and signals["prefetch_vset"] is not None
+        and fetch_ptag != prefetch_ptag
+        and int(signals["fetch_vset"]) == int(signals["prefetch_vset"])
     )
     same_paddr_diff_vset = (
-        fetch_valid and prefetch_valid
+        concurrent_miss_base
+        and _off(signals["fetch_hit"])
+        and _off(signals["prefetch_hit"])
         and signals["fetch_paddr"] is not None
         and signals["prefetch_paddr"] is not None
         and signals["fetch_vset"] is not None
         and signals["prefetch_vset"] is not None
         and int(signals["fetch_paddr"]) == int(signals["prefetch_paddr"])
         and int(signals["fetch_vset"]) != int(signals["prefetch_vset"])
-        and not fetch_hit and not prefetch_hit
     )
     _mark(recorder, "icache_missunit_request", "same_key_fetch_prefetch_merge", cycle, same_key, evidence)
-    _mark(recorder, "icache_missunit_request", "distinct_key_parallel_allocate", cycle, different_paddr, evidence)
+    _mark(recorder, "icache_missunit_request", "distinct_key_parallel_allocate", cycle, different_ptag_same_vset, evidence)
     _mark(recorder, "icache_missunit_request", "same_paddr_diff_vset_separate", cycle, same_paddr_diff_vset, evidence)
-    _mark(recorder, "icache_missunit_capacity", "fetch_full_duplicate_merge", cycle, fetch_full and fetch_valid and fetch_hit, evidence)
-    _mark(recorder, "icache_missunit_capacity", "prefetch_full_duplicate_merge", cycle, prefetch_full and prefetch_valid and prefetch_hit, evidence)
+    fetch_key_known = signals["fetch_paddr"] is not None and signals["fetch_vset"] is not None
+    prefetch_key_known = signals["prefetch_paddr"] is not None and signals["prefetch_vset"] is not None
+    fetch_nonduplicate = fetch_key_known and not _same_key_exists(
+        mshrs, range(14), signals["fetch_paddr"], signals["fetch_vset"]
+    )
+    prefetch_nonduplicate = prefetch_key_known and not _same_key_exists(
+        mshrs, range(14), signals["prefetch_paddr"], signals["prefetch_vset"]
+    )
+    fetch_full_backpressure = (
+        fetch_full
+        and fetch_valid
+        and fetch_nonduplicate
+        and _off(signals["fetch_hit"])
+        and _off(signals["fetch_ready"])
+        and _off(signals["flush"])
+        and _off(signals["fencei"])
+    )
+    prefetch_full_backpressure = (
+        prefetch_full
+        and prefetch_valid
+        and prefetch_nonduplicate
+        and _off(signals["prefetch_hit"])
+        and _off(signals["prefetch_ready"])
+        and _off(signals["flush"])
+        and _off(signals["fencei"])
+    )
+    _mark(
+        recorder,
+        "icache_missunit_capacity",
+        "fetch_full_backpressure",
+        cycle,
+        fetch_full_backpressure,
+        evidence,
+    )
+    _mark(
+        recorder,
+        "icache_missunit_capacity",
+        "prefetch_full_backpressure",
+        cycle,
+        prefetch_full_backpressure,
+        evidence,
+    )
 
     _mark(
         recorder, "icache_missunit_acquire", "fetch_priority_over_prefetch", cycle,
