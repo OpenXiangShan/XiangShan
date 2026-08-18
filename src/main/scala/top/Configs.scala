@@ -296,7 +296,7 @@ case class WithNKBL1D(n: Int, ways: Int = 8) extends Config((site, here, up) => 
 case class L2CacheConfig
 (
   size: String,
-  ways: Int = 8,
+  ways: Int = 16,
   inclusive: Boolean = true,
   banks: Int = 1,
   tp: Boolean = true,
