@@ -386,9 +386,11 @@ object Opcode {
     // When uop leaving rename, srcType should set to SrcType.no
     val link  = Value(bb"001") + GpWen + Src1Gp
     val auipc = IntUJType(bb"010")
+    val fusedAuipcJalrLink = Value(bb"011") + GpWen
 
     def linkUopisLink(op: UInt) = op(0)
     def linkUopisAuipc(op: UInt) = op(1)
+    def linkUopisFusedAuipcJalrLink(op: UInt) = op === fusedAuipcJalrLink.encode
   }
 
   object NewJmpOpcodes extends Opcodes {

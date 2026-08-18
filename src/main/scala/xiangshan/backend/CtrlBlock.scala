@@ -126,7 +126,7 @@ class CtrlBlockImp(
   // Stage 1 is always enabled on this branch. Stage 2 is toggled for the
   // separately measured 3-to-2 experiment and intentionally does not use ROB
   // compression.
-  private val enableAuipcJalrStage2 = false
+  private val enableAuipcJalrStage2 = true
 
   private val s0_robFlushRedirect = rob.io.flushOut
   private val s1_robFlushRedirect = Wire(Valid(new Redirect))
@@ -726,6 +726,64 @@ class CtrlBlockImp(
         dispatch.io.renameIn(i + 2).bits.fuOpType := NewJmpOpcodes.fusedJr
         dispatch.io.renameIn(i + 2).bits.srcType(0) := SrcType.no
         dispatch.io.renameIn(i + 2).bits.imm := Cat(a.instr(31, 12), c.instr(31, 20))
+      }
+    }
+  } else {
+    // Stage 2: replace AUIPC + JALR(link + jr) with two ordinary backend
+    // uops. The first keeps the AUIPC architectural slot but writes the
+    // final link value; the second keeps the JALR control-flow metadata.
+    // No ROB entry is merged and ROB compression remains disabled.
+    for (i <- 0 until RenameWidth - 2) {
+      val a = decodePipeRename(i).bits
+      val b = decodePipeRename(i + 1).bits
+      val c = decodePipeRename(i + 2).bits
+      val safe = decodePipeRename(i).valid && decodePipeRename(i + 1).valid && decodePipeRename(i + 2).valid &&
+        !disableFusion && !a.exceptionVec.orR && !b.exceptionVec.orR && !c.exceptionVec.orR &&
+        TriggerAction.isNone(a.trigger) && TriggerAction.isNone(b.trigger) && TriggerAction.isNone(c.trigger) &&
+        !a.isLastInFtqEntry && (a.ftqPtr === b.ftqPtr) && (b.ftqPtr === c.ftqPtr) &&
+        a.fuType === FuType.link.U && LinkOpcodes.linkUopisAuipc(a.fuOpType) &&
+        b.fuType === FuType.link.U && LinkOpcodes.linkUopisLink(b.fuOpType) && b.isJR && b.firstUop &&
+        c.fuType === FuType.njmp.U && c.isJR && c.isJr && c.lastUop &&
+        a.ldest =/= 0.U && a.ldest === c.lsrc(0) && a.ldest === c.ldest
+      XSPerfAccumulate("auipc_jalr_stage2_match", safe)
+      when (safe) {
+        // Slot i remains the AUIPC architectural instruction, but its link
+        // result is PC(AUIPC)+8, equal to PC(JALR)+4.
+        rename.io.in(i).bits.fuOpType := LinkOpcodes.fusedAuipcJalrLink
+        rename.io.in(i).bits.imm := 0.U
+        rename.io.in(i).bits.srcType.foreach(_ := SrcType.no)
+        rename.io.in(i).bits.rfWen := true.B
+        rename.io.in(i).bits.firstUop := true.B
+        rename.io.in(i).bits.lastUop := true.B
+        dispatch.io.renameIn(i).bits.fuOpType := LinkOpcodes.fusedAuipcJalrLink
+        dispatch.io.renameIn(i).bits.imm := 0.U
+        dispatch.io.renameIn(i).bits.srcType.foreach(_ := SrcType.no)
+        dispatch.io.renameIn(i).bits.rfWen := true.B
+        dispatch.io.renameIn(i).bits.firstUop := true.B
+        dispatch.io.renameIn(i).bits.lastUop := true.B
+
+        // Slot i+1 becomes the JALR target uop. It has no RF write because
+        // the preceding synthetic link uop already writes the final value.
+        rename.io.in(i + 1).bits := c
+        rename.io.in(i + 1).bits.fuOpType := NewJmpOpcodes.fusedJr
+        rename.io.in(i + 1).bits.srcType(0) := SrcType.no
+        rename.io.in(i + 1).bits.imm := Cat(a.instr(31, 12), c.instr(31, 20))
+        rename.io.in(i + 1).bits.rfWen := false.B
+        rename.io.in(i + 1).bits.firstUop := true.B
+        rename.io.in(i + 1).bits.lastUop := true.B
+        dispatch.io.renameIn(i + 1).bits := c
+        dispatch.io.renameIn(i + 1).bits.fuOpType := NewJmpOpcodes.fusedJr
+        dispatch.io.renameIn(i + 1).bits.srcType(0) := SrcType.no
+        dispatch.io.renameIn(i + 1).bits.imm := Cat(a.instr(31, 12), c.instr(31, 20))
+        dispatch.io.renameIn(i + 1).bits.rfWen := false.B
+        dispatch.io.renameIn(i + 1).bits.firstUop := true.B
+        dispatch.io.renameIn(i + 1).bits.lastUop := true.B
+
+        // The third decoded uop is consumed by the transform and must not
+        // allocate a rename/free-list/dispatch/ROB entry.
+        rename.io.in(i + 2).valid := false.B
+        dispatch.io.renameIn(i + 2).valid := false.B
+        rename.io.validVec(i + 2) := false.B
       }
     }
   }
