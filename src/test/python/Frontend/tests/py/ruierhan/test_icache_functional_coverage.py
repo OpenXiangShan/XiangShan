@@ -92,6 +92,71 @@ def test_icache_missunit_sampler_contract_has_one_key_per_leaf():
     assert len(set(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS)) == 31
 
 
+def _set_fetch_mshr_allocate_inputs(recorder, *, prefetch=0, flush=0, fencei=0):
+    for name, value in {
+        _MAIN + "__Vtogcov__io_missReq_valid": 1,
+        _MAIN + "__Vtogcov__io_missReq_ready": 1,
+        _MAIN + "__Vtogcov__io_missReq_bits_blkPAddr": 0x480,
+        _MAIN + "__Vtogcov__io_missReq_bits_vSetIdx": 7,
+        _MISS + "fetchHit": 0,
+        _MISS + "io_prefetchReq_valid": prefetch,
+        _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush": flush,
+        _TOP + "io_fencei": fencei,
+        _MISS + "priorityFIFO.io_enq_valid": 0,
+    }.items():
+        recorder.set_missunit_signal(name, value)
+    for index in range(4):
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.valid", 0)
+
+
+def test_missunit_fetch_allocate_requires_single_clean_request_and_tracks_checkpoint():
+    recorder = _Recorder()
+    _set_fetch_mshr_allocate_inputs(recorder)
+    recorder.set_missunit_signal(_MISS + "allMshr_1.valid", 1)
+
+    sample_icache_missunit_coverage(recorder, recorder.env, 100)
+
+    assert _hit(recorder, "icache_missunit_request", "fetch_mshr_allocate")
+    pending = recorder._icache_missunit_cov_state["pending_fetch_allocations"]
+    assert pending == [{
+        "trigger_cycle": 100,
+        "expected_index": 0,
+        "paddr": 0x480,
+        "vset": 7,
+    }]
+
+    recorder.set_missunit_signal(_MAIN + "__Vtogcov__io_missReq_valid", 0)
+    recorder.set_missunit_signal(_MISS + "allMshr_0.valid", 1)
+    recorder.set_missunit_signal(_MISS + "allMshr_0.blkPAddr", 0x480)
+    recorder.set_missunit_signal(_MISS + "allMshr_0.vSetIdx", 7)
+    sample_icache_missunit_coverage(recorder, recorder.env, 101)
+
+    checkpoint = recorder._icache_missunit_cov_state["last_fetch_allocation_checkpoint"]
+    assert checkpoint["expected_index"] == 0
+    assert checkpoint["payload_matches"]
+    assert checkpoint["fifo_not_enqueued"]
+    assert checkpoint["complete"]
+
+
+def test_missunit_fetch_allocate_rejects_non_single_or_blocked_requests():
+    for kwargs in (
+        {"prefetch": 1},
+        {"flush": 1},
+        {"fencei": 1},
+    ):
+        recorder = _Recorder()
+        _set_fetch_mshr_allocate_inputs(recorder, **kwargs)
+        sample_icache_missunit_coverage(recorder, recorder.env, 102)
+        assert not _hit(recorder, "icache_missunit_request", "fetch_mshr_allocate")
+
+    recorder = _Recorder()
+    _set_fetch_mshr_allocate_inputs(recorder)
+    for index in range(4):
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.valid", 1)
+    sample_icache_missunit_coverage(recorder, recorder.env, 103)
+    assert not _hit(recorder, "icache_missunit_request", "fetch_mshr_allocate")
+
+
 def test_icache_waylookup_sampler_contract_has_one_key_per_leaf():
     assert len(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS) == 42
     assert len(set(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS)) == 42

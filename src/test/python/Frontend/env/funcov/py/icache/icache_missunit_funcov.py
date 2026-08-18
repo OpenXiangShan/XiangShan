@@ -118,6 +118,17 @@ def _all_valid(mshrs: list[dict[str, Optional[int]]], indexes: range) -> bool:
     return all(_on(mshrs[index]["valid"]) for index in indexes)
 
 
+def _free_indexes(
+    mshrs: list[dict[str, Optional[int]]], indexes: range
+) -> list[int]:
+    """Return explicitly observable free entries, preserving allocation priority."""
+    return [
+        index
+        for index in indexes
+        if mshrs[index]["valid"] is not None and not _on(mshrs[index]["valid"])
+    ]
+
+
 def _same_key_exists(
     mshrs: list[dict[str, Optional[int]]],
     indexes: range,
@@ -151,6 +162,10 @@ def reset_icache_missunit_coverage_state(recorder) -> None:
         "error_response_seen": False,
         "last_refill_source": None,
         "last_refill_outstanding": 0,
+        # BIN-686 records the expected allocation here so a checker can
+        # validate the registered MSHR contents on the following cycle.
+        "pending_fetch_allocations": [],
+        "last_fetch_allocation_checkpoint": None,
     }
 
 
@@ -320,6 +335,40 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
     }
     evidence["mshr_valid"] = [item["valid"] for item in mshrs]
     evidence["mshr_issue"] = [item["issue"] for item in mshrs]
+    evidence["mshr_paddr"] = [item["paddr"] for item in mshrs]
+    evidence["mshr_vset"] = [item["vset"] for item in mshrs]
+
+    # The allocation handshake and the registered MSHR contents are observed
+    # on adjacent samples.  Keep this diagnostic association separate from the
+    # coverpoint trigger: Checkpoint results must not be used to manufacture a
+    # functional-coverage hit.
+    completed_allocations = []
+    pending_allocations = state["pending_fetch_allocations"]
+    for pending in pending_allocations:
+        if pending["trigger_cycle"] >= cycle:
+            continue
+        index = pending["expected_index"]
+        item = mshrs[index]
+        payload_matches = (
+            _on(item["valid"])
+            and item["paddr"] is not None
+            and item["vset"] is not None
+            and int(item["paddr"]) == pending["paddr"]
+            and int(item["vset"]) == pending["vset"]
+        )
+        completed_allocations.append(
+            {
+                **pending,
+                "observed_cycle": cycle,
+                "payload_matches": payload_matches,
+                "fifo_not_enqueued": _off(signals["fifo_enq"]),
+                "complete": payload_matches and _off(signals["fifo_enq"]),
+            }
+        )
+    state["pending_fetch_allocations"] = []
+    if completed_allocations:
+        state["last_fetch_allocation_checkpoint"] = completed_allocations[-1]
+        evidence["last_fetch_allocation_checkpoint"] = completed_allocations[-1]
 
     fetch_valid = _on(signals["fetch_valid"])
     prefetch_valid = _on(signals["prefetch_valid"])
@@ -331,6 +380,8 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
     prefetch_demux_fire = prefetch_fire and not prefetch_hit
     fetch_candidates = sum(_on(signals[f"fetch_arb_{index}"]) for index in range(4))
     fetch_full = _all_valid(mshrs, range(4))
+    fetch_free_indexes = _free_indexes(mshrs, range(4))
+    fetch_expected_index = fetch_free_indexes[0] if fetch_free_indexes else None
     prefetch_full = _all_valid(mshrs, range(4, 14))
     any_mshr = _any_status(mshrs, range(14), "valid")
     any_fetch = _any_status(mshrs, range(4), "valid")
@@ -345,9 +396,37 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
         if 0 <= fifo_index < 10:
             fifo_head = signals[f"fifo_entry_{fifo_index}"]
 
+    flush = _on(signals["flush"])
+    fencei = _on(signals["fencei"])
+    fetch_mshr_allocate = (
+        fetch_demux_fire
+        and _off(signals["prefetch_valid"])
+        and _off(signals["flush"])
+        and _off(signals["fencei"])
+        and fetch_expected_index is not None
+        and signals["fetch_paddr"] is not None
+        and signals["fetch_vset"] is not None
+    )
+    evidence["fetch_free_mshr_indexes"] = fetch_free_indexes
+    evidence["fetch_expected_mshr"] = fetch_expected_index
+    if fetch_mshr_allocate:
+        evidence["fetch_allocation_key"] = {
+            "blkPAddr": signals["fetch_paddr"],
+            "vSetIdx": signals["fetch_vset"],
+        }
+        if signals["fetch_paddr"] is not None and signals["fetch_vset"] is not None:
+            state["pending_fetch_allocations"].append(
+                {
+                    "trigger_cycle": cycle,
+                    "expected_index": fetch_expected_index,
+                    "paddr": int(signals["fetch_paddr"]),
+                    "vset": int(signals["fetch_vset"]),
+                }
+            )
+
     _mark(
         recorder, "icache_missunit_request", "fetch_mshr_allocate", cycle,
-        fetch_demux_fire, evidence,
+        fetch_mshr_allocate, evidence,
     )
     _mark(
         recorder, "icache_missunit_request", "prefetch_mshr_allocate", cycle,
@@ -429,8 +508,6 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
     prefetch_mismatch = prefetch_demux_fire and any_mshr and not _same_key_exists(mshrs, range(14), signals["prefetch_paddr"], signals["prefetch_vset"])
     _mark(recorder, "icache_missunit_dedup", "key_mismatch_no_merge", cycle, fetch_mismatch or prefetch_mismatch, evidence)
 
-    flush = _on(signals["flush"])
-    fencei = _on(signals["fencei"])
     _mark(recorder, "icache_missunit_flush", "redirect_blocks_new_prefetch", cycle, flush and prefetch_valid and not prefetch_hit, evidence)
     _mark(recorder, "icache_missunit_flush", "redirect_cancels_unissued_prefetch", cycle, flush and any(_on(item["valid"]) and _off(item["issue"]) for item in mshrs[4:]), evidence)
     _mark(recorder, "icache_missunit_flush", "redirect_marks_issued_prefetch", cycle, flush and any(_on(item["valid"]) and _on(item["issue"]) for item in mshrs[4:]), evidence)
