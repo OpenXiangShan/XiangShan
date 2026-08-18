@@ -33,8 +33,17 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
     val writeResp: Valid[BankWriteResp]     = Valid(new BankWriteResp)
 
     val sramResetDone: Bool = Output(Bool())
+
+    // context flush handshake (not generated when HasBpuFlush is off)
+    val contextFlush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
+    val bpuFlushing:  Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
   }
   val io: BankIO = IO(new BankIO)
+
+  // Intermediate unpacked signals (SPEC 03 §4.2.1); else false.B is only a Scala
+  // type placeholder: all consumers below live inside if (HasBpuFlush) guards.
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get  else false.B
 
   private val sram = Module(new SplittedSRAMTemplate(
     new AheadBtbEntry,
@@ -43,6 +52,7 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
     waySplit = NumWays / 2,
     dataSplit = 1,
     shouldReset = true,
+    extraReset  = HasBpuFlush, // elaboration-time constant: extra_reset port is not generated when off
     singlePort = true,
     withClockGate = true,
     holdRead = true,
@@ -50,6 +60,11 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
     hasSramCtl = hasSramCtl,
     suffix = Option("bpu_abtb")
   ))
+  // Runtime context flush drives the SRAM extra_reset (SPEC 03 §4.2.2);
+  // during the 64-cycle reset sweep the SRAM ready naturally blocks new reads/writes.
+  if (HasBpuFlush) {
+    sram.extra_reset.get := contextFlush
+  }
   /* --------------------------------------------------------------------------------------------------------------
      read
      -------------------------------------------------------------------------------------------------------------- */
@@ -75,16 +90,20 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
     new BankWriteReq,
     WriteBufferSize,
     numPorts = 1,
+    hasContextFlush = HasBpuFlush,
     nameSuffix = s"abtbBank$bandIdx"
   ))
+  if (HasBpuFlush) {
+    writeBuffer.io.contextFlush.get := io.contextFlush.get
+  }
 
   // WriteBuffer accepts every pulse; a full miss overwrites an older dirty entry.
-  writeBuffer.io.write.head.valid := io.writeReq.valid
+  writeBuffer.io.write.head.valid := io.writeReq.valid && (if (HasBpuFlush) !bpuFlushing else true.B)
   writeBuffer.io.write.head.bits  := io.writeReq.bits
 
-  writeBuffer.io.read.head.ready := sram.io.w.req.ready && !io.readReq.valid
+  writeBuffer.io.read.head.ready := sram.io.w.req.ready && !io.readReq.valid && (if (HasBpuFlush) !bpuFlushing else true.B)
 
-  private val writeValid   = writeBuffer.io.read.head.valid && !io.readReq.valid
+  private val writeValid   = writeBuffer.io.read.head.valid && !io.readReq.valid && (if (HasBpuFlush) !bpuFlushing else true.B)
   private val writeEntry   = writeBuffer.io.read.head.bits.entry
   private val writeSetIdx  = writeBuffer.io.read.head.bits.setIdx
   private val writeWayMask = UIntToOH(writeBuffer.io.read.head.bits.wayIdx)

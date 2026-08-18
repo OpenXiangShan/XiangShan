@@ -52,10 +52,27 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val banks     = Seq.tabulate(NumBanks)(i => Module(new AheadBtbBank(i)))
   private val replacers = Seq.fill(NumBanks)(Module(new AheadBtbReplacer))
 
-  io.sramResetDone := banks.map(_.io.sramResetDone).reduce(_ && _)
-  // context flush placeholder: real flush scheme comes later
+  // Intermediate unpacked signals (SPEC 03 §4.2.1); else false.B is only a Scala
+  // type placeholder: all consumers below live inside if (HasBpuFlush) guards.
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get  else false.B
+
+  // Top-level fan-out of the flush signals (Option-to-Option, generated only when on)
   if (HasBpuFlush) {
-    io.resetDone.get := true.B
+    banks.foreach { b =>
+      b.io.contextFlush.get := io.contextFlush.get
+      b.io.bpuFlushing.get  := io.bpuFlushing.get
+    }
+    replacers.foreach { r =>
+      r.io.contextFlush.get := io.contextFlush.get
+    }
+  }
+
+  io.sramResetDone := banks.map(_.io.sramResetDone).reduce(_ && _)
+  // Real flush completion: SRAMs finish their 64-cycle sweep at T+65 and resetDone
+  // combinationally follows, masked low on the contextFlush pulse cycle (SPEC 03 §4.8)
+  if (HasBpuFlush) {
+    io.resetDone.get := io.sramResetDone && !contextFlush
   }
 
   io.trainReady := true.B
@@ -112,14 +129,30 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   private val s0_previousStartPc = io.startPc
 
-  private val s0_simpleHash = io.normalPathHist.getHistWithInfo(AbtbHashFhInfo).foldedHist(AheadBtbHashBitWidth - 1, 0)
+  // Sticky PHR isolation (SPEC 03 §4.10): once a context flush happened, aBTB index
+  // permanently degrades to PC-only so stale PHR cannot shape the new context's
+  // bank/set allocation footprint.
+  private val phrIsolated = if (HasBpuFlush) RegInit(false.B) else false.B
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      phrIsolated := true.B
+    }
+  }
+
+  private val s0_phrHash = io.normalPathHist.getHistWithInfo(AbtbHashFhInfo).foldedHist(AheadBtbHashBitWidth - 1, 0)
+  private val s0_simpleHash =
+    if (HasBpuFlush) {
+      Mux(phrIsolated || contextFlush, 0.U, s0_phrHash)
+    } else {
+      s0_phrHash
+    }
   private val s0_hashIndex  = s0_previousStartPc(log2Ceil(NumEntries / NumWays) - 1, 0) ^ s0_simpleHash
   private val s0_setIdx     = s0_hashIndex(log2Ceil(NumEntries / NumWays) - 1, log2Ceil(NumBanks))
   private val s0_bankIdx    = s0_hashIndex(log2Ceil(NumBanks) - 1, 0)
   private val s0_bankMask   = UIntToOH(s0_bankIdx)
 
   banks.zipWithIndex.foreach { case (b, i) =>
-    b.io.readReq.valid       := predictReqValid && s0_bankMask(i)
+    b.io.readReq.valid       := predictReqValid && s0_bankMask(i) && (if (HasBpuFlush) !bpuFlushing else true.B)
     b.io.readReq.bits.setIdx := s0_setIdx
   }
 
@@ -135,8 +168,14 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val s1_bankIdx  = RegEnable(s0_bankIdx, s0_fire)
   private val s1_bankMask = RegEnable(s0_bankMask, s0_fire)
 
-  private val s1_entries    = Mux1H(s1_bankMask, banks.map(_.io.readResp.entries))
-  private val s1_ctrVec     = takenCounter(s1_bankIdx)(s1_setIdx)
+  private val s1_entries = if (HasBpuFlush) Mux(bpuFlushing,
+    0.U.asTypeOf(Vec(NumWays, new AheadBtbEntry)),
+    Mux1H(s1_bankMask, banks.map(_.io.readResp.entries))
+  ) else Mux1H(s1_bankMask, banks.map(_.io.readResp.entries))
+  private val s1_ctrVec = if (HasBpuFlush) Mux(bpuFlushing,
+    VecInit.fill(NumWays)(TakenCounter.Zero),
+    takenCounter(s1_bankIdx)(s1_setIdx)
+  ) else takenCounter(s1_bankIdx)(s1_setIdx)
   private val s1_ctrResult  = VecInit(s1_ctrVec.map(_.isPositive))
   private val s1_strongBias = VecInit(s1_ctrVec.map(_.isSaturate))
   /* --------------------------------------------------------------------------------------------------------------
@@ -202,6 +241,35 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     s2_conditionValidVec := VecInit.fill(NumAheadBtbPredictionEntries)(false.B)
   }
 
+  if (HasBpuFlush) { when(contextFlush) {
+    // s1 index / bank state
+    s1_setIdx   := 0.U
+    s1_bankIdx  := 0.U
+    s1_bankMask := 0.U
+
+    // s2 data registers
+    s2_setIdx     := 0.U
+    s2_bankIdx    := 0.U
+    s2_bankMask   := 0.U
+    s2_entries    := 0.U.asTypeOf(s2_entries)
+    s2_hitMask    := 0.U.asTypeOf(s2_hitMask)
+    s2_startPc    := 0.U.asTypeOf(s2_startPc)
+    s2_ctrResult  := 0.U.asTypeOf(s2_ctrResult)
+    s2_strongBias := 0.U.asTypeOf(s2_strongBias)
+    // io.predCtrl pre-control vectors feed the BPU top directly and are not gated
+    // by pred.valid/hitMask, so they must be cleared explicitly
+    s2_jumpValidVec      := VecInit.fill(NumAheadBtbPredictionEntries)(false.B)
+    s2_conditionValidVec := VecInit.fill(NumAheadBtbPredictionEntries)(false.B)
+    // s3 data registers
+    s3_setIdx     := 0.U
+    s3_bankIdx    := 0.U
+    s3_bankMask   := 0.U
+    s3_entries    := 0.U.asTypeOf(s3_entries)
+    s3_startPc    := 0.U.asTypeOf(s3_startPc)
+    s3_ctrResult  := 0.U.asTypeOf(s3_ctrResult)
+    s3_strongBias := 0.U.asTypeOf(s3_strongBias)
+  } }
+
   io.prediction.zipWithIndex.foreach { case (pred, i) =>
     pred.valid            := s2_valid && s2_hitMask(i)
     pred.bits.taken       := s2_ctrResult(i)
@@ -242,7 +310,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   io.debug_startPc := s2_startPc
 
   replacers.zipWithIndex.foreach { case (r, i) =>
-    r.io.readValid   := s2_valid && s2_hit && s2_bankMask(i)
+    r.io.readValid   := s2_valid && s2_hit && s2_bankMask(i) && (if (HasBpuFlush) !bpuFlushing else true.B)
     r.io.readSetIdx  := s2_setIdx
     r.io.readWayMask := s2_hitMask
   }
@@ -254,7 +322,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   private val t0_train = io.fastTrain.get.bits
 
-  private val t0_fire = io.enable && io.fastTrain.get.valid && t0_train.abtbMeta.valid
+  private val t0_fire = io.enable && io.fastTrain.get.valid && t0_train.abtbMeta.valid && (if (HasBpuFlush) !bpuFlushing else true.B)
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1
@@ -341,6 +409,19 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val t2_needCorrectTarget = RegNext(t1_needCorrectTarget)
   private val t2_writeEntry        = RegNext(t1_writeEntry)
 
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      t1_train              := 0.U.asTypeOf(t1_train)
+      t2_victimWayIdx      := 0.U.asTypeOf(t2_victimWayIdx)
+      t2_setIdx            := 0.U
+      t2_bankMask          := 0.U
+      t2_hitMaskOH         := 0.U.asTypeOf(t2_hitMaskOH)
+      t2_needWriteNewEntry := false.B
+      t2_needCorrectTarget := false.B
+      t2_writeEntry        := 0.U.asTypeOf(t2_writeEntry)
+    }
+  }
+
   banks.zipWithIndex.foreach { case (b, i) =>
     when(t2_fire && t2_needWriteNewEntry && t2_bankMask(i)) {
       b.io.writeReq.valid             := true.B
@@ -367,7 +448,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }
 
   replacers.zip(banks).foreach { case (r, b) =>
-    r.io.writeValid  := b.io.writeResp.valid
+    r.io.writeValid  := b.io.writeResp.valid && (if (HasBpuFlush) !bpuFlushing else true.B)
     r.io.writeSetIdx := b.io.writeResp.bits.setIdx
     r.io.writeWayIdx := b.io.writeResp.bits.wayIdx
   }

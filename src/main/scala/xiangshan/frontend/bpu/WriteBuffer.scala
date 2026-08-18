@@ -40,6 +40,8 @@ import xiangshan.XSModule
  * used to update the entry's wayMask and wayData when hit the same entry
  * @param hasCnt Whether the write request bundle has a counter field, used to update the entry's useful counter
  * @param hasFlush Whether the write buffer has a flush signal, used to reset the write buffer
+ * @param hasContextFlush Whether the write buffer has a context flush signal, a stronger clear than flush:
+ * clears both dirty and shadowValid (SPEC 03 §4.3), bound to HasBpuFlush at the aBTB instance site only
  * @param nameSuffix Suffix of name, used for clearer logging
 */
 class WriteBuffer[T <: WriteReqBundle](
@@ -50,6 +52,7 @@ class WriteBuffer[T <: WriteReqBundle](
     hasCnt:     Boolean = false,
     hasWayMask: Boolean = false,
     hasFlush:   Boolean = false,
+    hasContextFlush: Boolean = false,
     nameSuffix: String = ""
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
@@ -63,6 +66,8 @@ class WriteBuffer[T <: WriteReqBundle](
     val overwrite: Vec[Bool]         = Output(Vec(numPorts, Bool()))
     val takenMask: Option[Vec[Bool]] = Option.when(hasCnt)(Vec(numPorts, Input(Bool())))
     val flush:     Option[Bool]      = Option.when(hasFlush)(Input(Bool()))
+    // Context flush pulse: clears both dirty and shadowValid (SPEC 03 §4.3.1)
+    val contextFlush: Option[Bool]   = Option.when(hasContextFlush)(Input(Bool()))
   }
   val io: WriteBufferIO = IO(new WriteBufferIO)
 
@@ -70,6 +75,9 @@ class WriteBuffer[T <: WriteReqBundle](
 
   // clean write buffer when flush is true
   private val flush = io.flush.getOrElse(false.B)
+  // Intermediate unpacked signal conditioned on this module's own hasContextFlush
+  // parameter (SPEC 03 §4.3.1); all consumers live inside if (hasContextFlush).
+  private val contextFlush = if (hasContextFlush) io.contextFlush.get else false.B
 
   private def mergeSameWay(entry: T, writeGen: T): T = {
     val merged = WireInit(entry)
@@ -264,10 +272,27 @@ class WriteBuffer[T <: WriteReqBundle](
     val touchWays = Seq(writeTouchVec(nRows)) ++ hitTouchVec(nRows).filter(_.valid == true.B).take(numPorts)
     replacerWay(nRows) := replacer.way
     replacer.access(touchWays)
-    when(flush) {
-      // Discard all pending SRAM writes while retaining the shadow entries.
-      for (i <- 0 until numEntries) {
-        nextDirty(nRows)(i) := false.B
+    // Context switch must clear shadowValid as well: EntrySRAM has been cleared,
+    // so a shadow hit with identical data would wrongly drop the write and lose
+    // the training record (SPEC 03 §4.3.2). Entries keep stale values but never
+    // match with shadowValid = false, so the buffer is functionally empty.
+    if (hasContextFlush) {
+      when(flush || contextFlush) {
+        for (i <- 0 until numEntries) {
+          nextDirty(nRows)(i) := false.B
+        }
+      }
+      when(contextFlush) {
+        for (i <- 0 until numEntries) {
+          nextShadowValid(nRows)(i) := false.B
+        }
+      }
+    } else {
+      when(flush) {
+        // Discard all pending SRAM writes while retaining the shadow entries.
+        for (i <- 0 until numEntries) {
+          nextDirty(nRows)(i) := false.B
+        }
       }
     }
     XSPerfAccumulate(f"${namePrefix}_port${nRows}_is_full", writePortValid(nRows) && fullVec(nRows))
