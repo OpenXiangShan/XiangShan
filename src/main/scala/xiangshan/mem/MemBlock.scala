@@ -1045,6 +1045,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     stu.io.vecstout.ready := false.B
     // from storeQueue
     stu.io.sqDeqPtr := lsq.io.sqDeqPtr
+    stu.io.sqAddrReadyPtr := lsq.io.issuePtrExt
   }
 
   val sqStoutLatch = Wire(DecoupledIO(new MemToRob(staParams.head)))
