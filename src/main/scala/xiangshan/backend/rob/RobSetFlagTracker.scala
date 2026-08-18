@@ -33,11 +33,32 @@ class RobSetFlagUpdateReq(val flagWidth: Int)(implicit p: Parameters) extends XS
 class RobSetFlagTracker(
   val width: Int,
   val numUpdatePorts: Int,
-  val numCommitPorts: Int
+  val numCommitPorts: Int,
+  candidateIndices: Seq[Seq[Int]] = Seq.empty
 )(implicit p: Parameters) extends XSModule {
   require(width > 0, "RobSetFlagTracker requires at least one flag bit")
   require(numUpdatePorts > 0, "RobSetFlagTracker requires at least one update port")
   require(numCommitPorts > 0, "RobSetFlagTracker requires at least one commit port")
+
+  private val candidatesByFlag = if (candidateIndices.isEmpty) {
+    Seq.fill(width)((0 until numUpdatePorts).toSeq)
+  } else {
+    require(
+      candidateIndices.length == width,
+      s"RobSetFlagTracker candidateIndices must have $width flag entries, got ${candidateIndices.length}"
+    )
+    candidateIndices.foreach { candidates =>
+      require(
+        candidates.distinct.length == candidates.length,
+        "RobSetFlagTracker candidateIndices must not contain duplicate ports"
+      )
+      require(
+        candidates.forall(index => index >= 0 && index < numUpdatePorts),
+        s"RobSetFlagTracker candidateIndices must be in [0, $numUpdatePorts)"
+      )
+    }
+    candidateIndices
+  }
 
   val io = IO(new Bundle {
     val update = Input(Vec(numUpdatePorts, Valid(new RobSetFlagUpdateReq(width))))
@@ -67,7 +88,7 @@ class RobSetFlagTracker(
       commit.valid && commit.bits.isSameEntry(pendingRobIdx(bit))
     }.reduce(_ || _) && !pendingNeedsFlush
 
-    val updateCandidates = io.update.indices.map { index =>
+    val updateCandidates = candidatesByFlag(bit).map { index =>
       val update = io.update(index)
       val valid = update.valid && update.bits.setMask(bit) && !updateNeedsFlush(index) &&
         !(!io.redirect.valid && updateCommits(index))
