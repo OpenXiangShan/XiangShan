@@ -97,7 +97,15 @@ class SrcSelectModule extends Module with HasVectorSettings {
           ((i != 3).B && uopNum(2)) -> (rs2 | (i / 2).U),
           ((i != 7).B && uopNum(3)) -> (rs2 | (i / 2).U),
         )),
-        Src2SelectEnum.AMOCASQ -> ((if ((i % 2) == 0) rs2 else rd) + (i / 2).U),
+        Src2SelectEnum.AMOCASQ -> {
+          i match {
+            case 0 => rs2
+            case 1 => rd
+            case 2 => Mux(rs2 === 0.U, 0.U, rs2 + 1.U)
+            case 3 => Mux(rd === 0.U, 0.U, rd + 1.U)
+            case _ => 0.U
+          }
+        },
       ).map { case (k, v) => k.toUInt -> v }
     )
 
@@ -109,7 +117,15 @@ class SrcSelectModule extends Module with HasVectorSettings {
         DestSelectEnum.INCF2 -> (rd + (i / 2).U),
         DestSelectEnum.INCF4 -> (rd + (i / 4).U),
         DestSelectEnum.CONST -> rd,
-        DestSelectEnum.AMOCASQ -> Mux(rd === 0.U, 0.U, rd + (i / 2).U),
+        DestSelectEnum.AMOCASQ -> {
+          i match {
+            case 0 => 0.U
+            case 1 => rd
+            case 2 => 0.U
+            case 3 => Mux(rd === 0.U, 0.U, rd + 1.U)
+            case _ => 0.U
+          }
+        }
       ).map { case (k, v) => k.toUInt -> v }
     )
   }
