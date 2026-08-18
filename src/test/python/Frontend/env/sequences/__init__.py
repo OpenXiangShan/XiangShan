@@ -11,6 +11,7 @@ from .translation_scenarios import (
     TranslationScenarioBuilder,
     TranslationScenarioState,
 )
+from .translation_scenario_sequence import TranslationScenarioPhase, TranslationScenarioSequence, TranslationSfenceAction
 
 __all__ = [
     "CheckPcSequence",
@@ -29,4 +30,7 @@ __all__ = [
     "TranslationScenario",
     "TranslationScenarioBuilder",
     "TranslationScenarioState",
+    "TranslationScenarioPhase",
+    "TranslationScenarioSequence",
+    "TranslationSfenceAction",
 ]

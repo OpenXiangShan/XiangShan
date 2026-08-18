@@ -189,6 +189,42 @@ def test_oracle_marks_pre_fence_response_stale_in_new_epoch() -> None:
     assert env.translation_oracle.get_active()["response_seen"] is True
 
 
+def test_oracle_discards_sfence_dropped_response_before_same_key_refill() -> None:
+    env, old_state = _state(
+        scenario_id="oracle-sfence-old",
+        va=0x8020_3000,
+        pa=0x8040_3000,
+        pte=TranslationPte(v=1, r=1, x=1, a=1),
+    )
+    old_request = old_state.expected_ptw_request
+    env.translation_oracle.observe_ptw_request(10, **{key: old_request[key] for key in ("vpn", "s2xlate", "get_gpa")})
+    env.pulse_sfence()
+    env.translation_oracle.discard_pending_ptw_responses(env.current_cycle, agent_dropped=1)
+
+    new_state = TranslationScenarioBuilder(env).build(
+        TranslationScenario(
+            scenario_id="oracle-sfence-new",
+            va=old_state.scenario.va,
+            pa=0x8060_3000,
+            payload=b"\x13\x00\x00\x00",
+        )
+    )
+    env.arm_translation_scenario(new_state)
+    new_request = new_state.expected_ptw_request
+    new_response = env.page_table.build_ptw_resp(
+        new_request["vpn"], s2xlate=new_request["s2xlate"], get_gpa=new_request["get_gpa"]
+    )
+    env.translation_oracle.observe_ptw_request(20, **{key: new_request[key] for key in ("vpn", "s2xlate", "get_gpa")})
+    env.translation_oracle.observe_ptw_response(
+        21,
+        **{key: new_request[key] for key in ("vpn", "s2xlate", "get_gpa")},
+        response=new_response,
+    )
+
+    assert env.translation_oracle.get_active()["response_seen"] is True
+    assert any(record["kind"] == "sfence_dropped_ptw_requests" for record in env.translation_oracle.get_stats()["records"])
+
+
 def test_oracle_accepts_the_second_page_ptw_transaction_after_the_first_fetch() -> None:
     env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
     state = TranslationScenarioBuilder(env).build(

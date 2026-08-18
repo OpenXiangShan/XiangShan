@@ -158,6 +158,7 @@ class TranslationPermissionOracle:
             "responded_ptw_request_keys": [],
             "ptw_request_counts": [],
             "fetched_pages": [],
+            "allow_speculative_before_response": False,
         }
         self._icache_cursor = len(getattr(getattr(self.env, "icache_agent", None), "request_records", []))
         self._uncache_cursor = len(getattr(getattr(self.env, "uncache_agent", None), "request_addrs", []))
@@ -185,6 +186,10 @@ class TranslationPermissionOracle:
             self._error(cycle, "unexpected_followup_ptw_request", actual=actual)
             return
         if expected is None:
+            if self.active["allow_speculative_before_response"] and not self.active["response_seen"]:
+                self._record(cycle, "pre_response_ptw_request", actual=actual)
+                self._ptw_requests.append({**actual, "translation_epoch": int(getattr(self.env, "translation_epoch", self.active["translation_epoch"])), "speculative": True})
+                return
             self._error(cycle, "ptw_request_mismatch", expected=self.active["expected_ptw_requests"], actual=actual)
             return
         record = {**actual, "translation_epoch": int(getattr(self.env, "translation_epoch", self.active["translation_epoch"]))}
@@ -251,7 +256,11 @@ class TranslationPermissionOracle:
             ),
             None,
         )
-        request_epoch = None if request_index is None else self._ptw_requests.pop(request_index)["translation_epoch"]
+        request_record = None if request_index is None else self._ptw_requests.pop(request_index)
+        request_epoch = None if request_record is None else request_record["translation_epoch"]
+        if request_record is not None and request_record.get("speculative"):
+            self._record(cycle, "stale_speculative_ptw_response", actual=actual)
+            return
         if request_epoch is not None and int(request_epoch) != int(self.active["translation_epoch"]):
             self._record(cycle, "stale_ptw_response", response_epoch=request_epoch, actual=actual)
             return
@@ -275,6 +284,11 @@ class TranslationPermissionOracle:
             return
         actual_path = str(path)
         actual_pa = int(pa)
+        if self.active["expected_ptw_requests"] and not self.active["response_seen"]:
+            # A phase transition can leave prior ICache requests in flight. They
+            # cannot be attributed to the newly armed translation epoch yet.
+            self._record(cycle, "pre_response_fetch_request", path=actual_path, pa=actual_pa)
+            return
         if self.active["expected_path"] == "fault":
             self._record(cycle, "fetch_request", path=actual_path, pa=actual_pa)
             self._error(cycle, "unexpected_fetch_after_fault", path=actual_path, pa=actual_pa)
@@ -536,6 +550,22 @@ class TranslationPermissionOracle:
             "errors": [dict(error) for error in self.errors],
             "records": [dict(record) for record in self.records],
         }
+
+    def set_speculative_request_policy(self, *, allow_before_response: bool) -> None:
+        if self.active is not None:
+            self.active["allow_speculative_before_response"] = bool(allow_before_response)
+
+    def discard_pending_ptw_responses(self, cycle: int, *, agent_dropped: int) -> None:
+        if self.active is None or int(agent_dropped) <= 0:
+            return
+        pending = len(self._ptw_requests)
+        self._ptw_requests.clear()
+        self._record(
+            cycle,
+            "sfence_dropped_ptw_requests",
+            oracle_pending=pending,
+            agent_dropped=int(agent_dropped),
+        )
 
     def clear(self) -> None:
         self.active = None
