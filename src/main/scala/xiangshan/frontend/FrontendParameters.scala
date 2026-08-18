@@ -89,6 +89,11 @@ trait HasFrontendParameters extends HasXSParameter {
 
   def ResolveEntryBranchNumber: Int = frontendParameters.ResolveEntryBranchNumber
 
+  // Bpu enqueues at most this many prediction blocks (i.e. Ftq entries) per cycle.
+  // A block ends at a taken cfi, so enqueueing more than one block per cycle means predicting more than one taken
+  // branch per cycle. Blocks of one enqueue go to consecutive Ftq entries, and block i+1 starts at block i's target.
+  def MaxPredictionNum: Int = 2
+
   def MaxPrefetchReqNum: Int = 2
   def MaxFetchReqNum:    Int = 2
   def MaxAccessLineNum:  Int = 2

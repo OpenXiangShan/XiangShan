@@ -33,10 +33,10 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
     val ifuResolve:     Valid[Resolve]            = Input(Valid(new Resolve))
     val bpuTrain:       DecoupledIO[ResolveEntry] = Decoupled(new ResolveEntry)
 
-    val backendRedirect:    Bool   = Input(Bool())
-    val backendRedirectPtr: FtqPtr = Input(new FtqPtr)
-    val bpuEnqueue:         Bool   = Input(Bool())
-    val bpuEnqueuePtr:      FtqPtr = Input(new FtqPtr)
+    val backendRedirect:    Bool        = Input(Bool())
+    val backendRedirectPtr: FtqPtr      = Input(new FtqPtr)
+    val bpuEnqueue:         Vec[Bool]   = Input(Vec(MaxPredictionNum, Bool()))
+    val bpuEnqueuePtr:      Vec[FtqPtr] = Input(Vec(MaxPredictionNum, new FtqPtr))
   }
 
   val io: ResolveQueueIO = IO(new ResolveQueueIO)
@@ -152,10 +152,16 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
     }
   }
 
+  // An entry whose Ftq index is being written by a new prediction refers to a fetch block that no longer exists.
+  private def overwrittenByBpu(ftqIdx: FtqPtr): Bool =
+    io.bpuEnqueue.zip(io.bpuEnqueuePtr).map { case (enqueue, ptr) =>
+      enqueue && ftqIdx.value === ptr.value
+    }.reduce(_ || _)
+
   mem.foreach { entry =>
     when(entry.valid &&
       (backendRedirect.reduce(_ || _) && entry.bits.ftqIdx > backendRedirectPtr ||
-        io.bpuEnqueue && entry.bits.ftqIdx.value === io.bpuEnqueuePtr.value)) {
+        overwrittenByBpu(entry.bits.ftqIdx))) {
       entry.bits.flushed := true.B
     }
   }

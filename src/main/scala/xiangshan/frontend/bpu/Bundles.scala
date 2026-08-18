@@ -195,13 +195,12 @@ class BpuCtrl extends Bundle {
 }
 
 // Bpu -> Ftq
-class BpuPrediction(implicit p: Parameters) extends BpuBundle {
+// One prediction block, which becomes one Ftq entry.
+class BpuPredictionBlock(implicit p: Parameters) extends BpuBundle {
   val startPc:     PrunedAddr = PrunedAddr(VAddrBits)
   val target:      PrunedAddr = PrunedAddr(VAddrBits)
   val taken:       Bool       = Bool()
   val endPosition: UInt       = UInt(CfiPositionWidth.W)
-  // override valid
-  val s3Override: Bool = Bool()
 
   def fromStage(startPc: PrunedAddr, prediction: Prediction): Unit = {
     this.startPc     := startPc
@@ -209,6 +208,18 @@ class BpuPrediction(implicit p: Parameters) extends BpuBundle {
     this.taken       := prediction.taken
     this.endPosition := prediction.cfiPosition
   }
+}
+
+// Bpu -> Ftq
+// Blocks of one enqueue are written to consecutive Ftq entries, and blocks(i+1) starts at blocks(i)'s target,
+// so Ftq keeps deriving a block's target from its successor's startPc.
+// The blocks are enqueued atomically: either all valid blocks are accepted, or none of them is.
+class BpuPrediction(implicit p: Parameters) extends BpuBundle {
+  val blocks: Vec[Valid[BpuPredictionBlock]] = Vec(MaxPredictionNum, Valid(new BpuPredictionBlock))
+  // override valid
+  val s3Override: Bool = Bool()
+
+  def numBlocks: UInt = PopCount(blocks.map(_.valid))
 }
 
 // Backend & Ftq -> Bpu
