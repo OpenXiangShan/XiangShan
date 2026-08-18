@@ -57,6 +57,8 @@ class FrontendMonitor:
         self.last_dut_redirect: Optional[dict] = None
         self._skip_cfvec_until_cycle: Optional[int] = None
         self._recovery_target_pc: Optional[int] = None
+        self._translation_s2xlate: Optional[int] = None
+        self._translation_priv_imode: int = 1
 
     def _golden_step_bytes(self, pc: int) -> int:
         if self.memory is None:
@@ -70,7 +72,13 @@ class FrontendMonitor:
     def _translate_fetch_addr(self, va: int) -> tuple[Optional[int], dict]:
         if self.page_table is None:
             return int(va), {"mode": "bare", "va": int(va), "pa": int(va), "ok": True}
-        pa, ok, info = self.page_table.translate(int(va))
+        kwargs = {}
+        if self._translation_s2xlate is not None:
+            kwargs = {
+                "s2xlate": int(self._translation_s2xlate),
+                "priv_imode": int(self._translation_priv_imode),
+            }
+        pa, ok, info = self.page_table.translate(int(va), **kwargs)
         meta = dict(info or {})
         meta["va"] = int(va)
         meta["ok"] = bool(ok)
@@ -282,6 +290,10 @@ class FrontendMonitor:
     def set_expected_pc(self, pc: int) -> None:
         self.expected_pc = int(pc)
         self.wait_sync_after_redirect = False
+
+    def set_translation_context(self, *, s2xlate: int, priv_imode: int) -> None:
+        self._translation_s2xlate = int(s2xlate)
+        self._translation_priv_imode = int(priv_imode)
 
     def notify_redirect(self, target_pc: int, reason: str = "", grace_cycles: int = 2) -> None:
         self.expected_pc = None
@@ -749,6 +761,8 @@ class FrontendMonitor:
         self.last_dut_redirect = None
         self._skip_cfvec_until_cycle = None
         self._recovery_target_pc = None
+        self._translation_s2xlate = None
+        self._translation_priv_imode = 1
 
 
 __all__ = ["Observation", "FrontendMonitor"]

@@ -94,7 +94,9 @@ class TranslationPermissionOracle:
     def arm(self, state, *, translation_epoch: int) -> dict:
         expected_fault = self._expected_fault(state)
         page_outcomes = [dict(outcome) for outcome in getattr(state, "expected_page_outcomes", (state.expected_outcome,))]
-        expected_ptw_requests = [
+        expected_ptw_requests = [] if (
+            str(state.scenario.mode).lower() == "bare" and int(state.scenario.s2xlate) == 0
+        ) else [
             {
                 "scenario_id": str(state.scenario.scenario_id),
                 "vpn": self.env.page_table.normalize_ptw_vpn((int(state.scenario.va) >> 12) + page),
@@ -139,6 +141,7 @@ class TranslationPermissionOracle:
             "expected_fetches": expected_fetches,
             "expected_path": "fault" if expected_fault else str(state.scenario.expected_path),
             "expected_fault": expected_fault,
+            "max_ptw_requests_per_key": getattr(state.scenario, "max_ptw_requests_per_key", None),
             "request_seen": False,
             "response_seen": False,
             "fetch_seen": False,
@@ -153,6 +156,7 @@ class TranslationPermissionOracle:
             "responded_ptw_vpns": [],
             "requested_ptw_request_keys": [],
             "responded_ptw_request_keys": [],
+            "ptw_request_counts": [],
             "fetched_pages": [],
         }
         self._icache_cursor = len(getattr(getattr(self.env, "icache_agent", None), "request_records", []))
@@ -187,6 +191,27 @@ class TranslationPermissionOracle:
         self._ptw_requests.append(record)
         self.active["request_seen"] = True
         request_key = (int(actual["vpn"]), int(actual["s2xlate"]), int(actual["get_gpa"]))
+        request_count = next(
+            (
+                item
+                for item in self.active["ptw_request_counts"]
+                if (int(item["vpn"]), int(item["s2xlate"]), int(item["get_gpa"])) == request_key
+            ),
+            None,
+        )
+        if request_count is None:
+            request_count = {"vpn": request_key[0], "s2xlate": request_key[1], "get_gpa": request_key[2], "count": 0}
+            self.active["ptw_request_counts"].append(request_count)
+        request_count["count"] += 1
+        max_requests = self.active["max_ptw_requests_per_key"]
+        if max_requests is not None and int(request_count["count"]) > int(max_requests):
+            self._error(
+                cycle,
+                "ptw_request_limit_exceeded",
+                actual=actual,
+                max_ptw_requests_per_key=int(max_requests),
+                request_count=int(request_count["count"]),
+            )
         if request_key not in self.active["requested_ptw_request_keys"]:
             self.active["requested_ptw_request_keys"].append(request_key)
         if int(actual["vpn"]) not in self.active["requested_ptw_vpns"]:

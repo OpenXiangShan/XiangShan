@@ -100,6 +100,7 @@ class TranslationScenario:
     ptw_response_latency_max: Optional[int] = None
     ptw_response_seed: int = 1
     ptw_response_overrides: Tuple[TranslationPtwResponseOverride, ...] = ()
+    max_ptw_requests_per_key: Optional[int] = None
     satp_asid: int = 0
     satp_ppn: int = 0
     vsatp_asid: int = 0
@@ -229,9 +230,13 @@ class TranslationScenarioBuilder:
         if not str(scenario.scenario_id):
             raise ValueError("translation scenario_id must be non-empty")
         s2xlate = int(scenario.s2xlate)
-        stage1_mode = self._mode_name(scenario.mode, "stage-1", allow_bare=(s2xlate == _S2XLATE_ONLY_STAGE2))
+        stage1_mode = self._mode_name(scenario.mode, "stage-1", allow_bare=True)
         stage2_mode = self._mode_name(scenario.stage2_mode or "sv39", "stage-2", allow_bare=False)
-        if s2xlate != _S2XLATE_ONLY_STAGE2 and not self._is_canonical(scenario.va, self._canonical_bits(stage1_mode)):
+        if stage1_mode == "bare" and s2xlate not in {_S2XLATE_NONE, _S2XLATE_ONLY_STAGE2}:
+            raise ValueError("bare translation scenarios require s2xlate=0 or s2xlate=2")
+        if stage1_mode == "bare" and s2xlate == _S2XLATE_NONE and int(scenario.va) != int(scenario.pa):
+            raise ValueError("bare translation scenarios require VA and PA to match")
+        if stage1_mode != "bare" and s2xlate != _S2XLATE_ONLY_STAGE2 and not self._is_canonical(scenario.va, self._canonical_bits(stage1_mode)):
             raise ValueError(f"{stage1_mode} non-canonical VA is unsupported: 0x{int(scenario.va):x}")
         if int(scenario.page_count) < 1:
             raise ValueError("translation page_count must be positive")
@@ -252,6 +257,8 @@ class TranslationScenarioBuilder:
             raise ValueError("PTW response latency must be non-negative")
         if scenario.ptw_response_latency_max is not None and int(scenario.ptw_response_latency_max) < int(scenario.ptw_response_latency):
             raise ValueError("PTW response latency_max must be at least latency")
+        if scenario.max_ptw_requests_per_key is not None and int(scenario.max_ptw_requests_per_key) < 1:
+            raise ValueError("max_ptw_requests_per_key must be positive")
         override_keys = set()
         for override in scenario.ptw_response_overrides:
             key = (int(override.vpn), int(override.s2xlate), int(override.get_gpa))
@@ -382,7 +389,7 @@ class TranslationScenarioBuilder:
         elif s2xlate == _S2XLATE_ALL_STAGE:
             self._map_stage1_pages(self.env, scenario, int(scenario.gpa))
             self._map_stage2_pages(self.env, scenario, int(scenario.gpa))
-        else:
+        elif str(scenario.mode).lower() != "bare":
             self._map_stage1_pages(self.env, scenario, int(scenario.pa))
 
         if int(scenario.s1_pf) or int(scenario.s1_af):
@@ -421,12 +428,12 @@ class TranslationScenarioBuilder:
         )
         self.env.load_program(scenario.payload, int(scenario.pa))
         context = self.env.update_translation_context(
-            satp_mode=self._mode_csr_value(scenario.mode),
+            satp_mode=(self._mode_csr_value(scenario.mode) if s2xlate not in {_S2XLATE_ONLY_STAGE1, _S2XLATE_ONLY_STAGE2} else 0),
             satp_asid=int(scenario.satp_asid),
             satp_ppn=int(scenario.satp_ppn),
-            vsatp_mode=(self._mode_csr_value(scenario.mode) if s2xlate == _S2XLATE_ALL_STAGE else None),
-            vsatp_asid=(int(scenario.vsatp_asid) if s2xlate == _S2XLATE_ALL_STAGE else None),
-            vsatp_ppn=(int(scenario.vsatp_ppn) if s2xlate == _S2XLATE_ALL_STAGE else None),
+            vsatp_mode=(self._mode_csr_value(scenario.mode) if s2xlate in {_S2XLATE_ONLY_STAGE1, _S2XLATE_ALL_STAGE} else None),
+            vsatp_asid=(int(scenario.vsatp_asid) if s2xlate in {_S2XLATE_ONLY_STAGE1, _S2XLATE_ALL_STAGE} else None),
+            vsatp_ppn=(int(scenario.vsatp_ppn) if s2xlate in {_S2XLATE_ONLY_STAGE1, _S2XLATE_ALL_STAGE} else None),
             hgatp_mode=(self._mode_csr_value(stage2_mode) if s2xlate in {_S2XLATE_ONLY_STAGE2, _S2XLATE_ALL_STAGE} else None),
             hgatp_vmid=(int(scenario.hgatp_vmid) if s2xlate in {_S2XLATE_ONLY_STAGE2, _S2XLATE_ALL_STAGE} else None),
             hgatp_ppn=(int(scenario.hgatp_ppn) if s2xlate in {_S2XLATE_ONLY_STAGE2, _S2XLATE_ALL_STAGE} else None),

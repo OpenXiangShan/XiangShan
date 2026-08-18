@@ -1018,6 +1018,10 @@ class FrontendEnv:
             raise ValueError(
                 f"cannot arm translation scenario from epoch {state_epoch} after environment advanced to {self.translation_epoch}"
             )
+        self.monitor.set_translation_context(
+            s2xlate=int(state.scenario.s2xlate),
+            priv_imode=int(state.scenario.priv_imode),
+        )
         return self.translation_oracle.arm(state, translation_epoch=state_epoch)
 
     def assert_translation_scenario(self) -> dict:

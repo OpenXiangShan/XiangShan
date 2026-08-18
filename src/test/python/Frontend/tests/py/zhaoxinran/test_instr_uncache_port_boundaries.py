@@ -1402,6 +1402,210 @@ def test_uncache_cacheable_non_mmio_uses_icache_path(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_bare_fetch_uses_identity_pa_without_ptw(env):
+    _initialize_mmio_fetch(env, reset_vector=_NORMAL_BASE)
+    scenario = TranslationScenario(
+        scenario_id="bare-identity-fetch-dut",
+        va=_NORMAL_BASE,
+        pa=_NORMAL_BASE,
+        payload=int(_CNOP).to_bytes(2, "little") * 256,
+        mode="bare",
+        expected_path="cacheable",
+        expected_result="normal",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=_NORMAL_BASE,
+                size=0x1000,
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+                addr=_NORMAL_BASE,
+                size=0x1000,
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(scenario.va)
+    env.arm_translation_scenario(state)
+    _force_redirect_to(env, scenario.va)
+
+    assert RunUntilCommitSequence(target=CommitTarget(target_count=6, max_cycles=6000)).run(env) >= 6
+    env.step(32)
+
+    assert int(env.ptw_agent.get_stats()["req_count"]) == 0
+    assert any(
+        int(record["address"]) == (scenario.pa & ~0x3F)
+        for record in env.icache_agent.get_stats()["request_records"]
+    )
+    assert env.assert_translation_scenario()["error_count"] == 0
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_sv39_revisit_uses_existing_translation_refill(env):
+    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    scenario = TranslationScenario(
+        scenario_id="sv39-revisit-translation-refill-dut",
+        va=_NORMAL_BASE,
+        pa=_NORMAL_PHYS_BASE,
+        payload=int(_CNOP).to_bytes(2, "little") * 256,
+        max_ptw_requests_per_key=1,
+        expected_path="cacheable",
+        expected_result="miss_refill",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=_NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+                addr=_NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(scenario.va)
+    env.arm_translation_scenario(state)
+    _force_redirect_to(env, scenario.va)
+
+    assert RunUntilCommitSequence(target=CommitTarget(target_count=6, max_cycles=6000)).run(env) >= 6
+    first_ptw_requests = int(env.ptw_agent.get_stats()["req_count"])
+    first_pc_observations = sum(int(obs.pc) == scenario.va for obs in env.monitor.observations)
+    assert first_ptw_requests == 1
+    assert first_pc_observations >= 1
+
+    _force_redirect_to(env, scenario.va)
+    assert RunUntilCommitSequence(target=CommitTarget(target_count=6, max_cycles=6000)).run(env) >= 6
+    env.step(32)
+
+    assert int(env.ptw_agent.get_stats()["req_count"]) == first_ptw_requests
+    assert sum(int(obs.pc) == scenario.va for obs in env.monitor.observations) > first_pc_observations
+    assert env.assert_translation_scenario()["error_count"] == 0
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_sv39_only_stage1_uses_vs_stage_physical_address(env):
+    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    scenario = TranslationScenario(
+        scenario_id="sv39-only-stage1-dut",
+        va=_NORMAL_BASE,
+        pa=_NORMAL_PHYS_BASE,
+        payload=int(_CNOP).to_bytes(2, "little") * 256,
+        s2xlate=1,
+        s1_pte=TranslationPte(asid=5),
+        vsatp_asid=5,
+        priv_virt=1,
+        expected_path="cacheable",
+        expected_result="miss_refill",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=_NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+                addr=_NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(scenario.va)
+    env.arm_translation_scenario(state)
+    _force_redirect_to(env, scenario.va)
+
+    assert RunUntilCommitSequence(target=CommitTarget(target_count=6, max_cycles=6000)).run(env) >= 6
+    env.step(32)
+
+    assert int(env.ptw_agent.get_stats()["resp_count"]) >= 1
+    assert any(
+        int(record["address"]) == (scenario.pa & ~0x3F)
+        for record in env.icache_agent.get_stats()["request_records"]
+    )
+    assert env.assert_translation_scenario()["error_count"] == 0
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_sv39_only_stage2_uses_g_stage_physical_address(env):
+    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    scenario = TranslationScenario(
+        scenario_id="sv39-only-stage2-dut",
+        va=_NORMAL_BASE,
+        pa=_NORMAL_PHYS_BASE,
+        payload=int(_CNOP).to_bytes(2, "little") * 256,
+        mode="bare",
+        stage2_mode="sv39",
+        s2xlate=2,
+        s2_pte=TranslationPte(vmid=7),
+        hgatp_vmid=7,
+        priv_virt=1,
+        expected_path="cacheable",
+        expected_result="miss_refill",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=_NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+                addr=_NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(scenario.va)
+    env.arm_translation_scenario(state)
+    _force_redirect_to(env, scenario.va)
+
+    assert RunUntilCommitSequence(target=CommitTarget(target_count=6, max_cycles=6000)).run(env) >= 6
+    env.step(32)
+
+    assert int(env.ptw_agent.get_stats()["resp_count"]) >= 1
+    assert any(
+        int(record["address"]) == (scenario.pa & ~0x3F)
+        for record in env.icache_agent.get_stats()["request_records"]
+    )
+    assert env.assert_translation_scenario()["error_count"] == 0
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_tps("ATP-119")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_sv39_all_stage_uses_stage2_physical_address(env):
