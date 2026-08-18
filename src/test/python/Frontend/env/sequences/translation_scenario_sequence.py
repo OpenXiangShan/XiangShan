@@ -13,6 +13,8 @@ class TranslationScenarioPhase:
     reuse_previous: bool = False
     redirect: bool = True
     target_pc: int | None = None
+    page_indexes: tuple[int, ...] | None = None
+    expect_ptw: bool = True
     wait_for_ptw_requests: int = 0
     wait_for_stale_responses: int = 0
     wait_for_completion: bool = True
@@ -56,7 +58,7 @@ class TranslationScenarioSequence:
             return False
         if active["expected_path"] == "fault":
             return bool(active["fault_seen"])
-        return bool(active["response_seen"] and active["fetch_seen"])
+        return bool((not active["expected_ptw_requests"] or active["response_seen"]) and active["fetch_seen"])
 
     def run(self, env) -> list[dict]:
         if not self.actions:
@@ -99,9 +101,28 @@ class TranslationScenarioSequence:
                     raise ValueError("translation phase requires a scenario")
                 state = TranslationScenarioBuilder(env).build(action.scenario)
             scenario = state.scenario
+            if not action.expect_ptw and int(action.wait_for_ptw_requests):
+                raise ValueError("a no-PTW phase cannot wait for PTW requests")
+            if action.page_indexes is not None and (
+                not action.page_indexes
+                or len(set(action.page_indexes)) != len(action.page_indexes)
+                or any(int(page) < 0 or int(page) >= len(state.expected_page_outcomes) for page in action.page_indexes)
+            ):
+                raise ValueError("translation phase page_indexes must select declared scenario pages")
+            if action.target_pc is not None:
+                target_pc = int(action.target_pc)
+            elif action.page_indexes is not None and len(action.page_indexes) == 1:
+                target_pc = int(state.expected_page_outcomes[int(action.page_indexes[0])]["va"])
+            else:
+                target_pc = int(scenario.va)
             env.monitor.clear()
-            env.monitor.set_expected_pc(int(action.target_pc if action.target_pc is not None else scenario.va))
-            env.arm_translation_scenario(state)
+            env.monitor.set_expected_pc(target_pc)
+            env.arm_translation_scenario(
+                state,
+                page_indexes=action.page_indexes,
+                expect_ptw=bool(action.expect_ptw),
+            )
+            env.translation_oracle.set_fetch_observation_ready(ready=not action.redirect)
             env.translation_oracle.set_speculative_request_policy(
                 allow_before_response=bool(action.allow_speculative_before_response)
             )
@@ -125,7 +146,7 @@ class TranslationScenarioSequence:
             request_count = int(env.ptw_agent.get_stats()["req_count"])
             if action.redirect:
                 env.backend_model.inject_redirect(
-                    int(action.target_pc if action.target_pc is not None else scenario.va),
+                    target_pc,
                     "translation-scenario-sequence",
                 )
             if int(action.wait_for_ptw_requests):

@@ -255,6 +255,28 @@ def test_oracle_accepts_the_second_page_ptw_transaction_after_the_first_fetch() 
     assert stats["active"]["fetched_pages"] == [0, 1]
 
 
+def test_oracle_can_verify_a_selected_page_without_a_new_ptw_request() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    state = TranslationScenarioBuilder(env).build(
+        TranslationScenario(
+            scenario_id="oracle-selected-page-hit",
+            va=0x8020_0000,
+            pa=0x8040_0000,
+            payload=b"\x13\x00\x00\x00" * 1025,
+            page_count=2,
+        )
+    )
+
+    active = env.arm_translation_scenario(state, page_indexes=(1,), expect_ptw=False)
+    second = state.expected_page_outcomes[1]
+    env.translation_oracle.observe_fetch_request(10, path="icache", pa=int(second["pa"]) & ~0x3F)
+
+    stats = env.assert_translation_scenario()
+    assert active["expected_ptw_requests"] == []
+    assert active["selected_pages"] == [1]
+    assert stats["active"]["fetched_pages"] == [1]
+
+
 def test_oracle_rejects_second_page_fetch_with_the_wrong_pma_path() -> None:
     env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
     scenario = TranslationScenario(

@@ -10,6 +10,7 @@ from .translation_scenarios import (
     TranslationScenario,
     TranslationScenarioBuilder,
     TranslationScenarioState,
+    TranslationSectorLane,
 )
 from .translation_scenario_sequence import TranslationScenarioPhase, TranslationScenarioSequence, TranslationSfenceAction
 
@@ -30,6 +31,7 @@ __all__ = [
     "TranslationScenario",
     "TranslationScenarioBuilder",
     "TranslationScenarioState",
+    "TranslationSectorLane",
     "TranslationScenarioPhase",
     "TranslationScenarioSequence",
     "TranslationSfenceAction",

@@ -91,10 +91,21 @@ class TranslationPermissionOracle:
             "guest_fault": "instruction_guest_page_fault",
         }.get(str(state.scenario.expected_result))
 
-    def arm(self, state, *, translation_epoch: int) -> dict:
+    def arm(self, state, *, translation_epoch: int, page_indexes=None, expect_ptw: bool = True) -> dict:
+        all_page_outcomes = [dict(outcome) for outcome in getattr(state, "expected_page_outcomes", (state.expected_outcome,))]
+        if page_indexes is None:
+            selected_pages = tuple(range(len(all_page_outcomes)))
+        else:
+            selected_pages = tuple(int(page) for page in page_indexes)
+        if (
+            not selected_pages
+            or len(set(selected_pages)) != len(selected_pages)
+            or any(page < 0 or page >= len(all_page_outcomes) for page in selected_pages)
+        ):
+            raise ValueError("translation oracle page_indexes must select declared scenario pages")
+        page_outcomes = [all_page_outcomes[page] for page in selected_pages]
         expected_fault = self._expected_fault(state)
-        page_outcomes = [dict(outcome) for outcome in getattr(state, "expected_page_outcomes", (state.expected_outcome,))]
-        expected_ptw_requests = [] if (
+        expected_ptw_requests = [] if not expect_ptw or (
             str(state.scenario.mode).lower() == "bare" and int(state.scenario.s2xlate) == 0
         ) else [
             {
@@ -103,7 +114,7 @@ class TranslationPermissionOracle:
                 "s2xlate": int(state.expected_ptw_request["s2xlate"]),
                 "get_gpa": int(state.expected_ptw_request["get_gpa"]),
             }
-            for page in range(int(state.scenario.page_count))
+            for page in selected_pages
         ]
         if expected_fault == "instruction_guest_page_fault":
             expected_ptw_requests.extend(
@@ -113,10 +124,10 @@ class TranslationPermissionOracle:
                     "s2xlate": int(state.expected_ptw_request["s2xlate"]),
                     "get_gpa": 1,
                 }
-                for page in range(int(state.scenario.page_count))
+                for page in selected_pages
             )
         expected_fetches = []
-        for page, outcome in enumerate(page_outcomes):
+        for page, outcome in zip(selected_pages, page_outcomes):
             if not outcome.get("ok", False):
                 continue
             path = "icache" if outcome["expected_path"] == "cacheable" else "uncache"
@@ -132,11 +143,12 @@ class TranslationPermissionOracle:
         self.active = {
             "scenario_id": str(state.scenario.scenario_id),
             "translation_epoch": int(translation_epoch),
-            "va": int(state.scenario.va),
+            "va": int(page_outcomes[0]["va"]),
             "payload_size": len(state.scenario.payload),
             "expected_ptw_request": dict(state.expected_ptw_request),
             "expected_ptw_requests": expected_ptw_requests,
-            "expected_outcome": dict(state.expected_outcome),
+            "expected_outcome": dict(page_outcomes[0]),
+            "selected_pages": list(selected_pages),
             "expected_page_outcomes": page_outcomes,
             "expected_fetches": expected_fetches,
             "expected_path": "fault" if expected_fault else str(state.scenario.expected_path),
@@ -159,6 +171,9 @@ class TranslationPermissionOracle:
             "ptw_request_counts": [],
             "fetched_pages": [],
             "allow_speculative_before_response": False,
+            "fetch_observation_ready": True,
+            "fetch_observation_not_before": 0,
+            "redirect_count_at_arm": int(getattr(getattr(self.env, "monitor", None), "redirect_count", 0)),
         }
         self._icache_cursor = len(getattr(getattr(self.env, "icache_agent", None), "request_records", []))
         self._uncache_cursor = len(getattr(getattr(self.env, "uncache_agent", None), "request_addrs", []))
@@ -284,6 +299,9 @@ class TranslationPermissionOracle:
             return
         actual_path = str(path)
         actual_pa = int(pa)
+        if not self.active["fetch_observation_ready"] or int(cycle) < int(self.active["fetch_observation_not_before"]):
+            self._record(cycle, "pre_redirect_fetch_request", path=actual_path, pa=actual_pa)
+            return
         if self.active["expected_ptw_requests"] and not self.active["response_seen"]:
             # A phase transition can leave prior ICache requests in flight. They
             # cannot be attributed to the newly armed translation epoch yet.
@@ -472,6 +490,11 @@ class TranslationPermissionOracle:
     def on_clock_edge(self, cycle: int) -> None:
         if self.active is None or self.env is None:
             return
+        if not self.active["fetch_observation_ready"]:
+            redirect_count = int(getattr(getattr(self.env, "monitor", None), "redirect_count", 0))
+            if redirect_count > int(self.active["redirect_count_at_arm"]):
+                self.active["fetch_observation_ready"] = True
+                self.active["fetch_observation_not_before"] = int(cycle) + 2
         ptw_if = getattr(self.env, "ptw_if", None)
         if ptw_if is not None and self._read(ptw_if.req_0_valid) and self._read(ptw_if.req_0_ready):
             self.observe_ptw_request(
@@ -554,6 +577,10 @@ class TranslationPermissionOracle:
     def set_speculative_request_policy(self, *, allow_before_response: bool) -> None:
         if self.active is not None:
             self.active["allow_speculative_before_response"] = bool(allow_before_response)
+
+    def set_fetch_observation_ready(self, *, ready: bool) -> None:
+        if self.active is not None:
+            self.active["fetch_observation_ready"] = bool(ready)
 
     def discard_pending_ptw_responses(self, cycle: int, *, agent_dropped: int) -> None:
         if self.active is None or int(agent_dropped) <= 0:

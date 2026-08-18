@@ -81,6 +81,16 @@ class TranslationPtwResponseOverride:
 
 
 @dataclass(frozen=True)
+class TranslationSectorLane:
+    """One S-stage level-0 sector lane returned by a PTW response."""
+
+    lane: int
+    ppn: int
+    valid: int = 1
+    pte_present: int = 1
+
+
+@dataclass(frozen=True)
 class TranslationScenario:
     """One reproducible Sv39 translation setup shared by model and DUT."""
 
@@ -100,6 +110,7 @@ class TranslationScenario:
     ptw_response_latency_max: Optional[int] = None
     ptw_response_seed: int = 1
     ptw_response_overrides: Tuple[TranslationPtwResponseOverride, ...] = ()
+    s1_sector_lanes: Tuple[TranslationSectorLane, ...] = ()
     max_ptw_requests_per_key: Optional[int] = None
     satp_asid: int = 0
     satp_ppn: int = 0
@@ -270,6 +281,29 @@ class TranslationScenarioBuilder:
         self.env.ptw_agent.validate_response_overrides(
             tuple(override.as_agent_config() for override in scenario.ptw_response_overrides)
         )
+        if scenario.s1_sector_lanes:
+            if stage1_mode == "bare" or s2xlate == _S2XLATE_ONLY_STAGE2 or int(scenario.s1_pte.level) != 0:
+                raise ValueError("S-stage sector lanes require a non-bare level-0 stage-1 translation")
+            seen_lanes = set()
+            target_ppn = (
+                int(scenario.gpa)
+                if s2xlate == _S2XLATE_ALL_STAGE and scenario.gpa is not None
+                else int(scenario.pa)
+            ) >> 12
+            for entry in scenario.s1_sector_lanes:
+                if not 0 <= int(entry.lane) <= 7:
+                    raise ValueError(f"sector lane {entry.lane} is outside the eight-lane response")
+                if int(entry.lane) in seen_lanes:
+                    raise ValueError(f"duplicate sector lane {entry.lane}")
+                seen_lanes.add(int(entry.lane))
+                if int(entry.ppn) < 0:
+                    raise ValueError("sector lane PPN must be non-negative")
+                if int(entry.valid) not in {0, 1} or int(entry.pte_present) not in {0, 1}:
+                    raise ValueError("sector lane valid and pte_present must be 0 or 1")
+                if int(entry.valid) and not int(entry.pte_present):
+                    raise ValueError("a valid sector lane requires a present PTE")
+                if int(entry.pte_present) and (int(entry.ppn) >> 3) != (target_ppn >> 3):
+                    raise ValueError("sector lane PPN must share the response PPN high bits")
         if s2xlate == _S2XLATE_ALL_STAGE:
             if scenario.gpa is None:
                 raise ValueError("all-stage translation requires gpa")
@@ -391,6 +425,18 @@ class TranslationScenarioBuilder:
             self._map_stage2_pages(self.env, scenario, int(scenario.gpa))
         elif str(scenario.mode).lower() != "bare":
             self._map_stage1_pages(self.env, scenario, int(scenario.pa))
+        if scenario.s1_sector_lanes:
+            sector_base = (int(scenario.va) >> 12) & ~0x7
+            lane_pte = scenario.s1_pte.as_mapping_kwargs()
+            for entry in scenario.s1_sector_lanes:
+                if not int(entry.pte_present):
+                    continue
+                self.env.page_table.map_page(
+                    sector_base + int(entry.lane),
+                    int(entry.ppn),
+                    **{**lane_pte, "v": int(entry.valid)},
+                )
+            self.env.page_table.enable_stage1_sector_response(int(scenario.va) >> 12)
 
         if int(scenario.s1_pf) or int(scenario.s1_af):
             self.env.page_table.set_stage1_response_fault(
@@ -468,6 +514,7 @@ class TranslationScenarioBuilder:
 __all__ = [
     "TranslationPmpPmaEntry",
     "TranslationPtwResponseOverride",
+    "TranslationSectorLane",
     "TranslationPte",
     "TranslationScenario",
     "TranslationScenarioBuilder",

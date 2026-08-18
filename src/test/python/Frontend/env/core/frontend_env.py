@@ -1015,7 +1015,7 @@ class FrontendEnv:
     def get_errors(self) -> list:
         return self.monitor.get_errors()
 
-    def arm_translation_scenario(self, state) -> dict:
+    def arm_translation_scenario(self, state, *, page_indexes=None, expect_ptw: bool = True) -> dict:
         state_epoch = int(state.translation_epoch)
         if state_epoch != int(self.translation_epoch):
             raise ValueError(
@@ -1025,7 +1025,12 @@ class FrontendEnv:
             s2xlate=int(state.scenario.s2xlate),
             priv_imode=int(state.scenario.priv_imode),
         )
-        return self.translation_oracle.arm(state, translation_epoch=state_epoch)
+        return self.translation_oracle.arm(
+            state,
+            translation_epoch=state_epoch,
+            page_indexes=page_indexes,
+            expect_ptw=bool(expect_ptw),
+        )
 
     def assert_translation_scenario(self) -> dict:
         return self.translation_oracle.assert_complete()

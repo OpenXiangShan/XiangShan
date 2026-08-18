@@ -11,6 +11,7 @@ from env.sequences import (
     TranslationPtwResponseOverride,
     TranslationScenario,
     TranslationScenarioBuilder,
+    TranslationSectorLane,
 )
 from env.support import PmpPmaConfig
 
@@ -146,6 +147,33 @@ def test_builder_applies_request_keyed_ptw_response_override() -> None:
     overridden = env.ptw_agent._build_response(request)
     assert overridden["s1_valididx"] == [0] * 8
     assert env.ptw_agent.get_stats()["response_override_hit_count"] == 1
+
+
+def test_builder_composes_declared_stage1_sector_lanes_into_one_ptw_response() -> None:
+    env = _env()
+    va = 0x8020_0000
+    pa = 0x8040_0000
+    state = TranslationScenarioBuilder(env).build(
+        TranslationScenario(
+            scenario_id="sv39-sector-lanes",
+            va=va,
+            pa=pa,
+            payload=b"\x13\x00\x00\x00",
+            s1_sector_lanes=(
+                TranslationSectorLane(lane=1, ppn=(pa >> 12) + 1),
+                TranslationSectorLane(lane=2, ppn=(pa >> 12) + 2, valid=0),
+            ),
+        )
+    )
+
+    response = env.page_table.build_ptw_resp(state.expected_ptw_request["vpn"])
+    translated_pa, ok, _ = env.page_table.translate(va + 0x1000)
+
+    assert response["s1_valididx"][:3] == [1, 1, 0]
+    assert response["s1_pteidx"][:3] == [1, 1, 1]
+    assert response["s1_ppn_low"][:3] == [0, 1, 2]
+    assert ok is True
+    assert translated_pa == pa + 0x1000
 
 
 def test_builder_rejects_invalid_ptw_response_override_before_mutating_env() -> None:

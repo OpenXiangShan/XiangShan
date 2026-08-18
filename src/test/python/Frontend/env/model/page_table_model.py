@@ -21,6 +21,7 @@ class PageTableModel:
         self.set_mode(mode)
         self.pte_map: Dict[int, PTE] = {}
         self.stage2_pte_map: Dict[int, PTE] = {}
+        self._stage1_sector_response_tags: set[int] = set()
         # PTW response faults describe walk/access failures, not PTE fields.
         self._stage1_fault_map: Dict[int, Tuple[int, int]] = {}
         self._stage2_fault_map: Dict[int, Tuple[int, int]] = {}
@@ -28,6 +29,7 @@ class PageTableModel:
     def clear(self) -> None:
         self.pte_map.clear()
         self.stage2_pte_map.clear()
+        self._stage1_sector_response_tags.clear()
         self._stage1_fault_map.clear()
         self._stage2_fault_map.clear()
 
@@ -113,6 +115,9 @@ class PageTableModel:
             vmid=int(vmid),
             pbmt=int(pbmt),
         )
+
+    def enable_stage1_sector_response(self, vpn: int) -> None:
+        self._stage1_sector_response_tags.add(self.normalize_ptw_vpn(vpn) >> self._SECTOR_IDX_BITS)
 
     def set_stage1_response_fault(self, vpn: int, *, page_fault: int = 0, access_fault: int = 0) -> None:
         """Inject response-side S-stage faults without changing the returned PTE."""
@@ -418,6 +423,19 @@ class PageTableModel:
 
     def _build_stage1_resp(self, vpn: int, pte: PTE, pf: int) -> dict:
         addr_low, ppn_low, valididx, pteidx = self._build_sector_arrays(vpn, pte.ppn, pte.level, pte.v)
+        sector_tag = self.normalize_ptw_vpn(vpn) >> self._SECTOR_IDX_BITS
+        if int(pte.level) == 0 and sector_tag in self._stage1_sector_response_tags:
+            sector_base = self.normalize_ptw_vpn(vpn) & ~self._SECTOR_MASK
+            ppn_low = [0] * (self._SECTOR_MASK + 1)
+            valididx = [0] * (self._SECTOR_MASK + 1)
+            pteidx = [0] * (self._SECTOR_MASK + 1)
+            for lane in range(self._SECTOR_MASK + 1):
+                lane_pte = self._lookup_pte(self.pte_map, sector_base + lane, self.mode)
+                if lane_pte is None or int(lane_pte.level) != 0:
+                    continue
+                ppn_low[lane] = int(lane_pte.ppn) & self._SECTOR_MASK
+                valididx[lane] = int(lane_pte.v)
+                pteidx[lane] = 1
         resp = {
             "s1_entry_tag": vpn >> self._SECTOR_IDX_BITS,
             "s1_entry_asid": pte.asid,
