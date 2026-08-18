@@ -88,10 +88,10 @@ class BpuFlushInfo(implicit p: Parameters) extends FtqBundle with HasCircularQue
 }
 
 class FtqToCtrlIO(implicit p: Parameters) extends FtqBundle {
-  // write to backend pc mem
-  val wen:     Bool      = Output(Bool())
-  val ftqIdx:  UInt      = Output(UInt(FtqPtr.width.W))
-  val startPc: GuardedPc = Output(GuardedPc())
+  // write to backend pc mem, one port per prediction block, as Bpu can enqueue several blocks in one cycle
+  val wen:     Vec[Bool]      = Output(Vec(MaxPredictionNum, Bool()))
+  val ftqIdx:  Vec[UInt]      = Output(Vec(MaxPredictionNum, UInt(FtqPtr.width.W)))
+  val startPc: Vec[GuardedPc] = Output(Vec(MaxPredictionNum, GuardedPc()))
 }
 
 class PerfMeta(implicit p: Parameters) extends FtqBundle {

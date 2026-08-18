@@ -478,10 +478,18 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** bpu to ftq io *** */
   io.toFtq.prediction.valid := s1_valid && s2_ready || s3_override
+
+  private val firstBlock = io.toFtq.prediction.bits.blocks.head
+  firstBlock.valid := true.B
   when(s3_override) {
-    io.toFtq.prediction.bits.fromStage(s3_startPc.get, s3_prediction)
+    firstBlock.bits.fromStage(s3_startPc.get, s3_prediction)
   }.otherwise {
-    io.toFtq.prediction.bits.fromStage(s1_startPc.get, s1_prediction)
+    firstBlock.bits.fromStage(s1_startPc.get, s1_prediction)
+  }
+  // 2-taken prediction is not implemented yet, so we predict a single block per cycle
+  io.toFtq.prediction.bits.blocks.tail.foreach { block =>
+    block.valid := false.B
+    block.bits  := 0.U.asTypeOf(block.bits)
   }
   io.toFtq.prediction.bits.s3Override := s3_override
 
@@ -679,8 +687,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   XSPerfHistogram(
     "fetchBlockSize",
     Mux(
-      io.toFtq.prediction.bits.taken,
-      getFtqOffset(io.toFtq.prediction.bits.startPc, io.toFtq.prediction.bits.endPosition),
+      firstBlock.bits.taken,
+      getFtqOffset(firstBlock.bits.startPc, firstBlock.bits.endPosition),
       FetchBlockInstNum.U
     ),
     io.toFtq.prediction.fire,

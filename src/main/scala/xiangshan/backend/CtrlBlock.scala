@@ -114,7 +114,10 @@ class CtrlBlockImp(
   val redirectGen = Module(new RedirectGenerator)
   val lsqEnqCtrl = Module(new LsqEnqCtrl)
   private def hasRen: Boolean = true
-  private val pcMem = Module(new SyncDataModuleTemplate(GuardedPc(), FtqSize, numPcMemRead, 1, "BackendPC", hasRen = hasRen))
+  // Ftq writes one entry per prediction block, and it can enqueue several blocks in one cycle
+  private val numPcMemWrite = io.frontend.fromFtq.MaxPredictionNum
+  // TODO: implement banking to support consecutive write painlessly
+  private val pcMem = Module(new SyncDataModuleTemplate(GuardedPc(), FtqSize, numPcMemRead, numPcMemWrite, "BackendPC", hasRen = hasRen))
   private val rob = wrapper.rob.module
   private val memCtrl = Module(new MemCtrl(params))
 
@@ -810,9 +813,11 @@ class CtrlBlockImp(
   }}
   io.toIssueBlock.flush := s1_s3_redirect
 
-  pcMem.io.wen.head   := GatedValidRegNext(io.frontend.fromFtq.wen)
-  pcMem.io.waddr.head := RegEnable(io.frontend.fromFtq.ftqIdx, io.frontend.fromFtq.wen)
-  pcMem.io.wdata.head := RegEnable(io.frontend.fromFtq.startPc, io.frontend.fromFtq.wen)
+  for (i <- 0 until numPcMemWrite) {
+    pcMem.io.wen(i)   := GatedValidRegNext(io.frontend.fromFtq.wen(i))
+    pcMem.io.waddr(i) := RegEnable(io.frontend.fromFtq.ftqIdx(i), io.frontend.fromFtq.wen(i))
+    pcMem.io.wdata(i) := RegEnable(io.frontend.fromFtq.startPc(i), io.frontend.fromFtq.wen(i))
+  }
 
   io.toDataPath.flush := s2_s4_redirect
   io.toExuBlock.flush := s2_s4_redirect
