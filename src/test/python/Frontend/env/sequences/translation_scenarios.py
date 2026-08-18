@@ -10,6 +10,7 @@ from ..support.pmp_pma import PmpPmaConfig, csr_addresses_for_entry, encode_pmp_
 
 _PAGE_SIZE = 0x1000
 _SV39_MODE = 8
+_SV48_MODE = 9
 _S2XLATE_NONE = 0
 _S2XLATE_ONLY_STAGE1 = 1
 _S2XLATE_ONLY_STAGE2 = 2
@@ -89,6 +90,7 @@ class TranslationScenario:
     payload: bytes
     page_count: int = 1
     mode: str = "sv39"
+    stage2_mode: Optional[str] = None
     s1_pte: TranslationPte = field(default_factory=TranslationPte)
     s2_pte: TranslationPte = field(default_factory=TranslationPte)
     gpa: Optional[int] = None
@@ -138,22 +140,46 @@ class TranslationScenarioBuilder:
         self.env = env
 
     @staticmethod
-    def _is_sv39_canonical(va: int) -> bool:
+    def _is_canonical(va: int, bits: int) -> bool:
         value = int(va)
         if not 0 <= value < (1 << 64):
             return False
-        sign = (value >> 38) & 1
-        upper = value >> 39
-        return upper == ((1 << 25) - 1 if sign else 0)
+        sign = (value >> (int(bits) - 1)) & 1
+        upper = value >> int(bits)
+        return upper == ((1 << (64 - int(bits))) - 1 if sign else 0)
+
+    @staticmethod
+    def _mode_name(mode: str, stage: str, *, allow_bare: bool) -> str:
+        normalized = str(mode).lower()
+        supported = {"sv39", "sv48"}
+        if allow_bare:
+            supported.add("bare")
+        if normalized not in supported:
+            allowed = "/".join(sorted(supported))
+            raise ValueError(f"unsupported {stage} translation mode: {mode}; expected {allowed}")
+        return normalized
+
+    @staticmethod
+    def _mode_csr_value(mode: str) -> int:
+        return {"bare": 0, "sv39": _SV39_MODE, "sv48": _SV48_MODE}[str(mode).lower()]
+
+    @staticmethod
+    def _canonical_bits(mode: str) -> int:
+        return {"sv39": 39, "sv48": 48}[str(mode).lower()]
+
+    @staticmethod
+    def _stage2_gpa_bits(mode: str) -> int:
+        return {"sv39": 41, "sv48": 50}[str(mode).lower()]
 
     @staticmethod
     def _page_count_needed(va: int, payload_size: int) -> int:
         return max(1, ((int(va) & (_PAGE_SIZE - 1)) + max(1, int(payload_size)) + _PAGE_SIZE - 1) // _PAGE_SIZE)
 
     @staticmethod
-    def _validate_pte(pte: TranslationPte, stage: str) -> None:
-        if int(pte.level) != 0:
-            raise ValueError(f"{stage} PTE level {pte.level} is unsupported; only Sv39 level-0 pages are supported")
+    def _validate_pte(pte: TranslationPte, stage: str, mode: str) -> None:
+        max_level = 3 if str(mode).lower() == "sv48" else 2
+        if not 0 <= int(pte.level) <= max_level:
+            raise ValueError(f"{stage} PTE level {pte.level} is outside the {mode} leaf range")
         for name, value in pte.as_mapping_kwargs().items():
             if name == "level":
                 continue
@@ -186,13 +212,27 @@ class TranslationScenarioBuilder:
         ):
             raise ValueError("translation without G-stage cannot inject G-stage response faults")
 
+    @staticmethod
+    def _validate_superpage_target(va: int, target: int, pte: TranslationPte, stage: str, page_count: int) -> None:
+        level = int(pte.level)
+        if level == 0:
+            return
+        page_mask = (1 << (level * 9)) - 1
+        va_vpn = int(va) >> 12
+        target_ppn = int(target) >> 12
+        if (va_vpn & page_mask) != (target_ppn & page_mask):
+            raise ValueError(f"{stage} superpage VA and target must share the leaf page offset")
+        if (va_vpn & page_mask) + int(page_count) > page_mask + 1:
+            raise ValueError(f"{stage} superpage does not cover the declared page_count")
+
     def validate(self, scenario: TranslationScenario) -> None:
         if not str(scenario.scenario_id):
             raise ValueError("translation scenario_id must be non-empty")
-        if str(scenario.mode).lower() != "sv39":
-            raise ValueError(f"unsupported translation mode: {scenario.mode}; only Sv39 is supported")
-        if not self._is_sv39_canonical(scenario.va):
-            raise ValueError(f"Sv39 non-canonical VA is unsupported: 0x{int(scenario.va):x}")
+        s2xlate = int(scenario.s2xlate)
+        stage1_mode = self._mode_name(scenario.mode, "stage-1", allow_bare=(s2xlate == _S2XLATE_ONLY_STAGE2))
+        stage2_mode = self._mode_name(scenario.stage2_mode or "sv39", "stage-2", allow_bare=False)
+        if s2xlate != _S2XLATE_ONLY_STAGE2 and not self._is_canonical(scenario.va, self._canonical_bits(stage1_mode)):
+            raise ValueError(f"{stage1_mode} non-canonical VA is unsupported: 0x{int(scenario.va):x}")
         if int(scenario.page_count) < 1:
             raise ValueError("translation page_count must be positive")
         if not scenario.payload:
@@ -201,7 +241,7 @@ class TranslationScenarioBuilder:
             raise ValueError("VA and PA must have the same page offset")
         if int(scenario.page_count) < self._page_count_needed(scenario.va, len(scenario.payload)):
             raise ValueError("translation page_count does not cover the payload")
-        if int(scenario.s2xlate) not in {
+        if s2xlate not in {
             _S2XLATE_NONE,
             _S2XLATE_ONLY_STAGE1,
             _S2XLATE_ONLY_STAGE2,
@@ -223,7 +263,7 @@ class TranslationScenarioBuilder:
         self.env.ptw_agent.validate_response_overrides(
             tuple(override.as_agent_config() for override in scenario.ptw_response_overrides)
         )
-        if int(scenario.s2xlate) == _S2XLATE_ALL_STAGE:
+        if s2xlate == _S2XLATE_ALL_STAGE:
             if scenario.gpa is None:
                 raise ValueError("all-stage translation requires gpa")
             if int(scenario.va) & (_PAGE_SIZE - 1) != int(scenario.gpa) & (_PAGE_SIZE - 1):
@@ -232,8 +272,19 @@ class TranslationScenarioBuilder:
                 raise ValueError("GPA and PA must have the same page offset")
             if int(scenario.s1_pte.vmid) != int(scenario.hgatp_vmid):
                 raise ValueError("all-stage stage-1 PTE VMID must match hgatp_vmid")
-        self._validate_pte(scenario.s1_pte, "stage-1")
-        self._validate_pte(scenario.s2_pte, "stage-2")
+        if s2xlate in {_S2XLATE_ONLY_STAGE2, _S2XLATE_ALL_STAGE}:
+            stage2_input = int(scenario.gpa) if s2xlate == _S2XLATE_ALL_STAGE else int(scenario.va)
+            if not 0 <= stage2_input < (1 << self._stage2_gpa_bits(stage2_mode)):
+                raise ValueError(f"{stage2_mode}x4 GPA is unsupported: 0x{stage2_input:x}")
+        self._validate_pte(scenario.s1_pte, "stage-1", stage1_mode)
+        self._validate_pte(scenario.s2_pte, "stage-2", stage2_mode)
+        stage1_target = int(scenario.gpa) if s2xlate == _S2XLATE_ALL_STAGE else int(scenario.pa)
+        stage2_target = int(scenario.pa)
+        if s2xlate != _S2XLATE_ONLY_STAGE2:
+            self._validate_superpage_target(scenario.va, stage1_target, scenario.s1_pte, "stage-1", scenario.page_count)
+        if s2xlate in {_S2XLATE_ONLY_STAGE2, _S2XLATE_ALL_STAGE}:
+            stage2_va = int(scenario.gpa) if s2xlate == _S2XLATE_ALL_STAGE else int(scenario.va)
+            self._validate_superpage_target(stage2_va, stage2_target, scenario.s2_pte, "stage-2", scenario.page_count)
         self._validate_response_faults(scenario)
         for entry in scenario.pmp_entries:
             if entry.kind != "pmp":
@@ -251,6 +302,15 @@ class TranslationScenarioBuilder:
     @staticmethod
     def _map_stage1_pages(env, scenario: TranslationScenario, target: int) -> None:
         pte_kwargs = scenario.s1_pte.as_mapping_kwargs()
+        level = int(scenario.s1_pte.level)
+        if level:
+            page_mask = (1 << (level * 9)) - 1
+            env.page_table.map_page(
+                int(scenario.va) >> 12,
+                (int(target) >> 12) & ~page_mask,
+                **pte_kwargs,
+            )
+            return
         for page in range(int(scenario.page_count)):
             env.page_table.map_page(
                 (int(scenario.va) >> 12) + page,
@@ -262,6 +322,15 @@ class TranslationScenarioBuilder:
     def _map_stage2_pages(env, scenario: TranslationScenario, target: int) -> None:
         pte_kwargs = scenario.s2_pte.as_mapping_kwargs()
         pte_kwargs.pop("asid")
+        level = int(scenario.s2_pte.level)
+        if level:
+            page_mask = (1 << (level * 9)) - 1
+            env.page_table.map_stage2_page(
+                int(target) >> 12,
+                (int(scenario.pa) >> 12) & ~page_mask,
+                **pte_kwargs,
+            )
+            return
         for page in range(int(scenario.page_count)):
             env.page_table.map_stage2_page(
                 (int(target) >> 12) + page,
@@ -336,11 +405,13 @@ class TranslationScenarioBuilder:
                 None if scenario.ptw_response_latency_max is None else int(scenario.ptw_response_latency_max)
             ),
             seed=int(scenario.ptw_response_seed),
-            mode="sv39",
+            mode=str(scenario.mode).lower(),
             response_source="model",
             compare_drive_source="model",
             response_overrides=tuple(override.as_agent_config() for override in scenario.ptw_response_overrides),
         )
+        stage2_mode = str(scenario.stage2_mode or "sv39").lower()
+        self.env.page_table.set_stage2_mode(stage2_mode)
         expected_page_outcomes = tuple(
             self._expected_page_outcome(
                 scenario,
@@ -350,13 +421,13 @@ class TranslationScenarioBuilder:
         )
         self.env.load_program(scenario.payload, int(scenario.pa))
         context = self.env.update_translation_context(
-            satp_mode=_SV39_MODE,
+            satp_mode=self._mode_csr_value(scenario.mode),
             satp_asid=int(scenario.satp_asid),
             satp_ppn=int(scenario.satp_ppn),
-            vsatp_mode=(_SV39_MODE if s2xlate == _S2XLATE_ALL_STAGE else None),
+            vsatp_mode=(self._mode_csr_value(scenario.mode) if s2xlate == _S2XLATE_ALL_STAGE else None),
             vsatp_asid=(int(scenario.vsatp_asid) if s2xlate == _S2XLATE_ALL_STAGE else None),
             vsatp_ppn=(int(scenario.vsatp_ppn) if s2xlate == _S2XLATE_ALL_STAGE else None),
-            hgatp_mode=(_SV39_MODE if s2xlate in {_S2XLATE_ONLY_STAGE2, _S2XLATE_ALL_STAGE} else None),
+            hgatp_mode=(self._mode_csr_value(stage2_mode) if s2xlate in {_S2XLATE_ONLY_STAGE2, _S2XLATE_ALL_STAGE} else None),
             hgatp_vmid=(int(scenario.hgatp_vmid) if s2xlate in {_S2XLATE_ONLY_STAGE2, _S2XLATE_ALL_STAGE} else None),
             hgatp_ppn=(int(scenario.hgatp_ppn) if s2xlate in {_S2XLATE_ONLY_STAGE2, _S2XLATE_ALL_STAGE} else None),
             priv_imode=int(scenario.priv_imode),
@@ -375,7 +446,7 @@ class TranslationScenarioBuilder:
             translation_epoch=int(self.env.translation_epoch),
             expected_ptw_request={
                 "scenario_id": str(scenario.scenario_id),
-                "vpn": int(scenario.va) >> 12,
+                "vpn": self.env.page_table.normalize_ptw_vpn(int(scenario.va) >> 12),
                 "s2xlate": s2xlate,
                 "get_gpa": int(scenario.get_gpa),
             },

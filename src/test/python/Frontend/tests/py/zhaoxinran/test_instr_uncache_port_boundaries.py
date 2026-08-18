@@ -1460,6 +1460,116 @@ def test_uncache_sv39_all_stage_uses_stage2_physical_address(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_sv39_level1_superpage_uses_mapped_physical_address(env):
+    va = 0x8020_0000
+    pa = 0x8040_0000
+    superpage_size = 0x20_0000
+    _initialize_sv39_fetch(env, reset_vector=va)
+    scenario = TranslationScenario(
+        scenario_id="sv39-level1-superpage-dut",
+        va=va,
+        pa=pa,
+        payload=int(_CNOP).to_bytes(2, "little") * 256,
+        s1_pte=TranslationPte(level=1),
+        expected_path="cacheable",
+        expected_result="miss_refill",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=pa,
+                size=superpage_size,
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+                addr=pa,
+                size=superpage_size,
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(va)
+    env.arm_translation_scenario(state)
+    _force_redirect_to(env, va)
+
+    commits = RunUntilCommitSequence(target=CommitTarget(target_count=6, max_cycles=6000)).run(env)
+
+    assert commits >= 6
+    assert int(env.ptw_agent.get_stats().get("resp_count", 0)) >= 1
+    assert any(int(record["address"]) == pa for record in env.icache_agent.get_stats()["request_records"])
+    assert any(int(obs.pc) == va for obs in env.monitor.observations)
+    assert env.assert_translation_scenario()["error_count"] == 0
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_sv48x4_uses_stage2_physical_address(env):
+    va = 0xFFFF_8000_8020_0000
+    gpa = 0x8040_0000
+    pa = 0x8060_0000
+    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    scenario = TranslationScenario(
+        scenario_id="sv48x4-all-stage-dut",
+        va=va,
+        gpa=gpa,
+        pa=pa,
+        payload=int(_CNOP).to_bytes(2, "little") * 256,
+        mode="sv48",
+        stage2_mode="sv48",
+        s2xlate=3,
+        s1_pte=TranslationPte(asid=5, vmid=7),
+        s2_pte=TranslationPte(vmid=7),
+        vsatp_asid=5,
+        hgatp_vmid=7,
+        priv_virt=1,
+        expected_path="cacheable",
+        expected_result="miss_refill",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=pa,
+                size=0x1000,
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+                addr=pa,
+                size=0x1000,
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(va)
+    env.arm_translation_scenario(state)
+    _force_redirect_to(env, va)
+
+    commits = RunUntilCommitSequence(target=CommitTarget(target_count=6, max_cycles=6000)).run(env)
+
+    assert commits >= 6, {
+        "ptw": env.ptw_agent.get_stats(),
+        "icache": env.icache_agent.get_stats(),
+        "uncache": env.uncache_agent.get_stats(),
+        "translation": env.translation_oracle.get_stats(),
+    }
+    assert int(env.ptw_agent.get_stats().get("resp_count", 0)) >= 1
+    assert any(int(record["address"]) == pa for record in env.icache_agent.get_stats()["request_records"])
+    assert env.assert_translation_scenario()["error_count"] == 0
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.parametrize(
     "scenario_id,s1_pf,s1_af,s2_gpf,s2_gaf",
     [

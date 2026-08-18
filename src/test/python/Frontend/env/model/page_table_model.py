@@ -6,6 +6,7 @@ from .memory_model import PTE
 
 
 class PageTableModel:
+    _PTW_VPN_BITS = 38
     _SECTOR_IDX_BITS = 3
     _SECTOR_MASK = (1 << _SECTOR_IDX_BITS) - 1
     _VPN_LEVEL_BITS = 9
@@ -15,7 +16,9 @@ class PageTableModel:
     _ALL_STAGE = 3
 
     def __init__(self, mode: str = "bare") -> None:
-        self.mode = mode.lower()
+        self.mode = "bare"
+        self.stage2_mode = "sv39"
+        self.set_mode(mode)
         self.pte_map: Dict[int, PTE] = {}
         self.stage2_pte_map: Dict[int, PTE] = {}
         # PTW response faults describe walk/access failures, not PTE fields.
@@ -30,9 +33,15 @@ class PageTableModel:
 
     def set_mode(self, mode: str) -> None:
         mode = mode.lower()
-        if mode not in {"bare", "sv39"}:
+        if mode not in {"bare", "sv39", "sv48"}:
             raise ValueError(f"unsupported mode: {mode}")
         self.mode = mode
+
+    def set_stage2_mode(self, mode: str) -> None:
+        mode = mode.lower()
+        if mode not in {"sv39", "sv48"}:
+            raise ValueError(f"unsupported stage-2 mode: {mode}")
+        self.stage2_mode = mode
 
     def map_page(
         self,
@@ -107,22 +116,29 @@ class PageTableModel:
 
     def set_stage1_response_fault(self, vpn: int, *, page_fault: int = 0, access_fault: int = 0) -> None:
         """Inject response-side S-stage faults without changing the returned PTE."""
-        self._stage1_fault_map[int(vpn)] = (int(page_fault), int(access_fault))
+        self._stage1_fault_map[self.normalize_ptw_vpn(vpn)] = (int(page_fault), int(access_fault))
 
     def set_stage2_response_fault(self, gvpn: int, *, guest_page_fault: int = 0, guest_access_fault: int = 0) -> None:
         """Inject response-side G-stage faults without changing the returned PTE."""
-        self._stage2_fault_map[int(gvpn)] = (int(guest_page_fault), int(guest_access_fault))
+        self._stage2_fault_map[self.normalize_ptw_vpn(gvpn)] = (int(guest_page_fault), int(guest_access_fault))
+
+    @classmethod
+    def normalize_ptw_vpn(cls, vpn: int) -> int:
+        """Encode a VPN as it appears on the generated 38-bit PTW request port."""
+        return int(vpn) & ((1 << cls._PTW_VPN_BITS) - 1)
 
     @classmethod
     def _pte_key(cls, vpn: int, level: int) -> int:
         level = max(0, int(level))
         lower_bits = level * cls._VPN_LEVEL_BITS
-        return int(vpn) & ~((1 << lower_bits) - 1) if lower_bits else int(vpn)
+        vpn = cls.normalize_ptw_vpn(vpn)
+        return vpn & ~((1 << lower_bits) - 1) if lower_bits else vpn
 
     @classmethod
-    def _lookup_pte(cls, pte_map: Dict[int, PTE], vpn: int) -> Optional[PTE]:
+    def _lookup_pte(cls, pte_map: Dict[int, PTE], vpn: int, mode: str = "sv39") -> Optional[PTE]:
         vpn = int(vpn)
-        for level in range(3):
+        levels = 4 if str(mode).lower() == "sv48" else 3
+        for level in range(levels):
             pte = pte_map.get(cls._pte_key(vpn, level))
             if pte is not None and int(pte.level) == level:
                 return pte
@@ -158,7 +174,7 @@ class PageTableModel:
         return {0: "pma", 1: "uncache", 2: "mmio", 3: "fault"}.get(int(pbmt), "fault")
 
     def _stage1_fault(self, vpn: int, pte: Optional[PTE], priv_imode: int) -> Tuple[Optional[str], str]:
-        forced_pf, forced_af = self._stage1_fault_map.get(int(vpn), (0, 0))
+        forced_pf, forced_af = self._stage1_fault_map.get(self.normalize_ptw_vpn(vpn), (0, 0))
         if forced_af:
             return "access_fault", "stage1_access_fault"
         if forced_pf or pte is None or int(pte.v) == 0:
@@ -180,7 +196,7 @@ class PageTableModel:
         return None, "ok"
 
     def _stage2_fault(self, gvpn: int, pte: Optional[PTE]) -> Tuple[Optional[str], str]:
-        forced_gpf, forced_gaf = self._stage2_fault_map.get(int(gvpn), (0, 0))
+        forced_gpf, forced_gaf = self._stage2_fault_map.get(self.normalize_ptw_vpn(gvpn), (0, 0))
         if forced_gaf:
             return "access_fault", "stage2_guest_access_fault"
         if forced_gpf or pte is None or int(pte.v) == 0:
@@ -200,7 +216,10 @@ class PageTableModel:
     def _infer_s2xlate(self, vpn: int) -> int:
         if not self.stage2_pte_map:
             return self._ONLY_STAGE1
-        if self._lookup_pte(self.pte_map, vpn) is None and self._lookup_pte(self.stage2_pte_map, vpn) is not None:
+        if (
+            self._lookup_pte(self.pte_map, vpn, self.mode) is None
+            and self._lookup_pte(self.stage2_pte_map, vpn, self.stage2_mode) is not None
+        ):
             return self._ONLY_STAGE2
         return self._ALL_STAGE
 
@@ -235,7 +254,7 @@ class PageTableModel:
 
         metadata = {"mode": self.mode, "s2xlate": s2xlate, "stage2": s2xlate in {self._ONLY_STAGE2, self._ALL_STAGE}}
         if s2xlate == self._ONLY_STAGE2:
-            stage2_pte = self._lookup_pte(self.stage2_pte_map, vpn)
+            stage2_pte = self._lookup_pte(self.stage2_pte_map, vpn, self.stage2_mode)
             fault, reason = self._stage2_fault(vpn, stage2_pte)
             metadata.update(self._pte_metadata("stage2", stage2_pte))
             metadata["stage1_ok"] = False
@@ -258,7 +277,7 @@ class PageTableModel:
             stage1_reason = "ok"
             metadata["stage1_ok"] = True
         else:
-            stage1_pte = self._lookup_pte(self.pte_map, vpn)
+            stage1_pte = self._lookup_pte(self.pte_map, vpn, self.mode)
             stage1_fault, stage1_reason = self._stage1_fault(vpn, stage1_pte, priv_imode)
             metadata.update(self._pte_metadata("stage1", stage1_pte))
             metadata["stage1_ok"] = stage1_fault is None
@@ -282,7 +301,7 @@ class PageTableModel:
             metadata.update(self._outcome_metadata(None, "ok"))
             return pa, True, metadata
 
-        stage2_pte = self._lookup_pte(self.stage2_pte_map, stage1_ppn)
+        stage2_pte = self._lookup_pte(self.stage2_pte_map, stage1_ppn, self.stage2_mode)
         stage2_fault, stage2_reason = self._stage2_fault(stage1_ppn, stage2_pte)
         metadata.update(self._pte_metadata("stage2", stage2_pte))
         metadata["stage2_ok"] = stage2_fault is None
@@ -340,7 +359,7 @@ class PageTableModel:
                 "s2_gaf": 0,
             }
 
-        pte = self._lookup_pte(self.stage2_pte_map, gvpn)
+        pte = self._lookup_pte(self.stage2_pte_map, gvpn, self.stage2_mode)
         forced_gpf, forced_gaf = self._stage2_fault_map.get(gvpn, (0, 0))
         gpf = 1 if forced_gpf or pte is None or int(pte.v) == 0 else 0
         gaf = 1 if forced_gaf else 0
@@ -480,7 +499,7 @@ class PageTableModel:
             pte = PTE(ppn=vpn, level=0)
             pf = 0
         else:
-            pte = self._lookup_pte(self.pte_map, vpn)
+            pte = self._lookup_pte(self.pte_map, vpn, self.mode)
             forced_pf, forced_af = self._stage1_fault_map.get(vpn, (0, 0))
             pf = 1 if forced_pf or pte is None or int(pte.v) == 0 else 0
             if pte is None:

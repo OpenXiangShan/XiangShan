@@ -97,7 +97,7 @@ class TranslationPermissionOracle:
         expected_ptw_requests = [
             {
                 "scenario_id": str(state.scenario.scenario_id),
-                "vpn": (int(state.scenario.va) >> 12) + page,
+                "vpn": self.env.page_table.normalize_ptw_vpn((int(state.scenario.va) >> 12) + page),
                 "s2xlate": int(state.expected_ptw_request["s2xlate"]),
                 "get_gpa": int(state.expected_ptw_request["get_gpa"]),
             }
@@ -107,7 +107,7 @@ class TranslationPermissionOracle:
             expected_ptw_requests.extend(
                 {
                     "scenario_id": str(state.scenario.scenario_id),
-                    "vpn": (int(state.scenario.va) >> 12) + page,
+                    "vpn": self.env.page_table.normalize_ptw_vpn((int(state.scenario.va) >> 12) + page),
                     "s2xlate": int(state.expected_ptw_request["s2xlate"]),
                     "get_gpa": 1,
                 }

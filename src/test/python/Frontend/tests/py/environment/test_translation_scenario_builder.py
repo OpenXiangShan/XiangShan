@@ -438,16 +438,8 @@ def test_builder_rejects_unrepresentable_response_fault_combinations(scenario, m
     "scenario,match",
     [
         (
-            TranslationScenario("sv48", 0x80200000, 0x80400000, b"\x13", mode="sv48"),
-            "only Sv39",
-        ),
-        (
             TranslationScenario("noncanonical", 0x0000_0080_0000_0000, 0x80400000, b"\x13"),
             "non-canonical",
-        ),
-        (
-            TranslationScenario("superpage", 0x80200000, 0x80400000, b"\x13", s1_pte=TranslationPte(level=1)),
-            "level",
         ),
         (
             TranslationScenario("short-pages", 0x80200FF0, 0x80400FF0, b"\x13" * 17),
