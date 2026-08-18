@@ -301,6 +301,7 @@ def _unit_icache_interface() -> SimpleNamespace:
         a_bits_address=_Signal(),
         d_valid=_Signal(),
         d_bits_opcode=_Signal(),
+        d_bits_size=_Signal(),
         d_bits_source=_Signal(),
         d_bits_denied=_Signal(),
         d_bits_data=_Signal(),
@@ -337,11 +338,26 @@ def test_icache_agent_fault_injection_obeys_tilelink_contract(
 
     stats = agent.get_stats()
     assert int(stats["resp_line_count"]) == 1
+    assert int(interface.d_bits_size.value) == 6
     assert int(stats["denied_resp_count"]) == expected_denied
     assert int(stats["corrupt_resp_count"]) == expected_corrupt
     assert [int(item["beat_idx"]) for item in stats["response_records"]] == [0, 1]
     assert all(int(item["denied"]) == expected_denied for item in stats["response_records"])
     assert all(int(item["corrupt"]) == expected_corrupt for item in stats["response_records"])
+
+
+def test_icache_agent_reset_discards_pending_response() -> None:
+    memory = MemoryModel()
+    agent = ICacheAgent(memory)
+    interface = _unit_icache_interface()
+    agent.interface = interface
+    agent.pending.append(object())
+    interface.d_valid.value = 1
+
+    agent.reset()
+
+    assert not agent.pending
+    assert int(interface.d_valid.value) == 0
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")

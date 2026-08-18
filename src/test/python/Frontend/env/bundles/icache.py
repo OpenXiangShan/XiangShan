@@ -11,6 +11,7 @@ class ICacheBundle(Bundle):
         "a_bits_address": "auto_inner_icache_client_out_a_bits_address",
         "d_valid": "auto_inner_icache_client_out_d_valid",
         "d_bits_opcode": "auto_inner_icache_client_out_d_bits_opcode",
+        "d_bits_size": "auto_inner_icache_client_out_d_bits_size",
         "d_bits_source": "auto_inner_icache_client_out_d_bits_source",
         "d_bits_denied": "auto_inner_icache_client_out_d_bits_denied",
         "d_bits_data": "auto_inner_icache_client_out_d_bits_data",
@@ -23,6 +24,7 @@ class ICacheBundle(Bundle):
     a_bits_address = Signal()
     d_valid = Signal()
     d_bits_opcode = Signal()
+    d_bits_size = Signal()
     d_bits_source = Signal()
     d_bits_denied = Signal()
     d_bits_data = Signal()
@@ -32,6 +34,7 @@ class ICacheBundle(Bundle):
         self.a_ready.value = 0
         self.d_valid.value = 0
         self.d_bits_opcode.value = 0
+        self.d_bits_size.value = 0
         self.d_bits_source.value = 0
         self.d_bits_denied.value = 0
         self.d_bits_data.value = 0

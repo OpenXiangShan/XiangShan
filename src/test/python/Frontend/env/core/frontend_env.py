@@ -613,7 +613,10 @@ class FrontendEnv:
 
     def _on_clock_edge(self, cycle: int) -> None:
         self.current_cycle = int(cycle)
-        self.icache_agent.on_clock_edge(cycle)
+        if self._read(self.clock_reset.reset, 0):
+            self.icache_agent.reset()
+        else:
+            self.icache_agent.on_clock_edge(cycle)
         self.uncache_agent.on_clock_edge(cycle)
         self.ptw_agent.on_clock_edge(cycle)
         self.ptw_full_ppn_checker.on_clock_edge(cycle)

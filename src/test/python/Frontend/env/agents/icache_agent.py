@@ -65,6 +65,19 @@ class ICacheAgent:
             raise TypeError(f"ICacheAgent.bind requires an icache interface, got {type(target).__name__}")
         self.interface = target
 
+    def reset(self) -> None:
+        self.pending.clear()
+        if self.interface is None:
+            return
+        self._write(self.interface.a_ready, 0)
+        self._write(self.interface.d_valid, 0)
+        self._write(self.interface.d_bits_opcode, 0)
+        self._write(self.interface.d_bits_size, 0)
+        self._write(self.interface.d_bits_source, 0)
+        self._write(self.interface.d_bits_denied, 0)
+        self._write(self.interface.d_bits_data, 0)
+        self._write(self.interface.d_bits_corrupt, 0)
+
     def set_event_sink(self, sink: Optional[Callable[[Dict], None]]) -> None:
         self.event_sink = sink
 
@@ -191,6 +204,7 @@ class ICacheAgent:
         data = top.beat0 if top.beat_idx == 0 else top.beat1
         self._write(self.interface.d_valid, 1)
         self._write(self.interface.d_bits_opcode, 1)
+        self._write(self.interface.d_bits_size, 6)
         self._write(self.interface.d_bits_source, top.source)
         self._write(self.interface.d_bits_data, data)
         self._write(self.interface.d_bits_denied, top.denied)

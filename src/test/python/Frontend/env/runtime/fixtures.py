@@ -387,6 +387,28 @@ def _attach_case_log_handler(path: Path) -> logging.Handler:
     return handler
 
 
+def _drive_external_memory_idle(dut) -> None:
+    for name in (
+        "auto_inner_icache_client_out_d_valid",
+        "auto_inner_icache_client_out_d_bits_opcode",
+        "auto_inner_icache_client_out_d_bits_size",
+        "auto_inner_icache_client_out_d_bits_source",
+        "auto_inner_icache_client_out_d_bits_denied",
+        "auto_inner_icache_client_out_d_bits_data",
+        "auto_inner_icache_client_out_d_bits_corrupt",
+        "auto_inner_instrUncache_client_out_d_valid",
+        "auto_inner_instrUncache_client_out_d_bits_opcode",
+        "auto_inner_instrUncache_client_out_d_bits_size",
+        "auto_inner_instrUncache_client_out_d_bits_source",
+        "auto_inner_instrUncache_client_out_d_bits_denied",
+        "auto_inner_instrUncache_client_out_d_bits_data",
+        "auto_inner_instrUncache_client_out_d_bits_corrupt",
+    ):
+        signal = getattr(dut, name, None)
+        if signal is not None:
+            signal.value = 0
+
+
 def create_dut(request):
     global _VCS_BATCH_DUT
     configure_env_logging()
@@ -441,6 +463,7 @@ def create_dut(request):
 
     dut.reset.value = 1
     dut.clock.value = 0
+    _drive_external_memory_idle(dut)
     setattr(dut, "_frontend_case_log_handler", case_log_handler)
     setattr(dut, "_frontend_case_log_path", None if case_log_path is None else str(case_log_path))
     return dut
@@ -474,9 +497,6 @@ def dut(request):
     dut = create_dut(request)
     _suppress_dut_finalizer_for_batch_run(dut)
     coverage = _dut_coverage_path(request, _data_dir())
-    if not vars(dut).get("_frontend_clock_initialized", False):
-        dut.InitClock("clock")
-        setattr(dut, "_frontend_clock_initialized", True)
     yield dut
     try:
         if hasattr(dut, "FlushWaveform"):
@@ -524,6 +544,9 @@ def env(dut, request):
             target_testcases=targets["testcases"],
         )
     tb = FrontendEnv(dut, event_sink=None if recorder is None else recorder.handle_event, config=DEFAULT_ENV_CONFIG)
+    if not vars(dut).get("_frontend_clock_initialized", False):
+        dut.InitClock("clock")
+        setattr(dut, "_frontend_clock_initialized", True)
     tb.waveform_path = str(waveform)
     tb.line_coverage_path = str(coverage)
     tb.functional_coverage = recorder
