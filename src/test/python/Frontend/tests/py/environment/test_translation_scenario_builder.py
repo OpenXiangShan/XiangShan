@@ -179,6 +179,31 @@ def test_builder_composes_declared_stage1_sector_lanes_into_one_ptw_response() -
     assert translated_pa == pa + 0x1000
 
 
+def test_builder_applies_response_fault_override_to_selected_page_outcome() -> None:
+    env = _env()
+    va = 0x8020_0000
+    scenario = TranslationScenario(
+        scenario_id="sv39-sector-rewalk-fault-override",
+        va=va,
+        pa=0x8040_0000,
+        payload=b"\x13\x00" * 2049,
+        page_count=2,
+        ptw_response_overrides=(
+            TranslationPtwResponseOverride(
+                vpn=(va >> 12) + 1,
+                s2xlate=0,
+                patch=(("s1_pf", 1),),
+            ),
+        ),
+    )
+
+    state = TranslationScenarioBuilder(env).build(scenario)
+
+    assert state.expected_page_outcomes[0]["ok"] is True
+    assert state.expected_page_outcomes[1]["outcome"] == "instruction_page_fault"
+    assert state.expected_page_outcomes[1]["expected_path"] == "fault"
+
+
 def test_builder_rejects_invalid_ptw_response_override_before_mutating_env() -> None:
     env = _env()
     scenario = TranslationScenario(

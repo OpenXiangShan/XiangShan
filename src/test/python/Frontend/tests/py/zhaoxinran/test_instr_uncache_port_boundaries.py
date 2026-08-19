@@ -15,6 +15,7 @@ from env.sequences import (
     LoadProgramSequence,
     RunUntilCommitSequence,
     TranslationPmpPmaEntry,
+    TranslationPtwResponseOverride,
     TranslationPte,
     TranslationScenario,
     TranslationScenarioBuilder,
@@ -1630,6 +1631,79 @@ def test_uncache_sv39_invalid_sector_lane_rewalks_and_refetches(env):
     assert int(env.ptw_agent.get_stats()["req_count"]) >= 2
     assert env.translation_oracle.get_active()["expected_fault"] is None
     assert any(
+        int(record["address"]) == ((_NORMAL_PHYS_BASE + 0x1000) & ~0x3F)
+        for record in env.icache_agent.get_stats()["request_records"]
+    )
+    assert env.assert_translation_scenario()["error_count"] == 0
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_sv39_sector_lane_rewalk_response_fault_dut(env):
+    _initialize_sv39_fetch(env, reset_vector=_NORMAL_BASE)
+    scenario = TranslationScenario(
+        scenario_id="sv39-sector-lane-rewalk-response-fault-dut",
+        va=_NORMAL_BASE,
+        pa=_NORMAL_PHYS_BASE,
+        payload=int(_CNOP).to_bytes(2, "little") * 2049,
+        page_count=2,
+        s1_sector_lanes=(
+            TranslationSectorLane(lane=1, ppn=(_NORMAL_PHYS_BASE >> 12) + 1, valid=0, pte_present=1),
+        ),
+        ptw_response_overrides=(
+            TranslationPtwResponseOverride(
+                vpn=(_NORMAL_BASE >> 12) + 1,
+                s2xlate=0,
+                patch=(("s1_pf", 1),),
+            ),
+        ),
+        expected_path="cacheable",
+        expected_result="miss_refill",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=_NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=1,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=_NORMAL_PHYS_BASE + 0x1000,
+                size=0x1000,
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+                addr=_NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=1,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=True, atomic=True),
+                addr=_NORMAL_PHYS_BASE + 0x1000,
+                size=0x1000,
+            ),
+        ),
+    )
+    result = TranslationScenarioSequence(
+        actions=(
+            TranslationScenarioPhase(scenario=scenario, page_indexes=(0,)),
+            TranslationScenarioPhase(reuse_previous=True, page_indexes=(1,)),
+        )
+    ).run(env)
+
+    assert [item["kind"] for item in result] == ["phase", "phase"]
+    assert int(env.ptw_agent.get_stats()["req_count"]) >= 2
+    assert int(env.ptw_agent.get_stats()["response_override_hit_count"]) >= 1
+    assert env.translation_oracle.get_active()["expected_fault"] == "instruction_page_fault"
+    assert not any(
         int(record["address"]) == ((_NORMAL_PHYS_BASE + 0x1000) & ~0x3F)
         for record in env.icache_agent.get_stats()["request_records"]
     )

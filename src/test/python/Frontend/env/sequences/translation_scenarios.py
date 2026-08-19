@@ -413,6 +413,48 @@ class TranslationScenarioBuilder:
             expected_path = "uncache" if expected_metadata["permission"]["pma_mmio"] else "cacheable"
         return {"va": int(va), "pa": expected_pa, "ok": expected_ok, "expected_path": expected_path, **expected_metadata}
 
+    @staticmethod
+    def _apply_response_fault_override(outcome: dict, scenario: TranslationScenario, page: int) -> dict:
+        request_vpn = (int(scenario.va) >> 12) + int(page)
+        request_key = (
+            int(request_vpn),
+            int(scenario.s2xlate),
+            int(scenario.get_gpa),
+        )
+        override = next(
+            (
+                item
+                for item in scenario.ptw_response_overrides
+                if (int(item.vpn), int(item.s2xlate), int(item.get_gpa)) == request_key
+            ),
+            None,
+        )
+        if override is None:
+            return outcome
+        patch = dict(override.patch)
+        if int(patch.get("s1_af", 0)):
+            fault = "instruction_access_fault"
+            fault_name = "access_fault"
+        elif int(patch.get("s1_pf", 0)):
+            fault = "instruction_page_fault"
+            fault_name = "page_fault"
+        elif int(patch.get("s2_gaf", 0)):
+            fault = "instruction_access_fault"
+            fault_name = "access_fault"
+        elif int(patch.get("s2_gpf", 0)):
+            fault = "instruction_guest_page_fault"
+            fault_name = "guest_fault"
+        else:
+            return outcome
+        return {
+            **outcome,
+            "ok": False,
+            "expected_path": "fault",
+            "outcome": fault,
+            "fault": fault_name,
+            "reason": "ptw_response_override",
+        }
+
     def build(self, scenario: TranslationScenario) -> TranslationScenarioState:
         self.validate(scenario)
 
@@ -469,9 +511,13 @@ class TranslationScenarioBuilder:
         stage2_mode = str(scenario.stage2_mode or "sv39").lower()
         self.env.page_table.set_stage2_mode(stage2_mode)
         expected_page_outcomes = tuple(
-            self._expected_page_outcome(
+            self._apply_response_fault_override(
+                self._expected_page_outcome(
+                    scenario,
+                    int(scenario.va) if page == 0 else (int(scenario.va) & ~(_PAGE_SIZE - 1)) + page * _PAGE_SIZE,
+                ),
                 scenario,
-                int(scenario.va) if page == 0 else (int(scenario.va) & ~(_PAGE_SIZE - 1)) + page * _PAGE_SIZE,
+                page,
             )
             for page in range(int(scenario.page_count))
         )
