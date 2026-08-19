@@ -24,6 +24,7 @@ import xiangshan.frontend.bpu.history.fastphr.FastPhrParameters
 import xiangshan.frontend.bpu.history.phr.PhrParameters
 import xiangshan.frontend.bpu.ittage.IttageParameters
 import xiangshan.frontend.bpu.mbtb.MainBtbParameters
+import xiangshan.frontend.bpu.ptage.PtageParameters
 import xiangshan.frontend.bpu.ras.RasParameters
 import xiangshan.frontend.bpu.sc.ScParameters
 import xiangshan.frontend.bpu.tage.TageParameters
@@ -46,6 +47,7 @@ case class BpuParameters(
     // sub predictors
     ubtbParameters:   MicroBtbParameters = MicroBtbParameters(),
     abtbParameters:   AheadBtbParameters = AheadBtbParameters(),
+    ptageParameters:  PtageParameters = PtageParameters(),
     utageParameters:  MicroTageParameters = MicroTageParameters(),
     mbtbParameters:   MainBtbParameters = MainBtbParameters(),
     tageParameters:   TageParameters = TageParameters(),
