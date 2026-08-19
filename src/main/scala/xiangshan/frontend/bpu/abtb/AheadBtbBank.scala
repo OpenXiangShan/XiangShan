@@ -101,9 +101,9 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
   writeBuffer.io.write.head.valid := io.writeReq.valid && (if (HasBpuFlush) !bpuFlushing else true.B)
   writeBuffer.io.write.head.bits  := io.writeReq.bits
 
-  writeBuffer.io.read.head.ready := sram.io.w.req.ready && !io.readReq.valid && (if (HasBpuFlush) !bpuFlushing else true.B)
+  writeBuffer.io.read.head.ready := sram.io.w.req.ready && !io.readReq.valid
 
-  private val writeValid   = writeBuffer.io.read.head.valid && !io.readReq.valid && (if (HasBpuFlush) !bpuFlushing else true.B)
+  private val writeValid   = writeBuffer.io.read.head.valid && !io.readReq.valid
   private val writeEntry   = writeBuffer.io.read.head.bits.entry
   private val writeSetIdx  = writeBuffer.io.read.head.bits.setIdx
   private val writeWayMask = UIntToOH(writeBuffer.io.read.head.bits.wayIdx)
