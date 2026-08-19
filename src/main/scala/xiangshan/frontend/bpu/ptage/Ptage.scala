@@ -261,11 +261,18 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
     heldMeta.p1CfiPosition === held.cfiPosition &&
     heldMeta.p1Attribute.asUInt === held.attribute.asUInt
 
+  // Useful marks an entry that earned its place, and allocation passes those over. Nothing ever clears the mark, so
+  // an entry that stopped being consulted would hold its table indefinitely and allocation would find nowhere left to
+  // go. Sweeping the tables to clear marks is not open to a training path that only writes, so instead count how
+  // often allocation is turned away and, once it has been often enough, let the next one take a marked entry.
+  private val allocRefusals = RegInit(0.U(AllocRefusalLimitWidth.W))
+  private val allocMayEvict = allocRefusals.andR
+
   // A wrong entry is handed to a longer history to tell the two contexts apart, so allocation looks above the
-  // provider; a miss may go anywhere. Either way only a table not currently carrying its weight is taken.
+  // provider; a miss may go anywhere.
   private val allocMask = VecInit(Seq.tabulate(NumTables) { t =>
     val longerThanProvider = if (t == 0) !heldHit else !heldHit || heldMeta.provider.bits < t.U
-    longerThanProvider && !heldMeta.usefulVec(t)
+    longerThanProvider && (!heldMeta.usefulVec(t) || allocMayEvict)
   })
   private val allocSel = selectShortest(allocMask)
 
@@ -276,6 +283,14 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   private val doStrengthen   = pending.valid && heldCorrect
   private val doCorrect      = pending.valid && !heldCorrect && correctInPlace
   private val doAllocate     = pending.valid && !heldCorrect && !correctInPlace && allocSel.valid
+
+  // Count refusals until one eviction is allowed, then start counting again. Clearing the count on an allocation that
+  // succeeded normally would be wrong: successes and refusals interleave, so the count would never reach the limit
+  // and marked entries would never be reclaimed at all.
+  when(t0_valid) {
+    when(doAllocate && allocMayEvict)(allocRefusals := 0.U)
+      .elsewhen(pending.valid && !heldCorrect && !allocSel.valid)(allocRefusals := allocRefusals + 1.U)
+  }
 
   private val writeTable = Mux(doAllocate, allocSel.bits, heldMeta.provider.bits)
   // only a strengthened entry keeps its counter and its standing; the other two install the group afresh
@@ -355,6 +370,7 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   XSPerfAccumulate("trainCorrect", t0_valid && doCorrect)
   XSPerfAccumulate("trainAllocate", t0_valid && doAllocate)
   XSPerfAccumulate("trainNoTableFree", t0_valid && pending.valid && !heldCorrect && !allocSel.valid)
+  XSPerfAccumulate("trainAllocateEvicted", t0_valid && doAllocate && allocMayEvict)
 
   private val s1_fire = io.stageCtrl.s1_fire && io.enable
   XSPerfAccumulate("predHit", s1_fire && s1_p1Usable)
