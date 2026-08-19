@@ -48,6 +48,19 @@ class S1Train(implicit p: Parameters) extends PhrBundle {
   val prediction: Prediction = new Prediction
 }
 
+// Phr -> FastPhr. FastPhr caches a short window of the same path history, so it must be fed the very bits Phr
+// shifts in, and must reload from Phr's reconstruction on redirect rather than keeping a private recovery path.
+class PhrToFastPhr(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
+  // corrected history a redirect restarts from, newest at bit 0, matching FastPhr's window order
+  val redirectPhr: UInt = UInt(PhrHistoryLength.W)
+  // A taken block's whole contribution to the history. Phr shifts by Shamt and overlays hashHigh, and those are the
+  // low and high halves of this one hash, so FastPhr can apply the same update as (window << Shamt) ^ pathHash.
+  val s1PathHash: UInt = UInt(PathHashWidth.W)
+  val s3PathHash: UInt = UInt(PathHashWidth.W)
+  // the logical history FastPhr's window is expected to mirror, used to assert the two stay in step
+  val debug_phr: UInt = UInt(PhrHistoryLength.W)
+}
+
 class PhrUpdateData(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
   val valid:   Bool    = Bool()
   val taken:   Bool    = Bool()

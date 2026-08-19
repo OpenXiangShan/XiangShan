@@ -84,4 +84,5 @@ class FastPhr(implicit p: Parameters) extends FastPhrModule with HasFastPhrParam
   )
 
   io.foldedHist := foldedHist
+  io.debug_phr  := phr
 }

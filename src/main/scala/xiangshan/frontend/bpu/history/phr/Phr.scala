@@ -38,6 +38,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     val commit:         Valid[Train]          = Input(Valid(new Train)) // trian bp data from reslove
     val oldFoldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val trainFoldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val toFastPhr:      PhrToFastPhr          = Output(new PhrToFastPhr)
   }
   val io: PhrIO = IO(new PhrIO)
 
@@ -305,6 +306,19 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
       s1_valid           -> s1_foldedPhrReg
     )
   )
+
+  // The history a redirect restarts from. getRedirectPhr rebuilds the mispredicting block's own start history, so
+  // that block's resolved outcome still has to be applied on top: a taken block shifts its path bits in and folds
+  // its hash into the low bits, while a not-taken one only refreshes the low bits, which getRedirectPhr already did.
+  io.toFastPhr.redirectPhr := Mux(
+    redirectData.taken,
+    Cat(redirectPhr(PhrHistoryLength - 1 - Shamt, PathHashHighWidth), redirectS0PhrLowBits, redirectShiftBits),
+    redirectPhr
+  )
+  // a not-taken block leaves the history alone, so it contributes nothing to fold in
+  io.toFastPhr.s1PathHash := Mux(s1UpdateData.taken, Cat(s1HashComponents._2, s1ShiftBits), 0.U)
+  io.toFastPhr.s3PathHash := Mux(s3_overrideData.taken, Cat(s3HashHigh, s3ShiftBits), 0.U)
+  io.toFastPhr.debug_phr  := phrValue
 
   io.phrMeta        := s1_phrMeta
   io.phr            := phr.asUInt
