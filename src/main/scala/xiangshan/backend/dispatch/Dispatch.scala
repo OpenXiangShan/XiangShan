@@ -720,11 +720,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
         assert(PopCount(effective) === 1.U, "scalar load must select exactly one LDU IQ")
       }
     }
-    if (enableLongLoadAluSteering) {
-      when(fromRename(i).valid && FuType.isAlu(fromRename(i).bits.fuType)) {
-        assert(PopCount(effective) === 1.U, "scalar ALU must select exactly one ALU IQ")
-      }
-    }
   }
   val uopSelIQMatrix = Wire(Vec(renameWidth, Vec(issueQueueNum, UInt(renameWidth.U.getWidth.W))))
   uopSelIQMatrix.zipWithIndex.map{ case (u, i) => {
