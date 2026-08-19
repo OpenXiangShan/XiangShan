@@ -34,7 +34,8 @@ class RobSetFlagTracker(
   val width: Int,
   val numUpdatePorts: Int,
   val numCommitPorts: Int,
-  candidateIndices: Seq[Seq[Int]] = Seq.empty
+  candidateIndices: Seq[Seq[Int]] = Seq.empty,
+  orderedUpdatePorts: Boolean = false
 )(implicit p: Parameters) extends XSModule {
   require(width > 0, "RobSetFlagTracker requires at least one flag bit")
   require(numUpdatePorts > 0, "RobSetFlagTracker requires at least one update port")
@@ -74,12 +75,38 @@ class RobSetFlagTracker(
     })
   }
 
+  // Enqueue lanes are already ordered by ROB age. Keep this reduction balanced,
+  // but select the left (older) valid lane without another RobPtr comparison.
+  private def selectFirstValid(candidates: Seq[(Bool, RobPtr)]): (Bool, RobPtr) = {
+    ParallelOperation(candidates, (left: (Bool, RobPtr), right: (Bool, RobPtr)) => {
+      (left._1 || right._1, Mux(left._1, left._2, right._2))
+    })
+  }
+
   private val pendingValid = RegInit(VecInit(Seq.fill(width)(false.B)))
   private val pendingRobIdx = RegInit(VecInit(Seq.fill(width)(RobPtr(false.B, 0.U))))
 
   private val updateNeedsFlush = io.update.map(_.bits.robIdx.needFlush(io.redirect))
   private val updateCommits = io.update.map { update =>
     io.commit.map(commit => commit.valid && commit.bits.isSameEntry(update.bits.robIdx)).reduce(_ || _)
+  }
+  private val commonUpdateValid = io.update.zipWithIndex.map { case (update, index) =>
+    update.valid && !updateNeedsFlush(index) &&
+      !(!io.redirect.valid && updateCommits(index))
+  }
+
+  if (orderedUpdatePorts) {
+    for {
+      older <- 0 until numUpdatePorts
+      younger <- older + 1 until numUpdatePorts
+    } {
+      when(io.update(older).valid && io.update(younger).valid) {
+        assert(
+          io.update(older).bits.robIdx.isNotAfterSlot(io.update(younger).bits.robIdx),
+          s"ordered RobSetFlagTracker update ports $older and $younger are out of ROB order"
+        )
+      }
+    }
   }
 
   io.commitSetMask := VecInit((0 until width).map { bit =>
@@ -90,15 +117,23 @@ class RobSetFlagTracker(
 
     val updateCandidates = candidatesByFlag(bit).map { index =>
       val update = io.update(index)
-      val valid = update.valid && update.bits.setMask(bit) && !updateNeedsFlush(index) &&
-        !(!io.redirect.valid && updateCommits(index))
+      val valid = commonUpdateValid(index) && update.bits.setMask(bit)
       (valid, update.bits.robIdx)
     }
     val pendingCandidate = (
       pendingValid(bit) && !pendingCommits && !pendingNeedsFlush,
       pendingRobIdx(bit)
     )
-    val next = selectOldest(pendingCandidate +: updateCandidates)
+    val updateWinner = if (orderedUpdatePorts) {
+      selectFirstValid(updateCandidates)
+    } else {
+      selectOldest(updateCandidates)
+    }
+    val next = if (orderedUpdatePorts) {
+      selectOldest(Seq(pendingCandidate, updateWinner))
+    } else {
+      selectOldest(pendingCandidate +: updateCandidates)
+    }
 
     pendingValid(bit) := next._1
     when(next._1) {
