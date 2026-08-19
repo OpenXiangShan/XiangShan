@@ -269,7 +269,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
 
   val l1_depth_const = Constantin.createRecord(s"streamL1Depth${p(XSCoreParamsKey).HartId}", initValue = 64)
   val l2_depth_const = Constantin.createRecord(s"streamL2Depth${p(XSCoreParamsKey).HartId}", initValue = 640)
-  val l3_depth_const = Constantin.createRecord(s"streamL3Depth${p(XSCoreParamsKey).HartId}", initValue = 960) // l3 is not useful
+  val l3_depth_const = Constantin.createRecord(s"streamL3Depth${p(XSCoreParamsKey).HartId}", initValue = 960) 
 
   val l1_depth = Wire(UInt(DEPTH_BITS.W))
   val l2_depth = Wire(UInt(DEPTH_BITS.W))
@@ -425,7 +425,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s4_pf_l2_bits = RegEnable(s3_pf_l2_bits, s3_pf_l2_valid)
   val s4_pf_l3_bits = RegEnable(s3_pf_l3_bits, s3_pf_l2_valid)
 
-  val enable_l3_pf = Constantin.createRecord(s"enableL3StreamPrefetch${p(XSCoreParamsKey).HartId}", initValue = false)
+  val enable_l3_pf = Constantin.createRecord(s"enableL3StreamPrefetch${p(XSCoreParamsKey).HartId}", initValue = true)
   // s5: send the l3 prefetch req out
   val s5_pf_l3_valid = GatedValidRegNext(s4_pf_l2_valid) && enable_l3_pf
   val s5_pf_l3_bits = RegEnable(s4_pf_l3_bits, s4_pf_l2_valid)
