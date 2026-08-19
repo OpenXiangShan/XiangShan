@@ -30,16 +30,18 @@ class FastPhr(implicit p: Parameters) extends FastPhrModule with HasFastPhrParam
   private val foldedHist =
     RegInit(0.U.asTypeOf(new PhrAllFoldedHistories(FastFoldedHistoryInfo, MaxUpdateNum)))
 
-  // insertNum only ever takes 3 discrete values (0, Shamt, 2*Shamt), so the shift is realized
-  // as a select over 3 fixed-shamt shifters instead of a runtime barrel shift. shared by the
-  // steady advance and an override's corrected replay, which apply the identical shift to
-  // different base windows
+  // The advance mirrors Phr's own update, so this window stays a true cache of it: shift the window by one Shamt per
+  // block and XOR the group's token over the newest bits. The token carries both halves of each block's path hash,
+  // which is why this is an XOR and not an OR -- the hash's high half lands on bits the shift already moved there.
+  // insertNum only ever takes 3 discrete values (0, Shamt, 2*Shamt), so the shift is realized as a select over 3
+  // fixed-shamt shifters instead of a runtime barrel shift. shared by the steady advance and an override's corrected
+  // replay, which apply the identical shift to different base windows
   private def advance(base: UInt, token: UInt, numBlocksOH: Vec[Bool]): UInt = Mux1H(
     numBlocksOH,
     Seq(
       base,
-      ((base << Shamt).asUInt | token(Shamt - 1, 0))(WindowLength - 1, 0),
-      ((base << (2 * Shamt)).asUInt | token(2 * Shamt - 1, 0))(WindowLength - 1, 0)
+      ((base << Shamt).asUInt ^ token(PathHashWidth - 1, 0))(WindowLength - 1, 0),
+      ((base << (2 * Shamt)).asUInt ^ token)(WindowLength - 1, 0)
     )
   )
 

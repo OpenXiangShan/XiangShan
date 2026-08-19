@@ -17,6 +17,8 @@ package xiangshan.frontend.bpu.history.fastphr
 
 import chisel3._
 import chisel3.util._
+import scala.math.min
+import utility.ParallelXOR
 import xiangshan.frontend.bpu.history.FoldedHistoryMaintenance
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
@@ -28,9 +30,22 @@ trait Helpers extends HasFastPhrParameters with FoldedHistoryMaintenance {
     VecInit((0 until MaxUpdateNum).map(i => phr(span - 1 - i)))
   }
 
+  // XOR-reduce a value into compLen bits, the same reduction computeFoldedHash performs but over the value's own
+  // width instead of a fixed path-hash width, since a multi-block token is wider than one hash. Bits past the span
+  // are dropped: they leave the window in the same step that brings them in.
+  private def foldToken(bits: UInt, compLen: Int, histLen: Int): UInt = {
+    val width   = min(bits.getWidth, histLen)
+    val nChunks = (width + compLen - 1) / compLen
+    ParallelXOR((0 until nChunks).map(i => bits(min((i + 1) * compLen, width) - 1, i * compLen)))
+  }
+
   // advances every table's resident folded history by 0, 1 or 2 blocks as selected by numBlocksOH.
   // for each table, 3 fold candidates are built (unchanged / advance Shamt / advance 2*Shamt) and
-  // the result is an end mux over those candidates, rather than folding twice in sequence
+  // the result is an end mux over those candidates, rather than folding twice in sequence.
+  //
+  // Folding is linear over XOR, so the window's shift and the group's token are folded apart and combined at the end.
+  // That matters because the token's two blocks carry their path hashes at different offsets, which the built-in
+  // update() cannot express: it places a single hash-high at one fixed offset.
   def foldStep(
       foldedQ:     PhrAllFoldedHistories,
       phr:         UInt,
@@ -39,15 +54,20 @@ trait Helpers extends HasFastPhrParameters with FoldedHistoryMaintenance {
   ): PhrAllFoldedHistories = {
     require(numBlocksOH.length == 3, "numBlocksOH must be one-hot over {0, 1, 2} blocks")
 
-    val noHashHigh = 0.U(PathHashHighWidth.W) // no path-hash mixing, only the raw history fold
-    val res        = WireInit(foldedQ)
+    val res = WireInit(foldedQ)
     for (i <- foldedQ.hist.indices) {
       val h  = foldedQ.hist(i)
       val ob = getOldBits(phr, h.info.HistoryLength)
 
+      // the window shift alone: no new bits mixed in here, the token below supplies all of them
+      def shifted(num: Int): UInt =
+        h.update(ob, num, 0.U(num.W), 0.U(PathHashHighWidth.W)).foldedHist
+      def folded(bits: UInt): UInt =
+        foldToken(bits, h.info.FoldedLength, h.info.HistoryLength)
+
       val candidate0 = h.foldedHist // 0 blocks: identity, no update() call
-      val candidate1 = h.update(ob, Shamt, token(Shamt - 1, 0), noHashHigh).foldedHist
-      val candidate2 = h.update(ob, 2 * Shamt, token(2 * Shamt - 1, 0), noHashHigh).foldedHist
+      val candidate1 = shifted(Shamt) ^ folded(token(PathHashWidth - 1, 0))
+      val candidate2 = shifted(2 * Shamt) ^ folded(token)
 
       res.hist(i).foldedHist := Mux1H(numBlocksOH, Seq(candidate0, candidate1, candidate2))
     }

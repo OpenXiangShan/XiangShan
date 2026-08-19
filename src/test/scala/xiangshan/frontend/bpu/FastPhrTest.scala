@@ -37,12 +37,15 @@ class FastPhrTest extends AnyFlatSpec {
   })
 
   private val shamt:        Int = config(XSCoreParamsKey).frontendParameters.bpuParameters.phrParameters.Shamt
-  private val maxUpdateNum: Int = 2 * shamt
+  private val pathHashWidth: Int =
+    config(XSCoreParamsKey).frontendParameters.bpuParameters.phrParameters.PathHashWidth
+  // a group carries one path hash per block, each one Shamt above the next; MaxPredictionNum is 2
+  private val tokenWidth: Int = pathHashWidth + shamt
 
   class TestModule(implicit p: Parameters) extends FastPhrModule with PhrHelper {
     class CtrlIO extends Bundle {
       val valid:       Bool      = Input(Bool())
-      val token:       UInt      = Input(UInt(MaxUpdateNum.W))
+      val token:       UInt      = Input(UInt(TokenWidth.W))
       val numBlocksOH: Vec[Bool] = Input(Vec(3, Bool()))
       val s2Fire:      Bool      = Input(Bool())
 
@@ -50,7 +53,7 @@ class FastPhrTest extends AnyFlatSpec {
       val redirectPhr:   UInt = Input(UInt(WindowLength.W))
 
       val overrideValid:       Bool      = Input(Bool())
-      val overrideToken:       UInt      = Input(UInt(MaxUpdateNum.W))
+      val overrideToken:       UInt      = Input(UInt(TokenWidth.W))
       val overrideNumBlocksOH: Vec[Bool] = Input(Vec(3, Bool()))
     }
     val ctrl: CtrlIO = IO(new CtrlIO)
@@ -92,8 +95,8 @@ class FastPhrTest extends AnyFlatSpec {
       ctrl.numBlocksOH,
       Seq(
         referenceWindow,
-        ((referenceWindow << Shamt).asUInt | ctrl.token(Shamt - 1, 0))(WindowLength - 1, 0),
-        ((referenceWindow << (2 * Shamt)).asUInt | ctrl.token(2 * Shamt - 1, 0))(WindowLength - 1, 0)
+        ((referenceWindow << Shamt).asUInt ^ ctrl.token(PathHashWidth - 1, 0))(WindowLength - 1, 0),
+        ((referenceWindow << (2 * Shamt)).asUInt ^ ctrl.token)(WindowLength - 1, 0)
       )
     )
     when(ctrl.valid) {
@@ -124,13 +127,13 @@ class FastPhrTest extends AnyFlatSpec {
   private def clearControls(dut: TestModule): Unit = {
     dut.ctrl.valid.poke(false.B)
     for (i <- 0 until 3) dut.ctrl.numBlocksOH(i).poke(false.B)
-    dut.ctrl.token.poke(0.U(maxUpdateNum.W))
+    dut.ctrl.token.poke(0.U(tokenWidth.W))
     dut.ctrl.s2Fire.poke(false.B)
     dut.ctrl.redirectValid.poke(false.B)
     dut.ctrl.redirectPhr.poke(0.U)
     dut.ctrl.overrideValid.poke(false.B)
     for (i <- 0 until 3) dut.ctrl.overrideNumBlocksOH(i).poke(false.B)
-    dut.ctrl.overrideToken.poke(0.U(maxUpdateNum.W))
+    dut.ctrl.overrideToken.poke(0.U(tokenWidth.W))
   }
 
   behavior of "FastPhr"
@@ -148,13 +151,13 @@ class FastPhrTest extends AnyFlatSpec {
 
       for (_ <- 0 until 500) {
         val numBlocks = Random.nextInt(3)
-        val token     = BigInt(maxUpdateNum, Random)
+        val token     = BigInt(tokenWidth, Random)
 
         dut.ctrl.valid.poke(true.B)
         for (i <- 0 until 3) {
           dut.ctrl.numBlocksOH(i).poke((i == numBlocks).B)
         }
-        dut.ctrl.token.poke(token.U(maxUpdateNum.W))
+        dut.ctrl.token.poke(token.U(tokenWidth.W))
         dut.clock.step(1)
 
         dut.res.dutFolded.expect(dut.res.referenceFolded.peek())
@@ -175,12 +178,12 @@ class FastPhrTest extends AnyFlatSpec {
         // a steady advance is requested on every cycle too, so a redirect landing on the same
         // cycle must be seen to win over it
         val numBlocks   = Random.nextInt(3)
-        val token       = BigInt(maxUpdateNum, Random)
+        val token       = BigInt(tokenWidth, Random)
         val redirectPhr = BigInt(dut.WindowLength, Random)
 
         dut.ctrl.valid.poke(true.B)
         for (i <- 0 until 3) dut.ctrl.numBlocksOH(i).poke((i == numBlocks).B)
-        dut.ctrl.token.poke(token.U(maxUpdateNum.W))
+        dut.ctrl.token.poke(token.U(tokenWidth.W))
 
         dut.ctrl.redirectValid.poke(true.B)
         dut.ctrl.redirectPhr.poke(redirectPhr.U(dut.WindowLength.W))
@@ -209,8 +212,10 @@ class FastPhrTest extends AnyFlatSpec {
         if (shiftAmt == 0) {
           base
         } else {
-          val shiftMask = (BigInt(1) << shiftAmt) - 1
-          ((base << shiftAmt) | (token & shiftMask)) & ((BigInt(1) << dut.WindowLength) - 1)
+          // a group of n blocks folds in n path hashes, each one Shamt above the next
+          val usedWidth = dut.PathHashWidth + (numBlocks - 1) * shamt
+          val tokenMask = (BigInt(1) << usedWidth) - 1
+          ((base << shiftAmt) ^ (token & tokenMask)) & ((BigInt(1) << dut.WindowLength) - 1)
         }
       }
 
@@ -230,12 +235,12 @@ class FastPhrTest extends AnyFlatSpec {
         val valid     = Random.nextBoolean()
         val s2Fire    = previousValid
         val numBlocks = if (valid) Random.nextInt(3) else 0
-        val token     = BigInt(maxUpdateNum, Random)
+        val token     = BigInt(tokenWidth, Random)
 
         dut.ctrl.valid.poke(valid.B)
         dut.ctrl.s2Fire.poke(s2Fire.B)
         for (i <- 0 until 3) dut.ctrl.numBlocksOH(i).poke((i == numBlocks).B)
-        dut.ctrl.token.poke(token.U(maxUpdateNum.W))
+        dut.ctrl.token.poke(token.U(tokenWidth.W))
         dut.clock.step(1)
 
         // both snapshot stages sample their sources in the same cycle, so capture before mutating
@@ -256,14 +261,14 @@ class FastPhrTest extends AnyFlatSpec {
       // from-scratch window built by re-advancing snapS3, independent of FastPhr's own
       // incremental fold maintenance
       val correctedNumBlocks = Random.nextInt(3)
-      val correctedToken     = BigInt(maxUpdateNum, Random)
+      val correctedToken     = BigInt(tokenWidth, Random)
       val expectedWindow     = advance(snapS3, correctedNumBlocks, correctedToken)
 
       dut.ctrl.valid.poke(false.B)
       dut.ctrl.s2Fire.poke(false.B)
       dut.ctrl.overrideValid.poke(true.B)
       for (i <- 0 until 3) dut.ctrl.overrideNumBlocksOH(i).poke((i == correctedNumBlocks).B)
-      dut.ctrl.overrideToken.poke(correctedToken.U(maxUpdateNum.W))
+      dut.ctrl.overrideToken.poke(correctedToken.U(tokenWidth.W))
       dut.expectFold.window.poke(expectedWindow.U(dut.WindowLength.W))
 
       dut.clock.step(1)

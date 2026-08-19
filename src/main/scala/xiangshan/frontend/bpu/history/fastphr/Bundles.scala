@@ -38,8 +38,9 @@ class FastPhrSnapshot(implicit p: Parameters) extends FastPhrBundle with HasFast
 //   - redirect: reload from an externally reconstructed window (the big Phr's corrected history)
 //   - override: internally re-apply a corrected group from the snapshot that group started at
 class FastPhrIO(implicit p: Parameters) extends FastPhrBundle with HasFastPhrParameters {
-  val valid:       Bool      = Input(Bool())
-  val token:       UInt      = Input(UInt(MaxUpdateNum.W))
+  val valid: Bool = Input(Bool())
+  // the group's path-history contribution, see TokenWidth; a one-block group uses only the low PathHashWidth bits
+  val token:       UInt      = Input(UInt(TokenWidth.W))
   val numBlocksOH: Vec[Bool] = Input(Vec(3, Bool())) // one-hot, index i means advance i blocks
 
   // carries a snapshot from s2 to s3 alongside the group it belongs to, so an override recovers the state that group
@@ -49,7 +50,7 @@ class FastPhrIO(implicit p: Parameters) extends FastPhrBundle with HasFastPhrPar
   val redirect: FastPhrRedirect = Input(new FastPhrRedirect)
 
   val overrideValid:       Bool      = Input(Bool())
-  val overrideToken:       UInt      = Input(UInt(MaxUpdateNum.W))
+  val overrideToken:       UInt      = Input(UInt(TokenWidth.W))
   val overrideNumBlocksOH: Vec[Bool] = Input(Vec(3, Bool())) // one-hot, corrected group's block count
 
   val foldedHist: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(FastFoldedHistoryInfo, MaxUpdateNum))
