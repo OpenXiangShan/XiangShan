@@ -172,11 +172,11 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.basicDebug.foreach { debug =>
       debug.ldest := robEnq.ldest
       debug.pdest := robEnq.pdest
-      debug.vd := robEnq.instr.asTypeOf(new XSInstBitFields).VD
+      debug.vd := robEnq.debug.map(_.instr.asTypeOf(new XSInstBitFields).VD).getOrElse(0.U)
       debug.fpWen := robEnq.fpWen
       debug.vecWen := robEnq.vecWen
       debug.v0Wen := robEnq.v0Wen
-      debug.eliminatedMove := robEnq.eliminatedMove
+      debug.eliminatedMove := robEnq.isMove
       debug.isXSTrap := robEnq.isXSTrap
     }
     robEntry.debug_fuType.foreach(_ := robEnq.fuType)
