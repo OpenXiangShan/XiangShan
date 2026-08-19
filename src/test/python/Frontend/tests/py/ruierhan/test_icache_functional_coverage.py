@@ -88,8 +88,8 @@ def test_icache_prefetchpipe_sampler_contract_has_one_key_per_leaf():
 
 
 def test_icache_missunit_sampler_contract_has_one_key_per_leaf():
-    assert len(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS) == 31
-    assert len(set(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS)) == 31
+    assert len(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS) == 34
+    assert len(set(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS)) == 34
 
 
 def _set_fetch_mshr_allocate_inputs(recorder, *, prefetch=0, flush=0, fencei=0):
@@ -1028,6 +1028,105 @@ def test_missunit_redirect_keeps_fetch_requires_known_no_response():
 
         sample_icache_missunit_coverage(recorder, recorder.env, 12)
         assert not _hit(recorder, "icache_missunit_flush", bin_name)
+
+
+def test_missunit_fencei_conditions_require_the_expected_pre_fence_state():
+    recorder = _Recorder()
+    for name, value in {
+        _TOP + "io_fencei": 0,
+        _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush": 0,
+        _MAIN + "__Vtogcov__io_missReq_valid": 1,
+        _MISS + "fetchHit": 0,
+        _MAIN + "__Vtogcov__io_missReq_bits_blkPAddr": 0x480,
+        _MAIN + "__Vtogcov__io_missReq_bits_vSetIdx": 7,
+    }.items():
+        recorder.set_missunit_signal(name, value)
+    sample_icache_missunit_coverage(recorder, recorder.env, 20)
+
+    recorder.set_missunit_signal(_TOP + "io_fencei", 1)
+    recorder.set_missunit_signal(_ICACHE + "__Vtogcov__io_fromFtq_redirectFlush", 1)
+    sample_icache_missunit_coverage(recorder, recorder.env, 21)
+    assert not _hit(recorder, "icache_missunit_fencei", "fencei_blocks_new_nonduplicate")
+
+    recorder.set_missunit_signal(_ICACHE + "__Vtogcov__io_fromFtq_redirectFlush", 0)
+    sample_icache_missunit_coverage(recorder, recorder.env, 22)
+    assert _hit(recorder, "icache_missunit_fencei", "fencei_blocks_new_nonduplicate")
+
+    for index in (0, 4):
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.valid", 1)
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.issue", 0)
+    sample_icache_missunit_coverage(recorder, recorder.env, 23)
+    assert _hit(recorder, "icache_missunit_fencei", "fencei_cancels_unissued_mshr")
+
+
+def test_missunit_fencei_issued_and_clean_refill_conditions():
+    recorder = _Recorder()
+    recorder.set_missunit_signal(_TOP + "io_fencei", 0)
+    for index in (0, 4):
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.valid", 1)
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.issue", 1)
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.flush", 0)
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.fencei", 0)
+    recorder.set_missunit_signal(_MISS + "lastFireNext", 0)
+    sample_icache_missunit_coverage(recorder, recorder.env, 30)
+
+    recorder.set_missunit_signal(_TOP + "io_fencei", 1)
+    sample_icache_missunit_coverage(recorder, recorder.env, 31)
+    assert _hit(recorder, "icache_missunit_fencei", "fencei_marks_issued_mshr")
+
+    recorder = _Recorder()
+    recorder.set_missunit_signal(_TOP + "io_fencei", 0)
+    sample_icache_missunit_coverage(recorder, recorder.env, 40)
+    for name, value in {
+        _TOP + "io_fencei": 1,
+        _MISS + "lastFireNext": 1,
+        _MISS + "idNext": 0,
+        _MISS + "allMshr_0.valid": 1,
+        _MISS + "allMshr_0.flush": 0,
+        _MISS + "allMshr_0.fencei": 0,
+        _MISS + "corruptReg": 0,
+        _MISS + "deniedReg": 0,
+    }.items():
+        recorder.set_missunit_signal(name, value)
+    sample_icache_missunit_coverage(recorder, recorder.env, 41)
+    assert _hit(recorder, "icache_missunit_fencei", "fencei_suppresses_sram_write")
+
+
+def test_missunit_fencei_prefetch_fifo_requires_an_unissued_prefetch_mshr():
+    recorder = _Recorder()
+    for name, value in {
+        _TOP + "io_fencei": 1,
+        _MISS + "priorityFIFO.enqPtr_flag": 0,
+        _MISS + "priorityFIFO.enqPtr_value": 1,
+        _MISS + "priorityFIFO.deqPtr_flag": 0,
+        _MISS + "priorityFIFO.deqPtr_value": 0,
+        _MISS + "priorityFIFO.regFiles_0": 4,
+        _MISS + "allMshr_4.valid": 1,
+        _MISS + "allMshr_4.issue": 0,
+    }.items():
+        recorder.set_missunit_signal(name, value)
+    sample_icache_missunit_coverage(recorder, recorder.env, 45)
+    assert _hit(recorder, "icache_missunit_fencei", "fencei_clears_prefetch_fifo")
+
+
+def test_missunit_fencei_redirect_bins_split_requestor_and_issue_state():
+    for index, issue, bin_name in (
+        (0, 0, "fencei_redirect_fetch_unissued"),
+        (0, 1, "fencei_redirect_fetch_issued"),
+        (4, 0, "fencei_redirect_prefetch_unissued"),
+        (4, 1, "fencei_redirect_prefetch_issued"),
+    ):
+        recorder = _Recorder()
+        for name, value in {
+            _TOP + "io_fencei": 1,
+            _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush": 1,
+            _MISS + f"allMshr_{index}.valid": 1,
+            _MISS + f"allMshr_{index}.issue": issue,
+            _MISS + "lastFireNext": 0,
+        }.items():
+            recorder.set_missunit_signal(name, value)
+        sample_icache_missunit_coverage(recorder, recorder.env, 50)
+        assert _hit(recorder, "icache_missunit_fencei", bin_name)
 
 
 def test_missunit_source_route_uses_final_beat_context():

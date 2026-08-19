@@ -25,6 +25,9 @@ ICACHE_PREFETCH_FUNCOV_BIN_IDS = {
 
 ICACHE_MISSUNIT_FUNCOV_BIN_IDS = {
     *(f"BIN-{index:03d}" for index in range(686, 717)),
+    "BIN-818",
+    "BIN-819",
+    "BIN-820",
 }
 
 ICACHE_WAYLOOKUP_FUNCOV_BIN_IDS = {

@@ -50,7 +50,10 @@ ICACHE_MISSUNIT_SAMPLER_BIN_KEYS = frozenset(
         ("icache_missunit_fencei", "fencei_marks_issued_mshr"),
         ("icache_missunit_fencei", "fencei_suppresses_sram_write"),
         ("icache_missunit_fencei", "fencei_clears_prefetch_fifo"),
-        ("icache_missunit_fencei", "fencei_redirect_combined"),
+        ("icache_missunit_fencei", "fencei_redirect_fetch_unissued"),
+        ("icache_missunit_fencei", "fencei_redirect_fetch_issued"),
+        ("icache_missunit_fencei", "fencei_redirect_prefetch_unissued"),
+        ("icache_missunit_fencei", "fencei_redirect_prefetch_issued"),
         ("icache_missunit_refill", "clean_doublebeat_refill_write"),
         ("icache_missunit_refill", "source_routes_refill"),
         ("icache_missunit_refill", "error_beats_accumulate"),
@@ -187,6 +190,7 @@ def reset_icache_missunit_coverage_state(recorder) -> None:
         "last_refill_source": None,
         "last_refill_outstanding": 0,
         "last_flush": None,
+        "last_fencei": None,
         # BIN-686 records the expected allocation here so a checker can
         # validate the registered MSHR contents on the following cycle.
         "pending_fetch_allocations": [],
@@ -423,6 +427,7 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
 
     flush = _on(signals["flush"])
     fencei = _on(signals["fencei"])
+    fencei_first = fencei and _off(state["last_fencei"])
     controls_clear = _off(signals["flush"]) and _off(signals["fencei"])
     fetch_existing_mshr_hit = _same_key_exists(
         mshrs, range(14), signals["fetch_paddr"], signals["fetch_vset"]
@@ -672,7 +677,6 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
     _mark(recorder, "icache_missunit_flush", "redirect_keeps_unissued_fetch_mshr", cycle, flush and unissued_fetch and no_response_next, evidence)
     _mark(recorder, "icache_missunit_flush", "redirect_keeps_issued_fetch_mshr", cycle, flush and issued_fetch and no_response_next, evidence)
     response_valid = response_next and _mshr_response_valid(mshrs, signals["id_next"])
-    writes = _on(signals["meta_write"]) or _on(signals["data_write"])
     clean_response = _off(signals["corrupt_reg"]) and _off(signals["denied_reg"])
     redirect_first = flush and _off(state["last_flush"])
     redirect_response = redirect_first and response_valid and clean_response
@@ -700,15 +704,75 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
         evidence,
     )
 
-    _mark(recorder, "icache_missunit_fencei", "fencei_blocks_new_nonduplicate", cycle, fencei and ((fetch_valid and not fetch_hit) or (prefetch_valid and not prefetch_hit)), evidence)
-    _mark(recorder, "icache_missunit_fencei", "fencei_cancels_unissued_mshr", cycle, fencei and any(_on(item["valid"]) and _off(item["issue"]) for item in mshrs), evidence)
-    _mark(recorder, "icache_missunit_fencei", "fencei_marks_issued_mshr", cycle, fencei and any(_on(item["valid"]) and _on(item["issue"]) for item in mshrs), evidence)
+    fetch_new_nonduplicate = (
+        fetch_valid
+        and not fetch_hit
+        and _mshr_key_miss(mshrs, signals["fetch_paddr"], signals["fetch_vset"])
+    )
+    prefetch_new_nonduplicate = (
+        prefetch_valid
+        and not prefetch_hit
+        and _mshr_key_miss(
+            mshrs, signals["prefetch_paddr"], signals["prefetch_vset"]
+        )
+    )
+    fetch_unissued = any(
+        _on(item["valid"]) and _off(item["issue"]) for item in mshrs[:4]
+    )
+    prefetch_unissued = any(
+        _on(item["valid"]) and _off(item["issue"]) for item in mshrs[4:]
+    )
+
+    def issued_waiting_for_grant(index: int) -> bool:
+        item = mshrs[index]
+        if not (_on(item["valid"]) and _on(item["issue"])):
+            return False
+        if _off(signals["last_fire_next"]):
+            return True
+        return (
+            _on(signals["last_fire_next"])
+            and signals["id_next"] is not None
+            and int(signals["id_next"]) != index
+        )
+
+    fetch_issued_waiting = any(issued_waiting_for_grant(index) for index in range(4))
+    prefetch_issued_waiting = any(
+        issued_waiting_for_grant(index) for index in range(4, 14)
+    )
+    _mark(
+        recorder,
+        "icache_missunit_fencei",
+        "fencei_blocks_new_nonduplicate",
+        cycle,
+        fencei and not flush and (fetch_new_nonduplicate or prefetch_new_nonduplicate),
+        evidence,
+    )
+    _mark(
+        recorder,
+        "icache_missunit_fencei",
+        "fencei_cancels_unissued_mshr",
+        cycle,
+        fencei and fetch_unissued and prefetch_unissued,
+        evidence,
+    )
+    _mark(
+        recorder,
+        "icache_missunit_fencei",
+        "fencei_marks_issued_mshr",
+        cycle,
+        fencei and fetch_issued_waiting and prefetch_issued_waiting,
+        evidence,
+    )
     _mark(
         recorder,
         "icache_missunit_fencei",
         "fencei_suppresses_sram_write",
         cycle,
-        fencei and response_next and response_valid and not writes,
+        fencei_first
+        and response_next
+        and response_valid
+        and _off(signals["corrupt_reg"])
+        and _off(signals["denied_reg"]),
         evidence,
     )
     fifo_nonempty = (
@@ -716,8 +780,53 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
         and signals["fifo_enq_value"] is not None and signals["fifo_deq_value"] is not None
         and (int(signals["fifo_enq_flag"]) != int(signals["fifo_deq_flag"]) or int(signals["fifo_enq_value"]) != int(signals["fifo_deq_value"]))
     )
-    _mark(recorder, "icache_missunit_fencei", "fencei_clears_prefetch_fifo", cycle, fencei and fifo_nonempty and _on(signals["fifo_flush"]), evidence)
-    _mark(recorder, "icache_missunit_fencei", "fencei_redirect_combined", cycle, fencei and flush and (any_mshr or fifo_nonempty), evidence)
+    fifo_has_unissued_prefetch = fifo_nonempty and any(
+        entry is not None
+        and 4 <= int(entry) < len(mshrs)
+        and _on(mshrs[int(entry)]["valid"])
+        and _off(mshrs[int(entry)]["issue"])
+        for entry in (signals[f"fifo_entry_{index}"] for index in range(10))
+    )
+    _mark(
+        recorder,
+        "icache_missunit_fencei",
+        "fencei_clears_prefetch_fifo",
+        cycle,
+        fencei and fifo_has_unissued_prefetch,
+        evidence,
+    )
+    _mark(
+        recorder,
+        "icache_missunit_fencei",
+        "fencei_redirect_fetch_unissued",
+        cycle,
+        fencei and flush and fetch_unissued,
+        evidence,
+    )
+    _mark(
+        recorder,
+        "icache_missunit_fencei",
+        "fencei_redirect_fetch_issued",
+        cycle,
+        fencei and flush and fetch_issued_waiting,
+        evidence,
+    )
+    _mark(
+        recorder,
+        "icache_missunit_fencei",
+        "fencei_redirect_prefetch_unissued",
+        cycle,
+        fencei and flush and prefetch_unissued,
+        evidence,
+    )
+    _mark(
+        recorder,
+        "icache_missunit_fencei",
+        "fencei_redirect_prefetch_issued",
+        cycle,
+        fencei and flush and prefetch_issued_waiting,
+        evidence,
+    )
 
     opcode = signals["d_opcode"]
     has_data_beat = (
@@ -783,3 +892,4 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
         state["last_refill_source"] = None
         state["last_refill_outstanding"] = 0
     state["last_flush"] = signals["flush"]
+    state["last_fencei"] = signals["fencei"]

@@ -266,7 +266,7 @@ def test_icache_mainpipe_single_bank_range_dut(env) -> None:
 
 @pytest.mark.funcov_bins(
     "BIN-686", "BIN-690", "BIN-691", "BIN-692", "BIN-699", "BIN-705", "BIN-817",
-    "BIN-707", "BIN-708", "BIN-709", "BIN-710", "BIN-711", "BIN-712",
+    "BIN-707", "BIN-708", "BIN-709", "BIN-710", "BIN-711", "BIN-712", "BIN-818", "BIN-819", "BIN-820",
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_missunit_merge_and_fencei(lowrisk_cleanup) -> None:
