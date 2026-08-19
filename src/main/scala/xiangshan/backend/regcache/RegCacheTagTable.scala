@@ -66,7 +66,7 @@ class RegCacheTagTable(numReadPorts: Int)(implicit p: Parameters) extends XSModu
 
   require(wakeupFromIQNeedWriteRC.size == IntRegCacheWriteSize + MemRegCacheWriteSize, "wakeup size should be equal to RC write size")
 
-  shiftLoadDependency.zip(wakeupFromIQNeedWriteRC.map(_.bits.loadDependency)).zip(wakeupFromIQNeedWriteRC.map(_.bits.params.name)).foreach {
+  shiftLoadDependency.zip(wakeupFromIQNeedWriteRC.map(_.bits.loadDependency)).zip(backendParams.intSchdParams.get.wakeUpInExuSources.map(_.name)).foreach {
     case ((deps, originalDeps), name) => deps.zip(originalDeps).zipWithIndex.foreach {
       case ((dep, originalDep), deqPortIdx) =>
         if (backendParams.getLdExuIdx(backendParams.allExuParams.find(_.name == name).get) == deqPortIdx)

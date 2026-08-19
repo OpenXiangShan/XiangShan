@@ -123,9 +123,10 @@ class CtrlBlockImp(
   private val memCtrl = Module(new MemCtrl(params))
 
   private val disableFusion = decode.in.fromCSR.singlestep || !decode.in.fromCSR.custom.fusion_enable
-  // Stage 2 is toggled for the separately measured 3-to-2 experiment and
-  // intentionally does not use general ROB compression.
-  private val enableAuipcJalrStage2 = true
+  // Stage 1 is always enabled on this branch. Stage 2 is toggled for the
+  // separately measured 3-to-2 experiment and intentionally does not use ROB
+  // compression.
+  private val enableAuipcJalrStage2 = false
 
   private val s0_robFlushRedirect = rob.io.flushOut
   private val s1_robFlushRedirect = Wire(Valid(new Redirect))
@@ -727,54 +728,6 @@ class CtrlBlockImp(
         dispatch.io.renameIn(i + 2).bits.srcType(0) := SrcType.no
         dispatch.io.renameIn(i + 2).bits.selImm := SelImm.IMM_AUIPC_JALR
         dispatch.io.renameIn(i + 2).bits.imm := Cat(a.instr(31, 12), c.instr(31, 20))
-      }
-    }
-  } else {
-    // Stage 2: retain the AUIPC architectural uop and replace the adjacent
-    // JALR link+jump pair with one fused JALR uop. This produces two backend
-    // uops and two ordinary ROB entries/completions; no ROB compression is
-    // involved. AUIPC remains a normal architectural write so it can retire
-    // with its precise pre-JALR value.
-    for (i <- 0 until RenameWidth - 2) {
-      val a = decodePipeRename(i).bits
-      val b = decodePipeRename(i + 1).bits
-      val c = decodePipeRename(i + 2).bits
-      val safe = decodePipeRename(i).valid && decodePipeRename(i + 1).valid && decodePipeRename(i + 2).valid &&
-        !disableFusion && !a.exceptionVec.orR && !b.exceptionVec.orR && !c.exceptionVec.orR &&
-        TriggerAction.isNone(a.trigger) && TriggerAction.isNone(b.trigger) && TriggerAction.isNone(c.trigger) &&
-        !a.isLastInFtqEntry && (a.ftqPtr === b.ftqPtr) && (b.ftqPtr === c.ftqPtr) &&
-        a.fuType === FuType.link.U && LinkOpcodes.linkUopisAuipc(a.fuOpType) &&
-        b.fuType === FuType.link.U && LinkOpcodes.linkUopisLink(b.fuOpType) && b.isJR && b.firstUop &&
-        c.fuType === FuType.njmp.U && c.isJR && c.isJr && c.lastUop &&
-        a.ldest =/= 0.U && a.ldest === c.lsrc(0) && a.ldest === c.ldest
-      XSPerfAccumulate("auipc_jalr_stage2_match", safe)
-      when (safe) {
-        // Slot i remains the original AUIPC uop and architectural write.
-        // Slot i+1 carries the JALR PC/FTQ/prediction/RAS metadata while its
-        // NewJumpUnit performs both target redirect and link writeback.
-        rename.io.in(i + 1).bits := c
-        rename.io.in(i + 1).bits.fuOpType := NewJmpOpcodes.fusedJr
-        rename.io.in(i + 1).bits.srcType(0) := SrcType.no
-        rename.io.in(i + 1).bits.selImm := SelImm.IMM_AUIPC_JALR
-        rename.io.in(i + 1).bits.imm := Cat(a.instr(31, 12), c.instr(31, 20))
-        rename.io.in(i + 1).bits.rfWen := true.B
-        rename.io.in(i + 1).bits.firstUop := true.B
-        rename.io.in(i + 1).bits.lastUop := true.B
-        rename.io.in(i + 1).bits.numWB := 1.U
-        dispatch.io.renameIn(i + 1).bits := c
-        dispatch.io.renameIn(i + 1).bits.fuOpType := NewJmpOpcodes.fusedJr
-        dispatch.io.renameIn(i + 1).bits.srcType(0) := SrcType.no
-        dispatch.io.renameIn(i + 1).bits.selImm := SelImm.IMM_AUIPC_JALR
-        dispatch.io.renameIn(i + 1).bits.imm := Cat(a.instr(31, 12), c.instr(31, 20))
-        dispatch.io.renameIn(i + 1).bits.rfWen := true.B
-        dispatch.io.renameIn(i + 1).bits.firstUop := true.B
-        dispatch.io.renameIn(i + 1).bits.lastUop := true.B
-        dispatch.io.renameIn(i + 1).bits.numWB := 1.U
-
-        // The original JALR jump uop is consumed by the transform.
-        rename.io.in(i + 2).valid := false.B
-        dispatch.io.renameIn(i + 2).valid := false.B
-        rename.io.validVec(i + 2) := false.B
       }
     }
   }

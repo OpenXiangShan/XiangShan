@@ -31,7 +31,6 @@ class NewJumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(c
   private val fusedTarget = auipcPc + fusedHi + fusedLo
   private val normalTarget = Mux(isJr, src, pc) + SignExt(imm, XLEN)
   private val jumpTarget = Mux(isFusedJr, fusedTarget & (~1.U(XLEN.W)), normalTarget)
-  private val fusedLink = pc + io.in.bits.data.nextPcOffset.get
 
   private val fixedTaken = io.in.bits.ctrl.predictInfo.get.fixedTaken
   private val predTaken = io.in.bits.ctrl.predictInfo.get.predTaken
@@ -63,7 +62,7 @@ class NewJumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(c
 
   io.in.ready := io.out.ready
   io.out.valid := io.in.valid
-  io.out.bits.res.data := Mux(isFusedJr, fusedLink, 0.U)
+  io.out.bits.res.data := 0.U
   io.toFrontendBJUResolve.get.valid := io.out.valid
   io.toFrontendBJUResolve.get.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
   io.toFrontendBJUResolve.get.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get

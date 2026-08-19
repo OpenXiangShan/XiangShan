@@ -335,11 +335,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     }
 
     if (backendParams.basicDebugEn && params.isIntSchd) {
-      val delayedWakeupQueueRcIdx = issueQueues.flatMap { iq =>
-        iq.io.wakeupToIQ.zip(iq.param.exuBlockParams).collect {
-          case (x, exuParam) if exuParam.needWriteRegCache => x
-        }
-      }.map { case x =>
+      val delayedWakeupQueueRcIdx = issueQueues.flatMap(_.io.wakeupToIQ).map { case x =>
         val delayed = Wire(new DiffRCIdx)
         delayed.wen   := RegNextN(x.bits.rfWen, 3)
         delayed.rcIdx := RegNextN(x.bits.rcDest.get, 3)

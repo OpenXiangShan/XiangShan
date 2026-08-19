@@ -340,8 +340,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     entriesIO.snResp.foreach(_                                  := io.snResp.get)
     for(deqIdx <- 0 until params.numDeq) {
       entriesIO.deqReady(deqIdx)                                := deqBeforeDly(deqIdx).ready
-      entriesIO.deqSelOH(deqIdx).valid                          := finalDeqSelValidVec(deqIdx)
-      entriesIO.deqSelOH(deqIdx).bits                           := finalDeqSelOHVec(deqIdx)
+      entriesIO.deqSelOH(deqIdx).valid                          := deqSelValidVec(deqIdx)
+      entriesIO.deqSelOH(deqIdx).bits                           := deqSelOHVec(deqIdx)
       entriesIO.enqEntryOldestSel(deqIdx)                       := enqEntryOldestSel(deqIdx)
       entriesIO.simpEntryOldestSel.foreach(_(deqIdx)            := simpEntryOldestSel.get(deqIdx))
       entriesIO.compEntryOldestSel.foreach(_(deqIdx)            := compEntryOldestSel.get(deqIdx))
@@ -417,26 +417,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     }
   }
 
-  // An uncertain-latency producer announces its writeback three cycles in
-  // advance. Do not issue a lower-priority integer writer to the same port in
-  // that window; unlike a normal busy-table reservation, the DIV completion
-  // time was not known when DIV issued.
-  private val uncertainExus = params.exuBlockParams.filter(_.needUncertainWakeup)
-  private val uncertainWakeups = io.wakeupFromExu.toSeq.flatMap(_.zip(uncertainExus))
-  private val uncertainIntWbConflict = params.exuBlockParams.map { exu =>
-    exu.getIntWBPort.map { wb =>
-      uncertainWakeups
-        .filter { case (_, uncertainExu) =>
-          uncertainExu.getIntWBPort.exists(uncertainWb =>
-            uncertainWb.port == wb.port && uncertainWb.priority < wb.priority
-          )
-        }
-        .map { case (wakeup, _) => wakeup.valid && wakeup.bits.rfWen }
-        .foldLeft(false.B)(_ || _)
-    }.getOrElse(false.B)
-  }
-  private val uncertainIntWbBlocked = Wire(Vec(params.numDeq, Bool()))
-
   canIssueMergeAllBusy.zipWithIndex.foreach { case (merge, i) =>
     val mergeFuBusy = {
       if (fuBusyTableWrite(i).nonEmpty) canIssueVec.asUInt & (~fuBusyTableMask(i)).asUInt
@@ -462,8 +442,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       if (vlWbBusyTableRead(i).nonEmpty) mergeV0WbBusy & (~vlWbBusyTableMask(i)).asUInt
       else  mergeV0WbBusy
     }
-    uncertainIntWbBlocked(i) := uncertainIntWbConflict(i) && (mergeVlWbBusy & rfWenVec.asUInt).orR
-    merge := mergeVlWbBusy & ~Mux(uncertainIntWbConflict(i), rfWenVec.asUInt, 0.U)
+    merge := mergeVlWbBusy
   }
 
   deqCanIssue.zipWithIndex.foreach { case (req, i) =>
@@ -533,6 +512,10 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
                           subDeqSelOHVec.get(1)) & canIssueMergeAllBusy(0)
     deqSelOHVec(1) := subDeqSelOHVec.get(0) & canIssueMergeAllBusy(1)
 
+    finalDeqSelValidVec.zip(finalDeqSelOHVec).zip(deqSelValidVec).zip(deqSelOHVec).zipWithIndex.foreach { case ((((selValid, selOH), deqValid), deqOH), i) =>
+      selValid := deqValid && deqOH.orR
+      selOH := deqOH
+    }
   }
   else {
     enqEntryOldestSel := NewAgeDetector(numEntries = params.numEnq,
@@ -592,52 +575,11 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       }
     }
 
-  }
-
-  // A two-dequeue IQ can select an ALU and a BJU in the same cycle. If their
-  // fixed latencies target the same integer writeback port and cycle, only the
-  // configured higher-priority writer may issue. This covers the first issue
-  // after an idle period, before the writeback busy table has a reservation.
-  finalDeqSelValidVec.zip(finalDeqSelOHVec).zip(deqSelValidVec).zip(deqSelOHVec).zipWithIndex.foreach {
-    case ((((selValid, selOH), deqValid), deqOH), i) =>
-      selValid := deqValid && deqOH.orR
+    finalDeqSelValidVec.zip(finalDeqSelOHVec).zip(deqSelValidVec).zip(deqSelOHVec).zipWithIndex.foreach { case ((((selValid, selOH), deqValid), deqOH), i) =>
+      selValid := deqValid
       selOH := deqOH
-  }
-  if (params.numDeq == 2 && params.numDeqOutside == 0) {
-    val sameCycleIntWbMutex = WireDefault(false.B)
-    val deqIntWb = params.exuBlockParams.map(_.getIntWBPort)
-    (deqIntWb(0), deqIntWb(1)) match {
-      case (Some(wb0), Some(wb1)) if wb0.port == wb1.port =>
-        val selectedRfWen = deqSelOHVec.map(oh => (oh & rfWenVec.asUInt).orR)
-        val selectedFuType = deqSelOHVec.map(oh => Mux1H(oh, fuTypeVec))
-        val fixedLatencyMatch = params.exuBlockParams.zip(selectedFuType).map { case (exu, fuType) =>
-          exu.writeIntFuConfigs.flatMap(cfg => cfg.latency.latencyVal.map(lat => (cfg.fuType, lat)))
-            .groupBy(_._2)
-            .view
-            .mapValues(cfgs => FuType.FuTypeOrR(fuType, cfgs.map(_._1)))
-            .toMap
-        }
-        val sameWbCycle = (fixedLatencyMatch(0).keySet intersect fixedLatencyMatch(1).keySet)
-          .map(lat => fixedLatencyMatch(0)(lat) && fixedLatencyMatch(1)(lat))
-          .foldLeft(false.B)(_ || _)
-        val wbCollision = deqSelValidVec(0) && deqSelValidVec(1) &&
-          selectedRfWen(0) && selectedRfWen(1) && sameWbCycle
-        sameCycleIntWbMutex := wbCollision
-        val suppressDeq0 = wbCollision && (wb0.priority > wb1.priority).B
-        val suppressDeq1 = wbCollision && !suppressDeq0
-        when (suppressDeq0) {
-          finalDeqSelValidVec(0) := false.B
-          finalDeqSelOHVec(0) := 0.U
-        }
-        when (suppressDeq1) {
-          finalDeqSelValidVec(1) := false.B
-          finalDeqSelOHVec(1) := 0.U
-        }
-      case _ =>
     }
-    XSPerfAccumulate("same_cycle_int_wb_mutex", sameCycleIntWbMutex)
   }
-  XSPerfAccumulate("uncertain_int_wb_block", uncertainIntWbBlocked.asUInt.orR)
 
   val toBusyTableDeqResp = Wire(Vec(params.numDeq, ValidIO(new IssueQueueRespBundle)))
 

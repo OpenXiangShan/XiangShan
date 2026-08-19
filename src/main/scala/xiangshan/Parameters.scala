@@ -336,11 +336,11 @@ case class XSCoreParameters
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
         ExeUnitParams("ALU0", Seq(AluCfg, CsrCfg, FenceCfg, LinkCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(1, 0))), true, 2),
-        ExeUnitParams("BJU0", Seq(BrhCfg, NJmpCfg), Seq(IntWB(port = 0, 1)), Seq(Seq(IntRD(1, 1)), Seq(IntRD(7, 2))))
+        ExeUnitParams("BJU0", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(1, 1)), Seq(IntRD(7, 2))))
       ), numEntries = 18, numEnq = 2, numComp = 10),
       IssueBlockParams(Seq(
         ExeUnitParams("ALU1", Seq(AluCfg, DivCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntRD(2, 0)), Seq(IntRD(3, 0))), true, 2),
-        ExeUnitParams("BJU1", Seq(BrhCfg, NJmpCfg), Seq(IntWB(port = 1, 1)), Seq(Seq(IntRD(3, 1)), Seq(IntRD(9, 2))))
+        ExeUnitParams("BJU1", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(3, 1)), Seq(IntRD(9, 2))))
       ), numEntries = 18, numEnq = 2, numComp = 10),
       IssueBlockParams(Seq(
         ExeUnitParams(
@@ -351,7 +351,7 @@ case class XSCoreParameters
           true,
           2,
         ),
-        ExeUnitParams("BJU2", Seq(BrhCfg, NJmpCfg), Seq(IntWB(port = 2, 1)), Seq(Seq(IntRD(5, 1)), Seq(IntRD(11, 2))))
+        ExeUnitParams("BJU2", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(5, 1)), Seq(IntRD(11, 2))))
       ), numEntries = 18, numEnq = 2, numComp = 10),
       IssueBlockParams(Seq(
         ExeUnitParams(
@@ -549,7 +549,7 @@ case class XSCoreParameters
   def iqWakeUpParams = {
     Seq(
       WakeUpConfig(
-        Seq("ALU0", "ALU1", "ALU2", "ALU3", "ALU4", "ALU5", "BJU0", "BJU1", "BJU2", "LDU0", "LDU1", "LDU2") ->
+        Seq("ALU0", "ALU1", "ALU2", "ALU3", "ALU4", "ALU5", "LDU0", "LDU1", "LDU2") ->
         Seq("ALU0", "ALU1", "ALU2", "ALU3", "ALU4", "ALU5", "LDU0", "LDU1", "LDU2", "STA0", "STA1", "STD0", "STD1", "BJU0", "BJU1", "BJU2")
       ),
       WakeUpConfig(

@@ -648,11 +648,11 @@ object BackendV2SchdParams {
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
         ExeUnitParams("ALU0", Seq(AluCfg, CsrCfg, FenceCfg, LinkCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(4, 0))), true, 2),
-        ExeUnitParams("BJU0", Seq(BrhCfg, NJmpCfg), Seq(IntWB(port = 0, 1)), Seq(Seq(IntRD(0, 1)), Seq(IntRD(4, 1))))
+        ExeUnitParams("BJU0", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(0, 1)), Seq(IntRD(4, 1))))
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("ALU1", Seq(AluCfg, DivCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntRD(1, 0)), Seq(IntRD(5, 0))), true, 2),
-        ExeUnitParams("BJU1", Seq(BrhCfg, NJmpCfg), Seq(IntWB(port = 1, 1)), Seq(Seq(IntRD(1, 1)), Seq(IntRD(5, 1))))
+        ExeUnitParams("BJU1", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(1, 1)), Seq(IntRD(5, 1))))
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams(
@@ -664,7 +664,7 @@ object BackendV2SchdParams {
           2,
           vlWB = VlWB(port = intSchdVlWbPort, 0),
         ),
-        ExeUnitParams("BJU2", Seq(BrhCfg, NJmpCfg), Seq(IntWB(port = 2, 1)), Seq(Seq(IntRD(2, 1)), Seq(IntRD(6, 1))))
+        ExeUnitParams("BJU2", Seq(BrhCfg, NJmpCfg), Seq(), Seq(Seq(IntRD(2, 1)), Seq(IntRD(6, 1))))
       ), numEntries = IssueQueueSize, numEnq = 2, numComp = IssueQueueCompEntrySize),
       IssueBlockParams(Seq(
         ExeUnitParams("ALU3", Seq(AluCfg, BkuCfg, MulCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntRD(3, 0)), Seq(IntRD(7, 0))), true, 2)
@@ -773,7 +773,7 @@ object BackendV2SchdParams {
   def iqWakeUpParams = {
     Seq(
       WakeUpConfig(
-        Seq("ALU0", "ALU1", "ALU2", "ALU3", "BJU0", "BJU1", "BJU2", "LDU0", "LDU1", "LDU2") ->
+        Seq("ALU0", "ALU1", "ALU2", "ALU3", "LDU0", "LDU1", "LDU2") ->
         Seq("ALU0", "ALU1", "ALU2", "ALU3", "LDU0", "LDU1", "LDU2", "STA0", "STA1", "STD0", "STD1", "BJU0", "BJU1", "BJU2")
       ),
       WakeUpConfig(
