@@ -353,18 +353,38 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     uras.io.specOut.retTarget,
     s1_abtbFirstTakenBr.target
   )
-  s1_prediction := Mux(
-    s1_abtbValid,
-    Mux(s1_abtbResult.taken, s1_abtbResult, fallThrough.io.prediction),
-    Mux(s1_ubtbPrediction.taken, s1_ubtbPrediction, fallThrough.io.prediction)
+  // pTAGE answers with a whole group where it has one, so it leads; anything it does not know falls to the small btb
+  // and then to running the block out. A return takes its target from the return stack whichever source found it.
+  private val s1_ptageBlock  = ptage.io.prediction.blocks.head
+  private val s1_ptageResult = Wire(new Prediction)
+  s1_ptageResult.taken       := s1_ptageBlock.bits.taken
+  s1_ptageResult.cfiPosition := s1_ptageBlock.bits.cfiPosition
+  s1_ptageResult.attribute   := s1_ptageBlock.bits.attribute
+  s1_ptageResult.target := Mux(
+    s1_ptageBlock.bits.attribute.isReturn && uras.io.specOut.isCanUse,
+    uras.io.specOut.retTarget,
+    s1_ptageBlock.bits.target
+  )
+
+  s1_prediction := MuxCase(
+    fallThrough.io.prediction,
+    Seq(
+      (s1_ptageBlock.valid && s1_ptageResult.taken) -> s1_ptageResult,
+      s1_ptageBlock.valid                           -> fallThrough.io.prediction,
+      (s1_abtbValid && s1_abtbResult.taken)         -> s1_abtbResult,
+      s1_abtbValid                                  -> fallThrough.io.prediction,
+      s1_ubtbPrediction.taken                       -> s1_ubtbPrediction
+    )
   )
 
   private val s1_taken             = s1_prediction.taken
   private val useAbtb              = s1_abtbValid && s1_abtbResult.taken
-  private val debug_s1UseUbtb      = s1_taken && !useAbtb
-  private val debug_s1UseUbtbUtage = s1_taken && !useAbtb
-  private val debug_s1UseAbtb      = s1_taken && useAbtb && !s1_utageHitMask.reduce(_ || _)
-  private val debug_s1UseAbtbUtage = s1_taken && useAbtb && s1_utageHitMask.reduce(_ || _)
+  private val usePtage             = s1_ptageBlock.valid && s1_ptageResult.taken
+  private val debug_s1UsePtage     = s1_taken && usePtage
+  private val debug_s1UseUbtb      = s1_taken && !useAbtb && !usePtage
+  private val debug_s1UseUbtbUtage = s1_taken && !useAbtb && !usePtage
+  private val debug_s1UseAbtb      = s1_taken && useAbtb && !usePtage && !s1_utageHitMask.reduce(_ || _)
+  private val debug_s1UseAbtbUtage = s1_taken && useAbtb && !usePtage && s1_utageHitMask.reduce(_ || _)
 
   s1_utageMeta := utage.io.meta.bits
 
@@ -654,6 +674,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     MuxCase(
       BpuPredictionSource.Stage1.Fallthrough,
       Seq(
+        debug_s1UsePtage     -> BpuPredictionSource.Stage1.Ptage,
         debug_s1UseUbtb      -> BpuPredictionSource.Stage1.Ubtb,
         debug_s1UseUbtbUtage -> BpuPredictionSource.Stage1.UbtbUtage,
         debug_s1UseAbtb      -> BpuPredictionSource.Stage1.Abtb,
@@ -744,6 +765,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     "s1_use",
     io.toFtq.prediction.fire,
     Seq(
+      ("ptage", debug_s1UsePtage),
       ("ubtb", debug_s1UseUbtb),
       ("abtb", debug_s1UseAbtb),
       ("ubtb_microTage", debug_s1UseUbtbUtage),

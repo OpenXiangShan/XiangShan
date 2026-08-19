@@ -160,7 +160,8 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   // target from elsewhere, so the second block's start would not be where the entry assumed.
   private val s1_p1Usable = s1_anchored && s1_provider.valid
   private val s1_p2Usable =
-    s1_p1Usable && s1_providerEntry.p2Valid && PtageAttribute.hasStaticTarget(s1_providerEntry.p1.attribute)
+    s1_p1Usable && s1_providerEntry.p2Valid &&
+      PtageBlock.hasStaticTarget(s1_providerEntry.p1.taken, s1_providerEntry.p1.attribute)
 
   private def decode(block: PtageBlock, target: PrunedAddr): PtageBlockPrediction = {
     val prediction = Wire(new PtageBlockPrediction)
@@ -210,17 +211,11 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   private def targetInReach(startPc: PrunedAddr, target: PrunedAddr): Bool =
     getTargetUpper(startPc) === getTargetUpper(target)
 
-  private val t0_attribute = MuxCase(
-    PtageAttribute.Deferred,
-    Seq(
-      !t0_prediction.taken                  -> PtageAttribute.FallThrough,
-      !targetInReach(t0_startPc, t0_nextPc) -> PtageAttribute.Deferred,
-      (t0_prediction.attribute.isCall ||
-        t0_prediction.attribute.isReturn)   -> PtageAttribute.Deferred,
-      t0_prediction.attribute.isConditional -> PtageAttribute.Conditional,
-      t0_prediction.attribute.isDirect      -> PtageAttribute.Direct
-    )
-  )
+  // An entry can only describe a group whose next pc it is able to rebuild. A taken exit that jumps beyond the stored
+  // low bits is not representable, so learning it would install a confidently wrong target; leaving it as a miss lets
+  // the fallback answer instead. A return is the exception: its target comes from the return stack, not from here.
+  private val t0_representable =
+    !t0_prediction.taken || targetInReach(t0_startPc, t0_nextPc) || t0_prediction.attribute.isReturn
 
   private val t0_cfiPc = getCfiPcFromPosition(t0_startPc, t0_prediction.cfiPosition)
   // the same hash Phr shifts into the path history for this block, so the entry can later supply it ready-made
@@ -232,14 +227,13 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
 
   private val t0_continuesPending =
     pending.valid && t0_valid &&
-      pending.bits.taken &&
-      PtageAttribute.hasStaticTarget(pending.bits.attribute) &&
+      PtageBlock.hasStaticTarget(pending.bits.taken, pending.bits.attribute) &&
       t0_startPc === pending.bits.nextPc &&
       // only a conditional exit may end a group's second block: anything else has no target the entry can rebuild
-      t0_attribute === PtageAttribute.Conditional
+      t0_prediction.attribute.isConditional && t0_representable
 
   // The first group after a correction belongs to no entry, so it is neither written nor used as a second block.
-  private val t0_anchored = t0_valid && !t0_meta.noAnchor
+  private val t0_anchored = t0_valid && !t0_meta.noAnchor && t0_representable
 
   when(io.redirectValid) {
     pending.valid := false.B
@@ -247,7 +241,7 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
     pending.valid            := t0_anchored
     pending.bits.meta        := t0_meta
     pending.bits.cfiPosition := t0_prediction.cfiPosition
-    pending.bits.attribute   := t0_attribute
+    pending.bits.attribute   := t0_prediction.attribute
     pending.bits.nextPcLow   := getEntryNextPc(t0_nextPc)
     pending.bits.nextPc      := t0_nextPc
     pending.bits.taken       := t0_prediction.taken
@@ -301,7 +295,7 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
 
   entry.p2Valid        := t0_continuesPending
   entry.p2.cfiPosition := t0_prediction.cfiPosition
-  entry.p2.attribute   := t0_attribute
+  entry.p2.attribute   := t0_prediction.attribute
   entry.p2.nextPcLow   := getEntryNextPc(t0_nextPc)
   entry.p2.counter := Mux(
     writeFresh || !heldMeta.p2Valid,

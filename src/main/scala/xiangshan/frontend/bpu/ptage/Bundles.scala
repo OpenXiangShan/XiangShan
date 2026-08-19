@@ -18,29 +18,21 @@ package xiangshan.frontend.bpu.ptage
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utils.EnumUInt
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterFactory
 import xiangshan.frontend.bpu.WriteReqBundle
 
-/** What pTAGE knows about how a block leaves.
-  *
-  * Only Conditional and Direct name a target that the entry itself can supply, so only those can be followed by a
-  * second block in the same group. Deferred covers indirect, call and return exits as well as targets too far away to
-  * fit in the stored low bits: pTAGE still predicts such a block, but its successor is left to the fallback predictor
-  * and the high-level predictor.
-  */
-object PtageAttribute extends EnumUInt(4) {
-  def FallThrough: UInt = 0.U(width.W) // no cfi in the block, it runs to the end
-  def Conditional: UInt = 1.U(width.W)
-  def Direct:      UInt = 2.U(width.W) // unconditional direct jump
-  def Deferred:    UInt = 3.U(width.W)
+object PtageBlock {
 
-  // a block whose stored next pc is the real one, and so can be followed by a second block
-  def hasStaticTarget(attribute: UInt): Bool =
-    attribute === Conditional || attribute === Direct
+  /** Whether the entry itself supplies this block's target, and so knows where a following block would start.
+    *
+    * An indirect exit, return included, takes its target from somewhere else, so the next pc kept here is not where
+    * control actually goes and cannot be used as the start of a second block.
+    */
+  def hasStaticTarget(taken: Bool, attribute: BranchAttribute): Bool = taken && !attribute.isIndirect
 }
 
 object PtageCounter extends SaturateCounterFactory {
@@ -51,7 +43,7 @@ object PtageCounter extends SaturateCounterFactory {
 /** One block of a prediction group: where it leaves, and where it goes next. */
 class PtageBlock(implicit p: Parameters) extends PtageBundle {
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
-  val attribute:   UInt            = PtageAttribute()
+  val attribute:   BranchAttribute = new BranchAttribute
   val counter:     SaturateCounter = PtageCounter()
   // low bits of this block's next pc, read out and used directly as an index with no adder in the way
   val nextPcLow: UInt = UInt(NextPcLowWidth.W)
@@ -85,10 +77,10 @@ class PtageEntry(implicit p: Parameters) extends PtageBundle {
 
 /** One decoded block of a pTAGE prediction group, with its target already reconstructed. */
 class PtageBlockPrediction(implicit p: Parameters) extends PtageBundle {
-  val taken:       Bool       = Bool()
-  val cfiPosition: UInt       = UInt(CfiPositionWidth.W)
-  val attribute:   UInt       = PtageAttribute()
-  val target:      PrunedAddr = PrunedAddr(VAddrBits)
+  val taken:       Bool            = Bool()
+  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val attribute:   BranchAttribute = new BranchAttribute
+  val target:      PrunedAddr      = PrunedAddr(VAddrBits)
 }
 
 /** pTAGE's answer for one prediction cycle: one block, two on a 2-taken hit, or none at all. */
@@ -119,7 +111,7 @@ class PtageMeta(implicit p: Parameters) extends PtageBundle {
   val p1Counter:     SaturateCounter = PtageCounter()
   val p2Counter:     SaturateCounter = PtageCounter()
   val p1CfiPosition: UInt            = UInt(CfiPositionWidth.W)
-  val p1Attribute:   UInt            = PtageAttribute()
+  val p1Attribute:   BranchAttribute = new BranchAttribute
   val p2Valid:       Bool            = Bool()
   // The first group after a redirect was indexed with the history as it stood before the correction landed, so it
   // belongs to no entry and must not be trained. This is the warm-up that indexing a group ahead costs.
@@ -132,12 +124,12 @@ class PtageMeta(implicit p: Parameters) extends PtageBundle {
   * second blocks could only ever be learned where they already existed.
   */
 class PtagePendingGroup(implicit p: Parameters) extends PtageBundle {
-  val meta:        PtageMeta  = new PtageMeta
-  val cfiPosition: UInt       = UInt(CfiPositionWidth.W)
-  val attribute:   UInt       = PtageAttribute()
-  val nextPcLow:   UInt       = UInt(NextPcLowWidth.W)
-  val nextPc:      PrunedAddr = PrunedAddr(VAddrBits)
-  val taken:       Bool       = Bool()
+  val meta:        PtageMeta       = new PtageMeta
+  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val attribute:   BranchAttribute = new BranchAttribute
+  val nextPcLow:   UInt            = UInt(NextPcLowWidth.W)
+  val nextPc:      PrunedAddr      = PrunedAddr(VAddrBits)
+  val taken:       Bool            = Bool()
   // this block's contribution to the path history, kept so the entry can carry a whole group's contribution
   val pathHash: UInt = UInt(PathHashWidth.W)
 }
