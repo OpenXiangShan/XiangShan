@@ -88,6 +88,9 @@ def _eligible_artifact(tmp_path: Path, simulator: str = "verilator") -> tuple[di
         ),
         "definitions_sha256": backannotate_funcov._json_sha256(definitions),
         "sampler_sha256": backannotate_funcov._current_sampler_sha256(),
+        "verification_env_sha256": (
+            backannotate_funcov._current_verification_env_sha256()
+        ),
         "signal_contract_sha256": runtime["signal_contract_sha256"],
         "build_manifest_path": str(manifest_path),
         "build_manifest_sha256": runtime["build_manifest_sha256"],
@@ -199,6 +202,20 @@ def test_backannotation_runtime_manifest_gate_accepts_vcs_build(tmp_path):
     gate = backannotate_funcov.evaluate_artifact(raw)
 
     assert gate == {"kind": "dut", "eligible": True, "reasons": []}
+
+
+def test_backannotation_rejects_verification_environment_drift(tmp_path, monkeypatch):
+    raw, _manifest_path, _build_root = _eligible_artifact(tmp_path)
+    monkeypatch.setattr(
+        backannotate_funcov,
+        "_current_verification_env_sha256",
+        lambda: "0" * 64,
+    )
+
+    gate = backannotate_funcov.evaluate_artifact(raw)
+
+    assert not gate["eligible"]
+    assert "verification_env_version_mismatch" in gate["reasons"]
 
 
 @pytest.mark.parametrize(

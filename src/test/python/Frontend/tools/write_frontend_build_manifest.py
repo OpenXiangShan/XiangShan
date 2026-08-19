@@ -17,6 +17,27 @@ if str(PROVENANCE_ROOT) not in sys.path:
 from artifact_provenance import _OBSERVABILITY_SOURCE_ALLOWLIST, write_frontend_build_manifest
 
 
+# These paths can change the generated Frontend DUT or the toolchain inputs
+# used to build it. Verification-side edits are tracked independently by the
+# funcov registry/sampler/testcase hashes and do not require a DUT rebuild.
+_DUT_INPUT_PATHS = (
+    "Makefile",
+    "build.sc",
+    "build.mill",
+    "build.sbt",
+    "mill",
+    ".mill-version",
+    "project/",
+    "src/main/scala/",
+    "src/main/resources/",
+    "rocket-chip/",
+    "hardfloat/",
+    "XSCore/",
+    "coupledL2/",
+    "utility/",
+)
+
+
 def _worktree_git_context(repo_root: Path) -> tuple[Path, Path, Path] | None:
     """Return (common git dir, worktree index, admin dir) for a linked worktree."""
     gitfile = repo_root / ".git"
@@ -84,6 +105,14 @@ def _git_bytes(repo_root: Path, *args: str) -> bytes:
         env=env,
     )
     return bytes(result.stdout)
+
+
+def _is_dut_input_path(path: str) -> bool:
+    normalized = path.strip().lstrip("./")
+    return any(
+        normalized == prefix or normalized.startswith(prefix)
+        for prefix in _DUT_INPUT_PATHS
+    )
 
 
 def main() -> int:
@@ -157,7 +186,8 @@ def main() -> int:
         # Build/run outputs are audit data, not source inputs to the DUT.
         if path.startswith("data/runs/") or path.startswith("build-frontend/"):
             continue
-        status_entries.append(line)
+        if _is_dut_input_path(path):
+            status_entries.append(line)
     source_tree_dirty = bool(status_entries)
     manifest = write_frontend_build_manifest(
         args.output,

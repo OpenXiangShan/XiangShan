@@ -116,6 +116,41 @@ def current_funcov_sampler_sha256() -> str:
     )
 
 
+def verification_environment_paths() -> dict[str, Path]:
+    """Return executable verification sources that affect DUT evidence."""
+
+    frontend_root = _frontend_root()
+    env_root = frontend_root / "env"
+    paths = [
+        path
+        for path in env_root.rglob("*")
+        if path.is_file() and path.suffix in {".py", ".sv"}
+    ]
+    paths.extend(
+        path
+        for path in (
+            frontend_root / "Frontend_api.py",
+            frontend_root / "Frontend_env.py",
+            frontend_root / "conftest.py",
+            frontend_root / "tests" / "conftest.py",
+        )
+        if path.is_file()
+    )
+    return {
+        path.relative_to(frontend_root).as_posix(): path
+        for path in sorted(set(paths))
+    }
+
+
+def current_verification_environment_sha256() -> str:
+    return _json_sha256(
+        {
+            label: _file_sha256(str(path))
+            for label, path in verification_environment_paths().items()
+        }
+    )
+
+
 COMPATIBILITY_FIELDS = (
     "simulator",
     "dut_source_sha",
@@ -130,6 +165,7 @@ COMPATIBILITY_FIELDS = (
     "generated_rtl_sha256",
     "registry_sha256",
     "sampler_sha256",
+    "verification_env_sha256",
     "signal_contract_sha256",
     "build_config",
     "toolchain",
@@ -420,6 +456,7 @@ class FunctionalCoverageRecorder:
                 build_config = build_config_override
         definitions_sha256 = _json_sha256([asdict(item) for item in self.definitions])
         sampler_sha256 = current_funcov_sampler_sha256()
+        verification_env_sha256 = current_verification_environment_sha256()
         provenance = {
             "simulator": simulator,
             "dut_source_sha": dut_source_sha,
@@ -438,6 +475,7 @@ class FunctionalCoverageRecorder:
             ),
             "definitions_sha256": definitions_sha256,
             "sampler_sha256": sampler_sha256,
+            "verification_env_sha256": verification_env_sha256,
             "signal_contract_sha256": build["signal_contract_sha256"],
             "build_config": build_config,
             "build_manifest_path": str(manifest_path),

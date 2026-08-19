@@ -12,6 +12,8 @@ from pathlib import Path
 
 FRONTEND_ROOT = Path(__file__).resolve().parents[1]
 PROVENANCE_ROOT = FRONTEND_ROOT / "env" / "runtime"
+if str(FRONTEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(FRONTEND_ROOT))
 if str(PROVENANCE_ROOT) not in sys.path:
     sys.path.insert(0, str(PROVENANCE_ROOT))
 
@@ -19,6 +21,7 @@ from artifact_provenance import (  # noqa: E402
     BUILD_HASH_FIELDS as MANIFEST_BUILD_HASH_FIELDS,
     load_frontend_build_manifest,
 )
+from env.funcov.recorder import current_verification_environment_sha256  # noqa: E402
 
 
 FIELD_RE = re.compile(r"\x01([^\x02]+)\x02([^\x01]*)")
@@ -40,6 +43,7 @@ COMPATIBILITY_FIELDS = (
     *BUILD_HASH_FIELDS,
     "registry_sha256",
     "sampler_sha256",
+    "verification_env_sha256",
     "build_config",
     "toolchain",
 )

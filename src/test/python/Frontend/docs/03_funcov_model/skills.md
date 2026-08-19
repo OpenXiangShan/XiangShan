@@ -216,7 +216,7 @@ src/test/python/Frontend/scripts/gen_coverage_html.sh <run-dir>/coverage
 
 不同版本默认拒绝合并。显式迁移必须证明旧 bin 语义未变、给出一对一映射、保留新增 bin 为 unhit，并记录迁移审计信息。
 
-当前 JSON 已记录 registry、定义、sampler、DUT 模型库/Python 扩展、generated RTL tree、signal contract、build config 和 toolchain 签名；`merge_raw_files()` 会重新计算每个输入的 compatibility signature 和 definitions hash，签名不一致或字段被静默修改时直接失败。`make frontend` 成功后生成 design-build manifest，运行时重新核对 manifest 与实际产物哈希；源码脏、manifest 缺失或产物不匹配均不得进入自动 `HIT`。标准 runner 同时生成唯一 run 目录并保存 pytest outcome/退出码和 checker 状态。汇编 suite 会对逐 case artifact 执行只读反标审计，并输出明确标记为 diagnostic `observed` 的合并报告；该 aggregate 不能代替逐 case DUT evidence。
+当前 JSON 已记录 registry、定义、sampler、完整验证环境、DUT 模型库/Python 扩展、generated RTL tree、signal contract、build config 和 toolchain 签名；`merge_raw_files()` 会重新计算每个输入的 compatibility signature 和 definitions hash，签名不一致或字段被静默修改时直接失败。`make frontend` 成功后生成 design-build manifest，运行时重新核对 manifest 与实际产物哈希；DUT 编译输入脏、manifest 缺失或产物不匹配均不得进入自动 `HIT`。测试点文档、coverage registry、driver、monitor、checker、sampler 和 Python testcase 的变化不要求重新编译 DUT；registry、验证环境和 testcase 分别通过内容 hash 重新验证 artifact，验证实现变化只要求重新回归。纯文档变化不改变 DUT 或验证环境身份。标准 runner 同时生成唯一 run 目录并保存 pytest outcome/退出码和 checker 状态。汇编 suite 会对逐 case artifact 执行只读反标审计，并输出明确标记为 diagnostic `observed` 的合并报告；该 aggregate 不能代替逐 case DUT evidence。
 
 反标门禁必须实际检查同一 run 下声明的 waveform、raw `.dat`、case log 和 funcov 文件，而不是只检查路径字符串。waveform、`.dat` 和 funcov 文件为空或不存在时不得进入自动 `HIT`；安静用例允许 case log 为空，但文件必须存在。
 反标时还必须重算当前 canonical registry 和 sampler 的 SHA，并重算 artifact 内 definitions hash。registry/sampler 已更新或 definitions 被改写的历史 artifact 只能作诊断证据，不得对当前测试点升级为 `HIT`。
@@ -256,7 +256,7 @@ Frontend 设计每周更新时执行固定流程：
 3. 建立设计文件/信号到测试点、bin、checker 和 testcase 的影响映射。
 4. 增加、修改、合并或删除受影响测试点，并记录原因。
 5. 同步修改 Condition、Checkpoint、Object、sampler、checker 和 testcase。
-6. 重新编译 DUT，生成 build manifest 和 signal inventory。
+6. 仅当 DUT 编译输入或编译配置发生变化时重新编译 DUT；否则复用已有 DUT build，并刷新/校验 build manifest 和 signal inventory。
 7. 执行全量 signal contract、模型单测和受影响 testcase。
 8. 运行当前版本 active 回归，独立生成 funcov 和 codecov 报告。
 9. 旧版本受影响的 `HIT/CLOSED` 在重验前标记 `PARTIAL`，evidence 注明版本失效原因。

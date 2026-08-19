@@ -28,7 +28,12 @@ REPO_ROOT = FRONTEND_ROOT.parents[3]
 if str(FRONTEND_ROOT) not in sys.path:
     sys.path.insert(0, str(FRONTEND_ROOT))
 
-from env.funcov.recorder import current_funcov_sampler_sha256, funcov_sampler_paths
+from env.funcov.recorder import (
+    current_funcov_sampler_sha256,
+    current_verification_environment_sha256,
+    funcov_sampler_paths,
+    verification_environment_paths,
+)
 
 
 PRIMARY_STATUSES = ("UNMAPPED", "MODELED", "PARTIAL", "HIT", "CLOSED")
@@ -63,6 +68,7 @@ PROVENANCE_MATCH_FIELDS = (
     "design_baseline_sha",
     "registry_sha256",
     "sampler_sha256",
+    "verification_env_sha256",
     "source_sha_override",
     "source_delta_sha256",
     "source_delta_files",
@@ -344,14 +350,25 @@ def expected_provenance(pilot_path: Path, simulator: str) -> dict[str, Any]:
     if bool(manifest.get("source_tree_dirty", False)):
         reasons.append("source_tree_dirty")
     worktree = verification_worktree_state()
-    if worktree["status"] != "clean":
-        reasons.append("verification_worktree_dirty")
     manifest_status = "valid" if not reasons else "invalid"
     sampler_paths = funcov_sampler_paths()
     missing_sampler = [str(path) for path in sampler_paths.values() if not path.is_file()]
     if missing_sampler:
         reasons.extend(f"sampler_missing:{path}" for path in missing_sampler)
     sampler_sha256 = "unavailable" if missing_sampler else current_funcov_sampler_sha256()
+    verification_paths = verification_environment_paths()
+    missing_verification = [
+        str(path) for path in verification_paths.values() if not path.is_file()
+    ]
+    if missing_verification:
+        reasons.extend(
+            f"verification_env_missing:{path}" for path in missing_verification
+        )
+    verification_env_sha256 = (
+        "unavailable"
+        if missing_verification or not verification_paths
+        else current_verification_environment_sha256()
+    )
     return {
         "simulator": simulator,
         "build_manifest_path": str(manifest_path),
@@ -368,6 +385,7 @@ def expected_provenance(pilot_path: Path, simulator: str) -> dict[str, Any]:
         "signal_contract_sha256": str(manifest.get("signal_contract_sha256") or artifact_hashes.get("signal_contract_sha256") or "unavailable"),
         "registry_sha256": _sha256(pilot_path),
         "sampler_sha256": sampler_sha256,
+        "verification_env_sha256": verification_env_sha256,
     }
 
 

@@ -24,7 +24,12 @@ if str(_IMPORT_ROOT) not in sys.path:
     sys.path.insert(0, str(_IMPORT_ROOT))
 
 from env.runtime.artifact_provenance import load_frontend_build_manifest  # noqa: E402
-from env.funcov.recorder import current_funcov_sampler_sha256, funcov_sampler_paths  # noqa: E402
+from env.funcov.recorder import (  # noqa: E402
+    current_funcov_sampler_sha256,
+    current_verification_environment_sha256,
+    funcov_sampler_paths,
+    verification_environment_paths,
+)
 
 
 STATUSES = {
@@ -52,6 +57,7 @@ _REQUIRED_PROVENANCE = (
     "registry_sha256",
     "definitions_sha256",
     "sampler_sha256",
+    "verification_env_sha256",
     "signal_contract_sha256",
     "build_manifest_sha256",
     "compatibility_signature",
@@ -65,6 +71,7 @@ _SHA256_PROVENANCE = {
     "registry_sha256",
     "definitions_sha256",
     "sampler_sha256",
+    "verification_env_sha256",
     "signal_contract_sha256",
     "build_manifest_sha256",
     "compatibility_signature",
@@ -83,6 +90,7 @@ _COMPATIBILITY_FIELDS = (
     "generated_rtl_sha256",
     "registry_sha256",
     "sampler_sha256",
+    "verification_env_sha256",
     "signal_contract_sha256",
     "build_config",
     "toolchain",
@@ -391,6 +399,13 @@ def _current_sampler_sha256() -> str | None:
     return current_funcov_sampler_sha256()
 
 
+def _current_verification_env_sha256() -> str | None:
+    paths = verification_environment_paths()
+    if not paths or any(not path.is_file() for path in paths.values()):
+        return None
+    return current_verification_environment_sha256()
+
+
 def _manifest_value_matches(field: str, recorded: Any, runtime: Any) -> bool:
     if field == "source_sha_override":
         return (
@@ -675,6 +690,15 @@ def evaluate_artifact(raw: Any) -> dict:
         != current_sampler_sha256
     ):
         reasons.append("sampler_version_mismatch")
+
+    current_verification_env_sha256 = _current_verification_env_sha256()
+    if current_verification_env_sha256 is None:
+        reasons.append("current_verification_env_unavailable")
+    elif (
+        str(provenance.get("verification_env_sha256") or "").strip().lower()
+        != current_verification_env_sha256
+    ):
+        reasons.append("verification_env_version_mismatch")
 
     definitions = raw.get("definitions")
     if not isinstance(definitions, list):
