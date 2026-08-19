@@ -17,7 +17,6 @@ package xiangshan.frontend.bpu
 
 import chisel3.util._
 import xiangshan.frontend.HasFrontendParameters
-import xiangshan.frontend.bpu.abtb.AheadBtbParameters
 import xiangshan.frontend.bpu.history.commonhr.CommonHR
 import xiangshan.frontend.bpu.history.commonhr.CommonHRParameters
 import xiangshan.frontend.bpu.history.fastphr.FastPhrParameters
@@ -29,7 +28,6 @@ import xiangshan.frontend.bpu.ras.RasParameters
 import xiangshan.frontend.bpu.sc.ScParameters
 import xiangshan.frontend.bpu.tage.TageParameters
 import xiangshan.frontend.bpu.ubtb.MicroBtbParameters
-import xiangshan.frontend.bpu.utage.MicroTageParameters
 
 // For users: these are default Bpu parameters set by dev, do not change them here,
 // use top-level Parameters.scala instead.
@@ -46,9 +44,7 @@ case class BpuParameters(
     fastPhrParameters:  FastPhrParameters = FastPhrParameters(),
     // sub predictors
     ubtbParameters:   MicroBtbParameters = MicroBtbParameters(),
-    abtbParameters:   AheadBtbParameters = AheadBtbParameters(),
     ptageParameters:  PtageParameters = PtageParameters(),
-    utageParameters:  MicroTageParameters = MicroTageParameters(),
     mbtbParameters:   MainBtbParameters = MainBtbParameters(),
     tageParameters:   TageParameters = TageParameters(),
     scParameters:     ScParameters = ScParameters(),
@@ -72,8 +68,6 @@ trait HasBpuParameters extends HasFrontendParameters {
 
   def PhrHistoryLength: Int = frontendParameters.getPhrHistoryLength
 
-  def NumAheadBtbPredictionEntries: Int = bpuParameters.abtbParameters.NumWays
-
   def NumBtbAlignBanks:    Int = FetchBlockSize / FetchBlockAlignSize
   def NumBtbResultEntries: Int = bpuParameters.mbtbParameters.NumWay * NumBtbAlignBanks
 
@@ -93,9 +87,6 @@ trait HasBpuParameters extends HasFrontendParameters {
         _.getFoldedHistoryInfoSet(bpuParameters.ittageParameters.TagWidth, bpuParameters.ittageParameters.NumBanks)
       }.reduce(_ ++ _) ++
       bpuParameters.scParameters.PathTableInfos.map {
-        _.getFoldedHistoryInfoSet()
-      }.reduce(_ ++ _) ++
-      bpuParameters.utageParameters.TableInfos.map {
         _.getFoldedHistoryInfoSet()
       }.reduce(_ ++ _)
 

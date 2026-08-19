@@ -24,7 +24,6 @@ import xiangshan.Resolve
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.Pc
-import xiangshan.frontend.bpu.abtb.AheadBtbMeta
 import xiangshan.frontend.bpu.history.commonhr.CommonHRMeta
 import xiangshan.frontend.bpu.history.commonhr.CommonHRResolveMeta
 import xiangshan.frontend.bpu.history.phr.PhrMeta
@@ -35,7 +34,6 @@ import xiangshan.frontend.bpu.ras.RasCommitMeta
 import xiangshan.frontend.bpu.ras.RasRedirectMeta
 import xiangshan.frontend.bpu.sc.ScMeta
 import xiangshan.frontend.bpu.tage.TageMeta
-import xiangshan.frontend.bpu.utage.MicroTageMeta
 import xiangshan.frontend.ftq.ResolveSource
 
 /* *** public const & type *** */
@@ -153,7 +151,6 @@ class BpuPredictionSource extends Bundle {
   val s3Override: Bool = Bool()
 
   def s1Ubtb:        Bool = s1Source === BpuPredictionSource.Stage1.Ubtb
-  def s1Abtb:        Bool = s1Source === BpuPredictionSource.Stage1.Abtb
   def s1Fallthrough: Bool = s1Source === BpuPredictionSource.Stage1.Fallthrough
   def s3Ras:         Bool = s3Source === BpuPredictionSource.Stage3.Ras
   def s3ITTage:      Bool = s3Source === BpuPredictionSource.Stage3.ITTage
@@ -164,13 +161,10 @@ class BpuPredictionSource extends Bundle {
 }
 
 object BpuPredictionSource {
-  object Stage1 extends EnumUInt(6) {
+  object Stage1 extends EnumUInt(3) {
     def Ubtb:        UInt = 0.U(width.W)
-    def Abtb:        UInt = 1.U(width.W)
-    def UbtbUtage:   UInt = 2.U(width.W)
-    def AbtbUtage:   UInt = 3.U(width.W)
-    def Ptage:       UInt = 5.U(width.W)
-    def Fallthrough: UInt = 4.U(width.W)
+    def Ptage:       UInt = 1.U(width.W)
+    def Fallthrough: UInt = 2.U(width.W)
   }
   object Stage3 extends EnumUInt(6) {
     def Ras:         UInt = 0.U(width.W)
@@ -297,12 +291,10 @@ class Train(NumStartPcVecDup: Int = 1)(implicit p: Parameters) extends BpuTrain 
 
 // use s3 prediction to train s1 predictors
 class FastTrain(implicit p: Parameters) extends BpuBundle {
-  val startPc:         Pc            = Pc()
-  val finalPrediction: Prediction    = new Prediction
-  val hasOverride:     Bool          = Bool()
-  val abtbMeta:        AheadBtbMeta  = new AheadBtbMeta
-  val utageMeta:       MicroTageMeta = new MicroTageMeta
-  val ptageMeta:       PtageMeta     = new PtageMeta
+  val startPc:         Pc         = Pc()
+  val finalPrediction: Prediction = new Prediction
+  val hasOverride:     Bool       = Bool()
+  val ptageMeta:       PtageMeta  = new PtageMeta
 }
 
 // metadata for commit training (e.g. ras)
@@ -331,8 +323,6 @@ class BpuResolveMeta(implicit p: Parameters) extends BpuBundle {
   val phr:      PhrMeta             = new PhrMeta
   val commonHR: CommonHRResolveMeta = new CommonHRResolveMeta
 
-  // val debug_utage: Option[MicroTageMeta] = Option.when(!env.FPGAPlatform)(new MicroTageMeta)
-  val utage: MicroTageMeta = new MicroTageMeta
 }
 
 class BpuPerfMeta(implicit p: Parameters) extends BpuBundle {

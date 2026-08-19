@@ -31,7 +31,6 @@ import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
 import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.history.commonhr.CommonHR
 import xiangshan.frontend.bpu.history.commonhr.CommonHRMeta
 import xiangshan.frontend.bpu.history.fastphr.FastPhr
@@ -46,8 +45,6 @@ import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.sc.Sc
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
-import xiangshan.frontend.bpu.utage.MicroTage
-import xiangshan.frontend.bpu.utage.MicroTageMeta
 
 class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with HasFastPhrParameters {
   class BpuIO extends Bundle {
@@ -62,8 +59,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   /* *** submodules *** */
   private val fallThrough = Module(new FallThroughPredictor)
   private val ubtb        = Module(new MicroBtb)
-  private val abtb        = Module(new AheadBtb)
-  private val utage       = Module(new MicroTage)
   private val mbtb        = Module(new MainBtb)
   private val tage        = Module(new Tage)
   private val ittage      = Module(new Ittage)
@@ -78,9 +73,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private def predictors: Seq[BasePredictor] = Seq(
     fallThrough,
     ubtb,
-    abtb,
     ptage,
-    utage,
     uras,
     mbtb,
     tage,
@@ -98,27 +91,22 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val constCtrl = Constantin.createRecord("constCtrl")
 
   fallThrough.io.enable := true.B // fallThrough is always enabled
-  utage.io.enable       := true.B
   uras.io.enable        := true.B
   ptage.io.enable       := true.B
   if (env.EnableConstantin && !env.FPGAPlatform) {
     ubtb.io.enable   := Mux(constCtrl(0), constCtrl(1), ctrl.ubtbEnable)
-    abtb.io.enable   := Mux(constCtrl(0), constCtrl(2), ctrl.abtbEnable)
     mbtb.io.enable   := Mux(constCtrl(0), constCtrl(3), ctrl.mbtbEnable)
     tage.io.enable   := Mux(constCtrl(0), constCtrl(4), ctrl.tageEnable)
     sc.io.enable     := Mux(constCtrl(0), constCtrl(5), ctrl.scEnable)
     ittage.io.enable := Mux(constCtrl(0), constCtrl(6), ctrl.ittageEnable)
     ras.io.enable    := Mux(constCtrl(0), constCtrl(7), ctrl.rasEnable)
-    // utage.io.enable  := Mux(constCtrl(0), constCtrl(8), ctrl.utageEnable)
   } else {
     ubtb.io.enable   := ctrl.ubtbEnable
-    abtb.io.enable   := ctrl.abtbEnable
     mbtb.io.enable   := ctrl.mbtbEnable
     tage.io.enable   := ctrl.tageEnable
     sc.io.enable     := ctrl.scEnable
     ittage.io.enable := ctrl.ittageEnable
     ras.io.enable    := ctrl.rasEnable
-    // utage.io.enable  := ctrl.utageEnable
   }
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
@@ -158,18 +146,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val s2_startPc = RegEnable(s1_startPc, s1_fire)
   private val s3_startPc = RegEnable(s2_startPc, s2_fire)
 
-  // abtb meta won't be sent to ftq, used for abtb fast train
   // pTAGE's lookup information rides the pipeline down to s3, where the verified group trains the entry it came from
   private val s2_ptageMeta = RegEnable(ptage.io.meta, s1_fire)
   private val s3_ptageMeta = RegEnable(s2_ptageMeta, s2_fire)
-
-  private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
-  private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
-
-  private val s1_utageMeta     = Wire(new MicroTageMeta)
-  private val s2_utageMeta     = RegEnable(s1_utageMeta, s1_fire)
-  private val s2_realUtageMeta = Wire(new MicroTageMeta)
-  private val s3_utageMeta     = RegEnable(s2_realUtageMeta, s2_fire)
 
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
@@ -198,8 +177,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   fastTrain.valid                := s3_valid
   fastTrain.bits.startPc         := s3_startPc.get.unGuard
   fastTrain.bits.finalPrediction := s3_prediction
-  fastTrain.bits.abtbMeta        := s3_abtbMeta
-  fastTrain.bits.utageMeta       := s3_utageMeta
   fastTrain.bits.ptageMeta       := s3_ptageMeta
   fastTrain.bits.hasOverride     := s3_override
 
@@ -225,24 +202,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   ptage.io.foldedHist    := fastPhr.io.foldedHist
   ptage.io.redirectValid := redirect.valid
   ptage.io.overrideValid := s3_override
-
-  abtb.io.redirectValid  := redirect.valid
-  abtb.io.overrideValid  := s3_override
-  abtb.io.normalPathHist := phr.io.oldFoldedPhr
-
-  // utage.io.foldedPathHist         := phr.io.oldFoldedPhr
-  // utage.io.foldedPathHistForTrain := phr.io.trainFoldedPhr
-  utage.io.abtbPrediction := abtb.io.abtbResult
-  utage.io.abtbPosVec     := abtb.io.abtbPos
-  utage.io.overrideValid  := s3_override
-  utage.io.redirectValid  := redirect.valid
-
-  utage.io.normalPathHist   := phr.io.oldFoldedPhr
-  utage.io.s1PathHist       := phr.io.s1_foldedPhr
-  utage.io.overridePathHist := phr.io.s3_foldedPhr
-
-  utage.io.s1StartPc       := s1_prediction.target.unGuard
-  utage.io.overrideStartPc := s3_prediction.target.unGuard
 
   // uras
   uras.io.specIn.startPc                := s1_startPc.get
@@ -312,46 +271,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   s0_stall := !(s1_valid || s3_override || redirect.valid)
 
   private val s1_ubtbPrediction = Wire(new Prediction)
-  private val s1_abtbPrediction = Wire(Vec(NumAheadBtbPredictionEntries, new Prediction))
   s1_ubtbPrediction := ubtb.io.prediction.bits
   s1_ubtbPrediction.target := Mux(
     ubtb.io.prediction.bits.attribute.isReturn && uras.io.specOut.isCanUse,
     uras.io.specOut.retTarget,
     ubtb.io.prediction.bits.target
-  )
-  for (i <- 0 until NumAheadBtbPredictionEntries) {
-    s1_abtbPrediction(i) := abtb.io.prediction(i).bits
-  }
-
-  private val s1_abtbPosition       = abtb.io.abtbResultPos
-  private val s1_utageHitMask       = utage.io.prediction.hitVec
-  private val s1_utageTakenMask     = utage.io.prediction.takenVec
-  private val s1_jumpValidVec       = abtb.io.predCtrl.jumpValidVec
-  private val s1_conditonalValidVec = abtb.io.predCtrl.conditionValidVec
-  private val s1_abtbTakenMask = VecInit(abtb.io.prediction.zipWithIndex.map { case (pred, i) =>
-    XSPerfAccumulate(
-      s"abtb_attribute_mismatch_takenCtr${i}",
-      pred.valid && (pred.bits.attribute.isDirect || pred.bits.attribute.isIndirect) && !pred.bits.taken
-    )
-    XSPerfAccumulate(
-      s"microTage_false_hit_way${i}",
-      pred.valid && !pred.bits.attribute.isConditional && s1_utageHitMask(i)
-    )
-    s1_jumpValidVec(i) || (s1_conditonalValidVec(i) && Mux(s1_utageHitMask(i), s1_utageTakenMask(i), pred.bits.taken))
-  })
-
-  private val s1_compareMatrix      = CompareMatrix(s1_abtbPosition)
-  private val s1_abtbFirstTakenBrOH = s1_compareMatrix.getLeastElementOH(s1_abtbTakenMask)
-  private val s1_abtbFirstTakenBr   = Mux1H(s1_abtbFirstTakenBrOH, s1_abtbPrediction)
-  private val s1_abtbValid          = abtb.io.prediction.map(_.valid).reduce(_ || _)
-
-  private val s1_abtbResult = Wire(new Prediction)
-  s1_abtbResult       := s1_abtbFirstTakenBr
-  s1_abtbResult.taken := s1_abtbTakenMask.reduce(_ || _)
-  s1_abtbResult.target := Mux(
-    s1_abtbFirstTakenBr.attribute.isReturn && uras.io.specOut.isCanUse,
-    uras.io.specOut.retTarget,
-    s1_abtbFirstTakenBr.target
   )
   // pTAGE answers with a whole group where it has one, so it leads; anything it does not know falls to the small btb
   // and then to running the block out. A return takes its target from the return stack whichever source found it.
@@ -371,30 +295,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     Seq(
       (s1_ptageBlock.valid && s1_ptageResult.taken) -> s1_ptageResult,
       s1_ptageBlock.valid                           -> fallThrough.io.prediction,
-      (s1_abtbValid && s1_abtbResult.taken)         -> s1_abtbResult,
-      s1_abtbValid                                  -> fallThrough.io.prediction,
       s1_ubtbPrediction.taken                       -> s1_ubtbPrediction
     )
   )
 
-  private val s1_taken             = s1_prediction.taken
-  private val useAbtb              = s1_abtbValid && s1_abtbResult.taken
-  private val usePtage             = s1_ptageBlock.valid && s1_ptageResult.taken
-  private val debug_s1UsePtage     = s1_taken && usePtage
-  private val debug_s1UseUbtb      = s1_taken && !useAbtb && !usePtage
-  private val debug_s1UseUbtbUtage = s1_taken && !useAbtb && !usePtage
-  private val debug_s1UseAbtb      = s1_taken && useAbtb && !usePtage && !s1_utageHitMask.reduce(_ || _)
-  private val debug_s1UseAbtbUtage = s1_taken && useAbtb && !usePtage && s1_utageHitMask.reduce(_ || _)
-
-  s1_utageMeta := utage.io.meta.bits
+  private val s1_taken         = s1_prediction.taken
+  private val usePtage         = s1_ptageBlock.valid && s1_ptageResult.taken
+  private val debug_s1UsePtage = s1_taken && usePtage
+  private val debug_s1UseUbtb  = s1_taken && !usePtage
 
   private val s2_s1Prediction = RegEnable(s1_prediction, s1_fire)
-
-  s2_realUtageMeta := s2_utageMeta
-  s2_realUtageMeta.abtbResult.zipWithIndex.foreach { case (result, idx) =>
-    result.valid :=
-      s2_utageMeta.abtbResult(idx).valid && (s2_utageMeta.abtbResult(idx).cfiPosition <= s2_s1Prediction.cfiPosition)
-  }
 
   private val s2_compareMatrix = CompareMatrix(VecInit(mbtb.io.result.map(_.bits.cfiPosition)))
   private val s2_jumpTakenVec = VecInit(mbtb.io.result.map {
@@ -505,8 +415,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   s3_resolveMeta.commonHR := commonHR.io.s3ResolveMeta
   s3_resolveMeta.ittage   := ittage.io.meta
   s3_resolveMeta.phr      := s3_phrMeta
-  // s3_resolveMeta.debug_utage.foreach(_ := s3_utageMeta)
-  s3_resolveMeta.utage := s3_utageMeta
 
   private val s3_commitMeta = Wire(new BpuCommitMeta)
   s3_commitMeta.ras := ras.io.commitMeta
@@ -562,13 +470,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val s1_ubtbPredWithURas = WireInit(ubtb.io.prediction)
   when(s1_ubtbPredWithURas.valid && s1_ubtbPredWithURas.bits.attribute.isReturn && uras.io.specOut.isCanUse) {
     s1_ubtbPredWithURas.bits.target := uras.io.specOut.retTarget
-  }
-
-  private val s1_abtbPredWithURas = WireInit(abtb.io.prediction)
-  s1_abtbPredWithURas.foreach {
-    case p => when(p.valid && p.bits.attribute.isReturn && uras.io.specOut.isCanUse) {
-        p.bits.target := uras.io.specOut.retTarget
-      }
   }
 
   phr.io.train.s0_stall      := s0_stall
@@ -661,11 +562,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     "s0_stall but s0_startPc is different from s0_startPcReg"
   )
 
-  /* *** check abtb output *** */
-  when(io.toFtq.prediction.fire && abtb.io.prediction.map(_.valid).reduce(_ || _)) {
-    assert(abtb.io.debug_startPc === s1_startPc.head.unGuard)
-  }
-
   /* *** Debug Meta *** */
   // used for performance counters
   private val s3_firstTakenBlameSc = Mux1H(s3_firstTakenBranchOH, s3_scUsed)
@@ -674,11 +570,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     MuxCase(
       BpuPredictionSource.Stage1.Fallthrough,
       Seq(
-        debug_s1UsePtage     -> BpuPredictionSource.Stage1.Ptage,
-        debug_s1UseUbtb      -> BpuPredictionSource.Stage1.Ubtb,
-        debug_s1UseUbtbUtage -> BpuPredictionSource.Stage1.UbtbUtage,
-        debug_s1UseAbtb      -> BpuPredictionSource.Stage1.Abtb,
-        debug_s1UseAbtbUtage -> BpuPredictionSource.Stage1.AbtbUtage
+        debug_s1UsePtage -> BpuPredictionSource.Stage1.Ptage,
+        debug_s1UseUbtb  -> BpuPredictionSource.Stage1.Ubtb
       )
     )
   private val s3_predictionSource = PriorityEncoder(Seq(
@@ -767,9 +660,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     Seq(
       ("ptage", debug_s1UsePtage),
       ("ubtb", debug_s1UseUbtb),
-      ("abtb", debug_s1UseAbtb),
-      ("ubtb_microTage", debug_s1UseUbtbUtage),
-      ("abtb_microTage", debug_s1UseAbtbUtage),
       ("fallThrough", !s1_taken)
     )
   )
