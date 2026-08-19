@@ -54,6 +54,8 @@ class BpuToFtqIO(implicit p: Parameters) extends FrontendBundle {
   val prediction: DecoupledIO[BpuPrediction] = Decoupled(new BpuPrediction)
   val meta:       DecoupledIO[BpuMeta]       = Decoupled(new BpuMeta)
   val s3FtqPtr:   FtqPtr                     = Output(new FtqPtr)
+  // how many entries the group now leaving s3 occupies, so Ftq knows how far the point of no return has moved
+  val s3NumBlocks: UInt = Output(UInt(log2Ceil(MaxPredictionNum + 1).W))
 
   // perfMeta uses the same valid signal as meta
   val perfMeta:       BpuPerfMeta           = Output(new BpuPerfMeta)

@@ -147,7 +147,6 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   }
 
   private val s1_provider = selectLongest(s1_hitVec)
-  private val s1_alt = selectLongest(s1_hitVec.zipWithIndex.map { case (h, t) => h && !(s1_provider.bits === t.U) })
 
   private val s1_providerEntry = Mux1H(UIntToOH(s1_provider.bits, NumTables), s1_entry)
 
@@ -180,10 +179,8 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   io.meta.setIdx        := s1_setIdx
   io.meta.tag           := s1_tag
   io.meta.bankIdx       := s1_bankIdx
-  io.meta.hitVec        := s1_hitVec
   io.meta.usefulVec     := VecInit(s1_entry.map(_.useful))
   io.meta.provider      := s1_provider
-  io.meta.alt           := s1_alt
   io.meta.p1Counter     := s1_providerEntry.p1.counter
   io.meta.p2Counter     := s1_providerEntry.p2.counter
   io.meta.p2Valid       := s1_providerEntry.p2Valid

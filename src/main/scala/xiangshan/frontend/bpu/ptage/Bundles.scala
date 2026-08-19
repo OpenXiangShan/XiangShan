@@ -101,12 +101,10 @@ class PtageMeta(implicit p: Parameters) extends PtageBundle {
   val setIdx:  Vec[UInt] = Vec(NumTables, UInt(SetIdxWidth.W))
   val tag:     Vec[UInt] = Vec(NumTables, UInt(TagWidth.W))
   val bankIdx: UInt      = UInt(BankIdxWidth.W)
-  val hitVec:  Vec[Bool] = Vec(NumTables, Bool())
   // the hit entries' useful bits, used to pick an allocation victim; may be stale, which costs allocation quality
   // but never correctness
   val usefulVec: Vec[Bool]   = Vec(NumTables, Bool())
   val provider:  Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
-  val alt:       Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
   // the provider entry as it was read, so training need not read the table again to know what it is correcting
   val p1Counter:     SaturateCounter = PtageCounter()
   val p2Counter:     SaturateCounter = PtageCounter()

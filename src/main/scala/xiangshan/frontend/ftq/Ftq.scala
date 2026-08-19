@@ -284,12 +284,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
     s3PerfQueue(s3BpuPtr).mispredict := false.B
   }
 
-  // The entry sitting in s3 always leaves s3 in the next cycle, whether or not it overrides, and an override writes
+  // The group sitting in s3 always leaves s3 in the next cycle, whether or not it overrides, and an override writes
   // its final prediction straight into Ftq instead of sending it around the Bpu pipeline again. So by the next cycle
-  // it has passed the point of no return, and pnrPtr can be advanced past it.
+  // every entry it occupies has passed the point of no return, and pnrPtr can be advanced past all of them.
   // A redirect resets pnrPtr along with the other pointers, see the redirect section below.
   when(io.fromBpu.meta.valid) {
-    pnrPtr := io.fromBpu.s3FtqPtr + 1.U
+    pnrPtr := io.fromBpu.s3FtqPtr + io.fromBpu.s3NumBlocks
   }
 
   // The entry in s3 can still be overridden, so pnrPtr must never have passed it. In steady state pnrPtr equals

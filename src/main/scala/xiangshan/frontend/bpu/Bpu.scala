@@ -150,6 +150,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val s2_ptageMeta = RegEnable(ptage.io.meta, s1_fire)
   private val s3_ptageMeta = RegEnable(s2_ptageMeta, s2_fire)
 
+  // the group's width follows it down the pipeline, so s3 can tell Ftq how many entries it is releasing
+  private val s1_groupNumBlocks = Wire(UInt(log2Ceil(MaxPredictionNum + 1).W))
+  private val s2_groupNumBlocks = RegEnable(s1_groupNumBlocks, s1_fire)
+  private val s3_groupNumBlocks = RegEnable(s2_groupNumBlocks, s2_fire)
+
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
   stageCtrl.s0_fire := s0_fire
@@ -317,6 +322,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   s1_group(1).bits.cfiPosition := s1_secondBlock.bits.cfiPosition
   s1_group(1).bits.attribute   := s1_secondBlock.bits.attribute
   s1_group(1).bits.target      := s1_secondBlock.bits.target
+  s1_groupNumBlocks            := PopCount(s1_group.map(_.valid))
 
   private val s1_taken         = s1_prediction.taken
   private val debug_s1UsePtage = s1_taken && usePtage
@@ -462,6 +468,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val s2_ftqPtr = RegEnable(io.fromFtq.bpuPtr, s1_fire)
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
   io.toFtq.s3FtqPtr := s3_ftqPtr
+  // An override replaces the group with a single corrected block, so only a group that survives s3 keeps its width.
+  io.toFtq.s3NumBlocks := Mux(s3_override, 1.U, s3_groupNumBlocks)
 
   io.toFtq.meta.valid             := s3_valid
   io.toFtq.meta.bits.redirectMeta := s3_redirectMeta
