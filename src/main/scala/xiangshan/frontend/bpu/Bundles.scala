@@ -30,6 +30,7 @@ import xiangshan.frontend.bpu.history.commonhr.CommonHRResolveMeta
 import xiangshan.frontend.bpu.history.phr.PhrMeta
 import xiangshan.frontend.bpu.ittage.IttageMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
+import xiangshan.frontend.bpu.ptage.PtageMeta
 import xiangshan.frontend.bpu.ras.RasCommitMeta
 import xiangshan.frontend.bpu.ras.RasRedirectMeta
 import xiangshan.frontend.bpu.sc.ScMeta
@@ -300,6 +301,7 @@ class FastTrain(implicit p: Parameters) extends BpuBundle {
   val hasOverride:     Bool          = Bool()
   val abtbMeta:        AheadBtbMeta  = new AheadBtbMeta
   val utageMeta:       MicroTageMeta = new MicroTageMeta
+  val ptageMeta:       PtageMeta     = new PtageMeta
 }
 
 // metadata for commit training (e.g. ras)

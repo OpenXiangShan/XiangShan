@@ -77,8 +77,9 @@ class PtageEntry(implicit p: Parameters) extends PtageBundle {
 
   // The group's effect on the path history, worked out at training time. Keeping it in the entry is what holds the
   // single-cycle prediction loop together: the history advance needs the new bits in the same cycle the entry is read,
-  // and deriving them from the blocks' contents there would not make timing.
-  val phrToken: UInt = UInt(MaxUpdateNum.W)
+  // and deriving them from the blocks' contents there would not make timing. It is a full path hash per block rather
+  // than just the shifted-in bits, because that is what Phr applies and what FastPhr therefore has to mirror.
+  val phrToken: UInt = UInt(TokenWidth.W)
   val ghrShamt: UInt = UInt(GhrShamtWidth.W)
 }
 
@@ -114,10 +115,39 @@ class PtageMeta(implicit p: Parameters) extends PtageBundle {
   val usefulVec: Vec[Bool]   = Vec(NumTables, Bool())
   val provider:  Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
   val alt:       Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
-  // the provider's counters as they were read, so training need not read the table again
-  val p1Counter: SaturateCounter = PtageCounter()
-  val p2Counter: SaturateCounter = PtageCounter()
-  val p2Valid:   Bool            = Bool()
+  // the provider entry as it was read, so training need not read the table again to know what it is correcting
+  val p1Counter:     SaturateCounter = PtageCounter()
+  val p2Counter:     SaturateCounter = PtageCounter()
+  val p1CfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val p1Attribute:   UInt            = PtageAttribute()
+  val p2Valid:       Bool            = Bool()
+  // The first group after a redirect was indexed with the history as it stood before the correction landed, so it
+  // belongs to no entry and must not be trained. This is the warm-up that indexing a group ahead costs.
+  val noAnchor: Bool = Bool()
+}
+
+/** A verified group, held back one training event so the group that follows it can become its second block.
+  *
+  * This is what lets a pair be learned without ever having been predicted as one, which matters because otherwise
+  * second blocks could only ever be learned where they already existed.
+  */
+class PtagePendingGroup(implicit p: Parameters) extends PtageBundle {
+  val meta:        PtageMeta  = new PtageMeta
+  val cfiPosition: UInt       = UInt(CfiPositionWidth.W)
+  val attribute:   UInt       = PtageAttribute()
+  val nextPcLow:   UInt       = UInt(NextPcLowWidth.W)
+  val nextPc:      PrunedAddr = PrunedAddr(VAddrBits)
+  val taken:       Bool       = Bool()
+  // this block's contribution to the path history, kept so the entry can carry a whole group's contribution
+  val pathHash: UInt = UInt(PathHashWidth.W)
+}
+
+/** A pending write to one table's bank, registered so the decision and the write land in different cycles. */
+class PtageTrainWrite(implicit p: Parameters) extends PtageBundle {
+  val table:  UInt       = UInt(log2Ceil(NumTables).W)
+  val bank:   UInt       = UInt(BankIdxWidth.W)
+  val setIdx: UInt       = UInt(SetIdxWidth.W)
+  val entry:  PtageEntry = new PtageEntry
 }
 
 class BankReadReq(implicit p: Parameters) extends PtageBundle {

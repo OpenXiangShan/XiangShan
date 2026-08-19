@@ -43,6 +43,10 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
     val foldedHist: PhrAllFoldedHistories =
       Input(new PhrAllFoldedHistories(FastFoldedHistoryInfo, MaxUpdateNum))
 
+    // a correction lands on the history a cycle after it is announced, so pTAGE has to know when one happened
+    val redirectValid: Bool = Input(Bool())
+    val overrideValid: Bool = Input(Bool())
+
     val prediction: PtagePrediction = Output(new PtagePrediction)
     val meta:       PtageMeta       = Output(new PtageMeta)
   }
@@ -71,6 +75,10 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   private val a0_startPc = io.startPc
   private val a0_bankIdx = getBankIndex(a0_startPc)
 
+  // A read issued in a correction cycle indexes with the folded history as it stood before that correction reached
+  // FastPhr, so whatever it returns belongs to the path just abandoned. pTAGE sits that one group out.
+  private val a0_anchored = !io.redirectValid && !io.overrideValid
+
   private def foldedFor(tableIdx: Int, width: Int): UInt = {
     val span = fastPhrParameters.Spans(tableIdx)
     io.foldedHist.getHistWithInfo(new xiangshan.frontend.bpu.FoldedHistoryInfo(
@@ -90,20 +98,14 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
     }
   }
 
-  // Training is not built yet, so nothing writes the tables and they stay as the sram reset left them: every lookup
-  // misses, and pTAGE reports that honestly through its counters rather than predicting anything.
-  banks.flatten.foreach { bank =>
-    bank.io.writeReq.valid := false.B
-    bank.io.writeReq.bits  := 0.U.asTypeOf(new BankWriteReq)
-  }
-
   /* *** s0: sram data returns, match tags ***
    * The tag compare sits here rather than in s1 so that s1 is left with only a priority select and a decode. Both
    * folded tag histories were captured with the address, so this is an xor of already-registered values.
    */
-  private val s0_startPc = RegEnable(a0_startPc, s0_fire)
-  private val s0_bankIdx = RegEnable(a0_bankIdx, s0_fire)
-  private val s0_setIdx  = RegEnable(a0_setIdx, s0_fire)
+  private val s0_anchored = RegEnable(a0_anchored, false.B, s0_fire)
+  private val s0_startPc  = RegEnable(a0_startPc, s0_fire)
+  private val s0_bankIdx  = RegEnable(a0_bankIdx, s0_fire)
+  private val s0_setIdx   = RegEnable(a0_setIdx, s0_fire)
   private val s0_tagFold = RegEnable(
     VecInit(Seq.tabulate(NumTables) { t =>
       // two folds of different widths, so that a tag does not simply repeat what the set index already says
@@ -119,12 +121,13 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   private val s0_hitVec = VecInit(Seq.tabulate(NumTables)(t => s0_entry(t).valid && s0_entry(t).tag === s0_tag(t)))
 
   /* *** s1: select a provider and decode the group *** */
-  private val s1_startPc = RegEnable(io.startPc, s0_fire)
-  private val s1_entry   = RegEnable(s0_entry, s0_fire)
-  private val s1_hitVec  = RegEnable(s0_hitVec, s0_fire)
-  private val s1_setIdx  = RegEnable(s0_setIdx, s0_fire)
-  private val s1_tag     = RegEnable(s0_tag, s0_fire)
-  private val s1_bankIdx = RegEnable(s0_bankIdx, s0_fire)
+  private val s1_anchored = RegEnable(s0_anchored, false.B, s0_fire)
+  private val s1_startPc  = RegEnable(io.startPc, s0_fire)
+  private val s1_entry    = RegEnable(s0_entry, s0_fire)
+  private val s1_hitVec   = RegEnable(s0_hitVec, s0_fire)
+  private val s1_setIdx   = RegEnable(s0_setIdx, s0_fire)
+  private val s1_tag      = RegEnable(s0_tag, s0_fire)
+  private val s1_bankIdx  = RegEnable(s0_bankIdx, s0_fire)
 
   // The longest history that hit provides the prediction and the next longest is its alternative, as in any TAGE:
   // a longer history is a more specific context, so where one matches it is the better answer.
@@ -132,6 +135,14 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
     val sel = Wire(Valid(UInt(log2Ceil(NumTables).W)))
     sel.valid := mask.reduce(_ || _)
     sel.bits  := (NumTables - 1).U - PriorityEncoder(mask.reverse)
+    sel
+  }
+
+  // an allocation looks for the shortest history that is free, so a new context is learned as cheaply as possible
+  private def selectShortest(mask: Seq[Bool]): Valid[UInt] = {
+    val sel = Wire(Valid(UInt(log2Ceil(NumTables).W)))
+    sel.valid := mask.reduce(_ || _)
+    sel.bits  := PriorityEncoder(mask)
     sel
   }
 
@@ -147,7 +158,7 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
 
   // A block can only be followed by another if its own target is the one the entry stored: a deferred exit takes its
   // target from elsewhere, so the second block's start would not be where the entry assumed.
-  private val s1_p1Usable = s1_provider.valid
+  private val s1_p1Usable = s1_anchored && s1_provider.valid
   private val s1_p2Usable =
     s1_p1Usable && s1_providerEntry.p2Valid && PtageAttribute.hasStaticTarget(s1_providerEntry.p1.attribute)
 
@@ -165,16 +176,175 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   io.prediction.blocks(1).valid := s1_p2Usable
   io.prediction.blocks(1).bits  := decode(s1_providerEntry.p2, s1_p2Target)
 
-  io.meta.setIdx    := s1_setIdx
-  io.meta.tag       := s1_tag
-  io.meta.bankIdx   := s1_bankIdx
-  io.meta.hitVec    := s1_hitVec
-  io.meta.usefulVec := VecInit(s1_entry.map(_.useful))
-  io.meta.provider  := s1_provider
-  io.meta.alt       := s1_alt
-  io.meta.p1Counter := s1_providerEntry.p1.counter
-  io.meta.p2Counter := s1_providerEntry.p2.counter
-  io.meta.p2Valid   := s1_providerEntry.p2Valid
+  io.meta.setIdx        := s1_setIdx
+  io.meta.tag           := s1_tag
+  io.meta.bankIdx       := s1_bankIdx
+  io.meta.hitVec        := s1_hitVec
+  io.meta.usefulVec     := VecInit(s1_entry.map(_.useful))
+  io.meta.provider      := s1_provider
+  io.meta.alt           := s1_alt
+  io.meta.p1Counter     := s1_providerEntry.p1.counter
+  io.meta.p2Counter     := s1_providerEntry.p2.counter
+  io.meta.p2Valid       := s1_providerEntry.p2Valid
+  io.meta.p1CfiPosition := s1_providerEntry.p1.cfiPosition
+  io.meta.p1Attribute   := s1_providerEntry.p1.attribute
+  io.meta.noAnchor      := !s1_anchored
+
+  /* *** training ***
+   * Driven by s3's verified result, so pTAGE learns what the high-level predictor concluded rather than waiting for
+   * the backend. The point is to track s3 closely and stop overriding it; final accuracy is s3's job, and the odd
+   * group that s3 itself got wrong is corrected by a later training event.
+   *
+   * Nothing is read back here. Every index, tag and counter the update needs travelled down the pipeline with the
+   * group, which is what keeps training from having to reconstruct a context that has since moved on, and leaves the
+   * tables with a write port that only ever writes.
+   */
+  private val t0_valid      = io.fastTrain.get.valid && io.enable
+  private val t0_train      = io.fastTrain.get.bits
+  private val t0_meta       = t0_train.ptageMeta
+  private val t0_prediction = t0_train.finalPrediction
+  private val t0_startPc    = t0_train.startPc
+  private val t0_nextPc     = t0_prediction.target.unGuard
+
+  // An entry rebuilds a target from the pc it was reached with, so a target out of that reach cannot be stored.
+  private def targetInReach(startPc: PrunedAddr, target: PrunedAddr): Bool =
+    getTargetUpper(startPc) === getTargetUpper(target)
+
+  private val t0_attribute = MuxCase(
+    PtageAttribute.Deferred,
+    Seq(
+      !t0_prediction.taken                  -> PtageAttribute.FallThrough,
+      !targetInReach(t0_startPc, t0_nextPc) -> PtageAttribute.Deferred,
+      (t0_prediction.attribute.isCall ||
+        t0_prediction.attribute.isReturn)   -> PtageAttribute.Deferred,
+      t0_prediction.attribute.isConditional -> PtageAttribute.Conditional,
+      t0_prediction.attribute.isDirect      -> PtageAttribute.Direct
+    )
+  )
+
+  private val t0_cfiPc = getCfiPcFromPosition(t0_startPc, t0_prediction.cfiPosition)
+  // the same hash Phr shifts into the path history for this block, so the entry can later supply it ready-made
+  private val t0_pathHash = Mux(t0_prediction.taken, pathHash(t0_cfiPc, t0_nextPc), 0.U)
+
+  // Hold each verified group back by one training event. When the next one arrives we know whether it continues the
+  // held group, and can therefore write a pair rather than a lone block.
+  private val pending = RegInit(0.U.asTypeOf(Valid(new PtagePendingGroup)))
+
+  private val t0_continuesPending =
+    pending.valid && t0_valid &&
+      pending.bits.taken &&
+      PtageAttribute.hasStaticTarget(pending.bits.attribute) &&
+      t0_startPc === pending.bits.nextPc &&
+      // only a conditional exit may end a group's second block: anything else has no target the entry can rebuild
+      t0_attribute === PtageAttribute.Conditional
+
+  // The first group after a correction belongs to no entry, so it is neither written nor used as a second block.
+  private val t0_anchored = t0_valid && !t0_meta.noAnchor
+
+  when(io.redirectValid) {
+    pending.valid := false.B
+  }.elsewhen(t0_valid) {
+    pending.valid            := t0_anchored
+    pending.bits.meta        := t0_meta
+    pending.bits.cfiPosition := t0_prediction.cfiPosition
+    pending.bits.attribute   := t0_attribute
+    pending.bits.nextPcLow   := getEntryNextPc(t0_nextPc)
+    pending.bits.nextPc      := t0_nextPc
+    pending.bits.taken       := t0_prediction.taken
+    pending.bits.pathHash    := t0_pathHash
+  }
+
+  /* *** t1: decide what to write, and build it *** */
+  private val t1_write = RegInit(0.U.asTypeOf(Valid(new PtageTrainWrite)))
+
+  private val held     = pending.bits
+  private val heldMeta = held.meta
+  private val heldHit  = heldMeta.provider.valid
+  // the entry named this group's exit correctly, so only its direction was ever in question
+  private val heldCorrect = heldHit &&
+    heldMeta.p1CfiPosition === held.cfiPosition &&
+    heldMeta.p1Attribute.asUInt === held.attribute.asUInt
+
+  // A wrong entry is handed to a longer history to tell the two contexts apart, so allocation looks above the
+  // provider; a miss may go anywhere. Either way only a table not currently carrying its weight is taken.
+  private val allocMask = VecInit(Seq.tabulate(NumTables) { t =>
+    val longerThanProvider = if (t == 0) !heldHit else !heldHit || heldMeta.provider.bits < t.U
+    longerThanProvider && !heldMeta.usefulVec(t)
+  })
+  private val allocSel = selectShortest(allocMask)
+
+  // There is one write to spend per event, so the outcomes are exclusive. An entry that was right is strengthened. A
+  // wrong one is normally given to a longer history, keeping both contexts represented, but an entry that was never
+  // confident, or one no table will take over from, is simply corrected where it stands.
+  private val correctInPlace = heldHit && (heldMeta.p1Counter.isWeak || !allocSel.valid)
+  private val doStrengthen   = pending.valid && heldCorrect
+  private val doCorrect      = pending.valid && !heldCorrect && correctInPlace
+  private val doAllocate     = pending.valid && !heldCorrect && !correctInPlace && allocSel.valid
+
+  private val writeTable = Mux(doAllocate, allocSel.bits, heldMeta.provider.bits)
+  // only a strengthened entry keeps its counter and its standing; the other two install the group afresh
+  private val writeFresh = !doStrengthen
+
+  private val entry = Wire(new PtageEntry)
+  entry.valid  := true.B
+  entry.tag    := heldMeta.tag(writeTable)
+  entry.useful := doStrengthen
+
+  entry.p1.cfiPosition := held.cfiPosition
+  entry.p1.attribute   := held.attribute
+  entry.p1.nextPcLow   := held.nextPcLow
+  entry.p1.counter := Mux(
+    writeFresh,
+    Mux(held.taken, PtageCounter.WeakPositive, PtageCounter.WeakNegative),
+    Mux(held.taken, heldMeta.p1Counter.getIncrease(), heldMeta.p1Counter.getDecrease())
+  )
+
+  entry.p2Valid        := t0_continuesPending
+  entry.p2.cfiPosition := t0_prediction.cfiPosition
+  entry.p2.attribute   := t0_attribute
+  entry.p2.nextPcLow   := getEntryNextPc(t0_nextPc)
+  entry.p2.counter := Mux(
+    writeFresh || !heldMeta.p2Valid,
+    Mux(t0_prediction.taken, PtageCounter.WeakPositive, PtageCounter.WeakNegative),
+    Mux(t0_prediction.taken, heldMeta.p2Counter.getIncrease(), heldMeta.p2Counter.getDecrease())
+  )
+
+  // Each block contributes a whole path hash, the second sitting Shamt above the first, exactly as Phr would have
+  // applied them one after the other.
+  entry.phrToken := Mux(
+    t0_continuesPending,
+    (held.pathHash << Shamt).asUInt ^ t0_pathHash,
+    held.pathHash
+  )
+  entry.ghrShamt := held.taken.asUInt +& (t0_continuesPending && t0_prediction.taken).asUInt
+
+  t1_write.valid := t0_valid && (doStrengthen || doCorrect || doAllocate)
+  when(t0_valid && pending.valid) {
+    t1_write.bits.table  := writeTable
+    t1_write.bits.bank   := heldMeta.bankIdx
+    t1_write.bits.setIdx := heldMeta.setIdx(writeTable)
+    t1_write.bits.entry  := entry
+  }
+
+  /* *** t2: hand the write to the banks ***
+   * The write buffer inside a bank is the drain stage: it takes the request now and lands it on a cycle whose bank is
+   * not busy serving a prediction.
+   */
+  banks.zipWithIndex.foreach { case (tableBanks, t) =>
+    tableBanks.zipWithIndex.foreach { case (bank, b) =>
+      bank.io.writeReq.valid       := t1_write.valid && t1_write.bits.table === t.U && t1_write.bits.bank === b.U
+      bank.io.writeReq.bits.setIdx := t1_write.bits.setIdx
+      bank.io.writeReq.bits.entry  := t1_write.bits.entry
+    }
+  }
+
+  XSPerfAccumulate("trainEvent", t0_valid)
+  XSPerfAccumulate("trainNoAnchor", t0_valid && t0_meta.noAnchor)
+  XSPerfAccumulate("trainPaired", t0_valid && t0_continuesPending)
+  XSPerfAccumulate("trainStrengthen", t0_valid && doStrengthen)
+  XSPerfAccumulate("trainCorrect", t0_valid && doCorrect)
+  XSPerfAccumulate("trainAllocate", t0_valid && doAllocate)
+  XSPerfAccumulate("trainNoTableFree", t0_valid && pending.valid && !heldCorrect && !allocSel.valid)
 
   private val s1_fire = io.stageCtrl.s1_fire && io.enable
   XSPerfAccumulate("predHit", s1_fire && s1_p1Usable)

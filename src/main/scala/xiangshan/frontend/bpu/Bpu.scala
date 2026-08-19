@@ -159,6 +159,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val s3_startPc = RegEnable(s2_startPc, s2_fire)
 
   // abtb meta won't be sent to ftq, used for abtb fast train
+  // pTAGE's lookup information rides the pipeline down to s3, where the verified group trains the entry it came from
+  private val s2_ptageMeta = RegEnable(ptage.io.meta, s1_fire)
+  private val s3_ptageMeta = RegEnable(s2_ptageMeta, s2_fire)
+
   private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
   private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
 
@@ -196,6 +200,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   fastTrain.bits.finalPrediction := s3_prediction
   fastTrain.bits.abtbMeta        := s3_abtbMeta
   fastTrain.bits.utageMeta       := s3_utageMeta
+  fastTrain.bits.ptageMeta       := s3_ptageMeta
   fastTrain.bits.hasOverride     := s3_override
 
   predictors.foreach { p =>
@@ -217,7 +222,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   // pTAGE reads its resident folded histories straight out of FastPhr; its own a0 stage is driven by the shared
   // startPc, which for an ahead-indexed predictor is the key of a group two cycles out rather than this one's.
   // Nothing selects its prediction yet, so it only observes and reports how well it would have done.
-  ptage.io.foldedHist := fastPhr.io.foldedHist
+  ptage.io.foldedHist    := fastPhr.io.foldedHist
+  ptage.io.redirectValid := redirect.valid
+  ptage.io.overrideValid := s3_override
 
   abtb.io.redirectValid  := redirect.valid
   abtb.io.overrideValid  := s3_override

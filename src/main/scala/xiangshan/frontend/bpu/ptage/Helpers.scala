@@ -19,8 +19,9 @@ import chisel3._
 import utils.AddrField
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.TargetFixHelper
+import xiangshan.frontend.bpu.history.phr.{Helpers => PhrPathHelpers}
 
-trait Helpers extends HasPtageParameters with TargetFixHelper {
+trait Helpers extends HasPtageParameters with TargetFixHelper with PhrPathHelpers {
   val addrFields = AddrField(
     Seq(
       ("instOffset", instOffsetBits),
