@@ -31,9 +31,13 @@ class MicroBtbReplacer(implicit p: Parameters) extends MicroBtbModule {
     val victim: UInt = Output(UInt(log2Up(NumEntries).W))
 
     val perf: ReplacerPerfInfo = Output(new ReplacerPerfInfo)
+    val contextFlush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
   }
 
   val io: MicroBtbReplacerIO = IO(new MicroBtbReplacerIO)
+
+  // type placeholder: all consumers below live inside if (HasBpuFlush) guards.
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
 
   private val replacer = ReplacementPolicy.fromString(Replacer, NumEntries)
 
@@ -46,7 +50,22 @@ class MicroBtbReplacer(implicit p: Parameters) extends MicroBtbModule {
   io.victim := Mux(notUseful, notUsefulIdx, replacer.way)
 
   // touch Plru
-  replacer.access(Seq(io.predTouch, io.trainTouch))
+  if (HasBpuFlush) {
+    val flushTouches = (0 until NumEntries / 2).map { i =>
+      val v = Wire(Valid(UInt(log2Up(NumEntries).W)))
+      v.valid := contextFlush
+      v.bits  := (2 * i + 1).U
+      v
+    }
+
+    when(contextFlush) {
+      replacer.access(flushTouches)
+    }.otherwise {
+      replacer.access(Seq(io.predTouch, io.trainTouch))
+    }
+  } else {
+    replacer.access(Seq(io.predTouch, io.trainTouch))
+  }
 
   /* *** perf *** */
   io.perf.replaceNotUseful := notUseful

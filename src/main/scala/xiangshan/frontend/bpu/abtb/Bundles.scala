@@ -64,6 +64,7 @@ class ReplacerIO(implicit p: Parameters) extends AheadBtbBundle {
 
   val replaceSetIdx: UInt = Input(UInt(SetIdxWidth.W))
   val victimWayIdx:  UInt = Output(UInt(WayIdxWidth.W))
+  val contextFlush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
 }
 
 class AheadBtbMetaEntry(implicit p: Parameters) extends AheadBtbBundle {
