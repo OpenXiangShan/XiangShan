@@ -101,8 +101,16 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   val issueQueueNum = allIssueParams.size
   private val scalarLduIQIdx = allIssueParams.zipWithIndex.collect { case (iq, idx) if iq.isLdAddrIQ => idx }
   private val scalarLduExuIdx = scalarLduIQIdx.map(iqIdx => allExuParams.indexOf(allIssueParams(iqIdx).exuBlockParams.head))
+  private val scalarAluIQIdx = allIssueParams.zipWithIndex.collect {
+    case (iq, idx) if iq.exuBlockParams.exists(_.fuConfigs.contains(FuConfig.AluCfg)) => idx
+  }
+  private val scalarAluExuIdx = scalarAluIQIdx.map(iqIdx => allExuParams.indexOf(allIssueParams(iqIdx).exuBlockParams.head))
+  private val longLoadAluPreferredIQIdx = scalarAluIQIdx.minByOption { iqIdx =>
+    allIssueParams(iqIdx).exuBlockParams.flatMap(_.fuConfigs).distinct.size
+  }
   private val iqEnqStart = allIssueParams.map(_.numEnq).scanLeft(0)(_ + _).dropRight(1)
   private val enableLongLoadLduSteering = scalarLduIQIdx.size == 3
+  private val enableLongLoadAluSteering = scalarAluIQIdx.size > 1
 
   val io = IO(new Bundle {
     // from rename
@@ -292,6 +300,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   // register allocation has final priority so a stale producer can never tag its reuse.
   val longMissIntNext = ((longMissInt & ~longMissClearInt) | longMissSetInt) & ~longMissAllocInt
   val longMissFpNext = ((longMissFp & ~longMissClearFp) | longMissSetFp) & ~longMissAllocFp
+  // Dispatch decisions use registered miss state. Preserve same-cycle allocation
+  // clearing so a reused physical destination cannot inherit a stale long-miss tag.
+  val longMissIntForSteering = longMissInt & ~longMissAllocInt
   longMissInt := longMissIntNext
   longMissFp := longMissFpNext
   io.longMissInt := longMissInt
@@ -580,8 +591,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     * Preserve the existing three-way load balancing for ordinary scalar loads and
     * override only confirmed long-load-dependent address uops. Those uops prefer
     * LDU2 only while it is no heavier than the IQ chosen by normal balancing.
-    * This avoids reducing normal-load bandwidth from three queues to two merely to
-    * reserve capacity for the comparatively rare long-load-dependent case.
+    * The registered scoreboard deliberately excludes a miss reported in the current
+    * cycle, breaking the longLoadMiss-to-dispatch combinational path at the cost of
+    * recognizing a newly confirmed dependency one cycle later.
     */
   private def buildLduSteering(
     valids: Seq[Bool],
@@ -595,7 +607,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     if (enableLongLoadLduSteering) {
       for (uopIdx <- 0 until renameWidth) {
         val isScalarLoad = valids(uopIdx) && FuType.isLoad(fuTypes(uopIdx))
-        val isLongDependent = isScalarLoad && SrcType.isXp(srcTypes(uopIdx)(0)) && longMissIntNext(psrcs(uopIdx)(0))
+        val isLongDependent = isScalarLoad && SrcType.isXp(srcTypes(uopIdx)(0)) && longMissIntForSteering(psrcs(uopIdx)(0))
         val priorSelections = scalarLduIQIdx.map { iqIdx =>
           PopCount(result.take(uopIdx).map(_(iqIdx)))
         }
@@ -631,6 +643,56 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     uopSelIQ
   )
 
+  /**
+    * Soft-isolate confirmed long-load-dependent ALU consumers in the least-specialized
+    * ALU IQ, leaving the remaining queues available to independent work. Redirect only
+    * when that IQ has an enqueue slot and is no heavier than the normal selection.
+    * Ordinary ALU traffic keeps the existing balancing policy and may still borrow the
+    * preferred IQ, so classification cannot create a hard partition or deadlock.
+    */
+  private def buildAluConsumerSteering(
+    longDependentAlu: Seq[Bool],
+    fallbackSelections: Seq[Vec[Bool]]
+  ): Vec[Vec[Bool]] = {
+    val result = Wire(Vec(renameWidth, Vec(issueQueueNum, Bool())))
+    result.zip(fallbackSelections).foreach { case (selected, fallback) => selected := fallback }
+    if (enableLongLoadAluSteering) {
+      for (uopIdx <- 0 until renameWidth) {
+        val priorSelections = scalarAluIQIdx.map { iqIdx =>
+          PopCount(result.take(uopIdx).map(_(iqIdx)))
+        }
+        val canAccept = scalarAluIQIdx.zipWithIndex.map { case (iqIdx, localIdx) =>
+          io.IQValidNumVec(scalarAluExuIdx(localIdx)) < allIssueParams(iqIdx).numEntries.U &&
+            priorSelections(localIdx) < allIssueParams(iqIdx).numEnq.U
+        }
+        val effectiveCount = scalarAluExuIdx.zip(priorSelections).map { case (exuIdx, prior) =>
+          io.IQValidNumVec(exuIdx) +& prior
+        }
+        val originallySelected = scalarAluIQIdx.map(fallbackSelections(uopIdx)(_))
+        val originalCount = Mux1H(originallySelected, effectiveCount)
+        val preferredIdx = scalarAluIQIdx.indexOf(longLoadAluPreferredIQIdx.get)
+        val redirectToPreferred = canAccept(preferredIdx) && effectiveCount(preferredIdx) <= originalCount
+        scalarAluIQIdx.zipWithIndex.foreach { case (iqIdx, localIdx) =>
+          when(longDependentAlu(uopIdx)) {
+            result(uopIdx)(iqIdx) := Mux(redirectToPreferred,
+              (localIdx == preferredIdx).B, fallbackSelections(uopIdx)(iqIdx))
+          }
+        }
+      }
+    }
+    result
+  }
+
+  val longDependentAluFromRename = fromRename.map { in =>
+    val depends = in.bits.psrc.zip(in.bits.srcType).take(2).map { case (psrc, srcType) =>
+      SrcType.isXp(srcType) && longMissIntForSteering(psrc)
+    }.reduce(_ || _)
+    in.valid && FuType.isAlu(in.bits.fuType) && depends
+  }
+  val aluSteerFromRename = buildAluConsumerSteering(
+    longDependentAluFromRename, lduSteerFromRename
+  )
+
   uopSelIQ.zipWithIndex.map{ case (u, i) => {
     when(io.toRenameAllFire){
       u := Mux(renameIn(i).valid,
@@ -652,10 +714,15 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   }}
   val effectiveUopSelIQ = Wire(Vec(renameWidth, Vec(issueQueueNum, Bool())))
   effectiveUopSelIQ.zipWithIndex.foreach { case (effective, i) =>
-    effective := lduSteerFromRename(i)
+    effective := aluSteerFromRename(i)
     if (enableLongLoadLduSteering) {
       when(fromRename(i).valid && FuType.isLoad(fromRename(i).bits.fuType)) {
         assert(PopCount(effective) === 1.U, "scalar load must select exactly one LDU IQ")
+      }
+    }
+    if (enableLongLoadAluSteering) {
+      when(fromRename(i).valid && FuType.isAlu(fromRename(i).bits.fuType)) {
+        assert(PopCount(effective) === 1.U, "scalar ALU must select exactly one ALU IQ")
       }
     }
   }
@@ -731,7 +798,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
       io.IQValidNumVec(exuIdx) < allIssueParams(iqIdx).numEntries.U
     }
     val longDependentLoad = fromRename.map { in =>
-      in.valid && FuType.isLoad(in.bits.fuType) && SrcType.isXp(in.bits.srcType(0)) && longMissIntNext(in.bits.psrc(0))
+      in.valid && FuType.isLoad(in.bits.fuType) && SrcType.isXp(in.bits.srcType(0)) &&
+        longMissIntForSteering(in.bits.psrc(0))
     }
     val normalLoad = fromRename.map(in => in.valid && FuType.isLoad(in.bits.fuType)).zip(longDependentLoad)
       .map { case (load, longDependent) => load && !longDependent }
@@ -749,6 +817,21 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
       .map { case ((fire, normal), regular) => fire && normal && regular }))
     XSPerfAccumulate("dispatch_normal_load_borrow_reserved_iq", PopCount(dispatched.zip(normalLoad).zip(selectedReserved)
       .map { case ((fire, normal), reserved) => fire && normal && reserved }))
+  }
+
+  if (enableLongLoadAluSteering) {
+    val reservedIqIdx = longLoadAluPreferredIQIdx.get
+    val selectedReserved = effectiveUopSelIQ.map(_(reservedIqIdx))
+    val selectedOther = effectiveUopSelIQ.map(sel => scalarAluIQIdx.dropRight(1).map(sel(_)).reduce(_ || _))
+    val dispatched = fromRename.map(_.fire)
+    XSPerfAccumulate("dispatch_long_load_dependent_alu",
+      PopCount(dispatched.zip(longDependentAluFromRename).map { case (fire, dependent) => fire && dependent }))
+    XSPerfAccumulate("dispatch_long_dep_alu_to_reserved_iq",
+      PopCount(dispatched.zip(longDependentAluFromRename).zip(selectedReserved)
+        .map { case ((fire, dependent), reserved) => fire && dependent && reserved }))
+    XSPerfAccumulate("dispatch_long_dep_alu_fallback",
+      PopCount(dispatched.zip(longDependentAluFromRename).zip(selectedOther)
+        .map { case ((fire, dependent), other) => fire && dependent && other }))
   }
 
   io.toIssueQueues.zip(IQSelUop).map(x => {
