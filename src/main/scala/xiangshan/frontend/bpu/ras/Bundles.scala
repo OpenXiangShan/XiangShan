@@ -109,3 +109,18 @@ class RasSpecInfo(implicit p: Parameters) extends RasBundle {
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val startPc:     UInt            = UInt(GuardedVAddrBits.W)
 }
+
+class MicroRasPtr(implicit p: Parameters) extends CircularQueuePtr[MicroRasPtr](p =>
+      p(XSCoreParamsKey).frontendParameters.bpuParameters.rasParameters.MicroRasDepth
+    ) {}
+
+object MicroRasPtr {
+  def apply(f: Bool, v: UInt)(implicit p: Parameters): MicroRasPtr = {
+    val ptr = Wire(new MicroRasPtr)
+    ptr.flag  := f
+    ptr.value := v
+    ptr
+  }
+
+  def inverse(ptr: MicroRasPtr)(implicit p: Parameters): MicroRasPtr = apply(!ptr.flag, ptr.value)
+}

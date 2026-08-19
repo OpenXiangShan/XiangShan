@@ -21,7 +21,8 @@ import xiangshan.frontend.bpu.HasBpuParameters
 case class RasParameters(
     CommitStackSize:   Int = 16, // Size of the RAS stack
     SpecQueueSize:     Int = 32, // Size of the RAS speculative queue
-    StackCounterWidth: Int = 3   // Width of the RAS counter (log2 of number of same calls merged in single stack entry)
+    StackCounterWidth: Int = 3,  // Width of the RAS counter (log2 of number of same calls merged in single stack entry)
+    MicroRasDepth:     Int = 4
 ) {
   require(isPow2(SpecQueueSize), "SpecSize must be a power of 2")
 }
@@ -33,4 +34,5 @@ trait HasRasParameters extends HasBpuParameters {
   def SpecQueueSize:     Int = rasParameters.SpecQueueSize
   def StackCounterWidth: Int = rasParameters.StackCounterWidth
   def StackCounterMax:   Int = (1 << StackCounterWidth) - 1
+  def MicroRasDepth:     Int = rasParameters.MicroRasDepth
 }
