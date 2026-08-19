@@ -341,7 +341,13 @@ class TranslationScenarioBuilder:
             encode_pmp_pma_addr(entry.addr, entry.config, size=entry.size)
 
     @staticmethod
-    def _map_stage1_pages(env, scenario: TranslationScenario, target: int) -> None:
+    def _map_stage1_pages(
+        env,
+        scenario: TranslationScenario,
+        target: int,
+        *,
+        skip_vpns: set[int] | None = None,
+    ) -> None:
         pte_kwargs = scenario.s1_pte.as_mapping_kwargs()
         level = int(scenario.s1_pte.level)
         if level:
@@ -352,7 +358,10 @@ class TranslationScenarioBuilder:
                 **pte_kwargs,
             )
             return
+        skipped = {int(vpn) for vpn in (skip_vpns or set())}
         for page in range(int(scenario.page_count)):
+            if ((int(scenario.va) >> 12) + page) in skipped:
+                continue
             env.page_table.map_page(
                 (int(scenario.va) >> 12) + page,
                 (int(target) >> 12) + page,
@@ -460,13 +469,18 @@ class TranslationScenarioBuilder:
 
         self.env.page_table.clear()
         s2xlate = int(scenario.s2xlate)
+        missing_sector_vpns = {
+            (int(scenario.va) >> 12) + int(entry.lane)
+            for entry in scenario.s1_sector_lanes
+            if not int(entry.pte_present)
+        }
         if s2xlate == _S2XLATE_ONLY_STAGE2:
             self._map_stage2_pages(self.env, scenario, int(scenario.va))
         elif s2xlate == _S2XLATE_ALL_STAGE:
-            self._map_stage1_pages(self.env, scenario, int(scenario.gpa))
+            self._map_stage1_pages(self.env, scenario, int(scenario.gpa), skip_vpns=missing_sector_vpns)
             self._map_stage2_pages(self.env, scenario, int(scenario.gpa))
         elif str(scenario.mode).lower() != "bare":
-            self._map_stage1_pages(self.env, scenario, int(scenario.pa))
+            self._map_stage1_pages(self.env, scenario, int(scenario.pa), skip_vpns=missing_sector_vpns)
         if scenario.s1_sector_lanes:
             sector_base = (int(scenario.va) >> 12) & ~0x7
             lane_pte = scenario.s1_pte.as_mapping_kwargs()

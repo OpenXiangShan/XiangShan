@@ -179,6 +179,31 @@ def test_builder_composes_declared_stage1_sector_lanes_into_one_ptw_response() -
     assert translated_pa == pa + 0x1000
 
 
+def test_builder_keeps_missing_sector_lane_unmapped_for_rewalk_fault() -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id="sv39-sector-missing-pte-lane",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        payload=b"\x13\x00\x00\x00" * 1024,
+        page_count=2,
+        s1_sector_lanes=(
+            TranslationSectorLane(lane=1, ppn=(0x8040_0000 >> 12) + 1, valid=0, pte_present=0),
+        ),
+    )
+
+    state = TranslationScenarioBuilder(env).build(scenario)
+    initial = env.page_table.build_ptw_resp(scenario.va >> 12)
+    rewalk = env.page_table.build_ptw_resp((scenario.va >> 12) + 1)
+
+    assert state.expected_page_outcomes[0]["ok"] is True
+    assert state.expected_page_outcomes[1]["outcome"] == "instruction_page_fault"
+    assert state.expected_page_outcomes[1]["expected_path"] == "fault"
+    assert initial["s1_pf"] == 0
+    assert initial["s1_valididx"][1] == 0
+    assert rewalk["s1_pf"] == 1
+
+
 def test_builder_applies_response_fault_override_to_selected_page_outcome() -> None:
     env = _env()
     va = 0x8020_0000
