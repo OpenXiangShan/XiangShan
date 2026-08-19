@@ -117,7 +117,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   // metaQueue stores information needed to train BPU.
   private val metaQueueResolve = Reg(Vec(FtqSize, new BpuResolveMeta))
-  private val metaQueueCommit  = Reg(Vec(FtqSize, new BpuCommitMeta))
+  // Bpu writes one resolve meta per lookup, at the entry that lookup started from. A group's later blocks are
+  // enqueued without one, so they must not be trained from whatever the index happened to hold before.
+  private val metaQueueResolveValid = RegInit(VecInit.fill(FtqSize)(false.B))
+  private val metaQueueCommit       = Reg(Vec(FtqSize, new BpuCommitMeta))
 
   // resolveQueue caches branch resolve information from backend.
   private val resolveQueue = Module(new ResolveQueue)
@@ -242,6 +245,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   when(entryEnqueue) {
     predictionBlocks.zip(predictionPtrVec).foreach { case (block, ptr) =>
       when(block.valid) {
+        metaQueueResolveValid(ptr.value)  := false.B
         entryQueue(ptr.value).startPc     := block.bits.startPc
         entryQueue(ptr.value).taken       := block.bits.taken
         entryQueue(ptr.value).endPosition := block.bits.endPosition
@@ -270,9 +274,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val s3PerfQueue = WireInit(perfQueue)
   when(io.fromBpu.meta.valid) {
     val s3BpuPtr = io.fromBpu.s3FtqPtr.value
-    metaQueueRedirect(s3BpuPtr) := io.fromBpu.meta.bits.redirectMeta
-    metaQueueResolve(s3BpuPtr)  := io.fromBpu.meta.bits.resolveMeta
-    metaQueueCommit(s3BpuPtr)   := io.fromBpu.meta.bits.commitMeta
+    metaQueueRedirect(s3BpuPtr)     := io.fromBpu.meta.bits.redirectMeta
+    metaQueueResolve(s3BpuPtr)      := io.fromBpu.meta.bits.resolveMeta
+    metaQueueResolveValid(s3BpuPtr) := true.B
+    metaQueueCommit(s3BpuPtr)       := io.fromBpu.meta.bits.commitMeta
 
     s3PerfQueue(s3BpuPtr).bpuPerf := io.fromBpu.perfMeta
     s3PerfQueue(s3BpuPtr).isCfi.foreach(_ := false.B)
@@ -467,7 +472,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val needFlush = backendRedirect.valid && resolveQueue.io.bpuTrain.bits.ftqIdx > backendRedirect.bits.ftqIdx ||
       RegNext(backendRedirect.valid) && resolveQueue.io.bpuTrain.bits.ftqIdx > RegNext(backendRedirect.bits.ftqIdx)
 
-    trainCache.valid     := !needFlush
+    // an entry Bpu never wrote a resolve meta for has nothing to train the predictors with
+    trainCache.valid     := !needFlush && metaQueueResolveValid(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
     trainCache.bits.meta := metaQueueResolve(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
     trainCache.bits.startPcVec.foreach { dup =>
       dup.zipWithIndex.foreach { case (startPc, i) =>
@@ -671,7 +677,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
     )
   )
 
-  private val perf_commitHasMispredict = commit && commitPerfMeta.mispredict
+  // A group's later blocks are enqueued without Bpu meta of their own, so their perf meta describes whichever block
+  // last held the index. Attributing a mispredict from one would blame a prediction that was never made.
+  private val perf_commitHasMispredict =
+    commit && commitPerfMeta.mispredict && metaQueueResolveValid(commitPtr(0).value)
   private val perf_commitHasMispredictConditional =
     perf_commitHasMispredict && commitPerfMeta.mispredictBranchInfo.attribute.isConditional
 
