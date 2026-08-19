@@ -690,7 +690,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     in.valid && FuType.isAlu(in.bits.fuType) && depends
   }
   val aluSteerFromRename = buildAluConsumerSteering(
-    longDependentAluFromRename, lduSteerFromRename
+    longDependentAluFromRename, uopSelIQ
   )
 
   uopSelIQ.zipWithIndex.map{ case (u, i) => {
@@ -714,7 +714,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   }}
   val effectiveUopSelIQ = Wire(Vec(renameWidth, Vec(issueQueueNum, Bool())))
   effectiveUopSelIQ.zipWithIndex.foreach { case (effective, i) =>
-    effective := aluSteerFromRename(i)
+    // Keep the two steering policies independent: loads use the LDU policy,
+    // while all other uops (including ordinary ALU uops) use the original
+    // selection with only the long-dependent ALU override applied.
+    effective := Mux(enableLongLoadLduSteering.B && FuType.isLoad(fromRename(i).bits.fuType),
+      lduSteerFromRename(i), aluSteerFromRename(i))
     if (enableLongLoadLduSteering) {
       when(fromRename(i).valid && FuType.isLoad(fromRename(i).bits.fuType)) {
         assert(PopCount(effective) === 1.U, "scalar load must select exactly one LDU IQ")
