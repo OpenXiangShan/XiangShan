@@ -822,7 +822,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   if (enableLongLoadAluSteering) {
     val reservedIqIdx = longLoadAluPreferredIQIdx.get
     val selectedReserved = effectiveUopSelIQ.map(_(reservedIqIdx))
-    val selectedOther = effectiveUopSelIQ.map(sel => scalarAluIQIdx.dropRight(1).map(sel(_)).reduce(_ || _))
+    val selectedOther = effectiveUopSelIQ.map(sel => scalarAluIQIdx.filterNot(_ == reservedIqIdx).map(sel(_)).reduce(_ || _))
     val dispatched = fromRename.map(_.fire)
     XSPerfAccumulate("dispatch_long_load_dependent_alu",
       PopCount(dispatched.zip(longDependentAluFromRename).map { case (fire, dependent) => fire && dependent }))
