@@ -72,6 +72,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
   class IssueQueueRespBundle(implicit p: Parameters, val params: IssueBlockParams) extends XSBundle {
     val failed                = Bool()
+    // OG0-only failure classes.  `failed` intentionally remains the generic
+    // retry signal used by entries at every response stage; these two bits
+    // allow the IQ to distinguish short-lived RF/WB arbitration losses from
+    // forwarding cancellation and later pipeline backpressure.
+    val rfReadArbFailed       = Bool()
+    val wbArbFailed           = Bool()
     val finalSuccess          = Bool()
     // TODO: change fuType
     val fuType                = FuType()

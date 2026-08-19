@@ -179,6 +179,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   stAddrIQs.zipWithIndex.foreach { case(imp, i) =>
     val feedBack = io.staFeedback.get(i).feedbackSlow
     imp.io.s2Resp.get.head.failed := feedBack.valid && !feedBack.bits.hit
+    imp.io.s2Resp.get.head.rfReadArbFailed := false.B
+    imp.io.s2Resp.get.head.wbArbFailed := false.B
     imp.io.s2Resp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
     imp.io.s2Resp.get.head.fuType := 0.U
     imp.io.s2Resp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
@@ -196,6 +198,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   stdIQs.zipWithIndex.foreach { case(imp, i) =>
     val feedBack = io.stdFeedback.get(i).feedbackSlow
     imp.io.s1Resp.get.head.failed := feedBack.valid && !feedBack.bits.hit
+    imp.io.s1Resp.get.head.rfReadArbFailed := false.B
+    imp.io.s1Resp.get.head.wbArbFailed := false.B
     imp.io.s1Resp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
     imp.io.s1Resp.get.head.fuType := 0.U
     imp.io.s1Resp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
@@ -207,6 +211,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     imp.io.memIO.get.sqDeqPtr.get := io.sqDeqPtr.get
     val feedBack = io.vstuFeedback.get(i).feedbackSlow
     imp.io.snResp.get.head.failed := feedBack.valid && !feedBack.bits.hit
+    imp.io.snResp.get.head.rfReadArbFailed := false.B
+    imp.io.snResp.get.head.wbArbFailed := false.B
     imp.io.snResp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
     imp.io.snResp.get.head.fuType := 0.U
     imp.io.snResp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
@@ -519,6 +525,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         val thisIQ = issueQueues.filter(x => x.param.allExuParams.contains(toMem(i)(j).bits.params)).head
         if (thisIQ.io.s0Resp.nonEmpty) {
           thisIQ.io.s0Resp.get(j).failed := toMem(i)(j).valid && !toMem(i)(j).ready
+          thisIQ.io.s0Resp.get(j).rfReadArbFailed := false.B
+          thisIQ.io.s0Resp.get(j).wbArbFailed := false.B
           thisIQ.io.s0Resp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ || thisIQ.param.isStdIQ).B
           thisIQ.io.s0Resp.get(j).fuType := toMem(i)(j).bits.ctrl.fuType
           thisIQ.io.s0Resp.get(j).sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
@@ -527,6 +535,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         // for intRegion's loadUnit
         if (thisIQ.io.snResp.nonEmpty) {
           thisIQ.io.snResp.get(j).failed := false.B
+          thisIQ.io.snResp.get(j).rfReadArbFailed := false.B
+          thisIQ.io.snResp.get(j).wbArbFailed := false.B
           thisIQ.io.snResp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ || thisIQ.param.isStdIQ).B
           thisIQ.io.snResp.get(j).fuType := toMem(i)(j).bits.ctrl.fuType
           thisIQ.io.snResp.get(j).sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
@@ -717,6 +727,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
           thisIQ.io.s0Resp.get(j) match {
             case resp =>
               resp.failed := toMem(i)(j).valid && !toMem(i)(j).ready
+              resp.rfReadArbFailed := false.B
+              resp.wbArbFailed := false.B
               resp.finalSuccess := toMem(i)(j).fire && FuType.isVLoad(toMem(i)(j).bits.ctrl.fuType)
               resp.fuType := toMem(i)(j).bits.ctrl.fuType
               resp.sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))

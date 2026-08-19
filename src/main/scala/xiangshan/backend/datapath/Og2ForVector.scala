@@ -57,6 +57,8 @@ class Og2ForVector(params: BackendParams)(implicit p: Parameters) extends XSModu
           val og2Failed = s2_toExuValid(iqId)(exuId) && !toExuReady(iqId)(exuId)
           // VecMem need oldest uop, otherwise s0 will be not ready
           og2Resp.failed := (if (og2Resp.params.isVecMemIQ) false.B else og2Failed)
+          og2Resp.rfReadArbFailed := false.B
+          og2Resp.wbArbFailed := false.B
           og2Resp.finalSuccess := (
             if (og2Resp.params match { case x => x.isVecMemIQ })
               false.B

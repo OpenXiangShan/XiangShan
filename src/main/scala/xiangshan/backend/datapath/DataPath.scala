@@ -65,6 +65,8 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
 
   private val og0FailedVec2: MixedVec[Vec[Bool]] = Wire(MixedVec(fromIQ.map(x => Vec(x.size, Bool())).toSeq))
   private val og1FailedVec2: MixedVec[Vec[Bool]] = Wire(MixedVec(fromIQ.map(x => Vec(x.size, Bool())).toSeq))
+  private val rfReadArbFailedVec2: MixedVec[Vec[Bool]] = Wire(MixedVec(fromIQ.map(x => Vec(x.size, Bool())).toSeq))
+  private val wbArbFailedVec2: MixedVec[Vec[Bool]] = Wire(MixedVec(fromIQ.map(x => Vec(x.size, Bool())).toSeq))
 
   // port -> win
   private val intRdArbWinner: Seq2[MixedVec[Bool]] = intRFReadArbiter.io.in.map(_.map(x => MixedVecInit(x.map(_.ready).toSeq)).toSeq).toSeq
@@ -589,6 +591,11 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
         }.reduce(_ || _) && s0.valid
       } else s0_cancel := false.B
       val s0_ldCancel = LoadShouldCancel(s0.bits.loadDependency, io.ldCancel)
+      val canFastRetry = s0.valid && !s0_cancel && !s0_ldCancel && !s1_flush
+      rfReadArbFailedVec2(i)(j) := canFastRetry && !rdNotBlock(i)(j)
+      wbArbFailedVec2(i)(j) := canFastRetry && rdNotBlock(i)(j) &&
+        !(intWbNotBlock(i)(j) && fpWbNotBlock(i)(j) && vfWbNotBlock(i)(j) &&
+          v0WbNotBlock(i)(j) && vlWbNotBlock(i)(j))
       when (s0.fire && !s1_flush && !s0_ldCancel) {
         s1_valid := true.B
       }.otherwise {
@@ -615,6 +622,11 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
           val og0resp = toIU.og0resp
           og0FailedVec2(iqIdx)(iuIdx) := fromIQ(iqIdx)(iuIdx).valid && !fromIQ(iqIdx)(iuIdx).ready
           og0resp.failed              := og0FailedVec2(iqIdx)(iuIdx)
+          // Keep the fast-retry causes narrower than generic `failed`:
+          // forwarding cancellation, load cancellation and flush must wait
+          // for their normal dependency/replay recovery paths.
+          og0resp.rfReadArbFailed     := rfReadArbFailedVec2(iqIdx)(iuIdx)
+          og0resp.wbArbFailed         := wbArbFailedVec2(iqIdx)(iuIdx)
           og0resp.finalSuccess        := false.B
           og0resp.sqIdx.foreach(_     := 0.U.asTypeOf(new SqPtr))
           og0resp.lqIdx.foreach(_     := 0.U.asTypeOf(new LqPtr))
@@ -630,6 +642,8 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
             og1FailedVec2(iqIdx)(iuIdx) := s1_toExuValid(iqIdx)(iuIdx) && !s1_toExuReady(iqIdx)(iuIdx)
           }
           og1resp.failed          := og1FailedVec2(iqIdx)(iuIdx)
+          og1resp.rfReadArbFailed := false.B
+          og1resp.wbArbFailed     := false.B
           og1resp.sqIdx.foreach(_ :=  0.U.asTypeOf(new SqPtr))
           og1resp.lqIdx.foreach(_ :=  0.U.asTypeOf(new LqPtr))
           og1resp.finalSuccess    := (

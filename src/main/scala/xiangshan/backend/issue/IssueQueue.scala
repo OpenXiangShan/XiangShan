@@ -177,6 +177,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     new MultiWakeupQueue(x, new ExuInput(x), new ExuInput(x, x.copyWakeupOut, x.copyNum), new WakeupQueueFlush, x.wakeUpFuLatancySet, flushFunc, modificationFunc, lastConnectFunc)
   ))}
   val deqBeforeDly = Wire(params.genIssueDecoupledBundle)
+  val deqDelay = Reg(params.genIssueValidBundle)
 
   val intWbBusyTableIn = io.wbBusyTableRead.map(_.intWbBusyTable)
   val fpWbBusyTableIn = io.wbBusyTableRead.map(_.fpWbBusyTable)
@@ -257,7 +258,13 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
   io.fuTypeVec := fuTypeVec
   val deqEntryVec = Wire(Vec(params.numDeq, ValidIO(new EntryBundle(isDeq = true))))
+  val baseCanIssueMergeAllBusy = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
   val canIssueMergeAllBusy = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
+  val secondChoiceRequest = Wire(Vec(params.numDeq, Bool()))
+  val secondChoiceRfRequest = Wire(Vec(params.numDeq, Bool()))
+  val secondChoiceWbRequest = Wire(Vec(params.numDeq, Bool()))
+  val secondChoiceAvailable = Wire(Vec(params.numDeq, Bool()))
+  val secondChoiceFire = Wire(Vec(params.numDeq, Bool()))
   val deqCanIssue = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
 
   //deq
@@ -368,12 +375,12 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     entriesIO.snResp.foreach(_                                  := io.snResp.get)
     for(deqIdx <- 0 until params.numDeq) {
       entriesIO.deqReady(deqIdx)                                := deqBeforeDly(deqIdx).ready
-      entriesIO.deqSelOH(deqIdx).valid                          := deqSelValidVec(deqIdx)
+      entriesIO.deqSelOH(deqIdx).valid                          := finalDeqSelValidVec(deqIdx)
       if (params.aluDeqNeedPickJump && (deqIdx == 1)) {
         val needCancelDeq1 = deqEntryVec(0).valid && FuType.isJump(deqEntryVec(0).bits.payload.fuType)
-        entriesIO.deqSelOH(deqIdx).valid                        := deqSelValidVec(deqIdx) && !needCancelDeq1
+        entriesIO.deqSelOH(deqIdx).valid                        := finalDeqSelValidVec(deqIdx) && !needCancelDeq1
       }
-      entriesIO.deqSelOH(deqIdx).bits                           := deqSelOHVec(deqIdx)
+      entriesIO.deqSelOH(deqIdx).bits                           := finalDeqSelOHVec(deqIdx)
       entriesIO.enqEntryOldestSel(deqIdx)                       := enqEntryOldestSel(deqIdx)
       entriesIO.simpEntryOldestSel.foreach(_(deqIdx)            := simpEntryOldestSel.get(deqIdx))
       entriesIO.compEntryOldestSel.foreach(_(deqIdx)            := compEntryOldestSel.get(deqIdx))
@@ -461,7 +468,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     }
   }
 
-  canIssueMergeAllBusy.zipWithIndex.foreach { case (merge, i) =>
+  baseCanIssueMergeAllBusy.zipWithIndex.foreach { case (merge, i) =>
     val mergeFuBusy = {
       if (fuBusyTableWrite(i).nonEmpty) canIssueVec.asUInt & (~fuBusyTableMask(i)).asUInt
       else canIssueVec.asUInt
@@ -487,6 +494,33 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       else  mergeV0WbBusy
     }
     merge := mergeVlWbBusy
+  }
+
+  // Do not replace an OG0 arbitration loser in the feedback cycle itself:
+  // the FU and wakeup reservations are cleared at the following edge.  In the
+  // next cycle the ordinary busy tables are already correct.  If another uop
+  // is eligible, temporarily mask the failed entry and let the existing
+  // age/category picker select the second choice through its normal path.
+  val secondChoiceFailedOH = RegInit(VecInit(Seq.fill(params.numDeq)(0.U(params.numEntries.W))))
+  secondChoiceRequest.zipWithIndex.foreach { case (request, i) =>
+    val rfArbFailed = deqDelay(i).valid && io.og0Resp(i).rfReadArbFailed &&
+      !params.aluDeqNeedPickJump.B && !io.flush.valid
+    val wbArbFailed = deqDelay(i).valid && io.og0Resp(i).wbArbFailed &&
+      !params.aluDeqNeedPickJump.B && !io.flush.valid
+    val og0ArbFailed = rfArbFailed || wbArbFailed
+    request := RegNext(og0ArbFailed, false.B) && !io.flush.valid
+    secondChoiceRfRequest(i) := RegNext(rfArbFailed, false.B) && !io.flush.valid
+    secondChoiceWbRequest(i) := RegNext(wbArbFailed, false.B) && !io.flush.valid
+    when (og0ArbFailed) {
+      secondChoiceFailedOH(i) := UIntToOH(deqDelay(i).bits.iqIdx, params.numEntries)
+    }
+  }
+
+  canIssueMergeAllBusy.zip(secondChoiceAvailable).zipWithIndex.foreach { case ((merge, available), i) =>
+    val portEligible = baseCanIssueMergeAllBusy(i) & VecInit(deqCanAcceptVec(i)).asUInt
+    val otherEligible = portEligible & (~secondChoiceFailedOH(i)).asUInt
+    available := secondChoiceRequest(i) && otherEligible.orR
+    merge := Mux(available, baseCanIssueMergeAllBusy(i) & (~secondChoiceFailedOH(i)).asUInt, baseCanIssueMergeAllBusy(i))
   }
 
   deqCanIssue.zipWithIndex.foreach { case (req, i) =>
@@ -630,6 +664,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   toBusyTableDeqResp.zipWithIndex.foreach { case (deqResp, i) =>
     deqResp.valid := deqBeforeDly(i).valid
     deqResp.bits.failed := false.B
+    deqResp.bits.rfReadArbFailed := false.B
+    deqResp.bits.wbArbFailed := false.B
     deqResp.bits.finalSuccess := false.B
     deqResp.bits.fuType := deqBeforeDly(i).bits.fuType
     deqResp.bits.sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
@@ -934,9 +970,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.debug_seqNum.foreach(_ := deqEntryVec(i).bits.payload.debug.get.debug_seqNum)
     deq.bits.perfDebugInfo.foreach(_.selectTime := GTimer())
     deq.bits.perfDebugInfo.foreach(_.issueTime := GTimer() + 1.U)
-  }
 
-  val deqDelay = Reg(params.genIssueValidBundle)
+  }
   deqDelay.zip(deqBeforeDly).zipWithIndex.foreach { case ((deqDly, deq), i) =>
     deqDly.valid := deq.valid
     when(validVec.asUInt.orR) {
@@ -964,6 +999,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
         deqDly.valid := deq.valid && !(entries.io.aluDeqSelectJump.get && x.head.valid)
       })
     }
+    secondChoiceFire(i) := secondChoiceAvailable(i) && deq.fire &&
+      !(finalDeqSelOHVec(i) & secondChoiceFailedOH(i)).orR
   }
   io.deqDelay.zip(deqDelay).foreach { case (sink, source) =>
     sink.valid := source.valid
@@ -1110,6 +1147,21 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       Mux1H(wakeupFuLatencySeqs(deqPortIdx) map { case (k, v) => (fuType(k.id), v.U) })
     )
   }
+
+  XSPerfAccumulate("og0_rf_read_block_retry_events",
+    PopCount(io.og0Resp.map(_.rfReadArbFailed)))
+  XSPerfAccumulate("og0_wb_block_retry_events",
+    PopCount(io.og0Resp.map(_.wbArbFailed)))
+  XSPerfAccumulate("second_choice_reselect_request_events", PopCount(secondChoiceRequest))
+  XSPerfAccumulate("second_choice_reselect_candidate_events",
+    PopCount(secondChoiceAvailable))
+  XSPerfAccumulate("second_choice_reselect_fire_events", PopCount(secondChoiceFire))
+  XSPerfAccumulate("second_choice_reselect_no_candidate_events",
+    PopCount(secondChoiceRequest.zip(secondChoiceAvailable).map { case (request, available) => request && !available }))
+  XSPerfAccumulate("second_choice_reselect_rf_fire_events",
+    PopCount(secondChoiceFire.zip(secondChoiceRfRequest).map { case (fire, request) => fire && request }))
+  XSPerfAccumulate("second_choice_reselect_wb_fire_events",
+    PopCount(secondChoiceFire.zip(secondChoiceWbRequest).map { case (fire, request) => fire && request }))
 
   // issue perf counter
   // enq count
