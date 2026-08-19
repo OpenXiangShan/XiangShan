@@ -19,6 +19,7 @@ package top
 import chisel3._
 import org.chipsalliance.cde.config.Parameters
 import device._
+import device.{AXI4RAM => DeviceAXI4RAM}
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.amba.apb._
 import freechips.rocketchip.tilelink._
@@ -79,7 +80,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
 
   val flash = LazyModule(new AXI4Flash(Seq(AddressSet(0x10000000L, 0xfffffff))))
   val bootSram = Option.when(useExternalLLC) {
-    LazyModule(new device.AXI4RAM(Seq(externalLLCBootSramRange), memByte = ExternalLLCAddressMap.BootSramBytes))
+    LazyModule(new DeviceAXI4RAM(Seq(externalLLCBootSramRange), memByte = ExternalLLCAddressMap.BootSramBytes))
   }
   val uartLite = LazyModule(new AXI4UART(Seq(soc.UARTLiteRange)))
   private val uart16550Params = UART16550Params(address = soc.UART16550Range.base)
