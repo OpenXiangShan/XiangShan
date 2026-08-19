@@ -160,10 +160,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_realUtageMeta = Wire(new MicroTageMeta)
   private val s3_utageMeta     = RegEnable(s2_realUtageMeta, s2_fire)
 
-  private val s1_useAbtb = Wire(Bool())
-  private val s2_useAbtb = RegEnable(s1_useAbtb, s1_fire)
-  private val s3_useAbtb = RegEnable(s2_useAbtb, s2_fire)
-
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
   stageCtrl.s0_fire := s0_fire
@@ -194,7 +190,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   fastTrain.bits.abtbMeta        := s3_abtbMeta
   fastTrain.bits.utageMeta       := s3_utageMeta
   fastTrain.bits.hasOverride     := s3_override
-  fastTrain.bits.useAbtb         := s3_useAbtb
 
   predictors.foreach { p =>
     p.io.startPc   := s0_startPc.get
@@ -345,12 +340,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
 
   private val s1_taken             = s1_prediction.taken
-  private val useAbtbTaken         = s1_abtbValid && s1_abtbResult.taken
-  private val debug_s1UseUbtb      = s1_taken && !useAbtbTaken
-  private val debug_s1UseUbtbUtage = s1_taken && !useAbtbTaken
-  private val debug_s1UseAbtb      = s1_taken && useAbtbTaken && !s1_utageHitMask.reduce(_ || _)
-  private val debug_s1UseAbtbUtage = s1_taken && useAbtbTaken && s1_utageHitMask.reduce(_ || _)
-  s1_useAbtb := s1_abtbValid
+  private val useAbtb              = s1_abtbValid && s1_abtbResult.taken
+  private val debug_s1UseUbtb      = s1_taken && !useAbtb
+  private val debug_s1UseUbtbUtage = s1_taken && !useAbtb
+  private val debug_s1UseAbtb      = s1_taken && useAbtb && !s1_utageHitMask.reduce(_ || _)
+  private val debug_s1UseAbtbUtage = s1_taken && useAbtb && s1_utageHitMask.reduce(_ || _)
 
   s1_utageMeta := utage.io.meta.bits
 
