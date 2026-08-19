@@ -22,6 +22,7 @@ import utility.ParallelXOR
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.PrunedAddrInit
 
 trait HalfAlignHelper extends HasBpuParameters {
   def getAlignedPcUpper(pc: PrunedAddr): UInt =
@@ -41,11 +42,6 @@ trait HalfAlignHelper extends HasBpuParameters {
     val nextAlignedPc          = Wire(chiselTypeOf(pc))
     nextAlignedPc := Cat(nextAlignedPcUpperBits, 0.U(FetchBlockAlignWidth.W))
     nextAlignedPc
-  }
-
-  def getNthNextAlignedPc(pc: PrunedAddr, n: Int): PrunedAddr = {
-    val nextAlignedPcUpperBits = getAlignedPcUpper(pc) + n.U
-    PrunedAddrInit(Cat(nextAlignedPcUpperBits, 0.U(FetchBlockAlignWidth.W)))
   }
 
   def getNthNextAlignedPc(pc: PrunedAddr, n: Int): PrunedAddr = {
