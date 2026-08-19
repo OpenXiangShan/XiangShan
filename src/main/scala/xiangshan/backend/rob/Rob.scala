@@ -1798,7 +1798,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         val loadCheck = (FuType.isAMO(uop.debug_fuType.getOrElse(0.U)) || FuType.isLoad(uop.debug_fuType.getOrElse(0.U)) || isVLoad) && !dt_skip
         difftestLoadEvent.valid    := io.commits.commitValid(i) && io.commits.isCommit && loadCheck
         difftestLoadEvent.paddr    := exuOut.paddr
-        difftestLoadEvent.opType   := uop.debug_fuOpType.getOrElse(0.U)
+        difftestLoadEvent.opType   :=
+          LSUOpType.formLoadEventOpcode(
+            FuType.isAMO(uop.debug_fuType.getOrElse(0.U)),
+            uop.debug_fuOpType.getOrElse(0.U)
+          )
         difftestLoadEvent.isAtomic := FuType.isAMO(uop.debug_fuType.getOrElse(0.U))
         difftestLoadEvent.isLoad   := FuType.isLoad(uop.debug_fuType.getOrElse(0.U))
         difftestLoadEvent.isVLoad  := isVLoad

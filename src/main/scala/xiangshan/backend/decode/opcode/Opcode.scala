@@ -526,6 +526,47 @@ object Opcode {
     def getUopType(op: UInt): UInt = op(0)
 
     def isPrefetch(op: UInt): Bool = getUopType(op) === uopPrefetch
+
+    def getIsH(op: UInt): UInt = op(6)
+
+    def getIsX(op: UInt): UInt = op(5)
+
+    def getSign(op: UInt): UInt = op(4)
+
+    def getLdType(op: UInt): UInt = op(10, 7)
+
+    def getLduOp(op: UInt): UInt = getLdType(op) ## getIsH(op) ## getIsX(op) ## getSign(op)
+
+    def formDifftestLduOpcode(op: UInt): UInt = {
+      val lduOp = getLduOp(op)
+      val sz = size(op)
+      val diffLduOp: UInt = LookupTree(lduOp, difftestLduOpMap)
+      Cat(diffLduOp, sz(1, 0))
+    }
+
+    object LduDifftestOpcode {
+      def ls = "b000".U
+      def lu = "b001".U
+      def hlvs = "b100".U
+      def hlvu = "b101".U
+      def hlvxu = "b111".U
+    }
+
+    object LduOp {
+      val ls    = SCALAR ## nonH ## nonX ## sign
+      val lu    = SCALAR ## nonH ## nonX ## unsign
+      val hlvs  = SCALAR ##  isH ## nonX ## sign
+      val hlvu  = SCALAR ##  isH ## nonX ## unsign
+      val hlvxu = SCALAR ##  isH ##  isX ## unsign
+    }
+
+    val difftestLduOpMap: Seq[(BitPat, UInt)] = Seq(
+      LduOp.ls    -> LduDifftestOpcode.ls   ,
+      LduOp.lu    -> LduDifftestOpcode.lu   ,
+      LduOp.hlvs  -> LduDifftestOpcode.hlvs ,
+      LduOp.hlvu  -> LduDifftestOpcode.hlvu ,
+      LduOp.hlvxu -> LduDifftestOpcode.hlvxu,
+    )
   }
 
   trait StuOpcodes extends Opcodes with LsuTrait with DataType {
@@ -802,7 +843,15 @@ object Opcode {
 
   object AmoOpcodes extends AmoOpcodes
 
-  object LsuOpcodes extends LduOpcodes with StuOpcodes with AmoOpcodes
+  object LsuOpcodes extends LduOpcodes with StuOpcodes with AmoOpcodes {
+    def formLoadEventOpcode(isAtomic: Bool, opcode: UInt): UInt = {
+      Mux(
+        isAtomic,
+        super[AmoOpcodes].formDifftestOpcode(opcode),
+        super[LduOpcodes].formDifftestLduOpcode(opcode),
+      )
+    }
+  }
 
   object CsrOpcodes extends Opcodes {
     //                        | func3|
