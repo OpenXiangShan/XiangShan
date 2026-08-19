@@ -16,9 +16,11 @@
 package xiangshan.frontend.bpu.ptage
 
 import chisel3._
+import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.XSCoreParamsKey
+import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterFactory
 import xiangshan.frontend.bpu.WriteReqBundle
@@ -78,6 +80,44 @@ class PtageEntry(implicit p: Parameters) extends PtageBundle {
   // and deriving them from the blocks' contents there would not make timing.
   val phrToken: UInt = UInt(MaxUpdateNum.W)
   val ghrShamt: UInt = UInt(GhrShamtWidth.W)
+}
+
+/** One decoded block of a pTAGE prediction group, with its target already reconstructed. */
+class PtageBlockPrediction(implicit p: Parameters) extends PtageBundle {
+  val taken:       Bool       = Bool()
+  val cfiPosition: UInt       = UInt(CfiPositionWidth.W)
+  val attribute:   UInt       = PtageAttribute()
+  val target:      PrunedAddr = PrunedAddr(VAddrBits)
+}
+
+/** pTAGE's answer for one prediction cycle: one block, two on a 2-taken hit, or none at all. */
+class PtagePrediction(implicit p: Parameters) extends PtageBundle {
+  val blocks: Vec[Valid[PtageBlockPrediction]] = Vec(MaxPredictionNum, Valid(new PtageBlockPrediction))
+
+  def hit:       Bool = blocks.head.valid
+  def numBlocks: UInt = PopCount(blocks.map(_.valid))
+}
+
+/** What training needs to know about the lookup that produced a prediction.
+  *
+  * Carried down the predictor pipeline rather than recomputed, because pTAGE indexes on the *previous* group's start
+  * pc and history: re-deriving an index at training time would have to reproduce a context that has since moved on,
+  * and any drift would train a different entry than the one that predicted.
+  */
+class PtageMeta(implicit p: Parameters) extends PtageBundle {
+  val setIdx:  Vec[UInt] = Vec(NumTables, UInt(SetIdxWidth.W))
+  val tag:     Vec[UInt] = Vec(NumTables, UInt(TagWidth.W))
+  val bankIdx: UInt      = UInt(BankIdxWidth.W)
+  val hitVec:  Vec[Bool] = Vec(NumTables, Bool())
+  // the hit entries' useful bits, used to pick an allocation victim; may be stale, which costs allocation quality
+  // but never correctness
+  val usefulVec: Vec[Bool]   = Vec(NumTables, Bool())
+  val provider:  Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
+  val alt:       Valid[UInt] = Valid(UInt(log2Ceil(NumTables).W))
+  // the provider's counters as they were read, so training need not read the table again
+  val p1Counter: SaturateCounter = PtageCounter()
+  val p2Counter: SaturateCounter = PtageCounter()
+  val p2Valid:   Bool            = Bool()
 }
 
 class BankReadReq(implicit p: Parameters) extends PtageBundle {

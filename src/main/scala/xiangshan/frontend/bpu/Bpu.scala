@@ -40,6 +40,7 @@ import xiangshan.frontend.bpu.history.phr.Phr
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.ittage.Ittage
 import xiangshan.frontend.bpu.mbtb.MainBtb
+import xiangshan.frontend.bpu.ptage.Ptage
 import xiangshan.frontend.bpu.ras.MicroRas
 import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.sc.Sc
@@ -72,11 +73,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val fastPhr     = Module(new FastPhr)
   private val commonHR    = Module(new CommonHR)
   private val uras        = Module(new MicroRas)
+  private val ptage       = Module(new Ptage)
 
   private def predictors: Seq[BasePredictor] = Seq(
     fallThrough,
     ubtb,
     abtb,
+    ptage,
     utage,
     uras,
     mbtb,
@@ -97,6 +100,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   fallThrough.io.enable := true.B // fallThrough is always enabled
   utage.io.enable       := true.B
   uras.io.enable        := true.B
+  ptage.io.enable       := true.B
   if (env.EnableConstantin && !env.FPGAPlatform) {
     ubtb.io.enable   := Mux(constCtrl(0), constCtrl(1), ctrl.ubtbEnable)
     abtb.io.enable   := Mux(constCtrl(0), constCtrl(2), ctrl.abtbEnable)
@@ -210,6 +214,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   io.fromFtq.train.ready := predictors.map(_.io.trainReady).reduce(_ && _)
 
   /* *** predictor specific inputs *** */
+  // pTAGE reads its resident folded histories straight out of FastPhr; its own a0 stage is driven by the shared
+  // startPc, which for an ahead-indexed predictor is the key of a group two cycles out rather than this one's.
+  // Nothing selects its prediction yet, so it only observes and reports how well it would have done.
+  ptage.io.foldedHist := fastPhr.io.foldedHist
+
   abtb.io.redirectValid  := redirect.valid
   abtb.io.overrideValid  := s3_override
   abtb.io.normalPathHist := phr.io.oldFoldedPhr
