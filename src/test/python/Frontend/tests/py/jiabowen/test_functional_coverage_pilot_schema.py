@@ -32,7 +32,7 @@ ICACHE_HITMISS_FUNCOV_BIN_IDS = {
 }
 
 IFU_CACHEABLE_PIPELINE_BIN_IDS = {
-    *(f"BIN-{index:03d}" for index in range(801, 817)),
+    *(f"BIN-{index:03d}" for index in range(801, 824)),
 }
 
 ICACHE_MAINPIPE_S2_ECC_BIN_IDS = {
@@ -54,7 +54,7 @@ def test_active_pilot_has_global_unique_identifiers_and_mappings():
 
     summary = validate_pilot_schema(pilot_path)
 
-    assert summary == {"rows": 405, "bin_ids": 405, "mapping_keys": 405, "legacy_ids": 4}
+    assert summary == {"rows": 421, "bin_ids": 421, "mapping_keys": 421, "legacy_ids": 4}
 
 
 def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
@@ -70,7 +70,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
     active = [row for row in rows if row["Coverpoint"].strip()]
     legacy_bpu_ftq = [row for row in rows if "旧BPU_FTQ" in row["映射测试点路径"]]
 
-    assert len(active) == 247
+    assert len(active) == 263
     assert {row["Bin_ID"] for row in active} == {
         *(f"BIN-{index:03d}" for index in range(401, 424)),
         *(f"BIN-{index:03d}" for index in range(424, 433)),
@@ -80,6 +80,8 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
         *(f"BIN-{index:03d}" for index in range(628, 632)),
         *(f"BIN-{index:03d}" for index in range(633, 637)),
         "BIN-638",
+        "BIN-769",
+        *(f"BIN-{index:03d}" for index in range(770, 781)),
         "BIN-641",
         "BIN-642",
         "BIN-645",
@@ -89,7 +91,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
         *(f"BIN-{index:03d}" for index in range(686, 717)),
         *(f"BIN-{index:03d}" for index in range(717, 759)),
         *(f"BIN-{index:03d}" for index in range(759, 769)),
-        *(f"BIN-{index:03d}" for index in range(801, 817)),
+        *(f"BIN-{index:03d}" for index in range(801, 824)),
     }
     assert legacy_bpu_ftq
     assert all(not row["Coverpoint"].strip() for row in legacy_bpu_ftq)

@@ -10,6 +10,9 @@ from .compact_funcov import _sample_instr_compact_coverage
 def initialize_ifu_coverage_state(recorder) -> None:
     recorder._ifu_last_cfvec = None
     recorder._ifu_redirect_skip_until_cycle = None
+    recorder._ifu_cacheable_backend_blocked = False
+    recorder._ifu_cacheable_pending_cfi = None
+    recorder._ifu_cacheable_last_delivery_entry = None
 
 
 def reset_ifu_coverage_state(recorder) -> None:
@@ -21,6 +24,7 @@ def handle_ifu_event(recorder, event: dict) -> None:
         return
     cycle = int(event.get("cycle", 0))
     recorder._ifu_last_cfvec = None
+    recorder._ifu_cacheable_pending_cfi = None
     recorder._ifu_redirect_skip_until_cycle = cycle + 1
 
 
@@ -46,6 +50,132 @@ def _classify_cfi_kind(instr: int, is_rvc: bool) -> str:
     if opcode == 0x67:
         return "jalr"
     return "non_cfi"
+
+
+def _sign_extend(value: int, width: int) -> int:
+    sign = 1 << (int(width) - 1)
+    return (int(value) ^ sign) - sign
+
+
+def _branch_target(pc: int, instr: int) -> int:
+    instr = int(instr) & 0xFFFFFFFF
+    immediate = (
+        (((instr >> 31) & 0x1) << 12)
+        | (((instr >> 7) & 0x1) << 11)
+        | (((instr >> 25) & 0x3F) << 5)
+        | (((instr >> 8) & 0xF) << 1)
+    )
+    return int(pc) + _sign_extend(immediate, 13)
+
+
+def _jal_target(pc: int, instr: int) -> int:
+    instr = int(instr) & 0xFFFFFFFF
+    immediate = (
+        (((instr >> 31) & 0x1) << 20)
+        | (((instr >> 12) & 0xFF) << 12)
+        | (((instr >> 20) & 0x1) << 11)
+        | (((instr >> 21) & 0x3FF) << 1)
+    )
+    return int(pc) + _sign_extend(immediate, 21)
+
+
+def _cacheable_cf_entries(recorder, entries: list[dict], cycle: int) -> list[dict]:
+    windows = [
+        window
+        for window in getattr(recorder, "_ifu_cacheable_verified_windows", ())
+        if int(cycle) - int(window["cycle"]) <= 128
+    ]
+    result = []
+    for entry in entries:
+        matching = next(
+            (
+                window
+                for window in reversed(windows)
+                if entry["ftq_ptr"] == window["ftq_ptr"]
+                and int(window["pc_start"]) <= int(entry["pc"]) < int(window["pc_limit"])
+            ),
+            None,
+        )
+        if matching is not None:
+            result.append({**entry, "cacheable_source": matching})
+    return result
+
+
+def _contiguous_pairs(entries: list[dict]):
+    for before, after in zip(entries, entries[1:]):
+        expected = int(before["pc"]) + (2 if before["is_rvc"] else 4)
+        if (
+            int(after["pc"]) == expected
+            and before["ftq_ptr"] == after["ftq_ptr"]
+            and (int(before["pc"]) & ~0x3F) == (int(after["pc"]) & ~0x3F)
+        ):
+            yield before, after
+
+
+def _sample_cacheable_delivery(recorder, cycle: int, entries: list[dict], can_accept: int) -> None:
+    if int(can_accept) == 0:
+        recorder._ifu_cacheable_backend_blocked = True
+        recorder._ifu_cacheable_last_delivery_entry = None
+        return
+    if not entries:
+        return
+
+    prior = getattr(recorder, "_ifu_cacheable_last_delivery_entry", None)
+    ordered_entries = ([prior] if prior is not None else []) + entries
+    pairs = list(_contiguous_pairs(ordered_entries))
+    evidence = {"event": "cacheable_cfvec_delivery", "entries": entries}
+    if getattr(recorder, "_ifu_cacheable_backend_blocked", False) and pairs:
+        recorder.mark("ifu_cacheable_delivery", "backend_recovery_multi_instr", cycle, evidence)
+        recorder._ifu_cacheable_backend_blocked = False
+
+    if any(before["is_rvc"] == after["is_rvc"] == 1 for before, after in pairs):
+        recorder.mark("ifu_cacheable_delivery", "same_cacheline_multi_rvc", cycle, evidence)
+    if any(before["is_rvc"] == after["is_rvc"] == 0 for before, after in pairs):
+        recorder.mark("ifu_cacheable_delivery", "same_cacheline_multi_rvi", cycle, evidence)
+    if any(before["is_rvc"] == 1 and after["is_rvc"] == 0 for before, after in pairs):
+        recorder.mark("ifu_cacheable_delivery", "rvc_then_rvi", cycle, evidence)
+    if any(before["is_rvc"] == 0 and after["is_rvc"] == 1 for before, after in pairs):
+        recorder.mark("ifu_cacheable_delivery", "rvi_then_rvc", cycle, evidence)
+    recorder._ifu_cacheable_last_delivery_entry = entries[-1]
+
+
+def _sample_cacheable_cfi_flow(recorder, cycle: int, entries: list[dict]) -> None:
+    pending = getattr(recorder, "_ifu_cacheable_pending_cfi", None)
+    for entry in entries:
+        if pending is not None:
+            pc = int(entry["pc"])
+            if pc in pending["expected_pcs"]:
+                recorder.mark(
+                    "ifu_cacheable_cfi_flow",
+                    pending["bin_name"],
+                    cycle,
+                    {
+                        "event": "cacheable_cfi_next_pc",
+                        "cfi": pending,
+                        "successor": entry,
+                    },
+                )
+            pending = None
+
+        kind = _classify_cfi_kind(entry["instr"], bool(entry["is_rvc"]))
+        if kind == "branch":
+            pending = {
+                "bin_name": "branch_next_pc_matches_decode",
+                "pc": int(entry["pc"]),
+                "instr": int(entry["instr"]),
+                "expected_pcs": (
+                    int(entry["pc"]) + (2 if entry["is_rvc"] else 4),
+                    _branch_target(entry["pc"], entry["instr"]),
+                ),
+            }
+        elif kind == "jal":
+            pending = {
+                "bin_name": "jal_target_without_stale_delivery",
+                "pc": int(entry["pc"]),
+                "instr": int(entry["instr"]),
+                "expected_pcs": (_jal_target(entry["pc"], entry["instr"]),),
+            }
+    recorder._ifu_cacheable_pending_cfi = pending
 
 
 def _sample_ifu_cfvec_coverage(recorder, cycle: int, slot: int, pc: int, instr: int, is_rvc: bool) -> None:
@@ -132,6 +262,7 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
     if _read(recorder, "io_backend_toFtq_redirect_valid", 0) == 1:
         skip_until = max(int(skip_until or cycle), cycle + 1)
         recorder._ifu_redirect_skip_until_cycle = skip_until
+        recorder._ifu_cacheable_pending_cfi = None
     if skip_until is not None and cycle <= int(skip_until):
         recorder._ifu_last_cfvec = None
         return
@@ -162,6 +293,7 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
             {
                 "slot": int(slot),
                 "pc": int(pc),
+                "instr": int(instr) & 0xFFFFFFFF,
                 "is_rvc": int(bool(is_rvc)),
                 "ftq_ptr": (int(ftq_flag), int(ftq_value)),
             }
@@ -175,6 +307,11 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
             cycle,
             {"event": "cfvec_mixed_width_window", "entries": cf_entries},
         )
+
+    cacheable_entries = _cacheable_cf_entries(recorder, cf_entries, cycle)
+    can_accept = _read(recorder, "io_backend_canAccept", 0)
+    _sample_cacheable_delivery(recorder, cycle, cacheable_entries, can_accept)
+    _sample_cacheable_cfi_flow(recorder, cycle, cacheable_entries)
 
     unique_ftq_ptrs = []
     for entry in cf_entries:
@@ -262,5 +399,12 @@ CFVEC_SAMPLER_BIN_KEYS = frozenset(
         ("ifu_rvc_exception", "fetch_exception_over_illegal_rvc"),
         ("uncache_page_boundary", "rvc_tail_no_resend_before_delivery"),
         ("uncache_page_boundary", "rvi_tail_resend_next_page"),
+        ("ifu_cacheable_delivery", "backend_recovery_multi_instr"),
+        ("ifu_cacheable_delivery", "same_cacheline_multi_rvc"),
+        ("ifu_cacheable_delivery", "same_cacheline_multi_rvi"),
+        ("ifu_cacheable_delivery", "rvc_then_rvi"),
+        ("ifu_cacheable_delivery", "rvi_then_rvc"),
+        ("ifu_cacheable_cfi_flow", "branch_next_pc_matches_decode"),
+        ("ifu_cacheable_cfi_flow", "jal_target_without_stale_delivery"),
     }
 )

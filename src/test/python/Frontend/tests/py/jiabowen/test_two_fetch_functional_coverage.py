@@ -52,6 +52,7 @@ from env.funcov.recorder import (
     FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS,
     FunctionalCoverageRecorder,
     current_funcov_sampler_sha256,
+    current_verification_environment_sha256,
     default_pilot_csv_path,
     funcov_sampler_paths,
 )
@@ -142,6 +143,7 @@ def _eligible_provenance():
 
     definitions_sha256 = hashlib.sha256(b"[]").hexdigest()
     sampler_sha256 = current_funcov_sampler_sha256()
+    verification_env_sha256 = current_verification_environment_sha256()
     values = {
         key: "b" * 64
         for key in (
@@ -150,6 +152,7 @@ def _eligible_provenance():
             "generated_rtl_sha256",
             "registry_sha256",
             "sampler_sha256",
+            "verification_env_sha256",
             "signal_contract_sha256",
             "build_manifest_sha256",
             "compatibility_signature",
@@ -160,6 +163,7 @@ def _eligible_provenance():
     values["registry_sha256"] = file_sha256(default_pilot_csv_path())
     values["definitions_sha256"] = definitions_sha256
     values["sampler_sha256"] = sampler_sha256
+    values["verification_env_sha256"] = current_verification_environment_sha256()
     values["simulator"] = "verilator"
     values["dut_source_sha"] = "a" * 40
     values["implementation_sha"] = "a" * 40
@@ -189,6 +193,7 @@ def _resign_provenance(values):
         "generated_rtl_sha256",
         "registry_sha256",
         "sampler_sha256",
+        "verification_env_sha256",
         "signal_contract_sha256",
         "build_config",
         "toolchain",
@@ -582,10 +587,10 @@ def test_canonical_registry_matches_the_single_sampler_contract():
             for row in csv.DictReader(handle)
             if row["Coverpoint"].strip()
         }
-    assert len(active) == 247
+    assert len(active) == 263
     assert active == set(FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS)
     assert len(CFVEC_SAMPLER_BIN_KEYS) == 17
-    assert len(IFU_CFVEC_SAMPLER_BIN_KEYS) == 26
+    assert len(IFU_CFVEC_SAMPLER_BIN_KEYS) == 33
     assert len(TWO_FETCH_SAMPLER_BIN_KEYS) == 41
     assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 47
     assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 37
@@ -810,7 +815,7 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     assert "s1_icacheMeta_0_pmpMmio" not in recorder_source
     assert "s1_icacheMetaIn_0_itlbPbmt" in recorder_source
     assert "s1_icacheMetaIn_0_pmpMmio" in recorder_source
-    assert len(recorder.definitions) == 247
+    assert len(recorder.definitions) == 263
     assert all(item.coverpoint for item in recorder.definitions)
     assert "FunctionalCoverageRecorder.from_pilot_csv" in fixture_source
     assert "set_line_coverage" in fixture_source
@@ -893,6 +898,7 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
     manifest = load_frontend_build_manifest(source_root, simulator="verilator")
     manifest_path = source_root / "frontend_build_manifest.verilator.json"
     sampler_sha256 = current_funcov_sampler_sha256()
+    verification_env_sha256 = current_verification_environment_sha256()
     (run_root / "waveforms").mkdir(parents=True, exist_ok=True)
     waveform_path = run_root / "waveforms" / "case.fst"
     waveform_path.write_bytes(b"fst")
@@ -911,6 +917,7 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
         ).hexdigest(),
         "definitions_sha256": hashlib.sha256(b"[]").hexdigest(),
         "sampler_sha256": sampler_sha256,
+        "verification_env_sha256": verification_env_sha256,
         "signal_contract_sha256": manifest["signal_contract_sha256"],
         "build_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         "simulator": "verilator",
@@ -938,6 +945,7 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
                         default_pilot_csv_path().read_bytes()
                     ).hexdigest(),
                     "sampler_sha256": sampler_sha256,
+                    "verification_env_sha256": verification_env_sha256,
                     "signal_contract_sha256": manifest["signal_contract_sha256"],
                     "build_config": "frontend-test",
                     "toolchain": "python-test",
@@ -1852,6 +1860,7 @@ def test_backannotation_rejects_stale_compatibility_signature(tmp_path):
     [
         ("registry_sha256", "registry_version_mismatch"),
         ("sampler_sha256", "sampler_version_mismatch"),
+        ("verification_env_sha256", "verification_env_version_mismatch"),
     ],
 )
 def test_backannotation_rejects_current_model_version_drift(

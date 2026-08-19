@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from typing import Optional
 
 from ..common.dut import _dut, _read_first
@@ -70,6 +71,7 @@ def initialize_ifu_cacheable_pipeline_state(recorder) -> None:
     recorder._ifu_cacheable_s1_stall = None
     recorder._ifu_cacheable_last_accept_cycle = None
     recorder._ifu_cacheable_last_verified = None
+    recorder._ifu_cacheable_verified_windows = deque(maxlen=64)
 
 
 def reset_ifu_cacheable_pipeline_state(recorder) -> None:
@@ -238,6 +240,19 @@ def _sample_verified_transfer(recorder, cycle: int, s1_snapshot: Optional[dict])
             {**evidence, "previous": previous},
         )
     recorder._ifu_cacheable_last_verified = {"cycle": int(cycle), "source": expected}
+    for block in expected:
+        if block.get("valid") != 1:
+            continue
+        recorder._ifu_cacheable_verified_windows.append(
+            {
+                "cycle": int(cycle),
+                "ftq_ptr": (int(block["ftqIdx_flag"]), int(block["ftqIdx_value"])),
+                # PrunedAddr omits bit zero; size is expressed in halfwords.
+                "pc_start": int(block["startVAddr_addr"]) << 1,
+                "pc_limit": (int(block["startVAddr_addr"]) << 1) + 2 * int(block["size"]),
+                "source": block,
+            }
+        )
     recorder._ifu_cacheable_pending_transfer = None
 
 

@@ -19,6 +19,8 @@ from .cacheable_pipeline_funcov import (
 
 IFU_COVERPOINTS = {
     "ifu_cfvec": "instruction_stream",
+    "ifu_cacheable_delivery": "stream_shape",
+    "ifu_cacheable_cfi_flow": "next_pc",
     **COMPACT_COVERPOINTS,
     **IFU_CACHEABLE_PIPELINE_COVERPOINTS,
 }

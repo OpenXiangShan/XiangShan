@@ -27,6 +27,38 @@ def _program_image(instructions: Iterable[int], base_addr: int = _BASE) -> Progr
     return ProgramImage(payload=_instructions_to_bytes(instructions), base_addr=base_addr)
 
 
+def _cacheable_stream_image(base_addr: int = _BASE) -> ProgramImage:
+    payload = bytearray()
+
+    def rvc(value: int = 0x0001) -> None:
+        payload.extend(int(value & 0xFFFF).to_bytes(2, "little"))
+
+    def rvi(value: int = _NOP) -> None:
+        payload.extend(int(value & 0xFFFFFFFF).to_bytes(4, "little"))
+
+    # Keep the mixed-width stream in one cacheline before the CFI sequence.
+    rvc()
+    rvc()
+    rvi()
+    rvi()
+    rvc()
+    rvi()
+    rvc()
+    while len(payload) < 32:
+        rvc()
+
+    branch_pc = int(base_addr) + len(payload)
+    rvi(_bne(0, 0, 8))
+    rvi()
+    jal_pc = int(base_addr) + len(payload)
+    rvi(_jal(0, 8))
+    rvi()  # stale fall-through slot; direct JAL must redirect before delivery.
+    assert int(base_addr) + len(payload) == jal_pc + 8
+    rvi()
+    rvi()
+    return ProgramImage(payload=bytes(payload), base_addr=base_addr)
+
+
 def _jal(rd: int, offset: int) -> int:
     imm = offset & 0x1FFFFF
     return (
@@ -233,6 +265,39 @@ def test_baremode_queue_near_full_backpressure_pilot(env):
 
     assert commits_before >= 4
     assert commits_after >= 4
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins(
+    "BIN-817",
+    "BIN-818",
+    "BIN-819",
+    "BIN-820",
+    "BIN-821",
+    "BIN-822",
+    "BIN-823",
+)
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_baremode_cacheable_stream_delivery_pilot(env):
+    LoadProgramSequence(image=_cacheable_stream_image(), step_cycles=0).run(env)
+    env.initialize(reset_vector=_BASE, bare_mode=True, reset_cycles=20)
+
+    env.backend_model.set_can_accept(0)
+    env.step(32)
+    env.backend_model.set_can_accept(1)
+    commits = _warmup_commits(env, target_count=14, max_cycles=5000)
+
+    assert commits >= 14
+    for group, bin_name in (
+        ("ifu_cacheable_delivery", "backend_recovery_multi_instr"),
+        ("ifu_cacheable_delivery", "same_cacheline_multi_rvc"),
+        ("ifu_cacheable_delivery", "same_cacheline_multi_rvi"),
+        ("ifu_cacheable_delivery", "rvc_then_rvi"),
+        ("ifu_cacheable_delivery", "rvi_then_rvc"),
+        ("ifu_cacheable_cfi_flow", "branch_next_pc_matches_decode"),
+        ("ifu_cacheable_cfi_flow", "jal_target_without_stale_delivery"),
+    ):
+        assert env.functional_coverage.key_hit(group, bin_name)
     assert not env.monitor.get_errors()
 
 
