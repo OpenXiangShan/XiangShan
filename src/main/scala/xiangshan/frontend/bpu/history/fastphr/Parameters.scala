@@ -42,12 +42,6 @@ trait HasFastPhrParameters extends HasPhrParameters {
   def WindowLength: Int = fastPhrParameters.Spans.max
   def MaxUpdateNum: Int = 2 * Shamt
 
-  // A group's whole contribution to the path history, expressed as bits to XOR into the shifted window. Phr's taken
-  // update is (old << Shamt) ^ pathHash, because its shift bits and its hash-high overlay are the low and high halves
-  // of the same path hash. A second block's hash then lands Shamt bits above the first's, so the combined token of a
-  // MaxPredictionNum-block group is that much wider than one hash.
-  def TokenWidth: Int = PathHashWidth + (MaxPredictionNum - 1) * Shamt
-
   // per table, an index-like fold and two tag-like folds (widths IdxWidth, TagWidth, TagWidth - 1),
   // each capped at the span; idx/tag widths are direct parameters here, not derived from a set count
   def FastFoldedHistoryInfo: Set[FoldedHistoryInfo] =

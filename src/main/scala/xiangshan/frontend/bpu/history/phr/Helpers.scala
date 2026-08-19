@@ -133,4 +133,42 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper with FoldedHistoryMa
     }
     nextFoldedPhr
   }
+
+  // XOR-reduce a value into compLen bits, over the value's own width rather than a fixed path-hash width, since a
+  // group's token is wider than one hash. Bits past the span are dropped: they leave the window as they arrive.
+  private def foldToken(bits: UInt, compLen: Int, histLen: Int): UInt = {
+    val width   = min(bits.getWidth, histLen)
+    val nChunks = (width + compLen - 1) / compLen
+    ParallelXOR((0 until nChunks).map(i => bits(min((i + 1) * compLen, width) - 1, i * compLen)))
+  }
+
+  /** Advance every folded history by a whole group.
+    *
+    * Folding is linear over XOR, so the window's shift and the group's token fold apart and combine at the end. That
+    * separation is what lets one step carry several blocks: the blocks' path hashes sit at different offsets within
+    * the token, which a single hash-high argument could not express.
+    */
+  def foldGroup(
+      baseFoldedPhr: PhrAllFoldedHistories,
+      oldestBits:    PhrAllFoldedHistoryOldestBits,
+      token:         UInt,
+      insOH:         Seq[Bool]
+  ): PhrAllFoldedHistories = {
+    val res = WireInit(baseFoldedPhr)
+    for (i <- baseFoldedPhr.hist.indices) {
+      val h  = baseFoldedPhr.hist(i)
+      val ob = oldestBits.hist(i).bits
+      res.hist(i).foldedHist := Mux1H(
+        insOH,
+        Seq.tabulate(insOH.length) { n =>
+          if (n == 0) h.foldedHist
+          else {
+            val shifted = h.update(ob, n * Shamt, 0.U((n * Shamt).W), 0.U(PathHashHighWidth.W)).foldedHist
+            shifted ^ foldToken(token, h.info.FoldedLength, h.info.HistoryLength)
+          }
+        }
+      )
+    }
+    res
+  }
 }

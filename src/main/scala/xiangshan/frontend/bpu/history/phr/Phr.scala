@@ -47,11 +47,10 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
 
   // s1Train and s3 override commit to the physical PHR one cycle later.
   // A redirect cancels any pending write; s3 override also cancels pending writes from s1.
-  private val pendingValid     = RegInit(false.B)
-  private val pendingTaken     = RegInit(false.B)
-  private val pendingLowBits   = RegInit(0.U(PathHashHighWidth.W))
-  private val pendingShiftBits = RegInit(0.U(Shamt.W))
-  private val pendingBits      = Cat(pendingLowBits, pendingShiftBits)
+  private val pendingValid = RegInit(false.B)
+  // what the pending update writes over the newest bits, and the low bits it leaves behind for the next lookup
+  private val pendingBits    = RegInit(0.U(TokenWidth.W))
+  private val pendingLowBits = RegInit(0.U(PathHashHighWidth.W))
 
   // Read PHR through the logical view, including pending-write bypass.
   private def getPhr(ptr: PhrPtr): UInt =
@@ -63,13 +62,10 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   }
 
   private val oldPhrValue = getPhr(phrPtr)
+  // An update writes the newest TokenWidth bits and re-indexes the rest, so bypassing it is a single substitution.
   private val pendingPhrValue = Mux(
     pendingValid,
-    Mux(
-      pendingTaken,
-      Cat(oldPhrValue(PhrHistoryLength - 1, PathHashWidth), pendingBits),
-      Cat(oldPhrValue(PhrHistoryLength - 1, PathHashHighWidth), pendingLowBits)
-    ),
+    Cat(oldPhrValue(PhrHistoryLength - 1, TokenWidth), pendingBits),
     oldPhrValue
   )
 
@@ -107,7 +103,6 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val s2_phrMeta = RegEnable(s1_phrMeta, 0.U.asTypeOf(new PhrMeta), s1_fire)
   private val s3_phrMeta = RegEnable(s2_phrMeta, 0.U.asTypeOf(new PhrMeta), s2_fire)
 
-  private val s1UpdateData    = WireInit(0.U.asTypeOf(new PhrUpdateData))
   private val redirectData    = WireInit(0.U.asTypeOf(new PhrUpdateData))
   private val s3_override     = WireInit(false.B)
   private val s3_overrideData = WireInit(0.U.asTypeOf(new PhrUpdateData))
@@ -123,7 +118,6 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val s1S0PhrPtr           = WireInit(0.U.asTypeOf(new PhrPtr))
   private val s1S0PhrLowBits       = WireInit(0.U(PathHashHighWidth.W))
   private val s1S0FoldedPhr        = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
-  private val s1Update             = WireInit(0.U.asTypeOf(new PhrUpdateResult))
   private val redirectPhr          = WireInit(0.U(PhrHistoryLength.W))
 
   // Organize the input data into the structure required for PHR updates
@@ -141,17 +135,26 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   s3_overrideData.target  := io.train.s3_prediction.target.unGuard
   s3_overrideData.phrMeta := io.train.s3_phrMeta
 
-  s1UpdateData.valid              := s1_valid
-  s1UpdateData.taken              := io.s1Train.prediction.taken
-  s1UpdateData.cfiPc              := getCfiPcFromPosition(io.s1Train.startPc, io.s1Train.prediction.cfiPosition)
-  s1UpdateData.target             := io.s1Train.prediction.target.unGuard
-  s1UpdateData.phrMeta.phrPtr     := s1_phrPtr
-  s1UpdateData.phrMeta.phrLowBits := s1_phrLowBits
+  // s1 commits a whole prediction group, and the path history advances once per taken block within it. Each block
+  // contributes its path hash, block i+1's sitting Shamt above block i's, which composes the group into one token:
+  // the bits to XOR over the shifted history. taken is the group's own, i.e. whether it moved the history at all.
+  private val s1_blockTaken = VecInit(io.s1Train.blocks.map(b => b.valid && b.bits.taken))
+  private val s1_blockHash = VecInit(io.s1Train.blocks.zip(io.s1Train.blockStartPc).map { case (b, pc) =>
+    pathHash(getCfiPcFromPosition(pc, b.bits.cfiPosition), b.bits.target.unGuard)
+  })
+  private val s1_numTaken = PopCount(s1_blockTaken)
+  private val s1_token = io.s1Train.blocks.indices.foldLeft(0.U(TokenWidth.W)) { (acc, i) =>
+    Mux(s1_blockTaken(i), ((acc << Shamt).asUInt ^ s1_blockHash(i))(TokenWidth - 1, 0), acc)
+  }
+  // one-hot over how many blocks the group advances by, so every shift below is a fixed one
+  private val s1_insOH = Seq.tabulate(MaxPredictionNum + 1)(n => s1_numTaken === n.U)
+
+  // whether the group moved the history at all; a group of purely not-taken blocks leaves it alone
+  private val s1_groupTaken = s1_blockTaken.reduce(_ || _)
 
   // Compute all ShiftBits values and the high bits of the hash
   private val redirectHashComponents = getPathHashComponents(redirectData.cfiPc, redirectData.target)
   private val s3HashComponents       = getPathHashComponents(s3_overrideData.cfiPc, s3_overrideData.target)
-  private val s1HashComponents       = getPathHashComponents(s1UpdateData.cfiPc, s1UpdateData.target)
 
   private val redirectShiftBits = redirectHashComponents._1
   private val redirectHashHigh  = redirectHashComponents._2
@@ -161,15 +164,19 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   // Compute all phrPtr and phrLowBits for updates
   redirectUpdate := getUpdatePtrs(redirectData, redirectHashHigh)
   s3Update       := getUpdatePtrs(s3_overrideData, s3HashHigh)
-  s1Update       := getUpdatePtrs(s1UpdateData, s1HashComponents._2)
-  private val s1ShiftBits = s1HashComponents._1
 
   redirectS0PhrPtr     := redirectUpdate.phrPtr
   redirectS0PhrLowBits := redirectUpdate.phrLowBits
   s3S0PhrPtr           := s3Update.phrPtr
   s3S0PhrLowBits       := s3Update.phrLowBits
-  s1S0PhrPtr           := Mux(io.s1Train.prediction.taken, s1Update.phrPtr, s1_phrPtr)
-  s1S0PhrLowBits       := Mux(io.s1Train.prediction.taken, s1Update.phrLowBits, s1_phrLowBits)
+  // the group moves the pointer once per taken block, and its low bits become the shifted old ones XOR the token
+  s1S0PhrPtr := Mux1H(s1_insOH, Seq.tabulate(MaxPredictionNum + 1)(n => s1_phrPtr - (n * Shamt).U))
+  s1S0PhrLowBits := Mux1H(
+    s1_insOH,
+    Seq.tabulate(MaxPredictionNum + 1) { n =>
+      ((s1_phrLowBits << (n * Shamt)).asUInt ^ s1_token)(PathHashHighWidth - 1, 0)
+    }
+  )
 
   phrPtr := MuxCase(
     phrPtr,
@@ -230,43 +237,42 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
 
   private val s1_oldestBits = Wire(new PhrAllFoldedHistoryOldestBits(AllFoldedHistoryInfo))
   s1_oldestBits.read(VecInit(pendingPhrValue.asBools), s1_phrPtr)
-  s1S0FoldedPhr := getNextFoldedPhr(
-    s1UpdateData,
-    s1_oldestBits,
-    s1_foldedPhrReg,
-    s1HashComponents._2,
-    s1HashComponents._1
+  s1S0FoldedPhr := foldGroup(s1_foldedPhrReg, s1_oldestBits, s1_token, s1_insOH)
+
+  // Every update is the same shape: shift the history by one Shamt per taken block and XOR the group's token over
+  // the newest bits. A correction that lands on a not-taken block shifts nothing and simply restores the low bits its
+  // meta carried. The write therefore always covers exactly the newest TokenWidth bits.
+  private def writeBitsFor(base: UInt, taken: Bool, hash: UInt): UInt =
+    Mux(taken, ((base << Shamt).asUInt ^ hash)(TokenWidth - 1, 0), base(TokenWidth - 1, 0))
+
+  private val redirectWriteBits =
+    writeBitsFor(redirectPhr, redirectData.taken, Cat(redirectHashHigh, redirectShiftBits))
+  private val s3Phr       = getRedirectPhr(s3_overrideData.phrMeta)
+  private val s3WriteBits = writeBitsFor(s3Phr, s3_overrideData.taken, Cat(s3HashHigh, s3ShiftBits))
+  private val s1WriteBits = Mux1H(
+    s1_insOH,
+    Seq.tabulate(MaxPredictionNum + 1) { n =>
+      ((pendingPhrValue(TokenWidth - 1, 0) << (n * Shamt)).asUInt ^ s1_token)(TokenWidth - 1, 0)
+    }
   )
 
-  private val redirectBits = Cat(redirectS0PhrLowBits, redirectShiftBits)
-
-  private val s1UpdateWins = s1_valid && io.s1Train.prediction.taken && !redirectData.valid && !s3_override
+  private val s1UpdateWins = s1_valid && s1_groupTaken && !redirectData.valid && !s3_override
   private val s3UpdateWins = s3_override && !redirectData.valid
   pendingValid := s3UpdateWins || s1UpdateWins
   when(s3UpdateWins) {
-    pendingTaken     := s3_overrideData.taken
-    pendingLowBits   := s3S0PhrLowBits
-    pendingShiftBits := s3ShiftBits
+    pendingBits    := s3WriteBits
+    pendingLowBits := s3S0PhrLowBits
   }.elsewhen(s1UpdateWins) {
-    pendingTaken     := true.B
-    pendingLowBits   := s1S0PhrLowBits
-    pendingShiftBits := s1ShiftBits
+    pendingBits    := s1WriteBits
+    pendingLowBits := s1S0PhrLowBits
   }
 
-  private val phrWriteValid   = redirectData.valid || pendingValid
-  private val phrWriteTaken   = Mux(redirectData.valid, redirectData.taken, pendingTaken)
-  private val phrWritePtr     = Mux(redirectData.valid, s0_phrPtr, phrPtr)
-  private val phrWriteBits    = Mux(redirectData.valid, redirectBits, pendingBits)
-  private val phrWriteLowBits = Mux(redirectData.valid, redirectS0PhrLowBits, pendingLowBits)
+  private val phrWriteValid = redirectData.valid || pendingValid
+  private val phrWritePtr   = Mux(redirectData.valid, s0_phrPtr, phrPtr)
+  private val phrWriteBits  = Mux(redirectData.valid, redirectWriteBits, pendingBits)
   when(phrWriteValid) {
-    when(phrWriteTaken) {
-      for (i <- 0 until PathHashWidth) {
-        phr((phrWritePtr + (i + 1).U).value) := phrWriteBits(i)
-      }
-    }.otherwise {
-      for (i <- 1 to PathHashHighWidth) {
-        phr((phrWritePtr + i.U).value) := phrWriteLowBits(i - 1)
-      }
+    for (i <- 0 until TokenWidth) {
+      phr((phrWritePtr + (i + 1).U).value) := phrWriteBits(i)
     }
   }
 
@@ -276,9 +282,9 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   s0_foldedPhr := MuxCase(
     s0_foldedPhrReg,
     Seq(
-      redirectData.valid                        -> redirectS0FoldedPhr,
-      s3_override                               -> s3S0FoldedPhr,
-      (s1_valid && io.s1Train.prediction.taken) -> s1S0FoldedPhr
+      redirectData.valid          -> redirectS0FoldedPhr,
+      s3_override                 -> s3S0FoldedPhr,
+      (s1_valid && s1_groupTaken) -> s1S0FoldedPhr
     )
   )
 
@@ -316,7 +322,8 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     redirectPhr
   )
   // a not-taken block leaves the history alone, so it contributes nothing to fold in
-  io.toFastPhr.s1PathHash := Mux(s1UpdateData.taken, Cat(s1HashComponents._2, s1ShiftBits), 0.U)
+  io.toFastPhr.s1Token    := s1_token
+  io.toFastPhr.s1NumTaken := s1_numTaken
   io.toFastPhr.s3PathHash := Mux(s3_overrideData.taken, Cat(s3HashHigh, s3ShiftBits), 0.U)
   io.toFastPhr.debug_phr  := phrValue
 

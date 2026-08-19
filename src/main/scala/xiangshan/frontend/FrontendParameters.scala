@@ -25,8 +25,12 @@ import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.frontend.ifu.IfuParameters
 
 case class FrontendParameters(
-    FetchBlockSize:           Int = 64, // bytes
-    FetchPorts:               Int = 2,  // 2-fetch
+    FetchBlockSize: Int = 64, // bytes
+    FetchPorts:     Int = 2,  // 2-fetch
+    // Bpu enqueues at most this many prediction blocks (i.e. Ftq entries) per cycle. A block ends at a taken cfi, so
+    // enqueueing more than one means predicting more than one taken branch per cycle. Blocks of one enqueue go to
+    // consecutive Ftq entries, and block i+1 starts at block i's target.
+    MaxPredictionNum:         Int = 2,
     ResolveEntryBranchNumber: Int = 8,
     bpuParameters:            BpuParameters = BpuParameters(),
     ftqParameters:            FtqParameters = FtqParameters(),
@@ -89,10 +93,7 @@ trait HasFrontendParameters extends HasXSParameter {
 
   def ResolveEntryBranchNumber: Int = frontendParameters.ResolveEntryBranchNumber
 
-  // Bpu enqueues at most this many prediction blocks (i.e. Ftq entries) per cycle.
-  // A block ends at a taken cfi, so enqueueing more than one block per cycle means predicting more than one taken
-  // branch per cycle. Blocks of one enqueue go to consecutive Ftq entries, and block i+1 starts at block i's target.
-  def MaxPredictionNum: Int = 2
+  def MaxPredictionNum: Int = frontendParameters.MaxPredictionNum
 
   def MaxPrefetchReqNum: Int = 2
   def MaxFetchReqNum:    Int = 2

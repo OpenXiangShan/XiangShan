@@ -299,6 +299,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
     )
   )
 
+  // The group s1 hands on. Everything downstream that has to account for a whole group, the path history included,
+  // reads it from here, so there is one place the second block gets filled in.
+  private val s1_group = Wire(Vec(MaxPredictionNum, Valid(new Prediction)))
+  s1_group(0).valid := true.B
+  s1_group(0).bits  := s1_prediction
+  s1_group.tail.foreach { block =>
+    block.valid := false.B
+    block.bits  := 0.U.asTypeOf(block.bits)
+  }
+
   private val s1_taken         = s1_prediction.taken
   private val usePtage         = s1_ptageBlock.valid && s1_ptageResult.taken
   private val debug_s1UsePtage = s1_taken && usePtage
@@ -481,7 +491,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   phr.io.train.s3_startPc    := s3_startPc.get.unGuard
   phr.io.s1Train.valid       := s1_fire
   phr.io.s1Train.startPc     := s1_startPc.get.unGuard
-  phr.io.s1Train.prediction  := s1_prediction
+  phr.io.s1Train.blocks      := s1_group
 
   phr.io.commit.valid := io.fromFtq.train.fire
   phr.io.commit.bits.fromBpuTrain(train)
@@ -500,12 +510,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
    * exactly the events that move Phr, with the same tokens, so the two never diverge. Only taken blocks shift the
    * path history, so a not-taken block advances neither.
    */
-  private def numBlocksOH(taken: Bool): Vec[Bool] =
-    VecInit(!taken, taken, false.B) // one block per cycle for now, so at most one taken block
+  private def numBlocksOH(numTaken: UInt): Vec[Bool] =
+    VecInit(Seq.tabulate(MaxPredictionNum + 1)(n => numTaken === n.U))
 
   fastPhr.io.valid       := s1_fire
-  fastPhr.io.token       := phr.io.toFastPhr.s1PathHash
-  fastPhr.io.numBlocksOH := numBlocksOH(s1_prediction.taken)
+  fastPhr.io.token       := phr.io.toFastPhr.s1Token
+  fastPhr.io.numBlocksOH := numBlocksOH(phr.io.toFastPhr.s1NumTaken)
   fastPhr.io.s2Fire      := s2_fire
 
   fastPhr.io.redirect.valid := redirect.valid
@@ -513,7 +523,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
 
   fastPhr.io.overrideValid       := s3_override
   fastPhr.io.overrideToken       := phr.io.toFastPhr.s3PathHash
-  fastPhr.io.overrideNumBlocksOH := numBlocksOH(s3_prediction.taken)
+  fastPhr.io.overrideNumBlocksOH := numBlocksOH(s3_prediction.taken.asUInt)
 
   // FastPhr caches what Phr already holds, so the two must agree bit for bit. Checking the window directly catches a
   // divergence at its source, rather than waiting for it to surface as a mispredict through pTAGE's folded histories.
