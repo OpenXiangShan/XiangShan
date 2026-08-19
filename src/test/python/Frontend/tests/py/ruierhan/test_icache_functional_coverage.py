@@ -832,6 +832,109 @@ def test_missunit_refill_counts_grant_data_opcode_5():
     assert _hit(recorder, "icache_missunit_refill", "clean_doublebeat_refill_write")
 
 
+def _sample_missunit_corrupt_beat_case(
+    error_beat: int,
+    *,
+    request_matches=True,
+    controls_clear=True,
+    release_mshr=True,
+):
+    recorder = _Recorder()
+    mshr = _MISS + "allMshr_0."
+    for name, value in {
+        _MISS + "io_metaWrite_req_valid": 0,
+        _ICACHE + "ctrlUnitOpt.io_dataWrite_req_valid": 0,
+        _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush": 0,
+        _TOP + "io_fencei": 0,
+        _TOP + "auto_inner_icache_client_out_d_bits_source": 0,
+    }.items():
+        recorder.set_missunit_signal(name, value)
+
+    d_valid = _TOP + "auto_inner_icache_client_out_d_valid"
+    d_opcode = _TOP + "auto_inner_icache_client_out_d_bits_opcode"
+    d_corrupt = _TOP + "auto_inner_icache_client_out_d_bits_corrupt"
+    d_denied = _TOP + "auto_inner_icache_client_out_d_bits_denied"
+    last_fire = _MISS + "lastFire"
+    last_fire_next = _MISS + "lastFireNext"
+    id_next = _MISS + "idNext"
+    corrupt_reg = _MISS + "corruptReg"
+    denied_reg = _MISS + "deniedReg"
+
+    # Cycle 0: the original cacheable miss request allocates fetch MSHR 0.
+    _set_fetch_mshr_allocate_inputs(recorder)
+    recorder.set_missunit_signal(
+        _MAIN + "__Vtogcov__io_missReq_bits_blkPAddr",
+        0x300 if request_matches else 0x301,
+    )
+    recorder.set_missunit_signal(_MAIN + "__Vtogcov__io_missReq_bits_vSetIdx", 4)
+    sample_icache_missunit_coverage(recorder, recorder.env, 0)
+
+    # Cycle 1: MSHR 0 registers the request, then receives the first beat.
+    recorder.set_missunit_signal(_MAIN + "__Vtogcov__io_missReq_valid", 0)
+    for name, value in {
+        mshr + "valid": 1,
+        mshr + "flush": 0,
+        mshr + "fencei": 0,
+        mshr + "issue": 1,
+        mshr + "blkPAddr": 0x300,
+        mshr + "vSetIdx": 4,
+    }.items():
+        recorder.set_missunit_signal(name, value)
+    recorder.set_missunit_signal(d_valid, 1)
+    recorder.set_missunit_signal(d_opcode, 5)
+    recorder.set_missunit_signal(d_denied, 0)
+    recorder.set_missunit_signal(d_corrupt, 1 if error_beat == 0 else 0)
+    sample_icache_missunit_coverage(recorder, recorder.env, 1)
+
+    recorder.set_missunit_signal(d_corrupt, 1 if error_beat == 1 else 0)
+    if not controls_clear:
+        recorder.set_missunit_signal(_TOP + "io_fencei", 1)
+    recorder.set_missunit_signal(last_fire, 1)
+    sample_icache_missunit_coverage(recorder, recorder.env, 2)
+
+    recorder.set_missunit_signal(_TOP + "io_fencei", 0)
+    recorder.set_missunit_signal(d_valid, 0)
+    recorder.set_missunit_signal(last_fire, 0)
+    recorder.set_missunit_signal(last_fire_next, 1)
+    recorder.set_missunit_signal(id_next, 0)
+    recorder.set_missunit_signal(corrupt_reg, 1)
+    recorder.set_missunit_signal(denied_reg, 0)
+    sample_icache_missunit_coverage(recorder, recorder.env, 3)
+
+    # Cycle 4: response retirement must release the associated MSHR.
+    recorder.set_missunit_signal(last_fire_next, 0)
+    recorder.set_missunit_signal(mshr + "valid", 0 if release_mshr else 1)
+    sample_icache_missunit_coverage(recorder, recorder.env, 4)
+    return recorder
+
+
+def test_missunit_refill_error_first_beat_requires_matching_mshr_and_no_sram_write():
+    recorder = _sample_missunit_corrupt_beat_case(0)
+    assert _hit(recorder, "icache_missunit_refill", "error_first_beat_no_sram_write")
+    assert not _hit(recorder, "icache_missunit_refill", "error_second_beat_no_sram_write")
+
+
+def test_missunit_refill_error_second_beat_requires_matching_mshr_and_no_sram_write():
+    recorder = _sample_missunit_corrupt_beat_case(1)
+    assert _hit(recorder, "icache_missunit_refill", "error_second_beat_no_sram_write")
+    assert not _hit(recorder, "icache_missunit_refill", "error_first_beat_no_sram_write")
+
+
+def test_missunit_refill_error_bins_require_request_association_controls_and_release():
+    cases = (
+        {"request_matches": False},
+        {"controls_clear": False},
+        {"release_mshr": False},
+    )
+    for kwargs in cases:
+        recorder = _sample_missunit_corrupt_beat_case(0, **kwargs)
+        assert not _hit(
+            recorder,
+            "icache_missunit_refill",
+            "error_first_beat_no_sram_write",
+        )
+
+
 def test_missunit_fifo_issue_order_requires_source_to_match_fifo_head():
     recorder = _Recorder()
     for name, value in {

@@ -56,8 +56,8 @@ ICACHE_MISSUNIT_SAMPLER_BIN_KEYS = frozenset(
         ("icache_missunit_fencei", "fencei_redirect_prefetch_issued"),
         ("icache_missunit_refill", "clean_doublebeat_refill_write"),
         ("icache_missunit_refill", "source_routes_refill"),
-        ("icache_missunit_refill", "error_beats_accumulate"),
-        ("icache_missunit_refill", "clean_refill_clears_error"),
+        ("icache_missunit_refill", "error_first_beat_no_sram_write"),
+        ("icache_missunit_refill", "error_second_beat_no_sram_write"),
     }
 )
 
@@ -182,11 +182,36 @@ def _mshr_response_valid(mshrs: list[dict[str, Optional[int]]], source: Optional
     return _on(item["valid"]) and _off(item["flush"]) and _off(item["fencei"])
 
 
+def _mshr_key(
+    mshrs: list[dict[str, Optional[int]]], source: Optional[int]
+) -> Optional[tuple[int, int]]:
+    if source is None or not 0 <= int(source) < len(mshrs):
+        return None
+    item = mshrs[int(source)]
+    if not _on(item["valid"]) or item["paddr"] is None or item["vset"] is None:
+        return None
+    return int(item["paddr"]), int(item["vset"])
+
+
 def reset_icache_missunit_coverage_state(recorder) -> None:
     recorder._icache_missunit_cov_state = {
         "acquire_blocked_cycles": 0,
         "clean_beats": 0,
-        "error_response_seen": False,
+        "refill_beat_index": 0,
+        "refill_source": None,
+        "refill_paddr": None,
+        "refill_vset": None,
+        "refill_key_valid": False,
+        "refill_source_consistent": True,
+        "refill_controls_clear": True,
+        "refill_error_first": False,
+        "refill_error_second": False,
+        "pending_refill": None,
+        "pending_refill_release": None,
+        # A response is eligible for the error bins only when its MSHR key
+        # was first observed from the request that allocated that MSHR.
+        "pending_mshr_request_keys": [],
+        "mshr_request_keys": {},
         "last_refill_source": None,
         "last_refill_outstanding": 0,
         "last_flush": None,
@@ -340,6 +365,10 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
             ),
         ),
         "prefetch_arb_selected": _read(recorder, (_MISS + "prefetchArb.io_sel",)),
+        "prefetch_demux_chosen": _read(
+            recorder,
+            (_MISS + "prefetchDemux.io_chosen", _MISS + "prefetchDemux.__Vtogcov__io_chosen"),
+        ),
     }
     for index in range(10):
         signals[f"fifo_entry_{index}"] = _read(
@@ -367,6 +396,33 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
     evidence["mshr_issue"] = [item["issue"] for item in mshrs]
     evidence["mshr_paddr"] = [item["paddr"] for item in mshrs]
     evidence["mshr_vset"] = [item["vset"] for item in mshrs]
+
+    # An explicitly invalid MSHR can no longer carry a request association.
+    for index in tuple(state["mshr_request_keys"]):
+        if _off(mshrs[index]["valid"]):
+            state["mshr_request_keys"].pop(index)
+
+    # Allocation is registered in the MSHR one sample after its request
+    # handshake.  Record the original miss key only when that registration is
+    # observable, so a later TileLink response cannot be attributed by source
+    # alone.
+    for pending in state["pending_mshr_request_keys"]:
+        if pending["trigger_cycle"] >= cycle:
+            continue
+        index = pending["expected_index"]
+        item = mshrs[index]
+        if (
+            _on(item["valid"])
+            and item["paddr"] is not None
+            and item["vset"] is not None
+            and int(item["paddr"]) == pending["paddr"]
+            and int(item["vset"]) == pending["vset"]
+        ):
+            state["mshr_request_keys"][index] = (
+                pending["paddr"], pending["vset"]
+            )
+    state["pending_mshr_request_keys"] = []
+    evidence["mshr_request_keys"] = dict(state["mshr_request_keys"])
 
     # The allocation handshake and the registered MSHR contents are observed
     # on adjacent samples.  Keep this diagnostic association separate from the
@@ -413,6 +469,11 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
     fetch_free_indexes = _free_indexes(mshrs, range(4))
     fetch_expected_index = fetch_free_indexes[0] if fetch_free_indexes else None
     prefetch_full = _all_valid(mshrs, range(4, 14))
+    prefetch_free_indexes = _free_indexes(mshrs, range(4, 14))
+    prefetch_chosen = signals["prefetch_demux_chosen"]
+    prefetch_expected_index = None
+    if prefetch_chosen is not None and 0 <= int(prefetch_chosen) < 10:
+        prefetch_expected_index = 4 + int(prefetch_chosen)
     any_mshr = _any_status(mshrs, range(14), "valid")
     any_fetch = _any_status(mshrs, range(4), "valid")
     any_prefetch = _any_status(mshrs, range(4, 14), "valid")
@@ -470,6 +531,33 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
                     "vset": int(signals["fetch_vset"]),
                 }
             )
+            state["pending_mshr_request_keys"].append(
+                {
+                    "trigger_cycle": cycle,
+                    "expected_index": fetch_expected_index,
+                    "paddr": int(signals["fetch_paddr"]),
+                    "vset": int(signals["fetch_vset"]),
+                }
+            )
+
+    prefetch_mshr_key_observable = (
+        prefetch_demux_fire
+        and prefetch_expected_index is not None
+        and prefetch_expected_index in prefetch_free_indexes
+        and signals["prefetch_paddr"] is not None
+        and signals["prefetch_vset"] is not None
+        and controls_clear
+    )
+    evidence["prefetch_expected_mshr"] = prefetch_expected_index
+    if prefetch_mshr_key_observable:
+        state["pending_mshr_request_keys"].append(
+            {
+                "trigger_cycle": cycle,
+                "expected_index": prefetch_expected_index,
+                "paddr": int(signals["prefetch_paddr"]),
+                "vset": int(signals["prefetch_vset"]),
+            }
+        )
 
     _mark(
         recorder, "icache_missunit_request", "fetch_mshr_allocate", cycle,
@@ -829,22 +917,90 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
     )
 
     opcode = signals["d_opcode"]
-    has_data_beat = (
-        _on(signals["d_valid"])
-        and opcode is not None
-        and (int(opcode) & 1) != 0
-    )
-    if has_data_beat:
-        if _off(signals["d_corrupt"]) and _off(signals["d_denied"]):
-            state["clean_beats"] += 1
-        else:
-            state["error_response_seen"] = False
-    if _on(signals["last_fire"]):
-        state["last_refill_source"] = signals["d_source"]
-        state["last_refill_outstanding"] = sum(
-            _on(item["valid"]) and _on(item["issue"])
-            for item in mshrs
+    response_next = _on(signals["last_fire_next"])
+    response_valid = response_next and _mshr_response_valid(mshrs, signals["id_next"])
+
+    # The RTL invalidates the completed MSHR after presenting the refill
+    # response.  Delay the error-bin sample until the following cycle so the
+    # coverage point proves that the associated MSHR was actually released.
+    pending_release = state["pending_refill_release"]
+    if pending_release is not None and cycle == pending_release["response_cycle"] + 1:
+        source = pending_release["source"]
+        mshr_released = (
+            source is not None
+            and 0 <= int(source) < len(mshrs)
+            and _off(mshrs[int(source)]["valid"])
         )
+        evidence["refill_release_source"] = source
+        evidence["refill_mshr_released"] = mshr_released
+        _mark(
+            recorder,
+            "icache_missunit_refill",
+            pending_release["bin_name"],
+            cycle,
+            pending_release["base_conditions"] and mshr_released,
+            evidence,
+        )
+        if source is not None:
+            state["mshr_request_keys"].pop(int(source), None)
+        state["pending_refill_release"] = None
+    elif pending_release is not None and cycle > pending_release["response_cycle"] + 1:
+        state["pending_refill_release"] = None
+
+    # A refill response is formed one cycle after its final D beat.  Validate
+    # the completed transaction against the source-selected MSHR and require
+    # both SRAM write enables to be known low for the error bins.
+    completed_refill = state["pending_refill"]
+    if completed_refill is None:
+        # Keep the synthetic unit-test contract useful when lastFire is not
+        # modeled and the sampler only sees the two D beats plus lastFireNext.
+        completed_refill = {
+            "source": state["refill_source"],
+            "paddr": state["refill_paddr"],
+            "vset": state["refill_vset"],
+            "key_valid": state["refill_key_valid"],
+            "source_consistent": state["refill_source_consistent"],
+            "error_first": state["refill_error_first"],
+            "error_second": state["refill_error_second"],
+            "clean_beats": state["clean_beats"],
+            "complete_doublebeat": False,
+            "controls_clear": state["refill_controls_clear"],
+        }
+    completed_source = completed_refill["source"]
+    completed_key = (
+        completed_refill["paddr"],
+        completed_refill["vset"],
+    )
+    response_key = None
+    if signals["id_next"] is not None:
+        response_key = _mshr_key(mshrs, signals["id_next"])
+    # MSHR blkPAddr/vSetIdx are the registered key captured from the miss
+    # request.  Require both D beats and the response-selected MSHR to retain
+    # that key, so the sampled response cannot be attributed to another miss.
+    refill_key_matches = (
+        completed_refill["key_valid"]
+        and completed_refill["source_consistent"]
+        and completed_source is not None
+        and signals["id_next"] is not None
+        and int(completed_source) == int(signals["id_next"])
+        and response_key == completed_key
+    )
+    request_key_matches = (
+        completed_source is not None
+        and state["mshr_request_keys"].get(int(completed_source)) == completed_key
+    )
+    writes_known = signals["meta_write"] is not None and signals["data_write"] is not None
+    no_sram_write = writes_known and _off(signals["meta_write"]) and _off(signals["data_write"])
+    response_corrupt = _on(signals["corrupt_reg"])
+    evidence["refill_key_matches"] = refill_key_matches
+    evidence["refill_request_key_matches"] = request_key_matches
+    evidence["refill_completed_source"] = completed_source
+    evidence["refill_completed_paddr"] = completed_refill["paddr"]
+    evidence["refill_completed_vset"] = completed_refill["vset"]
+    evidence["refill_completed_ptag"] = (
+        _ptag_from_blk(completed_refill["paddr"])
+        if completed_refill["paddr"] is not None else None
+    )
     if response_next:
         clean_response = _off(signals["corrupt_reg"]) and _off(signals["denied_reg"])
         _mark(
@@ -852,7 +1008,7 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
             "icache_missunit_refill",
             "clean_doublebeat_refill_write",
             cycle,
-            response_valid and clean_response and state["clean_beats"] >= 2,
+            response_valid and clean_response and completed_refill["clean_beats"] >= 2,
             evidence,
         )
         refill_source = state["last_refill_source"]
@@ -870,26 +1026,97 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
             source_routes,
             evidence,
         )
-        errored = _on(signals["corrupt_reg"]) or _on(signals["denied_reg"])
-        _mark(
-            recorder,
-            "icache_missunit_refill",
-            "error_beats_accumulate",
-            cycle,
-            response_valid and errored,
-            evidence,
+        error_base = (
+            response_valid
+            and response_corrupt
+            and refill_key_matches
+            and request_key_matches
+            and completed_refill["complete_doublebeat"]
+            and completed_refill["controls_clear"]
+            and no_sram_write
+            and controls_clear
         )
-        _mark(
-            recorder,
-            "icache_missunit_refill",
-            "clean_refill_clears_error",
-            cycle,
-            response_valid and state["error_response_seen"] and clean_response,
-            evidence,
-        )
-        state["error_response_seen"] = errored
+        if error_base and completed_refill["error_first"] and not completed_refill["error_second"]:
+            state["pending_refill_release"] = {
+                "response_cycle": cycle,
+                "source": completed_source,
+                "bin_name": "error_first_beat_no_sram_write",
+                "base_conditions": True,
+            }
+        elif error_base and completed_refill["error_second"] and not completed_refill["error_first"]:
+            state["pending_refill_release"] = {
+                "response_cycle": cycle,
+                "source": completed_source,
+                "bin_name": "error_second_beat_no_sram_write",
+                "base_conditions": True,
+            }
+        state["pending_refill"] = None
         state["clean_beats"] = 0
+        state["refill_beat_index"] = 0
+        state["refill_source"] = None
+        state["refill_paddr"] = None
+        state["refill_vset"] = None
+        state["refill_key_valid"] = False
+        state["refill_source_consistent"] = True
+        state["refill_controls_clear"] = True
+        state["refill_error_first"] = False
+        state["refill_error_second"] = False
         state["last_refill_source"] = None
         state["last_refill_outstanding"] = 0
+
+    has_data_beat = (
+        _on(signals["d_valid"])
+        and opcode is not None
+        and (int(opcode) & 1) != 0
+    )
+    if has_data_beat:
+        beat_index = state["refill_beat_index"]
+        beat_source = signals["d_source"]
+        beat_key = _mshr_key(mshrs, beat_source)
+        if beat_index == 0:
+            state["refill_source"] = beat_source
+            state["refill_paddr"] = beat_key[0] if beat_key is not None else None
+            state["refill_vset"] = beat_key[1] if beat_key is not None else None
+            state["refill_key_valid"] = beat_key is not None
+            state["refill_controls_clear"] = controls_clear
+        else:
+            state["refill_source_consistent"] = state["refill_source_consistent"] and (
+                beat_source == state["refill_source"] and beat_key == (
+                    state["refill_paddr"], state["refill_vset"]
+                )
+            )
+            state["refill_controls_clear"] = (
+                state["refill_controls_clear"] and controls_clear
+            )
+        beat_corrupt = _on(signals["d_corrupt"])
+        if beat_index == 0:
+            state["refill_error_first"] = beat_corrupt
+        elif beat_index == 1:
+            state["refill_error_second"] = beat_corrupt
+        if _off(signals["d_corrupt"]) and _off(signals["d_denied"]):
+            state["clean_beats"] += 1
+        state["refill_beat_index"] += 1
+    if _on(signals["last_fire"]):
+        state["last_refill_source"] = signals["d_source"]
+        state["last_refill_outstanding"] = sum(
+            _on(item["valid"]) and _on(item["issue"])
+            for item in mshrs
+        )
+        state["pending_refill"] = {
+            "source": state["refill_source"],
+            "paddr": state["refill_paddr"],
+            "vset": state["refill_vset"],
+            "key_valid": state["refill_key_valid"],
+            "source_consistent": state["refill_source_consistent"],
+            "error_first": state["refill_error_first"],
+            "error_second": state["refill_error_second"],
+            "clean_beats": state["clean_beats"],
+            "complete_doublebeat": (
+                has_data_beat
+                and state["refill_beat_index"] == 2
+                and state["refill_source"] == signals["d_source"]
+            ),
+            "controls_clear": state["refill_controls_clear"],
+        }
     state["last_flush"] = signals["flush"]
     state["last_fencei"] = signals["fencei"]
