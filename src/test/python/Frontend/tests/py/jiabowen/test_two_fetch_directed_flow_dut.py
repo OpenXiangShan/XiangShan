@@ -890,9 +890,10 @@ def test_backend_redirect_drops_dual_miss_and_ignores_delayed_old_response(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-509")
+# Safety regression only: BIN-509 requires a rollback-eligible s3 pointer and
+# must not be claimed by the younger-flush behavior exercised here.
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_bpu_s3_override_drops_stalled_dual_request_before_mainpipe_fire(env):
+def test_bpu_s3_override_preserves_older_stalled_dual_request(env):
     _load_and_reset(env)
     recorder = _recorder(env)
     _warm_frontend_execution(env)
@@ -905,8 +906,8 @@ def test_bpu_s3_override_drops_stalled_dual_request_before_mainpipe_fire(env):
     predictor_disabled = False
     predictor_disable_count = 0
     predictor_disabled_cycles: list[int] = []
-    nonrollback_collision_count = 0
-    nonrollback_collisions: list[dict] = []
+    noneligible_collision_count = 0
+    noneligible_collisions: list[dict] = []
     rearm_cycle = 0
     for _ in range(_cycle_limit("TB_TWO_FETCH_BPU_FLUSH_MAX_CYCLES", 4000)):
         env.step(1)
@@ -978,17 +979,17 @@ def test_bpu_s3_override_drops_stalled_dual_request_before_mainpipe_fire(env):
                 for item in getattr(env.icache_agent, "pending", ())
                 if int(getattr(item, "ready_cycle", -1)) > int(env.current_cycle)
             ]
-            if delayed_candidate:
+            if delayed_candidate and not rollback_applied:
                 flush_snapshot = candidate
                 delayed_at_flush = delayed_candidate
                 break
 
-            # A younger s3 pointer is a legal no-op for fetchPtr. Rearm the
-            # predictors and seek another collision, while still accepting a
-            # valid flush that kills the stalled MainPipe request.
-            nonrollback_collision_count += 1
-            nonrollback_collisions.append(candidate)
-            nonrollback_collisions[:] = nonrollback_collisions[-16:]
+            # A rollback-eligible s3 pointer is a distinct testpoint. This
+            # regression instead proves that a younger flush does not discard
+            # the older stalled MainPipe request.
+            noneligible_collision_count += 1
+            noneligible_collisions.append(candidate)
+            noneligible_collisions[:] = noneligible_collisions[-16:]
             env.set_bp_ctrl_enable(
                 ubtb_enable=1,
                 abtb_enable=1,
@@ -1014,30 +1015,29 @@ def test_bpu_s3_override_drops_stalled_dual_request_before_mainpipe_fire(env):
         ittage_enable=1,
     )
     assert flush_snapshot is not None, {
-        "reason": "no BPU s3 override collided with a stalled dual FTQ request",
+        "reason": "no younger BPU s3 override overlapped a stalled dual FTQ request",
         "predictor_disable_count": predictor_disable_count,
         "last_predictor_disabled_cycles": predictor_disabled_cycles,
-        "legal_nonrollback_collision_count": nonrollback_collision_count,
-        "last_legal_nonrollback_collisions": nonrollback_collisions,
+        "noneligible_collision_count": noneligible_collision_count,
+        "last_noneligible_collisions": noneligible_collisions,
         "icache": env.icache_agent.get_stats(),
         "backend": env.backend_model.get_stats(),
     }
 
-    # Current RTL may consume the MainPipe entry on the same edge as the
-    # stage-3 flush. The contract that is observable and stable here is that
-    # no stale payload or response escapes after the flush; pointer rollback is
-    # checked below when the DUT actually applies it.
-    if bool(flush_snapshot["rollback_applied"]):
-        assert _ftq_ptr_at_or_after(
-            flush_snapshot["pending"]["fetch_ptr"], flush_snapshot["flush_ptr"]
-        ), {
-            "reason": "reported rollback collision was not rollback-eligible",
-            "flush": flush_snapshot,
-        }
-        assert flush_snapshot["fetch_ptr_after"] == flush_snapshot["flush_ptr"], {
-            "reason": "fetchPtr did not roll back to BPU s3 FTQ pointer",
-            "flush": flush_snapshot,
-        }
+    assert not bool(flush_snapshot["rollback_applied"]), {
+        "reason": "younger-flush regression captured a rollback-eligible collision",
+        "flush": flush_snapshot,
+    }
+    assert not _ftq_ptr_at_or_after(
+        flush_snapshot["pending"]["fetch_ptr"], flush_snapshot["flush_ptr"]
+    ), {
+        "reason": "BPU s3 pointer was not younger than the stalled FTQ request",
+        "flush": flush_snapshot,
+    }
+    assert flush_snapshot["fetch_ptr_after"] == flush_snapshot["pending"]["fetch_ptr"], {
+        "reason": "younger BPU s3 pointer incorrectly rolled back fetchPtr",
+        "flush": flush_snapshot,
+    }
 
     assert delayed_at_flush, {
         "reason": "BPU s3 collision had no in-flight delayed ICache response",
@@ -1100,30 +1100,19 @@ def test_bpu_s3_override_drops_stalled_dual_request_before_mainpipe_fire(env):
             break
 
     assert not stale_ibuffer_before_reissue and not stale_cfvec_before_reissue, {
-        "reason": "killed dual FTQ transaction escaped before rollback-path reissue",
+        "reason": "stalled dual FTQ transaction escaped before its MainPipe request fired",
         "old_tags": sorted(old_tags),
         "ibuffer": stale_ibuffer_before_reissue,
         "cfvec": stale_cfvec_before_reissue,
     }
     assert first_reissue is not None, {
-        "reason": "BPU rollback path never reissued to MainPipe",
+        "reason": "older stalled dual request never reached MainPipe after BPU s3 flush",
         "flush": flush_snapshot,
     }
-    if bool(flush_snapshot["rollback_applied"]):
-        assert first_reissue["tags"][0] == flush_snapshot["flush_ptr"], {
-            "reason": "first post-s3 MainPipe request did not use rollback FTQ pointer",
-            "flush": flush_snapshot,
-            "first_reissue": first_reissue,
-        }
-        assert int(first_reissue["start_pc"]) == int(flush_snapshot["flush_target_pc"]), {
-            "reason": "first post-s3 MainPipe request did not use rollback target PC",
-            "flush": flush_snapshot,
-            "first_reissue": first_reissue,
-        }
     assert delayed_responses_after_flush, {
         "reason": "test ended before delayed response completed",
         "pending_at_flush": delayed_at_flush,
         "responses": _icache_response_records(env),
     }
-    assert recorder.key_hit("two_fetch_flush_flow", "bpu_s3_drop_before_issue")
+    assert not recorder.key_hit("two_fetch_flush_flow", "bpu_s3_drop_before_issue")
     assert not env.monitor.get_errors()
