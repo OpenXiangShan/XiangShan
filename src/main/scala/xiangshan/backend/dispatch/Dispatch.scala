@@ -300,9 +300,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   // register allocation has final priority so a stale producer can never tag its reuse.
   val longMissIntNext = ((longMissInt & ~longMissClearInt) | longMissSetInt) & ~longMissAllocInt
   val longMissFpNext = ((longMissFp & ~longMissClearFp) | longMissSetFp) & ~longMissAllocFp
-  // Dispatch decisions use registered miss state. Preserve same-cycle allocation
-  // clearing so a reused physical destination cannot inherit a stale long-miss tag.
-  val longMissIntForSteering = longMissInt & ~longMissAllocInt
+  // Dispatch decisions use only the registered miss state.  The allocation mask
+  // is consumed by longMissIntNext at the clock edge; including the current
+  // allocation mask here would recreate a pdest -> uopSelIQ timing path.
+  val longMissIntForSteering = longMissInt
   longMissInt := longMissIntNext
   longMissFp := longMissFpNext
   io.longMissInt := longMissInt
