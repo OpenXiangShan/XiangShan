@@ -248,11 +248,6 @@ class MainBtbAlignBank(
   private val s3_takenMask        = io.s3_takenMask
   private val s3_victimTakenMask  = io.s3_victimTakenMask
 
-  // touch taken entries only: not-taken conditional entries are considered not very useful and should be killed first
-  replacer.io.predict.touch.valid        := s3_fire && s3_takenMask.reduce(_ || _)
-  replacer.io.predict.touch.bits.setIdx  := s3_replacerSetIdx
-  replacer.io.predict.touch.bits.wayMask := s3_takenMask.asUInt
-
   victimBtbReplacers.zipWithIndex.foreach { case (r, i) =>
     r.io.predictTouch.valid        := s3_fire && s3_internalBankMask(i) && s3_victimTakenMask.reduce(_ || _)
     r.io.predictTouch.bits.setIdx  := s3_setIdx.take(VictimBtbSetIdxLen)
