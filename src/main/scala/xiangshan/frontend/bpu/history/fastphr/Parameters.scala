@@ -40,7 +40,6 @@ trait HasFastPhrParameters extends HasPhrParameters {
   def fastPhrParameters: FastPhrParameters = bpuParameters.fastPhrParameters
 
   def WindowLength: Int = fastPhrParameters.Spans.max
-  def MaxUpdateNum: Int = 2 * Shamt
 
   // per table, an index-like fold and two tag-like folds (widths IdxWidth, TagWidth, TagWidth - 1),
   // each capped at the span; idx/tag widths are direct parameters here, not derived from a set count

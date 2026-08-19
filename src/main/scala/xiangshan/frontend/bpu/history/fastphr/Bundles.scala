@@ -41,7 +41,7 @@ class FastPhrIO(implicit p: Parameters) extends FastPhrBundle with HasFastPhrPar
   val valid: Bool = Input(Bool())
   // the group's path-history contribution, see TokenWidth; a one-block group uses only the low PathHashWidth bits
   val token:       UInt      = Input(UInt(TokenWidth.W))
-  val numBlocksOH: Vec[Bool] = Input(Vec(3, Bool())) // one-hot, index i means advance i blocks
+  val numBlocksOH: Vec[Bool] = Input(Vec(MaxPredictionNum + 1, Bool())) // one-hot, index i advances i blocks
 
   // carries a snapshot from s2 to s3 alongside the group it belongs to, so an override recovers the state that group
   // started from however many bubbles separated the two advances
@@ -51,7 +51,7 @@ class FastPhrIO(implicit p: Parameters) extends FastPhrBundle with HasFastPhrPar
 
   val overrideValid:       Bool      = Input(Bool())
   val overrideToken:       UInt      = Input(UInt(TokenWidth.W))
-  val overrideNumBlocksOH: Vec[Bool] = Input(Vec(3, Bool())) // one-hot, corrected group's block count
+  val overrideNumBlocksOH: Vec[Bool] = Input(Vec(MaxPredictionNum + 1, Bool())) // corrected group's block count
 
   val foldedHist: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(FastFoldedHistoryInfo, MaxUpdateNum))
 

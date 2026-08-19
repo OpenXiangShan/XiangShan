@@ -30,15 +30,6 @@ trait Helpers extends HasFastPhrParameters with FoldedHistoryMaintenance {
     VecInit((0 until MaxUpdateNum).map(i => phr(span - 1 - i)))
   }
 
-  // XOR-reduce a value into compLen bits, the same reduction computeFoldedHash performs but over the value's own
-  // width instead of a fixed path-hash width, since a multi-block token is wider than one hash. Bits past the span
-  // are dropped: they leave the window in the same step that brings them in.
-  private def foldToken(bits: UInt, compLen: Int, histLen: Int): UInt = {
-    val width   = min(bits.getWidth, histLen)
-    val nChunks = (width + compLen - 1) / compLen
-    ParallelXOR((0 until nChunks).map(i => bits(min((i + 1) * compLen, width) - 1, i * compLen)))
-  }
-
   // advances every table's resident folded history by 0, 1 or 2 blocks as selected by numBlocksOH.
   // for each table, 3 fold candidates are built (unchanged / advance Shamt / advance 2*Shamt) and
   // the result is an end mux over those candidates, rather than folding twice in sequence.
@@ -52,7 +43,7 @@ trait Helpers extends HasFastPhrParameters with FoldedHistoryMaintenance {
       token:       UInt,
       numBlocksOH: Vec[Bool]
   ): PhrAllFoldedHistories = {
-    require(numBlocksOH.length == 3, "numBlocksOH must be one-hot over {0, 1, 2} blocks")
+    require(numBlocksOH.length == MaxPredictionNum + 1, "numBlocksOH must be one-hot over a group's block count")
 
     val res = WireInit(foldedQ)
     for (i <- foldedQ.hist.indices) {

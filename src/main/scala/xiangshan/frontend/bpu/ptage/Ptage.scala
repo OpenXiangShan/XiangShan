@@ -23,6 +23,7 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.HasFastTrainIO
+import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 /** pTAGE: the 2-taken fast predictor.
@@ -162,8 +163,8 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
     s1_p1Usable && s1_providerEntry.p2Valid &&
       PtageBlock.hasStaticTarget(s1_providerEntry.p1.taken, s1_providerEntry.p1.attribute)
 
-  private def decode(block: PtageBlock, target: PrunedAddr): PtageBlockPrediction = {
-    val prediction = Wire(new PtageBlockPrediction)
+  private def decode(block: PtageBlock, target: PrunedAddr): Prediction = {
+    val prediction = Wire(new Prediction)
     prediction.taken       := block.taken
     prediction.cfiPosition := block.cfiPosition
     prediction.attribute   := block.attribute
@@ -207,19 +208,11 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   private val t0_startPc    = t0_train.startPc
   private val t0_nextPc     = t0_prediction.target.unGuard
 
-  // An entry rebuilds a target from the pc it was reached with, so a target out of that reach cannot be stored.
-  private def targetInReach(startPc: PrunedAddr, target: PrunedAddr): Bool =
-    getTargetUpper(startPc) === getTargetUpper(target)
-
   // An entry can only describe a group whose next pc it is able to rebuild. A taken exit that jumps beyond the stored
   // low bits is not representable, so learning it would install a confidently wrong target; leaving it as a miss lets
   // the fallback answer instead. A return is the exception: its target comes from the return stack, not from here.
   private val t0_representable =
-    !t0_prediction.taken || targetInReach(t0_startPc, t0_nextPc) || t0_prediction.attribute.isReturn
-
-  private val t0_cfiPc = getCfiPcFromPosition(t0_startPc, t0_prediction.cfiPosition)
-  // the same hash Phr shifts into the path history for this block, so the entry can later supply it ready-made
-  private val t0_pathHash = Mux(t0_prediction.taken, pathHash(t0_cfiPc, t0_nextPc), 0.U)
+    !t0_prediction.taken || getTargetCarry(t0_startPc, t0_nextPc).isFit || t0_prediction.attribute.isReturn
 
   // Hold each verified group back by one training event. When the next one arrives we know whether it continues the
   // held group, and can therefore write a pair rather than a lone block.
@@ -245,7 +238,6 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
     pending.bits.nextPcLow   := getEntryNextPc(t0_nextPc)
     pending.bits.nextPc      := t0_nextPc
     pending.bits.taken       := t0_prediction.taken
-    pending.bits.pathHash    := t0_pathHash
 
     pending.bits.hasSecondBlock := t0_train.hasSecondBlock
   }
@@ -287,9 +279,11 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   // Count refusals until one eviction is allowed, then start counting again. Clearing the count on an allocation that
   // succeeded normally would be wrong: successes and refusals interleave, so the count would never reach the limit
   // and marked entries would never be reclaimed at all.
+  private val allocRefused = pending.valid && !heldCorrect && !allocSel.valid
+
   when(t0_valid) {
     when(doAllocate && allocMayEvict)(allocRefusals := 0.U)
-      .elsewhen(pending.valid && !heldCorrect && !allocSel.valid)(allocRefusals := allocRefusals + 1.U)
+      .elsewhen(allocRefused)(allocRefusals := allocRefusals + 1.U)
   }
 
   private val writeTable = Mux(doAllocate, allocSel.bits, heldMeta.provider.bits)
@@ -307,7 +301,7 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   entry.p1.counter := Mux(
     writeFresh,
     Mux(held.taken, PtageCounter.WeakPositive, PtageCounter.WeakNegative),
-    Mux(held.taken, heldMeta.p1Counter.getIncrease(), heldMeta.p1Counter.getDecrease())
+    heldMeta.p1Counter.getUpdate(held.taken)
   )
 
   // A group that kept a second block consumed its own successor, so the next training event is the group after it and
@@ -322,22 +316,13 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   entry.p2.nextPcLow   := Mux(heldPairConfirmed, heldMeta.p2NextPcLow, getEntryNextPc(t0_nextPc))
   entry.p2.counter := Mux(
     heldPairConfirmed,
-    heldMeta.p2Counter.getIncrease(),
+    heldMeta.p2Counter.getUpdate(true.B),
     Mux(
       writeFresh || !heldMeta.p2Valid,
       Mux(t0_prediction.taken, PtageCounter.WeakPositive, PtageCounter.WeakNegative),
-      Mux(t0_prediction.taken, heldMeta.p2Counter.getIncrease(), heldMeta.p2Counter.getDecrease())
+      heldMeta.p2Counter.getUpdate(t0_prediction.taken)
     )
   )
-
-  // Each block contributes a whole path hash, the second sitting Shamt above the first, exactly as Phr would have
-  // applied them one after the other.
-  entry.phrToken := Mux(
-    t0_continuesPending,
-    (held.pathHash << Shamt).asUInt ^ t0_pathHash,
-    held.pathHash
-  )
-  entry.ghrShamt := held.taken.asUInt +& (t0_continuesPending && t0_prediction.taken).asUInt
 
   private val writeHappens = t0_valid && (doStrengthen || doCorrect || doAllocate)
 
@@ -369,7 +354,7 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   XSPerfAccumulate("trainStrengthen", t0_valid && doStrengthen)
   XSPerfAccumulate("trainCorrect", t0_valid && doCorrect)
   XSPerfAccumulate("trainAllocate", t0_valid && doAllocate)
-  XSPerfAccumulate("trainNoTableFree", t0_valid && pending.valid && !heldCorrect && !allocSel.valid)
+  XSPerfAccumulate("trainNoTableFree", t0_valid && allocRefused)
   XSPerfAccumulate("trainAllocateEvicted", t0_valid && doAllocate && allocMayEvict)
 
   private val s1_fire = io.stageCtrl.s1_fire && io.enable

@@ -150,18 +150,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val s2_ptageMeta = RegEnable(ptage.io.meta, s1_fire)
   private val s3_ptageMeta = RegEnable(s2_ptageMeta, s2_fire)
 
-  // the group's width follows it down the pipeline, so s3 can tell Ftq how many entries it is releasing
-  private val s1_groupNumBlocks = Wire(UInt(log2Ceil(MaxPredictionNum + 1).W))
-  private val s2_groupNumBlocks = RegEnable(s1_groupNumBlocks, s1_fire)
-  private val s3_groupNumBlocks = RegEnable(s2_groupNumBlocks, s2_fire)
-
-  // the second block and where it starts, carried to s3 so that it can be checked there
+  // the second block, carried to s3 so that it can be checked there. Where it starts needs no pipeline of its own:
+  // it is the first block's target, which already travels down as the s1 prediction.
   private val s1_secondBlockIn = Wire(Valid(new Prediction))
-  private val s1_secondStartPc = Wire(PrunedAddr(VAddrBits))
   private val s2_secondBlock   = RegEnable(s1_secondBlockIn, s1_fire)
   private val s3_secondBlock   = RegEnable(s2_secondBlock, s2_fire)
-  private val s2_secondStartPc = RegEnable(s1_secondStartPc, s1_fire)
-  private val s3_secondStartPc = RegEnable(s2_secondStartPc, s2_fire)
 
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
@@ -330,9 +323,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   s1_group(1).bits.cfiPosition := s1_secondBlock.bits.cfiPosition
   s1_group(1).bits.attribute   := s1_secondBlock.bits.attribute
   s1_group(1).bits.target      := s1_secondBlock.bits.target
-  s1_groupNumBlocks            := PopCount(s1_group.map(_.valid))
   s1_secondBlockIn             := s1_group(1)
-  s1_secondStartPc             := s1_prediction.target
 
   private val s1_taken         = s1_prediction.taken
   private val debug_s1UsePtage = s1_taken && usePtage
@@ -418,7 +409,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
    * block of width now and gets it back later: the next lookup meets that block as a first block, verifies it the
    * ordinary way, and fills the micro btb in passing, so the same pair can be checked next time round.
    */
-  ubtb.io.verifyStartPc := s3_secondStartPc
+  ubtb.io.verifyStartPc := s3_s1Prediction.target
 
   private val s3_secondBlockExitDiffers =
     ubtb.io.verify.bits.cfiPosition =/= s3_secondBlock.bits.cfiPosition ||
@@ -518,7 +509,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val s3_ftqPtr = RegEnable(s2_ftqPtr, s2_fire)
   io.toFtq.s3FtqPtr := s3_ftqPtr
   // An override replaces the group with a single corrected block, so only a group that survives s3 keeps its width.
-  io.toFtq.s3NumBlocks := Mux(s3_override, 1.U, s3_groupNumBlocks)
+  // a group is its first block plus, where there was one, its second; an override leaves only the corrected first
+  io.toFtq.s3NumBlocks := Mux(s3_override, 1.U, 1.U +& s3_secondBlock.valid.asUInt)
 
   io.toFtq.meta.valid             := s3_valid
   io.toFtq.meta.bits.redirectMeta := s3_redirectMeta

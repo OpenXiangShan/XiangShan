@@ -194,7 +194,7 @@ class PhrAllFoldedHistoryOldestBits(gen: Set[FoldedHistoryInfo])(implicit p: Par
     with HasPhrParameters {
 
   val hist: MixedVec[PhrFoldedHistoryOldestBits] =
-    MixedVec(gen.toSeq.sortBy(_.asTuple).map(info => new PhrFoldedHistoryOldestBits(info, MaxUpdateNum(p))))
+    MixedVec(gen.toSeq.sortBy(_.asTuple).map(info => new PhrFoldedHistoryOldestBits(info, MaxUpdateNum)))
 
   def getHistWithInfo(info: FoldedHistoryInfo): PhrFoldedHistoryOldestBits = {
     val selected = hist.filter(_.info.equals(info))
@@ -214,7 +214,7 @@ class PhrAllFoldedHistories(gen: Set[FoldedHistoryInfo], maxUpdateNum: Int)(impl
   // A group advances the history once per taken block, so the default supports a whole group's worth. This widens no
   // register: maxUpdateNum only decides how many oldest bits an update needs, not how wide a folded history is.
   def this(gen: Set[FoldedHistoryInfo])(implicit p: Parameters) =
-    this(gen, MaxUpdateNum(p))
+    this(gen, PhrMaxUpdateNum(p))
 
   val hist: MixedVec[PhrFoldedHistory] =
     MixedVec(gen.toSeq.sortBy(_.asTuple).map(info => new PhrFoldedHistory(info, maxUpdateNum)))

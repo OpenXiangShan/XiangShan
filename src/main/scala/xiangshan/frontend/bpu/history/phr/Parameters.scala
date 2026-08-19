@@ -28,7 +28,9 @@ case class PhrParameters(
     HistoryAlign: Int = 4
 ) {}
 
-object MaxUpdateNum {
+// the same quantity as HasPhrParameters.MaxUpdateNum, reachable from a constructor argument list, where trait
+// members are not yet in scope
+object PhrMaxUpdateNum {
   // the most a single cycle can shift into the path history: one path hash's worth of shift bits per taken block
   def apply(p: Parameters): Int = {
     val params = p(XSCoreParamsKey).frontendParameters
@@ -40,6 +42,9 @@ trait HasPhrParameters extends HasBpuParameters {
   def phrParameters: PhrParameters = bpuParameters.phrParameters
 
   def Shamt: Int = phrParameters.Shamt
+
+  // the most a single cycle may shift into the path history: one block's shift bits per block of a group
+  def MaxUpdateNum: Int = MaxPredictionNum * Shamt
 
   // A group's whole contribution to the path history, as bits to XOR over the shifted window. A taken block's shift
   // bits and its hash-high overlay are the two halves of one path hash, so one block contributes a whole hash and

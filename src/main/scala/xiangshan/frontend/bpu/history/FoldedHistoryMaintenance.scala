@@ -17,6 +17,7 @@ package xiangshan.frontend.bpu.history
 
 import chisel3._
 import org.chipsalliance.cde.config.Parameters
+import utility.ParallelXOR
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.PhrHelper
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
@@ -33,5 +34,14 @@ trait FoldedHistoryMaintenance extends PhrHelper {
         computeFoldedHist(window, info.FoldedLength)(info.HistoryLength)
     }
     foldedPhr
+  }
+
+  /** XOR-reduce a value into compLen bits, over the value's own width rather than a fixed path-hash width, since a
+    * group's token is wider than one hash. Bits past the span are dropped: they leave the window as they arrive.
+    */
+  def foldToken(bits: UInt, compLen: Int, histLen: Int): UInt = {
+    val width   = scala.math.min(bits.getWidth, histLen)
+    val nChunks = (width + compLen - 1) / compLen
+    ParallelXOR((0 until nChunks).map(i => bits(scala.math.min((i + 1) * compLen, width) - 1, i * compLen)))
   }
 }

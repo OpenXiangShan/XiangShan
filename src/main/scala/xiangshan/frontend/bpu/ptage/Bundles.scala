@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterFactory
 import xiangshan.frontend.bpu.WriteReqBundle
@@ -66,29 +67,13 @@ class PtageEntry(implicit p: Parameters) extends PtageBundle {
   val p1:      PtageBlock = new PtageBlock
   val p2:      PtageBlock = new PtageBlock
   val p2Valid: Bool       = Bool()
-
-  // The group's effect on the path history, worked out at training time. Keeping it in the entry is what holds the
-  // single-cycle prediction loop together: the history advance needs the new bits in the same cycle the entry is read,
-  // and deriving them from the blocks' contents there would not make timing. It is a full path hash per block rather
-  // than just the shifted-in bits, because that is what Phr applies and what FastPhr therefore has to mirror.
-  val phrToken: UInt = UInt(TokenWidth.W)
-  val ghrShamt: UInt = UInt(GhrShamtWidth.W)
-}
-
-/** One decoded block of a pTAGE prediction group, with its target already reconstructed. */
-class PtageBlockPrediction(implicit p: Parameters) extends PtageBundle {
-  val taken:       Bool            = Bool()
-  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
-  val attribute:   BranchAttribute = new BranchAttribute
-  val target:      PrunedAddr      = PrunedAddr(VAddrBits)
 }
 
 /** pTAGE's answer for one prediction cycle: one block, two on a 2-taken hit, or none at all. */
 class PtagePrediction(implicit p: Parameters) extends PtageBundle {
-  val blocks: Vec[Valid[PtageBlockPrediction]] = Vec(MaxPredictionNum, Valid(new PtageBlockPrediction))
+  // each block already decoded into the shape every other predictor hands the top level
+  val blocks: Vec[Valid[Prediction]] = Vec(MaxPredictionNum, Valid(new Prediction))
 
-  def hit:       Bool = blocks.head.valid
-  def numBlocks: UInt = PopCount(blocks.map(_.valid))
 }
 
 /** What training needs to know about the lookup that produced a prediction.
@@ -133,8 +118,6 @@ class PtagePendingGroup(implicit p: Parameters) extends PtageBundle {
   val nextPcLow:   UInt            = UInt(NextPcLowWidth.W)
   val nextPc:      PrunedAddr      = PrunedAddr(VAddrBits)
   val taken:       Bool            = Bool()
-  // this block's contribution to the path history, kept so the entry can carry a whole group's contribution
-  val pathHash: UInt = UInt(PathHashWidth.W)
   // whether this group already carried its own second block, which decides if a successor can still be expected
   val hasSecondBlock: Bool = Bool()
 }
