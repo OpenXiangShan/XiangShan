@@ -79,7 +79,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
 
   val flash = LazyModule(new AXI4Flash(Seq(AddressSet(0x10000000L, 0xfffffff))))
   val bootSram = Option.when(useExternalLLC) {
-    LazyModule(new AXI4RAM(Seq(externalLLCBootSramRange), memByte = ExternalLLCAddressMap.BootSramBytes))
+    LazyModule(new device.AXI4RAM(Seq(externalLLCBootSramRange), memByte = ExternalLLCAddressMap.BootSramBytes))
   }
   val uartLite = LazyModule(new AXI4UART(Seq(soc.UARTLiteRange)))
   private val uart16550Params = UART16550Params(address = soc.UART16550Range.base)
