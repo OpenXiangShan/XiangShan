@@ -91,6 +91,14 @@ class TranslationSectorLane:
 
 
 @dataclass(frozen=True)
+class TranslationPermissionProbe:
+    """One declared physical permission-check range, addressed through its VA."""
+
+    va: int
+    size: int = 8
+
+
+@dataclass(frozen=True)
 class TranslationScenario:
     """One reproducible Sv39 translation setup shared by model and DUT."""
 
@@ -109,6 +117,17 @@ class TranslationScenario:
     ptw_response_latency: int = 3
     ptw_response_latency_max: Optional[int] = None
     ptw_response_seed: int = 1
+    ptw_req_ready_strategy: Literal["always", "periodic", "random"] = "always"
+    ptw_req_ready_probability: float = 1.0
+    ptw_req_ready_high_cycles: int = 1
+    ptw_req_ready_low_cycles: int = 0
+    ptw_flush_pending_on_sfence: bool = True
+    ptw_strict_bare_mode: bool = False
+    ptw_response_source: Literal["model", "nemu", "compare"] = "model"
+    ptw_compare_drive_source: Literal["model", "nemu"] = "model"
+    ptw_nemu_adapter: str = ""
+    ptw_machine_pbmte: Optional[int] = None
+    ptw_hypervisor_pbmte: Optional[int] = None
     ptw_response_overrides: Tuple[TranslationPtwResponseOverride, ...] = ()
     s1_sector_lanes: Tuple[TranslationSectorLane, ...] = ()
     max_ptw_requests_per_key: Optional[int] = None
@@ -126,6 +145,7 @@ class TranslationScenario:
     s2_gaf: int = 0
     pmp_entries: Tuple[TranslationPmpPmaEntry, ...] = ()
     pma_entries: Tuple[TranslationPmpPmaEntry, ...] = ()
+    permission_probes: Tuple[TranslationPermissionProbe, ...] = ()
     expected_path: Literal["cacheable", "uncache", "fault"] = "cacheable"
     expected_result: Literal["hit", "miss_refill", "page_fault", "access_fault", "guest_fault", "normal"] = "normal"
 
@@ -143,6 +163,7 @@ class TranslationScenarioState:
     context: dict
     pmp_writes: Tuple[dict, ...]
     pma_writes: Tuple[dict, ...]
+    expected_permission_probes: Tuple[dict, ...]
 
 
 class TranslationScenarioBuilder:
@@ -268,6 +289,24 @@ class TranslationScenarioBuilder:
             raise ValueError("PTW response latency must be non-negative")
         if scenario.ptw_response_latency_max is not None and int(scenario.ptw_response_latency_max) < int(scenario.ptw_response_latency):
             raise ValueError("PTW response latency_max must be at least latency")
+        if str(scenario.ptw_req_ready_strategy).lower() not in {"always", "periodic", "random"}:
+            raise ValueError("unsupported PTW request ready strategy")
+        if not 0.0 <= float(scenario.ptw_req_ready_probability) <= 1.0:
+            raise ValueError("PTW request ready probability must be within [0, 1]")
+        if int(scenario.ptw_req_ready_high_cycles) < 0 or int(scenario.ptw_req_ready_low_cycles) < 0:
+            raise ValueError("PTW request ready cycle counts must be non-negative")
+        if str(scenario.ptw_response_source).lower() not in {"model", "nemu", "compare"}:
+            raise ValueError("unsupported PTW response source")
+        if str(scenario.ptw_compare_drive_source).lower() not in {"model", "nemu"}:
+            raise ValueError("unsupported PTW compare drive source")
+        if str(scenario.ptw_response_source).lower() in {"nemu", "compare"} and not str(scenario.ptw_nemu_adapter).strip():
+            raise ValueError("NEMU/compare PTW response source requires a NEMU adapter")
+        for name, value in {
+            "ptw_machine_pbmte": scenario.ptw_machine_pbmte,
+            "ptw_hypervisor_pbmte": scenario.ptw_hypervisor_pbmte,
+        }.items():
+            if value is not None and int(value) not in {0, 1}:
+                raise ValueError(f"{name} must be 0, 1 or None")
         if scenario.max_ptw_requests_per_key is not None and int(scenario.max_ptw_requests_per_key) < 1:
             raise ValueError("max_ptw_requests_per_key must be positive")
         override_keys = set()
@@ -339,6 +378,11 @@ class TranslationScenarioBuilder:
             csr_addresses_for_entry(entry.kind, entry.index)
             encode_pmp_pma_cfg(entry.config)
             encode_pmp_pma_addr(entry.addr, entry.config, size=entry.size)
+        for probe in scenario.permission_probes:
+            if int(probe.size) < 1:
+                raise ValueError("translation permission probe size must be positive")
+            if int(probe.va) < int(scenario.va) or int(probe.va) + int(probe.size) > int(scenario.va) + len(scenario.payload):
+                raise ValueError("translation permission probe must be covered by the scenario payload")
 
     @staticmethod
     def _map_stage1_pages(
@@ -422,6 +466,46 @@ class TranslationScenarioBuilder:
             expected_path = "uncache" if expected_metadata["permission"]["pma_mmio"] else "cacheable"
         return {"va": int(va), "pa": expected_pa, "ok": expected_ok, "expected_path": expected_path, **expected_metadata}
 
+    def _expected_permission_probes(self, scenario: TranslationScenario) -> Tuple[dict, ...]:
+        probes = []
+        for probe in scenario.permission_probes:
+            pa, translated, metadata = self.env.page_table.translate(
+                int(probe.va),
+                s2xlate=int(scenario.s2xlate),
+                priv_imode=int(scenario.priv_imode),
+            )
+            if not translated:
+                probes.append(
+                    {
+                        "va": int(probe.va),
+                        "size": int(probe.size),
+                        "pa": int(pa),
+                        "translated": False,
+                        "outcome": str(metadata.get("outcome", "fault")),
+                    }
+                )
+                continue
+            permission = PmpPmaPermissionModel.check_instruction(
+                int(pa),
+                pmp_entries=scenario.pmp_entries,
+                pma_entries=scenario.pma_entries,
+                priv_imode=int(scenario.priv_imode),
+                size=int(probe.size),
+                pmp_enabled=bool(scenario.pmp_entries),
+                pma_enabled=bool(scenario.pma_entries),
+            )
+            probes.append(
+                {
+                    "va": int(probe.va),
+                    "size": int(probe.size),
+                    "pa": int(pa),
+                    "end": int(pa) + int(probe.size) - 1,
+                    "translated": True,
+                    "permission": permission.as_dict(),
+                }
+            )
+        return tuple(probes)
+
     @staticmethod
     def _apply_response_fault_override(outcome: dict, scenario: TranslationScenario, page: int) -> dict:
         request_vpn = (int(scenario.va) >> 12) + int(page)
@@ -468,6 +552,11 @@ class TranslationScenarioBuilder:
         self.validate(scenario)
 
         self.env.page_table.clear()
+        self.env.page_table.set_ptw_pbmte_policy(
+            machine=scenario.ptw_machine_pbmte,
+            hypervisor=scenario.ptw_hypervisor_pbmte,
+            reset=True,
+        )
         s2xlate = int(scenario.s2xlate)
         missing_sector_vpns = {
             (int(scenario.va) >> 12) + int(entry.lane)
@@ -518,8 +607,15 @@ class TranslationScenarioBuilder:
             ),
             seed=int(scenario.ptw_response_seed),
             mode=str(scenario.mode).lower(),
-            response_source="model",
-            compare_drive_source="model",
+            req_ready_strategy=str(scenario.ptw_req_ready_strategy),
+            req_ready_probability=float(scenario.ptw_req_ready_probability),
+            req_ready_high_cycles=int(scenario.ptw_req_ready_high_cycles),
+            req_ready_low_cycles=int(scenario.ptw_req_ready_low_cycles),
+            flush_pending_on_sfence=bool(scenario.ptw_flush_pending_on_sfence),
+            strict_bare_mode=bool(scenario.ptw_strict_bare_mode),
+            response_source=str(scenario.ptw_response_source),
+            compare_drive_source=str(scenario.ptw_compare_drive_source),
+            nemu_ptw_adapter=str(scenario.ptw_nemu_adapter),
             response_overrides=tuple(override.as_agent_config() for override in scenario.ptw_response_overrides),
         )
         stage2_mode = str(scenario.stage2_mode or "sv39").lower()
@@ -535,6 +631,7 @@ class TranslationScenarioBuilder:
             )
             for page in range(int(scenario.page_count))
         )
+        expected_permission_probes = self._expected_permission_probes(scenario)
         self.env.load_program(scenario.payload, int(scenario.pa))
         context = self.env.update_translation_context(
             satp_mode=(self._mode_csr_value(scenario.mode) if s2xlate not in {_S2XLATE_ONLY_STAGE1, _S2XLATE_ONLY_STAGE2} else 0),
@@ -571,12 +668,14 @@ class TranslationScenarioBuilder:
             context=context,
             pmp_writes=pmp_writes,
             pma_writes=pma_writes,
+            expected_permission_probes=expected_permission_probes,
         )
 
 
 __all__ = [
     "TranslationPmpPmaEntry",
     "TranslationPtwResponseOverride",
+    "TranslationPermissionProbe",
     "TranslationSectorLane",
     "TranslationPte",
     "TranslationScenario",

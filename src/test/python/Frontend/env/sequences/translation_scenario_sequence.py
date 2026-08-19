@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from .translation_scenarios import TranslationScenario, TranslationScenarioBuilder, TranslationScenarioState
+from .translation_scenarios import TranslationPmpPmaEntry, TranslationScenario, TranslationScenarioBuilder, TranslationScenarioState
 
 
 @dataclass(frozen=True)
@@ -36,10 +36,52 @@ class TranslationSfenceAction:
 
 
 @dataclass(frozen=True)
+class TranslationContextAction:
+    """Apply one explicit translation-context change between scenario phases."""
+
+    satp_mode: int | None = None
+    satp_asid: int | None = None
+    satp_ppn: int | None = None
+    vsatp_mode: int | None = None
+    vsatp_asid: int | None = None
+    vsatp_ppn: int | None = None
+    hgatp_mode: int | None = None
+    hgatp_vmid: int | None = None
+    hgatp_ppn: int | None = None
+    priv_imode: int | None = None
+    priv_virt: int | None = None
+    cycles: int = 1
+
+
+@dataclass(frozen=True)
+class TranslationPmpPmaWriteAction:
+    """Write one PMP/PMA entry after a phase, including locked-entry rewrite attempts."""
+
+    entry: TranslationPmpPmaEntry
+    settle_cycles: int = 0
+
+
+@dataclass(frozen=True)
+class TranslationPbmteAction:
+    """Update the PTW PBMTE policy and drive a DUT control when one is live."""
+
+    machine: int | None = None
+    hypervisor: int | None = None
+    require_supported: bool = False
+
+
+@dataclass(frozen=True)
 class TranslationScenarioSequence:
     """Run ordered translation phases without embedding timing loops in a testcase."""
 
-    actions: tuple[TranslationScenarioPhase | TranslationSfenceAction, ...]
+    actions: tuple[
+        TranslationScenarioPhase
+        | TranslationSfenceAction
+        | TranslationContextAction
+        | TranslationPmpPmaWriteAction
+        | TranslationPbmteAction,
+        ...,
+    ]
 
     @staticmethod
     def _wait(env, predicate, *, description: str, max_cycles: int) -> None:
@@ -90,6 +132,57 @@ class TranslationScenarioSequence:
                         "record": record,
                     }
                 )
+                continue
+
+            if isinstance(action, TranslationContextAction):
+                record = env.update_translation_context(
+                    satp_mode=action.satp_mode,
+                    satp_asid=action.satp_asid,
+                    satp_ppn=action.satp_ppn,
+                    vsatp_mode=action.vsatp_mode,
+                    vsatp_asid=action.vsatp_asid,
+                    vsatp_ppn=action.vsatp_ppn,
+                    hgatp_mode=action.hgatp_mode,
+                    hgatp_vmid=action.hgatp_vmid,
+                    hgatp_ppn=action.hgatp_ppn,
+                    priv_imode=action.priv_imode,
+                    priv_virt=action.priv_virt,
+                    cycles=int(action.cycles),
+                )
+                results.append({"kind": "translation_context", "record": record})
+                continue
+
+            if isinstance(action, TranslationPmpPmaWriteAction):
+                entry = action.entry
+                if entry.kind == "pmp":
+                    record = env.write_pmp_entry(
+                        entry.index,
+                        entry.config,
+                        entry.addr,
+                        size=entry.size,
+                        settle_cycles=int(action.settle_cycles),
+                    )
+                elif entry.kind == "pma":
+                    record = env.write_pma_entry(
+                        entry.index,
+                        entry.config,
+                        entry.addr,
+                        size=entry.size,
+                        settle_cycles=int(action.settle_cycles),
+                    )
+                else:
+                    raise ValueError("translation PMP/PMA write action requires a PMP or PMA entry")
+                results.append({"kind": f"{entry.kind}_write", "record": record})
+                continue
+
+            if isinstance(action, TranslationPbmteAction):
+                record = env.set_translation_pbmte(machine=action.machine, hypervisor=action.hypervisor)
+                if action.require_supported and not record["supported"]:
+                    raise RuntimeError(
+                        "current generated DUT does not expose requested PBMTE control(s): "
+                        f"{record['unsupported']}"
+                    )
+                results.append({"kind": "pbmte", "record": record})
                 continue
 
             if action.reuse_previous:
@@ -177,4 +270,11 @@ class TranslationScenarioSequence:
         return results
 
 
-__all__ = ["TranslationScenarioPhase", "TranslationScenarioSequence", "TranslationSfenceAction"]
+__all__ = [
+    "TranslationContextAction",
+    "TranslationPbmteAction",
+    "TranslationPmpPmaWriteAction",
+    "TranslationScenarioPhase",
+    "TranslationScenarioSequence",
+    "TranslationSfenceAction",
+]

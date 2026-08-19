@@ -4,9 +4,11 @@ import pytest
 
 from env.core.frontend_env import FrontendEnv
 from env.model.ptw_response_source import PTWRequestSnapshot
+from env.nemu import ptw_adapter_template
 from env.runtime.dut_factory import FakeDUTFrontend
 from env.sequences import (
     TranslationPmpPmaEntry,
+    TranslationPermissionProbe,
     TranslationPte,
     TranslationPtwResponseOverride,
     TranslationScenario,
@@ -120,6 +122,239 @@ def test_builder_applies_declared_ptw_response_timing() -> None:
     assert stats["latency_min"] == 5
     assert stats["latency_max"] == 9
     assert stats["req_ready_strategy"] == "always"
+
+
+def test_builder_applies_declared_ptw_transport_policy() -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id="sv39-ptw-transport-policy",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        payload=b"\x13\x00\x00\x00",
+        ptw_response_latency=2,
+        ptw_response_latency_max=5,
+        ptw_response_seed=19,
+        ptw_req_ready_strategy="periodic",
+        ptw_req_ready_high_cycles=2,
+        ptw_req_ready_low_cycles=3,
+        ptw_flush_pending_on_sfence=False,
+        ptw_strict_bare_mode=True,
+    )
+
+    TranslationScenarioBuilder(env).build(scenario)
+
+    stats = env.ptw_agent.get_stats()
+    assert stats["latency_min"] == 2
+    assert stats["latency_max"] == 5
+    assert stats["req_ready_strategy"] == "periodic"
+    assert stats["strict_bare_mode"] is True
+    assert env.ptw_agent.flush_pending_on_sfence is False
+
+
+@pytest.mark.parametrize(
+    "field,value,expected_outcome,expected_fault_field",
+    [
+        ("ptw_machine_pbmte", 0, "instruction_page_fault", "s1_pf"),
+        ("ptw_machine_pbmte", 1, "normal", "s1_pf"),
+    ],
+)
+def test_builder_models_nonvirtual_pbmte_before_driving_the_frontend_response(
+    field, value, expected_outcome, expected_fault_field
+) -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id=f"pbmte-{field}-{value}",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        payload=b"\x13\x00\x00\x00",
+        s1_pte=TranslationPte(pbmt=1),
+        **{field: value},
+    )
+
+    state = TranslationScenarioBuilder(env).build(scenario)
+    response = env.page_table.build_ptw_resp(state.expected_ptw_request["vpn"])
+
+    assert state.expected_outcome["outcome"] == expected_outcome
+    assert response[expected_fault_field] == (1 if value == 0 else 0)
+
+
+def test_builder_models_gstage_pbmte_as_a_guest_page_fault() -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id="gstage-pbmte-disabled",
+        va=0x8020_0000,
+        gpa=0x8030_0000,
+        pa=0x8040_0000,
+        payload=b"\x13\x00\x00\x00",
+        s2xlate=2,
+        s2_pte=TranslationPte(pbmt=1),
+        ptw_machine_pbmte=0,
+        expected_path="fault",
+        expected_result="guest_fault",
+    )
+
+    state = TranslationScenarioBuilder(env).build(scenario)
+    response = env.page_table.build_ptw_resp(state.expected_ptw_request["vpn"], s2xlate=2)
+
+    assert state.expected_outcome["outcome"] == "instruction_guest_page_fault"
+    assert response["s2_gpf"] == 1
+
+
+def test_builder_resets_pbmte_policy_between_scenarios() -> None:
+    env = _env()
+    disabled = TranslationScenario(
+        scenario_id="pbmte-disabled",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        payload=b"\x13\x00\x00\x00",
+        s1_pte=TranslationPte(pbmt=1),
+        ptw_machine_pbmte=0,
+    )
+    legacy_raw_response = TranslationScenario(
+        scenario_id="pbmte-raw-response",
+        va=0x8030_0000,
+        pa=0x8050_0000,
+        payload=b"\x13\x00\x00\x00",
+        s1_pte=TranslationPte(pbmt=1),
+    )
+
+    TranslationScenarioBuilder(env).build(disabled)
+    state = TranslationScenarioBuilder(env).build(legacy_raw_response)
+    response = env.page_table.build_ptw_resp(state.expected_ptw_request["vpn"])
+
+    assert state.expected_outcome["outcome"] == "normal"
+    assert response["s1_pf"] == 0
+
+
+def test_nemu_adapter_serializes_pbmt_and_napot_pte_fields() -> None:
+    vpn = 0x8020_0000 >> 12
+    ptw_adapter_template.sync_sv39_page_table(
+        (
+            {
+                "vpn": vpn,
+                "ppn": 0x8040_0,
+                "r": 1,
+                "x": 1,
+                "a": 1,
+                "n": 1,
+                "pbmt": 1,
+            },
+        )
+    )
+
+    response = ptw_adapter_template.build_ptw_resp(_ptw_request(vpn))
+
+    assert response["s1_entry_n"] == 1
+    assert response["s1_entry_pbmt"] == 1
+
+
+def test_ptw_agent_normalizes_nemu_response_through_declared_pbmte_policy() -> None:
+    env = _env()
+    vpn = 0x8020_0000 >> 12
+    ptw_adapter_template.sync_sv39_page_table(
+        ({"vpn": vpn, "ppn": 0x8040_0, "r": 1, "x": 1, "a": 1, "pbmt": 1},)
+    )
+    env.page_table.set_ptw_pbmte_policy(machine=0, reset=True)
+    env.ptw_agent.configure(
+        mode="sv39",
+        response_source="nemu",
+        nemu_ptw_adapter="env.nemu.ptw_adapter_template:build_ptw_resp",
+    )
+
+    response = env.ptw_agent._build_response(_ptw_request(vpn))
+
+    assert response["s1_entry_pbmt"] == 1
+    assert response["s1_pf"] == 1
+
+
+def test_builder_derives_explicit_fetch_range_permission_probes() -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id="sv39-fetch-range-probe",
+        va=0x8020_0FF8,
+        pa=0x8040_0FF8,
+        payload=b"\x13" * 16,
+        page_count=2,
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), 0x8040_0000, size=0x1000
+            ),
+            TranslationPmpPmaEntry(
+                "pmp", 1, PmpPmaConfig(match="napot", read=True, execute=True), 0x8040_1000, size=0x1000
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                "pma", 0, PmpPmaConfig(match="napot", read=True, execute=True, cacheable=True), 0x8040_0000, size=0x1000
+            ),
+            TranslationPmpPmaEntry(
+                "pma", 1, PmpPmaConfig(match="napot", read=True, execute=True, cacheable=False), 0x8040_1000, size=0x1000
+            ),
+        ),
+        permission_probes=(
+            TranslationPermissionProbe(va=0x8020_0FF8, size=8),
+            TranslationPermissionProbe(va=0x8020_1000, size=8),
+        ),
+    )
+
+    state = TranslationScenarioBuilder(env).build(scenario)
+
+    assert state.expected_permission_probes == (
+        {
+            "va": 0x8020_0FF8,
+            "size": 8,
+            "pa": 0x8040_0FF8,
+            "end": 0x8040_0FFF,
+            "translated": True,
+            "permission": state.expected_permission_probes[0]["permission"],
+        },
+        {
+            "va": 0x8020_1000,
+            "size": 8,
+            "pa": 0x8040_1000,
+            "end": 0x8040_1007,
+            "translated": True,
+            "permission": state.expected_permission_probes[1]["permission"],
+        },
+    )
+    assert state.expected_permission_probes[0]["permission"]["pma_cacheable"] is True
+    assert state.expected_permission_probes[1]["permission"]["pma_cacheable"] is False
+
+
+def test_builder_rejects_permission_probe_outside_its_payload() -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id="invalid-permission-probe",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        payload=b"\x13" * 4,
+        permission_probes=(TranslationPermissionProbe(va=0x8020_0004, size=8),),
+    )
+
+    with pytest.raises(ValueError, match="permission probe"):
+        TranslationScenarioBuilder(env).build(scenario)
+
+
+@pytest.mark.parametrize(
+    "kwargs,match",
+    [
+        ({"ptw_req_ready_strategy": "unknown"}, "ready strategy"),
+        ({"ptw_req_ready_probability": 2.0}, "probability"),
+        ({"ptw_response_source": "nemu"}, "NEMU adapter"),
+    ],
+)
+def test_builder_rejects_invalid_ptw_transport_policy(kwargs, match) -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id="invalid-ptw-transport-policy",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        payload=b"\x13",
+        **kwargs,
+    )
+
+    with pytest.raises(ValueError, match=match):
+        TranslationScenarioBuilder(env).build(scenario)
 
 
 def test_builder_applies_request_keyed_ptw_response_override() -> None:

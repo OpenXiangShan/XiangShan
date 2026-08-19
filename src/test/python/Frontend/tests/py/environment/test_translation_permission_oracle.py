@@ -4,7 +4,13 @@ import pytest
 
 from env.core.frontend_env import FrontendEnv
 from env.runtime.dut_factory import FakeDUTFrontend, FakeSignal
-from env.sequences import TranslationPmpPmaEntry, TranslationPte, TranslationScenario, TranslationScenarioBuilder
+from env.sequences import (
+    TranslationPermissionProbe,
+    TranslationPmpPmaEntry,
+    TranslationPte,
+    TranslationScenario,
+    TranslationScenarioBuilder,
+)
 from env.support import PmpPmaConfig
 
 
@@ -342,6 +348,32 @@ def test_oracle_reconstructs_mainpipe_pmp_request_address_after_translation() ->
     stats = env.assert_translation_scenario()
     pmp_record = next(record for record in stats["records"] if record["kind"] == "mainpipe_pmp_request")
     assert (pmp_record["addr"], pmp_record["size"], pmp_record["end"]) == (scenario.pa, 8, scenario.pa + 7)
+
+
+def test_oracle_requires_each_declared_fetch_range_permission_probe() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    scenario = TranslationScenario(
+        scenario_id="oracle-fetch-range-probes",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        payload=b"\x13" * 16,
+        permission_probes=(
+            TranslationPermissionProbe(va=0x8020_0000, size=8),
+            TranslationPermissionProbe(va=0x8020_0008, size=8),
+        ),
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), 0x8040_0000, size=0x1000
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.arm_translation_scenario(state)
+    _observe_matching_ptw(env, state)
+    env.translation_oracle.observe_mainpipe_pmp_request(12, addr=0x8040_0000)
+
+    with pytest.raises(AssertionError, match="permission_probe"):
+        env.assert_translation_scenario()
 
 
 def test_oracle_does_not_require_pmp_request_after_page_fault() -> None:

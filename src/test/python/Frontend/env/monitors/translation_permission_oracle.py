@@ -154,6 +154,10 @@ class TranslationPermissionOracle:
             "expected_fetches": expected_fetches,
             "expected_path": "fault" if expected_fault else str(state.scenario.expected_path),
             "expected_fault": expected_fault,
+            "expected_permission_probes": [
+                dict(probe) for probe in getattr(state, "expected_permission_probes", ())
+            ],
+            "observed_permission_probes": [],
             "max_ptw_requests_per_key": getattr(state.scenario, "max_ptw_requests_per_key", None),
             "request_seen": False,
             "response_seen": False,
@@ -355,16 +359,32 @@ class TranslationPermissionOracle:
     def observe_mainpipe_pmp_request(self, cycle: int, *, addr: int) -> None:
         if self.active is None or not self.active["permission_check_required"]:
             return
-        if self.active["pmp_request_seen"]:
+        if self.active["pmp_request_seen"] and not self.active["expected_permission_probes"]:
             return
         actual_addr = int(addr)
         expected_addr = int(self.active["expected_outcome"].get("pa", 0))
+        probe = None
+        declared_probes = self.active["expected_permission_probes"]
+        if declared_probes:
+            probe = next(
+                (
+                    item
+                    for item in declared_probes
+                    if int(item.get("pa", -1)) == actual_addr
+                    and int(item.get("size", _PMP_REQUEST_SIZE_BYTES)) == _PMP_REQUEST_SIZE_BYTES
+                    and int(item["pa"]) not in self.active["observed_permission_probes"]
+                ),
+                None,
+            )
+            if probe is not None:
+                expected_addr = int(probe["pa"])
         self._record(
             cycle,
             "mainpipe_pmp_request",
             addr=actual_addr,
             size=_PMP_REQUEST_SIZE_BYTES,
             end=actual_addr + _PMP_REQUEST_SIZE_BYTES - 1,
+            probe=probe,
         )
         if actual_addr != expected_addr:
             self._error(
@@ -377,6 +397,8 @@ class TranslationPermissionOracle:
             return
         self.active["pmp_request_seen"] = True
         self.active["permission_request_seen"] = True
+        if probe is not None:
+            self.active["observed_permission_probes"].append(int(probe["pa"]))
 
     def observe_prefetchpipe_pmp_request(self, cycle: int, *, addr: int) -> None:
         """Record PrefetchPipe permission checks without requiring a speculative target."""
@@ -561,6 +583,14 @@ class TranslationPermissionOracle:
                 missing.append(f"fetch_page_{missing_pages}")
         if self.active["permission_check_required"] and not self.active["permission_request_seen"]:
             missing.append("permission_request")
+        missing_probes = [
+            int(probe["pa"])
+            for probe in self.active["expected_permission_probes"]
+            if int(probe.get("size", _PMP_REQUEST_SIZE_BYTES)) == _PMP_REQUEST_SIZE_BYTES
+            and int(probe["pa"]) not in self.active["observed_permission_probes"]
+        ]
+        if missing_probes:
+            missing.append(f"permission_probe_{missing_probes}")
         if missing:
             self._error(getattr(self.env, "current_cycle", 0), "missing_observation", missing=missing)
         if self.errors:

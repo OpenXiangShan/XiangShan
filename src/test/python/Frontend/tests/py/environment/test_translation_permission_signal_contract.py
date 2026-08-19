@@ -19,7 +19,6 @@ _COMMON_SIGNALS = {
     "itlb_ptw_request_get_gpa": "Frontend_top.Frontend.inner_itlb.io_ptw_req_0_bits_getGpa",
 }
 
-
 def _registered_names(offset: Path) -> set[str]:
     return {
         line[len("  - name: ") :].strip()

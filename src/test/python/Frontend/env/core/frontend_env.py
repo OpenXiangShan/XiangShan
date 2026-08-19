@@ -26,6 +26,7 @@ from ..bundles import (
     bind_bundle_optional,
     bind_bundle_required,
 )
+from toffee.bundle import DummySignal
 from .checkers import PTWFullPpnChecker, PTWRespInputChecker
 from ..support.env_config import BAREMODE_ENV_CONFIG, DEFAULT_ENV_CONFIG, EnvConfig, SV39_ENV_CONFIG
 from ..support.logging_utils import configure_env_logging, parse_log_level
@@ -72,6 +73,7 @@ class FrontendEnv:
         self.event_sink = event_sink
         self.config = config or DEFAULT_ENV_CONFIG
         self._nemu_sync_module: Optional[Any] = None
+        self._nemu_sync_adapter_spec: Optional[str] = None
         self._nemu_satp_override: Optional[int] = None
         self._nemu_vsatp_override: Optional[int] = None
         self._nemu_hgatp_override: Optional[int] = None
@@ -311,9 +313,9 @@ class FrontendEnv:
         }
 
     def _get_nemu_sync_module(self) -> Any:
-        if self._nemu_sync_module is not None:
+        adapter_spec = str(self.ptw_agent.nemu_ptw_adapter or self.config.ptw.nemu_ptw_adapter or "")
+        if self._nemu_sync_module is not None and self._nemu_sync_adapter_spec == adapter_spec:
             return self._nemu_sync_module
-        adapter_spec = str(self.config.ptw.nemu_ptw_adapter or "")
         if ":" not in adapter_spec:
             raise RuntimeError(f"invalid NEMU PTW adapter spec: {adapter_spec!r}")
         module_name, _ = adapter_spec.split(":", 1)
@@ -325,6 +327,7 @@ class FrontendEnv:
                 "sync_memory/sync_sv39_page_table/sync_sv39x4_page_table"
             )
         self._nemu_sync_module = module
+        self._nemu_sync_adapter_spec = adapter_spec
         return module
 
     def _iter_memory_ranges(self):
@@ -398,7 +401,11 @@ class FrontendEnv:
                     "g": int(pte.g),
                     "a": int(pte.a),
                     "d": int(pte.d),
+                    "n": int(pte.n),
+                    "pbmt": int(pte.pbmt),
                     "level": int(pte.level),
+                    "asid": int(pte.asid),
+                    "vmid": int(pte.vmid),
                 }
             )
         return entries
@@ -921,6 +928,48 @@ class FrontendEnv:
         self._write(self.ptw_if.sfence_valid, 0)
         self._emit_event("control.sfence", {**fields, "translation_epoch": int(self.translation_epoch)})
         return dict(fields)
+
+    def set_translation_pbmte(
+        self,
+        *,
+        machine: Optional[int] = None,
+        hypervisor: Optional[int] = None,
+    ) -> dict:
+        """Configure PTW PBMTE policy and drive a real top-level control when available."""
+
+        requested = {
+            "machine": None if machine is None else int(bool(machine)),
+            "hypervisor": None if hypervisor is None else int(bool(hypervisor)),
+        }
+        ptw_policy = self.page_table.set_ptw_pbmte_policy(machine=machine, hypervisor=hypervisor)
+        signals = {
+            "machine": self.csr_ctrl_if.io_tlbCsr_mPBMTE,
+            "hypervisor": self.csr_ctrl_if.io_tlbCsr_hPBMTE,
+        }
+        driven = {}
+        unsupported = []
+        if bool(getattr(self.dut, "_is_fake_frontend_dut", False)):
+            unsupported = [name for name, value in requested.items() if value is not None]
+        for name, value in requested.items():
+            if value is None:
+                continue
+            if name in unsupported:
+                continue
+            signal = signals[name]
+            if isinstance(signal, DummySignal):
+                unsupported.append(name)
+                continue
+            self._write(signal, int(value))
+            driven[name] = int(value)
+        record = {
+            "requested": requested,
+            "ptw_policy": ptw_policy,
+            "driven": driven,
+            "unsupported": unsupported,
+            "supported": not unsupported,
+        }
+        self._emit_event("control.translation_pbmte", record)
+        return record
 
     def update_translation_context(
         self,

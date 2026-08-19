@@ -5,6 +5,7 @@ from .reset_sequences import InitializeFrontendSequence, ResetFrontendSequence
 from .trace_sequences import LoadGoldenTraceSequence, RunUntilCommitSequence, RunUntilGoldenTraceCompleteSequence
 from .translation_scenarios import (
     TranslationPmpPmaEntry,
+    TranslationPermissionProbe,
     TranslationPte,
     TranslationPtwResponseOverride,
     TranslationScenario,
@@ -12,7 +13,14 @@ from .translation_scenarios import (
     TranslationScenarioState,
     TranslationSectorLane,
 )
-from .translation_scenario_sequence import TranslationScenarioPhase, TranslationScenarioSequence, TranslationSfenceAction
+from .translation_scenario_sequence import (
+    TranslationContextAction,
+    TranslationPbmteAction,
+    TranslationPmpPmaWriteAction,
+    TranslationScenarioPhase,
+    TranslationScenarioSequence,
+    TranslationSfenceAction,
+)
 
 __all__ = [
     "CheckPcSequence",
@@ -26,12 +34,16 @@ __all__ = [
     "RunUntilCommitSequence",
     "RunUntilGoldenTraceCompleteSequence",
     "TranslationPmpPmaEntry",
+    "TranslationPermissionProbe",
     "TranslationPte",
     "TranslationPtwResponseOverride",
     "TranslationScenario",
     "TranslationScenarioBuilder",
     "TranslationScenarioState",
     "TranslationSectorLane",
+    "TranslationContextAction",
+    "TranslationPbmteAction",
+    "TranslationPmpPmaWriteAction",
     "TranslationScenarioPhase",
     "TranslationScenarioSequence",
     "TranslationSfenceAction",

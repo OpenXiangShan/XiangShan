@@ -4,6 +4,13 @@ import pytest
 
 from env.core.frontend_env import FrontendEnv
 from env.runtime.dut_factory import FakeDUTFrontend
+from env.sequences import (
+    TranslationContextAction,
+    TranslationPbmteAction,
+    TranslationPmpPmaEntry,
+    TranslationPmpPmaWriteAction,
+    TranslationScenarioSequence,
+)
 from env.support import PmpPmaConfig
 from env.support.pmp_pma import (
     PMA_ADDR_BASE,
@@ -105,3 +112,36 @@ def test_update_translation_context_updates_values_and_pulses_affected_groups() 
     assert env.dut.io_tlbCsr_satp_changed.value == 0
     assert env.dut.io_tlbCsr_priv_virt_changed.value == 0
     assert events[-1]["type"] == "control.translation_context"
+
+
+def test_translation_sequence_exposes_control_actions_without_a_testcase_local_driver() -> None:
+    env, _events = _env_with_events()
+    entry = TranslationPmpPmaEntry(
+        kind="pmp",
+        index=0,
+        config=PmpPmaConfig(match="napot", read=True, execute=True),
+        addr=0x8000_0000,
+        size=0x1000,
+    )
+
+    result = TranslationScenarioSequence(
+        actions=(
+            TranslationContextAction(vsatp_mode=8, vsatp_asid=3),
+            TranslationPmpPmaWriteAction(entry),
+            TranslationPbmteAction(machine=1),
+        )
+    ).run(env)
+
+    assert [item["kind"] for item in result] == ["translation_context", "pmp_write", "pbmte"]
+    assert result[0]["record"]["changed"]["vsatp"] is True
+    assert result[1]["record"]["index"] == 0
+    assert result[2]["record"]["supported"] is False
+    assert result[2]["record"]["unsupported"] == ["machine"]
+    assert result[2]["record"]["ptw_policy"] == {"machine": True, "hypervisor": None}
+
+
+def test_pbmte_action_requires_a_generated_dut_control_when_requested() -> None:
+    env, _events = _env_with_events()
+
+    with pytest.raises(RuntimeError, match="PBMTE"):
+        TranslationScenarioSequence(actions=(TranslationPbmteAction(machine=1, require_supported=True),)).run(env)

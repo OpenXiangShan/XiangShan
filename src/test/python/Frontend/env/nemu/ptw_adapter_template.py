@@ -47,9 +47,11 @@ def _load_entries(model: PageTableModel) -> None:
             g=int(entry.get("g", 0)),
             a=int(entry.get("a", 1)),
             d=int(entry.get("d", 0)),
+            n=int(entry.get("n", 0)),
             level=int(entry.get("level", 0)),
             asid=int(entry.get("asid", 0)),
             vmid=int(entry.get("vmid", 0)),
+            pbmt=int(entry.get("pbmt", 0)),
         )
     for entry in _STAGE2_ENTRIES:
         model.map_stage2_page(
@@ -63,8 +65,10 @@ def _load_entries(model: PageTableModel) -> None:
             g=int(entry.get("g", 0)),
             a=int(entry.get("a", 1)),
             d=int(entry.get("d", 0)),
+            n=int(entry.get("n", 0)),
             level=int(entry.get("level", 0)),
             vmid=int(entry.get("vmid", 0)),
+            pbmt=int(entry.get("pbmt", 0)),
         )
 
 

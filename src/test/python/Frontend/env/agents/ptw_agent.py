@@ -370,10 +370,10 @@ class PTWAgent:
             response = nemu_resp if driven_source == "nemu" else model_resp
         key = (int(snapshot.vpn), int(snapshot.s2xlate), int(snapshot.get_gpa))
         patch = self.response_overrides.get(key)
-        if patch is None:
-            return response
-        self.response_override_hit_count += 1
-        return {**response, **patch}
+        if patch is not None:
+            self.response_override_hit_count += 1
+            response = {**response, **patch}
+        return self.page_table.apply_ptw_pbmte_policy(response)
 
     def _driven_source(self) -> str:
         if self.response_source == "compare":

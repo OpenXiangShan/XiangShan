@@ -14,6 +14,8 @@ class CSRControlBundle(Bundle):
         "io_tlbCsr_satp_changed",
         "io_tlbCsr_vsatp_changed",
         "io_tlbCsr_hgatp_changed",
+        "io_tlbCsr_mPBMTE",
+        "io_tlbCsr_hPBMTE",
     }
 
     io_tlbCsr_priv_imode = Signal()
@@ -31,6 +33,8 @@ class CSRControlBundle(Bundle):
     io_tlbCsr_hgatp_vmid = Signal()
     io_tlbCsr_hgatp_ppn = Signal()
     io_tlbCsr_hgatp_changed = Signal()
+    io_tlbCsr_mPBMTE = Signal()
+    io_tlbCsr_hPBMTE = Signal()
     io_csrCtrl_bp_ctrl_ubtbEnable = Signal()
     io_csrCtrl_bp_ctrl_abtbEnable = Signal()
     io_csrCtrl_bp_ctrl_mbtbEnable = Signal()
@@ -67,6 +71,8 @@ class CSRControlBundle(Bundle):
         self.io_tlbCsr_hgatp_vmid.value = 0
         self.io_tlbCsr_hgatp_ppn.value = 0
         self.io_tlbCsr_hgatp_changed.value = 0
+        self.io_tlbCsr_mPBMTE.value = 0
+        self.io_tlbCsr_hPBMTE.value = 0
         self.io_csrCtrl_bp_ctrl_ubtbEnable.value = int(ubtb_enable)
         self.io_csrCtrl_bp_ctrl_abtbEnable.value = int(abtb_enable)
         self.io_csrCtrl_bp_ctrl_mbtbEnable.value = int(mbtb_enable)
