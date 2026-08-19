@@ -30,6 +30,12 @@ from .py.ftq.sampler import (
     sample_two_fetch_coverage,
 )
 
+# Compatibility names used by the pre-refactor contract tests.  These signals
+# are intentionally optional because the generated Verilator contract does
+# not expose the historical way-data conflict internals.
+TWO_FETCH_OPTIONAL_SIGNAL_KEYS = frozenset({"way_data_conflict"})
+_WAY_DATA_CONFLICT_SIGNALS = frozenset()
+
 # Legacy registry compatibility: these 17 keys remain part of the existing
 # pilot contract while the modular IFU sampler exports the additional models.
 CFVEC_SAMPLER_BIN_KEYS = frozenset(
@@ -66,6 +72,8 @@ __all__ = [
     "TWO_FETCH_COVERPOINTS",
     "TWO_FETCH_SAMPLER_BIN_KEYS",
     "_TWO_FETCH_SIGNALS",
+    "TWO_FETCH_OPTIONAL_SIGNAL_KEYS",
+    "_WAY_DATA_CONFLICT_SIGNALS",
     "_classify_cfi_kind",
     "handle_owner_v3_event",
     "sample_cfvec_coverage",

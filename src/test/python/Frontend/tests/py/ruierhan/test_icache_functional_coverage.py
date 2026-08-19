@@ -945,12 +945,13 @@ def test_missunit_acquire_backpressure_window_resets_on_control_or_invalid():
         assert not _hit(recorder, "icache_missunit_acquire", "acquire_backpressure_recovery")
 
 
-def test_missunit_sram_suppression_requires_valid_response():
+def test_missunit_redirect_sram_suppression_requires_known_previous_flush():
     recorder = _Recorder()
     for name, value in {
         _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush": 1,
         _MISS + "lastFireNext": 1,
         _MISS + "idNext": 0,
+        _MISS + "allMshr_0.valid": 1,
         _MISS + "allMshr_0.flush": 0,
         _MISS + "allMshr_0.fencei": 0,
         _MISS + "corruptReg": 0,
@@ -962,11 +963,35 @@ def test_missunit_sram_suppression_requires_valid_response():
     assert not _hit(recorder, "icache_missunit_flush", "redirect_suppresses_sram_write")
 
     recorder.set_missunit_signal(_ICACHE + "__Vtogcov__io_fromFtq_redirectFlush", 0)
+    recorder.set_missunit_signal(_MISS + "lastFireNext", 0)
     sample_icache_missunit_coverage(recorder, recorder.env, 8)
-    recorder.set_missunit_signal(_MISS + "allMshr_0.valid", 1)
     recorder.set_missunit_signal(_ICACHE + "__Vtogcov__io_fromFtq_redirectFlush", 1)
+    recorder.set_missunit_signal(_MISS + "lastFireNext", 1)
+    # Checkpoint observations must not participate in the coverage predicate.
+    recorder.set_missunit_signal(_MISS + "io_metaWrite_req_valid", 1)
+    recorder.set_missunit_signal(_ICACHE + "ctrlUnitOpt.io_dataWrite_req_valid", 1)
     sample_icache_missunit_coverage(recorder, recorder.env, 9)
     assert _hit(recorder, "icache_missunit_flush", "redirect_suppresses_sram_write")
+    checkpoint = recorder._icache_missunit_cov_state[
+        "last_redirect_sram_write_checkpoint"
+    ]
+    assert checkpoint["writes_known"]
+    assert not checkpoint["complete"]
+
+
+def test_missunit_redirect_blocks_prefetch_requires_known_nonduplicate():
+    recorder = _Recorder()
+    recorder.set_missunit_signal(
+        _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush", 1
+    )
+    recorder.set_missunit_signal(_MISS + "io_prefetchReq_valid", 1)
+
+    sample_icache_missunit_coverage(recorder, recorder.env, 9)
+    assert not _hit(recorder, "icache_missunit_flush", "redirect_blocks_new_prefetch")
+
+    recorder.set_missunit_signal(_MISS + "prefetchHit", 0)
+    sample_icache_missunit_coverage(recorder, recorder.env, 10)
+    assert _hit(recorder, "icache_missunit_flush", "redirect_blocks_new_prefetch")
 
 
 def test_missunit_redirect_keeps_fetch_mshr_bins_split_by_issue_state():
@@ -980,12 +1005,29 @@ def test_missunit_redirect_keeps_fetch_mshr_bins_split_by_issue_state():
         )
         recorder.set_missunit_signal(_MISS + "allMshr_0.valid", 1)
         recorder.set_missunit_signal(_MISS + "allMshr_0.issue", issue)
+        recorder.set_missunit_signal(_MISS + "lastFireNext", 0)
         sample_icache_missunit_coverage(recorder, recorder.env, 10)
         recorder.set_missunit_signal(
             _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush", 1
         )
         sample_icache_missunit_coverage(recorder, recorder.env, 11)
         assert _hit(recorder, "icache_missunit_flush", bin_name)
+
+
+def test_missunit_redirect_keeps_fetch_requires_known_no_response():
+    for issue, bin_name in (
+        (0, "redirect_keeps_unissued_fetch_mshr"),
+        (1, "redirect_keeps_issued_fetch_mshr"),
+    ):
+        recorder = _Recorder()
+        recorder.set_missunit_signal(
+            _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush", 1
+        )
+        recorder.set_missunit_signal(_MISS + "allMshr_0.valid", 1)
+        recorder.set_missunit_signal(_MISS + "allMshr_0.issue", issue)
+
+        sample_icache_missunit_coverage(recorder, recorder.env, 12)
+        assert not _hit(recorder, "icache_missunit_flush", bin_name)
 
 
 def test_missunit_source_route_uses_final_beat_context():

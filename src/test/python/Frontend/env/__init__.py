@@ -6,6 +6,20 @@ canonical implementations now live under ``agents/``, ``monitors/``,
 the historically stable imports available for tests and downstream users.
 """
 
+# Keep historical module paths importable without recreating root-level
+# implementation files; the canonical implementations remain under runtime/.
+import sys as _sys
+
+from .funcov import recorder as _functional_coverage
+from .runtime import artifact_provenance as _artifact_provenance
+from .runtime import fixtures as _fixtures
+from .runtime import pylib as _pylib
+
+_sys.modules.setdefault(__name__ + ".fixtures", _fixtures)
+_sys.modules.setdefault(__name__ + ".functional_coverage", _functional_coverage)
+_sys.modules.setdefault(__name__ + ".artifact_provenance", _artifact_provenance)
+_sys.modules.setdefault(__name__ + ".pylib", _pylib)
+
 from .api import (
     api_Frontend_check_pc_sequence,
     api_Frontend_enable_fst_dump,

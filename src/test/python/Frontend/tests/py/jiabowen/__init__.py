@@ -1,0 +1,1 @@
+"""Frontend jiabowen tests."""

@@ -1,0 +1,1 @@
+"""Frontend environment contract tests."""

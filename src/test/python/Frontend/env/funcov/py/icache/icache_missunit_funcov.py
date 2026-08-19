@@ -186,11 +186,12 @@ def reset_icache_missunit_coverage_state(recorder) -> None:
         "error_response_seen": False,
         "last_refill_source": None,
         "last_refill_outstanding": 0,
-        "last_flush": 0,
+        "last_flush": None,
         # BIN-686 records the expected allocation here so a checker can
         # validate the registered MSHR contents on the following cycle.
         "pending_fetch_allocations": [],
         "last_fetch_allocation_checkpoint": None,
+        "last_redirect_sram_write_checkpoint": None,
     }
 
 
@@ -660,27 +661,42 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
     prefetch_mismatch = prefetch_demux_fire and any_mshr and not _same_key_exists(mshrs, range(14), signals["prefetch_paddr"], signals["prefetch_vset"])
     _mark(recorder, "icache_missunit_dedup", "key_mismatch_no_merge", cycle, fetch_mismatch or prefetch_mismatch, evidence)
 
-    prefetch_miss = prefetch_valid and not prefetch_hit
+    prefetch_miss = prefetch_valid and _off(signals["prefetch_hit"])
     response_next = _on(signals["last_fire_next"])
     _mark(recorder, "icache_missunit_flush", "redirect_blocks_new_prefetch", cycle, flush and prefetch_miss, evidence)
     _mark(recorder, "icache_missunit_flush", "redirect_cancels_unissued_prefetch", cycle, flush and any(_on(item["valid"]) and _off(item["issue"]) for item in mshrs[4:]), evidence)
     _mark(recorder, "icache_missunit_flush", "redirect_marks_issued_prefetch", cycle, flush and any(_on(item["valid"]) and _on(item["issue"]) for item in mshrs[4:]), evidence)
     unissued_fetch = any(_on(item["valid"]) and _off(item["issue"]) for item in mshrs[:4])
     issued_fetch = any(_on(item["valid"]) and _on(item["issue"]) for item in mshrs[:4])
-    _mark(recorder, "icache_missunit_flush", "redirect_keeps_unissued_fetch_mshr", cycle, flush and unissued_fetch and not response_next, evidence)
-    _mark(recorder, "icache_missunit_flush", "redirect_keeps_issued_fetch_mshr", cycle, flush and issued_fetch and not response_next, evidence)
+    no_response_next = _off(signals["last_fire_next"])
+    _mark(recorder, "icache_missunit_flush", "redirect_keeps_unissued_fetch_mshr", cycle, flush and unissued_fetch and no_response_next, evidence)
+    _mark(recorder, "icache_missunit_flush", "redirect_keeps_issued_fetch_mshr", cycle, flush and issued_fetch and no_response_next, evidence)
     response_valid = response_next and _mshr_response_valid(mshrs, signals["id_next"])
     writes = _on(signals["meta_write"]) or _on(signals["data_write"])
     clean_response = _off(signals["corrupt_reg"]) and _off(signals["denied_reg"])
-    redirect_first = flush and not _on(state["last_flush"])
+    redirect_first = flush and _off(state["last_flush"])
+    redirect_response = redirect_first and response_valid and clean_response
     evidence["redirect_first"] = redirect_first
     evidence["clean_response"] = clean_response
+    if redirect_response:
+        writes_known = signals["meta_write"] is not None and signals["data_write"] is not None
+        checkpoint = {
+            "trigger_cycle": cycle,
+            "meta_write": signals["meta_write"],
+            "data_write": signals["data_write"],
+            "writes_known": writes_known,
+            "complete": writes_known
+            and _off(signals["meta_write"])
+            and _off(signals["data_write"]),
+        }
+        state["last_redirect_sram_write_checkpoint"] = checkpoint
+        evidence["redirect_sram_write_checkpoint"] = checkpoint
     _mark(
         recorder,
         "icache_missunit_flush",
         "redirect_suppresses_sram_write",
         cycle,
-        redirect_first and response_next and response_valid and clean_response and not writes,
+        redirect_response,
         evidence,
     )
 
@@ -766,4 +782,4 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
         state["clean_beats"] = 0
         state["last_refill_source"] = None
         state["last_refill_outstanding"] = 0
-    state["last_flush"] = int(flush)
+    state["last_flush"] = signals["flush"]
