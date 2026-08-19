@@ -186,6 +186,9 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   io.meta.p2Valid       := s1_providerEntry.p2Valid
   io.meta.p1CfiPosition := s1_providerEntry.p1.cfiPosition
   io.meta.p1Attribute   := s1_providerEntry.p1.attribute
+  io.meta.p2CfiPosition := s1_providerEntry.p2.cfiPosition
+  io.meta.p2Attribute   := s1_providerEntry.p2.attribute
+  io.meta.p2NextPcLow   := s1_providerEntry.p2.nextPcLow
   io.meta.noAnchor      := !s1_anchored
 
   /* *** training ***
@@ -243,6 +246,8 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
     pending.bits.nextPc      := t0_nextPc
     pending.bits.taken       := t0_prediction.taken
     pending.bits.pathHash    := t0_pathHash
+
+    pending.bits.hasSecondBlock := t0_train.hasSecondBlock
   }
 
   /* *** t1: decide what to write, and build it *** */
@@ -290,14 +295,24 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
     Mux(held.taken, heldMeta.p1Counter.getIncrease(), heldMeta.p1Counter.getDecrease())
   )
 
-  entry.p2Valid        := t0_continuesPending
-  entry.p2.cfiPosition := t0_prediction.cfiPosition
-  entry.p2.attribute   := t0_prediction.attribute
-  entry.p2.nextPcLow   := getEntryNextPc(t0_nextPc)
+  // A group that kept a second block consumed its own successor, so the next training event is the group after it and
+  // no continuation can form. The entry's stored second block is what produced that block and s3 verified it, so it is
+  // put back and reinforced instead of dropped. Clearing it here would erase a pair at the very moment it proved
+  // correct, leaving the entry to learn the same pair over and over and never hold one long enough to use it twice.
+  private val heldPairConfirmed = doStrengthen && held.hasSecondBlock && heldMeta.p2Valid
+
+  entry.p2Valid        := t0_continuesPending || heldPairConfirmed
+  entry.p2.cfiPosition := Mux(heldPairConfirmed, heldMeta.p2CfiPosition, t0_prediction.cfiPosition)
+  entry.p2.attribute   := Mux(heldPairConfirmed, heldMeta.p2Attribute, t0_prediction.attribute)
+  entry.p2.nextPcLow   := Mux(heldPairConfirmed, heldMeta.p2NextPcLow, getEntryNextPc(t0_nextPc))
   entry.p2.counter := Mux(
-    writeFresh || !heldMeta.p2Valid,
-    Mux(t0_prediction.taken, PtageCounter.WeakPositive, PtageCounter.WeakNegative),
-    Mux(t0_prediction.taken, heldMeta.p2Counter.getIncrease(), heldMeta.p2Counter.getDecrease())
+    heldPairConfirmed,
+    heldMeta.p2Counter.getIncrease(),
+    Mux(
+      writeFresh || !heldMeta.p2Valid,
+      Mux(t0_prediction.taken, PtageCounter.WeakPositive, PtageCounter.WeakNegative),
+      Mux(t0_prediction.taken, heldMeta.p2Counter.getIncrease(), heldMeta.p2Counter.getDecrease())
+    )
   )
 
   // Each block contributes a whole path hash, the second sitting Shamt above the first, exactly as Phr would have
@@ -309,7 +324,9 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   )
   entry.ghrShamt := held.taken.asUInt +& (t0_continuesPending && t0_prediction.taken).asUInt
 
-  t1_write.valid := t0_valid && (doStrengthen || doCorrect || doAllocate)
+  private val writeHappens = t0_valid && (doStrengthen || doCorrect || doAllocate)
+
+  t1_write.valid := writeHappens
   when(t0_valid && pending.valid) {
     t1_write.bits.table  := writeTable
     t1_write.bits.bank   := heldMeta.bankIdx
@@ -332,6 +349,8 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   XSPerfAccumulate("trainEvent", t0_valid)
   XSPerfAccumulate("trainNoAnchor", t0_valid && t0_meta.noAnchor)
   XSPerfAccumulate("trainPaired", t0_valid && t0_continuesPending)
+  XSPerfAccumulate("trainP2Kept", writeHappens && heldPairConfirmed)
+  XSPerfAccumulate("trainP2Dropped", writeHappens && heldMeta.p2Valid && !entry.p2Valid)
   XSPerfAccumulate("trainStrengthen", t0_valid && doStrengthen)
   XSPerfAccumulate("trainCorrect", t0_valid && doCorrect)
   XSPerfAccumulate("trainAllocate", t0_valid && doAllocate)

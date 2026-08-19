@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
+import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
@@ -31,6 +32,11 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   class MicroBtbIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
     // predict
     val prediction: Valid[Prediction] = Output(Valid(new Prediction))
+
+    // A second, independent lookup, used at s3 to check a block the s3 predictors never looked up. The entries are
+    // flops, so this costs another set of tag comparisons rather than another port.
+    val verifyStartPc: GuardedPc         = Input(GuardedPc())
+    val verify:        Valid[Prediction] = Output(Valid(new Prediction))
   }
 
   val io: MicroBtbIO = IO(new MicroBtbIO)
@@ -100,6 +106,22 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   // update replacer
   replacer.io.predTouch.valid := s1_hit && s1_fire
   replacer.io.predTouch.bits  := s1_hitIdx
+
+  /* *** verification lookup ***
+   * Answers "where does the block starting here leave", for a caller that has its own answer and wants a second
+   * opinion. Entries are written from s3's verified predictions, so an entry is an account of what actually happened
+   * the last time control passed through, arrived at independently of whoever is asking.
+   */
+  private val verifyTag   = getTag(io.verifyStartPc)
+  private val verifyHitOH = VecInit(entries.map(e => e.valid && e.tag === verifyTag)).asUInt
+  private val verifyEntry = Mux1H(verifyHitOH, entries)
+
+  io.verify.valid            := verifyHitOH.orR
+  io.verify.bits.taken       := true.B // an entry only exists for a branch seen taken
+  io.verify.bits.cfiPosition := verifyEntry.slot1.position
+  io.verify.bits.attribute   := verifyEntry.slot1.attribute
+  io.verify.bits.target :=
+    getFullTarget(io.verifyStartPc, verifyEntry.slot1.target, verifyEntry.slot1.targetCarry)
 
   /* *** train stage 0 ***
    * - read entries

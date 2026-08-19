@@ -111,6 +111,11 @@ class PtageMeta(implicit p: Parameters) extends PtageBundle {
   val p1CfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val p1Attribute:   BranchAttribute = new BranchAttribute
   val p2Valid:       Bool            = Bool()
+  // the stored second block, carried so a write that learns nothing new about it can put it back unchanged instead of
+  // dropping it
+  val p2CfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val p2Attribute:   BranchAttribute = new BranchAttribute
+  val p2NextPcLow:   UInt            = UInt(NextPcLowWidth.W)
   // The first group after a redirect was indexed with the history as it stood before the correction landed, so it
   // belongs to no entry and must not be trained. This is the warm-up that indexing a group ahead costs.
   val noAnchor: Bool = Bool()
@@ -130,6 +135,8 @@ class PtagePendingGroup(implicit p: Parameters) extends PtageBundle {
   val taken:       Bool            = Bool()
   // this block's contribution to the path history, kept so the entry can carry a whole group's contribution
   val pathHash: UInt = UInt(PathHashWidth.W)
+  // whether this group already carried its own second block, which decides if a successor can still be expected
+  val hasSecondBlock: Bool = Bool()
 }
 
 /** A pending write to one table's bank, registered so the decision and the write land in different cycles. */

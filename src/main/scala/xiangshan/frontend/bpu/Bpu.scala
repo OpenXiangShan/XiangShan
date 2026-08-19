@@ -155,6 +155,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   private val s2_groupNumBlocks = RegEnable(s1_groupNumBlocks, s1_fire)
   private val s3_groupNumBlocks = RegEnable(s2_groupNumBlocks, s2_fire)
 
+  // the second block and where it starts, carried to s3 so that it can be checked there
+  private val s1_secondBlockIn = Wire(Valid(new Prediction))
+  private val s1_secondStartPc = Wire(PrunedAddr(VAddrBits))
+  private val s2_secondBlock   = RegEnable(s1_secondBlockIn, s1_fire)
+  private val s3_secondBlock   = RegEnable(s2_secondBlock, s2_fire)
+  private val s2_secondStartPc = RegEnable(s1_secondStartPc, s1_fire)
+  private val s3_secondStartPc = RegEnable(s2_secondStartPc, s2_fire)
+
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
   stageCtrl.s0_fire := s0_fire
@@ -323,6 +331,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   s1_group(1).bits.attribute   := s1_secondBlock.bits.attribute
   s1_group(1).bits.target      := s1_secondBlock.bits.target
   s1_groupNumBlocks            := PopCount(s1_group.map(_.valid))
+  s1_secondBlockIn             := s1_group(1)
+  s1_secondStartPc             := s1_prediction.target
 
   private val s1_taken         = s1_prediction.taken
   private val debug_s1UsePtage = s1_taken && usePtage
@@ -399,6 +409,41 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
       )
     )
 
+  /* *** second block verification ***
+   * The s3 predictors look up only where the group starts, so they say nothing about a second block. The micro btb
+   * does: it is written from s3's own verified predictions, so an entry is an account of what happened the last time
+   * control passed through, arrived at independently of whatever pTAGE stored.
+   *
+   * A block it has no entry for cannot be checked, and an unchecked block is not worth keeping. Dropping one costs a
+   * block of width now and gets it back later: the next lookup meets that block as a first block, verifies it the
+   * ordinary way, and fills the micro btb in passing, so the same pair can be checked next time round.
+   */
+  ubtb.io.verifyStartPc := s3_secondStartPc
+
+  private val s3_secondBlockExitDiffers =
+    ubtb.io.verify.bits.cfiPosition =/= s3_secondBlock.bits.cfiPosition ||
+      ubtb.io.verify.bits.attribute =/= s3_secondBlock.bits.attribute ||
+      ubtb.io.verify.bits.target =/= s3_secondBlock.bits.target ||
+      !s3_secondBlock.bits.taken
+
+  // An entry is positive evidence of where a block leaves; its absence is not evidence that a block runs to the end,
+  // only that nothing is on record. Keeping a block on the strength of that would let one through unchecked, so a
+  // block the micro btb cannot account for is treated the same as one it contradicts.
+  private val s3_secondBlockUnverified =
+    s3_secondBlock.valid && (!ubtb.io.verify.valid || s3_secondBlockExitDiffers)
+
+  XSPerfAccumulate("s3SecondBlockChecked", s3_valid && s3_secondBlock.valid)
+  XSPerfAccumulate("s3SecondBlockUnknown", s3_valid && s3_secondBlock.valid && !ubtb.io.verify.valid)
+  XSPerfAccumulate(
+    "s3SecondBlockDisagrees",
+    s3_valid && s3_secondBlock.valid && ubtb.io.verify.valid && s3_secondBlockExitDiffers
+  )
+  // a not-taken second block can never be confirmed, since only a taken exit leaves an entry behind
+  XSPerfAccumulate(
+    "s3SecondBlockNotTaken",
+    s3_valid && s3_secondBlock.valid && !s3_secondBlock.bits.taken
+  )
+
   s3_override := {
     val takenDiff       = s3_taken =/= s3_s1Prediction.taken
     val cfiPositionDiff = Mux1H(s3_firstTakenBranchOH, s3_mbtbCfiPositionDiffVec)
@@ -413,8 +458,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
         )
       )
 
-    s3_valid && (takenDiff || cfiPositionDiff || attributeDiff || targetDiff)
+    s3_valid && (takenDiff || cfiPositionDiff || attributeDiff || targetDiff || s3_secondBlockUnverified)
   }
+
+  // Assigned here rather than with the rest of fastTrain because it depends on the override decision: a second block
+  // that failed verification is dropped along with the group, so the entry that proposed it has not been vindicated.
+  fastTrain.bits.hasSecondBlock := s3_secondBlock.valid && !s3_override
 
   private val s2_phrMeta = RegEnable(phr.io.phrMeta, s1_fire)
   private val s3_phrMeta = RegEnable(s2_phrMeta, s2_fire)
