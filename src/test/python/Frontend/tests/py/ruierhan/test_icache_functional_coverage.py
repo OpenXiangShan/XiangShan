@@ -18,7 +18,10 @@ from env.funcov.py.icache.icache_mainpipe_funcov import (
     _SIGNALS,
 )
 from env.funcov.py.icache.icache_prefetchpipe_funcov import _PREFETCH_SIGNALS
-from env.funcov.py.icache.icache_waylookup_funcov import _SIGNALS as _WAYLOOKUP_SIGNALS
+from env.funcov.py.icache.icache_waylookup_funcov import (
+    _SIGNALS as _WAYLOOKUP_SIGNALS,
+    _WL as _WAYLOOKUP_PREFIX,
+)
 from env.funcov.py.icache.icache_missunit_funcov import _ICACHE, _MISS, _TOP
 from env.funcov.py.icache.icache_hitmiss_funcov import (
     _MAIN as _HITMISS_MAIN,
@@ -65,6 +68,12 @@ class _Recorder:
 
     def set_waylookup_signal(self, key, value, index=0):
         self.env.dut.set(_WAYLOOKUP_SIGNALS[key][index], value)
+
+    def set_waylookup_entry_field(self, entry, field, value):
+        self.env.dut.set(
+            _WAYLOOKUP_PREFIX + f"__Vtogcov__entries_{int(entry)}_{field}",
+            value,
+        )
 
     def set_missunit_signal(self, name, value):
         self.env.dut.set(name, value)
@@ -339,8 +348,8 @@ def test_missunit_capacity_bins_require_full_pool_and_clean_control():
 
 
 def test_icache_waylookup_sampler_contract_has_one_key_per_leaf():
-    assert len(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS) == 42
-    assert len(set(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS)) == 42
+    assert len(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS) == 41
+    assert len(set(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS)) == 41
 
 
 def test_icache_hitmiss_sampler_contract_has_one_key_per_leaf():
@@ -1273,8 +1282,15 @@ def test_waylookup_dual_dequeue_uses_real_two_fetch_observation():
     for key, value in {
         "to_valid": 1,
         "to_ready": 1,
+        "ftq_req1_valid": 1,
         "info1_valid": 1,
         "real_two": 1,
+        "info0_mmio": 0,
+        "info1_mmio": 0,
+        "info0_exception": 0,
+        "info1_exception": 0,
+        "flush": 0,
+        "fencei": 0,
     }.items():
         recorder.set_waylookup_key(key, value)
 
@@ -1288,7 +1304,12 @@ def test_waylookup_capacity_samples_full_queue_without_checkpoint_signal():
     for key, value in {
         "num_valid": 32,
         "write0_valid": 1,
-        "write0_ready": 0,
+        "write1_valid": 1,
+        # Checkpoint-side backpressure deliberately disagrees.
+        "write0_ready": 1,
+        "write1_ready": 1,
+        "flush": 0,
+        "fencei": 0,
     }.items():
         recorder.set_waylookup_key(key, value)
 
@@ -1297,33 +1318,161 @@ def test_waylookup_capacity_samples_full_queue_without_checkpoint_signal():
     assert _hit(recorder, "icache_waylookup_capacity", "full_blocks_write")
 
 
+def test_waylookup_capacity_conditions_do_not_depend_on_backpressure_checkpoint():
+    recorder = _Recorder()
+    for key, value in {
+        "num_valid": 31,
+        "to_valid": 1,
+        "to_ready": 1,
+        "write0_valid": 1,
+        "write1_valid": 1,
+        # These are checkpoint results and must not gate either bin.
+        "write0_ready": 1,
+        "write1_ready": 1,
+        "flush": 0,
+        "fencei": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+
+    sample_icache_waylookup_coverage(recorder, recorder.env, 4)
+
+    assert _hit(recorder, "icache_waylookup_capacity", "one_slot_blocks_dual")
+    assert _hit(recorder, "icache_waylookup_capacity", "read_write_boundary")
+
+
 def test_waylookup_update_uses_mainpipe_response_and_readptr_relative_entry():
     recorder = _Recorder()
     for key, value in {
         "read_value": 3,
         "num_valid": 2,
         "update_valid": 1,
+        "update_corrupt": 0,
+        "update_vset": 9,
+        "update_paddr": 0x55 << 6,
+        "flush": 0,
+        "fencei": 0,
     }.items():
         recorder.set_waylookup_key(key, value)
 
-    recorder.set_waylookup_signal("update_updated", 1, index=3 * 2)
-    recorder.set_waylookup_signal("update_same_tag", 1, index=3 * 2)
+    recorder.set_waylookup_entry_field(3, "vSetIdx_0", 9)
+    recorder.set_waylookup_entry_field(3, "pTag", 0x55)
     sample_icache_waylookup_coverage(recorder, recorder.env, 4)
 
     assert _hit(recorder, "icache_waylookup_update", "update_head")
-    assert _hit(recorder, "icache_waylookup_update", "update_same_tag")
+
+
+def test_waylookup_update_head_requires_matching_ptag_and_clean_response():
+    recorder = _Recorder()
+    for key, value in {
+        "read_value": 0,
+        "num_valid": 1,
+        "update_valid": 1,
+        "update_corrupt": 0,
+        "update_vset": 4,
+        "update_paddr": 0x77 << 6,
+        "flush": 0,
+        "fencei": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    recorder.set_waylookup_entry_field(0, "vSetIdx_0", 4)
+    recorder.set_waylookup_entry_field(0, "pTag", 0x78)
+
+    sample_icache_waylookup_coverage(recorder, recorder.env, 5)
+
+    assert not _hit(recorder, "icache_waylookup_update", "update_head")
+
+    recorder.set_waylookup_key("update_corrupt", 1)
+    recorder.set_waylookup_entry_field(0, "pTag", 0x77)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 6)
+
+    assert not _hit(recorder, "icache_waylookup_update", "update_head")
 
 
 def test_waylookup_corrupt_update_requires_no_metadata_update():
     recorder = _Recorder()
-    recorder.set_waylookup_key("read_value", 0)
-    recorder.set_waylookup_key("num_valid", 1)
-    recorder.set_waylookup_key("update_valid", 1)
-    recorder.set_waylookup_key("update_corrupt", 1)
+    for key, value in {
+        "read_value": 0,
+        "num_valid": 1,
+        "update_valid": 1,
+        "update_corrupt": 1,
+        "update_vset": 3,
+        "update_paddr": 0x44 << 6,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    recorder.set_waylookup_entry_field(0, "vSetIdx_0", 3)
+    recorder.set_waylookup_entry_field(0, "pTag", 0x44)
 
     sample_icache_waylookup_coverage(recorder, recorder.env, 5)
 
     assert _hit(recorder, "icache_waylookup_update", "update_corrupt_ignored")
+
+
+def test_waylookup_corrupt_update_can_match_a_nonhead_entry():
+    recorder = _Recorder()
+    for key, value in {
+        "read_value": 4,
+        "num_valid": 2,
+        "update_valid": 1,
+        "update_corrupt": 1,
+        "update_vset": 6,
+        "update_paddr": 0x66 << 6,
+        "update_waymask": 2,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    recorder.set_waylookup_entry_field(5, "vSetIdx_1", 6)
+    recorder.set_waylookup_entry_field(5, "waymask_1", 2)
+    recorder.set_waylookup_entry_field(5, "pTag", 0x67)
+
+    sample_icache_waylookup_coverage(recorder, recorder.env, 6)
+
+    assert _hit(recorder, "icache_waylookup_update", "update_corrupt_ignored")
+
+
+def test_waylookup_second_update_requires_a_pre_stall_second_ftq_request():
+    recorder = _Recorder()
+    for key, value in {
+        "read_value": 0,
+        "num_valid": 2,
+        "update_valid": 1,
+        "ftq_req1_valid": 1,
+        "flush": 0,
+        "fencei": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    recorder.set_waylookup_signal("update_updated", 1, index=2)
+
+    sample_icache_waylookup_coverage(recorder, recorder.env, 7)
+
+    assert _hit(recorder, "icache_waylookup_update", "update_second_entry_stall")
+
+
+def test_waylookup_entry_fields_requires_a_normal_write():
+    recorder = _Recorder()
+    for key, value in {
+        "write0_valid": 1,
+        "write0_ready": 1,
+        "write0_exception": 0,
+        "flush": 0,
+        "fencei": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+
+    sample_icache_waylookup_coverage(recorder, recorder.env, 8)
+
+    assert _hit(recorder, "icache_waylookup_queue", "entry_fields")
+
+    rejected = _Recorder()
+    for key, value in {
+        "write0_valid": 1,
+        "write0_ready": 1,
+        "write0_exception": 1,
+        "flush": 0,
+        "fencei": 0,
+    }.items():
+        rejected.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(rejected, rejected.env, 9)
+
+    assert not _hit(rejected, "icache_waylookup_queue", "entry_fields")
 
 
 def test_waylookup_exception_dequeue_requires_exception_pointer_at_readptr():
@@ -1348,28 +1497,162 @@ def test_waylookup_exception_dequeue_requires_exception_pointer_at_readptr():
     assert _hit(recorder, "icache_waylookup_exception", "exception_dequeue")
 
 
+def test_waylookup_exception_capture_uses_port0_and_rejects_clearing_controls():
+    recorder = _Recorder()
+    for key, value in {
+        "write0_valid": 1,
+        "write0_ready": 1,
+        "write0_exception": 1,
+        "write1_valid": 1,
+        "flush": 0,
+        "fencei": 0,
+        "bpu_flush_match": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 8)
+    assert _hit(recorder, "icache_waylookup_exception", "exception_capture")
+
+    for control, value in (("flush", 1), ("fencei", 1), ("bpu_flush_match", 1)):
+        blocked = _Recorder()
+        for key, signal_value in {
+            "write0_valid": 1,
+            "write0_ready": 1,
+            "write0_exception": 1,
+            "write1_valid": 0,
+            "flush": 0,
+            "fencei": 0,
+            "bpu_flush_match": 0,
+        }.items():
+            blocked.set_waylookup_key(key, signal_value)
+        blocked.set_waylookup_key(control, value)
+        sample_icache_waylookup_coverage(blocked, blocked.env, 9)
+        assert not _hit(blocked, "icache_waylookup_exception", "exception_capture")
+
+
+def test_waylookup_exception_write_blocking_splits_single_and_dual_requests():
+    single = _Recorder()
+    for key, value in {
+        "exception_valid": 1,
+        "write0_valid": 1,
+        "write1_valid": 0,
+        "write0_ready": 1,
+        "flush": 0,
+        "fencei": 0,
+        "bpu_flush_match": 0,
+    }.items():
+        single.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(single, single.env, 10)
+    assert _hit(single, "icache_waylookup_exception", "exception_blocks_single_write")
+    assert not _hit(single, "icache_waylookup_exception", "exception_blocks_dual_write")
+
+    dual = _Recorder()
+    for key, value in {
+        "exception_valid": 1,
+        "write0_valid": 1,
+        "write1_valid": 1,
+        "write0_ready": 1,
+        "write1_ready": 1,
+        "flush": 0,
+        "fencei": 0,
+        "bpu_flush_match": 0,
+    }.items():
+        dual.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(dual, dual.env, 11)
+    assert not _hit(dual, "icache_waylookup_exception", "exception_blocks_single_write")
+    assert _hit(dual, "icache_waylookup_exception", "exception_blocks_dual_write")
+
+
+def test_waylookup_exception_waits_flush_tracks_a_matched_dequeue():
+    recorder = _Recorder()
+    for key, value in {
+        "to_valid": 1,
+        "to_ready": 1,
+        "read_flag": 0,
+        "read_value": 4,
+        "write_flag": 0,
+        "write_value": 5,
+        "exception_valid": 1,
+        "exception_ptr_flag": 0,
+        "exception_ptr_value": 4,
+        "flush": 0,
+        "bpu_flush": 0,
+        "bpu_flush_match": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 12)
+    assert not _hit(recorder, "icache_waylookup_exception", "exception_waits_flush")
+
+    recorder.set_waylookup_key("to_valid", 0)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 13)
+    assert _hit(recorder, "icache_waylookup_exception", "exception_waits_flush")
+
+    cleared = _Recorder()
+    for key, value in {
+        "to_valid": 1,
+        "to_ready": 1,
+        "read_flag": 0,
+        "read_value": 4,
+        "write_flag": 0,
+        "write_value": 5,
+        "exception_valid": 1,
+        "exception_ptr_flag": 0,
+        "exception_ptr_value": 4,
+        "flush": 0,
+        "bpu_flush": 0,
+        "bpu_flush_match": 0,
+    }.items():
+        cleared.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(cleared, cleared.env, 14)
+    cleared.set_waylookup_key("to_valid", 0)
+    cleared.set_waylookup_key("flush", 1)
+    sample_icache_waylookup_coverage(cleared, cleared.env, 15)
+    cleared.set_waylookup_key("flush", 0)
+    sample_icache_waylookup_coverage(cleared, cleared.env, 16)
+    assert not _hit(cleared, "icache_waylookup_exception", "exception_waits_flush")
+
+    bpu_cleared = _Recorder()
+    for key, value in {
+        "to_valid": 1,
+        "to_ready": 1,
+        "read_flag": 0,
+        "read_value": 4,
+        "write_flag": 0,
+        "write_value": 5,
+        "exception_valid": 1,
+        "exception_ptr_flag": 0,
+        "exception_ptr_value": 4,
+        "flush": 0,
+        "bpu_flush": 0,
+        "bpu_flush_match": 0,
+    }.items():
+        bpu_cleared.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(bpu_cleared, bpu_cleared.env, 17)
+    bpu_cleared.set_waylookup_key("to_valid", 0)
+    bpu_cleared.set_waylookup_key("bpu_flush", 1)
+    bpu_cleared.set_waylookup_key("bpu_flush_match", 1)
+    sample_icache_waylookup_coverage(bpu_cleared, bpu_cleared.env, 18)
+    bpu_cleared.set_waylookup_key("bpu_flush", 0)
+    bpu_cleared.set_waylookup_key("bpu_flush_match", 0)
+    sample_icache_waylookup_coverage(bpu_cleared, bpu_cleared.env, 19)
+    assert not _hit(bpu_cleared, "icache_waylookup_exception", "exception_waits_flush")
+
+
 def test_waylookup_exception_written_into_empty_queue_is_not_bypassed():
     recorder = _Recorder()
     for key, value in {
         "empty": 1,
         "write0_valid": 1,
         "write0_ready": 1,
+        "write1_valid": 0,
         "write0_exception": 1,
-        "exception_valid": 0,
-        "to_valid": 0,
+        "to_ready": 1,
+        "to_valid": 1,
+        "flush": 0,
+        "fencei": 0,
+        "bpu_flush_match": 0,
     }.items():
         recorder.set_waylookup_key(key, value)
-    sample_icache_waylookup_coverage(recorder, recorder.env, 8)
-
-    for key, value in {
-        "empty": 1,
-        "write0_valid": 0,
-        "write0_exception": 0,
-        "exception_valid": 1,
-        "to_valid": 0,
-    }.items():
-        recorder.set_waylookup_key(key, value)
-    sample_icache_waylookup_coverage(recorder, recorder.env, 9)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 17)
 
     assert _hit(recorder, "icache_waylookup_exception", "exception_no_bypass")
 
@@ -1379,13 +1662,217 @@ def test_waylookup_flush_suppresses_nonempty_read_output():
     for key, value in {
         "flush": 1,
         "num_valid": 1,
-        "to_valid": 0,
+        # Output suppression is a checkpoint, not part of the scene predicate.
+        "to_valid": 1,
     }.items():
         recorder.set_waylookup_key(key, value)
 
     sample_icache_waylookup_coverage(recorder, recorder.env, 8)
 
     assert _hit(recorder, "icache_waylookup_flush", "flush_wins_read")
+
+
+def test_waylookup_global_flush_requires_a_nonempty_queue():
+    recorder = _Recorder()
+    recorder.set_waylookup_key("flush", 1)
+    recorder.set_waylookup_key("num_valid", 0)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 9)
+    assert not _hit(recorder, "icache_waylookup_flush", "global_flush_clears_all")
+
+    recorder.set_waylookup_key("num_valid", 1)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 10)
+    assert _hit(recorder, "icache_waylookup_flush", "global_flush_clears_all")
+
+
+def test_waylookup_flush_write_and_update_bins_sample_the_concurrent_condition():
+    recorder = _Recorder()
+    for key, value in {
+        "flush": 1,
+        "write0_valid": 1,
+        "write0_ready": 1,
+        "update_valid": 1,
+        # Pointer reset is deliberately absent: it belongs to the checkpoint.
+        "read_flag": 1,
+        "read_value": 7,
+        "write_flag": 1,
+        "write_value": 11,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+
+    sample_icache_waylookup_coverage(recorder, recorder.env, 11)
+
+    assert _hit(recorder, "icache_waylookup_flush", "flush_wins_write")
+    assert _hit(recorder, "icache_waylookup_flush", "flush_wins_update")
+
+
+def test_waylookup_flush_recovery_tracks_the_first_later_accepted_write():
+    recorder = _Recorder()
+    for key, value in {
+        "flush": 1,
+        "num_valid": 1,
+        "write0_valid": 0,
+        "write0_ready": 1,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 12)
+
+    recorder.set_waylookup_key("flush", 0)
+    recorder.set_waylookup_key("num_valid", 0)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 13)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 14)
+    assert not _hit(recorder, "icache_waylookup_flush", "flush_recovery")
+
+    recorder.set_waylookup_key("write0_valid", 1)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 15)
+    assert _hit(recorder, "icache_waylookup_flush", "flush_recovery")
+
+
+def test_waylookup_nonmatching_bpu_flush_requires_a_nonempty_queue():
+    recorder = _Recorder()
+    for key, value in {
+        "bpu_flush": 1,
+        "bpu_flush_match": 0,
+        "num_valid": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 16)
+    assert not _hit(recorder, "icache_waylookup_flush", "bpu_flush_nonmatching")
+
+    recorder.set_waylookup_key("num_valid", 1)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 17)
+    assert _hit(recorder, "icache_waylookup_flush", "bpu_flush_nonmatching")
+
+
+def _set_waylookup_dual_write(recorder, *, write_value=4):
+    for key, value in {
+        "write_flag": 0,
+        "write_value": write_value,
+        "write0_valid": 1,
+        "write1_valid": 1,
+        "write0_ready": 1,
+        "write1_ready": 1,
+        "flush": 0,
+        "fencei": 0,
+        "bpu_flush": 0,
+        "bpu_flush_match": 0,
+        "empty": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+
+
+def test_waylookup_two_prefetch_flush_tracks_an_earlier_dual_write():
+    recorder = _Recorder()
+    _set_waylookup_dual_write(recorder)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 18)
+    assert not _hit(recorder, "icache_waylookup_flush", "bpu_flush_two_prefetch")
+
+    recorder.set_waylookup_key("write0_valid", 0)
+    recorder.set_waylookup_key("write1_valid", 0)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 19)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 20)
+
+    recorder.set_waylookup_key("bpu_flush", 1)
+    recorder.set_waylookup_key("bpu_flush_match", 1)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 21)
+    assert _hit(recorder, "icache_waylookup_flush", "bpu_flush_two_prefetch")
+
+
+def test_waylookup_two_prefetch_flush_rejects_same_cycle_and_fenced_history():
+    same_cycle = _Recorder()
+    _set_waylookup_dual_write(same_cycle)
+    same_cycle.set_waylookup_key("bpu_flush", 1)
+    same_cycle.set_waylookup_key("bpu_flush_match", 1)
+    sample_icache_waylookup_coverage(same_cycle, same_cycle.env, 22)
+    assert not _hit(same_cycle, "icache_waylookup_flush", "bpu_flush_two_prefetch")
+
+    fenced = _Recorder()
+    _set_waylookup_dual_write(fenced)
+    sample_icache_waylookup_coverage(fenced, fenced.env, 23)
+    fenced.set_waylookup_key("write0_valid", 0)
+    fenced.set_waylookup_key("write1_valid", 0)
+    fenced.set_waylookup_key("fencei", 1)
+    sample_icache_waylookup_coverage(fenced, fenced.env, 24)
+    fenced.set_waylookup_key("fencei", 0)
+    fenced.set_waylookup_key("bpu_flush", 1)
+    fenced.set_waylookup_key("bpu_flush_match", 1)
+    sample_icache_waylookup_coverage(fenced, fenced.env, 25)
+    assert not _hit(fenced, "icache_waylookup_flush", "bpu_flush_two_prefetch")
+
+
+def test_waylookup_single_read_wrap_requires_an_exact_single_dequeue_transition():
+    recorder = _Recorder()
+    for key, value in {
+        "read_flag": 0,
+        "read_value": 31,
+        "to_valid": 1,
+        "to_ready": 1,
+        "real_two": 0,
+        "flush": 0,
+        "fencei": 0,
+        "bpu_flush_match": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 26)
+
+    recorder.set_waylookup_key("read_flag", 1)
+    recorder.set_waylookup_key("read_value", 0)
+    recorder.set_waylookup_key("to_valid", 0)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 27)
+    assert _hit(recorder, "icache_waylookup_wrap", "single_read_wrap")
+
+    flushed = _Recorder()
+    for key, value in {
+        "read_flag": 1,
+        "read_value": 31,
+        "to_valid": 1,
+        "to_ready": 1,
+        "real_two": 0,
+        "flush": 1,
+        "fencei": 0,
+        "bpu_flush_match": 0,
+    }.items():
+        flushed.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(flushed, flushed.env, 28)
+    flushed.set_waylookup_key("read_flag", 0)
+    flushed.set_waylookup_key("read_value", 0)
+    sample_icache_waylookup_coverage(flushed, flushed.env, 29)
+    assert not _hit(flushed, "icache_waylookup_wrap", "single_read_wrap")
+
+
+def test_waylookup_single_write_wrap_requires_port0_only_and_exact_pointer_step():
+    recorder = _Recorder()
+    for key, value in {
+        "write_flag": 0,
+        "write_value": 31,
+        "write0_valid": 1,
+        "write0_ready": 1,
+        "write1_valid": 0,
+        "flush": 0,
+        "fencei": 0,
+        "bpu_flush_match": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 30)
+
+    recorder.set_waylookup_key("write_flag", 1)
+    recorder.set_waylookup_key("write_value", 0)
+    recorder.set_waylookup_key("write0_valid", 0)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 31)
+    assert _hit(recorder, "icache_waylookup_wrap", "single_write_wrap")
+
+
+def test_waylookup_dual_write_wrap_uses_the_prior_fire_and_exact_pointer_step():
+    recorder = _Recorder()
+    _set_waylookup_dual_write(recorder, write_value=31)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 30)
+
+    recorder.set_waylookup_key("write_flag", 1)
+    recorder.set_waylookup_key("write_value", 1)
+    recorder.set_waylookup_key("write0_valid", 0)
+    recorder.set_waylookup_key("write1_valid", 0)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 31)
+    assert _hit(recorder, "icache_waylookup_wrap", "dual_wrap")
+    assert not _hit(recorder, "icache_waylookup_wrap", "single_write_wrap")
 
 
 def test_prefetch_ftq_accept_samples_entry_condition():

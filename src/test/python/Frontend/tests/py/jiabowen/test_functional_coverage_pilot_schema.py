@@ -24,14 +24,18 @@ ICACHE_PREFETCH_FUNCOV_BIN_IDS = {
 }
 
 ICACHE_MISSUNIT_FUNCOV_BIN_IDS = {
-    *(f"BIN-{index:03d}" for index in range(686, 717)),
+    *(f"BIN-{index:03d}" for index in range(686, 717) if index not in (697, 716)),
+    "BIN-817",
     "BIN-818",
     "BIN-819",
     "BIN-820",
+    "BIN-821",
 }
 
 ICACHE_WAYLOOKUP_FUNCOV_BIN_IDS = {
-    *(f"BIN-{index:03d}" for index in range(717, 759)),
+    *(f"BIN-{index:03d}" for index in range(717, 759) if index not in (725, 729, 730)),
+    "BIN-822",
+    "BIN-823",
 }
 
 ICACHE_HITMISS_FUNCOV_BIN_IDS = {
@@ -79,7 +83,7 @@ def test_active_pilot_has_global_unique_identifiers_and_mappings():
 
     summary = validate_pilot_schema(pilot_path)
 
-    assert summary == {"rows": 602, "bin_ids": 602, "mapping_keys": 602, "legacy_ids": 4}
+    assert summary == {"rows": 604, "bin_ids": 604, "mapping_keys": 604, "legacy_ids": 4}
 
 
 def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
@@ -164,7 +168,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
     active = [row for row in rows if row["Coverpoint"].strip()]
     legacy_bpu_ftq = [row for row in rows if "旧BPU_FTQ" in row["映射测试点路径"]]
 
-    assert len(active) == 444
+    assert len(active) == 446
     assert {row["Bin_ID"] for row in active} == {
         *(f"BIN-{index:03d}" for index in range(401, 424)),
         *(f"BIN-{index:03d}" for index in range(424, 433)),
@@ -182,18 +186,10 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
         *(f"BIN-{index:03d}" for index in range(674, 676)),
         *(f"BIN-{index:03d}" for index in range(650, 674)),
         *(f"BIN-{index:03d}" for index in range(677, 686)),
-        *(f"BIN-{index:03d}" for index in range(686, 717)),
-        *(f"BIN-{index:03d}" for index in range(717, 759)),
-        *(f"BIN-{index:03d}" for index in range(759, 769)),
-        *(f"BIN-{index:03d}" for index in range(801, 824)),
-        "BIN-824",
-        *(f"BIN-{index:03d}" for index in range(825, 832)),
-        *(f"BIN-{index:03d}" for index in range(832, 837)),
-        *(f"BIN-{index:03d}" for index in range(837, 844)),
-        *(f"BIN-{index:03d}" for index in range(844, 854)),
-        *(f"BIN-{index:03d}" for index in range(854, 889)),
-        *(f"BIN-{index:03d}" for index in range(889, 899)),
-        *(f"BIN-{index:03d}" for index in range(899, 1005)),
+        *(f"BIN-{index:03d}" for index in range(686, 717) if index not in (697, 716)),
+        *(f"BIN-{index:03d}" for index in range(717, 759) if index not in (725, 729, 730)),
+        *(f"BIN-{index:03d}" for index in range(759, 781)),
+        *(f"BIN-{index:03d}" for index in range(801, 1012)),
     }
     assert legacy_bpu_ftq
     assert all(not row["Coverpoint"].strip() for row in legacy_bpu_ftq)
