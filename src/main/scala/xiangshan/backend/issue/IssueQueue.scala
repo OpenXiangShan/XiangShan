@@ -79,7 +79,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     s"isAllSimp: ${params.isAllSimp}, isAllComp: ${params.isAllComp}")
 
   require(params.numExu <= 2, "IssueQueue has not supported more than 2 deq ports")
-  require(params.numEnq <= 2, "IssueQueue has not supported more than 2 enq ports")
+  require(params.numEnq > 0, "IssueQueue should have at least one enq port")
   require(params.numSimp == 0 || params.numSimp >= params.numEnq, "numSimp should be 0 or at least not less than numEnq")
   require(params.numComp == 0 || params.numComp >= params.numEnq, "numComp should be 0 or at least not less than numEnq")
   val param: IssueBlockParams = params
@@ -279,6 +279,17 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   val othersEntryEnqSelVec = Option.when(params.isAllComp || params.isAllSimp)(Wire(Vec(params.numEnq, UInt((params.numEntries - params.numEnq).W))))
   val simpAgeDetectRequest = Option.when(params.hasCompAndSimp)(Wire(Vec(params.numDeq + params.numEnq, UInt(params.numSimp.W))))
   simpAgeDetectRequest.foreach(_ := 0.U.asTypeOf(simpAgeDetectRequest.get))
+
+  private def connectSimpTransRequests(): Unit = {
+    val simpTransBaseRequest = VecInit(requestForTrans.drop(params.numEnq).take(params.numSimp)).asUInt
+    for (enqIdx <- 0 until params.numEnq) {
+      val prevSelections = simpEntryOldestSel.get
+        .slice(params.numDeq, params.numDeq + enqIdx)
+        .map(_.bits)
+        .foldLeft(0.U(params.numSimp.W))(_ | _)
+      simpAgeDetectRequest.get(params.numDeq + enqIdx) := simpTransBaseRequest & (~prevSelections).asUInt
+    }
+  }
 
   // when vf exu (with og2) wake up int/mem iq (without og2), the wakeup signals should delay 1 cycle
   // as vf exu's min latency is 1, we do not need consider og0cancel
@@ -519,10 +530,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     else {
       simpAgeDetectRequest.get(0) := canIssueVec.asUInt(params.numEnq + params.numSimp - 1, params.numEnq)
       simpAgeDetectRequest.get(1) := DontCare
-      simpAgeDetectRequest.get(params.numDeq) := VecInit(requestForTrans.drop(params.numEnq).take(params.numSimp)).asUInt
-      if (params.numEnq == 2) {
-        simpAgeDetectRequest.get(params.numDeq + 1) := VecInit(requestForTrans.drop(params.numEnq).take(params.numSimp)).asUInt & (~simpEntryOldestSel.get(params.numDeq).bits).asUInt
-      }
+      connectSimpTransRequests()
 
       simpEntryOldestSel.get := AgeDetector(numEntries = params.numSimp,
         enq = simpEntryEnqSelVec.get,
@@ -589,10 +597,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       deqCanIssue.zipWithIndex.foreach { case (req, i) =>
         simpAgeDetectRequest.get(i) := req(params.numEnq + params.numSimp - 1, params.numEnq)
       }
-      simpAgeDetectRequest.get(params.numDeq) := VecInit(requestForTrans.drop(params.numEnq).take(params.numSimp)).asUInt
-      if (params.numEnq == 2) {
-        simpAgeDetectRequest.get(params.numDeq + 1) := VecInit(requestForTrans.drop(params.numEnq).take(params.numSimp)).asUInt & (~simpEntryOldestSel.get(params.numDeq).bits).asUInt
-      }
+      connectSimpTransRequests()
 
       simpEntryOldestSel.get := AgeDetector(numEntries = params.numSimp,
         enq = simpEntryEnqSelVec.get,

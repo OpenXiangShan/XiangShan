@@ -21,7 +21,7 @@ import xiangshan.mem.Bundles.MemWaitUpdateReqBundle
 class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule {
   override def desiredName: String = params.getEntryName
 
-  require(params.numEnq <= 2, "number of enq should be no more than 2")
+  require(params.numEnq > 0, "number of enq should be greater than 0")
 
   private val EnqEntryNum         = params.numEnq
   private val OthersEntryNum      = params.numEntries - params.numEnq
@@ -111,6 +111,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val debugSrcReadyVec       = OptionWrapper(backendParams.debugEn, Wire(Vec(params.numEntries, Bool())))
   //cancel bypass
   val cancelBypassVec        = Wire(Vec(params.numEntries, Bool()))
+  val enqValidForTrans       = validForTrans.take(EnqEntryNum)
 
 
   //enqEntries
@@ -159,15 +160,15 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
 
     // we only allow all or none of the enq entries transfering to others entries.
     enqCanTrans2Others.get := PopCount(validVec.take(EnqEntryNum)) <= PopCount(validVec.takeRight(OthersEntryNum).map(!_))
-    // othersTransSelVec(i) is the target others entry for enq entry [i].
-    // note that dispatch does not guarantee the validity of enq entries with low index.
-    // that means in some cases enq entry [0] is invalid while enq entry [1] is valid.
-    // in this case, enq entry [1] should use result [0] of TransPolicy.
-    othersTransSelVec.get(0).valid := othersTransPolicy.get.io.enqSelOHVec(0).valid && validForTrans(0)
-    othersTransSelVec.get(0).bits  := othersTransPolicy.get.io.enqSelOHVec(0).bits
-    if (params.numEnq == 2) {
-      othersTransSelVec.get(1).valid := Mux(!validForTrans(0), othersTransPolicy.get.io.enqSelOHVec(0).valid, othersTransPolicy.get.io.enqSelOHVec(1).valid) && validForTrans(1)
-      othersTransSelVec.get(1).bits  := Mux(!validForTrans(0), othersTransPolicy.get.io.enqSelOHVec(0).bits,  othersTransPolicy.get.io.enqSelOHVec(1).bits)
+    // Compact sparse valid enq ports onto the policy outputs so later valid ports reuse earlier picks.
+    othersTransSelVec.get.zipWithIndex.foreach { case (selOH, enqIdx) =>
+      val rank = if (enqIdx == 0) 0.U else PopCount(enqValidForTrans.take(enqIdx))
+      selOH.valid := enqValidForTrans(enqIdx) && Mux1H(
+        othersTransPolicy.get.io.enqSelOHVec.indices.map(selIdx => (rank === selIdx.U) -> othersTransPolicy.get.io.enqSelOHVec(selIdx).valid)
+      )
+      selOH.bits := Mux1H(
+        othersTransPolicy.get.io.enqSelOHVec.indices.map(selIdx => (rank === selIdx.U) -> othersTransPolicy.get.io.enqSelOHVec(selIdx).bits)
+      )
     }
 
     finalOthersTransSelVec.get.zip(othersTransSelVec.get).zipWithIndex.foreach { case ((finalOH, selOH), enqIdx) =>
@@ -197,19 +198,24 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
       canTrans := !enqCanTrans2Comp.get && PopCount(validVec.takeRight(CompEntryNum).map(!_)) >= (idx + 1).U
     }
 
-    // simp/compTransSelVec(i) is the target simp/comp entry for enq entry [i].
-    // note that dispatch does not guarantee the validity of enq entries with low index.
-    // that means in some cases enq entry [0] is invalid while enq entry [1] is valid.
-    // in this case, enq entry [1] should use result [0] of TransPolicy.
-    simpTransSelVec.get(0).valid := simpTransPolicy.get.io.enqSelOHVec(0).valid && validForTrans(0)
-    simpTransSelVec.get(0).bits  := simpTransPolicy.get.io.enqSelOHVec(0).bits
-    compTransSelVec.get(0).valid := compTransPolicy.get.io.enqSelOHVec(0).valid && validForTrans(0)
-    compTransSelVec.get(0).bits  := compTransPolicy.get.io.enqSelOHVec(0).bits
-    if (params.numEnq == 2) {
-      simpTransSelVec.get(1).valid := Mux(!validForTrans(0), simpTransPolicy.get.io.enqSelOHVec(0).valid, simpTransPolicy.get.io.enqSelOHVec(1).valid) && validForTrans(1)
-      simpTransSelVec.get(1).bits  := Mux(!validForTrans(0), simpTransPolicy.get.io.enqSelOHVec(0).bits,  simpTransPolicy.get.io.enqSelOHVec(1).bits)
-      compTransSelVec.get(1).valid := Mux(!validForTrans(0), compTransPolicy.get.io.enqSelOHVec(0).valid, compTransPolicy.get.io.enqSelOHVec(1).valid) && validForTrans(1)
-      compTransSelVec.get(1).bits  := Mux(!validForTrans(0), compTransPolicy.get.io.enqSelOHVec(0).bits,  compTransPolicy.get.io.enqSelOHVec(1).bits)
+    // Compact sparse valid enq ports onto the policy outputs so later valid ports reuse earlier picks.
+    simpTransSelVec.get.zipWithIndex.foreach { case (selOH, enqIdx) =>
+      val rank = if (enqIdx == 0) 0.U else PopCount(enqValidForTrans.take(enqIdx))
+      selOH.valid := enqValidForTrans(enqIdx) && Mux1H(
+        simpTransPolicy.get.io.enqSelOHVec.indices.map(selIdx => (rank === selIdx.U) -> simpTransPolicy.get.io.enqSelOHVec(selIdx).valid)
+      )
+      selOH.bits := Mux1H(
+        simpTransPolicy.get.io.enqSelOHVec.indices.map(selIdx => (rank === selIdx.U) -> simpTransPolicy.get.io.enqSelOHVec(selIdx).bits)
+      )
+    }
+    compTransSelVec.get.zipWithIndex.foreach { case (selOH, enqIdx) =>
+      val rank = if (enqIdx == 0) 0.U else PopCount(enqValidForTrans.take(enqIdx))
+      selOH.valid := enqValidForTrans(enqIdx) && Mux1H(
+        compTransPolicy.get.io.enqSelOHVec.indices.map(selIdx => (rank === selIdx.U) -> compTransPolicy.get.io.enqSelOHVec(selIdx).valid)
+      )
+      selOH.bits := Mux1H(
+        compTransPolicy.get.io.enqSelOHVec.indices.map(selIdx => (rank === selIdx.U) -> compTransPolicy.get.io.enqSelOHVec(selIdx).bits)
+      )
     }
 
     finalSimpTransSelVec.get.zip(simpTransSelVec.get).zipWithIndex.foreach { case ((finalOH, selOH), enqIdx) =>
