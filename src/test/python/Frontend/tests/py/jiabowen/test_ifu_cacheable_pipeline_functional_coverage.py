@@ -90,9 +90,12 @@ def _set_request(
     return blocks
 
 
-def _set_s1(dut, blocks, *, valid=1, ready=1):
+def _set_s1(dut, blocks, *, valid=1, ready=1, fire=None, req_is_uncache=0, exception=0):
     dut.set(_SIGNALS["s1_valid"][0], valid)
     dut.set(_SIGNALS["s1_ready"][0], ready)
+    dut.set(_SIGNALS["s1_fire"][0], int(valid and ready) if fire is None else fire)
+    dut.set(_SIGNALS["s1_req_uncache"][0], req_is_uncache)
+    dut.set(_SIGNALS["s1_exception"][0], exception)
     for index, block in enumerate(blocks):
         for field, value in block.items():
             if field in {"data", "maybeRvcMap"}:
@@ -119,6 +122,11 @@ def test_cacheable_single_block_transfer_requires_matching_s1_metadata(tmp_path)
     assert recorder.key_hit("ifu_cacheable_window", "single_block")
     assert recorder.key_hit("ifu_cacheable_metadata", "first_ftq_preserved")
     assert recorder.key_hit("ifu_cacheable_metadata", "not_taken_preserved")
+    assert recorder.key_hit("ifu_cacheable_s1", "fire_to_s2")
+    assert recorder.key_hit("ifu_cacheable_s1", "source_ftq_address_matched")
+    assert recorder.key_hit("ifu_cacheable_s1", "s0_accept_to_s1_valid")
+    assert recorder.key_hit("ifu_cacheable_s1", "single_cacheable_path")
+    assert recorder.key_hit("ifu_cacheable_s1", "cacheable_no_uncache")
     assert not recorder.key_hit("ifu_cacheable_metadata", "second_ftq_preserved")
 
 
@@ -156,6 +164,63 @@ def test_cacheable_dual_block_transfer_preserves_both_ftq_sources(tmp_path):
     assert recorder.key_hit("ifu_cacheable_metadata", "first_ftq_preserved")
     assert recorder.key_hit("ifu_cacheable_metadata", "second_ftq_preserved")
     assert not recorder.key_hit("ifu_cacheable_metadata", "not_taken_preserved")
+    assert recorder.key_hit("ifu_cacheable_s1", "dual_cacheable_path")
+
+
+def test_cacheable_metadata_diversity_bins_are_transaction_scoped(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    transactions = [
+        (0x40000000, 32, (0, 31), (0, 1)),
+        (0x40000001, 16, (1, 7), (0, 2)),
+        (0x40000010, 16, (1, 7), (0, 3)),
+        (0x40000018, 15, (1, 6), (0, 4)),
+    ]
+    cycle = 1
+    for start, size, taken, ftq in transactions:
+        blocks = _set_request(dut, start0=start, size0=size, taken0=taken, ftq0=ftq)
+        sample_ifu_cacheable_pipeline_coverage(recorder, env, cycle)
+        cycle += 1
+        _idle_request(dut)
+        _set_s1(dut, blocks)
+        sample_ifu_cacheable_pipeline_coverage(recorder, env, cycle)
+        cycle += 1
+
+    assert recorder.key_hit("ifu_cacheable_address", "head_mid_tail_seen")
+    assert recorder.key_hit("ifu_cacheable_address", "align_2b_4b_seen")
+    assert recorder.key_hit("ifu_cacheable_range", "sequential_full_fetch")
+    assert recorder.key_hit("ifu_cacheable_metadata", "taken_offset_preserved")
+    assert recorder.key_hit("ifu_cacheable_range", "fetch_size_variation")
+    assert recorder.key_hit("ifu_cacheable_metadata", "ftq_pointer_progression")
+
+
+def test_cacheable_cross_cacheline_dual_block_is_distinct(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    second = {
+        "valid": 1,
+        "ftqIdx_flag": 0,
+        "ftqIdx_value": 8,
+        "startVAddr_addr": 0x40000020,
+        "takenCfiOffset_valid": 1,
+        "takenCfiOffset_bits": 7,
+        "range": 0xFF,
+        "size": 8,
+        "data": 0x55667788,
+        "maybeRvcMap": 0x33,
+    }
+    blocks = _set_request(
+        dut,
+        start0=0x40000018,
+        ftq0=(0, 7),
+        size0=8,
+        taken0=(1, 7),
+        second=second,
+    )
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+    _idle_request(dut)
+    _set_s1(dut, blocks)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+
+    assert recorder.key_hit("ifu_cacheable_window", "cross_cacheline_dual_block")
 
 
 def test_cacheable_ingress_payload_must_stay_stable_while_backpressured(tmp_path):
@@ -176,6 +241,16 @@ def test_cacheable_ingress_payload_must_stay_stable_while_backpressured(tmp_path
         item["event"] == "ifu_cacheable_backpressure_payload_changed"
         for item in recorder.risk_observations
     )
+
+
+def test_cacheable_s1_backpressure_holds_icache_response(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    blocks = _set_request(dut, ready=0, fire=0)
+    _set_s1(dut, blocks, ready=0)
+
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    assert recorder.key_hit("ifu_cacheable_s1", "response_backpressured_by_s2")
 
 
 def test_cacheable_s1_metadata_must_stay_stable_while_blocked(tmp_path):
@@ -306,4 +381,4 @@ def test_cacheable_sampler_signals_match_generated_contract():
         f"{_IFU_PREFIX}s1_fetchBlock_1_valid",
     }
     assert required <= names
-    assert len(IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS) == 16
+    assert len(IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS) == 30

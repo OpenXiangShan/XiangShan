@@ -373,6 +373,12 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
 
 CFVEC_SAMPLER_BIN_KEYS = frozenset(
     {
+        ("ifu_invalid_taken_exception", "observed"),
+        ("ifu_ibuffer_output", "instr_pc_isrvc_observed"),
+        ("ifu_ibuffer_output", "ftq_offset_observed"),
+        ("ifu_ibuffer_output", "fixed_range_clipped"),
+        ("ifu_ibuffer_output", "last_in_ftq_entry"),
+        ("ifu_ibuffer_output", "taken_end_metadata"),
         ("ifu_instr_size_type", "rvi_seen"),
         ("ifu_instr_size_type", "rvc_seen"),
         ("ifu_instr_size_type", "mixed_rvi_rvc_seen"),

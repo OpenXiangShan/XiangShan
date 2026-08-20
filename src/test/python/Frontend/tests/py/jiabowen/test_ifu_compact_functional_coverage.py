@@ -59,7 +59,7 @@ def _make_recorder(tmp_path):
     return recorder, env, dut, memory
 
 
-def _set_ifu_output(dut, entries, *, exception_type=0):
+def _set_ifu_output(dut, entries, *, exception_type=0, valid_mask_extra=0):
     enq_enable = 0
     valid_mask = 0
     dut.set(_PREFIX + "io_toIBuffer_ready", 1)
@@ -74,11 +74,14 @@ def _set_ifu_output(dut, entries, *, exception_type=0):
         dut.set(_PREFIX + f"io_toIBuffer_bits_instrs_{slot}", instr)
         dut.set(_PREFIX + f"io_toIBuffer_bits_isRvc_{slot}", is_rvc)
         dut.set(_PREFIX + f"io_toIBuffer_bits_instrEndOffset_{slot}_offset", end_offset)
+        dut.set(_PREFIX + f"io_toIBuffer_bits_instrEndOffset_{slot}_predTaken", slot == entries[-1][0])
+        dut.set(_PREFIX + f"io_toIBuffer_bits_instrEndOffset_{slot}_fixedTaken", 0)
+        dut.set(_PREFIX + f"io_toIBuffer_bits_isLastInFtqEntry_{slot}", slot == entries[-1][0])
         dut.set(_PREFIX + f"io_toIBuffer_bits_ftqPtr_{slot}_flag", ftq_flag)
         dut.set(_PREFIX + f"io_toIBuffer_bits_ftqPtr_{slot}_value", ftq_value)
         dut.set(_PREFIX + f"io_toIBuffer_bits_exceptionMask_{slot}", exception_mask)
     dut.set(_PREFIX + "io_toIBuffer_bits_enqEnable", enq_enable)
-    dut.set(_PREFIX + "io_toIBuffer_bits_valid", valid_mask)
+    dut.set(_PREFIX + "io_toIBuffer_bits_valid", valid_mask | int(valid_mask_extra))
 
 
 def test_ifu_compact_and_expander_bins_use_to_ibuffer_fire(tmp_path):
@@ -108,6 +111,25 @@ def test_ifu_compact_and_expander_bins_use_to_ibuffer_fire(tmp_path):
     assert recorder.key_hit("ifu_instr_end_offset", "rvc_rvi_end_offset")
     assert recorder.key_hit("ifu_rvc_expander", "legal_rvc_expanded")
     assert recorder.key_hit("ifu_rvc_expander", "rvi_passthrough")
+    assert recorder.key_hit("ifu_ibuffer_output", "instr_pc_isrvc_observed")
+    assert recorder.key_hit("ifu_ibuffer_output", "ftq_offset_observed")
+    assert recorder.key_hit("ifu_ibuffer_output", "last_in_ftq_entry")
+    assert recorder.key_hit("ifu_ibuffer_output", "taken_end_metadata")
+
+
+def test_ifu_ibuffer_output_range_clipping_requires_valid_slot_not_enabled(tmp_path):
+    recorder, env, dut, memory = _make_recorder(tmp_path)
+    base = 0x80000000
+    memory.write32(base, 0x00000013)
+    _set_ifu_output(
+        dut,
+        [(0, base, 0x00000013, 0, 1, 0, 1, 0)],
+        valid_mask_extra=1 << 1,
+    )
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert recorder.key_hit("ifu_ibuffer_output", "fixed_range_clipped")
 
 
 def test_ifu_compact_two_fetch_source_requires_expected_ftq_order(tmp_path):
@@ -151,6 +173,26 @@ def test_ifu_illegal_rvc_and_fetch_exception_priority_bins(tmp_path):
     assert not priority.key_hit("ifu_rvc_exception", "illegal_rvc")
 
 
+def test_invalid_taken_fetch_exception_cross_is_stimulus_coverage(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    dut.set(_PREFIX + "s1_valid", 1)
+    dut.set(_PREFIX + "s1_invalidTaken_0", 1)
+    dut.set(_PREFIX + "s1_icacheMeta_0_exception_value", 0)
+    dut.set(_PREFIX + "s1_instrCount", 1)
+    dut.set(_PREFIX + "s1_flush", 0)
+
+    sample_cfvec_coverage(recorder, env, 1)
+    assert not recorder.key_hit("ifu_invalid_taken_exception", "observed")
+
+    dut.set(_PREFIX + "s1_icacheMeta_0_exception_value", 3)
+    # Coverage records the stimulus even if a pre-fix DUT computes the wrong
+    # count. A checker must independently require instrCount == 1.
+    dut.set(_PREFIX + "s1_instrCount", 4)
+    sample_cfvec_coverage(recorder, env, 2)
+
+    assert recorder.key_hit("ifu_invalid_taken_exception", "observed")
+
+
 def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
     root = Path(__file__).resolve().parents[7]
     offset = root / "build-frontend/pylib-verilator/Frontend/Frontend_offset.yaml"
@@ -168,9 +210,17 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "io_toIBuffer_bits_instrs_0",
         _PREFIX + "io_toIBuffer_bits_isRvc_0",
         _PREFIX + "io_toIBuffer_bits_instrEndOffset_0_offset",
+        _PREFIX + "io_toIBuffer_bits_instrEndOffset_0_predTaken",
+        _PREFIX + "io_toIBuffer_bits_instrEndOffset_0_fixedTaken",
+        _PREFIX + "io_toIBuffer_bits_isLastInFtqEntry_0",
         _PREFIX + "io_toIBuffer_bits_exceptionType_value",
         _PREFIX + "io_toIBuffer_bits_exceptionMask_0",
         _PREFIX + "io_toIBuffer_bits_ftqPtr_0_flag",
         _PREFIX + "io_toIBuffer_bits_ftqPtr_0_value",
+        _PREFIX + "s1_valid",
+        _PREFIX + "s1_invalidTaken_0",
+        _PREFIX + "s1_icacheMeta_0_exception_value",
+        _PREFIX + "s1_instrCount",
+        _PREFIX + "s1_flush",
     }
     assert required <= names
