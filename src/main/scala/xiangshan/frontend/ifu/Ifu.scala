@@ -679,6 +679,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     b.bits.target    := checkerRedirect.bits.target.toUInt
     b
   }
+  XSPerfAccumulate("invalidTaken", Mux(s1_fire, PopCount(s1_alignedInvalidTakenMask), 0.U))
 
   toFtq.wbRedirect := Mux(wbValid, checkFlushWb, uncacheFlushWb)
 
