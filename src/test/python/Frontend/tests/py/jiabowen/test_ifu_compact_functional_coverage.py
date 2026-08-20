@@ -115,6 +115,46 @@ def test_ifu_compact_and_expander_bins_use_to_ibuffer_fire(tmp_path):
     assert recorder.key_hit("ifu_ibuffer_output", "ftq_offset_observed")
     assert recorder.key_hit("ifu_ibuffer_output", "last_in_ftq_entry")
     assert recorder.key_hit("ifu_ibuffer_output", "taken_end_metadata")
+    assert recorder.key_hit("ifu_cacheable_boundary", "mixed_rvc_rvi")
+    assert recorder.key_hit("ifu_cacheable_boundary", "rvi_high_half_rvc_like")
+    assert recorder.key_hit("ifu_cacheable_compact", "raw_start_slots_observed")
+    assert recorder.key_hit("ifu_cacheable_compact", "mixed_end_offset_observed")
+    assert recorder.key_hit("ifu_cacheable_compact", "contiguous_slots_observed")
+    assert recorder.key_hit("ifu_cacheable_expander", "legal_rvc_input_seen")
+    assert recorder.key_hit("ifu_cacheable_expander", "rvi_input_seen")
+
+
+def test_ifu_cacheable_boundary_homogeneous_sequences_are_observed(tmp_path):
+    base = 0x80000000
+
+    rvi, rvi_env, rvi_dut, rvi_memory = _make_recorder(tmp_path / "rvi")
+    for offset in (0, 4, 8):
+        rvi_memory.write32(base + offset, 0x00000013)
+    _set_ifu_output(
+        rvi_dut,
+        [
+            (0, base, 0x00000013, 0, 1, 0, 1, 0),
+            (1, base + 4, 0x00000013, 0, 3, 0, 1, 0),
+            (2, base + 8, 0x00000013, 0, 5, 0, 1, 0),
+        ],
+    )
+    sample_cfvec_coverage(rvi, rvi_env, 1)
+    assert rvi.key_hit("ifu_cacheable_boundary", "all_rvi_4b")
+
+    rvc, rvc_env, rvc_dut, rvc_memory = _make_recorder(tmp_path / "rvc")
+    expanded = expand_rvc(0x0001)
+    for offset in (0, 2, 4):
+        rvc_memory.write16(base + offset, 0x0001)
+    _set_ifu_output(
+        rvc_dut,
+        [
+            (0, base, expanded, 1, 0, 0, 1, 0),
+            (1, base + 2, expanded, 1, 1, 0, 1, 0),
+            (2, base + 4, expanded, 1, 2, 0, 1, 0),
+        ],
+    )
+    sample_cfvec_coverage(rvc, rvc_env, 1)
+    assert rvc.key_hit("ifu_cacheable_boundary", "all_rvc_2b")
 
 
 def test_ifu_ibuffer_output_range_clipping_requires_valid_slot_not_enabled(tmp_path):
@@ -146,6 +186,7 @@ def test_ifu_compact_two_fetch_source_requires_expected_ftq_order(tmp_path):
     sample_cfvec_coverage(recorder, env, 2)
 
     assert recorder.key_hit("ifu_instr_compact_source", "two_fetch_select_block")
+    assert recorder.key_hit("ifu_cacheable_compact", "two_fetch_source_observed")
 
 
 def test_ifu_illegal_rvc_and_fetch_exception_priority_bins(tmp_path):

@@ -587,10 +587,10 @@ def test_canonical_registry_matches_the_single_sampler_contract():
             for row in csv.DictReader(handle)
             if row["Coverpoint"].strip()
         }
-    assert len(active) == 283
+    assert len(active) == 293
     assert active == set(FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS)
     assert len(CFVEC_SAMPLER_BIN_KEYS) == 17
-    assert len(IFU_CFVEC_SAMPLER_BIN_KEYS) == 39
+    assert len(IFU_CFVEC_SAMPLER_BIN_KEYS) == 49
     assert len(TWO_FETCH_SAMPLER_BIN_KEYS) == 41
     assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 47
     assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 37
@@ -815,7 +815,7 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     assert "s1_icacheMeta_0_pmpMmio" not in recorder_source
     assert "s1_icacheMetaIn_0_itlbPbmt" in recorder_source
     assert "s1_icacheMetaIn_0_pmpMmio" in recorder_source
-    assert len(recorder.definitions) == 283
+    assert len(recorder.definitions) == 293
     assert all(item.coverpoint for item in recorder.definitions)
     assert "FunctionalCoverageRecorder.from_pilot_csv" in fixture_source
     assert "set_line_coverage" in fixture_source
@@ -1145,20 +1145,29 @@ def test_funcov_targets_resolve_from_exact_registry_testcase(tmp_path):
         "BIN-810",
         "BIN-811",
         "BIN-813",
-            "BIN-816",
-            "BIN-828",
-            "BIN-832",
-            "BIN-833",
-            "BIN-834",
-            "BIN-835",
-            "BIN-836",
-            "BIN-837",
-            "BIN-838",
-            "BIN-839",
-            "BIN-840",
-            "BIN-841",
-            "BIN-842",
-        ]
+        "BIN-816",
+        "BIN-828",
+        "BIN-832",
+        "BIN-833",
+        "BIN-834",
+        "BIN-835",
+        "BIN-836",
+        "BIN-837",
+        "BIN-838",
+        "BIN-839",
+        "BIN-840",
+        "BIN-841",
+        "BIN-842",
+        "BIN-845",
+        "BIN-846",
+        "BIN-847",
+        "BIN-848",
+        "BIN-849",
+        "BIN-850",
+        "BIN-851",
+        "BIN-852",
+        "BIN-853",
+    ]
 
 
 def test_unmapped_bin_path_does_not_claim_registry_targets(tmp_path, monkeypatch):

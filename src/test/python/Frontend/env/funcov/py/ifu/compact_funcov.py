@@ -149,6 +149,12 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
             cycle,
             {**evidence, "raw_records": raw_records},
         )
+        recorder.mark(
+            "ifu_cacheable_compact",
+            "raw_start_slots_observed",
+            cycle,
+            {**evidence, "raw_records": raw_records},
+        )
 
     if all(record["ftq_ptr"] is not None and record["end_offset"] is not None for record in records):
         recorder.mark("ifu_ibuffer_output", "ftq_offset_observed", cycle, evidence)
@@ -166,6 +172,48 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         recorder.mark("ifu_ibuffer_output", "taken_end_metadata", cycle, evidence)
     if _is_contiguous(slots):
         recorder.mark("ifu_instr_compact", "contiguous_slots", cycle, evidence)
+        recorder.mark(
+            "ifu_cacheable_compact", "contiguous_slots_observed", cycle, evidence
+        )
+
+    typed_records = [
+        record
+        for record in records
+        if record["pc"] is not None and record["is_rvc"] in {0, 1}
+    ]
+    if len(typed_records) >= 2:
+        all_rvi = all(record["is_rvc"] == 0 for record in typed_records) and all(
+            int(after["pc"]) - int(before["pc"]) == 4
+            for before, after in zip(typed_records, typed_records[1:])
+        )
+        all_rvc = all(record["is_rvc"] == 1 for record in typed_records) and all(
+            int(after["pc"]) - int(before["pc"]) == 2
+            for before, after in zip(typed_records, typed_records[1:])
+        )
+        mixed = {record["is_rvc"] for record in typed_records} == {0, 1} and all(
+            int(after["pc"]) - int(before["pc"])
+            == (2 if before["is_rvc"] == 1 else 4)
+            for before, after in zip(typed_records, typed_records[1:])
+        )
+        if all_rvi:
+            recorder.mark("ifu_cacheable_boundary", "all_rvi_4b", cycle, evidence)
+        if all_rvc:
+            recorder.mark("ifu_cacheable_boundary", "all_rvc_2b", cycle, evidence)
+        if mixed:
+            recorder.mark("ifu_cacheable_boundary", "mixed_rvc_rvi", cycle, evidence)
+
+    for record in typed_records:
+        if record["is_rvc"] != 0:
+            continue
+        raw = _read_raw_instruction(env, int(record["pc"]), False)
+        if raw is not None and ((int(raw) >> 16) & 0x3) != 0x3:
+            recorder.mark(
+                "ifu_cacheable_boundary",
+                "rvi_high_half_rvc_like",
+                cycle,
+                {**evidence, "slot": record["slot"], "raw": int(raw)},
+            )
+            break
 
     if any(record["is_rvc"] == 0 for record in records):
         recorder.mark("ifu_instr_compact", "rvi_single_slot", cycle, evidence)
@@ -192,6 +240,9 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         has_rvi_end |= before["is_rvc"] == 0 and pc_step == 4 and end_step == 2
     if has_rvc_end and has_rvi_end:
         recorder.mark("ifu_instr_end_offset", "rvc_rvi_end_offset", cycle, evidence)
+        recorder.mark(
+            "ifu_cacheable_compact", "mixed_end_offset_observed", cycle, evidence
+        )
 
     expected = getattr(recorder, "_two_fetch_expected_cfvec", None)
     expected_tags = tuple(expected.get("tags") or ()) if isinstance(expected, dict) else ()
@@ -202,6 +253,9 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
             source_tags.append(tag)
     if len(expected_tags) == 2 and tuple(source_tags[:2]) == expected_tags:
         recorder.mark("ifu_instr_compact_source", "two_fetch_select_block", cycle, evidence)
+        recorder.mark(
+            "ifu_cacheable_compact", "two_fetch_source_observed", cycle, evidence
+        )
 
     for record in records:
         pc = record["pc"]
@@ -213,6 +267,12 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         if raw is None:
             continue
         if int(is_rvc) == 0:
+            recorder.mark(
+                "ifu_cacheable_expander",
+                "rvi_input_seen",
+                cycle,
+                {**evidence, "slot": record["slot"], "raw": raw},
+            )
             if int(instr) & 0xFFFFFFFF == int(raw):
                 recorder.mark(
                     "ifu_rvc_expander",
@@ -241,6 +301,12 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                     {**evidence, "slot": record["slot"], "raw": raw},
                 )
             continue
+        recorder.mark(
+            "ifu_cacheable_expander",
+            "legal_rvc_input_seen",
+            cycle,
+            {**evidence, "slot": record["slot"], "raw": raw},
+        )
         if int(instr) & 0xFFFFFFFF == expanded:
             recorder.mark(
                 "ifu_rvc_expander",
@@ -251,6 +317,9 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
 
 
 COMPACT_COVERPOINTS = {
+    "ifu_cacheable_boundary": "sequence_shape",
+    "ifu_cacheable_compact": "output_shape",
+    "ifu_cacheable_expander": "input_type",
     "ifu_ibuffer_output": "field_observation",
     "ifu_invalid_taken_exception": "stimulus_cross",
     "ifu_instr_compact": "instruction_layout",
@@ -262,6 +331,16 @@ COMPACT_COVERPOINTS = {
 
 COMPACT_SAMPLER_BIN_KEYS = frozenset(
     {
+        ("ifu_cacheable_boundary", "all_rvi_4b"),
+        ("ifu_cacheable_boundary", "all_rvc_2b"),
+        ("ifu_cacheable_boundary", "mixed_rvc_rvi"),
+        ("ifu_cacheable_boundary", "rvi_high_half_rvc_like"),
+        ("ifu_cacheable_compact", "raw_start_slots_observed"),
+        ("ifu_cacheable_compact", "two_fetch_source_observed"),
+        ("ifu_cacheable_compact", "mixed_end_offset_observed"),
+        ("ifu_cacheable_compact", "contiguous_slots_observed"),
+        ("ifu_cacheable_expander", "legal_rvc_input_seen"),
+        ("ifu_cacheable_expander", "rvi_input_seen"),
         ("ifu_ibuffer_output", "instr_pc_isrvc_observed"),
         ("ifu_ibuffer_output", "ftq_offset_observed"),
         ("ifu_ibuffer_output", "fixed_range_clipped"),
