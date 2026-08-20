@@ -110,6 +110,11 @@ that boundary stable.
   contract. If it can, extend or merge into that existing case; adding a new
   testcase is forbidden. Add a new testcase only when no existing case can
   encode the scenario cleanly.
+- Build verification-environment APIs, monitors, and oracles around reusable
+  DUT behaviors, not individual testpoint names or directed testcase shapes.
+  Collect the default functional coverage through reproducible regressions;
+  add a directed testcase only for the small set of semantics that cannot be
+  reached or judged reliably by that regression contract.
 - Do not change implementation code merely to satisfy an existing test when the
   test contradicts the intended frontend behavior. Update or remove the invalid
   expectation only after proving the semantic contract.
