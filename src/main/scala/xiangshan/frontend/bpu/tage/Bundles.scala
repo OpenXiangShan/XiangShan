@@ -69,6 +69,7 @@ class PhrToTageIO(implicit p: Parameters) extends TageBundle {
 class MainBtbToTageIO(implicit p: Parameters) extends TageBundle {
   val result:       Vec[Valid[Prediction]] = Input(Vec(NumBtbResultEntries, Valid(new Prediction)))
   val s1_positions: Vec[UInt]              = Input(Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W)))
+  val baseConf:     Vec[Bool]              = Input(Vec(NumBtbResultEntries, Bool()))
 }
 
 class TageToScIO(implicit p: Parameters) extends TageBundle {
@@ -110,11 +111,13 @@ class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBun
 
 class TageMetaEntry(implicit p: Parameters) extends TageBundle {
   val useProvider:       Bool            = Bool()
+  val hasAlt:            Bool            = Bool()
   val providerTableIdx:  UInt            = UInt(TableIdxWidth.W)
   val providerWayIdx:    UInt            = UInt(MaxNumWays.W)
   val providerTakenCtr:  SaturateCounter = TakenCounter()
   val providerUsefulCtr: SaturateCounter = UsefulCounter()
   val altOrBasePred:     Bool            = Bool()
+  val altConf:           Bool            = Bool()
 }
 
 class TageMeta(implicit p: Parameters) extends TageBundle {
@@ -168,6 +171,7 @@ class TrainInfo(implicit p: Parameters) extends TageBundle {
 
   val incUseAltOnNa: Bool = Bool()
   val decUseAltOnNa: Bool = Bool()
+  val useAltOnNaIdx: UInt = UInt(UseAltOnNaIdxWidth.W)
 
   val finalPred:   Bool = Bool()
   val actualTaken: Bool = Bool() // used for writeBuffer
