@@ -1757,6 +1757,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     ))
     forward.s2Resp.bits.denied := RegEnable(s1ForwardInfo(i).denied, s1ReqValid) && s2Resp_Valid
     forward.s2Resp.bits.corrupt := RegEnable(s1ForwardInfo(i).corrupt, s1ReqValid) && s2Resp_Valid
+    forward.s2Resp.bits.l1dbpFinalBypass := false.B
     io.forwardS1PAddrMatch(i) := s1ReqValid && (mshrIdOH & s1PaddrMatchVec(i).asUInt).orR
     XSError(((s1SelectOH(i) - 1.U) & s1SelectOH(i)).orR && s1RespValid, "multi mshr hit when forward!\n")
   }

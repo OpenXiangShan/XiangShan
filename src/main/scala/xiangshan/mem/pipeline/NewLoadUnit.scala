@@ -837,6 +837,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     val uncacheForwardResp = Flipped(ValidIO(new UncacheForwardResp))
     val mshrForwardResp = Flipped(ValidIO(new DCacheForwardResp))
     val tldForwardResp = Flipped(ValidIO(new DCacheForwardResp))
+    val l1dbpTldForwarded = Output(Bool())
 
     val uncacheBypassResp = Flipped(ValidIO(new UncacheBypassRespS2))
 
@@ -974,6 +975,7 @@ class LoadUnitS2(param: ExeUnitParams)(
 
   val dcacheFullForward = (~(io.mshrForwardResp.bits.forwardMask.asUInt) & in.mask) === 0.U ||
                           io.tldForwardResp.valid
+  io.l1dbpTldForwarded := io.tldForwardResp.valid && io.tldForwardResp.bits.l1dbpFinalBypass
   val uncacheFullForward = (~io.uncacheForwardResp.bits.forwardMask.asUInt & in.mask) === 0.U && !sqDataInvalid
   val storeFullForward = (~storeForwardMask & in.mask) === 0.U && !sqDataInvalid
   val fullForward = storeFullForward || dcacheFullForward
@@ -1931,6 +1933,8 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s2.io.uncacheForwardResp := io.uncacheForward.s2Resp
   s2.io.mshrForwardResp := io.mshrForward.s2Resp
   s2.io.tldForwardResp := io.tldForward.s2Resp
+  io.mshrForward.l1dbpTldForwarded := false.B
+  io.tldForward.l1dbpTldForwarded := s2.io.l1dbpTldForwarded
   s2.io.uncacheBypassResp := io.uncacheBypass.s2Resp
   s2.io.staNukeQueryReq := io.staNukeQueryReq
   io.rarNukeQuery.req <> s2.io.rarNukeQueryReq

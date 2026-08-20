@@ -982,6 +982,36 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   XSPerfAccumulate("l1dbp_accuracy_pred_live_actual_live",
     s3_l1dbp_accuracy_valid && !s3_l1dbp_pred.dead && !s3_l1dbp_actual_dead)
 
+  // Per-origin accuracy breakdown. Keep the overall confusion matrix above
+  // unchanged, while separating demand, stream, and stride samples.
+  val l1dbp_accuracy_demand = s3_l1dbp_accuracy_valid && s3_l1dbp_demand
+  val l1dbp_accuracy_stream = s3_l1dbp_accuracy_valid && s3_l1dbp_stream
+  val l1dbp_accuracy_stride = s3_l1dbp_accuracy_valid && s3_l1dbp_stride
+  XSPerfAccumulate("l1dbp_accuracy_demand_pred_dead_actual_dead",
+    l1dbp_accuracy_demand && s3_l1dbp_pred.dead && s3_l1dbp_actual_dead)
+  XSPerfAccumulate("l1dbp_accuracy_demand_pred_dead_actual_live",
+    l1dbp_accuracy_demand && s3_l1dbp_pred.dead && !s3_l1dbp_actual_dead)
+  XSPerfAccumulate("l1dbp_accuracy_demand_pred_live_actual_dead",
+    l1dbp_accuracy_demand && !s3_l1dbp_pred.dead && s3_l1dbp_actual_dead)
+  XSPerfAccumulate("l1dbp_accuracy_demand_pred_live_actual_live",
+    l1dbp_accuracy_demand && !s3_l1dbp_pred.dead && !s3_l1dbp_actual_dead)
+  XSPerfAccumulate("l1dbp_accuracy_stream_pred_dead_actual_dead",
+    l1dbp_accuracy_stream && s3_l1dbp_pred.dead && s3_l1dbp_actual_dead)
+  XSPerfAccumulate("l1dbp_accuracy_stream_pred_dead_actual_live",
+    l1dbp_accuracy_stream && s3_l1dbp_pred.dead && !s3_l1dbp_actual_dead)
+  XSPerfAccumulate("l1dbp_accuracy_stream_pred_live_actual_dead",
+    l1dbp_accuracy_stream && !s3_l1dbp_pred.dead && s3_l1dbp_actual_dead)
+  XSPerfAccumulate("l1dbp_accuracy_stream_pred_live_actual_live",
+    l1dbp_accuracy_stream && !s3_l1dbp_pred.dead && !s3_l1dbp_actual_dead)
+  XSPerfAccumulate("l1dbp_accuracy_stride_pred_dead_actual_dead",
+    l1dbp_accuracy_stride && s3_l1dbp_pred.dead && s3_l1dbp_actual_dead)
+  XSPerfAccumulate("l1dbp_accuracy_stride_pred_dead_actual_live",
+    l1dbp_accuracy_stride && s3_l1dbp_pred.dead && !s3_l1dbp_actual_dead)
+  XSPerfAccumulate("l1dbp_accuracy_stride_pred_live_actual_dead",
+    l1dbp_accuracy_stride && !s3_l1dbp_pred.dead && s3_l1dbp_actual_dead)
+  XSPerfAccumulate("l1dbp_accuracy_stride_pred_live_actual_live",
+    l1dbp_accuracy_stride && !s3_l1dbp_pred.dead && !s3_l1dbp_actual_dead)
+
   when (s3_fire && s3_l1dbp_sample_set && s3_l1dbp_lifetime_end && s3_l1dbp_sample.valid) {
     assert(s3_l1dbp_supported, "valid L1DBP sample must have a supported pf_source")
   }

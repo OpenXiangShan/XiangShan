@@ -777,6 +777,7 @@ class DCacheForwardResp(implicit p: Parameters) extends DCacheBundle {
   // denied and corrupt are only valid when forwarding matches
   val denied = Bool()
   val corrupt = Bool()
+  val l1dbpFinalBypass = Bool()
 }
 
 class DCacheForward(implicit p: Parameters) extends DCacheBundle {
@@ -784,6 +785,7 @@ class DCacheForward(implicit p: Parameters) extends DCacheBundle {
   val s1Req = Output(new DCacheForwardReqS1)
   val s1Kill = Output(Bool())
   val s2Resp = Flipped(ValidIO(new DCacheForwardResp))
+  val l1dbpTldForwarded = Output(Bool())
 }
 
 class DCacheLoadWakeup(implicit p: Parameters) extends DCacheBundle {
@@ -1387,6 +1389,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val paddrMatch = missQueue.io.forwardS1PAddrMatch(i)
     val s1RespValid = s1ReqValid && bus.d.valid && bus.d.bits.opcode === TLMessages.GrantData &&
       mshrMatch && beatMatch && paddrMatch
+    val s1RespL1DBPBypass = bus.d.bits.user.lift(L1DBPFinalBypassKey).getOrElse(false.B)
     val s1RespForwardData = VecInit.tabulate(l1BusDataWidth / VLEN) { i =>
       bus.d.bits.data((i + 1) * VLEN - 1, i * VLEN)
     }(paddr(log2Up(VLEN / 8)))
@@ -1398,6 +1401,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     s2Resp.bits.forwardMask := VecInit(Seq.fill(VLEN / 8)(RegNext(s1RespValid)))
     s2Resp.bits.denied := RegEnable(bus.d.bits.denied, s1ReqValid)
     s2Resp.bits.corrupt := RegEnable(bus.d.bits.corrupt, s1ReqValid)
+    s2Resp.bits.l1dbpFinalBypass := RegEnable(s1RespL1DBPBypass, s1RespValid)
   }
   // tl D channel wakeup
   io.lsu.loadWakeup.valid := (bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.Grant) &&
@@ -1793,6 +1797,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     bus.d.fire && first && bus.d.bits.opcode === GrantData
   }
   XSPerfAccumulate("grant_data_fire", grant_data_fire)
+  XSPerfAccumulate("l1dbp_bypass_load_tld_candidate",
+    grant_data_fire && bus.d.bits.user.lift(L1DBPFinalBypassKey).getOrElse(false.B))
+  XSPerfAccumulate("l1dbp_bypass_load_tld_forwarded",
+    io.lsu.forward_D.map(_.l1dbpTldForwarded).reduce(_ || _))
 
   val hint_source = io.l2_hint.bits.sourceId
 

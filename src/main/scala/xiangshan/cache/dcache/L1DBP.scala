@@ -17,7 +17,7 @@ case class L1DBPParams(
   sampleBits: Int = 2,
   pcPredictorEntries: Int = 8192,
   debugMode: Boolean = false,
-  enablePrefetchPrediction: Boolean = true,
+  enablePrefetchPrediction: Boolean = false,
   pcHash: (UInt, Int) => UInt = (pc, width) => XORFold(pc >> 1, width)
 ) {
   require(sampleBits >= 1, "L1DBP sampleBits must be positive")
@@ -61,7 +61,7 @@ class L1DBP(implicit p: Parameters) extends DCacheModule {
 
   def scUpdate(state: UInt, accessed: Bool): UInt = {
     val accessedUpdate = Mux(state === 3.U, 3.U, state + 1.U)
-    val notAccessedUpdate = Mux(state(1) === 0.U, 0.U, state - 2.U)
+    val notAccessedUpdate = Mux(state(1) === 0.U, 0.U, state - 1.U)
     Mux(accessed, accessedUpdate, notAccessedUpdate)
   }
 
@@ -69,8 +69,8 @@ class L1DBP(implicit p: Parameters) extends DCacheModule {
   s1Upd.valid := RegNext(io.update.valid, false.B)
   s1Upd.bits := RegEnable(io.update.bits, io.update.valid)
 
-  val pcSCArray = RegInit(VecInit(Seq.fill(l1dbpPcPredictorEntries)(0.U(2.W))))
-  val pfSCArray = RegInit(VecInit(Seq.fill(2)(0.U(2.W))))
+  val pcSCArray = RegInit(VecInit(Seq.fill(l1dbpPcPredictorEntries)(3.U(2.W))))
+  val pfSCArray = RegInit(VecInit(Seq.fill(2)(3.U(2.W))))
   val forceDead = l1dbpParams.debugMode.B
   val enablePrefetchPrediction = l1dbpParams.enablePrefetchPrediction.B
 
