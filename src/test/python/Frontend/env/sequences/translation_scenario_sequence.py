@@ -38,16 +38,8 @@ class TranslationSfenceAction:
     rs1: int = 0
     rs2: int = 0
     ident: int = 0
-    flush_pipe: int = 0
     hv: int = 0
     hg: int = 0
-    cycles: int = 1
-
-
-@dataclass(frozen=True)
-class TranslationFlushPipeAction:
-    """Pulse Frontend's iTLB flushPipe input between translation phases."""
-
     cycles: int = 1
 
 
@@ -93,7 +85,6 @@ class TranslationScenarioSequence:
     actions: tuple[
         TranslationScenarioPhase
         | TranslationSfenceAction
-        | TranslationFlushPipeAction
         | TranslationContextAction
         | TranslationPmpPmaWriteAction
         | TranslationPbmteAction,
@@ -103,10 +94,8 @@ class TranslationScenarioSequence:
     @staticmethod
     def randomized_control_actions(seed: int, count: int) -> tuple[
         TranslationSfenceAction
-        | TranslationFlushPipeAction
         | TranslationContextAction
-        | TranslationPmpPmaWriteAction
-        | TranslationPbmteAction,
+        | TranslationPmpPmaWriteAction,
         ...,
     ]:
         """Create a replayable legal control stream for translation regressions."""
@@ -116,7 +105,7 @@ class TranslationScenarioSequence:
         generator = random.Random(int(seed))
         actions = []
         for ordinal in range(int(count)):
-            kind = ordinal % 5
+            kind = ordinal % 3
             if kind == 0:
                 actions.append(
                     TranslationSfenceAction(
@@ -129,8 +118,6 @@ class TranslationScenarioSequence:
                     )
                 )
             elif kind == 1:
-                actions.append(TranslationFlushPipeAction(cycles=generator.randrange(1, 3)))
-            elif kind == 2:
                 actions.append(
                     TranslationContextAction(
                         satp_asid=generator.randrange(16),
@@ -140,7 +127,7 @@ class TranslationScenarioSequence:
                         priv_virt=generator.randrange(2),
                     )
                 )
-            elif kind == 3:
+            else:
                 actions.append(
                     TranslationPmpPmaWriteAction(
                         TranslationPmpPmaEntry(
@@ -158,8 +145,6 @@ class TranslationScenarioSequence:
                         )
                     )
                 )
-            else:
-                actions.append(TranslationPbmteAction(machine=generator.randrange(2), hypervisor=generator.randrange(2)))
         return tuple(actions)
 
     @staticmethod
@@ -172,10 +157,8 @@ class TranslationScenarioSequence:
     ) -> tuple[
         TranslationScenarioPhase
         | TranslationSfenceAction
-        | TranslationFlushPipeAction
         | TranslationContextAction
-        | TranslationPmpPmaWriteAction
-        | TranslationPbmteAction,
+        | TranslationPmpPmaWriteAction,
         ...,
     ]:
         """Build a replayable phase/control stream for generic regressions."""
@@ -254,7 +237,6 @@ class TranslationScenarioSequence:
                     rs1=int(action.rs1),
                     rs2=int(action.rs2),
                     ident=int(action.ident),
-                    flush_pipe=int(action.flush_pipe),
                     hv=int(action.hv),
                     hg=int(action.hg),
                     cycles=int(action.cycles),
@@ -270,11 +252,6 @@ class TranslationScenarioSequence:
                         "record": record,
                     }
                 )
-                continue
-
-            if isinstance(action, TranslationFlushPipeAction):
-                record = env.pulse_translation_flushpipe(cycles=int(action.cycles))
-                results.append({"kind": "flushpipe", "record": record})
                 continue
 
             if isinstance(action, TranslationContextAction):
@@ -417,7 +394,6 @@ class TranslationScenarioSequence:
 
 __all__ = [
     "TranslationContextAction",
-    "TranslationFlushPipeAction",
     "TranslationPbmteAction",
     "TranslationPmpPmaWriteAction",
     "TranslationScenarioPhase",

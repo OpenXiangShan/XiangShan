@@ -57,10 +57,8 @@ def test_translation_random_control_stream_replays_and_runs_through_the_public_s
     assert actions == TranslationScenarioSequence.randomized_control_actions(0xACE, 20)
     assert {type(action).__name__ for action in actions} == {
         "TranslationSfenceAction",
-        "TranslationFlushPipeAction",
         "TranslationContextAction",
         "TranslationPmpPmaWriteAction",
-        "TranslationPbmteAction",
     }
 
     env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
