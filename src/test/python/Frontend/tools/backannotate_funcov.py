@@ -49,6 +49,16 @@ POINT_REFERENCE_RE = re.compile(r"^covergroup ([^,;]+), coverpoint ([^,;()]+)$")
 BIN_ID_RE = re.compile(r"^BIN-\d+$")
 
 _PASS_OUTCOMES = {"pass", "passed", "ok", "success", "successful"}
+_CHECKER_NOT_APPLICABLE = {
+    "",
+    "unknown",
+    "unavailable",
+    "disabled",
+    "not_applicable",
+    "not-applicable",
+    "not_enabled",
+    "not-enabled",
+}
 _REQUIRED_PROVENANCE = (
     "dut_source_sha",
     "dut_build_sha256",
@@ -541,8 +551,9 @@ def evaluate_artifact(raw: Any) -> dict:
 
     A positive functional bin is not enough to establish a DUT hit.  The run
     must carry a current schema/provenance signature, a passing pytest outcome,
-    and clean monitor/checker/error results.  Missing metadata is deliberately
-    reported as ``unverified`` instead of being guessed as a pass.
+    and clean results from checks that are enabled for the scenario.  Missing
+    or not-applicable checker metadata does not block a coverage ``HIT``;
+    an explicit checker failure still does.
     """
     if not isinstance(raw, dict):
         return {
@@ -814,7 +825,10 @@ def evaluate_artifact(raw: Any) -> dict:
     checker_status = str(checker.get("status", "")).strip().lower()
     checker_error_count = _as_int(checker.get("error_count")) or 0
     checker_errors = checker.get("errors")
-    if checker_status not in _PASS_OUTCOMES:
+    if (
+        checker_status not in _PASS_OUTCOMES
+        and checker_status not in _CHECKER_NOT_APPLICABLE
+    ):
         reasons.append(f"checker_status:{checker_status or 'missing'}")
     if checker_error_count or checker_errors:
         count = checker_error_count or _collection_count(checker_errors)

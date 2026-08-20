@@ -196,6 +196,27 @@ def test_backannotation_runtime_manifest_gate_accepts_unchanged_build(tmp_path):
     assert gate == {"kind": "dut", "eligible": True, "reasons": []}
 
 
+def test_backannotation_accepts_dut_artifact_without_applicable_checker(tmp_path):
+    raw, _manifest_path, _build_root = _eligible_artifact(tmp_path)
+    raw.pop("checker", None)
+    raw["run"].pop("checker", None)
+
+    gate = backannotate_funcov.evaluate_artifact(raw)
+
+    assert gate == {"kind": "dut", "eligible": True, "reasons": []}
+
+
+def test_backannotation_rejects_explicit_checker_failure(tmp_path):
+    raw, _manifest_path, _build_root = _eligible_artifact(tmp_path)
+    raw["checker"] = {"status": "fail", "error_count": 1, "errors": [{"kind": "checker"}]}
+
+    gate = backannotate_funcov.evaluate_artifact(raw)
+
+    assert not gate["eligible"]
+    assert "checker_status:fail" in gate["reasons"]
+    assert "checker_errors:1" in gate["reasons"]
+
+
 def test_backannotation_runtime_manifest_gate_accepts_vcs_build(tmp_path):
     raw, _manifest_path, _build_root = _eligible_artifact(tmp_path, "vcs")
 

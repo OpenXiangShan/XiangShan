@@ -11,7 +11,7 @@ Frontend BT 的唯一主流程是：
 
 `设计分析 -> 叶子测试点 -> 环境与 checker -> testcase -> 功能覆盖率 -> 真实 DUT 回归 -> artifact -> 自动反标 -> 人工 CLOSED`
 
-测试点是所有验证活动的输入。功能覆盖率用于证明目标场景已经被激励并采样，checker、assertion、协议检查或 trace 对比用于证明 DUT 行为正确。二者缺一不可。
+测试点是所有验证活动的输入。功能覆盖率用于证明目标场景已经被激励并采样；当前阶段的 `HIT` 只以这一激励与采样证据为目标。checker、assertion、协议检查或 trace/reference 对比用于证明 DUT 行为正确，属于后续 `CLOSED` 的语义验收证据。已启用的检查不得出现未豁免错误，但某个叶子尚未建设 checker、assertion 或 reference，不得阻塞其 `HIT`。
 
 当前不建设完整 cycle-accurate golden model。能够使用 NEMU trace 的指令语义场景继续进行 DUT/golden 对比；其他场景使用协议级 scoreboard、跨周期 invariant、checker 和 assertion 检查正确性。
 
@@ -20,7 +20,7 @@ Frontend BT 的唯一主流程是：
 - 测试点或 bin 已存在。
 - FakeDut 或模型单测命中。
 - testcase 曾经运行但没有目标场景证据。
-- 功能 bin 命中但 checker、monitor 或 trace 失败。
+- 功能 bin 命中，但该 run 中已启用且适用的 checker、monitor、assertion 或 trace/reference 检查失败。
 - line、branch、expr 或 toggle 代码覆盖率上升。
 
 ## 2. 需求与 golden 来源
@@ -111,7 +111,7 @@ Condition 只描述如何构成场景，Checkpoint 只描述如何证明结果�
 
 一个 testcase 可以覆盖多个叶子，但每个叶子必须有一个主责任 testcase。testcase 必须显式列出目标 TP_ID/Bin_ID，不能依赖运行后偶然命中解释覆盖意图。Python directed test 使用 `@pytest.mark.funcov_bins(...)` / `funcov_tps(...)`；通用 bin-trace testcase 由 registry 中 `建议试点用例` 与汇编/bin stem 的精确匹配生成目标，必要时通过 `TB_FUNCOV_TARGET_BINS` 显式覆盖。
 
-对已知 Bin_ID/TP_ID 范围的 run，artifact 必须记录 `coverage_targets`；Python directed testcase 通过上述 marker 声明，或通过 `TB_FUNCOV_TARGET_BINS`、`TB_FUNCOV_TARGET_TP_IDS`、`TB_FUNCOV_TARGET_TESTCASES` 显式声明。通用 bin-trace 可以不声明 `bin_ids`，不得仅根据 bin 文件名推断 coverage 所有权；一旦声明目标，未知 Bin_ID 或 testcase 名必须使 run 失败。不得专门构造一个只为命中 coverpoint、却不验证真实功能语义的 directed testcase。
+对已知 Bin_ID/TP_ID 范围的 run，artifact 必须记录 `coverage_targets`；Python directed testcase 通过上述 marker 声明，或通过 `TB_FUNCOV_TARGET_BINS`、`TB_FUNCOV_TARGET_TP_IDS`、`TB_FUNCOV_TARGET_TESTCASES` 显式声明。通用 bin-trace 可以不声明 `bin_ids`，不得仅根据 bin 文件名推断 coverage 所有权；一旦声明目标，未知 Bin_ID 或 testcase 名必须使 run 失败。directed testcase 可以专门覆盖目标 bin，但必须按叶子测试点定义构造真实 DUT 场景，不得伪造 coverage event、force 内部状态，或绕过该 run 中已启用的检查；`HIT` 阶段不要求每个叶子已有完整 reference model 或语义 checker。
 
 标准场景由两部分共同构成：
 
@@ -228,9 +228,9 @@ src/test/python/Frontend/scripts/gen_coverage_html.sh <run-dir>/coverage
 
 - `UNMAPPED`：没有 coverage 模型。
 - `MODELED`：已完成建模，但尚无当前版本真实 DUT 命中。
-- `PARTIAL`：模型或证据仍不完整，例如语义未闭环、testcase 失败或旧证据待重验。它是中间状态，不代表功能覆盖率建模完成，不能当作最终目标或验收完成态。
-- `HIT`：当前版本真实 DUT 回归通过且目标 bin 命中。
-- `CLOSED`：人工完成测试点语义、checker 和波形/trace 证据验收。
+- `PARTIAL`：模型、场景刺激或当前运行证据仍不完整，例如 testcase 失败、目标未命中、采样/归属不清或旧证据待重验。它是中间状态，不代表功能覆盖率建模完成，不能当作最终目标或验收完成态。
+- `HIT`：当前版本真实 DUT 回归通过，且目标 bin 在该场景中命中；不以 reference model 或语义 checker 是否已建设为前提。
+- `CLOSED`：人工完成测试点语义正确性验收；按该测试点适用性审阅 checker、assertion、reference、波形或 trace 证据。
 - `BLOCKED`：明确的 DUT、design 或 environment blocker。
 - `N-A`：评审确认当前设计不适用。
 
@@ -239,7 +239,7 @@ src/test/python/Frontend/scripts/gen_coverage_html.sh <run-dir>/coverage
 1. 使用编译后的真实 DUT。
 2. 版本兼容性签名完整且匹配。
 3. pytest PASS，退出码为 0。
-4. monitor、checker、assertion 和 reference/trace 无未豁免错误。
+4. 该 run 中已启用且适用的 monitor、checker、assertion、reference 或 trace 检查无未豁免错误；未建设或未适用某类检查本身不阻塞 `HIT`。
 5. 同一 run 中，point 级目标至少产生一次有效子 bin 采样，或 bin 级目标的指定 `(group, point, bin)` 命中。
 6. 日志、波形、funcov 和 codecov artifact 属于同一 run。
 
