@@ -198,7 +198,11 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val vlCommits = Input(new VlCommitBundle(RabCommitWidth))
     val renameUpdates =
       if (backendParams.basicDebugEn) Some(Input(Vec(diffRatParams.renameWidth, Valid(new DiffRatRenameUpdate)))) else None
+    val snapshotEnds =
+      if (backendParams.basicDebugEn) Some(Input(Vec(diffRatParams.renameWidth, Valid(new RobPtr)))) else None
     val diffRatCommitRobIdx = if (backendParams.basicDebugEn) Some(Input(Valid(new RobPtr))) else None
+    val diffRatCommitRobIdxVec =
+      if (backendParams.basicDebugEn) Some(Input(Vec(diffRatParams.commitWidth, Valid(new RobPtr)))) else None
     val intReadPorts = Vec(RenameWidth, Vec(2, new RatReadPort(log2Ceil(IntLogicRegs))))
     val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort(log2Ceil(IntLogicRegs))))
     val fpReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort(log2Ceil(FpLogicRegs))))
@@ -243,7 +247,9 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     rat.io.diffRatBase.v0Rat := v0Rat.io.diffRatBase.get
     rat.io.diffRatBase.vlRat := vlRat.io.diffRatBase.get
     rat.io.renameUpdates := io.renameUpdates.get
+    rat.io.snapshotEnds := io.snapshotEnds.get
     rat.io.commitRobIdx := io.diffRatCommitRobIdx.get
+    rat.io.commitRobIdxVec := io.diffRatCommitRobIdxVec.get
   }
 
   io.debug_int_rat .foreach(_ := intRat.io.debug_rdata.get)

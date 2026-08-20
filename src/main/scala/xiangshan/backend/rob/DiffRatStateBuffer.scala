@@ -22,6 +22,7 @@ case class DiffRatStateParams()(implicit p: Parameters) {
   val vlEntries: Int = 1
   val robEntries: Int = coreParams.RobSize
   val renameWidth: Int = coreParams.RenameWidth
+  val commitWidth: Int = coreParams.CommitWidth
 
   require(Seq(intEntries, fpEntries, vecEntries, v0Entries, vlEntries).forall(_ > 0))
   require(coreParams.IntLogicRegs >= intEntries)
@@ -31,6 +32,7 @@ case class DiffRatStateParams()(implicit p: Parameters) {
   require(coreParams.VlLogicRegs >= vlEntries)
   require(robEntries > 0)
   require(renameWidth > 0)
+  require(commitWidth > 0)
 
   val totalEntries: Int = intEntries + fpEntries + vecEntries + v0Entries + vlEntries
   // Keep the two circular ROB pointer generations distinct in snapshot storage.
@@ -48,8 +50,6 @@ class DiffRatState(val params: DiffRatStateParams)(implicit p: Parameters) exten
 }
 
 class DiffRatRenameUpdate(implicit p: Parameters) extends XSBundle {
-  val robIdx = new RobPtr
-  val lastUop = Bool()
   val ldest = UInt(LogicRegsWidth.W)
   val pdest = UInt(PhyRegIdxWidth.W)
   val rfWen = Bool()
@@ -79,7 +79,9 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val diffRatBase = Input(new DiffRatState(params))
     val renameUpdates = Input(Vec(params.renameWidth, Valid(new DiffRatRenameUpdate)))
+    val snapshotEnds = Input(Vec(params.renameWidth, Valid(new RobPtr)))
     val commitRobIdx = Input(Valid(new RobPtr))
+    val commitRobIdxVec = Input(Vec(params.commitWidth, Valid(new RobPtr)))
     val diffRat = Output(new DiffRatState(params))
   })
 
@@ -122,13 +124,13 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
     Mem(params.storageEntries, UInt(stateWidth.W))
       .suggestName(s"diff_rat_state_bank_$bank")
   }
-  val stateWriteValid = VecInit(io.renameUpdates.map(req => req.valid && req.bits.lastUop))
-  val stateWriteSlots = io.renameUpdates.map(req => slotOf(req.bits.robIdx))
+  val stateWriteValid = VecInit(io.snapshotEnds.map(_.valid))
+  val stateWriteSlots = io.snapshotEnds.map(req => slotOf(req.bits))
   val stateWriteData = laneRat.tail.map(_.asUInt)
   val stateBankTags = Mem(params.storageEntries, UInt(params.bankBits.W))
   val stateSlotValid = RegInit(VecInit.fill(params.storageEntries)(false.B))
 
-  // ROB compression means last-uop state slots are not necessarily consecutive.
+  // ROB compression means snapshot slots are not necessarily consecutive.
   // Give each rename lane a dedicated bank and retain the selected lane per ROB slot.
   for {
     older <- 0 until params.renameWidth
@@ -156,8 +158,26 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
   assert(!io.commitRobIdx.valid || stateSlotValid(readSlot), "diff RAT commit reads an invalid state")
   assert(!io.commitRobIdx.valid || !readWriteConflict, "diff RAT state is read and written in the same cycle")
 
-  when(io.commitRobIdx.valid) {
-    stateSlotValid(readSlot) := false.B
+  for (commit <- io.commitRobIdxVec) {
+    val commitSlot = slotOf(commit.bits)
+    val commitWriteConflict = VecInit.tabulate(params.renameWidth) { lane =>
+      stateWriteValid(lane) && stateWriteSlots(lane) === commitSlot
+    }.asUInt.orR
+    when(commit.valid) {
+      assert(stateSlotValid(commitSlot), "diff RAT commit clears an invalid state")
+      assert(!commitWriteConflict, "diff RAT state is committed and written in the same cycle")
+      stateSlotValid(commitSlot) := false.B
+    }
+  }
+  for {
+    older <- 0 until params.commitWidth
+    younger <- older + 1 until params.commitWidth
+  } {
+    assert(
+      !(io.commitRobIdxVec(older).valid && io.commitRobIdxVec(younger).valid &&
+        io.commitRobIdxVec(older).bits === io.commitRobIdxVec(younger).bits),
+      "two commit lanes clear the same diff RAT slot"
+    )
   }
 
   val bankReadData = RegEnable(VecInit(stateBanks.map(_.read(readSlot))), readRequestValid)

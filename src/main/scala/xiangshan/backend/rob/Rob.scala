@@ -84,6 +84,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val rabCommits = Output(new RabCommitIO)
     val vlCommits = Output(new VlCommitBundle(RabCommitWidth))
     val diffRatCommitRobIdx = if (backendParams.basicDebugEn) Some(Output(Valid(new RobPtr))) else None
+    val diffRatCommitRobIdxVec =
+      if (backendParams.basicDebugEn) Some(Output(Vec(CommitWidth, Valid(new RobPtr)))) else None
     val isVsetFlushPipe = Output(Bool())
     val lsq = new RobLsqIO
     val robDeqPtr = Output(new RobPtr)
@@ -635,14 +637,26 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     deqVlsExceptionNeedCommit := true.B
   }
 
+  val hasCommit = io.commits.isCommit && io.commits.commitValid.asUInt.orR
+  val newestCommit = PriorityMuxDefault(
+    io.commits.commitValid.zip(io.commits.robIdx).reverse,
+    deqPtr
+  )
   io.diffRatCommitRobIdx.foreach { commitRobIdx =>
-    val hasCommit = io.commits.isCommit && io.commits.commitValid.asUInt.orR
-    val newestCommit = PriorityMuxDefault(
-      io.commits.commitValid.zip(io.commits.robIdx).reverse,
-      deqPtr
-    )
     commitRobIdx.valid := hasCommit || deqVlsExceptionNeedCommit
     commitRobIdx.bits := Mux(deqVlsExceptionNeedCommit, deqPtr, newestCommit)
+  }
+  io.diffRatCommitRobIdxVec.foreach { commitRobIdxVec =>
+    assert(!(deqVlsExceptionNeedCommit && hasCommit), "VLS and normal commits overlap")
+    for (i <- 0 until CommitWidth) {
+      commitRobIdxVec(i).valid := io.commits.isCommit && io.commits.commitValid(i) &&
+        !deqVlsExceptionNeedCommit
+      commitRobIdxVec(i).bits := io.commits.robIdx(i)
+    }
+    when(deqVlsExceptionNeedCommit) {
+      commitRobIdxVec.head.valid := true.B
+      commitRobIdxVec.head.bits := deqPtr
+    }
   }
 
   XSDebug(deqHasException && exceptionDataRead.bits.singleStep, "Debug Mode: Deq has singlestep exception\n")
