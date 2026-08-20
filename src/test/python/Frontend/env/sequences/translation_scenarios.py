@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from typing import Literal, Optional, Tuple
 
@@ -92,10 +93,11 @@ class TranslationSectorLane:
 
 @dataclass(frozen=True)
 class TranslationPermissionProbe:
-    """One declared physical permission-check range, addressed through its VA."""
+    """One logical fetch range, optionally split at PMP/PMA attribute boundaries."""
 
     va: int
     size: int = 8
+    segment_sizes: Tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -164,6 +166,224 @@ class TranslationScenarioState:
     pmp_writes: Tuple[dict, ...]
     pma_writes: Tuple[dict, ...]
     expected_permission_probes: Tuple[dict, ...]
+
+
+@dataclass(frozen=True)
+class TranslationGeneratedScenario:
+    """One reproducible constrained-random translation scenario."""
+
+    seed: int
+    ordinal: int
+    scenario: TranslationScenario
+
+
+class TranslationScenarioRandomizer:
+    """Generate legal, replayable translation scenarios for regression streams."""
+
+    _TRANSLATION_KINDS = ("bare", "stage1", "stage2", "all_stage", "sector", "superpage")
+
+    def __init__(self, seed: int) -> None:
+        self.seed = int(seed)
+        self._random = random.Random(self.seed)
+
+    def _pte(self, *, vmid: int = 0, allow_fault: bool = True) -> TranslationPte:
+        fault = self._random.choice(("normal", "x", "a", "invalid_wr")) if allow_fault else "normal"
+        return TranslationPte(
+            r=0 if fault == "invalid_wr" else 1,
+            w=1 if fault == "invalid_wr" else 0,
+            x=0 if fault == "x" else 1,
+            a=0 if fault == "a" else 1,
+            u=self._random.randrange(2),
+            vmid=int(vmid),
+            pbmt=self._random.choice((0, 0, 1, 2)),
+        )
+
+    def _permission_entries(self, pa: int, *, pages: int, ordinal: int) -> tuple[Tuple[TranslationPmpPmaEntry, ...], Tuple[TranslationPmpPmaEntry, ...]]:
+        pmp_entries = []
+        pma_entries = []
+        for page in range(pages):
+            execute = bool(self._random.randrange(2))
+            pmp_entries.append(
+                TranslationPmpPmaEntry(
+                    "pmp",
+                    page,
+                    PmpPmaConfig(match="napot", read=True, execute=execute),
+                    int(pa) + page * _PAGE_SIZE,
+                    size=_PAGE_SIZE,
+                )
+            )
+            pma_entries.append(
+                TranslationPmpPmaEntry(
+                    "pma",
+                    page,
+                    PmpPmaConfig(match="napot", read=True, execute=True, cacheable=bool(self._random.randrange(2))),
+                    int(pa) + page * _PAGE_SIZE,
+                    size=_PAGE_SIZE,
+                )
+            )
+        style = int(ordinal) % 3
+        if style == 1:
+            pmp_entries.append(
+                TranslationPmpPmaEntry(
+                    "pmp",
+                    len(pmp_entries),
+                    PmpPmaConfig(match="napot", read=True, execute=not bool(pmp_entries[0].config.execute)),
+                    int(pa),
+                    size=_PAGE_SIZE,
+                )
+            )
+        elif style == 2:
+            first_execute = bool(pmp_entries[0].config.execute)
+            pmp_entries[0] = TranslationPmpPmaEntry(
+                "pmp", 0, PmpPmaConfig(match="off"), int(pa), size=None
+            )
+            pmp_entries.insert(
+                1,
+                TranslationPmpPmaEntry(
+                    "pmp", 1, PmpPmaConfig(match="tor", read=True, execute=first_execute), int(pa) + _PAGE_SIZE, size=None
+                ),
+            )
+            for entry_index in range(2, len(pmp_entries)):
+                entry = pmp_entries[entry_index]
+                pmp_entries[entry_index] = TranslationPmpPmaEntry(
+                    entry.kind, entry_index, entry.config, entry.addr, entry.size
+                )
+        return tuple(pmp_entries), tuple(pma_entries)
+
+    def _generate_one(self, ordinal: int) -> TranslationGeneratedScenario:
+        index = int(ordinal)
+        if index < 0:
+            raise ValueError("translation random scenario ordinal must be non-negative")
+        kind = self._TRANSLATION_KINDS[index % len(self._TRANSLATION_KINDS)]
+        mode = self._random.choice(("sv39", "sv48"))
+        stage2_mode = self._random.choice(("sv39", "sv48"))
+        page_count = 2 if self._random.randrange(4) == 0 else 1
+        offset = 0xFF8 if page_count == 2 else self._random.randrange(0, 0xFF0, 8)
+        va = 0x8020_0000 + offset
+        pa = 0x8040_0000 + offset
+        gpa = 0x8060_0000 + offset
+        priv_imode = self._random.choice((0, 1, 2))
+        pmp_entries, pma_entries = self._permission_entries(pa - offset, pages=page_count, ordinal=index)
+        payload = b"\x13\x00\x00\x00" * (4 if page_count == 2 else 2)
+        common = {
+            "scenario_id": f"translation-random-s{self.seed}-n{index}",
+            "va": va,
+            "pa": pa,
+            "payload": payload,
+            "page_count": page_count,
+            "ptw_response_latency": self._random.randrange(0, 6),
+            "ptw_response_seed": self._random.randrange(1, 1 << 31),
+            "priv_imode": priv_imode,
+            "pmp_entries": pmp_entries,
+            "pma_entries": pma_entries,
+        }
+        if page_count == 2:
+            common["permission_probes"] = (
+                TranslationPermissionProbe(va=va, size=16, segment_sizes=(8, 8)),
+            )
+        if kind == "bare":
+            bare_common = {**common, "mode": "bare", "va": pa, "pa": pa}
+            if page_count == 2:
+                bare_common["permission_probes"] = (
+                    TranslationPermissionProbe(va=pa, size=16, segment_sizes=(8, 8)),
+                )
+            scenario = TranslationScenario(**bare_common)
+        elif kind == "stage1":
+            response_fault = self._random.choice(("none", "page", "access"))
+            only_stage1 = bool(self._random.randrange(2))
+            scenario = TranslationScenario(
+                **{
+                    **common,
+                    "mode": mode,
+                    "s2xlate": _S2XLATE_ONLY_STAGE1 if only_stage1 else _S2XLATE_NONE,
+                    "priv_virt": int(only_stage1),
+                    "s1_pte": self._pte(),
+                    "s1_pf": int(response_fault == "page"),
+                    "s1_af": int(response_fault == "access"),
+                }
+            )
+        elif kind == "stage2":
+            response_fault = self._random.choice(("none", "guest_page", "guest_access"))
+            scenario = TranslationScenario(
+                **{
+                    **common,
+                    "mode": "bare",
+                    "stage2_mode": stage2_mode,
+                    "s2xlate": _S2XLATE_ONLY_STAGE2,
+                    "priv_virt": 1,
+                    "s2_pte": self._pte(),
+                    "s2_gpf": int(response_fault == "guest_page"),
+                    "s2_gaf": int(response_fault == "guest_access"),
+                }
+            )
+        else:
+            if kind == "sector":
+                scenario = TranslationScenario(
+                    **{
+                        **common,
+                        "mode": mode,
+                        "s1_pte": self._pte(allow_fault=False),
+                        "s1_sector_lanes": (
+                            TranslationSectorLane(
+                                lane=1,
+                                ppn=(pa >> 12) + 1,
+                                valid=self._random.randrange(2),
+                                pte_present=1,
+                            ),
+                        ),
+                    }
+                )
+            elif kind == "superpage":
+                scenario = TranslationScenario(
+                    **{
+                        **common,
+                        "mode": mode,
+                        "s1_pte": TranslationPte(
+                            **{**self._pte(allow_fault=False).as_mapping_kwargs(), "level": 1}
+                        ),
+                    }
+                )
+            else:
+                vmid = self._random.randrange(1, 16)
+                s1_fault = self._random.choice(("none", "page", "access"))
+                s2_fault = self._random.choice(("none", "guest_page", "guest_access"))
+                scenario = TranslationScenario(
+                    **{
+                        **common,
+                        "mode": mode,
+                        "stage2_mode": stage2_mode,
+                        "s2xlate": _S2XLATE_ALL_STAGE,
+                        "gpa": gpa,
+                        "priv_virt": 1,
+                        "s1_pte": self._pte(vmid=vmid),
+                        "s2_pte": self._pte(vmid=vmid),
+                        "hgatp_vmid": vmid,
+                        "s1_pf": int(s1_fault == "page"),
+                        "s1_af": int(s1_fault == "access"),
+                        "s2_gpf": int(s2_fault == "guest_page"),
+                        "s2_gaf": int(s2_fault == "guest_access"),
+                    }
+                )
+        return TranslationGeneratedScenario(seed=self.seed, ordinal=index, scenario=scenario)
+
+    def next(self, ordinal: int) -> TranslationGeneratedScenario:
+        """Replay one ordinal without requiring callers to restore RNG state."""
+
+        index = int(ordinal)
+        if index < 0:
+            raise ValueError("translation random scenario ordinal must be non-negative")
+        replay = TranslationScenarioRandomizer(self.seed)
+        generated = None
+        for current in range(index + 1):
+            generated = replay._generate_one(current)
+        assert generated is not None
+        return generated
+
+    def generate(self, count: int) -> Tuple[TranslationGeneratedScenario, ...]:
+        if int(count) < 0:
+            raise ValueError("translation random scenario count must be non-negative")
+        replay = TranslationScenarioRandomizer(self.seed)
+        return tuple(replay._generate_one(ordinal) for ordinal in range(int(count)))
 
 
 class TranslationScenarioBuilder:
@@ -383,6 +603,11 @@ class TranslationScenarioBuilder:
                 raise ValueError("translation permission probe size must be positive")
             if int(probe.va) < int(scenario.va) or int(probe.va) + int(probe.size) > int(scenario.va) + len(scenario.payload):
                 raise ValueError("translation permission probe must be covered by the scenario payload")
+            if probe.segment_sizes:
+                if any(int(size) < 1 for size in probe.segment_sizes):
+                    raise ValueError("translation permission probe segment sizes must be positive")
+                if sum(int(size) for size in probe.segment_sizes) != int(probe.size):
+                    raise ValueError("translation permission probe segment sizes must cover the complete probe")
 
     @staticmethod
     def _map_stage1_pages(
@@ -468,42 +693,58 @@ class TranslationScenarioBuilder:
 
     def _expected_permission_probes(self, scenario: TranslationScenario) -> Tuple[dict, ...]:
         probes = []
-        for probe in scenario.permission_probes:
-            pa, translated, metadata = self.env.page_table.translate(
-                int(probe.va),
-                s2xlate=int(scenario.s2xlate),
-                priv_imode=int(scenario.priv_imode),
-            )
-            if not translated:
+        for probe_index, probe in enumerate(scenario.permission_probes):
+            segment_sizes = probe.segment_sizes or (int(probe.size),)
+            offset = 0
+            for segment_index, segment_size in enumerate(segment_sizes):
+                segment_va = int(probe.va) + offset
+                offset += int(segment_size)
+                pa, translated, metadata = self.env.page_table.translate(
+                    segment_va,
+                    s2xlate=int(scenario.s2xlate),
+                    priv_imode=int(scenario.priv_imode),
+                )
+                record = {
+                    "va": segment_va,
+                    "size": int(segment_size),
+                }
+                if probe.segment_sizes:
+                    record.update(
+                        {
+                            "probe_index": int(probe_index),
+                            "segment_index": int(segment_index),
+                            "logical_va": int(probe.va),
+                            "logical_size": int(probe.size),
+                        }
+                    )
+                if not translated:
+                    probes.append(
+                        {
+                            **record,
+                            "pa": int(pa),
+                            "translated": False,
+                            "outcome": str(metadata.get("outcome", "fault")),
+                        }
+                    )
+                    continue
+                permission = PmpPmaPermissionModel.check_instruction(
+                    int(pa),
+                    pmp_entries=scenario.pmp_entries,
+                    pma_entries=scenario.pma_entries,
+                    priv_imode=int(scenario.priv_imode),
+                    size=int(segment_size),
+                    pmp_enabled=bool(scenario.pmp_entries),
+                    pma_enabled=bool(scenario.pma_entries),
+                )
                 probes.append(
                     {
-                        "va": int(probe.va),
-                        "size": int(probe.size),
+                        **record,
                         "pa": int(pa),
-                        "translated": False,
-                        "outcome": str(metadata.get("outcome", "fault")),
+                        "end": int(pa) + int(segment_size) - 1,
+                        "translated": True,
+                        "permission": permission.as_dict(),
                     }
                 )
-                continue
-            permission = PmpPmaPermissionModel.check_instruction(
-                int(pa),
-                pmp_entries=scenario.pmp_entries,
-                pma_entries=scenario.pma_entries,
-                priv_imode=int(scenario.priv_imode),
-                size=int(probe.size),
-                pmp_enabled=bool(scenario.pmp_entries),
-                pma_enabled=bool(scenario.pma_entries),
-            )
-            probes.append(
-                {
-                    "va": int(probe.va),
-                    "size": int(probe.size),
-                    "pa": int(pa),
-                    "end": int(pa) + int(probe.size) - 1,
-                    "translated": True,
-                    "permission": permission.as_dict(),
-                }
-            )
         return tuple(probes)
 
     @staticmethod
@@ -677,7 +918,9 @@ __all__ = [
     "TranslationPtwResponseOverride",
     "TranslationPermissionProbe",
     "TranslationSectorLane",
+    "TranslationGeneratedScenario",
     "TranslationPte",
+    "TranslationScenarioRandomizer",
     "TranslationScenario",
     "TranslationScenarioBuilder",
     "TranslationScenarioState",

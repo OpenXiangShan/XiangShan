@@ -167,7 +167,7 @@ class TranslationPermissionOracle:
             "permission_request_seen": False,
             "prefetchpipe_pmp_requests": [],
             "permission_check_required": bool(state.scenario.pmp_entries or state.scenario.pma_entries)
-            and expected_fault in {None, "instruction_access_fault"},
+            and any("permission" in outcome for outcome in page_outcomes),
             "pmp_signal_unavailable": False,
             "requested_ptw_vpns": [],
             "responded_ptw_vpns": [],
@@ -188,10 +188,20 @@ class TranslationPermissionOracle:
     def get_active(self) -> Optional[dict]:
         return None if self.active is None else dict(self.active)
 
+    def _observation_ready(self, cycle: int) -> bool:
+        return bool(
+            self.active is not None
+            and self.active["fetch_observation_ready"]
+            and int(cycle) >= int(self.active["fetch_observation_not_before"])
+        )
+
     def observe_ptw_request(self, cycle: int, *, vpn: int, s2xlate: int, get_gpa: int) -> None:
         if self.active is None:
             return
         actual = {"vpn": int(vpn), "s2xlate": int(s2xlate), "get_gpa": int(get_gpa)}
+        if not self._observation_ready(cycle):
+            self._record(cycle, "pre_redirect_ptw_request", actual=actual)
+            return
         expected = next(
             (
                 request
@@ -202,6 +212,9 @@ class TranslationPermissionOracle:
             ),
             None,
         )
+        if expected is None and self.active["expected_ptw_requests"] and not self.active["request_seen"]:
+            self._record(cycle, "pre_target_ptw_request", actual=actual)
+            return
         if self.active["fault_seen"]:
             self._error(cycle, "unexpected_followup_ptw_request", actual=actual)
             return
@@ -247,6 +260,9 @@ class TranslationPermissionOracle:
         if self.active is None:
             return
         actual = {"vpn": int(vpn), "s2xlate": int(s2xlate), "get_gpa": int(get_gpa)}
+        if not self._observation_ready(cycle):
+            self._record(cycle, "pre_redirect_ptw_response", actual=actual)
+            return
         expected = next(
             (
                 request
@@ -257,6 +273,20 @@ class TranslationPermissionOracle:
             ),
             None,
         )
+        pending_request_known = any(
+            item["vpn"] == int(vpn)
+            and item["s2xlate"] == int(s2xlate)
+            and item["get_gpa"] == int(get_gpa)
+            for item in self._ptw_requests
+        )
+        if (
+            expected is None
+            and not pending_request_known
+            and self.active["expected_ptw_requests"]
+            and not self.active["request_seen"]
+        ):
+            self._record(cycle, "pre_target_ptw_response", actual=actual)
+            return
         response_record = {
             "ppn": int(response.get("s1_entry_ppn", 0)),
             "pbmt": int(response.get("s1_entry_pbmt", 0)),
@@ -304,7 +334,7 @@ class TranslationPermissionOracle:
             return
         actual_path = str(path)
         actual_pa = int(pa)
-        if not self.active["fetch_observation_ready"] or int(cycle) < int(self.active["fetch_observation_not_before"]):
+        if not self._observation_ready(cycle):
             self._record(cycle, "pre_redirect_fetch_request", path=actual_path, pa=actual_pa)
             return
         if self.active["expected_ptw_requests"] and not self.active["response_seen"]:
@@ -359,6 +389,9 @@ class TranslationPermissionOracle:
     def observe_mainpipe_pmp_request(self, cycle: int, *, addr: int) -> None:
         if self.active is None or not self.active["permission_check_required"]:
             return
+        if not self._observation_ready(cycle):
+            self._record(cycle, "pre_redirect_mainpipe_pmp_request", addr=int(addr))
+            return
         if self.active["pmp_request_seen"] and not self.active["expected_permission_probes"]:
             return
         actual_addr = int(addr)
@@ -403,6 +436,9 @@ class TranslationPermissionOracle:
     def observe_prefetchpipe_pmp_request(self, cycle: int, *, addr: int) -> None:
         """Record PrefetchPipe permission checks without requiring a speculative target."""
         if self.active is None or not self.active["permission_check_required"]:
+            return
+        if not self._observation_ready(cycle):
+            self._record(cycle, "pre_redirect_prefetchpipe_pmp_request", addr=int(addr))
             return
         actual_addr = int(addr)
         page_base = actual_addr & ~0xFFF
@@ -494,6 +530,24 @@ class TranslationPermissionOracle:
         if not actual_faults:
             return
         actual_fault = actual_faults[0] if len(actual_faults) == 1 else "multiple"
+        if not self._observation_ready(cycle):
+            self._record(
+                cycle,
+                "pre_redirect_cfvec_exception",
+                pc=int(pc),
+                fault=actual_fault,
+                cross_page=bool(cross_page),
+            )
+            return
+        if self.active["expected_ptw_requests"] and not self.active["request_seen"]:
+            self._record(
+                cycle,
+                "pre_target_cfvec_exception",
+                pc=int(pc),
+                fault=actual_fault,
+                cross_page=bool(cross_page),
+            )
+            return
         expected_fault = self.active["expected_fault"]
         if expected_fault is not None and self.active["fault_seen"]:
             return
@@ -586,7 +640,8 @@ class TranslationPermissionOracle:
         missing_probes = [
             int(probe["pa"])
             for probe in self.active["expected_permission_probes"]
-            if int(probe.get("size", _PMP_REQUEST_SIZE_BYTES)) == _PMP_REQUEST_SIZE_BYTES
+            if bool(probe.get("translated", True))
+            and int(probe.get("size", _PMP_REQUEST_SIZE_BYTES)) == _PMP_REQUEST_SIZE_BYTES
             and int(probe["pa"]) not in self.active["observed_permission_probes"]
         ]
         if missing_probes:
@@ -624,6 +679,11 @@ class TranslationPermissionOracle:
             oracle_pending=pending,
             agent_dropped=int(agent_dropped),
         )
+
+    def disarm(self) -> None:
+        if self.active is not None:
+            self._record(getattr(self.env, "current_cycle", 0), "disarmed")
+        self.active = None
 
     def clear(self) -> None:
         self.active = None

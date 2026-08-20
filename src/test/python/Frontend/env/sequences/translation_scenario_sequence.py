@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, replace
 
-from .translation_scenarios import TranslationPmpPmaEntry, TranslationScenario, TranslationScenarioBuilder, TranslationScenarioState
+from .translation_scenarios import (
+    TranslationPmpPmaEntry,
+    TranslationScenario,
+    TranslationScenarioBuilder,
+    TranslationScenarioRandomizer,
+    TranslationScenarioState,
+)
+from ..support.pmp_pma import PmpPmaConfig
 
 
 @dataclass(frozen=True)
@@ -30,8 +38,16 @@ class TranslationSfenceAction:
     rs1: int = 0
     rs2: int = 0
     ident: int = 0
+    flush_pipe: int = 0
     hv: int = 0
     hg: int = 0
+    cycles: int = 1
+
+
+@dataclass(frozen=True)
+class TranslationFlushPipeAction:
+    """Pulse Frontend's iTLB flushPipe input between translation phases."""
+
     cycles: int = 1
 
 
@@ -77,11 +93,112 @@ class TranslationScenarioSequence:
     actions: tuple[
         TranslationScenarioPhase
         | TranslationSfenceAction
+        | TranslationFlushPipeAction
         | TranslationContextAction
         | TranslationPmpPmaWriteAction
         | TranslationPbmteAction,
         ...,
     ]
+
+    @staticmethod
+    def randomized_control_actions(seed: int, count: int) -> tuple[
+        TranslationSfenceAction
+        | TranslationFlushPipeAction
+        | TranslationContextAction
+        | TranslationPmpPmaWriteAction
+        | TranslationPbmteAction,
+        ...,
+    ]:
+        """Create a replayable legal control stream for translation regressions."""
+
+        if int(count) < 0:
+            raise ValueError("translation random control count must be non-negative")
+        generator = random.Random(int(seed))
+        actions = []
+        for ordinal in range(int(count)):
+            kind = ordinal % 5
+            if kind == 0:
+                actions.append(
+                    TranslationSfenceAction(
+                        addr=0x8020_0000 + generator.randrange(4) * 0x1000,
+                        rs1=generator.randrange(2),
+                        rs2=generator.randrange(2),
+                        ident=generator.randrange(16),
+                        hv=generator.randrange(2),
+                        hg=generator.randrange(2),
+                    )
+                )
+            elif kind == 1:
+                actions.append(TranslationFlushPipeAction(cycles=generator.randrange(1, 3)))
+            elif kind == 2:
+                actions.append(
+                    TranslationContextAction(
+                        satp_asid=generator.randrange(16),
+                        vsatp_asid=generator.randrange(16),
+                        hgatp_vmid=generator.randrange(16),
+                        priv_imode=generator.randrange(3),
+                        priv_virt=generator.randrange(2),
+                    )
+                )
+            elif kind == 3:
+                actions.append(
+                    TranslationPmpPmaWriteAction(
+                        TranslationPmpPmaEntry(
+                            "pmp" if generator.randrange(2) else "pma",
+                            31 - ((ordinal // 5) % 8),
+                            PmpPmaConfig(
+                                match="napot",
+                                read=True,
+                                execute=bool(generator.randrange(2)),
+                                cacheable=bool(generator.randrange(2)),
+                                locked=bool(generator.randrange(2)),
+                            ),
+                            0x8040_0000 + generator.randrange(8) * 0x1000,
+                            size=0x1000,
+                        )
+                    )
+                )
+            else:
+                actions.append(TranslationPbmteAction(machine=generator.randrange(2), hypervisor=generator.randrange(2)))
+        return tuple(actions)
+
+    @staticmethod
+    def randomized_scenario_actions(
+        seed: int,
+        count: int,
+        *,
+        start_ordinal: int = 0,
+        include_controls: bool = True,
+    ) -> tuple[
+        TranslationScenarioPhase
+        | TranslationSfenceAction
+        | TranslationFlushPipeAction
+        | TranslationContextAction
+        | TranslationPmpPmaWriteAction
+        | TranslationPbmteAction,
+        ...,
+    ]:
+        """Build a replayable phase/control stream for generic regressions."""
+
+        if int(count) < 0:
+            raise ValueError("translation random scenario count must be non-negative")
+        if int(start_ordinal) < 0:
+            raise ValueError("translation random scenario start ordinal must be non-negative")
+        stop_ordinal = int(start_ordinal) + int(count)
+        generated = TranslationScenarioRandomizer(int(seed)).generate(stop_ordinal)[int(start_ordinal) :]
+        if not generated:
+            return ()
+        all_controls = TranslationScenarioSequence.randomized_control_actions(
+            int(seed) ^ 0xA5A5_5A5A,
+            max(0, stop_ordinal - 1),
+        )
+        controls = all_controls[int(start_ordinal) :]
+        actions = []
+        for ordinal, item in enumerate(generated):
+            actions.append(TranslationScenarioPhase(scenario=item.scenario))
+            if include_controls and ordinal < len(generated) - 1:
+                actions.append(controls[ordinal])
+        return tuple(actions)
 
     @staticmethod
     def _wait(env, predicate, *, description: str, max_cycles: int) -> None:
@@ -102,13 +219,33 @@ class TranslationScenarioSequence:
             return bool(active["fault_seen"])
         return bool((not active["expected_ptw_requests"] or active["response_seen"]) and active["fetch_seen"])
 
+    @staticmethod
+    def _phase_finished(env) -> bool:
+        return TranslationScenarioSequence._phase_complete(env) or bool(
+            env.translation_oracle.get_stats()["errors"]
+        )
+
+    def initialize_first_phase(self, env, *, reset_cycles: int = 20) -> None:
+        """Reset the DUT in the translation mode required by the first phase."""
+
+        first_phase = next((action for action in self.actions if isinstance(action, TranslationScenarioPhase)), None)
+        if first_phase is None or first_phase.scenario is None or first_phase.reuse_previous:
+            raise ValueError("translation scenario sequence requires an explicit first phase for initialization")
+        scenario = first_phase.scenario
+        translation_enabled = str(scenario.mode).lower() != "bare" or int(scenario.s2xlate) != 0
+        env.initialize(
+            reset_vector=int(scenario.va),
+            bare_mode=not translation_enabled,
+            reset_cycles=int(reset_cycles),
+        )
+
     def run(self, env) -> list[dict]:
         if not self.actions:
             raise ValueError("translation scenario sequence requires at least one action")
 
         results: list[dict] = []
         previous_state: TranslationScenarioState | None = None
-        for action in self.actions:
+        for action_index, action in enumerate(self.actions):
             if isinstance(action, TranslationSfenceAction):
                 ptw_stats = env.ptw_agent.get_stats()
                 dropped_before = int(ptw_stats.get("sfence_dropped_responses", 0))
@@ -117,6 +254,7 @@ class TranslationScenarioSequence:
                     rs1=int(action.rs1),
                     rs2=int(action.rs2),
                     ident=int(action.ident),
+                    flush_pipe=int(action.flush_pipe),
                     hv=int(action.hv),
                     hg=int(action.hg),
                     cycles=int(action.cycles),
@@ -132,6 +270,11 @@ class TranslationScenarioSequence:
                         "record": record,
                     }
                 )
+                continue
+
+            if isinstance(action, TranslationFlushPipeAction):
+                record = env.pulse_translation_flushpipe(cycles=int(action.cycles))
+                results.append({"kind": "flushpipe", "record": record})
                 continue
 
             if isinstance(action, TranslationContextAction):
@@ -253,7 +396,7 @@ class TranslationScenarioSequence:
             if action.wait_for_completion:
                 self._wait(
                     env,
-                    lambda: self._phase_complete(env),
+                    lambda: self._phase_finished(env),
                     description="translation completion",
                     max_cycles=int(action.max_cycles),
                 )
@@ -267,11 +410,14 @@ class TranslationScenarioSequence:
                 }
             )
             previous_state = state
+            if action.wait_for_completion and action_index < len(self.actions) - 1:
+                env.translation_oracle.disarm()
         return results
 
 
 __all__ = [
     "TranslationContextAction",
+    "TranslationFlushPipeAction",
     "TranslationPbmteAction",
     "TranslationPmpPmaWriteAction",
     "TranslationScenarioPhase",
