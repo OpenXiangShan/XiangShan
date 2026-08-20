@@ -99,6 +99,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val safeFromFrontend = Input(Bool())
     }
     val wfi_enable = Input(Bool())
+    val commit_stuck_check_enable = Input(Bool())
     val toDecode = new Bundle {
       val isResumeVType = Output(Bool())
       val walkToArchVType = Output(Bool())
@@ -1863,14 +1864,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // max commit-stuck cycle
   val mmioBusy = io.lsq.mmioBusy // lsq know uncache request is rob head
   val commitStuck = (!io.commits.commitValid.reduce(_ || _) || !io.commits.isCommit) && !mmioBusy
-  val commitStuckCycle = RegInit(0.U(log2Up(maxCommitStuck).W))
-  when(commitStuck) {
-    commitStuckCycle := commitStuckCycle + 1.U
-  }.elsewhen(!commitStuck && RegNext(commitStuck)) {
-    commitStuckCycle := 0.U
-  }
+  val commitStuckCounter = Module(new CommitStuckCounter(
+    width = log2Up(maxCommitStuck),
+    forceEnable = env.EnableDifftest.B
+  ))
+  val commitStuckOverflowEnabled = if (wfiResume) true.B else !hasWFI
+  commitStuckCounter.io.stuck := commitStuck
+  commitStuckCounter.io.runtimeEnable := io.commit_stuck_check_enable
+  commitStuckCounter.io.overflowEnabled := commitStuckOverflowEnabled
+  val commitStuckCycle = commitStuckCounter.io.count
   // check if stuck > 2^maxCommitStuckCycle
-  val commitStuck_overflow = commitStuckCycle.andR && (if (wfiResume) true.B else (!hasWFI))
+  val commitStuck_overflow = commitStuckCounter.io.overflow
   val criticalErrors = Seq(
     ("rob_commit_stuck  ", commitStuck_overflow),
   )
