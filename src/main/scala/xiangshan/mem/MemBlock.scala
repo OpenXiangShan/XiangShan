@@ -847,6 +847,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vSegmentFlag := false.B
   }
 
+  // Kill the request left in DCache load port 0 S1 when segment takes over.
+  // Only a hardware prefetch can occupy this boundary slot.
+  val vSegmentFlagPrev = RegNext(vSegmentFlag, false.B)
+  val vSegmentS1Kill = vSegmentFlag && !vSegmentFlagPrev
+
   // LoadUnit
   val correctMissTrain = Constantin.createRecord(s"CorrectMissTrain$hartId", initValue = false)
 
@@ -897,7 +902,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       dcache.io.lsu.load(0).s1_paddr_dup_lsu       := vSegmentUnit.io.rdcache.s1_paddr_dup_lsu
       dcache.io.lsu.load(0).s1_paddr_dup_dcache    := vSegmentUnit.io.rdcache.s1_paddr_dup_dcache
       dcache.io.lsu.load(0).s1_kill_data_read      := vSegmentUnit.io.rdcache.s1_kill_data_read
-      dcache.io.lsu.load(0).s1_kill                := vSegmentUnit.io.rdcache.s1_kill
+      dcache.io.lsu.load(0).s1_kill                := vSegmentUnit.io.rdcache.s1_kill || vSegmentS1Kill
       dcache.io.lsu.load(0).s2_kill                := vSegmentUnit.io.rdcache.s2_kill
       dcache.io.lsu.load(0).s0_pc                  := vSegmentUnit.io.rdcache.s0_pc
       dcache.io.lsu.load(0).s1_pc                  := vSegmentUnit.io.rdcache.s1_pc
