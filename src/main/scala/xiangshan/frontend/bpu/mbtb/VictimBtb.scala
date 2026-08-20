@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.mbtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.SaturateCounter
 
 class VictimBtb(implicit p: Parameters) extends MainBtbModule {
@@ -112,7 +113,7 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule {
   for (w <- 0 until NumWay) {
     when(writeEntry.req.valid) {
       when(writeEntry.req.bits.flushMask(w)) {
-        writeEntries(w).entry.valid := false.B
+        writeEntries(w).entry.attribute := BranchAttribute.None
       }
       // write entry has higher priority than flush
       when(writeEntry.req.bits.wayMask(w)) {
@@ -127,11 +128,11 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule {
   // a matching prediction position.
   for (w <- 0 until NumWay) {
     when(flush.req.valid && flush.req.bits.wayMask(w)) {
-      entries(flush.req.bits.setIdx)(w).entry.valid := false.B
+      entries(flush.req.bits.setIdx)(w).entry.attribute := BranchAttribute.None
     }
   }
 
   when(reset.asBool) {
-    entries.foreach(_.foreach(_.entry.valid := false.B))
+    entries.foreach(_.foreach(_.entry.attribute := BranchAttribute.None))
   }
 }

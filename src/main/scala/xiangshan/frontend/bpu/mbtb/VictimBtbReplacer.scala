@@ -46,8 +46,8 @@ class VictimBtbReplacer(implicit p: Parameters) extends MainBtbModule {
 
   /* *** predict *** */
   // read current state
-  stateBank.io.predictReadSetIdx := io.predictTouch.bits.setIdx
-  private val predictState = stateBank.io.predictReadState
+  stateBank.io.predictRead.setIdx := io.predictTouch.bits.setIdx
+  private val predictState = stateBank.io.predictRead.state
 
   // compose touch way vec
   private val predictTouchWay = VecInit((0 until NumWay).map { i =>
@@ -63,19 +63,19 @@ class VictimBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   private val predictNextState = Mux(io.predictTouch.valid, predictStateGen.io.nextState, predictState)
 
   // write back next state
-  stateBank.io.predictWriteValid  := io.predictTouch.valid
-  stateBank.io.predictWriteSetIdx := io.predictTouch.bits.setIdx
-  stateBank.io.predictWriteState  := predictNextState
+  stateBank.io.predictWrite.valid       := io.predictTouch.valid
+  stateBank.io.predictWrite.bits.setIdx := io.predictTouch.bits.setIdx
+  stateBank.io.predictWrite.bits.state  := predictNextState
 
   /* *** train *** */
   // read current state
-  stateBank.io.trainReadSetIdx := io.trainTouch.bits.setIdx
+  stateBank.io.trainRead.setIdx := io.trainTouch.bits.setIdx
 
   private val predictSameSet = io.predictTouch.valid && (io.predictTouch.bits.setIdx === io.trainTouch.bits.setIdx)
   private val trainState = Mux(
     predictSameSet,
     predictNextState,
-    stateBank.io.trainReadState
+    stateBank.io.trainRead.state
   )
 
   // compose touch way vec
@@ -93,9 +93,9 @@ class VictimBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   private val trainNextState = Mux(io.trainTouch.valid, trainStateGen.io.nextState, trainState)
 
   // write back next state
-  stateBank.io.trainWriteValid  := io.trainTouch.valid
-  stateBank.io.trainWriteSetIdx := io.trainTouch.bits.setIdx
-  stateBank.io.trainWriteState  := trainNextState
+  stateBank.io.trainWrite.valid       := io.trainTouch.valid
+  stateBank.io.trainWrite.bits.setIdx := io.trainTouch.bits.setIdx
+  stateBank.io.trainWrite.bits.state  := trainNextState
 
   /* *** victim *** */
   io.victim.wayMask := UIntToOH(trainStateGen.io.victim)

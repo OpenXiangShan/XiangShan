@@ -191,22 +191,23 @@ class MainBtbAlignBank(
   private val s2_alignedInstOffset = getAlignedInstOffset(s2_startPc)
 
   // send resp
-  (r.resp.predictions zip r.resp.metas zip s2_rawEntries zip s2_rawCounters).foreach { case (((pred, meta), e), c) =>
-    // send rawHit for training
-    val rawHit = e.valid && e.tag === s2_tag
-    // filter out branches before alignedInstOffset
-    // also filter out all entries if crossPage to satisfy Ifu/ICache's requirement
-    val hit = rawHit && e.position >= s2_alignedInstOffset && !s2_crossPage
-    pred.valid            := hit
-    pred.bits.cfiPosition := Cat(s2_posHigherBits, e.position)
-    pred.bits.target      := getFullTarget(s2_startPc, e.targetLowerBits, e.targetCarry)
-    pred.bits.attribute   := e.attribute
-    pred.bits.taken       := c.isPositive
+  (r.mbtbResp.predictions zip r.mbtbResp.metas zip s2_rawEntries zip s2_rawCounters).foreach {
+    case (((pred, meta), e), c) =>
+      // send rawHit for training
+      val rawHit = e.valid && e.tag === s2_tag
+      // filter out branches before alignedInstOffset
+      // also filter out all entries if crossPage to satisfy Ifu/ICache's requirement
+      val hit = rawHit && e.position >= s2_alignedInstOffset && !s2_crossPage
+      pred.valid            := hit
+      pred.bits.cfiPosition := Cat(s2_posHigherBits, e.position)
+      pred.bits.target      := getFullTarget(s2_startPc, e.targetLowerBits, e.targetCarry)
+      pred.bits.attribute   := e.attribute
+      pred.bits.taken       := c.isPositive
 
-    meta.rawHit    := rawHit
-    meta.attribute := e.attribute
-    meta.position  := Cat(s2_posHigherBits, e.position)
-    meta.counter   := c
+      meta.rawHit    := rawHit
+      meta.attribute := e.attribute
+      meta.position  := Cat(s2_posHigherBits, e.position)
+      meta.counter   := c
   }
   (r.vbtbResp.predictions zip r.vbtbResp.metas).zipWithIndex.foreach {
     case ((pred, meta), i) =>
@@ -216,7 +217,7 @@ class MainBtbAlignBank(
       val e      = s2_vbtbEntries(i)
       pred.valid            := hit
       pred.bits.cfiPosition := Cat(s2_posHigherBits, e.entry.position)
-      pred.bits.target      := getFullTarget(s2_startPc, e.entry.targetLowerBits, Some(e.entry.targetCarry))
+      pred.bits.target      := getFullTarget(s2_startPc, e.entry.targetLowerBits, e.entry.targetCarry)
       pred.bits.attribute   := e.entry.attribute
       pred.bits.taken       := e.counter.isPositive
 
