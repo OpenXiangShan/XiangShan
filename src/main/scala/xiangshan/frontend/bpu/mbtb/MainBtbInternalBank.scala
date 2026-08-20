@@ -73,6 +73,10 @@ class MainBtbInternalBank(
 
     val sramResetDone: Bool = Output(Bool())
 
+    // context flush handshake (not generated when HasBpuFlush is off)
+    val contextFlush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
+    val bpuFlushing:  Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
+
     val read:         Read         = new Read
     val writeEntry:   WriteEntry   = new WriteEntry
     val writeCounter: WriteCounter = new WriteCounter
@@ -80,6 +84,11 @@ class MainBtbInternalBank(
   }
 
   val io: MainBtbInternalBankIO = IO(new MainBtbInternalBankIO)
+
+  // Intermediate unpacked signals (SPEC 04 §4.2.1); else false.B is only a Scala
+  // type placeholder: all consumers below live inside if (HasBpuFlush) guards.
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get  else false.B
 
   // alias
   private val read         = io.read
@@ -97,6 +106,7 @@ class MainBtbInternalBank(
         shouldReset = true,
         holdRead = true,
         withClockGate = true,
+        extraReset = HasBpuFlush, // elaboration-time constant: extra_reset port is not generated when off
         hasMbist = hasMbist,
         hasSramCtl = hasSramCtl,
         suffix = Option("bpu_mbtb_entry")
@@ -113,24 +123,41 @@ class MainBtbInternalBank(
     shouldReset = true,
     holdRead = true,
     withClockGate = true,
+    extraReset = HasBpuFlush, // elaboration-time constant: extra_reset port is not generated when off
     hasMbist = hasMbist,
     hasSramCtl = hasSramCtl,
     suffix = Option("bpu_mbtb_counter")
   )).suggestName(s"mbtb_sram_counter_align${alignIdx}_bank${bankIdx}")
 
+  // Runtime context flush drives the SRAM extra_reset, triggering the 256-cycle
+  // sweep; the sweep window is shared by entry and counter SRAMs (SPEC 04 §4.2.2 / §4.3.2)
+  if (HasBpuFlush) {
+    (entrySrams :+ counterSram).foreach { sram =>
+      sram.extra_reset.get := contextFlush
+    }
+  }
+
   private val entryWriteBuffer = Module(new WriteBuffer(
     new MainBtbEntrySramWriteReq,
     numEntries = WriteBufferSize,
     numPorts = NumWay,
+    hasContextFlush = HasBpuFlush, // clears dirty + shadowValid on the flush pulse (SPEC 04 §4.4.1)
     nameSuffix = s"mbtbEntryAlign${alignIdx}_Bank${bankIdx}"
   ))
+  if (HasBpuFlush) {
+    entryWriteBuffer.io.contextFlush.get := contextFlush
+  }
 
   private val counterWriteBuffer = Module(new Queue(
     new MainBtbCounterSramWriteReq,
     WriteBufferSize,
     pipe = true,
-    flow = true
+    flow = true,
+    hasFlush = HasBpuFlush // resets enq_ptr/deq_ptr/maybe_full on the flush pulse (SPEC 04 §4.5.1)
   ))
+  if (HasBpuFlush) {
+    counterWriteBuffer.io.flush.get := contextFlush
+  }
 
   io.sramResetDone := entrySrams.map(_.io.resetDone).reduce(_ && _) && counterSram.io.resetDone
 
@@ -169,7 +196,9 @@ class MainBtbInternalBank(
   entryWriteBuffer.io.write.zipWithIndex.foreach { case (bufWrite, i) =>
     val writeValid = writeEntry.req.valid && writeEntry.req.bits.wayMask(i)
     val flushValid = flush.req.valid && flush.req.bits.wayMask(i) && !conflict
-    val valid      = writeValid || flushValid
+    // unified gate at the merge point: one AND term blocks both write sources
+    // (train writes + multi-hit zero writes) during the whole flush window (SPEC 04 §4.4.3)
+    val valid      = (writeValid || flushValid) && (if (HasBpuFlush) !bpuFlushing else true.B)
     bufWrite.valid := RegNext(valid, false.B)
     bufWrite.bits.setIdx := RegEnable(
       Mux(
@@ -189,7 +218,8 @@ class MainBtbInternalBank(
     )
   }
   // counter, dont care flush (`hit` is controlled by entry)
-  counterWriteBuffer.io.enq.valid         := writeCounter.req.valid
+  // single write source, gate enq.valid directly for a whole-window hard guarantee (SPEC 04 §4.5.3)
+  counterWriteBuffer.io.enq.valid         := writeCounter.req.valid && (if (HasBpuFlush) !bpuFlushing else true.B)
   counterWriteBuffer.io.enq.bits.setIdx   := writeCounter.req.bits.setIdx
   counterWriteBuffer.io.enq.bits.wayMask  := writeCounter.req.bits.wayMask
   counterWriteBuffer.io.enq.bits.counters := writeCounter.req.bits.counters

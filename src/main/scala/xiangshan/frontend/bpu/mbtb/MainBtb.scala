@@ -41,6 +41,11 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   val io: MainBtbIO = IO(new MainBtbIO)
 
+  // Intermediate unpacked signals (SPEC 04 §4.2.1); else false.B is only a Scala
+  // type placeholder: all consumers below live inside if (HasBpuFlush) guards.
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get  else false.B
+
   // print params
   println(f"MainBtb:")
   println(f"  Size(set, way, align, internal): $NumSets * $NumWay * $NumAlignBanks * $NumInternalBanks = $NumEntries")
@@ -51,9 +56,18 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val alignBanks = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new MainBtbAlignBank(alignIdx)))
 
   io.sramResetDone := alignBanks.map(_.io.sramResetDone).reduce(_ && _)
-  // context flush placeholder: real flush scheme comes later
+  // Real flush completion: the 40 SRAMs finish their 256-cycle sweep at T+257,
+  // resetDone combinationally follows, masked low on the contextFlush pulse cycle (SPEC 04 §4.9)
   if (HasBpuFlush) {
-    io.resetDone.get := true.B
+    io.resetDone.get := io.sramResetDone && !contextFlush
+  }
+
+  // Top-level fan-out of the flush signals (Option-to-Option, generated only when on)
+  if (HasBpuFlush) {
+    alignBanks.foreach { b =>
+      b.io.contextFlush.get := io.contextFlush.get
+      b.io.bpuFlushing.get  := io.bpuFlushing.get
+    }
   }
 
   io.trainReady := true.B
@@ -130,7 +144,9 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
    * receive training data
    * send startPc to alignBank for replacer state reading
    */
-  t0_fire := io.stageCtrl.t0_fire && io.enable
+  // gate the local Wire (not io.stageCtrl.t0_fire) so the train pipeline stalls
+  // during the whole flush window: no new data is loaded into t1 registers (SPEC 04 §4.8 strategy 2)
+  t0_fire := io.stageCtrl.t0_fire && io.enable && (if (HasBpuFlush) !bpuFlushing else true.B)
   private val t0_train = io.train
 
   private val t0_startPc    = t0_train.startPc
@@ -149,6 +165,16 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   private val t1_rotator    = RegEnable(t0_rotator, t0_fire)
   private val t1_startPcVec = RegEnable(t0_startPcVec, t0_fire)
+
+  // clear t1 data registers on the contextFlush pulse, last-connect overrides the
+  // RegEnable loads above; control signals (fires) are not cleared (SPEC 04 §4.8 strategy 1)
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      t1_train      := 0.U.asTypeOf(t1_train)
+      t1_rotator    := 0.U.asTypeOf(t1_rotator)
+      t1_startPcVec := 0.U.asTypeOf(t1_startPcVec)
+    }
+  }
 
   private val t1_meta           = t1_train.meta.mbtb
   private val t1_mispredictInfo = t1_train.mispredictBranch

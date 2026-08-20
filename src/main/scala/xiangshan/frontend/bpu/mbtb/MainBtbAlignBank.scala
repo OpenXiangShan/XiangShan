@@ -79,9 +79,18 @@ class MainBtbAlignBank(
 
     // fast path of train pc, used to read replacer in advance for better timing
     val t0_startPc: PrunedAddr = Input(new PrunedAddr(VAddrBits))
+
+    // context flush handshake (not generated when HasBpuFlush is off)
+    val contextFlush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
+    val bpuFlushing:  Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
   }
 
   val io: MainBtbAlignBankIO = IO(new MainBtbAlignBankIO)
+
+  // Intermediate unpacked signals (SPEC 04 §4.2.1); else false.B is only a Scala
+  // type placeholder: all consumers below live inside if (HasBpuFlush) guards.
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get  else false.B
 
   // alias
   private val r = io.read
@@ -92,6 +101,16 @@ class MainBtbAlignBank(
   }
 
   private val replacer = Module(new MainBtbReplacer)
+
+  // Fan-out of the flush signals (Option-to-Option, generated only when on)
+  if (HasBpuFlush) {
+    internalBanks.foreach { b =>
+      b.io.contextFlush.get := io.contextFlush.get
+      b.io.bpuFlushing.get  := io.bpuFlushing.get
+    }
+    // bpuFlushing stays at this level to gate the touch enables (SPEC 04 §4.6.1)
+    replacer.io.contextFlush.get := io.contextFlush.get
+  }
 
   io.sramResetDone := internalBanks.map(_.io.sramResetDone).reduce(_ && _)
 
@@ -112,7 +131,8 @@ class MainBtbAlignBank(
   assert(!s0_fire || s0_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.read.req.valid       := s0_fire && s0_internalBankMask(i)
+    // no read requests to SRAMs under reset sweep (SPEC 04 §4.7 strategy 2)
+    b.io.read.req.valid       := s0_fire && s0_internalBankMask(i) && (if (HasBpuFlush) !bpuFlushing else true.B)
     b.io.read.req.bits.setIdx := s0_setIdx
   }
 
@@ -126,14 +146,18 @@ class MainBtbAlignBank(
   private val s1_crossPage        = RegEnable(s0_crossPage, s0_fire)
   private val s1_internalBankMask = RegEnable(s0_internalBankMask, s0_fire)
 
-  private val s1_rawEntries = Mux1H(
-    s1_internalBankMask,
-    internalBanks.map(_.io.read.resp.entries)
-  )
-  private val s1_rawCounters = Mux1H(
-    s1_internalBankMask,
-    internalBanks.map(_.io.read.resp.counters)
-  )
+  // force-zero the Mux1H output during the flush window so holdRead stale lines
+  // can never flow into the prediction decision (SPEC 04 §4.7 strategy 2)
+  private val s1_rawEntries = if (HasBpuFlush) Mux(
+    bpuFlushing,
+    0.U.asTypeOf(Vec(NumWay, new MainBtbEntry)),
+    Mux1H(s1_internalBankMask, internalBanks.map(_.io.read.resp.entries))
+  ) else Mux1H(s1_internalBankMask, internalBanks.map(_.io.read.resp.entries))
+  private val s1_rawCounters = if (HasBpuFlush) Mux(
+    bpuFlushing,
+    VecInit.fill(NumWay)(TakenCounter.Zero),
+    Mux1H(s1_internalBankMask, internalBanks.map(_.io.read.resp.counters))
+  ) else Mux1H(s1_internalBankMask, internalBanks.map(_.io.read.resp.counters))
 
   io.read.s1_positions := VecInit(s1_rawEntries.map(e => Cat(s1_posHigherBits, e.position)))
 
@@ -189,8 +213,31 @@ class MainBtbAlignBank(
   private val s3_replacerSetIdx = RegEnable(getReplacerSetIndex(s2_startPc), s2_fire)
   private val s3_takenMask      = io.s3_takenMask
 
+  // clear S1/S2/S3 prediction registers at the end of the contextFlush cycle,
+  // last-connect overrides the RegEnable loads above; startPc and fire/valid
+  // control signals are not cleared (SPEC 04 §4.7 strategy 1)
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      // S1
+      s1_posHigherBits    := 0.U
+      s1_crossPage        := false.B
+      s1_internalBankMask := 0.U
+      // S2
+      s2_posHigherBits    := 0.U
+      s2_crossPage        := false.B
+      s2_internalBankMask := 0.U
+      s2_rawEntries       := 0.U.asTypeOf(s2_rawEntries)
+      s2_rawCounters      := 0.U.asTypeOf(s2_rawCounters)
+      // S3
+      s3_replacerSetIdx   := 0.U
+    }
+  }
+
   // touch taken entries only: not-taken conditional entries are considered not very useful and should be killed first
-  replacer.io.predict.touch.valid        := s3_fire && s3_takenMask.reduce(_ || _)
+  // gate both touch enables during the flush window: in-flight requests must not
+  // pollute the already-cleared replacer states (SPEC 04 §4.6.3)
+  replacer.io.predict.touch.valid := s3_fire && s3_takenMask.reduce(_ || _) &&
+    (if (HasBpuFlush) !bpuFlushing else true.B)
   replacer.io.predict.touch.bits.setIdx  := s3_replacerSetIdx
   replacer.io.predict.touch.bits.wayMask := s3_takenMask.asUInt
 
@@ -219,6 +266,14 @@ class MainBtbAlignBank(
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx, NumInternalBanks)
   private val t1_alignBankIdx     = getAlignBankIndex(t1_startPc)
   private val t1_victimMask       = RegEnable(t0_victimMask, t0_fire)
+
+  // clear t1 data register on the contextFlush pulse, last-connect overrides the
+  // RegEnable load above (SPEC 04 §4.8 strategy 1; the other t1_* are wires)
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      t1_victimMask := 0.U.asTypeOf(t1_victimMask)
+    }
+  }
 
   /* *** update entry *** */
   // NOTE: the original rawHit result can be multi-hit (i.e. multiple rawHit && position match), so PriorityEncoderOH
@@ -256,7 +311,8 @@ class MainBtbAlignBank(
   }
 
   // update replacer
-  replacer.io.train.t1_touch.valid        := t1_fire && t1_entryNeedWrite
+  replacer.io.train.t1_touch.valid := t1_fire && t1_entryNeedWrite &&
+    (if (HasBpuFlush) !bpuFlushing else true.B)
   replacer.io.train.t1_touch.bits.setIdx  := getReplacerSetIndex(t1_startPc)
   replacer.io.train.t1_touch.bits.wayMask := t1_entryWayMask
 

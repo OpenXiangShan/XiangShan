@@ -41,14 +41,30 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
 
     val predict: Predict = new Predict
     val train:   Train   = new Train
+
+    // context flush handshake (not generated when HasBpuFlush is off);
+    // bpuFlushing stays in MainBtbAlignBank to gate the touch enables (SPEC 04 §4.6.1)
+    val contextFlush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
   }
 
   val io: MainBtbReplacerIO = IO(new MainBtbReplacerIO)
 
+  // Intermediate unpacked signal (SPEC 04 §4.6.1); else false.B is only a Scala
+  // type placeholder: all consumers below live inside if (HasBpuFlush) guards.
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+
   private val predictStateGen = Module(ReplacerStateGen(Replacer, NumWay, accessSize = NumWay))
   private val trainStateGen   = Module(ReplacerStateGen(Replacer, NumWay))
   private val victimStateGen  = Module(ReplacerStateGen(Replacer, NumWay))
-  private val stateBank       = Module(new ReplacerState(NumSets, predictStateGen.StateWidth))
+  private val stateBank       = Module(new ReplacerState(
+    NumSets,
+    predictStateGen.StateWidth,
+    hasContextFlush = HasBpuFlush // clears all sets' states in 1 cycle (SPEC 04 §4.6.2)
+  ))
+
+  if (HasBpuFlush) {
+    stateBank.io.contextFlush.get := contextFlush
+  }
 
   /* *** predict *** */
   // read current state
