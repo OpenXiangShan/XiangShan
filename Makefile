@@ -50,7 +50,6 @@ TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 ISSUE ?= E.b
-CHISEL_TARGET ?= systemverilog
 
 SUPPORT_CHI_ISSUE = B C E.b
 ifeq ($(findstring $(ISSUE), $(SUPPORT_CHI_ISSUE)),)
@@ -65,6 +64,21 @@ ifeq ($(MAKECMDGOALS),)
 GOALS = verilog
 else
 GOALS = $(MAKECMDGOALS)
+endif
+
+# GSIM reads CHIRRTL directly, so Verilog is not needed for these goals.
+# An explicit CHISEL_TARGET on the command line still takes precedence.
+ifneq ($(filter sim-chirrtl gsim,$(GOALS)),)
+CHISEL_TARGET ?= chirrtl
+endif
+CHISEL_TARGET ?= systemverilog
+
+# The RTL emitted by the simulation top depends on the chisel target:
+# CHIRRTL stops right after elaboration, the other targets run firtool and convert to SV
+ifeq ($(CHISEL_TARGET),chirrtl)
+SIM_TOP_OUT = $(RTL_DIR)/$(SIM_TOP).fir
+else
+SIM_TOP_OUT = $(SIM_TOP_V)
 endif
 
 # JVM memory configurations
@@ -286,9 +300,9 @@ endif
 
 verilog: $(call docker-deps,$(TOP_V))
 
-$(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
+$(SIM_TOP_OUT): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
-	@echo -e "\n[mill] Generating Verilog files..." > $(TIMELOG)
+	@echo -e "\n[mill] Generating $(CHISEL_TARGET) files..." > $(TIMELOG)
 	@date -R | tee -a $(TIMELOG)
 	$(TIME_CMD) mill -i $(MILL_BUILD_ARGS) xiangshan.test.runMain $(SIMTOP) \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) \
@@ -309,7 +323,10 @@ endif
 	sed -i -e "s/\$$error(/\$$fwrite(32\'h80000002, /g" $(RTL_DIR)/*.$(RTL_SUFFIX)
 endif
 
-sim-verilog: $(call docker-deps,$(SIM_TOP_V))
+sim-verilog: $(call docker-deps,$(SIM_TOP_OUT))
+
+# elaboration only, stopping at CHIRRTL without generating Verilog
+sim-chirrtl: $(call docker-deps,$(SIM_TOP_OUT))
 
 clean:
 	$(MAKE) -C ./difftest clean
@@ -354,7 +371,7 @@ emu-mk: sim-verilog
 emu: $(call docker-deps,emu-mk)
 	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) OBJCACHE=$(OBJCACHE)
 
-gsim: sim-verilog
+gsim: sim-chirrtl
 	$(MAKE) -C ./difftest emu GSIM=1 SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 # vcs simulation
@@ -385,4 +402,4 @@ include Makefile.test
 
 include src/main/scala/device/standalone/standalone_device.mk
 
-.PHONY: FORCE verilog sim-verilog gsim emu clean help init init-force bump bsp $(REF_SO)
+.PHONY: FORCE verilog sim-verilog sim-chirrtl gsim emu clean help init init-force bump bsp $(REF_SO)
