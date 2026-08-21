@@ -321,6 +321,61 @@ def test_builder_derives_explicit_fetch_range_permission_probes() -> None:
     assert state.expected_permission_probes[1]["permission"]["pma_cacheable"] is False
 
 
+def test_builder_splits_one_logical_permission_probe_at_declared_attribute_boundaries() -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id="split-permission-probe",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        payload=b"\x13" * 16,
+        permission_probes=(TranslationPermissionProbe(va=0x8020_0000, size=8, segment_sizes=(4, 4)),),
+    )
+
+    state = TranslationScenarioBuilder(env).build(scenario)
+
+    assert state.expected_permission_probes == (
+        {
+            "probe_index": 0,
+            "segment_index": 0,
+            "logical_va": 0x8020_0000,
+            "logical_size": 8,
+            "va": 0x8020_0000,
+            "size": 4,
+            "pa": 0x8040_0000,
+            "end": 0x8040_0003,
+            "translated": True,
+            "permission": state.expected_permission_probes[0]["permission"],
+        },
+        {
+            "probe_index": 0,
+            "segment_index": 1,
+            "logical_va": 0x8020_0000,
+            "logical_size": 8,
+            "va": 0x8020_0004,
+            "size": 4,
+            "pa": 0x8040_0004,
+            "end": 0x8040_0007,
+            "translated": True,
+            "permission": state.expected_permission_probes[1]["permission"],
+        },
+    )
+
+
+@pytest.mark.parametrize("segment_sizes", [(4, 2), (4, 0, 4)])
+def test_builder_rejects_incomplete_or_empty_permission_probe_segments(segment_sizes) -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id="invalid-permission-probe-segments",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        payload=b"\x13" * 16,
+        permission_probes=(TranslationPermissionProbe(va=0x8020_0000, size=8, segment_sizes=segment_sizes),),
+    )
+
+    with pytest.raises(ValueError, match="segment sizes"):
+        TranslationScenarioBuilder(env).build(scenario)
+
+
 def test_builder_rejects_permission_probe_outside_its_payload() -> None:
     env = _env()
     scenario = TranslationScenario(

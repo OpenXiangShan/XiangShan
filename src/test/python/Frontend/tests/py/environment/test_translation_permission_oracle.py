@@ -95,6 +95,76 @@ def test_oracle_uses_first_normal_fetch_as_translation_evidence() -> None:
     assert [record["kind"] for record in stats["records"]] == ["armed", "ptw_request", "ptw_response", "fetch_request"]
 
 
+def test_oracle_disarm_keeps_completed_phase_history() -> None:
+    env, state = _state(
+        scenario_id="oracle-disarm",
+        va=0x8020_0004,
+        pa=0x8040_0004,
+        pte=TranslationPte(v=1, r=1, x=1, a=1),
+    )
+
+    _observe_matching_ptw(env, state)
+    env.translation_oracle.observe_fetch_request(12, path="icache", pa=state.expected_outcome["pa"] & ~0x3F)
+    env.assert_translation_scenario()
+    env.translation_oracle.disarm()
+
+    stats = env.translation_oracle.get_stats()
+    assert stats["active"] is None
+    assert stats["records"][-1]["kind"] == "disarmed"
+    assert stats["error_count"] == 0
+
+
+def test_oracle_does_not_attribute_transactions_before_redirect_recovery() -> None:
+    env, state = _state(
+        scenario_id="oracle-pre-redirect",
+        va=0x8020_1000,
+        pa=0x8040_1000,
+        pte=TranslationPte(v=1, r=1, x=0, a=1),
+    )
+    env.translation_oracle.set_fetch_observation_ready(ready=False)
+    request = state.expected_ptw_request
+
+    env.translation_oracle.observe_ptw_request(
+        12,
+        vpn=request["vpn"] + 1,
+        s2xlate=request["s2xlate"],
+        get_gpa=request["get_gpa"],
+    )
+    env.translation_oracle.observe_cfvec(12, pc=0, exception_bits={1: 1})
+
+    stats = env.translation_oracle.get_stats()
+    assert stats["error_count"] == 0
+    assert [record["kind"] for record in stats["records"][-2:]] == [
+        "pre_redirect_ptw_request",
+        "pre_redirect_cfvec_exception",
+    ]
+
+
+def test_oracle_does_not_attribute_old_vpn_before_the_target_request() -> None:
+    env, state = _state(
+        scenario_id="oracle-pre-target",
+        va=0x8020_1000,
+        pa=0x8040_1000,
+        pte=TranslationPte(v=1, r=1, x=0, a=1),
+    )
+    request = state.expected_ptw_request
+
+    env.translation_oracle.observe_ptw_request(
+        12,
+        vpn=request["vpn"] + 1,
+        s2xlate=request["s2xlate"],
+        get_gpa=request["get_gpa"],
+    )
+    env.translation_oracle.observe_cfvec(12, pc=state.scenario.va + 0x1000, exception_bits={1: 1})
+
+    stats = env.translation_oracle.get_stats()
+    assert stats["error_count"] == 0
+    assert [record["kind"] for record in stats["records"][-2:]] == [
+        "pre_target_ptw_request",
+        "pre_target_cfvec_exception",
+    ]
+
+
 def test_oracle_maps_generated_cfvec_page_fault_bit() -> None:
     env, state = _state(
         scenario_id="oracle-page-fault",
@@ -518,3 +588,52 @@ def test_oracle_requires_the_guest_fault_gpa_followup_ptw_transaction() -> None:
         (first["vpn"], first["s2xlate"], 0),
         (followup["vpn"], followup["s2xlate"], 1),
     ]
+
+
+def test_oracle_does_not_require_permission_request_after_translation_access_fault() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    scenario = TranslationScenario(
+        scenario_id="oracle-stage2-access-fault",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        payload=b"\x13\x00\x00\x00",
+        mode="bare",
+        stage2_mode="sv39",
+        s2xlate=2,
+        priv_virt=1,
+        s2_gaf=1,
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, execute=True),
+                addr=0x8040_0000,
+                size=0x1000,
+            ),
+        ),
+    )
+
+    state = TranslationScenarioBuilder(env).build(scenario)
+    active = env.arm_translation_scenario(state)
+
+    assert active["expected_fault"] == "instruction_access_fault"
+    assert active["permission_check_required"] is False
+
+
+def test_oracle_does_not_require_untranslated_permission_probe() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    scenario = TranslationScenario(
+        scenario_id="oracle-untranslated-probe",
+        va=0x8020_0000,
+        pa=0x8040_0000,
+        payload=b"\x13\x00\x00\x00\x13\x00\x00\x00",
+        s1_pf=1,
+        permission_probes=(TranslationPermissionProbe(va=0x8020_0000, size=8),),
+    )
+
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.arm_translation_scenario(state)
+    _observe_matching_ptw(env, state)
+    env.translation_oracle.observe_cfvec(12, pc=scenario.va, exception_bits={12: 1})
+
+    assert env.assert_translation_scenario()["error_count"] == 0
