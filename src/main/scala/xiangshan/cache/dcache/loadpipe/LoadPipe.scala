@@ -492,9 +492,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   }
 
 
-  XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
-  XSPerfAccumulate("dcache_read_from_prefetched_line", s2_valid && isPrefetchRelated(s2_hit_prefetch) && !resp.bits.miss)
-  XSPerfAccumulate("dcache_first_read_from_prefetched_line", s2_valid && isPrefetchRelated(s2_hit_prefetch) && !resp.bits.miss && !s2_hit_access)
+  XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid, dontTouch = true)
+  XSPerfAccumulate("dcache_read_from_prefetched_line", s2_valid && isPrefetchRelated(s2_hit_prefetch) && !resp.bits.miss, dontTouch = true)
+  XSPerfAccumulate("dcache_first_read_from_prefetched_line", s2_valid && isPrefetchRelated(s2_hit_prefetch) && !resp.bits.miss && !s2_hit_access, dontTouch = true)
 
   // if ldu0 and ldu1 hit the same, count for 1
   val total_prefetch = s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
@@ -643,13 +643,13 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   XSPerfAccumulate("load_req", io.lsu.req.fire)
   XSPerfAccumulate("load_s1_kill", s1_fire && io.lsu.s1_kill)
   XSPerfAccumulate("load_hit_way", s1_fire && s1_tag_match_dup_dc)
-  XSPerfAccumulate("load_replay", io.lsu.resp.fire && resp.bits.replay)
-  XSPerfAccumulate("load_replay_for_dcache_data_nack", io.lsu.resp.fire && resp.bits.replay && s2_nack_data)
-  XSPerfAccumulate("load_replay_for_dcache_no_mshr", io.lsu.resp.fire && resp.bits.replay && s2_nack_no_mshr)
-  XSPerfAccumulate("load_replay_for_dcache_conflict", io.lsu.resp.fire && resp.bits.replay && io.bank_conflict_slow)
+  XSPerfAccumulate("load_replay", io.lsu.resp.fire && resp.bits.replay, dontTouch = true)
+  XSPerfAccumulate("load_replay_for_dcache_data_nack", io.lsu.resp.fire && resp.bits.replay && s2_nack_data, dontTouch = true)
+  XSPerfAccumulate("load_replay_for_dcache_no_mshr", io.lsu.resp.fire && resp.bits.replay && s2_nack_no_mshr, dontTouch = true)
+  XSPerfAccumulate("load_replay_for_dcache_conflict", io.lsu.resp.fire && resp.bits.replay && io.bank_conflict_slow, dontTouch = true)
   XSPerfAccumulate("load_replay_for_dcache_wpu_pred_fail", io.lsu.resp.fire && resp.bits.replay && s2_wpu_pred_fail)
   XSPerfAccumulate("load_hit", io.lsu.resp.fire && !real_miss)
-  XSPerfAccumulate("load_miss", io.lsu.resp.fire && real_miss)
+  XSPerfAccumulate("load_miss", io.lsu.resp.fire && real_miss, dontTouch = true)
   XSPerfAccumulate("load_succeed", io.lsu.resp.fire && !resp.bits.miss && !resp.bits.replay)
   XSPerfAccumulate("load_miss_or_conflict", io.lsu.resp.fire && resp.bits.miss)
   XSPerfAccumulate("actual_ld_fast_wakeup", s1_fire && s1_tag_match_dup_dc && !io.disable_ld_fast_wakeup)

@@ -138,18 +138,18 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasPrefe
     depth := depth_const
   }
 
-  XSPerfAccumulate("total_prefetch", io.timely.total_prefetch)
-  XSPerfAccumulate("late_hit_prefetch", io.timely.late_hit_prefetch)
-  XSPerfAccumulate("late_miss_prefetch", io.timely.late_miss_prefetch)
-  XSPerfAccumulate("good_prefetch", io.validity.good_prefetch)
-  XSPerfAccumulate("bad_prefetch", io.validity.bad_prefetch)
+  XSPerfAccumulate("total_prefetch", io.timely.total_prefetch, dontTouch = true)
+  XSPerfAccumulate("late_hit_prefetch", io.timely.late_hit_prefetch, dontTouch = true)
+  XSPerfAccumulate("late_miss_prefetch", io.timely.late_miss_prefetch, dontTouch = true)
+  XSPerfAccumulate("good_prefetch", io.validity.good_prefetch, dontTouch = true)
+  XSPerfAccumulate("bad_prefetch", io.validity.bad_prefetch, dontTouch = true)
   for(i <- (0 until DEPTH_BITS)) {
     val t = (1 << i)
-    XSPerfAccumulate(s"depth${t}", depth === t.U)
+    XSPerfAccumulate(s"depth${t}", depth === t.U, dontTouch = true)
   }
-  XSPerfAccumulate("trigger_disable", trigger_disable)
-  XSPerfAccumulate("prefetch_hit", io.timely.prefetch_hit)
-  XSPerfAccumulate("disable_time", !enable)
+  XSPerfAccumulate("trigger_disable", trigger_disable, dontTouch = true)
+  XSPerfAccumulate("prefetch_hit", io.timely.prefetch_hit, dontTouch = true)
+  XSPerfAccumulate("disable_time", !enable, dontTouch = true)
 
   assert(depth =/= 0.U, "depth should not be zero")
 }

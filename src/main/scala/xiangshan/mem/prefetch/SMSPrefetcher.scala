@@ -548,7 +548,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   XSPerfAccumulate("sms_agt_in", io.s0_lookup.valid)
   XSPerfAccumulate("sms_agt_alloc", s1_alloc) // cross region match or filter evict
   XSPerfAccumulate("sms_agt_update", s1_update) // entry hit
-  XSPerfAccumulate("sms_agt_pf_gen", io.s2_pf_gen_req.valid)
+  XSPerfAccumulate("sms_agt_pf_gen", io.s2_pf_gen_req.valid, dontTouch = true)
   XSPerfAccumulate("sms_agt_pf_gen_paddr_valid",
     io.s2_pf_gen_req.valid && io.s2_pf_gen_req.bits.paddr_valid
   )
@@ -562,7 +562,7 @@ class ActiveGenerationTable()(implicit p: Parameters) extends XSModule with HasS
   }
   XSPerfAccumulate("sms_agt_evict", s2_evict_valid)
   XSPerfAccumulate("sms_agt_evict_by_plru", s2_evict_valid && !s2_do_dcache_evict)
-  XSPerfAccumulate("sms_agt_evict_by_dcache", s2_evict_valid && s2_do_dcache_evict)
+  XSPerfAccumulate("sms_agt_evict_by_dcache", s2_evict_valid && s2_do_dcache_evict, dontTouch = true)
   XSPerfAccumulate("sms_agt_evict_one_hot_pattern", s2_evict_valid && (s2_evict_entry.access_cnt === 1.U))
 }
 
@@ -898,7 +898,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   XSPerfAccumulate("sms_pht_update", io.agt_update.valid)
   XSPerfAccumulate("sms_pht_update_hit", s2_valid && s2_evict && s2_pht_hit)
   XSPerfAccumulate("sms_pht_lookup", io.s2_agt_lookup.valid)
-  XSPerfAccumulate("sms_pht_lookup_hit", s2_valid && !s2_evict && s2_pht_hit)
+  XSPerfAccumulate("sms_pht_lookup_hit", s2_valid && !s2_evict && s2_pht_hit, dontTouch = true)
   for(i <- 0 until smsParams.pht_ways){
     XSPerfAccumulate(s"sms_pht_write_way_$i", pht_ram.io.w.req.fire && pht_ram.io.w.req.bits.waymask.get(i))
   }
@@ -1095,7 +1095,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   assert(!io.tlb_req.resp.fire || Cat(s2_tlb_fire_vec).orR, "sms_pf_filter: tlb resp fires, but no tlb req from tlb_req_arb 2 cycles ago")
 
   XSPerfAccumulate("sms_pf_filter_recv_req", io.gen_req.valid)
-  XSPerfAccumulate("sms_pf_filter_hit", s1_valid && s1_hit)
+  XSPerfAccumulate("sms_pf_filter_hit", s1_valid && s1_hit, dontTouch = true)
   XSPerfAccumulate("sms_pf_filter_tlb_req", io.tlb_req.req.fire)
   XSPerfAccumulate("sms_pf_filter_tlb_resp_miss", io.tlb_req.resp.fire && io.tlb_req.resp.bits.miss)
   XSPerfAccumulate("sms_pf_filter_tlb_resp_drop", s3_drop)
@@ -1111,7 +1111,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   for(i <- 0 until smsParams.pf_filter_size){
     XSPerfAccumulate(s"sms_pf_filter_access_way_$i", s0_gen_req_valid && s0_access_way === i.U)
   }
-  XSPerfAccumulate("sms_pf_filter_l2_req", io.l2_pf_addr.valid)
+  XSPerfAccumulate("sms_pf_filter_l2_req", io.l2_pf_addr.valid, dontTouch = true)
 }
 
 class SMSTrainFilter()(implicit p: Parameters) extends XSModule with HasSMSModuleHelper with HasTrainFilterHelper {

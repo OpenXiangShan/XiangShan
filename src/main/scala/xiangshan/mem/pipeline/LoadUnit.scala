@@ -1914,13 +1914,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s0_vecin_valid",               io.vecldin.valid)
   XSPerfAccumulate("s0_vecin_block",               io.vecldin.valid && !io.vecldin.fire)
   XSPerfAccumulate("s0_in_fire_first_issue",       s0_valid && s0_sel_src.isFirstIssue)
-  XSPerfAccumulate("s0_lsq_replay_issue",          io.replay.fire)
+  XSPerfAccumulate("s0_lsq_replay_issue",          io.replay.fire, dontTouch = true)
   XSPerfAccumulate("s0_lsq_replay_vecissue",       io.replay.fire && io.replay.bits.isvec)
   XSPerfAccumulate("s0_ldu_fire_first_issue",      io.ldin.fire && s0_sel_src.isFirstIssue)
   XSPerfAccumulate("s0_fast_replay_issue",         io.fast_rep_in.fire)
   XSPerfAccumulate("s0_fast_replay_vecissue",      io.fast_rep_in.fire && io.fast_rep_in.bits.isvec)
   XSPerfAccumulate("s0_stall_out",                 s0_valid && !s0_can_go)
-  XSPerfAccumulate("s0_stall_dcache",              s0_valid && !io.dcache.req.ready)
+  XSPerfAccumulate("s0_stall_dcache",              s0_valid && !io.dcache.req.ready, dontTouch = true)
   XSPerfAccumulate("s0_addr_spec_success",         s0_fire && s0_dcache_vaddr(VAddrBits-1, 12) === io.ldin.bits.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("s0_addr_spec_failed",          s0_fire && s0_dcache_vaddr(VAddrBits-1, 12) =/= io.ldin.bits.src(0)(VAddrBits-1, 12))
   XSPerfAccumulate("s0_addr_spec_success_once",    s0_fire && s0_dcache_vaddr(VAddrBits-1, 12) === io.ldin.bits.src(0)(VAddrBits-1, 12) && s0_sel_src.isFirstIssue)
@@ -1928,10 +1928,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s0_vec_addr_vlen_aligned",     s0_fire && s0_sel_src.isvec && s0_dcache_vaddr(3, 0) === 0.U)
   XSPerfAccumulate("s0_vec_addr_vlen_unaligned",   s0_fire && s0_sel_src.isvec && s0_dcache_vaddr(3, 0) =/= 0.U)
   XSPerfAccumulate("s0_forward_tl_d_channel",      s0_out.forward_tlDchannel)
-  XSPerfAccumulate("s0_hardware_prefetch_fire",    s0_fire && s0_hw_prf_select)
+  XSPerfAccumulate("s0_hardware_prefetch_fire",    s0_fire && s0_hw_prf_select, dontTouch = true)
   XSPerfAccumulate("s0_software_prefetch_fire",    s0_fire && s0_sel_src.prf && s0_src_select_vec(int_iss_idx))
-  XSPerfAccumulate("s0_hardware_prefetch_blocked", io.prefetch_req.valid && !s0_hw_prf_select)
-  XSPerfAccumulate("s0_hardware_prefetch_total",   io.prefetch_req.valid)
+  XSPerfAccumulate("s0_hardware_prefetch_blocked", io.prefetch_req.valid && !s0_hw_prf_select, dontTouch = true)
+  XSPerfAccumulate("s0_hardware_prefetch_total",   io.prefetch_req.valid, dontTouch = true)
 
   XSPerfAccumulate("s3_rollback_total",             io.rollback.valid)
   XSPerfAccumulate("s3_rep_frm_fetch_rollback",     io.rollback.valid && s3_rep_frm_fetch)
@@ -1941,7 +1941,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s1_in_valid",                  s1_valid)
   XSPerfAccumulate("s1_in_fire",                   s1_fire)
   XSPerfAccumulate("s1_in_fire_first_issue",       s1_fire && s1_in.isFirstIssue)
-  XSPerfAccumulate("s1_tlb_miss",                  s1_fire && s1_tlb_miss)
+  XSPerfAccumulate("s1_tlb_miss",                  s1_fire && s1_tlb_miss, dontTouch = true)
   XSPerfAccumulate("s1_tlb_miss_first_issue",      s1_fire && s1_tlb_miss && s1_in.isFirstIssue)
   XSPerfAccumulate("s1_stall_out",                 s1_valid && !s1_can_go)
   XSPerfAccumulate("s1_dly_err",                   s1_valid && s1_fast_rep_dly_err)
@@ -1949,19 +1949,19 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("s2_in_valid",                  s2_valid)
   XSPerfAccumulate("s2_in_fire",                   s2_fire)
   XSPerfAccumulate("s2_in_fire_first_issue",       s2_fire && s2_in.isFirstIssue)
-  XSPerfAccumulate("s2_dcache_miss",               s2_fire && io.dcache.resp.bits.miss)
-  XSPerfAccumulate("s2_dcache_miss_first_issue",   s2_fire && io.dcache.resp.bits.miss && s2_in.isFirstIssue)
+  XSPerfAccumulate("s2_dcache_miss",               s2_fire && io.dcache.resp.bits.miss, dontTouch = true)
+  XSPerfAccumulate("s2_dcache_miss_first_issue",   s2_fire && io.dcache.resp.bits.miss && s2_in.isFirstIssue, dontTouch = true)
   XSPerfAccumulate("s2_dcache_real_miss_first_issue",   s2_fire && io.dcache.resp.bits.miss && s2_in.isFirstIssue)
   XSPerfAccumulate("s2_full_forward",              s2_fire && s2_full_fwd)
   XSPerfAccumulate("s2_dcache_miss_full_forward",  s2_fire && s2_dcache_miss)
   XSPerfAccumulate("s2_fwd_frm_d_can",             s2_valid && s2_fwd_frm_d_chan)
-  XSPerfAccumulate("s2_fwd_frm_d_chan_or_mshr",    s2_valid && s2_fwd_frm_d_chan_or_mshr)
-  XSPerfAccumulate("s2_stall_out",                 s2_fire && !s2_can_go)
+  XSPerfAccumulate("s2_fwd_frm_d_chan_or_mshr",    s2_valid && s2_fwd_frm_d_chan_or_mshr, dontTouch = true)
+  XSPerfAccumulate("s2_stall_out",                 s2_fire && !s2_can_go, dontTouch = true)
   XSPerfAccumulate("s2_prefetch",                  s2_fire && s2_prf)
-  XSPerfAccumulate("s2_prefetch_ignored",          s2_fire && s2_prf && io.dcache.s2_mq_nack) // ignore prefetch for mshr full / miss req port conflict
-  XSPerfAccumulate("s2_prefetch_miss",             s2_fire && s2_prf && io.dcache.resp.bits.miss) // prefetch req miss in l1
-  XSPerfAccumulate("s2_prefetch_hit",              s2_fire && s2_prf && !io.dcache.resp.bits.miss) // prefetch req hit in l1
-  XSPerfAccumulate("s2_prefetch_accept",           s2_fire && s2_prf && io.dcache.resp.bits.miss && !io.dcache.s2_mq_nack) // prefetch a missed line in l1, and l1 accepted it
+  XSPerfAccumulate("s2_prefetch_ignored",          s2_fire && s2_prf && io.dcache.s2_mq_nack, dontTouch = true) // ignore prefetch for mshr full / miss req port conflict
+  XSPerfAccumulate("s2_prefetch_miss",             s2_fire && s2_prf && io.dcache.resp.bits.miss, dontTouch = true) // prefetch req miss in l1
+  XSPerfAccumulate("s2_prefetch_hit",              s2_fire && s2_prf && !io.dcache.resp.bits.miss, dontTouch = true) // prefetch req hit in l1
+  XSPerfAccumulate("s2_prefetch_accept",           s2_fire && s2_prf && io.dcache.resp.bits.miss && !io.dcache.s2_mq_nack, dontTouch = true) // prefetch a missed line in l1, and l1 accepted it
   XSPerfAccumulate("s2_forward_req",               s2_fire && s2_in.forward_tlDchannel)
   XSPerfAccumulate("s2_successfully_forward_channel_D", s2_fire && s2_fwd_frm_d_chan && s2_fwd_data_valid)
   XSPerfAccumulate("s2_successfully_forward_mshr",      s2_fire && s2_fwd_frm_mshr && s2_fwd_data_valid)
