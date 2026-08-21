@@ -89,6 +89,7 @@ class MptOutputSwitchBox(implicit p: Parameters) extends XSModule with MPTCacheP
   val mptOutDataReg = Reg(new MptTlbRespBundle())
   val mptOutMptOnly = RegInit(false.B)
   val mptOutReqPA   = Reg(UInt(ppnLen.W))
+  val mptEn = io.csr.mmpt.mode =/= 0.U
 
   val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed ||
     io.csr.priv.virt_changed || (if (HasMptCheck) io.csr.mmpt.changed else false.B)
@@ -135,7 +136,7 @@ class MptOutputSwitchBox(implicit p: Parameters) extends XSModule with MPTCacheP
           nextState := s_send_l1_tlb
         }
       }.elsewhen(io.mergeArb.valid) { // normal mode, two modes are mutually exclusive
-        when(io.mergeArb.bits.fault) {
+        when(io.mergeArb.bits.fault || !mptEn) {
           io.l1TLB.valid := true.B
           when(io.l1TLB.ready) {
             io.mergeArb.ready := true.B
@@ -269,46 +270,6 @@ class MptEntry(implicit p: Parameters) extends XSBundle with MPTCacheParam {
 
   def getAddr(offset: UInt): UInt =
     this.data.getAddr(offset)
-
-  def genFake(level: UInt): Unit = {
-    this.N         := false.B
-    this.data.data := "h802F4".U
-    this.L         := false.B
-    this.V         := true.B
-    switch(level) {
-      is("b1000".U) {
-        this.N         := false.B
-        this.data.data := "h802F4".U
-        this.L         := false.B
-        this.V         := true.B
-      }
-      is("b0100".U) {
-        this.N         := false.B
-        this.data.data := "h802F5".U
-        this.L         := false.B
-        this.V         := true.B
-      }
-      is("b0010".U) {
-        if (HasMptCheckDefault4k) {
-          this.N         := false.B
-          this.data.data := "h802F6".U
-          this.L         := false.B
-          this.V         := true.B
-        } else {
-          this.N         := false.B
-          this.data.data := "hFFFFFFFFFFFF".U
-          this.L         := true.B
-          this.V         := true.B
-        }
-      }
-      is("b0001".U) {
-        this.N         := false.B
-        this.data.data := "hFFFFFFFFFFFF".U
-        this.L         := true.B
-        this.V         := true.B
-      }
-    }
-  }
 }
 
 class MptCacheTag(tagLen: Int, isSp: Boolean = false)(implicit p: Parameters) extends XSBundle with MPTCacheParam {
@@ -1102,11 +1063,8 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
   val pmpCheckLevel = RegEnable(nextPmpCheckLevel, "b1000".U(mptLevelLenOH.W), setPmpCheckLevel)
 
   val mpteResp = Wire(new MptEntry())
-  if (HasMptCheckDefault) {
-    mpteResp.genFake(level)
-  } else {
-    mpteResp.apply(mem.resp.bits) // mem mpte mpteData
-  }
+
+  mpteResp.apply(mem.resp.bits) // mem mpte mpteData
 
   val mpteData = Reg(new MptData())
   // Stores the returned permissions/lower-level address, or the incoming request address entry;
@@ -1141,10 +1099,9 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
   // should be safer than just := memAddr
 
   // accessFault logic
-  val pmpFail = if (HasMptCheckDefault) false.B else (!isLeafMpte) && (io.pmp.resp.ld || io.pmp.resp.mmio)
+  val pmpFail = (!isLeafMpte) && (io.pmp.resp.ld || io.pmp.resp.mmio)
   // PMP delay unknown
-  val entryError = if (HasMptCheckDefault) false.B else
-    mpteInvalid || rsvZeroError0 || rsvZeroError1 || rsvZeroError2 || ((!isLeafMpte) && level === 1.U)
+  val entryError = mpteInvalid || rsvZeroError0 || rsvZeroError1 || rsvZeroError2 || ((!isLeafMpte) && level === 1.U)
   // level == 0 non leaf, zero = / = 0,pmp fail,invalid casue accessFault
   val accessFault = entryError || pmpFail // pmp fail also cause accessFault
   io.refill.bits.level := Mux(pmpFail, pmpCheckLevel, level) // pmpFail return next level,else cur level
@@ -1253,11 +1210,13 @@ class MptChecker(implicit p: Parameters) extends XSModule with HasPtwConst {
   mptMissQueueInst.csr <> io.csr
   mptMissQueueInst.sfence <> io.sfence
 
+  val mptEn = io.csr.mmpt.mode =/= 0.U
+
   mptCacheInst.req.bits.mptOnly := io.req.bits.mptOnly // need some fix
   mptCacheInst.req.bits.reqPA   := io.req.bits.reqPA
   mptCacheInst.req.bits.source  := io.req.bits.id
-  mptCacheInst.req.valid        := io.req.valid
-  io.req.ready                  := mptCacheInst.req.ready
+  mptCacheInst.req.valid        := io.req.valid && mptEn
+  io.req.ready                  := mptEn && mptCacheInst.req.ready
 
   val mptReturn = Wire(new MptRespBundle())
   mptReturn.mptPerm := Mux(mptMissQueueInst.resp.valid, mptMissQueueInst.resp.bits.perm, mptCacheInst.respHit.bits.perm)
@@ -1289,7 +1248,7 @@ class MptChecker(implicit p: Parameters) extends XSModule with HasPtwConst {
     mptCacheInst.respHit.bits.permIsNAPOT
   )
 
-  io.resp.valid := mptMissQueueInst.resp.valid || mptCacheInst.respHit.valid
+  io.resp.valid := mptEn && (mptMissQueueInst.resp.valid || mptCacheInst.respHit.valid)
   io.resp.bits <> mptReturn
 
   mptMissQueueInst.refill <> mptTWInst.refill
@@ -1299,8 +1258,8 @@ class MptChecker(implicit p: Parameters) extends XSModule with HasPtwConst {
   mptMissQueueInst.missCache.bits.hitAddr  := mptCacheInst.respMiss.bits.ppn
   mptMissQueueInst.missCache.bits.source   := mptCacheInst.respMiss.bits.source
   mptMissQueueInst.missCache.bits.pa       := mptCacheInst.respMiss.bits.pa
-  mptMissQueueInst.missCache.valid         := mptCacheInst.respMiss.valid
-  mptCacheInst.respMiss.ready              := mptMissQueueInst.missCache.ready
+  mptMissQueueInst.missCache.valid         := mptCacheInst.respMiss.valid && mptEn
+  mptCacheInst.respMiss.ready              := Mux(mptEn, mptMissQueueInst.missCache.ready, true.B)
   // cache refill io
   mptCacheInst.refill <> mptTWInst.refill
   // MptMissQueue-twio
@@ -1318,21 +1277,4 @@ class MptChecker(implicit p: Parameters) extends XSModule with HasPtwConst {
   mptTWInst.pmp.resp <> io.pmp.resp
   io.pmp.req <> mptTWInst.pmp.req
 
-  val mptDiabledFakedRespValid = RegInit(false.B)
-  val mptDiabledFakedMptOnly   = RegInit(false.B)
-  when(io.csr.mmpt.mode === 0.U) {
-    mptCacheInst.req.valid := false.B // mptmode  return 111
-
-    io.req.ready := true.B
-    when(io.req.fire) {
-      mptDiabledFakedRespValid := true.B
-      mptDiabledFakedMptOnly   := io.req.bits.mptOnly
-    }
-    io.resp.valid        := mptDiabledFakedRespValid
-    io.resp.bits.mptOnly := mptDiabledFakedMptOnly
-    when(io.resp.fire) {
-      mptDiabledFakedRespValid := false.B
-      mptDiabledFakedMptOnly   := false.B
-    }
-  }
 }
