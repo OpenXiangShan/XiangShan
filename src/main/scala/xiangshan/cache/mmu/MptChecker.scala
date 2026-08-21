@@ -423,19 +423,15 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
   val mfenceActive = WireInit(false.B)
   val fencePA      = WireInit(false.B)
   val mfencevalid  = io.sfence.valid && io.sfence.bits.mfence.get
+  val rs1IsX0      = io.sfence.bits.rs1
+  val rs2IsX0      = io.sfence.bits.rs2
+  val sdidMatches  = io.sfence.bits.id === io.csr.mmpt.sdid
   // This MPT design supports partial cache flushing by PA. When flushing, in addition to leaf nodes, intermediate nodes are also invalidated
-  switch(Cat(io.sfence.bits.rs2, io.sfence.bits.rs1).asUInt) {
-    is("b11".U) {
-      fencePA := (io.sfence.bits.id === io.csr.mmpt.sdid) && mfencevalid // delay of about 10 gates
-    }
-    is("b01".U) {
-      fencePA := mfencevalid
-    }
-    is("b10".U) {
-      mfenceActive := (io.sfence.bits.id === io.csr.mmpt.sdid) && mfencevalid
-    }
-    is("b00".U) {
-      mfenceActive := mfencevalid
+  when(mfencevalid) {
+    when(rs1IsX0) {
+      mfenceActive := rs2IsX0 || sdidMatches
+    }.otherwise {
+      fencePA := rs2IsX0 || sdidMatches
     }
   }
   val flushAll      = mfenceActive || io.csr.mmpt.changed
