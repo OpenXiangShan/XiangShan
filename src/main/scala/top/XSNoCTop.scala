@@ -193,10 +193,10 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHI
 trait HasXSTile { this: BaseXSSoc =>
 
   // xstile
-  val core_with_l2 = LazyModule(new XSTileWrap()(p.alter((site, here, up) => {
+  val core_with_l2 = LazyModule(new XSTileWrap()(XSCachedParametersOptional(p(CachedParameterKey), p.alter((site, here, up) => {
     case XSCoreParamsKey => tiles.head
     case PerfCounterOptionsKey => up(PerfCounterOptionsKey).copy(perfDBHartID = tiles.head.HartId)
-  })))
+  }))))
   // interrupts
   val clintIntNode = Option.when(!UsePrivateClint)(IntSourceNode(IntSourcePortSimple(1, 1, 2)))
   val debugIntNode = IntSourceNode(IntSourcePortSimple(1, 1, 1))

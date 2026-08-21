@@ -90,7 +90,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s0_twoPrefetchCase  = io.fromFtq.bits.twoPrefetchCase
 
   private val s0_readMetaVAddr  = s0_twoPrefetchCase.selectMetaVAddr(s0_req)
-  private val s0_readMetaSetIdx = VecInit(s0_readMetaVAddr.map(get_idx))
+  private val s0_readMetaSetIdx = s0_twoPrefetchCase.selectMetaSetIdx(s0_req)
   private val s0_readDoubleLine = s0_twoPrefetchCase.selectIsCrossLine(s0_req)
 
   fromBpuS0Flush := !s0_isSoftPrefetch && io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid)
@@ -158,13 +158,18 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   // NOTE: in kunminghu-v3, Bpu/Ftq ensure that a single fetch request will not cross page,
   //       so we need only one Itlb port to get pAddr / itlbException,
   //       and we can simply use vAddr of first cacheline to send Itlb request.
+  private val itlbVAddr  = Mux(s1_needItlb, s1_readMetaVAddr(0), s0_readMetaVAddr(0))
+  private val itlbFullVa = itlbVAddr.signExt(XLEN).toUInt
+
   toItlb.valid             := s1_needItlb || s0_valid
   toItlb.bits              := DontCare
   toItlb.bits.size         := 3.U
-  toItlb.bits.vaddr        := Mux(s1_needItlb, s1_readMetaVAddr(0).toUInt, s0_readMetaVAddr(0).toUInt)
-  toItlb.bits.debug.pc     := Mux(s1_needItlb, s1_readMetaVAddr(0).toUInt, s0_readMetaVAddr(0).toUInt)
+  toItlb.bits.vaddr        := itlbVAddr.toUInt(VAddrBits - 1, 0)
+  toItlb.bits.debug.pc     := itlbFullVa
   toItlb.bits.cmd          := TlbCmd.exec
   toItlb.bits.no_translate := false.B
+  toItlb.bits.fullva       := itlbFullVa
+  toItlb.bits.checkfullva  := true.B
   fromItlb.ready           := true.B
   io.itlb.req_kill         := false.B
 
@@ -317,7 +322,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     port.bits.exceptionEntry.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
 
     port.bits.entry.debug_ftqIdx.foreach(_ := s1_req(i).ftqIdx)
-    port.bits.entry.debug_startVAddr.foreach(_ := s1_req(i).startVAddr)
+    port.bits.entry.debug_startVAddr.foreach(_ := s1_req(i).startVAddr.unGuard)
 
     when(port.fire) {
       val waymasksVec = s1_reqMetaInfo(i).map(_.waymask.asTypeOf(Vec(nWays, Bool())))

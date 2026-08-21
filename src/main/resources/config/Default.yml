@@ -85,5 +85,3 @@ CVMParams:
   HasDelayNoencryption: false
 
 EnableBitmapCheck: true
-
-EnableBitmapCheckDefault: false

@@ -129,7 +129,7 @@ case class SoCParameters
   // on chip network configurations
   val L3OuterBusWidth = 256
   val UARTLiteRange = AddressSet(0x40600000, if (UARTLiteForDTS) 0x3f else 0xf)
-  val UART16550Range = AddressSet(0x310b0000L, 0x1f)
+  val UART16550Range = AddressSet(0x310b0000L, 0x7f)
 }
 
 trait HasSoCParameter {

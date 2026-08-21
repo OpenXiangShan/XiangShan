@@ -54,11 +54,7 @@ case class XSCoreParameters
   ELEN: Int = 64,
   HSXLEN: Int = 64,
   HasMptCheck: Boolean = false, //enable mpt
-  HasMptCheckDefault: Boolean = false, // hardwired testing code: fake 2M MPT table
-  HasMptCheckDefault4k: Boolean = false, // hardwired testing code: fake 4k MPT table
-  HasMptInodeOpt: Boolean = false, // hardwired testing code: skip mpt check for non-leaf ptw nodes
   HasBitmapCheck: Boolean = true,
-  HasBitmapCheckDefault: Boolean = false,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
   HasHExtension: Boolean = true,
@@ -163,7 +159,8 @@ case class XSCoreParameters
     *      please set constant "modeStrideBerti" in PrefetcherWrapper.scala to "bothOn".
     *      TODO: separate Stream and Stride prefetcher in the future.
     */
-  prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), SMSParams()),
+  prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), BertiParams(), SMSParams()),
+  modeStrideBerti: Int = 0b01, // 00 bothOff, 01 strideOnBertiOff, 10 strideOffBertiOn, 11 bothOn
   IfuRedirectNum: Int = 1,
   LoadPipelineWidth: Int = 3,
   StorePipelineWidth: Int = 2,
@@ -311,7 +308,7 @@ case class XSCoreParameters
     "shvstvecd", "smaia", "smcdeleg", "smcntrpmf", "smcsrind", "smdbltrp", "smmpm", "smnpm", "smrnmi", "smstateen",
     "ss1p13", "ssaia", "ssccfg", "ssccptr", "sscofpmf", "sscounterenw", "sscsrind", "ssdbltrp", "ssnpm",
     "sspm", "ssstateen", "ssstrict", "sstc", "sstvala", "sstvecd", "ssu64xl", "supm", "sv39",
-    "sv48", "svade", "svbare", "svinval", "svnapot", "svpbmt", "za64rs", "zacas", "zawrs", "zba",
+    "sv48", "svade", "svbare", "svinval", "svnapot", "svpbmt", "za64rs", "zabha", "zacas", "zawrs", "zba",
     "zbb", "zbc", "zbkb", "zbkc", "zbkx", "zbs", "zcb", "zcmop", "zfa", "zfh", "zfhmin", "zic64b",
     "zicbom", "zicbop", "zicboz", "ziccamoa", "ziccif", "zicclsm", "ziccrse", "zicntr", "zicond",
     "zicsr", "zifencei", "zihintntl", "zihintpause", "zihpm", "zimop", "zkn", "zknd", "zkne", "zknh",
@@ -583,11 +580,7 @@ trait HasXSParameter {
   val xLen = XLEN
   assert(!(HasMptCheck == true && HasBitmapCheck == true), "Conflicts: MPT and Bitmap can't be used together")
   def HasMptCheck = coreParams.HasMptCheck && !coreParams.HasBitmapCheck
-  def HasMptCheckDefault = coreParams.HasMptCheckDefault
-  def HasMptCheckDefault4k = coreParams.HasMptCheckDefault4k
-  def HasMptInodeOpt = coreParams.HasMptInodeOpt
   def HasBitmapCheck = coreParams.HasBitmapCheck
-  def HasBitmapCheckDefault = coreParams.HasBitmapCheckDefault
 
   /** prefetch config */
   def prefetcherSeq = coreParams.prefetcher
@@ -628,13 +621,8 @@ trait HasXSParameter {
     }
   } // VAddrBits is Virtual Memory addr bits
 
-  def VAddrMaxBits = {
-    if(EnableSv48) {
-      coreParams.VAddrBitsSv48 max coreParams.GPAddrBitsSv48x4
-    } else {
-      coreParams.VAddrBitsSv39 max coreParams.GPAddrBitsSv39x4
-    }
-  }
+  def GuardedVAddrBits = VAddrBits + 1 // 1 extra guard bit for overflow/canonical check
+
   def SdidLength = coreParams.SdidLength
   def AsidLength = coreParams.AsidLength
   def VmidLength = coreParams.VmidLength
@@ -828,6 +816,7 @@ trait HasXSParameter {
   def LFSTSize = 64
   def SSIDWidth = log2Up(LFSTSize)
   def LFSTWidth = 2
+  def strictResetPeriod = 8192
   def StoreSetEnable = true // LWT will be disabled if SS is enabled
   def LFSTEnable = true
 

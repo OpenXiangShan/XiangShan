@@ -857,15 +857,33 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vSegmentFlag := false.B
   }
 
+  val rrBankConflictFastReplay = newLoadUnits.map(_.io.rrBankConflictFastReplay)
+  val rrBankConflictFastReplayCandidates = rrBankConflictFastReplay.map(_.candidate)
+  val rrBankConflictFastReplayArb = Module(new RRArbiterInit(Bool(), LduCnt))
+  rrBankConflictFastReplayArb.suggestName("rr_bank_conflict_fast_replay_arb")
+  rrBankConflictFastReplayArb.io.out.ready := true.B
+  rrBankConflictFastReplayArb.io.in.zip(rrBankConflictFastReplayCandidates).foreach { case (in, candidate) =>
+    in.valid := candidate
+    in.bits := true.B
+  }
+  val rrBankConflictFastReplayGrant = rrBankConflictFastReplayArb.io.in.map(in => in.valid && in.ready)
+  XSError(PopCount(rrBankConflictFastReplayGrant) > 1.U, "only one rr bank conflict fast replay grant is allowed")
+
   // LoadUnit
   for (i <- 0 until LduCnt) {
     newLoadUnits(i).io.redirect <> redirect
+    rrBankConflictFastReplay(i).grant := rrBankConflictFastReplayGrant(i)
 
     // get input form dispatch
     newLoadUnits(i).io.ldin <> issueLda(i)
     io.mem_to_ooo.ldCancel(i).ld1Cancel := false.B
     io.mem_to_ooo.ldCancel(i).ld2Cancel := newLoadUnits(i).io.cancel
     io.mem_to_ooo.wakeup(i) := newLoadUnits(i).io.wakeup
+
+    // Perf-only head/full qualifiers for MDP counters.
+    newLoadUnits(i).io.perfRobHeadPtr := io.ooo_to_mem.lsqio.pendingPtr
+    newLoadUnits(i).io.perfLqHeadPtr := lsq.io.lqDeqPtr
+    newLoadUnits(i).io.perfLqFull := lsq.io.lqFull
 
     // software prefetch to frontend (prefetch.i)
     io.ifetchPrefetch(i) <> newLoadUnits(i).io.swInstrPrefetch
@@ -1027,6 +1045,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     stu.io.vecstout.ready := false.B
     // from storeQueue
     stu.io.sqDeqPtr := lsq.io.sqDeqPtr
+    stu.io.sqAddrReadyPtr := lsq.io.issuePtrExt
   }
 
   val sqStoutLatch = Wire(DecoupledIO(new MemToRob(staParams.head)))
@@ -1567,9 +1586,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dcache.io.debugTopDown.robHeadOtherReplay := lsq.io.debugTopDown.robHeadOtherReplay
   dcache.io.debugRolling := io.debugRolling
 
-  lsq.io.noUopsIssued := io.topDownInfo.toBackend.noUopsIssued
-  io.topDownInfo.toBackend.lqEmpty := lsq.io.lqEmpty
-  io.topDownInfo.toBackend.sqEmpty := lsq.io.sqEmpty
+  io.topDownInfo.toBackend.replayAllocate := lsq.io.replayAllocate
+  io.topDownInfo.toBackend.sqFull  := lsq.io.sqFull
+  io.topDownInfo.toBackend.sbFull  := sbuffer.io.sbFull
   io.topDownInfo.toBackend.l1Miss := dcache.io.l1Miss
   io.topDownInfo.toBackend.l2TopMiss.l2Miss := RegNext(io.topDownInfo.fromL2Top.l2Miss)
   io.topDownInfo.toBackend.l2TopMiss.l3Miss := RegNext(io.topDownInfo.fromL2Top.l3Miss)
@@ -1577,11 +1596,157 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val ldDeqCount = PopCount(issueLda.map(_.valid))
   val stDeqCount = PopCount(issueSta.take(StaCnt).map(_.valid))
   val iqDeqCount = ldDeqCount +& stDeqCount
+  val s2LoadRRBankConflictCount = PopCount(dcache.io.lsu.load.map(_.s2_rr_bank_conflict))
+  val rrBankConflictFastReplayPerfStatus = rrBankConflictFastReplay.map(_.perfStatus)
+  val rrBankConflictFastReplayS3Denied =
+    rrBankConflictFastReplayPerfStatus.map(s => s.s3Candidate && !s.s3Grant)
+  val rrBankConflictFastReplayS3GrantedNotFire =
+    rrBankConflictFastReplayPerfStatus.map(s => s.s3Candidate && s.s3Grant && !s.s3Fire)
+  val rrBankConflictFastReplayS3DeniedS0Ready =
+    rrBankConflictFastReplayS3Denied.zip(rrBankConflictFastReplayPerfStatus).map {
+      case (denied, s) => denied && s.s0Ready
+    }
+
+  val rrBankConflictFastReplayPerfEvents = Seq(
+    ("s2_candidate", rrBankConflictFastReplayPerfStatus.map(_.s3Candidate), true), // s2 generate, s3 use
+    ("s2_arbiter_grant", rrBankConflictFastReplayPerfStatus.map(_.s3Grant), true), // s2 generate, s3 use
+    ("s2_arbiter_denied", rrBankConflictFastReplayS3Denied, false), // s2 generate, s3 use
+    ("s3_fire", rrBankConflictFastReplayPerfStatus.map(_.s3Fire), true),
+    ("s3_granted_not_fire", rrBankConflictFastReplayS3GrantedNotFire, true),
+    ("s3_arbiter_denied_s0_ready", rrBankConflictFastReplayS3DeniedS0Ready, false)
+  )
   XSPerfAccumulate("load_iq_deq_count", ldDeqCount)
   XSPerfHistogram("load_iq_deq_count", ldDeqCount, true.B, 0, LdExuCnt + 1)
   XSPerfAccumulate("store_iq_deq_count", stDeqCount)
   XSPerfHistogram("store_iq_deq_count", stDeqCount, true.B, 0, StAddrCnt + 1)
   XSPerfAccumulate("ls_iq_deq_count", iqDeqCount)
+  XSPerfAccumulate("s2_load_rr_bank_conflict_ge2", s2LoadRRBankConflictCount > 1.U)
+  XSPerfAccumulate("s2_load_rr_bank_conflict_eq2", s2LoadRRBankConflictCount === 2.U)
+  XSPerfAccumulate("s2_load_rr_bank_conflict_eq3", s2LoadRRBankConflictCount === 3.U)
+
+  rrBankConflictFastReplayPerfEvents.foreach { case (name, events, hasTotal) =>
+    if (hasTotal) {
+      XSPerfAccumulate(s"rr_bank_conflict_fast_replay_$name", PopCount(events))
+    }
+    events.zipWithIndex.foreach { case (event, i) =>
+      XSPerfAccumulate(s"rr_bank_conflict_fast_replay_${name}_$i", event)
+    }
+  }
+
+  val perfMdpAddr = newLoadUnits.map(_.io.perfMdpAddr)
+  val perfLoadUnitMdpNonStrictAddrHit = PopCount(perfMdpAddr.map(_.loadUnitNonStrictHit))
+  val perfLoadUnitMdpNonStrictAddrMiss = PopCount(perfMdpAddr.map(_.loadUnitNonStrictMiss))
+  val perfLoadUnitMdpStrictAddrHit = PopCount(perfMdpAddr.map(_.loadUnitStrictHit))
+  val perfLoadUnitMdpStrictAddrMiss = PopCount(perfMdpAddr.map(_.loadUnitStrictMiss))
+  val perfReplayMdpNonStrictAddrHit = PopCount(perfMdpAddr.map(_.replayNonStrictHit))
+  val perfReplayMdpNonStrictAddrMiss = PopCount(perfMdpAddr.map(_.replayNonStrictMiss))
+  val perfReplayMdpStrictAddrHit = PopCount(perfMdpAddr.map(_.replayStrictHit))
+  val perfReplayMdpStrictAddrMiss = PopCount(perfMdpAddr.map(_.replayStrictMiss))
+  val perfMdpWaitStoreRetired = PopCount(perfMdpAddr.map(_.waitStoreRetired))
+  val perfLoadUnitMdpAddrHit = perfLoadUnitMdpNonStrictAddrHit +& perfLoadUnitMdpStrictAddrHit
+  val perfLoadUnitMdpAddrMiss = perfLoadUnitMdpNonStrictAddrMiss +& perfLoadUnitMdpStrictAddrMiss
+  val perfReplayMdpAddrHit = perfReplayMdpNonStrictAddrHit +& perfReplayMdpStrictAddrHit
+  val perfReplayMdpAddrMiss = perfReplayMdpNonStrictAddrMiss +& perfReplayMdpStrictAddrMiss
+  val perfMdpSuccessNonStrictAddrHit = perfLoadUnitMdpNonStrictAddrHit +& perfReplayMdpNonStrictAddrHit
+  val perfMdpSuccessNonStrictAddrMiss = perfLoadUnitMdpNonStrictAddrMiss +& perfReplayMdpNonStrictAddrMiss
+  val perfMdpSuccessStrictAddrHit = perfLoadUnitMdpStrictAddrHit +& perfReplayMdpStrictAddrHit
+  val perfMdpSuccessStrictAddrMiss = perfLoadUnitMdpStrictAddrMiss +& perfReplayMdpStrictAddrMiss
+  val perfMdpSuccessAddrHit = perfMdpSuccessNonStrictAddrHit +& perfMdpSuccessStrictAddrHit
+  val perfMdpSuccessAddrMiss = perfMdpSuccessNonStrictAddrMiss +& perfMdpSuccessStrictAddrMiss
+
+  val perfLoadUnitMdpNonStrictAddrHitRobHead =
+    PopCount(perfMdpAddr.map(e => e.loadUnitNonStrictHit && e.perfAtRobHead))
+  val perfLoadUnitMdpNonStrictAddrMissRobHead =
+    PopCount(perfMdpAddr.map(e => e.loadUnitNonStrictMiss && e.perfAtRobHead))
+  val perfLoadUnitMdpStrictAddrHitRobHead =
+    PopCount(perfMdpAddr.map(e => e.loadUnitStrictHit && e.perfAtRobHead))
+  val perfLoadUnitMdpStrictAddrMissRobHead =
+    PopCount(perfMdpAddr.map(e => e.loadUnitStrictMiss && e.perfAtRobHead))
+  val perfReplayMdpNonStrictAddrHitRobHead =
+    PopCount(perfMdpAddr.map(e => e.replayNonStrictHit && e.perfAtRobHead))
+  val perfReplayMdpNonStrictAddrMissRobHead =
+    PopCount(perfMdpAddr.map(e => e.replayNonStrictMiss && e.perfAtRobHead))
+  val perfReplayMdpStrictAddrHitRobHead =
+    PopCount(perfMdpAddr.map(e => e.replayStrictHit && e.perfAtRobHead))
+  val perfReplayMdpStrictAddrMissRobHead =
+    PopCount(perfMdpAddr.map(e => e.replayStrictMiss && e.perfAtRobHead))
+  val perfLoadUnitMdpAddrHitRobHead =
+    perfLoadUnitMdpNonStrictAddrHitRobHead +& perfLoadUnitMdpStrictAddrHitRobHead
+  val perfLoadUnitMdpAddrMissRobHead =
+    perfLoadUnitMdpNonStrictAddrMissRobHead +& perfLoadUnitMdpStrictAddrMissRobHead
+  val perfReplayMdpAddrHitRobHead =
+    perfReplayMdpNonStrictAddrHitRobHead +& perfReplayMdpStrictAddrHitRobHead
+  val perfReplayMdpAddrMissRobHead =
+    perfReplayMdpNonStrictAddrMissRobHead +& perfReplayMdpStrictAddrMissRobHead
+  val perfMdpSuccessNonStrictAddrHitRobHead =
+    perfLoadUnitMdpNonStrictAddrHitRobHead +& perfReplayMdpNonStrictAddrHitRobHead
+  val perfMdpSuccessNonStrictAddrMissRobHead =
+    perfLoadUnitMdpNonStrictAddrMissRobHead +& perfReplayMdpNonStrictAddrMissRobHead
+  val perfMdpSuccessStrictAddrHitRobHead =
+    perfLoadUnitMdpStrictAddrHitRobHead +& perfReplayMdpStrictAddrHitRobHead
+  val perfMdpSuccessStrictAddrMissRobHead =
+    perfLoadUnitMdpStrictAddrMissRobHead +& perfReplayMdpStrictAddrMissRobHead
+  val perfMdpSuccessAddrHitRobHead =
+    perfMdpSuccessNonStrictAddrHitRobHead +& perfMdpSuccessStrictAddrHitRobHead
+  val perfMdpSuccessAddrMissRobHead =
+    perfMdpSuccessNonStrictAddrMissRobHead +& perfMdpSuccessStrictAddrMissRobHead
+
+  val perfReplayMdpNonStrictAddrHitLqHeadFull =
+    PopCount(perfMdpAddr.map(e => e.replayNonStrictHit && e.perfAtLqHead && e.perfLqFull))
+  val perfReplayMdpNonStrictAddrMissLqHeadFull =
+    PopCount(perfMdpAddr.map(e => e.replayNonStrictMiss && e.perfAtLqHead && e.perfLqFull))
+  val perfReplayMdpStrictAddrHitLqHeadFull =
+    PopCount(perfMdpAddr.map(e => e.replayStrictHit && e.perfAtLqHead && e.perfLqFull))
+  val perfReplayMdpStrictAddrMissLqHeadFull =
+    PopCount(perfMdpAddr.map(e => e.replayStrictMiss && e.perfAtLqHead && e.perfLqFull))
+  val perfReplayMdpAddrHitLqHeadFull =
+    perfReplayMdpNonStrictAddrHitLqHeadFull +& perfReplayMdpStrictAddrHitLqHeadFull
+  val perfReplayMdpAddrMissLqHeadFull =
+    perfReplayMdpNonStrictAddrMissLqHeadFull +& perfReplayMdpStrictAddrMissLqHeadFull
+
+  XSPerfAccumulate("loadunit_mdp_hit_addr_hit", perfLoadUnitMdpAddrHit)
+  XSPerfAccumulate("loadunit_mdp_hit_addr_miss", perfLoadUnitMdpAddrMiss)
+  XSPerfAccumulate("loadunit_mdp_hit_non_strict_addr_hit", perfLoadUnitMdpNonStrictAddrHit)
+  XSPerfAccumulate("loadunit_mdp_hit_non_strict_addr_miss", perfLoadUnitMdpNonStrictAddrMiss)
+  XSPerfAccumulate("loadunit_mdp_hit_strict_addr_hit", perfLoadUnitMdpStrictAddrHit)
+  XSPerfAccumulate("loadunit_mdp_hit_strict_addr_miss", perfLoadUnitMdpStrictAddrMiss)
+  XSPerfAccumulate("replay_mdp_hit_addr_hit", perfReplayMdpAddrHit)
+  XSPerfAccumulate("replay_mdp_hit_addr_miss", perfReplayMdpAddrMiss)
+  XSPerfAccumulate("replay_mdp_hit_non_strict_addr_hit", perfReplayMdpNonStrictAddrHit)
+  XSPerfAccumulate("replay_mdp_hit_non_strict_addr_miss", perfReplayMdpNonStrictAddrMiss)
+  XSPerfAccumulate("replay_mdp_hit_strict_addr_hit", perfReplayMdpStrictAddrHit)
+  XSPerfAccumulate("replay_mdp_hit_strict_addr_miss", perfReplayMdpStrictAddrMiss)
+  XSPerfAccumulate("mdp_hit_addr_hit", perfMdpSuccessAddrHit)
+  XSPerfAccumulate("mdp_hit_addr_miss", perfMdpSuccessAddrMiss)
+  XSPerfAccumulate("mdp_hit_non_strict_addr_hit", perfMdpSuccessNonStrictAddrHit)
+  XSPerfAccumulate("mdp_hit_non_strict_addr_miss", perfMdpSuccessNonStrictAddrMiss)
+  XSPerfAccumulate("mdp_hit_strict_addr_hit", perfMdpSuccessStrictAddrHit)
+  XSPerfAccumulate("mdp_hit_strict_addr_miss", perfMdpSuccessStrictAddrMiss)
+  XSPerfAccumulate("mdp_wait_store_retired", perfMdpWaitStoreRetired)
+  XSPerfAccumulate("loadunit_mdp_hit_addr_hit_rob_head", perfLoadUnitMdpAddrHitRobHead)
+  XSPerfAccumulate("loadunit_mdp_hit_addr_miss_rob_head", perfLoadUnitMdpAddrMissRobHead)
+  XSPerfAccumulate("loadunit_mdp_hit_non_strict_addr_hit_rob_head", perfLoadUnitMdpNonStrictAddrHitRobHead)
+  XSPerfAccumulate("loadunit_mdp_hit_non_strict_addr_miss_rob_head", perfLoadUnitMdpNonStrictAddrMissRobHead)
+  XSPerfAccumulate("loadunit_mdp_hit_strict_addr_hit_rob_head", perfLoadUnitMdpStrictAddrHitRobHead)
+  XSPerfAccumulate("loadunit_mdp_hit_strict_addr_miss_rob_head", perfLoadUnitMdpStrictAddrMissRobHead)
+  XSPerfAccumulate("replay_mdp_hit_addr_hit_rob_head", perfReplayMdpAddrHitRobHead)
+  XSPerfAccumulate("replay_mdp_hit_addr_miss_rob_head", perfReplayMdpAddrMissRobHead)
+  XSPerfAccumulate("replay_mdp_hit_non_strict_addr_hit_rob_head", perfReplayMdpNonStrictAddrHitRobHead)
+  XSPerfAccumulate("replay_mdp_hit_non_strict_addr_miss_rob_head", perfReplayMdpNonStrictAddrMissRobHead)
+  XSPerfAccumulate("replay_mdp_hit_strict_addr_hit_rob_head", perfReplayMdpStrictAddrHitRobHead)
+  XSPerfAccumulate("replay_mdp_hit_strict_addr_miss_rob_head", perfReplayMdpStrictAddrMissRobHead)
+  XSPerfAccumulate("mdp_hit_addr_hit_rob_head", perfMdpSuccessAddrHitRobHead)
+  XSPerfAccumulate("mdp_hit_addr_miss_rob_head", perfMdpSuccessAddrMissRobHead)
+  XSPerfAccumulate("mdp_hit_non_strict_addr_hit_rob_head", perfMdpSuccessNonStrictAddrHitRobHead)
+  XSPerfAccumulate("mdp_hit_non_strict_addr_miss_rob_head", perfMdpSuccessNonStrictAddrMissRobHead)
+  XSPerfAccumulate("mdp_hit_strict_addr_hit_rob_head", perfMdpSuccessStrictAddrHitRobHead)
+  XSPerfAccumulate("mdp_hit_strict_addr_miss_rob_head", perfMdpSuccessStrictAddrMissRobHead)
+  XSPerfAccumulate("replay_mdp_hit_addr_hit_lq_head_full", perfReplayMdpAddrHitLqHeadFull)
+  XSPerfAccumulate("replay_mdp_hit_addr_miss_lq_head_full", perfReplayMdpAddrMissLqHeadFull)
+  XSPerfAccumulate("replay_mdp_hit_non_strict_addr_hit_lq_head_full", perfReplayMdpNonStrictAddrHitLqHeadFull)
+  XSPerfAccumulate("replay_mdp_hit_non_strict_addr_miss_lq_head_full", perfReplayMdpNonStrictAddrMissLqHeadFull)
+  XSPerfAccumulate("replay_mdp_hit_strict_addr_hit_lq_head_full", perfReplayMdpStrictAddrHitLqHeadFull)
+  XSPerfAccumulate("replay_mdp_hit_strict_addr_miss_lq_head_full", perfReplayMdpStrictAddrMissLqHeadFull)
 
   val pfevent = Module(new PFEvent)
   pfevent.io.distribute_csr := csrCtrl.distribute_csr

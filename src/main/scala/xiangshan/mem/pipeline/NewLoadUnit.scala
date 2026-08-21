@@ -30,6 +30,7 @@ import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.exu.ExeUnitParams
+import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.Bundles._
 import xiangshan.mem.LoadReplayCauses._
 import xiangshan.mem.LoadStage._
@@ -50,6 +51,7 @@ class LoadUnitS0(param: ExeUnitParams)(
     val unalignTail = Flipped(DecoupledIO(new LoadStageIO))
     val replay = Flipped(DecoupledIO(new LoadReplayIO))
     val fastReplay = Flipped(DecoupledIO(new FastReplayIO))
+    val fastReplayCanAccept = Output(Bool())
     // TODO: canAcceptHigh/LowConfPrefetch
     val prefetchReq = Flipped(DecoupledIO(new L1PrefetchReq))
     val vecldin = Flipped(DecoupledIO(new VectorLoadIn))
@@ -237,6 +239,9 @@ class LoadUnitS0(param: ExeUnitParams)(
   pipeIn.valid := sink.valid && io.dcacheReq.ready
   sink.ready := pipeIn.ready && io.dcacheReq.ready
   connectSamePort(pipeIn.bits, sink.bits)
+  io.fastReplayCanAccept :=
+    pipeIn.ready && io.dcacheReq.ready && !unalignTail.valid && !replayHiPrio.valid
+  XSError(fastReplay.valid && fastReplay.ready =/= io.fastReplayCanAccept, "fast replay canAccept must match arbiter ready")
 
   // alias for arbitration result
   val uop = sink.bits.uop
@@ -601,11 +606,11 @@ class LoadUnitS1(param: ExeUnitParams)(
   val redirectNextNext = Wire(redirect.cloneType)
   redirectNextNext.valid := GatedValidRegNext(redirectNext.valid)
   redirectNextNext.bits := RegEnable(redirectNext.bits, redirectNext.valid)
-  
+
   val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
 
   val kill = !pipeIn.valid || io.kill || isSwInstrPrefetch ||
-             robIdx.needFlush(redirect) || robIdx.needFlush(redirectNext) || 
+             robIdx.needFlush(redirect) || robIdx.needFlush(redirectNext) ||
              (robIdx.needFlush(redirectNextNext) && isUnalignTail)
 
   /**
@@ -733,6 +738,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   stageInfo.cause.get := 0.U.asTypeOf(stageInfo.cause.get)
   stageInfo.cause.get(LoadReplayCauses.C_NK) := nuke
   stageInfo.fastReplayNukeFirst.get := fastReplayNukeFirst
+  stageInfo.perfIsCmaReplay.get := LoadEntrance.isReplay(entrance) && in.cause.get(LoadReplayCauses.C_MA)
   // update trigger info
   stageInfo.vecVaddrOffset.get := vecVaddrOffset
   stageInfo.vecTriggerMask.get := vecTriggerMask
@@ -831,7 +837,12 @@ class LoadUnitS2(param: ExeUnitParams)(
     val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
     // TODO: move this inside of dcacheResp
     val dcacheBankConflict = Input(Bool())
+    val dcacheRRBankConflict = Input(Bool())
     val dcacheMSHRNack = Input(Bool())
+
+    // Global rr bank-conflict fast replay arbitration in S2.
+    val rrBankConflictFastReplayCandidate = Output(Bool())
+    val rrBankConflictFastReplayGrant = Input(Bool())
 
     /**
       * Data forward response
@@ -884,6 +895,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val isMMIOReplay = in.isMMIOReplay()
   val isNCReplay = in.isNCReplay()
   val isUncacheReplay = in.isUncacheReplay()
+  val perfIsCmaReplay = in.perfIsCmaReplay.get
   val isPrefetch = accessType.isPrefetch()
   val isHwPrefetch = accessType.isHwPrefetch()
   val isSwPrefetch = accessType.isSwPrefetch()
@@ -1138,8 +1150,23 @@ class LoadUnitS2(param: ExeUnitParams)(
   stageInfo.addrInvalidSqIdx.get := sqAddrInvalidSqIdx
   stageInfo.tlbId.get := io.tlbHint.id
   stageInfo.tlbFull.get := io.tlbHint.full
+  stageInfo.perfMdpAddrValid.get := io.sqForwardResp.valid && io.sqForwardResp.bits.perfMdpAddrValid
+  stageInfo.perfMdpAddrStrict.get := io.sqForwardResp.bits.perfMdpAddrStrict
+  stageInfo.perfMdpAddrHit.get := io.sqForwardResp.bits.perfMdpAddrHit
+  stageInfo.perfWaitStoreRetired.get := io.sqForwardResp.valid && io.sqForwardResp.bits.perfWaitStoreRetired
+  stageInfo.perfIsCmaReplay.get := perfIsCmaReplay
   // Pre-process for s3
+  val rrBankConflictFastReplay =
+    !kill && fastReplay && fastReplayBankConflict && io.dcacheRRBankConflict && !exception
+  val rrBankConflictFastReplayCandidate = pipeIn.fire && rrBankConflictFastReplay
+  io.rrBankConflictFastReplayCandidate := rrBankConflictFastReplayCandidate
+  XSError(
+    io.rrBankConflictFastReplayGrant && !rrBankConflictFastReplayCandidate,
+    "rr bank conflict fast replay grant without candidate in s2"
+  )
   stageInfo.troubleMaker.get := troubleMaker
+  stageInfo.rrBankConflictFastReplay.get := rrBankConflictFastReplay
+  stageInfo.rrBankConflictFastReplayGrant.get := io.rrBankConflictFastReplayGrant
   stageInfo.shouldFastReplay.get := in.shouldFastReplay.get || fastReplay && !exception
   stageInfo.matchInvalid.get := matchInvalid && troubleMaker
   stageInfo.shouldWakeup.get := shouldWakeup
@@ -1251,6 +1278,11 @@ class LoadUnitS3(param: ExeUnitParams)(
 
     // Fast replay
     val fastReplay = DecoupledIO(new FastReplayIO)
+    // Registered S2 arbitration result used by S3 and performance counters.
+    val rrBankConflictFastReplayCandidate = Output(Bool())
+    val rrBankConflictFastReplayGrant = Output(Bool())
+    val rrBankConflictFastReplayFire = Output(Bool())
+    val rrBankConflictFastReplayDenied = Output(Bool())
 
     // RAR / RAW revoke and RAR response
     val rarNukeQueryResp = Flipped(ValidIO(new LoadNukeQueryResp))
@@ -1268,6 +1300,11 @@ class LoadUnitS3(param: ExeUnitParams)(
 
     // Load cancel
     val cancel = Output(Bool())
+
+    val perfRobHeadPtr = Input(new RobPtr)
+    val perfLqHeadPtr = Input(new LqPtr)
+    val perfLqFull = Input(Bool())
+    val perfMdpAddr = Output(new PerfMdpAddr)
 
     // CSR control signals
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
@@ -1384,7 +1421,16 @@ class LoadUnitS3(param: ExeUnitParams)(
     * Fast replay
     */
   val shouldFastReplay = in.shouldFastReplay.get
-  val allowFastReplay = io.fastReplay.ready
+  val rrBankConflictFastReplay = in.rrBankConflictFastReplay.get
+  val rrBankConflictFastReplayCandidate =
+    shouldFastReplay && rrBankConflictFastReplay
+  val rrBankConflictFastReplayGrant = in.rrBankConflictFastReplayGrant.get
+  XSError(
+    pipeIn.valid && rrBankConflictFastReplayGrant && !rrBankConflictFastReplay,
+    "rr bank conflict fast replay grant without rr marker in s3"
+  )
+  val allowRRBankConflictFastReplay = !rrBankConflictFastReplayCandidate || rrBankConflictFastReplayGrant
+  val allowFastReplay = io.fastReplay.ready && allowRRBankConflictFastReplay
   val doFastReplay = shouldFastReplay && allowFastReplay
   val fastReplay = Wire(new FastReplayIO)
   connectSamePort(fastReplay, in)
@@ -1505,6 +1551,68 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.rep_info.tlb_id := in.tlbId.get
   lqWrite.rep_info.tlb_full := in.tlbFull.get
 
+  val perfIsReplayExec = LoadEntrance.isReplay(entrance) || s4HeadIsReplay && s4HeadValid
+  val perfMdpAddrValid = Mux(s4HeadValid, s4Head.perfMdpAddrValid.get, in.perfMdpAddrValid.get)
+  val perfMdpAddrStrict = Mux(s4HeadValid, s4Head.perfMdpAddrStrict.get, in.perfMdpAddrStrict.get)
+  val perfMdpAddrHit = Mux(s4HeadValid, s4Head.perfMdpAddrHit.get, in.perfMdpAddrHit.get)
+  val perfWaitStoreRetired = Mux(s4HeadValid, s4Head.perfWaitStoreRetired.get, in.perfWaitStoreRetired.get)
+  val perfIsCmaReplay = Mux(s4HeadValid, s4Head.perfIsCmaReplay.get, in.perfIsCmaReplay.get)
+  val perfMdpUop = Mux(s4HeadValid, s4Head.uop, uop)
+  val perfMdpAddrCanCount = lqWriteValid && !lqWriteNeedReplay
+  val perfMdpAddrNonStrict = !perfMdpAddrStrict
+  val perfMdpAddrMiss = !perfMdpAddrHit
+  val perfLoadUnitMdpAddrCanCount = perfMdpAddrCanCount && !perfIsReplayExec && perfMdpAddrValid
+  val perfReplayMdpAddrCanCount = perfMdpAddrCanCount && perfIsReplayExec && perfIsCmaReplay
+  val perfWaitStoreRetiredCanCount = perfMdpAddrCanCount && perfWaitStoreRetired &&
+    (!perfIsReplayExec || perfIsCmaReplay)
+  val perfMdpAddr = Wire(new PerfMdpAddr)
+  perfMdpAddr.loadUnitNonStrictHit := perfLoadUnitMdpAddrCanCount && perfMdpAddrNonStrict && perfMdpAddrHit
+  perfMdpAddr.loadUnitNonStrictMiss := perfLoadUnitMdpAddrCanCount && perfMdpAddrNonStrict && perfMdpAddrMiss
+  perfMdpAddr.loadUnitStrictHit := perfLoadUnitMdpAddrCanCount && perfMdpAddrStrict && perfMdpAddrHit
+  perfMdpAddr.loadUnitStrictMiss := perfLoadUnitMdpAddrCanCount && perfMdpAddrStrict && perfMdpAddrMiss
+  perfMdpAddr.replayNonStrictHit := perfReplayMdpAddrCanCount && perfMdpAddrNonStrict && perfMdpAddrHit
+  perfMdpAddr.replayNonStrictMiss := perfReplayMdpAddrCanCount && perfMdpAddrNonStrict && perfMdpAddrMiss
+  perfMdpAddr.replayStrictHit := perfReplayMdpAddrCanCount && perfMdpAddrStrict && perfMdpAddrHit
+  perfMdpAddr.replayStrictMiss := perfReplayMdpAddrCanCount && perfMdpAddrStrict && perfMdpAddrMiss
+  perfMdpAddr.waitStoreRetired := perfWaitStoreRetiredCanCount
+  perfMdpAddr.perfAtRobHead := perfMdpUop.robIdx === io.perfRobHeadPtr
+  perfMdpAddr.perfAtLqHead := perfMdpUop.lqIdx === io.perfLqHeadPtr
+  perfMdpAddr.perfLqFull := io.perfLqFull
+
+  // StoreSet ChiselDB trace
+  val storeSetLoadUnitCheckHartId = p(XSCoreParamsKey).HartId
+  val storeSetLoadUnitCheckTable = ChiselDB.createTable(
+    s"StoreSetLoadUnitCheckDB$storeSetLoadUnitCheckHartId",
+    new StoreSetLoadUnitCheckDBEntry,
+    basicDB = false
+  )
+  val storeSetLoadUnitCheckEntry = Wire(new StoreSetLoadUnitCheckDBEntry)
+  val storeSetLoadUnitCheckUop = Mux(s4HeadValid, s4Head.uop, uop)
+  val storeSetLoadUnitCheckAddrInvalidSqIdx = Mux(s4HeadValid, s4Head.addrInvalidSqIdx.get, in.addrInvalidSqIdx.get)
+  val storeSetLoadUnitCheckStoreSqIdxValid = lqWriteCause(LoadReplayCauses.C_MA)
+  val storeSetLoadUnitCheckFoldPc =
+    XORFold(storeSetLoadUnitCheckUop.pc(VAddrBits - 1, 1), MemPredPCWidth)
+  storeSetLoadUnitCheckEntry.timeCnt := GTimer()
+  storeSetLoadUnitCheckEntry.robIdx := storeSetLoadUnitCheckUop.robIdx.value
+  storeSetLoadUnitCheckEntry.foldPc := storeSetLoadUnitCheckFoldPc
+  storeSetLoadUnitCheckEntry.ssid := storeSetLoadUnitCheckUop.ssid
+  storeSetLoadUnitCheckEntry.loadSqIdx := storeSetLoadUnitCheckUop.sqIdx.value
+  storeSetLoadUnitCheckEntry.storeSqIdx := storeSetLoadUnitCheckAddrInvalidSqIdx.value
+  storeSetLoadUnitCheckEntry.loadWaitBit := storeSetLoadUnitCheckUop.loadWaitBit
+  storeSetLoadUnitCheckEntry.loadWaitStrict := storeSetLoadUnitCheckUop.loadWaitStrict
+  storeSetLoadUnitCheckEntry.mdpAddrValid := perfMdpAddrValid
+  storeSetLoadUnitCheckEntry.mdpAddrStrict := perfMdpAddrStrict
+  storeSetLoadUnitCheckEntry.mdpAddrHit := perfMdpAddrHit
+  storeSetLoadUnitCheckEntry.storeSqIdxValid := storeSetLoadUnitCheckStoreSqIdxValid
+  storeSetLoadUnitCheckTable.log(
+    data = storeSetLoadUnitCheckEntry,
+    en = lqWriteValid &&
+      storeSetLoadUnitCheckUop.storeSetHit && storeSetLoadUnitCheckUop.loadWaitBit,
+    site = s"${param.name}_StoreSetLoadUnitCheck$storeSetLoadUnitCheckHartId",
+    clock = clock,
+    reset = reset
+  )
+
   // Writeback to VLMergeBuffer
   val vecldoutValid = pipeIn.valid && !kill && shouldWriteback && isVector && endPipe
   val vecldout = Wire(new VecPipelineFeedbackIO(isVStore = false))
@@ -1583,8 +1691,14 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.vecldout.valid := vecldoutValid
   io.vecldout.bits := vecldout
 
-  io.fastReplay.valid := pipeIn.valid && shouldFastReplay
+  io.fastReplay.valid := pipeIn.valid && !kill && shouldFastReplay && allowRRBankConflictFastReplay
   io.fastReplay.bits := fastReplay
+  io.rrBankConflictFastReplayCandidate := rrBankConflictFastReplayCandidate
+  io.rrBankConflictFastReplayGrant := rrBankConflictFastReplayCandidate && rrBankConflictFastReplayGrant
+  io.rrBankConflictFastReplayFire :=
+    rrBankConflictFastReplayCandidate && rrBankConflictFastReplayGrant && io.fastReplay.fire
+  io.rrBankConflictFastReplayDenied :=
+    rrBankConflictFastReplayCandidate && !rrBankConflictFastReplayGrant && io.lqWrite.fire
 
   io.revokeLastCycle := revokeLastCycle
   io.revokeLastLastCycle := revokeLastLastCycle
@@ -1593,6 +1707,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.rollback.bits := DontCare
   io.rollback.bits.isRVC := uop.isRVC
   io.rollback.bits.robIdx := robIdx
+  io.rollback.bits.satpFlush := false.B
   io.rollback.bits.ftqIdx := uop.ftqPtr
   io.rollback.bits.ftqOffset := uop.ftqOffset
   io.rollback.bits.level := rollbackLevel
@@ -1603,6 +1718,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.exceptionInfo.bits := exceptionInfo
 
   io.cancel := cancel
+  io.perfMdpAddr := perfMdpAddr
 
   io.debugInfo.isReplayFast := pipeIn.valid && !kill && doFastReplay
   io.debugInfo.isReplaySlow := lqWriteValid && cause.asUInt.orR
@@ -1825,6 +1941,12 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   // IQ wakeup and load cancel
   val wakeup = ValidIO(new MemWakeUpBundle)
   val cancel = Output(Bool())
+  val perfRobHeadPtr = Input(new RobPtr)
+  val perfLqHeadPtr = Input(new LqPtr)
+  val perfLqFull = Input(Bool())
+  val perfMdpAddr = Output(new PerfMdpAddr)
+  // S2 arbitration and S3 execution status for rr bank-conflict fast replay
+  val rrBankConflictFastReplay = new RRBankConflictFastReplayIO
   // Exception info
   val exceptionInfo = ValidIO(new MemExceptionInfo)
   // Data forwarding and bypass
@@ -1940,6 +2062,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.dcache.s2_kill := s2.io.dcacheKill
   s2.io.dcacheResp <> io.dcache.resp
   s2.io.dcacheBankConflict := io.dcache.s2_bank_conflict
+  s2.io.dcacheRRBankConflict := io.dcache.s2_rr_bank_conflict
   s2.io.dcacheMSHRNack := io.dcache.s2_mq_nack
   s2.io.sqForwardResp := io.sqForward.s2Resp
   s2.io.sbufferForwardResp := io.sbufferForward.s2Resp
@@ -1968,6 +2091,10 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.rawNukeQuery.revokeLastLastCycle := s3.io.revokeLastLastCycle
   io.rollback := s3.io.rollback
   io.cancel := s3.io.cancel
+  s3.io.perfRobHeadPtr := io.perfRobHeadPtr
+  s3.io.perfLqHeadPtr := io.perfLqHeadPtr
+  s3.io.perfLqFull := io.perfLqFull
+  io.perfMdpAddr := s3.io.perfMdpAddr
   io.exceptionInfo := s3.io.exceptionInfo
   s3.io.csrCtrl := io.csrCtrl
 
@@ -1983,6 +2110,17 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.ldout.toFpRf.foreach(_.bits.data := dataPath.io.s3ShiftAndExtData(io.ldout.toFpRf.get.bits.data.getWidth - 1, 0))
   io.ldout.toIntRf.foreach(_.bits.data := dataPath.io.s3ShiftAndExtData(io.ldout.toIntRf.get.bits.data.getWidth - 1, 0))
   io.vecldout.bits.vecdata.get := dataPath.io.s3ShiftData
+
+  // rr bank-conflict fast replay arbiter
+  val rrBankConflictFastReplay = io.rrBankConflictFastReplay
+  val rrBankConflictFastReplayPerfStatus = rrBankConflictFastReplay.perfStatus
+  rrBankConflictFastReplay.candidate := s2.io.rrBankConflictFastReplayCandidate
+  s2.io.rrBankConflictFastReplayGrant := rrBankConflictFastReplay.grant
+  rrBankConflictFastReplayPerfStatus.s3Candidate := s3.io.rrBankConflictFastReplayCandidate
+  rrBankConflictFastReplayPerfStatus.s3Grant := s3.io.rrBankConflictFastReplayGrant
+  rrBankConflictFastReplayPerfStatus.s0Ready := s0.io.fastReplayCanAccept
+  rrBankConflictFastReplayPerfStatus.s3Fire := s3.io.rrBankConflictFastReplayFire
+  rrBankConflictFastReplayPerfStatus.s3Denied := s3.io.rrBankConflictFastReplayDenied
 
   // Debug info
   io.debugInfo.s1_isTlbFirstMiss := s1.io.debugInfo.isTlbFirstMiss

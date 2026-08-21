@@ -33,11 +33,11 @@ import xiangshan.frontend.bpu.TageTableInfo
  */
 class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters with TopHelper with HalfAlignHelper {
   class TageIO(implicit p: Parameters) extends BasePredictorIO {
-    val fromPhr:     PhrToTageIO         = new PhrToTageIO
-    val fromMainBtb: MainBtbToTageIO     = new MainBtbToTageIO
-    val toSc:        TageToScIO          = new TageToScIO
-    val prediction:  Vec[TagePrediction] = Output(Vec(NumBtbResultEntries, new TagePrediction))
-    val meta:        TageMeta            = Output(new TageMeta)
+    val fromPhr:     PhrToTageIO     = new PhrToTageIO
+    val fromMainBtb: MainBtbToTageIO = new MainBtbToTageIO
+    val toSc:        TageToScIO      = new TageToScIO
+    val prediction:  TagePrediction  = Output(new TagePrediction)
+    val meta:        TageMeta        = Output(new TageMeta)
 
     val debug_trainValid: Bool = Input(Bool())
   }
@@ -51,7 +51,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val usefulResetInFlight = RegInit(false.B)
 
   // use the alternate prediction when counter is positive
-  private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(UseAltOnNaCounter.Zero))
+  private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(UseAltOnNaCounter.WeakPositive))
 
   /* *** reset *** */
   io.sramResetDone := tables.map(_.io.sramResetDone).reduce(_ && _)
@@ -62,7 +62,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      -------------------------------------------------------------------------------------------------------------- */
 
   private val s0_fire    = io.stageCtrl.s0_fire && io.enable
-  private val s0_startPc = io.startPc
+  private val s0_startPc = io.startPc.unGuard
 
   private val s0_foldedHist = getFoldedHist(io.fromPhr.foldedPathHist)
   private val s0_setIdx = VecInit((tables zip s0_foldedHist).map { case (table, hist) =>
@@ -112,10 +112,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s2_branches = io.fromMainBtb.result
 
   s2_branches.zipWithIndex.foreach { case (branch, i) =>
-    val position      = branch.bits.cfiPosition
-    val cfiPc         = getCfiPcFromPosition(s2_startPc, position)
-    val useAltOnNaIdx = getUseAltOnNaIdx(cfiPc)
-    val useAltOnNa    = useAltOnNaVec(useAltOnNaIdx).isPositive
+    val position = branch.bits.cfiPosition
 
     // compare tags of each branch with all tables
     val allTableTagMatchResults = s2_readResp.zipWithIndex.map { case (tableReadResp, tableIdx) =>
@@ -143,23 +140,29 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val altTableOH             = getLongestHistTableOH(hitTableMaskNoProvider)
     val alt                    = Mux1H(altTableOH, allTableTagMatchResults)
 
+    val altConf          = Mux(hasAlt, !alt.takenCtr.isWeak, io.fromMainBtb.baseConf(i))
+    val providerTableIdx = OHToUInt(providerTableOH)
+    val useAltOnNaIdx    = Cat(providerTableIdx, altConf)
+    val useAltOnNa       = useAltOnNaVec(useAltOnNaIdx).isPositive
+
+    // If the entry is recognized as a newly allocated entry and USE_ALT_ON_NA is positive,
+    // use the alternate prediction.
     val useProvider = hasProvider && !(useAltOnNa && provider.takenCtr.isWeak)
 
-    // get prediction for each branch
-    io.prediction(i).useProvider  := useProvider
-    io.prediction(i).providerPred := provider.takenCtr.isPositive
-    io.prediction(i).hasAlt       := hasAlt
-    io.prediction(i).altPred      := alt.takenCtr.isPositive
+    io.prediction.takenVec(i).valid := useProvider || hasAlt
+    io.prediction.takenVec(i).bits  := Mux(useProvider, provider.takenCtr.isPositive, alt.takenCtr.isPositive)
 
     io.toSc.providerTakenCtrVec(i).valid := hasProvider && branch.valid
     io.toSc.providerTakenCtrVec(i).bits  := provider.takenCtr
 
     io.meta.entries(i).useProvider       := useProvider
-    io.meta.entries(i).providerTableIdx  := OHToUInt(providerTableOH)
+    io.meta.entries(i).hasAlt            := hasAlt
+    io.meta.entries(i).providerTableIdx  := providerTableIdx
     io.meta.entries(i).providerWayIdx    := OHToUInt(provider.hitWayMaskOH)
     io.meta.entries(i).providerTakenCtr  := provider.takenCtr
     io.meta.entries(i).providerUsefulCtr := provider.usefulCtr
     io.meta.entries(i).altOrBasePred     := Mux(hasAlt, alt.takenCtr.isPositive, branch.bits.taken)
+    io.meta.entries(i).altConf           := altConf
 
     XSPerfAccumulate(
       s"s2_branch_${i}_multihit_on_same_table",
@@ -185,15 +188,15 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   private val t0_fire = io.stageCtrl.t0_fire && t0_hasCond && io.enable
 
-  private val (t0_mbtbHitMask, t0_basePred, t0_meta) = t0_branches.map { branch =>
+  private val (t0_mbtbHitMask, t0_baseCtr, t0_meta) = t0_branches.map { branch =>
     val mbtbMeta  = io.train.meta.mbtb.entries.flatten
     val tageMeta  = io.train.meta.tage.entries
     val hitMask   = mbtbMeta.map(_.hit(branch.bits))
     val hitMaskOH = PriorityEncoderOH(hitMask)
     val mbtbHit   = hitMask.reduce(_ || _)
-    val basePred  = Mux1H(hitMaskOH, mbtbMeta.map(_.counter.isPositive))
+    val baseCtr   = Mux1H(hitMaskOH, mbtbMeta.map(_.counter))
     val meta      = Mux1H(hitMaskOH, tageMeta)
-    (mbtbHit, basePred, meta)
+    (mbtbHit, baseCtr, meta)
   }.unzip3
 
   // if all hit conditional branches use provider and no mispredict, use meta to train
@@ -273,7 +276,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   private val t1_useMeta     = RegEnable(t0_useMeta, t0_fire)
   private val t1_meta        = RegEnable(VecInit(t0_meta), t0_fire)
-  private val t1_basePred    = RegEnable(VecInit(t0_basePred), t0_fire)
+  private val t1_baseCtr     = RegEnable(VecInit(t0_baseCtr), t0_fire)
   private val t1_mbtbHitMask = RegEnable(VecInit(t0_mbtbHitMask), t0_fire)
 
   private val t1_foldedHist = RegEnable(t0_foldedHist, t0_fire)
@@ -300,22 +303,15 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   private val t2_useMeta     = RegEnable(t1_useMeta, t1_fire)
   private val t2_meta        = RegEnable(t1_meta, t1_fire)
-  private val t2_basePred    = RegEnable(t1_basePred, t1_fire)
+  private val t2_baseCtr     = RegEnable(t1_baseCtr, t1_fire)
   private val t2_mbtbHitMask = RegEnable(t1_mbtbHitMask, t1_fire)
 
-  private val t2_cfiUseAltOnNaIdxVec = VecInit(t2_branches.map { branch =>
-    val cfiPc = getCfiPcFromPosition(t2_startPc, branch.bits.cfiPosition)
-    getUseAltOnNaIdx(cfiPc)
-  })
-
   private val t2_trainInfoVec = VecInit(t2_branches.zipWithIndex.map { case (branch, i) =>
-    val isCond        = branch.valid && branch.bits.attribute.isConditional
-    val mbtbHit       = t2_mbtbHitMask(i)
-    val meta          = t2_meta(i)
-    val position      = branch.bits.cfiPosition
-    val actualTaken   = branch.bits.taken
-    val useAltOnNaIdx = t2_cfiUseAltOnNaIdxVec(i)
-    val useAltOnNa    = useAltOnNaVec(useAltOnNaIdx).isPositive
+    val isCond      = branch.valid && branch.bits.attribute.isConditional
+    val mbtbHit     = t2_mbtbHitMask(i)
+    val meta        = t2_meta(i)
+    val position    = branch.bits.cfiPosition
+    val actualTaken = branch.bits.taken
 
     val allTableTagMatchResults = t2_readResp.zipWithIndex.map { case (tableReadResp, tableIdx) =>
       val tag          = t2_rawTag(tableIdx) ^ position
@@ -360,8 +356,6 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       altTableOH := 0.U
       alt        := 0.U.asTypeOf(new TrainTagMatchResult)
 
-      useProvider   := true.B
-      useAlt        := false.B
       altOrBasePred := meta.altOrBasePred
     }.otherwise { // use result from sram read resp
       hasProvider     := hitTableMask.reduce(_ || _)
@@ -373,10 +367,14 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       altTableOH := getLongestHistTableOH(hitTableMaskNoProvider).asUInt
       alt        := Mux1H(altTableOH, allTableTagMatchResults)
 
-      useProvider   := hasProvider && (!useAltOnNa || !provider.takenCtr.isWeak)
-      useAlt        := !useProvider && hasAlt
-      altOrBasePred := Mux(hasAlt, alt.takenCtr.isPositive, t2_basePred(i))
+      altOrBasePred := Mux(hasAlt, alt.takenCtr.isPositive, t2_baseCtr(i).isPositive)
     }
+
+    val altConf       = Mux(t2_useMeta, meta.altConf, Mux(hasAlt, !alt.takenCtr.isWeak, t2_baseCtr(i).isSaturate))
+    val useAltOnNaIdx = Cat(OHToUInt(providerTableOH), altConf)
+    val useAltOnNa    = useAltOnNaVec(useAltOnNaIdx).isPositive
+    useProvider := Mux(t2_useMeta, true.B, hasProvider && !(useAltOnNa && provider.takenCtr.isWeak))
+    useAlt      := !t2_useMeta && !useProvider && hasAlt
 
     val providerPred = provider.takenCtr.isPositive
     val finalPred    = Mux(useProvider, providerPred, altOrBasePred)
@@ -399,8 +397,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     val needUpdateAltCtr = !alt.takenCtr.shouldHold(actualTaken) && useAlt
 
-    val incUseAltOnNa = hasProvider && provider.takenCtr.isWeak && altOrBasePred === actualTaken
-    val decUseAltOnNa = hasProvider && provider.takenCtr.isWeak && altOrBasePred =/= actualTaken
+    // Train the selector only when it can change the prediction.
+    // When the weak provider and alternate/base disagree, exactly one of them is correct.
+    val trainUseAltOnNa = hasProvider && provider.takenCtr.isWeak && providerPred =/= altOrBasePred
+    val incUseAltOnNa   = trainUseAltOnNa && altOrBasePred === actualTaken
+    val decUseAltOnNa   = trainUseAltOnNa && providerPred === actualTaken
 
     val trainInfo = Wire(new TrainInfo).suggestName(s"t2_branch_${i}_trainInfo")
     trainInfo.valid := isCond && mbtbHit // Only consider update if conditional branch
@@ -431,6 +432,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     trainInfo.incUseAltOnNa := incUseAltOnNa
     trainInfo.decUseAltOnNa := decUseAltOnNa
+    trainInfo.useAltOnNaIdx := useAltOnNaIdx
 
     trainInfo.finalPred   := finalPred
     trainInfo.actualTaken := actualTaken
@@ -447,17 +449,16 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      - allocate a new entry when mispredict
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t3_fire                = RegNext(t2_fire, init = false.B)
-  private val t3_branches            = RegEnable(t2_branches, t2_fire)
-  private val t3_startPc             = RegEnable(t2_startPc, t2_fire)
-  private val t3_setIdx              = RegEnable(t2_setIdx, t2_fire)
-  private val t3_bankMask            = RegEnable(t2_bankMask, t2_fire)
-  private val t3_rawTag              = RegEnable(t2_rawTag, t2_fire)
-  private val t3_readResp            = RegEnable(t2_readResp, t2_fire)
-  private val t3_useMeta             = RegEnable(t2_useMeta, t2_fire)
-  private val t3_mbtbHitMask         = RegEnable(t2_mbtbHitMask, t2_fire)
-  private val t3_cfiUseAltOnNaIdxVec = RegEnable(t2_cfiUseAltOnNaIdxVec, t2_fire)
-  private val t3_trainInfoVec        = RegEnable(t2_trainInfoVec, t2_fire)
+  private val t3_fire         = RegNext(t2_fire, init = false.B)
+  private val t3_branches     = RegEnable(t2_branches, t2_fire)
+  private val t3_startPc      = RegEnable(t2_startPc, t2_fire)
+  private val t3_setIdx       = RegEnable(t2_setIdx, t2_fire)
+  private val t3_bankMask     = RegEnable(t2_bankMask, t2_fire)
+  private val t3_rawTag       = RegEnable(t2_rawTag, t2_fire)
+  private val t3_readResp     = RegEnable(t2_readResp, t2_fire)
+  private val t3_useMeta      = RegEnable(t2_useMeta, t2_fire)
+  private val t3_mbtbHitMask  = RegEnable(t2_mbtbHitMask, t2_fire)
+  private val t3_trainInfoVec = RegEnable(t2_trainInfoVec, t2_fire)
 
   private val t3_needAllocateBranchOH = t3_trainInfoVec.map(info => info.valid && info.needAllocate)
   when(t3_fire) {
@@ -497,7 +498,20 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t3_canAllocate          = t3_canAllocateTableMask.orR
   private val t3_allocate             = t3_needAllocate && t3_canAllocate
 
-  private val t3_allocateTableOH = PriorityEncoderOH(t3_canAllocateTableMask)
+  // Keep a 15-bit maximal-period LFSR (period 2^15 - 1) even though only the low NumTables bits are used.
+  // The longer period avoids short-period correlation with allocation/training events at negligible hardware cost.
+  // Its taps are {15, 14}, requiring only one feedback XOR; a shorter 8-bit maximal-period LFSR uses four taps.
+  // Randomly filter allocation candidates, then prefer the shorter-history table among the remaining candidates.
+  // Fall back to the original candidate mask when the random mask filters out every candidate.
+  require(NumTables <= 15, s"TAGE NumTables ($NumTables) must be less than the 15-bit LFSR width")
+  private val t3_allocateTableRandomMask    = random.LFSR(width = 15)(NumTables - 1, 0)
+  private val t3_randomCanAllocateTableMask = t3_canAllocateTableMask & t3_allocateTableRandomMask
+  private val t3_preferredAllocateTableMask = Mux(
+    t3_randomCanAllocateTableMask.orR,
+    t3_randomCanAllocateTableMask,
+    t3_canAllocateTableMask
+  )
+  private val t3_allocateTableOH = PriorityEncoderOH(t3_preferredAllocateTableMask)
   private val t3_allocateWayMask = Mux1H(t3_allocateTableOH, t3_allTableCanAllocateWayMask)
   private val t3_allocateWayOH   = PriorityEncoderOH(t3_allocateWayMask)
   dontTouch(t3_allocateTableOH)
@@ -595,27 +609,26 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     usefulResetCtr.selfIncrease()
   }
 
-  useAltOnNaVec.zipWithIndex.map { case (ctr, i) =>
-    val idxMatchMask = t3_cfiUseAltOnNaIdxVec.map(_ === i.U)
+  useAltOnNaVec.zipWithIndex.foreach { case (ctr, i) =>
+    val idxMatchMask = t3_trainInfoVec.map(updateInfo => updateInfo.valid && updateInfo.useAltOnNaIdx === i.U)
     val increaseMask = idxMatchMask.zip(t3_trainInfoVec).map { case (idxMatch, updateInfo) =>
-      idxMatch && updateInfo.valid && updateInfo.incUseAltOnNa
+      idxMatch && updateInfo.incUseAltOnNa
     }
     val decreaseMask = idxMatchMask.zip(t3_trainInfoVec).map { case (idxMatch, updateInfo) =>
-      idxMatch && updateInfo.valid && updateInfo.decUseAltOnNa
+      idxMatch && updateInfo.decUseAltOnNa
     }
-    val increase = increaseMask.reduce(_ || _)
-    val decrease = decreaseMask.reduce(_ || _)
+    val increaseCount = PopCount(increaseMask)
+    val decreaseCount = PopCount(decreaseMask)
+    val increase      = increaseCount >= decreaseCount
+    val step          = Mux(increase, increaseCount - decreaseCount, decreaseCount - increaseCount)
+    val updatedCtr = Mux(
+      increase,
+      ctr.getIncrease(step, en = step.orR),
+      ctr.getDecrease(step, en = step.orR)
+    )
 
     when(t3_fire) {
-      assert(PopCount(increaseMask) <= 1.U)
-      assert(PopCount(decreaseMask) <= 1.U)
-      assert(!(increase && decrease))
-
-      when(increase) {
-        ctr.selfIncrease()
-      }.elsewhen(decrease) {
-        ctr.selfDecrease()
-      }
+      ctr := updatedCtr
     }
   }
 

@@ -138,7 +138,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     })
     val fromRob = Input(new Bundle {
       val trap = ValidIO(new Bundle {
-        val pc = UInt(VaddrMaxWidth.W)
+        val pc = UInt((VaddrMaxWidth+1).W)
         val pcGPA = UInt(PAddrBitsMax.W)
         val instr = UInt(InstWidth.W)
         val trapVec = UInt(64.W)
@@ -150,6 +150,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isHls = Bool()
         val isFetchMalAddr = Bool()
         val isForVSnonLeafPTE = Bool()
+        val satpFlushFirstFetchFault = Bool()
       })
       val commit = Input(new RobCommitCSR)
       val robDeqPtr = Input(new RobPtr)
@@ -183,6 +184,8 @@ class NewCSR(implicit val p: Parameters) extends Module
         val vlenb = UInt(XLEN.W)
         val off = Bool()
       }
+      val satp  = Valid(UInt(SatpMode.getWidth.W))
+      val vsatp = Valid(UInt(SatpMode.getWidth.W))
       // debug
       val debugMode = Bool()
       val singleStepFlag = Bool()
@@ -232,6 +235,10 @@ class NewCSR(implicit val p: Parameters) extends Module
 
     val fetchMalTval = Input(UInt(XLEN.W))
 
+    val oldSatpMode  = Input(UInt(SatpMode.getWidth.W))
+    val oldVsatpMode = Input(UInt(SatpMode.getWidth.W))
+    val oldPrivState = Input(new PrivState)
+
     val distributedWenLegal = Output(Bool())
 
     val trapTargetPc = ValidIO(new TargetPCBundle)
@@ -271,6 +278,11 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trapIsFetchMalAddr = io.fromRob.trap.bits.isFetchMalAddr
   val trapIsFetchBkpt = io.fromRob.trap.bits.isFetchBkpt
   val trapIsForVSnonLeafPTE = io.fromRob.trap.bits.isForVSnonLeafPTE
+  val trapIsSatpFlushFirstFetchFault = io.fromRob.trap.bits.satpFlushFirstFetchFault
+
+  val oldSatpMode  = io.oldSatpMode
+  val oldVsatpMode = io.oldVsatpMode
+  val oldPrivState = io.oldPrivState
 
   // debug_intrrupt
   val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
@@ -840,9 +852,10 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.isFetchBkpt := trapIsFetchBkpt
         in.trapIsForVSnonLeafPTE := trapIsForVSnonLeafPTE
         in.hasDTExcp := hasDTExcp
+        in.satpFlushFirstFetchFault := trapIsSatpFlushFirstFetchFault
 
-        in.iMode.PRVM := PRVM
-        in.iMode.V := V
+        in.iMode.PRVM := Mux(trapIsSatpFlushFirstFetchFault, oldPrivState.PRVM, PRVM)
+        in.iMode.V := Mux(trapIsSatpFlushFirstFetchFault, oldPrivState.V, V)
         // when NMIE is zero, force to behave as MPRV is zero
         in.dMode.PRVM := Mux(mstatus.regOut.MPRV.asBool && mnstatus.regOut.NMIE.asBool, mstatus.regOut.MPP, PRVM)
         in.dMode.V := V.asUInt.asBool || mstatus.regOut.MPRV && mnstatus.regOut.NMIE.asBool && (mstatus.regOut.MPP =/= PrivMode.M) && mstatus.regOut.MPV
@@ -859,6 +872,12 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.satp  := satp.regOut
         in.vsatp := vsatp.regOut
         in.hgatp := hgatp.regOut
+        in.oldSatp  := Mux(trapIsSatpFlushFirstFetchFault,
+                        Cat(oldSatpMode, 0.U((XLEN - SatpMode.getWidth).W)).asTypeOf(in.oldSatp),
+                        satp.regOut)
+        in.oldVsatp := Mux(trapIsSatpFlushFirstFetchFault,
+                        Cat(oldVsatpMode, 0.U((XLEN - SatpMode.getWidth).W)).asTypeOf(in.oldVsatp),
+                        vsatp.regOut)
         if (HasBitmapCheck) {
           in.mbmc := mbmc.get.regOut
         } else {
@@ -1164,6 +1183,10 @@ class NewCSR(implicit val p: Parameters) extends Module
                         (vstopi.regOut.IID.asUInt =/= 0.U)
   io.status.debugMode := debugMode
   io.status.singleStepFlag := !debugMode && dcsr.regOut.STEP
+  io.status.satp.valid  := satp.w.wen
+  io.status.satp.bits   := satp.regOut.MODE.asUInt
+  io.status.vsatp.valid := vsatp.w.wen
+  io.status.vsatp.bits  := vsatp.regOut.MODE.asUInt
 
   private val nonDebugTrapEventValid = Cat(Seq(trapEntryMEvent, trapEntryMNEvent, trapEntryHSEvent, trapEntryVSEvent).map(_.valid)).asUInt.orR
   private val delayedPcFromXtvec = RegEnable(trapHandleMod.io.out.pcFromXtvec, nonDebugTrapEventValid)
@@ -1420,14 +1443,16 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.custom.pf_ctrl.l1D_pf_enable_pht       := spfctl.regOut.L1D_PF_ENABLE_PHT.asBool
   io.status.custom.pf_ctrl.l1D_pf_active_threshold := spfctl.regOut.L1D_PF_ACTIVE_THRESHOLD.asUInt
   io.status.custom.pf_ctrl.l1D_pf_active_stride    := spfctl.regOut.L1D_PF_ACTIVE_STRIDE.asUInt
-  io.status.custom.pf_ctrl.l1D_pf_enable_stride    := spfctl.regOut.L1D_PF_ENABLE_STRIDE.asBool
+  io.status.custom.pf_ctrl.l1D_pf_stride_enable    := spfctl.regOut.L1D_PF_STRIDE_ENABLE.asBool
   io.status.custom.pf_ctrl.l2_pf_store_only        := spfctl.regOut.L2_PF_STORE_ONLY.asBool
   io.status.custom.pf_ctrl.l2_pf_recv_enable       := spfctl.regOut.L2_PF_RECV_ENABLE.asBool
   io.status.custom.pf_ctrl.l2_pf_pbop_enable       := spfctl.regOut.L2_PF_PBOP_ENABLE.asBool
   io.status.custom.pf_ctrl.l2_pf_vbop_enable       := spfctl.regOut.L2_PF_VBOP_ENABLE.asBool
   io.status.custom.pf_ctrl.l2_pf_tp_enable         := spfctl.regOut.L2_PF_TP_ENABLE.asBool
   io.status.custom.pf_ctrl.l2_pf_delay_latency     := spfctl.regOut.L2_PF_DELAY_LATENCY.asUInt
-  io.status.custom.pf_ctrl.berti_enable            := spfctl.regOut.BERTI_ENABLE.asBool
+  io.status.custom.pf_ctrl.l1D_pf_berti_enable     := spfctl.regOut.L1D_PF_BERTI_ENABLE.asBool
+  io.status.custom.pf_ctrl.l1D_pf_stream_enable    := spfctl.regOut.L1D_PF_STREAM_ENABLE.asBool
+  io.status.custom.pf_ctrl.l2_pf_cdp_enable        := spfctl.regOut.L2_PF_CDP_ENABLE.asBool
 
   io.status.custom.lvpred_disable          := slvpredctl.regOut.LVPRED_DISABLE.asBool
   io.status.custom.no_spec_load            := slvpredctl.regOut.NO_SPEC_LOAD.asBool

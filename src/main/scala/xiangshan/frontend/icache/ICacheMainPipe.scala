@@ -29,7 +29,7 @@ import xiangshan.L1CacheErrorInfo
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.mmu.TlbCmd
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.ftq.BpuFlushInfo
 import xiangshan.frontend.ftq.FtqToMainPipeBundle
@@ -167,7 +167,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
           "ICache MainPipe: wayLookupEntry ftqIdx mismatch"
         )
         assert(
-          s0_wayLookupEntry(i).debug_startVAddr.get === s0_req(i).startVAddr,
+          s0_wayLookupEntry(i).debug_startVAddr.get === s0_req(i).startVAddr.unGuard,
           "ICache MainPipe: wayLookupEntry startVAddr mismatch"
         )
       }
@@ -406,6 +406,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     req.icacheMeta.exception          := s1_exceptionOut
     req.icacheMeta.pmpMmio            := s1_pmpMmio
     req.icacheMeta.isBackendException := s1_req(i).hasBackendException
+    req.icacheMeta.hasSatpFlush       := s1_req(i).hasSatpFlush
     req.icacheMeta.isForVSnonLeafPTE  := s1_exceptionInfo(i).isForVSnonLeafPTE
     req.icacheMeta.itlbPbmt           := s1_wayLookupEntry(i).itlbPbmt
     req.icacheMeta.pAddr              := getPAddrFromPTag(s1_vAddr(2 * i), s1_pTag)
@@ -437,10 +438,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   // make corrupt-related info as a bundle for easier selection
   private class CorruptedInfo extends Bundle {
-    val vAddr:   PrunedAddr = PrunedAddr(VAddrBits)
-    val wayMask: UInt       = UInt(wayBits.W)
-    val isMeta:  Bool       = Bool()
-    val isData:  Bool       = Bool()
+    val vAddr:   Pc   = Pc()
+    val wayMask: UInt = UInt(wayBits.W)
+    val isMeta:  Bool = Bool()
+    val isData:  Bool = Bool()
 
     def vSetIdx: UInt = get_idx(vAddr)
   }
@@ -481,7 +482,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
       val info = Wire(Valid(new CorruptedInfo))
       info.valid        := metaCorrupt(portIdx) || dataCorrupt(portIdx)
-      info.bits.vAddr   := s2_vAddr(reqIdx)(portIdx)
+      info.bits.vAddr   := s2_vAddr(reqIdx)(portIdx).unGuard
       info.bits.wayMask := s2_wayMask(reqIdx)(portIdx)
       info.bits.isMeta  := metaCorrupt(portIdx)
       info.bits.isData  := dataCorrupt(portIdx)

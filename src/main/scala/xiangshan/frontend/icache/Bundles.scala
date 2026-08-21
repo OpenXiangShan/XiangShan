@@ -28,6 +28,9 @@ import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchRequestBundle
 import xiangshan.frontend.FtqFetchRequest
+import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.Pc
+import xiangshan.frontend.PcInit
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.ifu.IfuBundle
@@ -186,7 +189,7 @@ class ReplacerVictimBundle(implicit p: Parameters) extends ICacheBundle {
 /* ***** MainPipe ***** */
 // ICache(MainPipe) -> IFU
 class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
-  val startVAddr:         PrunedAddr    = PrunedAddr(VAddrBits)
+  val startVAddr:         Pc            = Pc()
   val data:               UInt          = UInt(blockBits.W)
   val maybeRvcMap:        UInt          = UInt(MaxInstNumPerBlock.W)
   val pAddr:              PrunedAddr    = PrunedAddr(PAddrBits)
@@ -208,6 +211,7 @@ class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
 class ICacheMeta(implicit p: Parameters) extends ICacheBundle {
   val exception:          ExceptionType = new ExceptionType
   val pmpMmio:            Bool          = Bool()
+  val hasSatpFlush:       Bool          = Bool()
   val isBackendException: Bool          = Bool()
   val isForVSnonLeafPTE:  Bool          = Bool()
   val itlbPbmt:           UInt          = UInt(Pbmt.width.W)
@@ -219,7 +223,7 @@ class ICacheMeta(implicit p: Parameters) extends ICacheBundle {
 
 class MainPipeToIfuReq(implicit p: Parameters) extends ICacheBundle {
   val valid:          Bool        = Bool()
-  val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
+  val startVAddr:     GuardedPc   = GuardedPc()
   val ftqIdx:         FtqPtr      = new FtqPtr
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
   val range:          UInt        = UInt(FetchBlockInstNum.W)
@@ -249,16 +253,18 @@ class MainPipeToWayLookupBundle(implicit p: Parameters) extends ICacheBundle {
 
 /* ***** PrefetchPipe ***** */
 class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
-  val startVAddr:       PrunedAddr    = PrunedAddr(VAddrBits)
-  val nextLineVAddr:    PrunedAddr    = PrunedAddr(VAddrBits)
+  val startVAddr:       GuardedPc     = GuardedPc()
+  val nextLineVAddr:    GuardedPc     = GuardedPc()
+  val vSetIdx:          Vec[UInt]     = Vec(PortNumber, UInt(idxBits.W))
   val isCrossLine:      Bool          = Bool()
   val ftqIdx:           FtqPtr        = new FtqPtr
   val backendException: ExceptionType = new ExceptionType
   val isSoftPrefetch:   Bool          = Bool()
 
   def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): PrefetchReqBundle = {
-    startVAddr       := req.vaddr
+    startVAddr       := PcInit(req.vaddr).signGuard
     nextLineVAddr    := DontCare
+    vSetIdx          := VecInit(get_idx(startVAddr), 0.U(idxBits.W))
     isCrossLine      := false.B
     ftqIdx           := DontCare
     backendException := ExceptionType.None
@@ -283,8 +289,8 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val isMmio:      Bool      = Bool()
   val itlbPbmt:    UInt      = UInt(Pbmt.width.W)
 
-  val debug_ftqIdx:     Option[FtqPtr]     = Option.when(!env.FPGAPlatform)(new FtqPtr)
-  val debug_startVAddr: Option[PrunedAddr] = Option.when(!env.FPGAPlatform)(PrunedAddr(VAddrBits))
+  val debug_ftqIdx:     Option[FtqPtr] = Option.when(!env.FPGAPlatform)(new FtqPtr)
+  val debug_startVAddr: Option[Pc]     = Option.when(!env.FPGAPlatform)(Pc())
 
   def getMetaInfo(i: Int): MetaInfo = {
     val info = Wire(new MetaInfo)

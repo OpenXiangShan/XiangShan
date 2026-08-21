@@ -123,4 +123,18 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper with PhrHelper {
     }
     nextFoldedPhr
   }
+
+  def getNextFoldedPhr(
+      data:          PhrUpdateData,
+      oldestBits:    PhrAllFoldedHistoryOldestBits,
+      baseFoldedPhr: PhrAllFoldedHistories,
+      hashHigh:      UInt,
+      shiftBits:     UInt
+  ): PhrAllFoldedHistories = {
+    val nextFoldedPhr = WireInit(baseFoldedPhr)
+    when(data.taken) {
+      nextFoldedPhr := baseFoldedPhr.update(oldestBits, hashHigh, Shamt, shiftBits)
+    }
+    nextFoldedPhr
+  }
 }

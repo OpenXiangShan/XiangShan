@@ -609,7 +609,11 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         vs_finish := true.B
       }.otherwise{
         if (HasMptCheck) {
-          s_mpt_check := true.B // mem_addr_update checks pmp, next is mpt or mem access state
+          when(mptEn && checkIntermediateNode) {
+            s_mpt_check := true.B
+          }.otherwise {
+            s_mem_req := false.B
+          }
         }else{
           s_mem_req := false.B
         } // that is not intended for mpt
@@ -1666,7 +1670,11 @@ class HPTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     when(!(find_pte || accessFaultMpt)) {
       level := levelNext
       if (HasMptCheck) {
-        s_mpt_check := true.B // mem_addr_update checks pmp, next is mpt or mem access state
+        when(mptEn && checkIntermediateNode) {
+          s_mpt_check := true.B
+        }.otherwise {
+          s_mem_req := false.B
+        }
       } else {
         s_mem_req := false.B
       }
