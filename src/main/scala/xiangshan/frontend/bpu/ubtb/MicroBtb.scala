@@ -37,7 +37,6 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   println(f"MicroBtb:")
   println(f"  Size(full-assoc): $NumEntries")
-  println(f"  Use fast-train: $UseFastTrain")
   println(f"  Replacer: $Replacer")
   println(f"  Address fields:")
   addrFields.show(indent = 4)
@@ -107,29 +106,18 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
    * - check if hits t1 stage
    * - calculate hit flags
    */
-  private val t0_fire        = Wire(Bool())
-  private val t0_startPc     = Wire(Pc())
-  private val t0_actualTaken = Wire(Bool())
-  private val t0_position    = Wire(UInt(CfiPositionWidth.W))
-  private val t0_fullTarget  = Wire(Pc())
-  private val t0_attribute   = Wire(new BranchAttribute)
+  private val t0_useFast    = io.fastTrain.get.valid
+  private val t0_useResolve = io.stageCtrl.t0_fire && io.train.mispredictBranch.valid
 
-  if (UseFastTrain) {
-    t0_fire        := io.fastTrain.get.valid && io.enable
-    t0_startPc     := io.fastTrain.get.bits.startPc
-    t0_actualTaken := io.fastTrain.get.bits.finalPrediction.taken
-    t0_position    := io.fastTrain.get.bits.finalPrediction.cfiPosition
-    t0_fullTarget  := io.fastTrain.get.bits.finalPrediction.target.unGuard
-    t0_attribute   := io.fastTrain.get.bits.finalPrediction.attribute
-  } else {
-    // FIXME: not sure if first mispredict is the best, maybe first taken?
-    t0_fire        := io.stageCtrl.t0_fire && io.train.mispredictBranch.valid && io.enable
-    t0_startPc     := io.train.startPc
-    t0_actualTaken := io.train.mispredictBranch.bits.taken
-    t0_position    := io.train.mispredictBranch.bits.cfiPosition
-    t0_fullTarget  := io.train.mispredictBranch.bits.target
-    t0_attribute   := io.train.mispredictBranch.bits.attribute
-  }
+  // resolve's mispredict has higher priority
+  private val t0_fire    = (t0_useFast || t0_useResolve) && io.enable
+  private val t0_startPc = Mux(t0_useResolve, io.train.startPc, io.fastTrain.get.bits.startPc)
+  private val t0_branch  = Mux(t0_useResolve, io.train.mispredictBranch.bits, io.fastTrain.get.bits.branch)
+
+  private val t0_actualTaken = t0_branch.taken
+  private val t0_position    = t0_branch.cfiPosition
+  private val t0_fullTarget  = t0_branch.target
+  private val t0_attribute   = t0_branch.attribute
 
   private val t0_tag         = getTag(t0_startPc)
   private val t0_target      = getEntryTarget(t0_fullTarget)

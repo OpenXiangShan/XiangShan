@@ -172,12 +172,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   train := io.fromFtq.train.bits
 
   private val fastTrain = Wire(Valid(new FastTrain))
-  fastTrain.valid                := s3_valid
-  fastTrain.bits.startPc         := s3_startPc.get.unGuard
-  fastTrain.bits.finalPrediction := s3_prediction
-  fastTrain.bits.abtbMeta        := s3_abtbMeta
-  fastTrain.bits.utageMeta       := s3_utageMeta
-  fastTrain.bits.hasOverride     := s3_override
+  fastTrain.valid        := s3_valid
+  fastTrain.bits.startPc := s3_startPc.get.unGuard
+  fastTrain.bits.branch.fromPrediction(s3_prediction, s3_override)
+  fastTrain.bits.abtbMeta  := s3_abtbMeta
+  fastTrain.bits.utageMeta := s3_utageMeta
 
   predictors.foreach { p =>
     p.io.startPc   := s0_startPc.get

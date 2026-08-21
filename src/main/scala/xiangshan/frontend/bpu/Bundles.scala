@@ -231,6 +231,7 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle with HalfAlignHelper 
 
   val debug_realCfiPc: Option[UInt] = Option.when(!env.FPGAPlatform)(UInt(VAddrBits.W))
 
+  // backend resolve train s1/s3 predictor
   def fromResolve(resolve: Resolve): Unit = {
     this.taken       := resolve.taken
     this.target      := resolve.target
@@ -245,6 +246,17 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle with HalfAlignHelper 
         resolve.debug_isRVC.get
       )
     }
+  }
+
+  // s3 prediction train s1 predictor
+  def fromPrediction(prediction: Prediction, hasOverride: Bool): Unit = {
+    this.taken       := prediction.taken
+    this.target      := prediction.target.unGuard // s1 training does not need guard bit
+    this.cfiPosition := prediction.cfiPosition
+    this.attribute   := prediction.attribute
+    this.mispredict  := hasOverride
+    // not available
+    this.debug_realCfiPc.foreach(_ := DontCare)
   }
 }
 
@@ -283,11 +295,10 @@ class Train(NumStartPcVecDup: Int = 1)(implicit p: Parameters) extends BpuTrain 
 
 // use s3 prediction to train s1 predictors
 class FastTrain(implicit p: Parameters) extends BpuBundle {
-  val startPc:         Pc            = Pc()
-  val finalPrediction: Prediction    = new Prediction
-  val hasOverride:     Bool          = Bool()
-  val abtbMeta:        AheadBtbMeta  = new AheadBtbMeta
-  val utageMeta:       MicroTageMeta = new MicroTageMeta
+  val startPc:   Pc            = Pc()
+  val branch:    BranchInfo    = new BranchInfo
+  val abtbMeta:  AheadBtbMeta  = new AheadBtbMeta
+  val utageMeta: MicroTageMeta = new MicroTageMeta
 }
 
 // metadata for commit training (e.g. ras)
