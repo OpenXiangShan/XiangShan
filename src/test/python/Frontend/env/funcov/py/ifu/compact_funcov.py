@@ -80,12 +80,41 @@ def _sample_invalid_taken_exception_cross(recorder, dut, cycle: int) -> None:
         )
 
 
+def _sample_instr_boundary_tail(recorder, dut, cycle: int) -> None:
+    s1_valid = _read_ifu_internal(recorder, dut, "s1_valid")
+    s1_fire = _read_ifu_internal(recorder, dut, "s1_fire")
+    s1_flush = _read_ifu_internal(recorder, dut, "s1_flush")
+    s1_req_is_uncache = _read_ifu_internal(recorder, dut, "s1_reqIsUncache")
+    total_end_is_half_rvi = _read_ifu_internal(recorder, dut, "s1_totalEndIsHalfRvi")
+    total_end_pos = _read_ifu_internal(recorder, dut, "s1_totalEndPos")
+    if None in {s1_valid, s1_fire, s1_flush, s1_req_is_uncache, total_end_is_half_rvi}:
+        return
+    if (
+        int(s1_valid) == 1
+        and int(s1_fire) == 1
+        and int(s1_flush) == 0
+        and int(s1_req_is_uncache) == 0
+        and int(total_end_is_half_rvi) == 1
+    ):
+        recorder.mark(
+            "ifu_instr_boundary_half",
+            "tail_half_detected",
+            cycle,
+            {
+                "event": "ifu_s1_boundary_tail_half_rvi",
+                "s1_total_end_pos": total_end_pos,
+                "s1_total_end_is_half_rvi": 1,
+            },
+        )
+
+
 def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
     dut = getattr(env, "dut", None)
     if dut is None:
         return
 
     _sample_invalid_taken_exception_cross(recorder, dut, cycle)
+    _sample_instr_boundary_tail(recorder, dut, cycle)
 
     wb_redirect = _read_ifu_internal(recorder, dut, "wbRedirect_valid")
     uncache_redirect = _read_ifu_internal(recorder, dut, "uncacheRedirect_valid")
@@ -218,6 +247,52 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
             }
         else:
             recorder._ifu_ibuffer_alignment_pending = None
+
+        prev_end_is_half_rvi = _read_ifu_internal(recorder, dut, "s2_prevEndIsHalfRvi")
+        prev_end_half_pc = _decode_pruned_pc(
+            _read_ifu_internal(recorder, dut, "s2_prevEndHalfPc_addr")
+        )
+        prev_end_half_data = _read_ifu_internal(recorder, dut, "s2_prevEndHalfRviData")
+        first_record = records[0]
+        if (
+            s2_req_is_uncache == 0
+            and prev_end_is_half_rvi == 1
+            and first_record["is_rvc"] == 0
+            and int(first_record["slot"]) == int(align_shift_num)
+        ):
+            half_evidence = {
+                **alignment_evidence,
+                "event": "ifu_s2_cross_block_rvi_completion",
+                "previous_half_pc": prev_end_half_pc,
+                "previous_half_data": prev_end_half_data,
+                "first_record": first_record,
+            }
+            recorder.mark(
+                "ifu_instr_boundary_half",
+                "head_half_completion",
+                cycle,
+                half_evidence,
+            )
+            if first_record["pc"] == prev_end_half_pc:
+                recorder.mark(
+                    "ifu_instr_boundary_half",
+                    "stitched_pc_uses_half_pc",
+                    cycle,
+                    half_evidence,
+                )
+            if None not in {first_record["pc"], first_record["instr"], prev_end_half_data}:
+                raw = _read_raw_instruction(env, int(first_record["pc"]), False)
+                if (
+                    raw is not None
+                    and (int(raw) & 0xFFFF) == int(prev_end_half_data)
+                    and (int(first_record["instr"]) & 0xFFFFFFFF) == int(raw)
+                ):
+                    recorder.mark(
+                        "ifu_instr_boundary_half",
+                        "stitched_data_matches",
+                        cycle,
+                        {**half_evidence, "raw": int(raw)},
+                    )
 
     raw_records = []
     for record in records:
@@ -407,6 +482,7 @@ COMPACT_COVERPOINTS = {
     "ifu_ibuffer_alignment": "pointer_alignment",
     "ifu_ibuffer_output": "field_observation",
     "ifu_invalid_taken_exception": "stimulus_cross",
+    "ifu_instr_boundary_half": "cross_block_state",
     "ifu_instr_compact": "instruction_layout",
     "ifu_instr_compact_source": "two_fetch_source",
     "ifu_instr_end_offset": "end_offset",
@@ -436,6 +512,10 @@ COMPACT_SAMPLER_BIN_KEYS = frozenset(
         ("ifu_ibuffer_output", "last_in_ftq_entry"),
         ("ifu_ibuffer_output", "taken_end_metadata"),
         ("ifu_invalid_taken_exception", "observed"),
+        ("ifu_instr_boundary_half", "tail_half_detected"),
+        ("ifu_instr_boundary_half", "head_half_completion"),
+        ("ifu_instr_boundary_half", "stitched_data_matches"),
+        ("ifu_instr_boundary_half", "stitched_pc_uses_half_pc"),
         ("ifu_instr_compact", "contiguous_slots"),
         ("ifu_instr_compact", "rvi_single_slot"),
         ("ifu_instr_compact", "rvc_multi_slot"),
