@@ -13,6 +13,7 @@ _IFU_INTERNAL_PREFIXES = (
     "Frontend_top.Frontend._inner_ifu_",
 )
 _IFU_OUTPUT_SLOT_COUNT = 36
+_IBUFFER_ENTRY_COUNT = 48
 _FETCH_EXCEPTION_VALUES = frozenset({1, 2, 3, 5})
 
 
@@ -86,6 +87,12 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
 
     _sample_invalid_taken_exception_cross(recorder, dut, cycle)
 
+    wb_redirect = _read_ifu_internal(recorder, dut, "wbRedirect_valid")
+    uncache_redirect = _read_ifu_internal(recorder, dut, "uncacheRedirect_valid")
+    pointer_redirect = wb_redirect == 1 or uncache_redirect == 1
+    if pointer_redirect:
+        recorder._ifu_ibuffer_alignment_pending = None
+
     ready = _read_ifu_internal(recorder, dut, "io_toIBuffer_ready")
     valid = _read_ifu_internal(recorder, dut, "io_toIBuffer_valid")
     enq_enable = _read_ifu_internal(recorder, dut, "io_toIBuffer_bits_enqEnable")
@@ -139,7 +146,11 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
     align_shift_num = _read_ifu_internal(recorder, dut, "s2_alignShiftNum")
     instr_count = _read_ifu_internal(recorder, dut, "s2_instrCount")
     s2_fire = _read_ifu_internal(recorder, dut, "s2_fire")
-    if None not in {prev_ibuf_enq_ptr, align_shift_num, instr_count, s2_fire} and int(s2_fire) == 1:
+    s2_req_is_uncache = _read_ifu_internal(recorder, dut, "s2_reqIsUncache")
+    if (
+        None not in {prev_ibuf_enq_ptr, align_shift_num, instr_count, s2_fire}
+        and int(s2_fire) == 1
+    ):
         alignment_evidence = {
             **evidence,
             "event": "ifu_s2_ibuffer_alignment",
@@ -174,6 +185,39 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                 cycle,
                 alignment_evidence,
             )
+
+        pending = getattr(recorder, "_ifu_ibuffer_alignment_pending", None)
+        if s2_req_is_uncache == 0 and not pointer_redirect:
+            if pending is not None:
+                expected_ptr = (
+                    int(pending["prev_ibuf_enq_ptr"]) + int(pending["instr_count"])
+                ) % _IBUFFER_ENTRY_COUNT
+                update_evidence = {
+                    **alignment_evidence,
+                    "event": "ifu_s2_ibuffer_pointer_update",
+                    "previous_cycle": int(pending["cycle"]),
+                    "previous_prev_ibuf_enq_ptr": int(pending["prev_ibuf_enq_ptr"]),
+                    "previous_instr_count": int(pending["instr_count"]),
+                    "expected_prev_ibuf_enq_ptr": int(expected_ptr),
+                }
+                if int(prev_ibuf_enq_ptr) == expected_ptr:
+                    recorder.mark(
+                        "ifu_ibuffer_alignment",
+                        "pointer_advance_matches_count",
+                        cycle,
+                        update_evidence,
+                    )
+                else:
+                    recorder.risk_observations.append(
+                        {**update_evidence, "event": "ifu_s2_ibuffer_pointer_update_mismatch"}
+                    )
+            recorder._ifu_ibuffer_alignment_pending = {
+                "cycle": int(cycle),
+                "prev_ibuf_enq_ptr": int(prev_ibuf_enq_ptr),
+                "instr_count": int(instr_count),
+            }
+        else:
+            recorder._ifu_ibuffer_alignment_pending = None
 
     raw_records = []
     for record in records:
@@ -385,6 +429,7 @@ COMPACT_SAMPLER_BIN_KEYS = frozenset(
         ("ifu_ibuffer_alignment", "zero_pointer_slot_zero"),
         ("ifu_ibuffer_alignment", "nonzero_shift_matches_slot"),
         ("ifu_ibuffer_alignment", "wide_window_bounded"),
+        ("ifu_ibuffer_alignment", "pointer_advance_matches_count"),
         ("ifu_ibuffer_output", "instr_pc_isrvc_observed"),
         ("ifu_ibuffer_output", "ftq_offset_observed"),
         ("ifu_ibuffer_output", "fixed_range_clipped"),

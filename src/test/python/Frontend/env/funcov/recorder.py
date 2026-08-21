@@ -312,6 +312,7 @@ class FunctionalCoverageRecorder:
         self._last_uncache_was_nc = False
         self._ifu_last_cfvec: Optional[dict] = None
         self._ifu_redirect_skip_until_cycle: Optional[int] = None
+        self._ifu_ibuffer_alignment_pending: Optional[dict] = None
         self._two_fetch_last_fetch_ptr: Optional[tuple[int, int]] = None
         self._two_fetch_expected_ptr_step: Optional[int] = None
         self._two_fetch_waiting_refill = False
@@ -672,6 +673,7 @@ class FunctionalCoverageRecorder:
         self._last_uncache_was_nc = False
         self._ifu_last_cfvec = None
         self._ifu_redirect_skip_until_cycle = None
+        self._ifu_ibuffer_alignment_pending = None
         self._two_fetch_last_fetch_ptr = None
         self._two_fetch_expected_ptr_step = None
         self._two_fetch_waiting_refill = False

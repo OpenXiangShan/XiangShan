@@ -67,6 +67,7 @@ def _set_ifu_output(
     valid_mask_extra=0,
     prev_ibuf_enq_ptr=0,
     instr_count=None,
+    s2_req_is_uncache=0,
 ):
     enq_enable = 0
     valid_mask = 0
@@ -94,6 +95,9 @@ def _set_ifu_output(
     dut.set(_PREFIX + "s2_alignShiftNum", int(prev_ibuf_enq_ptr) & 0x3)
     dut.set(_PREFIX + "s2_instrCount", len(entries) if instr_count is None else instr_count)
     dut.set(_PREFIX + "s2_fire", 1)
+    dut.set(_PREFIX + "s2_reqIsUncache", s2_req_is_uncache)
+    dut.set(_PREFIX + "wbRedirect_valid", 0)
+    dut.set(_PREFIX + "uncacheRedirect_valid", 0)
 
 
 def test_ifu_compact_and_expander_bins_use_to_ibuffer_fire(tmp_path):
@@ -206,6 +210,63 @@ def test_ifu_ibuffer_pointer_alignment_bins_use_real_s2_fields(tmp_path):
     assert recorder.key_hit("ifu_ibuffer_alignment", "wide_window_bounded")
 
 
+def test_ifu_ibuffer_pointer_update_tracks_count_and_wraps(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    base = 0x80000000
+
+    _set_ifu_output(
+        dut,
+        [(0, base, 0x00000013, 0, 1, 0, 1, 0)],
+        prev_ibuf_enq_ptr=40,
+        instr_count=12,
+    )
+    sample_cfvec_coverage(recorder, env, 1)
+    assert not recorder.key_hit("ifu_ibuffer_alignment", "pointer_advance_matches_count")
+
+    _set_ifu_output(
+        dut,
+        [(0, base + 4, 0x00000013, 0, 3, 0, 1, 0)],
+        prev_ibuf_enq_ptr=4,
+        instr_count=7,
+    )
+    sample_cfvec_coverage(recorder, env, 2)
+
+    assert recorder.key_hit("ifu_ibuffer_alignment", "pointer_advance_matches_count")
+
+
+def test_ifu_ibuffer_pointer_update_does_not_cross_redirect_or_uncache(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    base = 0x80000000
+
+    _set_ifu_output(
+        dut,
+        [(1, base, 0x00000013, 0, 1, 0, 1, 0)],
+        prev_ibuf_enq_ptr=5,
+        instr_count=7,
+    )
+    sample_cfvec_coverage(recorder, env, 1)
+
+    dut.set(_PREFIX + "wbRedirect_valid", 1)
+    sample_cfvec_coverage(recorder, env, 2)
+    _set_ifu_output(
+        dut,
+        [(0, base + 4, 0x00000013, 0, 3, 0, 1, 0)],
+        prev_ibuf_enq_ptr=12,
+        instr_count=4,
+        s2_req_is_uncache=1,
+    )
+    sample_cfvec_coverage(recorder, env, 3)
+    _set_ifu_output(
+        dut,
+        [(0, base + 8, 0x00000013, 0, 5, 0, 1, 0)],
+        prev_ibuf_enq_ptr=16,
+        instr_count=1,
+    )
+    sample_cfvec_coverage(recorder, env, 4)
+
+    assert not recorder.key_hit("ifu_ibuffer_alignment", "pointer_advance_matches_count")
+
+
 def test_ifu_ibuffer_output_range_clipping_requires_valid_slot_not_enabled(tmp_path):
     recorder, env, dut, memory = _make_recorder(tmp_path)
     base = 0x80000000
@@ -315,6 +376,9 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "s2_prevIBufEnqPtr_value",
         _PREFIX + "s2_instrCount",
         _PREFIX + "s2_fire",
+        _PREFIX + "s2_reqIsUncache",
         _PREFIX + "s2_alignShiftNum",
+        _PREFIX + "wbRedirect_valid",
+        _PREFIX + "uncacheRedirect_valid",
     }
     assert required <= names

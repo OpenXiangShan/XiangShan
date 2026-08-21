@@ -13,6 +13,7 @@ def initialize_ifu_coverage_state(recorder) -> None:
     recorder._ifu_cacheable_backend_blocked = False
     recorder._ifu_cacheable_pending_cfi = None
     recorder._ifu_cacheable_last_delivery_entry = None
+    recorder._ifu_ibuffer_alignment_pending = None
 
 
 def reset_ifu_coverage_state(recorder) -> None:
@@ -25,6 +26,7 @@ def handle_ifu_event(recorder, event: dict) -> None:
     cycle = int(event.get("cycle", 0))
     recorder._ifu_last_cfvec = None
     recorder._ifu_cacheable_pending_cfi = None
+    recorder._ifu_ibuffer_alignment_pending = None
     recorder._ifu_redirect_skip_until_cycle = cycle + 1
 
 
@@ -263,8 +265,10 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
         skip_until = max(int(skip_until or cycle), cycle + 1)
         recorder._ifu_redirect_skip_until_cycle = skip_until
         recorder._ifu_cacheable_pending_cfi = None
+        recorder._ifu_ibuffer_alignment_pending = None
     if skip_until is not None and cycle <= int(skip_until):
         recorder._ifu_last_cfvec = None
+        recorder._ifu_ibuffer_alignment_pending = None
         return
     recorder._ifu_redirect_skip_until_cycle = None
 
@@ -386,6 +390,7 @@ CFVEC_SAMPLER_BIN_KEYS = frozenset(
         ("ifu_ibuffer_alignment", "zero_pointer_slot_zero"),
         ("ifu_ibuffer_alignment", "nonzero_shift_matches_slot"),
         ("ifu_ibuffer_alignment", "wide_window_bounded"),
+        ("ifu_ibuffer_alignment", "pointer_advance_matches_count"),
         ("ifu_invalid_taken_exception", "observed"),
         ("ifu_ibuffer_output", "instr_pc_isrvc_observed"),
         ("ifu_ibuffer_output", "ftq_offset_observed"),

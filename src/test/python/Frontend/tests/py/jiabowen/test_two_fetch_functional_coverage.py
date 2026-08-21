@@ -587,10 +587,10 @@ def test_canonical_registry_matches_the_single_sampler_contract():
             for row in csv.DictReader(handle)
             if row["Coverpoint"].strip()
         }
-    assert len(active) == 296
+    assert len(active) == 297
     assert active == set(FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS)
     assert len(CFVEC_SAMPLER_BIN_KEYS) == 17
-    assert len(IFU_CFVEC_SAMPLER_BIN_KEYS) == 52
+    assert len(IFU_CFVEC_SAMPLER_BIN_KEYS) == 53
     assert len(TWO_FETCH_SAMPLER_BIN_KEYS) == 41
     assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 47
     assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 37
@@ -815,7 +815,7 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     assert "s1_icacheMeta_0_pmpMmio" not in recorder_source
     assert "s1_icacheMetaIn_0_itlbPbmt" in recorder_source
     assert "s1_icacheMetaIn_0_pmpMmio" in recorder_source
-    assert len(recorder.definitions) == 296
+    assert len(recorder.definitions) == 297
     assert all(item.coverpoint for item in recorder.definitions)
     assert "FunctionalCoverageRecorder.from_pilot_csv" in fixture_source
     assert "set_line_coverage" in fixture_source
@@ -1170,6 +1170,7 @@ def test_funcov_targets_resolve_from_exact_registry_testcase(tmp_path):
         "BIN-854",
         "BIN-855",
         "BIN-856",
+        "BIN-857",
     ]
 
 
