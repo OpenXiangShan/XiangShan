@@ -149,6 +149,7 @@ class PredCheckRedirect(implicit p: Parameters) extends IfuBundle {
   val misIdx:       Valid[UInt]     = Valid(UInt(log2Ceil(IBufferEnqueueWidth).W))
   val taken:        Bool            = Bool()
   val invalidTaken: Bool            = Bool()
+  val notCfiTaken:  Bool            = Bool()
   val isRVC:        Bool            = Bool()
   val selectBlock:  Bool            = Bool()
   val attribute:    BranchAttribute = new BranchAttribute
