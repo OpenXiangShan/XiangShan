@@ -132,6 +132,7 @@ trait PMAMethod extends PMAConst {
       MemMap("h00_3802_2100", "h00_38FF_FFFF",   "h0", "Reserved",    ""),
       MemMap("h00_3900_0000", "h00_3900_1FFF",   "h0", "L3CacheCtrl",  "RW"),
       MemMap("h00_3900_2000", "h00_39FF_FFFF",   "h0", "Reserved",    ""),
+      MemMap("h00_3110_0000", "h00_3110_FFFF",   "h0", "APLIC",       "RW"),
       MemMap("h00_3A00_0000", "h00_3FFF_FFFF",   "h0", "",            "RW),
          Sub("h00_3A00_0000", "h00_3A00_0FFF",   "h0", "PLL0",        "RW),
          Sub('h00_3A00_1000", "h00_3A7F_FFFF",   "h0", "Reserved",    "RW"),
