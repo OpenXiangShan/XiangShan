@@ -33,6 +33,7 @@ import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.issue.EntryBundles.RespType
 import xiangshan.backend.issue._
+import difftest.plugin.topdown.TopdownIQInfoCollect
 
 
 class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModule with HasCriticalErrors {
@@ -792,11 +793,47 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     issueQueueEnqHasIssuedVec(sta) := Mux(staValidNum(i) > stdValidNum(i), staEnqHasIssuedVec(i), stdEnqHasIssuedVec(i))
   }
 
-  val issueQueueDeqVec = issueQueues.flatMap(_.io.deqDelay)
-  io.debugIQDeqRobIdxVec.foreach(_.zip(issueQueueDeqVec).foreach{ case(sink, source) =>
-    sink.valid := source.valid
-    sink.bits := source.bits.robIdx
+
+  val srcReadyVec = issueQueues.flatMap(_.io.srcReadyVec)
+  val validVec = issueQueues.flatMap(_.io.validVec)
+  val allIssueParams = backendParams.allIssueParams.filter(_.StdCnt == 0)
+  val allExuParams = allIssueParams.map(_.exuBlockParams).flatten
+  val allFuConfigs = allExuParams.map(_.fuConfigs).flatten.toSet.toSeq
+  val sortedFuConfigs = allFuConfigs.sortBy(_.fuType.id)
+
+  val fuConfigsInIssueParams = allIssueParams.map(_.allExuParams.map(_.fuConfigs).flatten.toSet.toSeq)
+  val fuMapPipelineNum = sortedFuConfigs.map( fu => {
+    val fuInIQIdx = fuConfigsInIssueParams.zipWithIndex.filter { case (f, i) => f.contains(fu) }.map(_._2)
+    var pipeLineNum = fuInIQIdx.length
+    if (fu.fuType == FuType.stu) {
+      pipeLineNum = pipeLineNum * 2
+    }
+    println(s"fu : ${fu.name} pipelinenum: ${pipeLineNum}")
+    pipeLineNum.asUInt
   })
+
+  if(backendParams.debugEn) {
+    val topdownIQInfoVec = issueQueues.flatMap(_.io.topdownIQInfoVec.get)
+    val topdownIQInfoCollect = Module(new TopdownIQInfoCollect(io.iqEntryNum))
+    topdownIQInfoCollect.io.in.zip(topdownIQInfoVec).foreach{ case (sink, source) =>
+      sink.valid := source.valid
+      sink.robIdx := source.bits.robIdx.value
+      sink.robFlag := source.bits.robIdx.flag
+      sink.srcReady := source.bits.srcReady
+      val currentPipelineNum = Mux1H(source.bits.fuType, fuMapPipelineNum)
+      sink.pipeNum := currentPipelineNum
+      sink.cancelSource := source.bits.cancelSource
+      sink.futype := OHToUInt(source.bits.fuType)
+      sink.issued := source.bits.issued
+    }
+    io.topdownIQInfoVec.foreach( _.zip(topdownIQInfoVec).zip(topdownIQInfoCollect.io.out).foreach{
+      case ((sink, source), ideal) =>
+        sink.valid := source.valid
+        // connect base info
+        connectSamePort(sink.bits, source.bits)
+        sink.bits.idealIssueTime := ideal.idealIssueTime
+    })
+  }
 
 
 
@@ -961,7 +998,8 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   // TopDown
   val uopTopDown = new UopTopDown
   val iqDeqSum = params.issueBlockParams.map(_.numDeq).sum
+  val iqEntryNum = params.issueBlockParams.map(_.numEntries).sum
   val debugIQValidNumVec = Option.when(backendParams.debugEn)(Vec(IQNum, Output(UInt(maxIQSize.U.getWidth.W))))
   val debugIQEnqHasIssuedVec = Option.when(backendParams.debugEn)(Vec(IQNum, Output(Bool())))
-  val debugIQDeqRobIdxVec = Option.when(backendParams.debugEn)(Vec(iqDeqSum, ValidIO(new RobPtr())))
+  val topdownIQInfoVec = Option.when(backendParams.debugEn)(Output(Vec(iqEntryNum, ValidIO(new TopdownIQExtendedInfo()))))
 }

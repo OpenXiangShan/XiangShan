@@ -21,7 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
 import utility.XSDebug
 import xiangshan.XSCoreParamsKey
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.Prediction
@@ -42,22 +42,18 @@ object PhrPtr {
     apply(!ptr.flag, ptr.value)
 }
 
-class S1Train(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
-  val valid:              Bool                   = Bool()
-  val taken:              Bool                   = Bool() // actual s1_taken
-  val startPc:            PrunedAddr             = PrunedAddr(VAddrBits)
-  val abtbValid:          Bool                   = Bool()
-  val abtbFirstTakenBrOH: Vec[Bool]              = Vec(NumAheadBtbPredictionEntries, Bool())
-  val ubtbPrediction:     Valid[Prediction]      = Valid(new Prediction)
-  val abtbPrediction:     Vec[Valid[Prediction]] = Vec(NumAheadBtbPredictionEntries, Valid(new Prediction))
+class S1Train(implicit p: Parameters) extends PhrBundle {
+  val valid:      Bool       = Bool()
+  val startPc:    Pc         = Pc()
+  val prediction: Prediction = new Prediction
 }
 
 class PhrUpdateData(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
-  val valid:   Bool       = Bool()
-  val taken:   Bool       = Bool()
-  val cfiPc:   PrunedAddr = PrunedAddr(VAddrBits)
-  val target:  PrunedAddr = PrunedAddr(VAddrBits)
-  val phrMeta: PhrMeta    = new PhrMeta()
+  val valid:   Bool    = Bool()
+  val taken:   Bool    = Bool()
+  val cfiPc:   Pc      = Pc()
+  val target:  Pc      = Pc()
+  val phrMeta: PhrMeta = new PhrMeta()
 }
 
 class PhrUpdateResult(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
@@ -75,7 +71,7 @@ class PhrUpdate(implicit p: Parameters) extends PhrBundle {
   val s3_override:   Bool       = Bool()
   val s3_phrMeta:    PhrMeta    = new PhrMeta()
   val s3_prediction: Prediction = new Prediction()
-  val s3_startPc:    PrunedAddr = PrunedAddr(VAddrBits)
+  val s3_startPc:    Pc         = Pc()
 }
 
 class PhrMeta(implicit p: Parameters) extends PhrBundle {
@@ -152,48 +148,38 @@ class PhrFoldedHistory(val info: FoldedHistoryInfo, val maxUpdateNum: Int)(impli
 
     val fh         = WireInit(this)
     val hashFolded = computeFoldedHash(Cat(hashHigh, 0.U(maxUpdateNum.W)), info.FoldedLength)(info.HistoryLength)
-    dontTouch(newFoldedHist)
-    dontTouch(hashFolded)
     fh.foldedHist := newFoldedHist ^ hashFolded
     fh
   }
 }
 
-// class AheadFoldedHistoryOldestBits(val len: Int, val max_update_num: Int)(implicit p: Parameters) extends XSBundle {
-//   val bits = Vec(max_update_num * 2, Bool())
-//   // def info = (len, compLen)
-//   def getRealOb(brNumOH: UInt): Vec[Bool] = {
-//     val ob = Wire(Vec(max_update_num, Bool()))
-//     for (i <- 0 until max_update_num) {
-//       ob(i) := Mux1H(brNumOH, bits.drop(i).take(numBr + 1))
-//     }
-//     ob
-//   }
-// }
+class PhrFoldedHistoryOldestBits(val info: FoldedHistoryInfo, val maxUpdateNum: Int)(implicit p: Parameters)
+    extends PhrBundle {
+  val bits: Vec[Bool] = Vec(maxUpdateNum, Bool())
 
-// class AllAheadFoldedHistoryOldestBits(val gen: Seq[Tuple2[Int, Int]])(implicit p: Parameters) extends PhrBundle {
-//   val afhob = MixedVec(gen.filter(t => t._1 > t._2).map(_._1)
-//     .toSet.toList.map(l => new AheadFoldedHistoryOldestBits(l, numBr))) // remove duplicates
-//   require(gen.toSet.toList.equals(gen))
-//   def getObWithInfo(info: Tuple2[Int, Int]) = {
-//     val selected = afhob.filter(_.len == info._1)
-//     require(selected.length == 1)
-//     selected(0)
-//   }
-//   def read(ghv: Vec[Bool], ptr: PhrPtr) = {
-//     val hisLens      = afhob.map(_.len)
-//     val bitsToRead   = hisLens.flatMap(l => (0 until numBr * 2).map(i => l - i - 1)).toSet // remove duplicates
-//     val bitsWithInfo = bitsToRead.map(pos => (pos, ghv((ptr + (pos + 1).U).value)))
-//     for (ob <- afhob) {
-//       for (i <- 0 until numBr * 2) {
-//         val pos       = ob.len - i - 1
-//         val bit_found = bitsWithInfo.filter(_._1 == pos).toList
-//         require(bit_found.length == 1)
-//         ob.bits(i) := bit_found(0)._2
-//       }
-//     }
-//   }
-// }
+  def oldestBitToGetFromPhr: Seq[Int] = (0 until maxUpdateNum).map(info.HistoryLength - _ - 1)
+
+  def readFromPhr(phr: Vec[Bool], histPtr: PhrPtr): Unit =
+    bits := VecInit(oldestBitToGetFromPhr.map(i => phr(i)))
+}
+
+class PhrAllFoldedHistoryOldestBits(gen: Set[FoldedHistoryInfo])(implicit p: Parameters) extends PhrBundle
+    with HasPhrParameters {
+
+  val hist: MixedVec[PhrFoldedHistoryOldestBits] =
+    MixedVec(gen.toSeq.sortBy(_.asTuple).map(info => new PhrFoldedHistoryOldestBits(info, Shamt)))
+
+  def getHistWithInfo(info: FoldedHistoryInfo): PhrFoldedHistoryOldestBits = {
+    val selected = hist.filter(_.info.equals(info))
+    require(selected.length == 1)
+    selected.head
+  }
+
+  def read(phv: Vec[Bool], ptr: PhrPtr): Unit =
+    for (h <- hist) {
+      h.readFromPhr(phv, ptr)
+    }
+}
 
 class PhrAllFoldedHistories(gen: Set[FoldedHistoryInfo])(implicit p: Parameters) extends PhrBundle
     with HasPhrParameters with Helpers {
@@ -222,24 +208,22 @@ class PhrAllFoldedHistories(gen: Set[FoldedHistoryInfo])(implicit p: Parameters)
     }
     res
   }
-  // TODO: Enable ahead logic
-  // def update(afhob: AllAheadFoldedHistoryOldestBits, lastBrNumOH: UInt, shift: Int, taken: Bool): AllFoldedHistories = {
-  //   val res = WireInit(this)
-  //   for (i <- 0 until this.hist.length) {
-  //     val fh = this.hist(i)
-  //     if (fh.needOldestBits) {
-  //       val info          = fh.info
-  //       val selectedAfhob = afhob.getObWithInfo(info)
-  //       val ob            = selectedAfhob.getRealOb(lastBrNumOH)
-  //       res.hist(i) := this.hist(i).update(ob, shift, taken)
-  //     } else {
-  //       val dumb = Wire(Vec(numBr, Bool())) // not needed
-  //       dumb        := DontCare
-  //       res.hist(i) := this.hist(i).update(dumb, shift, taken)
-  //     }
-  //   }
-  //   res
-  // }
+
+  def update(
+      oldestBits: PhrAllFoldedHistoryOldestBits,
+      hashHigh:   UInt,
+      shift:      Int,
+      shiftBits:  UInt
+  ): PhrAllFoldedHistories = {
+    require(shiftBits.getWidth == shift)
+    require(hist.length == oldestBits.hist.length)
+    val res = WireInit(this)
+    for (i <- this.hist.indices) {
+      val info = this.hist(i).info
+      res.hist(i) := this.hist(i).update(oldestBits.getHistWithInfo(info).bits, shift, shiftBits, hashHigh)
+    }
+    res
+  }
 
   def display(cond: Bool): Unit =
     for (h <- hist) {

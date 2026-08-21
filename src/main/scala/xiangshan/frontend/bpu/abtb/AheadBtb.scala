@@ -19,7 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.HasFastTrainIO
@@ -39,7 +39,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     val abtbResultPos: Vec[UInt]                  = Output(Vec(NumAheadBtbPredictionEntries, UInt(CfiPositionWidth.W)))
     val abtbPos:       Vec[UInt]                  = Output(Vec(NumAheadBtbPredictionEntries, UInt(CfiPositionWidth.W)))
     val meta:          AheadBtbMeta               = Output(new AheadBtbMeta)
-    val debug_startPc: PrunedAddr                 = Output(PrunedAddr(VAddrBits))
+    val debug_startPc: Pc                         = Output(Pc())
     val normalPathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
   }
   val io: AheadBtbIO = IO(new AheadBtbIO)
@@ -235,13 +235,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }
 
   // used for check abtb output
-  io.debug_startPc := s2_startPc
-
-  replacers.zipWithIndex.foreach { case (r, i) =>
-    r.io.readValid   := s2_valid && s2_hit && s2_bankMask(i)
-    r.io.readSetIdx  := s2_setIdx
-    r.io.readWayMask := s2_hitMask
-  }
+  io.debug_startPc := s2_startPc.unGuard
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 0
@@ -250,7 +244,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   private val t0_train = io.fastTrain.get.bits
 
-  private val t0_fire = io.enable && io.fastTrain.get.valid && t0_train.finalPrediction.taken && t0_train.abtbMeta.valid
+  private val t0_fire = io.enable && io.fastTrain.get.valid && t0_train.abtbMeta.valid
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1
@@ -267,7 +261,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val t1_setMask  = UIntToOH(t1_setIdx)
   private val t1_bankMask = t1_meta.bankMask
 
-  // use taken branch of s3 prediction to train abtb
+  // A taken final prediction can allocate/correct an entry. A not-taken
+  // prediction only updates counters of the conditional entries that hit.
   private val t1_trainTaken           = t1_train.finalPrediction.taken
   private val t1_trainPosition        = t1_train.finalPrediction.cfiPosition
   private val t1_trainAttribute       = t1_train.finalPrediction.attribute
@@ -305,7 +300,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     e.hit && e.position === t1_trainPosition && e.attribute === t1_trainAttribute
   }
   private val t1_hit               = t1_hitMask.reduce(_ || _)
-  private val t1_needWriteNewEntry = !t1_hit
+  private val t1_needWriteNewEntry = !t1_hit && t1_trainTaken
 
   // If the target of indirect branch is wrong, we need correct it.
   // Since the entry only stores the lower bits of the target, we only need to check the lower bits.
@@ -327,19 +322,31 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   replacers.foreach(_.io.replaceSetIdx := t1_setIdx)
   private val victimWayIdx = replacers.map(_.io.victimWayIdx)
 
+  private val t2_fire              = RegNext(t1_fire, init = false.B)
+  private val t2_victimWayIdx      = RegNext(VecInit(victimWayIdx))
+  private val t2_setIdx            = RegNext(t1_setIdx)
+  private val t2_bankMask          = RegNext(t1_bankMask)
+  private val t2_hitMaskOH         = RegNext(VecInit(t1_hitMaskOH))
+  private val t2_needWriteNewEntry = RegNext(t1_needWriteNewEntry)
+  private val t2_needCorrectTarget = RegNext(t1_needCorrectTarget)
+  private val t2_writeEntry        = RegNext(t1_writeEntry)
+  private val t2_hit               = RegNext(t1_hit)
+  private val t2_hitMask           = RegNext(VecInit(t1_hitMask))
+  private val t2_trainTaken        = RegNext(t1_trainTaken)
+
   banks.zipWithIndex.foreach { case (b, i) =>
-    when(t1_fire && t1_needWriteNewEntry && t1_bankMask(i)) {
+    when(t2_fire && t2_needWriteNewEntry && t2_bankMask(i)) {
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := true.B
-      b.io.writeReq.bits.setIdx       := t1_setIdx
-      b.io.writeReq.bits.wayIdx       := victimWayIdx(i)
-      b.io.writeReq.bits.entry        := t1_writeEntry
-    }.elsewhen(t1_fire && t1_needCorrectTarget && t1_bankMask(i)) {
+      b.io.writeReq.bits.setIdx       := t2_setIdx
+      b.io.writeReq.bits.wayIdx       := t2_victimWayIdx(i)
+      b.io.writeReq.bits.entry        := t2_writeEntry
+    }.elsewhen(t2_fire && t2_needCorrectTarget && t2_bankMask(i)) {
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := false.B
-      b.io.writeReq.bits.setIdx       := t1_setIdx
-      b.io.writeReq.bits.wayIdx       := OHToUInt(t1_hitMaskOH)
-      b.io.writeReq.bits.entry        := t1_writeEntry
+      b.io.writeReq.bits.setIdx       := t2_setIdx
+      b.io.writeReq.bits.wayIdx       := OHToUInt(t2_hitMaskOH)
+      b.io.writeReq.bits.entry        := t2_writeEntry
     }.elsewhen(s2_valid && s2_multiHit && s2_bankMask(i)) {
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := true.B
@@ -356,6 +363,13 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     r.io.writeValid  := b.io.writeResp.valid
     r.io.writeSetIdx := b.io.writeResp.bits.setIdx
     r.io.writeWayIdx := b.io.writeResp.bits.wayIdx
+  }
+  // update replacer -- Allocation touch and training touch are triggered at different times,
+  // so they cannot share the same interface.
+  replacers.zipWithIndex.foreach { case (r, i) =>
+    r.io.readValid   := t2_fire && t2_trainTaken && t2_bankMask(i) && t2_hit
+    r.io.readSetIdx  := t2_setIdx
+    r.io.readWayMask := t2_hitMask
   }
 
   /* --------------------------------------------------------------------------------------------------------------

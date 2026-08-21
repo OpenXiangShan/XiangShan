@@ -32,13 +32,26 @@ class TwoPrefetchCase extends Bundle {
   def valid: Bool = !isConflict
 
   // select 2 vaddr to read ICacheMetaArray
-  def selectMetaVAddr(reqVec: Vec[PrefetchReqBundle]): Vec[PrunedAddr] =
+  def selectMetaVAddr(reqVec: Vec[PrefetchReqBundle]): Vec[GuardedPc] =
     MuxCase(
       // unable to do 2-prefetch, or isSameLine or isOverlap1, both use req1's start and nextLine
       VecInit(reqVec(0).startVAddr, reqVec(0).nextLineVAddr),
       Seq(
         isOverlap2   -> VecInit(reqVec(1).startVAddr, reqVec(1).nextLineVAddr),
         isInterleave -> VecInit(reqVec(0).startVAddr, reqVec(1).startVAddr)
+      )
+    )
+
+  // timing optimization:
+  // To avoid introducing a very wide adder on the meta SRAM read path,
+  // vSetIdx(1) comes from vSetIdx(0) + 1.U rather than get_idx(nextLineVAddr).
+  def selectMetaSetIdx(reqVec: Vec[PrefetchReqBundle]): Vec[UInt] =
+    MuxCase(
+      // unable to do 2-prefetch, or isSameLine or isOverlap1, both use req1's start and nextLine
+      reqVec(0).vSetIdx,
+      Seq(
+        isOverlap2   -> reqVec(1).vSetIdx,
+        isInterleave -> VecInit(reqVec(0).vSetIdx(0), reqVec(1).vSetIdx(0))
       )
     )
 

@@ -517,8 +517,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.robio.robHeadLsIssue := issue.flatten.map(deq =>
     deq.fire && deq.bits.robIdx === ctrlBlock.io.robio.robDeqPtr
   ).reduce(_ || _)
-  ctrlBlock.io.robio.debugIQDeqRobIdxVec.foreach(_ := intRegion.io.debugIQDeqRobIdxVec.get ++
-    fpRegion.io.debugIQDeqRobIdxVec.get ++ vecRegion.io.debugIQDeqRobIdxVec.get)
+  ctrlBlock.io.robio.topdownIQInfoVec.foreach(_ := intRegion.io.topdownIQInfoVec.get ++
+    fpRegion.io.topdownIQInfoVec.get ++ vecRegion.io.topdownIQInfoVec.get)
 
   // mem io
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq
@@ -551,12 +551,12 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   topDownMod.io.vecTopDown.uopsIssued    := vecRegion.io.uopTopDown.uopsIssued
   topDownMod.io.vecTopDown.uopsIssuedCnt := vecRegion.io.uopTopDown.uopsIssuedCnt
   topDownMod.io.vecTopDown.noStoreIssued := vecRegion.io.uopTopDown.noStoreIssued
-  topDownMod.io.topDownInfo.lqEmpty := DelayN(io.topDownInfo.lqEmpty, 2)
-  topDownMod.io.topDownInfo.sqEmpty := DelayN(io.topDownInfo.sqEmpty, 2)
+  topDownMod.io.topDownInfo.replayAllocate := DelayN(io.topDownInfo.replayAllocate, 2)
+  topDownMod.io.topDownInfo.sqFull  := DelayN(io.topDownInfo.sqFull, 2)
+  topDownMod.io.topDownInfo.sbFull  := DelayN(io.topDownInfo.sbFull, 2)
   topDownMod.io.topDownInfo.l1Miss  := RegNext(io.topDownInfo.l1Miss)
   topDownMod.io.topDownInfo.l2TopMiss.l2Miss := io.topDownInfo.l2TopMiss.l2Miss
   topDownMod.io.topDownInfo.l2TopMiss.l3Miss := io.topDownInfo.l2TopMiss.l3Miss
-  io.topDownInfo.noUopsIssued := RegNext(topDownMod.io.topDownInfo.noUopsIssued)
 
   private val cg = ClockGate.genTeSrc
   dontTouch(cg)

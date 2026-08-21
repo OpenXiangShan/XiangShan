@@ -46,14 +46,16 @@ class PrefetchCtrl(implicit p: Parameters) extends XSBundle {
   val l1D_pf_enable_pht = Bool()
   val l1D_pf_active_threshold = UInt(4.W)
   val l1D_pf_active_stride = UInt(6.W)
-  val l1D_pf_enable_stride = Bool()
+  val l1D_pf_stride_enable = Bool()
   val l2_pf_store_only = Bool()
   val l2_pf_recv_enable = Bool()
   val l2_pf_pbop_enable = Bool()
   val l2_pf_vbop_enable = Bool()
   val l2_pf_tp_enable = Bool()
+  val l2_pf_cdp_enable = Bool()
   val l2_pf_delay_latency = UInt(10.W)
-  val berti_enable = Bool()
+  val l1D_pf_berti_enable = Bool()
+  val l1D_pf_stream_enable = Bool()
 
   def toL2PrefetchCtrl(): PrefetchCtrlFromCore = {
     val res = Wire(new PrefetchCtrlFromCore)
@@ -62,6 +64,7 @@ class PrefetchCtrl(implicit p: Parameters) extends XSBundle {
     res.l2_pbop_en := l2_pf_pbop_enable
     res.l2_vbop_en := l2_pf_vbop_enable
     res.l2_tp_en := l2_pf_tp_enable
+    res.l2_cdp_en := l2_pf_cdp_enable
     res.l2_pf_delay_latency := l2_pf_delay_latency
     res
   }

@@ -162,8 +162,9 @@ class RegfileBank
   })
   override def desiredName = name
   println(name + ": size: " + numPregs + " read: " + numReadPorts + " write: " + numWritePorts + " numBank: " + numBank)
-  val bankRaddrWidth = log2Ceil(numBank)
-  val bankEntryNum = 1 << (width - bankRaddrWidth)
+  require(isPow2(numBank), s"numBank must be a power of two, but got $numBank")
+  require(numPregs >= numBank, s"numPregs ($numPregs) must be no less than numBank ($numBank)")
+  require(width == log2Up(numPregs), s"address width ($width) does not match numPregs ($numPregs)")
 
   val mem_0 = if (isVlRegfile) RegInit(0.U(len.W)) else Reg(UInt(len.W))
   val mem = Reg(Vec(numPregs, UInt(len.W)))
@@ -172,11 +173,12 @@ class RegfileBank
     if (i == 0) m := mem_0
     else m := mem(i)
   }
+  val banks = (0 until numBank).map { bank =>
+    memForRead.zipWithIndex.filter { case (_, index) => index % numBank == bank }.map(_._1)
+  }
   for (r <- io.readPorts) {
-    for (i <- 0 until numBank){
-      val startIdx = bankEntryNum * i
-      val endIdx = math.min(bankEntryNum * (i + 1), numPregs)
-      val thisBank = VecInit(memForRead.slice(startIdx, endIdx))
+    for (i <- 0 until numBank) {
+      val thisBank = VecInit(banks(i))
       r.data(i) := thisBank(RegNext(r.addr(i)))
     }
   }

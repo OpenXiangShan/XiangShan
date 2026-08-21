@@ -19,7 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BranchAttribute
@@ -108,10 +108,10 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
    * - calculate hit flags
    */
   private val t0_fire        = Wire(Bool())
-  private val t0_startPc     = Wire(PrunedAddr(VAddrBits))
+  private val t0_startPc     = Wire(Pc())
   private val t0_actualTaken = Wire(Bool())
   private val t0_position    = Wire(UInt(CfiPositionWidth.W))
-  private val t0_fullTarget  = Wire(PrunedAddr(VAddrBits))
+  private val t0_fullTarget  = Wire(Pc())
   private val t0_attribute   = Wire(new BranchAttribute)
 
   if (UseFastTrain) {
@@ -119,7 +119,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
     t0_startPc     := io.fastTrain.get.bits.startPc
     t0_actualTaken := io.fastTrain.get.bits.finalPrediction.taken
     t0_position    := io.fastTrain.get.bits.finalPrediction.cfiPosition
-    t0_fullTarget  := io.fastTrain.get.bits.finalPrediction.target
+    t0_fullTarget  := io.fastTrain.get.bits.finalPrediction.target.unGuard
     t0_attribute   := io.fastTrain.get.bits.finalPrediction.attribute
   } else {
     // FIXME: not sure if first mispredict is the best, maybe first taken?

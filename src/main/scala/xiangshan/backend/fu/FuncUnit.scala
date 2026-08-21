@@ -82,6 +82,7 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val vlWen         = OptionWrapper(cfg.needVlWen, Bool())
   val exceptionVec  = ExceptSparseVec(cfg.exceptionOut)
   val flushPipe     = OptionWrapper(cfg.flushPipe,  Bool())
+  val satpFlush     = OptionWrapper(cfg.isCsr,      Bool())
   val replay        = OptionWrapper(cfg.replayInst, Bool())
   val isRVC         = OptionWrapper(cfg.hasIsRVC, Bool())
   val fpu           = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)

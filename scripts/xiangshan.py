@@ -542,19 +542,37 @@ class XiangShan(object):
         iopmp_test = map(lambda x: os.path.join(base_dir, x), workloads)
         return iopmp_test
 
-    def __get_ci_crosspage_fetch_test(self, name=None):
-        base_dir = "/nfs/home/share/ci-workloads/crosspage-fetch"
+    def __get_ci_frontend_misc_test(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads/frontend"
         workloads = [
-            "crosspage_pad2b_page1_exec_page2_exec-riscv64-xs.bin",       # normal
-            "crosspage_pad2b_page1_exec_page2_exec_io-riscv64-xs.bin",    # normal -> mmio
-            "crosspage_pad2b_page1_exec_page2_none-riscv64-xs.bin",       # normal -> page fault
-            "crosspage_pad2b_page1_exec_page2_io-riscv64-xs.bin",         # normal -> mmio page fault
-            "crosspage_pad2b_page1_exec_io_page2_exec-riscv64-xs.bin",    # mmio -> normal
-            "crosspage_pad2b_page1_exec_io_page2_exec_io-riscv64-xs.bin", # mmio
-            "crosspage_pad2b_page1_exec_io_page2_none-riscv64-xs.bin",    # mmio -> page fault
-            "crosspage_pad2b_page1_exec_io_page2_io-riscv64-xs.bin",      # mmio -> mmio page fault
-            "crosspage_pad2b_page1_none_page2_exec-riscv64-xs.bin",       # page fault
-            "crosspage_pad2b_page1_none_page2_exec_io-riscv64-xs.bin",    # page fault -> mmio
+            # test single instruction fetch across page boundary, with different combinations of page attributes/permissions
+            "crosspage-fetch/pad2b_page1_exec_page2_exec-riscv64-xs.bin",       # normal
+            "crosspage-fetch/pad2b_page1_exec_page2_exec_io-riscv64-xs.bin",    # normal -> mmio
+            "crosspage-fetch/pad2b_page1_exec_page2_none-riscv64-xs.bin",       # normal -> page fault
+            "crosspage-fetch/pad2b_page1_exec_page2_io-riscv64-xs.bin",         # normal -> mmio page fault
+            "crosspage-fetch/pad2b_page1_exec_io_page2_exec-riscv64-xs.bin",    # mmio -> normal
+            "crosspage-fetch/pad2b_page1_exec_io_page2_exec_io-riscv64-xs.bin", # mmio
+            "crosspage-fetch/pad2b_page1_exec_io_page2_none-riscv64-xs.bin",    # mmio -> page fault
+            "crosspage-fetch/pad2b_page1_exec_io_page2_io-riscv64-xs.bin",      # mmio -> mmio page fault
+            "crosspage-fetch/pad2b_page1_none_page2_exec-riscv64-xs.bin",       # page fault
+            "crosspage-fetch/pad2b_page1_none_page2_exec_io-riscv64-xs.bin",    # page fault -> mmio
+            # test fetching from non-canonical pc
+            "fetch-canonical-check-test/sv39-riscv64-xs.bin",          # fall-through to a non-canonical pc (bpu)
+            "fetch-canonical-check-test/sv39-half-rvi-riscv64-xs.bin", # fall-through to a non-canonical pc (bpu), with a rvi crossing page
+            "fetch-canonical-check-test/sv39-beqz-riscv64-xs.bin",     # branch to a non-canonical pc (branchUnit)
+            "fetch-canonical-check-test/sv39-jal-riscv64-xs.bin",      # jump to a non-canonical pc (ifu)
+            "fetch-canonical-check-test/sv39-jalr-riscv64-xs.bin",     # indirect jump to a non-canonical pc (jumpUnit)
+            "fetch-canonical-check-test/sv39-mret-riscv64-xs.bin",     # mret to a non-canonical pc (csr)
+            "fetch-canonical-check-test/sv39-sret-riscv64-xs.bin",     # sret to a non-canonical pc (csr)
+            # test fetching from non-canonical pc again, but in sv48x4 mode
+            "fetch-canonical-check-test/sv48x4-riscv64-xs.bin",
+            "fetch-canonical-check-test/sv48x4-half-rvi-riscv64-xs.bin",
+            "fetch-canonical-check-test/sv48x4-beqz-riscv64-xs.bin",
+            "fetch-canonical-check-test/sv48x4-jal-riscv64-xs.bin",
+            "fetch-canonical-check-test/sv48x4-jalr-riscv64-xs.bin",
+            "fetch-canonical-check-test/sv48x4-mret-riscv64-xs.bin",
+            "fetch-canonical-check-test/sv48x4-sret-riscv64-xs.bin",
+            # we also have sv39x4, sv48, sv57, but 39 and 48x4 should cover all situation, so these are not included in the ci test.
         ]
         return map(lambda x: os.path.join(base_dir, x), workloads)
 
@@ -645,7 +663,7 @@ class XiangShan(object):
             "f16_test": self.__get_ci_F16test,
             "zcb-test": self.__get_ci_zcbtest,
             "iopmp-test": self.__get_ci_iopmptest,
-            "crosspage-fetch-test": self.__get_ci_crosspage_fetch_test,
+            "frontend-misc-test": self.__get_ci_frontend_misc_test,
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)
@@ -678,7 +696,7 @@ class XiangShan(object):
             "f16_test": self.__get_ci_F16test,
             "zcb-test": self.__get_ci_zcbtest,
             "iopmp-test": self.__get_ci_iopmptest,
-            "crosspage-fetch-test": self.__get_ci_crosspage_fetch_test,
+            "frontend-misc-test": self.__get_ci_frontend_misc_test,
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)

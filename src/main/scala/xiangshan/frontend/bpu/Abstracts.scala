@@ -20,7 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSBundle
 import xiangshan.XSModule
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.GuardedPc
 
 abstract class BpuBundle(implicit p: Parameters) extends XSBundle with HasBpuParameters
 
@@ -36,7 +36,7 @@ abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
   // predict stage control
   val stageCtrl: StageCtrl = Input(new StageCtrl)
   // predict request
-  val startPc: PrunedAddr = Input(PrunedAddr(VAddrBits))
+  val startPc: GuardedPc = Input(GuardedPc())
   // resolve train
   val trainReady: Bool  = Output(Bool())
   val train:      Train = Input(new Train)

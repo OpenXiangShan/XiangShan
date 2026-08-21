@@ -37,11 +37,6 @@ trait TopHelper extends HasTageParameters {
 
   def getLongestHistTableOH(hitTableMask: Seq[Bool]): Seq[Bool] =
     PriorityEncoderOH(hitTableMask.reverse).reverse
-
-  def getUseAltOnNaIdx(pc: PrunedAddr): UInt = {
-    val useAltOnNaIdxWidth = log2Ceil(NumUseAltOnNa)
-    pc(useAltOnNaIdxWidth - 1 + instOffsetBits, instOffsetBits)
-  }
 }
 
 trait TableHelper extends TopHelper { // extends TopHelper for getBankIndex

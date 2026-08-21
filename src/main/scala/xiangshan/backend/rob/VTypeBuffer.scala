@@ -175,9 +175,9 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val walkSize     = RegInit(0.U(size.U.getWidth.W))
   private val spclWalkSize = RegInit(0.U(size.U.getWidth.W))
 
-  private val commitSizeNext   = Wire(UInt(RabCommitWidth.U.getWidth.W))
-  private val walkSizeNext     = Wire(UInt(RabCommitWidth.U.getWidth.W))
-  private val spclWalkSizeNext = Wire(UInt(RabCommitWidth.U.getWidth.W))
+  private val commitSizeNext   = Wire(UInt(size.U.getWidth.W))
+  private val walkSizeNext     = Wire(UInt(size.U.getWidth.W))
+  private val spclWalkSizeNext = Wire(UInt(size.U.getWidth.W))
 
   private val newCommitSize   = io.fromRob.commitSize
   private val newWalkSize     = io.fromRob.walkSize

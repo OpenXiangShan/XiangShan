@@ -32,8 +32,8 @@ import utility.HasCircularQueuePtrHelper
 import utility.RegNextWithEnable
 import utility.XSDebug
 import utility.XSPerfAccumulate
-import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BpuCommit
@@ -45,7 +45,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
     val commit:   Valid[BpuCommit]   = Flipped(Valid(new BpuCommit))
     val redirect: Valid[BpuRedirect] = Flipped(Valid(new BpuRedirect))
 
-    val topRetAddr:   PrunedAddr      = Output(PrunedAddr(VAddrBits))
+    val topRetAddr:   GuardedPc       = Output(GuardedPc())
     val redirectMeta: RasRedirectMeta = Output(new RasRedirectMeta)
     val commitMeta:   RasCommitMeta   = Output(new RasCommitMeta)
   }
@@ -57,7 +57,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
 
   io.trainReady := true.B
 
-  def alignMask: UInt = ((~0.U(VAddrBits.W)) << FetchBlockAlignWidth).asUInt
+  def alignMask: UInt = Cat(Fill(GuardedVAddrBits - FetchBlockAlignWidth, 1.U), 0.U(FetchBlockAlignWidth.W))
 
   private val stack = Module(new RasStack).io
   // Here is an assertion that the same piece of valid data lasts for only one cycle.
@@ -66,14 +66,12 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   private val specPush          = io.specIn.valid && io.specIn.bits.attribute.isCall
   private val specPop           = io.specIn.valid && io.specIn.bits.attribute.isReturn
 
-  private val specIn       = io.specIn.bits
-  private val specAlignPc  = specIn.startPc & alignMask
-  private val specPushAddr = specAlignPc + (specIn.cfiPosition << 1.U).asUInt + 2.U
+  private val specIn      = io.specIn.bits
+  private val specAlignPc = specIn.startPc & alignMask
   stack.spec.pushValid := specPush && !stackNearOverflow
   stack.spec.popValid  := specPop && !stackNearOverflow
-
-  stack.spec.pushAddr := PrunedAddrInit(specPushAddr)
-  stack.spec.fire     := io.specIn.valid
+  stack.spec.pushAddr  := GuardedPcInit(specAlignPc + (specIn.cfiPosition << 1.U).asUInt + 2.U)
+  stack.spec.fire      := io.specIn.valid
 
   private val redirectMeta = Wire(new RasRedirectMeta)
   redirectMeta.ssp        := stack.meta.ssp
@@ -102,7 +100,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   stack.redirect.isRet  := redirect.bits.attribute.isReturn
   stack.redirect.meta   := redirect.bits.meta.ras
   // Redirected branch PC points to end of instruction.
-  stack.redirect.callAddr := redirect.bits.cfiPc + 2.U
+  stack.redirect.callAddr := redirect.bits.cfiPc.signGuard + 2.U
 
   private val commitValid    = RegNext(io.commit.valid, init = false.B)
   private val commitInfo     = RegEnable(io.commit.bits, io.commit.valid)
