@@ -71,6 +71,7 @@ def _set_ifu_output(
     s2_prev_end_is_half_rvi=0,
     s2_prev_end_half_pc=0,
     s2_prev_end_half_data=0,
+    s2_fetch_block_start_pc=None,
 ):
     enq_enable = 0
     valid_mask = 0
@@ -102,6 +103,12 @@ def _set_ifu_output(
     dut.set(_PREFIX + "s2_prevEndIsHalfRvi", s2_prev_end_is_half_rvi)
     dut.set(_PREFIX + "s2_prevEndHalfPc_addr", int(s2_prev_end_half_pc) >> 1)
     dut.set(_PREFIX + "s2_prevEndHalfRviData", s2_prev_end_half_data)
+    if s2_fetch_block_start_pc is None:
+        s2_fetch_block_start_pc = entries[0][1]
+    dut.set(
+        _PREFIX + "s2_fetchBlock_0_startVAddr_addr",
+        int(s2_fetch_block_start_pc) >> 1,
+    )
     dut.set(_PREFIX + "wbRedirect_valid", 0)
     dut.set(_PREFIX + "uncacheRedirect_valid", 0)
 
@@ -285,6 +292,7 @@ def test_ifu_instr_boundary_tail_half_is_sampled_on_cacheable_s1_fire(tmp_path):
     sample_cfvec_coverage(recorder, env, 1)
 
     assert recorder.key_hit("ifu_instr_boundary_half", "tail_half_detected")
+    assert recorder.key_hit("ifu_instr_boundary_v2", "tail_half_state")
 
 
 def test_ifu_instr_boundary_cross_block_rvi_checks_data_and_pc(tmp_path):
@@ -294,10 +302,11 @@ def test_ifu_instr_boundary_cross_block_rvi_checks_data_and_pc(tmp_path):
     memory.write32(pc, raw)
     _set_ifu_output(
         dut,
-        [(0, pc, raw, 0, 31, 0, 1, 0)],
+        [(0, pc, raw, 0, 0, 0, 1, 0)],
         s2_prev_end_is_half_rvi=1,
         s2_prev_end_half_pc=pc,
         s2_prev_end_half_data=raw & 0xFFFF,
+        s2_fetch_block_start_pc=pc + 2,
     )
 
     sample_cfvec_coverage(recorder, env, 1)
@@ -305,6 +314,37 @@ def test_ifu_instr_boundary_cross_block_rvi_checks_data_and_pc(tmp_path):
     assert recorder.key_hit("ifu_instr_boundary_half", "head_half_completion")
     assert recorder.key_hit("ifu_instr_boundary_half", "stitched_data_matches")
     assert recorder.key_hit("ifu_instr_boundary_half", "stitched_pc_uses_half_pc")
+    assert recorder.key_hit("ifu_instr_boundary_source", "saved_half_selected")
+    assert recorder.key_hit("ifu_instr_boundary_half", "saved_half_forwarded")
+    assert recorder.key_hit("ifu_instr_boundary_alignment", "stitched_at_align_head")
+    assert recorder.key_hit("ifu_instr_boundary_expansion", "stitched_single_rvi")
+    assert recorder.key_hit("ifu_instr_boundary_v2", "next_block_completion")
+    assert not recorder.key_hit("ifu_instr_boundary_v2", "continuation_after_stitch")
+
+
+def test_ifu_instr_boundary_cross_block_continuation_checks_pc_steps(tmp_path):
+    recorder, env, dut, memory = _make_recorder(tmp_path)
+    pc = 0x8000003E
+    raw = 0x00108093
+    memory.write32(pc, raw)
+    memory.write16(pc + 4, 0x0001)
+    memory.write32(pc + 6, 0x00000013)
+    _set_ifu_output(
+        dut,
+        [
+            (0, pc, raw, 0, 0, 0, 1, 0),
+            (1, pc + 4, expand_rvc(0x0001), 1, 1, 0, 1, 0),
+            (2, pc + 6, 0x00000013, 0, 3, 0, 1, 0),
+        ],
+        s2_prev_end_is_half_rvi=1,
+        s2_prev_end_half_pc=pc,
+        s2_prev_end_half_data=raw & 0xFFFF,
+        s2_fetch_block_start_pc=pc + 2,
+    )
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert recorder.key_hit("ifu_instr_boundary_v2", "continuation_after_stitch")
 
 
 def test_ifu_instr_boundary_cross_block_rvi_rejects_wrong_data_and_pc(tmp_path):
@@ -318,6 +358,7 @@ def test_ifu_instr_boundary_cross_block_rvi_rejects_wrong_data_and_pc(tmp_path):
         s2_prev_end_is_half_rvi=1,
         s2_prev_end_half_pc=pc + 2,
         s2_prev_end_half_data=(raw + 1) & 0xFFFF,
+        s2_fetch_block_start_pc=pc + 2,
     )
 
     sample_cfvec_coverage(recorder, env, 1)
@@ -325,6 +366,10 @@ def test_ifu_instr_boundary_cross_block_rvi_rejects_wrong_data_and_pc(tmp_path):
     assert recorder.key_hit("ifu_instr_boundary_half", "head_half_completion")
     assert not recorder.key_hit("ifu_instr_boundary_half", "stitched_data_matches")
     assert not recorder.key_hit("ifu_instr_boundary_half", "stitched_pc_uses_half_pc")
+    assert not recorder.key_hit("ifu_instr_boundary_source", "saved_half_selected")
+    assert not recorder.key_hit("ifu_instr_boundary_half", "saved_half_forwarded")
+    assert not recorder.key_hit("ifu_instr_boundary_v2", "next_block_completion")
+    assert not recorder.key_hit("ifu_instr_boundary_v2", "continuation_after_stitch")
 
 
 def test_ifu_ibuffer_output_range_clipping_requires_valid_slot_not_enabled(tmp_path):
@@ -445,6 +490,7 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "s2_prevEndIsHalfRvi",
         _PREFIX + "s2_prevEndHalfPc_addr",
         _PREFIX + "s2_prevEndHalfRviData",
+        _PREFIX + "s2_fetchBlock_0_startVAddr_addr",
         _PREFIX + "wbRedirect_valid",
         _PREFIX + "uncacheRedirect_valid",
     }

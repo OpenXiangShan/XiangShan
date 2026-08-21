@@ -47,6 +47,18 @@ def _is_contiguous(slots: list[int]) -> bool:
     return len(slots) >= 2 and slots == list(range(slots[0], slots[-1] + 1))
 
 
+def _records_follow_instruction_boundaries(records: list[dict[str, Any]]) -> bool:
+    if len(records) < 2:
+        return False
+    for before, after in zip(records, records[1:]):
+        if None in {before["pc"], before["is_rvc"], after["pc"]}:
+            return False
+        expected_pc = int(before["pc"]) + (2 if int(before["is_rvc"]) else 4)
+        if int(after["pc"]) != expected_pc:
+            return False
+    return True
+
+
 def _read_raw_instruction(env, pc: int, is_rvc: bool) -> Optional[int]:
     raw, metadata = _read_expected_fetch_raw(env, int(pc), 2 if bool(is_rvc) else 4)
     if raw is None or not bool(metadata.get("ok", False)):
@@ -102,6 +114,16 @@ def _sample_instr_boundary_tail(recorder, dut, cycle: int) -> None:
             cycle,
             {
                 "event": "ifu_s1_boundary_tail_half_rvi",
+                "s1_total_end_pos": total_end_pos,
+                "s1_total_end_is_half_rvi": 1,
+            },
+        )
+        recorder.mark(
+            "ifu_instr_boundary_v2",
+            "tail_half_state",
+            cycle,
+            {
+                "event": "ifu_s1_v2_tail_half_state",
                 "s1_total_end_pos": total_end_pos,
                 "s1_total_end_is_half_rvi": 1,
             },
@@ -253,6 +275,9 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
             _read_ifu_internal(recorder, dut, "s2_prevEndHalfPc_addr")
         )
         prev_end_half_data = _read_ifu_internal(recorder, dut, "s2_prevEndHalfRviData")
+        fetch_block_start_pc = _decode_pruned_pc(
+            _read_ifu_internal(recorder, dut, "s2_fetchBlock_0_startVAddr_addr")
+        )
         first_record = records[0]
         if (
             s2_req_is_uncache == 0
@@ -265,6 +290,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                 "event": "ifu_s2_cross_block_rvi_completion",
                 "previous_half_pc": prev_end_half_pc,
                 "previous_half_data": prev_end_half_data,
+                "fetch_block_start_pc": fetch_block_start_pc,
                 "first_record": first_record,
             }
             recorder.mark(
@@ -273,26 +299,93 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                 cycle,
                 half_evidence,
             )
-            if first_record["pc"] == prev_end_half_pc:
+            pc_matches = first_record["pc"] == prev_end_half_pc
+            if pc_matches:
                 recorder.mark(
                     "ifu_instr_boundary_half",
                     "stitched_pc_uses_half_pc",
                     cycle,
                     half_evidence,
                 )
+            data_matches = False
+            raw = None
             if None not in {first_record["pc"], first_record["instr"], prev_end_half_data}:
                 raw = _read_raw_instruction(env, int(first_record["pc"]), False)
-                if (
+                data_matches = (
                     raw is not None
                     and (int(raw) & 0xFFFF) == int(prev_end_half_data)
                     and (int(first_record["instr"]) & 0xFFFFFFFF) == int(raw)
-                ):
+                )
+                if data_matches:
                     recorder.mark(
                         "ifu_instr_boundary_half",
                         "stitched_data_matches",
                         cycle,
                         {**half_evidence, "raw": int(raw)},
                     )
+            complete_evidence = {
+                **half_evidence,
+                "raw": raw,
+                "pc_matches": bool(pc_matches),
+                "data_matches": bool(data_matches),
+            }
+            starts_on_high_half = (
+                fetch_block_start_pc is not None
+                and prev_end_half_pc is not None
+                and int(fetch_block_start_pc) == int(prev_end_half_pc) + 2
+            )
+            if starts_on_high_half and pc_matches and data_matches:
+                recorder.mark(
+                    "ifu_instr_boundary_source",
+                    "saved_half_selected",
+                    cycle,
+                    complete_evidence,
+                )
+                recorder.mark(
+                    "ifu_instr_boundary_v2",
+                    "next_block_completion",
+                    cycle,
+                    complete_evidence,
+                )
+            if pc_matches and data_matches:
+                recorder.mark(
+                    "ifu_instr_boundary_half",
+                    "saved_half_forwarded",
+                    cycle,
+                    complete_evidence,
+                )
+            if first_record["end_offset"] == 0:
+                recorder.mark(
+                    "ifu_instr_boundary_alignment",
+                    "stitched_at_align_head",
+                    cycle,
+                    complete_evidence,
+                )
+            no_halfword_duplicate = all(
+                record["pc"] is None
+                or first_record["pc"] is None
+                or int(record["pc"]) != int(first_record["pc"]) + 2
+                for record in records[1:]
+            )
+            if pc_matches and data_matches and no_halfword_duplicate:
+                recorder.mark(
+                    "ifu_instr_boundary_expansion",
+                    "stitched_single_rvi",
+                    cycle,
+                    complete_evidence,
+                )
+            if (
+                starts_on_high_half
+                and pc_matches
+                and data_matches
+                and _records_follow_instruction_boundaries(records)
+            ):
+                recorder.mark(
+                    "ifu_instr_boundary_v2",
+                    "continuation_after_stitch",
+                    cycle,
+                    complete_evidence,
+                )
 
     raw_records = []
     for record in records:
@@ -482,7 +575,11 @@ COMPACT_COVERPOINTS = {
     "ifu_ibuffer_alignment": "pointer_alignment",
     "ifu_ibuffer_output": "field_observation",
     "ifu_invalid_taken_exception": "stimulus_cross",
+    "ifu_instr_boundary_alignment": "output_slot",
+    "ifu_instr_boundary_expansion": "width_preservation",
     "ifu_instr_boundary_half": "cross_block_state",
+    "ifu_instr_boundary_source": "high_half_entry",
+    "ifu_instr_boundary_v2": "cross_block_delivery",
     "ifu_instr_compact": "instruction_layout",
     "ifu_instr_compact_source": "two_fetch_source",
     "ifu_instr_end_offset": "end_offset",
@@ -512,10 +609,17 @@ COMPACT_SAMPLER_BIN_KEYS = frozenset(
         ("ifu_ibuffer_output", "last_in_ftq_entry"),
         ("ifu_ibuffer_output", "taken_end_metadata"),
         ("ifu_invalid_taken_exception", "observed"),
+        ("ifu_instr_boundary_alignment", "stitched_at_align_head"),
+        ("ifu_instr_boundary_expansion", "stitched_single_rvi"),
         ("ifu_instr_boundary_half", "tail_half_detected"),
         ("ifu_instr_boundary_half", "head_half_completion"),
+        ("ifu_instr_boundary_half", "saved_half_forwarded"),
         ("ifu_instr_boundary_half", "stitched_data_matches"),
         ("ifu_instr_boundary_half", "stitched_pc_uses_half_pc"),
+        ("ifu_instr_boundary_source", "saved_half_selected"),
+        ("ifu_instr_boundary_v2", "tail_half_state"),
+        ("ifu_instr_boundary_v2", "next_block_completion"),
+        ("ifu_instr_boundary_v2", "continuation_after_stitch"),
         ("ifu_instr_compact", "contiguous_slots"),
         ("ifu_instr_compact", "rvi_single_slot"),
         ("ifu_instr_compact", "rvc_multi_slot"),
