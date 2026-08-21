@@ -87,6 +87,7 @@ case class ExeUnitParams(
   val exceptionOut: Seq[Int] = fuConfigs.map(_.exceptionOut).reduce(_ ++ _).distinct.sorted
   val hasLoadError: Boolean = fuConfigs.map(_.hasLoadError).reduce(_ || _)
   val flushPipe: Boolean = fuConfigs.map(_.flushPipe).reduce(_ || _)
+  val satpFlush: Boolean = fuConfigs.map(_.isCsr).reduce(_ || _)
   val replayInst: Boolean = fuConfigs.map(_.replayInst).reduce(_ || _)
   val trigger: Boolean = fuConfigs.map(_.trigger).reduce(_ || _)
   val needExceptionGen: Boolean = exceptionOut.nonEmpty || flushPipe || replayInst || trigger
@@ -511,7 +512,7 @@ case class ExeUnitParams(
   def genMemWriteBackBundle(implicit p: Parameters): MemWriteBack = {
     new MemWriteBack(this)
   }
-  
+
   def genWriteBackRobBundle(implicit p: Parameters): WriteBackRobBundle = {
     new WriteBackRobBundle(this, backendParam)
   }

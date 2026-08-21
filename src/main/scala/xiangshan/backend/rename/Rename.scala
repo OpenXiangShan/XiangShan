@@ -95,9 +95,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // perf only
     val debugDispatchAllFire = OptionWrapper(backendParams.debugEn, Input(Bool()))
     val debugOutValidVec = OptionWrapper(backendParams.debugEn, Vec(RenameWidth, Input(Bool())))
-    val debugRobHeadFuType = Option.when(backendParams.debugEn)(Input(FuType()))
-    val debugRobHeadStall = Option.when(backendParams.debugEn)(Input(Bool()))
-    val debugLoadReason = Option.when(backendParams.debugEn)(Input(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))
+    val debugRobHeadStall = Option.when(backendParams.debugEn)(Flipped(ValidIO(Input(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))))
     val stallReason = new Bundle {
       val in = Flipped(new StallReasonIO(RenameWidth))
       val out = new StallReasonIO(RenameWidth)
@@ -291,6 +289,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     fl.io.redirect := io.redirect.valid
     fl.io.walk := io.rabCommits.isWalk
   }
+  vlFreeList.io.walk := io.vlCommits.isWalk
   // only when all free list and dispatch1 has enough space can we do allocation
   // when lsqEnqCtrl recover finish, it can allocate freelist.
   // when isWalk, freelist can definitely allocate
@@ -298,10 +297,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   fpFreeList.io.doAllocate := intFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && io.toLsqEnqCtrl.canAccept && dispatchCanAcc || io.rabCommits.isWalk
   vecFreeList.io.doAllocate := intFreeList.io.canAllocate && fpFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && io.toLsqEnqCtrl.canAccept && dispatchCanAcc || io.rabCommits.isWalk
   v0FreeList.io.doAllocate := intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && vlFreeList.io.canAllocate && io.toLsqEnqCtrl.canAccept && dispatchCanAcc || io.rabCommits.isWalk
-  vlFreeList.io.doAllocate := intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && io.toLsqEnqCtrl.canAccept && dispatchCanAcc || io.rabCommits.isWalk
+  vlFreeList.io.doAllocate := intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && io.toLsqEnqCtrl.canAccept && dispatchCanAcc || io.vlCommits.isWalk
 
   //           dispatch1 ready ++ float point free list ready ++ int free list ready ++ vec free list ready     ++ not walk
-  val canOut = dispatchCanAcc && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk && io.toLsqEnqCtrl.canAccept
+  val canOut = dispatchCanAcc && fpFreeList.io.canAllocate && intFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk && !io.vlCommits.isWalk && io.toLsqEnqCtrl.canAccept
 
   val isLastFtqVec = io.in.map(_.bits.isLastInFtqEntry)
   val isFusionVec = io.isFusionVec
@@ -576,7 +575,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // Assign performance counters
     uops(i).debug.foreach(_.perfDebugInfo.renameTime := GTimer())
 
-    io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk && io.toLsqEnqCtrl.canAccept
+    io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk && !io.vlCommits.isWalk && io.toLsqEnqCtrl.canAccept
     io.out(i).bits := uops(i)
     // dirty code
     if (i == 0) {
@@ -603,7 +602,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     fpSpecWen(i)  := needFpDest(i)  && fpFreeList.io.canAllocate  && fpFreeList.io.doAllocate  && !io.rabCommits.isWalk && !io.redirect.valid
     vecSpecWen(i) := needVecDest(i) && vecFreeList.io.canAllocate && vecFreeList.io.doAllocate && !io.rabCommits.isWalk && !io.redirect.valid
     v0SpecWen(i) := needV0Dest(i) && v0FreeList.io.canAllocate && v0FreeList.io.doAllocate && !io.rabCommits.isWalk && !io.redirect.valid
-    vlSpecWen(i) := needVlDest(i) && vlFreeList.io.canAllocate && vlFreeList.io.doAllocate && !io.rabCommits.isWalk && !io.redirect.valid
+    vlSpecWen(i) := needVlDest(i) && vlFreeList.io.canAllocate && vlFreeList.io.doAllocate && !io.rabCommits.isWalk && !io.vlCommits.isWalk && !io.redirect.valid
 
 
     if (i < RabCommitWidth) {
@@ -949,27 +948,18 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   )) > 1.U
 
   // TODO make all stall reason option to remove getorElse
-  val robHeadStall = io.debugRobHeadStall.getOrElse(false.B)
-  val robHeadFutype = io.debugRobHeadFuType.getOrElse(0.U)
-  val ldReason = io.debugLoadReason.getOrElse(0.U)
+  val robHeadStall = io.debugRobHeadStall.map(_.valid).getOrElse(false.B)
+  val robHeadStallReason = io.debugRobHeadStall.map(_.bits).getOrElse(0.U)
 
-  val robHeadStallReason = MuxCase(OtherNotReadyStall.id.U, Seq(
-    FuType.isAMO(robHeadFutype)          -> AtomicStall.id.U          ,
-    FuType.isStoreVstore(robHeadFutype)  -> StoreStall.id.U           ,
-    FuType.isLoadVload(robHeadFutype)    -> ldReason                  ,
-    FuType.isDivSqrt(robHeadFutype)      -> DivStall.id.U             ,
-    FuType.isInt(robHeadFutype)          -> IntNotReadyStall.id.U     ,
-    FuType.isFArith(robHeadFutype)       -> FPNotReadyStall.id.U      ,
-  ))
   val freelistStall = intFlStall || fpFlStall || vecFlStall || v0FlStall || vlFlStall
   val freelistStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
-    robHeadStall  -> robHeadStallReason,
-    multiFlStall  -> MultiFlStall.id.U,
-    intFlStall    -> IntFlStall.id.U,
-    fpFlStall     -> FpFlStall.id.U,
-    vecFlStall    -> VecFlStall.id.U,
-    v0FlStall     -> V0FlStall.id.U,
-    vlFlStall     -> VlFlStall.id.U,
+    robHeadStall   -> robHeadStallReason,
+    multiFlStall   -> MultiFlStall.id.U,
+    intFlStall     -> IntFlStall.id.U,
+    fpFlStall      -> FpFlStall.id.U,
+    vecFlStall     -> VecFlStall.id.U,
+    v0FlStall      -> V0FlStall.id.U,
+    vlFlStall      -> VlFlStall.id.U,
   ))
   renameStallReason := MuxCase(BackendOtherCoreStall.id.U, Seq(
     redirectStall -> redirectStallReason,

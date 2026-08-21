@@ -529,6 +529,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val s2LoadMaskEnd      = RegEnable(UIntToMask(MemorySize.CalculateSelectMask(s1LoadStart, s1LoadEnd), VLENB), s1Valid)
       val s2DataInvalidSqIdx = RegEnable(s1DataInvalidSqIdx, s1Valid)
       val s2LoadWaitStrict   = RegEnable(s1LoadWaitStrict, s1Valid)
+      val s2OverlapMask      = RegEnable(s1OverlapMask, s1Valid)
       val s2WaitStrictSqIdx  = RegEnable(s1LoadSqIdx - 1.U, s1Valid)
       val s2MultiMatch       = RegEnable(s1MultiMatch, s1Valid)
       val s2LoadPaddr        = RegEnable(s1QueryPaddr, s1Valid)
@@ -622,6 +623,23 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       s2Resp.bits.forwardInvalid   := !s2SafeForward || s2CboForwardFail || s2Cross4KPage // do not support cross page forward.
       s2Resp.bits.matchInvalid     := s2PaddrNoMatch && !s2Cross4KPage && s2SafeForward // if cross Page/multi match, let load replay.
       s2Resp.valid                 := s2Valid
+
+      // Perf-only response fields
+      val perfS1HasWaitStore = RegEnable(s0Req.bits.loadWaitBit, s0Valid)
+      val perfS2HasWaitStore = RegEnable(perfS1HasWaitStore, s1Valid)
+      val s2AgeMask = RegEnable(s1AgeMaskLow | s1AgeMaskHigh, s1Valid)
+      val perfS2WaitStoreRetired = perfS2HasWaitStore && !s2MdpQueryRespValid
+      val perfS2MdpHitVec = VecInit((0 until StoreQueuePhysicalSize).map(j =>
+        s2MdpQueryRespValid && !s2MdpHitOutOfRange && s2AddrInvalidSqIdx.value === j.U)).asUInt
+      val perfS2MdpCandidate = Mux(s2LoadWaitStrict, s2AgeMask, s2AgeMask & perfS2MdpHitVec)
+      val perfS2MdpSelectedAddrMatch = (perfS2MdpCandidate & s2OverlapMask & s2PaddrMatchVec &
+        addrValidVec.asUInt & s2SelectOH).orR
+      val perfS2MdpForwardMaskMatch = s2ForwardValid && s2FinalMask.orR
+
+      s2Resp.bits.perfMdpAddrValid  := s2Valid && perfS2MdpCandidate.orR
+      s2Resp.bits.perfMdpAddrStrict := s2LoadWaitStrict
+      s2Resp.bits.perfMdpAddrHit    := perfS2MdpSelectedAddrMatch && perfS2MdpForwardMaskMatch
+      s2Resp.bits.perfWaitStoreRetired := s2Valid && perfS2WaitStoreRetired
 
       if(debugEn) {
         dontTouch(io.query)

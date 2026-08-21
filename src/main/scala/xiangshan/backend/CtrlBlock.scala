@@ -33,7 +33,7 @@ import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.ftq.{FtqPtr, FtqRead, HasFtqParameters}
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.GuardedPc
 import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, SqPtr, ToLsqEnqCtrl}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, VecScheduler}
 import xiangshan.backend.trace._
@@ -49,6 +49,20 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
 
   val commit = Valid(new FtqPtr)
   val callRetCommit = Vec(CommitWidth, Valid(new CallRetCommit))
+}
+
+class BackendToIBufBundle(implicit p: Parameters) extends XSBundle {
+  val decodeCanAccept = Bool()
+
+  // VTypeBuffer is resuming vtype
+  val resumingVType = Bool()
+  val walkToArchVType = Bool()
+  val walkVType   = ValidIO(new VType)
+  val vsetvlVType = new VType
+  val commitVType = new Bundle {
+    val vtype = ValidIO(new VType)
+    val hasVsetvl = Bool()
+  }
 }
 
 class CtrlBlock(params: BackendParams)(implicit p: Parameters) extends LazyModule {
@@ -100,7 +114,7 @@ class CtrlBlockImp(
   val redirectGen = Module(new RedirectGenerator)
   val lsqEnqCtrl = Module(new LsqEnqCtrl)
   private def hasRen: Boolean = true
-  private val pcMem = Module(new SyncDataModuleTemplate(PrunedAddr(VAddrBits), FtqSize, numPcMemRead, 1, "BackendPC", hasRen = hasRen))
+  private val pcMem = Module(new SyncDataModuleTemplate(GuardedPc(), FtqSize, numPcMemRead, 1, "BackendPC", hasRen = hasRen))
   private val rob = wrapper.rob.module
   private val memCtrl = Module(new MemCtrl(params))
 
@@ -113,9 +127,10 @@ class CtrlBlockImp(
 
   pcMem.io.ren.get(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.valid
   pcMem.io.raddr(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.bits.ftqIdx.value
-  val robFlushPCOffset = Reg(UInt(VAddrBits.W))
+  val robFlushPCOffset = Reg(UInt(GuardedVAddrBits.W))
   when(s0_robFlushRedirect.valid) {
-    robFlushPCOffset := s0_robFlushRedirect.bits.getPcOffset()
+    // exception-related datapath needs guard bit, apply signExt to offset
+    robFlushPCOffset := SignExt(s0_robFlushRedirect.bits.getPcOffset(), GuardedVAddrBits)
   }
   private val s1_robFlushPc = pcMem.io.rdata(pcMemRdIndexes("robFlush").head).toUInt + robFlushPCOffset
   private val s3_redirectGen = redirectGen.io.stage2Redirect
@@ -218,24 +233,40 @@ class CtrlBlockImp(
   for ((pcMemIdx, i) <- pcMemRdIndexes("memPredLoad").zipWithIndex) {
     val ren   = mdpTrainValid
     val raddr = io.fromMem.mdpTrain.bits.ftqIdx.value
-    val offset = RegEnable(io.fromMem.mdpTrain.bits.getPcOffset, mdpTrainValid)
+    val offset = RegEnable(io.fromMem.mdpTrain.bits.getPcOffset(), mdpTrainValid)
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
-    memCtrl.io.memPredUpdate.ldpc := XORFold((pcMem.io.rdata(pcMemIdx).toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
+    // pcMem.rdata includes a guard bit used only by exception-related path, do .unGuard explicitly
+    memCtrl.io.memPredUpdate.ldpc := XORFold((pcMem.io.rdata(pcMemIdx).unGuard.toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
 
     // update wait table, will be remove in the future
-    memCtrl.io.memPredUpdate.waddr := XORFold((pcMem.io.rdata(pcMemIdx).toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
+    memCtrl.io.memPredUpdate.waddr := XORFold((pcMem.io.rdata(pcMemIdx).unGuard.toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
     memCtrl.io.memPredUpdate.wdata := true.B
   }
   for ((pcMemIdx, i) <- pcMemRdIndexes("memPredStore").zipWithIndex) {
     val ren   = mdpTrainValid
     val raddr = io.fromMem.mdpTrain.bits.stFtqIdx.value
-    val offset = RegEnable(io.fromMem.mdpTrain.bits.getStPcOffset, mdpTrainValid)
+    val offset = RegEnable(io.fromMem.mdpTrain.bits.getStPcOffset(), mdpTrainValid)
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
-    memCtrl.io.memPredUpdate.stpc := XORFold((pcMem.io.rdata(pcMemIdx).toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
+    memCtrl.io.memPredUpdate.stpc := XORFold((pcMem.io.rdata(pcMemIdx).unGuard.toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
   }
   memCtrl.io.memPredUpdate.valid := RegNext(mdpTrainValid) // pc is ready, 1 cycle later
+
+  // StoreSet ChiselDB trace
+  val storeSetTrainHartId = p(XSCoreParamsKey).HartId
+  val storeSetTrainTable = ChiselDB.createTable(s"StoreSetTrainDB$storeSetTrainHartId", new StoreSetTrainDBEntry, basicDB = false)
+  val storeSetTrainEntry = Wire(new StoreSetTrainDBEntry)
+  storeSetTrainEntry.timeCnt := GTimer()
+  storeSetTrainEntry.ldFoldPc := memCtrl.io.memPredUpdate.ldpc
+  storeSetTrainEntry.stFoldPc := memCtrl.io.memPredUpdate.stpc
+  storeSetTrainTable.log(
+    data = storeSetTrainEntry,
+    en = memCtrl.io.memPredUpdate.valid,
+    site = s"CtrlBlock$storeSetTrainHartId",
+    clock = clock,
+    reset = reset
+  )
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("bjuPc").zipWithIndex) {
     val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(i)
@@ -243,7 +274,8 @@ class CtrlBlockImp(
     val roffset = io.toDataPath.pcToDataPathIO.fromDataPathFtqOffset(i)
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
-    io.toDataPath.pcToDataPathIO.toDataPathPC(i) := pcMem.io.rdata(pcMemIdx).toUInt
+    // pcMem.rdata includes a guard bit used only by exception-related path, do .unGuard explicitly
+    io.toDataPath.pcToDataPathIO.toDataPathPC(i) := pcMem.io.rdata(pcMemIdx).unGuard.toUInt
   }
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("bjuTarget").zipWithIndex) {
@@ -252,7 +284,7 @@ class CtrlBlockImp(
     val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value + 1.U
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
-    io.toDataPath.pcToDataPathIO.toDataPathTargetPC(i) := pcMem.io.rdata(pcMemIdx).toUInt
+    io.toDataPath.pcToDataPathIO.toDataPathTargetPC(i) := pcMem.io.rdata(pcMemIdx).unGuard.toUInt
   }
 
   val baseIdx = params.BrhCnt
@@ -263,14 +295,14 @@ class CtrlBlockImp(
     val roffset = io.toDataPath.pcToDataPathIO.fromDataPathFtqOffset(baseIdx+i)
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
-    io.toDataPath.pcToDataPathIO.toDataPathPC(baseIdx+i) := pcMem.io.rdata(pcMemIdx).toUInt
+    io.toDataPath.pcToDataPathIO.toDataPathPC(baseIdx+i) := pcMem.io.rdata(pcMemIdx).unGuard.toUInt
   }
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("hybrid").zipWithIndex) {
     // load read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
     pcMem.io.ren.get(pcMemIdx) := io.memHyPcRead(i).valid
     pcMem.io.raddr(pcMemIdx) := io.memHyPcRead(i).ptr.value
-    io.memHyPcRead(i).data := pcMem.io.rdata(pcMemIdx).toUInt + (RegEnable(io.memHyPcRead(i).offset, io.memHyPcRead(i).valid) << instOffsetBits)
+    io.memHyPcRead(i).data := pcMem.io.rdata(pcMemIdx).unGuard.toUInt + (RegEnable(io.memHyPcRead(i).offset, io.memHyPcRead(i).valid) << instOffsetBits)
   }
 
   if (EnableStorePrefetchSMS) {
@@ -278,7 +310,7 @@ class CtrlBlockImp(
       pcMem.io.ren.get(pcMemIdx) := io.memStPcRead(i).valid
       pcMem.io.raddr(pcMemIdx) := io.memStPcRead(i).ptr.value
       // memStPcRead.data is not right bucasue memStPcRead don't have isRVC
-      io.memStPcRead(i).data := pcMem.io.rdata(pcMemIdx).toUInt + (RegEnable(io.memStPcRead(i).offset, io.memStPcRead(i).valid) << instOffsetBits)
+      io.memStPcRead(i).data := pcMem.io.rdata(pcMemIdx).unGuard.toUInt + (RegEnable(io.memStPcRead(i).offset, io.memStPcRead(i).valid) << instOffsetBits)
     }
   } else {
     io.memStPcRead.foreach(_.data := 0.U)
@@ -297,7 +329,7 @@ class CtrlBlockImp(
     val traceValid = trace.toPcMem.blocks(i).valid
     pcMem.io.ren.get(pcMemIdx) := traceValid
     pcMem.io.raddr(pcMemIdx) := trace.toPcMem.blocks(i).bits.ftqIdx.get.value
-    tracePcStart(i) := pcMem.io.rdata(pcMemIdx).toUInt
+    tracePcStart(i) := pcMem.io.rdata(pcMemIdx).unGuard.toUInt
   }
 
   // Trap/Xret only occur in block(0).
@@ -326,9 +358,11 @@ class CtrlBlockImp(
   redirectGen.io.oldestExuRedirect.valid := oldestExuRedirect.valid
   redirectGen.io.oldestExuRedirect.bits := oldestExuRedirect.bits
   redirectGen.io.loadReplay <> loadReplay
-  val loadRedirectTargetOffset = Reg(UInt(VAddrBits.W))
+  val loadRedirectTargetOffset = Reg(UInt(GuardedVAddrBits.W))
   when(memViolation.valid) {
-    val thisPcOffset = memViolation.bits.getPcOffset()
+    // similar to robFlushPCOffset
+    val thisPcOffset = SignExt(memViolation.bits.getPcOffset(), GuardedVAddrBits)
+    // nextPcOffset is a positive value, does not need signExt
     val nextPcOffset = memViolation.bits.getNextPcOffset()
     loadRedirectTargetOffset := Mux(memViolation.bits.flushItself(), thisPcOffset, nextPcOffset)
   }
@@ -420,12 +454,14 @@ class CtrlBlockImp(
   // vtype commit
   decode.io.fromCSR := io.fromCSR.toDecode
   decode.io.fromRob.isResumeVType := rob.io.toDecode.isResumeVType
-  decode.io.fromRob.walkToArchVType := rob.io.toDecode.walkToArchVType
-  decode.io.fromRob.commitVType := rob.io.toDecode.commitVType
-  decode.io.fromRob.walkVType := rob.io.toDecode.walkVType
-
   decode.io.redirect.valid := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
   decode.io.redirect.bits := Mux(s1_s3_redirect.valid, s1_s3_redirect.bits, s2_s4_redirect.bits)
+
+  io.frontend.toIBuf.resumingVType := rob.io.toDecode.isResumeVType
+  io.frontend.toIBuf.walkToArchVType := rob.io.toDecode.walkToArchVType
+  io.frontend.toIBuf.walkVType := rob.io.toDecode.walkVType
+  io.frontend.toIBuf.vsetvlVType := io.toDecode.vsetvlVType
+  io.frontend.toIBuf.commitVType := rob.io.toDecode.commitVType
 
   // add decode Buf for in.ready better timing
   /**
@@ -528,7 +564,8 @@ class CtrlBlockImp(
     decodeIn.bits := Mux(decodeBufValid(i), decodeBufBits(i), decodeConnectFromFrontend(i))
   }
   /** no valid instr in decode buffer && no valid instr from frontend --> can accept new instr from frontend */
-  io.frontend.canAccept := !decodeBufValid(0) || !decodeFromFrontend(0).valid
+  io.frontend.toIBuf.decodeCanAccept := !decodeBufValid(0) || !decodeFromFrontend(0).valid
+
   decode.io.csrCtrl := RegNext(io.csrCtrl)
   decode.io.intRat <> rename.io.intReadPorts
   decode.io.fpRat  <> rename.io.fpReadPorts
@@ -537,7 +574,7 @@ class CtrlBlockImp(
   decode.io.vlRat  <> rename.io.vlReadPorts
   decode.io.fusion := 0.U.asTypeOf(decode.io.fusion) // Todo
   decode.io.stallReason.in <> io.frontend.stallReason
-  decode.io.backendCanAccept := io.frontend.canAccept
+  decode.io.backendCanAccept := io.frontend.toIBuf.decodeCanAccept
 
   // snapshot check
   class CFIRobIdx extends Bundle {
@@ -725,7 +762,6 @@ class CtrlBlockImp(
   dispatch.io.enqRob.resp := enqRob.resp
   rob.io.enq.needAlloc := enqRob.needAlloc
   rob.io.enq.req := enqRob.req
-  dispatch.io.robHeadFuType := rob.io.debugRobHeadFuType
   dispatch.io.stallReason <> rename.io.stallReason.out
   dispatch.io.wakeUpAll.wakeUpInt := io.toDispatch.wakeUpInt
   dispatch.io.wakeUpAll.wakeUpFp  := io.toDispatch.wakeUpFp
@@ -823,7 +859,7 @@ class CtrlBlockImp(
   rob.io.csr.criticalErrorState := io.robio.csr.criticalErrorState
   rob.io.debugEnqLsq := io.debugEnqLsq
   rob.io.debugInstrAddrTransType := io.fromCSR.instrAddrTransType
-  rob.io.debugIQDeqRobIdxVec.foreach(_ := io.robio.debugIQDeqRobIdxVec.get)
+  rob.io.topdownIQInfoVec.foreach(_ := io.robio.topdownIQInfoVec.get)
 
   io.robio.robDeqPtr := rob.io.robDeqPtr
 
@@ -831,8 +867,6 @@ class CtrlBlockImp(
 
   // rob to backend
   io.robio.commitVType := rob.io.toDecode.commitVType
-  // exu block to decode
-  decode.io.vsetvlVType := io.toDecode.vsetvlVType
   // backend to decode
   decode.io.vstart := io.toDecode.vstart
   // backend to rob
@@ -845,29 +879,9 @@ class CtrlBlockImp(
   io.toVecExcpMod.ratOldPest := rename.io.ratOldPdest
 
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
+  rob.io.debugTopDown.fromCore := io.debugTopDown.fromCore
   io.debugRolling := rob.io.debugRolling
-  // mem topdown reason collect
-  val notIssue = !rob.io.debugTopDown.toDispatch.robHeadLsIssue
-  val tlbReplay = io.debugTopDown.fromCore.fromMem.robHeadTlbReplay
-  val tlbMiss = io.debugTopDown.fromCore.fromMem.robHeadTlbMiss
-  val vioReplay = io.debugTopDown.fromCore.fromMem.robHeadLoadVio
-  val mshrReplay = io.debugTopDown.fromCore.fromMem.robHeadLoadMSHR
-  val l1Miss = io.debugTopDown.fromCore.fromMem.robHeadMissInDCache
-  val l2Miss = io.debugTopDown.fromCore.l2MissMatch
-  val l3Miss = io.debugTopDown.fromCore.l3MissMatch
-  val ldReason = Mux(l3Miss, LoadMemStall.id.U,
-    Mux(l2Miss, LoadL3Stall.id.U,
-      Mux(l1Miss, LoadL2Stall.id.U,
-        Mux(notIssue, MemNotReadyStall.id.U,
-          Mux(tlbMiss, LoadTLBStall.id.U,
-            Mux(tlbReplay, LoadTLBStall.id.U,
-              Mux(mshrReplay, LoadMSHRReplayStall.id.U,
-                Mux(vioReplay, LoadVioReplayStall.id.U,
-                  LoadL1Stall.id.U))))))))
-  dispatch.io.debugLoadReason.foreach(_ := ldReason)
   dispatch.io.debugRobTrueCommit.foreach(_ := rob.io.debugTopDown.toDispatch.robTrueCommit)
-  rename.io.debugLoadReason.foreach(_ := ldReason)
-  rename.io.debugRobHeadFuType.foreach(_ := rob.io.debugRobHeadFuType)
   rename.io.debugRobHeadStall.foreach(_ := rob.io.debugRobHeadStall.get)
 
   io.perfInfo.ctrlInfo.robFull := GatedValidRegNext(rob.io.robFull)
@@ -962,6 +976,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
 
   val csrCtrl = Input(new CustomCSRCtrlIO)
   val IssueQueueDeqSum  = backendParams.allIssueParams.map(_.numDeq).sum
+  val iqEntryNum = backendParams.allIssueParams.map(_.numEntries).sum
   val robio = new Bundle {
     val csr = new RobCSRIO
     val exception = ValidIO(new ExceptionInfo)
@@ -979,7 +994,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val robidx = Input(new RobPtr)
       val pc     = Output(UInt(VAddrBits.W))
     })
-    val debugIQDeqRobIdxVec = Option.when(backendParams.debugEn)(Vec(IssueQueueDeqSum, Flipped(ValidIO(new RobPtr()))))
+    val topdownIQInfoVec = Option.when(backendParams.debugEn)(Input(Vec(iqEntryNum, Flipped(ValidIO(new TopdownIQExtendedInfo())))))
   }
 
   val toDecode = new Bundle {

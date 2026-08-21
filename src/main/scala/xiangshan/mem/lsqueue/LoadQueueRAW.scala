@@ -382,6 +382,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     redirect.bits.robIdx      := rollbackLqWb(i).bits.robIdx
     redirect.bits.ftqIdx      := rollbackLqWb(i).bits.ftqPtr
     redirect.bits.ftqOffset   := rollbackLqWb(i).bits.ftqOffset
+    redirect.bits.satpFlush   := false.B
     redirect.bits.stIsRVC     := stIsRVC(i)
     redirect.bits.stFtqIdx    := stFtqIdx(i)
     redirect.bits.stFtqOffset := stFtqOffset(i)

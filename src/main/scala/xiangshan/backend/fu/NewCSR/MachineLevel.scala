@@ -24,15 +24,9 @@ trait MachineLevel { self: NewCSR =>
   // Machine level Custom Read/Write
   val mbmc = if (HasBitmapCheck) Some(Module(new CSRModule("Mbmc", new MbmcBundle) {
     val mbmc_lock = reg.BME.asBool
-    if (!HasBitmapCheckDefault) {
-      reg.BME := Mux(wen && !mbmc_lock, wdata.BME, reg.BME)
-      reg.CMODE := Mux(wen, wdata.CMODE, reg.CMODE)
-      reg.BMA := Mux(wen && !mbmc_lock, wdata.BMA, reg.BMA)
-    } else {
-      reg.BME := 1.U
-      reg.CMODE := 0.U
-      reg.BMA := BMAField.TestBMA
-    }
+    reg.BME := Mux(wen && !mbmc_lock, wdata.BME, reg.BME)
+    reg.CMODE := Mux(wen, wdata.CMODE, reg.CMODE)
+    reg.BMA := Mux(wen && !mbmc_lock, wdata.BMA, reg.BMA)
     reg.BCLEAR := Mux(reg.BCLEAR.asBool, 0.U, Mux(wen && wdata.BCLEAR.asBool, 1.U, 0.U))
     reg.KEYIDEN := Mux(wen, wdata.KEYIDEN, reg.KEYIDEN)
   })
@@ -40,30 +34,18 @@ trait MachineLevel { self: NewCSR =>
 
   val mmpt = if (HasMptCheck) Some(Module(new CSRModule("Mmpt", new MmptBundle) {
     val ppnMask = ZeroExt(Fill(PPNLengthMpt, 1.U(1.W)).take(PAddrBits - PageOffsetWidth), PPNLengthMpt)
-    if (!HasMptCheckDefault) {
-      when(wen) {
-        reg.SDID := wdata.SDID
-        reg.PPN := wdata.PPN & ppnMask
-        reg.optOutInNode := wdata.optOutInNode
-        when(wdata.MODE.isLegal) {
-          reg.MODE := wdata.MODE
-        }.otherwise {
-          reg.MODE := reg.MODE
-        }
+    when(wen) {
+      reg.SDID := wdata.SDID
+      reg.PPN := wdata.PPN & ppnMask
+      reg.optOutInNode := wdata.optOutInNode
+      when(wdata.MODE.isLegal) {
+        reg.MODE := wdata.MODE
       }.otherwise {
-        reg := reg
+        reg.MODE := reg.MODE
       }
-    } else {
-      reg.SDID := 0.U.asTypeOf(reg.SDID)
-      reg.PPN := "h00000080000".U(PPNLengthMpt.W) & ppnMask //for testing, will be removed later
-      if (HasMptInodeOpt) {
-        reg.optOutInNode := 1.U.asTypeOf(reg.optOutInNode)
-      } else {
-        reg.optOutInNode := 0.U.asTypeOf(reg.optOutInNode)
-      }
-      reg.MODE := 2.U.asTypeOf(reg.MODE)
+    }.otherwise {
+      reg := reg
     }
-
   })
     .setAddr(Mmpt)) else None
 

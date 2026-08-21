@@ -12,6 +12,7 @@ import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.mem.{LqPtr, SqPtr}
 import utility.PerfCCT
+import xiangshan.backend.rob.RobPtr
 
 class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
   // Inputs
@@ -58,6 +59,8 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val fuTypeVec = Output(Vec(params.numEntries, FuType()))
   val canIssueVec = Output(Vec(params.numEntries, Bool()))
   val srcReadyVec = Output(Vec(params.numEntries, Bool()))
+  val topdownIQInfoVec = Option.when(backendParams.debugEn)(Output(Vec(params.numEntries, ValidIO(new TopdownIQInfo()))))
+  val debugRobIdxVec =  Option.when(backendParams.debugEn)(Output(Vec(params.numEntries, new RobPtr())))
 
   val deqDelay: MixedVec[DecoupledIO[Og0InUop]] = params.genIssueDecoupledBundle// = deq.cloneType
   val deqOg1Payload: MixedVec[IssueQueueDeqOg1Payload] = params.genIssueDeqOg1PayloadBundle
@@ -219,10 +222,28 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   val srcReadyVec = VecInit(entries.io.srcReady.asBools)
   val validVecRegNext = VecInit(entries.io.validRegNext.asBools)
   val issuedVecRegNext = VecInit(entries.io.issuedRegNext.asBools)
+  val fuTypeVec = Wire(Vec(params.numEntries, FuType()))
   io.validVec := validVec
   io.issuedVec := issuedVec
   io.canIssueVec := canIssueVec
   io.srcReadyVec := srcReadyVec
+  io.debugRobIdxVec.foreach(_ := entries.io.debugRobIdxVec.get)
+  io.topdownIQInfoVec.foreach{ case infoVec =>
+    val cancelSourceVec = entries.io.debugCancelSourceVec.get
+    val debugSrcReadyVec = entries.io.debugSrcReadyVec.get
+    val robIdxVec = entries.io.debugRobIdxVec.get
+    infoVec.zip(cancelSourceVec).zip(validVec).zip(robIdxVec)
+      .zip(debugSrcReadyVec).zip(fuTypeVec).zip(issuedVec).foreach{
+      case ((((((sink, cancel),valid),robIdx), srcReady), fuType), issued) =>{
+        sink.valid := valid
+        sink.bits.robIdx := robIdx
+        sink.bits.cancelSource := cancel
+        sink.bits.srcReady := srcReady
+        sink.bits.fuType := fuType
+        sink.bits.issued := issued
+      }
+    }
+  }
   dontTouch(canIssueVec)
   val deqFirstIssueVec = entries.io.isFirstIssue
 
@@ -233,7 +254,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   // (deqIdx)(srcIdx)
   val finalExuSources: Option[Vec[Vec[ExuSource]]] = exuSources.map(x => VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, x))))
 
-  val fuTypeVec = Wire(Vec(params.numEntries, FuType()))
+
   io.fuTypeVec := fuTypeVec
   val deqEntryVec = Wire(Vec(params.numDeq, ValidIO(new EntryBundle(isDeq = true))))
   val canIssueMergeAllBusy = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
@@ -336,6 +357,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       // dirty code, for uopidx and lastUop's assign
       enq.bits.payload.og1Payload.vpu.foreach(_.vuopIdx         := s0_enqBits(enqIdx).uopIdx.get)
       enq.bits.payload.og1Payload.vpu.foreach(_.lastUop         := s0_enqBits(enqIdx).lastUop.get)
+      enq.bits.payload.debugLastIssueCancelSource.foreach(_     := IQCancelSource.none)
     }
     entriesIO.og0Resp                                           := io.og0Resp
     entriesIO.og1Resp                                           := io.og1Resp

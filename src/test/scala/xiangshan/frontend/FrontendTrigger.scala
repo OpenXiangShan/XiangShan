@@ -7,7 +7,7 @@ import org.scalatest.matchers.must.Matchers
 import top.DefaultConfig
 import utility.{LogUtilsOptions, LogUtilsOptionsKey}
 import xiangshan.{DebugOptionsKey, XSCoreParameters, XSCoreParamsKey}
-import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.PcInit
 
 
 class FrontendTriggerTest extends AnyFlatSpec with Matchers with ChiselSim {
@@ -38,7 +38,7 @@ class FrontendTriggerTest extends AnyFlatSpec with Matchers with ChiselSim {
         m.io.frontendTrigger.tUpdate.bits.tdata.matchType.poke(3.U)
         m.io.frontendTrigger.tUpdate.bits.tdata.tdata2.poke("h1234_567f".U)
         m.io.pc.zipWithIndex.map { case (pc, i) =>
-          pc.poke(PrunedAddrInit((0x1234_5676 + 2 * i).U))
+          pc.poke(PcInit((0x1234_5676 + 2 * i).U(pc.length.W)))
         }
         for (_ <- 0 until 4) { m.clock.step() }
         m.io.triggered.zipWithIndex.map { case (action, i) =>

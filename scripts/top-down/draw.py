@@ -7,10 +7,85 @@ import argparse
 import os.path as osp
 
 
-def draw(out_csv_paths=None, labels=None):
+ROBHEAD_COLUMN_ORDER = ['mul', 'ldu', 'stu', 'fma', 'fdivsqrt', 'other']
+
+
+def run_intel_topdown_analyse(df, issue_width):
+    analysed_df = df.copy(deep=True)
+    original_columns = set(analysed_df.columns)
+    icount = 20 * 10 ** 6
+    analysed_df['Base'] = icount
+    analysed_df['FetchLatencyBound'] = analysed_df['if_fetch_bubble_eq_max'] * issue_width
+    analysed_df['FetchBandwidthBound'] = analysed_df['if_fetch_bubble'] - analysed_df['FetchLatencyBound']
+    print(f'FetchLatencyBound: {analysed_df["FetchLatencyBound"]}')
+    analysed_df['BadSpec'] = analysed_df['inst_spec'] - icount + analysed_df['recovery_bubble']
+    print(f'BadSpec Insts: {analysed_df["BadSpec"]}')
+    # analysed_df['CoreBound'] = (analysed_df['exec_stall_cycle'] - analysed_df['mem_stall_anyload'] - analysed_df['mem_stall_store']) * issue_width
+
+    analysed_df['L1Bound'] = (analysed_df['mem_stall_anyload'] - analysed_df['mem_stall_l1miss']) * issue_width
+    print(f'L1Bound: {analysed_df["L1Bound"]}')
+    analysed_df['L2Bound'] = (analysed_df['mem_stall_l1miss'] - analysed_df['mem_stall_l2miss']) * issue_width
+    print(f'L2Bound: {analysed_df["L2Bound"]}')
+    analysed_df['L3Bound'] = (analysed_df['mem_stall_l2miss'] - analysed_df['mem_stall_l3miss']) * issue_width
+    print(f'L3Bound: {analysed_df["L3Bound"]}')
+    analysed_df['MemBound'] = analysed_df['mem_stall_l3miss'] * issue_width
+    analysed_df['StoreBound'] = analysed_df['mem_stall_store'] * issue_width
+    analysed_df['CoreBound'] = analysed_df['total_cycles'] * issue_width - icount - analysed_df['FetchLatencyBound'] - analysed_df['FetchBandwidthBound'] - analysed_df['BadSpec'] - analysed_df['mem_stall_anyload']*issue_width - analysed_df['StoreBound']
+    print(f'CoreBound: {analysed_df["CoreBound"]}')
+    total_cycles = analysed_df['total_cycles'] * issue_width
+    print(f'Total Cycles: {total_cycles}')
+    partition_sum = analysed_df['Base'] + analysed_df['FetchLatencyBound'] + analysed_df['FetchBandwidthBound'] + analysed_df['BadSpec'] + analysed_df['CoreBound'] + analysed_df['L1Bound'] + analysed_df['L2Bound'] + analysed_df['L3Bound'] + analysed_df['MemBound'] + analysed_df['StoreBound']
+    print(f'Partition Sum: {partition_sum}')
+    generated_columns = [col for col in analysed_df.columns if col not in original_columns]
+    return analysed_df[['cpi'] + generated_columns]
+
+
+def run_robhead_analyse(df):
+    analysed_df = df.copy(deep=True)
+    kept_wait_cycle_map = {
+        'mul': 'waitMulCycle',
+        'ldu': 'waitLduCycle',
+        'stu': 'waitStuCycle',
+        'fma': 'waitfmacCycle',
+        'fdivsqrt': 'waitfDivSqrtCycle',
+    }
+    other_wait_cycle_columns = [
+        'waitAluCycle',
+        'waitDivCycle',
+        'waitBrhCycle',
+        'waitJmpCycle',
+        'waitCsrCycle',
+        'waitFenCycle',
+        'waitBkuCycle',
+        'waitAtmCycle',
+        'waitfaluCycle',
+        'waitfcvtCycle',
+        'waitfcmpCycle',
+    ]
+
+    all_wait_cycle_columns = list(kept_wait_cycle_map.values()) + other_wait_cycle_columns
+    for column in all_wait_cycle_columns:
+        if column not in analysed_df.columns:
+            analysed_df[column] = 0.0
+    total_wait_cycles = analysed_df[all_wait_cycle_columns].sum(axis=1)
+
+    for output_column, input_column in kept_wait_cycle_map.items():
+        analysed_df[output_column] = analysed_df[input_column]
+    analysed_df['other'] = analysed_df[other_wait_cycle_columns].sum(axis=1)
+
+    normalizer = total_wait_cycles.replace(0, np.nan)
+    analysed_df[ROBHEAD_COLUMN_ORDER] = analysed_df[ROBHEAD_COLUMN_ORDER].div(normalizer, axis=0).fillna(0.0)
+
+    partition_sum = analysed_df[ROBHEAD_COLUMN_ORDER].sum(axis=1)
+    print(f'ROB Head Wait Partition Sum: {partition_sum}')
+    return analysed_df[['cpi'] + ROBHEAD_COLUMN_ORDER]
+
+
+def draw(out_csv_paths=None, labels=None, issue_width=8):
 
     assert len(out_csv_paths) == len(labels)
     assert 1 <= len(out_csv_paths) <= 2
+    issue_width = float(issue_width)
 
     results = {labels[i]: (out_csv_paths[i], labels[i]) for i in range(len(out_csv_paths))}
 
@@ -53,6 +128,8 @@ def draw(out_csv_paths=None, labels=None):
     frontend_analyse = cf.FRONTEND_ANALYSE
     mem_analyse = cf.MEM_ANALYSE
     custom_analyse = cf.CUSTOM_ANALYSE
+    intel_topdown_analyse = getattr(cf, 'INTEL_TOPDOWN_ANALYSE', False)
+    robhead_analyse = getattr(cf, 'ROBHEAD_ANALYSE', False)
     fine_grain_rename = False
 
     analyse_jobs = []
@@ -70,6 +147,10 @@ def draw(out_csv_paths=None, labels=None):
             analyse_jobs.append(("mem", cf.xs_mem_rename_map))
         if custom_analyse:
             analyse_jobs.append(("custom", cf.xs_custom_rename_map))
+        if intel_topdown_analyse:
+            analyse_jobs.append(("intel_topdown", None))
+        if robhead_analyse:
+            analyse_jobs.append(("robhead", None))
     if not analyse_jobs:
         analyse_jobs.append(("default", cf.xs_coarse_rename_map))
 
@@ -115,8 +196,11 @@ def draw(out_csv_paths=None, labels=None):
                 cols_to_drop = existing_columns - cols_to_keep
                 df.drop(columns=cols_to_drop, inplace=True)
 
-            # Merge df columns according to the rename map if value starting with 'Merge'
-            if rename and current_rename_map is not None:
+            if tag == 'intel_topdown':
+                df = run_intel_topdown_analyse(df, issue_width)
+            elif tag == 'robhead':
+                df = run_robhead_analyse(df)
+            elif rename and current_rename_map is not None:
                 rename_with_map(df, current_rename_map)
                 icount = 20 * 10 ** 6
                 if 'BadSpecInst' in df.columns:
@@ -250,6 +334,8 @@ if __name__ == '__main__':
                         help=f'base label (default: BASE)')
     parser.add_argument('--ref-label', default='REF',
                         help=f'ref label (default: REF)')
+    parser.add_argument('--issue-width', type=float, default=8,
+                        help='issue width for intel topdown analyse (default: 8)')
     opt = parser.parse_args()
 
     base_csv = opt.base_weighted_csv
@@ -262,8 +348,8 @@ if __name__ == '__main__':
         f'Neither base nor ref csv exists: base={base_csv}, ref={ref_csv}'
 
     if base_exists and ref_exists:
-        draw([base_csv, ref_csv], [opt.base_label, opt.ref_label])
+        draw([base_csv, ref_csv], [opt.base_label, opt.ref_label], opt.issue_width)
     elif base_exists:
-        draw([base_csv], [opt.base_label])
+        draw([base_csv], [opt.base_label], opt.issue_width)
     else:
-        draw([ref_csv], [opt.ref_label])
+        draw([ref_csv], [opt.ref_label], opt.issue_width)

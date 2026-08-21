@@ -48,6 +48,20 @@ sealed trait HasLoadPipeBundleParam {
 }
 case class DefaultLoadPipeBundleParam() extends HasLoadPipeBundleParam
 
+class RRBankConflictFastReplayPerfStatus extends Bundle {
+  val s3Candidate = Bool()
+  val s3Grant = Bool()
+  val s0Ready = Bool()
+  val s3Fire = Bool()
+  val s3Denied = Bool()
+}
+
+class RRBankConflictFastReplayIO extends Bundle {
+  val candidate = Output(Bool())
+  val grant = Input(Bool())
+  val perfStatus = Output(new RRBankConflictFastReplayPerfStatus)
+}
+
 class LoadPipeBundle(
   param: HasLoadPipeBundleParam = DefaultLoadPipeBundleParam()
 )(
@@ -96,6 +110,11 @@ class LoadPipeBundle(
   val addrInvalidSqIdx = Option.when(param.replayToLRQ)(new SqPtr)
   val tlbId = Option.when(param.replayToLRQ)(UInt(log2Up(loadfiltersize).W))
   val tlbFull = Option.when(param.replayToLRQ)(Bool())
+  val perfMdpAddrValid = Option.when(param.replayToLRQ)(Bool())
+  val perfMdpAddrStrict = Option.when(param.replayToLRQ)(Bool())
+  val perfMdpAddrHit = Option.when(param.replayToLRQ)(Bool())
+  val perfWaitStoreRetired = Option.when(param.replayToLRQ)(Bool())
+  val perfIsCmaReplay = Option.when(param.hasS2PreProcess)(Bool())
 
   val forwardDChannel = Option.when(param.replayFromLRQ)(Bool())
   val uncacheReplay = Option.when(param.replayFromLRQ)(Bool())
@@ -119,6 +138,8 @@ class LoadPipeBundle(
   val shouldFastReplay = Option.when(param.hasS2PreProcess)(Bool())
   // S2 -> S3
   val troubleMaker = Option.when(param.hasS3PreProcess)(Bool())
+  val rrBankConflictFastReplay = Option.when(param.hasS3PreProcess)(Bool())
+  val rrBankConflictFastReplayGrant = Option.when(param.hasS3PreProcess)(Bool())
   val matchInvalid = Option.when(param.hasS3PreProcess)(Bool())
   val shouldWakeup = Option.when(param.hasS3PreProcess)(Bool())
   val shouldWriteback = Option.when(param.hasS3PreProcess)(Bool())
@@ -247,6 +268,7 @@ class StorePipeBundle(
   val align = Option.when(param.hasUnalignHandling)(Bool())
   val unalignHead = Option.when(param.hasUnalignHandling)(Bool())
   val cross4KPage = Option.when(param.hasUnalignHandling)(Bool())
+  val isAddrReadyHead = Option.when(param.hasUnalignHandling)(Bool())
 
   // MMU & exception handling
   val tlbHit = Option.when(param.hasAddrTrans)(Bool())
@@ -274,6 +296,7 @@ class StorePipeBundle(
     align.get := DontCare
     unalignHead.get := DontCare
     cross4KPage.get := DontCare
+    isAddrReadyHead.get := DontCare
   }
   def DontCareVectorFields(): Unit = {
     vecBaseVaddr.get := 0.U

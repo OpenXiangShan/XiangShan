@@ -78,14 +78,16 @@ class SbpctlBundle extends CSRBundle {
 }
 
 class SpfctlBundle extends CSRBundle {
-  val BERTI_ENABLE            = RW(    32).withReset(true.B).withDescription("Enable the Berti prefetcher.")
+  val L2_PF_CDP_ENABLE        = RW(    34).withReset(true.B).withDescription("Enable CDP-based L2 training and L2 prefetching.")
+  val L1D_PF_STREAM_ENABLE    = RW(    33).withReset(true.B).withDescription("Enable the L1D Stream prefetcher.")
+  val L1D_PF_BERTI_ENABLE     = RW(    32).withReset(true.B).withDescription("Enable the L1D Berti prefetcher.")
   val L2_PF_DELAY_LATENCY     = SpfctlL2PfDelayLatency(31, 22).withReset(SpfctlL2PfDelayLatency.initValue).withDescription("Delay latency used when training the L2 prefetcher.")
   val L2_PF_TP_ENABLE         = RW(    21).withReset(true.B).withDescription("Enable TP-based L2 training and L2 prefetching.")
   val L2_PF_VBOP_ENABLE       = RW(    20).withReset(true.B).withDescription("Enable VBOP-based L2 training and L2 prefetching.")
   val L2_PF_PBOP_ENABLE       = RW(    19).withReset(true.B).withDescription("Enable PBOP-based L2 training and L2 prefetching.")
   val L2_PF_RECV_ENABLE       = RW(    18).withReset(true.B).withDescription("Enable L2 prefetch requests received from the SMS/L1 training path.")
   val L2_PF_STORE_ONLY        = RW(    17).withReset(false.B).withDescription("Restrict L2 prefetching to store-triggered training.")
-  val L1D_PF_ENABLE_STRIDE    = RW(    16).withReset(true.B).withDescription("Enable the L1D stride prefetcher.")
+  val L1D_PF_STRIDE_ENABLE    = RW(    16).withReset(true.B).withDescription("Enable the L1D stride prefetcher.")
   val L1D_PF_ACTIVE_STRIDE    = SpfctlL1DPfActiveStride(15, 10).withReset(SpfctlL1DPfActiveStride.initValue).withDescription("Active-page stride threshold for the L1D prefetcher.")
   val L1D_PF_ACTIVE_THRESHOLD = SpfctlL1DPfActiveThreshold( 9,  6).withReset(SpfctlL1DPfActiveThreshold.initValue).withDescription("Active-page confidence threshold for the L1D prefetcher.")
   val L1D_PF_ENABLE_PHT       = RW(     5).withReset(true.B).withDescription("Enable the L1D PHT prefetcher.")

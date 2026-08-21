@@ -45,7 +45,7 @@ class AXI4UART16550(params: UART16550Params)(implicit p: Parameters)
       name      = "uart16550",
       compat    = Seq("ns16550a"),
       base      = params.address,
-      size      = 0x20,
+      size      = 0x80,
       beatBytes = params.beatBytes)
   )
   with HasInterruptSources
@@ -342,7 +342,10 @@ class AXI4UART16550(params: UART16550Params)(implicit p: Parameters)
       0x10 -> Seq(reg4),
       0x14 -> Seq(reg5),
       0x18 -> Seq(reg6),
-      0x1C -> Seq(reg7)
+      0x1C -> Seq(reg7),
+      // DesignWare-compatible UART status. AM polls bit 0 before changing
+      // divisor settings; expose the transmitter busy state there.
+      0x7C -> Seq(RegField.r(8, Cat(0.U(7.W), txBusy), RegFieldDesc("usr", "UART Status")))
     )
 
     // Default outputs (no pull-based RX source on UARTIO)

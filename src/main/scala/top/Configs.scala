@@ -29,6 +29,7 @@ import xiangshan.frontend.FrontendParameters
 import xiangshan.frontend.bpu.BpuParameters
 import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.IttageTableInfo
+import xiangshan.frontend.bpu.ScTableInfo
 import xiangshan.frontend.bpu.MicroTageInfo
 import xiangshan.frontend.bpu.mbtb.MainBtbParameters
 import xiangshan.frontend.bpu.tage.TageParameters
@@ -104,10 +105,11 @@ class MinimalConfig(n: Int = 1) extends Config(
           frontendParameters = FrontendParameters(
             FetchBlockSize = 32, // in bytes
             bpuParameters = BpuParameters(
-              // FIXME: these are from V2 Ftb(Size=512, Way=2), may not correct
               mbtbParameters = MainBtbParameters(
-                // NumEntries = 512,
-                // NumWay = 2
+                NumEntries = 512,
+                NumWay = 2,
+                NumInternalBanks = 2,
+                WriteBufferSize = 2
               ),
               tageParameters = TageParameters(
                 TableInfos = Seq(
@@ -124,11 +126,16 @@ class MinimalConfig(n: Int = 1) extends Config(
                   new MicroTageInfo(512, 12, 6, 15)
                 ),
               ),
-              // FIXME: these are from V2 SC, we don't have equivalent parameters now
               scParameters = ScParameters(
-                // NumRows = 128,
-                // NumTables = 2,
-                // HistLens = Seq(0, 5),
+                PathTableInfos = Seq(
+                  new ScTableInfo(128, 8)
+                ),
+                GlobalTableInfos = Seq(
+                  new ScTableInfo(128, 8)
+                ),
+                BackwardTableInfos = Seq(
+                  new ScTableInfo(128, 4)
+                )
               ),
               ittageParameters = IttageParameters(
                 TableInfos = Seq(
@@ -302,6 +309,7 @@ case class L2CacheConfig
   banks: Int = 1,
   tp: Boolean = true,
   nl: Boolean = false,
+  cdp: Boolean = true,
   enablePC: Boolean = false, // Enable PC field for L1Param
   enableFlush: Boolean = false
 ) extends Config((site, here, up) => {
@@ -338,6 +346,7 @@ case class L2CacheConfig
         prefetch = Seq(BOPParameters()) ++
           (if (tp) Seq(TPParameters()) else Nil) ++
           (if (nl) Seq(NLParameters()) else Nil) ++
+          (if (cdp) Seq(CDPParameters()) else Nil) ++
           (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
         enableL2Flush = enableFlush,
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
@@ -502,8 +511,7 @@ class CVMCompile extends Config((site, here, up) => {
     HasDelayNoencryption = false
   )
   case XSTileKey => up(XSTileKey).map(_.copy(
-    HasBitmapCheck = true,
-    HasBitmapCheckDefault = false))
+    HasBitmapCheck = true))
 })
 
 class CVMTestCompile extends Config((site, here, up) => {
@@ -513,8 +521,7 @@ class CVMTestCompile extends Config((site, here, up) => {
     HasDelayNoencryption = true
   )
   case XSTileKey => up(XSTileKey).map(_.copy(
-    HasBitmapCheck =true,
-    HasBitmapCheckDefault = true))
+    HasBitmapCheck =true))
 })
 
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(

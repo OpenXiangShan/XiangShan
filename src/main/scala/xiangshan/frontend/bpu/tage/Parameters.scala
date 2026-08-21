@@ -41,8 +41,7 @@ case class TageParameters(
     NumUsefulCtrSramFolds: Int = 8,
     WriteBufferSize:       Int = 4,
     UsefulResetCtrWidth:   Int = 8,
-    UseAltOnNaWidth:       Int = 7,
-    NumUseAltOnNa:         Int = 128,
+    UseAltOnNaWidth:       Int = 5,
     EnableTageTrace:       Boolean = false
 ) {}
 
@@ -59,7 +58,8 @@ trait HasTageParameters extends HasBpuParameters {
 
   def UsefulResetCtrWidth: Int = tageParameters.UsefulResetCtrWidth
   def UseAltOnNaWidth:     Int = tageParameters.UseAltOnNaWidth
-  def NumUseAltOnNa:       Int = tageParameters.NumUseAltOnNa
+  def NumUseAltOnNa:       Int = 2 * NumTables // each table corresponds to two counters
+  def UseAltOnNaIdxWidth:  Int = log2Ceil(NumUseAltOnNa)
 
   def TableInfos: Seq[TageTableInfo] = tageParameters.TableInfos
 
