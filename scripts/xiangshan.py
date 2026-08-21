@@ -29,6 +29,7 @@ import shlex
 import psutil
 import re
 import pathlib
+from typing import List, Tuple, Set
 
 def find_files_with_suffix(root_dir, suffixes):
     matching_files = []
@@ -713,29 +714,29 @@ class XiangShan(object):
                 return ret
         return 0
 
-def get_free_cores(n: int, max_retry: int = 60) -> tuple[int, int, int]:
+def get_free_cores(n: int, max_retry: int = 60) -> Tuple[int, int, int]:
     '''get contiguous free N cores that numactl can bind to, return (numa_node, start_core, end_core)'''
     def get_numa_count() -> int:
         '''get numa node count'''
         node_dir = pathlib.Path("/sys/devices/system/node/")
         return len(list(node_dir.glob("node*")))
 
-    def get_cpu_usage() -> list[float]:
+    def get_cpu_usage() -> List[float]:
         '''get cpu usage of all cores'''
         return psutil.cpu_percent(interval=0.5, percpu=True)
 
-    def get_physical_cores() -> set[int]:
+    def get_physical_cores() -> Set[int]:
         '''get all physical cores'''
         count = psutil.cpu_count(logical=False)
         if count is None:
             raise RuntimeError("Failed to get physical core count")
         return set(range(count))
 
-    def get_usable_cores() -> set[int]:
+    def get_usable_cores() -> Set[int]:
         '''get all cores current process can bind to'''
         return os.sched_getaffinity(0)
 
-    def get_bound_cores() -> set[int]:
+    def get_bound_cores() -> Set[int]:
         '''get all cores that are already bound by other processes'''
         valid_list = ["running", "disk-sleep", "waking", "waiting"]
         cores = set()
@@ -750,7 +751,7 @@ def get_free_cores(n: int, max_retry: int = 60) -> tuple[int, int, int]:
 
         return cores
 
-    def detect(n: int):
+    def detect(n: int) -> Tuple[bool, int, int, int]:
         numa_count = get_numa_count()
         phy_cores = get_physical_cores() # invariant, get once
         num_core = len(phy_cores)
