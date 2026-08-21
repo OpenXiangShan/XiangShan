@@ -1,304 +1,4 @@
 module frontend_atp_funcov (
-  input logic        clock,
-  input logic        reset,
-
-  input logic        io_tlbCsr_priv_virt,
-  input logic [3:0]  io_tlbCsr_satp_mode,
-  input logic [3:0]  io_tlbCsr_vsatp_mode,
-  input logic [3:0]  io_tlbCsr_hgatp_mode,
-  input logic        io_tlbCsr_satp_changed,
-  input logic        io_tlbCsr_vsatp_changed,
-  input logic        io_tlbCsr_hgatp_changed,
-  input logic        io_tlbCsr_priv_virt_changed,
-
-  input logic        itlb_req_valid,
-  input logic [49:0] itlb_req_vaddr,
-  input logic        itlb_resp_miss,
-
-  input logic        ptw_req_valid,
-  input logic        ptw_req_ready,
-  input logic [37:0] ptw_req_vpn,
-  input logic [1:0]  ptw_req_s2xlate,
-  input logic        ptw_resp_valid,
-  input logic [1:0]  ptw_resp_s2xlate,
-  input logic        ptw_resp_s1_entry_v,
-  input logic [1:0]  ptw_resp_s1_entry_level,
-  input logic        ptw_resp_s1_entry_n,
-  input logic [7:0]  ptw_resp_s1_valididx,
-  input logic [7:0]  ptw_resp_s1_pteidx,
-  input logic        ptw_resp_s2_gpf,
-  input logic        ptw_resp_s2_gaf,
-
-  input logic        sfence_valid,
-  input logic        sfence_rs1,
-  input logic        sfence_rs2,
-  input logic        sfence_hv,
-  input logic        sfence_hg,
-  input logic        flush_pipe
-);
-
-  localparam logic [1:0] NO_STAGE    = 2'b00;
-  localparam logic [1:0] ONLY_STAGE1 = 2'b01;
-  localparam logic [1:0] ONLY_STAGE2 = 2'b10;
-  localparam logic [1:0] ALL_STAGE   = 2'b11;
-
-  logic        atp_ptw_inflight;
-  logic        atp_seen_csr_changed;
-  logic        atp_seen_sfence;
-  logic        atp_seen_flush_pipe;
-  logic [1:0]  atp_inflight_s2xlate;
-  logic [37:0] atp_last_ptw_req_vpn;
-
-  logic        atp_refill_seen;
-  logic [1:0]  atp_refill_s2xlate;
-  logic [37:0] atp_refill_vpn;
-  logic        atp_superpage_refill_seen;
-  logic [7:0]  atp_superpage_lane_seen;
-  logic [2:0]  atp_miss_kind;
-  logic [2:0]  atp_refill_hit_kind;
-  logic [2:0]  atp_sector_lane_kind;
-  logic [2:0]  atp_sfence_scope;
-  logic [2:0]  atp_sfence_stage;
-
-  wire csr_changed =
-    io_tlbCsr_satp_changed ||
-    io_tlbCsr_vsatp_changed ||
-    io_tlbCsr_hgatp_changed ||
-    io_tlbCsr_priv_virt_changed;
-
-  wire ptw_req_fire = ptw_req_valid && ptw_req_ready;
-  wire [37:0] itlb_req_vpn = itlb_req_vaddr[49:12];
-  wire [2:0] atp_ptw_resp_lane = atp_last_ptw_req_vpn[2:0];
-  wire [7:0] atp_ptw_resp_lane_oh = 8'b1 << atp_ptw_resp_lane;
-  wire [7:0] atp_itlb_req_lane_oh = 8'b1 << itlb_req_vpn[2:0];
-
-  wire itlb_miss_to_ptw =
-    itlb_req_valid &&
-    itlb_resp_miss &&
-    ptw_req_fire;
-
-  wire atp_refill_then_hit =
-    atp_refill_seen &&
-    itlb_req_valid &&
-    !itlb_resp_miss &&
-    (itlb_req_vpn == atp_refill_vpn);
-
-  wire atp_s1_4k_sector_resp =
-    ptw_resp_valid &&
-    (ptw_resp_s2xlate == NO_STAGE) &&
-    ptw_resp_s1_entry_v &&
-    (ptw_resp_s1_entry_level == 2'b00);
-
-  wire atp_vs_4k_sector_resp =
-    ptw_resp_valid &&
-    (ptw_resp_s2xlate == ALL_STAGE) &&
-    io_tlbCsr_priv_virt &&
-    ptw_resp_s1_entry_v &&
-    (ptw_resp_s1_entry_level == 2'b00) &&
-    !ptw_resp_s2_gpf &&
-    !ptw_resp_s2_gaf;
-
-  wire atp_resp_lane_valid = ptw_resp_s1_valididx[atp_ptw_resp_lane];
-  wire atp_resp_lane_pteidx = ptw_resp_s1_pteidx[atp_ptw_resp_lane];
-  wire atp_s1_superpage_resp =
-    ptw_resp_valid &&
-    ptw_resp_s1_entry_v &&
-    (ptw_resp_s1_entry_level != 2'b00) &&
-    !ptw_resp_s1_entry_n;
-  wire atp_superpage_new_lane_hit =
-    atp_superpage_refill_seen &&
-    itlb_req_valid &&
-    !itlb_resp_miss &&
-    ((atp_superpage_lane_seen & ~atp_itlb_req_lane_oh) != 8'b0);
-
-  always_comb begin
-    atp_miss_kind = 3'd0;
-    if (itlb_miss_to_ptw && !io_tlbCsr_priv_virt &&
-        ((io_tlbCsr_satp_mode == 4'h8) || (io_tlbCsr_satp_mode == 4'h9)) &&
-        ptw_req_s2xlate == NO_STAGE)
-      atp_miss_kind = 3'd1;
-    else if (itlb_miss_to_ptw && io_tlbCsr_priv_virt &&
-             ((io_tlbCsr_vsatp_mode == 4'h8) || (io_tlbCsr_vsatp_mode == 4'h9)) &&
-             io_tlbCsr_hgatp_mode == 4'h0 && ptw_req_s2xlate == ONLY_STAGE1)
-      atp_miss_kind = 3'd2;
-    else if (itlb_miss_to_ptw && io_tlbCsr_priv_virt && io_tlbCsr_vsatp_mode == 4'h0 &&
-             ((io_tlbCsr_hgatp_mode == 4'h8) || (io_tlbCsr_hgatp_mode == 4'h9)) &&
-             ptw_req_s2xlate == ONLY_STAGE2)
-      atp_miss_kind = 3'd3;
-    else if (itlb_miss_to_ptw && io_tlbCsr_priv_virt &&
-             ((io_tlbCsr_vsatp_mode == 4'h8) || (io_tlbCsr_vsatp_mode == 4'h9)) &&
-             ((io_tlbCsr_hgatp_mode == 4'h8) || (io_tlbCsr_hgatp_mode == 4'h9)) &&
-             ptw_req_s2xlate == ALL_STAGE)
-      atp_miss_kind = 3'd4;
-
-    atp_refill_hit_kind = 3'd0;
-    if (atp_refill_then_hit) begin
-      case (atp_refill_s2xlate)
-        NO_STAGE: atp_refill_hit_kind = 3'd1;
-        ONLY_STAGE1: atp_refill_hit_kind = 3'd2;
-        ONLY_STAGE2: atp_refill_hit_kind = 3'd3;
-        ALL_STAGE: atp_refill_hit_kind = 3'd4;
-        default: ;
-      endcase
-    end
-
-    atp_sector_lane_kind = 3'd0;
-    if (atp_s1_4k_sector_resp && atp_resp_lane_valid) atp_sector_lane_kind = 3'd1;
-    else if (atp_s1_4k_sector_resp && !atp_resp_lane_valid) atp_sector_lane_kind = 3'd2;
-    else if (atp_vs_4k_sector_resp && atp_resp_lane_pteidx && atp_resp_lane_valid)
-      atp_sector_lane_kind = 3'd3;
-    else if (atp_vs_4k_sector_resp && atp_resp_lane_pteidx && !atp_resp_lane_valid)
-      atp_sector_lane_kind = 3'd4;
-
-    atp_sfence_scope = 3'd0;
-    if (atp_refill_seen && sfence_valid) begin
-      if (sfence_rs1 && sfence_rs2) atp_sfence_scope = 3'd1;
-      else if (!sfence_rs1 && sfence_rs2) atp_sfence_scope = 3'd2;
-      else if (sfence_rs1 && !sfence_rs2) atp_sfence_scope = 3'd3;
-      else atp_sfence_scope = 3'd4;
-    end
-
-    atp_sfence_stage = 3'd0;
-    if (atp_refill_seen && sfence_valid && !sfence_hv && !sfence_hg &&
-        !io_tlbCsr_priv_virt)
-      atp_sfence_stage = 3'd1;
-    else if (atp_refill_seen && sfence_valid && sfence_hv && !sfence_hg &&
-             io_tlbCsr_priv_virt && atp_refill_s2xlate == ONLY_STAGE1)
-      atp_sfence_stage = 3'd2;
-    else if (atp_refill_seen && sfence_valid && !sfence_hv && sfence_hg &&
-             io_tlbCsr_priv_virt && atp_refill_s2xlate == ONLY_STAGE2)
-      atp_sfence_stage = 3'd3;
-    else if (atp_refill_seen && sfence_valid && sfence_hv && !sfence_hg &&
-             io_tlbCsr_priv_virt && atp_refill_s2xlate == ALL_STAGE)
-      atp_sfence_stage = 3'd4;
-    else if (atp_refill_seen && sfence_valid && !sfence_hv && sfence_hg &&
-             io_tlbCsr_priv_virt && atp_refill_s2xlate == ALL_STAGE)
-      atp_sfence_stage = 3'd5;
-  end
-
-  always_ff @(posedge clock) begin
-    if (reset) begin
-      atp_ptw_inflight <= 1'b0;
-      atp_seen_csr_changed <= 1'b0;
-      atp_seen_sfence <= 1'b0;
-      atp_seen_flush_pipe <= 1'b0;
-      atp_inflight_s2xlate <= NO_STAGE;
-      atp_last_ptw_req_vpn <= '0;
-      atp_refill_seen <= 1'b0;
-      atp_refill_s2xlate <= NO_STAGE;
-      atp_refill_vpn <= '0;
-      atp_superpage_refill_seen <= 1'b0;
-      atp_superpage_lane_seen <= '0;
-    end else begin
-      if (ptw_req_fire) begin
-        atp_ptw_inflight <= 1'b1;
-        atp_seen_csr_changed <= 1'b0;
-        atp_seen_sfence <= 1'b0;
-        atp_seen_flush_pipe <= 1'b0;
-        atp_inflight_s2xlate <= ptw_req_s2xlate;
-        atp_last_ptw_req_vpn <= ptw_req_vpn;
-      end
-
-      if (atp_ptw_inflight && csr_changed) begin
-        atp_seen_csr_changed <= 1'b1;
-      end
-      if (atp_ptw_inflight && sfence_valid) begin
-        atp_seen_sfence <= 1'b1;
-      end
-      if (atp_ptw_inflight && flush_pipe) begin
-        atp_seen_flush_pipe <= 1'b1;
-      end
-
-      if (ptw_resp_valid) begin
-        atp_ptw_inflight <= 1'b0;
-        atp_refill_seen <= 1'b1;
-        atp_refill_s2xlate <= ptw_resp_s2xlate;
-        atp_refill_vpn <= atp_last_ptw_req_vpn;
-      end
-
-      if (atp_s1_superpage_resp) begin
-        atp_superpage_refill_seen <= 1'b1;
-        atp_superpage_lane_seen <= atp_ptw_resp_lane_oh;
-      end else if (atp_superpage_refill_seen && itlb_req_valid && !itlb_resp_miss) begin
-        atp_superpage_lane_seen <= atp_superpage_lane_seen | atp_itlb_req_lane_oh;
-      end
-
-      if (csr_changed || sfence_valid || flush_pipe) begin
-        atp_refill_seen <= 1'b0;
-        atp_superpage_refill_seen <= 1'b0;
-        atp_superpage_lane_seen <= '0;
-      end
-    end
-  end
-
-  covergroup frontend_atp_funcov_cg @(posedge clock);
-    option.per_instance = 1;
-
-    ATP_csr_changed_before_ptw_resp_cp: coverpoint (atp_seen_csr_changed && ptw_resp_valid) iff (!reset) {
-      bins csr_changed_before_ptw_resp = {1'b1};
-    }
-    ATP_translation_miss_cp: coverpoint atp_miss_kind iff (!reset) {
-      bins nonvirtual_s_stage = {3'd1};
-      bins only_stage1 = {3'd2};
-      bins only_stage2 = {3'd3};
-      bins all_stage = {3'd4};
-    }
-    ATP_refill_then_hit_cp: coverpoint atp_refill_hit_kind iff (!reset) {
-      bins nonvirtual_s_stage = {3'd1};
-      bins only_stage1 = {3'd2};
-      bins only_stage2 = {3'd3};
-      bins all_stage = {3'd4};
-    }
-    ATP_sector_lane_cp: coverpoint atp_sector_lane_kind iff (!reset) {
-      bins s1_valid = {3'd1};
-      bins s1_invalid = {3'd2};
-      bins vs_valid = {3'd3};
-      bins vs_invalid = {3'd4};
-    }
-    ATP_superpage_multi_lane_hit_cp: coverpoint (atp_superpage_new_lane_hit) iff (!reset) {
-      bins multi_lane_hit = {1'b1};
-    }
-    ATP_flushpipe_with_ptw_req_cp: coverpoint (flush_pipe && ptw_req_fire) iff (!reset) {
-      bins concurrent = {1'b1};
-    }
-    ATP_flushpipe_with_ptw_resp_cp: coverpoint (flush_pipe && ptw_resp_valid) iff (!reset) {
-      bins concurrent = {1'b1};
-    }
-    ATP_flushpipe_during_ptw_wait_cp: coverpoint (atp_seen_flush_pipe && ptw_resp_valid) iff (!reset) {
-      bins observed = {1'b1};
-    }
-    ATP_sfence_with_ptw_req_cp: coverpoint (sfence_valid && ptw_req_fire) iff (!reset) {
-      bins concurrent = {1'b1};
-    }
-    ATP_sfence_with_ptw_resp_cp: coverpoint (sfence_valid && ptw_resp_valid) iff (!reset) {
-      bins concurrent = {1'b1};
-    }
-    ATP_sfence_during_ptw_wait_cp: coverpoint (atp_seen_sfence && ptw_resp_valid) iff (!reset) {
-      bins observed = {1'b1};
-    }
-    ATP_sfence_scope_cp: coverpoint atp_sfence_scope iff (!reset) {
-      bins all_addr_all_id = {3'd1};
-      bins single_addr_all_id = {3'd2};
-      bins all_addr_single_id = {3'd3};
-      bins single_addr_single_id = {3'd4};
-    }
-    ATP_sfence_stage_cp: coverpoint atp_sfence_stage iff (!reset) {
-      bins nonvirtual_s_stage = {3'd1};
-      bins only_stage1 = {3'd2};
-      bins only_stage2 = {3'd3};
-      bins all_stage_vs_side = {3'd4};
-      bins all_stage_g_side = {3'd5};
-    }
-  endgroup
-
-  frontend_atp_funcov_cg atp_cov;
-  initial begin
-    atp_cov = new();
-  end
-
-endmodule
-
-module frontend_atp_remaining_funcov (
   input logic          clock,
   input logic          reset,
   input logic          io_tlbCsr_priv_virt,
@@ -340,6 +40,11 @@ module frontend_atp_remaining_funcov (
   input logic          ptw_resp_s1_af,
   input logic          ptw_resp_s2_gpf,
   input logic          ptw_resp_s2_gaf,
+  input logic [1:0]    ptw_resp_s1_entry_level,
+  input logic          ptw_resp_s1_entry_n,
+  input logic [7:0]    ptw_resp_s1_valididx,
+  input logic [7:0]    ptw_resp_s1_pteidx,
+  input logic          flush_pipe,
   input logic          sfence_valid,
   input logic          sfence_rs1,
   input logic          sfence_rs2,
@@ -377,6 +82,197 @@ module frontend_atp_remaining_funcov (
   localparam logic [1:0] ATTR_NC     = 2'b01;
   localparam logic [1:0] ATTR_MMIO   = 2'b10;
   localparam logic [1:0] ATTR_BAD    = 2'b11;
+
+
+  logic        atp_timing_ptw_inflight;
+  logic        atp_timing_seen_csr_changed;
+  logic        atp_timing_seen_sfence;
+  logic        atp_timing_seen_flush_pipe;
+  logic [1:0]  atp_timing_inflight_s2xlate;
+  logic [37:0] atp_timing_last_ptw_req_vpn;
+
+  logic        atp_timing_refill_seen;
+  logic [1:0]  atp_timing_refill_s2xlate;
+  logic [37:0] atp_timing_refill_vpn;
+  logic        atp_timing_superpage_refill_seen;
+  logic [7:0]  atp_timing_superpage_lane_seen;
+  logic [2:0]  atp_timing_miss_kind;
+  logic [2:0]  atp_timing_refill_hit_kind;
+  logic [2:0]  atp_timing_sector_lane_kind;
+  logic [2:0]  atp_timing_sfence_scope;
+  logic [2:0]  atp_timing_sfence_stage;
+
+  wire atp_timing_csr_changed =
+    io_tlbCsr_satp_changed ||
+    io_tlbCsr_vsatp_changed ||
+    io_tlbCsr_hgatp_changed ||
+    io_tlbCsr_priv_virt_changed;
+
+  wire atp_timing_ptw_req_fire = ptw_req_valid && ptw_req_ready;
+  wire [37:0] atp_timing_itlb_req_vpn = itlb_req_vaddr[49:12];
+  wire [2:0] atp_timing_ptw_resp_lane = atp_timing_last_ptw_req_vpn[2:0];
+  wire [7:0] atp_timing_ptw_resp_lane_oh = 8'b1 << atp_timing_ptw_resp_lane;
+  wire [7:0] atp_timing_itlb_req_lane_oh = 8'b1 << atp_timing_itlb_req_vpn[2:0];
+
+  wire atp_timing_itlb_miss_to_ptw =
+    itlb_req_valid &&
+    itlb_resp_miss &&
+    atp_timing_ptw_req_fire;
+
+  wire atp_timing_refill_then_hit =
+    atp_timing_refill_seen &&
+    itlb_req_valid &&
+    !itlb_resp_miss &&
+    (atp_timing_itlb_req_vpn == atp_timing_refill_vpn);
+
+  wire atp_timing_s1_4k_sector_resp =
+    ptw_resp_valid &&
+    (ptw_resp_s2xlate == NO_STAGE) &&
+    ptw_resp_s1_v &&
+    (ptw_resp_s1_entry_level == 2'b00);
+
+  wire atp_timing_vs_4k_sector_resp =
+    ptw_resp_valid &&
+    (ptw_resp_s2xlate == ALL_STAGE) &&
+    io_tlbCsr_priv_virt &&
+    ptw_resp_s1_v &&
+    (ptw_resp_s1_entry_level == 2'b00) &&
+    !ptw_resp_s2_gpf &&
+    !ptw_resp_s2_gaf;
+
+  wire atp_timing_resp_lane_valid = ptw_resp_s1_valididx[atp_timing_ptw_resp_lane];
+  wire atp_timing_resp_lane_pteidx = ptw_resp_s1_pteidx[atp_timing_ptw_resp_lane];
+  wire atp_timing_s1_superpage_resp =
+    ptw_resp_valid &&
+    ptw_resp_s1_v &&
+    (ptw_resp_s1_entry_level != 2'b00) &&
+    !ptw_resp_s1_entry_n;
+  wire atp_timing_superpage_new_lane_hit =
+    atp_timing_superpage_refill_seen &&
+    itlb_req_valid &&
+    !itlb_resp_miss &&
+    ((atp_timing_superpage_lane_seen & ~atp_timing_itlb_req_lane_oh) != 8'b0);
+
+  always_comb begin
+    atp_timing_miss_kind = 3'd0;
+    if (atp_timing_itlb_miss_to_ptw && !io_tlbCsr_priv_virt &&
+        ((io_tlbCsr_satp_mode == 4'h8) || (io_tlbCsr_satp_mode == 4'h9)) &&
+        ptw_req_s2xlate == NO_STAGE)
+      atp_timing_miss_kind = 3'd1;
+    else if (atp_timing_itlb_miss_to_ptw && io_tlbCsr_priv_virt &&
+             ((io_tlbCsr_vsatp_mode == 4'h8) || (io_tlbCsr_vsatp_mode == 4'h9)) &&
+             io_tlbCsr_hgatp_mode == 4'h0 && ptw_req_s2xlate == ONLY_STAGE1)
+      atp_timing_miss_kind = 3'd2;
+    else if (atp_timing_itlb_miss_to_ptw && io_tlbCsr_priv_virt && io_tlbCsr_vsatp_mode == 4'h0 &&
+             ((io_tlbCsr_hgatp_mode == 4'h8) || (io_tlbCsr_hgatp_mode == 4'h9)) &&
+             ptw_req_s2xlate == ONLY_STAGE2)
+      atp_timing_miss_kind = 3'd3;
+    else if (atp_timing_itlb_miss_to_ptw && io_tlbCsr_priv_virt &&
+             ((io_tlbCsr_vsatp_mode == 4'h8) || (io_tlbCsr_vsatp_mode == 4'h9)) &&
+             ((io_tlbCsr_hgatp_mode == 4'h8) || (io_tlbCsr_hgatp_mode == 4'h9)) &&
+             ptw_req_s2xlate == ALL_STAGE)
+      atp_timing_miss_kind = 3'd4;
+
+    atp_timing_refill_hit_kind = 3'd0;
+    if (atp_timing_refill_then_hit) begin
+      case (atp_timing_refill_s2xlate)
+        NO_STAGE: atp_timing_refill_hit_kind = 3'd1;
+        ONLY_STAGE1: atp_timing_refill_hit_kind = 3'd2;
+        ONLY_STAGE2: atp_timing_refill_hit_kind = 3'd3;
+        ALL_STAGE: atp_timing_refill_hit_kind = 3'd4;
+        default: ;
+      endcase
+    end
+
+    atp_timing_sector_lane_kind = 3'd0;
+    if (atp_timing_s1_4k_sector_resp && atp_timing_resp_lane_valid) atp_timing_sector_lane_kind = 3'd1;
+    else if (atp_timing_s1_4k_sector_resp && !atp_timing_resp_lane_valid) atp_timing_sector_lane_kind = 3'd2;
+    else if (atp_timing_vs_4k_sector_resp && atp_timing_resp_lane_pteidx && atp_timing_resp_lane_valid)
+      atp_timing_sector_lane_kind = 3'd3;
+    else if (atp_timing_vs_4k_sector_resp && atp_timing_resp_lane_pteidx && !atp_timing_resp_lane_valid)
+      atp_timing_sector_lane_kind = 3'd4;
+
+    atp_timing_sfence_scope = 3'd0;
+    if (atp_timing_refill_seen && sfence_valid) begin
+      if (sfence_rs1 && sfence_rs2) atp_timing_sfence_scope = 3'd1;
+      else if (!sfence_rs1 && sfence_rs2) atp_timing_sfence_scope = 3'd2;
+      else if (sfence_rs1 && !sfence_rs2) atp_timing_sfence_scope = 3'd3;
+      else atp_timing_sfence_scope = 3'd4;
+    end
+
+    atp_timing_sfence_stage = 3'd0;
+    if (atp_timing_refill_seen && sfence_valid && !sfence_hv && !sfence_hg &&
+        !io_tlbCsr_priv_virt)
+      atp_timing_sfence_stage = 3'd1;
+    else if (atp_timing_refill_seen && sfence_valid && sfence_hv && !sfence_hg &&
+             io_tlbCsr_priv_virt && atp_timing_refill_s2xlate == ONLY_STAGE1)
+      atp_timing_sfence_stage = 3'd2;
+    else if (atp_timing_refill_seen && sfence_valid && !sfence_hv && sfence_hg &&
+             io_tlbCsr_priv_virt && atp_timing_refill_s2xlate == ONLY_STAGE2)
+      atp_timing_sfence_stage = 3'd3;
+    else if (atp_timing_refill_seen && sfence_valid && sfence_hv && !sfence_hg &&
+             io_tlbCsr_priv_virt && atp_timing_refill_s2xlate == ALL_STAGE)
+      atp_timing_sfence_stage = 3'd4;
+    else if (atp_timing_refill_seen && sfence_valid && !sfence_hv && sfence_hg &&
+             io_tlbCsr_priv_virt && atp_timing_refill_s2xlate == ALL_STAGE)
+      atp_timing_sfence_stage = 3'd5;
+  end
+
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      atp_timing_ptw_inflight <= 1'b0;
+      atp_timing_seen_csr_changed <= 1'b0;
+      atp_timing_seen_sfence <= 1'b0;
+      atp_timing_seen_flush_pipe <= 1'b0;
+      atp_timing_inflight_s2xlate <= NO_STAGE;
+      atp_timing_last_ptw_req_vpn <= '0;
+      atp_timing_refill_seen <= 1'b0;
+      atp_timing_refill_s2xlate <= NO_STAGE;
+      atp_timing_refill_vpn <= '0;
+      atp_timing_superpage_refill_seen <= 1'b0;
+      atp_timing_superpage_lane_seen <= '0;
+    end else begin
+      if (atp_timing_ptw_req_fire) begin
+        atp_timing_ptw_inflight <= 1'b1;
+        atp_timing_seen_csr_changed <= 1'b0;
+        atp_timing_seen_sfence <= 1'b0;
+        atp_timing_seen_flush_pipe <= 1'b0;
+        atp_timing_inflight_s2xlate <= ptw_req_s2xlate;
+        atp_timing_last_ptw_req_vpn <= ptw_req_vpn;
+      end
+
+      if (atp_timing_ptw_inflight && atp_timing_csr_changed) begin
+        atp_timing_seen_csr_changed <= 1'b1;
+      end
+      if (atp_timing_ptw_inflight && sfence_valid) begin
+        atp_timing_seen_sfence <= 1'b1;
+      end
+      if (atp_timing_ptw_inflight && flush_pipe) begin
+        atp_timing_seen_flush_pipe <= 1'b1;
+      end
+
+      if (ptw_resp_valid) begin
+        atp_timing_ptw_inflight <= 1'b0;
+        atp_timing_refill_seen <= 1'b1;
+        atp_timing_refill_s2xlate <= ptw_resp_s2xlate;
+        atp_timing_refill_vpn <= atp_timing_last_ptw_req_vpn;
+      end
+
+      if (atp_timing_s1_superpage_resp) begin
+        atp_timing_superpage_refill_seen <= 1'b1;
+        atp_timing_superpage_lane_seen <= atp_timing_ptw_resp_lane_oh;
+      end else if (atp_timing_superpage_refill_seen && itlb_req_valid && !itlb_resp_miss) begin
+        atp_timing_superpage_lane_seen <= atp_timing_superpage_lane_seen | atp_timing_itlb_req_lane_oh;
+      end
+
+      if (atp_timing_csr_changed || sfence_valid || flush_pipe) begin
+        atp_timing_refill_seen <= 1'b0;
+        atp_timing_superpage_refill_seen <= 1'b0;
+        atp_timing_superpage_lane_seen <= '0;
+      end
+    end
+  end
+
 
   logic [31:0] pmp_match_0;
   logic [31:0] pmp_match_1;
@@ -985,8 +881,64 @@ module frontend_atp_remaining_funcov (
       atp_nc_to_mmio ? 3'd6 : 3'd0;
   end
 
-  covergroup frontend_atp_remaining_funcov_cg @(posedge clock);
+  covergroup frontend_atp_funcov_cg @(posedge clock);
     option.per_instance = 1;
+
+    ATP_csr_changed_before_ptw_resp_cp: coverpoint (atp_timing_seen_csr_changed && ptw_resp_valid) iff (!reset) {
+      bins csr_changed_before_ptw_resp = {1'b1};
+    }
+    ATP_translation_miss_cp: coverpoint atp_timing_miss_kind iff (!reset) {
+      bins nonvirtual_s_stage = {3'd1};
+      bins only_stage1 = {3'd2};
+      bins only_stage2 = {3'd3};
+      bins all_stage = {3'd4};
+    }
+    ATP_refill_then_hit_cp: coverpoint atp_timing_refill_hit_kind iff (!reset) {
+      bins nonvirtual_s_stage = {3'd1};
+      bins only_stage1 = {3'd2};
+      bins only_stage2 = {3'd3};
+      bins all_stage = {3'd4};
+    }
+    ATP_sector_lane_cp: coverpoint atp_timing_sector_lane_kind iff (!reset) {
+      bins s1_valid = {3'd1};
+      bins s1_invalid = {3'd2};
+      bins vs_valid = {3'd3};
+      bins vs_invalid = {3'd4};
+    }
+    ATP_superpage_multi_lane_hit_cp: coverpoint (atp_timing_superpage_new_lane_hit) iff (!reset) {
+      bins multi_lane_hit = {1'b1};
+    }
+    ATP_flushpipe_with_ptw_req_cp: coverpoint (flush_pipe && atp_timing_ptw_req_fire) iff (!reset) {
+      bins concurrent = {1'b1};
+    }
+    ATP_flushpipe_with_ptw_resp_cp: coverpoint (flush_pipe && ptw_resp_valid) iff (!reset) {
+      bins concurrent = {1'b1};
+    }
+    ATP_flushpipe_during_ptw_wait_cp: coverpoint (atp_timing_seen_flush_pipe && ptw_resp_valid) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_sfence_with_ptw_req_cp: coverpoint (sfence_valid && atp_timing_ptw_req_fire) iff (!reset) {
+      bins concurrent = {1'b1};
+    }
+    ATP_sfence_with_ptw_resp_cp: coverpoint (sfence_valid && ptw_resp_valid) iff (!reset) {
+      bins concurrent = {1'b1};
+    }
+    ATP_sfence_during_ptw_wait_cp: coverpoint (atp_timing_seen_sfence && ptw_resp_valid) iff (!reset) {
+      bins observed = {1'b1};
+    }
+    ATP_sfence_scope_cp: coverpoint atp_timing_sfence_scope iff (!reset) {
+      bins all_addr_all_id = {3'd1};
+      bins single_addr_all_id = {3'd2};
+      bins all_addr_single_id = {3'd3};
+      bins single_addr_single_id = {3'd4};
+    }
+    ATP_sfence_stage_cp: coverpoint atp_timing_sfence_stage iff (!reset) {
+      bins nonvirtual_s_stage = {3'd1};
+      bins only_stage1 = {3'd2};
+      bins only_stage2 = {3'd3};
+      bins all_stage_vs_side = {3'd4};
+      bins all_stage_g_side = {3'd5};
+    }
 
     ATP_translation_mode_cp: coverpoint atp_translation_mode iff (!reset) {
       bins nonvirtual_bare = {4'd1};
@@ -1209,8 +1161,8 @@ module frontend_atp_remaining_funcov (
     }
   endgroup
 
-  frontend_atp_remaining_funcov_cg atp_remaining_cov;
+  frontend_atp_funcov_cg atp_cov;
   initial begin
-    atp_remaining_cov = new();
+    atp_cov = new();
   end
 endmodule
