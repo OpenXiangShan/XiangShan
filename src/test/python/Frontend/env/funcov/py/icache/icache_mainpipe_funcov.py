@@ -180,8 +180,6 @@ _SIGNALS = {
     "exception": (_MAIN + "s1_exception_value",),
     "is_mmio": (_MAIN + "s1_isMmio",),
     "pbmt": (_MAIN + "s1_wayLookupEntry_0_itlbPbmt",),
-    "ecc_enable": (_MAIN + "io_eccEnable", _ICACHE + "io_eccEnable"),
-    "local_ecc_enable": (_MAIN + "eccEnable", _MAIN + "__Vtogcov__eccEnable"),
     "s2_valid": (_MAIN + "s2_valid", _MAIN + "__Vtogcov__s2_valid"),
     "error_valid": (_MAIN + "io_error_valid", _MAIN + "__Vtogcov__io_error_valid"),
     "error_meta": (_MAIN + "io_error_bits_source_tag",),
@@ -228,10 +226,10 @@ _EVIDENCE_SCALARS = frozenset(
         "exception",
         "is_mmio",
         "pbmt",
-        "ecc_enable",
-        "local_ecc_enable",
         "s2_valid",
         "error_valid",
+        "error_meta",
+        "error_data",
     }
 )
 
@@ -665,16 +663,9 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
     mshr = _bits(s["mshr"])
     mshr_reg = _bits(s["mshr_reg"])
     has_send = _bits(s["has_send"])
-    corrupt = _bits(s["s2_corrupt"])
-    local_ecc_enable = (
-        s["local_ecc_enable"]
-        if s["local_ecc_enable"] is not None
-        else s["ecc_enable"]
+    corrupt = tuple(
+        None if value is None else int(value) for value in s["s2_corrupt"]
     )
-    if local_ecc_enable is None:
-        # The current ICache control unit defaults ECC to enabled, but the
-        # generated Verilator inventory drops the internal enable net.
-        local_ecc_enable = 1
     evidence = {
         key: value
         for key, value in s.items()
@@ -1270,8 +1261,29 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         evidence,
     )
     prior_s1_fire = bool(prev) and _on(prev["s1_fire"])
-    s2_context = prior_s1_fire and _on(s["s2_valid"]) and _on(local_ecc_enable)
+    s2_valid_observed = s["s2_valid"]
+    s2_active = (
+        prior_s1_fire
+        and _off(s["io_flush"])
+        and (s2_valid_observed is None or _on(s2_valid_observed))
+    )
+    s2_context = s2_active
     valid_lines = _s2_valid_lines(prev, s)
+    prior_req1_valid = prev["req1_valid"] if prev else None
+    s2_context_evidence = {
+        "prior_s1_fire": prior_s1_fire,
+        "s2_valid_lines": tuple(valid_lines),
+        "s2_prior_req1_valid": prior_req1_valid,
+        "s2_cross_lines": tuple(s["s2_cross"]),
+        "s2_context_source": (
+            "observed_s2_valid"
+            if s2_valid_observed is not None
+            else "reconstructed_from_prior_s1_fire"
+        ),
+        "s2_valid_observed": s2_valid_observed,
+        "s2_ecc_mode": "static_enabled_in_frontend_rtl",
+        "s2_global_flush": s["io_flush"],
+    }
     meta_single_way: list[int] = []
     meta_multiway: list[int] = []
     meta_zero_way: list[int] = []
@@ -1306,7 +1318,21 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
             bin_name,
             cycle,
             s2_context and bool(matches),
-            {**evidence, "s2_matching_lines": tuple(matches)},
+            {
+                **evidence,
+                **s2_context_evidence,
+                "s2_matching_lines": tuple(matches),
+                "s2_invalid_line_reasons": tuple(
+                    (
+                        index,
+                        "req_invalid"
+                        if index >= 2 and not _on(prior_req1_valid)
+                        else "non_cross_line",
+                    )
+                    for index in matches
+                    if not valid_lines[index]
+                ),
+            },
         )
 
     selected_valid: list[tuple[int, int, int]] = []
@@ -1351,7 +1377,12 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
             bin_name,
             cycle,
             s2_context and bool(matches),
-            {**evidence, "s2_matching_req_line_banks": tuple(matches)},
+            {
+                **evidence,
+                **s2_context_evidence,
+                "s2_matching_req_line_banks": tuple(matches),
+                "s2_prior_bank_mshr_valid": tuple(prior_bank_mshr),
+            },
         )
 
     _mark(

@@ -251,13 +251,13 @@ def test_tc_icache_mainpipe_s2_flush_dut(env) -> None:
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.xfail(
-    reason="current Python ICache environment exposes TL response faults but not Meta/DataArray ECC injection hooks",
+    reason="current Python ICache environment has no Meta/DataArray ECC injection hooks",
     strict=False,
 )
 def test_tc_icache_mainpipe_ecc_injection_required_dut(env, bin_id, bin_name) -> None:
     del bin_id
     pytest.xfail(
-        "current Python ICache environment exposes TL response faults but not Meta/DataArray ECC injection hooks"
+        "current Python ICache environment has no Meta/DataArray ECC injection hooks"
     )
     _load_nops(env, _BASE, words=1024)
     env.icache_agent.configure(hit_latency=1, miss_latency=16, miss_rate=1.0, seed=0x6641)

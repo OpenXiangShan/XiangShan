@@ -44,6 +44,7 @@ class _Recorder:
     def __init__(self):
         self.env = SimpleNamespace(dut=_Dut())
         self.hits = set()
+        self.hit_evidence = {}
 
     @staticmethod
     def _read_first_dut_signal(dut, names):
@@ -54,8 +55,9 @@ class _Recorder:
         return None
 
     def mark(self, group, bin_name, cycle, evidence, *, coverpoint=None):
-        del cycle, evidence
+        del cycle
         self.hits.add((group, coverpoint, bin_name))
+        self.hit_evidence[(group, bin_name)] = dict(evidence)
 
     def set_key(self, key, value):
         self.env.dut.set(_SIGNALS[key][0], value)
@@ -3356,7 +3358,7 @@ def _prime_mainpipe_s2(recorder, *, bank_mshr: int | None = None) -> None:
     for key, value in {
         "s1_fire": 0,
         "s2_valid": 1,
-        "local_ecc_enable": 1,
+        "io_flush": 0,
     }.items():
         recorder.set_key(key, value)
     recorder.env.dut.set(_MAIN + "s2_isCrossLine_0", 0)
@@ -3409,6 +3411,100 @@ def test_mainpipe_meta_ecc_bins_sample_distinct_source_conditions():
             assert not _hit(recorder, "icache_mainpipe_s2_ecc", other)
 
 
+def test_mainpipe_s2_ecc_uses_static_enable_and_reconstructs_valid():
+    recorder = _Recorder()
+    for key, value in {
+        "s1_fire": 1,
+        "req1_valid": 0,
+    }.items():
+        recorder.set_key(key, value)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 40)
+    recorder.set_key("s1_fire", 0)
+    recorder.set_key("io_flush", 0)
+    _set_mainpipe_meta_source(
+        recorder,
+        line_index=0,
+        hitnum=1,
+        mismatch=True,
+    )
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+    assert _hit(
+        recorder,
+        "icache_mainpipe_s2_ecc",
+        "meta_code_mismatch_single_way",
+    )
+    evidence = recorder.hit_evidence[
+        ("icache_mainpipe_s2_ecc", "meta_code_mismatch_single_way")
+    ]
+    assert evidence["s2_context_source"] == "reconstructed_from_prior_s1_fire"
+    assert evidence["s2_valid_observed"] is None
+    assert evidence["s2_ecc_mode"] == "static_enabled_in_frontend_rtl"
+
+    recorder = _Recorder()
+    for key, value in {
+        "s1_fire": 1,
+        "req1_valid": 0,
+    }.items():
+        recorder.set_key(key, value)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 40)
+    recorder.set_key("s1_fire", 0)
+    recorder.set_key("io_flush", 0)
+    recorder.set_key("s2_valid", 1)
+    _set_mainpipe_meta_source(
+        recorder,
+        line_index=0,
+        hitnum=1,
+        mismatch=True,
+    )
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+    assert _hit(
+        recorder,
+        "icache_mainpipe_s2_ecc",
+        "meta_code_mismatch_single_way",
+    )
+
+    recorder = _Recorder()
+    for key, value in {
+        "s1_fire": 1,
+        "req1_valid": 0,
+    }.items():
+        recorder.set_key(key, value)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 40)
+    recorder.set_key("s1_fire", 0)
+    recorder.set_key("io_flush", 0)
+    recorder.set_key("s2_valid", 0)
+    _set_mainpipe_meta_source(
+        recorder,
+        line_index=0,
+        hitnum=1,
+        mismatch=True,
+    )
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+    assert not _hit(
+        recorder,
+        "icache_mainpipe_s2_ecc",
+        "meta_code_mismatch_single_way",
+    )
+
+
+def test_mainpipe_s2_ecc_rejects_global_flush_context():
+    recorder = _Recorder()
+    _prime_mainpipe_s2(recorder)
+    recorder.set_key("io_flush", 1)
+    _set_mainpipe_meta_source(
+        recorder,
+        line_index=0,
+        hitnum=1,
+        mismatch=True,
+    )
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+    assert not _hit(
+        recorder,
+        "icache_mainpipe_s2_ecc",
+        "meta_code_mismatch_single_way",
+    )
+
+
 def test_mainpipe_meta_invalid_line_has_separate_masking_bin():
     recorder = _Recorder()
     _prime_mainpipe_s2(recorder)
@@ -3420,11 +3516,30 @@ def test_mainpipe_meta_invalid_line_has_separate_masking_bin():
     )
     sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
     assert _hit(recorder, "icache_mainpipe_s2_ecc", "meta_invalid_line_masked")
+    evidence = recorder.hit_evidence[
+        ("icache_mainpipe_s2_ecc", "meta_invalid_line_masked")
+    ]
+    assert evidence["s2_invalid_line_reasons"] == ((1, "non_cross_line"),)
+    assert evidence["s2_valid_lines"] == (True, False, False, False)
     assert not _hit(
         recorder,
         "icache_mainpipe_s2_ecc",
         "meta_code_mismatch_single_way",
     )
+
+    recorder = _Recorder()
+    _prime_mainpipe_s2(recorder)
+    _set_mainpipe_meta_source(
+        recorder,
+        line_index=2,
+        hitnum=2,
+        mismatch=False,
+    )
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 42)
+    evidence = recorder.hit_evidence[
+        ("icache_mainpipe_s2_ecc", "meta_invalid_line_masked")
+    ]
+    assert evidence["s2_invalid_line_reasons"] == ((2, "req_invalid"),)
 
 
 def _set_mainpipe_data_source(
@@ -3484,6 +3599,11 @@ def test_mainpipe_data_ecc_mshr_bypass_and_port_miss_bins():
         "icache_mainpipe_s2_ecc",
         "data_ecc_mshr_bypass_skips_sram_bank",
     )
+    evidence = recorder.hit_evidence[
+        ("icache_mainpipe_s2_ecc", "data_ecc_mshr_bypass_skips_sram_bank")
+    ]
+    assert evidence["s2_matching_req_line_banks"] == ((0, 0, 0),)
+    assert evidence["s2_prior_bank_mshr_valid"][0] == 1
 
     recorder = _Recorder()
     _prime_mainpipe_s2(recorder)
