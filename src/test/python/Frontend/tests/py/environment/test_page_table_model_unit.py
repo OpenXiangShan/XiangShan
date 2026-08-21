@@ -27,6 +27,19 @@ def test_build_ptw_resp_encodes_sector_ppn_layout_for_level0_leaf() -> None:
     assert resp[f"s1_pteidx_{other_idx}"] == 0
 
 
+def test_build_ptw_resp_keeps_faulting_target_sector_lane_matchable() -> None:
+    pt = PageTableModel(mode="sv39")
+    vpn = 0x80003
+    sector_idx = vpn & 0x7
+
+    pt.map_page(vpn, 0x90003, v=0, x=0, r=0, level=0)
+    resp = pt.build_ptw_resp(vpn)
+
+    assert (resp["s1_entry_v"], resp["s1_pf"]) == (0, 1)
+    assert resp[f"s1_valididx_{sector_idx}"] == 1
+    assert resp[f"s1_pteidx_{sector_idx}"] == 1
+
+
 def test_translate_applies_stage2_after_stage1_leaf() -> None:
     pt = PageTableModel(mode="sv39")
     va = 0x80000004

@@ -51,6 +51,7 @@ class PTWAgent:
         self.pending = deque()
         self.active_resp: Optional[_PTWPending] = None
         self.last_drive_expectation: Optional[dict] = None
+        self.last_request_expectation: Optional[dict] = None
         self.event_sink: Optional[Callable[[Dict], None]] = None
         self.req_count = 0
         self.resp_count = 0
@@ -400,6 +401,11 @@ class PTWAgent:
             return None
         return dict(self.last_drive_expectation)
 
+    def get_last_request_expectation(self) -> Optional[dict]:
+        if self.last_request_expectation is None:
+            return None
+        return dict(self.last_request_expectation)
+
     def _current_latency(self) -> int:
         if self.latency_max <= self.latency_min:
             return self.latency_min
@@ -489,6 +495,8 @@ class PTWAgent:
         if self.interface is None:
             return
 
+        self.last_request_expectation = None
+
         if self.flush_pending_on_sfence and self._read(self.interface.sfence_valid, 0) == 1:
             self._flush_pending(cycle)
 
@@ -556,6 +564,12 @@ class PTWAgent:
                 )
             )
             self.req_count += 1
+            self.last_request_expectation = {
+                "cycle": int(cycle),
+                "vpn": int(vpn),
+                "s2xlate": int(s2xlate),
+                "get_gpa": int(get_gpa),
+            }
             self._emit(
                 cycle,
                 "handshake.ptw_req",

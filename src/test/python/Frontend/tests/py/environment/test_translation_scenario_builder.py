@@ -596,6 +596,40 @@ def test_builder_derives_each_page_fetch_path_from_pma() -> None:
     ]
 
 
+@pytest.mark.parametrize("mode", ("sv39", "sv48"))
+def test_builder_constructs_normal_cross_page_instruction_stream(mode: str) -> None:
+    env = _env()
+    scenario = TranslationScenario(
+        scenario_id=f"normal-cross-page-{mode}",
+        va=0x8020_0F00,
+        pa=0x8040_0F00,
+        payload=b"\x13\x00\x00\x00" * 512,
+        page_count=2,
+        mode=mode,
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), 0x8040_0000, size=0x2000
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                "pma", 0, PmpPmaConfig(match="napot", read=True, execute=True, cacheable=True), 0x8040_0000, size=0x2000
+            ),
+        ),
+    )
+
+    state = TranslationScenarioBuilder(env).build(scenario)
+
+    assert len(state.expected_page_outcomes) == 2
+    assert [(outcome["va"], outcome["pa"]) for outcome in state.expected_page_outcomes] == [
+        (0x8020_0F00, 0x8040_0F00),
+        (0x8020_1000, 0x8040_1000),
+    ]
+    assert all(outcome["ok"] and outcome["expected_path"] == "cacheable" for outcome in state.expected_page_outcomes)
+    assert env.memory.read_block(scenario.pa, len(scenario.payload)) == scenario.payload
+    assert len(state.pmp_writes) == len(state.pma_writes) == 1
+
+
 def test_builder_composes_all_stage_mapping_from_gpa_to_pa() -> None:
     env = _env()
     scenario = TranslationScenario(

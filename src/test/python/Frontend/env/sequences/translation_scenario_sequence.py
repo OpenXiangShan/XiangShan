@@ -19,7 +19,7 @@ class TranslationScenarioPhase:
 
     scenario: TranslationScenario | None = None
     reuse_previous: bool = False
-    redirect: bool = True
+    redirect: bool = False
     target_pc: int | None = None
     page_indexes: tuple[int, ...] | None = None
     expect_ptw: bool = True
@@ -161,27 +161,27 @@ class TranslationScenarioSequence:
         | TranslationPmpPmaWriteAction,
         ...,
     ]:
-        """Build a replayable phase/control stream for generic regressions."""
+        """Build one replayable reset/re-entry phase for a generic regression."""
 
         if int(count) < 0:
             raise ValueError("translation random scenario count must be non-negative")
         if int(start_ordinal) < 0:
             raise ValueError("translation random scenario start ordinal must be non-negative")
+        if int(count) > 1:
+            raise ValueError(
+                "translation random phases require explicit reset/re-entry; "
+                "run one ordinal per TranslationScenarioSequence"
+            )
+        if include_controls:
+            raise ValueError(
+                "translation random phase does not support control actions; "
+                "configuration switching requires a redirect source context"
+            )
         stop_ordinal = int(start_ordinal) + int(count)
         generated = TranslationScenarioRandomizer(int(seed)).generate(stop_ordinal)[int(start_ordinal) :]
         if not generated:
             return ()
-        all_controls = TranslationScenarioSequence.randomized_control_actions(
-            int(seed) ^ 0xA5A5_5A5A,
-            max(0, stop_ordinal - 1),
-        )
-        controls = all_controls[int(start_ordinal) :]
-        actions = []
-        for ordinal, item in enumerate(generated):
-            actions.append(TranslationScenarioPhase(scenario=item.scenario))
-            if include_controls and ordinal < len(generated) - 1:
-                actions.append(controls[ordinal])
-        return tuple(actions)
+        return (TranslationScenarioPhase(scenario=generated[0].scenario),)
 
     @staticmethod
     def _wait(env, predicate, *, description: str, max_cycles: int) -> None:
@@ -200,7 +200,16 @@ class TranslationScenarioSequence:
             return False
         if active["expected_path"] == "fault":
             return bool(active["fault_seen"])
-        return bool((not active["expected_ptw_requests"] or active["response_seen"]) and active["fetch_seen"])
+        normal_observations = [
+            observation
+            for observation in env.monitor.observations
+            if int(active["va"]) <= int(observation.pc) < int(active["va"]) + int(active["payload_size"])
+        ]
+        return bool(
+            (not active["expected_ptw_requests"] or active["response_seen"])
+            and len(active["expected_fetches"]) == len(active["observed_fetch_pas"])
+            and len(normal_observations) >= 2
+        )
 
     @staticmethod
     def _phase_finished(env) -> bool:
@@ -305,6 +314,12 @@ class TranslationScenarioSequence:
                 results.append({"kind": "pbmte", "record": record})
                 continue
 
+            if action.redirect:
+                raise ValueError(
+                    "translation phase redirect requires an explicit source context; "
+                    "use reset/re-entry until configuration-switch support is implemented"
+                )
+
             if action.reuse_previous:
                 if previous_state is None or action.scenario is not None:
                     raise ValueError("reuse_previous phase must follow a phase and omit scenario")
@@ -357,11 +372,6 @@ class TranslationScenarioSequence:
                 )
 
             request_count = int(env.ptw_agent.get_stats()["req_count"])
-            if action.redirect:
-                env.backend_model.inject_redirect(
-                    target_pc,
-                    "translation-scenario-sequence",
-                )
             if int(action.wait_for_ptw_requests):
                 self._wait(
                     env,

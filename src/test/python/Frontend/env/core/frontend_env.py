@@ -641,11 +641,13 @@ class FrontendEnv:
     def Step(self, cycles: int = 1) -> int:
         return self.step(cycles)
 
-    def reset(self, cycles: int = 20) -> None:
+    def reset(self, cycles: int = 20, *, before_release: Optional[Callable[[], None]] = None) -> None:
         self.logger.info("reset dut: cycles=%d", int(cycles))
         self._emit_event("control.reset", {"cycles": int(cycles)})
         self._write(self.clock_reset.reset, 1)
         self.step(cycles)
+        if before_release is not None:
+            before_release()
         self._write(self.clock_reset.reset, 0)
         self.step(1)
 

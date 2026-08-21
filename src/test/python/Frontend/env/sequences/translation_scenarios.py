@@ -258,13 +258,17 @@ class TranslationScenarioRandomizer:
         mode = self._random.choice(("sv39", "sv48"))
         stage2_mode = self._random.choice(("sv39", "sv48"))
         page_count = 2 if self._random.randrange(4) == 0 else 1
-        offset = 0xFF8 if page_count == 2 else self._random.randrange(0, 0xFF0, 8)
+        offset = 0xFF8 if page_count == 2 else self._random.randrange(0, 0xF80, 8)
         va = 0x8020_0000 + offset
         pa = 0x8040_0000 + offset
         gpa = 0x8060_0000 + offset
         priv_imode = self._random.choice((0, 1, 2))
+        # A 1KiB stream carries 256 RVI instructions. Preserve the random
+        # page offset, then extend the declared mapping if that stream crosses
+        # into the next page.
+        payload = b"\x13\x00\x00\x00" * 256
+        page_count = max(page_count, (offset + len(payload) + _PAGE_SIZE - 1) // _PAGE_SIZE)
         pmp_entries, pma_entries = self._permission_entries(pa - offset, pages=page_count, ordinal=index)
-        payload = b"\x13\x00\x00\x00" * (4 if page_count == 2 else 2)
         common = {
             "scenario_id": f"translation-random-s{self.seed}-n{index}",
             "va": va,

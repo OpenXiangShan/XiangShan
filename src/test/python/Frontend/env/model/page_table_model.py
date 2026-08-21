@@ -492,6 +492,8 @@ class PageTableModel:
 
     def _build_stage1_resp(self, vpn: int, pte: PTE, pf: int) -> dict:
         addr_low, ppn_low, valididx, pteidx = self._build_sector_arrays(vpn, pte.ppn, pte.level, pte.v)
+        if int(pf):
+            valididx[addr_low] = 1
         sector_tag = self.normalize_ptw_vpn(vpn) >> self._SECTOR_IDX_BITS
         if int(pte.level) == 0 and sector_tag in self._stage1_sector_response_tags:
             sector_base = self.normalize_ptw_vpn(vpn) & ~self._SECTOR_MASK
