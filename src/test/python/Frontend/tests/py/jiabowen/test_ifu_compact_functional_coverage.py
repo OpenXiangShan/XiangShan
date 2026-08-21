@@ -59,7 +59,15 @@ def _make_recorder(tmp_path):
     return recorder, env, dut, memory
 
 
-def _set_ifu_output(dut, entries, *, exception_type=0, valid_mask_extra=0):
+def _set_ifu_output(
+    dut,
+    entries,
+    *,
+    exception_type=0,
+    valid_mask_extra=0,
+    prev_ibuf_enq_ptr=0,
+    instr_count=None,
+):
     enq_enable = 0
     valid_mask = 0
     dut.set(_PREFIX + "io_toIBuffer_ready", 1)
@@ -82,6 +90,10 @@ def _set_ifu_output(dut, entries, *, exception_type=0, valid_mask_extra=0):
         dut.set(_PREFIX + f"io_toIBuffer_bits_exceptionMask_{slot}", exception_mask)
     dut.set(_PREFIX + "io_toIBuffer_bits_enqEnable", enq_enable)
     dut.set(_PREFIX + "io_toIBuffer_bits_valid", valid_mask | int(valid_mask_extra))
+    dut.set(_PREFIX + "s2_prevIBufEnqPtr_value", prev_ibuf_enq_ptr)
+    dut.set(_PREFIX + "s2_alignShiftNum", int(prev_ibuf_enq_ptr) & 0x3)
+    dut.set(_PREFIX + "s2_instrCount", len(entries) if instr_count is None else instr_count)
+    dut.set(_PREFIX + "s2_fire", 1)
 
 
 def test_ifu_compact_and_expander_bins_use_to_ibuffer_fire(tmp_path):
@@ -155,6 +167,43 @@ def test_ifu_cacheable_boundary_homogeneous_sequences_are_observed(tmp_path):
     )
     sample_cfvec_coverage(rvc, rvc_env, 1)
     assert rvc.key_hit("ifu_cacheable_boundary", "all_rvc_2b")
+
+
+def test_ifu_ibuffer_pointer_alignment_bins_use_real_s2_fields(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    base = 0x80000000
+
+    _set_ifu_output(
+        dut,
+        [(0, base, 0x00000013, 0, 1, 0, 1, 0)],
+        prev_ibuf_enq_ptr=0,
+    )
+    sample_cfvec_coverage(recorder, env, 1)
+    assert recorder.key_hit("ifu_ibuffer_alignment", "zero_pointer_slot_zero")
+
+    _set_ifu_output(
+        dut,
+        [
+            (2, base + 4, 0x00000013, 0, 3, 0, 1, 0),
+            (3, base + 8, 0x00000013, 0, 5, 0, 1, 0),
+        ],
+        prev_ibuf_enq_ptr=6,
+    )
+    sample_cfvec_coverage(recorder, env, 2)
+    assert recorder.key_hit("ifu_ibuffer_alignment", "nonzero_shift_matches_slot")
+
+    _set_ifu_output(
+        dut,
+        [
+            (1, base + 12, 0x00000013, 0, 7, 0, 1, 0),
+            (2, base + 16, 0x00000013, 0, 9, 0, 1, 0),
+            (3, base + 20, 0x00000013, 0, 11, 0, 1, 0),
+        ],
+        prev_ibuf_enq_ptr=9,
+        instr_count=40,
+    )
+    sample_cfvec_coverage(recorder, env, 3)
+    assert recorder.key_hit("ifu_ibuffer_alignment", "wide_window_bounded")
 
 
 def test_ifu_ibuffer_output_range_clipping_requires_valid_slot_not_enabled(tmp_path):
@@ -263,5 +312,9 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "s1_icacheMeta_0_exception_value",
         _PREFIX + "s1_instrCount",
         _PREFIX + "s1_flush",
+        _PREFIX + "s2_prevIBufEnqPtr_value",
+        _PREFIX + "s2_instrCount",
+        _PREFIX + "s2_fire",
+        _PREFIX + "s2_alignShiftNum",
     }
     assert required <= names

@@ -135,6 +135,46 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         "exception_type": exception_type,
     }
 
+    prev_ibuf_enq_ptr = _read_ifu_internal(recorder, dut, "s2_prevIBufEnqPtr_value")
+    align_shift_num = _read_ifu_internal(recorder, dut, "s2_alignShiftNum")
+    instr_count = _read_ifu_internal(recorder, dut, "s2_instrCount")
+    s2_fire = _read_ifu_internal(recorder, dut, "s2_fire")
+    if None not in {prev_ibuf_enq_ptr, align_shift_num, instr_count, s2_fire} and int(s2_fire) == 1:
+        alignment_evidence = {
+            **evidence,
+            "event": "ifu_s2_ibuffer_alignment",
+            "prev_ibuf_enq_ptr": int(prev_ibuf_enq_ptr),
+            "align_shift_num": int(align_shift_num),
+            "instr_count": int(instr_count),
+        }
+        first_slot = int(slots[0])
+        if int(prev_ibuf_enq_ptr) == 0 and int(align_shift_num) == 0 and first_slot == 0:
+            recorder.mark(
+                "ifu_ibuffer_alignment",
+                "zero_pointer_slot_zero",
+                cycle,
+                alignment_evidence,
+            )
+        if (
+            int(prev_ibuf_enq_ptr) != 0
+            and int(align_shift_num) != 0
+            and int(align_shift_num) == (int(prev_ibuf_enq_ptr) & 0x3)
+            and first_slot == int(align_shift_num)
+        ):
+            recorder.mark(
+                "ifu_ibuffer_alignment",
+                "nonzero_shift_matches_slot",
+                cycle,
+                alignment_evidence,
+            )
+        if int(instr_count) > _IFU_OUTPUT_SLOT_COUNT and len(slots) <= _IFU_OUTPUT_SLOT_COUNT:
+            recorder.mark(
+                "ifu_ibuffer_alignment",
+                "wide_window_bounded",
+                cycle,
+                alignment_evidence,
+            )
+
     raw_records = []
     for record in records:
         if None in {record["pc"], record["instr"], record["is_rvc"]}:
@@ -320,6 +360,7 @@ COMPACT_COVERPOINTS = {
     "ifu_cacheable_boundary": "sequence_shape",
     "ifu_cacheable_compact": "output_shape",
     "ifu_cacheable_expander": "input_type",
+    "ifu_ibuffer_alignment": "pointer_alignment",
     "ifu_ibuffer_output": "field_observation",
     "ifu_invalid_taken_exception": "stimulus_cross",
     "ifu_instr_compact": "instruction_layout",
@@ -341,6 +382,9 @@ COMPACT_SAMPLER_BIN_KEYS = frozenset(
         ("ifu_cacheable_compact", "contiguous_slots_observed"),
         ("ifu_cacheable_expander", "legal_rvc_input_seen"),
         ("ifu_cacheable_expander", "rvi_input_seen"),
+        ("ifu_ibuffer_alignment", "zero_pointer_slot_zero"),
+        ("ifu_ibuffer_alignment", "nonzero_shift_matches_slot"),
+        ("ifu_ibuffer_alignment", "wide_window_bounded"),
         ("ifu_ibuffer_output", "instr_pc_isrvc_observed"),
         ("ifu_ibuffer_output", "ftq_offset_observed"),
         ("ifu_ibuffer_output", "fixed_range_clipped"),
