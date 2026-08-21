@@ -78,14 +78,34 @@ class MetaInfo(implicit p: Parameters) extends ICacheBundle {
   val metaCodes:   UInt = UInt(MetaEccBits.W)
 }
 
-class MaybeRvcShiftInfo(implicit p: Parameters) extends ICacheBundle {
-  val shiftNum:          Vec[UInt]      = Vec(MaxFetchLineNum, UInt(log2Ceil(MaxInstNumPerBlock).W))
-  val shiftFlag:         Bool           = Bool()
-  val firstBlockRange:   UInt           = UInt(MaxInstNumPerBlock.W)
-  val totalBlockRange:   UInt           = UInt(MaxInstNumPerBlock.W)
-  val sramShiftMaybeRvc: Vec[Vec[UInt]] = Vec(MaxFetchReqNum, Vec(PortNumber, UInt(MaxInstNumPerBlock.W)))
-  val maybeRvcMaskVec:   Vec[Vec[UInt]] = Vec(MaxFetchReqNum, Vec(PortNumber, UInt(MaxInstNumPerBlock.W)))
-  val takenCfiOffset:    Vec[UInt]      = Vec(MaxFetchReqNum, UInt(CfiPositionWidth.W))
+// Info describing how to align the raw per-line maybeRvcMap into the fetch coordinate.
+// Naming convention:
+//   maybeRvcMap        : raw per-cache-line map, bit i = 2-byte slot i of the line.
+//   alignedMaybeRvcMap : map aligned to the fetch coordinate, bit 0 = the first fetched
+//                        instruction slot of req0 (what the IFU consumes).
+// "Shift" is reserved for the alignment operation/parameters (shiftNum,
+// shouldShiftRight, shiftMaybeRvc); "Aligned" marks the resulting maps.
+class MaybeRvcAlignInfo(implicit p: Parameters) extends ICacheBundle {
+  // shift parameters of the alignment operation
+  val shiftNum:         Vec[UInt] = Vec(MaxFetchLineNum, UInt(log2Ceil(MaxInstNumPerBlock).W))
+  val shouldShiftRight: Bool      = Bool()
+  // instruction ranges in the fetch coordinate
+  val firstBlockRange: UInt = UInt(MaxInstNumPerBlock.W)
+  val totalBlockRange: UInt = UInt(MaxInstNumPerBlock.W)
+  // raw SRAM per-line maps, pre-aligned into the fetch coordinate (done in s0)
+  val sramAlignedMaybeRvcMap: Vec[Vec[UInt]] = Vec(MaxFetchReqNum, Vec(PortNumber, UInt(MaxInstNumPerBlock.W)))
+  // masks in the fetch coordinate, used to gate the aligned maps per cache line
+  val alignedMaybeRvcMaskVec: Vec[Vec[UInt]] = Vec(MaxFetchReqNum, Vec(PortNumber, UInt(MaxInstNumPerBlock.W)))
+  val takenCfiOffset:         Vec[UInt]      = Vec(MaxFetchReqNum, UInt(CfiPositionWidth.W))
+
+  // shift-left flag of each maybeRvcMap, used by shiftConfig
+  // each maybeRvcMap should: (extraShiftNum, shiftLeft)
+  def shiftConfig: Seq[(Int, Bool)] = Seq(
+    (0, false.B),
+    (1, true.B),
+    (0, !this.shouldShiftRight),
+    (2, true.B)
+  )
 }
 
 /* ***** Array write ***** */
@@ -231,27 +251,26 @@ class ICacheMeta(implicit p: Parameters) extends ICacheBundle {
   def isUncache: Bool = pmpMmio || Pbmt.isUncache(itlbPbmt)
 }
 
-class FetchBlocktoIfuReq(implicit p: Parameters) extends ICacheBundle {
-  val valid:          Bool        = Bool()
-  val startVAddr:     GuardedPc   = GuardedPc()
-  val ftqIdx:         FtqPtr      = new FtqPtr
-  val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
-  // val range:          UInt        = UInt(FetchBlockInstNum.W)
-  val size: UInt = UInt(log2Ceil(FetchBlockInstNum + 1).W)
+class FetchBlockInfo(implicit p: Parameters) extends ICacheBundle {
+  val valid:            Bool        = Bool()
+  val startVAddr:       GuardedPc   = GuardedPc()
+  val ftqIdx:           FtqPtr      = new FtqPtr
+  val takenCfiOffset:   Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+  val size:             UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
+  val data:             UInt        = UInt(blockBits.W)
+  val icacheMeta:       ICacheMeta  = new ICacheMeta
+  val perf_isCrossLine: Bool        = Bool()
 
-  val data: UInt = UInt(blockBits.W)
-  // val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
-
-  val icacheMeta: ICacheMeta = new ICacheMeta
-
-  val perf_isCrossLine: Bool = Bool()
+  def endIndex: UInt =
+    startVAddr(log2Ceil(MaxInstNumPerBlock), instOffsetBits) + takenCfiOffset.bits
 }
 
 class MainPipeToIfuReq(implicit p: Parameters) extends ICacheBundle {
-  val firstRange:  UInt                    = UInt(FetchBlockInstNum.W)
-  val totalRange:  UInt                    = UInt(FetchBlockInstNum.W)
-  val maybeRvcMap: UInt                    = UInt(MaxInstNumPerBlock.W)
-  val info:        Vec[FetchBlocktoIfuReq] = Vec(FetchPorts, new FetchBlocktoIfuReq)
+  val firstRange: UInt = UInt(FetchBlockInstNum.W)
+  val totalRange: UInt = UInt(FetchBlockInstNum.W)
+  // aligned to the fetch coordinate (bit 0 = the first fetched instruction slot)
+  val maybeRvcMap: UInt                = UInt(MaxInstNumPerBlock.W)
+  val info:        Vec[FetchBlockInfo] = Vec(FetchPorts, new FetchBlockInfo)
 }
 
 class MainPipeToIfuIO(implicit p: Parameters) extends ICacheBundle {
@@ -259,14 +278,6 @@ class MainPipeToIfuIO(implicit p: Parameters) extends ICacheBundle {
   // for timing fix, sent 1 cycle after req is fired
   val corrupt: Vec[Vec[Bool]] = Vec(FetchPorts, Vec(PortNumber, Bool()))
 }
-
-// class MainPipeToIfuIO(implicit p: Parameters) extends ICacheBundle {
-//   class Req(implicit p: Parameters) extends ICacheBundle {
-//     val info: Vec[MainPipeToIfuReq] = Vec(FetchPorts, new MainPipeToIfuReq)
-//     val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
-//   }
-//   val req: DecoupledIO[Req] = DecoupledIO(new Req)
-// }
 
 class WayLookupToMainPipeBundle(implicit p: Parameters) extends ICacheBundle {
   val wayLookupInfo: Vec[Valid[WayLookupBundle]] = Vec(FetchPorts, Valid(new WayLookupBundle))

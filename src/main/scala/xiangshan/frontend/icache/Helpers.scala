@@ -283,24 +283,34 @@ trait ICacheMaybeRvcHelper extends HasICacheParameters with ICacheCacheLineHelpe
       leftShift:   Bool
   ): UInt = Mux(leftShift, maybeRvcMap << shiftNum, maybeRvcMap >> shiftNum)(MaxInstNumPerBlock - 1, 0)
 
-  def genInstRange(size: UInt): UInt =
-    Mux(size >= MaxInstNumPerBlock.U, ~0.U(MaxInstNumPerBlock.W), UIntToMask(size, MaxInstNumPerBlock))
-
-  def genMaybeRvcShiftInfo(
+  def genInstRange(size: UInt): UInt = {
+    // For max width = 2^N, shift amount bit-width (N+1) causes extra Mux stage.
+    // Since any value >= 2^N saturates to all-1, we check the MSB (size[N]) first.
+    // If set -> output all ones; else use lower N bits for UIntToMask.
+    // This reduces shifter width from (N+1) to N, improving timing.
+    require(isPow2(MaxInstNumPerBlock), s"MaxInstNumPerBlock ($MaxInstNumPerBlock) must be a power of two")
+    val sizeExt = size.pad(log2Ceil(MaxInstNumPerBlock) + 1) // Adapt to varying FetchSize values
+    val range = Mux(
+      sizeExt(log2Ceil(MaxInstNumPerBlock)),
+      Fill(MaxInstNumPerBlock, true.B),
+      UIntToMask(sizeExt(log2Ceil(MaxInstNumPerBlock) - 1, 0), MaxInstNumPerBlock)
+    )
+    range
+  }
+  def genMaybeRvcAlignInfo(
       req:            Vec[FtqFetchRequest],
       wayLookupEntry: Vec[WayLookupEntry]
-  ): MaybeRvcShiftInfo = {
-    val info = Wire(new MaybeRvcShiftInfo)
+  ): MaybeRvcAlignInfo = {
+    val info = Wire(new MaybeRvcAlignInfo)
 
-    val reqStart         = VecInit(req.map(_.startVAddr(log2Ceil(MaxInstNumPerBlock), 1)))
-    val takenCfiOffset   = VecInit(req.map(req => getFtqOffset(req.startVAddr, req.endPosition)))
-    val blockIsCrossLine = VecInit(req.map(req => isCrossLine(req.startVAddr, req.endPosition)))
-    val fetchSize        = VecInit(takenCfiOffset.map(_ +& 1.U))
-    val firstFetchSize   = fetchSize(0)
-    val secondFetchSize  = fetchSize(1)
-    val totalFetchSize   = firstFetchSize +& secondFetchSize
-    val firstBlockRange  = genInstRange(firstFetchSize)
-    val totalBlockRange  = Mux(req(1).valid, genInstRange(totalFetchSize), firstBlockRange)
+    val reqStart        = VecInit(req.map(_.startVAddr(log2Ceil(MaxInstNumPerBlock), 1)))
+    val takenCfiOffset  = VecInit(req.map(req => getFtqOffset(req.startVAddr, req.endPosition)))
+    val fetchSize       = VecInit(takenCfiOffset.map(_ +& 1.U))
+    val totalFetchSize  = fetchSize(0) +& fetchSize(1)
+    val firstBlockRange = genInstRange(fetchSize(0))
+    // Keep req(1).valid out of this s0 timing path. totalBlockRange is selected
+    // with the registered twoFetchValid in MainPipe before being sent to IFU.
+    val totalBlockRange = genInstRange(totalFetchSize)
 
     info.firstBlockRange := firstBlockRange
     info.totalBlockRange := totalBlockRange
@@ -314,62 +324,52 @@ trait ICacheMaybeRvcHelper extends HasICacheParameters with ICacheCacheLineHelpe
     info.shiftNum(1) := ~reqStart(0)
 
     // Line 2 belongs to req1's first cache line. It may be before or after the end of req0,
-    // so shiftFlag selects whether it should move right or left.
-    info.shiftFlag   := reqStart(1) > firstFetchSize
-    info.shiftNum(2) := Mux(info.shiftFlag, reqStart(1) - firstFetchSize, firstFetchSize - reqStart(1))
+    // so shouldShiftRight selects whether it should move right or left.
+    info.shouldShiftRight := reqStart(1) > fetchSize(0)
+    info.shiftNum(2)      := Mux(info.shouldShiftRight, reqStart(1) - fetchSize(0), fetchSize(0) - reqStart(1))
 
     // Line 3 is the cross-line tail of req1. The extra +2 shift is encoded by Cat(map, 0.U(2.W)) below.
     info.shiftNum(3) := ~reqStart(1) + takenCfiOffset(0)
 
-    // Apply the low bits in s0 so the registered map only needs coarse shifts in s1.
-    info.sramShiftMaybeRvc(0)(0) := shiftMaybeRvc(
-      wayLookupEntry(0).maybeRvcMap(0),
-      info.shiftNum(0),
-      leftShift = false.B
-    )
-    info.sramShiftMaybeRvc(0)(1) :=
-      shiftMaybeRvc(
-        Cat(wayLookupEntry(0).maybeRvcMap(1), 0.U(1.W)),
-        info.shiftNum(1),
-        leftShift = true.B
+    // Pre-align each raw SRAM per-line map into the fetch coordinate here in s0
+    // (the SRAM path is fully aligned in s0 and registered; the MSHR path reuses
+    // the same shiftNum/shouldShiftRight to align the missUnit map in s1).
+    // shiftConfig describes each maybeRvcMap: (extraShiftNum, shiftLeft).
+    info.shiftConfig.zipWithIndex.foreach { case (c, i) =>
+      val reqIdx  = i / PortNumber
+      val portIdx = i % PortNumber
+      info.sramAlignedMaybeRvcMap(reqIdx)(portIdx) := shiftMaybeRvc(
+        Cat(wayLookupEntry(reqIdx).maybeRvcMap(portIdx), 0.U(c._1.W)),
+        info.shiftNum(i),
+        leftShift = c._2
       )
-    info.sramShiftMaybeRvc(1)(0) :=
-      shiftMaybeRvc(
-        wayLookupEntry(1).maybeRvcMap(0),
-        info.shiftNum(2),
-        leftShift = !info.shiftFlag
-      )
-    info.sramShiftMaybeRvc(1)(1) :=
-      shiftMaybeRvc(
-        Cat(wayLookupEntry(1).maybeRvcMap(1), 0.U(2.W)),
-        info.shiftNum(3),
-        leftShift = true.B
-      )
+    }
 
-    info.maybeRvcMaskVec(0)(0) := genInstRange(
-      Mux(
-        blockIsCrossLine(0),
-        MaxInstNumPerBlock.U - info.shiftNum(0),
-        firstFetchSize
-      )
-    )
-    info.maybeRvcMaskVec(0)(1) := firstBlockRange & ~info.maybeRvcMaskVec(0)(0)
-    info.maybeRvcMaskVec(1)(0) := Mux(
-      req(1).valid,
-      genInstRange(
-        firstFetchSize +& Mux(
-          blockIsCrossLine(1),
-          MaxInstNumPerBlock.U - reqStart(1),
-          secondFetchSize
-        )
-      ) & ~firstBlockRange,
-      0.U
-    )
-    info.maybeRvcMaskVec(1)(1) := Mux(
-      req(1).valid,
-      totalBlockRange & ~(firstBlockRange | info.maybeRvcMaskVec(1)(0)),
-      0.U
-    )
+    // The following masks are all in the "combined coordinate" space:
+    // bit 0 corresponds to the first valid instruction slot of req0,
+    // consistent with the coordinate after aligning by sramAlignedMaybeRvcMap / mshrAlignedMaybeRvcMap.
+    //
+    // (0)(0): instructions of req0 in line0.
+    //   genInstRange(N - shiftNum(0)): all slots from req0 start to the end of line0.
+    //   & firstBlockRange clamps to req0's actual fetch range, i.e., min(N - reqStart(0), fetchSize(0)).
+    info.alignedMaybeRvcMaskVec(0)(0) := genInstRange(MaxInstNumPerBlock.U - info.shiftNum(0)) & firstBlockRange
+    // (0)(1): req0's tail across line1 = the part of firstBlockRange not covered by line0.
+    info.alignedMaybeRvcMaskVec(0)(1) := firstBlockRange & ~info.alignedMaybeRvcMaskVec(0)(0)
+
+    // req1 starts fetching at combined coordinate fetchSize(0). Its line0 can occupy at most N - reqStart(1) slots,
+    // so the upper bound for line0 mask is fetchSize(0) + (N - reqStart(1)).
+    // By the invariant fetchSize(0) + fetchSize(1) <= N (see constraints in Ftq), we have:
+    //   1) This upper bound <= 2*N, truncating to log2Ceil(N)+1 bits covers all valid values.
+    //   2) The only value that gets truncated is 2*N, which occurs iff fetchSize(0)=N and reqStart(1)=0,
+    //      in which case fetchSize(1)=0 and both masks are already zero. Thus truncation is safe,
+    //      and also reduces shifter width to improve timing.
+    val req1Line0End = (MaxInstNumPerBlock.U - reqStart(1) + fetchSize(0))(log2Ceil(MaxInstNumPerBlock), 0)
+    // (1)(0): instructions of req1 in line0 = [fetchSize(0), min(req1Line0End, fetchSize(0)+fetchSize(1))-1].
+    //   genInstRange(req1Line0End) provides the upper bound; & totalBlockRange clamps to the total fetch range.
+    //   & ~firstBlockRange removes req0's part.
+    info.alignedMaybeRvcMaskVec(1)(0) := genInstRange(req1Line0End) & totalBlockRange & ~firstBlockRange
+    // (1)(1): req1's tail in line1 = the part of totalBlockRange not covered by firstBlockRange and (1)(0).
+    info.alignedMaybeRvcMaskVec(1)(1) := totalBlockRange & ~(firstBlockRange | info.alignedMaybeRvcMaskVec(1)(0))
     info
   }
 }
