@@ -9,6 +9,9 @@ _TOP = "Frontend_top."
 _ICACHE = _TOP + "Frontend.inner_icache."
 _MAIN = _ICACHE + "mainPipe."
 _MISS = _ICACHE + "missUnit."
+_PREFETCH = _ICACHE + "prefetcher."
+_NUM_WAYS = 4
+_PAGE_CACHELINE_INDEX_BITS = 6
 
 _S1_CROSS = (
     (_MAIN + "s1_req_0_isCrossLine", _MAIN + "accessTrace_crossLine"),
@@ -21,6 +24,13 @@ _S1_HITS = tuple(
     )
     for req in range(2)
     for line in range(2)
+)
+_PREFETCH_META_VALIDS = tuple(
+    (
+        _PREFETCH + f"io_metaRead_resp_entries_0_{way}_valid",
+        _PREFETCH + f"__Vtogcov__io_metaRead_resp_entries_0_{way}_valid",
+    )
+    for way in range(_NUM_WAYS)
 )
 
 
@@ -48,11 +58,36 @@ ICACHE_HITMISS_SAMPLER_BIN_KEYS = frozenset(
 
 _SIGNALS = {
     "s1_valid": (_MAIN + "s1_valid", _MAIN + "__Vtogcov__s1_valid"),
+    "s1_fire": (_MAIN + "s1_fire", _MAIN + "__Vtogcov__s1_fire"),
+    "s1_flush": (_MAIN + "s1_flush", _MAIN + "__Vtogcov__s1_flush"),
+    "global_flush": (
+        _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
+        _ICACHE + "io_fromFtq_redirectFlush",
+    ),
     "cross0": _S1_CROSS[0],
     "cross1": _S1_CROSS[1],
     "req1_valid": (_MAIN + "s1_req_1_valid",),
     "req0_start": (_MAIN + "s1_req_0_vAddr_0_addr",),
     "req1_start": (_MAIN + "s1_req_1_vAddr_0_addr",),
+    "main_s1_ptag": (
+        _MAIN + "s1_wayLookupEntry_0_pTag",
+        _MAIN + "s1_pTag",
+        _MAIN + "__Vtogcov__s1_pTag",
+    ),
+    "main_s1_vset": (
+        _MAIN + "s1_req_0_vSetIdx_0",
+        _MAIN + "s1_wayLookupEntry_0_vSetIdx_0",
+    ),
+    "main_s1_ftq_flag": (
+        _MAIN + "s1_req_0_ftqIdx_flag",
+        _MAIN + "__Vtogcov__s1_req_0_ftqIdx_flag",
+    ),
+    "main_s1_ftq_value": (
+        _MAIN + "s1_req_0_ftqIdx_value",
+        _MAIN + "__Vtogcov__s1_req_0_ftqIdx_value",
+    ),
+    "main_s1_mmio": (_MAIN + "s1_isMmio", _MAIN + "__Vtogcov__s1_isMmio"),
+    "fencei": (_TOP + "io_fencei",),
     "pmp_instr": (_MAIN + "io_pmp_resp_instr",),
     "itlb_exception": (
         _MAIN + "s1_exceptionInfo_0_itlbException_value",
@@ -60,7 +95,6 @@ _SIGNALS = {
     ),
     "sram_valid": (
         _MAIN + "s1_sramRespValid",
-        _MAIN + "s1_sramValid_0_1",
         _MAIN + "__Vtogcov__s1_sramRespValid",
     ),
     "sram_valid_cross0": (_MAIN + "s1_sramValid_0_1",),
@@ -74,16 +108,25 @@ _SIGNALS = {
     "last_fire_next": (_MISS + "lastFireNext", _MISS + "__Vtogcov__lastFireNext"),
     "id_next": (_MISS + "idNext", _MISS + "__Vtogcov__idNext"),
     "fetch_valid": (
+        _MAIN + "io_missReq_valid",
         _MAIN + "__Vtogcov__io_missReq_valid",
         _MISS + "fetchDemux.io_in_valid",
         _MISS + "fetchDemux.__Vtogcov__io_in_valid",
     ),
+    "fetch_ready": (
+        _MAIN + "io_missReq_ready",
+        _MAIN + "__Vtogcov__io_missReq_ready",
+        _MISS + "fetchDemux.io_in_ready",
+        _MISS + "fetchDemux.__Vtogcov__io_in_ready",
+    ),
     "fetch_hit": (_MISS + "fetchHit", _MISS + "__Vtogcov__fetchHit"),
     "fetch_paddr": (
+        _MAIN + "io_missReq_bits_blkPAddr",
         _MAIN + "__Vtogcov__io_missReq_bits_blkPAddr",
         _ICACHE + "_mainPipe_io_missReq_bits_blkPAddr",
     ),
     "fetch_vset": (
+        _MAIN + "io_missReq_bits_vSetIdx",
         _MAIN + "__Vtogcov__io_missReq_bits_vSetIdx",
         _ICACHE + "_mainPipe_io_missReq_bits_vSetIdx",
     ),
@@ -103,6 +146,64 @@ _SIGNALS = {
     "d_denied": (_TOP + "auto_inner_icache_client_out_d_bits_denied",),
     "corrupt_reg": (_MISS + "corruptReg",),
     "denied_reg": (_MISS + "deniedReg",),
+    "prefetch_s1_valid": (
+        _PREFETCH + "s1_valid",
+        _PREFETCH + "__Vtogcov__s1_valid",
+    ),
+    "prefetch_s1_soft": (
+        _PREFETCH + "s1_isSoftPrefetch",
+        _PREFETCH + "__Vtogcov__s1_isSoftPrefetch",
+    ),
+    "prefetch_s1_sram_valid": (
+        _PREFETCH + "s1_sramValid_0",
+        _PREFETCH + "__Vtogcov__s1_sramValid_0",
+    ),
+    "prefetch_s1_sram_hit": (
+        _PREFETCH + "s1_sramHits_0",
+        _PREFETCH + "__Vtogcov__s1_sramHits_0",
+    ),
+    "prefetch_s1_ptag": (
+        _PREFETCH + "s1_pTag",
+        _PREFETCH + "__Vtogcov__s1_pTag",
+    ),
+    "prefetch_s1_vset": (
+        _PREFETCH + "s1_readMetaSetIdx_0",
+        _PREFETCH + "__Vtogcov__s1_readMetaSetIdx_0",
+    ),
+    "prefetch_s1_ftq_flag": (_PREFETCH + "s1_ftqIdx_flag",),
+    "prefetch_s1_ftq_value": (_PREFETCH + "s1_ftqIdx_value",),
+    "prefetch_s2_valid": (
+        _PREFETCH + "s2_valid",
+        _PREFETCH + "__Vtogcov__s2_valid",
+    ),
+    "prefetch_s2_fire": (
+        _PREFETCH + "s2_fire",
+        _PREFETCH + "__Vtogcov__s2_fire",
+    ),
+    "prefetch_s2_exception": (
+        _PREFETCH + "s2_exception_value",
+        _PREFETCH + "__Vtogcov__s2_exception_value",
+    ),
+    "prefetch_s2_mmio": (
+        _PREFETCH + "s2_isMmio",
+        _PREFETCH + "__Vtogcov__s2_isMmio",
+    ),
+    "prefetch_s2_sram_hit": (
+        _PREFETCH + "s2_sramHits_0",
+        _PREFETCH + "__Vtogcov__s2_sramHits_0",
+    ),
+    "prefetch_s2_mshr_hit": (
+        _PREFETCH + "s2_mshrHits_valid",
+        _PREFETCH + "__Vtogcov__s2_mshrHits_valid",
+    ),
+    "prefetch_s2_ptag": (
+        _PREFETCH + "s2_pTag",
+        _PREFETCH + "__Vtogcov__s2_pTag",
+    ),
+    "prefetch_s2_vset": (
+        _PREFETCH + "s2_readMetaSetIdx_0",
+        _PREFETCH + "__Vtogcov__s2_readMetaSetIdx_0",
+    ),
 }
 
 
@@ -187,7 +288,11 @@ def _mark(
 
 
 def reset_icache_hitmiss_coverage_state(recorder) -> None:
-    recorder._icache_hitmiss_cov_state = {"refilled_keys": set()}
+    recorder._icache_hitmiss_cov_state = {
+        "refilled_keys": {},
+        "full_set_miss_signatures": {},
+        "last_clean_hit": None,
+    }
 
 
 def _snapshot(recorder) -> dict[str, Any]:
@@ -200,6 +305,9 @@ def _snapshot(recorder) -> dict[str, Any]:
             for req in range(2)
             for line in range(2)
         ),
+    )
+    scalar["prefetch_meta_valids"] = _read_candidates(
+        recorder, _PREFETCH_META_VALIDS
     )
     return scalar
 
@@ -214,6 +322,12 @@ def _line_valids(snapshot: dict[str, Any]) -> tuple[bool, bool, bool, bool]:
 def _line_hits(snapshot: dict[str, Any]) -> tuple[bool, bool, bool, bool]:
     hits = snapshot["hits"]
     waymask = snapshot["waymask"]
+    sram_valid = (
+        snapshot["sram_valid"],
+        snapshot["sram_valid_cross0"],
+        snapshot["sram_valid_req1"],
+        snapshot["sram_valid_req1_cross"],
+    )
     valid = _line_valids(snapshot)
     return tuple(
         valid[index]
@@ -221,12 +335,45 @@ def _line_hits(snapshot: dict[str, Any]) -> tuple[bool, bool, bool, bool]:
         and int(hits[index]) != 0
         and waymask[index] is not None
         and int(waymask[index]) != 0
+        and sram_valid[index] is not None
+        and int(sram_valid[index]) != 0
         for index in range(4)
     )
 
 
+def _clean_hit(snapshot: dict[str, Any], line_hits: tuple[bool, bool, bool, bool]) -> bool:
+    line_valids = _line_valids(snapshot)
+    return (
+        _on(snapshot["s1_valid"])
+        and all(
+            (not valid) or hit
+            for valid, hit in zip(line_valids, line_hits)
+        )
+        and _off(snapshot["itlb_exception"])
+        and _off(snapshot["pmp_instr"])
+        and _off(snapshot["s1_flush"])
+        and _off(snapshot["fencei"])
+    )
+
+
+def _hit_identity(snapshot: dict[str, Any]) -> Optional[dict[str, Any]]:
+    if snapshot["req0_start"] is None:
+        return None
+    start = int(snapshot["req0_start"])
+    return {
+        "line": start >> 6,
+        "offset": start & 0x3F,
+        "cross": _on(snapshot["cross0"]),
+    }
+
+
 def _clean_fetch_refill(snapshot: dict[str, Any], mshrs: list[dict[str, Optional[int]]]) -> Optional[tuple[int, int]]:
-    if not _on(snapshot["last_fire_next"]) or snapshot["id_next"] is None:
+    if (
+        not _on(snapshot["last_fire_next"])
+        or snapshot["id_next"] is None
+        or not _off(snapshot["global_flush"])
+        or not _off(snapshot["fencei"])
+    ):
         return None
     source = int(snapshot["id_next"])
     if not 0 <= source < len(mshrs):
@@ -238,7 +385,76 @@ def _clean_fetch_refill(snapshot: dict[str, Any], mshrs: list[dict[str, Optional
         return None
     if item["paddr"] is None or item["vset"] is None:
         return None
-    return int(item["paddr"]), int(item["vset"])
+    return int(item["paddr"]) >> _PAGE_CACHELINE_INDEX_BITS, int(item["vset"])
+
+
+def _cache_key(ptag: Optional[int], vset: Optional[int]) -> Optional[tuple[int, int]]:
+    if ptag is None or vset is None:
+        return None
+    return int(ptag), int(vset)
+
+
+def _full_set_miss_signature(snapshot: dict[str, Any]) -> Optional[tuple[int, int, int, int]]:
+    values = (
+        snapshot["prefetch_s1_ptag"],
+        snapshot["prefetch_s1_vset"],
+        snapshot["prefetch_s1_ftq_flag"],
+        snapshot["prefetch_s1_ftq_value"],
+    )
+    if (
+        not _on(snapshot["prefetch_s1_valid"])
+        or not _off(snapshot["prefetch_s1_soft"])
+        or not _off(snapshot["global_flush"])
+        or not _off(snapshot["fencei"])
+        or not _on(snapshot["prefetch_s1_sram_valid"])
+        or not all(_on(valid) for valid in snapshot["prefetch_meta_valids"])
+        or not _off(snapshot["prefetch_s1_sram_hit"])
+        or any(value is None for value in values)
+    ):
+        return None
+    return tuple(int(value) for value in values)
+
+
+def _fetch_miss_signature(snapshot: dict[str, Any]) -> Optional[tuple[int, int, int, int]]:
+    values = (
+        snapshot["fetch_paddr"],
+        snapshot["fetch_vset"],
+        snapshot["main_s1_ftq_flag"],
+        snapshot["main_s1_ftq_value"],
+    )
+    if any(value is None for value in values):
+        return None
+    return (
+        int(values[0]) >> _PAGE_CACHELINE_INDEX_BITS,
+        int(values[1]),
+        int(values[2]),
+        int(values[3]),
+    )
+
+
+def _main_s1_signature(snapshot: dict[str, Any]) -> Optional[tuple[int, int, int, int]]:
+    values = (
+        snapshot["main_s1_ptag"],
+        snapshot["main_s1_vset"],
+        snapshot["main_s1_ftq_flag"],
+        snapshot["main_s1_ftq_value"],
+    )
+    if any(value is None for value in values):
+        return None
+    return tuple(int(value) for value in values)
+
+
+def _same_cache_key(
+    item: dict[str, Optional[int]], key: Optional[tuple[int, int]]
+) -> bool:
+    return (
+        key is not None
+        and _on(item["valid"])
+        and item["paddr"] is not None
+        and item["vset"] is not None
+        and (int(item["paddr"]) >> _PAGE_CACHELINE_INDEX_BITS) == key[0]
+        and int(item["vset"]) == key[1]
+    )
 
 
 def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
@@ -258,25 +474,65 @@ def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
     evidence["mshr"] = mshrs
     line_valids = _line_valids(snapshot)
     line_hits = _line_hits(snapshot)
-    single_hit = line_hits[0] and not _on(snapshot["cross0"])
-    cross_hit = line_hits[0] and line_hits[1] and _on(snapshot["cross0"])
 
-    _mark(
-        recorder,
-        "icache_hit_path",
-        "continuous_same_line_sram_hit",
-        cycle,
-        _on(snapshot["s1_valid"]) and single_hit,
-        evidence,
-    )
-    _mark(
-        recorder,
-        "icache_hit_path",
-        "continuous_cross_line_sram_hit",
-        cycle,
-        _on(snapshot["s1_valid"]) and cross_hit,
-        evidence,
-    )
+    if (
+        _on(snapshot["global_flush"])
+        or _on(snapshot["s1_flush"])
+        or _on(snapshot["fencei"])
+    ):
+        state["refilled_keys"].clear()
+        state["full_set_miss_signatures"].clear()
+
+    full_set_signature = _full_set_miss_signature(snapshot)
+    if full_set_signature is not None:
+        state["full_set_miss_signatures"][full_set_signature] = cycle
+
+    # These two bins describe a sequence of accepted clean hit requests.  A
+    # gap between requests is allowed, but an intervening non-hit request,
+    # exception, flush, or fence.i breaks the sequence.
+    if _on(snapshot["s1_flush"]) or _on(snapshot["fencei"]):
+        state["last_clean_hit"] = None
+    if _on(snapshot["s1_fire"]):
+        current_hit = _hit_identity(snapshot) if _clean_hit(snapshot, line_hits) else None
+        previous_hit = state["last_clean_hit"]
+        if current_hit is not None and previous_hit is not None:
+            same_line_different_offset = (
+                current_hit["line"] == previous_hit["line"]
+                and current_hit["offset"] != previous_hit["offset"]
+            )
+            crossed_cacheline = (
+                current_hit["line"] != previous_hit["line"]
+                or current_hit["cross"]
+                or previous_hit["cross"]
+            )
+            sequence_evidence = dict(evidence)
+            sequence_evidence["previous_clean_hit"] = previous_hit
+            sequence_evidence["current_clean_hit"] = current_hit
+            _mark(
+                recorder,
+                "icache_hit_path",
+                "continuous_same_line_sram_hit",
+                cycle,
+                same_line_different_offset,
+                sequence_evidence,
+            )
+            _mark(
+                recorder,
+                "icache_hit_path",
+                "continuous_cross_line_sram_hit",
+                cycle,
+                crossed_cacheline,
+                sequence_evidence,
+            )
+        state["last_clean_hit"] = current_hit
+    elif _on(snapshot["s1_valid"]) and (
+        _on(snapshot["itlb_exception"])
+        or _on(snapshot["pmp_instr"])
+        or _on(snapshot["s1_flush"])
+        or _on(snapshot["fencei"])
+    ):
+        state["last_clean_hit"] = None
+
     independent = (
         _on(snapshot["s1_valid"])
         and _on(snapshot["req1_valid"])
@@ -284,6 +540,10 @@ def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
         and snapshot["req0_start"] is not None
         and snapshot["req1_start"] is not None
         and (int(snapshot["req0_start"]) >> 6) != (int(snapshot["req1_start"]) >> 6)
+        and _off(snapshot["itlb_exception"])
+        and _off(snapshot["pmp_instr"])
+        and _off(snapshot["s1_flush"])
+        and _off(snapshot["fencei"])
     )
     _mark(recorder, "icache_hit_path", "dual_request_independent_hit", cycle, independent, evidence)
     _mark(
@@ -328,16 +588,26 @@ def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
 
     clean_refill_key = _clean_fetch_refill(snapshot, mshrs)
     if clean_refill_key is not None:
-        state["refilled_keys"].add(clean_refill_key)
-    prefetch_key = None
-    if snapshot["prefetch_paddr"] is not None and snapshot["prefetch_vset"] is not None:
-        prefetch_key = (int(snapshot["prefetch_paddr"]), int(snapshot["prefetch_vset"]))
+        state["refilled_keys"][clean_refill_key] = cycle
+    prefetch_key = _cache_key(
+        snapshot["prefetch_s2_ptag"], snapshot["prefetch_s2_vset"]
+    )
+    prefetch_refill_cycle = state["refilled_keys"].get(prefetch_key)
     _mark(
         recorder,
         "icache_miss_path",
         "fetch_refill_prefetch_hit",
         cycle,
-        prefetch_valid and prefetch_hit and prefetch_key in state["refilled_keys"],
+        _on(snapshot["prefetch_s2_valid"])
+        and _on(snapshot["prefetch_s2_fire"])
+        and _off(snapshot["prefetch_s2_exception"])
+        and _off(snapshot["prefetch_s2_mmio"])
+        and _on(snapshot["prefetch_s2_sram_hit"])
+        and _off(snapshot["prefetch_s2_mshr_hit"])
+        and _off(snapshot["global_flush"])
+        and _off(snapshot["fencei"])
+        and prefetch_refill_cycle is not None
+        and prefetch_refill_cycle < cycle,
         evidence,
     )
 
@@ -349,16 +619,40 @@ def sample_icache_hitmiss_coverage(recorder, env, cycle: int) -> None:
     )
     _mark(recorder, "icache_miss_path", "continuous_fetch_miss_merge", cycle, merge, evidence)
 
+    fetch_miss_signature = _fetch_miss_signature(snapshot)
+    full_set_cycle = state["full_set_miss_signatures"].get(fetch_miss_signature)
+    plru_condition = (
+        fetch_valid
+        and _on(snapshot["fetch_ready"])
+        and not fetch_hit
+        and full_set_cycle is not None
+        and full_set_cycle < cycle
+        and _off(snapshot["global_flush"])
+        and _off(snapshot["fencei"])
+    )
     _mark(
         recorder,
         "icache_miss_path",
         "plru_victim_on_miss",
         cycle,
-        fetch_valid and not fetch_hit and _on(snapshot["victim_req"]) and snapshot["victim_way"] is not None,
+        plru_condition,
         evidence,
     )
-    refill_then_hit = fetch_valid and fetch_hit and fetch_key in state["refilled_keys"] and not any(
-        _same_key(item, *(fetch_key or (None, None))) for item in mshrs
+    if plru_condition:
+        state["full_set_miss_signatures"].pop(fetch_miss_signature, None)
+    elif _on(snapshot["s1_fire"]):
+        state["full_set_miss_signatures"].pop(_main_s1_signature(snapshot), None)
+
+    demand_key = _cache_key(snapshot["main_s1_ptag"], snapshot["main_s1_vset"])
+    demand_refill_cycle = state["refilled_keys"].get(demand_key)
+    refill_then_hit = (
+        _on(snapshot["s1_fire"])
+        and _clean_hit(snapshot, line_hits)
+        and _off(snapshot["main_s1_mmio"])
+        and line_hits[0]
+        and demand_refill_cycle is not None
+        and demand_refill_cycle < cycle
+        and not any(_same_cache_key(item, demand_key) for item in mshrs)
     )
     _mark(recorder, "icache_miss_path", "refill_then_fetch_hit", cycle, refill_then_hit, evidence)
 
