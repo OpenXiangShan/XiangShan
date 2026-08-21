@@ -14,6 +14,10 @@ def initialize_ifu_coverage_state(recorder) -> None:
     recorder._ifu_cacheable_pending_cfi = None
     recorder._ifu_cacheable_last_delivery_entry = None
     recorder._ifu_ibuffer_alignment_pending = None
+    recorder._ifu_ibuffer_hold_pending = None
+    recorder._ifu_wb_pending = []
+    recorder._ifu_predecode_seen_types = set()
+    recorder._ifu_predecode_ras_seen = set()
 
 
 def reset_ifu_coverage_state(recorder) -> None:
@@ -27,6 +31,8 @@ def handle_ifu_event(recorder, event: dict) -> None:
     recorder._ifu_last_cfvec = None
     recorder._ifu_cacheable_pending_cfi = None
     recorder._ifu_ibuffer_alignment_pending = None
+    recorder._ifu_ibuffer_hold_pending = None
+    recorder._ifu_wb_pending = []
     recorder._ifu_redirect_skip_until_cycle = cycle + 1
 
 
@@ -387,6 +393,26 @@ CFVEC_SAMPLER_BIN_KEYS = frozenset(
         ("ifu_cacheable_compact", "contiguous_slots_observed"),
         ("ifu_cacheable_expander", "legal_rvc_input_seen"),
         ("ifu_cacheable_expander", "rvi_input_seen"),
+        ("ifu_cacheable_main_path", "dual_clean_delivery"),
+        ("ifu_data_slice", "first_block_coherent"),
+        ("ifu_data_slice", "second_block_source_coherent"),
+        ("ifu_data_slice", "rvi_crosses_fetch_blocks"),
+        ("ifu_data_slice", "rvc_keeps_second_halfword"),
+        ("ifu_data_slice", "second_block_suppressed"),
+        ("ifu_instr_compact_rank", "rank_matches_output_slot"),
+        ("ifu_aligned_slot", "pc_data_valid_coherent"),
+        ("ifu_predecode", "non_cfi_correct"),
+        ("ifu_predecode", "branch_jal_jalr_correct"),
+        ("ifu_predecode", "call_return_correct"),
+        ("ifu_predecode", "cfi_offset_correct"),
+        ("ifu_predecode", "slot_mapping_coherent"),
+        ("ifu_ibuffer_output", "predecode_matches_encoding"),
+        ("ifu_ibuffer_backpressure", "payload_stable"),
+        ("ifu_ibuffer_backpressure", "held_payload_delivered"),
+        ("ifu_ibuffer_backpressure", "upstream_stalled"),
+        ("ifu_writeback", "ordinary_no_redirect"),
+        ("ifu_writeback", "dual_fetch_sources_match"),
+        ("ifu_writeback", "instr_count_matches_enq"),
         ("ifu_ibuffer_alignment", "zero_pointer_slot_zero"),
         ("ifu_ibuffer_alignment", "nonzero_shift_matches_slot"),
         ("ifu_ibuffer_alignment", "wide_window_bounded"),

@@ -1063,6 +1063,8 @@ def backannotate(
         items = _pilot_bins_for_reference(ref, pilot)
         if not items:
             continue
+        if bin_prefix and not any(item.bin_id.startswith(bin_prefix) for item in items):
+            continue
 
         suggested_testcases = {item.testcase for item in items if item.testcase}
         if ref.kind == "bin":

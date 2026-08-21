@@ -587,10 +587,10 @@ def test_canonical_registry_matches_the_single_sampler_contract():
             for row in csv.DictReader(handle)
             if row["Coverpoint"].strip()
         }
-    assert len(active) == 308
+    assert len(active) == 328
     assert active == set(FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS)
     assert len(CFVEC_SAMPLER_BIN_KEYS) == 17
-    assert len(IFU_CFVEC_SAMPLER_BIN_KEYS) == 64
+    assert len(IFU_CFVEC_SAMPLER_BIN_KEYS) == 84
     assert len(TWO_FETCH_SAMPLER_BIN_KEYS) == 41
     assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 47
     assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 37
@@ -815,7 +815,7 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     assert "s1_icacheMeta_0_pmpMmio" not in recorder_source
     assert "s1_icacheMetaIn_0_itlbPbmt" in recorder_source
     assert "s1_icacheMetaIn_0_pmpMmio" in recorder_source
-    assert len(recorder.definitions) == 308
+    assert len(recorder.definitions) == 328
     assert all(item.coverpoint for item in recorder.definitions)
     assert "FunctionalCoverageRecorder.from_pilot_csv" in fixture_source
     assert "set_line_coverage" in fixture_source
@@ -1171,6 +1171,19 @@ def test_funcov_targets_resolve_from_exact_registry_testcase(tmp_path):
         "BIN-855",
         "BIN-856",
         "BIN-857",
+        "BIN-869",
+        "BIN-870",
+        "BIN-871",
+        "BIN-873",
+        "BIN-874",
+        "BIN-875",
+        "BIN-876",
+        "BIN-883",
+        "BIN-884",
+        "BIN-885",
+        "BIN-886",
+        "BIN-887",
+        "BIN-888",
     ]
 
 
@@ -1193,6 +1206,7 @@ def test_cross_block_rvi_target_resolves_boundary_bins(tmp_path):
         "BIN-866",
         "BIN-867",
         "BIN-868",
+        "BIN-872",
     ]
 
 
@@ -2074,6 +2088,37 @@ def test_backannotation_tool_distinguishes_model_dut_and_manual_close(tmp_path):
         )
     with pytest.raises(ValueError, match="already owned"):
         validate_mapping(testpoint_path, pilot)
+
+
+def test_backannotation_bin_prefix_preserves_unscoped_rows(tmp_path):
+    pilot_path = tmp_path / "pilot.csv"
+    testpoint_path = tmp_path / "testpoints.csv"
+    pilot_path.write_text(
+        "Bin_ID,Coverage_Group,Coverpoint,Bin_Name,建议试点用例\n"
+        "BIN-501,group_a,point_a,bin_a,case_a\n"
+        "BIN-601,group_b,point_b,bin_b,case_b\n",
+        encoding="utf-8-sig",
+    )
+    testpoint_path.write_text(
+        "一级测试点,coverage,status,testcase,evidence\n"
+        "leaf_a,\"covergroup group_a, coverpoint point_a, bins bin_a (BIN-501)\",MODELED,case_a,\n"
+        "leaf_b,\"covergroup group_b, coverpoint point_b, bins bin_b (BIN-601)\",HIT,case_b,existing DUT evidence\n",
+        encoding="utf-8-sig",
+    )
+
+    counts = backannotate(
+        testpoint_path,
+        load_pilot(pilot_path, bin_prefix="BIN-5"),
+        [],
+        apply=True,
+        bin_prefix="BIN-5",
+    )
+
+    assert counts["model"] == 1
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[1]["status"] == "HIT"
+    assert rows[1]["evidence"] == "existing DUT evidence"
 
 
 def test_backannotation_rejects_hit_from_failed_dut_artifact(tmp_path):

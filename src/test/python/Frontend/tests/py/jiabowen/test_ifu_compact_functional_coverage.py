@@ -113,6 +113,19 @@ def _set_ifu_output(
     dut.set(_PREFIX + "uncacheRedirect_valid", 0)
 
 
+def _set_aligned_slot(dut, slot, entry, *, block_sel, branch_type, rd=0, rs=0):
+    _slot, pc, instr, is_rvc, end_offset, _flag, _value, _exception = entry
+    dut.set(_PREFIX + f"s2_alignedInstrVec_{slot}_valid", 1)
+    dut.set(_PREFIX + f"s2_alignedInstrPcVec_{slot}_addr", int(pc) >> 1)
+    dut.set(_PREFIX + f"s2_alignedInstrVec_{slot}_isRvc", is_rvc)
+    dut.set(_PREFIX + f"s2_alignedInstrVec_{slot}_blockSel", block_sel)
+    dut.set(_PREFIX + f"s2_alignedInstrVec_{slot}_endOffset", end_offset)
+    dut.set(_PREFIX + f"s2_expandedInstrDataVec_{slot}", instr)
+    dut.set(_PREFIX + f"s2_alignedPdInfoVec_{slot}_brAttribute_branchType", branch_type)
+    dut.set(_PREFIX + f"s2_alignedPdInfoVec_{slot}_brAttribute_rd", rd)
+    dut.set(_PREFIX + f"s2_alignedPdInfoVec_{slot}_brAttribute_rs", rs)
+
+
 def test_ifu_compact_and_expander_bins_use_to_ibuffer_fire(tmp_path):
     recorder, env, dut, memory = _make_recorder(tmp_path)
     base = 0x80000000
@@ -402,6 +415,94 @@ def test_ifu_compact_two_fetch_source_requires_expected_ftq_order(tmp_path):
 
     assert recorder.key_hit("ifu_instr_compact_source", "two_fetch_select_block")
     assert recorder.key_hit("ifu_cacheable_compact", "two_fetch_source_observed")
+
+
+def test_ifu_dual_slice_alignment_and_predecode_are_coherent(tmp_path):
+    recorder, env, dut, memory = _make_recorder(tmp_path)
+    base = 0x80000000
+    entries = [
+        (0, base, 0x00000013, 0, 1, 0, 3, 0),
+        (1, base + 4, 0x00000063, 0, 3, 0, 3, 0),
+        (2, base + 8, 0x000000EF, 0, 5, 0, 4, 0),
+        (3, base + 12, 0x00008067, 0, 7, 0, 4, 0),
+    ]
+    for entry in entries:
+        memory.write32(entry[1], entry[2])
+    _set_ifu_output(dut, entries)
+    for slot, entry in enumerate(entries):
+        branch_type = (0, 1, 2, 3)[slot]
+        rd = 1 if slot == 2 else 0
+        rs = 1 if slot == 3 else 0
+        _set_aligned_slot(
+            dut,
+            slot,
+            entry,
+            block_sel=0 if slot < 2 else 1,
+            branch_type=branch_type,
+            rd=rd,
+            rs=rs,
+        )
+        if branch_type in {1, 2}:
+            dut.set(_PREFIX + f"predChecker.io_req_bits_jumpOffsetVec_{slot}_addr", 0)
+    dut.set(_PREFIX + "s2_fetchBlock_0_valid", 1)
+    dut.set(_PREFIX + "s2_fetchBlock_1_valid", 1)
+    dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_flag", 0)
+    dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_value", 3)
+    dut.set(_PREFIX + "s2_fetchBlock_1_ftqIdx_flag", 0)
+    dut.set(_PREFIX + "s2_fetchBlock_1_ftqIdx_value", 4)
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert recorder.key_hit("ifu_cacheable_main_path", "dual_clean_delivery")
+    assert recorder.key_hit("ifu_data_slice", "first_block_coherent")
+    assert recorder.key_hit("ifu_data_slice", "second_block_source_coherent")
+    assert recorder.key_hit("ifu_instr_compact_rank", "rank_matches_output_slot")
+    assert recorder.key_hit("ifu_aligned_slot", "pc_data_valid_coherent")
+    assert recorder.key_hit("ifu_predecode", "non_cfi_correct")
+    assert recorder.key_hit("ifu_predecode", "branch_jal_jalr_correct")
+    assert recorder.key_hit("ifu_predecode", "call_return_correct")
+    assert recorder.key_hit("ifu_predecode", "cfi_offset_correct")
+    assert recorder.key_hit("ifu_predecode", "slot_mapping_coherent")
+    assert recorder.key_hit("ifu_ibuffer_output", "predecode_matches_encoding")
+
+
+def test_ifu_backpressure_release_and_writeback_match_enqueue(tmp_path):
+    recorder, env, dut, memory = _make_recorder(tmp_path)
+    base = 0x80000000
+    entries = [
+        (0, base, 0x00000013, 0, 1, 0, 3, 0),
+        (1, base + 4, 0x00000013, 0, 3, 0, 4, 0),
+    ]
+    for entry in entries:
+        memory.write32(entry[1], entry[2])
+    _set_ifu_output(dut, entries)
+    dut.set(_PREFIX + "s1_valid", 0)
+    dut.set(_PREFIX + "s1_ready", 1)
+    dut.set(_PREFIX + "wbValid", 0)
+    dut.set(_PREFIX + "wbInstrCount", 0)
+    sample_cfvec_coverage(recorder, env, 1)
+
+    dut.set(_PREFIX + "io_toIBuffer_ready", 0)
+    dut.set(_PREFIX + "s1_valid", 1)
+    dut.set(_PREFIX + "s1_ready", 0)
+    sample_cfvec_coverage(recorder, env, 2)
+    sample_cfvec_coverage(recorder, env, 3)
+
+    dut.set(_PREFIX + "io_toIBuffer_ready", 1)
+    dut.set(_PREFIX + "wbValid", 1)
+    dut.set(_PREFIX + "wbInstrCount", 2)
+    dut.set(_PREFIX + "wbAlignFetchBlock_0_ftqIdx_flag", 0)
+    dut.set(_PREFIX + "wbAlignFetchBlock_0_ftqIdx_value", 3)
+    dut.set(_PREFIX + "wbAlignFetchBlock_1_ftqIdx_flag", 0)
+    dut.set(_PREFIX + "wbAlignFetchBlock_1_ftqIdx_value", 4)
+    sample_cfvec_coverage(recorder, env, 4)
+
+    assert recorder.key_hit("ifu_ibuffer_backpressure", "payload_stable")
+    assert recorder.key_hit("ifu_ibuffer_backpressure", "held_payload_delivered")
+    assert recorder.key_hit("ifu_ibuffer_backpressure", "upstream_stalled")
+    assert recorder.key_hit("ifu_writeback", "ordinary_no_redirect")
+    assert recorder.key_hit("ifu_writeback", "dual_fetch_sources_match")
+    assert recorder.key_hit("ifu_writeback", "instr_count_matches_enq")
 
 
 def test_ifu_illegal_rvc_and_fetch_exception_priority_bins(tmp_path):

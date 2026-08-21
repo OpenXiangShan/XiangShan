@@ -66,6 +66,148 @@ def _read_raw_instruction(env, pc: int, is_rvc: bool) -> Optional[int]:
     return int(raw) & (0xFFFF if bool(is_rvc) else 0xFFFFFFFF)
 
 
+def _decode_branch_type(instr: int) -> int:
+    opcode = int(instr) & 0x7F
+    if opcode == 0x63:
+        return 1
+    if opcode == 0x6F:
+        return 2
+    if opcode == 0x67:
+        return 3
+    return 0
+
+
+def _decode_cfi_offset(instr: int, branch_type: int) -> Optional[int]:
+    instr = int(instr) & 0xFFFFFFFF
+    if int(branch_type) == 1:
+        immediate = (
+            (((instr >> 31) & 1) << 12)
+            | (((instr >> 7) & 1) << 11)
+            | (((instr >> 25) & 0x3F) << 5)
+            | (((instr >> 8) & 0xF) << 1)
+        )
+        width = 13
+    elif int(branch_type) == 2:
+        immediate = (
+            (((instr >> 31) & 1) << 20)
+            | (((instr >> 12) & 0xFF) << 12)
+            | (((instr >> 20) & 1) << 11)
+            | (((instr >> 21) & 0x3FF) << 1)
+        )
+        width = 21
+    else:
+        return None
+    sign = 1 << (width - 1)
+    return (immediate ^ sign) - sign
+
+
+def _read_ibuffer_payload_signature(recorder, dut, enq_enable: int, valid_mask: int) -> tuple:
+    values: list[Any] = [int(enq_enable), int(valid_mask)]
+    for slot in _active_ifu_output_slots(enq_enable, valid_mask):
+        values.append(
+            (
+                int(slot),
+                _read_ifu_output_slot(recorder, dut, "instrs", slot),
+                _read_ifu_output_slot(recorder, dut, "pc", slot, "_addr"),
+                _read_ifu_output_slot(recorder, dut, "isRvc", slot),
+                _read_ifu_output_slot(recorder, dut, "ftqPtr", slot, "_flag"),
+                _read_ifu_output_slot(recorder, dut, "ftqPtr", slot, "_value"),
+                _read_ifu_output_slot(recorder, dut, "instrEndOffset", slot, "_offset"),
+                _read_ifu_output_slot(recorder, dut, "instrEndOffset", slot, "_predTaken"),
+                _read_ifu_output_slot(recorder, dut, "instrEndOffset", slot, "_fixedTaken"),
+            )
+        )
+    return tuple(values)
+
+
+def _sample_ibuffer_backpressure(
+    recorder,
+    dut,
+    cycle: int,
+    ready: int,
+    valid: int,
+    enq_enable: int,
+    valid_mask: int,
+    pointer_redirect: bool,
+) -> None:
+    pending = getattr(recorder, "_ifu_ibuffer_hold_pending", None)
+    if pointer_redirect:
+        recorder._ifu_ibuffer_hold_pending = None
+        return
+
+    if int(valid) == 1 and int(ready) == 0:
+        signature = _read_ibuffer_payload_signature(recorder, dut, enq_enable, valid_mask)
+        evidence = {
+            "event": "ifu_to_ibuffer_backpressure",
+            "enq_enable": int(enq_enable),
+            "valid_mask": int(valid_mask),
+        }
+        if pending is not None and signature == pending["signature"]:
+            recorder.mark("ifu_ibuffer_backpressure", "payload_stable", cycle, evidence)
+        recorder._ifu_ibuffer_hold_pending = {
+            "cycle": int(cycle),
+            "signature": signature,
+        }
+        s1_valid = _read_ifu_internal(recorder, dut, "s1_valid")
+        s1_ready = _read_ifu_internal(recorder, dut, "s1_ready")
+        if s1_valid == 1 and s1_ready == 0:
+            recorder.mark("ifu_ibuffer_backpressure", "upstream_stalled", cycle, evidence)
+        return
+
+    if int(valid) == 1 and int(ready) == 1 and pending is not None:
+        signature = _read_ibuffer_payload_signature(recorder, dut, enq_enable, valid_mask)
+        if signature == pending["signature"]:
+            recorder.mark(
+                "ifu_ibuffer_backpressure",
+                "held_payload_delivered",
+                cycle,
+                {
+                    "event": "ifu_to_ibuffer_backpressure_release",
+                    "held_cycle": int(pending["cycle"]),
+                    "enq_enable": int(enq_enable),
+                    "valid_mask": int(valid_mask),
+                },
+            )
+    recorder._ifu_ibuffer_hold_pending = None
+
+
+def _sample_writeback(recorder, dut, cycle: int, pointer_redirect: bool) -> None:
+    pending = list(getattr(recorder, "_ifu_wb_pending", ()))
+    pending = [item for item in pending if int(cycle) - int(item["cycle"]) <= 4]
+    if pointer_redirect:
+        pending.clear()
+
+    wb_valid = _read_ifu_internal(recorder, dut, "wbValid")
+    wb_count = _read_ifu_internal(recorder, dut, "wbInstrCount")
+    if wb_valid == 1 and wb_count is not None and pending:
+        match = next((item for item in pending if int(item["count"]) == int(wb_count)), None)
+        if match is not None:
+            evidence = {
+                "event": "ifu_normal_writeback",
+                "enqueue_cycle": int(match["cycle"]),
+                "enqueue_count": int(match["count"]),
+                "wb_instr_count": int(wb_count),
+                "source_tags": match["source_tags"],
+            }
+            recorder.mark("ifu_writeback", "ordinary_no_redirect", cycle, evidence)
+            recorder.mark("ifu_writeback", "instr_count_matches_enq", cycle, evidence)
+
+            wb_tags = []
+            for block in range(2):
+                flag = _read_ifu_internal(recorder, dut, f"wbAlignFetchBlock_{block}_ftqIdx_flag")
+                value = _read_ifu_internal(recorder, dut, f"wbAlignFetchBlock_{block}_ftqIdx_value")
+                wb_tags.append(None if flag is None or value is None else (int(flag), int(value)))
+            if len(match["source_tags"]) == 2 and tuple(wb_tags) == tuple(match["source_tags"]):
+                recorder.mark(
+                    "ifu_writeback",
+                    "dual_fetch_sources_match",
+                    cycle,
+                    {**evidence, "wb_tags": wb_tags},
+                )
+            pending.remove(match)
+    recorder._ifu_wb_pending = pending
+
+
 def _sample_invalid_taken_exception_cross(recorder, dut, cycle: int) -> None:
     s1_valid = _read_ifu_internal(recorder, dut, "s1_valid")
     invalid_taken = _read_ifu_internal(recorder, dut, "s1_invalidTaken_0")
@@ -144,12 +286,24 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
     if pointer_redirect:
         recorder._ifu_ibuffer_alignment_pending = None
 
+    _sample_writeback(recorder, dut, cycle, pointer_redirect)
+
     ready = _read_ifu_internal(recorder, dut, "io_toIBuffer_ready")
     valid = _read_ifu_internal(recorder, dut, "io_toIBuffer_valid")
     enq_enable = _read_ifu_internal(recorder, dut, "io_toIBuffer_bits_enqEnable")
     valid_mask = _read_ifu_internal(recorder, dut, "io_toIBuffer_bits_valid")
     if None in {ready, valid, enq_enable, valid_mask}:
         return
+    _sample_ibuffer_backpressure(
+        recorder,
+        dut,
+        cycle,
+        int(ready),
+        int(valid),
+        int(enq_enable),
+        int(valid_mask),
+        pointer_redirect,
+    )
     if int(ready) != 1 or int(valid) != 1:
         return
 
@@ -193,11 +347,33 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         "exception_type": exception_type,
     }
 
+    source_tags: list[tuple[int, int]] = []
+    for record in records:
+        if record["ftq_ptr"] is not None and record["ftq_ptr"] not in source_tags:
+            source_tags.append(record["ftq_ptr"])
+    recorder._ifu_wb_pending.append(
+        {
+            "cycle": int(cycle),
+            "count": len(slots),
+            "source_tags": tuple(source_tags),
+        }
+    )
+
     prev_ibuf_enq_ptr = _read_ifu_internal(recorder, dut, "s2_prevIBufEnqPtr_value")
     align_shift_num = _read_ifu_internal(recorder, dut, "s2_alignShiftNum")
     instr_count = _read_ifu_internal(recorder, dut, "s2_instrCount")
     s2_fire = _read_ifu_internal(recorder, dut, "s2_fire")
     s2_req_is_uncache = _read_ifu_internal(recorder, dut, "s2_reqIsUncache")
+    fetch0_valid = _read_ifu_internal(recorder, dut, "s2_fetchBlock_0_valid")
+    fetch1_valid = _read_ifu_internal(recorder, dut, "s2_fetchBlock_1_valid")
+    if (
+        s2_fire == 1
+        and s2_req_is_uncache == 0
+        and fetch0_valid == 1
+        and fetch1_valid == 1
+        and int(exception_type or 0) == 0
+    ):
+        recorder.mark("ifu_cacheable_main_path", "dual_clean_delivery", cycle, evidence)
     if (
         None not in {prev_ibuf_enq_ptr, align_shift_num, instr_count, s2_fire}
         and int(s2_fire) == 1
@@ -387,6 +563,163 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                     complete_evidence,
                 )
 
+    internal_records: list[dict[str, Any]] = []
+    for record in records:
+        slot = int(record["slot"])
+        aligned_valid = _read_ifu_internal(recorder, dut, f"s2_alignedInstrVec_{slot}_valid")
+        aligned_pc = _decode_pruned_pc(
+            _read_ifu_internal(recorder, dut, f"s2_alignedInstrPcVec_{slot}_addr")
+        )
+        aligned_is_rvc = _read_ifu_internal(recorder, dut, f"s2_alignedInstrVec_{slot}_isRvc")
+        block_sel = _read_ifu_internal(recorder, dut, f"s2_alignedInstrVec_{slot}_blockSel")
+        aligned_end_offset = _read_ifu_internal(
+            recorder, dut, f"s2_alignedInstrVec_{slot}_endOffset"
+        )
+        expanded = _read_ifu_internal(recorder, dut, f"s2_expandedInstrDataVec_{slot}")
+        branch_type = _read_ifu_internal(
+            recorder, dut, f"s2_alignedPdInfoVec_{slot}_brAttribute_branchType"
+        )
+        rd = _read_ifu_internal(recorder, dut, f"s2_alignedPdInfoVec_{slot}_brAttribute_rd")
+        rs = _read_ifu_internal(recorder, dut, f"s2_alignedPdInfoVec_{slot}_brAttribute_rs")
+        internal_records.append(
+            {
+                **record,
+                "aligned_valid": aligned_valid,
+                "aligned_pc": aligned_pc,
+                "aligned_is_rvc": aligned_is_rvc,
+                "block_sel": block_sel,
+                "aligned_end_offset": aligned_end_offset,
+                "expanded": expanded,
+                "branch_type": branch_type,
+                "rd": rd,
+                "rs": rs,
+            }
+        )
+
+    coherent = [
+        item
+        for item in internal_records
+        if item["aligned_valid"] == 1
+        and item["aligned_pc"] == item["pc"]
+        and item["aligned_is_rvc"] == item["is_rvc"]
+        and item["aligned_end_offset"] == item["end_offset"]
+        and item["expanded"] == item["instr"]
+    ]
+    if len(coherent) == len(internal_records):
+        recorder.mark(
+            "ifu_aligned_slot",
+            "pc_data_valid_coherent",
+            cycle,
+            {**evidence, "internal": internal_records},
+        )
+
+    first_source = [item for item in coherent if item["block_sel"] == 0]
+    second_source = [item for item in coherent if item["block_sel"] == 1]
+    if first_source:
+        recorder.mark(
+            "ifu_data_slice",
+            "first_block_coherent",
+            cycle,
+            {**evidence, "internal": first_source},
+        )
+
+    fetch_tags = []
+    for block in range(2):
+        flag = _read_ifu_internal(recorder, dut, f"s2_fetchBlock_{block}_ftqIdx_flag")
+        value = _read_ifu_internal(recorder, dut, f"s2_fetchBlock_{block}_ftqIdx_value")
+        fetch_tags.append(None if flag is None or value is None else (int(flag), int(value)))
+    if second_source and fetch_tags[1] is not None and all(
+        item["ftq_ptr"] == fetch_tags[1] for item in second_source
+    ):
+        recorder.mark(
+            "ifu_data_slice",
+            "second_block_source_coherent",
+            cycle,
+            {**evidence, "internal": second_source},
+        )
+
+    for before, after in zip(internal_records, internal_records[1:]):
+        if before["block_sel"] != 0 or after["block_sel"] != 1:
+            continue
+        if None in {before["pc"], before["is_rvc"], after["pc"]}:
+            continue
+        contiguous = int(after["pc"]) == int(before["pc"]) + (2 if before["is_rvc"] else 4)
+        if contiguous and before["is_rvc"] == 0:
+            recorder.mark("ifu_data_slice", "rvi_crosses_fetch_blocks", cycle, evidence)
+        if contiguous and before["is_rvc"] == 1:
+            recorder.mark("ifu_data_slice", "rvc_keeps_second_halfword", cycle, evidence)
+
+    if fetch1_valid == 1 and internal_records and not second_source:
+        recorder.mark("ifu_data_slice", "second_block_suppressed", cycle, evidence)
+
+    if (
+        align_shift_num is not None
+        and instr_count is not None
+        and slots == list(range(int(align_shift_num), int(align_shift_num) + len(slots)))
+        and len(slots) == min(int(instr_count), _IFU_OUTPUT_SLOT_COUNT - int(align_shift_num))
+    ):
+        recorder.mark("ifu_instr_compact_rank", "rank_matches_output_slot", cycle, evidence)
+
+    predecode_coherent = []
+    for item in coherent:
+        if item["instr"] is None or item["branch_type"] is None:
+            continue
+        expected_type = _decode_branch_type(int(item["instr"]))
+        if int(item["branch_type"]) != expected_type:
+            continue
+        predecode_coherent.append(item)
+        seen_types = getattr(recorder, "_ifu_predecode_seen_types", set())
+        seen_types.add(expected_type)
+        recorder._ifu_predecode_seen_types = seen_types
+        if expected_type == 0:
+            recorder.mark("ifu_predecode", "non_cfi_correct", cycle, {**evidence, "slot": item})
+
+        rd = (int(item["instr"]) >> 7) & 0x1F
+        rs1 = (int(item["instr"]) >> 15) & 0x1F
+        ras_seen = getattr(recorder, "_ifu_predecode_ras_seen", set())
+        if expected_type in {2, 3} and rd in {1, 5} and item["rd"] == rd:
+            ras_seen.add("call")
+        if (
+            expected_type == 3
+            and rs1 in {1, 5}
+            and rd != rs1
+            and item["rd"] == rd
+            and item["rs"] == rs1
+        ):
+            ras_seen.add("return")
+        recorder._ifu_predecode_ras_seen = ras_seen
+
+        expected_offset = _decode_cfi_offset(int(item["instr"]), expected_type)
+        if expected_offset is not None:
+            observed_offset = _read_ifu_internal(
+                recorder,
+                dut,
+                f"predChecker.io_req_bits_jumpOffsetVec_{int(item['slot'])}_addr",
+            )
+            if observed_offset is not None:
+                observed_full = int(observed_offset) << 1
+                if observed_full == (int(expected_offset) & ((1 << 50) - 1)):
+                    recorder.mark(
+                        "ifu_predecode",
+                        "cfi_offset_correct",
+                        cycle,
+                        {**evidence, "slot": item, "offset": expected_offset},
+                    )
+
+    if len(predecode_coherent) == len(internal_records):
+        recorder.mark(
+            "ifu_predecode",
+            "slot_mapping_coherent",
+            cycle,
+            {**evidence, "internal": internal_records},
+        )
+    if {1, 2, 3}.issubset(getattr(recorder, "_ifu_predecode_seen_types", set())):
+        recorder.mark("ifu_predecode", "branch_jal_jalr_correct", cycle, evidence)
+    if {"call", "return"}.issubset(getattr(recorder, "_ifu_predecode_ras_seen", set())):
+        recorder.mark("ifu_predecode", "call_return_correct", cycle, evidence)
+    if {0, 1, 2, 3}.issubset(getattr(recorder, "_ifu_predecode_seen_types", set())):
+        recorder.mark("ifu_ibuffer_output", "predecode_matches_encoding", cycle, evidence)
+
     raw_records = []
     for record in records:
         if None in {record["pc"], record["instr"], record["is_rvc"]}:
@@ -569,10 +902,14 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
 
 
 COMPACT_COVERPOINTS = {
+    "ifu_aligned_slot": "coherence",
     "ifu_cacheable_boundary": "sequence_shape",
     "ifu_cacheable_compact": "output_shape",
     "ifu_cacheable_expander": "input_type",
+    "ifu_cacheable_main_path": "delivery",
+    "ifu_data_slice": "source_selection",
     "ifu_ibuffer_alignment": "pointer_alignment",
+    "ifu_ibuffer_backpressure": "hold_sequence",
     "ifu_ibuffer_output": "field_observation",
     "ifu_invalid_taken_exception": "stimulus_cross",
     "ifu_instr_boundary_alignment": "output_slot",
@@ -581,10 +918,13 @@ COMPACT_COVERPOINTS = {
     "ifu_instr_boundary_source": "high_half_entry",
     "ifu_instr_boundary_v2": "cross_block_delivery",
     "ifu_instr_compact": "instruction_layout",
+    "ifu_instr_compact_rank": "rank_mapping",
     "ifu_instr_compact_source": "two_fetch_source",
     "ifu_instr_end_offset": "end_offset",
+    "ifu_predecode": "decode_coherence",
     "ifu_rvc_expander": "expansion_mode",
     "ifu_rvc_exception": "exception_mode",
+    "ifu_writeback": "ftq_update",
 }
 
 COMPACT_SAMPLER_BIN_KEYS = frozenset(
@@ -599,6 +939,26 @@ COMPACT_SAMPLER_BIN_KEYS = frozenset(
         ("ifu_cacheable_compact", "contiguous_slots_observed"),
         ("ifu_cacheable_expander", "legal_rvc_input_seen"),
         ("ifu_cacheable_expander", "rvi_input_seen"),
+        ("ifu_cacheable_main_path", "dual_clean_delivery"),
+        ("ifu_data_slice", "first_block_coherent"),
+        ("ifu_data_slice", "second_block_source_coherent"),
+        ("ifu_data_slice", "rvi_crosses_fetch_blocks"),
+        ("ifu_data_slice", "rvc_keeps_second_halfword"),
+        ("ifu_data_slice", "second_block_suppressed"),
+        ("ifu_instr_compact_rank", "rank_matches_output_slot"),
+        ("ifu_aligned_slot", "pc_data_valid_coherent"),
+        ("ifu_predecode", "non_cfi_correct"),
+        ("ifu_predecode", "branch_jal_jalr_correct"),
+        ("ifu_predecode", "call_return_correct"),
+        ("ifu_predecode", "cfi_offset_correct"),
+        ("ifu_predecode", "slot_mapping_coherent"),
+        ("ifu_ibuffer_output", "predecode_matches_encoding"),
+        ("ifu_ibuffer_backpressure", "payload_stable"),
+        ("ifu_ibuffer_backpressure", "held_payload_delivered"),
+        ("ifu_ibuffer_backpressure", "upstream_stalled"),
+        ("ifu_writeback", "ordinary_no_redirect"),
+        ("ifu_writeback", "dual_fetch_sources_match"),
+        ("ifu_writeback", "instr_count_matches_enq"),
         ("ifu_ibuffer_alignment", "zero_pointer_slot_zero"),
         ("ifu_ibuffer_alignment", "nonzero_shift_matches_slot"),
         ("ifu_ibuffer_alignment", "wide_window_bounded"),
