@@ -667,9 +667,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
     val ftqIdx    = VecInit(wbAlignFetchBlock.map(_.ftqIdx))
     val startAddr = VecInit(wbAlignFetchBlock.map(_.startVAddr.toUInt(VAddrBits - 1, 0)))
     val attribute = checkerRedirect.bits.attribute
-    val canTrain =
-      attribute.isDirect || attribute.isReturn ||
-        checkerRedirect.bits.invalidTaken || checkerRedirect.bits.notCfiTaken
+    val canTrain = attribute.isDirect || attribute.isReturn ||
+      checkerRedirect.bits.invalidTaken || checkerRedirect.bits.notCfiTaken
     b.valid          := wbValid && checkerRedirect.valid
     b.bits.canTrain  := canTrain
     b.bits.ftqIdx    := Mux(checkerRedirect.bits.selectBlock, ftqIdx(1), ftqIdx(0))
