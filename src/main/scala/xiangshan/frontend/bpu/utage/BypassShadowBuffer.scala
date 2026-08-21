@@ -69,8 +69,14 @@ class BypassShadowBuffer(
     val tryWrite:     Valid[WriteReq] = Output(Valid(new WriteReq))
     val writeSuccess: Bool            = Input(Bool())
     val usefulReset:  Bool            = Input(Bool())
+    val contextFlush: Option[Bool]     = Option.when(HasBpuFlush)(Input(Bool()))
+    val bpuFlushing:  Option[Bool]     = Option.when(HasBpuFlush)(Input(Bool()))
   }
   val io = IO(new BypassBufferIO)
+
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get  else false.B
+
   class BufferEntry extends Bundle {
     val valid:     Bool                  = Bool()
     val entryData: Valid[MicroTageEntry] = Valid(new MicroTageEntry)
@@ -202,12 +208,12 @@ class BypassShadowBuffer(
     if (tableId < NumTables / 2) UsefulCounter.WeakNegative else UsefulCounter.WeakPositive,
     oldUseful.getUpdate(io.train.t1_update.bits.needUseful)
   )
-  when(doAlloc || (io.train.t1_update.valid && io.train.t1_update.bits.usefulValid)) {
+  when((doAlloc || (io.train.t1_update.valid && io.train.t1_update.bits.usefulValid)) && !bpuFlushing) {
     t1_trainReadUseful := newUseful
   }
 
   // Useful counter reset logic
-  when(io.usefulReset) {
+  when(io.usefulReset && !bpuFlushing) {
     for (bankIdx <- 0 until numBanks) {
       for (setIdx <- 0 until numSets / numBanks) {
         val entry = usefulEntries(bankIdx)(setIdx)
@@ -228,7 +234,7 @@ class BypassShadowBuffer(
   newBufferEntry.entryData.bits  := newMicroTageEntry
 
   private val t1_hasWrite = writeBufferValid
-  when(t1_hasWrite) {
+  when(t1_hasWrite && !bpuFlushing) {
     entries(enqPtr.value) := newBufferEntry
     enqPtr                := enqPtr + 1.U
     priorityMask          := Fill(numEntry, 1.U(1.W)) >> ~enqPtr.value
@@ -249,12 +255,12 @@ class BypassShadowBuffer(
     statusEntries(deqPtr.value).dirty := false.B
   }
 
-  when(t1_hasWrite) {
+  when(t1_hasWrite && !bpuFlushing) {
     statusEntries(enqPtr.value).valid := true.B
     statusEntries(enqPtr.value).dirty := true.B
   }
 
-  when(t1_hasWrite && t1_hasHit) {
+  when(t1_hasWrite && !bpuFlushing && t1_hasHit) {
     statusEntries(t1_cleanId).dirty := false.B
   }
 
@@ -266,6 +272,30 @@ class BypassShadowBuffer(
   io.tryWrite.bits.writeIndex := entries(deqPtr.value).index
   io.tryWrite.bits.writeData  := entries(deqPtr.value).entryData.bits
   io.tryWrite.bits.forceWrite := forceWrite && statusEntries(deqPtr.value).valid && statusEntries(deqPtr.value).dirty
+
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      entries := 0.U.asTypeOf(entries)
+      for (i <- 0 until numEntry) {
+        statusEntries(i).valid := false.B
+        statusEntries(i).dirty := false.B
+      }
+      enqPtr              := 0.U.asTypeOf(enqPtr)
+      deqPtr              := 0.U.asTypeOf(deqPtr)
+      priorityMask        := 0.U.asTypeOf(priorityMask)
+      a1_chosenFirstMask  := 0.U.asTypeOf(a1_chosenFirstMask)
+      a1_firstHit         := 0.U.asTypeOf(a1_firstHit)
+      a1_entryHit         := 0.U.asTypeOf(a1_entryHit)
+      t1_fire             := false.B
+      t1_trainIndex       := 0.U.asTypeOf(t1_trainIndex)
+      t1_hasHit           := false.B
+      t1_microTageHit     := false.B
+      t1_trainReadEntry   := 0.U.asTypeOf(t1_trainReadEntry)
+      t1_cleanId          := 0.U.asTypeOf(t1_cleanId)
+      forceWrite          := false.B
+      usefulEntries       := 0.U.asTypeOf(usefulEntries)
+    }
+  }
 
   // ==========================================================================
   // Buffer Performance Diagnostic Counters

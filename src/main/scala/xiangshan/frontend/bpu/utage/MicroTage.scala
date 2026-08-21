@@ -59,6 +59,9 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   val io: MicroTageIO = IO(new MicroTageIO)
   io.trainReady := true.B
 
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get  else false.B
+
   // Ahead pipeline implementation. Advantage: get data one cycle earlier.
   // Disadvantage: multi-position competition for the same entry.
   // Problem scenario: the same entry accessed by different branches in different cycles.
@@ -79,10 +82,15 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
       )).io
       t
   }
-  io.sramResetDone := tables.map(_.sramResetDone).reduce(_ && _)
-  // context flush placeholder: real flush scheme comes later
   if (HasBpuFlush) {
-    io.resetDone.get := true.B
+    tables.foreach { t =>
+      t.contextFlush.get := contextFlush
+      t.bpuFlushing.get  := bpuFlushing
+    }
+  }
+  io.sramResetDone := tables.map(_.sramResetDone).reduce(_ && _)
+  if (HasBpuFlush) {
+    io.resetDone.get := io.sramResetDone && !contextFlush
   }
   // High-order tables have longer history, better discrimination, relatively stable,
   // and lower access frequency. No need to frequently clean dead entries based on useful counters.
@@ -94,7 +102,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   // Predict
   tables.zipWithIndex.foreach {
     case (t, idx) =>
-      t.req.valid          := true.B // Power optimization related, not handled for now.
+      t.req.valid          := !bpuFlushing
       t.req.bits.readIndex := a0_readIndex(idx)
       idx match {
         case 0 => t.usefulReset := lowTickCounter(LowTickWidth)
@@ -245,6 +253,23 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     a3_posHitVec := a2_posHitVec
   }
 
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      a1_readIndex         := 0.U.asTypeOf(a1_readIndex)
+      a2_readIndex         := 0.U.asTypeOf(a2_readIndex)
+      a2_predRead          := 0.U.asTypeOf(a2_predRead)
+      a2_posHitVec         := 0.U.asTypeOf(a2_posHitVec)
+      a2_foldedPathHist    := 0.U.asTypeOf(a2_foldedPathHist)
+      a2_fromAbtbPos       := 0.U.asTypeOf(a2_fromAbtbPos)
+      a2_abtbUseTableIDVec := 0.U.asTypeOf(a2_abtbUseTableIDVec)
+      a2_abtbTakenVec      := 0.U.asTypeOf(a2_abtbTakenVec)
+      a2_abtbHitVec        := 0.U.asTypeOf(a2_abtbHitVec)
+      a3_predRead          := 0.U.asTypeOf(a3_predRead)
+      a3_readIndex         := 0.U.asTypeOf(a3_readIndex)
+      a3_posHitVec         := 0.U.asTypeOf(a3_posHitVec)
+    }
+  }
+
   // ------------ MicroTage is only concerned with conditional branches ---------- //
   private val t0_train                  = RegNext(io.fastTrain.get.bits, 0.U.asTypeOf(new FastTrain))
   private val t0_fire                   = RegNext(io.fastTrain.get.valid, false.B)
@@ -307,14 +332,15 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     Mux(t0_misPredAbtbEntry.valid && t0_misPredAbtbEntry.hit, UIntToOH(t0_misPredAbtbEntry.tableId), 0.U)
   private val t0_trainIdx = t0_trainMeta.readIndex
 
-  private val t1_fire                   = RegNext(t0_fire, false.B)
-  private val t1_foldedPathHistForTrain = RegEnable(t0_foldedPathHistForTrain, t0_fire)
-  private val t1_trainRead              = RegEnable(t0_trainRead, t0_fire)
-  private val t1_trainResult            = RegEnable(t0_trainResult, t0_fire)
-  private val t1_misPredProviderOH      = RegEnable(t0_misPredProviderOH, t0_fire)
-  private val t1_needAlloc              = RegEnable(t0_hasMisPred, t0_fire)
-  private val t1_allocTaken             = RegEnable(t0_allocTaken, t0_fire)
-  private val t1_allocCfiPosition       = RegEnable(t0_misPredAbtbEntry.cfiPosition, t0_fire)
+  private val trainPipeFire             = t0_fire && !bpuFlushing
+  private val t1_fire                   = RegNext(trainPipeFire, false.B)
+  private val t1_foldedPathHistForTrain = RegEnable(t0_foldedPathHistForTrain, trainPipeFire)
+  private val t1_trainRead              = RegEnable(t0_trainRead, trainPipeFire)
+  private val t1_trainResult            = RegEnable(t0_trainResult, trainPipeFire)
+  private val t1_misPredProviderOH      = RegEnable(t0_misPredProviderOH, trainPipeFire)
+  private val t1_needAlloc              = RegEnable(t0_hasMisPred, trainPipeFire)
+  private val t1_allocTaken             = RegEnable(t0_allocTaken, trainPipeFire)
+  private val t1_allocCfiPosition       = RegEnable(t0_misPredAbtbEntry.cfiPosition, trainPipeFire)
   // Select entries eligible for allocation
   private val t1_keepUseMask = Wire(Vec(NumTables, Bool()))
   for (i <- 0 until NumTables) {
@@ -324,10 +350,10 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     Mux(t1_misPredProviderOH === 0.U, 0.U, t1_misPredProviderOH | (t1_misPredProviderOH - 1.U))
   private val t1_allocCandidateMask = ~(t1_lowerFillMask | t1_keepUseMask.asUInt)
   private val t1_normalAllocMask    = PriorityEncoderOH(t1_allocCandidateMask)
-  private val t1_trainStartPc       = RegEnable(t0_trainStartPc, t0_fire)
+  private val t1_trainStartPc       = RegEnable(t0_trainStartPc, trainPipeFire)
 
   for (i <- 0 until NumTables) {
-    tables(i).train.t0_trainIndex.valid := t0_fire
+    tables(i).train.t0_trainIndex.valid := trainPipeFire
     tables(i).train.t0_trainIndex.bits  := t0_trainIdx(i)
     val t1_trainTag     = computeHashTag(t1_trainStartPc, t1_foldedPathHistForTrain, TableInfos, i)
     val predCfiPosition = t1_trainRead(i).cfiPosition
@@ -383,6 +409,24 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     highTickCounter := 0.U
   }.elsewhen((t1_normalAllocMask === 0.U) && t1_needAlloc && t1_fire) {
     highTickCounter := highTickCounter + 1.U
+  }
+
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      lowTickCounter  := 0.U
+      highTickCounter := 0.U
+    }
+    when(bpuFlushing) {
+      t1_fire                   := false.B
+      t1_foldedPathHistForTrain := 0.U.asTypeOf(t1_foldedPathHistForTrain)
+      t1_trainRead              := 0.U.asTypeOf(t1_trainRead)
+      t1_trainResult            := 0.U.asTypeOf(t1_trainResult)
+      t1_misPredProviderOH      := 0.U.asTypeOf(t1_misPredProviderOH)
+      t1_needAlloc              := false.B
+      t1_allocTaken             := false.B
+      t1_allocCfiPosition       := 0.U.asTypeOf(t1_allocCfiPosition)
+      t1_trainStartPc           := 0.U.asTypeOf(t1_trainStartPc)
+    }
   }
 
   // ==========================================================================
