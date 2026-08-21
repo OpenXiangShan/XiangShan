@@ -111,6 +111,7 @@ class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBun
 
 class TageMetaEntry(implicit p: Parameters) extends TageBundle {
   val useProvider:       Bool            = Bool()
+  val hasProvider:       Bool            = Bool()
   val hasAlt:            Bool            = Bool()
   val providerTableIdx:  UInt            = UInt(TableIdxWidth.W)
   val providerWayIdx:    UInt            = UInt(MaxNumWays.W)
