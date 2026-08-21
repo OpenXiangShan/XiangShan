@@ -161,7 +161,11 @@ class Ptage(implicit p: Parameters) extends BasePredictor with HasPtageParameter
   private val s1_p1Usable = s1_anchored && s1_provider.valid
   private val s1_p2Usable =
     s1_p1Usable && s1_providerEntry.p2Valid &&
-      PtageBlock.hasStaticTarget(s1_providerEntry.p1.taken, s1_providerEntry.p1.attribute)
+      PtageBlock.hasStaticTarget(s1_providerEntry.p1.taken, s1_providerEntry.p1.attribute) &&
+      // Only a conditional exit is ever learned as a second block, since anything else either takes its target from
+      // elsewhere or moves the return stack. Checking it where the entry is used keeps a stale or aliased entry from
+      // presenting one of those as a second block.
+      s1_providerEntry.p2.attribute.isConditional
 
   private def decode(block: PtageBlock, target: PrunedAddr): Prediction = {
     val prediction = Wire(new Prediction)

@@ -274,7 +274,15 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val s3PerfQueue = WireInit(perfQueue)
   when(io.fromBpu.meta.valid) {
     val s3BpuPtr = io.fromBpu.s3FtqPtr.value
-    metaQueueRedirect(s3BpuPtr)     := io.fromBpu.meta.bits.redirectMeta
+    // Recovery state belongs to every entry of a group, not just the one the lookup started from. A redirect can name
+    // any of them, and for a return it takes its target from the return stack top recorded here, so an entry left
+    // holding whatever the index last had would send that return to a stale address. The group shares one state
+    // because a block that moves the return stack is not allowed to carry a successor, see Bpu's second block.
+    (0 until MaxPredictionNum).foreach { i =>
+      when(i.U < io.fromBpu.s3NumBlocks) {
+        metaQueueRedirect((io.fromBpu.s3FtqPtr + i.U).value) := io.fromBpu.meta.bits.redirectMeta
+      }
+    }
     metaQueueResolve(s3BpuPtr)      := io.fromBpu.meta.bits.resolveMeta
     metaQueueResolveValid(s3BpuPtr) := true.B
     metaQueueCommit(s3BpuPtr)       := io.fromBpu.meta.bits.commitMeta

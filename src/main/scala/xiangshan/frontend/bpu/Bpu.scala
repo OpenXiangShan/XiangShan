@@ -313,7 +313,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   // one; and when the group came from a fallback instead, there is no second block to speak of.
   private val usePtage       = s1_ptageBlock.valid && s1_ptageResult.taken
   private val s1_secondBlock = ptage.io.prediction.blocks(1)
-  private val s1_emitSecond  = usePtage && s1_secondBlock.valid
+  // A block that moves the return stack cannot carry a successor. Every entry of a group recovers from the one
+  // speculation state Ftq records for it, so a second block behind a call would read a return stack top its own
+  // predecessor has already pushed past, and a return inside that block would be redirected to a stale address.
+  private val s1_firstMovesRas = s1_prediction.attribute.hasPush || s1_prediction.attribute.hasPop
+  private val s1_emitSecond    = usePtage && s1_secondBlock.valid && !s1_firstMovesRas
 
   private val s1_group = Wire(Vec(MaxPredictionNum, Valid(new Prediction)))
   s1_group(0).valid            := true.B
