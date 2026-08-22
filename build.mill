@@ -154,7 +154,7 @@ object xiangshan extends ChiselModule {
     mvn"io.circe::circe-generic-extras:0.14.4"
   )
 
-  def scalacOptions: T[Seq[String]] = super.scalacOptions() ++ Agg("-deprecation", "-feature")
+  def scalacOptions: T[Seq[String]] = super.scalacOptions() ++ Agg("-deprecation", "-feature", "-Wunused")
 
   private def publishLocale: Locale = new Locale.Builder().setLanguage("en").build()
   private def publishVersion: T[String] = VcsVersion.vcsState().format(
