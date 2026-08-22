@@ -10,7 +10,7 @@ jobs:
     uses: ./.github/workflows/perf-template.yml
     with:
       test_branch: kunminghu-v3
-      benchmark_type: spec06-gcc15-0.3c
+      benchmark_type: spec06-rva23-novec-gcc16-0.3c
       servers: all
 
   report:
