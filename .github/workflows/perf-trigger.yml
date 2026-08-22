@@ -36,8 +36,10 @@ on:
         required: false
         type: choice
         options:
-          - spec06-gcc15-0.3c
-          - spec06-gcc15-1.0c
+          - spec06-rva23-novec-gcc16-0.3c
+          - spec06-rva23-novec-gcc16-1.0c
+          - spec06-rv64gcb-gcc16-0.3c
+          - spec06-rv64gcb-gcc16-1.0c
           - spec06-xscc-0.3c
           - spec06-xscc-0.8c
           - spec06-xscc-1.0c
@@ -45,9 +47,11 @@ on:
           - spec26-gcc15-1.0c
           - spec26-rv64gc-gcc15-0.3c
           - spec26-rv64gc-gcc15-1.0c
+          - legacy-spec06-gcc15-0.3c
+          - legacy-spec06-gcc15-1.0c
           - custom
           - dryrun
-        default: spec06-gcc15-1.0c
+        default: spec06-rva23-novec-gcc16-1.0c
       benchmarks:
         description: Specific benchmarks to run (comma-separated), leave empty to run all
         required: false
