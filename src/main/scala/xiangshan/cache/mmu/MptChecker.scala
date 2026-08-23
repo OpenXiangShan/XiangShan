@@ -1039,7 +1039,7 @@ class MptMissQueue(implicit p: Parameters) extends XSModule with MPTCacheParam {
   io.twReq.bits.hitAddr  := reqFIFO.deq.bits.hitAddr
   io.twReq.bits.reqPA    := reqFIFO.deq.bits.pa(ppnLen - 1, mptOff - offLen)
   io.twReq.bits.hitLevel := reqFIFO.deq.bits.hitLevel
-  io.twReq.valid         := fifoNotEmpty && !refilling && io.twReq.ready
+  io.twReq.valid         := fifoNotEmpty && !refilling
 
   reqFIFO.flush.get := flush
   when(flush) {
@@ -1301,5 +1301,4 @@ class MptChecker(implicit p: Parameters) extends XSModule with HasPtwConst {
   // PMP IO
   mptTWInst.pmp.resp <> io.pmp.resp
   io.pmp.req <> mptTWInst.pmp.req
-
 }
