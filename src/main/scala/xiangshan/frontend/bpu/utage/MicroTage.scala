@@ -272,7 +272,10 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
   private val t0_train                  = RegNext(io.fastTrain.get.bits, 0.U.asTypeOf(new FastTrain))
-  private val t0_fire                   = RegNext(io.fastTrain.get.valid, false.B)
+  private val t0_fire = RegNext(
+    io.fastTrain.get.valid && (if (HasBpuFlush) !bpuFlushing else true.B),
+    false.B
+  )
   private val t0_trainMeta              = t0_train.utageMeta
   private val t0_abtbResult             = t0_trainMeta.abtbResult
   private val t0_trainRead              = VecInit(tables.map(_.train.t0_read))
@@ -332,15 +335,14 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     Mux(t0_misPredAbtbEntry.valid && t0_misPredAbtbEntry.hit, UIntToOH(t0_misPredAbtbEntry.tableId), 0.U)
   private val t0_trainIdx = t0_trainMeta.readIndex
 
-  private val trainPipeFire             = t0_fire && !bpuFlushing
-  private val t1_fire                   = RegNext(trainPipeFire, false.B)
-  private val t1_foldedPathHistForTrain = RegEnable(t0_foldedPathHistForTrain, trainPipeFire)
-  private val t1_trainRead              = RegEnable(t0_trainRead, trainPipeFire)
-  private val t1_trainResult            = RegEnable(t0_trainResult, trainPipeFire)
-  private val t1_misPredProviderOH      = RegEnable(t0_misPredProviderOH, trainPipeFire)
-  private val t1_needAlloc              = RegEnable(t0_hasMisPred, trainPipeFire)
-  private val t1_allocTaken             = RegEnable(t0_allocTaken, trainPipeFire)
-  private val t1_allocCfiPosition       = RegEnable(t0_misPredAbtbEntry.cfiPosition, trainPipeFire)
+  private val t1_fire                   = RegNext(t0_fire, false.B)
+  private val t1_foldedPathHistForTrain = RegEnable(t0_foldedPathHistForTrain, t0_fire)
+  private val t1_trainRead              = RegEnable(t0_trainRead, t0_fire)
+  private val t1_trainResult            = RegEnable(t0_trainResult, t0_fire)
+  private val t1_misPredProviderOH      = RegEnable(t0_misPredProviderOH, t0_fire)
+  private val t1_needAlloc              = RegEnable(t0_hasMisPred, t0_fire)
+  private val t1_allocTaken             = RegEnable(t0_allocTaken, t0_fire)
+  private val t1_allocCfiPosition       = RegEnable(t0_misPredAbtbEntry.cfiPosition, t0_fire)
   // Select entries eligible for allocation
   private val t1_keepUseMask = Wire(Vec(NumTables, Bool()))
   for (i <- 0 until NumTables) {
@@ -350,10 +352,10 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     Mux(t1_misPredProviderOH === 0.U, 0.U, t1_misPredProviderOH | (t1_misPredProviderOH - 1.U))
   private val t1_allocCandidateMask = ~(t1_lowerFillMask | t1_keepUseMask.asUInt)
   private val t1_normalAllocMask    = PriorityEncoderOH(t1_allocCandidateMask)
-  private val t1_trainStartPc       = RegEnable(t0_trainStartPc, trainPipeFire)
+  private val t1_trainStartPc       = RegEnable(t0_trainStartPc, t0_fire)
 
   for (i <- 0 until NumTables) {
-    tables(i).train.t0_trainIndex.valid := trainPipeFire
+    tables(i).train.t0_trainIndex.valid := t0_fire
     tables(i).train.t0_trainIndex.bits  := t0_trainIdx(i)
     val t1_trainTag     = computeHashTag(t1_trainStartPc, t1_foldedPathHistForTrain, TableInfos, i)
     val predCfiPosition = t1_trainRead(i).cfiPosition

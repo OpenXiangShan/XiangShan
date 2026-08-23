@@ -183,7 +183,7 @@ class BypassShadowBuffer(
   // Update logic: either allocation or update
   private val doAlloc  = io.train.t1_alloc.valid
   private val doUpdate = io.train.t1_update.valid
-  writeBufferValid := doAlloc || doUpdate
+  writeBufferValid := (doAlloc || doUpdate) && !bpuFlushing
 
   // New entry values
   newMicroTageEntry.valid := true.B
@@ -234,7 +234,7 @@ class BypassShadowBuffer(
   newBufferEntry.entryData.bits  := newMicroTageEntry
 
   private val t1_hasWrite = writeBufferValid
-  when(t1_hasWrite && !bpuFlushing) {
+  when(t1_hasWrite) {
     entries(enqPtr.value) := newBufferEntry
     enqPtr                := enqPtr + 1.U
     priorityMask          := Fill(numEntry, 1.U(1.W)) >> ~enqPtr.value
@@ -255,12 +255,12 @@ class BypassShadowBuffer(
     statusEntries(deqPtr.value).dirty := false.B
   }
 
-  when(t1_hasWrite && !bpuFlushing) {
+  when(t1_hasWrite) {
     statusEntries(enqPtr.value).valid := true.B
     statusEntries(enqPtr.value).dirty := true.B
   }
 
-  when(t1_hasWrite && !bpuFlushing && t1_hasHit) {
+  when(t1_hasWrite && t1_hasHit) {
     statusEntries(t1_cleanId).dirty := false.B
   }
 
