@@ -98,6 +98,8 @@ trait MPTCacheParam extends HasTlbConst {
   val mptLevelLenOH = 4 // level number 4 length in OH
   val mptLevelLenUInt = 2 // level number 4 length in int
   val mptOff = 16 // mpt offset of PA
+  val smmpt43PAddrBits = 43
+  val smmpt52PAddrBits = 52
   // l3 8T
   val l3Size  = 1
   val mptL3TagLen = 5
