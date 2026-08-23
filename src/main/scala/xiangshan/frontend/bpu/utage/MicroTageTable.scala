@@ -47,10 +47,20 @@ class MicroTageTable(
     val train:         MicroTageTrain      = new MicroTageTrain(numSets)
     val usefulReset:   Bool                = Input(Bool())
     val sramResetDone: Bool                = Output(Bool())
+    val contextFlush:  Option[Bool]        = Option.when(HasBpuFlush)(Input(Bool()))
+    val bpuFlushing:   Option[Bool]        = Option.when(HasBpuFlush)(Input(Bool()))
   }
   val io = IO(new MicroTageTableIO)
+
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get  else false.B
+
   // Write buffer to handle write conflicts
   private val wbuffer = Module(new BypassShadowBuffer(numSets, tableId, numBanks))
+  if (HasBpuFlush) {
+    wbuffer.io.contextFlush.get := contextFlush
+    wbuffer.io.bpuFlushing.get  := bpuFlushing
+  }
 
   // Banked SRAM for storing MicroTage entries
   private val entrySram = Seq.tabulate(numBanks) { bankIdx =>
@@ -60,11 +70,17 @@ class MicroTageTable(
       way = 1,
       singlePort = true,
       shouldReset = true,
+      extraReset = HasBpuFlush,
       withClockGate = true,
       hasMbist = hasMbist,
       hasSramCtl = hasSramCtl,
       suffix = Option("bpu_utage")
     )).suggestName(s"utage_entry_sram_bank${bankIdx}")
+  }
+  if (HasBpuFlush) {
+    entrySram.foreach { bank =>
+      bank.extra_reset.get := contextFlush
+    }
   }
 
   // Calculate bank selection for read access
@@ -74,7 +90,7 @@ class MicroTageTable(
 
   // Read from all SRAM banks
   entrySram.zipWithIndex.foreach { case (bank, bankIdx) =>
-    bank.io.r.req.valid       := bankOH(bankIdx)
+    bank.io.r.req.valid       := bankOH(bankIdx) && io.req.valid
     bank.io.r.req.bits.setIdx := bankReadInnerIndex
   }
 
@@ -93,7 +109,12 @@ class MicroTageTable(
   private val bufferReadEntry = wbuffer.io.resp.readEntry
   // Convert SRAM response to proper type
   private val sramRealReadEntry = WireDefault(0.U.asTypeOf(new MicroTageEntry))
-  private val sramReadEntry     = bankReadEntries.asTypeOf(new MicroTageEntry)
+  private val sramReadEntry =
+    if (HasBpuFlush) {
+      Mux(bpuFlushing, 0.U.asTypeOf(new MicroTageEntry), bankReadEntries.asTypeOf(new MicroTageEntry))
+    } else {
+      bankReadEntries.asTypeOf(new MicroTageEntry)
+    }
   sramRealReadEntry := sramReadEntry
 
   // Select data from buffer (if hit) or SRAM (if miss)
