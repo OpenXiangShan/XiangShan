@@ -24,8 +24,6 @@ case class MicroBtbParameters(
     TargetWidth:    Int = 22, // 2B aligned
     UsefulCntWidth: Int = 2,
     Replacer:       String = "plru",
-    // use s3 prediction to train ubtb
-    UseFastTrain: Boolean = true,
     // enable carry and borrow fix for target, so jumps around 2^(TargetWidth+1) boundary will not cause misprediction
     // mainBtb should handle this case, so performance affect should be slight, and, bad for timing
     EnableTargetFix: Boolean = false
@@ -40,6 +38,5 @@ trait HasMicroBtbParameters extends HasBpuParameters {
   def UsefulCntWidth: Int    = ubtbParameters.UsefulCntWidth
   def Replacer:       String = ubtbParameters.Replacer
 
-  def UseFastTrain:    Boolean = ubtbParameters.UseFastTrain
   def EnableTargetFix: Boolean = ubtbParameters.EnableTargetFix
 }

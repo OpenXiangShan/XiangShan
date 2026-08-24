@@ -55,6 +55,7 @@ import xiangshan.frontend.bpu.BpuResolveMeta
 import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
+import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.icache.ICacheDataHelper
 import xiangshan.frontend.icache.ICacheToFtqIO
@@ -398,6 +399,13 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val flushTrainCache =
     backendRedirect.valid && trainCache.valid && trainIndexCache > backendRedirect.bits.ftqIdx
 
+  private val trainBranches      = resolveQueue.io.bpuTrain.bits.branches
+  private val trainCompareMatrix = CompareMatrix(VecInit(trainBranches.map(_.bits.cfiPosition)))
+  // All branches after the first mispredicted branch must not update the predictors.
+  private val trainFirstMispredictMask = trainCompareMatrix.getLowerElementMask(
+    VecInit(trainBranches.map(b => b.valid && b.bits.mispredict))
+  )
+
   when(flushTrainCache) {
     trainCache.valid := false.B
   }.elsewhen(resolveQueue.io.bpuTrain.fire) {
@@ -418,7 +426,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
           startPc := getAlignedPc(resolveQueue.io.bpuTrain.bits.startPc + (i << FetchBlockAlignWidth).U)
       }
     }
-    trainCache.bits.branches     := resolveQueue.io.bpuTrain.bits.branches
+    trainCache.bits.branches.zip(trainBranches).zip(trainFirstMispredictMask).foreach {
+      case ((cachedBranch, branch), mask) =>
+        cachedBranch.bits  := branch.bits
+        cachedBranch.valid := branch.valid && mask
+    }
     trainCache.bits.perfMeta     := perfQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value).bpuPerf
     trainCache.bits.debug_source := resolveQueue.io.bpuTrain.bits.debug_source
     trainIndexCache              := resolveQueue.io.bpuTrain.bits.ftqIdx

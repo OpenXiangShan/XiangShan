@@ -168,28 +168,15 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   stageCtrl.s3_fire := s3_fire
   stageCtrl.t0_fire := io.fromFtq.train.fire
 
-  private val t0_compareMatrix = CompareMatrix(VecInit(io.fromFtq.train.bits.branches.map(_.bits.cfiPosition)))
-  // mark all branches after the first mispredict as invalid
-  // i.e. we have (valid, position, mispredict) for each branch:
-  // (1, 2, 0), (1, 5, 1), (1, 8, 0)
-  // then the first mispredict branch is @5, so mask should be (1, 1, 0)
-  private val t0_firstMispredictMask = t0_compareMatrix.getLowerElementMask(
-    VecInit(io.fromFtq.train.bits.branches.map(b => b.valid && b.bits.mispredict))
-  )
-
   private val train = Wire(new BpuTrain)
   train := io.fromFtq.train.bits
-  train.branches.zipWithIndex.foreach { case (b, i) =>
-    b.valid := io.fromFtq.train.bits.branches(i).valid && t0_firstMispredictMask(i)
-  }
 
   private val fastTrain = Wire(Valid(new FastTrain))
-  fastTrain.valid                := s3_valid
-  fastTrain.bits.startPc         := s3_startPc.get.unGuard
-  fastTrain.bits.finalPrediction := s3_prediction
-  fastTrain.bits.abtbMeta        := s3_abtbMeta
-  fastTrain.bits.utageMeta       := s3_utageMeta
-  fastTrain.bits.hasOverride     := s3_override
+  fastTrain.valid        := s3_valid
+  fastTrain.bits.startPc := s3_startPc.get.unGuard
+  fastTrain.bits.branch.fromPrediction(s3_prediction, s3_override)
+  fastTrain.bits.abtbMeta  := s3_abtbMeta
+  fastTrain.bits.utageMeta := s3_utageMeta
 
   predictors.foreach { p =>
     p.io.startPc   := s0_startPc.get

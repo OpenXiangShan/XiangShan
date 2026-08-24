@@ -249,7 +249,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val t0_trainRead              = VecInit(tables.map(_.train.t0_read))
   private val t0_foldedPathHistForTrain = t0_trainMeta.foldedPathHistForTrain
   private val t0_trainStartPc           = t0_train.startPc
-  private val finalPrediction           = t0_train.finalPrediction
+  private val finalPrediction           = t0_train.branch
 
   private val t0_hasHitMisPredVec  = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
   private val t0_missHitMisPredVec = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
