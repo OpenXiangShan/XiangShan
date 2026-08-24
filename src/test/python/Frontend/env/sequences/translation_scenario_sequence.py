@@ -200,15 +200,20 @@ class TranslationScenarioSequence:
             return False
         if active["expected_path"] == "fault":
             return bool(active["fault_seen"])
-        normal_observations = [
-            observation
-            for observation in env.monitor.observations
-            if int(active["va"]) <= int(observation.pc) < int(active["va"]) + int(active["payload_size"])
-        ]
+        expected_ptw_request_keys = {
+            (int(request["vpn"]), int(request["s2xlate"]), int(request["get_gpa"]))
+            for request in active["expected_ptw_requests"]
+        }
+        expected_normal_cfvec_pages = {
+            int(page)
+            for page, outcome in zip(active["selected_pages"], active["expected_page_outcomes"])
+            if bool(outcome.get("ok", False))
+        }
         return bool(
-            (not active["expected_ptw_requests"] or active["response_seen"])
+            expected_ptw_request_keys.issubset(active["responded_ptw_request_keys"])
             and len(active["expected_fetches"]) == len(active["observed_fetch_pas"])
-            and len(normal_observations) >= 2
+            and expected_normal_cfvec_pages.issubset(active["observed_normal_cfvec_pages"])
+            and int(active["observed_normal_cfvec_count"]) >= 2
         )
 
     @staticmethod

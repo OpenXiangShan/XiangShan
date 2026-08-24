@@ -10,6 +10,8 @@ from env.sequences import (
     TranslationPte,
     TranslationScenario,
     TranslationScenarioBuilder,
+    TranslationScenarioSequence,
+    TranslationSectorLane,
 )
 from env.support import PmpPmaConfig
 
@@ -116,6 +118,82 @@ def test_oracle_requires_each_cacheable_fetch_block_covered_by_the_payload() -> 
     env.translation_oracle.errors.clear()
     env.translation_oracle.observe_fetch_request(13, path="icache", pa=active["expected_fetches"][1]["pa"])
     assert env.assert_translation_scenario()["error_count"] == 0
+
+
+def test_phase_completion_requires_normal_cfvec_from_each_selected_page() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    state = TranslationScenarioBuilder(env).build(
+        TranslationScenario(
+            scenario_id="oracle-phase-complete-cross-page-cfvec",
+            va=0x8020_0F00,
+            pa=0x8040_0F00,
+            payload=b"\x13\x00\x00\x00" * 512,
+            page_count=2,
+        )
+    )
+    active = env.arm_translation_scenario(state)
+
+    for cycle, request in enumerate(active["expected_ptw_requests"], start=10):
+        response = env.page_table.build_ptw_resp(
+            request["vpn"], s2xlate=request["s2xlate"], get_gpa=request["get_gpa"]
+        )
+        env.translation_oracle.observe_ptw_request(cycle * 2, **{key: request[key] for key in ("vpn", "s2xlate", "get_gpa")})
+        env.translation_oracle.observe_ptw_response(
+            cycle * 2 + 1,
+            **{key: request[key] for key in ("vpn", "s2xlate", "get_gpa")},
+            response=response,
+        )
+    for cycle, fetch in enumerate(active["expected_fetches"], start=100):
+        env.translation_oracle.observe_fetch_request(cycle, path=fetch["path"], pa=fetch["pa"])
+
+    first_page_va = int(state.expected_page_outcomes[0]["va"])
+    second_page_va = int(state.expected_page_outcomes[1]["va"])
+    env.translation_oracle.observe_cfvec(200, pc=first_page_va, exception_bits={})
+    env.translation_oracle.observe_cfvec(201, pc=first_page_va + 4, exception_bits={})
+
+    assert not TranslationScenarioSequence._phase_complete(env)
+    assert env.translation_oracle.get_active()["observed_normal_cfvec_pages"] == [0]
+
+    env.translation_oracle.observe_cfvec(202, pc=second_page_va, exception_bits={})
+
+    assert TranslationScenarioSequence._phase_complete(env)
+    assert env.translation_oracle.get_active()["observed_normal_cfvec_pages"] == [0, 1]
+
+
+def test_oracle_expects_one_ptw_for_a_superpage_covering_two_payload_pages() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    state = TranslationScenarioBuilder(env).build(
+        TranslationScenario(
+            scenario_id="oracle-superpage-ptw-coverage",
+            va=0x8020_0F00,
+            pa=0x8040_0F00,
+            payload=b"\x13\x00\x00\x00" * 512,
+            page_count=2,
+            s1_pte=TranslationPte(level=1),
+        )
+    )
+
+    active = env.arm_translation_scenario(state)
+
+    assert [request["vpn"] for request in active["expected_ptw_requests"]] == [state.expected_ptw_request["vpn"]]
+
+
+def test_oracle_expects_one_ptw_for_sector_lanes_covering_two_payload_pages() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    state = TranslationScenarioBuilder(env).build(
+        TranslationScenario(
+            scenario_id="oracle-sector-ptw-coverage",
+            va=0x8020_0F00,
+            pa=0x8040_0F00,
+            payload=b"\x13\x00\x00\x00" * 512,
+            page_count=2,
+            s1_sector_lanes=(TranslationSectorLane(lane=1, ppn=(0x8040_0000 >> 12) + 1),),
+        )
+    )
+
+    active = env.arm_translation_scenario(state)
+
+    assert [request["vpn"] for request in active["expected_ptw_requests"]] == [state.expected_ptw_request["vpn"]]
 
 
 def test_oracle_disarm_keeps_completed_phase_history() -> None:

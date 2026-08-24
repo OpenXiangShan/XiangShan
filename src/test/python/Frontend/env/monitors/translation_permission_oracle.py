@@ -106,16 +106,23 @@ class TranslationPermissionOracle:
             raise ValueError("translation oracle page_indexes must select declared scenario pages")
         page_outcomes = [all_page_outcomes[page] for page in selected_pages]
         expected_fault = self._expected_fault(state, page_outcomes[0])
+        s2xlate = int(state.expected_ptw_request["s2xlate"])
+        response_covers_selected_pages = (
+            (s2xlate != 2 and int(state.scenario.s1_pte.level) > 0)
+            or (s2xlate in {2, 3} and int(state.scenario.s2_pte.level) > 0)
+            or bool(state.scenario.s1_sector_lanes)
+        )
+        ptw_pages = selected_pages[:1] if response_covers_selected_pages else selected_pages
         expected_ptw_requests = [] if not expect_ptw or (
-            str(state.scenario.mode).lower() == "bare" and int(state.scenario.s2xlate) == 0
+            str(state.scenario.mode).lower() == "bare" and s2xlate == 0
         ) else [
             {
                 "scenario_id": str(state.scenario.scenario_id),
                 "vpn": self.env.page_table.normalize_ptw_vpn((int(state.scenario.va) >> 12) + page),
-                "s2xlate": int(state.expected_ptw_request["s2xlate"]),
+                "s2xlate": s2xlate,
                 "get_gpa": int(state.expected_ptw_request["get_gpa"]),
             }
-            for page in selected_pages
+            for page in ptw_pages
         ]
         if expected_fault == "instruction_guest_page_fault" and int(state.scenario.s2xlate) == 3:
             expected_ptw_requests.extend(
@@ -125,7 +132,7 @@ class TranslationPermissionOracle:
                     "s2xlate": int(state.expected_ptw_request["s2xlate"]),
                     "get_gpa": 1,
                 }
-                for page in selected_pages
+                for page in ptw_pages
             )
         expected_fetches = []
         payload_end = int(state.scenario.va) + len(state.scenario.payload)
@@ -187,6 +194,8 @@ class TranslationPermissionOracle:
             "ptw_request_counts": [],
             "fetched_pages": [],
             "observed_fetch_pas": [],
+            "observed_normal_cfvec_pages": [],
+            "observed_normal_cfvec_count": 0,
             "allow_speculative_before_response": False,
             "fetch_observation_ready": True,
             "fetch_observation_not_before": 0,
@@ -567,6 +576,27 @@ class TranslationPermissionOracle:
             return
         actual_faults = [name for bit, name in _EXCEPTION_BITS.items() if int(exception_bits.get(bit, 0))]
         if not actual_faults:
+            if not self._observation_ready(cycle):
+                self._record(cycle, "pre_redirect_cfvec_normal", pc=int(pc), cross_page=bool(cross_page))
+                return
+            if self.active["expected_ptw_requests"] and not self.active["request_seen"]:
+                self._record(cycle, "pre_target_cfvec_normal", pc=int(pc), cross_page=bool(cross_page))
+                return
+            expected_page = next(
+                (
+                    page
+                    for page, outcome in zip(self.active["selected_pages"], self.active["expected_page_outcomes"])
+                    if bool(outcome.get("ok", False))
+                    and int(outcome["va"]) <= int(pc) < (int(outcome["va"]) & ~0xFFF) + 0x1000
+                ),
+                None,
+            )
+            if expected_page is None:
+                return
+            self._record(cycle, "cfvec_normal", pc=int(pc), page=int(expected_page), cross_page=bool(cross_page))
+            self.active["observed_normal_cfvec_count"] += 1
+            if int(expected_page) not in self.active["observed_normal_cfvec_pages"]:
+                self.active["observed_normal_cfvec_pages"].append(int(expected_page))
             return
         actual_fault = actual_faults[0] if len(actual_faults) == 1 else "multiple"
         if not self._observation_ready(cycle):
