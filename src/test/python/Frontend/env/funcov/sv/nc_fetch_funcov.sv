@@ -160,7 +160,7 @@ module frontend_nc_fetch_funcov (
         last_nc_delivery_seen <= 1'b1;
         last_nc_is_rvc <= delivered_is_rvc;
         last_nc_clean <= uncache_resp_exception == 3'h0;
-        last_nc_pc <= to_ibuffer_pc_0;
+        last_nc_pc <= uncache_pc;
       end
 
       prev_backend_can_accept <= backend_can_accept;
@@ -360,12 +360,12 @@ module frontend_nc_fetch_funcov (
       }
     NC_rvc_pc_progress_cp:
       coverpoint (last_nc_delivery_seen && last_nc_is_rvc && nc_delivery &&
-                  to_ibuffer_pc_0 == last_nc_pc + 49'd2) iff (!reset) {
+                  uncache_pc == last_nc_pc + 49'd1) iff (!reset) {
         bins observed = {1'b1};
       }
     NC_rvi_pc_progress_cp:
       coverpoint (last_nc_delivery_seen && !last_nc_is_rvc && nc_delivery &&
-                  to_ibuffer_pc_0 == last_nc_pc + 49'd4) iff (!reset) {
+                  uncache_pc == last_nc_pc + 49'd2) iff (!reset) {
         bins observed = {1'b1};
       }
     NC_cfi_delivery_cp:
