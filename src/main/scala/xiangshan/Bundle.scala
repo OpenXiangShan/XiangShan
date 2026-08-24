@@ -347,13 +347,6 @@ class NonmaskableInterruptIO() extends Bundle {
   // reserve for other nmi type
 }
 
-class DiffCommitIO(implicit p: Parameters) extends XSBundle {
-  val isCommit = Bool()
-  val commitValid = Vec(CommitWidth * MaxUopSize, Bool())
-
-  val info = Vec(CommitWidth * MaxUopSize, new RabCommitInfo)
-}
-
 class DiffVlCommitBundle(commitWidth: Int)(implicit p: Parameters) extends XSBundle {
   val commitValid = Vec(commitWidth, Bool())
   val pdestVl = Vec(commitWidth, UInt(VlPhyRegIdxWidth.W))

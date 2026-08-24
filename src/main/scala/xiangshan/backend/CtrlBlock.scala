@@ -692,8 +692,8 @@ class CtrlBlockImp(
   memCtrl.io.dispatchLFSTio <> dispatch.io.lfst
 
   rename.io.hartId := io.fromTop.hartId
-  rename.io.ratDiffCommits.foreach(_ := rob.io.diffCommits.get)
-  rename.io.ratDiffVlCommits.foreach(_ := rob.io.diffVlCommits.get)
+  rename.io.diffRatCommitRobIdx.foreach(_ := rob.io.diffRatCommitRobIdx.get)
+  rename.io.diffRatCommitRobIdxVec.foreach(_ := rob.io.diffRatCommitRobIdxVec.get)
 
   rename.io.redirect := s1_s3_redirect
   rename.io.rabCommits := rob.io.rabCommits

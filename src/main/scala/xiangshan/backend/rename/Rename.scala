@@ -88,8 +88,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // for rat
     val hartId        = Input(UInt(8.W))
     val ratOldPdest      = Output(new RatToVecExcpMod)
-    val ratDiffCommits   = Option.when(backendParams.basicDebugEn)(Input(new DiffCommitIO))
-    val ratDiffVlCommits = Option.when(backendParams.basicDebugEn)(Input(new DiffVlCommitBundle(CommitWidth)))
+    val diffRatCommitRobIdx = Option.when(backendParams.basicDebugEn)(Input(Valid(new RobPtr)))
+    val diffRatCommitRobIdxVec =
+      Option.when(backendParams.basicDebugEn)(Input(Vec(CommitWidth, Valid(new RobPtr))))
     val diff_vl_rat      = Option.when(backendParams.basicDebugEn)(Output(Vec(1, UInt(PhyRegIdxWidth.W))))
     val ratSnpt = Input(new SnapshotPort)
     // perf only
@@ -217,8 +218,20 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   rat.io.redirect := io.redirect.valid
   rat.io.rabCommits := io.rabCommits
   rat.io.vlCommits := io.vlCommits
-  rat.io.diffCommits.foreach(_ := io.ratDiffCommits.get)
-  rat.io.diffVlCommits.foreach(_ := io.ratDiffVlCommits.get)
+  rat.io.diffRatCommitRobIdx.foreach(_ := io.diffRatCommitRobIdx.get)
+  rat.io.diffRatCommitRobIdxVec.foreach(_ := io.diffRatCommitRobIdxVec.get)
+  rat.io.renameUpdates.foreach { updates =>
+    updates.zip(io.out).foreach { case (update, renameOut) =>
+      update.valid := renameOut.fire && !io.redirect.valid
+      update.bits.ldest := renameOut.bits.ldest
+      update.bits.pdest := renameOut.bits.pdest
+      update.bits.rfWen := renameOut.bits.rfWen
+      update.bits.fpWen := renameOut.bits.fpWen
+      update.bits.vecWen := renameOut.bits.vecWen
+      update.bits.v0Wen := renameOut.bits.v0Wen
+      update.bits.vlWen := renameOut.bits.vlWen
+    }
+  }
 
   int_need_free := rat.io.int_need_free
   int_old_pdest := rat.io.int_old_pdest
@@ -346,6 +359,18 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     * Rename: allocate free physical register and update rename table
     */
   val uops = Wire(Vec(RenameWidth, new RenameOutUop))
+
+  rat.io.snapshotEnds.foreach { snapshotEnds =>
+    snapshotEnds.zipWithIndex.foreach { case (snapshotEnd, i) =>
+      snapshotEnd.valid := canOut && io.validVec(i) && io.in(i).bits.lastUop &&
+        needRobFlags(i) && !io.redirect.valid
+      snapshotEnd.bits := uops(i).robIdx
+    }
+    when(canOut && !io.redirect.valid) {
+      assert(PopCount(snapshotEnds.map(_.valid)) === validCount,
+        "diff RAT snapshots do not match allocated ROB entries")
+    }
+  }
   uops.zip(io.in.map(_.bits)).map{ case(uop, in) => {
     uop := 0.U.asTypeOf(uop)
     connectSamePort(uop, in)
