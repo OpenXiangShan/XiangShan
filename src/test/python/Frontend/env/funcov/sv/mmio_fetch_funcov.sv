@@ -152,7 +152,7 @@ module frontend_mmio_fetch_funcov (
         to_ibuffer_valid && to_ibuffer_ready &&
         s2_req_is_uncache && s2_pmp_mmio_0;
 
-      if (tl_a_valid && !tl_a_ready) begin
+      if (tl_a_valid && !tl_a_ready && !stalled_a_seen) begin
         stalled_a_seen <= 1'b1;
         stalled_a_addr <= tl_a_addr;
         stalled_a_pc <= s2_pc_0;
