@@ -4,9 +4,11 @@
 [submodule "difftest"]
 	path = difftest
 	url = https://github.com/OpenXiangShan/difftest.git
+	branch = master
 [submodule "ready-to-run"]
 	path = ready-to-run
 	url = https://github.com/OpenXiangShan/ready-to-run.git
+	branch = v3-diffstore-test
 [submodule "utility"]
 	path = utility
 	url = https://github.com/OpenXiangShan/Utility.git
