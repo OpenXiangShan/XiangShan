@@ -9,6 +9,10 @@ class BackendObserveBundle(Bundle):
         "redirect_bits_pc": "io_backend_toFtq_redirect_bits_pc",
         "redirect_bits_target": "io_backend_toFtq_redirect_bits_target",
         "redirect_bits_taken": "io_backend_toFtq_redirect_bits_taken",
+        "gpaddr_mem_wen": "io_backend_fromIfu_gpAddrMem_wen",
+        "gpaddr_mem_waddr": "io_backend_fromIfu_gpAddrMem_waddr",
+        "gpaddr_mem_gpaddr": "io_backend_fromIfu_gpAddrMem_wdata_gpaddr",
+        "gpaddr_mem_is_for_vs_nonleaf_pte": "io_backend_fromIfu_gpAddrMem_wdata_isForVSnonLeafPTE",
     }
 
     cfvec_valid = SignalList("io_backend_cfVec_#_valid", 8)
@@ -27,3 +31,7 @@ class BackendObserveBundle(Bundle):
     redirect_bits_pc = Signal()
     redirect_bits_target = Signal()
     redirect_bits_taken = Signal()
+    gpaddr_mem_wen = Signal()
+    gpaddr_mem_waddr = Signal()
+    gpaddr_mem_gpaddr = Signal()
+    gpaddr_mem_is_for_vs_nonleaf_pte = Signal()
