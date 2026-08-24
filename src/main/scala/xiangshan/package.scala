@@ -19,7 +19,7 @@ import chisel3.experimental.SourceInfo
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.BackendParams
-import xiangshan.backend.fu.FuConfig
+import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.decode.{Imm, ImmUnion}
 
 package object xiangshan {
@@ -715,6 +715,30 @@ package object xiangshan {
     def isSign(op: UInt) = !op(1)
     def isW(op: UInt) = op(2)
     def isH(op: UInt) = op(0)
+  }
+
+  // ZihintNTL: non-temporal locality hint variants (add x0,x0,x2~x5)
+  object NtlType {
+    def p1   = "b00".U
+    def pall = "b01".U
+    def s1   = "b10".U
+    def all  = "b11".U
+
+    def apply() = UInt(2.W)
+    def apply(rs2: UInt): UInt = Mux(rs2(2, 0) === 5.U, all,
+                                 Mux(rs2(2, 0) === 4.U, s1,
+                                 Mux(rs2(2, 0) === 3.U, pall, p1)))
+
+    def isDcacheNtl(ntl: Valid[UInt]): Bool =
+      ntl.valid && (ntl.bits === p1 || ntl.bits === pall || ntl.bits === all)
+
+    // Currently, CMO and atomics ignore NTL for simplicity.
+    def isNtlIgnored(fuType: UInt, fuOpType: UInt): Bool =
+      FuType.isAMO(fuType) || LSUOpType.isCboAll(fuOpType)
+
+    // Compress to 1-bit DCache NTL; currently only DCache NTL is supported.
+    def toDcacheNtl(ntl: Valid[UInt], fuType: UInt, fuOpType: UInt): Bool =
+      isDcacheNtl(ntl) && !isNtlIgnored(fuType, fuOpType)
   }
 
   object LSUOpType {

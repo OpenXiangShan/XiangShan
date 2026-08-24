@@ -81,6 +81,7 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   // - StorePipe: io.lsu.s2_kill
   // - MainPipe (miss): s2_grow_perm_fail
   val cancel = Bool()
+  val isNtl = Bool()
 
   // Req source decode
   // Note that req source is NOT cmd type
@@ -594,6 +595,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val corrupt = RegInit(false.B)
   val prefetch = RegInit(false.B)
   val access = RegInit(false.B)
+  val isNtl = RegInit(false.B)
 
   val should_refill_data_reg =  Reg(Bool())
   val should_refill_data = WireInit(should_refill_data_reg)
@@ -666,6 +668,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   when (release_entry && req_valid) {
     req_valid := false.B
+    isNtl := false.B
   }
 
   when (io.miss_req_pipe_reg.alloc && !io.miss_req_pipe_reg.cancel) {
@@ -713,6 +716,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     corrupt := false.B
     prefetch := input_req_is_prefetch && !io.miss_req_pipe_reg.prefetch_late_en(signals_pipe_prefetch, io.queryME(0).req.bits, io.queryME(0).req.valid)
     access := false.B
+    isNtl := miss_req_pipe_reg_bits.isNtl
     secondary_fired := false.B
 
     refill_start_time := GTimer()
@@ -758,6 +762,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     should_refill_data := should_refill_data_reg || miss_req_pipe_reg_bits.isFromLoad
     should_refill_data_reg := should_refill_data
+    isNtl := miss_req_pipe_reg_bits.isNtl
     when (!input_req_is_prefetch) {
       access := true.B // when merge non-prefetch req, set access bit
     }
@@ -1036,6 +1041,7 @@ for(i <- 0 until reqNum) {
   io.main_pipe_req.bits.id := req.id
   io.main_pipe_req.bits.pf_source := req.pf_source
   io.main_pipe_req.bits.access := access
+  io.main_pipe_req.bits.isNtl := isNtl
   io.main_pipe_req.bits.occupy_way := req.occupy_way
   io.main_pipe_req.bits.miss_fail_cause_evict_btot := evict_BtoT_way
 

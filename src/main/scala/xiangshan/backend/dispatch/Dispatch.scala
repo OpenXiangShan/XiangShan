@@ -173,6 +173,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     fromRenameUpdate(i).bits.srcState := 0.U.asTypeOf(fromRenameUpdate(i).bits.srcState)
     fromRenameUpdate(i).bits.srcStateVl := 0.U // dontCare this
     connectSamePort(fromRenameUpdate(i).bits, fromRename(i).bits)
+    // Currently only DCache NTL is supported. So only 1 bit is needed.
+    fromRenameUpdate(i).bits.ntl := NtlType.toDcacheNtl(
+      fromRename(i).bits.ntl, fromRename(i).bits.fuType, fromRename(i).bits.fuOpType)
     fromRenameUpdate(i).bits.debug.foreach(connectSamePort(_, fromRename(i).bits.debug.get))
     fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqLastOffset
     fromRenameUpdate(i).bits.ftqPtr := fromRename(i).bits.ftqPtr + fromRename(i).bits.crossFtq
@@ -570,7 +573,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   for (i <- 0 until RenameWidth){
     // update valid logic
     fromRenameUpdate(i).valid := fromRename(i).valid && allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) &&
-      !lsqRecoverStall && !fromRename(i).bits.isMove && !fromRename(i).bits.hasException && !fromRenameUpdate(i).bits.singleStep
+      !lsqRecoverStall && !fromRename(i).bits.isMove && !fromRename(i).bits.isNtlHint && !fromRename(i).bits.hasException && !fromRenameUpdate(i).bits.singleStep
     fromRename(i).ready := allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && !lsqRecoverStall
     // update src type if eliminate old vd
     fromRenameUpdate(i).bits.srcType(numRegSrcVf - 1) := Mux(ignoreOldVdVec(i), SrcType.no, fromRename(i).bits.srcType(numRegSrcVf - 1))

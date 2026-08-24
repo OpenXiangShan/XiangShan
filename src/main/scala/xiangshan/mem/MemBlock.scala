@@ -901,6 +901,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
       when (vSegmentFlag) {
         dcache.io.lsu.load(i).pf_source              := vSegmentUnit.io.rdcache.pf_source
+        dcache.io.lsu.load(i).ntl                    := false.B
         dcache.io.lsu.load(i).s1_paddr_dup_lsu       := vSegmentUnit.io.rdcache.s1_paddr_dup_lsu
         dcache.io.lsu.load(i).s1_paddr_dup_dcache    := vSegmentUnit.io.rdcache.s1_paddr_dup_dcache
         dcache.io.lsu.load(i).s1_kill                := vSegmentUnit.io.rdcache.s1_kill
@@ -911,6 +912,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         dcache.io.lsu.load(i).is128Req               := vSegmentUnit.io.rdcache.is128Req
       }.otherwise {
         dcache.io.lsu.load(i).pf_source              := newLoadUnits(i).io.dcache.pf_source
+        dcache.io.lsu.load(i).ntl                    := newLoadUnits(i).io.dcache.ntl
         dcache.io.lsu.load(i).s1_paddr_dup_lsu       := newLoadUnits(i).io.dcache.s1_paddr_dup_lsu
         dcache.io.lsu.load(i).s1_paddr_dup_dcache    := newLoadUnits(i).io.dcache.s1_paddr_dup_dcache
         dcache.io.lsu.load(i).s1_kill                := newLoadUnits(i).io.dcache.s1_kill

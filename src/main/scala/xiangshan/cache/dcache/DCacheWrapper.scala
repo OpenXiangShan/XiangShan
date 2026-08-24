@@ -399,6 +399,7 @@ abstract class DCacheBundle(implicit p: Parameters) extends L1CacheBundle
 class ReplacementAccessBundle(implicit p: Parameters) extends DCacheBundle {
   val set = UInt(log2Up(nSets).W)
   val way = UInt(log2Up(nWays).W)
+  val ntl = Bool() // true: mark hit way as PLRU victim; false: normal touch
 }
 
 class ReplacementWayReqIO(implicit p: Parameters) extends DCacheBundle {
@@ -451,6 +452,7 @@ class DCacheLineReq(implicit p: Parameters) extends DCacheBundle
   val data   = UInt((cfg.blockBytes * 8).W)
   val mask   = UInt(cfg.blockBytes.W)
   val id     = UInt(reqIdWidth.W)
+  val ntl    = Bool()
   def dump(cond: Bool) = {
     XSDebug(cond, "DCacheLineReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
@@ -467,6 +469,7 @@ class DCacheWordReqWithVaddrAndPfFlag(implicit p: Parameters) extends DCacheWord
   val prefetch = Bool()
   val vecValid = Bool()
   val sqNeedDeq = Bool()
+  val ntl = Bool()
 
   def toDCacheWordReqWithVaddr() = {
     val res = Wire(new DCacheWordReqWithVaddr)
@@ -687,6 +690,8 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val is128Req = Bool()
   // cycle 0: prefetch source bits
   val pf_source = Output(UInt(L1PfSourceBits.W))
+  // cycle 0: ntl indicator
+  val ntl = Output(Bool())
   // cycle0: load microop
  // val s0_uop = Output(new MicroOp)
   // cycle 0: virtual address: req.addr
@@ -1715,7 +1720,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // replacement algorithm
-  val replacer = ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets)
+  require(cacheParams.replacer.contains("setplru"),
+    s"zihintntl DCache NTL currently requires replacer=setplru, got ${cacheParams.replacer}")
+  val replacer = new NtlSetAssocLRU(nSets, nWays) // PLRU that supports NTL (zihintntl) access
   val replWayReqs = ldu.map(_.io.replace_way) ++ Seq(mainPipe.io.replace_way) ++ stu.map(_.io.replace_way)
 
   if (dwpuParam.enCfPred) {
@@ -1751,7 +1758,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       w.bits := req.bits.way
   }
   val touchSets = replAccessReqs.map(_.bits.set)
-  replacer.access(touchSets, touchWays)
+  val touchNtls = replAccessReqs.map(_.bits.ntl)
+  replacer.access(touchSets, touchWays, touchNtls)
 
   //----------------------------------------
   // assertions

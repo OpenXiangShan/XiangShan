@@ -125,6 +125,7 @@ class SQDataEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val cboType                  = CboType()
   val prefetch                 = Bool() //TODO: need it ?
   val isHyper                  = Bool()
+  val ntl                      = Bool()
 
   // debug signal
   val debugPaddr               = Option.when(debugEn)(UInt((PAddrBits).W))
@@ -174,6 +175,7 @@ class WriteToSbufferReqEntry(implicit p: Parameters) extends MemBlockBundle {
   val vaddr        = UInt(VAddrBits.W)
   val data         = UInt(VLEN.W)
   val mask         = UInt((VLEN/8).W)
+  val ntl          = Bool()
   val deqPtrMove   = Bool()
 }
 
@@ -704,6 +706,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       sink.addr     := source.addr
       sink.vecValid := source.vecValid
       sink.prefetch := source.prefetch
+      sink.ntl      := source.ntl
       sink
     }
 
@@ -1240,6 +1243,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
 
       port.bits.wline    := ctrlEntry.isCbo && isCboZero(dataEntry.cboType)
       port.bits.prefetch := dataEntry.prefetch
+      port.bits.ntl      := dataEntry.ntl
       port.bits.vecValid := true.B
       if (i == 0) {
         // if cross16B, only port 1 deqPtr move, else both port 0 and port 1 deqPtr move.
@@ -1660,6 +1664,7 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
 
     when(staSetValid) {
       connectSamePort(dataEntries(i).uop, selectBits.uop)
+      dataEntries(i).ntl := selectBits.uop.ntl
     }
 
     io.fromStoreUnit.storeAddrIn.zipWithIndex.map{case (port, j) =>
