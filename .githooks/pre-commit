@@ -4,6 +4,11 @@ set -euo pipefail
 REPO_DIR="$(git rev-parse --show-toplevel)"
 cd "${REPO_DIR}"
 
+if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
+  echo "ERROR: merge commits are prohibited in this worktree." >&2
+  exit 1
+fi
+
 scala_files="$(git diff --cached --name-only --diff-filter=ACMR -- src/main/scala)"
 
 if [[ -n "${scala_files}" ]]; then
