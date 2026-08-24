@@ -183,13 +183,19 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
   private val zhujiangCfgNodes = zhujiangNocConfig
     .map(_.island.filter(_.nodeType == xijiang.NodeType.HI))
     .getOrElse(Seq.empty)
+  private val zhujiangMemNodes = zhujiangNocConfig
+    .map(_.island.filter(_.nodeType == xijiang.NodeType.S))
+    .getOrElse(Seq.empty)
+  private val zhujiangMemOutstanding = zhujiangMemNodes.headOption
+    .map(_.outstanding)
+    .getOrElse(8)
 
   val zhujiangMemMaster = Option.when(isZhuJiang)(AXI4MasterNode(Seq(AXI4MasterPortParameters(
     masters = Seq(AXI4MasterParameters(
       name = "zhujiang-mem",
-      id = IdRange(0, 8),
+      id = IdRange(0, zhujiangMemOutstanding),
       aligned = true,
-      maxFlight = Some(1)
+      maxFlight = Some(zhujiangMemOutstanding)
     ))
   ))))
 
