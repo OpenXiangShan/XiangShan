@@ -377,7 +377,7 @@ $(FRONTEND_WAVEFORM_FORMAT_FILE): FORCE
 
 $(FRONTEND_CONFIG_FILE): FORCE
 	@mkdir -p $(dir $@)
-	@desired_config="sim=$(FRONTEND_SIM) access=$(FRONTEND_ACCESS_MODE) picker_args=$(FRONTEND_PICKER_SIM_ARGS)"; \
+	@desired_config="sim=$(FRONTEND_SIM) access=$(FRONTEND_ACCESS_MODE) picker=$(FRONTEND_PICKER) picker_args=$(FRONTEND_PICKER_SIM_ARGS)"; \
 	if [ "$(FRONTEND_SIM)" = "vcs" ]; then \
 		desired_config="$$desired_config vcs_home=$(FRONTEND_VCS_HOME) verdi_home=$(FRONTEND_VERDI_HOME)"; \
 	fi; \
