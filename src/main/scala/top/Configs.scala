@@ -593,7 +593,7 @@ class FpgaDefaultConfig(n: Int = 1) extends Config(
 
 class FpgaDiffDefaultConfig(n: Int = 1) extends Config(
   (OpenLLCConfig("3MB", banks = 1, ways = 6)
-    ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
+    ++ L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)).alter((site, here, up) => {
     case DebugOptionsKey => up(DebugOptionsKey).copy(
