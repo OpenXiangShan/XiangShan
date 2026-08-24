@@ -103,6 +103,7 @@ package seq_pkg;
     `include "memblock_main_dispatch_manual_control_main_table_sequence.sv"
     `include "memblock_main_dispatch_cancel_reconcile_sequence.sv"
     `include "mem_base_sequence.sv"
+    `include "memblock_rm_dut_writeback_observer.sv"
     `include "memblock_rm_readonly_api.sv"
     `include "memblock_virtual_sequencer.sv"
     `include "virtual_base_sequence.sv"

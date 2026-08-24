@@ -1,5 +1,6 @@
 
 +incdir+./src
++incdir+./src/memblock_rm
 +incdir+../cfg
 memblock_env_pkg.sv
 
