@@ -502,7 +502,6 @@ class FrontendEnv:
         # the DUT does not depend on simulator-specific input initialization.
         scalar_defaults = {
             "io_hartId": 0,
-            "io_backend_wfi_wfiSafe": 0,
             "io_softPrefetch_0_valid": 0,
             "io_softPrefetch_0_bits_vaddr": 0,
             "io_softPrefetch_1_valid": 0,
