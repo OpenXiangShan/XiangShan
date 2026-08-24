@@ -79,7 +79,7 @@ def test_active_pilot_has_global_unique_identifiers_and_mappings():
 
     summary = validate_pilot_schema(pilot_path)
 
-    assert summary == {"rows": 607, "bin_ids": 607, "mapping_keys": 607, "legacy_ids": 4}
+    assert summary == {"rows": 608, "bin_ids": 608, "mapping_keys": 608, "legacy_ids": 4}
 
 
 def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
@@ -164,7 +164,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
     active = [row for row in rows if row["Coverpoint"].strip()]
     legacy_bpu_ftq = [row for row in rows if "旧BPU_FTQ" in row["映射测试点路径"]]
 
-    assert len(active) == 449
+    assert len(active) == 450
     assert {row["Bin_ID"] for row in active} == {
         *(f"BIN-{index:03d}" for index in range(401, 424)),
         *(f"BIN-{index:03d}" for index in range(424, 433)),
@@ -185,7 +185,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
         *(f"BIN-{index:03d}" for index in range(686, 717) if index not in (697, 716)),
         *(f"BIN-{index:03d}" for index in range(717, 759) if index not in (725, 729, 730)),
         *(f"BIN-{index:03d}" for index in range(759, 781)),
-        *(f"BIN-{index:03d}" for index in range(801, 1015)),
+        *(f"BIN-{index:03d}" for index in range(801, 1016)),
     }
     assert legacy_bpu_ftq
     assert all(not row["Coverpoint"].strip() for row in legacy_bpu_ftq)

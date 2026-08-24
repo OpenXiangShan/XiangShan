@@ -207,3 +207,25 @@ def test_mmio_cross_page_first_page_iaf_beats_illegal_instruction(env):
     assert env.functional_coverage.key_hit(
         "ifu_mmio_exception_priority", "second_page_exec_not_illegal"
     )
+
+
+@pytest.mark.funcov_bins("BIN-1015")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
+    uncache._prepare_mmio_cnop_stream(env)
+    env.uncache_agent.configure(latency=2, mmio_latency=16)
+    env.backend_model.set_can_accept(0)
+    uncache._initialize_mmio_fetch(env)
+
+    recorder = env.functional_coverage
+    assert uncache._wait_for_uncache_req(env) > 0
+    assert uncache._wait_for_uncache_resp(env) > 0
+    for _ in range(32):
+        env.step(1)
+        if recorder.key_hit("ifu_mmio_backpressure", "reserved_slot_fire"):
+            break
+
+    assert recorder.key_hit("ifu_mmio_backpressure", "reserved_slot_fire")
+    env.backend_model.set_can_accept(1)
+    env.step(32)
+    assert not env.monitor.get_errors()

@@ -8,12 +8,14 @@ MMIO_V3_COVERPOINTS = {
     "ifu_mmio_tl_a_stall": "request_context",
     "ifu_mmio_page_tail": "rvc_progress",
     "ifu_mmio_exception_priority": "first_page_iaf",
+    "ifu_mmio_backpressure": "result_handoff",
 }
 MMIO_V3_SAMPLER_BIN_KEYS = frozenset(
     {
         ("ifu_mmio_tl_a_stall", "stable_until_accept"),
         ("ifu_mmio_page_tail", "next_pc_plus_2b"),
         ("ifu_mmio_exception_priority", "second_page_exec_not_illegal"),
+        ("ifu_mmio_backpressure", "reserved_slot_fire"),
     }
 )
 
@@ -178,6 +180,52 @@ def sample_mmio_v3_coverage(recorder, env, cycle: int) -> None:
         return
     _sample_tl_a_stall(recorder, dut, int(cycle))
     _sample_page_tail_rvc(recorder, env, dut, int(cycle))
+    _sample_result_backpressure(recorder, dut, int(cycle))
+
+
+def _sample_result_backpressure(recorder, dut, cycle: int) -> None:
+    to_valid = _read_ifu(recorder, dut, "io_toIBuffer_valid")
+    to_ready = _read_ifu(recorder, dut, "io_toIBuffer_ready")
+    resp_valid = _read_uncache_unit(recorder, dut, "io_resp_valid")
+    req_uncache = _read_ifu(recorder, dut, "s2_reqIsUncache")
+    pmp_mmio = _read_ifu(recorder, dut, "s2_icacheMeta_0_pmpMmio")
+    if not (
+        resp_valid == 1
+        and to_valid == 1
+        and req_uncache == 1
+        and pmp_mmio == 1
+    ):
+        return
+
+    evidence = {
+        "event": "mmio_result_reserved_ibuffer_slot",
+        "response_data": _read_uncache_unit(recorder, dut, "io_resp_bits_uncacheData"),
+        "response_exception": _read_uncache_unit(
+            recorder, dut, "io_resp_bits_exception_value"
+        ),
+        "response_need_resend": _read_uncache_unit(
+            recorder, dut, "io_resp_bits_needResend"
+        ),
+        "enq_enable": _read_ifu(recorder, dut, "io_toIBuffer_bits_enqEnable"),
+        "delivery_exception": _read_ifu(
+            recorder, dut, "io_toIBuffer_bits_exceptionType_value"
+        ),
+    }
+    if to_ready == 1:
+        recorder.mark(
+            "ifu_mmio_backpressure",
+            "reserved_slot_fire",
+            cycle,
+            evidence,
+        )
+    elif to_ready == 0:
+        recorder.risk_observations.append(
+            {
+                **evidence,
+                "event": "mmio_result_missing_reserved_ibuffer_slot",
+                "cycle": int(cycle),
+            }
+        )
 
 
 def handle_mmio_v3_checked_event(recorder, event: dict[str, Any]) -> bool:

@@ -77,6 +77,7 @@ module frontend_mmio_fetch_funcov (
   logic        cross_8b_resend_seen;
   logic        page_tail_rvc_pending;
   logic [48:0] page_tail_rvc_pc;
+  logic        result_reserved_fire_seen;
   logic        prev_tl_a_fire;
   logic        wait_a_flush_seen;
   logic        resend_flush_seen;
@@ -127,6 +128,7 @@ module frontend_mmio_fetch_funcov (
       cross_8b_resend_seen <= 1'b0;
       page_tail_rvc_pending <= 1'b0;
       page_tail_rvc_pc <= '0;
+      result_reserved_fire_seen <= 1'b0;
       prev_tl_a_fire <= 1'b0;
       wait_a_flush_seen <= 1'b0;
       resend_flush_seen <= 1'b0;
@@ -145,6 +147,10 @@ module frontend_mmio_fetch_funcov (
       wait_a_flush_seen <= entry_state == SEND_REQ && tl_a_valid && !tl_a_ready && ifu_flush;
       resend_flush_seen <= entry_resending && ifu_flush;
       half_flush_seen <= prev_end_half_rvi && ifu_flush;
+
+      result_reserved_fire_seen <= uncache_resp_valid &&
+        to_ibuffer_valid && to_ibuffer_ready &&
+        s2_req_is_uncache && s2_pmp_mmio_0;
 
       if (tl_a_valid && !tl_a_ready) begin
         stalled_a_seen <= 1'b1;
@@ -569,8 +575,8 @@ module frontend_mmio_fetch_funcov (
       coverpoint (wb_path_valid && wb_redirect && s2_req_is_uncache) iff (!reset) {
         bins observed = {1'b1};
       }
-    MMIO_result_held_by_ibuffer_backpressure_cp:
-      coverpoint (uncache_resp_valid && to_ibuffer_valid && !to_ibuffer_ready) iff (!reset) {
+    MMIO_result_uses_reserved_ibuffer_slot_cp:
+      coverpoint result_reserved_fire_seen iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_completion_uncache_flush_wb_cp:

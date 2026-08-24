@@ -55,9 +55,12 @@ def _set_common_signals(dut):
     dut.set(_IFU + "s2_reqIsUncache", 1)
     dut.set(_IFU + "io_toIBuffer_valid", 0)
     dut.set(_IFU + "io_toIBuffer_ready", 1)
+    dut.set(_IFU + "io_toIBuffer_bits_enqEnable", 1)
     dut.set(_IFU + "io_toIBuffer_bits_exceptionType_value", 0)
     dut.set(_IFU + "uncachePc_addr", 0)
     dut.set(_UNCACHE_UNIT + "io_resp_valid", 0)
+    dut.set(_UNCACHE_UNIT + "io_resp_bits_uncacheData", 0)
+    dut.set(_UNCACHE_UNIT + "io_resp_bits_exception_value", 0)
     dut.set(_UNCACHE_UNIT + "io_resp_bits_needResend", 0)
 
 
@@ -129,3 +132,23 @@ def test_first_page_iaf_checked_event_requires_both_page_permissions(tmp_path):
     assert recorder.key_hit(
         "ifu_mmio_exception_priority", "second_page_exec_not_illegal"
     )
+
+
+def test_mmio_result_requires_reserved_ibuffer_slot(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_common_signals(dut)
+    dut.set(_UNCACHE_UNIT + "io_resp_valid", 1)
+    dut.set(_UNCACHE_UNIT + "io_resp_bits_uncacheData", 0x00000013)
+    dut.set(_IFU + "io_toIBuffer_valid", 1)
+    dut.set(_IFU + "io_toIBuffer_ready", 0)
+
+    sample_mmio_v3_coverage(recorder, env, 1)
+    assert not recorder.key_hit("ifu_mmio_backpressure", "reserved_slot_fire")
+    assert any(
+        item.get("event") == "mmio_result_missing_reserved_ibuffer_slot"
+        for item in recorder.risk_observations
+    )
+
+    dut.set(_IFU + "io_toIBuffer_ready", 1)
+    sample_mmio_v3_coverage(recorder, env, 2)
+    assert recorder.key_hit("ifu_mmio_backpressure", "reserved_slot_fire")
