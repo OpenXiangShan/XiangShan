@@ -595,6 +595,13 @@ class Ftq(implicit p: Parameters) extends FtqModule
     topdownStage.reasons(TopDownCounters.FtqUpdateBubble.id) := true.B
   }
 
+  // s3 threw away what s1 predicted, so the entries behind it are cut and fetched again. Name the reason here rather
+  // than in Bpu: what the override costs is the fetch already in flight for those entries, and this stage and Ifu's
+  // are the ones carrying it.
+  when(bpuS3Redirect) {
+    topdownStage.reasons(TopDownCounters.OverrideBubble.id) := true.B
+  }
+
   // Hardware performance monitors
   val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent()

@@ -1192,6 +1192,12 @@ package object xiangshan {
   object TopDownCounters extends Enumeration {
     val NoStall = Value("NoStall") // Base
     // frontend
+    // Ftq had nothing left to hand over. Ranked lowest of the frontend reasons on purpose: a miss, a redirect or an
+    // override in flight explains the same cycles better, so what lands here is only what none of them claimed.
+    // In practice that is the frontend refilling after a correction rather than Bpu being unable to keep up: on
+    // MicroBench it works out at about ten cycles per backend redirect, the depth of the path from a redirect
+    // through Bpu and Ftq back to fetch. A number here that does not divide up that way is worth looking into.
+    val FtqEmptyBubble = Value("FtqEmptyBubble")
     val OverrideBubble = Value("OverrideBubble")
     val FtqUpdateBubble = Value("FtqUpdateBubble")
     // val ControlRedirectBubble = Value("ControlRedirectBubble")

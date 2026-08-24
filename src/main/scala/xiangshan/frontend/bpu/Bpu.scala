@@ -685,7 +685,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   s3_perfMeta.scUsed              := s3_scUsed.asUInt
 
   io.toFtq.perfMeta := s3_perfMeta
-  // TODO: override reason and redirect reason
+
+  // TODO: redirect reason
   io.toFtq.topdownReasons := 0.U.asTypeOf(new FrontendTopDownBundle())
 
   /* *** BpTrace *** */
