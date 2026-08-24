@@ -758,7 +758,7 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
   // In this case, hitPerms actually holds the result from the previous pipeline stage.
   
   respHitRegTmp    := respHitReg || overRangeFaultReg
-  io.respHit.valid := (respHitReg || overRangeFaultReg) && !refilling && !fencePA !flushPipeOnly
+  io.respHit.valid := (respHitReg || overRangeFaultReg) && !refilling && !fencePA && !flushPipeOnly
   
   val (sphitReg, l0hitReg) = (RegEnable(sphit, pipeFlowEn), RegEnable(l0Hit, pipeFlowEn))
   val cacheHitPerm = Mux1H(
