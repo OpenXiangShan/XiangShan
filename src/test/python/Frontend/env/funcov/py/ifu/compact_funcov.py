@@ -28,6 +28,26 @@ def _read_ifu_output_slot(recorder, dut, field: str, slot: int, suffix: str = ""
     return _read_ifu_internal(recorder, dut, f"io_toIBuffer_bits_{field}_{int(slot)}{suffix}")
 
 
+def _read_predchecker(recorder, dut, stem: str) -> Optional[int]:
+    value = recorder._read_first_dut_signal(
+        dut,
+        (
+            "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__" + str(stem),
+            "Frontend_top.Frontend.inner_ifu.predChecker." + str(stem),
+        ),
+    )
+    if value is not None:
+        return value
+    return _read_ifu_internal(recorder, dut, f"predChecker.{stem}")
+
+
+def _read_predchecker_or_ifu(recorder, dut, pred_stem: str, ifu_stem: str) -> Optional[int]:
+    value = _read_predchecker(recorder, dut, pred_stem)
+    if value is not None:
+        return value
+    return _read_ifu_internal(recorder, dut, ifu_stem)
+
+
 def _decode_pruned_pc(encoded_pc: Optional[int]) -> Optional[int]:
     """Restore the byte address carried by the IFU PrunedAddr bundle.
 
@@ -261,15 +281,287 @@ def _sample_instr_boundary_tail(recorder, dut, cycle: int) -> None:
             },
         )
         recorder.mark(
-            "ifu_instr_boundary_v2",
+            "ifu_instr_boundary_v3",
             "tail_half_state",
             cycle,
             {
-                "event": "ifu_s1_v2_tail_half_state",
+                "event": "ifu_s0_v3_tail_half_state",
                 "s1_total_end_pos": total_end_pos,
                 "s1_total_end_is_half_rvi": 1,
             },
         )
+
+
+def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
+    if not hasattr(recorder, "_ifu_predchecker_v3_target_kinds"):
+        recorder._ifu_predchecker_v3_target_kinds = set()
+    pending = getattr(recorder, "_ifu_predchecker_v3_pending", None)
+    redirect_valid = _read_predchecker(
+        recorder, dut, "io_resp_stage2Out_checkerRedirect_valid"
+    )
+    registered_invalid_taken = _read_predchecker(recorder, dut, "invalidTakenNext")
+    if redirect_valid == 1 and registered_invalid_taken == 1:
+        recorder.mark(
+            "ifu_predchecker_v3_fault",
+            "invalid_taken",
+            cycle,
+            {
+                "event": "ifu_predchecker_v3_registered_invalid_taken",
+                "checker_redirect_valid": 1,
+                "invalid_taken_next": 1,
+            },
+        )
+    if (
+        pending is not None
+        and pending["fault"] is None
+        and int(cycle) > int(pending["cycle"])
+    ):
+        if redirect_valid == 0:
+            recorder.mark(
+                "ifu_predchecker_v3_fault",
+                "no_remask_fault",
+                cycle,
+                {
+                    "event": "ifu_predchecker_v3_no_fault",
+                    "request_cycle": int(pending["cycle"]),
+                    "entries": pending["entries"],
+                },
+            )
+        recorder._ifu_predchecker_v3_pending = None
+        pending = None
+    if pending is not None and redirect_valid == 1:
+        target = _read_predchecker(
+            recorder, dut, "io_resp_stage2Out_checkerRedirect_bits_target_addr"
+        )
+        taken = _read_predchecker(
+            recorder, dut, "io_resp_stage2Out_checkerRedirect_bits_taken"
+        )
+        invalid_taken = _read_predchecker(
+            recorder, dut, "io_resp_stage2Out_checkerRedirect_bits_invalidTaken"
+        )
+        is_rvc = _read_predchecker(
+            recorder, dut, "io_resp_stage2Out_checkerRedirect_bits_isRVC"
+        )
+        select_block = _read_predchecker(
+            recorder, dut, "io_resp_stage2Out_checkerRedirect_bits_selectBlock"
+        )
+        branch_type = _read_predchecker(
+            recorder,
+            dut,
+            "io_resp_stage2Out_checkerRedirect_bits_attribute_branchType",
+        )
+        ras_action = _read_predchecker(
+            recorder,
+            dut,
+            "io_resp_stage2Out_checkerRedirect_bits_attribute_rasAction",
+        )
+        end_offset = _read_predchecker(
+            recorder, dut, "io_resp_stage2Out_checkerRedirect_bits_endOffset"
+        )
+        observed = {
+            "target": target,
+            "taken": taken,
+            "invalid_taken": invalid_taken,
+            "is_rvc": is_rvc,
+            "select_block": select_block,
+            "branch_type": branch_type,
+            "ras_action": ras_action,
+            "end_offset": end_offset,
+        }
+        evidence = {
+            "event": "ifu_predchecker_v3_redirect",
+            "request_cycle": int(pending["cycle"]),
+            "fault": pending["fault"],
+            "slot": int(pending["slot"]),
+            "expected": pending,
+            "observed": observed,
+        }
+        expected_target = (
+            int(pending["pc_addr"]) + int(pending["jump_offset_addr"])
+            if pending["fault"] == "jal_not_taken"
+            else int(pending["pc_addr"])
+            + (1 if pending["is_rvc"] or pending["invalid_taken"] else 2)
+        )
+        if target == expected_target:
+            target_kind = (
+                "direct_jump" if pending["fault"] == "jal_not_taken" else "sequential"
+            )
+            recorder._ifu_predchecker_v3_target_kinds.add(target_kind)
+            if recorder._ifu_predchecker_v3_target_kinds == {"direct_jump", "sequential"}:
+                recorder.mark(
+                    "ifu_predchecker_v3_redirect",
+                    "target_by_fault_kind",
+                    cycle,
+                    evidence,
+                )
+        expected_branch_type = 0 if pending["invalid_taken"] else pending["branch_type"]
+        expected_ras_action = 0 if pending["invalid_taken"] else pending["ras_action"]
+        if (
+            invalid_taken == pending["invalid_taken"]
+            and is_rvc == pending["is_rvc"]
+            and select_block == pending["select_block"]
+            and branch_type == expected_branch_type
+            and ras_action == expected_ras_action
+            and end_offset == pending["end_offset"]
+        ):
+            recorder.mark(
+                "ifu_predchecker_v3_redirect",
+                "metadata_matches_earliest_fault",
+                cycle,
+                evidence,
+            )
+        recorder._ifu_predchecker_v3_pending = None
+    elif pending is not None and int(cycle) - int(pending["cycle"]) > 2:
+        recorder._ifu_predchecker_v3_pending = None
+
+    req_valid = _read_predchecker_or_ifu(
+        recorder, dut, "io_req_valid", "s2_valid_valid"
+    )
+    if req_valid != 1:
+        return
+
+    entries = []
+    for slot in range(_IFU_OUTPUT_SLOT_COUNT):
+        prefix = f"io_req_bits_instrVec_{slot}_"
+        valid = _read_predchecker_or_ifu(
+            recorder, dut, prefix + "valid", f"s2_alignedInstrVec_{slot}_valid"
+        )
+        if valid != 1:
+            continue
+        pred_taken = _read_predchecker_or_ifu(
+            recorder,
+            dut,
+            prefix + "isPredTaken",
+            f"s2_alignedInstrVec_{slot}_isPredTaken",
+        )
+        invalid_taken = _read_predchecker_or_ifu(
+            recorder,
+            dut,
+            prefix + "invalidTaken",
+            f"s2_alignedInstrVec_{slot}_invalidTaken",
+        )
+        is_rvc = _read_predchecker_or_ifu(
+            recorder, dut, prefix + "isRvc", f"s2_alignedInstrVec_{slot}_isRvc"
+        )
+        select_block = _read_predchecker_or_ifu(
+            recorder, dut, prefix + "blockSel", f"s2_alignedInstrVec_{slot}_blockSel"
+        )
+        end_offset = _read_predchecker_or_ifu(
+            recorder, dut, prefix + "endOffset", f"s2_alignedInstrVec_{slot}_endOffset"
+        )
+        branch_type = _read_predchecker_or_ifu(
+            recorder,
+            dut,
+            f"io_req_bits_pdInfoVec_{slot}_brAttribute_branchType",
+            f"s2_alignedPdInfoVec_{slot}_brAttribute_branchType",
+        )
+        ras_action = _read_predchecker(
+            recorder, dut, f"io_req_bits_pdInfoVec_{slot}_brAttribute_rasAction"
+        )
+        if ras_action is None:
+            rd = _read_ifu_internal(
+                recorder, dut, f"s2_alignedPdInfoVec_{slot}_brAttribute_rd"
+            )
+            rs = _read_ifu_internal(
+                recorder, dut, f"s2_alignedPdInfoVec_{slot}_brAttribute_rs"
+            )
+            if None not in {branch_type, is_rvc, rd, rs}:
+                link_rd = int(rd) in {1, 5}
+                link_rs = int(rs) in {1, 5}
+                has_push = (
+                    int(branch_type) == 2 and link_rd and not int(is_rvc)
+                ) or (int(branch_type) == 3 and link_rd)
+                has_pop = int(branch_type) == 3 and link_rs and int(rd) != int(rs)
+                ras_action = (int(has_push) << 1) | int(has_pop)
+        pc_addr = _read_predchecker_or_ifu(
+            recorder,
+            dut,
+            f"io_req_bits_instrPcVec_{slot}_addr",
+            f"s2_alignedInstrPcVec_{slot}_addr",
+        )
+        jump_offset_addr = _read_predchecker(
+            recorder, dut, f"io_req_bits_jumpOffsetVec_{slot}_addr"
+        )
+        fixed_valid = _read_predchecker(
+            recorder, dut, f"io_resp_stage1Out_fixedInstrValid_{slot}"
+        )
+        if fixed_valid is None:
+            fixed_mask = _read_ifu_internal(recorder, dut, "s2_fixedInstrValid")
+            if fixed_mask is not None:
+                fixed_valid = (int(fixed_mask) >> slot) & 1
+        if None in {
+            pred_taken,
+            invalid_taken,
+            is_rvc,
+            select_block,
+            end_offset,
+            branch_type,
+            ras_action,
+            pc_addr,
+            jump_offset_addr,
+            fixed_valid,
+        }:
+            continue
+        fault = None
+        if int(branch_type) == 2 and int(pred_taken) == 0:
+            fault = "jal_not_taken"
+        elif int(branch_type) == 3 and not (int(ras_action) & 1) and int(pred_taken) == 0:
+            fault = "jalr_not_taken"
+        elif int(ras_action) & 1 and int(pred_taken) == 0:
+            fault = "ret_not_taken"
+        elif int(branch_type) == 0 and int(pred_taken) == 1:
+            fault = "not_cfi_taken"
+        elif int(invalid_taken) == 1:
+            fault = "invalid_taken"
+        entries.append(
+            {
+                "slot": int(slot),
+                "fault": fault,
+                "pred_taken": int(pred_taken),
+                "invalid_taken": int(invalid_taken),
+                "is_rvc": int(is_rvc),
+                "select_block": int(select_block),
+                "end_offset": int(end_offset),
+                "branch_type": int(branch_type),
+                "ras_action": int(ras_action),
+                "pc_addr": int(pc_addr),
+                "jump_offset_addr": int(jump_offset_addr),
+                "fixed_valid": int(fixed_valid),
+            }
+        )
+
+    faults = [entry for entry in entries if entry["fault"] is not None]
+    if not faults:
+        recorder._ifu_predchecker_v3_pending = {
+            "fault": None,
+            "cycle": int(cycle),
+            "entries": entries,
+        }
+        return
+
+    first = faults[0]
+    recorder.mark(
+        "ifu_predchecker_v3_fault",
+        first["fault"],
+        cycle,
+        {"event": "ifu_predchecker_v3_fault", "faults": faults, "entries": entries},
+    )
+    younger = [entry for entry in entries if entry["slot"] > first["slot"]]
+    if first["fixed_valid"] == 1 and all(entry["fixed_valid"] == 0 for entry in younger):
+        recorder.mark(
+            "ifu_predchecker_v3_range",
+            "fault_inclusive_younger_masked",
+            cycle,
+            {"event": "ifu_predchecker_v3_fixed_range", "faults": faults, "entries": entries},
+        )
+    if len(faults) >= 2 and first["slot"] == min(entry["slot"] for entry in faults):
+        recorder.mark(
+            "ifu_predchecker_v3_range",
+            "earliest_fault_selected",
+            cycle,
+            {"event": "ifu_predchecker_v3_multi_fault", "faults": faults},
+        )
+    recorder._ifu_predchecker_v3_pending = {**first, "cycle": int(cycle)}
 
 
 def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
@@ -279,6 +571,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
 
     _sample_invalid_taken_exception_cross(recorder, dut, cycle)
     _sample_instr_boundary_tail(recorder, dut, cycle)
+    _sample_predchecker_v3(recorder, dut, cycle)
 
     wb_redirect = _read_ifu_internal(recorder, dut, "wbRedirect_valid")
     uncache_redirect = _read_ifu_internal(recorder, dut, "uncacheRedirect_valid")
@@ -518,7 +811,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                     complete_evidence,
                 )
                 recorder.mark(
-                    "ifu_instr_boundary_v2",
+                    "ifu_instr_boundary_v3",
                     "next_block_completion",
                     cycle,
                     complete_evidence,
@@ -557,7 +850,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                 and _records_follow_instruction_boundaries(records)
             ):
                 recorder.mark(
-                    "ifu_instr_boundary_v2",
+                    "ifu_instr_boundary_v3",
                     "continuation_after_stitch",
                     cycle,
                     complete_evidence,
@@ -916,12 +1209,15 @@ COMPACT_COVERPOINTS = {
     "ifu_instr_boundary_expansion": "width_preservation",
     "ifu_instr_boundary_half": "cross_block_state",
     "ifu_instr_boundary_source": "high_half_entry",
-    "ifu_instr_boundary_v2": "cross_block_delivery",
+    "ifu_instr_boundary_v3": "cross_block_delivery",
     "ifu_instr_compact": "instruction_layout",
     "ifu_instr_compact_rank": "rank_mapping",
     "ifu_instr_compact_source": "two_fetch_source",
     "ifu_instr_end_offset": "end_offset",
     "ifu_predecode": "decode_coherence",
+    "ifu_predchecker_v3_fault": "fault_type",
+    "ifu_predchecker_v3_range": "first_fault_range",
+    "ifu_predchecker_v3_redirect": "registered_redirect",
     "ifu_rvc_expander": "expansion_mode",
     "ifu_rvc_exception": "exception_mode",
     "ifu_writeback": "ftq_update",
@@ -952,6 +1248,16 @@ COMPACT_SAMPLER_BIN_KEYS = frozenset(
         ("ifu_predecode", "call_return_correct"),
         ("ifu_predecode", "cfi_offset_correct"),
         ("ifu_predecode", "slot_mapping_coherent"),
+        ("ifu_predchecker_v3_fault", "no_remask_fault"),
+        ("ifu_predchecker_v3_fault", "jal_not_taken"),
+        ("ifu_predchecker_v3_fault", "jalr_not_taken"),
+        ("ifu_predchecker_v3_fault", "ret_not_taken"),
+        ("ifu_predchecker_v3_fault", "not_cfi_taken"),
+        ("ifu_predchecker_v3_fault", "invalid_taken"),
+        ("ifu_predchecker_v3_range", "earliest_fault_selected"),
+        ("ifu_predchecker_v3_range", "fault_inclusive_younger_masked"),
+        ("ifu_predchecker_v3_redirect", "target_by_fault_kind"),
+        ("ifu_predchecker_v3_redirect", "metadata_matches_earliest_fault"),
         ("ifu_ibuffer_output", "predecode_matches_encoding"),
         ("ifu_ibuffer_backpressure", "payload_stable"),
         ("ifu_ibuffer_backpressure", "held_payload_delivered"),
@@ -977,9 +1283,9 @@ COMPACT_SAMPLER_BIN_KEYS = frozenset(
         ("ifu_instr_boundary_half", "stitched_data_matches"),
         ("ifu_instr_boundary_half", "stitched_pc_uses_half_pc"),
         ("ifu_instr_boundary_source", "saved_half_selected"),
-        ("ifu_instr_boundary_v2", "tail_half_state"),
-        ("ifu_instr_boundary_v2", "next_block_completion"),
-        ("ifu_instr_boundary_v2", "continuation_after_stitch"),
+        ("ifu_instr_boundary_v3", "tail_half_state"),
+        ("ifu_instr_boundary_v3", "next_block_completion"),
+        ("ifu_instr_boundary_v3", "continuation_after_stitch"),
         ("ifu_instr_compact", "contiguous_slots"),
         ("ifu_instr_compact", "rvi_single_slot"),
         ("ifu_instr_compact", "rvc_multi_slot"),

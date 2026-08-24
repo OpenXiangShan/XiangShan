@@ -18,6 +18,8 @@ def initialize_ifu_coverage_state(recorder) -> None:
     recorder._ifu_wb_pending = []
     recorder._ifu_predecode_seen_types = set()
     recorder._ifu_predecode_ras_seen = set()
+    recorder._ifu_predchecker_v3_pending = None
+    recorder._ifu_predchecker_v3_target_kinds = set()
 
 
 def reset_ifu_coverage_state(recorder) -> None:
@@ -33,6 +35,7 @@ def handle_ifu_event(recorder, event: dict) -> None:
     recorder._ifu_ibuffer_alignment_pending = None
     recorder._ifu_ibuffer_hold_pending = None
     recorder._ifu_wb_pending = []
+    recorder._ifu_predchecker_v3_pending = None
     recorder._ifu_redirect_skip_until_cycle = cycle + 1
 
 
@@ -406,6 +409,16 @@ CFVEC_SAMPLER_BIN_KEYS = frozenset(
         ("ifu_predecode", "call_return_correct"),
         ("ifu_predecode", "cfi_offset_correct"),
         ("ifu_predecode", "slot_mapping_coherent"),
+        ("ifu_predchecker_v3_fault", "no_remask_fault"),
+        ("ifu_predchecker_v3_fault", "jal_not_taken"),
+        ("ifu_predchecker_v3_fault", "jalr_not_taken"),
+        ("ifu_predchecker_v3_fault", "ret_not_taken"),
+        ("ifu_predchecker_v3_fault", "not_cfi_taken"),
+        ("ifu_predchecker_v3_fault", "invalid_taken"),
+        ("ifu_predchecker_v3_range", "earliest_fault_selected"),
+        ("ifu_predchecker_v3_range", "fault_inclusive_younger_masked"),
+        ("ifu_predchecker_v3_redirect", "target_by_fault_kind"),
+        ("ifu_predchecker_v3_redirect", "metadata_matches_earliest_fault"),
         ("ifu_ibuffer_output", "predecode_matches_encoding"),
         ("ifu_ibuffer_backpressure", "payload_stable"),
         ("ifu_ibuffer_backpressure", "held_payload_delivered"),
@@ -426,9 +439,9 @@ CFVEC_SAMPLER_BIN_KEYS = frozenset(
         ("ifu_instr_boundary_half", "stitched_data_matches"),
         ("ifu_instr_boundary_half", "stitched_pc_uses_half_pc"),
         ("ifu_instr_boundary_source", "saved_half_selected"),
-        ("ifu_instr_boundary_v2", "tail_half_state"),
-        ("ifu_instr_boundary_v2", "next_block_completion"),
-        ("ifu_instr_boundary_v2", "continuation_after_stitch"),
+        ("ifu_instr_boundary_v3", "tail_half_state"),
+        ("ifu_instr_boundary_v3", "next_block_completion"),
+        ("ifu_instr_boundary_v3", "continuation_after_stitch"),
         ("ifu_ibuffer_output", "instr_pc_isrvc_observed"),
         ("ifu_ibuffer_output", "ftq_offset_observed"),
         ("ifu_ibuffer_output", "fixed_range_clipped"),

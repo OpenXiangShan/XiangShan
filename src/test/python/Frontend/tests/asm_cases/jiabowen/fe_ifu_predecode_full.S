@@ -8,6 +8,17 @@
 _start:
     addi s0, zero, 24
 
+    # Keep an untrained non-RAS JALR in its own fetch block so PredChecker V3
+    # must repair the initial not-taken prediction as JalrFault.
+    .balign 64
+.Lother_indirect_hi:
+    auipc t1, %pcrel_hi(other_indirect_target)
+    addi t1, t1, %pcrel_lo(.Lother_indirect_hi)
+    jalr zero, 0(t1)
+    nop
+
+    .balign 64
+other_indirect_target:
     .balign 32
 loop_head:
     addi s1, s1, 1

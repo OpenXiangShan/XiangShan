@@ -47,7 +47,7 @@ module frontend_redirect_flush_recovery_funcov (
   input logic                 ifu_s1_valid,
   input logic                 ifu_s2_valid,
   input logic                 backend_can_accept,
-  input logic                 pred_checker_target_fault,
+  input logic                 pred_checker_remask_fault,
   input logic                 pred_checker_not_cfi_taken,
   input logic                 pred_checker_invalid_taken,
   input logic                 itlb_flush_pipe,
@@ -362,8 +362,8 @@ module frontend_redirect_flush_recovery_funcov (
       !ifu_wb_redirect_is_rvc && !backend_redirect_valid) iff (!reset) { bins observed = {1'b1}; }
     RFR_ifu_invalid_taken_rvc_redirect_cp: coverpoint (ifu_wb_redirect_valid && !ifu_wb_redirect_taken &&
       ifu_wb_redirect_is_rvc && !backend_redirect_valid) iff (!reset) { bins observed = {1'b1}; }
-    RFR_pred_checker_target_fault_condition_cp:
-      coverpoint (pred_checker_target_fault && !backend_redirect_valid) iff (!reset) {
+    RFR_pred_checker_remask_fault_condition_cp:
+      coverpoint (pred_checker_remask_fault && !backend_redirect_valid) iff (!reset) {
         bins observed = {1'b1};
     }
     RFR_pred_checker_not_cfi_taken_condition_cp:

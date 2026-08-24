@@ -13,6 +13,7 @@ IFU_FUNCOV_BIN_IDS = {
     *(f"BIN-{index:03d}" for index in range(501, 542)),
     "BIN-824",
     *(f"BIN-{index:03d}" for index in range(832, 837)),
+    *(f"BIN-{index:03d}" for index in range(889, 899)),
 }
 
 ICACHE_PREFETCH_FUNCOV_BIN_IDS = {
@@ -50,6 +51,20 @@ ICACHE_MAINPIPE_S2_ECC_BIN_IDS = {
 
 ICACHE_MAPPED_STATUSES = {"MODELED", "PARTIAL", "HIT"}
 
+IFU_V3_OWNER_BLOCK_LEAF_COUNTS = (139, 43, 42, 81)
+IFU_V3_FORBIDDEN_OWNER_TERMS = {
+    "ifu_instr_boundary_v2",
+    "targetFault",
+    "target fault",
+    "s3_valid",
+    "s3_icacheMeta",
+    "s3_reqIsUncache",
+    "prevLast",
+    "lastInstrIsHalfRvi",
+    "fixedTwoFetchRange",
+    "firstPredTakenIdx",
+}
+
 
 def test_active_pilot_has_global_unique_identifiers_and_mappings():
     repo_root = Path(__file__).resolve().parents[7]
@@ -60,7 +75,52 @@ def test_active_pilot_has_global_unique_identifiers_and_mappings():
 
     summary = validate_pilot_schema(pilot_path)
 
-    assert summary == {"rows": 486, "bin_ids": 486, "mapping_keys": 486, "legacy_ids": 4}
+    assert summary == {"rows": 496, "bin_ids": 496, "mapping_keys": 496, "legacy_ids": 4}
+
+
+def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
+    repo_root = Path(__file__).resolve().parents[7]
+    testpoint_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+    )
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.reader(handle))
+
+    marker_indices = [
+        index for index, row in enumerate(rows) if "@加柏文" in "".join(row)
+    ]
+    assert len(marker_indices) == 4
+
+    owner_blocks = []
+    for marker_index in marker_indices:
+        marker = rows[marker_index]
+        marker_depth = next(index for index, value in enumerate(marker[:5]) if value.strip())
+        block_end = len(rows)
+        for index in range(marker_index + 1, len(rows)):
+            if any(rows[index][depth].strip() for depth in range(marker_depth + 1)):
+                block_end = index
+                break
+        owner_blocks.append(rows[marker_index:block_end])
+
+    assert tuple(
+        sum(bool(row[4].strip()) for row in block) for block in owner_blocks
+    ) == IFU_V3_OWNER_BLOCK_LEAF_COUNTS
+
+    for block in owner_blocks:
+        assert "V3" in "".join(block[0])
+        block_text = "\n".join("|".join(row) for row in block)
+        assert not (IFU_V3_FORBIDDEN_OWNER_TERMS & set(re.findall(
+            r"ifu_instr_boundary_v2|targetFault|target fault|s3_valid|s3_icacheMeta|"
+            r"s3_reqIsUncache|prevLast|lastInstrIsHalfRvi|fixedTwoFetchRange|"
+            r"firstPredTakenIdx",
+            block_text,
+        )))
+        for row in block:
+            if not row[4].strip():
+                continue
+            assert all(row[column].strip() for column in (5, 6, 7))
+            assert row[9].strip() in {"UNMAPPED", "MODELED", "PARTIAL", "HIT"}
 
 
 def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
@@ -76,7 +136,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
     active = [row for row in rows if row["Coverpoint"].strip()]
     legacy_bpu_ftq = [row for row in rows if "旧BPU_FTQ" in row["映射测试点路径"]]
 
-    assert len(active) == 328
+    assert len(active) == 338
     assert {row["Bin_ID"] for row in active} == {
         *(f"BIN-{index:03d}" for index in range(401, 424)),
         *(f"BIN-{index:03d}" for index in range(424, 433)),
@@ -104,6 +164,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
         *(f"BIN-{index:03d}" for index in range(837, 844)),
         *(f"BIN-{index:03d}" for index in range(844, 854)),
         *(f"BIN-{index:03d}" for index in range(854, 889)),
+        *(f"BIN-{index:03d}" for index in range(889, 899)),
     }
     assert legacy_bpu_ftq
     assert all(not row["Coverpoint"].strip() for row in legacy_bpu_ftq)

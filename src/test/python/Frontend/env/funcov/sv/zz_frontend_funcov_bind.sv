@@ -277,7 +277,7 @@ module frontend_funcov_hub (
   input logic                 rfr_ifu_s1_valid,
   input logic                 rfr_ifu_s2_valid,
   input logic                 rfr_backend_can_accept,
-  input logic                 rfr_pred_checker_target_fault,
+  input logic                 rfr_pred_checker_remask_fault,
   input logic                 rfr_pred_checker_not_cfi_taken,
   input logic                 rfr_pred_checker_invalid_taken,
   input logic                 rfr_itlb_flush_pipe,
@@ -629,7 +629,7 @@ module frontend_funcov_hub (
     .ifu_s1_valid(rfr_ifu_s1_valid),
     .ifu_s2_valid(rfr_ifu_s2_valid),
     .backend_can_accept(rfr_backend_can_accept),
-    .pred_checker_target_fault(rfr_pred_checker_target_fault),
+    .pred_checker_remask_fault(rfr_pred_checker_remask_fault),
     .pred_checker_not_cfi_taken(rfr_pred_checker_not_cfi_taken),
     .pred_checker_invalid_taken(rfr_pred_checker_invalid_taken),
     .itlb_flush_pipe(rfr_itlb_flush_pipe),
@@ -1082,7 +1082,7 @@ bind Frontend frontend_funcov_hub u_frontend_funcov_hub (
   .rfr_ifu_s1_valid(|inner_ifu.s1_valid),
   .rfr_ifu_s2_valid(inner_ifu.s2_fetchBlock_0_valid || inner_ifu.s2_fetchBlock_1_valid),
   .rfr_backend_can_accept(io_backend_canAccept),
-  .rfr_pred_checker_target_fault(|{
+  .rfr_pred_checker_remask_fault(|{
     inner_ifu.predChecker._stage1Fault_T, inner_ifu.predChecker._stage1Fault_T_4,
     inner_ifu.predChecker._stage1Fault_T_8, inner_ifu.predChecker._stage1Fault_T_12,
     inner_ifu.predChecker._stage1Fault_T_16, inner_ifu.predChecker._stage1Fault_T_20,

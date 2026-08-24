@@ -126,6 +126,148 @@ def _set_aligned_slot(dut, slot, entry, *, block_sel, branch_type, rd=0, rs=0):
     dut.set(_PREFIX + f"s2_alignedPdInfoVec_{slot}_brAttribute_rs", rs)
 
 
+def _set_predchecker_request(dut, entries):
+    dut.set(_PREFIX + "predChecker.io_req_valid", 1)
+    dut.set(_PREFIX + "predChecker.io_resp_stage2Out_checkerRedirect_valid", 0)
+    for slot in range(36):
+        dut.set(_PREFIX + f"predChecker.io_req_bits_instrVec_{slot}_valid", 0)
+    for entry in entries:
+        slot = int(entry["slot"])
+        prefix = _PREFIX + f"predChecker.io_req_bits_instrVec_{slot}_"
+        dut.set(prefix + "valid", 1)
+        dut.set(prefix + "isPredTaken", entry.get("pred_taken", 0))
+        dut.set(prefix + "invalidTaken", entry.get("invalid_taken", 0))
+        dut.set(prefix + "isRvc", entry.get("is_rvc", 0))
+        dut.set(prefix + "blockSel", entry.get("block_sel", 0))
+        dut.set(prefix + "endOffset", entry.get("end_offset", slot))
+        dut.set(
+            _PREFIX
+            + f"predChecker.io_req_bits_pdInfoVec_{slot}_brAttribute_branchType",
+            entry.get("branch_type", 0),
+        )
+        dut.set(
+            _PREFIX
+            + f"predChecker.io_req_bits_pdInfoVec_{slot}_brAttribute_rasAction",
+            entry.get("ras_action", 0),
+        )
+        dut.set(
+            _PREFIX + f"predChecker.io_req_bits_instrPcVec_{slot}_addr",
+            entry.get("pc_addr", 0x40000000 + slot * 2),
+        )
+        dut.set(
+            _PREFIX + f"predChecker.io_req_bits_jumpOffsetVec_{slot}_addr",
+            entry.get("jump_offset_addr", 4),
+        )
+        dut.set(
+            _PREFIX + f"predChecker.io_resp_stage1Out_fixedInstrValid_{slot}",
+            entry.get("fixed_valid", 1),
+        )
+
+
+def _set_predchecker_redirect(dut, pending, *, target):
+    dut.set(_PREFIX + "predChecker.io_req_valid", 0)
+    base = _PREFIX + "predChecker.io_resp_stage2Out_checkerRedirect_"
+    dut.set(base + "valid", 1)
+    dut.set(base + "bits_target_addr", target)
+    dut.set(base + "bits_taken", 1)
+    dut.set(base + "bits_invalidTaken", pending.get("invalid_taken", 0))
+    dut.set(base + "bits_isRVC", pending.get("is_rvc", 0))
+    dut.set(base + "bits_selectBlock", pending.get("block_sel", 0))
+    dut.set(
+        base + "bits_attribute_branchType",
+        0 if pending.get("invalid_taken", 0) else pending.get("branch_type", 0),
+    )
+    dut.set(
+        base + "bits_attribute_rasAction",
+        0 if pending.get("invalid_taken", 0) else pending.get("ras_action", 0),
+    )
+    dut.set(base + "bits_endOffset", pending.get("end_offset", pending["slot"]))
+
+
+def test_ifu_predchecker_v3_fault_types_and_no_fault_are_observed(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    fault_entries = (
+        ("jal_not_taken", {"slot": 0, "branch_type": 2}),
+        ("jalr_not_taken", {"slot": 0, "branch_type": 3}),
+        ("ret_not_taken", {"slot": 0, "branch_type": 3, "ras_action": 1}),
+        ("not_cfi_taken", {"slot": 0, "branch_type": 0, "pred_taken": 1}),
+        ("invalid_taken", {"slot": 0, "branch_type": 0, "invalid_taken": 1}),
+    )
+    for cycle, (bin_name, entry) in enumerate(fault_entries, start=1):
+        _set_predchecker_request(dut, [entry])
+        sample_cfvec_coverage(recorder, env, cycle)
+        assert recorder.key_hit("ifu_predchecker_v3_fault", bin_name)
+
+    _set_predchecker_request(
+        dut,
+        [{"slot": 0, "branch_type": 0, "pred_taken": 0}],
+    )
+    sample_cfvec_coverage(recorder, env, 10)
+    dut.set(_PREFIX + "predChecker.io_req_valid", 0)
+    sample_cfvec_coverage(recorder, env, 11)
+
+    assert recorder.key_hit("ifu_predchecker_v3_fault", "no_remask_fault")
+
+
+def test_ifu_predchecker_v3_registered_invalid_taken_survives_back_to_back_s2(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    dut.set(_PREFIX + "predChecker.io_resp_stage2Out_checkerRedirect_valid", 1)
+    dut.set(_PREFIX + "predChecker.invalidTakenNext", 1)
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert recorder.key_hit("ifu_predchecker_v3_fault", "invalid_taken")
+
+
+def test_ifu_predchecker_v3_selects_first_fault_and_masks_younger_slots(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_predchecker_request(
+        dut,
+        [
+            {"slot": 1, "branch_type": 2, "fixed_valid": 1},
+            {"slot": 3, "branch_type": 3, "fixed_valid": 0},
+        ],
+    )
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert recorder.key_hit("ifu_predchecker_v3_range", "earliest_fault_selected")
+    assert recorder.key_hit("ifu_predchecker_v3_range", "fault_inclusive_younger_masked")
+
+
+def test_ifu_predchecker_v3_redirect_target_and_metadata_follow_fault_kind(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    jal = {
+        "slot": 0,
+        "branch_type": 2,
+        "pc_addr": 0x40000000,
+        "jump_offset_addr": 4,
+        "block_sel": 0,
+        "end_offset": 3,
+    }
+    _set_predchecker_request(dut, [jal])
+    sample_cfvec_coverage(recorder, env, 1)
+    _set_predchecker_redirect(dut, jal, target=jal["pc_addr"] + jal["jump_offset_addr"])
+    sample_cfvec_coverage(recorder, env, 2)
+
+    jalr = {
+        "slot": 2,
+        "branch_type": 3,
+        "pc_addr": 0x40000008,
+        "block_sel": 1,
+        "end_offset": 7,
+    }
+    _set_predchecker_request(dut, [jalr])
+    sample_cfvec_coverage(recorder, env, 3)
+    _set_predchecker_redirect(dut, jalr, target=jalr["pc_addr"] + 2)
+    sample_cfvec_coverage(recorder, env, 4)
+
+    assert recorder.key_hit("ifu_predchecker_v3_redirect", "target_by_fault_kind")
+    assert recorder.key_hit(
+        "ifu_predchecker_v3_redirect", "metadata_matches_earliest_fault"
+    )
+
+
 def test_ifu_compact_and_expander_bins_use_to_ibuffer_fire(tmp_path):
     recorder, env, dut, memory = _make_recorder(tmp_path)
     base = 0x80000000
@@ -305,7 +447,7 @@ def test_ifu_instr_boundary_tail_half_is_sampled_on_cacheable_s1_fire(tmp_path):
     sample_cfvec_coverage(recorder, env, 1)
 
     assert recorder.key_hit("ifu_instr_boundary_half", "tail_half_detected")
-    assert recorder.key_hit("ifu_instr_boundary_v2", "tail_half_state")
+    assert recorder.key_hit("ifu_instr_boundary_v3", "tail_half_state")
 
 
 def test_ifu_instr_boundary_cross_block_rvi_checks_data_and_pc(tmp_path):
@@ -331,8 +473,8 @@ def test_ifu_instr_boundary_cross_block_rvi_checks_data_and_pc(tmp_path):
     assert recorder.key_hit("ifu_instr_boundary_half", "saved_half_forwarded")
     assert recorder.key_hit("ifu_instr_boundary_alignment", "stitched_at_align_head")
     assert recorder.key_hit("ifu_instr_boundary_expansion", "stitched_single_rvi")
-    assert recorder.key_hit("ifu_instr_boundary_v2", "next_block_completion")
-    assert not recorder.key_hit("ifu_instr_boundary_v2", "continuation_after_stitch")
+    assert recorder.key_hit("ifu_instr_boundary_v3", "next_block_completion")
+    assert not recorder.key_hit("ifu_instr_boundary_v3", "continuation_after_stitch")
 
 
 def test_ifu_instr_boundary_cross_block_continuation_checks_pc_steps(tmp_path):
@@ -357,7 +499,7 @@ def test_ifu_instr_boundary_cross_block_continuation_checks_pc_steps(tmp_path):
 
     sample_cfvec_coverage(recorder, env, 1)
 
-    assert recorder.key_hit("ifu_instr_boundary_v2", "continuation_after_stitch")
+    assert recorder.key_hit("ifu_instr_boundary_v3", "continuation_after_stitch")
 
 
 def test_ifu_instr_boundary_cross_block_rvi_rejects_wrong_data_and_pc(tmp_path):
@@ -381,8 +523,8 @@ def test_ifu_instr_boundary_cross_block_rvi_rejects_wrong_data_and_pc(tmp_path):
     assert not recorder.key_hit("ifu_instr_boundary_half", "stitched_pc_uses_half_pc")
     assert not recorder.key_hit("ifu_instr_boundary_source", "saved_half_selected")
     assert not recorder.key_hit("ifu_instr_boundary_half", "saved_half_forwarded")
-    assert not recorder.key_hit("ifu_instr_boundary_v2", "next_block_completion")
-    assert not recorder.key_hit("ifu_instr_boundary_v2", "continuation_after_stitch")
+    assert not recorder.key_hit("ifu_instr_boundary_v3", "next_block_completion")
+    assert not recorder.key_hit("ifu_instr_boundary_v3", "continuation_after_stitch")
 
 
 def test_ifu_ibuffer_output_range_clipping_requires_valid_slot_not_enabled(tmp_path):
@@ -594,5 +736,6 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "s2_fetchBlock_0_startVAddr_addr",
         _PREFIX + "wbRedirect_valid",
         _PREFIX + "uncacheRedirect_valid",
+        "Frontend_top.Frontend.inner_ifu.predChecker.invalidTakenNext",
     }
     assert required <= names
