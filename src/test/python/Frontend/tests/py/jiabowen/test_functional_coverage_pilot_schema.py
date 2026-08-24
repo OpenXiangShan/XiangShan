@@ -25,17 +25,13 @@ ICACHE_PREFETCH_FUNCOV_BIN_IDS = {
 
 ICACHE_MISSUNIT_FUNCOV_BIN_IDS = {
     *(f"BIN-{index:03d}" for index in range(686, 717) if index not in (697, 716)),
-    "BIN-817",
-    "BIN-818",
-    "BIN-819",
-    "BIN-820",
-    "BIN-821",
+    *(f"BIN-{index}" for index in range(1005, 1010)),
 }
 
 ICACHE_WAYLOOKUP_FUNCOV_BIN_IDS = {
     *(f"BIN-{index:03d}" for index in range(717, 759) if index not in (725, 729, 730)),
-    "BIN-822",
-    "BIN-823",
+    "BIN-1010",
+    "BIN-1011",
 }
 
 ICACHE_HITMISS_FUNCOV_BIN_IDS = {
@@ -230,7 +226,7 @@ def test_icache_mainpipe_s2_ecc_leaves_are_single_bin_and_match_registry():
     with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
             bin_ids = (
-                set(re.findall(r"BIN-\d{3}", row["coverage"]))
+                set(re.findall(r"BIN-\d+", row["coverage"]))
                 & ICACHE_MAINPIPE_S2_ECC_BIN_IDS
             )
             if not bin_ids:
@@ -317,7 +313,7 @@ def test_ifu_cacheable_pipeline_leaves_are_single_bin_and_match_registry():
     with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
             bin_ids = (
-                set(re.findall(r"BIN-\d{3}", row["coverage"]))
+                set(re.findall(r"BIN-\d+", row["coverage"]))
                 & IFU_CACHEABLE_PIPELINE_BIN_IDS
             )
             if not bin_ids:
@@ -365,7 +361,7 @@ def test_icache_prefetch_leaves_are_single_bin_and_match_registry():
     with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
             bin_ids = (
-                set(re.findall(r"BIN-\d{3}", row["coverage"]))
+                set(re.findall(r"BIN-\d+", row["coverage"]))
                 & ICACHE_PREFETCH_FUNCOV_BIN_IDS
             )
             if not bin_ids:
@@ -412,7 +408,7 @@ def test_icache_missunit_leaves_are_single_bin_and_match_registry():
     mapped_rows = {}
     with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
-            bin_ids = set(re.findall(r"BIN-\d{3}", row["coverage"])) & ICACHE_MISSUNIT_FUNCOV_BIN_IDS
+            bin_ids = set(re.findall(r"BIN-\d+", row["coverage"])) & ICACHE_MISSUNIT_FUNCOV_BIN_IDS
             if not bin_ids:
                 continue
             assert len(bin_ids) == 1, row["coverage"]
@@ -453,7 +449,7 @@ def test_icache_waylookup_leaves_are_single_bin_and_match_registry():
     mapped_rows = {}
     with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
-            bin_ids = set(re.findall(r"BIN-\d{3}", row["coverage"])) & ICACHE_WAYLOOKUP_FUNCOV_BIN_IDS
+            bin_ids = set(re.findall(r"BIN-\d+", row["coverage"])) & ICACHE_WAYLOOKUP_FUNCOV_BIN_IDS
             if not bin_ids:
                 continue
             assert len(bin_ids) == 1, row["coverage"]
@@ -494,7 +490,7 @@ def test_icache_hitmiss_leaves_are_single_bin_and_match_registry():
     mapped_rows = {}
     with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
-            bin_ids = set(re.findall(r"BIN-\d{3}", row["coverage"])) & ICACHE_HITMISS_FUNCOV_BIN_IDS
+            bin_ids = set(re.findall(r"BIN-\d+", row["coverage"])) & ICACHE_HITMISS_FUNCOV_BIN_IDS
             if not bin_ids:
                 continue
             assert len(bin_ids) == 1, row["coverage"]
