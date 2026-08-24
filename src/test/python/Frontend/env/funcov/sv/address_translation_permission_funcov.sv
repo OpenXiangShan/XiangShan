@@ -1161,8 +1161,5 @@ module frontend_atp_funcov (
     }
   endgroup
 
-  frontend_atp_funcov_cg atp_cov;
-  initial begin
-    atp_cov = new();
-  end
+  frontend_atp_funcov_cg atp_cov = new();
 endmodule
