@@ -294,32 +294,22 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 
   // Perf Counter
   val counter = PopCount(v)
-  val inflight_counter = RegInit(0.U(log2Up(Size).W))
-  val inflight_full = inflight_counter === Size.U
-  when (io.ptw.req(0).fire =/= io.ptw.resp.fire) {
-    inflight_counter := Mux(io.ptw.req(0).fire, inflight_counter + 1.U, inflight_counter - 1.U)
-  }
-
-  assert(inflight_counter <= Size.U, "inflight should be no more than Size")
+  val fullReqVec = io.tlb.req.indices.map(i =>
+    io.tlb.req(i).valid && !ptwResp_ReqMatchVec(i) && !entryIsMatchVec(i) && !canenq(i)
+  )
+  val sentEntryCount = PopCount(v.zip(sent).map { case (valid, issued) => valid && issued })
   when (counter === 0.U) {
     assert(!io.ptw.req(0).fire, "when counter is 0, should not req")
   }
 
-  when (io.flush) {
-    inflight_counter := 0.U
-  }
-
   XSPerfAccumulate("tlb_req_count", PopCount(Cat(io.tlb.req.map(_.valid))))
   XSPerfAccumulate("tlb_req_count_filtered", PopCount(enqvalid))
+  XSPerfAccumulate("tlb_req_full_count", PopCount(fullReqVec))
+  XSPerfAccumulate("entry_cycle", counter)
+  XSPerfAccumulate("sent_entry_cycle", sentEntryCount)
   XSPerfAccumulate("ptw_req_count", io.ptw.req(0).fire)
-  XSPerfAccumulate("ptw_req_cycle", inflight_counter)
-  XSPerfAccumulate("tlb_resp_count", io.tlb.resp.fire)
-  XSPerfAccumulate("ptw_resp_count", io.ptw.resp.fire)
-  XSPerfAccumulate("inflight_cycle", Cat(sent).orR)
-
-  for (i <- 0 until Size + 1) {
-    XSPerfAccumulate(s"counter${i}", counter === i.U)
-  }
+  XSPerfAccumulate("ptw_req_blocked", io.ptw.req(0).valid && !io.ptw.req(0).ready)
+  XSPerfAccumulate("ptw_resp_match_count", io.refill)
 
 }
 
@@ -637,15 +627,16 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
 
   // perf
   XSPerfAccumulate("tlb_req_count", PopCount(Cat(io.tlb.req.map(_.valid))))
-  XSPerfAccumulate("tlb_req_count_filtered", Mux(do_enq, accumEnqNum(Width - 1), 0.U))
+  XSPerfAccumulate("tlb_req_fire_count", PopCount(io.tlb.req.map(_.fire)))
+  XSPerfAccumulate("tlb_req_blocked_count", PopCount(io.tlb.req.map(req => req.valid && !req.ready)))
+  XSPerfAccumulate("tlb_req_count_filtered", Mux(do_enq, enqNum, 0.U))
+  XSPerfAccumulate("itlb_filter_allocated_cycle", counter)
   XSPerfAccumulate("ptw_req_count", io.ptw.req(0).fire)
+  XSPerfAccumulate("ptw_req_blocked", io.ptw.req(0).valid && !io.ptw.req(0).ready)
   XSPerfAccumulate("ptw_req_cycle", inflight_counter)
   XSPerfAccumulate("tlb_resp_count", io.tlb.resp.fire)
   XSPerfAccumulate("ptw_resp_count", io.ptw.resp.fire)
   XSPerfAccumulate("inflight_cycle", !isEmptyDeq)
-  for (i <- 0 until Size + 1) {
-    XSPerfAccumulate(s"counter${i}", counter === i.U)
-  }
 }
 
 object PTWRepeater {
