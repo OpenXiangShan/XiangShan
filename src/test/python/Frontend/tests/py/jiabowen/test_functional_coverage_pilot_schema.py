@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from env.funcov.py.ifu.owner_v3_funcov import OWNER_V3_BIN_SPECS
 from tools.backannotate_funcov import validate_pilot_schema
 
 
@@ -75,7 +76,7 @@ def test_active_pilot_has_global_unique_identifiers_and_mappings():
 
     summary = validate_pilot_schema(pilot_path)
 
-    assert summary == {"rows": 496, "bin_ids": 496, "mapping_keys": 496, "legacy_ids": 4}
+    assert summary == {"rows": 602, "bin_ids": 602, "mapping_keys": 602, "legacy_ids": 4}
 
 
 def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
@@ -121,6 +122,30 @@ def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
                 continue
             assert all(row[column].strip() for column in (5, 6, 7))
             assert row[9].strip() in {"UNMAPPED", "MODELED", "PARTIAL", "HIT"}
+            assert row[9].strip() != "UNMAPPED"
+
+
+def test_jiabowen_owner_event_bins_are_exactly_mapped_once():
+    repo_root = Path(__file__).resolve().parents[7]
+    testpoint_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+    )
+    owner_ids = {spec.bin_id for spec in OWNER_V3_BIN_SPECS}
+    mapped = {}
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            bin_ids = set(re.findall(r"BIN-\d+", row["coverage"])) & owner_ids
+            if not bin_ids:
+                continue
+            assert len(bin_ids) == 1
+            bin_id = bin_ids.pop()
+            assert bin_id not in mapped
+            assert row["status"] == "MODELED"
+            assert row["evidence"] == "MODEL:test_ifu_v3_owner_event_model"
+            mapped[bin_id] = row
+
+    assert set(mapped) == owner_ids
 
 
 def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
@@ -136,7 +161,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
     active = [row for row in rows if row["Coverpoint"].strip()]
     legacy_bpu_ftq = [row for row in rows if "旧BPU_FTQ" in row["映射测试点路径"]]
 
-    assert len(active) == 338
+    assert len(active) == 444
     assert {row["Bin_ID"] for row in active} == {
         *(f"BIN-{index:03d}" for index in range(401, 424)),
         *(f"BIN-{index:03d}" for index in range(424, 433)),
@@ -165,6 +190,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
         *(f"BIN-{index:03d}" for index in range(844, 854)),
         *(f"BIN-{index:03d}" for index in range(854, 889)),
         *(f"BIN-{index:03d}" for index in range(889, 899)),
+        *(f"BIN-{index:03d}" for index in range(899, 1005)),
     }
     assert legacy_bpu_ftq
     assert all(not row["Coverpoint"].strip() for row in legacy_bpu_ftq)
@@ -248,7 +274,7 @@ def test_ifu_predecode_and_two_fetch_leaves_are_single_bin_and_actionable():
     mapped_rows = {}
     with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
         for row in csv.DictReader(handle):
-            bin_ids = set(re.findall(r"BIN-\d{3}", row["coverage"])) & IFU_FUNCOV_BIN_IDS
+            bin_ids = set(re.findall(r"BIN-\d+", row["coverage"])) & IFU_FUNCOV_BIN_IDS
             if not bin_ids:
                 continue
 

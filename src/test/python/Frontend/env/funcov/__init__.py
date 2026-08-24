@@ -11,7 +11,13 @@ versions, simulators, or two different coverage semantics.
 from .py.ifu.sampler import (
     CFVEC_SAMPLER_BIN_KEYS as IFU_CFVEC_SAMPLER_BIN_KEYS,
     IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS,
+    OWNER_V3_BIN_SPECS,
+    OWNER_V3_COVERPOINT,
+    OWNER_V3_COVERPOINTS,
+    OWNER_V3_EVENT_TYPE,
+    OWNER_V3_SAMPLER_BIN_KEYS,
     _classify_cfi_kind,
+    handle_owner_v3_event,
     initialize_ifu_cacheable_pipeline_state,
     reset_ifu_cacheable_pipeline_state,
     sample_ifu_cacheable_pipeline_coverage,
@@ -25,7 +31,7 @@ from .py.ftq.sampler import (
 )
 
 # Legacy registry compatibility: these 17 keys remain part of the existing
-# pilot contract while the modular IFU sampler exposes its complete 26-key set.
+# pilot contract while the modular IFU sampler exports the additional models.
 CFVEC_SAMPLER_BIN_KEYS = frozenset(
     {
         ("ifu_instr_size_type", "rvi_seen"),
@@ -52,10 +58,16 @@ __all__ = [
     "CFVEC_SAMPLER_BIN_KEYS",
     "IFU_CFVEC_SAMPLER_BIN_KEYS",
     "IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS",
+    "OWNER_V3_BIN_SPECS",
+    "OWNER_V3_COVERPOINT",
+    "OWNER_V3_COVERPOINTS",
+    "OWNER_V3_EVENT_TYPE",
+    "OWNER_V3_SAMPLER_BIN_KEYS",
     "TWO_FETCH_COVERPOINTS",
     "TWO_FETCH_SAMPLER_BIN_KEYS",
     "_TWO_FETCH_SIGNALS",
     "_classify_cfi_kind",
+    "handle_owner_v3_event",
     "sample_cfvec_coverage",
     "initialize_ifu_cacheable_pipeline_state",
     "reset_ifu_cacheable_pipeline_state",

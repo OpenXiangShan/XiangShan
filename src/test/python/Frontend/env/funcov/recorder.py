@@ -21,6 +21,8 @@ from . import (
     CFVEC_SAMPLER_BIN_KEYS,
     IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS,
     IFU_CFVEC_SAMPLER_BIN_KEYS,
+    OWNER_V3_SAMPLER_BIN_KEYS,
+    handle_owner_v3_event,
     initialize_ifu_cacheable_pipeline_state,
     reset_ifu_cacheable_pipeline_state,
     sample_ifu_cacheable_pipeline_coverage,
@@ -106,6 +108,7 @@ def funcov_sampler_paths() -> dict[str, Path]:
         "funcov/py/ifu/sampler.py": root / "py" / "ifu" / "sampler.py",
         "funcov/py/ifu/cfvec_funcov.py": root / "py" / "ifu" / "cfvec_funcov.py",
         "funcov/py/ifu/compact_funcov.py": root / "py" / "ifu" / "compact_funcov.py",
+        "funcov/py/ifu/owner_v3_funcov.py": root / "py" / "ifu" / "owner_v3_funcov.py",
         "funcov/py/ifu/cacheable_pipeline_funcov.py": root / "py" / "ifu" / "cacheable_pipeline_funcov.py",
     }
 
@@ -201,6 +204,7 @@ FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS = frozenset(
     set(CFVEC_SAMPLER_BIN_KEYS)
     | set(IFU_CFVEC_SAMPLER_BIN_KEYS)
     | set(IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS)
+    | set(OWNER_V3_SAMPLER_BIN_KEYS)
     | set(TWO_FETCH_SAMPLER_BIN_KEYS)
     | set(UNCACHE_EVENT_SAMPLER_BIN_KEYS)
     | set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)
@@ -603,6 +607,8 @@ class FunctionalCoverageRecorder:
         event_type = str(evt.get("type", ""))
         cycle = int(evt.get("cycle", 0))
         payload = evt.get("payload", {}) or {}
+
+        handle_owner_v3_event(self, evt)
 
         if event_type == "handshake.icache_a":
             if (

@@ -1067,7 +1067,7 @@ def test_funcov_artifact_records_explicit_targets(tmp_path):
     ]
 
     with pytest.raises(ValueError, match="unknown functional coverage target Bin_ID"):
-        _make_recorder(tmp_path / "bad_target", target_bin_ids=["BIN-999"])
+        _make_recorder(tmp_path / "bad_target", target_bin_ids=["BIN-9999"])
 
 
 def test_funcov_targets_resolve_from_exact_registry_testcase(tmp_path):

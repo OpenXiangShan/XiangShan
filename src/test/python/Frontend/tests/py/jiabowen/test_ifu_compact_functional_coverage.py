@@ -1,6 +1,10 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+from env.funcov.py.ifu.owner_v3_funcov import (
+    OWNER_V3_BIN_SPECS,
+    OWNER_V3_EVENT_TYPE,
+)
 from env.funcov.py.ifu.sampler import sample_cfvec_coverage
 from env.funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_path
 from env.support.rvc_decoder import expand_rvc
@@ -57,6 +61,48 @@ def _make_recorder(tmp_path):
     )
     recorder.attach(env)
     return recorder, env, dut, memory
+
+
+def test_ifu_v3_owner_event_model_requires_checked_observations(tmp_path):
+    recorder, _env, _dut, _memory = _make_recorder(tmp_path)
+    first = OWNER_V3_BIN_SPECS[0]
+    recorder.handle_event(
+        {
+            "type": OWNER_V3_EVENT_TYPE,
+            "cycle": 1,
+            "payload": {
+                "bin_id": first.bin_id,
+                "condition_met": True,
+                "checkpoint_passed": True,
+                "observations": {},
+            },
+        }
+    )
+    assert not recorder.key_hit(first.coverage_group, first.bin_name)
+
+    for cycle, spec in enumerate(OWNER_V3_BIN_SPECS, start=2):
+        recorder.handle_event(
+            {
+                "type": OWNER_V3_EVENT_TYPE,
+                "cycle": cycle,
+                "payload": {
+                    "bin_id": spec.bin_id,
+                    "condition_met": True,
+                    "checkpoint_passed": True,
+                    "observations": {"checked_leaf": spec.bin_id},
+                    "producer": "test_ifu_v3_owner_event_model",
+                },
+            }
+        )
+
+    assert all(
+        recorder.key_hit(spec.coverage_group, spec.bin_name)
+        for spec in OWNER_V3_BIN_SPECS
+    )
+    assert any(
+        item.get("event") == "ifu_v3_owner_leaf_rejected"
+        for item in recorder.risk_observations
+    )
 
 
 def _set_ifu_output(
