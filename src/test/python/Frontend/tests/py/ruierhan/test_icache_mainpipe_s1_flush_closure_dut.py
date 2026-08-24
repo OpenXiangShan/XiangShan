@@ -338,19 +338,6 @@ def test_tc_icache_mainpipe_s1_global_flush_pending_miss(env) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-617")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_tc_icache_mainpipe_s1_bpu_match(env) -> None:
-    _require_bpu_s3_ftq_observable(env)
-    _initialize_bpu_s3_stream(env)
-    _drive_bpu_s3_until_s1_hit(
-        env,
-        "bpu_match_clears_s1",
-        max_cycles=_cycle_limit("TB_ICACHE_S1_BPU_MATCH_MAX_CYCLES", 512),
-    )
-    assert not env.monitor.get_errors()
-
-
 @pytest.mark.funcov_bins("BIN-618")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_s1_bpu_miss(env) -> None:

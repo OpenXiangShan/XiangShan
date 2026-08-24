@@ -289,6 +289,7 @@ def validate_mapping(
     pilot: dict[str, PilotBin],
     *,
     bin_prefix: str | None = None,
+    structure_errors: list[tuple[int, str]] | None = None,
 ) -> dict[str, int]:
     fields, rows = _read_csv(testpoint_path)
     required = {"coverage", "status", "testcase", "evidence"}
@@ -310,10 +311,14 @@ def validate_mapping(
         if ref is None:
             if bin_prefix is not None and bin_prefix not in coverage:
                 continue
-            raise ValueError(
+            message = (
                 f"line {line}: leaf must bind exactly one covergroup/coverpoint or "
                 "one covergroup/coverpoint/bin"
             )
+            if structure_errors is not None:
+                structure_errors.append((line, message))
+                continue
+            raise ValueError(message)
         point_key = (ref.group, ref.coverpoint)
         if ref.kind == "point":
             items = _pilot_bins_for_reference(ref, pilot)
@@ -1050,11 +1055,33 @@ def backannotate(
     *,
     apply: bool,
     bin_prefix: str | None = None,
+    allow_testpoint_structure_errors: bool = False,
 ) -> dict[str, int]:
     fields, rows = _read_csv(testpoint_path)
-    validate_mapping(testpoint_path, pilot, bin_prefix=bin_prefix)
+    structure_errors: list[tuple[int, str]] = []
+    validate_mapping(
+        testpoint_path,
+        pilot,
+        bin_prefix=bin_prefix,
+        structure_errors=structure_errors
+        if allow_testpoint_structure_errors
+        else None,
+    )
+    for _line, message in structure_errors:
+        print(message, file=sys.stderr)
     artifacts = list(artifacts)
-    counts = {"model": 0, "partial": 0, "hit": 0, "failed": 0, "closed_preserved": 0}
+    counts = {
+        "model": 0,
+        "partial": 0,
+        "hit": 0,
+        "failed": 0,
+        "closed_preserved": 0,
+    }
+    if allow_testpoint_structure_errors:
+        counts["structure_errors"] = len(structure_errors)
+        counts["structure_skipped_lines"] = len(
+            {line for line, _message in structure_errors}
+        )
 
     for row in rows:
         ref = parse_reference(row["coverage"])
@@ -1164,6 +1191,11 @@ def main() -> int:
         "--check", action="store_true", help="validate only; do not write"
     )
     parser.add_argument(
+        "--allow-testpoint-structure-errors",
+        action="store_true",
+        help="skip malformed coverage leaf references and report their line numbers",
+    )
+    parser.add_argument(
         "--schema-check",
         action="store_true",
         help="validate global pilot identifiers only",
@@ -1196,6 +1228,7 @@ def main() -> int:
         artifacts,
         apply=not args.check,
         bin_prefix=args.bin_prefix,
+        allow_testpoint_structure_errors=args.allow_testpoint_structure_errors,
     )
     print(" ".join(f"{key}={value}" for key, value in sorted(counts.items())))
     return 0

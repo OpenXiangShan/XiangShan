@@ -2139,6 +2139,76 @@ def test_backannotation_bin_prefix_preserves_unscoped_rows(tmp_path):
     assert rows[1]["evidence"] == "existing DUT evidence"
 
 
+def test_backannotation_can_skip_testpoint_structure_errors(tmp_path, capsys):
+    pilot_path = tmp_path / "pilot.csv"
+    testpoint_path = tmp_path / "testpoints.csv"
+    dut_path = tmp_path / "dut.funcov.json"
+    pilot_path.write_text(
+        "Bin_ID,Coverage_Group,Coverpoint,Bin_Name,建议试点用例\n"
+        "BIN-501,two_fetch_ftq_eligibility,request_eligibility,eligible_dual,case_a\n"
+        "BIN-502,two_fetch_ftq_eligibility,request_eligibility,eligible_single,case_b\n",
+        encoding="utf-8-sig",
+    )
+    testpoint_path.write_text(
+        "一级测试点,coverage,status,testcase,evidence\n"
+        "leaf_a,\"covergroup two_fetch_ftq_eligibility, coverpoint request_eligibility, bins eligible_dual (BIN-501)\",MODELED,,\n"
+        "bad_leaf,not-a-canonical-reference,MODELED,,keep_me\n"
+        "leaf_b,\"covergroup two_fetch_ftq_eligibility, coverpoint request_eligibility, bins eligible_single (BIN-502)\",MODELED,,\n",
+        encoding="utf-8-sig",
+    )
+    dut_path.write_text(
+        json.dumps(
+            {
+                "artifact_schema_version": 2,
+                "artifact_tag": "case_b_test_bin_trace",
+                "coverage_targets": {"bin_ids": ["BIN-502"], "hit_keys": []},
+                **_eligible_artifact_paths("unit-skip-structure-errors", "case_b"),
+                "provenance": _eligible_provenance(),
+                "run": _eligible_run("unit-skip-structure-errors"),
+                "stats": {"monitor": {"cycles_total": 10, "error_count": 0}},
+                "errors": [],
+                "hits": {
+                    "two_fetch_ftq_eligibility::request_eligibility::eligible_single": {
+                        "hits": 2
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    pilot = load_pilot(pilot_path)
+    artifacts = load_artifacts([dut_path])
+
+    with pytest.raises(
+        ValueError, match="leaf must bind exactly one covergroup/coverpoint"
+    ):
+        backannotate(testpoint_path, pilot, artifacts, apply=True)
+
+    counts = backannotate(
+        testpoint_path,
+        pilot,
+        artifacts,
+        apply=True,
+        allow_testpoint_structure_errors=True,
+    )
+
+    assert counts["hit"] == 1
+    assert counts["structure_errors"] == 1
+    assert counts["structure_skipped_lines"] == 1
+    assert (
+        "line 3: leaf must bind exactly one covergroup/coverpoint"
+        in capsys.readouterr().err
+    )
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["status"] == "MODELED"
+    assert rows[1]["coverage"] == "not-a-canonical-reference"
+    assert rows[1]["evidence"] == "keep_me"
+    assert rows[2]["status"] == "HIT"
+    assert rows[2]["testcase"] == "case_b"
+    assert "DUT:case_b_test_bin_trace:hits=2" in rows[2]["evidence"]
+
+
 def test_backannotation_rejects_hit_from_failed_dut_artifact(tmp_path):
     pilot_path = tmp_path / "pilot.csv"
     testpoint_path = tmp_path / "testpoints.csv"

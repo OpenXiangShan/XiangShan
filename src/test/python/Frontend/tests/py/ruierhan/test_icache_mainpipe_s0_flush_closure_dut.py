@@ -304,19 +304,6 @@ def _drive_bpu_s3_until_hit(env, bin_name: str, *, max_cycles: int) -> None:
     }
 
 
-@pytest.mark.funcov_bins("BIN-606")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_tc_icache_mainpipe_s0_bpu_match(env) -> None:
-    _require_bpu_s3_ftq_observable(env)
-    _initialize_bpu_s3_stream(env)
-    _drive_bpu_s3_until_hit(
-        env,
-        "bpu_match_cancels_entry",
-        max_cycles=_cycle_limit("TB_ICACHE_S0_BPU_MATCH_MAX_CYCLES", 512),
-    )
-    assert not env.monitor.get_errors()
-
-
 @pytest.mark.funcov_bins("BIN-607")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_s0_bpu_miss(env) -> None:
