@@ -23,6 +23,7 @@ from . import (
     IFU_CFVEC_SAMPLER_BIN_KEYS,
     OWNER_V3_SAMPLER_BIN_KEYS,
     MMIO_V3_SAMPLER_BIN_KEYS,
+    handle_mmio_v3_checked_event,
     handle_owner_v3_event,
     initialize_ifu_cacheable_pipeline_state,
     initialize_mmio_v3_coverage_state,
@@ -616,6 +617,7 @@ class FunctionalCoverageRecorder:
         payload = evt.get("payload", {}) or {}
 
         handle_owner_v3_event(self, evt)
+        handle_mmio_v3_checked_event(self, evt)
 
         if event_type == "handshake.icache_a":
             if (

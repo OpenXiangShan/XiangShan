@@ -1,6 +1,9 @@
 from types import SimpleNamespace
 
-from env.funcov.py.ifu.mmio_v3_funcov import sample_mmio_v3_coverage
+from env.funcov.py.ifu.mmio_v3_funcov import (
+    MMIO_V3_CHECKED_EVENT_TYPE,
+    sample_mmio_v3_coverage,
+)
 from env.funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_path
 
 
@@ -97,3 +100,32 @@ def test_page_tail_rvc_progress_uses_halfword_pc_units(tmp_path):
     sample_mmio_v3_coverage(recorder, env, 2)
 
     assert recorder.key_hit("ifu_mmio_page_tail", "next_pc_plus_2b")
+
+
+def test_first_page_iaf_checked_event_requires_both_page_permissions(tmp_path):
+    recorder, _env, _dut = _make_recorder(tmp_path)
+    base_payload = {
+        "bin_id": "BIN-1014",
+        "condition_met": True,
+        "checkpoint_passed": True,
+        "observations": {
+            "first_page_execute": False,
+            "second_page_execute": False,
+            "delivered_exception": 3,
+            "illegal_instruction": False,
+        },
+    }
+    recorder.handle_event(
+        {"type": MMIO_V3_CHECKED_EVENT_TYPE, "cycle": 1, "payload": base_payload}
+    )
+    assert not recorder.key_hit(
+        "ifu_mmio_exception_priority", "second_page_exec_not_illegal"
+    )
+
+    base_payload["observations"]["second_page_execute"] = True
+    recorder.handle_event(
+        {"type": MMIO_V3_CHECKED_EVENT_TYPE, "cycle": 2, "payload": base_payload}
+    )
+    assert recorder.key_hit(
+        "ifu_mmio_exception_priority", "second_page_exec_not_illegal"
+    )

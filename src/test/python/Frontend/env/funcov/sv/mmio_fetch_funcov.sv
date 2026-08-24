@@ -91,6 +91,7 @@ module frontend_mmio_fetch_funcov (
   wire tl_a_fire = tl_a_valid && tl_a_ready;
   wire entry_wait_resp = entry_state == WAIT_RESP;
   wire page_tail_request = &entry_req_addr[11:1];
+  wire s2_page_tail = &s2_pc_0[10:0];
   wire beat_tail_request = &entry_req_addr[2:1];
   wire [15:0] tl_d_first_half = tl_d_data[entry_req_addr[1:0] * 16 +: 16];
   wire response_is_rvc = tl_d_first_half[1:0] != 2'b11;
@@ -527,7 +528,9 @@ module frontend_mmio_fetch_funcov (
         bins observed = {1'b1};
       }
     MMIO_first_page_iaf_not_illegal_cp:
-      coverpoint (first_page_exception_seen && to_ibuffer_valid &&
+      coverpoint (s2_valid && s2_req_is_uncache && !s2_use_uncache &&
+                  s2_pmp_mmio_0 && s2_page_tail &&
+                  s2_exception_0 == 3'h3 && to_ibuffer_valid &&
                   to_ibuffer_exception == 3'h3) iff (!reset) {
         bins observed = {1'b1};
       }

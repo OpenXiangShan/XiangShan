@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 
+MMIO_V3_CHECKED_EVENT_TYPE = "ifu.v3.mmio.checked"
 MMIO_V3_COVERPOINTS = {
     "ifu_mmio_tl_a_stall": "request_context",
     "ifu_mmio_page_tail": "rvc_progress",
+    "ifu_mmio_exception_priority": "first_page_iaf",
 }
 MMIO_V3_SAMPLER_BIN_KEYS = frozenset(
     {
         ("ifu_mmio_tl_a_stall", "stable_until_accept"),
         ("ifu_mmio_page_tail", "next_pc_plus_2b"),
+        ("ifu_mmio_exception_priority", "second_page_exec_not_illegal"),
     }
 )
 
@@ -177,9 +180,52 @@ def sample_mmio_v3_coverage(recorder, env, cycle: int) -> None:
     _sample_page_tail_rvc(recorder, env, dut, int(cycle))
 
 
+def handle_mmio_v3_checked_event(recorder, event: dict[str, Any]) -> bool:
+    if str(event.get("type", "")) != MMIO_V3_CHECKED_EVENT_TYPE:
+        return False
+    cycle = int(event.get("cycle", 0))
+    payload = event.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+    observations = payload.get("observations")
+    accepted = (
+        payload.get("bin_id") == "BIN-1014"
+        and payload.get("condition_met") is True
+        and payload.get("checkpoint_passed") is True
+        and isinstance(observations, dict)
+        and observations.get("first_page_execute") is False
+        and observations.get("second_page_execute") is True
+        and observations.get("delivered_exception") == 3
+        and observations.get("illegal_instruction") is False
+    )
+    if not accepted:
+        recorder.risk_observations.append(
+            {
+                "event": "ifu_mmio_v3_checked_event_rejected",
+                "cycle": cycle,
+                "bin_id": payload.get("bin_id"),
+            }
+        )
+        return False
+    recorder.mark(
+        "ifu_mmio_exception_priority",
+        "second_page_exec_not_illegal",
+        cycle,
+        {
+            "event": MMIO_V3_CHECKED_EVENT_TYPE,
+            "bin_id": "BIN-1014",
+            "observations": observations,
+            "producer": str(payload.get("producer", "directed_checker")),
+        },
+    )
+    return True
+
+
 __all__ = [
+    "MMIO_V3_CHECKED_EVENT_TYPE",
     "MMIO_V3_COVERPOINTS",
     "MMIO_V3_SAMPLER_BIN_KEYS",
+    "handle_mmio_v3_checked_event",
     "initialize_mmio_v3_coverage_state",
     "reset_mmio_v3_coverage_state",
     "sample_mmio_v3_coverage",
