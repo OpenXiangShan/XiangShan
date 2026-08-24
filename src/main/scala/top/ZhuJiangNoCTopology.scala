@@ -5,6 +5,8 @@ import zhujiang.ZJParameters
 import zhujiang.device.AxiDeviceParams
 
 object ZhuJiangNoCTopology {
+  private val MemoryOutstanding = 64
+
   def apply(numCores: Int, base: ZJParameters = ZJParameters()): ZJParameters = {
     apply(numCores, base, base.cfgAxiDataBits)
   }
@@ -27,7 +29,10 @@ object ZhuJiangNoCTopology {
     NodeParam(nodeType = NodeType.RI, axiDevParams = Some(AxiDeviceParams(wrapper = "east", attr = "main"))),
     NodeParam(nodeType = NodeType.HI, axiDevParams = Some(AxiDeviceParams(wrapper = "east", attr = "main")), defaultHni = true),
     NodeParam(nodeType = NodeType.HF, bankId = 1, hfpId = 1),
-    NodeParam(nodeType = NodeType.S, axiDevParams = Some(AxiDeviceParams(wrapper = "south", attr = "mem_0"))),
+    NodeParam(
+      nodeType = NodeType.S,
+      axiDevParams = Some(AxiDeviceParams(outstanding = MemoryOutstanding, wrapper = "south", attr = "mem_0"))
+    ),
     NodeParam(nodeType = NodeType.HF, bankId = 0, hfpId = 1),
     NodeParam(nodeType = NodeType.M, axiDevParams = Some(AxiDeviceParams(wrapper = "misc", attr = "hwa"))),
     NodeParam(nodeType = NodeType.P)
@@ -41,7 +46,10 @@ object ZhuJiangNoCTopology {
     NodeParam(nodeType = NodeType.RI, axiDevParams = Some(AxiDeviceParams(wrapper = "east", attr = "main"))),
     NodeParam(nodeType = NodeType.HI, axiDevParams = Some(AxiDeviceParams(wrapper = "east", attr = "main")), defaultHni = true),
     NodeParam(nodeType = NodeType.HF, bankId = 1, hfpId = 1),
-    NodeParam(nodeType = NodeType.S, axiDevParams = Some(AxiDeviceParams(wrapper = "south", attr = "mem_0"))),
+    NodeParam(
+      nodeType = NodeType.S,
+      axiDevParams = Some(AxiDeviceParams(outstanding = MemoryOutstanding, wrapper = "south", attr = "mem_0"))
+    ),
     NodeParam(nodeType = NodeType.HF, bankId = 0, hfpId = 1),
     NodeParam(nodeType = NodeType.M, axiDevParams = Some(AxiDeviceParams(wrapper = "misc", attr = "hwa"))),
     NodeParam(nodeType = NodeType.P)
