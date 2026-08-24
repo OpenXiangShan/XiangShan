@@ -586,7 +586,7 @@ object TopMain extends App {
 
     // generate difftest bundles (w/o DifftestTopIO)
     if (enableDifftest) {
-      DifftestModule.collect("XiangShan")
+      DifftestModule.collect("XIANGSHAN_KMHV3")
     }
   }
 
