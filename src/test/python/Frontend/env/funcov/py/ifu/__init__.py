@@ -10,6 +10,13 @@ from .owner_v3_funcov import (
     OWNER_V3_SAMPLER_BIN_KEYS,
     handle_owner_v3_event,
 )
+from .mmio_v3_funcov import (
+    MMIO_V3_COVERPOINTS,
+    MMIO_V3_SAMPLER_BIN_KEYS,
+    initialize_mmio_v3_coverage_state,
+    reset_mmio_v3_coverage_state,
+    sample_mmio_v3_coverage,
+)
 from .cacheable_pipeline_funcov import (
     IFU_CACHEABLE_PIPELINE_COVERPOINTS,
     IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS,
@@ -28,12 +35,17 @@ __all__ = [
     "OWNER_V3_COVERPOINTS",
     "OWNER_V3_EVENT_TYPE",
     "OWNER_V3_SAMPLER_BIN_KEYS",
+    "MMIO_V3_COVERPOINTS",
+    "MMIO_V3_SAMPLER_BIN_KEYS",
     "IFU_CACHEABLE_PIPELINE_COVERPOINTS",
     "IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS",
     "IFU_COVERPOINTS",
     "sample_cfvec_coverage",
     "sample_compact_coverage",
     "handle_owner_v3_event",
+    "initialize_mmio_v3_coverage_state",
+    "reset_mmio_v3_coverage_state",
+    "sample_mmio_v3_coverage",
     "initialize_ifu_cacheable_pipeline_state",
     "reset_ifu_cacheable_pipeline_state",
     "sample_ifu_cacheable_pipeline_coverage",

@@ -22,10 +22,14 @@ from . import (
     IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS,
     IFU_CFVEC_SAMPLER_BIN_KEYS,
     OWNER_V3_SAMPLER_BIN_KEYS,
+    MMIO_V3_SAMPLER_BIN_KEYS,
     handle_owner_v3_event,
     initialize_ifu_cacheable_pipeline_state,
+    initialize_mmio_v3_coverage_state,
     reset_ifu_cacheable_pipeline_state,
+    reset_mmio_v3_coverage_state,
     sample_ifu_cacheable_pipeline_coverage,
+    sample_mmio_v3_coverage,
     sample_cfvec_coverage,
 )
 from .py.ftq.sampler import (
@@ -109,6 +113,7 @@ def funcov_sampler_paths() -> dict[str, Path]:
         "funcov/py/ifu/cfvec_funcov.py": root / "py" / "ifu" / "cfvec_funcov.py",
         "funcov/py/ifu/compact_funcov.py": root / "py" / "ifu" / "compact_funcov.py",
         "funcov/py/ifu/owner_v3_funcov.py": root / "py" / "ifu" / "owner_v3_funcov.py",
+        "funcov/py/ifu/mmio_v3_funcov.py": root / "py" / "ifu" / "mmio_v3_funcov.py",
         "funcov/py/ifu/cacheable_pipeline_funcov.py": root / "py" / "ifu" / "cacheable_pipeline_funcov.py",
     }
 
@@ -205,6 +210,7 @@ FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS = frozenset(
     | set(IFU_CFVEC_SAMPLER_BIN_KEYS)
     | set(IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS)
     | set(OWNER_V3_SAMPLER_BIN_KEYS)
+    | set(MMIO_V3_SAMPLER_BIN_KEYS)
     | set(TWO_FETCH_SAMPLER_BIN_KEYS)
     | set(UNCACHE_EVENT_SAMPLER_BIN_KEYS)
     | set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)
@@ -324,6 +330,7 @@ class FunctionalCoverageRecorder:
         self._two_fetch_last_dual_cycle: Optional[int] = None
         initialize_ftq_coverage_state(self)
         initialize_ifu_cacheable_pipeline_state(self)
+        initialize_mmio_v3_coverage_state(self)
         self._dut_signal_cache: Dict[str, Any] = {}
         self._missing_dut_signals: set[str] = set()
 
@@ -688,6 +695,7 @@ class FunctionalCoverageRecorder:
         self._two_fetch_last_waylookup_write_state = None
         reset_ftq_coverage_state(self)
         reset_ifu_cacheable_pipeline_state(self)
+        reset_mmio_v3_coverage_state(self)
         reset_icache_mainpipe_coverage_state(self)
         reset_icache_prefetchpipe_coverage_state(self)
         reset_icache_missunit_coverage_state(self)
@@ -708,6 +716,7 @@ class FunctionalCoverageRecorder:
         sample_two_fetch_coverage(self, env, cycle)
         sample_cfvec_coverage(self, env, cycle)
         sample_ifu_cacheable_pipeline_coverage(self, env, cycle)
+        sample_mmio_v3_coverage(self, env, cycle)
         sample_icache_mainpipe_coverage(self, env, cycle)
         sample_icache_prefetchpipe_coverage(self, env, cycle)
         sample_icache_missunit_coverage(self, env, cycle)

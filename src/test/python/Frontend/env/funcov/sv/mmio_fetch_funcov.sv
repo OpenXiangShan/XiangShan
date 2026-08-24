@@ -8,6 +8,7 @@ module frontend_mmio_fetch_funcov (
   input logic        s2_pmp_mmio_0,
   input logic [1:0]  s2_pbmt_0,
   input logic [2:0]  s2_exception_0,
+  input logic [48:0] s2_pc_0,
   input logic        is_first_instr,
   input logic        uncache_input_valid,
   input logic        uncache_input_ready,
@@ -67,6 +68,10 @@ module frontend_mmio_fetch_funcov (
   logic [1:0]  prev_uncache_state;
   logic        stalled_a_seen;
   logic [47:0] stalled_a_addr;
+  logic [48:0] stalled_a_pc;
+  logic        stalled_a_pmp_mmio;
+  logic [1:0]  stalled_a_pbmt;
+  logic [2:0]  stalled_a_exception;
   logic        cross_page_half_pending;
   logic        first_page_exception_seen;
   logic        cross_8b_resend_seen;
@@ -107,6 +112,10 @@ module frontend_mmio_fetch_funcov (
       prev_uncache_state <= IDLE;
       stalled_a_seen <= 1'b0;
       stalled_a_addr <= '0;
+      stalled_a_pc <= '0;
+      stalled_a_pmp_mmio <= 1'b0;
+      stalled_a_pbmt <= '0;
+      stalled_a_exception <= '0;
       cross_page_half_pending <= 1'b0;
       first_page_exception_seen <= 1'b0;
       cross_8b_resend_seen <= 1'b0;
@@ -132,6 +141,10 @@ module frontend_mmio_fetch_funcov (
       if (tl_a_valid && !tl_a_ready) begin
         stalled_a_seen <= 1'b1;
         stalled_a_addr <= tl_a_addr;
+        stalled_a_pc <= s2_pc_0;
+        stalled_a_pmp_mmio <= s2_pmp_mmio_0;
+        stalled_a_pbmt <= s2_pbmt_0;
+        stalled_a_exception <= s2_exception_0;
       end else if (tl_a_fire || ifu_flush) begin
         stalled_a_seen <= 1'b0;
       end
@@ -392,7 +405,10 @@ module frontend_mmio_fetch_funcov (
       }
     MMIO_tl_a_stall_context_cp:
       coverpoint (stalled_a_seen && tl_a_valid && !tl_a_ready &&
-                  tl_a_addr == stalled_a_addr) iff (!reset) {
+                  tl_a_addr == stalled_a_addr && s2_pc_0 == stalled_a_pc &&
+                  s2_pmp_mmio_0 == stalled_a_pmp_mmio &&
+                  s2_pbmt_0 == stalled_a_pbmt &&
+                  s2_exception_0 == stalled_a_exception) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_tl_a_fire_to_wait_resp_cp:
