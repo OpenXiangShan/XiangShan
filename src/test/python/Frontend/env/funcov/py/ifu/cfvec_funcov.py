@@ -428,7 +428,7 @@ CFVEC_SAMPLER_BIN_KEYS = frozenset(
         ("ifu_writeback", "instr_count_matches_enq"),
         ("ifu_ibuffer_alignment", "zero_pointer_slot_zero"),
         ("ifu_ibuffer_alignment", "nonzero_shift_matches_slot"),
-        ("ifu_ibuffer_alignment", "wide_window_bounded"),
+        ("ifu_ibuffer_alignment", "max_window_shift_bounded"),
         ("ifu_ibuffer_alignment", "pointer_advance_matches_count"),
         ("ifu_invalid_taken_exception", "observed"),
         ("ifu_instr_boundary_alignment", "stitched_at_align_head"),

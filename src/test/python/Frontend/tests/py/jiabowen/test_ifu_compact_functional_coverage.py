@@ -409,19 +409,20 @@ def test_ifu_ibuffer_pointer_alignment_bins_use_real_s2_fields(tmp_path):
     )
     sample_cfvec_coverage(recorder, env, 2)
     assert recorder.key_hit("ifu_ibuffer_alignment", "nonzero_shift_matches_slot")
+    assert not recorder.key_hit("ifu_ibuffer_alignment", "max_window_shift_bounded")
 
+    max_window_entries = [
+        (slot, base + 0x100 + 4 * index, 0x00000013, 0, index, 0, 1, 0)
+        for index, slot in enumerate(range(3, 35))
+    ]
     _set_ifu_output(
         dut,
-        [
-            (1, base + 12, 0x00000013, 0, 7, 0, 1, 0),
-            (2, base + 16, 0x00000013, 0, 9, 0, 1, 0),
-            (3, base + 20, 0x00000013, 0, 11, 0, 1, 0),
-        ],
-        prev_ibuf_enq_ptr=9,
-        instr_count=40,
+        max_window_entries,
+        prev_ibuf_enq_ptr=3,
+        instr_count=32,
     )
     sample_cfvec_coverage(recorder, env, 3)
-    assert recorder.key_hit("ifu_ibuffer_alignment", "wide_window_bounded")
+    assert recorder.key_hit("ifu_ibuffer_alignment", "max_window_shift_bounded")
 
 
 def test_ifu_ibuffer_pointer_update_tracks_count_and_wraps(tmp_path):

@@ -13,6 +13,7 @@ _IFU_INTERNAL_PREFIXES = (
     "Frontend_top.Frontend._inner_ifu_",
 )
 _IFU_OUTPUT_SLOT_COUNT = 36
+_FETCH_BLOCK_INST_COUNT = 32
 _IBUFFER_ENTRY_COUNT = 48
 _FETCH_EXCEPTION_VALUES = frozenset({1, 2, 3, 5})
 
@@ -698,10 +699,18 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                 cycle,
                 alignment_evidence,
             )
-        if int(instr_count) > _IFU_OUTPUT_SLOT_COUNT and len(slots) <= _IFU_OUTPUT_SLOT_COUNT:
+        max_window_slots = list(
+            range(int(align_shift_num), int(align_shift_num) + _FETCH_BLOCK_INST_COUNT)
+        )
+        if (
+            int(instr_count) == _FETCH_BLOCK_INST_COUNT
+            and int(align_shift_num) == 3
+            and slots == max_window_slots
+            and max_window_slots[-1] < _IFU_OUTPUT_SLOT_COUNT
+        ):
             recorder.mark(
                 "ifu_ibuffer_alignment",
-                "wide_window_bounded",
+                "max_window_shift_bounded",
                 cycle,
                 alignment_evidence,
             )
@@ -1267,7 +1276,7 @@ COMPACT_SAMPLER_BIN_KEYS = frozenset(
         ("ifu_writeback", "instr_count_matches_enq"),
         ("ifu_ibuffer_alignment", "zero_pointer_slot_zero"),
         ("ifu_ibuffer_alignment", "nonzero_shift_matches_slot"),
-        ("ifu_ibuffer_alignment", "wide_window_bounded"),
+        ("ifu_ibuffer_alignment", "max_window_shift_bounded"),
         ("ifu_ibuffer_alignment", "pointer_advance_matches_count"),
         ("ifu_ibuffer_output", "instr_pc_isrvc_observed"),
         ("ifu_ibuffer_output", "ftq_offset_observed"),
