@@ -951,8 +951,37 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         if contiguous and before["is_rvc"] == 1:
             recorder.mark("ifu_data_slice", "rvc_keeps_second_halfword", cycle, evidence)
 
-    if fetch1_valid == 1 and internal_records and not second_source:
-        recorder.mark("ifu_data_slice", "second_block_suppressed", cycle, evidence)
+    preclip_second_slots = []
+    for slot in range(_IFU_OUTPUT_SLOT_COUNT):
+        aligned_valid = _read_ifu_internal(
+            recorder, dut, f"s2_alignedInstrVec_{slot}_valid"
+        )
+        block_sel = _read_ifu_internal(
+            recorder, dut, f"s2_alignedInstrVec_{slot}_blockSel"
+        )
+        if aligned_valid == 1 and block_sel == 1:
+            preclip_second_slots.append(slot)
+    active_second_slots = [
+        item["slot"] for item in internal_records if item["block_sel"] == 1
+    ]
+    if (
+        fetch1_valid == 1
+        and s2_fire == 1
+        and s2_req_is_uncache == 0
+        and preclip_second_slots
+        and first_source
+        and not active_second_slots
+    ):
+        recorder.mark(
+            "ifu_data_slice",
+            "second_block_suppressed",
+            cycle,
+            {
+                **evidence,
+                "preclip_second_slots": preclip_second_slots,
+                "delivered_second_slots": active_second_slots,
+            },
+        )
 
     if (
         align_shift_num is not None

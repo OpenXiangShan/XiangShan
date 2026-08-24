@@ -694,6 +694,33 @@ def test_ifu_backpressure_release_and_writeback_match_enqueue(tmp_path):
     assert recorder.key_hit("ifu_writeback", "instr_count_matches_enq")
 
 
+def test_second_block_suppression_requires_preclip_second_source(tmp_path):
+    recorder, env, dut, memory = _make_recorder(tmp_path)
+    base = 0x80000000
+    first_entries = [
+        (0, base, 0x00000013, 0, 1, 0, 3, 0),
+        (1, base + 4, 0x00000013, 0, 3, 0, 3, 0),
+    ]
+    for entry in first_entries:
+        memory.write32(entry[1], entry[2])
+    _set_ifu_output(dut, first_entries)
+    for slot, entry in enumerate(first_entries):
+        _set_aligned_slot(dut, slot, entry, block_sel=0, branch_type=0)
+    dut.set(_PREFIX + "s2_alignedInstrVec_2_valid", 0)
+    dut.set(_PREFIX + "s2_alignedInstrVec_2_blockSel", 0)
+    dut.set(_PREFIX + "s2_fetchBlock_0_valid", 1)
+    dut.set(_PREFIX + "s2_fetchBlock_1_valid", 1)
+
+    sample_cfvec_coverage(recorder, env, 1)
+    assert not recorder.key_hit("ifu_data_slice", "second_block_suppressed")
+
+    suppressed_entry = (2, base + 0x40, 0x00000013, 0, 1, 0, 4, 0)
+    _set_aligned_slot(dut, 2, suppressed_entry, block_sel=1, branch_type=0)
+    sample_cfvec_coverage(recorder, env, 2)
+
+    assert recorder.key_hit("ifu_data_slice", "second_block_suppressed")
+
+
 def test_ifu_illegal_rvc_and_fetch_exception_priority_bins(tmp_path):
     recorder, env, dut, memory = _make_recorder(tmp_path / "illegal")
     base = 0x80000000
