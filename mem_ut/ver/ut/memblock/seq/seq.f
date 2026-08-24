@@ -3,6 +3,7 @@
 +incdir+./base_seq
 +incdir+./base_seq/soft_test
 +incdir+./virtual_sequence
++incdir+../env/src/memblock_rm
 +incdir+../env/src
 seq_pkg.sv
 
