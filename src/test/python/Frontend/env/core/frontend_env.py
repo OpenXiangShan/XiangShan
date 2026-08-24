@@ -854,8 +854,12 @@ class FrontendEnv:
         cfg_word = int(self._pmp_pma_cfg_words[normalized_kind].get(cfg_csr, 0))
         byte_mask = 0xFF << (8 * byte_offset)
         cfg_word = (cfg_word & ~byte_mask) | (cfg_byte << (8 * byte_offset))
-        self.write_distributed_csr(cfg_csr, cfg_word, settle_cycles=settle_cycles)
-        self.write_distributed_csr(addr_csr, encoded_addr, settle_cycles=settle_cycles)
+        if config.locked:
+            self.write_distributed_csr(addr_csr, encoded_addr, settle_cycles=settle_cycles)
+            self.write_distributed_csr(cfg_csr, cfg_word, settle_cycles=settle_cycles)
+        else:
+            self.write_distributed_csr(cfg_csr, cfg_word, settle_cycles=settle_cycles)
+            self.write_distributed_csr(addr_csr, encoded_addr, settle_cycles=settle_cycles)
         self._pmp_pma_cfg_words[normalized_kind][cfg_csr] = cfg_word
         record = {
             "kind": normalized_kind,

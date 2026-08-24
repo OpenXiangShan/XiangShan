@@ -84,6 +84,19 @@ def test_pmp_pma_entry_writes_preserve_other_cfg_bytes_in_mirror() -> None:
     assert env._pmp_pma_cfg_words["pmp"][PMP_CFG_BASE] == 0x1D | (0x1F << 8)
 
 
+def test_locked_pmp_entry_writes_address_before_locking_config() -> None:
+    env, _events = _env_with_events()
+
+    env.write_pmp_entry(
+        0,
+        PmpPmaConfig(match="napot", read=True, execute=False, locked=True),
+        0x80000000,
+        size=0x1000,
+    )
+
+    assert [record["addr"] for record in env.csr_write_log[-2:]] == [PMP_ADDR_BASE, PMP_CFG_BASE]
+
+
 def test_pulse_sfence_drives_all_fields_for_exactly_requested_cycles() -> None:
     env, events = _env_with_events()
 
