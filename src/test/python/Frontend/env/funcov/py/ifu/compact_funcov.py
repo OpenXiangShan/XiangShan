@@ -208,6 +208,7 @@ def _sample_writeback(recorder, dut, cycle: int, pointer_redirect: bool) -> None
                 "enqueue_cycle": int(match["cycle"]),
                 "enqueue_count": int(match["count"]),
                 "wb_instr_count": int(wb_count),
+                "source_valids": match["source_valids"],
                 "source_tags": match["source_tags"],
             }
             recorder.mark("ifu_writeback", "ordinary_no_redirect", cycle, evidence)
@@ -218,7 +219,11 @@ def _sample_writeback(recorder, dut, cycle: int, pointer_redirect: bool) -> None
                 flag = _read_ifu_internal(recorder, dut, f"wbAlignFetchBlock_{block}_ftqIdx_flag")
                 value = _read_ifu_internal(recorder, dut, f"wbAlignFetchBlock_{block}_ftqIdx_value")
                 wb_tags.append(None if flag is None or value is None else (int(flag), int(value)))
-            if len(match["source_tags"]) == 2 and tuple(wb_tags) == tuple(match["source_tags"]):
+            if (
+                tuple(match["source_valids"]) == (1, 1)
+                and len(match["source_tags"]) == 2
+                and tuple(wb_tags) == tuple(match["source_tags"])
+            ):
                 recorder.mark(
                     "ifu_writeback",
                     "dual_fetch_sources_match",
@@ -645,10 +650,13 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
     for record in records:
         if record["ftq_ptr"] is not None and record["ftq_ptr"] not in source_tags:
             source_tags.append(record["ftq_ptr"])
+    fetch0_valid = _read_ifu_internal(recorder, dut, "s2_fetchBlock_0_valid")
+    fetch1_valid = _read_ifu_internal(recorder, dut, "s2_fetchBlock_1_valid")
     recorder._ifu_wb_pending.append(
         {
             "cycle": int(cycle),
             "count": len(slots),
+            "source_valids": (fetch0_valid, fetch1_valid),
             "source_tags": tuple(source_tags),
         }
     )
@@ -658,8 +666,6 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
     instr_count = _read_ifu_internal(recorder, dut, "s2_instrCount")
     s2_fire = _read_ifu_internal(recorder, dut, "s2_fire")
     s2_req_is_uncache = _read_ifu_internal(recorder, dut, "s2_reqIsUncache")
-    fetch0_valid = _read_ifu_internal(recorder, dut, "s2_fetchBlock_0_valid")
-    fetch1_valid = _read_ifu_internal(recorder, dut, "s2_fetchBlock_1_valid")
     if (
         s2_fire == 1
         and s2_req_is_uncache == 0

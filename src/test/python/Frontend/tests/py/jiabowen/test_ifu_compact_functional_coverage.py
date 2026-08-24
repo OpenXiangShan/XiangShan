@@ -667,6 +667,8 @@ def test_ifu_backpressure_release_and_writeback_match_enqueue(tmp_path):
     _set_ifu_output(dut, entries)
     dut.set(_PREFIX + "s1_valid", 0)
     dut.set(_PREFIX + "s1_ready", 1)
+    dut.set(_PREFIX + "s2_fetchBlock_0_valid", 1)
+    dut.set(_PREFIX + "s2_fetchBlock_1_valid", 1)
     dut.set(_PREFIX + "wbValid", 0)
     dut.set(_PREFIX + "wbInstrCount", 0)
     sample_cfvec_coverage(recorder, env, 1)
@@ -692,6 +694,35 @@ def test_ifu_backpressure_release_and_writeback_match_enqueue(tmp_path):
     assert recorder.key_hit("ifu_writeback", "ordinary_no_redirect")
     assert recorder.key_hit("ifu_writeback", "dual_fetch_sources_match")
     assert recorder.key_hit("ifu_writeback", "instr_count_matches_enq")
+
+
+def test_dual_source_writeback_requires_two_observable_fetch_blocks(tmp_path):
+    recorder, env, dut, memory = _make_recorder(tmp_path)
+    base = 0x80000000
+    entries = [
+        (0, base, 0x00000013, 0, 1, 0, 3, 0),
+        (1, base + 4, 0x00000013, 0, 3, 0, 4, 0),
+    ]
+    for entry in entries:
+        memory.write32(entry[1], entry[2])
+    _set_ifu_output(dut, entries)
+    dut.set(_PREFIX + "s2_fetchBlock_0_valid", 1)
+    dut.set(_PREFIX + "s2_fetchBlock_1_valid", 0)
+    dut.set(_PREFIX + "wbValid", 0)
+    dut.set(_PREFIX + "wbInstrCount", 0)
+    sample_cfvec_coverage(recorder, env, 1)
+
+    dut.set(_PREFIX + "io_toIBuffer_valid", 0)
+    dut.set(_PREFIX + "wbValid", 1)
+    dut.set(_PREFIX + "wbInstrCount", 2)
+    dut.set(_PREFIX + "wbAlignFetchBlock_0_ftqIdx_flag", 0)
+    dut.set(_PREFIX + "wbAlignFetchBlock_0_ftqIdx_value", 3)
+    dut.set(_PREFIX + "wbAlignFetchBlock_1_ftqIdx_flag", 0)
+    dut.set(_PREFIX + "wbAlignFetchBlock_1_ftqIdx_value", 4)
+    sample_cfvec_coverage(recorder, env, 2)
+
+    assert recorder.key_hit("ifu_writeback", "ordinary_no_redirect")
+    assert not recorder.key_hit("ifu_writeback", "dual_fetch_sources_match")
 
 
 def test_second_block_suppression_requires_preclip_second_source(tmp_path):
