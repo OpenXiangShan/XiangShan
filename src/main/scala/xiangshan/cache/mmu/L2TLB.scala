@@ -216,6 +216,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val tlbCounter = RegInit(0.U(log2Ceil(MissQueueSize + 1).W))
   val reqVec = WireInit(VecInit(Seq.fill(PtwWidth)(false.B)))
   val respVec = WireInit(VecInit(Seq.fill(PtwWidth)(false.B)))
+  val arb1MptOnly = if (HasMptCheck) {
+    arb1.io.out.bits.mptOnly.get && mptEn.get
+  } else {
+    false.B
+  }
 
   for (i <- 0 until PtwWidth) {
     when (io.tlb(i).req(0).fire) {
@@ -237,7 +242,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     mpt_arb.get.io.in(mptOnlyPort).bits.id := arb1.io.chosen // b101 + bx //tlb id to mptc id
     mpt_arb.get.io.in(mptOnlyPort).bits.mptOnly := true.B // used for l2tlb return control logic
     mpt_arb.get.io.in(mptOnlyPort).bits.reqPA := arb1.io.out.bits.vpn // for mpt only vpn is ppn
-    mpt_arb.get.io.in(mptOnlyPort).valid := arb1.io.out.fire && (arb1.io.out.bits.mptOnly.get) // valid when mptOnly and
+    mpt_arb.get.io.in(mptOnlyPort).valid := arb1.io.out.fire && arb1MptOnly // valid when mptOnly and
     // s2xlate is dont care, it has nothing to do with mpt
   }
 
@@ -249,7 +254,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.llptw.ready := arb2.io.in(InArbPTWPort).ready
   block_decoupled(missQueue.io.out, arb2.io.in(InArbMissQueuePort), Mux(missQueue.io.out.bits.isLLptw, !llptw.io.in.ready, !ptw.io.req.ready))
 
-  arb2.io.in(InArbTlbPort).valid := arb1.io.out.fire && (if (HasMptCheck) !(arb1.io.out.bits.mptOnly.get) else true.B)
+  arb2.io.in(InArbTlbPort).valid := arb1.io.out.fire && !arb1MptOnly
   // not mpt only req will go to l2tlb,mptOnly goes to mptc directly
   arb2.io.in(InArbTlbPort).bits.req_info.vpn := arb1.io.out.bits.vpn
   arb2.io.in(InArbTlbPort).bits.req_info.s2xlate := arb1.io.out.bits.s2xlate
@@ -260,9 +265,12 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // 1. arb1 and arb2 are both comb logic, so ready can work just the same cycle
   // 2. arb1 can send one req at most in a cycle, so do not need to write
   //    "tlbCounter <= (MissQueueSize - 2).U"
-  arb1.io.out.ready := arb2.io.in(InArbTlbPort).ready && tlbCounter < MissQueueSize.U &&
-    (if (HasMptCheck) (mpt_arb.get.io.in(mptOnlyPort).ready) else true.B)
-  //arb1 out is ready when arb2 and mptc are both ready
+  val arb1TargetReady = if (HasMptCheck) {
+    Mux(arb1MptOnly, mpt_arb.get.io.in(mptOnlyPort).ready, arb2.io.in(InArbTlbPort).ready)
+  } else {
+    arb2.io.in(InArbTlbPort).ready
+  }
+  arb1.io.out.ready := tlbCounter < MissQueueSize.U && arb1TargetReady
   arb2.io.in(InArbHPTWPort).valid := hptw_req_arb.io.out.valid
   arb2.io.in(InArbHPTWPort).bits.req_info.vpn := hptw_req_arb.io.out.bits.gvpn
   arb2.io.in(InArbHPTWPort).bits.req_info.s2xlate := onlyStage2
@@ -1020,15 +1028,20 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   for (i <- 0 until PtwWidth) {
     XSPerfAccumulate(s"req_count${i}", io.tlb(i).req(0).fire)
     XSPerfAccumulate(s"req_blocked_count_${i}", io.tlb(i).req(0).valid && !io.tlb(i).req(0).ready)
+    XSPerfAccumulate(s"resp_count${i}", io.tlb(i).resp.fire)
+    XSPerfAccumulate(s"cache_resp_count${i}", mergeArb(i).in(outArbCachePort).fire)
+    XSPerfAccumulate(s"ptw_resp_count${i}", mergeArb(i).in(outArbFsmPort).fire)
+    XSPerfAccumulate(s"llptw_resp_count${i}", mergeArb(i).in(outArbMqPort).fire)
+    XSPerfAccumulate(s"resp_fault_count${i}", io.tlb(i).resp.fire && (io.tlb(i).resp.bits.s1.pf || io.tlb(i).resp.bits.s1.af || io.tlb(i).resp.bits.s2.gpf || io.tlb(i).resp.bits.s2.gaf))
   }
   XSPerfAccumulate(s"req_blocked_by_mq", arb1.io.out.valid && missQueue.io.out.valid)
-  for (i <- 0 until (MemReqWidth + 1)) {
-    XSPerfAccumulate(s"mem_req_util${i}", PopCount(waiting_resp) === i.U)
-  }
+  XSPerfAccumulate("req_outstanding_cycle", tlbCounter)
+  XSPerfAccumulate("req_full_cycle", tlbCounter === MissQueueSize.U)
   XSPerfAccumulate("mem_cycle", PopCount(waiting_resp) =/= 0.U)
+  XSPerfAccumulate("mem_outstanding_cycle", PopCount(waiting_resp))
   XSPerfAccumulate("mem_count", mem.a.fire)
   for (i <- 0 until PtwWidth) {
-    XSPerfAccumulate(s"llptw_ppn_af${i}", mergeArb(i).in(outArbMqPort).valid && mergeArb(i).in(outArbMqPort).bits.s1.entry(OHToUInt(mergeArb(i).in(outArbMqPort).bits.s1.pteidx)).af && !llptw_out.bits.af)
+    XSPerfAccumulate(s"llptw_ppn_af${i}", mergeArb(i).in(outArbMqPort).fire && mergeArb(i).in(outArbMqPort).bits.s1.entry(OHToUInt(mergeArb(i).in(outArbMqPort).bits.s1.pteidx)).af && !llptw_out.bits.af)
     XSPerfAccumulate(s"access_fault${i}", io.tlb(i).resp.fire && io.tlb(i).resp.bits.s1.af)
   }
 

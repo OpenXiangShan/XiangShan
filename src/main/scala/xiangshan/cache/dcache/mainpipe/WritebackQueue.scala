@@ -402,10 +402,10 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   if (numMemChannels > 1) {
     val demuxedEntryReleases = entries.map(e => demuxByChannel(e.io.mem_release, selectChannel(e.io.block_addr.bits), numMemChannels))
     for (ch <- 0 until numMemChannels) {
-      TLArbiter.robin(edge, io.mem_release(ch), demuxedEntryReleases.map(_(ch)):_*)
+      TLArbiter.lowest(edge, io.mem_release(ch), demuxedEntryReleases.map(_(ch)):_*)
     }
   } else {
-    TLArbiter.robin(edge, io.mem_release(0), entries.map(_.io.mem_release):_*)
+    TLArbiter.lowest(edge, io.mem_release(0), entries.map(_.io.mem_release):_*)
   }
 
   // sanity check

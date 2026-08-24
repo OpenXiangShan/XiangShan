@@ -511,8 +511,7 @@ class CVMCompile extends Config((site, here, up) => {
     HasDelayNoencryption = false
   )
   case XSTileKey => up(XSTileKey).map(_.copy(
-    HasBitmapCheck = true,
-    HasBitmapCheckDefault = false))
+    HasBitmapCheck = true))
 })
 
 class CVMTestCompile extends Config((site, here, up) => {
@@ -522,8 +521,7 @@ class CVMTestCompile extends Config((site, here, up) => {
     HasDelayNoencryption = true
   )
   case XSTileKey => up(XSTileKey).map(_.copy(
-    HasBitmapCheck =true,
-    HasBitmapCheckDefault = true))
+    HasBitmapCheck =true))
 })
 
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
@@ -541,7 +539,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 ) with DeprecatedConfigWarning
 
 class DefaultConfig(n: Int = 1) extends Config(
-  OpenLLCConfig("16MB", ways = 16, banks = 4)
+  OpenLLCConfig("32MB", ways = 16, banks = 4)
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4, numMemChannels = 2)
     ++ new BaseConfig(n)

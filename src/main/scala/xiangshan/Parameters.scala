@@ -54,11 +54,7 @@ case class XSCoreParameters
   ELEN: Int = 64,
   HSXLEN: Int = 64,
   HasMptCheck: Boolean = false, //enable mpt
-  HasMptCheckDefault: Boolean = false, // hardwired testing code: fake 2M MPT table
-  HasMptCheckDefault4k: Boolean = false, // hardwired testing code: fake 4k MPT table
-  HasMptInodeOpt: Boolean = false, // hardwired testing code: skip mpt check for non-leaf ptw nodes
   HasBitmapCheck: Boolean = true,
-  HasBitmapCheckDefault: Boolean = false,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
   HasHExtension: Boolean = true,
@@ -584,11 +580,7 @@ trait HasXSParameter {
   val xLen = XLEN
   assert(!(HasMptCheck == true && HasBitmapCheck == true), "Conflicts: MPT and Bitmap can't be used together")
   def HasMptCheck = coreParams.HasMptCheck && !coreParams.HasBitmapCheck
-  def HasMptCheckDefault = coreParams.HasMptCheckDefault
-  def HasMptCheckDefault4k = coreParams.HasMptCheckDefault4k
-  def HasMptInodeOpt = coreParams.HasMptInodeOpt
   def HasBitmapCheck = coreParams.HasBitmapCheck
-  def HasBitmapCheckDefault = coreParams.HasBitmapCheckDefault
 
   /** prefetch config */
   def prefetcherSeq = coreParams.prefetcher
@@ -629,13 +621,8 @@ trait HasXSParameter {
     }
   } // VAddrBits is Virtual Memory addr bits
 
-  def VAddrMaxBits = {
-    if(EnableSv48) {
-      coreParams.VAddrBitsSv48 max coreParams.GPAddrBitsSv48x4
-    } else {
-      coreParams.VAddrBitsSv39 max coreParams.GPAddrBitsSv39x4
-    }
-  }
+  def GuardedVAddrBits = VAddrBits + 1 // 1 extra guard bit for overflow/canonical check
+
   def SdidLength = coreParams.SdidLength
   def AsidLength = coreParams.AsidLength
   def VmidLength = coreParams.VmidLength

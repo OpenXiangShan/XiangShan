@@ -332,6 +332,8 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   // NOTE: we currently only use one output port to L2 and L3 prefetch sender respectively
   val l2_pf_sender_opt = if (coreParams.prefetcher.nonEmpty)
     Some(BundleBridgeSource(() => new PrefetchRecv)) else None
+  val l3_pf_sender_opt = if (coreParams.prefetcher.nonEmpty)
+    Some(BundleBridgeSource(() => new PrefetchRecv)) else None
   val frontendBridge = LazyModule(new FrontendBridge)
   // interrupt sinks
   val clint_int_sink = IntSinkNode(IntSinkPortSimple(1, 2))
@@ -769,9 +771,14 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   outer.l2_pf_sender_opt.foreach(_.out.head._1.addr_valid := prefetcher.io.l1_pf_to_l2.addr_valid)
   outer.l2_pf_sender_opt.foreach(_.out.head._1.addr := prefetcher.io.l1_pf_to_l2.addr)
   outer.l2_pf_sender_opt.foreach(_.out.head._1.pf_source :=  prefetcher.io.l1_pf_to_l2.pf_source)
-  outer.l2_pf_sender_opt.foreach(_.out.head._1.l2_pf_en := prefetcher.io.l1_pf_to_l2.l2_pf_en)
+  outer.l2_pf_sender_opt.foreach(_.out.head._1.pf_en := prefetcher.io.l1_pf_to_l2.pf_en)
+  outer.l3_pf_sender_opt.foreach(_.out.head._1.addr_valid := prefetcher.io.l1_pf_to_l3.addr_valid)
+  outer.l3_pf_sender_opt.foreach(_.out.head._1.addr := prefetcher.io.l1_pf_to_l3.addr)
+  outer.l3_pf_sender_opt.foreach(_.out.head._1.pf_source :=  prefetcher.io.l1_pf_to_l3.pf_source)
+  outer.l3_pf_sender_opt.foreach(_.out.head._1.pf_en := prefetcher.io.l1_pf_to_l3.pf_en)
   XSPerfAccumulate("prefetch_fire_l1", l1_pf_req.fire)
   XSPerfAccumulate("prefetch_fire_l2", outer.l2_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))
+  XSPerfAccumulate("prefetch_fire_l3", outer.l3_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))
 
   /** prefetcher site in L2 */
   dtlb_reqs(L2toL1DTLBPortIndex) <> io.l2_tlb_req
@@ -1045,6 +1052,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     stu.io.vecstout.ready := false.B
     // from storeQueue
     stu.io.sqDeqPtr := lsq.io.sqDeqPtr
+    stu.io.sqAddrReadyPtr := lsq.io.issuePtrExt
   }
 
   val sqStoutLatch = Wire(DecoupledIO(new MemToRob(staParams.head)))

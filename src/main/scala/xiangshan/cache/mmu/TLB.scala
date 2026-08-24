@@ -209,7 +209,16 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     val pf48 = SignExt(EffectiveVa(i)(47, 0), XLEN) =/= EffectiveVa(i)
     val pf39 = SignExt(EffectiveVa(i)(38, 0), XLEN) =/= EffectiveVa(i)
-    val gpf48 = EffectiveVa(i)(XLEN - 1, 48 + 2) =/= 0.U
+    val gpf48 = Mux(
+      // ITLB uses fullva SignExt-ed from 50bit pc,
+      // it can wrongly SignExt a canonical Sv48x4 address into a non-canonical one,
+      // so here we check if EffectiveVa(49) is 0:
+      //   if it is, then an pc overflow happened, a gpf should be raised.
+      //   otherwise, EffectiveVa(63..50) is SignExt-ed from EffectiveVa(49) and we should ignore it.
+      TlbCmd.isExec(req_in(i).bits.cmd),
+      EffectiveVa(i)(XLEN - 1, 48 + 2) =/= 0.U && EffectiveVa(i)(48 + 2 - 1) === 0.U,
+      EffectiveVa(i)(XLEN - 1, 48 + 2) =/= 0.U,
+    )
     val gpf39 = EffectiveVa(i)(XLEN - 1, 39 + 2) =/= 0.U
     val af = EffectiveVa(i)(XLEN - 1, PAddrBits) =/= 0.U
     when (req(i).valid && req(i).bits.checkfullva) {
@@ -488,25 +497,30 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     // when pf and gpf can't happens simultaneously
     val hasPf = (ldPf || ldUpdate || stPf || stUpdate || instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
-    // Only lsu need check related to high address truncation
     when (RegNext(prepf || pregpf || preaf)) {
       resp(idx).bits.isForVSnonLeafPTE := false.B
       resp(idx).bits.excp(nDups).pf.ld := RegNext(prepf) && isLd
       resp(idx).bits.excp(nDups).pf.st := RegNext(prepf) && isSt
-      resp(idx).bits.excp(nDups).pf.instr := false.B
+      resp(idx).bits.excp(nDups).pf.instr := RegNext(prepf) && isInst
 
       resp(idx).bits.excp(nDups).gpf.ld := RegNext(pregpf) && isLd
       resp(idx).bits.excp(nDups).gpf.st := RegNext(pregpf) && isSt
-      resp(idx).bits.excp(nDups).gpf.instr := false.B
+      resp(idx).bits.excp(nDups).gpf.instr := RegNext(pregpf) && isInst
 
       resp(idx).bits.excp(nDups).af.ld := RegNext(preaf) && TlbCmd.isRead(cmd)
       resp(idx).bits.excp(nDups).af.st := RegNext(preaf) && TlbCmd.isWrite(cmd)
-      resp(idx).bits.excp(nDups).af.instr := false.B
+      resp(idx).bits.excp(nDups).af.instr := RegNext(preaf) && isInst
 
       resp(idx).bits.excp(nDups).vaNeedExt := false.B
       // overwrite miss & gpaddr when exception related to high address truncation happens
       resp(idx).bits.miss := false.B
-      resp(idx).bits.gpaddr(nDups) := req_out(idx).fullva
+      // Instruction fetch only provides a VAddrBits+1-bit va (from the PC), which the frontend
+      // can only sign-extend to XLEN since the current translation mode is unavailable there.
+      // However, sequential fetch may overflow the PC into the invalid bit[50]=1 region under Sv48x4,
+      // in such case, do sign-extension would wrongly set bits [63:51]=1.
+      // Zero-extend instead to report the correct unsigned gpaddr on guest page faults
+      // DTLB requests carry a full XLEN va, so keeping it as-is.
+      resp(idx).bits.gpaddr(nDups) := Mux(isInst, ZeroExt(req_out(idx).fullva(VAddrBits, 0), XLEN), req_out(idx).fullva)
     } .otherwise {
       // isForVSnonLeafPTE is used only when gpf happens and it caused by a G-stage translation which supports VS-stage translation
       // it will be sent to CSR in order to modify the m/htinst.
@@ -739,9 +753,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       XSPerfAccumulate("first_miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i) && RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid))
       XSPerfAccumulate("miss" + Integer.toString(i, 10), result_ok(i) && portTranslateEnable(i) && missVec(i))
     }
+    XSPerfAccumulate(s"ptw_req${i}", ptw.req(i).fire)
+    XSPerfAccumulate(s"tlb_replay${i}", io.tlbreplay(i))
   }
   XSPerfAccumulate("ptw_resp_count", ptw.resp.fire)
   XSPerfAccumulate("ptw_resp_pf_count", ptw.resp.fire && ptw.resp.bits.s1.pf)
+  XSPerfAccumulate("refill_count", refill)
 
   // Log
   for(i <- 0 until Width) {

@@ -21,7 +21,8 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import utility.XSPerfSeqAccumulate
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.StageCtrl
@@ -34,9 +35,9 @@ class MainBtbAlignBank(
       class Req extends Bundle {
         // NOTE: this startPc is not from Bpu top, it's calculated in MainBtb top
         // i.e. (VecInit.tabulate(NumAlignBanks)(startPc + _ * alignSize))(alignIdx) rotated right by startAlignIdx
-        val startPc:       PrunedAddr = new PrunedAddr(VAddrBits)
-        val posHigherBits: UInt       = UInt(AlignBankIdxLen.W)
-        val crossPage:     Bool       = Bool()
+        val startPc:       GuardedPc = new GuardedPc
+        val posHigherBits: UInt      = UInt(AlignBankIdxLen.W)
+        val crossPage:     Bool      = Bool()
       }
 
       class Resp extends Bundle {
@@ -55,7 +56,7 @@ class MainBtbAlignBank(
       class Req extends Bundle {
         val needWrite: Bool = Bool()
         // similar to Read.Req.startPc, calculated in MainBtb top
-        val startPc:  PrunedAddr             = new PrunedAddr(VAddrBits)
+        val startPc:  Pc                     = new Pc
         val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
         val meta:     Vec[MainBtbMetaEntry]  = Vec(NumWay, new MainBtbMetaEntry)
         // mispredictBranch is actually Mux1H(branches.map(b => b.valid && b.mispredict), b.bits),
@@ -78,7 +79,7 @@ class MainBtbAlignBank(
     val s3_takenMask: Vec[Bool] = Input(Vec(NumWay, Bool()))
 
     // fast path of train pc, used to read replacer in advance for better timing
-    val t0_startPc: PrunedAddr = Input(new PrunedAddr(VAddrBits))
+    val t0_startPc: Pc = Input(new Pc)
   }
 
   val io: MainBtbAlignBankIO = IO(new MainBtbAlignBankIO)
@@ -189,11 +190,6 @@ class MainBtbAlignBank(
   private val s3_replacerSetIdx = RegEnable(getReplacerSetIndex(s2_startPc), s2_fire)
   private val s3_takenMask      = io.s3_takenMask
 
-  // touch taken entries only: not-taken conditional entries are considered not very useful and should be killed first
-  replacer.io.predict.touch.valid        := s3_fire && s3_takenMask.reduce(_ || _)
-  replacer.io.predict.touch.bits.setIdx  := s3_replacerSetIdx
-  replacer.io.predict.touch.bits.wayMask := s3_takenMask.asUInt
-
   /* *** t0 ***
    * read replacer in advance for better timing
    */
@@ -255,11 +251,6 @@ class MainBtbAlignBank(
     b.io.writeEntry.req.bits.entry   := t1_entry
   }
 
-  // update replacer
-  replacer.io.train.t1_touch.valid        := t1_fire && t1_entryNeedWrite
-  replacer.io.train.t1_touch.bits.setIdx  := getReplacerSetIndex(t1_startPc)
-  replacer.io.train.t1_touch.bits.wayMask := t1_entryWayMask
-
   /* *** update counter *** */
   private val t1_newCounters    = Wire(Vec(NumWay, TakenCounter()))
   private val t1_counterWayMask = Wire(Vec(NumWay, Bool()))
@@ -275,6 +266,19 @@ class MainBtbAlignBank(
     t1_counterWayMask(i) := entryOverridden || hitMask.reduce(_ || _)
     t1_newCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, meta.counter.getUpdate(actualTaken))
   }
+  private val t1_actualTakenMask = VecInit(t1_meta.zipWithIndex.map { case (meta, i) =>
+    val hitMask = t1_branches.map(branch =>
+      branch.valid && meta.position === branch.bits.cfiPosition && meta.rawHit && branch.bits.taken
+    )
+    hitMask.reduce(_ || _)
+  })
+  private val t1_actualTakenOH = PriorityEncoderOH(t1_actualTakenMask.asUInt)
+
+  private val t1_replacerSetIdx = getReplacerSetIndex(t1_startPc)
+  // update replacer -- Allocation touch and training touch are co-timed and share the same replacer interface.
+  replacer.io.train.t1_touch.valid        := t1_fire && (t1_entryNeedWrite || t1_actualTakenMask.reduce(_ || _))
+  replacer.io.train.t1_touch.bits.setIdx  := t1_replacerSetIdx
+  replacer.io.train.t1_touch.bits.wayMask := Mux(t1_entryNeedWrite, t1_entryWayMask, t1_actualTakenOH)
 
   // write counter anytime when needed
   private val t1_counterNeedWrite = t1_counterWayMask.reduce(_ || _)

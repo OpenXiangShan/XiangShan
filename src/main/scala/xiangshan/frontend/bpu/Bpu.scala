@@ -29,8 +29,8 @@ import utils.DuplicateInit
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
+import xiangshan.frontend.GuardedPcInit
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.abtb.AheadBtb
 import xiangshan.frontend.bpu.history.commonhr.CommonHR
 import xiangshan.frontend.bpu.history.commonhr.CommonHRMeta
@@ -140,11 +140,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val debug_bpId = RegInit(0.U(XLEN.W))
 
-  private val s0_startPc    = DuplicateInit(NumStartPcDuplicate, PrunedAddrInit(0.U(VAddrBits.W)))
+  private val s0_startPc    = DuplicateInit(NumStartPcDuplicate, GuardedPcInit(0.U(GuardedVAddrBits.W)))
   private val s0_startPcReg = RegEnable(s0_startPc, !s0_stall)
 
   when(RegNext(RegNext(reset.asBool)) && !reset.asBool) {
-    s0_startPcReg := io.resetVector
+    s0_startPcReg.foreach(_ := io.resetVector.zeroExt(GuardedVAddrBits))
   }
 
   private val s1_startPc = RegEnable(s0_startPc, s0_fire)
@@ -168,28 +168,15 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   stageCtrl.s3_fire := s3_fire
   stageCtrl.t0_fire := io.fromFtq.train.fire
 
-  private val t0_compareMatrix = CompareMatrix(VecInit(io.fromFtq.train.bits.branches.map(_.bits.cfiPosition)))
-  // mark all branches after the first mispredict as invalid
-  // i.e. we have (valid, position, mispredict) for each branch:
-  // (1, 2, 0), (1, 5, 1), (1, 8, 0)
-  // then the first mispredict branch is @5, so mask should be (1, 1, 0)
-  private val t0_firstMispredictMask = t0_compareMatrix.getLowerElementMask(
-    VecInit(io.fromFtq.train.bits.branches.map(b => b.valid && b.bits.mispredict))
-  )
-
   private val train = Wire(new BpuTrain)
   train := io.fromFtq.train.bits
-  train.branches.zipWithIndex.foreach { case (b, i) =>
-    b.valid := io.fromFtq.train.bits.branches(i).valid && t0_firstMispredictMask(i)
-  }
 
   private val fastTrain = Wire(Valid(new FastTrain))
-  fastTrain.valid                := s3_valid
-  fastTrain.bits.startPc         := s3_startPc.get
-  fastTrain.bits.finalPrediction := s3_prediction
-  fastTrain.bits.abtbMeta        := s3_abtbMeta
-  fastTrain.bits.utageMeta       := s3_utageMeta
-  fastTrain.bits.hasOverride     := s3_override
+  fastTrain.valid        := s3_valid
+  fastTrain.bits.startPc := s3_startPc.get.unGuard
+  fastTrain.bits.branch.fromPrediction(s3_prediction, s3_override)
+  fastTrain.bits.abtbMeta  := s3_abtbMeta
+  fastTrain.bits.utageMeta := s3_utageMeta
 
   predictors.foreach { p =>
     p.io.startPc   := s0_startPc.get
@@ -222,8 +209,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   utage.io.s1PathHist       := phr.io.s1_foldedPhr
   utage.io.overridePathHist := phr.io.s3_foldedPhr
 
-  utage.io.s1StartPc       := s1_prediction.target
-  utage.io.overrideStartPc := s3_prediction.target
+  utage.io.s1StartPc       := s1_prediction.target.unGuard
+  utage.io.overrideStartPc := s3_prediction.target.unGuard
 
   // uras
   uras.io.specIn.startPc                := s1_startPc.get
@@ -245,6 +232,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   tage.io.fromMainBtb.result             := mbtb.io.result
   tage.io.fromMainBtb.s1_positions       := mbtb.io.s1_positions
+  tage.io.fromMainBtb.baseConf           := VecInit(mbtb.io.meta.entries.flatten.map(_.counter.isSaturate))
   tage.io.fromPhr.foldedPathHist         := phr.io.s0_foldedPhr
   tage.io.fromPhr.foldedPathHistForTrain := phr.io.trainFoldedPhr
   tage.io.debug_trainValid               := io.fromFtq.train.valid // for perf counters
@@ -529,9 +517,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   phr.io.train.s3_override   := s3_override
   phr.io.train.s3_phrMeta    := s3_phrMeta
   phr.io.train.s3_prediction := s3_prediction
-  phr.io.train.s3_startPc    := s3_startPc.get
+  phr.io.train.s3_startPc    := s3_startPc.get.unGuard
   phr.io.s1Train.valid       := s1_fire
-  phr.io.s1Train.startPc     := s1_startPc.get
+  phr.io.s1Train.startPc     := s1_startPc.get.unGuard
   phr.io.s1Train.prediction  := s1_prediction
 
   phr.io.commit.valid := io.fromFtq.train.fire
@@ -553,25 +541,25 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       (s1_cfiPc.addr(CompareAddrLowWidth - 1, 0) > s1_prediction.target.addr(CompareAddrLowWidth - 1, 0))
 
   commonHR.io.stageCtrl                 := stageCtrl
-  commonHR.io.s0_startPc.get            := s0_startPc.get
+  commonHR.io.s0_startPc.get            := s0_startPc.get.unGuard
   commonHR.io.s1_imliTaken              := s1_imliTaken
-  commonHR.io.s2StartPc                 := s2_startPc.get
+  commonHR.io.s2StartPc                 := s2_startPc.get.unGuard
   commonHR.io.s2CondHitMask             := VecInit(mbtb.io.result.map(e => e.valid && e.bits.attribute.isConditional))
   commonHR.io.s2CfiPositions            := VecInit(mbtb.io.result.map(_.bits.cfiPosition))
-  commonHR.io.s2CfiTargets              := VecInit(mbtb.io.result.map(_.bits.target))
-  commonHR.io.update.startPc            := s3_startPc.get
-  commonHR.io.update.target             := s3_prediction.target
+  commonHR.io.s2CfiTargets              := VecInit(mbtb.io.result.map(_.bits.target.unGuard))
+  commonHR.io.update.startPc            := s3_startPc.get.unGuard
+  commonHR.io.update.target             := s3_prediction.target.unGuard
   commonHR.io.update.taken              := s3_taken
   commonHR.io.update.s3Override         := s3_override
   commonHR.io.update.attributes         := VecInit(s3_mbtbResult.map(_.bits.attribute))
-  commonHR.io.update.targets            := VecInit(s3_mbtbResult.map(_.bits.target))
+  commonHR.io.update.targets            := VecInit(s3_mbtbResult.map(_.bits.target.unGuard))
   commonHR.io.update.firstTakenBranchOH := s3_firstTakenBranchOH
   commonHR.io.update.firstTakenBranch   := s3_firstTakenBranch
   commonHR.io.update.position           := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
   commonHR.io.update.condHitMask        := s3_condHitMask
   commonHR.io.redirect.valid            := redirect.valid
   commonHR.io.redirect.cfiPc            := redirect.bits.cfiPc
-  commonHR.io.redirect.target           := redirect.bits.target
+  commonHR.io.redirect.target           := redirect.bits.target.unGuard
   commonHR.io.redirect.taken            := redirect.bits.taken
   commonHR.io.redirect.attribute        := redirect.bits.attribute
   commonHR.io.redirect.meta             := redirect.bits.meta.commonHRMeta
@@ -589,7 +577,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** check abtb output *** */
   when(io.toFtq.prediction.fire && abtb.io.prediction.map(_.valid).reduce(_ || _)) {
-    assert(abtb.io.debug_startPc === s1_startPc.head)
+    assert(abtb.io.debug_startPc === s1_startPc.head.unGuard)
   }
 
   /* *** Debug Meta *** */
@@ -619,7 +607,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_s1PredictionSource = RegEnable(s2_s1PredictionSource, s2_fire)
 
   private val s3_perfMeta = Wire(new BpuPerfMeta)
-  s3_perfMeta.startPc             := s3_startPc.head
+  s3_perfMeta.startPc             := s3_startPc.head.unGuard
   s3_perfMeta.bpId                := debug_bpId
   s3_perfMeta.s1Prediction        := s3_s1Prediction
   s3_perfMeta.s3Prediction        := s3_prediction

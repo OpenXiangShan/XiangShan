@@ -145,13 +145,7 @@ class Bitmap(implicit p: Parameters) extends XSModule with HasPtwConst {
   val mem_arb = Module(new RRArbiterInit(new bitmapEntry(), l2tlbParams.llptwsize+2))
 
   val bitmapdata = Wire(Vec(blockBits / XLEN, UInt(XLEN.W)))
-  if (HasBitmapCheckDefault) {
-    for (i <- 0 until blockBits / XLEN) {
-      bitmapdata(i) := 0.U
-    }
-  } else {
-    bitmapdata := io.mem.resp.bits.value.asTypeOf(Vec(blockBits / XLEN, UInt(XLEN.W)))
-  }
+  bitmapdata := io.mem.resp.bits.value.asTypeOf(Vec(blockBits / XLEN, UInt(XLEN.W)))
 
   for (i <- 0 until l2tlbParams.llptwsize+2) {
     mem_arb.io.in(i).bits := entries(i)

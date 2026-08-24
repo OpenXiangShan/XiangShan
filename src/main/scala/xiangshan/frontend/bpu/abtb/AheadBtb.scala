@@ -19,7 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.HasFastTrainIO
@@ -39,7 +39,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     val abtbResultPos: Vec[UInt]                  = Output(Vec(NumAheadBtbPredictionEntries, UInt(CfiPositionWidth.W)))
     val abtbPos:       Vec[UInt]                  = Output(Vec(NumAheadBtbPredictionEntries, UInt(CfiPositionWidth.W)))
     val meta:          AheadBtbMeta               = Output(new AheadBtbMeta)
-    val debug_startPc: PrunedAddr                 = Output(PrunedAddr(VAddrBits))
+    val debug_startPc: Pc                         = Output(Pc())
     val normalPathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
   }
   val io: AheadBtbIO = IO(new AheadBtbIO)
@@ -235,13 +235,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }
 
   // used for check abtb output
-  io.debug_startPc := s2_startPc
-
-  replacers.zipWithIndex.foreach { case (r, i) =>
-    r.io.readValid   := s2_valid && s2_hit && s2_bankMask(i)
-    r.io.readSetIdx  := s2_setIdx
-    r.io.readWayMask := s2_hitMask
-  }
+  io.debug_startPc := s2_startPc.unGuard
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 0
@@ -269,10 +263,10 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   // A taken final prediction can allocate/correct an entry. A not-taken
   // prediction only updates counters of the conditional entries that hit.
-  private val t1_trainTaken           = t1_train.finalPrediction.taken
-  private val t1_trainPosition        = t1_train.finalPrediction.cfiPosition
-  private val t1_trainAttribute       = t1_train.finalPrediction.attribute
-  private val t1_trainTarget          = t1_train.finalPrediction.target
+  private val t1_trainTaken           = t1_train.branch.taken
+  private val t1_trainPosition        = t1_train.branch.cfiPosition
+  private val t1_trainAttribute       = t1_train.branch.attribute
+  private val t1_trainTarget          = t1_train.branch.target
   private val t1_trainTargetLowerBits = getTargetLowerBits(t1_trainTarget)
 
   private val t1_condMask           = t1_meta.entries.map(e => e.hit && e.attribute.isConditional)
@@ -336,6 +330,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val t2_needWriteNewEntry = RegNext(t1_needWriteNewEntry)
   private val t2_needCorrectTarget = RegNext(t1_needCorrectTarget)
   private val t2_writeEntry        = RegNext(t1_writeEntry)
+  private val t2_hit               = RegNext(t1_hit)
+  private val t2_hitMask           = RegNext(VecInit(t1_hitMask))
+  private val t2_trainTaken        = RegNext(t1_trainTaken)
 
   banks.zipWithIndex.foreach { case (b, i) =>
     when(t2_fire && t2_needWriteNewEntry && t2_bankMask(i)) {
@@ -366,6 +363,13 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     r.io.writeValid  := b.io.writeResp.valid
     r.io.writeSetIdx := b.io.writeResp.bits.setIdx
     r.io.writeWayIdx := b.io.writeResp.bits.wayIdx
+  }
+  // update replacer -- Allocation touch and training touch are triggered at different times,
+  // so they cannot share the same interface.
+  replacers.zipWithIndex.foreach { case (r, i) =>
+    r.io.readValid   := t2_fire && t2_trainTaken && t2_bankMask(i) && t2_hit
+    r.io.readSetIdx  := t2_setIdx
+    r.io.readWayMask := t2_hitMask
   }
 
   /* --------------------------------------------------------------------------------------------------------------

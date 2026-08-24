@@ -50,6 +50,7 @@ object ArgParser {
       |--disable-alwaysdb
       |--enable-dfx
       |--enable-simfrontend
+      |--imsic-bus-type <NONE|TL|AXI>
       |--dump-csr
       |""".stripMargin
 

@@ -24,7 +24,7 @@ import utility.XSDebug
 import utility.XSPerfAccumulate
 import utility.mbist.MbistPipeline
 import utility.sram.FoldedSRAMTemplate
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.IttageTableInfo
 import xiangshan.frontend.bpu.SaturateCounter
@@ -41,7 +41,7 @@ class IttageTable(
 
   class IttageTableIO extends IttageBundle {
     class Req extends Bundle {
-      val startPc:    PrunedAddr            = PrunedAddr(VAddrBits)
+      val startPc:    Pc                    = Pc()
       val foldedHist: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
     }
 
@@ -52,7 +52,7 @@ class IttageTable(
     }
 
     class Update extends Bundle {
-      val startPc:    PrunedAddr            = PrunedAddr(VAddrBits)
+      val startPc:    Pc                    = Pc()
       val foldedHist: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
       // update tag and ctr
       val valid:   Bool            = Bool()
@@ -115,7 +115,7 @@ class IttageTable(
   require(ittageEntrySz == (new IttageEntry(tagLen)).getWidth)
 
   // pc is start address of basic block, most 2 branch inst in block
-  def getUnhashedIdx(pc: PrunedAddr): UInt = (pc >> instOffsetBits).asUInt
+  def getUnhashedIdx(pc: Pc): UInt = (pc >> instOffsetBits).asUInt
 
   private val s0_valid       = io.req.valid
   private val s0_startPc     = io.req.bits.startPc

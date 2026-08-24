@@ -342,20 +342,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val spvmids = sp.map(_.vmid)
   val sph = Reg(Vec(l2tlbParams.spSize, UInt(2.W)))
 
-  // Access Perf
-  val l3AccessPerf = if(EnableSv48) Some(Wire(Vec(l2tlbParams.l3Size, Bool()))) else None
-  val l2AccessPerf = Wire(Vec(l2tlbParams.l2Size, Bool()))
-  val l1AccessPerf = Wire(Vec(l2tlbParams.l1nWays, Bool()))
-  val l0AccessPerf = Wire(Vec(l2tlbParams.l0nWays, Bool()))
-  val spAccessPerf = Wire(Vec(l2tlbParams.spSize, Bool()))
-  if (EnableSv48) l3AccessPerf.map(_.map(_ := false.B))
-  l2AccessPerf.map(_ := false.B)
-  l1AccessPerf.map(_ := false.B)
-  l0AccessPerf.map(_ := false.B)
-  spAccessPerf.map(_ := false.B)
-
-
-
   def vpn_match(vpn1: UInt, vpn2: UInt, level: Int) = {
     (vpn1(vpnLen-1, vpnnLen*level+3) === vpn2(vpnLen-1, vpnnLen*level+3))
   }
@@ -403,7 +389,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     when (hit && stageDelay_valid_1cycle) { ptwl3replace.get.access(OHToUInt(hitVec)) }
 
-    l3AccessPerf.get.zip(hitVec).map{ case (l, h) => l := h && stageDelay_valid_1cycle}
     for (i <- 0 until l2tlbParams.l3Size) {
       XSDebug(stageReq.fire, p"[l3] l3(${i.U}) ${l3.get(i)} hit:${l3.get(i).hit(vpn_search, io.csr_dup(2).satp.asid, io.csr_dup(2).vsatp.asid, io.csr_dup(2).hgatp.vmid, ignoreID = l3g.get(i), s2xlate = h_search)}\n")
     }
@@ -437,7 +422,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     when (hit && stageDelay_valid_1cycle) { ptwl2replace.access(OHToUInt(hitVec)) }
 
-    l2AccessPerf.zip(hitVec).map{ case (l, h) => l := h && stageDelay_valid_1cycle}
     for (i <- 0 until l2tlbParams.l2Size) {
       XSDebug(stageReq.fire, p"[l2] l2(${i.U}) ${l2(i)} hit:${l2(i).hit(vpn_search, io.csr_dup(2).satp.asid, io.csr_dup(2).vsatp.asid, io.csr_dup(2).hgatp.vmid, ignoreID = l2g(i), s2xlate = h_search)}\n")
     }
@@ -503,7 +487,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     when (hit && stageCheck_valid_1cycle) { ptwl1replace.access(genPtwL1SetIdx(check_vpn), hitWay) }
 
-    l1AccessPerf.zip(hitVec).map{ case (l, h) => l := h && stageCheck_valid_1cycle }
     XSDebug(stageDelay_valid_1cycle, p"[l1] ridx:0x${Hexadecimal(ridx)}\n")
     for (i <- 0 until l2tlbParams.l1nWays) {
       XSDebug(stageCheck_valid_1cycle, p"[l1] ramDatas(${i.U}) ${ramDatas(i)}  l1v:${vVec(i)}  hit:${hit}\n")
@@ -581,7 +564,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     when (hit && stageCheck_valid_1cycle) { ptwl0replace.access(genPtwL0SetIdx(check_vpn), hitWay) }
 
-    l0AccessPerf.zip(hitVec).map{ case (l, h) => l := h && stageCheck_valid_1cycle }
     XSDebug(stageReq.fire, p"[l0] ridx:0x${Hexadecimal(ridx)}\n")
     for (i <- 0 until l2tlbParams.l0nWays) {
       XSDebug(stageCheck_valid_1cycle, p"[l0] ramDatas(${i.U}) ${ramDatas(i)}  l0v:${vVec(i)}  hit:${hitVec(i)}\n")
@@ -664,7 +646,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     when (hit && stageDelay_valid_1cycle) { spreplace.access(OHToUInt(hitVec)) }
 
-    spAccessPerf.zip(hitVec).map{ case (s, h) => s := h && stageDelay_valid_1cycle }
     for (i <- 0 until l2tlbParams.spSize) {
       XSDebug(stageReq.fire, p"[sp] sp(${i.U}) ${sp(i)} hit:${sp(i).hit(vpn_search, io.csr_dup(0).satp.asid, io.csr_dup(0).vsatp.asid, io.csr_dup(0).hgatp.vmid, allType = true, s2xlate = h_search)} spv:${spv(i)}\n")
     }
@@ -1323,7 +1304,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   if (EnableSv48) {
     XSPerfAccumulate("l3_hit_pre", base_valid_access_0 && resp_l3_pre.get && io.resp.bits.toFsm.l3Hit.get && !io.resp.bits.toFsm.l2Hit && !io.resp.bits.toFsm.l1Hit && !io.resp.bits.hit)
   }
-  XSPerfAccumulate("l2_hit_pre", base_valid_access_0 && resp_l2_pre && !io.resp.bits.toFsm.l2Hit && !io.resp.bits.toFsm.l1Hit && !io.resp.bits.hit)
+  XSPerfAccumulate("l2_hit_pre", base_valid_access_0 && resp_l2_pre && io.resp.bits.toFsm.l2Hit && !io.resp.bits.toFsm.l1Hit && !io.resp.bits.hit)
   XSPerfAccumulate("l1_hit_pre", base_valid_access_0 && resp_l1_pre && io.resp.bits.toFsm.l1Hit && !io.resp.bits.hit)
   XSPerfAccumulate("l0_hit_pre", base_valid_access_0 && resp_l0_pre && resp_l0)
   XSPerfAccumulate("sp_hit_pre", base_valid_access_0 && resp_sp_pre && resp_sp)
@@ -1392,21 +1373,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   XSPerfAccumulate("rwHarzad", io.req.valid && !io.req.ready)
   XSPerfAccumulate("out_blocked", io.resp.valid && !io.resp.ready)
   if (EnableSv48) {
-    l3AccessPerf.get.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"l3AccessIndex${i}", l) }
-  }
-  l2AccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"l2AccessIndex${i}", l) }
-  l1AccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"l1AccessIndex${i}", l) }
-  l0AccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"l0AccessIndex${i}", l) }
-  spAccessPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"SPAccessIndex${i}", l) }
-  if (EnableSv48) {
-    l3RefillPerf.get.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"l3RefillIndex${i}", l) }
-  }
-  l2RefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"l2RefillIndex${i}", l) }
-  l1RefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"l1RefillIndex${i}", l) }
-  l0RefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"l0RefillIndex${i}", l) }
-  spRefillPerf.zipWithIndex.map{ case (l, i) => XSPerfAccumulate(s"SPRefillIndex${i}", l) }
-
-  if (EnableSv48) {
     XSPerfAccumulate("l3Refill", Cat(l3RefillPerf.get).orR)
   }
   XSPerfAccumulate("l2Refill", Cat(l2RefillPerf).orR)
@@ -1442,14 +1408,14 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   XSDebug(RegNext(sfence_dup(0).valid), p"[sfence] spv:${Binary(spv)}\n")
 
   val perfEvents = Seq(
-    ("access           ", base_valid_access_0             ),
-    ("l2_hit           ", l2Hit                           ),
-    ("l1_hit           ", l1Hit                           ),
-    ("l0_hit           ", l0Hit                           ),
-    ("sp_hit           ", spHit                           ),
-    ("pte_hit          ", l0Hit || spHit                  ),
-    ("rwHarzad         ", io.req.valid && !io.req.ready   ),
-    ("out_blocked      ", io.resp.valid && !io.resp.ready ),
+    ("access           ", base_valid_access_0),
+    ("l2_hit           ", base_valid_access_0 && io.resp.bits.toFsm.l2Hit && !io.resp.bits.toFsm.l1Hit && !io.resp.bits.hit),
+    ("l1_hit           ", base_valid_access_0 && io.resp.bits.toFsm.l1Hit && !io.resp.bits.hit),
+    ("l0_hit           ", base_valid_access_0 && resp_l0),
+    ("sp_hit           ", base_valid_access_0 && resp_sp),
+    ("pte_hit          ", base_valid_access_0 && io.resp.bits.hit),
+    ("rwHarzad         ", io.req.valid && !io.req.ready),
+    ("out_blocked      ", io.resp.valid && !io.resp.ready),
   )
   generatePerfEvent()
 }
