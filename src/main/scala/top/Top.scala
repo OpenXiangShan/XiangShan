@@ -84,6 +84,9 @@ trait HasDTSImp[+L <: BaseXSSoc] { this: LazyRawModuleImp =>
 
 class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 {
+  private val useExternalLLC = p(UseExternalLLCKey)
+  require(!useExternalLLC || enableCHI, "External LLC requires CHI")
+
   val nocMisc = if (enableCHI) Some(LazyModule(new MemMisc())) else None
   val socMisc = if (!enableCHI) Some(LazyModule(new SoCMisc())) else None
   val misc: MemMisc = if (enableCHI) nocMisc.get else socMisc.get
@@ -101,7 +104,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       case PerfCounterOptionsKey => up(PerfCounterOptionsKey).copy(perfDBHartID = coreParams.HartId)
     }))))
   )
-  val chi_llcBridge_opt = Option.when(enableCHI)(
+  val chi_llcBridge_opt = Option.when(enableCHI && !useExternalLLC)(
     LazyModule(new OpenNCB()(p.alter((site, here, up) => {
       case NCBParametersKey => new NCBParameters(
         outstandingDepth    = 64,
@@ -115,7 +118,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     })))
   )
 
-  val chi_mmioBridge_opt = Seq.fill(NumCores)(Option.when(enableCHI)(
+  val chi_extllc_opt = Option.when(useExternalLLC) {
+    require(NumCores <= 2, s"External LLC wrapper currently supports up to two RNs, got $NumCores")
+    LazyModule(new ExternalLLC())
+  }
+
+  val chi_mmioBridge_opt = Seq.fill(NumCores)(Option.when(enableCHI && !useExternalLLC)(
     LazyModule(new OpenNCB()(p.alter((site, here, up) => {
       case NCBParametersKey => new NCBParameters(
         outstandingDepth            = 32,
@@ -224,6 +232,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     case None =>
   }
 
+  chi_extllc_opt.foreach { externalLLC =>
+    misc.soc_xbar.get := externalLLC.axi4node
+    misc.soc_xbar.get := externalLLC.periAXI4Node
+  }
+
   chi_mmioBridge_opt.foreach { e =>
     e match {
     case Some(ncb) =>
@@ -249,7 +262,6 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       case None =>
     }
 
-    memory.viewAs[AXI4Bundle] <> misc.memory.elements.head._2
     peripheral.viewAs[AXI4Bundle] <> misc.peripheral.elements.head._2
 
     val io = IO(new Bundle {
@@ -293,7 +305,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     val reset_sync = withClockAndReset(io.clock, io.reset) { ResetGen() }
     val jtag_reset_sync = withClockAndReset(io.systemjtag.jtag.TCK, io.systemjtag.reset) { ResetGen() }
-    val chi_openllc_opt = Option.when(enableCHI)(
+    val chi_openllc_opt = Option.when(enableCHI && !useExternalLLC) {
       withClockAndReset(io.clock, io.reset) {
         Module(new OpenLLC()(p.alter((site, here, up) => {
           case OpenLLCParamKey => soc.OpenLLCParamsOpt.get.copy(
@@ -302,7 +314,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
           )
         })))
       }
-    )
+    }
+    chi_extllc_opt.foreach { externalLLC =>
+      externalLLC.module.io.clock := io.clock
+      externalLLC.module.io.reset := io.reset.asBool
+    }
+    memory.viewAs[AXI4Bundle] <> misc.memory.elements.head._2
 
     // override LazyRawModuleImp's clock and reset
     childClock := io.clock
@@ -320,16 +337,21 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     io.pll0_ctrl <> misc.module.pll0_ctrl
 
-    val imsic_axi4 = Option.when(NumCores == 1)(imsic_bus_tops.head.axi4.map { x =>
+    val imsic_axi4 = Option.when(!useExternalLLC && NumCores == 1)(imsic_bus_tops.head.axi4.map { x =>
       IO(Flipped(new VerilogAXI4Record(x.elts.head.params.copy(addrBits = 32))))
     }).flatten
-    val imsic_axi4s = Option.when(NumCores > 1)(imsic_bus_tops.head.axi4.map { x =>
+    val imsic_axi4s = Option.when(!useExternalLLC && NumCores > 1)(imsic_bus_tops.head.axi4.map { x =>
       IO(Vec(NumCores, Flipped(new VerilogAXI4Record(x.elts.head.params.copy(addrBits = 32)))))
     }).flatten
     imsic_bus_tops.zipWithIndex.foreach { case (imsic_bus_top, i) =>
       imsic_bus_top.axi4.foreach { x =>
-        val imsic_axi4_port = if (NumCores == 1) imsic_axi4.get else imsic_axi4s.get(i)
-        imsic_axi4_port.viewAs[AXI4Bundle] <> x.elements.head._2
+        chi_extllc_opt match {
+          case Some(externalLLC) =>
+            externalLLC.module.io.imsic(i).viewAs[AXI4Bundle] <> x.elements.head._2
+          case None =>
+            val imsic_axi4_port = if (NumCores == 1) imsic_axi4.get else imsic_axi4s.get(i)
+            imsic_axi4_port.viewAs[AXI4Bundle] <> x.elements.head._2
+        }
       }
       imsic_bus_top.tl_m.foreach { x =>
         val imsic_m_tl = IO(chiselTypeOf(x.getWrappedValue))
@@ -408,34 +430,49 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     }
 
     withClockAndReset(io.clock, io.reset) {
-      Option.when(enableCHI)(true.B).foreach { _ =>
+      if (enableCHI && useExternalLLC) {
         for ((core, i) <- core_with_l2.zipWithIndex) {
+          val coreCHI = core.module.io.chi.get
+          val extLLCLogger = CHILogger(s"L2[${i}]_ExtLLC", true)
+          val extLLCRN = chi_extllc_opt.get.module.io.rn(i)
+          dontTouch(coreCHI)
+          coreCHI <> extLLCLogger.io.up
+          extLLCRN <> extLLCLogger.io.down
+          require(coreCHI.getWidth == extLLCRN.getWidth)
+        }
+      } else if (enableCHI) {
+        val llcRouteId = NumCores * 2
+        for ((core, i) <- core_with_l2.zipWithIndex) {
+          val coreCHI = core.module.io.chi.get
           val mmioLogger = CHILogger(s"L2[${i}]_MMIO", true)
           val llcLogger = CHILogger(s"L2[${i}]_LLC", true)
-          dontTouch(core.module.io.chi.get)
+          val mmioRouteId = NumCores + i
+          val lowAddressRange = AddressSet(0x0L, 0x00007fffffffL)
+          val chiRouteMap = Map[AddressSet, Int]() ++
+            Seq(lowAddressRange -> mmioRouteId) ++
+            AddressSet(0x0L, 0xffffffffffffL).subtract(lowAddressRange).map(_ -> llcRouteId)
+          dontTouch(coreCHI)
           bind(
-            route(
-              core.module.io.chi.get, Map((AddressSet(0x0L, 0x00007fffffffL), NumCores + i)) ++ AddressSet(0x0L,
-              0xffffffffffffL).subtract(AddressSet(0x0L, 0x00007fffffffL)).map(addr => (addr, NumCores * 2)).toMap
-            ),
-            Map((NumCores + i) -> mmioLogger.io.up, (NumCores * 2) -> llcLogger.io.up)
+            route(coreCHI, chiRouteMap),
+            Map(mmioRouteId -> mmioLogger.io.up, llcRouteId -> llcLogger.io.up)
           )
           chi_mmioBridge_opt(i).get.module.io.chi.connect(mmioLogger.io.down)
-          chi_openllc_opt.get.io.rn(i) <> llcLogger.io.down
-          require(core.module.io.chi.get.getWidth == llcLogger.io.up.getWidth)
-          require(llcLogger.io.down.getWidth == chi_openllc_opt.get.io.rn(i).getWidth)
+          val llcRN = chi_openllc_opt.get.io.rn(i)
+          llcRN <> llcLogger.io.down
+          require(llcLogger.io.down.getWidth == llcRN.getWidth)
+          require(coreCHI.getWidth == llcLogger.io.up.getWidth)
         }
-        val memLogger = CHILogger(s"LLC_MEM", true)
-        chi_openllc_opt.get.io.sn.connect(memLogger.io.up)
-        chi_llcBridge_opt.get.module.io.chi.connect(memLogger.io.down)
-        chi_openllc_opt.get.io.nodeID := (NumCores * 2).U
-        chi_openllc_opt.foreach { l3 =>
-          l3.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
+        chi_openllc_opt.foreach { openLLC =>
+          val memLogger = CHILogger(s"LLC_MEM", true)
+          openLLC.io.sn.connect(memLogger.io.up)
+          chi_llcBridge_opt.get.module.io.chi.connect(memLogger.io.down)
+          openLLC.io.nodeID := llcRouteId.U
+          openLLC.io.debugTopDown.robHeadPaddr := core_with_l2.map(_.module.io.debugTopDown.robHeadPaddr)
+          core_with_l2.zip(openLLC.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) =>
+            tile.module.io.debugTopDown.l3MissMatch := l3Match
+          }
+          core_with_l2.foreach(_.module.io.l3Miss := openLLC.io.l3Miss)
         }
-        core_with_l2.zip(chi_openllc_opt.get.io.debugTopDown.addrMatch).foreach { case (tile, l3Match) =>
-          tile.module.io.debugTopDown.l3MissMatch := l3Match
-        }
-        core_with_l2.map(_.module.io.l3Miss := (if (chi_openllc_opt.nonEmpty) chi_openllc_opt.get.io.l3Miss else false.B))
       }
     }
 
@@ -458,7 +495,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
 
     core_with_l2.zipWithIndex.foreach { case (tile, i) =>
       tile.module.io.nodeID.foreach { case nodeID =>
-        nodeID := i.U
+        if (useExternalLLC) {
+          nodeID := chi_extllc_opt.get.module.io.rnNodeId(i)
+        } else {
+          nodeID := i.U
+        }
         dontTouch(nodeID)
       }
     }

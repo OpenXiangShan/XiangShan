@@ -48,6 +48,7 @@ object ArgParser {
       |--with-rollingdb
       |--disable-perf
       |--disable-alwaysdb
+      |--external-llc
       |--enable-dfx
       |--enable-simfrontend
       |--imsic-bus-type <NONE|TL|AXI>
@@ -143,6 +144,10 @@ object ArgParser {
         case "--disable-alwaysdb" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDB = false)
+          }), tail)
+        case "--external-llc" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case UseExternalLLCKey => true
           }), tail)
         case "--enable-simfrontend" :: tail =>
           nextOption(config.alter((site, here, up) => {
