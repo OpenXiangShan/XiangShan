@@ -21,6 +21,7 @@ from env.funcov.py.ftq.sampler import (
     _TWO_FETCH_SIGNALS,
     sample_two_fetch_coverage,
 )
+from env.funcov.py.ftq.two_fetch_funcov import _tf_ptr_at_or_after
 from env.funcov.py.ftq.checker_funcov import (
     COVERAGE_GROUPS as CHECKER_COVERAGE_GROUPS,
     SAMPLER_BIN_KEYS as CHECKER_SAMPLER_BIN_KEYS,
@@ -310,6 +311,67 @@ def test_two_fetch_ftq_eligibility_and_pointer_bins(tmp_path):
     assert recorder.key_hit("two_fetch_ftq_eligibility", "blocked_cross_page")
     assert recorder.key_hit("two_fetch_pointer_advance", "step_two")
     assert recorder.key_hit("two_fetch_pointer_advance", "wrap_step_two")
+
+
+@pytest.mark.parametrize(
+    ("fetch_ptr", "s3_ftq_ptr", "expected"),
+    [
+        ((0, 10), (0, 9), True),
+        ((0, 10), (0, 10), True),
+        ((0, 10), (0, 11), False),
+        ((1, 1), (0, 63), True),
+        ((0, 63), (1, 0), False),
+    ],
+)
+def test_two_fetch_bpu_s3_pointer_relation_matches_rtl(
+    fetch_ptr, s3_ftq_ptr, expected
+):
+    assert _tf_ptr_at_or_after(fetch_ptr, s3_ftq_ptr) is expected
+
+
+def test_two_fetch_bpu_s3_flush_marks_equal_fetch_pointer(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    dut.set_key("ftq_valid", 1)
+    dut.set_key("ftq_ready", 0)
+    dut.set_key("ftq_req1_valid", 1)
+    dut.set_key("fetch_ptr_flag", 0)
+    dut.set_key("fetch_ptr_value", 10)
+    dut.set_key("bpu_s3_flush", 0)
+    dut.set_key("main_s0_fire", 0)
+
+    sample_two_fetch_coverage(recorder, env, 1)
+
+    dut.set_key("bpu_s3_flush", 1)
+    dut.set_key("bpu_s3_flush_ptr_flag", 0)
+    dut.set_key("bpu_s3_flush_ptr_value", 10)
+    sample_two_fetch_coverage(recorder, env, 2)
+
+    assert recorder.key_hit("two_fetch_flush_flow", "bpu_s3_drop_before_issue")
+
+
+def test_two_fetch_bpu_s3_flush_does_not_mark_an_accepted_request(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    dut.set_key("ftq_valid", 1)
+    dut.set_key("ftq_ready", 0)
+    dut.set_key("ftq_req1_valid", 1)
+    dut.set_key("fetch_ptr_flag", 0)
+    dut.set_key("fetch_ptr_value", 10)
+    dut.set_key("bpu_s3_flush", 0)
+    dut.set_key("main_s0_fire", 0)
+
+    sample_two_fetch_coverage(recorder, env, 1)
+
+    dut.set_key("bpu_s3_flush", 1)
+    dut.set_key("bpu_s3_flush_ptr_flag", 0)
+    dut.set_key("bpu_s3_flush_ptr_value", 10)
+    dut.set_key("main_s0_fire", 1)
+    sample_two_fetch_coverage(recorder, env, 2)
+
+    assert not recorder.key_hit("two_fetch_flush_flow", "bpu_s3_drop_before_issue")
+    assert any(
+        item.get("event") == "bpu_s3_pending_dual_not_dropped_before_issue"
+        for item in recorder.risk_observations
+    )
 
 
 def test_two_fetch_backend_exception_requires_observed_exception_signal(tmp_path):

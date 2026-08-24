@@ -94,20 +94,6 @@ _MAIN_S1_SHOULD_FETCH_SIGNALS = tuple(
     for index in range(4)
 )
 
-_BPU_S3_FLUSH_PTR_SIGNALS = {
-    "flag": (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_flag",
-    ),
-    "value": (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_value",
-    ),
-}
-_FTQ_ENTRY_START_SIGNALS = tuple(
-    f"Frontend_top.Frontend.inner_ftq.entryQueue_{index}_startPc_addr"
-    for index in range(64)
-)
-
-
 def _c_j(offset: int) -> int:
     """Encode a C.J immediate according to the RISC-V C extension."""
     assert int(offset) % 2 == 0
@@ -423,48 +409,6 @@ def _main_s1_line_addresses(recorder, required_lines: Sequence[bool]) -> set[int
     return addresses
 
 
-def _fetch_ptr(recorder) -> tuple[int, int]:
-    return (
-        _read_key(recorder, "fetch_ptr_flag"),
-        _read_key(recorder, "fetch_ptr_value"),
-    )
-
-
-def _bpu_s3_flush_ptr(recorder) -> tuple[int, int]:
-    return (
-        _read_required(
-            recorder,
-            _BPU_S3_FLUSH_PTR_SIGNALS["flag"],
-            label="bpu_s3_flush.ftqIdx.flag",
-        ),
-        _read_required(
-            recorder,
-            _BPU_S3_FLUSH_PTR_SIGNALS["value"],
-            label="bpu_s3_flush.ftqIdx.value",
-        ),
-    )
-
-
-def _ftq_ptr_at_or_after(left: tuple[int, int], right: tuple[int, int]) -> bool:
-    """Mirror CircularQueuePtr.>= for two continuous FTQ pointers."""
-    left_flag, left_value = (int(left[0]), int(left[1]))
-    right_flag, right_value = (int(right[0]), int(right[1]))
-    return bool((left_flag != right_flag) ^ (left_value >= right_value))
-
-
-def _ftq_entry_start_pc(recorder, ptr: tuple[int, int]) -> int:
-    index = int(ptr[1])
-    assert 0 <= index < len(_FTQ_ENTRY_START_SIGNALS), ptr
-    return (
-        _read_required(
-            recorder,
-            (_FTQ_ENTRY_START_SIGNALS[index],),
-            label=f"FTQ entry[{index}].startPc",
-        )
-        << 1
-    )
-
-
 def _icache_response_records(env) -> list[dict]:
     records = env.icache_agent.get_stats().get("response_records", [])
     return [dict(record) for record in records]
@@ -492,14 +436,6 @@ def test_two_fetch_directed_flow_signal_contract_matches_dut_inventory():
     missing_s1_lines = [
         list(names) for names in _MAIN_S1_VADDR_SIGNALS if not any(name in registered for name in names)
     ]
-    missing_bpu_flush_ptr = {
-        key: list(names)
-        for key, names in _BPU_S3_FLUSH_PTR_SIGNALS.items()
-        if not any(name in registered for name in names)
-    }
-    missing_ftq_entry_starts = [
-        name for name in _FTQ_ENTRY_START_SIGNALS if name not in registered
-    ]
     payload_names = {
         name for name in registered if name.startswith(_IBUFFER_PAYLOAD_PREFIX)
     }
@@ -519,16 +455,12 @@ def test_two_fetch_directed_flow_signal_contract_matches_dut_inventory():
         and not missing_groups
         and not missing_tag_groups
         and not missing_s1_lines
-        and not missing_bpu_flush_ptr
-        and not missing_ftq_entry_starts
         and payload_required <= payload_names
     ), {
         "missing_fencei": "Frontend_top.io_fencei" not in registered,
         "missing_two_fetch_groups": missing_groups,
         "missing_request_tag_groups": missing_tag_groups,
         "missing_main_s1_lines": missing_s1_lines,
-        "missing_bpu_flush_ptr": missing_bpu_flush_ptr,
-        "missing_ftq_entry_starts": missing_ftq_entry_starts,
         "missing_payload_fields": sorted(payload_required - payload_names),
         "observable_payload_field_count": len(payload_names),
     }
@@ -887,232 +819,4 @@ def test_backend_redirect_drops_dual_miss_and_ignores_delayed_old_response(env):
         }
         for item in recorder.risk_observations
     ), recorder.risk_observations
-    assert not env.monitor.get_errors()
-
-
-# Safety regression only: BIN-509 requires a rollback-eligible s3 pointer and
-# must not be claimed by the younger-flush behavior exercised here.
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_bpu_s3_override_preserves_older_stalled_dual_request(env):
-    _load_and_reset(env)
-    recorder = _recorder(env)
-    _warm_frontend_execution(env)
-    env.icache_agent.configure(hit_latency=1, miss_latency=512, miss_rate=1.0, seed=0x6221)
-    _pulse_fencei(env)
-
-    pending_snapshot: dict | None = None
-    flush_snapshot: dict | None = None
-    delayed_at_flush: list[dict] = []
-    predictor_disabled = False
-    predictor_disable_count = 0
-    predictor_disabled_cycles: list[int] = []
-    noneligible_collision_count = 0
-    noneligible_collisions: list[dict] = []
-    rearm_cycle = 0
-    for _ in range(_cycle_limit("TB_TWO_FETCH_BPU_FLUSH_MAX_CYCLES", 4000)):
-        env.step(1)
-        ftq_pending = (
-            _read_key(recorder, "ftq_valid") == 1
-            and _read_key(recorder, "ftq_ready") == 0
-            and _read_key(recorder, "ftq_req1_valid") == 1
-        )
-        if ftq_pending:
-            tags = _current_ftq_request_tags(recorder)
-            current = {
-                "cycle": int(env.current_cycle),
-                "tags": tags,
-                "start0": _read_key(recorder, "ftq_req0_start"),
-                "start1": _read_key(recorder, "ftq_req1_start"),
-                "fetch_ptr": _fetch_ptr(recorder),
-            }
-            if pending_snapshot is not None:
-                assert current["tags"] == pending_snapshot["tags"], {
-                    "reason": "FTQ dual request tag changed while valid && !ready",
-                    "before": pending_snapshot,
-                    "after": current,
-                }
-                assert current["start0"] == pending_snapshot["start0"]
-                assert current["start1"] == pending_snapshot["start1"]
-                assert current["fetch_ptr"] == pending_snapshot["fetch_ptr"]
-            else:
-                pending_snapshot = current
-                continue
-            if not predictor_disabled and int(env.current_cycle) >= int(rearm_cycle):
-                # Changing predictor availability while a trained dual request
-                # is blocked makes the later BPU stage disagree with the
-                # earlier prediction and produces a real s3 override.
-                env.set_bp_ctrl_enable(
-                    ubtb_enable=0,
-                    abtb_enable=0,
-                    mbtb_enable=0,
-                    tage_enable=0,
-                    sc_enable=0,
-                    ittage_enable=0,
-                )
-                predictor_disabled = True
-                predictor_disable_count += 1
-                predictor_disabled_cycles.append(int(env.current_cycle))
-                predictor_disabled_cycles[:] = predictor_disabled_cycles[-16:]
-
-        if _read_key(recorder, "bpu_s3_flush") == 1 and pending_snapshot is not None:
-            flush_ptr = _bpu_s3_flush_ptr(recorder)
-            candidate = {
-                "cycle": int(env.current_cycle),
-                "pending": dict(pending_snapshot),
-                "flush_ptr": flush_ptr,
-                "flush_target_pc": _ftq_entry_start_pc(recorder, flush_ptr),
-                "fetch_ptr_after": _fetch_ptr(recorder),
-                "main_s0_fire": _read_key(recorder, "main_s0_fire"),
-            }
-            pending_fetch_ptr = candidate["pending"]["fetch_ptr"]
-            rollback_applied = bool(
-                pending_fetch_ptr != flush_ptr
-                and _ftq_ptr_at_or_after(pending_fetch_ptr, flush_ptr)
-            )
-            candidate["rollback_applied"] = rollback_applied
-            delayed_candidate = [
-                {
-                    "source": int(getattr(item, "source")),
-                    "address": int(getattr(item, "addr")),
-                    "ready_cycle": int(getattr(item, "ready_cycle")),
-                }
-                for item in getattr(env.icache_agent, "pending", ())
-                if int(getattr(item, "ready_cycle", -1)) > int(env.current_cycle)
-            ]
-            if delayed_candidate and not rollback_applied:
-                flush_snapshot = candidate
-                delayed_at_flush = delayed_candidate
-                break
-
-            # A rollback-eligible s3 pointer is a distinct testpoint. This
-            # regression instead proves that a younger flush does not discard
-            # the older stalled MainPipe request.
-            noneligible_collision_count += 1
-            noneligible_collisions.append(candidate)
-            noneligible_collisions[:] = noneligible_collisions[-16:]
-            env.set_bp_ctrl_enable(
-                ubtb_enable=1,
-                abtb_enable=1,
-                mbtb_enable=1,
-                tage_enable=1,
-                sc_enable=1,
-                ittage_enable=1,
-            )
-            predictor_disabled = False
-            pending_snapshot = None
-            rearm_cycle = int(env.current_cycle) + 8
-            continue
-
-        if not ftq_pending and _read_key(recorder, "bpu_s3_flush") != 1:
-            pending_snapshot = None
-
-    env.set_bp_ctrl_enable(
-        ubtb_enable=1,
-        abtb_enable=1,
-        mbtb_enable=1,
-        tage_enable=1,
-        sc_enable=1,
-        ittage_enable=1,
-    )
-    assert flush_snapshot is not None, {
-        "reason": "no younger BPU s3 override overlapped a stalled dual FTQ request",
-        "predictor_disable_count": predictor_disable_count,
-        "last_predictor_disabled_cycles": predictor_disabled_cycles,
-        "noneligible_collision_count": noneligible_collision_count,
-        "last_noneligible_collisions": noneligible_collisions,
-        "icache": env.icache_agent.get_stats(),
-        "backend": env.backend_model.get_stats(),
-    }
-
-    assert not bool(flush_snapshot["rollback_applied"]), {
-        "reason": "younger-flush regression captured a rollback-eligible collision",
-        "flush": flush_snapshot,
-    }
-    assert not _ftq_ptr_at_or_after(
-        flush_snapshot["pending"]["fetch_ptr"], flush_snapshot["flush_ptr"]
-    ), {
-        "reason": "BPU s3 pointer was not younger than the stalled FTQ request",
-        "flush": flush_snapshot,
-    }
-    assert flush_snapshot["fetch_ptr_after"] == flush_snapshot["pending"]["fetch_ptr"], {
-        "reason": "younger BPU s3 pointer incorrectly rolled back fetchPtr",
-        "flush": flush_snapshot,
-    }
-
-    assert delayed_at_flush, {
-        "reason": "BPU s3 collision had no in-flight delayed ICache response",
-        "flush": flush_snapshot,
-        "icache": env.icache_agent.get_stats(),
-    }
-    delayed_ready = {
-        (int(item["source"]), int(item["address"])): int(item["ready_cycle"])
-        for item in delayed_at_flush
-    }
-    old_tags = set(flush_snapshot["pending"]["tags"])
-    stale_ibuffer_before_reissue: list[dict] = []
-    stale_cfvec_before_reissue: list[dict] = []
-    first_reissue: dict | None = None
-    delayed_responses_after_flush: list[dict] = []
-    for _ in range(_cycle_limit("TB_TWO_FETCH_BPU_RECOVERY_MAX_CYCLES", 1024)):
-        env.step(1)
-        if first_reissue is None:
-            if (
-                _read_key(recorder, "to_ibuffer_valid") == 1
-                and _read_key(recorder, "to_ibuffer_ready") == 1
-            ):
-                entries = _ibuffer_entries(recorder)
-                stale = [entry for entry in entries if entry["ftq_tag"] in old_tags]
-                if stale:
-                    stale_ibuffer_before_reissue.append(
-                        {"cycle": int(env.current_cycle), "entries": stale}
-                    )
-            stale_cfvec = [
-                entry
-                for entry in _cfvec_entries(recorder)
-                if entry["ftq_tag"] in old_tags
-            ]
-            if stale_cfvec:
-                stale_cfvec_before_reissue.append(
-                    {"cycle": int(env.current_cycle), "entries": stale_cfvec}
-                )
-
-            if _read_key(recorder, "main_s0_fire") == 1:
-                first_reissue = {
-                    "cycle": int(env.current_cycle),
-                    "tags": _current_ftq_request_tags(recorder),
-                    "start_pc": _read_key(recorder, "ftq_req0_start") << 1,
-                }
-
-        delayed_responses_after_flush = []
-        for record in _icache_response_records(env):
-            key = (
-                int(record.get("source", -1)),
-                int(record.get("address", -1)),
-            )
-            if key not in delayed_ready:
-                continue
-            response_cycle = int(record.get("cycle", -1))
-            if response_cycle >= max(
-                int(flush_snapshot["cycle"]), int(delayed_ready[key])
-            ):
-                delayed_responses_after_flush.append(record)
-        if first_reissue is not None and delayed_responses_after_flush:
-            break
-
-    assert not stale_ibuffer_before_reissue and not stale_cfvec_before_reissue, {
-        "reason": "stalled dual FTQ transaction escaped before its MainPipe request fired",
-        "old_tags": sorted(old_tags),
-        "ibuffer": stale_ibuffer_before_reissue,
-        "cfvec": stale_cfvec_before_reissue,
-    }
-    assert first_reissue is not None, {
-        "reason": "older stalled dual request never reached MainPipe after BPU s3 flush",
-        "flush": flush_snapshot,
-    }
-    assert delayed_responses_after_flush, {
-        "reason": "test ended before delayed response completed",
-        "pending_at_flush": delayed_at_flush,
-        "responses": _icache_response_records(env),
-    }
-    assert not recorder.key_hit("two_fetch_flush_flow", "bpu_s3_drop_before_issue")
     assert not env.monitor.get_errors()

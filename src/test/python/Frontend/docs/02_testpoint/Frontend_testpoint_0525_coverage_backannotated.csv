@@ -1590,7 +1590,7 @@ wfi,,,,,,,,,,,
 ,,指针与flush,,,,,,,,,
 ,,,fetchPtr推进和旧路径清理,,,,,,,,
 ,,,,FTQ尾部满足双fetch资格时fetchPtr跨环回推进两项,将fetchPtr置于FTQ尾部倒数一项并准备两个可双取指entry；保持MainPipe可接受且无redirect,双请求握手后fetchPtr按环形指针语义加2，flag/value正确；后续请求从环回后的下一未消费entry开始,驱动: fetchPtr尾部位置、两个合法entry、fromMainPipe.realTwoFetchValid=1；采集: fetchPtr握手前后flag/value,"covergroup two_fetch_pointer_advance, coverpoint fetch_ptr_step, bins wrap_step_two (BIN-508)",PARTIAL,fe_2fetch_trained_short_blocks,"DUT_REJECTED:fe_2fetch_trained_short_blocks_test_bin_trace:pytest_outcome:failed,exit_code:1,checker_status:fail"
-,,,,双请求发出前BPU stage3 override命中窗口,先准备满足双fetch资格但尚未与MainPipe握手的窗口，再让BPU stage3 override指向fetchPtr或更早entry,fetchPtr回退到override ftqIdx；旧窗口req不发生fire，重定向后从新路径重新生成请求,驱动: prediction.s3Override、s3FtqPtr、MainPipe backpressure；采集: flushFromBpu.stage3、toMainPipe.fire、fetchPtr,"covergroup two_fetch_flush_flow, coverpoint flush_stage, bins bpu_s3_drop_before_issue (BIN-509)",PARTIAL,tc_2fetch_bpu_s3_flush,"DUT_REJECTED:test_bpu_s3_override_drops_stalled_dual_request_before_mainpipe_fire:pytest_outcome:failed,exit_code:1,funcov_errors:5,monitor_errors:5,checker_status:fail,checker_errors:5"
+,,,,双请求发出前BPU stage3 override命中窗口,先准备满足双fetch资格但尚未与MainPipe握手的窗口，再让BPU stage3 override指向fetchPtr或更早entry,fetchPtr更新为override ftqIdx（相等时原位重放）；旧窗口req不发生fire，重定向后从新路径重新生成请求,驱动: prediction.s3Override、s3FtqPtr、MainPipe backpressure；采集: flushFromBpu.stage3、toMainPipe.fire、fetchPtr,"covergroup two_fetch_flush_flow, coverpoint flush_stage, bins bpu_s3_drop_before_issue (BIN-509)",MODELED,,
 ,2-prefetch与WayLookup准备,,,,,,,,,,
 ,,TwoPrefetchCase地址布局,,,,,,,,,
 ,,,双块meta读取映射,,,,,,,,

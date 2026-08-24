@@ -451,9 +451,10 @@ def _tf_next_ptr(flag: int, value: int, size: int) -> tuple[int, int]:
 
 
 def _tf_ptr_at_or_after(left: tuple[int, int], right: tuple[int, int]) -> bool:
+    """Mirror CircularQueuePtr.>= for two continuous FTQ pointers."""
     left_flag, left_value = (int(left[0]), int(left[1]))
     right_flag, right_value = (int(right[0]), int(right[1]))
-    return bool((left_flag != right_flag) ^ (left_value > right_value))
+    return bool((left_flag != right_flag) ^ (left_value >= right_value))
 
 
 def _tf_mainpipe_fail_reason(recorder) -> dict[str, bool] | None:
@@ -719,6 +720,7 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
     ftq_ready = _tf_read(recorder, "ftq_ready")
     ftq_req1_valid = _tf_read(recorder, "ftq_req1_valid")
     ftq_fire = ftq_valid == 1 and ftq_ready == 1
+    main_s0_fire = _tf_read(recorder, "main_s0_fire")
 
     bpu_s3_flush = _tf_read(recorder, "bpu_s3_flush")
     if bpu_s3_flush == 1 and recorder._two_fetch_ftq_pending:
@@ -737,7 +739,7 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
             and flush_ptr is not None
             and _tf_ptr_at_or_after(tuple(pending_ptr), tuple(flush_ptr))
         )
-        if rollback_match:
+        if rollback_match and main_s0_fire == 0:
             rollback_distance = circular_distance(
                 int(pending_ptr[0]), int(pending_ptr[1]), int(flush_ptr[0]), int(flush_ptr[1]), ftq_size
             )
@@ -751,15 +753,22 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
                     flush_ptr=list(flush_ptr),
                     rollback_distance=rollback_distance,
                     pending_cycle=pending_cycle,
+                    main_s0_fire=main_s0_fire,
                 ),
             )
         else:
+            event = (
+                "bpu_s3_pending_dual_not_dropped_before_issue"
+                if rollback_match
+                else "bpu_s3_pending_dual_flush_ptr_unmatched_or_unobservable"
+            )
             recorder.risk_observations.append(
                 _tf_evidence(
-                    "bpu_s3_pending_dual_flush_ptr_unmatched_or_unobservable",
+                    event,
                     pending_ptr=None if pending_ptr is None else list(pending_ptr),
                     flush_ptr=None if flush_ptr is None else list(flush_ptr),
                     pending_cycle=pending_cycle,
+                    main_s0_fire=main_s0_fire,
                     cycle=cycle,
                 )
             )
@@ -883,7 +892,6 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
     main_valid = _tf_read(recorder, "way_out_valid")
     main_ready = _tf_read(recorder, "way_out_ready")
     main_real_two = _tf_read(recorder, "way_real_two")
-    main_s0_fire = _tf_read(recorder, "main_s0_fire")
     main_fire = main_s0_fire == 1
     if main_fire and main_req1_candidate == 1 and main_real_two is not None:
         recorder._two_fetch_expected_ptr_step = 2 if int(main_real_two) == 1 else 1
