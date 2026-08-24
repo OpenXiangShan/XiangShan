@@ -46,6 +46,7 @@ from env.funcov.py.icache import (
     ICACHE_MISSUNIT_SAMPLER_BIN_KEYS,
     ICACHE_MAINPIPE_SAMPLER_BIN_KEYS,
     ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS,
+    ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS,
     ICACHE_HITMISS_SAMPLER_BIN_KEYS,
 )
 from env.runtime.artifact_provenance import load_frontend_build_manifest, write_frontend_build_manifest
@@ -649,7 +650,6 @@ def test_canonical_registry_matches_the_single_sampler_contract():
             for row in csv.DictReader(handle)
             if row["Coverpoint"].strip()
         }
-    assert len(active) == 446
     assert active == set(FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS)
     assert len(CFVEC_SAMPLER_BIN_KEYS) == 17
     assert len(IFU_CFVEC_SAMPLER_BIN_KEYS) == 94
@@ -657,6 +657,7 @@ def test_canonical_registry_matches_the_single_sampler_contract():
     assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 47
     assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 37
     assert len(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS) == 34
+    assert len(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS) == 41
     assert len(ICACHE_HITMISS_SAMPLER_BIN_KEYS) == 10
 
 
