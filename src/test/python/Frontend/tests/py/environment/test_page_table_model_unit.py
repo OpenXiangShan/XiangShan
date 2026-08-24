@@ -59,17 +59,17 @@ def test_translate_applies_stage2_after_stage1_leaf() -> None:
 
 
 @pytest.mark.parametrize(
-    "pte_kwargs,priv_imode,reason",
+    "pte_kwargs,priv_imode,reason,expected_ptw_pf",
     [
-        ({"x": 0}, 1, "stage1_execute_denied"),
-        ({"a": 0}, 1, "stage1_accessed_clear"),
-        ({"r": 0, "w": 1}, 1, "stage1_write_without_read"),
-        ({"u": 0}, 0, "stage1_user_denied"),
-        ({"u": 1}, 1, "stage1_supervisor_denied"),
+        ({"x": 0}, 1, "stage1_execute_denied", 0),
+        ({"a": 0}, 1, "stage1_accessed_clear", 0),
+        ({"r": 0, "w": 1}, 1, "stage1_write_without_read", 1),
+        ({"u": 0}, 0, "stage1_user_denied", 0),
+        ({"u": 1}, 1, "stage1_supervisor_denied", 0),
     ],
 )
 def test_translate_keeps_leaf_pte_visible_while_reporting_stage1_page_fault(
-    pte_kwargs: dict, priv_imode: int, reason: str
+    pte_kwargs: dict, priv_imode: int, reason: str, expected_ptw_pf: int
 ) -> None:
     pt = PageTableModel(mode="sv39")
     va = 0x80200004
@@ -79,7 +79,7 @@ def test_translate_keeps_leaf_pte_visible_while_reporting_stage1_page_fault(
     pa, ok, metadata = pt.translate(va, s2xlate=1, priv_imode=priv_imode)
 
     assert resp["s1_entry_v"] == 1
-    assert resp["s1_pf"] == 0
+    assert resp["s1_pf"] == expected_ptw_pf
     assert pa == 0
     assert ok is False
     assert metadata["outcome"] == "instruction_page_fault"
@@ -100,6 +100,13 @@ def test_translate_stage2_faults_and_access_fault_priority() -> None:
     pa, ok, metadata = pt.translate(va, s2xlate=3)
 
     assert (resp["s1_pf"], resp["s1_af"], resp["s2_gpf"], resp["s2_gaf"]) == (1, 0, 0, 1)
+    assert (
+        resp["s2_entry_ppn"],
+        resp["s2_entry_perm_r"],
+        resp["s2_entry_perm_w"],
+        resp["s2_entry_perm_x"],
+        resp["s2_entry_v"],
+    ) == (0, 0, 0, 0, 1)
     assert pa == 0
     assert ok is False
     assert metadata["outcome"] == "instruction_access_fault"

@@ -688,6 +688,88 @@ def test_builder_binds_page_fault_outcome_without_rewriting_the_pte() -> None:
 
 
 @pytest.mark.parametrize(
+    "scenario,expected_response,expected_outcome",
+    [
+        pytest.param(
+            TranslationScenario(
+                scenario_id="s1-write-without-read-response",
+                va=0x8020_0000,
+                pa=0x8040_0000,
+                payload=b"\x13\x00\x00\x00",
+                s2xlate=1,
+                s1_pte=TranslationPte(r=0, w=1),
+                expected_path="fault",
+                expected_result="page_fault",
+            ),
+            (1, 0, 1, 1, 0, 0, 0, 0),
+            "instruction_page_fault",
+            id="stage1",
+        ),
+        pytest.param(
+            TranslationScenario(
+                scenario_id="s2-write-without-read-response",
+                va=0x8020_0000,
+                pa=0x8040_0000,
+                payload=b"\x13\x00\x00\x00",
+                mode="bare",
+                s2xlate=2,
+                priv_virt=1,
+                s2_pte=TranslationPte(r=0, w=1),
+                expected_path="fault",
+                expected_result="guest_fault",
+            ),
+            (0, 0, 0, 0, 0, 0, 1, 1),
+            "instruction_guest_page_fault",
+            id="only-stage2",
+        ),
+        pytest.param(
+            TranslationScenario(
+                scenario_id="all-stage-gstage-write-without-read-response",
+                va=0x8020_0000,
+                gpa=0x8060_0000,
+                pa=0x8040_0000,
+                payload=b"\x13\x00\x00\x00",
+                s2xlate=3,
+                priv_virt=1,
+                s1_pte=TranslationPte(asid=5, vmid=7),
+                s2_pte=TranslationPte(r=0, w=1, vmid=7),
+                vsatp_asid=5,
+                hgatp_vmid=7,
+                expected_path="fault",
+                expected_result="guest_fault",
+            ),
+            (1, 1, 0, 0, 0, 0, 1, 1),
+            "instruction_guest_page_fault",
+            id="all-stage",
+        ),
+    ],
+)
+def test_builder_encodes_write_without_read_ptw_responses_like_l2tlb(
+    scenario: TranslationScenario,
+    expected_response: tuple[int, ...],
+    expected_outcome: str,
+) -> None:
+    env = _env()
+    state = TranslationScenarioBuilder(env).build(scenario)
+    response = env.page_table.build_ptw_resp(scenario.va >> 12, s2xlate=scenario.s2xlate)
+
+    assert tuple(
+        response[name]
+        for name in (
+            "s1_entry_v",
+            "s1_entry_perm_r",
+            "s1_entry_perm_w",
+            "s1_pf",
+            "s2_entry_v",
+            "s2_entry_perm_r",
+            "s2_entry_perm_w",
+            "s2_gpf",
+        )
+    ) == expected_response
+    assert state.expected_outcome["outcome"] == expected_outcome
+
+
+@pytest.mark.parametrize(
     "pmp_execute,pma_execute,expected_reason",
     [
         (False, True, "pmp_execute_denied"),

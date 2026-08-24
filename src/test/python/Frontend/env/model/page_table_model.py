@@ -23,7 +23,7 @@ class PageTableModel:
         self.stage2_pte_map: Dict[int, PTE] = {}
         self._stage1_sector_response_tags: set[int] = set()
         self._stage1_sector_lane_valid: dict[int, dict[int, int]] = {}
-        # PTW response faults describe walk/access failures, not PTE fields.
+        # Explicit response faults supplement the faults derived from PTE fields.
         self._stage1_fault_map: Dict[int, Tuple[int, int]] = {}
         self._stage2_fault_map: Dict[int, Tuple[int, int]] = {}
         # ``None`` retains the legacy raw-PTW-response mode.  A concrete value
@@ -89,6 +89,7 @@ class PageTableModel:
             normalized["s1_pf"] = 1
         if self.machine_pbmte is False and int(normalized.get("s2_entry_pbmt", 0)) != 0:
             normalized["s2_gpf"] = 1
+            normalized["s2_entry_v"] = 0
         return normalized
 
     def _stage1_pbmte(self, s2xlate: int) -> Optional[bool]:
@@ -435,24 +436,48 @@ class PageTableModel:
         pte = self._lookup_pte(self.stage2_pte_map, gvpn, self.stage2_mode)
         forced_gpf, forced_gaf = self._stage2_fault_map.get(gvpn, (0, 0))
         pbmt_disabled = pte is not None and self.machine_pbmte is False and int(pte.pbmt) != 0
-        gpf = 1 if forced_gpf or pte is None or int(pte.v) == 0 or pbmt_disabled else 0
+        gpf = 1 if (
+            forced_gpf
+            or pte is None
+            or int(pte.v) == 0
+            or (int(pte.w) == 1 and int(pte.r) == 0)
+            or pbmt_disabled
+        ) else 0
         gaf = 1 if forced_gaf else 0
         if pte is None:
             pte = PTE(ppn=0, v=0, r=0, x=0, level=0)
+        resp_pte = (
+            PTE(
+                ppn=0,
+                v=0,
+                r=0,
+                w=0,
+                x=0,
+                u=0,
+                g=0,
+                a=0,
+                d=0,
+                n=0,
+                level=pte.level,
+                vmid=pte.vmid,
+            )
+            if gaf
+            else pte
+        )
         return {
             "s2_entry_tag": gvpn,
-            "s2_entry_vmid": pte.vmid,
-            "s2_entry_n": pte.n,
-            "s2_entry_pbmt": pte.pbmt,
-            "s2_entry_perm_a": pte.a,
-            "s2_entry_perm_g": pte.g,
-            "s2_entry_perm_u": pte.u,
-            "s2_entry_perm_x": pte.x,
-            "s2_entry_perm_w": pte.w,
-            "s2_entry_perm_r": pte.r,
-            "s2_entry_level": pte.level,
-            "s2_entry_v": pte.v,
-            "s2_entry_ppn": pte.ppn,
+            "s2_entry_vmid": resp_pte.vmid,
+            "s2_entry_n": resp_pte.n,
+            "s2_entry_pbmt": resp_pte.pbmt,
+            "s2_entry_perm_a": resp_pte.a,
+            "s2_entry_perm_g": resp_pte.g,
+            "s2_entry_perm_u": resp_pte.u,
+            "s2_entry_perm_x": resp_pte.x,
+            "s2_entry_perm_w": resp_pte.w,
+            "s2_entry_perm_r": resp_pte.r,
+            "s2_entry_level": resp_pte.level,
+            "s2_entry_v": int(not gpf),
+            "s2_entry_ppn": resp_pte.ppn,
             "s2_gpf": gpf,
             "s2_gaf": gaf,
         }
@@ -596,7 +621,13 @@ class PageTableModel:
             pte = self._lookup_pte(self.pte_map, vpn, self.mode)
             forced_pf, forced_af = self._stage1_fault_map.get(vpn, (0, 0))
             pbmt_disabled = pte is not None and self._stage1_pbmte(s2xlate) is False and int(pte.pbmt) != 0
-            pf = 1 if forced_pf or pte is None or int(pte.v) == 0 or pbmt_disabled else 0
+            pf = 1 if (
+                forced_pf
+                or pte is None
+                or int(pte.v) == 0
+                or (int(pte.w) == 1 and int(pte.r) == 0)
+                or pbmt_disabled
+            ) else 0
             if pte is None:
                 pte = PTE(ppn=0, v=0, r=0, x=0, level=0)
 
