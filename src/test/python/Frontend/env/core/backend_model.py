@@ -4153,6 +4153,7 @@ class BackendModel:
         backend_igpf = int(payload.get("backend_igpf", 0))
         backend_ipf = int(payload.get("backend_ipf", 0))
         backend_iaf = int(payload.get("backend_iaf", 0))
+        satp_flush = int(payload.get("satp_flush", 0))
         if "ftq_flag" in payload and "ftq_value" in payload:
             self._assert_redirect_ftq_not_committed(
                 int(ftq_flag),
@@ -4267,10 +4268,11 @@ class BackendModel:
             "is_rvc": drive_is_rvc,
             "branch_type": branch_type,
             "ras_action": ras_action,
-            "level": 0,
+            "level": level,
             "backend_igpf": backend_igpf,
             "backend_ipf": backend_ipf,
             "backend_iaf": backend_iaf,
+            "satp_flush": satp_flush,
         }
         if self.monitor is not None:
             self.monitor.notify_redirect(target_pc, reason=reason)
@@ -4362,6 +4364,92 @@ class BackendModel:
         self._last_correct_cfi_context = None
         # Note: do NOT clear ftq_entries — entries already dispatch-complete remain valid;
         # they will naturally drain via _drive_commit() until the redirect fires.
+
+    def inject_redirect_from_cfvec(
+        self,
+        *,
+        source_pc: int,
+        source_ftq_flag: Optional[int],
+        source_ftq_value: Optional[int],
+        source_ftq_offset: Optional[int],
+        target_pc: int,
+        reason: str,
+        taken: int = 1,
+        level: int = 0,
+        backend_igpf: int = 0,
+        backend_ipf: int = 0,
+        backend_iaf: int = 0,
+        satp_flush: int = 0,
+        delay_cycles: Optional[int] = None,
+    ) -> None:
+        self._assert_explicit_injection_allowed("redirect")
+        if int(level) not in (0, 1):
+            raise ValueError("redirect level must be 0 (flushAfter) or 1 (flush)")
+
+        candidates = []
+        for entry in self._cfvec_queue:
+            if int(entry.pc) != int(source_pc) or entry.path_state == PATH_STATE_WRONG:
+                continue
+            if source_ftq_flag is not None and int(entry.ftq_flag) != int(source_ftq_flag):
+                continue
+            if source_ftq_value is not None and int(entry.ftq_value) != int(source_ftq_value):
+                continue
+            if source_ftq_offset is not None and int(entry.ftq_offset) != int(source_ftq_offset):
+                continue
+            candidates.append(entry)
+        if len(candidates) != 1:
+            raise AssertionError(
+                "redirect source must match exactly one live cfVec entry: "
+                f"pc=0x{int(source_pc):x} matches={len(candidates)}"
+            )
+
+        source = candidates[0]
+        fault_bits = (
+            ("backend_igpf", int(backend_igpf), 20),
+            ("backend_ipf", int(backend_ipf), 12),
+            ("backend_iaf", int(backend_iaf), 1),
+        )
+        selected_fault_bits = [bit for _name, enabled, bit in fault_bits if enabled]
+        if selected_fault_bits:
+            if int(level) != 1:
+                raise AssertionError("backend-fault redirect must use level=1 (flush)")
+            for bit in selected_fault_bits:
+                if (int(source.exception_bits) & (1 << int(bit))) == 0:
+                    raise AssertionError(
+                        "backend-fault redirect source lacks matching cfVec exception bit: "
+                        f"pc=0x{int(source.pc):x} bit={int(bit)}"
+                    )
+        elif source.exception_marked:
+            raise AssertionError("non-fault redirect cannot use an exception-marked cfVec source")
+        elif not int(satp_flush) and not source.is_cfi:
+            raise AssertionError("control redirect source must be a CFI cfVec entry")
+
+        context = self._build_redirect_context_from_queue_entry(None, source)
+        payload_extra = {
+            "pc": int(source.pc),
+            "ftq_flag": int(source.ftq_flag),
+            "ftq_value": int(source.ftq_value),
+            "ftq_offset": int(source.ftq_offset),
+            "is_rvc": int(source.is_rvc),
+            "taken": int(taken),
+            "level": int(level),
+            "backend_igpf": int(backend_igpf),
+            "backend_ipf": int(backend_ipf),
+            "backend_iaf": int(backend_iaf),
+            "satp_flush": int(satp_flush),
+        }
+        if context is not None:
+            payload_extra.update(
+                branch_type=int(context["branch_type"]),
+                ras_action=int(context["ras_action"]),
+            )
+        self._queue_redirect_event(
+            target_pc=int(target_pc),
+            reason=str(reason),
+            delay_cycles=delay_cycles,
+            flush_on_drive=True,
+            payload_extra=payload_extra,
+        )
 
     def inject_exception(self, cause: int, tval: int, pc: int, delay_cycles: int = _MIN_BACKEND_DELAY) -> None:
         self._assert_explicit_injection_allowed("exception")

@@ -24,6 +24,7 @@ class BackendCtrlBundle(Bundle):
         "redirect_bits_backend_igpf": "io_backend_toFtq_redirect_bits_backendIGPF",
         "redirect_bits_backend_ipf": "io_backend_toFtq_redirect_bits_backendIPF",
         "redirect_bits_backend_iaf": "io_backend_toFtq_redirect_bits_backendIAF",
+        "redirect_bits_satp_flush": "io_backend_toFtq_redirect_bits_satpFlush",
         "redirect_bits_debug_is_ctrl": "io_backend_toFtq_redirect_bits_debugIsCtrl",
         "redirect_bits_debug_is_mem_vio": "io_backend_toFtq_redirect_bits_debugIsMemVio",
         "wfi_req": "io_backend_wfi_wfiReq",
@@ -49,6 +50,7 @@ class BackendCtrlBundle(Bundle):
     redirect_bits_backend_igpf = Signal()
     redirect_bits_backend_ipf = Signal()
     redirect_bits_backend_iaf = Signal()
+    redirect_bits_satp_flush = Signal()
     redirect_bits_debug_is_ctrl = Signal()
     redirect_bits_debug_is_mem_vio = Signal()
     resolve_valid = SignalList("io_backend_toFtq_resolve_#_valid", 3)
@@ -85,6 +87,7 @@ class BackendCtrlBundle(Bundle):
         self.redirect_bits_backend_igpf.value = 0
         self.redirect_bits_backend_ipf.value = 0
         self.redirect_bits_backend_iaf.value = 0
+        self.redirect_bits_satp_flush.value = 0
         self.redirect_bits_debug_is_ctrl.value = 0
         self.redirect_bits_debug_is_mem_vio.value = 0
         for signal in self.resolve_valid:

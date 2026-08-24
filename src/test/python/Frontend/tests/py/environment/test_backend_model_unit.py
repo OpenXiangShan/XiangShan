@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from collections import deque
+from types import SimpleNamespace
 
 import pytest
 
+from env.agents.backend_agent import BackendAgent
 from env.core.backend_model import BackendModel
 from env.model.backend_state import ActiveWrongPathEpisode
 from env.model.backend_state import BackendEvent
@@ -63,6 +65,29 @@ def _queue_instr(pc: int, ftq_flag: int, ftq_value: int) -> QueueInstr:
     )
 
 
+def _redirect_drive_if():
+    fields = (
+        "redirect_bits_pc",
+        "redirect_bits_target",
+        "redirect_bits_taken",
+        "redirect_bits_ftq_idx_flag",
+        "redirect_bits_ftq_idx_value",
+        "redirect_bits_ftq_offset",
+        "redirect_bits_is_rvc",
+        "redirect_bits_attribute_branch_type",
+        "redirect_bits_attribute_ras_action",
+        "redirect_bits_level",
+        "redirect_bits_backend_igpf",
+        "redirect_bits_backend_ipf",
+        "redirect_bits_backend_iaf",
+        "redirect_bits_satp_flush",
+        "redirect_bits_debug_is_ctrl",
+        "redirect_bits_debug_is_mem_vio",
+        "redirect_valid",
+    )
+    return SimpleNamespace(**{field: _Signal() for field in fields})
+
+
 def test_format_queue_pc_ranges_keeps_adjacent_ftq_segments_distinct() -> None:
     entries = [
         _queue_instr(0x1000, 0, 14),
@@ -74,6 +99,92 @@ def test_format_queue_pc_ranges_keeps_adjacent_ftq_segments_distinct() -> None:
     assert BackendModel._format_queue_pc_ranges(entries) == (
         "0x1000-0x1002(0,14),0x1004-0x1006(0,16)"
     )
+
+
+def test_source_bound_exception_redirect_uses_observed_cfvec_context() -> None:
+    model = BackendModel()
+    source = _queue_instr(0x80000020, 1, 9)
+    source.ftq_offset = 6
+    source.is_rvc = True
+    source.exception_marked = True
+    source.exception_bits = 1 << 12
+    model._cfvec_queue = deque([source])
+
+    model.inject_redirect_from_cfvec(
+        source_pc=0x80000020,
+        source_ftq_flag=1,
+        source_ftq_value=9,
+        source_ftq_offset=6,
+        target_pc=0x80000100,
+        reason="instruction-page-fault-trap",
+        level=1,
+        backend_ipf=1,
+    )
+
+    event = model.pending_events[0]
+    assert event.payload["pc"] == 0x80000020
+    assert event.payload["ftq_flag"] == 1
+    assert event.payload["ftq_value"] == 9
+    assert event.payload["ftq_offset"] == 6
+    assert event.payload["is_rvc"] == 1
+    assert event.payload["backend_ipf"] == 1
+    assert event.payload["level"] == 1
+    assert event.payload["flush_on_drive"] is True
+
+
+def test_source_bound_fault_redirect_rejects_unmatched_exception_bit() -> None:
+    model = BackendModel()
+    source = _queue_instr(0x80000020, 1, 9)
+    source.exception_marked = True
+    source.exception_bits = 1 << 1
+    model._cfvec_queue = deque([source])
+
+    with pytest.raises(AssertionError, match="lacks matching cfVec exception bit"):
+        model.inject_redirect_from_cfvec(
+            source_pc=0x80000020,
+            source_ftq_flag=None,
+            source_ftq_value=None,
+            source_ftq_offset=None,
+            target_pc=0x80000100,
+            reason="instruction-page-fault-trap",
+            level=1,
+            backend_ipf=1,
+        )
+
+
+def test_backend_agent_drives_satp_flush_and_redirect_level() -> None:
+    agent = BackendAgent()
+    drive_if = _redirect_drive_if()
+    agent._drive_if = drive_if
+
+    agent.drive_redirect({"pc": 0x80000020, "target_pc": 0x80000100, "level": 1, "satp_flush": 1})
+
+    assert drive_if.redirect_bits_pc.value == 0x80000020
+    assert drive_if.redirect_bits_target.value == 0x80000100
+    assert drive_if.redirect_bits_level.value == 1
+    assert drive_if.redirect_bits_satp_flush.value == 1
+    assert drive_if.redirect_valid.value == 1
+
+
+def test_plan_redirect_payload_preserves_level_and_satp_flush() -> None:
+    model = BackendModel()
+
+    payload = model._plan_redirect_payload(
+        {
+            "target_pc": 0x80000100,
+            "reason": "satp-flush",
+            "pc": 0x80000020,
+            "ftq_flag": 1,
+            "ftq_value": 9,
+            "ftq_offset": 6,
+            "is_rvc": 1,
+            "level": 1,
+            "satp_flush": 1,
+        }
+    )
+
+    assert payload["level"] == 1
+    assert payload["satp_flush"] == 1
 
 
 def test_recovery_target_requires_matching_pc_and_ftq() -> None:

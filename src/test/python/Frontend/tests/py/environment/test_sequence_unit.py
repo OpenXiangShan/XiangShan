@@ -41,10 +41,15 @@ class _InjectRedirectBackendModel:
     def __init__(self) -> None:
         self.target_pc: int | None = None
         self.delay_cycles = "unset"
+        self.source_kwargs = None
 
     def inject_redirect(self, target_pc: int, reason: str, delay_cycles=None) -> None:
         self.target_pc = int(target_pc)
         self.delay_cycles = delay_cycles
+
+    def inject_redirect_from_cfvec(self, **kwargs) -> None:
+        self.source_kwargs = dict(kwargs)
+        self.target_pc = int(kwargs["target_pc"])
 
 
 class _InjectRedirectEnv:
@@ -172,6 +177,41 @@ def test_inject_redirect_sequence_uses_monitor_recent_pcs_without_raw_dut_peeks(
     assert observed is True
     assert env.monitor.recent_pcs()[-1] == 0x80000080
     assert env.backend_model.delay_cycles is None
+
+
+def test_inject_redirect_sequence_uses_source_bound_redirect_when_requested():
+    env = _InjectRedirectEnv()
+
+    observed = InjectRedirectSequence(
+        txn=RedirectTxn(
+            target_pc=0x80000100,
+            reason="instruction-page-fault-trap",
+            source_pc=0x80000020,
+            source_ftq_flag=1,
+            source_ftq_value=9,
+            source_ftq_offset=6,
+            level=1,
+            backend_ipf=1,
+            satp_flush=1,
+            max_cycles=2,
+        ),
+    ).run(env)
+
+    assert observed is True
+    assert env.backend_model.source_kwargs == {
+        "source_pc": 0x80000020,
+        "source_ftq_flag": 1,
+        "source_ftq_value": 9,
+        "source_ftq_offset": 6,
+        "target_pc": 0x80000100,
+        "reason": "instruction-page-fault-trap",
+        "taken": 1,
+        "level": 1,
+        "backend_igpf": 0,
+        "backend_ipf": 1,
+        "backend_iaf": 0,
+        "satp_flush": 1,
+    }
 
 
 def test_run_until_golden_trace_complete_uses_monitor_and_backend_model_contracts_only():

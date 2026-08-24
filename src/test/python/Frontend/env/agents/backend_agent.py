@@ -98,6 +98,7 @@ class BackendAgent:
         self._write(self._drive_if.redirect_bits_backend_igpf, int(payload.get("backend_igpf", 0)))
         self._write(self._drive_if.redirect_bits_backend_ipf, int(payload.get("backend_ipf", 0)))
         self._write(self._drive_if.redirect_bits_backend_iaf, int(payload.get("backend_iaf", 0)))
+        self._write(self._drive_if.redirect_bits_satp_flush, int(payload.get("satp_flush", 0)))
         self._write(self._drive_if.redirect_bits_debug_is_ctrl, 1)
         self._write(self._drive_if.redirect_bits_debug_is_mem_vio, 0)
         self._write(self._drive_if.redirect_valid, 1)

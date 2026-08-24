@@ -21,6 +21,16 @@ class RedirectTxn:
     target_pc: int
     reason: str
     max_cycles: int = 1000
+    source_pc: Optional[int] = None
+    source_ftq_flag: Optional[int] = None
+    source_ftq_value: Optional[int] = None
+    source_ftq_offset: Optional[int] = None
+    taken: int = 1
+    level: int = 0
+    backend_igpf: int = 0
+    backend_ipf: int = 0
+    backend_iaf: int = 0
+    satp_flush: int = 0
 
 
 @dataclass(frozen=True)

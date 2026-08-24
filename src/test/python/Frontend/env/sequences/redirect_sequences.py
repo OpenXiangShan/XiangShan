@@ -41,12 +41,26 @@ class InjectRedirectSequence:
     txn: RedirectTxn
 
     def run(self, env) -> bool:
-        env.backend_model.inject_redirect(
-            self.txn.target_pc,
-            self.txn.reason,
-        )
-        if self.txn.target_pc in _recent_pcs(env, limit=16):
-            return True
+        if self.txn.source_pc is None:
+            env.backend_model.inject_redirect(
+                self.txn.target_pc,
+                self.txn.reason,
+            )
+        else:
+            env.backend_model.inject_redirect_from_cfvec(
+                source_pc=int(self.txn.source_pc),
+                source_ftq_flag=self.txn.source_ftq_flag,
+                source_ftq_value=self.txn.source_ftq_value,
+                source_ftq_offset=self.txn.source_ftq_offset,
+                target_pc=int(self.txn.target_pc),
+                reason=str(self.txn.reason),
+                taken=int(self.txn.taken),
+                level=int(self.txn.level),
+                backend_igpf=int(self.txn.backend_igpf),
+                backend_ipf=int(self.txn.backend_ipf),
+                backend_iaf=int(self.txn.backend_iaf),
+                satp_flush=int(self.txn.satp_flush),
+            )
         for _ in range(max(0, int(self.txn.max_cycles))):
             env.step(1)
             if self.txn.target_pc in _recent_pcs(env, limit=16):

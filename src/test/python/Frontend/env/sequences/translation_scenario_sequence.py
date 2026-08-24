@@ -10,6 +10,8 @@ from .translation_scenarios import (
     TranslationScenarioRandomizer,
     TranslationScenarioState,
 )
+from .redirect_sequences import InjectRedirectSequence
+from ..core.transactions import RedirectTxn
 from ..support.pmp_pma import PmpPmaConfig
 
 
@@ -20,6 +22,7 @@ class TranslationScenarioPhase:
     scenario: TranslationScenario | None = None
     reuse_previous: bool = False
     redirect: bool = False
+    redirect_txn: RedirectTxn | None = None
     target_pc: int | None = None
     page_indexes: tuple[int, ...] | None = None
     expect_ptw: bool = True
@@ -319,11 +322,14 @@ class TranslationScenarioSequence:
                 results.append({"kind": "pbmte", "record": record})
                 continue
 
-            if action.redirect:
+            phase_redirect = bool(action.redirect or action.redirect_txn is not None)
+            if phase_redirect and action.redirect_txn is None:
                 raise ValueError(
                     "translation phase redirect requires an explicit source context; "
                     "use reset/re-entry until configuration-switch support is implemented"
                 )
+            if action.redirect_txn is not None and action.redirect_txn.source_pc is None:
+                raise ValueError("translation phase redirect requires a source-bound RedirectTxn")
 
             if action.reuse_previous:
                 if previous_state is None or action.scenario is not None:
@@ -348,6 +354,8 @@ class TranslationScenarioSequence:
                 target_pc = int(state.expected_page_outcomes[int(action.page_indexes[0])]["va"])
             else:
                 target_pc = int(scenario.va)
+            if action.redirect_txn is not None and int(action.redirect_txn.target_pc) != int(target_pc):
+                raise ValueError("translation phase target_pc must match redirect transaction target_pc")
             env.monitor.clear()
             env.monitor.set_expected_pc(target_pc)
             env.arm_translation_scenario(
@@ -355,7 +363,7 @@ class TranslationScenarioSequence:
                 page_indexes=action.page_indexes,
                 expect_ptw=bool(action.expect_ptw),
             )
-            env.translation_oracle.set_fetch_observation_ready(ready=not action.redirect)
+            env.translation_oracle.set_fetch_observation_ready(ready=not phase_redirect)
             env.translation_oracle.set_speculative_request_policy(
                 allow_before_response=bool(action.allow_speculative_before_response)
             )
@@ -385,6 +393,10 @@ class TranslationScenarioSequence:
                     description="PTW request",
                     max_cycles=int(action.max_cycles),
                 )
+            if action.redirect_txn is not None:
+                if not InjectRedirectSequence(txn=action.redirect_txn).run(env):
+                    raise AssertionError("source-bound redirect did not reach the translation phase target")
+                env.translation_oracle.set_fetch_observation_ready(ready=True)
             if action.wait_for_completion:
                 self._wait(
                     env,

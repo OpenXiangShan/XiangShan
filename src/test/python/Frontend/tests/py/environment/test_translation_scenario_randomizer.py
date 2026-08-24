@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from env.core.frontend_env import FrontendEnv
+from env.core.transactions import RedirectTxn
 from env.runtime.dut_factory import FakeDUTFrontend
 from env.sequences import (
     TranslationScenarioBuilder,
@@ -114,3 +115,22 @@ def test_translation_phase_rejects_target_only_redirect() -> None:
 
     with pytest.raises(ValueError, match="explicit source context"):
         TranslationScenarioSequence(actions=(TranslationScenarioPhase(scenario=scenario, redirect=True),)).run(env)
+
+
+def test_translation_phase_requires_redirect_target_to_match_its_phase() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    scenario = TranslationScenarioRandomizer(0xBEEF).next(0).scenario
+
+    with pytest.raises(ValueError, match="target_pc must match"):
+        TranslationScenarioSequence(
+            actions=(
+                TranslationScenarioPhase(
+                    scenario=scenario,
+                    redirect_txn=RedirectTxn(
+                        target_pc=int(scenario.va) + 4,
+                        reason="unit-source-bound-redirect",
+                        source_pc=int(scenario.va),
+                    ),
+                ),
+            )
+        ).run(env)
