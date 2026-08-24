@@ -5,6 +5,7 @@ from env.funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_pa
 
 
 _IFU = "Frontend_top.Frontend.inner_ifu."
+_UNCACHE_UNIT = _IFU + "uncacheUnit.__Vtogcov__"
 
 
 class _Signal:
@@ -23,7 +24,11 @@ class _FakeDut:
 
 def _make_recorder(tmp_path):
     dut = _FakeDut()
-    env = SimpleNamespace(dut=dut)
+    env = SimpleNamespace(
+        dut=dut,
+        monitor=SimpleNamespace(observations=[]),
+        memory=SimpleNamespace(mmio_ranges=[(0x10001000, 0x10003000)]),
+    )
     recorder = FunctionalCoverageRecorder.from_pilot_csv(
         default_pilot_csv_path(),
         testcase_name="ifu_mmio_v3_unit",
@@ -44,6 +49,13 @@ def _set_common_signals(dut):
     dut.set(_IFU + "s2_icacheMeta_0_pmpMmio", 1)
     dut.set(_IFU + "s2_icacheMeta_0_itlbPbmt", 0)
     dut.set(_IFU + "s2_icacheMeta_0_exception_value", 0)
+    dut.set(_IFU + "s2_reqIsUncache", 1)
+    dut.set(_IFU + "io_toIBuffer_valid", 0)
+    dut.set(_IFU + "io_toIBuffer_ready", 1)
+    dut.set(_IFU + "io_toIBuffer_bits_exceptionType_value", 0)
+    dut.set(_IFU + "uncachePc_addr", 0)
+    dut.set(_UNCACHE_UNIT + "io_resp_valid", 0)
+    dut.set(_UNCACHE_UNIT + "io_resp_bits_needResend", 0)
 
 
 def test_tl_a_stall_requires_full_context_stability(tmp_path):
@@ -69,3 +81,19 @@ def test_tl_a_stall_requires_full_context_stability(tmp_path):
     sample_mmio_v3_coverage(recorder, env, 3)
     sample_mmio_v3_coverage(recorder, env, 4)
     assert recorder.key_hit("ifu_mmio_tl_a_stall", "stable_until_accept")
+
+
+def test_page_tail_rvc_progress_uses_halfword_pc_units(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_common_signals(dut)
+    env.monitor.observations.append(
+        SimpleNamespace(pc=0x10001FFE, is_rvc=True, cycle=1)
+    )
+
+    sample_mmio_v3_coverage(recorder, env, 1)
+    env.monitor.observations.append(
+        SimpleNamespace(pc=0x10002000, is_rvc=True, cycle=2)
+    )
+    sample_mmio_v3_coverage(recorder, env, 2)
+
+    assert recorder.key_hit("ifu_mmio_page_tail", "next_pc_plus_2b")

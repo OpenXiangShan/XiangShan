@@ -75,6 +75,8 @@ module frontend_mmio_fetch_funcov (
   logic        cross_page_half_pending;
   logic        first_page_exception_seen;
   logic        cross_8b_resend_seen;
+  logic        page_tail_rvc_pending;
+  logic [48:0] page_tail_rvc_pc;
   logic        prev_tl_a_fire;
   logic        wait_a_flush_seen;
   logic        resend_flush_seen;
@@ -102,6 +104,9 @@ module frontend_mmio_fetch_funcov (
   wire [1:0] tl_error_kind = !mmio_delivery ? 2'h0 :
     uncache_resp_exception == 3'h3 ? 2'h1 :
     uncache_resp_exception == 3'h5 ? 2'h2 : 2'h0;
+  wire page_tail_clean_rvc_response = page_tail_request && uncache_resp_valid &&
+    !uncache_resp_need_resend && uncache_resp_exception == 3'h0 &&
+    uncache_resp_data[1:0] != 2'b11;
 
   always_ff @(posedge clock) begin
     if (reset) begin
@@ -119,6 +124,8 @@ module frontend_mmio_fetch_funcov (
       cross_page_half_pending <= 1'b0;
       first_page_exception_seen <= 1'b0;
       cross_8b_resend_seen <= 1'b0;
+      page_tail_rvc_pending <= 1'b0;
+      page_tail_rvc_pc <= '0;
       prev_tl_a_fire <= 1'b0;
       wait_a_flush_seen <= 1'b0;
       resend_flush_seen <= 1'b0;
@@ -129,7 +136,7 @@ module frontend_mmio_fetch_funcov (
       end else if (mmio_delivery) begin
         last_mmio_delivery_seen <= 1'b1;
         last_mmio_is_rvc <= delivered_is_rvc;
-        last_mmio_pc <= to_ibuffer_pc_0;
+        last_mmio_pc <= uncache_pc;
       end
       prev_backend_can_accept <= backend_can_accept;
       prev_uncache_state <= uncache_state;
@@ -147,6 +154,15 @@ module frontend_mmio_fetch_funcov (
         stalled_a_exception <= s2_exception_0;
       end else if (tl_a_fire || ifu_flush) begin
         stalled_a_seen <= 1'b0;
+      end
+
+      if (ifu_flush || backend_redirect) begin
+        page_tail_rvc_pending <= 1'b0;
+      end else if (page_tail_clean_rvc_response) begin
+        page_tail_rvc_pending <= 1'b1;
+        page_tail_rvc_pc <= uncache_pc;
+      end else if (page_tail_rvc_pending && to_ibuffer_valid && to_ibuffer_ready) begin
+        page_tail_rvc_pending <= 1'b0;
       end
 
       if (page_tail_request && uncache_resp_valid && uncache_resp_need_resend) begin
@@ -216,25 +232,25 @@ module frontend_mmio_fetch_funcov (
         bins observed = {1'b1};
       }
     MMIO_rvc_pc_2b_progress_cp:
-      coverpoint (last_mmio_delivery_seen && last_mmio_is_rvc && mmio_delivery &&
-                  to_ibuffer_pc_0 == last_mmio_pc + 49'd2) iff (!reset) {
+      coverpoint (page_tail_rvc_pending && mmio_delivery &&
+                  uncache_pc == page_tail_rvc_pc + 49'd1) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_rvi_pc_4b_progress_cp:
       coverpoint (last_mmio_delivery_seen && !last_mmio_is_rvc && mmio_delivery &&
-                  to_ibuffer_pc_0 == last_mmio_pc + 49'd4) iff (!reset) {
+                  uncache_pc == last_mmio_pc + 49'd2) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_rvc_single_pc_2b_progress_cp:
       coverpoint (last_mmio_delivery_seen && last_mmio_is_rvc && mmio_delivery &&
                   delivered_is_rvc && single_delivery &&
-                  to_ibuffer_pc_0 == last_mmio_pc + 49'd2) iff (!reset) {
+                  uncache_pc == last_mmio_pc + 49'd1) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_rvi_single_pc_4b_progress_cp:
       coverpoint (last_mmio_delivery_seen && !last_mmio_is_rvc && mmio_delivery &&
                   !delivered_is_rvc && single_delivery &&
-                  to_ibuffer_pc_0 == last_mmio_pc + 49'd4) iff (!reset) {
+                  uncache_pc == last_mmio_pc + 49'd2) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_branch_delivery_cp:

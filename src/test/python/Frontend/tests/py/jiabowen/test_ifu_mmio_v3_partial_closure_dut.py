@@ -34,3 +34,25 @@ def test_mmio_tl_a_stall_holds_request_context(env):
     env.uncache_agent.set_a_ready(None)
     assert uncache._wait_for_uncache_req_delta(env, 1)
     assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1013")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_mmio_page_tail_rvc_delivers_next_pc_plus_2b(env):
+    uncache._prepare_cross_page_rvc_stream(env)
+    env.uncache_agent.configure(latency=2, mmio_latency=16)
+    uncache._initialize_mmio_fetch(env, reset_vector=uncache._CROSS_PAGE_PC)
+
+    first_beat = uncache._CROSS_PAGE_PC & ~(uncache._UNCACHE_BEAT_BYTES - 1)
+    assert uncache._wait_for_request_addr(env, first_beat, max_cycles=5000)
+    assert uncache._wait_for_observed_pc(env, uncache._CROSS_PAGE_PC, max_cycles=8000)
+    assert uncache._wait_for_observed_pc(env, uncache._CROSS_PAGE_PC + 2, max_cycles=8000), {
+        "observed": [
+            (int(obs.pc), int(obs.instr), bool(obs.is_rvc))
+            for obs in env.monitor.observations[-16:]
+        ],
+        "uncache": env.uncache_agent.get_stats(),
+    }
+
+    assert env.functional_coverage.key_hit("ifu_mmio_page_tail", "next_pc_plus_2b")
+    assert not env.monitor.get_errors()
