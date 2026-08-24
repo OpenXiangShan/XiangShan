@@ -102,9 +102,7 @@ def lowrisk_cleanup(env):
         fencei.value = 0
 
 
-@pytest.mark.funcov_bins(
-    "BIN-605", "BIN-606", "BIN-617", "BIN-625", "BIN-628", "BIN-629"
-)
+@pytest.mark.funcov_bins("BIN-605", "BIN-606", "BIN-617", "BIN-629")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_mainpipe_flush_refill(env) -> None:
     base = 0x8004_0000

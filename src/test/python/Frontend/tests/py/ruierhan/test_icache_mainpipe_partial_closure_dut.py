@@ -19,7 +19,6 @@ from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _DUAL_BASE,
     _completed_dual_transactions,
     _initialize_cacheable_stream,
-    _load_nops,
     _load_two_fetch_loop,
     _register_mainpipe_observer,
 )
@@ -109,47 +108,6 @@ def test_tc_icache_mainpipe_selective_refill_dut(env) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-625")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-@pytest.mark.xfail(
-    reason="current ICacheAgent has no per-line variable refill-latency control for deterministic split refill",
-    strict=False,
-)
-def test_tc_icache_mainpipe_split_refill_dut(env) -> None:
-    pytest.xfail(
-        "current ICacheAgent has no per-line variable refill-latency control for deterministic split refill"
-    )
-    _load_two_fetch_loop(env, _DUAL_BASE)
-    env.icache_agent.configure(hit_latency=8, miss_latency=8, miss_rate=1.0, seed=0x2524)
-    env.initialize(reset_vector=_DUAL_BASE, bare_mode=True, reset_cycles=20)
-    env.monitor.clear()
-    env.monitor.set_expected_pc(_DUAL_BASE)
-    fencei = getattr(env.dut, "io_fencei", None)
-    assert fencei is not None, {"missing_dut_signal": "io_fencei"}
-    fencei.value = 1
-    env.step(1)
-    fencei.value = 0
-    _wait_hit(env, "icache_mainpipe_s1_refill", "cross_line_split_refill")
-
-
-@pytest.mark.funcov_bins("BIN-628")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-@pytest.mark.xfail(
-    reason="current directed setup does not reliably force both requests to be cross-line with all four lines missing",
-    strict=False,
-)
-def test_tc_icache_mainpipe_four_line_arb_dut(env) -> None:
-    pytest.xfail(
-        "current directed setup does not reliably force both requests to be cross-line with all four lines missing"
-    )
-    _load_two_fetch_loop(env, _DUAL_BASE)
-    env.icache_agent.configure(hit_latency=8, miss_latency=32, miss_rate=1.0, seed=0x6628)
-    env.initialize(reset_vector=_DUAL_BASE, bare_mode=True, reset_cycles=20)
-    env.monitor.clear()
-    env.monitor.set_expected_pc(_DUAL_BASE)
-    _wait_hit(env, "icache_mainpipe_s1_miss", "four_line_fixed_priority")
-
-
 @pytest.mark.funcov_bins("BIN-634")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_pmp_fault_dut(env) -> None:
@@ -164,44 +122,3 @@ def test_tc_icache_mainpipe_uncache_suppress_dut(env) -> None:
     _run_pbmt_nc_redirect(env)
     _wait_hit(env, "icache_mainpipe_s1_protection", "pbmt_uncache_suppresses_refill")
     assert not env.monitor.get_errors()
-
-
-@pytest.mark.parametrize(
-    ("bin_id", "bin_name"),
-    [
-        ("BIN-641", "meta_code_mismatch_single_way"),
-        ("BIN-770", "meta_multiway_hit"),
-        ("BIN-771", "meta_code_mismatch_zero_way_ignored"),
-        ("BIN-772", "meta_invalid_line_masked"),
-        ("BIN-642", "data_ecc_selected_valid_sram_bank"),
-        ("BIN-773", "data_ecc_unselected_bank_ignored"),
-        ("BIN-774", "data_ecc_mshr_bypass_skips_sram_bank"),
-        ("BIN-775", "data_ecc_port_miss_ignored"),
-    ],
-)
-@pytest.mark.funcov_bins(
-    "BIN-641",
-    "BIN-642",
-    "BIN-770",
-    "BIN-771",
-    "BIN-772",
-    "BIN-773",
-    "BIN-774",
-    "BIN-775",
-)
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-@pytest.mark.xfail(
-    reason="current Python ICache environment has no Meta/DataArray ECC injection hooks",
-    strict=False,
-)
-def test_tc_icache_mainpipe_ecc_injection_required_dut(env, bin_id, bin_name) -> None:
-    del bin_id
-    pytest.xfail(
-        "current Python ICache environment has no Meta/DataArray ECC injection hooks"
-    )
-    _load_nops(env, _BASE, words=1024)
-    env.icache_agent.configure(hit_latency=1, miss_latency=16, miss_rate=1.0, seed=0x6641)
-    env.initialize(reset_vector=_BASE, bare_mode=True, reset_cycles=20)
-    env.monitor.clear()
-    env.monitor.set_expected_pc(_BASE)
-    _wait_hit(env, "icache_mainpipe_s2_ecc", bin_name)
