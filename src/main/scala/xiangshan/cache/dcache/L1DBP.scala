@@ -59,18 +59,23 @@ class L1DBP(implicit p: Parameters) extends DCacheModule {
     val update = Flipped(ValidIO(new L1DBPUpdate))
   })
 
+  val scWidth = 2
+  val scMax = (1 << scWidth) - 1
+  require(scWidth >= 2, "L1DBP saturating counter must be at least two bits")
+
   def scUpdate(state: UInt, accessed: Bool): UInt = {
-    val accessedUpdate = Mux(state === 3.U, 3.U, state + 1.U)
-    val notAccessedUpdate = Mux(state(1) === 0.U, 0.U, state - 1.U)
-    Mux(accessed, accessedUpdate, notAccessedUpdate)
+    require(state.getWidth == scWidth)
+    val accessedUpdate = Mux(state +& 2.U >= scMax.U, scMax.U, state +& 2.U)
+    val notAccessedUpdate = Mux(state <= 1.U, 0.U(scWidth.W), state - 1.U)
+    Mux(accessed, accessedUpdate, notAccessedUpdate)(scWidth - 1, 0)
   }
 
   val s1Upd = WireInit(0.U.asTypeOf(io.update))
   s1Upd.valid := RegNext(io.update.valid, false.B)
   s1Upd.bits := RegEnable(io.update.bits, io.update.valid)
 
-  val pcSCArray = RegInit(VecInit(Seq.fill(l1dbpPcPredictorEntries)(3.U(2.W))))
-  val pfSCArray = RegInit(VecInit(Seq.fill(2)(3.U(2.W))))
+  val pcSCArray = RegInit(VecInit(Seq.fill(l1dbpPcPredictorEntries)(2.U(scWidth.W))))
+  val pfSCArray = RegInit(VecInit(Seq.fill(2)(2.U(scWidth.W))))
   val forceDead = l1dbpParams.debugMode.B
   val enablePrefetchPrediction = l1dbpParams.enablePrefetchPrediction.B
 
@@ -115,7 +120,7 @@ class L1DBP(implicit p: Parameters) extends DCacheModule {
     val s1PfArrayRead = if (l1dbpParams.enablePrefetchPrediction) {
       pfSCArray(s1Query.bits.pfIdx)
     } else {
-      1.U(2.W)
+      1.U(scWidth.W)
     }
     val bypassByS1 = Mux(s1BypassEn, scUpdate(s1PfArrayRead, s1Upd.bits.accessed), s1PfArrayRead)
     val bypassByS0 = Mux(s0BypassEn, scUpdate(bypassByS1, io.update.bits.accessed), bypassByS1)
