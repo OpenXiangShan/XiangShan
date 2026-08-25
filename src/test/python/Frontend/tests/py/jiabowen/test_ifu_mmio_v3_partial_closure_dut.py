@@ -2,8 +2,69 @@ from __future__ import annotations
 
 import pytest
 
+from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from env.funcov.py.ifu.mmio_v3_funcov import MMIO_V3_CHECKED_EVENT_TYPE
 from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+
+
+def _two_rvi_cross_beat_payload() -> bytes:
+    payload = bytearray(int(uncache._CNOP).to_bytes(2, "little") * 3)
+    payload.extend(int(uncache._ADDI_X0_X0_0).to_bytes(4, "little") * 2)
+    payload.extend(int(uncache._CNOP).to_bytes(2, "little") * 128)
+    return bytes(payload)
+
+
+def _cross_page_payload(*, rvi_tail: bool) -> bytes:
+    payload = bytearray(
+        int(uncache._CNOP).to_bytes(2, "little")
+        * (uncache._SV39_PAGE_SIZE // 2 + 128)
+    )
+    if rvi_tail:
+        payload[
+            uncache._SV39_PAGE_SIZE - 2 : uncache._SV39_PAGE_SIZE + 2
+        ] = int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
+    return bytes(payload)
+
+
+def _branch_payload() -> bytes:
+    # beq x0, x0, +4 followed by a sequential RVI and RVC padding.
+    payload = bytearray(int(0x00000263).to_bytes(4, "little"))
+    payload.extend(int(uncache._ADDI_X0_X0_0).to_bytes(4, "little"))
+    payload.extend(int(uncache._CNOP).to_bytes(2, "little") * 128)
+    return bytes(payload)
+
+
+def _register_cross_8b_trace(env) -> list[dict[str, int | None]]:
+    trace: list[dict[str, int | None]] = []
+
+    def capture(cycle, active_env):
+        snapshot = owner_funcov._snapshot(
+            active_env.functional_coverage, active_env.dut
+        )
+        if not any(
+            snapshot[name] == 1
+            for name in ("tl_a_valid", "tl_d_valid", "instr_resp_valid", "resp_valid")
+        ):
+            return
+        trace.append(
+            {
+                "cycle": int(cycle),
+                "entry_state": snapshot["entry_state"],
+                "resending": snapshot["entry_resending"],
+                "req_addr": snapshot["entry_req_addr"],
+                "tl_a_valid": snapshot["tl_a_valid"],
+                "tl_a_ready": snapshot["tl_a_ready"],
+                "tl_d_valid": snapshot["tl_d_valid"],
+                "tl_d_data": snapshot["tl_d_data"],
+                "instr_resp_valid": snapshot["instr_resp_valid"],
+                "resp_valid": snapshot["resp_valid"],
+                "to_valid": snapshot["to_valid"],
+                "to_ready": snapshot["to_ready"],
+            }
+        )
+
+    env.register_cycle_observer(capture)
+    return trace
 
 
 @pytest.mark.funcov_bins("BIN-1012")
@@ -228,4 +289,279 @@ def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
     assert recorder.key_hit("ifu_mmio_backpressure", "reserved_slot_fire")
     env.backend_model.set_can_accept(1)
     env.step(32)
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1047", "BIN-1048")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_mmio_cross_8b_clean_resend_delivers_two_ordered_rvi(env):
+    cross_8b_trace = _register_cross_8b_trace(env)
+    payload = _two_rvi_cross_beat_payload()
+    env.memory.mmio_ranges.append(
+        (uncache._MMIO_BASE, uncache._MMIO_BASE + len(payload))
+    )
+    uncache.LoadProgramSequence(
+        image=uncache.ProgramImage(payload=payload, base_addr=uncache._MMIO_BASE),
+        step_cycles=0,
+    ).run(env)
+    uncache._initialize_mmio_fetch(env, reset_vector=uncache._CROSS_BEAT_PC)
+
+    assert uncache._wait_for_request_addr(env, uncache._MMIO_BASE)
+    assert uncache._wait_for_request_addr(env, uncache._MMIO_BASE + 8)
+    assert uncache._wait_for_observed_pc(env, uncache._CROSS_BEAT_PC, max_cycles=8000)
+    assert uncache._wait_for_observed_pc(
+        env, uncache._CROSS_BEAT_PC + 4, max_cycles=8000
+    )
+
+    observed = {
+        int(item.pc): item
+        for item in env.monitor.observations
+        if int(item.pc) in {uncache._CROSS_BEAT_PC, uncache._CROSS_BEAT_PC + 4}
+    }
+    assert int(observed[uncache._CROSS_BEAT_PC].instr) == uncache._ADDI_X0_X0_0
+    assert int(observed[uncache._CROSS_BEAT_PC + 4].instr) == uncache._ADDI_X0_X0_0
+    assert not bool(observed[uncache._CROSS_BEAT_PC].is_rvc)
+    assert not bool(observed[uncache._CROSS_BEAT_PC + 4].is_rvc)
+    assert env.functional_coverage.key_hit(
+        "ifu_mmio_owner_v3", "mmio_leaf_033"
+    ), "\n".join(str(item) for item in cross_8b_trace[-80:])
+    assert env.functional_coverage.key_hit(
+        "ifu_mmio_owner_v3", "mmio_leaf_032"
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1071", "BIN-1077", "BIN-1079")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_nc_cross_8b_clean_resend_delivers_two_ordered_rvi(env, tmp_path):
+    cross_8b_trace = _register_cross_8b_trace(env)
+    payload = _two_rvi_cross_beat_payload()
+    bin_path = tmp_path / "pbmt_nc_cross_8b_two_rvi.bin"
+    bin_path.write_bytes(payload)
+    _expected, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
+        env,
+        vaddr=uncache._NORMAL_BASE,
+        paddr=uncache._NORMAL_PHYS_BASE,
+        bin_path=bin_path,
+    )
+    start_pc = mapping.vaddr + 6
+    uncache._initialize_sv39_fetch(env, reset_vector=start_pc)
+    uncache._configure_exec_attrs_for_mapping(env, mapping)
+    uncache._force_redirect_to(env, start_pc)
+
+    assert uncache._wait_for_request_addr(env, mapping.paddr, max_cycles=6000)
+    assert uncache._wait_for_request_addr(env, mapping.paddr + 8, max_cycles=6000)
+    assert uncache._wait_for_observed_pc(env, start_pc, max_cycles=12000)
+    assert uncache._wait_for_observed_pc(env, start_pc + 4, max_cycles=12000)
+
+    observed = {
+        int(item.pc): item
+        for item in env.monitor.observations
+        if int(item.pc) in {start_pc, start_pc + 4}
+    }
+    assert int(observed[start_pc].instr) == uncache._ADDI_X0_X0_0
+    assert int(observed[start_pc + 4].instr) == uncache._ADDI_X0_X0_0
+    assert not bool(observed[start_pc].is_rvc)
+    assert not bool(observed[start_pc + 4].is_rvc)
+    assert env.functional_coverage.key_hit(
+        "ifu_nc_owner_v3", "nc_leaf_023"
+    ), "\n".join(str(item) for item in cross_8b_trace[-80:])
+    assert env.functional_coverage.key_hit(
+        "ifu_nc_owner_v3", "nc_leaf_025"
+    ), "\n".join(str(item) for item in cross_8b_trace[-80:])
+    assert env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_017")
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1080", "BIN-1081", "BIN-1083")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_nc_cross_page_clean_rvi_resumes_and_delivers_once(env, tmp_path):
+    payload = _cross_page_payload(rvi_tail=True)
+    bin_path = tmp_path / "pbmt_nc_cross_page_rvi.bin"
+    bin_path.write_bytes(payload)
+    _expected, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
+        env,
+        vaddr=uncache._NORMAL_BASE,
+        paddr_pages=(uncache._NORMAL_PHYS_BASE, uncache._NORMAL_ALT_PHYS_BASE),
+        bin_path=bin_path,
+    )
+    start_pc = mapping.vaddr + uncache._SV39_PAGE_SIZE - 2
+    first_beat = mapping.paddr_pages[0] + uncache._SV39_PAGE_SIZE - 8
+    second_page = mapping.paddr_pages[1]
+    uncache._initialize_sv39_fetch(env, reset_vector=start_pc)
+    uncache._configure_exec_attrs_16k(env, base_addr=0x80000000)
+    uncache._force_redirect_to(env, start_pc)
+
+    assert uncache._wait_for_request_addr(env, first_beat, max_cycles=6000)
+    assert uncache._wait_for_request_addr(env, second_page, max_cycles=6000)
+    assert uncache._wait_for_observed_pc(env, start_pc, max_cycles=12000)
+
+    deliveries = [item for item in env.monitor.observations if int(item.pc) == start_pc]
+    assert len(deliveries) == 1
+    assert int(deliveries[0].instr) == uncache._ADDI_X0_X0_0
+    assert not bool(deliveries[0].is_rvc)
+    for leaf in (26, 27, 29):
+        assert env.functional_coverage.key_hit(
+            "ifu_nc_owner_v3", f"nc_leaf_{leaf:03d}"
+        )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1082")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_nc_page_tail_rvc_delivers_without_half_instruction_resend(env, tmp_path):
+    payload = _cross_page_payload(rvi_tail=False)[: uncache._SV39_PAGE_SIZE]
+    bin_path = tmp_path / "pbmt_nc_page_tail_rvc.bin"
+    bin_path.write_bytes(payload)
+    _expected, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
+        env,
+        vaddr=uncache._NORMAL_BASE,
+        paddr=uncache._NORMAL_PHYS_BASE,
+        bin_path=bin_path,
+    )
+    start_pc = mapping.vaddr + uncache._SV39_PAGE_SIZE - 2
+    first_beat = mapping.paddr + uncache._SV39_PAGE_SIZE - 8
+    uncache._initialize_sv39_fetch(env, reset_vector=start_pc)
+    uncache._configure_exec_attrs_for_mapping(env, mapping)
+    uncache._force_redirect_to(env, start_pc)
+
+    assert uncache._wait_for_request_addr(env, first_beat, max_cycles=6000)
+    assert uncache._wait_for_observed_pc(env, start_pc, max_cycles=12000)
+
+    delivered = next(item for item in env.monitor.observations if int(item.pc) == start_pc)
+    assert bool(delivered.is_rvc)
+    assert env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_028")
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1049")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_mmio_branch_reuses_common_predecode(env):
+    payload = _branch_payload()
+    env.memory.mmio_ranges.append(
+        (uncache._MMIO_BASE, uncache._MMIO_BASE + len(payload))
+    )
+    uncache.LoadProgramSequence(
+        image=uncache.ProgramImage(payload=payload, base_addr=uncache._MMIO_BASE),
+        step_cycles=0,
+    ).run(env)
+    uncache._initialize_mmio_fetch(env)
+
+    assert uncache._wait_for_observed_pc(env, uncache._MMIO_BASE, max_cycles=8000)
+    assert env.functional_coverage.key_hit(
+        "ifu_mmio_owner_v3", "mmio_leaf_034"
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1075")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_nc_branch_reuses_common_predecode(env, tmp_path):
+    bin_path = tmp_path / "pbmt_nc_branch.bin"
+    bin_path.write_bytes(_branch_payload())
+    _expected, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
+        env,
+        vaddr=uncache._NORMAL_BASE,
+        paddr=uncache._NORMAL_PHYS_BASE,
+        bin_path=bin_path,
+    )
+    uncache._initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
+    uncache._configure_exec_attrs_for_mapping(env, mapping)
+    uncache._force_redirect_to(env, mapping.vaddr)
+
+    assert uncache._wait_for_observed_pc(env, mapping.vaddr, max_cycles=12000)
+    assert env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_021")
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1023", "BIN-1089", "BIN-1092")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_nc_page_tail_naturally_advances_to_pbmt_io(env):
+    nc_vaddr = uncache._NORMAL_BASE
+    io_vaddr = nc_vaddr + uncache._SV39_PAGE_SIZE
+    nc_paddr = uncache._NORMAL_PHYS_BASE
+    io_paddr = uncache._NORMAL_ALT_PHYS_BASE
+    payload = int(uncache._CNOP).to_bytes(2, "little") * (
+        uncache._SV39_PAGE_SIZE // 2
+    )
+    env.page_table.clear()
+    env.page_table.map_page(
+        nc_vaddr >> 12,
+        nc_paddr >> 12,
+        v=1,
+        r=1,
+        x=1,
+        pbmt=uncache._PBMT_NC,
+    )
+    env.page_table.map_page(
+        io_vaddr >> 12,
+        io_paddr >> 12,
+        v=1,
+        r=1,
+        x=1,
+        pbmt=uncache._PBMT_IO,
+    )
+    env.ptw_agent.configure(
+        mode="sv39", response_source="model", compare_drive_source="model"
+    )
+    for paddr in (nc_paddr, io_paddr):
+        uncache.LoadProgramSequence(
+            image=uncache.ProgramImage(payload=payload, base_addr=paddr),
+            step_cycles=0,
+        ).run(env)
+
+    start_pc = nc_vaddr + uncache._SV39_PAGE_SIZE - 2
+    uncache._initialize_sv39_fetch(env, reset_vector=start_pc)
+    uncache._configure_exec_attrs_16k(env, base_addr=0x80000000)
+    uncache._force_redirect_to(env, start_pc)
+
+    assert uncache._wait_for_request_addr(
+        env, nc_paddr + uncache._SV39_PAGE_SIZE - 8, max_cycles=12000
+    )
+    assert uncache._wait_for_observed_pc(env, start_pc, max_cycles=12000)
+    assert uncache._wait_for_request_addr(env, io_paddr, max_cycles=12000)
+    assert uncache._wait_for_observed_pc(env, io_vaddr, max_cycles=12000)
+
+    assert env.functional_coverage.key_hit(
+        "ifu_mmio_owner_v3", "mmio_leaf_008"
+    )
+    for leaf in (35, 38):
+        assert env.functional_coverage.key_hit(
+            "ifu_nc_owner_v3", f"nc_leaf_{leaf:03d}"
+        )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1063")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_nc_tl_a_stall_holds_and_releases_same_request(env, tmp_path):
+    bin_path = tmp_path / "pbmt_nc_tl_a_stall.bin"
+    bin_path.write_bytes(int(uncache._CNOP).to_bytes(2, "little") * 256)
+    _expected, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
+        env,
+        vaddr=uncache._NORMAL_BASE,
+        paddr=uncache._NORMAL_PHYS_BASE,
+        bin_path=bin_path,
+    )
+    uncache._initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
+    uncache._configure_exec_attrs_for_mapping(env, mapping)
+    env.uncache_agent.set_a_ready(0)
+    uncache._force_redirect_to(env, mapping.vaddr)
+
+    for _ in range(6000):
+        env.step(1)
+        if int(env.uncache_if.a_valid.value) == 1:
+            break
+    assert int(env.uncache_if.a_valid.value) == 1
+    assert int(env.uncache_if.a_ready.value) == 0
+    stalled_addr = int(env.uncache_if.a_bits_address.value)
+    req_count = int(env.uncache_agent.get_stats().get("req_count", 0))
+    env.step(8)
+    assert int(env.uncache_if.a_valid.value) == 1
+    assert int(env.uncache_if.a_bits_address.value) == stalled_addr
+    assert int(env.uncache_agent.get_stats().get("req_count", 0)) == req_count
+
+    env.uncache_agent.set_a_ready(None)
+    assert uncache._wait_for_request_addr(env, mapping.paddr, max_cycles=6000)
+    assert env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_009")
     assert not env.monitor.get_errors()
