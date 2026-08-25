@@ -63,6 +63,17 @@ def _make_recorder(tmp_path):
     return recorder, env, dut, memory
 
 
+def _mark_source_bin(recorder, bin_id, cycle):
+    definition = recorder.definition_by_bin_id[bin_id]
+    recorder.mark(
+        definition.coverage_group,
+        definition.bin_name,
+        cycle,
+        {"unit_source_bin_id": bin_id},
+        coverpoint=definition.coverpoint,
+    )
+
+
 def test_ifu_v3_owner_event_model_requires_checked_observations(tmp_path):
     recorder, _env, _dut, _memory = _make_recorder(tmp_path)
     first = OWNER_V3_BIN_SPECS[0]
@@ -102,6 +113,60 @@ def test_ifu_v3_owner_event_model_requires_checked_observations(tmp_path):
     assert any(
         item.get("event") == "ifu_v3_owner_leaf_rejected"
         for item in recorder.risk_observations
+    )
+
+
+def test_ifu_v3_owner_source_rules_require_the_complete_canonical_evidence(tmp_path):
+    recorder, _env, _dut, _memory = _make_recorder(tmp_path)
+
+    _mark_source_bin(recorder, "BIN-1055", 1)
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_005")
+
+    _mark_source_bin(recorder, "BIN-874", 2)
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_014")
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_063")
+
+    for cycle, bin_id in enumerate(("BIN-832", "BIN-886"), start=3):
+        _mark_source_bin(recorder, bin_id, cycle)
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_035")
+    _mark_source_bin(recorder, "BIN-898", 5)
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_035")
+
+    for cycle, bin_id in enumerate(("BIN-814", "BIN-815"), start=6):
+        _mark_source_bin(recorder, bin_id, cycle)
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_054")
+
+    for cycle, bin_id in enumerate(("BIN-807", "BIN-808", "BIN-828"), start=8):
+        _mark_source_bin(recorder, bin_id, cycle)
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_057")
+    _mark_source_bin(recorder, "BIN-866", 11)
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_057")
+
+    for cycle, bin_id in enumerate(("BIN-812", "BIN-814", "BIN-883"), start=12):
+        _mark_source_bin(recorder, bin_id, cycle)
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_058")
+    _mark_source_bin(recorder, "BIN-884", 15)
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_058")
+
+    for cycle, bin_id in enumerate(("BIN-432", "BIN-832", "BIN-886"), start=16):
+        _mark_source_bin(recorder, bin_id, cycle)
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_060")
+    _mark_source_bin(recorder, "BIN-897", 19)
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_060")
+
+    exception_recorder, _env, _dut, _memory = _make_recorder(tmp_path / "exception")
+    _mark_source_bin(exception_recorder, "BIN-762", 20)
+    assert not exception_recorder.key_hit(
+        "ifu_v3_pipeline_owner_model", "owner_leaf_007"
+    )
+    _mark_source_bin(exception_recorder, "BIN-942", 21)
+    assert exception_recorder.key_hit(
+        "ifu_v3_pipeline_owner_model", "owner_leaf_007"
+    )
+
+    _mark_source_bin(exception_recorder, "BIN-636", 22)
+    assert exception_recorder.key_hit(
+        "ifu_v3_pipeline_owner_model", "owner_leaf_008"
     )
 
 
@@ -265,11 +330,114 @@ def test_ifu_predchecker_v3_registered_invalid_taken_survives_back_to_back_s2(tm
     assert recorder.key_hit("ifu_predchecker_v3_fault", "invalid_taken")
 
 
+def test_ifu_predchecker_v3_tracks_correct_jalr_forms_and_taken_offsets(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    cycle = 1
+    for ras_action in (0, 1, 2):
+        for is_rvc in (0, 1):
+            _set_predchecker_request(
+                dut,
+                [
+                    {
+                        "slot": 0,
+                        "branch_type": 3,
+                        "ras_action": ras_action,
+                        "pred_taken": 1,
+                        "is_rvc": is_rvc,
+                        "end_offset": cycle - 1,
+                    }
+                ],
+            )
+            sample_cfvec_coverage(recorder, env, cycle)
+            cycle += 1
+
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_075")
+
+    for end_offset in range(16):
+        _set_predchecker_request(
+            dut,
+            [
+                {
+                    "slot": 0,
+                    "branch_type": 1,
+                    "pred_taken": 1,
+                    "end_offset": end_offset,
+                }
+            ],
+        )
+        sample_cfvec_coverage(recorder, env, cycle)
+        cycle += 1
+
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_076")
+
+
+def test_ifu_predchecker_v3_owner_priority_crosses_use_observed_slot_order(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    scenarios = (
+        (
+            [
+                {"slot": 0, "branch_type": 2},
+                {
+                    "slot": 1,
+                    "branch_type": 1,
+                    "pred_taken": 1,
+                    "end_offset": 15,
+                    "is_rvc": 0,
+                },
+            ],
+            ("owner_leaf_079", "owner_leaf_080"),
+        ),
+        (
+            [{"slot": 0, "branch_type": 2, "invalid_taken": 1}],
+            ("owner_leaf_081",),
+        ),
+        (
+            [
+                {"slot": 0, "branch_type": 3},
+                {"slot": 1, "branch_type": 2},
+            ],
+            ("owner_leaf_083",),
+        ),
+        (
+            [
+                {"slot": 0, "branch_type": 3},
+                {"slot": 1, "branch_type": 1, "pred_taken": 1},
+            ],
+            ("owner_leaf_085",),
+        ),
+        (
+            [{"slot": 0, "branch_type": 3, "invalid_taken": 1}],
+            ("owner_leaf_086",),
+        ),
+    )
+    for cycle, (entries, expected_bins) in enumerate(scenarios, start=1):
+        _set_predchecker_request(dut, entries)
+        sample_cfvec_coverage(recorder, env, cycle)
+        for bin_name in expected_bins:
+            assert recorder.key_hit("ifu_v3_boundary_owner_model", bin_name)
+
+
+def test_ifu_predchecker_v3_mixed_owner_leaf_requires_all_categories(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_predchecker_request(
+        dut,
+        [
+            {"slot": 0, "branch_type": 0, "pred_taken": 0, "is_rvc": 1},
+            {"slot": 1, "branch_type": 1, "pred_taken": 1, "is_rvc": 0},
+        ],
+    )
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_056")
+
+
 def test_ifu_predchecker_v3_selects_first_fault_and_masks_younger_slots(tmp_path):
     recorder, env, dut, _memory = _make_recorder(tmp_path)
     _set_predchecker_request(
         dut,
         [
+            {"slot": 0, "branch_type": 0, "fixed_valid": 1},
             {"slot": 1, "branch_type": 2, "fixed_valid": 1},
             {"slot": 3, "branch_type": 3, "fixed_valid": 0},
         ],
@@ -279,6 +447,9 @@ def test_ifu_predchecker_v3_selects_first_fault_and_masks_younger_slots(tmp_path
 
     assert recorder.key_hit("ifu_predchecker_v3_range", "earliest_fault_selected")
     assert recorder.key_hit("ifu_predchecker_v3_range", "fault_inclusive_younger_masked")
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_039")
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_040")
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_096")
 
 
 def test_ifu_predchecker_v3_redirect_target_and_metadata_follow_fault_kind(tmp_path):
@@ -497,6 +668,31 @@ def test_ifu_instr_boundary_tail_half_is_sampled_on_cacheable_s1_fire(tmp_path):
     assert recorder.key_hit("ifu_instr_boundary_v3", "tail_half_state")
 
 
+def test_ifu_pred_taken_indices_match_compacted_first_and_second_blocks(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    for name, value in {
+        "s1_valid": 1,
+        "s1_totalRawInstrValid": 0b1011,
+        "s1_firstRange": 0b0011,
+        "s1_mergedPredTakenMask": 0b0010,
+        "s1_fetchBlock_0_valid": 1,
+        "s1_fetchBlock_1_valid": 1,
+        "s1_fetchBlock_0_takenCfiOffset_valid": 1,
+        "s1_fetchBlock_1_takenCfiOffset_valid": 0,
+        "s1_firstEndIsHalfRvi": 0,
+        "s1_totalEndIsHalfRvi": 0,
+    }.items():
+        dut.set(_PREFIX + name, value)
+    sample_cfvec_coverage(recorder, env, 1)
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_018")
+
+    dut.set(_PREFIX + "s1_mergedPredTakenMask", 0b0100)
+    dut.set(_PREFIX + "s1_fetchBlock_0_takenCfiOffset_valid", 0)
+    dut.set(_PREFIX + "s1_fetchBlock_1_takenCfiOffset_valid", 1)
+    sample_cfvec_coverage(recorder, env, 2)
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_020")
+
+
 def test_ifu_instr_boundary_cross_block_rvi_checks_data_and_pc(tmp_path):
     recorder, env, dut, memory = _make_recorder(tmp_path)
     pc = 0x8000003E
@@ -696,6 +892,105 @@ def test_ifu_backpressure_release_and_writeback_match_enqueue(tmp_path):
     assert recorder.key_hit("ifu_writeback", "instr_count_matches_enq")
 
 
+def test_ifu_backpressure_redirect_discards_held_payload(tmp_path):
+    recorder, env, dut, memory = _make_recorder(tmp_path)
+    base = 0x80000000
+    memory.write32(base, 0x00000013)
+    _set_ifu_output(dut, [(0, base, 0x00000013, 0, 1, 0, 3, 0)])
+    dut.set(_PREFIX + "io_toIBuffer_ready", 0)
+    sample_cfvec_coverage(recorder, env, 1)
+
+    dut.set(_PREFIX + "wbRedirect_valid", 1)
+    dut.set(_PREFIX + "io_toIBuffer_valid", 0)
+    sample_cfvec_coverage(recorder, env, 2)
+
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_045")
+
+
+def test_ifu_backend_redirect_clears_live_half_state_and_pointer(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    for name, value in {
+        "io_fromFtq_redirect_valid": 0,
+        "wbRedirect_valid": 0,
+        "io_toFtq_wbRedirect_valid": 0,
+        "s0_flush": 0,
+        "s1_flush": 0,
+        "s2_flush": 0,
+        "s0_prevEndIsHalfRvi": 1,
+        "s1_prevEndHalfRviData": 0xABCD,
+        "s1_prevEndHalfRviPc_addr": 0x4000001F,
+        "s1_prevIBufEnqPtr_value": 7,
+        "s1_valid": 1,
+        "s2_valid_valid": 1,
+    }.items():
+        dut.set(_PREFIX + name, value)
+    sample_cfvec_coverage(recorder, env, 1)
+
+    for name in ("io_fromFtq_redirect_valid", "s0_flush", "s1_flush", "s2_flush"):
+        dut.set(_PREFIX + name, 1)
+    sample_cfvec_coverage(recorder, env, 2)
+
+    for name in (
+        "io_fromFtq_redirect_valid",
+        "s0_flush",
+        "s1_flush",
+        "s2_flush",
+        "s0_prevEndIsHalfRvi",
+        "s1_prevEndHalfRviData",
+        "s1_prevEndHalfRviPc_addr",
+        "s1_prevIBufEnqPtr_value",
+        "s1_valid",
+        "s2_valid_valid",
+    ):
+        dut.set(_PREFIX + name, 0)
+    sample_cfvec_coverage(recorder, env, 3)
+
+    for bin_id in ("BIN-920", "BIN-923", "BIN-960"):
+        spec = recorder.definition_by_bin_id[bin_id]
+        assert recorder.key_hit(spec.coverage_group, spec.bin_name)
+
+
+def test_ifu_redirect_priority_and_wb_cleanup_use_observed_dut_signals(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    for name, value in {
+        "io_fromFtq_redirect_valid": 0,
+        "wbRedirect_valid": 0,
+        "io_toFtq_wbRedirect_valid": 0,
+        "s0_flush": 0,
+        "s1_flush": 0,
+        "s2_flush": 0,
+        "s0_prevEndIsHalfRvi": 0,
+        "s1_prevEndHalfRviData": 0,
+        "s1_prevEndHalfRviPc_addr": 0,
+        "s1_prevIBufEnqPtr_value": 0,
+        "s1_valid": 1,
+        "s2_valid_valid": 1,
+    }.items():
+        dut.set(_PREFIX + name, value)
+    sample_cfvec_coverage(recorder, env, 1)
+
+    dut.set(_PREFIX + "wbRedirect_valid", 1)
+    for name in ("s0_flush", "s1_flush", "s2_flush"):
+        dut.set(_PREFIX + name, 1)
+    sample_cfvec_coverage(recorder, env, 2)
+
+    dut.set(_PREFIX + "wbRedirect_valid", 0)
+    for name in ("s0_flush", "s1_flush", "s2_flush", "s1_valid", "s2_valid_valid"):
+        dut.set(_PREFIX + name, 0)
+    sample_cfvec_coverage(recorder, env, 3)
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_052")
+
+    dut.set(_PREFIX + "io_fromFtq_redirect_valid", 1)
+    dut.set(_PREFIX + "wbRedirect_valid", 1)
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_valid", 0)
+    for name in ("s0_flush", "s1_flush", "s2_flush"):
+        dut.set(_PREFIX + name, 1)
+    sample_cfvec_coverage(recorder, env, 4)
+
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_051")
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_097")
+
+
 def test_dual_source_writeback_requires_two_observable_fetch_blocks(tmp_path):
     recorder, env, dut, memory = _make_recorder(tmp_path)
     base = 0x80000000
@@ -725,7 +1020,7 @@ def test_dual_source_writeback_requires_two_observable_fetch_blocks(tmp_path):
     assert not recorder.key_hit("ifu_writeback", "dual_fetch_sources_match")
 
 
-def test_second_block_suppression_requires_preclip_second_source(tmp_path):
+def test_second_block_suppression_uses_post_range_output_checkpoint(tmp_path):
     recorder, env, dut, memory = _make_recorder(tmp_path)
     base = 0x80000000
     first_entries = [
@@ -743,7 +1038,7 @@ def test_second_block_suppression_requires_preclip_second_source(tmp_path):
     dut.set(_PREFIX + "s2_fetchBlock_1_valid", 1)
 
     sample_cfvec_coverage(recorder, env, 1)
-    assert not recorder.key_hit("ifu_data_slice", "second_block_suppressed")
+    assert recorder.key_hit("ifu_data_slice", "second_block_suppressed")
 
     suppressed_entry = (2, base + 0x40, 0x00000013, 0, 1, 0, 4, 0)
     _set_aligned_slot(dut, 2, suppressed_entry, block_sel=1, branch_type=0)
@@ -770,11 +1065,22 @@ def test_ifu_illegal_rvc_and_fetch_exception_priority_bins(tmp_path):
         [(0, base, 0x00000000, 1, 0, 0, 1, 1)],
         exception_type=1,
     )
+    priority_dut.set(_PREFIX + "s2_fetchBlock_1_valid", 1)
+    priority_dut.set(_PREFIX + "s2_alignedInstrVec_0_blockSel", 0)
 
     sample_cfvec_coverage(priority, priority_env, 1)
 
     assert priority.key_hit("ifu_rvc_exception", "fetch_exception_over_illegal_rvc")
+    assert priority.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
     assert not priority.key_hit("ifu_rvc_exception", "illegal_rvc")
+    for bin_name in (
+        "owner_leaf_012",
+        "owner_leaf_031",
+        "owner_leaf_044",
+    ):
+        assert priority.key_hit("ifu_v3_pipeline_owner_model", bin_name)
+    for bin_name in ("owner_leaf_064", "owner_leaf_072"):
+        assert priority.key_hit("ifu_v3_boundary_owner_model", bin_name)
 
 
 def test_invalid_taken_fetch_exception_cross_is_stimulus_coverage(tmp_path):
@@ -830,6 +1136,14 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "s1_reqIsUncache",
         _PREFIX + "s1_totalEndIsHalfRvi",
         _PREFIX + "s1_totalEndPos",
+        _PREFIX + "s1_totalRawInstrValid",
+        _PREFIX + "s1_firstRange",
+        _PREFIX + "s1_mergedPredTakenMask",
+        _PREFIX + "s1_fetchBlock_0_valid",
+        _PREFIX + "s1_fetchBlock_1_valid",
+        _PREFIX + "s1_fetchBlock_0_takenCfiOffset_valid",
+        _PREFIX + "s1_fetchBlock_1_takenCfiOffset_valid",
+        _PREFIX + "s1_firstEndIsHalfRvi",
         _PREFIX + "s2_prevIBufEnqPtr_value",
         _PREFIX + "s2_instrCount",
         _PREFIX + "s2_fire",
@@ -841,6 +1155,15 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "s2_fetchBlock_0_startVAddr_addr",
         _PREFIX + "wbRedirect_valid",
         _PREFIX + "uncacheRedirect_valid",
+        _PREFIX + "io_fromFtq_redirect_valid",
+        _PREFIX + "io_toFtq_wbRedirect_valid",
+        _PREFIX + "s0_flush",
+        _PREFIX + "s2_flush",
+        _PREFIX + "s0_prevEndIsHalfRvi",
+        _PREFIX + "s1_prevEndHalfRviData",
+        _PREFIX + "s1_prevEndHalfRviPc_addr",
+        _PREFIX + "s1_prevIBufEnqPtr_value",
+        _PREFIX + "s2_valid_valid",
         "Frontend_top.Frontend.inner_ifu.predChecker.invalidTakenNext",
     }
     assert required <= names
