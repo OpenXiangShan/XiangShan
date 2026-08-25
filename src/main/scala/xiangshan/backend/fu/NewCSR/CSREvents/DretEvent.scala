@@ -61,6 +61,8 @@ class DretEventModule(implicit p: Parameters) extends Module with CSREventBase {
 
   out.privState.bits.PRVM     := in.dcsr.PRV.asUInt
   out.privState.bits.V        := Mux(in.dcsr.PRV === PrivMode.M, VirtMode.Off.asUInt, in.dcsr.V.asUInt)
+  out.dcsr.bits.V             := in.dcsr.V
+  out.dcsr.bits.PRV           := in.dcsr.PRV
   out.mstatus.bits.MPRV       := Mux(!out.privState.bits.isModeM, 0.U, in.mstatus.MPRV.asUInt)
   out.mstatus.bits.MDT        := Mux(!out.privState.bits.isModeM, 0.U, in.mstatus.MDT.asBool)
   out.mstatus.bits.SDT        := Mux(out.privState.bits.isVirtual || out.privState.bits.isModeHU, 0.U, in.mstatus.SDT.asBool)

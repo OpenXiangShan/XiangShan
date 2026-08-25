@@ -69,7 +69,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     .setAddr(CSRs.scounteren)
 
   val senvcfg: CSRModule[SEnvCfg] = (if (HasShadowStack) {
-    Module(new CSRModule("Senvcfg", new SEnvCfg) with HasShadowStackEnvBundle {
+    Module(new CSRModule("Senvcfg", new SEnvCfg(HasZicfilp)) with HasShadowStackEnvBundle {
       // menvcfg.SSE=0 makes senvcfg.SSE read-only zero at every lower level.
       // In a virtual mode, henvcfg.SSE=0 imposes the same rule on the guest's
       // view of senvcfg.SSE. Keep the stored bit unchanged in those states so
@@ -81,7 +81,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
       }
     })
   } else {
-    Module(new CSRModule("Senvcfg", new SEnvCfg))
+    Module(new CSRModule("Senvcfg", new SEnvCfg(HasZicfilp)))
   }).setAddr(CSRs.senvcfg)
 
   val scountinhibit = Module(new CSRModule("Scountinhibit", new McountinhibitBundle) with HasMcounterenBundle {
@@ -236,7 +236,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   )
 }
 
-class SstatusBundle extends CSRBundle {
+class SstatusBundle(hasZicfilp: Boolean = false) extends CSRBundle {
   val SIE  = CSRWARLField   (1, wNoFilter).withDescription("Global interrupt enable for S-mode.")
   val SPIE = CSRWARLField   (5, wNoFilter).withDescription("Saved SIE value from before trap entry.")
   val UBE  = CSRROField     (6).withReset(0.U).withDescription("U-mode endianness selector.")
@@ -246,9 +246,14 @@ class SstatusBundle extends CSRBundle {
   val XS   = ContextStatusRO(16, 15).withReset(0.U).withDescription("Additional user extension state summary.")
   val SUM  = CSRWARLField   (18, wNoFilter).withReset(0.U).withDescription("Permit S-mode data accesses to pages marked as user.")
   val MXR  = CSRWARLField   (19, wNoFilter).withReset(0.U).withDescription("Make executable pages readable when set.")
+  val SPELP = CSRROField    (23).withReset(0.U).withDescription("Saved landing-pad state for traps into S-mode.")
   val SDT  = CSRWARLField   (24, wNoFilter).withReset(0.U).withDescription("S-mode disable-trap bit used by the Ssdbltrp extension.")
   val UXL  = XLENField      (33, 32).withReset(XLENField.XLEN64).withDescription("Effective XLEN for U-mode.")
   val SD   = CSRROField     (63, (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty).withDescription("Dirty summary bit for the floating-point or vector context.")
+
+  if (hasZicfilp) {
+    SPELP.setRW()
+  }
 }
 
 class SieBundle extends InterruptEnableBundle {
@@ -281,7 +286,11 @@ class ScontextBundle extends CSRBundle {
   val ALL = RW(31, 0).withReset(0.U).withDescription("Supervisor trigger context value.")
 }
 
-class SEnvCfg(implicit p: Parameters) extends EnvCfg
+class SEnvCfg(hasZicfilp: Boolean = false)(implicit p: Parameters) extends EnvCfg {
+  if (hasZicfilp) {
+    this.LPE.setRW()
+  }
+}
 
 class SipToMip extends IpValidBundle {
   this.SSIP.bits.setRW()

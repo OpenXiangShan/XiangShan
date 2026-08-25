@@ -54,6 +54,7 @@ case class XSCoreParameters
   ELEN: Int = 64,
   HSXLEN: Int = 64,
   HasShadowStack: Boolean = false,
+  HasZicfilp: Boolean = true, // Zicfilp
   HasMptCheck: Boolean = false, //enable mpt
   HasBitmapCheck: Boolean = true,
   HasMExtension: Boolean = true,
@@ -674,6 +675,8 @@ trait HasXSParameter {
   val fLen = 64
   def hartIdLen = p(MaxHartIdBits)
   val xLen = XLEN
+  // Zicfilp
+  def HasZicfilp = coreParams.HasZicfilp
   assert(!(HasMptCheck == true && HasBitmapCheck == true), "Conflicts: MPT and Bitmap can't be used together")
   def HasShadowStack = coreParams.HasShadowStack
   def HasMptCheck = coreParams.HasMptCheck && !coreParams.HasBitmapCheck

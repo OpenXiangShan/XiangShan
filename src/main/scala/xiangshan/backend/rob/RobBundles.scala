@@ -155,6 +155,9 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_vecWen     = OptionWrapper(backendParams.debugEn, Bool())
     val debug_v0Wen      = OptionWrapper(backendParams.debugEn, Bool())
     val debug_commitType = OptionWrapper(backendParams.debugEn, CommitType())
+    // Zicfilp
+    val ZicfilpJalr = OptionWrapper(HasZicfilp, Bool())
+    val ZicfilpLPAD = OptionWrapper(HasZicfilp, Bool())
     val topdownIssued    = OptionWrapper(backendParams.debugEn, Bool())
     val topdownCanceled  = OptionWrapper(backendParams.debugEn, Bool())
     val topdownRobHead   = OptionWrapper(backendParams.debugEn, Bool())
@@ -204,7 +207,9 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth / 2 + 1).W))
     // debug_end
-
+    // Zicfilp
+    val ZicfilpJalr = OptionWrapper(HasZicfilp, Bool())
+    val ZicfilpLPAD = OptionWrapper(HasZicfilp, Bool())
   }
 
   def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop)(implicit p: Parameters): Unit = {
@@ -257,6 +262,13 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.topdownCancelSource.foreach(_ := IQCancelSource.none)
     robEntry.topdownCancelTimeVec.foreach(_.foreach(_ := 0.U))
     robEntry.topdownCancelTimeFixVec.foreach(_.foreach(_ := 0.U))
+    // Zicfilp
+    robEntry.ZicfilpJalr.zip(robEnq.ZicfilpInfos).foreach { case (sink, source) =>
+      sink := source.ZicfilpJalr
+    }
+    robEntry.ZicfilpLPAD.zip(robEnq.ZicfilpLPAD).foreach { case (sink, source) =>
+      sink := source
+    }
   }
 
   def connectCommitEntry(
@@ -289,6 +301,13 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.basicDebug.foreach(_ := robEntry.basicDebug.get)
     robCommitEntry.debug_fuType.foreach(_ := robEntry.debug_fuType.get)
     robCommitEntry.debug_fusionNum.foreach(_ := robEntry.debug_fusionNum.get)
+    // Zicfilp
+    robCommitEntry.ZicfilpJalr.zip(robEntry.ZicfilpJalr).foreach { case (sink, source) =>
+      sink := source
+    }
+    robCommitEntry.ZicfilpLPAD.zip(robEntry.ZicfilpLPAD).foreach { case (sink, source) =>
+      sink := source
+    }
   }
 }
 

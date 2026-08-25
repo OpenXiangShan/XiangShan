@@ -7,7 +7,7 @@ import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.fu.{FuConfig, PipedFuncUnit}
 import xiangshan.frontend.{PcInit, PrunedAddrInit}
 import xiangshan.frontend.bpu.BranchAttribute.BranchType
-import xiangshan.{JumpOpType, Redirect, RedirectLevel}
+import xiangshan.{ExceptionNO, JumpOpType, Redirect, RedirectLevel}
 
 class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
   // associated with AddrData's position of NJmpCfg.srcData
@@ -15,6 +15,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   private val pc = io.instrAddrTransType.get.extend(io.in.bits.data.pc.get, cfg.destDataBits)
   private val imm = io.in.bits.data.imm
   private val func = io.in.bits.ctrl.fuOpType
+  private val isLPAD = io.in.bits.ctrl.ZicfilpInfos.map(_.ZicfilpLPADValid).getOrElse(false.B)
   // XSError(func =/= NewJumpOpType.j && func =/= NewJumpOpType.jr, p"func ${Binary(func)} is not new_jump type uop")
 
   // j:  pc       + imm -> pc
@@ -32,7 +33,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
 
   val redirect: Redirect = io.out.bits.res.redirect.get.bits
   val redirectValid: Bool = io.out.bits.res.redirect.get.valid
-  redirectValid := io.in.valid && (needRedirect || redirect.hasBackendFault)
+  redirectValid := io.in.valid && !isLPAD && (needRedirect || redirect.hasBackendFault)
   redirect := 0.U.asTypeOf(redirect)
   redirect.level := RedirectLevel.flushAfter
   redirect.robIdx := io.in.bits.ctrl.robIdx
@@ -47,12 +48,20 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   redirect.backendIPF := io.instrAddrTransType.get.checkPageFault(jumpTarget)
   redirect.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(jumpTarget)
   redirect.attribute := io.toFrontendBJUResolve.get.bits.attribute
+  redirect.ZicfilpJalr.foreach(_ := io.in.bits.ctrl.ZicfilpInfos.get.ZicfilpJalr)
   //  redirect.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id // Todo: assign it
+
+  if (HasZicfilp) {
+    // A zero LPAD label matches any x7 value.
+    val lpadLabel = imm(31, 12)
+    io.out.bits.ctrl.exceptionVec(ExceptionNO.softwareCheck) :=
+      isLPAD && lpadLabel.orR && src(31, 12) =/= lpadLabel
+  }
 
   io.in.ready := io.out.ready
   io.out.valid := io.in.valid
   io.out.bits.res.data := 0.U
-  io.toFrontendBJUResolve.get.valid := io.out.valid
+  io.toFrontendBJUResolve.get.valid := io.out.valid && !isLPAD
   io.toFrontendBJUResolve.get.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
   io.toFrontendBJUResolve.get.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
   io.toFrontendBJUResolve.get.bits.pc := PcInit(pc(VAddrBits - 1, 0))
