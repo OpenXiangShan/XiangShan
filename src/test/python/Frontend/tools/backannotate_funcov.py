@@ -1083,6 +1083,25 @@ def backannotate(
             {line for line, _message in structure_errors}
         )
 
+    # Artifact gates perform filesystem/hash checks, and the raw hit map can
+    # be several megabytes for a DUT trace.  Evaluate both once per artifact
+    # before walking the testpoint table; redoing this work for every leaf
+    # made multi-run union backannotation needlessly expensive.
+    artifact_cache = []
+    for path, raw, kind in artifacts:
+        artifact_cache.append(
+            {
+                "path": path,
+                "raw": raw,
+                "kind": kind,
+                "hits": _as_mapping(raw.get("hits")),
+                "tag": str(raw.get("artifact_tag") or path.stem),
+                "gate": evaluate_artifact(raw)
+                if kind in {"dut", "invalid"}
+                else {"eligible": False, "reasons": ["model_artifact"]},
+            }
+        )
+
     for row in rows:
         ref = parse_reference(row["coverage"])
         if ref is None:
@@ -1104,13 +1123,20 @@ def backannotate(
             continue
         if status in {"BLOCKED", "N-A"}:
             continue
+        # Backannotation is cumulative.  A later artifact set may be scoped
+        # to a subset of tests, so it must not downgrade an already accepted
+        # HIT that is absent from that subset.
+        existing_hit = status == "HIT"
 
         model_entries = []
         dut_entries = []
         rejected_entries = []
         dut_seen_for_testcase = False
-        for path, raw, kind in artifacts:
-            hits = _as_mapping(raw.get("hits"))
+        for artifact in artifact_cache:
+            path = artifact["path"]
+            raw = artifact["raw"]
+            kind = artifact["kind"]
+            hits = artifact["hits"]
             hit_count = sum(
                 _as_int(
                     _as_mapping(
@@ -1131,7 +1157,7 @@ def backannotate(
                 ),
                 default=0,
             )
-            tag = str(raw.get("artifact_tag") or path.stem)
+            tag = artifact["tag"]
             target_matches = _target_matches_reference(
                 raw,
                 tag,
@@ -1140,7 +1166,7 @@ def backannotate(
                 row["testcase"].strip(),
             )
             if kind in {"dut", "invalid"}:
-                gate = evaluate_artifact(raw)
+                gate = artifact["gate"]
                 if target_matches:
                     dut_seen_for_testcase = True
                 if target_matches and gate["eligible"] and hit_count > 0:
@@ -1163,6 +1189,9 @@ def backannotate(
             row["evidence"], [*model_entries, *dut_entries, *rejected_entries]
         )
         if dut_entries:
+            row["status"] = "HIT"
+            counts["hit"] += 1
+        elif existing_hit:
             row["status"] = "HIT"
             counts["hit"] += 1
         elif dut_seen_for_testcase:
