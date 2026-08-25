@@ -195,6 +195,11 @@ case class FuConfig (
   def isJmp: Boolean = fuType == FuType.jmp
 
   def isLink: Boolean = fuType == FuType.link
+  // Zicfilp
+  def effectiveExceptionOut(hasZicfilp: Boolean): Seq[Int] = {
+    val zicfilpExceptions = if (hasZicfilp && isJmp) Seq(softwareCheck) else Seq.empty
+    (exceptionOut ++ zicfilpExceptions).distinct.sorted
+  }
 
   def isFence: Boolean = fuType == FuType.fence
 
@@ -240,7 +245,7 @@ object FuConfig {
       Seq(IntData()), // jal -> Seq(ja, link)
     ),
     piped = true,
-    immType = Set(Imm_I(), Imm_J()),
+    immType = Set(Imm_I(), Imm_J(), Imm_U()),
   )
 
   val LinkCfg: FuConfig = FuConfig (

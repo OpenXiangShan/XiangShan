@@ -665,6 +665,7 @@ class MopCtrlBundle(implicit p: Parameters) extends XSBundle {
   val vtype            = VType()
   val oldVType         = VType()
   val rawInst          = UInt(32.W)
+  val ZicfilpPCAligned = Option.when(HasZicfilp)(Bool())
   val debug            = Option.when(backendParams.debugEn)(new DecodeInUopDebug())
 }
 
