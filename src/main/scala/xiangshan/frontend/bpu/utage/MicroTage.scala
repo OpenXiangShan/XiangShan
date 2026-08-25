@@ -272,10 +272,9 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
   private val t0_train                  = RegNext(io.fastTrain.get.bits, 0.U.asTypeOf(new FastTrain))
-  private val t0_fire = RegNext(
-    io.fastTrain.get.valid && (if (HasBpuFlush) !bpuFlushing else true.B),
-    false.B
-  )
+  // Keep the registered training valid low at all consumers for the complete flush window.
+  private val t0_fire = RegNext(io.fastTrain.get.valid, false.B) &&
+    (if (HasBpuFlush) !bpuFlushing else true.B)
   private val t0_trainMeta              = t0_train.utageMeta
   private val t0_abtbResult             = t0_trainMeta.abtbResult
   private val t0_trainRead              = VecInit(tables.map(_.train.t0_read))
@@ -335,7 +334,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     Mux(t0_misPredAbtbEntry.valid && t0_misPredAbtbEntry.hit, UIntToOH(t0_misPredAbtbEntry.tableId), 0.U)
   private val t0_trainIdx = t0_trainMeta.readIndex
 
-  private val t1_fire                   = RegNext(t0_fire, false.B)
+  // Keep every training fire low for the complete flush window (SPEC 05 §4.5).
+  private val t1_fire = RegNext(t0_fire, false.B) && (if (HasBpuFlush) !bpuFlushing else true.B)
   private val t1_foldedPathHistForTrain = RegEnable(t0_foldedPathHistForTrain, t0_fire)
   private val t1_trainRead              = RegEnable(t0_trainRead, t0_fire)
   private val t1_trainResult            = RegEnable(t0_trainResult, t0_fire)
@@ -419,7 +419,6 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
       highTickCounter := 0.U
     }
     when(bpuFlushing) {
-      t1_fire                   := false.B
       t1_foldedPathHistForTrain := 0.U.asTypeOf(t1_foldedPathHistForTrain)
       t1_trainRead              := 0.U.asTypeOf(t1_trainRead)
       t1_trainResult            := 0.U.asTypeOf(t1_trainResult)

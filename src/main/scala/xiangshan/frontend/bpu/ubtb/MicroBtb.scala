@@ -188,7 +188,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
    * - update entries
    * - update replacer
    */
-  t1_fire := RegNext(t0_fire, false.B)
+  t1_fire := RegNext(t0_fire, false.B) && (if (HasBpuFlush) !bpuFlushing else true.B)
   t1_tag  := RegEnable(t0_tag, t0_fire)
   private val t1_actualTaken = RegEnable(t0_actualTaken, t0_fire)
   private val t1_position    = RegEnable(t0_position, t0_fire)

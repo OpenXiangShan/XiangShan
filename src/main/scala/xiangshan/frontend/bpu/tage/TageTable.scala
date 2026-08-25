@@ -38,9 +38,16 @@ class TageTable(
     val usefulResetInFlight: Bool = Output(Bool())
 
     val sramResetDone: Bool = Output(Bool())
+
+    val contextFlush:  Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
+    val bpuFlushing:   Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
+    val entryResetDone: Option[Bool] = Option.when(HasBpuFlush)(Output(Bool()))
   }
 
   val io: TageTableIO = IO(new TageTableIO)
+
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get else false.B
 
   println(f"TageTable[$tableIdx]:")
   println(f"  Size(set, bank, way): $NumSets * $NumBanks * $NumWays = ${info.Size}")
@@ -59,9 +66,16 @@ class TageTable(
         withClockGate = true,
         hasMbist = hasMbist,
         hasSramCtl = hasSramCtl,
-        suffix = Option("bpu_tage_entry")
+        suffix = Option("bpu_tage_entry"),
+        extraReset = HasBpuFlush
       )).suggestName(s"tage_entry_sram_bank${bankIdx}_way${wayIdx}")
     }
+
+  if (HasBpuFlush) {
+    entrySram.flatten.foreach { sram =>
+      sram.extra_reset.get := contextFlush
+    }
+  }
 
   // Folding multiple ways of an SRAM with too small a data width together results in better area efficiency.
   private val usefulCtrSram =
@@ -99,9 +113,14 @@ class TageTable(
         WriteBufferSize,
         numPorts = NumWays,
         hasCnt = true,
-        nameSuffix = s"tageTable${tableIdx}_${bankIdx}"
+        nameSuffix = s"tageTable${tableIdx}_${bankIdx}",
+        hasContextFlush = HasBpuFlush
       )).suggestName(s"tage_entry_write_buffer_bank${bankIdx}")
     }
+
+  if (HasBpuFlush) {
+    entryWriteBuffers.foreach(_.io.contextFlush.get := contextFlush)
+  }
 
   // use a write buffer to store a usefulCtr write request
   private val usefulCtrWriteBuffers =
@@ -110,9 +129,14 @@ class TageTable(
         new UsefulCtrSramWriteReq,
         entries = WriteBufferSize,
         pipe = true,
-        flow = true
+        flow = true,
+        hasFlush = HasBpuFlush
       )).suggestName(s"tage_useful_write_buffer_bank${bankIdx}_way${wayIdx}")
     }
+
+  if (HasBpuFlush) {
+    usefulCtrWriteBuffers.flatten.foreach(_.io.flush.get := contextFlush)
+  }
 
   // read sram
   entrySram.zip(usefulCtrSram).zipWithIndex.foreach { case ((entryBank, usefulBank), bankIdx) =>
@@ -142,7 +166,7 @@ class TageTable(
     buffer.io.write.zipWithIndex.foreach { case (bufferIn, wayIdx) =>
       val writeValid =
         writeReqValid && writeReq.bankMask(bankIdx) && writeReq.wayMask(wayIdx) && writeReq.writeEntryEn(wayIdx)
-      bufferIn.valid       := writeValid
+      bufferIn.valid       := (if (HasBpuFlush) writeValid && !bpuFlushing else writeValid)
       bufferIn.bits.setIdx := writeReq.setIdx
       bufferIn.bits.entry  := writeReq.entries(wayIdx)
     }
@@ -153,7 +177,7 @@ class TageTable(
     bankBuffer.zipWithIndex.foreach { case (wayBuffer, wayIdx) =>
       val writeValid =
         writeReqValid && writeReq.bankMask(bankIdx) && writeReq.wayMask(wayIdx) && writeReq.writeUsefulEn(wayIdx)
-      wayBuffer.io.enq.valid          := writeValid
+      wayBuffer.io.enq.valid          := (if (HasBpuFlush) writeValid && !bpuFlushing else writeValid)
       wayBuffer.io.enq.bits.setIdx    := writeReq.setIdx
       wayBuffer.io.enq.bits.usefulCtr := writeReq.usefulCtrs(wayIdx)
     }
@@ -219,6 +243,10 @@ class TageTable(
   io.sramResetDone := (
     entrySram.flatten.map(_.io.resetDone) ++ usefulCtrSram.flatten.map(_.io.resetDone)
   ).reduce(_ && _)
+
+  if (HasBpuFlush) {
+    io.entryResetDone.get := entrySram.flatten.map(_.io.resetDone).reduce(_ && _)
+  }
 
   XSPerfAccumulate("predict_read", io.readReq(0).valid)
   XSPerfAccumulate("train_read", io.readReq(1).valid)

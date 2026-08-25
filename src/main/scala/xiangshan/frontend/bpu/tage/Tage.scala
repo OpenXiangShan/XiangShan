@@ -20,7 +20,6 @@ import chisel3.util._
 import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
 import utility.ChiselDB
-import utility.DataHoldBypass
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.frontend.bpu.BasePredictor
@@ -43,8 +42,18 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   }
   val io: TageIO = IO(new TageIO)
 
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get else false.B
+
   /* *** submodules *** */
   private val tables = TableInfos.zipWithIndex.map { case (info, i) => Module(new TageTable(i, info)) }
+
+  if (HasBpuFlush) {
+    tables.foreach { table =>
+      table.io.contextFlush.get := contextFlush
+      table.io.bpuFlushing.get  := bpuFlushing
+    }
+  }
 
   // reset all usefulCtr when usefulResetCtr saturated
   private val usefulResetCtr      = RegInit(UsefulResetCounter.Zero)
@@ -55,9 +64,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   /* *** reset *** */
   io.sramResetDone := tables.map(_.io.sramResetDone).reduce(_ && _)
-  // context flush placeholder: real flush scheme comes later
   if (HasBpuFlush) {
-    io.resetDone.get := true.B
+    val allEntryResetDone = tables.map(_.io.entryResetDone.get).reduce(_ && _)
+    val allUsefulResetDone = !tables.map(_.io.usefulResetInFlight).reduce(_ || _)
+    val contextStorageDone = allEntryResetDone && allUsefulResetDone
+    io.resetDone.get := !bpuFlushing || (!contextFlush && contextStorageDone)
   }
 
   /* --------------------------------------------------------------------------------------------------------------
@@ -67,6 +78,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   private val s0_fire    = io.stageCtrl.s0_fire && io.enable
   private val s0_startPc = io.startPc
+  private val s0_sramReadValid = s0_fire && (if (HasBpuFlush) !bpuFlushing else true.B)
 
   private val s0_foldedHist = getFoldedHist(io.fromPhr.foldedPathHist)
   private val s0_setIdx = VecInit((tables zip s0_foldedHist).map { case (table, hist) =>
@@ -78,7 +90,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
-    table.io.readReq(0).valid         := s0_fire
+    table.io.readReq(0).valid         := s0_sramReadValid
     table.io.readReq(0).bits.setIdx   := s0_setIdx(tableIdx)
     table.io.readReq(0).bits.bankMask := s0_bankMask
   }
@@ -100,7 +112,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     })
   })
 
-  private val s1_readResp = DataHoldBypass(VecInit(tables.map(_.io.readResp(0))), RegNext(s0_fire))
+  private val s1_rawReadResp   = VecInit(tables.map(_.io.readResp(0)))
+  private val s1_readRespValid = RegNext(s0_sramReadValid, init = false.B)
+  private val s1_readRespHold  = RegEnable(s1_rawReadResp, s1_readRespValid)
+  private val s1_heldReadResp  = Mux(s1_readRespValid, s1_rawReadResp, s1_readRespHold)
+  private val s1_readResp =
+    if (HasBpuFlush) Mux(bpuFlushing, 0.U.asTypeOf(s1_heldReadResp), s1_heldReadResp) else s1_heldReadResp
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 2
@@ -112,6 +129,17 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s2_startPc  = RegEnable(s1_startPc, s1_fire)
   private val s2_tag      = RegEnable(s1_tag, s1_fire)
   private val s2_readResp = RegEnable(s1_readResp, s1_fire)
+
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      s1_startPc      := 0.U.asTypeOf(s1_startPc)
+      s1_foldedHist   := 0.U.asTypeOf(s1_foldedHist)
+      s1_readRespHold := 0.U.asTypeOf(s1_readRespHold)
+      s2_startPc      := 0.U.asTypeOf(s2_startPc)
+      s2_tag          := 0.U.asTypeOf(s2_tag)
+      s2_readResp     := 0.U.asTypeOf(s2_readResp)
+    }
+  }
 
   private val s2_branches = io.fromMainBtb.result
 
@@ -184,7 +212,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_condMask = VecInit(t0_branches.map(branch => branch.valid && branch.bits.attribute.isConditional))
   private val t0_hasCond  = t0_condMask.reduce(_ || _)
 
-  private val t0_fire = io.stageCtrl.t0_fire && t0_hasCond && io.enable
+  private val t0_fire = if (HasBpuFlush) {
+    io.stageCtrl.t0_fire && t0_hasCond && io.enable && !bpuFlushing
+  } else {
+    io.stageCtrl.t0_fire && t0_hasCond && io.enable
+  }
 
   private val (t0_mbtbHitMask, t0_basePred, t0_meta) = t0_branches.map { branch =>
     val mbtbMeta  = io.train.meta.mbtb.entries.flatten
@@ -265,7 +297,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      - compute temp tag
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t1_fire     = RegNext(t0_fire, init = false.B)
+  private val t1_fire = RegNext(t0_fire, init = false.B) && (if (HasBpuFlush) !bpuFlushing else true.B)
   private val t1_startPc  = RegEnable(t0_startPc, t0_fire)
   private val t1_branches = RegEnable(t0_branches, t0_fire)
 
@@ -289,7 +321,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     - generate train info for each branch
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t2_fire     = RegNext(t1_fire, init = false.B)
+  private val t2_fire = RegNext(t1_fire, init = false.B) && (if (HasBpuFlush) !bpuFlushing else true.B)
   private val t2_branches = RegEnable(t1_branches, t1_fire)
   private val t2_startPc  = RegEnable(t1_startPc, t1_fire)
   dontTouch(t2_startPc)
@@ -448,7 +480,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      - allocate a new entry when mispredict
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t3_fire                = RegNext(t2_fire, init = false.B)
+  private val t3_fire = RegNext(t2_fire, init = false.B) && (if (HasBpuFlush) !bpuFlushing else true.B)
   private val t3_branches            = RegEnable(t2_branches, t2_fire)
   private val t3_startPc             = RegEnable(t2_startPc, t2_fire)
   private val t3_setIdx              = RegEnable(t2_setIdx, t2_fire)
@@ -520,6 +552,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   }
 
   private val t3_usefulResetStart = t3_fire && usefulResetCtr.isSaturatePositive && !usefulResetInFlight
+  private val usefulResetStart = if (HasBpuFlush) {
+    contextFlush || (t3_usefulResetStart && !bpuFlushing)
+  } else {
+    t3_usefulResetStart
+  }
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
     implicit val info: TageTableInfo = TableInfos(tableIdx)
@@ -581,7 +618,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.io.writeReq.bits.usefulCtrs      := writeUsefulCtrs
     table.io.writeReq.bits.actualTakenMask := actualTakenMask
 
-    table.io.usefulResetStart := t3_usefulResetStart
+    table.io.usefulResetStart := usefulResetStart
   }
 
   when(t3_usefulResetStart) {
@@ -617,6 +654,45 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       }.elsewhen(decrease) {
         ctr.selfDecrease()
       }
+    }
+  }
+
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      t1_startPc      := 0.U.asTypeOf(t1_startPc)
+      t1_branches     := 0.U.asTypeOf(t1_branches)
+      t1_setIdx       := 0.U.asTypeOf(t1_setIdx)
+      t1_bankMask     := 0.U.asTypeOf(t1_bankMask)
+      t1_useMeta      := false.B
+      t1_meta         := 0.U.asTypeOf(t1_meta)
+      t1_basePred     := 0.U.asTypeOf(t1_basePred)
+      t1_mbtbHitMask  := 0.U.asTypeOf(t1_mbtbHitMask)
+      t1_foldedHist   := 0.U.asTypeOf(t1_foldedHist)
+
+      t2_branches     := 0.U.asTypeOf(t2_branches)
+      t2_startPc      := 0.U.asTypeOf(t2_startPc)
+      t2_setIdx       := 0.U.asTypeOf(t2_setIdx)
+      t2_bankMask     := 0.U.asTypeOf(t2_bankMask)
+      t2_rawTag       := 0.U.asTypeOf(t2_rawTag)
+      t2_readResp     := 0.U.asTypeOf(t2_readResp)
+      t2_useMeta      := false.B
+      t2_meta         := 0.U.asTypeOf(t2_meta)
+      t2_basePred     := 0.U.asTypeOf(t2_basePred)
+      t2_mbtbHitMask  := 0.U.asTypeOf(t2_mbtbHitMask)
+
+      t3_branches            := 0.U.asTypeOf(t3_branches)
+      t3_startPc             := 0.U.asTypeOf(t3_startPc)
+      t3_setIdx              := 0.U.asTypeOf(t3_setIdx)
+      t3_bankMask            := 0.U.asTypeOf(t3_bankMask)
+      t3_rawTag              := 0.U.asTypeOf(t3_rawTag)
+      t3_readResp            := 0.U.asTypeOf(t3_readResp)
+      t3_useMeta             := false.B
+      t3_mbtbHitMask         := 0.U.asTypeOf(t3_mbtbHitMask)
+      t3_cfiUseAltOnNaIdxVec := 0.U.asTypeOf(t3_cfiUseAltOnNaIdxVec)
+      t3_trainInfoVec        := 0.U.asTypeOf(t3_trainInfoVec)
+
+      usefulResetCtr.resetZero()
+      useAltOnNaVec.foreach(_.resetZero())
     }
   }
 

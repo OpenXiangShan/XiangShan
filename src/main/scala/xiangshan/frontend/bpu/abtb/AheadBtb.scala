@@ -330,7 +330,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
      - write a new entry or modify an existing entry if needed
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val t1_fire  = RegNext(t0_fire, init = false.B)
+  private val t1_fire = RegNext(t0_fire, init = false.B) && (if (HasBpuFlush) !bpuFlushing else true.B)
   private val t1_train = RegEnable(t0_train, t0_fire)
 
   private val t1_meta = t1_train.abtbMeta
@@ -400,7 +400,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   replacers.foreach(_.io.replaceSetIdx := t1_setIdx)
   private val victimWayIdx = replacers.map(_.io.victimWayIdx)
 
-  private val t2_fire              = RegNext(t1_fire, init = false.B)
+  private val t2_fire              = RegNext(t1_fire, init = false.B) && (if (HasBpuFlush) !bpuFlushing else true.B)
   private val t2_victimWayIdx      = RegNext(VecInit(victimWayIdx))
   private val t2_setIdx            = RegNext(t1_setIdx)
   private val t2_bankMask          = RegNext(t1_bankMask)

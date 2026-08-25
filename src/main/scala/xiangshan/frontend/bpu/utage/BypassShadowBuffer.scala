@@ -123,7 +123,10 @@ class BypassShadowBuffer(
   io.resp.readEntry := a1_bufferEntry.bits
 
   // Training logic - stage 0
-  private val t0_fire       = io.train.t0_trainIndex.valid
+  // Re-gate both local stages at the module boundary so the buffer does not rely
+  // solely on the top-level training-valid contract during a flush (SPEC 05 §4.5).
+  private val t0_fire = io.train.t0_trainIndex.valid &&
+    (if (HasBpuFlush) !bpuFlushing else true.B)
   private val t0_trainIndex = io.train.t0_trainIndex.bits
   private val t0_entryHit   = Wire(Vec(numEntry, Bool()))
   t0_entryHit := entries.map(e => (e.index === t0_trainIndex) && e.valid)
@@ -161,7 +164,8 @@ class BypassShadowBuffer(
   private val bypassHit       = Wire(Bool())
   private val bypassReadEntry = Wire(new MicroTageEntry)
 
-  private val t1_fire           = RegNext(t0_fire, false.B)
+  private val t1_fire = RegNext(t0_fire, false.B) &&
+    (if (HasBpuFlush) !bpuFlushing else true.B)
   private val t1_trainIndex     = RegNext(t0_trainIndex, 0.U(log2Ceil(MaxNumSets).W))
   private val t1_hasHit         = RegNext(Mux(needBypass, bypassHasHit, t0_hasHit), false.B)
   private val t1_microTageHit   = RegNext(Mux(needBypass, bypassHit, t0_microTageHit))
@@ -286,7 +290,6 @@ class BypassShadowBuffer(
       a1_chosenFirstMask  := 0.U.asTypeOf(a1_chosenFirstMask)
       a1_firstHit         := 0.U.asTypeOf(a1_firstHit)
       a1_entryHit         := 0.U.asTypeOf(a1_entryHit)
-      t1_fire             := false.B
       t1_trainIndex       := 0.U.asTypeOf(t1_trainIndex)
       t1_hasHit           := false.B
       t1_microTageHit     := false.B
