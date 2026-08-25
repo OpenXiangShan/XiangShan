@@ -802,7 +802,7 @@ package object xiangshan {
       hardwareError,
       instrGuestPageFault
     )
-    def decodeSet = Seq(
+    private def baseDecodeSet: Seq[Int] = Seq(
       instrAccessFault,
       illegalInstr,
       breakPoint, // new
@@ -811,7 +811,14 @@ package object xiangshan {
       instrGuestPageFault,
       virtualInstr, // new
     )
-    def exceptionGenSet(params: BackendParams) = (params.exceptionOut ++ decodeSet).distinct.sorted
+    def decodeSet: Seq[Int] = baseDecodeSet
+    def decodeSet(hasZicfilp: Boolean): Seq[Int] = {
+      if (hasZicfilp) (baseDecodeSet :+ softwareCheck).distinct.sorted else baseDecodeSet
+    }
+    def exceptionGenSet(params: BackendParams): Seq[Int] = exceptionGenSet(params, false)
+    def exceptionGenSet(params: BackendParams, hasZicfilp: Boolean): Seq[Int] = {
+      (params.exceptionOut(hasZicfilp) ++ decodeSet(hasZicfilp)).distinct.sorted
+    }
   }
 
   object TopDownCounters extends Enumeration {

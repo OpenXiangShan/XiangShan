@@ -195,6 +195,8 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.bits.ctrl.vtype       .foreach(x => x := source.bits.ctrl.vtype.get)
       sink.bits.ctrl.frm         .foreach(x => x := source.bits.ctrl.frm.get)
       sink.bits.ctrl.oldVType    .foreach(x => x := source.bits.ctrl.oldVType.get)
+      // Zicfilp
+      sink.bits.ctrl.ZicfilpInfos.foreach(x => x := source.bits.ctrl.ZicfilpInfos.get)
       sink.bits.perfDebugInfo    .foreach(_ := source.bits.perfDebugInfo.get)
       sink.bits.debug_seqNum     .foreach(_ := source.bits.debug_seqNum.get)
   }
@@ -230,6 +232,8 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.vtype.foreach(x => x := source.ctrl.vtype.get)
       sink.oldVType.foreach(x => x := source.ctrl.oldVType.get)
       sink.frm.foreach(_ := source.ctrl.frm.get)
+      // Zicfilp
+      sink.ZicfilpInfos.foreach(x => x := source.ctrl.ZicfilpInfos.get)
       val sinkData = fu.io.in.bits.dataPipe.get(i)
       val sourceData = inPipe._1(i)
       sinkData.src.zip(sourceData.data.src).foreach { case (fuSrc, exuSrc) => fuSrc := exuSrc }

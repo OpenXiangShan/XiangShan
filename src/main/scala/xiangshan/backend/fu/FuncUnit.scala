@@ -72,6 +72,8 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val lastUop     = OptionWrapper(cfg.needVecCtrl, Bool())
   val vtype       = OptionWrapper(cfg.needVecCtrl, VType())
   val oldVType    = Option.when(cfg.writeVType)(VType())
+  // Zicfilp
+  val ZicfilpInfos = OptionWrapper(HasZicfilp && cfg.isJmp, new ZicfilpInfo)
 }
 
 class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
@@ -84,7 +86,7 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val vecWen        = OptionWrapper(cfg.needVecWen, Bool())
   val v0Wen         = OptionWrapper(cfg.needV0Wen, Bool())
   val vlWen         = OptionWrapper(cfg.needVlWen, Bool())
-  val exceptionVec  = ExceptSparseVec(cfg.exceptionOut)
+  val exceptionVec  = ExceptSparseVec(cfg.effectiveExceptionOut(HasZicfilp))
   val flushPipe     = OptionWrapper(cfg.flushPipe,  Bool())
   val satpFlush     = OptionWrapper(cfg.isCsr,      Bool())
   val replay        = OptionWrapper(cfg.replayInst, Bool())

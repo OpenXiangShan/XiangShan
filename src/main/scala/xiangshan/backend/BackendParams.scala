@@ -140,6 +140,7 @@ case class BackendParams(
   def numExu = allSchdParams.map(_.numExu).sum
 
   def numException(implicit p: Parameters) = getWrite2RobSize(_.needExceptionGen)
+  def numException(hasZicfilp: Boolean)(implicit p: Parameters) = getWrite2RobSize(_.needExceptionGen(hasZicfilp))
 
   def numRedirect = 1 // only for ahead info to frontend
 
@@ -528,6 +529,10 @@ case class BackendParams(
 
   def exceptionOut = allExuParams.flatMap(_.exceptionOut).distinct.sorted
   def getExceptionOutList = allRealExuParams.map(_.exceptionOut).filter(_.nonEmpty)
+  // Zicfilp
+  def exceptionOut(hasZicfilp: Boolean) = allExuParams.flatMap(_.effectiveExceptionOut(hasZicfilp)).distinct.sorted
+  def getExceptionOutList(hasZicfilp: Boolean) =
+    allRealExuParams.map(_.effectiveExceptionOut(hasZicfilp)).filter(_.nonEmpty)
 
   private def isContinuous(portIndices: Seq[Int]): Boolean = {
     val portIndicesSet = portIndices.toSet

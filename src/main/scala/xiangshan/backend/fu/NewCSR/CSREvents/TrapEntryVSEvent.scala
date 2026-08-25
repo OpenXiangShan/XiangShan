@@ -14,7 +14,7 @@ import xiangshan.AddrTransType
 
 class TrapEntryVSEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
 
-  val vsstatus = ValidIO((new SstatusBundle ).addInEvent(_.SPP, _.SPIE, _.SIE, _.SDT))
+  val vsstatus = ValidIO((new SstatusBundle ).addInEvent(_.SPP, _.SPIE, _.SIE, _.SDT, _.SPELP))
   val vsepc    = ValidIO((new Epc           ).addInEvent(_.epc))
   val vscause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
   val vstval   = ValidIO((new OneFieldBundle).addInEvent(_.ALL))
@@ -83,6 +83,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   private val isFetchMalAddrExcp = isException && isFetchMalAddr
   private val isIllegalInst  = isException && (EX_II.U === highPrioTrapNO || EX_VI.U === highPrioTrapNO)
   private val satpFlushFirstFetchFault = in.satpFlushFirstFetchFault
+  private val isZicfilp      = isException && EX_SWC.U === highPrioTrapNO
 
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
   // We fill pc here
@@ -99,6 +100,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
     tvalFillPcPlus2  -> (trapPC + 2.U),
     tvalFillMemVaddr -> trapMemVA,
     tvalFillInst     -> trapInst,
+    isZicfilp        -> 2.U,
   ))
 
   out := DontCare
@@ -116,6 +118,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   out.vsstatus.bits.SPIE         := current.vsstatus.SIE
   out.vsstatus.bits.SIE          := 0.U
   out.vsstatus.bits.SDT          := in.henvcfg.DTE.asBool // when DTE open set SDT to 1, else SDT is readonly 0
+  out.vsstatus.bits.SPELP        := current.ZicfilpELP.getOrElse(false.B)
   // SPVP is not PrivMode enum type, so asUInt and shrink the width
   out.vsepc.bits.epc             := Mux(satpFlushFirstFetchFault,
                                       trapPC(63, 1),

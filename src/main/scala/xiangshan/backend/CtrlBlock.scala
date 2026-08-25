@@ -127,6 +127,10 @@ class CtrlBlockImp(
   private val s1_robFlushRedirect = Wire(Valid(new Redirect))
   s1_robFlushRedirect.valid := GatedValidRegNext(s0_robFlushRedirect.valid, false.B)
   s1_robFlushRedirect.bits := RegEnable(s0_robFlushRedirect.bits, s0_robFlushRedirect.valid)
+  // Zicfilp: ROB redirects are traps, interrupts, replays, or flush-pipe events, not JALR/xRET redirects.
+  s1_robFlushRedirect.bits.ZicfilpJalr.foreach(_ := false.B)
+  s1_robFlushRedirect.bits.ZicfilpXRetValid.foreach(_ := false.B)
+  s1_robFlushRedirect.bits.ZicfilpRetELP.foreach(_ := false.B)
 
   println(s"[CtrlBlock] pcMem read port for \"robFlush\": ${pcMemRdIndexes("robFlush").head}.")
   pcMem.io.ren.get(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.valid
@@ -164,8 +168,9 @@ class CtrlBlockImp(
     x.valid := GatedValidRegNext(io.fromWB.wbData(i).valid)
     x.bits := delayedNotFlushedWriteBack(i).bits
   }
-  val delayedNotFlushedWriteBackNeedFlush = Wire(Vec(params.getWrite2RobSize(_.needExceptionGen), Bool()))
-  delayedNotFlushedWriteBackNeedFlush := delayedNotFlushedWriteBack.filter(_.bits.params.needExceptionGen).map{ x =>
+  // Match the ROB's exception writeback ports, including landing-pad checks.
+  val delayedNotFlushedWriteBackNeedFlush = Wire(Vec(params.getWrite2RobSize(_.needExceptionGen(HasZicfilp)), Bool()))
+  delayedNotFlushedWriteBackNeedFlush := delayedNotFlushedWriteBack.filter(_.bits.params.needExceptionGen(HasZicfilp)).map{ x =>
     x.bits.exceptionVec.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B) ||
       (if (x.bits.trigger.nonEmpty) TriggerAction.isDmode(x.bits.trigger.get) else false.B)
   }
@@ -230,6 +235,10 @@ class CtrlBlockImp(
   loadReplay.bits := RegEnable(memViolation.bits, memViolation.valid)
   loadReplay.bits.debugIsCtrl := false.B
   loadReplay.bits.debugIsMemVio := true.B
+  // Zicfilp: a memory replay does not change ELP by itself.
+  loadReplay.bits.ZicfilpJalr.foreach(_ := false.B)
+  loadReplay.bits.ZicfilpXRetValid.foreach(_ := false.B)
+  loadReplay.bits.ZicfilpRetELP.foreach(_ := false.B)
 
   println(s"[CtrlBlock] pcMem read port for \"redirect\": ${pcMemRdIndexes("redirect").head}.")
   pcMem.io.ren.get(pcMemRdIndexes("redirect").head) := memViolation.valid
@@ -441,6 +450,21 @@ class CtrlBlockImp(
     crc.bits.ftqPtr := RegEnable(blk.bits.ftqIdx.get, vld)
     crc.bits.rasAction := RegEnable(Itype.isPush(blk.bits.tracePipe.itype) ## Itype.isPop(blk.bits.tracePipe.itype), vld)
   }
+
+  // Zicfilp architectural ELP follows only instructions that actually commit.
+  val archZicfilp = Option.when(HasZicfilp)(Module(new ArchZicfilp))
+  archZicfilp.foreach { arch =>
+    for (i <- 0 until CommitWidth) {
+      arch.io.commitValid(i) := rob.io.commits.isCommit && rob.io.commits.commitValid(i)
+      arch.io.commitJalr(i) := rob.io.commits.info(i).ZicfilpJalr.get
+    }
+    arch.io.enable := io.fromCSR.toDecode.enableZicfilp.get
+    arch.io.trap := rob.io.exception.valid
+    arch.io.xret.valid := s1_s3_redirect.valid && s1_s3_redirect.bits.ZicfilpXRetValid.get
+    arch.io.xret.bits := s1_s3_redirect.bits.ZicfilpRetELP.get
+    io.toCSR.ZicfilpELP.get := arch.io.archELP
+  }
+
   // Be careful here:
   // T0: rob.io.flushOut, s0_robFlushRedirect
   // T1: s1_robFlushRedirect, rob.io.exception.valid
@@ -484,6 +508,22 @@ class CtrlBlockImp(
   io.frontend.toIBuf.walkVType := rob.io.toDecode.walkVType
   io.frontend.toIBuf.vsetvlVType := io.toDecode.vsetvlVType
   io.frontend.toIBuf.commitVType := rob.io.toDecode.commitVType
+
+  // Zicfilp
+  if (HasZicfilp) {
+    val decodeRedirectCandidates = Seq(s1_s3_redirect, s2_s4_redirect)
+    val decodeOldestRedirectOH = Redirect.selectOldestRedirect(decodeRedirectCandidates)
+    val decodeOldestRedirect = Mux1H(decodeOldestRedirectOH, decodeRedirectCandidates)
+    val decodeHasNewRedirect = decodeRedirectCandidates.map(_.valid).reduce(_ || _)
+    val enableZicfilp = io.fromCSR.toDecode.enableZicfilp.get
+
+    decode.in.ZicfilpRedirect.get.valid := decodeHasNewRedirect
+    decode.in.ZicfilpRedirect.get.bits := Mux(
+      decodeOldestRedirect.bits.ZicfilpXRetValid.get,
+      decodeOldestRedirect.bits.ZicfilpRetELP.get,
+      decodeOldestRedirect.bits.ZicfilpJalr.get && enableZicfilp
+    )
+  }
 
   // add decode Buf for in.ready better timing
   /**
@@ -997,6 +1037,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val toCSR = new Bundle {
     val trapInstInfo = Output(ValidIO(new TrapInstInfo))
+    // Zicfilp
+    val ZicfilpELP = OptionWrapper(HasZicfilp, Output(Bool()))
   }
   val fromWB = new Bundle {
     val wbData = Flipped(MixedVec(params.genWrite2RobBundles))

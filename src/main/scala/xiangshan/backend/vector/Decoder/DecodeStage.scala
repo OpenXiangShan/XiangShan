@@ -8,6 +8,8 @@ import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.isa.Extensions._
+import xiangshan.backend.decode.SpecZicfilp
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.RatReadPort
@@ -108,6 +110,7 @@ class DecodeStageImp(
         ctrl.vtype            := inMopBits.vtype
         ctrl.oldVType         := inMopBits.specvtype
         ctrl.rawInst          := inMopBits.instr
+        ctrl.ZicfilpPCAligned.foreach(_ := inMopBits.ZicfilpPCAligned.get)
         ctrl.debug.foreach(_  := inMopBits.debug.get)
     }
   }
@@ -115,6 +118,21 @@ class DecodeStageImp(
   in.mop.zipWithIndex.foreach {
     case (mop, i) =>
       mop.ready := decodeChannels.in.mops(i).ready
+  }
+
+  val specZicfilp = Option.when(HasZicfilp)(Module(new SpecZicfilp))
+  specZicfilp.foreach { spec =>
+    spec.io.enable := in.fromCSR.enableZicfilp.get
+    spec.io.redirect := in.ZicfilpRedirect.get
+    for (i <- out.uop.indices) {
+      val coUop = decodeChannels.out.uops(i)
+      // JALR now has link and jump uops. Advance ELP once per instruction,
+      // including when its uops straddle a decoder stall or buffer boundary.
+      spec.io.valid(i) := coUop.valid && coUop.bits.info.isFirstUop && !in.redirect.valid
+      spec.io.fire(i) := spec.io.valid(i) && out.uop(i).ready
+      spec.io.isJalr(i) := out.uop(i).bits.ZicfilpInfos.get.ZicfilpJalr
+      spec.io.isLPAD(i) := out.uop(i).bits.ZicfilpLPAD.get
+    }
   }
 
   out.uop.zipWithIndex.foreach { case (uop, i) =>
@@ -180,6 +198,26 @@ class DecodeStageImp(
         bits.isJ := uopInfo.isJ
         bits.isJr := uopInfo.isJr
         bits.numWB := uopInfo.numWb +& 1.U
+        if (HasZicfilp) {
+          val inst = mopInfo.rawInst
+          bits.ZicfilpInfos.get.ZicfilpJalr :=
+            inst(6, 0) === "b1100111".U && inst(14, 12) === 0.U &&
+            inst(19, 15) =/= 1.U && inst(19, 15) =/= 5.U && inst(19, 15) =/= 7.U
+          bits.ZicfilpLPAD.get :=
+            inst(6, 0) === "b0010111".U && inst(11, 7) === 0.U && mopInfo.ZicfilpPCAligned.get
+          val spec = specZicfilp.get
+          bits.ZicfilpInfos.get.ZicfilpLPADValid := spec.io.lpadValid(i)
+          bits.exceptionVec(softwareCheck) := spec.io.exception(i)
+          when(spec.io.lpadValid(i)) {
+            // AUIPC moved to LinkUnit, which has no register operand. Execute
+            // active LPADs on JumpUnit so the label can be checked against x7.
+            bits.fuType := FuType.jmp.U
+            bits.fuOpType := JumpOpType.j
+            bits.rfWen := false.B
+            bits.lsrc(0) := 7.U
+            bits.srcType(0) := SrcType.reg
+          }
+        }
         bits.latency := LatDecoder(bits.fuType, bits.fuOpType)
         bits.debug.foreach{ x =>
           x.pc := mopInfo.debug.get.pc
@@ -219,6 +257,7 @@ class DecodeStageImp(
 object DecodeStage {
   class In(implicit p: Parameters) extends XSBundle {
     val redirect = Input(ValidIO(new Redirect))
+    val ZicfilpRedirect = Option.when(HasZicfilp)(Input(ValidIO(Bool())))
 
     // The ready of mop means this mop is accepted by DecodeStage
     // Ready signal depends on valid
