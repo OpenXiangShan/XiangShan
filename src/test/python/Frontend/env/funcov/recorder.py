@@ -23,14 +23,18 @@ from . import (
     IFU_CFVEC_SAMPLER_BIN_KEYS,
     OWNER_V3_SAMPLER_BIN_KEYS,
     MMIO_V3_SAMPLER_BIN_KEYS,
+    MMIO_NC_OWNER_SAMPLER_BIN_KEYS,
     handle_mmio_v3_checked_event,
     handle_owner_v3_event,
     initialize_ifu_cacheable_pipeline_state,
     initialize_mmio_v3_coverage_state,
+    initialize_mmio_nc_owner_coverage_state,
     reset_ifu_cacheable_pipeline_state,
     reset_mmio_v3_coverage_state,
+    reset_mmio_nc_owner_coverage_state,
     sample_ifu_cacheable_pipeline_coverage,
     sample_mmio_v3_coverage,
+    sample_mmio_nc_owner_coverage,
     sample_cfvec_coverage,
 )
 from .py.ftq.sampler import (
@@ -39,6 +43,7 @@ from .py.ftq.sampler import (
     reset_ftq_coverage_state,
     sample_two_fetch_coverage,
 )
+from .py.ifu.owner_v3_funcov import derive_owner_v3_from_source
 from .py.icache import (
     ICACHE_MISSUNIT_SAMPLER_BIN_KEYS,
     ICACHE_MAINPIPE_SAMPLER_BIN_KEYS,
@@ -115,6 +120,7 @@ def funcov_sampler_paths() -> dict[str, Path]:
         "funcov/py/ifu/compact_funcov.py": root / "py" / "ifu" / "compact_funcov.py",
         "funcov/py/ifu/owner_v3_funcov.py": root / "py" / "ifu" / "owner_v3_funcov.py",
         "funcov/py/ifu/mmio_v3_funcov.py": root / "py" / "ifu" / "mmio_v3_funcov.py",
+        "funcov/py/ifu/mmio_nc_owner_funcov.py": root / "py" / "ifu" / "mmio_nc_owner_funcov.py",
         "funcov/py/ifu/cacheable_pipeline_funcov.py": root / "py" / "ifu" / "cacheable_pipeline_funcov.py",
     }
 
@@ -212,6 +218,7 @@ FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS = frozenset(
     | set(IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS)
     | set(OWNER_V3_SAMPLER_BIN_KEYS)
     | set(MMIO_V3_SAMPLER_BIN_KEYS)
+    | set(MMIO_NC_OWNER_SAMPLER_BIN_KEYS)
     | set(TWO_FETCH_SAMPLER_BIN_KEYS)
     | set(UNCACHE_EVENT_SAMPLER_BIN_KEYS)
     | set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)
@@ -332,6 +339,7 @@ class FunctionalCoverageRecorder:
         initialize_ftq_coverage_state(self)
         initialize_ifu_cacheable_pipeline_state(self)
         initialize_mmio_v3_coverage_state(self)
+        initialize_mmio_nc_owner_coverage_state(self)
         self._dut_signal_cache: Dict[str, Any] = {}
         self._missing_dut_signals: set[str] = set()
 
@@ -591,6 +599,13 @@ class FunctionalCoverageRecorder:
             hit.first_cycle = int(cycle)
         if evidence is not None and len(hit.evidence) < 8:
             hit.evidence.append(_sanitize(evidence))
+        definition = self.definition_by_key[key]
+        derive_owner_v3_from_source(
+            self,
+            definition.bin_id,
+            int(cycle),
+            evidence,
+        )
         return True
 
     def _coverage_key(
@@ -698,6 +713,7 @@ class FunctionalCoverageRecorder:
         reset_ftq_coverage_state(self)
         reset_ifu_cacheable_pipeline_state(self)
         reset_mmio_v3_coverage_state(self)
+        reset_mmio_nc_owner_coverage_state(self)
         reset_icache_mainpipe_coverage_state(self)
         reset_icache_prefetchpipe_coverage_state(self)
         reset_icache_missunit_coverage_state(self)
@@ -719,6 +735,7 @@ class FunctionalCoverageRecorder:
         sample_cfvec_coverage(self, env, cycle)
         sample_ifu_cacheable_pipeline_coverage(self, env, cycle)
         sample_mmio_v3_coverage(self, env, cycle)
+        sample_mmio_nc_owner_coverage(self, env, cycle)
         sample_icache_mainpipe_coverage(self, env, cycle)
         sample_icache_prefetchpipe_coverage(self, env, cycle)
         sample_icache_missunit_coverage(self, env, cycle)

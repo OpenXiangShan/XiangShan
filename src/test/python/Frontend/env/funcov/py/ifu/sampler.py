@@ -26,6 +26,14 @@ from .mmio_v3_funcov import (
     reset_mmio_v3_coverage_state,
     sample_mmio_v3_coverage,
 )
+from .mmio_nc_owner_funcov import (
+    MMIO_NC_OWNER_COVERPOINT,
+    MMIO_NC_OWNER_COVERPOINTS,
+    MMIO_NC_OWNER_SAMPLER_BIN_KEYS,
+    initialize_mmio_nc_owner_coverage_state,
+    reset_mmio_nc_owner_coverage_state,
+    sample_mmio_nc_owner_coverage,
+)
 from .cacheable_pipeline_funcov import (
     IFU_CACHEABLE_PIPELINE_COVERPOINTS,
     IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS,
@@ -41,6 +49,7 @@ IFU_COVERPOINTS = {
     **COMPACT_COVERPOINTS,
     **OWNER_V3_COVERPOINTS,
     **MMIO_V3_COVERPOINTS,
+    **MMIO_NC_OWNER_COVERPOINTS,
     **IFU_CACHEABLE_PIPELINE_COVERPOINTS,
 }
 
@@ -56,6 +65,9 @@ __all__ = [
     "MMIO_V3_CHECKED_EVENT_TYPE",
     "MMIO_V3_COVERPOINTS",
     "MMIO_V3_SAMPLER_BIN_KEYS",
+    "MMIO_NC_OWNER_COVERPOINT",
+    "MMIO_NC_OWNER_COVERPOINTS",
+    "MMIO_NC_OWNER_SAMPLER_BIN_KEYS",
     "IFU_CACHEABLE_PIPELINE_COVERPOINTS",
     "IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS",
     "IFU_COVERPOINTS",
@@ -71,6 +83,9 @@ __all__ = [
     "initialize_mmio_v3_coverage_state",
     "reset_mmio_v3_coverage_state",
     "sample_mmio_v3_coverage",
+    "initialize_mmio_nc_owner_coverage_state",
+    "reset_mmio_nc_owner_coverage_state",
+    "sample_mmio_nc_owner_coverage",
     "reset_ifu_cacheable_pipeline_state",
     "sample_ifu_cacheable_pipeline_coverage",
 ]
