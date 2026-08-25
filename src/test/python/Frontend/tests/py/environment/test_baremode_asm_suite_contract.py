@@ -60,7 +60,7 @@ def test_baremode_asm_suite_discovers_and_scopes_all_cases(tmp_path: Path) -> No
     }
 
     assert listed_cases == sorted(tracked_asm_cases)
-    assert len(listed_cases) == 19
+    assert len(listed_cases) == len(tracked_asm_cases)
     listed_stems = {Path(path).stem for path in listed_cases}
     assert listed_stems & active_testcases
     assert listed_stems - active_testcases
