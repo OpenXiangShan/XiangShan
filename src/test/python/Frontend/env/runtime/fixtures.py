@@ -11,7 +11,6 @@ from logging import getLogger
 from pathlib import Path
 
 import pytest
-from toffee_test.reporter import set_line_coverage
 
 from .pylib import frontend_pylib_path
 
@@ -504,6 +503,8 @@ def dut(request):
     except Exception:
         logger.exception("dut waveform flush failed")
     if _is_enabled("TB_ENABLE_TOFFEE_LINE_COVERAGE", default="1") and coverage.is_file():
+        from toffee_test.reporter import set_line_coverage
+
         ignore = _expanded_coverage_ignore_path()
         set_line_coverage(request, str(coverage), ignore=ignore)
     handler = getattr(dut, "_frontend_case_log_handler", None)

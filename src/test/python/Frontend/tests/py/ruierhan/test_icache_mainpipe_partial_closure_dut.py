@@ -11,9 +11,6 @@ from collections.abc import Callable
 
 import pytest
 
-from tests.py.jiabowen.test_functional_coverage_baremode import (
-    test_baremode_mmio_uncache_redirect_pilot as _run_mmio_uncache_redirect,
-)
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _BASE,
     _DUAL_BASE,
@@ -23,6 +20,12 @@ from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _register_mainpipe_observer,
 )
 from tests.py.zhaoxinran.test_instr_uncache_port_boundaries import (
+    test_uncache_sv39_cross_page_rvi_uses_second_page_pma_path
+    as _run_cross_page_pma_path,
+    test_uncache_sv39_pmp_execute_denied_reports_instruction_access_fault
+    as _run_pmp_execute_denied,
+    test_uncache_sv39_sector_lane_reuses_refill_on_adjacent_page
+    as _run_sector_lane_refill,
     test_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests
     as _run_pbmt_nc_redirect,
 )
@@ -72,6 +75,10 @@ def test_tc_icache_mainpipe_fault_refill_dut(env, fault) -> None:
 
     _wait_hit(env, "icache_mainpipe_s1_refill", "corrupt_refill_saved")
     _wait_hit(env, "icache_mainpipe_s1_protection", "tl_error_to_exception")
+    stats = env.icache_agent.get_stats()
+    assert int(stats["corrupt_resp_count"]) >= 1
+    if int(fault["denied"]):
+        assert int(stats["denied_resp_count"]) >= 1
     assert not env.monitor.get_errors()
 
 
@@ -108,11 +115,34 @@ def test_tc_icache_mainpipe_selective_refill_dut(env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-623")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_mainpipe_nonmatching_refill_dut(env) -> None:
+    _run_sector_lane_refill(env)
+    _wait_hit(
+        env,
+        "icache_mainpipe_s1_refill",
+        "nonmatching_refill_ignored",
+        max_cycles=1,
+    )
+    assert int(env.icache_agent.get_stats().get("resp_line_count", 0)) >= 1
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_bins("BIN-634")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_pmp_fault_dut(env) -> None:
-    _run_mmio_uncache_redirect(env)
+    _run_pmp_execute_denied(env)
     _wait_hit(env, "icache_mainpipe_s1_protection", "pmp_exception_suppresses_miss")
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-635")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_mainpipe_pma_mmio_suppress_dut(env) -> None:
+    _run_cross_page_pma_path(env)
+    _wait_hit(env, "icache_mainpipe_s1_protection", "pmp_mmio_suppresses_refill")
+    assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= 1
     assert not env.monitor.get_errors()
 
 

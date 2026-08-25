@@ -7,6 +7,10 @@ from collections.abc import Sequence
 
 import pytest
 
+from env.funcov.py.icache.flush_from_bpu import (
+    BpuS3Flush,
+    ftq_ptr_is_strictly_after_current,
+)
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _initialize_cacheable_stream,
 )
@@ -91,6 +95,16 @@ def _cycle_limit(name: str, default: int) -> int:
 
 
 def _try_read(env, names: Sequence[str]) -> int | None:
+    cache = getattr(env, "_ruierhan_internal_signal_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(env, "_ruierhan_internal_signal_cache", cache)
+    cache_key = tuple(str(name) for name in names)
+    if cache_key in cache:
+        signal = cache[cache_key]
+        value = None if signal is None else getattr(signal, "value", None)
+        return None if value is None else int(value)
+
     for name in names:
         try:
             signal = getattr(env.dut, str(name), None)
@@ -99,9 +113,11 @@ def _try_read(env, names: Sequence[str]) -> int | None:
                 signal = getter(str(name)) if callable(getter) else None
             value = None if signal is None else getattr(signal, "value", None)
             if value is not None:
+                cache[cache_key] = signal
                 return int(value)
         except Exception:
             continue
+    cache[cache_key] = None
     return None
 
 
@@ -140,6 +156,17 @@ def _s0_sampling_window(env) -> bool:
         and _read(env, "data_ready") == 1
         and _read(env, "s1_ready") == 1
     )
+
+
+def _bpu_is_after_s0(sample: dict) -> bool:
+    return ftq_ptr_is_strictly_after_current(
+        BpuS3Flush(
+            valid=sample["bpu_valid"],
+            flag=sample["bpu_flag"],
+            value=sample["bpu_value"],
+        ),
+        (sample["s0_ftq_flag"], sample["s0_ftq_value"]),
+    ) is True
 
 
 def _wait_for_s0_sampling_window(env, *, max_cycles: int) -> dict:
@@ -308,10 +335,23 @@ def _drive_bpu_s3_until_hit(env, bin_name: str, *, max_cycles: int) -> None:
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_s0_bpu_miss(env) -> None:
     _require_bpu_s3_ftq_observable(env)
+    samples: list[dict] = []
+    env.register_cycle_observer(lambda _cycle, active_env: samples.append(_snapshot(active_env)))
     _initialize_bpu_s3_stream(env)
     _drive_bpu_s3_until_hit(
         env,
         "bpu_miss_allows_entry",
         max_cycles=_cycle_limit("TB_ICACHE_S0_BPU_MISS_MAX_CYCLES", 512),
     )
+    assert any(
+        sample["ftq_valid"] == 1
+        and sample["from_valid"] == 1
+        and sample["data_ready"] == 1
+        and sample["s1_ready"] == 1
+        and sample["io_flush"] == 0
+        and sample["s0_flush"] == 0
+        and sample["s0_fire"] == 1
+        and _bpu_is_after_s0(sample)
+        for sample in samples
+    ), {"tail": samples[-64:]}
     assert not env.monitor.get_errors()

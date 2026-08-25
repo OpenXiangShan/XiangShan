@@ -7,6 +7,10 @@ from collections.abc import Callable, Sequence
 
 import pytest
 
+from env.funcov.py.icache.flush_from_bpu import (
+    BpuS3Flush,
+    ftq_ptr_is_strictly_after_current,
+)
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _initialize_cacheable_stream,
 )
@@ -68,6 +72,11 @@ _SIGNALS = {
     "miss_resp_denied": (_MAIN + "__Vtogcov__io_missResp_bits_denied",),
     "to_ifu_valid": _aliases(_MAIN + "io_toIfu_req_valid"),
     "to_ifu_ready": _aliases(_MAIN + "io_toIfu_req_ready"),
+    "s2_valid": (
+        _MAIN + "s2_valid",
+        _MAIN + "__Vtogcov__s2_valid",
+        "TOP." + _MAIN + "s2_valid",
+    ),
 }
 
 for _index in range(4):
@@ -92,6 +101,16 @@ def _cycle_limit(name: str, default: int) -> int:
 
 
 def _try_read(env, names: Sequence[str]) -> int | None:
+    cache = getattr(env, "_ruierhan_internal_signal_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(env, "_ruierhan_internal_signal_cache", cache)
+    cache_key = tuple(str(name) for name in names)
+    if cache_key in cache:
+        signal = cache[cache_key]
+        value = None if signal is None else getattr(signal, "value", None)
+        return None if value is None else int(value)
+
     for name in names:
         try:
             signal = getattr(env.dut, str(name), None)
@@ -100,9 +119,11 @@ def _try_read(env, names: Sequence[str]) -> int | None:
                 signal = getter(str(name)) if callable(getter) else None
             value = None if signal is None else getattr(signal, "value", None)
             if value is not None:
+                cache[cache_key] = signal
                 return int(value)
         except Exception:
             continue
+    cache[cache_key] = None
     return None
 
 
@@ -175,6 +196,36 @@ def _wait_hit(env, bin_name: str, *, max_cycles: int) -> None:
         max_cycles=max_cycles,
         label=f"{group}.{bin_name}",
     )
+
+
+def _wait_group_hit(env, group: str, bin_name: str, *, max_cycles: int) -> None:
+    _run_until(
+        env,
+        lambda: env.functional_coverage.key_hit(group, bin_name),
+        max_cycles=max_cycles,
+        label=f"{group}.{bin_name}",
+    )
+
+
+def _bpu_is_after_s1(sample: dict) -> bool:
+    return ftq_ptr_is_strictly_after_current(
+        BpuS3Flush(
+            valid=sample["bpu_valid"],
+            flag=sample["bpu_flag"],
+            value=sample["bpu_value"],
+        ),
+        (sample["s1_ftq0_flag"], sample["s1_ftq0_value"]),
+    ) is True
+
+
+def _pending_response(env, *, min_cycles: int = 0):
+    candidates = [
+        item
+        for item in getattr(env.icache_agent, "pending", ())
+        if int(getattr(item, "ready_cycle", -1))
+        >= int(env.current_cycle) + int(min_cycles)
+    ]
+    return min(candidates, key=lambda item: int(getattr(item, "ready_cycle"))) if candidates else None
 
 
 def _redirect_target(attempt: int) -> int:
@@ -342,12 +393,20 @@ def test_tc_icache_mainpipe_s1_global_flush_pending_miss(env) -> None:
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_s1_bpu_miss(env) -> None:
     _require_bpu_s3_ftq_observable(env)
+    samples = _register_s1_observer(env)
     _initialize_bpu_s3_stream(env)
     _drive_bpu_s3_until_s1_hit(
         env,
         "bpu_miss_keeps_s1",
         max_cycles=_cycle_limit("TB_ICACHE_S1_BPU_MISS_MAX_CYCLES", 512),
     )
+    assert any(
+        sample["s1_valid"] == 1
+        and sample["io_flush"] == 0
+        and sample["s1_flush"] == 0
+        and _bpu_is_after_s1(sample)
+        for sample in samples
+    ), {"tail": samples[-64:]}
     assert not env.monitor.get_errors()
 
 
@@ -362,6 +421,15 @@ def test_tc_icache_mainpipe_late_refill_after_flush(env) -> None:
         max_cycles=_cycle_limit("TB_ICACHE_S1_LATE_REFILL_PENDING_WAIT", 6000),
         label="s1 pending miss before refill",
     )
+    delayed = _pending_response(env, min_cycles=4)
+    assert delayed is not None, {
+        "reason": "no delayed ICache response is associated with the pending miss",
+        "pending": list(getattr(env.icache_agent, "pending", ())),
+    }
+    delayed_key = (
+        int(getattr(delayed, "source")),
+        int(getattr(delayed, "addr")),
+    )
     env.backend_model.inject_redirect(_REDIRECT_BASE, "ctrl_redirect", delay_cycles=0)
     _wait_hit(env, "global_flush_clears_s1_pending_miss", max_cycles=64)
     _wait_hit(
@@ -369,38 +437,51 @@ def test_tc_icache_mainpipe_late_refill_after_flush(env) -> None:
         "late_refill_ignored_after_flush",
         max_cycles=1,
     )
+    _run_until(
+        env,
+        lambda: any(
+            (int(record["source"]), int(record["address"])) == delayed_key
+            and int(record["beat_idx"]) == 1
+            for record in env.icache_agent.get_stats().get("response_records", [])
+        ),
+        max_cycles=_cycle_limit("TB_ICACHE_S1_LATE_RESPONSE_WAIT", 256),
+        label="late response after the old s1 context was flushed",
+    )
     assert not env.monitor.get_errors()
 
 
 @pytest.mark.funcov_bins("BIN-621")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-@pytest.mark.xfail(
-    reason="redirect/refill race can select a stale backend FTQ context in the current harness",
-    strict=False,
-)
 def test_tc_icache_mainpipe_flush_refill_race(env) -> None:
-    latency = 32
     samples = _register_s1_observer(env)
-    _initialize_cacheable_stream(env, _BASE, latency=latency, samples=samples)
+    _initialize_cacheable_stream(env, _BASE, latency=1, samples=samples)
 
-    _run_until(
-        env,
-        lambda: _pending_miss(_snapshot(env)) and _read(env, "last_fire") == 1,
-        max_cycles=_cycle_limit("TB_ICACHE_S1_REFILL_RACE_FIRE_WAIT", 6000),
-        label="issued s1 miss request before refill race",
-    )
-    env.backend_model.inject_redirect(
-        _REDIRECT_BASE,
-        "ctrl_redirect",
-        delay_cycles=_cycle_limit("TB_ICACHE_S1_REFILL_RACE_REDIRECT_DELAY", latency),
-    )
-    _wait_hit(
-        env,
-        "flush_wins_matching_refill",
-        max_cycles=_cycle_limit("TB_ICACHE_S1_REFILL_RACE_WAIT", latency + 256),
-    )
+    attempts = _cycle_limit("TB_ICACHE_S1_REFILL_RACE_ATTEMPTS", 64)
+    for attempt in range(attempts):
+        _run_until(
+            env,
+            lambda: _read(env, "s1_valid") == 1
+            and _read(env, "s1_fetch_finish") == 1
+            and _read(env, "s1_flush") == 0,
+            max_cycles=_cycle_limit("TB_ICACHE_S1_REFILL_RACE_FIRE_WAIT", 6000),
+            label="completed s1 response while one-cycle refills continue",
+        )
+        env.backend_model.inject_redirect(
+            _redirect_target(attempt),
+            "ctrl_redirect",
+            delay_cycles=0,
+        )
+        try:
+            _wait_hit(env, "flush_wins_matching_refill", max_cycles=32)
+            break
+        except AssertionError:
+            if attempt + 1 >= attempts:
+                raise
     assert any(
-        sample["s1_flush"] == 1 and _raw_refill_match(sample)
+        sample["s1_flush"] == 1
+        and _raw_refill_match(sample)
+        and sample["to_ifu_valid"] == 0
+        and sample["s1_fire"] == 0
         for sample in samples[-256:]
     ), {"tail": samples[-256:]}
     assert not env.monitor.get_errors()
@@ -438,3 +519,53 @@ def test_tc_icache_mainpipe_flush_registered_refill(env) -> None:
             assert not env.monitor.get_errors()
             return
     _wait_hit(env, "flush_cancels_registered_refill", max_cycles=1)
+
+
+@pytest.mark.funcov_bins("BIN-645")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_mainpipe_global_flush_clears_s2(env) -> None:
+    if not _can_read(env, "s2_valid"):
+        pytest.xfail(
+            "MainPipe s2_valid is not exported by the current Verilator build; "
+            "BIN-645 cannot be sampled without rebuilding the DUT with this signal"
+        )
+    samples = _register_s1_observer(env)
+    _initialize_cacheable_stream(env, _BASE, latency=1, samples=samples)
+
+    attempts = _cycle_limit("TB_ICACHE_S2_GLOBAL_FLUSH_ATTEMPTS", 64)
+    for attempt in range(attempts):
+        _run_until(
+            env,
+            lambda: _read(env, "s2_valid") == 1
+            and _read(env, "io_flush") == 0
+            and _read(env, "bpu_valid") == 0,
+            max_cycles=_cycle_limit("TB_ICACHE_S2_VALID_WAIT", 6000),
+            label="active s2 context without a BPU s3 flush",
+        )
+        env.backend_model.inject_redirect(
+            _redirect_target(attempt),
+            "ctrl_redirect",
+            delay_cycles=0,
+        )
+        try:
+            _wait_group_hit(
+                env,
+                "icache_mainpipe_s2_ecc",
+                "global_flush_clears_s2",
+                max_cycles=32,
+            )
+            break
+        except AssertionError:
+            if attempt + 1 >= attempts:
+                raise
+
+    env.step(1)
+    assert any(
+        current["s2_valid"] == 1
+        and current["io_flush"] == 1
+        and current["bpu_valid"] == 0
+        and current["s1_fire"] == 0
+        and following["s2_valid"] == 0
+        for current, following in zip(samples, samples[1:])
+    ), {"tail": samples[-64:]}
+    assert not env.monitor.get_errors()

@@ -21,6 +21,61 @@ from tests.py.jiabowen.test_two_fetch_directed_flow_dut import (
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 _NOP = 0x0000_0013
+_MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
+_ICACHE = "Frontend_top.Frontend.inner_icache."
+
+
+def _try_read_internal(env, names: tuple[str, ...]) -> int | None:
+    cache = getattr(env, "_ruierhan_internal_signal_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(env, "_ruierhan_internal_signal_cache", cache)
+    cache_key = tuple(str(name) for name in names)
+    if cache_key in cache:
+        signal = cache[cache_key]
+        value = None if signal is None else getattr(signal, "value", None)
+        return None if value is None else int(value)
+
+    for name in names:
+        try:
+            signal = getattr(env.dut, str(name), None)
+            if signal is None:
+                getter = getattr(env.dut, "GetInternalSignal", None)
+                signal = getter(str(name)) if callable(getter) else None
+            value = None if signal is None else getattr(signal, "value", None)
+            if value is not None:
+                cache[cache_key] = signal
+                return int(value)
+        except Exception:
+            continue
+    cache[cache_key] = None
+    return None
+
+
+def _miss_request_snapshot(env) -> dict[str, int | None]:
+    return {
+        "cycle": int(env.current_cycle),
+        "valid": _try_read_internal(
+            env, (_MAIN + "__Vtogcov__io_missReq_valid",)
+        ),
+        "ready": _try_read_internal(
+            env, (_MAIN + "__Vtogcov__io_missReq_ready",)
+        ),
+        "vset": _try_read_internal(
+            env,
+            (
+                _MAIN + "__Vtogcov__io_missReq_bits_vSetIdx",
+                _ICACHE + "_mainPipe_io_missReq_bits_vSetIdx",
+            ),
+        ),
+        "paddr": _try_read_internal(
+            env,
+            (
+                _MAIN + "__Vtogcov__io_missReq_bits_blkPAddr",
+                _ICACHE + "_mainPipe_io_missReq_bits_blkPAddr",
+            ),
+        ),
+    }
 
 
 def _load_nops(env, base: int, *, words: int = 512) -> None:
@@ -102,7 +157,6 @@ def lowrisk_cleanup(env):
         fencei.value = 0
 
 
-@pytest.mark.funcov_bins("BIN-605", "BIN-606", "BIN-617", "BIN-629")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_mainpipe_flush_refill(env) -> None:
     base = 0x8004_0000
@@ -123,6 +177,93 @@ def test_icache_lowrisk_mainpipe_flush_refill(env) -> None:
         label="redirect target delivery",
     )
     assert int(env.icache_agent.get_stats()["req_count"]) >= 2
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-629")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_mainpipe_missunit_backpressure(lowrisk_cleanup) -> None:
+    env = lowrisk_cleanup
+    if os.getenv("TB_ICACHE_FETCH_MSHR_PRESSURE_SUPPORTED") != "1":
+        pytest.xfail(
+            "the current top-level environment cannot keep PrefetchPipe from "
+            "allocating the cold line ahead of MainPipe; a supported prefetch "
+            "isolation control is required to fill all four Fetch MSHRs"
+        )
+    samples: list[dict[str, int | None]] = []
+    env.register_cycle_observer(
+        lambda _cycle, active_env: samples.append(
+            _miss_request_snapshot(active_env)
+        )
+    )
+    base = 0x800C_0000
+    redirect_stride = 0x1_0000
+    _load_nops(env, base, words=(6 * redirect_stride) // 4)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=16384,
+        miss_rate=1.0,
+        seed=0x6629,
+    )
+    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(base)
+
+    # Let PrefetchPipe occupy its ten MSHRs first.  A redirect to a distant
+    # cold address can then reach MainPipe without PrefetchPipe allocating the
+    # same line ahead of it.  Fetch MSHRs survive frontend redirects, so four
+    # such requests fill sources 0..3 and the fifth request is backpressured.
+    _run_until(
+        env,
+        lambda: int(env.icache_agent.get_stats()["pending"]) >= 10,
+        max_cycles=6000,
+        label="all ten prefetch MSHRs outstanding",
+    )
+    for index in range(4):
+        env.backend_model.inject_redirect(
+            base + (index + 1) * redirect_stride,
+            "ctrl_redirect",
+            delay_cycles=0,
+        )
+        _run_until(
+            env,
+            lambda expected=index + 1: len(
+                {
+                    int(record["source"])
+                    for record in env.icache_agent.get_stats()["request_records"]
+                    if int(record["source"]) < 4
+                }
+            )
+            >= expected,
+            max_cycles=6000,
+            label=f"demand miss {index + 1} allocated a fetch MSHR",
+        )
+    env.backend_model.inject_redirect(
+        base + 5 * redirect_stride,
+        "ctrl_redirect",
+        delay_cycles=0,
+    )
+    _wait_funcov_hit(
+        env,
+        "icache_mainpipe_s1_miss",
+        "missunit_backpressure_stable",
+        max_cycles=6000,
+        label="two-cycle stable MainPipe miss under MissUnit backpressure",
+    )
+    stats = env.icache_agent.get_stats()
+    assert int(stats["max_pending_depth"]) >= 14, stats
+    assert int(stats["pending"]) >= 14, stats
+    assert any(
+        previous["valid"] == 1
+        and previous["ready"] == 0
+        and current["valid"] == 1
+        and current["ready"] == 0
+        and previous["vset"] is not None
+        and previous["paddr"] is not None
+        and previous["vset"] == current["vset"]
+        and previous["paddr"] == current["paddr"]
+        for previous, current in zip(samples, samples[1:])
+    ), {"tail": samples[-32:]}
     assert not env.monitor.get_errors()
 
 
