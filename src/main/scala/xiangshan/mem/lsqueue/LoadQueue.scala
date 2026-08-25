@@ -289,6 +289,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    * LoadQueueReplay
    */
   loadQueueReplay.io.redirect         <> io.redirect
+  loadQueueReplay.io.robHeadPtr       := io.rob.pendingPtrNext
   loadQueueReplay.io.enq              <> io.ldu.ldin // from load_s3
   loadQueueReplay.io.replay           <> io.replay
   loadQueueReplay.io.loadWakeup       <> io.loadWakeup

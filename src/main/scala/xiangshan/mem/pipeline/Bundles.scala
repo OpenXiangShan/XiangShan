@@ -87,6 +87,7 @@ class LoadPipeBundle(
   val align = Option.when(param.hasUnalignHandling)(Bool())
   val unalignHead = Option.when(param.hasUnalignHandling)(Bool())
   val readWholeBank = Option.when(param.hasUnalignHandling)(Bool()) // TODO: remove this
+  val lrqAmbReplay = Option.when(param.hasUnalignHandling)(Bool())
 
   // MMU & exception handling
   val tlbAccessResult = Option.when(param.hasAddrTrans)(TlbAccessResult())
@@ -143,6 +144,8 @@ class LoadPipeBundle(
   val matchInvalid = Option.when(param.hasS3PreProcess)(Bool())
   val shouldWakeup = Option.when(param.hasS3PreProcess)(Bool())
   val shouldWriteback = Option.when(param.hasS3PreProcess)(Bool())
+  val sqSbufferForwarded = Option.when(param.hasS3PreProcess)(Bool())
+  val sqSbufferFullForwarded = Option.when(param.hasS3PreProcess)(Bool())
   // S3 -> S4
   val hasException = Option.when(param.hasS4PreProcess)(Bool())
   val headAlwaysWriteback = Option.when(param.hasS4PreProcess)(Bool())
@@ -172,6 +175,7 @@ class LoadPipeBundle(
     forwardDChannel.get := false.B
     uncacheReplay.get := false.B
     ncReplay.get := false.B
+    lrqAmbReplay.foreach(_ := false.B)
   }
   def DontCareVectorFields(): Unit = {
     elemIdx.get := 0.U

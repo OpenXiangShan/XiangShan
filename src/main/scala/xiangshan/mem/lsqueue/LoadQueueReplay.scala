@@ -22,6 +22,7 @@ import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
 import xiangshan.backend.Bundles.{DynInst, ExuOutput, MemExuOutput, IssueQueueLRQWakeUpBundle}
+import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.Bundles._
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
@@ -70,6 +71,27 @@ object LoadReplayCauses {
   val C_MF  = 12
   // total causes
   val allCauses = 13
+
+  private val perfCauseNameMap = Seq(
+    C_UNCACHE -> "uncache",
+    C_SMF -> "storeQueue_multi_match",
+    C_MA -> "mem_amb",
+    C_TM -> "tlb_miss",
+    C_FF -> "forward_fail",
+    C_DR -> "dcache_replay",
+    C_DM -> "dcache_miss",
+    C_WF -> "wpu_fail",
+    C_BC -> "bank_conflict",
+    C_RAR -> "rar_nack",
+    C_RAW -> "raw_nack",
+    C_NK -> "nuke",
+    C_MF -> "misalign_buffer_full"
+  )
+  require(perfCauseNameMap.map(_._1).distinct.size == allCauses)
+  require(perfCauseNameMap.map(_._1).sorted == (0 until allCauses))
+  require(perfCauseNameMap.map(_._2).distinct.size == allCauses)
+
+  val perfCauseNames: Seq[String] = perfCauseNameMap.sortBy(_._1).map(_._2)
 }
 
 class VecReplayInfo(implicit p: Parameters) extends XSBundle with HasVLSUParameters {
@@ -197,6 +219,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val io = IO(new Bundle() {
     // control
     val redirect = Flipped(ValidIO(new Redirect))
+    val robHeadPtr = Input(new RobPtr)
 
     // from load unit s3
     val enq = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle)))
@@ -271,6 +294,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val cause = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(LoadReplayCauses.allCauses.W))))
   val blocking = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
   val strict = RegInit(VecInit(List.fill(LoadQueueReplaySize)(false.B)))
+  // Saturating residence timer for each LRQ entry. It covers the whole lifetime from the
+  // first allocation to normal release; re-replay and cause updates do not restart it.
+  private val replayResidenceWidth = 16
+  val replayResidenceCycles = RegInit(VecInit(List.fill(LoadQueueReplaySize)(0.U(replayResidenceWidth.W))))
 
   // freeliset: store valid entries index.
   // +---+---+--------------+-----+-----+
@@ -670,7 +697,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
                     uop(s1_oldestSel(i).bits).robIdx.needFlush(RegNext(io.redirect))
     val s0_oldestSelIndexOH = s0_oldestSel(i).bits // one-hot
     val s0_oldestSelV = s0_oldestSel(i).valid
-    s1_oldestSel(i).valid := RegEnable(s0_oldestSelV, false.B, s0_can_go)
+    // A fired request must leave s1 even when cooldown prevents accepting another selection.
+    s1_oldestSel(i).valid := RegEnable(
+      Mux(s0_can_go, s0_oldestSelV, false.B),
+      false.B,
+      s0_can_go || replay_req(i).fire
+    )
     s1_oldestSel(i).bits := RegEnable(OHToUInt(s0_oldestSel(i).bits), s0_can_go)
     vaddrModule.io.ren(i) := s0_can_go && s0_oldestSelV
     vaddrModule.io.raddr(i) := OHToUInt(s0_oldestSel(i).bits)
@@ -952,7 +984,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val rob_head_confilct_replay = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_BC)
   val rob_head_forward_fail    = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_FF)
   val rob_head_mshrfull_replay = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_DR)
-  val rob_head_dcache_miss     = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_DM)
   val rob_head_rar_nack        = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_RAR)
   val rob_head_raw_nack        = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_RAW)
   val rob_head_other_replay    = lq_match && (rob_head_rar_nack || rob_head_raw_nack || rob_head_forward_fail)
@@ -969,6 +1000,128 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val perfValidCount = RegNext(PopCount(allocated))
 
   //  perf cnt
+  val normalRelease = VecInit(io.enq.zipWithIndex.map { case (enq, w) =>
+    val schedIndex = enq.bits.schedIndex
+    enq.fire && !cancelEnq(w) && enq.bits.isLoadReplay && !needReplay(w) && allocated(schedIndex)
+  })
+  // Entry-level release mask. Besides aggregating releases across load pipelines, it keeps
+  // the release cycle out of both the residence timer and the ROB-head occupancy count.
+  val normalReleaseOH = VecInit((0 until LoadQueueReplaySize).map { entryIdx =>
+    VecInit(io.enq.zip(normalRelease).map { case (enq, release) =>
+      release && enq.bits.schedIndex === entryIdx.U
+    }).asUInt.orR
+  })
+  val newAllocate = VecInit(newEnqueue.zip(io.enq).map { case (newEnq, enq) =>
+    newEnq && enq.fire
+  })
+  val newAllocateOH = VecInit((0 until LoadQueueReplaySize).map { entryIdx =>
+    VecInit(newAllocate.zip(enqIndexOH).map { case (allocate, indexOH) =>
+      allocate && indexOH(entryIdx)
+    }).asUInt.orR
+  })
+
+  val replayResidenceMax = ((1 << replayResidenceWidth) - 1).U(replayResidenceWidth.W)
+  // Reset only for a newly allocated entry. Redirect/cancel stops the timer without creating
+  // a latency sample, while a live entry saturates at replayResidenceMax instead of wrapping.
+  replayResidenceCycles.zipWithIndex.foreach { case (timer, entryIdx) =>
+    when (newAllocateOH(entryIdx)) {
+      timer := 0.U
+    }.elsewhen (allocated(entryIdx) && !normalReleaseOH(entryIdx) && !needCancel(entryIdx)) {
+      when (timer =/= replayResidenceMax) {
+        timer := timer + 1.U
+      }
+    }
+  }
+
+  val releaseTimers = VecInit(io.enq.map(enq => replayResidenceCycles(enq.bits.schedIndex)))
+  // The timer contains completed cycles before the current cycle, so add the normal-release
+  // cycle to obtain T_release - T_enq. If the timer already reached the maximum, the exact
+  // latency is larger than the representable value and this release sample is an overflow.
+  val releaseLatencies = VecInit(releaseTimers.map { timer =>
+    Mux(timer === replayResidenceMax, replayResidenceMax, timer + 1.U)
+  })
+  // Attribute each normal release to the entry's final one-hot cause. The per-cause reductions
+  // preserve multiple releases in the same cycle by summing across all load pipelines.
+  val releaseCauseEvents = (0 until LoadReplayCauses.allCauses).map { causeIdx =>
+    VecInit(io.enq.zipWithIndex.map { case (enq, w) =>
+      normalRelease(w) && cause(enq.bits.schedIndex)(causeIdx)
+    })
+  }
+  val releaseCauseCounts = releaseCauseEvents.map(PopCount(_))
+  val releaseCauseLatencies = releaseCauseEvents.map { events =>
+    events.zip(releaseLatencies).map { case (event, latency) =>
+      Mux(event, latency, 0.U(replayResidenceWidth.W))
+    }.reduce(_ +& _)
+  }
+  // Count released samples whose exact latency exceeded replayResidenceMax. This is a sample
+  // count, not the number of cycles beyond the representable range.
+  val releaseCauseOverflowCounts = releaseCauseEvents.map { events =>
+    PopCount(events.zip(releaseTimers).map { case (event, timer) =>
+      event && timer === replayResidenceMax
+    })
+  }
+
+  val scalarRobHeadRelease = VecInit(io.enq.zipWithIndex.map { case (enq, w) =>
+    val schedIndex = enq.bits.schedIndex
+    normalRelease(w) && !vecReplay(schedIndex).isvec && uop(schedIndex).robIdx === io.robHeadPtr
+  })
+  val robHeadReleaseCauseEvents = (0 until LoadReplayCauses.allCauses).map { causeIdx =>
+    VecInit(io.enq.zipWithIndex.map { case (enq, w) =>
+      val schedIndex = enq.bits.schedIndex
+      scalarRobHeadRelease(w) && cause(schedIndex)(causeIdx)
+    })
+  }
+  val robHeadReleaseCauseCounts = robHeadReleaseCauseEvents.map(PopCount(_))
+  // Count unreleased scalar ROB-head occupancy using the current cause. Cancel and normal-release
+  // cycles are excluded. The OR reduction limits each cause to at most one increment per cycle.
+  val scalarUnreleasedRobHeadEntries = VecInit((0 until LoadQueueReplaySize).map { entryIdx =>
+    allocated(entryIdx) &&
+      !vecReplay(entryIdx).isvec &&
+      uop(entryIdx).robIdx === io.robHeadPtr &&
+      !needCancel(entryIdx) &&
+      !normalReleaseOH(entryIdx)
+  })
+  val scalarUnreleasedRobHeadByCause = (0 until LoadReplayCauses.allCauses).map { causeIdx =>
+    VecInit((0 until LoadQueueReplaySize).map { entryIdx =>
+      scalarUnreleasedRobHeadEntries(entryIdx) && cause(entryIdx)(causeIdx)
+    }).asUInt.orR
+  }
+
+  io.enq.zipWithIndex.foreach { case (enq, w) =>
+    val schedIndex = enq.bits.schedIndex
+    when (normalRelease(w)) {
+      assert(PopCount(cause(schedIndex)) === 1.U, "released replay entry cause must be one-hot")
+    }
+  }
+  for (i <- 0 until LoadPipelineWidth; j <- i + 1 until LoadPipelineWidth) {
+    assert(!(normalRelease(i) && normalRelease(j) &&
+      io.enq(i).bits.schedIndex === io.enq(j).bits.schedIndex),
+      "a replay entry must not be released by multiple ports")
+  }
+  assert(robHeadReleaseCauseCounts.reduce(_ +& _) === PopCount(scalarRobHeadRelease),
+    "replay cause increments must equal scalar ROB-head releases")
+  XSError(releaseCauseCounts.reduce(_ +& _) =/= PopCount(normalRelease),
+    "release cause increments must equal normal replay releases\n")
+  XSError(PopCount(normalReleaseOH) =/= PopCount(normalRelease),
+    "normal release entry mask must preserve the release count\n")
+  XSError(releaseCauseOverflowCounts.reduce(_ +& _) > PopCount(normalRelease),
+    "overflow release samples must not exceed normal replay releases\n")
+
+  // event counters
+  LoadReplayCauses.perfCauseNames.zip(robHeadReleaseCauseCounts).foreach { case (causeName, count) =>
+    XSPerfAccumulate(s"replay_${causeName}_scalar_release_rob_head", count)
+  }
+
+  // slot counters
+  // Offline average residence latency is release_latency_cycles / release_count. Overflow count
+  // reports how many released samples exceeded the representable latency.
+  LoadReplayCauses.perfCauseNames.zipWithIndex.foreach { case (causeName, causeIdx) =>
+    XSPerfAccumulate(s"replay_${causeName}_release_latency_cycles", releaseCauseLatencies(causeIdx))
+    XSPerfAccumulate(s"replay_${causeName}_release_count", releaseCauseCounts(causeIdx))
+    XSPerfAccumulate(s"replay_${causeName}_release_latency_overflow_count", releaseCauseOverflowCounts(causeIdx))
+    XSPerfAccumulate(s"replay_${causeName}_scalar_rob_head_blocked_cycles", scalarUnreleasedRobHeadByCause(causeIdx))
+  }
+
   val enqNumber               = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay))
   val deqNumber               = PopCount(io.replay.map(_.fire))
   val deqBlockCount           = PopCount(io.replay.map(r => r.valid && !r.ready))
