@@ -41,6 +41,9 @@ class JumpDataModule(implicit p: Parameters) extends XSModule {
     val isRVC = Input(Bool())
     val result, target = Output(UInt(XLEN.W))
     val isAuipc = Output(Bool())
+    // Zicfilp
+    val ZicfilpLPAD = OptionWrapper(HasZicfilp, Input(Bool()))
+    val ZicfilpFineGrained = OptionWrapper(HasZicfilp, Output(Bool()))
   })
   val (src1, pc, imm, func, isRVC) = (io.src, io.pc, io.imm, io.func, io.isRVC)
 
@@ -50,6 +53,13 @@ class JumpDataModule(implicit p: Parameters) extends XSModule {
 
   val snpc = pc + io.nextPcOffset
   val target = Mux(JumpOpType.jumpOpisJalr(func), src1 + offset, pc + offset) // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
+
+  // Zicfilp fine-grained check: a zero LPAD label matches any x7 value.
+  io.ZicfilpFineGrained.zip(io.ZicfilpLPAD).foreach { case (fineGrained, lpadValid) =>
+    val lpadLabel = offset(31, 12)
+    val sourceLabel = src1(31, 12)
+    fineGrained := lpadValid && lpadLabel.orR && sourceLabel =/= lpadLabel
+  }
 
   // RISC-V spec for JALR:
   // The target address is obtained by adding the sign-extended 12-bit I-immediate to the register rs1,

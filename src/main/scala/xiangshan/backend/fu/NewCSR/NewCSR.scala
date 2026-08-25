@@ -98,6 +98,8 @@ class NewCSROutput(implicit p: Parameters) extends Bundle {
   val regOut = UInt(64.W)
   // perf
   val isPerfCnt = Bool()
+  // Zicfilp
+  val retELP = OptionWrapper(p(XSCoreParamsKey).HasZicfilp, Bool())
 }
 
 class NewCSR(implicit val p: Parameters) extends Module
@@ -133,6 +135,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     })
     val in = Flipped(DecoupledIO(new NewCSRInput))
     val trapInst = Input(ValidIO(UInt(InstWidth.W)))
+    // Zicfilp
+    val ZicfilpELP = OptionWrapper(HasZicfilp, Input(Bool()))
     val fromMem = Input(new Bundle {
       val excpVA  = UInt(XLEN.W)
       val excpGPA = UInt(XLEN.W)
@@ -851,6 +855,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
         in.iMode.PRVM := PRVM
         in.iMode.V := V
+        in.ZicfilpELP.foreach(_ := io.ZicfilpELP.getOrElse(false.B))
         // when NMIE is zero, force to behave as MPRV is zero
         in.dMode.PRVM := Mux(mstatus.regOut.MPRV.asBool && mnstatus.regOut.NMIE.asBool, mstatus.regOut.MPP, PRVM)
         in.dMode.V := V.asUInt.asBool || mstatus.regOut.MPRV && mnstatus.regOut.NMIE.asBool && (mstatus.regOut.MPP =/= PrivMode.M) && mstatus.regOut.MPV
@@ -1027,9 +1032,21 @@ class NewCSR(implicit val p: Parameters) extends Module
   // flush pipe when write xcontext.
   val writeContext = Cat(Seq(mcontext, hcontext, scontext).map(_.addr.U === addr)).orR && wenLegalReg
 
+  // Zicfilp: younger instructions may already have been decoded with the old xLPE value.
+  val zicfilpLPEChange = if (HasZicfilp) {
+    Seq(
+      mseccfg.w.wen && mseccfg.w.wdataFields.MLPE =/= mseccfg.regOut.MLPE,
+      menvcfg.w.wen && menvcfg.w.wdataFields.LPE =/= menvcfg.regOut.LPE,
+      henvcfg.w.wen && henvcfg.w.wdataFields.LPE =/= henvcfg.regOut.LPE,
+      senvcfg.w.wen && senvcfg.w.wdataFields.LPE =/= senvcfg.regOut.LPE,
+    ).reduce(_ || _)
+  } else {
+    false.B
+  }
+
   val flushPipe = resetSatp ||
     triggerFrontendChange || floatStatusOnOff || vectorStatusOnOff ||
-    vstartChange || frmChange || writeContext
+    vstartChange || frmChange || writeContext || zicfilpLPEChange
 
   /**
    * Look up id in vsMapS and sMapVS.
@@ -1144,6 +1161,23 @@ class NewCSR(implicit val p: Parameters) extends Module
     waitIMSICValid -> imsic_EX_VI,
   )), false.B, normalCSRValid || waitIMSICValid)
   io.out.bits.flushPipe := flushPipe
+  io.out.bits.retELP.foreach { out =>
+    def targetLPE(targetPrv: UInt, targetVirtual: Bool): Bool = MuxCase(false.B, Seq(
+      (targetPrv === PrivMode.M.asUInt) -> mseccfg.regOut.MLPE.asBool,
+      (targetPrv === PrivMode.S.asUInt && !targetVirtual) -> menvcfg.regOut.LPE.asBool,
+      (targetPrv === PrivMode.S.asUInt && targetVirtual) -> henvcfg.regOut.LPE.asBool,
+      (targetPrv === PrivMode.U.asUInt) -> senvcfg.regOut.LPE.asBool,
+    ))
+
+    val sretPELP = Mux(isModeVS, vsstatus.regOut.SPELP.asBool, mstatus.regOut.SPELP.asBool)
+    val restoredELP = MuxCase(false.B, Seq(
+      legalMNret -> (mnstatus.regOut.MNPELP.asBool && targetLPE(mnretEvent.out.privState.bits.PRVM.asUInt, mnretEvent.out.privState.bits.V.asBool)),
+      legalMret  -> (mstatus.regOut.MPELP.asBool && targetLPE(mretEvent.out.privState.bits.PRVM.asUInt, mretEvent.out.privState.bits.V.asBool)),
+      legalSret  -> (sretPELP && targetLPE(sretEvent.out.privState.bits.PRVM.asUInt, sretEvent.out.privState.bits.V.asBool)),
+      legalDret  -> (dcsr.regOut.PELP.asBool && targetLPE(dretEvent.out.privState.bits.PRVM.asUInt, dretEvent.out.privState.bits.V.asBool)),
+    ))
+    out := DataHoldBypass(restoredELP, false.B, normalCSRValid)
+  }
 
   /** Prepare read data for output */
   io.out.bits.rData := DataHoldBypass(
@@ -1552,6 +1586,16 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.tlb.pmm.henvcfg := RegNext(henvcfg.regOut.PMM.asUInt)
   io.tlb.pmm.hstatus := RegNext(hstatus.regOut.HUPMM.asUInt)
   io.tlb.pmm.senvcfg := RegNext(senvcfg.regOut.PMM.asUInt)
+
+  // Zicfilp
+  io.toDecode.enableZicfilp.foreach { enable =>
+    enable := MuxCase(false.B, Seq(
+      isModeM  -> mseccfg.regOut.MLPE.asBool,
+      isModeHS -> menvcfg.regOut.LPE.asBool,
+      isModeVS -> henvcfg.regOut.LPE.asBool,
+      (isModeHU || isModeVU) -> senvcfg.regOut.LPE.asBool,
+    ))
+  }
 
   io.toDecode.illegalInst.mfence.foreach(_ := !isModeM)
 

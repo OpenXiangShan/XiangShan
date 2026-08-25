@@ -12,7 +12,7 @@ import xiangshan.backend.fu.NewCSR._
 
 
 class TrapEntryDEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
-  val dcsr            = ValidIO((new DcsrBundle).addInEvent(_.CAUSE, _.V, _.PRV))
+  val dcsr            = ValidIO((new DcsrBundle).addInEvent(_.CAUSE, _.V, _.PRV, _.PELP))
   val dpc             = ValidIO((new Epc       ).addInEvent(_.epc))
   val targetPc        = ValidIO(new TargetPCBundle)
   val debugMode       = ValidIO(Bool())
@@ -88,6 +88,7 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   out.dcsr.bits.V             := current.privState.V.asUInt
   out.dcsr.bits.PRV           := current.privState.PRVM.asUInt
   out.dcsr.bits.CAUSE         := cause
+  out.dcsr.bits.PELP          := current.ZicfilpELP.getOrElse(false.B)
   out.dpc.bits.epc            := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
 
   out.targetPc.bits.pc        := RegEnable(debugPc, valid || hasExceptionInDmode)

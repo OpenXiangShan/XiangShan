@@ -196,6 +196,8 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.bits.ctrl.fpu         .foreach(x => x := source.bits.ctrl.fpu.get)
       sink.bits.ctrl.vpu         .foreach(x => x := source.bits.ctrl.vpu.get)
       sink.bits.ctrl.vialuCtrl   .foreach(x => x := source.bits.ctrl.vialuCtrl.get)
+      // Zicfilp
+      sink.bits.ctrl.ZicfilpInfos.foreach(x => x := source.bits.ctrl.ZicfilpInfos.get)
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFpToVecInst := 0.U)
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP32Instr   := 0.U)
       sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP64Instr   := 0.U)
@@ -229,6 +231,8 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.predictInfo.foreach(x => x := source.ctrl.predictInfo.get)
       sink.fpu.foreach(x => x := source.ctrl.fpu.get)
       sink.vpu.foreach(x => x := source.ctrl.vpu.get)
+      // Zicfilp
+      sink.ZicfilpInfos.foreach(x => x := source.ctrl.ZicfilpInfos.get)
       sink.vpu.foreach(x => x.fpu.isFpToVecInst := 0.U)
       sink.vpu.foreach(x => x.fpu.isFP32Instr := 0.U)
       sink.vpu.foreach(x => x.fpu.isFP64Instr := 0.U)

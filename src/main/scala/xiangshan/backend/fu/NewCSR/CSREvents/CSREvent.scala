@@ -128,6 +128,7 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val isFetchBkpt = Input(Bool())
   val trapIsForVSnonLeafPTE = Input(Bool())
   val hasDTExcp = Input(Bool())
+  val ZicfilpELP = Option.when(HasZicfilp)(Input(Bool()))
 
   // always current privilege
   val iMode = Input(new PrivState())

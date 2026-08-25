@@ -12,7 +12,7 @@ import xiangshan.AddrTransType
 
 
 class MretEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase {
-  val mstatus  = ValidIO((new MstatusBundle).addInEvent(_.MPP, _.MPV, _.MIE, _.MPIE, _.MPRV, _.MDT, _.SDT))
+  val mstatus  = ValidIO((new MstatusBundle).addInEvent(_.MPP, _.MPV, _.MIE, _.MPIE, _.MPRV, _.MDT, _.SDT, _.MPELP))
   val vsstatus = ValidIO((new SstatusBundle).addInEvent(_.SDT))
   val targetPc = ValidIO(new TargetPCBundle)
 }
@@ -65,6 +65,7 @@ class MretEventModule(implicit p: Parameters) extends Module with CSREventBase {
   out.mstatus.bits.MPV        := VirtMode.Off.asUInt
   out.mstatus.bits.MIE        := in.mstatus.MPIE
   out.mstatus.bits.MPIE       := 1.U
+  out.mstatus.bits.MPELP      := 0.U
   out.mstatus.bits.MPRV       := Mux(in.mstatus.MPP =/= PrivMode.M, 0.U, in.mstatus.MPRV.asUInt)
   // clear MDT when return mret always execute in M mode
   out.mstatus.bits.MDT    := 0.U

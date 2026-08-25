@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.{SignExt, ZeroExt}
-import xiangshan.RedirectLevel
+import xiangshan.{ExceptionNO, RedirectLevel}
 import xiangshan.backend.fu.{FuConfig, FuncUnit, JumpDataModule, PipedFuncUnit}
 import xiangshan.JumpOpType
 import xiangshan.backend.datapath.DataConfig.VAddrData
@@ -33,6 +33,8 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   jumpDataModule.io.nextPcOffset := io.in.bits.data.nextPcOffset.get
   jumpDataModule.io.func := func
   jumpDataModule.io.isRVC := isRVC
+  // Zicfilp
+  jumpDataModule.io.ZicfilpLPAD.foreach(_ := io.in.bits.ctrl.ZicfilpInfos.get.ZicfilpLPADValid)
 
   val fixedTaken = io.in.bits.ctrl.predictInfo.get.fixedTaken
   val predTaken  = io.in.bits.ctrl.predictInfo.get.predTaken
@@ -60,7 +62,14 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   redirect.backendIPF := io.instrAddrTransType.get.checkPageFault(jumpDataModule.io.target)
   redirect.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(jumpDataModule.io.target)
   redirect.attribute := io.toFrontendBJUResolve.get.bits.attribute
+  // Zicfilp
+  redirect.ZicfilpJalr.foreach(_ := io.in.bits.ctrl.ZicfilpInfos.get.ZicfilpJalr)
 //  redirect.debug_runahead_checkpoint_id := uop.debugInfo.runahead_checkpoint_id // Todo: assign it
+
+  // Zicfilp
+  jumpDataModule.io.ZicfilpFineGrained.foreach { fineGrained =>
+    io.out.bits.ctrl.exceptionVec(ExceptionNO.softwareCheck) := fineGrained
+  }
 
   io.in.ready := io.out.ready
   io.out.valid := io.in.valid
