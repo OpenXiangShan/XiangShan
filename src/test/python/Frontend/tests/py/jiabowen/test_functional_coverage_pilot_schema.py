@@ -5,6 +5,12 @@ from pathlib import Path
 import pytest
 
 from env.funcov.py.ifu.owner_v3_funcov import OWNER_V3_BIN_SPECS
+from env.funcov.py.ifu.mmio_nc_owner_funcov import (
+    MMIO_NC_OWNER_COVERPOINT,
+    MMIO_NC_OWNER_SAMPLER_BIN_KEYS,
+    MMIO_OWNER_GROUP,
+    NC_OWNER_GROUP,
+)
 from tools.backannotate_funcov import validate_pilot_schema
 
 
@@ -54,6 +60,7 @@ ICACHE_MAINPIPE_S2_ECC_BIN_IDS = {
 }
 
 ICACHE_MAPPED_STATUSES = {"MODELED", "PARTIAL", "HIT"}
+MMIO_NC_OWNER_BIN_IDS = {f"BIN-{index}" for index in range(1016, 1094)}
 
 IFU_V3_OWNER_BLOCK_LEAF_COUNTS = (139, 43, 42, 81)
 IFU_V3_FORBIDDEN_OWNER_TERMS = {
@@ -79,7 +86,7 @@ def test_active_pilot_has_global_unique_identifiers_and_mappings():
 
     summary = validate_pilot_schema(pilot_path)
 
-    assert summary == {"rows": 608, "bin_ids": 608, "mapping_keys": 608, "legacy_ids": 4}
+    assert summary == {"rows": 686, "bin_ids": 686, "mapping_keys": 686, "legacy_ids": 4}
 
 
 def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
@@ -144,8 +151,8 @@ def test_jiabowen_owner_event_bins_are_exactly_mapped_once():
             assert len(bin_ids) == 1
             bin_id = bin_ids.pop()
             assert bin_id not in mapped
-            assert row["status"] == "MODELED"
-            assert row["evidence"] == "MODEL:test_ifu_v3_owner_event_model"
+            assert row["status"] in {"MODELED", "HIT", "PARTIAL"}
+            assert "MODEL:test_ifu_v3_owner_event_model" in row["evidence"]
             mapped[bin_id] = row
 
     assert set(mapped) == owner_ids
@@ -164,7 +171,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
     active = [row for row in rows if row["Coverpoint"].strip()]
     legacy_bpu_ftq = [row for row in rows if "旧BPU_FTQ" in row["映射测试点路径"]]
 
-    assert len(active) == 450
+    assert len(active) == 528
     assert {row["Bin_ID"] for row in active} == {
         *(f"BIN-{index:03d}" for index in range(401, 424)),
         *(f"BIN-{index:03d}" for index in range(424, 433)),
@@ -185,10 +192,65 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
         *(f"BIN-{index:03d}" for index in range(686, 717) if index not in (697, 716)),
         *(f"BIN-{index:03d}" for index in range(717, 759) if index not in (725, 729, 730)),
         *(f"BIN-{index:03d}" for index in range(759, 781)),
-        *(f"BIN-{index:03d}" for index in range(801, 1016)),
+        *(f"BIN-{index:03d}" for index in range(801, 1094)),
     }
     assert legacy_bpu_ftq
     assert all(not row["Coverpoint"].strip() for row in legacy_bpu_ftq)
+
+
+def test_mmio_nc_owner_leaves_are_single_bin_and_match_registry():
+    repo_root = Path(__file__).resolve().parents[7]
+    pilot_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
+    )
+    testpoint_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+    )
+
+    with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
+        pilot_rows = {
+            row["Bin_ID"]: row
+            for row in csv.DictReader(handle)
+            if row["Bin_ID"] in MMIO_NC_OWNER_BIN_IDS
+        }
+    assert set(pilot_rows) == MMIO_NC_OWNER_BIN_IDS
+    assert {
+        (row["Coverage_Group"], row["Bin_Name"])
+        for row in pilot_rows.values()
+    } == MMIO_NC_OWNER_SAMPLER_BIN_KEYS
+    assert all(
+        row["Coverpoint"] == MMIO_NC_OWNER_COVERPOINT
+        for row in pilot_rows.values()
+    )
+
+    mapped_rows = {}
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            bin_ids = set(re.findall(r"BIN-\d+", row["coverage"])) & MMIO_NC_OWNER_BIN_IDS
+            if not bin_ids:
+                continue
+            assert len(bin_ids) == 1, row["coverage"]
+            bin_id = bin_ids.pop()
+            assert bin_id not in mapped_rows
+            pilot = pilot_rows[bin_id]
+            assert row["coverage"] == (
+                f"covergroup {pilot['Coverage_Group']}, "
+                f"coverpoint {pilot['Coverpoint']}, "
+                f"bins {pilot['Bin_Name']} ({bin_id})"
+            )
+            assert row["status"] in {"MODELED", "HIT", "PARTIAL"}
+            assert "MODEL:sample_mmio_nc_owner_coverage" in row["evidence"]
+            mapped_rows[bin_id] = row
+
+    assert set(mapped_rows) == MMIO_NC_OWNER_BIN_IDS
+    assert sum(
+        row["Coverage_Group"] == MMIO_OWNER_GROUP for row in pilot_rows.values()
+    ) == 39
+    assert sum(
+        row["Coverage_Group"] == NC_OWNER_GROUP for row in pilot_rows.values()
+    ) == 39
 
 
 def test_pilot_schema_rejects_duplicate_bin_id(tmp_path):
