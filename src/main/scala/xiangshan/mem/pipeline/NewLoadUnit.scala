@@ -129,6 +129,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   replay.noQuery.get := io.replay.bits.uncacheReplay.get
   replay.DontCarePAddr()
   replay.DontCareUnalign() // assign later in sink
+  replay.lrqAmbReplay.get := io.replay.bits.cause.get(C_MA)
   val replayIsHiPrio = io.replay.bits.isReplayHiPrioEntrance()
   replayHiPrio.valid := io.replay.valid && replayIsHiPrio
   replayHiPrio.bits := replay
@@ -141,6 +142,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   fastReplay.bits.noQuery.get := true.B
   fastReplay.bits.entrance := io.fastReplay.bits.entrance | LoadEntrance.fastReplay.U
   fastReplay.bits.DontCareUnalign() // assign later in sink
+  fastReplay.bits.lrqAmbReplay.get := false.B
   fastReplay.bits.occupySource := VecInit(sources.map(_.valid)).asUInt // for perf
 
   // 3. low-priority replay from LRQ
@@ -471,6 +473,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   XSPerfAccumulate("vector_addr_vlen_align", false.B)
   XSPerfAccumulate("vector_addr_vlen_unalign", false.B)
   XSPerfAccumulate("forward_tld_channel", io.replay.fire && io.replay.bits.forwardDChannel.get)
+  val loadFromLrqAmbReplay = io.replay.fire && io.replay.bits.cause.get(C_MA)
+  XSPerfAccumulate("load_from_lrq_amb_replay", loadFromLrqAmbReplay)
   XSPerfAccumulate("hardware_prefetch_fire", io.prefetchReq.fire)
   XSPerfAccumulate("software_prefetch_fire", io.ldin.fire && LSUOpType.isPrefetch(io.ldin.bits.fuOpType))
   XSPerfAccumulate("hardware_prefetch_block", io.prefetchReq.valid && !io.prefetchReq.ready)
@@ -959,6 +963,27 @@ class LoadUnitS2(param: ExeUnitParams)(
 
   val forwardInvalid = io.sqForwardResp.valid && io.sqForwardResp.bits.forwardInvalid
 
+  val requestedMask = in.mask
+  val sqForwardMask = Mux(
+    io.sqForwardResp.valid,
+    io.sqForwardResp.bits.forwardMask.asUInt,
+    0.U((VLEN / 8).W)
+  )
+  val sbufferForwardMask = Mux(
+    io.sbufferForwardResp.valid,
+    io.sbufferForwardResp.bits.forwardMask.asUInt,
+    0.U((VLEN / 8).W)
+  )
+  val sqSbufferMatchInvalid = io.sqForwardResp.valid && io.sqForwardResp.bits.matchInvalid ||
+    io.sbufferForwardResp.valid && io.sbufferForwardResp.bits.matchInvalid
+  val sqSbufferForwardValid = !sqDataInvalid && !forwardInvalid && !sqSbufferMatchInvalid
+  val sqRequestedForwardedMask = requestedMask & sqForwardMask
+  val sbufferRequestedForwardedMask = requestedMask & sbufferForwardMask
+  val sqSbufferForwardedMask = sqRequestedForwardedMask | sbufferRequestedForwardedMask
+  val sqForwarded = sqRequestedForwardedMask.orR
+  val sqSbufferForwarded = sqSbufferForwardValid && sqForwarded
+  val sqSbufferFullForwarded = sqSbufferForwarded && sqSbufferForwardedMask === requestedMask
+
   // MSHR / TileLink-D channel
   val mshrForwardDenied = io.mshrForwardResp.valid && io.mshrForwardResp.bits.denied
   val tldForwardDenied = io.tldForwardResp.valid && io.tldForwardResp.bits.denied
@@ -1159,6 +1184,8 @@ class LoadUnitS2(param: ExeUnitParams)(
   stageInfo.matchInvalid.get := matchInvalid && troubleMaker
   stageInfo.shouldWakeup.get := shouldWakeup
   stageInfo.shouldWriteback.get := shouldWriteback
+  stageInfo.sqSbufferForwarded.get := sqSbufferForwarded
+  stageInfo.sqSbufferFullForwarded.get := sqSbufferFullForwarded
 
   when (pipeIn.fire) { pipeOutBits := stageInfo }
 
@@ -1255,7 +1282,6 @@ class LoadUnitS3(param: ExeUnitParams)(
     val redirect = Flipped(ValidIO(new Redirect))
     val kill = Input(Bool())
     val unalignTailValid = Input(Bool())
-    val perfRobHeadPtr = Input(new RobPtr)
 
     // DCache response
     val dcacheError = Input(Bool())
@@ -1699,6 +1725,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.rollback.bits := DontCare
   io.rollback.bits.isRVC := uop.isRVC
   io.rollback.bits.robIdx := robIdx
+  io.rollback.bits.satpFlush := false.B
   io.rollback.bits.ftqIdx := uop.ftqPtr
   io.rollback.bits.ftqOffset := uop.ftqOffset
   io.rollback.bits.level := rollbackLevel
@@ -1722,6 +1749,30 @@ class LoadUnitS3(param: ExeUnitParams)(
   /**
     * Perf counters
     */
+  val demandLoad = isScalar || isVector
+  val transactionReplay = shouldReplay || s4HeadValid && s4HeadShouldReplay
+  val loadFromSqSbufferBase = pipeIn.fire && !kill && demandLoad &&
+    !transactionReplay && !exception && !rarViolation && !matchInvalid && in.sqSbufferForwarded.get
+  val loadFromSqSbufferFullData = loadFromSqSbufferBase && in.sqSbufferFullForwarded.get
+  val loadFromSqSbufferPartialData = loadFromSqSbufferBase && !in.sqSbufferFullForwarded.get
+  val loadFromSqSbufferSuccess = loadFromSqSbufferPartialData || loadFromSqSbufferFullData
+  val loadSuccessfulWriteback = (io.ldout.toRob.fire || io.vldout.toRob.valid) && !kill && demandLoad &&
+    !transactionReplay && !exception && !rollbackValid
+  val lrqAmbReplay = Mux(s4HeadValid, s4Head.lrqAmbReplay.get, in.lrqAmbReplay.get)
+  val lrqAmbSqSbufferForwarded = Mux(
+    s4HeadValid,
+    s4Head.sqSbufferForwarded.get || in.sqSbufferForwarded.get,
+    in.sqSbufferForwarded.get
+  )
+  val loadFromLrqAmbForwardSuccess = pipeIn.fire && endPipe && !kill && demandLoad && lrqAmbReplay &&
+    lrqAmbSqSbufferForwarded && !transactionReplay && !exception && !rarViolation && !matchInvalid
+
+  XSPerfAccumulate("load_from_sq_sbuffer_success", loadFromSqSbufferSuccess)
+  XSPerfAccumulate("load_from_sq_sbuffer_partial_data", loadFromSqSbufferPartialData)
+  XSPerfAccumulate("load_from_sq_sbuffer_full_data", loadFromSqSbufferFullData)
+  XSPerfAccumulate("load_successful_writeback", loadSuccessfulWriteback)
+  XSPerfAccumulate("load_from_lrq_amb_forward_success", loadFromLrqAmbForwardSuccess)
+
   XSPerfAccumulate("rollback_total", rollbackValid)
   XSPerfAccumulate("rollback_rar_violation", rollbackValid && rarViolation)
   XSPerfAccumulate("rollback_match_invalid", rollbackValid && matchInvalid)
@@ -1923,7 +1974,6 @@ class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends
 class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   private val numMemChannels = p(XSCoreParamsKey).dcacheParametersOpt.get.numMemChannels
   val redirect = Flipped(ValidIO(new Redirect))
-  val perfRobHeadPtr = Input(new RobPtr)
   // Request sources
   val ldin = Flipped(DecoupledIO(new ExuInput(param)))
   val replay = Flipped(DecoupledIO(new LoadReplayIO))
@@ -2085,7 +2135,6 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
 
   // S3
   s3.io.redirect := io.redirect
-  s3.io.perfRobHeadPtr := io.perfRobHeadPtr
   s3.io.dcacheError := io.dcache.resp.bits.error_delayed
   io.ldout <> s3.io.ldout
   io.vldout := s3.io.vldout

@@ -559,6 +559,16 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   newLoadUnits.zipWithIndex.map(x => x._1.suggestName("LoadUnit_"+x._2))
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
 
+  storeUnits.foreach(_.io.perfRobHeadPtr := io.ooo_to_mem.lsqio.pendingPtr)
+  stdExeUnits.foreach(_.io.perfRobHeadPtr := io.ooo_to_mem.lsqio.pendingPtr)
+  XSPerfAccumulate("store_addr_writeback_rob_head", PopCount(storeUnits.map(_.io.writebackAtRobHead)))
+  XSPerfAccumulate("store_data_writeback_rob_head", PopCount(stdExeUnits.map(_.io.writebackAtRobHead)))
+
+  for (i <- 0 until LoadEntrance.num) {
+    val sourceName = LoadEntrance.findNameById(i)
+    val eventCount = PopCount(newLoadUnits.map(_.io.sourceExecuteFailRobHead(i)))
+    XSPerfAccumulate(s"${sourceName}_execute_fail_rob_head", eventCount)
+  }
 
   writebackLda.zipWithIndex.foreach { case (wb, i) =>
     if (i == AtomicWBPort) {
