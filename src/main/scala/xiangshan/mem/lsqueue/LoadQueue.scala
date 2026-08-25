@@ -308,6 +308,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.storeDataWakeup.zip(io.wakeupToLRQ.drop(StaCnt).take(StdCnt)).foreach { case (sink, source) => sink := source }
   loadQueueReplay.io.storeAddrWakeupCancel.zip(io.wakeupToLRQCancel.take(StaCnt)).foreach { case (sink, source) => sink := source }
   loadQueueReplay.io.storeDataWakeupCancel.zip(io.wakeupToLRQCancel.drop(StaCnt).take(StdCnt)).foreach { case (sink, source) => sink := source }
+  loadQueueReplay.io.storeDataWrite.zip(io.std.storeDataIn).foreach { case (sink, source) =>
+    sink.valid := source.valid
+    sink.bits := source.bits.sqIdx
+  }
   loadQueueReplay.io.physicalUpperSqIdx <> io.sq.physicalUpperSqIdx
 
   loadQueueReplay.io.mmioWakeup := uncacheBuffer.io.mmioWakeup

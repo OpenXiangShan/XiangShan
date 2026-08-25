@@ -519,6 +519,23 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val storeUnits = Seq.tabulate(StaCnt)(i => Module(new NewStoreUnit(staParams(i))))
   val stdExeUnits = Seq.tabulate(StdCnt)(i => Module(new StdExeUnit(stdParams(i))))
 
+  val stdDataWriteNow = stdExeUnits.map(_.io.sqData)
+  val stdDataWritePrev = stdDataWriteNow.map { now =>
+    val prev = Wire(Valid(new SqPtr))
+    prev.valid := RegNext(now.valid, false.B)
+    prev.bits := RegEnable(now.bits.sqIdx, now.valid)
+    prev
+  }
+  newLoadUnits.foreach { ldu =>
+    ldu.io.stdDataWrite.current.zip(stdDataWriteNow).foreach { case (sink, source) =>
+      sink.valid := source.valid
+      sink.bits := source.bits.sqIdx
+    }
+    ldu.io.stdDataWrite.previous.zip(stdDataWritePrev).foreach { case (sink, source) =>
+      sink := source
+    }
+  }
+
   wakeupToLRQCancel.take(StaCnt).zip(storeUnits).zip(io.ooo_to_mem.wakeupToLRQCancel.take(StaCnt)).foreach {
     case ((sink, stu), source) =>
       sink.og0Cancel := source.og0Cancel

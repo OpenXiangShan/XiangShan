@@ -233,6 +233,11 @@ class VectorLoadIn(implicit p: Parameters)
 class LoadStageIO(implicit p: Parameters, implicit val s: LoadStage)
   extends LoadPipeBundle(LoadStageIOParam())
 
+class StdDataWriteWindow(numStdPorts: Int)(implicit p: Parameters) extends XSBundle {
+  val current = Vec(numStdPorts, Valid(new SqPtr))
+  val previous = Vec(numStdPorts, Valid(new SqPtr))
+}
+
 sealed trait HasStorePipeBundleParam {
   def hasVector: Boolean = false
   def hasStoreSet: Boolean = false
