@@ -27,7 +27,7 @@ import utility._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.mem.prefetch._
 import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
-import xiangshan.mem.L1PrefetchReq
+import xiangshan.mem.{L1PrefetchReq, skidBuffer}
 
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss = Bool() // only amo miss will refill in main pipe
@@ -248,10 +248,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val s1_s0_set_conflict, s2_s0_set_conflict, s3_s0_set_conflict = Wire(Bool())
   val set_conflict = s1_s0_set_conflict || s2_s0_set_conflict || s3_s0_set_conflict
-  // check sbuffer store req set_conflict in parallel with req arbiter
-  // it will speed up the generation of store_req.ready, which is in crit. path
-  val s1_s0_set_conflict_store, s2_s0_set_conflict_store, s3_s0_set_conflict_store = Wire(Bool())
-  val store_set_conflict = s1_s0_set_conflict_store || s2_s0_set_conflict_store || s3_s0_set_conflict_store
   val s1_ready, s2_ready, s3_ready = Wire(Bool())
 
   // convert store req to main pipe req, and select a req from store and probe
@@ -282,26 +278,27 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   // s0: read meta and tag
   val req = Wire(DecoupledIO(new MainPipeReq))
+  val arbiter_out = Wire(DecoupledIO(new MainPipeReq))
   arbiter(
     in = Seq(
       io.probe_req,
       io.refill_req,
       prefetch_req, // Todo: what's the best priority
-      store_req, // Note: store_req.ready is now manually assigned for better timing
+      store_req,
       io.atomic_req,
     ),
-    out = req,
+    out = arbiter_out,
     name = Some("main_pipe_req")
   )
-
-  val store_idx = get_dcache_idx(io.store_req.bits.vaddr)
-  // manually assign store_req.ready for better timing
-  // now store_req set conflict check is done in parallel with req arbiter
-  store_req.ready := io.meta_read.ready && io.tag_read.ready && s1_ready && !store_set_conflict &&
-    !io.probe_req.valid && !io.refill_req.valid && !prefetch_req.valid
-  // Prefetch request has lower priority, so it needs to check higher priority requests
-  prefetch_req.ready := io.meta_read.ready && io.tag_read.ready && s1_ready && !set_conflict &&
-    !io.probe_req.valid && !io.refill_req.valid
+  // skidBuffer to cut timing path of ready
+  skidBuffer(
+    arbiter_out,
+    req,
+    false.B,
+    "MainPipeSkidBuffer"
+  )
+  // Keep requestor ready driven by the arbiter so it observes the same
+  // handshake as the skid buffer input.
   val s0_req = req.bits
   val s0_idx = get_dcache_idx(s0_req.vaddr)
   val s0_need_tag = io.tag_read.valid
@@ -379,7 +376,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   }
   s1_ready := !s1_valid || s1_can_go
   s1_s0_set_conflict := s1_valid && s0_idx === s1_idx && !s1_isPrefetch
-  s1_s0_set_conflict_store := s1_valid && store_idx === s1_idx && !s1_isPrefetch
 
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
   meta_resp := Mux(GatedValidRegNext(s0_fire), VecInit(io.meta_resp.map(_.asUInt)), RegEnable(meta_resp, s1_valid))
@@ -526,7 +522,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   }
 
   s2_s0_set_conflict := s2_valid && s0_idx === s2_idx && !s2_isPrefetch
-  s2_s0_set_conflict_store := s2_valid && store_idx === s2_idx && !s2_isPrefetch
 
   // BtoT grow blocked: too many in-flight BtoT occupies in this set; replay store
   val s2_has_more_then_3_ways_BtoT = PopCount(io.btot_ways_for_set) > (nWays-2).U
@@ -891,7 +886,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   s3_ready := !s3_valid || s3_can_go
   s3_s0_set_conflict := s3_valid && s3_idx === s0_idx && !s3_isPrefetch
-  s3_s0_set_conflict_store := s3_valid && s3_idx === store_idx && !s3_isPrefetch
   //assert(RegNext(!s3_valid || !(s3_req.source === STORE_SOURCE.U && !s3_req.probe) || s3_hit)) // miss store should never come to s3 ,fixed(reserve)
 
   io.meta_read.valid := req.valid

@@ -1068,9 +1068,10 @@ class LoadUnitS2(param: ExeUnitParams)(
   // if store pipeline is waiting for store, send this load to fast replay
   val fastReplayNuke = cause(C_NK) &&  // TODO: use C_RAR or C_NK?
     !hasHigherPriorityCauses(VecInit(cause.patch(C_MA, Seq(cause(C_MA) && !fastReplayNukeFirst), 1)), C_RAR)
-  val fastReplay = !LoadEntrance.isFastReplay(entrance) && // 1.3.1
-    (fastReplayMSHRNack || fastReplayBankConflict || fastReplayNuke || fastReplayForwardFail) && // 1.3.2
-    !isUnalign && !tlbMiss // 1.3.3, if tlb miss, should not to fast replay
+  val fastReplayEligible = !LoadEntrance.isFastReplay(entrance) &&
+    !isUnalign && !tlbMiss
+  val fastReplay = fastReplayEligible && // 1.3.1, 1.3.3
+    (fastReplayMSHRNack || fastReplayBankConflict || fastReplayNuke || fastReplayForwardFail) // 1.3.2
 
   /**
     * Nuke query to LQRAR / LQRAW
@@ -1078,7 +1079,8 @@ class LoadUnitS2(param: ExeUnitParams)(
     * For timing considerations, violation check requests issued in s2 do not need to be accurate. But MUST ensure that
     * accurate `revoke` signals are given in s3 to withdraw requests that do not require violation check.
     */
-  val nukeQueryReqValid = troubleMaker && !prevStageNuke
+  val canNukeQuery = !isMMIOReplay && !isPrefetch
+  val nukeQueryReqValid = canNukeQuery && !prevStageNuke
   val nukeQueryReq = Wire(new LoadNukeQueryReq)
   nukeQueryReq.robIdx := robIdx
   nukeQueryReq.paddr := paddr
@@ -1169,8 +1171,11 @@ class LoadUnitS2(param: ExeUnitParams)(
   stageInfo.perfWaitStoreRetired.get := io.sqForwardResp.valid && io.sqForwardResp.bits.perfWaitStoreRetired
   stageInfo.perfIsCmaReplay.get := perfIsCmaReplay
   // Pre-process for s3
+  // A RR candidate is a bank-conflict fast replay only. Keep it off the
+  // general fast-replay cause OR so the S2 candidate-to-arbiter path is
+  // independent of MSHR-nack, nuke, and forward-fail logic.
   val rrBankConflictFastReplay =
-    !kill && fastReplay && fastReplayBankConflict && io.dcacheRRBankConflict && !exception
+    !kill && fastReplayEligible && fastReplayBankConflict && io.dcacheRRBankConflict
   val rrBankConflictFastReplayCandidate = pipeIn.fire && rrBankConflictFastReplay
   io.rrBankConflictFastReplayCandidate := rrBankConflictFastReplayCandidate
   XSError(
@@ -1198,7 +1203,7 @@ class LoadUnitS2(param: ExeUnitParams)(
 
   io.unalignTailValid := pipeIn.valid && isUnalignTail
 
-  io.dcacheKill := kill || exception || isUncache || isUncacheReplay || !needDCacheAccess
+  io.dcacheKill := kill || exception || isUncache || isUncacheReplay
   io.dcacheResp.ready := true.B
 
   io.rarNukeQueryReq.valid := nukeQueryReqValid && pipeIn.valid

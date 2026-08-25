@@ -895,7 +895,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   val rrBankConflictFastReplay = newLoadUnits.map(_.io.rrBankConflictFastReplay)
   val rrBankConflictFastReplayCandidates = rrBankConflictFastReplay.map(_.candidate)
-  val rrBankConflictFastReplayArb = Module(new RRArbiterInit(Bool(), LduCnt))
+  val rrBankConflictFastReplayArb = Module(new TwoLevelRRArbiter(Bool(), LduCnt))
   rrBankConflictFastReplayArb.suggestName("rr_bank_conflict_fast_replay_arb")
   rrBankConflictFastReplayArb.io.out.ready := true.B
   rrBankConflictFastReplayArb.io.in.zip(rrBankConflictFastReplayCandidates).foreach { case (in, candidate) =>
