@@ -524,6 +524,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrin.l2FlushDone := RegNext(io.fromTop.l2FlushDone)
   csrin.reset_mtvec.foreach(_ := io.fromTop.reset_mtvec.get)
   csrin.trapInstInfo := ctrlBlock.io.toCSR.trapInstInfo
+  csrin.ZicfilpELP.foreach(_ := ctrlBlock.io.toCSR.ZicfilpELP.getOrElse(false.B))
   csrin.fromVecExcpMod.busy := vecExcpMod.o.status.busy
   csrin.criticalErrorState := backendCriticalError
 

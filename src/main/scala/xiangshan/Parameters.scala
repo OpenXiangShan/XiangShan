@@ -53,6 +53,7 @@ case class XSCoreParameters
   VLEN: Int = 128,
   ELEN: Int = 64,
   HSXLEN: Int = 64,
+  HasZicfilp: Boolean = true, // Zicfilp
   HasMptCheck: Boolean = false, //enable mpt
   HasBitmapCheck: Boolean = true,
   HasMExtension: Boolean = true,
@@ -667,6 +668,8 @@ trait HasXSParameter {
   def hartIDDmodeWidth = coreParams.hartIDDmodeWidth
   def enableResetMtvec = coreParams.enableResetMtvec
   val xLen = XLEN
+  // Zicfilp
+  def HasZicfilp = coreParams.HasZicfilp
   assert(!(HasMptCheck == true && HasBitmapCheck == true), "Conflicts: MPT and Bitmap can't be used together")
   def HasMptCheck = coreParams.HasMptCheck && !coreParams.HasBitmapCheck
   def HasBitmapCheck = coreParams.HasBitmapCheck

@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
+import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.fu.util._
@@ -117,6 +118,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       in.bits.dret := isDret
       in.bits.redirectFlush := redirectFlush
   }
+  csrMod.io.ZicfilpELP.foreach(_ := io.csrin.get.ZicfilpELP.getOrElse(false.B))
   csrMod.io.trapInst := trapInstMod.io.currentTrapInst
   csrMod.io.fetchMalTval := trapTvalMod.io.tval
   csrMod.io.fromMem.excpVA  := csrIn.memExceptionVAddr
@@ -355,6 +357,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   redirect.backendIGPF := csrMod.io.xretTargetPc.bits.raiseIGPF
   // Only mispred will send redirect to frontend
   redirect.isMisPred := false.B
+  val legalXRetOut = io.out.valid && isXRetReg && !csrModOut.EX_II && !csrModOut.EX_VI
+  redirect.ZicfilpXRetValid.foreach(_ := legalXRetOut)
+  redirect.ZicfilpRetELP.foreach(_ := csrModOut.retELP.getOrElse(false.B))
 
   val rfWenReg = RegEnable(io.in.bits.ctrl.rfWen.get, io.in.fire)
   val pdestReg = RegEnable(io.in.bits.ctrl.pdest, io.in.fire)
@@ -445,12 +450,17 @@ class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val l2FlushDone = Input(Bool())
   val reset_mtvec = Option.when(enableResetMtvec)(Input(UInt(PAddrBits.W)))
   val trapInstInfo = Input(ValidIO(new TrapInstInfo))
+  // Zicfilp
+  val ZicfilpELP = OptionWrapper(HasZicfilp, Input(Bool()))
   val fromVecExcpMod = Input(new Bundle {
     val busy = Bool()
   })
 }
 
 class CSRToDecode(implicit p: Parameters) extends XSBundle {
+  // Zicfilp
+  val enableZicfilp = OptionWrapper(HasZicfilp, Bool())
+
   val illegalInst = new Bundle {
 
     val mfence = Option.when(HasMptCheck) (Bool())
