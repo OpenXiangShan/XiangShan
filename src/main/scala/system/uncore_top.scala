@@ -278,6 +278,13 @@ final case class BufferedAXI4Connection(buffer: AXI4Buffer) {
   }
 }
 
+final case class TimingCutAXI4Connection(sourceBuffer: AXI4Buffer, timingCutBuffer: AXI4Buffer) {
+  def setReset(reset: Reset): Unit = {
+    sourceBuffer.module.reset := reset
+    timingCutBuffer.module.reset := reset
+  }
+}
+
 class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
   private def newXbar(name: String): AXI4Xbar = {
     val xbar = LazyModule(new AXI4Xbar())
@@ -291,11 +298,27 @@ class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
     buffer
   }
 
+  private def newTimingCutBuffer(name: String): AXI4Buffer = {
+    val cut = BufferParams(depth = 1, flow = false, pipe = false)
+    val buffer = LazyModule(new AXI4Buffer(cut, cut, cut, cut, cut))
+    buffer.suggestName(name)
+    buffer
+  }
+
   private def connectThroughBuffer(sink: AXI4Node, source: AXI4Node, name: String, star: Boolean = false): BufferedAXI4Connection = {
     val buffer = newBuffer(name)
     if (star) sink :=* buffer.node else sink := buffer.node
     buffer.node := source
     BufferedAXI4Connection(buffer)
+  }
+
+  private def connectThroughTimingCut(sink: AXI4Node, source: AXI4Node, name: String, star: Boolean = false): TimingCutAXI4Connection = {
+    val sourceBuffer = newBuffer(name)
+    val timingCutBuffer = newTimingCutBuffer(s"${name.stripSuffix("_buf")}_timing_cut")
+    if (star) sink :=* timingCutBuffer.node else sink := timingCutBuffer.node
+    timingCutBuffer.node := sourceBuffer.node
+    sourceBuffer.node := source
+    TimingCutAXI4Connection(sourceBuffer, timingCutBuffer)
   }
 
   // cpu master: cpus--> cpu_xbarNto1-->cpu2imsic_s/cpu2dm_s
@@ -319,38 +342,38 @@ class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
   val cpum = cpum_LM.node
   println("Cbus: test 00 ===")
   val cpu0ToCx0Bufs = (0 until 2).map { i =>
-    connectThroughBuffer(xbar2to1(0), cpus(i), s"cbus_cpu${i}_to_cx0_buf", star = true)
+    connectThroughTimingCut(xbar2to1(0), cpus(i), s"cbus_cpu${i}_to_cx0_buf", star = true)
   }
-  val cpu2ToCx1Buf = connectThroughBuffer(xbar2to1(1), cpus(2), "cbus_cpu2_to_cx1_buf")
+  val cpu2ToCx1Buf = connectThroughTimingCut(xbar2to1(1), cpus(2), "cbus_cpu2_to_cx1_buf")
   val cx0ToCx1Buf = connectThroughBuffer(xbar2to1(1), xbar2to1(0), "cbus_cx0_to_cx1_buf")
-  val cpu3ToCx2Buf = connectThroughBuffer(xbar2to1(2), cpus(3), "cbus_cpu3_to_cx2_buf")
+  val cpu3ToCx2Buf = connectThroughTimingCut(xbar2to1(2), cpus(3), "cbus_cpu3_to_cx2_buf")
   val cx1ToCx2Buf = connectThroughBuffer(xbar2to1(2), xbar2to1(1), "cbus_cx1_to_cx2_buf")
   val cpu4ToCx3Bufs = (4 until 6).map { i =>
-    connectThroughBuffer(xbar2to1(3), cpus(i), s"cbus_cpu${i}_to_cx3_buf", star = true)
+    connectThroughTimingCut(xbar2to1(3), cpus(i), s"cbus_cpu${i}_to_cx3_buf", star = true)
   }
   val cpu7ToCx5Bufs = (4 until 6).map { i =>
     val cpuIdx = i + 3
-    connectThroughBuffer(xbar2to1(5), cpus(cpuIdx), s"cbus_cpu${cpuIdx}_to_cx5_buf", star = true)
+    connectThroughTimingCut(xbar2to1(5), cpus(cpuIdx), s"cbus_cpu${cpuIdx}_to_cx5_buf", star = true)
   }
   val cpu10ToCx7Bufs = (4 until 6).map { i =>
     val cpuIdx = i + 3 * 2
-    connectThroughBuffer(xbar2to1(7), cpus(cpuIdx), s"cbus_cpu${cpuIdx}_to_cx7_buf", star = true)
+    connectThroughTimingCut(xbar2to1(7), cpus(cpuIdx), s"cbus_cpu${cpuIdx}_to_cx7_buf", star = true)
   }
   val cpu13ToCx9Bufs = (4 until 6).map { i =>
     val cpuIdx = i + 3 * 3
-    connectThroughBuffer(xbar2to1(9), cpus(cpuIdx), s"cbus_cpu${cpuIdx}_to_cx9_buf", star = true)
+    connectThroughTimingCut(xbar2to1(9), cpus(cpuIdx), s"cbus_cpu${cpuIdx}_to_cx9_buf", star = true)
   }
   println("Cbus: test 01 ===")
 //  xbar2to10->xbar2to11->xbar2to12   xbar2to13->xbar2to14,xbar2to15->xbar2to16,xbar2to17->xbar2to18, xbar2to19->xbar2to110
 
   val cx3ToCx4Buf = connectThroughBuffer(xbar2to1(4), xbar2to1(3), "cbus_cx3_to_cx4_buf")
-  val cpu6ToCx4Buf = connectThroughBuffer(xbar2to1(4), cpus(6), "cbus_cpu6_to_cx4_buf")
+  val cpu6ToCx4Buf = connectThroughTimingCut(xbar2to1(4), cpus(6), "cbus_cpu6_to_cx4_buf")
   val cx5ToCx6Buf = connectThroughBuffer(xbar2to1(6), xbar2to1(5), "cbus_cx5_to_cx6_buf")
-  val cpu9ToCx6Buf = connectThroughBuffer(xbar2to1(6), cpus(9), "cbus_cpu9_to_cx6_buf")
+  val cpu9ToCx6Buf = connectThroughTimingCut(xbar2to1(6), cpus(9), "cbus_cpu9_to_cx6_buf")
   val cx7ToCx8Buf = connectThroughBuffer(xbar2to1(8), xbar2to1(7), "cbus_cx7_to_cx8_buf")
-  val cpu12ToCx8Buf = connectThroughBuffer(xbar2to1(8), cpus(12), "cbus_cpu12_to_cx8_buf")
+  val cpu12ToCx8Buf = connectThroughTimingCut(xbar2to1(8), cpus(12), "cbus_cpu12_to_cx8_buf")
   val cx9ToCx10Buf = connectThroughBuffer(xbar2to1(10), xbar2to1(9), "cbus_cx9_to_cx10_buf", star = true)
-  val cpu15ToCx10Buf = connectThroughBuffer(xbar2to1(10), cpus(15), "cbus_cpu15_to_cx10_buf", star = true)
+  val cpu15ToCx10Buf = connectThroughTimingCut(xbar2to1(10), cpus(15), "cbus_cpu15_to_cx10_buf", star = true)
   println("Cbus: test 02 ===")
 
   val cx10ToL1x0Buf = connectThroughBuffer(l1xbar2to1(0), xbar2to1(10), "cbus_cx10_to_l1x0_buf")
@@ -379,7 +402,7 @@ class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
     val cx2InputReset = l1x3FanoutReset
     xbar2to1LMs(2).module.reset := cx2InputReset
     val cx2FanoutReset = cxToL1Bufs(3).sinkReset(cx2InputReset)
-    cpu3ToCx2Buf.module.reset := cx2FanoutReset
+    cpu3ToCx2Buf.setReset(cx2FanoutReset)
 
     val l1x1InputReset = l1x2FanoutReset
     l1xbar2to1LMs(1).module.reset := l1x1InputReset
@@ -388,17 +411,17 @@ class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
     val cx4InputReset = l1x2FanoutReset
     xbar2to1LMs(4).module.reset := cx4InputReset
     val cx4FanoutReset = cxToL1Bufs(2).sinkReset(cx4InputReset)
-    cpu6ToCx4Buf.module.reset := cx4FanoutReset
+    cpu6ToCx4Buf.setReset(cx4FanoutReset)
 
     val cx1InputReset = cx2FanoutReset
     xbar2to1LMs(1).module.reset := cx1InputReset
     val cx1FanoutReset = cx1ToCx2Buf.sinkReset(cx1InputReset)
-    cpu2ToCx1Buf.module.reset := cx1FanoutReset
+    cpu2ToCx1Buf.setReset(cx1FanoutReset)
 
     val cx3InputReset = cx4FanoutReset
     xbar2to1LMs(3).module.reset := cx3InputReset
     val cx3FanoutReset = cx3ToCx4Buf.sinkReset(cx3InputReset)
-    cpu4ToCx3Bufs.foreach(_.module.reset := cx3FanoutReset)
+    cpu4ToCx3Bufs.foreach(_.setReset(cx3FanoutReset))
 
     val l1x0InputReset = l1x1FanoutReset
     l1xbar2to1LMs(0).module.reset := l1x0InputReset
@@ -407,37 +430,37 @@ class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
     val cx6InputReset = l1x1FanoutReset
     xbar2to1LMs(6).module.reset := cx6InputReset
     val cx6FanoutReset = cxToL1Bufs(1).sinkReset(cx6InputReset)
-    cpu9ToCx6Buf.module.reset := cx6FanoutReset
+    cpu9ToCx6Buf.setReset(cx6FanoutReset)
 
     val cx0InputReset = cx1FanoutReset
     xbar2to1LMs(0).module.reset := cx0InputReset
     val cx0FanoutReset = cx0ToCx1Buf.sinkReset(cx0InputReset)
-    cpu0ToCx0Bufs.foreach(_.module.reset := cx0FanoutReset)
+    cpu0ToCx0Bufs.foreach(_.setReset(cx0FanoutReset))
 
     val cx5InputReset = cx6FanoutReset
     xbar2to1LMs(5).module.reset := cx5InputReset
     val cx5FanoutReset = cx5ToCx6Buf.sinkReset(cx5InputReset)
-    cpu7ToCx5Bufs.foreach(_.module.reset := cx5FanoutReset)
+    cpu7ToCx5Bufs.foreach(_.setReset(cx5FanoutReset))
 
     val cx8InputReset = l1x0FanoutReset
     xbar2to1LMs(8).module.reset := cx8InputReset
     val cx8FanoutReset = cxToL1Bufs(0).sinkReset(cx8InputReset)
-    cpu12ToCx8Buf.module.reset := cx8FanoutReset
+    cpu12ToCx8Buf.setReset(cx8FanoutReset)
 
     val cx10InputReset = l1x0FanoutReset
     xbar2to1LMs(10).module.reset := cx10InputReset
     val cx10FanoutReset = cx10ToL1x0Buf.sinkReset(cx10InputReset)
-    cpu15ToCx10Buf.module.reset := cx10FanoutReset
+    cpu15ToCx10Buf.setReset(cx10FanoutReset)
 
     val cx7InputReset = cx8FanoutReset
     xbar2to1LMs(7).module.reset := cx7InputReset
     val cx7FanoutReset = cx7ToCx8Buf.sinkReset(cx7InputReset)
-    cpu10ToCx7Bufs.foreach(_.module.reset := cx7FanoutReset)
+    cpu10ToCx7Bufs.foreach(_.setReset(cx7FanoutReset))
 
     val cx9InputReset = cx10FanoutReset
     xbar2to1LMs(9).module.reset := cx9InputReset
     val cx9FanoutReset = cx9ToCx10Buf.sinkReset(cx9InputReset)
-    cpu13ToCx9Bufs.foreach(_.module.reset := cx9FanoutReset)
+    cpu13ToCx9Bufs.foreach(_.setReset(cx9FanoutReset))
   }
 }
 
