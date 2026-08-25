@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.ChiselDB
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfRolling
 import utils.VecRotate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
@@ -205,4 +206,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   XSPerfAccumulate("train_has_mispredict", t1_fire && t1_mispredictInfo.valid)
   XSPerfAccumulate("train_hit_mispredict", t1_fire && t1_mispredictInfo.valid && perf_t1HitMispredictBranch)
   XSPerfAccumulate("pred_miss", s2_fire && perf_s2HitMask.reduce(!_ && !_))
+
+  XSPerfRolling("rolling_mbtb_pred_miss", s2_fire && perf_s2HitMask.reduce(!_ && !_), 10000, clock, reset)
+
 }

@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfRolling
 import utility.XSPerfSeqAccumulate
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.Pc
@@ -507,6 +508,8 @@ class MainBtbAlignBank(
       ("fixAttribute", t1_hit && !(t1_mispredictInfo.bits.attribute === Mux1H(t1_hitMask, t1_meta.map(_.attribute))))
     )
   )
+
+  XSPerfRolling("rolling_allocate", t1_fire && t1_mispredictInfo.valid && t1_entryNeedWrite, 10000, clock, reset)
 
   XSPerfAccumulate("updateCounter", Mux(t1_fire, PopCount(t1_counterWayMask), 0.U))
 }
