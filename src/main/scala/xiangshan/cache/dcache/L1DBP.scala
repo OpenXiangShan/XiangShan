@@ -61,7 +61,10 @@ class L1DBP(implicit p: Parameters) extends DCacheModule {
 
   val scWidth = 2
   val scMax = (1 << scWidth) - 1
+  val scInit = 2
+  val resetPeriod = 8192 * 2
   require(scWidth >= 2, "L1DBP saturating counter must be at least two bits")
+  require(isPow2(resetPeriod), "L1DBP reset period must be a power of two")
 
   def scUpdate(state: UInt, accessed: Bool): UInt = {
     require(state.getWidth == scWidth)
@@ -74,8 +77,11 @@ class L1DBP(implicit p: Parameters) extends DCacheModule {
   s1Upd.valid := RegNext(io.update.valid, false.B)
   s1Upd.bits := RegEnable(io.update.bits, io.update.valid)
 
-  val pcSCArray = RegInit(VecInit(Seq.fill(l1dbpPcPredictorEntries)(2.U(scWidth.W))))
-  val pfSCArray = RegInit(VecInit(Seq.fill(2)(2.U(scWidth.W))))
+  val pcSCArray = RegInit(VecInit(Seq.fill(l1dbpPcPredictorEntries)(scInit.U(scWidth.W))))
+  val pfSCArray = RegInit(VecInit(Seq.fill(2)(scInit.U(scWidth.W))))
+  val resetCounter = RegInit(0.U(log2Ceil(resetPeriod).W))
+  val resetArrays = resetCounter === (resetPeriod - 1).U
+  resetCounter := Mux(resetArrays, 0.U, resetCounter + 1.U)
   val forceDead = l1dbpParams.debugMode.B
   val enablePrefetchPrediction = l1dbpParams.enablePrefetchPrediction.B
 
@@ -131,7 +137,9 @@ class L1DBP(implicit p: Parameters) extends DCacheModule {
   val pcWen = s1Upd.valid && s1Upd.bits.origin === L1DBPOrigin.demand
   val pcWOH = UIntToOH(s1Upd.bits.idx, l1dbpPcPredictorEntries)
   (0 until l1dbpPcPredictorEntries).foreach { i =>
-    when(pcWen && pcWOH(i)) {
+    when(resetArrays) {
+      pcSCArray(i) := scInit.U(scWidth.W)
+    }.elsewhen(pcWen && pcWOH(i)) {
       pcSCArray(i) := scUpdate(pcSCArray(i), s1Upd.bits.accessed)
     }
   }
@@ -143,7 +151,9 @@ class L1DBP(implicit p: Parameters) extends DCacheModule {
   }
   val pfWOH = UIntToOH(s1Upd.bits.pfIdx, 2)
   (0 until 2).foreach { i =>
-    when(pfWen && pfWOH(i)) {
+    when(resetArrays) {
+      pfSCArray(i) := scInit.U(scWidth.W)
+    }.elsewhen(pfWen && pfWOH(i)) {
       pfSCArray(i) := scUpdate(pfSCArray(i), s1Upd.bits.accessed)
     }
   }
