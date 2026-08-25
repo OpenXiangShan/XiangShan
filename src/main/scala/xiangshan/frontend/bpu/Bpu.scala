@@ -415,8 +415,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   s3_override := {
     val takenDiff       = s3_taken =/= s3_s1Prediction.taken
-    val cfiPositionDiff = Mux1H(s3_firstTakenBranchOH, s3_mbtbCfiPositionDiffVec)
-    val attributeDiff   = Mux1H(s3_firstTakenBranchOH, s3_mbtbAttributeDiffVec)
+    val cfiPositionDiff = s3_taken && Mux1H(s3_firstTakenBranchOH, s3_mbtbCfiPositionDiffVec)
+    val attributeDiff   = s3_taken && Mux1H(s3_firstTakenBranchOH, s3_mbtbAttributeDiffVec)
     val targetDiff =
       MuxCase(
         false.B, // fall-through
