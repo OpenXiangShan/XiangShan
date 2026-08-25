@@ -222,7 +222,8 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       val thisPcOffset = exuInput.bits.getPcOffset()
       val nextPcOffset = exuInput.bits.getNextPcOffset()
       val isJR = FuType.isJump(fuType) && JumpOpType.jumpUopisjr(fuOpType)
-      val immBJU = imm + Mux(isJR, 0.U, SignExt(thisPcOffset, imm.getWidth))
+      val isLPAD = exuInput.bits.ZicfilpInfos.map(_.ZicfilpLPADValid).getOrElse(false.B)
+      val immBJU = imm + Mux(isJR || isLPAD, 0.U, SignExt(thisPcOffset, imm.getWidth))
       val immCsrFence = fromDPs(exuIdx).bits.imm.get
       exuInput.bits.imm := Mux((FuType.isCsr(fuType) || FuType.isFence(fuType)) && exuParm.hasCSR.B, immCsrFence, immBJU)
       exuInput.bits.nextPcOffset.foreach(_ := nextPcOffset)

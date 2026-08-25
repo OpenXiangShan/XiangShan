@@ -71,6 +71,8 @@ class RobSlotInfo(implicit p: Parameters) extends XSBundle {
 }
 
 class RobEntryBundle(implicit p: Parameters) extends XSBundle {
+  val ZicfilpJalr = OptionWrapper(HasZicfilp, Bool())
+  val ZicfilpLPAD = OptionWrapper(HasZicfilp, Bool())
   val valid = Bool()
 
   val entryPairType = CompressType()
@@ -226,10 +228,19 @@ class RobEntryBundle(implicit p: Parameters) extends XSBundle {
     this.topdownCancelSource.foreach(_ := IQCancelSource.none)
     this.topdownCancelTimeVec.foreach(_.foreach(_ := 0.U))
     this.topdownCancelTimeFixVec.foreach(_.foreach(_ := 0.U))
+    // Zicfilp
+    this.ZicfilpJalr.zip(robEnq.ZicfilpInfos).foreach { case (sink, source) =>
+      sink := source.ZicfilpJalr
+    }
+    this.ZicfilpLPAD.zip(robEnq.ZicfilpLPAD).foreach { case (sink, source) =>
+      sink := source
+    }
   }
 }
 
 class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
+  val ZicfilpJalr = OptionWrapper(HasZicfilp, Bool())
+  val ZicfilpLPAD = OptionWrapper(HasZicfilp, Bool())
   val walk_v = Bool()
   val commit_v = Bool()
   val commit_w = Bool()
@@ -290,6 +301,13 @@ class RobCommitEntryBundle(implicit p: Parameters) extends XSBundle {
     this.basicDebug.foreach(_ := robEntry.basicDebug.get)
     this.debug_fuType.foreach(_ := robEntry.debug_fuType.get)
     this.debug_fusionNum.foreach(_ := robEntry.debug_fusionNum.get)
+    // Zicfilp
+    this.ZicfilpJalr.zip(robEntry.ZicfilpJalr).foreach { case (sink, source) =>
+      sink := source
+    }
+    this.ZicfilpLPAD.zip(robEntry.ZicfilpLPAD).foreach { case (sink, source) =>
+      sink := source
+    }
   }
 }
 

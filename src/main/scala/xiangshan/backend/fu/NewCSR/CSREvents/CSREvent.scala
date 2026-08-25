@@ -129,6 +129,7 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val trapIsForVSnonLeafPTE = Input(Bool())
   val hasDTExcp = Input(Bool())
   val satpFlushFirstFetchFault = Input(Bool())
+  val ZicfilpELP = Option.when(HasZicfilp)(Input(Bool()))
 
   // always current privilege
   val iMode = Input(new PrivState())

@@ -117,7 +117,7 @@ object RobDeqPtrWrapper {
     val blockCommit = Input(Bool())
 
     // Oldest retained exception.
-    val exception_state = Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params))))
+    val exception_state = Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params, HasZicfilp))))
 
     // Interrupt qualification.
     val intrBitSetReg = Input(Bool())
