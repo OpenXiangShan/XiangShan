@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ReplacementPolicy
+import utils.VecRotate
 
 class ICacheReplacer(implicit p: Parameters) extends ICacheModule {
   class ICacheReplacerIO(implicit p: Parameters) extends ICacheBundle {
@@ -26,39 +27,49 @@ class ICacheReplacer(implicit p: Parameters) extends ICacheModule {
     val victim: ReplacerVictimBundle = Flipped(new ReplacerVictimBundle)
   }
 
+  private def NumSetsPerPort = nSets / PortNumber
+  private def SetIdxWidth    = log2Ceil(NumSetsPerPort)
+
+  private def getReplacerId(vSetIdx:  UInt): UInt = vSetIdx(log2Ceil(PortNumber) - 1, 0)
+  private def getReplacerSet(vSetIdx: UInt): UInt = vSetIdx(idxBits - 1, log2Ceil(PortNumber))
+
   val io: ICacheReplacerIO = IO(new ICacheReplacerIO)
 
-  private val replacers = Seq.fill(PortNumber)(ReplacementPolicy.fromString(Replacer, nWays, nSets / PortNumber))
+  // for each FetchReq, rotate its 2 ports (so even vSetIdx becomes physical idx 0, odd becomes idx 1), then transpose
+  // e.g. 2 FetchReqs requesting touch 4 sets: (0, 1) from fb(0) and (5, 6) from fb(1)
+  //      we do a vecRotate (Mux) first: (0, 1) and (6, 5)
+  //      then to a transpose for each replacer: (0, 6) for replacer(0) and (1, 5) for replacer(1)
+  private val touches = io.touch.req.map(req => VecRotate(getReplacerId(req(0).bits.vSetIdx)).rotate(req)).transpose
 
-  // touch
-  private val touchSets = Seq.fill(PortNumber)(Wire(Vec(PortNumber, UInt(log2Ceil(nSets / PortNumber).W))))
-  private val touchWays = Seq.fill(PortNumber)(Wire(Vec(PortNumber, Valid(UInt(wayBits.W)))))
-  (0 until PortNumber).foreach { i =>
-    touchSets(i)(0) := Mux(
-      io.touch.req(i).bits.vSetIdx(0),
-      io.touch.req(1).bits.vSetIdx(idxBits - 1, 1),
-      io.touch.req(0).bits.vSetIdx(idxBits - 1, 1)
-    )
-    touchWays(i)(0).bits  := Mux(io.touch.req(i).bits.vSetIdx(0), io.touch.req(1).bits.way, io.touch.req(0).bits.way)
-    touchWays(i)(0).valid := Mux(io.touch.req(i).bits.vSetIdx(0), io.touch.req(1).valid, io.touch.req(0).valid)
+  // latch victim info to touch it in the next cycle
+  private val victimVSetIdx = RegEnable(io.victim.req.bits.vSetIdx, io.victim.req.valid)
+  private val victimWay     = RegEnable(io.victim.resp.way, io.victim.req.valid)
+  private val victimValid   = RegNext(io.victim.req.valid)
+
+  private val replacers = Seq.tabulate(PortNumber) { idx =>
+    val replacer = ReplacementPolicy.fromString(Replacer, nWays, NumSetsPerPort)
+
+    // PortNumber touch access + 1 victim access
+    val sets = Seq.fill(PortNumber + 1)(Wire(UInt(SetIdxWidth.W)))
+    val ways = Seq.fill(PortNumber + 1)(Wire(Valid(UInt(wayBits.W))))
+
+    (sets.init lazyZip ways.init lazyZip touches(idx)).foreach { case (set, way, touch) =>
+      set       := getReplacerSet(touch.bits.vSetIdx)
+      way.bits  := touch.bits.way
+      way.valid := touch.valid
+    }
+
+    sets.last       := getReplacerSet(victimVSetIdx)
+    ways.last.bits  := victimWay
+    ways.last.valid := victimValid && idx.U === getReplacerId(victimVSetIdx)
+
+    // generate access logic
+    replacer.access(sets, ways)
+    replacer
   }
 
-  // victim
-  io.victim.resp.way := Mux(
-    io.victim.req.bits.vSetIdx(0),
-    replacers(1).way(io.victim.req.bits.vSetIdx(idxBits - 1, 1)),
-    replacers(0).way(io.victim.req.bits.vSetIdx(idxBits - 1, 1))
-  )
-
-  // touch the victim in next cycle
-  private val victimVSetIdxReg =
-    RegEnable(io.victim.req.bits.vSetIdx, 0.U.asTypeOf(io.victim.req.bits.vSetIdx), io.victim.req.valid)
-  private val victimWayReg = RegEnable(io.victim.resp.way, 0.U.asTypeOf(io.victim.resp.way), io.victim.req.valid)
-  (0 until PortNumber).foreach { i =>
-    touchSets(i)(1)       := victimVSetIdxReg(idxBits - 1, 1)
-    touchWays(i)(1).bits  := victimWayReg
-    touchWays(i)(1).valid := RegNext(io.victim.req.valid) && (victimVSetIdxReg(0) === i.U)
-  }
-
-  ((replacers zip touchSets) zip touchWays).foreach { case ((r, s), w) => r.access(s, w) }
+  // send victim to missUnit
+  io.victim.resp.way := Mux1H(replacers.zipWithIndex.map { case (replacer, idx) =>
+    (idx.U === getReplacerId(io.victim.req.bits.vSetIdx)) -> replacer.way(getReplacerSet(io.victim.req.bits.vSetIdx))
+  })
 }
