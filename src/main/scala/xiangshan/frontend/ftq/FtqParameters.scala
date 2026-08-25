@@ -20,11 +20,10 @@ import chisel3.util._
 import xiangshan.frontend.HasFrontendParameters
 
 case class FtqParameters(
-    FtqSize:            Int = 64,
-    ResolveQueueSize:   Int = 16,
-    BpRunAheadDistance: Int = 8,
-    BpTrainStallLimit:  Int = 8,
-    CommitQueueSize:    Int = 64
+    FtqSize:           Int = 64,
+    ResolveQueueSize:  Int = 16,
+    BpTrainStallLimit: Int = 8,
+    CommitQueueSize:   Int = 64
 ) {
   // sanity check
   require(isPow2(FtqSize))
@@ -34,7 +33,7 @@ trait HasFtqParameters extends HasFrontendParameters {
   def ftqParameters: FtqParameters = frontendParameters.ftqParameters
 
   def ResolveQueueSize:   Int = ftqParameters.ResolveQueueSize
-  def BpRunAheadDistance: Int = ftqParameters.BpRunAheadDistance
+  def BpRunAheadDistance: Int = frontendParameters.icacheParameters.WayLookupSize
   def BpTrainStallLimit:  Int = ftqParameters.BpTrainStallLimit
   def CommitQueueSize:    Int = ftqParameters.CommitQueueSize
 }
