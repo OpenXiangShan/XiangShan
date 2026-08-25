@@ -31,7 +31,7 @@ import xiangshan.mem.Bundles._
 import xiangshan.cache._
 import xiangshan.cache.{DCacheLineIO, DCacheWordIO, MemoryOpConstants}
 import xiangshan.cache.{CMOReq, CMOResp}
-import xiangshan.cache.mmu.{TlbHintIO, TlbRequestIO}
+import xiangshan.cache.mmu.{TLBHintResp, TlbHintIO, TlbRequestIO}
 
 class ExceptionAddrIO(implicit p: Parameters) extends XSBundle {
   val isStore = Input(Bool())
@@ -134,6 +134,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val issuePtrExt = Output(new SqPtr)
     val l2_hint = Input(Vec(cfg.numMemChannels, Valid(new L2ToL1Hint())))
     val tlb_hint = Flipped(new TlbHintIO)
+    val fast_tlb_hint = Flipped(ValidIO(new TLBHintResp))
     val wakeupToLRQ = Vec(StaCnt + StdCnt, Flipped(ValidIO(new IssueQueueLRQWakeUpBundle)))
     val wakeupToLRQCancel = Input(Vec(StaCnt + StdCnt, new LRQWakeUpCancelBundle))
     val cmoOpReq  = DecoupledIO(new CMOReq)
@@ -254,6 +255,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   loadQueue.io.bypass              <> io.bypass
   loadQueue.io.l2_hint             <> io.l2_hint
   loadQueue.io.tlb_hint            <> io.tlb_hint
+  loadQueue.io.fast_tlb_hint       <> io.fast_tlb_hint
   loadQueue.io.wakeupToLRQ         <> io.wakeupToLRQ
   loadQueue.io.wakeupToLRQCancel   := io.wakeupToLRQCancel
   loadQueue.io.lqEmpty             <> io.lqEmpty

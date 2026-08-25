@@ -209,6 +209,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
     val l2_hint = Input(Vec(cfg.numMemChannels, Valid(new L2ToL1Hint())))
     val tlb_hint = Flipped(new TlbHintIO)
+    val fast_tlb_hint = Flipped(ValidIO(new TLBHintResp))
     val wakeupToLRQ = Vec(StaCnt + StdCnt, Flipped(ValidIO(new IssueQueueLRQWakeUpBundle)))
     val wakeupToLRQCancel = Input(Vec(StaCnt + StdCnt, new LRQWakeUpCancelBundle))
     val lqEmpty = Output(Bool())
@@ -303,6 +304,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.rawFull          <> loadQueueRAW.io.lqFull
   loadQueueReplay.io.l2_hint          <> io.l2_hint
   loadQueueReplay.io.tlb_hint         <> io.tlb_hint
+  loadQueueReplay.io.fast_tlb_hint    <> io.fast_tlb_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
   loadQueueReplay.io.storeAddrWakeup.zip(io.wakeupToLRQ.take(StaCnt)).foreach { case (sink, source) => sink := source }
   loadQueueReplay.io.storeDataWakeup.zip(io.wakeupToLRQ.drop(StaCnt).take(StdCnt)).foreach { case (sink, source) => sink := source }
