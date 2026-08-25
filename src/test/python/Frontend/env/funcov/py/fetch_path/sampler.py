@@ -125,7 +125,7 @@ def sample_uncache_cycle_state(recorder, dut, cycle: int) -> None:
         dut, "Frontend_top.Frontend.inner_ifu.uncacheUnit.itlbPbmt"
     )
     active_pbmt = latched_pbmt if state in {1, 2, 3} and latched_pbmt is not None else pbmt
-    can_accept = recorder._try_read_dut_signal(dut, "Frontend_top.io_backend_canAccept")
+    can_accept = recorder._try_read_dut_signal(dut, "Frontend_top.io_backend_toIBuf_decodeCanAccept")
     if active_pbmt == 1 and pmp_mmio == 0 and state in {2, 3}:
         recorder._uncache_active_nc = True
     if active_pbmt == 1 and pmp_mmio == 1 and state == 1:

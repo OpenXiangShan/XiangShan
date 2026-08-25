@@ -322,7 +322,7 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
         )
 
     cacheable_entries = _cacheable_cf_entries(recorder, cf_entries, cycle)
-    can_accept = _read(recorder, "io_backend_canAccept", 0)
+    can_accept = _read(recorder, "io_backend_toIBuf_decodeCanAccept", 0)
     _sample_cacheable_delivery(recorder, cycle, cacheable_entries, can_accept)
     _sample_cacheable_cfi_flow(recorder, cycle, cacheable_entries)
 

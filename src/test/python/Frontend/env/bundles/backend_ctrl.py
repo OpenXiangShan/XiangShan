@@ -5,7 +5,7 @@ from toffee import Bundle, Signal, SignalList
 
 class BackendCtrlBundle(Bundle):
     SIGNAL_BINDINGS = {
-        "can_accept": "io_backend_canAccept",
+        "can_accept": "io_backend_toIBuf_decodeCanAccept",
         "backend_empty": "io_backend_backendEmpty",
         "commit_valid": "io_backend_toFtq_commit_valid",
         "commit_bits_flag": "io_backend_toFtq_commit_bits_flag",

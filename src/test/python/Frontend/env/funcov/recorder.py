@@ -1054,7 +1054,7 @@ class FunctionalCoverageRecorder:
             dut, "Frontend_top.Frontend.inner_ifu.uncacheUnit.itlbPbmt"
         )
         active_pbmt = latched_pbmt if state in {1, 2, 3} and latched_pbmt is not None else pbmt
-        can_accept = self._try_read_dut_signal(dut, "Frontend_top.io_backend_canAccept")
+        can_accept = self._try_read_dut_signal(dut, "Frontend_top.io_backend_toIBuf_decodeCanAccept")
         if active_pbmt == 1 and pmp_mmio == 0 and state in {2, 3}:
             self._uncache_active_nc = True
         if active_pbmt == 1 and pmp_mmio == 1 and state == 1:

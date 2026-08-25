@@ -215,7 +215,7 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
         "wrong_path_target_pc": wrong_path_target_pc,
         "recovery_target_pc": recovery_target_pc,
         "active_wrong_path_episode": active_wrong_path_episode,
-        "backend_can_accept": _read_sig(dut, "io_backend_canAccept", 0),
+        "backend_can_accept": _read_sig(dut, "io_backend_toIBuf_decodeCanAccept", 0),
         "from_ftq": {
             "wen": _read_sig(dut, "io_backend_fromFtq_wen", 0),
             "ftq_idx": _read_sig(dut, "io_backend_fromFtq_ftqIdx", 0),
