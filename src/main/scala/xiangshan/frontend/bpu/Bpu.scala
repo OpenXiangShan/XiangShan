@@ -209,8 +209,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   utage.io.s1PathHist       := phr.io.s1_foldedPhr
   utage.io.overridePathHist := phr.io.s3_foldedPhr
 
-  utage.io.s1StartPc       := s1_prediction.target.unGuard
-  utage.io.overrideStartPc := s3_prediction.target.unGuard
+  // Tag PC must be the block being predicted, same as fastTrain.startPc (s3_startPc).
+  // Using s1/s3 prediction.target (the successor) made predict-tag and train-tag
+  // hash different PCs, so µTAGE never hit after a successful allocate.
+  // unGuard matches FastTrain.startPc and MicroTageIO (Pc, not GuardedPc).
+  utage.io.s1StartPc       := s1_startPc.get.unGuard
+  utage.io.overrideStartPc := s3_startPc.get.unGuard
 
   // uras
   uras.io.specIn.startPc                := s1_startPc.get

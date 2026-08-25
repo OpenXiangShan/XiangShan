@@ -59,11 +59,9 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   val io: MicroTageIO = IO(new MicroTageIO)
   io.trainReady := true.B
 
-  // Ahead pipeline implementation. Advantage: get data one cycle earlier.
-  // Disadvantage: multi-position competition for the same entry.
-  // Problem scenario: the same entry accessed by different branches in different cycles.
+  // S0 issues the SRAM read; S1 consumes the 1-cycle response (a1). Do not
+  // register a1 again onto s0_fire — that extra stage selected the previous block.
   private val a0_fire                = io.enable && io.stageCtrl.s0_fire
-  private val a1_fire                = a0_fire
   private val a2_fire                = io.stageCtrl.s1_fire
   private val overrideValid          = io.overrideValid
   private val redirectValid          = io.redirectValid
@@ -115,23 +113,25 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     a1_predRead(i).takenCtr    := a1_predEntries(i).takenCtr
   }
 
-  // Prioritize early position comparison at the cost of ABTB SRAM timing margin,
-  // ensuring glitch-free valid signals for the next stage.
+  // Pair cfiPosition with the same-cycle aBTB result. io.abtbPosVec is the ahead
+  // (aBTB S1) position and belongs to the next block, so it cannot score a hit
+  // against the current SRAM response in a1.
   private val a1_posHitVec = Wire(Vec(NumAheadBtbPredictionEntries, Vec(NumTables, Bool())))
   for (i <- 0 until NumAheadBtbPredictionEntries) {
     for (j <- 0 until NumTables) {
-      a1_posHitVec(i)(j) := a1_predEntries(j).valid && (a1_predEntries(j).cfiPosition === io.abtbPosVec(i))
+      a1_posHitVec(i)(j) :=
+        a1_predEntries(j).valid &&
+          io.abtbPrediction(i).valid &&
+          (a1_predEntries(j).cfiPosition === io.abtbPrediction(i).bits.cfiPosition)
     }
   }
-  // Get finally selected Table ID for each branch instruction of abtb.
-  // (Pre-calculate timing-critical signals for BPU S1.
-  // These include the Hit and Taken signals required for MicroTag and aBTB coordination.)
+  // Combine tagHit and posHit for each aBTB slot. a1 is already the current S1
+  // block: SRAM and the write buffer both have 1-cycle latency from S0.
   private val a1_abtbTableIDVec = Wire(Vec(NumAheadBtbPredictionEntries, UInt(log2Ceil(NumTables).W)))
   private val a1_abtbTakenVec   = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
   private val a1_abtbHitVec     = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
   private val tabeIDVec         = VecInit.tabulate(NumTables)(i => i.U)
   for (i <- 0 until NumAheadBtbPredictionEntries) {
-    // tmp prefix highlights the temporary scope within the loop.
     val tmpTableHitVec   = Wire(Vec(NumTables, Bool()))
     val tmpTableTakenVec = Wire(Vec(NumTables, Bool()))
     for (j <- 0 until NumTables) {
@@ -143,11 +143,25 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     a1_abtbTableIDVec(i) := ParallelPriorityMux(tmpTableHitVec.reverse, tabeIDVec.reverse)
   }
 
+  // Pipeline the S1 SRAM snapshot to S3 so override replays the overridden
+  // block, not whichever block happens to sit in S1 that cycle.
+  private val a2_readIndex = RegInit(0.U.asTypeOf(a1_readIndex))
+  private val a2_predRead  = RegInit(0.U.asTypeOf(a1_predRead))
+  private val a2_posHitVec = RegInit(0.U.asTypeOf(a1_posHitVec))
   private val a3_readIndex = RegInit(0.U.asTypeOf(a1_readIndex))
   private val a3_predRead  = RegInit(0.U.asTypeOf(a1_predRead))
   private val a3_posHitVec = RegInit(0.U.asTypeOf(a1_posHitVec))
+  when(a2_fire) {
+    a2_predRead  := a1_predRead
+    a2_readIndex := a1_readIndex
+    a2_posHitVec := a1_posHitVec
+  }
+  when(io.stageCtrl.s2_fire) {
+    a3_predRead  := a2_predRead
+    a3_readIndex := a2_readIndex
+    a3_posHitVec := a2_posHitVec
+  }
 
-  // ------------------------------  ----------------------------------------- //
   private val overridePredRead = Wire(Vec(NumTables, new MicroTageTablePred))
   for (i <- 0 until NumTables) {
     val predTag = computeHashTag(io.overrideStartPc, io.overridePathHist, TableInfos, i)
@@ -164,7 +178,6 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val a3_abtbTakenVec   = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
   private val a3_abtbHitVec     = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
   for (i <- 0 until NumAheadBtbPredictionEntries) {
-    // tmp prefix highlights the temporary scope within the loop.
     val tmpTableHitVec   = Wire(Vec(NumTables, Bool()))
     val tmpTableTakenVec = Wire(Vec(NumTables, Bool()))
     for (j <- 0 until NumTables) {
@@ -176,70 +189,52 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     a3_abtbTableIDVec(i) := ParallelPriorityMux(tmpTableHitVec.reverse, tabeIDVec.reverse)
   }
 
-  private val a2_readIndex = RegEnable(Mux(overrideValid, a3_readIndex, a1_readIndex), a1_fire)
-  private val a2_predRead =
-    RegEnable(Mux(overrideValid, overridePredRead, a1_predRead), 0.U.asTypeOf(a1_predRead), a1_fire)
-  private val a2_posHitVec =
-    RegEnable(Mux(overrideValid, a3_posHitVec, a1_posHitVec), 0.U.asTypeOf(a1_posHitVec), a1_fire)
-  private val a2_foldedPathHist =
-    RegEnable(Mux(overrideValid, io.overridePathHist, io.s1PathHist), a1_fire)
-  private val a2_fromAbtbPos = RegEnable(io.abtbPosVec, a1_fire)
-  private val a2_abtbUseTableIDVec =
-    RegEnable(Mux(overrideValid, a3_abtbTableIDVec, a1_abtbTableIDVec), 0.U.asTypeOf(a1_abtbTableIDVec), a1_fire)
-  private val a2_abtbTakenVec =
-    RegEnable(Mux(overrideValid, a3_abtbTakenVec, a1_abtbTakenVec), 0.U.asTypeOf(a1_abtbTakenVec), a1_fire)
-  private val a2_abtbTakenCtrVec = Wire(Vec(NumAheadBtbPredictionEntries, TakenCounter()))
-
-  private val a2_abtbHitVec = RegInit(VecInit.fill(NumAheadBtbPredictionEntries)(false.B))
-  when(redirectValid) {
-    a2_abtbHitVec := 0.U.asTypeOf(Vec(NumAheadBtbPredictionEntries, Bool()))
-  }.elsewhen(overrideValid) {
-    a2_abtbHitVec := a3_abtbHitVec
-  }.elsewhen(a1_fire) {
-    a2_abtbHitVec := a1_abtbHitVec
-  }
-
+  // S1 consumes a1 directly. The old extra register on s0_fire made hit/taken
+  // belong to the previous block; SRAM is already one cycle, so that extra
+  // stage was a misalignment, not a timing helper.
+  private val s1_hitVec = Mux(
+    redirectValid,
+    0.U.asTypeOf(a1_abtbHitVec),
+    Mux(overrideValid, a3_abtbHitVec, a1_abtbHitVec)
+  )
+  private val s1_takenVec    = Mux(overrideValid, a3_abtbTakenVec, a1_abtbTakenVec)
+  private val s1_tableIdVec  = Mux(overrideValid, a3_abtbTableIDVec, a1_abtbTableIDVec)
+  private val s1_predReadUse = Mux(overrideValid, overridePredRead, a1_predRead)
+  private val s1_readIndex   = Mux(overrideValid, a3_readIndex, a1_readIndex)
+  private val s1_foldedHist  = Mux(overrideValid, io.overridePathHist, io.s1PathHist)
+  private val s1_takenCtrVec = Wire(Vec(NumAheadBtbPredictionEntries, TakenCounter()))
   for (i <- 0 until NumAheadBtbPredictionEntries) {
     val tableTakenCtrVec = Wire(Vec(NumTables, TakenCounter()))
     for (j <- 0 until NumTables) {
-      tableTakenCtrVec(j) := a2_predRead(j).takenCtr
+      tableTakenCtrVec(j) := s1_predReadUse(j).takenCtr
     }
-    a2_abtbTakenCtrVec(i) := tableTakenCtrVec(a2_abtbUseTableIDVec(i))
+    s1_takenCtrVec(i) := tableTakenCtrVec(s1_tableIdVec(i))
   }
 
   private val s1_predMeta = Wire(Valid(new MicroTageMeta))
-  s1_predMeta.valid := a2_abtbHitVec.asUInt.orR
+  s1_predMeta.valid := s1_hitVec.asUInt.orR
   s1_predMeta.bits.abtbResult := 0.U.asTypeOf(Vec(
     NumAheadBtbPredictionEntries,
     new AbtbResult
-  )) // no use, only for placeholder.
-  s1_predMeta.bits.readIndex              := a2_readIndex
-  s1_predMeta.bits.foldedPathHistForTrain := a2_foldedPathHist
+  ))
+  s1_predMeta.bits.readIndex              := s1_readIndex
+  s1_predMeta.bits.foldedPathHistForTrain := s1_foldedHist
   for (i <- 0 until NumAheadBtbPredictionEntries) {
-    // On the cycle following a redirect, MicroTage provides no prediction;
-    // therefore, this cycle is excluded from training.
+    // Drop the cycle after redirect from training; µTAGE has no useful prediction then.
     s1_predMeta.bits.abtbResult(i).valid :=
       io.abtbPrediction(i).valid && io.abtbPrediction(i).bits.attribute.isConditional && RegNext(!redirectValid)
     s1_predMeta.bits.abtbResult(i).baseTaken        := io.abtbPrediction(i).bits.taken
-    s1_predMeta.bits.abtbResult(i).hit              := a2_abtbHitVec(i) && io.abtbPrediction(i).valid
-    s1_predMeta.bits.abtbResult(i).predTaken        := a2_abtbTakenVec(i)
-    s1_predMeta.bits.abtbResult(i).tableId          := a2_abtbUseTableIDVec(i)
-    s1_predMeta.bits.abtbResult(i).cfiPosition      := a2_fromAbtbPos(i) // io.abtbPrediction(i).bits.cfiPosition
+    s1_predMeta.bits.abtbResult(i).hit              := s1_hitVec(i) && io.abtbPrediction(i).valid
+    s1_predMeta.bits.abtbResult(i).predTaken        := s1_takenVec(i)
+    s1_predMeta.bits.abtbResult(i).tableId          := s1_tableIdVec(i)
+    s1_predMeta.bits.abtbResult(i).cfiPosition      := io.abtbPrediction(i).bits.cfiPosition
     s1_predMeta.bits.abtbResult(i).baseIsStrongBias := io.abtbPrediction(i).bits.isStrongBias
-    s1_predMeta.bits.abtbResult(i).takenCtr         := a2_abtbTakenCtrVec(i)
+    s1_predMeta.bits.abtbResult(i).takenCtr         := s1_takenCtrVec(i)
   }
 
-  io.prediction.takenVec := a2_abtbTakenVec
-  // May be a false hit; needs to be combined with abtbEntry's valid signal for correctness.
-  // Done here for timing/layout reasons.
-  io.prediction.hitVec := a2_abtbHitVec
-  io.meta              := s1_predMeta
-
-  when(a2_fire) {
-    a3_predRead  := a2_predRead
-    a3_readIndex := a2_readIndex
-    a3_posHitVec := a2_posHitVec
-  }
+  io.prediction.takenVec := s1_takenVec
+  io.prediction.hitVec   := s1_hitVec
+  io.meta                := s1_predMeta
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
   private val t0_train                  = RegNext(io.fastTrain.get.bits, 0.U.asTypeOf(new FastTrain))
