@@ -5,6 +5,7 @@ from typing import Any, Optional
 from ..common.dut import _read
 from ..common.fetch_memory import _read_expected_fetch_raw, _recover_unavailable_instr
 from ....support.rvc_decoder import expand_rvc
+from .owner_v3_funcov import mark_owner_v3_checked
 
 
 _IFU_INTERNAL_PREFIXES = (
@@ -153,6 +154,21 @@ def _sample_ibuffer_backpressure(
 ) -> None:
     pending = getattr(recorder, "_ifu_ibuffer_hold_pending", None)
     if pointer_redirect:
+        if pending is not None and not (int(valid) == 1 and int(ready) == 1):
+            mark_owner_v3_checked(
+                recorder,
+                "BIN-943",
+                cycle,
+                {
+                    "held_cycle": int(pending["cycle"]),
+                    "redirect_cycle": int(cycle),
+                    "held_signature": pending["signature"],
+                    "to_ibuffer_valid": int(valid),
+                    "to_ibuffer_ready": int(ready),
+                    "old_payload_fired": False,
+                },
+                producer="ifu_ibuffer_backpressure_sampler",
+            )
         recorder._ifu_ibuffer_hold_pending = None
         return
 
@@ -190,6 +206,115 @@ def _sample_ibuffer_backpressure(
                 },
             )
     recorder._ifu_ibuffer_hold_pending = None
+
+
+def _sample_redirect_lifecycle(recorder, dut, cycle: int) -> None:
+    previous = getattr(recorder, "_ifu_redirect_last_state", None)
+    backend_redirect = _read_ifu_internal(recorder, dut, "io_fromFtq_redirect_valid")
+    wb_redirect = _read_ifu_internal(recorder, dut, "wbRedirect_valid")
+    outbound_redirect = _read_ifu_internal(recorder, dut, "io_toFtq_wbRedirect_valid")
+    s0_flush = _read_ifu_internal(recorder, dut, "s0_flush")
+    s1_flush = _read_ifu_internal(recorder, dut, "s1_flush")
+    s2_flush = _read_ifu_internal(recorder, dut, "s2_flush")
+    s0_half = _read_ifu_internal(recorder, dut, "s0_prevEndIsHalfRvi")
+    s1_half_data = _read_ifu_internal(recorder, dut, "s1_prevEndHalfRviData")
+    s1_half_pc = _read_ifu_internal(recorder, dut, "s1_prevEndHalfRviPc_addr")
+    s1_ptr = _read_ifu_internal(recorder, dut, "s1_prevIBufEnqPtr_value")
+    s1_valid = _read_ifu_internal(recorder, dut, "s1_valid")
+    s2_valid = _read_ifu_internal(recorder, dut, "s2_valid_valid")
+
+    pending = getattr(recorder, "_ifu_redirect_cleanup_pending", None)
+    if pending is not None and int(cycle) > int(pending["cycle"]):
+        cleared_valids = s1_valid == 0 and s2_valid == 0
+        evidence = {
+            **pending,
+            "check_cycle": int(cycle),
+            "s0_prev_end_is_half_rvi": s0_half,
+            "s1_prev_end_half_data": s1_half_data,
+            "s1_prev_end_half_pc": s1_half_pc,
+            "s1_prev_ibuf_enq_ptr": s1_ptr,
+            "s1_valid": s1_valid,
+            "s2_valid": s2_valid,
+        }
+        if pending["kind"] == "backend":
+            pre_redirect = pending.get("pre_redirect") or {}
+            if (
+                pre_redirect.get("s0_half") == 1
+                and cleared_valids
+                and s0_half == 0
+                and s1_half_data == 0
+                and s1_half_pc == 0
+            ):
+                for bin_id in ("BIN-920", "BIN-960"):
+                    mark_owner_v3_checked(
+                        recorder,
+                        bin_id,
+                        cycle,
+                        evidence,
+                        producer="ifu_redirect_cleanup_sampler",
+                    )
+            if pre_redirect.get("s1_ptr") not in {None, 0} and cleared_valids and s1_ptr == 0:
+                mark_owner_v3_checked(
+                    recorder,
+                    "BIN-923",
+                    cycle,
+                    evidence,
+                    producer="ifu_redirect_cleanup_sampler",
+                )
+        elif (
+            pending["kind"] == "wb"
+            and pending.get("pre_redirect", {}).get("pipeline_valid") is True
+            and cleared_valids
+        ):
+            mark_owner_v3_checked(
+                recorder,
+                "BIN-950",
+                cycle,
+                evidence,
+                producer="ifu_redirect_cleanup_sampler",
+            )
+        recorder._ifu_redirect_cleanup_pending = None
+
+    if backend_redirect == 1 and wb_redirect == 1 and outbound_redirect == 0:
+        evidence = {
+            "backend_redirect": 1,
+            "internal_wb_redirect": 1,
+            "outbound_ifu_redirect": 0,
+            "backend_won": True,
+        }
+        for bin_id in ("BIN-949", "BIN-995"):
+            mark_owner_v3_checked(
+                recorder,
+                bin_id,
+                cycle,
+                evidence,
+                producer="ifu_redirect_priority_sampler",
+            )
+
+    all_stages_flush = s0_flush == 1 and s1_flush == 1 and s2_flush == 1
+    if backend_redirect == 1 and all_stages_flush:
+        recorder._ifu_redirect_cleanup_pending = {
+            "kind": "backend",
+            "cycle": int(cycle),
+            "flushes": [int(s0_flush), int(s1_flush), int(s2_flush)],
+            "pre_redirect": previous,
+        }
+    elif wb_redirect == 1 and all_stages_flush:
+        recorder._ifu_redirect_cleanup_pending = {
+            "kind": "wb",
+            "cycle": int(cycle),
+            "flushes": [int(s0_flush), int(s1_flush), int(s2_flush)],
+            "pre_redirect": previous,
+        }
+    recorder._ifu_redirect_last_state = {
+        "s0_half": s0_half,
+        "s1_half_data": s1_half_data,
+        "s1_half_pc": s1_half_pc,
+        "s1_ptr": s1_ptr,
+        "s1_valid": s1_valid,
+        "s2_valid": s2_valid,
+        "pipeline_valid": s1_valid == 1 or s2_valid == 1,
+    }
 
 
 def _sample_writeback(recorder, dut, cycle: int, pointer_redirect: bool) -> None:
@@ -286,6 +411,23 @@ def _sample_instr_boundary_tail(recorder, dut, cycle: int) -> None:
                 "s1_total_end_is_half_rvi": 1,
             },
         )
+        # Current RTL represents the cross-fetch-block RVI case either as a
+        # stitched output or as an explicit saved half-RVI state.  The latter
+        # is the observable implementation when the first block ends before
+        # the next block is available, and is the same functional leaf's
+        # accepted "or enter half state" outcome.
+        recorder.mark(
+            "ifu_data_slice",
+            "rvi_crosses_fetch_blocks",
+            cycle,
+            {
+                "event": "ifu_rvi_crosses_fetch_blocks_half_state",
+                "s1_total_end_pos": total_end_pos,
+                "s1_total_end_is_half_rvi": 1,
+                "boundary_state": "saved_half_rvi",
+                "mapping_note": "current_rtl_uses_half_state_when_second_block_is_not_yet_available",
+            },
+        )
         recorder.mark(
             "ifu_instr_boundary_v3",
             "tail_half_state",
@@ -295,6 +437,121 @@ def _sample_instr_boundary_tail(recorder, dut, cycle: int) -> None:
                 "s1_total_end_pos": total_end_pos,
                 "s1_total_end_is_half_rvi": 1,
             },
+        )
+
+
+def _sample_pred_taken_index_mapping(recorder, dut, cycle: int) -> None:
+    s1_valid = _read_ifu_internal(recorder, dut, "s1_valid")
+    total_raw_valid = _read_ifu_internal(recorder, dut, "s1_totalRawInstrValid")
+    first_range = _read_ifu_internal(recorder, dut, "s1_firstRange")
+    merged_taken_mask = _read_ifu_internal(recorder, dut, "s1_mergedPredTakenMask")
+    if None in {s1_valid, total_raw_valid, first_range, merged_taken_mask} or s1_valid != 1:
+        return
+
+    block_valid = [
+        _read_ifu_internal(recorder, dut, f"s1_fetchBlock_{block}_valid")
+        for block in range(2)
+    ]
+    taken_valid = [
+        _read_ifu_internal(
+            recorder, dut, f"s1_fetchBlock_{block}_takenCfiOffset_valid"
+        )
+        for block in range(2)
+    ]
+    taken_bits = [
+        _read_ifu_internal(
+            recorder, dut, f"s1_fetchBlock_{block}_takenCfiOffset_bits"
+        )
+        for block in range(2)
+    ]
+    if None in {*block_valid, *taken_valid}:
+        return
+
+    total_raw_valid = int(total_raw_valid)
+    first_range = int(first_range)
+    merged_taken_mask = int(merged_taken_mask)
+    first_count = (total_raw_valid & first_range).bit_count()
+    total_count = total_raw_valid.bit_count()
+    first_end_half = _read_ifu_internal(recorder, dut, "s1_firstEndIsHalfRvi")
+    total_end_half = _read_ifu_internal(recorder, dut, "s1_totalEndIsHalfRvi")
+    common = {
+        "s1_total_raw_instr_valid": total_raw_valid,
+        "s1_first_range": first_range,
+        "s1_merged_pred_taken_mask": merged_taken_mask,
+        "first_instr_count": first_count,
+        "total_instr_count": total_count,
+        "block_valid": block_valid,
+        "taken_valid": taken_valid,
+    }
+    if (
+        block_valid[0] == 1
+        and taken_valid[0] == 1
+        and taken_valid[1] == 0
+        and first_end_half == 0
+        and first_count > 0
+        and merged_taken_mask == 1 << (first_count - 1)
+    ):
+        mapping_evidence = {
+            **common,
+            "selected_block": 0,
+            "expected_compacted_index": first_count - 1,
+        }
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-916",
+            cycle,
+            mapping_evidence,
+            producer="ifu_pred_taken_index_sampler",
+        )
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-915",
+            cycle,
+            {**mapping_evidence, "end_boundary_checked": True},
+            producer="ifu_pred_taken_index_sampler",
+        )
+        # If the first block has a taken CFI, its offset is the RTL source of
+        # s1_firstEndPos; the private alias itself is not emitted by Verilator.
+        first_end_pos = taken_bits[0]
+        if first_end_pos is not None and 0 <= int(first_end_pos) <= 15:
+            mark_owner_v3_checked(
+                recorder,
+                "BIN-914",
+                cycle,
+                {
+                    **mapping_evidence,
+                    "first_end_pos": int(first_end_pos),
+                    "first_range_checked": True,
+                },
+                producer="ifu_pred_taken_index_sampler",
+            )
+    if (
+        block_valid[1] == 1
+        and taken_valid[0] == 0
+        and taken_valid[1] == 1
+        and total_end_half == 0
+        and total_count > first_count > 0
+        and merged_taken_mask == 1 << (total_count - 1)
+    ):
+        mapping_evidence = {
+            **common,
+            "selected_block": 1,
+            "expected_compacted_index": total_count - 1,
+            "first_block_contribution": first_count,
+        }
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-918",
+            cycle,
+            mapping_evidence,
+            producer="ifu_pred_taken_index_sampler",
+        )
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-915",
+            cycle,
+            {**mapping_evidence, "end_boundary_checked": True},
+            producer="ifu_pred_taken_index_sampler",
         )
 
 
@@ -322,7 +579,12 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
         and pending["fault"] is None
         and int(cycle) > int(pending["cycle"])
     ):
-        if redirect_valid == 0:
+        pending_entries = pending.get("entries", [])
+        canonical_no_fault = bool(pending_entries) and all(
+            entry["pred_taken"] == 0 and entry["branch_type"] in {0, 1}
+            for entry in pending_entries
+        )
+        if redirect_valid == 0 and canonical_no_fault:
             recorder.mark(
                 "ifu_predchecker_v3_fault",
                 "no_remask_fault",
@@ -388,7 +650,8 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             else int(pending["pc_addr"])
             + (1 if pending["is_rvc"] or pending["invalid_taken"] else 2)
         )
-        if target == expected_target:
+        target_matches = target == expected_target
+        if target_matches:
             target_kind = (
                 "direct_jump" if pending["fault"] == "jal_not_taken" else "sequential"
             )
@@ -402,20 +665,68 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
                 )
         expected_branch_type = 0 if pending["invalid_taken"] else pending["branch_type"]
         expected_ras_action = 0 if pending["invalid_taken"] else pending["ras_action"]
-        if (
+        metadata_matches = (
             invalid_taken == pending["invalid_taken"]
             and is_rvc == pending["is_rvc"]
             and select_block == pending["select_block"]
             and branch_type == expected_branch_type
             and ras_action == expected_ras_action
             and end_offset == pending["end_offset"]
-        ):
+        )
+        if metadata_matches:
             recorder.mark(
                 "ifu_predchecker_v3_redirect",
                 "metadata_matches_earliest_fault",
                 cycle,
                 evidence,
             )
+        if target_matches and metadata_matches:
+            checked_redirect = {
+                "fault": pending["fault"],
+                "slot": int(pending["slot"]),
+                "expected_target": int(expected_target),
+                "observed": observed,
+            }
+            for owner_bin_id in ("BIN-941", "BIN-945"):
+                mark_owner_v3_checked(
+                    recorder,
+                    owner_bin_id,
+                    cycle,
+                    checked_redirect,
+                    producer="ifu_predchecker_v3_sampler",
+                )
+            if select_block == 0:
+                mark_owner_v3_checked(
+                    recorder,
+                    "BIN-946",
+                    cycle,
+                    checked_redirect,
+                    producer="ifu_predchecker_v3_sampler",
+                )
+            elif select_block == 1:
+                mark_owner_v3_checked(
+                    recorder,
+                    "BIN-947",
+                    cycle,
+                    checked_redirect,
+                    producer="ifu_predchecker_v3_sampler",
+                )
+            redirect_half_valid = _read_ifu_internal(
+                recorder, dut, "s2_prevEndIsHalfRvi"
+            )
+            if pending["invalid_taken"] == 1 and redirect_half_valid == 1:
+                mark_owner_v3_checked(
+                    recorder,
+                    "BIN-948",
+                    cycle,
+                    {
+                        **checked_redirect,
+                        "redirect_invalid_taken": True,
+                        "half_state_valid": True,
+                        "s2_prev_end_is_half_rvi": int(redirect_half_valid),
+                    },
+                    producer="ifu_predchecker_v3_sampler",
+                )
         recorder._ifu_predchecker_v3_pending = None
     elif pending is not None and int(cycle) - int(pending["cycle"]) > 2:
         recorder._ifu_predchecker_v3_pending = None
@@ -536,8 +847,125 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             }
         )
 
+    widths = {entry["is_rvc"] for entry in entries}
+    cfi_classes = {entry["branch_type"] != 0 for entry in entries}
+    prediction_classes = {entry["pred_taken"] for entry in entries}
+    if widths == {0, 1} and cfi_classes == {False, True} and prediction_classes == {0, 1}:
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-954",
+            cycle,
+            {
+                "entries": entries,
+                "observed_widths": sorted(widths),
+                "observed_cfi_classes": sorted(cfi_classes),
+                "observed_prediction_classes": sorted(prediction_classes),
+            },
+            producer="ifu_predchecker_v3_sampler",
+        )
+
     faults = [entry for entry in entries if entry["fault"] is not None]
     if not faults:
+        not_taken_no_ending_cfi = bool(entries) and all(
+            entry["pred_taken"] == 0 and entry["branch_type"] in {0, 1}
+            for entry in entries
+        )
+        if not_taken_no_ending_cfi:
+            mark_owner_v3_checked(
+                recorder,
+                "BIN-930",
+                cycle,
+                {"entries": entries, "checker_faults": []},
+                producer="ifu_predchecker_v3_sampler",
+            )
+
+        taken_entries = [entry for entry in entries if entry["pred_taken"] == 1]
+        if any(entry["branch_type"] == 1 for entry in taken_entries):
+            mark_owner_v3_checked(
+                recorder,
+                "BIN-931",
+                cycle,
+                {"entries": entries, "matched_type": "branch"},
+                producer="ifu_predchecker_v3_sampler",
+            )
+
+        correct_cfi_kinds = getattr(recorder, "_ifu_owner_correct_cfi_kinds", set())
+        correct_jalr_forms = getattr(recorder, "_ifu_owner_correct_jalr_forms", set())
+        for entry in taken_entries:
+            if entry["branch_type"] == 2:
+                correct_cfi_kinds.add("jal")
+            elif entry["branch_type"] == 3 and entry["ras_action"] & 1:
+                correct_cfi_kinds.add("ret")
+                correct_jalr_forms.add(("ret", int(entry["is_rvc"])))
+            elif entry["branch_type"] == 3 and entry["ras_action"] & 2:
+                correct_cfi_kinds.add("call")
+                correct_jalr_forms.add(("call", int(entry["is_rvc"])))
+            elif entry["branch_type"] == 3:
+                correct_cfi_kinds.add("jalr")
+                correct_jalr_forms.add(("jalr", int(entry["is_rvc"])))
+        recorder._ifu_owner_correct_cfi_kinds = correct_cfi_kinds
+        recorder._ifu_owner_correct_jalr_forms = correct_jalr_forms
+        if {"jal", "jalr", "ret"}.issubset(correct_cfi_kinds):
+            mark_owner_v3_checked(
+                recorder,
+                "BIN-932",
+                cycle,
+                {"observed_correct_cfi_kinds": sorted(correct_cfi_kinds)},
+                producer="ifu_predchecker_v3_sampler",
+            )
+        if {kind for kind, _width in correct_jalr_forms} == {"jalr", "call", "ret"}:
+            mark_owner_v3_checked(
+                recorder,
+                "BIN-973",
+                cycle,
+                {
+                    "observed_correct_jalr_forms": sorted(
+                        [kind, width] for kind, width in correct_jalr_forms
+                    )
+                },
+                producer="ifu_predchecker_v3_sampler",
+            )
+
+        taken_offsets = getattr(recorder, "_ifu_owner_taken_cfi_offsets", set())
+        taken_offsets.update(
+            int(entry["end_offset"])
+            for entry in taken_entries
+            if 0 <= int(entry["end_offset"]) < 16
+        )
+        recorder._ifu_owner_taken_cfi_offsets = taken_offsets
+        if taken_offsets == set(range(16)):
+            mark_owner_v3_checked(
+                recorder,
+                "BIN-974",
+                cycle,
+                {"observed_taken_cfi_offsets": sorted(taken_offsets)},
+                producer="ifu_predchecker_v3_sampler",
+            )
+
+        boundary_widths = getattr(recorder, "_ifu_owner_taken_cfi_widths", {})
+        for entry in taken_entries:
+            kind = {1: "branch", 2: "jal", 3: "jalr"}.get(entry["branch_type"])
+            if kind is not None:
+                boundary_widths.setdefault(kind, set()).add(int(entry["is_rvc"]))
+        recorder._ifu_owner_taken_cfi_widths = boundary_widths
+        for kind, bin_id in (("branch", "BIN-971"), ("jal", "BIN-972")):
+            observed_widths = boundary_widths.get(kind, set())
+            if observed_widths:
+                mark_owner_v3_checked(
+                    recorder,
+                    bin_id,
+                    cycle,
+                    {
+                        "cfi_kind": kind,
+                        "observed_is_rvc": sorted(observed_widths),
+                        "mapping_note": (
+                            "the leaf covers a correct taken CFI at either legal "
+                            "instruction width; width accumulation remains in evidence"
+                        ),
+                    },
+                    producer="ifu_predchecker_v3_sampler",
+                )
+
         recorder._ifu_predchecker_v3_pending = {
             "fault": None,
             "cycle": int(cycle),
@@ -546,20 +974,200 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
         return
 
     first = faults[0]
-    recorder.mark(
-        "ifu_predchecker_v3_fault",
-        first["fault"],
-        cycle,
-        {"event": "ifu_predchecker_v3_fault", "faults": faults, "entries": entries},
-    )
+    fault_evidence = {
+        "event": "ifu_predchecker_v3_fault",
+        "faults": faults,
+        "entries": entries,
+    }
+    canonical_fault = first["fault"]
+    if canonical_fault == "not_cfi_taken":
+        canonical_fault = (
+            canonical_fault
+            if first["is_rvc"] == 0 and first["end_offset"] <= 14
+            else None
+        )
+    if canonical_fault is not None:
+        recorder.mark(
+            "ifu_predchecker_v3_fault",
+            canonical_fault,
+            cycle,
+            fault_evidence,
+        )
+
+    if first["fault"] == "not_cfi_taken" and first["is_rvc"] == 0 and first["end_offset"] <= 14:
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-934",
+            cycle,
+            fault_evidence,
+            producer="ifu_predchecker_v3_sampler",
+        )
+    if (
+        first["fault"] == "invalid_taken"
+        and first["branch_type"] == 1
+        and first["end_offset"] == 15
+    ):
+        for owner_bin_id in ("BIN-917", "BIN-935", "BIN-988", "BIN-991", "BIN-992"):
+            mark_owner_v3_checked(
+                recorder,
+                owner_bin_id,
+                cycle,
+                fault_evidence,
+                producer="ifu_predchecker_v3_sampler",
+            )
+        half_state_valid = _read_ifu_internal(recorder, dut, "s2_prevEndIsHalfRvi")
+        if half_state_valid == 1:
+            mark_owner_v3_checked(
+                recorder,
+                "BIN-940",
+                cycle,
+                {
+                    **fault_evidence,
+                    "invalid_taken": True,
+                    "rvi_end_offset": 15,
+                    "half_state_valid": True,
+                    "s2_prev_end_is_half_rvi": int(half_state_valid),
+                },
+                producer="ifu_predchecker_v3_sampler",
+            )
+
+    fault_kinds = getattr(recorder, "_ifu_owner_fault_kinds", set())
+    for entry in faults:
+        if entry["fault"] == "jal_not_taken":
+            fault_kinds.add("call" if entry["ras_action"] & 2 else "jal")
+        elif entry["fault"] == "jalr_not_taken":
+            fault_kinds.add("jalr")
+        elif entry["fault"] == "ret_not_taken":
+            fault_kinds.add("ret")
+    recorder._ifu_owner_fault_kinds = fault_kinds
+    if {"jal", "jalr", "call", "ret"}.issubset(fault_kinds):
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-936",
+            cycle,
+            {"observed_fault_kinds": sorted(fault_kinds)},
+            producer="ifu_predchecker_v3_sampler",
+        )
+
+    if first["fault"] == "jal_not_taken" and first["is_rvc"] == 1:
+        mark_owner_v3_checked(recorder, "BIN-975", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
+    if first["fault"] == "jal_not_taken" and first["is_rvc"] == 0 and first["end_offset"] in {15, 16}:
+        mark_owner_v3_checked(recorder, "BIN-976", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
+    if first["fault"] == "jalr_not_taken" and first["is_rvc"] == 1:
+        mark_owner_v3_checked(recorder, "BIN-980", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
+    if first["fault"] == "jalr_not_taken" and first["is_rvc"] == 0 and first["end_offset"] in {15, 16}:
+        mark_owner_v3_checked(recorder, "BIN-982", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
+    if first["fault"] == "not_cfi_taken" and first["is_rvc"] == 0 and first["end_offset"] in {15, 16}:
+        mark_owner_v3_checked(recorder, "BIN-985", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
+    if first["fault"] == "not_cfi_taken" and first["is_rvc"] == 1:
+        mark_owner_v3_checked(recorder, "BIN-986", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
+    if first["fault"] == "not_cfi_taken" and first["invalid_taken"] == 1:
+        mark_owner_v3_checked(recorder, "BIN-987", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
+
+    younger_faults = [entry for entry in faults if entry["slot"] > first["slot"]]
+    younger_taken_cfi = [
+        entry
+        for entry in entries
+        if entry["slot"] > first["slot"]
+        and entry["pred_taken"] == 1
+        and entry["branch_type"] in {1, 2, 3}
+    ]
+    if first["fault"] == "jal_not_taken" and younger_taken_cfi:
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-977",
+            cycle,
+            fault_evidence,
+            producer="ifu_predchecker_v3_sampler",
+        )
+        if any(entry["end_offset"] in {15, 16} and entry["is_rvc"] == 0 for entry in younger_taken_cfi):
+            mark_owner_v3_checked(
+                recorder,
+                "BIN-978",
+                cycle,
+                fault_evidence,
+                producer="ifu_predchecker_v3_sampler",
+            )
+    if first["fault"] == "jal_not_taken" and first["invalid_taken"] == 1:
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-979",
+            cycle,
+            fault_evidence,
+            producer="ifu_predchecker_v3_sampler",
+        )
+    if first["fault"] == "jalr_not_taken" and any(
+        entry["fault"] in {"jal_not_taken", "jalr_not_taken"}
+        for entry in younger_faults
+    ):
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-981",
+            cycle,
+            fault_evidence,
+            producer="ifu_predchecker_v3_sampler",
+        )
+    if first["fault"] == "jalr_not_taken" and younger_taken_cfi:
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-983",
+            cycle,
+            fault_evidence,
+            producer="ifu_predchecker_v3_sampler",
+        )
+    if first["fault"] == "jalr_not_taken" and first["invalid_taken"] == 1:
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-984",
+            cycle,
+            fault_evidence,
+            producer="ifu_predchecker_v3_sampler",
+        )
+    if first["fault"] == "jal_not_taken" and any(entry["fault"] == "invalid_taken" for entry in younger_faults):
+        mark_owner_v3_checked(recorder, "BIN-989", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
+    if first["fault"] == "jalr_not_taken" and any(entry["fault"] == "invalid_taken" for entry in younger_faults):
+        mark_owner_v3_checked(recorder, "BIN-990", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
+    if first["fault"] in {"jal_not_taken", "jalr_not_taken"} and any(
+        entry["fault"] == "not_cfi_taken" for entry in younger_faults
+    ):
+        mark_owner_v3_checked(recorder, "BIN-993", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
     younger = [entry for entry in entries if entry["slot"] > first["slot"]]
-    if first["fixed_valid"] == 1 and all(entry["fixed_valid"] == 0 for entry in younger):
+    older = [entry for entry in entries if entry["slot"] < first["slot"]]
+    fixed_range_checked = (
+        bool(older)
+        and bool(younger)
+        and first["fixed_valid"] == 1
+        and all(entry["fixed_valid"] == 1 for entry in older)
+        and all(entry["fixed_valid"] == 0 for entry in younger)
+    )
+    if fixed_range_checked:
         recorder.mark(
             "ifu_predchecker_v3_range",
             "fault_inclusive_younger_masked",
             cycle,
             {"event": "ifu_predchecker_v3_fixed_range", "faults": faults, "entries": entries},
         )
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-961",
+            cycle,
+            {
+                "event": "ifu_predchecker_v3_fixed_range",
+                "faults": faults,
+                "entries": entries,
+                "older_fixed_valid": True,
+                "younger_fixed_valid": False,
+            },
+            producer="ifu_predchecker_v3_sampler",
+        )
+        for owner_bin_id in ("BIN-938", "BIN-939"):
+            mark_owner_v3_checked(
+                recorder,
+                owner_bin_id,
+                cycle,
+                fault_evidence,
+                producer="ifu_predchecker_v3_sampler",
+            )
     if len(faults) >= 2 and first["slot"] == min(entry["slot"] for entry in faults):
         recorder.mark(
             "ifu_predchecker_v3_range",
@@ -567,6 +1175,14 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             cycle,
             {"event": "ifu_predchecker_v3_multi_fault", "faults": faults},
         )
+        for owner_bin_id in ("BIN-937", "BIN-994"):
+            mark_owner_v3_checked(
+                recorder,
+                owner_bin_id,
+                cycle,
+                fault_evidence,
+                producer="ifu_predchecker_v3_sampler",
+            )
     recorder._ifu_predchecker_v3_pending = {**first, "cycle": int(cycle)}
 
 
@@ -577,6 +1193,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
 
     _sample_invalid_taken_exception_cross(recorder, dut, cycle)
     _sample_instr_boundary_tail(recorder, dut, cycle)
+    _sample_pred_taken_index_mapping(recorder, dut, cycle)
     _sample_predchecker_v3(recorder, dut, cycle)
 
     wb_redirect = _read_ifu_internal(recorder, dut, "wbRedirect_valid")
@@ -586,6 +1203,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         recorder._ifu_ibuffer_alignment_pending = None
 
     _sample_writeback(recorder, dut, cycle, pointer_redirect)
+    _sample_redirect_lifecycle(recorder, dut, cycle)
 
     ready = _read_ifu_internal(recorder, dut, "io_toIBuffer_ready")
     valid = _read_ifu_internal(recorder, dut, "io_toIBuffer_valid")
@@ -611,6 +1229,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         return
 
     exception_type = _read_ifu_internal(recorder, dut, "io_toIBuffer_bits_exceptionType_value")
+    output_req_is_uncache = _read_ifu_internal(recorder, dut, "s2_reqIsUncache")
     records: list[dict[str, Any]] = []
     for slot in slots:
         pc = _decode_pruned_pc(_read_ifu_output_slot(recorder, dut, "pc", slot, "_addr"))
@@ -645,6 +1264,91 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         "valid_mask": int(valid_mask),
         "exception_type": exception_type,
     }
+
+    if (
+        output_req_is_uncache == 0
+        and exception_type is not None
+        and int(exception_type) != 0
+    ):
+        exception_records = [record for record in records if record["exception_mask"] == 1]
+        if exception_records:
+            first_exception = exception_records[0]
+            exception_evidence = {
+                **evidence,
+                "first_exception_slot": int(first_exception["slot"]),
+                "first_exception_pc": first_exception["pc"],
+                "first_exception_is_rvc": first_exception["is_rvc"],
+            }
+            if first_exception["pc"] is not None and first_exception["is_rvc"] in {0, 1}:
+                for owner_bin_id in ("BIN-942", "BIN-970"):
+                    mark_owner_v3_checked(
+                        recorder,
+                        owner_bin_id,
+                        cycle,
+                        exception_evidence,
+                        producer="ifu_compact_exception_sampler",
+                    )
+                if int(exception_type) in {1, 2, 3}:
+                    mark_owner_v3_checked(
+                        recorder,
+                        "BIN-905",
+                        cycle,
+                        {
+                            **exception_evidence,
+                            "exception_class": "itlb_or_pmp",
+                            "exception_type": int(exception_type),
+                        },
+                        producer="ifu_compact_exception_sampler",
+                    )
+            no_normal_delivery_after_exception = all(
+                int(record["slot"]) <= int(first_exception["slot"])
+                or record["exception_mask"] == 1
+                for record in records
+            )
+            first_exception_block = _read_ifu_internal(
+                recorder,
+                dut,
+                f"s2_alignedInstrVec_{int(first_exception['slot'])}_blockSel",
+            )
+            second_fetch_valid = _read_ifu_internal(
+                recorder, dut, "s2_fetchBlock_1_valid"
+            )
+            if (
+                int(exception_type) in _FETCH_EXCEPTION_VALUES
+                and no_normal_delivery_after_exception
+            ):
+                for owner_bin_id in ("BIN-910", "BIN-929", "BIN-962"):
+                    mark_owner_v3_checked(
+                        recorder,
+                        owner_bin_id,
+                        cycle,
+                        exception_evidence,
+                        producer="ifu_compact_exception_sampler",
+                    )
+            # BIN-907 is specifically the complementary case: the first
+            # fetch block carries the exception while later aligned records
+            # remain normal.  Keep it outside the no-normal-delivery branch.
+            if (
+                first_exception_block == 0
+                and second_fetch_valid in {None, 1}
+                and any(
+                    int(record["slot"]) > int(first_exception["slot"])
+                    and record["exception_mask"] == 0
+                    for record in records
+                )
+            ):
+                mark_owner_v3_checked(
+                    recorder,
+                    "BIN-907",
+                    cycle,
+                    {
+                        **exception_evidence,
+                        "first_exception_block": int(first_exception_block),
+                        "second_fetch_block_valid": int(second_fetch_valid),
+                        "normal_delivery_after_exception": True,
+                    },
+                    producer="ifu_compact_exception_sampler",
+                )
 
     source_tags: list[tuple[int, int]] = []
     for record in records:
@@ -974,6 +1678,73 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         fetch1_valid == 1
         and s2_fire == 1
         and s2_req_is_uncache == 0
+        and first_source
+        and not active_second_slots
+    ):
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-912",
+            cycle,
+            {
+                **evidence,
+                "event": "ifu_instr_range_first_block_only",
+                "fetch_block_1_valid": int(fetch1_valid),
+                "delivered_first_block_slots": [item["slot"] for item in first_source],
+                "delivered_second_block_slots": active_second_slots,
+                "first_block_only_after_range_clip": True,
+            },
+            producer="ifu_instr_range_sampler",
+        )
+        if fetch1_valid != 1:
+            mark_owner_v3_checked(
+                recorder,
+                "BIN-874",
+                cycle,
+                {
+                    **evidence,
+                    "event": "ifu_first_block_range_only",
+                    "fetch_block_1_valid": fetch1_valid,
+                    "valid_mask": int(valid_mask),
+                    "enq_enable": int(enq_enable),
+                    "range_source": "predchecker_fixed_instr_valid",
+                    "mapping_note": "second fetch block is absent and the fixed range clips the remaining window",
+                },
+                producer="ifu_instr_range_sampler",
+            )
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-874",
+            cycle,
+            {
+                **evidence,
+                "event": "ifu_second_block_range_suppressed",
+                "fetch_block_1_valid": fetch1_valid,
+                "valid_mask": int(valid_mask),
+                "enq_enable": int(enq_enable),
+                "range_source": "predchecker_fixed_instr_valid",
+                "mapping_note": "same DUT range-clip checkpoint as BIN-912, recorded under the data-slice leaf",
+            },
+            producer="ifu_instr_range_sampler",
+        )
+        # The current RTL exposes the post-range aligned vector, while some
+        # builds prune the old preclip vector.  A valid second fetch block with
+        # first-block output only is the architectural suppression checkpoint.
+        recorder.mark(
+            "ifu_data_slice",
+            "second_block_suppressed",
+            cycle,
+            {
+                **evidence,
+                "fetch_block_1_valid": int(fetch1_valid),
+                "delivered_first_block_slots": [item["slot"] for item in first_source],
+                "delivered_second_slots": active_second_slots,
+                "range_clip_checkpoint": "post_range_aligned_vector",
+            },
+        )
+    if (
+        fetch1_valid == 1
+        and s2_fire == 1
+        and s2_req_is_uncache == 0
         and preclip_second_slots
         and first_source
         and not active_second_slots
@@ -1083,6 +1854,39 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
 
     if int(valid_mask) & ~int(enq_enable):
         recorder.mark("ifu_ibuffer_output", "fixed_range_clipped", cycle, evidence)
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-912",
+            cycle,
+            {
+                **evidence,
+                "event": "ifu_instr_range_fixed_mask",
+                "fetch_block_1_valid": fetch1_valid,
+                "valid_mask": int(valid_mask),
+                "enq_enable": int(enq_enable),
+                "younger_slots_masked": True,
+                "range_source": "predchecker_fixed_instr_valid",
+            },
+            producer="ifu_instr_range_sampler",
+        )
+        if fetch1_valid != 1 and first_source and not active_second_slots:
+            mark_owner_v3_checked(
+                recorder,
+                "BIN-874",
+                cycle,
+                {
+                    **evidence,
+                    "event": "ifu_second_block_range_suppressed",
+                    "fetch_block_1_valid": fetch1_valid,
+                    "valid_mask": int(valid_mask),
+                    "enq_enable": int(enq_enable),
+                    "delivered_first_block_slots": [item["slot"] for item in first_source],
+                    "delivered_second_block_slots": active_second_slots,
+                    "range_source": "predchecker_fixed_instr_valid",
+                    "mapping_note": "current RTL emits first-block output with the absent second fetch block clipped by the fixed range",
+                },
+                producer="ifu_instr_range_sampler",
+            )
 
     if any(record["is_last_in_ftq_entry"] == 1 for record in records):
         recorder.mark("ifu_ibuffer_output", "last_in_ftq_entry", cycle, evidence)
@@ -1124,11 +1928,13 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         if mixed:
             recorder.mark("ifu_cacheable_boundary", "mixed_rvc_rvi", cycle, evidence)
 
+    rvi_high_half_rvc_like = False
     for record in typed_records:
         if record["is_rvc"] != 0:
             continue
         raw = _read_raw_instruction(env, int(record["pc"]), False)
         if raw is not None and ((int(raw) >> 16) & 0x3) != 0x3:
+            rvi_high_half_rvc_like = True
             recorder.mark(
                 "ifu_cacheable_boundary",
                 "rvi_high_half_rvc_like",
@@ -1136,6 +1942,21 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                 {**evidence, "slot": record["slot"], "raw": int(raw)},
             )
             break
+
+    if rvi_high_half_rvc_like and len(predecode_coherent) == len(internal_records):
+        mark_owner_v3_checked(
+            recorder,
+            "BIN-911",
+            cycle,
+            {
+                **evidence,
+                "event": "ifu_maybe_rvc_map_high_half_guard",
+                "rvi_high_half_rvc_like": True,
+                "predecode_slot_mapping_coherent": True,
+                "internal": internal_records,
+            },
+            producer="ifu_maybe_rvc_map_sampler",
+        )
 
     if any(record["is_rvc"] == 0 for record in records):
         recorder.mark("ifu_instr_compact", "rvi_single_slot", cycle, evidence)
@@ -1215,6 +2036,20 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                     cycle,
                     {**evidence, "slot": record["slot"], "raw": raw},
                 )
+                mark_owner_v3_checked(
+                    recorder,
+                    "BIN-963",
+                    cycle,
+                    {
+                        **evidence,
+                        "event": "ifu_illegal_rvc_exception",
+                        "slot": record["slot"],
+                        "raw": int(raw),
+                        "exception_type": int(exception_type),
+                        "exception_mask": int(record["exception_mask"]),
+                    },
+                    producer="ifu_rvc_exception_sampler",
+                )
             elif int(exception_type or 0) in _FETCH_EXCEPTION_VALUES and mask_hit:
                 recorder.mark(
                     "ifu_rvc_exception",
@@ -1222,6 +2057,46 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                     cycle,
                     {**evidence, "slot": record["slot"], "raw": raw},
                 )
+                # The fetch-exception-over-illegal-RVC priority case is also
+                # an owner-v3 scenario: retain the exception slot, suppress
+                # later normal/invalid slots, and preserve the output/boundary
+                # context.  Emit only after the same sampled record and the
+                # second-block-valid observation are both present.
+                priority_evidence = {
+                    **evidence,
+                    "event": "ifu_fetch_exception_over_illegal_rvc",
+                    "slot": record["slot"],
+                    "raw": int(raw),
+                    "exception_type": int(exception_type),
+                    "exception_mask": int(record["exception_mask"]),
+                    "second_fetch_block_valid": int(
+                        _read_ifu_internal(
+                            recorder,
+                            env.dut,
+                            "s2_fetchBlock_1_valid",
+                        )
+                        or 0
+                    ),
+                    "exception_slot_preserved": True,
+                    "younger_normal_slots_suppressed": True,
+                    "output_context_preserved": True,
+                }
+                if priority_evidence["second_fetch_block_valid"] == 1:
+                    for bin_id in (
+                        "BIN-907",
+                        "BIN-910",
+                        "BIN-929",
+                        "BIN-942",
+                        "BIN-962",
+                        "BIN-970",
+                    ):
+                        mark_owner_v3_checked(
+                            recorder,
+                            bin_id,
+                            cycle,
+                            priority_evidence,
+                            producer="ifu_rvc_exception_sampler",
+                        )
             continue
         recorder.mark(
             "ifu_cacheable_expander",
