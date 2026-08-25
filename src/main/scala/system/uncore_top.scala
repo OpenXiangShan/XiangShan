@@ -84,7 +84,7 @@ case class AplicParams(
     CFG_ID_WIDTH:   Int = 16,
     APLICAddrMap:   AddressSet = AddressSet(0x1E020000L, 0x7fff),
     MSI_DATA_WIDTH: Int = 32,
-    NumIntSrcs:     Int = 512
+    NumIntSrcs:     Int = 160
 )
 case class PeriParams(
     slaveDataBytes: Int = 8,
@@ -1287,6 +1287,7 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
   override lazy val module = new Imp(this)
 }
 class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
+  require(params.aplicParams.NumIntSrcs == 160, "uncoreTop APLIC supports exactly 160 interrupt sources")
   // cpu axi ports -> xbar1to2 -> imsic slave and dm slave
   println("====start: enter uncoreTop ..==")
   val cpu_mNodes = Seq.fill(params.NumHarts) {
@@ -1375,7 +1376,8 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       )
     })
     val i_dft_icg_scan_en    = IO(Input(Bool()))
-    val i_aplic_wire_int_vld = IO(Input(UInt(params.NumIntSrcs.W)))
+    val i_aplic_wire_int_vld = IO(Input(UInt(512.W)))
+    val i_aplic_wire_int_vld_NC = dontTouch(WireInit(i_aplic_wire_int_vld(511, 160)))
     val rtc_clock            = IO(Input(Clock()))
     val rtc_reset            = IO(Input(AsyncReset()))
     val clock                = IO(Input(Clock()))
@@ -1403,7 +1405,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     withClockAndReset(clock, reset) {
       val aplic_top = Module(new aplic_top(params.aplicParams))
       // aplic
-      aplic_top.i_aplic_wire_int_vld := i_aplic_wire_int_vld
+      aplic_top.i_aplic_wire_int_vld := i_aplic_wire_int_vld(159, 0)
       aplic_top.i_dft_icg_scan_en    := i_dft_icg_scan_en
       aplic_top.aplic_s <> peri_sNode.in.head._1
       imsicTop.module.s_aplic <> aplic_top.aplic_m
@@ -1494,7 +1496,7 @@ object PbusGen extends App {
     CFG_ID_WIDTH = 11,
     APLICAddrMap = AddressSet(0x1E020000L, 0x7fff),
     MSI_DATA_WIDTH = 32,
-    NumIntSrcs = 512
+    NumIntSrcs = 160
   )
   val periParams = PeriParams(
     slaveDataBytes = 8,
