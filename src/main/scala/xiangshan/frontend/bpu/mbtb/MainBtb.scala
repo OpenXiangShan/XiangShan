@@ -160,7 +160,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   /* *** t1 ***
    * calculate write data and write to alignBanks
    */
-  private val t1_fire  = RegNext(t0_fire, init = false.B) && io.enable
+  private val t1_fire = RegNext(t0_fire, init = false.B) && io.enable && (if (HasBpuFlush) !bpuFlushing else true.B)
   private val t1_train = RegEnable(t0_train, t0_fire)
 
   private val t1_rotator    = RegEnable(t0_rotator, t0_fire)
