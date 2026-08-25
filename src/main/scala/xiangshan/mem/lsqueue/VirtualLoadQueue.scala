@@ -137,7 +137,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   // make chisel happy
   val deqCountMask = Wire(UInt(DeqPtrMoveStride.W))
   deqCountMask := deqLookup.asUInt & (~deqInSameRedirectCycle.asUInt).asUInt
-  val commitCount = PopCount(PriorityEncoderOH(~deqCountMask) - 1.U)
+  val commitCount = PriorityEncoder(true.B ## ~deqCountMask)
   val lastCommitCount = GatedRegNext(commitCount)
 
   // update deqPtr

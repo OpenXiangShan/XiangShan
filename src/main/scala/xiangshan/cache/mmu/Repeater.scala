@@ -314,7 +314,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
     })
 
     // Multiple matching entries are handled by the original replay_all hint.
-    fastHint.valid := fastRespValidReg && PopCount(fastMatchReg) === 1.U && !io.flush
+    fastHint.valid := fastRespValidReg && fastMatchReg.orR && !io.flush
     fastHint.bits.id := fastHintId
     fastHint.bits.replay_all := false.B
   }

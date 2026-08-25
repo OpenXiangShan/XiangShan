@@ -212,7 +212,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   val (bus, edge) = outer.clientNode.out.head
 
-  val req  = io.lsq.req
+  val req  = Wire(Decoupled(new UncacheWordReq))
   val resp = io.lsq.resp
   val mem_acquire = bus.a
   val mem_grant   = bus.d
@@ -225,10 +225,9 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   bus.d.ready := false.B
   bus.e.valid := false.B
   bus.e.bits  := DontCare
-  io.lsq.req.ready := req_ready
+  req.ready := req_ready
   io.lsq.resp.valid := false.B
   io.lsq.resp.bits := DontCare
-
 
   /******************************************************************
    * Data Structure
@@ -241,6 +240,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   val noPending = RegInit(VecInit(Seq.fill(UncacheBufferSize)(true.B)))
 
   // drain buffer
+  val entriesEmpty = Wire(Bool())
   val empty = Wire(Bool())
   val f1_needDrain = Wire(Bool())
   val do_uarch_drain = RegInit(false.B)
@@ -251,6 +251,16 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   }.otherwise{
     do_uarch_drain := false.B
   }
+
+  // Flush and uarch drain stop new requests at the skid input. Requests already
+  // accepted by the skid must still reach e0 so that the uncache buffer drains.
+  val skidOccupied = skidBuffer(
+    io.lsq.req,
+    req,
+    false.B,
+    "UncacheSkidBuffer",
+    !(io.flush.valid || do_uarch_drain)
+  )
 
   val q0_entry = Wire(new UncacheEntry)
   val q0_canSentIdx = Wire(UInt(INDEX_WIDTH.W))
@@ -355,7 +365,10 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   val (e0_allocIdx, e0_canAlloc) = PriorityEncoderWithFlag(e0_invalidVec)
   val e0_allocWaitSame = e0_allocWaitSameVec.reduce(_ || _)
   val e0_sid = Mux(e0_canMerge, e0_mergeIdx, e0_allocIdx)
-  val e0_reject = do_uarch_drain || (!e0_canMerge && !e0_invalidVec.asUInt.orR) || e0_rejectVec.reduce(_ || _)
+  // During a drain, only the request already captured by the skid buffer may
+  // enter e0. New LSQ requests are stopped at the skid input.
+  val e0_reject = (do_uarch_drain && !skidOccupied) ||
+    (!e0_canMerge && !e0_invalidVec.asUInt.orR) || e0_rejectVec.reduce(_ || _)
 
   // e0_fire is used to guarantee that it will not be rejected
   when(e0_canMerge && e0_req_valid){
@@ -490,7 +503,8 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
    * Buffer Flush
    * 1. when io.flush.valid is true: drain store queue and ubuffer
    ******************************************************************/
-  empty := !VecInit(states.map(_.isValid())).asUInt.orR
+  entriesEmpty := !VecInit(states.map(_.isValid())).asUInt.orR
+  empty := entriesEmpty && !skidOccupied
   io.flush.empty := empty
 
 
@@ -600,20 +614,21 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   XSPerfAccumulate("q0_acquire", q0_canSent)
   XSPerfAccumulate("q0_acquire_store", q0_canSent && q0_isStore)
   XSPerfAccumulate("q0_acquire_load", q0_canSent && !q0_isStore)
-  XSPerfAccumulate("uncache_memBackTypeMM", io.lsq.req.fire && io.lsq.req.bits.memBackTypeMM)
-  XSPerfAccumulate("uncache_mmio_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc)
-  XSPerfAccumulate("uncache_mmio_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc)
-  XSPerfAccumulate("uncache_nc_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc)
-  XSPerfAccumulate("uncache_nc_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc)
+  XSPerfAccumulate("skid_enqueue", io.lsq.req.fire)
+  XSPerfAccumulate("uncache_memBackTypeMM", e0_fire && e0_req.memBackTypeMM)
+  XSPerfAccumulate("uncache_mmio_store", e0_fire && isStore(e0_req.cmd) && !e0_req.nc)
+  XSPerfAccumulate("uncache_mmio_load", e0_fire && !isStore(e0_req.cmd) && !e0_req.nc)
+  XSPerfAccumulate("uncache_nc_store", e0_fire && isStore(e0_req.cmd) && e0_req.nc)
+  XSPerfAccumulate("uncache_nc_load", e0_fire && !isStore(e0_req.cmd) && e0_req.nc)
   XSPerfAccumulate("uncache_outstanding", uState =/= s_idle && mem_acquire.fire)
   XSPerfAccumulate("forward_count", PopCount(io.forward.map(_.s2Resp.bits.forwardMask.asUInt.orR)))
   XSPerfAccumulate("forward_vaddr_match_failed", PopCount(f1_tagMismatchVec))
 
   val perfEvents = Seq(
-    ("uncache_mmio_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc),
-    ("uncache_mmio_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc),
-    ("uncache_nc_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc),
-    ("uncache_nc_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc),
+    ("uncache_mmio_store", e0_fire && isStore(e0_req.cmd) && !e0_req.nc),
+    ("uncache_mmio_load", e0_fire && !isStore(e0_req.cmd) && !e0_req.nc),
+    ("uncache_nc_store", e0_fire && isStore(e0_req.cmd) && e0_req.nc),
+    ("uncache_nc_load", e0_fire && !isStore(e0_req.cmd) && e0_req.nc),
     ("uncache_outstanding", uState =/= s_idle && mem_acquire.fire),
     ("forward_count", PopCount(io.forward.map(_.s2Resp.bits.forwardMask.asUInt.orR))),
     ("forward_vaddr_match_failed", PopCount(f1_tagMismatchVec))
