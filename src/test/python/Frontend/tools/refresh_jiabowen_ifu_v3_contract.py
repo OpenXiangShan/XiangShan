@@ -209,6 +209,22 @@ _UPDATES = {
         "s2_valid、s2_icacheMeta(0)、s2_flush、uncacheUnit.req、toUncache、toIBuffer、toFtq.wbRedirect",
         evidence=f"{_REVIEW}:normalized stale f3/s3 wording to current s2",
     ),
+    "BIN-1032": ContractUpdate(
+        "IfuUncache SendReq反压时实际toUncache.valid保持低（PBMT.NC为合法witness）",
+        "IfuUncacheUnit处于SendReq且io.toIBuffer.ready=0；使用PBMT.NC合法流制造反压，MMIO/IO因WaitLastCommit顺序化通常不产生该组合",
+        "实际观测uncacheUnit.io.toUncache.req.valid=0；该协议点以CSV 1026–1142为canonical，NC区重复点仅作cross-reference",
+        "uncacheState、ifuStall、io.toIBuffer.ready、uncacheUnit.io.toUncache.req.valid、PBMT/PMP属性",
+        status="MODELED",
+        evidence=f"{_REVIEW}:generic IfuUncache handshake contract uses a legal PBMT.NC witness and observes the real valid signal",
+    ),
+    "BIN-1062": ContractUpdate(
+        "NC路径复用InstrUncache SendReq反压契约（cross-reference BIN-1032）",
+        "PBMT.NC进入SendReq且IBuffer反压；作为canonical BIN-1032的合法路径witness",
+        "命中BIN-1032的同一实际握手观察；NC区只确认路径适配，不重复定义IfuUncache FSM协议",
+        "PBMT.NC属性、uncacheState、ifuStall、io.toIBuffer.ready、uncacheUnit.io.toUncache.req.valid",
+        status="MODELED",
+        evidence=f"{_REVIEW}:NC policy section cross-references the canonical InstrUncache protocol leaf BIN-1032",
+    ),
 }
 
 

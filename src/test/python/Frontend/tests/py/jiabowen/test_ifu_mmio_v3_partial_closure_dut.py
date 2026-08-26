@@ -384,6 +384,71 @@ def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-1032")
+@pytest.mark.skipif(
+    not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
+)
+def test_instr_uncache_send_request_stall_uses_legal_nc_witness(env):
+    """Exercise the canonical SendReq backpressure contract on a legal NC path."""
+    expected, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
+        env,
+        vaddr=uncache._NORMAL_BASE,
+        paddr=uncache._NORMAL_PHYS_BASE,
+        instr_count=4096,
+    )
+    uncache._initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
+    uncache._configure_exec_attrs_16k(env, base_addr=0x80000000)
+    env.backend_model.set_can_accept(0)
+    uncache._force_redirect_to(env, mapping.vaddr)
+
+    stalled_cycles = []
+    handshake_samples = {}
+
+    def observe_send_stall(cycle, active_env):
+        snapshot = owner_funcov._snapshot(
+            active_env.functional_coverage, active_env.dut
+        )
+        sample = (
+            snapshot["uncache_state"],
+            snapshot["ifu_stall"],
+            snapshot["to_uncache_valid"],
+        )
+        handshake_samples[sample] = handshake_samples.get(sample, 0) + 1
+        if (
+            snapshot["uncache_state"] == owner_funcov._SEND_REQ
+            and snapshot["ifu_stall"] == 1
+            and snapshot["to_uncache_valid"] == 0
+        ):
+            stalled_cycles.append(int(cycle))
+
+    env.register_cycle_observer(observe_send_stall)
+    for _ in range(4000):
+        env.step(1)
+        if env.functional_coverage.key_hit(
+            "ifu_mmio_owner_v3", "mmio_leaf_017"
+        ):
+            break
+
+    assert stalled_cycles, {
+        "mapping": mapping,
+        "uncache": env.uncache_agent.get_stats(),
+        "backend": env.backend_model.get_stats(),
+        "handshake_samples": handshake_samples,
+    }
+    assert env.functional_coverage.key_hit(
+        "ifu_mmio_owner_v3", "mmio_leaf_017"
+    )
+
+    env.backend_model.set_can_accept(1)
+    assert uncache._wait_for_observed_pc(
+        env, expected[0][0], max_cycles=12000
+    ), {
+        "observed": [int(item.pc) for item in env.monitor.observations[-16:]],
+        "uncache": env.uncache_agent.get_stats(),
+    }
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_bins("BIN-1056")
 @pytest.mark.skipif(
     not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"

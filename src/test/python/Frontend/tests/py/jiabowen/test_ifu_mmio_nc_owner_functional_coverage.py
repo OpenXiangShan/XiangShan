@@ -51,6 +51,7 @@ def test_snapshot_reads_current_verilator_derived_aliases():
             "uncacheUnit.io_resp_valid": 1,
             "uncacheUnit.io_resp_bits_uncacheData": 0x1234,
             "uncacheUnit.io_ifuStall": 0,
+            "uncacheUnit.io_toUncache_req_valid": 1,
             "uncacheUnit.io_emptyAfter": 1,
             "Frontend_top.Frontend.inner_ifu.s2_uncacheData": 0xAABBCCDD,
             "Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_valid": 1,
@@ -71,6 +72,7 @@ def test_snapshot_reads_current_verilator_derived_aliases():
     assert snapshot["resp_valid"] == 1
     assert snapshot["resp_data"] == 0x1234
     assert snapshot["ifu_stall"] == 0
+    assert snapshot["to_uncache_valid"] == 1
     assert snapshot["empty_after"] == 1
     assert snapshot["s2_uncache_data"] == 0xAABBCCDD
     assert snapshot["instr_resp_valid"] == 1
@@ -406,6 +408,7 @@ def test_mmio_fsm_leaves_follow_current_ifu_uncache_state_machine():
             "uncache_state": owner._WAIT_LAST_COMMIT,
             "is_first": 1,
             "ifu_stall": 0,
+            "to_uncache_valid": 1,
             "req_ready": 0,
         }
     )
@@ -430,6 +433,29 @@ def test_mmio_fsm_leaves_follow_current_ifu_uncache_state_machine():
 
     for leaf in (12, 16, 18, 19):
         assert (owner.MMIO_OWNER_GROUP, f"mmio_leaf_{leaf:03d}") in recorder.hits
+
+
+def test_send_request_stall_uses_observed_valid_and_nc_witnesses_canonical_bin():
+    snapshot = _empty_snapshot()
+    snapshot.update(
+        {
+            "uncache_state": owner._SEND_REQ,
+            "ifu_stall": 1,
+            "to_uncache_valid": 1,
+        }
+    )
+    recorder = _Recorder()
+    state = _state(recorder)
+    state["nc_active"] = True
+
+    owner._sample_nc(recorder, 1, snapshot, state)
+    assert (owner.NC_OWNER_GROUP, "nc_leaf_008") not in recorder.hits
+    assert (owner.MMIO_OWNER_GROUP, "mmio_leaf_017") not in recorder.hits
+
+    snapshot["to_uncache_valid"] = 0
+    owner._sample_nc(recorder, 2, snapshot, state)
+    assert (owner.NC_OWNER_GROUP, "nc_leaf_008") in recorder.hits
+    assert (owner.MMIO_OWNER_GROUP, "mmio_leaf_017") in recorder.hits
 
 
 def test_mmio_redirect_cancels_waiting_response_path():

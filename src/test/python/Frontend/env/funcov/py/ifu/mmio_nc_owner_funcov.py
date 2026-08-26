@@ -130,6 +130,15 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "req_ready": _read_uncache(recorder, dut, "io_req_ready"),
         "uncache_state": _read_uncache(recorder, dut, "uncacheState"),
         "ifu_stall": _read_uncache(recorder, dut, "io_ifuStall"),
+        "to_uncache_valid": _read(
+            recorder,
+            dut,
+            "Frontend_top.Frontend.inner_instrUncache.entries_0.io_req_valid",
+            *(
+                prefix + "io_toUncache_req_valid"
+                for prefix in _UNCACHE_PREFIXES
+            ),
+        ),
         "empty_after": _read_uncache(recorder, dut, "io_emptyAfter"),
         "uncache_busy": _read_ifu(recorder, dut, "uncacheBusy"),
         "ibuffer_ready": _read_ifu(recorder, dut, "io_toIBuffer_ready"),
@@ -289,11 +298,7 @@ def _sample_mmio(
     ifu_stall = s["ifu_stall"]
     if ifu_stall is None and s["ibuffer_ready"] is not None:
         ifu_stall = int(s["ibuffer_ready"] == 0)
-    to_uncache_valid = (
-        int(state_value == _SEND_REQ and ifu_stall == 0)
-        if state_value is not None and ifu_stall is not None
-        else None
-    )
+    to_uncache_valid = s["to_uncache_valid"]
     empty_after = s["empty_after"]
     if (
         empty_after is None
@@ -333,6 +338,8 @@ def _sample_mmio(
         "resp_data": s["resp_data"],
         "s2_uncache_data": s["s2_uncache_data"],
         "resp_valid": s["resp_valid"],
+        "ifu_stall": ifu_stall,
+        "to_uncache_valid": to_uncache_valid,
         "backend_redirect": s["backend_redirect"],
         "uncache_redirect": s["uncache_redirect"],
         "wb_redirect": s["wb_redirect"],
@@ -616,11 +623,7 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
     ifu_stall = s["ifu_stall"]
     if ifu_stall is None and s["ibuffer_ready"] is not None:
         ifu_stall = int(s["ibuffer_ready"] == 0)
-    to_uncache_valid = (
-        int(s["uncache_state"] == _SEND_REQ and ifu_stall == 0)
-        if s["uncache_state"] is not None and ifu_stall is not None
-        else None
-    )
+    to_uncache_valid = s["to_uncache_valid"]
     entry_wait_resp = s["entry_state"] == _ENTRY_REFILL_RESP
     tl_a_fire = s["tl_a_valid"] == 1 and s["tl_a_ready"] == 1
     page_tail = (
@@ -646,6 +649,8 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
         "uncache_pc": s["uncache_pc"],
         "resp_data": s["resp_data"],
         "s2_uncache_data": s["s2_uncache_data"],
+        "ifu_stall": ifu_stall,
+        "to_uncache_valid": to_uncache_valid,
     }
     seen = state["nc_seen"]
 
@@ -748,6 +753,18 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
     for index, condition in conditions.items():
         if condition:
             _mark(recorder, NC_OWNER_GROUP, index, cycle, evidence)
+    if conditions[8]:
+        _mark(
+            recorder,
+            MMIO_OWNER_GROUP,
+            17,
+            cycle,
+            {
+                **evidence,
+                "canonical_protocol_bin": "BIN-1032",
+                "witness_path": "pbmt_nc",
+            },
+        )
 
     stalled = state["stalled_a"]
     if nc_active and s["tl_a_valid"] == 1 and s["tl_a_ready"] == 0:
