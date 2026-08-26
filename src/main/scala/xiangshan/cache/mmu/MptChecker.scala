@@ -448,15 +448,13 @@ class MPTCacheIO(implicit p: Parameters) extends MMUIOBaseBundle with MPTCachePa
 class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
   val io = IO(new MPTCacheIO)
   // mfence signal
-  val mfencevalid   = io.sfence.valid && io.sfence.bits.mfence.get
-  val rs1IsX0       = io.sfence.bits.rs1
-  val rs2IsX0       = io.sfence.bits.rs2
-  val mfenceHasPA   = mfencevalid && !rs1IsX0
-  val mfenceHasSDID = mfenceHasPA && !rs2IsX0
-  // An all-PA, single-SDID fence cannot scan every L0 SRAM set in one cycle,
-  // so conservatively flush all cache levels whenever rs1 is x0.
-  val mfenceFenceAll = mfencevalid && rs1IsX0
-  val fenceSDIDReg   = io.sfence.bits.id(sdidLen - 1, 0)
+  val mfencevalid    = io.sfence.valid && io.sfence.bits.mfence.get
+  val rs1IsX0        = io.sfence.bits.rs1
+  val rs2IsX0        = io.sfence.bits.rs2
+  val mfenceHasPA    = mfencevalid && !rs1IsX0
+  val mfenceHasSDID  = mfencevalid && !rs2IsX0
+  val mfenceFenceAll = mfencevalid && rs1IsX0 && rs2IsX0
+  val fenceSDIDReg    = io.sfence.bits.id(sdidLen - 1, 0)
   val flushPipeOnly = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed ||
     io.csr.priv.virt_changed || io.csr.mmpt.changed
   // This MPT design supports partial cache flushing by PA. When flushing, in addition to leaf nodes, intermediate nodes are also invalidated.
@@ -578,6 +576,12 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
     hasSramCtl = hasSramCtl
   )) // 1clk delay from req to resp
   val l0Valid = RegInit(Vec(l0nSets, Vec(l0nWays, Bool())), 0.U.asTypeOf(Vec(l0nSets, Vec(l0nWays, Bool()))))
+  // Keep a register shadow of the SRAM-resident SDID tags so an x0/SDID MFENCE
+  // can invalidate matching entries in every set without using a PA index.
+  val l0Sdid = RegInit(
+    Vec(l0nSets, Vec(l0nWays, UInt(sdidLen.W))),
+    0.U.asTypeOf(Vec(l0nSets, Vec(l0nWays, UInt(sdidLen.W))))
+  )
 
   val mptCacheL3Replace = Module(new PLRUOH(logWays = log2Up(l3Size))).io
   val mptCacheL2Replace = Module(new PLRUOH(logWays = log2Up(l2Size))).io
@@ -763,8 +767,12 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
         }
       }
       is("b01".U) {
-        hitVecHitSDID.zipWithIndex.map { case (x, i) =>
-          when(x)(l0Valid(geL0Set(stageDelay.bits.reqPA))(i) := false.B)
+        for (set <- 0 until l0nSets) {
+          for (way <- 0 until l0nWays) {
+            when(l0Valid(set)(way) && l0Sdid(set)(way) === stageDelay.bits.sdid) {
+              l0Valid(set)(way) := false.B
+            }
+          }
         }
       }
       is("b10".U) {
@@ -989,6 +997,7 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
       for (i <- 0 until l0nWays) {
         when(l0VictimWay(i) === 1.U && rfl0SetIdx === j.U) {
           l0Valid(j)(i) := true.B
+          l0Sdid(j)(i) := io.csr.mmpt.sdid
         }
       }
     }
