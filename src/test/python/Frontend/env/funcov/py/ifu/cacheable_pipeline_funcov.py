@@ -4,10 +4,12 @@ from collections import deque
 from typing import Optional
 
 from ..common.dut import _dut, _read_first
+from .owner_v3_funcov import mark_owner_v3_checked
 
 
 _ICACHE_PREFIX = "Frontend_top.Frontend.inner_icache."
 _IFU_PREFIX = "Frontend_top.Frontend.inner_ifu."
+_MAINPIPE_PREFIX = f"{_ICACHE_PREFIX}mainPipe."
 
 
 IFU_CACHEABLE_PIPELINE_COVERPOINTS = {
@@ -90,6 +92,70 @@ _SIGNALS = {
     ),
 }
 
+_UPSTREAM_SIGNALS = {
+    "mainpipe_fire": (f"{_MAINPIPE_PREFIX}s0_fire",),
+    "second_requested": (f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_valid",),
+    "second_waylookup_valid": (
+        f"{_MAINPIPE_PREFIX}io_fromWayLookup_bits_wayLookupInfo_1_valid",
+    ),
+    "first_mmio": (
+        f"{_MAINPIPE_PREFIX}io_fromWayLookup_bits_wayLookupInfo_0_bits_entry_isMmio",
+    ),
+    "second_mmio": (
+        f"{_MAINPIPE_PREFIX}io_fromWayLookup_bits_wayLookupInfo_1_bits_entry_isMmio",
+    ),
+    "first_itlb_exception": (
+        f"{_MAINPIPE_PREFIX}io_fromWayLookup_bits_wayLookupInfo_0_bits_exceptionEntry_itlbException_value",
+        f"{_MAINPIPE_PREFIX}__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_0_bits_exceptionEntry_itlbException_value",
+    ),
+    "second_itlb_exception": (
+        f"{_MAINPIPE_PREFIX}io_fromWayLookup_bits_wayLookupInfo_1_bits_exceptionEntry_itlbException_value",
+        f"{_MAINPIPE_PREFIX}__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_1_bits_exceptionEntry_itlbException_value",
+    ),
+    "first_ftq_flag": (
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_ftqIdx_flag",
+        "Frontend_top.Frontend.inner_ftq.fetchPtr_ptrs_0_flag",
+    ),
+    "first_ftq_value": (
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_ftqIdx_value",
+        "Frontend_top.Frontend.inner_ftq.fetchPtr_ptrs_0_value",
+    ),
+    "real_two_fetch": (
+        f"{_MAINPIPE_PREFIX}s0_realTwoFetchValid",
+        "inner_icache.mainPipe.s0_realTwoFetchValid",
+        f"{_ICACHE_PREFIX}dataArray.io_read_req_bits_1_valid",
+    ),
+}
+
+_LATE_FAULT_SIGNALS = {
+    "line0_corrupt": (f"{_MAINPIPE_PREFIX}io_toIfu_corrupt_0_0",),
+    "line1_corrupt": (f"{_MAINPIPE_PREFIX}io_toIfu_corrupt_0_1",),
+    "s1_meta_in_exception": (
+        f"{_IFU_PREFIX}s1_icacheMetaIn_0_exception_value",
+    ),
+    "s1_merged_exception": (
+        f"{_IFU_PREFIX}s1_icacheMeta_0_exception_value",
+    ),
+    "s1_ftq_flag": (f"{_IFU_PREFIX}s1_fetchBlock_0_ftqIdx_flag",),
+    "s1_ftq_value": (f"{_IFU_PREFIX}s1_fetchBlock_0_ftqIdx_value",),
+    "s2_valid": (f"{_IFU_PREFIX}s2_valid_valid",),
+    "s2_ftq_flag": (f"{_IFU_PREFIX}s2_fetchBlock_0_ftqIdx_flag",),
+    "s2_ftq_value": (f"{_IFU_PREFIX}s2_fetchBlock_0_ftqIdx_value",),
+    "s2_exception": (f"{_IFU_PREFIX}s2_icacheMeta_0_exception_value",),
+    "s2_instr_count": (f"{_IFU_PREFIX}s2_instrCount",),
+    "to_ibuffer_valid": (f"{_IFU_PREFIX}io_toIBuffer_valid",),
+    "to_ibuffer_ready": (
+        f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_ready",
+        "inner_ifu.io_toIBuffer_ready",
+    ),
+    "to_ibuffer_exception": (
+        f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionType_value",
+    ),
+    "to_ibuffer_enq": (
+        f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_enqEnable",
+    ),
+}
+
 
 def initialize_ifu_cacheable_pipeline_state(recorder) -> None:
     recorder._ifu_cacheable_pending_transfer = None
@@ -102,6 +168,10 @@ def initialize_ifu_cacheable_pipeline_state(recorder) -> None:
     recorder._ifu_cacheable_alignments = set()
     recorder._ifu_cacheable_fetch_sizes = set()
     recorder._ifu_cacheable_last_ftq_ptr = None
+    recorder._ifu_upstream_suppression_pending = deque(maxlen=8)
+    recorder._ifu_late_fault_stall_pending = None
+    recorder._ifu_late_fault_delivery_pending = None
+    recorder._ifu_late_fault_flush_pending = None
 
 
 def reset_ifu_cacheable_pipeline_state(recorder) -> None:
@@ -111,6 +181,295 @@ def reset_ifu_cacheable_pipeline_state(recorder) -> None:
 def _read_signal(recorder, key: str) -> Optional[int]:
     value = _read_first(recorder, _SIGNALS[key])
     return None if value is None else int(value)
+
+
+def _read_upstream_signal(recorder, key: str) -> Optional[int]:
+    value = _read_first(recorder, _UPSTREAM_SIGNALS[key])
+    return None if value is None else int(value)
+
+
+def _read_late_fault_signal(recorder, key: str) -> Optional[int]:
+    value = _read_first(recorder, _LATE_FAULT_SIGNALS[key])
+    return None if value is None else int(value)
+
+
+def _read_exception_mask(recorder) -> Optional[int]:
+    mask = 0
+    for slot in range(35):
+        value = _read_first(
+            recorder,
+            (
+                f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask_{slot}",
+            ),
+        )
+        if value is None:
+            return None
+        mask |= (int(value) & 1) << slot
+    return mask
+
+
+def _mark_late_fault_owner(recorder, cycle: int, evidence: dict) -> None:
+    mark_owner_v3_checked(
+        recorder,
+        "BIN-906",
+        cycle,
+        evidence,
+        producer="ifu_cacheable_late_fault_sampler",
+    )
+
+
+def _sample_late_fault_attribution(recorder, cycle: int) -> None:
+    flush_pending = recorder._ifu_late_fault_flush_pending
+    if flush_pending is not None and int(cycle) > int(flush_pending["cycle"]):
+        s2_valid = _read_late_fault_signal(recorder, "s2_valid")
+        s2_flag = _read_late_fault_signal(recorder, "s2_ftq_flag")
+        s2_value = _read_late_fault_signal(recorder, "s2_ftq_value")
+        same_flushed_window = (
+            s2_valid == 1
+            and None not in {s2_flag, s2_value}
+            and (int(s2_flag), int(s2_value)) == flush_pending["ftq_identity"]
+        )
+        if not same_flushed_window:
+            _mark_late_fault_owner(
+                recorder,
+                cycle,
+                {
+                    **flush_pending,
+                    "event": "ifu_line0_late_fault_flush_suppressed",
+                    "s2_same_window_valid": False,
+                },
+            )
+        else:
+            _record_mismatch(
+                recorder,
+                "ifu_line0_late_fault_survived_flush",
+                cycle,
+                pending=flush_pending,
+            )
+        recorder._ifu_late_fault_flush_pending = None
+
+    delivery_pending = recorder._ifu_late_fault_delivery_pending
+    if delivery_pending is not None and int(cycle) > int(delivery_pending["cycle"]):
+        values = {
+            key: _read_late_fault_signal(recorder, key)
+            for key in (
+                "s2_valid",
+                "s2_ftq_flag",
+                "s2_ftq_value",
+                "s2_exception",
+                "s2_instr_count",
+                "to_ibuffer_valid",
+                "to_ibuffer_ready",
+                "to_ibuffer_exception",
+                "to_ibuffer_enq",
+            )
+        }
+        values["to_ibuffer_exception_mask"] = _read_exception_mask(recorder)
+        if all(value is not None for value in values.values()):
+            same_window = (
+                values["s2_valid"] == 1
+                and (values["s2_ftq_flag"], values["s2_ftq_value"])
+                == delivery_pending["ftq_identity"]
+            )
+            single_exception_slot = (
+                values["s2_instr_count"] == 1
+                and int(values["to_ibuffer_enq"]).bit_count() == 1
+                and int(values["to_ibuffer_exception_mask"]).bit_count() == 1
+            )
+            if (
+                same_window
+                and values["s2_exception"] in {3, 5}
+                and values["to_ibuffer_valid"] == 1
+                and values["to_ibuffer_ready"] == 1
+                and values["to_ibuffer_exception"] == values["s2_exception"]
+                and single_exception_slot
+            ):
+                _mark_late_fault_owner(
+                    recorder,
+                    cycle,
+                    {
+                        **delivery_pending,
+                        "event": "ifu_line0_late_fault_stall_preserved",
+                        "s2_observation": values,
+                    },
+                )
+                recorder._ifu_late_fault_delivery_pending = None
+            elif int(cycle) - int(delivery_pending["cycle"]) > 2:
+                _record_mismatch(
+                    recorder,
+                    "ifu_line0_late_fault_delivery_missing",
+                    cycle,
+                    pending=delivery_pending,
+                    observed=values,
+                )
+                recorder._ifu_late_fault_delivery_pending = None
+
+    s1_values = {
+        "valid": _read_signal(recorder, "s1_valid"),
+        "ready": _read_signal(recorder, "s1_ready"),
+        "fire": _read_signal(recorder, "s1_fire"),
+        "flush": _read_signal(recorder, "s1_flush"),
+        **{
+            key: _read_late_fault_signal(recorder, key)
+            for key in (
+                "line0_corrupt",
+                "line1_corrupt",
+                "s1_meta_in_exception",
+                "s1_merged_exception",
+                "s1_ftq_flag",
+                "s1_ftq_value",
+            )
+        },
+    }
+    if any(value is None for value in s1_values.values()) or s1_values["valid"] != 1:
+        return
+    identity = (int(s1_values["s1_ftq_flag"]), int(s1_values["s1_ftq_value"]))
+    if s1_values["line1_corrupt"] == 1:
+        _record_mismatch(
+            recorder,
+            "ifu_second_cacheline_late_fault_unattributed",
+            cycle,
+            ftq_identity=list(identity),
+            merged_exception=int(s1_values["s1_merged_exception"]),
+            blocked_bin_id="BIN-909",
+        )
+
+    first_line_fault = (
+        s1_values["line0_corrupt"] == 1
+        and s1_values["s1_merged_exception"] == 5
+    ) or s1_values["s1_meta_in_exception"] in {3, 5}
+    if not first_line_fault:
+        return
+    evidence = {
+        "cycle": int(cycle),
+        "ftq_identity": identity,
+        "line0_corrupt": int(s1_values["line0_corrupt"]),
+        "s1_meta_in_exception": int(s1_values["s1_meta_in_exception"]),
+        "s1_merged_exception": int(s1_values["s1_merged_exception"]),
+    }
+    if s1_values["flush"] == 1 and s1_values["fire"] == 0:
+        recorder._ifu_late_fault_flush_pending = evidence
+        return
+    if s1_values["ready"] == 0 and s1_values["fire"] == 0:
+        recorder._ifu_late_fault_stall_pending = evidence
+        return
+    stall_pending = recorder._ifu_late_fault_stall_pending
+    if (
+        s1_values["fire"] == 1
+        and stall_pending is not None
+        and identity == stall_pending["ftq_identity"]
+        and s1_values["s1_merged_exception"] in {3, 5}
+    ):
+        recorder._ifu_late_fault_delivery_pending = {
+            **stall_pending,
+            "cycle": int(cycle),
+            "release_exception": int(s1_values["s1_merged_exception"]),
+        }
+        recorder._ifu_late_fault_stall_pending = None
+
+
+def _sample_upstream_window_invariants(recorder, cycle: int) -> None:
+    pending = recorder._ifu_upstream_suppression_pending
+    req_valid = _read_signal(recorder, "req_valid")
+    req1_valid = None
+    output_ftq_flag = None
+    output_ftq_value = None
+    if req_valid == 1:
+        req1_valid = _read_req_field(recorder, 1, "valid")
+        output_ftq_flag = _read_req_field(recorder, 0, "ftqIdx_flag")
+        output_ftq_value = _read_req_field(recorder, 0, "ftqIdx_value")
+    if None not in {req1_valid, output_ftq_flag, output_ftq_value}:
+        output_identity = (int(output_ftq_flag), int(output_ftq_value))
+        matches = [item for item in pending if item["ftq_identity"] == output_identity]
+        for match in matches:
+            evidence = {
+                **match["input"],
+                "event": match["event"],
+                "input_cycle": int(match["cycle"]),
+                "output_ftq_identity": list(output_identity),
+                "output_second_valid": int(req1_valid),
+                "illegal_mixed_response_emitted": int(req1_valid) == 1,
+            }
+            if int(req1_valid) == 0:
+                mark_owner_v3_checked(
+                    recorder,
+                    match["bin_id"],
+                    cycle,
+                    evidence,
+                    producer="ifu_cacheable_upstream_invariant_sampler",
+                )
+            else:
+                _record_mismatch(
+                    recorder,
+                    "ifu_cacheable_upstream_suppression_failed",
+                    cycle,
+                    evidence=evidence,
+                )
+            pending.remove(match)
+    while pending and int(cycle) - int(pending[0]["cycle"]) > 4:
+        expired = pending.popleft()
+        _record_mismatch(
+            recorder,
+            "ifu_cacheable_upstream_suppression_unobserved",
+            cycle,
+            pending=expired,
+        )
+
+    values = {key: _read_upstream_signal(recorder, key) for key in _UPSTREAM_SIGNALS}
+    if any(
+        values[key] is None
+        for key in (
+            "mainpipe_fire",
+            "second_requested",
+            "second_waylookup_valid",
+            "first_ftq_flag",
+            "first_ftq_value",
+            "real_two_fetch",
+        )
+    ):
+        return
+    if (
+        values["mainpipe_fire"] != 1
+        or values["second_requested"] != 1
+        or values["second_waylookup_valid"] != 1
+    ):
+        return
+    if (
+        values["real_two_fetch"] == 0
+        and (values["first_mmio"] == 1 or values["second_mmio"] == 1)
+    ):
+        pending.append(
+            {
+                "bin_id": "BIN-904",
+                "event": "icache_mainpipe_mixed_window_suppressed",
+                "cycle": int(cycle),
+                "ftq_identity": (
+                    int(values["first_ftq_flag"]),
+                    int(values["first_ftq_value"]),
+                ),
+                "input": values,
+            }
+        )
+    if (
+        values["real_two_fetch"] == 0
+        and values["first_itlb_exception"] == 0
+        and values["second_itlb_exception"] not in {None, 0}
+    ):
+        pending.append(
+            {
+                "bin_id": "BIN-908",
+                "event": "icache_mainpipe_second_itlb_suppresses_dual_fetch",
+                "cycle": int(cycle),
+                "ftq_identity": (
+                    int(values["first_ftq_flag"]),
+                    int(values["first_ftq_value"]),
+                ),
+                "input": {
+                    **values,
+                    "second_block_pmp_independently_checked": False,
+                },
+            }
+        )
 
 
 def _req_signal_names(index: int, field: str) -> tuple[str, ...]:
@@ -396,6 +755,8 @@ def sample_ifu_cacheable_pipeline_coverage(recorder, env, cycle: int) -> None:
         return
 
     cycle = int(cycle)
+    _sample_upstream_window_invariants(recorder, cycle)
+    _sample_late_fault_attribution(recorder, cycle)
     req_valid = _read_signal(recorder, "req_valid")
     req_ready = _read_signal(recorder, "req_ready")
     s0_fire = _read_signal(recorder, "s0_fire")
@@ -507,6 +868,19 @@ def sample_ifu_cacheable_pipeline_coverage(recorder, env, cycle: int) -> None:
             recorder.mark("ifu_cacheable_flush", "wb_redirect_blocks", cycle, flush_evidence)
         if bpu_s3_flush == 1 and s0_flush_bpu == 1:
             recorder.mark("ifu_cacheable_flush", "bpu_match_blocks", cycle, flush_evidence)
+            if source is not None and source["blocks"][1].get("valid") == 1:
+                mark_owner_v3_checked(
+                    recorder,
+                    "BIN-901",
+                    cycle,
+                    {
+                        **flush_evidence,
+                        "window_identity": "block0_ftq_idx",
+                        "window_blocks": 2,
+                        "whole_window_fired": False,
+                    },
+                    producer="ifu_cacheable_bpu_window_sampler",
+                )
 
     accepted = req_valid == 1 and req_ready == 1 and s0_fire == 1 and s0_flush == 0
     if accepted and source is not None:
