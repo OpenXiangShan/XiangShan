@@ -247,14 +247,15 @@ class TLBFA(
   if (HasMptCheck) {
     val mfence_valid = sfence.valid && sfence.bits.mfence.get
     val mfence_sdid = sfence.bits.id(sdidLen - 1, 0)
+    val mfenceRs2IsX0 = sfence.bits.rs2
     when (mfence_valid) {
-      when (sfence.bits.rs2) {
+      when (!mfenceRs2IsX0) {
         // mfence with sdid target: flush all entries matching the sdid, regardless of address/pa form
         v.zipWithIndex.map { case (a, i) =>
           a := a && !(entries(i).sdid.get === mfence_sdid)
         }
       }.otherwise {
-        // other mfence forms: full flush
+        // mfence with x0 as the SDID operand: flush entries from all SDIDs
         v.zipWithIndex.map { case (a, i) => a := false.B }
       }
     }
