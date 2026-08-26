@@ -84,7 +84,7 @@ case class XSCoreParameters
   RobCommitWidth: Int = 8,
   RabCommitWidth: Int = 8,
   MaxUopSize: Int = 8,
-  EnableRobCompression: Boolean = true,
+  EnableRobCompression: Boolean = false,
   EnableRenameSnapshot: Boolean = true,
   RenameSnapshotNum: Int = 4,
   // TODO: New frontend parameters system below. Replace the old parameters above during development.
