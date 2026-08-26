@@ -115,7 +115,7 @@ case class XSCoreParameters
   SQUnalignQueueSize: Int = 2,
   VlsQueueSize: Int = 8,
   RobSize: Int = 128,
-  RabSize: Int = 256,
+  RabSize: Int = 288,
   VTypeBufferSize: Int = 64, // used to reorder vtype
   IssueQueueSize: Int = 20,
   IssueQueueCompEntrySize: Int = 12,
