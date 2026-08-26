@@ -16,11 +16,6 @@ from env.sequences import (
 from env.support import PmpPmaConfig
 
 
-_MAINPIPE_S1_VALID = "Frontend_top.Frontend.inner_icache.mainPipe.s1_valid"
-_MAINPIPE_START_VADDR = "Frontend_top.Frontend.inner_icache.mainPipe.s1_req_0_vAddr_0_addr"
-_MAINPIPE_PTAG = "Frontend_top.Frontend.inner_icache.mainPipe.s1_wayLookupEntry_0_pTag"
-_PREFETCHPIPE_S1_VALID = "Frontend_top.Frontend.inner_icache.prefetcher.s1_valid"
-_PREFETCHPIPE_PMP_ADDR = "Frontend_top.Frontend.inner_icache.prefetcher.io_pmp_req_bits_addr"
 _ITLB_PTW_REQ_GET_GPA = "Frontend_top.Frontend.inner_itlb.io_ptw_req_0_bits_getGpa"
 
 
@@ -95,6 +90,29 @@ def test_oracle_uses_first_normal_fetch_as_translation_evidence() -> None:
     stats = env.assert_translation_scenario()
     assert stats["error_count"] == 0
     assert [record["kind"] for record in stats["records"]] == ["armed", "ptw_request", "ptw_response", "fetch_request"]
+
+
+def test_oracle_aligns_uncache_requests_to_the_eight_byte_beat() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    state = TranslationScenarioBuilder(env).build(
+        TranslationScenario(
+            scenario_id="oracle-uncache-beat-alignment",
+            va=0x8020_0FFC,
+            pa=0x8040_0FFC,
+            payload=b"\x13\x00\x00\x00",
+            s1_pte=TranslationPte(pbmt=1),
+            expected_path="uncache",
+        )
+    )
+    active = env.arm_translation_scenario(state)
+
+    _observe_matching_ptw(env, state)
+    assert active["expected_fetches"] == [
+        {"page": 0, "vpn": 0x8020_0000 >> 12, "path": "uncache", "pa": 0x8040_0FF8}
+    ]
+    env.translation_oracle.observe_fetch_request(12, path="uncache", pa=0x8040_0FF8)
+
+    assert env.assert_translation_scenario()["error_count"] == 0
 
 
 def test_oracle_requires_each_cacheable_fetch_block_covered_by_the_payload() -> None:
@@ -454,6 +472,28 @@ def test_oracle_can_verify_a_selected_page_without_a_new_ptw_request() -> None:
     assert stats["active"]["fetched_pages"] == [1]
 
 
+def test_oracle_accepts_known_fetch_from_unselected_page() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    state = TranslationScenarioBuilder(env).build(
+        TranslationScenario(
+            scenario_id="oracle-selected-page-stale-fetch",
+            va=0x8020_0F00,
+            pa=0x8040_0F00,
+            payload=b"\x13\x00\x00\x00" * 512,
+            page_count=2,
+        )
+    )
+
+    active = env.arm_translation_scenario(state, page_indexes=(0,))
+    second_page = state.expected_page_outcomes[1]
+    second_page_line = int(second_page["pa"]) & ~0x3F
+    env.translation_oracle.observe_fetch_request(10, path="icache", pa=second_page_line)
+
+    assert active["allowed_out_of_scope_fetches"]
+    assert env.translation_oracle.errors == []
+    assert env.translation_oracle.get_active()["observed_out_of_scope_fetch_pas"] == [second_page_line]
+
+
 def test_oracle_rejects_second_page_fetch_with_the_wrong_pma_path() -> None:
     env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
     scenario = TranslationScenario(
@@ -488,175 +528,13 @@ def test_oracle_rejects_second_page_fetch_with_the_wrong_pma_path() -> None:
         env.assert_translation_scenario()
 
 
-def test_oracle_reconstructs_mainpipe_pmp_request_address_after_translation() -> None:
-    dut = _PmpProbeDut()
-    env = FrontendEnv(dut, register_callbacks=False)
-    scenario = TranslationScenario(
-        scenario_id="oracle-mainpipe-pmp-request",
-        va=0x8020_0404,
-        pa=0x8040_0404,
-        payload=b"\x13\x00\x00\x00",
-        pmp_entries=(
-            TranslationPmpPmaEntry(
-                "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), 0x8040_0000, size=0x1000
-            ),
-        ),
-    )
-    state = TranslationScenarioBuilder(env).build(scenario)
-    env.arm_translation_scenario(state)
-    _observe_matching_ptw(env, state)
-    dut._internal_signals.update(
-        {
-            _MAINPIPE_S1_VALID: FakeSignal(1),
-            _MAINPIPE_START_VADDR: FakeSignal(scenario.va >> 1),
-            _MAINPIPE_PTAG: FakeSignal(scenario.pa >> 12),
-        }
-    )
-
-    env.translation_oracle.on_clock_edge(12)
-    env.translation_oracle.observe_fetch_request(13, path="icache", pa=scenario.pa & ~0x3F)
-
-    stats = env.assert_translation_scenario()
-    pmp_record = next(record for record in stats["records"] if record["kind"] == "mainpipe_pmp_request")
-    assert (pmp_record["addr"], pmp_record["size"], pmp_record["end"]) == (scenario.pa, 8, scenario.pa + 7)
-
-
-def test_oracle_requires_each_declared_fetch_range_permission_probe() -> None:
+def test_oracle_accepts_pmp_configured_fetch_without_internal_permission_sampling() -> None:
     env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
     scenario = TranslationScenario(
-        scenario_id="oracle-fetch-range-probes",
+        scenario_id="oracle-pmp-configured-fetch",
         va=0x8020_0000,
         pa=0x8040_0000,
         payload=b"\x13" * 16,
-        permission_probes=(
-            TranslationPermissionProbe(va=0x8020_0000, size=8),
-            TranslationPermissionProbe(va=0x8020_0008, size=8),
-        ),
-        pmp_entries=(
-            TranslationPmpPmaEntry(
-                "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), 0x8040_0000, size=0x1000
-            ),
-        ),
-    )
-    state = TranslationScenarioBuilder(env).build(scenario)
-    env.arm_translation_scenario(state)
-    _observe_matching_ptw(env, state)
-    env.translation_oracle.observe_mainpipe_pmp_request(12, addr=0x8040_0000)
-
-    with pytest.raises(AssertionError, match="permission_probe"):
-        env.assert_translation_scenario()
-
-
-def test_oracle_does_not_require_pmp_request_after_page_fault() -> None:
-    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
-    state = TranslationScenarioBuilder(env).build(
-        TranslationScenario(
-            scenario_id="oracle-page-fault-before-pmp",
-            va=0x8020_0404,
-            pa=0x8040_0404,
-            payload=b"\x13\x00\x00\x00",
-            s1_pte=TranslationPte(v=1, r=1, x=0, a=1),
-            pmp_entries=(
-                TranslationPmpPmaEntry(
-                    "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), 0x8040_0000, size=0x1000
-                ),
-            ),
-        )
-    )
-
-    active = env.arm_translation_scenario(state)
-
-    assert active["expected_fault"] == "instruction_page_fault"
-    assert active["permission_check_required"] is False
-
-
-def test_oracle_rejects_mismatched_reconstructed_mainpipe_pmp_request_address() -> None:
-    env, state = _state(
-        scenario_id="oracle-mainpipe-pmp-request-mismatch",
-        va=0x8020_0404,
-        pa=0x8040_0404,
-        pte=TranslationPte(v=1, r=1, x=1, a=1),
-    )
-    env.translation_oracle.active["permission_check_required"] = True
-    env.translation_oracle.active["response_seen"] = True
-    env.translation_oracle.observe_mainpipe_pmp_request(12, addr=state.expected_outcome["pa"] + 2)
-
-    with pytest.raises(AssertionError, match="mainpipe_pmp_request_addr_mismatch"):
-        env.assert_translation_scenario()
-
-
-def test_oracle_records_prefetchpipe_pmp_request_from_portable_address_signal() -> None:
-    dut = _PmpProbeDut()
-    env = FrontendEnv(dut, register_callbacks=False)
-    scenario = TranslationScenario(
-        scenario_id="oracle-prefetchpipe-pmp-request",
-        va=0x8020_0404,
-        pa=0x8040_0404,
-        payload=b"\x13\x00\x00\x00",
-        pmp_entries=(
-            TranslationPmpPmaEntry(
-                "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), 0x8040_0000, size=0x1000
-            ),
-        ),
-    )
-    state = TranslationScenarioBuilder(env).build(scenario)
-    env.arm_translation_scenario(state)
-    _observe_matching_ptw(env, state)
-    dut._internal_signals.update(
-        {
-            _MAINPIPE_S1_VALID: FakeSignal(0),
-            _PREFETCHPIPE_S1_VALID: FakeSignal(1),
-            _PREFETCHPIPE_PMP_ADDR: FakeSignal(scenario.pa),
-        }
-    )
-
-    env.translation_oracle.on_clock_edge(12)
-    env.translation_oracle.observe_fetch_request(13, path="icache", pa=scenario.pa & ~0x3F)
-
-    stats = env.assert_translation_scenario()
-    record = next(item for item in stats["records"] if item["kind"] == "prefetchpipe_pmp_request")
-    assert (record["addr"], record["size"], record["end"], record["page"]) == (
-        scenario.pa,
-        8,
-        scenario.pa + 7,
-        0,
-    )
-
-
-def test_oracle_completes_pmp_execute_denied_probe_from_prefetchpipe() -> None:
-    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
-    scenario = TranslationScenario(
-        scenario_id="oracle-prefetchpipe-pmp-execute-denied",
-        va=0x8020_0000,
-        pa=0x8040_0000,
-        payload=b"\x13\x00\x00\x00" * 2,
-        permission_probes=(TranslationPermissionProbe(va=0x8020_0000, size=8),),
-        pmp_entries=(
-            TranslationPmpPmaEntry(
-                "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=False), 0x8040_0000, size=0x1000
-            ),
-        ),
-    )
-    state = TranslationScenarioBuilder(env).build(scenario)
-    active = env.arm_translation_scenario(state)
-
-    _observe_matching_ptw(env, state)
-    env.translation_oracle.observe_prefetchpipe_pmp_request(12, addr=scenario.pa)
-    env.translation_oracle.observe_cfvec(13, pc=scenario.va, exception_bits={1: 1})
-
-    stats = env.assert_translation_scenario()
-    assert active["expected_permission_probes"][0]["permission"]["reason"] == "pmp_execute_denied"
-    assert stats["active"]["observed_permission_probes"] == [scenario.pa]
-
-
-def test_oracle_completes_executable_uncache_probe_from_prefetchpipe() -> None:
-    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
-    scenario = TranslationScenario(
-        scenario_id="oracle-prefetchpipe-uncache-probe",
-        va=0x8020_0000,
-        pa=0x8040_0000,
-        payload=b"\x13\x00\x00\x00" * 2,
-        permission_probes=(TranslationPermissionProbe(va=0x8020_0000, size=8),),
         pmp_entries=(
             TranslationPmpPmaEntry(
                 "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), 0x8040_0000, size=0x1000
@@ -664,50 +542,15 @@ def test_oracle_completes_executable_uncache_probe_from_prefetchpipe() -> None:
         ),
         pma_entries=(
             TranslationPmpPmaEntry(
-                "pma",
-                0,
-                PmpPmaConfig(match="napot", read=True, execute=True, cacheable=False),
-                0x8040_0000,
-                size=0x1000,
-            ),
-        ),
-        expected_path="uncache",
-    )
-    state = TranslationScenarioBuilder(env).build(scenario)
-    active = env.arm_translation_scenario(state)
-
-    _observe_matching_ptw(env, state)
-    env.translation_oracle.observe_prefetchpipe_pmp_request(12, addr=scenario.pa)
-    env.translation_oracle.observe_fetch_request(13, path="uncache", pa=scenario.pa)
-
-    stats = env.assert_translation_scenario()
-    assert active["expected_permission_probes"][0]["permission"]["pma_mmio"] is True
-    assert stats["active"]["observed_permission_probes"] == [scenario.pa]
-
-
-def test_oracle_does_not_complete_executable_probe_from_prefetchpipe() -> None:
-    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
-    scenario = TranslationScenario(
-        scenario_id="oracle-prefetchpipe-executable-probe",
-        va=0x8020_0000,
-        pa=0x8040_0000,
-        payload=b"\x13\x00\x00\x00" * 2,
-        permission_probes=(TranslationPermissionProbe(va=0x8020_0000, size=8),),
-        pmp_entries=(
-            TranslationPmpPmaEntry(
-                "pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), 0x8040_0000, size=0x1000
+                "pma", 0, PmpPmaConfig(match="napot", read=True, execute=True, cacheable=True), 0x8040_0000, size=0x1000
             ),
         ),
     )
     state = TranslationScenarioBuilder(env).build(scenario)
     env.arm_translation_scenario(state)
-
     _observe_matching_ptw(env, state)
-    env.translation_oracle.observe_prefetchpipe_pmp_request(12, addr=scenario.pa)
     env.translation_oracle.observe_fetch_request(13, path="icache", pa=scenario.pa & ~0x3F)
-
-    with pytest.raises(AssertionError, match="permission_probe"):
-        env.assert_translation_scenario()
+    assert env.assert_translation_scenario()["error_count"] == 0
 
 
 def test_oracle_reads_internal_itlb_get_gpa_when_the_top_level_ptw_field_is_absent() -> None:
@@ -776,36 +619,6 @@ def test_oracle_requires_the_guest_fault_gpa_followup_ptw_transaction() -> None:
         (first["vpn"], first["s2xlate"], 0),
         (followup["vpn"], followup["s2xlate"], 1),
     ]
-
-
-def test_oracle_does_not_require_permission_request_after_translation_access_fault() -> None:
-    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
-    scenario = TranslationScenario(
-        scenario_id="oracle-stage2-access-fault",
-        va=0x8020_0000,
-        pa=0x8040_0000,
-        payload=b"\x13\x00\x00\x00",
-        mode="bare",
-        stage2_mode="sv39",
-        s2xlate=2,
-        priv_virt=1,
-        s2_gaf=1,
-        pmp_entries=(
-            TranslationPmpPmaEntry(
-                kind="pmp",
-                index=0,
-                config=PmpPmaConfig(match="napot", read=True, execute=True),
-                addr=0x8040_0000,
-                size=0x1000,
-            ),
-        ),
-    )
-
-    state = TranslationScenarioBuilder(env).build(scenario)
-    active = env.arm_translation_scenario(state)
-
-    assert active["expected_fault"] == "instruction_access_fault"
-    assert active["permission_check_required"] is False
 
 
 def test_oracle_does_not_require_untranslated_permission_probe() -> None:

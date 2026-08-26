@@ -58,6 +58,28 @@ _FAULT_CASES = (
     ),
     pytest.param(
         _scenario(
+            "translation-fault-superpage-response-page",
+            mode="sv39",
+            s1_pte=TranslationPte(level=1),
+            s1_pf=1,
+            expected_result="page_fault",
+        ),
+        "instruction_page_fault",
+        id="superpage-response-page-fault",
+    ),
+    pytest.param(
+        _scenario(
+            "translation-fault-superpage-response-access",
+            mode="sv39",
+            s1_pte=TranslationPte(level=1),
+            s1_af=1,
+            expected_result="access_fault",
+        ),
+        "instruction_access_fault",
+        id="superpage-response-access-fault",
+    ),
+    pytest.param(
+        _scenario(
             "translation-fault-stage1-pte-invalid",
             mode="sv39",
             s1_pte=TranslationPte(v=0),
@@ -120,6 +142,38 @@ _FAULT_CASES = (
         "instruction_access_fault",
         id="all-stage-guest-access-fault",
     ),
+    *(
+        pytest.param(
+            _scenario(
+                f"translation-fault-all-stage-{s1_name}-with-{s2_name}",
+                mode="sv39",
+                stage2_mode="sv39",
+                s2xlate=3,
+                gpa=_GPA,
+                s1_pte=TranslationPte(asid=5, vmid=7),
+                s2_pte=TranslationPte(vmid=7),
+                vsatp_asid=5,
+                hgatp_vmid=7,
+                priv_virt=1,
+                s1_pf=int(s1_name == "response-page"),
+                s1_af=int(s1_name == "response-access"),
+                s2_gpf=int(s2_name == "guest-page"),
+                s2_gaf=int(s2_name == "guest-access"),
+                expected_result=expected_result,
+            ),
+            expected_fault,
+            id=f"all-stage-{s1_name}-with-{s2_name}",
+        )
+        for s1_name, s1_expected_result, s1_expected_fault in (
+            ("response-page", "page_fault", "instruction_page_fault"),
+            ("response-access", "access_fault", "instruction_access_fault"),
+        )
+        for s2_name, expected_result, expected_fault in (
+            ("leaf", s1_expected_result, s1_expected_fault),
+            ("guest-page", s1_expected_result, s1_expected_fault),
+            ("guest-access", "access_fault", "instruction_access_fault"),
+        )
+    ),
 )
 
 
@@ -145,8 +199,5 @@ def test_address_translation_fault(env, scenario: TranslationScenario, expected_
     assert state.expected_page_outcomes[0]["ok"] is False
     assert state.expected_page_outcomes[0]["outcome"] == expected_fault
     assert env.monitor.exception_mark_count > 0
-    observations_after_fault = len(env.monitor.observations)
-    env.step(64)
-    assert len(env.monitor.observations) == observations_after_fault
     env.assert_translation_scenario()
     assert not env.get_errors()

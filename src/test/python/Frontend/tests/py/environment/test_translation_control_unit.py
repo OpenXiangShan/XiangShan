@@ -110,6 +110,21 @@ def test_pulse_sfence_drives_all_fields_for_exactly_requested_cycles() -> None:
     assert events[-1]["type"] == "control.sfence"
 
 
+def test_unmatched_sfence_can_preserve_the_active_translation_epoch() -> None:
+    env, _events = _env_with_events()
+
+    env.translation_epoch = 7
+    env.pulse_sfence(
+        addr=0x80002000,
+        rs1=1,
+        rs2=1,
+        ident=3,
+        advance_translation_epoch=False,
+    )
+
+    assert env.translation_epoch == 7
+
+
 def test_update_translation_context_updates_values_and_pulses_affected_groups() -> None:
     env, events = _env_with_events()
 

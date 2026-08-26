@@ -770,38 +770,68 @@ class FrontendEnv:
         priv_virt: bool = False,
         cycles: int = 1,
     ) -> int:
-        asserted = []
-        if priv_virt:
-            asserted.append(self.csr_ctrl_if.io_tlbCsr_priv_virt_changed)
-        if satp:
-            asserted.append(self.csr_ctrl_if.io_tlbCsr_satp_changed)
-        if vsatp:
-            asserted.append(self.csr_ctrl_if.io_tlbCsr_vsatp_changed)
-        if hgatp:
-            asserted.append(self.csr_ctrl_if.io_tlbCsr_hgatp_changed)
-        for signal in asserted:
-            self._write(signal, 1)
-        if asserted:
+        prepared = self.prepare_tlb_csr_changes(
+            satp=satp,
+            vsatp=vsatp,
+            hgatp=hgatp,
+            priv_virt=priv_virt,
+        )
+        if not prepared["changed"]:
+            return 0
+        step_cycles = max(1, int(cycles))
+        end_cycle = self.step(step_cycles)
+        if end_cycle is not None:
+            self.current_cycle = max(int(self.current_cycle), int(end_cycle))
+        self.release_tlb_csr_changes(prepared)
+        self._emit_event(
+            "control.tlb_csr_changed",
+            {**prepared, "cycles": step_cycles},
+        )
+        return step_cycles
+
+    def prepare_tlb_csr_changes(
+        self,
+        *,
+        satp: bool = False,
+        vsatp: bool = False,
+        hgatp: bool = False,
+        priv_virt: bool = False,
+    ) -> dict:
+        """Assert TLB CSR changed inputs without advancing the DUT clock."""
+
+        changed = {
+            "satp": bool(satp),
+            "vsatp": bool(vsatp),
+            "hgatp": bool(hgatp),
+            "priv_virt": bool(priv_virt),
+        }
+        signals = {
+            "satp": self.csr_ctrl_if.io_tlbCsr_satp_changed,
+            "vsatp": self.csr_ctrl_if.io_tlbCsr_vsatp_changed,
+            "hgatp": self.csr_ctrl_if.io_tlbCsr_hgatp_changed,
+            "priv_virt": self.csr_ctrl_if.io_tlbCsr_priv_virt_changed,
+        }
+        for name, signal in signals.items():
+            if changed[name]:
+                self._write(signal, 1)
+        if any(changed.values()):
             self.translation_epoch += 1
-            step_cycles = max(1, int(cycles))
-            end_cycle = self.step(step_cycles)
-            if end_cycle is not None:
-                self.current_cycle = max(int(self.current_cycle), int(end_cycle))
-            for signal in asserted:
+        return {
+            **changed,
+            "changed": any(changed.values()),
+            "translation_epoch": int(self.translation_epoch),
+        }
+
+    def release_tlb_csr_changes(self, prepared: dict) -> None:
+        signals = {
+            "satp": self.csr_ctrl_if.io_tlbCsr_satp_changed,
+            "vsatp": self.csr_ctrl_if.io_tlbCsr_vsatp_changed,
+            "hgatp": self.csr_ctrl_if.io_tlbCsr_hgatp_changed,
+            "priv_virt": self.csr_ctrl_if.io_tlbCsr_priv_virt_changed,
+        }
+        for name, signal in signals.items():
+            if bool(prepared.get(name, False)):
                 self._write(signal, 0)
-            self._emit_event(
-                "control.tlb_csr_changed",
-                {
-                    "satp": bool(satp),
-                    "vsatp": bool(vsatp),
-                    "hgatp": bool(hgatp),
-                    "priv_virt": bool(priv_virt),
-                    "cycles": step_cycles,
-                    "translation_epoch": int(self.translation_epoch),
-                },
-            )
-            return step_cycles
-        return 0
 
     def write_distributed_csr(self, addr: int, data: int, *, settle_cycles: int = 0) -> dict:
         """Drive one complete distributed CSR write and retain its transaction record."""
@@ -904,10 +934,47 @@ class FrontendEnv:
         hv: int = 0,
         hg: int = 0,
         cycles: int = 1,
+        advance_translation_epoch: bool = True,
     ) -> dict:
-        """Drive one SFENCE/HFENCE pulse through the public PTW bundle."""
+        """Drive one SFENCE/HFENCE pulse through the public PTW bundle.
 
+        Set ``advance_translation_epoch`` only when the caller has proved that
+        the SFENCE scope cannot invalidate its currently armed scenario.
+        """
+        prepared = self.prepare_sfence(
+            addr=addr,
+            rs1=rs1,
+            rs2=rs2,
+            ident=ident,
+            hv=hv,
+            hg=hg,
+            advance_translation_epoch=advance_translation_epoch,
+        )
         pulse_cycles = max(1, int(cycles))
+        end_cycle = self.step(pulse_cycles)
+        if end_cycle is not None:
+            self.current_cycle = max(int(self.current_cycle), int(end_cycle))
+        self.release_sfence(prepared)
+        fields = {
+            key: prepared[key]
+            for key in ("addr", "rs1", "rs2", "id", "hv", "hg", "cycle")
+        }
+        fields["cycles"] = pulse_cycles
+        self._emit_event("control.sfence", {**fields, "translation_epoch": int(self.translation_epoch)})
+        return dict(fields)
+
+    def prepare_sfence(
+        self,
+        *,
+        addr: int = 0,
+        rs1: int = 0,
+        rs2: int = 0,
+        ident: int = 0,
+        hv: int = 0,
+        hg: int = 0,
+        advance_translation_epoch: bool = True,
+    ) -> dict:
+        """Assert SFENCE/HFENCE inputs without advancing the DUT clock."""
         fields = {
             "addr": int(addr),
             "rs1": int(bool(rs1)),
@@ -915,7 +982,6 @@ class FrontendEnv:
             "id": int(ident),
             "hv": int(bool(hv)),
             "hg": int(bool(hg)),
-            "cycles": pulse_cycles,
         }
         self._write(self.ptw_if.sfence_bits_addr, fields["addr"])
         self._write(self.ptw_if.sfence_bits_rs1, fields["rs1"])
@@ -924,14 +990,14 @@ class FrontendEnv:
         self._write(self.ptw_if.sfence_bits_hv, fields["hv"])
         self._write(self.ptw_if.sfence_bits_hg, fields["hg"])
         self._write(self.ptw_if.sfence_valid, 1)
-        self.translation_epoch += 1
+        if advance_translation_epoch:
+            self.translation_epoch += 1
         fields["cycle"] = int(self.current_cycle)
-        end_cycle = self.step(pulse_cycles)
-        if end_cycle is not None:
-            self.current_cycle = max(int(self.current_cycle), int(end_cycle))
+        fields["translation_epoch"] = int(self.translation_epoch)
+        return fields
+
+    def release_sfence(self, prepared: dict) -> None:
         self._write(self.ptw_if.sfence_valid, 0)
-        self._emit_event("control.sfence", {**fields, "translation_epoch": int(self.translation_epoch)})
-        return dict(fields)
 
     def set_translation_pbmte(
         self,
@@ -992,28 +1058,47 @@ class FrontendEnv:
         cycles: int = 1,
     ) -> dict:
         """Update exposed TLB translation context fields and pulse affected changed pins."""
+        prepared = self.prepare_translation_context_change(
+            satp_mode=satp_mode,
+            satp_asid=satp_asid,
+            satp_ppn=satp_ppn,
+            vsatp_mode=vsatp_mode,
+            vsatp_asid=vsatp_asid,
+            vsatp_ppn=vsatp_ppn,
+            hgatp_mode=hgatp_mode,
+            hgatp_vmid=hgatp_vmid,
+            hgatp_ppn=hgatp_ppn,
+            priv_imode=priv_imode,
+            priv_virt=priv_virt,
+        )
+        pulse_cycles = max(1, int(cycles)) if any(prepared["changed"].values()) else 0
+        if pulse_cycles:
+            end_cycle = self.step(pulse_cycles)
+            if end_cycle is not None:
+                self.current_cycle = max(int(self.current_cycle), int(end_cycle))
+        self.release_translation_context_change(prepared)
+        record = {"changed": prepared["changed"], "cycles": pulse_cycles}
+        self._emit_event("control.translation_context", {**record, "translation_epoch": int(self.translation_epoch)})
+        return record
 
+    def prepare_translation_context_change(self, **kwargs) -> dict:
+        """Drive translation context fields and changed pins without stepping."""
         groups = {
-            "satp": ((satp_mode, self.csr_ctrl_if.io_tlbCsr_satp_mode), (satp_asid, self.csr_ctrl_if.io_tlbCsr_satp_asid), (satp_ppn, self.csr_ctrl_if.io_tlbCsr_satp_ppn)),
-            "vsatp": ((vsatp_mode, self.csr_ctrl_if.io_tlbCsr_vsatp_mode), (vsatp_asid, self.csr_ctrl_if.io_tlbCsr_vsatp_asid), (vsatp_ppn, self.csr_ctrl_if.io_tlbCsr_vsatp_ppn)),
-            "hgatp": ((hgatp_mode, self.csr_ctrl_if.io_tlbCsr_hgatp_mode), (hgatp_vmid, self.csr_ctrl_if.io_tlbCsr_hgatp_vmid), (hgatp_ppn, self.csr_ctrl_if.io_tlbCsr_hgatp_ppn)),
-            "priv_virt": ((priv_imode, self.csr_ctrl_if.io_tlbCsr_priv_imode), (priv_virt, self.csr_ctrl_if.io_tlbCsr_priv_virt)),
+            "satp": ((kwargs.get("satp_mode"), self.csr_ctrl_if.io_tlbCsr_satp_mode), (kwargs.get("satp_asid"), self.csr_ctrl_if.io_tlbCsr_satp_asid), (kwargs.get("satp_ppn"), self.csr_ctrl_if.io_tlbCsr_satp_ppn)),
+            "vsatp": ((kwargs.get("vsatp_mode"), self.csr_ctrl_if.io_tlbCsr_vsatp_mode), (kwargs.get("vsatp_asid"), self.csr_ctrl_if.io_tlbCsr_vsatp_asid), (kwargs.get("vsatp_ppn"), self.csr_ctrl_if.io_tlbCsr_vsatp_ppn)),
+            "hgatp": ((kwargs.get("hgatp_mode"), self.csr_ctrl_if.io_tlbCsr_hgatp_mode), (kwargs.get("hgatp_vmid"), self.csr_ctrl_if.io_tlbCsr_hgatp_vmid), (kwargs.get("hgatp_ppn"), self.csr_ctrl_if.io_tlbCsr_hgatp_ppn)),
+            "priv_virt": ((kwargs.get("priv_imode"), self.csr_ctrl_if.io_tlbCsr_priv_imode), (kwargs.get("priv_virt"), self.csr_ctrl_if.io_tlbCsr_priv_virt)),
         }
-        changed = {name: any(value is not None for value, _signal in members) for name, members in groups.items()}
+        changed_groups = {name: any(value is not None for value, _signal in members) for name, members in groups.items()}
         for members in groups.values():
             for value, signal in members:
                 if value is not None:
                     self._write(signal, int(value))
-        pulse_cycles = self.pulse_tlb_csr_changes(
-            satp=changed["satp"],
-            vsatp=changed["vsatp"],
-            hgatp=changed["hgatp"],
-            priv_virt=changed["priv_virt"],
-            cycles=cycles,
-        )
-        record = {"changed": changed, "cycles": int(pulse_cycles)}
-        self._emit_event("control.translation_context", {**record, "translation_epoch": int(self.translation_epoch)})
-        return record
+        control = self.prepare_tlb_csr_changes(**changed_groups)
+        return {**control, "changed": changed_groups}
+
+    def release_translation_context_change(self, prepared: dict) -> None:
+        self.release_tlb_csr_changes(prepared)
 
     def set_log_level(self, level: str) -> int:
         value = parse_log_level(level)

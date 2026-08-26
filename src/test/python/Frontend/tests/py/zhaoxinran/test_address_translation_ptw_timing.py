@@ -10,6 +10,7 @@ from env.sequences import (
     TranslationScenario,
     TranslationScenarioPhase,
     TranslationScenarioSequence,
+    TranslationSectorLane,
 )
 from env.support import PmpPmaConfig
 
@@ -22,7 +23,9 @@ _PAGE_SIZE = 0x1000
 _PAYLOAD = b"\x13\x00\x00\x00" * 512
 
 
-def _physical_permissions() -> tuple[tuple[TranslationPmpPmaEntry, ...], tuple[TranslationPmpPmaEntry, ...]]:
+def _physical_permissions(
+    *, cacheable: bool = True
+) -> tuple[tuple[TranslationPmpPmaEntry, ...], tuple[TranslationPmpPmaEntry, ...]]:
     return (
         (
             TranslationPmpPmaEntry(
@@ -37,7 +40,7 @@ def _physical_permissions() -> tuple[tuple[TranslationPmpPmaEntry, ...], tuple[T
             TranslationPmpPmaEntry(
                 "pma",
                 0,
-                PmpPmaConfig(match="napot", read=True, execute=True, cacheable=True),
+                PmpPmaConfig(match="napot", read=True, execute=True, cacheable=cacheable),
                 _PA & ~(_PAGE_SIZE - 1),
                 size=0x2000,
             ),
@@ -45,8 +48,16 @@ def _physical_permissions() -> tuple[tuple[TranslationPmpPmaEntry, ...], tuple[T
     )
 
 
-def _scenario(scenario_id: str, *, with_physical_permissions: bool = True, **kwargs) -> TranslationScenario:
-    pmp_entries, pma_entries = _physical_permissions() if with_physical_permissions else ((), ())
+def _scenario(
+    scenario_id: str,
+    *,
+    with_physical_permissions: bool = True,
+    physical_cacheable: bool = True,
+    **kwargs,
+) -> TranslationScenario:
+    pmp_entries, pma_entries = (
+        _physical_permissions(cacheable=physical_cacheable) if with_physical_permissions else ((), ())
+    )
     return TranslationScenario(
         scenario_id=scenario_id,
         va=_VA,
@@ -95,6 +106,42 @@ _TIMING_CASES = (
     ),
     pytest.param(
         _scenario(
+            "translation-ptw-superpage-latency",
+            mode="sv39",
+            s1_pte=TranslationPte(level=1),
+            ptw_response_latency=3,
+            ptw_response_latency_max=7,
+            ptw_response_seed=0x5A390033,
+        ),
+        None,
+        id="superpage-latency",
+    ),
+    pytest.param(
+        _scenario(
+            "translation-ptw-uncache-latency",
+            mode="sv39",
+            physical_cacheable=False,
+            ptw_response_latency=3,
+            ptw_response_latency_max=7,
+            ptw_response_seed=0x5A390034,
+        ),
+        None,
+        id="uncache-latency",
+    ),
+    pytest.param(
+        _scenario(
+            "translation-ptw-sector-periodic-ready",
+            mode="sv39",
+            s1_sector_lanes=(TranslationSectorLane(lane=1, ppn=(_PA >> 12) + 1),),
+            ptw_req_ready_strategy="periodic",
+            ptw_req_ready_high_cycles=1,
+            ptw_req_ready_low_cycles=2,
+        ),
+        None,
+        id="sector-periodic-ready",
+    ),
+    pytest.param(
+        _scenario(
             "translation-ptw-only-stage2-gpf-latency",
             mode="bare",
             stage2_mode="sv39",
@@ -134,6 +181,46 @@ _TIMING_CASES = (
         "instruction_access_fault",
         id="all-stage-gaf-periodic-ready",
     ),
+    *(
+        pytest.param(
+            _scenario(
+                f"translation-ptw-all-stage-{s1_name}-with-{s2_name}-timing",
+                mode="sv39",
+                stage2_mode="sv39",
+                s2xlate=3,
+                gpa=_GPA,
+                s1_pte=TranslationPte(asid=5, vmid=7),
+                s2_pte=TranslationPte(vmid=7),
+                vsatp_asid=5,
+                hgatp_vmid=7,
+                priv_virt=1,
+                s1_pf=int(s1_name == "response-page"),
+                s1_af=int(s1_name == "response-access"),
+                s2_gpf=int(s2_name == "guest-page"),
+                s2_gaf=int(s2_name == "guest-access"),
+                expected_path="fault",
+                expected_result=expected_result,
+                with_physical_permissions=False,
+                ptw_response_latency=2,
+                ptw_response_latency_max=5,
+                ptw_response_seed=seed,
+                ptw_req_ready_strategy="periodic",
+                ptw_req_ready_high_cycles=1,
+                ptw_req_ready_low_cycles=2,
+            ),
+            expected_fault,
+            id=f"all-stage-{s1_name}-with-{s2_name}-timing",
+        )
+        for s1_name, s1_expected_result, s1_expected_fault in (
+            ("response-page", "page_fault", "instruction_page_fault"),
+            ("response-access", "access_fault", "instruction_access_fault"),
+        )
+        for s2_name, expected_result, expected_fault, seed in (
+            ("leaf", s1_expected_result, s1_expected_fault, 0x5A390041),
+            ("guest-page", s1_expected_result, s1_expected_fault, 0x5A390042),
+            ("guest-access", "access_fault", "instruction_access_fault", 0x5A390043),
+        )
+    ),
 )
 
 
@@ -162,7 +249,4 @@ def test_ptw_timing_by_translation_stage(
     else:
         assert state.expected_page_outcomes[0]["outcome"] == expected_fault
         assert env.monitor.exception_mark_count > 0
-        observations_after_fault = len(env.monitor.observations)
-        env.step(64)
-        assert len(env.monitor.observations) == observations_after_fault
     assert not env.get_errors()

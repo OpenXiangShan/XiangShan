@@ -4,7 +4,8 @@ import os
 
 import pytest
 
-from env.sequences import TranslationPte, TranslationScenario, TranslationScenarioBuilder
+from env.sequences import TranslationPmpPmaEntry, TranslationPte, TranslationScenario, TranslationScenarioBuilder
+from env.support import PmpPmaConfig
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -19,6 +20,7 @@ def _s1_scenario(
     *,
     pte: TranslationPte,
     priv_imode: int = 1,
+    **kwargs,
 ) -> TranslationScenario:
     return TranslationScenario(
         scenario_id=scenario_id,
@@ -31,6 +33,7 @@ def _s1_scenario(
         priv_imode=priv_imode,
         expected_path="fault",
         expected_result="page_fault",
+        **kwargs,
     )
 
 
@@ -80,6 +83,38 @@ _PTE_PERMISSION_CASES = (
         _s1_scenario("translation-pte-s1-write-without-read", pte=TranslationPte(r=0, w=1)),
         "instruction_page_fault",
         id="stage1-write-without-read",
+    ),
+    pytest.param(
+        _s1_scenario("translation-pte-s1-execute-denied", pte=TranslationPte(x=0)),
+        "instruction_page_fault",
+        id="stage1-execute-denied",
+    ),
+    pytest.param(
+        _s1_scenario(
+            "translation-pte-s1-reserved-pbmt",
+            pte=TranslationPte(pbmt=3),
+            ptw_machine_pbmte=1,
+            pmp_entries=(
+                TranslationPmpPmaEntry(
+                    "pmp",
+                    0,
+                    PmpPmaConfig(match="napot", read=True, execute=True),
+                    _PA & ~0x1FFF,
+                    size=0x2000,
+                ),
+            ),
+            pma_entries=(
+                TranslationPmpPmaEntry(
+                    "pma",
+                    0,
+                    PmpPmaConfig(match="napot", read=True, execute=True, cacheable=True),
+                    _PA & ~0x1FFF,
+                    size=0x2000,
+                ),
+            ),
+        ),
+        "instruction_page_fault",
+        id="stage1-reserved-pbmt",
     ),
     *(
         pytest.param(

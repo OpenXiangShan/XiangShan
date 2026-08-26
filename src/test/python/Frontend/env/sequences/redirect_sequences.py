@@ -40,7 +40,8 @@ def _advance_pc_matches(env, expected_pcs, max_cycles: int) -> bool:
 class InjectRedirectSequence:
     txn: RedirectTxn
 
-    def run(self, env) -> bool:
+    def inject(self, env) -> None:
+        """Queue the redirect without consuming a DUT cycle."""
         if self.txn.source_pc is None:
             env.backend_model.inject_redirect(
                 self.txn.target_pc,
@@ -61,11 +62,29 @@ class InjectRedirectSequence:
                 backend_iaf=int(self.txn.backend_iaf),
                 satp_flush=int(self.txn.satp_flush),
             )
+
+    def run(self, env) -> bool:
+        self.inject(env)
+        return self.wait(env)
+
+    def wait(self, env) -> bool:
+        if self.txn.target_pc in _recent_pcs(env, limit=16):
+            return True
         for _ in range(max(0, int(self.txn.max_cycles))):
             env.step(1)
             if self.txn.target_pc in _recent_pcs(env, limit=16):
                 return True
         return False
+
+    def wait_for_notification(self, env) -> bool:
+        """Wait until the environment observes the redirect drive event."""
+        monitor = getattr(env, "monitor", None)
+        start_count = int(getattr(monitor, "redirect_count", 0))
+        for _ in range(max(0, int(self.txn.max_cycles))):
+            if int(getattr(monitor, "redirect_count", 0)) > start_count:
+                return True
+            env.step(1)
+        return int(getattr(monitor, "redirect_count", 0)) > start_count
 
 
 @dataclass(frozen=True)

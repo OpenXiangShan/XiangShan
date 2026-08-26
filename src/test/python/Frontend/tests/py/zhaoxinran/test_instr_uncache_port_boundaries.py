@@ -1354,6 +1354,133 @@ def test_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(env):
     assert not env.monitor.get_errors()
 
 
+def _configure_translation_attribute(env, *, attr: str, paddr: int) -> int:
+    if attr == "cacheable":
+        _configure_exec_cacheable_pma_4k(env, base_addr=paddr)
+        return _PBMT_PMA
+    if attr == "mmio":
+        _configure_exec_mmio_pma_4k(env, base_addr=paddr)
+        return _PBMT_PMA
+    if attr == "nc":
+        _configure_exec_cacheable_pma_4k(env, base_addr=paddr)
+        return _PBMT_NC
+    raise ValueError(f"unsupported translation attribute {attr!r}")
+
+
+@pytest.mark.parametrize(
+    "old_attr,new_attr",
+    (
+        ("cacheable", "mmio"),
+        ("cacheable", "nc"),
+        ("mmio", "cacheable"),
+        ("mmio", "nc"),
+        ("nc", "cacheable"),
+        ("nc", "mmio"),
+    ),
+)
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_sv39_same_page_sfence_retranslates_changed_attribute(env, old_attr: str, new_attr: str) -> None:
+    old_pbmt = _PBMT_NC if old_attr == "nc" else _PBMT_PMA
+    expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
+        env,
+        vaddr=_NORMAL_BASE,
+        paddr=_NORMAL_PHYS_BASE,
+        pbmt=old_pbmt,
+    )
+    _initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
+    _configure_exec_pmp_4k(env, base_addr=mapping.paddr)
+    _configure_translation_attribute(env, attr=old_attr, paddr=mapping.paddr)
+    _force_redirect_to(env, mapping.vaddr)
+
+    if old_attr == "cacheable":
+        assert _wait_for_icache_req(env, max_cycles=6000) > 0
+    else:
+        assert _wait_for_request_addr(env, mapping.paddr, max_cycles=6000), env.uncache_agent.get_stats()
+    assert _wait_for_observed_pc(env, mapping.vaddr, max_cycles=12000)
+    observation_index_before_switch = len(env.monitor.observations)
+    observations_before_switch = sum(int(obs.pc) == int(mapping.vaddr) for obs in env.monitor.observations)
+
+    new_pbmt = _configure_translation_attribute(env, attr=new_attr, paddr=mapping.paddr)
+    _remap_sv39_page_pbmt(env, vaddr=mapping.vaddr, paddr=mapping.paddr, pbmt=new_pbmt)
+    _pulse_sfence(env, addr=mapping.vaddr, rs1=0, rs2=1)
+    _force_redirect_to(env, mapping.vaddr)
+
+    if new_attr == "cacheable":
+        assert _wait_for_icache_req(env, max_cycles=12000) > 0
+    else:
+        assert _wait_for_request_addr(env, mapping.paddr, max_cycles=12000), env.uncache_agent.get_stats()
+    for _ in range(12000):
+        if sum(int(obs.pc) == int(mapping.vaddr) for obs in env.monitor.observations) > observations_before_switch:
+            break
+        env.step(1)
+
+    assert sum(int(obs.pc) == int(mapping.vaddr) for obs in env.monitor.observations) > observations_before_switch
+    assert any(
+        int(obs.pc) == int(mapping.vaddr)
+        and int(obs.instr) == int(expected_block[0][1])
+        and bool(obs.is_rvc) == bool(expected_block[0][2])
+        for obs in env.monitor.observations[observation_index_before_switch:]
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.parametrize(
+    "old_attr,new_attr",
+    (
+        ("cacheable", "mmio"),
+        ("cacheable", "nc"),
+        ("mmio", "cacheable"),
+    ),
+)
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_sv39_redirect_transitions_to_changed_attribute(env, old_attr: str, new_attr: str) -> None:
+    old_pbmt = _PBMT_PMA
+    new_pbmt = _PBMT_NC if new_attr == "nc" else _PBMT_PMA
+    _, old_mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
+        env,
+        vaddr=_NORMAL_BASE,
+        paddr=_NORMAL_PHYS_BASE,
+        pbmt=old_pbmt,
+    )
+    expected_block, target_mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
+        env,
+        vaddr=_NORMAL_ALT_BASE,
+        paddr=_NORMAL_ALT_PHYS_BASE,
+        pbmt=new_pbmt,
+    )
+    _remap_sv39_page_pbmt(
+        env,
+        vaddr=old_mapping.vaddr,
+        paddr=old_mapping.paddr,
+        pbmt=old_pbmt,
+    )
+    _initialize_sv39_fetch(env, reset_vector=old_mapping.vaddr)
+    _configure_exec_pmp(env, base_addr=0x8000_0000, size=0x4000)
+    _configure_translation_attribute(env, attr=old_attr, paddr=old_mapping.paddr)
+
+    if old_attr == "cacheable":
+        assert _wait_for_icache_req(env, max_cycles=6000) > 0
+    else:
+        assert _wait_for_request_addr(env, old_mapping.paddr, max_cycles=6000), env.uncache_agent.get_stats()
+    assert _wait_for_observed_pc(env, old_mapping.vaddr, max_cycles=12000)
+
+    _configure_translation_attribute(env, attr=new_attr, paddr=target_mapping.paddr)
+    _force_redirect_to(env, target_mapping.vaddr)
+
+    if new_attr == "cacheable":
+        assert _wait_for_icache_req(env, max_cycles=12000) > 0
+    else:
+        assert _wait_for_request_addr(env, target_mapping.paddr, max_cycles=12000), env.uncache_agent.get_stats()
+    assert _wait_for_observed_pc(env, target_mapping.vaddr, max_cycles=12000)
+    assert any(
+        int(obs.pc) == int(target_mapping.vaddr)
+        and int(obs.instr) == int(expected_block[0][1])
+        and bool(obs.is_rvc) == bool(expected_block[0][2])
+        for obs in env.monitor.observations
+    )
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_tps("ATP-113")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_cacheable_non_mmio_uses_icache_path(env):
