@@ -88,7 +88,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.entrance := StoreEntrance.scalarIssue.U
   scalarIssue.bits.accessType.instrType := InstrType.scalar.U
   scalarIssue.bits.accessType.isCbo := LSUOpType.isCboAll(stinUop.fuOpType)
-  scalarIssue.bits.accessType.isCboNoZero := LSUOpType.isCbo(stinUop.fuOpType)
+  scalarIssue.bits.accessType.isCboNoZero := LSUOpType.isCboNotZero(stinUop.fuOpType)
   scalarIssue.bits.uop := stinUop
   scalarIssue.bits.vaddr := stinVAddr
   scalarIssue.bits.fullva := stinFullva

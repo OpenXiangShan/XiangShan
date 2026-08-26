@@ -1673,10 +1673,10 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
       val setValid      = cboSetVec(j)
       when(setValid) {
         dataEntries(i).cboType   := Mux1H(List(
-          isCboClean(port.bits.uop.fuOpType(1, 0)) -> CboType.clean, // TODO: don't use (1, 0)
-          isCboFlush(port.bits.uop.fuOpType(1, 0)) -> CboType.flush,
-          isCboInval(port.bits.uop.fuOpType(1, 0)) -> CboType.inval,
-          isCboZero(port.bits.uop.fuOpType(1, 0))  -> CboType.zero
+          LSUOpType.isCboClean(port.bits.uop.fuOpType) -> CboType.clean,
+          LSUOpType.isCboFlush(port.bits.uop.fuOpType) -> CboType.flush,
+          LSUOpType.isCboInval(port.bits.uop.fuOpType) -> CboType.inval,
+          LSUOpType.isCboZero(port.bits.uop.fuOpType) -> CboType.zero,
         ))
       }
     }
@@ -1918,7 +1918,7 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
     val stWbIdx       = storeDataIn.bits.sqIdx.value
     when(storeDataIn.fire){
       // if it's a cbo.zero, write zero.
-      dataEntries(stWbIdx).data  := Mux(storeDataIn.bits.fuOpType === LSUOpType.cbo_zero, 0.U, storeDataIn.bits.data)
+      dataEntries(stWbIdx).data  := Mux(LSUOpType.isCboZero(storeDataIn.bits.fuOpType), 0.U, storeDataIn.bits.data)
 
       // debug signal
       if(debugEn) {

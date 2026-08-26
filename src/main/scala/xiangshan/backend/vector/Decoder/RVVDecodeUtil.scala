@@ -265,11 +265,20 @@ object RVVDecodeUtil {
     val e64 = SewPattern(64)
   }
 
-  case class BoolPattern(bitPat: BitPat) extends DecodePattern {
+  class BoolPattern(val bitPat: BitPat) extends DecodePattern {
     val value: Boolean = bitPat.rawString match {
       case "0" => false
       case "1" => true
     }
+  }
+
+  object BoolPattern {
+    def apply(bitPat: BitPat): BoolPattern = new BoolPattern(bitPat)
+
+    def all: Seq[BoolPattern] = Seq(
+      BoolPattern(BitPat.Y(1)),
+      BoolPattern(BitPat.N(1)),
+    )
   }
 
   case class UopNumOHsPattern(

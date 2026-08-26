@@ -9,8 +9,8 @@ import utility.LookupTree
 import xiangshan.CommitType
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
+import xiangshan.backend.decode.isa.Instructions.ZICBOType
 import xiangshan.backend.decode.opcode.Opcode
-import xiangshan.backend.decode.opcode.Opcode.Opcode
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.Frm
 import xiangshan.backend.vector.Decoder.DecodePatterns.RdZeroPattern
@@ -49,6 +49,19 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
     case p if !p.hasRd => Seq(p ## RdZeroPattern(None))
   }
 
+
+  val patternsCboI2f: Seq[DecodePatternComb2[InstPattern, BoolPattern]] = for (
+    instP <- instSeq.filter(x => ZICBOType.all.contains(x.bitPat));
+    bool <- BoolPattern.all
+  ) yield {
+    instP ## bool
+  }
+
+  println("[tmp-SimpleDecodeChannel]")
+  instSeq.foreach(println)
+  println("[tmp-SimpleDecodeChannel]")
+  patternsCboI2f.foreach(println)
+
   val uopInfoFields = Seq.tabulate(maxSplitUopNum)(i => new UopInfoField(i))
   val opcodeFields = Seq.tabulate(maxSplitUopNum)(i => new OpcodeField(i))
   val fuTypeFields = Seq.tabulate(maxSplitUopNum)(i => new FuTypeField(i))
@@ -68,14 +81,18 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
   println(s"The length of DecodeTable in SimpleDecodeChannel: ${patterns.length}")
   val table = new DecodeTable(patterns, fields)
   val instRdTable = new DecodeTable(patternsRd, Seq(NumWbField))
+  val instCboI2fTable = new DecodeTable(patternsCboI2f, Seq(CboOpcodeField))
 
   // Get the decode result by generating a decode table by programming logic array (pla)
   val result = table.decode(in.rawInst)
   val resultInstRd = instRdTable.decode(in.rawInst ## rdZero)
+  val resultInstCboI2f = instCboI2fTable.decode(in.rawInst ## in.fromCSR.special.cboI2F)
 
   val uopInfos = uopInfoFields.map(field => result(field))
   val opcodes = opcodeFields.map(field => result(field))
   val fuTypes = fuTypeFields.map(field => result(field))
+
+  val cboOpcode = resultInstCboI2f(CboOpcodeField)
 
   val isMop  = result(IsMopField)
   val selImm = result(SelImmField)
@@ -122,7 +139,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
     out.uop(i).bits.renameInfo := uopInfos(i).bits
     out.uop(i).bits.renameInfo.gpWen := uopInfos(i).bits.gpWen && instFields.RD =/= 0.U
     out.uop(i).bits.fuType := fuTypes(i)
-    out.uop(i).bits.opcode := opcodes(i)
+    out.uop(i).bits.opcode := opcodes(i) | cboOpcode
     out.uop(i).bits.lsrc1 := instFields.RS1
     out.uop(i).bits.lsrc2 := instFields.RS2
     out.uop(i).bits.lsrc3 := instFields.FS3

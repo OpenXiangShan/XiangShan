@@ -112,6 +112,8 @@ object Extensions {
     override val table: Map[BitPat, Seq[Opcode]] = tableZfhminD
   }
 
+  case object Zicbo extends UnprivExt(Seq(ZICBOType), tableZicbo)
+
   case object Zicond extends UnprivExt(Seq(ZICONDType), tableZicond)
 
   case object Zicsr extends UnprivExt(Seq(ZICSRType), tableZicsr)
@@ -156,6 +158,7 @@ object Extensions {
     Zvknha,
     Zvbb,
     XSTrap,
+    Zicbo,
     Zicond,
     Zifencei, Zknd, Zkne, Zknh, Zksed, Zksh,
     // Zcb, Zcmop,

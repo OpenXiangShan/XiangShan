@@ -665,12 +665,13 @@ object Opcode {
     val cbo_flush = IntIType(SCALAR, nonH, nonX, sign, CBO.flush, uopCbo) + NoSpec + BlockBack
     val cbo_inval = IntIType(SCALAR, nonH, nonX, sign, CBO.inval, uopCbo) + NoSpec + BlockBack
 
-    def getCmoOpcode(op: UInt): UInt = op(3, 1)
-    def isCbo(op: UInt): Bool = op(0) === uopCbo && getCmoOpcode(op) === CBO.zero
+    def getCboOpcode(op: UInt): UInt = op(3, 1)
+    def isCboNotZero(op: UInt): Bool = op(0) === uopCbo && getCboOpcode(op) =/= CBO.zero
     def isCboAll(op: UInt): Bool = op(0) === uopCbo
-    def isCboClean(op: UInt): Bool = isCbo(op) && getCmoOpcode(op) === CBO.clean
-    def isCboFlush(op: UInt): Bool = isCbo(op) && getCmoOpcode(op) === CBO.flush
-    def isCboInval(op: UInt): Bool = isCbo(op) && getCmoOpcode(op) === CBO.inval
+    def isCboZero(op: UInt): Bool = op(0) === uopCbo && getCboOpcode(op) === CBO.zero
+    def isCboClean(op: UInt): Bool = op(0) === uopCbo && getCboOpcode(op) === CBO.clean
+    def isCboFlush(op: UInt): Bool = op(0) === uopCbo && getCboOpcode(op) === CBO.flush
+    def isCboInval(op: UInt): Bool = op(0) === uopCbo && getCboOpcode(op) === CBO.inval
   }
 
   trait AmoOpcodes extends Opcodes with LsuTrait {
