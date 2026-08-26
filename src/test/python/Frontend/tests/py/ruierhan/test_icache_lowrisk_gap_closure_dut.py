@@ -14,14 +14,17 @@ from env.sequences import (
     TranslationScenario,
     TranslationScenarioBuilder,
 )
+from env.sequences import TranslationPmpPmaEntry
 from env.funcov.py.icache.icache_waylookup_funcov import (
     _SIGNALS as _WAYLOOKUP_SIGNALS,
 )
+from env.support.pmp_pma import PmpPmaConfig
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _initialize_cacheable_stream,
 )
 from tests.py.jiabowen.test_two_fetch_directed_flow_dut import (
     _load_and_reset as _load_two_fetch_loop,
+    _trained_short_block_loop,
     _warm_frontend_execution as _warm_two_fetch_execution,
 )
 
@@ -157,6 +160,21 @@ def _wait_funcov_hit(
         lambda: env.functional_coverage.key_hit(group, bin_name),
         max_cycles=max_cycles,
         label=label or f"{group}.{bin_name}",
+    )
+
+
+def _wait_funcov_hits(
+    env,
+    targets: tuple[tuple[str, str], ...],
+    *,
+    max_cycles: int,
+    label: str,
+) -> None:
+    _run_until(
+        env,
+        lambda: all(env.functional_coverage.key_hit(group, name) for group, name in targets),
+        max_cycles=max_cycles,
+        label=label,
     )
 
 
@@ -549,7 +567,7 @@ def test_icache_lowrisk_waylookup_queue_read_dut(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins(
-    "BIN-737", "BIN-738", "BIN-739", "BIN-1010", "BIN-740", "BIN-741",
+    "BIN-737", "BIN-738", "BIN-739", "BIN-1010", "BIN-740", "BIN-741", "BIN-762",
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
@@ -569,15 +587,19 @@ def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
         s1_pf=1,
         expected_result="page_fault",
     )
-    env.initialize(reset_vector=va, bare_mode=False)
+    _initialize_cacheable_stream(env, pa, latency=24)
+    _run_until(
+        env,
+        lambda: int(env.icache_agent.get_stats()["resp_line_count"]) >= 1,
+        max_cycles=4096,
+        label="cacheline refill before ITLB exception",
+    )
     state = TranslationScenarioBuilder(env).build(scenario)
 
-    def arm_before_reset_release() -> None:
-        env.monitor.clear()
-        env.monitor.set_expected_pc(va)
-        env.arm_translation_scenario(state, page_indexes=(0,))
-
-    env.reset(before_release=arm_before_reset_release)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(va)
+    env.arm_translation_scenario(state, page_indexes=(0,))
+    env.backend_model.inject_redirect(va, "ctrl_redirect", delay_cycles=0)
     _run_until(
         env,
         lambda: bool(env.translation_oracle.get_active())
@@ -592,8 +614,90 @@ def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
         max_cycles=256,
         label="WayLookup exception capture coverage",
     )
+    _wait_funcov_hit(
+        env,
+        "icache_hit_path",
+        "hit_itlb_exception",
+        max_cycles=256,
+        label="cache hit with ITLB exception coverage",
+    )
     env.step(16)
     assert env.monitor.exception_mark_count > 0
+    env.assert_translation_scenario()
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-763")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_lowrisk_hit_pmp_exception(lowrisk_cleanup) -> None:
+    """Present a cacheable line with execute permission denied by the PMP model."""
+    env = lowrisk_cleanup
+    va = 0x8021_0F00
+    pa = 0x8041_0F00
+    payload = (_NOP.to_bytes(4, "little")) * 512
+    scenario = TranslationScenario(
+        scenario_id="cacheable-hit-pmp-instruction-access-fault",
+        va=va,
+        pa=pa,
+        payload=payload,
+        page_count=2,
+        mode="sv39",
+        expected_path="fault",
+        expected_result="access_fault",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(match="napot", read=True, write=True, execute=False),
+                addr=pa,
+                size=0x1000,
+            ),
+        ),
+        pma_entries=(
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=PmpPmaConfig(
+                    match="napot",
+                    read=True,
+                    write=True,
+                    execute=True,
+                    cacheable=True,
+                    atomic=True,
+                ),
+                addr=pa,
+                size=0x1000,
+            ),
+        ),
+    )
+    _initialize_cacheable_stream(env, pa, latency=24)
+    _run_until(
+        env,
+        lambda: int(env.icache_agent.get_stats()["resp_line_count"]) >= 1,
+        max_cycles=4096,
+        label="cacheline refill before PMP exception",
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+
+    env.monitor.clear()
+    env.monitor.set_expected_pc(va)
+    env.arm_translation_scenario(state, page_indexes=(0,))
+    env.backend_model.inject_redirect(va, "ctrl_redirect", delay_cycles=0)
+    _run_until(
+        env,
+        lambda: bool(env.translation_oracle.get_active())
+        and bool(env.translation_oracle.get_active().get("fault_seen")),
+        max_cycles=6000,
+        label="cacheable hit with PMP execute fault",
+    )
+    _wait_funcov_hit(
+        env,
+        "icache_hit_path",
+        "hit_pmp_exception",
+        max_cycles=256,
+        label="cache hit with PMP exception coverage",
+    )
+    env.step(16)
     env.assert_translation_scenario()
     assert not env.monitor.get_errors()
 
@@ -628,12 +732,85 @@ def test_icache_lowrisk_waylookup_capacity_wrap_dut(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-763", "BIN-765", "BIN-767", "BIN-768")
+@pytest.mark.funcov_bins("BIN-759", "BIN-760")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_lowrisk_hit_path_sequences(lowrisk_cleanup) -> None:
+    """Fill adjacent lines, then let the normal sequential stream exercise clean hits."""
+    env = lowrisk_cleanup
+    base = 0x800A_0000
+    env.load_program(_trained_short_block_loop(), base)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=24,
+        miss_rate=1.0,
+        seed=0x6275,
+    )
+    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(base)
+    _run_until(
+        env,
+        lambda: int(env.icache_agent.get_stats()["resp_line_count"]) >= 4,
+        max_cycles=4096,
+        label="two cacheline refills for hit-path sequence",
+    )
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=24,
+        miss_rate=0.0,
+        seed=0x6275,
+    )
+    _wait_funcov_hits(
+        env,
+        (
+            ("icache_hit_path", "continuous_same_line_sram_hit"),
+            ("icache_hit_path", "continuous_cross_line_sram_hit"),
+        ),
+        max_cycles=4096,
+        label="same-line and cross-line clean SRAM hit coverage",
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-761")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_lowrisk_dual_independent_hit(lowrisk_cleanup) -> None:
+    """Train the existing two-fetch loop with both requested lines resident."""
+    env = lowrisk_cleanup
+    base = 0x8000_0000
+    env.load_program(_trained_short_block_loop(), base)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=24,
+        miss_rate=1.0,
+        seed=0x6276,
+    )
+    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(base)
+    _warm_two_fetch_execution(env)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=24,
+        miss_rate=0.0,
+        seed=0x6276,
+    )
+    _wait_funcov_hit(
+        env,
+        "icache_hit_path",
+        "dual_request_independent_hit",
+        max_cycles=4096,
+        label="dual independent clean SRAM hit coverage",
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-765", "BIN-767", "BIN-768")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8004_0000
-    _load_nops(env, base, words=1024)
+    _load_nops(env, base, words=8192)
     env.icache_agent.configure(
         hit_latency=1,
         miss_latency=32,
@@ -651,6 +828,49 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
         label="clean cache refill",
     )
     _drive_soft_prefetch(env, [base, base + 0x40])
-    env.step(64)
+    _wait_funcov_hit(
+        env,
+        "icache_miss_path",
+        "fetch_refill_prefetch_hit",
+        max_cycles=4096,
+        label="prefetch SRAM hit after clean fetch refill",
+    )
+    # Four distinct tags mapping to one set establish the full-set condition;
+    # the fifth tag then exercises the real miss/victim request path.
+    for index in range(4):
+        target = base + index * 0x1000
+        env.backend_model.inject_redirect(target, "ctrl_redirect", delay_cycles=0)
+        _run_until(
+            env,
+            lambda expected=index + 2: int(env.icache_agent.get_stats()["resp_line_count"]) >= expected,
+            max_cycles=4096,
+            label=f"same-set refill {index + 1}",
+        )
+    victim_target = base + 4 * 0x1000
+    env.backend_model.inject_redirect(victim_target, "ctrl_redirect", delay_cycles=0)
+    _wait_funcov_hit(
+        env,
+        "icache_miss_path",
+        "plru_victim_on_miss",
+        max_cycles=4096,
+        label="full-set PLRU victim miss coverage",
+    )
+
+    # The most recently refilled line is now revisited with hit responses
+    # enabled, exercising the post-refill demand-hit correlation.
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=32,
+        miss_rate=0.0,
+        seed=0x6276,
+    )
+    env.backend_model.inject_redirect(base + 3 * 0x1000, "ctrl_redirect", delay_cycles=0)
+    _wait_funcov_hit(
+        env,
+        "icache_miss_path",
+        "refill_then_fetch_hit",
+        max_cycles=4096,
+        label="demand SRAM hit after refill and MSHR release",
+    )
     assert int(env.icache_agent.get_stats()["resp_line_count"]) >= 1
     assert not env.monitor.get_errors()
