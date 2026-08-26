@@ -320,6 +320,7 @@ def test_fe_ifu_predchecker_false_taken(env) -> None:
     env.backend_model.inject_redirect(_BASE, "ifu_predchecker_v3_not_cfi", delay_cycles=1)
 
     _run_until_bin(env, "ifu_predchecker_v3_fault", "not_cfi_taken")
+    _run_until_bin(env, "ifu_v3_pipeline_owner_model", "owner_leaf_036")
     _assert_owner_bins(env, (*_PREDICTOR_WARMUP_OWNER_BINS, "BIN-934"))
     assert not env.monitor.get_errors()
 
@@ -391,6 +392,8 @@ def test_fe_ifu_predchecker_invalid_taken(env) -> None:
     "BIN-976",
     "BIN-980",
     "BIN-985",
+    "BIN-933",
+    "BIN-886",
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_fe_ifu_predchecker_cfi_width_and_position_faults(env) -> None:

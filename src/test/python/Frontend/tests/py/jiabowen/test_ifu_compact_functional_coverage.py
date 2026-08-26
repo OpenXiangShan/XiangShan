@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from env.funcov.py.ifu.owner_v3_funcov import (
+    OWNER_V3_BLOCKED_BIN_IDS,
     OWNER_V3_BIN_SPECS,
     OWNER_V3_EVENT_TYPE,
 )
@@ -11,6 +12,7 @@ from env.support.rvc_decoder import expand_rvc
 
 
 _PREFIX = "Frontend_top.Frontend.inner_ifu.__Vtogcov__"
+_FTQ_PREFIX = "Frontend_top.Frontend.inner_ftq."
 
 
 class _Signal:
@@ -109,6 +111,12 @@ def test_ifu_v3_owner_event_model_requires_checked_observations(tmp_path):
     assert all(
         recorder.key_hit(spec.coverage_group, spec.bin_name)
         for spec in OWNER_V3_BIN_SPECS
+        if spec.bin_id not in OWNER_V3_BLOCKED_BIN_IDS
+    )
+    assert all(
+        not recorder.key_hit(spec.coverage_group, spec.bin_name)
+        for spec in OWNER_V3_BIN_SPECS
+        if spec.bin_id in OWNER_V3_BLOCKED_BIN_IDS
     )
     assert any(
         item.get("event") == "ifu_v3_owner_leaf_rejected"
@@ -126,7 +134,7 @@ def test_ifu_v3_owner_source_rules_require_the_complete_canonical_evidence(tmp_p
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_014")
     assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_063")
 
-    for cycle, bin_id in enumerate(("BIN-832", "BIN-886"), start=3):
+    for cycle, bin_id in enumerate(("BIN-832", "BIN-842"), start=3):
         _mark_source_bin(recorder, bin_id, cycle)
     assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_035")
     _mark_source_bin(recorder, "BIN-898", 5)
@@ -136,23 +144,13 @@ def test_ifu_v3_owner_source_rules_require_the_complete_canonical_evidence(tmp_p
         _mark_source_bin(recorder, bin_id, cycle)
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_054")
 
-    for cycle, bin_id in enumerate(("BIN-807", "BIN-808", "BIN-828"), start=8):
+    for cycle, bin_id in enumerate(
+        ("BIN-807", "BIN-808", "BIN-828", "BIN-866", "BIN-812", "BIN-814", "BIN-883", "BIN-884", "BIN-432", "BIN-886", "BIN-897"),
+        start=8,
+    ):
         _mark_source_bin(recorder, bin_id, cycle)
-    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_057")
-    _mark_source_bin(recorder, "BIN-866", 11)
-    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_057")
-
-    for cycle, bin_id in enumerate(("BIN-812", "BIN-814", "BIN-883"), start=12):
-        _mark_source_bin(recorder, bin_id, cycle)
-    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_058")
-    _mark_source_bin(recorder, "BIN-884", 15)
-    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_058")
-
-    for cycle, bin_id in enumerate(("BIN-432", "BIN-832", "BIN-886"), start=16):
-        _mark_source_bin(recorder, bin_id, cycle)
-    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_060")
-    _mark_source_bin(recorder, "BIN-897", 19)
-    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_060")
+    for owner_leaf in ("owner_leaf_057", "owner_leaf_058", "owner_leaf_060"):
+        assert not recorder.key_hit("ifu_v3_pipeline_owner_model", owner_leaf)
 
     exception_recorder, _env, _dut, _memory = _make_recorder(tmp_path / "exception")
     _mark_source_bin(exception_recorder, "BIN-762", 20)
@@ -165,7 +163,7 @@ def test_ifu_v3_owner_source_rules_require_the_complete_canonical_evidence(tmp_p
     )
 
     _mark_source_bin(exception_recorder, "BIN-636", 22)
-    assert exception_recorder.key_hit(
+    assert not exception_recorder.key_hit(
         "ifu_v3_pipeline_owner_model", "owner_leaf_008"
     )
 
@@ -175,6 +173,13 @@ def _set_ifu_output(
     entries,
     *,
     exception_type=0,
+    is_backend_exception=0,
+    has_satp_flush=0,
+    exception_cross_page=0,
+    gp_addr_mem_wen=0,
+    gp_addr_mem_waddr=0,
+    gp_addr=0,
+    is_for_vs_nonleaf_pte=0,
     valid_mask_extra=0,
     prev_ibuf_enq_ptr=0,
     instr_count=None,
@@ -189,6 +194,24 @@ def _set_ifu_output(
     dut.set(_PREFIX + "io_toIBuffer_ready", 1)
     dut.set(_PREFIX + "io_toIBuffer_valid", 1)
     dut.set(_PREFIX + "io_toIBuffer_bits_exceptionType_value", exception_type)
+    dut.set(_PREFIX + "io_toIBuffer_bits_isBackendException", is_backend_exception)
+    dut.set(_PREFIX + "io_toIBuffer_bits_hasSatpFlush", has_satp_flush)
+    dut.set(_PREFIX + "io_toIBuffer_bits_exceptionCrossPage", exception_cross_page)
+    dut.set(_PREFIX + "io_toBackend_gpAddrMem_wen", gp_addr_mem_wen)
+    dut.set(_PREFIX + "io_toBackend_gpAddrMem_waddr", gp_addr_mem_waddr)
+    dut.set(_PREFIX + "io_toBackend_gpAddrMem_wdata_gpaddr", gp_addr)
+    dut.set(
+        _PREFIX + "io_toBackend_gpAddrMem_wdata_isForVSnonLeafPTE",
+        is_for_vs_nonleaf_pte,
+    )
+    dut.set(_PREFIX + "s2_icacheMeta_0_isBackendException", is_backend_exception)
+    dut.set(_PREFIX + "s2_icacheMeta_0_hasSatpFlush", has_satp_flush)
+    dut.set(_PREFIX + "s2_icacheMeta_0_gpAddr_addr", int(gp_addr) >> 1)
+    dut.set(
+        _PREFIX + "s2_icacheMeta_0_isForVSnonLeafPTE",
+        is_for_vs_nonleaf_pte,
+    )
+    dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_value", gp_addr_mem_waddr)
     for slot, pc, instr, is_rvc, end_offset, ftq_flag, ftq_value, exception_mask in entries:
         slot = int(slot)
         enq_enable |= 1 << slot
@@ -429,7 +452,108 @@ def test_ifu_predchecker_v3_mixed_owner_leaf_requires_all_categories(tmp_path):
 
     sample_cfvec_coverage(recorder, env, 1)
 
+    # BIN-954 is an IFU exception metadata contract leaf.  Decode-category
+    # diversity alone must not manufacture a hit for it.
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_056")
+
+
+def test_ifu_exception_metadata_owner_leaf_uses_ibuffer_and_gpa_contract(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_ifu_output(
+        dut,
+        [(0, 0x40000000, 0x00000013, 0, 0, 0, 0, 1)],
+        exception_type=5,
+        is_backend_exception=1,
+        has_satp_flush=1,
+        exception_cross_page=1,
+        gp_addr_mem_wen=1,
+        gp_addr_mem_waddr=7,
+        gp_addr=0x12345000,
+        is_for_vs_nonleaf_pte=1,
+        s2_prev_end_is_half_rvi=1,
+    )
+
+    sample_cfvec_coverage(recorder, env, 1)
+
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_056")
+
+
+def test_not_cfi_taken_owner_leaf_requires_ftq_resolve(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    not_cfi = {
+        "slot": 0,
+        "branch_type": 0,
+        "pred_taken": 1,
+        "pc_addr": 0x40000000,
+        "end_offset": 0,
+    }
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_valid", 0)
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_bits_canTrain", 0)
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_bits_ftqIdx_value", 0)
+    _set_predchecker_request(dut, [not_cfi])
+    sample_cfvec_coverage(recorder, env, 1)
+
+    _set_predchecker_redirect(dut, not_cfi, target=not_cfi["pc_addr"] + 2)
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_valid", 1)
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_bits_canTrain", 1)
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_bits_ftqIdx_value", 9)
+    sample_cfvec_coverage(recorder, env, 2)
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_036")
+
+    dut.set(_PREFIX + "predChecker.io_resp_stage2Out_checkerRedirect_valid", 0)
+    dut.set(_PREFIX + "io_toFtq_wbRedirect_valid", 0)
+    dut.set(_FTQ_PREFIX + "ifuResolve_valid", 1)
+    dut.set(_FTQ_PREFIX + "ifuResolve_bits_ftqIdx_value", 9)
+    sample_cfvec_coverage(recorder, env, 3)
+
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_036")
+
+
+def test_ftq_first_mispredict_masks_younger_training(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    dut.set(_FTQ_PREFIX + "resolveQueue.io_bpuTrain_valid", 1)
+    dut.set(_FTQ_PREFIX + "resolveQueue_io_bpuTrain_ready", 1)
+    for index in range(8):
+        dut.set(
+            _FTQ_PREFIX + f"resolveQueue.io_bpuTrain_bits_branches_{index}_valid",
+            int(index in {0, 1, 2}),
+        )
+        dut.set(
+            _FTQ_PREFIX
+            + f"resolveQueue.io_bpuTrain_bits_branches_{index}_bits_cfiPosition",
+            (1, 3, 5)[index] if index in {0, 1, 2} else index + 8,
+        )
+        dut.set(
+            _FTQ_PREFIX
+            + f"resolveQueue.io_bpuTrain_bits_branches_{index}_bits_mispredict",
+            int(index == 1),
+        )
+    sample_cfvec_coverage(recorder, env, 1)
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_060")
+
+    dut.set(_FTQ_PREFIX + "resolveQueue.io_bpuTrain_valid", 0)
+    dut.set(_FTQ_PREFIX + "trainCache_valid", 1)
+    for index in range(8):
+        dut.set(
+            _FTQ_PREFIX + f"trainCache_bits_branches_{index}_valid",
+            0,
+        )
+    sample_cfvec_coverage(recorder, env, 2)
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_060")
+
+    dut.set(_FTQ_PREFIX + "resolveQueue.io_bpuTrain_valid", 1)
+    dut.set(_FTQ_PREFIX + "trainCache_valid", 0)
+    sample_cfvec_coverage(recorder, env, 3)
+    dut.set(_FTQ_PREFIX + "resolveQueue.io_bpuTrain_valid", 0)
+    dut.set(_FTQ_PREFIX + "trainCache_valid", 1)
+    for index in range(8):
+        dut.set(
+            _FTQ_PREFIX + f"trainCache_bits_branches_{index}_valid",
+            int(index in {0, 1}),
+        )
+    sample_cfvec_coverage(recorder, env, 4)
+
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_060")
 
 
 def test_ifu_predchecker_v3_selects_first_fault_and_masks_younger_slots(tmp_path):
@@ -1165,5 +1289,23 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "s1_prevIBufEnqPtr_value",
         _PREFIX + "s2_valid_valid",
         "Frontend_top.Frontend.inner_ifu.predChecker.invalidTakenNext",
+        _FTQ_PREFIX + "ifuResolve_valid",
+        _FTQ_PREFIX + "ifuResolve_bits_ftqIdx_value",
+        _FTQ_PREFIX + "resolveQueue.io_bpuTrain_valid",
+        _FTQ_PREFIX + "resolveQueue.io_bpuTrain_ready",
+        _FTQ_PREFIX + "trainCache_valid",
+        "Frontend_top.io_backend_fromIfu_gpAddrMem_wen",
+        "Frontend_top.io_backend_fromIfu_gpAddrMem_waddr",
+        "Frontend_top.io_backend_fromIfu_gpAddrMem_wdata_gpaddr",
+        "Frontend_top.io_backend_fromIfu_gpAddrMem_wdata_isForVSnonLeafPTE",
+    }
+    required |= {
+        _FTQ_PREFIX + f"resolveQueue.io_bpuTrain_bits_branches_{index}_{field}"
+        for index in range(8)
+        for field in ("valid", "bits_cfiPosition", "bits_mispredict")
+    }
+    required |= {
+        _FTQ_PREFIX + f"trainCache_bits_branches_{index}_valid"
+        for index in range(8)
     }
     assert required <= names
