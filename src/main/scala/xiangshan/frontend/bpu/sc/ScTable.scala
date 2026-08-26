@@ -39,9 +39,16 @@ class ScTable(
     val trainReadResp:   Vec[ScEntry]      = Output(Vec(numWays, new ScEntry()))
     val update:          ScTableTrain      = Input(new ScTableTrain(numSets, numWays))
     val sramResetDone:   Bool              = Output(Bool())
+    // [新增] 表级刷新接口；关闭时结构性消失。
+    val contextFlush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
+    val bpuFlushing:  Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
   }
 
   val io = IO(new ScTableIO())
+
+  // ScTable 解包，后续 SRAM/WriteBuffer 门控使用这两个内部别名。
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get  else false.B
 
   println(f"Sc$tableType[$tableIdx]:")
   println(f"  Size(set, bank, way): $numSets * $NumBanks * $numWays")
@@ -57,6 +64,7 @@ class ScTable(
       way = numWays,
       singlePort = true,
       shouldReset = true,
+      extraReset = HasBpuFlush, // [修改] 关闭时 extra-reset 端口与逻辑均不生成
       holdRead = true,
       withClockGate = true,
       hasMbist = hasMbist,
@@ -65,6 +73,11 @@ class ScTable(
     ))
   )
 
+  // [新增] 触发运行时 SRAM 清零。
+  if (HasBpuFlush) {
+    sram.foreach { bank => bank.extra_reset.get := contextFlush }
+  }
+
   private val writeBuffer = Seq.tabulate(NumBanks)(bankIdx =>
     Module(new WriteBuffer(
       new ScTableSramWriteReq(numRows, numWays),
@@ -72,9 +85,15 @@ class ScTable(
       numPorts = 1,
       numWays = numWays,
       hasWayMask = true,
+      hasContextFlush = HasBpuFlush, // [修改] ScTable 实例点启用现有接口
       nameSuffix = s"sc${tableType}${tableIdx}_${bankIdx}"
     ))
   )
+
+  // [新增] 复用共享 WriteBuffer 已有的 context-flush 接口。
+  if (HasBpuFlush) {
+    writeBuffer.foreach { buffer => buffer.io.contextFlush.get := contextFlush }
+  }
 
   // read path table by setIndex
   sram.zipWithIndex.foreach { case (bank, bankIdx) =>
@@ -88,10 +107,18 @@ class ScTable(
   io.sramResetDone := sram.map(_.io.resetDone).reduce(_ && _)
 
   private val predictReadBankMaskNext = RegEnable(io.predictReadReq.bits.bankMask, io.predictReadReq.valid)
-  io.predictReadResp := Mux1H(predictReadBankMaskNext, sram.map(_.io.r.resp.data))
+  private val trainReadBankMaskNext   = RegEnable(io.trainReadReq.bits.bankMask, io.trainReadReq.valid)
 
-  private val trainReadBankMaskNext = RegEnable(io.trainReadReq.bits.bankMask, io.trainReadReq.valid)
-  io.trainReadResp := Mux1H(trainReadBankMaskNext, sram.map(_.io.r.resp.data))
+  // [新增] contextFlush 清零 bank-mask，屏蔽恢复首拍 holdRead 旧值。
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      predictReadBankMaskNext := 0.U.asTypeOf(predictReadBankMaskNext)
+      trainReadBankMaskNext   := 0.U.asTypeOf(trainReadBankMaskNext)
+    }
+  }
+
+  io.predictReadResp := Mux1H(predictReadBankMaskNext, sram.map(_.io.r.resp.data))
+  io.trainReadResp   := Mux1H(trainReadBankMaskNext, sram.map(_.io.r.resp.data))
 
   // update path table
   private val updateValid    = io.update.valid && io.update.wayMask.reduce(_ || _)
@@ -101,7 +128,9 @@ class ScTable(
 
   writeBuffer.zip(updateBankMask.asBools).foreach {
     case (buffer, bankEnable) =>
-      val writeValid = updateValid && bankEnable
+      val rawWriteValid = updateValid && bankEnable
+      // [修改] 刷新期间禁止新入队。
+      val writeValid = if (HasBpuFlush) rawWriteValid && !bpuFlushing else rawWriteValid
       buffer.io.write.head.valid       := writeValid
       buffer.io.write.head.bits.setIdx := updateIdx
       buffer.io.write.head.bits.wayMask.get := Mux(

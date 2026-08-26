@@ -53,12 +53,20 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   }
   val io: ScIO = IO(new ScIO)
 
+  // 只在此处解包 BasePredictorIO 的刷新输入为模块内部别名；后续门控统一使用这两个别名。
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get  else false.B
+
   /*
    * stage control signals
    */
   private val s0_fire = io.stageCtrl.s0_fire && io.enable
   private val s1_fire = io.stageCtrl.s1_fire && io.enable
   private val s2_fire = io.stageCtrl.s2_fire && io.enable
+
+  // [新增] 刷新窗口的 SRAM 读请求与读响应有效控制（预测路径污染防护）。
+  private val s0ScReadValid = if (HasBpuFlush) s0_fire && !bpuFlushing else s0_fire
+  private val s1ScReadValid = if (HasBpuFlush) !bpuFlushing || RegNext(s0ScReadValid, false.B) else true.B
 
   /*
    *  instantiate tables
@@ -98,9 +106,16 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       imliTable.io.sramResetDone :+
       biasTable.io.sramResetDone
   ).reduce(_ && _)
-  // context flush placeholder: real flush scheme comes later
+  
+  // [新增] 表级刷新连线与 resetDone 生成；置于所有 table 实例化之后，避免 Scala 前向引用。
   if (HasBpuFlush) {
-    io.resetDone.get := true.B
+    (pathTable ++ globalTable ++ bwTable ++ Seq(imliTable, biasTable)).foreach { table =>
+      table.io.contextFlush.get := contextFlush
+      table.io.bpuFlushing.get  := bpuFlushing
+    }
+
+    // 复用 Sc 已有的全表 SRAM resetDone 归约；contextFlush 当拍立即拉低。
+    io.resetDone.get := io.sramResetDone && !contextFlush
   }
 
   /*
@@ -147,28 +162,28 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_bwIdx = s1_bwIdx.map(RegEnable(_, s1_fire)) // for debug
 
   pathTable.zip(s0_pathIdx).foreach { case (table, idx) =>
-    table.io.predictReadReq.valid         := s0_fire && PathEnable.B
+    table.io.predictReadReq.valid         := s0ScReadValid && PathEnable.B
     table.io.predictReadReq.bits.setIdx   := idx
     table.io.predictReadReq.bits.bankMask := s0_bankMask
   }
 
   globalTable.zip(s0_globalIdx).foreach { case (table, idx) =>
-    table.io.predictReadReq.valid := s0_fire && s0_commonHR.valid && GlobalEnable.B // if ghr invalid not request global table
+    table.io.predictReadReq.valid := s0ScReadValid && s0_commonHR.valid && GlobalEnable.B // if ghr invalid not request global table
     table.io.predictReadReq.bits.setIdx   := idx
     table.io.predictReadReq.bits.bankMask := s0_bankMask
   }
 
   bwTable.zip(s0_bwIdx).foreach { case (table, idx) =>
-    table.io.predictReadReq.valid         := s0_fire && s0_commonHR.valid && BWEnable.B
+    table.io.predictReadReq.valid         := s0ScReadValid && s0_commonHR.valid && BWEnable.B
     table.io.predictReadReq.bits.setIdx   := idx
     table.io.predictReadReq.bits.bankMask := s0_bankMask
   }
 
-  imliTable.io.predictReadReq.valid         := s0_fire && ImliEnable.B
+  imliTable.io.predictReadReq.valid         := s0ScReadValid && ImliEnable.B
   imliTable.io.predictReadReq.bits.setIdx   := s0_imliIdx
   imliTable.io.predictReadReq.bits.bankMask := s0_bankMask
 
-  biasTable.io.predictReadReq.valid         := s0_fire && BiasEnable.B
+  biasTable.io.predictReadReq.valid         := s0ScReadValid && BiasEnable.B
   biasTable.io.predictReadReq.bits.setIdx   := s0_biasIdx
   biasTable.io.predictReadReq.bits.bankMask := s0_bankMask
 
@@ -178,31 +193,31 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    */
   private val s1_startPc = RegEnable(io.startPc, s0_fire)
   private val s1_pathResp = Mux(
-    PathEnable.B,
+    s1ScReadValid && PathEnable.B,
     VecInit(pathTable.map(_.io.predictReadResp)),
     VecInit.fill(NumPathTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
   )
   // if s0_commonHR invalid, global table resp is also invalid
   private val s1_globalResp = Mux(
-    s1_commonHRValid && GlobalEnable.B,
+    s1ScReadValid && s1_commonHRValid && GlobalEnable.B,
     VecInit(globalTable.map(_.io.predictReadResp)),
     VecInit.fill(NumGlobalTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
   )
 
   private val s1_bwResp = Mux(
-    s1_commonHRValid && BWEnable.B,
+    s1ScReadValid && s1_commonHRValid && BWEnable.B,
     VecInit(bwTable.map(_.io.predictReadResp)),
     VecInit.fill(NumBWTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
   )
 
   private val s1_imliResp = Mux(
-    ImliEnable.B,
+    s1ScReadValid && ImliEnable.B,
     imliTable.io.predictReadResp,
     VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry()))
   )
 
   private val s1_biasResp = Mux(
-    BiasEnable.B,
+    s1ScReadValid && BiasEnable.B,
     biasTable.io.predictReadResp,
     VecInit.fill(BiasTableNumWays)(0.U.asTypeOf(new ScEntry()))
   )
@@ -227,12 +242,18 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    */
   private val s2_startPc = RegEnable(s1_startPc, s1_fire)
 
-  private val s2_biasPercsum = VecInit(s1_biasPercsum.map(RegEnable(_, s1_fire)))
+  // [修改] 保留五类 percsum 的底层寄存器，VecInit 只负责组合。
+  private val s2_biasPercsumRegs   = s1_biasPercsum.map(RegEnable(_, s1_fire))
+  private val s2_bwPercsumRegs     = s1_bwPercsum.map(RegEnable(_, s1_fire))
+  private val s2_imliPercsumRegs   = s1_imliPercsum.map(RegEnable(_, s1_fire))
+  private val s2_pathPercsumRegs   = s1_pathPercsum.map(RegEnable(_, s1_fire))
+  private val s2_globalPercsumRegs = s1_globalPercsum.map(RegEnable(_, s1_fire))
 
-  private val s2_bwPercsum     = VecInit(s1_bwPercsum.map(RegEnable(_, s1_fire)))
-  private val s2_imliPercsum   = VecInit(s1_imliPercsum.map(RegEnable(_, s1_fire)))
-  private val s2_pathPercsum   = VecInit(s1_pathPercsum.map(RegEnable(_, s1_fire)))
-  private val s2_globalPercsum = VecInit(s1_globalPercsum.map(RegEnable(_, s1_fire)))
+  private val s2_biasPercsum   = VecInit(s2_biasPercsumRegs)
+  private val s2_bwPercsum     = VecInit(s2_bwPercsumRegs)
+  private val s2_imliPercsum   = VecInit(s2_imliPercsumRegs)
+  private val s2_pathPercsum   = VecInit(s2_pathPercsumRegs)
+  private val s2_globalPercsum = VecInit(s2_globalPercsumRegs)
 
   private val s2_mergePercsum = Seq(s2_pathPercsum, s2_globalPercsum, s2_bwPercsum, s2_imliPercsum)
   private val s2_sumPercsum   = VecInit.tabulate(NumWays)(j => ParallelSingedExpandingAdd(s2_mergePercsum.map(_(j))))
@@ -329,31 +350,103 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     XSError(s2_fire && use && !valid, "SC useScPred is true but tage provider is invalid!\n")
   }
 
-  io.meta.scBiasLowerBits := RegEnable(s2_biasIdxLowBits, s2_fire)
+  // [修改] meta 先命名寄存器，再连接输出。
+  private val metaScBiasLowerBitsReg = RegEnable(s2_biasIdxLowBits, s2_fire)
+  private val metaScPredReg          = RegEnable(s2_scPred, s2_fire)
+  private val metaTagePredReg        = RegEnable(s2_providerTakenMask, s2_fire)
+  private val metaTageCtrReg         = RegEnable(VecInit(s2_providerCtr.map(_.value)), s2_fire)
+  private val metaTagePredValidReg   = RegEnable(s2_providerValid, s2_fire)
+  private val metaUseScPredReg       = RegEnable(s2_useScPred, s2_fire)
+  private val metaSumAboveThresReg   = RegEnable(s2_sumAboveThres, s2_fire)
 
-  io.meta.scPred        := RegEnable(s2_scPred, s2_fire)
-  io.meta.tagePred      := RegEnable(s2_providerTakenMask, s2_fire)
-  io.meta.tageCtr       := RegEnable(VecInit(s2_providerCtr.map(_.value)), s2_fire)
-  io.meta.tagePredValid := RegEnable(s2_providerValid, s2_fire)
-  io.meta.useScPred     := RegEnable(s2_useScPred, s2_fire)
-  io.meta.sumAboveThres := RegEnable(s2_sumAboveThres, s2_fire)
+  io.meta.scBiasLowerBits := metaScBiasLowerBitsReg
+  io.meta.scPred          := metaScPredReg
+  io.meta.tagePred        := metaTagePredReg
+  io.meta.tageCtr         := metaTageCtrReg
+  io.meta.tagePredValid   := metaTagePredValidReg
+  io.meta.useScPred       := metaUseScPredReg
+  io.meta.sumAboveThres   := metaSumAboveThresReg
 
-  io.meta.debug_scPathTakenVec.get   := VecInit(s2_pathPred.map(RegEnable(_, s2_fire))) // for performance counter
-  io.meta.debug_scGlobalTakenVec.get := VecInit(s2_globalPred.map(RegEnable(_, s2_fire)))
-  io.meta.debug_scBWTakenVec.get     := VecInit(s2_bwPred.map(RegEnable(_, s2_fire)))
-  io.meta.debug_scImliTakenVec.get   := VecInit(s2_imliPred.map(RegEnable(_, s2_fire)))
-  io.meta.debug_scBiasTakenVec.get   := VecInit(s2_biasPred.map(RegEnable(_, s2_fire)))
+  // [修改] debug 也先命名寄存器，再连接输出。
+  private val debugScPathTakenRegs   = s2_pathPred.map(RegEnable(_, s2_fire))
+  private val debugScGlobalTakenRegs = s2_globalPred.map(RegEnable(_, s2_fire))
+  private val debugScBWTakenRegs     = s2_bwPred.map(RegEnable(_, s2_fire))
+  private val debugScImliTakenRegs   = s2_imliPred.map(RegEnable(_, s2_fire))
+  private val debugScBiasTakenRegs   = s2_biasPred.map(RegEnable(_, s2_fire))
 
-  io.meta.debug_predPathIdx.get   := RegEnable(MixedVecInit(s2_pathIdx), s2_fire) // for debug
-  io.meta.debug_predGlobalIdx.get := RegEnable(MixedVecInit(s2_globalIdx), s2_fire)
-  io.meta.debug_predBWIdx.get     := RegEnable(MixedVecInit(s2_bwIdx), s2_fire)
-  io.meta.debug_predImliIdx.get   := RegEnable(s2_imliIdx, s2_fire)
-  io.meta.debug_predBiasIdx.get   := RegEnable(s2_biasIdx, s2_fire)
+  io.meta.debug_scPathTakenVec.get   := VecInit(debugScPathTakenRegs) // for performance counter
+  io.meta.debug_scGlobalTakenVec.get := VecInit(debugScGlobalTakenRegs)
+  io.meta.debug_scBWTakenVec.get     := VecInit(debugScBWTakenRegs)
+  io.meta.debug_scImliTakenVec.get   := VecInit(debugScImliTakenRegs)
+  io.meta.debug_scBiasTakenVec.get   := VecInit(debugScBiasTakenRegs)
+
+  private val debugPredPathIdxReg   = RegEnable(MixedVecInit(s2_pathIdx), s2_fire)
+  private val debugPredGlobalIdxReg = RegEnable(MixedVecInit(s2_globalIdx), s2_fire)
+  private val debugPredBWIdxReg     = RegEnable(MixedVecInit(s2_bwIdx), s2_fire)
+  private val debugPredImliIdxReg   = RegEnable(s2_imliIdx, s2_fire)
+  private val debugPredBiasIdxReg   = RegEnable(s2_biasIdx, s2_fire)
+
+  io.meta.debug_predPathIdx.get   := debugPredPathIdxReg // for debug
+  io.meta.debug_predGlobalIdx.get := debugPredGlobalIdxReg
+  io.meta.debug_predBWIdx.get     := debugPredBWIdxReg
+  io.meta.debug_predImliIdx.get   := debugPredImliIdxReg
+  io.meta.debug_predBiasIdx.get   := debugPredBiasIdxReg
+
+  // [新增] contextFlush 时钟沿恢复预测流水 payload（策略一）。s1ScReadValid 由 s0ScReadValid 驱动，不在此块重复赋值。
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      s1_commonHRValid := false.B
+      s1_startPc       := 0.U.asTypeOf(s1_startPc)
+      s1_pathIdx.foreach(r => r := 0.U.asTypeOf(r))
+      s1_globalIdx.foreach(r => r := 0.U.asTypeOf(r))
+      s1_bwIdx.foreach(r => r := 0.U.asTypeOf(r))
+      s1_imliIdx := 0.U.asTypeOf(s1_imliIdx)
+      s1_biasIdx := 0.U.asTypeOf(s1_biasIdx)
+
+      s2_startPc := 0.U.asTypeOf(s2_startPc)
+      s2_pathIdx.foreach(r => r := 0.U.asTypeOf(r))
+      s2_globalIdx.foreach(r => r := 0.U.asTypeOf(r))
+      s2_bwIdx.foreach(r => r := 0.U.asTypeOf(r))
+      s2_imliIdx := 0.U.asTypeOf(s2_imliIdx)
+      s2_biasIdx := 0.U.asTypeOf(s2_biasIdx)
+
+      Seq(
+        s2_biasPercsumRegs,
+        s2_bwPercsumRegs,
+        s2_imliPercsumRegs,
+        s2_pathPercsumRegs,
+        s2_globalPercsumRegs
+      ).flatten.foreach(r => r := 0.U.asTypeOf(r))
+
+      metaScBiasLowerBitsReg := 0.U.asTypeOf(metaScBiasLowerBitsReg)
+      metaScPredReg          := 0.U.asTypeOf(metaScPredReg)
+      metaTagePredReg        := 0.U.asTypeOf(metaTagePredReg)
+      metaTageCtrReg         := 0.U.asTypeOf(metaTageCtrReg)
+      metaTagePredValidReg   := 0.U.asTypeOf(metaTagePredValidReg)
+      metaUseScPredReg       := 0.U.asTypeOf(metaUseScPredReg)
+      metaSumAboveThresReg   := 0.U.asTypeOf(metaSumAboveThresReg)
+
+      Seq(
+        debugScPathTakenRegs,
+        debugScGlobalTakenRegs,
+        debugScBWTakenRegs,
+        debugScImliTakenRegs,
+        debugScBiasTakenRegs
+      ).flatten.foreach(r => r := false.B)
+
+      debugPredPathIdxReg   := 0.U.asTypeOf(debugPredPathIdxReg)
+      debugPredGlobalIdxReg := 0.U.asTypeOf(debugPredGlobalIdxReg)
+      debugPredBWIdxReg     := 0.U.asTypeOf(debugPredBWIdxReg)
+      debugPredImliIdxReg   := 0.U.asTypeOf(debugPredImliIdxReg)
+      debugPredBiasIdxReg   := 0.U.asTypeOf(debugPredBiasIdxReg)
+    }
+  }
 
   /*
    *  train pipeline stage 0
    */
-  private val t0_fire     = io.stageCtrl.t0_fire && io.enable
+  // [修改] T0：刷新窗口内不接收新训练，不发出 ScTable 训练读请求。
+  private val t0_fire     = io.stageCtrl.t0_fire && io.enable && (if (HasBpuFlush) !bpuFlushing else true.B)
   private val t0_meta     = io.train.meta.sc
   private val t0_commonHR = io.train.meta.commonHR
   private val t0_bankMask = getBankMask(io.train.startPc)
@@ -428,7 +521,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   /*
    *  train pipeline stage 1
    */
-  private val t1_fire     = RegNext(t0_fire, false.B)
+  // [修改] T1：在 RegNext 输出上增加整窗门控。
+  private val t1_fire     = RegNext(t0_fire, false.B) && (if (HasBpuFlush) !bpuFlushing else true.B)
   private val t1_branches = RegEnable(io.train.branches, t0_fire)
   private val t1_meta     = RegEnable(t0_meta, 0.U.asTypeOf(t0_meta), t0_fire)
   private val t1_commonHR = RegEnable(t0_commonHR, t0_fire)
@@ -608,11 +702,18 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   when(t1_writeValid) {
     scThreshold := t1_writeThresVec
   }
+  // [新增] contextFlush 当拍恢复 scThreshold 初始值；last-connect 保证优先级高于正常训练写入。
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      scThreshold := VecInit.tabulate(NumWays)(_ => ThresholdCounter.Init)
+    }
+  }
 
   /*
    *  train pipeline stage 2
    */
-  private val t2_writeValid          = RegNext(t1_writeValid, false.B)
+  // [修改] T2：在 RegNext 输出上增加整窗门控，阻断所有 ScTable.update。
+  private val t2_writeValid          = RegNext(t1_writeValid, false.B) && (if (HasBpuFlush) !bpuFlushing else true.B)
   private val t2_bankMask            = RegEnable(t1_bankMask, t1_fire)
   private val t2_pathSetIdx          = RegEnable(t1_pathSetIdx, t1_fire)
   private val t2_globalSetIdx        = RegEnable(t1_globalSetIdx, t1_fire)
@@ -630,6 +731,45 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t2_writeBWEntryVec     = RegEnable(t1_writeBWEntryVec, t1_fire)
   private val t2_writeBiasEntryVec   = RegEnable(t1_writeBiasEntryVec, t1_fire)
   private val t2_writeImliEntryVec   = RegEnable(t1_writeImliEntryVec, t1_fire)
+
+  // [新增] contextFlush 时钟沿恢复训练流水 payload（策略一）。valid 不在此块赋值，由门控组合阻断 + RegNext 自然恢复。
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      t1_branches := 0.U.asTypeOf(t1_branches)
+      t1_meta     := 0.U.asTypeOf(t1_meta)
+      t1_commonHR := 0.U.asTypeOf(t1_commonHR)
+      t1_startPc  := 0.U.asTypeOf(t1_startPc)
+      t1_bankMask := 0.U.asTypeOf(t1_bankMask)
+      t1_pathSetIdx   := 0.U.asTypeOf(t1_pathSetIdx)
+      t1_globalSetIdx := 0.U.asTypeOf(t1_globalSetIdx)
+      t1_bwSetIdx     := 0.U.asTypeOf(t1_bwSetIdx)
+      t1_imliSetIdx   := 0.U.asTypeOf(t1_imliSetIdx)
+      t1_biasSetIdx   := 0.U.asTypeOf(t1_biasSetIdx)
+      t1_oldBiasLowBits        := 0.U.asTypeOf(t1_oldBiasLowBits)
+      t1_branchesScIdxHitVec   := 0.U.asTypeOf(t1_branchesScIdxHitVec)
+      t1_branchesScIdxVec      := 0.U.asTypeOf(t1_branchesScIdxVec)
+      t1_writeTakenVec         := 0.U.asTypeOf(t1_writeTakenVec)
+      t1_writeValidVecReg      := 0.U.asTypeOf(t1_writeValidVecReg)
+
+      t2_bankMask            := 0.U.asTypeOf(t2_bankMask)
+      t2_pathSetIdx          := 0.U.asTypeOf(t2_pathSetIdx)
+      t2_globalSetIdx        := 0.U.asTypeOf(t2_globalSetIdx)
+      t2_bwSetIdx            := 0.U.asTypeOf(t2_bwSetIdx)
+      t2_imliSetIdx          := 0.U.asTypeOf(t2_imliSetIdx)
+      t2_biasSetIdx          := 0.U.asTypeOf(t2_biasSetIdx)
+      t2_commonHR            := 0.U.asTypeOf(t2_commonHR)
+      t2_oldPathEntries      := 0.U.asTypeOf(t2_oldPathEntries)
+      t2_oldGlobalEntries    := 0.U.asTypeOf(t2_oldGlobalEntries)
+      t2_oldBWEntries        := 0.U.asTypeOf(t2_oldBWEntries)
+      t2_oldImliEntries      := 0.U.asTypeOf(t2_oldImliEntries)
+      t2_oldBiasEntries      := 0.U.asTypeOf(t2_oldBiasEntries)
+      t2_writePathEntryVec   := 0.U.asTypeOf(t2_writePathEntryVec)
+      t2_writeGlobalEntryVec := 0.U.asTypeOf(t2_writeGlobalEntryVec)
+      t2_writeBWEntryVec     := 0.U.asTypeOf(t2_writeBWEntryVec)
+      t2_writeBiasEntryVec   := 0.U.asTypeOf(t2_writeBiasEntryVec)
+      t2_writeImliEntryVec   := 0.U.asTypeOf(t2_writeImliEntryVec)
+    }
+  }
   private val t2_writePathWayMaskVec =
     t2_oldPathEntries.zip(t2_writePathEntryVec).map { case (oldEntries, newEntries) =>
       updateWayMask(oldEntries, newEntries)
