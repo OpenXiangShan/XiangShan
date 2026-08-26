@@ -91,9 +91,9 @@ module frontend_mmio_fetch_funcov (
   wire delivered_is_rvc = |(to_ibuffer_enq & to_ibuffer_is_rvc);
   wire tl_a_fire = tl_a_valid && tl_a_ready;
   wire entry_wait_resp = entry_state == WAIT_RESP;
-  wire page_tail_request = &entry_req_addr[11:1];
+  wire page_tail_request = &entry_req_addr[10:0];
   wire s2_page_tail = &s2_pc_0[10:0];
-  wire beat_tail_request = &entry_req_addr[2:1];
+  wire beat_tail_request = &entry_req_addr[1:0];
   wire [15:0] tl_d_first_half = tl_d_data[entry_req_addr[1:0] * 16 +: 16];
   wire response_is_rvc = tl_d_first_half[1:0] != 2'b11;
   wire response_is_rvi = tl_d_first_half[1:0] == 2'b11;
@@ -315,7 +315,7 @@ module frontend_mmio_fetch_funcov (
         bins observed = {1'b1};
       }
     MMIO_rvi_not_cross_8b_cp:
-      coverpoint entry_req_addr[2:1] iff (!reset && entry_wait_resp && !entry_resending &&
+      coverpoint entry_req_addr[1:0] iff (!reset && entry_wait_resp && !entry_resending &&
                   tl_d_valid && response_is_rvi && !tl_d_corrupt && !tl_d_denied) {
         bins offset_0 = {2'b00};
         bins offset_2 = {2'b01};
@@ -555,7 +555,7 @@ module frontend_mmio_fetch_funcov (
       }
     MMIO_cross_8b_second_a_cp:
       coverpoint (cross_8b_resend_seen && entry_resending && tl_a_valid &&
-                  tl_a_addr == {1'b0, entry_req_addr[46:3] + 44'd1, 3'b000}) iff (!reset) {
+                  tl_a_addr == {1'b0, entry_req_addr[45:2] + 44'd1, 3'b000}) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_cross_8b_second_d_cp:
