@@ -41,7 +41,7 @@ import xiangshan.XSModule
  * @param hasCnt Whether the write request bundle has a counter field, used to update the entry's useful counter
  * @param hasFlush Whether the write buffer has a flush signal, used to reset the write buffer
  * @param hasContextFlush Whether the write buffer has a context flush signal, a stronger clear than flush:
- * clears both dirty and shadowValid (SPEC 03 §4.3), bound to HasBpuFlush at the aBTB instance site only
+ * clears both dirty and shadowValid (SPEC 03 §4.3), bound to HasBpuFlush at the aBTB and SC instance sites
  * @param nameSuffix Suffix of name, used for clearer logging
 */
 class WriteBuffer[T <: WriteReqBundle](
