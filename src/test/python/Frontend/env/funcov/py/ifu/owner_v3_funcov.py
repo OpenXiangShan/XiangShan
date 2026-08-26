@@ -49,6 +49,7 @@ def _build_owner_v3_bin_specs() -> tuple[OwnerV3BinSpec, ...]:
 
 OWNER_V3_BIN_SPECS = _build_owner_v3_bin_specs()
 OWNER_V3_BIN_BY_ID = {spec.bin_id: spec for spec in OWNER_V3_BIN_SPECS}
+OWNER_V3_BLOCKED_BIN_IDS = frozenset({"BIN-909"})
 OWNER_V3_COVERPOINTS = {
     spec.coverage_group: OWNER_V3_COVERPOINT for spec in OWNER_V3_BIN_SPECS
 }
@@ -65,21 +66,16 @@ OWNER_V3_SOURCE_RULES = (
     OwnerV3SourceRule("BIN-903", ("BIN-1055",)),
     OwnerV3SourceRule("BIN-905", ("BIN-762", "BIN-942")),
     OwnerV3SourceRule("BIN-905", ("BIN-763", "BIN-942")),
-    OwnerV3SourceRule("BIN-906", ("BIN-636", "BIN-942")),
     OwnerV3SourceRule("BIN-912", ("BIN-874",)),
     OwnerV3SourceRule("BIN-913", ("BIN-867",)),
     OwnerV3SourceRule("BIN-919", ("BIN-898",)),
     OwnerV3SourceRule("BIN-924", ("BIN-431",)),
     OwnerV3SourceRule("BIN-925", ("BIN-432",)),
     OwnerV3SourceRule("BIN-926", ("BIN-432",)),
-    OwnerV3SourceRule("BIN-933", ("BIN-832", "BIN-886", "BIN-898")),
-    OwnerV3SourceRule("BIN-934", ("BIN-892",)),
+    OwnerV3SourceRule("BIN-933", ("BIN-832", "BIN-842", "BIN-898")),
     OwnerV3SourceRule("BIN-942", ("BIN-432",)),
     OwnerV3SourceRule("BIN-944", ("BIN-836",)),
     OwnerV3SourceRule("BIN-952", ("BIN-814", "BIN-815")),
-    OwnerV3SourceRule("BIN-955", ("BIN-807", "BIN-808", "BIN-828", "BIN-866")),
-    OwnerV3SourceRule("BIN-956", ("BIN-812", "BIN-814", "BIN-883", "BIN-884")),
-    OwnerV3SourceRule("BIN-958", ("BIN-432", "BIN-832", "BIN-886", "BIN-897")),
     OwnerV3SourceRule("BIN-961", ("BIN-874",)),
     OwnerV3SourceRule("BIN-962", ("BIN-432",)),
     OwnerV3SourceRule("BIN-964", ("BIN-878",)),
@@ -176,6 +172,7 @@ def handle_owner_v3_event(recorder, event: dict[str, Any]) -> bool:
     observations = payload.get("observations")
     accepted = (
         spec is not None
+        and bin_id not in OWNER_V3_BLOCKED_BIN_IDS
         and payload.get("condition_met") is True
         and payload.get("checkpoint_passed") is True
         and isinstance(observations, dict)
@@ -188,6 +185,7 @@ def handle_owner_v3_event(recorder, event: dict[str, Any]) -> bool:
                 "cycle": cycle,
                 "bin_id": bin_id,
                 "known_bin": spec is not None,
+                "blocked_contract": bin_id in OWNER_V3_BLOCKED_BIN_IDS,
                 "condition_met": payload.get("condition_met"),
                 "checkpoint_passed": payload.get("checkpoint_passed"),
                 "has_observations": isinstance(observations, dict)
@@ -214,6 +212,7 @@ def handle_owner_v3_event(recorder, event: dict[str, Any]) -> bool:
 
 __all__ = [
     "OWNER_V3_BIN_BY_ID",
+    "OWNER_V3_BLOCKED_BIN_IDS",
     "OWNER_V3_BIN_SPECS",
     "OWNER_V3_COVERPOINT",
     "OWNER_V3_COVERPOINTS",

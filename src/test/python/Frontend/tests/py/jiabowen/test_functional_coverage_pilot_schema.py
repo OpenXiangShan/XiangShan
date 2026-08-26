@@ -4,7 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from env.funcov.py.ifu.owner_v3_funcov import OWNER_V3_BIN_SPECS
+from env.funcov.py.ifu.owner_v3_funcov import (
+    OWNER_V3_BIN_SPECS,
+    OWNER_V3_BLOCKED_BIN_IDS,
+)
 from env.funcov.py.ifu.mmio_nc_owner_funcov import (
     MMIO_NC_OWNER_COVERPOINT,
     MMIO_NC_OWNER_SAMPLER_BIN_KEYS,
@@ -74,6 +77,8 @@ IFU_V3_FORBIDDEN_OWNER_TERMS = {
     "lastInstrIsHalfRvi",
     "fixedTwoFetchRange",
     "firstPredTakenIdx",
+    "f3/s3",
+    "s3 payload",
 }
 
 
@@ -131,7 +136,13 @@ def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
             if not row[4].strip():
                 continue
             assert all(row[column].strip() for column in (5, 6, 7))
-            assert row[9].strip() in {"UNMAPPED", "MODELED", "PARTIAL", "HIT"}
+            assert row[9].strip() in {
+                "UNMAPPED",
+                "MODELED",
+                "PARTIAL",
+                "HIT",
+                "BLOCKED",
+            }
             assert row[9].strip() != "UNMAPPED"
 
 
@@ -151,11 +162,14 @@ def test_jiabowen_owner_event_bins_are_exactly_mapped_once():
             assert len(bin_ids) == 1
             bin_id = bin_ids.pop()
             assert bin_id not in mapped
-            assert row["status"] in {"MODELED", "HIT", "PARTIAL"}
+            assert row["status"] in {"MODELED", "HIT", "PARTIAL", "BLOCKED"}
             assert "MODEL:test_ifu_v3_owner_event_model" in row["evidence"]
             mapped[bin_id] = row
 
     assert set(mapped) == owner_ids
+    assert {
+        bin_id for bin_id, row in mapped.items() if row["status"] == "BLOCKED"
+    } == OWNER_V3_BLOCKED_BIN_IDS
 
 
 def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
@@ -240,7 +254,7 @@ def test_mmio_nc_owner_leaves_are_single_bin_and_match_registry():
                 f"coverpoint {pilot['Coverpoint']}, "
                 f"bins {pilot['Bin_Name']} ({bin_id})"
             )
-            assert row["status"] in {"MODELED", "HIT", "PARTIAL"}
+            assert row["status"] in {"MODELED", "HIT", "PARTIAL", "BLOCKED"}
             assert "MODEL:sample_mmio_nc_owner_coverage" in row["evidence"]
             mapped_rows[bin_id] = row
 
