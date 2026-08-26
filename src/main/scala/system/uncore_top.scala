@@ -225,6 +225,53 @@ class AXIDataBridge(SrcDataWidth: Int, DestDataWidth: Int, errorAddrMap: Seq[Add
   lazy val module = new Imp
   class Imp extends LazyModuleImp(this)
 }
+
+object AXI4WriteOnlyZeroReadAdapter {
+  def connect(upstream: AXI4Bundle, downstream: AXI4Bundle, clock: Clock, reset: Reset): Unit = {
+    downstream.aw <> upstream.aw
+    downstream.w <> upstream.w
+    upstream.b <> downstream.b
+
+    val readPending = withClockAndReset(clock, reset) { RegInit(false.B) }
+    val readId = withClockAndReset(clock, reset) {
+      RegInit(0.U(upstream.r.bits.id.getWidth.W))
+    }
+
+    upstream.ar.ready := !readPending
+    upstream.r.valid := readPending
+    upstream.r.bits := 0.U.asTypeOf(upstream.r.bits)
+    upstream.r.bits.id := readId
+    upstream.r.bits.resp := AXI4Parameters.RESP_OKAY
+    upstream.r.bits.last := true.B
+
+    withClockAndReset(clock, reset) {
+      when (upstream.ar.fire) {
+        readPending := true.B
+        readId := upstream.ar.bits.id
+      }.elsewhen(upstream.r.fire) {
+        readPending := false.B
+      }
+    }
+
+    downstream.ar.valid := false.B
+    downstream.ar.bits := 0.U.asTypeOf(downstream.ar.bits)
+    downstream.r.ready := true.B
+  }
+}
+
+class AXI4WriteOnlyZeroReadAdapter(implicit p: Parameters) extends LazyModule {
+  val node = AXI4AdapterNode()
+
+  // Keep the cut at the containing module boundary so constant AR/R signals
+  // are visible to downstream synthesis and hierarchy optimization.
+  override def shouldBeInlined: Boolean = true
+
+  lazy val module = new LazyModuleImp(this) {
+    (node.in zip node.out).foreach { case ((in, _), (out, _)) =>
+      AXI4WriteOnlyZeroReadAdapter.connect(in, out, clock, reset)
+    }
+  }
+}
 //  axi_xbar_o :=
 //  AXI4Buffer() :=
 //  AXI4Buffer() :=
@@ -805,7 +852,10 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
 
   val Cbus = LazyModule(new Cbus(params))
   val hni_s_xbarLM = newXbar("hni_s_xbar")
-  val hni_s_xbar = hni_s_xbarLM.node
+  val hniWriteOnlyAdapter = LazyModule(new AXI4WriteOnlyZeroReadAdapter)
+  hniWriteOnlyAdapter.suggestName("imsic_hni_write_only")
+  hni_s_xbarLM.node := hniWriteOnlyAdapter.node
+  val hni_s_xbar = hniWriteOnlyAdapter.node
   val pcie_xbar1to2LM = newXbar("imsic_pcie_xbar1to2")
   val pcie_xbar1to2 = pcie_xbar1to2LM.node
   val pbus_xbarLM = newXbar("imsic_pbus_xbar")
@@ -851,7 +901,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   val u_hnis_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.nocDataWidth,
     DestDataWidth = params.MSIOutDataWidth,
     errorAddrMap = AXIDataBridge.errorAddrMapFromLegal(params.localImsicAddrMap ++ params.crsimsicAddrMap)))
-  u_hnis_DataBridge.axi_xbar_i := hni_s_xbar
+  u_hnis_DataBridge.axi_xbar_i := hni_s_xbarLM.node
   pcie_xbar1to2 := aplic_mNode
   val hniBridgeToPcieBuf = connectThroughBuffer(pcie_xbar1to2, u_hnis_DataBridge.axi_xbar_o, "imsic_hni_bridge_to_pcie_buf")
   // instance data width switch bridge
@@ -1063,20 +1113,12 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     //   outReset := routeReset
     // }
     for (i <- 0 until params.NumHarts) {
-      m(i).viewAs[AXI4Bundle] <> sNodes(i).in.head._1
-      sNodes(i).in.head._1.ar.ready := true.B
-      sNodes(i).in.head._1.r.bits.data := 0.U
-      m(i).viewAs[AXI4Bundle].ar.bits.addr := 0.U
-      m(i).viewAs[AXI4Bundle].ar.bits.id   := 0.U
-      m(i).viewAs[AXI4Bundle].ar.bits.prot := 0.U
-      m(i).viewAs[AXI4Bundle].ar.bits.size := 2.U
-      m(i).viewAs[AXI4Bundle].ar.bits.len := 0.U
-      m(i).viewAs[AXI4Bundle].ar.bits.burst := 0.U
-      m(i).viewAs[AXI4Bundle].ar.bits.lock := 0.U
-      m(i).viewAs[AXI4Bundle].ar.bits.cache := 0.U
-      m(i).viewAs[AXI4Bundle].ar.bits.qos := 0.U
-      m(i).viewAs[AXI4Bundle].ar.valid := false.B
-      m(i).viewAs[AXI4Bundle].r.ready := true.B
+      val ext = m(i).viewAs[AXI4Bundle]
+      val node = sNodes(i).in.head._1
+
+      // Entry adapters normally consume reads. Terminate any unexpected read
+      // here as well so a violated routing assumption cannot stall upstream.
+      AXI4WriteOnlyZeroReadAdapter.connect(node, ext, clock, reset)
     }
   }
 }
@@ -1353,7 +1395,12 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     )))
   }
   val cpu_xbar1to2 = Seq.fill(params.NumHarts)(AXI4Xbar())
-  val cpu_imsic_filter_nodes = Seq.fill(params.NumHarts)(AXI4IdentityNode())
+  val cpu_imsic_filter_modules = Seq.tabulate(params.NumHarts) { i =>
+    val filter = LazyModule(new AXI4WriteOnlyZeroReadAdapter)
+    filter.suggestName(s"cpu_${i}_imsic_filter")
+    filter
+  }
+  val cpu_imsic_filter_nodes = cpu_imsic_filter_modules.map(_.node)
   // instance modules
   val imsicTop = LazyModule(new imsicPbusTop(params))
   val hni_mNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
@@ -1470,38 +1517,11 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val noc2msiAwIsLocal = noc2msi.aw.bits.addr(47, 44) === noc2msiSelfId
     val noc2msiAwAddr = routeNoc2msiAddr(noc2msi.aw.bits.addr, noc2msiAwIsLocal)
 
-    def connectWriteOnlyWithZeroReadResponse(master: AXI4Bundle, slave: AXI4Bundle): Unit = {
-      master.aw <> slave.aw
-      master.w <> slave.w
-      slave.b <> master.b
-
-      val rValidReg = withClockAndReset(clock, reset) { RegInit(false.B) }
-      val readIdD = withClockAndReset(clock, reset) {
-        RegEnable(slave.ar.bits.id, 0.U.asTypeOf(slave.ar.bits.id), slave.ar.fire)
-      }
-      withClockAndReset(clock, reset) {
-        when (slave.ar.fire) {
-          rValidReg := true.B
-        }.elsewhen(slave.r.fire) {
-          rValidReg := false.B
-        }
-      }
-      slave.ar.ready := true.B
-      slave.r.valid := rValidReg
-      slave.r.bits.id := readIdD
-      slave.r.bits.data := 0.U
-      slave.r.bits.resp := AXI4Parameters.RESP_OKAY
-      slave.r.bits.last := true.B
-    }
-
-    connectWriteOnlyWithZeroReadResponse(hni_mNode.out.head._1, noc2msi)
+    AXI4WriteOnlyZeroReadAdapter.connect(noc2msi, hni_mNode.out.head._1, clock, reset)
     hni_mNode.out.head._1.aw.bits.addr := noc2msiAwAddr
     peri_mNode.out.head._1 <> s_noc2cfg.viewAs[AXI4Bundle] // uncore peri cfg slave io
     cpu_mNodes.zip(s_cpu2uncore).foreach { case (node, io) =>
       node.out.head._1 <> io.viewAs[AXI4Bundle]
-    }
-    cpu_imsic_filter_nodes.foreach { node =>
-      connectWriteOnlyWithZeroReadResponse(node.out.head._1, node.in.head._1)
     }
     // connection about cross-die access ports for debug
     syscnt.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> peri_s1Node.in.head._1)
