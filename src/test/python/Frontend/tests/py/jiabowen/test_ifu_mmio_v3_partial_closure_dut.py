@@ -567,6 +567,52 @@ def test_nc_tl_a_stall_holds_and_releases_same_request(env, tmp_path):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-1062")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_nc_send_request_is_suppressed_when_ibuffer_not_ready(env):
+    expected, mapping = uncache._prepare_sv39_mapped_pbmt_nc_cfi_stream(
+        env,
+        vaddr=uncache._NORMAL_BASE,
+        paddr=uncache._NORMAL_PHYS_BASE,
+        instr_count=4096,
+    )
+    uncache._initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
+    uncache._configure_exec_attrs_16k(env, base_addr=0x80000000)
+    env.backend_model.set_can_accept(0)
+    uncache._force_redirect_to(env, mapping.vaddr)
+
+    stalled_cycles = []
+
+    def observe_stall(cycle, active_env):
+        snapshot = owner_funcov._snapshot(
+            active_env.functional_coverage, active_env.dut
+        )
+        if snapshot["uncache_state"] == 2 and snapshot["ifu_stall"] == 1:
+            stalled_cycles.append(int(cycle))
+
+    env.register_cycle_observer(observe_stall)
+    for _ in range(20000):
+        env.step(1)
+        if env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_008"):
+            break
+
+    assert stalled_cycles, {
+        "mapping": mapping,
+        "uncache": env.uncache_agent.get_stats(),
+        "backend": env.backend_model.get_stats(),
+    }
+    assert env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_008")
+
+    env.backend_model.set_can_accept(1)
+    assert uncache._wait_for_observed_pc(
+        env, expected[0][0], max_cycles=12000
+    ), {
+        "observed": [int(item.pc) for item in env.monitor.observations[-16:]],
+        "uncache": env.uncache_agent.get_stats(),
+    }
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_bins("BIN-1090")
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_cacheable_delivery_then_pbmt_nc_starts_with_clean_first_instruction(env):
