@@ -1370,10 +1370,10 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
       // process return
       when(accessFault || isLeafMpte) { // out delay unknown
         // when(isLeafMpte) {io.refill.valid := true.B}
-        io.refill.valid := true.B
+        io.refill.valid := !flush
         nextState       := s_idle // OPTPOINT*
       }.otherwise {
-        io.refill.valid := true.B   // start refill
+        io.refill.valid := !flush   // start refill
         setLevel        := true.B
         nextState       := s_mem_req // OPTPOINT*
       }
