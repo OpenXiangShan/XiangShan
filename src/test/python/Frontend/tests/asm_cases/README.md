@@ -8,10 +8,10 @@ the frontend bin-trace flow.
 Current bin-trace suite:
 
 `scripts/run_baremode_asm_suite.sh` runs every tracked `.S` below by default
-(19 cases). All cases must compile to a non-empty bin, generate a non-empty
-NEMU trace, and complete the DUT checker. The nine cases already named by the
+(24 cases). All cases must compile to a non-empty bin, generate a non-empty
+NEMU trace, and complete the DUT checker. The twelve cases already named by the
 canonical functional-coverage registry use directed coverage targets; the
-other ten remain observed-only until their registry mappings are added.
+other twelve remain observed-only until their registry mappings are added.
 There is no hidden active-list exclusion: when a tracked assembly case fails,
 first diagnose and repair it so the default suite remains complete. Remove the
 source from `asm_cases/` only when the case is no longer a maintained
@@ -23,10 +23,13 @@ regression.
   32-byte FTQ boundary, with a site at DefaultConfig's 64-byte fetch span.
 - `jiabowen/fe_2fetch_size_blocked.S`
 - `jiabowen/fe_2fetch_trained_short_blocks.S`
+- `jiabowen/fe_ifu_cacheable_meta_variation.S`
 - `jiabowen/fe_ifu_cfi_decode_basic.S`
 - `jiabowen/fe_ifu_mixed_rvc_rvi_boundary.S`
+- `jiabowen/fe_ifu_predecode_full.S`
 - `jiabowen/fe_ifu_rvc_seq_boundary.S`
 - `jiabowen/fe_ifu_rvi_seq_boundary.S`
+- `jiabowen/fe_ifu_s0_s1_pipeline_fill.S`
 - `jiabowen/fe_baremode_cond_nt.S`
 - `jiabowen/fe_baremode_direct_jmp.S`
 - `jiabowen/fe_baremode_seq_icache_basic.S`
@@ -36,6 +39,10 @@ regression.
 - `jiabowen/fe_multi_branch_dense_loop.S`
 - `jiabowen/fe_multi_branch_random_positions.S`
 - `jiabowen/fe_multi_cfi_per_ftq_entry.S`
+- `ruierhan/fe_icache_prefetch_bpu_flush.S`: alternating branch outcomes for
+  PrefetchPipe/BPU flush alignment.
+- `ruierhan/fe_icache_prefetch_layouts.S`: 64-byte-relative branch placements
+  for PrefetchPipe dual-layout training.
 - `zhaoxinran/fe_instr_uncache_boundary_mix.S`: consolidated NEMU-runnable
   InstrUncache boundary stream.
 
