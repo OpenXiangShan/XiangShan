@@ -283,6 +283,70 @@ def test_nc_path_transition_recognizes_pbmt_io_as_strong_order_mmio():
     assert (owner.NC_OWNER_GROUP, "nc_leaf_038") in recorder.hits
 
 
+def test_owner_path_cross_requires_all_four_sequential_transitions():
+    recorder = _Recorder()
+    state = _state(recorder)
+
+    def sample(cycle, path):
+        snapshot = _empty_snapshot()
+        if path == "cacheable":
+            state["nc_active"] = False
+            snapshot.update(
+                {
+                    "s2_valid": 1,
+                    "s2_req_uncache": 0,
+                    "to_valid": 1,
+                    "to_ready": 1,
+                }
+            )
+        elif path == "nc":
+            snapshot.update(
+                {
+                    "s2_valid": 1,
+                    "s2_req_uncache": 1,
+                    "s2_use_uncache": 1,
+                    "s2_pmp_mmio": 0,
+                    "s2_pbmt": owner._PBMT_NC,
+                    "req_valid": 1,
+                    "req_ready": 1,
+                }
+            )
+        else:
+            state["nc_active"] = False
+            snapshot.update(
+                {
+                    "s2_valid": 1,
+                    "s2_req_uncache": 1,
+                    "s2_pmp_mmio": 1,
+                    "s2_pbmt": 0,
+                    "req_valid": 1,
+                    "req_ready": 1,
+                }
+            )
+        owner._sample_nc(recorder, cycle, snapshot, state)
+
+    for cycle, path in enumerate(
+        ("cacheable", "nc", "cacheable", "mmio", "nc"), start=1
+    ):
+        sample(cycle, path)
+    assert (
+        "ifu_v3_pipeline_owner_model",
+        "owner_leaf_059",
+    ) not in recorder.hits
+
+    sample(6, "mmio")
+    assert (
+        "ifu_v3_pipeline_owner_model",
+        "owner_leaf_059",
+    ) in recorder.hits
+    assert set(state["path_transition_observations"]) == {
+        "cacheable_to_nc",
+        "cacheable_to_mmio",
+        "nc_to_cacheable",
+        "nc_to_mmio",
+    }
+
+
 def test_nc_response_cannot_hit_mmio_response_leaf():
     snapshot = _empty_snapshot()
     snapshot.update(

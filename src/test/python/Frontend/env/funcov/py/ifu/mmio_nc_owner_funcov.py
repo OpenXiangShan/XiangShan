@@ -97,6 +97,7 @@ def initialize_mmio_nc_owner_coverage_state(recorder) -> None:
         "nc_to_mmio_pending": False,
         "nc_seen": set(),
         "previous_path": None,
+        "path_transition_observations": {},
     }
 
 
@@ -800,6 +801,20 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
     if current_path is not None and previous_path is not None:
         transition = f"{previous_path}_to_{current_path}"
         seen.add(transition)
+        if transition in {
+            "cacheable_to_nc",
+            "cacheable_to_mmio",
+            "nc_to_cacheable",
+            "nc_to_mmio",
+        }:
+            state["path_transition_observations"][transition] = {
+                "cycle": int(cycle),
+                "prev_end_half": s["prev_end_half"],
+                "prev_half_pc": s["prev_half_pc"],
+                "prev_half_data": s["prev_half_data"],
+                "pmp_mmio": s["s2_pmp_mmio"],
+                "pbmt": s["s2_pbmt"],
+            }
         if transition == "nc_to_cacheable":
             for index in (34, 37):
                 _mark(
@@ -833,8 +848,30 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
         for index in (35, 38):
             _mark(recorder, NC_OWNER_GROUP, index, cycle, evidence)
         state["nc_to_mmio_pending"] = False
-    path_transitions = {"cacheable_to_nc", "nc_to_cacheable", "nc_to_mmio"} & seen
+    required_path_transitions = {
+        "cacheable_to_nc",
+        "cacheable_to_mmio",
+        "nc_to_cacheable",
+        "nc_to_mmio",
+    }
+    path_transitions = required_path_transitions & seen
     if path_transitions:
+        if path_transitions == required_path_transitions:
+            mark_owner_v3_checked(
+                recorder,
+                "BIN-957",
+                cycle,
+                {
+                    **evidence,
+                    "event": "sequential_fetch_path_transition",
+                    "path_transitions": sorted(path_transitions),
+                    "transition_observations": state[
+                        "path_transition_observations"
+                    ],
+                    "mixed_dual_block_response": False,
+                },
+                producer="ifu_sequential_path_transition_sampler",
+            )
         _mark(
             recorder,
             NC_OWNER_GROUP,
