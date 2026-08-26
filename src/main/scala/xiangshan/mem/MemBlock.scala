@@ -895,6 +895,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     uncache.io.forward(i) <> newLoadUnits(i).io.uncacheForward
     dcache.io.lsu.forward_D(i) <> newLoadUnits(i).io.tldForward
     dcache.io.lsu.forward_mshr(i) <> newLoadUnits(i).io.mshrForward
+    dcache.io.lsu.forward_rob(i) <> newLoadUnits(i).io.robForward
     lsq.io.bypass(i) <> newLoadUnits(i).io.uncacheBypass
     // RAW / RAR violation check
     lsq.io.ldu.rawNukeQuery(i) <> newLoadUnits(i).io.rawNukeQuery

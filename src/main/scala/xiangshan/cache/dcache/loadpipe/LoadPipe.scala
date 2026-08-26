@@ -64,6 +64,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     // send miss request to miss queue
     val miss_req    = DecoupledIO(new MissReq)
     val miss_resp   = Input(new MissResp)
+    val robForwardResp = Input(ValidIO(new DCacheForwardResp))
 
     // send miss request to wbq
     val wbq_conflict_check = Valid(UInt())
@@ -363,7 +364,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // lsu side tag match
   val s2_hit_dup_lsu = RegNext(s1_tag_match_dup_lsu)
 
-  io.lsu.s2_hit := s2_hit_dup_lsu && !s2_wpu_pred_fail
+  io.lsu.s2_hit := (s2_hit_dup_lsu || io.robForwardResp.valid) && !s2_wpu_pred_fail
 
   val s2_hit_meta = RegEnable(s1_hit_meta, s1_fire)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
@@ -379,9 +380,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   //
   val s2_can_send_miss_req = RegEnable(s1_will_send_miss_req, s1_fire)
   val s2_can_send_miss_req_dup = RegEnable(s1_will_send_miss_req, s1_fire)
+  val s2_rob_hit = io.robForwardResp.valid
 
-  val s2_miss_req_valid     = s2_valid && s2_can_send_miss_req
-  val s2_miss_req_valid_dup = s2_valid_dup && s2_can_send_miss_req_dup
+  val s2_miss_req_valid     = s2_valid && s2_can_send_miss_req && !s2_rob_hit
+  val s2_miss_req_valid_dup = s2_valid_dup && s2_can_send_miss_req_dup && !s2_rob_hit
   val s2_miss_req_fire      = s2_miss_req_valid_dup && io.miss_req.ready
 
   // when req got nacked, upper levels should replay this request
@@ -410,7 +412,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_l1dbp_dead = RegEnable(io.l1dbp.resp.bits.dead, false.B, s1_fire)
   val s2_hit_refill_latency = RegEnable(s1_hit_refill_latency, s1_fire)
 
-  val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh && !s2_wpu_pred_fail
+  val s2_hit = (s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh || s2_rob_hit) &&
+    !s2_wpu_pred_fail
 
   val s2_data128bit = Cat((0 until DCacheVWordBankCount).reverse.map(i => io.banked_data_resp(i).raw_data))
   val s2_resp_data  = s2_data128bit
@@ -465,7 +468,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // they can sit in load queue and wait for refill
   //
   // * report a miss if bank conflict is detected
-  val real_miss = !s2_real_way_en.orR
+  val real_miss = !s2_real_way_en.orR && !s2_rob_hit
 
   resp.bits.real_miss := real_miss
   resp.bits.miss := real_miss

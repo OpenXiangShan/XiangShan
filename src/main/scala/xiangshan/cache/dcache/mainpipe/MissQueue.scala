@@ -487,6 +487,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val req_handled_by_this_entry = Output(Bool())
 
     val forwardInfo = Output(new MissEntryForwardIO)
+    val readOnlyBufferWrite = ValidIO(new L1DBPReadOnlyBufferWrite)
     val l2_pf_store_only = Input(Bool())
 
     // whether the pipeline reg has send out an acquire
@@ -838,6 +839,12 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       refill_latency := Mux(overflow, 0.U, time_delta)
     }
   }
+
+  io.readOnlyBufferWrite.valid := io.mem_grant.fire && refill_done &&
+    io.mem_grant.bits.user.lift(L1DBPFinalBypassKey).getOrElse(false.B) &&
+    !io.mem_grant.bits.denied && !io.mem_grant.bits.corrupt
+  io.readOnlyBufferWrite.bits.paddr := req.addr
+  io.readOnlyBufferWrite.bits.data := refill_and_store_data_update
 
   when (io.mem_finish.fire) {
     s_grantack := true.B
@@ -1256,6 +1263,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     // forward missqueue
     val forward = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
+    val readOnlyBufferWrite = ValidIO(new L1DBPReadOnlyBufferWrite)
+    val readOnlyBufferMSHR = Output(Vec(cfg.nMissEntries, Valid(UInt(PAddrBits.W))))
     val forwardS1PAddrMatch = Output(Vec(LoadPipelineWidth, Bool()))
     // If a store is miss and accepted by mshr, Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
     // Note: the resp of this st-ld forwarding is merged into io.forward.S2Resp interface
@@ -1707,6 +1716,13 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.memSetPattenDetected := memSetPattenDetected
 
   val forwardInfo_vec = VecInit(entries.map(_.io.forwardInfo))
+  io.readOnlyBufferMSHR.zip(forwardInfo_vec).foreach { case (out, info) =>
+    out.valid := info.inflight
+    out.bits := info.paddr
+  }
+  val readOnlyBufferWriteVec = VecInit(entries.map(_.io.readOnlyBufferWrite))
+  io.readOnlyBufferWrite.valid := readOnlyBufferWriteVec.map(_.valid).reduce(_ || _)
+  io.readOnlyBufferWrite.bits := Mux1H(readOnlyBufferWriteVec.map(write => write.valid -> write.bits))
   val VLENB = VLEN / 8
   // Forwarding paddr CAM, shared by io.forward and io.forward_stData
   val paddrFwd = Wire(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))

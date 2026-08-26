@@ -175,6 +175,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val atomic_resp = ValidIO(new MainPipeResp)
     // find matched refill data in missentry
     val mainpipe_info = Output(new MainPipeInfoToMQ)
+    val readOnlyBufferInvalidate = Output(Valid(UInt(PAddrBits.W)))
     // missqueue refill data
     val refill_info = Flipped(ValidIO(new MissQueueRefillInfo))
     // write-back queue
@@ -1136,6 +1137,15 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.store_hit_resp.bits.miss := mshr_handled_store_miss_s3
   io.store_hit_resp.bits.replay := false.B
   io.store_hit_resp.bits.id := Mux(mshr_handled_store_miss_s3, mshr_handled_store_miss_id_s3, s3_req.id)
+
+  io.readOnlyBufferInvalidate.valid :=
+    (s3_valid && (s3_store_can_go && s3_req.isStore || s3_amo_can_go && s3_req.isAMO)) ||
+      mshr_handled_store_miss
+  io.readOnlyBufferInvalidate.bits := Mux(
+    mshr_handled_store_miss,
+    get_block_addr(s2_req.addr),
+    get_block_addr(s3_req.addr)
+  )
 
   val atomic_hit_resp = Wire(new MainPipeResp)
   atomic_hit_resp.source := s3_req.source

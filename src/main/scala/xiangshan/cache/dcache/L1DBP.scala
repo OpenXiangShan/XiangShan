@@ -18,11 +18,14 @@ case class L1DBPParams(
   pcPredictorEntries: Int = 8192,
   debugMode: Boolean = false,
   enablePrefetchPrediction: Boolean = false,
+  readOnlyBufferEntries: Int = 8,
   pcHash: (UInt, Int) => UInt = (pc, width) => XORFold(pc >> 1, width)
 ) {
   require(sampleBits >= 1, "L1DBP sampleBits must be positive")
   require(pcPredictorEntries >= 2 && isPow2(pcPredictorEntries),
     "L1DBP PC predictor entries must be a power of two and at least two")
+  require(readOnlyBufferEntries >= 0 && (readOnlyBufferEntries == 0 || isPow2(readOnlyBufferEntries)),
+    "L1DBP read-only buffer entries must be zero or a power of two")
 }
 
 object L1DBPOrigin {

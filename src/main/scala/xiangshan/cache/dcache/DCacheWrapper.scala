@@ -837,6 +837,7 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check
   val forward_D = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
   val forward_mshr = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
+  val forward_rob = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
   // If a store is miss and accepted by mshr, Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
   val forward_mshrStData = Flipped(Vec(LoadPipelineWidth, new SbufferForwardReq))
 }
@@ -1048,6 +1049,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val sampledPCArray = cacheParams.l1DBPParams.map(_ => Module(new L1DSampledPCArray))
   val predictionArray = cacheParams.l1DBPParams.map(_ => Module(new L1DBPPredictionArray))
   val l1dbp = cacheParams.l1DBPParams.map(_ => Module(new L1DBP))
+  val readOnlyBuffer = cacheParams.l1DBPParams.filter(_.readOnlyBufferEntries > 0)
+    .map(params => Module(new L1DBPReadOnlyBuffer(params.readOnlyBufferEntries)))
 
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 1))
   val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
@@ -1080,6 +1083,19 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.debugTopDown <> io.debugTopDown
   missQueue.io.l2_hint <> RegNext(io.l2_hint)
   missQueue.io.mainpipe_info := mainPipe.io.mainpipe_info
+  readOnlyBuffer.foreach { buffer =>
+    buffer.io.install := missQueue.io.readOnlyBufferWrite
+    buffer.io.invalidate := mainPipe.io.readOnlyBufferInvalidate
+    buffer.io.inflightMSHR := missQueue.io.readOnlyBufferMSHR
+    buffer.io.forward <> io.lsu.forward_rob
+  }
+  if (readOnlyBuffer.isEmpty) {
+    io.lsu.forward_rob.foreach { forward =>
+      forward.s2Resp.valid := false.B
+      forward.s2Resp.bits := DontCare
+      forward.l1dbpTldForwarded := false.B
+    }
+  }
   missQueue.io.occupy_set.zip(ldu.map(_.io.occupy_set)).foreach { case (l, r) => l <> r }
   missQueue.io.occupy_fail.zip(ldu.map(_.io.occupy_fail)).foreach { case (l, r) => l <> r }
   mainPipe.io.refill_info := missQueue.io.refill_info
@@ -1303,6 +1319,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   assert(!RegNext(!tag_write_intend && tagArray.io.write.valid))
   ldu.take(LoadPipelineWidth).zipWithIndex.foreach {
     case (ld, i) =>
+      ld.io.robForwardResp := io.lsu.forward_rob(i).s2Resp
       tagArray.io.read(i) <> ld.io.tag_read
       ld.io.tag_resp := tagArray.io.resp(i)
       ld.io.tag_read.ready := !tag_write_intend
