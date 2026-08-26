@@ -538,6 +538,12 @@ class DefaultConfig(n: Int = 1) extends Config(
     ++ new BaseConfig(n)
 )
 
+class NoRobCompressionConfig(n: Int = 1) extends Config(
+  new DefaultConfig(n).alter((site, here, up) => {
+    case XSTileKey => up(XSTileKey).map(_.copy(EnableRobCompression = false))
+  })
+)
+
 class CVMConfig(n: Int = 1) extends Config(
   new CVMCompile
     ++ new DefaultConfig(n)

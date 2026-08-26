@@ -315,10 +315,22 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     sink.bits.simple := source.bits.simple || isFusion
   }
   compressUnit.io.actualValid := VecInit(io.in.map(_.valid))
-  compressUnit.io.forceNoCompress := io.singleStep
+  compressUnit.io.forceNoCompress := io.singleStep || (!EnableRobCompression).B
   val isEntryTailLane = compressUnit.io.out.isEntryTailLane
   val isEntryHeadLane = compressUnit.io.out.isEntryHeadLane
-  val formerSlotMaskVec = compressUnit.io.out.formerSlotMask
+  val formerSlotMaskVec = if (EnableRobCompression) {
+    compressUnit.io.out.formerSlotMask
+  } else {
+    compressUnit.io.out.formerSlotMask.zipWithIndex.map { case (mask, i) =>
+      // A fused uop still represents its cleared architectural follower for
+      // difftest and trace retirement accounting, while using one NORMAL entry.
+      if (i < RenameWidth - 1) {
+        Mux(isFusionVec(i), mask | (BigInt(1) << (i + 1)).U(RenameWidth.W), mask)
+      } else {
+        mask
+      }
+    }
+  }
   val latterSlotMaskVec = compressUnit.io.out.latterSlotMask
   val compressMaskVec = formerSlotMaskVec.zip(latterSlotMaskVec).map { case (former, latter) => former | latter }
   val entryInstrCount = compressMaskVec.map(PopCount(_))
