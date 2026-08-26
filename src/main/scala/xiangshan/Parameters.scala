@@ -114,8 +114,8 @@ case class XSCoreParameters
   StoreQueueSnapshotInterval: Int = 1, // must a power of 2
   SQUnalignQueueSize: Int = 2,
   VlsQueueSize: Int = 8,
-  RobSize: Int = 192,
-  RabSize: Int = 352,
+  RobSize: Int = 128,
+  RabSize: Int = 160,
   VTypeBufferSize: Int = 64, // used to reorder vtype
   IssueQueueSize: Int = 20,
   IssueQueueCompEntrySize: Int = 12,
