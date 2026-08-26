@@ -292,6 +292,62 @@ def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-1052")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_mmio_backend_redirect_wins_response_writeback(env):
+    uncache._prepare_mmio_cnop_stream(env)
+    env.uncache_agent.configure(latency=2, mmio_latency=32)
+    uncache._initialize_mmio_fetch(env)
+
+    assert uncache._wait_for_uncache_req(env) > 0
+    assert env.uncache_agent.pending
+    ready_cycle = int(env.uncache_agent.pending[0].ready_cycle)
+    trace = []
+
+    def capture_overlap(cycle, active_env):
+        snapshot = owner_funcov._snapshot(
+            active_env.functional_coverage, active_env.dut
+        )
+        if any(
+            snapshot[name] == 1
+            for name in (
+                "tl_d_valid",
+                "resp_valid",
+                "backend_redirect",
+                "uncache_redirect",
+                "ifu_flush",
+            )
+        ):
+            trace.append(
+                {
+                    "cycle": int(cycle),
+                    "tl_d_valid": snapshot["tl_d_valid"],
+                    "resp_valid": snapshot["resp_valid"],
+                    "backend_redirect": snapshot["backend_redirect"],
+                    "uncache_redirect": snapshot["uncache_redirect"],
+                    "ifu_flush": snapshot["ifu_flush"],
+                    "uncache_state": snapshot["uncache_state"],
+                }
+            )
+
+    env.register_cycle_observer(capture_overlap)
+    while int(env.current_cycle) < ready_cycle:
+        env.step(1)
+    target_pc = uncache._MMIO_BASE + 0x40
+    uncache._force_redirect_to(env, target_pc)
+
+    for _ in range(256):
+        env.step(1)
+        if env.functional_coverage.key_hit("ifu_mmio_owner_v3", "mmio_leaf_037"):
+            break
+
+    assert env.functional_coverage.key_hit(
+        "ifu_mmio_owner_v3", "mmio_leaf_037"
+    ), "\n".join(str(item) for item in trace)
+    assert uncache._wait_for_observed_pc(env, target_pc, max_cycles=6000)
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_bins("BIN-1047", "BIN-1048")
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_8b_clean_resend_delivers_two_ordered_rvi(env):
