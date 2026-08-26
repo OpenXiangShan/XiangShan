@@ -51,6 +51,7 @@ class MptTlbRespBundle(implicit p: Parameters) extends XSBundle with MPTCachePar
     this.mptLevel      := 3.U
     this.permIsNAPOT   := true.B
     this.sdid          := 0.U
+    this.mptOnly       := false.B
   }
   def applyMptc2TlbResp(childBundle: MptRespBundle): Unit = {
     this.accessFault   := childBundle.accessFault
