@@ -270,6 +270,98 @@ def test_mmio_cross_page_first_page_iaf_beats_illegal_instruction(env):
     )
 
 
+@pytest.mark.funcov_bins("BIN-1045")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_mmio_cross_page_second_page_pf_attributes_to_rvi_start(env):
+    """Exercise the owner leaf's first-half/second-page fault contract."""
+    cross_page_va = uncache._NORMAL_BASE + uncache._SV39_PAGE_SIZE - 2
+    cross_page_pa = uncache._MMIO_BASE + uncache._SV39_PAGE_SIZE - 2
+    next_page_pa = uncache._MMIO_BASE + uncache._SV39_PAGE_SIZE
+    payload = int(uncache._ADDI_X0_X0_0).to_bytes(4, "little") + int(uncache._CNOP).to_bytes(2, "little") * 64
+
+    uncache._initialize_sv39_fetch(env, reset_vector=cross_page_va)
+    scenario = uncache.TranslationScenario(
+        scenario_id="bin-1045-mmio-cross-page-second-pf",
+        va=cross_page_va,
+        pa=cross_page_pa,
+        payload=payload,
+        page_count=2,
+        s1_pte=uncache.TranslationPte(pbmt=uncache._PBMT_IO),
+        expected_path="fault",
+        pmp_entries=(
+            uncache.TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=uncache.PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=uncache._MMIO_BASE,
+                size=0x1000,
+            ),
+            uncache.TranslationPmpPmaEntry(
+                kind="pmp",
+                index=1,
+                config=uncache.PmpPmaConfig(match="napot", read=True, write=True, execute=True),
+                addr=next_page_pa,
+                size=0x1000,
+            ),
+        ),
+        pma_entries=(
+            uncache.TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=uncache.PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=False),
+                addr=uncache._MMIO_BASE,
+                size=0x1000,
+            ),
+            uncache.TranslationPmpPmaEntry(
+                kind="pma",
+                index=1,
+                config=uncache.PmpPmaConfig(match="napot", read=True, write=True, execute=True, cacheable=False),
+                addr=next_page_pa,
+                size=0x1000,
+            ),
+        ),
+        ptw_response_overrides=(
+            uncache.TranslationPtwResponseOverride(
+                vpn=(cross_page_va >> 12) + 1,
+                s2xlate=0,
+                patch=(("s1_pf", 1),),
+            ),
+        ),
+    )
+    state = uncache.TranslationScenarioBuilder(env).build(scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(cross_page_va)
+    env.arm_translation_scenario(state)
+    uncache._force_redirect_to(env, cross_page_va)
+
+    for _ in range(12000):
+        if env.functional_coverage.key_hit("ifu_mmio_owner_v3", "mmio_leaf_030"):
+            break
+        env.step(1)
+
+    assert env.functional_coverage.key_hit(
+        "ifu_mmio_owner_v3", "mmio_leaf_030"
+    ), {
+        "ptw": env.ptw_agent.get_stats(),
+        "uncache": env.uncache_agent.get_stats(),
+        "observations": [
+            (int(obs.pc), int(obs.instr), bool(obs.is_rvc))
+            for obs in env.monitor.observations[-16:]
+        ],
+    }
+    for _ in range(256):
+        if env.monitor.exception_mark_count > 0:
+            break
+        env.step(1)
+    assert env.monitor.exception_mark_count > 0
+    ptw_stats = env.ptw_agent.get_stats()
+    assert int(ptw_stats.get("response_override_hit_count", 0)) >= 1, ptw_stats
+    assert (cross_page_pa & ~(uncache._UNCACHE_BEAT_BYTES - 1)) in env.uncache_agent.get_stats().get(
+        "request_addrs", []
+    )
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_bins("BIN-1015")
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
