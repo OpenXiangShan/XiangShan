@@ -62,14 +62,16 @@ class L1DBP(implicit p: Parameters) extends DCacheModule {
   val scWidth = 2
   val scMax = (1 << scWidth) - 1
   val scInit = 2
-  val resetPeriod = 8192 * 2
+  val resetPeriod = 8192 * 4
   require(scWidth >= 2, "L1DBP saturating counter must be at least two bits")
   require(isPow2(resetPeriod), "L1DBP reset period must be a power of two")
 
+  val inc = 1.U
+  val dec = 1.U
   def scUpdate(state: UInt, accessed: Bool): UInt = {
     require(state.getWidth == scWidth)
-    val accessedUpdate = Mux(state +& 2.U >= scMax.U, scMax.U, state +& 2.U)
-    val notAccessedUpdate = Mux(state <= 1.U, 0.U(scWidth.W), state - 1.U)
+    val accessedUpdate = Mux(state +& inc >= scMax.U, scMax.U, state + inc)
+    val notAccessedUpdate = Mux(state <= dec, 0.U(scWidth.W), state - dec)
     Mux(accessed, accessedUpdate, notAccessedUpdate)(scWidth - 1, 0)
   }
 
