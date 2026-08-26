@@ -43,15 +43,14 @@ import xiangshan.XSModule
  * @param nameSuffix Suffix of name, used for clearer logging
 */
 class WriteBuffer[T <: WriteReqBundle](
-    gen:            T,
-    numEntries:     Int = 1,
-    numPorts:       Int = 1,
-    numWays:        Int = 1,
-    hasCnt:         Boolean = false,
-    hasCompareBits: Boolean = false,
-    hasWayMask:     Boolean = false,
-    hasFlush:       Boolean = false,
-    nameSuffix:     String = ""
+    gen:        T,
+    numEntries: Int = 1,
+    numPorts:   Int = 1,
+    numWays:    Int = 1,
+    hasCnt:     Boolean = false,
+    hasWayMask: Boolean = false,
+    hasFlush:   Boolean = false,
+    nameSuffix: String = ""
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
   require(numPorts >= 1)
@@ -212,8 +211,10 @@ class WriteBuffer[T <: WriteReqBundle](
           nextShadowValid(rowIdx)(hitIdx) := true.B
           nextDirty(rowIdx)(hitIdx)       := true.B
         }.elsewhen(hitWritten) {
-          val entryChange = if (hasCompareBits) {
-            entries(rowIdx)(hitIdx).compareBits.getOrElse(0.U) =/= mergedEntry.compareBits.getOrElse(0.U)
+          val entryCompareBits  = entries(rowIdx)(hitIdx).compareBits
+          val mergedCompareBits = mergedEntry.compareBits
+          val entryChange = if (entryCompareBits.isDefined) {
+            entryCompareBits.get =/= mergedCompareBits.get
           } else { entries(rowIdx)(hitIdx).asUInt =/= mergedEntry.asUInt }
           when(entryChange) {
             nextDirty(rowIdx)(hitIdx)       := true.B
