@@ -437,7 +437,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     (uncacheUnit.io.resp.valid && !uncacheUnit.io.resp.bits.needResend) || !s2_useUncacheFetch
   private val s2_uncacheCrossPageMask = s2_valid && uncacheUnit.io.resp.valid && uncacheUnit.io.resp.bits.needResend
   private val s2_toIBufferValid =
-    s2_valid && (!s2_reqIsUncache || (s2_uncacheCanGo && s2_reqIsUncache)) && !s2_flush
+    s2_valid && (!s2_useUncacheFetch || (s2_uncacheCanGo && s2_useUncacheFetch)) && !s2_flush
 
   /* ** unache state handle ** */
   private val uncacheBusy = RegInit(false.B)
@@ -484,7 +484,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_uncacheData =
     Mux(s2_prevEndIsHalfRviInfo.valid, Cat(uncacheData(15, 0), s2_prevEndIsHalfRviInfo.bits.data), uncacheData)
   private val uncacheIsRvc = s2_uncacheData(1, 0) =/= "b11".U
-  uncacheRvcExpander.io.in      := Mux(s2_reqIsUncache, s2_uncacheData, 0.U)
+  uncacheRvcExpander.io.in      := Mux(s2_useUncacheFetch, s2_uncacheData, 0.U)
   uncacheRvcExpander.io.fsIsOff := io.csrFsIsOff
 
   s2_valid := ValidHold(
@@ -497,7 +497,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     s2_flush
   )
 
-  s2_ready := (io.toIBuffer.ready && (s2_uncacheCanGo || !s2_reqIsUncache)) || !s2_valid
+  s2_ready := (io.toIBuffer.ready && (s2_uncacheCanGo || !s2_useUncacheFetch)) || !s2_valid
 
   /* ** prediction result check ** */
   checkerIn.valid              := s2_valid
@@ -539,8 +539,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
    */
   io.toIBuffer.bits.prevInstrCount := Mux(
     s1_fire,
-    Mux(s1_reqIsUncache, 1.U, s1_specInstrCount),
-    Mux(s2_reqIsUncache, 1.U, s2_instrCount)
+    Mux(s1_useUncacheFetch, 1.U, s1_specInstrCount),
+    Mux(s2_useUncacheFetch, 1.U, s2_instrCount)
   )
 
   // Find the last entry based on the boundaries of compacted valid signals.
@@ -557,8 +557,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
     else enq(i) ^ ((select(i) === select(i + 1)) & enq(i + 1))
   }
   io.toIBuffer.bits.instrEndOffset.zipWithIndex.foreach { case (a, i) =>
-    a.predTaken  := s2_expandedInstrVec(i).isPredTaken && !s2_reqIsUncache
-    a.fixedTaken := checkerOutStage1.fixedTaken(i) && !s2_reqIsUncache
+    a.predTaken  := s2_expandedInstrVec(i).isPredTaken && !s2_useUncacheFetch
+    a.fixedTaken := checkerOutStage1.fixedTaken(i) && !s2_useUncacheFetch
     a.offset     := s2_endOffsetVec(i)
   }
   io.toIBuffer.bits.foldpc := s2_alignedFoldPc
@@ -610,7 +610,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val uncacheFlushWb      = Wire(Valid(new FrontendRedirect))
   private val uncachePd           = 0.U.asTypeOf(Vec(FetchBlockInstNum, new PreDecodeInfo))
   private val uncacheMisEndOffset = Wire(Valid(UInt(FetchBlockInstOffsetWidth.W)))
-  uncacheMisEndOffset.valid := s2_reqIsUncache
+
+  uncacheMisEndOffset.valid := s2_useUncacheFetch
   uncacheMisEndOffset.bits  := Mux(uncacheIsRvc || s2_prevEndIsHalfRviInfo.valid || uncacheNeedResend, 0.U, 1.U)
 
   // Send mmioFlushWb back to FTQ 1 cycle after uncache fetch return
@@ -624,7 +625,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     )
   // Due to the presence of uncache requests, s2_valid && io.toIBuffer.ready is not equivalent to s2_fire.
   uncacheFlushWb.valid :=
-    s2_valid && io.toIBuffer.ready && s2_reqIsUncache && !backendRedirect && (s2_uncacheCanGo || uncacheNeedResend)
+    s2_valid && io.toIBuffer.ready && s2_useUncacheFetch && !backendRedirect && (s2_uncacheCanGo || uncacheNeedResend)
   uncacheFlushWb.bits.canTrain  := false.B
   uncacheFlushWb.bits.ftqIdx    := s2_fetchBlock(0).ftqIdx
   uncacheFlushWb.bits.pc        := s2_fetchBlock(0).startVAddr.toUInt(VAddrBits - 1, 0)
@@ -634,7 +635,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   uncacheFlushWb.bits.attribute := BranchAttribute.None
   uncacheFlushWb.bits.target    := uncacheTarget.toUInt
 
-  when(s2_reqIsUncache) {
+  when(s2_useUncacheFetch) {
     val inst        = s2_uncacheData
     val brAttribute = BranchAttribute.decode(inst)
 
@@ -674,7 +675,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // S2 can now directly concatenate uncache instructions using s2_prevLastIsHalfRvi during fetch.
   // This fixes the edge case where instructions spanning both cache and uncache channels fell through
   // the cracks of the existing S1 (cache) and S2 (uncache) cross-page handling logic.
-  uncacheRedirect.valid := s2_valid && io.toIBuffer.ready && s2_reqIsUncache && (s2_uncacheCanGo || uncacheNeedResend)
+  uncacheRedirect.valid := s2_valid && io.toIBuffer.ready && s2_useUncacheFetch && (s2_uncacheCanGo || uncacheNeedResend)
   uncacheRedirect.instrCount            := Mux(uncacheNeedResend, 0.U, 1.U)
   uncacheRedirect.prevIBufEnqPtr        := s2_prevIBufEnqPtr
   uncacheRedirect.halfRviInfo.valid     := uncacheNeedResend
@@ -687,7 +688,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
    * - redirect if found fault prediction
    * - redirect if false hit last half(last PC is not start + 32 Bytes, but in the middle of an notCFI RVI instruction)
    * ***************************************************************************** */
-  private val wbEnable          = RegNext(s1_fire && !s1_flush) && !s2_reqIsUncache && !s2_flush
+  private val wbEnable          = RegNext(s1_fire && !s1_flush) && !s2_useUncacheFetch && !s2_flush
   private val wbValid           = RegNext(wbEnable, init = false.B)
   private val wbFirstValid      = RegEnable(s2_firstValid, wbEnable)
   private val wbSecondValid     = RegEnable(s2_secondValid, wbEnable)
@@ -776,7 +777,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.perfInfo.checkPerfInfo.misPred          := checkerRedirect.valid
   perfAnalyzer.io.perfInfo.checkPerfInfo.selectBlock      := checkerRedirect.bits.blockSel
   perfAnalyzer.io.perfInfo.checkPerfInfo.misEndOffset     := checkerRedirect.bits.endOffset
-  perfAnalyzer.io.perfInfo.checkPerfInfo.uncacheBubble    := s2_reqIsUncache && !s2_uncacheCanGo
+  perfAnalyzer.io.perfInfo.checkPerfInfo.uncacheBubble    := s2_useUncacheFetch && !s2_uncacheCanGo
 
   perfAnalyzer.io.perfInfo.toIBufferInfo.ibufferFire   := io.toIBuffer.fire
   perfAnalyzer.io.perfInfo.toIBufferInfo.enqEnable     := io.toIBuffer.bits.enqEnable & io.toIBuffer.bits.valid
