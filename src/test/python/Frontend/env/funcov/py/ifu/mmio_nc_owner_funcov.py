@@ -331,6 +331,10 @@ def _sample_mmio(
         "uncache_pc": s["uncache_pc"],
         "resp_data": s["resp_data"],
         "s2_uncache_data": s["s2_uncache_data"],
+        "resp_valid": s["resp_valid"],
+        "backend_redirect": s["backend_redirect"],
+        "uncache_redirect": s["uncache_redirect"],
+        "wb_redirect": s["wb_redirect"],
     }
 
     conditions = {
@@ -426,7 +430,7 @@ def _sample_mmio(
         37: mmio_active
         and s["backend_redirect"] == 1
         and s["resp_valid"] == 1
-        and s["uncache_redirect"] == 0,
+        and s["wb_redirect"] == 0,
         39: pending and s["wfi_safe"] == 0,
     }
     for index, condition in conditions.items():

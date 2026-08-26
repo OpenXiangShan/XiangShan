@@ -385,3 +385,23 @@ def test_mmio_redirect_cancels_waiting_response_path():
     owner._sample_mmio(recorder, 1, snapshot, state)
 
     assert (owner.MMIO_OWNER_GROUP, "mmio_leaf_015") in recorder.hits
+
+
+def test_mmio_backend_redirect_masks_ftq_writeback_on_response():
+    snapshot = _empty_snapshot()
+    snapshot.update(
+        {
+            "uncache_state": owner._IDLE,
+            "backend_redirect": 1,
+            "resp_valid": 1,
+            "uncache_redirect": 1,
+            "wb_redirect": 0,
+        }
+    )
+    recorder = _Recorder()
+    state = _state(recorder)
+    state["mmio_active"] = True
+
+    owner._sample_mmio(recorder, 1, snapshot, state)
+
+    assert (owner.MMIO_OWNER_GROUP, "mmio_leaf_037") in recorder.hits
