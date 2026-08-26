@@ -384,6 +384,87 @@ def test_mmio_response_uses_reserved_ibuffer_slot_under_backend_pressure(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-1056")
+@pytest.mark.skipif(
+    not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
+)
+def test_nc_execute_denied_preserves_fetch_exception(env):
+    payload = int(uncache._CNOP).to_bytes(2, "little") * 64
+    start_pc = uncache._NORMAL_BASE
+
+    uncache._initialize_sv39_fetch(env, reset_vector=start_pc)
+    scenario = uncache.TranslationScenario(
+        scenario_id="bin-1056-nc-execute-denied",
+        va=start_pc,
+        pa=uncache._NORMAL_PHYS_BASE,
+        payload=payload,
+        s1_pte=uncache.TranslationPte(pbmt=uncache._PBMT_NC),
+        expected_path="fault",
+        pmp_entries=(
+            uncache.TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=uncache.PmpPmaConfig(
+                    match="napot", read=True, write=True, execute=False
+                ),
+                addr=uncache._NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+        pma_entries=(
+            uncache.TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=uncache.PmpPmaConfig(
+                    match="napot",
+                    read=True,
+                    write=True,
+                    execute=True,
+                    cacheable=True,
+                    atomic=True,
+                ),
+                addr=uncache._NORMAL_PHYS_BASE,
+                size=0x1000,
+            ),
+        ),
+    )
+    state = uncache.TranslationScenarioBuilder(env).build(scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(start_pc)
+    exception_samples = []
+
+    def capture_exception(cycle, active_env):
+        snapshot = owner_funcov._snapshot(
+            active_env.functional_coverage, active_env.dut
+        )
+        if snapshot["to_valid"] == 1 and snapshot["to_exception"] not in {None, 0}:
+            exception_samples.append(
+                {"cycle": int(cycle), "exception": int(snapshot["to_exception"])}
+            )
+
+    env.register_cycle_observer(capture_exception)
+    env.arm_translation_scenario(state)
+    uncache._force_redirect_to(env, start_pc)
+
+    for _ in range(6000):
+        if env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_002"):
+            break
+        env.step(1)
+
+    assert env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_002"), {
+        "ptw": env.ptw_agent.get_stats(),
+        "observations": [
+            (int(obs.pc), int(obs.instr), bool(obs.is_rvc))
+            for obs in env.monitor.observations[-16:]
+        ],
+    }
+    assert exception_samples, {
+        "reason": "NC exception did not reach toIBuffer",
+        "samples": exception_samples,
+    }
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_bins("BIN-1052")
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_backend_redirect_wins_response_writeback(env):
