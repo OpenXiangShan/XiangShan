@@ -565,3 +565,43 @@ def test_nc_tl_a_stall_holds_and_releases_same_request(env, tmp_path):
     assert uncache._wait_for_request_addr(env, mapping.paddr, max_cycles=6000)
     assert env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_009")
     assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1090")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_cacheable_delivery_then_pbmt_nc_starts_with_clean_first_instruction(env):
+    nc_expected, cacheable_pcs = uncache._prepare_sv39_dual_nc_cacheable_stream(env)
+    env.icache_agent.configure(
+        hit_latency=4, miss_latency=4, miss_rate=0.0, seed=1090
+    )
+    uncache._initialize_sv39_fetch(env, reset_vector=uncache._NORMAL_ALT_BASE)
+    uncache._configure_exec_attrs_16k(env, base_addr=0x80000000)
+    uncache._force_redirect_to(env, uncache._NORMAL_ALT_BASE)
+
+    assert uncache._wait_for_observed_pc(
+        env, cacheable_pcs[0], max_cycles=12000
+    ), env.icache_agent.get_stats()
+    switch_index = len(env.monitor.observations)
+    uncache._pulse_sfence(
+        env, addr=uncache._NORMAL_ALT_BASE, rs1=1, rs2=0
+    )
+    uncache._force_redirect_to(env, uncache._NORMAL_BASE)
+
+    assert uncache._wait_for_request_addr(
+        env, uncache._NORMAL_PHYS_BASE, max_cycles=6000
+    ), env.uncache_agent.get_stats()
+    assert uncache._wait_for_observed_pc(
+        env, uncache._NORMAL_BASE, max_cycles=12000
+    ), env.uncache_agent.get_stats()
+
+    first_nc = next(
+        observation
+        for observation in list(env.monitor.observations)[switch_index:]
+        if int(observation.pc) == uncache._NORMAL_BASE
+    )
+    expected_pc, expected_instr, expected_is_rvc = nc_expected[0]
+    assert int(first_nc.pc) == int(expected_pc)
+    assert int(first_nc.instr) == int(expected_instr)
+    assert bool(first_nc.is_rvc) == bool(expected_is_rvc)
+    assert env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_036")
+    assert not env.monitor.get_errors()
