@@ -1192,6 +1192,12 @@ package object xiangshan {
   object TopDownCounters extends Enumeration {
     val NoStall = Value("NoStall") // Base
     // frontend
+    // Ftq had nothing left to hand over. Ranked lowest of the frontend reasons on purpose: a miss, a redirect or an
+    // override in flight explains the same cycles better, so what lands here is only what none of them claimed.
+    // In practice that is the frontend refilling after a correction rather than Bpu being unable to keep up: on
+    // MicroBench it works out at about ten cycles per backend redirect, the depth of the path from a redirect
+    // through Bpu and Ftq back to fetch. A number here that does not divide up that way is worth looking into.
+    val FtqEmptyBubble = Value("FtqEmptyBubble")
     val OverrideBubble = Value("OverrideBubble")
     val FtqUpdateBubble = Value("FtqUpdateBubble")
     // val ControlRedirectBubble = Value("ControlRedirectBubble")
@@ -1202,6 +1208,11 @@ package object xiangshan {
     val MemVioRedirectBubble = Value("MemVioRedirectBubble")
     val OtherRedirectBubble = Value("OtherRedirectBubble")
     val FtqFullStall = Value("FtqFullStall")
+    // A predictor could not take its training write because the bank it needed was busy serving a prediction read,
+    // and Ftq throttles Bpu once that has gone on long enough, so training does not fall arbitrarily behind. Tage
+    // and Sc are the two that raise it. The read wins the bank every time, so the cost is not the conflict itself
+    // but the throttle it eventually triggers, which is a real stall of the prediction pipeline.
+    val TrainSramConflictStall = Value("TrainSramConflictStall")
 
     val ICacheMissBubble = Value("ICacheMissBubble")
     val ITLBMissBubble = Value("ITLBMissBubble")

@@ -724,6 +724,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   perfAnalyzer.io.ifuPerfCtrl.backendRedirect  := backendRedirect
   perfAnalyzer.io.ifuPerfCtrl.ifuWbRedirect    := wbRedirect.valid
   perfAnalyzer.io.ifuPerfCtrl.fromBpuFlush     := s0_flushFromBpu
+  perfAnalyzer.io.ifuPerfCtrl.bpuOverride      := fromFtq.flushFromBpu.s3.valid
   perfAnalyzer.io.ifuPerfCtrl.fromICacheBubble := false.B
 
   perfAnalyzer.io.topdownIn.icacheTopdown          := io.fromICache.topdown

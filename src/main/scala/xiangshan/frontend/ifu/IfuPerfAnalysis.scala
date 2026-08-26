@@ -72,6 +72,8 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
       val backendRedirect:  Bool = Bool()
       val ifuWbRedirect:    Bool = Bool()
       val fromBpuFlush:     Bool = Bool()
+      // the override itself, not the per-stage flush match: every stage in flight is thrown away by it
+      val bpuOverride:      Bool = Bool()
       val fromICacheBubble: Bool = Bool()
     }
 
@@ -99,6 +101,11 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
   for (i <- 1 until numOfStage) {
     topdownStages(i) := topdownStages(i - 1)
   }
+  // Nothing arrived to fetch this cycle. A miss already names itself one stage down, and it holds this signal high
+  // for as long as it lasts, so exclude it here rather than stamping the same event twice under two names.
+  when(io.ifuPerfCtrl.fromFtqBubble && !icacheMissBubble && !itlbMissBubble) {
+    topdownStages(0).reasons(TopDownCounters.FtqEmptyBubble.id) := true.B
+  }
   when(icacheMissBubble) {
     topdownStages(1).reasons(TopDownCounters.ICacheMissBubble.id) := true.B
   }
@@ -112,7 +119,16 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
       topdownStages(i).reasons(TopDownCounters.BTBMissBubble.id) := true.B
     }
   }
+  // A Bpu override cuts the entries s1 had already handed on. Only the second block of a pair waits for Ftq's point
+  // of no return; the first may still be overridden and is flushed from here. Stage 0 alone, because that is all an
+  // override reaches: the later stages are flushed only by a backend or write-back redirect. With Ftq's own stage
+  // that comes to the two cycles an override costs.
+  when(io.ifuPerfCtrl.bpuOverride) {
+    topdownStages(0).reasons(TopDownCounters.OverrideBubble.id) := true.B
+  }
   io.topdownOut.topdown := topdownStages(numOfStage - 1)
+  // as in Ftq, the bundle leaving this cycle is flushed by the same redirect and has to carry the reason too
+  io.topdownOut.topdown.backendRedirectOverride(io.topdownIn.backendRedirectTopdown)
 
   /** <PERF> f0 fetch bubble */
   XSPerfAccumulate("fetch_bubble_ftq_not_valid", io.ifuPerfCtrl.fromFtqBubble)

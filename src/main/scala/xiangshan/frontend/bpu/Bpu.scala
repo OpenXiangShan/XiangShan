@@ -685,7 +685,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with Ha
   s3_perfMeta.scUsed              := s3_scUsed.asUInt
 
   io.toFtq.perfMeta := s3_perfMeta
-  // TODO: override reason and redirect reason
+
+  // Bpu reports no reason of its own, and does not need to: nothing inside it can stall the prediction path, which
+  // fires unless Ftq back-pressures it or a flush empties it, and both of those are named where they happen. The one
+  // cycle an override costs here is exactly the cycle Ftq's own stage sees, so Ftq names it.
   io.toFtq.topdownReasons := 0.U.asTypeOf(new FrontendTopDownBundle())
 
   /* *** BpTrace *** */

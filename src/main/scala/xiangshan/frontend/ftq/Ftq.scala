@@ -197,6 +197,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val bpNotRunTooFar = RegInit(true.B)
   bpNotRunTooFar := distanceBetween(bpuPtr(0), fetchPtr(0)) < BpRunAheadDistance.U &&
     bpTrainStallCnt < BpTrainStallLimit.U
+  // Which of the two throttled Bpu, so that the stall can be named. Training falling behind and Bpu running too far
+  // ahead of fetch are unrelated causes and cost different things to fix.
+  private val bpThrottledByTrain = RegInit(false.B)
+  bpThrottledByTrain := bpTrainStallCnt >= BpTrainStallLimit.U
 
   io.fromBpu.prediction.ready := ftqHasRoom && bpNotRunTooFar
   io.fromBpu.meta.ready       := true.B
@@ -577,22 +581,42 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.backendRedirectTopdown.controlFlowRedirect     := backendRedirect.bits.debugIsCtrl
   io.backendRedirectTopdown.memoryViolationRedirect := backendRedirect.bits.debugIsMemVio
 
-  io.backendRedirectTopdown.btbMissBubble    := false.B // TODO: add more info to distinguish
   io.backendRedirectTopdown.tageMissBubble   := backendRedirect.bits.attribute.isConditional
   io.backendRedirectTopdown.scMissBubble     := false.B // TODO: add SC info
   io.backendRedirectTopdown.ittageMissBubble := backendRedirect.bits.attribute.needIttage
   io.backendRedirectTopdown.rasMissBubble    := backendRedirect.bits.attribute.isReturn
+  // Whatever the direction and target predictors do not own falls to the btb, which is what named the block's exit
+  // and where it went. The stages take their reason bits straight from these flags, so a redirect that sets none of
+  // them names nothing at all, and every cycle the frontend then spends refilling is charged to no cause.
+  io.backendRedirectTopdown.btbMissBubble :=
+    !(io.backendRedirectTopdown.tageMissBubble ||
+      io.backendRedirectTopdown.ittageMissBubble ||
+      io.backendRedirectTopdown.rasMissBubble)
 
   private val topdownStage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
   // only driven by clock, not valid-ready
   topdownStage := io.fromBpu.topdownReasons
   topdownStage.backendRedirectOverride(io.backendRedirectTopdown)
   io.toIfu.topdownInfo := topdownStage
+  // and on the group leaving this cycle, not just the register behind it: that group is flushed by the same redirect,
+  // so without naming it here its cycle is lost to no cause
+  io.toIfu.topdownInfo.backendRedirectOverride(io.backendRedirectTopdown)
 
   when(!ftqHasRoom) {
     topdownStage.reasons(TopDownCounters.FtqFullStall.id) := true.B
   }.elsewhen(!bpNotRunTooFar) {
-    topdownStage.reasons(TopDownCounters.FtqUpdateBubble.id) := true.B
+    when(bpThrottledByTrain) {
+      topdownStage.reasons(TopDownCounters.TrainSramConflictStall.id) := true.B
+    }.otherwise {
+      topdownStage.reasons(TopDownCounters.FtqUpdateBubble.id) := true.B
+    }
+  }
+
+  // s3 threw away what s1 predicted, so the entries behind it are cut and fetched again. Name the reason here rather
+  // than in Bpu: what the override costs is the fetch already in flight for those entries, and this stage and Ifu's
+  // are the ones carrying it.
+  when(bpuS3Redirect) {
+    topdownStage.reasons(TopDownCounters.OverrideBubble.id) := true.B
   }
 
   // Hardware performance monitors
