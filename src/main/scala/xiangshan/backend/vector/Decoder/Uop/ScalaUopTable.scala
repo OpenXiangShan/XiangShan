@@ -566,6 +566,16 @@ object ScalaUopTable {
 
   def tableZicfi = ???
 
+  val tableZicbo = {
+    import xiangshan.backend.decode.isa.Instructions.ZICBOType
+    ZICBOType.mapUopcode(
+      _.CBO_INVAL -> cbo_inval,
+      _.CBO_CLEAN -> cbo_clean,
+      _.CBO_FLUSH -> cbo_flush,
+      _.CBO_ZERO -> cbo_zero,
+    )
+  }
+
   val tableZicond = {
     import xiangshan.backend.decode.isa.Instructions.ZICONDType
 
