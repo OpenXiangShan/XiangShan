@@ -10,6 +10,13 @@ import os
 
 import pytest
 
+from env.sequences import (
+    TranslationScenario,
+    TranslationScenarioBuilder,
+)
+from env.funcov.py.icache.icache_waylookup_funcov import (
+    _SIGNALS as _WAYLOOKUP_SIGNALS,
+)
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _initialize_cacheable_stream,
 )
@@ -76,6 +83,45 @@ def _miss_request_snapshot(env) -> dict[str, int | None]:
             ),
         ),
     }
+
+
+def _waylookup_value(env, key: str) -> int | None:
+    return _try_read_internal(env, tuple(_WAYLOOKUP_SIGNALS[str(key)]))
+
+
+def _waylookup_snapshot(env) -> dict[str, int | None]:
+    return {
+        "cycle": int(env.current_cycle),
+        "empty": _waylookup_value(env, "empty"),
+        "num_valid": _waylookup_value(env, "num_valid"),
+        "read_flag": _waylookup_value(env, "read_flag"),
+        "read_value": _waylookup_value(env, "read_value"),
+        "write_flag": _waylookup_value(env, "write_flag"),
+        "write_value": _waylookup_value(env, "write_value"),
+        "exception_valid": _waylookup_value(env, "exception_valid"),
+        "write0_valid": _waylookup_value(env, "write0_valid"),
+        "write0_ready": _waylookup_value(env, "write0_ready"),
+        "write1_valid": _waylookup_value(env, "write1_valid"),
+        "write1_ready": _waylookup_value(env, "write1_ready"),
+        "to_valid": _waylookup_value(env, "to_valid"),
+        "to_ready": _waylookup_value(env, "to_ready"),
+        "update_valid": _waylookup_value(env, "update_valid"),
+        "flush": _waylookup_value(env, "flush"),
+        "bpu_flush": _waylookup_value(env, "bpu_flush"),
+        "bpu_flush_match": _waylookup_value(env, "bpu_flush_match"),
+    }
+
+
+def _wait_waylookup_occupancy(env, minimum: int, *, max_cycles: int) -> None:
+    _run_until(
+        env,
+        lambda: (
+            _waylookup_value(env, "num_valid") is not None
+            and int(_waylookup_value(env, "num_valid")) >= int(minimum)
+        ),
+        max_cycles=max_cycles,
+        label=f"WayLookup occupancy >= {int(minimum)}",
+    )
 
 
 def _load_nops(env, base: int, *, words: int = 512) -> None:
@@ -155,6 +201,7 @@ def lowrisk_cleanup(env):
     fencei = getattr(env.clock_reset, "io_fencei", None)
     if fencei is not None:
         fencei.value = 0
+    env.backend_model.set_can_accept(1)
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -432,9 +479,11 @@ def test_icache_lowrisk_missunit_merge_and_fencei(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins(
-    "BIN-720", "BIN-731", "BIN-734", "BIN-735", "BIN-741",
-    "BIN-744", "BIN-746", "BIN-748", "BIN-750", "BIN-751", "BIN-752",
-    "BIN-753", "BIN-754", "BIN-756", "BIN-758",
+    "BIN-720", "BIN-726", "BIN-727", "BIN-728", "BIN-731", "BIN-733",
+    "BIN-734", "BIN-735", "BIN-736", "BIN-737", "BIN-738", "BIN-739",
+    "BIN-1010", "BIN-740", "BIN-741", "BIN-742", "BIN-743", "BIN-744",
+    "BIN-745", "BIN-746", "BIN-748", "BIN-749", "BIN-750", "BIN-751",
+    "BIN-753", "BIN-754", "BIN-756", "BIN-757", "BIN-1011", "BIN-758",
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_waylookup_updates_and_flush(lowrisk_cleanup) -> None:
@@ -461,6 +510,121 @@ def test_icache_lowrisk_waylookup_updates_and_flush(lowrisk_cleanup) -> None:
         max_cycles=1024,
         label="WayLookup flush recovery target",
     )
+    _wait_funcov_hit(
+        env,
+        "icache_waylookup_flush",
+        "flush_recovery",
+        max_cycles=256,
+        label="WayLookup flush recovery coverage",
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins(
+    "BIN-720", "BIN-726", "BIN-727",
+)
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_lowrisk_waylookup_queue_read_dut(lowrisk_cleanup) -> None:
+    """Build normal WayLookup entries, then exercise read-side backpressure."""
+    env = lowrisk_cleanup
+    _load_two_fetch_loop(env)
+    _warm_two_fetch_execution(env)
+
+    _wait_waylookup_occupancy(env, 2, max_cycles=4096)
+    _wait_funcov_hit(
+        env,
+        "icache_waylookup_read",
+        "dual_entry_dequeue",
+        max_cycles=4096,
+        label="WayLookup dual-entry dequeue coverage",
+    )
+    env.backend_model.set_can_accept(0)
+    env.step(12)
+    blocked = _waylookup_snapshot(env)
+    env.backend_model.set_can_accept(1)
+    env.step(32)
+
+    assert blocked["num_valid"] is not None and int(blocked["num_valid"]) >= 1
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins(
+    "BIN-737", "BIN-738", "BIN-739", "BIN-1010", "BIN-740", "BIN-741",
+)
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
+    """Drive a cacheable instruction page fault through the existing PTW model."""
+    env = lowrisk_cleanup
+    va = 0x8020_0F00
+    pa = 0x8040_0F00
+    payload = (_NOP.to_bytes(4, "little")) * 512
+    scenario = TranslationScenario(
+        scenario_id="waylookup-cacheable-instruction-page-fault",
+        va=va,
+        pa=pa,
+        payload=payload,
+        page_count=2,
+        expected_path="fault",
+        mode="sv39",
+        s1_pf=1,
+        expected_result="page_fault",
+    )
+    env.initialize(reset_vector=va, bare_mode=False)
+    state = TranslationScenarioBuilder(env).build(scenario)
+
+    def arm_before_reset_release() -> None:
+        env.monitor.clear()
+        env.monitor.set_expected_pc(va)
+        env.arm_translation_scenario(state, page_indexes=(0,))
+
+    env.reset(before_release=arm_before_reset_release)
+    _run_until(
+        env,
+        lambda: bool(env.translation_oracle.get_active())
+        and bool(env.translation_oracle.get_active().get("fault_seen")),
+        max_cycles=6000,
+        label="cacheable instruction page fault",
+    )
+    _wait_funcov_hit(
+        env,
+        "icache_waylookup_exception",
+        "exception_capture",
+        max_cycles=256,
+        label="WayLookup exception capture coverage",
+    )
+    env.step(16)
+    assert env.monitor.exception_mark_count > 0
+    env.assert_translation_scenario()
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins(
+    "BIN-753", "BIN-754", "BIN-756", "BIN-757", "BIN-1011", "BIN-758",
+)
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_lowrisk_waylookup_capacity_wrap_dut(lowrisk_cleanup) -> None:
+    """Hold MainPipe behind a real frontend stream to approach FIFO boundaries."""
+    env = lowrisk_cleanup
+    _load_two_fetch_loop(env)
+    _warm_two_fetch_execution(env)
+    env.backend_model.set_can_accept(0)
+    _run_until(
+        env,
+        lambda: (
+            _waylookup_value(env, "num_valid") is not None
+            and int(_waylookup_value(env, "num_valid")) >= 2
+        ),
+        max_cycles=4096,
+        label="WayLookup entries accumulate under backend backpressure",
+    )
+    env.step(128)
+    held = _waylookup_snapshot(env)
+    env.backend_model.set_can_accept(1)
+    env.step(256)
+
+    assert held["num_valid"] is not None and int(held["num_valid"]) >= 1
+    assert held["read_value"] is not None
+    assert held["write_value"] is not None
     assert not env.monitor.get_errors()
 
 
