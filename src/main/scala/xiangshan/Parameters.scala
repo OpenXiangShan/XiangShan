@@ -735,6 +735,7 @@ trait HasXSParameter {
   def RobCommitWidth = coreParams.RobCommitWidth
   def RabCommitWidth = coreParams.RabCommitWidth
   def MaxUopSize = coreParams.MaxUopSize
+  def EnableRobCompression = coreParams.EnableRobCompression
   def EnableRenameSnapshot = coreParams.EnableRenameSnapshot
   def RenameSnapshotNum = coreParams.RenameSnapshotNum
   def EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
