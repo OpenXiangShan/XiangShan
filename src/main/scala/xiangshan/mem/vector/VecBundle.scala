@@ -218,7 +218,7 @@ class FeedbackToLsqIO(implicit p: Parameters) extends VLSUBundle{
   val lqIdx = new LqPtr
   val vaddr = UInt(XLEN.W)
   val vaNeedExt = Bool()
-  val gpaddr = UInt(GPAddrBits.W)
+  val gpaddr = UInt(XLEN.W)
   val isForVSnonLeafPTE = Bool()
   val feedback = Vec(VecFeedbacks.allFeedbacks, Bool())
     // for exception
