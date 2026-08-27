@@ -62,9 +62,18 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
   }
   val io = IO(new MicroRasIO)
   io.sramResetDone := true.B
-  // context flush placeholder: real flush scheme comes later
+
+  // context flush handshake (SPEC 07 §4/§6)
+  // internal wires driven by the optional flush I/O; default false when HasBpuFlush is off
+  private val contextFlush = Wire(Bool())
+  private val bpuFlushing  = Wire(Bool())
+  contextFlush := false.B
+  bpuFlushing  := false.B
   if (HasBpuFlush) {
-    io.resetDone.get := true.B
+    contextFlush := io.contextFlush.get
+    bpuFlushing  := io.bpuFlushing.get
+    // register-based uRAS: all state clears 1 cycle after contextFlush, so resetDone = !contextFlush
+    io.resetDone.get := !contextFlush
   }
   io.trainReady    := true.B
 
@@ -207,8 +216,9 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
     }
   }
 
-  io.specOut.isCanUse  := isCanUse
-  io.specOut.retTarget := topRetAddr
+  // output gating on bpuFlushing (SPEC 07 §4.3): force prediction invalid during the whole flush window
+  io.specOut.isCanUse  := (if (HasBpuFlush) isCanUse && !bpuFlushing else isCanUse)
+  io.specOut.retTarget := (if (HasBpuFlush) Mux(bpuFlushing, 0.U.asTypeOf(PrunedAddr(VAddrBits)), topRetAddr) else topRetAddr)
 
   private val s3_overrideHasRasAction     = hasOverride && (s3_realPush || s3_realPop)
   private val s3_overrideHasRasActionNext = RegNext(s3_overrideHasRasAction, false.B)
@@ -217,4 +227,23 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
     "s1_has_return_after_override_has_action",
     s3_overrideHasRasActionNext && io.stageCtrl.s1_fire && specPop
   )
+
+  // context flush: clear all S2/S3 tracking and pipeline staging registers (SPEC 07 §4.1/§4.4)
+  // placed last to override (last-connect) specIn/override/redirect writes, and to cover the
+  // s2_retAddr/s3_retAddr/topRetAddr/redirectDelay1 registers that hasRedirect does not clear
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      // S2/S3 tracking registers
+      s2_hasPush := false.B
+      s2_hasPop  := false.B
+      s3_hasPush := false.B
+      s3_hasPop  := false.B
+      s2_retAddr := 0.U.asTypeOf(PrunedAddr(VAddrBits))
+      s3_retAddr := 0.U.asTypeOf(PrunedAddr(VAddrBits))
+      // pipeline staging registers
+      isCanUse       := false.B
+      topRetAddr     := 0.U.asTypeOf(PrunedAddr(VAddrBits))
+      redirectDelay1 := false.B
+    }
+  }
 }
