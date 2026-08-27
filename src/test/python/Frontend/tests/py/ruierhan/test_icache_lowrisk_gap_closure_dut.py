@@ -93,7 +93,7 @@ def _waylookup_value(env, key: str) -> int | None:
 
 
 def _waylookup_snapshot(env) -> dict[str, int | None]:
-    return {
+    snapshot = {
         "cycle": int(env.current_cycle),
         "empty": _waylookup_value(env, "empty"),
         "num_valid": _waylookup_value(env, "num_valid"),
@@ -112,7 +112,49 @@ def _waylookup_snapshot(env) -> dict[str, int | None]:
         "flush": _waylookup_value(env, "flush"),
         "bpu_flush": _waylookup_value(env, "bpu_flush"),
         "bpu_flush_match": _waylookup_value(env, "bpu_flush_match"),
+        "ftq_req1_valid": _try_read_internal(
+            env,
+            (_MAIN + "io_fromFtq_bits_req_1_valid",),
+        ),
+        "info1_valid": _try_read_internal(
+            env,
+            (
+                _MAIN + "io_fromWayLookup_bits_wayLookupInfo_1_valid",
+                _MAIN + "__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_1_valid",
+            ),
+        ),
+        "real_two": _try_read_internal(
+            env,
+            (_ICACHE + "__Vtogcov__io_toFtq_fromMainPipe_realTwoFetchValid",),
+        ),
+        "info0_mmio": _try_read_internal(
+            env,
+            (
+                _MAIN + "io_fromWayLookup_bits_wayLookupInfo_0_bits_entry_isMmio",
+                _MAIN + "__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_0_bits_entry_isMmio",
+            ),
+        ),
+        "info1_mmio": _try_read_internal(
+            env,
+            (
+                _MAIN + "io_fromWayLookup_bits_wayLookupInfo_1_bits_entry_isMmio",
+                _MAIN + "__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_1_bits_entry_isMmio",
+            ),
+        ),
+        "info0_exception": _try_read_internal(
+            env,
+            (_MAIN + "__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_0_bits_exceptionEntry_itlbException_value",),
+        ),
+        "info1_exception": _try_read_internal(
+            env,
+            (_MAIN + "__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_1_bits_exceptionEntry_itlbException_value",),
+        ),
+        "write0_exception": _try_read_internal(
+            env,
+            (_ICACHE + "prefetcher.__Vtogcov__io_wayLookupWrite_0_bits_exceptionEntry_itlbException_value",),
+        ),
     }
+    return snapshot
 
 
 def _wait_waylookup_occupancy(env, minimum: int, *, max_cycles: int) -> None:
@@ -156,11 +198,24 @@ def _wait_funcov_hit(
     label: str | None = None,
 ) -> None:
     max_cycles = int(os.getenv("TB_ICACHE_LOWRISK_MAX_CYCLES", str(max_cycles)), 0)
-    _run_until(
-        env,
-        lambda: env.functional_coverage.key_hit(group, bin_name),
-        max_cycles=max_cycles,
-        label=label or f"{group}.{bin_name}",
+    target = (group, bin_name)
+    for _ in range(max_cycles):
+        if env.functional_coverage.key_hit(*target):
+            return
+        env.step(1)
+    raise AssertionError(
+        {
+            "reason": f"timeout while waiting for {label or f'{group}.{bin_name}'}",
+            "missing": [f"{group}.{bin_name}"],
+            "max_cycles": max_cycles,
+            "current_cycle": int(env.current_cycle),
+            "waylookup": _waylookup_snapshot(env),
+            "miss_request": _miss_request_snapshot(env),
+            "coverage_state": getattr(
+                env.functional_coverage, "_icache_hitmiss_cov_state", None
+            ),
+            "monitor_errors": env.monitor.get_errors(),
+        }
     )
 
 
@@ -172,11 +227,58 @@ def _wait_funcov_hits(
     label: str,
 ) -> None:
     max_cycles = int(os.getenv("TB_ICACHE_LOWRISK_MAX_CYCLES", str(max_cycles)), 0)
-    _run_until(
-        env,
-        lambda: all(env.functional_coverage.key_hit(group, name) for group, name in targets),
-        max_cycles=max_cycles,
-        label=label,
+    for _ in range(max_cycles):
+        missing = [
+            (group, name)
+            for group, name in targets
+            if not env.functional_coverage.key_hit(group, name)
+        ]
+        if not missing:
+            return
+        env.step(1)
+    raise AssertionError(
+        {
+            "reason": f"timeout while waiting for {label}",
+            "missing": [f"{group}.{name}" for group, name in missing],
+            "max_cycles": max_cycles,
+            "current_cycle": int(env.current_cycle),
+            "waylookup": _waylookup_snapshot(env),
+            "miss_request": _miss_request_snapshot(env),
+            "monitor_errors": env.monitor.get_errors(),
+        }
+    )
+
+
+def _wait_for_target_response(
+    env,
+    target: int,
+    *,
+    max_cycles: int,
+    label: str,
+    after_cycle: int | None = None,
+) -> None:
+    """Wait for the specific cache line requested by a redirect."""
+    line = int(target) & ~0x3F
+    for _ in range(int(max_cycles)):
+        if any(
+            int(record.get("address", -1)) == line
+            and int(record.get("beat_idx", -1)) == 1
+            and (
+                after_cycle is None
+                or int(record.get("cycle", -1)) > int(after_cycle)
+            )
+            for record in env.icache_agent.get_stats().get("response_records", [])
+        ):
+            return
+        env.step(1)
+    raise AssertionError(
+        {
+            "reason": f"timeout while waiting for {label}",
+            "target_line": line,
+            "current_cycle": int(env.current_cycle),
+            "stats": env.icache_agent.get_stats(),
+            "monitor_errors": env.monitor.get_errors(),
+        }
     )
 
 
@@ -213,6 +315,18 @@ def _drive_soft_prefetch(env, addresses: list[int]) -> None:
     _clear_soft_prefetch(env)
 
 
+def _set_predictors(env, enabled: bool) -> None:
+    value = 1 if enabled else 0
+    env.set_bp_ctrl_enable(
+        ubtb_enable=value,
+        abtb_enable=value,
+        mbtb_enable=value,
+        tage_enable=value,
+        sc_enable=value,
+        ittage_enable=value,
+    )
+
+
 @pytest.fixture
 def lowrisk_cleanup(env):
     """Restore top-level test inputs even when a scenario fails."""
@@ -222,6 +336,7 @@ def lowrisk_cleanup(env):
     if fencei is not None:
         fencei.value = 0
     env.backend_model.set_can_accept(1)
+    _set_predictors(env, True)
 
 
 @pytest.mark.funcov_bins("BIN-685")
@@ -509,14 +624,14 @@ def test_icache_lowrisk_missunit_merge_and_fencei(lowrisk_cleanup) -> None:
     "BIN-720", "BIN-726", "BIN-727", "BIN-728", "BIN-731", "BIN-733",
     "BIN-734", "BIN-735", "BIN-736", "BIN-737", "BIN-738", "BIN-739",
     "BIN-1010", "BIN-740", "BIN-741", "BIN-742", "BIN-743", "BIN-744",
-    "BIN-745", "BIN-746", "BIN-748", "BIN-749", "BIN-750", "BIN-751",
+    "BIN-745", "BIN-746", "BIN-748", "BIN-749", "BIN-750", "BIN-751", "BIN-752",
     "BIN-753", "BIN-754", "BIN-756", "BIN-757", "BIN-1011", "BIN-758",
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_waylookup_updates_and_flush(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8006_0000
-    _load_nops(env, base, words=2048)
+    _load_nops(env, base, words=32768)
     env.icache_agent.configure(
         hit_latency=1,
         miss_latency=24,
@@ -527,13 +642,41 @@ def test_icache_lowrisk_waylookup_updates_and_flush(lowrisk_cleanup) -> None:
     env.monitor.clear()
     env.monitor.set_expected_pc(base)
 
-    for offset in range(0x100, 0x900, 0x80):
+    for offset in range(0x100, 0x2100, 0x80):
         _drive_soft_prefetch(env, [base + offset, base + offset + 0x40])
-        env.step(4)
-    env.backend_model.inject_redirect(base + 0x1000, "ctrl_redirect", delay_cycles=0)
+        if offset % 0x200 == 0:
+            env.backend_model.inject_redirect(
+                base + offset,
+                "ctrl_redirect",
+                delay_cycles=0,
+            )
+        env.step(2)
+
+    corrupt_target = base + 0x3000
+    env.icache_agent.inject_response_fault_at(corrupt_target, corrupt=1)
+    env.backend_model.inject_redirect(corrupt_target, "ctrl_redirect", delay_cycles=0)
+    env.step(64)
+
+    # Align a global redirect with an accepted WayLookup write.
+    for attempt in range(256):
+        if env.functional_coverage.key_hit(
+            "icache_waylookup_flush", "flush_wins_write"
+        ):
+            break
+        if _waylookup_value(env, "write0_valid") == 1:
+            env.backend_model.inject_redirect(
+                base + 0x4000 + attempt * 0x40,
+                "ctrl_redirect",
+                delay_cycles=0,
+            )
+        env.step(1)
+    env.backend_model.inject_redirect(base + 0x5000, "ctrl_redirect", delay_cycles=0)
     _run_until(
         env,
-        lambda: any(int(observation.pc) == base + 0x1000 for observation in env.monitor.observations),
+        lambda: any(
+            int(observation.pc) == base + 0x5000
+            for observation in env.monitor.observations
+        ),
         max_cycles=1024,
         label="WayLookup flush recovery target",
     )
@@ -543,6 +686,37 @@ def test_icache_lowrisk_waylookup_updates_and_flush(lowrisk_cleanup) -> None:
         "flush_recovery",
         max_cycles=256,
         label="WayLookup flush recovery coverage",
+    )
+
+    # Predictor enable transitions produce supported BPU s3 flush traffic.
+    # Keep a non-empty queue and dual-prefetch stream active while cycling it.
+    for attempt in range(4096):
+        if all(
+            env.functional_coverage.key_hit("icache_waylookup_flush", name)
+            for name in ("bpu_flush_rewinds_tail", "bpu_flush_two_prefetch")
+        ):
+            break
+        if attempt % 16 == 0:
+            _set_predictors(env, False)
+        elif attempt % 16 == 6:
+            _set_predictors(env, True)
+        env.step(1)
+    _set_predictors(env, True)
+
+    _wait_funcov_hits(
+        env,
+        (
+            ("icache_waylookup_update", "update_head"),
+            ("icache_waylookup_update", "update_same_way_new_tag"),
+            ("icache_waylookup_update", "update_corrupt_ignored"),
+            ("icache_waylookup_update", "update_write_concurrent"),
+            ("icache_waylookup_update", "update_second_entry_stall"),
+            ("icache_waylookup_flush", "flush_wins_write"),
+            ("icache_waylookup_flush", "bpu_flush_rewinds_tail"),
+            ("icache_waylookup_flush", "bpu_flush_two_prefetch"),
+        ),
+        max_cycles=4096,
+        label="WayLookup update and flush edge coverage",
     )
     assert not env.monitor.get_errors()
 
@@ -558,18 +732,37 @@ def test_icache_lowrisk_waylookup_queue_read_dut(lowrisk_cleanup) -> None:
     _warm_two_fetch_execution(env)
 
     _wait_waylookup_occupancy(env, 2, max_cycles=4096)
-    _wait_funcov_hit(
+    _wait_funcov_hits(
         env,
-        "icache_waylookup_read",
-        "dual_entry_dequeue",
+        (
+            ("icache_waylookup_queue", "entry_fields"),
+            ("icache_waylookup_read", "dual_entry_dequeue"),
+        ),
         max_cycles=4096,
-        label="WayLookup dual-entry dequeue coverage",
+        label="WayLookup entry integrity and dual-entry dequeue coverage",
     )
     env.backend_model.set_can_accept(0)
     env.step(12)
     blocked = _waylookup_snapshot(env)
     env.backend_model.set_can_accept(1)
-    env.step(32)
+    # Refill updates can make the second queued entry temporarily unreadable,
+    # which is the RTL's intended single-service fallback condition.
+    _pulse_fencei(env)
+    _set_predictors(env, False)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=24,
+        miss_rate=1.0,
+        seed=0x727,
+    )
+    _wait_funcov_hit(
+        env,
+        "icache_waylookup_read",
+        "single_entry_fallback",
+        max_cycles=4096,
+        label="WayLookup single-entry fallback coverage",
+    )
+    _set_predictors(env, True)
 
     assert blocked["num_valid"] is not None and int(blocked["num_valid"]) >= 1
     assert not env.monitor.get_errors()
@@ -611,8 +804,16 @@ def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
     # Exercise both producers of WayLookup entries.  The backend redirect
     # drives MainPipe while the soft-prefetch request gives PrefetchPipe an
     # opportunity to capture the same translated exception entry.
-    _drive_soft_prefetch(env, [va])
     env.backend_model.inject_redirect(va, "ctrl_redirect", delay_cycles=0)
+    # Capture is a one-cycle write fire.  Poll coverage while the faulting
+    # request is presented; fault_seen denotes the later blocked state.
+    _drive_soft_prefetch(env, [va])
+    for _ in range(6000):
+        if env.functional_coverage.key_hit(
+            "icache_waylookup_exception", "exception_capture"
+        ):
+            break
+        env.step(1)
     _run_until(
         env,
         lambda: bool(env.translation_oracle.get_active())
@@ -629,6 +830,37 @@ def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
     )
     _wait_funcov_hit(
         env,
+        "icache_waylookup_exception",
+        "exception_no_bypass",
+        max_cycles=256,
+        label="WayLookup exception write without empty-queue bypass",
+    )
+    _wait_funcov_hit(
+        env,
+        "icache_waylookup_exception",
+        "exception_blocks_dual_write",
+        max_cycles=512,
+        label="WayLookup exception backpressure for a dual write",
+    )
+    env.assert_translation_scenario()
+
+    # The blocked transaction remains dual until the exception is cleared.
+    # Start a second fault episode with predictors disabled so PrefetchPipe
+    # presents a port-0-only request behind the persistent exception entry.
+    _pulse_fencei(env)
+    _set_predictors(env, False)
+    env.arm_translation_scenario(state, page_indexes=(0,))
+    env.backend_model.inject_redirect(va, "ctrl_redirect", delay_cycles=0)
+    _wait_funcov_hit(
+        env,
+        "icache_waylookup_exception",
+        "exception_blocks_single_write",
+        max_cycles=6000,
+        label="WayLookup exception backpressure for a single write",
+    )
+    _set_predictors(env, True)
+    _wait_funcov_hit(
+        env,
         "icache_hit_path",
         "hit_itlb_exception",
         max_cycles=256,
@@ -636,7 +868,6 @@ def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
     )
     env.step(16)
     assert env.monitor.exception_mark_count > 0
-    env.assert_translation_scenario()
     assert not env.monitor.get_errors()
 
 
@@ -727,20 +958,55 @@ def test_icache_lowrisk_waylookup_capacity_wrap_dut(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     _load_two_fetch_loop(env)
     _warm_two_fetch_execution(env)
+    pressure_base = 0x8001_0000
+    _load_nops(env, pressure_base, words=32768)
     env.backend_model.set_can_accept(0)
-    _run_until(
-        env,
-        lambda: (
-            _waylookup_value(env, "num_valid") is not None
-            and int(_waylookup_value(env, "num_valid")) >= 2
-        ),
-        max_cycles=4096,
-        label="WayLookup entries accumulate under backend backpressure",
-    )
-    env.step(128)
+    for attempt in range(16384):
+        occupancy = _waylookup_value(env, "num_valid")
+        if occupancy is not None and int(occupancy) >= 31:
+            break
+        if attempt % 16 == 0:
+            env.backend_model.inject_redirect(
+                pressure_base + ((attempt // 16) % 512) * 0x80,
+                "ctrl_redirect",
+                delay_cycles=0,
+            )
+        env.step(1)
     held = _waylookup_snapshot(env)
+    assert held["num_valid"] is not None and int(held["num_valid"]) >= 31, held
+
+    # Keep producers active for the 31/32-entry write blocking samples, then
+    # release MainPipe so the same run crosses the read/write boundary.
+    env.step(8)
     env.backend_model.set_can_accept(1)
-    env.step(256)
+    _wait_funcov_hits(
+        env,
+        (
+            ("icache_waylookup_capacity", "full_blocks_write"),
+            ("icache_waylookup_capacity", "one_slot_blocks_dual"),
+            ("icache_waylookup_capacity", "read_write_boundary"),
+        ),
+        max_cycles=8192,
+        label="WayLookup exact capacity boundaries",
+    )
+
+    for _ in range(32768):
+        if all(
+            env.functional_coverage.key_hit("icache_waylookup_wrap", name)
+            for name in ("single_read_wrap", "single_write_wrap", "dual_wrap")
+        ):
+            break
+        env.step(1)
+    _wait_funcov_hits(
+        env,
+        (
+            ("icache_waylookup_wrap", "single_read_wrap"),
+            ("icache_waylookup_wrap", "single_write_wrap"),
+            ("icache_waylookup_wrap", "dual_wrap"),
+        ),
+        max_cycles=1,
+        label="WayLookup read/write pointer wrap coverage",
+    )
 
     assert held["num_valid"] is not None and int(held["num_valid"]) >= 1
     assert held["read_value"] is not None
@@ -826,23 +1092,30 @@ def test_icache_lowrisk_dual_independent_hit(lowrisk_cleanup) -> None:
 def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
     env = lowrisk_cleanup
     base = 0x8004_0000
-    _load_nops(env, base, words=8192)
+    _load_nops(env, base, words=32768)
     env.icache_agent.configure(
         hit_latency=1,
         miss_latency=32,
         miss_rate=1.0,
         seed=0x6276,
     )
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
     env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    # Keep the first FTQ context live throughout the directed redirects.  This
+    # prevents the synthetic redirect from selecting a committed FTQ context
+    # while the ICache is deliberately stalled on refills.
+    env.backend_model.set_can_accept(0)
     env.monitor.clear()
     env.monitor.set_expected_pc(base)
 
-    _run_until(
-        env,
-        lambda: int(env.icache_agent.get_stats()["resp_line_count"]) >= 1,
-        max_cycles=1024,
-        label="clean cache refill",
-    )
+    target = base + 0x100
+    # A sequential NOP stream can produce unrelated refills while the redirect
+    # is in flight, so align the monitor and wait for this target line itself.
+    env.monitor.set_expected_pc(target)
+    env.backend_model.inject_redirect(target, "ctrl_redirect", delay_cycles=0)
+    _wait_for_target_response(env, target, max_cycles=4096, label="clean demand cache refill")
+    env.monitor.clear()
+    env.monitor.set_expected_pc(target)
     # The first refill is intentionally forced to miss.  Subsequent soft
     # prefetches must see the refilled line as an SRAM hit.
     env.icache_agent.configure(
@@ -851,7 +1124,11 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
         miss_rate=0.0,
         seed=0x6276,
     )
-    _drive_soft_prefetch(env, [base, base + 0x40])
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    for _ in range(32):
+        _drive_soft_prefetch(env, [target])
+        if env.functional_coverage.key_hit("icache_miss_path", "fetch_refill_prefetch_hit"):
+            break
     _wait_funcov_hit(
         env,
         "icache_miss_path",
@@ -859,24 +1136,33 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
         max_cycles=4096,
         label="prefetch SRAM hit after clean fetch refill",
     )
-    # Four distinct tags mapping to one set establish the full-set condition;
-    # the fifth tag then exercises the real miss/victim request path.
+    _pulse_fencei(env)
+    # Use one extra warmup tag because the first post-fence refill can overlap
+    # the final invalidation/read response.  Five tags reliably leave all four
+    # ways valid; the sixth exercises the real miss/victim request path.
     env.icache_agent.configure(
         hit_latency=1,
         miss_latency=32,
         miss_rate=1.0,
         seed=0x6276,
     )
-    for index in range(4):
-        target = base + index * 0x1000
-        env.backend_model.inject_redirect(target, "ctrl_redirect", delay_cycles=0)
-        _run_until(
+    same_set_stride = 0x4000
+    for index in range(5):
+        fill_target = base + index * same_set_stride
+        request_cycle = int(env.current_cycle)
+        _drive_soft_prefetch(env, [fill_target])
+        _wait_for_target_response(
             env,
-            lambda expected=index + 2: int(env.icache_agent.get_stats()["resp_line_count"]) >= expected,
+            fill_target,
             max_cycles=4096,
             label=f"same-set refill {index + 1}",
+            after_cycle=request_cycle,
         )
-    victim_target = base + 4 * 0x1000
+        # The TileLink response precedes MissUnit's MetaArray write.  Do not
+        # launch the next same-set lookup until that write is observable.
+        env.step(8)
+    victim_target = base + 5 * same_set_stride
+    victim_request_cycle = int(env.current_cycle)
     env.backend_model.inject_redirect(victim_target, "ctrl_redirect", delay_cycles=0)
     _wait_funcov_hit(
         env,
@@ -885,16 +1171,41 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
         max_cycles=4096,
         label="full-set PLRU victim miss coverage",
     )
+    _wait_for_target_response(
+        env,
+        victim_target,
+        max_cycles=4096,
+        label="PLRU victim demand refill",
+        after_cycle=victim_request_cycle,
+    )
 
-    # The most recently refilled line is now revisited with hit responses
-    # enabled, exercising the post-refill demand-hit correlation.
+    # Train a finite loop before invalidating the cache.  After fence.i the
+    # trained predictions revisit each block without another redirect, giving
+    # the sampler an uninterrupted fetch-refill -> MSHR-release -> SRAM-hit
+    # sequence for the same line.
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
+    loop_base = base + 0x1_8000
+    env.load_program(_trained_short_block_loop(), loop_base)
+    env.backend_model.set_can_accept(1)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(loop_base)
+    env.backend_model.inject_redirect(loop_base, "ctrl_redirect", delay_cycles=0)
+    _warm_two_fetch_execution(env)
+    trained_commit_count = int(env.backend_model.get_stats().get("commit_count", 0))
+    _run_until(
+        env,
+        lambda: int(env.backend_model.get_stats().get("commit_count", 0))
+        >= trained_commit_count + 256,
+        max_cycles=4096,
+        label="stable trained short-block loop",
+    )
     env.icache_agent.configure(
         hit_latency=1,
         miss_latency=32,
-        miss_rate=0.0,
+        miss_rate=1.0,
         seed=0x6276,
     )
-    env.backend_model.inject_redirect(base + 3 * 0x1000, "ctrl_redirect", delay_cycles=0)
+    _pulse_fencei(env)
     _wait_funcov_hit(
         env,
         "icache_miss_path",

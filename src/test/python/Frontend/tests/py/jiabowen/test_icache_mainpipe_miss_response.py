@@ -360,6 +360,27 @@ def test_icache_agent_reset_discards_pending_response() -> None:
     assert int(interface.d_valid.value) == 0
 
 
+def test_icache_agent_a_ready_override_applies_backpressure() -> None:
+    memory = MemoryModel()
+    memory.load_bin((_NOP.to_bytes(4, "little")) * 16, _BASE)
+    agent = ICacheAgent(memory)
+    interface = _unit_icache_interface()
+    agent.interface = interface
+    interface.a_valid.value = 1
+    interface.a_bits_source.value = 0
+    interface.a_bits_address.value = _BASE
+
+    agent.set_a_ready(0)
+    agent.on_clock_edge(10)
+    assert int(interface.a_ready.value) == 0
+    assert int(agent.get_stats()["req_count"]) == 0
+
+    agent.set_a_ready(None)
+    agent.on_clock_edge(11)
+    assert int(interface.a_ready.value) == 1
+    assert int(agent.get_stats()["req_count"]) == 1
+
+
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_refill_response_registers_one_cycle_before_mainpipe_delivery(env) -> None:
     samples = _initialize_cacheable_stream(env, _BASE, latency=16)

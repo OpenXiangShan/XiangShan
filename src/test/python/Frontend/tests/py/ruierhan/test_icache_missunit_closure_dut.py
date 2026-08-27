@@ -12,6 +12,8 @@ from collections.abc import Callable
 
 import pytest
 
+from env.sequences import TranslationScenario, TranslationScenarioBuilder
+
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 _BASE = 0x8010_0000
@@ -54,6 +56,22 @@ def _snapshot(env) -> dict[str, int | None]:
         "miss_ready": _read(env, _MAIN + "__Vtogcov__io_missReq_ready"),
         "miss_paddr": _read(env, _MAIN + "__Vtogcov__io_missReq_bits_blkPAddr"),
         "miss_vset": _read(env, _MAIN + "__Vtogcov__io_missReq_bits_vSetIdx"),
+        "prefetch_valid": _read(
+            env, _MISS + "__Vtogcov__io_prefetchReq_valid"
+        ),
+        "prefetch_ready": _read(
+            env, _MISS + "__Vtogcov__io_prefetchReq_ready"
+        ),
+        "prefetch_paddr": _read(
+            env, _MISS + "__Vtogcov__io_prefetchReq_bits_blkPAddr"
+        ),
+        "prefetch_vset": _read(
+            env, _MISS + "__Vtogcov__io_prefetchReq_bits_vSetIdx"
+        ),
+        "fetch_hit": _read(env, _MISS + "fetchHit", _MISS + "__Vtogcov__fetchHit"),
+        "prefetch_hit": _read(
+            env, _MISS + "prefetchHit", _MISS + "__Vtogcov__prefetchHit"
+        ),
         "flush": _read(env, _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush"),
         "fencei": _read(env, _TOP + "io_fencei"),
         "a_valid": _read(env, _TOP + "auto_inner_icache_client_out_a_valid"),
@@ -63,7 +81,26 @@ def _snapshot(env) -> dict[str, int | None]:
         "d_source": _read(env, _TOP + "auto_inner_icache_client_out_d_bits_source"),
         "last_fire_next": _read(env, _MISS + "lastFireNext"),
         "id_next": _read(env, _MISS + "idNext"),
+        "acquire_valid": _read(
+            env, _TOP + "auto_inner_icache_client_out_a_valid"
+        ),
+        "acquire_ready": _read(
+            env, _TOP + "auto_inner_icache_client_out_a_ready"
+        ),
+        "acquire_source": _read(
+            env, _TOP + "auto_inner_icache_client_out_a_bits_source"
+        ),
     }
+    for index in range(4):
+        sample[f"fetch_arb_{index}"] = _read(
+            env, f"{_MISS}acquireArb.io_in_{index}_valid"
+        )
+    sample["prefetch_arb_valid"] = _read(
+        env,
+        f"{_MISS}_prefetchArb_io_out_valid",
+        f"{_MISS}prefetchArb.__Vtogcov__io_out_valid",
+        f"{_MISS}prefetchArb.io_out_valid",
+    )
     for index in range(14):
         prefix = f"{_MISS}allMshr_{index}."
         for field in ("valid", "issue", "flush", "fencei", "blkPAddr", "vSetIdx"):
@@ -85,7 +122,7 @@ def _clear_soft_prefetch(env) -> None:
             address.value = 0
 
 
-def _drive_soft_prefetch(env, addresses: list[int]) -> None:
+def _set_soft_prefetch(env, addresses: list[int]) -> None:
     _clear_soft_prefetch(env)
     for slot, address in enumerate(addresses[:3]):
         valid = getattr(env.dut, f"io_softPrefetch_{slot}_valid", None)
@@ -95,8 +132,40 @@ def _drive_soft_prefetch(env, addresses: list[int]) -> None:
         }
         valid.value = 1
         value.value = int(address)
+
+
+def _drive_soft_prefetch(env, addresses: list[int]) -> None:
+    _set_soft_prefetch(env, addresses)
     env.step(1)
     _clear_soft_prefetch(env)
+
+
+def _drive_concurrent_requests(env, *, fetch: int, prefetch: int) -> None:
+    _set_soft_prefetch(env, [int(prefetch)])
+    env.backend_model.inject_redirect(int(fetch), "ctrl_redirect", delay_cycles=0)
+    env.step(1)
+    _clear_soft_prefetch(env)
+
+
+def _drive_request_pair(
+    env,
+    *,
+    fetch: int,
+    prefetch: int,
+    skew: int,
+) -> None:
+    if int(skew) < 0:
+        _drive_soft_prefetch(env, [int(prefetch)])
+        env.step(max(0, -int(skew) - 1))
+        env.backend_model.inject_redirect(int(fetch), "ctrl_redirect", delay_cycles=0)
+        env.step(1)
+    elif int(skew) > 0:
+        env.backend_model.inject_redirect(int(fetch), "ctrl_redirect", delay_cycles=0)
+        env.step(1)
+        env.step(max(0, int(skew) - 1))
+        _drive_soft_prefetch(env, [int(prefetch)])
+    else:
+        _drive_concurrent_requests(env, fetch=int(fetch), prefetch=int(prefetch))
 
 
 def _pulse_fencei(env) -> None:
@@ -116,6 +185,141 @@ def _pulse_fencei_redirect(env, target: int) -> None:
     env.step(1)
     signal.value = 0
     env.step(1)
+
+
+def _mshr_present(
+    sample: dict[str, int | None],
+    indexes: range,
+    *,
+    issue: int | None = None,
+) -> bool:
+    return any(
+        sample[f"mshr_{index}_valid"] == 1
+        and (issue is None or sample[f"mshr_{index}_issue"] == int(issue))
+        for index in indexes
+    )
+
+
+def _mshr_count(
+    sample: dict[str, int | None],
+    indexes: range,
+    *,
+    issue: int | None = None,
+) -> int:
+    return sum(
+        sample[f"mshr_{index}_valid"] == 1
+        and (issue is None or sample[f"mshr_{index}_issue"] == int(issue))
+        for index in indexes
+    )
+
+
+def _mshr_has_key(
+    sample: dict[str, int | None],
+    indexes: range,
+    address: int,
+    *,
+    issue: int | None = None,
+) -> bool:
+    block_paddr = int(address) >> 6
+    # MissUnit stores the cache-line set index, not PrefetchPipe's banked
+    # read-meta index.  A 64-byte line therefore advances vSetIdx by one.
+    vset = (int(address) >> 6) & 0xFF
+    return any(
+        sample[f"mshr_{index}_valid"] == 1
+        and sample[f"mshr_{index}_blkPAddr"] == block_paddr
+        and sample[f"mshr_{index}_vSetIdx"] == vset
+        and (issue is None or sample[f"mshr_{index}_issue"] == int(issue))
+        for index in indexes
+    )
+
+
+def _wait_mshr_state(
+    env,
+    predicate: Callable[[dict[str, int | None]], bool],
+    *,
+    max_cycles: int,
+    label: str,
+) -> dict[str, int | None]:
+    for _ in range(int(max_cycles)):
+        sample = _snapshot(env)
+        if predicate(sample):
+            return sample
+        env.step(1)
+    raise AssertionError(
+        {
+            "reason": f"timeout while waiting for {label}",
+                "last_snapshot": _snapshot(env),
+                "coverage_state": getattr(
+                    env.functional_coverage, "_icache_missunit_cov_state", None
+                ),
+                "stats": env.get_stats(),
+        }
+    )
+
+
+def _pulse_fencei_when(
+    env,
+    predicate: Callable[[dict[str, int | None]], bool],
+    *,
+    target: int | None = None,
+    prefetch: int | None = None,
+    max_cycles: int = 6000,
+) -> dict[str, int | None]:
+    signal = getattr(env.clock_reset, "io_fencei", None)
+    assert signal is not None, {"missing_signal": "io_fencei"}
+    for _ in range(int(max_cycles)):
+        sample = _snapshot(env)
+        if predicate(sample):
+            if prefetch is not None:
+                _set_soft_prefetch(env, [int(prefetch)])
+            signal.value = 1
+            if target is not None:
+                env.backend_model.inject_redirect(
+                    int(target), "ctrl_redirect", delay_cycles=0
+                )
+            env.step(1)
+            signal.value = 0
+            _clear_soft_prefetch(env)
+            env.step(1)
+            return sample
+        env.step(1)
+    raise AssertionError(
+        {
+            "reason": "MSHR state required for fence.i alignment did not appear",
+            "max_cycles": int(max_cycles),
+            "last": _snapshot(env),
+            "stats": env.get_stats(),
+        }
+    )
+
+
+def _build_mshr_pressure_until(
+    env,
+    predicate: Callable[[dict[str, int | None]], bool],
+    *,
+    max_attempts: int = 512,
+) -> dict[str, int | None]:
+    for attempt in range(int(max_attempts)):
+        sample = _snapshot(env)
+        if predicate(sample):
+            return sample
+        fetch = _BASE + 0x2000 + (attempt % 48) * 0x80 + 0x38
+        prefetch = _BASE + 0x8000 + (attempt % 48) * 0x80
+        _set_soft_prefetch(
+            env,
+            [prefetch, prefetch + 0x40, prefetch + 0x80],
+        )
+        env.backend_model.inject_redirect(fetch, "ctrl_redirect", delay_cycles=0)
+        env.step(1)
+        _clear_soft_prefetch(env)
+    raise AssertionError(
+        {
+            "reason": "requested MSHR pressure state did not appear",
+            "max_attempts": int(max_attempts),
+            "last": _snapshot(env),
+            "stats": env.get_stats(),
+        }
+    )
 
 
 def _run_until(env, predicate: Callable[[], bool], *, max_cycles: int, label: str) -> None:
@@ -156,15 +360,26 @@ def _wait_bins(env, targets: list[tuple[str, str]], *, max_cycles: int = 6000) -
             "reason": "functional coverage targets were not reached",
             "missing": sorted(f"{group}.{name}" for group, name in remaining),
             "cycle": int(env.current_cycle),
+            "last_snapshot": _snapshot(env),
+            "coverage_state": getattr(
+                env.functional_coverage, "_icache_missunit_cov_state", None
+            ),
             "stats": env.get_stats(),
             "monitor_errors": env.monitor.get_errors(),
         }
     )
 
 
-def _prepare(env, *, latency: int = 4096) -> list[dict[str, int | None]]:
+def _prepare(
+    env,
+    *,
+    latency: int = 4096,
+    words: int = 4096,
+    prefetch_enabled: bool = True,
+    backend_can_accept: bool = True,
+) -> list[dict[str, int | None]]:
     samples: list[dict[str, int | None]] = []
-    _load_nops(env, _BASE)
+    _load_nops(env, _BASE, words=words)
     env.icache_agent.configure(
         hit_latency=1,
         miss_latency=int(latency),
@@ -174,7 +389,11 @@ def _prepare(env, *, latency: int = 4096) -> list[dict[str, int | None]]:
     env.register_cycle_observer(
         lambda _cycle, active_env: samples.append(_snapshot(active_env))
     )
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = (
+        1 if prefetch_enabled else 0
+    )
     env.initialize(reset_vector=_BASE, bare_mode=True, reset_cycles=20)
+    env.backend_model.set_can_accept(1 if backend_can_accept else 0)
     env.monitor.clear()
     env.monitor.set_expected_pc(_BASE)
     return samples
@@ -191,40 +410,215 @@ def _wait_initial_refill(env) -> None:
     _run_until(
         env,
         lambda: int(env.icache_agent.get_stats()["resp_line_count"]) >= 1,
-        max_cycles=4000,
+        max_cycles=max(4000, int(env.icache_agent.miss_latency) + 2000),
         label="initial fetch refill",
     )
 
 
 def _assert_clean(env) -> None:
     _clear_soft_prefetch(env)
+    env.icache_agent.set_a_ready(None)
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    env.backend_model.set_can_accept(1)
     fencei = getattr(env.clock_reset, "io_fencei", None)
     if fencei is not None:
         fencei.value = 0
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-690", "BIN-691", "BIN-692")
+@pytest.mark.funcov_bins("BIN-690", "BIN-691")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_request_and_concurrent_dut(env) -> None:
-    samples = _prepare(env, latency=128)
+    samples = _prepare(
+        env,
+        latency=48,
+        words=32768,
+        prefetch_enabled=False,
+        backend_can_accept=False,
+    )
     _wait_initial_refill(env)
-    # Distinct cold targets create demand/prefetch overlap without forcing
-    # internal request signals.
-    for offset in (0x100, 0x180, 0x200):
-        _drive_soft_prefetch(env, [_BASE + offset, _BASE + offset + 0x40])
-    for offset in (0x280, 0x300, 0x380):
-        env.backend_model.inject_redirect(_BASE + offset, "ctrl_redirect", delay_cycles=0)
-        env.step(2)
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    for attempt in range(64):
+        if env.functional_coverage.key_hit(
+            "icache_missunit_request", "same_key_fetch_prefetch_merge"
+        ):
+            break
+        same_key = _BASE + 0x2000 + attempt * 0x80
+        _drive_request_pair(
+            env,
+            fetch=same_key,
+            prefetch=same_key,
+            skew=0,
+        )
+        env.step(8)
+
+    # A 16-KiB stride preserves the virtual set index while changing pTag.
+    # Isolate each attempt so stale hardware-prefetch MSHRs cannot turn either
+    # side into a duplicate before the concurrent request reaches MissUnit.
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
+    _wait_mshr_state(
+        env,
+        lambda sample: _mshr_count(sample, range(14)) == 0,
+        max_cycles=2048,
+        label="empty MSHR array before distinct-key requests",
+    )
+    # Measure the soft-prefetch path before aligning it with a fetch-capacity
+    # release.  The preceding address supplies PrefetchPipe's registered vSet.
+    probe = _BASE + 0x1_0000
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    _set_soft_prefetch(env, [probe + 0x4000])
+    env.step(1)
+    probe_input_cycle = int(env.current_cycle)
+    _set_soft_prefetch(env, [probe])
+    env.step(1)
+    _clear_soft_prefetch(env)
+    probe_request_cycle = None
+    for _ in range(64):
+        sample = _snapshot(env)
+        if (
+            sample["prefetch_valid"] == 1
+            and sample["prefetch_paddr"] == (probe >> 6)
+        ):
+            probe_request_cycle = int(env.current_cycle)
+            break
+        env.step(1)
+    assert probe_request_cycle is not None, {
+        "reason": "soft-prefetch latency probe did not reach MissUnit",
+        "last": _snapshot(env),
+    }
+    soft_request_latency = probe_request_cycle - probe_input_cycle
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
+    _wait_mshr_state(
+        env,
+        lambda sample: _mshr_count(sample, range(14)) == 0,
+        max_cycles=1024,
+        label="empty MSHR array after soft-prefetch latency probe",
+    )
+
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=256,
+        miss_rate=1.0,
+        seed=0x686,
+    )
+    env.backend_model.set_can_accept(0)
+    redirect_index = 0
+    for release_offset in range(6):
+        if env.functional_coverage.key_hit(
+            "icache_missunit_request", "distinct_key_parallel_allocate"
+        ):
+            break
+        for _ in range(16):
+            if _mshr_count(_snapshot(env), range(4)) == 4:
+                break
+            target = _BASE + 0x6000 + redirect_index * 0x1000 + 0x38
+            redirect_index += 1
+            env.monitor.set_expected_pc(target)
+            env.backend_model.inject_redirect(target, "ctrl_redirect", delay_cycles=0)
+            env.step(8)
+        held_target = _BASE + 0x6000 + redirect_index * 0x1000
+        redirect_index += 1
+        env.monitor.set_expected_pc(held_target)
+        env.backend_model.inject_redirect(
+            held_target, "ctrl_redirect", delay_cycles=0
+        )
+        _wait_mshr_state(
+            env,
+            lambda sample: (
+                _mshr_count(sample, range(4)) == 4
+                and sample["miss_valid"] == 1
+                and sample["miss_ready"] == 0
+                and sample["fetch_hit"] == 0
+            ),
+            max_cycles=2048,
+            label=f"full fetch MSHR pool for release offset {release_offset}",
+        )
+        pending_fetch = next(
+            item for item in env.icache_agent.pending if int(item.source) < 4
+        )
+        # The final D beat is one cycle after ready_cycle; MissUnit releases
+        # the MSHR on a following registered checkpoint.  Scan that small,
+        # deterministic window across successive capacity episodes.
+        target_request_cycle = int(pending_fetch.ready_cycle) + 1 + release_offset
+        prime_input_cycle = target_request_cycle - soft_request_latency - 1
+        while int(env.current_cycle) < prime_input_cycle:
+            env.step(1)
+        # Once capacity is released, MainPipe advances to vSet 0x40.  Give each
+        # scan window a disjoint physical tag so neither its prime nor target
+        # can merge with a prefetch MSHR left by an earlier window.
+        prefetch = _BASE + 0x10_1000 + release_offset * 0x8000
+        env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+        _set_soft_prefetch(env, [prefetch + 0x4000])
+        env.step(1)
+        _set_soft_prefetch(env, [prefetch])
+        env.step(1)
+        _clear_soft_prefetch(env)
+        env.step(max(8, soft_request_latency + 4))
+        env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
     _wait_bins(
         env,
         [
             ("icache_missunit_request", "same_key_fetch_prefetch_merge"),
             ("icache_missunit_request", "distinct_key_parallel_allocate"),
-            ("icache_missunit_request", "same_paddr_diff_vset_separate"),
         ],
     )
     assert samples
+    _assert_clean(env)
+
+
+@pytest.mark.funcov_bins("BIN-692")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_missunit_same_paddr_diff_vset_dut(env) -> None:
+    pa = 0x8050_0000
+    va_fetch = 0x4050_0000
+    va_prefetch = va_fetch + 0x1000
+    payload = (_NOP.to_bytes(4, "little")) * 2048
+    _prepare(env, latency=128)
+    scenario = TranslationScenario(
+        scenario_id="icache-missunit-synonym-vset",
+        va=va_fetch,
+        pa=pa,
+        payload=payload,
+        page_count=1,
+        mode="sv39",
+        expected_path="cacheable",
+        expected_result="miss_refill",
+    )
+    TranslationScenarioBuilder(env).build(scenario)
+    env.page_table.map_page(
+        va_prefetch >> 12,
+        pa >> 12,
+        **scenario.s1_pte.as_mapping_kwargs(),
+    )
+    env.monitor.clear()
+    env.monitor.set_translation_context(s2xlate=0, priv_imode=1)
+    env.monitor.set_expected_pc(va_fetch)
+
+    # Populate both ITLB translations, then fence.i removes the ICache lines
+    # without discarding the virtual synonyms.
+    env.backend_model.inject_redirect(va_fetch, "ctrl_redirect", delay_cycles=0)
+    env.step(256)
+    env.backend_model.inject_redirect(va_prefetch, "ctrl_redirect", delay_cycles=0)
+    env.step(256)
+    _pulse_fencei(env)
+    for attempt in range(64):
+        if env.functional_coverage.key_hit(
+            "icache_missunit_request", "same_paddr_diff_vset_separate"
+        ):
+            break
+        _pulse_fencei(env)
+        _drive_request_pair(
+            env,
+            fetch=va_fetch,
+            prefetch=va_prefetch,
+            skew=(attempt % 3) - 1,
+        )
+        env.step(8)
+    _wait_bins(
+        env,
+        [("icache_missunit_request", "same_paddr_diff_vset_separate")],
+        max_cycles=6000,
+    )
     _assert_clean(env)
 
 
@@ -254,13 +648,35 @@ def test_icache_missunit_prefetch_capacity_dut(env) -> None:
 @pytest.mark.funcov_bins("BIN-693", "BIN-694")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_acquire_priority_dut(env) -> None:
-    _prepare(env, latency=128)
+    _prepare(
+        env,
+        latency=128,
+        words=32768,
+        prefetch_enabled=False,
+        backend_can_accept=False,
+    )
     _wait_initial_refill(env)
-    for offset in (0x100, 0x180, 0x200):
-        _drive_soft_prefetch(env, [_BASE + offset])
-    for offset in (0x400, 0x500, 0x600):
-        env.backend_model.inject_redirect(_BASE + offset, "ctrl_redirect", delay_cycles=0)
-        env.step(2)
+    env.icache_agent.set_a_ready(0)
+    fetch = _BASE + 0x2038
+    env.monitor.set_expected_pc(fetch)
+    env.backend_model.inject_redirect(fetch, "ctrl_redirect", delay_cycles=0)
+    _wait_mshr_state(
+        env,
+        lambda sample: _mshr_count(sample, range(4), issue=0) >= 2,
+        max_cycles=1024,
+        label="two unissued fetch MSHRs",
+    )
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    _drive_soft_prefetch(env, [_BASE + 0x8000])
+    _wait_mshr_state(
+        env,
+        lambda sample: _mshr_present(sample, range(4, 14), issue=0),
+        max_cycles=1024,
+        label="unissued prefetch MSHR beside fetch candidates",
+    )
+    env.icache_agent.set_a_ready(1)
+    env.step(4)
+    env.icache_agent.set_a_ready(None)
     _wait_bins(
         env,
         [
@@ -274,15 +690,82 @@ def test_icache_missunit_acquire_priority_dut(env) -> None:
 @pytest.mark.funcov_bins("BIN-699", "BIN-700")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_dedup_dut(env) -> None:
-    _prepare(env, latency=128)
+    _prepare(
+        env,
+        latency=128,
+        prefetch_enabled=False,
+        backend_can_accept=True,
+    )
     _wait_initial_refill(env)
-    target = _BASE + 0x100
-    _drive_soft_prefetch(env, [target])
-    _drive_soft_prefetch(env, [target])
-    env.backend_model.inject_redirect(target, "ctrl_redirect", delay_cycles=0)
-    env.step(2)
-    env.backend_model.inject_redirect(target, "ctrl_redirect", delay_cycles=0)
-    _drive_soft_prefetch(env, [target])
+    env.icache_agent.set_a_ready(0)
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+
+    demand_target = _BASE + 0x40
+    _wait_mshr_state(
+        env,
+        lambda sample: _mshr_has_key(sample, range(4), demand_target, issue=0),
+        max_cycles=1024,
+        label="existing fetch MSHR before prefetch duplicate",
+    )
+    for _ in range(16):
+        _drive_soft_prefetch(env, [demand_target])
+        if env.functional_coverage.key_hit(
+            "icache_missunit_dedup", "prefetch_merge_any_mshr"
+        ):
+            break
+
+    # Keep at least one prefetch MSHR ahead of the sequential demand stream.
+    # Pulse ready for exactly one cycle per earlier demand line, preventing the
+    # target prefetch acquire from escaping between demand responses.
+    prefetch_target = _BASE + 0xC0
+    for _ in range(16):
+        _drive_soft_prefetch(env, [prefetch_target])
+        if _mshr_has_key(_snapshot(env), range(4, 14), prefetch_target, issue=0):
+            break
+    _wait_mshr_state(
+        env,
+        lambda sample: _mshr_has_key(
+            sample, range(4, 14), prefetch_target, issue=0
+        ),
+        max_cycles=1024,
+        label="existing prefetch MSHR before demand duplicate",
+    )
+    response_count = int(env.icache_agent.get_stats()["resp_line_count"])
+    env.icache_agent.set_a_ready(1)
+    env.step(1)
+    env.icache_agent.set_a_ready(0)
+    _run_until(
+        env,
+        lambda: int(env.icache_agent.get_stats()["resp_line_count"])
+        > response_count,
+        max_cycles=512,
+        label="first sequential demand response before prefetch duplicate",
+    )
+    _wait_mshr_state(
+        env,
+        lambda sample: _mshr_has_key(
+            sample, range(4), _BASE + 0x80, issue=0
+        ),
+        max_cycles=512,
+        label="second sequential demand MSHR before prefetch duplicate",
+    )
+    response_count = int(env.icache_agent.get_stats()["resp_line_count"])
+    env.icache_agent.set_a_ready(1)
+    env.step(1)
+    env.icache_agent.set_a_ready(0)
+    _run_until(
+        env,
+        lambda: int(env.icache_agent.get_stats()["resp_line_count"])
+        > response_count,
+        max_cycles=512,
+        label="second sequential demand response before prefetch duplicate",
+    )
+    _wait_bins(
+        env,
+        [("icache_missunit_dedup", "fetch_merge_any_mshr")],
+        max_cycles=4096,
+    )
+    env.icache_agent.set_a_ready(None)
     _wait_bins(
         env,
         [
@@ -298,20 +781,99 @@ def test_icache_missunit_dedup_dut(env) -> None:
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_redirect_flush_dut(env) -> None:
-    samples = _prepare(env, latency=128)
+    samples = _prepare(
+        env,
+        latency=128,
+        prefetch_enabled=False,
+        backend_can_accept=False,
+    )
     _wait_initial_refill(env)
-    # A new nonduplicate prefetch is presented during redirect.
-    _drive_soft_prefetch(env, [_BASE + 0x100])
-    env.backend_model.inject_redirect(_BASE + 0x700, "ctrl_redirect", delay_cycles=0)
-    _drive_soft_prefetch(env, [_BASE + 0x180])
+    env.icache_agent.set_a_ready(0)
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+
+    _wait_mshr_state(
+        env,
+        lambda sample: _mshr_present(sample, range(4), issue=0),
+        max_cycles=1024,
+        label="unissued fetch MSHR before redirect",
+    )
+    for attempt in range(16):
+        if _mshr_count(_snapshot(env), range(4, 14), issue=0) >= 10:
+            break
+        base = _BASE + 0x2000 + attempt * 0xC0
+        _drive_soft_prefetch(env, [base, base + 0x40, base + 0x80])
+        env.step(4)
+    _wait_mshr_state(
+        env,
+        lambda sample: _mshr_count(sample, range(4, 14), issue=0) >= 10,
+        max_cycles=2048,
+        label="full set of unissued prefetch MSHRs",
+    )
+
+    # With all prefetch MSHRs occupied, this nonduplicate request remains valid
+    # until the redirect arrives, aligning request blocking and MSHR flushing.
+    held_prefetch = _BASE + 0x4000
+    _set_soft_prefetch(env, [held_prefetch])
+    _wait_mshr_state(
+        env,
+        lambda sample: sample["prefetch_valid"] == 1
+        and sample["prefetch_ready"] == 0
+        and sample["prefetch_hit"] == 0,
+        max_cycles=1024,
+        label="blocked nonduplicate prefetch request",
+    )
+    first_redirect = _BASE + 0x700
+    env.monitor.set_expected_pc(first_redirect)
+    env.backend_model.inject_redirect(first_redirect, "ctrl_redirect", delay_cycles=0)
     env.step(2)
-    # Keep both request classes outstanding while redirecting them at different
-    # issue stages.  The observer provides the source/issue evidence used by
-    # the checkpoint checks in the coverage sampler.
-    _drive_soft_prefetch(env, [_BASE + 0x200, _BASE + 0x240, _BASE + 0x280])
-    env.backend_model.inject_redirect(_BASE + 0x780, "ctrl_redirect", delay_cycles=0)
+    _clear_soft_prefetch(env)
+    _wait_bins(
+        env,
+        [
+            ("icache_missunit_flush", "redirect_blocks_new_prefetch"),
+            ("icache_missunit_flush", "redirect_cancels_unissued_prefetch"),
+            ("icache_missunit_flush", "redirect_keeps_unissued_fetch_mshr"),
+        ],
+        max_cycles=128,
+    )
+
+    env.icache_agent.set_a_ready(1)
+    _drive_soft_prefetch(env, [_BASE + 0x5000])
+    _wait_mshr_state(
+        env,
+        lambda sample: _mshr_present(sample, range(4), issue=1)
+        and _mshr_present(sample, range(4, 14), issue=1),
+        max_cycles=1024,
+        label="issued fetch and prefetch MSHRs",
+    )
+    issued_redirect = _BASE + 0x780
+    env.monitor.set_expected_pc(issued_redirect)
+    env.backend_model.inject_redirect(issued_redirect, "ctrl_redirect", delay_cycles=0)
     env.step(2)
-    env.backend_model.inject_redirect(_BASE + 0x800, "ctrl_redirect", delay_cycles=0)
+
+    # Fetch MSHRs survive redirect.  The agent already knows when its leading
+    # response will start, so account for the three-cycle redirect-to-MissUnit
+    # propagation and align flush with that response's second beat.
+    pending = env.icache_agent.pending[0]
+    sample = _snapshot(env)
+    source = int(pending.source)
+    assert 0 <= source < 4 and sample[f"mshr_{source}_valid"] == 1, {
+        "pending_source": source,
+        "snapshot": sample,
+    }
+    response_redirect = _BASE + 0x800
+    env.monitor.set_expected_pc(response_redirect)
+    redirect_delay = max(
+        2,
+        int(pending.ready_cycle) - int(env.current_cycle) + 1,
+    )
+    env.backend_model.inject_redirect(
+        response_redirect,
+        "ctrl_redirect",
+        delay_cycles=redirect_delay,
+    )
+    env.step(redirect_delay + 8)
+    env.icache_agent.set_a_ready(None)
     _wait_bins(
         env,
         [
@@ -351,4 +913,105 @@ def test_icache_missunit_fencei_dut(env) -> None:
         max_cycles=12000,
     )
     assert any(item["fencei"] == 1 for item in samples)
+    _assert_clean(env)
+
+
+@pytest.mark.funcov_bins("BIN-707", "BIN-708", "BIN-711")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_missunit_fencei_unissued_dut(env) -> None:
+    samples = _prepare(env, latency=16384, words=32768)
+    state = _build_mshr_pressure_until(
+        env,
+        lambda sample: (
+            _mshr_present(sample, range(4), issue=0)
+            and _mshr_present(sample, range(4, 14), issue=0)
+            and (sample["miss_valid"] == 1 or sample["prefetch_valid"] == 1)
+        ),
+    )
+    _pulse_fencei_when(
+        env,
+        lambda sample: (
+            _mshr_present(sample, range(4), issue=0)
+            and _mshr_present(sample, range(4, 14), issue=0)
+        ),
+        prefetch=_BASE + 0xE000,
+        max_cycles=1,
+    )
+    _wait_bins(
+        env,
+        [
+            ("icache_missunit_fencei", "fencei_blocks_new_nonduplicate"),
+            ("icache_missunit_fencei", "fencei_cancels_unissued_mshr"),
+            ("icache_missunit_fencei", "fencei_clears_prefetch_fifo"),
+        ],
+        max_cycles=128,
+    )
+    assert state["miss_valid"] == 1 or state["prefetch_valid"] == 1
+    assert any(sample["fencei"] == 1 for sample in samples)
+    _assert_clean(env)
+
+
+@pytest.mark.funcov_bins("BIN-712", "BIN-1007")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_missunit_fencei_redirect_unissued_dut(env) -> None:
+    samples = _prepare(env, latency=16384, words=32768)
+    _build_mshr_pressure_until(
+        env,
+        lambda sample: (
+            _mshr_present(sample, range(4), issue=0)
+            and _mshr_present(sample, range(4, 14), issue=0)
+        ),
+    )
+    _pulse_fencei_when(
+        env,
+        lambda sample: (
+            _mshr_present(sample, range(4), issue=0)
+            and _mshr_present(sample, range(4, 14), issue=0)
+        ),
+        target=_BASE + 0xF000,
+        max_cycles=1,
+    )
+    _wait_bins(
+        env,
+        [
+            ("icache_missunit_fencei", "fencei_redirect_fetch_unissued"),
+            ("icache_missunit_fencei", "fencei_redirect_prefetch_unissued"),
+        ],
+        max_cycles=128,
+    )
+    assert any(sample["fencei"] == 1 and sample["flush"] == 1 for sample in samples)
+    _assert_clean(env)
+
+
+@pytest.mark.funcov_bins("BIN-1006", "BIN-1008")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_missunit_fencei_redirect_issued_dut(env) -> None:
+    samples = _prepare(env, latency=16384, words=32768)
+    _build_mshr_pressure_until(
+        env,
+        lambda sample: (
+            _mshr_present(sample, range(4), issue=1)
+            and _mshr_present(sample, range(4, 14), issue=1)
+            and sample["last_fire_next"] == 0
+        ),
+    )
+    _pulse_fencei_when(
+        env,
+        lambda sample: (
+            _mshr_present(sample, range(4), issue=1)
+            and _mshr_present(sample, range(4, 14), issue=1)
+            and sample["last_fire_next"] == 0
+        ),
+        target=_BASE + 0x10000,
+        max_cycles=1,
+    )
+    _wait_bins(
+        env,
+        [
+            ("icache_missunit_fencei", "fencei_redirect_fetch_issued"),
+            ("icache_missunit_fencei", "fencei_redirect_prefetch_issued"),
+        ],
+        max_cycles=128,
+    )
+    assert any(sample["fencei"] == 1 and sample["flush"] == 1 for sample in samples)
     _assert_clean(env)

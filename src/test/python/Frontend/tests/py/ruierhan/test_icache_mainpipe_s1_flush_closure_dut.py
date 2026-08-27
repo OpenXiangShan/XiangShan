@@ -9,6 +9,7 @@ import pytest
 
 from env.funcov.py.icache.flush_from_bpu import (
     BpuS3Flush,
+    ftq_ptr_matches_or_before,
     ftq_ptr_is_strictly_after_current,
 )
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
@@ -218,6 +219,17 @@ def _bpu_is_after_s1(sample: dict) -> bool:
     ) is True
 
 
+def _bpu_matches_s1(sample: dict) -> bool:
+    return ftq_ptr_matches_or_before(
+        BpuS3Flush(
+            valid=sample["bpu_valid"],
+            flag=sample["bpu_flag"],
+            value=sample["bpu_value"],
+        ),
+        (sample["s1_ftq0_flag"], sample["s1_ftq0_value"]),
+    ) is True
+
+
 def _pending_response(env, *, min_cycles: int = 0):
     candidates = [
         item
@@ -330,6 +342,47 @@ def _drive_bpu_s3_until_s1_hit(env, bin_name: str, *, max_cycles: int) -> None:
     }
 
 
+def _drive_bpu_s3_until_s2_hit(env, *, max_cycles: int) -> None:
+    predictor_disabled = False
+    disabled_at = -1
+
+    try:
+        for _ in range(int(max_cycles)):
+            if env.functional_coverage.key_hit(
+                "icache_mainpipe_s2_ecc", "bpu_s3_flush_keeps_s2"
+            ):
+                return
+            if (
+                _read(env, "s2_valid") == 1
+                and _read(env, "io_flush") == 0
+                and _read(env, "bpu_valid") == 0
+                and not predictor_disabled
+            ):
+                env.set_bp_ctrl_enable(
+                    ubtb_enable=0,
+                    abtb_enable=0,
+                    mbtb_enable=0,
+                    tage_enable=0,
+                    sc_enable=0,
+                    ittage_enable=0,
+                )
+                predictor_disabled = True
+                disabled_at = int(env.current_cycle)
+            elif predictor_disabled and int(env.current_cycle) - disabled_at >= 6:
+                _restore_predictors(env)
+                predictor_disabled = False
+            env.step(1)
+    finally:
+        _restore_predictors(env)
+
+    _wait_group_hit(
+        env,
+        "icache_mainpipe_s2_ecc",
+        "bpu_s3_flush_keeps_s2",
+        max_cycles=1,
+    )
+
+
 @pytest.mark.funcov_bins("BIN-616", "BIN-736", "BIN-742", "BIN-743", "BIN-745")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_s1_global_flush_hit(env) -> None:
@@ -412,6 +465,30 @@ def test_tc_icache_mainpipe_s1_bpu_miss(env) -> None:
         and sample["io_flush"] == 0
         and sample["s1_flush"] == 0
         and _bpu_is_after_s1(sample)
+        for sample in samples
+    ), {"tail": samples[-64:]}
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-617")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_mainpipe_s1_bpu_match(env) -> None:
+    _require_bpu_s3_ftq_observable(env)
+    samples = _register_s1_observer(env)
+    _initialize_bpu_s3_stream(env)
+    _drive_bpu_s3_until_s1_hit(
+        env,
+        "bpu_match_clears_s1",
+        max_cycles=_cycle_limit("TB_ICACHE_S1_BPU_MATCH_MAX_CYCLES", 2048),
+    )
+    assert any(
+        sample["s1_valid"] == 1
+        and sample["io_flush"] == 0
+        and sample["bpu_valid"] == 1
+        and sample["s1_flush"] == 1
+        and sample["s1_fire"] == 0
+        and sample["to_ifu_valid"] == 0
+        and _bpu_matches_s1(sample)
         for sample in samples
     ), {"tail": samples[-64:]}
     assert not env.monitor.get_errors()
@@ -580,5 +657,28 @@ def test_tc_icache_mainpipe_global_flush_clears_s2(env) -> None:
         and current["s1_fire"] == 0
         and following["s2_valid"] == 0
         for current, following in zip(samples, samples[1:])
+    ), {"tail": samples[-64:]}
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-776")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_mainpipe_bpu_s3_keeps_s2(env) -> None:
+    if not _can_read(env, "s2_valid"):
+        pytest.xfail(
+            "MainPipe s2_valid is not exported by the current Verilator build; "
+            "BIN-776 cannot be sampled without rebuilding the DUT with this signal"
+        )
+    samples = _register_s1_observer(env)
+    _initialize_bpu_s3_stream(env)
+    _drive_bpu_s3_until_s2_hit(
+        env,
+        max_cycles=_cycle_limit("TB_ICACHE_S2_BPU_MAX_CYCLES", 4096),
+    )
+    assert any(
+        sample["s2_valid"] == 1
+        and sample["io_flush"] == 0
+        and sample["bpu_valid"] == 1
+        for sample in samples
     ), {"tail": samples[-64:]}
     assert not env.monitor.get_errors()

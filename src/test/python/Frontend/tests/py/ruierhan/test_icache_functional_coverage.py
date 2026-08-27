@@ -720,9 +720,18 @@ def test_hitmiss_refill_associations_cover_prefetch_and_later_fetch_hit():
     recorder.set_hitmiss_key("req0_start", 0x300 << 6)
     recorder.set_hitmiss_key("main_s1_ptag", 0x300 >> 6)
     recorder.set_hitmiss_key("main_s1_vset", 4)
+    recorder.set_hitmiss_key("main_s1_ftq_flag", 0)
+    recorder.set_hitmiss_key("main_s1_ftq_value", 7)
     recorder.set_hitmiss_key("main_s1_mmio", 0)
     recorder.env.dut.set(_HITMISS_MISS + "allMshr_0.valid", 0)
+    recorder.set_hitmiss_key("s1_fire", 0)
     sample_icache_hitmiss_coverage(recorder, recorder.env, 47)
+    assert not _hit(recorder, "icache_miss_path", "refill_then_fetch_hit")
+
+    recorder.set_hitmiss_key("s1_fire", 1)
+    recorder.set_hitmiss_key("sram_valid", 0)
+    recorder.env.dut.set(_HITMISS_MAIN + "s1_hits_0_0", 0)
+    sample_icache_hitmiss_coverage(recorder, recorder.env, 48)
     assert _hit(recorder, "icache_miss_path", "refill_then_fetch_hit")
 
 
@@ -803,8 +812,24 @@ def test_hitmiss_merge_and_full_set_miss_bins_use_required_conditions():
         recorder.env.dut.set(candidates[0], 1)
     sample_icache_hitmiss_coverage(recorder, recorder.env, 49)
 
+    # MainPipe accepts the same miss before its MissUnit request appears.  A
+    # miss at this stage must not discard the full-set signature.
     for key, value in {
         "prefetch_s1_valid": 0,
+        "s1_valid": 1,
+        "s1_fire": 1,
+        "sram_valid": 1,
+        "main_s1_ptag": 0x500 >> 6,
+        "main_s1_vset": 5,
+        "main_s1_ftq_flag": 0,
+        "main_s1_ftq_value": 9,
+    }.items():
+        recorder.set_hitmiss_key(key, value)
+    sample_icache_hitmiss_coverage(recorder, recorder.env, 50)
+
+    for key, value in {
+        "s1_valid": 0,
+        "s1_fire": 0,
         "fetch_valid": 1,
         "fetch_ready": 1,
         "fetch_hit": 0,
@@ -814,8 +839,44 @@ def test_hitmiss_merge_and_full_set_miss_bins_use_required_conditions():
         "main_s1_ftq_value": 9,
     }.items():
         recorder.set_hitmiss_key(key, value)
-    sample_icache_hitmiss_coverage(recorder, recorder.env, 50)
+    sample_icache_hitmiss_coverage(recorder, recorder.env, 51)
     assert _hit(recorder, "icache_miss_path", "plru_victim_on_miss")
+
+
+def test_hitmiss_full_set_prefetch_miss_reaches_plru_bin():
+    recorder = _Recorder()
+    for key, value in {
+        "global_flush": 0,
+        "fencei": 0,
+        "prefetch_s1_valid": 1,
+        "prefetch_s1_soft": 0,
+        "prefetch_s1_sram_valid": 1,
+        "prefetch_s1_sram_hit": 0,
+        "prefetch_s1_ptag": 0x700 >> 6,
+        "prefetch_s1_vset": 7,
+        "prefetch_s1_ftq_flag": 0,
+        "prefetch_s1_ftq_value": 11,
+    }.items():
+        recorder.set_hitmiss_key(key, value)
+    for candidates in _HITMISS_PREFETCH_META_VALIDS:
+        recorder.env.dut.set(candidates[0], 1)
+    sample_icache_hitmiss_coverage(recorder, recorder.env, 60)
+
+    for key, value in {
+        "prefetch_s1_valid": 0,
+        "prefetch_valid": 1,
+        "prefetch_ready": 1,
+        "prefetch_hit": 0,
+        "prefetch_paddr": 0x700,
+        "prefetch_vset": 7,
+    }.items():
+        recorder.set_hitmiss_key(key, value)
+    sample_icache_hitmiss_coverage(recorder, recorder.env, 61)
+
+    assert _hit(recorder, "icache_miss_path", "plru_victim_on_miss")
+    assert recorder.hit_evidence[("icache_miss_path", "plru_victim_on_miss")][
+        "plru_request_kind"
+    ] == "prefetch"
 
 
 def test_hitmiss_plru_condition_rejects_nonfull_or_unaccepted_miss():

@@ -76,8 +76,15 @@ def _load_nops(env, base: int, *, words: int = 8192) -> None:
     env.load_program((_NOP.to_bytes(4, "little")) * int(words), int(base))
 
 
-def _prepare_nops(env, base: int, *, latency: int, seed: int) -> None:
-    _load_nops(env, base)
+def _prepare_nops(
+    env,
+    base: int,
+    *,
+    latency: int,
+    seed: int,
+    words: int = 8192,
+) -> None:
+    _load_nops(env, base, words=words)
     env.icache_agent.configure(
         hit_latency=1,
         miss_latency=int(latency),
@@ -99,7 +106,7 @@ def _clear_soft_prefetch(env) -> None:
             address.value = 0
 
 
-def _present_soft_prefetch(env, addresses: Iterable[int]) -> None:
+def _set_soft_prefetch(env, addresses: Iterable[int]) -> None:
     _clear_soft_prefetch(env)
     for slot, address in enumerate(tuple(addresses)[:3]):
         valid = getattr(env.dut, f"io_softPrefetch_{slot}_valid", None)
@@ -109,6 +116,10 @@ def _present_soft_prefetch(env, addresses: Iterable[int]) -> None:
         }
         valid.value = 1
         value.value = int(address)
+
+
+def _present_soft_prefetch(env, addresses: Iterable[int]) -> None:
+    _set_soft_prefetch(env, addresses)
     env.step(1)
     _clear_soft_prefetch(env)
 
@@ -189,6 +200,141 @@ def test_tc_icache_prefetchpipe_bpu_flush(prefetchpipe_env) -> None:
         env,
         [("icache_prefetchpipe_s0_entry", "bpu_flush_match_blocks_hw")],
         max_cycles=32,
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-653")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_prefetch_s0_redirect(prefetchpipe_env) -> None:
+    env = prefetchpipe_env
+    _initialize_bpu_s3_stream(env)
+    _load_nops(env, _SOFT_BASE)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=64,
+        miss_rate=1.0,
+        seed=0x6653,
+    )
+
+    for attempt in range(128):
+        for _ in range(512):
+            if (
+                _signal(env, "from_valid") == 1
+                and _signal(env, "from_soft") == 0
+                and _signal(env, "s1_ready") == 1
+                and _signal(env, "meta_ready") == 1
+                and _signal(env, "global_flush") == 0
+            ):
+                break
+            env.step(1)
+        env.backend_model.inject_redirect(
+            _SOFT_BASE + 0x1000 + attempt * 0x40,
+            "ctrl_redirect",
+            delay_cycles=0,
+        )
+        env.step(2)
+        if _hit(env, "icache_prefetchpipe_s0_entry", "redirect_flush_blocks_hw"):
+            break
+
+    _wait_bins(
+        env,
+        [("icache_prefetchpipe_s0_entry", "redirect_flush_blocks_hw")],
+        max_cycles=1,
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-777", "BIN-673")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_prefetch_bpu_boundaries(prefetchpipe_env) -> None:
+    env = prefetchpipe_env
+    _initialize_bpu_s3_stream(env)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=256,
+        miss_rate=1.0,
+        seed=0x6777,
+    )
+    targets = {
+        ("icache_prefetchpipe_s0_entry", "bpu_flush_miss_allows_hw"),
+        ("icache_prefetchpipe_s2_miss", "bpu_flush_keeps_s2"),
+    }
+    predictor_disabled = False
+    disabled_at = -1
+    try:
+        for _ in range(8192):
+            if all(_hit(env, *target) for target in targets):
+                break
+            active_window = (
+                _signal(env, "from_valid") == 1
+                or _signal(env, "s1_valid") == 1
+                or _signal(env, "s2_valid") == 1
+            )
+            if active_window and not predictor_disabled:
+                env.set_bp_ctrl_enable(
+                    ubtb_enable=0,
+                    abtb_enable=0,
+                    mbtb_enable=0,
+                    tage_enable=0,
+                    sc_enable=0,
+                    ittage_enable=0,
+                )
+                predictor_disabled = True
+                disabled_at = int(env.current_cycle)
+            elif predictor_disabled and int(env.current_cycle) - disabled_at >= 6:
+                _restore_predictors(env)
+                predictor_disabled = False
+            env.step(1)
+    finally:
+        _restore_predictors(env)
+
+    _wait_bins(env, targets, max_cycles=1)
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-655")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_prefetch_soft_bpu(prefetchpipe_env) -> None:
+    env = prefetchpipe_env
+    _initialize_bpu_s3_stream(env)
+    _load_nops(env, _SOFT_BASE)
+    predictor_disabled = False
+    disabled_at = -1
+    try:
+        for attempt in range(4096):
+            if _hit(env, "icache_prefetchpipe_s0_entry", "soft_ignores_bpu_flush"):
+                break
+            _set_soft_prefetch(
+                env,
+                (_SOFT_BASE + 0x4000 + (attempt % 64) * 0x40,),
+            )
+            if not predictor_disabled and (
+                _signal(env, "from_valid") == 1
+                or _signal(env, "soft_pending") == 1
+            ):
+                env.set_bp_ctrl_enable(
+                    ubtb_enable=0,
+                    abtb_enable=0,
+                    mbtb_enable=0,
+                    tage_enable=0,
+                    sc_enable=0,
+                    ittage_enable=0,
+                )
+                predictor_disabled = True
+                disabled_at = int(env.current_cycle)
+            elif predictor_disabled and int(env.current_cycle) - disabled_at >= 6:
+                _restore_predictors(env)
+                predictor_disabled = False
+            env.step(1)
+    finally:
+        _clear_soft_prefetch(env)
+        _restore_predictors(env)
+
+    _wait_bins(
+        env,
+        [("icache_prefetchpipe_s0_entry", "soft_ignores_bpu_flush")],
+        max_cycles=1,
     )
     assert not env.monitor.get_errors()
 
@@ -318,7 +464,110 @@ def test_tc_icache_prefetchpipe_refill_layout(prefetchpipe_env) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-771", "BIN-772", "BIN-778", "BIN-780")
+@pytest.mark.funcov_bins("BIN-660")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_prefetch_refill_replace(prefetchpipe_env) -> None:
+    env = prefetchpipe_env
+    base = _SOFT_BASE
+    _prepare_nops(env, base, latency=24, seed=0x6660, words=32768)
+    response_base = int(env.icache_agent.get_stats()["resp_line_count"])
+
+    same_set_stride = 0x4000
+    # These addresses share the ICache set while using distinct physical tags.
+    for index in range(4):
+        target = base + index * same_set_stride
+        env.backend_model.inject_redirect(target, "ctrl_redirect", delay_cycles=0)
+        for _ in range(4096):
+            if int(env.icache_agent.get_stats()["resp_line_count"]) >= response_base + index + 1:
+                break
+            env.step(1)
+
+    replacement = base + 4 * same_set_stride
+    env.backend_model.inject_redirect(replacement, "ctrl_redirect", delay_cycles=0)
+    for attempt in range(4096):
+        if _hit(
+            env,
+            "icache_prefetchpipe_s1_meta",
+            "same_way_new_tag_invalidates_old",
+        ):
+            break
+        _present_soft_prefetch(env, (base + (attempt % 4) * same_set_stride,))
+        env.step(1)
+
+    _wait_bins(
+        env,
+        [("icache_prefetchpipe_s1_meta", "same_way_new_tag_invalidates_old")],
+        max_cycles=1,
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-667")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_prefetch_corrupt_refill(prefetchpipe_env) -> None:
+    env = prefetchpipe_env
+    target = _SOFT_BASE + 0x6000
+    _prepare_nops(env, _SOFT_BASE, latency=32, seed=0x6667)
+    env.icache_agent.inject_response_fault_at(target, corrupt=1)
+    for _ in range(64):
+        _present_soft_prefetch(env, (target,))
+        if _hit(env, "icache_prefetchpipe_s2_miss", "corrupt_refill_reprefetch"):
+            break
+        env.step(2)
+    _wait_bins(
+        env,
+        [("icache_prefetchpipe_s2_miss", "corrupt_refill_reprefetch")],
+        max_cycles=4096,
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-683")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_prefetch_clean_mshr(prefetchpipe_env) -> None:
+    env = prefetchpipe_env
+    base = _SOFT_BASE
+    target = base + 0x7000
+    _prepare_nops(env, base, latency=512, seed=0x6683)
+
+    for offset in range(0x100, 0x380, 0xC0):
+        _present_soft_prefetch(
+            env,
+            (base + offset, base + offset + 0x40, base + offset + 0x80),
+        )
+    for _ in range(6000):
+        if int(env.icache_agent.get_stats()["pending"]) >= 10:
+            break
+        env.step(1)
+
+    # Demand fetch owns the target refill. Repeated prefetch presentation keeps
+    # the same s2 transaction live while MissUnit pressure delays acceptance.
+    env.backend_model.inject_redirect(target, "ctrl_redirect", delay_cycles=0)
+    for attempt in range(8192):
+        if _hit(
+            env,
+            "icache_prefetchpipe_s2_miss",
+            "clean_mshr_cancels_backpressured_miss",
+        ):
+            break
+        if attempt % 4 == 0:
+            _present_soft_prefetch(env, (target,))
+        else:
+            env.step(1)
+    _wait_bins(
+        env,
+        [
+            (
+                "icache_prefetchpipe_s2_miss",
+                "clean_mshr_cancels_backpressured_miss",
+            )
+        ],
+        max_cycles=1,
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-771", "BIN-772", "BIN-778", "BIN-779", "BIN-780")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_large_loop_layout(prefetchpipe_env) -> None:
     env = prefetchpipe_env
@@ -327,12 +576,55 @@ def test_tc_icache_prefetchpipe_large_loop_layout(prefetchpipe_env) -> None:
         env,
         [
             ("icache_prefetchpipe_s1_meta", "dual_layout_overlap1"),
+            ("icache_prefetchpipe_s1_meta", "dual_layout_overlap2"),
             ("icache_prefetchpipe_s1_meta", "dual_layout_interleave"),
             ("icache_mainpipe_s2_ecc", "meta_code_mismatch_zero_way_ignored"),
             ("icache_mainpipe_s2_ecc", "meta_invalid_line_masked"),
         ],
         max_cycles=6000,
     )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-679", "BIN-680")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_prefetch_queue_backpressure(prefetchpipe_env) -> None:
+    env = prefetchpipe_env
+    _initialize_bpu_s3_stream(env)
+    _load_nops(env, _SOFT_BASE)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=128,
+        miss_rate=1.0,
+        seed=0x6680,
+    )
+    env.backend_model.set_can_accept(0)
+    targets = {
+        ("icache_prefetchpipe_s1_meta", "meta_resend_backpressure_recovery"),
+        ("icache_prefetchpipe_s1_meta", "waylookup_backpressure_recovery"),
+    }
+    released = False
+    for attempt in range(16384):
+        if all(_hit(env, *target) for target in targets):
+            break
+        occupancy = _signal(env, "waylookup_num_valid")
+        if occupancy == 32 and not released:
+            env.step(4)
+            env.backend_model.set_can_accept(1)
+            released = True
+        elif attempt % 32 == 0:
+            env.backend_model.inject_redirect(
+                _SOFT_BASE + 0x1000 + ((attempt // 32) % 64) * 0x40,
+                "ctrl_redirect",
+                delay_cycles=0,
+            )
+            env.step(1)
+        else:
+            env.step(1)
+    if not released:
+        env.backend_model.set_can_accept(1)
+        env.step(64)
+    _wait_bins(env, targets, max_cycles=1024)
     assert not env.monitor.get_errors()
 
 

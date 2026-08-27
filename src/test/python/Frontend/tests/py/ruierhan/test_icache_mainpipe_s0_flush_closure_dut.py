@@ -9,6 +9,7 @@ import pytest
 
 from env.funcov.py.icache.flush_from_bpu import (
     BpuS3Flush,
+    ftq_ptr_matches_or_before,
     ftq_ptr_is_strictly_after_current,
 )
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
@@ -169,6 +170,17 @@ def _bpu_is_after_s0(sample: dict) -> bool:
     ) is True
 
 
+def _bpu_matches_s0(sample: dict) -> bool:
+    return ftq_ptr_matches_or_before(
+        BpuS3Flush(
+            valid=sample["bpu_valid"],
+            flag=sample["bpu_flag"],
+            value=sample["bpu_value"],
+        ),
+        (sample["s0_ftq_flag"], sample["s0_ftq_value"]),
+    ) is True
+
+
 def _wait_for_s0_sampling_window(env, *, max_cycles: int) -> dict:
     last = None
     for _ in range(int(max_cycles)):
@@ -209,11 +221,11 @@ def _wait_hit(env, bin_name: str, *, max_cycles: int) -> None:
 
 @pytest.mark.funcov_bins("BIN-605")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-@pytest.mark.xfail(
-    reason="s0 global flush requires redirect/MainPipe sampling-window alignment that is not stable in current DUT harness",
-    strict=False,
-)
 def test_tc_icache_mainpipe_s0_global_flush(env) -> None:
+    samples: list[dict] = []
+    env.register_cycle_observer(
+        lambda _cycle, active_env: samples.append(_snapshot(active_env))
+    )
     _initialize_cacheable_stream(env, _BASE, latency=8)
 
     attempts = _cycle_limit("TB_ICACHE_S0_GLOBAL_FLUSH_ATTEMPTS", 24)
@@ -226,6 +238,16 @@ def test_tc_icache_mainpipe_s0_global_flush(env) -> None:
         env.backend_model.inject_redirect(target, "ctrl_redirect", delay_cycles=0)
         try:
             _wait_hit(env, "global_flush_cancels_entry", max_cycles=32)
+            assert any(
+                sample["ftq_valid"] == 1
+                and sample["from_valid"] == 1
+                and sample["io_flush"] == 1
+                and sample["s0_flush"] == 1
+                and sample["data_ready"] == 1
+                and sample["s1_ready"] == 1
+                and sample["s0_fire"] == 0
+                for sample in samples[-64:]
+            ), {"tail": samples[-64:]}
             assert not env.monitor.get_errors()
             return
         except AssertionError:
@@ -329,6 +351,35 @@ def _drive_bpu_s3_until_hit(env, bin_name: str, *, max_cycles: int) -> None:
         "backend": env.backend_model.get_stats(),
         "monitor_errors": env.monitor.get_errors(),
     }
+
+
+@pytest.mark.funcov_bins("BIN-606")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_mainpipe_s0_bpu_match(env) -> None:
+    _require_bpu_s3_ftq_observable(env)
+    samples: list[dict] = []
+    env.register_cycle_observer(
+        lambda _cycle, active_env: samples.append(_snapshot(active_env))
+    )
+    _initialize_bpu_s3_stream(env)
+    _drive_bpu_s3_until_hit(
+        env,
+        "bpu_match_cancels_entry",
+        max_cycles=_cycle_limit("TB_ICACHE_S0_BPU_MATCH_MAX_CYCLES", 2048),
+    )
+    assert any(
+        sample["ftq_valid"] == 1
+        and sample["from_valid"] == 1
+        and sample["io_flush"] == 0
+        and sample["bpu_valid"] == 1
+        and sample["s0_flush"] == 1
+        and sample["data_ready"] == 1
+        and sample["s1_ready"] == 1
+        and sample["s0_fire"] == 0
+        and _bpu_matches_s0(sample)
+        for sample in samples
+    ), {"tail": samples[-64:]}
+    assert not env.monitor.get_errors()
 
 
 @pytest.mark.funcov_bins("BIN-607", "BIN-749")
