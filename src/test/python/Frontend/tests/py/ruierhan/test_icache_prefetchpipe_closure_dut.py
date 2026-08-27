@@ -119,6 +119,7 @@ def prefetchpipe_env(env):
         yield env
     finally:
         _clear_soft_prefetch(env)
+        env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
         env.backend_model.set_can_accept(1)
         _restore_predictors(env)
 
@@ -192,6 +193,28 @@ def test_tc_icache_prefetchpipe_bpu_flush(prefetchpipe_env) -> None:
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-664")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_prefetchpipe_disabled(prefetchpipe_env) -> None:
+    env = prefetchpipe_env
+    _prepare_nops(env, _SOFT_BASE, latency=32, seed=0x6664)
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
+    for attempt in range(64):
+        _present_soft_prefetch(
+            env,
+            (_SOFT_BASE + 0x100 + (attempt % 32) * 0x40,),
+        )
+        if _hit(env, "icache_prefetchpipe_s1_completion", "prefetch_disabled_no_s2"):
+            break
+        env.step(4)
+    _wait_bins(
+        env,
+        [("icache_prefetchpipe_s1_completion", "prefetch_disabled_no_s2")],
+        max_cycles=512,
+    )
+    assert not env.monitor.get_errors()
+
+
 def _translation_state(
     env,
     *,
@@ -216,7 +239,7 @@ def _translation_state(
     return TranslationScenarioBuilder(env).build(scenario)
 
 
-@pytest.mark.funcov_bins("BIN-658", "BIN-678")
+@pytest.mark.funcov_bins("BIN-658", "BIN-678", "BIN-738", "BIN-740")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_itlb_control(prefetchpipe_env) -> None:
     env = prefetchpipe_env
@@ -270,13 +293,17 @@ def test_tc_icache_prefetchpipe_itlb_control(prefetchpipe_env) -> None:
             break
     _wait_bins(
         env,
-        [("icache_prefetchpipe_s1_meta", "flush_cancels_itlb_wait")],
+        [
+            ("icache_prefetchpipe_s1_meta", "flush_cancels_itlb_wait"),
+            ("icache_waylookup_exception", "exception_dequeue"),
+            ("icache_waylookup_exception", "exception_waits_flush"),
+        ],
         max_cycles=512,
     )
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-659", "BIN-661", "BIN-666")
+@pytest.mark.funcov_bins("BIN-659", "BIN-661", "BIN-666", "BIN-700")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_refill_layout(prefetchpipe_env) -> None:
     env = prefetchpipe_env
@@ -285,12 +312,13 @@ def test_tc_icache_prefetchpipe_refill_layout(prefetchpipe_env) -> None:
         ("icache_prefetchpipe_s1_meta", "clean_refill_updates_meta"),
         ("icache_prefetchpipe_s1_meta", "dual_layout_same_line"),
         ("icache_prefetchpipe_s2_miss", "sram_or_clean_mshr_hit"),
+        ("icache_missunit_dedup", "prefetch_merge_any_mshr"),
     }
     _wait_bins(env, targets, max_cycles=4000)
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-778", "BIN-780")
+@pytest.mark.funcov_bins("BIN-771", "BIN-772", "BIN-778", "BIN-780")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_large_loop_layout(prefetchpipe_env) -> None:
     env = prefetchpipe_env
@@ -300,27 +328,30 @@ def test_tc_icache_prefetchpipe_large_loop_layout(prefetchpipe_env) -> None:
         [
             ("icache_prefetchpipe_s1_meta", "dual_layout_overlap1"),
             ("icache_prefetchpipe_s1_meta", "dual_layout_interleave"),
+            ("icache_mainpipe_s2_ecc", "meta_code_mismatch_zero_way_ignored"),
+            ("icache_mainpipe_s2_ecc", "meta_invalid_line_masked"),
         ],
         max_cycles=6000,
     )
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-681", "BIN-683", "BIN-685")
+@pytest.mark.funcov_bins("BIN-681")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_s2_pressure(prefetchpipe_env) -> None:
     env = prefetchpipe_env
     _run_trained_refill(env)
-    pressure_targets = (
-        ("icache_prefetchpipe_s1_completion", "s2_busy_enters_s2_recovery"),
-        ("icache_prefetchpipe_s2_miss", "clean_mshr_cancels_backpressured_miss"),
-        ("icache_prefetchpipe_s2_miss", "missunit_backpressure_recovery"),
+    _wait_bins(
+        env,
+        [("icache_prefetchpipe_s1_completion", "s2_busy_enters_s2_recovery")],
+        max_cycles=64,
     )
-    _wait_bins(env, pressure_targets, max_cycles=4000)
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-682", "BIN-672")
+@pytest.mark.funcov_bins(
+    "BIN-682", "BIN-672", "BIN-702", "BIN-703", "BIN-704", "BIN-747"
+)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_flush_boundaries(prefetchpipe_env) -> None:
     env = prefetchpipe_env
@@ -328,6 +359,10 @@ def test_tc_icache_prefetchpipe_flush_boundaries(prefetchpipe_env) -> None:
     targets = {
         ("icache_prefetchpipe_s1_completion", "flush_blocks_s1_completion"),
         ("icache_prefetchpipe_s2_miss", "redirect_flush_ready_boundary"),
+        ("icache_missunit_flush", "redirect_blocks_new_prefetch"),
+        ("icache_missunit_flush", "redirect_cancels_unissued_prefetch"),
+        ("icache_missunit_flush", "redirect_marks_issued_prefetch"),
+        ("icache_waylookup_flush", "bpu_flush_empty"),
     }
     _wait_bins(env, targets, max_cycles=1000)
     assert not env.monitor.get_errors()

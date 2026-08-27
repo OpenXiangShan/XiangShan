@@ -210,6 +210,7 @@ def test_baremode_backend_ipf_redirect_pilot(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-762")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_baremode_backend_iaf_redirect_pilot(env):
     _load_nop_program(env, words=128)
@@ -220,6 +221,9 @@ def test_baremode_backend_iaf_redirect_pilot(env):
 
     assert commits >= 4
     assert CheckPcSequence(PcSequenceExpectation(expected_pcs=(_BASE + 0xE0,), max_cycles=400)).run(env)
+    assert env.functional_coverage.key_hit(
+        "icache_hit_path", "hit_itlb_exception"
+    )
     assert not env.monitor.get_errors()
 
 

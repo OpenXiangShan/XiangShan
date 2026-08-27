@@ -331,7 +331,7 @@ def _drive_bpu_s3_until_hit(env, bin_name: str, *, max_cycles: int) -> None:
     }
 
 
-@pytest.mark.funcov_bins("BIN-607")
+@pytest.mark.funcov_bins("BIN-607", "BIN-749")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_s0_bpu_miss(env) -> None:
     _require_bpu_s3_ftq_observable(env)
@@ -354,4 +354,7 @@ def test_tc_icache_mainpipe_s0_bpu_miss(env) -> None:
         and _bpu_is_after_s0(sample)
         for sample in samples
     ), {"tail": samples[-64:]}
+    assert env.functional_coverage.key_hit(
+        "icache_waylookup_flush", "bpu_flush_nonmatching"
+    )
     assert not env.monitor.get_errors()

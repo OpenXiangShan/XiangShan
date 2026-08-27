@@ -330,7 +330,7 @@ def _drive_bpu_s3_until_s1_hit(env, bin_name: str, *, max_cycles: int) -> None:
     }
 
 
-@pytest.mark.funcov_bins("BIN-616")
+@pytest.mark.funcov_bins("BIN-616", "BIN-736", "BIN-742", "BIN-743", "BIN-745")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_s1_global_flush_hit(env) -> None:
     samples = _register_s1_observer(env)
@@ -359,6 +359,13 @@ def test_tc_icache_mainpipe_s1_global_flush_hit(env) -> None:
                 and sample["s1_fire"] == 0
                 for sample in samples[-64:]
             ), {"tail": samples[-64:]}
+            for group, bin_name in (
+                ("icache_waylookup_update", "update_flush_same_cycle"),
+                ("icache_waylookup_flush", "global_flush_clears_all"),
+                ("icache_waylookup_flush", "flush_wins_read"),
+                ("icache_waylookup_flush", "flush_wins_update"),
+            ):
+                _wait_group_hit(env, group, bin_name, max_cycles=32)
             assert not env.monitor.get_errors()
             return
         except AssertionError:
@@ -450,7 +457,7 @@ def test_tc_icache_mainpipe_late_refill_after_flush(env) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-621")
+@pytest.mark.funcov_bins("BIN-621", "BIN-706")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_flush_refill_race(env) -> None:
     samples = _register_s1_observer(env)
@@ -477,6 +484,12 @@ def test_tc_icache_mainpipe_flush_refill_race(env) -> None:
         except AssertionError:
             if attempt + 1 >= attempts:
                 raise
+    _wait_group_hit(
+        env,
+        "icache_missunit_flush",
+        "redirect_suppresses_sram_write",
+        max_cycles=64,
+    )
     assert any(
         sample["s1_flush"] == 1
         and _raw_refill_match(sample)

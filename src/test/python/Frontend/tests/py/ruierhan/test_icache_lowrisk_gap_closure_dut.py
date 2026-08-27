@@ -155,6 +155,7 @@ def _wait_funcov_hit(
     max_cycles: int,
     label: str | None = None,
 ) -> None:
+    max_cycles = int(os.getenv("TB_ICACHE_LOWRISK_MAX_CYCLES", str(max_cycles)), 0)
     _run_until(
         env,
         lambda: env.functional_coverage.key_hit(group, bin_name),
@@ -170,6 +171,7 @@ def _wait_funcov_hits(
     max_cycles: int,
     label: str,
 ) -> None:
+    max_cycles = int(os.getenv("TB_ICACHE_LOWRISK_MAX_CYCLES", str(max_cycles)), 0)
     _run_until(
         env,
         lambda: all(env.functional_coverage.key_hit(group, name) for group, name in targets),
@@ -222,6 +224,7 @@ def lowrisk_cleanup(env):
     env.backend_model.set_can_accept(1)
 
 
+@pytest.mark.funcov_bins("BIN-685")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_mainpipe_flush_refill(env) -> None:
     base = 0x8004_0000
@@ -242,6 +245,12 @@ def test_icache_lowrisk_mainpipe_flush_refill(env) -> None:
         label="redirect target delivery",
     )
     assert int(env.icache_agent.get_stats()["req_count"]) >= 2
+    _wait_funcov_hit(
+        env,
+        "icache_prefetchpipe_s2_miss",
+        "missunit_backpressure_recovery",
+        max_cycles=256,
+    )
     assert not env.monitor.get_errors()
 
 
@@ -599,6 +608,10 @@ def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
     env.monitor.clear()
     env.monitor.set_expected_pc(va)
     env.arm_translation_scenario(state, page_indexes=(0,))
+    # Exercise both producers of WayLookup entries.  The backend redirect
+    # drives MainPipe while the soft-prefetch request gives PrefetchPipe an
+    # opportunity to capture the same translated exception entry.
+    _drive_soft_prefetch(env, [va])
     env.backend_model.inject_redirect(va, "ctrl_redirect", delay_cycles=0)
     _run_until(
         env,
@@ -632,8 +645,11 @@ def test_icache_lowrisk_waylookup_exception_entry_dut(lowrisk_cleanup) -> None:
 def test_icache_lowrisk_hit_pmp_exception(lowrisk_cleanup) -> None:
     """Present a cacheable line with execute permission denied by the PMP model."""
     env = lowrisk_cleanup
-    va = 0x8021_0F00
-    pa = 0x8041_0F00
+    # NAPOT entries are encoded at page granularity by the existing PMP/PMA
+    # support.  Keep the instruction offset in the page while aligning the
+    # entry base to the required 4-KiB grain.
+    va = 0x8021_0000
+    pa = 0x8041_0000
     payload = (_NOP.to_bytes(4, "little")) * 512
     scenario = TranslationScenario(
         scenario_id="cacheable-hit-pmp-instruction-access-fault",
@@ -827,6 +843,14 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
         max_cycles=1024,
         label="clean cache refill",
     )
+    # The first refill is intentionally forced to miss.  Subsequent soft
+    # prefetches must see the refilled line as an SRAM hit.
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=32,
+        miss_rate=0.0,
+        seed=0x6276,
+    )
     _drive_soft_prefetch(env, [base, base + 0x40])
     _wait_funcov_hit(
         env,
@@ -837,6 +861,12 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
     )
     # Four distinct tags mapping to one set establish the full-set condition;
     # the fifth tag then exercises the real miss/victim request path.
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=32,
+        miss_rate=1.0,
+        seed=0x6276,
+    )
     for index in range(4):
         target = base + index * 0x1000
         env.backend_model.inject_redirect(target, "ctrl_redirect", delay_cycles=0)
