@@ -170,7 +170,7 @@ jobs:
             fi
 
             if [ "${base_mode}" = "legacy" ]; then
-              echo "**NOTE**: We're migrating to new checkpoints (see #6181), legacy testcases and reports are going to be removed. Please use the new IPC reports for future comparisons."
+              echo "**NOTE**: We're migrating to new checkpoints (see #6402), legacy testcases and reports are going to be removed. Please use the new IPC reports for future comparisons."
               echo
             fi
 
