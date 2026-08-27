@@ -58,6 +58,7 @@ def test_snapshot_reads_current_verilator_derived_aliases():
             "Frontend_top.Frontend.inner_ifu.s2_alignedInstrPcVec_0_addr": 0x400,
             "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable": 1,
             "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_pc_0_addr": 0x400,
+            "Frontend_top.Frontend.inner_ifu.wbRedirect_valid": 1,
             "Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_valid": 1,
             "Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_bits_data": 0x5678,
             "Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_bits_corrupt": 0,
@@ -81,6 +82,7 @@ def test_snapshot_reads_current_verilator_derived_aliases():
     assert snapshot["s2_uncache_data"] == 0xAABBCCDD
     assert snapshot["s2_instr_pc"] == 0x400
     assert snapshot["to_pc"] == 0x400
+    assert snapshot["checker_redirect"] == 1
     assert snapshot["instr_resp_valid"] == 1
     assert snapshot["instr_resp_data"] == 0x5678
     assert snapshot["instr_resp_corrupt"] == 0
@@ -513,6 +515,44 @@ def test_mmio_redirect_cancels_waiting_response_path():
     owner._sample_mmio(recorder, 1, snapshot, state)
 
     assert (owner.MMIO_OWNER_GROUP, "mmio_leaf_015") in recorder.hits
+
+
+def test_nc_checker_redirect_hits_only_when_recovery_starts_new_nc_request():
+    snapshot = _empty_snapshot()
+    snapshot.update(
+        {
+            "s2_req_uncache": 0,
+            "checker_redirect": 1,
+            "wb_path_valid": 1,
+            "wb_redirect": 1,
+            "ifu_flush": 1,
+            "req_valid": 0,
+            "s2_pc": 0x400,
+        }
+    )
+    recorder = _Recorder()
+    state = _state(recorder)
+
+    owner._sample_nc(recorder, 1, snapshot, state)
+    assert (owner.NC_OWNER_GROUP, "nc_leaf_013") not in recorder.hits
+
+    snapshot.update(
+        {
+            "s2_valid": 1,
+            "s2_req_uncache": 1,
+            "s2_use_uncache": 1,
+            "s2_pmp_mmio": 0,
+            "s2_pbmt": owner._PBMT_NC,
+            "checker_redirect": 0,
+            "wb_path_valid": 0,
+            "wb_redirect": 0,
+            "ifu_flush": 0,
+            "req_valid": 1,
+            "req_ready": 1,
+        }
+    )
+    owner._sample_nc(recorder, 2, snapshot, state)
+    assert (owner.NC_OWNER_GROUP, "nc_leaf_013") in recorder.hits
 
 
 def test_mmio_backend_redirect_masks_ftq_writeback_on_response():

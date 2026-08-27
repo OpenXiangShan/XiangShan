@@ -785,6 +785,148 @@ def test_nc_cross_page_second_page_pf_attributes_to_rvi_start(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-1067")
+@pytest.mark.skipif(
+    not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
+)
+def test_cacheable_checker_redirect_preempts_then_restarts_nc_request(env):
+    virtual_page = uncache._NORMAL_BASE
+    physical_page = 0x80004000
+    cacheable_start = virtual_page + uncache._SV39_PAGE_SIZE - uncache._FETCH_BLOCK_SIZE
+    nc_start = virtual_page + uncache._SV39_PAGE_SIZE
+    nc_physical_page = physical_page + uncache._SV39_PAGE_SIZE
+
+    cacheable_payload = bytearray(
+        int(uncache._CNOP).to_bytes(2, "little")
+        * (uncache._SV39_PAGE_SIZE // 2)
+    )
+    cacheable_payload[-4:] = int(uncache._JAL_X0_PLUS_4).to_bytes(4, "little")
+    nc_payload = (
+        int(uncache._CNOP).to_bytes(2, "little")
+        * (uncache._SV39_PAGE_SIZE // 2)
+    )
+
+    env.page_table.clear()
+    env.page_table.map_page(
+        virtual_page >> 12,
+        physical_page >> 12,
+        v=1,
+        r=1,
+        x=1,
+        pbmt=uncache._PBMT_PMA,
+    )
+    env.page_table.map_page(
+        nc_start >> 12,
+        nc_physical_page >> 12,
+        v=1,
+        r=1,
+        x=1,
+        pbmt=uncache._PBMT_NC,
+    )
+    env.ptw_agent.configure(
+        mode="sv39", response_source="model", compare_drive_source="model"
+    )
+    uncache.LoadProgramSequence(
+        image=uncache.ProgramImage(
+            payload=bytes(cacheable_payload), base_addr=physical_page
+        ),
+        step_cycles=0,
+    ).run(env)
+    uncache.LoadProgramSequence(
+        image=uncache.ProgramImage(payload=nc_payload, base_addr=nc_physical_page),
+        step_cycles=0,
+    ).run(env)
+    env.uncache_agent.configure(latency=64, mmio_latency=64)
+    uncache._initialize_sv39_fetch(env, reset_vector=cacheable_start)
+    uncache._configure_exec_attrs_16k(env, base_addr=physical_page)
+
+    trace = []
+
+    def capture_checker_nc_overlap(cycle, active_env):
+        snapshot = owner_funcov._snapshot(
+            active_env.functional_coverage, active_env.dut
+        )
+        if not any(
+            snapshot[name] == 1
+            for name in (
+                "checker_redirect",
+                "instr_resp_valid",
+                "resp_valid",
+                "req_valid",
+            )
+        ):
+            return
+        trace.append(
+            {
+                "cycle": int(cycle),
+                "s2_pc": snapshot["s2_pc"],
+                "s2_req_uncache": snapshot["s2_req_uncache"],
+                "req_valid": snapshot["req_valid"],
+                "req_ready": snapshot["req_ready"],
+                "uncache_state": snapshot["uncache_state"],
+                "checker_redirect": snapshot["checker_redirect"],
+                "wb_path_valid": snapshot["wb_path_valid"],
+                "wb_redirect": snapshot["wb_redirect"],
+                "ifu_flush": snapshot["ifu_flush"],
+                "instr_resp_valid": snapshot["instr_resp_valid"],
+                "resp_valid": snapshot["resp_valid"],
+                "to_valid": snapshot["to_valid"],
+                "to_pc": snapshot["to_pc"],
+                "req_count": int(
+                    active_env.uncache_agent.get_stats().get("req_count", 0)
+                ),
+            }
+        )
+
+    env.register_cycle_observer(capture_checker_nc_overlap)
+    uncache._force_redirect_to(env, cacheable_start)
+
+    for _ in range(12000):
+        if env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_013"):
+            break
+        env.step(1)
+
+    assert env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_013"), {
+        "trace": trace[-96:],
+        "ptw": env.ptw_agent.get_stats(),
+        "icache": env.icache_agent.get_stats(),
+        "uncache": env.uncache_agent.get_stats(),
+    }
+    cancel_samples = [
+        sample
+        for sample in trace
+        if sample["checker_redirect"] == 1
+        and sample["wb_path_valid"] == 1
+        and sample["wb_redirect"] == 1
+        and sample["ifu_flush"] == 1
+        and sample["s2_req_uncache"] != 1
+        and sample["req_valid"] != 1
+    ]
+    assert cancel_samples, trace[-96:]
+    cancel_sample = cancel_samples[-1]
+    cancel_cycle = int(cancel_sample["cycle"])
+    recovery_requests = [
+        sample
+        for sample in trace
+        if int(sample["cycle"]) > cancel_cycle
+        and sample["s2_req_uncache"] == 1
+        and sample["req_valid"] == 1
+        and sample["req_ready"] == 1
+    ]
+    assert recovery_requests, trace[-96:]
+    assert uncache._wait_for_request_addr(
+        env, nc_physical_page, max_cycles=6000
+    ), env.uncache_agent.get_stats()
+    assert int(env.uncache_agent.get_stats().get("req_count", 0)) > int(
+        cancel_sample["req_count"]
+    )
+    assert any(
+        int(addr) == nc_physical_page
+        for addr in env.uncache_agent.get_stats().get("request_addrs", [])
+    )
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_bins("BIN-1052")
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_backend_redirect_wins_response_writeback(env):

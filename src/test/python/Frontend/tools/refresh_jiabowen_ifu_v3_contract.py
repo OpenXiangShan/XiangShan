@@ -42,6 +42,12 @@ class ContractUpdate:
 
 _CACHEABLE = "PMA可缓存且可执行地址"
 _REVIEW = "RTL_REVIEW:c0ca46459"
+_SUPERSEDED_EVIDENCE = {
+    "BIN-1067": (
+        f"{_REVIEW}:PredChecker is a cacheable writeback path; this leaf covers "
+        "an older cacheable checker redirect cancelling a younger NC transaction"
+    ),
+}
 
 _UPDATES = {
     "BIN-899": ContractUpdate(
@@ -225,6 +231,14 @@ _UPDATES = {
         status="MODELED",
         evidence=f"{_REVIEW}:NC policy section cross-references the canonical InstrUncache protocol leaf BIN-1032",
     ),
+    "BIN-1067": ContractUpdate(
+        "更老cacheable checker redirect阻止年轻NC旧请求并从目标重启NC路径",
+        "cacheable块产生PredChecker redirect，顺序后继为独立PBMT.NC事务；当前in-order IFU在NC接受前解析checker redirect",
+        "checker redirect触发年轻流水flush且同拍不发出NC请求；随后仅redirect恢复路径的新NC请求可进入SendReq/WaitResp；NC自身不产生PredChecker redirect",
+        "cacheable checkerRedirect/wbValid/toFtq.wbRedirect、s2 flush、NC属性和uncache req.fire、redirect周期与恢复NC接受周期",
+        status="MODELED",
+        evidence=f"{_REVIEW}:PredChecker is cacheable-only; legal V3 ordering resolves the checker redirect before the younger NC request and restarts NC from the redirect target",
+    ),
     "BIN-1084": ContractUpdate(
         "NC页尾第一页执行权限异常应归属请求起始PC（OPEN/FIXME）",
         "PBMT.NC请求起始PC位于4K页尾2B，第一页PMP execute=0且第二页可执行",
@@ -326,6 +340,12 @@ def refresh(*, check: bool = False) -> dict[str, int]:
     changed_testpoints = 0
     for bin_id, update in _UPDATES.items():
         row = testpoint_rows[mapped[bin_id]]
+        superseded = _SUPERSEDED_EVIDENCE.get(bin_id)
+        if superseded and superseded in row["evidence"]:
+            row["evidence"] = row["evidence"].replace(
+                f"{superseded}; ", ""
+            ).replace(superseded, "")
+            changed_testpoints += 1
         desired = {
             "五级测试点": update.leaf,
             "Condition": update.condition,

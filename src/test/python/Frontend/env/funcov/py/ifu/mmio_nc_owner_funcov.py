@@ -95,6 +95,7 @@ def initialize_mmio_nc_owner_coverage_state(recorder) -> None:
         "nc_cross_8b_pending": False,
         "nc_first_page_pc_bug_reported": False,
         "nc_redirect_pending": False,
+        "nc_checker_redirect_pending": None,
         "nc_to_mmio_pending": False,
         "nc_seen": set(),
         "previous_path": None,
@@ -259,6 +260,7 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "ifu_flush": _read_ifu(recorder, dut, "s2_flush"),
         "uncache_redirect": _read_ifu(recorder, dut, "uncacheRedirect_valid"),
         "wb_redirect": _read_ifu(recorder, dut, "io_toFtq_wbRedirect_valid"),
+        "checker_redirect": _read_ifu(recorder, dut, "wbRedirect_valid"),
         "wb_path_valid": _read_ifu(recorder, dut, "wbValid"),
         "branch_type": _read_ifu(recorder, dut, "brAttribute_branchType"),
         "prev_end_half": _read_ifu(recorder, dut, "s2_prevEndIsHalfRvi"),
@@ -677,6 +679,8 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
         "to_pc": s["to_pc"],
         "ifu_stall": ifu_stall,
         "to_uncache_valid": to_uncache_valid,
+        "checker_redirect": s["checker_redirect"],
+        "wb_redirect": s["wb_redirect"],
     }
     seen = state["nc_seen"]
 
@@ -746,7 +750,6 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
         and state["previous_uncache_state"] == _SEND_REQ
         and s["uncache_state"] == _WAIT_RESP
         and s["req_ready"] == 0,
-        13: pending and s["wb_path_valid"] == 1 and s["wb_redirect"] == 1,
         14: nc_active
         and (
             (
@@ -833,6 +836,22 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
     if nc_active and s["uncache_state"] == _WAIT_RESP and s["backend_redirect"] == 1:
         seen.add("redirect_wait_resp")
 
+    checker_preempts_nc = (
+        not nc_active
+        and s["s2_req_uncache"] != 1
+        and s["checker_redirect"] == 1
+        and s["wb_path_valid"] == 1
+        and s["wb_redirect"] == 1
+        and s["ifu_flush"] == 1
+        and s["backend_redirect"] != 1
+        and s["req_valid"] != 1
+    )
+    if checker_preempts_nc:
+        state["nc_checker_redirect_pending"] = {
+            "checker_pc": s["s2_pc"],
+            "redirect_cycle": int(cycle),
+        }
+
     cacheable_delivery = (
         not nc_active
         and s["s2_valid"] == 1
@@ -846,6 +865,25 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
         if nc_accept
         else "mmio" if mmio_accept else "cacheable" if cacheable_delivery else None
     )
+    checker_pending = state["nc_checker_redirect_pending"]
+    if checker_pending is not None and int(cycle) > checker_pending["redirect_cycle"]:
+        if current_path == "nc" and nc_accept:
+            _mark(
+                recorder,
+                NC_OWNER_GROUP,
+                13,
+                cycle,
+                {
+                    **evidence,
+                    "older_cacheable_checker_redirect": True,
+                    "redirect_cycle": checker_pending["redirect_cycle"],
+                    "checker_pc": checker_pending["checker_pc"],
+                    "nc_request_started_only_on_recovery": True,
+                },
+            )
+            state["nc_checker_redirect_pending"] = None
+        elif current_path is not None:
+            state["nc_checker_redirect_pending"] = None
     previous_path = state["previous_path"]
     if current_path is not None and previous_path is not None:
         transition = f"{previous_path}_to_{current_path}"
@@ -1052,6 +1090,7 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
         state["nc_active"] = False
     if s["backend_redirect"] == 1:
         state["nc_last_delivery"] = None
+        state["nc_checker_redirect_pending"] = None
     if current_path is not None:
         state["previous_path"] = current_path
 
