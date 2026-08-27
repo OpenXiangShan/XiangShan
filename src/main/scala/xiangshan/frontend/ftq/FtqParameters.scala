@@ -32,8 +32,7 @@ case class FtqParameters(
 trait HasFtqParameters extends HasFrontendParameters {
   def ftqParameters: FtqParameters = frontendParameters.ftqParameters
 
-  def ResolveQueueSize:   Int = ftqParameters.ResolveQueueSize
-  def BpRunAheadDistance: Int = frontendParameters.icacheParameters.WayLookupSize
-  def BpTrainStallLimit:  Int = ftqParameters.BpTrainStallLimit
-  def CommitQueueSize:    Int = ftqParameters.CommitQueueSize
+  def ResolveQueueSize:  Int = ftqParameters.ResolveQueueSize
+  def BpTrainStallLimit: Int = ftqParameters.BpTrainStallLimit
+  def CommitQueueSize:   Int = ftqParameters.CommitQueueSize
 }
