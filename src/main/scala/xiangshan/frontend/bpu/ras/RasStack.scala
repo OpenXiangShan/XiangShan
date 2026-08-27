@@ -61,8 +61,13 @@ class RasStack(implicit p: Parameters) extends RasModule
 
     val specNearOverflow: Bool     = Output(Bool())
     val debug:            RasDebug = new RasDebug
+    // context flush clear pulse (SPEC 06 §4), not generated when HasBpuFlush is off
+    val contextFlush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
   }
   val io: RasStackIO = IO(new RasStackIO)
+
+  // read-only optional flush I/O unpacked once at module top; no scattered .get below
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
 
   private val commitStack = RegInit(VecInit(Seq.fill(CommitStackSize)(RasEntry(PrunedAddrInit(0.U(VAddrBits.W)), 0.U))))
   private val specQueue   = RegInit(VecInit(Seq.fill(SpecQueueSize)(RasEntry(PrunedAddrInit(0.U(VAddrBits.W)), 0.U))))
@@ -320,7 +325,8 @@ class RasStack(implicit p: Parameters) extends RasModule
     specPop(ssp, sctr, tosr, tosw, topNos)
   }
 
-  io.spec.popAddr := timingTop.retAddr
+  // combinational output zeroing on contextFlush (SPEC 06 §4.3): output 0 on the T cycle, else timingTop
+  io.spec.popAddr := (if (HasBpuFlush) Mux(contextFlush, PrunedAddrInit(0.U(VAddrBits.W)), timingTop.retAddr) else timingTop.retAddr)
 
   io.meta.tosw := tosw
   io.meta.tosr := tosr
@@ -423,4 +429,41 @@ class RasStack(implicit p: Parameters) extends RasModule
   io.debug.commitStack.zipWithIndex.foreach { case (a, i) => a := commitStack(i) }
   io.debug.specNos.zipWithIndex.foreach { case (a, i) => a := specNos(i) }
   io.debug.specQueue.zipWithIndex.foreach { case (a, i) => a := specQueue(i) }
+
+  // context flush: clear all stack data / pointers / bypass / timing registers (SPEC 06 §4.1/§4.2/§4.4)
+  // placed last to override (last-connect) all writes from commit / specPush / specPop / redirect / realPush
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      // stack data
+      commitStack.foreach { e =>
+        e.retAddr := PrunedAddrInit(0.U(VAddrBits.W))
+        e.ctr     := 0.U
+      }
+      specQueue.foreach { e =>
+        e.retAddr := PrunedAddrInit(0.U(VAddrBits.W))
+        e.ctr     := 0.U
+      }
+      specNos.foreach { p =>
+        p.flag  := false.B
+        p.value := 0.U
+      }
+      // pointers and counters (restore power-on initial values)
+      nsp                := 0.U
+      ssp                := 0.U
+      sctr               := 0.U
+      tosr               := RasPtr(true.B, (SpecQueueSize - 1).U)
+      tosw               := RasPtr(false.B, 0.U)
+      bos                := RasPtr(false.B, 0.U)
+      specNearOverflowed := false.B
+      // writeBypass: clear X-state residue
+      writeBypassEntry   := 0.U.asTypeOf(new RasEntry)
+      writeBypassNos     := 0.U.asTypeOf(new RasPtr)
+      writeBypassValid   := false.B
+      // block the delayed write channel on the T cycle
+      realPush           := false.B
+      // pipeline staging
+      timingTop          := 0.U.asTypeOf(new RasEntry)
+      timingNos          := 0.U.asTypeOf(new RasPtr)
+    }
+  }
 }

@@ -54,9 +54,14 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
 
   // Ras used Regfile instead of SRAM to store entires
   io.sramResetDone := true.B
-  // context flush placeholder: real flush scheme comes later
+
+  // context flush handshake (SPEC 06 §4/§6)
+  // read-only optional flush I/O unpacked once at module top; no scattered .get below
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get  else false.B
+  // register-based RAS: all state clears 1 cycle after contextFlush, so resetDone = !contextFlush
   if (HasBpuFlush) {
-    io.resetDone.get := true.B
+    io.resetDone.get := !contextFlush
   }
 
   io.trainReady := true.B
@@ -64,11 +69,28 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   def alignMask: UInt = ((~0.U(VAddrBits.W)) << FetchBlockAlignWidth).asUInt
 
   private val stack = Module(new RasStack).io
+  if (HasBpuFlush) {
+    stack.contextFlush.get := contextFlush
+  }
   // Here is an assertion that the same piece of valid data lasts for only one cycle.
   // io.specIn.valid = s3_fire
   private val stackNearOverflow = stack.specNearOverflow
-  private val specPush          = io.specIn.valid && io.specIn.bits.attribute.isCall
-  private val specPop           = io.specIn.valid && io.specIn.bits.attribute.isReturn
+  // spec path input gating (SPEC 06 §4.2): hold raw inputs in wires, gate valid with !bpuFlushing
+  private val specInValidRaw = Wire(Bool())
+  private val specIsCall     = Wire(Bool())
+  private val specIsReturn   = Wire(Bool())
+  specInValidRaw := io.specIn.valid
+  specIsCall     := io.specIn.bits.attribute.isCall
+  specIsReturn   := io.specIn.bits.attribute.isReturn
+
+  private val specInValid = Wire(Bool())
+  specInValid := specInValidRaw
+  if (HasBpuFlush) {
+    specInValid := specInValidRaw && !bpuFlushing
+  }
+
+  private val specPush = specInValid && specIsCall
+  private val specPop  = specInValid && specIsReturn
 
   private val specIn       = io.specIn.bits
   private val specAlignPc  = specIn.startPc & alignMask
@@ -77,7 +99,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   stack.spec.popValid  := specPop && !stackNearOverflow
 
   stack.spec.pushAddr := PrunedAddrInit(specPushAddr)
-  stack.spec.fire     := io.specIn.valid
+  stack.spec.fire     := specInValid
 
   private val redirectMeta = Wire(new RasRedirectMeta)
   redirectMeta.ssp        := stack.meta.ssp
@@ -101,15 +123,27 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   private val stackTOSW    = stack.meta.tosw
   private val redirectTOSW = redirect.bits.meta.ras.tosw
 
-  stack.redirect.valid  := redirect.valid && (isBefore(redirectTOSW, stackTOSW) || !stackNearOverflow)
+  // redirect path input gating (SPEC 06 §4.2): block old-context meta restore during flush window
+  private val rawRedirectValid = redirect.valid && (isBefore(redirectTOSW, stackTOSW) || !stackNearOverflow)
+  stack.redirect.valid := (if (HasBpuFlush) rawRedirectValid && !bpuFlushing else rawRedirectValid)
   stack.redirect.isCall := redirect.bits.attribute.isCall
   stack.redirect.isRet  := redirect.bits.attribute.isReturn
   stack.redirect.meta   := redirect.bits.meta.ras
   // Redirected branch PC points to end of instruction.
   stack.redirect.callAddr := redirect.bits.cfiPc + 2.U
 
-  private val commitValid    = RegNext(io.commit.valid, init = false.B)
-  private val commitInfo     = RegEnable(io.commit.bits, io.commit.valid)
+  // commit path input gating (SPEC 06 §4.2): gate both RegNext input and RegEnable enable
+  private val commitInValidRaw = Wire(Bool())
+  commitInValidRaw := io.commit.valid
+
+  private val commitInValid = Wire(Bool())
+  commitInValid := commitInValidRaw
+  if (HasBpuFlush) {
+    commitInValid := commitInValidRaw && !bpuFlushing
+  }
+
+  private val commitValid = RegNext(commitInValid, init = false.B)
+  private val commitInfo  = RegEnable(io.commit.bits, commitInValid)
   private val commitPushAddr = DontCare
   stack.commit.valid     := commitValid
   stack.commit.pushValid := commitValid && commitInfo.attribute.isCall
