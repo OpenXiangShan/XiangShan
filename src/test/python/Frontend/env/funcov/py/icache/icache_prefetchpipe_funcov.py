@@ -135,12 +135,12 @@ _PREFETCH_SIGNALS = {
         _PREFETCH + "__Vtogcov__io_wayLookupWrite_1_valid",
     ),
     "way1_ready": (
-        _PREFETCH + "io_wayLookupWrite_1_ready",
-        _PREFETCH + "__Vtogcov__io_wayLookupWrite_1_ready",
         # ICacheWayLookup intentionally drives both write ready signals together;
         # generated RTL may therefore retain only port 0.
         _PREFETCH + "io_wayLookupWrite_0_ready",
         _PREFETCH + "__Vtogcov__io_wayLookupWrite_0_ready",
+        _PREFETCH + "io_wayLookupWrite_1_ready",
+        _PREFETCH + "__Vtogcov__io_wayLookupWrite_1_ready",
     ),
     "waylookup_num_valid": (_WAYLOOKUP + "numValidEntries",),
     "waylookup_exception_valid": (_WAYLOOKUP + "exceptionEntry_valid",),

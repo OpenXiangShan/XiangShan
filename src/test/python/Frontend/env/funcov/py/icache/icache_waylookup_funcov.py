@@ -7,7 +7,7 @@ _WL = "Frontend_top.Frontend.inner_icache.wayLookup."
 _ICACHE = "Frontend_top.Frontend.inner_icache."
 _MAIN = _ICACHE + "mainPipe."
 _PREFETCH = _ICACHE + "prefetcher."
-_TOP = "Frontend_top.Frontend."
+_TOP = "Frontend_top."
 
 _UPDATE_COUNT = 64
 _ENTRY_FIELD_NAMES = (
@@ -146,6 +146,11 @@ _SIGNALS = {
         _PREFETCH + "__Vtogcov__io_wayLookupWrite_0_ready",
     ),
     "write1_ready": (
+        # The generated ICache wrapper exposes only port 0's ready signal;
+        # ICacheWayLookup drives both Decoupled write ports from the same
+        # free-entry/exception condition.
+        _PREFETCH + "io_wayLookupWrite_0_ready",
+        _PREFETCH + "__Vtogcov__io_wayLookupWrite_0_ready",
         _PREFETCH + "io_wayLookupWrite_1_ready",
         _PREFETCH + "__Vtogcov__io_wayLookupWrite_1_ready",
     ),

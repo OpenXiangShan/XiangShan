@@ -221,6 +221,8 @@ def reset_icache_missunit_coverage_state(recorder) -> None:
         "pending_fetch_allocations": [],
         "last_fetch_allocation_checkpoint": None,
         "last_redirect_sram_write_checkpoint": None,
+        "last_fetch_request_observation": None,
+        "last_parallel_request_observation": None,
     }
 
 
@@ -234,31 +236,39 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
     signals = {
         "fetch_valid": _read(
             recorder,
-            _names(
+            (
                 _MAIN + "__Vtogcov__io_missReq_valid",
+                _MISS + "io_fetchReq_valid",
+                _MISS + "__Vtogcov__io_fetchReq_valid",
                 _MISS + "fetchDemux.io_in_valid",
                 _MISS + "fetchDemux.__Vtogcov__io_in_valid",
             ),
         ),
         "fetch_ready": _read(
             recorder,
-            _names(
+            (
                 _MAIN + "__Vtogcov__io_missReq_ready",
+                _MISS + "io_fetchReq_ready",
+                _MISS + "__Vtogcov__io_fetchReq_ready",
                 _MISS + "fetchDemux.io_in_ready",
                 _MISS + "fetchDemux.__Vtogcov__io_in_ready",
             ),
         ),
         "fetch_paddr": _read(
             recorder,
-            _names(
+            (
                 _MAIN + "__Vtogcov__io_missReq_bits_blkPAddr",
+                _MISS + "io_fetchReq_bits_blkPAddr",
+                _MISS + "__Vtogcov__io_fetchReq_bits_blkPAddr",
                 _ICACHE + "_mainPipe_io_missReq_bits_blkPAddr",
             ),
         ),
         "fetch_vset": _read(
             recorder,
-            _names(
+            (
                 _MAIN + "__Vtogcov__io_missReq_bits_vSetIdx",
+                _MISS + "io_fetchReq_bits_vSetIdx",
+                _MISS + "__Vtogcov__io_fetchReq_bits_vSetIdx",
                 _ICACHE + "_mainPipe_io_missReq_bits_vSetIdx",
             ),
         ),
@@ -360,8 +370,9 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
         "prefetch_arb_valid": _read(
             recorder,
             (
-                _MISS + "prefetchArb.io_out_valid",
+                _MISS + "_prefetchArb_io_out_valid",
                 _MISS + "prefetchArb.__Vtogcov__io_out_valid",
+                _MISS + "prefetchArb.io_out_valid",
             ),
         ),
         "prefetch_arb_selected": _read(recorder, (_MISS + "prefetchArb.io_sel",)),
@@ -464,6 +475,25 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
     prefetch_fire = prefetch_valid and _on(signals["prefetch_ready"])
     fetch_demux_fire = fetch_fire and not fetch_hit
     prefetch_demux_fire = prefetch_fire and not prefetch_hit
+    if fetch_valid or fetch_hit:
+        state["last_fetch_request_observation"] = {
+            "cycle": cycle,
+            "valid": signals["fetch_valid"],
+            "ready": signals["fetch_ready"],
+            "hit": signals["fetch_hit"],
+            "paddr": signals["fetch_paddr"],
+            "vset": signals["fetch_vset"],
+        }
+    if fetch_valid and prefetch_valid:
+        state["last_parallel_request_observation"] = {
+            "cycle": cycle,
+            "fetch_paddr": signals["fetch_paddr"],
+            "fetch_vset": signals["fetch_vset"],
+            "fetch_hit": signals["fetch_hit"],
+            "prefetch_paddr": signals["prefetch_paddr"],
+            "prefetch_vset": signals["prefetch_vset"],
+            "prefetch_hit": signals["prefetch_hit"],
+        }
     fetch_candidates = sum(_on(signals[f"fetch_arb_{index}"]) for index in range(4))
     fetch_full = _all_valid(mshrs, range(4))
     fetch_free_indexes = _free_indexes(mshrs, range(4))
@@ -722,7 +752,6 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
         fetch_fire
         and controls_clear
         and fetch_hit
-        and fetch_existing_mshr_hit
     )
     prefetch_merge_any_mshr = (
         prefetch_fire
