@@ -568,7 +568,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   // ptw
   val sfence = RegNext(RegNext(io.ooo_to_mem.sfence))
-  val tlbcsr = RegNext(RegNext(io.ooo_to_mem.tlbCsr))
+  val tlbcsr = RegNext(io.ooo_to_mem.tlbCsr)
   private val ptw = outer.ptw.module
   private val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
   private val l1d_to_l2_buffer = outer.l1d_to_l2_buffer.map(_.module)
