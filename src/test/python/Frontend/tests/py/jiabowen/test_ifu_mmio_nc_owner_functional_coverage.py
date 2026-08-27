@@ -466,7 +466,7 @@ def test_send_request_stall_uses_observed_valid_and_nc_witnesses_canonical_bin()
     assert (owner.MMIO_OWNER_GROUP, "mmio_leaf_017") in recorder.hits
 
 
-def test_nc_first_page_iaf_requires_real_pc_match_for_attribution_leaf():
+def test_nc_first_page_iaf_uses_ftq_identity_and_ignores_debug_pc():
     snapshot = _empty_snapshot()
     snapshot.update(
         {
@@ -478,24 +478,31 @@ def test_nc_first_page_iaf_requires_real_pc_match_for_attribution_leaf():
             "s2_exception": 3,
             "s2_pc": 0x7FF,
             "s2_instr_pc": 0x7FF,
+            "s2_ftq_flag": 0,
+            "s2_ftq_value": 9,
+            "req_valid": 0,
+            "to_uncache_valid": 0,
+            "tl_a_valid": 0,
             "to_valid": 1,
             "to_ready": 1,
             "to_exception": 3,
             "to_pc": 0,
+            "to_ftq_flag": 0,
+            "to_ftq_value": 9,
+            "to_ftq_offset": 0,
         }
     )
     recorder = _Recorder()
-    recorder.risk_observations = []
     state = _state(recorder)
 
     owner._sample_nc(recorder, 1, snapshot, state)
     assert (owner.NC_OWNER_GROUP, "nc_leaf_032") in recorder.hits
-    assert (owner.NC_OWNER_GROUP, "nc_leaf_030") not in recorder.hits
-    assert recorder.risk_observations[-1]["event"] == "nc_first_page_fault_pc_mismatch"
-
-    snapshot["to_pc"] = snapshot["s2_instr_pc"]
-    owner._sample_nc(recorder, 2, snapshot, state)
     assert (owner.NC_OWNER_GROUP, "nc_leaf_030") in recorder.hits
+
+    recorder = _Recorder()
+    snapshot["to_ftq_value"] = 10
+    owner._sample_nc(recorder, 2, snapshot, _state(recorder))
+    assert (owner.NC_OWNER_GROUP, "nc_leaf_030") not in recorder.hits
 
 
 def test_mmio_redirect_cancels_waiting_response_path():

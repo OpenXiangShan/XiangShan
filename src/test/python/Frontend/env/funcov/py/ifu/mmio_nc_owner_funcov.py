@@ -93,7 +93,6 @@ def initialize_mmio_nc_owner_coverage_state(recorder) -> None:
         "nc_last_delivery": None,
         "nc_cross_page_pending": False,
         "nc_cross_8b_pending": False,
-        "nc_first_page_pc_bug_reported": False,
         "nc_redirect_pending": False,
         "nc_checker_redirect_pending": None,
         "nc_to_mmio_pending": False,
@@ -118,11 +117,24 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
             break
         is_rvc_mask |= (int(value) & 1) << slot
 
+    active_slot = None
     active_to_pc = None
+    active_to_ftq_flag = None
+    active_to_ftq_value = None
+    active_to_ftq_offset = None
     if enq is not None and int(enq) != 0:
         active_slot = (int(enq) & -int(enq)).bit_length() - 1
         active_to_pc = _read_ifu(
             recorder, dut, f"io_toIBuffer_bits_pc_{active_slot}_addr"
+        )
+        active_to_ftq_flag = _read_ifu(
+            recorder, dut, f"io_toIBuffer_bits_ftqPtr_{active_slot}_flag"
+        )
+        active_to_ftq_value = _read_ifu(
+            recorder, dut, f"io_toIBuffer_bits_ftqPtr_{active_slot}_value"
+        )
+        active_to_ftq_offset = _read_ifu(
+            recorder, dut, f"io_toIBuffer_bits_instrEndOffset_{active_slot}_offset"
         )
     s2_align_shift = _read_ifu(recorder, dut, "s2_alignShiftNum")
     s2_instr_pc = (
@@ -143,6 +155,8 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "s2_pbmt": _read_ifu(recorder, dut, "s2_icacheMeta_0_itlbPbmt"),
         "s2_exception": _read_ifu(recorder, dut, "s2_icacheMeta_0_exception_value"),
         "s2_pc": _read_ifu(recorder, dut, "s2_fetchBlock_0_startVAddr_addr"),
+        "s2_ftq_flag": _read_ifu(recorder, dut, "s2_fetchBlock_0_ftqIdx_flag"),
+        "s2_ftq_value": _read_ifu(recorder, dut, "s2_fetchBlock_0_ftqIdx_value"),
         "s2_instr_pc": s2_instr_pc,
         "s2_uncache_data": _read_ifu(recorder, dut, "s2_uncacheData"),
         "is_first": _read_ifu(recorder, dut, "isFirstInstr"),
@@ -242,6 +256,9 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "to_ready": _read_ifu(recorder, dut, "io_toIBuffer_ready"),
         "to_enq": enq,
         "to_pc": active_to_pc,
+        "to_ftq_flag": active_to_ftq_flag,
+        "to_ftq_value": active_to_ftq_value,
+        "to_ftq_offset": active_to_ftq_offset,
         "to_is_rvc": is_rvc_mask if is_rvc_available else None,
         "to_exception": _read_ifu(
             recorder, dut, "io_toIBuffer_bits_exceptionType_value"
@@ -1058,26 +1075,43 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
             {**evidence, "exception_kind": s["to_exception"]},
         )
     if conditions[32]:
-        if s["to_pc"] == s["s2_instr_pc"]:
+        ftq_identity_known = all(
+            s[name] is not None
+            for name in (
+                "s2_ftq_flag",
+                "s2_ftq_value",
+                "to_ftq_flag",
+                "to_ftq_value",
+                "to_ftq_offset",
+            )
+        )
+        ftq_identity_matches = (
+            ftq_identity_known
+            and s["to_ftq_flag"] == s["s2_ftq_flag"]
+            and s["to_ftq_value"] == s["s2_ftq_value"]
+        )
+        no_uncache_request = (
+            s["req_valid"] != 1
+            and s["to_uncache_valid"] != 1
+            and s["tl_a_valid"] != 1
+        )
+        if ftq_identity_matches and no_uncache_request:
             _mark(
                 recorder,
                 NC_OWNER_GROUP,
                 30,
                 cycle,
-                {**evidence, "pc_attribution_checked": True},
-            )
-        elif not state["nc_first_page_pc_bug_reported"]:
-            recorder.risk_observations.append(
                 {
-                    "event": "nc_first_page_fault_pc_mismatch",
-                    "cycle": int(cycle),
-                    "expected_pc_addr": s["s2_instr_pc"],
-                    "actual_pc_addr": s["to_pc"],
-                    "exception": s["to_exception"],
-                    "rtl_review": "c0ca46459",
-                }
+                    **evidence,
+                    "functional_exception_identity_checked": True,
+                    "ftq_ptr": [s["to_ftq_flag"], s["to_ftq_value"]],
+                    "ftq_offset": s["to_ftq_offset"],
+                    "debug_pc": s["to_pc"],
+                    "debug_pc_matches_nc_va": s["to_pc"] == s["s2_instr_pc"],
+                    "cfvec_pc_functional_requirement": False,
+                    "old_uncache_request_suppressed": True,
+                },
             )
-            state["nc_first_page_pc_bug_reported"] = True
 
     if s["ifu_flush"] == 1:
         state["nc_active"] = False

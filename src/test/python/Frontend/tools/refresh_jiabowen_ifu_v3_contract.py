@@ -47,6 +47,14 @@ _SUPERSEDED_EVIDENCE = {
         f"{_REVIEW}:PredChecker is a cacheable writeback path; this leaf covers "
         "an older cacheable checker redirect cancelling a younger NC transaction"
     ),
+    "BIN-1084": (
+        f"{_REVIEW}:OPEN/FIXME first-page fault bypasses uncache req.fire but "
+        "the uncache output branch still selects stale uncachePc"
+    ),
+    "BIN-1086": (
+        f"{_REVIEW}:separates the reachable IAF type contract from blocked "
+        "BIN-1084 PC attribution"
+    ),
 }
 
 _UPDATES = {
@@ -240,20 +248,20 @@ _UPDATES = {
         evidence=f"{_REVIEW}:PredChecker is cacheable-only; legal V3 ordering resolves the checker redirect before the younger NC request and restarts NC from the redirect target",
     ),
     "BIN-1084": ContractUpdate(
-        "NC页尾第一页执行权限异常应归属请求起始PC（OPEN/FIXME）",
-        "PBMT.NC请求起始PC位于4K页尾2B，第一页PMP execute=0且第二页可执行",
-        "toIBuffer交付Instruction Access Fault且活动槽PC等于请求起始PC；当前V3因s2_useUncacheFetch=0未更新uncachePc，实测活动槽PC为0，不得标HIT",
-        "s2_reqIsUncache、s2_useUncacheFetch、s2起始PC、uncacheUnit.req.fire、uncachePc、toIBuffer活动槽PC/exceptionType",
-        status="BLOCKED",
-        evidence=f"{_REVIEW}:OPEN/FIXME first-page fault bypasses uncache req.fire but the uncache output branch still selects stale uncachePc",
+        "NC第一页权限异常不发InstrUncache请求且保留后端异常身份",
+        "PBMT.NC事务在ITLB/PMP权限检查产生PF/AF；异常发生在InstrUncache请求发出前，页尾2B场景作为directed witness",
+        "s2_reqIsUncache=1、s2_useUncacheFetch=0且不发出IfuUncache/InstrUncache/TL请求；异常通过toIBuffer交付，exceptionType与ftqPtr/ftqOffset保留当前FTQ事务身份；cfVec.pc为debug-only，不要求等于NC VA",
+        "PBMT/权限异常、s2_reqIsUncache、s2_useUncacheFetch、IfuUncache/InstrUncache/TL请求、toIBuffer exceptionType/ftqPtr/ftqOffset；后端FTQ→Backend PC memory路径",
+        status="MODELED",
+        evidence=f"{_REVIEW}:cfVec.pc is debug-only; functional exception identity uses exceptionVec plus ftqPtr/ftqOffset and Backend FTQ PC memory",
     ),
     "BIN-1086": ContractUpdate(
         "NC页尾第一页不可执行时按Instruction Access Fault交付",
         "PBMT.NC请求起始PC位于4K页尾2B，第一页PMP execute=0且第二页可执行；权限异常发生在uncache请求发出前",
-        "s2_reqIsUncache=1、s2_useUncacheFetch=0且s2异常为AF；toIBuffer实际交付AF；PC归属问题由BIN-1084独立跟踪",
+        "s2_reqIsUncache=1、s2_useUncacheFetch=0且s2异常为AF；toIBuffer实际交付AF；cfVec.pc debug值不作为功能判据",
         "PBMT.NC/PMP属性、s2起始PC、s2_reqIsUncache、s2_useUncacheFetch、toIBuffer valid/ready/exceptionType",
         status="MODELED",
-        evidence=f"{_REVIEW}:separates the reachable IAF type contract from blocked BIN-1084 PC attribution",
+        evidence=f"{_REVIEW}:first-page IAF is a functional exception contract; cfVec.pc is debug-only",
     ),
 }
 

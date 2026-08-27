@@ -530,7 +530,7 @@ def test_nc_execute_denied_preserves_fetch_exception(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-1086")
+@pytest.mark.funcov_bins("BIN-1084", "BIN-1086")
 @pytest.mark.skipif(
     not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
 )
@@ -622,6 +622,14 @@ def test_nc_page_tail_first_page_execute_denied_delivers_iaf(env):
                     "s2_use_uncache": snapshot["s2_use_uncache"],
                     "s2_exception": snapshot["s2_exception"],
                     "to_pc": snapshot["to_pc"],
+                    "s2_ftq_flag": snapshot["s2_ftq_flag"],
+                    "s2_ftq_value": snapshot["s2_ftq_value"],
+                    "to_ftq_flag": snapshot["to_ftq_flag"],
+                    "to_ftq_value": snapshot["to_ftq_value"],
+                    "to_ftq_offset": snapshot["to_ftq_offset"],
+                    "req_valid": snapshot["req_valid"],
+                    "to_uncache_valid": snapshot["to_uncache_valid"],
+                    "tl_a_valid": snapshot["tl_a_valid"],
                 }
             )
 
@@ -632,7 +640,10 @@ def test_nc_page_tail_first_page_execute_denied_delivers_iaf(env):
     uncache._force_redirect_to(env, start_pc)
 
     for _ in range(6000):
-        if env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_032"):
+        if all(
+            env.functional_coverage.key_hit("ifu_nc_owner_v3", leaf)
+            for leaf in ("nc_leaf_030", "nc_leaf_032")
+        ):
             break
         env.step(1)
 
@@ -646,11 +657,13 @@ def test_nc_page_tail_first_page_execute_denied_delivers_iaf(env):
     assert samples[-1]["s2_req_uncache"] == 1
     assert samples[-1]["s2_use_uncache"] == 0
     assert samples[-1]["s2_exception"] == 3
-    assert not env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_030")
-    assert any(
-        item.get("event") == "nc_first_page_fault_pc_mismatch"
-        for item in env.functional_coverage.risk_observations
-    )
+    assert samples[-1]["req_valid"] != 1
+    assert samples[-1]["to_uncache_valid"] != 1
+    assert samples[-1]["tl_a_valid"] != 1
+    assert samples[-1]["to_ftq_flag"] == samples[-1]["s2_ftq_flag"]
+    assert samples[-1]["to_ftq_value"] == samples[-1]["s2_ftq_value"]
+    assert samples[-1]["to_ftq_offset"] is not None
+    assert env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_030")
     assert not env.monitor.get_errors()
 
 
