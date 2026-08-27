@@ -225,6 +225,22 @@ _UPDATES = {
         status="MODELED",
         evidence=f"{_REVIEW}:NC policy section cross-references the canonical InstrUncache protocol leaf BIN-1032",
     ),
+    "BIN-1084": ContractUpdate(
+        "NC页尾第一页执行权限异常应归属请求起始PC（OPEN/FIXME）",
+        "PBMT.NC请求起始PC位于4K页尾2B，第一页PMP execute=0且第二页可执行",
+        "toIBuffer交付Instruction Access Fault且活动槽PC等于请求起始PC；当前V3因s2_useUncacheFetch=0未更新uncachePc，实测活动槽PC为0，不得标HIT",
+        "s2_reqIsUncache、s2_useUncacheFetch、s2起始PC、uncacheUnit.req.fire、uncachePc、toIBuffer活动槽PC/exceptionType",
+        status="BLOCKED",
+        evidence=f"{_REVIEW}:OPEN/FIXME first-page fault bypasses uncache req.fire but the uncache output branch still selects stale uncachePc",
+    ),
+    "BIN-1086": ContractUpdate(
+        "NC页尾第一页不可执行时按Instruction Access Fault交付",
+        "PBMT.NC请求起始PC位于4K页尾2B，第一页PMP execute=0且第二页可执行；权限异常发生在uncache请求发出前",
+        "s2_reqIsUncache=1、s2_useUncacheFetch=0且s2异常为AF；toIBuffer实际交付AF；PC归属问题由BIN-1084独立跟踪",
+        "PBMT.NC/PMP属性、s2起始PC、s2_reqIsUncache、s2_useUncacheFetch、toIBuffer valid/ready/exceptionType",
+        status="MODELED",
+        evidence=f"{_REVIEW}:separates the reachable IAF type contract from blocked BIN-1084 PC attribution",
+    ),
 }
 
 

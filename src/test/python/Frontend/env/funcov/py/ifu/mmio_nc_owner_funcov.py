@@ -93,6 +93,7 @@ def initialize_mmio_nc_owner_coverage_state(recorder) -> None:
         "nc_last_delivery": None,
         "nc_cross_page_pending": False,
         "nc_cross_8b_pending": False,
+        "nc_first_page_pc_bug_reported": False,
         "nc_redirect_pending": False,
         "nc_to_mmio_pending": False,
         "nc_seen": set(),
@@ -116,6 +117,23 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
             break
         is_rvc_mask |= (int(value) & 1) << slot
 
+    active_to_pc = None
+    if enq is not None and int(enq) != 0:
+        active_slot = (int(enq) & -int(enq)).bit_length() - 1
+        active_to_pc = _read_ifu(
+            recorder, dut, f"io_toIBuffer_bits_pc_{active_slot}_addr"
+        )
+    s2_align_shift = _read_ifu(recorder, dut, "s2_alignShiftNum")
+    s2_instr_pc = (
+        None
+        if s2_align_shift is None
+        else _read_ifu(
+            recorder,
+            dut,
+            f"s2_alignedInstrPcVec_{int(s2_align_shift)}_addr",
+        )
+    )
+
     return {
         "s2_valid": _read_ifu(recorder, dut, "s2_valid_valid"),
         "s2_req_uncache": _read_ifu(recorder, dut, "s2_reqIsUncache"),
@@ -124,6 +142,7 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "s2_pbmt": _read_ifu(recorder, dut, "s2_icacheMeta_0_itlbPbmt"),
         "s2_exception": _read_ifu(recorder, dut, "s2_icacheMeta_0_exception_value"),
         "s2_pc": _read_ifu(recorder, dut, "s2_fetchBlock_0_startVAddr_addr"),
+        "s2_instr_pc": s2_instr_pc,
         "s2_uncache_data": _read_ifu(recorder, dut, "s2_uncacheData"),
         "is_first": _read_ifu(recorder, dut, "isFirstInstr"),
         "req_valid": _read_uncache(recorder, dut, "io_req_valid"),
@@ -221,6 +240,7 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "to_valid": _read_ifu(recorder, dut, "io_toIBuffer_valid"),
         "to_ready": _read_ifu(recorder, dut, "io_toIBuffer_ready"),
         "to_enq": enq,
+        "to_pc": active_to_pc,
         "to_is_rvc": is_rvc_mask if is_rvc_available else None,
         "to_exception": _read_ifu(
             recorder, dut, "io_toIBuffer_bits_exceptionType_value"
@@ -630,6 +650,10 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
         s["entry_req_addr"] is not None
         and (int(s["entry_req_addr"]) & 0x7FF) == 0x7FF
     )
+    s2_page_tail = (
+        s["s2_instr_pc"] is not None
+        and (int(s["s2_instr_pc"]) & 0x7FF) == 0x7FF
+    )
     beat_tail = (
         s["entry_req_addr"] is not None
         and (int(s["entry_req_addr"]) & 0x3) == 0x3
@@ -643,12 +667,14 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
     response_is_rvc = response_half is not None and (response_half & 0x3) != 0x3
     evidence = {
         "s2_pc": s["s2_pc"],
+        "s2_instr_pc": s["s2_instr_pc"],
         "state": s["uncache_state"],
         "entry_state": s["entry_state"],
         "tl_a_addr": s["tl_a_addr"],
         "uncache_pc": s["uncache_pc"],
         "resp_data": s["resp_data"],
         "s2_uncache_data": s["s2_uncache_data"],
+        "to_pc": s["to_pc"],
         "ifu_stall": ifu_stall,
         "to_uncache_valid": to_uncache_valid,
     }
@@ -748,7 +774,13 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
         and s["resp_data"] is not None
         and (int(s["resp_data"]) & 0x3) != 0x3
         and s["resp_need_resend"] == 0,
-        32: nc_delivery and page_tail and s["to_exception"] == 3,
+        32: nc_candidate
+        and s["s2_use_uncache"] == 0
+        and s2_page_tail
+        and s["s2_exception"] == 3
+        and s["to_valid"] == 1
+        and s["to_ready"] == 1
+        and s["to_exception"] == 3,
     }
     for index, condition in conditions.items():
         if condition:
@@ -987,12 +1019,27 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
             cycle,
             {**evidence, "exception_kind": s["to_exception"]},
         )
-    if nc_active and page_tail and s["s2_exception"] not in {None, 0}:
-        seen.add("first_page_exception")
-    if nc_delivery and page_tail and s["to_exception"] == 3:
-        seen.add("first_page_iaf")
-    if {"first_page_exception", "first_page_iaf"}.issubset(seen):
-        _mark(recorder, NC_OWNER_GROUP, 30, cycle, {**evidence, "seen": sorted(seen)})
+    if conditions[32]:
+        if s["to_pc"] == s["s2_instr_pc"]:
+            _mark(
+                recorder,
+                NC_OWNER_GROUP,
+                30,
+                cycle,
+                {**evidence, "pc_attribution_checked": True},
+            )
+        elif not state["nc_first_page_pc_bug_reported"]:
+            recorder.risk_observations.append(
+                {
+                    "event": "nc_first_page_fault_pc_mismatch",
+                    "cycle": int(cycle),
+                    "expected_pc_addr": s["s2_instr_pc"],
+                    "actual_pc_addr": s["to_pc"],
+                    "exception": s["to_exception"],
+                    "rtl_review": "c0ca46459",
+                }
+            )
+            state["nc_first_page_pc_bug_reported"] = True
 
     if s["ifu_flush"] == 1:
         state["nc_active"] = False

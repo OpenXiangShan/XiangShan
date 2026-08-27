@@ -530,6 +530,130 @@ def test_nc_execute_denied_preserves_fetch_exception(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-1086")
+@pytest.mark.skipif(
+    not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
+)
+def test_nc_page_tail_first_page_execute_denied_delivers_iaf(env):
+    start_pc = uncache._NORMAL_BASE + uncache._SV39_PAGE_SIZE - 2
+    start_paddr = uncache._NORMAL_PHYS_BASE + uncache._SV39_PAGE_SIZE - 2
+    first_page = start_paddr & ~(uncache._SV39_PAGE_SIZE - 1)
+    second_page = first_page + uncache._SV39_PAGE_SIZE
+    payload = int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
+
+    uncache._initialize_sv39_fetch(env, reset_vector=start_pc)
+    scenario = uncache.TranslationScenario(
+        scenario_id="bin-1086-nc-page-tail-first-page-iaf",
+        va=start_pc,
+        pa=start_paddr,
+        payload=payload,
+        page_count=2,
+        s1_pte=uncache.TranslationPte(pbmt=uncache._PBMT_NC),
+        expected_path="fault",
+        expected_result="access_fault",
+        pmp_entries=(
+            uncache.TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=uncache.PmpPmaConfig(
+                    match="napot", read=True, write=True, execute=False
+                ),
+                addr=first_page,
+                size=uncache._SV39_PAGE_SIZE,
+            ),
+            uncache.TranslationPmpPmaEntry(
+                kind="pmp",
+                index=1,
+                config=uncache.PmpPmaConfig(
+                    match="napot", read=True, write=True, execute=True
+                ),
+                addr=second_page,
+                size=uncache._SV39_PAGE_SIZE,
+            ),
+        ),
+        pma_entries=(
+            uncache.TranslationPmpPmaEntry(
+                kind="pma",
+                index=0,
+                config=uncache.PmpPmaConfig(
+                    match="napot",
+                    read=True,
+                    write=True,
+                    execute=True,
+                    cacheable=True,
+                    atomic=True,
+                ),
+                addr=first_page,
+                size=uncache._SV39_PAGE_SIZE,
+            ),
+            uncache.TranslationPmpPmaEntry(
+                kind="pma",
+                index=1,
+                config=uncache.PmpPmaConfig(
+                    match="napot",
+                    read=True,
+                    write=True,
+                    execute=True,
+                    cacheable=True,
+                    atomic=True,
+                ),
+                addr=second_page,
+                size=uncache._SV39_PAGE_SIZE,
+            ),
+        ),
+    )
+    state = uncache.TranslationScenarioBuilder(env).build(scenario)
+    assert state.expected_page_outcomes[0]["permission"]["execute_allowed"] is False
+    assert state.expected_page_outcomes[1]["permission"]["execute_allowed"] is True
+
+    samples = []
+
+    def capture_first_page_fault(cycle, active_env):
+        snapshot = owner_funcov._snapshot(
+            active_env.functional_coverage, active_env.dut
+        )
+        if snapshot["to_valid"] == 1 and snapshot["to_exception"] == 3:
+            samples.append(
+                {
+                    "cycle": int(cycle),
+                    "s2_pc": snapshot["s2_pc"],
+                    "s2_instr_pc": snapshot["s2_instr_pc"],
+                    "s2_req_uncache": snapshot["s2_req_uncache"],
+                    "s2_use_uncache": snapshot["s2_use_uncache"],
+                    "s2_exception": snapshot["s2_exception"],
+                    "to_pc": snapshot["to_pc"],
+                }
+            )
+
+    env.register_cycle_observer(capture_first_page_fault)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(start_pc)
+    env.arm_translation_scenario(state)
+    uncache._force_redirect_to(env, start_pc)
+
+    for _ in range(6000):
+        if env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_032"):
+            break
+        env.step(1)
+
+    assert env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_032"), {
+        "samples": samples,
+        "ptw": env.ptw_agent.get_stats(),
+        "uncache": env.uncache_agent.get_stats(),
+    }
+    assert samples
+    assert samples[-1]["s2_instr_pc"] == start_pc >> 1
+    assert samples[-1]["s2_req_uncache"] == 1
+    assert samples[-1]["s2_use_uncache"] == 0
+    assert samples[-1]["s2_exception"] == 3
+    assert not env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_030")
+    assert any(
+        item.get("event") == "nc_first_page_fault_pc_mismatch"
+        for item in env.functional_coverage.risk_observations
+    )
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_bins("BIN-1052")
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_backend_redirect_wins_response_writeback(env):

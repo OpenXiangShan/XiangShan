@@ -54,6 +54,10 @@ def test_snapshot_reads_current_verilator_derived_aliases():
             "uncacheUnit.io_toUncache_req_valid": 1,
             "uncacheUnit.io_emptyAfter": 1,
             "Frontend_top.Frontend.inner_ifu.s2_uncacheData": 0xAABBCCDD,
+            "Frontend_top.Frontend.inner_ifu.s2_alignShiftNum": 0,
+            "Frontend_top.Frontend.inner_ifu.s2_alignedInstrPcVec_0_addr": 0x400,
+            "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable": 1,
+            "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_pc_0_addr": 0x400,
             "Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_valid": 1,
             "Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_bits_data": 0x5678,
             "Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_bits_corrupt": 0,
@@ -75,6 +79,8 @@ def test_snapshot_reads_current_verilator_derived_aliases():
     assert snapshot["to_uncache_valid"] == 1
     assert snapshot["empty_after"] == 1
     assert snapshot["s2_uncache_data"] == 0xAABBCCDD
+    assert snapshot["s2_instr_pc"] == 0x400
+    assert snapshot["to_pc"] == 0x400
     assert snapshot["instr_resp_valid"] == 1
     assert snapshot["instr_resp_data"] == 0x5678
     assert snapshot["instr_resp_corrupt"] == 0
@@ -456,6 +462,38 @@ def test_send_request_stall_uses_observed_valid_and_nc_witnesses_canonical_bin()
     owner._sample_nc(recorder, 2, snapshot, state)
     assert (owner.NC_OWNER_GROUP, "nc_leaf_008") in recorder.hits
     assert (owner.MMIO_OWNER_GROUP, "mmio_leaf_017") in recorder.hits
+
+
+def test_nc_first_page_iaf_requires_real_pc_match_for_attribution_leaf():
+    snapshot = _empty_snapshot()
+    snapshot.update(
+        {
+            "s2_valid": 1,
+            "s2_req_uncache": 1,
+            "s2_use_uncache": 0,
+            "s2_pmp_mmio": 0,
+            "s2_pbmt": owner._PBMT_NC,
+            "s2_exception": 3,
+            "s2_pc": 0x7FF,
+            "s2_instr_pc": 0x7FF,
+            "to_valid": 1,
+            "to_ready": 1,
+            "to_exception": 3,
+            "to_pc": 0,
+        }
+    )
+    recorder = _Recorder()
+    recorder.risk_observations = []
+    state = _state(recorder)
+
+    owner._sample_nc(recorder, 1, snapshot, state)
+    assert (owner.NC_OWNER_GROUP, "nc_leaf_032") in recorder.hits
+    assert (owner.NC_OWNER_GROUP, "nc_leaf_030") not in recorder.hits
+    assert recorder.risk_observations[-1]["event"] == "nc_first_page_fault_pc_mismatch"
+
+    snapshot["to_pc"] = snapshot["s2_instr_pc"]
+    owner._sample_nc(recorder, 2, snapshot, state)
+    assert (owner.NC_OWNER_GROUP, "nc_leaf_030") in recorder.hits
 
 
 def test_mmio_redirect_cancels_waiting_response_path():
