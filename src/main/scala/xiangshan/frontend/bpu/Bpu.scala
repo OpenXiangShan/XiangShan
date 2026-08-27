@@ -365,9 +365,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // timing optimization: The comparison of predictions and the generation of the s3_taken are performed in parallel.
   private val s3_mbtbCfiPositionDiffVec = VecInit(s3_mbtbResult.map(_.bits.cfiPosition =/= s3_s1Prediction.cfiPosition))
   private val s3_mbtbAttributeDiffVec   = VecInit(s3_mbtbResult.map(_.bits.attribute =/= s3_s1Prediction.attribute))
-  private val s3_mbtbTargetDiffVec      = VecInit(s3_mbtbResult.map(_.bits.target =/= s3_s1Prediction.target))
-  private val s3_ittageTargetDiff       = ittage.io.prediction.target =/= s3_s1Prediction.target
-  private val s3_rasTargetDiff          = ras.io.topRetAddr =/= s3_s1Prediction.target
+  // timing optimization: btb's target is Cat(getUpper(startPc), entry.lower), so we can compare only lower bits
+  private val s3_mbtbTargetDiffVec = VecInit(s3_mbtbResult.map(_.bits.targetLower =/= s3_s1Prediction.targetLower))
+  // but we still need to compare full target for ittage/ras
+  private val s3_ittageTargetDiff = ittage.io.prediction.target =/= s3_s1Prediction.target
+  private val s3_rasTargetDiff    = ras.io.topRetAddr =/= s3_s1Prediction.target
 
   private val s3_takenMask = VecInit(s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
     val useTage   = s3_tagePrediction.takenVec(i).valid

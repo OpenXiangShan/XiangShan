@@ -398,4 +398,6 @@ class Prediction(implicit p: Parameters) extends BpuBundle {
   val target:      GuardedPc       = GuardedPc()
   val attribute:   BranchAttribute = new BranchAttribute
   val taken:       Bool            = Bool()
+
+  def targetLower: UInt = target(MaxBtbTargetWidth + instOffsetBits - 1, instOffsetBits)
 }
