@@ -220,8 +220,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   // perf
   io.toIfu.perf.hits         := mainPipe.io.perf.rawHits
-  io.toIfu.perf.isDoubleLine := mainPipe.io.toIfu.req.bits(0).perf_isCrossLine
-  io.toIfu.perf.exception    := mainPipe.io.toIfu.req.bits(0).icacheMeta.exception
+  io.toIfu.perf.isDoubleLine := mainPipe.io.toIfu.req.bits.info(0).perf_isCrossLine
+  io.toIfu.perf.exception    := mainPipe.io.toIfu.req.bits.info(0).icacheMeta.exception
 
   // topdown perf
   // when mainPipe is handling a miss, it will create a bubble in Ifu pipe
@@ -252,7 +252,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
       "icache_miss_cnt",                // count misses when:
       mainPipe.io.toIfu.req.valid && (  // response is sent to Ifu, and
         !mainPipe.io.perf.rawHits(0) || // port 0 miss, or
-          mainPipe.io.toIfu.req.bits(0).perf_isCrossLine && !mainPipe.io.perf.rawHits(
+          mainPipe.io.toIfu.req.bits.info(0).perf_isCrossLine && !mainPipe.io.perf.rawHits(
             1
           ) // port 1 is needed and miss
       )

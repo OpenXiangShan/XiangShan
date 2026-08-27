@@ -149,7 +149,8 @@ trait HasICacheParameters extends HasFrontendParameters // scalastyle:ignore num
   def DataSramWidth:         Int = ICacheDataBits + DataEccBits + DataPaddingBits
 
   // mainPipe
-  def EnableCorruptRefetch: Boolean = icacheParameters.EnableCorruptRefetch
+  def EnableCorruptRefetch:  Boolean = icacheParameters.EnableCorruptRefetch
+  def MaybeRvcFineShiftBits: Int     = 2
 
   // submodule enable
   def EnableCtrlUnit: Boolean = icacheParameters.EnableCtrlUnit
