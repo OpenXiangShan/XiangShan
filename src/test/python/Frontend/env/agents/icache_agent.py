@@ -44,6 +44,7 @@ class ICacheAgent:
         self.response_records = []
         self._next_response_faults = deque()
         self._response_faults_by_addr: Dict[int, deque] = {}
+        self.a_ready_override: Optional[int] = None
 
     @staticmethod
     def _read(signal, default: int = 0) -> int:
@@ -80,6 +81,14 @@ class ICacheAgent:
 
     def set_event_sink(self, sink: Optional[Callable[[Dict], None]]) -> None:
         self.event_sink = sink
+
+    def set_a_ready(self, value: Optional[int]) -> None:
+        self.a_ready_override = None if value is None else (1 if int(value) else 0)
+        if self.interface is not None:
+            self._write(
+                self.interface.a_ready,
+                1 if self.a_ready_override is None else self.a_ready_override,
+            )
 
     def _emit(self, cycle: int, event_type: str, payload: Dict, level: str = "INFO") -> None:
         if self.event_sink is None:
@@ -144,8 +153,9 @@ class ICacheAgent:
 
     def _handle_request(self, cycle: int) -> None:
         assert self.interface is not None
-        self._write(self.interface.a_ready, 1)
-        if self._read(self.interface.a_valid, 0) != 1:
+        a_ready = 1 if self.a_ready_override is None else int(self.a_ready_override)
+        self._write(self.interface.a_ready, a_ready)
+        if self._read(self.interface.a_valid, 0) != 1 or a_ready != 1:
             return
         source = self._read(self.interface.a_bits_source, 0)
         addr = self._read(self.interface.a_bits_address, 0)
@@ -257,6 +267,7 @@ class ICacheAgent:
             "miss_count": self.miss_count,
             "max_pending_depth": self.max_pending_depth,
             "pending": len(self.pending),
+            "a_ready_override": self.a_ready_override,
             "corrupt_resp_count": self.corrupt_resp_count,
             "denied_resp_count": self.denied_resp_count,
             "request_records": [dict(record) for record in self.request_records],
