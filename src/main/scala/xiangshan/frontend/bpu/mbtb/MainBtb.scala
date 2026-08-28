@@ -368,10 +368,22 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   )
 
   /* *** statistics *** */
-  private val perf_s2HitMask             = VecInit(alignBanks.flatMap(_.io.read.resp.predictions.map(_.valid)))
+  private val perf_s2HitMask = VecInit(alignBanks.flatMap(_.io.read.resp.predictions.map(_.valid)))
+  private val perf_s2VbtbHitMask = VecInit(s2_finalPredictions.zipWithIndex.flatMap { case (predictions, i) =>
+    val useVbtb = s2_logicOverriddenBankMask(s2_posHigherBitsVec(i))
+    predictions.map(pred => useVbtb && pred.valid)
+  })
+  private val perf_s2VbtbTakenMask = VecInit(perf_s2VbtbHitMask zip io.result map { case (hit, pred) =>
+    hit && pred.bits.taken
+  })
+  private val perf_s2VbtbNotTakenMask = VecInit(perf_s2VbtbHitMask zip io.result map { case (hit, pred) =>
+    hit && !pred.bits.taken
+  })
   private val perf_t1HitMispredictBranch = t1_meta.entries.flatten.map(_.hit(t1_mispredictInfo.bits)).reduce(_ || _)
 
   XSPerfAccumulate("pred_use_vbtb", s1_fire && s1_logicLostCount =/= 0.U)
+  XSPerfAccumulate("vbtb_hit_counter_taken", Mux(s2_fire, PopCount(perf_s2VbtbTakenMask), 0.U))
+  XSPerfAccumulate("vbtb_hit_counter_not_taken", Mux(s2_fire, PopCount(perf_s2VbtbNotTakenMask), 0.U))
   XSPerfAccumulate("pred_hit", s2_fire && perf_s2HitMask.reduce(_ || _))
   XSPerfAccumulate("pred_miss", s2_fire && perf_s2HitMask.reduce(!_ && !_))
   XSPerfHistogram("pred_hit_count", PopCount(perf_s2HitMask), s2_fire, 0, NumWay * NumAlignBanks + 1)
