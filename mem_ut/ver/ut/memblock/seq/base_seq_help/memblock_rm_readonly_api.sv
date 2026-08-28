@@ -253,6 +253,21 @@ class memblock_rm_readonly_api extends uvm_object;
         bit                  ready;
     } dcache_overlay_readiness_view_t;
 
+    // 中文注释：RM 读取的 L2 D-error 值型快照。valid 表示账本已经完成 testcase
+    // 初始化；state/activation 来自指定 query sample，绝不暴露 live associative map。
+    typedef struct packed {
+        bit                  valid;
+        bit                  sticky_enabled;
+        bit                  denied;
+        bit                  corrupt;
+        mem_access_base_sequence::l2_d_error_state_e state;
+        longint unsigned     generation;
+        longint unsigned     corrupt_activation_sample;
+        longint unsigned     denied_activation_sample;
+        bit                  source_valid;
+        bit [9:0]            source;
+    } l2_d_error_view_t;
+
     // 中文注释：dispatch 上下文是 RM 关联 UID 表项、当前采样和 flush/replay
     // 生命周期的只读标量快照。它不暴露或消费任一内部 queue；其中 pending 计数
     // 只表示调用瞬间已有 PTW-wait replay 项数，不能用于驱动或推进 replay。
@@ -389,6 +404,11 @@ class memblock_rm_readonly_api extends uvm_object;
     );
     extern function bit get_dcache_overlay_readiness_for_rm(
         output dcache_overlay_readiness_view_t view
+    );
+    extern function bit read_l2_d_error_for_rm(
+        input  mem_addr_t          line_addr,
+        input  longint unsigned    sample,
+        output l2_d_error_view_t   view
     );
 
     extern function bit try_get_common_data(output common_data_transaction data);
@@ -1145,5 +1165,46 @@ function bit memblock_rm_readonly_api::get_dcache_overlay_readiness_for_rm(
     end
     return 1'b0;
 endfunction:get_dcache_overlay_readiness_for_rm
+
+function bit memblock_rm_readonly_api::read_l2_d_error_for_rm(
+    input  mem_addr_t          line_addr,
+    input  longint unsigned    sample,
+    output l2_d_error_view_t   view
+);
+    mem_access_base_sequence::l2_d_error_line_record_t record;
+    bit sticky_enabled;
+
+    view = '{
+        valid: 1'b0,
+        sticky_enabled: 1'b0,
+        denied: 1'b0,
+        corrupt: 1'b0,
+        state: mem_access_base_sequence::L2_D_ERROR_NONE,
+        generation: 0,
+        corrupt_activation_sample: 0,
+        denied_activation_sample: 0,
+        source_valid: 1'b0,
+        source: '0
+    };
+    if (!mem_access_base_sequence::query_l2_d_error_at_sample(
+            line_addr, sample, sticky_enabled, record)) begin
+        return 1'b0;
+    end
+    view.valid          = 1'b1;
+    view.sticky_enabled = sticky_enabled;
+    view.state          = record.valid ? record.state :
+                          mem_access_base_sequence::L2_D_ERROR_NONE;
+    view.denied         = record.valid &&
+                          record.state == mem_access_base_sequence::L2_D_ERROR_DENIED;
+    view.corrupt        = record.valid &&
+                          (record.state == mem_access_base_sequence::L2_D_ERROR_CORRUPT ||
+                           record.state == mem_access_base_sequence::L2_D_ERROR_DENIED);
+    view.generation                 = record.generation;
+    view.corrupt_activation_sample  = record.corrupt_activation_sample;
+    view.denied_activation_sample   = record.denied_activation_sample;
+    view.source_valid               = record.source_valid;
+    view.source                     = record.source;
+    return 1'b1;
+endfunction:read_l2_d_error_for_rm
 
 `endif
