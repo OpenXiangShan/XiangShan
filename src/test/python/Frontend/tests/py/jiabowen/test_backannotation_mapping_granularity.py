@@ -59,6 +59,24 @@ def test_point_and_bin_level_ownership_cannot_overlap(tmp_path):
         )
 
 
+def test_semicolon_separated_sv_and_python_mappings_are_both_owned(tmp_path):
+    pilot_path = tmp_path / "pilot.csv"
+    testpoint_path = tmp_path / "testpoints.csv"
+    _write_pilot(pilot_path)
+    _write_testpoints(
+        testpoint_path,
+        "covergroup group_a, coverpoint point_a, bins value_a (BIN-001); "
+        "covergroup group_a, coverpoint point_a, bins value_b (BIN-002)",
+    )
+
+    mapping = backannotate_funcov.validate_mapping(
+        testpoint_path,
+        backannotate_funcov.load_pilot(pilot_path),
+    )
+
+    assert mapping == {"BIN-001": 2, "BIN-002": 2}
+
+
 def test_one_positive_child_bin_hits_a_point_level_leaf(tmp_path, monkeypatch):
     pilot_path = tmp_path / "pilot.csv"
     testpoint_path = tmp_path / "testpoints.csv"
@@ -93,3 +111,35 @@ def test_one_positive_child_bin_hits_a_point_level_leaf(tmp_path, monkeypatch):
     assert row["status"] == "HIT"
     assert row["testcase"] == "case_point"
     assert "DUT:case_point:hits=2" in row["evidence"]
+
+
+def test_scoped_artifacts_do_not_downgrade_existing_partial(tmp_path):
+    pilot_path = tmp_path / "pilot.csv"
+    testpoint_path = tmp_path / "testpoints.csv"
+    _write_pilot(pilot_path)
+    _write_testpoints(
+        testpoint_path,
+        "covergroup group_a, coverpoint point_a, bins value_a (BIN-001)",
+    )
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        fields = list(csv.DictReader(handle).fieldnames or [])
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    rows[0]["status"] = "PARTIAL"
+    with testpoint_path.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    counts = backannotate_funcov.backannotate(
+        testpoint_path,
+        backannotate_funcov.load_pilot(pilot_path, bin_prefix="BIN-001"),
+        [],
+        apply=True,
+        bin_prefix="BIN-001",
+    )
+
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        row = next(csv.DictReader(handle))
+    assert counts["partial"] == 1
+    assert row["status"] == "PARTIAL"

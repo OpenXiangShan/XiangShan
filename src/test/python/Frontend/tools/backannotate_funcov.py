@@ -270,6 +270,23 @@ def parse_reference(value: str) -> CoverageReference | None:
     return None
 
 
+def parse_references(value: str) -> list[CoverageReference]:
+    """Parse one or more independent mappings kept in a leaf's coverage field.
+
+    A leaf may retain an existing SV mapping alongside its Python owner mapping;
+    semicolon is the explicit separator used by the testpoint CSV.
+    """
+    references = []
+    for fragment in str(value or "").split(";"):
+        fragment = fragment.strip()
+        if not fragment:
+            continue
+        reference = parse_reference(fragment)
+        if reference is not None:
+            references.append(reference)
+    return references
+
+
 def _pilot_bins_for_reference(
     ref: CoverageReference,
     pilot: dict[str, PilotBin],
@@ -307,8 +324,8 @@ def validate_mapping(
         coverage = row["coverage"].strip()
         if not coverage:
             continue
-        ref = parse_reference(coverage)
-        if ref is None:
+        refs = parse_references(coverage)
+        if not refs:
             if bin_prefix is not None and bin_prefix not in coverage:
                 continue
             message = (
@@ -319,51 +336,52 @@ def validate_mapping(
                 structure_errors.append((line, message))
                 continue
             raise ValueError(message)
-        point_key = (ref.group, ref.coverpoint)
-        if ref.kind == "point":
-            items = _pilot_bins_for_reference(ref, pilot)
-            if not items:
-                if bin_prefix is not None:
-                    continue
-                raise ValueError(f"line {line}: unknown pilot coverpoint {point_key}")
+        for ref in refs:
+            point_key = (ref.group, ref.coverpoint)
+            if ref.kind == "point":
+                items = _pilot_bins_for_reference(ref, pilot)
+                if not items:
+                    if bin_prefix is not None:
+                        continue
+                    raise ValueError(f"line {line}: unknown pilot coverpoint {point_key}")
+                if point_key in point_owners:
+                    raise ValueError(
+                        f"line {line}: coverpoint {point_key} already owned by line "
+                        f"{point_owners[point_key]}"
+                    )
+                if point_key in bin_owned_points:
+                    raise ValueError(
+                        f"line {line}: coverpoint {point_key} mixes point-level ownership "
+                        f"with bin-level ownership at line {bin_owned_points[point_key]}"
+                    )
+                point_owners[point_key] = line
+                for item in items:
+                    mapped[item.bin_id] = line
+                continue
+
+            bin_id = str(ref.bin_id)
+            if bin_prefix is not None and not bin_id.startswith(bin_prefix):
+                continue
+            expected = pilot.get(bin_id)
+            if expected is None:
+                raise ValueError(f"line {line}: unknown pilot bin {bin_id}")
+            if (ref.group, ref.coverpoint, ref.bin_name) != (
+                expected.group,
+                expected.coverpoint,
+                expected.bin_name,
+            ):
+                raise ValueError(f"line {line}: pilot mismatch for {bin_id}")
             if point_key in point_owners:
                 raise ValueError(
-                    f"line {line}: coverpoint {point_key} already owned by line "
-                    f"{point_owners[point_key]}"
+                    f"line {line}: coverpoint {point_key} mixes bin-level ownership "
+                    f"with point-level ownership at line {point_owners[point_key]}"
                 )
-            if point_key in bin_owned_points:
+            if bin_id in mapped:
                 raise ValueError(
-                    f"line {line}: coverpoint {point_key} mixes point-level ownership "
-                    f"with bin-level ownership at line {bin_owned_points[point_key]}"
+                    f"line {line}: {bin_id} already owned by line {mapped[bin_id]}"
                 )
-            point_owners[point_key] = line
-            for item in items:
-                mapped[item.bin_id] = line
-            continue
-
-        bin_id = str(ref.bin_id)
-        if bin_prefix is not None and not bin_id.startswith(bin_prefix):
-            continue
-        expected = pilot.get(bin_id)
-        if expected is None:
-            raise ValueError(f"line {line}: unknown pilot bin {bin_id}")
-        if (ref.group, ref.coverpoint, ref.bin_name) != (
-            expected.group,
-            expected.coverpoint,
-            expected.bin_name,
-        ):
-            raise ValueError(f"line {line}: pilot mismatch for {bin_id}")
-        if point_key in point_owners:
-            raise ValueError(
-                f"line {line}: coverpoint {point_key} mixes bin-level ownership "
-                f"with point-level ownership at line {point_owners[point_key]}"
-            )
-        if bin_id in mapped:
-            raise ValueError(
-                f"line {line}: {bin_id} already owned by line {mapped[bin_id]}"
-            )
-        mapped[bin_id] = line
-        bin_owned_points.setdefault(point_key, line)
+            mapped[bin_id] = line
+            bin_owned_points.setdefault(point_key, line)
 
     missing_bins = sorted(set(pilot) - set(mapped))
     if missing_bins:
@@ -1103,18 +1121,31 @@ def backannotate(
         )
 
     for row in rows:
-        ref = parse_reference(row["coverage"])
-        if ref is None:
+        refs = parse_references(row["coverage"])
+        if not refs:
             continue
-        items = _pilot_bins_for_reference(ref, pilot)
-        if not items:
+        reference_items = [
+            (ref, _pilot_bins_for_reference(ref, pilot)) for ref in refs
+        ]
+        reference_items = [(ref, items) for ref, items in reference_items if items]
+        if not reference_items:
             continue
-        if bin_prefix and not any(item.bin_id.startswith(bin_prefix) for item in items):
+        if bin_prefix and not any(
+            item.bin_id.startswith(bin_prefix)
+            for _ref, items in reference_items
+            for item in items
+        ):
             continue
 
-        suggested_testcases = {item.testcase for item in items if item.testcase}
-        if ref.kind == "bin":
-            row["testcase"] = items[0].testcase
+        all_items = [item for _ref, items in reference_items for item in items]
+        suggested_testcases = {item.testcase for item in all_items if item.testcase}
+        if any(ref.kind == "bin" for ref, _items in reference_items):
+            row["testcase"] = next(
+                item.testcase
+                for ref, items in reference_items
+                if ref.kind == "bin"
+                for item in items
+            )
         elif not row["testcase"].strip() and len(suggested_testcases) == 1:
             row["testcase"] = next(iter(suggested_testcases))
         status = row["status"].strip() or "MODELED"
@@ -1127,6 +1158,7 @@ def backannotate(
         # to a subset of tests, so it must not downgrade an already accepted
         # HIT that is absent from that subset.
         existing_hit = status == "HIT"
+        existing_partial = status == "PARTIAL"
 
         model_entries = []
         dut_entries = []
@@ -1144,12 +1176,12 @@ def backannotate(
                     ).get("hits")
                 )
                 or 0
-                for item in items
+                for item in all_items
             )
             legacy_hit_count = max(
                 (
                     _as_int(_as_mapping(hits.get(legacy_key)).get("hits")) or 0
-                    for item in items
+                    for item in all_items
                     for legacy_key in (
                         f"{item.group}::{item.bin_name}",
                         f"{item.group}::::{item.bin_name}",
@@ -1158,12 +1190,15 @@ def backannotate(
                 default=0,
             )
             tag = artifact["tag"]
-            target_matches = _target_matches_reference(
-                raw,
-                tag,
-                ref,
-                items,
-                row["testcase"].strip(),
+            target_matches = any(
+                _target_matches_reference(
+                    raw,
+                    tag,
+                    ref,
+                    items,
+                    row["testcase"].strip(),
+                )
+                for ref, items in reference_items
             )
             if kind in {"dut", "invalid"}:
                 gate = artifact["gate"]
@@ -1199,6 +1234,9 @@ def backannotate(
             counts["partial"] += 1
             if rejected_entries:
                 counts["failed"] += 1
+        elif existing_partial:
+            row["status"] = "PARTIAL"
+            counts["partial"] += 1
         else:
             row["status"] = "MODELED"
             counts["model"] += 1
