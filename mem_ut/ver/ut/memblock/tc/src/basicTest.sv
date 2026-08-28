@@ -31,6 +31,14 @@ class basicTest extends tcnt_test_base ;
                  vseq_name == "memblock_dispatch_manual_control_vseq";
       endfunction:vseq_supports_control_worker_topology
 
+      // 中文注释：real-smoke 的 disabled topology 由 VSEQ 持续驱动静态 Sv39 CSR。
+      // CSR/Fence agent 的 main_phase default sequence 必须换成无 producer 基类，
+      // 否则旧 default sequence 会在同一个 sequencer 上插入随机 CSR 或 SFence。
+      function bit vseq_owns_static_mmu_csr(input string vseq_name);
+          return vseq_name == "memblock_dispatch_real_smoke_vseq" &&
+                 !memblock_sync_pkg::uses_control_barrier_topology();
+      endfunction:vseq_owns_static_mmu_csr
+
       function void initialize_l2tlb_testcase_lifecycle();
           bit needs_response;
           memblock_sync_pkg::memblock_l2tlb_responder_mode_e responder_mode;
@@ -94,10 +102,11 @@ class basicTest extends tcnt_test_base ;
             seq_csr_common::initialize_control_worker_topology_from_plus(get_type_name());
             seq_csr_common::check_control_worker_dispatch_capability(
                 vseq_supports_control_worker_topology(main_vseq_name), main_vseq_name);
-            // 中文注释：第二种拓扑下 CSR/Fence worker 由选中的 VSEQ 显式启动。
-            // main_phase 默认 sequence 仍安装无 producer 的 idle 基类，避免 agent 自身
-            // fallback/default sequence 在同一 sequencer 上随机发送 item 与 worker 竞争。
-            if (memblock_sync_pkg::uses_control_barrier_topology()) begin
+            // 中文注释：active-control worker 或 disabled-topology 的静态 Sv39 CSR 都由
+            // 选中 VSEQ 显式持有 CSR/Fence producer。main_phase 默认 sequence 必须安装
+            // 无 producer 的 idle 基类，避免 agent fallback/default sequence 插入随机 item。
+            if (memblock_sync_pkg::uses_control_barrier_topology() ||
+                vseq_owns_static_mmu_csr(main_vseq_name)) begin
                 uvm_config_db#(uvm_object_wrapper)::set(
                     this,
                     "env.u_csr_ctrl_agent_agent.sqr.main_phase",

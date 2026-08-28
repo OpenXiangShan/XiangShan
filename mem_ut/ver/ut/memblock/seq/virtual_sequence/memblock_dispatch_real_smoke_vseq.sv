@@ -21,6 +21,7 @@ class memblock_dispatch_real_smoke_vseq extends virtual_base_sequence;
     extern virtual task start_core_dispatch_flow();
     extern virtual task wait_for_explicit_l2tlb_start_barrier();
     extern virtual function bit uses_explicit_control_workers();
+    extern virtual function bit uses_static_mmu_sv39_csr();
 
 endclass:memblock_dispatch_real_smoke_vseq
 
@@ -69,8 +70,8 @@ function void memblock_dispatch_real_smoke_vseq::require_real_smoke_sqr();
     require_agent_sqr("dcache", p_sequencer.dcache_sqr);
     require_agent_sqr("sbuffer", p_sequencer.sbuffer_sqr);
     require_agent_sqr("redirect", p_sequencer.redirect_sqr);
+    require_agent_sqr("csr_ctrl", p_sequencer.csr_ctrl_sqr);
     if (uses_explicit_control_workers()) begin
-        require_agent_sqr("csr_ctrl", p_sequencer.csr_ctrl_sqr);
         require_agent_sqr("fence", p_sequencer.fence_sqr);
     end
 endfunction:require_real_smoke_sqr
@@ -81,6 +82,13 @@ endfunction:require_real_smoke_sqr
 function bit memblock_dispatch_real_smoke_vseq::uses_explicit_control_workers();
     return memblock_sync_pkg::uses_control_barrier_topology();
 endfunction:uses_explicit_control_workers
+
+// 中文注释：禁用 control worker topology 时由本 VSEQ 持有稳定 Sv39 CSR producer。
+// 其它 topology 保留原 CSR control worker 所有权，不能在同一 csr_ctrl_sqr 上双启动。
+function bit memblock_dispatch_real_smoke_vseq::uses_static_mmu_sv39_csr();
+    return memblock_sync_pkg::get_control_worker_topology_mode() ==
+           memblock_sync_pkg::MEMBLOCK_CONTROL_TOPOLOGY_DISABLED;
+endfunction:uses_static_mmu_sv39_csr
 
 function void memblock_dispatch_real_smoke_vseq::initialize_shared_memory_store();
     // 中文注释：本 vseq 是 real-smoke topology 的唯一 shared memory lifecycle owner。
@@ -121,6 +129,7 @@ task memblock_dispatch_real_smoke_vseq::start_core_dispatch_flow();
     memblock_main_dispatch_auto_build_main_table_base_sequence main_seq;
     memblock_csr_control_base_sequence                      csr_control_seq;
     memblock_sfence_control_base_sequence                   sfence_control_seq;
+    memblock_mmu_sv39_csr_sequence                          mmu_sv39_csr_seq;
 
     // 中文注释：agent sequence 只在对应真实 agent sequencer 上启动，主 orchestration
     // sequence 在 virtual sequencer 上启动；fork/join 和原 real-smoke 并发边界保持不变。
@@ -129,6 +138,12 @@ task memblock_dispatch_real_smoke_vseq::start_core_dispatch_flow();
             `uvm_do_on(lsqenq_seq, p_sequencer.lsqenq_sqr)
         end
         begin : start_issue_sequence
+            // 中文注释：issue 首次冻结 UID 的 TLB/PMA/PMP context；静态 Sv39
+            // topology 下必须与 L2TLB responder 一样先等待 CSR mirror barrier，
+            // 否则首批 issue 可能错误地继承 reset 的 Bare/M 态上下文。
+            if (uses_static_mmu_sv39_csr()) begin
+                wait_for_explicit_l2tlb_start_barrier();
+            end
             `uvm_do_on(issue_seq, p_sequencer.lintsissue_sqr)
         end
         begin : start_lsqcommit_sequence
@@ -140,6 +155,11 @@ task memblock_dispatch_real_smoke_vseq::start_core_dispatch_flow();
         end
         begin : start_main_sequence
             `uvm_do_on(main_seq, p_sequencer)
+        end
+        begin : start_static_mmu_sv39_csr_sequence
+            if (uses_static_mmu_sv39_csr()) begin
+                `uvm_do_on(mmu_sv39_csr_seq, p_sequencer.csr_ctrl_sqr)
+            end
         end
         begin : start_csr_control_worker
             if (uses_explicit_control_workers()) begin
@@ -159,19 +179,57 @@ endtask:start_core_dispatch_flow
 task memblock_dispatch_real_smoke_vseq::wait_for_explicit_l2tlb_start_barrier();
     common_data_transaction barrier_data;
     int unsigned wait_count;
+    bit [63:0] expected_paddr_base;
+    bit [43:0] expected_satp_ppn;
+    bit [1:0] expected_priv_mode;
 
     barrier_data = common_data_transaction::get();
     if (barrier_data == null) begin
         `uvm_fatal(get_type_name(), "failed to get common_data_transaction for L2TLB start barrier")
     end
     wait_count = 0;
-    while (!barrier_data.main_table_ready) begin
+    while (!barrier_data.main_table_ready &&
+           !barrier_data.is_global_stop_requested()) begin
         if (wait_count != 0 && (wait_count % 5000) == 0) begin
             `uvm_warning(get_type_name(),
                          $sformatf("still waiting for main table before explicit L2TLB start: wait_count=%0d main_trans_num=%0d next_uid=%0d",
                                    wait_count,
                                    barrier_data.main_trans_num,
                                    barrier_data.next_uid))
+        end
+        #1;
+        wait_count++;
+    end
+
+    if (barrier_data.is_global_stop_requested() || !uses_static_mmu_sv39_csr()) begin
+        return;
+    end
+
+    // 中文注释：static CSR sequence 必须先经 driver/monitor 写入 mmu_csr_state，
+    // L2TLB responder 才能以 Sv39 的 C-2 runtime context 接收首个 request。仅等
+    // main_table_ready 会让 responder 读取 reset 后的 Bare/M 态 snapshot。U 态是
+    // Sv39 生效的必要条件，必须与 satp root 在同一份 monitor snapshot 中确认。
+    expected_paddr_base = seq_csr_common::get_paddr_base();
+    expected_satp_ppn = expected_paddr_base[55:12];
+    expected_priv_mode = 2'd0;
+    wait_count = 0;
+    while ((barrier_data.mmu_csr_state == null ||
+            barrier_data.mmu_csr_state.satp_mode != 4'd8 ||
+            barrier_data.mmu_csr_state.satp_ppn != expected_satp_ppn ||
+            barrier_data.mmu_csr_state.priv_virt != 1'b0 ||
+            barrier_data.mmu_csr_state.priv_imode != expected_priv_mode ||
+            barrier_data.mmu_csr_state.priv_dmode != expected_priv_mode) &&
+           !barrier_data.is_global_stop_requested()) begin
+        if (wait_count != 0 && (wait_count % 5000) == 0) begin
+            `uvm_warning(get_type_name(),
+                         $sformatf("still waiting for static Sv39/U CSR mirror: wait_count=%0d expected_ppn=0x%0h current_mode=0x%0h current_ppn=0x%0h current_virt=%0d current_imode=%0d current_dmode=%0d",
+                                   wait_count,
+                                   expected_satp_ppn,
+                                   (barrier_data.mmu_csr_state == null) ? '0 : barrier_data.mmu_csr_state.satp_mode,
+                                   (barrier_data.mmu_csr_state == null) ? '0 : barrier_data.mmu_csr_state.satp_ppn,
+                                   (barrier_data.mmu_csr_state == null) ? '0 : barrier_data.mmu_csr_state.priv_virt,
+                                   (barrier_data.mmu_csr_state == null) ? '0 : barrier_data.mmu_csr_state.priv_imode,
+                                   (barrier_data.mmu_csr_state == null) ? '0 : barrier_data.mmu_csr_state.priv_dmode))
         end
         #1;
         wait_count++;
