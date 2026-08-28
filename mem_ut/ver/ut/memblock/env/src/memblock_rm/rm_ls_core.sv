@@ -128,6 +128,17 @@ class rm_ls_program_item_t;
     rm_ls_rob_key_t rob;
     bit             translation_valid;
     bit [23:0]      expected_exception;
+    // 中文注释：这些字段只保存 PMA/PMP 与 DCache ledger 的来源诊断，不参与
+    // transaction owner 生命周期；最终 architectural cause 仍由 exception vector 选择。
+    bit             expected_pmp_fault;
+    bit             expected_pma_fault;
+    bit             expected_keyid_fault;
+    bit             expected_pma_atomic_fault;
+    bit             expected_pma_cache_path_fault;
+    bit             expected_dcache_denied;
+    bit             expected_dcache_corrupt;
+    int unsigned    dynamic_epoch;
+    longint unsigned access_sample;
     bit [63:0]      store_data;
     bit [7:0]       store_byte_mask;
 
@@ -136,6 +147,11 @@ class rm_ls_program_item_t;
         computed_vaddr = '0; main_vaddr = '0; pa_valid_mask = '0;
         translation_key = '0; size_bytes = 0; is_signed = 0;
         rob = '{default:'0}; translation_valid = 0; expected_exception = '0;
+        expected_pmp_fault = 1'b0; expected_pma_fault = 1'b0;
+        expected_keyid_fault = 1'b0; expected_pma_atomic_fault = 1'b0;
+        expected_pma_cache_path_fault = 1'b0;
+        expected_dcache_denied = 1'b0; expected_dcache_corrupt = 1'b0;
+        dynamic_epoch = 0; access_sample = 0;
         store_data = '0; store_byte_mask = '0;
         foreach (pa_by_byte[i]) pa_by_byte[i] = '0;
     endfunction
@@ -214,8 +230,8 @@ class rm_ls_load_actual_t;
     int unsigned    uid;
     rm_ls_rob_key_t rob;
     bit             data_valid;
-    bit [63:0]      data;
-    bit [23:0]      exception_vec;
+    logic [63:0]    data;
+    logic [23:0]    exception_vec;
     longint unsigned cycle;
     function new();
         valid = 0; uid = 0; rob = '{default:'0}; data_valid = 0;
@@ -230,9 +246,9 @@ class rm_ls_history_record_t;
     bit [63:0]      vaddr;
     longint unsigned first_pa;
     bit [63:0]      expected_data;
-    bit [63:0]      actual_data;
+    logic [63:0]    actual_data;
     bit [23:0]      expected_exception;
-    bit [23:0]      actual_exception;
+    logic [23:0]    actual_exception;
     bit             compare_pass;
     rm_ls_error_e   error_code;
     string          detail;
@@ -285,6 +301,34 @@ class rm_ls_model_t;
 
     function void set_error(rm_ls_error_e code, string text);
         last_error = code; last_error_text = text; error_count++;
+    endfunction
+
+    // 已确认 ROB commit 的观测错误必须消费当前 uid，避免单笔错误阻断后续独立 uid。
+    function bit consume_current_commit_error(input rm_ls_rob_key_t commit_rob,
+                                              input rm_ls_error_e error_code,
+                                              input string error_text);
+        rm_ls_program_item_t item;
+
+        if (!configured || current_uid >= main_count || !items.exists(current_uid)) begin
+            set_error(RM_LS_ERR_MAIN_NOT_READY,
+                      "cannot consume failed commit because current item is unavailable");
+            return 1'b0;
+        end
+        item = items[current_uid];
+        if (commit_rob != item.rob) begin
+            set_error(RM_LS_ERR_DUT_ROB_MISMATCH,
+                      $sformatf("cannot consume failed uid %0d: expected ROB %0d/%0d got %0d/%0d",
+                                current_uid, item.rob.flag, item.rob.value,
+                                commit_rob.flag, commit_rob.value));
+            return 1'b0;
+        end
+
+        // 缺失 LDA 没有 DUT actual；不要向 history 写入默认值，避免把零值误读为
+        // 真实 data/exception。失败原因由 last_error_text 和 UVM_ERROR 保留。
+        set_error(error_code, error_text);
+        current_uid++;
+        consumed_commit_count++;
+        return 1'b1;
     endfunction
 
     function bit add_item(rm_ls_program_item_t item);
@@ -403,12 +447,66 @@ class rm_ls_model_t;
         return 1;
     endfunction
 
+    // 抽象职责：按 V2 ExceptionNO.priorities 选择 Load/Store 的架构 trap cause。
+    // 该函数只读 vector，不折叠或修改 raw bits；当没有本类访存异常时返回 -1。
+    function automatic int signed select_arch_exception_cause(
+        input logic [23:0] exception_vec,
+        input bit          store_access
+    );
+        if (store_access) begin
+            if (exception_vec[6]  === 1'b1) return 6;  // store address misaligned
+            if (exception_vec[15] === 1'b1) return 15; // store page fault
+            if (exception_vec[23] === 1'b1) return 23; // store guest page fault
+            if (exception_vec[7]  === 1'b1) return 7;  // store access fault
+            if (exception_vec[19] === 1'b1) return 19; // hardware error
+        end else begin
+            if (exception_vec[4]  === 1'b1) return 4;  // load address misaligned
+            if (exception_vec[13] === 1'b1) return 13; // load page fault
+            if (exception_vec[21] === 1'b1) return 21; // load guest page fault
+            if (exception_vec[5]  === 1'b1) return 5;  // load access fault
+            if (exception_vec[19] === 1'b1) return 19; // hardware error
+        end
+        return -1;
+    endfunction
+
+    // 抽象职责：比较架构可见 cause，同时保留 raw vector 是否完全相等供诊断。
+    // 当 expected/actual 至少一方包含 PF/GPF 时，V2 允许同一 cause 携带额外 raw AF；
+    // 没有 page/guest-page fault 时继续严格比较，避免掩盖普通 vector 差异。
+    function automatic bit compare_arch_exception(
+        input  logic [23:0] expected_exception,
+        input  logic [23:0] actual_exception,
+        input  bit           store_access,
+        output bit           raw_match,
+        output bit           cause_match
+    );
+        int signed expected_cause;
+        int signed actual_cause;
+
+        raw_match = expected_exception === actual_exception;
+        expected_cause = select_arch_exception_cause(expected_exception, store_access);
+        actual_cause = select_arch_exception_cause(actual_exception, store_access);
+        cause_match = expected_cause == actual_cause;
+        if ((expected_exception[store_access ? 15 : 13] === 1'b1) ||
+            (expected_exception[store_access ? 23 : 21] === 1'b1) ||
+            (actual_exception[store_access ? 15 : 13] === 1'b1) ||
+            (actual_exception[store_access ? 23 : 21] === 1'b1)) begin
+            return cause_match;
+        end
+        return raw_match;
+    endfunction
+
     function bit compare_load(rm_ls_program_item_t item,
-                              bit [23:0] terminal_exception);
+                              logic [23:0] terminal_exception);
         rm_ls_history_record_t rec;
         bit [63:0] expected;
         bit [23:0] expected_exception;
         rm_ls_load_actual_t actual;
+        bit raw_exception_match_actual;
+        bit cause_exception_match_actual;
+        bit raw_exception_match_terminal;
+        bit cause_exception_match_terminal;
+        bit actual_exception_ok;
+        bit terminal_exception_ok;
 
         rec = new();
         rec.uid = item.uid; rec.kind = item.kind; rec.rob = item.rob;
@@ -430,8 +528,13 @@ class rm_ls_model_t;
         if (!build_load_expected(item, expected, expected_exception)) return 0;
         rec.expected_data = expected; rec.actual_data = actual.data;
         rec.expected_exception = expected_exception; rec.actual_exception = actual.exception_vec;
-        if (terminal_exception != actual.exception_vec ||
-            actual.exception_vec != expected_exception) begin
+        actual_exception_ok = compare_arch_exception(
+            expected_exception, actual.exception_vec, 1'b0,
+            raw_exception_match_actual, cause_exception_match_actual);
+        terminal_exception_ok = compare_arch_exception(
+            expected_exception, terminal_exception, 1'b0,
+            raw_exception_match_terminal, cause_exception_match_terminal);
+        if (!actual_exception_ok || !terminal_exception_ok) begin
             rec.error_code = RM_LS_ERR_EXCEPTION_MISMATCH;
             rec.detail = $sformatf("uid %0d Load exception expected=0x%0h status=0x%0h actual=0x%0h",
                                    item.uid, expected_exception, terminal_exception,
@@ -440,10 +543,19 @@ class rm_ls_model_t;
             history.push_back(rec);
             return 0;
         end
+        if ((!raw_exception_match_actual || !raw_exception_match_terminal) &&
+            cause_exception_match_actual && cause_exception_match_terminal) begin
+            `uvm_info("RM_LS_EXCEPTION_DIAG",
+                      $sformatf("uid %0d Load raw exception differs but architectural cause matches: expected=0x%06h status=0x%06h actual=0x%06h cause=%0d",
+                                item.uid, expected_exception, terminal_exception,
+                                actual.exception_vec,
+                                select_arch_exception_cause(actual.exception_vec, 1'b0)),
+                      UVM_LOW)
+        end
         if (expected_exception != '0)
             rec.compare_pass = !actual.data_valid;
         else
-            rec.compare_pass = actual.data_valid && actual.data == expected;
+            rec.compare_pass = actual.data_valid && (actual.data === expected);
         rec.error_code = rec.compare_pass ? RM_LS_ERR_NONE : RM_LS_ERR_LOAD_MISMATCH;
         rec.detail = rec.compare_pass ? "Load match" : "Load data/data_valid mismatch";
         if (!rec.compare_pass) set_error(rec.error_code, rec.detail);
@@ -451,21 +563,32 @@ class rm_ls_model_t;
     endfunction
 
     function bit commit_store(rm_ls_program_item_t item,
-                              bit [23:0] commit_exception);
+                              logic [23:0] commit_exception);
         rm_ls_history_record_t rec;
         rm_ls_store_cache_entry_t store_entry;
         bit [7:0] required_mask;
+        bit raw_exception_match;
+        bit cause_exception_match;
 
         rec = new(); rec.uid = item.uid; rec.kind = item.kind; rec.rob = item.rob;
         rec.vaddr = item.computed_vaddr;
         if (item.pa_valid_mask[0]) rec.first_pa = item.pa_by_byte[0];
         rec.expected_exception = item.expected_exception;
         rec.actual_exception = commit_exception;
-        if (commit_exception != item.expected_exception) begin
+        if (!compare_arch_exception(item.expected_exception, commit_exception,
+                                    1'b1, raw_exception_match,
+                                    cause_exception_match)) begin
             rec.error_code = RM_LS_ERR_EXCEPTION_MISMATCH;
             rec.detail = $sformatf("uid %0d Store exception expected=0x%0h status=0x%0h",
                                    item.uid, item.expected_exception, commit_exception);
             set_error(rec.error_code, rec.detail); history.push_back(rec); return 0;
+        end
+        if (!raw_exception_match) begin
+            `uvm_info("RM_LS_EXCEPTION_DIAG",
+                      $sformatf("uid %0d Store raw exception differs but architectural cause matches: expected=0x%06h actual=0x%06h cause=%0d",
+                                item.uid, item.expected_exception, commit_exception,
+                                select_arch_exception_cause(commit_exception, 1'b1)),
+                      UVM_LOW)
         end
         if (item.expected_exception != '0) begin
             rec.compare_pass = 1'b1; rec.error_code = RM_LS_ERR_NONE;

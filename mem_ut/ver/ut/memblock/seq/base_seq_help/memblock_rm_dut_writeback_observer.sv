@@ -326,7 +326,8 @@ class memblock_rm_dut_writeback_observer extends uvm_object;
     endtask:run
 
     // RM comparison performs the only selection: latest non-replay/non-flush
-    // LDA record with the requested complete ROB key.
+    // LDA record with the requested ROB key. Payload X values are retained so
+    // the RM reports a value mismatch rather than a missing writeback.
     function bit read_latest_load_by_rob(
         input memblock_rob_key_t rob_key,
         output writeback_record_t record
@@ -338,12 +339,8 @@ class memblock_rm_dut_writeback_observer extends uvm_object;
                 writeback_history_q[index].source_kind == RM_WB_SOURCE_LDA &&
                 writeback_history_q[index].rob_valid &&
                 writeback_history_q[index].rob_flag_valid &&
-                writeback_history_q[index].rob_flag == rob_key.flag &&
-                writeback_history_q[index].rob_value == rob_key.value &&
-                !$isunknown({writeback_history_q[index].rob_flag,
-                             writeback_history_q[index].rob_value,
-                             writeback_history_q[index].data,
-                             writeback_history_q[index].exception_vec}) &&
+                writeback_history_q[index].rob_flag === rob_key.flag &&
+                writeback_history_q[index].rob_value === rob_key.value &&
                 writeback_history_q[index].replay_inst_valid &&
                 writeback_history_q[index].replay_inst === 1'b0 &&
                 writeback_history_q[index].flush_pipe_valid &&
