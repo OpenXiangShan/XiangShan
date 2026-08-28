@@ -20,6 +20,9 @@ class memblock_rm_readonly_api extends uvm_object;
     typedef mem_access_base_sequence::mem_line_addr_t mem_line_addr_t;
     typedef mem_access_base_sequence::mem_line_data_t mem_line_data_t;
     typedef mem_access_base_sequence::mem_line_mask_t mem_line_mask_t;
+    // 中文注释：RM 只拿到 PMA/PMP 的 Access-Fault 视图；mmio/cacheable/
+    // atomic_allowed 等属性留在模型内部，避免把分类误当成 RM 比较条件。
+    typedef pma_pmp_af_view_t pma_pmp_af_view_for_rm_t;
 
     typedef struct packed {
         bit                  valid;
@@ -409,6 +412,15 @@ class memblock_rm_readonly_api extends uvm_object;
         input  mem_addr_t          line_addr,
         input  longint unsigned    sample,
         output l2_d_error_view_t   view
+    );
+    extern function bit read_pma_pmp_af_for_rm(
+        input memblock_uid_t            uid,
+        input int unsigned              dynamic_epoch,
+        input bit                       translation_success,
+        input bit [47:0]                paddr,
+        input int unsigned              size_bytes,
+        input pma_pmp_cmd_e             cmd,
+        output pma_pmp_af_view_for_rm_t view
     );
 
     extern function bit try_get_common_data(output common_data_transaction data);
@@ -1206,5 +1218,51 @@ function bit memblock_rm_readonly_api::read_l2_d_error_for_rm(
     view.source                     = record.source;
     return 1'b1;
 endfunction:read_l2_d_error_for_rm
+
+function bit memblock_rm_readonly_api::read_pma_pmp_af_for_rm(
+    input memblock_uid_t            uid,
+    input int unsigned              dynamic_epoch,
+    input bit                       translation_success,
+    input bit [47:0]                paddr,
+    input int unsigned              size_bytes,
+    input pma_pmp_cmd_e             cmd,
+    output pma_pmp_af_view_for_rm_t view
+);
+    common_data_transaction data;
+    pma_pmp_eval_t          result;
+
+    view = '{default:'0};
+    // 中文注释：模型关闭时保持既有兼容语义；模型开启后 context 或 generation
+    // 缺失必须报告 query miss，不能静默把访问当作允许。
+    if (!seq_csr_common::get_pma_pmp_model_en()) begin
+        view.valid = translation_success;
+        view.translation_eligible = translation_success;
+        view.af_decided = translation_success;
+        return 1'b1;
+    end
+    if (!translation_success) begin
+        // 翻译失败时 PMA/PMP 结果未定义，调用者不得把它解释为 fault 或 allow。
+        return 1'b1;
+    end
+    if (!try_get_common_data(data) || data == null) begin
+        return report_query_miss("pma_pmp", "common data owner is not initialized");
+    end
+    if (!data.evaluate_pma_pmp_for_uid_epoch(uid, dynamic_epoch,
+                                             translation_success, paddr,
+                                             size_bytes, cmd, result)) begin
+        return report_query_miss(
+            "pma_pmp",
+            $sformatf("uid=%0d dynamic_epoch=%0d has no frozen PMA/PMP context or generation snapshot",
+                      uid, dynamic_epoch));
+    end
+    data.pma_pmp_model.make_base_af_view(result, view);
+    if (!view.valid || !view.translation_eligible) begin
+        return report_query_miss(
+            "pma_pmp",
+            $sformatf("uid=%0d dynamic_epoch=%0d PMA/PMP result is not translation-eligible",
+                      uid, dynamic_epoch));
+    end
+    return 1'b1;
+endfunction:read_pma_pmp_af_for_rm
 
 `endif

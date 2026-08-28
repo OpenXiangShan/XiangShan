@@ -4562,6 +4562,7 @@ class common_data_transaction extends uvm_object;
 
     function void register_uid_tlb_record_on_issue(input memblock_uid_t uid);
         main_control_transaction main_tr;
+        status_transaction       status;
         mmu_csr_runtime_state    snapshot;
         bit [51:0]               vpn;
         bit [1:0]                s2xlate;
@@ -4576,7 +4577,29 @@ class common_data_transaction extends uvm_object;
                        "UID TLB registration requires a published DUT global sample")
         end
         main_tr = get_main_transaction(uid);
+        status = get_status(uid);
         get_mmu_csr_snapshot(snapshot);
+        // 中文注释：PMA/PMP context 必须在首次真实 issue 边界冻结。TLB hit
+        // 可能没有 L2TLB request-fire，因此不能只在 responder 回调中建立该快照。
+        // 先回放严格早于本 sample 的 CSR 写，再用当前 dynamic_epoch 保存表代数。
+        if (seq_csr_common::get_pma_pmp_model_en()) begin
+            apply_pma_pmp_csr_writes_before_request(current_sample);
+            if (pma_pmp_model == null ||
+                !pma_pmp_model.capture_uid_context(
+                    uid,
+                    status.dynamic_epoch,
+                    snapshot.priv_dmode,
+                    snapshot.priv_debug,
+                    1'b0,
+                    1'b0,
+                    '0,
+                    snapshot.update_seq,
+                    current_sample)) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("failed to freeze PMA/PMP issue context uid=%0d epoch=%0d sample=%0d",
+                                     uid, status.dynamic_epoch, current_sample))
+            end
+        end
         vpn = {14'b0, main_tr.vaddr[49:12]};
         is_hypervisor_inst = is_hypervisor_tlb_inst(main_tr);
         s2xlate = snapshot.expected_s2xlate(is_hypervisor_inst);

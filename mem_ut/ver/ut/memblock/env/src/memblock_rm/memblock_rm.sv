@@ -75,8 +75,8 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
     );
     extern function bit observer_capture_commit_actual(
         memblock_rm_readonly_api::main_transaction_view_t main_view,
-        memblock_rm_readonly_api::status_view_t status_view,
-        rm_ls_program_item_t item
+        rm_ls_program_item_t item,
+        output bit missing_dut_load_writeback
     );
     extern function bit observer_capture_load_backing(rm_ls_program_item_t item);
     extern function string observer_kind_name(rm_ls_kind_e kind);
@@ -259,9 +259,14 @@ function bit memblock_rm::observer_build_commit_item(
     memblock_rm_readonly_api ro;
     memblock_rm_readonly_api::tlb_request_context_view_t tlb_context;
     memblock_rm_readonly_api::tlb_entry_view_t entry;
+    memblock_rm_readonly_api::pma_pmp_af_view_for_rm_t pma_pmp_view;
+    pma_pmp_cmd_e pma_pmp_cmd;
     bit access_fault;
     bit stage_one_fault;
     bit stage_two_fault;
+    bit entry_stage_one_fault;
+    bit entry_stage_two_fault;
+    bit entry_translation_fault;
     bit misaligned;
     bit store_access;
     bit s1_active;
@@ -271,6 +276,7 @@ function bit memblock_rm::observer_build_commit_item(
     bit [43:0] final_ppn;
     bit [3:0] expected_s1_mode;
     int unsigned bad_byte_index;
+    bit [7:0] required_pa_mask;
     rm_ls_error_e translation_path_error;
 
     item = new(main_view.uid);
@@ -281,6 +287,7 @@ function bit memblock_rm::observer_build_commit_item(
     item.computed_vaddr = observer_compute_vaddr(main_view.src_0, main_view.imm);
     item.rob.flag = main_view.rob_idx_flag;
     item.rob.value = main_view.rob_idx_value;
+    item.dynamic_epoch = status_view.dynamic_epoch;
     item.size_bytes = observer_scalar_size(main_view.fu_op_type);
     item.is_signed = main_view.fu_op_type == MEMBLOCK_LSUOP_LB ||
                      main_view.fu_op_type == MEMBLOCK_LSUOP_LH ||
@@ -364,16 +371,11 @@ function bit memblock_rm::observer_build_commit_item(
     end
     store_access = item.kind == RM_LS_KIND_STORE;
     misaligned = (item.computed_vaddr & (item.size_bytes - 1)) != 0;
-    if (misaligned) begin
-        item.expected_exception[store_access ? 6 : 4] = 1'b1;
-        item.translation_valid = 1'b1;
-        return 1'b1;
-    end
-
-    access_fault = main_view.tlb_af || main_view.pma_af ||
-                   main_view.denied || main_view.corrupt;
-    stage_one_fault = main_view.tlb_pf;
-    stage_two_fault = main_view.tlb_gpf;
+    // 中文注释：以下三类异常只来自冻结 TLB context/entry；main_view 的
+    // tlb_af/tlb_pf/tlb_gpf/pma_af/denied/corrupt 均禁止作为 RM 真源。
+    access_fault = 1'b0;
+    stage_one_fault = 1'b0;
+    stage_two_fault = 1'b0;
     if (bare_identity) begin
         if (!item.set_bare_identity_geometry(bad_byte_index)) begin
             ls_model.set_error(RM_LS_ERR_BARE_PA_OUT_OF_RANGE,
@@ -413,12 +415,14 @@ function bit memblock_rm::observer_build_commit_item(
             if (byte_index == 0) item.translation_key = tlb_context.entry_key;
             access_fault |= entry.pma_af || entry.fault_effective_s1_af ||
                             entry.fault_effective_s2_gaf;
-            stage_one_fault |= entry.fault_effective_s1_pf ||
-                               observer_stage_permission_fault(entry, tlb_context,
-                                                               store_access, 1'b1);
-            stage_two_fault |= entry.fault_effective_s2_gpf ||
-                               observer_stage_permission_fault(entry, tlb_context,
-                                                               store_access, 1'b0);
+            entry_stage_one_fault = entry.fault_effective_s1_pf ||
+                                    observer_stage_permission_fault(entry, tlb_context,
+                                                                    store_access, 1'b1);
+            entry_stage_two_fault = entry.fault_effective_s2_gpf ||
+                                    observer_stage_permission_fault(entry, tlb_context,
+                                                                    store_access, 1'b0);
+            stage_one_fault |= entry_stage_one_fault;
+            stage_two_fault |= entry_stage_two_fault;
             if (!entry.fault && !entry.pma_af && tlb_context.request_translation_valid) begin
                 if (entry.s2_stage_active) final_ppn = tlb_context.request_s2_resolved_ppn;
                 else if (entry.s1_stage_active) final_ppn = tlb_context.request_s1_resolved_ppn;
@@ -431,12 +435,74 @@ function bit memblock_rm::observer_build_commit_item(
                 item.pa_by_byte[byte_index] = {final_ppn, byte_va[11:0]};
                 item.pa_valid_mask[byte_index] = 1'b1;
             end
+            // A translation fault terminates the architectural access.  The DUT
+            // does not issue later-page TLB requests after this point, so asking
+            // the RM to resolve remaining bytes would create a false query miss
+            // for a cross-page access (for example, a faulting LW at page+0xffd).
+            entry_translation_fault = entry.pma_af ||
+                                      entry.fault_effective_s1_pf ||
+                                      entry.fault_effective_s1_af ||
+                                      entry.fault_effective_s2_gpf ||
+                                      entry.fault_effective_s2_gaf ||
+                                      entry_stage_one_fault ||
+                                      entry_stage_two_fault;
+            if (entry_translation_fault) begin
+                break;
+            end
         end
     end
+    required_pa_mask = 8'hff >> (8 - item.size_bytes);
+    // 中文注释：PMA/PMP 只在翻译成功且所有访问字节都有 PA 时查询。翻译
+    // fault 后 DUT 的后续 PMP/PMA response 不具备架构确定性，不能从模型补写 AF。
+    if (!access_fault && !stage_one_fault && !stage_two_fault &&
+        item.pa_valid_mask == required_pa_mask &&
+        seq_csr_common::get_pma_pmp_model_en()) begin
+        pma_pmp_cmd = store_access ? PMA_PMP_CMD_WRITE : PMA_PMP_CMD_READ;
+        if (!ro.read_pma_pmp_af_for_rm(
+                item.uid,
+                item.dynamic_epoch,
+                1'b1,
+                item.pa_by_byte[0][47:0],
+                item.size_bytes,
+                pma_pmp_cmd,
+                pma_pmp_view)) begin
+            ls_model.set_error(
+                RM_LS_ERR_TRANSLATION_NOT_READY,
+                $sformatf("uid %0d PMA/PMP AF view unavailable at PA 0x%0h epoch=%0d",
+                          item.uid, item.pa_by_byte[0], item.dynamic_epoch));
+            return 1'b0;
+        end
+        item.expected_pmp_fault = store_access ? pma_pmp_view.pmp_st_fault :
+                                                   pma_pmp_view.pmp_ld_fault;
+        item.expected_pma_fault = store_access ? pma_pmp_view.pma_st_fault :
+                                                   pma_pmp_view.pma_ld_fault;
+        item.expected_keyid_fault = pma_pmp_view.keyid_fault;
+        item.expected_pma_atomic_fault = pma_pmp_view.pma_atomic_fault;
+        item.expected_pma_cache_path_fault = pma_pmp_view.pma_cache_path_fault;
+        access_fault = store_access ? pma_pmp_view.st_access_fault :
+                                       pma_pmp_view.ld_access_fault;
+        // 当前 V2 smoke 的 U 态默认 PMP 会在基础权限阶段结束；若未来 profile
+        // 允许访问且 PMA C=0，需要独立 cache observer 提供 fact 后再补 cache-path AF。
+        // 此处不把 C=0/MMIO 分类或未知 fact 猜测成异常，保留模型诊断字段即可。
+        if (!pma_pmp_view.af_decided) begin
+            `uvm_info("RM_LS_PMA_FACT",
+                      $sformatf("uid %0d PMA C-path requires independent DCache fact; base_fault=%0d/%0d PA=0x%0h",
+                                item.uid, pma_pmp_view.base_ld_access_fault,
+                                pma_pmp_view.base_st_access_fault,
+                                item.pa_by_byte[0]),
+                      UVM_LOW)
+        end
+    end
+    // 中文注释：DUT exceptionVec 保留可同时成立的 access/page/guest-page fault，
+    // 不能按软件优先级折叠成单一 bit。LoadUnit 在 TLB fault 到达时会清掉
+    // address-misaligned，因此只有完全没有翻译异常时才把 misaligned 写入期望。
     if (access_fault) item.expected_exception[store_access ? 7 : 5] = 1'b1;
-    else if (stage_one_fault) item.expected_exception[store_access ? 15 : 13] = 1'b1;
-    else if (stage_two_fault) item.expected_exception[store_access ? 23 : 21] = 1'b1;
-    else if (item.pa_valid_mask != (8'hff >> (8 - item.size_bytes))) begin
+    if (stage_one_fault) item.expected_exception[store_access ? 15 : 13] = 1'b1;
+    if (stage_two_fault) item.expected_exception[store_access ? 23 : 21] = 1'b1;
+    if (item.expected_exception == '0 && misaligned)
+        item.expected_exception[store_access ? 6 : 4] = 1'b1;
+    if (item.expected_exception == '0 &&
+        item.pa_valid_mask != required_pa_mask) begin
         ls_model.set_error(RM_LS_ERR_TRANSLATION_NOT_READY,
                            $sformatf("uid %0d normal access has incomplete PA geometry mask=0x%0h",
                                      item.uid, item.pa_valid_mask));
@@ -460,25 +526,39 @@ endfunction:observer_build_commit_item
 
 function bit memblock_rm::observer_capture_commit_actual(
     memblock_rm_readonly_api::main_transaction_view_t main_view,
-    memblock_rm_readonly_api::status_view_t status_view,
-    rm_ls_program_item_t item
+    rm_ls_program_item_t item,
+    output bit missing_dut_load_writeback
 );
     memblock_rm_readonly_api ro;
     memblock_rm_readonly_api::dut_writeback_view_t load_view;
     rm_ls_load_actual_t load_actual;
     memblock_rob_key_t load_rob_key;
+    bit found_dut_load_writeback;
 
+    missing_dut_load_writeback = 1'b0;
     ro = memblock_rm_readonly_api::get();
     if (item.kind == RM_LS_KIND_LOAD) begin
         load_rob_key.flag = main_view.rob_idx_flag;
         load_rob_key.value = main_view.rob_idx_value;
-        if (!ro.read_dut_load_writeback_for_rm(load_rob_key, load_view) ||
-            !load_view.valid ||
+        found_dut_load_writeback =
+            ro.read_dut_load_writeback_for_rm(load_rob_key, load_view);
+
+        // 中文注释：status 只描述框架终态，不能替代同 ROB 的 DUT LDA 写回证据。
+        // 调用者记录 UVM_ERROR 后消费该 uid，继续比较后续独立 uid。
+        if (!found_dut_load_writeback) begin
+            missing_dut_load_writeback = 1'b1;
+            return 1'b1;
+        end
+
+        if (!load_view.valid ||
             !load_view.rob_valid || !load_view.rob_flag_valid ||
-            !load_view.data_valid || !load_view.exception_valid ||
+            // 中文注释：异常 load 的 writeback 合法地不携带返回数据；只有无异常
+            // writeback 才必须具备 data_valid，异常向量仍必须由监视器完整采集。
+            (!load_view.data_valid && load_view.exception_vec === '0) ||
+            !load_view.exception_valid ||
             load_view.source_kind != 2'd1 ||
-            load_view.rob_flag != load_rob_key.flag ||
-            load_view.rob_value != load_rob_key.value ||
+            load_view.rob_flag !== load_rob_key.flag ||
+            load_view.rob_value !== load_rob_key.value ||
             load_view.replay_inst || load_view.flush_pipe) begin
             ls_model.set_error(RM_LS_ERR_LOAD_ACTUAL_NOT_READY,
                                $sformatf("uid %0d committed ROB %0d/%0d DUT Load writeback is unavailable",
@@ -488,7 +568,7 @@ function bit memblock_rm::observer_capture_commit_actual(
         load_actual = new(); load_actual.valid = 1'b1; load_actual.uid = item.uid;
         load_actual.rob.flag = load_view.rob_flag;
         load_actual.rob.value = load_view.rob_value;
-        load_actual.data_valid = (load_view.exception_vec == '0);
+        load_actual.data_valid = (load_view.exception_vec === '0);
         load_actual.data = load_view.data;
         load_actual.exception_vec = load_view.exception_vec;
         load_actual.cycle = load_view.sample_cycle;
@@ -613,6 +693,7 @@ function bit memblock_rm::observer_process_current_commit();
     bit compare_result;
     bit check_complete;
     bit check_result;
+    bit missing_dut_load_writeback;
 
     ro = memblock_rm_readonly_api::get();
     if (!ro.framework_ready_for_rm()) return 1'b0;
@@ -697,9 +778,51 @@ function bit memblock_rm::observer_process_current_commit();
         return 1'b0;
     end
     if (!observer_build_commit_item(main_view, status_view, item) ||
-        !ls_model.add_item(item) ||
-        !observer_capture_commit_actual(main_view, status_view, item) ||
-        !observer_capture_load_backing(item)) begin
+        !ls_model.add_item(item)) begin
+        if (!observer_mismatch_reported) begin
+            `uvm_error("RM_LS_COMPARE", ls_model.last_error_text)
+            observer_mismatch_reported = 1'b1;
+        end
+        return 1'b0;
+    end
+
+    missing_dut_load_writeback = 1'b0;
+    if (!observer_capture_commit_actual(main_view, item,
+                                        missing_dut_load_writeback)) begin
+        if (!observer_mismatch_reported) begin
+            `uvm_error("RM_LS_COMPARE", ls_model.last_error_text)
+            observer_mismatch_reported = 1'b1;
+        end
+        return 1'b0;
+    end
+
+    if (missing_dut_load_writeback) begin
+        // 中文注释：该 Load 没有写内存效果，且本 uid 已不再进行数据比较；不能因
+        // backing 尚未可读而阻断后续 uid。后续正常 Load 会按自身地址懒采集 backing。
+        commit_rob.flag = status_view.rob_idx_flag;
+        commit_rob.value = status_view.rob_idx_value;
+        if (!ls_model.consume_current_commit_error(
+                commit_rob,
+                RM_LS_ERR_LOAD_ACTUAL_NOT_READY,
+                $sformatf("RM committed Load exists but DUT writebackLda was not found: uid=%0d robIdx=%0d/%0d expected_exception=0x%06h status_exception=0x%06h (no non-replay/non-flush LDA record matched this ROB)",
+                          item.uid,
+                          commit_rob.flag,
+                          commit_rob.value,
+                          item.expected_exception,
+                          status_view.exception_vec))) begin
+            if (!observer_mismatch_reported) begin
+                `uvm_error("RM_LS_COMPARE", ls_model.last_error_text)
+                observer_mismatch_reported = 1'b1;
+            end
+            return 1'b0;
+        end
+        `uvm_error("RM_LS_LDA_MISSING", ls_model.last_error_text)
+        // consume_current_commit_error 已推进 current_uid；不要置位全局阻塞标志。
+        observer_mismatch_reported = 1'b0;
+        return 1'b0;
+    end
+
+    if (!observer_capture_load_backing(item)) begin
         if (!observer_mismatch_reported) begin
             `uvm_error("RM_LS_COMPARE", ls_model.last_error_text)
             observer_mismatch_reported = 1'b1;
