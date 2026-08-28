@@ -176,6 +176,12 @@ class seq_csr_common;
     // 作用：为 1 时两个 memory-facing responder 都限制在 PADDR window，为 0 时按 48-bit 地址懒分配；
     // 不改变 tlb_map_builder 的 PPN 生成窗口。
     static bit          main_mem_ranges_en = 1'b1;
+    // 中文注释：PMA/PMP AF-only RM 模型开关。默认关闭保持旧回归行为；开启后
+    // RM 只消费冻结 request context 的 AF 结论，不读取 main_view 属性字段。
+    static bit          pma_pmp_model_en = 1'b0;
+    static bit          pma_pmp_raw_compare_en = 1'b1;
+    static bit          pma_pmp_xmr_check_en = 1'b0;
+    static bit          pma_pmp_undefined_after_tlb_fault = 1'b1;
     static int unsigned active_seq_no_progress_warn_cycles = 10000;
     static bit          dispatch_issue_seq_en = 1'b0;
     // 中文注释：lintsissue 非阻塞发射模式开关。
@@ -449,6 +455,11 @@ class seq_csr_common;
         paddr_base                  = plus::MEMBLOCK_PADDR_BASE;
         paddr_range                 = plus::MEMBLOCK_PADDR_RANGE;
         main_mem_ranges_en          = plus::MEMBLOCK_MAIN_MEM_RANGES_EN;
+        pma_pmp_model_en            = plus::MEMBLOCK_PMA_PMP_MODEL_EN;
+        pma_pmp_raw_compare_en      = plus::MEMBLOCK_PMA_PMP_RAW_COMPARE_EN;
+        pma_pmp_xmr_check_en        = plus::MEMBLOCK_PMA_PMP_XMR_CHECK_EN;
+        pma_pmp_undefined_after_tlb_fault =
+            plus::MEMBLOCK_PMA_PMP_UNDEFINED_AFTER_TLB_FAULT;
         active_seq_no_progress_warn_cycles = get_non_negative_int("MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES", plus::MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES);
         dispatch_issue_seq_en       = plus::MEMBLOCK_DISPATCH_ISSUE_SEQ_EN;
         dispatch_issue_nonblocking_en = plus::MEMBLOCK_DISPATCH_ISSUE_NONBLOCKING_EN;
@@ -1564,6 +1575,26 @@ class seq_csr_common;
         check_initialized("get_main_mem_ranges_en");
         return main_mem_ranges_en;
     endfunction:get_main_mem_ranges_en
+
+    static function bit get_pma_pmp_model_en();
+        check_initialized("get_pma_pmp_model_en");
+        return pma_pmp_model_en;
+    endfunction:get_pma_pmp_model_en
+
+    static function bit get_pma_pmp_raw_compare_en();
+        check_initialized("get_pma_pmp_raw_compare_en");
+        return pma_pmp_raw_compare_en;
+    endfunction:get_pma_pmp_raw_compare_en
+
+    static function bit get_pma_pmp_xmr_check_en();
+        check_initialized("get_pma_pmp_xmr_check_en");
+        return pma_pmp_xmr_check_en;
+    endfunction:get_pma_pmp_xmr_check_en
+
+    static function bit get_pma_pmp_undefined_after_tlb_fault();
+        check_initialized("get_pma_pmp_undefined_after_tlb_fault");
+        return pma_pmp_undefined_after_tlb_fault;
+    endfunction:get_pma_pmp_undefined_after_tlb_fault
 
     static function bit get_dispatch_issue_seq_en();
         check_initialized("get_dispatch_issue_seq_en");

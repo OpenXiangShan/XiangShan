@@ -11,6 +11,7 @@ seq_pkg.sv
 // ./base_seq_help/rob_order_util.sv
 // ./base_seq_help/seq_csr_common.sv
 // ./base_seq_help/mmu_csr_runtime_state.sv
+// ./base_seq_help/memblock_pma_pmp_model.sv
 // ./base_seq_help/main_control_transaction.sv
 // ./base_seq_help/memblock_op_behavior_util.sv
 // ./base_seq_help/status_transaction.sv
