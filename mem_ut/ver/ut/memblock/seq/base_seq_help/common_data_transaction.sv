@@ -13,6 +13,8 @@ class common_data_transaction extends uvm_object;
     typedef bit [53:0] memblock_uid_tlb_wait_shape_key_t;
     localparam bit [3:0] MEMBLOCK_SV39_MODE = 4'd8;
     localparam bit [3:0] MEMBLOCK_SV48_MODE = 4'd9;
+    localparam int unsigned MEMBLOCK_STA_LATE_FAULT_TOMBSTONE_MAX =
+        `MEMBLOCK_DUT_SQ_SIZE;
 
     typedef struct {
         memblock_sfence_payload_t payload;
@@ -1676,7 +1678,8 @@ class common_data_transaction extends uvm_object;
         // 中文注释：IssueQueue feedback success 只证明本次 issue response finalSuccess。
         // 这里复用 active/issue_killed/target_dispatched/issue_epoch/replay_seq 检查，过滤 replay/redirect 后迟到的旧 feedback；
         // 通过后仅设置 *_issue_feedback_success，不设置 *_writeback 或 *_pass，真实完成仍等待 real writeback。
-        if (!status.active || status.issue_killed ||
+        if (!status.active || status.issue_killed || status.fault ||
+            status.exception_pending || status.terminal_done ||
             !target_dispatched(status, target) ||
             status.get_target_issue_epoch(target) != issue_epoch ||
             !target_replay_seq_match(status, target, replay_seq)) begin
@@ -1694,6 +1697,208 @@ class common_data_transaction extends uvm_object;
         return 1'b1;
     endfunction:mark_issue_feedback_success
 
+    // 中文注释：STA IQ hit=0 时冻结旧 issue identity，但不等待 raw；后续 recovery
+    // 立即调用既有 mark_replay_pending()。只有 late fault 可以读取这个 history。
+    function bit capture_sta_late_fault_tombstone(input memblock_uid_t uid,
+                                                   input int unsigned issue_epoch,
+                                                   input int unsigned replay_seq,
+                                                   input longint unsigned cycle);
+        status_transaction                    status;
+        memblock_sta_late_fault_tombstone_t  tombstone;
+        memblock_rob_key_t                    rob_key;
+        memblock_sq_key_t                     sq_key;
+        memblock_uid_t                        mapped_uid;
+        int unsigned                          target_flush_epoch;
+
+        status = get_status(uid);
+        if (!status.active || status.issue_killed || status.fault ||
+            status.exception_pending || status.redirect_pending || status.terminal_done ||
+            !status.sta_dispatched || status.sta_writeback || status.sta_pass ||
+            status.sta_fault || issue_epoch == 0 ||
+            status.sta_issue_epoch != issue_epoch ||
+            !target_replay_seq_match(status, MEMBLOCK_ISSUE_TARGET_STA, replay_seq)) begin
+            return 1'b0;
+        end
+        if (!status.active_sq_mapped ||
+            !status.get_target_instance_flush_epoch(MEMBLOCK_ISSUE_TARGET_STA,
+                                                    target_flush_epoch)) begin
+            `uvm_fatal("STA_LATE_TOMBSTONE",
+                       $sformatf("current STA snapshot lacks SQ/flush identity uid=%0d", uid))
+        end
+        rob_key = status.get_rob_key();
+        sq_key.flag = status.sqIdx_flag;
+        sq_key.value = status.sqIdx_value;
+        if (!is_valid_sq_key(sq_key) ||
+            !lookup_active_uid_by_rob(rob_key, mapped_uid) || mapped_uid != uid ||
+            !lookup_active_uid_by_sq(sq_key, mapped_uid) || mapped_uid != uid) begin
+            `uvm_fatal("STA_LATE_TOMBSTONE",
+                       $sformatf("current STA mapping mismatch uid=%0d rob=%0d/%0d sq=%0d/%0d",
+                                 uid, rob_key.flag, rob_key.value, sq_key.flag, sq_key.value))
+        end
+        foreach (status.sta_late_fault_tombstone_q[idx]) begin
+            tombstone = status.sta_late_fault_tombstone_q[idx];
+            if (!tombstone.valid) begin
+                `uvm_fatal("STA_LATE_TOMBSTONE", $sformatf("invalid tombstone uid=%0d idx=%0d", uid, idx))
+            end
+            if (tombstone.dynamic_epoch == status.dynamic_epoch &&
+                tombstone.issue_epoch == issue_epoch &&
+                tombstone.replay_seq == replay_seq) begin
+                if (tombstone.rob_key != rob_key || tombstone.sq_key != sq_key ||
+                    tombstone.target_flush_epoch != target_flush_epoch) begin
+                    `uvm_fatal("STA_LATE_TOMBSTONE",
+                               $sformatf("duplicate tombstone identity mismatch uid=%0d epoch=%0d replay=%0d",
+                                         uid, issue_epoch, replay_seq))
+                end
+                return 1'b1;
+            end
+        end
+        if (status.sta_late_fault_tombstone_q.size() >=
+            MEMBLOCK_STA_LATE_FAULT_TOMBSTONE_MAX) begin
+            `uvm_fatal("STA_LATE_TOMBSTONE",
+                       $sformatf("tombstone history overflow uid=%0d dynamic_epoch=%0d size=%0d max=%0d",
+                                 uid, status.dynamic_epoch,
+                                 status.sta_late_fault_tombstone_q.size(),
+                                 MEMBLOCK_STA_LATE_FAULT_TOMBSTONE_MAX))
+        end
+        tombstone = '{default:'0};
+        tombstone.valid = 1'b1;
+        tombstone.rob_key = rob_key;
+        tombstone.sq_key = sq_key;
+        tombstone.issue_epoch = issue_epoch;
+        tombstone.replay_seq = replay_seq;
+        tombstone.dynamic_epoch = status.dynamic_epoch;
+        tombstone.target_flush_epoch = target_flush_epoch;
+        tombstone.create_cycle = cycle;
+        status.sta_late_fault_tombstone_q.push_back(tombstone);
+        status.last_event_cycle = cycle;
+        `uvm_info("STA_LATE_TOMBSTONE",
+                  $sformatf("capture uid=%0d dynamic_epoch=%0d issue_epoch=%0d replay_seq=%0d flush_epoch=%0d history=%0d",
+                            uid, tombstone.dynamic_epoch, issue_epoch, replay_seq,
+                            target_flush_epoch, status.sta_late_fault_tombstone_q.size()),
+                  UVM_LOW)
+        return 1'b1;
+    endfunction:capture_sta_late_fault_tombstone
+
+    // 中文注释：adapter 已以 raw ROB 找到 active UID 后，只读取该 UID 的有界 history。
+    // raw 不带 SQ/epoch/generation，故以 active status 的 SQ/dynamic identity 和 flush 下界复核。
+    function bit read_sta_late_fault_tombstone(
+        input memblock_uid_t uid,
+        input memblock_rob_key_t raw_rob_key,
+        input int unsigned raw_sample_flush_epoch,
+        output memblock_sta_late_fault_tombstone_t tombstone
+    );
+        status_transaction                    status;
+        memblock_sta_late_fault_tombstone_t  candidate;
+        memblock_sq_key_t                     sq_key;
+        memblock_uid_t                        mapped_uid;
+        bit                                   found;
+
+        tombstone = '{default:'0};
+        status = get_status(uid);
+        if (raw_sample_flush_epoch > memblock_sync_pkg::dispatch_flush_epoch) begin
+            `uvm_fatal("STA_LATE_TOMBSTONE",
+                       $sformatf("late fault sample epoch is from future uid=%0d sample=%0d current=%0d",
+                                 uid, raw_sample_flush_epoch,
+                                 memblock_sync_pkg::dispatch_flush_epoch))
+        end
+        if (!status.active || status.fault || status.exception_pending ||
+            status.terminal_done || status.redirect_pending || status.flushed ||
+            !status.active_sq_mapped || status.get_rob_key() != raw_rob_key) begin
+            return 1'b0;
+        end
+        sq_key.flag = status.sqIdx_flag;
+        sq_key.value = status.sqIdx_value;
+        if (!is_valid_sq_key(sq_key) ||
+            !lookup_active_uid_by_rob(raw_rob_key, mapped_uid) || mapped_uid != uid ||
+            !lookup_active_uid_by_sq(sq_key, mapped_uid) || mapped_uid != uid) begin
+            `uvm_fatal("STA_LATE_TOMBSTONE",
+                       $sformatf("late fault active mapping mismatch uid=%0d rob=%0d/%0d sq=%0d/%0d",
+                                 uid, raw_rob_key.flag, raw_rob_key.value,
+                                 sq_key.flag, sq_key.value))
+        end
+        found = 1'b0;
+        foreach (status.sta_late_fault_tombstone_q[idx]) begin
+            candidate = status.sta_late_fault_tombstone_q[idx];
+            if (!candidate.valid) begin
+                `uvm_fatal("STA_LATE_TOMBSTONE", $sformatf("invalid tombstone uid=%0d idx=%0d", uid, idx))
+            end
+            if (candidate.dynamic_epoch != status.dynamic_epoch ||
+                candidate.rob_key != raw_rob_key || candidate.sq_key != sq_key) begin
+                continue;
+            end
+            if (raw_sample_flush_epoch < candidate.target_flush_epoch) begin
+                continue;
+            end
+            if (!found || candidate.create_cycle < tombstone.create_cycle) begin
+                tombstone = candidate;
+                found = 1'b1;
+            end
+        end
+        return found;
+    endfunction:read_sta_late_fault_tombstone
+
+    // 中文注释：该 helper 只由 mark_target_fault() 调用。history 命中后将同 UID
+    // 终止为 fault，撤销待发射/待 PTW replay；不直接 retire active map。
+    function bit mark_sta_late_fault_from_tombstone(input memblock_uid_t uid,
+                                                     input int unsigned issue_epoch,
+                                                     input int unsigned replay_seq,
+                                                     input bit [23:0] exception_vec,
+                                                     input longint unsigned cycle);
+        status_transaction                    status;
+        memblock_sta_late_fault_tombstone_t  tombstone;
+        memblock_rob_key_t                    rob_key;
+        memblock_sq_key_t                     sq_key;
+        bit                                   found;
+
+        status = get_status(uid);
+        if (!status.active || status.fault || status.exception_pending ||
+            status.terminal_done || status.redirect_pending || status.flushed ||
+            !status.active_sq_mapped) begin
+            return 1'b0;
+        end
+        rob_key = status.get_rob_key();
+        sq_key.flag = status.sqIdx_flag;
+        sq_key.value = status.sqIdx_value;
+        found = 1'b0;
+        foreach (status.sta_late_fault_tombstone_q[idx]) begin
+            tombstone = status.sta_late_fault_tombstone_q[idx];
+            if (tombstone.valid && tombstone.dynamic_epoch == status.dynamic_epoch &&
+                tombstone.issue_epoch == issue_epoch && tombstone.replay_seq == replay_seq &&
+                tombstone.rob_key == rob_key && tombstone.sq_key == sq_key) begin
+                found = 1'b1;
+                break;
+            end
+        end
+        if (!found) begin
+            return 1'b0;
+        end
+        remove_uid_from_issue_queues(uid);
+        release_ptw_wait_replay(uid);
+        status.replay_pending = 1'b0;
+        status.replay_target_load = 1'b0;
+        status.replay_target_sta = 1'b0;
+        status.replay_target_std = 1'b0;
+        status.sta_dispatched = 1'b0;
+        status.sta_writeback = 1'b1;
+        status.sta_issue_feedback_success = 1'b0;
+        status.sta_pass = 1'b0;
+        status.sta_fault = 1'b1;
+        status.writeback = 1'b0;
+        status.pass = 1'b0;
+        status.success = 1'b0;
+        status.terminal_done = 1'b0;
+        status.fault = 1'b1;
+        status.exception_pending = 1'b1;
+        status.exception_vec = exception_vec;
+        status.clear_sta_late_fault_tombstones();
+        status.last_event_cycle = cycle;
+        `uvm_info("STA_LATE_TOMBSTONE",
+                  $sformatf("consume late fault uid=%0d issue_epoch=%0d replay_seq=%0d exception_vec=0x%0h",
+                            uid, issue_epoch, replay_seq, exception_vec),
+                  UVM_LOW)
+        return 1'b1;
+    endfunction:mark_sta_late_fault_from_tombstone
+
     function bit mark_target_fault(input memblock_uid_t uid,
                                    input memblock_issue_target_e target,
                                    input int unsigned issue_epoch,
@@ -1702,6 +1907,19 @@ class common_data_transaction extends uvm_object;
                                    input longint unsigned cycle);
         status_transaction status;
 
+        status = get_status(uid);
+        if (status.fault || status.exception_pending || status.terminal_done) begin
+            `uvm_info("WB_STATUS",
+                      $sformatf("drop duplicate fault uid=%0d target=%0d exception_vec=0x%0h",
+                                uid, target, exception_vec),
+                      UVM_LOW)
+            return 1'b0;
+        end
+        if (target == MEMBLOCK_ISSUE_TARGET_STA &&
+            mark_sta_late_fault_from_tombstone(uid, issue_epoch, replay_seq,
+                                                exception_vec, cycle)) begin
+            return 1'b1;
+        end
         if (!conditional_set_target_status_field(uid, target_writeback_field(target), 1'b1, target, issue_epoch, replay_seq)) begin
             return 1'b0;
         end
@@ -1715,6 +1933,10 @@ class common_data_transaction extends uvm_object;
         status.pass              = 1'b0;
         status.success           = 1'b0;
         status.terminal_done     = 1'b0;
+        if (target == MEMBLOCK_ISSUE_TARGET_STA) begin
+            release_ptw_wait_replay(uid);
+            status.clear_sta_late_fault_tombstones();
+        end
         status.last_event_cycle  = cycle;
         return 1'b1;
     endfunction:mark_target_fault
@@ -1752,7 +1974,10 @@ class common_data_transaction extends uvm_object;
                 `uvm_fatal("COMMON_DATA", $sformatf("mark_replay_pending got target=%0d", target))
             end
         endcase
-        if (!status.active || status.issue_killed ||
+        // 中文注释：late fault 或其它终态已经锁定 UID 结果时，队列中可能仍有同一
+        // UID 的旧 feedback。直接过滤，避免 stale replay 再次进入 issue queue。
+        if (!status.active || status.issue_killed || status.fault ||
+            status.exception_pending || status.terminal_done ||
             !target_dispatched(status, target) ||
             status.get_target_issue_epoch(target) != issue_epoch ||
             !target_replay_seq_match(status, target, replay_seq)) begin
@@ -1923,6 +2148,7 @@ class common_data_transaction extends uvm_object;
         status.load_issue_feedback_success = 1'b0;
         status.sta_issue_feedback_success = 1'b0;
         status.std_issue_feedback_success = 1'b0;
+        status.clear_sta_late_fault_tombstones();
         status.load_pass       = 1'b0;
         status.sta_pass        = 1'b0;
         status.std_pass        = 1'b0;
@@ -3005,6 +3231,8 @@ class common_data_transaction extends uvm_object;
             `uvm_fatal("COMMON_DATA", $sformatf("retire_active_uid got inactive uid=%0d", uid))
         end
         remove_uid_from_issue_queues(uid);
+        release_ptw_wait_replay(uid);
+        status.clear_sta_late_fault_tombstones();
 
         rob_key = status.get_rob_key();
         rob_map_key = rob_order_util::rob_to_map_key(rob_key);
@@ -5692,8 +5920,25 @@ class common_data_transaction extends uvm_object;
                                        input int unsigned replay_seq,
                                        input longint unsigned start_cycle);
         memblock_ptw_wait_replay_t wait_item;
+        status_transaction          status;
 
         check_uid(uid, "push_ptw_wait_replay");
+        status = get_status(uid);
+        // 中文注释：fault/redirect 与同 batch 的旧 replay 可能交错到达。先在
+        // PTW wait queue 入口做当前 identity 校验，避免 mark_replay_pending() 尚未
+        // 执行前把 stale item 再插回队列，进而阻塞 terminal drain。
+        if (!status.active || status.issue_killed || status.fault ||
+            status.exception_pending || status.terminal_done ||
+            status.redirect_pending || status.flushed ||
+            !target_dispatched(status, target) ||
+            status.get_target_issue_epoch(target) != issue_epoch ||
+            !target_replay_seq_match(status, target, replay_seq)) begin
+            `uvm_info("PTW_WAIT_REPLAY",
+                      $sformatf("drop stale PTW wait uid=%0d target=%0d issue_epoch=%0d replay_seq=%0d",
+                                uid, target, issue_epoch, replay_seq),
+                      UVM_LOW)
+            return;
+        end
         foreach (ptw_wait_replay_q[idx]) begin
             if (ptw_wait_replay_q[idx].valid &&
                 ptw_wait_replay_q[idx].uid == uid &&
