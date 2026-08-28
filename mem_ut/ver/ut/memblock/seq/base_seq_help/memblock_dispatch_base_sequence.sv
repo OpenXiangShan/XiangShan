@@ -1318,6 +1318,12 @@ function memblock_boundary_profile_e memblock_dispatch_base_sequence::classify_b
     if ((vaddr >> 6) != (end_vaddr >> 6)) begin
         return MEMBLOCK_BOUNDARY_PROFILE_CROSS_CACHELINE_SAME_4K;
     end
+    // 64B accesses are classified at cache-line granularity.  A line-aligned
+    // 64B access necessarily spans 16B/8B sub-boundaries, but it is still the
+    // aligned profile unless it crossed a page or cache line above.
+    if (size_bytes >= 64 && (vaddr % 64) == 0) begin
+        return MEMBLOCK_BOUNDARY_PROFILE_ALIGNED;
+    end
     if ((vaddr >> 4) != (end_vaddr >> 4)) begin
         return MEMBLOCK_BOUNDARY_PROFILE_CROSS_16B_SAME_LINE;
     end

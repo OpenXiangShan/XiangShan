@@ -108,6 +108,7 @@ package seq_pkg;
     `include "memblock_rm_readonly_api.sv"
     `include "memblock_virtual_sequencer.sv"
     `include "virtual_base_sequence.sv"
+    `include "memblock_mmu_sv39_csr_sequence.sv"
     `include "memblock_pending_mmio_directed_vseq.sv"
     `include "memblock_dispatch_real_smoke_vseq.sv"
     `include "memblock_dispatch_manual_control_vseq.sv"
