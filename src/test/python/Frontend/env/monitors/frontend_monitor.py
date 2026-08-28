@@ -8,6 +8,7 @@ from ..bundles import BackendObserveBundle
 from ..model.branch_checker import BranchChecker
 from ..model.memory_model import MemoryModel
 from ..model.page_table_model import PageTableModel
+from ..support.pc_utils import fold_pc
 from ..support.rvc_decoder import expand_rvc
 
 
@@ -45,6 +46,7 @@ class FrontendMonitor:
         self.slots_valid = 0
         self.redirect_count = 0
         self.exception_mark_count = 0
+        self.foldpc_recovery_count = 0
         self.instr_compare_skipped_count = 0
         self.current_cycle = 0
         self.event_sink: Optional[Callable[[Dict], None]] = None
@@ -421,6 +423,7 @@ class FrontendMonitor:
                 continue
 
             pc = self._read(self.interface.cfvec_pc[i], 0)
+            folded_pc = self._read(self.interface.cfvec_foldpc[i], 0)
             instr = self._read(self.interface.cfvec_instr[i], 0)
             is_rvc = bool(self._read(self.interface.cfvec_is_rvc[i], 0))
             pred_taken = bool(self._read(self.interface.cfvec_pred_taken[i], 0))
@@ -435,6 +438,43 @@ class FrontendMonitor:
                 + self._read(self.interface.cfvec_exception_vec[i][19], 0)
                 + self._read(self.interface.cfvec_exception_vec[i][20], 0)
             )
+            if int(pc) == 0 and int(ex_sum) > 0 and self._recovery_target_pc is not None:
+                recovery_first_cfvec_seen = True
+                target_pc = int(self._recovery_target_pc)
+                expected_foldpc = fold_pc(target_pc)
+                if int(folded_pc) != int(expected_foldpc):
+                    self._record_error(
+                        cycle=cycle,
+                        slot=i,
+                        kind="REDIRECT_RECOVERY_FOLDPC_MISMATCH",
+                        expected=target_pc,
+                        expected_foldpc=expected_foldpc,
+                        actual=0,
+                        actual_foldpc=int(folded_pc),
+                    )
+                    return
+                self._recovery_target_pc = None
+                self.expected_pc = None
+                self.wait_sync_after_redirect = False
+                self.redirect_grace = 0
+                self.redirect_sync_deadline = 0
+                self._ftq_start_pc_cache.clear()
+                self._ftq_group_closed.clear()
+                self._ftq_group_max_offset.clear()
+                self.slots_valid += 1
+                self.exception_mark_count += 1
+                self.foldpc_recovery_count += 1
+                self._emit(
+                    cycle,
+                    "monitor.exception_foldpc_recovery",
+                    {
+                        "slot": int(i),
+                        "expected_pc": target_pc,
+                        "foldpc": int(folded_pc),
+                    },
+                    level="DEBUG",
+                )
+                continue
             if int(pc) == 0:
                 continue
             if self._recovery_target_pc is not None and not recovery_first_cfvec_seen:
@@ -737,6 +777,7 @@ class FrontendMonitor:
             "avg_fetch_width": avg_fetch_width,
             "redirect_count": self.redirect_count,
             "exception_mark_count": self.exception_mark_count,
+            "foldpc_recovery_count": self.foldpc_recovery_count,
             "instr_compare_skipped_count": self.instr_compare_skipped_count,
             "error_count": len(self.errors),
         }
@@ -749,6 +790,7 @@ class FrontendMonitor:
         self.slots_valid = 0
         self.redirect_count = 0
         self.exception_mark_count = 0
+        self.foldpc_recovery_count = 0
         self.instr_compare_skipped_count = 0
         self.current_cycle = 0
         self.expected_pc = None

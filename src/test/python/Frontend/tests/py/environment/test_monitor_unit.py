@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from env.model.memory_model import MemoryModel
 from env.monitors.frontend_monitor import FrontendMonitor
+from env.support import fold_pc
 
 
 class _Signal:
@@ -17,6 +18,7 @@ class _ObserveIf:
         self.redirect_bits_taken = _Signal()
         self.cfvec_valid = [_Signal() for _ in range(8)]
         self.cfvec_pc = [_Signal() for _ in range(8)]
+        self.cfvec_foldpc = [_Signal() for _ in range(8)]
         self.cfvec_instr = [_Signal(0x13) for _ in range(8)]
         self.cfvec_is_rvc = [_Signal() for _ in range(8)]
         self.cfvec_pred_taken = [_Signal() for _ in range(8)]
@@ -196,6 +198,44 @@ def test_dut_redirect_first_sampled_cfvec_after_skip_must_be_target() -> None:
     assert monitor.get_errors()[0]["expected"] == 0x2000
     assert monitor.get_errors()[0]["actual"] == 0x2004
     assert monitor.observations == []
+
+
+def test_redirect_recovery_accepts_zero_exception_pc_with_matching_foldpc() -> None:
+    monitor, interface = _new_monitor()
+    target = 0x8000_0FFE
+
+    _drive_redirect_to_monitor(monitor, interface, pc=target, target=target)
+    monitor.on_clock_edge(10)
+    _set_redirect(interface, valid=0)
+    monitor.on_clock_edge(11)
+
+    _set_first_cfvec(interface, 0)
+    interface.cfvec_foldpc[0].value = fold_pc(target)
+    interface.cfvec_exception_vec[0][1].value = 1
+    monitor.on_clock_edge(12)
+
+    assert monitor.get_errors() == []
+    assert monitor.get_stats()["exception_mark_count"] == 1
+    assert monitor.get_stats()["foldpc_recovery_count"] == 1
+
+
+def test_redirect_recovery_rejects_zero_exception_pc_with_wrong_foldpc() -> None:
+    monitor, interface = _new_monitor()
+    target = 0x8000_0FFE
+
+    _drive_redirect_to_monitor(monitor, interface, pc=target, target=target)
+    monitor.on_clock_edge(10)
+    _set_redirect(interface, valid=0)
+    monitor.on_clock_edge(11)
+
+    _set_first_cfvec(interface, 0)
+    interface.cfvec_foldpc[0].value = fold_pc(target) ^ 1
+    interface.cfvec_exception_vec[0][1].value = 1
+    monitor.on_clock_edge(12)
+
+    error = monitor.get_errors()[0]
+    assert error["kind"] == "REDIRECT_RECOVERY_FOLDPC_MISMATCH"
+    assert error["expected_foldpc"] == fold_pc(target)
 
 
 def test_dut_redirect_to_mmio_target_does_not_require_recovery_cfvec() -> None:

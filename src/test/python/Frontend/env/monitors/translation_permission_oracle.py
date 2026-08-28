@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
+from ..support.pc_utils import fold_pc
+
 _EXCEPTION_BITS = {
     1: "instruction_access_fault",
     12: "instruction_page_fault",
@@ -464,7 +466,15 @@ class TranslationPermissionOracle:
             return internal_get_gpa
         return self._read(ptw_if.req_0_bits_get_gpa)
 
-    def observe_cfvec(self, cycle: int, *, pc: int, exception_bits: dict[int, int], cross_page: bool = False) -> None:
+    def observe_cfvec(
+        self,
+        cycle: int,
+        *,
+        pc: int,
+        exception_bits: dict[int, int],
+        cross_page: bool = False,
+        folded_pc: Optional[int] = None,
+    ) -> None:
         if self.active is None:
             return
         actual_faults = [name for bit, name in _EXCEPTION_BITS.items() if int(exception_bits.get(bit, 0))]
@@ -513,14 +523,35 @@ class TranslationPermissionOracle:
         expected_fault = self.active["expected_fault"]
         if expected_fault is not None and self.active["fault_seen"]:
             return
-        self._record(cycle, "cfvec_exception", pc=int(pc), fault=actual_fault, cross_page=bool(cross_page))
+        self._record(
+            cycle,
+            "cfvec_exception",
+            pc=int(pc),
+            folded_pc=None if folded_pc is None else int(folded_pc),
+            fault=actual_fault,
+            cross_page=bool(cross_page),
+        )
         if expected_fault is None:
             self._error(cycle, "unexpected_cfvec_exception", pc=int(pc), actual_fault=actual_fault)
             return
         va = int(self.active["va"])
-        if not va <= int(pc) < va + int(self.active["payload_size"]):
+        pc_matches = va <= int(pc) < va + int(self.active["payload_size"])
+        foldpc_matches = (
+            int(pc) == 0
+            and folded_pc is not None
+            and int(folded_pc) == fold_pc(va)
+        )
+        if not pc_matches and not foldpc_matches:
             self._error(cycle, "cfvec_exception_pc_mismatch", expected_va=va, actual_pc=int(pc), actual_fault=actual_fault)
             return
+        if foldpc_matches:
+            self._record(
+                cycle,
+                "cfvec_exception_foldpc_match",
+                expected_va=va,
+                folded_pc=int(folded_pc),
+                fault=actual_fault,
+            )
         if actual_fault != expected_fault:
             self._error(cycle, "cfvec_exception_type_mismatch", expected_fault=expected_fault, actual_fault=actual_fault, pc=int(pc))
             return
@@ -581,6 +612,7 @@ class TranslationPermissionOracle:
             self.observe_cfvec(
                 cycle,
                 pc=self._read(observe_if.cfvec_pc[slot]),
+                folded_pc=self._read(observe_if.cfvec_foldpc[slot]),
                 exception_bits={bit: self._read(observe_if.cfvec_exception_vec[slot][bit]) for bit in _EXCEPTION_BITS},
                 cross_page=bool(self._read(observe_if.cfvec_cross_page_ipf_fix[slot])),
             )

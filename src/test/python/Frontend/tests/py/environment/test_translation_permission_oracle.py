@@ -13,7 +13,7 @@ from env.sequences import (
     TranslationScenarioSequence,
     TranslationSectorLane,
 )
-from env.support import PmpPmaConfig
+from env.support import PmpPmaConfig, fold_pc
 
 
 _ITLB_PTW_REQ_GET_GPA = "Frontend_top.Frontend.inner_itlb.io_ptw_req_0_bits_getGpa"
@@ -296,6 +296,47 @@ def test_oracle_maps_generated_cfvec_page_fault_bit() -> None:
     env.translation_oracle.observe_cfvec(12, pc=state.scenario.va, exception_bits={12: 1}, cross_page=False)
 
     assert env.assert_translation_scenario()["error_count"] == 0
+
+
+def test_oracle_accepts_zero_exception_pc_with_matching_foldpc() -> None:
+    env, state = _state(
+        scenario_id="oracle-foldpc-fallback",
+        va=0x8020_1FFC,
+        pa=0x8040_1FFC,
+        pte=TranslationPte(v=1, r=1, x=0, a=1),
+    )
+
+    _observe_matching_ptw(env, state)
+    env.translation_oracle.observe_cfvec(
+        12,
+        pc=0,
+        folded_pc=fold_pc(state.scenario.va),
+        exception_bits={12: 1},
+    )
+
+    stats = env.assert_translation_scenario()
+    assert stats["error_count"] == 0
+    assert stats["records"][-1]["kind"] == "cfvec_exception_foldpc_match"
+
+
+def test_oracle_rejects_zero_exception_pc_with_wrong_foldpc() -> None:
+    env, state = _state(
+        scenario_id="oracle-foldpc-mismatch",
+        va=0x8020_1FFC,
+        pa=0x8040_1FFC,
+        pte=TranslationPte(v=1, r=1, x=0, a=1),
+    )
+
+    _observe_matching_ptw(env, state)
+    env.translation_oracle.observe_cfvec(
+        12,
+        pc=0,
+        folded_pc=fold_pc(state.scenario.va) ^ 1,
+        exception_bits={12: 1},
+    )
+
+    with pytest.raises(AssertionError, match="cfvec_exception_pc_mismatch"):
+        env.assert_translation_scenario()
 
 
 def test_oracle_uses_first_expected_fault_as_exception_evidence() -> None:
