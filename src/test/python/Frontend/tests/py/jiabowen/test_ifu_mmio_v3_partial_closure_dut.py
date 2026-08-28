@@ -1185,7 +1185,14 @@ def test_mmio_backend_redirect_wins_response_writeback(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-1047", "BIN-1048")
+@pytest.mark.funcov_bins(
+    "BIN-1047",
+    "BIN-1048",
+    "BIN-1105",
+    "BIN-1110",
+    "BIN-1111",
+    "BIN-1114",
+)
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_8b_clean_resend_delivers_two_ordered_rvi(env):
     cross_8b_trace = _register_cross_8b_trace(env)
@@ -1221,10 +1228,22 @@ def test_mmio_cross_8b_clean_resend_delivers_two_ordered_rvi(env):
     assert env.functional_coverage.key_hit(
         "ifu_mmio_owner_v3", "mmio_leaf_032"
     )
+    for leaf in (12, 17, 18, 21):
+        assert env.functional_coverage.key_hit(
+            "ifu_instruncache_owner_v3", f"instruncache_leaf_{leaf:03d}"
+        )
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-1071", "BIN-1077", "BIN-1079")
+@pytest.mark.funcov_bins(
+    "BIN-1071",
+    "BIN-1077",
+    "BIN-1079",
+    "BIN-1105",
+    "BIN-1110",
+    "BIN-1111",
+    "BIN-1114",
+)
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_cross_8b_clean_resend_delivers_two_ordered_rvi(env, tmp_path):
     cross_8b_trace = _register_cross_8b_trace(env)
@@ -1263,6 +1282,10 @@ def test_nc_cross_8b_clean_resend_delivers_two_ordered_rvi(env, tmp_path):
         "ifu_nc_owner_v3", "nc_leaf_025"
     ), "\n".join(str(item) for item in cross_8b_trace[-80:])
     assert env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_017")
+    for leaf in (12, 17, 18, 21):
+        assert env.functional_coverage.key_hit(
+            "ifu_instruncache_owner_v3", f"instruncache_leaf_{leaf:03d}"
+        )
     assert not env.monitor.get_errors()
 
 

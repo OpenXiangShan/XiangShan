@@ -97,6 +97,15 @@ _RTL_CONTRACT_REWRITES = {
     },
 }
 
+_PARTIAL_LEAVES = {
+    _LEAVES[31],
+    _LEAVES[37],
+}
+_P0_LEAVES = {
+    _LEAVES[22],
+    *_PARTIAL_LEAVES,
+}
+
 
 def _append_pilot_rows(fields: list[str], rows: list[dict[str, str]]) -> None:
     buffer = io.StringIO(newline="")
@@ -148,6 +157,8 @@ def synchronize() -> dict[str, int]:
             )
         if row["status"] == "UNMAPPED":
             row["status"] = "MODELED"
+        if leaf in _PARTIAL_LEAVES and row["status"] != "HIT":
+            row["status"] = "PARTIAL"
         if _MODEL_EVIDENCE not in row["evidence"]:
             row["evidence"] = "; ".join(
                 part for part in (_MODEL_EVIDENCE, row["evidence"].strip()) if part
@@ -175,7 +186,7 @@ def synchronize() -> dict[str, int]:
             "建议采样事件": row["Condition"].strip(),
             "建议观测对象": row["Object"].strip(),
             "命中判据": row["Checkpoint"].strip(),
-            "优先级": "P0" if row["status"] == "PARTIAL" else "P1",
+            "优先级": "P0" if leaf in _P0_LEAVES else "P1",
             "建议试点用例": "fe_instr_uncache_protocol_v3",
             "Legacy_Bin_ID": "",
         }

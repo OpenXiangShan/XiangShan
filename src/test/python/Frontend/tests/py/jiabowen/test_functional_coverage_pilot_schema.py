@@ -334,7 +334,7 @@ def test_instr_uncache_owner_leaves_are_complete_and_preserve_sv_models():
                 f"bins {pilot['Bin_Name']} ({bin_id})"
             )
             assert python_mapping in row["coverage"]
-            assert row["status"] in {"MODELED", "PARTIAL"}
+            assert row["status"] in {"MODELED", "PARTIAL", "HIT"}
             assert "MODEL:sample_instr_uncache_owner_coverage" in row["evidence"]
             mapped_rows[bin_id] = row
 
@@ -346,8 +346,9 @@ def test_instr_uncache_owner_leaves_are_complete_and_preserve_sv_models():
         )
         == 34
     )
-    assert sum(row["status"] == "MODELED" for row in mapped_rows.values()) == 35
-    assert sum(row["status"] == "PARTIAL" for row in mapped_rows.values()) == 3
+    assert sum(row["status"] == "HIT" for row in mapped_rows.values()) == 18
+    assert sum(row["status"] == "MODELED" for row in mapped_rows.values()) == 18
+    assert sum(row["status"] == "PARTIAL" for row in mapped_rows.values()) == 2
 
 
 def test_pilot_schema_rejects_duplicate_bin_id(tmp_path):

@@ -30,6 +30,8 @@ def initialize_instr_uncache_owner_coverage_state(recorder) -> None:
         "cross_page_pending": None,
         "non_cross_rvi_offsets": set(),
         "attribute_modes": set(),
+        "accepted_request_attributes": None,
+        "wfi_retracted_a": None,
     }
 
 
@@ -72,6 +74,8 @@ def _selected_word(data: Optional[int], pruned_addr: Optional[int]) -> Optional[
 
 def _entry_evidence(s: dict[str, Optional[int]]) -> dict[str, Any]:
     return {
+        "req_is_mmio": s["req_is_mmio"],
+        "req_pbmt": s["req_pbmt"],
         "entry_state": s["entry_state"],
         "entry_resending": s["entry_resending"],
         "entry_req_addr": s["entry_req_addr"],
@@ -109,7 +113,48 @@ def sample_instr_uncache_owner_coverage(
     clean_d = tl_d_valid and s["tl_d_corrupt"] == 0 and s["tl_d_denied"] == 0
     single_delivery = s["to_enq"] is not None and int(s["to_enq"]).bit_count() == 1
 
+    if (
+        s["req_valid"] == 1
+        and s["req_ready"] == 1
+        and s["req_is_mmio"] is not None
+        and s["req_pbmt"] is not None
+    ):
+        state["accepted_request_attributes"] = {
+            "mem_back_type_mm": int(s["req_is_mmio"] == 0),
+            "mem_page_type_nc": int(s["req_pbmt"] == 1),
+            "is_mmio": int(s["req_is_mmio"]),
+            "pbmt": int(s["req_pbmt"]),
+        }
+
     stalled = state["stalled_a"]
+    if (
+        stalled is not None
+        and s.get("wfi_req") == 1
+        and not tl_a_valid
+        and state["wfi_retracted_a"] is None
+    ):
+        state["wfi_retracted_a"] = dict(stalled)
+
+    wfi_retracted = state["wfi_retracted_a"]
+    if (
+        wfi_retracted is not None
+        and s.get("wfi_req") == 0
+        and tl_a_valid
+        and s["tl_a_addr"] is not None
+        and wfi_retracted.get("addr") == s["tl_a_addr"]
+    ):
+        _mark(
+            recorder,
+            9,
+            cycle,
+            {
+                **evidence,
+                "wfi_retracted_addr": wfi_retracted.get("addr"),
+                "wfi_recovery_addr": s["tl_a_addr"],
+            },
+        )
+        state["wfi_retracted_a"] = None
+
     if tl_a_valid and s["tl_a_ready"] == 0:
         current = {
             "addr": s["tl_a_addr"],
@@ -206,6 +251,17 @@ def sample_instr_uncache_owner_coverage(
             _mark(
                 recorder, 18, cycle, {**evidence, "stitched_data": s["instr_resp_data"]}
             )
+            if not entry_resending and s["instr_resp_need_resend"] == 0:
+                _mark(
+                    recorder,
+                    21,
+                    cycle,
+                    {
+                        **evidence,
+                        "single_instr_response": True,
+                        "resending_cleared": True,
+                    },
+                )
         if (
             not pending_d["beat_tail"]
             and not pending_d["resending"]
@@ -296,16 +352,7 @@ def sample_instr_uncache_owner_coverage(
                 cross_8b["expected_data"] = int(cross_8b["first_half"]) | (
                     second_half << 16
                 )
-        if (
-            cross_8b["second_d"]
-            and not entry_resending
-            and s["to_valid"] == 1
-            and s["to_ready"] == 1
-            and single_delivery
-            and s["to_is_rvc"] is not None
-            and int(s["to_is_rvc"]) & int(s["to_enq"]) == 0
-        ):
-            _mark(recorder, 21, cycle, evidence)
+        if cross_8b["second_d"] and not entry_resending and s["instr_resp_valid"] == 1:
             state["cross_8b_pending"] = None
 
     cross_page = state["cross_page_pending"]
@@ -365,17 +412,22 @@ def sample_instr_uncache_owner_coverage(
         _mark(recorder, 30, cycle, {**evidence, "no_second_page_request": True})
 
     if tl_a_valid:
+        accepted_attributes = state["accepted_request_attributes"]
         attr_pairs = (
             (
                 36,
                 "mem_back_type_mm",
-                s["entry_mem_back_type_mm"],
+                None
+                if accepted_attributes is None
+                else accepted_attributes["mem_back_type_mm"],
                 s["tl_a_mem_back_type_mm"],
             ),
             (
                 37,
                 "mem_page_type_nc",
-                s["entry_mem_page_type_nc"],
+                None
+                if accepted_attributes is None
+                else accepted_attributes["mem_page_type_nc"],
                 s["tl_a_mem_page_type_nc"],
             ),
         )
@@ -385,10 +437,21 @@ def sample_instr_uncache_owner_coverage(
                 and observed is not None
                 and int(expected) == int(observed)
             ):
-                _mark(recorder, index, cycle, {**evidence, "attribute": name})
-        if s["entry_mem_page_type_nc"] == 1 and s["entry_mem_back_type_mm"] == 1:
+                _mark(
+                    recorder,
+                    index,
+                    cycle,
+                    {
+                        **evidence,
+                        "attribute": name,
+                        "accepted_request_attributes": dict(accepted_attributes),
+                    },
+                )
+        expected_mem_back_type_mm = attr_pairs[0][2]
+        expected_mem_page_type_nc = attr_pairs[1][2]
+        if expected_mem_page_type_nc == 1 and expected_mem_back_type_mm == 1:
             state["attribute_modes"].add("nc")
-        if s["entry_mem_page_type_nc"] == 0 and s["entry_mem_back_type_mm"] == 0:
+        if expected_mem_page_type_nc == 0 and expected_mem_back_type_mm == 0:
             state["attribute_modes"].add("mmio")
 
     state["previous_entry_state"] = (

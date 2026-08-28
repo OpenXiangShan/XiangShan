@@ -743,6 +743,7 @@ def _recent_mmio_pcs(env, *, window: int) -> list[int]:
     ]
 
 
+@pytest.mark.funcov_bins("BIN-1094")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_a_ready_backpressure_holds_request(env):
     _prepare_mmio_cnop_stream(env)
@@ -775,14 +776,29 @@ def test_uncache_a_ready_backpressure_holds_request(env):
 
     assert req_after > req_before
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= req_before + 2
+    assert env.functional_coverage.key_hit(
+        "ifu_instruncache_owner_v3", "instruncache_leaf_001"
+    )
     assert not env.monitor.get_errors()
 
 
 @pytest.mark.parametrize(
     "fault_kwargs,expected_exception,expected_resp_type,expected_path_exception",
     [
-        ({"corrupt": 1}, "hwe", "corrupt", None),
-        ({"denied": 1}, "af", "denied", "mmio_x_af"),
+        pytest.param(
+            {"corrupt": 1},
+            "hwe",
+            "corrupt",
+            None,
+            marks=pytest.mark.funcov_bins("BIN-1100"),
+        ),
+        pytest.param(
+            {"denied": 1},
+            "af",
+            "denied",
+            "mmio_x_af",
+            marks=pytest.mark.funcov_bins("BIN-1099"),
+        ),
     ],
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -807,6 +823,10 @@ def test_uncache_response_fault_reports_dut_exception(
     assert int(stats.get("denied_resp_count", 0)) == (1 if fault_kwargs.get("denied") else 0)
     assert _wait_for_monitor_exception(env)
     assert env.monitor.exception_mark_count > 0
+    leaf = 7 if fault_kwargs.get("corrupt") else 6
+    assert env.functional_coverage.key_hit(
+        "ifu_instruncache_owner_v3", f"instruncache_leaf_{leaf:03d}"
+    )
     assert not env.monitor.get_errors()
 
 
@@ -840,6 +860,7 @@ def test_uncache_wfi_blocks_new_acquire_and_refill_not_safe(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-1102")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_wfi_during_a_ready_backpressure_retracts_unaccepted_request(env):
     _prepare_mmio_cnop_stream(env)
@@ -875,6 +896,9 @@ def test_uncache_wfi_during_a_ready_backpressure_retracts_unaccepted_request(env
 
     assert req_after > req_before
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= req_before + 2
+    assert env.functional_coverage.key_hit(
+        "ifu_instruncache_owner_v3", "instruncache_leaf_009"
+    )
     assert not env.monitor.get_errors()
 
 
@@ -2234,6 +2258,7 @@ def test_uncache_csr_changed_before_ptw_response_discards_stale_translation(env)
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-1108")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_resend_first_beat_corrupt_suppresses_resend(env):
     _prepare_cross_beat_rvi_stream(env)
@@ -2251,6 +2276,9 @@ def test_uncache_resend_first_beat_corrupt_suppresses_resend(env):
     assert stats.get("request_addrs", []).count(_MMIO_BASE) == 1
     assert (_MMIO_BASE + 8) not in stats.get("request_addrs", [])
     assert env.monitor.exception_mark_count > 0
+    assert env.functional_coverage.key_hit(
+        "ifu_instruncache_owner_v3", "instruncache_leaf_015"
+    )
     assert not env.monitor.get_errors()
 
 
@@ -2276,7 +2304,21 @@ def test_uncache_resend_first_beat_denied_allows_resend(env):
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.parametrize("fault,exception", [("corrupt", "hwe"), ("denied", "af")])
+@pytest.mark.parametrize(
+    "fault,exception",
+    [
+        pytest.param(
+            "corrupt",
+            "hwe",
+            marks=pytest.mark.funcov_bins("BIN-1110", "BIN-1112"),
+        ),
+        pytest.param(
+            "denied",
+            "af",
+            marks=pytest.mark.funcov_bins("BIN-1110"),
+        ),
+    ],
+)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_resend_second_beat_fault_reports_exception(env, fault, exception):
     _prepare_cross_beat_rvi_stream(env)
@@ -2296,10 +2338,17 @@ def test_uncache_resend_second_beat_fault_reports_exception(env, fault, exceptio
     assert _MMIO_BASE in stats.get("request_addrs", [])
     assert (_MMIO_BASE + 8) in stats.get("request_addrs", [])
     assert env.monitor.exception_mark_count > 0
+    assert env.functional_coverage.key_hit(
+        "ifu_instruncache_owner_v3", "instruncache_leaf_017"
+    )
+    if fault == "corrupt":
+        assert env.functional_coverage.key_hit(
+            "ifu_instruncache_owner_v3", "instruncache_leaf_019"
+        )
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-417")
+@pytest.mark.funcov_bins("BIN-417", "BIN-1101", "BIN-1115", "BIN-1116", "BIN-1120")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
     _prepare_cross_page_rvi_stream(env)
@@ -2435,9 +2484,13 @@ def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
     )
     assert not env.monitor.get_errors()
     assert env.functional_coverage.key_hit("uncache_page_boundary", "rvi_tail_resend_next_page")
+    for leaf in (8, 22, 23, 27):
+        assert env.functional_coverage.key_hit(
+            "ifu_instruncache_owner_v3", f"instruncache_leaf_{leaf:03d}"
+        )
 
 
-@pytest.mark.funcov_bins("BIN-416")
+@pytest.mark.funcov_bins("BIN-416", "BIN-1107", "BIN-1117")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_page_tail_rvc_does_not_fetch_next_page_before_delivery(env):
     _prepare_cross_page_rvc_stream(env)
@@ -2487,6 +2540,10 @@ def test_uncache_page_tail_rvc_does_not_fetch_next_page_before_delivery(env):
         "samples": rvc_window,
     }
     assert env.functional_coverage.key_hit("uncache_page_boundary", "rvc_tail_no_resend_before_delivery")
+    for leaf in (14, 24):
+        assert env.functional_coverage.key_hit(
+            "ifu_instruncache_owner_v3", f"instruncache_leaf_{leaf:03d}"
+        )
     assert not env.monitor.get_errors()
 
 

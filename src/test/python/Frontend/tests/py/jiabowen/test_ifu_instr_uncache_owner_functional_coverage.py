@@ -3,12 +3,13 @@ from env.funcov.py.ifu import mmio_nc_owner_funcov as owner
 
 
 class _Recorder:
-    def __init__(self):
+    def __init__(self, signals=None):
         self.hits = set()
         self.evidence = []
+        self.signals = {} if signals is None else dict(signals)
 
-    def _read_first_dut_signal(self, _dut, _names):
-        return None
+    def _read_first_dut_signal(self, _dut, names):
+        return next((self.signals[name] for name in names if name in self.signals), None)
 
     def mark(self, group, bin_name, _cycle, evidence):
         self.hits.add((group, bin_name))
@@ -68,6 +69,18 @@ def test_tl_a_stall_requires_each_observed_field_to_remain_stable():
     assert not _hit(recorder, 3)
 
 
+def test_snapshot_resolves_v3_tilelink_user_attribute_names():
+    recorder = _Recorder(
+        {
+            "auto_inner_instrUncache_client_out_a_bits_user_memBackType_MM": 1,
+            "auto_inner_instrUncache_client_out_a_bits_user_memPageType_NC": 0,
+        }
+    )
+    snapshot = owner._snapshot(recorder, object())
+    assert snapshot["tl_a_mem_back_type_mm"] == 1
+    assert snapshot["tl_a_mem_page_type_nc"] == 0
+
+
 def test_tl_a_fire_must_be_followed_by_entry_waiting_for_d():
     snapshot = _snapshot()
     snapshot.update(
@@ -90,6 +103,35 @@ def test_tl_a_fire_must_be_followed_by_entry_waiting_for_d():
     assert _hit(recorder, 4)
 
 
+def test_wfi_retract_requires_stalled_request_and_same_address_recovery():
+    snapshot = _snapshot()
+    snapshot.update(
+        {
+            "tl_a_valid": 1,
+            "tl_a_ready": 0,
+            "tl_a_addr": 0x4000,
+            "wfi_req": 0,
+        }
+    )
+    recorder = _Recorder()
+    _sample(recorder, 1, snapshot)
+    snapshot.update({"tl_a_valid": 0, "wfi_req": 1})
+    _sample(recorder, 2, snapshot)
+    assert not _hit(recorder, 9)
+    snapshot.update({"tl_a_valid": 1, "wfi_req": 0, "tl_a_ready": 0})
+    _sample(recorder, 3, snapshot)
+    assert _hit(recorder, 9)
+
+    recorder = _Recorder()
+    snapshot.update({"tl_a_valid": 1, "wfi_req": 0, "tl_a_addr": 0x4000})
+    _sample(recorder, 1, snapshot)
+    snapshot.update({"tl_a_valid": 0, "wfi_req": 1})
+    _sample(recorder, 2, snapshot)
+    snapshot.update({"tl_a_valid": 1, "wfi_req": 0, "tl_a_addr": 0x5000})
+    _sample(recorder, 3, snapshot)
+    assert not _hit(recorder, 9)
+
+
 def test_d_response_fields_are_checked_at_instruncache_response():
     snapshot = _snapshot()
     snapshot.update(
@@ -108,6 +150,7 @@ def test_d_response_fields_are_checked_at_instruncache_response():
     snapshot.update(
         {
             "entry_state": 3,
+            "entry_resending": 0,
             "tl_d_valid": 0,
             "instr_resp_valid": 1,
             "instr_resp_data": 0x00000013,
@@ -166,6 +209,7 @@ def test_cross_8b_resend_checks_second_address_and_single_rvi_delivery():
     snapshot.update(
         {
             "entry_state": 3,
+            "entry_resending": 0,
             "tl_d_valid": 0,
             "instr_resp_valid": 1,
             "instr_resp_data": 0x00130003,
@@ -176,6 +220,7 @@ def test_cross_8b_resend_checks_second_address_and_single_rvi_delivery():
     )
     _sample(recorder, 4, snapshot)
     assert _hit(recorder, 18)
+    assert _hit(recorder, 21)
 
     snapshot.update(
         {
@@ -231,32 +276,46 @@ def test_tl_user_attributes_must_match_entry_and_cover_mmio_and_nc_modes():
     snapshot = _snapshot()
     snapshot.update(
         {
-            "tl_a_valid": 1,
+            "req_valid": 1,
+            "req_ready": 1,
+            "req_is_mmio": 1,
+            "req_pbmt": 0,
+            "tl_a_valid": 0,
             "tl_a_ready": 1,
-            "entry_mem_back_type_mm": 0,
-            "entry_mem_page_type_nc": 0,
             "tl_a_mem_back_type_mm": 0,
             "tl_a_mem_page_type_nc": 0,
         }
     )
     recorder = _Recorder()
     _sample(recorder, 1, snapshot)
+    assert not any(_hit(recorder, index) for index in (36, 37, 38))
+
+    snapshot.update({"req_valid": 0, "req_ready": 0, "tl_a_valid": 1})
+    _sample(recorder, 2, snapshot)
     assert _hit(recorder, 36)
     assert _hit(recorder, 37)
     assert not _hit(recorder, 38)
 
     snapshot.update(
         {
-            "entry_mem_back_type_mm": 1,
-            "entry_mem_page_type_nc": 1,
+            "req_valid": 1,
+            "req_ready": 1,
+            "req_is_mmio": 0,
+            "req_pbmt": 1,
+            "tl_a_valid": 0,
             "tl_a_mem_back_type_mm": 1,
             "tl_a_mem_page_type_nc": 1,
         }
     )
-    _sample(recorder, 2, snapshot)
+    _sample(recorder, 3, snapshot)
+    snapshot.update({"req_valid": 0, "req_ready": 0, "tl_a_valid": 1})
+    _sample(recorder, 4, snapshot)
     assert not _hit(recorder, 38)
 
     recorder = _Recorder()
     snapshot["tl_a_mem_page_type_nc"] = 0
+    snapshot.update({"req_valid": 1, "req_ready": 1, "tl_a_valid": 0})
     _sample(recorder, 1, snapshot)
+    snapshot.update({"req_valid": 0, "req_ready": 0, "tl_a_valid": 1})
+    _sample(recorder, 2, snapshot)
     assert not _hit(recorder, 37)

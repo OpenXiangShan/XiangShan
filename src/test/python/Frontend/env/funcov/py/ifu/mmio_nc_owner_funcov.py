@@ -207,6 +207,8 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "is_first": _read_ifu(recorder, dut, "isFirstInstr"),
         "req_valid": _read_uncache(recorder, dut, "io_req_valid"),
         "req_ready": _read_uncache(recorder, dut, "io_req_ready"),
+        "req_is_mmio": _read_uncache(recorder, dut, "io_req_bits_isMmio"),
+        "req_pbmt": _read_uncache(recorder, dut, "io_req_bits_pbmt"),
         "uncache_state": _read_uncache(recorder, dut, "uncacheState"),
         "ifu_stall": _read_uncache(recorder, dut, "io_ifuStall"),
         "to_uncache_valid": _read(
@@ -309,12 +311,14 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "tl_a_mem_back_type_mm": _read(
             recorder,
             dut,
+            "auto_inner_instrUncache_client_out_a_bits_user_memBackType_MM",
             "auto_inner_instrUncache_client_out_a_bits_user_MemBackTypeMM",
             "auto_inner_instrUncache_client_out_a_bits_user_memBackTypeMM",
         ),
         "tl_a_mem_page_type_nc": _read(
             recorder,
             dut,
+            "auto_inner_instrUncache_client_out_a_bits_user_memPageType_NC",
             "auto_inner_instrUncache_client_out_a_bits_user_MemPageTypeNC",
             "auto_inner_instrUncache_client_out_a_bits_user_memPageTypeNC",
         ),
@@ -359,6 +363,13 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "prev_half_pc": _read_ifu(recorder, dut, "s2_prevEndHalfPc_addr"),
         "uncache_pc": _read_ifu(recorder, dut, "uncachePc_addr"),
         "wfi_safe": _read(recorder, dut, "Frontend_top.io_backend_wfi_wfiSafe"),
+        "wfi_req": _read(
+            recorder,
+            dut,
+            "Frontend_top.io_backend_wfi_wfiReq",
+            "Frontend_top.Frontend.io_backend_wfi_wfiReq",
+            "io_backend_wfi_wfiReq",
+        ),
         "waylookup_valid": _read(
             recorder,
             dut,
