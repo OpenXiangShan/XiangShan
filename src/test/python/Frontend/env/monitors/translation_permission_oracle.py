@@ -372,10 +372,6 @@ class TranslationPermissionOracle:
             # cannot be attributed to the newly armed translation epoch yet.
             self._record(cycle, "pre_response_fetch_request", path=actual_path, pa=actual_pa)
             return
-        if self.active["expected_path"] == "fault":
-            self._record(cycle, "fetch_request", path=actual_path, pa=actual_pa)
-            self._error(cycle, "unexpected_fetch_after_fault", path=actual_path, pa=actual_pa)
-            return
         matching_fetches = [
             item
             for item in self.active["expected_fetches"]
@@ -398,6 +394,10 @@ class TranslationPermissionOracle:
             self.active["fetched_pages"].append(int(expected["page"]))
             self.active["observed_fetch_pas"].append(actual_pa)
             self.active["fetch_seen"] = True
+            return
+        if self.active["expected_path"] == "fault":
+            self._record(cycle, "fetch_request", path=actual_path, pa=actual_pa)
+            self._error(cycle, "unexpected_fetch_after_fault", path=actual_path, pa=actual_pa)
             return
         matching_out_of_scope_fetches = [
             item

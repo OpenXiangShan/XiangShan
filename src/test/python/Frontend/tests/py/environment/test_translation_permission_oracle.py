@@ -356,6 +356,80 @@ def test_oracle_uses_first_expected_fault_as_exception_evidence() -> None:
     assert [record["kind"] for record in stats["records"]] == ["armed", "ptw_request", "ptw_response", "cfvec_exception"]
 
 
+def test_oracle_allows_only_declared_first_page_fetch_before_cross_page_fault() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    scenario = TranslationScenario(
+        scenario_id="oracle-cross-page-second-fault",
+        va=0x8020_0FFE,
+        pa=0x8040_0FFE,
+        payload=b"\x13\x00\x00\x00",
+        page_count=2,
+        s1_pte=TranslationPte(pbmt=1),
+        expected_path="fault",
+        expected_result="access_fault",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(
+                    match="napot", read=True, write=True, execute=True
+                ),
+                addr=0x8040_0000,
+                size=0x1000,
+            ),
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=1,
+                config=PmpPmaConfig(
+                    match="napot", read=True, write=True, execute=False
+                ),
+                addr=0x8040_1000,
+                size=0x1000,
+            ),
+        ),
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    active = env.arm_translation_scenario(state)
+    for cycle, request in enumerate(active["expected_ptw_requests"], start=10):
+        response = env.page_table.build_ptw_resp(
+            request["vpn"],
+            s2xlate=request["s2xlate"],
+            get_gpa=request["get_gpa"],
+        )
+        request_fields = {
+            key: request[key] for key in ("vpn", "s2xlate", "get_gpa")
+        }
+        env.translation_oracle.observe_ptw_request(cycle * 2, **request_fields)
+        env.translation_oracle.observe_ptw_response(
+            cycle * 2 + 1, **request_fields, response=response
+        )
+
+    assert active["expected_fetches"] == [
+        {
+            "page": 0,
+            "vpn": 0x8020_0000 >> 12,
+            "path": "uncache",
+            "pa": 0x8040_0FF8,
+        }
+    ]
+    env.translation_oracle.observe_fetch_request(
+        30, path="uncache", pa=0x8040_0FF8
+    )
+    env.translation_oracle.observe_cfvec(
+        31,
+        pc=scenario.va,
+        exception_bits={1: 1},
+        cross_page=True,
+    )
+    assert env.assert_translation_scenario()["error_count"] == 0
+
+    env.translation_oracle.observe_fetch_request(
+        32, path="uncache", pa=0x8040_1000
+    )
+    with pytest.raises(AssertionError, match="unexpected_fetch_after_fault"):
+        env.assert_translation_scenario()
+
+
 def test_oracle_rejects_wrong_cfvec_fault_type_with_scenario_context() -> None:
     env, state = _state(
         scenario_id="oracle-fault-type",
@@ -526,6 +600,7 @@ def test_oracle_accepts_known_fetch_from_unselected_page() -> None:
     )
 
     active = env.arm_translation_scenario(state, page_indexes=(0,))
+    _observe_matching_ptw(env, state)
     second_page = state.expected_page_outcomes[1]
     second_page_line = int(second_page["pa"]) & ~0x3F
     env.translation_oracle.observe_fetch_request(10, path="icache", pa=second_page_line)
