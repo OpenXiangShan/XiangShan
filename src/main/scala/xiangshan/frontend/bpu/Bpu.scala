@@ -238,14 +238,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val tageConfigInit =
     if (bpuParameters.tageParameters.TableInfos.length == 8) {
       Seq(
-        (5, 8, 15),
-        (6, 3, 11),
-        (9, 4, 8),
+        (6, 2, 15),
+        (6, 3, 18),
+        (9, 2, 16),
         (10, 3, 11),
         (9, 3, 18),
-        (8, 5, 18),
-        (7, 1, 15),
-        (8, 3, 17)
+        (9, 2, 11),
+        (8, 2, 13),
+        (9, 1, 13)
       )
     } else {
       bpuParameters.tageParameters.TableInfos.map { info =>
