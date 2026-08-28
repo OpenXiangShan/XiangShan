@@ -124,11 +124,11 @@ class TageMetaEntry(implicit p: Parameters) extends TageBundle {
 class TageTableConfig(implicit p: Parameters) extends TageBundle {
   val numSetsLog2: UInt = UInt(ActiveNumSetsLog2Width.W)
   val numWays:     UInt = UInt(ActiveNumWaysWidth.W)
+  val tagWidth:    UInt = UInt(ActiveTagWidthWidth.W)
 }
 
 class ConstantinConfig(implicit p: Parameters) extends TageBundle {
   val tableConfigs:   Vec[TageTableConfig] = Vec(NumTables, new TageTableConfig)
-  val tagWidth:       UInt                 = UInt(ActiveTagWidthWidth.W)
   val usefulCtrWidth: UInt                 = UInt(ActiveUsefulCtrWidthWidth.W)
 }
 

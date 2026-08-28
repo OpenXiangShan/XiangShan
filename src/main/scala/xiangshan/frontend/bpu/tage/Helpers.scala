@@ -49,7 +49,7 @@ trait TopHelper extends HasTageParameters {
         foldedHist.forIdx    := tageFoldedHist.head
         foldedHist.forTag(0) := tageFoldedHist(1)
         foldedHist.forTag(1) := Cat(tageFoldedHist(2), 0.U(1.W))
-        (tableConfig.numSetsLog2 === log2Ceil(numSets).U && config.tagWidth === tagWidth.U) -> foldedHist
+        (tableConfig.numSetsLog2 === log2Ceil(numSets).U && tableConfig.tagWidth === tagWidth.U) -> foldedHist
       }
       MuxCase(candidates.head._2, candidates)
     }

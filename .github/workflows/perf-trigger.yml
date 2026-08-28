@@ -45,6 +45,8 @@ on:
           - spec26-gcc15-1.0c
           - spec26-rv64gc-gcc15-0.3c
           - spec26-rv64gc-gcc15-1.0c
+          - legacy-spec06-gcc15-0.3c
+          - legacy-spec06-gcc15-1.0c
           - custom
           - dryrun
         default: spec06-gcc15-1.0c
@@ -56,6 +58,11 @@ on:
         description: Constantin file path (empty for default init setting, or file path for specific file)
         required: false
         type: string
+      expected_checkpoints:
+        description: Exact checkpoint count required for a Constantin regression; 0 accepts the full selected set
+        required: false
+        type: number
+        default: 0
       enable_db:
         description: Enable ChiselDB dump (High disk usage, 4~16G/ckpt, use with caution!)
         required: false
@@ -89,6 +96,7 @@ jobs:
         benchmark_type: ${{ github.event.inputs.benchmark_type }}
         benchmarks: ${{ github.event.inputs.benchmarks }}
         cst_file: ${{ github.event.inputs.cst_file }}
+        expected_checkpoints: ${{ fromJSON(github.event.inputs.expected_checkpoints) }}
         enable_db: ${{ fromJSON(github.event.inputs.enable_db) }}
         enable_rolling: ${{ fromJSON(github.event.inputs.enable_rolling) }}
         servers: ${{ github.event.inputs.servers }}

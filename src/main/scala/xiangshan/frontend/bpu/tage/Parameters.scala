@@ -41,12 +41,13 @@ case class TageParameters(
     WriteBufferSize:       Int = 4,
     UsefulResetCtrWidth:   Int = 8,
     UseAltOnNaWidth:       Int = 5,
-    MinNumSetsLog2:        Int = 7,
+    // Bounds are per bank. GEM5 tableSizes map to NumBanks * (1 << NumSetsLog2).
+    MinNumSetsLog2:        Int = 4,
     MaxNumSetsLog2:        Int = 11,
-    MinNumWays:            Int = 2,
+    MinNumWays:            Int = 1,
     MaxNumWays:            Int = 8,
-    MinTagWidth:           Int = 10,
-    MaxTagWidth:           Int = 15,
+    MinTagWidth:           Int = 8,
+    MaxTagWidth:           Int = 20,
     MinUsefulCtrWidth:     Int = 1,
     MaxUsefulCtrWidth:     Int = 2,
     EnableTageTrace:       Boolean = false

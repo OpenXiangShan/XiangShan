@@ -47,6 +47,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   /* *** submodules *** */
   private val tables = TableInfos.zipWithIndex.map { case (info, i) => Module(new TageTable(i, info)) }
+  private val activeTagMasks = tables.zip(io.constantinConfig.tableConfigs).map { case (table, config) =>
+    table.getActiveTagMask(config.tagWidth)
+  }
+
+  private def getActiveTagMask(tableIdx: UInt): UInt =
+    Mux1H(UIntToOH(tableIdx, NumTables), activeTagMasks)
 
   // reset all usefulCtr when usefulResetCtr saturated
   private val usefulResetCtr      = RegInit(UsefulResetCounter.Zero)
@@ -78,14 +84,13 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
           config.numWays >= MinNumWays.U && config.numWays <= MaxNumWays.U,
           s"TAGE table $tableIdx active way count is outside the physical table"
         )
+        assert(
+          config.tagWidth >= tageParameters.MinTagWidth.U && config.tagWidth <= tageParameters.MaxTagWidth.U,
+          s"TAGE table $tableIdx active tag width is outside the physical table"
+        )
       }
   }
   when(s0_fire) {
-    assert(
-      io.constantinConfig.tagWidth >= tageParameters.MinTagWidth.U &&
-        io.constantinConfig.tagWidth <= tageParameters.MaxTagWidth.U,
-      "TAGE active tag width must be between 10 and 20"
-    )
     assert(
       io.constantinConfig.usefulCtrWidth === 1.U || io.constantinConfig.usefulCtrWidth === 2.U,
       "TAGE active useful counter width must be 1 or 2"
@@ -151,7 +156,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val allTableTagMatchResults = s2_readResp.zipWithIndex.map { case (tableReadResp, tableIdx) =>
       val tag           = s2_tag(i)(tableIdx)
       val activeWayMask = tables(tableIdx).getActiveWayMask(io.constantinConfig.tableConfigs(tableIdx).numWays)
-      val activeTagMask = tables(tableIdx).getActiveTagMask(io.constantinConfig.tagWidth)
+      val activeTagMask = activeTagMasks(tableIdx)
       val hitWayMask = tableReadResp.entries.zipWithIndex.map { case (entry, wayIdx) =>
         activeWayMask(wayIdx) && entry.valid && (entry.tag & activeTagMask) === (tag & activeTagMask)
       }
@@ -363,7 +368,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val allTableTagMatchResults = t2_readResp.zipWithIndex.map { case (tableReadResp, tableIdx) =>
       val tag           = t2_rawTag(tableIdx) ^ position
       val activeWayMask = tables(tableIdx).getActiveWayMask(io.constantinConfig.tableConfigs(tableIdx).numWays)
-      val activeTagMask = tables(tableIdx).getActiveTagMask(io.constantinConfig.tagWidth)
+      val activeTagMask = activeTagMasks(tableIdx)
       val hitWayMask = tableReadResp.entries.zipWithIndex.map { case (entry, wayIdx) =>
         activeWayMask(wayIdx) && entry.valid && (entry.tag & activeTagMask) === (tag & activeTagMask)
       }
@@ -403,7 +408,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       provider.hit          := meta.hasProvider
       provider.hitWayMaskOH := Mux(meta.hasProvider, UIntToOH(meta.providerWayIdx, MaxNumWays), 0.U)
       provider.tag := (t2_rawTag(meta.providerTableIdx) ^ position) &
-        tables.head.getActiveTagMask(io.constantinConfig.tagWidth)
+        getActiveTagMask(meta.providerTableIdx)
       provider.takenCtr  := meta.providerTakenCtr
       provider.usefulCtr := meta.providerUsefulCtr
 
@@ -597,7 +602,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val actualTaken = t3_allocateBranch.bits.taken
     val entry       = Wire(new TageEntry)
     entry.valid := true.B
-    entry.tag   := (rawTag ^ position) & tables.head.getActiveTagMask(io.constantinConfig.tagWidth)
+    entry.tag   := (rawTag ^ position) & Mux1H(t3_allocateTableOH, activeTagMasks)
     entry.takenCtr := Mux(
       actualTaken,
       TakenCounter.WeakPositive,

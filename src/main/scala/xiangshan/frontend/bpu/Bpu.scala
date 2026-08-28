@@ -234,6 +234,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val hartId               = p(XSCoreParamsKey).HartId
   private val tageConstantinConfig = Wire(new ConstantinConfig)
+  // Keep the original global key as the fallback for existing Constantin files.
+  // A zero per-table value is outside the supported tag-width range and means
+  // that the legacy global width should be used for that table.
+  private val legacyTageTagWidth = Constantin
+    .createRecord(s"tageTagWidth_${hartId}", initValue = bpuParameters.tageParameters.TagWidth)(
+      tageConstantinConfig.tableConfigs.head.tagWidth.getWidth - 1,
+      0
+    )
   bpuParameters.tageParameters.TableInfos.zip(tageConstantinConfig.tableConfigs).zipWithIndex.foreach {
     case ((info, config), tableIdx) =>
       config.numSetsLog2 := Constantin
@@ -246,12 +254,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
           config.numWays.getWidth - 1,
           0
         )
+      val tableTagWidth = Constantin
+        .createRecord(s"tageTableTagWidth_${hartId}_${tableIdx}", initValue = 0)(config.tagWidth.getWidth - 1, 0)
+      config.tagWidth := Mux(tableTagWidth === 0.U, legacyTageTagWidth, tableTagWidth)
   }
-  tageConstantinConfig.tagWidth := Constantin
-    .createRecord(s"tageTagWidth_${hartId}", initValue = bpuParameters.tageParameters.TagWidth)(
-      tageConstantinConfig.tagWidth.getWidth - 1,
-      0
-    )
   tageConstantinConfig.usefulCtrWidth := Constantin
     .createRecord(s"tageUsefulCtrWidth_${hartId}", initValue = bpuParameters.tageParameters.UsefulCtrWidth)(
       tageConstantinConfig.usefulCtrWidth.getWidth - 1,
