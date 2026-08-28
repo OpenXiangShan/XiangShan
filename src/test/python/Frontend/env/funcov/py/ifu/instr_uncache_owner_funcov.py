@@ -30,6 +30,7 @@ def initialize_instr_uncache_owner_coverage_state(recorder) -> None:
         "d_response_pending": None,
         "cross_8b_pending": None,
         "cross_page_pending": None,
+        "second_page_exception_types": set(),
         "non_cross_rvi_offsets": set(),
         "attribute_modes": set(),
         "accepted_request_attributes": None,
@@ -516,7 +517,51 @@ def sample_instr_uncache_owner_coverage(
             and s["to_exception"] in {1, 2, 3}
             and s["prev_end_half"] == 1
         ):
-            _mark(recorder, 35, cycle, evidence)
+            expected_foldpc = fold_pc(int(cross_page["redirect_half_pc"]) << 1)
+            identity_matches = (
+                None
+                not in (
+                    s["s2_ftq_flag"],
+                    s["s2_ftq_value"],
+                    s["to_ftq_flag"],
+                    s["to_ftq_value"],
+                    s["to_ftq_offset"],
+                    s["to_foldpc"],
+                )
+                and s["to_ftq_flag"] == s["s2_ftq_flag"]
+                and s["to_ftq_value"] == s["s2_ftq_value"]
+                and int(s["to_ftq_offset"]) == 0
+                and int(s["to_foldpc"]) == expected_foldpc
+                and s["to_uncache_valid"] != 1
+                and s["tl_a_valid"] != 1
+                and single_delivery
+            )
+            if identity_matches:
+                exception_type = int(s["to_exception"])
+                state["second_page_exception_types"].add(exception_type)
+                exception_evidence = {
+                    **evidence,
+                    "original_pc": int(cross_page["redirect_half_pc"]) << 1,
+                    "expected_foldpc": expected_foldpc,
+                    "exception_type": exception_type,
+                    "cross_page_fix": True,
+                    "ftq_identity_matches": True,
+                    "no_second_page_instruncache_request": True,
+                    "no_second_page_tl_a_request": True,
+                }
+                if exception_type == 3:
+                    _mark(recorder, 33, cycle, exception_evidence)
+                if state["second_page_exception_types"] == {1, 2, 3}:
+                    _mark(
+                        recorder,
+                        34,
+                        cycle,
+                        {
+                            **exception_evidence,
+                            "observed_exception_types": [1, 2, 3],
+                        },
+                    )
+            state["cross_page_pending"] = None
 
     first_page_iaf = (
         s["s2_valid"] == 1

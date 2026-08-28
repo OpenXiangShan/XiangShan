@@ -12,7 +12,7 @@ from env.sequences import (
     TranslationScenario,
     TranslationScenarioBuilder,
 )
-from env.support import PmpPmaConfig
+from env.support import PmpPmaConfig, fold_pc
 from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
 
 
@@ -264,5 +264,116 @@ def test_mmio_page_tail_first_page_pmp_execute_fault_reports_iaf(env):
         for record in env.translation_oracle.get_stats()["records"]
     )
     assert uncache._wait_for_ptw_resp(env, max_cycles=6000) >= 2
+    assert env.assert_translation_scenario()["error_count"] == 0
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1126")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_mmio_cross_page_second_page_pmp_execute_fault_keeps_original_pc(env):
+    cross_page_va, cross_page_pa, payload = _prepare_cross_page_mmio_rvi(env)
+    first_page_pa = cross_page_pa & ~(uncache._SV39_PAGE_SIZE - 1)
+    next_page_pa = first_page_pa + uncache._SV39_PAGE_SIZE
+    scenario = TranslationScenario(
+        scenario_id="mmio-cross-page-second-page-pmp-execute-fault",
+        va=cross_page_va,
+        pa=cross_page_pa,
+        payload=payload,
+        page_count=2,
+        expected_path="fault",
+        expected_result="access_fault",
+        pmp_entries=(
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=0,
+                config=PmpPmaConfig(
+                    match="napot", read=True, write=True, execute=True
+                ),
+                addr=first_page_pa,
+                size=uncache._SV39_PAGE_SIZE,
+            ),
+            TranslationPmpPmaEntry(
+                kind="pmp",
+                index=1,
+                config=PmpPmaConfig(
+                    match="napot", read=True, write=True, execute=False
+                ),
+                addr=next_page_pa,
+                size=uncache._SV39_PAGE_SIZE,
+            ),
+        ),
+        pma_entries=tuple(
+            TranslationPmpPmaEntry(
+                kind="pma",
+                index=page,
+                config=PmpPmaConfig(
+                    match="napot",
+                    read=True,
+                    write=True,
+                    execute=True,
+                    cacheable=False,
+                ),
+                addr=first_page_pa + page * uncache._SV39_PAGE_SIZE,
+                size=uncache._SV39_PAGE_SIZE,
+            )
+            for page in range(2)
+        ),
+    )
+    snapshots: list[dict[str, int | None]] = []
+
+    def capture(cycle: int, active_env) -> None:
+        snapshots.append(
+            {
+                "cycle": int(cycle),
+                **owner_funcov._snapshot(
+                    active_env.functional_coverage, active_env.dut
+                ),
+            }
+        )
+
+    env.register_cycle_observer(capture)
+    uncache._initialize_sv39_fetch(env, reset_vector=cross_page_va)
+    state = TranslationScenarioBuilder(env).build(scenario)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(cross_page_va)
+    env.arm_translation_scenario(state)
+    uncache._force_redirect_to(env, cross_page_va)
+
+    first_beat = cross_page_pa & ~(uncache._UNCACHE_BEAT_BYTES - 1)
+    assert uncache._wait_for_request_addr(env, first_beat, max_cycles=12000)
+    assert uncache._wait_for_monitor_exception(env, max_cycles=12000)
+    assert uncache._wait_for_ptw_resp(env, max_cycles=6000) >= 2
+
+    matching = [
+        sample
+        for sample in snapshots
+        if sample["prev_end_half"] == 1
+        and sample["to_valid"] == 1
+        and sample["to_ready"] == 1
+        and sample["to_exception_cross_page"] == 1
+        and sample["to_exception"] == 3
+        and sample["to_uncache_valid"] != 1
+        and sample["tl_a_valid"] != 1
+    ]
+    assert matching, {"snapshots": snapshots[-64:]}
+    stats = env.uncache_agent.get_stats()
+    assert first_beat in stats.get("request_addrs", [])
+    assert next_page_pa not in stats.get("request_addrs", [])
+    exception_records = [
+        record
+        for record in env.translation_oracle.get_stats()["records"]
+        if record["kind"] == "cfvec_exception"
+    ]
+    assert any(
+        int(record["pc"]) == int(cross_page_va)
+        or (
+            int(record["pc"]) == 0
+            and int(record["folded_pc"]) == fold_pc(cross_page_va)
+        )
+        for record in exception_records
+    ), exception_records
+    assert env.functional_coverage.key_hit(
+        "ifu_instruncache_owner_v3", "instruncache_leaf_033"
+    )
     assert env.assert_translation_scenario()["error_count"] == 0
     assert not env.monitor.get_errors()

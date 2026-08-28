@@ -574,6 +574,84 @@ def test_first_page_pmp_fault_requires_original_identity_and_no_uncache_request(
     assert not any(_hit(recorder, index) for index in (30, 31, 32))
 
 
+def test_second_page_exception_matrix_requires_original_half_identity():
+    def drive_exception(recorder, cycle, exception_type, *, foldpc_delta=0):
+        snapshot = _snapshot()
+        snapshot.update(
+            {
+                "entry_state": protocol._ENTRY_REFILL_RESP,
+                "entry_req_addr": 0x7FF,
+                "entry_resending": 0,
+                "tl_d_valid": 1,
+                "tl_d_data": 0x0013 << 48,
+                "tl_d_corrupt": 0,
+                "tl_d_denied": 0,
+            }
+        )
+        _sample(recorder, cycle, snapshot)
+        snapshot.update(
+            {
+                "entry_state": 3,
+                "tl_d_valid": 0,
+                "instr_resp_valid": 1,
+                "instr_resp_data": 0x0013,
+                "instr_resp_corrupt": 0,
+                "instr_resp_denied": 0,
+                "instr_resp_need_resend": 1,
+            }
+        )
+        _sample(recorder, cycle + 1, snapshot)
+        snapshot.update(
+            {
+                "entry_state": protocol._ENTRY_IDLE,
+                "instr_resp_valid": 0,
+                "uncache_redirect": 1,
+                "resp_need_resend": 1,
+                "resp_data": 0x0013,
+                "uncache_pc": 0x7FF,
+            }
+        )
+        _sample(recorder, cycle + 2, snapshot)
+        snapshot.update(
+            {
+                "uncache_redirect": 0,
+                "resp_need_resend": 0,
+                "prev_end_half": 1,
+                "prev_half_data": 0x0013,
+                "prev_half_pc": 0x7FF,
+                "s2_ftq_flag": 0,
+                "s2_ftq_value": exception_type,
+                "to_valid": 1,
+                "to_ready": 1,
+                "to_enq": 1,
+                "to_exception": exception_type,
+                "to_exception_cross_page": 1,
+                "to_ftq_flag": 0,
+                "to_ftq_value": exception_type,
+                "to_ftq_offset": 0,
+                "to_foldpc": fold_pc(0xFFE) + foldpc_delta,
+                "to_uncache_valid": 0,
+                "tl_a_valid": 0,
+            }
+        )
+        _sample(recorder, cycle + 3, snapshot)
+
+    recorder = _Recorder()
+    drive_exception(recorder, 1, 3, foldpc_delta=1)
+    assert not any(_hit(recorder, index) for index in (33, 34, 35))
+
+    recorder = _Recorder()
+    drive_exception(recorder, 10, 3)
+    assert _hit(recorder, 33)
+    assert not _hit(recorder, 34)
+    assert not _hit(recorder, 35)
+    drive_exception(recorder, 20, 1)
+    assert not _hit(recorder, 34)
+    drive_exception(recorder, 30, 2)
+    assert _hit(recorder, 34)
+    assert not _hit(recorder, 35)
+
+
 def test_tl_user_attributes_must_match_entry_and_cover_mmio_and_nc_modes():
     snapshot = _snapshot()
     snapshot.update(
