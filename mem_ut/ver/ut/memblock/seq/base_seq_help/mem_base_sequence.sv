@@ -30,6 +30,34 @@ class mem_access_base_sequence extends uvm_sequence;
         SHARED_MEM_WRITE_UNCACHE = 2'd2
     } shared_mem_write_owner_e;
 
+    // 中文注释：L2 D-channel 错误账本按 64B physical line 保存。PENDING 只存在
+    // 于 response 建立到最后一个 GrantData D.fire 之间；live map 只保存 NONE、
+    // CORRUPT 或 DENIED。DENIED 语义上同时包含 corrupt，状态不支持运行期清除。
+    typedef enum bit [1:0] {
+        L2_D_ERROR_NONE    = 2'd0,
+        L2_D_ERROR_PENDING = 2'd1,
+        L2_D_ERROR_CORRUPT = 2'd2,
+        L2_D_ERROR_DENIED  = 2'd3
+    } l2_d_error_state_e;
+
+    typedef struct packed {
+        bit                  valid;
+        l2_d_error_state_e   state;
+        longint unsigned     generation;
+        longint unsigned     corrupt_activation_sample;
+        longint unsigned     denied_activation_sample;
+        bit                  source_valid;
+        bit [9:0]            source;
+    } l2_d_error_line_record_t;
+
+    typedef struct packed {
+        bit                  valid;
+        l2_d_error_state_e   proposed_state;
+        longint unsigned     accept_sample;
+        longint unsigned     generation;
+        bit [9:0]            source;
+    } l2_d_error_pending_record_t;
+
     typedef struct {
         mem_addr_t                addr;
         mem_line_mask_t           byte_mask;
@@ -93,6 +121,15 @@ class mem_access_base_sequence extends uvm_sequence;
     // 1KiB backing line 内有多条 64 B line 而漂移。
     static bit [63:0]                  dcache_corrupt_byte_mask_by_line[dcache_line_addr_t];
 
+    // 中文注释：sticky ledger 与 DCache alias、C-channel corrupt observer、shared
+    // memory overlay 完全隔离。它只在 testcase/shared-memory 初始化时清空，DCache
+    // runtime reset、CBO、Probe、Release 和 Uncache 都不得修改这两张表。
+    static l2_d_error_line_record_t    l2_d_error_live_by_line[dcache_line_addr_t];
+    static l2_d_error_pending_record_t l2_d_error_pending_by_line[dcache_line_addr_t];
+    static longint unsigned             l2_d_error_next_generation = 1;
+    static bit                          l2_d_error_ledger_ready = 1'b0;
+    static bit                          l2_d_error_sticky_enabled = 1'b0;
+
     `uvm_object_utils(mem_access_base_sequence)
 
     extern function new(string name = "mem_access_base_sequence");
@@ -114,6 +151,34 @@ class mem_access_base_sequence extends uvm_sequence;
         input longint unsigned capacity
     );
     extern static function bit is_shared_memory_lifecycle_initialized();
+    extern static function void report_l2_d_error_fatal(input string message);
+    extern static function void reset_l2_d_error_ledger(input bit sticky_enabled);
+    extern static function bit prepare_l2_d_error_for_grant(
+        input  mem_addr_t            line_addr,
+        input  longint unsigned      accept_sample,
+        input  bit [9:0]             source,
+        input  bit                   candidate_valid,
+        input  bit                   candidate_denied,
+        input  bit                   candidate_corrupt,
+        output bit                   denied,
+        output bit                   corrupt,
+        output bit                   needs_candidate,
+        output longint unsigned      reservation_generation
+    );
+    extern static function void commit_l2_d_error_on_grant_d_fire(
+        input mem_addr_t        line_addr,
+        input bit               denied,
+        input bit               corrupt,
+        input longint unsigned  sample,
+        input bit [9:0]         source,
+        input longint unsigned  reservation_generation
+    );
+    extern static function bit query_l2_d_error_at_sample(
+        input  mem_addr_t            line_addr,
+        input  longint unsigned      sample,
+        output bit                   sticky_enabled,
+        output l2_d_error_line_record_t record
+    );
     extern static function void clear_dcache_observer_state();
     extern static function bit claim_dcache_observer_owner();
     extern static function void release_dcache_observer_owner();
@@ -290,6 +355,11 @@ function void mem_access_base_sequence::clear_shared_memory_state();
     write_overlay_byte_valid.delete();
     write_overlay_corrupt_byte_mask.delete();
     dcache_corrupt_byte_mask_by_line.delete();
+    l2_d_error_live_by_line.delete();
+    l2_d_error_pending_by_line.delete();
+    l2_d_error_next_generation  = 1;
+    l2_d_error_ledger_ready     = 1'b0;
+    l2_d_error_sticky_enabled   = 1'b0;
     dcache_write_batch.delete();
     uncache_write_batch.delete();
     shared_mem_sample_valid          = 1'b0;
@@ -308,12 +378,268 @@ function void mem_access_base_sequence::initialize_shared_memory_state(
     if (ranges_en) begin
         init_main_mem_range(base, capacity);
     end
+    reset_l2_d_error_ledger(seq_csr_common::get_l2_d_error_sticky_en());
     shared_mem_lifecycle_initialized = 1'b1;
 endfunction:initialize_shared_memory_state
 
 function bit mem_access_base_sequence::is_shared_memory_lifecycle_initialized();
     return shared_mem_lifecycle_initialized;
 endfunction:is_shared_memory_lifecycle_initialized
+
+// 静态账本 helper 没有 sequence 实例，必须使用 UVM package 级报告函数，不能展开
+// 会隐式调用 this.uvm_report_fatal() 的 `uvm_fatal 宏。
+function void mem_access_base_sequence::report_l2_d_error_fatal(input string message);
+    uvm_pkg::uvm_report_fatal("L2_D_ERROR_LEDGER", message, UVM_NONE);
+endfunction:report_l2_d_error_fatal
+
+// 抽象职责：在 testcase/shared-memory 初始化边界建立空的 sticky ledger。该函数
+// 只负责状态初始化，不读取 DCache runtime map，也不在 CBO/Probe/reset service 中调用。
+function void mem_access_base_sequence::reset_l2_d_error_ledger(input bit sticky_enabled);
+    l2_d_error_live_by_line.delete();
+    l2_d_error_pending_by_line.delete();
+    l2_d_error_next_generation = 1;
+    l2_d_error_sticky_enabled  = sticky_enabled;
+    l2_d_error_ledger_ready    = 1'b1;
+endfunction:reset_l2_d_error_ledger
+
+// 抽象职责：在 GrantData response 创建点解析同一 physical line 的已有 live/pending
+// 错误，或者为调用方声明需要一次新的随机候选。调用方仅在 needs_candidate=1 时采样
+// 权重并以 candidate_valid=1 再次调用，因此同线 sticky 命中不会额外消耗随机数。
+function bit mem_access_base_sequence::prepare_l2_d_error_for_grant(
+    input  mem_addr_t            line_addr,
+    input  longint unsigned      accept_sample,
+    input  bit [9:0]             source,
+    input  bit                   candidate_valid,
+    input  bit                   candidate_denied,
+    input  bit                   candidate_corrupt,
+    output bit                   denied,
+    output bit                   corrupt,
+    output bit                   needs_candidate,
+    output longint unsigned      reservation_generation
+);
+    dcache_line_addr_t          line_key;
+    l2_d_error_line_record_t    live_record;
+    l2_d_error_pending_record_t pending_record;
+
+    denied                 = 1'b0;
+    corrupt                = 1'b0;
+    needs_candidate        = 1'b0;
+    reservation_generation = 0;
+    if (!l2_d_error_ledger_ready || !l2_d_error_sticky_enabled) begin
+        report_l2_d_error_fatal(
+            "sticky GrantData preparation requires an initialized enabled ledger");
+        return 1'b0;
+    end
+    line_key = line_addr[47:6];
+    if (l2_d_error_live_by_line.exists(line_key)) begin
+        live_record = l2_d_error_live_by_line[line_key];
+        if (!live_record.valid ||
+            (live_record.state != L2_D_ERROR_CORRUPT &&
+             live_record.state != L2_D_ERROR_DENIED)) begin
+            report_l2_d_error_fatal(
+                $sformatf("invalid live L2 D error record line=0x%0h state=%0d valid=%0d",
+                          line_addr, live_record.state, live_record.valid));
+            return 1'b0;
+        end
+        denied                 = live_record.state == L2_D_ERROR_DENIED;
+        corrupt                = 1'b1;
+        reservation_generation = live_record.generation;
+        return 1'b1;
+    end
+    if (l2_d_error_pending_by_line.exists(line_key)) begin
+        pending_record = l2_d_error_pending_by_line[line_key];
+        if (!pending_record.valid ||
+            (pending_record.proposed_state != L2_D_ERROR_CORRUPT &&
+             pending_record.proposed_state != L2_D_ERROR_DENIED)) begin
+            report_l2_d_error_fatal(
+                $sformatf("invalid pending L2 D error record line=0x%0h state=%0d valid=%0d",
+                          line_addr,
+                          pending_record.proposed_state,
+                          pending_record.valid));
+            return 1'b0;
+        end
+        denied                 = pending_record.proposed_state == L2_D_ERROR_DENIED;
+        corrupt                = 1'b1;
+        reservation_generation = pending_record.generation;
+        return 1'b1;
+    end
+    if (!candidate_valid) begin
+        needs_candidate = 1'b1;
+        return 1'b1;
+    end
+    if (candidate_denied && !candidate_corrupt) begin
+        report_l2_d_error_fatal(
+            $sformatf("GrantData denied requires corrupt line=0x%0h source=%0d",
+                      line_addr, source));
+        return 1'b0;
+    end
+    denied  = candidate_denied;
+    corrupt = candidate_corrupt;
+    if (!corrupt) begin
+        return 1'b1;
+    end
+    if (l2_d_error_next_generation == 0) begin
+        report_l2_d_error_fatal("L2 D error generation wrapped to zero");
+        return 1'b0;
+    end
+    pending_record = '{default:'0};
+    pending_record.valid          = 1'b1;
+    pending_record.proposed_state = denied ? L2_D_ERROR_DENIED : L2_D_ERROR_CORRUPT;
+    pending_record.accept_sample  = accept_sample;
+    pending_record.generation     = l2_d_error_next_generation;
+    pending_record.source         = source;
+    l2_d_error_next_generation++;
+    l2_d_error_pending_by_line[line_key] = pending_record;
+    reservation_generation = pending_record.generation;
+    return 1'b1;
+endfunction:prepare_l2_d_error_for_grant
+
+// 抽象职责：在最后一个 GrantData D.fire 后把 response 固定的错误结果提交到
+// live ledger。它只进行单 line 关联数组访问；早于该时刻的 RM 查询绝不会看到 pending。
+function void mem_access_base_sequence::commit_l2_d_error_on_grant_d_fire(
+    input mem_addr_t        line_addr,
+    input bit               denied,
+    input bit               corrupt,
+    input longint unsigned  sample,
+    input bit [9:0]         source,
+    input longint unsigned  reservation_generation
+);
+    dcache_line_addr_t          line_key;
+    l2_d_error_line_record_t    live_record;
+    l2_d_error_pending_record_t pending_record;
+    bit                         pending_valid;
+    l2_d_error_state_e          proposed_state;
+    longint unsigned            activation_generation;
+
+    if (!l2_d_error_sticky_enabled) begin
+        return;
+    end
+    if (!l2_d_error_ledger_ready) begin
+        report_l2_d_error_fatal("GrantData D.fire observed before sticky ledger initialization");
+    end
+    if (denied && !corrupt) begin
+        report_l2_d_error_fatal(
+            $sformatf("GrantData denied without corrupt line=0x%0h source=%0d",
+                      line_addr, source));
+    end
+    if (!corrupt) begin
+        return;
+    end
+    line_key = line_addr[47:6];
+    proposed_state = denied ? L2_D_ERROR_DENIED : L2_D_ERROR_CORRUPT;
+    pending_valid = l2_d_error_pending_by_line.exists(line_key);
+    pending_record = '{default:'0};
+    if (pending_valid) begin
+        pending_record = l2_d_error_pending_by_line[line_key];
+        if (!pending_record.valid ||
+            pending_record.proposed_state != proposed_state ||
+            (reservation_generation != 0 &&
+             pending_record.generation != reservation_generation)) begin
+            report_l2_d_error_fatal(
+                $sformatf("GrantData pending reservation mismatch line=0x%0h response_gen=%0d pending_gen=%0d response_state=%0d pending_state=%0d",
+                          line_addr,
+                          reservation_generation,
+                          pending_record.generation,
+                          proposed_state,
+                          pending_record.proposed_state));
+        end
+    end
+    if (!l2_d_error_live_by_line.exists(line_key)) begin
+        if (pending_valid) begin
+            activation_generation = pending_record.generation;
+        end else begin
+            if (reservation_generation != 0) begin
+                report_l2_d_error_fatal(
+                    $sformatf("GrantData response references missing reservation line=0x%0h generation=%0d",
+                              line_addr, reservation_generation));
+            end
+            if (l2_d_error_next_generation == 0) begin
+                report_l2_d_error_fatal("L2 D error generation wrapped to zero");
+            end
+            activation_generation = l2_d_error_next_generation;
+            l2_d_error_next_generation++;
+        end
+        live_record = '{default:'0};
+        live_record.valid                      = 1'b1;
+        live_record.state                      = proposed_state;
+        live_record.generation                 = activation_generation;
+        live_record.corrupt_activation_sample  = sample;
+        live_record.denied_activation_sample   = denied ? sample : 0;
+        live_record.source_valid               = 1'b1;
+        live_record.source                     = source;
+        l2_d_error_live_by_line[line_key] = live_record;
+    end else begin
+        live_record = l2_d_error_live_by_line[line_key];
+        if (!live_record.valid ||
+            (live_record.state != L2_D_ERROR_CORRUPT &&
+             live_record.state != L2_D_ERROR_DENIED)) begin
+            report_l2_d_error_fatal(
+                $sformatf("invalid live state on GrantData commit line=0x%0h state=%0d valid=%0d",
+                          line_addr, live_record.state, live_record.valid));
+        end
+        if (live_record.state == L2_D_ERROR_CORRUPT &&
+            proposed_state == L2_D_ERROR_DENIED) begin
+            if (pending_valid) activation_generation = pending_record.generation;
+            else begin
+                if (l2_d_error_next_generation == 0) begin
+                    report_l2_d_error_fatal("L2 D error generation wrapped to zero");
+                end
+                activation_generation = l2_d_error_next_generation;
+                l2_d_error_next_generation++;
+            end
+            live_record.state                    = L2_D_ERROR_DENIED;
+            live_record.generation               = activation_generation;
+            live_record.denied_activation_sample = sample;
+            l2_d_error_live_by_line[line_key] = live_record;
+        end
+    end
+    if (pending_valid) begin
+        l2_d_error_pending_by_line.delete(line_key);
+    end
+endfunction:commit_l2_d_error_on_grant_d_fire
+
+// 抽象职责：为 RM 提供一条 physical line 在指定 sample 的不可变值型错误视图。
+// 查询不创建 backing line、不消费 pending，也不会因后续 CBO/Probe 改变历史结果。
+function bit mem_access_base_sequence::query_l2_d_error_at_sample(
+    input  mem_addr_t            line_addr,
+    input  longint unsigned      sample,
+    output bit                   sticky_enabled,
+    output l2_d_error_line_record_t record
+);
+    dcache_line_addr_t       line_key;
+    l2_d_error_line_record_t live_record;
+
+    record = '{default:'0};
+    sticky_enabled = l2_d_error_sticky_enabled;
+    if (!l2_d_error_ledger_ready) begin
+        return 1'b0;
+    end
+    if (!l2_d_error_sticky_enabled) begin
+        return 1'b1;
+    end
+    line_key = line_addr[47:6];
+    if (!l2_d_error_live_by_line.exists(line_key)) begin
+        return 1'b1;
+    end
+    live_record = l2_d_error_live_by_line[line_key];
+    if (!live_record.valid) begin
+        report_l2_d_error_fatal(
+            $sformatf("invalid empty live record line=0x%0h", line_addr));
+        return 1'b0;
+    end
+    if (live_record.state == L2_D_ERROR_DENIED &&
+        live_record.denied_activation_sample <= sample) begin
+        record = live_record;
+        return 1'b1;
+    end
+    if (live_record.corrupt_activation_sample <= sample) begin
+        record = live_record;
+        record.state = L2_D_ERROR_CORRUPT;
+        record.denied_activation_sample = 0;
+        return 1'b1;
+    end
+    return 1'b1;
+endfunction:query_l2_d_error_at_sample
 
 function void mem_access_base_sequence::clear_dcache_observer_state();
     // 中文注释：生命周期初始化清除旧 owner 的旁路快照；不触碰 DCache sequence 私有 map。
@@ -969,6 +1295,10 @@ class dcache_mem__access_base_sequence extends mem_access_base_sequence;
         bit [9:0]               sink;
         bit                     denied;
         bit                     corrupt;
+        // 中文注释：sticky ledger 的 reservation generation 在 AcquireBlock A.fire
+        // 固定，并随两拍 GrantData 一起保持；最后一个 D.fire 用它审计 pending/live
+        // 转换，不能在 D.ready hold 期间重新生成。
+        longint unsigned        l2_d_error_reservation_generation;
         bit                     echo_isKeyword;
         bit [47:0]              line_addr;
         bit [1:0]               line_alias;
@@ -2449,6 +2779,9 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
     bit [255:0] line_data_high;
     bit [9:0]  grant_sink;
     bit [1:0]  probe_cap;
+    bit        l2_d_error_needs_candidate;
+    bit        l2_d_error_candidate_denied;
+    bit        l2_d_error_candidate_corrupt;
     dcache_probe_token_t        probe_token;
     dcache_cached_line_record_t line_record;
     dcache_response_record_t response_record;
@@ -2508,16 +2841,62 @@ task dcache_mem__access_base_sequence::accept_dcache_a_request(
             response_record.line_alias     = req_xact.auto_inner_dcache_client_out_a_bits_user_alias;
             response_record.data_low       = line_data_low;
             response_record.data_high      = line_data_high;
-            // 中文注释：GrantData 错误位只在 response record 创建时采样一次。
-            // denied 命中时协议要求 corrupt 同时置位；后续两拍 D 和 D.ready hold 只复用该快照。
-            response_record.denied = sample_d_error_enable(
-                seq_csr_common::get_l2_grantdata_denied_wt(),
-                "DCache GrantData denied"
-            );
-            response_record.corrupt = response_record.denied ? 1'b1 : sample_d_error_enable(
-                seq_csr_common::get_l2_grantdata_corrupt_wt(),
-                "DCache GrantData corrupt"
-            );
+            // 中文注释：sticky 模式下先查询同 line 的 live/pending 状态。只有完全
+            // 无状态时才采样一次候选并创建 reservation；关闭 sticky 时保持原有每笔
+            // response 独立采样行为。两拍 D 和 D.ready hold 始终只搬运该快照。
+            if (seq_csr_common::get_l2_d_error_sticky_en()) begin
+                if (!prepare_l2_d_error_for_grant(
+                        line_addr,
+                        $time,
+                        {4'b0, response_record.source},
+                        1'b0,
+                        1'b0,
+                        1'b0,
+                        response_record.denied,
+                        response_record.corrupt,
+                        l2_d_error_needs_candidate,
+                        response_record.l2_d_error_reservation_generation)) begin
+                    `uvm_fatal(get_type_name(),
+                               $sformatf("failed to prepare sticky GrantData error line=0x%0h",
+                                         line_addr))
+                end
+                if (l2_d_error_needs_candidate) begin
+                    l2_d_error_candidate_denied = sample_d_error_enable(
+                        seq_csr_common::get_l2_grantdata_denied_wt(),
+                        "DCache GrantData denied"
+                    );
+                    l2_d_error_candidate_corrupt = l2_d_error_candidate_denied ? 1'b1 :
+                        sample_d_error_enable(
+                            seq_csr_common::get_l2_grantdata_corrupt_wt(),
+                            "DCache GrantData corrupt"
+                        );
+                    if (!prepare_l2_d_error_for_grant(
+                            line_addr,
+                            $time,
+                            {4'b0, response_record.source},
+                            1'b1,
+                            l2_d_error_candidate_denied,
+                            l2_d_error_candidate_corrupt,
+                            response_record.denied,
+                            response_record.corrupt,
+                            l2_d_error_needs_candidate,
+                            response_record.l2_d_error_reservation_generation) ||
+                        l2_d_error_needs_candidate) begin
+                        `uvm_fatal(get_type_name(),
+                                   $sformatf("failed to reserve sticky GrantData error line=0x%0h",
+                                             line_addr))
+                    end
+                end
+            end else begin
+                response_record.denied = sample_d_error_enable(
+                    seq_csr_common::get_l2_grantdata_denied_wt(),
+                    "DCache GrantData denied"
+                );
+                response_record.corrupt = response_record.denied ? 1'b1 : sample_d_error_enable(
+                    seq_csr_common::get_l2_grantdata_corrupt_wt(),
+                    "DCache GrantData corrupt"
+                );
+            end
             response_record.hint_pending   = sample_hint_enable();
             response_record.hint_source_id = req_xact.auto_inner_dcache_client_out_a_bits_source[3:0];
             response_record.hint_isKeyword = req_xact.auto_inner_dcache_client_out_a_bits_echo_isKeyword;
@@ -2688,6 +3067,14 @@ function void dcache_mem__access_base_sequence::process_d_fire();
     completed_record = current_d_record;
     case (completed_record.kind)
         DCACHE_PENDING_D_GRANT_DATA: begin
+            commit_l2_d_error_on_grant_d_fire(
+                completed_record.line_addr,
+                completed_record.denied,
+                completed_record.corrupt,
+                $time,
+                {4'b0, completed_record.source},
+                completed_record.l2_d_error_reservation_generation
+            );
             grant_ack_record.line_addr = completed_record.line_addr;
             grant_ack_record.line_alias = completed_record.line_alias;
             grant_ack_record.sink      = completed_record.sink;

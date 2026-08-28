@@ -213,6 +213,9 @@ class seq_csr_common;
     static int unsigned uncache_rsp_delay_large_wt = 0;
     static bit          l2_rsp_reorder_en = 1'b0;
     static bit          uncache_rsp_reorder_en = 1'b0;
+    // 中文注释：开启后只把 GrantData D-error 写入 physical-line sticky ledger；
+    // ledger 的清空边界是 testcase/shared-memory 初始化，CBO/Probe 不参与清除。
+    static bit          l2_d_error_sticky_en = 1'b0;
     // 中文注释：DCache/Uncache D-channel 错误注入的百分比权重。
     // 设置：plus 读取后由 validate_and_clamp() 校验为 0..100；读取：response record 创建时一次采样。
     // 作用：只决定该 record 的 denied/corrupt 字段，不改变 A handshake、scheduler、D hold 或 terminal。
@@ -486,6 +489,7 @@ class seq_csr_common;
         uncache_rsp_delay_large_wt  = get_non_negative_int("MEMBLOCK_UNCACHE_RSP_DELAY_LARGE_WT", plus::MEMBLOCK_UNCACHE_RSP_DELAY_LARGE_WT);
         l2_rsp_reorder_en           = plus::MEMBLOCK_L2_RSP_REORDER_EN;
         uncache_rsp_reorder_en      = plus::MEMBLOCK_UNCACHE_RSP_REORDER_EN;
+        l2_d_error_sticky_en        = plus::MEMBLOCK_L2_D_ERROR_STICKY_EN;
         l2_grantdata_denied_wt      = get_non_negative_int("MEMBLOCK_L2_GRANTDATA_DENIED_WT", plus::MEMBLOCK_L2_GRANTDATA_DENIED_WT);
         l2_grantdata_corrupt_wt     = get_non_negative_int("MEMBLOCK_L2_GRANTDATA_CORRUPT_WT", plus::MEMBLOCK_L2_GRANTDATA_CORRUPT_WT);
         l2_cbo_ack_denied_wt        = get_non_negative_int("MEMBLOCK_L2_CBO_ACK_DENIED_WT", plus::MEMBLOCK_L2_CBO_ACK_DENIED_WT);
@@ -1720,6 +1724,11 @@ class seq_csr_common;
         check_initialized("get_l2_rsp_reorder_en");
         return l2_rsp_reorder_en;
     endfunction:get_l2_rsp_reorder_en
+
+    static function bit get_l2_d_error_sticky_en();
+        check_initialized("get_l2_d_error_sticky_en");
+        return l2_d_error_sticky_en;
+    endfunction:get_l2_d_error_sticky_en
 
     static function bit get_uncache_rsp_reorder_en();
         check_initialized("get_uncache_rsp_reorder_en");
