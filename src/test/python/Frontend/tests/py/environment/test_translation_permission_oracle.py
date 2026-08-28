@@ -8,6 +8,7 @@ from env.sequences import (
     TranslationPermissionProbe,
     TranslationPmpPmaEntry,
     TranslationPte,
+    TranslationPtwResponseOverride,
     TranslationScenario,
     TranslationScenarioBuilder,
     TranslationScenarioSequence,
@@ -734,6 +735,48 @@ def test_oracle_requires_the_guest_fault_gpa_followup_ptw_transaction() -> None:
     assert stats["active"]["requested_ptw_request_keys"] == [
         (first["vpn"], first["s2xlate"], 0),
         (followup["vpn"], followup["s2xlate"], 1),
+    ]
+
+
+def test_oracle_requires_guest_fault_gpa_followup_only_for_faulting_cross_page() -> None:
+    env = FrontendEnv(FakeDUTFrontend(), register_callbacks=False)
+    va = 0x8020_0FFE
+    scenario = TranslationScenario(
+        scenario_id="oracle-cross-page-second-guest-fault",
+        va=va,
+        gpa=0x8040_0FFE,
+        pa=0x8060_0FFE,
+        payload=b"\x13\x00\x00\x00",
+        page_count=2,
+        s2xlate=3,
+        hgatp_vmid=3,
+        s1_pte=TranslationPte(vmid=3),
+        ptw_response_overrides=(
+            TranslationPtwResponseOverride(
+                vpn=(va >> 12) + 1,
+                s2xlate=3,
+                patch=(("s2_gpf", 1),),
+            ),
+            TranslationPtwResponseOverride(
+                vpn=(va >> 12) + 1,
+                s2xlate=3,
+                get_gpa=1,
+                patch=(("s2_gpf", 1),),
+            ),
+        ),
+        expected_path="fault",
+        expected_result="guest_fault",
+    )
+    state = TranslationScenarioBuilder(env).build(scenario)
+    active = env.arm_translation_scenario(state)
+
+    assert [
+        (request["vpn"], request["s2xlate"], request["get_gpa"])
+        for request in active["expected_ptw_requests"]
+    ] == [
+        (va >> 12, 3, 0),
+        ((va >> 12) + 1, 3, 0),
+        ((va >> 12) + 1, 3, 1),
     ]
 
 

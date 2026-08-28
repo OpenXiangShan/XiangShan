@@ -118,6 +118,12 @@ class TranslationPermissionOracle:
             for page in ptw_pages
         ]
         if expected_fault == "instruction_guest_page_fault" and int(state.scenario.s2xlate) == 3:
+            guest_fault_pages = tuple(
+                page
+                for page, outcome in zip(selected_pages, page_outcomes)
+                if str(outcome.get("outcome", ""))
+                == "instruction_guest_page_fault"
+            )
             expected_ptw_requests.extend(
                 {
                     "scenario_id": str(state.scenario.scenario_id),
@@ -125,7 +131,7 @@ class TranslationPermissionOracle:
                     "s2xlate": int(state.expected_ptw_request["s2xlate"]),
                     "get_gpa": 1,
                 }
-                for page in ptw_pages
+                for page in guest_fault_pages
             )
         expected_fetches = []
         allowed_out_of_scope_fetches = []
