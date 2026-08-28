@@ -400,6 +400,54 @@ class dispatch_monitor_event_adapter extends uvm_object;
                                            1'b0);
     endfunction:probe_std_candidate
 
+    // 中文注释：value-only STD 无法只凭端口恢复 ROB flag。发生零候选 fatal 时，
+    // 该 helper 只读取两个完整 key 的当前 owner/status，输出可复现诊断；不改变
+    // active map、status 或 raw queue，避免诊断本身掩盖真实无主写回。
+    function string describe_std_value_only_candidates(
+        input memblock_sync_pkg::dispatch_raw_int_wb_t raw
+    );
+        string detail;
+
+        detail = "";
+        for (int unsigned flag_idx = 0; flag_idx < 2; flag_idx++) begin
+            memblock_rob_key_t rob_key;
+            memblock_uid_t uid;
+
+            rob_key.flag = flag_idx[0];
+            rob_key.value = raw.rob_value;
+            if (data.lookup_active_uid_by_rob(rob_key, uid)) begin
+                status_transaction status;
+                int unsigned std_instance_flush_epoch;
+                bit std_instance_flush_epoch_valid;
+
+                status = data.get_status(uid);
+                std_instance_flush_epoch_valid = status.get_target_instance_flush_epoch(
+                    MEMBLOCK_ISSUE_TARGET_STD,
+                    std_instance_flush_epoch
+                );
+                detail = {detail,
+                          $sformatf(" flag=%0d uid=%0d active=%0d enq=%0d std_dispatched=%0d std_wb=%0d fault=%0d terminal=%0d flushed=%0d redirect=%0d killed=%0d std_issue_epoch=%0d std_instance_epoch_valid=%0d std_instance_epoch=%0d",
+                                    rob_key.flag,
+                                    uid,
+                                    status.active,
+                                    status.enq,
+                                    status.std_dispatched,
+                                    status.std_writeback,
+                                    status.fault,
+                                    status.terminal_done,
+                                    status.flushed,
+                                    status.redirect_pending,
+                                    status.issue_killed,
+                                    status.std_issue_epoch,
+                                    std_instance_flush_epoch_valid,
+                                    std_instance_flush_epoch)};
+            end else begin
+                detail = {detail, $sformatf(" flag=%0d no_active_owner", rob_key.flag)};
+            end
+        end
+        return detail;
+    endfunction:describe_std_value_only_candidates
+
     function void resolve_std_uid_by_rob_value_only(
         input memblock_sync_pkg::dispatch_raw_int_wb_t raw,
         ref memblock_wb_event_t wb_event
@@ -428,8 +476,13 @@ class dispatch_monitor_event_adapter extends uvm_object;
             end
             if (!hit0 && !hit1) begin
                 `uvm_fatal("INT_WB_STD_KEY",
-                           $sformatf("STD ROB value=%0d has zero valid active STD flag candidates",
-                                     raw.rob_value))
+                           $sformatf("STD ROB value=%0d has zero valid active STD flag candidates raw_epoch=%0d current_epoch=%0d active_redirect=%0d cancel_records=%0d:%s",
+                                     raw.rob_value,
+                                     raw.sample_flush_epoch,
+                                     memblock_sync_pkg::dispatch_flush_epoch,
+                                     data.active_redirect.valid,
+                                     data.cancel_record_q.size(),
+                                     describe_std_value_only_candidates(raw)))
             end
             if (hit0) begin
                 wb_event = candidate0;
