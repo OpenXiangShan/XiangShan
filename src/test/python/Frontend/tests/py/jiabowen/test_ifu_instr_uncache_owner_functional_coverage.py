@@ -163,6 +163,71 @@ def test_d_response_fields_are_checked_at_instruncache_response():
     assert all(_hit(recorder, index) for index in (5, 6, 7))
 
 
+def test_combined_fault_leaves_require_both_response_flags():
+    for resending, index in ((0, 16), (1, 20)):
+        for response_denied, expected_hit in ((0, False), (1, True)):
+            snapshot = _snapshot()
+            snapshot.update(
+                {
+                    "entry_state": protocol._ENTRY_REFILL_RESP,
+                    "entry_req_addr": 0x803,
+                    "entry_resending": resending,
+                    "tl_d_valid": 1,
+                    "tl_d_data": 0x0003 << 48,
+                    "tl_d_corrupt": 1,
+                    "tl_d_denied": 1,
+                }
+            )
+            recorder = _Recorder()
+            _sample(recorder, 1, snapshot)
+            snapshot.update(
+                {
+                    "entry_state": 3,
+                    "entry_resending": 0,
+                    "tl_d_valid": 0,
+                    "instr_resp_valid": 1,
+                    "instr_resp_corrupt": 1,
+                    "instr_resp_denied": response_denied,
+                    "instr_resp_need_resend": 0,
+                }
+            )
+            _sample(recorder, 2, snapshot)
+            assert _hit(recorder, index) is expected_hit
+
+
+def test_non_crossing_rvi_leaf_requires_all_three_halfword_offsets():
+    snapshot = _snapshot()
+    recorder = _Recorder()
+    for cycle, byte_offset in enumerate((0, 2, 4), start=1):
+        entry_addr = 0x800 + byte_offset // 2
+        snapshot.update(
+            {
+                "entry_state": protocol._ENTRY_REFILL_RESP,
+                "entry_req_addr": entry_addr,
+                "entry_resending": 0,
+                "tl_d_valid": 1,
+                "tl_d_data": 0x00000013 << (byte_offset * 8),
+                "tl_d_corrupt": 0,
+                "tl_d_denied": 0,
+            }
+        )
+        _sample(recorder, cycle * 2 - 1, snapshot)
+        snapshot.update(
+            {
+                "entry_state": 3,
+                "tl_d_valid": 0,
+                "instr_resp_valid": 1,
+                "instr_resp_data": 0x00000013,
+                "instr_resp_corrupt": 0,
+                "instr_resp_denied": 0,
+                "instr_resp_need_resend": 0,
+            }
+        )
+        _sample(recorder, cycle * 2, snapshot)
+        assert _hit(recorder, 13) is (byte_offset == 4)
+        snapshot["instr_resp_valid"] = 0
+
+
 def test_cross_8b_resend_checks_second_address_and_single_rvi_delivery():
     first_addr = 0x803
     second_addr = ((first_addr >> 2) + 1) << 3

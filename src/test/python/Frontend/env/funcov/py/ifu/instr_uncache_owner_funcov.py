@@ -223,6 +223,8 @@ def sample_instr_uncache_owner_coverage(
             and not pending_d["resending"]
             and pending_d["corrupt"] == 1
             and pending_d["denied"] == 0
+            and s["instr_resp_corrupt"] == 1
+            and s["instr_resp_denied"] == 0
             and not entry_resending
             and s["instr_resp_need_resend"] == 0
         ):
@@ -232,11 +234,18 @@ def sample_instr_uncache_owner_coverage(
             and not pending_d["resending"]
             and pending_d["corrupt"] == 1
             and pending_d["denied"] == 1
+            and s["instr_resp_corrupt"] == 1
+            and s["instr_resp_denied"] == 1
             and not entry_resending
             and s["instr_resp_need_resend"] == 0
         ):
             _mark(recorder, 16, cycle, evidence)
-        if pending_d["resending"] and pending_d["corrupt"] == 1:
+        if (
+            pending_d["resending"]
+            and pending_d["corrupt"] == 1
+            and s["instr_resp_corrupt"] == 1
+            and s["instr_resp_denied"] == pending_d["denied"]
+        ):
             _mark(recorder, 20 if pending_d["denied"] == 1 else 19, cycle, evidence)
         cross_8b = state["cross_8b_pending"]
         if (

@@ -85,6 +85,18 @@ def _prepare_cross_beat_rvi_stream(env) -> None:
     LoadProgramSequence(image=ProgramImage(payload=bytes(payload), base_addr=_MMIO_BASE), step_cycles=0).run(env)
 
 
+def _prepare_non_crossing_rvi_offsets(env) -> tuple[int, int, int]:
+    offsets = (0, 10, 20)
+    payload = bytearray(int(_CNOP).to_bytes(2, "little") * 128)
+    for offset in offsets:
+        payload[offset:offset + 4] = int(_ADDI_X0_X0_0).to_bytes(4, "little")
+    env.memory.mmio_ranges.append((_MMIO_BASE, _MMIO_BASE + len(payload)))
+    LoadProgramSequence(
+        image=ProgramImage(payload=bytes(payload), base_addr=_MMIO_BASE), step_cycles=0
+    ).run(env)
+    return tuple(_MMIO_BASE + offset for offset in offsets)
+
+
 def _prepare_cross_page_rvi_stream(env) -> None:
     payload = bytearray(int(_CNOP).to_bytes(2, "little") * (_SV39_PAGE_SIZE // 2 + 128))
     tail_offset = _CROSS_PAGE_PC - _MMIO_BASE
@@ -2282,6 +2294,51 @@ def test_uncache_resend_first_beat_corrupt_suppresses_resend(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-1106")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_non_crossing_rvi_offsets_do_not_resend(env):
+    pcs = _prepare_non_crossing_rvi_offsets(env)
+    _initialize_mmio_fetch(env, reset_vector=pcs[0])
+
+    assert _wait_for_observed_pc(env, pcs[0])
+    for pc in pcs[1:]:
+        assert InjectRedirectSequence(
+            RedirectTxn(target_pc=pc, reason="non-crossing-rvi-offset", max_cycles=1000)
+        ).run(env)
+        assert _wait_for_observed_pc(env, pc)
+
+    assert env.functional_coverage.key_hit(
+        "ifu_instruncache_owner_v3", "instruncache_leaf_013"
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1109")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_resend_first_beat_combined_fault_suppresses_resend(env):
+    _prepare_cross_beat_rvi_stream(env)
+    env.uncache_agent.inject_response_fault_at(
+        _MMIO_BASE,
+        corrupt=1,
+        denied=1,
+    )
+    _initialize_mmio_fetch(env, reset_vector=_CROSS_BEAT_PC)
+
+    assert _wait_for_request_addr(env, _MMIO_BASE)
+    assert _wait_for_uncache_resp(env)
+    assert _wait_for_monitor_exception(env)
+    stats = env.uncache_agent.get_stats()
+
+    assert stats.get("request_addrs", []).count(_MMIO_BASE) == 1
+    assert (_MMIO_BASE + 8) not in stats.get("request_addrs", [])
+    assert int(stats.get("corrupt_resp_count", 0)) == 1
+    assert int(stats.get("denied_resp_count", 0)) == 1
+    assert env.functional_coverage.key_hit(
+        "ifu_instruncache_owner_v3", "instruncache_leaf_016"
+    )
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_resend_first_beat_denied_allows_resend(env):
     _prepare_cross_beat_rvi_stream(env)
@@ -2317,6 +2374,11 @@ def test_uncache_resend_first_beat_denied_allows_resend(env):
             "af",
             marks=pytest.mark.funcov_bins("BIN-1110"),
         ),
+        pytest.param(
+            "combined",
+            "hwe",
+            marks=pytest.mark.funcov_bins("BIN-1110", "BIN-1113"),
+        ),
     ],
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -2324,8 +2386,8 @@ def test_uncache_resend_second_beat_fault_reports_exception(env, fault, exceptio
     _prepare_cross_beat_rvi_stream(env)
     env.uncache_agent.inject_response_fault_at(
         _MMIO_BASE + 8,
-        corrupt=1 if fault == "corrupt" else 0,
-        denied=1 if fault == "denied" else 0,
+        corrupt=1 if fault in {"corrupt", "combined"} else 0,
+        denied=1 if fault in {"denied", "combined"} else 0,
     )
     _initialize_mmio_fetch(env, reset_vector=_CROSS_BEAT_PC)
 
@@ -2344,6 +2406,10 @@ def test_uncache_resend_second_beat_fault_reports_exception(env, fault, exceptio
     if fault == "corrupt":
         assert env.functional_coverage.key_hit(
             "ifu_instruncache_owner_v3", "instruncache_leaf_019"
+        )
+    if fault == "combined":
+        assert env.functional_coverage.key_hit(
+            "ifu_instruncache_owner_v3", "instruncache_leaf_020"
         )
     assert not env.monitor.get_errors()
 
