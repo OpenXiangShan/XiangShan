@@ -146,13 +146,53 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
             f"s2_alignedInstrPcVec_{int(s2_align_shift)}_addr",
         )
     )
+    entry_state = _read(
+        recorder,
+        dut,
+        "inner_instrUncache.entries_0.state",
+        "Frontend_top.Frontend.inner_instrUncache.entries_0.state",
+    )
+    to_uncache_ready = _read(
+        recorder,
+        dut,
+        "inner_ifu.io_toUncache_req_ready",
+        "inner_instrUncache.entries_0.io_req_ready",
+        "Frontend_top.Frontend.inner_instrUncache.entries_0.io_req_ready",
+        "Frontend_top.Frontend.inner_ifu.io_toUncache_req_ready",
+        *(prefix + "io_toUncache_req_ready" for prefix in _UNCACHE_PREFIXES),
+    )
+    # The Verilator offset exposes req_ready as a projection of the entry FSM,
+    # so derive the same contract when the projection handle is unavailable.
+    if to_uncache_ready is None and entry_state is not None:
+        to_uncache_ready = int(entry_state == _IDLE)
+    to_uncache_addr = _read(
+        recorder,
+        dut,
+        "inner_ifu.io_toUncache_req_bits_addr_addr",
+        "inner_instrUncache.entries_0.io_req_bits_addr_addr",
+        "Frontend_top.Frontend.inner_ifu.io_toUncache_req_bits_addr_addr",
+        *(prefix + "io_toUncache_req_bits_addr_addr" for prefix in _UNCACHE_PREFIXES),
+        "Frontend_top.Frontend.inner_instrUncache.entries_0.io_req_bits_addr_addr",
+    )
+    if to_uncache_addr is None:
+        to_uncache_addr = _read_uncache(recorder, dut, "uncachePAddr_addr")
 
     return {
+        "s1_valid": _read_ifu(recorder, dut, "s1_valid"),
+        "s1_flush": _read_ifu(recorder, dut, "s1_flush"),
+        "s1_req_uncache": _read_ifu(recorder, dut, "s1_reqIsUncache"),
+        "s1_pmp_mmio": _read_ifu(recorder, dut, "s1_icacheMetaIn_0_pmpMmio"),
+        "s1_pbmt": _read_ifu(recorder, dut, "s1_icacheMetaIn_0_itlbPbmt"),
+        "s1_paddr": _read_ifu(recorder, dut, "s1_icacheMetaIn_0_pAddr_addr"),
+        "s1_pc": _read_ifu(recorder, dut, "s1_fetchBlock_0_startVAddr_addr"),
+        "s1_ftq_flag": _read_ifu(recorder, dut, "s1_fetchBlock_0_ftqIdx_flag"),
+        "s1_ftq_value": _read_ifu(recorder, dut, "s1_fetchBlock_0_ftqIdx_value"),
         "s2_valid": _read_ifu(recorder, dut, "s2_valid_valid"),
         "s2_req_uncache": _read_ifu(recorder, dut, "s2_reqIsUncache"),
         "s2_use_uncache": _read_ifu(recorder, dut, "s2_useUncacheFetch"),
         "s2_pmp_mmio": _read_ifu(recorder, dut, "s2_icacheMeta_0_pmpMmio"),
         "s2_pbmt": _read_ifu(recorder, dut, "s2_icacheMeta_0_itlbPbmt"),
+        "s2_paddr": _read_ifu(recorder, dut, "s2_icacheMeta_0_pAddr_addr"),
         "s2_exception": _read_ifu(recorder, dut, "s2_icacheMeta_0_exception_value"),
         "s2_pc": _read_ifu(recorder, dut, "s2_fetchBlock_0_startVAddr_addr"),
         "s2_ftq_flag": _read_ifu(recorder, dut, "s2_fetchBlock_0_ftqIdx_flag"),
@@ -167,12 +207,17 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "to_uncache_valid": _read(
             recorder,
             dut,
+            "inner_ifu.io_toUncache_req_valid",
+            "inner_instrUncache.entries_0.io_req_valid",
             "Frontend_top.Frontend.inner_instrUncache.entries_0.io_req_valid",
+            "Frontend_top.Frontend.inner_ifu.io_toUncache_req_valid",
             *(
                 prefix + "io_toUncache_req_valid"
                 for prefix in _UNCACHE_PREFIXES
             ),
         ),
+        "to_uncache_ready": to_uncache_ready,
+        "to_uncache_addr": to_uncache_addr,
         "empty_after": _read_uncache(recorder, dut, "io_emptyAfter"),
         "uncache_busy": _read_ifu(recorder, dut, "uncacheBusy"),
         "ibuffer_ready": _read_ifu(recorder, dut, "io_toIBuffer_ready"),
@@ -233,11 +278,7 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "instr_resp_need_resend": _read_instr_uncache(
             recorder, dut, "io_toIfu_resp_bits_needResend"
         ),
-        "entry_state": _read(
-            recorder,
-            dut,
-            "Frontend_top.Frontend.inner_instrUncache.entries_0.state",
-        ),
+        "entry_state": entry_state,
         "entry_resending": _read(
             recorder,
             dut,
@@ -275,10 +316,14 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
             "io_backend_toFtq_redirect_valid",
         ),
         "ifu_flush": _read_ifu(recorder, dut, "s2_flush"),
+        "s2_wb_not_flush": _read_ifu(recorder, dut, "s2_wbNotFlush"),
         "uncache_redirect": _read_ifu(recorder, dut, "uncacheRedirect_valid"),
         "wb_redirect": _read_ifu(recorder, dut, "io_toFtq_wbRedirect_valid"),
         "checker_redirect": _read_ifu(recorder, dut, "wbRedirect_valid"),
         "wb_path_valid": _read_ifu(recorder, dut, "wbValid"),
+        "wb_ftq_flag": _read_ifu(recorder, dut, "wbAlignFetchBlock_0_ftqIdx_flag"),
+        "wb_ftq_value": _read_ifu(recorder, dut, "wbAlignFetchBlock_0_ftqIdx_value"),
+        "wb_pc": _read_ifu(recorder, dut, "wbAlignFetchBlock_0_startVAddr_addr"),
         "branch_type": _read_ifu(recorder, dut, "brAttribute_branchType"),
         "prev_end_half": _read_ifu(recorder, dut, "s2_prevEndIsHalfRvi"),
         "prev_half_data": _read_ifu(recorder, dut, "s2_prevEndHalfRviData"),
@@ -663,6 +708,9 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
     if ifu_stall is None and s["ibuffer_ready"] is not None:
         ifu_stall = int(s["ibuffer_ready"] == 0)
     to_uncache_valid = s["to_uncache_valid"]
+    to_uncache_fire = (
+        s["to_uncache_valid"] == 1 and s["to_uncache_ready"] == 1
+    )
     entry_wait_resp = s["entry_state"] == _ENTRY_REFILL_RESP
     tl_a_fire = s["tl_a_valid"] == 1 and s["tl_a_ready"] == 1
     page_tail = (
@@ -853,20 +901,70 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
     if nc_active and s["uncache_state"] == _WAIT_RESP and s["backend_redirect"] == 1:
         seen.add("redirect_wait_resp")
 
-    checker_preempts_nc = (
-        not nc_active
-        and s["s2_req_uncache"] != 1
-        and s["checker_redirect"] == 1
+    wb_identity = (s["wb_ftq_flag"], s["wb_ftq_value"])
+    s1_identity = (s["s1_ftq_flag"], s["s1_ftq_value"])
+    s2_identity = (s["s2_ftq_flag"], s["s2_ftq_value"])
+    wb_identity_known = None not in wb_identity
+    s1_identity_known = None not in s1_identity
+    s2_identity_known = None not in s2_identity
+    older_checker_redirect = (
+        s["checker_redirect"] == 1
         and s["wb_path_valid"] == 1
         and s["wb_redirect"] == 1
         and s["ifu_flush"] == 1
         and s["backend_redirect"] != 1
-        and s["req_valid"] != 1
+        and wb_identity_known
     )
-    if checker_preempts_nc:
+    younger_nc_in_s1 = (
+        older_checker_redirect
+        and s["s1_valid"] == 1
+        and s["s1_flush"] == 1
+        and s["s1_req_uncache"] == 1
+        and s["s1_pmp_mmio"] == 0
+        and s["s1_pbmt"] == _PBMT_NC
+        and s1_identity_known
+        and s1_identity != wb_identity
+    )
+    younger_nc_in_s2 = (
+        older_checker_redirect
+        and nc_candidate
+        and s["s2_wb_not_flush"] != 1
+        and s2_identity_known
+        and s2_identity != wb_identity
+    )
+    internal_req_races_flush = younger_nc_in_s2 and req_fire
+    # A checker redirect can remain asserted for more than one sampled cycle.
+    # Keep the first overlap context intact so the following cycle's same NC
+    # request is not mistaken for a distinct recovery transaction.
+    if (
+        older_checker_redirect
+        and (younger_nc_in_s1 or younger_nc_in_s2)
+        and state["nc_checker_redirect_pending"] is None
+    ):
+        use_s2_identity = bool(younger_nc_in_s2)
+        old_identity = s2_identity if use_s2_identity else s1_identity
+        old_pc = s["s2_pc"] if use_s2_identity else s["s1_pc"]
+        old_paddr = s["s2_paddr"] if use_s2_identity else s["s1_paddr"]
         state["nc_checker_redirect_pending"] = {
-            "checker_pc": s["s2_pc"],
             "redirect_cycle": int(cycle),
+            "checker_pc": s["wb_pc"],
+            "checker_ftq": wb_identity,
+            "old_ftq": old_identity,
+            "old_pc": old_pc,
+            "old_paddr": old_paddr,
+            "younger_nc_present_in_s1": bool(younger_nc_in_s1),
+            "younger_nc_present_in_s2": bool(younger_nc_in_s2),
+            "younger_nc_internal_req_races_flush": bool(internal_req_races_flush),
+            "old_nc_no_instruncache_request": not to_uncache_fire,
+            "old_nc_no_tl_a_fire": not tl_a_fire,
+            "old_nc_no_ibuffer_delivery": not (
+                s["to_valid"] == 1 and s["to_ready"] == 1
+            ),
+            "old_nc_no_response": not (
+                s["instr_resp_valid"] == 1 or s["resp_valid"] == 1
+            ),
+            "recovery": None,
+            "failure_reasons": [],
         }
 
     cacheable_delivery = (
@@ -883,23 +981,176 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
         else "mmio" if mmio_accept else "cacheable" if cacheable_delivery else None
     )
     checker_pending = state["nc_checker_redirect_pending"]
-    if checker_pending is not None and int(cycle) > checker_pending["redirect_cycle"]:
-        if current_path == "nc" and nc_accept:
-            _mark(
-                recorder,
-                NC_OWNER_GROUP,
-                13,
-                cycle,
-                {
-                    **evidence,
-                    "older_cacheable_checker_redirect": True,
-                    "redirect_cycle": checker_pending["redirect_cycle"],
-                    "checker_pc": checker_pending["checker_pc"],
-                    "nc_request_started_only_on_recovery": True,
-                },
+    if (
+        checker_pending is not None
+        and int(cycle) > checker_pending["redirect_cycle"]
+        # Keep the overlap context quiescent while the same redirect remains
+        # asserted; the request visible in this cycle is still the flushed B.
+        and not older_checker_redirect
+    ):
+        failures = checker_pending["failure_reasons"]
+        old_ftq = tuple(checker_pending["old_ftq"])
+        delivered_ftq = (s["to_ftq_flag"], s["to_ftq_value"])
+        delivered_pc_matches_old = (
+            checker_pending["old_pc"] is None
+            or s["to_pc"] is None
+            or int(s["to_pc"]) == int(checker_pending["old_pc"])
+        )
+        old_ibuffer_delivery = (
+            s["to_valid"] == 1
+            and s["to_ready"] == 1
+            and None not in delivered_ftq
+            and delivered_ftq == old_ftq
+            and delivered_pc_matches_old
+        )
+        recovery = checker_pending["recovery"]
+        if recovery is None:
+            if to_uncache_fire:
+                checker_pending["old_nc_no_instruncache_request"] = False
+                failures.append("old_nc_instruncache_request")
+            if tl_a_fire:
+                checker_pending["old_nc_no_tl_a_fire"] = False
+                failures.append("old_nc_tl_a_fire")
+            if s["instr_resp_valid"] == 1 or s["resp_valid"] == 1:
+                checker_pending["old_nc_no_response"] = False
+                failures.append("old_nc_response")
+            if old_ibuffer_delivery:
+                checker_pending["old_nc_no_ibuffer_delivery"] = False
+                failures.append("old_nc_ibuffer_delivery")
+            if nc_accept:
+                recovery_identity_known = (
+                    s2_identity_known
+                    and checker_pending["old_pc"] is not None
+                    and checker_pending["old_paddr"] is not None
+                    and s["s2_pc"] is not None
+                    and s["s2_paddr"] is not None
+                )
+                ftq_changed = recovery_identity_known and s2_identity != old_ftq
+                pc_changed = (
+                    checker_pending["old_pc"] is not None
+                    and s["s2_pc"] is not None
+                    and int(s["s2_pc"]) != int(checker_pending["old_pc"])
+                )
+                paddr_changed = (
+                    checker_pending["old_paddr"] is not None
+                    and s["s2_paddr"] is not None
+                    and int(s["s2_paddr"]) != int(checker_pending["old_paddr"])
+                )
+                identity_changes = [
+                    name
+                    for name, changed in (
+                        ("ftq", ftq_changed),
+                        ("pc", pc_changed),
+                        ("paddr", paddr_changed),
+                    )
+                    if changed
+                ]
+                if recovery_identity_known and identity_changes:
+                    checker_pending["recovery"] = {
+                        "accept_cycle": int(cycle),
+                        "ftq": s2_identity,
+                        "pc": s["s2_pc"],
+                        "paddr": s["s2_paddr"],
+                        "identity_changes": identity_changes,
+                        "to_instruncache_request": False,
+                        "tl_a_fire": False,
+                        "response": False,
+                        "ibuffer_delivery": False,
+                    }
+                else:
+                    failures.append("recovery_nc_identity_not_distinct")
+        else:
+            if old_ibuffer_delivery:
+                checker_pending["old_nc_no_ibuffer_delivery"] = False
+                failures.append("old_nc_ibuffer_delivery")
+            recovery_paddr = recovery["paddr"]
+            if to_uncache_fire and not recovery["to_instruncache_request"]:
+                to_uncache_matches = (
+                    recovery_paddr is not None
+                    and s["to_uncache_addr"] is not None
+                    and int(s["to_uncache_addr"]) == int(recovery_paddr)
+                )
+                recovery["to_instruncache_request"] |= bool(to_uncache_matches)
+                if not to_uncache_matches:
+                    failures.append("instruncache_request_identity_mismatch")
+            if tl_a_fire and not recovery["tl_a_fire"]:
+                tl_matches = (
+                    recovery_paddr is not None
+                    and s["tl_a_addr"] is not None
+                    and int(s["tl_a_addr"])
+                    == ((int(recovery_paddr) << 1) & ~0x7)
+                )
+                recovery["tl_a_fire"] |= bool(tl_matches)
+                if not tl_matches:
+                    failures.append("tl_a_request_identity_mismatch")
+            if s["instr_resp_valid"] == 1 or s["resp_valid"] == 1:
+                recovery["response"] = True
+            recovery_delivery = (
+                s["to_valid"] == 1
+                and s["to_ready"] == 1
+                and None not in delivered_ftq
+                and delivered_ftq == tuple(recovery["ftq"])
+                and s["to_pc"] is not None
+                and recovery["pc"] is not None
+                and int(s["to_pc"]) == int(recovery["pc"])
             )
-            state["nc_checker_redirect_pending"] = None
-        elif current_path is not None:
+            recovery["ibuffer_delivery"] |= bool(recovery_delivery)
+            recovery_complete = all(
+                recovery[name]
+                for name in (
+                    "to_instruncache_request",
+                    "tl_a_fire",
+                    "response",
+                    "ibuffer_delivery",
+                )
+            )
+            strong_overlap = checker_pending[
+                "younger_nc_internal_req_races_flush"
+            ]
+            if recovery_complete and strong_overlap and not failures:
+                _mark(
+                    recorder,
+                    NC_OWNER_GROUP,
+                    13,
+                    cycle,
+                    {
+                        **evidence,
+                        "older_cacheable_checker_redirect": True,
+                        "redirect_cycle": checker_pending["redirect_cycle"],
+                        "checker_pc": checker_pending["checker_pc"],
+                        "checker_ftq": list(checker_pending["checker_ftq"]),
+                        "old_nc_ftq": list(old_ftq),
+                        "old_nc_pc": checker_pending["old_pc"],
+                        "old_nc_paddr": checker_pending["old_paddr"],
+                        "younger_nc_present_in_s1": checker_pending[
+                            "younger_nc_present_in_s1"
+                        ],
+                        "younger_nc_present_in_s2": checker_pending[
+                            "younger_nc_present_in_s2"
+                        ],
+                        "younger_nc_internal_req_races_flush": True,
+                        "old_nc_no_instruncache_request": True,
+                        "old_nc_no_tl_a_fire": True,
+                        "old_nc_no_ibuffer_delivery": True,
+                        "old_nc_no_response": True,
+                        "recovery_nc_new_identity": True,
+                        "recovery_nc_ftq": list(recovery["ftq"]),
+                        "recovery_nc_pc": recovery["pc"],
+                        "recovery_nc_paddr": recovery["paddr"],
+                        "recovery_nc_identity_changes": recovery[
+                            "identity_changes"
+                        ],
+                        "recovery_nc_request_and_delivery": True,
+                        "stage_position_cross": "checker_redirect_x_internal_req_fire",
+                        "flush_side_effect_cross": "flush_x_no_old_external_request",
+                        "recovery_identity_cross": "recovery_x_new_ftq_pc_or_address",
+                    },
+                )
+                state["nc_checker_redirect_pending"] = None
+        if (
+            state["nc_checker_redirect_pending"] is not None
+            and int(cycle) - checker_pending["redirect_cycle"] > 8192
+        ):
             state["nc_checker_redirect_pending"] = None
     previous_path = state["previous_path"]
     if current_path is not None and previous_path is not None:

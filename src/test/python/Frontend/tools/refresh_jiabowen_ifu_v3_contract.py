@@ -45,7 +45,9 @@ _REVIEW = "RTL_REVIEW:c0ca46459"
 _SUPERSEDED_EVIDENCE = {
     "BIN-1067": (
         f"{_REVIEW}:PredChecker is a cacheable writeback path; this leaf covers "
-        "an older cacheable checker redirect cancelling a younger NC transaction"
+        "an older cacheable checker redirect cancelling a younger NC transaction",
+        f"{_REVIEW}:PredChecker is cacheable-only; legal V3 ordering resolves the "
+        "checker redirect before the younger NC request and restarts NC from the redirect target",
     ),
     "BIN-1084": (
         f"{_REVIEW}:OPEN/FIXME first-page fault bypasses uncache req.fire but "
@@ -240,12 +242,12 @@ _UPDATES = {
         evidence=f"{_REVIEW}:NC policy section cross-references the canonical InstrUncache protocol leaf BIN-1032",
     ),
     "BIN-1067": ContractUpdate(
-        "更老cacheable checker redirect阻止年轻NC旧请求并从目标重启NC路径",
-        "cacheable块产生PredChecker redirect，顺序后继为独立PBMT.NC事务；当前in-order IFU在NC接受前解析checker redirect",
-        "checker redirect触发年轻流水flush且同拍不发出NC请求；随后仅redirect恢复路径的新NC请求可进入SendReq/WaitResp；NC自身不产生PredChecker redirect",
-        "cacheable checkerRedirect/wbValid/toFtq.wbRedirect、s2 flush、NC属性和uncache req.fire、redirect周期与恢复NC接受周期",
-        status="MODELED",
-        evidence=f"{_REVIEW}:PredChecker is cacheable-only; legal V3 ordering resolves the checker redirect before the younger NC request and restarts NC from the redirect target",
+        "较老cacheable PredChecker redirect清理紧随其后的年轻NC事务并仅允许恢复路径新NC请求",
+        "cacheable块A产生checkerRedirect/wbRedirect；独立且更年轻、ftqIdx不同的PBMT.NC后继B在redirect到来时已真实位于IFU s1、s2或IfuUncacheUnit内部请求入口；无backend redirect干扰",
+        "A的wbRedirect清理B对应流水valid；若B的uncacheUnit.req.fire与flush同拍则flush获胜；旧B不产生InstrUncache请求、TL A请求、uncache响应或IBuffer交付；恢复后仅身份不同的新NC可请求并正常交付",
+        "A的wb ftqIdx/checkerRedirect/toFtq.wbRedirect；B的s1/s2 valid、PBMT/PMP、ftqIdx/PC/物理地址、s2_wbNotFlush、uncacheUnit req.fire/flush；InstrUncache请求、TL A、响应、IBuffer身份；恢复NC身份",
+        status="PARTIAL",
+        evidence=f"{_REVIEW}:RTL permits a different-ftqIdx younger NC in s1 or s2 when checker redirect arrives; s1 is flushed unconditionally, s2 is flushed unless s2_wbNotFlush, and IfuUncacheUnit flush overrides same-cycle Idle request capture; existing 91b6219d3 evidence only proves post-redirect recovery",
     ),
     "BIN-1084": ContractUpdate(
         "NC第一页权限异常不发InstrUncache请求且保留后端异常身份",
@@ -349,11 +351,15 @@ def refresh(*, check: bool = False) -> dict[str, int]:
     for bin_id, update in _UPDATES.items():
         row = testpoint_rows[mapped[bin_id]]
         superseded = _SUPERSEDED_EVIDENCE.get(bin_id)
-        if superseded and superseded in row["evidence"]:
-            row["evidence"] = row["evidence"].replace(
-                f"{superseded}; ", ""
-            ).replace(superseded, "")
-            changed_testpoints += 1
+        superseded_items = (
+            superseded if isinstance(superseded, tuple) else (superseded,)
+        )
+        for stale_evidence in superseded_items:
+            if stale_evidence and stale_evidence in row["evidence"]:
+                row["evidence"] = row["evidence"].replace(
+                    f"{stale_evidence}; ", ""
+                ).replace(stale_evidence, "")
+                changed_testpoints += 1
         desired = {
             "五级测试点": update.leaf,
             "Condition": update.condition,
@@ -365,7 +371,16 @@ def refresh(*, check: bool = False) -> dict[str, int]:
             # contract refresh must not erase that accepted evidence, while
             # design-review dispositions such as PARTIAL/BLOCKED remain
             # authoritative.
-            if not (update.status == "MODELED" and row["status"] == "HIT"):
+            strengthened_bin1067_hit = (
+                bin_id == "BIN-1067"
+                and row["status"] == "HIT"
+                and "DUT:test_cacheable_checker_redirect_flushes_younger_nc_internal_request:hits="
+                in row["evidence"]
+            )
+            if not (
+                (update.status == "MODELED" and row["status"] == "HIT")
+                or strengthened_bin1067_hit
+            ):
                 desired["status"] = update.status
         for field, value in desired.items():
             if row[field] != value:

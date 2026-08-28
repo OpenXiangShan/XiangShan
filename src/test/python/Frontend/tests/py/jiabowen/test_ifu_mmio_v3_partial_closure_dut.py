@@ -34,6 +34,19 @@ def _branch_payload() -> bytes:
     return bytes(payload)
 
 
+def _jal_x0(offset: int) -> int:
+    assert int(offset) % 2 == 0
+    assert -(1 << 20) <= int(offset) < (1 << 20)
+    imm = int(offset) & 0x1FFFFF
+    return (
+        (((imm >> 20) & 0x1) << 31)
+        | (((imm >> 1) & 0x3FF) << 21)
+        | (((imm >> 11) & 0x1) << 20)
+        | (((imm >> 12) & 0xFF) << 12)
+        | 0x6F
+    )
+
+
 def _register_cross_8b_trace(env) -> list[dict[str, int | None]]:
     trace: list[dict[str, int | None]] = []
 
@@ -802,22 +815,31 @@ def test_nc_cross_page_second_page_pf_attributes_to_rvi_start(env):
 @pytest.mark.skipif(
     not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration"
 )
-def test_cacheable_checker_redirect_preempts_then_restarts_nc_request(env):
+def test_cacheable_checker_redirect_flushes_younger_nc_internal_request(env):
     virtual_page = uncache._NORMAL_BASE
     physical_page = 0x80004000
     cacheable_start = virtual_page + uncache._SV39_PAGE_SIZE - uncache._FETCH_BLOCK_SIZE
     nc_start = virtual_page + uncache._SV39_PAGE_SIZE
     nc_physical_page = physical_page + uncache._SV39_PAGE_SIZE
+    branch_pc = nc_start - 4
+    recovery_nc = nc_start + 0x100
+    recovery_nc_pa = nc_physical_page + 0x100
+    warm_redirect_pc = recovery_nc + uncache._FETCH_BLOCK_SIZE
 
     cacheable_payload = bytearray(
         int(uncache._CNOP).to_bytes(2, "little")
         * (uncache._SV39_PAGE_SIZE // 2)
     )
-    cacheable_payload[-4:] = int(uncache._JAL_X0_PLUS_4).to_bytes(4, "little")
-    nc_payload = (
+    cacheable_payload[-4:] = int(_jal_x0(recovery_nc - branch_pc)).to_bytes(
+        4, "little"
+    )
+    nc_payload = bytearray(
         int(uncache._CNOP).to_bytes(2, "little")
         * (uncache._SV39_PAGE_SIZE // 2)
     )
+    nc_payload[warm_redirect_pc - nc_start : warm_redirect_pc - nc_start + 4] = int(
+        uncache._JAL_X0_PLUS_4
+    ).to_bytes(4, "little")
 
     env.page_table.clear()
     env.page_table.map_page(
@@ -837,7 +859,10 @@ def test_cacheable_checker_redirect_preempts_then_restarts_nc_request(env):
         pbmt=uncache._PBMT_NC,
     )
     env.ptw_agent.configure(
-        mode="sv39", response_source="model", compare_drive_source="model"
+        latency=0,
+        mode="sv39",
+        response_source="model",
+        compare_drive_source="model",
     )
     uncache.LoadProgramSequence(
         image=uncache.ProgramImage(
@@ -846,34 +871,112 @@ def test_cacheable_checker_redirect_preempts_then_restarts_nc_request(env):
         step_cycles=0,
     ).run(env)
     uncache.LoadProgramSequence(
-        image=uncache.ProgramImage(payload=nc_payload, base_addr=nc_physical_page),
+        image=uncache.ProgramImage(
+            payload=bytes(nc_payload), base_addr=nc_physical_page
+        ),
         step_cycles=0,
     ).run(env)
-    env.uncache_agent.configure(latency=64, mmio_latency=64)
+    env.uncache_agent.configure(latency=8, mmio_latency=8)
     uncache._initialize_sv39_fetch(env, reset_vector=cacheable_start)
     uncache._configure_exec_attrs_16k(env, base_addr=physical_page)
 
+    env.monitor.clear()
+    env.monitor.set_expected_pc(cacheable_start)
+
+    # Warm A only through s1, then flush it before PredChecker can train the JAL.
+    # The NC page is warmed through its own legal translation.  Its live JAL
+    # identity supplies the sole source-bound redirect that starts measurement.
+    env.backend_model.commit_min_delay = 4096
+    env.backend_model.commit_max_delay = 4096
+    icache_line_baseline = int(
+        env.icache_agent.get_stats().get("resp_line_count", 0)
+    )
+    uncache._force_redirect_to(env, cacheable_start)
+    setup_a_reached_s1 = False
+    for _ in range(4000):
+        env.step(1)
+        setup_snapshot = owner_funcov._snapshot(
+            env.functional_coverage, env.dut
+        )
+        setup_a_reached_s1 |= bool(
+            setup_snapshot["s1_valid"] == 1
+            and setup_snapshot["s1_pc"] == (cacheable_start >> 1)
+        )
+        if int(env.icache_agent.get_stats().get("resp_line_count", 0)) > int(
+            icache_line_baseline
+        ):
+            break
+    assert int(env.icache_agent.get_stats().get("resp_line_count", 0)) > int(
+        icache_line_baseline
+    ), env.icache_agent.get_stats()
+    assert not setup_a_reached_s1
+    uncache._force_redirect_to(env, recovery_nc)
+
+    redirect_source = None
+    setup_a_checker_redirect = False
+    for _ in range(8000):
+        env.step(1)
+        setup_snapshot = owner_funcov._snapshot(
+            env.functional_coverage, env.dut
+        )
+        setup_a_checker_redirect |= bool(
+            setup_snapshot["checker_redirect"] == 1
+            and setup_snapshot["wb_pc"] == (cacheable_start >> 1)
+        )
+        redirect_source = next(
+            (
+                entry
+                for entry in env.backend_model._cfvec_queue
+                if int(entry.pc) == warm_redirect_pc and bool(entry.is_cfi)
+            ),
+            None,
+        )
+        if redirect_source is not None:
+            break
+    assert not setup_a_checker_redirect
+    assert redirect_source is not None, {
+        "cfvec_queue": [
+            {
+                "pc": int(entry.pc),
+                "ftq": (int(entry.ftq_flag), int(entry.ftq_value)),
+                "offset": int(entry.ftq_offset),
+                "is_cfi": bool(entry.is_cfi),
+            }
+            for entry in env.backend_model._cfvec_queue
+        ],
+        "ptw": env.ptw_agent.get_stats(),
+        "icache": env.icache_agent.get_stats(),
+        "uncache": env.uncache_agent.get_stats(),
+    }
+
+    owner_funcov.reset_mmio_nc_owner_coverage_state(env.functional_coverage)
+    request_baseline = len(env.uncache_agent.get_stats().get("request_addrs", []))
+    env.monitor.clear()
     trace = []
 
     def capture_checker_nc_overlap(cycle, active_env):
         snapshot = owner_funcov._snapshot(
             active_env.functional_coverage, active_env.dut
         )
-        if not any(
-            snapshot[name] == 1
-            for name in (
-                "checker_redirect",
-                "instr_resp_valid",
-                "resp_valid",
-                "req_valid",
-            )
-        ):
-            return
         trace.append(
             {
                 "cycle": int(cycle),
+                "s1_valid": snapshot["s1_valid"],
+                "s1_flush": snapshot["s1_flush"],
+                "s1_pc": snapshot["s1_pc"],
+                "s1_req_uncache": snapshot["s1_req_uncache"],
+                "s1_pbmt": snapshot["s1_pbmt"],
+                "s1_pmp_mmio": snapshot["s1_pmp_mmio"],
+                "s1_ftq": (snapshot["s1_ftq_flag"], snapshot["s1_ftq_value"]),
                 "s2_pc": snapshot["s2_pc"],
+                "s2_paddr": snapshot["s2_paddr"],
+                "s2_valid": snapshot["s2_valid"],
                 "s2_req_uncache": snapshot["s2_req_uncache"],
+                "s2_use_uncache": snapshot["s2_use_uncache"],
+                "s2_pbmt": snapshot["s2_pbmt"],
+                "s2_pmp_mmio": snapshot["s2_pmp_mmio"],
+                "s2_ftq": (snapshot["s2_ftq_flag"], snapshot["s2_ftq_value"]),
+                "s2_wb_not_flush": snapshot["s2_wb_not_flush"],
                 "req_valid": snapshot["req_valid"],
                 "req_ready": snapshot["req_ready"],
                 "uncache_state": snapshot["uncache_state"],
@@ -881,10 +984,20 @@ def test_cacheable_checker_redirect_preempts_then_restarts_nc_request(env):
                 "wb_path_valid": snapshot["wb_path_valid"],
                 "wb_redirect": snapshot["wb_redirect"],
                 "ifu_flush": snapshot["ifu_flush"],
+                "wb_pc": snapshot["wb_pc"],
+                "wb_ftq": (snapshot["wb_ftq_flag"], snapshot["wb_ftq_value"]),
+                "to_uncache_valid": snapshot["to_uncache_valid"],
+                "to_uncache_ready": snapshot["to_uncache_ready"],
+                "to_uncache_addr": snapshot["to_uncache_addr"],
+                "tl_a_valid": snapshot["tl_a_valid"],
+                "tl_a_ready": snapshot["tl_a_ready"],
+                "tl_a_addr": snapshot["tl_a_addr"],
                 "instr_resp_valid": snapshot["instr_resp_valid"],
                 "resp_valid": snapshot["resp_valid"],
                 "to_valid": snapshot["to_valid"],
+                "to_ready": snapshot["to_ready"],
                 "to_pc": snapshot["to_pc"],
+                "to_ftq": (snapshot["to_ftq_flag"], snapshot["to_ftq_value"]),
                 "req_count": int(
                     active_env.uncache_agent.get_stats().get("req_count", 0)
                 ),
@@ -892,51 +1005,127 @@ def test_cacheable_checker_redirect_preempts_then_restarts_nc_request(env):
         )
 
     env.register_cycle_observer(capture_checker_nc_overlap)
-    uncache._force_redirect_to(env, cacheable_start)
+    env.backend_model.inject_redirect_from_cfvec(
+        source_pc=int(redirect_source.pc),
+        source_ftq_flag=int(redirect_source.ftq_flag),
+        source_ftq_value=int(redirect_source.ftq_value),
+        source_ftq_offset=int(redirect_source.ftq_offset),
+        target_pc=cacheable_start,
+        reason="bin1067_warm_return",
+        taken=1,
+        level=0,
+        delay_cycles=3,
+    )
 
-    for _ in range(12000):
+    for _ in range(4000):
         if env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_013"):
             break
         env.step(1)
 
-    assert env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_013"), {
-        "trace": trace[-96:],
-        "ptw": env.ptw_agent.get_stats(),
-        "icache": env.icache_agent.get_stats(),
-        "uncache": env.uncache_agent.get_stats(),
-    }
-    cancel_samples = [
+    if not env.functional_coverage.key_hit("ifu_nc_owner_v3", "nc_leaf_013"):
+        pending = getattr(
+            env.functional_coverage, "_ifu_mmio_nc_owner_state", {}
+        ).get("nc_checker_redirect_pending")
+        raise AssertionError(
+            {
+                "checker_trace": [
+                    sample
+                    for sample in trace
+                    if sample["checker_redirect"] == 1
+                ],
+                "recovery_trace": [
+                    sample
+                    for sample in trace
+                    if sample["req_valid"] == 1
+                    and sample["s2_req_uncache"] == 1
+                    and int(sample["cycle"]) > 0
+                ][-8:],
+                "pending_summary": None
+                if pending is None
+                else {
+                    "redirect_cycle": pending["redirect_cycle"],
+                    "old_ftq": pending["old_ftq"],
+                    "old_pc": pending["old_pc"],
+                    "old_paddr": pending["old_paddr"],
+                    "younger_nc_present_in_s1": pending[
+                        "younger_nc_present_in_s1"
+                    ],
+                    "younger_nc_present_in_s2": pending[
+                        "younger_nc_present_in_s2"
+                    ],
+                    "younger_nc_internal_req_races_flush": pending[
+                        "younger_nc_internal_req_races_flush"
+                    ],
+                    "old_nc_no_instruncache_request": pending[
+                        "old_nc_no_instruncache_request"
+                    ],
+                    "old_nc_no_tl_a_fire": pending["old_nc_no_tl_a_fire"],
+                    "old_nc_no_ibuffer_delivery": pending[
+                        "old_nc_no_ibuffer_delivery"
+                    ],
+                    "old_nc_no_response": pending["old_nc_no_response"],
+                    "failure_reasons": pending["failure_reasons"],
+                    "recovery": pending["recovery"],
+                },
+            }
+        )
+    overlap_samples = [
         sample
         for sample in trace
         if sample["checker_redirect"] == 1
         and sample["wb_path_valid"] == 1
         and sample["wb_redirect"] == 1
         and sample["ifu_flush"] == 1
-        and sample["s2_req_uncache"] != 1
-        and sample["req_valid"] != 1
-    ]
-    assert cancel_samples, trace[-96:]
-    cancel_sample = cancel_samples[-1]
-    cancel_cycle = int(cancel_sample["cycle"])
-    recovery_requests = [
-        sample
-        for sample in trace
-        if int(sample["cycle"]) > cancel_cycle
+        and sample["s2_valid"] == 1
         and sample["s2_req_uncache"] == 1
+        and sample["s2_pbmt"] == owner_funcov._PBMT_NC
+        and sample["s2_pmp_mmio"] == 0
+        and sample["s2_wb_not_flush"] != 1
+        and sample["s2_ftq"] != sample["wb_ftq"]
         and sample["req_valid"] == 1
         and sample["req_ready"] == 1
     ]
+    assert overlap_samples, trace[-192:]
+    overlap = overlap_samples[-1]
+    redirect_cycle = int(overlap["cycle"])
+    assert overlap["s2_pc"] == (nc_start >> 1)
+    assert overlap["s2_paddr"] == (nc_physical_page >> 1)
+    assert overlap["to_uncache_valid"] != 1
+    assert overlap["tl_a_valid"] != 1
+
+    recovery_requests = [
+        sample
+        for sample in trace
+        if int(sample["cycle"]) > redirect_cycle
+        and sample["s2_req_uncache"] == 1
+        and sample["req_valid"] == 1
+        and sample["req_ready"] == 1
+        and sample["s2_pc"] == (recovery_nc >> 1)
+        and sample["s2_paddr"] == (recovery_nc_pa >> 1)
+    ]
     assert recovery_requests, trace[-96:]
-    assert uncache._wait_for_request_addr(
-        env, nc_physical_page, max_cycles=6000
-    ), env.uncache_agent.get_stats()
-    assert int(env.uncache_agent.get_stats().get("req_count", 0)) > int(
-        cancel_sample["req_count"]
+    recovery = recovery_requests[0]
+    assert (
+        recovery["s2_ftq"],
+        recovery["s2_pc"],
+        recovery["s2_paddr"],
+    ) != (
+        overlap["s2_ftq"],
+        overlap["s2_pc"],
+        overlap["s2_paddr"],
     )
-    assert any(
-        int(addr) == nc_physical_page
-        for addr in env.uncache_agent.get_stats().get("request_addrs", [])
-    )
+    measured_addrs = env.uncache_agent.get_stats().get("request_addrs", [])[request_baseline:]
+    assert nc_physical_page not in measured_addrs, measured_addrs
+    assert recovery_nc_pa in measured_addrs, measured_addrs
+    old_tl_requests = [
+        sample
+        for sample in trace
+        if int(sample["cycle"]) >= redirect_cycle
+        and sample["tl_a_valid"] == 1
+        and sample["tl_a_ready"] == 1
+        and sample["tl_a_addr"] == nc_physical_page
+    ]
+    assert not old_tl_requests, old_tl_requests
     assert not env.monitor.get_errors()
 
 
