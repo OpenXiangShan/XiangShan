@@ -55,11 +55,14 @@ module frontend_mmio_fetch_funcov (
   input logic        wfi_safe
 );
 
-  localparam logic [1:0] IDLE             = 2'h0;
-  localparam logic [1:0] WAIT_LAST_COMMIT = 2'h1;
-  localparam logic [1:0] SEND_REQ         = 2'h2;
-  localparam logic [1:0] WAIT_RESP        = 2'h3;
-  localparam logic [1:0] PBMT_NC          = 2'h2;
+  localparam logic [1:0] UNCACHE_IDLE             = 2'h0;
+  localparam logic [1:0] UNCACHE_WAIT_LAST_COMMIT = 2'h1;
+  localparam logic [1:0] UNCACHE_SEND_REQ         = 2'h2;
+  localparam logic [1:0] UNCACHE_WAIT_RESP        = 2'h3;
+  localparam logic [1:0] ENTRY_INVALID            = 2'h0;
+  localparam logic [1:0] ENTRY_REFILL_REQ         = 2'h1;
+  localparam logic [1:0] ENTRY_REFILL_RESP        = 2'h2;
+  localparam logic [1:0] PBMT_NC                   = 2'h1;
 
   logic        last_mmio_delivery_seen;
   logic        last_mmio_is_rvc;
@@ -90,14 +93,14 @@ module frontend_mmio_fetch_funcov (
   wire single_delivery = $onehot(to_ibuffer_enq);
   wire delivered_is_rvc = |(to_ibuffer_enq & to_ibuffer_is_rvc);
   wire tl_a_fire = tl_a_valid && tl_a_ready;
-  wire entry_wait_resp = entry_state == WAIT_RESP;
+  wire entry_wait_resp = entry_state == ENTRY_REFILL_RESP;
   wire page_tail_request = &entry_req_addr[10:0];
   wire s2_page_tail = &s2_pc_0[10:0];
   wire beat_tail_request = &entry_req_addr[1:0];
   wire [15:0] tl_d_first_half = tl_d_data[entry_req_addr[1:0] * 16 +: 16];
   wire response_is_rvc = tl_d_first_half[1:0] != 2'b11;
   wire response_is_rvi = tl_d_first_half[1:0] == 2'b11;
-  wire mmio_pending = mmio_candidate || uncache_busy || uncache_state != IDLE;
+  wire mmio_pending = mmio_candidate || uncache_busy || uncache_state != UNCACHE_IDLE;
   wire [2:0] d_response_kind = (!entry_wait_resp || !tl_d_valid) ? 3'h0 :
     tl_d_denied ? 3'h3 : tl_d_corrupt ? 3'h2 :
     3'h1;
@@ -116,7 +119,7 @@ module frontend_mmio_fetch_funcov (
       last_mmio_is_rvc <= 1'b0;
       last_mmio_pc <= '0;
       prev_backend_can_accept <= 1'b0;
-      prev_uncache_state <= IDLE;
+      prev_uncache_state <= UNCACHE_IDLE;
       stalled_a_seen <= 1'b0;
       stalled_a_addr <= '0;
       stalled_a_pc <= '0;
@@ -144,7 +147,7 @@ module frontend_mmio_fetch_funcov (
       prev_backend_can_accept <= backend_can_accept;
       prev_uncache_state <= uncache_state;
       prev_tl_a_fire <= tl_a_fire;
-      wait_a_flush_seen <= entry_state == SEND_REQ && tl_a_valid && !tl_a_ready && ifu_flush;
+      wait_a_flush_seen <= entry_state == ENTRY_REFILL_REQ && tl_a_valid && !tl_a_ready && ifu_flush;
       resend_flush_seen <= entry_resending && ifu_flush;
       half_flush_seen <= prev_end_half_rvi && ifu_flush;
 
@@ -207,19 +210,19 @@ module frontend_mmio_fetch_funcov (
         bins observed = {1'b1};
       }
     MMIO_backend_empty_ibuffer_nonempty_wait_cp:
-      coverpoint (uncache_state == WAIT_LAST_COMMIT && backend_empty && !ibuffer_empty) iff (!reset) {
+      coverpoint (uncache_state == UNCACHE_WAIT_LAST_COMMIT && backend_empty && !ibuffer_empty) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_ibuffer_empty_backend_nonempty_wait_cp:
-      coverpoint (uncache_state == WAIT_LAST_COMMIT && !backend_empty && ibuffer_empty) iff (!reset) {
+      coverpoint (uncache_state == UNCACHE_WAIT_LAST_COMMIT && !backend_empty && ibuffer_empty) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_backend_ibuffer_empty_release_cp:
-      coverpoint (uncache_state == WAIT_LAST_COMMIT && backend_empty && ibuffer_empty) iff (!reset) {
+      coverpoint (uncache_state == UNCACHE_WAIT_LAST_COMMIT && backend_empty && ibuffer_empty) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_empty_release_with_ibuffer_stall_cp:
-      coverpoint (empty_after && ifu_stall && uncache_state == SEND_REQ) iff (!reset) {
+      coverpoint (empty_after && ifu_stall && uncache_state == UNCACHE_SEND_REQ) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_consecutive_rvc_cp:
@@ -291,15 +294,15 @@ module frontend_mmio_fetch_funcov (
         bins observed = {1'b1};
       }
     MMIO_redirect_while_waiting_d_cp:
-      coverpoint (uncache_state == WAIT_RESP && backend_redirect) iff (!reset) {
+      coverpoint (uncache_state == UNCACHE_WAIT_RESP && backend_redirect) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_redirect_in_wait_last_commit_cp:
-      coverpoint (uncache_state == WAIT_LAST_COMMIT && backend_redirect) iff (!reset) {
+      coverpoint (uncache_state == UNCACHE_WAIT_LAST_COMMIT && backend_redirect) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_redirect_in_send_req_cp:
-      coverpoint (uncache_state == SEND_REQ && tl_a_valid && !tl_a_ready && backend_redirect) iff (!reset) {
+      coverpoint (uncache_state == UNCACHE_SEND_REQ && tl_a_valid && !tl_a_ready && backend_redirect) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_rvi_cross_8b_cp:
@@ -377,37 +380,37 @@ module frontend_mmio_fetch_funcov (
         bins nc = {2'b01};
       }
     MMIO_uncache_idle_cp:
-      coverpoint (uncache_state == IDLE && !uncache_input_valid) iff (!reset) {
+      coverpoint (uncache_state == UNCACHE_IDLE && !uncache_input_valid) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_idle_accept_to_wait_last_commit_cp:
-      coverpoint (prev_uncache_state == IDLE && uncache_state == WAIT_LAST_COMMIT &&
+      coverpoint (prev_uncache_state == UNCACHE_IDLE && uncache_state == UNCACHE_WAIT_LAST_COMMIT &&
                   s2_pmp_mmio_0) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_idle_accept_nc_without_wait_cp:
-      coverpoint (prev_uncache_state == IDLE && uncache_state == SEND_REQ &&
+      coverpoint (prev_uncache_state == UNCACHE_IDLE && uncache_state == UNCACHE_SEND_REQ &&
                   s2_pbmt_0 == PBMT_NC && !s2_pmp_mmio_0) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_first_instruction_direct_send_cp:
-      coverpoint (uncache_input_valid && is_first_instr && uncache_state == SEND_REQ) iff (!reset) {
+      coverpoint (uncache_input_valid && is_first_instr && uncache_state == UNCACHE_SEND_REQ) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_nonfirst_waits_for_both_empty_cp:
-      coverpoint (uncache_state == WAIT_LAST_COMMIT && !is_first_instr && !empty_after) iff (!reset) {
+      coverpoint (uncache_state == UNCACHE_WAIT_LAST_COMMIT && !is_first_instr && !empty_after) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_wait_last_commit_no_tl_request_cp:
-      coverpoint (uncache_state == WAIT_LAST_COMMIT && !tl_a_valid) iff (!reset) {
+      coverpoint (uncache_state == UNCACHE_WAIT_LAST_COMMIT && !tl_a_valid) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_wait_last_commit_flush_cp:
-      coverpoint (uncache_state == WAIT_LAST_COMMIT && ifu_flush) iff (!reset) {
+      coverpoint (uncache_state == UNCACHE_WAIT_LAST_COMMIT && ifu_flush) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_wait_a_flush_clears_request_cp:
-      coverpoint (wait_a_flush_seen && entry_state == IDLE && !tl_a_valid) iff (!reset) {
+      coverpoint (wait_a_flush_seen && entry_state == ENTRY_INVALID && !tl_a_valid) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_resend_flush_clears_state_cp:
@@ -419,11 +422,11 @@ module frontend_mmio_fetch_funcov (
         bins observed = {1'b1};
       }
     MMIO_send_req_with_ibuffer_ready_cp:
-      coverpoint (uncache_state == SEND_REQ && !ifu_stall && tl_a_valid) iff (!reset) {
+      coverpoint (entry_state == ENTRY_REFILL_REQ && !ifu_stall && tl_a_valid) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_send_req_with_ibuffer_stall_cp:
-      coverpoint (uncache_state == SEND_REQ && ifu_stall && !tl_a_valid) iff (!reset) {
+      coverpoint (uncache_state == UNCACHE_SEND_REQ && ifu_stall && !tl_a_valid) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_tl_a_stall_context_cp:
@@ -479,7 +482,7 @@ module frontend_mmio_fetch_funcov (
       }
     MMIO_half_refetch_without_commit_wait_cp:
       coverpoint (prev_end_half_rvi && uncache_input_valid &&
-                  uncache_state != WAIT_LAST_COMMIT) iff (!reset) {
+                  uncache_state != UNCACHE_WAIT_LAST_COMMIT) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_half_refetch_complete_rvi_cp:
@@ -584,7 +587,7 @@ module frontend_mmio_fetch_funcov (
         bins observed = {1'b1};
       }
     MMIO_backend_redirect_over_writeback_cp:
-      coverpoint (backend_redirect && uncache_resp_valid && !uncache_redirect) iff (!reset) {
+      coverpoint (backend_redirect && uncache_resp_valid && !to_ibuffer_valid) iff (!reset) {
         bins observed = {1'b1};
       }
     MMIO_tl_error_to_instruction_slot_cp:

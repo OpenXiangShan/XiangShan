@@ -991,7 +991,7 @@ bind Frontend frontend_funcov_hub u_frontend_funcov_hub (
     _inner_ifu_io_toIBuffer_bits_isRvc_1, _inner_ifu_io_toIBuffer_bits_isRvc_0}),
   .mmio_to_ibuffer_exception(_inner_ifu_io_toIBuffer_bits_exceptionType_value),
   .mmio_to_ibuffer_exception_cross_page(_inner_ifu_io_toIBuffer_bits_exceptionCrossPage),
-  .mmio_backend_redirect(io_backend_toFtq_redirect_valid),
+  .mmio_backend_redirect(inner_ftq.backendRedirect_valid),
   .mmio_ifu_flush(inner_ifu.s2_flush),
   .mmio_uncache_redirect(inner_ifu.uncacheRedirect_valid),
   .mmio_wb_redirect(_inner_ifu_io_toFtq_wbRedirect_valid),
