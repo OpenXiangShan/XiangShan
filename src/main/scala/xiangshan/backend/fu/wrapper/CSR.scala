@@ -79,7 +79,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     CSROpType.wrti -> csri,
     CSROpType.seti -> (regOut | csri),
     CSROpType.clri -> (regOut & (~csri).asUInt),
-  ))
+  ).map { case (k, v) => k.encode -> v })
 
   private val csrAccess = valid && CSROpType.isCsrAccess(func)
   private val csrWen = valid && (
@@ -351,7 +351,6 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val pdestReg = RegEnable(io.in.bits.ctrl.pdest, io.in.fire)
   io.outRFWenAhead3Cycle.get := rfWenReg
   io.outPdestAhead3Cycle.get := pdestReg
-  io.out.bits.ctrl.toRobValid := RegEnable(io.in.bits.ctrl.toRobValid, io.in.fire)
   io.out.bits.ctrl.robIdx := Mux(isXRetReg, robIdxReg, DelayNWithValid(robIdxReg, csrModOutValid, 3)._2)
   io.out.bits.ctrl.pdest := DelayNWithValid(RegEnable(io.in.bits.ctrl.pdest, io.in.fire), csrModOutValid, 3)._2
   io.out.bits.ctrl.rfWen.foreach(_ := Mux(isXRetReg, rfWenReg, DelayNWithValid(rfWenReg, csrModOutValid, 3)._2))
@@ -403,16 +402,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.hd_misalign_ld_enable            := csrMod.io.status.custom.hd_misalign_ld_enable
       custom.power_down_enable                := csrMod.io.status.custom.power_down_enable
       custom.flush_l2_enable                  := csrMod.io.status.custom.flush_l2_enable
-      // Rename
-      custom.fusion_enable            := csrMod.io.status.custom.fusion_enable
-      custom.wfi_enable               := csrMod.io.status.custom.wfi_enable
       // distribute csr write signal
       // write to frontend and memory
       custom.distribute_csr.w.valid := csrMod.io.distributedWenLegal
       custom.distribute_csr.w.bits.addr := waddrReg
       custom.distribute_csr.w.bits.data := wdataReg
-      // rename single step
-      custom.singlestep := csrMod.io.status.singleStepFlag
       // trigger
       custom.frontend_trigger := csrMod.io.status.frontendTrigger
       custom.mem_trigger      := csrMod.io.status.memTrigger
@@ -594,4 +588,13 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
      */
     val cboI2F = Bool()
   }
+
+  val custom = new Bundle {
+    // Rename
+    val fusion_enable = Bool()
+    val wfi_enable = Bool()
+  }
+
+  // rename single step
+  val singlestep = Bool()
 }

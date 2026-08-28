@@ -28,6 +28,9 @@ import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchRequestBundle
 import xiangshan.frontend.FtqFetchRequest
+import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.Pc
+import xiangshan.frontend.PcInit
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.ifu.IfuBundle
@@ -73,6 +76,36 @@ class MetaInfo(implicit p: Parameters) extends ICacheBundle {
   val waymask:     UInt = UInt(nWays.W)
   val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
   val metaCodes:   UInt = UInt(MetaEccBits.W)
+}
+
+// Info describing how to align the raw per-line maybeRvcMap into the fetch coordinate.
+// Naming convention:
+//   maybeRvcMap        : raw per-cache-line map, bit i = 2-byte slot i of the line.
+//   alignedMaybeRvcMap : map aligned to the fetch coordinate, bit 0 = the first fetched
+//                        instruction slot of req0 (what the IFU consumes).
+// "Shift" is reserved for the alignment operation/parameters (shiftNum,
+// shouldShiftRight, shiftMaybeRvc); "Aligned" marks the resulting maps.
+class MaybeRvcAlignInfo(implicit p: Parameters) extends ICacheBundle {
+  // shift parameters of the alignment operation
+  val shiftNum:         Vec[UInt] = Vec(MaxFetchLineNum, UInt(log2Ceil(MaxInstNumPerBlock).W))
+  val shouldShiftRight: Bool      = Bool()
+  // instruction ranges in the fetch coordinate
+  val firstBlockRange: UInt = UInt(MaxInstNumPerBlock.W)
+  val totalBlockRange: UInt = UInt(MaxInstNumPerBlock.W)
+  // raw SRAM per-line maps, pre-aligned into the fetch coordinate (done in s0)
+  val sramAlignedMaybeRvcMap: Vec[Vec[UInt]] = Vec(MaxFetchReqNum, Vec(PortNumber, UInt(MaxInstNumPerBlock.W)))
+  // masks in the fetch coordinate, used to gate the aligned maps per cache line
+  val alignedMaybeRvcMaskVec: Vec[Vec[UInt]] = Vec(MaxFetchReqNum, Vec(PortNumber, UInt(MaxInstNumPerBlock.W)))
+  val takenCfiOffset:         Vec[UInt]      = Vec(MaxFetchReqNum, UInt(CfiPositionWidth.W))
+
+  // shift-left flag of each maybeRvcMap, used by shiftConfig
+  // each maybeRvcMap should: (extraShiftNum, shiftLeft)
+  def shiftConfig: Seq[(Int, Bool)] = Seq(
+    (0, false.B),
+    (1, true.B),
+    (0, !this.shouldShiftRight),
+    (2, true.B)
+  )
 }
 
 /* ***** Array write ***** */
@@ -186,7 +219,7 @@ class ReplacerVictimBundle(implicit p: Parameters) extends ICacheBundle {
 /* ***** MainPipe ***** */
 // ICache(MainPipe) -> IFU
 class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
-  val startVAddr:         PrunedAddr    = PrunedAddr(VAddrBits)
+  val startVAddr:         Pc            = Pc()
   val data:               UInt          = UInt(blockBits.W)
   val maybeRvcMap:        UInt          = UInt(MaxInstNumPerBlock.W)
   val pAddr:              PrunedAddr    = PrunedAddr(PAddrBits)
@@ -218,24 +251,30 @@ class ICacheMeta(implicit p: Parameters) extends ICacheBundle {
   def isUncache: Bool = pmpMmio || Pbmt.isUncache(itlbPbmt)
 }
 
+class FetchBlockInfo(implicit p: Parameters) extends ICacheBundle {
+  val valid:            Bool        = Bool()
+  val startVAddr:       GuardedPc   = GuardedPc()
+  val ftqIdx:           FtqPtr      = new FtqPtr
+  val takenCfiOffset:   Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+  val size:             UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
+  val data:             UInt        = UInt(blockBits.W)
+  val icacheMeta:       ICacheMeta  = new ICacheMeta
+  val perf_isCrossLine: Bool        = Bool()
+
+  def endIndex: UInt =
+    startVAddr(log2Ceil(MaxInstNumPerBlock), instOffsetBits) + takenCfiOffset.bits
+}
+
 class MainPipeToIfuReq(implicit p: Parameters) extends ICacheBundle {
-  val valid:          Bool        = Bool()
-  val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
-  val ftqIdx:         FtqPtr      = new FtqPtr
-  val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
-  val range:          UInt        = UInt(FetchBlockInstNum.W)
-  val size:           UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
-
-  val data:        UInt = UInt(blockBits.W)
-  val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
-
-  val icacheMeta: ICacheMeta = new ICacheMeta
-
-  val perf_isCrossLine: Bool = Bool()
+  val firstRange: UInt = UInt(FetchBlockInstNum.W)
+  val totalRange: UInt = UInt(FetchBlockInstNum.W)
+  // aligned to the fetch coordinate (bit 0 = the first fetched instruction slot)
+  val maybeRvcMap: UInt                = UInt(MaxInstNumPerBlock.W)
+  val info:        Vec[FetchBlockInfo] = Vec(FetchPorts, new FetchBlockInfo)
 }
 
 class MainPipeToIfuIO(implicit p: Parameters) extends ICacheBundle {
-  val req: DecoupledIO[Vec[MainPipeToIfuReq]] = DecoupledIO(Vec(FetchPorts, new MainPipeToIfuReq))
+  val req: DecoupledIO[MainPipeToIfuReq] = DecoupledIO(new MainPipeToIfuReq)
   // for timing fix, sent 1 cycle after req is fired
   val corrupt: Vec[Vec[Bool]] = Vec(FetchPorts, Vec(PortNumber, Bool()))
 }
@@ -250,8 +289,8 @@ class MainPipeToWayLookupBundle(implicit p: Parameters) extends ICacheBundle {
 
 /* ***** PrefetchPipe ***** */
 class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
-  val startVAddr:       PrunedAddr    = PrunedAddr(VAddrBits)
-  val nextLineVAddr:    PrunedAddr    = PrunedAddr(VAddrBits)
+  val startVAddr:       GuardedPc     = GuardedPc()
+  val nextLineVAddr:    GuardedPc     = GuardedPc()
   val vSetIdx:          Vec[UInt]     = Vec(PortNumber, UInt(idxBits.W))
   val isCrossLine:      Bool          = Bool()
   val ftqIdx:           FtqPtr        = new FtqPtr
@@ -259,7 +298,7 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
   val isSoftPrefetch:   Bool          = Bool()
 
   def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): PrefetchReqBundle = {
-    startVAddr       := req.vaddr
+    startVAddr       := PcInit(req.vaddr).signGuard
     nextLineVAddr    := DontCare
     vSetIdx          := VecInit(get_idx(startVAddr), 0.U(idxBits.W))
     isCrossLine      := false.B
@@ -286,8 +325,8 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val isMmio:      Bool      = Bool()
   val itlbPbmt:    UInt      = UInt(Pbmt.width.W)
 
-  val debug_ftqIdx:     Option[FtqPtr]     = Option.when(!env.FPGAPlatform)(new FtqPtr)
-  val debug_startVAddr: Option[PrunedAddr] = Option.when(!env.FPGAPlatform)(PrunedAddr(VAddrBits))
+  val debug_ftqIdx:     Option[FtqPtr] = Option.when(!env.FPGAPlatform)(new FtqPtr)
+  val debug_startVAddr: Option[Pc]     = Option.when(!env.FPGAPlatform)(Pc())
 
   def getMetaInfo(i: Int): MetaInfo = {
     val info = Wire(new MetaInfo)

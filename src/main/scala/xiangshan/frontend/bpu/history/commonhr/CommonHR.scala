@@ -21,17 +21,17 @@ import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
 import utility.HasCircularQueuePtrHelper
 import utility.XSError
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.StageCtrl
 
 class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with HasCircularQueuePtrHelper {
   class CommonHRIO extends CommonHRBundle {
     val stageCtrl:      StageCtrl           = Input(new StageCtrl)
     val s1_imliTaken:   Bool                = Input(Bool())
-    val s2StartPc:      PrunedAddr          = Input(PrunedAddr(VAddrBits))
+    val s2StartPc:      Pc                  = Input(Pc())
     val s2CondHitMask:  Vec[Bool]           = Input(Vec(NumBtbResultEntries, Bool()))
     val s2CfiPositions: Vec[UInt]           = Input(Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W)))
-    val s2CfiTargets:   Vec[PrunedAddr]     = Input(Vec(NumBtbResultEntries, PrunedAddr(VAddrBits)))
+    val s2CfiTargets:   Vec[Pc]             = Input(Vec(NumBtbResultEntries, Pc()))
     val update:         CommonHRUpdate      = Input(new CommonHRUpdate)
     val redirect:       CommonHRRedirect    = Input(new CommonHRRedirect)
     val s0_imli:        UInt                = Output(UInt(ImliHistoryLength.W))
@@ -39,7 +39,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     val s3DedupHitMask: Vec[Bool]           = Output(Vec(NumBtbResultEntries, Bool()))
     val s3ResolveMeta:  CommonHRResolveMeta = Output(new CommonHRResolveMeta)
 
-    val s0_startPc: Option[PrunedAddr] = Some(Input(PrunedAddr(VAddrBits))) // for debug
+    val s0_startPc: Option[Pc] = Some(Input(Pc())) // for debug
   }
   val io = IO(new CommonHRIO)
 
@@ -180,7 +180,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
    */
 
   private val r1_redirect     = RegEnable(io.redirect, 0.U.asTypeOf(new CommonHRRedirect), io.redirect.valid)
-  private val r1_s0StartPc    = RegEnable(io.s0_startPc.get, 0.U.asTypeOf(PrunedAddr(VAddrBits)), io.redirect.valid)
+  private val r1_s0StartPc    = RegEnable(io.s0_startPc.get, 0.U.asTypeOf(Pc()), io.redirect.valid)
   private val r1_metaGhr      = r1_redirect.meta.ghr
   private val r1_metaBW       = r1_redirect.meta.bw
   private val r1_oldPositions = r1_redirect.meta.position

@@ -1,0 +1,208 @@
+package xiangshan.backend.vector.Decoder.DecodeChannel
+
+import chisel3._
+import chisel3.experimental.hierarchy.{instantiable, public}
+import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
+import top.ArgParser
+import utility.LookupTree
+import xiangshan.CommitType
+import xiangshan.backend.decode.ImmUnion
+import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
+import xiangshan.backend.decode.isa.Instructions.ZICBOType
+import xiangshan.backend.decode.opcode.Opcode
+import xiangshan.backend.fu.FuType
+import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.Frm
+import xiangshan.backend.vector.Decoder.DecodePatterns.RdZeroPattern
+import xiangshan.backend.vector.Decoder.InstPattern._
+import xiangshan.backend.vector.Decoder.RVVDecodeUtil._
+import xiangshan.backend.vector.Decoder.{DecodeChannelInput, SrcRenType, NumUopOH}
+import xiangshan.backend.vector.Decoder.Types.{DecodeSelImm, NumWB}
+import xiangshan.backend.vector.Decoder.Uop.UopInfoRenameSimple
+import xiangshan.backend.vector.Decoder.util._
+import xiangshan.backend.vector.util.Verilog
+import xiangshan._
+
+@instantiable
+class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters) extends Module with HasXSParameter {
+  import xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel._
+
+  // For now, we only support 1 uop per instruction, so the maxSplitUopNum is 1. In the future, if we want to support
+  // more uops per instruction, we can increase this number and modify the decode table accordingly.
+  def maxSplitUopNum = 1
+
+  @public val in = IO(Input(new DecodeChannelInput))
+  @public val out = IO(Output(new Bundle {
+    val uop = Vec(maxSplitUopNum, ValidIO(new SimpleDecodeChannelOutput))
+    val uopNumOH = NumUopOH()
+  }))
+
+  val isMove = BitPat("b000000000000_?????_000_?????_0010011")
+
+  val rawInst = in.rawInst
+  val instFields = rawInst.asTypeOf(new XSInstBitFields)
+  val rdZero = instFields.RD === 0.U
+
+  val patterns = instSeq
+  val patternsRd: Seq[DecodePatternComb2[InstPattern, RdZeroPattern]] = instSeq.flatMap {
+    case p if p.hasRd => Seq(true, false).map(b => p ## RdZeroPattern(Some(b)))
+    case p if !p.hasRd => Seq(p ## RdZeroPattern(None))
+  }
+
+
+  val patternsCboI2f: Seq[DecodePatternComb2[InstPattern, BoolPattern]] = for (
+    instP <- instSeq.filter(x => ZICBOType.all.contains(x.bitPat));
+    bool <- BoolPattern.all
+  ) yield {
+    instP ## bool
+  }
+
+  println("[tmp-SimpleDecodeChannel]")
+  instSeq.foreach(println)
+  println("[tmp-SimpleDecodeChannel]")
+  patternsCboI2f.foreach(println)
+
+  val uopInfoFields = Seq.tabulate(maxSplitUopNum)(i => new UopInfoField(i))
+  val opcodeFields = Seq.tabulate(maxSplitUopNum)(i => new OpcodeField(i))
+  val fuTypeFields = Seq.tabulate(maxSplitUopNum)(i => new FuTypeField(i))
+
+  val fields = uopInfoFields ++ opcodeFields ++ fuTypeFields ++ Seq(
+    IsMopField,
+    FrmRenField,
+    FFlagsWenField,
+    SelImmField,
+    CommitTypeField,
+    CanRobCompressField,
+    NumUopOhField,
+    NeedFsField,
+    PrivExceptionCauseField,
+  )
+
+  println(s"The length of DecodeTable in SimpleDecodeChannel: ${patterns.length}")
+  val table = new DecodeTable(patterns, fields)
+  val instRdTable = new DecodeTable(patternsRd, Seq(NumWbField))
+  val instCboI2fTable = new DecodeTable(patternsCboI2f, Seq(CboOpcodeField))
+
+  // Get the decode result by generating a decode table by programming logic array (pla)
+  val result = table.decode(in.rawInst)
+  val resultInstRd = instRdTable.decode(in.rawInst ## rdZero)
+  val resultInstCboI2f = instCboI2fTable.decode(in.rawInst ## in.fromCSR.special.cboI2F)
+
+  val uopInfos = uopInfoFields.map(field => result(field))
+  val opcodes = opcodeFields.map(field => result(field))
+  val fuTypes = fuTypeFields.map(field => result(field))
+
+  val cboOpcode = resultInstCboI2f(CboOpcodeField)
+
+  val isMop  = result(IsMopField)
+  val selImm = result(SelImmField)
+
+  val imm = LookupTree(selImm.bits, ImmUnion.immSelMap.map {
+    case (sel, enum) =>
+      sel -> enum.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == enum.len)
+  })
+
+  val needFs = result(NeedFsField)
+  val privCause = result(PrivExceptionCauseField)
+
+  dontTouch(privCause)
+
+  val fsOffExceptionII = in.fromCSR.illegalInst.fsIsOff && needFs
+
+  val privExceptionSources = Seq(
+    (PrivExceptionCause.sfenceVMA,  in.fromCSR.illegalInst.sfenceVMA,              in.fromCSR.virtualInst.sfenceVMA),
+    (PrivExceptionCause.sfencePart, in.fromCSR.illegalInst.sfencePart,             in.fromCSR.virtualInst.sfencePart),
+    (PrivExceptionCause.hfenceGVMA, in.fromCSR.illegalInst.hfenceGVMA,             in.fromCSR.virtualInst.hfence),
+    (PrivExceptionCause.hfenceVVMA, in.fromCSR.illegalInst.hfenceVVMA,             in.fromCSR.virtualInst.hfence),
+    (PrivExceptionCause.hlsv,       in.fromCSR.illegalInst.hlsv,                   in.fromCSR.virtualInst.hlsv),
+    (PrivExceptionCause.wfi,        in.fromCSR.illegalInst.wfi,                    in.fromCSR.virtualInst.wfi),
+    (PrivExceptionCause.wrsNto,     in.fromCSR.illegalInst.wrs_nto,                in.fromCSR.virtualInst.wrs_nto),
+    (PrivExceptionCause.cboZ,       !HasCMO.B || in.fromCSR.illegalInst.cboZ,      in.fromCSR.virtualInst.cboZ),
+    (PrivExceptionCause.cboCF,      !HasCMO.B || in.fromCSR.illegalInst.cboCF,     in.fromCSR.virtualInst.cboCF),
+    (PrivExceptionCause.cboI,       !HasCMO.B || in.fromCSR.illegalInst.cboI,      in.fromCSR.virtualInst.cboI),
+    (PrivExceptionCause.aes64ks1i,  true.B,                                        false.B),
+    (PrivExceptionCause.amocasQ,    true.B,                                        false.B),
+  )
+
+  val privExceptionII = Mux1H(privExceptionSources.map {
+    case (cause, illegal, _) => (privCause === cause) -> illegal
+  })
+
+  val privExceptionVI = Mux1H(privExceptionSources.map {
+    case (cause, _, virtual) => (privCause === cause) -> virtual
+  })
+
+  for (i <- 0 until maxSplitUopNum) {
+    val frmExceptionII = out.uop(i).bits.frmRen && (out.uop(i).bits.frmIll || (out.uop(i).bits.frm === Frm.DYN && in.fromCSR.illegalInst.frm))
+
+    out.uop(i).valid := uopInfos(i).valid
+    out.uop(i).bits.renameInfo := uopInfos(i).bits
+    out.uop(i).bits.renameInfo.gpWen := uopInfos(i).bits.gpWen && instFields.RD =/= 0.U
+    out.uop(i).bits.fuType := fuTypes(i)
+    out.uop(i).bits.opcode := opcodes(i) | cboOpcode
+    out.uop(i).bits.lsrc1 := instFields.RS1
+    out.uop(i).bits.lsrc2 := instFields.RS2
+    out.uop(i).bits.lsrc3 := instFields.FS3
+    out.uop(i).bits.frmRen := result(FrmRenField)
+    out.uop(i).bits.fflagsWen := result(FFlagsWenField)
+    out.uop(i).bits.ldest := instFields.RD
+    out.uop(i).bits.frm := instFields.RM
+    out.uop(i).bits.frmIll := instFields.RM === 5.U || instFields.RM === 6.U
+    out.uop(i).bits.selImm := selImm
+    out.uop(i).bits.imm := imm
+    out.uop(i).bits.commitType := result(CommitTypeField)
+    out.uop(i).bits.canRobCompress := result(CanRobCompressField)
+    out.uop(i).bits.numWb := resultInstRd(NumWbField)
+    out.uop(i).bits.isMove := (isMop || rawInst === isMove) && instFields.RD =/= 0.U
+    out.uop(i).bits.exceptionII := frmExceptionII || fsOffExceptionII || privExceptionII
+    out.uop(i).bits.exceptionVI := privExceptionVI
+  }
+  out.uopNumOH := result(NumUopOhField)
+}
+
+class SimpleDecodeChannelOutput() extends Bundle {
+  val fuType: UInt = FuType()
+  val opcode: UInt = Opcode()
+  val renameInfo = new UopInfoRenameSimple
+  val lsrc1 = UInt(5.W)
+  val lsrc2 = UInt(5.W)
+  val lsrc3 = UInt(5.W)
+  val frmRen = Bool()
+  val fflagsWen = Bool()
+  val ldest = UInt(5.W)
+  val frm = Frm()
+  val frmIll = Bool()
+  val selImm = ValidIO(DecodeSelImm())
+  val imm = UInt(32.W)
+  val commitType = CommitType()
+  val canRobCompress = Bool()
+  val numWb = NumWB()
+  val isMove = Bool()
+  val exceptionII = Bool()
+  val exceptionVI = Bool()
+}
+
+object SimpleDecodeChannelMain extends App {
+  import xiangshan.backend.decode.isa.Extensions._
+
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(
+    args :+ "--disable-always-basic-diff" :+ "--fpga-platform" :+ "--target" :+ "verilog"
+  )
+
+  val defaultConfig = config.alterPartial({
+    case XSCoreParamsKey => XSCoreParameters()
+  })
+
+  val insts: Seq[InstPattern] = InstPattern.extensionInsts(extensions: _*).collect { case x if !x.isInstanceOf[VecInstPattern] => x }
+
+  println(s"number of insts: ${insts.size}")
+
+  val targetDir = "build/decoder"
+
+  Verilog.emitVerilog(
+    new SimpleDecodeChannel(insts)(defaultConfig),
+    Array("--full-stacktrace", "--target-dir", targetDir),
+  )
+
+  println(s"Generate SimpleDecodeChannel in dir $targetDir")
+}

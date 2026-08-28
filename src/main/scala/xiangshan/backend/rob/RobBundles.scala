@@ -27,6 +27,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles._
+import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
@@ -40,6 +41,17 @@ import scala.collection.immutable.Nil
 
 
 object RobBundles extends HasCircularQueuePtrHelper {
+  class BasicDebugInfo(implicit p: Parameters) extends XSBundle {
+    val ldest = UInt(LogicRegsWidth.W)
+    val pdest = UInt(PhyRegIdxWidth.W)
+    val vd = UInt(LogicRegsWidth.W)
+    val fpWen = Bool()
+    val vecWen = Bool()
+    val v0Wen = Bool()
+    val eliminatedMove = Bool()
+    val isXSTrap = Bool()
+  }
+
   class RobEntryBundle(implicit p: Parameters) extends XSBundle {
 
     // data begin
@@ -49,7 +61,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val interrupt_safe = Bool()
     val fpWen = Bool()
     val rfWen = Bool()
-    val wflags = Bool()
     val dirtyVs = Bool()
     val commitType = CommitType()
     val ftqIdx = new FtqPtr
@@ -59,24 +70,23 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val needVTB = Bool()
     val isHls = Bool()
     // data end
-
     // trace
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
     // status begin
     val valid = Bool()
+    val fflagsWen = Bool()
     val fflags = UInt(5.W)
     val mmio = Bool()
     val vxsat = Bool()
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
-    val uopNum = UInt(log2Up(MaxUopSize + 1).W)
+    val uopNum = UInt(log2Up(MaxUopSize * 2 + 1).W)
     val needFlush = Bool()
     // status end
 
     // debug_begin
     val debug_pc         = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr      = OptionWrapper(backendParams.debugEn, UInt(32.W))
-    val debug_ldest      = OptionWrapper(backendParams.basicDebugEn, UInt(LogicRegsWidth.W))
-    val debug_pdest      = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
+    val basicDebug       = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
     val debug_fuType     = OptionWrapper(backendParams.debugEn, FuType())
     val debug_fusionNum  = OptionWrapper(backendParams.debugEn, UInt(2.W))
     val debug_fuOpType   = OptionWrapper(backendParams.debugEn, FuOpType())
@@ -113,7 +123,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val commit_w = Bool()
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val interrupt_safe = Bool()
-    val wflags = Bool()
+    val fflagsWen = Bool()
     val fflags = UInt(5.W)
     val vxsat = Bool()
     val isRVC = Bool()
@@ -133,8 +143,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
-    val debug_ldest = OptionWrapper(backendParams.basicDebugEn, UInt(LogicRegsWidth.W))
-    val debug_pdest = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
+    val basicDebug = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
     val debug_otherPdest = OptionWrapper(backendParams.basicDebugEn, Vec(7, UInt(PhyRegIdxWidth.W)))
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(2.W))
@@ -144,7 +153,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
   }
 
   def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop): Unit = {
-    robEntry.wflags := robEnq.wfflags
+    robEntry.fflagsWen := robEnq.fflagsWen
     robEntry.commitType := robEnq.commitType
     robEntry.ftqIdx := robEnq.ftqPtr
     robEntry.ftqOffset := robEnq.ftqOffset
@@ -159,8 +168,16 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.needFlush := robEnq.hasException || robEnq.flushPipe
     // trace
     robEntry.traceBlockInPipe := robEnq.traceBlockInPipe
-    robEntry.debug_ldest.foreach(_ := robEnq.ldest)
-    robEntry.debug_pdest.foreach(_ := robEnq.pdest)
+    robEntry.basicDebug.foreach { debug =>
+      debug.ldest := robEnq.ldest
+      debug.pdest := robEnq.pdest
+      debug.vd := robEnq.debug.map(_.instr.asTypeOf(new XSInstBitFields).VD).getOrElse(0.U)
+      debug.fpWen := robEnq.fpWen
+      debug.vecWen := robEnq.vecWen
+      debug.v0Wen := robEnq.v0Wen
+      debug.eliminatedMove := robEnq.isMove
+      debug.isXSTrap := robEnq.isXSTrap
+    }
     robEntry.debug_fuType.foreach(_ := robEnq.fuType)
     robEntry.debug_fuOpType.foreach(_ := robEnq.fuOpType)
     robEntry.debug_rfWen.foreach(_ := robEnq.rfWen)
@@ -197,7 +214,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.rfWen := robEntry.rfWen
     robCommitEntry.fpWen := robEntry.fpWen
     robCommitEntry.fflags := robEntry.fflags
-    robCommitEntry.wflags := robEntry.wflags
+    robCommitEntry.fflagsWen := robEntry.fflagsWen
     robCommitEntry.vxsat := robEntry.vxsat
     robCommitEntry.isRVC := robEntry.isRVC
     robCommitEntry.needVTB := robEntry.needVTB
@@ -208,14 +225,13 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.ftqIdx := robEntry.ftqIdx
     robCommitEntry.ftqOffset := robEntry.ftqOffset
     robCommitEntry.commitType := robEntry.commitType
-    robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.wflags
+    robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.fflagsWen
     robCommitEntry.dirtyVs := robEntry.dirtyVs
     robCommitEntry.needFlush := robEntry.needFlush
     robCommitEntry.traceBlockInPipe := robEntry.traceBlockInPipe
     robCommitEntry.debug_pc.foreach(_ := robEntry.debug_pc.get)
     robCommitEntry.debug_instr.foreach(_ := robEntry.debug_instr.get)
-    robCommitEntry.debug_ldest.foreach(_ := robEntry.debug_ldest.get)
-    robCommitEntry.debug_pdest.foreach(_ := robEntry.debug_pdest.get)
+    robCommitEntry.basicDebug.foreach(_ := robEntry.basicDebug.get)
     robCommitEntry.debug_fuType.foreach(_ := robEntry.debug_fuType.get)
     robCommitEntry.debug_fusionNum.foreach(_ := robEntry.debug_fusionNum.get)
   }

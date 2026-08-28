@@ -72,10 +72,10 @@ class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
 class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
 
   // fast path: Timing critical
-  val valid:         Bool       = Bool()
-  val startVAddr:    PrunedAddr = PrunedAddr(VAddrBits)
-  val nextLineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
-  val target:        PrunedAddr = PrunedAddr(VAddrBits)
+  val valid:         Bool      = Bool()
+  val startVAddr:    GuardedPc = GuardedPc()
+  val nextLineVAddr: GuardedPc = GuardedPc()
+  val target:        GuardedPc = GuardedPc()
   // slow path
   val ftqIdx:         FtqPtr      = new FtqPtr
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
@@ -89,17 +89,17 @@ class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with ICa
 }
 
 class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
-  val valid:               Bool            = Bool()
-  val vAddr:               Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
-  def startVAddr:          PrunedAddr      = vAddr(0)
-  def nextLineVAddr:       PrunedAddr      = vAddr(1)
-  val taken:               Bool            = Bool()
-  val endPosition:         UInt            = UInt(CfiPositionWidth.W)
-  val bankSel:             Vec[UInt]       = Vec(PortNumber, UInt(DataBanks.W))
-  val ftqIdx:              FtqPtr          = new FtqPtr
-  val vSetIdx:             Vec[UInt]       = Vec(PortNumber, UInt(idxBits.W))
-  val hasBackendException: Bool            = Bool()
-  val hasSatpFlush:        Bool            = Bool()
+  val valid:               Bool           = Bool()
+  val vAddr:               Vec[GuardedPc] = Vec(PortNumber, GuardedPc())
+  def startVAddr:          GuardedPc      = vAddr(0)
+  def nextLineVAddr:       GuardedPc      = vAddr(1)
+  val taken:               Bool           = Bool()
+  val endPosition:         UInt           = UInt(CfiPositionWidth.W)
+  val bankSel:             Vec[UInt]      = Vec(PortNumber, UInt(DataBanks.W))
+  val ftqIdx:              FtqPtr         = new FtqPtr
+  val vSetIdx:             Vec[UInt]      = Vec(PortNumber, UInt(idxBits.W))
+  val hasBackendException: Bool           = Bool()
+  val hasSatpFlush:        Bool           = Bool()
 }
 
 class FtqToICacheIO(implicit p: Parameters) extends FrontendBundle {
@@ -110,11 +110,11 @@ class FtqToICacheIO(implicit p: Parameters) extends FrontendBundle {
 }
 
 class ICacheToIfuIO(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
-  val req:        DecoupledIO[Vec[MainPipeToIfuReq]] = DecoupledIO(Vec(FetchPorts, new MainPipeToIfuReq))
-  val corrupt:    Vec[Vec[Bool]]                     = Vec(FetchPorts, Vec(PortNumber, Bool()))
-  val topdown:    ICacheTopdownInfo                  = Output(new ICacheTopdownInfo)
-  val perf:       ICachePerfInfo                     = Output(new ICachePerfInfo)
-  val fetchReady: Bool                               = Output(Bool())
+  val req:        DecoupledIO[MainPipeToIfuReq] = DecoupledIO(new MainPipeToIfuReq)
+  val corrupt:    Vec[Vec[Bool]]                = Vec(FetchPorts, Vec(PortNumber, Bool()))
+  val topdown:    ICacheTopdownInfo             = Output(new ICacheTopdownInfo)
+  val perf:       ICachePerfInfo                = Output(new ICachePerfInfo)
+  val fetchReady: Bool                          = Output(Bool())
 }
 
 class IfuToInstrUncacheIO(implicit p: Parameters) extends FrontendBundle {
@@ -141,7 +141,7 @@ class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
   val ftqOffset: UInt            = UInt(FetchBlockInstOffsetWidth.W) // maybe use later
   val isRVC:     Bool            = Bool()                            // seems unused for now, keep it.
   val attribute: BranchAttribute = new BranchAttribute
-  val target:    UInt            = UInt(VAddrBits.W)
+  val target:    UInt            = UInt(GuardedVAddrBits.W)
 }
 
 class IfuToFtqIO(implicit p: Parameters) extends FrontendBundle {
@@ -320,7 +320,7 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val triggered:        Vec[UInt] = Vec(IBufferEnqueueWidth, TriggerAction())
   val isLastInFtqEntry: Vec[Bool] = Vec(IBufferEnqueueWidth, Bool())
 
-  val pc:             Vec[PrunedAddr]       = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
+  val pc:             Vec[Pc]               = Vec(IBufferEnqueueWidth, Pc())
   val prevIBufEnqPtr: IBufPtr               = new IBufPtr
   val prevInstrCount: UInt                  = UInt(log2Ceil(IBufferEnqueueWidth).W)
   val debug_seqNum:   Vec[InstSeqNum]       = Vec(IBufferEnqueueWidth, InstSeqNum())
@@ -466,5 +466,5 @@ class FrontendTopDownBundle(implicit p: Parameters) extends FrontendBundle {
 }
 
 class FrontendDebugTopDownInfo(implicit p: Parameters) extends FrontendBundle {
-  val robHeadVaddr: Valid[PrunedAddr] = Valid(PrunedAddr(VAddrBits))
+  val robHeadVaddr: Valid[Pc] = Valid(Pc())
 }

@@ -250,8 +250,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   ifu.io.backendEmpty := io.backend.backendEmpty
   io.backend.fromIfu  := ifu.io.toBackend
 
-  ibuffer.io.flush           := needFlush
-  ibuffer.io.decodeCanAccept := io.backend.canAccept
+  ibuffer.io.flush       := needFlush
+  ibuffer.io.fromBackend := io.backend.toIBuf
 
   // Topdown analysis
   ifu.io.backendRedirectTopdown     := ftq.io.backendRedirectTopdown
@@ -347,16 +347,16 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   )
   XSPerfAccumulate(
     "validCycles",
-    ibuffer.io.out.map(_.valid && io.backend.canAccept).reduce(_ || _)
+    ibuffer.io.out.map(_.valid && io.backend.toIBuf.decodeCanAccept).reduce(_ || _)
   )
   XSPerfAccumulate(
     "validInstrs",
-    PopCount(ibuffer.io.out.map(_.valid && io.backend.canAccept))
+    PopCount(ibuffer.io.out.map(_.valid && io.backend.toIBuf.decodeCanAccept))
   )
   XSPerfHistogram(
     "validInstrsDist",
     PopCount(ibuffer.io.out.map(_.valid)),
-    io.backend.canAccept,
+    io.backend.toIBuf.decodeCanAccept,
     0,
     DecodeWidth + 1
   )
@@ -370,7 +370,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
     "fetchedCacheLines",
     Mux(
       icache.io.toIfu.req.valid && icache.io.toIfu.req.ready,
-      Mux(icache.io.toIfu.req.bits(0).perf_isCrossLine, 2.U, 1.U),
+      Mux(icache.io.toIfu.req.bits.info(0).perf_isCrossLine, 2.U, 1.U),
       0.U
     )
   )
@@ -390,7 +390,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   )
   XSPerfAccumulate(
     "stallCycles_decodeFull",
-    !io.backend.canAccept
+    !io.backend.toIBuf.decodeCanAccept
   )
   XSPerfAccumulate(
     "stallCycles_ibufferFull",

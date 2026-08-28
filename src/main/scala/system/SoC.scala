@@ -16,6 +16,7 @@
 
 package system
 
+import aia.APLICParams
 import org.chipsalliance.cde.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
@@ -74,6 +75,7 @@ case class SoCParameters
   SYSCNTRange: AddressSet = AddressSet(0x38040000L, SYSCNTConsts.size - 1),
   BEURange: AddressSet = AddressSet(0x38010000L, 0xfff),
   PLICRange: AddressSet = AddressSet(0x3c000000L, PLICConsts.size(PLICConsts.maxMaxHarts) - 1),
+  APLICRange: AddressSet = AddressSet(0x31100000L, 0x3ffff),
   PLLRange: AddressSet = AddressSet(0x3a000000L, 0xfff),
   UARTLiteForDTS: Boolean = true, // should be false in SimMMIO
   extIntrs: Int = 64,
@@ -97,7 +99,7 @@ case class SoCParameters
   SeperateBusRanges: Seq[AddressSet] = Seq(),
   IMSICBusType: device.IMSICBusType.Value = device.IMSICBusType.AXI,
   IMSICParams: aia.IMSICParams = aia.IMSICParams(
-    imsicIntSrcWidth = 9,
+    imsicIntSrcWidth = 8,
     mAddr = 0x3A800000,
     sgAddr = 0x3B000000,
     geilen = 7,
@@ -105,6 +107,19 @@ case class SoCParameters
     iselectWidth = 12,
     EnableImsicAsyncBridge = true,
     HasTEEIMSIC = false
+  ),
+  APLICParams: APLICParams = aia.APLICParams(
+    aplicIntSrcWidth = 6,
+    imsicIntSrcWidth = 8,
+    mDomainBaseAddr = 0x31100000L,
+    sDomainBaseAddr = 0x31120000L,
+    mDomainMemWidth = 15,
+    sDomainMemWidth = 15,
+    mBaseAddr = 0x3A800000L,
+    sgBaseAddr = 0x3B000000L,
+    membersNum = 64,
+    groupsNum = 1,
+    geilen = 7
   ),
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 16, sync = 3, safe = false)),
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 8, sync = 3, safe = false)),
@@ -129,7 +144,7 @@ case class SoCParameters
   // on chip network configurations
   val L3OuterBusWidth = 256
   val UARTLiteRange = AddressSet(0x40600000, if (UARTLiteForDTS) 0x3f else 0xf)
-  val UART16550Range = AddressSet(0x310b0000L, 0x1f)
+  val UART16550Range = AddressSet(0x310b0000L, 0x7f)
 }
 
 trait HasSoCParameter {
@@ -199,20 +214,36 @@ trait HasPeripheralRanges {
   private def enableCHI = true
   private def dm = p(DebugModuleKey)
   private def pmParams = p(PMParameKey)
+  private def numCores = p(XSTileKey).size
 
   private def mmpma = pmParams.mmpma
+  private def imsicMRange(hartIndex: Int) = AddressSet(
+    soc.IMSICParams.mAddr + (hartIndex.toLong << soc.IMSICParams.intFileMemWidth),
+    (1L << soc.IMSICParams.intFileMemWidth) - 1
+  )
+  private def imsicSGRange(hartIndex: Int) = {
+    val strideWidth = soc.IMSICParams.intFileMemWidth + log2Ceil(1 + soc.IMSICParams.geilen)
+    AddressSet(
+      soc.IMSICParams.sgAddr + (hartIndex.toLong << strideWidth),
+      (1L << strideWidth) - 1
+    )
+  }
+  private def imsicRanges = (0 until numCores).flatMap { i =>
+    Seq(s"IMSIC_${i}_M" -> imsicMRange(i), s"IMSIC_${i}_SG" -> imsicSGRange(i))
+  }.toMap
 
   def onChipPeripheralRanges: Map[String, AddressSet] = Map(
     "TIMER" -> soc.TIMERRange,
     "SYSCNT" -> soc.SYSCNTRange,
     "BEU"   -> soc.BEURange,
     "PLIC"  -> soc.PLICRange,
+    "APLIC" -> soc.APLICRange,
     "PLL"   -> soc.PLLRange,
     "UARTLITE" -> soc.UARTLiteRange,
     "UART16550" -> soc.UART16550Range,
     "DEBUG" -> dm.get.address,
     "MMPMA" -> AddressSet(mmpma.address, mmpma.mask)
-  ) ++ (
+  ) ++ imsicRanges ++ (
     if (cvm.HasMEMencryption)
       Map("MEMENC"  -> cvm.MEMENCRange)
     else
@@ -497,10 +528,24 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
 
   val plic = LazyModule(new TLPLIC(PLICParams(soc.PLICRange.base), 8))
   val plicSource = LazyModule(new IntSourceNodeToModule(NrExtIntr))
+  val aplic = LazyModule(new aia.AXI4APLIC(soc.APLICParams))
 
   plic.intnode := plicSource.sourceNode
   if (enableCHI) { plic.node := device_xbar.get }
   else { plic.node := peripheralXbar.get }
+  if (enableCHI) {
+    aplic.fromCPU :=
+      TLToAXI4() :=
+      TLFragmenter(4, 8, holdFirstDeny = true) :=
+      TLWidthWidget(8) :=
+      device_xbar.get
+  } else {
+    aplic.fromCPU :=
+      TLToAXI4() :=
+      TLFragmenter(4, 8, holdFirstDeny = true) :=
+      TLWidthWidget(8) :=
+      peripheralXbar.get
+  }
 
   val pll_node = TLRegisterNode(
     address = Seq(soc.PLLRange),
@@ -583,11 +628,15 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
 
     // sync external interrupts
     require(plicSource.module.in.length == ext_intrs.getWidth)
-    for ((plic_in, interrupt) <- plicSource.module.in.zip(ext_intrs.asBools)) {
+    require(aplic.module.intSrcs.length <= ext_intrs.getWidth)
+    val extIntrsSync = Wire(Vec(ext_intrs.getWidth, Bool()))
+    for ((sync_intr, interrupt) <- extIntrsSync.zip(ext_intrs.asBools)) {
       val ext_intr_sync = RegInit(0.U(3.W))
       ext_intr_sync := Cat(ext_intr_sync(1, 0), interrupt)
-      plic_in := ext_intr_sync(2)
+      sync_intr := ext_intr_sync(2)
     }
+    plicSource.module.in.zip(extIntrsSync).foreach { case (plic_in, interrupt) => plic_in := interrupt }
+    aplic.module.intSrcs.zip(extIntrsSync).foreach { case (aplic_in, interrupt) => aplic_in := interrupt }
 
     pma.module.io <> cacheable_check
 

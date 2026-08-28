@@ -89,9 +89,10 @@ class MptOutputSwitchBox(implicit p: Parameters) extends XSModule with MPTCacheP
   val mptOutDataReg = Reg(new MptTlbRespBundle())
   val mptOutMptOnly = RegInit(false.B)
   val mptOutReqPA   = Reg(UInt(ppnLen.W))
+  val mptEn = io.csr.mmpt.mode =/= 0.U
 
   val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed ||
-    io.csr.priv.virt_changed || (if (HasMptCheck) io.csr.mmpt.changed else false.B)
+    io.csr.priv.virt_changed || io.csr.mmpt.changed
 
   when(io.mptOut.valid) {
     mptOutDataReg := mptOutDataWire
@@ -135,7 +136,7 @@ class MptOutputSwitchBox(implicit p: Parameters) extends XSModule with MPTCacheP
           nextState := s_send_l1_tlb
         }
       }.elsewhen(io.mergeArb.valid) { // normal mode, two modes are mutually exclusive
-        when(io.mergeArb.bits.fault) {
+        when(io.mergeArb.bits.fault || !mptEn) {
           io.l1TLB.valid := true.B
           when(io.l1TLB.ready) {
             io.mergeArb.ready := true.B
@@ -269,46 +270,6 @@ class MptEntry(implicit p: Parameters) extends XSBundle with MPTCacheParam {
 
   def getAddr(offset: UInt): UInt =
     this.data.getAddr(offset)
-
-  def genFake(level: UInt): Unit = {
-    this.N         := false.B
-    this.data.data := "h802F4".U
-    this.L         := false.B
-    this.V         := true.B
-    switch(level) {
-      is("b1000".U) {
-        this.N         := false.B
-        this.data.data := "h802F4".U
-        this.L         := false.B
-        this.V         := true.B
-      }
-      is("b0100".U) {
-        this.N         := false.B
-        this.data.data := "h802F5".U
-        this.L         := false.B
-        this.V         := true.B
-      }
-      is("b0010".U) {
-        if (HasMptCheckDefault4k) {
-          this.N         := false.B
-          this.data.data := "h802F6".U
-          this.L         := false.B
-          this.V         := true.B
-        } else {
-          this.N         := false.B
-          this.data.data := "hFFFFFFFFFFFF".U
-          this.L         := true.B
-          this.V         := true.B
-        }
-      }
-      is("b0001".U) {
-        this.N         := false.B
-        this.data.data := "hFFFFFFFFFFFF".U
-        this.L         := true.B
-        this.V         := true.B
-      }
-    }
-  }
 }
 
 class MptCacheTag(tagLen: Int, isSp: Boolean = false)(implicit p: Parameters) extends XSBundle with MPTCacheParam {
@@ -398,7 +359,13 @@ class MPTPipeData(implicit p: Parameters) extends XSBundle with MPTCacheParam {
 }
 
 object MPTPipeWithReset {
-  def apply(enqValid: Bool, enqBits: MPTPipe, reset: Bool, latency: Int): Valid[MPTPipe] = {
+  def apply(
+      enqValid: Bool,
+      enqBits: MPTPipe,
+      reset: Bool,
+      latency: Int,
+      clearData: Bool = false.B
+  ): Valid[MPTPipe] = {
     require(latency >= 0, "Pipe latency must be greater than or equal to zero!")
 
     if (latency == 0) {
@@ -413,12 +380,18 @@ object MPTPipeWithReset {
       // data has no reset
       val mptPipeControl = RegEnable(mptPipeControlIn, 0.U.asTypeOf(mptPipeControlIn), enqValid) // control has reset
       val b              = Wire(chiselTypeOf(enqBits))
+      // kill ordinary in-flight requests on context-changing flush, but keep
+      // fence flushCache requests alive.
+      when(clearData) {
+        mptPipeControl.dataValid := false.B
+        mptPipeControl.mptOnly   := false.B
+      }
       when(reset) {
         mptPipeControl := 0.U.asTypeOf(mptPipeControlIn)
         v := false.B
       }
       b.applySplitData(mptPipeControl, mptPipeData) // merge pipe control and data signal
-      apply(v, b, reset, latency - 1)
+      apply(v, b, reset, latency - 1, clearData)
     }
   }
 }
@@ -462,22 +435,20 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
   val mfenceActive = WireInit(false.B)
   val fencePA      = WireInit(false.B)
   val mfencevalid  = io.sfence.valid && io.sfence.bits.mfence.get
+  val rs1IsX0      = io.sfence.bits.rs1
+  val rs2IsX0      = io.sfence.bits.rs2
+  val sdidMatches  = io.sfence.bits.id === io.csr.mmpt.sdid
   // This MPT design supports partial cache flushing by PA. When flushing, in addition to leaf nodes, intermediate nodes are also invalidated
-  switch(Cat(io.sfence.bits.rs2, io.sfence.bits.rs1).asUInt) {
-    is("b11".U) {
-      fencePA := (io.sfence.bits.id === io.csr.mmpt.sdid) && mfencevalid // delay of about 10 gates
-    }
-    is("b01".U) {
-      fencePA := mfencevalid
-    }
-    is("b10".U) {
-      mfenceActive := (io.sfence.bits.id === io.csr.mmpt.sdid) && mfencevalid
-    }
-    is("b00".U) {
-      mfenceActive := mfencevalid
+  when(mfencevalid) {
+    when(rs1IsX0) {
+      mfenceActive := rs2IsX0 || sdidMatches
+    }.otherwise {
+      fencePA := rs2IsX0 || sdidMatches
     }
   }
   val flushAll      = mfenceActive || io.csr.mmpt.changed
+  val flushPipeOnly = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed ||
+    io.csr.priv.virt_changed || io.csr.mmpt.changed
 
   val pipeFlowEn = Wire(Bool())
   val refilling     = Wire(Bool())
@@ -512,13 +483,13 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
 
   val pipeInputs = Wire(new MPTPipe)
 
-  val stageReq     = MPTPipeWithReset(pipeFlowEn, pipeInputs, flushAll, 1)
+  val stageReq     = MPTPipeWithReset(pipeFlowEn, pipeInputs, flushAll, 1, flushPipeOnly)
   val stageDelayin = stageReq.bits
-  val stageDelay   = MPTPipeWithReset(pipeFlowEn, stageDelayin, flushAll, 1)
+  val stageDelay   = MPTPipeWithReset(pipeFlowEn, stageDelayin, flushAll, 1, flushPipeOnly)
   val stageCheckin = stageDelay.bits
-  val stageCheck   = MPTPipeWithReset(pipeFlowEn, stageCheckin, flushAll, 1)
+  val stageCheck   = MPTPipeWithReset(pipeFlowEn, stageCheckin, flushAll, 1, flushPipeOnly)
   val stageRespin  = stageCheck.bits
-  val stageResp    = MPTPipeWithReset(pipeFlowEn, stageRespin, flushAll, 1)
+  val stageResp    = MPTPipeWithReset(pipeFlowEn, stageRespin, flushAll, 1, flushPipeOnly)
 
   // priority
   // 1. fence PA
@@ -764,33 +735,58 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
   // gen perms hit l0 sp at stage check
 
   val hitPerms = sphit || l0Hit
+  private val rangeCompareWidth = math.max(ppnLen, smmpt52PAddrBits - offLen)
+  private def maxPpnForMode(pAddrBits: Int): UInt = {
+    val modePpnBits = pAddrBits - offLen
+    ((BigInt(1) << modePpnBits) - 1).U(rangeCompareWidth.W)
+  }
+  val smmpt43MaxPpn = maxPpnForMode(smmpt43PAddrBits)
+  val smmpt52MaxPpn = maxPpnForMode(smmpt52PAddrBits)
+  val reqPpnForRangeCheck = stageCheck.bits.reqPA.pad(rangeCompareWidth)
+  val overRangeFault = MuxLookup(io.csr.mmpt.mode, false.B)(Seq(
+    1.U -> (reqPpnForRangeCheck > smmpt43MaxPpn),
+    2.U -> (reqPpnForRangeCheck > smmpt52MaxPpn)
+  ))
+  val overRangeFaultReg = RegEnable(
+    stageCheck.bits.dataValid && overRangeFault,
+    false.B,
+    pipeFlowEn
+  )
+
   val respHitReg = RegEnable(hitPerms & stageCheck.bits.dataValid, false.B, pipeFlowEn)
   // Data is latched regardless of dataValid. If dataValid is low, the hit signal is also considered invalid.
   // In this case, hitPerms actually holds the result from the previous pipeline stage.
-
-  respHitRegTmp    := respHitReg
-  io.respHit.valid := respHitReg && !refilling && !fencePA
+  
+  respHitRegTmp    := respHitReg || overRangeFaultReg
+  io.respHit.valid := (respHitReg || overRangeFaultReg) && !refilling && !fencePA && !flushPipeOnly
+  
   val (sphitReg, l0hitReg) = (RegEnable(sphit, pipeFlowEn), RegEnable(l0Hit, pipeFlowEn))
-  io.respHit.bits.perm := Mux1H(
+  val cacheHitPerm = Mux1H(
     Seq(sphitReg, l0hitReg),
     Seq(spHitPerms, l0HitPerms)
   ) // 1 mux at output, 2 gates, should be fine
+  io.respHit.bits.perm             := Mux(overRangeFaultReg, 0.U, cacheHitPerm)
   io.respHit.bits.source           := stageResp.bits.source
   io.respHit.bits.mptOnly          := stageResp.bits.mptOnly
   io.respHit.bits.reqPA            := stageResp.bits.reqPA
-  io.respHit.bits.tlbContigousPerm := l0hitReg && l0PermTlbCompress
-  io.respHit.bits.permIsNAPOT := l0hitReg && l0PermIs64kNAPOT
-  io.respHit.bits.accessFault := (!io.respHit.bits.perm(0)) && io.respHit.bits.perm(
+  io.respHit.bits.tlbContigousPerm := !overRangeFaultReg && l0hitReg && l0PermTlbCompress
+  io.respHit.bits.permIsNAPOT      := !overRangeFaultReg && l0hitReg && l0PermIs64kNAPOT
+  io.respHit.bits.accessFault := overRangeFaultReg || ((!cacheHitPerm(0)) && cacheHitPerm(
     1
-  ) // not read but write // false.B // entry in mpt cache is always valid
-  io.respHit.bits.mptLevel := Mux1H(
+  )) // not read but write // false.B // entry in mpt cache is always valid
+  val cacheHitLevel = Mux1H(
     Seq(sphitReg, l0hitReg),
     Seq(splevel, 0.U(mptLevelLenUInt.W))
   ) // splevel is converted to binary for l1/l2tlb level compare with s1pte and s2pte
+  io.respHit.bits.mptLevel := Mux(overRangeFaultReg, 0.U, cacheHitLevel)
 
-  val respMissReg = RegEnable(!hitPerms & stageCheck.bits.dataValid, false.B, pipeFlowEn)
+  val respMissReg = RegEnable(
+    !hitPerms && !overRangeFault && stageCheck.bits.dataValid,
+    false.B,
+    pipeFlowEn
+  )
   // read regardless of dataValid
-  io.respMiss.valid := respMissReg && !refilling && !fencePA
+  io.respMiss.valid := respMissReg && !refilling && !fencePA && !flushPipeOnly
   io.respMiss.bits.hitLevel := RegEnable(hitAddrLevel, pipeFlowEn)
   io.respMiss.bits.ppn     := RegEnable(hitAddrData, pipeFlowEn)
   io.respMiss.bits.source  := stageResp.bits.source
@@ -919,6 +915,11 @@ class MPTCache(implicit p: Parameters) extends XSModule with MPTCacheParam {
     spValid := 0.U.asTypeOf(Vec(spSize, Bool()))
     l0Valid := 0.U.asTypeOf(Vec(l0nSets, Vec(l0nWays, Bool())))
     respHitReg := false.B
+    overRangeFaultReg := false.B
+    respMissReg := false.B
+  }
+  when(flushPipeOnly) {
+    respHitReg := false.B
     respMissReg := false.B
   }
 }
@@ -959,7 +960,8 @@ class MptMissQueueIO(implicit p: Parameters) extends MMUIOBaseBundle with MPTCac
 class MptMissQueue(implicit p: Parameters) extends XSModule with MPTCacheParam {
   val io = IO(new MptMissQueueIO)
 
-  val flush = io.sfence.valid || io.csr.mmpt.changed
+  val flush = io.csr.satp.changed || io.csr.vsatp.changed ||
+io.csr.hgatp.changed || io.csr.priv.virt_changed || io.sfence.valid || io.csr.mmpt.changed
   val reqFIFO = Module(new Queue(new MissCacheBundle(), entries = 4, pipe = true, hasFlush = true)).io
   // FIFO queue,record offset
   val fifoNotEmpty = reqFIFO.deq.valid
@@ -1053,7 +1055,7 @@ class MptMissQueue(implicit p: Parameters) extends XSModule with MPTCacheParam {
   io.twReq.bits.hitAddr  := reqFIFO.deq.bits.hitAddr
   io.twReq.bits.reqPA    := reqFIFO.deq.bits.pa(ppnLen - 1, mptOff - offLen)
   io.twReq.bits.hitLevel := reqFIFO.deq.bits.hitLevel
-  io.twReq.valid         := fifoNotEmpty && !refilling && io.twReq.ready
+  io.twReq.valid         := fifoNotEmpty && !refilling
 
   reqFIFO.flush.get := flush
   when(flush) {
@@ -1070,7 +1072,7 @@ class MptTableWalkerIO(implicit p: Parameters) extends MMUIOBaseBundle with MPTC
   val mem = new Bundle {
     val req  = DecoupledIO(new Bundle { val addr = UInt(PAddrBits.W) })
     val resp = Flipped(ValidIO(UInt(XLEN.W)))
-    // val mask = Input(Bool()) dont need？
+    val mask = Input(Bool())
   }
 
   val pmp = new Bundle {
@@ -1087,7 +1089,20 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
   io.pmp.req.bits.size := 3.U
   io.pmp.req.bits.cmd  := TlbCmd.read
 
-  val flush = io.sfence.valid || io.csr.mmpt.changed
+  // Keep the same flush conditions as the regular PTW.  An MPT walk is also
+  // an in-flight translation transaction, so a change of any translation
+  // context must invalidate its local FSM state.
+  val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed ||
+    io.csr.hgatp.changed || io.csr.priv.virt_changed || io.csr.mmpt.changed
+
+  // PTW convention: true means that no response is currently expected.  The
+  // L2TLB source ownership (io.mem.mask) remains asserted until the old
+  // response drains, so a new request cannot reuse this fixed source ID while
+  // the flushed transaction is still in flight.  Clearing this local latch on
+  // flush makes the late response a drain-only response; it cannot be parsed
+  // as the response to a post-flush request.
+  val w_mem_resp = RegInit(true.B)
+  val memRespAccepted = io.mem.resp.valid && !w_mem_resp && !flush
 
   val pa = RegEnable(io.req.bits.reqPA, 0.U, io.req.fire)
   // Store the received request PA in a register, used to generate the PN1/2/3 offsets for synthesizing the table walk address.
@@ -1102,26 +1117,23 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
   val pmpCheckLevel = RegEnable(nextPmpCheckLevel, "b1000".U(mptLevelLenOH.W), setPmpCheckLevel)
 
   val mpteResp = Wire(new MptEntry())
-  if (HasMptCheckDefault) {
-    mpteResp.genFake(level)
-  } else {
-    mpteResp.apply(mem.resp.bits) // mem mpte mpteData
-  }
+
+  mpteResp.apply(mem.resp.bits) // mem mpte mpteData
 
   val mpteData = Reg(new MptData())
   // Stores the returned permissions/lower-level address, or the incoming request address entry;
   // used to return permissions or synthesize the lower-level page table address with PA.
   io.refill.bits.refillData := mpteData // output alloc
-  val isLeafMpte = RegEnable(mpteResp.isLeaf, false.B, io.mem.resp.valid)
+  val isLeafMpte = RegEnable(mpteResp.isLeaf, false.B, memRespAccepted)
   io.refill.bits.isLeafMpte := isLeafMpte // tell cache if the current refill is leaf node
-  val mpteInvalid = RegEnable(!mpteResp.isValid, false.B, io.mem.resp.valid) // 1 level not on top of mem.resp
-  val rsvZeroError0 = RegEnable(mem.resp.bits(9, 2).orR, false.B, io.mem.resp.valid)
+  val mpteInvalid = RegEnable(!mpteResp.isValid, false.B, memRespAccepted) // 1 level not on top of mem.resp
+  val rsvZeroError0 = RegEnable(mem.resp.bits(9, 2).orR, false.B, memRespAccepted)
   // max 3 level or gate on top of mem.resp，NON ZERO error of mtpe
-  val rsvZeroError1 = RegEnable(mem.resp.bits(62, 58).orR, false.B, io.mem.resp.valid)
+  val rsvZeroError1 = RegEnable(mem.resp.bits(62, 58).orR, false.B, memRespAccepted)
   val rsvZeroError2 = false.B
   when(io.req.fire) {
     mpteData.apply(io.req.bits.hitAddr)
-  }.elsewhen(io.mem.resp.valid) {
+  }.elsewhen(memRespAccepted) {
     mpteData := mpteResp.data
   }
 
@@ -1137,14 +1149,13 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
   val memAddr = mpteData.getAddr(pn) // gen addr 0 delay
   io.mem.req.bits.addr := memAddr
   io.pmp.req.valid := DontCare
-  io.pmp.req.bits.addr := Mux(io.mem.resp.valid, mpteResp.getAddr(pn), memAddr)
+  io.pmp.req.bits.addr := Mux(memRespAccepted, mpteResp.getAddr(pn), memAddr)
   // should be safer than just := memAddr
 
   // accessFault logic
-  val pmpFail = if (HasMptCheckDefault) false.B else (!isLeafMpte) && (io.pmp.resp.ld || io.pmp.resp.mmio)
+  val pmpFail = (!isLeafMpte) && (io.pmp.resp.ld || io.pmp.resp.mmio)
   // PMP delay unknown
-  val entryError = if (HasMptCheckDefault) false.B else
-    mpteInvalid || rsvZeroError0 || rsvZeroError1 || rsvZeroError2 || ((!isLeafMpte) && level === 1.U)
+  val entryError = mpteInvalid || rsvZeroError0 || rsvZeroError1 || rsvZeroError2 || ((!isLeafMpte) && level === 1.U)
   // level == 0 non leaf, zero = / = 0,pmp fail,invalid casue accessFault
   val accessFault = entryError || pmpFail // pmp fail also cause accessFault
   io.refill.bits.level := Mux(pmpFail, pmpCheckLevel, level) // pmpFail return next level,else cur level
@@ -1182,14 +1193,16 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
       }
     }
     is(s_mem_req) {
-      mem.req.valid := true.B // req valid when not fire
+      // Do not issue during flush or reuse the fixed source ID while an old
+      // response is outstanding.
+      mem.req.valid := !mem.mask && !flush
 
       when(io.mem.req.fire) { // just waiting, timing safe
         nextState := s_mem_resp // to wait resp
       }.otherwise {}
     }
     is(s_mem_resp) {             // unknown in delay,timing?
-      when(io.mem.resp.valid) { // do nothing,delay one cycle OPTPOINT*
+      when(memRespAccepted) { // do nothing,delay one cycle OPTPOINT*
         nextState        := s_addr_proc
         setPmpCheckLevel := true.B
       }
@@ -1208,6 +1221,14 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
     }
 
   }
+  when(io.mem.req.fire) {
+    assert(w_mem_resp, "MPT walker reused its memory source ID with a response outstanding")
+    w_mem_resp := false.B
+  }
+  when(memRespAccepted) {
+    assert(curState === s_mem_resp, "MPT walker accepted a memory response outside the wait state")
+    w_mem_resp := true.B
+  }
   when(flush){
     pa := 0.U
     level := "b1000".U(mptLevelLenOH.W)
@@ -1216,6 +1237,9 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
     mpteInvalid := false.B
     rsvZeroError0 := false.B
     rsvZeroError1 := false.B
+    // Match PTW: invalidate the local transaction immediately, but leave the
+    // L2TLB source occupied until its late response is drained.
+    w_mem_resp := true.B
     curState := s_idle
   }
   // fsm end
@@ -1253,11 +1277,13 @@ class MptChecker(implicit p: Parameters) extends XSModule with HasPtwConst {
   mptMissQueueInst.csr <> io.csr
   mptMissQueueInst.sfence <> io.sfence
 
+  val mptEn = io.csr.mmpt.mode =/= 0.U
+
   mptCacheInst.req.bits.mptOnly := io.req.bits.mptOnly // need some fix
   mptCacheInst.req.bits.reqPA   := io.req.bits.reqPA
   mptCacheInst.req.bits.source  := io.req.bits.id
-  mptCacheInst.req.valid        := io.req.valid
-  io.req.ready                  := mptCacheInst.req.ready
+  mptCacheInst.req.valid        := io.req.valid && mptEn
+  io.req.ready                  := mptEn && mptCacheInst.req.ready
 
   val mptReturn = Wire(new MptRespBundle())
   mptReturn.mptPerm := Mux(mptMissQueueInst.resp.valid, mptMissQueueInst.resp.bits.perm, mptCacheInst.respHit.bits.perm)
@@ -1289,7 +1315,7 @@ class MptChecker(implicit p: Parameters) extends XSModule with HasPtwConst {
     mptCacheInst.respHit.bits.permIsNAPOT
   )
 
-  io.resp.valid := mptMissQueueInst.resp.valid || mptCacheInst.respHit.valid
+  io.resp.valid := mptEn && (mptMissQueueInst.resp.valid || mptCacheInst.respHit.valid)
   io.resp.bits <> mptReturn
 
   mptMissQueueInst.refill <> mptTWInst.refill
@@ -1299,8 +1325,8 @@ class MptChecker(implicit p: Parameters) extends XSModule with HasPtwConst {
   mptMissQueueInst.missCache.bits.hitAddr  := mptCacheInst.respMiss.bits.ppn
   mptMissQueueInst.missCache.bits.source   := mptCacheInst.respMiss.bits.source
   mptMissQueueInst.missCache.bits.pa       := mptCacheInst.respMiss.bits.pa
-  mptMissQueueInst.missCache.valid         := mptCacheInst.respMiss.valid
-  mptCacheInst.respMiss.ready              := mptMissQueueInst.missCache.ready
+  mptMissQueueInst.missCache.valid         := mptCacheInst.respMiss.valid && mptEn
+  mptCacheInst.respMiss.ready              := Mux(mptEn, mptMissQueueInst.missCache.ready, true.B)
   // cache refill io
   mptCacheInst.refill <> mptTWInst.refill
   // MptMissQueue-twio
@@ -1310,6 +1336,7 @@ class MptChecker(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.mem.req.bits.addr    := mptTWInst.mem.req.bits.addr
   io.mem.req.valid        := mptTWInst.mem.req.valid
   mptTWInst.mem.req.ready := io.mem.req.ready
+  mptTWInst.mem.mask      := io.mem.mask
 
   mptTWInst.mem.resp.bits  := io.mem.resp.bits
   mptTWInst.mem.resp.valid := io.mem.resp.valid
@@ -1317,22 +1344,4 @@ class MptChecker(implicit p: Parameters) extends XSModule with HasPtwConst {
   // PMP IO
   mptTWInst.pmp.resp <> io.pmp.resp
   io.pmp.req <> mptTWInst.pmp.req
-
-  val mptDiabledFakedRespValid = RegInit(false.B)
-  val mptDiabledFakedMptOnly   = RegInit(false.B)
-  when(io.csr.mmpt.mode === 0.U) {
-    mptCacheInst.req.valid := false.B // mptmode  return 111
-
-    io.req.ready := true.B
-    when(io.req.fire) {
-      mptDiabledFakedRespValid := true.B
-      mptDiabledFakedMptOnly   := io.req.bits.mptOnly
-    }
-    io.resp.valid        := mptDiabledFakedRespValid
-    io.resp.bits.mptOnly := mptDiabledFakedMptOnly
-    when(io.resp.fire) {
-      mptDiabledFakedRespValid := false.B
-      mptDiabledFakedMptOnly   := false.B
-    }
-  }
 }

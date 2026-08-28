@@ -21,33 +21,30 @@ import chisel3.experimental.BundleLiterals._
 import chisel3.util._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.experimental.decode.EspressoMinimizer
-
 import utility._
+import utils._
 import _root_.utils.{OptionWrapper, NamedUInt}
-
 import org.chipsalliance.cde.config.Parameters
-
 import xiangshan.frontend.IfuToBackendIO
 import xiangshan.frontend.PreDecodeInfo
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BpuCtrl
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.ftq.FtqToCtrlIO
 import xiangshan.frontend.FrontendRedirect
-
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.Bundles.UopIdx
-import xiangshan.backend.CtrlToFtqIO
+import xiangshan.backend.{BackendToIBufBundle, CtrlToFtqIO}
 import xiangshan.backend.decode.XDecode
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.NewCSR.Mcontrol6
 import xiangshan.backend.fu.NewCSR.Tdata1Bundle
 import xiangshan.backend.fu.NewCSR.Tdata2Bundle
+import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache.HasDCacheParameters
-
 import xiangshan.mem.LqPtr
 import xiangshan.mem.SqPtr
 import xiangshan.mem.prefetch.PrefetchCtrl
@@ -115,6 +112,8 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
   val isLastInFtqEntry = Bool()
+  val vtype            = VType()
+  val specvtype        = VType()
   val debug_seqNum = InstSeqNum()
 }
 
@@ -293,8 +292,8 @@ object Redirect extends HasCircularQueuePtrHelper {
 class Resolve(implicit p: Parameters) extends XSBundle {
   val ftqIdx: FtqPtr = new FtqPtr
   val ftqOffset: UInt = UInt(FetchBlockInstOffsetWidth.W)
-  val pc: PrunedAddr = PrunedAddr(VAddrBits)
-  val target: PrunedAddr = PrunedAddr(VAddrBits)
+  val pc: Pc = Pc()
+  val target: Pc = Pc()
   val taken: Bool = Bool()
   val mispredict: Bool = Bool()
   val attribute: BranchAttribute = new BranchAttribute
@@ -346,13 +345,6 @@ class NonmaskableInterruptIO() extends Bundle {
   val nmi_31 = Input(Bool())
   val nmi_43 = Input(Bool())
   // reserve for other nmi type
-}
-
-class DiffCommitIO(implicit p: Parameters) extends XSBundle {
-  val isCommit = Bool()
-  val commitValid = Vec(CommitWidth * MaxUopSize, Bool())
-
-  val info = Vec(CommitWidth * MaxUopSize, new RabCommitInfo)
 }
 
 class DiffVlCommitBundle(commitWidth: Int)(implicit p: Parameters) extends XSBundle {
@@ -460,7 +452,7 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   val fromIfu = new IfuToBackendIO
   // from backend
   val toFtq = Flipped(new CtrlToFtqIO)
-  val canAccept = Input(Bool())
+  val toIBuf = Input(new BackendToIBufBundle)
   val backendEmpty = Input(Bool())
 
   val wfi = Flipped(new WfiReqBundle)
@@ -674,14 +666,9 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val hd_misalign_ld_enable = Output(Bool())
   val power_down_enable = Output(Bool())
   val flush_l2_enable = Output(Bool())
-  // Rename
-  val fusion_enable = Output(Bool())
-  val wfi_enable = Output(Bool())
 
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
-  // TODO: move it to a new bundle, since single step is not a custom control signal
-  val singlestep = Output(Bool())
   val frontend_trigger = new FrontendTdataDistributeIO()
   val mem_trigger = new MemTdataDistributeIO()
   // Virtualization Mode

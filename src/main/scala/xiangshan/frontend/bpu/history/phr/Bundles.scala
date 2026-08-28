@@ -21,7 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.CircularQueuePtr
 import utility.XSDebug
 import xiangshan.XSCoreParamsKey
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.Prediction
@@ -44,16 +44,16 @@ object PhrPtr {
 
 class S1Train(implicit p: Parameters) extends PhrBundle {
   val valid:      Bool       = Bool()
-  val startPc:    PrunedAddr = PrunedAddr(VAddrBits)
+  val startPc:    Pc         = Pc()
   val prediction: Prediction = new Prediction
 }
 
 class PhrUpdateData(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
-  val valid:   Bool       = Bool()
-  val taken:   Bool       = Bool()
-  val cfiPc:   PrunedAddr = PrunedAddr(VAddrBits)
-  val target:  PrunedAddr = PrunedAddr(VAddrBits)
-  val phrMeta: PhrMeta    = new PhrMeta()
+  val valid:   Bool    = Bool()
+  val taken:   Bool    = Bool()
+  val cfiPc:   Pc      = Pc()
+  val target:  Pc      = Pc()
+  val phrMeta: PhrMeta = new PhrMeta()
 }
 
 class PhrUpdateResult(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
@@ -71,7 +71,7 @@ class PhrUpdate(implicit p: Parameters) extends PhrBundle {
   val s3_override:   Bool       = Bool()
   val s3_phrMeta:    PhrMeta    = new PhrMeta()
   val s3_prediction: Prediction = new Prediction()
-  val s3_startPc:    PrunedAddr = PrunedAddr(VAddrBits)
+  val s3_startPc:    Pc         = Pc()
 }
 
 class PhrMeta(implicit p: Parameters) extends PhrBundle {

@@ -8,6 +8,7 @@ import xiangshan.backend.fu.vector.Bundles.VConfig
 import xiangshan.backend.fu.vector.utils.ScalaDupToVector
 import xiangshan.backend.fu.{FuConfig, FuncUnit}
 import xiangshan.ExceptionNO
+import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
 import yunsuan.VialuFixType
 
 class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
@@ -27,16 +28,16 @@ class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUni
   protected val outVm       = outVecCtrl.vm
 
   // vadc.vv, vsbc.vv need this
-  protected val outNeedClearMask: Bool = VialuFixType.needClearMask(outCtrl.fuOpType)
+  protected val outNeedClearMask: Bool = VIAluOpcodes.isPredicateAlwaysTrue(outCtrl.fuOpType)
 
   protected val outVl       = outData.vl.get
   protected val outVstart   = outVecCtrl.vstart
   protected val outOldVd    = outData.src(2)
   // There is no difference between control-dependency or data-dependency for function unit,
   // but spliting these in ctrl or data bundles is easy to coding.
-  protected val outSrcMask: UInt = if (!cfg.maskWakeUp) outCtrl.vpu.get.vmask else {
+  protected val outSrcMask: UInt = {
     MuxCase(
-      outData.getSrcMask, Seq(
+      outData.v0.get, Seq(
         outNeedClearMask -> allMaskFalse,
         outVm -> allMaskTrue
       )

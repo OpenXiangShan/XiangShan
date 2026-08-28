@@ -41,8 +41,6 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val wakeupToLRQCancel = Option.when(params.isStAddrIQ || params.isStdIQ)(params.genIOWakeUpCancelBundle)
   val vlFromIntIsZero = Input(Bool())
   val vlFromIntIsVlmax = Input(Bool())
-  val vlFromVfIsZero = Input(Bool())
-  val vlFromVfIsVlmax = Input(Bool())
   val og0Cancel = Input(ExuVec())
   val og1Cancel = Input(ExuVec())
   val ldCancel = Vec(backendParams.LduCnt + backendParams.HyuCnt, Flipped(new LoadCancelIO))
@@ -316,26 +314,15 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       for(j <- 0 until numLsrc) {
         enq.bits.status.srcStatus(j).psrc                       := s0_enqBits(enqIdx).psrc(j)
         enq.bits.status.srcStatus(j).srcType                    := s0_enqBits(enqIdx).srcType(j)
-        enq.bits.status.srcStatus(j).srcState                   := (if (j < 3) {
-                                                                      Mux(SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U),
-                                                                          SrcState.rdy,
-                                                                          s0_enqBits(enqIdx).srcState(j))
-                                                                    } else {
-                                                                      s0_enqBits(enqIdx).srcState(j)
-                                                                    })
-        enq.bits.status.srcStatus(j).dataSources.value          := (if (j < 3) {
-                                                                      MuxCase(DataSource.reg, Seq(
-                                                                        (SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.zero,
-                                                                        SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))                                       -> DataSource.imm,
-                                                                        (SrcType.isVp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.v0,
-                                                                      ))
-                                                                    } else {
-                                                                      MuxCase(DataSource.reg, Seq(
-                                                                        SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))  -> DataSource.imm,
-                                                                      ))
-                                                                    })
+        enq.bits.status.srcStatus(j).srcState                   := s0_enqBits(enqIdx).srcState(j)
+        enq.bits.status.srcStatus(j).dataSources.value          := MuxCase(DataSource.reg, Seq(
+          (SrcType.isXp(s0_enqBits(enqIdx).srcType(j)) && (s0_enqBits(enqIdx).psrc(j) === 0.U)) -> DataSource.zero,
+          SrcType.isNotReg(s0_enqBits(enqIdx).srcType(j))                                       -> DataSource.imm,
+        ))
         enq.bits.status.srcStatus(j).srcLoadDependency          := VecInit(s0_enqBits(enqIdx).srcLoadDependency(j).map(x => x << 1))
         enq.bits.status.srcStatus(j).exuSources.foreach(_       := 0.U.asTypeOf(ExuSource()))
+      }
+      for (j <- 0 until params.numIntSrc) {
         enq.bits.status.srcStatus(j).useRegCache.foreach(_      := s0_enqBits(enqIdx).useRegCache(j))
         enq.bits.status.srcStatus(j).regCacheIdx.foreach(_      := s0_enqBits(enqIdx).regCacheIdx(j))
       }
@@ -344,6 +331,12 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           vlSrcStatus.srcState                                  := s0_enqBits(enqIdx).srcStateVl.get
           vlSrcStatus.psrc                                      := s0_enqBits(enqIdx).psrcVl.get
           vlSrcStatus.dataSource.value                          := DataSource.reg // Todo: update when support vl wake up
+      }
+      enq.bits.status.srcStatusV0.foreach {
+        v0SrcStatus =>
+          v0SrcStatus.srcState                                  := s0_enqBits(enqIdx).srcStateV0.get
+          v0SrcStatus.psrc                                      := s0_enqBits(enqIdx).psrcV0.get
+          v0SrcStatus.dataSource.value                          := DataSource.reg // Todo: update when support vl wake up
       }
       enq.bits.status.blocked                                   := false.B
       enq.bits.status.issued                                    := false.B
@@ -406,8 +399,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     entriesIO.wakeUpFromIQDelayed                               := wakeupFromIQDelayed
     entriesIO.vlFromIntIsZero                                   := io.vlFromIntIsZero
     entriesIO.vlFromIntIsVlmax                                  := io.vlFromIntIsVlmax
-    entriesIO.vlFromVfIsZero                                    := io.vlFromVfIsZero
-    entriesIO.vlFromVfIsVlmax                                   := io.vlFromVfIsVlmax
     entriesIO.og0Cancel                                         := io.og0Cancel
     entriesIO.og1Cancel                                         := io.og1Cancel
     entriesIO.ldCancel                                          := io.ldCancel
@@ -634,6 +625,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deqResp.bits.fuType := deqBeforeDly(i).bits.fuType
     deqResp.bits.sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
     deqResp.bits.lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
+    deqResp.bits.isFmac := false.B
   }
 
   //fuBusyTable
@@ -896,7 +888,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.fpRen .foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := deq.valid && deqEntryVec(i).bits.fpRen.get(idx)})
     deq.bits.vecRen.foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := deq.valid && deqEntryVec(i).bits.vecRen.get(idx)})
     deq.bits.vlRen .foreach(x => x := deq.valid && deqEntryVec(i).bits.vlRen.get)
-    deq.bits.v0Ren .foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := deq.valid && deqEntryVec(i).bits.v0Ren.get(idx)})
+    deq.bits.v0Ren .foreach(x => x := deq.valid && deqEntryVec(i).bits.v0Ren.get)
     deq.bits.rfWen.foreach(_ := deqEntryVec(i).bits.payload.rfWen.get)
     deq.bits.fpWen.foreach(_ := deqEntryVec(i).bits.payload.fpWen.get)
     deq.bits.vecWen.foreach(_ := deqEntryVec(i).bits.payload.vecWen.get)
@@ -904,6 +896,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.vlWen.foreach(_ := deqEntryVec(i).bits.payload.vlWen.get)
     deq.bits.flushPipe.foreach(_ := false.B)
     deq.bits.pdest := deqEntryVec(i).bits.payload.pdest
+    deq.bits.pdestV0.foreach(_ := deqEntryVec(i).bits.payload.pdestV0.get)
     deq.bits.pdestVl.foreach(_ := deqEntryVec(i).bits.payload.pdestVl.get)
     deq.bits.robIdx := deqEntryVec(i).bits.status.robIdx
 
@@ -1027,6 +1020,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
         wakeup.bits.v0Wen   := (param.writeV0Rf ).B && RegNext(loadWakeUp.bits.v0Wen && loadWakeUp.valid)
         wakeup.bits.vlWen   := (param.writeVlRf ).B && RegNext(loadWakeUp.bits.vlWen && loadWakeUp.valid)
         wakeup.bits.pdest   := RegNext(loadWakeUp.bits.pdest)
+        wakeup.bits.pdestV0 := 0.U
         wakeup.bits.pdestVl := 0.U
         wakeup.bits.rcDest.foreach(_ := io.replaceRCIdx.get(i))
         wakeup.bits.loadDependency.foreach(_ := 0.U) // this is correct for load only

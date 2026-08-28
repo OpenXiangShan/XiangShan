@@ -151,7 +151,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     val confidence = Input(UInt(1.W))
     val train_req = Flipped(DecoupledIO(new TrainReqBundle))
     val l1_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
-    val l2_l3_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
+    val l2_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
     // query Stream component to see if a stream pattern has already been detected
     val stream_lookup_req  = ValidIO(UInt(VAddrBits.W))
     val stream_lookup_resp = Input(Bool())
@@ -247,7 +247,6 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     vaddr = s2_l1_pf_vaddr,
     width = STRIDE_WIDTH_BLOCKS(),
     decr_mode = s2_decr_mode,
-    sink = SINK_L1,
     source = L1_HW_PREFETCH_STRIDE,
     confidence = io.confidence,
     // TODO: add stride debug db, not useful for now
@@ -259,7 +258,6 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     vaddr = s2_l2_pf_vaddr,
     width = STRIDE_WIDTH_BLOCKS(io.fdbkDegree),
     decr_mode = s2_decr_mode,
-    sink = SINK_L2,
     source = L1_HW_PREFETCH_STRIDE,
     confidence = io.confidence,
     // TODO: add stride debug db, not useful for now
@@ -278,10 +276,10 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
 
   io.l1_prefetch_req.valid := s3_valid && io.enable
   io.l1_prefetch_req.bits := s3_l1_pf_req_bits
-  io.l2_l3_prefetch_req.valid := s4_valid && io.enable
-  io.l2_l3_prefetch_req.bits := s4_l2_pf_req_bits
+  io.l2_prefetch_req.valid := s4_valid && io.enable
+  io.l2_prefetch_req.bits := s4_l2_pf_req_bits
 
-  XSPerfAccumulate("pf_valid", PopCount(Seq(io.l1_prefetch_req.valid, io.l2_l3_prefetch_req.valid)))
+  XSPerfAccumulate("pf_valid", PopCount(Seq(io.l1_prefetch_req.valid, io.l2_prefetch_req.valid)))
   XSPerfAccumulate("l1_pf_valid", s3_valid)
   XSPerfAccumulate("l2_pf_valid", s4_valid)
   XSPerfAccumulate("detect_stream", io.stream_lookup_resp)
@@ -309,6 +307,22 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     }
   }
 
+  XSPerfAccumulate("s1_stat_dissatisfy", s1_stat.dissatisfy)
+  XSPerfAccumulate("s1_stat_overflow", s1_stat.overflow)
+  XSPerfAccumulate("s1_stat_valid", s1_stat.valid)
+  XSPerfAccumulate("s1_stat_valid_confirm", s1_stat.valid_confirm)
+  XSPerfAccumulate("s1_stat_valid_confirm_sendpf", s1_stat.valid_confirm_sendpf)
+  XSPerfAccumulate("s1_stat_valid_mismatch", s1_stat.valid_mismatch)
+  XSPerfAccumulate("s1_stat_valid_mismatch_replace", s1_stat.valid_mismatch_replace)
   XSPerfAccumulate("stride_l2_feedback_control_drop", s2_valid && io.fdbkDegree === 0.U)
+  class StrideLearn extends Bundle {
+    val stat = new StatStrideBundle()
+    val pc = UInt(VAddrBits.W)
+  }
+  val strideLearn = Wire(new StrideLearn())
+  strideLearn.stat := s1_stat
+  strideLearn.pc := RegEnable(s0_pc, s0_valid)
+  val strideLearnDb = ChiselDB.createTable(s"StrideLearnTable${p(XSCoreParamsKey).HartId}", new StrideLearn, basicDB = true)
+  strideLearnDb.log(data = strideLearn, en = s1_update, clock = clock, reset = reset)
 
 }

@@ -125,7 +125,6 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
 class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasStreamPrefetchHelper {
   val region = UInt(REGION_TAG_BITS.W)
   val bit_vec = UInt(BIT_VEC_WITDH.W)
-  val sink = UInt(SINK_BITS.W)
   val source = new L1PrefetchSource()
   val confidence = UInt(1.W)
   // debug usage
@@ -133,10 +132,9 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
   val trigger_va = UInt(VAddrBits.W)
 
   // align prefetch vaddr and width to region
-  def getStreamPrefetchReqBundle(valid: Bool, vaddr: UInt, width: UInt, decr_mode: Bool, sink: UInt, source: UInt, confidence: UInt, t_pc: UInt, t_va: UInt): StreamPrefetchReqBundle = {
+  def getStreamPrefetchReqBundle(valid: Bool, vaddr: UInt, width: UInt, decr_mode: Bool, source: UInt, confidence: UInt, t_pc: UInt, t_va: UInt): StreamPrefetchReqBundle = {
     val res = Wire(new StreamPrefetchReqBundle)
     res.region := get_region_tag(vaddr)
-    res.sink := sink
     res.source.value := source
     res.confidence := confidence
 
@@ -155,7 +153,6 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
 
     assert(!valid || PopCount(res.bit_vec) <= width, "actual prefetch block number should less than or equals to WIDTH_CACHE_BLOCKS")
     assert(!valid || PopCount(res.bit_vec) >= 1.U, "at least one block should be included")
-    assert(sink <= SINK_L3, "invalid sink")
     for(i <- 0 until BIT_VEC_WITDH) {
       when(decr_mode) {
         when(i.U > region_bits) {
@@ -189,7 +186,8 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
     val confidence = Input(UInt(1.W))
     val train_req = Flipped(DecoupledIO(new TrainReqBundle))
     val l1_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
-    val l2_l3_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
+    val l2_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
+    val l3_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
 
     // Stride send lookup req here
     val stream_lookup_req  = Flipped(ValidIO(UInt(VAddrBits.W)))
@@ -285,7 +283,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
 
   val l1_depth_const = Constantin.createRecord(s"streamL1Depth${p(XSCoreParamsKey).HartId}", initValue = 64)
   val l2_depth_const = Constantin.createRecord(s"streamL2Depth${p(XSCoreParamsKey).HartId}", initValue = 640)
-  val l3_depth_const = Constantin.createRecord(s"streamL3Depth${p(XSCoreParamsKey).HartId}", initValue = 640) // l3 is not useful
+  val l3_depth_const = Constantin.createRecord(s"streamL3Depth${p(XSCoreParamsKey).HartId}", initValue = 960) 
 
   val l1_depth = Wire(UInt(DEPTH_BITS.W))
   val l2_depth = Wire(UInt(DEPTH_BITS.W))
@@ -396,7 +394,6 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
     vaddr = s2_l1_vaddr,
     width = WIDTH_CACHE_BLOCKS.U,
     decr_mode = s2_decr_mode,
-    sink = SINK_L1,
     source = L1_HW_PREFETCH_STREAM,
     confidence = io.confidence,
     t_pc = s2_pc,
@@ -407,7 +404,6 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
     vaddr = s2_l2_vaddr,
     width = L2_WIDTH_CACHE_BLOCKS(io.fdbkDegree),
     decr_mode = s2_decr_mode,
-    sink = SINK_L2,
     source = L1_HW_PREFETCH_STREAM,
     confidence = io.confidence,
     t_pc = s2_pc,
@@ -418,7 +414,6 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
     vaddr = s2_l3_vaddr,
     width = L3_WIDTH_CACHE_BLOCKS(io.fdbkDegree),
     decr_mode = s2_decr_mode,
-    sink = SINK_L3,
     source = L1_HW_PREFETCH_STREAM,
     confidence = io.confidence,
     t_pc = s2_pc,
@@ -444,19 +439,25 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule
   val s4_pf_l2_bits = RegEnable(s3_pf_l2_bits, s3_pf_l2_valid)
   val s4_pf_l3_bits = RegEnable(s3_pf_l3_bits, s3_pf_l2_valid)
 
-  val enable_l3_pf = Constantin.createRecord(s"enableL3StreamPrefetch${p(XSCoreParamsKey).HartId}", initValue = false)
+  val enable_l3_pf = Constantin.createRecord(s"enableL3StreamPrefetch${p(XSCoreParamsKey).HartId}", initValue = true)
   // s5: send the l3 prefetch req out
   val s5_pf_l3_valid = GatedValidRegNext(s4_pf_l2_valid) && enable_l3_pf
   val s5_pf_l3_bits = RegEnable(s4_pf_l3_bits, s4_pf_l2_valid)
 
   io.l1_prefetch_req.valid := s3_pf_l1_valid
   io.l1_prefetch_req.bits := s3_pf_l1_bits
-  io.l2_l3_prefetch_req.valid := s4_pf_l2_valid || s5_pf_l3_valid
-  io.l2_l3_prefetch_req.bits := Mux(s4_pf_l2_valid, s4_pf_l2_bits, s5_pf_l3_bits)
+  io.l2_prefetch_req.valid := s4_pf_l2_valid
+  io.l2_prefetch_req.bits := s4_pf_l2_bits
+  io.l3_prefetch_req.valid := s5_pf_l3_valid
+  io.l3_prefetch_req.bits := s5_pf_l3_bits
 
   XSPerfAccumulate("s4_pf_sent", s4_pf_l2_valid)
-  XSPerfAccumulate("s5_pf_sent", !s4_pf_l2_valid && s5_pf_l3_valid)
-  XSPerfAccumulate("pf_sent", PopCount(Seq(io.l1_prefetch_req.valid, io.l2_l3_prefetch_req.valid)))
+  XSPerfAccumulate("stream_l3_candidate", s5_pf_l3_valid)
+  XSPerfAccumulate("s5_pf_sent", s5_pf_l3_valid)
+  XSPerfAccumulate(
+    "pf_sent",
+    PopCount(Seq(io.l1_prefetch_req.valid, io.l2_prefetch_req.valid, io.l3_prefetch_req.valid))
+  )
 
   // Stride lookup starts here
   // S0: Stride send req

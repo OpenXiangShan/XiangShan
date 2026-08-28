@@ -1142,7 +1142,9 @@ for(i <- 0 until reqNum) {
 
   val (mshr_penalty_sample, mshr_penalty) = TransactionLatencyCounter(GatedValidRegNextN(primary_fire, 2) && !release_entry, release_entry)
   XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 0, 20, 1, true, true)
-  XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 20, 100, 10, true, false)
+  XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 20, 100, 10, true, true)
+  XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 100, 1000, 50, true, true)
+  XSPerfHistogram("miss_penalty", mshr_penalty, mshr_penalty_sample, 1000, 5000, 200, true, false)
 
   val load_miss_begin = ParallelMux(
     primary_fire_vec
@@ -1152,12 +1154,16 @@ for(i <- 0 until reqNum) {
   val refill_finished = GatedValidRegNext(!w_grantlast && refill_done) && should_refill_data
   val (load_miss_penalty_sample, load_miss_penalty) = TransactionLatencyCounter(load_miss_begin, refill_finished) // not real refill finish time
   XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 0, 20, 1, true, true)
-  XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 20, 100, 10, true, false)
-  XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 100, 400, 30, true, false)
+  XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 20, 100, 10, true, true)
+  XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 100, 400, 30, true, true)
+  XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 400, 1000, 50, true, true)
+  XSPerfHistogram("load_miss_penalty_to_use", load_miss_penalty, load_miss_penalty_sample, 1000, 5000, 200, true, false)
 
   val (a_to_d_penalty_sample, a_to_d_penalty) = TransactionLatencyCounter(start_counting, GatedValidRegNext(io.mem_grant.fire && refill_done))
   XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 0, 20, 1, true, true)
-  XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 20, 100, 10, true, false)
+  XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 20, 100, 10, true, true)
+  XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 100, 1000, 50, true, true)
+  XSPerfHistogram("a_to_d_penalty", a_to_d_penalty, a_to_d_penalty_sample, 1000, 5000, 200, true, false)
 }
 
 class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DCacheModule
@@ -1636,7 +1642,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.memSetPattenDetected := memSetPattenDetected
 
   val forwardInfo_vec = VecInit(entries.map(_.io.forwardInfo))
-  val VLENB = VLEN / 8
   // Forwarding paddr CAM, shared by io.forward and io.forward_stData
   val paddrFwd = Wire(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
   val s1PaddrMatchVec = Wire(Vec(LoadPipelineWidth, Vec(cfg.nMissEntries, Bool())))

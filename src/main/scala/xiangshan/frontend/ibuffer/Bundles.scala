@@ -25,10 +25,11 @@ import xiangshan.CtrlFlow
 import xiangshan.ExceptionNO
 import xiangshan.TriggerAction
 import xiangshan.XSCoreParamsKey
+import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
+import xiangshan.frontend.Pc
 import xiangshan.frontend.PreDecodeInfo
-import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.ftq.FtqPtr
 
 // FIXME: these ptrs have ambiguous names
@@ -47,16 +48,16 @@ class IBufBankPtr(implicit p: Parameters) extends CircularQueuePtr[IBufBankPtr](
     ) {}
 
 class IBufEntry(implicit p: Parameters) extends IBufferBundle {
-  val inst:             UInt       = UInt(32.W)
-  val pc:               PrunedAddr = PrunedAddr(VAddrBits)
-  val foldpc:           UInt       = UInt(MemPredPCWidth.W)
-  val isRvc:            Bool       = Bool()
-  val predTaken:        Bool       = Bool()
-  val fixedTaken:       Bool       = Bool()
-  val ftqPtr:           FtqPtr     = new FtqPtr
-  val instrEndOffset:   UInt       = UInt(FetchBlockInstOffsetWidth.W)
-  val triggered:        UInt       = TriggerAction()
-  val isLastInFtqEntry: Bool       = Bool()
+  val inst:             UInt   = UInt(32.W)
+  val pc:               Pc     = Pc()
+  val foldpc:           UInt   = UInt(MemPredPCWidth.W)
+  val isRvc:            Bool   = Bool()
+  val predTaken:        Bool   = Bool()
+  val fixedTaken:       Bool   = Bool()
+  val ftqPtr:           FtqPtr = new FtqPtr
+  val instrEndOffset:   UInt   = UInt(FetchBlockInstOffsetWidth.W)
+  val triggered:        UInt   = TriggerAction()
+  val isLastInFtqEntry: Bool   = Bool()
 
   val debug_seqNum: InstSeqNum = InstSeqNum()
 
@@ -92,6 +93,8 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     result.hasSatpFlush       := exception.hasSatpFlush
     result.triggered          := triggered
     result.isLastInFtqEntry   := isLastInFtqEntry
+    result.vtype              := DontCare // assign outside
+    result.specvtype          := DontCare // assign outside
     result.debug_seqNum       := debug_seqNum
     result.instrEndOffset     := instrEndOffset
     result
@@ -118,7 +121,7 @@ class IBufExceptionEntry(implicit p: Parameters) extends IBufferBundle {
 // in the IBuffer, which will be differentiated from IBufEntry.
 class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val inst:               UInt          = UInt(32.W)
-  val pc:                 PrunedAddr    = PrunedAddr(VAddrBits)
+  val pc:                 Pc            = Pc()
   val foldpc:             UInt          = UInt(MemPredPCWidth.W)
   val isRvc:              Bool          = Bool()
   val predTaken:          Bool          = Bool()
@@ -131,7 +134,10 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val triggered:          UInt          = TriggerAction()
   val isLastInFtqEntry:   Bool          = Bool()
   val instrEndOffset:     UInt          = UInt(FetchBlockInstOffsetWidth.W)
-  val debug_seqNum:       InstSeqNum    = InstSeqNum()
+  val vtype:              VType         = VType()
+  val specvtype:          VType         = VType()
+
+  val debug_seqNum: InstSeqNum = InstSeqNum()
 
   def toCtrlFlow: CtrlFlow = {
     val cf = Wire(new CtrlFlow)
@@ -159,6 +165,8 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.ftqPtr                                        := ftqPtr
     cf.ftqOffset                                     := instrEndOffset
     cf.isLastInFtqEntry                              := isLastInFtqEntry
+    cf.vtype                                         := vtype
+    cf.specvtype                                     := specvtype
     cf.debug_seqNum                                  := debug_seqNum
     cf
   }

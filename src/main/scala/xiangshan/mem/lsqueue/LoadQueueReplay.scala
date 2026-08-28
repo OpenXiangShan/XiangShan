@@ -197,7 +197,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val io = IO(new Bundle() {
     // control
     val redirect = Flipped(ValidIO(new Redirect))
-    val vecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
 
     // from load unit s3
     val enq = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle)))
@@ -879,23 +878,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
         scheduled(schedIndex) := false.B
       }
     }
-  }
-
-  // vector load, all replay entries of same robidx and uopidx
-  // should be released when vlmergebuffer commit or flush
-  val vecLdCanceltmp = Wire(Vec(LoadQueueReplaySize, Vec(VecLoadPipelineWidth, Bool())))
-  val vecLdCancel = Wire(Vec(LoadQueueReplaySize, Bool()))
-  val vecLdCommittmp = Wire(Vec(LoadQueueReplaySize, Vec(VecLoadPipelineWidth, Bool())))
-  val vecLdCommit = Wire(Vec(LoadQueueReplaySize, Bool()))
-  for (i <- 0 until LoadQueueReplaySize) {
-    val fbk = io.vecFeedback
-    for (j <- 0 until VecLoadPipelineWidth) {
-      vecLdCanceltmp(i)(j) := allocated(i) && fbk(j).valid && fbk(j).bits.isFlush && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
-      vecLdCommittmp(i)(j) := allocated(i) && fbk(j).valid && fbk(j).bits.isCommit && uop(i).robIdx === fbk(j).bits.robidx && uop(i).uopIdx === fbk(j).bits.uopidx
-    }
-    vecLdCancel(i) := vecLdCanceltmp(i).reduce(_ || _)
-    vecLdCommit(i) := vecLdCommittmp(i).reduce(_ || _)
-    XSError(((vecLdCancel(i) || vecLdCommit(i)) && allocated(i)), s"vector load, should not have replay entry $i when commit or flush.\n")
   }
 
   // misprediction recovery / exception redirect

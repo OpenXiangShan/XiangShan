@@ -29,6 +29,7 @@ import xiangshan.backend.issue._
 import xiangshan.backend.regfile._
 import xiangshan.{DebugOptionsKey, XSCoreParamsKey}
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.vector.{Exu, RegionParam}
 
 import scala.collection.mutable
 import scala.reflect.{ClassTag, classTag}
@@ -37,9 +38,12 @@ case class BackendParams(
   schdParams : Map[SchedulerType, SchdBlockParams],
   pregParams : Seq[PregParams],
   iqWakeUpParams : Seq[WakeUpConfig],
-) {
+) extends NewParam {
 
-  def debugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).EnableDifftest
+  def debugEn(implicit p: Parameters): Boolean = {
+    val debugOpts = p(DebugOptionsKey)
+    debugOpts.EnableDifftest || debugOpts.FullBasicDiff
+  }
 
   def robCompressEn: Boolean = false
 
@@ -83,6 +87,12 @@ case class BackendParams(
   // filter not fake exu unit
   def allRealExuParams =
     allExuParams.filterNot(_.fakeUnit)
+
+  // TODO: add vecSchdParams when it is ready
+  def iqEntryNum = Seq(
+    intSchdParams.get,
+    fpSchdParams.get,
+  ).flatMap(_.issueBlockParams).map(_.numEntries).sum
 
   def intPregParams: IntPregParams = pregParams.collectFirst { case x: IntPregParams => x }.get
   def fpPregParams: FpPregParams = pregParams.collectFirst { case x: FpPregParams => x }.get
@@ -129,7 +139,7 @@ case class BackendParams(
   def numNoDataWB = allSchdParams.map(_.numNoDataWB).sum
   def numExu = allSchdParams.map(_.numExu).sum
 
-  def numException = allRealExuParams.count(_.exceptionOut.nonEmpty)
+  def numException(implicit p: Parameters) = getWrite2RobSize(_.needExceptionGen)
 
   def numRedirect = 1 // only for ahead info to frontend
 
@@ -170,7 +180,22 @@ case class BackendParams(
   }
 
   def genWrite2RobBundles(implicit p: Parameters): MixedVec[ValidIO[WriteBackRobBundle]] = {
-    MixedVec(allSchdParams.map(_.genWriteBackRobValidBundle.flatten).flatten)
+    MixedVec(allSchdParams.map(_.genWriteBackRobValidBundle(needExtraVld = true).flatten).flatten)
+  }
+
+  def getWrite2RobParams(needExtraVld: Boolean = true): Seq[ExeUnitParams] = {
+    allIssueParams.flatMap(_.getWriteBackRobParams(needExtraVld))
+  }
+
+  def getWrite2RobSize(cond: ExeUnitParams => Boolean = _ => true)(implicit p: Parameters): Int =
+    getWrite2RobParams().count(cond)
+
+  def genNewExuOutputBundle[T <: Bundle](
+    builder: NewExuOutput => T,
+    when: ExeUnitParams => Boolean,
+    dataConfigs: Seq[DataConfig],
+  )(implicit p: Parameters): MixedVec[MixedVec[T]] = {
+    MixedVec(allSchdParams.flatMap(_.genNewExuOutputBundle(builder, when)))
   }
 
   def getIntWbArbiterParams: WbArbiterParams = {
@@ -189,7 +214,7 @@ case class BackendParams(
   }
 
   def getV0WbArbiterParams: WbArbiterParams = {
-    val v0WbCfgs: Seq[V0WB] = allSchdParams.flatMap(_.getWbCfgs.flatten.flatten.filter(x => x.writeV0)).map(_.asInstanceOf[V0WB])
+    val v0WbCfgs: Seq[V0WB] = allIssueParams.flatMap(_.exuBlockParams.filter(_.v0WB != null).map(_.v0WB))
     datapath.WbArbiterParams(v0WbCfgs, v0PregParams, this)
   }
 
@@ -215,6 +240,22 @@ case class BackendParams(
       .toSeq
       .sortBy(_._1)
     cfgs
+  }
+
+  def getV0RdPortParams: Seq[(Int, Seq[(Int, Int)])] = {
+    allRealExuParams
+      .filter(_.v0RD != null)
+      .map(x => (x.v0RD, x.exuIdx))
+      .groupBy { case (rdCfg, exuIdx) => rdCfg.port }
+      .map {
+        case (port, cfgExuIdxSeq) =>
+          port ->
+            cfgExuIdxSeq
+              .map { case (v0Rd, exuIdx) => (exuIdx, v0Rd.priority) }
+              .sortBy { case (exuIdx, prio) => prio }
+      }
+      .toSeq
+      .sortBy { case (port, _) => port }
   }
 
   def getVlRdPortParams: Seq[(Int, Seq[(Int, Int)])] = {
@@ -252,6 +293,24 @@ case class BackendParams(
   }
 
   /**
+   * Get v0 regfile write back port params
+   *
+   * @return Seq[port -> Seq[(exuIdx, priority)] ]
+   */
+  def getV0WbPortParams = {
+    allRealExuParams
+      .filter(_.v0WB != null)
+      .map(exuParams => exuParams.v0WB -> exuParams.exuIdx)
+      .groupBy{ case (v0wb, exuIdx) => v0wb.port }
+      .map{
+        case (port, wbIdxSeq) =>
+          port -> wbIdxSeq.map { case (wb, exuIdx) => (exuIdx, wb.priority) }
+      }
+      .toSeq
+      .sortBy { case (port, _) => port }
+  }
+
+  /**
    * Get vl regfile write back port params
    *
    * @return Seq[port -> Seq[(exuIdx, priority)] ]
@@ -272,6 +331,7 @@ case class BackendParams(
   def getRdPortIndices(dataCfg: DataConfig) = {
     dataCfg match {
       case VlData() => this.getVlRdPortParams.map(_._1)
+      case V0Data() => this.getV0RdPortParams.map(_._1)
       case _ => this.getRdPortParams(dataCfg).map(_._1)
     }
   }
@@ -279,6 +339,7 @@ case class BackendParams(
   def getWbPortIndices(dataCfg: DataConfig) = {
     dataCfg match {
       case VlData() => this.getVlWbPortParams.map(_._1)
+      case V0Data() => this.getV0WbPortParams.map(_._1)
       case _ => this.getWbPortParams(dataCfg).map(_._1)
     }
   }
@@ -299,6 +360,14 @@ case class BackendParams(
     allIssueParams.map(
       _.exuBlockParams.map(
         x => Option(x.vlRD).toSeq
+      )
+    )
+  }
+
+  def getV0RdCfgs: Seq[Seq[Seq[V0RD]]] = {
+    allIssueParams.map(
+      _.exuBlockParams.map(
+        x => Option(x.v0RD).toSeq
       )
     )
   }
@@ -363,6 +432,15 @@ case class BackendParams(
 
   def getVlRfWriteSize = {
     this.vlPregParams.numWrite.getOrElse(this.getWbPortIndices(VlData()).size)
+  }
+
+  /**
+   * Get size of read ports of vl regfile
+   *
+   * @return if [[VlPregParams.numRead]] is [[None]], get size of ports in [[VlRD]]
+   */
+  def getVlRfReadSize = {
+    this.vlPregParams.numRead.getOrElse(this.getRdPortIndices(VlData()).size)
   }
 
   def getRfReadSize(dataCfg: DataConfig) = {
@@ -539,6 +617,27 @@ case class BackendParams(
       }
     }
   }
+}
+
+sealed trait NewParam { self: BackendParams =>
+  def getIntRegionParam: RegionParam = RegionParam(intSchdParams.get, this)
+  def getFltRegionParam: RegionParam = RegionParam(fpSchdParams.get, this)
+  def getVecRegionParam: RegionParam = RegionParam(vecSchdParams.get, this)
+
+  def regionParams: Seq[RegionParam] = Seq(
+    getIntRegionParam,
+    getFltRegionParam,
+    getVecRegionParam,
+  )
+
+  // New api name
+  def gpPregParams = this.intPregParams
+  def vpPregParams = this.vfPregParams
+  def getVpWriteSize = this.getVfRfWriteSize
+
+  def genExuToRfBundle(pregParams: PregParams): MixedVec[MixedVec[MixedVec[Exu.ToRf]]] = MixedVec(
+    regionParams.map(_.genExuToRfBundle(pregParams))
+  )
 }
 
 object BackendV2SchdParams {

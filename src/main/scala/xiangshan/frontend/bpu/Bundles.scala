@@ -22,7 +22,8 @@ import utils.Duplicate
 import utils.EnumUInt
 import xiangshan.Resolve
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.GuardedPc
+import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
 import xiangshan.frontend.bpu.history.commonhr.CommonHRMeta
 import xiangshan.frontend.bpu.history.commonhr.CommonHRResolveMeta
@@ -196,14 +197,14 @@ class BpuCtrl extends Bundle {
 
 // Bpu -> Ftq
 class BpuPrediction(implicit p: Parameters) extends BpuBundle {
-  val startPc:     PrunedAddr = PrunedAddr(VAddrBits)
-  val target:      PrunedAddr = PrunedAddr(VAddrBits)
-  val taken:       Bool       = Bool()
-  val endPosition: UInt       = UInt(CfiPositionWidth.W)
+  val startPc:     GuardedPc = GuardedPc()
+  val target:      GuardedPc = GuardedPc()
+  val taken:       Bool      = Bool()
+  val endPosition: UInt      = UInt(CfiPositionWidth.W)
   // override valid
   val s3Override: Bool = Bool()
 
-  def fromStage(startPc: PrunedAddr, prediction: Prediction): Unit = {
+  def fromStage(startPc: GuardedPc, prediction: Prediction): Unit = {
     this.startPc     := startPc
     this.target      := prediction.target
     this.taken       := prediction.taken
@@ -214,15 +215,15 @@ class BpuPrediction(implicit p: Parameters) extends BpuBundle {
 // Backend & Ftq -> Bpu
 class BpuRedirect(implicit p: Parameters) extends BpuBundle {
   // BpuRedirect need the virtual address of the control flow instruction (cfiPc) instead of startPc in other bundles
-  val cfiPc:     PrunedAddr      = PrunedAddr(VAddrBits)
-  val target:    PrunedAddr      = PrunedAddr(VAddrBits)
+  val cfiPc:     Pc              = Pc()
+  val target:    GuardedPc       = GuardedPc()
   val taken:     Bool            = Bool()
   val attribute: BranchAttribute = new BranchAttribute
   val meta:      BpuRedirectMeta = new BpuRedirectMeta
 }
 
 class BranchInfo(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
-  val target:      PrunedAddr      = PrunedAddr(VAddrBits)
+  val target:      Pc              = Pc()
   val taken:       Bool            = Bool()
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val attribute:   BranchAttribute = new BranchAttribute
@@ -230,6 +231,7 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle with HalfAlignHelper 
 
   val debug_realCfiPc: Option[UInt] = Option.when(!env.FPGAPlatform)(UInt(VAddrBits.W))
 
+  // backend resolve train s1/s3 predictor
   def fromResolve(resolve: Resolve): Unit = {
     this.taken       := resolve.taken
     this.target      := resolve.target
@@ -245,31 +247,41 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle with HalfAlignHelper 
       )
     }
   }
+
+  // s3 prediction train s1 predictor
+  def fromPrediction(prediction: Prediction, hasOverride: Bool): Unit = {
+    this.taken       := prediction.taken
+    this.target      := prediction.target.unGuard // s1 training does not need guard bit
+    this.cfiPosition := prediction.cfiPosition
+    this.attribute   := prediction.attribute
+    this.mispredict  := hasOverride
+    // not available
+    this.debug_realCfiPc.foreach(_ := DontCare)
+  }
 }
 
 // Backend & Ftq -> Bpu
 class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
-  val startPcVec: Duplicate[Vec[PrunedAddr]] =
-    Duplicate(NumStartPcDuplicate, Vec(NumBtbAlignBanks, PrunedAddr(VAddrBits)))
+  val startPcVec: Duplicate[Vec[Pc]] =
+    Duplicate(NumStartPcDuplicate, Vec(NumBtbAlignBanks, Pc()))
   val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
   val meta:     BpuResolveMeta         = new BpuResolveMeta
   val perfMeta: BpuPerfMeta            = new BpuPerfMeta
 
   val debug_source: UInt = ResolveSource()
 
-  def startPc: PrunedAddr = startPcVec.get.head // get one duplicate and use its head (startPc for first alignBank)
+  def startPc: Pc = startPcVec.get.head // get one duplicate and use its head (startPc for first alignBank)
 
-  // we masked out all branches after the first mispredict branch in Bpu top (refer to Bpu.scala t0_firstMispredictMask)
-  // so, we can assert that branches.map(b => b.valid && b.bits.mispredict) is at-most-one-hot
-  // NOTE: do not use this on Bpu.io.fromFtq.train, it does not ensure the above assertion
+  // FTQ masks out all branches after the first mispredicted branch before sending training to BPU,
+  // so branches.map(b => b.valid && b.bits.mispredict) is at-most-one-hot.
   def mispredictBranch: Valid[BranchInfo] =
     Mux1H(branches.map(b => (b.valid && b.bits.mispredict, b)))
 }
 
 // Bpu top -> predictors
 class Train(NumStartPcVecDup: Int = 1)(implicit p: Parameters) extends BpuTrain {
-  override val startPcVec: Duplicate[Vec[PrunedAddr]] =
-    Duplicate(NumStartPcVecDup, Vec(NumBtbAlignBanks, PrunedAddr(VAddrBits)))
+  override val startPcVec: Duplicate[Vec[Pc]] =
+    Duplicate(NumStartPcVecDup, Vec(NumBtbAlignBanks, Pc()))
 
   def fromBpuTrain(that: BpuTrain): Unit = {
     this.startPcVec := that.startPcVec // NOTE this ':=' is overloaded for fan-out balancing
@@ -283,11 +295,10 @@ class Train(NumStartPcVecDup: Int = 1)(implicit p: Parameters) extends BpuTrain 
 
 // use s3 prediction to train s1 predictors
 class FastTrain(implicit p: Parameters) extends BpuBundle {
-  val startPc:         PrunedAddr    = PrunedAddr(VAddrBits)
-  val finalPrediction: Prediction    = new Prediction
-  val hasOverride:     Bool          = Bool()
-  val abtbMeta:        AheadBtbMeta  = new AheadBtbMeta
-  val utageMeta:       MicroTageMeta = new MicroTageMeta
+  val startPc:   Pc            = Pc()
+  val branch:    BranchInfo    = new BranchInfo
+  val abtbMeta:  AheadBtbMeta  = new AheadBtbMeta
+  val utageMeta: MicroTageMeta = new MicroTageMeta
 }
 
 // metadata for commit training (e.g. ras)
@@ -323,7 +334,7 @@ class BpuResolveMeta(implicit p: Parameters) extends BpuBundle {
 class BpuPerfMeta(implicit p: Parameters) extends BpuBundle {
   val bpId:         UInt                = UInt(XLEN.W)
   val scUsed:       UInt                = UInt(NumBtbResultEntries.W)
-  val startPc:      PrunedAddr          = new PrunedAddr(VAddrBits)
+  val startPc:      Pc                  = new Pc
   val s1Prediction: Prediction          = new Prediction
   val s3Prediction: Prediction          = new Prediction
   val mbtbMeta:     MainBtbMeta         = new MainBtbMeta
@@ -384,7 +395,7 @@ class StageCtrl(implicit p: Parameters) extends BpuBundle {
 // sub predictors -> Bpu top
 class Prediction(implicit p: Parameters) extends BpuBundle {
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
-  val target:      PrunedAddr      = PrunedAddr(VAddrBits)
+  val target:      GuardedPc       = GuardedPc()
   val attribute:   BranchAttribute = new BranchAttribute
   val taken:       Bool            = Bool()
 }

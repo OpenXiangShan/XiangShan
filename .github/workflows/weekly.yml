@@ -14,11 +14,11 @@ on:
 
 jobs:
   run:
-    name: Run GCC15 Performance Test
+    name: Run GCC16 Performance Test
     uses: ./.github/workflows/perf-template.yml
     with:
       test_branch: ${{ github.event.inputs.test_branch }}
-      benchmark_type: spec06-gcc15-1.0c
+      benchmark_type: spec06-rva23-novec-gcc16-1.0c
       servers: all
 
   run-xscc:
