@@ -2598,6 +2598,74 @@ def test_uncache_page_tail_fault_does_not_create_half_state(env, denied):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-1122")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_cross_page_half_is_flushed_while_second_page_response_pending(env):
+    _prepare_cross_page_rvi_stream(env)
+    env.uncache_agent.configure(latency=2, mmio_latency=64)
+    prev_half_samples = _register_prev_half_rvi_observer(env)
+    _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
+
+    first_beat = _CROSS_PAGE_PC & ~(_UNCACHE_BEAT_BYTES - 1)
+    next_page = _MMIO_BASE + _SV39_PAGE_SIZE
+    redirect_target = _MMIO_BASE + 0x40
+    assert _wait_for_request_addr(env, first_beat, max_cycles=5000)
+    assert _wait_for_request_addr(env, next_page, max_cycles=5000)
+
+    for _ in range(5000):
+        if prev_half_samples:
+            sample = prev_half_samples[-1]
+            if (
+                sample["last_request_addr"] == next_page
+                and int(sample["pending_count"]) > 0
+                and int(sample["s2"]) == 1
+            ):
+                break
+        env.step(1)
+    else:
+        raise AssertionError("next-page response never overlapped valid s2 half state")
+
+    redirect_queued_cycle = int(env.current_cycle)
+    observations_before_redirect = len(env.monitor.observations)
+    _force_redirect_to(env, redirect_target)
+    assert _wait_for_observed_pc(env, redirect_target, max_cycles=8000)
+    assert _wait_for_resp_count(env, 3, max_cycles=8000)
+    env.step(16)
+
+    redirect_samples = [
+        sample
+        for sample in prev_half_samples
+        if int(sample["cycle"]) >= redirect_queued_cycle
+    ]
+    redirect_cycles = [
+        int(sample["cycle"])
+        for sample in redirect_samples
+        if int(sample["backend_redirect"]) == 1
+    ]
+    assert redirect_cycles
+    first_redirect_cycle = min(redirect_cycles)
+    clear_window = [
+        sample
+        for sample in redirect_samples
+        if first_redirect_cycle <= int(sample["cycle"]) <= first_redirect_cycle + 3
+    ]
+    assert any(
+        int(sample["s0"]) == 0
+        and int(sample["s1_data"]) == 0
+        and int(sample["s1_pc"]) == 0
+        and int(sample["s2_valid"]) == 0
+        for sample in clear_window
+    ), {"clear_window": clear_window}
+    assert not any(
+        int(obs.pc) == _CROSS_PAGE_PC
+        for obs in env.monitor.observations[observations_before_redirect:]
+    )
+    assert env.functional_coverage.key_hit(
+        "ifu_instruncache_owner_v3", "instruncache_leaf_029"
+    )
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_bins("BIN-416", "BIN-1107", "BIN-1117")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_page_tail_rvc_does_not_fetch_next_page_before_delivery(env):

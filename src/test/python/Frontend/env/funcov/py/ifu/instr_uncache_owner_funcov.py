@@ -319,6 +319,8 @@ def sample_instr_uncache_owner_coverage(
                 "saw_recovery_request": False,
                 "redirect_half_pc": None,
                 "redirect_half_data": None,
+                "recovery_entry_addr": None,
+                "flush_pending": None,
             }
             _mark(recorder, 22, cycle, evidence)
         if (
@@ -426,8 +428,65 @@ def sample_instr_uncache_owner_coverage(
             and int(s["prev_half_pc"]) == cross_page["redirect_half_pc"]
         ):
             cross_page["saw_recovery_request"] = True
+            cross_page["recovery_entry_addr"] = s["to_uncache_addr"]
             _mark(recorder, 27, cycle, evidence)
         if (
+            s["backend_redirect"] == 1
+            and cross_page["saw_half_redirect"]
+            and cross_page["saw_recovery_request"]
+            and entry_state == _ENTRY_REFILL_RESP
+            and cross_page["flush_pending"] is None
+        ):
+            cross_page["flush_pending"] = {
+                "old_pc": cross_page["redirect_half_pc"],
+                "old_entry_addr": (
+                    entry_addr
+                    if entry_addr is not None
+                    else cross_page["recovery_entry_addr"]
+                ),
+                "saw_clear": False,
+                "old_response_complete": False,
+                "old_delivery": False,
+            }
+        flush_pending = cross_page["flush_pending"]
+        if flush_pending is not None:
+            if (
+                s["to_valid"] == 1
+                and s["to_ready"] == 1
+                and s["to_pc"] is not None
+                and int(s["to_pc"]) == flush_pending["old_pc"]
+            ):
+                flush_pending["old_delivery"] = True
+            if s["prev_end_half"] == 0 and s["s2_valid"] != 1:
+                flush_pending["saw_clear"] = True
+            if (
+                s["instr_resp_valid"] == 1
+                and entry_addr is not None
+                and flush_pending["old_entry_addr"] is not None
+                and int(entry_addr) == int(flush_pending["old_entry_addr"])
+            ):
+                flush_pending["old_response_complete"] = True
+            if (
+                flush_pending["saw_clear"]
+                and flush_pending["old_response_complete"]
+                and not flush_pending["old_delivery"]
+            ):
+                _mark(
+                    recorder,
+                    29,
+                    cycle,
+                    {
+                        **evidence,
+                        "old_pc": flush_pending["old_pc"],
+                        "old_entry_addr": flush_pending["old_entry_addr"],
+                        "half_state_cleared": True,
+                        "old_response_completed": True,
+                        "old_delivery": False,
+                    },
+                )
+                state["cross_page_pending"] = None
+                cross_page = None
+        if cross_page is not None and (
             cross_page["saw_recovery_request"]
             and s["to_valid"] == 1
             and s["to_ready"] == 1
@@ -442,7 +501,7 @@ def sample_instr_uncache_owner_coverage(
         ):
             _mark(recorder, 28, cycle, evidence)
             state["cross_page_pending"] = None
-        if (
+        if cross_page is not None and (
             s["to_valid"] == 1
             and s["to_ready"] == 1
             and s["to_exception_cross_page"] == 1

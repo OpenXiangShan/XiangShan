@@ -433,6 +433,87 @@ def test_page_tail_fault_requires_legal_corrupt_response_and_no_resend():
         assert not _hit(recorder, 25)
 
 
+def test_cross_page_half_flush_waits_for_old_response_and_blocks_old_delivery():
+    snapshot = _snapshot()
+    recorder = _Recorder()
+    snapshot.update(
+        {
+            "entry_state": protocol._ENTRY_REFILL_RESP,
+            "entry_req_addr": 0x7FF,
+            "entry_resending": 0,
+            "tl_d_valid": 1,
+            "tl_d_data": 0x0013 << 48,
+            "tl_d_corrupt": 0,
+            "tl_d_denied": 0,
+        }
+    )
+    _sample(recorder, 1, snapshot)
+    snapshot.update(
+        {
+            "entry_state": 3,
+            "tl_d_valid": 0,
+            "instr_resp_valid": 1,
+            "instr_resp_data": 0x0013,
+            "instr_resp_corrupt": 0,
+            "instr_resp_denied": 0,
+            "instr_resp_need_resend": 1,
+        }
+    )
+    _sample(recorder, 2, snapshot)
+    snapshot.update(
+        {
+            "entry_state": protocol._ENTRY_IDLE,
+            "instr_resp_valid": 0,
+            "uncache_redirect": 1,
+            "resp_need_resend": 1,
+            "resp_data": 0x0013,
+            "uncache_pc": 0x7FF,
+        }
+    )
+    _sample(recorder, 3, snapshot)
+    snapshot.update(
+        {
+            "uncache_redirect": 0,
+            "resp_need_resend": 0,
+            "prev_end_half": 1,
+            "prev_half_data": 0x0013,
+            "prev_half_pc": 0x7FF,
+            "to_uncache_valid": 1,
+            "to_uncache_ready": 1,
+            "to_uncache_addr": 0x800,
+        }
+    )
+    _sample(recorder, 4, snapshot)
+
+    snapshot.update(
+        {
+            "entry_state": protocol._ENTRY_REFILL_RESP,
+            "entry_req_addr": 0x800,
+            "to_uncache_valid": 0,
+            "backend_redirect": 1,
+            "s2_valid": 1,
+        }
+    )
+    _sample(recorder, 5, snapshot)
+    assert not _hit(recorder, 29)
+
+    snapshot.update(
+        {
+            "backend_redirect": 0,
+            "prev_end_half": 0,
+            "prev_half_data": 0,
+            "prev_half_pc": 0,
+            "s2_valid": 0,
+        }
+    )
+    _sample(recorder, 6, snapshot)
+    assert not _hit(recorder, 29)
+
+    snapshot.update({"entry_state": 3, "instr_resp_valid": 1})
+    _sample(recorder, 7, snapshot)
+    assert _hit(recorder, 29)
+
+
 def test_tl_user_attributes_must_match_entry_and_cover_mmio_and_nc_modes():
     snapshot = _snapshot()
     snapshot.update(
