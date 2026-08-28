@@ -371,6 +371,126 @@ class dispatch_monitor_event_adapter extends uvm_object;
         wb_event = candidate;
     endfunction:attach_current_issue_snapshot
 
+    // 中文注释：fault raw 的 current-first 非 fatal probe。预期的 replay/redirect 状态
+    // 仅返回 0；坏 key、owner 不一致和 future sample 仍由 fill helper 保持 fatal。
+    function bit try_attach_current_issue_snapshot(
+        ref memblock_wb_event_t wb_event,
+        input bit sample_flush_epoch_valid = 1'b0,
+        input int unsigned sample_flush_epoch = 0
+    );
+        memblock_uid_t      uid;
+        memblock_wb_event_t candidate;
+
+        ensure_handles();
+        if (!wb_event.valid || !wb_event.has_rob) begin
+            return 1'b0;
+        end
+        if (sample_flush_epoch_valid &&
+            sample_flush_epoch > memblock_sync_pkg::dispatch_flush_epoch) begin
+            `uvm_fatal("INT_WB_ATTACH", "current snapshot probe received a future sample epoch")
+        end
+        if (!data.lookup_active_uid_by_rob(wb_event.rob_key, uid)) begin
+            return 1'b0;
+        end
+        candidate = wb_event;
+        if (!fill_current_issue_snapshot(candidate, uid, candidate.rob_key,
+                                         sample_flush_epoch_valid,
+                                         sample_flush_epoch, 1'b0)) begin
+            return 1'b0;
+        end
+        wb_event = candidate;
+        return 1'b1;
+    endfunction:try_attach_current_issue_snapshot
+
+    // 中文注释：已进入 fault 的 active UID 收到重复 STA fault raw 时，只补全 event
+    // 让 writeback handler 幂等 drop；不读取 tombstone，也不改变已有 exception。
+    function bit try_attach_existing_sta_fault_snapshot(
+        ref memblock_wb_event_t wb_event,
+        input int unsigned sample_flush_epoch
+    );
+        memblock_uid_t      uid;
+        memblock_sq_key_t   sq_key;
+        memblock_uid_t      mapped_uid;
+        status_transaction  status;
+        int unsigned        target_flush_epoch;
+
+        ensure_handles();
+        if (!wb_event.valid || !wb_event.has_exception || !wb_event.has_rob) begin
+            return 1'b0;
+        end
+        if (sample_flush_epoch > memblock_sync_pkg::dispatch_flush_epoch) begin
+            `uvm_fatal("INT_WB_ATTACH", "terminal STA fault sample epoch is from the future")
+        end
+        if (!data.lookup_active_uid_by_rob(wb_event.rob_key, uid)) begin
+            return 1'b0;
+        end
+        status = data.get_status(uid);
+        if (!status.active || !(status.fault || status.exception_pending ||
+                                status.terminal_done) ||
+            !status.active_sq_mapped || status.get_rob_key() != wb_event.rob_key ||
+            status.sta_issue_epoch == 0 ||
+            !status.get_target_instance_flush_epoch(MEMBLOCK_ISSUE_TARGET_STA,
+                                                    target_flush_epoch) ||
+            sample_flush_epoch < target_flush_epoch) begin
+            return 1'b0;
+        end
+        sq_key.flag = status.sqIdx_flag;
+        sq_key.value = status.sqIdx_value;
+        if (!data.is_valid_sq_key(sq_key) ||
+            !data.lookup_active_uid_by_sq(sq_key, mapped_uid) || mapped_uid != uid) begin
+            `uvm_fatal("INT_WB_ATTACH",
+                       $sformatf("terminal STA fault SQ owner mismatch uid=%0d", uid))
+        end
+        wb_event.uid = uid;
+        wb_event.has_uid = 1'b1;
+        wb_event.sq_key = sq_key;
+        wb_event.has_sq = 1'b1;
+        wb_event.issue_epoch = status.sta_issue_epoch;
+        wb_event.has_issue_epoch = 1'b1;
+        wb_event.replay_seq = status.replay_seq;
+        wb_event.has_replay_seq = 1'b1;
+        return 1'b1;
+    endfunction:try_attach_existing_sta_fault_snapshot
+
+    // 中文注释：current STA snapshot 已因 replay 清除时，fault raw 才能从同 UID
+    // tombstone history 恢复旧身份。normal raw 从不调用本 helper。
+    function bit attach_sta_late_fault_snapshot(
+        ref memblock_wb_event_t wb_event,
+        input int unsigned sample_flush_epoch
+    );
+        memblock_uid_t                    uid;
+        memblock_sta_late_fault_tombstone_t tombstone;
+
+        ensure_handles();
+        if (!wb_event.valid || !wb_event.has_exception || !wb_event.has_rob) begin
+            return 1'b0;
+        end
+        if (sample_flush_epoch > memblock_sync_pkg::dispatch_flush_epoch) begin
+            `uvm_fatal("INT_WB_ATTACH", "late STA fault sample epoch is from the future")
+        end
+        if (!data.lookup_active_uid_by_rob(wb_event.rob_key, uid) ||
+            !data.read_sta_late_fault_tombstone(uid, wb_event.rob_key,
+                                                sample_flush_epoch, tombstone)) begin
+            return 1'b0;
+        end
+        wb_event.uid = uid;
+        wb_event.has_uid = 1'b1;
+        wb_event.rob_key = tombstone.rob_key;
+        wb_event.has_rob = 1'b1;
+        wb_event.sq_key = tombstone.sq_key;
+        wb_event.has_sq = 1'b1;
+        wb_event.issue_epoch = tombstone.issue_epoch;
+        wb_event.has_issue_epoch = 1'b1;
+        wb_event.replay_seq = tombstone.replay_seq;
+        wb_event.has_replay_seq = 1'b1;
+        `uvm_info("STA_LATE_TOMBSTONE",
+                  $sformatf("attach late fault uid=%0d issue_epoch=%0d replay_seq=%0d flush_epoch=%0d",
+                            uid, tombstone.issue_epoch, tombstone.replay_seq,
+                            tombstone.target_flush_epoch),
+                  UVM_LOW)
+        return 1'b1;
+    endfunction:attach_sta_late_fault_snapshot
+
     // 中文注释：对一个可能的 STD ROB flag 做一次有限候选检查。
     // active ROB 命中后先按 STD target/status/SQ owner/实例 epoch 过滤，再参与唯一性判断；
     // 因而另一 flag 命中一个非 STD uid 时不会误触发“双候选” fatal。
@@ -665,10 +785,30 @@ class dispatch_monitor_event_adapter extends uvm_object;
                 attach_current_issue_snapshot(wb_event, 1'b0, 1'b1, raw.sample_flush_epoch);
             end
             memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STA: begin
+                bit sta_fault_attached;
+
                 wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_STORE_WB;
                 wb_event.target = MEMBLOCK_ISSUE_TARGET_STA;
                 wb_event.has_rob = raw_rob_to_key(raw.rob_valid, raw.rob_flag, raw.rob_value, wb_event.rob_key);
-                attach_current_issue_snapshot(wb_event, 1'b0, 1'b1, raw.sample_flush_epoch);
+                sta_fault_attached = 1'b0;
+                if (wb_event.has_exception) begin
+                    sta_fault_attached = try_attach_existing_sta_fault_snapshot(
+                        wb_event, raw.sample_flush_epoch
+                    );
+                    if (!sta_fault_attached) begin
+                        sta_fault_attached = try_attach_current_issue_snapshot(
+                            wb_event, 1'b1, raw.sample_flush_epoch
+                        );
+                    end
+                    if (!sta_fault_attached) begin
+                        sta_fault_attached = attach_sta_late_fault_snapshot(
+                            wb_event, raw.sample_flush_epoch
+                        );
+                    end
+                end
+                if (!sta_fault_attached) begin
+                    attach_current_issue_snapshot(wb_event, 1'b0, 1'b1, raw.sample_flush_epoch);
+                end
             end
             memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STD: begin
                 wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_STORE_WB;

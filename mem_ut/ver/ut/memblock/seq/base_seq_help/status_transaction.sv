@@ -8,6 +8,19 @@
 `ifndef STATUS_TRANSACTION__SV
 `define STATUS_TRANSACTION__SV
 
+// 中文注释：STA IQ hit=0 后保存的旧 issue identity。raw STA 只有 ROB 和异常信息，
+// 因此 adapter 只能在 current snapshot 已失效且 raw 为 fault 时，用本记录恢复旧身份。
+typedef struct {
+    bit                  valid;
+    memblock_rob_key_t   rob_key;
+    memblock_sq_key_t    sq_key;
+    int unsigned         issue_epoch;
+    int unsigned         replay_seq;
+    int unsigned         dynamic_epoch;
+    int unsigned         target_flush_epoch;
+    longint unsigned     create_cycle;
+} memblock_sta_late_fault_tombstone_t;
+
 class status_transaction extends uvm_object;
 
     memblock_uid_t uid;
@@ -34,6 +47,9 @@ class status_transaction extends uvm_object;
     bit load_issue_feedback_success;
     bit sta_issue_feedback_success;
     bit std_issue_feedback_success;
+    // 中文注释：每 UID 的 STA late-fault history。IQ hit=0 创建，replay 不清除；
+    // STA fault、redirect/flush、terminal retire 或 reset 清除。仅 fault raw 可读取。
+    memblock_sta_late_fault_tombstone_t sta_late_fault_tombstone_q[$];
     bit load_pass;
     bit sta_pass;
     bit std_pass;
@@ -146,6 +162,10 @@ class status_transaction extends uvm_object;
         reset(0);
     endfunction:new
 
+    function void clear_sta_late_fault_tombstones();
+        sta_late_fault_tombstone_q.delete();
+    endfunction:clear_sta_late_fault_tombstones
+
     function void reset(input memblock_uid_t uid_i);
         uid               = uid_i;
         active            = 1'b0;
@@ -167,6 +187,7 @@ class status_transaction extends uvm_object;
         load_issue_feedback_success = 1'b0;
         sta_issue_feedback_success = 1'b0;
         std_issue_feedback_success = 1'b0;
+        clear_sta_late_fault_tombstones();
         load_pass         = 1'b0;
         sta_pass          = 1'b0;
         std_pass          = 1'b0;

@@ -86,15 +86,6 @@ class writeback_status_handler extends uvm_object;
         issue_epoch = wb_event.issue_epoch;
         replay_seq = wb_event.replay_seq;
         status = data.get_status(uid);
-        // 中文注释：严格 STA 模式把 IQ hit 作为 real-WB/fault-WB 的前置阶段。
-        // 未观察到 current issue 的 hit 时立即失败，不能让写回绕过 replay 判定。
-        if (wb_event.target == MEMBLOCK_ISSUE_TARGET_STA &&
-            target_real_wb_pass_enabled(MEMBLOCK_ISSUE_TARGET_STA) &&
-            !status.sta_issue_feedback_success) begin
-            `uvm_fatal("WB_STATUS_STA_ORDER",
-                       $sformatf("STA real writeback arrived before IQ hit uid=%0d issue_epoch=%0d replay_seq=%0d",
-                                 uid, issue_epoch, replay_seq))
-        end
         if (event_has_fault(wb_event)) begin
             `uvm_info("WB_STATUS",
                       $sformatf("fault feedback uid=%0d target=%0d port=%0d rob_valid=%0d rob=%0d/%0d lq_valid=%0d lq=%0d/%0d exception_vec=0x%0h",
@@ -115,6 +106,15 @@ class writeback_status_handler extends uvm_object;
             end
             data.push_feedback_event(wb_event);
             return 1'b1;
+        end
+        // 中文注释：normal STA raw 必须仍有 current IQ success；late raw 只有 fault
+        // 才能在 adapter 中借 tombstone 还原，不能放宽正常 writeback 的归属。
+        if (wb_event.target == MEMBLOCK_ISSUE_TARGET_STA &&
+            target_real_wb_pass_enabled(MEMBLOCK_ISSUE_TARGET_STA) &&
+            !status.sta_issue_feedback_success) begin
+            `uvm_fatal("WB_STATUS_STA_ORDER",
+                       $sformatf("STA real writeback arrived before IQ hit uid=%0d issue_epoch=%0d replay_seq=%0d",
+                                 uid, issue_epoch, replay_seq))
         end
         if (event_is_normal_pass(wb_event)) begin
             if (!data.mark_target_normal_pass(uid, wb_event.target, issue_epoch, replay_seq, wb_event.cycle)) begin
@@ -166,6 +166,21 @@ class writeback_status_handler extends uvm_object;
                 `uvm_warning("WB_STATUS",
                              $sformatf("drop STD issue feedback failed uid=%0d: no backend STD replay path", uid))
                 return 1'b0;
+            end
+            if (wb_event.target == MEMBLOCK_ISSUE_TARGET_STA) begin
+                if (!data.capture_sta_late_fault_tombstone(uid, issue_epoch, replay_seq, wb_event.cycle)) begin
+                    `uvm_info("WB_STATUS",
+                              $sformatf("drop stale STA replay feedback uid=%0d issue_epoch=%0d replay_seq=%0d",
+                                        uid, issue_epoch, replay_seq),
+                              UVM_LOW)
+                    return 1'b0;
+                end
+                `uvm_info("WB_STATUS",
+                          $sformatf("capture STA late-fault tombstone uid=%0d issue_epoch=%0d replay_seq=%0d; enqueue replay immediately",
+                                    uid, issue_epoch, replay_seq),
+                          UVM_LOW)
+                data.push_feedback_event(wb_event);
+                return 1'b1;
             end
             data.push_feedback_event(wb_event);
             return 1'b1;
