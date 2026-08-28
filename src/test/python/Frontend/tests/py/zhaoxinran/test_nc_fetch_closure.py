@@ -9,7 +9,7 @@ from env.sequences import (
     TranslationScenario,
     TranslationScenarioBuilder,
 )
-from env.support import PmpPmaConfig
+from env.support import PmpPmaConfig, fold_pc
 from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
 
 
@@ -130,6 +130,10 @@ def _register_cfvec_exception_observer(env) -> list[dict]:
                         "cycle": int(cycle),
                         "slot": int(slot),
                         "pc": int(observe.cfvec_pc[slot].value),
+                        "foldpc": int(observe.cfvec_foldpc[slot].value),
+                        "cross_page": int(
+                            observe.cfvec_cross_page_ipf_fix[slot].value
+                        ),
                         "bits": bits,
                     }
                 )
@@ -163,10 +167,22 @@ def _configure_exec_attrs_for_pages(env, pages: tuple[int, ...]) -> None:
         )
 
 
-def _nc_cross_page_fault_scenario(*, fault: str) -> tuple[TranslationScenario, int, int]:
+def _nc_cross_page_fault_scenario(
+    *, fault: str, scenario_index: int = 0
+) -> tuple[TranslationScenario, int, int]:
     # End on PTE sector lane 7 so the second page requires a new PTW response.
-    cross_page_va = uncache._NORMAL_BASE + 8 * uncache._SV39_PAGE_SIZE - 2
-    cross_page_pa = uncache._NORMAL_PHYS_BASE + uncache._SV39_PAGE_SIZE - 2
+    page_pair_offset = 2 * int(scenario_index) * uncache._SV39_PAGE_SIZE
+    cross_page_va = (
+        uncache._NORMAL_BASE
+        + (8 + 8 * int(scenario_index)) * uncache._SV39_PAGE_SIZE
+        - 2
+    )
+    cross_page_pa = (
+        uncache._NORMAL_PHYS_BASE
+        + page_pair_offset
+        + uncache._SV39_PAGE_SIZE
+        - 2
+    )
     first_page_pa = cross_page_pa & ~(uncache._SV39_PAGE_SIZE - 1)
     payload = int(uncache._ADDI_X0_X0_0).to_bytes(4, "little")
     payload += int(uncache._CNOP).to_bytes(2, "little") * 64
@@ -198,9 +214,15 @@ def _nc_cross_page_fault_scenario(*, fault: str) -> tuple[TranslationScenario, i
         for page in range(2)
     )
     if fault == "gpf":
-        gpa = uncache._NORMAL_PHYS_BASE + 0x20000 + uncache._SV39_PAGE_SIZE - 2
+        gpa = (
+            uncache._NORMAL_PHYS_BASE
+            + 0x20000
+            + page_pair_offset
+            + uncache._SV39_PAGE_SIZE
+            - 2
+        )
         scenario = TranslationScenario(
-            scenario_id="nc-cross-page-second-gpf",
+            scenario_id=f"nc-cross-page-second-gpf-{scenario_index}",
             va=cross_page_va,
             gpa=gpa,
             pa=cross_page_pa,
@@ -218,6 +240,12 @@ def _nc_cross_page_fault_scenario(*, fault: str) -> tuple[TranslationScenario, i
                     s2xlate=3,
                     patch=(("s2_gpf", 1),),
                 ),
+                TranslationPtwResponseOverride(
+                    vpn=(cross_page_va >> 12) + 1,
+                    s2xlate=3,
+                    get_gpa=1,
+                    patch=(("s2_gpf", 1),),
+                ),
             ),
             expected_path="fault",
             expected_result="guest_fault",
@@ -227,7 +255,7 @@ def _nc_cross_page_fault_scenario(*, fault: str) -> tuple[TranslationScenario, i
     else:
         patch_name = "s1_pf" if fault == "pf" else "s1_af"
         scenario = TranslationScenario(
-            scenario_id=f"nc-cross-page-second-{fault}",
+            scenario_id=f"nc-cross-page-second-{fault}-{scenario_index}",
             va=cross_page_va,
             pa=cross_page_pa,
             payload=payload,
@@ -767,6 +795,115 @@ def test_nc_cross_page_second_page_translation_fault_has_exact_pc(env, fault):
     assert not env.memory.is_mmio(first_beat)
     assert env.assert_translation_scenario()["error_count"] == 0
     assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1127")
+@pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_nc_cross_page_second_page_fault_matrix_keeps_original_identity(env):
+    fault_matrix = ("pf", "gpf", "af")
+    scenarios = [
+        _nc_cross_page_fault_scenario(fault=fault, scenario_index=index)
+        for index, fault in enumerate(fault_matrix)
+    ]
+    env.uncache_agent.configure(latency=16, mmio_latency=16)
+    uncache._initialize_sv39_fetch(env, reset_vector=scenarios[0][1])
+    exception_records = _register_cfvec_exception_observer(env)
+
+    for index, (fault, scenario_info) in enumerate(zip(fault_matrix, scenarios)):
+        scenario, cross_page_va, cross_page_pa = scenario_info
+        state = TranslationScenarioBuilder(env).build(scenario)
+        env.monitor.clear()
+        env.monitor.set_expected_pc(cross_page_va)
+        env.arm_translation_scenario(state)
+        exception_cursor = len(exception_records)
+        request_cursor = len(env.uncache_agent.get_stats().get("request_addrs", []))
+        uncache._force_redirect_to(env, cross_page_va)
+
+        first_beat = cross_page_pa & ~(uncache._UNCACHE_BEAT_BYTES - 1)
+        for _ in range(12000):
+            new_requests = env.uncache_agent.get_stats().get(
+                "request_addrs", []
+            )[request_cursor:]
+            if first_beat in new_requests:
+                break
+            env.step(1)
+        else:
+            raise AssertionError(
+                {
+                    "fault": fault,
+                    "first_beat": hex(first_beat),
+                    "uncache": env.uncache_agent.get_stats(),
+                    "ptw": env.ptw_agent.get_stats(),
+                }
+            )
+
+        for _ in range(12000):
+            active = env.translation_oracle.get_active()
+            if active is not None and active.get("fault_seen"):
+                break
+            env.step(1)
+        active = env.translation_oracle.get_active()
+        assert active is not None and active.get("fault_seen"), {
+            "fault": fault,
+            "active": active,
+            "ptw": env.ptw_agent.get_stats(),
+        }
+
+        for _ in range(6000):
+            active = env.translation_oracle.get_active()
+            expected_keys = {
+                (
+                    int(request["vpn"]),
+                    int(request["s2xlate"]),
+                    int(request["get_gpa"]),
+                )
+                for request in active["expected_ptw_requests"]
+            }
+            responded_keys = {
+                tuple(int(value) for value in key)
+                for key in active["responded_ptw_request_keys"]
+            }
+            if expected_keys.issubset(responded_keys):
+                break
+            env.step(1)
+        else:
+            raise AssertionError({"fault": fault, "active": active})
+
+        expected_exception_bit = {"pf": 12, "gpf": 20, "af": 1}[fault]
+        phase_exception_records = exception_records[exception_cursor:]
+        assert any(
+            record["bits"] == (expected_exception_bit,)
+            and record["cross_page"] == 1
+            and (
+                record["pc"] == int(cross_page_va)
+                or (
+                    record["pc"] == 0
+                    and record["foldpc"] == fold_pc(cross_page_va)
+                )
+            )
+            for record in phase_exception_records
+        ), {
+            "fault": fault,
+            "expected_pc": hex(cross_page_va),
+            "records": phase_exception_records,
+        }
+
+        new_requests = env.uncache_agent.get_stats().get(
+            "request_addrs", []
+        )[request_cursor:]
+        assert first_beat in new_requests
+        assert (cross_page_pa + 2) not in new_requests
+        assert env.assert_translation_scenario()["error_count"] == 0
+        assert not env.monitor.get_errors()
+        if index < len(fault_matrix) - 1:
+            assert not env.functional_coverage.key_hit(
+                "ifu_instruncache_owner_v3", "instruncache_leaf_034"
+            )
+        env.translation_oracle.disarm()
+
+    assert env.functional_coverage.key_hit(
+        "ifu_instruncache_owner_v3", "instruncache_leaf_034"
+    )
 
 
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
