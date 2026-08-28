@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from ....support import fold_pc
+
 
 INSTR_UNCACHE_OWNER_GROUP = "ifu_instruncache_owner_v3"
 INSTR_UNCACHE_OWNER_COVERPOINT = "protocol_leaf"
@@ -91,6 +93,12 @@ def _entry_evidence(s: dict[str, Optional[int]]) -> dict[str, Any]:
         "to_ready": s["to_ready"],
         "to_enq": s["to_enq"],
         "to_pc": s["to_pc"],
+        "to_foldpc": s["to_foldpc"],
+        "to_ftq_flag": s["to_ftq_flag"],
+        "to_ftq_value": s["to_ftq_value"],
+        "to_ftq_offset": s["to_ftq_offset"],
+        "s2_pc": s["s2_pc"],
+        "s2_instr_pc": s["s2_instr_pc"],
         "to_is_rvc": s["to_is_rvc"],
         "to_exception": s["to_exception"],
         "s2_uncache_data": s["s2_uncache_data"],
@@ -519,12 +527,74 @@ def sample_instr_uncache_owner_coverage(
         and (int(s["s2_instr_pc"]) & 0x7FF) == 0x7FF
         and s["to_valid"] == 1
         and s["to_ready"] == 1
+        and single_delivery
         and s["to_exception"] == 3
+        and s["prev_end_half"] == 0
         and s["to_uncache_valid"] != 1
         and s["tl_a_valid"] != 1
     )
     if first_page_iaf:
-        _mark(recorder, 30, cycle, {**evidence, "no_second_page_request": True})
+        first_page_pc = int(s["s2_instr_pc"]) << 1
+        expected_foldpc = fold_pc(first_page_pc)
+        expected_ftq_offset = (
+            None
+            if s["s2_pc"] is None
+            else int(s["s2_instr_pc"]) - int(s["s2_pc"])
+        )
+        identity_matches = (
+            None
+            not in (
+                expected_ftq_offset,
+                s["s2_ftq_flag"],
+                s["s2_ftq_value"],
+                s["to_ftq_flag"],
+                s["to_ftq_value"],
+                s["to_ftq_offset"],
+                s["to_foldpc"],
+            )
+            and s["to_ftq_flag"] == s["s2_ftq_flag"]
+            and s["to_ftq_value"] == s["s2_ftq_value"]
+            and int(s["to_ftq_offset"]) == expected_ftq_offset
+            and int(s["to_foldpc"]) == expected_foldpc
+        )
+        _mark(
+            recorder,
+            30,
+            cycle,
+            {
+                **evidence,
+                "first_page_pc": first_page_pc,
+                "no_instruncache_request": True,
+                "no_tl_a_request": True,
+                "single_exception_delivery": True,
+            },
+        )
+        if identity_matches:
+            _mark(
+                recorder,
+                31,
+                cycle,
+                {
+                    **evidence,
+                    "first_page_pc": first_page_pc,
+                    "expected_foldpc": expected_foldpc,
+                    "expected_ftq_offset": expected_ftq_offset,
+                    "ftq_identity_matches": True,
+                },
+            )
+        if s["to_exception_cross_page"] == 0:
+            _mark(
+                recorder,
+                32,
+                cycle,
+                {
+                    **evidence,
+                    "first_page_pc": first_page_pc,
+                    "mcause": "instruction_access_fault",
+                    "second_page_request_suppressed": True,
+                    "illegal_instruction": False,
+                },
+            )
 
     if tl_a_valid:
         accepted_attributes = state["accepted_request_attributes"]

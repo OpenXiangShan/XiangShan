@@ -127,6 +127,7 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
     active_to_ftq_flag = None
     active_to_ftq_value = None
     active_to_ftq_offset = None
+    active_to_foldpc = None
     if enq is not None and int(enq) != 0:
         active_slot = (int(enq) & -int(enq)).bit_length() - 1
         active_to_pc = _read_ifu(
@@ -140,6 +141,9 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         )
         active_to_ftq_offset = _read_ifu(
             recorder, dut, f"io_toIBuffer_bits_instrEndOffset_{active_slot}_offset"
+        )
+        active_to_foldpc = _read_ifu(
+            recorder, dut, f"io_toIBuffer_bits_foldpc_{active_slot}"
         )
     s2_align_shift = _read_ifu(recorder, dut, "s2_alignShiftNum")
     s2_instr_pc = (
@@ -333,6 +337,7 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "to_ftq_flag": active_to_ftq_flag,
         "to_ftq_value": active_to_ftq_value,
         "to_ftq_offset": active_to_ftq_offset,
+        "to_foldpc": active_to_foldpc,
         "to_is_rvc": is_rvc_mask if is_rvc_available else None,
         "to_exception": _read_ifu(
             recorder, dut, "io_toIBuffer_bits_exceptionType_value"
@@ -400,7 +405,6 @@ def _sample_mmio(
     nc_candidate = (
         s["s2_valid"] == 1 and s["s2_pmp_mmio"] == 0 and s["s2_pbmt"] == _PBMT_NC
     )
-    req_fire = s["req_valid"] == 1 and s["req_ready"] == 1
     single_delivery = s["to_enq"] is not None and int(s["to_enq"]).bit_count() == 1
     delivery_data = (
         s["s2_uncache_data"]
@@ -431,7 +435,6 @@ def _sample_mmio(
     ):
         empty_after = int(s["backend_empty"] == 1 and s["ibuffer_empty"] == 1)
     entry_wait_resp = s["entry_state"] == _ENTRY_REFILL_RESP
-    tl_a_fire = s["tl_a_valid"] == 1 and s["tl_a_ready"] == 1
     page_tail = (
         s["entry_req_addr"] is not None
         and (int(s["entry_req_addr"]) & 0x7FF) == 0x7FF
@@ -445,7 +448,6 @@ def _sample_mmio(
         shift = (int(s["entry_req_addr"]) & 0x3) * 16
         response_half = (int(s["tl_d_data"]) >> shift) & 0xFFFF
     response_is_rvi = response_half is not None and (response_half & 0x3) == 0x3
-    response_is_rvc = response_half is not None and (response_half & 0x3) != 0x3
     pending = mmio_candidate or mmio_active
     cancel_pending_mmio = (
         mmio_active

@@ -155,6 +155,7 @@ def test_mmio_cross_page_second_page_translation_fault(env, fault: str):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-1123", "BIN-1124", "BIN-1125")
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_page_tail_first_page_pmp_execute_fault_reports_iaf(env):
     """A first-page MMIO PMP execute denial must be IAF, never illegal."""
@@ -262,5 +263,6 @@ def test_mmio_page_tail_first_page_pmp_execute_fault_reports_iaf(env):
         and int(record["expected_va"]) == int(cross_page_va)
         for record in env.translation_oracle.get_stats()["records"]
     )
+    assert uncache._wait_for_ptw_resp(env, max_cycles=6000) >= 2
     assert env.assert_translation_scenario()["error_count"] == 0
     assert not env.monitor.get_errors()

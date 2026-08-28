@@ -1,5 +1,6 @@
 from env.funcov.py.ifu import instr_uncache_owner_funcov as protocol
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner
+from env.support import fold_pc
 
 
 class _Recorder:
@@ -512,6 +513,65 @@ def test_cross_page_half_flush_waits_for_old_response_and_blocks_old_delivery():
     snapshot.update({"entry_state": 3, "instr_resp_valid": 1})
     _sample(recorder, 7, snapshot)
     assert _hit(recorder, 29)
+
+
+def test_first_page_pmp_fault_requires_original_identity_and_no_uncache_request():
+    snapshot = _snapshot()
+    snapshot.update(
+        {
+            "s2_valid": 1,
+            "s2_req_uncache": 1,
+            "s2_use_uncache": 0,
+            "s2_exception": 3,
+            "s2_pc": 0x7FF,
+            "s2_instr_pc": 0x7FF,
+            "s2_ftq_flag": 0,
+            "s2_ftq_value": 7,
+            "to_valid": 1,
+            "to_ready": 1,
+            "to_enq": 1,
+            "to_exception": 3,
+            "to_exception_cross_page": 0,
+            "to_ftq_flag": 0,
+            "to_ftq_value": 7,
+            "to_ftq_offset": 0,
+            "to_foldpc": fold_pc(0xFFE),
+            "prev_end_half": 0,
+            "to_uncache_valid": 0,
+            "tl_a_valid": 0,
+        }
+    )
+    recorder = _Recorder()
+    _sample(recorder, 1, snapshot)
+    assert all(_hit(recorder, index) for index in (30, 31, 32))
+
+    wrong_identity = dict(snapshot)
+    wrong_identity["to_foldpc"] ^= 1
+    recorder = _Recorder()
+    _sample(recorder, 1, wrong_identity)
+    assert _hit(recorder, 30)
+    assert not _hit(recorder, 31)
+    assert _hit(recorder, 32)
+
+    wrong_offset = dict(snapshot)
+    wrong_offset["to_ftq_offset"] = 1
+    recorder = _Recorder()
+    _sample(recorder, 1, wrong_offset)
+    assert _hit(recorder, 30)
+    assert not _hit(recorder, 31)
+    assert _hit(recorder, 32)
+
+    leaked_request = dict(snapshot)
+    leaked_request["tl_a_valid"] = 1
+    recorder = _Recorder()
+    _sample(recorder, 1, leaked_request)
+    assert not any(_hit(recorder, index) for index in (30, 31, 32))
+
+    illegal = dict(snapshot)
+    illegal["to_exception"] = 4
+    recorder = _Recorder()
+    _sample(recorder, 1, illegal)
+    assert not any(_hit(recorder, index) for index in (30, 31, 32))
 
 
 def test_tl_user_attributes_must_match_entry_and_cover_mmio_and_nc_modes():
