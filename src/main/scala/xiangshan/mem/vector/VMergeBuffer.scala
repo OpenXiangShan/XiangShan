@@ -322,8 +322,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       entries(latchWbIndex).flowNum := entries(latchWbIndex).flowNum - latchFlowNum
 
       if (isVStore) {
-        val isUnitStride = LSUOpType.isAllUS(entries(wbIndex).uop.fuOpType)
-        when(!io.fromPipeline(i).bits.hit && !isUnitStride) {
+        when(!io.fromPipeline(i).bits.hit) {
           val replayFlowNumOffset = PopCount(mergePortMatrixMiss(i))
           val replayFlowMask = (0 until pipeWidth).map{case i => (0 until pipeWidth).map{case j =>
             UIntToOH(io.fromPipeline(j).bits.splitIndex, VLENB) & Fill(VLENB, mergePortMatrixMiss(i)(j))
@@ -366,6 +365,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val selAllocated = allocated(entryIdx)
     val selNeedRSReplay = needRSReplay(entryIdx)
     val selIsUnitStride = LSUOpType.isAllUS(selEntry.uop.fuOpType)
+    val selDoPartialReplay = selNeedRSReplay && (isVStore.B || !selIsUnitStride)
     val selFire  = selValid && canGo
     val canDeq = selFire && !selNeedRSReplay
     when(selFire) {
@@ -374,7 +374,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       selEntry.replayFlowMask := 0.U
       uopFinish(entryIdx)   := false.B
 
-      when (!selNeedRSReplay || selIsUnitStride) {
+      when (!selDoPartialReplay) {
         freeMaskVec(entryIdx) := selAllocated
         allocated(entryIdx)   := false.B
       } .otherwise {
@@ -398,7 +398,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     feedbackOut.dataInvalidSqIdx         := DontCare
     feedbackOut.sqIdx                    := selEntry.uop.sqIdx
     feedbackOut.lqIdx                    := selEntry.uop.lqIdx
-    feedbackOut.isVecPartReplay.foreach(_:= selNeedRSReplay && !selIsUnitStride)
+    feedbackOut.isVecPartReplay.foreach(_:= selDoPartialReplay)
     feedbackOut.vecReplayMask.foreach(_  := selEntry.replayFlowMask)
     feedbackOut.vecReplayMbIdx.foreach(_ := entryIdx)
 
