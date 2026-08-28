@@ -534,6 +534,17 @@ package memblock_sync_pkg;
         longint unsigned  cycle;
     } dispatch_raw_csr_t;
 
+    // 中文注释：分发到 PMP/PMA 的通用 CSR 写事实。CSR monitor 在 w.valid 的
+    // DUT sample 建立该值型记录；PMA/PMP model 在 request-fire 前按 sample
+    // 顺序消费，保证同边沿 request 使用旧表、后续 request 使用新 generation。
+    typedef struct {
+        bit               valid;
+        bit [11:0]        addr;
+        bit [63:0]        data;
+        longint unsigned  sample_seq;
+        time              sample_time;
+    } dispatch_raw_pma_pmp_csr_write_t;
+
     typedef struct {
         bit               valid;
         bit               rs1;
@@ -615,6 +626,9 @@ package memblock_sync_pkg;
     dispatch_raw_cancel_snapshot_t raw_cancel_snapshot_q[$];
     dispatch_raw_redirect_anchor_t raw_redirect_anchor_q[$];
     dispatch_raw_sfence_t      raw_sfence_q[$];
+    // 中文注释：generic CSR 写只由 CSR monitor 追加、由 common_data 的
+    // request-fire snapshot 路径按前缀消费。队列中的事件尚未影响模型 generation。
+    dispatch_raw_pma_pmp_csr_write_t raw_pma_pmp_csr_write_q[$];
     // 中文注释：CSR monitor 每个 DUT sample 发布一份短生命周期 context。
     // 同拍 fence 先到时 raw 留在 FIFO 等待绑定；下拍仍未绑定即为 monitor 时序错误。
     memblock_l2tlb_sfence_csr_context_t l2tlb_sfence_csr_context;
@@ -786,6 +800,17 @@ package memblock_sync_pkg;
         item.cycle             = 0;
         return item;
     endfunction:make_empty_raw_csr
+
+    function dispatch_raw_pma_pmp_csr_write_t make_empty_raw_pma_pmp_csr_write();
+        dispatch_raw_pma_pmp_csr_write_t item;
+
+        item.valid = 1'b0;
+        item.addr = '0;
+        item.data = '0;
+        item.sample_seq = 0;
+        item.sample_time = 0;
+        return item;
+    endfunction:make_empty_raw_pma_pmp_csr_write
 
     function dispatch_raw_sfence_t make_empty_raw_sfence();
         dispatch_raw_sfence_t item;
@@ -2402,6 +2427,43 @@ package memblock_sync_pkg;
         return 1'b1;
     endfunction:get_latest_raw_csr
 
+    // 中文注释：generic CSR write 的 producer 是 CSR monitor；该事件独立于 dispatch
+    // semantic capture gate，确保静态 Sv39 或早期 PMP/PMA 写也能按 sample 顺序回放。
+    // helper 不解释 CSR 地址，也不改变 PMA/PMP 表，语义由 common_data 的严格
+    // sample-order consumer 负责。
+    function void push_raw_pma_pmp_csr_write(
+        input dispatch_raw_pma_pmp_csr_write_t item
+    );
+        if (!item.valid) begin
+            return;
+        end
+        if (item.sample_seq == 0) begin
+            `uvm_fatal("MEMBLOCK_SYNC", "PMA/PMP CSR write requires non-zero sample")
+        end
+        raw_pma_pmp_csr_write_q.push_back(item);
+    endfunction:push_raw_pma_pmp_csr_write
+
+    function bit peek_raw_pma_pmp_csr_write(
+        output dispatch_raw_pma_pmp_csr_write_t item
+    );
+        if (raw_pma_pmp_csr_write_q.size() == 0) begin
+            item = make_empty_raw_pma_pmp_csr_write();
+            return 1'b0;
+        end
+        item = raw_pma_pmp_csr_write_q[0];
+        return item.valid;
+    endfunction:peek_raw_pma_pmp_csr_write
+
+    function bit pop_raw_pma_pmp_csr_write(
+        output dispatch_raw_pma_pmp_csr_write_t item
+    );
+        if (!peek_raw_pma_pmp_csr_write(item)) begin
+            return 1'b0;
+        end
+        item = raw_pma_pmp_csr_write_q.pop_front();
+        return 1'b1;
+    endfunction:pop_raw_pma_pmp_csr_write
+
     // Abstract responsibility: copy one immutable CSR sample into a raw fence
     // from the same DUT sample/reset epoch. It never changes FIFO order and
     // does not decide whether the fence should invalidate an entry.
@@ -2702,6 +2764,7 @@ package memblock_sync_pkg;
         raw_cancel_snapshot_q.delete();
         raw_redirect_anchor_q.delete();
         raw_sfence_q.delete();
+        raw_pma_pmp_csr_write_q.delete();
         l2tlb_sfence_csr_context = make_empty_l2tlb_sfence_csr_context();
         latest_raw_csr = make_empty_raw_csr();
         latest_raw_csr_valid = 1'b0;

@@ -51,6 +51,14 @@ class common_data_transaction extends uvm_object;
     // vpn/s2xlate；每个 bucket 受 DTLB filter 物理容量限制。
     memblock_uid_t uid_waiting_by_vpn_s2xlate[memblock_uid_tlb_wait_shape_key_t][$];
     mmu_csr_runtime_state    mmu_csr_state;
+    // 中文注释：PMA/PMP model 是整个 testcase 的唯一运行期表 owner。表项只由
+    // CSR monitor 的 raw write 回放更新；UID request-fire 冻结 generation 后，RM
+    // 只能通过只读 API 查询对应历史快照，不能读取当前可变表。
+    memblock_pma_pmp_model   pma_pmp_model;
+    // 中文注释：已被 PMA/PMP model 回放的最后一个 generic CSR write sample。
+    // 只允许单调增加；同 edge request 使用旧表，因此 sample 相等的写入保留给
+    // 下一笔 request 才消费。
+    longint unsigned         pma_pmp_last_applied_csr_sample;
     memblock_issue_q_item_t  load_issue_q[$];
     memblock_issue_q_item_t  sta_issue_q[$];
     memblock_issue_q_item_t  std_issue_q[$];
@@ -183,6 +191,9 @@ class common_data_transaction extends uvm_object;
         redirect_anchor_history_q.delete();
         mmu_csr_state       = mmu_csr_runtime_state::type_id::create("mmu_csr_state");
         mmu_csr_state.reset();
+        pma_pmp_model = memblock_pma_pmp_model::get();
+        pma_pmp_model.reset_and_init_v2_profile();
+        pma_pmp_last_applied_csr_sample = 0;
         next_tlb_entry_generation = 0;
         sfence_invalidate_pending_q.delete();
         uid_waiting_by_vpn_s2xlate.delete();
@@ -292,6 +303,11 @@ class common_data_transaction extends uvm_object;
             mmu_csr_state = mmu_csr_runtime_state::type_id::create("mmu_csr_state");
         end
         mmu_csr_state.reset();
+        if (pma_pmp_model == null) begin
+            pma_pmp_model = memblock_pma_pmp_model::get();
+        end
+        pma_pmp_model.reset_and_init_v2_profile();
+        pma_pmp_last_applied_csr_sample = 0;
         for (uid = 0; uid < main_trans_num_i; uid++) begin
             status_by_uid[uid] = status_transaction::type_id::create($sformatf("status_uid_%0d", uid));
             status_by_uid[uid].reset(uid);
@@ -4644,6 +4660,96 @@ class common_data_transaction extends uvm_object;
         add_waiting_uid_to_index(uid, record);
     endfunction:update_uid_tlb_record_context
 
+    // 抽象职责：回放严格早于 request-fire 的 CSR write，使该 request 使用与
+    // DUT 同边沿顺序一致的旧/新 PMA/PMP generation。该函数不扫描主表，只消费
+    // monitor FIFO 的连续前缀；同 sample 写入留给后续 request。
+    function void apply_pma_pmp_csr_writes_before_request(
+        input longint unsigned request_sample_seq
+    );
+        memblock_sync_pkg::dispatch_raw_pma_pmp_csr_write_t write_event;
+
+        if (request_sample_seq == 0) begin
+            `uvm_fatal("COMMON_DATA", "PMA/PMP CSR replay requires non-zero request sample")
+        end
+        if (pma_pmp_model == null) begin
+            `uvm_fatal("COMMON_DATA", "PMA/PMP model is unavailable during CSR replay")
+        end
+        while (memblock_sync_pkg::peek_raw_pma_pmp_csr_write(write_event) &&
+               write_event.sample_seq < request_sample_seq) begin
+            if (!memblock_sync_pkg::pop_raw_pma_pmp_csr_write(write_event)) begin
+                `uvm_fatal("COMMON_DATA", "PMA/PMP CSR FIFO peek/pop lost an event")
+            end
+            if (!write_event.valid || write_event.sample_seq == 0 ||
+                write_event.sample_seq <= pma_pmp_last_applied_csr_sample) begin
+                `uvm_fatal("COMMON_DATA",
+                           $sformatf("PMA/PMP CSR write sample is not strictly monotonic event=%0d applied=%0d",
+                                     write_event.sample_seq,
+                                     pma_pmp_last_applied_csr_sample))
+            end
+            pma_pmp_model.apply_csr_write(write_event.addr, write_event.data,
+                                          write_event.sample_seq);
+            pma_pmp_last_applied_csr_sample = write_event.sample_seq;
+        end
+    endfunction:apply_pma_pmp_csr_writes_before_request
+
+    // 抽象职责：向 readonly façade 提供 UID 在真实 request-fire 时冻结的
+    // PMA/PMP context。该 helper 不创建 singleton、也不补写缺失 context。
+    function bit read_pma_pmp_uid_context(
+        input memblock_uid_t uid,
+        output pma_pmp_uid_context_t context_view
+    );
+        context_view = '{default:'0};
+        return pma_pmp_model != null &&
+               pma_pmp_model.read_uid_context(uid, context_view);
+    endfunction:read_pma_pmp_uid_context
+
+    // 抽象职责：读取指定 dynamic epoch 的冻结 PMA/PMP context。旧 redirect 实例
+    // 不能借用同 UID 的新 context，避免延迟 writeback 读取到错误 generation。
+    function bit read_pma_pmp_uid_context_for_epoch(
+        input memblock_uid_t uid,
+        input int unsigned dynamic_epoch,
+        output pma_pmp_uid_context_t context_view
+    );
+        context_view = '{default:'0};
+        return pma_pmp_model != null &&
+               pma_pmp_model.read_uid_context_for_epoch(uid, dynamic_epoch,
+                                                        context_view);
+    endfunction:read_pma_pmp_uid_context_for_epoch
+
+    // 抽象职责：用已经冻结的 UID context 评估完整 post-TLB PMA/PMP AF；
+    // 该查询不读取 live CSR、不修改表，也不会把 TLB fault 后的访问误判为有效。
+    function bit evaluate_pma_pmp_for_uid(
+        input memblock_uid_t uid,
+        input bit translation_success,
+        input bit [47:0] paddr,
+        input int unsigned size_bytes,
+        input pma_pmp_cmd_e cmd,
+        output pma_pmp_eval_t result
+    );
+        result = '{default:'0};
+        return pma_pmp_model != null &&
+               pma_pmp_model.evaluate_for_uid(uid, translation_success, paddr,
+                                              size_bytes, cmd, result);
+    endfunction:evaluate_pma_pmp_for_uid
+
+    // 抽象职责：用指定 dynamic epoch 的上下文评估 post-TLB PMA/PMP。该路径是
+    // RM 延迟在 LDA/STA sample 查询时的唯一入口，绝不回读当前 live CSR 表。
+    function bit evaluate_pma_pmp_for_uid_epoch(
+        input memblock_uid_t uid,
+        input int unsigned dynamic_epoch,
+        input bit translation_success,
+        input bit [47:0] paddr,
+        input int unsigned size_bytes,
+        input pma_pmp_cmd_e cmd,
+        output pma_pmp_eval_t result
+    );
+        result = '{default:'0};
+        return pma_pmp_model != null &&
+               pma_pmp_model.evaluate_for_uid_epoch(uid, dynamic_epoch,
+                                                    translation_success, paddr,
+                                                    size_bytes, cmd, result);
+    endfunction:evaluate_pma_pmp_for_uid_epoch
+
     // Abstract responsibility: use the bounded shape index after a real
     // DTLB->L2TLB request fire.  It records only fire provenance and does not
     // create a token-to-UID ownership relation.
@@ -4703,6 +4809,8 @@ class common_data_transaction extends uvm_object;
                                  request_key.vmid))
         end
 
+        apply_pma_pmp_csr_writes_before_request(sample_seq);
+
         shape_key = make_uid_tlb_wait_shape_key(key.vpn, key.s2xlate);
         prune_uid_waiting_index_bucket(
             shape_key, "mark_waiting_uid_records_on_request_fire");
@@ -4745,6 +4853,21 @@ class common_data_transaction extends uvm_object;
                     // One request fire may mark several waiting UIDs.  The
                     // record remains independent of this request token.
                     record.mark_request_fire(sample_seq);
+                    if (status_by_uid[uid] == null ||
+                        !pma_pmp_model.capture_uid_context(
+                            uid,
+                            status_by_uid[uid].dynamic_epoch,
+                            request_csr_snapshot.priv_dmode,
+                            request_csr_snapshot.priv_debug,
+                            1'b0,
+                            1'b0,
+                            '0,
+                            request_csr_snapshot.update_seq,
+                            sample_seq)) begin
+                        `uvm_fatal("COMMON_DATA",
+                                   $sformatf("failed to freeze PMA/PMP context uid=%0d sample=%0d",
+                                             uid, sample_seq))
+                    end
                     marked_count++;
                 end
             end

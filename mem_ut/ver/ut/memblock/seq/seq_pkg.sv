@@ -69,6 +69,7 @@ package seq_pkg;
     `include "rob_order_util.sv"
     `include "seq_csr_common.sv"
     `include "mmu_csr_runtime_state.sv"
+    `include "memblock_pma_pmp_model.sv"
     `include "main_control_transaction.sv"
     `include "memblock_op_behavior_util.sv"
     `include "status_transaction.sv"

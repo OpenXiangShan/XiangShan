@@ -129,6 +129,10 @@ task csr_ctrl_agent_agent_monitor::mon_data();
     logic io_ooo_to_mem_tlbCsr_priv_debug;
     csr_ctrl_agent_agent_xaction  mon_tr;
     memblock_sync_pkg::dispatch_raw_csr_t raw_csr;
+    // 中文注释：该值型事件保留真实 distribute CSR write，不在 monitor 中解释
+    // pmpcfg/pmaaddr 地址。PMA/PMP model 以 sample 顺序消费，避免 sequence 预测值
+    // 直接改写参考表。
+    memblock_sync_pkg::dispatch_raw_pma_pmp_csr_write_t raw_pma_pmp_csr_write;
     // 中文注释：逐拍runtime CSR payload baseline，只由本monitor维护。
     // reset清valid；post-reset每拍更新，独立于semantic raw capture gate。
     memblock_sync_pkg::dispatch_raw_csr_t last_runtime_csr;
@@ -409,6 +413,19 @@ task csr_ctrl_agent_agent_monitor::mon_data();
             // payload, because the DUT consumes a fixed C-2 snapshot.
             memblock_sync_pkg::publish_l2tlb_csr_history(raw_csr,
                                                          current_sample_seq);
+            if (io_ooo_to_mem_csrCtrl_distribute_csr_w_valid === 1'b1) begin
+                raw_pma_pmp_csr_write =
+                    memblock_sync_pkg::make_empty_raw_pma_pmp_csr_write();
+                raw_pma_pmp_csr_write.valid = 1'b1;
+                raw_pma_pmp_csr_write.addr =
+                    io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_addr;
+                raw_pma_pmp_csr_write.data =
+                    io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_data;
+                raw_pma_pmp_csr_write.sample_seq = current_sample_seq;
+                raw_pma_pmp_csr_write.sample_time = $time;
+                memblock_sync_pkg::push_raw_pma_pmp_csr_write(
+                    raw_pma_pmp_csr_write);
+            end
             // 中文注释：SFENCE/HFENCE 的 stage 解释必须使用该 fence 同拍的
             // CSR，而不能在 adapter drain 时读取 latest。该发布独立于 semantic
             // raw capture gate，晚到的同拍 fence 会由同步包补齐 context。
