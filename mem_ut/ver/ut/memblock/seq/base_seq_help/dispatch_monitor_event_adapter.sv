@@ -371,6 +371,42 @@ class dispatch_monitor_event_adapter extends uvm_object;
         wb_event = candidate;
     endfunction:attach_current_issue_snapshot
 
+    // 中文注释：terminal UID 仍保留 active SQ map 到 fault retire 前。该 helper 仅消费
+    // 已由 SQ 和 terminal status 双重证明的迟到 STA IQ feedback；无 owner、SQ 不一致和
+    // 非 terminal 情况一律返回 0，继续走严格 current attach。
+    function bit try_drop_terminal_sta_iq_feedback(
+        input memblock_wb_event_t wb_event
+    );
+        memblock_uid_t     uid;
+        status_transaction status;
+        memblock_sq_key_t  canonical_sq;
+
+        ensure_handles();
+        if (!wb_event.valid ||
+            wb_event.source != MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK ||
+            wb_event.target != MEMBLOCK_ISSUE_TARGET_STA ||
+            !wb_event.has_sq || wb_event.has_rob || wb_event.has_lq) begin
+            return 1'b0;
+        end
+        if (!data.lookup_active_uid_by_sq(wb_event.sq_key, uid)) begin
+            return 1'b0;
+        end
+        status = data.get_status(uid);
+        canonical_sq.flag = status.sqIdx_flag;
+        canonical_sq.value = status.sqIdx_value;
+        if (!status.active_sq_mapped || canonical_sq != wb_event.sq_key ||
+            !(status.fault || status.exception_pending || status.terminal_done)) begin
+            return 1'b0;
+        end
+        `uvm_info("STA_IQ_TERMINAL_DROP",
+                  $sformatf("consume terminal STA IQ feedback uid=%0d sq=%0d/%0d fault=%0d exception_pending=%0d terminal_done=%0d sta_dispatched=%0d",
+                            uid, wb_event.sq_key.flag, wb_event.sq_key.value,
+                            status.fault, status.exception_pending,
+                            status.terminal_done, status.sta_dispatched),
+                  UVM_LOW)
+        return 1'b1;
+    endfunction:try_drop_terminal_sta_iq_feedback
+
     // 中文注释：fault raw 的 current-first 非 fatal probe。预期的 replay/redirect 状态
     // 仅返回 0；坏 key、owner 不一致和 future sample 仍由 fill helper 保持 fatal。
     function bit try_attach_current_issue_snapshot(
@@ -857,6 +893,9 @@ class dispatch_monitor_event_adapter extends uvm_object;
         wb_event.has_rob       = raw_rob_to_key(raw.rob_valid, raw.rob_flag, raw.rob_value, wb_event.rob_key);
         wb_event.has_lq         = 1'b0;
         wb_event.has_sq         = raw_sq_to_key(raw.sq_valid, raw.sq_flag, raw.sq_value, wb_event.sq_key);
+        if (try_drop_terminal_sta_iq_feedback(wb_event)) begin
+            return 1'b0;
+        end
         attach_current_issue_snapshot(wb_event);
         if (!wb_event.has_uid || !wb_event.has_rob || !wb_event.has_sq ||
             !wb_event.has_issue_epoch || !wb_event.has_replay_seq) begin
