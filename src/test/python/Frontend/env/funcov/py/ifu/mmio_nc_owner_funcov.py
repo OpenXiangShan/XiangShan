@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from .instr_uncache_owner_funcov import (
+    initialize_instr_uncache_owner_coverage_state,
+    sample_instr_uncache_owner_coverage,
+)
 from .owner_v3_funcov import mark_owner_v3_checked
 
 
@@ -100,6 +104,7 @@ def initialize_mmio_nc_owner_coverage_state(recorder) -> None:
         "previous_path": None,
         "path_transition_observations": {},
     }
+    initialize_instr_uncache_owner_coverage_state(recorder)
 
 
 def reset_mmio_nc_owner_coverage_state(recorder) -> None:
@@ -288,6 +293,30 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
             recorder,
             dut,
             "Frontend_top.Frontend.inner_instrUncache.entries_0.reqReg_addr_addr",
+        ),
+        "entry_mem_back_type_mm": _read(
+            recorder,
+            dut,
+            "Frontend_top.Frontend.inner_instrUncache.entries_0.reqReg_memBackTypeMM",
+            "Frontend_top.Frontend.inner_instrUncache.entries_0.io_req_bits_memBackTypeMM",
+        ),
+        "entry_mem_page_type_nc": _read(
+            recorder,
+            dut,
+            "Frontend_top.Frontend.inner_instrUncache.entries_0.reqReg_memPageTypeNC",
+            "Frontend_top.Frontend.inner_instrUncache.entries_0.io_req_bits_memPageTypeNC",
+        ),
+        "tl_a_mem_back_type_mm": _read(
+            recorder,
+            dut,
+            "auto_inner_instrUncache_client_out_a_bits_user_MemBackTypeMM",
+            "auto_inner_instrUncache_client_out_a_bits_user_memBackTypeMM",
+        ),
+        "tl_a_mem_page_type_nc": _read(
+            recorder,
+            dut,
+            "auto_inner_instrUncache_client_out_a_bits_user_MemPageTypeNC",
+            "auto_inner_instrUncache_client_out_a_bits_user_memPageTypeNC",
         ),
         "resp_valid": _read_uncache(recorder, dut, "io_resp_valid"),
         "resp_data": _read_uncache(recorder, dut, "io_resp_bits_uncacheData"),
@@ -1391,6 +1420,7 @@ def sample_mmio_nc_owner_coverage(recorder, env, cycle: int) -> None:
     snapshot = _snapshot(recorder, dut)
     _sample_mmio(recorder, int(cycle), snapshot, state)
     _sample_nc(recorder, int(cycle), snapshot, state)
+    sample_instr_uncache_owner_coverage(recorder, int(cycle), snapshot)
     state["previous_uncache_state"] = (
         _IDLE if snapshot["uncache_state"] is None else int(snapshot["uncache_state"])
     )

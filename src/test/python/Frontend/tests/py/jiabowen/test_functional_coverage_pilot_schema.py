@@ -14,6 +14,11 @@ from env.funcov.py.ifu.mmio_nc_owner_funcov import (
     MMIO_OWNER_GROUP,
     NC_OWNER_GROUP,
 )
+from env.funcov.py.ifu.instr_uncache_owner_funcov import (
+    INSTR_UNCACHE_OWNER_COVERPOINT,
+    INSTR_UNCACHE_OWNER_GROUP,
+    INSTR_UNCACHE_OWNER_SAMPLER_BIN_KEYS,
+)
 from tools.backannotate_funcov import validate_pilot_schema
 
 
@@ -64,8 +69,11 @@ ICACHE_MAINPIPE_S2_ECC_BIN_IDS = {
 
 ICACHE_MAPPED_STATUSES = {"MODELED", "PARTIAL", "HIT"}
 MMIO_NC_OWNER_BIN_IDS = {f"BIN-{index}" for index in range(1016, 1094)}
+INSTR_UNCACHE_OWNER_BIN_IDS = {f"BIN-{index}" for index in range(1094, 1132)}
 
-IFU_V3_OWNER_BLOCK_LEAF_COUNTS = (139, 43, 42, 81)
+IFU_V3_OWNER_MARKER_BLOCK_LEAF_COUNTS = (139, 43, 42, 81)
+IFU_V3_CANONICAL_BLOCK_RANGES = ((595, 770), (1026, 1142), (1184, 1243), (1245, 1349))
+IFU_V3_CANONICAL_BLOCK_LEAF_COUNTS = (139, 81, 42, 81)
 IFU_V3_FORBIDDEN_OWNER_TERMS = {
     "ifu_instr_boundary_v2",
     "targetFault",
@@ -91,7 +99,7 @@ def test_active_pilot_has_global_unique_identifiers_and_mappings():
 
     summary = validate_pilot_schema(pilot_path)
 
-    assert summary == {"rows": 686, "bin_ids": 686, "mapping_keys": 686, "legacy_ids": 4}
+    assert summary == {"rows": 724, "bin_ids": 724, "mapping_keys": 724, "legacy_ids": 4}
 
 
 def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
@@ -121,7 +129,7 @@ def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
 
     assert tuple(
         sum(bool(row[4].strip()) for row in block) for block in owner_blocks
-    ) == IFU_V3_OWNER_BLOCK_LEAF_COUNTS
+    ) == IFU_V3_OWNER_MARKER_BLOCK_LEAF_COUNTS
 
     for block in owner_blocks:
         assert "V3" in "".join(block[0])
@@ -144,6 +152,19 @@ def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
                 "BLOCKED",
             }
             assert row[9].strip() != "UNMAPPED"
+
+    canonical_blocks = [
+        rows[start - 1 : end] for start, end in IFU_V3_CANONICAL_BLOCK_RANGES
+    ]
+    assert (
+        tuple(sum(bool(row[4].strip()) for row in block) for block in canonical_blocks)
+        == IFU_V3_CANONICAL_BLOCK_LEAF_COUNTS
+    )
+    assert sum(IFU_V3_CANONICAL_BLOCK_LEAF_COUNTS) == 343
+    for block in canonical_blocks:
+        for row in block:
+            if row[4].strip():
+                assert row[9].strip() != "UNMAPPED"
 
 
 def test_jiabowen_owner_event_bins_are_exactly_mapped_once():
@@ -185,7 +206,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
     active = [row for row in rows if row["Coverpoint"].strip()]
     legacy_bpu_ftq = [row for row in rows if "旧BPU_FTQ" in row["映射测试点路径"]]
 
-    assert len(active) == 528
+    assert len(active) == 566
     assert {row["Bin_ID"] for row in active} == {
         *(f"BIN-{index:03d}" for index in range(401, 424)),
         *(f"BIN-{index:03d}" for index in range(424, 433)),
@@ -206,7 +227,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
         *(f"BIN-{index:03d}" for index in range(686, 717) if index not in (697, 716)),
         *(f"BIN-{index:03d}" for index in range(717, 759) if index not in (725, 729, 730)),
         *(f"BIN-{index:03d}" for index in range(759, 781)),
-        *(f"BIN-{index:03d}" for index in range(801, 1094)),
+        *(f"BIN-{index:03d}" for index in range(801, 1132)),
     }
     assert legacy_bpu_ftq
     assert all(not row["Coverpoint"].strip() for row in legacy_bpu_ftq)
@@ -265,6 +286,68 @@ def test_mmio_nc_owner_leaves_are_single_bin_and_match_registry():
     assert sum(
         row["Coverage_Group"] == NC_OWNER_GROUP for row in pilot_rows.values()
     ) == 39
+
+
+def test_instr_uncache_owner_leaves_are_complete_and_preserve_sv_models():
+    repo_root = Path(__file__).resolve().parents[7]
+    pilot_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
+    )
+    testpoint_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+    )
+
+    with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
+        pilot_rows = {
+            row["Bin_ID"]: row
+            for row in csv.DictReader(handle)
+            if row["Bin_ID"] in INSTR_UNCACHE_OWNER_BIN_IDS
+        }
+    assert set(pilot_rows) == INSTR_UNCACHE_OWNER_BIN_IDS
+    assert {
+        (row["Coverage_Group"], row["Bin_Name"]) for row in pilot_rows.values()
+    } == INSTR_UNCACHE_OWNER_SAMPLER_BIN_KEYS
+    assert all(
+        row["Coverage_Group"] == INSTR_UNCACHE_OWNER_GROUP
+        and row["Coverpoint"] == INSTR_UNCACHE_OWNER_COVERPOINT
+        for row in pilot_rows.values()
+    )
+
+    mapped_rows = {}
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            bin_ids = (
+                set(re.findall(r"BIN-\d+", row["coverage"]))
+                & INSTR_UNCACHE_OWNER_BIN_IDS
+            )
+            if not bin_ids:
+                continue
+            assert len(bin_ids) == 1, row["coverage"]
+            bin_id = bin_ids.pop()
+            assert bin_id not in mapped_rows
+            pilot = pilot_rows[bin_id]
+            python_mapping = (
+                f"covergroup {pilot['Coverage_Group']}, "
+                f"coverpoint {pilot['Coverpoint']}, "
+                f"bins {pilot['Bin_Name']} ({bin_id})"
+            )
+            assert python_mapping in row["coverage"]
+            assert row["status"] in {"MODELED", "PARTIAL"}
+            assert "MODEL:sample_instr_uncache_owner_coverage" in row["evidence"]
+            mapped_rows[bin_id] = row
+
+    assert set(mapped_rows) == INSTR_UNCACHE_OWNER_BIN_IDS
+    assert (
+        sum(
+            "covergroup frontend_mmio_fetch_cg" in row["coverage"]
+            for row in mapped_rows.values()
+        )
+        == 34
+    )
+    assert sum(row["status"] == "MODELED" for row in mapped_rows.values()) == 35
+    assert sum(row["status"] == "PARTIAL" for row in mapped_rows.values()) == 3
 
 
 def test_pilot_schema_rejects_duplicate_bin_id(tmp_path):

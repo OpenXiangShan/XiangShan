@@ -24,6 +24,7 @@ from . import (
     OWNER_V3_SAMPLER_BIN_KEYS,
     MMIO_V3_SAMPLER_BIN_KEYS,
     MMIO_NC_OWNER_SAMPLER_BIN_KEYS,
+    INSTR_UNCACHE_OWNER_SAMPLER_BIN_KEYS,
     handle_mmio_v3_checked_event,
     handle_owner_v3_event,
     initialize_ifu_cacheable_pipeline_state,
@@ -219,6 +220,7 @@ FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS = frozenset(
     | set(OWNER_V3_SAMPLER_BIN_KEYS)
     | set(MMIO_V3_SAMPLER_BIN_KEYS)
     | set(MMIO_NC_OWNER_SAMPLER_BIN_KEYS)
+    | set(INSTR_UNCACHE_OWNER_SAMPLER_BIN_KEYS)
     | set(TWO_FETCH_SAMPLER_BIN_KEYS)
     | set(UNCACHE_EVENT_SAMPLER_BIN_KEYS)
     | set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)
