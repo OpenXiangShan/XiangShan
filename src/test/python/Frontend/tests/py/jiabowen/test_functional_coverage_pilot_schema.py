@@ -346,8 +346,8 @@ def test_instr_uncache_owner_leaves_are_complete_and_preserve_sv_models():
         )
         == 34
     )
-    assert sum(row["status"] == "HIT" for row in mapped_rows.values()) == 21
-    assert sum(row["status"] == "MODELED" for row in mapped_rows.values()) == 15
+    assert sum(row["status"] == "HIT" for row in mapped_rows.values()) == 24
+    assert sum(row["status"] == "MODELED" for row in mapped_rows.values()) == 12
     assert sum(row["status"] == "PARTIAL" for row in mapped_rows.values()) == 2
 
 

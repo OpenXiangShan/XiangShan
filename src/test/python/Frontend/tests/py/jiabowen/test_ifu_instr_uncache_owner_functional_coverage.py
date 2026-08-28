@@ -238,7 +238,7 @@ def test_cross_8b_resend_checks_second_address_and_single_rvi_delivery():
             "entry_req_addr": first_addr,
             "entry_resending": 0,
             "tl_d_valid": 1,
-            "tl_d_data": 0x0003 << 48,
+                "tl_d_data": 0x0003 << 48,
             "tl_d_corrupt": 0,
             "tl_d_denied": 0,
         }
@@ -310,7 +310,7 @@ def test_page_tail_need_resend_does_not_count_an_internal_second_beat():
             "entry_req_addr": 0x7FF,
             "entry_resending": 0,
             "tl_d_valid": 1,
-            "tl_d_data": 0x0003 << 48,
+            "tl_d_data": 0x0013 << 48,
             "tl_d_corrupt": 0,
             "tl_d_denied": 0,
         }
@@ -322,7 +322,7 @@ def test_page_tail_need_resend_does_not_count_an_internal_second_beat():
             "entry_state": 3,
             "tl_d_valid": 0,
             "instr_resp_valid": 1,
-            "instr_resp_data": 0x0003,
+            "instr_resp_data": 0x0013,
             "instr_resp_corrupt": 0,
             "instr_resp_denied": 0,
             "instr_resp_need_resend": 1,
@@ -335,6 +335,102 @@ def test_page_tail_need_resend_does_not_count_an_internal_second_beat():
     snapshot.update({"entry_state": protocol._ENTRY_IDLE, "instr_resp_valid": 0})
     _sample(recorder, 3, snapshot)
     assert _hit(recorder, 23)
+
+    snapshot.update(
+        {
+            "uncache_redirect": 1,
+            "resp_need_resend": 1,
+            "resp_data": 0x0013,
+            "uncache_pc": 0x7FF,
+        }
+    )
+    _sample(recorder, 4, snapshot)
+    assert not _hit(recorder, 26)
+
+    snapshot.update(
+        {
+            "uncache_redirect": 0,
+            "resp_need_resend": 0,
+            "prev_end_half": 1,
+            "prev_half_data": 0x0013,
+            "prev_half_pc": 0x7FF,
+        }
+    )
+    _sample(recorder, 5, snapshot)
+    assert _hit(recorder, 26)
+
+    snapshot.update({"to_uncache_valid": 1, "to_uncache_ready": 1})
+    _sample(recorder, 6, snapshot)
+    assert _hit(recorder, 27)
+
+    snapshot.update(
+        {
+            "prev_end_half": 0,
+            "to_uncache_valid": 0,
+            "to_valid": 1,
+            "to_ready": 1,
+            "to_enq": 1,
+            "to_is_rvc": 0,
+            "to_exception": 0,
+            "to_pc": 0x800,
+            "s2_uncache_data": 0x00000013,
+        }
+    )
+    _sample(recorder, 7, snapshot)
+    assert not _hit(recorder, 28)
+    snapshot["to_pc"] = 0x7FF
+    _sample(recorder, 8, snapshot)
+    assert _hit(recorder, 28)
+
+
+def test_page_tail_fault_requires_legal_corrupt_response_and_no_resend():
+    for denied in (0, 1):
+        snapshot = _snapshot()
+        snapshot.update(
+            {
+                "entry_state": protocol._ENTRY_REFILL_RESP,
+                "entry_req_addr": 0x7FF,
+                "entry_resending": 0,
+                "tl_d_valid": 1,
+                "tl_d_data": 0x0003 << 48,
+                "tl_d_corrupt": 1,
+                "tl_d_denied": denied,
+            }
+        )
+        recorder = _Recorder()
+        _sample(recorder, 1, snapshot)
+        snapshot.update(
+            {
+                "entry_state": 3,
+                "tl_d_valid": 0,
+                "instr_resp_valid": 1,
+                "instr_resp_corrupt": 1,
+                "instr_resp_denied": denied,
+                "instr_resp_need_resend": 0,
+            }
+        )
+        _sample(recorder, 2, snapshot)
+        assert _hit(recorder, 25)
+
+        recorder = _Recorder()
+        snapshot.update(
+            {
+                "entry_state": protocol._ENTRY_REFILL_RESP,
+                "tl_d_valid": 1,
+                "instr_resp_valid": 0,
+            }
+        )
+        _sample(recorder, 1, snapshot)
+        snapshot.update(
+            {
+                "entry_state": 3,
+                "tl_d_valid": 0,
+                "instr_resp_valid": 1,
+                "instr_resp_need_resend": 1,
+            }
+        )
+        _sample(recorder, 2, snapshot)
+        assert not _hit(recorder, 25)
 
 
 def test_tl_user_attributes_must_match_entry_and_cover_mmio_and_nc_modes():

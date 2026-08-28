@@ -87,6 +87,18 @@ def _entry_evidence(s: dict[str, Optional[int]]) -> dict[str, Any]:
         "tl_d_corrupt": s["tl_d_corrupt"],
         "tl_d_denied": s["tl_d_denied"],
         "instr_resp_need_resend": s["instr_resp_need_resend"],
+        "to_valid": s["to_valid"],
+        "to_ready": s["to_ready"],
+        "to_enq": s["to_enq"],
+        "to_pc": s["to_pc"],
+        "to_is_rvc": s["to_is_rvc"],
+        "to_exception": s["to_exception"],
+        "s2_uncache_data": s["s2_uncache_data"],
+        "prev_end_half": s["prev_end_half"],
+        "prev_half_pc": s["prev_half_pc"],
+        "prev_half_data": s["prev_half_data"],
+        "to_uncache_valid": s["to_uncache_valid"],
+        "to_uncache_ready": s["to_uncache_ready"],
     }
 
 
@@ -303,6 +315,10 @@ def sample_instr_uncache_owner_coverage(
                 "entry_addr": pending_d["entry_addr"],
                 "data": s["instr_resp_data"],
                 "saw_internal_resend": False,
+                "saw_half_redirect": False,
+                "saw_recovery_request": False,
+                "redirect_half_pc": None,
+                "redirect_half_data": None,
             }
             _mark(recorder, 22, cycle, evidence)
         if (
@@ -315,7 +331,9 @@ def sample_instr_uncache_owner_coverage(
             _mark(recorder, 24, cycle, evidence)
         if (
             pending_d["page_tail"]
-            and (pending_d["corrupt"] == 1 or pending_d["denied"] == 1)
+            and pending_d["corrupt"] == 1
+            and s["instr_resp_corrupt"] == 1
+            and s["instr_resp_denied"] == pending_d["denied"]
             and s["instr_resp_need_resend"] == 0
         ):
             _mark(recorder, 25, cycle, evidence)
@@ -373,25 +391,54 @@ def sample_instr_uncache_owner_coverage(
         if (
             s["uncache_redirect"] == 1
             and s["resp_need_resend"] == 1
-            and s["prev_end_half"] == 1
+            and s["uncache_pc"] is not None
+            and s["resp_data"] is not None
         ):
-            _mark(recorder, 26, cycle, evidence)
+            cross_page["saw_half_redirect"] = True
+            cross_page["redirect_half_pc"] = int(s["uncache_pc"])
+            cross_page["redirect_half_data"] = int(s["resp_data"]) & 0xFFFF
         if (
-            s["prev_end_half"] == 1
+            cross_page["saw_half_redirect"]
+            and s["prev_end_half"] == 1
+            and s["prev_half_data"] is not None
+            and s["prev_half_pc"] is not None
+            and int(s["prev_half_data"]) == cross_page["redirect_half_data"]
+            and int(s["prev_half_pc"]) == cross_page["redirect_half_pc"]
+        ):
+            _mark(
+                recorder,
+                26,
+                cycle,
+                {
+                    **evidence,
+                    "redirect_half_pc": cross_page["redirect_half_pc"],
+                    "redirect_half_data": cross_page["redirect_half_data"],
+                },
+            )
+        if (
+            cross_page["saw_half_redirect"]
+            and s["prev_end_half"] == 1
             and s["to_uncache_valid"] == 1
             and s["to_uncache_ready"] == 1
             and s["prev_half_data"] is not None
             and s["prev_half_pc"] is not None
+            and int(s["prev_half_data"]) == cross_page["redirect_half_data"]
+            and int(s["prev_half_pc"]) == cross_page["redirect_half_pc"]
         ):
+            cross_page["saw_recovery_request"] = True
             _mark(recorder, 27, cycle, evidence)
         if (
-            s["to_valid"] == 1
+            cross_page["saw_recovery_request"]
+            and s["to_valid"] == 1
             and s["to_ready"] == 1
             and single_delivery
             and s["to_exception"] in {0, None}
-            and s["prev_end_half"] == 1
-            and s["to_is_rvc"] is not None
-            and int(s["to_is_rvc"]) & int(s["to_enq"]) == 0
+            and s["to_pc"] is not None
+            and int(s["to_pc"]) == cross_page["redirect_half_pc"]
+            and s["s2_uncache_data"] is not None
+            and (int(s["s2_uncache_data"]) & 0x3) == 0x3
+            and (int(s["s2_uncache_data"]) & 0xFFFF)
+            == cross_page["redirect_half_data"]
         ):
             _mark(recorder, 28, cycle, evidence)
             state["cross_page_pending"] = None

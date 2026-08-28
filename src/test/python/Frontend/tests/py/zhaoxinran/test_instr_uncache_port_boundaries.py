@@ -2414,7 +2414,9 @@ def test_uncache_resend_second_beat_fault_reports_exception(env, fault, exceptio
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-417", "BIN-1101", "BIN-1115", "BIN-1116", "BIN-1120")
+@pytest.mark.funcov_bins(
+    "BIN-417", "BIN-1101", "BIN-1115", "BIN-1116", "BIN-1119", "BIN-1120", "BIN-1121"
+)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
     _prepare_cross_page_rvi_stream(env)
@@ -2550,10 +2552,50 @@ def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
     )
     assert not env.monitor.get_errors()
     assert env.functional_coverage.key_hit("uncache_page_boundary", "rvi_tail_resend_next_page")
-    for leaf in (8, 22, 23, 27):
+    for leaf in (8, 22, 23, 26, 27, 28):
         assert env.functional_coverage.key_hit(
             "ifu_instruncache_owner_v3", f"instruncache_leaf_{leaf:03d}"
         )
+
+
+@pytest.mark.parametrize("denied", [0, 1], ids=["corrupt-only", "denied-and-corrupt"])
+@pytest.mark.funcov_bins("BIN-1118")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_page_tail_fault_does_not_create_half_state(env, denied):
+    _prepare_cross_page_rvi_stream(env)
+    first_beat = _CROSS_PAGE_PC & ~(_UNCACHE_BEAT_BYTES - 1)
+    prev_half_samples = _register_prev_half_rvi_observer(env)
+    env.uncache_agent.inject_response_fault_at(
+        first_beat,
+        corrupt=1,
+        denied=denied,
+    )
+    _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
+
+    assert _wait_for_request_addr(env, first_beat, max_cycles=5000)
+    assert _wait_for_uncache_resp(env, max_cycles=5000)
+    assert _wait_for_monitor_exception(env, max_cycles=5000)
+    env.step(32)
+    stats = env.uncache_agent.get_stats()
+    fault_response_samples = [
+        sample
+        for sample in prev_half_samples
+        if sample["last_response_addr"] == first_beat
+    ]
+
+    assert stats.get("request_addrs", []).count(first_beat) == 1
+    assert int(stats.get("corrupt_resp_count", 0)) == 1
+    assert int(stats.get("denied_resp_count", 0)) == denied
+    assert fault_response_samples
+    assert not any(int(sample["need_resend"]) for sample in fault_response_samples)
+    assert not any(
+        int(sample["s0"]) or int(sample["s1"]) or int(sample["s2"])
+        for sample in fault_response_samples
+    )
+    assert env.functional_coverage.key_hit(
+        "ifu_instruncache_owner_v3", "instruncache_leaf_025"
+    )
+    assert not env.monitor.get_errors()
 
 
 @pytest.mark.funcov_bins("BIN-416", "BIN-1107", "BIN-1117")

@@ -50,8 +50,8 @@ _LEAVES = (
     "RVI起始于4K页尾2B且第一半无异常时返回needResend",
     "跨页RVI不假设物理页连续，不能在InstrUncache内部直接取下一页",
     "跨页RVC页尾2B不返回needResend",
-    "跨页第一半corrupt/denied时不返回needResend",
-    "needResend由IFU转化为uncacheRedirect.isHalfInstr",
+    "跨页第一半corrupt=1（denied可为0或1）时不返回needResend",
+    "needResend触发IFU uncacheRedirect并保存halfPc/halfData",
     "IFU保存halfPc/halfData后重新发起下一页取指",
     "下一页返回后由IFU侧完成跨页RVI拼接",
     "跨页补半期间flush必须清理IFU half状态与InstrUncache内部状态",
@@ -65,6 +65,11 @@ _LEAVES = (
     "memPageTypeNC正确表达PBMT.NC属性",
     "MMIO与NC属性混合时由IFU上层决定顺序语义，InstrUncache只执行单次访问与resend语义",
 )
+
+_LEGACY_LEAF_ALIASES = {
+    "跨页第一半corrupt/denied时不返回needResend": _LEAVES[24],
+    "needResend由IFU转化为uncacheRedirect.isHalfInstr": _LEAVES[25],
+}
 
 _RTL_CONTRACT_REWRITES = {
     _LEAVES[8]: {
@@ -87,6 +92,20 @@ _RTL_CONTRACT_REWRITES = {
         "Checkpoint": "InstrUncache不接收frontend flush，可自然完成第二beat并清resending；旧路径response不得进入IBuffer，恢复路径身份独立",
         "Object": "redirect、entry resending/state、第二beat TL A/D、InstrUncache response、IFU/IBuffer ftqIdx/PC",
         "evidence": "RTL_REVIEW:c0ca46459:InstrUncache.io.flush tied false; do not require redirect to clear entry state",
+    },
+    _LEAVES[24]: {
+        "五级测试点": _LEAVES[24],
+        "Condition": "RVI低半位于4KB页尾2B；第一页TL D返回合法异常组合：corrupt=1且denied为0或1",
+        "Checkpoint": "InstrUncache响应保持corrupt/denied且needResend=0；IFU不建立prevEnd half状态，不把后续独立事务误归因为补半",
+        "Object": "第一页TL D corrupt/denied、InstrUncache response、needResend、s0/s1/s2 prevEnd half状态",
+        "evidence": "RTL_REVIEW:c0ca46459:needResend=crossPageBoundary&&!respCorruptReg&&!isRVC; TileLink denied requires corrupt",
+    },
+    _LEAVES[25]: {
+        "五级测试点": _LEAVES[25],
+        "Condition": "跨页RVI第一页clean响应产生needResend，IFU s2事务有效且toIBuffer ready",
+        "Checkpoint": "uncacheRedirect.valid由needResend触发并按RTL置isHalfInstr；halfPc/halfData随后进入prevEnd half状态，保留原RVI身份",
+        "Object": "needResend、uncacheRedirect.valid、s0/s1/s2 prevEndIsHalfRvi、halfPc、halfData",
+        "evidence": "RTL_REVIEW:c0ca46459:Ifu.scala:635-640 binds isHalfInstr to uncacheNeedResend and captures uncachePc/data",
     },
     _LEAVES[28]: {
         "五级测试点": "跨页补半期间backend redirect清理IFU half有效状态且旧半条不得泄漏",
@@ -122,7 +141,9 @@ def synchronize() -> dict[str, int]:
 
     row_by_leaf: dict[str, int] = {}
     for index, row in enumerate(testpoint_rows):
-        leaf = row["五级测试点"].strip()
+        leaf = _LEGACY_LEAF_ALIASES.get(
+            row["五级测试点"].strip(), row["五级测试点"].strip()
+        )
         if leaf in _LEAVES:
             if leaf in row_by_leaf:
                 raise ValueError(f"duplicate InstrUncache leaf: {leaf}")
@@ -133,6 +154,7 @@ def synchronize() -> dict[str, int]:
         rewritten = {
             values["五级测试点"]: original
             for original, values in _RTL_CONTRACT_REWRITES.items()
+            if "五级测试点" in values
         }
         for index, row in enumerate(testpoint_rows):
             original = rewritten.get(row["五级测试点"].strip())
@@ -143,6 +165,7 @@ def synchronize() -> dict[str, int]:
         raise ValueError(f"missing InstrUncache leaves: {sorted(missing)}")
 
     new_pilot_rows: list[dict[str, str]] = []
+    pilot_changed = False
     for ordinal, leaf in enumerate(_LEAVES, start=1):
         row_index = row_by_leaf[leaf]
         row = testpoint_rows[row_index]
@@ -195,13 +218,19 @@ def synchronize() -> dict[str, int]:
             new_pilot_rows.append(pilot_row)
             pilot_by_id[bin_id] = pilot_row
         elif existing != pilot_row:
-            raise ValueError(f"existing pilot row differs: {bin_id}")
+            identity_fields = ("Coverage_Group", "Coverpoint", "Bin_Name")
+            if any(existing[field] != pilot_row[field] for field in identity_fields):
+                raise ValueError(f"existing pilot identity differs: {bin_id}")
+            existing.update(pilot_row)
+            pilot_changed = True
 
     _write_csv(_TESTPOINT_PATH, testpoint_fields, testpoint_rows)
     if new_pilot_rows:
         if len(new_pilot_rows) != len(_LEAVES):
             raise ValueError("InstrUncache pilot registry is partially populated")
         _append_pilot_rows(pilot_fields, new_pilot_rows)
+    elif pilot_changed:
+        _write_csv(_PILOT_PATH, pilot_fields, pilot_rows)
     return {
         "registered_leaves": len(_LEAVES),
         "new_pilot_rows": len(new_pilot_rows),
