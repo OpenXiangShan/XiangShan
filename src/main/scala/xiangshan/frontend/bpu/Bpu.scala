@@ -26,7 +26,6 @@ import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import utility.XSPerfSeqAccumulate
 import utils.DuplicateInit
-import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
@@ -232,44 +231,52 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.specIn.bits.attribute   := s3_prediction.attribute
   ras.io.specIn.bits.cfiPosition := s3_prediction.cfiPosition
 
-  private val hartId               = p(XSCoreParamsKey).HartId
-  private val tageConstantinConfig = Wire(new ConstantinConfig)
-  // Keep the original global key as the fallback for existing Constantin files.
-  // A zero per-table value is outside the supported tag-width range and means
-  // that the legacy global width should be used for that table.
-  private val legacyTageTagWidth = Constantin
-    .createRecord(s"tageTagWidth_${hartId}", initValue = bpuParameters.tageParameters.TagWidth)(
-      tageConstantinConfig.tableConfigs.head.tagWidth.getWidth - 1,
-      0
-    )
-  bpuParameters.tageParameters.TableInfos.zip(tageConstantinConfig.tableConfigs).zipWithIndex.foreach {
-    case ((info, config), tableIdx) =>
-      config.numSetsLog2 := Constantin
-        .createRecord(
-          s"tageTableNumSetsLog2_${hartId}_${tableIdx}",
-          initValue = info.NumSetsLog2
-        )(config.numSetsLog2.getWidth - 1, 0)
-      config.numWays := Constantin
-        .createRecord(s"tageTableNumWays_${hartId}_${tableIdx}", initValue = info.NumWays)(
-          config.numWays.getWidth - 1,
-          0
-        )
-      val tableTagWidth = Constantin
-        .createRecord(s"tageTableTagWidth_${hartId}_${tableIdx}", initValue = 0)(config.tagWidth.getWidth - 1, 0)
-      config.tagWidth := Mux(tableTagWidth === 0.U, legacyTageTagWidth, tableTagWidth)
+  private val tageConfig = Wire(new ConstantinConfig)
+
+  // The active point is selected by the source commit.  No runtime CST is
+  // needed for these literals.
+  private val tageConfigInit =
+    if (bpuParameters.tageParameters.TableInfos.length == 8) {
+      Seq(
+        (9, 2, 13),
+        (9, 2, 13),
+        (9, 2, 13),
+        (9, 2, 13),
+        (9, 2, 13),
+        (9, 2, 13),
+        (9, 2, 13),
+        (9, 2, 13)
+      )
+    } else {
+      bpuParameters.tageParameters.TableInfos.map { info =>
+        (info.NumSetsLog2, info.NumWays, bpuParameters.tageParameters.TagWidth)
+      }
+    }
+  require(tageConfigInit.length == tageConfig.tableConfigs.length)
+  require(tageConfigInit.forall { case (numSetsLog2, numWays, tagWidth) =>
+    numSetsLog2 >= bpuParameters.tageParameters.MinNumSetsLog2 &&
+      numSetsLog2 <= bpuParameters.tageParameters.MaxNumSetsLog2 &&
+      numWays >= bpuParameters.tageParameters.MinNumWays &&
+      numWays <= bpuParameters.tageParameters.MaxNumWays &&
+      tagWidth >= bpuParameters.tageParameters.MinTagWidth &&
+      tagWidth <= bpuParameters.tageParameters.MaxTagWidth
+  })
+  require(2 >= bpuParameters.tageParameters.MinUsefulCtrWidth && 2 <= bpuParameters.tageParameters.MaxUsefulCtrWidth)
+  bpuParameters.tageParameters.TableInfos.zip(tageConfig.tableConfigs).zipWithIndex.foreach {
+    case ((_, config), tableIdx) =>
+      val (numSetsLog2, numWays, tagWidth) = tageConfigInit(tableIdx)
+      config.numSetsLog2 := numSetsLog2.U(config.numSetsLog2.getWidth.W)
+      config.numWays     := numWays.U(config.numWays.getWidth.W)
+      config.tagWidth    := tagWidth.U(config.tagWidth.getWidth.W)
   }
-  tageConstantinConfig.usefulCtrWidth := Constantin
-    .createRecord(s"tageUsefulCtrWidth_${hartId}", initValue = bpuParameters.tageParameters.UsefulCtrWidth)(
-      tageConstantinConfig.usefulCtrWidth.getWidth - 1,
-      0
-    )
+  tageConfig.usefulCtrWidth := 2.U(tageConfig.usefulCtrWidth.getWidth.W)
 
   tage.io.fromMainBtb.result             := mbtb.io.result
   tage.io.fromMainBtb.s1_positions       := mbtb.io.s1_positions
   tage.io.fromMainBtb.baseConf           := VecInit(mbtb.io.meta.entries.flatten.map(_.counter.isSaturate))
   tage.io.fromPhr.foldedPathHist         := phr.io.s0_foldedPhr
   tage.io.fromPhr.foldedPathHistForTrain := phr.io.trainFoldedPhr
-  tage.io.constantinConfig               := tageConstantinConfig
+  tage.io.constantinConfig               := tageConfig
   tage.io.debug_trainValid               := io.fromFtq.train.valid // for perf counters
 
   ittage.io.s1_foldedPhr   := phr.io.s1_foldedPhr

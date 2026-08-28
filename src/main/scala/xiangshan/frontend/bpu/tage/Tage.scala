@@ -72,7 +72,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s0_fire    = io.stageCtrl.s0_fire && io.enable
   private val s0_startPc = io.startPc.unGuard
 
-  // Constantin provides the active configuration and keeps it stable throughout a run.
+  // Bpu supplies the active configuration as a source-level constant for the
+  // selected experiment commit.
   tables.zip(io.constantinConfig.tableConfigs).zipWithIndex.foreach {
     case ((table, config), tableIdx) =>
       when(s0_fire) {

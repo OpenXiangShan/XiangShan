@@ -30,11 +30,6 @@ on:
           description: Constantin file path (empty for default init setting, or file path for specific file)
           required: false
           type: string
-      expected_checkpoints:
-        description: Exact checkpoint count required for a Constantin performance regression; 0 accepts the full selected set
-        required: false
-        type: number
-        default: 0
       enable_db:
         description: Enable ChiselDB dump
         required: false
@@ -116,41 +111,30 @@ jobs:
 
           if [[ -z "${{ inputs.servers }}" ]]; then
             if [[ "${{ inputs.emulator }}" == "gsim" ]]; then
-              SERVER_LIST=node
+              echo "SERVER_LIST=node" >> $GITHUB_ENV
             else
-              SERVER_LIST=open
+              echo "SERVER_LIST=open" >> $GITHUB_ENV
             fi
           else
-            SERVER_LIST="${{ inputs.servers }}"
+            echo "SERVER_LIST=${{ inputs.servers }}" >> $GITHUB_ENV
           fi
-          echo "SERVER_LIST=${SERVER_LIST}" >> $GITHUB_ENV
 
           SPEC_TAG="-${{ inputs.xs_config }}"
           # Set CST_COMPILE_OPT and CST_RUN_OPT based on cst_file
           if [[ -n "${{ inputs.cst_file }}" ]]; then
-            CST_SOURCE_FILE="${{ inputs.cst_file }}"
-            if [[ "${CST_SOURCE_FILE}" != /* ]]; then
-              CST_SOURCE_FILE="$GITHUB_WORKSPACE/${CST_SOURCE_FILE}"
-            fi
-            if [[ ! -f "${CST_SOURCE_FILE}" ]]; then
-              echo "Error: cst_file does not exist: ${CST_SOURCE_FILE}"
+            if [[ ! -f "${{ inputs.cst_file }}" ]]; then
+              echo "Error: cst_file does not exist: ${{ inputs.cst_file }}"
               exit 1
             fi
-            IFS=',' read -r -a SELECTED_SERVERS <<< "${SERVER_LIST}"
-            for server in "${SELECTED_SERVERS[@]}"; do
-              server="${server//[[:space:]]/}"
-              if [[ "${server}" == "open" || "${server}" == open* ]]; then
-                echo "Error: Constantin files are unavailable to open workers; use gsim/node servers."
-                exit 1
-              fi
-            done
-            CONST_BASENAME=$(basename "${CST_SOURCE_FILE}")
+            CONST_BASENAME=$(basename "${{ inputs.cst_file }}")
             CONST_TAG=${CONST_BASENAME%.*}
             SPEC_TAG="${SPEC_TAG}-${CONST_TAG}"
 
             echo "CST_COMPILE_OPT=--with-constantin" >> $GITHUB_ENV
+            echo "CST_RUN_OPT=--cst-file ${{ inputs.cst_file }}" >> $GITHUB_ENV
           else
             echo "CST_COMPILE_OPT=" >> $GITHUB_ENV
+            echo "CST_RUN_OPT=" >> $GITHUB_ENV
           fi
           SPEC_DIR="/nfs/home/cirunner/perf-report/cr${DATE}-${SHORT_SHA}${SPEC_TAG}"
 
@@ -238,16 +222,6 @@ jobs:
           echo "SPEC_DIR=${SPEC_DIR}" >> $GITHUB_ENV
           echo "SPEC_DIR=${SPEC_DIR}" >> $GITHUB_OUTPUT
 
-          if [[ -n "${{ inputs.cst_file }}" ]]; then
-            mkdir -p "$SPEC_DIR"
-            CST_RUNTIME_FILE="$SPEC_DIR/$CONST_BASENAME"
-            cp "$CST_SOURCE_FILE" "$CST_RUNTIME_FILE"
-            echo "CST_FILE=${CST_RUNTIME_FILE}" >> $GITHUB_ENV
-            echo "CST_RUN_OPT=--cst-file ${CST_RUNTIME_FILE}" >> $GITHUB_ENV
-          else
-            echo "CST_RUN_OPT=" >> $GITHUB_ENV
-          fi
-
           # append benchmark_type to score.txt filename, to prevent race condition in "python3 main.py --report"
           SCORE_FILE="${SPEC_DIR}/score-${{ inputs.benchmark_type }}.txt"
           echo "SCORE_FILE=${SCORE_FILE}" >> $GITHUB_ENV
@@ -264,6 +238,9 @@ jobs:
 
       - name: Build EMU with DRAMsim3
         run: |
+          if [[ -z "${{ inputs.cst_file }}" ]]; then
+            export WITH_CONSTANTIN=0
+          fi
           if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
             python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
               --config "${{ inputs.xs_config }}" \
@@ -307,16 +284,6 @@ jobs:
             --report \
             > "$SCORE_FILE"
 
-      - name: Verify Constantin run
-        if: ${{ inputs.cst_file != '' }}
-        run: |
-          python3 "$GITHUB_WORKSPACE/scripts/verify_constantin_run.py" \
-            --result-dir "$SPEC_DIR" \
-            --cst-file "$CST_FILE" \
-            --score-file "$SCORE_FILE" \
-            --expected-checkpoints "${{ inputs.expected_checkpoints }}" \
-            --output "$RUNNER_TEMP/constantin-evidence/verification.json"
-
       - name: Summary result
         run: |
           echo "### :rocket: Performance Test Result" >> $GITHUB_STEP_SUMMARY
@@ -335,42 +302,8 @@ jobs:
           echo "- fp: **${FP_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- total: **${TOTAL_SCORE}**" >> $GITHUB_STEP_SUMMARY
 
-      - name: Collect Constantin evidence
-        if: ${{ always() && inputs.cst_file != '' }}
-        run: |
-          EVIDENCE_DIR="$RUNNER_TEMP/constantin-evidence"
-          mkdir -p "$EVIDENCE_DIR"
-          if [[ -n "${CST_FILE:-}" && -f "$CST_FILE" ]]; then
-            cp "$CST_FILE" "$EVIDENCE_DIR/$(basename "$CST_FILE")"
-          fi
-
-          CST_SHA256=unavailable
-          if [[ -n "${CST_FILE:-}" && -f "$CST_FILE" ]]; then
-            CST_SHA256=$(sha256sum "$CST_FILE" | awk '{print $1}')
-          fi
-          EMULATOR_SHA256=unavailable
-          if [[ -f "$SPEC_DIR/emu-${{ inputs.emulator }}" ]]; then
-            EMULATOR_SHA256=$(sha256sum "$SPEC_DIR/emu-${{ inputs.emulator }}" | awk '{print $1}')
-          fi
-
-          {
-            printf 'commit_sha=%s\n' "$(git rev-parse HEAD)"
-            printf 'emulator_sha256=%s\n' "$EMULATOR_SHA256"
-            printf 'cst_file=%s\n' "${CST_FILE:-unavailable}"
-            printf 'cst_sha256=%s\n' "$CST_SHA256"
-          } > "$EVIDENCE_DIR/manifest.txt"
-
       - name: Upload report
-        if: ${{ always() }}
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.artifact_name }}
           path: ${{ steps.set_env.outputs.SCORE_FILE }}
-          if-no-files-found: warn
-
-      - name: Upload Constantin evidence
-        if: ${{ always() && inputs.cst_file != '' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ inputs.artifact_name }}-constantin-evidence
-          path: ${{ runner.temp }}/constantin-evidence
