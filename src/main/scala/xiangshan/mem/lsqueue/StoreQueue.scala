@@ -1439,7 +1439,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       val ptr = deqPtrExt(i).value
       val ram = DifftestMem(64L * 1024 * 1024 * 1024, 8)
       val wen = allocated(ptr) && committed(ptr) && !mmio(ptr)
-      val waddr = ((paddrModule.io.rdata(i) - "h80000000".U) >> 3).asUInt
+      val waddr = ((paddrModule.io.rdata(i) - PmemBase.U) >> 3).asUInt
       val wdata = Mux(paddrModule.io.rdata(i)(3), dataModule.io.rdata(i).data(127, 64), dataModule.io.rdata(i).data(63, 0))
       val wmask = Mux(paddrModule.io.rdata(i)(3), dataModule.io.rdata(i).mask(15, 8), dataModule.io.rdata(i).mask(7, 0))
       when (wen) {

@@ -170,7 +170,7 @@ class RAS(implicit p: Parameters) extends BasePredictor {
     val resetIdx = RegInit(0.U(log2Ceil(RasSize).W))
     val do_reset = RegInit(true.B)
     when (do_reset) {
-      stack.write(resetIdx, RASEntry(0x80000000L.U, 0.U))
+      stack.write(resetIdx, RASEntry(PmemBase.U, 0.U))
     }
     resetIdx := resetIdx + do_reset
     when (resetIdx === (RasSize-1).U) {

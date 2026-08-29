@@ -1559,7 +1559,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // have alias problem, extra alias bits needed for index
     val alias_addr_frag = bus.b.bits.data(2, 1)
     missQueue.io.probe.req.bits.vaddr := Cat(
-      bus.b.bits.address(PAddrBits - 1, DCacheAboveIndexOffset), // dontcare
+      bus.b.bits.address(bus.b.bits.address.getWidth - 1, DCacheAboveIndexOffset), // dontcare
       alias_addr_frag(DCacheAboveIndexOffset - DCacheTagOffset - 1, 0), // index
       bus.b.bits.address(DCacheTagOffset - 1, 0)                 // index & others
     )

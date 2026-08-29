@@ -23,7 +23,7 @@ import aia.IMSICParams
 import org.chipsalliance.cde.config.Parameters
 import system.{CVMParameters, CVMParamsKey, SoCParamsKey}
 import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry}
-import xiangshan.{DFTOptionsKey, XSTileKey}
+import xiangshan.{DFTOptionsKey, DebugOptionsKey, XSTileKey}
 import freechips.rocketchip.devices.debug.{DebugAttachParams, ExportDebug}
 import freechips.rocketchip.devices.debug.{DMI, JTAG, CJTAG, APB}
 import freechips.rocketchip.devices.debug.{DebugModuleKey, DebugModuleParams}
@@ -37,6 +37,9 @@ case class YamlConfig(
   Config: Option[String],
   PmemRanges: Option[List[MemoryRange]],
   PMAConfigs: Option[List[PMAConfigEntry]],
+  SimMemSize: Option[Long],
+  UARTLiteBase: Option[BigInt],
+  UART16550Base: Option[BigInt],
   EnableCHIAsyncBridge: Option[Boolean],
   L2CacheConfig: Option[L2CacheConfig],
   L3CacheConfig: Option[L3CacheConfig],
@@ -95,6 +98,21 @@ object YamlParser {
     yamlConfig.PMAConfigs.foreach { pmaConfigs =>
       newConfig = newConfig.alter((site, here, up) => {
         case SoCParamsKey => up(SoCParamsKey).copy(PMAConfigs = pmaConfigs)
+      })
+    }
+    yamlConfig.SimMemSize.foreach { size =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case DebugOptionsKey => up(DebugOptionsKey).copy(SimMemSize = size)
+      })
+    }
+    yamlConfig.UARTLiteBase.foreach { base =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(UARTLiteBase = base)
+      })
+    }
+    yamlConfig.UART16550Base.foreach { base =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(UART16550Base = base)
       })
     }
     yamlConfig.L2CacheConfig.foreach(l2 => newConfig = newConfig.alter(l2))

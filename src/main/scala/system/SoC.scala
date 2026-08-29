@@ -75,6 +75,8 @@ case class SoCParameters
     PMAConfigEntry(0)
   ),
   TIMERRange: AddressSet = AddressSet(0x38000000L, TIMERConsts.size - 1),
+  UARTLiteBase: BigInt = 0x40600000L,
+  UART16550Base: BigInt = 0x310b0000L,
   SYSCNTRange: AddressSet = AddressSet(0x38040000L, SYSCNTConsts.size - 1),
   BEURange: AddressSet = AddressSet(0x38010000L, 0xfff),
   EnableDCacheCtrl: Boolean = true,
@@ -160,8 +162,8 @@ case class SoCParameters
   val L3BlockSize = 64
   // on chip network configurations
   val L3OuterBusWidth = 256
-  val UARTLiteRange = AddressSet(0x40600000, if (UARTLiteForDTS) 0x3f else 0xf)
-  val UART16550Range = AddressSet(0x310b0000, 0x7f)
+  val UARTLiteRange = AddressSet(UARTLiteBase, if (UARTLiteForDTS) 0x3f else 0xf)
+  val UART16550Range = AddressSet(UART16550Base, 0x7f)
 }
 
 trait HasSoCParameter {
@@ -332,12 +334,17 @@ trait HaveAXI4MemPort {
   this: BaseSoC =>
   val device = new MemoryDevice
   // 48-bit physical address
-  val memRange = AddressSet(0x00000000L, 0xffffffffffffL).subtract(AddressSet(0x0L, 0x7fffffffL))
+  // Keep the bus window and the backing RAM index in sync with the configured
+  // physical memory ranges. AddressSet.misaligned handles ranges whose base or
+  // size is not power-of-two aligned.
+  val memRanges = soc.PmemRanges.flatMap { range =>
+    AddressSet.misaligned(range.lower, range.upper - range.lower)
+  }
   val memAXI4SlaveNode = AXI4SlaveNode(Seq(
     AXI4SlavePortParameters(
       slaves = Seq(
         AXI4SlaveParameters(
-          address = memRange,
+          address = memRanges,
           regionType = RegionType.UNCACHED,
           executable = true,
           supportsRead = TransferSizes(1, L3BlockSize),

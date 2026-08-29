@@ -587,6 +587,7 @@ trait HasXSParameter {
 
   def PAddrBits = p(SoCParamsKey).PAddrBits // PAddrBits is Phyical Memory addr bits
   def PmemRanges = p(SoCParamsKey).PmemRanges
+  def PmemBase = PmemRanges.map(_.lower).min
   def KeyIDBits = p(CVMParamsKey).KeyIDBits
   final val PageOffsetWidth = 12
   def NodeIDWidth = p(SoCParamsKey).NodeIDWidthList(p(CHIIssue)) // NodeID width among NoC
