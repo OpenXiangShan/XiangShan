@@ -74,7 +74,7 @@ case class SoCParameters
     PMAConfigEntry(0x10000000L, a = 1, w = true, r = true),
     PMAConfigEntry(0)
   ),
-  TIMERRange: AddressSet = AddressSet(0x38000000L, TIMERConsts.size - 1),
+  TIMERRange: AddressSet = AddressSet(0x14000000L, TIMERConsts.size - 1),
   SYSCNTRange: AddressSet = AddressSet(0x38040000L, SYSCNTConsts.size - 1),
   BEURange: AddressSet = AddressSet(0x38010000L, 0xfff),
   EnableDCacheCtrl: Boolean = true,
@@ -161,7 +161,7 @@ case class SoCParameters
   // on chip network configurations
   val L3OuterBusWidth = 256
   val UARTLiteRange = AddressSet(0x40600000, if (UARTLiteForDTS) 0x3f else 0xf)
-  val UART16550Range = AddressSet(0x310b0000, 0x7f)
+  val UART16550Range = AddressSet(0x7b000, 0x7f)
 }
 
 trait HasSoCParameter {
