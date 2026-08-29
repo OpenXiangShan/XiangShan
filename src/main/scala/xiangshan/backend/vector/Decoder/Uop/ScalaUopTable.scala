@@ -452,7 +452,7 @@ object ScalaUopTable {
 
     F_ZFAType.mapUopcode(
       _.FLEQ_S     -> fleq_fp32,
-      _.FLI_S      -> fleq_fp32, // todo
+      _.FLI_S      -> I2fOpcodes.fli_fp32,
       _.FLTQ_S     -> fltq_fp32,
       _.FMAXM_S    -> FAluOpcodes.fmaxm_fp32,
       _.FMINM_S    -> FAluOpcodes.fminm_fp32,
@@ -466,7 +466,7 @@ object ScalaUopTable {
 
     D_ZFAType.mapUopcode(
       _.FLEQ_D      -> fleq_fp64,
-      _.FLI_D       -> fleq_fp64,
+      _.FLI_D       -> I2fOpcodes.fli_fp64,
       _.FLTQ_D      -> fltq_fp64,
       _.FMAXM_D     -> FAluOpcodes.fmaxm_fp64,
       _.FMINM_D     -> FAluOpcodes.fminm_fp64,
@@ -481,7 +481,7 @@ object ScalaUopTable {
 
     ZFH_ZFAType.mapUopcode(
       _.FLEQ_H      -> fleq_fp16,
-      _.FLI_H       -> fleq_fp16, // todo
+      _.FLI_H       -> I2fOpcodes.fli_fp16,
       _.FLTQ_H      -> fltq_fp16,
       _.FMAXM_H     -> FAluOpcodes.fmaxm_fp16,
       _.FMINM_H     -> FAluOpcodes.fminm_fp16,
