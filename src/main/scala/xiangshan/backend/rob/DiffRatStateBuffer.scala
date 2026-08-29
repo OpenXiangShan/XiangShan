@@ -49,6 +49,7 @@ class DiffRatState(val params: DiffRatStateParams)(implicit p: Parameters) exten
 class DiffRatRenameUpdate(implicit p: Parameters) extends XSBundle {
   val ldest = UInt(LogicRegsWidth.W)
   val pdest = UInt(PhyRegIdxWidth.W)
+  val pdestVl = UInt(VlPhyRegIdxWidth.W)
   val rfWen = Bool()
   val fpWen = Bool()
   val vecWen = Bool()
@@ -106,8 +107,9 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
       next.vecRat(reg) := Mux(hit, req.bits.pdest, prev.vecRat(reg))
     }
     for (reg <- 0 until params.vlEntries) {
-      val hit = req.valid && req.bits.vlWen && req.bits.ldest === reg.U
-      next.vlRat(reg) := Mux(hit, req.bits.pdest, prev.vlRat(reg))
+      // VL has a single logical register indexed 0, so it does not use the generic ldest.
+      val hit = req.valid && req.bits.vlWen
+      next.vlRat(reg) := Mux(hit, req.bits.pdestVl, prev.vlRat(reg))
     }
   }
 

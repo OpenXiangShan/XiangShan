@@ -206,6 +206,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       update.valid := renameOut.fire && !io.redirect.valid
       update.bits.ldest := renameOut.bits.ldest
       update.bits.pdest := renameOut.bits.pdest
+      update.bits.pdestVl := renameOut.bits.pdestVl
       update.bits.rfWen := renameOut.bits.rfWen
       update.bits.fpWen := renameOut.bits.fpWen
       update.bits.vecWen := renameOut.bits.vecWen
