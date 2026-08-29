@@ -28,6 +28,7 @@ case class FrontendParameters(
     FetchBlockSize:           Int = 64, // bytes
     FetchPorts:               Int = 2,  // 2-fetch
     ResolveEntryBranchNumber: Int = 8,
+    PrefetchDepth:            Int = 32, // maximum icache prefetch / bpu runahead depth
     bpuParameters:            BpuParameters = BpuParameters(),
     ftqParameters:            FtqParameters = FtqParameters(),
     icacheParameters:         ICacheParameters = ICacheParameters(),
@@ -79,6 +80,8 @@ trait HasFrontendParameters extends HasXSParameter {
   def FetchBlockInstNum: Int = FetchBlockSize / instBytes
 //  def FetchBlockInstOffsetWidth = log2Ceil(FetchBlockInstNum) inherited from HasXSParameter
   def CfiPositionWidth: Int = log2Ceil(FetchBlockInstNum) // 2/4B(inst) aligned
+
+  def PrefetchDepth: Int = frontendParameters.PrefetchDepth
 
   // shared by Ifu and IBuffer
   // NOTE: we can enqueue FetchBlockInstNum instructions from Ifu,
