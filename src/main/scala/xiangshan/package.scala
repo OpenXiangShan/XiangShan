@@ -589,6 +589,7 @@ package object xiangshan {
     def IMM_VSETIVLI  = "b1011".U
     def IMM_VRORVI    = "b1100".U
     def IMM_LUI32     = "b1110".U
+    def IMM_FI        = "b1111".U
 
     def X      = BitPat("b0000")
 
@@ -608,6 +609,7 @@ package object xiangshan {
         IMM_VSETIVLI.litValue  -> "VSETIVLI",
         IMM_LUI32.litValue     -> "LUI32",
         IMM_VRORVI.litValue    -> "VRORVI",
+        IMM_FI.litValue        -> "FI",
       )
       strMap(immType.litValue)
     }
@@ -626,6 +628,7 @@ package object xiangshan {
         IMM_VSETIVLI.litValue  -> ImmUnion.VSETIVLI,
         IMM_LUI32.litValue     -> ImmUnion.LUI32,
         IMM_VRORVI.litValue    -> ImmUnion.VRORVI,
+        IMM_FI.litValue        -> ImmUnion.FI,
       )
       iuMap(immType.litValue)
     }

@@ -253,6 +253,7 @@ object FuConfig {
     writeFflags = true,
     latency = CertainLatency(2, extraValue = 1),
     needSrcFrm = true,
+    immType = Set(Imm_FI()),
   )
 
   val FcmpCfg: FuConfig = FuConfig(

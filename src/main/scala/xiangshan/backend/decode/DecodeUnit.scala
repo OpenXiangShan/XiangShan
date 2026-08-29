@@ -478,6 +478,16 @@ case class Imm_OPIVIU() extends Imm(5, SelImm.IMM_OPIVIU){
   }
 }
 
+case class Imm_FI() extends Imm(5, SelImm.IMM_FI){
+  override def do_toImm32(minBits: UInt): UInt = ZeroExt(minBits, 32)
+
+  override def extract(width: Int)(imm: UInt): UInt = ZeroExt(imm.take(5), width)
+
+  override def minBitsFromInstr(instr: UInt): UInt = {
+    instr(19, 15)
+  }
+}
+
 case class Imm_VSETVLI() extends Imm(11, SelImm.IMM_VSETVLI){
   override def do_toImm32(minBits: UInt): UInt = SignExt(minBits, 32)
 
@@ -554,13 +564,14 @@ object ImmUnion {
   val Z = Imm_Z()
   val OPIVIS = Imm_OPIVIS()
   val OPIVIU = Imm_OPIVIU()
+  val FI = Imm_FI()
   val VSETVLI = Imm_VSETVLI()
   val VSETIVLI = Imm_VSETIVLI()
   val LUI32 = Imm_LUI32()
   val VRORVI = Imm_VRORVI()
 
   // do not add special type lui32 to this, keep ImmUnion max len being 20.
-  val imms = Seq(I, S, B, U, J, Z, OPIVIS, OPIVIU, VSETVLI, VSETIVLI, VRORVI)
+  val imms = Seq(I, S, B, U, J, Z, OPIVIS, OPIVIU, FI, VSETVLI, VSETIVLI, VRORVI)
   val maxLen = imms.maxBy(_.len).len
   val immSelMap = Seq(
     SelImm.IMM_I,
@@ -571,6 +582,7 @@ object ImmUnion {
     SelImm.IMM_Z,
     SelImm.IMM_OPIVIS,
     SelImm.IMM_OPIVIU,
+    SelImm.IMM_FI,
     SelImm.IMM_VSETVLI,
     SelImm.IMM_VSETIVLI,
     SelImm.IMM_VRORVI,
