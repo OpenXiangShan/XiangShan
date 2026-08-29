@@ -15,8 +15,15 @@
 # See the Mulan PSL v2 for more details.
 #***************************************************************************************
 
+NOOP_HOME ?= $(abspath .)
 BUILD_DIR = ./build
 RTL_DIR = $(BUILD_DIR)/rtl
+
+# A direct `make gsim` must also select the GSIM difftest interface while
+# elaborating SimTop. Command-line assignments still take precedence.
+ifneq ($(filter gsim,$(MAKECMDGOALS)),)
+GSIM ?= 1
+endif
 
 # import docker support
 include scripts/Makefile.docker
@@ -199,6 +206,10 @@ ifeq ($(WITH_CONSTANTIN),1)
 override SIM_ARGS += --with-constantin
 endif
 
+ifeq ($(GSIM),1)
+override SIM_ARGS += --difftest-config G
+endif
+
 # emu for the release version
 RELEASE_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen --firtool-opt --ignore-read-enable-mem
 ifeq ($(FPGA), 1)
@@ -343,6 +354,9 @@ emu-mk: sim-verilog
 emu: $(call docker-deps,emu-mk)
 	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
+gsim: sim-verilog
+	$(MAKE) -C ./difftest emu GSIM=1 SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+
 # vcs simulation
 simv: sim-verilog
 	$(MAKE) -C ./difftest simv NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)"
@@ -371,4 +385,4 @@ include Makefile.test
 
 include src/main/scala/device/standalone/standalone_device.mk
 
-.PHONY: FORCE verilog sim-verilog emu clean help init init-force bump bsp $(REF_SO)
+.PHONY: FORCE verilog sim-verilog gsim emu clean help init init-force bump bsp $(REF_SO)
