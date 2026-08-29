@@ -23,7 +23,7 @@ import top.{ArgParser, Generator}
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemWakeUpBundle, MemWriteBack, UopIdx, connectSamePort}
+import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemWakeUpBundle, MemWriteBack, UopIdx, WakeupChainCountWidth, connectSamePort}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
@@ -92,6 +92,9 @@ class LoadUnitS0(param: ExeUnitParams)(
     val timeCnt = UInt(64.W)
     val valid = Bool()
     val pc = UInt(VAddrBits.W)
+    val wakedup = Bool()
+    val wakedupPC = UInt(VAddrBits.W)
+    val wakeupChainCount = UInt(WakeupChainCountWidth.W)
     val pdest = UInt(backendParams.pregIdxWidth.W)
     val rfWen = Bool()
     val fpWen = Bool()
@@ -104,6 +107,7 @@ class LoadUnitS0(param: ExeUnitParams)(
     val timeCnt = UInt(64.W)
     val pc = UInt(VAddrBits.W)
     val wakedupPC = UInt(VAddrBits.W)
+    val wakeupChainCount = UInt(WakeupChainCountWidth.W)
     val robIdx = UInt(log2Ceil(RobSize).W)
     val fuType = FuType()
     val pdest = UInt(backendParams.pregIdxWidth.W)
@@ -500,6 +504,9 @@ class LoadUnitS0(param: ExeUnitParams)(
   wakeupLUEntry.timeCnt := GTimer()
   wakeupLUEntry.valid := io.wakeup.valid
   wakeupLUEntry.pc := io.wakeup.bits.pc
+  wakeupLUEntry.wakedup := io.wakeup.bits.wakedup
+  wakeupLUEntry.wakedupPC := io.wakeup.bits.wakedupPC
+  wakeupLUEntry.wakeupChainCount := io.wakeup.bits.wakeupChainCount
   wakeupLUEntry.pdest := io.wakeup.bits.pdest
   wakeupLUEntry.rfWen := io.wakeup.bits.rfWen
   wakeupLUEntry.fpWen := io.wakeup.bits.fpWen
@@ -513,6 +520,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   wakedupLUEntry.timeCnt := GTimer()
   wakedupLUEntry.pc := io.ldin.bits.pc.getOrElse(0.U)
   wakedupLUEntry.wakedupPC := io.ldin.bits.wakedupPC
+  wakedupLUEntry.wakeupChainCount := io.ldin.bits.wakeupChainCount
   wakedupLUEntry.robIdx := io.ldin.bits.robIdx.value
   wakedupLUEntry.fuType := io.ldin.bits.fuType
   wakedupLUEntry.pdest := io.ldin.bits.pdest

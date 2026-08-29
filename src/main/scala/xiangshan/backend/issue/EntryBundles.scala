@@ -29,6 +29,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val firstIssue            = Bool()
     val wakedup               = Bool()
     val wakedupPC             = UInt(VAddrBits.W)
+    val wakeupChainCount      = UInt(WakeupChainCountWidth.W)
     val issueTimer            = UInt(params.issueTimerWidth.W)
     val deqPortIdx            = UInt(1.W)
 
@@ -188,6 +189,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val perfWakeupByIQ        = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))))
     val perfEnqDelayLoadWakeupByIQ = Option.when(params.hasIQWakeUp)(Output(Vec(params.numWakeupFromIQ, Bool())))
     val perfEnqDelayLoadWakeupPCByIQ = Option.when(params.hasIQWakeUp)(Output(Vec(params.numWakeupFromIQ, UInt(VAddrBits.W))))
+    val perfEnqDelayLoadWakeupCountByIQ = Option.when(params.hasIQWakeUp)(Output(Vec(params.numWakeupFromIQ, UInt(WakeupChainCountWidth.W))))
   }
 
   class CommonWireBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -340,24 +342,33 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                             status.issueTimer === params.issueTimerMaxValue.U && entryReg.payload.og1Payload.sqIdx.get === commonIn.issueResp.sqIdx.get
                                                           else true.B)
     val respIssueFail                                  = commonIn.issueResp.failed && sqIdxHit
-    val loadWakeupHitOHVec = Wire(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool())))
-    loadWakeupHitOHVec.zipWithIndex.foreach { case (hitOH, srcIdx) =>
+    val chainWakeupHitOHVec = Wire(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool())))
+    chainWakeupHitOHVec.zipWithIndex.foreach { case (hitOH, srcIdx) =>
       if (params.hasIQWakeUp) {
         hitOH := VecInit(hasIQWakeupGet.srcWakeupByIQ(srcIdx).zip(commonIn.wakeUpFromIQ).map {
-          case (hit, wakeup) => hit && wakeup.bits.params.hasLoadExu.B
+          case (hit, wakeup) => hit && wakeup.valid &&
+            (wakeup.bits.params.hasLoadExu.B || (wakeup.bits.wakedup && wakeup.bits.wakedupPC.orR))
         })
       } else {
         hitOH := 0.U.asTypeOf(hitOH)
       }
     }
-    val loadWakeupHitVec = VecInit(loadWakeupHitOHVec.map(_.asUInt.orR))
-    val loadWakeupHit = loadWakeupHitVec.asUInt.orR
-    val loadWakeupPC = if (params.hasIQWakeUp) {
-      Mux1H(loadWakeupHitOHVec.flatten, Seq.fill(params.numRegSrc)(commonIn.wakeUpFromIQ.map(_.bits.pc)).flatten)
+    val chainWakeupHitVec = VecInit(chainWakeupHitOHVec.map(_.asUInt.orR))
+    val chainWakeupHit = chainWakeupHitVec.asUInt.orR
+    val chainWakeupPC = if (params.hasIQWakeUp) {
+      Mux1H(chainWakeupHitOHVec.flatten, Seq.fill(params.numRegSrc)(commonIn.wakeUpFromIQ.map(w => Mux(w.bits.wakedup, w.bits.wakedupPC, w.bits.pc))).flatten)
     } else {
       0.U
     }
-    val isLoadEntry = FuType.isLoadVload(IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType)).asUInt)
+    val chainWakeupCount = if (params.hasIQWakeUp) {
+      Mux1H(chainWakeupHitOHVec.flatten, Seq.fill(params.numRegSrc)(commonIn.wakeUpFromIQ.map(w => Mux(w.bits.wakedup, nextWakeupChainCount(w.bits.wakeupChainCount), 1.U))).flatten)
+    } else {
+      0.U(WakeupChainCountWidth.W)
+    }
+    val entryFuType = IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
+    val isLoadEntry = FuType.isLoadVload(entryFuType)
+    val isChainComputeEntry = FuType.isAlu(entryFuType) || FuType.FuTypeOrR(entryFuType, Seq(FuType.mul, FuType.div))
+    val isChainEntry = isLoadEntry || isChainComputeEntry
     entryUpdate.status.robIdx                         := status.robIdx
     entryUpdate.status.fuType                         := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType))
     entryUpdate.status.srcStatus.zip(status.srcStatus).zipWithIndex.foreach { case ((srcStatusNext, srcStatus), srcIdx) =>
@@ -459,8 +470,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                           (srcCancelByLoad || respIssueFail)                -> false.B,
                                                          ))
     entryUpdate.status.firstIssue                     := Mux(status.firstIssue && status.issueTimer === params.issueTimerMaxValue.U, !respIssueFail, status.firstIssue)
-    entryUpdate.status.wakedup                        := status.wakedup || (validReg && isLoadEntry && loadWakeupHit)
-    entryUpdate.status.wakedupPC                      := Mux(validReg && isLoadEntry && loadWakeupHit, loadWakeupPC, status.wakedupPC)
+    entryUpdate.status.wakedup                        := status.wakedup || (validReg && isChainEntry && chainWakeupHit)
+    entryUpdate.status.wakedupPC                      := Mux(validReg && isChainEntry && chainWakeupHit, chainWakeupPC, status.wakedupPC)
+    entryUpdate.status.wakeupChainCount               := Mux(validReg && isChainEntry && chainWakeupHit, chainWakeupCount, status.wakeupChainCount)
     val updateIssueTimer = Mux(status.issueTimer === params.issueTimerMaxValue.U, status.issueTimer, status.issueTimer + 1.U)
     entryUpdate.status.issueTimer                     := Mux(validReg && status.issued, updateIssueTimer, 0.U)
     entryUpdate.status.deqPortIdx                     := Mux(commonIn.deqSel, commonIn.deqPortIdxWrite, Mux(status.issued, status.deqPortIdx, 0.U))
@@ -568,6 +580,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       commonOut.perfWakeupByIQ.get                    := hasIQWakeupGet.srcWakeupByIQ.map(x => VecInit(x.map(_ && validReg)))
       commonOut.perfEnqDelayLoadWakeupByIQ.get        := 0.U.asTypeOf(commonOut.perfEnqDelayLoadWakeupByIQ.get)
       commonOut.perfEnqDelayLoadWakeupPCByIQ.get      := 0.U.asTypeOf(commonOut.perfEnqDelayLoadWakeupPCByIQ.get)
+      commonOut.perfEnqDelayLoadWakeupCountByIQ.get   := 0.U.asTypeOf(commonOut.perfEnqDelayLoadWakeupCountByIQ.get)
     }
     // vecMem
     if (params.isVecMemIQ) {

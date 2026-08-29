@@ -94,6 +94,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     val exuIdx = UInt(8.W)
     val valid = Bool()
     val pc = UInt(VAddrBits.W)
+    val wakedup = Bool()
+    val wakedupPC = UInt(VAddrBits.W)
+    val wakeupChainCount = UInt(WakeupChainCountWidth.W)
     val pdest = UInt(backendParams.pregIdxWidth.W)
     val rfWen = Bool()
     val fpWen = Bool()
@@ -123,6 +126,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     val deqIdx = UInt(8.W)
     val pc = UInt(VAddrBits.W)
     val wakedupPC = UInt(VAddrBits.W)
+    val wakeupChainCount = UInt(WakeupChainCountWidth.W)
     val robIdx = UInt(log2Ceil(RobSize).W)
     val fuType = FuType()
     val pdest = UInt(PhyRegIdxWidth.W)
@@ -367,6 +371,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       enq.bits.status.firstIssue                                := true.B
       enq.bits.status.wakedup                                   := false.B
       enq.bits.status.wakedupPC                                 := 0.U
+      enq.bits.status.wakeupChainCount                          := 0.U
       enq.bits.status.issueTimer                                := 0.U
       enq.bits.status.deqPortIdx                                := 0.U
       connectSamePort(enq.bits.payload, s0_enqBits(enqIdx))
@@ -828,6 +833,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
             wakeUpQueue.io.enq.bits.uop.vlWen.foreach(x => x := Mux(wakeupFromExu.valid, wakeupFromExu.bits.vlWen, deqBeforeDly(i).bits.vlWen.get))
             wakeUpQueue.io.enq.bits.uop.pdest := Mux(wakeupFromExu.valid, wakeupFromExu.bits.pdest, deqBeforeDly(i).bits.pdest)
             wakeUpQueue.io.enq.bits.uop.fuType := Mux(wakeupFromExu.valid, FuType.div.U, deqBeforeDly(i).bits.fuType)
+            wakeUpQueue.io.enq.bits.uop.wakedup := Mux(wakeupFromExu.valid, wakeupFromExu.bits.wakedup, deqBeforeDly(i).bits.wakedup)
+            wakeUpQueue.io.enq.bits.uop.wakedupPC := Mux(wakeupFromExu.valid, wakeupFromExu.bits.wakedupPC, deqBeforeDly(i).bits.wakedupPC)
+            wakeUpQueue.io.enq.bits.uop.wakeupChainCount := Mux(wakeupFromExu.valid, wakeupFromExu.bits.wakeupChainCount, deqBeforeDly(i).bits.wakeupChainCount)
             wakeUpQueue.io.enq.bits.lat := Mux(wakeupFromExu.valid, 0.U, getDeqLat(i, deqBeforeDly(i).bits.fuType))
             wakeUpQueue.io.enq.bits.uop.is0Lat.foreach(_ := Mux(wakeupFromExu.valid, false.B, getDeqLat(i, deqBeforeDly(i).bits.fuType) === 0.U))
             // wakeupFromExu's valid need after flush
@@ -845,6 +853,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
             wakeUpQueue.io.enq.bits.uop.vlWen.foreach(x => x := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.vlWen.get, wakeupFromExu.bits.vlWen))
             wakeUpQueue.io.enq.bits.uop.pdest := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.pdest, wakeupFromExu.bits.pdest)
             wakeUpQueue.io.enq.bits.uop.fuType := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.fuType, FuType.fDivSqrt.U)
+            wakeUpQueue.io.enq.bits.uop.wakedup := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.wakedup, wakeupFromExu.bits.wakedup)
+            wakeUpQueue.io.enq.bits.uop.wakedupPC := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.wakedupPC, wakeupFromExu.bits.wakedupPC)
+            wakeUpQueue.io.enq.bits.uop.wakeupChainCount := Mux(deqBeforeDly(i).valid, deqBeforeDly(i).bits.wakeupChainCount, wakeupFromExu.bits.wakeupChainCount)
             wakeUpQueue.io.enq.bits.lat := Mux(deqBeforeDly(i).valid, getDeqLat(i, deqBeforeDly(i).bits.fuType), 0.U)
             // fp don't have 0 lat fu
             // wakeupFromExu's valid need after flush
@@ -874,6 +885,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           wakeUpQueue.io.enqAppend.valid := wakeupFromI2F.valid
           wakeUpQueue.io.enqAppend.bits.uop.fpWen.foreach(x => x := wakeupFromI2F.bits.fpWen)
           wakeUpQueue.io.enqAppend.bits.uop.pdest := wakeupFromI2F.bits.pdest
+          wakeUpQueue.io.enqAppend.bits.uop.wakedup := wakeupFromI2F.bits.wakedup
+          wakeUpQueue.io.enqAppend.bits.uop.wakedupPC := wakeupFromI2F.bits.wakedupPC
+          wakeUpQueue.io.enqAppend.bits.uop.wakeupChainCount := wakeupFromI2F.bits.wakeupChainCount
           wakeUpQueue.io.enqAppend.bits.uop.is0Lat.foreach(_ := false.B)
           wakeUpQueue.io.enqAppend.bits.lat := 0.U
         }
@@ -883,6 +897,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           wakeUpQueue.io.enqAppend.valid := wakeupFromF2I.valid
           wakeUpQueue.io.enqAppend.bits.uop.rfWen.foreach(x => x := wakeupFromF2I.bits.rfWen)
           wakeUpQueue.io.enqAppend.bits.uop.pdest := wakeupFromF2I.bits.pdest
+          wakeUpQueue.io.enqAppend.bits.uop.wakedup := wakeupFromF2I.bits.wakedup
+          wakeUpQueue.io.enqAppend.bits.uop.wakedupPC := wakeupFromF2I.bits.wakedupPC
+          wakeUpQueue.io.enqAppend.bits.uop.wakeupChainCount := wakeupFromF2I.bits.wakeupChainCount
           wakeUpQueue.io.enqAppend.bits.uop.is0Lat.foreach(_ := false.B)
           wakeUpQueue.io.enqAppend.bits.lat := 0.U
         }
@@ -891,6 +908,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           wakeUpQueue.io.enqAppend.valid := wakeupFromExu.valid
           wakeUpQueue.io.enqAppend.bits.uop.fpWen.foreach(x => x := wakeupFromExu.bits.fpWen)
           wakeUpQueue.io.enqAppend.bits.uop.pdest := wakeupFromExu.bits.pdest
+          wakeUpQueue.io.enqAppend.bits.uop.wakedup := wakeupFromExu.bits.wakedup
+          wakeUpQueue.io.enqAppend.bits.uop.wakedupPC := wakeupFromExu.bits.wakedupPC
+          wakeUpQueue.io.enqAppend.bits.uop.wakeupChainCount := wakeupFromExu.bits.wakeupChainCount
           wakeUpQueue.io.enqAppend.bits.uop.is0Lat.foreach(_ := false.B)
           wakeUpQueue.io.enqAppend.bits.lat := 0.U
         }
@@ -906,23 +926,28 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.isFirstIssue := deqFirstIssueVec(i)
     deq.bits.iqIdx    := OHToUInt(finalDeqSelOHVec(i))
     val deqFuType = IQFuType.readFuType(deqEntryVec(i).bits.status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
-    val sameCycleLoadWakeupHitOH = if (params.hasIQWakeUp) {
+    val sameCycleChainWakeupHitOH = if (params.hasIQWakeUp) {
       VecInit((0 until params.numWakeupFromIQ).map { iqIdx =>
-        if (wakeupFromIQ(iqIdx).bits.params.hasLoadExu) {
-          Mux1H(finalDeqSelOHVec(i), entries.io.wakeupHitByIQ.get.map(_(iqIdx)))
-        } else {
-          false.B
-        }
+        Mux1H(finalDeqSelOHVec(i), entries.io.wakeupHitByIQ.get.map(_(iqIdx))) &&
+          wakeupFromIQ(iqIdx).valid &&
+          (wakeupFromIQ(iqIdx).bits.params.hasLoadExu.B ||
+            (wakeupFromIQ(iqIdx).bits.wakedup && wakeupFromIQ(iqIdx).bits.wakedupPC.orR))
       })
     } else {
       VecInit(Seq(false.B))
     }
-    val sameCycleLoadWakeupHit = if (params.hasIQWakeUp) sameCycleLoadWakeupHitOH.asUInt.orR else false.B
-    val sameCycleLoadWakeupPC = if (params.hasIQWakeUp) Mux1H(sameCycleLoadWakeupHitOH, wakeupFromIQ.map(_.bits.pc)) else 0.U(VAddrBits.W)
-    val sameCycleLoadWakeupLoadDeq = sameCycleLoadWakeupHit && FuType.isLoadVload(deqFuType)
+    val sameCycleChainWakeupHit = if (params.hasIQWakeUp) sameCycleChainWakeupHitOH.asUInt.orR else false.B
+    val sameCycleChainWakeupPC = if (params.hasIQWakeUp) Mux1H(sameCycleChainWakeupHitOH,
+      wakeupFromIQ.map(w => Mux(w.bits.wakedup, w.bits.wakedupPC, w.bits.pc))) else 0.U(VAddrBits.W)
+    val sameCycleChainWakeupCount = if (params.hasIQWakeUp) Mux1H(sameCycleChainWakeupHitOH,
+      wakeupFromIQ.map(w => Mux(w.bits.wakedup, nextWakeupChainCount(w.bits.wakeupChainCount), 1.U))) else 0.U(WakeupChainCountWidth.W)
+    val sameCycleChainTarget = FuType.isLoadVload(deqFuType) || FuType.isAlu(deqFuType) || FuType.FuTypeOrR(deqFuType, Seq(FuType.mul, FuType.div))
+    val sameCycleChainWakeupDeq = sameCycleChainWakeupHit && sameCycleChainTarget
     deq.bits.fuType   := deqFuType
-    deq.bits.wakedup  := deqEntryVec(i).bits.status.wakedup || sameCycleLoadWakeupLoadDeq
-    deq.bits.wakedupPC := Mux(sameCycleLoadWakeupLoadDeq, sameCycleLoadWakeupPC, deqEntryVec(i).bits.status.wakedupPC)
+    deq.bits.fuOpType := deqEntryVec(i).bits.payload.og1Payload.fuOpType
+    deq.bits.wakedup  := deqEntryVec(i).bits.status.wakedup || sameCycleChainWakeupDeq
+    deq.bits.wakedupPC := Mux(sameCycleChainWakeupDeq, sameCycleChainWakeupPC, deqEntryVec(i).bits.status.wakedupPC)
+    deq.bits.wakeupChainCount := Mux(sameCycleChainWakeupDeq, sameCycleChainWakeupCount, deqEntryVec(i).bits.status.wakeupChainCount)
     // TODO: entries use Mux1H sel oldest uop, there can remove deq.valid
     deq.bits.rfBankRen.foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx.zipWithIndex.foreach{case (xxx, bank) => xxx :=
       deq.valid && deqEntryVec(i).bits.rfBankRen.get(idx)(bank)
@@ -1025,6 +1050,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     wakedupIQEntry.deqIdx := deqIdx.U
     wakedupIQEntry.pc := 0.U
     wakedupIQEntry.wakedupPC := deq.bits.wakedupPC
+    wakedupIQEntry.wakeupChainCount := deq.bits.wakeupChainCount
     wakedupIQEntry.robIdx := deq.bits.robIdx.value
     wakedupIQEntry.fuType := deq.bits.fuType
     wakedupIQEntry.pdest := deq.bits.pdest
@@ -1053,6 +1079,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
         wakeup.bits.vlWen   := (param.writeVlRf ).B && RegNext(loadWakeUp.bits.vlWen && loadWakeUp.valid)
         wakeup.bits.pdest   := RegNext(loadWakeUp.bits.pdest)
         wakeup.bits.pc      := RegNext(loadWakeUp.bits.pc)
+        wakeup.bits.wakedup := RegNext(loadWakeUp.bits.wakedup && loadWakeUp.valid)
+        wakeup.bits.wakedupPC := RegNext(loadWakeUp.bits.wakedupPC)
+        wakeup.bits.wakeupChainCount := RegNext(loadWakeUp.bits.wakeupChainCount)
         wakeup.bits.pdestVl := 0.U
         wakeup.bits.rcDest.foreach(_ := io.replaceRCIdx.get(i))
         wakeup.bits.loadDependency.foreach(_ := 0.U) // this is correct for load only
@@ -1176,13 +1205,45 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   XSPerfAccumulate("issue_instr_count", PopCount(io.deqDelay.map(_.valid)))
   XSPerfHistogram("issue_instr_count_hist", PopCount(io.deqDelay.map(_.valid)), true.B, 0, params.numDeq + 1, 1)
 
+  // End-to-end load-originated wakeup chain statistics.  A chain terminates
+  // when its load endpoint issues; intermediate compute/logic hops are
+  // counted by operation class below.
+  val chainIssued = deqBeforeDly.map(d => d.fire && d.bits.wakedup)
+  val chainLoadIssued = deqBeforeDly.map(d => d.fire && d.bits.wakedup && FuType.isLoadVload(d.bits.fuType))
+  XSPerfAccumulate("wakeup_chain_hop_cnt", PopCount(chainIssued))
+  val chainComputeVec = deqBeforeDly.map(d => d.fire && d.bits.wakedup &&
+    (FuType.isAlu(d.bits.fuType) || FuType.FuTypeOrR(d.bits.fuType, Seq(FuType.mul, FuType.div))))
+  val chainAddVec = deqBeforeDly.zip(chainComputeVec).map { case (d, c) => c &&
+    (d.bits.fuOpType === ALUOpType.add || d.bits.fuOpType === ALUOpType.addw || d.bits.fuOpType === ALUOpType.adduw) }
+  val chainSubVec = deqBeforeDly.zip(chainComputeVec).map { case (d, c) => c &&
+    (d.bits.fuOpType === ALUOpType.sub || d.bits.fuOpType === ALUOpType.subw) }
+  val chainAndVec = deqBeforeDly.zip(chainComputeVec).map { case (d, c) => c &&
+    (d.bits.fuOpType === ALUOpType.and || d.bits.fuOpType === ALUOpType.andn) }
+  val chainOrVec = deqBeforeDly.zip(chainComputeVec).map { case (d, c) => c &&
+    (d.bits.fuOpType === ALUOpType.or || d.bits.fuOpType === ALUOpType.orn) }
+  XSPerfAccumulate("wakeup_chain_compute_add_cnt", PopCount(chainAddVec))
+  XSPerfAccumulate("wakeup_chain_compute_sub_cnt", PopCount(chainSubVec))
+  XSPerfAccumulate("wakeup_chain_compute_mul_cnt", PopCount(deqBeforeDly.zip(chainComputeVec).map { case (d, c) => c && d.bits.fuType === FuType.mul.U }))
+  XSPerfAccumulate("wakeup_chain_compute_div_cnt", PopCount(deqBeforeDly.zip(chainComputeVec).map { case (d, c) => c && d.bits.fuType === FuType.div.U }))
+  XSPerfAccumulate("wakeup_chain_compute_and_cnt", PopCount(chainAndVec))
+  XSPerfAccumulate("wakeup_chain_compute_or_cnt", PopCount(chainOrVec))
+  deqBeforeDly.zip(chainLoadIssued).zipWithIndex.foreach { case ((d, chainLoad), deqIdx) =>
+    XSPerfHistogram(s"wakeup_chain_length_hist_deq${deqIdx}", d.bits.wakeupChainCount, chainLoad, 0, (1 << WakeupChainCountWidth), 1)
+  }
+
   if (params.hasIQWakeUp) {
     for (iqIdx <- 0 until params.numWakeupFromIQ) {
-      if (wakeupFromIQ(iqIdx).bits.params.hasLoadExu) {
+      // Every IQ source participates in chain accounting.  A non-load source
+      // is accepted only when it carries valid load-originated metadata.
+      if (true) {
         val wakeupRecvValid = io.wakeupFromIQ(iqIdx).valid
         val wakeupValid = wakeupFromIQ(iqIdx).valid
         val wakeupSourceExuIdx = params.wakeUpSourceExuIdx(iqIdx)
         val wakeupHitVec = VecInit(entries.io.wakeupHitByIQ.get.map(_(iqIdx)))
+        val wakeupChainSourceValid = wakeupValid && (wakeupFromIQ(iqIdx).bits.params.hasLoadExu.B ||
+          (wakeupFromIQ(iqIdx).bits.wakedup && wakeupFromIQ(iqIdx).bits.wakedupPC.orR))
+        val wakeupChainTargetVec = VecInit(fuTypeVec.map(fu => FuType.isLoadVload(fu) || FuType.isAlu(fu) || FuType.FuTypeOrR(fu, Seq(FuType.mul, FuType.div))))
+        val wakeupChainHitVec = VecInit(wakeupHitVec.zip(wakeupChainTargetVec).map { case (hit, target) => hit && target && wakeupChainSourceValid })
         val wakeupHitLoadVec = VecInit(wakeupHitVec.zip(fuTypeVec).map { case (hit, fu) =>
           hit && FuType.isLoadVload(fu)
         })
@@ -1220,6 +1281,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
         wakeupIQEntry.exuIdx := wakeupSourceExuIdx.U
         wakeupIQEntry.valid := wakeupRecvValid
         wakeupIQEntry.pc := io.wakeupFromIQ(iqIdx).bits.pc
+        wakeupIQEntry.wakedup := io.wakeupFromIQ(iqIdx).bits.wakedup
+        wakeupIQEntry.wakedupPC := io.wakeupFromIQ(iqIdx).bits.wakedupPC
+        wakeupIQEntry.wakeupChainCount := io.wakeupFromIQ(iqIdx).bits.wakeupChainCount
         wakeupIQEntry.pdest := io.wakeupFromIQ(iqIdx).bits.pdest
         wakeupIQEntry.rfWen := io.wakeupFromIQ(iqIdx).bits.rfWen
         wakeupIQEntry.fpWen := io.wakeupFromIQ(iqIdx).bits.fpWen
@@ -1232,7 +1296,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
         wakeupMatchIQEntry.timeCnt := GTimer()
         wakeupMatchIQEntry.iqIdx := 0.U
         wakeupMatchIQEntry.exuIdx := wakeupSourceExuIdx.U
-        wakeupMatchIQEntry.wakeupPC := wakeupFromIQ(iqIdx).bits.pc
+        wakeupMatchIQEntry.wakeupPC := Mux(wakeupFromIQ(iqIdx).bits.wakedup,
+          wakeupFromIQ(iqIdx).bits.wakedupPC, wakeupFromIQ(iqIdx).bits.pc)
         wakeupMatchIQEntry.matchCount := PopCount(wakeupHitLoadVec)
         wakeupMatchIQEntry.entryValid.zipWithIndex.foreach { case (entryValid, entryIdx) =>
           val hit = wakeupHitLoadVec(entryIdx)
@@ -1269,6 +1334,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
         wakeupMatchIQTable.log(wakeupMatchIQEntry, wakeupValid && PopCount(wakeupHitLoadVec) =/= 0.U, params.getIQName, clock, reset)
         wakeupMatchIQTable.log(enqDelayWakeupMatchIQEntry, PopCount(enqDelayLoadWakeupHitVec) =/= 0.U, params.getIQName, clock, reset)
         XSPerfAccumulate(s"loadpipe_wakeup_iq_from_exu${wakeupSourceExuIdx}_recv_cnt", wakeupRecvValid)
+        XSPerfAccumulate(s"wakeup_chain_iq_from_exu${wakeupSourceExuIdx}_match_cnt", PopCount(wakeupChainHitVec))
+        XSPerfAccumulate(s"wakeup_chain_iq_from_exu${wakeupSourceExuIdx}_match_valid_cnt", PopCount(wakeupChainHitVec) =/= 0.U)
         XSPerfAccumulate(s"loadpipe_wakeup_iq_from_exu${wakeupSourceExuIdx}_match_load_success_cnt", wakeupValidWithEnqDelay && wakeupMatchLoadSuccess)
         XSPerfHistogram(s"loadpipe_wakeup_iq_from_exu${wakeupSourceExuIdx}_match_instr_cnt_hist",
           PopCount(wakeupHitOrEnqDelayLoadVec), wakeupValidWithEnqDelay, 0, params.numEntries + 1, 1)

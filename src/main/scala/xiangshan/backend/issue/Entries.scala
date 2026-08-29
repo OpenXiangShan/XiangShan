@@ -109,6 +109,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val perfWakeupHitByIQVec   = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numWakeupFromIQ, Bool()))))
   val perfEnqDelayLoadWakeupHitByIQVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numWakeupFromIQ, Bool()))))
   val perfEnqDelayLoadWakeupPCByIQVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numWakeupFromIQ, UInt(VAddrBits.W)))))
+  val perfEnqDelayLoadWakeupCountByIQVec = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numWakeupFromIQ, UInt(WakeupChainCountWidth.W)))))
   //cancel bypass
   val cancelBypassVec        = Wire(Vec(params.numEntries, Bool()))
 
@@ -422,6 +423,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.wakeupHitByIQ.foreach(_        := perfWakeupHitByIQVec.get)
   io.enqDelayLoadWakeupHitByIQ.foreach(_ := perfEnqDelayLoadWakeupHitByIQVec.get)
   io.enqDelayLoadWakeupPCByIQ.foreach(_ := perfEnqDelayLoadWakeupPCByIQVec.get)
+  io.enqDelayLoadWakeupCountByIQ.foreach(_ := perfEnqDelayLoadWakeupCountByIQVec.get)
   io.entryInfo                      := entries
   io.validRegNext                   := validVecRegNext.asUInt
   io.issuedRegNext                  := issuedVecRegNext.asUInt
@@ -471,6 +473,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
       })
       perfEnqDelayLoadWakeupHitByIQVec.get(entryIdx) := out.perfEnqDelayLoadWakeupByIQ.get
       perfEnqDelayLoadWakeupPCByIQVec.get(entryIdx) := out.perfEnqDelayLoadWakeupPCByIQ.get
+      perfEnqDelayLoadWakeupCountByIQVec.get(entryIdx) := out.perfEnqDelayLoadWakeupCountByIQ.get
     }
     validVecRegNext(entryIdx)   := out.validRegNext
     issuedVecRegNext(entryIdx)  := out.issuedRegNext
@@ -589,6 +592,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val wakeupHitByIQ       = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numWakeupFromIQ, Output(Bool()))))
   val enqDelayLoadWakeupHitByIQ = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numWakeupFromIQ, Output(Bool()))))
   val enqDelayLoadWakeupPCByIQ = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numWakeupFromIQ, Output(UInt(VAddrBits.W)))))
+  val enqDelayLoadWakeupCountByIQ = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numWakeupFromIQ, Output(UInt(WakeupChainCountWidth.W)))))
   val entryInfo           = Vec(params.numEntries, ValidIO(new EntryBundle(isDeq = true)))
   // for enq.ready timing
   val validRegNext        = Output(UInt(params.numEntries.W))

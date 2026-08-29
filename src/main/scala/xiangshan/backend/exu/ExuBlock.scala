@@ -59,6 +59,9 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
     x.valid := exuI2FIn.valid && exuI2FIn.bits.ctrl.fpWen.get
     x.bits.fpWen := exuI2FIn.bits.ctrl.fpWen.get
     x.bits.pdest := exuI2FIn.bits.toRF.pdest
+    x.bits.wakedup := exuI2FIn.bits.wakedup
+    x.bits.wakedupPC := exuI2FIn.bits.wakedupPC
+    x.bits.wakeupChainCount := exuI2FIn.bits.wakeupChainCount
   }
   io.cross.F2IWakeupOut.foreach { x =>
     val exuF2IIn = exus.filter(x => x.exuParams.fuConfigs.contains(FcmpCfg)).head.io.in
@@ -66,6 +69,9 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
     x.valid := exuF2IIn.valid && exuF2IIn.bits.ctrl.rfWen.get
     x.bits.rfWen := exuF2IIn.bits.ctrl.rfWen.get
     x.bits.pdest := exuF2IIn.bits.toRF.pdest
+    x.bits.wakedup := exuF2IIn.bits.wakedup
+    x.bits.wakedupPC := exuF2IIn.bits.wakedupPC
+    x.bits.wakeupChainCount := exuF2IIn.bits.wakeupChainCount
   }
   io.uncertainWakeupOut.foreach{ x =>
     x.zip(exus.filter(exu => exu.io.uncertainWakeupOut.nonEmpty).map(_.io.uncertainWakeupOut.get)).map{ case (sink, source) =>

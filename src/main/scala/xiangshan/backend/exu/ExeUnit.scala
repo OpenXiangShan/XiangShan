@@ -367,6 +367,12 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   }
   io.uncertainWakeupOut.foreach{ out => {
     val uncertainFus = funcUnits.filter(x => needUncertainWakeupFuConfigs.contains(x.cfg))
+    // Uncertain wakeups are generated before the normal FU result. Keep the
+    // chain metadata beside each FU so it remains aligned with the early
+    // valid pulse instead of being reset with the wakeup bundle defaults.
+    val uncertainWakedup = uncertainFus.map(fu => RegEnable(io.in.bits.wakedup, fu.io.in.fire))
+    val uncertainWakedupPC = uncertainFus.map(fu => RegEnable(io.in.bits.wakedupPC, fu.io.in.fire))
+    val uncertainWakeupChainCount = uncertainFus.map(fu => RegEnable(io.in.bits.wakeupChainCount, fu.io.in.fire))
     if (uncertainFus.length == 1) {
       val fu = uncertainFus(0)
       out.valid := fu.io.outValidAhead3Cycle.get
@@ -379,6 +385,9 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       fu.io.out.bits.ctrl.v0Wen.foreach(x => out.bits.v0Wen := x)
       fu.io.out.bits.ctrl.vlWen.foreach(x => out.bits.vlWen := x)
       out.bits.pdest := fu.io.out.bits.ctrl.pdest
+      out.bits.wakedup := uncertainWakedup.head
+      out.bits.wakedupPC := uncertainWakedupPC.head
+      out.bits.wakeupChainCount := uncertainWakeupChainCount.head
       // csr
       if (fu.cfg.isCsr) {
         out.bits.rfWen := fu.io.outRFWenAhead3Cycle.get
@@ -397,6 +406,9 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       outBits(0).ctrl.vlWen.foreach(x =>  out.bits.vlWen  := Mux1H(outOH, outBits.map(_.ctrl.vlWen .get)))
       out.bits.pdest := Mux1H(outOH, outBits.map(_.ctrl.pdest))
       out.bits.pdestVl := Mux1H(outOH, outBits.map(_.ctrl.pdestVl.getOrElse(0.U)))
+      out.bits.wakedup := Mux1H(outOH, uncertainWakedup)
+      out.bits.wakedupPC := Mux1H(outOH, uncertainWakedupPC)
+      out.bits.wakeupChainCount := Mux1H(outOH, uncertainWakeupChainCount)
     }
   }
   }

@@ -29,6 +29,11 @@ import utility._
 
 
 object Bundles {
+  // Profiling metadata width for load-originated wakeup chains.
+  val WakeupChainCountWidth = 8
+  def nextWakeupChainCount(count: UInt): UInt = {
+    Mux(count === ((1 << WakeupChainCountWidth) - 1).U, count, count + 1.U)
+  }
   /**
    * Connect same name and same width port like sinkBundle := sourceBundle.
    *
@@ -608,6 +613,10 @@ object Bundles {
     val perfDebugInfo   = new PerfDebugInfo
     val debug_seqNum    = InstSeqNum()
     val storeSetHit     = Bool() // inst has been allocated an store set
+    // Propagated through the load pipeline for end-to-end wakeup-chain tracing.
+    val wakedup         = Bool()
+    val wakedupPC       = UInt(VAddrBits.W)
+    val wakeupChainCount = UInt(WakeupChainCountWidth.W)
     val waitForRobIdx   = new RobPtr // store set predicted previous store robIdx
     // Load wait is needed
     // load inst will not be executed until former store (predicted by mdp) addr calcuated
@@ -690,6 +699,9 @@ object Bundles {
     val vlWen = Bool() // fof may write vl
     val pdest = UInt(backendParams.pregIdxWidth.W)
     val pc = UInt(VAddrBits.W)
+    val wakedup = Bool()
+    val wakedupPC = UInt(VAddrBits.W)
+    val wakeupChainCount = UInt(WakeupChainCountWidth.W)
   }
   /**
     *
@@ -787,6 +799,9 @@ object Bundles {
     copyNum: Int = 0
   )(implicit p: Parameters) extends IssueQueueWakeUpBaseBundle(backendParams.allExuParams(exuIdx).wbPregIdxWidth, Seq(exuIdx)) {
     val pc = UInt(VAddrBits.W)
+    val wakedup = Bool()
+    val wakedupPC = UInt(VAddrBits.W)
+    val wakeupChainCount = UInt(WakeupChainCountWidth.W)
     val loadDependency = Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))
     val is0Lat = Bool()
     val params = backendParams.allExuParams.filter(_.exuIdx == exuIdx).head
@@ -923,11 +938,13 @@ object Bundles {
                                 )(implicit p: Parameters) extends XSBundle {
     val rcIdx          = Option.when(exuParams.needReadRegCache)(Vec(exuParams.numRegSrc, UInt(RegCacheIdxWidth.W))) // used to select regcache data
     val fuType         = FuType()
+    val fuOpType       = FuOpType()
     val robIdx         = new RobPtr
     val iqIdx          = UInt(log2Up(iqParams.numEntries).W)
     val isFirstIssue   = Bool()
     val wakedup        = Bool()
     val wakedupPC      = UInt(VAddrBits.W)
+    val wakeupChainCount = UInt(WakeupChainCountWidth.W)
     val rfBankRen      = Option.when(exuParams.readIntRf)(Vec(exuParams.numRegSrc, Vec(coreParams.intPreg.numBank, Bool())))
     val fpRen          = Option.when(exuParams.readFpRf )(Vec(exuParams.numRegSrc, Bool()))
     val vecRen         = Option.when(exuParams.readVecRf)(Vec(exuParams.numRegSrc, Bool()))
@@ -964,6 +981,7 @@ object Bundles {
     val isFirstIssue   = Bool()
     val wakedup        = Bool()
     val wakedupPC      = UInt(VAddrBits.W)
+    val wakeupChainCount = UInt(WakeupChainCountWidth.W)
     val rfRen          = Option.when(exuParams.readIntRf)(Vec(exuParams.numRegSrc, Bool()))
     val fpRen          = Option.when(exuParams.readFpRf )(Vec(exuParams.numRegSrc, Bool()))
     val vecRen         = Option.when(exuParams.readVecRf)(Vec(exuParams.numRegSrc, Bool()))
@@ -1094,6 +1112,7 @@ object Bundles {
     val isFirstIssue  = Bool()
     val wakedup       = Bool()
     val wakedupPC     = UInt(VAddrBits.W)
+    val wakeupChainCount = UInt(WakeupChainCountWidth.W)
     val pdestCopy  = OptionWrapper(copyWakeupOut, Vec(copyNum, UInt(params.wbPregIdxWidth.W)))
     val rfWenCopy  = OptionWrapper(copyWakeupOut && params.needIntWen, Vec(copyNum, Bool()))
     val fpWenCopy  = OptionWrapper(copyWakeupOut && params.needFpWen, Vec(copyNum, Bool()))
@@ -1186,6 +1205,9 @@ object Bundles {
       uop.pdest          := this.pdest
       uop.pdestVl        := this.pdestVl.getOrElse(0.U)
       uop.rfWen          := this.rfWen.getOrElse(false.B)
+      uop.wakedup        := this.wakedup
+      uop.wakedupPC      := this.wakedupPC
+      uop.wakeupChainCount := this.wakeupChainCount
       uop.fpWen          := this.fpWen.getOrElse(false.B)
       uop.vecWen         := this.vecWen.getOrElse(false.B)
       uop.v0Wen          := this.v0Wen.getOrElse(false.B)
@@ -1275,6 +1297,7 @@ object Bundles {
     val isFirstIssue   = Bool()
     val wakedup        = Bool()
     val wakedupPC      = UInt(VAddrBits.W)
+    val wakeupChainCount = UInt(WakeupChainCountWidth.W)
     val loadWaitBit    = Option.when(params.hasLoadExu)(Bool())
     val waitForRobIdx  = Option.when(params.hasLoadExu)(new RobPtr) // store set predicted previous store robIdx
     val storeSetHit    = Option.when(params.hasLoadExu || params.hasStoreAddrExu)(Bool())     // inst has been allocated an store set
