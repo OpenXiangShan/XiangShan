@@ -84,7 +84,7 @@ class XSArgs(object):
         self.emu_optimize = args.emu_optimize
         self.xprop = 1 if args.xprop else None
         self.issue = args.issue
-        self.with_chiseldb = 1 if args.enable_db or args.enable_rolling else (0 if args.no_db else 1)
+        self.with_chiseldb = 1 if args.enable_db or args.enable_rolling else 0
         self.with_rollingdb = 1 if args.enable_rolling else None
         # emu arguments
         self.max_instr = args.max_instr
@@ -96,7 +96,7 @@ class XSArgs(object):
             self.diff = self.diff.replace("nemu-interpreter", "spike")
         self.fork = not args.disable_fork
         self.disable_diff = args.no_diff
-        self.disable_db = args.no_db
+        self.disable_db = not (args.enable_db or args.enable_rolling)
         self.gcpt_restore_bin = args.gcpt_restore_bin
         self.pgo = args.pgo
         self.pgo_max_cycle = args.pgo_max_cycle
