@@ -73,6 +73,7 @@ class XSArgs(object):
         # Makefile arguments
         self.threads = args.threads
         self.make_threads = args.make_threads
+        self.with_constantin = 1 if args.with_constantin else None
         self.with_dramsim3 = 1 if args.with_dramsim3 else None
         self.is_release = 1 if args.release else None
         self.is_spike = "Spike" if args.spike else None
@@ -83,7 +84,8 @@ class XSArgs(object):
         self.emu_optimize = args.emu_optimize
         self.xprop = 1 if args.xprop else None
         self.issue = args.issue
-        self.with_chiseldb = 0 if args.no_db else 1
+        self.with_chiseldb = 1 if args.enable_db or args.enable_rolling else (0 if args.no_db else 1)
+        self.with_rollingdb = 1 if args.enable_rolling else None
         # emu arguments
         self.max_instr = args.max_instr
         self.ram_size = args.ram_size
@@ -100,6 +102,7 @@ class XSArgs(object):
         self.pgo_max_cycle = args.pgo_max_cycle
         self.pgo_emu_args = args.pgo_emu_args
         self.llvm_profdata = args.llvm_profdata
+        self.emulator = args.emulator
         self.emu_trace_all = 1 if args.trace_all else None
         # wave dump path
         if args.wave_dump is not None:
@@ -131,6 +134,7 @@ class XSArgs(object):
         makefile_args = [
             (self.threads,       "EMU_THREADS"),
             (self.with_dramsim3, "WITH_DRAMSIM3"),
+            (self.with_constantin, "WITH_CONSTANTIN"),
             (self.is_release,    "RELEASE"),
             (self.is_spike,      "REF"),
             (self.trace,         "EMU_TRACE"),
@@ -140,6 +144,7 @@ class XSArgs(object):
             (self.emu_optimize,  "EMU_OPTIMIZE"),
             (self.xprop,         "ENABLE_XPROP"),
             (self.with_chiseldb, "WITH_CHISELDB"),
+            (self.with_rollingdb, "WITH_ROLLINGDB"),
             (self.yaml_config,   "YAML_CONFIG"),
             (self.pgo,           "PGO_WORKLOAD"),
             (self.pgo_max_cycle, "PGO_MAX_CYCLE"),
@@ -244,7 +249,10 @@ class XiangShan(object):
         sim_args = " ".join(self.args.get_chisel_args(prefix="--"))
         make_args = " ".join(map(lambda arg: f"{arg[1]}={arg[0]}", self.args.get_makefile_args()))
         threads = self.args.make_threads
-        return_code = self.__exec_cmd(f'make -C $NOOP_HOME emu -j{threads} SIM_ARGS="{sim_args}" {make_args}')
+        if self.args.emulator == "verilator":
+            return_code = self.__exec_cmd(f'make -C $NOOP_HOME emu -j{threads} SIM_ARGS="{sim_args}" {make_args}')
+        else:
+            return_code = self.__exec_cmd(f'make -C $NOOP_HOME gsim GSIM=1 -j{threads} SIM_ARGS="{sim_args}" {make_args}')
         return return_code
 
     def build_simv(self):
@@ -677,6 +685,7 @@ if __name__ == "__main__":
     # makefile arguments
     parser.add_argument('--release', action='store_true', help='enable release')
     parser.add_argument('--spike', action='store_true', help='enable spike diff')
+    parser.add_argument('--with-constantin', action='store_true', help='enable constantin')
     parser.add_argument('--with-dramsim3', action='store_true', help='enable dramsim3')
     parser.add_argument('--threads', nargs='?', type=int, help='number of emu threads')
     parser.add_argument('--make-threads', nargs='?', type=int, help='number of make threads', default=200)
@@ -698,12 +707,18 @@ if __name__ == "__main__":
     parser.add_argument('--gcpt-restore-bin', type=str, default="", help="specify the bin used to restore from gcpt")
     # both makefile and emu arguments
     parser.add_argument('--no-db', action='store_true', help='disable chiseldb dump')
+    parser.add_argument('--dump-db', '--enable-db', dest='enable_db', action='store_true', help='enable chiseldb dump')
+    parser.add_argument('--enable-rolling', action='store_true', help='enable rolling db dump, implies --enable-db')
     parser.add_argument('--pgo', nargs='?', type=str, help='workload for pgo (null to disable pgo)')
     parser.add_argument('--pgo-max-cycle', nargs='?', default=400000, type=int, help='maximun cycle to train pgo')
     parser.add_argument('--pgo-emu-args', nargs='?', default='--no-diff', type=str, help='emu arguments for pgo')
     parser.add_argument('--llvm-profdata', nargs='?', type=str, help='corresponding llvm-profdata command of clang to compile emu, do not set with GCC')
+    parser.add_argument('--emulator', choices=['verilator', 'gsim'], default='verilator', help='emulator backend')
 
     args = parser.parse_args()
+
+    if args.no_db and (args.enable_db or args.enable_rolling):
+        parser.error('--no-db cannot be combined with --enable-db or --enable-rolling')
 
     xs = XiangShan(args)
     ret = xs.run(args)
