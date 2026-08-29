@@ -83,7 +83,8 @@ class XSArgs(object):
         self.emu_optimize = args.emu_optimize
         self.xprop = 1 if args.xprop else None
         self.issue = args.issue
-        self.with_chiseldb = 0 if args.no_db else 1
+        self.with_chiseldb = 1 if args.enable_db or args.enable_rolling else 0
+        self.with_rollingdb = 1 if args.enable_rolling else None
         # emu arguments
         self.max_instr = args.max_instr
         self.ram_size = args.ram_size
@@ -94,7 +95,7 @@ class XSArgs(object):
             self.diff = self.diff.replace("nemu-interpreter", "spike")
         self.fork = not args.disable_fork
         self.disable_diff = args.no_diff
-        self.disable_db = args.no_db
+        self.disable_db = not (args.enable_db or args.enable_rolling)
         self.gcpt_restore_bin = args.gcpt_restore_bin
         self.pgo = args.pgo
         self.pgo_max_cycle = args.pgo_max_cycle
@@ -140,6 +141,7 @@ class XSArgs(object):
             (self.emu_optimize,  "EMU_OPTIMIZE"),
             (self.xprop,         "ENABLE_XPROP"),
             (self.with_chiseldb, "WITH_CHISELDB"),
+            (self.with_rollingdb, "WITH_ROLLINGDB"),
             (self.yaml_config,   "YAML_CONFIG"),
             (self.pgo,           "PGO_WORKLOAD"),
             (self.pgo_max_cycle, "PGO_MAX_CYCLE"),
@@ -698,12 +700,17 @@ if __name__ == "__main__":
     parser.add_argument('--gcpt-restore-bin', type=str, default="", help="specify the bin used to restore from gcpt")
     # both makefile and emu arguments
     parser.add_argument('--no-db', action='store_true', help='disable chiseldb dump')
+    parser.add_argument('--dump-db', '--enable-db', dest='enable_db', action='store_true', help='enable chiseldb dump')
+    parser.add_argument('--enable-rolling', action='store_true', help='enable rolling db dump, implies --enable-db')
     parser.add_argument('--pgo', nargs='?', type=str, help='workload for pgo (null to disable pgo)')
     parser.add_argument('--pgo-max-cycle', nargs='?', default=400000, type=int, help='maximun cycle to train pgo')
     parser.add_argument('--pgo-emu-args', nargs='?', default='--no-diff', type=str, help='emu arguments for pgo')
     parser.add_argument('--llvm-profdata', nargs='?', type=str, help='corresponding llvm-profdata command of clang to compile emu, do not set with GCC')
 
     args = parser.parse_args()
+
+    if args.no_db and (args.enable_db or args.enable_rolling):
+        parser.error('--no-db cannot be combined with --enable-db or --enable-rolling')
 
     xs = XiangShan(args)
     ret = xs.run(args)
