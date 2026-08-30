@@ -207,6 +207,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
     val pseudo_tag_error_inj_done = Output(Bool())
     val pseudo_data_error_inj_done = Output(Bool())
+    // address range for error injection (from CtrlUnit)
+    val error_inj_addr_range = Input(new Bundle {
+      val start = UInt(PAddrBits.W)
+      val end   = UInt(PAddrBits.W)
+    })
+    // address match signal for error injection (output to CtrlUnit)
+    val addrMatch = Output(Bool())  // true when current access address is within configured range
     // force write
     val force_write = Input(Bool())
 
@@ -516,6 +523,16 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   io.pseudo_data_error_inj_done := s2_fire_to_s3 && (s2_tag_error || s2_hit) && s2_may_report_data_error
   io.pseudo_error.ready := false.B
+
+  // Address range check for error injection
+  def addrInRange(addr: UInt): Bool = {
+    val rangeBypass = io.error_inj_addr_range.start === 0.U && io.error_inj_addr_range.end === 0.U
+    val inRange = addr >= io.error_inj_addr_range.start && addr <= io.error_inj_addr_range.end
+    rangeBypass || inRange
+  }
+  // Generate addrMatch signal: true when current access address is within configured range
+  io.addrMatch := s2_valid && addrInRange(s2_req.addr)  // No RegNext! Real-time address match
+
   XSError(s2_valid && s2_can_go_to_s3 && s2_req.miss && !io.refill_info.valid, "MainPipe req can go to s3 but no refill data")
 
   // s3: write data, meta and tag

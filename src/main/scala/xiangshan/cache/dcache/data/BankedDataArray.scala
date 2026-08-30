@@ -270,6 +270,13 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val bank_conflict_slow = Output(Vec(LoadPipelineWidth, Bool()))
     val disable_ld_fast_wakeup = Output(Vec(LoadPipelineWidth, Bool()))
     val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
+    // address range for error injection (from CtrlUnit)
+    val error_inj_addr_range = Input(new Bundle {
+      val start = UInt(PAddrBits.W)
+      val end   = UInt(PAddrBits.W)
+    })
+    // address match signal for error injection (output to CtrlUnit)
+    val addrMatch = Output(Bool())  // true when current access address is within configured range
   })
 
   // bank (0, 1, 2, 3) each way use duplicate addr
@@ -482,17 +489,39 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   dontTouch(read_result)
   dontTouch(read_error_delayed_result)
 
+  // Address range check for error injection
+  def addrInRange(addr: UInt): Bool = {
+    val rangeBypass = io.error_inj_addr_range.start === 0.U && io.error_inj_addr_range.end === 0.U
+    val inRange = addr >= io.error_inj_addr_range.start && addr <= io.error_inj_addr_range.end
+    rangeBypass || inRange
+  }
+
+  // Generate addrMatch signal: true when current access address is within configured range
+  val currentAddrInRange = Wire(Bool())
+  val hasReadlineReq = io.readline.valid
+  val hasReadReq = io.read.map(_.valid).reduce(_ || _)
+  val readlineAddrInRange = hasReadlineReq && addrInRange(io.readline.bits.addr)
+  val readAddrInRange = io.read.zip(bank_addrs).zipWithIndex.map {
+    case ((read, bank_addr), i) =>
+      read.valid && addrInRange(read.bits.addr)
+  }.reduce(_ || _)
+  currentAddrInRange := readlineAddrInRange || readAddrInRange
+  io.addrMatch := currentAddrInRange
+
   val pseudo_data_toggle_mask = io.pseudo_error.bits.map {
     case bank =>
       Mux(io.pseudo_error.valid && bank.valid, bank.mask, 0.U)
   }
   val readline_hit = io.readline.fire &&
-                     (io.readline.bits.rmask & VecInit(io.pseudo_error.bits.map(_.valid)).asUInt).orR
+                     (io.readline.bits.rmask & VecInit(io.pseudo_error.bits.map(_.valid)).asUInt).orR &&
+                     currentAddrInRange
   val readbank_hit = io.read.zip(bank_addrs.zip(io.is128Req)).zipWithIndex.map {
                           case ((read, (bank_addr, is128Req)), i) =>
                             val error_bank0 = io.pseudo_error.bits(bank_addr(0))
                             val error_bank1 = io.pseudo_error.bits(bank_addr(1))
-                            read.fire && (error_bank0.valid || error_bank1.valid && is128Req) && !io.bank_conflict_slow(i)
+                            read.fire && (error_bank0.valid || error_bank1.valid && is128Req) &&
+                            !io.bank_conflict_slow(i) &&
+                            currentAddrInRange
                       }.reduce(_|_)
   io.pseudo_error.ready := RegNext(readline_hit || readbank_hit)
 
@@ -794,17 +823,40 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val bank_result_delayed = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, new L1BankedDataReadResult()))))
   val read_bank_error_delayed = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, Vec(DCacheWays, Bool()))))
 
+  // Address range check for error injection
+  def addrInRange(addr: UInt): Bool = {
+    val rangeBypass = io.error_inj_addr_range.start === 0.U && io.error_inj_addr_range.end === 0.U
+    val inRange = addr >= io.error_inj_addr_range.start && addr <= io.error_inj_addr_range.end
+    rangeBypass || inRange
+  }
+
+  // Generate addrMatch signal: true when current access address is within configured range
+  val currentAddrInRange = Wire(Bool())
+  val hasReadlineReq = io.readline.valid
+  val hasReadReq = io.read.map(_.valid).reduce(_ || _)
+  val readlineAddrInRange = hasReadlineReq && addrInRange(io.readline.bits.addr)
+  val readAddrInRange = io.read.zip(bank_addrs).zipWithIndex.map {
+    case ((read, bank_addr), i) =>
+      read.valid && addrInRange(read.bits.addr)
+  }.reduce(_ || _)
+  currentAddrInRange := readlineAddrInRange || readAddrInRange
+  io.addrMatch := currentAddrInRange
+
   val pseudo_data_toggle_mask = io.pseudo_error.bits.map {
     case bank =>
       Mux(io.pseudo_error.valid && bank.valid, bank.mask, 0.U)
   }
+
   val readline_hit = io.readline.fire &&
-                     (io.readline.bits.rmask & VecInit(io.pseudo_error.bits.map(_.valid)).asUInt).orR
+                     (io.readline.bits.rmask & VecInit(io.pseudo_error.bits.map(_.valid)).asUInt).orR &&
+                     currentAddrInRange
   val readbank_hit = io.read.zip(bank_addrs.zip(io.is128Req)).zipWithIndex.map {
                           case ((read, (bank_addr, is128Req)), i) =>
                             val error_bank0 = io.pseudo_error.bits(bank_addr(0))
                             val error_bank1 = io.pseudo_error.bits(bank_addr(1))
-                            read.fire && (error_bank0.valid || error_bank1.valid && is128Req) && !io.bank_conflict_slow(i)
+                            read.fire && (error_bank0.valid || error_bank1.valid && is128Req) &&
+                            !io.bank_conflict_slow(i) &&
+                            currentAddrInRange
                       }.reduce(_|_)
   io.pseudo_error.ready := RegNext(readline_hit || readbank_hit)
 
