@@ -56,7 +56,7 @@ class MemoryRequestHelper(requestType: Int)
     "  output reg        io_response",
     ");",
     "",
-    "always @(posedge clock or posedge reset) begin",
+    "always @(negedge clock or posedge reset) begin",
     "  if (reset) begin",
     "    io_response <= 1'b0;",
     "  end",
@@ -96,7 +96,7 @@ class MemoryResponseHelper(requestType: Int)
     "  output reg [63:0] response",
     ");",
     "",
-    "always @(posedge clock or posedge reset) begin",
+    "always @(negedge clock or posedge reset) begin",
     "  if (reset) begin",
     "    response <= 64'b0;",
     "  end",
@@ -147,159 +147,147 @@ class AXI4MemoryImp[T <: Data](outer: AXI4Memory) extends AXI4SlaveModuleImp(out
   def ramIndex(addr: UInt) = ((addr - ramBaseAddr.U)(ramOffsetBits - 1, 0) >> ramIndexBits).asUInt
   val ramHelper = DifftestMem(outer.memByte, outer.beatBytes, 8, singlePort = false)
 
-  val numOutstanding = 1 << in.ar.bits.id.getWidth
+  // TODO: *NOTICE* The simulated behaviour of DRAM (or other external models) might be inaccurate,
+  //       since we are not simulating the actual DRAM chip bits width.
+  //       Only the first request / burst is sent to the external model, regardless of the channel
+  //       count and AXI4 channel width.
+  //       This feature was not changed since the original implementation to keep the performance 
+  //       consistent with the legacy AXI4Memory SoC. Which was natural for write transactions, and
+  //       patched by 'read_flap*' for read transactions.
+
+  // !! This implementation should be only used for simulation purposes. !! 
+
+  val numOutstanding = 64
   // Note: we are using in.ar.bits.addr.getWidth insead of ramOffsetBits here.
   // Why: the CPU may access out-of-range addresses. Let the RAM helper deal with it.
-  val addressMem = Mem(numOutstanding, UInt((in.ar.bits.addr.getWidth - ramIndexBits).W))
-  val arlenMem = Mem(numOutstanding, UInt(in.ar.bits.len.getWidth.W))
+  val awQueue = Module(new Queue(chiselTypeOf(in.aw.bits), numOutstanding, flow = false))
+  val wQueue = Module(new Queue(chiselTypeOf(in.w.bits), numOutstanding * 2, flow = false))
+  val bQueue = Module(new Queue(chiselTypeOf(in.b.bits), numOutstanding, flow = false))
+  val arQueue = Module(new Queue(chiselTypeOf(in.ar.bits), numOutstanding, flow = false))
+  val rQueue = Module(new Queue(chiselTypeOf(in.r.bits), numOutstanding * 2, flow = false))
+
+  val wTrackers = Module(new Queue(chiselTypeOf(in.aw.bits), numOutstanding, flow = true))
+  val wTrackersDataID = RegInit(VecInit.fill(numOutstanding)(0.U(log2Up(outer.burstLen + 1).W)))
+
+  val rTrackers = Mem(numOutstanding, chiselTypeOf(in.ar.bits))
+  val rTrackersDataID = RegInit(VecInit.fill(numOutstanding)(0.U(log2Up(outer.burstLen + 1).W)))
+
+  val w_count = RegInit(0.U(log2Up(numOutstanding + 1).W))
+  val r_count = RegInit(0.U(log2Up(numOutstanding + 1).W))
 
   // accept a read request and send it to the external model
-  val pending_read_req_valid = RegInit(false.B)
-  val pending_read_req_bits  = RegEnable(in.ar.bits, in.ar.fire)
-  val pending_read_req_ready = Wire(Bool())
-  val pending_read_need_req = pending_read_req_valid && !pending_read_req_ready
-  val read_req_valid = pending_read_need_req || in.ar.valid
-  val read_req_bits  = Mux(pending_read_need_req, pending_read_req_bits, in.ar.bits)
-  pending_read_req_ready := readRequest(read_req_valid, read_req_bits.addr, read_req_bits.id)
+  in.ar.ready := arQueue.io.enq.ready
+  arQueue.io.enq.valid := in.ar.valid
+  arQueue.io.enq.bits := in.ar.bits
 
-  when (in.ar.fire) {
-    pending_read_req_valid := true.B
-    addressMem.write(read_req_bits.id, ramIndex(read_req_bits.addr))
-    arlenMem.write(read_req_bits.id, read_req_bits.len)
-  }.elsewhen (pending_read_req_ready) {
-    pending_read_req_valid := false.B
+  when (arQueue.io.enq.fire) {
+    rTrackers.write(in.ar.bits.id, in.ar.bits)
+    rTrackersDataID(in.ar.bits.id) := 0.U
   }
-  in.ar.ready := !pending_read_req_valid || pending_read_req_ready
 
-  // accept a write request (including address and data) and send it to the external model
-  val pending_write_req_valid = RegInit(VecInit.fill(2)(false.B))
-  val pending_write_req_bits  = RegEnable(in.aw.bits, in.aw.fire)
-  val pending_write_req_data  = RegEnable(in.w.bits, in.w.fire)
-  val pending_write_req_ready = Wire(Bool())
-  val pending_write_need_req = pending_write_req_valid.last && !pending_write_req_ready
-  val aw_and_w_last_arrive_at_same_time = in.aw.fire && in.w.fire && in.w.bits.last
-  val w_last_arrive_before_aw = in.aw.fire && pending_write_need_req
-  val aw_arrive_before_w_last = pending_write_req_valid.head && in.w.fire && in.w.bits.last
-  val aw_arrive_before_w = pending_write_req_valid.head && pending_write_need_req
-  val write_req_enq_pending = aw_arrive_before_w || aw_arrive_before_w_last
-  val write_req_enq_no_pending = aw_and_w_last_arrive_at_same_time || w_last_arrive_before_aw
-  val write_req_valid = write_req_enq_pending || RegNext(write_req_enq_no_pending, false.B)
-  val write_req_enq_addr = Mux(write_req_enq_pending, pending_write_req_bits.addr, in.aw.bits.addr)
-  val write_req_enq_id = Mux(write_req_enq_pending, pending_write_req_bits.id, in.aw.bits.id)
-  pending_write_req_ready := writeRequest(write_req_valid, write_req_enq_addr, write_req_enq_id)
-
-  when (in.aw.fire && !write_req_enq_no_pending) {
-    pending_write_req_valid.head := true.B
-  }.elsewhen (pending_write_req_ready) {
-    pending_write_req_valid.head := false.B
-  }
-  val write_req_last = in.w.fire && in.w.bits.last
-  when (write_req_last) {
-    pending_write_req_valid.last := true.B
-  }.elsewhen (pending_write_req_ready) {
-    pending_write_req_valid.last := false.B
-  }
-  in.aw.ready := !pending_write_req_valid.head || pending_write_req_ready
-  in.w.ready := in.aw.ready || !pending_write_req_valid.last
-
-  // ram is written when write data fire
-  val wdata_cnt = Counter(outer.burstLen)
-  val write_req_addr = Mux(in.aw.fire, in.aw.bits.addr, pending_write_req_bits.addr)
-  val write_req_index = ramIndex(write_req_addr) + wdata_cnt.value
-  when (in.w.fire) {
-    ramHelper.write(
-      addr = write_req_index,
-      data = in.w.bits.data.asTypeOf(Vec(outer.beatBytes, UInt(8.W))),
-      mask = in.w.bits.strb.asBools
-    )
-  }
-  when (write_req_last) {
-    wdata_cnt.reset()
-  }.elsewhen (in.w.fire) {
-    wdata_cnt.inc()
-  }
+  arQueue.io.deq.ready := readRequest(arQueue.io.deq.valid, arQueue.io.deq.bits.addr, arQueue.io.deq.bits.id)
 
   // read data response: resp from DRAMsim3; read data and response to in.r
-  // This is the output of the last pipeline before in.r. This is not the pipeline registers.
-  val r_resp = Wire(Decoupled(chiselTypeOf(in.r.bits)))
+  val rPipe = Module(new Queue(chiselTypeOf(in.r.bits), 1, pipe = true, flow = false))
 
-  val pending_read_resp_valid = RegInit(false.B)
-  val pending_read_resp_id = Reg(UInt(r_resp.bits.id.getWidth.W))
-  val has_read_resp = Wire(Bool())
-  val read_resp_last = r_resp.fire && r_resp.bits.last
-  val read_request_cnt = RegInit(0.U(8.W))
-  val read_have_req_cnt = read_request_cnt =/= 0.U
-  val (read_resp_valid, read_resp_id) = readResponse((!has_read_resp || read_resp_last) && read_have_req_cnt)
-  has_read_resp := (read_resp_valid && !read_resp_last) || pending_read_resp_valid
-  val rdata_cnt = Counter(outer.burstLen)
-  val read_resp_addr = addressMem(r_resp.bits.id) + rdata_cnt.value
-  val read_resp_len = arlenMem(r_resp.bits.id)
-  r_resp.valid := read_resp_valid || pending_read_resp_valid
-  r_resp.bits.id := Mux(pending_read_resp_valid, pending_read_resp_id, read_resp_id)
-  // We cannot get the read data this cycle because the RAM helper has one-cycle latency.
-  r_resp.bits.data := DontCare
-  r_resp.bits.resp := AXI4Parameters.RESP_OKAY
-  r_resp.bits.last := (rdata_cnt.value === read_resp_len)
+  val read_flap = RegInit(false.B)
+  val read_flap_tracker = Reg(chiselTypeOf(in.ar.bits))
 
-  // The return values of DPI-C are used to determine whether a request has been made or completed
-  // pending_read_req_ready ---> readRequest()
-  // read_resp_valid <--- readResponse()
-  when (pending_read_req_ready && !read_resp_valid) {
-    read_request_cnt := read_request_cnt + 1.U
-  }.elsewhen (read_resp_valid && !pending_read_req_ready) {
-    read_request_cnt := read_request_cnt - 1.U
-  }
-  when (!pending_read_resp_valid && read_resp_valid && !read_resp_last) {
-    pending_read_resp_valid := true.B
-    pending_read_resp_id := read_resp_id
-  }.elsewhen (pending_read_resp_valid && !read_resp_valid && read_resp_last) {
-    pending_read_resp_valid := false.B
-  }
-  when (read_resp_last) {
-    rdata_cnt.reset()
-  }.elsewhen (r_resp.fire) {
-    rdata_cnt.inc()
+  val (read_resp_valid, read_resp_id_ext) = readResponse((r_count =/= 0.U) && rPipe.io.enq.ready && !read_flap)
+  val read_resp_id = Mux(
+    read_flap,
+    read_flap_tracker.id, // second and further read burst if necessary, bypassing external model read
+    read_resp_id_ext // first read burst
+  )
+  val read_resp_addr = ramIndex(rTrackers(read_resp_id).addr) + rTrackersDataID(read_resp_id)
+
+  rPipe.io.enq.valid := read_resp_valid || read_flap
+  rPipe.io.enq.bits.id := read_resp_id
+  rPipe.io.enq.bits.data := DontCare // read data is not available yet
+  rPipe.io.enq.bits.resp := AXI4Parameters.RESP_OKAY
+  rPipe.io.enq.bits.last := rTrackersDataID(read_resp_id) === rTrackers(read_resp_id).len
+
+  when (rPipe.io.enq.fire) {
+    when (!rPipe.io.enq.bits.last) {
+      read_flap := true.B
+      read_flap_tracker := Mux(read_flap, read_flap_tracker, rTrackers(read_resp_id))
+    }.otherwise {
+      read_flap := false.B
+    }
+    rTrackersDataID(read_resp_id) := rTrackersDataID(read_resp_id) + 1.U
   }
 
-  // `r_pipe`: the extra pipeline registers for the read response `in.r`
-  prefix("r_pipe") {
-    val valid = RegInit(false.B)
-    when (in.r.fire) { valid := false.B }
-    when (r_resp.fire) { valid := true.B }
-    in.r.valid := valid
-    in.r.bits := RegEnable(r_resp.bits, r_resp.fire)
-    r_resp.ready := !valid || in.r.ready
+  rPipe.io.deq.ready := rQueue.io.enq.ready
+  rQueue.io.enq.valid := rPipe.io.deq.valid
+  rQueue.io.enq.bits.id := rPipe.io.deq.bits.id
+  rQueue.io.enq.bits.data := ramHelper.readAndHold(read_resp_addr, rPipe.io.enq.fire).asUInt
+  rQueue.io.enq.bits.resp := rPipe.io.deq.bits.resp
+  rQueue.io.enq.bits.last := rPipe.io.deq.bits.last
 
-    // the data should be auto-hold
-    in.r.bits.data := ramHelper.readAndHold(read_resp_addr, r_resp.fire).asUInt
+  rQueue.io.deq.ready := in.r.ready
+  in.r.valid := rQueue.io.deq.valid
+  in.r.bits := rQueue.io.deq.bits
+
+  // read request counter
+  val r_count_inc = arQueue.io.deq.fire
+  val r_count_dec = rQueue.io.enq.fire && rQueue.io.enq.bits.last
+  when (r_count_inc ^ r_count_dec) {
+    r_count := Mux(r_count_inc, r_count + 1.U, r_count - 1.U)
   }
 
-  // write response
-  val pending_write_resp_valid = RegInit(false.B)
-  val pending_write_resp_id = Reg(UInt(in.b.bits.id.getWidth.W))
-  val has_write_resp = Wire(Bool())
-  val write_request_cnt = RegInit(0.U(8.W))
-  val write_have_req_cnt = write_request_cnt =/= 0.U
-  val (write_resp_valid, write_resp_id) = writeResponse((!has_write_resp || in.b.fire) && write_have_req_cnt)
-  has_write_resp := write_resp_valid || pending_write_resp_valid
-  in.b.valid := write_resp_valid || pending_write_resp_valid
-  in.b.bits.id := Mux(pending_write_resp_valid, pending_write_resp_id, write_resp_id)
-  in.b.bits.resp := AXI4Parameters.RESP_OKAY
+  // accept a write request and send it to the external model
+  in.aw.ready := awQueue.io.enq.ready && wTrackers.io.enq.ready && bQueue.io.enq.ready
+  awQueue.io.enq.valid := in.aw.valid && wTrackers.io.enq.ready && bQueue.io.enq.ready
+  awQueue.io.enq.bits := in.aw.bits
 
-  // The return values of DPI-C are used to determine whether a request has been made or completed
-  // pending_write_req_ready ---> writeRequest()
-  // write_resp_valid <--- writeResponse()
-  when (pending_write_req_ready && !write_resp_valid) {
-    write_request_cnt := write_request_cnt + 1.U
-  }.elsewhen (write_resp_valid && !pending_write_req_ready) {
-    write_request_cnt := write_request_cnt - 1.U
+  wTrackers.io.enq.valid := in.aw.valid && bQueue.io.enq.ready
+  wTrackers.io.enq.bits := in.aw.bits
+
+  when (wTrackers.io.enq.fire) {
+    wTrackersDataID(in.aw.bits.id) := 0.U
   }
-  when (!pending_write_resp_valid && write_resp_valid && !in.b.ready) {
-    pending_write_resp_valid := true.B
-    pending_write_resp_id := write_resp_id
-  }.elsewhen (pending_write_resp_valid && !write_resp_valid && in.b.ready) {
-    pending_write_resp_valid := false.B
+  
+  awQueue.io.deq.ready := writeRequest(awQueue.io.deq.valid, awQueue.io.deq.bits.addr, awQueue.io.deq.bits.id)
+
+  // accept a write data and write it to the internal memory
+  in.w.ready := wQueue.io.enq.ready
+  wQueue.io.enq.valid := in.w.valid
+  wQueue.io.enq.bits := in.w.bits
+
+  wQueue.io.deq.ready := w_count =/= 0.U
+
+  val write_req_addr = ramIndex(wTrackers.io.deq.bits.addr) + wTrackersDataID(wTrackers.io.deq.bits.id)
+  when (wQueue.io.deq.fire) {
+    ramHelper.write(
+      addr = write_req_addr,
+      data = wQueue.io.deq.bits.data.asTypeOf(Vec(outer.beatBytes, UInt(8.W))),
+      mask = wQueue.io.deq.bits.strb.asBools
+    )
+    wTrackersDataID(wTrackers.io.deq.bits.id) := wTrackersDataID(wTrackers.io.deq.bits.id) + 1.U
   }
+
+  assert(!wQueue.io.deq.valid || wTrackers.io.deq.valid, "AXI4Memory: write tracker underflow on W channel")
+
+  // write request counter
+  val w_count_inc = awQueue.io.deq.fire
+  val w_count_dec = wQueue.io.deq.fire && wQueue.io.deq.bits.last
+  when (w_count_inc ^ w_count_dec) {
+    w_count := Mux(w_count_inc, w_count + 1.U, w_count - 1.U)
+  }
+
+  // generate write response
+  bQueue.io.deq.ready := in.b.ready
+  in.b.valid := bQueue.io.deq.valid
+  in.b.bits := bQueue.io.deq.bits
+
+  bQueue.io.enq.valid := wQueue.io.deq.fire && wQueue.io.deq.bits.last
+  bQueue.io.enq.bits.id := wTrackers.io.deq.bits.id
+  bQueue.io.enq.bits.resp := AXI4Parameters.RESP_OKAY
+
+  wTrackers.io.deq.ready := bQueue.io.enq.fire
+
+  assert(!bQueue.io.enq.valid || wTrackers.io.deq.valid, "AXI4Memory: write tracker underflow on B channel")
+  assert(!bQueue.io.enq.valid || bQueue.io.enq.ready, "AXI4Memory: B channel overflow")
 }
 
 class AXI4Memory
