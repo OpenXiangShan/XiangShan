@@ -479,9 +479,11 @@ class WithCHI extends Config((_, _, _) => {
 })
 
 class KunminghuV2Config(n: Int = 1) extends Config(
-  L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
+  (L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
     ++ new DefaultConfig(n)
-    ++ new WithCHI
+    ++ new WithCHI).alter((site, here, up) => {
+      case SoCParamsKey => up(SoCParamsKey).copy(LLCDDRExtraAXIBuffers = 4)
+    })
 )
 
 class KunminghuV2MinimalConfig(n: Int = 1) extends Config(

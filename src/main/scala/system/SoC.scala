@@ -135,6 +135,9 @@ case class SoCParameters
     geilen = 7
   ),
   EnableCHIAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 8, sync = 3, safe = true)),
+  // Number of additional AXI4 buffers between the CHI LLC bridge and external DDR.
+  // Each default AXI4Buffer contributes one cycle on the request and response paths.
+  LLCDDRExtraAXIBuffers: Int = 0,
   EnableClintAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 8, sync = 3, safe = true)),
   SeperateBusAsyncBridge: Option[AsyncQueueParams] = Some(AsyncQueueParams(depth = 1, sync = 3, safe = true)),
   // when UsePrivateClint is true, private clint is used, Timer will be instanced and mtip is generated inside XSTileWrap
@@ -155,6 +158,7 @@ case class SoCParameters
     !UsePrivateClint || (SeperateBus != top.SeperatedBusType.NONE),
     "SeperateBus should not be None when UsePrivateClint is true"
   )
+  require(LLCDDRExtraAXIBuffers >= 0, "LLCDDRExtraAXIBuffers must be non-negative")
   // L3 configurations
   val L3InnerBusWidth = 256
   val L3BlockSize = 64
@@ -356,8 +360,10 @@ trait HaveAXI4MemPort {
   val axi4mem_node = AXI4IdentityNode()
 
   if (enableCHI) {
-    axi4mem_node :=
-      soc_xbar.get
+    val llcDdrMemPath = (0 until soc.LLCDDRExtraAXIBuffers).foldLeft[AXI4Node](soc_xbar.get) {
+      case (upstream, _) => AXI4Buffer() := upstream
+    }
+    axi4mem_node := llcDdrMemPath
   } else {
     mem_xbar :=*
       TLBuffer.chainNode(2) :=
