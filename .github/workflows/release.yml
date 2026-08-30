@@ -144,6 +144,10 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/openxiangshan/xs-env:ubuntu-24.04
+      volumes:
+        - /mnt:/mnt
     steps:
       - name: Set test branch or commit
         id: set_test
@@ -151,18 +155,10 @@ jobs:
           REF="${{ inputs.test_branch || github.ref }}"
           echo "Using checkout ref: ${REF}"
           echo "commit_sha=${REF}" >> $GITHUB_OUTPUT
-
       - name: Checkout code
         uses: actions/checkout@v7
         with:
           ref: ${{ steps.set_test.outputs.commit_sha }}
-      - name: Install deps
-        run: |
-          sudo apt install python3-psutil
-          mkdir -p ~/.local/bin
-          curl -L https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.0.4/mill-dist-1.0.4-mill.sh -o ~/.local/bin/mill
-          chmod +x ~/.local/bin/mill
-          export PATH=~/.local/bin:$PATH
       - name: Init submodules
         run: make init-force
       - name: Init swapfile
