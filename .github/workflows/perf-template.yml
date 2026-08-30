@@ -116,7 +116,13 @@ jobs:
               echo "SERVER_LIST=open" >> $GITHUB_ENV
             fi
           else
-            echo "SERVER_LIST=${{ inputs.servers }}" >> $GITHUB_ENV
+            SERVER_INPUT="${{ inputs.servers }}"
+            # Strip metadata prefix (e.g. "cores=384 status=... [group4] ") if present.
+            # The metadata pattern contains key=value pairs before a [group] tag.
+            if [[ "$SERVER_INPUT" == *"="*"["*"]"* ]]; then
+              SERVER_INPUT=$(echo "$SERVER_INPUT" | sed 's/^[^[]*\[[^]]*\]\s*//')
+            fi
+            echo "SERVER_LIST=$SERVER_INPUT" >> $GITHUB_ENV
           fi
 
           SPEC_TAG="-${{ inputs.xs_config }}"
