@@ -14,6 +14,7 @@ env:
   AM_HOME: /nfs/home/share/ci-workloads/nexus-am
   PERF_HOME: /nfs/home/ci-runner/emu-performance/${{ github.run_number }}
   CKPT_HOME: /nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260604/checkpoint
+  CKPT_JSON_PATH: /nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260604/json/checkpoints_all.json
 
 jobs:
   changes:
@@ -40,6 +41,7 @@ jobs:
       - builder
     outputs:
       cluster: ${{ steps.save.outputs.cluster }}
+      random_ckpts: ${{ steps.random.outputs.selected_ckpts }}
     timeout-minutes: 180
     continue-on-error: false
     steps:
@@ -75,6 +77,31 @@ jobs:
           else
             echo "cluster=open" >> ${GITHUB_OUTPUT}
           fi
+      - name: Random selection
+        id: random
+        run: |
+          python3 - <<PY
+          import json
+          import random
+          random.seed(${{ github.run_number }}) # use run number as seed to make it deterministic for each run
+          selected = []
+          for (json_path, home) in [
+            ("${CKPT_JSON_PATH}", "${CKPT_HOME}")
+          ]:
+            with open(json_path, "r") as f:
+              ckpt_json = json.load(f)
+            selected.extend([
+              {
+                "home": home,
+                "name": bench,
+                "ckpt": random.choice(list(ckpt_json[bench]["points"].keys())) # select one checkpoint for each benchmark
+              }
+              for bench in random.sample(list(ckpt_json.keys()), 5) # select 5 benchmarks
+            ])
+          print(json.dumps(selected, indent=2))
+          with open("${GITHUB_OUTPUT}", "a") as f:
+            f.write(f"selected_ckpts={json.dumps(selected)}\n")
+          PY
 
   run:
     name: EMU - Performance - Run
@@ -253,3 +280,56 @@ jobs:
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
         run: |
           echo "Fork PR detected, skip summary workflow dispatch because GITHUB_TOKEN cannot dispatch workflows in pull_request from fork." >> $GITHUB_STEP_SUMMARY
+
+  random-regression:
+    name: EMU - Performance - Random Regression
+    needs: build
+    runs-on:
+      - ${{ needs.build.outputs.cluster }} # use same cluster as builder to avoid cross-cluster network copy & pgo issue
+      - runner
+    timeout-minutes: 300
+    continue-on-error: false
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.build.outputs.random_ckpts) }}
+      fail-fast: false
+    steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - name: Get artifact
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+          mkdir -p build
+          echo "Getting EMU binary from ${PERF_HOME}/emu"
+          cp -L ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
+      - name: Run SPEC06 Test - ${{ matrix.name }}
+        id: run
+        shell: bash
+        run: |
+          export CKPT=$(find "${CKPT_HOME}/${{ matrix.name }}/${{ matrix.ckpt }}" -type f \( -name "*.gz" -o -name "*.zstd" \) | head -n 1)
+          echo "Running checkpoint: ${CKPT}"
+          # TODO: remove --disable-fork to enable lightSSS when gsim supports it
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${PERF_HOME} \
+            --numa --threads 1 \
+            --max-instr 5000000 \
+            --disable-fork \
+            ${CKPT} \
+            2> stderr.log | tee stdout.log
+          # archive log, but does not save ipc file, as random selection is not comparable with previous runs
+          echo "IPC: $(grep -oP 'IPC = \K\d+\.\d+' stdout.log)"
+      - name: Archive log
+        if: ${{ always() && steps.run.outcome != 'skipped' }}
+        run: |
+          # if run step failed, do not sort
+          if [[ "${{ steps.run.outcome }}" == "failure" ]]; then
+            cat stderr.log
+          else
+            mv stderr.log stderr.log.raw
+            cat stderr.log.raw | sort | tee stderr.log
+          fi
+          tar -czvf "${PERF_HOME}/${{ matrix.name }}_${{ matrix.ckpt }}.tar.gz" stdout.log stderr.log
