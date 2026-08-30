@@ -503,6 +503,10 @@ class KunminghuV2MinimalConfig(n: Int = 1) extends Config(
 class XSNoCTopConfig(n: Int = 1) extends Config(
   (new KunminghuV2Config(n)).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCTop = true)
+    case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDiff = false)
+    case XSTileKey => up(XSTileKey).map(core => core.copy(
+      L2CacheParamsOpt = core.L2CacheParamsOpt.map(_.copy(enablePerf = true))
+    ))
   })
 )
 

@@ -211,7 +211,13 @@ override SIM_ARGS += --difftest-config G
 endif
 
 # emu for the release version
+ifeq ($(CONFIG),XSNoCTopConfig)
+# KXY simulation RTL: retain only the performance endpoint's printfs. The
+# generated wrapper supplies dump/clean pulses at 20M and 40M commits.
+RELEASE_ARGS += --fpga-platform --enable-module-print LogPerfEndpoint --remove-assert --reset-gen --firtool-opt --ignore-read-enable-mem
+else
 RELEASE_ARGS += --fpga-platform --disable-all --remove-assert --reset-gen --firtool-opt --ignore-read-enable-mem
+endif
 ifeq ($(FPGA), 1)
 override DEBUG_ARGS	+= --fpga-platform --disable-all --remove-assert --disable-clockgate
 else
@@ -281,6 +287,9 @@ ifeq ($(CHISEL_TARGET),systemverilog)
 	$(MEM_GEN_SEP) "$(MEM_GEN)" "$@.conf" "$(@D)"
 	@{ git log -n 1; git diff; } | sed 's/^/\/\// ' > $(dir $@).__diff__
 	@cat $(dir $@).__diff__ $@ > $(dir $@).__out__ && mv $(dir $@).__out__ $@
+ifeq ($(CONFIG),XSNoCTopConfig)
+	./scripts/wrap-xsnoctop-auto-perf.sh "$@"
+endif
 endif
 
 verilog: $(call docker-deps,$(TOP_V))
