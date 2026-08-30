@@ -35,6 +35,8 @@ DebugModuleParams:
   hasHartResets: true
 
 WFIResume: true
+  
+EnableCommitStuckCheck: false
 
 SeperateDM: false
 
