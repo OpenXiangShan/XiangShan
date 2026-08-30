@@ -504,6 +504,14 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     with HasDTSImp[XSNoCTop]
     with HasTraceIOImp[XSNoCTop]
   {
+    // Driven by the generated simulation wrapper at each 20M-instruction boundary.
+    val difftest_perfCtrl_clean = IO(Input(Bool()))
+    val difftest_perfCtrl_dump = IO(Input(Bool()))
+
+    withClockAndReset(clock, reset) {
+      XSLog.collect(GTimer(), true.B, difftest_perfCtrl_clean, difftest_perfCtrl_dump)
+    }
+
     /* work in SoC clock domain by default in XSTop scope */
     childClock := soc_clock
     childReset := soc_reset_sync
