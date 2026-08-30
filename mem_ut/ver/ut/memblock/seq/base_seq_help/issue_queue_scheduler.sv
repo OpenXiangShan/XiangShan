@@ -53,6 +53,7 @@ class issue_queue_scheduler extends uvm_object;
         item.send_pri    = 0;
         item.ready_cycle = 0;
         item.replay_seq  = 0;
+        item.dynamic_epoch = 0;
         item.has_lqIdx   = 1'b0;
         item.lq_key      = '{default:'0};
         item.has_sqIdx   = 1'b0;
@@ -80,6 +81,7 @@ class issue_queue_scheduler extends uvm_object;
         item.send_pri    = (target == MEMBLOCK_ISSUE_TARGET_STD) ? main_tr.send_pri_std : main_tr.send_pri;
         item.ready_cycle = main_tr.delay;
         item.replay_seq  = status.replay_seq;
+        item.dynamic_epoch = status.dynamic_epoch;
         item.has_lqIdx   = status.active_lq_mapped;
         item.lq_key.flag = status.lqIdx_flag;
         item.lq_key.value = status.lqIdx_value;
@@ -515,6 +517,89 @@ class issue_queue_scheduler extends uvm_object;
         data.clear_replay_target_after_fire(item.uid, item.target);
         return 1'b1;
     endfunction:mark_issue_fire_already_accepted
+
+    // 中文注释：普通 issue eligibility 会在 fault 后阻止新的 candidate，但不能否认
+    // fault 发生前已经冻结并由 driver 真实 fire 的 candidate。该函数只做身份/生命周期
+    // 校验，不修改公共状态；真正的状态转换由 mark_issue_fire_from_frozen_candidate() 完成。
+    function bit is_frozen_issue_item_fire_acceptable(input memblock_issue_q_item_t item);
+        status_transaction       status;
+        main_control_transaction main_tr;
+
+        ensure_data();
+        if (data.issue_blocked_by_global_flush() ||
+            item.target == MEMBLOCK_ISSUE_TARGET_NONE ||
+            !data.is_valid_uid(item.uid)) begin
+            return 1'b0;
+        end
+
+        status = data.get_status(item.uid);
+        if (!status.active || !status.enq || !status.issue_ready ||
+            status.terminal_done || status.flushed || status.redirect_pending ||
+            status.issue_killed || !status.fault || !status.exception_pending ||
+            status.dynamic_epoch != item.dynamic_epoch || item.ready_cycle != 0 ||
+            !data.target_replay_seq_match(status, item.target, item.replay_seq)) begin
+            return 1'b0;
+        end
+
+        main_tr = data.get_main_transaction(item.uid);
+        if (main_tr.get_rob_key() != item.rob_key || status.get_rob_key() != item.rob_key) begin
+            return 1'b0;
+        end
+
+        case (item.target)
+            MEMBLOCK_ISSUE_TARGET_LOAD: begin
+                if (!status.queued_load || status.load_dispatched || status.load_writeback ||
+                    status.load_pass || status.load_fault || !status.active_lq_mapped ||
+                    item.has_lqIdx != status.active_lq_mapped ||
+                    item.lq_key.flag != status.lqIdx_flag ||
+                    item.lq_key.value != status.lqIdx_value) begin
+                    return 1'b0;
+                end
+            end
+            MEMBLOCK_ISSUE_TARGET_STA: begin
+                if (!status.queued_sta || status.sta_dispatched || status.sta_writeback ||
+                    status.sta_pass || status.sta_fault || !status.active_sq_mapped ||
+                    item.has_sqIdx != status.active_sq_mapped ||
+                    item.sq_key.flag != status.sqIdx_flag ||
+                    item.sq_key.value != status.sqIdx_value) begin
+                    return 1'b0;
+                end
+            end
+            MEMBLOCK_ISSUE_TARGET_STD: begin
+                if (!status.queued_std || status.std_dispatched || status.std_writeback ||
+                    status.std_pass || status.std_fault || !status.active_sq_mapped ||
+                    item.has_sqIdx != status.active_sq_mapped ||
+                    item.sq_key.flag != status.sqIdx_flag ||
+                    item.sq_key.value != status.sqIdx_value) begin
+                    return 1'b0;
+                end
+            end
+            default: return 1'b0;
+        endcase
+        return 1'b1;
+    endfunction:is_frozen_issue_item_fire_acceptable
+
+    // 中文注释：只给已经真实 fire、但在 fire 前后恰好遇到 fault 的冻结 candidate
+    // 建立 issue snapshot。它不放宽正常仲裁，也不允许 global flush/redirect 后的旧实例复用。
+    function bit mark_issue_fire_from_frozen_candidate(input memblock_issue_q_item_t item);
+        int unsigned issue_epoch;
+
+        ensure_data();
+        if (!is_frozen_issue_item_fire_acceptable(item)) begin
+            return 1'b0;
+        end
+        issue_epoch = data.alloc_issue_epoch();
+        data.mark_issue_snapshot(item.uid, item.target, issue_epoch);
+        data.delete_issue_queue_entry(item.target, item.uid, item.replay_seq, 1'b1);
+        set_target_queued(item.uid, item.target, 1'b0);
+        set_target_dispatched(item.uid, item.target, 1'b1);
+        data.clear_replay_target_after_fire(item.uid, item.target);
+        `uvm_info("ISSUE_Q",
+                  $sformatf("accepted fault-inflight issue uid=%0d target=%0d dynamic_epoch=%0d issue_epoch=%0d",
+                            item.uid, item.target, item.dynamic_epoch, issue_epoch),
+                  UVM_HIGH)
+        return 1'b1;
+    endfunction:mark_issue_fire_from_frozen_candidate
 
 endclass:issue_queue_scheduler
 
