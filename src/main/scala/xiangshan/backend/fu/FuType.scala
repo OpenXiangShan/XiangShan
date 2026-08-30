@@ -199,6 +199,8 @@ object FuType extends OHEnumeration {
 
   def isVecOPF(fuType: UInt): Bool = FuTypeOrR(fuType, vecOPF)
 
+  def isVecOPFDepend(fuType: UInt): Bool = FuTypeOrR(fuType, vfma)
+
   def isVArithMem(fuType: UInt): Bool = FuTypeOrR(fuType, vecArithOrMem) // except vset
 
   def isDivSqrt(fuType: UInt): Bool = FuTypeOrR(fuType, div, fDivSqrt)
