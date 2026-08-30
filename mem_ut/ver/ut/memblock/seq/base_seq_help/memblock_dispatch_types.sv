@@ -647,6 +647,9 @@ typedef struct {
     int unsigned              send_pri;
     longint unsigned          ready_cycle;
     int unsigned              replay_seq;
+    // 中文注释：candidate 创建时所属的 UID 动态实例编号。
+    // redirect/reissue 后 status.dynamic_epoch 会递增，旧 candidate 不能给新实例记账。
+    int unsigned              dynamic_epoch;
     bit                       has_lqIdx;
     memblock_lq_key_t         lq_key;
     bit                       has_sqIdx;

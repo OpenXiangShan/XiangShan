@@ -33,7 +33,8 @@ class memblock_issue_dispatch_base_sequence extends lintsissue_agent_agent_defau
                                             ref memblock_issue_q_item_t fired_items[$]);
     extern function int unsigned port_idx_for_item(input memblock_issue_q_item_t item);
     extern function void mark_fired_items(input memblock_issue_q_item_t fired_items[$],
-                                          input bit [MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W-1:0] fired_mask);
+                                          input bit [MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W-1:0] fired_mask,
+                                          ref bit [MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W-1:0] bookkept_fired_mask);
 
 endclass:memblock_issue_dispatch_base_sequence
 
@@ -115,6 +116,9 @@ task memblock_issue_dispatch_base_sequence::send_issue_cycle(input int unsigned 
     memblock_issue_q_item_t fired_items[$];
     bit [MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W-1:0] candidate_mask;
     bit [MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W-1:0] effective_fired_mask;
+    // 中文注释：只记录当前 xaction 已由真实握手 watcher 完成的 port；finish_item()
+    // 返回后的补偿只处理该 mask 尚未覆盖的 bit，禁止为同一 fire 重复分配 issue epoch。
+    bit [MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W-1:0] bookkept_fired_mask;
     bit flush_or_epoch_changed;
 
     has_fire = 1'b0;
@@ -124,6 +128,10 @@ task memblock_issue_dispatch_base_sequence::send_issue_cycle(input int unsigned 
     end
 
     field_assigner.clear_lintsissue_xaction(tr);
+    // 当前 issue xaction 是一个周期性的 valid/ready item，不允许父类随机 gap 让
+    // finish_item() 时序偏离真实握手记账边界。
+    tr.pre_pkt_gap = 0;
+    tr.post_pkt_gap = 0;
     // 中文注释：以下 memblock_dispatch_* 字段只用于测试框架 driver/sequence 协作，
     // 不是发给 DUT 的 split issue payload。它们用于处理 valid/ready 等待、timeout、
     // redirect/flush 边界拍 partial fire，以及只标记 DUT 真正接收的 issue port。
@@ -139,6 +147,7 @@ task memblock_issue_dispatch_base_sequence::send_issue_cycle(input int unsigned 
     tr.memblock_dispatch_flush_epoch = memblock_sync_pkg::dispatch_flush_epoch;
     // fired_mask 由 driver 回填，target 区间由 compile-time port base/count 派生。
     tr.memblock_dispatch_fired_mask = '0;
+    bookkept_fired_mask = '0;
     if (!data.issue_blocked_by_global_flush()) begin
         issue_sched.select_issue_candidates(load_items, sta_items, std_items);
         if (!data.issue_blocked_by_global_flush()) begin
@@ -148,13 +157,28 @@ task memblock_issue_dispatch_base_sequence::send_issue_cycle(input int unsigned 
         end
     end
 
-    start_item(tr);
-    finish_item(tr);
-
     candidate_mask = '0;
     foreach (fired_items[idx]) begin
         candidate_mask[port_idx_for_item(fired_items[idx])] = 1'b1;
     end
+
+    start_item(tr);
+    // 中文注释：fired_mask 是 driver 在真实 valid&&ready 后置位的持久状态。watcher
+    // 等待尚未记账的 bit，而不是等待瞬时 event；即使 driver 先于 watcher 运行，条件
+    // 仍保持为真，随后仍会在 finish_item() 返回前完成 scheduler 记账。
+    fork : dispatch_fire_bookkeeping_watcher
+        begin
+            forever begin
+                wait ((tr.memblock_dispatch_fired_mask & candidate_mask &
+                       ~bookkept_fired_mask) != '0);
+                mark_fired_items(fired_items,
+                                 tr.memblock_dispatch_fired_mask & candidate_mask,
+                                 bookkept_fired_mask);
+            end
+        end
+    join_none
+    finish_item(tr);
+
     effective_fired_mask = tr.memblock_dispatch_fired_mask & candidate_mask;
     if ((tr.memblock_dispatch_fired_mask & ~candidate_mask) != '0) begin
         `uvm_fatal(get_type_name(),
@@ -173,9 +197,13 @@ task memblock_issue_dispatch_base_sequence::send_issue_cycle(input int unsigned 
     end
 
     if (effective_fired_mask != '0) begin
-        mark_fired_items(fired_items, effective_fired_mask);
+        // item_done 与 watcher 位于同一 UVM delta 时，先等待 watcher 把当前
+        // fired bit 全部消费；随后只对未覆盖 bit 做一次补偿，避免双重 scheduler 更新。
+        wait ((effective_fired_mask & ~bookkept_fired_mask) == '0);
+        mark_fired_items(fired_items, effective_fired_mask, bookkept_fired_mask);
         has_fire = 1'b1;
     end
+    disable dispatch_fire_bookkeeping_watcher;
 
     if (tr.memblock_dispatch_aborted_by_redirect) begin
         if (fired_items.size() != 0) begin
@@ -284,13 +312,14 @@ function int unsigned memblock_issue_dispatch_base_sequence::port_idx_for_item(i
 endfunction:port_idx_for_item
 
 function void memblock_issue_dispatch_base_sequence::mark_fired_items(input memblock_issue_q_item_t fired_items[$],
-                                                                      input bit [MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W-1:0] fired_mask);
+                                                                      input bit [MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W-1:0] fired_mask,
+                                                                      ref bit [MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W-1:0] bookkept_fired_mask);
     foreach (fired_items[idx]) begin
         int unsigned port_idx;
         bit          fire_marked;
 
         port_idx = port_idx_for_item(fired_items[idx]);
-        if (!fired_mask[port_idx]) begin
+        if (!fired_mask[port_idx] || bookkept_fired_mask[port_idx]) begin
             continue;
         end
         if (data.issue_blocked_by_global_flush()) begin
@@ -299,11 +328,19 @@ function void memblock_issue_dispatch_base_sequence::mark_fired_items(input memb
             fire_marked = issue_sched.mark_issue_fire(fired_items[idx]);
         end
         if (!fire_marked) begin
+            // 中文注释：candidate 已由 driver 真实 fire，但 fault 可能在 watcher
+            // 记账前置位 exception_pending；仅此时尝试严格的冻结实例 fallback。
+            fire_marked = issue_sched.mark_issue_fire_from_frozen_candidate(fired_items[idx]);
+        end
+        if (!fire_marked) begin
             `uvm_warning(get_type_name(),
                          $sformatf("skip stale issue item uid=%0d target=%0d",
                                    fired_items[idx].uid,
                                    fired_items[idx].target))
         end
+        // 中文注释：该 port 已经过真实握手并完成一次 scheduler 尝试。即使 recovery
+        // 已使 candidate 失效，也不能让 finish_item() 补偿路径对同一 port 重复尝试。
+        bookkept_fired_mask[port_idx] = 1'b1;
     end
 endfunction:mark_fired_items
 
