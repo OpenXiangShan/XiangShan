@@ -272,11 +272,14 @@ object ArgParser {
       case LogUtilsOptionsKey => LogUtilsOptions(
         enableDebug = here(DebugOptionsKey).EnableDebug,
         enablePerf = here(DebugOptionsKey).EnablePerfDebug,
-        fpgaPlatform = here(DebugOptionsKey).FPGAPlatform,
+        fpgaPlatform = here(DebugOptionsKey).FPGAPlatform && !here(SoCParamsKey).UseXSNoCTop,
         enableXMR = here(DebugOptionsKey).EnableXMR
       )
       case PerfCounterOptionsKey => PerfCounterOptions(
-        enablePerfPrint = here(DebugOptionsKey).EnablePerfDebug && !here(DebugOptionsKey).FPGAPlatform,
+        // XSNoCTopConfig is the KXY simulation RTL. Keep its counters even
+        // though make verilog otherwise selects the FPGA platform settings.
+        enablePerfPrint = here(DebugOptionsKey).EnablePerfDebug &&
+                          (!here(DebugOptionsKey).FPGAPlatform || here(SoCParamsKey).UseXSNoCTop),
         enablePerfDB = here(DebugOptionsKey).EnableRollingDB && !here(DebugOptionsKey).FPGAPlatform,
         perfLevel = XSPerfLevel.withName(here(DebugOptionsKey).PerfLevel),
         perfDBHartID = 0
