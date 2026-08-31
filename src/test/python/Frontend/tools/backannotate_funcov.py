@@ -16,7 +16,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 
 _IMPORT_ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +42,13 @@ STATUSES = {
     "N-A",
     "SV_FUNCOV",
 }
+HIERARCHY_COLUMNS = (
+    "一级测试点",
+    "二级测试点",
+    "三级测试点",
+    "四级测试点",
+    "五级测试点",
+)
 BIN_REFERENCE_RE = re.compile(
     r"^covergroup ([^,;]+), coverpoint ([^,;]+), bins ([^ (;]+) \((BIN-\d+)\)$"
 )
@@ -1066,6 +1073,33 @@ def _append_evidence(existing: str, entries: Iterable[str]) -> str:
     return "; ".join(values)
 
 
+def _normalized_hierarchy_filters(
+    hierarchy_filters: Mapping[str, str] | None,
+) -> dict[str, str]:
+    return {
+        str(field): str(value).strip()
+        for field, value in (hierarchy_filters or {}).items()
+        if str(value).strip()
+    }
+
+
+def _advance_hierarchy(row: Mapping[str, str], context: dict[str, str]) -> None:
+    for index, field in enumerate(HIERARCHY_COLUMNS):
+        value = str(row.get(field) or "").strip()
+        if not value:
+            continue
+        context[field] = value
+        for child in HIERARCHY_COLUMNS[index + 1 :]:
+            context[child] = ""
+
+
+def _hierarchy_matches(context: Mapping[str, str], filters: Mapping[str, str]) -> bool:
+    return all(
+        str(context.get(field) or "").casefold() == expected.casefold()
+        for field, expected in filters.items()
+    )
+
+
 def backannotate(
     testpoint_path: Path,
     pilot: dict[str, PilotBin],
@@ -1074,8 +1108,18 @@ def backannotate(
     apply: bool,
     bin_prefix: str | None = None,
     allow_testpoint_structure_errors: bool = False,
+    hierarchy_filters: Mapping[str, str] | None = None,
 ) -> dict[str, int]:
     fields, rows = _read_csv(testpoint_path)
+    hierarchy_filters = _normalized_hierarchy_filters(hierarchy_filters)
+    unknown_hierarchy_fields = sorted(set(hierarchy_filters) - set(HIERARCHY_COLUMNS))
+    if unknown_hierarchy_fields:
+        raise ValueError(f"unknown hierarchy filters: {unknown_hierarchy_fields}")
+    missing_hierarchy_fields = sorted(set(hierarchy_filters) - set(fields))
+    if missing_hierarchy_fields:
+        raise ValueError(
+            f"testpoint missing hierarchy columns: {missing_hierarchy_fields}"
+        )
     structure_errors: list[tuple[int, str]] = []
     validate_mapping(
         testpoint_path,
@@ -1120,7 +1164,11 @@ def backannotate(
             }
         )
 
+    hierarchy = {field: "" for field in HIERARCHY_COLUMNS}
     for row in rows:
+        _advance_hierarchy(row, hierarchy)
+        if hierarchy_filters and not _hierarchy_matches(hierarchy, hierarchy_filters):
+            continue
         refs = parse_references(row["coverage"])
         if not refs:
             continue
@@ -1254,6 +1302,8 @@ def main() -> int:
     parser.add_argument(
         "--bin-prefix", help="optional scoped Bin_ID prefix, for example BIN-5"
     )
+    parser.add_argument("--level1", help="only update this inherited first-level testpoint")
+    parser.add_argument("--level2", help="only update this inherited second-level testpoint")
     parser.add_argument(
         "--check", action="store_true", help="validate only; do not write"
     )
@@ -1296,6 +1346,10 @@ def main() -> int:
         apply=not args.check,
         bin_prefix=args.bin_prefix,
         allow_testpoint_structure_errors=args.allow_testpoint_structure_errors,
+        hierarchy_filters={
+            "一级测试点": args.level1,
+            "二级测试点": args.level2,
+        },
     )
     print(" ".join(f"{key}={value}" for key, value in sorted(counts.items())))
     return 0

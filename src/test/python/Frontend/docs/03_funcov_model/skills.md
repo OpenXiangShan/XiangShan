@@ -245,7 +245,7 @@ src/test/python/Frontend/scripts/gen_coverage_html.sh <run-dir>/coverage
 
 bin 被触发但 testcase 失败时不得标记 `HIT`。`CLOSED` 只能人工写入，自动工具不得生成、降级或覆盖。
 
-自动反标必须处理整个 active registry，不得写死 `BIN-5*` 等批次前缀，并对重复叶子、重复 bin、registry 漂移、版本不一致和缺失 artifact 直接失败。
+全局基线自动反标必须处理整个 active registry，不得写死 `BIN-5*` 等批次前缀，并对重复叶子、重复 bin、registry 漂移、版本不一致和缺失 artifact 直接失败。模块级覆盖率刷新可以使用 `--level1` 与 `--level2` 限定主表写回范围；写回后必须按继承层级审计逻辑记录，确认目标层级之外没有字段变化，且不得借模块级刷新修复或改写其他层级的结构错误。
 
 ## 11. 每周设计刷新
 

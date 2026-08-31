@@ -899,9 +899,9 @@ def sample_icache_missunit_coverage(recorder, env, cycle: int) -> None:
     )
     fifo_has_unissued_prefetch = fifo_nonempty and any(
         entry is not None
-        and 4 <= int(entry) < len(mshrs)
-        and _on(mshrs[int(entry)]["valid"])
-        and _off(mshrs[int(entry)]["issue"])
+        and 0 <= int(entry) < len(mshrs) - 4
+        and _on(mshrs[4 + int(entry)]["valid"])
+        and _off(mshrs[4 + int(entry)]["issue"])
         for entry in (signals[f"fifo_entry_{index}"] for index in range(10))
     )
     _mark(

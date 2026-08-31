@@ -1425,7 +1425,7 @@ def test_missunit_fencei_prefetch_fifo_requires_an_unissued_prefetch_mshr():
         _MISS + "priorityFIFO.enqPtr_value": 1,
         _MISS + "priorityFIFO.deqPtr_flag": 0,
         _MISS + "priorityFIFO.deqPtr_value": 0,
-        _MISS + "priorityFIFO.regFiles_0": 4,
+        _MISS + "priorityFIFO.regFiles_0": 0,
         _MISS + "allMshr_4.valid": 1,
         _MISS + "allMshr_4.issue": 0,
     }.items():
@@ -2253,6 +2253,19 @@ def test_prefetch_redirect_flush_requires_dynamic_entry_resources_ready():
     assert _hit(recorder, "icache_prefetchpipe_s0_entry", "redirect_flush_blocks_hw")
 
 
+def test_prefetch_redirect_flush_accepts_adjacent_observer_boundary():
+    recorder = _Recorder()
+    _set_prefetch_entry_scenario(recorder)
+
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 2)
+    recorder.set_prefetch_key("from_valid", 0)
+    recorder.set_prefetch_key("global_flush", 1)
+    recorder.set_prefetch_key("s0_fire", 0)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 3)
+
+    assert _hit(recorder, "icache_prefetchpipe_s0_entry", "redirect_flush_blocks_hw")
+
+
 def test_prefetch_bpu_match_and_miss_are_independent_bins():
     match_recorder = _Recorder()
     _set_prefetch_entry_scenario(match_recorder)
@@ -3069,6 +3082,27 @@ def test_mainpipe_global_s0_flush_samples_condition_not_checkpoint():
         recorder.set_key(key, value)
 
     sample_icache_mainpipe_coverage(recorder, recorder.env, 2)
+
+    assert _hit(recorder, "icache_mainpipe_s0_flush", "global_flush_cancels_entry")
+
+
+def test_mainpipe_global_s0_flush_accepts_adjacent_observer_boundary():
+    recorder = _Recorder()
+    for key, value in {
+        "ftq_valid": 1,
+        "from_valid": 1,
+        "data_ready": 1,
+        "s1_ready": 1,
+        "io_flush": 0,
+    }.items():
+        recorder.set_key(key, value)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 2)
+
+    recorder.set_key("ftq_valid", 0)
+    recorder.set_key("from_valid", 0)
+    recorder.set_key("io_flush", 1)
+    recorder.set_key("s0_fire", 0)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 3)
 
     assert _hit(recorder, "icache_mainpipe_s0_flush", "global_flush_cancels_entry")
 

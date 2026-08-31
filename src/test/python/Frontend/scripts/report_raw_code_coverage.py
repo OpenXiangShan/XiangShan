@@ -334,6 +334,7 @@ def validate_dat_provenance(
 
     records = []
     run_ids: set[str] = set()
+    testcase_identities: set[tuple[str, str]] = set()
     compatibility_signature = None
     build_identity = None
     for dat_path in dat_files:
@@ -398,8 +399,16 @@ def validate_dat_provenance(
         run_id = str(run.get("run_id") or "").strip()
         if not run_id:
             raise CoverageProvenanceError(f"sidecar lacks run_id: {sidecar_path}")
-        if run_id in run_ids:
-            raise CoverageProvenanceError(f"duplicate run_id across .dat files: {run_id}")
+        testcase_nodeid = str(run.get("testcase_nodeid") or "").strip()
+        if not testcase_nodeid:
+            raise CoverageProvenanceError(f"sidecar lacks testcase_nodeid: {sidecar_path}")
+        testcase_identity = (run_id, testcase_nodeid)
+        if testcase_identity in testcase_identities:
+            raise CoverageProvenanceError(
+                "duplicate testcase identity across .dat files: "
+                f"{run_id}::{testcase_nodeid}"
+            )
+        testcase_identities.add(testcase_identity)
         run_ids.add(run_id)
         outcome = str(run.get("pytest_outcome") or "").strip().lower()
         if outcome not in PASS_OUTCOMES or run.get("exit_code") not in {0, "0"}:
@@ -476,6 +485,7 @@ def validate_dat_provenance(
                 "size_bytes": dat_path.stat().st_size,
                 "funcov_path": str(sidecar_path),
                 "run_id": run_id,
+                "testcase_nodeid": testcase_nodeid,
                 "waveform_path": str(waveform_path),
                 "build_manifest_sha256": recorded_manifest_hash,
                 "compatibility_signature": recorded_signature,

@@ -984,6 +984,11 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
         "C \x01f\x02Frontend.sv\x01t\x02branch\x01x\x022\x02 0\n",
         encoding="utf-8",
     )
+    (data_dir / "case_2.dat").write_text(
+        "C \x01f\x02Frontend.sv\x01t\x02line\x01x\x021\x02 1\n"
+        "C \x01f\x02Frontend.sv\x01t\x02branch\x01x\x022\x02 0\n",
+        encoding="utf-8",
+    )
     provenance = {
         "dut_source_sha": "a" * 40,
         "dut_build_sha256": manifest["dut_build_sha256"],
@@ -1054,6 +1059,28 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
         ),
         encoding="utf-8",
     )
+    waveform_path_2 = run_root / "waveforms" / "case_2.fst"
+    waveform_path_2.write_bytes(b"fst")
+    run_2 = _eligible_run("unit-codecov-json", outcome="passed", exit_code=0)
+    run_2["testcase_nodeid"] = "tests/test_case.py::test_case_2"
+    (funcov_dir / "case_2.funcov.json").write_text(
+        json.dumps(
+            {
+                "artifact_schema_version": 2,
+                "artifact_tag": "unit_codecov_2",
+                "source_csv": str(default_pilot_csv_path()),
+                "definitions": [],
+                "waveform_path": str(waveform_path_2),
+                "line_coverage_path": str(data_dir / "case_2.dat"),
+                "provenance": provenance,
+                "run": run_2,
+                "stats": {"monitor": {"cycles_total": 1, "error_count": 0}},
+                "errors": [],
+                "hits": {},
+            }
+        ),
+        encoding="utf-8",
+    )
     result = subprocess.run(
         [
             sys.executable,
@@ -1077,8 +1104,13 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
     summary = json.loads(output_path.read_text(encoding="utf-8"))
     assert summary["run_id"] == "unit-codecov-json"
     assert summary["dat_files"] == [
-        {"path": str((data_dir / "case.dat").resolve()), "size_bytes": 64}
+        {"path": str((data_dir / "case.dat").resolve()), "size_bytes": 64},
+        {"path": str((data_dir / "case_2.dat").resolve()), "size_bytes": 64},
     ]
+    assert summary["provenance"]["run_ids"] == ["unit-codecov-json"]
+    assert [
+        item["testcase_nodeid"] for item in summary["provenance"]["dat_files"]
+    ] == ["tests/test_case.py::test_case", "tests/test_case.py::test_case_2"]
     assert summary["overall"]["line"] == {"hit": 1, "total": 1, "pct": 100.0}
     assert summary["overall"]["branch"] == {"hit": 0, "total": 1, "pct": 0.0}
     assert summary["scopes"]["all"]["source_lines"] == 2

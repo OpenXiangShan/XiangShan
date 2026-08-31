@@ -129,7 +129,45 @@ def _queue_backend_fault_redirect(env, *, target_pc: int, **fault_bits: int) -> 
     )
 
 
-@pytest.mark.funcov_bins("BIN-401", "BIN-404", "BIN-408", "BIN-413")
+@pytest.mark.funcov_bins(
+    "BIN-401",
+    "BIN-404",
+    "BIN-408",
+    "BIN-413",
+    "BIN-601",
+    "BIN-604",
+    "BIN-615",
+    "BIN-622",
+    "BIN-630",
+    "BIN-631",
+    "BIN-633",
+    "BIN-650",
+    "BIN-651",
+    "BIN-652",
+    "BIN-662",
+    "BIN-665",
+    "BIN-669",
+    "BIN-670",
+    "BIN-671",
+    "BIN-684",
+    "BIN-687",
+    "BIN-695",
+    "BIN-696",
+    "BIN-701",
+    "BIN-713",
+    "BIN-714",
+    "BIN-717",
+    "BIN-718",
+    "BIN-719",
+    "BIN-721",
+    "BIN-722",
+    "BIN-723",
+    "BIN-724",
+    "BIN-732",
+    "BIN-755",
+    "BIN-764",
+    "BIN-766",
+)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_baremode_seq_icache_basic_pilot(env):
     scenario = BaremodeSequentialIFUScenario(base_addr=_BASE, words=128, expected_fetches=4)

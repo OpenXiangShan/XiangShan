@@ -182,18 +182,24 @@ _PREFETCH_SIGNALS = {
         _MAIN + "__Vtogcov__io_missResp_valid",
     ),
     "refill_vset": (
-        _MAIN + "__Vtogcov__io_missResp_bits_vSetIdx",
         _PREFETCH + "io_missResp_bits_vSetIdx",
+        _MAIN + "io_missResp_bits_vSetIdx",
+        _MAIN + "__Vtogcov__io_missResp_bits_vSetIdx",
     ),
     "refill_corrupt": (
-        _MAIN + "__Vtogcov__io_missResp_bits_corrupt",
         _PREFETCH + "io_missResp_bits_corrupt",
+        _MAIN + "io_missResp_bits_corrupt",
+        _MAIN + "__Vtogcov__io_missResp_bits_corrupt",
     ),
     "refill_denied": (
-        _MAIN + "__Vtogcov__io_missResp_bits_denied",
+        _MAIN + "io_missResp_bits_denied",
         _PREFETCH + "io_missResp_bits_denied",
+        _MAIN + "__Vtogcov__io_missResp_bits_denied",
     ),
-    "refill_waymask": (_ICACHE + "missUnit.__Vtogcov__io_resp_bits_waymask",),
+    "refill_waymask": (
+        _ICACHE + "missUnit.io_resp_bits_waymask",
+        _ICACHE + "missUnit.__Vtogcov__io_resp_bits_waymask",
+    ),
     "s1_mshr_valid": (
         _PREFETCH + "s1_mshrValid",
         _PREFETCH + "__Vtogcov__s1_mshrValid",
@@ -312,8 +318,10 @@ _PREFETCH_SIGNALS = {
         _ICACHE + "missUnit.__Vtogcov__io_prefetchReq_valid",
     ),
     "refill_paddr": (
-        _PREFETCH + "__Vtogcov__io_missResp_bits_blkPAddr",
         _PREFETCH + "io_missResp_bits_blkPAddr",
+        _MAIN + "io_missResp_bits_blkPAddr",
+        _MAIN + "__Vtogcov__io_missResp_bits_blkPAddr",
+        _PREFETCH + "__Vtogcov__io_missResp_bits_blkPAddr",
     ),
 }
 
@@ -337,6 +345,7 @@ def reset_icache_prefetchpipe_coverage_state(recorder) -> None:
         "missunit_backpressure_cycles": 0,
         "missunit_backpressure_signature": None,
         "s2_ftq": None,
+        "previous_hw_entry_candidate": None,
     }
 
 
@@ -436,6 +445,7 @@ def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
     soft_request = _on(s["from_valid"]) and _on(s["from_soft"])
     # This pipe uses a non-blocking ITLB port whose request ready is an RTL invariant.
     entry_resources_ready = _on(s["s1_ready"]) and _on(s["meta_ready"])
+    previous_hw_entry_candidate = state["previous_hw_entry_candidate"]
     bpu_s0_match = _bpu_flush_match(s, "s0")
     bpu_s1_match = _bpu_flush_match(s, "s1") if _on(s["s1_valid"]) else False
     bpu_does_not_block_entry = (
@@ -675,8 +685,18 @@ def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
         "icache_prefetchpipe_s0_entry",
         "redirect_flush_blocks_hw",
         cycle,
-        hw_request and _on(s["global_flush"]) and entry_resources_ready,
-        evidence,
+        (
+            hw_request and _on(s["global_flush"]) and entry_resources_ready
+        )
+        or (
+            previous_hw_entry_candidate is not None
+            and _on(s["global_flush"])
+            and _off(s["s0_fire"])
+        ),
+        {
+            **evidence,
+            "previous_hw_entry_candidate": previous_hw_entry_candidate,
+        },
     )
     pending_clean_mshr_signature = state["clean_mshr_pending"]
     _mark_prefetch(
@@ -1043,3 +1063,12 @@ def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
         state["s2_ftq"] = None
     if _on(s["s1_real_fire"]):
         state["s2_ftq"] = s1_ftq if _off(s["s1_soft"]) else None
+    state["previous_hw_entry_candidate"] = (
+        {
+            "cycle": int(cycle),
+            "s0_ftq_flag": s["s0_ftq_flag"],
+            "s0_ftq_value": s["s0_ftq_value"],
+        }
+        if hw_request and entry_resources_ready and _off(s["global_flush"])
+        else None
+    )

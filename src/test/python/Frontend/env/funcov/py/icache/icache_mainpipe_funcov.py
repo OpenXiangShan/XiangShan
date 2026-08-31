@@ -121,6 +121,7 @@ _SIGNALS = {
         _MAIN + "io_flushFromBpu_s3_bits_value",
     ),
     "s1_ready": (_MAIN + "s1_ready", _MAIN + "__Vtogcov__s1_ready"),
+    "s0_fire": (_MAIN + "s0_fire", _MAIN + "__Vtogcov__s0_fire"),
     "s1_valid": (_MAIN + "s1_valid", _MAIN + "__Vtogcov__s1_valid"),
     "s1_flush": (_MAIN + "s1_flush", _MAIN + "__Vtogcov__s1_flush"),
     "s0_ftq_flag": (
@@ -200,6 +201,7 @@ _EVIDENCE_SCALARS = frozenset(
         "bpu_flag",
         "bpu_value",
         "s1_ready",
+        "s0_fire",
         "s1_valid",
         "s1_flush",
         "s0_ftq_flag",
@@ -708,6 +710,14 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
     bpu_s1_flush = _on(s["s1_flush"]) and _on(s["bpu_valid"])
     s0_bpu_match = _bpu_flush_matches_or_before_current(s, "s0")
     s1_bpu_match = _bpu_flush_matches_or_before_current(s, "s1")
+    previous_global_s0_candidate = (
+        prev is not None
+        and _on(prev["ftq_valid"])
+        and _on(prev["from_valid"])
+        and _on(prev["data_ready"])
+        and _on(prev["s1_ready"])
+        and _off(prev["io_flush"])
+    )
     s0_bpu_miss = _bpu_flush_is_after_current(s, "s0")
     s1_bpu_miss = _bpu_flush_is_after_current(s, "s1")
     ftq_fire = _on(s["ftq_valid"]) and _on(s["ftq_ready"])
@@ -799,12 +809,22 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         "icache_mainpipe_s0_flush",
         "global_flush_cancels_entry",
         cycle,
-        _on(s["ftq_valid"])
-        and _on(s["from_valid"])
-        and global_s0_flush
-        and _on(s["data_ready"])
-        and _on(s["s1_ready"]),
-        evidence,
+        (
+            _on(s["ftq_valid"])
+            and _on(s["from_valid"])
+            and global_s0_flush
+            and _on(s["data_ready"])
+            and _on(s["s1_ready"])
+        )
+        or (
+            previous_global_s0_candidate
+            and global_s0_flush
+            and _off(s["s0_fire"])
+        ),
+        {
+            **evidence,
+            "previous_global_s0_candidate": bool(previous_global_s0_candidate),
+        },
     )
     _mark(
         recorder,
