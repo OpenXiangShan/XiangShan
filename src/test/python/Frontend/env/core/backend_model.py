@@ -32,7 +32,7 @@ from ..model.backend_state import (
 )
 from ..model.ftq_scoreboard import FtqScoreboard
 from ..model.golden_trace import GoldenTrace, TraceEntry
-from .transactions import FtqIdxAheadTxn
+from .transactions import BackendRedirectClass, FtqIdxAheadTxn
 
 _MIN_BACKEND_DELAY = 3
 _GOLDEN_TRACE_RESOLVE_MIN_DELAY = 3
@@ -4192,6 +4192,12 @@ class BackendModel:
         backend_ipf = int(payload.get("backend_ipf", 0))
         backend_iaf = int(payload.get("backend_iaf", 0))
         satp_flush = int(payload.get("satp_flush", 0))
+        try:
+            redirect_class = BackendRedirectClass(
+                payload.get("redirect_class", BackendRedirectClass.CONTROL_FLOW)
+            )
+        except ValueError as exc:
+            raise ValueError("invalid backend redirect class") from exc
         if "ftq_flag" in payload and "ftq_value" in payload:
             self._assert_redirect_ftq_not_committed(
                 int(ftq_flag),
@@ -4311,6 +4317,7 @@ class BackendModel:
             "backend_ipf": backend_ipf,
             "backend_iaf": backend_iaf,
             "satp_flush": satp_flush,
+            "redirect_class": redirect_class,
         }
         if self.monitor is not None:
             self.monitor.notify_redirect(target_pc, reason=reason)
@@ -4393,10 +4400,13 @@ class BackendModel:
         reason: str,
         delay_cycles: Optional[int] = None,
         *,
+        redirect_class: BackendRedirectClass = BackendRedirectClass.CONTROL_FLOW,
         ftq_idx_ahead_flag: Optional[int] = None,
         ftq_idx_ahead_value: Optional[int] = None,
     ) -> None:
         self._assert_explicit_injection_allowed("redirect")
+        if redirect_class is not BackendRedirectClass.CONTROL_FLOW:
+            raise ValueError("non-control redirect requires source-bound FTQ context")
         if ftq_idx_ahead_flag is not None or ftq_idx_ahead_value is not None:
             raise ValueError("ftqIdxAhead requires source-bound redirect FTQ context")
         self._queue_redirect_event(
@@ -4428,11 +4438,14 @@ class BackendModel:
         backend_ipf: int = 0,
         backend_iaf: int = 0,
         satp_flush: int = 0,
+        redirect_class: BackendRedirectClass = BackendRedirectClass.CONTROL_FLOW,
         delay_cycles: Optional[int] = None,
         ftq_idx_ahead_flag: Optional[int] = None,
         ftq_idx_ahead_value: Optional[int] = None,
     ) -> None:
         self._assert_explicit_injection_allowed("redirect")
+        if not isinstance(redirect_class, BackendRedirectClass):
+            raise TypeError("redirect_class must be a BackendRedirectClass")
         if int(level) not in (0, 1):
             raise ValueError("redirect level must be 0 (flushAfter) or 1 (flush)")
 
@@ -4460,6 +4473,10 @@ class BackendModel:
             ("backend_iaf", int(backend_iaf), 1),
         )
         selected_fault_bits = [bit for _name, enabled, bit in fault_bits if enabled]
+        if redirect_class is BackendRedirectClass.MEMORY_VIOLATION and (
+            selected_fault_bits or int(satp_flush)
+        ):
+            raise AssertionError("memory-violation redirect cannot carry backend fault or satpFlush")
         if selected_fault_bits:
             if int(level) != 1:
                 raise AssertionError("backend-fault redirect must use level=1 (flush)")
@@ -4471,8 +4488,14 @@ class BackendModel:
                     )
         elif source.exception_marked:
             raise AssertionError("non-fault redirect cannot use an exception-marked cfVec source")
-        elif not int(satp_flush) and not source.is_cfi:
+        elif (
+            redirect_class is BackendRedirectClass.CONTROL_FLOW
+            and not int(satp_flush)
+            and not source.is_cfi
+        ):
             raise AssertionError("control redirect source must be a CFI cfVec entry")
+        elif redirect_class is BackendRedirectClass.MEMORY_VIOLATION and source.is_cfi:
+            raise AssertionError("memory-violation redirect source cannot be a CFI cfVec entry")
 
         context = self._build_redirect_context_from_queue_entry(None, source)
         payload_extra = {
@@ -4487,6 +4510,7 @@ class BackendModel:
             "backend_ipf": int(backend_ipf),
             "backend_iaf": int(backend_iaf),
             "satp_flush": int(satp_flush),
+            "redirect_class": redirect_class,
         }
         if context is not None:
             payload_extra.update(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..core.transactions import PcSequenceExpectation, RedirectTxn
+from ..core.transactions import BackendRedirectClass, PcSequenceExpectation, RedirectTxn
 
 
 def _recent_pcs(env, limit: int = 16) -> list[int]:
@@ -44,23 +44,25 @@ class InjectRedirectSequence:
         """Queue the redirect without consuming a DUT cycle."""
         if self.txn.source_pc is None:
             kwargs = {}
+            if self.txn.redirect_class is not BackendRedirectClass.CONTROL_FLOW:
+                kwargs["redirect_class"] = self.txn.redirect_class
             if self.txn.ftq_idx_ahead_flag is not None or self.txn.ftq_idx_ahead_value is not None:
-                kwargs = {
-                    "ftq_idx_ahead_flag": self.txn.ftq_idx_ahead_flag,
-                    "ftq_idx_ahead_value": self.txn.ftq_idx_ahead_value,
-                }
+                kwargs.update(
+                    ftq_idx_ahead_flag=self.txn.ftq_idx_ahead_flag,
+                    ftq_idx_ahead_value=self.txn.ftq_idx_ahead_value,
+                )
             env.backend_model.inject_redirect(
                 self.txn.target_pc,
                 self.txn.reason,
                 **kwargs,
             )
         else:
-            kwargs = {}
+            kwargs = {"redirect_class": self.txn.redirect_class}
             if self.txn.ftq_idx_ahead_flag is not None or self.txn.ftq_idx_ahead_value is not None:
-                kwargs = {
-                    "ftq_idx_ahead_flag": self.txn.ftq_idx_ahead_flag,
-                    "ftq_idx_ahead_value": self.txn.ftq_idx_ahead_value,
-                }
+                kwargs.update(
+                    ftq_idx_ahead_flag=self.txn.ftq_idx_ahead_flag,
+                    ftq_idx_ahead_value=self.txn.ftq_idx_ahead_value,
+                )
             env.backend_model.inject_redirect_from_cfvec(
                 source_pc=int(self.txn.source_pc),
                 source_ftq_flag=self.txn.source_ftq_flag,

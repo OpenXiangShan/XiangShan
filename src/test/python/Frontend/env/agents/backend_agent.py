@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Iterable, Mapping, Optional
 
 from ..bundles import BackendCtrlBundle
-from ..core.transactions import FtqIdxAheadTxn
+from ..core.transactions import BackendRedirectClass, FtqIdxAheadTxn
 from ..model.backend_state import FtqEntry, ResolveEntry
 
 
@@ -90,8 +90,17 @@ class BackendAgent:
             self._write(self._drive_if.call_ret_commit_bits_ftq_ptr_value[lane], int(getattr(inst, "ftq_value", 0)))
             self._write(self._drive_if.call_ret_commit_valid[lane], 1)
 
-    def drive_redirect(self, payload: Mapping[str, int]) -> None:
+    def drive_redirect(self, payload: Mapping[str, object]) -> None:
         assert self._drive_if is not None
+        redirect_class = payload.get("redirect_class")
+        debug_encoding = {
+            BackendRedirectClass.CONTROL_FLOW: (1, 0),
+            BackendRedirectClass.MEMORY_VIOLATION: (0, 1),
+            BackendRedirectClass.OTHER: (0, 0),
+        }
+        if not isinstance(redirect_class, BackendRedirectClass):
+            raise ValueError("redirect payload requires a valid BackendRedirectClass")
+        debug_is_ctrl, debug_is_mem_vio = debug_encoding[redirect_class]
         self._write(self._drive_if.redirect_bits_pc, int(payload.get("pc", 0)))
         self._write(self._drive_if.redirect_bits_target, int(payload.get("target_pc", 0)))
         self._write(self._drive_if.redirect_bits_taken, int(payload.get("taken", 1)))
@@ -106,6 +115,6 @@ class BackendAgent:
         self._write(self._drive_if.redirect_bits_backend_ipf, int(payload.get("backend_ipf", 0)))
         self._write(self._drive_if.redirect_bits_backend_iaf, int(payload.get("backend_iaf", 0)))
         self._write(self._drive_if.redirect_bits_satp_flush, int(payload.get("satp_flush", 0)))
-        self._write(self._drive_if.redirect_bits_debug_is_ctrl, 1)
-        self._write(self._drive_if.redirect_bits_debug_is_mem_vio, 0)
+        self._write(self._drive_if.redirect_bits_debug_is_ctrl, debug_is_ctrl)
+        self._write(self._drive_if.redirect_bits_debug_is_mem_vio, debug_is_mem_vio)
         self._write(self._drive_if.redirect_valid, 1)

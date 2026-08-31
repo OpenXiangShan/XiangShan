@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import Optional, Sequence
 
 
@@ -14,6 +15,12 @@ class ProgramImage:
 class GoldenTraceSource:
     path: str
     start_index: int = 0
+
+
+class BackendRedirectClass(str, Enum):
+    CONTROL_FLOW = "control_flow"
+    MEMORY_VIOLATION = "memory_violation"
+    OTHER = "other"
 
 
 @dataclass(frozen=True)
@@ -31,8 +38,13 @@ class RedirectTxn:
     backend_ipf: int = 0
     backend_iaf: int = 0
     satp_flush: int = 0
+    redirect_class: BackendRedirectClass = BackendRedirectClass.CONTROL_FLOW
     ftq_idx_ahead_flag: Optional[int] = None
     ftq_idx_ahead_value: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.redirect_class, BackendRedirectClass):
+            raise TypeError("redirect_class must be a BackendRedirectClass")
 
 
 @dataclass(frozen=True)

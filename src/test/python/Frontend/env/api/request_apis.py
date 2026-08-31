@@ -19,6 +19,7 @@ from ..core.transactions import (
     GoldenTraceSource,
     PcSequenceExpectation,
     ProgramImage,
+    BackendRedirectClass,
     RedirectTxn,
 )
 
@@ -51,6 +52,7 @@ def normalize_redirect_txn(
     target_pc,
     reason,
     max_cycles,
+    redirect_class=BackendRedirectClass.CONTROL_FLOW,
     ftq_idx_ahead_flag=None,
     ftq_idx_ahead_value=None,
 ) -> RedirectTxn:
@@ -58,6 +60,11 @@ def normalize_redirect_txn(
         target_pc=int(target_pc),
         reason=str(reason),
         max_cycles=int(max_cycles),
+        redirect_class=(
+            redirect_class
+            if isinstance(redirect_class, BackendRedirectClass)
+            else BackendRedirectClass(str(redirect_class))
+        ),
         ftq_idx_ahead_flag=None if ftq_idx_ahead_flag is None else int(ftq_idx_ahead_flag),
         ftq_idx_ahead_value=None if ftq_idx_ahead_value is None else int(ftq_idx_ahead_value),
     )
