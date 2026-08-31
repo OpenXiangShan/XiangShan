@@ -347,13 +347,6 @@ class NonmaskableInterruptIO() extends Bundle {
   // reserve for other nmi type
 }
 
-class DiffCommitIO(implicit p: Parameters) extends XSBundle {
-  val isCommit = Bool()
-  val commitValid = Vec(CommitWidth * MaxUopSize, Bool())
-
-  val info = Vec(CommitWidth * MaxUopSize, new RabCommitInfo)
-}
-
 class DiffVlCommitBundle(commitWidth: Int)(implicit p: Parameters) extends XSBundle {
   val commitValid = Vec(commitWidth, Bool())
   val pdestVl = Vec(commitWidth, UInt(VlPhyRegIdxWidth.W))
@@ -673,14 +666,9 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val hd_misalign_ld_enable = Output(Bool())
   val power_down_enable = Output(Bool())
   val flush_l2_enable = Output(Bool())
-  // Rename
-  val fusion_enable = Output(Bool())
-  val wfi_enable = Output(Bool())
 
   // distribute csr write signal
   val distribute_csr = new DistributedCSRIO()
-  // TODO: move it to a new bundle, since single step is not a custom control signal
-  val singlestep = Output(Bool())
   val frontend_trigger = new FrontendTdataDistributeIO()
   val mem_trigger = new MemTdataDistributeIO()
   // Virtualization Mode

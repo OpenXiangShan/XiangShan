@@ -116,6 +116,28 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
     result
   }
 
+  def selectInstrData(
+      instr:              Instruction,
+      firstData:          Vec[UInt],
+      secondData:         Vec[UInt],
+      secondStartRviData: UInt
+  ): UInt =
+    Mux(
+      !instr.blockSel,
+      Mux(instr.isCrossBlockInstr, Cat(secondStartRviData, firstData(instr.index)(15, 0)), firstData(instr.index)),
+      secondData(instr.index)
+    )
+
+  def genBaseInstrData(
+      instrVec:           Vec[Instruction],
+      firstData:          Vec[UInt],
+      secondData:         Vec[UInt],
+      secondStartRviData: UInt
+  ): Vec[UInt] =
+    VecInit((0 until IBufferEnqueueWidth).map { i =>
+      selectInstrData(instrVec(i), firstData, secondData, secondStartRviData)
+    })
+
   def alignData[T <: Data](indataVec: Vec[T], shiftNum: UInt, default: T): Vec[T] = {
     require(shiftNum.getWidth == 2)
     val dataVec = VecInit((0 until IBufferEnqueueWidth).map(i =>

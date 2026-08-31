@@ -43,11 +43,13 @@ object ArgParser {
       |--fpga-platform
       |--reset-gen
       |--enable-difftest
+      |--full-basicdiff
       |--enable-log
       |--with-chiseldb
       |--with-rollingdb
       |--disable-perf
       |--disable-alwaysdb
+      |--external-llc
       |--enable-dfx
       |--enable-simfrontend
       |--imsic-bus-type <NONE|TL|AXI>
@@ -124,6 +126,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnableDifftest = true)
           }), tail)
+        case "--full-basicdiff" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(FullBasicDiff = true)
+          }), tail)
         case "--disable-always-basic-diff" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDiff = false)
@@ -143,6 +149,10 @@ object ArgParser {
         case "--disable-alwaysdb" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(AlwaysBasicDB = false)
+          }), tail)
+        case "--external-llc" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case UseExternalLLCKey => true
           }), tail)
         case "--enable-simfrontend" :: tail =>
           nextOption(config.alter((site, here, up) => {

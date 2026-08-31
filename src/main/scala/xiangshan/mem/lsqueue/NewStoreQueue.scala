@@ -119,7 +119,7 @@ class SQDataEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val data                     = UInt(VLEN.W)
 
   def byteStart: UInt          = vaddr(log2Ceil(VLEN/8) - 1, 0)
-  def byteEnd: UInt            = byteStart + MemorySize.ByteOffset(size)
+  def byteEnd: UInt            = (byteStart +& MemorySize.ByteOffset(size)).ensuring(_.getWidth == (byteStart.getWidth + 1))
 
   val memoryType               = MemoryType()
   val cboType                  = CboType()
@@ -385,7 +385,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       // generate load byte start and end
       val s0LoadStart        = s0Req.bits.vaddr(VWordOffset - 1, 0)
       val s0ByteOffset       = MemorySize.ByteOffset(s0Req.bits.size)
-      val s0LoadEnd          = s0LoadStart + s0ByteOffset
+      val s0LoadEnd          = (s0LoadStart +& s0ByteOffset).ensuring(_.getWidth == (s0LoadStart.getWidth + 1))
 
       // mdp info
       val s0LoadWaitStrict = s0Req.bits.loadWaitStrict
@@ -1122,7 +1122,6 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     private val headCross16B      = headCtrlEntry.cross16Byte
     private val headIsCboZero     = headCtrlEntry.isCbo && isCboZero(headDataEntry.cboType)
     private val headCrossPage     = headrdataPtr === io.fromUnalignQueue.bits.sqIdx && io.fromUnalignQueue.valid
-    private val diffIsHighPart    = Wire(Vec(EnsbufferWidth, Bool())) //only for difftest
 
     // paddrHigh and vaddrHigh only for cross16Byte split
     private val paddrLow          = Cat(headDataEntry.paddr(headDataEntry.paddr.getWidth - 1, 4), 0.U(4.W))
@@ -1139,7 +1138,6 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
         writeSbufferMask(i)  := outMask(i) & unalignMask(i)
         writeSbufferPaddr(i) := paddrLow
         writeSbufferVaddr(i) := vaddrLow
-        diffIsHighPart(i)    := dataEntries(i).paddr(3) && !unalignWithin16Byte //TODO: will be fix in thefuture
       } else if (i == 1) {
         writeSbufferData(i)  := Mux(headCross16B, outData(0), outData(i))
         writeSbufferMask(i)  := Mux(headCross16B, outMask(0) & (~unalignMask(0)).asUInt, outMask(i))
@@ -1150,17 +1148,12 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
         writeSbufferVaddr(i) := Mux(headCross16B,
           vaddrHigh,
           Cat(dataEntries(i).vaddr(dataEntries(i).vaddr.getWidth - 1, 4), 0.U(4.W)))
-        diffIsHighPart(i)    := Mux(headCross16B,
-                                      false.B,
-                                      dataEntries(i).paddr(3) && !unalignWithin16Byte //TODO: will be fix in thefuture
-                                    ) // if cross 16B, port 1 must low part
       }
       else {
         writeSbufferData(i)  := outData(i)
         writeSbufferMask(i)  := outMask(i)
         writeSbufferPaddr(i) := Cat(dataEntries(i).paddr(dataEntries(i).paddr.getWidth - 1, 4), 0.U(4.W)) //align 128-bit
         writeSbufferVaddr(i) := Cat(dataEntries(i).vaddr(dataEntries(i).vaddr.getWidth - 1, 4), 0.U(4.W)) //align 128-bit
-        diffIsHighPart(i)    := dataEntries(i).paddr(3) && !unalignWithin16Byte //TODO: will be fix in thefuture
       }
     }
 
@@ -1338,14 +1331,28 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
         // when i = 0, the sqPtr is rdataPtr(0), which is rdataPtrExt(0), so it applies to NC as well.
         val ptr = io.rdataPtrExt(i).value
           if(i == 1) {
-            diffStore.diffInfo(i).uop                     := Mux(headCross16B, dataEntries.head.debugUop.get, dataEntries(i).debugUop.get)
+            val selectedUop = Mux(headCross16B, dataEntries.head.debugUop.get, dataEntries(i).debugUop.get)
+            val selectedVaddr = Mux(headCross16B, dataEntries.head.vaddr, dataEntries(i).vaddr)
+            diffStore.diffInfo(i).uop                     := selectedUop
             diffStore.diffInfo(i).start                   := Mux(headCross16B, dataEntries.head.debugVecUnalignedStart.get, dataEntries(i).debugVecUnalignedStart.get)
-            diffStore.diffInfo(i).offset                  := Mux(headCross16B, dataEntries.head.debugVecUnalignedOffset.get, dataEntries(i).debugVecUnalignedOffset.get)
+            val eew = LSUOpType.vecElemSize(selectedUop.fuOpType)
+            diffStore.diffInfo(i).offset                  := MuxLookup(eew, 0.U(log2Up(XLEN).W))(Seq(
+              0.U -> 0.U,
+              1.U -> selectedVaddr(0),
+              2.U -> selectedVaddr(1, 0),
+              3.U -> selectedVaddr(2, 0)
+            ))
           }
           else {
             diffStore.diffInfo(i).uop                     := dataEntries(i).debugUop.get
             diffStore.diffInfo(i).start                   := dataEntries(i).debugVecUnalignedStart.get
-            diffStore.diffInfo(i).offset                  := dataEntries(i).debugVecUnalignedOffset.get
+            val eew = LSUOpType.vecElemSize(dataEntries(i).debugUop.get.fuOpType)
+            diffStore.diffInfo(i).offset                  := MuxLookup(eew, 0.U(log2Up(XLEN).W))(Seq(
+              0.U -> 0.U,
+              1.U -> dataEntries(i).vaddr(0),
+              2.U -> dataEntries(i).vaddr(1, 0),
+              3.U -> dataEntries(i).vaddr(2, 0)
+            ))
           }
 
           diffStore.cacheableStore(i).valid               := writeSbufferWire(i).fire
@@ -1354,7 +1361,6 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
           diffStore.cacheableStore(i).bits.mask           := writeSbufferWire(i).bits.mask
           diffStore.cacheableStore(i).bits.wline          := writeSbufferWire(i).bits.wline
           diffStore.cacheableStore(i).bits.vecValid       := writeSbufferWire(i).bits.vecValid
-          diffStore.cacheableStore(i).bits.diffIsHighPart := diffIsHighPart(i) // indicate whether valid data in high 64-bit, only for scalar store event!
       }
       diffStore.ncStore.valid := io.toUncacheBuffer.req.fire && io.toUncacheBuffer.req.bits.nc
       diffStore.ncStore.bits := io.toUncacheBuffer.req.bits
@@ -1667,10 +1673,10 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
       val setValid      = cboSetVec(j)
       when(setValid) {
         dataEntries(i).cboType   := Mux1H(List(
-          isCboClean(port.bits.uop.fuOpType(1, 0)) -> CboType.clean, // TODO: don't use (1, 0)
-          isCboFlush(port.bits.uop.fuOpType(1, 0)) -> CboType.flush,
-          isCboInval(port.bits.uop.fuOpType(1, 0)) -> CboType.inval,
-          isCboZero(port.bits.uop.fuOpType(1, 0))  -> CboType.zero
+          LSUOpType.isCboClean(port.bits.uop.fuOpType) -> CboType.clean,
+          LSUOpType.isCboFlush(port.bits.uop.fuOpType) -> CboType.flush,
+          LSUOpType.isCboInval(port.bits.uop.fuOpType) -> CboType.inval,
+          LSUOpType.isCboZero(port.bits.uop.fuOpType) -> CboType.zero,
         ))
       }
     }
@@ -1879,6 +1885,8 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
     val stWbIdx       = storeAddrIn.bits.uop.sqIdx.value
     val byteStart     = storeAddrIn.bits.vaddr(VWordOffset - 1, 0)
     val byteOffset    = MemorySize.ByteOffset(storeAddrIn.bits.size)
+    val isVecMemContinousOp = LSUOpType.isVecMemContinousOp(storeAddrIn.bits.uop.fuOpType)
+    val byteMaskFromSize = UIntToMask(MemorySize.CalculateSelectMask(0.U, byteOffset), VLENB)
 
     // !isLastRequest && cross16Byte means it is first request of cross 16B unalign  --> save paddr
     //  isLastRequest && cross16Byte means it is second request of cross 16B unalign --> not save paddr
@@ -1887,10 +1895,12 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
       // the second paddr of cross16Byte request will be write to unalign queue
       dataEntries(stWbIdx).vaddr     := storeAddrIn.bits.vaddr
       dataEntries(stWbIdx).paddrHigh := storeAddrIn.bits.paddr(PAddrBits - 1, PageOffsetWidth)
-      // only unit-stride use it, because unit-stride mask is not continue true.
-      dataEntries(stWbIdx).byteMask  := Mux(MemorySize.sizeIs(storeAddrIn.bits.size, MemorySize.Q),
-        storeAddrIn.bits.mask,
-        UIntToMask(byteOffset + 1.U, VLENB))
+      // StoreQueue later rotates byteMask by address offset, so vector continuous stores keep it offset-free here.
+      dataEntries(stWbIdx).byteMask  := Mux(
+        isVecMemContinousOp,
+        byteMaskFromSize,
+        UIntToMask(MemorySize.CalculateSelectMask(byteStart, byteStart +& byteOffset), VLENB)
+      )
       dataEntries(stWbIdx).size      := storeAddrIn.bits.size
 
       // debug singal
@@ -1898,7 +1908,7 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
         dataEntries(stWbIdx).debugPaddr.get := storeAddrIn.bits.paddr
       }
     }
-    XSError(byteStart + byteOffset < byteStart && storeAddrIn.fire &&
+    XSError(byteStart +& byteOffset < byteStart && storeAddrIn.fire &&
     (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross16Byte),
      "ByteStart > ByteEnd! at pipeline ${i}\n")
   }
@@ -1908,7 +1918,7 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
     val stWbIdx       = storeDataIn.bits.sqIdx.value
     when(storeDataIn.fire){
       // if it's a cbo.zero, write zero.
-      dataEntries(stWbIdx).data  := Mux(storeDataIn.bits.fuOpType === LSUOpType.cbo_zero, 0.U, storeDataIn.bits.data)
+      dataEntries(stWbIdx).data  := Mux(LSUOpType.isCboZero(storeDataIn.bits.fuOpType), 0.U, storeDataIn.bits.data)
 
       // debug signal
       if(debugEn) {
@@ -2106,7 +2116,6 @@ class StoreQueue(implicit p: Parameters) extends LSQModule with HasPerfEvents {
 
   virtualStoreQueue.io.redirect   <> io.redirect
   virtualStoreQueue.io.fromRob    <> io.fromRob
-  virtualStoreQueue.io.fromVMergeBuffer <> io.fromVMergeBuffer
   virtualStoreQueue.io.enq        <> io.enq
   virtualStoreQueue.io.mdpQuery.zip(io.forward).foreach { case (query, forward) =>
     query.valid := forward.s0Req.valid

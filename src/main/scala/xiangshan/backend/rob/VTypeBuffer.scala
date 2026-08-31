@@ -4,10 +4,11 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility._
-import xiangshan.backend.Bundles.EnqRobUop
+import xiangshan.backend.Bundles.{DynInst, EnqRobUop}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 import xiangshan._
+import xiangshan.backend.decode.opcode.Opcode.VSetOpcodes
 
 class VTypeBufferPtr(size: Int) extends CircularQueuePtr[VTypeBufferPtr](size) {
   def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).VTypeBufferSize)
@@ -146,7 +147,7 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
   private val diffPtrNext = Wire(chiselTypeOf(diffPtr))
 
   // get enque vtypes in io.req
-  private val enqVTypes = VecInit(io.req.map(req => req.bits.vpu.specVType))
+  private val enqVTypes = VecInit(io.req.map(req => req.bits.oldVType))
   private val enqValids = VecInit(io.req.map(_.valid))
   private val enqVType = PriorityMux(enqValids.zip(enqVTypes).map { case (valid, vtype) => valid -> vtype })
 
@@ -250,9 +251,9 @@ class VTypeBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasCi
    */
   vtypeBufferWriteAddrVec := allocPtrVec.map(_.value)
   vtypeBufferWriteEnVec := needAllocVec
-  vtypeBufferWriteDataVec.zip(io.req.map(_.bits)).foreach { case (entry: VTypeBufferEntry, inst) =>
-    entry.vtype := inst.vpu.vtype
-    entry.isVsetvl := VSETOpType.isVsetvl(inst.fuOpType)
+  vtypeBufferWriteDataVec.zip(io.req.map(_.bits)).foreach { case (entry: VTypeBufferEntry, inst: EnqRobUop) =>
+    entry.vtype := inst.vtype
+    entry.isVsetvl := VSetOpcodes.isVSetvl(inst.fuOpType)
     entry.vlWen := inst.vlWen
     entry.pdestVl := inst.pdestVl
   }

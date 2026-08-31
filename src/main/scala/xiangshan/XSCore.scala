@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import xscache.coupledL2.PrefetchCtrlFromCore
+import xscache.coupledL2.{L2ToL1PfCtrl, PrefetchCtrlFromCore}
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.HasSoCParameter
@@ -99,6 +99,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val resetInFrontend = Output(Bool())
     val traceCoreInterface = new TraceCoreInterface
     val l2PfCtrl = Output(new PrefetchCtrlFromCore)
+    val l2_fdbk_pf_ctrl = Input(new L2ToL1PfCtrl)
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Vec(numMemChannelsFromDcache, Valid(new L2ToL1Hint())))
@@ -154,12 +155,11 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.staIqFeedback := memBlock.io.mem_to_ooo.staIqFeedback
   backend.io.mem.stdIqFeedback := memBlock.io.mem_to_ooo.stdIqFeedback
   backend.io.mem.hyuIqFeedback := memBlock.io.mem_to_ooo.hyuIqFeedback
-  backend.io.mem.vstuIqFeedback := memBlock.io.mem_to_ooo.vstuIqFeedback
-  backend.io.mem.vlduIqFeedback := memBlock.io.mem_to_ooo.vlduIqFeedback
   backend.io.mem.ldCancel := memBlock.io.mem_to_ooo.ldCancel
   backend.io.mem.wakeup := memBlock.io.mem_to_ooo.wakeup
+  backend.io.mem.vldS3WakeUp := memBlock.io.mem_to_ooo.vldS3WakeUp
   backend.io.mem.intWriteback <> memBlock.io.mem_to_ooo.intWriteback
-  backend.io.mem.vecWriteback <> memBlock.io.mem_to_ooo.vecWriteback
+  backend.io.mem.vecWriteback := memBlock.io.mem_to_ooo.vecWriteback
   backend.io.mem.robLsqIO.mmioBusy := memBlock.io.mem_to_ooo.lsqio.mmioBusy
 
   backend.io.mem.exceptionAddr.vaddr  := memBlock.io.mem_to_ooo.lsqio.vaddr
@@ -195,13 +195,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.inner_beu_errors_icache <> frontend.io.error
   memBlock.io.ooo_to_mem.backendToTopBypass := backend.io.toTop
   memBlock.io.ooo_to_mem.intIssue <> backend.io.mem.intIssue
-  memBlock.io.ooo_to_mem.vecIssue <> backend.io.mem.vecIssue
   memBlock.io.ooo_to_mem.wakeupToLRQ <> backend.io.mem.wakeupToLRQ
   memBlock.io.ooo_to_mem.wakeupToLRQCancel := backend.io.mem.wakeupToLRQCancel
+  memBlock.io.ooo_to_mem.vstdStoreData <> backend.io.mem.vstdStoreData
 
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.ooo_to_mem.intIssue.flatten.foreach { case x => x.bits.flushPipe.foreach(_ := false.B) }
-  memBlock.io.ooo_to_mem.vecIssue.flatten.foreach { case x => x.bits.flushPipe.foreach(_ := false.B) }
   memBlock.io.ooo_to_mem.storePc := backend.io.mem.storePcRead
   memBlock.io.ooo_to_mem.hybridPc := backend.io.mem.hyuPcRead
   memBlock.io.ooo_to_mem.flushSb := backend.io.fenceio.sbuffer.flushSb
@@ -223,6 +222,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.l2_hint <> io.l2_hint
   memBlock.io.l2_tlb_req <> io.l2_tlb_req
   memBlock.io.l2_pmp_resp <> io.l2_pmp_resp
+  memBlock.io.l2_fdbk_pf_ctrl <> io.l2_fdbk_pf_ctrl
   memBlock.io.l2PfqBusy := io.l2PfqBusy
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore

@@ -99,14 +99,21 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val pmp = Module(new PMP())
   val pmp_check = VecInit(Seq.fill(if (HasBitmapCheck || HasMptCheck) 5 else 4) (Module(new PMPChecker(lgMaxSize = 3, sameCycle = true)).io))
   pmp.io.distribute_csr := io.csr.distribute_csr
+  def pmpCheckMode(index: Int): UInt = if (HasMptCheck && index == 4) ModeM else ModeS
   if (HasBitmapCheck) {
     if (KeyIDBits > 0) {
-      pmp_check.foreach(_.check_env.apply(csr_dup(0).mbmc.KEYIDEN.asBool, csr_dup(0).mbmc.CMODE.asBool, ModeS, csr_dup(0).priv.debug, pmp.io.pmp, pmp.io.pma))
+      pmp_check.zipWithIndex.foreach { case (checker, index) =>
+        checker.check_env.apply(csr_dup(0).mbmc.KEYIDEN.asBool, csr_dup(0).mbmc.CMODE.asBool, pmpCheckMode(index), csr_dup(0).priv.debug, pmp.io.pmp, pmp.io.pma)
+      }
     } else {
-      pmp_check.foreach(_.check_env.apply(csr_dup(0).mbmc.CMODE.asBool, ModeS, csr_dup(0).priv.debug, pmp.io.pmp, pmp.io.pma))
+      pmp_check.zipWithIndex.foreach { case (checker, index) =>
+        checker.check_env.apply(csr_dup(0).mbmc.CMODE.asBool, pmpCheckMode(index), csr_dup(0).priv.debug, pmp.io.pmp, pmp.io.pma)
+      }
     }
   } else {
-    pmp_check.foreach(_.check_env.apply(ModeS, csr_dup(0).priv.debug, pmp.io.pmp, pmp.io.pma))
+    pmp_check.zipWithIndex.foreach { case (checker, index) =>
+      checker.check_env.apply(pmpCheckMode(index), csr_dup(0).priv.debug, pmp.io.pmp, pmp.io.pma)
+    }
   }
 
   // add bitmapcheck

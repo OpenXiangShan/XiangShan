@@ -1069,6 +1069,7 @@ class BertiPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasBe
   deltaTable.io.train.bits := trainBits
   prefetchBuffer.io.l1_srcReq := deltaTable.io.prefetch_l1
   prefetchBuffer.io.l2_srcReq := deltaTable.io.prefetch_l2
+  prefetchBuffer.io.l2_srcReq.valid := deltaTable.io.prefetch_l2.valid && io.fdbkDegree > 0.U
 
   // 4. io
   io.tlb_req <> prefetchBuffer.io.tlbReq
@@ -1086,5 +1087,6 @@ class BertiPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasBe
   XSPerfAccumulate("demandPfHit_prefetchValidL1", demandPfHit && deltaTable.io.prefetch_l1.valid)
   XSPerfAccumulate("demandMiss_prefetchValidL2", demandMiss && deltaTable.io.prefetch_l2.valid)
   XSPerfAccumulate("demandPfHit_prefetchValidL2", demandPfHit && deltaTable.io.prefetch_l2.valid)
+  XSPerfAccumulate("berti_l2_feedback_control_drop", deltaTable.io.prefetch_l2.valid && io.fdbkDegree === 0.U)
 
 }

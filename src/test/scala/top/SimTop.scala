@@ -164,7 +164,7 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   soc.io.systemjtag.part_number := 0.U(16.W)
   soc.io.systemjtag.version := 0.U(4.W)
 
-  override def cpuName: Option[String] = Some("XiangShan")
+  override def cpuName: Option[String] = Some("XIANGSHAN_KMHV3")
 
   val uart = IO(new UARTIO)
   simMMIO.io.uart <> uart

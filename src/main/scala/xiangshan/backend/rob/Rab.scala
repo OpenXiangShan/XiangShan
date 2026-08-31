@@ -9,7 +9,6 @@ import utility._
 import utility.OneHot.UIntToOHSeq
 import xiangshan.backend.Bundles.EnqRobUop
 import xiangshan.backend.{RabToVecExcpMod, RegWriteFromRab}
-import xiangshan.backend.decode.VectorConstants
 import xiangshan.backend.rename.SnapshotGenerator
 import chisel3.experimental.BundleLiterals._
 
@@ -54,7 +53,6 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
     val enqPtrVec = Output(Vec(RenameWidth, new RenameBufferPtr))
 
     val commits = Output(new RabCommitIO)
-    val diffCommits = if (backendParams.basicDebugEn) Some(Output(new DiffCommitIO)) else None
 
     val status = Output(new Bundle {
       val walkEnd = Bool()
@@ -94,9 +92,6 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   val vcfgPtrOHShift = CircularShift(vcfgPtrOH)
   // may shift [0, 2) steps
   val vcfgPtrOHSeq = Seq.tabulate(2)(vcfgPtrOHShift.left)
-
-  val diffPtr = RegInit(0.U.asTypeOf(new RenameBufferPtr))
-  val diffPtrNext = Wire(new RenameBufferPtr)
   // Regs
   val renameBuffer = Reg(Vec(size, new RenameBufferEntry))
   val renameBufferEntries = VecInit((0 until size) map (i => renameBuffer(i)))
@@ -167,13 +162,8 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
   val commitCandidates = VecInit(deqPtrOHVec.map(sel => Mux1H(sel, renameBufferEntries)))
   val vcfgCandidates   = VecInit(vcfgPtrOHSeq.map(sel => Mux1H(sel, renameBufferEntries)))
 
-  // update diff pointer
-  diffPtrNext := diffPtr + newCommitSize
-  diffPtr := diffPtrNext
-
   // update vcfg pointer
-  // TODO: do not use diffPtrNext here
-  vcfgPtrOH := diffPtrNext.toOH
+  vcfgPtrOH := (deqPtr + newCommitSize).toOH
 
   // update enq pointer
   val enqPtrNext = Mux(
@@ -281,14 +271,6 @@ class RenameBuffer(size: Int)(implicit p: Parameters) extends XSModule with HasC
         x.lreg := RegEnable(io.commits.info(i).ldest, valid)
         x.preg := RegEnable(io.commits.info(i).pdest, valid)
     }
-  }
-
-  // for difftest
-  io.diffCommits.foreach(_ := 0.U.asTypeOf(new DiffCommitIO))
-  io.diffCommits.foreach(_.isCommit := true.B)
-  for(i <- 0 until RabCommitWidth * MaxUopSize) {
-    io.diffCommits.foreach(_.commitValid(i) := i.U < newCommitSize)
-    io.diffCommits.foreach(_.info(i) := renameBufferEntries((diffPtr + i.U).value).info)
   }
 
   XSError(isBefore(enqPtr, deqPtr) && !isFull(enqPtr, deqPtr), "\ndeqPtr is older than enqPtr!\n")

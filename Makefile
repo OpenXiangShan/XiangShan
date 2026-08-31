@@ -107,6 +107,7 @@ OBJCACHE ?=
 # common chisel args
 MFC_ARGS = --target $(CHISEL_TARGET) \
            --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
+RTL_INCLUDE ?=
 
 ifeq ($(CHISEL_TARGET),systemverilog)
 MFC_ARGS += --split-verilog --dump-fir
@@ -135,7 +136,7 @@ COMMON_EXTRA_ARGS += --dfx false
 endif
 endif
 
-# enable or disable sram ctl maunally
+# enable or disable sram ctl manually
 ifeq ($(SRAM_WITH_CTL),1)
 COMMON_EXTRA_ARGS += --sram-with-ctl
 endif
@@ -547,7 +548,7 @@ reformat:
 
 # verilator simulation
 emu-mk: sim-verilog
-	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)"
 
 emu: $(call docker-deps,emu-mk)
 	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) OBJCACHE=$(OBJCACHE)
@@ -557,7 +558,7 @@ gsim: sim-chirrtl
 
 # vcs simulation
 simv: sim-verilog
-	$(MAKE) -C ./difftest simv NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+	$(MAKE) -C ./difftest simv NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) RTL_INCLUDE="$(RTL_INCLUDE)"
 
 simv-run:
 	$(MAKE) -C ./difftest simv-run NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
