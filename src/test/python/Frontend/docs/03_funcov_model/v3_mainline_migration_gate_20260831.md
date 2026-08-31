@@ -1,13 +1,15 @@
-# V3 859389870 Frontend Coverage Migration Gate
+# V3 e5c70547f / frontend-bt 1916b7615 Coverage Migration Gate
 
 Date: 2026-08-31
 
 ## Decision
 
 Coverage backannotation and status promotion are paused until a DUT built from
-V3 `859389870811614a2c3d8708c8bd3bfea558d476` has a valid build manifest and a
+the integrated `frontend-bt` commit
+`1916b7615a8d057cbef6862ca94f4c4794f26b8b`, containing reviewed V3 design tip
+`e5c70547f3a966accf20a4b065ec1d8e33443180`, has a valid build manifest and a
 new signal inventory. Existing HIT rows and artifacts remain immutable
-historical evidence; they do not prove the new mainline.
+historical evidence; they do not prove the current integrated mainline.
 
 No denominator changes are part of this migration:
 
@@ -21,22 +23,35 @@ No denominator changes are part of this migration:
 
 ## Baseline Reconciliation
 
-The read-only V3 reference used for this review is
+The read-only V3 reference used for the original frontend impact review was
 `/tmp/design-refs-20260831-90yFFZ/v3`, which is clean at
 `859389870811614a2c3d8708c8bd3bfea558d476`. The existing design reference
 repositories were not fetched, checked out, cleaned, or modified.
+
+Subsequent remote reconciliation found V3 design tip
+`e5c70547f3a966accf20a4b065ec1d8e33443180` and integrated verification tip
+`1916b7615a8d057cbef6862ca94f4c4794f26b8b`. The latter is the merge of the
+former into `frontend-bt`, and the local verification branch now matches that
+integration commit. Compared with `859389870`, the design tip adds
+`3e6839bca` (CI container migration) and `e5c70547f` (F-POP L2 prefetcher).
+There is no delta under `src/main/scala/xiangshan/frontend`; `MemBlock.scala`
+only gains L2-prefetch feedback wiring, with the remaining source changes in
+the memory prefetch implementation. The frontend probe and directed-scenario
+impact analysis below therefore remains valid.
 
 The active Verilator build is not the new mainline. Its manifest reports all
 three source identities as `7afd6f737d9e3ddc881bda5523e854f07ef5e246`, with
 `source_tree_dirty=false` and a 2026-08-25 build timestamp. Commit `7afd6f737`
 and contract baseline `c0ca46459` diverge after merge-base `6891f912c`; neither
-is an ancestor of the other. `c0ca46459` is an ancestor of `859389870`, while
+is an ancestor of the other. `c0ca46459` is an ancestor of `e5c70547f`, while
 `7afd6f737` is not. Therefore:
 
 - `RTL_REVIEW:c0ca46459` entries are old semantic review evidence only.
 - Existing DUT artifacts are evidence for their manifest source, normally
-  `7afd6f737`, not for `859389870`.
-- A build from `859389870` is required before any new-mainline DUT claim.
+  `7afd6f737`, not for `e5c70547f` or `1916b7615`.
+- A build from the integrated `frontend-bt` commit is required before any
+  current-mainline DUT claim. Building directly from the design checkout is
+  not an acceptable substitute for the verification integration.
 - Generated signal names below are expected from Chisel structure, but must be
   confirmed against the post-build signal inventory before aliases are edited.
 
@@ -103,7 +118,7 @@ is an ancestor of the other. `c0ca46459` is an ancestor of `859389870`, while
    should continue observing pointer distance, occupancy, ready/valid, flush,
    and wrap rather than relying on a removed parameter symbol.
 
-### Must rerun scenarios on 859389870
+### Must rerun scenarios on the current integrated mainline
 
 - ICache/IFU maybeRvc alignment: single and dual fetch blocks; same line and
   cross line; SRAM-only, MSHR-only, and mixed SRAM/MSHR returns; invalid req1
@@ -135,7 +150,8 @@ is an ancestor of the other. `c0ca46459` is an ancestor of `859389870`, while
 
 ### Provenance-only updates
 
-- Regenerate the build manifest and signal inventory from the 859 build.
+- Regenerate the build manifest and signal inventory from the integrated
+  `frontend-bt` build.
 - Update active contract/tool baseline declarations only after the RTL review
   is accepted. Do not rewrite old `RTL_REVIEW:c0ca46459` evidence strings or old
   artifact manifests; their old identities are the audit trail.
@@ -157,18 +173,25 @@ is an ancestor of the other. `c0ca46459` is an ancestor of `859389870`, while
 
 ## Focus BIN Assessment
 
-| BIN | Current canonical status | 859389870 assessment | Required directed evidence |
+| BIN | Current canonical status | e5c70547f / 1916b7615 assessment | Required directed evidence |
 | --- | --- | --- | --- |
 | BIN-908 | `PARTIAL` | State does not improve. The new MainPipe still ORs both WayLookup ITLB exceptions into `s0_hasItlbException` and suppresses req1, while PMP remains a single req0-address check. Second-block ITLB suppression is reachable; independent second-block PMP attribution is still absent. | Drive req1 valid with only block-1 ITLB exception; prove `s0_hasItlbException=1`, `s0_realTwoFetchValid=0`, and new `info(1).valid=0`. Preserve the PMP limitation as review evidence. |
-| BIN-909 | `BLOCKED` | Remains blocked. Per-line TL corrupt/denied is reduced into `s1_exceptionOut`, copied into both `info(i).icacheMeta`, and IFU exception delivery still keys off `s1_icacheMeta(0)`. The alignment change does not create second-lane fault attribution. | Re-run second-line-only TL denied/corrupt and ECC cases with stall/flush to document the 859 behavior, but do not claim HIT unless RTL later exposes and preserves precise lane ownership. |
-| BIN-1067 | `HIT` on old DUT | Contract remains structurally reachable: wbRedirect still flushes s1 unconditionally, flushes s2 unless `s2_wbNotFlush`, and drives `uncacheUnit.io.flush`. The new checker ownership fields can change which FTQ entry creates the older redirect, so the old HIT does not prove 859. | Use an older cacheable checker redirect A and younger NC B with distinct identities. Cover B in s1, s2, and an exact same-cycle internal `uncacheUnit.req.fire`/flush race; prove flush wins and old B causes no InstrUncache request, TL A, response, or IBuffer delivery; then prove only a new recovery identity completes. No backend redirect. |
+| BIN-909 | `BLOCKED` | Remains blocked. Per-line TL corrupt/denied is reduced into `s1_exceptionOut`, copied into both `info(i).icacheMeta`, and IFU exception delivery still keys off `s1_icacheMeta(0)`. The alignment change does not create second-lane fault attribution. | Re-run second-line-only TL denied/corrupt and ECC cases with stall/flush to document the current integrated behavior, but do not claim HIT unless RTL later exposes and preserves precise lane ownership. |
+| BIN-1067 | `HIT` on old DUT | Contract remains structurally reachable: wbRedirect still flushes s1 unconditionally, flushes s2 unless `s2_wbNotFlush`, and drives `uncacheUnit.io.flush`. The new checker ownership fields can change which FTQ entry creates the older redirect, so the old HIT does not prove the current integration. | Use an older cacheable checker redirect A and younger NC B with distinct identities. Cover B in s1, s2, and an exact same-cycle internal `uncacheUnit.req.fire`/flush race; prove flush wins and old B causes no InstrUncache request, TL A, response, or IBuffer delivery; then prove only a new recovery identity completes. No backend redirect. |
 | BIN-1084 | `HIT` on old DUT | The first-page permission-fault/no-uncache-request contract remains reachable, but IFU raw-data indexing, range handling, cross-block ownership, and halfRviInfo changed. The old page-tail identity evidence is historical only. | Re-run page-tail 2B PBMT.NC with first-page PF and AF variants. Require `s2_reqIsUncache=1`, `s2_useUncacheFetch=0`, no IfuUncache/InstrUncache/TL A request, correct IBuffer exception, and preserved ftqPtr/ftqOffset/backend FTQ identity. Include stall/flush control cases. |
 
 ## Ordered Migration Gate
 
-1. Obtain a clean DUT build whose manifest source, implementation, and design
-   baseline all identify `859389870`; reject a locally overridden or divergent
-   manifest.
+1. Obtain a clean DUT build from the current reviewed `frontend-bt` integration
+   commit or a reviewed descendant. Both `dut_source_sha` and
+   `implementation_sha` must identify that integration commit (or descendant),
+   and Git ancestry must prove that it contains reviewed design tip
+   `e5c70547f`. For an immediate build, expect both fields to be
+   `1916b7615`; preferably record `design_baseline_sha=e5c70547f` explicitly via
+   `FRONTEND_DESIGN_BASELINE_SHA`. If the build helper leaves the design field
+   equal to the integration source by default, verify the design-tip ancestry
+   separately. Do not require all three manifest fields to equal a design-branch
+   SHA, and reject a locally overridden, divergent, or dirty manifest.
 2. Export the new signal inventory. Resolve exact generated aliases for the
    new ICache payload, halfRviInfo, blockSel/isCrossBlockInstr, predecode, and
    shared-depth state before editing bind/samplers.
@@ -176,7 +199,8 @@ is an ancestor of the other. `c0ca46459` is an ancestor of `859389870`, while
    signal-contract tests. Keep negative checks at least as strict as today.
 4. Run unit and contract checks. Do not run full DUT regression yet.
 5. Run the targeted scenario groups above with explicit target bins and valid
-   859 provenance. Review failures before broadening the run set.
+   current integration provenance. Review failures before broadening the run
+   set.
 6. Only after affected probes and scenarios pass, resume exact-target coverage
    climbing and backannotation. MODELED/PARTIAL or old-build HIT evidence must
    never be promoted as a new-mainline DUT HIT.
