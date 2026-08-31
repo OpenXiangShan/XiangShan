@@ -95,7 +95,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   private val stackTOSW    = stack.meta.tosw
   private val redirectTOSW = redirect.bits.meta.ras.tosw
 
-  stack.redirect.valid  := redirect.valid && (isBefore(redirectTOSW, stackTOSW) || !stackNearOverflow)
+  stack.redirect.valid  := redirect.valid
   stack.redirect.isCall := redirect.bits.attribute.isCall
   stack.redirect.isRet  := redirect.bits.attribute.isReturn
   stack.redirect.meta   := redirect.bits.meta.ras

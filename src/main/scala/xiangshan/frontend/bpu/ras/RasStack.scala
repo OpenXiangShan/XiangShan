@@ -413,11 +413,11 @@ class RasStack(implicit p: Parameters) extends RasModule
     }
   }
 
-  when(distanceBetween(tosw, bos) > (SpecQueueSize - 2).U) {
-    specNearOverflowed := true.B
-  }.otherwise {
-    specNearOverflowed := false.B
-  }
+  // when(distanceBetween(tosw, bos) > (SpecQueueSize - 2).U) {
+  //   specNearOverflowed := true.B
+  // }.otherwise {
+  //   specNearOverflowed := false.B
+  // }
 
   io.specNearOverflow := specNearOverflowed
   XSPerfAccumulate("specNearOverflow", specNearOverflowed)
