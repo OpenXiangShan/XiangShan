@@ -1,10 +1,10 @@
 PmemRanges:
-  - { lower: 0x80000000, upper: 0x80000000000 }
+  - { lower: 0x80080000, upper: 0x100000000 }
 
 PMAConfigs:
   - { base_addr: 0x0, range: 0x1000000000000, a: 3 }
-  - { base_addr: 0x80000000000, c: true, atomic: true, a: 1, x: true, w: true, r: true }
-  - { base_addr: 0x80000000, a: 1, w: true, r: true }
+  - { base_addr: 0x100000000, c: true, atomic: true, a: 1, x: true, w: true, r: true }
+  - { base_addr: 0x80080000, a: 1, w: true, r: true }
   - { base_addr: 0x3A000000, a: 1 }
   - { base_addr: 0x39002000, a: 1, w: true, r: true }
   - { base_addr: 0x39000000, a: 1, w: true, r: true }
@@ -14,6 +14,10 @@ PMAConfigs:
   - { base_addr: 0x20000000, a: 1, x: true, w: true, r: true }
   - { base_addr: 0x10000000, a: 1, w: true, r: true }
   - { base_addr: 0 }
+
+SimMemSize: 0x7ff80000
+
+UART16550Base: 0x20001000
 
 EnableCHIAsyncBridge: true
 
@@ -52,7 +56,7 @@ SeperateBus: NONE
 
 UsePrivateClint: false
 
-TIMERRange: { base: 0x38000000, mask: 0xFFFF }
+TIMERRange: { base: 0x60000, mask: 0xFFFF }
 
 SeperateBusRanges:
   - { base: 0x38020000, mask: 0xFFF } # Default Debug Module Address
