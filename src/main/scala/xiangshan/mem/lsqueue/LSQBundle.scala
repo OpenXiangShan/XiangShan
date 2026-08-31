@@ -280,7 +280,6 @@ class VirtualStoreQueueToPhysicalQueueIO(PhysicalQueuePtr: MultiFlagCircularQueu
   val preCommitPtr       = ValidIO(PhysicalQueuePtr.cloneType) // uop is rob head, which can be set committed in physicalQueue
   val retiredPtr         = PhysicalQueuePtr.cloneType
   val physicalQueueEnqPtr = Output(PhysicalQueuePtr.cloneType)
-  val mdpHitPtr           = Vec(LoadPipelineWidth, ValidIO(PhysicalQueuePtr.cloneType)) // for MDP predict, indicate which entry is hit by load
   val headRobIdx          = Output(new RobPtr) // for writeback of mmio/cbo
 }
 
@@ -303,13 +302,6 @@ class PhysicalQueueToVirtualStoreQueueIO[PhysicalQueuePtrType <: MultiFlagCircul
   val deqCount           = Flipped(ValidIO(UInt(log2Ceil(EnsbufferWidth + 1).W)))
 }
 
-class MDPQueryIO (implicit p: Parameters) extends XSBundle {
-  // MDP
-  // load inst will not be executed until former store (predicted by mdp) addr calcuated
-  val loadWaitBit        = Bool()
-  val waitForRobIdx      = new RobPtr // store set predicted previous store robIdx
-}
-
 class VirtualStoreQueueIO[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[PhysicalQueuePtrType]](PhysicalQueuePtr: PhysicalQueuePtrType)
                          (implicit p: Parameters) extends XSBundle {
   // for mulit Core Difftest
@@ -319,8 +311,6 @@ class VirtualStoreQueueIO[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Phys
   val enq                = new VirtualStoreQueueEnqIO(PhysicalQueuePtr)
   // from ROB
   val fromRob            = new ROBToVirtualStoreQueueIO
-  // mdp query, from forward
-  val mdpQuery           = Vec(LoadPipelineWidth, Flipped(ValidIO(new MDPQueryIO)))
   //to physical queue
   val toPhysicalQueue    = new VirtualStoreQueueToPhysicalQueueIO(PhysicalQueuePtr)
   val fromPhysicalQueue  = new PhysicalQueueToVirtualStoreQueueIO(PhysicalQueuePtr)

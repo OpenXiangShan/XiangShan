@@ -345,7 +345,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   storeForwardReq.loadWaitStrict := uop.loadWaitStrict
   storeForwardReq.ssid := uop.ssid
   storeForwardReq.storeSetHit := uop.storeSetHit
-  storeForwardReq.waitForRobIdx := uop.waitForRobIdx
+  storeForwardReq.waitSqIdx := uop.waitSqIdx
 
   if(debugEn) {
     storeForwardReq.debug_robIdx.get := uop.robIdx
@@ -574,7 +574,7 @@ class LoadUnitS1(param: ExeUnitParams)(
 
   // storeset
   val isStoreSetHit = uop.storeSetHit
-  val waitRobIdx = uop.waitForRobIdx
+  val waitSqIdx = uop.waitSqIdx
 
   /**
     * Redirect
@@ -678,7 +678,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   }).orR && paddrEffective
   // if nuke is storeSetHit store, let load fast replay
   val fastReplayNukeFirst = isStoreSetHit && nukeQueryReqs.zip(nukeQueryValids).map{case (req, v) =>
-    req.robIdx === waitRobIdx && v}.reduce(_ || _)
+    req.sqIdx === waitSqIdx && v}.reduce(_ || _)
 
   /**
     * Pipeline connect
@@ -886,7 +886,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
   val isUnalign = isUnalignHead || isUnalignTail
   val isStoreSetHit = uop.storeSetHit
-  val waitRobIdx = uop.waitForRobIdx
+  val waitSqIdx = uop.waitSqIdx
 
   /**
     * Redirect
@@ -1025,7 +1025,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   // if nuke is storeSetHit store, let load fast replay
   val prevStageFastReplayNukeFirst = in.fastReplayNukeFirst.get
   val fastReplayNukeFirst = isStoreSetHit && nukeQueryReqs.zip(nukeQueryValids).map{case (req, v) =>
-    req.robIdx === waitRobIdx && v}.reduce(_ || _) || prevStageFastReplayNukeFirst
+    req.sqIdx === waitSqIdx && v}.reduce(_ || _) || prevStageFastReplayNukeFirst
 
   /**
     * Preliminary assessment of the load exit

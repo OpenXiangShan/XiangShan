@@ -253,8 +253,6 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
         val deqPtr = Input(new SqPtr())
         val physicalQueueUpper = Input(new SqPtr())
       }
-      // for mdp query
-      val mdpQueryResp    = Vec(LoadPipelineWidth, Flipped(ValidIO(new SqPtr)))
     })
 
     /**
@@ -388,8 +386,10 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val s0LoadEnd          = (s0LoadStart +& s0ByteOffset).ensuring(_.getWidth == (s0LoadStart.getWidth + 1))
 
       // mdp info
+      val s0LoadWaitBit    = s0Req.bits.loadWaitBit
       val s0LoadWaitStrict = s0Req.bits.loadWaitStrict
       val s0LoadSqIdx      = s0Req.bits.sqIdx
+      val s0WaitSqIdx      = s0Req.bits.waitSqIdx
 
       val s0AgeMaskLow     = s0DeqMask & s0ForwardMask & VecInit(Seq.fill(StoreQueuePhysicalSize)(s0DifferentFlag)).asUInt
       val s0AgeMaskHigh    = (~s0DeqMask).asUInt & (VecInit(Seq.fill(StoreQueuePhysicalSize)(s0DifferentFlag)).asUInt | s0ForwardMask)
@@ -401,6 +401,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val s1LoadEnd      = RegEnable(s0LoadEnd, s0Valid)
       val s1LoadWaitStrict = RegEnable(s0LoadWaitStrict, s0Valid)
       val s1LoadSqIdx      = RegEnable(s0LoadSqIdx, s0Valid)
+      val s1LoadWaitBit    = RegEnable(s0LoadWaitBit, s0Valid)
+      val s1WaitSqIdx      = RegEnable(s0WaitSqIdx, s0Valid)
       val s1LoadOutOfRange = RegEnable(s0LoadOutOfRange, s0Valid)
 
       val s1AgeMaskLow   = RegEnable(s0AgeMaskLow, s0Valid)
@@ -517,9 +519,6 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
         io.ctrlInfo.deqPtr.operation_flag
       )
 
-      val s2MdpQueryResp      = io.mdpQueryResp(i)
-      val s2MdpQueryRespValid = s2MdpQueryResp.valid
-      val s2AddrInvalidSqIdx  = s2MdpQueryResp.bits
       val s2SelectDataEntry   = RegEnable(s1SelectDataEntry, s1Valid)
       val s2SelectCtrlEntry   = RegEnable(s1SelectCtrlEntry, s1Valid)
       val s2DataInValid       = RegEnable(s1DataInvalid, s1Valid)
@@ -529,6 +528,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val s2LoadMaskEnd      = RegEnable(UIntToMask(MemorySize.CalculateSelectMask(s1LoadStart, s1LoadEnd), VLENB), s1Valid)
       val s2DataInvalidSqIdx = RegEnable(s1DataInvalidSqIdx, s1Valid)
       val s2LoadWaitStrict   = RegEnable(s1LoadWaitStrict, s1Valid)
+      val s2LoadWaitBit      = RegEnable(s1LoadWaitBit, s1Valid)
+      val s2WaitSqIdx        = RegEnable(s1WaitSqIdx, s1Valid)
       val s2OverlapMask      = RegEnable(s1OverlapMask, s1Valid)
       val s2WaitStrictSqIdx  = RegEnable(s1LoadSqIdx - 1.U, s1Valid)
       val s2MultiMatch       = RegEnable(s1MultiMatch, s1Valid)
@@ -536,11 +537,14 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val s2LoadStart        = RegEnable(s1LoadStart, s1Valid)
       val s2LoadEnd          = RegEnable(s1LoadEnd, s1Valid)
       val s2ForwardValid     = RegEnable(s1SelectOH.orR, s1Valid) // indicate whether forward is valid.
-      val s2HasAddrInvalidVec  = RegEnable(s1HasAddrInvalidVec, s1Valid)
-      val s2PhysicalQueueUpper = RegEnable(io.ctrlInfo.physicalQueueUpper, s1Valid) // physicalQueueUpper maybe move after s1
+      val s2DeqPtr             = io.ctrlInfo.deqPtr
+      val s2PhysicalQueueUpper = io.ctrlInfo.physicalQueueUpper
       val s2Valid              = RegNext(s1Valid)
-      val s2PreciseMdpWait     = s2MdpQueryRespValid && s2HasAddrInvalidVec(s2AddrInvalidSqIdx.value)
-      val s2MdpHitOutOfRange   = s2MdpQueryRespValid && s2AddrInvalidSqIdx.isNotBefore(s2PhysicalQueueUpper)
+      val s2MdpTargetRetired   = s2LoadWaitBit && s2WaitSqIdx.isBefore(s2DeqPtr)
+      val s2MdpHitOutOfRange   = s2LoadWaitBit && s2WaitSqIdx.isNotBefore(s2PhysicalQueueUpper)
+      val s2MdpHitInPhysical   = s2LoadWaitBit && s2WaitSqIdx.isNotBefore(s2DeqPtr) &&
+        s2WaitSqIdx.isBefore(s2PhysicalQueueUpper)
+      val s2PreciseMdpWait     = s2MdpHitInPhysical && !io.ctrlEntriesIn(s2WaitSqIdx.value).addrValid
       val s2NeedPreciseMdpWait = s2PreciseMdpWait || s2MdpHitOutOfRange
       // debug
       XSError(s1SelectOH.orR && !s1SelectCtrlEntry.addrValid && s1Valid, "forward select a invalid entry!\n")
@@ -619,18 +623,16 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       s2Resp.bits.dataInvalid.valid := s2DataInValid && s2ForwardValid // select is valid
       s2Resp.bits.dataInvalid.bits  := s2DataInvalidSqIdx
       s2Resp.bits.addrInvalid.valid := Mux(s2LoadWaitStrict, s2StrictMdpWait, s2NeedPreciseMdpWait) // maby can't select a entry
-      s2Resp.bits.addrInvalid.bits := Mux(s2LoadWaitStrict, s2WaitStrictSqIdx, s2AddrInvalidSqIdx)
+      s2Resp.bits.addrInvalid.bits := Mux(s2LoadWaitStrict, s2WaitStrictSqIdx, s2WaitSqIdx)
       s2Resp.bits.forwardInvalid   := !s2SafeForward || s2CboForwardFail || s2Cross4KPage // do not support cross page forward.
       s2Resp.bits.matchInvalid     := s2PaddrNoMatch && !s2Cross4KPage && s2SafeForward // if cross Page/multi match, let load replay.
       s2Resp.valid                 := s2Valid
 
       // Perf-only response fields
-      val perfS1HasWaitStore = RegEnable(s0Req.bits.loadWaitBit, s0Valid)
-      val perfS2HasWaitStore = RegEnable(perfS1HasWaitStore, s1Valid)
       val s2AgeMask = RegEnable(s1AgeMaskLow | s1AgeMaskHigh, s1Valid)
-      val perfS2WaitStoreRetired = perfS2HasWaitStore && !s2MdpQueryRespValid
+      val perfS2WaitStoreRetired = s2MdpTargetRetired
       val perfS2MdpHitVec = VecInit((0 until StoreQueuePhysicalSize).map(j =>
-        s2MdpQueryRespValid && !s2MdpHitOutOfRange && s2AddrInvalidSqIdx.value === j.U)).asUInt
+        s2MdpHitInPhysical && s2WaitSqIdx.value === j.U)).asUInt
       val perfS2MdpCandidate = Mux(s2LoadWaitStrict, s2AgeMask, s2AgeMask & perfS2MdpHitVec)
       val perfS2MdpSelectedAddrMatch = (perfS2MdpCandidate & s2OverlapMask & s2PaddrMatchVec &
         addrValidVec.asUInt & s2SelectOH).orR
@@ -1534,7 +1536,6 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
 
   // forward connection
   forwardModule.io.query           <> io.forward
-  forwardModule.io.mdpQueryResp    <> io.fromVirtualStoreQueue.mdpHitPtr
   forwardModule.io.ctrlInfo.deqPtr := deqPtrExt.head
   forwardModule.io.ctrlInfo.physicalQueueUpper := physicalQueueUpper
   dataEntries.zip(forwardModule.io.dataEntriesIn).foreach{ case (source, sink) =>
@@ -2117,12 +2118,6 @@ class StoreQueue(implicit p: Parameters) extends LSQModule with HasPerfEvents {
   virtualStoreQueue.io.redirect   <> io.redirect
   virtualStoreQueue.io.fromRob    <> io.fromRob
   virtualStoreQueue.io.enq        <> io.enq
-  virtualStoreQueue.io.mdpQuery.zip(io.forward).foreach { case (query, forward) =>
-    query.valid := forward.s0Req.valid
-    query.bits.loadWaitBit := forward.s0Req.bits.loadWaitBit
-    query.bits.waitForRobIdx := forward.s0Req.bits.waitForRobIdx
-  }
-
   physicalQueue.io.storeDataIn   <> io.storeDataIn
   physicalQueue.io.fromStoreUnit <> io.fromStoreUnit
   physicalQueue.io.fromVirtualStoreQueue <> virtualStoreQueue.io.toPhysicalQueue

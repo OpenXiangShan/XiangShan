@@ -30,8 +30,8 @@ import chisel3.util._
 import xiangshan._
 import utils._
 import utility._
-import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.Bundles._
+import xiangshan.mem.SqPtr
 
 // store set load violation predictor
 // See "Memory Dependence Prediction using Store Sets" for details
@@ -423,20 +423,20 @@ class SSIT(implicit p: Parameters) extends XSModule {
 // Last Fetched Store Table Entry
 class LFSTEntry(implicit p: Parameters) extends XSBundle  {
   val valid = Bool()
-  val robIdx = new RobPtr
+  val sqIdx = new SqPtr
 }
 
 class LFSTReq(implicit p: Parameters) extends XSBundle {
   val isstore = Bool()
   val ssid = UInt(SSIDWidth.W) // use ssid to lookup LFST
-  val robIdx = new RobPtr
+  val sqIdx = new SqPtr
   val perfStrictPred = Bool()
 }
 
 class LFSTResp(implicit p: Parameters) extends XSBundle {
   val shouldWait = Bool()
   val strictShouldWait = Bool()
-  val robIdx = new RobPtr
+  val sqIdx = new SqPtr
   val perfNotIssuedStoreGt1 = Bool()
 }
 
@@ -448,8 +448,8 @@ class DispatchLFSTIO(implicit p: Parameters) extends XSBundle {
 // Last Fetched Store Table
 class LFST(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
-    // when redirect, mark canceled store as invalid
-    val redirect = Input(Valid(new Redirect))
+    // The pointer is the first free SQ entry after redirect recovery.
+    val sqRedirectPtr = Input(Valid(new SqPtr))
     val dispatch = Flipped(new DispatchLFSTIO)
     // when store issued, mark store as invalid
     val storeIssue = Vec(backendParams.StaExuCnt, Flipped(Valid(new StoreUnitToLFST)))
@@ -457,7 +457,7 @@ class LFST(implicit p: Parameters) extends XSModule {
   })
 
   val validVec = RegInit(VecInit(Seq.fill(LFSTSize)(VecInit(Seq.fill(LFSTWidth)(false.B)))))
-  val robIdxVec = Reg(Vec(LFSTSize, Vec(LFSTWidth, new RobPtr)))
+  val sqIdxVec = Reg(Vec(LFSTSize, Vec(LFSTWidth, new SqPtr)))
   val allocPtr = RegInit(VecInit(Seq.fill(LFSTSize)(0.U(log2Up(LFSTWidth).W))))
   val valid = Wire(Vec(LFSTSize, Bool()))
   (0 until LFSTSize).map(i => {
@@ -485,11 +485,19 @@ class LFST(implicit p: Parameters) extends XSModule {
         io.dispatch.req(i).valid &&
         (!io.dispatch.req(i).bits.isstore || io.csrCtrl.storeset_wait_store)
       ) && !io.csrCtrl.lvpred_disable || io.csrCtrl.no_spec_load
-    io.dispatch.resp(i).bits.robIdx := robIdxVec(io.dispatch.req(i).bits.ssid)(allocPtr(io.dispatch.req(i).bits.ssid)-1.U)
+    val respSsid = io.dispatch.req(i).bits.ssid
+    io.dispatch.resp(i).bits.sqIdx := sqIdxVec(respSsid)(allocPtr(respSsid) - 1.U)
+    // A younger store may issue before an older one. Select the newest slot that is still valid.
+    (0 until LFSTWidth).reverse.foreach { j =>
+      val candidate = (allocPtr(respSsid) - (j + 1).U)(log2Up(LFSTWidth) - 1, 0)
+      when(validVec(respSsid)(candidate)) {
+        io.dispatch.resp(i).bits.sqIdx := sqIdxVec(respSsid)(candidate)
+      }
+    }
     if(i > 0){
       (0 until i).map(j =>
         when(hitInDispatchBundleVec(j)){
-          io.dispatch.resp(i).bits.robIdx := io.dispatch.req(j).bits.robIdx
+          io.dispatch.resp(i).bits.sqIdx := io.dispatch.req(j).bits.sqIdx
         }
       )
     }
@@ -506,7 +514,8 @@ class LFST(implicit p: Parameters) extends XSModule {
   (0 until backendParams.StaExuCnt).map(i => {
     // TODO: opt timing
     (0 until LFSTWidth).map(j => {
-      when(io.storeIssue(i).valid && io.storeIssue(i).bits.storeSetHit && io.storeIssue(i).bits.robIdx.value === robIdxVec(io.storeIssue(i).bits.ssid)(j).value){
+      when(io.storeIssue(i).valid && io.storeIssue(i).bits.storeSetHit &&
+        io.storeIssue(i).bits.sqIdx === sqIdxVec(io.storeIssue(i).bits.ssid)(j)) {
         validVec(io.storeIssue(i).bits.ssid)(j) := false.B
       }
     })
@@ -517,28 +526,32 @@ class LFST(implicit p: Parameters) extends XSModule {
   (0 until RenameWidth).map(i => {
     when(io.dispatch.req(i).valid && io.dispatch.req(i).bits.isstore){
       val waddr = io.dispatch.req(i).bits.ssid
-      val wptr = allocPtr(waddr)
-      allocPtr(waddr) := allocPtr(waddr) + 1.U
+      val olderSameSsidStores = if (i == 0) 0.U else PopCount((0 until i).map { j =>
+        io.dispatch.req(j).valid && io.dispatch.req(j).bits.isstore &&
+          io.dispatch.req(j).bits.ssid === waddr
+      })
+      val wptr = (allocPtr(waddr) + olderSameSsidStores)(log2Up(LFSTWidth) - 1, 0)
+      allocPtr(waddr) := wptr + 1.U
       validVec(waddr)(wptr) := true.B
-      robIdxVec(waddr)(wptr) := io.dispatch.req(i).bits.robIdx
+      sqIdxVec(waddr)(wptr) := io.dispatch.req(i).bits.sqIdx
       when(validVec(waddr)(wptr)) {
         overflowVec(i) := true.B
       }
     }
   })
 
-  // when redirect, cancel store influenced
+  // Cancel stores at or after the recovered SQ tail.
   (0 until LFSTSize).map(i => {
     (0 until LFSTWidth).map(j => {
-      when(validVec(i)(j) && robIdxVec(i)(j).needFlush(io.redirect)){
+      when(validVec(i)(j) && sqIdxVec(i)(j).needFlush(io.sqRedirectPtr)) {
         validVec(i)(j) := false.B
       }
     })
   })
 
-  // recover robIdx after squash
+  // Repair allocation pointers after squash entries have been cleared.
   // behavior model, to be refactored later
-  when(RegNext(io.redirect.fire)) {
+  when(RegNext(io.sqRedirectPtr.fire)) {
     (0 until LFSTSize).map(i => {
       (0 until LFSTWidth).map(j => {
         val check_position = WireInit(allocPtr(i) + (j+1).U)

@@ -382,6 +382,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   val nukeQueryReqValid = fire && tlbHit && !isHwPrefetch
   val nukeQueryReq = Wire(new StoreNukeQueryReq)
   nukeQueryReq.robIdx := robIdx
+  nukeQueryReq.sqIdx := uop.sqIdx
   nukeQueryReq.paddr := paddr
   nukeQueryReq.mask := mask
   nukeQueryReq.matchType := Mux(isCbo, StLdNukeMatchType.CacheLine, StLdNukeMatchType.Normal)
@@ -494,7 +495,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   io.dcacheKill := killDCache
 
   io.updateLFST.valid := updateLFSTValid
-  io.updateLFST.bits.robIdx := robIdx
+  io.updateLFST.bits.sqIdx := uop.sqIdx
   io.updateLFST.bits.ssid := ssid
   io.updateLFST.bits.storeSetHit := storeSetHit
 
