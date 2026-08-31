@@ -914,6 +914,7 @@ def test_uncache_wfi_during_a_ready_backpressure_retracts_unaccepted_request(env
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-1103")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_pending_response_flushed_by_redirect(env):
     _prepare_mmio_cnop_stream(env)
@@ -931,6 +932,9 @@ def test_uncache_pending_response_flushed_by_redirect(env):
     assert int(env.uncache_agent.get_stats().get("resp_count", 0)) > 0
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= req_before_redirect
     assert not any(int(obs.pc) == _MMIO_BASE for obs in env.monitor.observations)
+    assert env.functional_coverage.key_hit(
+        "ifu_instruncache_owner_v3", "instruncache_leaf_010"
+    ), env.functional_coverage.raw_path()
     assert not env.monitor.get_errors()
 
 

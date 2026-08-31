@@ -31,6 +31,9 @@ def initialize_instr_uncache_owner_coverage_state(recorder) -> None:
         "cross_8b_pending": None,
         "cross_page_pending": None,
         "first_page_tl_fault_pending": None,
+        "latest_accepted_request": None,
+        "active_instruncache_request": None,
+        "redirected_wait_d_pending": None,
         "second_page_exception_types": set(),
         "non_cross_rvi_offsets": set(),
         "attribute_modes": set(),
@@ -158,6 +161,11 @@ def sample_instr_uncache_owner_coverage(
             "mode": mode,
         }
         state["accepted_request_attributes"] = accepted_attributes
+        state["latest_accepted_request"] = {
+            "s2_ftq_flag": s["s2_ftq_flag"],
+            "s2_ftq_value": s["s2_ftq_value"],
+            "s2_instr_pc": s["s2_instr_pc"],
+        }
         if mode is not None:
             state["attribute_transactions"].append(
                 {
@@ -227,6 +235,29 @@ def sample_instr_uncache_owner_coverage(
     elif tl_a_fire or not tl_a_valid:
         state["stalled_a"] = None
 
+    if tl_a_fire and not entry_resending:
+        accepted_request = state["latest_accepted_request"]
+        if accepted_request is not None:
+            state["active_instruncache_request"] = {
+                **accepted_request,
+                "tl_a_addr": s["tl_a_addr"],
+                "d_seen": False,
+            }
+
+    active_request = state["active_instruncache_request"]
+    if (
+        s["backend_redirect"] == 1
+        and active_request is not None
+        and not active_request["d_seen"]
+        and state["redirected_wait_d_pending"] is None
+    ):
+        state["redirected_wait_d_pending"] = {
+            **active_request,
+            "saw_d_after_redirect": False,
+            "saw_instr_response_after_redirect": False,
+            "old_identity_delivered": False,
+        }
+
     if (
         state["previous_tl_a_fire"]
         and entry_state == _ENTRY_REFILL_RESP
@@ -235,6 +266,11 @@ def sample_instr_uncache_owner_coverage(
         _mark(recorder, 4, cycle, evidence)
 
     if tl_d_valid:
+        if active_request is not None:
+            active_request["d_seen"] = True
+        redirected_wait_d = state["redirected_wait_d_pending"]
+        if redirected_wait_d is not None:
+            redirected_wait_d["saw_d_after_redirect"] = True
         state["d_response_pending"] = {
             "data": s["tl_d_data"],
             "corrupt": s["tl_d_corrupt"],
@@ -264,6 +300,9 @@ def sample_instr_uncache_owner_coverage(
 
     pending_d = state["d_response_pending"]
     if s["instr_resp_valid"] == 1 and pending_d is not None:
+        redirected_wait_d = state["redirected_wait_d_pending"]
+        if redirected_wait_d is not None and redirected_wait_d["saw_d_after_redirect"]:
+            redirected_wait_d["saw_instr_response_after_redirect"] = True
         response_data_matches = (
             s["instr_resp_data"] is not None
             and pending_d["expected_data"] is not None
@@ -398,6 +437,46 @@ def sample_instr_uncache_owner_coverage(
         ):
             first_page_fault["saw_instr_response"] = True
         state["d_response_pending"] = None
+        state["active_instruncache_request"] = None
+
+    redirected_wait_d = state["redirected_wait_d_pending"]
+    if (
+        redirected_wait_d is not None
+        and s["to_valid"] == 1
+        and s["to_ready"] == 1
+        and single_delivery
+    ):
+        old_identity = (
+            redirected_wait_d["s2_ftq_flag"],
+            redirected_wait_d["s2_ftq_value"],
+            redirected_wait_d["s2_instr_pc"],
+        )
+        delivered_identity = (s["to_ftq_flag"], s["to_ftq_value"], s["to_pc"])
+        identity_observable = None not in (*old_identity, *delivered_identity)
+        if identity_observable and delivered_identity == old_identity:
+            redirected_wait_d["old_identity_delivered"] = True
+        elif (
+            identity_observable
+            and redirected_wait_d["saw_instr_response_after_redirect"]
+            and not redirected_wait_d["old_identity_delivered"]
+            and delivered_identity != old_identity
+            and s["to_exception"] == 0
+        ):
+            _mark(
+                recorder,
+                10,
+                cycle,
+                {
+                    **evidence,
+                    "redirect_before_d": True,
+                    "d_completed_after_redirect": True,
+                    "instr_response_completed_after_redirect": True,
+                    "old_identity_delivery_suppressed": True,
+                    "old_identity": old_identity,
+                    "recovery_identity": delivered_identity,
+                },
+            )
+            state["redirected_wait_d_pending"] = None
 
     first_page_fault = state["first_page_tl_fault_pending"]
     if first_page_fault is not None:
@@ -874,6 +953,8 @@ def sample_instr_uncache_owner_coverage(
     if s["backend_redirect"] == 1 or s["ifu_flush"] == 1:
         state["attribute_transactions"].clear()
         state["first_page_tl_fault_pending"] = None
+    if s["ifu_flush"] == 1:
+        state["active_instruncache_request"] = None
 
     state["previous_entry_state"] = (
         _ENTRY_IDLE if entry_state is None else int(entry_state)

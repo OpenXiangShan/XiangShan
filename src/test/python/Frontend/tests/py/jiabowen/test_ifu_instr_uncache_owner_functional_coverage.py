@@ -133,6 +133,82 @@ def test_wfi_retract_requires_stalled_request_and_same_address_recovery():
     assert not _hit(recorder, 9)
 
 
+def test_redirected_wait_d_requires_old_response_completion_and_new_identity():
+    def drive(*, d_before_redirect=False, leak_old_identity=False):
+        recorder = _Recorder()
+        snapshot = _snapshot()
+        snapshot.update(
+            {
+                "req_valid": 1,
+                "req_ready": 1,
+                "req_is_mmio": 1,
+                "req_pbmt": 0,
+                "s2_ftq_flag": 0,
+                "s2_ftq_value": 7,
+                "s2_instr_pc": 0x4000,
+            }
+        )
+        _sample(recorder, 1, snapshot)
+        snapshot.update(
+            {
+                "req_valid": 0,
+                "entry_state": protocol._ENTRY_REFILL_REQ,
+                "tl_a_valid": 1,
+                "tl_a_ready": 1,
+                "tl_a_addr": 0x8000,
+            }
+        )
+        _sample(recorder, 2, snapshot)
+        snapshot.update(
+            {
+                "entry_state": protocol._ENTRY_REFILL_RESP,
+                "tl_a_valid": 0,
+                "tl_d_valid": int(d_before_redirect),
+                "tl_d_data": 0x00000013,
+                "tl_d_corrupt": 0,
+                "tl_d_denied": 0,
+            }
+        )
+        _sample(recorder, 3, snapshot)
+        snapshot.update({"backend_redirect": 1, "ifu_flush": 1, "tl_d_valid": 0})
+        _sample(recorder, 4, snapshot)
+        snapshot.update({"backend_redirect": 0, "ifu_flush": 0, "tl_d_valid": 1})
+        _sample(recorder, 5, snapshot)
+        snapshot.update(
+            {
+                "entry_state": protocol._ENTRY_IDLE,
+                "tl_d_valid": 0,
+                "instr_resp_valid": 1,
+                "instr_resp_data": 0x00000013,
+                "instr_resp_corrupt": 0,
+                "instr_resp_denied": 0,
+                "instr_resp_need_resend": 0,
+            }
+        )
+        _sample(recorder, 6, snapshot)
+        snapshot.update(
+            {
+                "instr_resp_valid": 0,
+                "to_valid": 1,
+                "to_ready": 1,
+                "to_enq": 1,
+                "to_ftq_flag": 0,
+                "to_ftq_value": 7 if leak_old_identity else 8,
+                "to_pc": 0x4000 if leak_old_identity else 0x4040,
+                "to_exception": 0,
+            }
+        )
+        _sample(recorder, 7, snapshot)
+        if leak_old_identity:
+            snapshot.update({"to_ftq_value": 8, "to_pc": 0x4040})
+            _sample(recorder, 8, snapshot)
+        return recorder
+
+    assert _hit(drive(), 10)
+    assert not _hit(drive(d_before_redirect=True), 10)
+    assert not _hit(drive(leak_old_identity=True), 10)
+
+
 def test_d_response_fields_are_checked_at_instruncache_response():
     snapshot = _snapshot()
     snapshot.update(
