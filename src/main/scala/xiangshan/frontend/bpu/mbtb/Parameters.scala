@@ -21,7 +21,7 @@ import xiangshan.frontend.bpu.HasBpuParameters
 
 case class MainBtbParameters(
     NumEntries: Int = 8192,
-    NumWay:     Int = 6,
+    NumWay:     Int = 5,
     // Lowest level banks used to resolve read-write conflicts and reduce SRAM power, each bank is a physical SRAM
     NumInternalBanks: Int = 4,
     // NumAlignBanks is determined by top-level FetchBlockSize and FetchBlockAlignSize, not adjustable in mbtb
@@ -47,7 +47,14 @@ trait HasMainBtbParameters extends HasBpuParameters {
 
   def NumAlignBanks: Int = FetchBlockSize / FetchBlockAlignSize
   // NumSets is the number of sets in one bank, a bank corresponds to a physical SRAM
-  def NumSets: Int = NumEntries / NumWay / NumInternalBanks / NumAlignBanks
+  // Round up to a power of two so address decoding remains a direct bit slice.
+  def NumSets: Int = {
+    val entriesPerSet = NumWay * NumInternalBanks * NumAlignBanks
+    val requiredSets  = (NumEntries - 1) / entriesPerSet + 1
+    1 << log2Ceil(requiredSets)
+  }
+
+  def ActualNumEntries: Int = NumSets * NumWay * NumInternalBanks * NumAlignBanks
 
   def SetIdxLen:          Int = log2Ceil(NumSets)
   def InternalBankIdxLen: Int = log2Ceil(NumInternalBanks)

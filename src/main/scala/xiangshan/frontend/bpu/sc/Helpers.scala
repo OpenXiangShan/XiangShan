@@ -47,9 +47,9 @@ trait Helpers extends HasScParameters with PhrHelper {
     UIntToOH(addrFields.extract("bankIdx", pc))
 
   def getWayIdx(cfiPosition: UInt): UInt = {
-    val nChunks = (cfiPosition.getWidth + log2Ceil(NumWays) - 1) / log2Ceil(NumWays)
+    val nChunks = (cfiPosition.getWidth + log2Ceil(NumScWays) - 1) / log2Ceil(NumScWays)
     val hashChunks = (0 until nChunks) map { i =>
-      cfiPosition(min((i + 1) * log2Ceil(NumWays), cfiPosition.getWidth) - 1, i * log2Ceil(NumWays))
+      cfiPosition(min((i + 1) * log2Ceil(NumScWays), cfiPosition.getWidth) - 1, i * log2Ceil(NumScWays))
     }
     ParallelXOR(hashChunks)
   }
@@ -100,10 +100,10 @@ trait Helpers extends HasScParameters with PhrHelper {
       newEntries: Vec[ScEntry]
   ): Vec[Bool] = {
     require(
-      oldEntries.length == newEntries.length && newEntries.length == NumWays,
-      "Length of oldEntries and newEntries should be same as NumWays"
+      oldEntries.length == newEntries.length && newEntries.length == NumScWays,
+      "Length of oldEntries and newEntries should be same as NumScWays"
     )
-    val updateWayMask = WireInit(VecInit.fill(NumWays)(false.B))
+    val updateWayMask = WireInit(VecInit.fill(NumScWays)(false.B))
     oldEntries.zip(newEntries).zip(updateWayMask).foreach {
       case ((oldEntry, newEntry), wayMask) =>
         when(oldEntry.ctr.value =/= newEntry.ctr.value) {

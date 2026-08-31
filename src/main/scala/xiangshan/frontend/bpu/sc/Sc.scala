@@ -64,23 +64,23 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  instantiate tables
    */
   private val pathTable = PathTableInfos.zipWithIndex.map { case (info, i) =>
-    Module(new ScTable(info.NumSets, NumWays, "pathTable", i) with PathTableHelper {
+    Module(new ScTable(info.NumSets, NumScWays, "pathTable", i) with PathTableHelper {
       override protected def TableInfo: ScTableInfo = info
     })
   }
 
   private val globalTable = GlobalTableInfos.zipWithIndex.map { case (info, i) =>
-    Module(new ScTable(info.NumSets, NumWays, "globalTable", i) with CommonTableHelper {
+    Module(new ScTable(info.NumSets, NumScWays, "globalTable", i) with CommonTableHelper {
       override protected def TableInfo: ScTableInfo = info
     })
   }
 
   private val bwTable = BackwardTableInfos.zipWithIndex.map { case (info, i) =>
-    Module(new ScTable(info.NumSets, NumWays, "bwTable", i) with CommonTableHelper {
+    Module(new ScTable(info.NumSets, NumScWays, "bwTable", i) with CommonTableHelper {
       override protected def TableInfo: ScTableInfo = info
     })
   }
-  private val imliTable = Module(new ScTable(ImliTableInfo.NumSets, NumWays, "imliTable", 0) with CommonTableHelper {
+  private val imliTable = Module(new ScTable(ImliTableInfo.NumSets, NumScWays, "imliTable", 0) with CommonTableHelper {
     override protected def TableInfo: ScTableInfo = ImliTableInfo
   })
 
@@ -89,7 +89,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       override protected def TableInfo: ScTableInfo = BiasTableInfo
     })
 
-  private val scThreshold = RegInit(VecInit.tabulate(NumWays)(_ => ThresholdCounter.Init))
+  private val scThreshold = RegInit(VecInit.tabulate(NumScWays)(_ => ThresholdCounter.Init))
 
   io.sramResetDone := (
     pathTable.map(_.io.sramResetDone) ++
@@ -176,25 +176,25 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s1_pathResp = Mux(
     PathEnable.B,
     VecInit(pathTable.map(_.io.predictReadResp)),
-    VecInit.fill(NumPathTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
+    VecInit.fill(NumPathTables)(VecInit.fill(NumScWays)(0.U.asTypeOf(new ScEntry())))
   )
   // if s0_commonHR invalid, global table resp is also invalid
   private val s1_globalResp = Mux(
     s1_commonHRValid && GlobalEnable.B,
     VecInit(globalTable.map(_.io.predictReadResp)),
-    VecInit.fill(NumGlobalTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
+    VecInit.fill(NumGlobalTables)(VecInit.fill(NumScWays)(0.U.asTypeOf(new ScEntry())))
   )
 
   private val s1_bwResp = Mux(
     s1_commonHRValid && BWEnable.B,
     VecInit(bwTable.map(_.io.predictReadResp)),
-    VecInit.fill(NumBWTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
+    VecInit.fill(NumBWTables)(VecInit.fill(NumScWays)(0.U.asTypeOf(new ScEntry())))
   )
 
   private val s1_imliResp = Mux(
     ImliEnable.B,
     imliTable.io.predictReadResp,
-    VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry()))
+    VecInit.fill(NumScWays)(0.U.asTypeOf(new ScEntry()))
   )
 
   private val s1_biasResp = Mux(
@@ -206,13 +206,13 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s1_mergeResp = VecInit(s1_pathResp ++ s1_globalResp ++ s1_bwResp ++ Seq(s1_imliResp))
 
   private val s1_pathPercsum =
-    VecInit.tabulate(NumWays)(w => s1_pathResp.map(entry => getPercsum(entry(w).ctr.value)).reduce(_ +& _))
+    VecInit.tabulate(NumScWays)(w => s1_pathResp.map(entry => getPercsum(entry(w).ctr.value)).reduce(_ +& _))
 
   private val s1_globalPercsum =
-    VecInit.tabulate(NumWays)(w => s1_globalResp.map(entry => getPercsum(entry(w).ctr.value)).reduce(_ +& _))
+    VecInit.tabulate(NumScWays)(w => s1_globalResp.map(entry => getPercsum(entry(w).ctr.value)).reduce(_ +& _))
 
   private val s1_bwPercsum =
-    VecInit.tabulate(NumWays)(w => s1_bwResp.map(entry => getPercsum(entry(w).ctr.value)).reduce(_ +& _))
+    VecInit.tabulate(NumScWays)(w => s1_bwResp.map(entry => getPercsum(entry(w).ctr.value)).reduce(_ +& _))
 
   private val s1_imliPercsum = VecInit(s1_imliResp.map(entry => getPercsum(entry.ctr.value)))
   private val s1_biasPercsum = VecInit(s1_biasResp.map(entry => getPercsum(entry.ctr.value)))
@@ -231,7 +231,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_globalPercsum = VecInit(s1_globalPercsum.map(RegEnable(_, s1_fire)))
 
   private val s2_mergePercsum = Seq(s2_pathPercsum, s2_globalPercsum, s2_bwPercsum, s2_imliPercsum)
-  private val s2_sumPercsum   = VecInit.tabulate(NumWays)(j => ParallelSingedExpandingAdd(s2_mergePercsum.map(_(j))))
+  private val s2_sumPercsum =
+    VecInit.tabulate(NumScWays)(j => ParallelSingedExpandingAdd(s2_mergePercsum.map(_(j))))
 
   private val s2_mbtbResult        = io.mbtbResult
   private val s2_providerTakenMask = VecInit(io.providerTakenCtrs.map(_.bits.isPositive))
@@ -262,7 +263,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     case (biasPercsum, wayIdx) =>
       val idx = wayIdx >> BiasUseTageBitWidth
       biasPercsum +& s2_sumPercsum(idx)
-  }.grouped(BiasTableNumWays / NumWays).toSeq.map(group => VecInit(group)))
+  }.grouped(BiasTableNumWays / NumScWays).toSeq.map(group => VecInit(group)))
 
   private val Seq(s2_sumAboveThresholdShift1All, s2_sumAboveThresholdShift2All, s2_sumAboveThresholdShift3All) =
     Seq(4, 5, 6).map(shiftRight =>
@@ -441,22 +442,22 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t1_oldPathEntries = Mux(
     PathEnable.B,
     VecInit(pathTable.map(_.io.trainReadResp)),
-    VecInit.fill(NumPathTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
+    VecInit.fill(NumPathTables)(VecInit.fill(NumScWays)(0.U.asTypeOf(new ScEntry())))
   )
   private val t1_oldGlobalEntries = Mux(
     t1_commonHR.valid && GlobalEnable.B,
     VecInit(globalTable.map(_.io.trainReadResp)),
-    VecInit.fill(NumGlobalTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
+    VecInit.fill(NumGlobalTables)(VecInit.fill(NumScWays)(0.U.asTypeOf(new ScEntry())))
   )
   private val t1_oldBWEntries = Mux(
     t1_commonHR.valid && BWEnable.B,
     VecInit(bwTable.map(_.io.trainReadResp)),
-    VecInit.fill(NumBWTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
+    VecInit.fill(NumBWTables)(VecInit.fill(NumScWays)(0.U.asTypeOf(new ScEntry())))
   )
   private val t1_oldImliEntries = Mux(
     ImliEnable.B,
     imliTable.io.trainReadResp,
-    VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry()))
+    VecInit.fill(NumScWays)(0.U.asTypeOf(new ScEntry()))
   )
   private val t1_oldBiasEntries = Mux(
     BiasEnable.B,
@@ -475,21 +476,21 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t1_writeValid       = t1_writeValidVec.reduce(_ || _)
 
   require(
-    t1_branchesWayIdxVec(0).getWidth == log2Ceil(NumWays),
+    t1_branchesWayIdxVec(0).getWidth == log2Ceil(NumScWays),
     s"t1_branchesWayIdxVec entry width: ${t1_branchesWayIdxVec(0).getWidth} " +
-      s"should be the same as log2Ceil(NumWays): ${log2Ceil(NumWays)}"
+      s"should be the same as log2Ceil(NumScWays): ${log2Ceil(NumScWays)}"
   )
 
   /************ get new threshold************/
-  private val t1_thresholdOverflowVec  = WireInit(VecInit.fill(NumWays)(false.B))
-  private val t1_thresholdUnderflowVec = WireInit(VecInit.fill(NumWays)(false.B))
-  private val t1_writeThresVec         = VecInit.tabulate(NumWays)(_ => ThresholdCounter.Init)
+  private val t1_thresholdOverflowVec  = WireInit(VecInit.fill(NumScWays)(false.B))
+  private val t1_thresholdUnderflowVec = WireInit(VecInit.fill(NumScWays)(false.B))
+  private val t1_writeThresVec         = VecInit.tabulate(NumScWays)(_ => ThresholdCounter.Init)
 
   // For each reslove branch, record its update direction, whether it has been updated, and which way it has been updated to
   private val thresholdWayMask =
-    VecInit(Seq.fill(ResolveEntryBranchNumber)(VecInit(Seq.fill(NumWays)(false.B))))
+    VecInit(Seq.fill(ResolveEntryBranchNumber)(VecInit(Seq.fill(NumScWays)(false.B))))
   private val thresholdDirMask =
-    VecInit(Seq.fill(ResolveEntryBranchNumber)(VecInit(Seq.fill(NumWays)(false.B))))
+    VecInit(Seq.fill(ResolveEntryBranchNumber)(VecInit(Seq.fill(NumScWays)(false.B))))
   t1_writeValidVec.zip(t1_writeTakenVec).zip(t1_branchesWayIdxVec).zip(t1_branchesScIdxVec).zipWithIndex.foreach {
     case ((((valid, taken), writeIdx), oldIdx), i) =>
       val scWrong = taken =/= t1_meta.scPred(oldIdx)
@@ -516,7 +517,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   // calculate new path table entries
   private val t1_writePathEntryVec = WireInit(
-    VecInit.fill(NumPathTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
+    VecInit.fill(NumPathTables)(VecInit.fill(NumScWays)(0.U.asTypeOf(new ScEntry())))
   )
   t1_oldPathEntries.zip(t1_writePathEntryVec).foreach {
     case (oldEntries: Vec[ScEntry], writeEntries: Vec[ScEntry]) =>
@@ -533,7 +534,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   // calculate new global table entries
   private val t1_writeGlobalEntryVec = WireInit(
-    VecInit.fill(NumGlobalTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
+    VecInit.fill(NumGlobalTables)(VecInit.fill(NumScWays)(0.U.asTypeOf(new ScEntry())))
   )
   t1_oldGlobalEntries.zip(t1_writeGlobalEntryVec).foreach {
     case (oldEntries: Vec[ScEntry], writeEntries: Vec[ScEntry]) =>
@@ -548,7 +549,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   }
 
   private val t1_writeBWEntryVec = WireInit(
-    VecInit.fill(NumBWTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
+    VecInit.fill(NumBWTables)(VecInit.fill(NumScWays)(0.U.asTypeOf(new ScEntry())))
   )
   t1_oldBWEntries.zip(t1_writeBWEntryVec).foreach {
     case (oldEntries: Vec[ScEntry], writeEntries: Vec[ScEntry]) =>
@@ -710,7 +711,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   private val scUsedVec    = WireInit(VecInit.fill(NumWays)(false.B))
   private val scNotUsedVec = WireInit(VecInit.fill(NumWays)(false.B))
-  private val changeVec    = VecInit.fill(NumWays)(false.B)
+  private val changeVec    = VecInit.fill(NumScWays)(false.B)
   // foreach train branches
   for (i <- 0 until ResolveEntryBranchNumber) {
     val branchWayIdx = t1_branchesScIdxVec(i)
@@ -742,20 +743,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       scNotUsedVec(branchWayIdx) := !t1_meta.useScPred(branchWayIdx) && t1_writeValidVec(i)
     }
   }
-  // foreach write way
+  // foreach logical prediction slot
   for (i <- 0 until NumWays) {
-    val pChange = t1_oldPathEntries.zip(t1_writePathEntryVec).map {
-      case (oldEntries, writeEntries) =>
-        oldEntries(i).ctr =/= writeEntries(i).ctr
-    }.reduce(_ || _) && PathEnable.B
-    val gChange = t1_oldGlobalEntries.zip(t1_writeGlobalEntryVec).map {
-      case (oldEntries, writeEntries) =>
-        oldEntries(i).ctr =/= writeEntries(i).ctr
-    }.reduce(_ || _) && GlobalEnable.B
-    // val bChange =
-    //   (t1_oldBiasEntries(i).ctr.value =/= t1_writeBiasEntryVec(i).ctr.value) && t1_writeBiasWayMask(i) && BiasEnable.B
-    changeVec(i) := pChange || gChange
-
     XSPerfAccumulate(s"sc_correct_tage_wrong${i}", scCorrectVec(i) && tageWrongVec(i))
     XSPerfAccumulate(s"sc_wrong_tage_correct${i}", scWrongVec(i) && tageCorrectVec(i))
     XSPerfAccumulate(s"sc_correct_tage_correct${i}", scCorrectVec(i) && tageCorrectVec(i))
@@ -774,6 +763,21 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     XSPerfAccumulate(s"sc_imli_wrong${i}", scImliWrongVec(i))
     XSPerfAccumulate(s"sc_bias_correct${i}", scBiasCorrectVec(i))
     XSPerfAccumulate(s"sc_bias_wrong${i}", scBiasWrongVec(i))
+  }
+
+  // foreach physical SC way
+  for (i <- 0 until NumScWays) {
+    val pChange = t1_oldPathEntries.zip(t1_writePathEntryVec).map {
+      case (oldEntries, writeEntries) =>
+        oldEntries(i).ctr =/= writeEntries(i).ctr
+    }.reduce(_ || _) && PathEnable.B
+    val gChange = t1_oldGlobalEntries.zip(t1_writeGlobalEntryVec).map {
+      case (oldEntries, writeEntries) =>
+        oldEntries(i).ctr =/= writeEntries(i).ctr
+    }.reduce(_ || _) && GlobalEnable.B
+    // val bChange =
+    //   (t1_oldBiasEntries(i).ctr.value =/= t1_writeBiasEntryVec(i).ctr.value) && t1_writeBiasWayMask(i) && BiasEnable.B
+    changeVec(i) := pChange || gChange
 
     XSPerfAccumulate(s"path_table_change${i}", t1_writeValid && pChange)
     XSPerfAccumulate(s"global_table_change${i}", t1_writeValid && gChange)
@@ -859,33 +863,34 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   /* *** Sc Trace *** */
   private val scTraceVec = Wire(Vec(ResolveEntryBranchNumber, Valid(new ScConditionalBranchTrace)))
   scTraceVec.zipWithIndex.foreach { case (trace, i) =>
-    val predWayIdx = t1_branchesScIdxVec(i)
+    val predSlotIdx = t1_branchesScIdxVec(i)
+    val scWayIdx    = t1_branchesWayIdxVec(i)
     trace.valid        := t1_writeValidVec(i)
     trace.bits.startPc := t1_startPc
     trace.bits.cfiPc   := t1_branches(i).bits.debug_realCfiPc.getOrElse(0.U(VAddrBits.W))
 
-    trace.bits.providerValid := t1_meta.tagePredValid(predWayIdx)
-    trace.bits.providerTaken := t1_meta.tagePred(predWayIdx)
-    trace.bits.providerCtr   := t1_meta.tageCtr(predWayIdx)
+    trace.bits.providerValid := t1_meta.tagePredValid(predSlotIdx)
+    trace.bits.providerTaken := t1_meta.tagePred(predSlotIdx)
+    trace.bits.providerCtr   := t1_meta.tageCtr(predSlotIdx)
 
-    trace.bits.pathResp   := VecInit(t1_oldPathEntries.map(v => v(predWayIdx).asUInt))
-    trace.bits.globalResp := VecInit(t1_oldGlobalEntries.map(v => v(predWayIdx).asUInt))
-    val biasWayIdx = Cat(t1_branchesWayIdxVec(i), t1_oldBiasLowBits(predWayIdx))
+    trace.bits.pathResp   := VecInit(t1_oldPathEntries.map(v => v(scWayIdx).asUInt))
+    trace.bits.globalResp := VecInit(t1_oldGlobalEntries.map(v => v(scWayIdx).asUInt))
+    val biasWayIdx = Cat(scWayIdx, t1_oldBiasLowBits(predSlotIdx))
     trace.bits.biasResp := t1_oldBiasEntries(biasWayIdx).asUInt
 
-    trace.bits.sumAboveThres := t1_meta.sumAboveThres(predWayIdx)
-    trace.bits.scPred        := t1_meta.scPred(predWayIdx)
-    trace.bits.useSc         := t1_meta.useScPred(predWayIdx)
+    trace.bits.sumAboveThres := t1_meta.sumAboveThres(predSlotIdx)
+    trace.bits.scPred        := t1_meta.scPred(predSlotIdx)
+    trace.bits.useSc         := t1_meta.useScPred(predSlotIdx)
 
     trace.bits.actualTaken := t1_writeTakenVec(i)
     trace.bits.mispredict  := t1_branches(i).bits.mispredict
 
-    trace.bits.scCorrectTageWrong   := scCorrectVec(predWayIdx) && tageWrongVec(predWayIdx)
-    trace.bits.scWrongTageCorrect   := scWrongVec(predWayIdx) && tageCorrectVec(predWayIdx)
-    trace.bits.scCorrectTageCorrect := scCorrectVec(predWayIdx) && tageCorrectVec(predWayIdx)
-    trace.bits.scWrongTageWrong     := scWrongVec(predWayIdx) && tageWrongVec(predWayIdx)
-    trace.bits.scWrong              := scWrongVec(predWayIdx)
-    trace.bits.scCorrect            := scCorrectVec(predWayIdx)
+    trace.bits.scCorrectTageWrong   := scCorrectVec(predSlotIdx) && tageWrongVec(predSlotIdx)
+    trace.bits.scWrongTageCorrect   := scWrongVec(predSlotIdx) && tageCorrectVec(predSlotIdx)
+    trace.bits.scCorrectTageCorrect := scCorrectVec(predSlotIdx) && tageCorrectVec(predSlotIdx)
+    trace.bits.scWrongTageWrong     := scWrongVec(predSlotIdx) && tageWrongVec(predSlotIdx)
+    trace.bits.scWrong              := scWrongVec(predSlotIdx)
+    trace.bits.scCorrect            := scCorrectVec(predSlotIdx)
 
   }
 

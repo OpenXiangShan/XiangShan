@@ -46,7 +46,8 @@ case class ScParameters(
     ThresholdInit:       Int = 1130, // magic number,greater than min and less than max
     NumBanks:            Int = 2,
     WriteBufferSize:     Int = 4,
-    EnableScTrace:       Boolean = false
+    EnableScTrace:       Boolean = false,
+    NumScWays:           Option[Int] = None
 ) {}
 
 trait HasScParameters extends HasBpuParameters {
@@ -60,10 +61,17 @@ trait HasScParameters extends HasBpuParameters {
 
   def TageTakenCtrWidth: Int = bpuParameters.tageParameters.TakenCtrWidth
   def CtrWidth:          Int = scParameters.CtrWidth
-  def NumWays:           Int = NumBtbResultEntries
-  def NumBanks:          Int = scParameters.NumBanks
-  def BankWidth:         Int = log2Ceil(NumBanks)
-  def ThresholdWidth:    Int = scParameters.ThresholdWidth
+  // NumWays is the number of logical MBTB result slots; NumScWays is the physical SC table width.
+  def NumWays:        Int = NumBtbResultEntries
+  def NumScWays:      Int = scParameters.NumScWays.getOrElse(1 << log2Floor(NumWays))
+  def NumBanks:       Int = scParameters.NumBanks
+  def BankWidth:      Int = log2Ceil(NumBanks)
+  def ThresholdWidth: Int = scParameters.ThresholdWidth
+
+  require(
+    NumScWays >= 2 && NumScWays <= NumWays && isPow2(NumScWays),
+    s"NumScWays($NumScWays) must be a power of two in [2, NumWays($NumWays)]"
+  )
 
   def PathTableInfos: Seq[ScTableInfo] = scParameters.PathTableInfos
   def NumPathTables:  Int              = PathTableInfos.length
@@ -76,7 +84,7 @@ trait HasScParameters extends HasBpuParameters {
 
   def BiasTableInfo:       ScTableInfo = scParameters.BiasTableInfo
   def BiasUseTageBitWidth: Int         = scParameters.BiasUseTageBitWidth
-  def BiasTableNumWays:    Int         = NumWays << BiasUseTageBitWidth // add tage_taken bits as wayIdx
+  def BiasTableNumWays:    Int         = NumScWays << BiasUseTageBitWidth // add tage_taken bits as wayIdx
   def NumBiasTable:        Int         = 1
 
   def BackwardTableInfos: Seq[ScTableInfo] = scParameters.BackwardTableInfos

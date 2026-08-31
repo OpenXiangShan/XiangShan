@@ -44,7 +44,10 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   // print params
   println(f"MainBtb:")
-  println(f"  Size(set, way, align, internal): $NumSets * $NumWay * $NumAlignBanks * $NumInternalBanks = $NumEntries")
+  println(
+    f"  Size(set, way, align, internal): $NumSets * $NumWay * $NumAlignBanks * $NumInternalBanks = " +
+      f"$ActualNumEntries (requested $NumEntries)"
+  )
   println(f"  Address fields:")
   addrFields.show(indent = 4)
 
