@@ -110,7 +110,6 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val flowsPrevThisUop = (uopIdxInField << flowsLog2).asUInt // # of flows before this uop in a field
   val flowsPrevThisVd = (vdIdxInField << numFlowsSameVdLog2).asUInt // # of flows before this vd in a field
   val flowsIncludeThisUop = ((uopIdxInField +& 1.U) << flowsLog2).asUInt // # of flows before this uop besides this uop
-//  val flowNum = Mux(io.in.bits.isVecPartReplay.get, PopCount(io.in.bits.vecReplayMask.get), io.in.bits.flowNum.get)
   val flowNum = io.in.bits.flowNum.get
   // max index in vd, only use in index instructions for calculate index
   val maxIdxInVdIndex = GenVLMAX(Mux(s0_emul.asSInt > 0.S, 0.U, s0_emul), s0_eew)
@@ -132,10 +131,8 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val srcMask = GenFlowMask(Mux(s0_vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src_mask), vvstart, evl, true)
   val srcMaskShiftBits = Mux(isSpecialIndexed, flowsPrevThisUop, flowsPrevThisVd)
 
-  val flowMask = Mux(io.in.bits.isVecPartReplay.get,
-    io.in.bits.vecReplayMask.get,
-    ((srcMask & UIntToMask(flowsIncludeThisUop.asUInt, VLEN + 1) &
-    (~UIntToMask(flowsPrevThisUop.asUInt, VLEN)).asUInt) >> srcMaskShiftBits)(VLENB - 1, 0))
+  val flowMask = ((srcMask & UIntToMask(flowsIncludeThisUop.asUInt, VLEN + 1) &
+    (~UIntToMask(flowsPrevThisUop.asUInt, VLEN)).asUInt) >> srcMaskShiftBits)(VLENB - 1, 0)
   val indexedSrcMask = (srcMask >> flowsPrevThisVd).asUInt //only for index instructions
 
   // Used to calculate the element index.
@@ -179,6 +176,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     x.indexVlMaxInVd := indexVlMaxInVd
     x.isVecPartReplay := io.in.bits.isVecPartReplay.get
     x.vecReplayMbIdx := io.in.bits.vecReplayMbIdx.get
+    x.vecReplayFlowMask := io.in.bits.vecReplayMask.get
   }
   s0_valid := io.in.valid && !s0_kill
   /**-------------------------------------
@@ -377,7 +375,9 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val regOffset        = getCheckAddrLowBits(issueUsLowBitsAddr, maxMemByteNum) // offset in 256-bits vd
   XSError((splitIdx > 1.U && usNoSplit) || (splitIdx > 1.U && !issuePreIsSplit) , "Unit-Stride addr split error!\n")
 
-  val vecActive = Mux(!issuePreIsSplit, usSplitMask.orR, (flowMask & UIntToOH(splitIdx)).orR)
+  val normalFlowActive = Mux(!issuePreIsSplit, usSplitMask.orR, (flowMask & UIntToOH(splitIdx)).orR)
+  val replayFlowActive = (issueEntry.vecReplayFlowMask & UIntToOH(splitIdx, maxFlowNum)).orR
+  val vecActive = Mux(issueEntry.isVecPartReplay, replayFlowActive, normalFlowActive)
   // no-unit-stride can trigger misalign
   val addrAligned = LookupTree(Mux(isIndexed(issueInstType), issueSew, issueEew), List(
     "b00".U   -> true.B,                //b
@@ -633,4 +633,3 @@ class VSSplitImp(implicit p: Parameters) extends VLSUModule{
 
   io.vstdMisalign.get <> splitBuffer.io.vstdMisalign.get
 }
-
