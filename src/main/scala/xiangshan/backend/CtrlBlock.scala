@@ -704,7 +704,7 @@ class CtrlBlockImp(
   }
 
   // currently, we only update mdp info when isReplay
-  memCtrl.io.redirect := s1_s3_redirect
+  memCtrl.io.sqRedirectPtr := io.fromMemToLsqEnqCtrl.sqRedirectPtr.get
   memCtrl.io.csrCtrl := io.csrCtrl                          // RegNext in memCtrl
   memCtrl.io.stIn := io.fromMem.stIn                        // RegNext in memCtrl
   memCtrl.io.mdpFoldPcVecVld := mdpFlodPcVecVld
@@ -985,7 +985,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val redirect = ValidIO(new Redirect)
   val fromMem = new Bundle {
-    val stIn = Vec(params.StaExuCnt, Flipped(ValidIO(new StoreUnitToLFST))) // use storeSetHit, ssid, robIdx
+    val stIn = Vec(params.StaExuCnt, Flipped(ValidIO(new StoreUnitToLFST))) // use storeSetHit, ssid, sqIdx
     val violation = Flipped(ValidIO(new Redirect))
     val mdpTrain = Flipped(ValidIO(new Redirect))
   }

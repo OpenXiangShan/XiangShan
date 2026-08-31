@@ -170,7 +170,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     fromRenameUpdate(i).bits.srcState := 0.U.asTypeOf(fromRenameUpdate(i).bits.srcState)
     fromRenameUpdate(i).bits.srcStateV0 := 0.U // dontCare this
     fromRenameUpdate(i).bits.srcStateVl := 0.U // dontCare this
-    fromRenameUpdate(i).bits.waitForRobIdx := 0.U.asTypeOf(fromRenameUpdate(i).bits.waitForRobIdx)
+    fromRenameUpdate(i).bits.waitSqIdx := 0.U.asTypeOf(fromRenameUpdate(i).bits.waitSqIdx)
     connectSamePort(fromRenameUpdate(i).bits, fromRename(i).bits)
     fromRenameUpdate(i).bits.debug.foreach(connectSamePort(_, fromRename(i).bits.debug.get))
     fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqLastOffset
@@ -778,13 +778,13 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.lfst.req(i).valid := fromRename(i).fire && updatedUop(i).storeSetHit
     io.lfst.req(i).bits.isstore := isStore(i)
     io.lfst.req(i).bits.ssid := updatedUop(i).ssid
-    io.lfst.req(i).bits.robIdx := updatedUop(i).robIdx // speculatively assigned in rename
+    io.lfst.req(i).bits.sqIdx := updatedUop(i).lsqIdxStart.sqIdx
     io.lfst.req(i).bits.perfStrictPred := fromRename(i).bits.loadWaitStrict
 
     // override load delay ctrl signal with store set result
     if(StoreSetEnable) {
       fromRenameUpdate(i).bits.loadWaitBit := io.lfst.resp(i).bits.shouldWait
-      fromRenameUpdate(i).bits.waitForRobIdx := io.lfst.resp(i).bits.robIdx
+      fromRenameUpdate(i).bits.waitSqIdx := io.lfst.resp(i).bits.sqIdx
       fromRenameUpdate(i).bits.loadWaitStrict := fromRename(i).bits.loadWaitStrict && // filter strict pprediction
         io.lfst.resp(i).bits.shouldWait && io.lfst.resp(i).bits.strictShouldWait
     } else {

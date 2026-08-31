@@ -260,7 +260,7 @@ object Exu {
       exuInput.ftqOffset.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.predictInfo.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.loadWaitBit.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.waitForRobIdx.foreach(x => x := 0.U.asTypeOf(x))
+      exuInput.waitSqIdx.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.storeSetHit.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.loadWaitStrict.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.ssid.foreach(x => x := 0.U.asTypeOf(x))
