@@ -28,7 +28,9 @@ class BackendCtrlBundle(Bundle):
         "redirect_bits_debug_is_ctrl": "io_backend_toFtq_redirect_bits_debugIsCtrl",
         "redirect_bits_debug_is_mem_vio": "io_backend_toFtq_redirect_bits_debugIsMemVio",
         "wfi_req": "io_backend_wfi_wfiReq",
-        "ftq_idx_ahead_0_valid": "io_backend_toFtq_ftqIdxAhead_valid",
+        "ftq_idx_ahead_valid": "io_backend_toFtq_ftqIdxAhead_valid",
+        "ftq_idx_ahead_flag": "io_backend_toFtq_ftqIdxAhead_bits_flag",
+        "ftq_idx_ahead_value": "io_backend_toFtq_ftqIdxAhead_bits_value",
     }
 
     can_accept = Signal()
@@ -67,7 +69,9 @@ class BackendCtrlBundle(Bundle):
     call_ret_commit_bits_ras_action = SignalList("io_backend_toFtq_callRetCommit_#_bits_rasAction", 8)
     call_ret_commit_bits_ftq_ptr_value = SignalList("io_backend_toFtq_callRetCommit_#_bits_ftqPtr_value", 8)
     wfi_req = Signal()
-    ftq_idx_ahead_0_valid = Signal()
+    ftq_idx_ahead_valid = Signal()
+    ftq_idx_ahead_flag = Signal()
+    ftq_idx_ahead_value = Signal()
 
     def drive_idle(self) -> None:
         self.can_accept.value = 1
@@ -99,4 +103,6 @@ class BackendCtrlBundle(Bundle):
         for signal in self.call_ret_commit_bits_ftq_ptr_value:
             signal.value = 0
         self.wfi_req.value = 0
-        self.ftq_idx_ahead_0_valid.value = 0
+        self.ftq_idx_ahead_valid.value = 0
+        self.ftq_idx_ahead_flag.value = 0
+        self.ftq_idx_ahead_value.value = 0

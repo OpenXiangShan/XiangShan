@@ -43,11 +43,24 @@ class InjectRedirectSequence:
     def inject(self, env) -> None:
         """Queue the redirect without consuming a DUT cycle."""
         if self.txn.source_pc is None:
+            kwargs = {}
+            if self.txn.ftq_idx_ahead_flag is not None or self.txn.ftq_idx_ahead_value is not None:
+                kwargs = {
+                    "ftq_idx_ahead_flag": self.txn.ftq_idx_ahead_flag,
+                    "ftq_idx_ahead_value": self.txn.ftq_idx_ahead_value,
+                }
             env.backend_model.inject_redirect(
                 self.txn.target_pc,
                 self.txn.reason,
+                **kwargs,
             )
         else:
+            kwargs = {}
+            if self.txn.ftq_idx_ahead_flag is not None or self.txn.ftq_idx_ahead_value is not None:
+                kwargs = {
+                    "ftq_idx_ahead_flag": self.txn.ftq_idx_ahead_flag,
+                    "ftq_idx_ahead_value": self.txn.ftq_idx_ahead_value,
+                }
             env.backend_model.inject_redirect_from_cfvec(
                 source_pc=int(self.txn.source_pc),
                 source_ftq_flag=self.txn.source_ftq_flag,
@@ -61,6 +74,7 @@ class InjectRedirectSequence:
                 backend_ipf=int(self.txn.backend_ipf),
                 backend_iaf=int(self.txn.backend_iaf),
                 satp_flush=int(self.txn.satp_flush),
+                **kwargs,
             )
 
     def run(self, env) -> bool:

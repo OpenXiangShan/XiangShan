@@ -31,6 +31,20 @@ class RedirectTxn:
     backend_ipf: int = 0
     backend_iaf: int = 0
     satp_flush: int = 0
+    ftq_idx_ahead_flag: Optional[int] = None
+    ftq_idx_ahead_value: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class FtqIdxAheadTxn:
+    ftq_flag: int
+    ftq_value: int
+
+    def __post_init__(self) -> None:
+        if int(self.ftq_flag) not in (0, 1):
+            raise ValueError("ftqIdxAhead flag must be 0 or 1")
+        if not 0 <= int(self.ftq_value) < 64:
+            raise ValueError("ftqIdxAhead value must be within [0, 63]")
 
 
 @dataclass(frozen=True)

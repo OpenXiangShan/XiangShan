@@ -47,8 +47,20 @@ def normalize_commit_target(target_count, max_cycles) -> CommitTarget:
     return CommitTarget(target_count=int(target_count), max_cycles=int(max_cycles))
 
 
-def normalize_redirect_txn(target_pc, reason, max_cycles) -> RedirectTxn:
-    return RedirectTxn(target_pc=int(target_pc), reason=str(reason), max_cycles=int(max_cycles))
+def normalize_redirect_txn(
+    target_pc,
+    reason,
+    max_cycles,
+    ftq_idx_ahead_flag=None,
+    ftq_idx_ahead_value=None,
+) -> RedirectTxn:
+    return RedirectTxn(
+        target_pc=int(target_pc),
+        reason=str(reason),
+        max_cycles=int(max_cycles),
+        ftq_idx_ahead_flag=None if ftq_idx_ahead_flag is None else int(ftq_idx_ahead_flag),
+        ftq_idx_ahead_value=None if ftq_idx_ahead_value is None else int(ftq_idx_ahead_value),
+    )
 
 
 def normalize_pc_sequence_expectation(expected_pcs: Sequence[int], max_cycles) -> PcSequenceExpectation:
