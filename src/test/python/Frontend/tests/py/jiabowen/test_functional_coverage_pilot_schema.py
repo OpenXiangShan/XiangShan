@@ -346,9 +346,9 @@ def test_instr_uncache_owner_leaves_are_complete_and_preserve_sv_models():
         )
         == 34
     )
-    assert sum(row["status"] == "HIT" for row in mapped_rows.values()) == 30
+    assert sum(row["status"] == "HIT" for row in mapped_rows.values()) == 31
     assert sum(row["status"] == "MODELED" for row in mapped_rows.values()) == 7
-    assert sum(row["status"] == "PARTIAL" for row in mapped_rows.values()) == 1
+    assert sum(row["status"] == "PARTIAL" for row in mapped_rows.values()) == 0
 
 
 def test_pilot_schema_rejects_duplicate_bin_id(tmp_path):

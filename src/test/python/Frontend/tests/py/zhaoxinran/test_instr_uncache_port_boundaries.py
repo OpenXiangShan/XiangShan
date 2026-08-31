@@ -1466,11 +1466,17 @@ def test_sv39_same_page_sfence_retranslates_changed_attribute(env, old_attr: str
         ("cacheable", "mmio"),
         ("cacheable", "nc"),
         ("mmio", "cacheable"),
+        pytest.param(
+            "nc",
+            "mmio",
+            marks=pytest.mark.funcov_bins("BIN-1131"),
+            id="nc-to-mmio",
+        ),
     ),
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_sv39_redirect_transitions_to_changed_attribute(env, old_attr: str, new_attr: str) -> None:
-    old_pbmt = _PBMT_PMA
+    old_pbmt = _PBMT_NC if old_attr == "nc" else _PBMT_PMA
     new_pbmt = _PBMT_NC if new_attr == "nc" else _PBMT_PMA
     _, old_mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
         env,
@@ -1501,7 +1507,47 @@ def test_sv39_redirect_transitions_to_changed_attribute(env, old_attr: str, new_
     assert _wait_for_observed_pc(env, old_mapping.vaddr, max_cycles=12000)
 
     _configure_translation_attribute(env, attr=new_attr, paddr=target_mapping.paddr)
-    _force_redirect_to(env, target_mapping.vaddr)
+    if (old_attr, new_attr) == ("nc", "mmio"):
+        redirect_source_pc = old_mapping.vaddr + 0x10
+        redirect_source = None
+        for _ in range(6000):
+            redirect_source = next(
+                (
+                    entry
+                    for entry in env.backend_model._cfvec_queue
+                    if int(entry.pc) == int(redirect_source_pc)
+                    and bool(entry.is_cfi)
+                ),
+                None,
+            )
+            if redirect_source is not None:
+                break
+            env.step(1)
+        assert redirect_source is not None, {
+            "source_pc": hex(int(redirect_source_pc)),
+            "cfvec_queue": [
+                {
+                    "pc": hex(int(entry.pc)),
+                    "ftq": (int(entry.ftq_flag), int(entry.ftq_value)),
+                    "offset": int(entry.ftq_offset),
+                    "is_cfi": bool(entry.is_cfi),
+                }
+                for entry in env.backend_model._cfvec_queue
+            ],
+        }
+        env.backend_model.inject_redirect_from_cfvec(
+            source_pc=int(redirect_source.pc),
+            source_ftq_flag=int(redirect_source.ftq_flag),
+            source_ftq_value=int(redirect_source.ftq_value),
+            source_ftq_offset=int(redirect_source.ftq_offset),
+            target_pc=int(target_mapping.vaddr),
+            reason="instruncache_nc_to_mmio_transition",
+            taken=1,
+            level=0,
+            delay_cycles=3,
+        )
+    else:
+        _force_redirect_to(env, target_mapping.vaddr)
 
     if new_attr == "cacheable":
         assert _wait_for_icache_req(env, max_cycles=12000) > 0
@@ -1514,6 +1560,10 @@ def test_sv39_redirect_transitions_to_changed_attribute(env, old_attr: str, new_
         and bool(obs.is_rvc) == bool(expected_block[0][2])
         for obs in env.monitor.observations
     )
+    if (old_attr, new_attr) == ("nc", "mmio"):
+        assert env.functional_coverage.key_hit(
+            "ifu_instruncache_owner_v3", "instruncache_leaf_038"
+        ), env.functional_coverage.raw_path()
     assert not env.monitor.get_errors()
 
 

@@ -34,6 +34,8 @@ def initialize_instr_uncache_owner_coverage_state(recorder) -> None:
         "non_cross_rvi_offsets": set(),
         "attribute_modes": set(),
         "accepted_request_attributes": None,
+        "attribute_transactions": [],
+        "completed_attribute_transactions": [],
         "wfi_retracted_a": None,
     }
 
@@ -140,12 +142,31 @@ def sample_instr_uncache_owner_coverage(
         and s["req_is_mmio"] is not None
         and s["req_pbmt"] is not None
     ):
-        state["accepted_request_attributes"] = {
+        mode = None
+        if s["req_is_mmio"] == 0 and s["req_pbmt"] == 1:
+            mode = "nc"
+        elif s["req_is_mmio"] == 1 and s["req_pbmt"] != 1:
+            mode = "mmio"
+        accepted_attributes = {
             "mem_back_type_mm": int(s["req_is_mmio"] == 0),
             "mem_page_type_nc": int(s["req_pbmt"] == 1),
             "is_mmio": int(s["req_is_mmio"]),
             "pbmt": int(s["req_pbmt"]),
+            "mode": mode,
         }
+        state["accepted_request_attributes"] = accepted_attributes
+        if mode is not None:
+            state["attribute_transactions"].append(
+                {
+                    **accepted_attributes,
+                    "s2_ftq_flag": s["s2_ftq_flag"],
+                    "s2_ftq_value": s["s2_ftq_value"],
+                    "s2_instr_pc": s["s2_instr_pc"],
+                    "tl_a_addr": None,
+                    "tl_a_fire": False,
+                    "response_seen": False,
+                }
+            )
 
     stalled = state["stalled_a"]
     if (
@@ -683,6 +704,81 @@ def sample_instr_uncache_owner_coverage(
             state["attribute_modes"].add("nc")
         if expected_mem_page_type_nc == 0 and expected_mem_back_type_mm == 0:
             state["attribute_modes"].add("mmio")
+
+    attribute_transactions = state["attribute_transactions"]
+    if tl_a_fire and not entry_resending:
+        pending_a = next(
+            (
+                transaction
+                for transaction in attribute_transactions
+                if not transaction["tl_a_fire"]
+            ),
+            None,
+        )
+        if pending_a is not None:
+            pending_a["tl_a_fire"] = True
+            pending_a["tl_a_addr"] = s["tl_a_addr"]
+    if s["instr_resp_valid"] == 1:
+        pending_response = next(
+            (
+                transaction
+                for transaction in attribute_transactions
+                if transaction["tl_a_fire"] and not transaction["response_seen"]
+            ),
+            None,
+        )
+        if pending_response is not None:
+            pending_response["response_seen"] = True
+    if s["to_valid"] == 1 and s["to_ready"] == 1 and single_delivery:
+        completed = next(
+            (
+                transaction
+                for transaction in attribute_transactions
+                if transaction["response_seen"]
+                and None
+                not in (
+                    transaction["s2_ftq_flag"],
+                    transaction["s2_ftq_value"],
+                    transaction["s2_instr_pc"],
+                    s["to_ftq_flag"],
+                    s["to_ftq_value"],
+                    s["to_pc"],
+                )
+                and transaction["s2_ftq_flag"] == s["to_ftq_flag"]
+                and transaction["s2_ftq_value"] == s["to_ftq_value"]
+                and transaction["s2_instr_pc"] == s["to_pc"]
+                and s["to_exception"] in {0, None}
+            ),
+            None,
+        )
+        if completed is not None:
+            completed_record = dict(completed)
+            completed_record["to_ftq_flag"] = s["to_ftq_flag"]
+            completed_record["to_ftq_value"] = s["to_ftq_value"]
+            completed_record["to_pc"] = s["to_pc"]
+            state["completed_attribute_transactions"].append(completed_record)
+            attribute_transactions.remove(completed)
+            recent = state["completed_attribute_transactions"][-2:]
+            if (
+                len(recent) == 2
+                and recent[0]["mode"] != recent[1]["mode"]
+                and {transaction["mode"] for transaction in recent}
+                == {"mmio", "nc"}
+            ):
+                _mark(
+                    recorder,
+                    38,
+                    cycle,
+                    {
+                        **evidence,
+                        "ordered_completed_transactions": recent,
+                        "distinct_ifu_identities": True,
+                        "single_instruncache_transaction_per_mode": True,
+                    },
+                )
+
+    if s["backend_redirect"] == 1 or s["ifu_flush"] == 1:
+        state["attribute_transactions"].clear()
 
     state["previous_entry_state"] = (
         _ENTRY_IDLE if entry_state is None else int(entry_state)

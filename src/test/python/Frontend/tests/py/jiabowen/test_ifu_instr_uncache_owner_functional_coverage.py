@@ -654,28 +654,100 @@ def test_second_page_exception_matrix_requires_original_half_identity():
 
 def test_tl_user_attributes_must_match_entry_and_cover_mmio_and_nc_modes():
     snapshot = _snapshot()
+    recorder = _Recorder()
+
+    def drive_transaction(cycle, *, mode, ftq_value, pc):
+        is_mmio = int(mode == "mmio")
+        pbmt = 0 if is_mmio else 1
+        snapshot.update(
+            {
+                "req_valid": 1,
+                "req_ready": 1,
+                "req_is_mmio": is_mmio,
+                "req_pbmt": pbmt,
+                "s2_ftq_flag": 0,
+                "s2_ftq_value": ftq_value,
+                "s2_instr_pc": pc,
+                "tl_a_valid": 0,
+                "tl_a_ready": 1,
+                "tl_a_mem_back_type_mm": int(not is_mmio),
+                "tl_a_mem_page_type_nc": int(pbmt == 1),
+                "instr_resp_valid": 0,
+                "to_valid": 0,
+            }
+        )
+        _sample(recorder, cycle, snapshot)
+        snapshot.update(
+            {
+                "req_valid": 0,
+                "req_ready": 0,
+                "tl_a_valid": 1,
+                "tl_a_addr": 0x8000 + 8 * ftq_value,
+            }
+        )
+        _sample(recorder, cycle + 1, snapshot)
+        snapshot.update({"tl_a_valid": 0, "instr_resp_valid": 1})
+        _sample(recorder, cycle + 2, snapshot)
+        snapshot.update(
+            {
+                "instr_resp_valid": 0,
+                "to_valid": 1,
+                "to_ready": 1,
+                "to_enq": 1,
+                "to_exception": 0,
+                "to_ftq_flag": 0,
+                "to_ftq_value": ftq_value,
+                "to_pc": pc,
+            }
+        )
+        _sample(recorder, cycle + 3, snapshot)
+        snapshot["to_valid"] = 0
+
+    drive_transaction(1, mode="mmio", ftq_value=1, pc=0x4000)
+    assert _hit(recorder, 36)
+    assert _hit(recorder, 37)
+    assert not _hit(recorder, 38)
+
+    drive_transaction(10, mode="nc", ftq_value=2, pc=0x5000)
+    assert _hit(recorder, 38)
+
+
+def test_mixed_attribute_modes_require_completed_distinct_ifu_identities():
+    snapshot = _snapshot()
     snapshot.update(
         {
             "req_valid": 1,
             "req_ready": 1,
             "req_is_mmio": 1,
             "req_pbmt": 0,
+            "s2_ftq_flag": 0,
+            "s2_ftq_value": 1,
+            "s2_instr_pc": 0x4000,
             "tl_a_valid": 0,
-            "tl_a_ready": 1,
-            "tl_a_mem_back_type_mm": 0,
-            "tl_a_mem_page_type_nc": 0,
         }
     )
     recorder = _Recorder()
     _sample(recorder, 1, snapshot)
-    assert not any(_hit(recorder, index) for index in (36, 37, 38))
-
-    snapshot.update({"req_valid": 0, "req_ready": 0, "tl_a_valid": 1})
+    snapshot.update({"req_valid": 0, "tl_a_valid": 1, "tl_a_ready": 1})
     _sample(recorder, 2, snapshot)
-    assert _hit(recorder, 36)
-    assert _hit(recorder, 37)
+    snapshot.update({"tl_a_valid": 0, "instr_resp_valid": 1})
+    _sample(recorder, 3, snapshot)
+    snapshot.update(
+        {
+            "instr_resp_valid": 0,
+            "to_valid": 1,
+            "to_ready": 1,
+            "to_enq": 1,
+            "to_exception": 0,
+            "to_ftq_flag": 0,
+            "to_ftq_value": 7,
+            "to_pc": 0x4000,
+        }
+    )
+    _sample(recorder, 4, snapshot)
     assert not _hit(recorder, 38)
 
+    recorder = _Recorder()
     snapshot.update(
         {
             "req_valid": 1,
@@ -683,18 +755,9 @@ def test_tl_user_attributes_must_match_entry_and_cover_mmio_and_nc_modes():
             "req_is_mmio": 0,
             "req_pbmt": 1,
             "tl_a_valid": 0,
-            "tl_a_mem_back_type_mm": 1,
-            "tl_a_mem_page_type_nc": 1,
+            "tl_a_mem_page_type_nc": 0,
         }
     )
-    _sample(recorder, 3, snapshot)
-    snapshot.update({"req_valid": 0, "req_ready": 0, "tl_a_valid": 1})
-    _sample(recorder, 4, snapshot)
-    assert not _hit(recorder, 38)
-
-    recorder = _Recorder()
-    snapshot["tl_a_mem_page_type_nc"] = 0
-    snapshot.update({"req_valid": 1, "req_ready": 1, "tl_a_valid": 0})
     _sample(recorder, 1, snapshot)
     snapshot.update({"req_valid": 0, "req_ready": 0, "tl_a_valid": 1})
     _sample(recorder, 2, snapshot)
