@@ -653,6 +653,7 @@ def test_nc_page_tail_delivery_uses_correct_next_page_policy(env, tmp_path, is_r
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-1128")
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_nc_page_tail_denied_response_reports_exact_instruction_access_fault(env, tmp_path):
     """Reject a denied first-page tail response without an illegal resend."""
@@ -709,6 +710,9 @@ def test_nc_page_tail_denied_response_reports_exact_instruction_access_fault(env
     }
     assert all(record["pc"] != 0 for record in exception_records)
     assert not env.memory.is_mmio(first_beat)
+    assert env.functional_coverage.key_hit(
+        "ifu_instruncache_owner_v3", "instruncache_leaf_035"
+    ), env.functional_coverage.raw_path()
     assert not env.monitor.get_errors()
 
 

@@ -30,6 +30,7 @@ def initialize_instr_uncache_owner_coverage_state(recorder) -> None:
         "d_response_pending": None,
         "cross_8b_pending": None,
         "cross_page_pending": None,
+        "first_page_tl_fault_pending": None,
         "second_page_exception_types": set(),
         "non_cross_rvi_offsets": set(),
         "attribute_modes": set(),
@@ -110,6 +111,8 @@ def _entry_evidence(s: dict[str, Optional[int]]) -> dict[str, Any]:
         "prev_half_data": s["prev_half_data"],
         "to_uncache_valid": s["to_uncache_valid"],
         "to_uncache_ready": s["to_uncache_ready"],
+        "to_uncache_addr": s["to_uncache_addr"],
+        "uncache_pc": s["uncache_pc"],
     }
 
 
@@ -242,6 +245,22 @@ def sample_instr_uncache_owner_coverage(
             "beat_tail": beat_tail,
             "expected_data": _selected_word(s["tl_d_data"], entry_addr),
         }
+        if (
+            page_tail
+            and not entry_resending
+            and response_is_rvi
+            and s["tl_d_corrupt"] == 1
+        ):
+            state["first_page_tl_fault_pending"] = {
+                "entry_addr": entry_addr,
+                "expected_exception": 3 if s["tl_d_denied"] == 1 else 5,
+                "s2_pc": s["s2_pc"],
+                "s2_instr_pc": s["s2_instr_pc"],
+                "s2_ftq_flag": s["s2_ftq_flag"],
+                "s2_ftq_value": s["s2_ftq_value"],
+                "saw_instr_response": False,
+                "old_path_external_request": False,
+            }
 
     pending_d = state["d_response_pending"]
     if s["instr_resp_valid"] == 1 and pending_d is not None:
@@ -369,7 +388,82 @@ def sample_instr_uncache_owner_coverage(
             and s["instr_resp_need_resend"] == 0
         ):
             _mark(recorder, 25, cycle, evidence)
+        first_page_fault = state["first_page_tl_fault_pending"]
+        if (
+            first_page_fault is not None
+            and pending_d["entry_addr"] == first_page_fault["entry_addr"]
+            and s["instr_resp_corrupt"] == 1
+            and s["instr_resp_denied"] == pending_d["denied"]
+            and s["instr_resp_need_resend"] == 0
+        ):
+            first_page_fault["saw_instr_response"] = True
         state["d_response_pending"] = None
+
+    first_page_fault = state["first_page_tl_fault_pending"]
+    if first_page_fault is not None:
+        if tl_a_valid or s["to_uncache_valid"] == 1:
+            first_page_fault["old_path_external_request"] = True
+        if s["to_valid"] == 1 and s["to_ready"] == 1:
+            expected_end_offset = (
+                None
+                if None
+                in (first_page_fault["s2_pc"], first_page_fault["s2_instr_pc"])
+                else int(first_page_fault["s2_instr_pc"])
+                - int(first_page_fault["s2_pc"])
+                + 1
+            )
+            expected_foldpc = (
+                None
+                if first_page_fault["s2_instr_pc"] is None
+                else fold_pc(int(first_page_fault["s2_instr_pc"]) << 1)
+            )
+            identity_matches = (
+                None
+                not in (
+                    expected_end_offset,
+                    expected_foldpc,
+                    first_page_fault["s2_instr_pc"],
+                    first_page_fault["s2_ftq_flag"],
+                    first_page_fault["s2_ftq_value"],
+                    s["to_pc"],
+                    s["to_ftq_flag"],
+                    s["to_ftq_value"],
+                    s["to_ftq_offset"],
+                    s["to_foldpc"],
+                )
+                and int(s["to_pc"]) == int(first_page_fault["s2_instr_pc"])
+                and s["to_ftq_flag"] == first_page_fault["s2_ftq_flag"]
+                and s["to_ftq_value"] == first_page_fault["s2_ftq_value"]
+                and int(s["to_ftq_offset"]) == expected_end_offset
+                and int(s["to_foldpc"]) == expected_foldpc
+            )
+            if (
+                first_page_fault["saw_instr_response"]
+                and not first_page_fault["old_path_external_request"]
+                and identity_matches
+                and single_delivery
+                and s["to_exception"] == first_page_fault["expected_exception"]
+                and s["to_exception"] != 4
+                and s["to_exception_cross_page"] == 0
+                and s["prev_end_half"] == 0
+            ):
+                _mark(
+                    recorder,
+                    35,
+                    cycle,
+                    {
+                        **evidence,
+                        "first_page_tl_fault": True,
+                        "expected_exception": first_page_fault[
+                            "expected_exception"
+                        ],
+                        "need_resend_suppressed": True,
+                        "no_second_page_request": True,
+                        "illegal_instruction": False,
+                        "ftq_pc_identity_matches": True,
+                    },
+                )
+            state["first_page_tl_fault_pending"] = None
 
     if (
         clean_d
@@ -779,6 +873,7 @@ def sample_instr_uncache_owner_coverage(
 
     if s["backend_redirect"] == 1 or s["ifu_flush"] == 1:
         state["attribute_transactions"].clear()
+        state["first_page_tl_fault_pending"] = None
 
     state["previous_entry_state"] = (
         _ENTRY_IDLE if entry_state is None else int(entry_state)

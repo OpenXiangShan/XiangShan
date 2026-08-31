@@ -652,6 +652,75 @@ def test_second_page_exception_matrix_requires_original_half_identity():
     assert not _hit(recorder, 35)
 
 
+def test_first_page_tl_fault_suppresses_cross_page_refetch_and_illegal_decode():
+    def drive(
+        *, leaked_request=False, delivered_exception=3, need_resend=0, end_offset=1
+    ):
+        recorder = _Recorder()
+        snapshot = _snapshot()
+        snapshot.update(
+            {
+                "entry_state": protocol._ENTRY_REFILL_RESP,
+                "entry_req_addr": 0x7FF,
+                "entry_resending": 0,
+                "tl_d_valid": 1,
+                "tl_d_data": 0x0013 << 48,
+                "tl_d_corrupt": 1,
+                "tl_d_denied": 1,
+                "s2_pc": 0x7FF,
+                "s2_instr_pc": 0x7FF,
+                "s2_ftq_flag": 0,
+                "s2_ftq_value": 9,
+                "uncache_pc": 0x7FF,
+            }
+        )
+        _sample(recorder, 1, snapshot)
+        snapshot.update(
+            {
+                "entry_state": 3,
+                "tl_d_valid": 0,
+                "instr_resp_valid": 1,
+                "instr_resp_corrupt": 1,
+                "instr_resp_denied": 1,
+                "instr_resp_need_resend": need_resend,
+                "to_uncache_valid": int(leaked_request),
+            }
+        )
+        _sample(recorder, 2, snapshot)
+        snapshot.update(
+            {
+                "instr_resp_valid": 0,
+                "to_uncache_valid": 0,
+                "to_valid": 1,
+                "to_ready": 1,
+                "to_enq": 1,
+                "to_pc": 0x7FF,
+                "to_ftq_flag": 0,
+                "to_ftq_value": 9,
+                "to_ftq_offset": end_offset,
+                "to_foldpc": fold_pc(0xFFE),
+                "to_exception": delivered_exception,
+                "to_exception_cross_page": 0,
+                "prev_end_half": 0,
+            }
+        )
+        _sample(recorder, 3, snapshot)
+        return recorder
+
+    recorder = drive()
+    assert _hit(recorder, 35)
+    evidence = next(item[2] for item in recorder.evidence if item[1].endswith("035"))
+    assert evidence["need_resend_suppressed"] is True
+    assert evidence["no_second_page_request"] is True
+    assert evidence["illegal_instruction"] is False
+
+    assert not _hit(drive(leaked_request=True), 35)
+    assert not _hit(drive(delivered_exception=4), 35)
+    assert not _hit(drive(need_resend=1), 35)
+    assert not _hit(drive(end_offset=0), 35)
+    assert not _hit(drive(end_offset=2), 35)
+
+
 def test_tl_user_attributes_must_match_entry_and_cover_mmio_and_nc_modes():
     snapshot = _snapshot()
     recorder = _Recorder()
