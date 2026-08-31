@@ -211,7 +211,11 @@ class WriteBuffer[T <: WriteReqBundle](
           nextShadowValid(rowIdx)(hitIdx) := true.B
           nextDirty(rowIdx)(hitIdx)       := true.B
         }.elsewhen(hitWritten) {
-          val entryChange = entries(rowIdx)(hitIdx).asUInt =/= mergedEntry.asUInt
+          val entryCompareBits  = entries(rowIdx)(hitIdx).compareBits
+          val mergedCompareBits = mergedEntry.compareBits
+          val entryChange = if (entryCompareBits.isDefined) {
+            entryCompareBits.get =/= mergedCompareBits.get
+          } else { entries(rowIdx)(hitIdx).asUInt =/= mergedEntry.asUInt }
           when(entryChange) {
             nextDirty(rowIdx)(hitIdx)       := true.B
             nextEntries(rowIdx)(hitIdx)     := mergedEntry
