@@ -5,7 +5,7 @@ Date: 2026-08-31
 ## Decision
 
 Coverage backannotation and status promotion are paused until a DUT built from
-the integrated `frontend-bt` commit
+the integrated `frontend-bt` line rooted at merge commit
 `1916b7615a8d057cbef6862ca94f4c4794f26b8b`, containing reviewed V3 design tip
 `e5c70547f3a966accf20a4b065ec1d8e33443180`, has a valid build manifest and a
 new signal inventory. Existing HIT rows and artifacts remain immutable
@@ -31,7 +31,7 @@ repositories were not fetched, checked out, cleaned, or modified.
 Subsequent remote reconciliation found V3 design tip
 `e5c70547f3a966accf20a4b065ec1d8e33443180` and integrated verification tip
 `1916b7615a8d057cbef6862ca94f4c4794f26b8b`. The latter is the merge of the
-former into `frontend-bt`, and the local verification branch now matches that
+former into `frontend-bt`, and the local verification branch contains that
 integration commit. Compared with `859389870`, the design tip adds
 `3e6839bca` (CI container migration) and `e5c70547f` (F-POP L2 prefetcher).
 There is no delta under `src/main/scala/xiangshan/frontend`; `MemBlock.scala`
@@ -186,12 +186,14 @@ is an ancestor of the other. `c0ca46459` is an ancestor of `e5c70547f`, while
    commit or a reviewed descendant. Both `dut_source_sha` and
    `implementation_sha` must identify that integration commit (or descendant),
    and Git ancestry must prove that it contains reviewed design tip
-   `e5c70547f`. For an immediate build, expect both fields to be
-   `1916b7615`; preferably record `design_baseline_sha=e5c70547f` explicitly via
-   `FRONTEND_DESIGN_BASELINE_SHA`. If the build helper leaves the design field
-   equal to the integration source by default, verify the design-tip ancestry
-   separately. Do not require all three manifest fields to equal a design-branch
-   SHA, and reject a locally overridden, divergent, or dirty manifest.
+   `e5c70547f`. A build checked out exactly at the merge point has both fields
+   equal to `1916b7615`; a build at a reviewed descendant must record that exact
+   descendant instead. Preferably record `design_baseline_sha=e5c70547f`
+   explicitly via `FRONTEND_DESIGN_BASELINE_SHA`. If the build helper leaves
+   the design field equal to the integration source by default, verify the
+   design-tip ancestry separately. Do not require all three manifest fields to
+   equal a design-branch SHA, and reject a locally overridden, divergent, or
+   dirty manifest.
 2. Export the new signal inventory. Resolve exact generated aliases for the
    new ICache payload, halfRviInfo, blockSel/isCrossBlockInstr, predecode, and
    shared-depth state before editing bind/samplers.
