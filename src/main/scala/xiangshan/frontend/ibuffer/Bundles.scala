@@ -158,7 +158,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.predTaken                                     := predTaken
     cf.crossPageIPFFix                               := exceptionCrossPage
     cf.storeSetHit                                   := DontCare
-    cf.waitForRobIdx                                 := DontCare
+    cf.waitSqIdx                                     := DontCare
     cf.loadWaitBit                                   := DontCare
     cf.loadWaitStrict                                := DontCare
     cf.ssid                                          := DontCare
