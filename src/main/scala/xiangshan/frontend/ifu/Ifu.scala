@@ -365,7 +365,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }.elsewhen(uncacheRedirect.valid) {
     s1_prevIBufEnqPtrDup := uncacheRedirect.prevIBufEnqPtr + uncacheRedirect.instrCount
   }.elsewhen(s1_fire && !s1_icacheMeta(0).isUncache) {
-    s1_prevIBufEnqPtrDup := s1_prevIBufEnqPtrDup.head + s1_specInstrCount
+    s1_prevIBufEnqPtrDup := s1_prevIBufEnqPtrDup.head + s1_instrCount
   }
 
   // reqIsUncache is used to limit the number of fetch requests and enable special pre-decode configurations.
@@ -544,10 +544,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
     ftqPtr := Mux(s2_blockSel(i) || s2_isCrossBlockInstr(i), s2_fetchBlock(1).ftqIdx, s2_fetchBlock(0).ftqIdx)
   }
 
-  /* in s2, prevInstrCount equals to next cycle's IBuffer.numFromFetch without predChecker. "prev" means s1;
-   * when s1 fire (s1_valid && s2_ready), use s1_specInstrCount;
-   * else when s2 stall (s2_valid && !s2_ready). use s2_instrCount because prevInstrCount equals to current instrCount;
+  /* in s2, prevInstrCount equals to next cycle's IBuffer.numFromFetch without predChecker. "prev" means s1,
+   * when s1 fire (s1_valid && s2_ready), use s1_specInstrCount,
+   * else when s2 stall (s2_valid && !s2_ready). use s2_instrCount because prevInstrCount equals to current instrCount,
    * otherwise, we don't care about prevInstrCount because next cycle's toIBuffer.valid won't set.
+   *
+   * We didn't use s1_instrCount (which considers ICache parity check and exceptions) for better timing,
+   * Ibuf use this value only for a `allowEnq := prevInstrCount < numEmpty`,
+   * and we have `s1_instrCount <= s1_specInstrCount`, so this is safe.
    */
   io.toIBuffer.bits.prevInstrCount := Mux(
     s1_fire,
