@@ -116,8 +116,13 @@ jobs:
             fi
             echo
 
-            echo "| Testcase | Current | Base | Diff |"
-            echo "| -------- | ------- | ---- | ---- |"
+            if [ "${base_mode}" = "fuzz" ]; then
+              echo "| Testcase | Current |"
+              echo "| -------- | ------- |"
+            else
+              echo "| Testcase | Current | Base | Diff |"
+              echo "| -------- | ------- | ---- | ---- |"
+            fi
 
             for file in ${current_pattern}; do
               if [ ! -f "${file}" ]; then
@@ -127,7 +132,12 @@ jobs:
               name=$(basename "${file}" | cut -d '-' -f 2-)
               ipc=$(cat "${file}")
 
-              if [ "${base_mode}" = "default" ] && [[ "${name}" == legacy-* ]]; then
+              if [ "${base_mode}" = "fuzz" ]; then
+                echo "| ${name} | ${ipc} |"
+                continue
+              fi
+
+              if [ "${base_mode}" = "default" ] && [[ "${name}" == legacy-* || "${name}" == fuzz-* ]]; then
                 continue
               fi
 
@@ -152,26 +162,28 @@ jobs:
               fi
             done
 
-            if [ ${#current_values[@]} -gt 0 ]; then
-              current_geomean=$(geomean "${current_values[@]}")
-              base_geomean=$(geomean "${base_values[@]}")
-              geomean_diff=$(diff "${current_geomean}" "${base_geomean}")
-            else
-              current_geomean="N/A"
-              base_geomean="N/A"
-              geomean_diff="N/A"
-            fi
+            if [ "${base_mode}" != "fuzz" ]; then
+              if [ ${#current_values[@]} -gt 0 ]; then
+                current_geomean=$(geomean "${current_values[@]}")
+                base_geomean=$(geomean "${base_values[@]}")
+                geomean_diff=$(diff "${current_geomean}" "${base_geomean}")
+              else
+                current_geomean="N/A"
+                base_geomean="N/A"
+                geomean_diff="N/A"
+              fi
 
-            echo "| **GEOMEAN** | **${current_geomean}** | **${base_geomean}** | **${geomean_diff}%** |"
-            echo
-            if [ "${has_na}" = true ]; then
-              echo "**NOTE**: Some testcases do not have base data, diff is shown as N/A and GEOMEAN is calculated only from matched pairs."
+              echo "| **GEOMEAN** | **${current_geomean}** | **${base_geomean}** | **${geomean_diff}%** |"
               echo
-            fi
+              if [ "${has_na}" = true ]; then
+                echo "**NOTE**: Some testcases do not have base data, diff is shown as N/A and GEOMEAN is calculated only from matched pairs."
+                echo
+              fi
 
-            if [ "${base_mode}" = "legacy" ]; then
-              echo "**NOTE**: We're migrating to new checkpoints (see #6181), legacy testcases and reports are going to be removed. Please use the new IPC reports for future comparisons."
-              echo
+              if [ "${base_mode}" = "legacy" ]; then
+                echo "**NOTE**: We're migrating to new checkpoints (see #6181), legacy testcases and reports are going to be removed. Please use the new IPC reports for future comparisons."
+                echo
+              fi
             fi
 
             if [ "${collapsible}" = "true" ]; then
@@ -200,6 +212,7 @@ jobs:
               print_report_table "IPC Report (Legacy)" "current/ipc-legacy-*" "legacy" "true"
             fi
             print_report_table "IPC Report" "current/ipc-*" "default" "false"
+            print_report_table "Fuzz Report" "current/ipc-fuzz-*" "fuzz" "true"
           } > report.md
 
           cat report.md >> "$GITHUB_STEP_SUMMARY"
