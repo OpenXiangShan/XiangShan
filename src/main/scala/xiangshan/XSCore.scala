@@ -20,7 +20,7 @@ import org.chipsalliance.cde.config
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import xscache.coupledL2.PrefetchCtrlFromCore
+import xscache.coupledL2.{L2ToL1PfCtrl, PrefetchCtrlFromCore}
 import freechips.rocketchip.diplomacy.{BundleBridgeSource, LazyModule, LazyModuleImp}
 import freechips.rocketchip.tile.HasFPUParameters
 import system.HasSoCParameter
@@ -99,6 +99,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val resetInFrontend = Output(Bool())
     val traceCoreInterface = new TraceCoreInterface
     val l2PfCtrl = Output(new PrefetchCtrlFromCore)
+    val l2_fdbk_pf_ctrl = Input(new L2ToL1PfCtrl)
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
     val l2_hint = Input(Vec(numMemChannelsFromDcache, Valid(new L2ToL1Hint())))
@@ -221,6 +222,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.l2_hint <> io.l2_hint
   memBlock.io.l2_tlb_req <> io.l2_tlb_req
   memBlock.io.l2_pmp_resp <> io.l2_pmp_resp
+  memBlock.io.l2_fdbk_pf_ctrl <> io.l2_fdbk_pf_ctrl
   memBlock.io.l2PfqBusy := io.l2PfqBusy
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
