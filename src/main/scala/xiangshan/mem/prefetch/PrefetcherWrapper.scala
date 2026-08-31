@@ -34,6 +34,7 @@ trait PrefetcherParams {
 trait HasPrefetcherParams extends HasXSParameter{
   def LD_TRAIN_WIDTH = backendParams.LdExuCnt
   def ST_TRAIN_WIDTH = backendParams.StaExuCnt
+  def DEGREE_WIDTH = 2
 
   // You can set the unified interface to N, and the invalid that you don't need can be set to 0
   val L1_PF_REG_CNT = 1
@@ -99,6 +100,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     val l1_pf_to_l1 = DecoupledIO(new L1PrefetchReq())
     val l1_pf_to_l2 = Output(new xscache.coupledL2.PrefetchRecv())
     val l1_pf_to_l3 = Output(new xscache.coupledL2.PrefetchRecv())
+    val l2_fdbk_pf_ctrl = Input(new xscache.coupledL2.L2ToL1PfCtrl)
+    // TODO: l2_pf degree control internally
   })
 
   def isLoadAccess(uop: DynInst): Bool = FuType.isLoad(uop.fuType) || FuType.isVLoad(uop.fuType)
@@ -171,6 +174,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     val enableSMS = Constantin.createRecord(s"pf_enableSMS$hartId", initValue = true)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
     pf.io.enable := enableSMS && l1D_pf_enable
+    pf.io.fdbkDegree := io.l2_fdbk_pf_ctrl.smsDegree
     pf.io_agt_en := GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_enable_agt, 2, Some(false.B))
     pf.io_pht_en := GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_enable_pht, 2, Some(false.B))
     pf.io_act_threshold := GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_active_threshold, 2, Some(12.U))
@@ -221,6 +225,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     val enableL1StridePrefetcher = Constantin.createRecord(s"pf_enableL1StridePrefetcher$hartId", initValue = true)
     // constantinCtrl && master switch csrCtrl && single switch csrCtrl
     pf.io.enable := l1D_pf_enable
+    pf.io.fdbkDegree := 1.U
 
     pf.pf_ctrl <> io.pfCtrlFromDCache
     pf.l2PfqBusy := io.pfCtrlFromTile.l2PfqBusy
@@ -228,6 +233,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
       GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_stream_enable, 2, Some(false.B))
     pf.strideEnable := l1D_pf_enable && enableL1StridePrefetcher && strideModeEnable &&
       GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_stride_enable, 2, Some(false.B))
+    pf.streamFdbkDegree := io.l2_fdbk_pf_ctrl.streamDegree
+    pf.strideFdbkDegree := io.l2_fdbk_pf_ctrl.strideDegree
 
     // stride will train on miss or prefetch hit
     for(i <- 0 until LD_TRAIN_WIDTH){
@@ -268,6 +275,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     pf.io.enable := enableBerti && l1D_pf_enable &&
       GatedRegNextN(io.pfCtrlFromCSR.l1D_pf_berti_enable, 2, Some(false.B)) &&
       bertiModeEnable
+    pf.io.fdbkDegree := io.l2_fdbk_pf_ctrl.bertiDegree
 
     for(i <- 0 until LD_TRAIN_WIDTH){
       val source = io.trainSource.s3_load(i)
