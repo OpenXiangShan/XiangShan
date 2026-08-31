@@ -257,6 +257,12 @@ module frontend_redirect_flush_recovery_funcov (
         bins observed = {1'b1};
     }
 
+    RFR_redirect_level_cp:
+      coverpoint backend_redirect_level iff (!reset && backend_redirect_valid) {
+        bins flush_after = {1'b0};
+        bins flush_itself = {1'b1};
+    }
+
     RFR_redirect_range_cp:
       coverpoint {backend_redirect_valid, backend_redirect_level, backend_redirect_is_rvc}
         iff (!reset) {
@@ -267,9 +273,50 @@ module frontend_redirect_flush_recovery_funcov (
     }
 
     RFR_redirect_ftq_offset_cp:
-      coverpoint backend_redirect_ftq_offset iff (!reset && backend_redirect_valid);
+      coverpoint backend_redirect_ftq_offset iff (!reset && backend_redirect_valid) {
+        bins head = {5'd0};
+        bins interior = {[5'd1:5'd30]};
+        bins tail = {5'd31};
+    }
     RFR_redirect_boundary_cross:
-      cross RFR_redirect_range_cp, RFR_redirect_ftq_offset_cp;
+      cross RFR_redirect_range_cp, RFR_redirect_ftq_offset_cp {
+        bins flush_after_rvi_head =
+          binsof(RFR_redirect_range_cp.flush_after_rvi) &&
+          binsof(RFR_redirect_ftq_offset_cp.head);
+        bins flush_after_rvi_interior =
+          binsof(RFR_redirect_range_cp.flush_after_rvi) &&
+          binsof(RFR_redirect_ftq_offset_cp.interior);
+        bins flush_after_rvi_tail =
+          binsof(RFR_redirect_range_cp.flush_after_rvi) &&
+          binsof(RFR_redirect_ftq_offset_cp.tail);
+        bins flush_after_rvc_head =
+          binsof(RFR_redirect_range_cp.flush_after_rvc) &&
+          binsof(RFR_redirect_ftq_offset_cp.head);
+        bins flush_after_rvc_interior =
+          binsof(RFR_redirect_range_cp.flush_after_rvc) &&
+          binsof(RFR_redirect_ftq_offset_cp.interior);
+        bins flush_after_rvc_tail =
+          binsof(RFR_redirect_range_cp.flush_after_rvc) &&
+          binsof(RFR_redirect_ftq_offset_cp.tail);
+        bins flush_itself_rvi_head =
+          binsof(RFR_redirect_range_cp.flush_itself_rvi) &&
+          binsof(RFR_redirect_ftq_offset_cp.head);
+        bins flush_itself_rvi_interior =
+          binsof(RFR_redirect_range_cp.flush_itself_rvi) &&
+          binsof(RFR_redirect_ftq_offset_cp.interior);
+        bins flush_itself_rvi_tail =
+          binsof(RFR_redirect_range_cp.flush_itself_rvi) &&
+          binsof(RFR_redirect_ftq_offset_cp.tail);
+        bins flush_itself_rvc_head =
+          binsof(RFR_redirect_range_cp.flush_itself_rvc) &&
+          binsof(RFR_redirect_ftq_offset_cp.head);
+        bins flush_itself_rvc_interior =
+          binsof(RFR_redirect_range_cp.flush_itself_rvc) &&
+          binsof(RFR_redirect_ftq_offset_cp.interior);
+        bins flush_itself_rvc_tail =
+          binsof(RFR_redirect_range_cp.flush_itself_rvc) &&
+          binsof(RFR_redirect_ftq_offset_cp.tail);
+    }
 
     RFR_ftq_idx_ahead_match_cp: coverpoint (backend_redirect_valid && ahead_idx_match && to_bpu_redirect_valid) iff (!reset) {
       bins observed = {1'b1};
