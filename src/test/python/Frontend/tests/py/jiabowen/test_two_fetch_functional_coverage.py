@@ -577,7 +577,8 @@ def test_two_fetch_checker_second_invalid_taken_bin(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
     recorder._two_fetch_last_dual_cycle = 6
     dut.set_key("checker_valid", 1)
-    dut.set_key("checker_select", 1)
+    dut.set_key("checker_block_sel", 1)
+    dut.set_key("checker_cross_block", 0)
     dut.set_key("checker_invalid", 1)
     dut.set_key("fixed_instr_valid", 1)
 
@@ -592,12 +593,25 @@ def test_checker_priority_does_not_infer_two_faults_from_select_only(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
     recorder._two_fetch_last_dual_cycle = 6
     dut.set_key("checker_valid", 1)
-    dut.set_key("checker_select", 0)
+    dut.set_key("checker_block_sel", 0)
+    dut.set_key("checker_cross_block", 0)
 
     sample_two_fetch_coverage(recorder, env, 7)
 
     assert recorder.key_hit("two_fetch_checker_redirect", "first_block")
     assert not recorder.key_hit("two_fetch_checker_priority", "first_masks_second")
+
+
+def test_two_fetch_checker_cross_block_instr_selects_second_owner(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    recorder._two_fetch_last_dual_cycle = 6
+    dut.set_key("checker_valid", 1)
+    dut.set_key("checker_block_sel", 0)
+    dut.set_key("checker_cross_block", 1)
+
+    sample_two_fetch_coverage(recorder, env, 7)
+
+    assert recorder.key_hit("two_fetch_checker_redirect", "second_block")
 
 
 def test_compressed_cfvec_uses_expanded_instruction_for_cfi_classification(tmp_path):

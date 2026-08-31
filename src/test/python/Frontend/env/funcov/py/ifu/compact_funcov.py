@@ -78,6 +78,448 @@ def _read_gpaddr_output(recorder, dut, stem: str) -> Optional[int]:
     )
 
 
+_FRONTEND_TRIGGER_PREFIXES = (
+    "Frontend_top.Frontend.inner_ifu.frontendTrigger.__Vtogcov__",
+    "Frontend_top.Frontend.inner_ifu.frontendTrigger.",
+)
+
+
+def _read_frontend_trigger(recorder, dut, stem: str) -> Optional[int]:
+    return recorder._read_first_dut_signal(
+        dut,
+        tuple(prefix + str(stem) for prefix in _FRONTEND_TRIGGER_PREFIXES),
+    )
+
+
+def _frontend_trigger_config(recorder, dut, slot: int) -> Optional[tuple[int, ...]]:
+    values = tuple(
+        _read_frontend_trigger(recorder, dut, f"tdataVec_{int(slot)}_{field}")
+        for field in ("matchType", "select", "timing", "action", "chain", "tdata2")
+    )
+    if any(value is None for value in values):
+        return None
+    return tuple(int(value) for value in values)
+
+
+def _frontend_trigger_compare(pc: int, match_type: int, tdata2: int) -> bool:
+    if int(match_type) == 0:
+        return int(pc) == int(tdata2)
+    if int(match_type) == 2:
+        return int(pc) >= int(tdata2)
+    if int(match_type) == 3:
+        return int(pc) < int(tdata2)
+    return False
+
+
+def _frontend_trigger_can_fire_name(lane: int, slot: int) -> str:
+    if int(lane) == 0:
+        return f"triggerCanFireVec_{int(slot)}"
+    return f"triggerCanFireVec_{int(lane)}_{int(slot)}"
+
+
+def _frontend_trigger_state(recorder) -> dict[str, Any]:
+    state = getattr(recorder, "_ifu_frontend_trigger_state", None)
+    if state is None:
+        state = {
+            "last_configs": None,
+            "verified_updates": {},
+            "update_samples": {},
+            "enable_samples": {},
+            "match_type_samples": {0: set(), 2: set(), 3: set()},
+            "suppression_samples": set(),
+            "chain_samples": set(),
+            "action_samples": set(),
+            "held_trigger": None,
+            "marked": set(),
+        }
+        recorder._ifu_frontend_trigger_state = state
+    return state
+
+
+def _mark_frontend_trigger_once(
+    recorder,
+    state: dict[str, Any],
+    bin_id: str,
+    cycle: int,
+    observations: dict[str, Any],
+) -> None:
+    if str(bin_id) in state["marked"]:
+        return
+    if mark_owner_v3_checked(
+        recorder,
+        str(bin_id),
+        int(cycle),
+        observations,
+        producer="ifu_frontend_trigger_v3_sampler",
+    ):
+        state["marked"].add(str(bin_id))
+
+
+def _sample_frontend_trigger(recorder, dut, cycle: int) -> None:
+    state = _frontend_trigger_state(recorder)
+    configs = tuple(_frontend_trigger_config(recorder, dut, slot) for slot in range(4))
+    if any(config is None for config in configs):
+        return
+    configs = tuple(config for config in configs if config is not None)
+
+    update_valid = _read_ifu_internal(recorder, dut, "io_frontendTrigger_tUpdate_valid")
+    update_addr = _read_ifu_internal(recorder, dut, "io_frontendTrigger_tUpdate_bits_addr")
+    if update_valid == 1 and update_addr is not None:
+        slot = int(update_addr) & 0x3
+        input_values = tuple(
+            _read_ifu_internal(
+                recorder,
+                dut,
+                f"io_frontendTrigger_tUpdate_bits_tdata_{field}",
+            )
+            for field in ("matchType", "select", "timing", "action", "chain", "tdata2")
+        )
+        previous = state.get("last_configs")
+        non_target_stable = previous is not None and all(
+            configs[index] == previous[index] for index in range(4) if index != slot
+        )
+        if not any(value is None for value in input_values):
+            input_config = tuple(int(value) for value in input_values)
+            if configs[slot] == input_config and non_target_stable:
+                signature = (slot, *input_config)
+                state["verified_updates"][signature] = {
+                    "cycle": int(cycle),
+                    "slot": slot,
+                    "config": input_config,
+                    "non_target_configs_unchanged": True,
+                }
+
+    state["last_configs"] = configs
+
+    s2_valid = _read_ifu_internal(recorder, dut, "s2_valid_valid")
+    s2_flush = _read_ifu_internal(recorder, dut, "s2_flush")
+    valid_mask = _read_ifu_internal(recorder, dut, "s2_alignedInstrValid")
+    output_valid = _read_ifu_internal(recorder, dut, "io_toIBuffer_valid")
+    output_ready = _read_ifu_internal(recorder, dut, "io_toIBuffer_ready")
+    output_enq = _read_ifu_internal(recorder, dut, "io_toIBuffer_bits_enqEnable")
+
+    if s2_flush == 1:
+        held = state.get("held_trigger")
+        backend_redirect = _read_ifu_internal(
+            recorder, dut, "io_fromFtq_redirect_valid"
+        )
+        if held is not None and backend_redirect == 1 and output_valid == 0:
+            same_identity = all(
+                _read_ifu_output_slot(recorder, dut, "pc", lane["lane"], "_addr")
+                == (int(lane["pc"]) >> 1)
+                and _read_ifu_output_slot(
+                    recorder, dut, "ftqPtr", lane["lane"], "_flag"
+                )
+                == lane["ftq_flag"]
+                and _read_ifu_output_slot(
+                    recorder, dut, "ftqPtr", lane["lane"], "_value"
+                )
+                == lane["ftq_value"]
+                for lane in held["lanes"]
+            )
+            if same_identity:
+                _mark_frontend_trigger_once(
+                    recorder,
+                    state,
+                    "BIN-1003",
+                    cycle,
+                    {
+                        "event": "frontend_trigger_held_identity_flushed",
+                        "held_cycle": held["cycle"],
+                        "flush_cycle": int(cycle),
+                        "held_lanes": held["lanes"],
+                        "backend_redirect": int(backend_redirect),
+                        "s2_flush": int(s2_flush),
+                        "to_ibuffer_valid_during_flush": int(output_valid),
+                        "same_pc_ftq_identity_during_flush": True,
+                        "old_identity_delivery_suppressed": True,
+                    },
+                )
+        state["held_trigger"] = None
+        return
+
+    if s2_valid != 1 or valid_mask is None:
+        return
+
+    debug_mode = _read_ifu_internal(recorder, dut, "io_frontendTrigger_debugMode")
+    can_raise_bp = _read_ifu_internal(
+        recorder, dut, "io_frontendTrigger_triggerCanRaiseBpExp"
+    )
+    if debug_mode is None or can_raise_bp is None:
+        return
+
+    enable = tuple(
+        _read_frontend_trigger(recorder, dut, f"triggerEnableVec_{slot}")
+        for slot in range(4)
+    )
+    if any(value is None for value in enable):
+        return
+    enable = tuple(int(value) for value in enable if value is not None)
+
+    lanes: list[dict[str, Any]] = []
+    for lane in range(_IFU_OUTPUT_SLOT_COUNT):
+        if not (int(valid_mask) & (1 << lane)):
+            continue
+        pc_encoded = _read_ifu_internal(recorder, dut, f"s2_alignedInstrPcVec_{lane}_addr")
+        if pc_encoded is None:
+            continue
+        pc = int(pc_encoded) << 1
+        hits = tuple(
+            _read_frontend_trigger(recorder, dut, f"triggerHitVec_{lane}_{slot}")
+            for slot in range(3)
+        )
+        can_fire = tuple(
+            _read_frontend_trigger(
+                recorder,
+                dut,
+                _frontend_trigger_can_fire_name(lane, slot),
+            )
+            for slot in range(4)
+        )
+        output_triggered = _read_ifu_output_slot(recorder, dut, "triggered", lane)
+        if any(value is None for value in (*hits, *can_fire)):
+            continue
+        lane_observation = {
+            "lane": lane,
+            "pc": pc,
+            "hits": tuple(int(value) for value in hits if value is not None),
+            "can_fire": tuple(int(value) for value in can_fire if value is not None),
+            "output_triggered": None
+            if output_triggered is None
+            else int(output_triggered),
+        }
+        lanes.append(lane_observation)
+
+        for slot, config in enumerate(configs[:3]):
+            match_type, select, timing, action, chain, tdata2 = config
+            raw_match = _frontend_trigger_compare(pc, match_type, tdata2)
+            actual_hit = lane_observation["hits"][slot]
+            expected_hit = int(
+                raw_match
+                and enable[slot] == 1
+                and select == 0
+                and int(debug_mode) == 0
+            )
+            if actual_hit != expected_hit:
+                recorder.risk_observations.append(
+                    {
+                        "event": "frontend_trigger_compare_mismatch",
+                        "cycle": int(cycle),
+                        "lane": lane,
+                        "slot": slot,
+                        "pc": pc,
+                        "config": list(config),
+                        "enable": enable[slot],
+                        "debug_mode": int(debug_mode),
+                        "expected_hit": expected_hit,
+                        "actual_hit": actual_hit,
+                    }
+                )
+                continue
+
+            signature = (slot, *config)
+            if signature in state["verified_updates"] and select == 0 and int(debug_mode) == 0:
+                samples = state["update_samples"].setdefault(signature, set())
+                samples.add("hit" if actual_hit == 1 else "miss")
+                if {"hit", "miss"} <= samples:
+                    _mark_frontend_trigger_once(
+                        recorder,
+                        state,
+                        "BIN-996",
+                        cycle,
+                        {
+                            "event": "frontend_trigger_update_applied",
+                            **state["verified_updates"][signature],
+                            "pc": pc,
+                            "observed_outcomes": sorted(samples),
+                        },
+                    )
+
+            if raw_match and select == 0 and int(debug_mode) == 0:
+                enable_key = (slot, *config, pc)
+                samples = state["enable_samples"].setdefault(enable_key, set())
+                if enable[slot] == 0 and actual_hit == 0:
+                    samples.add("disabled")
+                if enable[slot] == 1 and actual_hit == 1:
+                    samples.add("enabled")
+                if {"disabled", "enabled"} <= samples:
+                    _mark_frontend_trigger_once(
+                        recorder,
+                        state,
+                        "BIN-997",
+                        cycle,
+                        {
+                            "event": "frontend_trigger_enable_toggle",
+                            "slot": slot,
+                            "pc": pc,
+                            "config": list(config),
+                            "observed_states": sorted(samples),
+                        },
+                    )
+
+            if match_type in state["match_type_samples"] and enable[slot] == 1 and select == 0 and int(debug_mode) == 0:
+                state["match_type_samples"][match_type].add(
+                    "hit" if actual_hit == 1 else "miss"
+                )
+                if all(
+                    {"hit", "miss"} <= state["match_type_samples"][mode]
+                    for mode in (0, 2, 3)
+                ):
+                    _mark_frontend_trigger_once(
+                        recorder,
+                        state,
+                        "BIN-998",
+                        cycle,
+                        {
+                            "event": "frontend_trigger_match_types",
+                            "mode_outcomes": {
+                                str(mode): sorted(state["match_type_samples"][mode])
+                                for mode in (0, 2, 3)
+                            },
+                            "last_lane": lane,
+                            "last_pc": pc,
+                        },
+                    )
+
+            if raw_match and enable[slot] == 1 and actual_hit == 0:
+                if select == 1:
+                    state["suppression_samples"].add("select")
+                if int(debug_mode) == 1:
+                    state["suppression_samples"].add("debug")
+                if {"select", "debug"} <= state["suppression_samples"]:
+                    _mark_frontend_trigger_once(
+                        recorder,
+                        state,
+                        "BIN-999",
+                        cycle,
+                        {
+                            "event": "frontend_trigger_match_suppressed",
+                            "slot": slot,
+                            "lane": lane,
+                            "pc": pc,
+                            "config": list(config),
+                            "suppression_modes": sorted(state["suppression_samples"]),
+                        },
+                    )
+
+        if len(configs) >= 2:
+            first = configs[0]
+            second = configs[1]
+            if (
+                first[4] == 1
+                and second[4] == 0
+                and lane_observation["hits"][0] == 1
+                and lane_observation["hits"][1] == 1
+                and lane_observation["can_fire"][0] == 0
+            ):
+                if first[2] == second[2] and lane_observation["can_fire"][1] == 1:
+                    state["chain_samples"].add("chain_pass")
+                if first[2] != second[2] and lane_observation["can_fire"][1] == 0:
+                    state["chain_samples"].add("timing_block")
+                if {"chain_pass", "timing_block"} <= state["chain_samples"]:
+                    _mark_frontend_trigger_once(
+                        recorder,
+                        state,
+                        "BIN-1000",
+                        cycle,
+                        {
+                            "event": "frontend_trigger_chain_timing",
+                            "lane": lane,
+                            "pc": pc,
+                            "configs": [list(first), list(second)],
+                            "hits": list(lane_observation["hits"][:2]),
+                            "can_fire": list(lane_observation["can_fire"][:2]),
+                            "observed_states": sorted(state["chain_samples"]),
+                        },
+                    )
+
+        firing_slots = [
+            slot for slot, value in enumerate(lane_observation["can_fire"]) if value == 1
+        ]
+        if len(firing_slots) == 1 and output_triggered is not None:
+            firing_slot = firing_slots[0]
+            action = configs[firing_slot][3]
+            if action == 1 and int(output_triggered) == 1:
+                state["action_samples"].add("debug_action")
+            if action == 0 and int(can_raise_bp) == 1 and int(output_triggered) == 0:
+                state["action_samples"].add("breakpoint_action")
+            if {"debug_action", "breakpoint_action"} <= state["action_samples"]:
+                _mark_frontend_trigger_once(
+                    recorder,
+                    state,
+                    "BIN-1001",
+                    cycle,
+                    {
+                        "event": "frontend_trigger_action_generation",
+                        "lane": lane,
+                        "pc": pc,
+                        "firing_slot": firing_slot,
+                        "action": action,
+                        "trigger_can_raise_bp": int(can_raise_bp),
+                        "output_triggered": int(output_triggered),
+                        "observed_actions": sorted(state["action_samples"]),
+                    },
+                )
+
+    if output_valid == 1 and output_ready == 1 and output_enq is not None:
+        state["held_trigger"] = None
+        delivered = [lane for lane in lanes if int(output_enq) & (1 << lane["lane"])]
+        firing_delivered = [lane for lane in delivered if sum(lane["can_fire"]) == 1]
+        if len(firing_delivered) == 1:
+            selected = firing_delivered[0]
+            peers_clean = all(
+                lane["output_triggered"] == 15
+                for lane in delivered
+                if lane["lane"] != selected["lane"] and sum(lane["can_fire"]) == 0
+            )
+            if selected["output_triggered"] in {0, 1} and peers_clean:
+                _mark_frontend_trigger_once(
+                    recorder,
+                    state,
+                    "BIN-1002",
+                    cycle,
+                    {
+                        "event": "frontend_trigger_lane_delivery_alignment",
+                        "selected_lane": selected,
+                        "delivered_lanes": delivered,
+                        "to_ibuffer_fire": True,
+                        "peer_lanes_untriggered": True,
+                    },
+                )
+
+    if output_valid == 1 and output_ready == 0 and output_enq is not None:
+        held_lanes = []
+        for lane in lanes:
+            lane_index = int(lane["lane"])
+            if not (int(output_enq) & (1 << lane_index)):
+                continue
+            if sum(lane["can_fire"]) != 1 or lane["output_triggered"] not in {0, 1}:
+                continue
+            ftq_flag = _read_ifu_output_slot(
+                recorder, dut, "ftqPtr", lane_index, "_flag"
+            )
+            ftq_value = _read_ifu_output_slot(
+                recorder, dut, "ftqPtr", lane_index, "_value"
+            )
+            if ftq_flag is None or ftq_value is None:
+                continue
+            held_lanes.append(
+                {
+                    "lane": lane_index,
+                    "pc": int(lane["pc"]),
+                    "ftq_flag": int(ftq_flag),
+                    "ftq_value": int(ftq_value),
+                    "can_fire": list(lane["can_fire"]),
+                    "output_triggered": int(lane["output_triggered"]),
+                }
+            )
+        if held_lanes:
+            state["held_trigger"] = {
+                "cycle": int(cycle),
+                "lanes": held_lanes,
+            }
+
+
 def _sample_ftq_training_mask(recorder, dut, cycle: int) -> None:
     """Check the V3 FTQ mask after the first mispredict in one train entry."""
 
@@ -355,9 +797,14 @@ def _sample_redirect_lifecycle(recorder, dut, cycle: int) -> None:
     s1_flush = _read_ifu_internal(recorder, dut, "s1_flush")
     s2_flush = _read_ifu_internal(recorder, dut, "s2_flush")
     s0_half = _read_ifu_internal(recorder, dut, "s0_prevEndIsHalfRvi")
-    s1_half_data = _read_ifu_internal(recorder, dut, "s1_prevEndHalfRviData")
-    s1_half_pc = _read_ifu_internal(recorder, dut, "s1_prevEndHalfRviPc_addr")
-    s1_ptr = _read_ifu_internal(recorder, dut, "s1_prevIBufEnqPtr_value")
+    s1_half_valid = _read_ifu_internal(recorder, dut, "s1_prevEndHalfRviInfo_valid")
+    s1_half_data = _read_ifu_internal(
+        recorder, dut, "s1_prevEndHalfRviInfo_bits_data"
+    )
+    s1_half_pc = _read_ifu_internal(
+        recorder, dut, "s1_prevEndHalfRviInfo_bits_pc_addr"
+    )
+    s1_ptr = _read_ifu_internal(recorder, dut, "s1_prevIBufEnqPtrDup_dup_0_value")
     s1_valid = _read_ifu_internal(recorder, dut, "s1_valid")
     s2_valid = _read_ifu_internal(recorder, dut, "s2_valid_valid")
 
@@ -368,6 +815,7 @@ def _sample_redirect_lifecycle(recorder, dut, cycle: int) -> None:
             **pending,
             "check_cycle": int(cycle),
             "s0_prev_end_is_half_rvi": s0_half,
+            "s1_prev_end_half_rvi_valid": s1_half_valid,
             "s1_prev_end_half_data": s1_half_data,
             "s1_prev_end_half_pc": s1_half_pc,
             "s1_prev_ibuf_enq_ptr": s1_ptr,
@@ -380,6 +828,7 @@ def _sample_redirect_lifecycle(recorder, dut, cycle: int) -> None:
                 pre_redirect.get("s0_half") == 1
                 and cleared_valids
                 and s0_half == 0
+                and s1_half_valid == 0
                 and s1_half_data == 0
                 and s1_half_pc == 0
             ):
@@ -446,6 +895,7 @@ def _sample_redirect_lifecycle(recorder, dut, cycle: int) -> None:
         }
     recorder._ifu_redirect_last_state = {
         "s0_half": s0_half,
+        "s1_half_valid": s1_half_valid,
         "s1_half_data": s1_half_data,
         "s1_half_pc": s1_half_pc,
         "s1_ptr": s1_ptr,
@@ -566,7 +1016,7 @@ def _sample_exception_metadata(recorder, dut, cycle: int) -> None:
         recorder, dut, "s2_icacheMeta_0_isForVSnonLeafPTE"
     )
     prev_end_is_half_rvi = _read_ifu_internal(
-        recorder, dut, "s2_prevEndIsHalfRvi"
+        recorder, dut, "s2_prevEndIsHalfRviInfo_valid"
     )
     ftq_idx = _read_ifu_internal(recorder, dut, "s2_fetchBlock_0_ftqIdx_value")
     if None in {
@@ -680,8 +1130,15 @@ def _sample_instr_boundary_tail(recorder, dut, cycle: int) -> None:
     s1_fire = _read_ifu_internal(recorder, dut, "s1_fire")
     s1_flush = _read_ifu_internal(recorder, dut, "s1_flush")
     s1_req_is_uncache = _read_ifu_internal(recorder, dut, "s1_reqIsUncache")
-    total_end_is_half_rvi = _read_ifu_internal(recorder, dut, "s1_totalEndIsHalfRvi")
-    total_end_pos = _read_ifu_internal(recorder, dut, "s1_totalEndPos")
+    total_end_is_half_rvi = _read_ifu_internal(
+        recorder, dut, "s1_totalEndIsHalfRvi"
+    )
+    total_end_pc = _read_ifu_internal(
+        recorder, dut, "s1_totalEndHalfRvi_bits_pc_addr"
+    )
+    total_end_data = _read_ifu_internal(
+        recorder, dut, "s1_totalEndHalfRvi_bits_data"
+    )
     if None in {s1_valid, s1_fire, s1_flush, s1_req_is_uncache, total_end_is_half_rvi}:
         return
     if (
@@ -697,7 +1154,8 @@ def _sample_instr_boundary_tail(recorder, dut, cycle: int) -> None:
             cycle,
             {
                 "event": "ifu_s1_boundary_tail_half_rvi",
-                "s1_total_end_pos": total_end_pos,
+                "s1_total_end_half_pc": total_end_pc,
+                "s1_total_end_half_data": total_end_data,
                 "s1_total_end_is_half_rvi": 1,
             },
         )
@@ -712,7 +1170,8 @@ def _sample_instr_boundary_tail(recorder, dut, cycle: int) -> None:
             cycle,
             {
                 "event": "ifu_rvi_crosses_fetch_blocks_half_state",
-                "s1_total_end_pos": total_end_pos,
+                "s1_total_end_half_pc": total_end_pc,
+                "s1_total_end_half_data": total_end_data,
                 "s1_total_end_is_half_rvi": 1,
                 "boundary_state": "saved_half_rvi",
                 "mapping_note": "current_rtl_uses_half_state_when_second_block_is_not_yet_available",
@@ -724,7 +1183,8 @@ def _sample_instr_boundary_tail(recorder, dut, cycle: int) -> None:
             cycle,
             {
                 "event": "ifu_s0_v3_tail_half_state",
-                "s1_total_end_pos": total_end_pos,
+                "s1_total_end_half_pc": total_end_pc,
+                "s1_total_end_half_data": total_end_data,
                 "s1_total_end_is_half_rvi": 1,
             },
         )
@@ -732,10 +1192,11 @@ def _sample_instr_boundary_tail(recorder, dut, cycle: int) -> None:
 
 def _sample_pred_taken_index_mapping(recorder, dut, cycle: int) -> None:
     s1_valid = _read_ifu_internal(recorder, dut, "s1_valid")
-    total_raw_valid = _read_ifu_internal(recorder, dut, "s1_totalRawInstrValid")
+    raw_valid = _read_ifu_internal(recorder, dut, "s1_rawInstrValid")
+    total_range = _read_ifu_internal(recorder, dut, "s1_totalRange")
     first_range = _read_ifu_internal(recorder, dut, "s1_firstRange")
     merged_taken_mask = _read_ifu_internal(recorder, dut, "s1_mergedPredTakenMask")
-    if None in {s1_valid, total_raw_valid, first_range, merged_taken_mask} or s1_valid != 1:
+    if None in {s1_valid, raw_valid, total_range, first_range, merged_taken_mask} or s1_valid != 1:
         return
 
     block_valid = [
@@ -757,7 +1218,7 @@ def _sample_pred_taken_index_mapping(recorder, dut, cycle: int) -> None:
     if None in {*block_valid, *taken_valid}:
         return
 
-    total_raw_valid = int(total_raw_valid)
+    total_raw_valid = int(raw_valid) & int(total_range)
     first_range = int(first_range)
     merged_taken_mask = int(merged_taken_mask)
     first_count = (total_raw_valid & first_range).bit_count()
@@ -929,8 +1390,18 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
         is_rvc = _read_predchecker(
             recorder, dut, "io_resp_stage2Out_checkerRedirect_bits_isRVC"
         )
-        select_block = _read_predchecker(
-            recorder, dut, "io_resp_stage2Out_checkerRedirect_bits_selectBlock"
+        block_sel = _read_predchecker(
+            recorder, dut, "io_resp_stage2Out_checkerRedirect_bits_blockSel"
+        )
+        is_cross_block_instr = _read_predchecker(
+            recorder,
+            dut,
+            "io_resp_stage2Out_checkerRedirect_bits_isCrossBlockInstr",
+        )
+        select_block = (
+            None
+            if block_sel is None or is_cross_block_instr is None
+            else int(block_sel) | int(is_cross_block_instr)
         )
         branch_type = _read_predchecker(
             recorder,
@@ -950,6 +1421,8 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             "taken": taken,
             "invalid_taken": invalid_taken,
             "is_rvc": is_rvc,
+            "block_sel": block_sel,
+            "is_cross_block_instr": is_cross_block_instr,
             "select_block": select_block,
             "branch_type": branch_type,
             "ras_action": ras_action,
@@ -987,6 +1460,8 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
         metadata_matches = (
             invalid_taken == pending["invalid_taken"]
             and is_rvc == pending["is_rvc"]
+            and block_sel == pending["block_sel"]
+            and is_cross_block_instr == pending["is_cross_block_instr"]
             and select_block == pending["select_block"]
             and branch_type == expected_branch_type
             and ras_action == expected_ras_action
@@ -1031,7 +1506,7 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
                     producer="ifu_predchecker_v3_sampler",
                 )
             redirect_half_valid = _read_ifu_internal(
-                recorder, dut, "s2_prevEndIsHalfRvi"
+                recorder, dut, "s2_prevEndIsHalfRviInfo_valid"
             )
             if pending["invalid_taken"] == 1 and redirect_half_valid == 1:
                 mark_owner_v3_checked(
@@ -1099,8 +1574,19 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
         is_rvc = _read_predchecker_or_ifu(
             recorder, dut, prefix + "isRvc", f"s2_alignedInstrVec_{slot}_isRvc"
         )
-        select_block = _read_predchecker_or_ifu(
+        block_sel = _read_predchecker_or_ifu(
             recorder, dut, prefix + "blockSel", f"s2_alignedInstrVec_{slot}_blockSel"
+        )
+        is_cross_block_instr = _read_predchecker_or_ifu(
+            recorder,
+            dut,
+            prefix + "isCrossBlockInstr",
+            f"s2_alignedInstrVec_{slot}_isCrossBlockInstr",
+        )
+        select_block = (
+            None
+            if block_sel is None or is_cross_block_instr is None
+            else int(block_sel) | int(is_cross_block_instr)
         )
         end_offset = _read_predchecker_or_ifu(
             recorder, dut, prefix + "endOffset", f"s2_alignedInstrVec_{slot}_endOffset"
@@ -1115,28 +1601,22 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             recorder, dut, f"io_req_bits_pdInfoVec_{slot}_brAttribute_rasAction"
         )
         if ras_action is None:
-            rd = _read_ifu_internal(
-                recorder, dut, f"s2_alignedPdInfoVec_{slot}_brAttribute_rd"
+            ras_action = _read_ifu_internal(
+                recorder,
+                dut,
+                f"s2_alignedPdInfoVec_{slot}_brAttribute_rasAction",
             )
-            rs = _read_ifu_internal(
-                recorder, dut, f"s2_alignedPdInfoVec_{slot}_brAttribute_rs"
-            )
-            if None not in {branch_type, is_rvc, rd, rs}:
-                link_rd = int(rd) in {1, 5}
-                link_rs = int(rs) in {1, 5}
-                has_push = (
-                    int(branch_type) == 2 and link_rd and not int(is_rvc)
-                ) or (int(branch_type) == 3 and link_rd)
-                has_pop = int(branch_type) == 3 and link_rs and int(rd) != int(rs)
-                ras_action = (int(has_push) << 1) | int(has_pop)
         pc_addr = _read_predchecker_or_ifu(
             recorder,
             dut,
             f"io_req_bits_instrPcVec_{slot}_addr",
             f"s2_alignedInstrPcVec_{slot}_addr",
         )
-        jump_offset_addr = _read_predchecker(
-            recorder, dut, f"io_req_bits_jumpOffsetVec_{slot}_addr"
+        jump_offset_addr = _read_predchecker_or_ifu(
+            recorder,
+            dut,
+            f"io_req_bits_jumpOffsetVec_{slot}_addr",
+            f"s2_alignedJumpOffsetVec_{slot}_addr",
         )
         fixed_valid = _read_predchecker(
             recorder, dut, f"io_resp_stage1Out_fixedInstrValid_{slot}"
@@ -1149,6 +1629,8 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             pred_taken,
             invalid_taken,
             is_rvc,
+            block_sel,
+            is_cross_block_instr,
             select_block,
             end_offset,
             branch_type,
@@ -1176,6 +1658,8 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
                 "pred_taken": int(pred_taken),
                 "invalid_taken": int(invalid_taken),
                 "is_rvc": int(is_rvc),
+                "block_sel": int(block_sel),
+                "is_cross_block_instr": int(is_cross_block_instr),
                 "select_block": int(select_block),
                 "end_offset": int(end_offset),
                 "branch_type": int(branch_type),
@@ -1332,7 +1816,9 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
                 fault_evidence,
                 producer="ifu_predchecker_v3_sampler",
             )
-        half_state_valid = _read_ifu_internal(recorder, dut, "s2_prevEndIsHalfRvi")
+        half_state_valid = _read_ifu_internal(
+            recorder, dut, "s2_prevEndIsHalfRviInfo_valid"
+        )
         if half_state_valid == 1:
             mark_owner_v3_checked(
                 recorder,
@@ -1366,15 +1852,18 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             producer="ifu_predchecker_v3_sampler",
         )
 
+    first_is_cross_block_rvi = first["is_rvc"] == 0 and (
+        first["is_cross_block_instr"] == 1 or first["end_offset"] == 16
+    )
     if first["fault"] == "jal_not_taken" and first["is_rvc"] == 1:
         mark_owner_v3_checked(recorder, "BIN-975", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
-    if first["fault"] == "jal_not_taken" and first["is_rvc"] == 0 and first["end_offset"] in {15, 16}:
+    if first["fault"] == "jal_not_taken" and first_is_cross_block_rvi:
         mark_owner_v3_checked(recorder, "BIN-976", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
     if first["fault"] == "jalr_not_taken" and first["is_rvc"] == 1:
         mark_owner_v3_checked(recorder, "BIN-980", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
-    if first["fault"] == "jalr_not_taken" and first["is_rvc"] == 0 and first["end_offset"] in {15, 16}:
+    if first["fault"] == "jalr_not_taken" and first_is_cross_block_rvi:
         mark_owner_v3_checked(recorder, "BIN-982", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
-    if first["fault"] == "not_cfi_taken" and first["is_rvc"] == 0 and first["end_offset"] in {15, 16}:
+    if first["fault"] == "not_cfi_taken" and first_is_cross_block_rvi:
         mark_owner_v3_checked(recorder, "BIN-985", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
     if first["fault"] == "not_cfi_taken" and first["is_rvc"] == 1:
         mark_owner_v3_checked(recorder, "BIN-986", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
@@ -1397,7 +1886,14 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             fault_evidence,
             producer="ifu_predchecker_v3_sampler",
         )
-        if any(entry["end_offset"] in {15, 16} and entry["is_rvc"] == 0 for entry in younger_taken_cfi):
+        if any(
+            entry["is_rvc"] == 0
+            and (
+                entry["is_cross_block_instr"] == 1
+                or entry["end_offset"] == 16
+            )
+            for entry in younger_taken_cfi
+        ):
             mark_owner_v3_checked(
                 recorder,
                 "BIN-978",
@@ -1512,6 +2008,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
     _sample_instr_boundary_tail(recorder, dut, cycle)
     _sample_pred_taken_index_mapping(recorder, dut, cycle)
     _sample_predchecker_v3(recorder, dut, cycle)
+    _sample_frontend_trigger(recorder, dut, cycle)
     _sample_ftq_training_mask(recorder, dut, cycle)
     _sample_exception_metadata(recorder, dut, cycle)
 
@@ -1777,11 +2274,17 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         else:
             recorder._ifu_ibuffer_alignment_pending = None
 
-        prev_end_is_half_rvi = _read_ifu_internal(recorder, dut, "s2_prevEndIsHalfRvi")
-        prev_end_half_pc = _decode_pruned_pc(
-            _read_ifu_internal(recorder, dut, "s2_prevEndHalfPc_addr")
+        prev_end_is_half_rvi = _read_ifu_internal(
+            recorder, dut, "s2_prevEndIsHalfRviInfo_valid"
         )
-        prev_end_half_data = _read_ifu_internal(recorder, dut, "s2_prevEndHalfRviData")
+        prev_end_half_pc = _decode_pruned_pc(
+            _read_ifu_internal(
+                recorder, dut, "s2_prevEndIsHalfRviInfo_bits_pc_addr"
+            )
+        )
+        prev_end_half_data = _read_ifu_internal(
+            recorder, dut, "s2_prevEndIsHalfRviInfo_bits_data"
+        )
         fetch_block_start_pc = _decode_pruned_pc(
             _read_ifu_internal(recorder, dut, "s2_fetchBlock_0_startVAddr_addr")
         )
@@ -1910,8 +2413,9 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         branch_type = _read_ifu_internal(
             recorder, dut, f"s2_alignedPdInfoVec_{slot}_brAttribute_branchType"
         )
-        rd = _read_ifu_internal(recorder, dut, f"s2_alignedPdInfoVec_{slot}_brAttribute_rd")
-        rs = _read_ifu_internal(recorder, dut, f"s2_alignedPdInfoVec_{slot}_brAttribute_rs")
+        ras_action = _read_ifu_internal(
+            recorder, dut, f"s2_alignedPdInfoVec_{slot}_brAttribute_rasAction"
+        )
         internal_records.append(
             {
                 **record,
@@ -1922,8 +2426,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                 "aligned_end_offset": aligned_end_offset,
                 "expanded": expanded,
                 "branch_type": branch_type,
-                "rd": rd,
-                "rs": rs,
+                "ras_action": ras_action,
             }
         )
 
@@ -2101,17 +2604,18 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         if expected_type == 0:
             recorder.mark("ifu_predecode", "non_cfi_correct", cycle, {**evidence, "slot": item})
 
-        rd = (int(item["instr"]) >> 7) & 0x1F
-        rs1 = (int(item["instr"]) >> 15) & 0x1F
         ras_seen = getattr(recorder, "_ifu_predecode_ras_seen", set())
-        if expected_type in {2, 3} and rd in {1, 5} and item["rd"] == rd:
+        ras_action = item["ras_action"]
+        if (
+            expected_type in {2, 3}
+            and ras_action is not None
+            and int(ras_action) & 2
+        ):
             ras_seen.add("call")
         if (
             expected_type == 3
-            and rs1 in {1, 5}
-            and rd != rs1
-            and item["rd"] == rd
-            and item["rs"] == rs1
+            and ras_action is not None
+            and int(ras_action) & 1
         ):
             ras_seen.add("return")
         recorder._ifu_predecode_ras_seen = ras_seen

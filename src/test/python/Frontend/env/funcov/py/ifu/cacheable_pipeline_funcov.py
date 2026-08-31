@@ -474,14 +474,47 @@ def _sample_upstream_window_invariants(recorder, cycle: int) -> None:
 
 def _req_signal_names(index: int, field: str) -> tuple[str, ...]:
     return (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_{index}_{field}",
-        f"{_ICACHE_PREFIX}mainPipe.io_toIfu_req_bits_{index}_{field}",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_info_{index}_{field}",
+        f"{_ICACHE_PREFIX}mainPipe.io_toIfu_req_bits_info_{index}_{field}",
     )
 
 
 def _read_req_field(recorder, index: int, field: str) -> Optional[int]:
     value = _read_first(recorder, _req_signal_names(index, field))
     return None if value is None else int(value)
+
+
+def _read_req_top_field(recorder, field: str) -> Optional[int]:
+    value = _read_first(
+        recorder,
+        (
+            f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_{field}",
+            f"{_MAINPIPE_PREFIX}io_toIfu_req_bits_{field}",
+        ),
+    )
+    return None if value is None else int(value)
+
+
+def _read_req_data(recorder, index: int) -> Optional[int]:
+    chunks = []
+    for local_bank in range(8):
+        bank = int(index) * 8 + local_bank
+        data_index = 3 * bank + int(bank >= 8)
+        data_suffix = "" if bank == 0 else f"_{data_index}"
+        valid_suffix = f"_{data_index + 1}"
+        reg_suffix = "" if bank == 0 else f"_{bank}"
+        live = _read_first(
+            recorder,
+            (f"{_MAINPIPE_PREFIX}_s1_data_T{valid_suffix}",),
+        )
+        if live is None:
+            return None
+        stem = f"_s1_data_T{data_suffix}" if int(live) else f"s1_data_r{reg_suffix}"
+        chunk = _read_first(recorder, (f"{_MAINPIPE_PREFIX}{stem}",))
+        if chunk is None:
+            return None
+        chunks.append(int(chunk))
+    return sum(chunk << (64 * bank) for bank, chunk in enumerate(chunks))
 
 
 def _read_s1_field(recorder, index: int, field: str) -> Optional[int]:
@@ -510,7 +543,6 @@ def _request_snapshot(recorder) -> Optional[dict]:
                 "startVAddr_addr",
                 "takenCfiOffset_valid",
                 "takenCfiOffset_bits",
-                "range",
                 "size",
             ):
                 value = _read_req_field(recorder, index, field)
@@ -519,14 +551,24 @@ def _request_snapshot(recorder) -> Optional[dict]:
                 block[field] = int(value)
         blocks.append(block)
 
-    payload = {"blocks": blocks}
+    first_range = _read_req_top_field(recorder, "firstRange")
+    total_range = _read_req_top_field(recorder, "totalRange")
+    maybe_rvc_map = _read_req_top_field(recorder, "maybeRvcMap")
+    if None in {first_range, total_range, maybe_rvc_map}:
+        return None
+    payload = {
+        "blocks": blocks,
+        "firstRange": int(first_range),
+        "totalRange": int(total_range),
+        "maybeRvcMap": int(maybe_rvc_map),
+    }
     for index in range(2):
         if not blocks[index]["valid"]:
             continue
-        for field in ("data", "maybeRvcMap"):
-            value = _read_req_field(recorder, index, field)
-            if value is not None:
-                payload[f"req{index}_{field}"] = int(value)
+        data = _read_req_data(recorder, index)
+        if data is None:
+            return None
+        payload[f"req{index}_data"] = int(data)
     return payload
 
 
@@ -544,7 +586,6 @@ def _s1_snapshot(recorder) -> Optional[dict]:
                 "startVAddr_addr",
                 "takenCfiOffset_valid",
                 "takenCfiOffset_bits",
-                "range",
                 "size",
             ):
                 value = _read_s1_field(recorder, index, field)
@@ -552,10 +593,32 @@ def _s1_snapshot(recorder) -> Optional[dict]:
                     return None
                 block[field] = int(value)
         blocks.append(block)
-    return {"blocks": blocks}
+    first_range = _read_first(
+        recorder,
+        (f"{_IFU_PREFIX}s1_firstRange", f"{_IFU_PREFIX}__Vtogcov__s1_firstRange"),
+    )
+    total_range = _read_first(
+        recorder,
+        (f"{_IFU_PREFIX}s1_totalRange", f"{_IFU_PREFIX}__Vtogcov__s1_totalRange"),
+    )
+    if None in {first_range, total_range}:
+        return None
+    payload = {
+        "blocks": blocks,
+        "firstRange": int(first_range),
+        "totalRange": int(total_range),
+    }
+    for index, stem in enumerate(("s1_firstICacheData", "s1_secondICacheData")):
+        if not blocks[index]["valid"]:
+            continue
+        data = _read_first(recorder, (f"{_IFU_PREFIX}{stem}",))
+        if data is None:
+            return None
+        payload[f"req{index}_data"] = int(data)
+    return payload
 
 
-def _metadata_blocks(snapshot: dict) -> list[dict]:
+def _metadata_snapshot(snapshot: dict) -> dict:
     fields = (
         "valid",
         "ftqIdx_flag",
@@ -563,10 +626,20 @@ def _metadata_blocks(snapshot: dict) -> list[dict]:
         "startVAddr_addr",
         "takenCfiOffset_valid",
         "takenCfiOffset_bits",
-        "range",
         "size",
     )
-    return [{field: block[field] for field in fields if field in block} for block in snapshot["blocks"]]
+    result = {
+        "blocks": [
+            {field: block[field] for field in fields if field in block}
+            for block in snapshot["blocks"]
+        ],
+        "firstRange": snapshot["firstRange"],
+        "totalRange": snapshot["totalRange"],
+    }
+    for index, block in enumerate(snapshot["blocks"]):
+        if block.get("valid") == 1:
+            result[f"req{index}_data"] = snapshot[f"req{index}_data"]
+    return result
 
 
 def _record_mismatch(recorder, event: str, cycle: int, **details) -> None:
@@ -587,8 +660,8 @@ def _sample_verified_transfer(recorder, cycle: int, s1_snapshot: Optional[dict])
     if pending is None or s1_snapshot is None or _read_signal(recorder, "s1_valid") != 1:
         return
 
-    expected = _metadata_blocks(pending["snapshot"])
-    observed = _metadata_blocks(s1_snapshot)
+    expected = _metadata_snapshot(pending["snapshot"])
+    observed = _metadata_snapshot(s1_snapshot)
     if observed != expected:
         _record_mismatch(
             recorder,
@@ -615,7 +688,8 @@ def _sample_verified_transfer(recorder, cycle: int, s1_snapshot: Optional[dict])
             {**evidence, "pipeline_latency": 1},
         )
     recorder.mark("ifu_cacheable_s1", "source_ftq_address_matched", cycle, evidence)
-    second_valid = expected[1]["valid"] == 1
+    expected_blocks = expected["blocks"]
+    second_valid = expected_blocks[1]["valid"] == 1
     recorder.mark(
         "ifu_cacheable_window",
         "dual_block" if second_valid else "single_block",
@@ -625,7 +699,7 @@ def _sample_verified_transfer(recorder, cycle: int, s1_snapshot: Optional[dict])
     recorder.mark("ifu_cacheable_metadata", "first_ftq_preserved", cycle, evidence)
     if second_valid:
         recorder.mark("ifu_cacheable_metadata", "second_ftq_preserved", cycle, evidence)
-    if expected[0]["takenCfiOffset_valid"] == 0:
+    if expected_blocks[0]["takenCfiOffset_valid"] == 0:
         recorder.mark("ifu_cacheable_metadata", "not_taken_preserved", cycle, evidence)
     if (
         _read_signal(recorder, "s1_req_uncache") == 0
@@ -638,7 +712,7 @@ def _sample_verified_transfer(recorder, cycle: int, s1_snapshot: Optional[dict])
             evidence,
         )
 
-    valid_blocks = [block for block in expected if block.get("valid") == 1]
+    valid_blocks = [block for block in expected_blocks if block.get("valid") == 1]
     for block in valid_blocks:
         halfword_index = int(block["startVAddr_addr"]) & 0x1F
         if halfword_index <= 10:
@@ -734,7 +808,7 @@ def _sample_verified_transfer(recorder, cycle: int, s1_snapshot: Optional[dict])
             {**evidence, "previous": previous},
         )
     recorder._ifu_cacheable_last_verified = {"cycle": int(cycle), "source": expected}
-    for block in expected:
+    for block in expected_blocks:
         if block.get("valid") != 1:
             continue
         recorder._ifu_cacheable_verified_windows.append(

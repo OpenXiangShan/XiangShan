@@ -7,12 +7,14 @@ from env.funcov.py.ifu.owner_v3_funcov import (
     OWNER_V3_EVENT_TYPE,
 )
 from env.funcov.py.ifu.sampler import sample_cfvec_coverage
+from env.funcov.py.ifu.compact_funcov import _sample_frontend_trigger
 from env.funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_path
 from env.support.rvc_decoder import expand_rvc
 
 
 _PREFIX = "Frontend_top.Frontend.inner_ifu.__Vtogcov__"
 _FTQ_PREFIX = "Frontend_top.Frontend.inner_ftq."
+_TRIGGER_PREFIX = "Frontend_top.Frontend.inner_ifu.frontendTrigger."
 
 
 class _Signal:
@@ -234,9 +236,16 @@ def _set_ifu_output(
     dut.set(_PREFIX + "s2_instrCount", len(entries) if instr_count is None else instr_count)
     dut.set(_PREFIX + "s2_fire", 1)
     dut.set(_PREFIX + "s2_reqIsUncache", s2_req_is_uncache)
-    dut.set(_PREFIX + "s2_prevEndIsHalfRvi", s2_prev_end_is_half_rvi)
-    dut.set(_PREFIX + "s2_prevEndHalfPc_addr", int(s2_prev_end_half_pc) >> 1)
-    dut.set(_PREFIX + "s2_prevEndHalfRviData", s2_prev_end_half_data)
+    dut.set(
+        _PREFIX + "s2_prevEndIsHalfRviInfo_valid", s2_prev_end_is_half_rvi
+    )
+    dut.set(
+        _PREFIX + "s2_prevEndIsHalfRviInfo_bits_pc_addr",
+        int(s2_prev_end_half_pc) >> 1,
+    )
+    dut.set(
+        _PREFIX + "s2_prevEndIsHalfRviInfo_bits_data", s2_prev_end_half_data
+    )
     if s2_fetch_block_start_pc is None:
         s2_fetch_block_start_pc = entries[0][1]
     dut.set(
@@ -253,11 +262,20 @@ def _set_aligned_slot(dut, slot, entry, *, block_sel, branch_type, rd=0, rs=0):
     dut.set(_PREFIX + f"s2_alignedInstrPcVec_{slot}_addr", int(pc) >> 1)
     dut.set(_PREFIX + f"s2_alignedInstrVec_{slot}_isRvc", is_rvc)
     dut.set(_PREFIX + f"s2_alignedInstrVec_{slot}_blockSel", block_sel)
+    dut.set(_PREFIX + f"s2_alignedInstrVec_{slot}_isCrossBlockInstr", 0)
     dut.set(_PREFIX + f"s2_alignedInstrVec_{slot}_endOffset", end_offset)
     dut.set(_PREFIX + f"s2_expandedInstrDataVec_{slot}", instr)
     dut.set(_PREFIX + f"s2_alignedPdInfoVec_{slot}_brAttribute_branchType", branch_type)
-    dut.set(_PREFIX + f"s2_alignedPdInfoVec_{slot}_brAttribute_rd", rd)
-    dut.set(_PREFIX + f"s2_alignedPdInfoVec_{slot}_brAttribute_rs", rs)
+    link_rd = int(rd) in {1, 5}
+    link_rs = int(rs) in {1, 5}
+    has_push = (int(branch_type) == 2 and link_rd and not int(is_rvc)) or (
+        int(branch_type) == 3 and link_rd
+    )
+    has_pop = int(branch_type) == 3 and link_rs and int(rd) != int(rs)
+    dut.set(
+        _PREFIX + f"s2_alignedPdInfoVec_{slot}_brAttribute_rasAction",
+        (int(has_push) << 1) | int(has_pop),
+    )
 
 
 def _set_predchecker_request(dut, entries):
@@ -273,6 +291,10 @@ def _set_predchecker_request(dut, entries):
         dut.set(prefix + "invalidTaken", entry.get("invalid_taken", 0))
         dut.set(prefix + "isRvc", entry.get("is_rvc", 0))
         dut.set(prefix + "blockSel", entry.get("block_sel", 0))
+        dut.set(
+            prefix + "isCrossBlockInstr",
+            entry.get("is_cross_block_instr", 0),
+        )
         dut.set(prefix + "endOffset", entry.get("end_offset", slot))
         dut.set(
             _PREFIX
@@ -306,7 +328,11 @@ def _set_predchecker_redirect(dut, pending, *, target):
     dut.set(base + "bits_taken", 1)
     dut.set(base + "bits_invalidTaken", pending.get("invalid_taken", 0))
     dut.set(base + "bits_isRVC", pending.get("is_rvc", 0))
-    dut.set(base + "bits_selectBlock", pending.get("block_sel", 0))
+    dut.set(base + "bits_blockSel", pending.get("block_sel", 0))
+    dut.set(
+        base + "bits_isCrossBlockInstr",
+        pending.get("is_cross_block_instr", 0),
+    )
     dut.set(
         base + "bits_attribute_branchType",
         0 if pending.get("invalid_taken", 0) else pending.get("branch_type", 0),
@@ -394,19 +420,55 @@ def test_ifu_predchecker_v3_tracks_correct_jalr_forms_and_taken_offsets(tmp_path
     assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_076")
 
 
+def test_ifu_predchecker_v3_cross_block_bins_use_explicit_cross_flag(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+
+    _set_predchecker_request(
+        dut,
+        [{"slot": 15, "branch_type": 2, "end_offset": 15}],
+    )
+    sample_cfvec_coverage(recorder, env, 1)
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_078")
+
+    scenarios = (
+        (2, 0, "owner_leaf_078"),
+        (3, 0, "owner_leaf_084"),
+        (0, 1, "owner_leaf_087"),
+    )
+    for cycle, (branch_type, pred_taken, owner_leaf) in enumerate(
+        scenarios, start=2
+    ):
+        _set_predchecker_request(
+            dut,
+            [
+                {
+                    "slot": 15,
+                    "branch_type": branch_type,
+                    "pred_taken": pred_taken,
+                    "is_rvc": 0,
+                    "is_cross_block_instr": 1,
+                    "end_offset": 0,
+                }
+            ],
+        )
+        sample_cfvec_coverage(recorder, env, cycle)
+        assert recorder.key_hit("ifu_v3_boundary_owner_model", owner_leaf)
+
+
 def test_ifu_predchecker_v3_owner_priority_crosses_use_observed_slot_order(tmp_path):
     recorder, env, dut, _memory = _make_recorder(tmp_path)
     scenarios = (
         (
             [
                 {"slot": 0, "branch_type": 2},
-                {
-                    "slot": 1,
-                    "branch_type": 1,
-                    "pred_taken": 1,
-                    "end_offset": 15,
-                    "is_rvc": 0,
-                },
+                    {
+                        "slot": 1,
+                        "branch_type": 1,
+                        "pred_taken": 1,
+                        "is_rvc": 0,
+                        "is_cross_block_instr": 1,
+                        "end_offset": 0,
+                    },
             ],
             ("owner_leaf_079", "owner_leaf_080"),
         ),
@@ -784,7 +846,8 @@ def test_ifu_instr_boundary_tail_half_is_sampled_on_cacheable_s1_fire(tmp_path):
     dut.set(_PREFIX + "s1_flush", 0)
     dut.set(_PREFIX + "s1_reqIsUncache", 0)
     dut.set(_PREFIX + "s1_totalEndIsHalfRvi", 1)
-    dut.set(_PREFIX + "s1_totalEndPos", 31)
+    dut.set(_PREFIX + "s1_totalEndHalfRvi_bits_pc_addr", 0x4000001F)
+    dut.set(_PREFIX + "s1_totalEndHalfRvi_bits_data", 0xABCD)
 
     sample_cfvec_coverage(recorder, env, 1)
 
@@ -796,7 +859,8 @@ def test_ifu_pred_taken_indices_match_compacted_first_and_second_blocks(tmp_path
     recorder, env, dut, _memory = _make_recorder(tmp_path)
     for name, value in {
         "s1_valid": 1,
-        "s1_totalRawInstrValid": 0b1011,
+        "s1_rawInstrValid": 0b1011,
+        "s1_totalRange": 0b1111,
         "s1_firstRange": 0b0011,
         "s1_mergedPredTakenMask": 0b0010,
         "s1_fetchBlock_0_valid": 1,
@@ -1041,9 +1105,10 @@ def test_ifu_backend_redirect_clears_live_half_state_and_pointer(tmp_path):
         "s1_flush": 0,
         "s2_flush": 0,
         "s0_prevEndIsHalfRvi": 1,
-        "s1_prevEndHalfRviData": 0xABCD,
-        "s1_prevEndHalfRviPc_addr": 0x4000001F,
-        "s1_prevIBufEnqPtr_value": 7,
+        "s1_prevEndHalfRviInfo_valid": 1,
+        "s1_prevEndHalfRviInfo_bits_data": 0xABCD,
+        "s1_prevEndHalfRviInfo_bits_pc_addr": 0x4000001F,
+        "s1_prevIBufEnqPtrDup_dup_0_value": 7,
         "s1_valid": 1,
         "s2_valid_valid": 1,
     }.items():
@@ -1060,9 +1125,10 @@ def test_ifu_backend_redirect_clears_live_half_state_and_pointer(tmp_path):
         "s1_flush",
         "s2_flush",
         "s0_prevEndIsHalfRvi",
-        "s1_prevEndHalfRviData",
-        "s1_prevEndHalfRviPc_addr",
-        "s1_prevIBufEnqPtr_value",
+        "s1_prevEndHalfRviInfo_valid",
+        "s1_prevEndHalfRviInfo_bits_data",
+        "s1_prevEndHalfRviInfo_bits_pc_addr",
+        "s1_prevIBufEnqPtrDup_dup_0_value",
         "s1_valid",
         "s2_valid_valid",
     ):
@@ -1084,9 +1150,10 @@ def test_ifu_redirect_priority_and_wb_cleanup_use_observed_dut_signals(tmp_path)
         "s1_flush": 0,
         "s2_flush": 0,
         "s0_prevEndIsHalfRvi": 0,
-        "s1_prevEndHalfRviData": 0,
-        "s1_prevEndHalfRviPc_addr": 0,
-        "s1_prevIBufEnqPtr_value": 0,
+        "s1_prevEndHalfRviInfo_valid": 0,
+        "s1_prevEndHalfRviInfo_bits_data": 0,
+        "s1_prevEndHalfRviInfo_bits_pc_addr": 0,
+        "s1_prevIBufEnqPtrDup_dup_0_value": 0,
         "s1_valid": 1,
         "s2_valid_valid": 1,
     }.items():
@@ -1227,6 +1294,231 @@ def test_invalid_taken_fetch_exception_cross_is_stimulus_coverage(tmp_path):
     assert recorder.key_hit("ifu_invalid_taken_exception", "observed")
 
 
+def _set_frontend_trigger_config(
+    dut,
+    slot,
+    *,
+    match_type=0,
+    select=0,
+    timing=0,
+    action=0,
+    chain=0,
+    tdata2=0,
+):
+    values = {
+        "matchType": match_type,
+        "select": select,
+        "timing": timing,
+        "action": action,
+        "chain": chain,
+        "tdata2": tdata2,
+    }
+    for field, value in values.items():
+        dut.set(_TRIGGER_PREFIX + f"tdataVec_{slot}_{field}", value)
+    return values
+
+
+def _set_frontend_trigger_lane(
+    dut,
+    *,
+    pc,
+    hits,
+    can_fire,
+    triggered=15,
+    valid=True,
+):
+    dut.set(_PREFIX + "s2_valid_valid", int(valid))
+    dut.set(_PREFIX + "s2_flush", 0)
+    dut.set(_PREFIX + "s2_alignedInstrValid", 1 if valid else 0)
+    dut.set(_PREFIX + "s2_alignedInstrPcVec_0_addr", int(pc) >> 1)
+    dut.set(_PREFIX + "io_toIBuffer_bits_pc_0_addr", int(pc) >> 1)
+    for slot in range(4):
+        dut.set(_TRIGGER_PREFIX + f"triggerHitVec_0_{slot}", hits[slot])
+        dut.set(_TRIGGER_PREFIX + f"triggerCanFireVec_{slot}", can_fire[slot])
+    dut.set(_PREFIX + "io_toIBuffer_valid", int(valid))
+    dut.set(_PREFIX + "io_toIBuffer_ready", 1)
+    dut.set(_PREFIX + "io_toIBuffer_bits_enqEnable", 1 if valid else 0)
+    dut.set(_PREFIX + "io_toIBuffer_bits_triggered_0", triggered)
+
+
+def _drive_frontend_trigger_update(dut, slot, config):
+    dut.set(_PREFIX + "io_frontendTrigger_tUpdate_valid", 1)
+    dut.set(_PREFIX + "io_frontendTrigger_tUpdate_bits_addr", slot)
+    for field, value in config.items():
+        dut.set(_PREFIX + f"io_frontendTrigger_tUpdate_bits_tdata_{field}", value)
+
+
+def test_frontend_trigger_sampler_requires_checked_config_and_lane_results(tmp_path):
+    recorder, _env, dut, _memory = _make_recorder(tmp_path)
+    for slot in range(4):
+        _set_frontend_trigger_config(dut, slot)
+        dut.set(_TRIGGER_PREFIX + f"triggerEnableVec_{slot}", 0)
+    dut.set(_PREFIX + "io_frontendTrigger_tUpdate_valid", 0)
+    dut.set(_PREFIX + "io_frontendTrigger_tUpdate_bits_addr", 0)
+    for field in ("matchType", "select", "timing", "action", "chain", "tdata2"):
+        dut.set(_PREFIX + f"io_frontendTrigger_tUpdate_bits_tdata_{field}", 0)
+    dut.set(_PREFIX + "io_frontendTrigger_debugMode", 0)
+    dut.set(_PREFIX + "io_frontendTrigger_triggerCanRaiseBpExp", 1)
+    _set_frontend_trigger_lane(
+        dut, pc=0x80000000, hits=(0, 0, 0, 0), can_fire=(0, 0, 0, 0), valid=False
+    )
+    _sample_frontend_trigger(recorder, dut, 0)
+
+    target = 0x80000100
+    equal = _set_frontend_trigger_config(dut, 0, tdata2=target)
+    _drive_frontend_trigger_update(dut, 0, equal)
+    _set_frontend_trigger_lane(
+        dut,
+        pc=target + 2,
+        hits=(0, 0, 0, 0),
+        can_fire=(0, 0, 0, 0),
+    )
+    _sample_frontend_trigger(recorder, dut, 1)
+
+    dut.set(_PREFIX + "io_frontendTrigger_tUpdate_valid", 0)
+    _set_frontend_trigger_lane(
+        dut, pc=target, hits=(0, 0, 0, 0), can_fire=(0, 0, 0, 0)
+    )
+    _sample_frontend_trigger(recorder, dut, 2)
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_098")
+
+    dut.set(_TRIGGER_PREFIX + "triggerEnableVec_0", 1)
+    _set_frontend_trigger_lane(
+        dut, pc=target, hits=(1, 0, 0, 0), can_fire=(1, 0, 0, 0), triggered=0
+    )
+    _sample_frontend_trigger(recorder, dut, 3)
+
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_098")
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_099")
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_104")
+    _set_frontend_trigger_lane(
+        dut, pc=target + 2, hits=(0, 0, 0, 0), can_fire=(0, 0, 0, 0), triggered=15
+    )
+    _sample_frontend_trigger(recorder, dut, 4)
+
+    greater = _set_frontend_trigger_config(dut, 0, match_type=2, tdata2=target)
+    _drive_frontend_trigger_update(dut, 0, greater)
+    _set_frontend_trigger_lane(
+        dut, pc=target - 2, hits=(0, 0, 0, 0), can_fire=(0, 0, 0, 0)
+    )
+    _sample_frontend_trigger(recorder, dut, 5)
+    dut.set(_PREFIX + "io_frontendTrigger_tUpdate_valid", 0)
+    _set_frontend_trigger_lane(
+        dut, pc=target, hits=(1, 0, 0, 0), can_fire=(1, 0, 0, 0), triggered=0
+    )
+    _sample_frontend_trigger(recorder, dut, 6)
+
+    less = _set_frontend_trigger_config(dut, 0, match_type=3, tdata2=target)
+    _drive_frontend_trigger_update(dut, 0, less)
+    _set_frontend_trigger_lane(
+        dut, pc=target + 2, hits=(0, 0, 0, 0), can_fire=(0, 0, 0, 0)
+    )
+    _sample_frontend_trigger(recorder, dut, 7)
+    dut.set(_PREFIX + "io_frontendTrigger_tUpdate_valid", 0)
+    _set_frontend_trigger_lane(
+        dut, pc=target - 2, hits=(1, 0, 0, 0), can_fire=(1, 0, 0, 0), triggered=0
+    )
+    _sample_frontend_trigger(recorder, dut, 8)
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_100")
+
+    selected = _set_frontend_trigger_config(dut, 0, select=1, tdata2=target)
+    _drive_frontend_trigger_update(dut, 0, selected)
+    _set_frontend_trigger_lane(
+        dut, pc=target, hits=(0, 0, 0, 0), can_fire=(0, 0, 0, 0)
+    )
+    _sample_frontend_trigger(recorder, dut, 9)
+    dut.set(_PREFIX + "io_frontendTrigger_tUpdate_valid", 0)
+    debug = _set_frontend_trigger_config(dut, 0, tdata2=target)
+    _drive_frontend_trigger_update(dut, 0, debug)
+    dut.set(_PREFIX + "io_frontendTrigger_debugMode", 1)
+    _sample_frontend_trigger(recorder, dut, 10)
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_101")
+
+    dut.set(_PREFIX + "io_frontendTrigger_debugMode", 0)
+    first = _set_frontend_trigger_config(
+        dut, 0, timing=0, action=0, chain=1, tdata2=target
+    )
+    second = _set_frontend_trigger_config(
+        dut, 1, timing=0, action=1, chain=0, tdata2=target
+    )
+    dut.set(_TRIGGER_PREFIX + "triggerEnableVec_1", 1)
+    _drive_frontend_trigger_update(dut, 0, first)
+    _set_frontend_trigger_lane(
+        dut, pc=target, hits=(1, 1, 0, 0), can_fire=(0, 1, 0, 0), triggered=1
+    )
+    _sample_frontend_trigger(recorder, dut, 11)
+    _drive_frontend_trigger_update(dut, 1, second)
+    _sample_frontend_trigger(recorder, dut, 12)
+
+    second_mismatched = _set_frontend_trigger_config(
+        dut, 1, timing=1, action=1, chain=0, tdata2=target
+    )
+    _drive_frontend_trigger_update(dut, 1, second_mismatched)
+    _set_frontend_trigger_lane(
+        dut, pc=target, hits=(1, 1, 0, 0), can_fire=(0, 0, 0, 0), triggered=15
+    )
+    _sample_frontend_trigger(recorder, dut, 13)
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_102")
+
+    dut.set(_PREFIX + "io_frontendTrigger_tUpdate_valid", 0)
+    only_breakpoint = _set_frontend_trigger_config(
+        dut, 0, timing=0, action=0, chain=0, tdata2=target
+    )
+    _set_frontend_trigger_config(dut, 1)
+    dut.set(_TRIGGER_PREFIX + "triggerEnableVec_1", 0)
+    _drive_frontend_trigger_update(dut, 0, only_breakpoint)
+    _set_frontend_trigger_lane(
+        dut, pc=target, hits=(1, 0, 0, 0), can_fire=(1, 0, 0, 0), triggered=0
+    )
+    _sample_frontend_trigger(recorder, dut, 14)
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_103")
+
+
+def test_frontend_trigger_sampler_requires_held_pc_ftq_identity_at_redirect_flush(
+    tmp_path,
+):
+    recorder, _env, dut, _memory = _make_recorder(tmp_path)
+    target = 0x80000100
+    for slot in range(4):
+        _set_frontend_trigger_config(dut, slot)
+        dut.set(_TRIGGER_PREFIX + f"triggerEnableVec_{slot}", int(slot == 0))
+    _set_frontend_trigger_config(dut, 0, tdata2=target)
+    dut.set(_PREFIX + "io_frontendTrigger_tUpdate_valid", 0)
+    dut.set(_PREFIX + "io_frontendTrigger_debugMode", 0)
+    dut.set(_PREFIX + "io_frontendTrigger_triggerCanRaiseBpExp", 1)
+    dut.set(_PREFIX + "io_fromFtq_redirect_valid", 0)
+    _set_frontend_trigger_lane(
+        dut,
+        pc=target,
+        hits=(1, 0, 0, 0),
+        can_fire=(1, 0, 0, 0),
+        triggered=0,
+    )
+    dut.set(_PREFIX + "io_toIBuffer_ready", 0)
+    dut.set(_PREFIX + "io_toIBuffer_bits_ftqPtr_0_flag", 0)
+    dut.set(_PREFIX + "io_toIBuffer_bits_ftqPtr_0_value", 7)
+    _sample_frontend_trigger(recorder, dut, 1)
+
+    dut.set(_PREFIX + "io_fromFtq_redirect_valid", 1)
+    dut.set(_PREFIX + "s2_flush", 1)
+    dut.set(_PREFIX + "io_toIBuffer_valid", 0)
+    dut.set(_PREFIX + "io_toIBuffer_bits_ftqPtr_0_value", 8)
+    _sample_frontend_trigger(recorder, dut, 2)
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_105")
+
+    dut.set(_PREFIX + "io_fromFtq_redirect_valid", 0)
+    dut.set(_PREFIX + "s2_flush", 0)
+    dut.set(_PREFIX + "io_toIBuffer_valid", 1)
+    dut.set(_PREFIX + "io_toIBuffer_bits_ftqPtr_0_value", 7)
+    _sample_frontend_trigger(recorder, dut, 3)
+
+    dut.set(_PREFIX + "io_fromFtq_redirect_valid", 1)
+    dut.set(_PREFIX + "s2_flush", 1)
+    dut.set(_PREFIX + "io_toIBuffer_valid", 0)
+    _sample_frontend_trigger(recorder, dut, 4)
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_105")
+
+
 def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
     root = Path(__file__).resolve().parents[7]
     offset = root / "build-frontend/pylib-verilator/Frontend/Frontend_offset.yaml"
@@ -1259,8 +1551,10 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "s1_flush",
         _PREFIX + "s1_reqIsUncache",
         _PREFIX + "s1_totalEndIsHalfRvi",
-        _PREFIX + "s1_totalEndPos",
-        _PREFIX + "s1_totalRawInstrValid",
+        _PREFIX + "s1_totalEndHalfRvi_bits_pc_addr",
+        _PREFIX + "s1_totalEndHalfRvi_bits_data",
+        _PREFIX + "s1_rawInstrValid",
+        _PREFIX + "s1_totalRange",
         _PREFIX + "s1_firstRange",
         _PREFIX + "s1_mergedPredTakenMask",
         _PREFIX + "s1_fetchBlock_0_valid",
@@ -1273,9 +1567,9 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "s2_fire",
         _PREFIX + "s2_reqIsUncache",
         _PREFIX + "s2_alignShiftNum",
-        _PREFIX + "s2_prevEndIsHalfRvi",
-        _PREFIX + "s2_prevEndHalfPc_addr",
-        _PREFIX + "s2_prevEndHalfRviData",
+        _PREFIX + "s2_prevEndIsHalfRviInfo_valid",
+        _PREFIX + "s2_prevEndIsHalfRviInfo_bits_pc_addr",
+        _PREFIX + "s2_prevEndIsHalfRviInfo_bits_data",
         _PREFIX + "s2_fetchBlock_0_startVAddr_addr",
         _PREFIX + "wbRedirect_valid",
         _PREFIX + "uncacheRedirect_valid",
@@ -1284,11 +1578,19 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "s0_flush",
         _PREFIX + "s2_flush",
         _PREFIX + "s0_prevEndIsHalfRvi",
-        _PREFIX + "s1_prevEndHalfRviData",
-        _PREFIX + "s1_prevEndHalfRviPc_addr",
-        _PREFIX + "s1_prevIBufEnqPtr_value",
+        _PREFIX + "s1_prevEndHalfRviInfo_valid",
+        _PREFIX + "s1_prevEndHalfRviInfo_bits_data",
+        _PREFIX + "s1_prevEndHalfRviInfo_bits_pc_addr",
+        _PREFIX + "s1_prevIBufEnqPtrDup_dup_0_value",
         _PREFIX + "s2_valid_valid",
+        _PREFIX + "s2_alignedInstrValid",
+        _PREFIX + "io_frontendTrigger_tUpdate_valid",
+        _PREFIX + "io_frontendTrigger_tUpdate_bits_addr",
+        _PREFIX + "io_frontendTrigger_debugMode",
+        _PREFIX + "io_frontendTrigger_triggerCanRaiseBpExp",
         "Frontend_top.Frontend.inner_ifu.predChecker.invalidTakenNext",
+        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_blockSel",
+        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_isCrossBlockInstr",
         _FTQ_PREFIX + "ifuResolve_valid",
         _FTQ_PREFIX + "ifuResolve_bits_ftqIdx_value",
         _FTQ_PREFIX + "resolveQueue.io_bpuTrain_valid",
@@ -1305,7 +1607,40 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         for field in ("valid", "bits_cfiPosition", "bits_mispredict")
     }
     required |= {
+        _PREFIX + f"io_frontendTrigger_tUpdate_bits_tdata_{field}"
+        for field in ("matchType", "select", "timing", "action", "chain", "tdata2")
+    }
+    required |= {
+        _TRIGGER_PREFIX + f"tdataVec_{slot}_{field}"
+        for slot in range(4)
+        for field in ("matchType", "select", "timing", "action", "chain", "tdata2")
+    }
+    required |= {
+        _TRIGGER_PREFIX + f"triggerEnableVec_{slot}" for slot in range(4)
+    }
+    required |= {
+        _TRIGGER_PREFIX + f"triggerHitVec_{lane}_{slot}"
+        for lane in range(36)
+        for slot in range(3)
+    }
+    required |= {
+        _TRIGGER_PREFIX
+        + (f"triggerCanFireVec_{slot}" if lane == 0 else f"triggerCanFireVec_{lane}_{slot}")
+        for lane in range(36)
+        for slot in range(4)
+    }
+    required |= {
+        _PREFIX + f"s2_alignedInstrPcVec_{lane}_addr" for lane in range(36)
+    }
+    required |= {
+        _PREFIX + f"io_toIBuffer_bits_triggered_{lane}" for lane in range(36)
+    }
+    required |= {
         _FTQ_PREFIX + f"trainCache_bits_branches_{index}_valid"
         for index in range(8)
+    }
+    required |= {
+        _PREFIX + f"s2_alignedJumpOffsetVec_{index}_addr"
+        for index in range(35)
     }
     assert required <= names

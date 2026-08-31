@@ -7,32 +7,32 @@ _IFU_PREV_HALF_RVI_SIGNALS = (
         "TOP.Frontend_top.Frontend.inner_ifu.s0_prevEndIsHalfRvi",
     ),
     (
-        "Frontend_top.Frontend.inner_ifu.s1_prevEndIsHalfRvi",
-        "TOP.Frontend_top.Frontend.inner_ifu.s1_prevEndIsHalfRvi",
+        "Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviInfo_valid",
+        "TOP.Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviInfo_valid",
     ),
     (
-        "Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviData",
-        "TOP.Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviData",
+        "Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviInfo_bits_data",
+        "TOP.Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviInfo_bits_data",
     ),
     (
-        "Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviPc_addr",
-        "TOP.Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviPc_addr",
+        "Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviInfo_bits_pc_addr",
+        "TOP.Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviInfo_bits_pc_addr",
     ),
     (
-        "Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRvi",
-        "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRvi",
+        "Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_valid",
+        "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_valid",
     ),
     (
         "Frontend_top.Frontend.inner_ifu.s2_valid_valid",
         "TOP.Frontend_top.Frontend.inner_ifu.s2_valid_valid",
     ),
     (
-        "Frontend_top.Frontend.inner_ifu.s2_prevEndHalfRviData",
-        "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndHalfRviData",
+        "Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_bits_data",
+        "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_bits_data",
     ),
     (
-        "Frontend_top.Frontend.inner_ifu.s2_prevEndHalfPc_addr",
-        "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndHalfPc_addr",
+        "Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_bits_pc_addr",
+        "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_bits_pc_addr",
     ),
 )
 _IFU_BACKEND_REDIRECT_SIGNALS = (

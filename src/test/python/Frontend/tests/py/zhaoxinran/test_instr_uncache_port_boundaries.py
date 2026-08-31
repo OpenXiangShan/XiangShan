@@ -604,32 +604,32 @@ _IFU_PREV_HALF_RVI_SIGNALS = {
         "TOP.Frontend_top.Frontend.inner_ifu.s0_prevEndIsHalfRvi",
     ),
     "s1": (
-        "Frontend_top.Frontend.inner_ifu.s1_prevEndIsHalfRvi",
-        "TOP.Frontend_top.Frontend.inner_ifu.s1_prevEndIsHalfRvi",
+        "Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviInfo_valid",
+        "TOP.Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviInfo_valid",
     ),
     "s1_data": (
-        "Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviData",
-        "TOP.Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviData",
+        "Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviInfo_bits_data",
+        "TOP.Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviInfo_bits_data",
     ),
     "s1_pc": (
-        "Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviPc_addr",
-        "TOP.Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviPc_addr",
+        "Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviInfo_bits_pc_addr",
+        "TOP.Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviInfo_bits_pc_addr",
     ),
     "s2": (
-        "Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRvi",
-        "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRvi",
+        "Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_valid",
+        "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_valid",
     ),
     "s2_valid": (
         "Frontend_top.Frontend.inner_ifu.s2_valid_valid",
         "TOP.Frontend_top.Frontend.inner_ifu.s2_valid_valid",
     ),
     "s2_data": (
-        "Frontend_top.Frontend.inner_ifu.s2_prevEndHalfRviData",
-        "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndHalfRviData",
+        "Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_bits_data",
+        "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_bits_data",
     ),
     "s2_pc": (
-        "Frontend_top.Frontend.inner_ifu.s2_prevEndHalfPc_addr",
-        "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndHalfPc_addr",
+        "Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_bits_pc_addr",
+        "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_bits_pc_addr",
     ),
 }
 _IFU_BACKEND_REDIRECT_SIGNALS = (
@@ -2592,6 +2592,7 @@ def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
     # s2_valid rather than requiring the physically stale bits to be zero.
     assert any(
         int(sample["s0"]) == 0
+        and int(sample["s1"]) == 0
         and int(sample["s1_data"]) == 0
         and int(sample["s1_pc"]) == 0
         and int(sample["s2_valid"]) == 0
@@ -2705,6 +2706,7 @@ def test_uncache_cross_page_half_is_flushed_while_second_page_response_pending(e
     ]
     assert any(
         int(sample["s0"]) == 0
+        and int(sample["s1"]) == 0
         and int(sample["s1_data"]) == 0
         and int(sample["s1_pc"]) == 0
         and int(sample["s2_valid"]) == 0

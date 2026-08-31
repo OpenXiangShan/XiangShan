@@ -46,7 +46,7 @@ _NC_TIMING_SIGNALS = {
         "Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_exceptionType_value",
     ),
     "prev_end_half_rvi": (
-        "Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRvi",
+        "Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_valid",
     ),
     "wb_path_valid": (
         "Frontend_top.Frontend.inner_ifu.wbValid",

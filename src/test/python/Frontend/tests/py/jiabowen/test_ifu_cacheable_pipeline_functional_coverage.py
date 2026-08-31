@@ -88,11 +88,35 @@ def _set_request(
     ]
     for index, block in enumerate(blocks):
         for field, value in block.items():
-            if field in {"data", "maybeRvcMap"}:
-                name = f"{_ICACHE_PREFIX}mainPipe.io_toIfu_req_bits_{index}_{field}"
-            else:
-                name = f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_{index}_{field}"
-            dut.set(name, value)
+            if field in {"data", "maybeRvcMap", "range"}:
+                continue
+            dut.set(
+                f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_info_{index}_{field}",
+                value,
+            )
+        if block.get("valid"):
+            data = int(block["data"])
+            for local_bank in range(8):
+                bank = index * 8 + local_bank
+                reg_suffix = "" if bank == 0 else f"_{bank}"
+                data_index = 3 * bank + int(bank >= 8)
+                valid_suffix = f"_{data_index + 1}"
+                dut.set(f"{_ICACHE_PREFIX}mainPipe._s1_data_T{valid_suffix}", 0)
+                dut.set(
+                    f"{_ICACHE_PREFIX}mainPipe.s1_data_r{reg_suffix}",
+                    (data >> (64 * local_bank)) & ((1 << 64) - 1),
+                )
+    first_range = int(blocks[0].get("range", 0))
+    second_range = int(blocks[1].get("range", 0)) if blocks[1].get("valid") else 0
+    dut.set(f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_firstRange", first_range)
+    dut.set(
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_totalRange",
+        first_range | second_range,
+    )
+    dut.set(
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_maybeRvcMap",
+        int(blocks[0].get("maybeRvcMap", 0)),
+    )
     return blocks
 
 
@@ -106,7 +130,16 @@ def _set_s1(dut, blocks, *, valid=1, ready=1, fire=None, req_is_uncache=0, excep
         for field, value in block.items():
             if field in {"data", "maybeRvcMap"}:
                 continue
+            if field == "range":
+                continue
             dut.set(f"{_IFU_PREFIX}s1_fetchBlock_{index}_{field}", value)
+        if block.get("valid"):
+            stem = "s1_firstICacheData" if index == 0 else "s1_secondICacheData"
+            dut.set(f"{_IFU_PREFIX}{stem}", block["data"])
+    first_range = int(blocks[0].get("range", 0))
+    second_range = int(blocks[1].get("range", 0)) if blocks[1].get("valid") else 0
+    dut.set(f"{_IFU_PREFIX}s1_firstRange", first_range)
+    dut.set(f"{_IFU_PREFIX}s1_totalRange", first_range | second_range)
 
 
 def _idle_request(dut):
@@ -344,7 +377,7 @@ def test_cacheable_ingress_payload_must_stay_stable_while_backpressured(tmp_path
     assert recorder.key_hit("ifu_cacheable_ingress", "backpressure_payload_stable")
 
     dut.set(
-        f"{_ICACHE_PREFIX}mainPipe.io_toIfu_req_bits_0_data",
+        f"{_ICACHE_PREFIX}mainPipe.s1_data_r",
         0xDEADBEEF,
     )
     sample_ifu_cacheable_pipeline_coverage(recorder, env, 3)
@@ -483,13 +516,19 @@ def test_cacheable_sampler_signals_match_generated_contract():
     }
     required |= {
         _SIGNALS["wb_redirect"][0],
-        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_0_ftqIdx_flag",
-        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_0_startVAddr_addr",
-        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_1_valid",
-        f"{_ICACHE_PREFIX}mainPipe.io_toIfu_req_bits_0_data",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_info_0_ftqIdx_flag",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_info_0_startVAddr_addr",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_info_1_valid",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_firstRange",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_totalRange",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_maybeRvcMap",
         f"{_IFU_PREFIX}s1_fetchBlock_0_ftqIdx_flag",
         f"{_IFU_PREFIX}s1_fetchBlock_0_startVAddr_addr",
         f"{_IFU_PREFIX}s1_fetchBlock_1_valid",
+        f"{_IFU_PREFIX}s1_firstRange",
+        f"{_IFU_PREFIX}s1_totalRange",
+        f"{_IFU_PREFIX}s1_firstICacheData",
+        f"{_IFU_PREFIX}s1_secondICacheData",
         _UPSTREAM_SIGNALS["mainpipe_fire"][0],
         _UPSTREAM_SIGNALS["second_requested"][0],
         _UPSTREAM_SIGNALS["second_waylookup_valid"][0],
@@ -508,6 +547,18 @@ def test_cacheable_sampler_signals_match_generated_contract():
     required |= {
         f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask_{slot}"
         for slot in range(35)
+    }
+    required |= {
+        f"{_ICACHE_PREFIX}mainPipe._s1_data_T_{3 * bank + int(bank >= 8) + 1}"
+        for bank in range(16)
+    }
+    required |= {
+        f"{_ICACHE_PREFIX}mainPipe._s1_data_T{'' if bank == 0 else f'_{3 * bank + int(bank >= 8)}'}"
+        for bank in range(16)
+    }
+    required |= {
+        f"{_ICACHE_PREFIX}mainPipe.s1_data_r{'' if bank == 0 else f'_{bank}'}"
+        for bank in range(16)
     }
     assert required <= names
     assert len(IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS) == 30

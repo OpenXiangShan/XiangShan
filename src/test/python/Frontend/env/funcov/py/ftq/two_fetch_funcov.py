@@ -193,13 +193,13 @@ _TWO_FETCH_SIGNALS = {
         "Frontend_top.Frontend.inner_icache.mainPipe.io_toIfu_req_ready",
     ),
     "ifu_req1_valid": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_1_valid",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_1_valid",
     ),
     "ifu_req0_size": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_0_size",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_0_size",
     ),
     "ifu_first_taken": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_0_takenCfiOffset_valid",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_0_takenCfiOffset_valid",
     ),
     "ifu_first_invalid": (
         f"{_IFU_PREFIX}s1_invalidTaken_0",
@@ -228,8 +228,11 @@ _TWO_FETCH_SIGNALS = {
     "checker_valid": (
         "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage2Out_checkerRedirect_valid",
     ),
-    "checker_select": (
-        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_selectBlock",
+    "checker_block_sel": (
+        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_blockSel",
+    ),
+    "checker_cross_block": (
+        "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_isCrossBlockInstr",
     ),
     "checker_invalid": (
         "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_invalidTaken",
@@ -268,22 +271,22 @@ _TWO_FETCH_SIGNALS = {
         f"{_MAINPIPE_PREFIX}__Vtogcov__s1_isMmio",
     ),
     "ifu_req0_ftq_flag": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_0_ftqIdx_flag",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_0_ftqIdx_flag",
     ),
     "ifu_req0_ftq_value": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_0_ftqIdx_value",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_0_ftqIdx_value",
     ),
     "ifu_req1_ftq_flag": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_1_ftqIdx_flag",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_1_ftqIdx_flag",
     ),
     "ifu_req1_ftq_value": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_1_ftqIdx_value",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_1_ftqIdx_value",
     ),
     "ifu_req0_start": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_0_startVAddr_addr",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_0_startVAddr_addr",
     ),
     "ifu_req1_start": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_1_startVAddr_addr",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_info_1_startVAddr_addr",
     ),
     "ifu_s2_ftq0_flag": (
         f"{_IFU_PREFIX}s2_fetchBlock_0_ftqIdx_flag",
@@ -1205,20 +1208,33 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
             )
 
     checker_valid = _tf_read(recorder, "checker_valid")
-    checker_select = _tf_read(recorder, "checker_select")
+    checker_block_sel = _tf_read(recorder, "checker_block_sel")
+    checker_cross_block = _tf_read(recorder, "checker_cross_block")
     checker_invalid = _tf_read(recorder, "checker_invalid")
     fixed_instr_valid = _tf_read(recorder, "fixed_instr_valid")
     remask_fault_count = _tf_remask_fault_count(recorder)
     recent_dual = recorder._two_fetch_last_dual_cycle is not None and (
         cycle - int(recorder._two_fetch_last_dual_cycle)
     ) <= 8
-    if checker_valid == 1 and checker_select is not None and recent_dual:
+    if (
+        checker_valid == 1
+        and checker_block_sel is not None
+        and checker_cross_block is not None
+        and recent_dual
+    ):
+        checker_select = int(checker_block_sel) | int(checker_cross_block)
         selected_bin = "second_block" if int(checker_select) else "first_block"
         recorder.mark(
             "two_fetch_checker_redirect",
             selected_bin,
             cycle,
-            _tf_evidence("checker_redirect", select_block=int(checker_select), invalid_taken=checker_invalid),
+            _tf_evidence(
+                "checker_redirect",
+                block_sel=int(checker_block_sel),
+                is_cross_block_instr=int(checker_cross_block),
+                effective_select_block=int(checker_select),
+                invalid_taken=checker_invalid,
+            ),
         )
         if int(checker_select) == 0 and remask_fault_count is not None and remask_fault_count >= 2:
             recorder.mark(

@@ -211,8 +211,18 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "is_first": _read_ifu(recorder, dut, "isFirstInstr"),
         "req_valid": _read_uncache(recorder, dut, "io_req_valid"),
         "req_ready": _read_uncache(recorder, dut, "io_req_ready"),
-        "req_is_mmio": _read_uncache(recorder, dut, "io_req_bits_isMmio"),
-        "req_pbmt": _read_uncache(recorder, dut, "io_req_bits_pbmt"),
+        "req_is_mmio": _read(
+            recorder,
+            dut,
+            *(prefix + "io_req_bits_isMmio" for prefix in _UNCACHE_PREFIXES),
+            *(prefix + "s2_icacheMeta_0_pmpMmio" for prefix in _IFU_PREFIXES),
+        ),
+        "req_pbmt": _read(
+            recorder,
+            dut,
+            *(prefix + "io_req_bits_pbmt" for prefix in _UNCACHE_PREFIXES),
+            *(prefix + "s2_icacheMeta_0_itlbPbmt" for prefix in _IFU_PREFIXES),
+        ),
         "uncache_state": _read_uncache(recorder, dut, "uncacheState"),
         "ifu_stall": _read_uncache(recorder, dut, "io_ifuStall"),
         "to_uncache_valid": _read(
@@ -363,9 +373,15 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
         "wb_ftq_value": _read_ifu(recorder, dut, "wbAlignFetchBlock_0_ftqIdx_value"),
         "wb_pc": _read_ifu(recorder, dut, "wbAlignFetchBlock_0_startVAddr_addr"),
         "branch_type": _read_ifu(recorder, dut, "brAttribute_branchType"),
-        "prev_end_half": _read_ifu(recorder, dut, "s2_prevEndIsHalfRvi"),
-        "prev_half_data": _read_ifu(recorder, dut, "s2_prevEndHalfRviData"),
-        "prev_half_pc": _read_ifu(recorder, dut, "s2_prevEndHalfPc_addr"),
+        "prev_end_half": _read_ifu(
+            recorder, dut, "s2_prevEndIsHalfRviInfo_valid"
+        ),
+        "prev_half_data": _read_ifu(
+            recorder, dut, "s2_prevEndIsHalfRviInfo_bits_data"
+        ),
+        "prev_half_pc": _read_ifu(
+            recorder, dut, "s2_prevEndIsHalfRviInfo_bits_pc_addr"
+        ),
         "uncache_pc": _read_ifu(recorder, dut, "uncachePc_addr"),
         "wfi_safe": _read(recorder, dut, "Frontend_top.io_backend_wfi_wfiSafe"),
         "wfi_req": _read(
