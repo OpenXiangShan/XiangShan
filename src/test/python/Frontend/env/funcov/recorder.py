@@ -74,6 +74,18 @@ def default_pilot_csv_path() -> Path:
     return _frontend_root() / "docs" / "03_funcov_model" / "frontend_bt_functional_coverage_pilot.csv"
 
 
+def _decode_signal_inventory_name(value: str) -> str:
+    raw = str(value).strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] == '"':
+        try:
+            return str(json.loads(raw))
+        except ValueError:
+            return raw
+    if len(raw) >= 2 and raw[0] == raw[-1] == "'":
+        return raw[1:-1].replace("''", "'")
+    return raw
+
+
 def _sanitize(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
@@ -781,7 +793,9 @@ class FunctionalCoverageRecorder:
             with offset_yaml.open("r", encoding="utf-8") as f:
                 for line in f:
                     if line.startswith(prefix):
-                        signals.add(line[len(prefix) :].strip())
+                        signals.add(
+                            _decode_signal_inventory_name(line[len(prefix) :])
+                        )
         except OSError:
             return None
         return signals
