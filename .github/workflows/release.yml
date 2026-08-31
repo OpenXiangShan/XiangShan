@@ -144,6 +144,9 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
     runs-on: ubuntu-latest
+    env:
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
     container:
       image: ghcr.io/openxiangshan/xs-env:ubuntu-24.04
       volumes:
