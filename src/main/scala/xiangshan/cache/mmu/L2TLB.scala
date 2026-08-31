@@ -1244,6 +1244,23 @@ class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     )
     helperResult.fillS2Resp(io.tlb(i).resp.bits.s2, vpnDelayed, s2xlateReg, io.csr.tlb.hgatp.vmid)
     io.tlb(i).resp.bits.s2xlate := s2xlateReg
+
+    // Keep the fake PTW boundary observable without modeling eliminated hardware events.
+    val req = io.tlb(i).req(0)
+    val resp = io.tlb(i).resp
+    val respFault = resp.bits.s1.pf || resp.bits.s1.af ||
+      resp.bits.s2.gpf || resp.bits.s2.gaf
+    XSPerfAccumulate(s"req_count${i}", req.fire)
+    XSPerfAccumulate(s"req_blocked_count_${i}", req.valid && !req.ready)
+    XSPerfAccumulate(s"resp_count${i}", resp.fire)
+    XSPerfAccumulate(s"resp_fault_count${i}", resp.fire && respFault)
+    XSPerfAccumulate(s"resp_pf_count${i}", resp.fire && resp.bits.s1.pf)
+    XSPerfAccumulate(s"resp_gpf_count${i}", resp.fire && resp.bits.s2.gpf)
+    XSPerfAccumulate(s"req_inflight_cycle${i}", !empty)
+    XSPerfAccumulate(s"req_no_s2xlate_count${i}", req.fire && req.bits.s2xlate === noS2xlate)
+    XSPerfAccumulate(s"req_only_stage1_count${i}", req.fire && req.bits.s2xlate === onlyStage1)
+    XSPerfAccumulate(s"req_only_stage2_count${i}", req.fire && req.bits.s2xlate === onlyStage2)
+    XSPerfAccumulate(s"req_all_stage_count${i}", req.fire && req.bits.s2xlate === allStage)
   }
   io.wfi.wfiSafe := true.B
 }

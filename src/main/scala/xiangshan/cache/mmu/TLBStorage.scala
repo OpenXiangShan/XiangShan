@@ -386,7 +386,18 @@ class TLBFakeFA(
       resp.bits.g_pbmt(d) := s2RespPte.pbmt
       resp.bits.s2xlate(d) := s2xlateReg
     }
+
+    // Keep the fake storage boundary observable without modeling eliminated hardware events.
+    XSPerfAccumulate(s"req_count${i}", req.fire)
+    XSPerfAccumulate(s"helper_req_count${i}", helperEnable)
+    XSPerfAccumulate(s"resp_count${i}", resp.valid)
+    XSPerfAccumulate(s"hit_count${i}", resp.valid && resp.bits.hit)
+    XSPerfAccumulate(s"resp_pf_count${i}", resp.valid && resp.bits.hit && helperResult.hasPf)
+    XSPerfAccumulate(s"resp_gpf_count${i}", resp.valid && resp.bits.hit && helperResult.hasGpf)
   }
+
+  XSPerfAccumulate("access", io.r.resp.map(_.valid.asUInt).fold(0.U)(_ + _))
+  XSPerfAccumulate("hit", io.r.resp.map(a => a.valid && a.bits.hit).fold(0.U)(_.asUInt + _.asUInt))
 
   io.access := DontCare
 }
