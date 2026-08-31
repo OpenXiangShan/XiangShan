@@ -1,6 +1,5 @@
-from types import SimpleNamespace
-
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner
+from env.funcov.recorder import _decode_signal_inventory_name
 
 
 class _Recorder:
@@ -44,6 +43,18 @@ def test_sampler_contract_has_39_mmio_and_39_nc_leaf_bins():
         )
         == 39
     )
+
+
+def test_signal_inventory_name_decoder_handles_yaml_quoted_aliases():
+    assert _decode_signal_inventory_name(
+        '"uncacheUnit.io_req_bits_isMmio"'
+    ) == "uncacheUnit.io_req_bits_isMmio"
+    assert _decode_signal_inventory_name(
+        "'uncacheUnit.io_req_bits_pbmt'"
+    ) == "uncacheUnit.io_req_bits_pbmt"
+    assert _decode_signal_inventory_name(
+        "Frontend_top.Frontend.inner_ifu.s2_valid"
+    ) == "Frontend_top.Frontend.inner_ifu.s2_valid"
 
 
 def test_snapshot_reads_current_verilator_derived_aliases():
