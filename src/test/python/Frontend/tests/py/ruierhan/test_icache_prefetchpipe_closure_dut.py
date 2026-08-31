@@ -275,58 +275,6 @@ def test_tc_icache_prefetch_s0_redirect(prefetchpipe_env) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-777", "BIN-673")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_tc_icache_prefetch_bpu_boundaries(prefetchpipe_env) -> None:
-    pytest.xfail(
-        "the top-level test API cannot select the BPU stage3 FTQ pointer needed "
-        "for deterministic prefetch s0-miss and resident-s2 boundaries"
-    )
-    env = prefetchpipe_env
-    _initialize_bpu_s3_stream(env)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=256,
-        miss_rate=1.0,
-        seed=0x6777,
-    )
-    targets = {
-        ("icache_prefetchpipe_s0_entry", "bpu_flush_miss_allows_hw"),
-        ("icache_prefetchpipe_s2_miss", "bpu_flush_keeps_s2"),
-    }
-    predictor_disabled = False
-    disabled_at = -1
-    try:
-        for _ in range(8192):
-            if all(_hit(env, *target) for target in targets):
-                break
-            active_window = (
-                _signal(env, "from_valid") == 1
-                or _signal(env, "s1_valid") == 1
-                or _signal(env, "s2_valid") == 1
-            )
-            if active_window and not predictor_disabled:
-                env.set_bp_ctrl_enable(
-                    ubtb_enable=0,
-                    abtb_enable=0,
-                    mbtb_enable=0,
-                    tage_enable=0,
-                    sc_enable=0,
-                    ittage_enable=0,
-                )
-                predictor_disabled = True
-                disabled_at = int(env.current_cycle)
-            elif predictor_disabled and int(env.current_cycle) - disabled_at >= 6:
-                _restore_predictors(env)
-                predictor_disabled = False
-            env.step(1)
-    finally:
-        _restore_predictors(env)
-
-    _wait_bins(env, targets, max_cycles=1)
-    assert not env.monitor.get_errors()
-
-
 @pytest.mark.funcov_bins("BIN-655")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetch_soft_bpu(prefetchpipe_env) -> None:
@@ -567,15 +515,6 @@ def test_tc_icache_prefetch_corrupt_refill(prefetchpipe_env) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-683")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_tc_icache_prefetch_clean_mshr(prefetchpipe_env) -> None:
-    pytest.xfail(
-        "MissUnit dedup makes an exact clean-refill match mutually exclusive "
-        "with prefetchReq backpressure: a matching MSHR forces ready high"
-    )
-
-
 @pytest.mark.funcov_bins("BIN-771", "BIN-772", "BIN-778", "BIN-780")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_large_loop_layout(prefetchpipe_env) -> None:
@@ -591,62 +530,6 @@ def test_tc_icache_prefetchpipe_large_loop_layout(prefetchpipe_env) -> None:
         ],
         max_cycles=6000,
     )
-    assert not env.monitor.get_errors()
-
-
-@pytest.mark.funcov_bins("BIN-779")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_tc_icache_prefetchpipe_overlap2_layout(prefetchpipe_env) -> None:
-    pytest.xfail(
-        "the current public frontend workload generators do not emit the "
-        "two-prefetch overlap2 FTQ layout"
-    )
-
-
-@pytest.mark.funcov_bins("BIN-679", "BIN-680")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_tc_icache_prefetch_queue_backpressure(prefetchpipe_env) -> None:
-    pytest.xfail(
-        "BIN-680 requires a 32-entry-full WayLookup, but this DUT config limits "
-        "frontend run-ahead to 8; BIN-679 also needs a public MetaArray-ready "
-        "backpressure control that the top-level API does not expose"
-    )
-    env = prefetchpipe_env
-    _initialize_bpu_s3_stream(env)
-    _load_nops(env, _SOFT_BASE)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=128,
-        miss_rate=1.0,
-        seed=0x6680,
-    )
-    env.backend_model.set_can_accept(0)
-    targets = {
-        ("icache_prefetchpipe_s1_meta", "meta_resend_backpressure_recovery"),
-        ("icache_prefetchpipe_s1_meta", "waylookup_backpressure_recovery"),
-    }
-    released = False
-    for attempt in range(16384):
-        if all(_hit(env, *target) for target in targets):
-            break
-        occupancy = _signal(env, "waylookup_num_valid")
-        if occupancy == 32 and not released:
-            env.step(4)
-            env.backend_model.set_can_accept(1)
-            released = True
-        elif attempt % 32 == 0:
-            env.backend_model.inject_redirect(
-                _SOFT_BASE + 0x1000 + ((attempt // 32) % 64) * 0x40,
-                "ctrl_redirect",
-                delay_cycles=0,
-            )
-            env.step(1)
-        else:
-            env.step(1)
-    if not released:
-        env.backend_model.set_can_accept(1)
-        env.step(64)
-    _wait_bins(env, targets, max_cycles=1024)
     assert not env.monitor.get_errors()
 
 

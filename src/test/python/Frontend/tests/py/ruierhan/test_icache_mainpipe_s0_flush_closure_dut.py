@@ -359,39 +359,6 @@ def _drive_bpu_s3_until_hit(env, bin_name: str, *, max_cycles: int) -> None:
     }
 
 
-@pytest.mark.funcov_bins("BIN-606")
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_tc_icache_mainpipe_s0_bpu_match(env) -> None:
-    pytest.xfail(
-        "the top-level test API cannot select the BPU stage3 FTQ pointer needed "
-        "to match the concurrent MainPipe s0 entry"
-    )
-    _require_bpu_s3_ftq_observable(env)
-    samples: list[dict] = []
-    env.register_cycle_observer(
-        lambda _cycle, active_env: samples.append(_snapshot(active_env))
-    )
-    _initialize_bpu_s3_stream(env)
-    _drive_bpu_s3_until_hit(
-        env,
-        "bpu_match_cancels_entry",
-        max_cycles=_cycle_limit("TB_ICACHE_S0_BPU_MATCH_MAX_CYCLES", 2048),
-    )
-    assert any(
-        sample["ftq_valid"] == 1
-        and sample["from_valid"] == 1
-        and sample["io_flush"] == 0
-        and sample["bpu_valid"] == 1
-        and sample["s0_flush"] == 1
-        and sample["data_ready"] == 1
-        and sample["s1_ready"] == 1
-        and sample["s0_fire"] == 0
-        and _bpu_matches_s0(sample)
-        for sample in samples
-    ), {"tail": samples[-64:]}
-    assert not env.monitor.get_errors()
-
-
 @pytest.mark.funcov_bins("BIN-607", "BIN-749")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_s0_bpu_miss(env) -> None:
