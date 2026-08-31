@@ -113,9 +113,10 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
     val offset = PopCount(io.allocateReq.take(i))
 
     if (enablePreAlloc) {
-      val deqPtr = headPtr + numAllocate + offset
-      io.canAllocate(i) := RegEnable(isBefore(deqPtr, tailPtr), enablePreAlloc.B)
-      io.allocateSlot(i) := RegEnable(freeList(deqPtr.value), enablePreAlloc.B)
+      val preAllocateNum = numAllocate +& offset
+      val preAllocatePtr = headPtr + preAllocateNum
+      io.canAllocate(i) := RegEnable(isBefore(preAllocatePtr, tailPtr), enablePreAlloc.B)
+      io.allocateSlot(i) := RegEnable(freeList(preAllocatePtr.value), enablePreAlloc.B)
     } else {
       val deqPtr = headPtr + offset
       io.canAllocate(i) := isBefore(deqPtr, tailPtr)
