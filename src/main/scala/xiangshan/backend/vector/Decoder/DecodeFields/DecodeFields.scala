@@ -226,10 +226,10 @@ object SplitTypeField extends DecodeField[RVVInstWithConfigPattern, SplitType.Ty
     else if (op.name.startsWithThese(prefixesMap(SplitType.VVM))) {
       splitType = SplitType.VVM
     }
-    else if (
-      op.name.startsWithThese("VN") && op.name.endsWithThese("_WX", "_WI", "_WV") ||
-        op.name.startsWithThese("VFNCVT")
-    ) {
+    else if (op.name.startsWithThese("VFNCVT")) {
+      splitType = SplitType.VFNCVT
+    }
+    else if (op.name.startsWithThese("VN") && op.name.endsWithThese("_WX", "_WI", "_WV")) {
       splitType = SplitType.WVV
     }
     else if (
@@ -406,10 +406,10 @@ object SplitTypeOHField extends DecodeField[RVVInstWithConfigPattern, SplitTypeO
     else if (op.name.startsWithThese(prefixesMap(SplitType.VVM))) {
       splitType = SplitType.VVM
     }
-    else if (
-      op.name.startsWithThese("VN") && op.name.endsWithThese("_WX", "_WI", "_WV") ||
-        op.name.startsWithThese("VFNCVT")
-    ) {
+    else if (op.name.startsWithThese("VFNCVT")) {
+      splitType = SplitType.VFNCVT
+    }
+    else if (op.name.startsWithThese("VN") && op.name.endsWithThese("_WX", "_WI", "_WV")) {
       splitType = SplitType.WVV
     }
     else if (
@@ -600,6 +600,14 @@ object SrcSplitSelectField extends DecodeField[UopLmulNfSplitOHPattern, Vec[SrcD
       if (lmulValue * 2 <= 8) {
         for (i <- 0 until (1.0 max (lmulValue * 2)).toInt) {
           uops(i) = genBitPat(_.VS2, i) ## genBitPat(_.VS1, i / 2) ## genBitPat(_.VD, i / 2)
+        }
+      }
+    }
+    else if (splitTypeValue == SplitType.VFNCVT.litValue) {
+      val numUop = (1.0 max lmulValue).toInt
+      if (numUop * 2 <= 8) {
+        for (i <- 0 until numUop) {
+          uops(i) = genBitPat(_.VS2, 2 * i) ## genBitPat(_.VS2, 2 * i + 1) ## genBitPat(_.VD, i)
         }
       }
     }

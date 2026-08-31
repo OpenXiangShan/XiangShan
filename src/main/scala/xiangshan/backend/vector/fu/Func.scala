@@ -158,7 +158,7 @@ object Func {
     val vxsatE8: Option[Vec[UInt]] = Option.when(cfg.writeVxsat)(Vec(vlenb, Vxsat()))
     val narrowVxsatE8: Option[Vec[UInt]] = Option.when(cfg.writeVxsat)(Vec(vlenb / 2, Vxsat()))
     val fflagsE8: Option[Vec[UInt]] = Option.when(cfg.writeFflags)(Vec(vlenb, Fflags()))
-    val narrowFflagsE8: Option[Vec[UInt]] = Option.when(cfg.writeFflags)(Vec(vlenb, Fflags()))
+    val narrowFflagsE8: Option[Vec[UInt]] = Option.when(cfg.writeFflags)(Vec(vlenb / 2, Fflags()))
 
     // Todo: floatpoint data before normalizing
   }
