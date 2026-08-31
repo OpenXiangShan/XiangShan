@@ -192,6 +192,16 @@ case class VecFuConfig (
     FuType.vsha256c,
   )
 
+  def needWidenOut: Boolean = FuType.FuTypeOrR(
+    this.fuType,
+    FuType.vialu,
+  )
+
+  def needNarrowOut: Boolean = FuType.FuTypeOrR(
+    this.fuType,
+    FuType.vialu,
+  )
+
   def isSta: Boolean = name.contains("sta")
 
   def isStd: Boolean = name.contains("std")
