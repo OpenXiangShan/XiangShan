@@ -161,6 +161,17 @@ class MainBtbAlignBank(
     raw && e.entry.position >= s1_alignedInstOffset && !s1_crossPage
   })
 
+  // Only expose the earliest VBTB hit from each align bank. PriorityEncoderOH
+  // provides a deterministic physical-way tie break for equal positions.
+  private val s1_vbtbInvalidPosition = Fill(CfiAlignedPositionWidth, 1.U(1.W))
+  private val s1_vbtbMinPosition = (s1_vbtbHitMask zip s1_vbtbEntries).map { case (hit, e) =>
+    Mux(hit, e.entry.position, s1_vbtbInvalidPosition)
+  }.reduce((a, b) => Mux(a <= b, a, b))
+  private val s1_vbtbMinHitMask = VecInit((s1_vbtbHitMask zip s1_vbtbEntries).map { case (hit, e) =>
+    hit && e.entry.position === s1_vbtbMinPosition
+  })
+  private val s1_vbtbSelectOH = PriorityEncoderOH(s1_vbtbMinHitMask.asUInt)
+
   io.read.mbtbResp.positions := VecInit(s1_rawEntries.map(e => Cat(s1_posHigherBits, e.position)))
   io.read.vbtbResp.positions := VecInit(s1_vbtbEntries.map(e => Cat(s1_posHigherBits, e.entry.position)))
 
@@ -179,8 +190,8 @@ class MainBtbAlignBank(
   private val s2_rawEntries       = RegEnable(s1_rawEntries, s1_fire)
   private val s2_rawCounters      = RegEnable(s1_rawCounters, s1_fire)
   private val s2_vbtbEntries      = RegEnable(s1_vbtbEntries, s1_fire)
-  private val s2_vbtbRawHitMask   = RegEnable(s1_vbtbRawHitMask, s1_fire)
   private val s2_vbtbHitMask      = RegEnable(s1_vbtbHitMask, s1_fire)
+  private val s2_vbtbSelectOH     = RegEnable(s1_vbtbSelectOH, s1_fire)
 
   private val s2_setIdx = getSetIndex(s2_startPc)
   private val s2_tag    = getTag(s2_startPc)
@@ -212,21 +223,26 @@ class MainBtbAlignBank(
   }
   (r.vbtbResp.predictions zip r.vbtbResp.metas).zipWithIndex.foreach {
     case ((pred, meta), i) =>
-      // send rawHit for training
-      val rawHit = s2_vbtbRawHitMask(i)
-      val hit    = s2_vbtbHitMask(i)
-      val e      = s2_vbtbEntries(i)
-      pred.valid            := hit
+      val selected = s2_vbtbSelectOH(i)
+      val e        = s2_vbtbEntries(i)
+      pred.valid            := selected
       pred.bits.cfiPosition := Cat(s2_posHigherBits, e.entry.position)
       pred.bits.target      := getFullTarget(s2_startPc, e.entry.targetLowerBits, e.entry.targetCarry)
       pred.bits.attribute   := e.entry.attribute
       pred.bits.taken       := e.counter.isPositive
 
-      meta.rawHit    := rawHit
+      // Non-selected hits are not prediction candidates and must not be visible
+      // to TAGE/SC training through MainBtbMeta.
+      meta.rawHit    := selected
       meta.attribute := e.entry.attribute
       meta.position  := Cat(s2_posHigherBits, e.entry.position)
       meta.counter   := e.counter
   }
+
+  assert(
+    !s2_fire || PopCount(r.vbtbResp.predictions.map(_.valid)) <= 1.U,
+    "VBTB should output at most one hit per align bank"
+  )
 
   // add an alias for hitMask for later use & debug purpose
   private val s2_hitMask = VecInit(r.mbtbResp.predictions.map(_.valid))
