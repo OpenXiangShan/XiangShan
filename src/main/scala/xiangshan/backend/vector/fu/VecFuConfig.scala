@@ -195,11 +195,13 @@ case class VecFuConfig (
   def needWidenOut: Boolean = FuType.FuTypeOrR(
     this.fuType,
     FuType.vialu,
+    FuType.vfcvt,
   )
 
   def needNarrowOut: Boolean = FuType.FuTypeOrR(
     this.fuType,
     FuType.vialu,
+    FuType.vfcvt,
   )
 
   def isSta: Boolean = name.contains("sta")
