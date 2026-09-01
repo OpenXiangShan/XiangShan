@@ -1992,7 +1992,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     ("load_to_load_forward    ", s1_fire && s1_try_ptr_chasing && !s1_ptr_chasing_canceled      ),
     ("stall_dcache            ", s0_valid && s0_can_go && !io.dcache.req.ready                  ),
     ("load_s1_in_fire         ", s0_fire                                                        ),
-    ("load_s1_tlb_miss        ", s1_fire && io.tlb.resp.bits.miss                               ),
+    ("load_s1_tlb_miss        ", s1_fire && s1_tlb_miss                                         ),
     ("load_s2_in_fire         ", s1_fire                                                        ),
     ("load_s2_dcache_miss     ", s2_fire && io.dcache.resp.bits.miss                            ),
     ("l1D_load_hw_prf_access  ", s2_fire && s2_hw_prf                                           ),// Only hw prf
