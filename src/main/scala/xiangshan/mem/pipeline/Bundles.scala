@@ -268,6 +268,7 @@ class StorePipeBundle(
   val size = UInt(MemorySize.Size.width.W)
   val mask = UInt((VLEN/8).W)
   val isFirstIssue = Bool()
+  val illegalIssue = Bool()
 
   // StoreSet
   val ssid = Option.when(param.hasStoreSet)(UInt(SSIDWidth.W))
