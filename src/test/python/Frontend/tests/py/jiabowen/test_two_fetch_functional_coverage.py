@@ -118,6 +118,16 @@ def _set_dual_ibuffer_entries(dut, first_tag: tuple[int, int], second_tag: tuple
 
 
 class _Memory:
+    def __init__(self):
+        self._bytes = {}
+
+    def write16(self, address, value):
+        for offset in range(2):
+            self._bytes[int(address) + offset] = (int(value) >> (8 * offset)) & 0xFF
+
+    def read_u8(self, address):
+        return self._bytes.get(int(address), 0)
+
     @staticmethod
     def is_mmio(_addr):
         return False
@@ -314,6 +324,125 @@ def test_two_fetch_ftq_eligibility_and_pointer_bins(tmp_path):
     assert recorder.key_hit("two_fetch_pointer_advance", "wrap_step_two")
 
 
+def test_two_fetch_s0_accept_preserves_redirect_owner_before_s1(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    dut.set_key("ftq_valid", 1)
+    dut.set_key("ftq_ready", 1)
+    dut.set_key("ftq_req1_valid", 1)
+    dut.set_key("main_s0_fire", 1)
+    dut.set_key("ftq_req0_ftq_flag", 0)
+    dut.set_key("ftq_req0_ftq_value", 20)
+    dut.set_key("ftq_req1_ftq_flag", 0)
+    dut.set_key("ftq_req1_ftq_value", 21)
+    dut.set_key("backend_redirect", 0)
+    dut.set_key("backend_redirect_target", 0)
+    dut.set_key("to_ibuffer_valid", 0)
+    dut.set_key("to_ibuffer_ready", 0)
+
+    sample_two_fetch_coverage(recorder, env, 1)
+
+    assert recorder._two_fetch_recent_inflight_tags == {
+        "tags": ((0, 20), (0, 21)),
+        "cycle": 1,
+        "stage": "main_s0_accept",
+        "has_miss": None,
+        "pattern": None,
+    }
+
+    dut.set_key("ftq_valid", 0)
+    dut.set_key("main_s0_fire", 0)
+    dut.set_key("backend_redirect", 1)
+    dut.set_key("backend_redirect_target", 0x80000100)
+    sample_two_fetch_coverage(recorder, env, 2)
+
+    assert recorder._two_fetch_redirect_pending["old_tags"] == ((0, 20), (0, 21))
+    assert recorder._two_fetch_redirect_pending["target"] == 0x80000100
+
+    dut.set_key("backend_redirect", 0)
+    dut.set_key("to_ibuffer_valid", 1)
+    dut.set_key("to_ibuffer_ready", 1)
+    base = "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_"
+    dut.set(base + "enqEnable", 1)
+    dut.set(base + "pc_0_addr", 0x80000100 >> 1)
+    dut.set(base + "isRvc_0", 1)
+    dut.set(base + "ftqPtr_0_flag", 0)
+    dut.set(base + "ftqPtr_0_value", 21)
+    sample_two_fetch_coverage(recorder, env, 3)
+
+    assert recorder.key_hit(
+        "two_fetch_flush_flow", "backend_redirect_drops_inflight"
+    )
+    hit = recorder.hits[recorder.definition_by_bin_id["BIN-540"].key]
+    assert hit.evidence[-1]["ftq_slot_reused"] is True
+    assert not any(
+        item.get("event") == "two_fetch_redirect_old_tag_delivery"
+        for item in recorder.risk_observations
+    )
+
+
+def test_two_fetch_s0_accept_does_not_default_missing_ftq_tag(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    dut.set_key("ftq_valid", 1)
+    dut.set_key("ftq_ready", 1)
+    dut.set_key("ftq_req1_valid", 1)
+    dut.set_key("main_s0_fire", 1)
+    dut.set_key("ftq_req0_ftq_flag", 0)
+    dut.set_key("ftq_req0_ftq_value", 20)
+
+    sample_two_fetch_coverage(recorder, env, 1)
+
+    assert recorder._two_fetch_recent_inflight_tags is None
+    assert any(
+        item.get("event") == "two_fetch_s0_ftq_tag_unobservable"
+        for item in recorder.risk_observations
+    )
+
+
+def test_two_fetch_redirect_rejects_reused_ftq_tag_at_wrong_pc(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    for key, value in (
+        ("ftq_valid", 1),
+        ("ftq_ready", 1),
+        ("ftq_req1_valid", 1),
+        ("main_s0_fire", 1),
+        ("ftq_req0_ftq_flag", 0),
+        ("ftq_req0_ftq_value", 20),
+        ("ftq_req1_ftq_flag", 0),
+        ("ftq_req1_ftq_value", 21),
+        ("backend_redirect", 0),
+        ("backend_redirect_target", 0),
+        ("to_ibuffer_valid", 0),
+        ("to_ibuffer_ready", 0),
+    ):
+        dut.set_key(key, value)
+    sample_two_fetch_coverage(recorder, env, 1)
+
+    dut.set_key("ftq_valid", 0)
+    dut.set_key("main_s0_fire", 0)
+    dut.set_key("backend_redirect", 1)
+    dut.set_key("backend_redirect_target", 0x80000100)
+    sample_two_fetch_coverage(recorder, env, 2)
+
+    dut.set_key("backend_redirect", 0)
+    dut.set_key("to_ibuffer_valid", 1)
+    dut.set_key("to_ibuffer_ready", 1)
+    base = "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_"
+    dut.set(base + "enqEnable", 1)
+    dut.set(base + "pc_0_addr", 0x80000104 >> 1)
+    dut.set(base + "isRvc_0", 1)
+    dut.set(base + "ftqPtr_0_flag", 0)
+    dut.set(base + "ftqPtr_0_value", 21)
+    sample_two_fetch_coverage(recorder, env, 3)
+
+    assert not recorder.key_hit(
+        "two_fetch_flush_flow", "backend_redirect_drops_inflight"
+    )
+    assert any(
+        item.get("event") == "two_fetch_redirect_old_tag_delivery"
+        for item in recorder.risk_observations
+    )
+
+
 @pytest.mark.parametrize(
     ("fetch_ptr", "s3_ftq_ptr", "expected"),
     [
@@ -492,6 +621,82 @@ def test_two_fetch_waylookup_ifu_and_delivery_bins(tmp_path):
 
     sample_two_fetch_coverage(recorder, env, 4)
     assert not recorder.key_hit("two_fetch_waylookup_block_reason", "data_bank_conflict")
+
+
+def _set_cross_block_rvi_window(
+    dut,
+    env,
+    *,
+    raw_block_sel=0,
+    expose_cross_flag=True,
+):
+    first_size = 8
+    cross_index = first_size - 1
+    start0 = 0x40000018
+    start1 = start0 + first_size
+    low_half = 0x0093
+    high_half = 0x0010
+    expected_data = low_half | (high_half << 16)
+
+    dut.set_key("ifu_valid", 1)
+    dut.set_key("ifu_ready", 1)
+    dut.set_key("ifu_req1_valid", 1)
+    dut.set_key("ifu_req0_size", first_size)
+    dut.set_key("ifu_req0_start", start0)
+    dut.set_key("ifu_req1_start", start1)
+    base = "Frontend_top.Frontend.inner_ifu.instrBoundary.io_resp_rawInstrVec_"
+    for index in range(32):
+        dut.set(f"{base}{index}_valid", int(index in (0, cross_index, first_size + 1)))
+        dut.set(f"{base}{index}_data", expected_data if index == cross_index else 0x00000013)
+        dut.set(f"{base}{index}_isRvc", 0)
+        dut.set(f"{base}{index}_blockSel", int(index >= first_size))
+        dut.set(f"{base}{index}_isCrossBlockInstr", 0)
+        dut.set(f"{base}{index}_startOffset", 31 if index == cross_index else index)
+    dut.set(f"{base}{cross_index}_blockSel", raw_block_sel)
+    if expose_cross_flag:
+        dut.set(f"{base}{cross_index}_isCrossBlockInstr", 1)
+    else:
+        delattr(dut, f"{base}{cross_index}_isCrossBlockInstr")
+    env.memory.write16((start0 + cross_index) << 1, low_half)
+    env.memory.write16(start1 << 1, high_half)
+
+
+def test_two_fetch_cross_block_rvi_keeps_raw_selector_and_uses_effective_owner(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_cross_block_rvi_window(dut, env)
+
+    sample_two_fetch_coverage(recorder, env, 1)
+
+    assert recorder.key_hit("two_fetch_ifu_source", "blocksel_switch")
+    assert recorder.key_hit("two_fetch_cross_block", "rvi_stitch")
+    hit = recorder.hits[recorder.definition_by_bin_id["BIN-529"].key]
+    assert hit.evidence[-1]["raw_block_sel"] == 0
+    assert hit.evidence[-1]["is_cross_block_instr"] == 1
+    assert hit.evidence[-1]["effective_owner"] == 1
+
+
+def test_two_fetch_cross_block_rvi_rejects_ownerized_raw_selector(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_cross_block_rvi_window(dut, env, raw_block_sel=1)
+
+    sample_two_fetch_coverage(recorder, env, 1)
+
+    assert not recorder.key_hit("two_fetch_ifu_source", "blocksel_switch")
+    assert not recorder.key_hit("two_fetch_cross_block", "rvi_stitch")
+
+
+def test_two_fetch_cross_block_rvi_does_not_default_missing_cross_flag(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_cross_block_rvi_window(dut, env, expose_cross_flag=False)
+
+    sample_two_fetch_coverage(recorder, env, 1)
+
+    assert not recorder.key_hit("two_fetch_cross_block", "rvi_stitch")
+    assert any(
+        item.get("event") == "raw_instr_cross_flag_unobservable"
+        and 7 in item.get("indices", [])
+        for item in recorder.risk_observations
+    )
 
 
 def test_waylookup_data_conflict_is_not_inferred_without_s0_bank_inputs(tmp_path):

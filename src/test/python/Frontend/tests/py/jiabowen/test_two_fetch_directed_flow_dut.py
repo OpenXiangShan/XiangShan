@@ -59,39 +59,13 @@ _FTQ_REQUEST_TAG_SIGNALS = {
     ),
 }
 
-_MAIN_S1_TAG_SIGNALS = {
-    "req0_flag": (
-        f"{_MAINPIPE_PREFIX}s1_req_0_ftqIdx_flag",
-        f"{_MAINPIPE_PREFIX}__Vtogcov__s1_req_0_ftqIdx_flag",
-    ),
-    "req0_value": (
-        f"{_MAINPIPE_PREFIX}s1_req_0_ftqIdx_value",
-        f"{_MAINPIPE_PREFIX}__Vtogcov__s1_req_0_ftqIdx_value",
-    ),
-    "req1_flag": (
-        f"{_MAINPIPE_PREFIX}s1_req_1_ftqIdx_flag",
-        f"{_MAINPIPE_PREFIX}__Vtogcov__s1_req_1_ftqIdx_flag",
-    ),
-    "req1_value": (
-        f"{_MAINPIPE_PREFIX}s1_req_1_ftqIdx_value",
-        f"{_MAINPIPE_PREFIX}__Vtogcov__s1_req_1_ftqIdx_value",
-    ),
-}
-
-_MAIN_S1_VADDR_SIGNALS = tuple(
+_FTQ_REQUEST_VADDR_SIGNALS = tuple(
     (
-        f"{_MAINPIPE_PREFIX}s1_req_{req}_vAddr_{line}_addr",
-        f"{_MAINPIPE_PREFIX}__Vtogcov__s1_req_{req}_vAddr_{line}_addr",
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_{req}_vAddr_{line}_addr",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_toMainPipe_bits_req_{req}_vAddr_{line}_addr",
     )
     for req in range(2)
     for line in range(2)
-)
-_MAIN_S1_SHOULD_FETCH_SIGNALS = tuple(
-    (
-        f"{_MAINPIPE_PREFIX}s1_shouldFetch_{index}",
-        f"{_MAINPIPE_PREFIX}__Vtogcov__s1_shouldFetch_{index}",
-    )
-    for index in range(4)
 )
 
 def _c_j(offset: int) -> int:
@@ -351,62 +325,12 @@ def _current_ftq_request_tags(recorder) -> tuple[tuple[int, int], tuple[int, int
     )
 
 
-def _current_main_s1_tags(recorder) -> tuple[tuple[int, int], tuple[int, int]]:
-    values = {
-        name: _read_required(recorder, candidates, label=f"mainPipe.s1.{name}")
-        for name, candidates in _MAIN_S1_TAG_SIGNALS.items()
+def _current_ftq_request_line_addresses(recorder) -> set[int]:
+    return {
+        (_read_required(recorder, candidates, label=f"fromFtq.vAddr[{index}]") << 1)
+        & ~0x3F
+        for index, candidates in enumerate(_FTQ_REQUEST_VADDR_SIGNALS)
     }
-    return (
-        (int(values["req0_flag"]), int(values["req0_value"])),
-        (int(values["req1_flag"]), int(values["req1_value"])),
-    )
-
-
-def _main_s1_required_line_addresses(recorder, pending_refill: dict) -> set[int]:
-    required = list(pending_refill.get("required_lines") or ())
-    assert len(required) == 4 and any(bool(value) for value in required), {
-        "reason": "pending dual transaction has no required miss lines",
-        "pending_refill": pending_refill,
-    }
-    addresses: set[int] = set()
-    for index, is_required in enumerate(required):
-        if not bool(is_required):
-            continue
-        halfword_addr = _read_required(
-            recorder,
-            _MAIN_S1_VADDR_SIGNALS[index],
-            label=f"mainPipe.s1_req_line[{index}].vAddr",
-        )
-        addresses.add((int(halfword_addr) << 1) & ~0x3F)
-    return addresses
-
-
-def _main_s1_required_lines(recorder) -> list[bool]:
-    return [
-        bool(
-            _read_required(
-                recorder,
-                candidates,
-                label=f"mainPipe.s1_shouldFetch[{index}]",
-            )
-        )
-        for index, candidates in enumerate(_MAIN_S1_SHOULD_FETCH_SIGNALS)
-    ]
-
-
-def _main_s1_line_addresses(recorder, required_lines: Sequence[bool]) -> set[int]:
-    assert len(required_lines) == len(_MAIN_S1_VADDR_SIGNALS)
-    addresses: set[int] = set()
-    for index, required in enumerate(required_lines):
-        if not required:
-            continue
-        halfword_addr = _read_required(
-            recorder,
-            _MAIN_S1_VADDR_SIGNALS[index],
-            label=f"mainPipe.s1_req_line[{index}].vAddr",
-        )
-        addresses.add((int(halfword_addr) << 1) & ~0x3F)
-    return addresses
 
 
 def _icache_response_records(env) -> list[dict]:
@@ -433,8 +357,10 @@ def test_two_fetch_directed_flow_signal_contract_matches_dut_inventory():
         for key, names in _FTQ_REQUEST_TAG_SIGNALS.items()
         if not any(name in registered for name in names)
     }
-    missing_s1_lines = [
-        list(names) for names in _MAIN_S1_VADDR_SIGNALS if not any(name in registered for name in names)
+    missing_request_lines = [
+        list(names)
+        for names in _FTQ_REQUEST_VADDR_SIGNALS
+        if not any(name in registered for name in names)
     ]
     payload_names = {
         name for name in registered if name.startswith(_IBUFFER_PAYLOAD_PREFIX)
@@ -454,13 +380,13 @@ def test_two_fetch_directed_flow_signal_contract_matches_dut_inventory():
         "Frontend_top.io_fencei" in registered
         and not missing_groups
         and not missing_tag_groups
-        and not missing_s1_lines
+        and not missing_request_lines
         and payload_required <= payload_names
     ), {
         "missing_fencei": "Frontend_top.io_fencei" not in registered,
         "missing_two_fetch_groups": missing_groups,
         "missing_request_tag_groups": missing_tag_groups,
-        "missing_main_s1_lines": missing_s1_lines,
+        "missing_request_lines": missing_request_lines,
         "missing_payload_fields": sorted(payload_required - payload_names),
         "observable_payload_field_count": len(payload_names),
     }
@@ -646,64 +572,49 @@ def test_backend_redirect_drops_dual_miss_and_ignores_delayed_old_response(env):
     env.icache_agent.configure(hit_latency=1, miss_latency=128, miss_rate=1.0, seed=0x6219)
     _pulse_fencei(env)
 
-    observed_transaction: dict | None = None
     associated: dict | None = None
     for _ in range(_cycle_limit("TB_TWO_FETCH_MISS_ASSOC_MAX_CYCLES", 2048)):
         env.step(1)
-        if (
-            _read_key(recorder, "main_s1_valid") == 1
-            and _read_key(recorder, "main_req1_valid") == 1
+        if not (
+            _read_key(recorder, "main_s0_fire") == 1
+            and _read_key(recorder, "ftq_req1_valid") == 1
         ):
-            required_lines = _main_s1_required_lines(recorder)
-            if any(required_lines):
-                tags = _current_main_s1_tags(recorder)
-                observed_transaction = {
-                    "cycle": int(env.current_cycle),
-                    "tags": tags,
-                    "required_lines": required_lines,
-                    "required_line_addresses": sorted(
-                        _main_s1_line_addresses(recorder, required_lines)
-                    ),
-                }
-        if observed_transaction is None:
             continue
 
-        required_line_addresses = set(observed_transaction["required_line_addresses"])
-        # TileLink source identifies an MSHR rather than an FTQ entry. The
-        # agent is configured to make every request after fence.i a miss, so
-        # the live pending line and its future ready cycle are the authoritative
-        # association. Avoid a second request-record time-window match: the
-        # sampler observes MainPipe and the agent handshake at different points
-        # in the same cycle.
+        tags = _current_ftq_request_tags(recorder)
+        request_line_addresses = _current_ftq_request_line_addresses(recorder)
+        # #6220 keeps the aggregate transaction at MainPipe S0 until refill
+        # completes, so S1 is too late to associate with a live TL request.
+        # A line already in an MSHR is still a legal dependency of this exact
+        # accepted FTQ pair; bind it by the S0 payload's four line addresses.
         pending_tl = list(getattr(env.icache_agent, "pending", ()))
         delayed_tl = [
             item
             for item in pending_tl
             if int(getattr(item, "ready_cycle", -1)) >= int(env.current_cycle) + 4
-            and int(getattr(item, "addr")) in required_line_addresses
+            and int(getattr(item, "addr")) in request_line_addresses
         ]
         if not delayed_tl:
             continue
-        associated = dict(observed_transaction)
-        associated.update(
-            {
-                "association_cycle": int(env.current_cycle),
-                "tl": [
-                    {
-                        "source": int(getattr(item, "source")),
-                        "address": int(getattr(item, "addr")),
-                        "ready_cycle": int(getattr(item, "ready_cycle")),
-                    }
-                    for item in delayed_tl
-                ],
-            }
-        )
+        associated = {
+            "stage": "main_s0_accept",
+            "association_cycle": int(env.current_cycle),
+            "tags": tags,
+            "request_line_addresses": sorted(request_line_addresses),
+            "tl": [
+                {
+                    "source": int(getattr(item, "source")),
+                    "address": int(getattr(item, "addr")),
+                    "ready_cycle": int(getattr(item, "ready_cycle")),
+                }
+                for item in delayed_tl
+            ],
+        }
         break
     assert associated is not None, {
         "reason": "trained dual fetch never overlapped a delayed ICache refill",
         "icache": env.icache_agent.get_stats(),
         "backend": env.backend_model.get_stats(),
-        "last_observed_transaction": observed_transaction,
         "pending": [
             {
                 "source": int(getattr(item, "source")),

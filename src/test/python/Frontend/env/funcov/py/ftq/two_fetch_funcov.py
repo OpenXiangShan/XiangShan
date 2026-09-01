@@ -51,6 +51,26 @@ _TWO_FETCH_SIGNALS = {
     "ftq_req1_start": (
         f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_vAddr_0_addr",
     ),
+    "ftq_req0_ftq_flag": (
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_ftqIdx_flag",
+        "Frontend_top.Frontend.inner_icache."
+        "__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_ftqIdx_flag",
+    ),
+    "ftq_req0_ftq_value": (
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_ftqIdx_value",
+        "Frontend_top.Frontend.inner_icache."
+        "__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_ftqIdx_value",
+    ),
+    "ftq_req1_ftq_flag": (
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_ftqIdx_flag",
+        "Frontend_top.Frontend.inner_icache."
+        "__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_ftqIdx_flag",
+    ),
+    "ftq_req1_ftq_value": (
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_ftqIdx_value",
+        "Frontend_top.Frontend.inner_icache."
+        "__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_ftqIdx_value",
+    ),
     "ftq_req0_end": (
         f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_endPosition",
     ),
@@ -590,6 +610,14 @@ def _tf_raw_instr_vector(recorder) -> list[dict] | None:
     return result
 
 
+def _tf_effective_owner(item: dict) -> int | None:
+    block_sel = item.get("blockSel")
+    is_cross_block_instr = item.get("isCrossBlockInstr")
+    if block_sel is None or is_cross_block_instr is None:
+        return None
+    return int(block_sel) | int(is_cross_block_instr)
+
+
 def _tf_first_block_raw_instr_count(recorder) -> int | None:
     raw = _tf_raw_instr_vector(recorder)
     if raw is None:
@@ -802,6 +830,36 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
         if ftq_valid == 1 and ftq_ready == 0 and ftq_req1_valid == 1
         else False
     )
+
+    if (
+        ftq_fire
+        and main_s0_fire == 1
+        and ftq_req1_valid == 1
+        and bpu_s3_flush != 1
+        and main_s1_flush != 1
+        and backend_redirect != 1
+    ):
+        s0_tag0 = _tf_tag(recorder, "ftq_req0_ftq")
+        s0_tag1 = _tf_tag(recorder, "ftq_req1_ftq")
+        if s0_tag0 is None or s0_tag1 is None:
+            recorder.risk_observations.append(
+                _tf_evidence(
+                    "two_fetch_s0_ftq_tag_unobservable",
+                    tag0=None if s0_tag0 is None else list(s0_tag0),
+                    tag1=None if s0_tag1 is None else list(s0_tag1),
+                    cycle=cycle,
+                )
+            )
+        else:
+            # #6220 keeps a miss transaction at MainPipe S0 while refill is
+            # outstanding; MainPipe S1 may not become valid until D returns.
+            recorder._two_fetch_recent_inflight_tags = {
+                "tags": (s0_tag0, s0_tag1),
+                "cycle": cycle,
+                "stage": "main_s0_accept",
+                "has_miss": None,
+                "pattern": None,
+            }
 
     if ftq_fire and ftq_req1_valid is not None:
         start0 = _tf_ftq_start(recorder, 0)
@@ -1083,7 +1141,11 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
         unknown_cross_indices = (
             []
             if raw_instr is None
-            else [index for index, item in enumerate(raw_instr) if item.get("isCrossBlockInstr") is None]
+            else [
+                index
+                for index, item in enumerate(raw_instr)
+                if item["valid"] == 1 and item.get("isCrossBlockInstr") is None
+            ]
         )
         if unknown_cross_indices and not getattr(recorder, "_two_fetch_raw_cross_unknown_reported", False):
             recorder.risk_observations.append(
@@ -1100,25 +1162,22 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
         cross_indices = (
             []
             if raw_instr is None
-            else [index for index, item in enumerate(raw_instr) if item.get("isCrossBlockInstr") == 1]
+            else [
+                index
+                for index, item in enumerate(raw_instr)
+                if item["valid"] == 1 and item.get("isCrossBlockInstr") == 1
+            ]
         )
-        blocksel_exact = False
+        raw_blocksel_exact = False
         if raw_instr is not None and first_size is not None and 0 < int(first_size) < len(raw_instr):
             size = int(first_size)
-            expected_blocksels = []
-            for index, item in enumerate(raw_instr):
-                cross_flag = item.get("isCrossBlockInstr")
-                if index == size - 1 and cross_flag is None:
-                    expected_blocksels = []
-                    break
-                expected_blocksels.append(
-                    item["blockSel"]
-                    == int(index >= size or (index == size - 1 and cross_flag == 1))
-                )
-            blocksel_exact = bool(expected_blocksels) and all(expected_blocksels)
+            raw_blocksel_exact = all(
+                item["blockSel"] == int(index >= size)
+                for index, item in enumerate(raw_instr)
+            )
             first_valid = any(item["valid"] == 1 and item["blockSel"] == 0 for item in raw_instr)
             second_valid = any(item["valid"] == 1 and item["blockSel"] == 1 for item in raw_instr)
-            if blocksel_exact and first_valid and second_valid:
+            if raw_blocksel_exact and first_valid and second_valid:
                 recorder.mark(
                     "two_fetch_ifu_source",
                     "blocksel_switch",
@@ -1127,12 +1186,14 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
                         "ifu_blocksel_exact",
                         first_size=size,
                         cross_indices=cross_indices,
+                        raw_blocksel_semantics="instruction_start_halfword",
                     ),
                 )
 
-            if len(cross_indices) == 1:
+            if not unknown_cross_indices and len(cross_indices) == 1:
                 cross_index = cross_indices[0]
                 cross_item = raw_instr[cross_index]
+                effective_owner = _tf_effective_owner(cross_item)
                 start0 = _tf_read(recorder, "ifu_req0_start")
                 start1 = _tf_read(recorder, "ifu_req1_start")
                 cross_pc = None if start0 is None else int(start0) + cross_index
@@ -1152,11 +1213,13 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
                     cross_index + 1 < len(raw_instr) and raw_instr[cross_index + 1]["valid"] == 0
                 )
                 if (
-                    blocksel_exact
+                    raw_blocksel_exact
                     and cross_index == size - 1
                     and cross_item["valid"] == 1
                     and cross_item["isRvc"] == 0
-                    and cross_item["blockSel"] == 1
+                    and cross_item["blockSel"] == 0
+                    and cross_item["isCrossBlockInstr"] == 1
+                    and effective_owner == 1
                     and cross_item["startOffset"] == 31
                     and start0 is not None
                     and start1 is not None
@@ -1175,13 +1238,17 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
                             pc=int(cross_pc) << 1,
                             data=int(cross_item["data"]),
                             first_size=size,
+                            raw_block_sel=int(cross_item["blockSel"]),
+                            is_cross_block_instr=int(cross_item["isCrossBlockInstr"]),
+                            effective_owner=int(effective_owner),
                         ),
                     )
 
         if (
             _tf_read(recorder, "ifu_first_taken") == 1
             and raw_instr is not None
-            and blocksel_exact
+            and raw_blocksel_exact
+            and not unknown_cross_indices
             and not cross_indices
         ):
             recorder.mark(
@@ -1398,16 +1465,7 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
             delivered_old = any(entry["ftq_ptr"] in old_tags for entry in entries)
             target = redirect_pending.get("target")
             first_pc = int(entries[0]["pc"]) << 1 if entries else None
-            if delivered_old:
-                recorder.risk_observations.append(
-                    _tf_evidence(
-                        "two_fetch_redirect_old_tag_delivery",
-                        old_tags=[list(tag) for tag in sorted(old_tags)],
-                        delivered_tags=[list(tag) for tag in compressed_tags],
-                        cycle=cycle,
-                    )
-                )
-            elif target is not None and first_pc == int(target):
+            if target is not None and first_pc == int(target):
                 recorder.mark(
                     "two_fetch_flush_flow",
                     "backend_redirect_drops_inflight",
@@ -1418,7 +1476,17 @@ def sample_two_fetch_coverage(recorder, env, cycle: int, groups=None) -> None:
                         first_pc=first_pc,
                         old_tags=[list(tag) for tag in sorted(old_tags)],
                         delivered_tags=[list(tag) for tag in compressed_tags],
+                        ftq_slot_reused=bool(delivered_old),
                     ),
+                )
+            elif delivered_old:
+                recorder.risk_observations.append(
+                    _tf_evidence(
+                        "two_fetch_redirect_old_tag_delivery",
+                        old_tags=[list(tag) for tag in sorted(old_tags)],
+                        delivered_tags=[list(tag) for tag in compressed_tags],
+                        cycle=cycle,
+                    )
                 )
             else:
                 recorder.risk_observations.append(
