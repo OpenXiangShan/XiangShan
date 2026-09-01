@@ -35,9 +35,14 @@ class RegionWays(implicit p: Parameters) extends IttageModule {
     val writeValid:   Bool = Input(Bool())
     val writeRegion:  UInt = Input(UInt(RegionBits.W))
     val writePointer: UInt = Output(UInt(log2Ceil(RegionNums).W))
+
+    // Context flush clears regions.valid only (SPEC 10 §4.3); RegionWays does not receive bpuFlushing.
+    val contextFlush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
   }
 
   val io: RegionWaysIO = IO(new RegionWaysIO)
+
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
 
   private class RegionEntry(implicit p: Parameters) extends IttageBundle {
     val valid:  Bool = Bool()
@@ -88,4 +93,16 @@ class RegionWays(implicit p: Parameters) extends IttageModule {
   replacerTouchWays(0).valid := io.writeValid
   replacerTouchWays(0).bits  := writePointer
   replacer.access(replacerTouchWays)
+
+  // Context flush clears only the valid bits and must sit after the normal write-back so
+  // last-connect gives the flush the highest priority: a stale region payload cannot join
+  // target reconstruction once invalid, and an all-invalid array never reads old PLRU
+  // victims, so region payloads and the replacer need no reset (SPEC 10 §4.3.2).
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      for (i <- 0 until RegionNums) {
+        regions(i).valid := false.B
+      }
+    }
+  }
 }

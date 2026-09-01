@@ -53,13 +53,21 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   val io: IttageIO = IO(new IttageIO)
 
+  // Unpack the read-only flush ports once at the top (SPEC 10 §4.0.1); later logic uses these
+  // aliases only. When HasBpuFlush is off the else branch is a Scala type placeholder and the
+  // flush-only consumers are cut by their own if-guards.
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get else false.B
+
   io.trainReady := true.B
 
   private val s0_startPc = io.startPc
-  private val s0_fire    = io.stageCtrl.s0_fire && io.enable
-  private val s1_fire    = io.stageCtrl.s1_fire && io.enable
-  private val s2_fire    = io.stageCtrl.s2_fire && io.enable
-  private val s3_fire    = io.stageCtrl.s3_fire && io.enable
+  // Pipeline advance is blocked for the whole flush window; the closed configuration folds the
+  // added gate back into the original expression (SPEC 10 §4.5.3).
+  private val s0_fire    = io.stageCtrl.s0_fire && io.enable && (if (HasBpuFlush) !bpuFlushing else true.B)
+  private val s1_fire    = io.stageCtrl.s1_fire && io.enable && (if (HasBpuFlush) !bpuFlushing else true.B)
+  private val s2_fire    = io.stageCtrl.s2_fire && io.enable && (if (HasBpuFlush) !bpuFlushing else true.B)
+  private val s3_fire    = io.stageCtrl.s3_fire && io.enable && (if (HasBpuFlush) !bpuFlushing else true.B)
 
   private val s1_startPc = RegEnable(s0_startPc, s0_fire)
   private val s2_startPc = RegEnable(s1_startPc, s1_fire)
@@ -71,16 +79,32 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
       t
   }
 
-  io.sramResetDone := tables.map(_.io.sramResetDone).reduce(_ && _)
-  // context flush placeholder: real flush scheme comes later
+  // Flush dispatch to sub-tables: option-to-option connections live inside the guard so the
+  // closed configuration neither touches .get nor generates the wiring (SPEC 10 §4.1.1).
   if (HasBpuFlush) {
-    io.resetDone.get := true.B
+    tables.foreach { table =>
+      table.io.contextFlush.get := contextFlush
+      table.io.bpuFlushing.get  := bpuFlushing
+    }
+  }
+
+  io.sramResetDone := tables.map(_.io.sramResetDone).reduce(_ && _)
+  // resetDone reflects ITTAGE-local completion only: contextFlush forces it low on the trigger
+  // cycle, then io.sramResetDone reports the runtime SRAM reset (one write per physical row)
+  // done. bpuFlushing must not participate, or it would form a wait loop with the BPU-wide
+  // resetDone aggregation (SPEC 10 §4.4).
+  if (HasBpuFlush) {
+    io.resetDone.get := !contextFlush && io.sramResetDone
   }
 
   private val useAltOnNa = RegInit((1 << (UseAltOnNaWidth - 1)).U(UseAltOnNaWidth.W))
   private val tickCnt    = RegInit(TickCounter.Zero)
 
   private val rTable = Module(new RegionWays)
+  // RegionWays takes only the clear pulse; its write path is gated at rTable.io.writeValid (SPEC 10 §4.3.1).
+  if (HasBpuFlush) {
+    rTable.io.contextFlush.get := contextFlush
+  }
 
   // uftb miss or hasIndirect
   // TODO: for low power: use ubtb&abtb and remove this
@@ -114,10 +138,22 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   private val s3_providerCnt       = RegEnable(s2_providerCnt, s2_fire)
   private val s3_altProviderCnt    = RegEnable(s2_altProviderCnt, s2_fire)
 
+  // Only the S3 prediction valid token gets a context reset: prediction.hit = s3_fire && s3_provided,
+  // so clearing s3_provided removes the stale-target authority once the flush window closes, while the
+  // window gate on s3_fire covers the combinational window before the register clear takes effect.
+  // All other S3 payload registers keep their original RegEnable structure (SPEC 10 §4.5.2).
+  if (HasBpuFlush) {
+    when(contextFlush) {
+      s3_provided := false.B
+    }
+  }
+
   private val ittageMeta = WireDefault(0.U.asTypeOf(new IttageMeta))
   io.meta := ittageMeta
 
-  private val t0_fire = io.enable && io.stageCtrl.t0_fire
+  // The refresh window keeps trainReady true so incoming train packets are consumed, but t0_fire
+  // is blocked to drop them before T1; no new update intent enters the training pipeline (SPEC 10 §4.6.1).
+  private val t0_fire = io.enable && io.stageCtrl.t0_fire && (if (HasBpuFlush) !bpuFlushing else true.B)
 
   private val t1_train = Wire(new Train)
   t1_train := RegEnable(io.train, 0.U.asTypeOf(new Train), t0_fire)
@@ -167,20 +203,24 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   val trainBranchIdx: UInt = PriorityEncoder(trainBranchIdxVec)
   val hasTrainBranch: Bool = trainBranchIdxVec.asUInt.orR
 
-  // Update condition for ittage
-  private val updateValid = hasTrainBranch && RegNext(t0_fire, init = false.B)
+  // Update condition for ittage; the whole flush window keeps T1 side effects from
+  // regenerating, and the anonymous RegNext(t0_fire) token drains at the trigger edge (SPEC 10 §4.6.2).
+  private val updateValid =
+    hasTrainBranch && RegNext(t0_fire, init = false.B) && (if (HasBpuFlush) !bpuFlushing else true.B)
 
   private val updateMask            = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
   private val updateUsefulCntMask   = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
   private val updateResetUsefulCnt  = WireInit(false.B)
   private val updateCorrect         = Wire(Vec(NumTables, Bool()))
-  private val updateAlloc           = Wire(Vec(NumTables, Bool()))
+  // updateAlloc must default to false instead of DontCare: rTable.io.writeValid reduces it
+  // unconditionally, so elements outside when(updateValid) have to be deterministically false
+  // (a functional-correctness precondition of the context-flush gating, SPEC 10 §4.3.3).
+  private val updateAlloc           = WireInit(0.U.asTypeOf(Vec(NumTables, Bool())))
   private val updateOldCnt          = Wire(Vec(NumTables, ConfidenceCounter()))
   private val updateUsefulCnt       = Wire(Vec(NumTables, UsefulCounter()))
   private val updateTargetOffset    = Wire(Vec(NumTables, new IttageOffset))
   private val updateOldTargetOffset = Wire(Vec(NumTables, new IttageOffset))
   updateCorrect         := DontCare
-  updateAlloc           := DontCare
   updateOldCnt          := DontCare
   updateUsefulCnt       := DontCare
   updateTargetOffset    := DontCare
@@ -318,7 +358,11 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   // At this time, it is necessary to raise usePCRegion.
   // The t1_train mechanism of the usePCRegion bit requires further consideration.
   updateRealTargetOffset.usePcRegion := updateRealUsePCRegion || !updateAlloc.reduce(_ || _)
-  rTable.io.writeValid               := !updateRealUsePCRegion && updateAlloc.reduce(_ || _)
+  // RegionWays is the one update path that bypasses the WriteBuffer, so its write must be gated
+  // on its own: updateValid authorizes the training, updateAlloc's deterministic default makes the
+  // unconditional reduce safe, and !bpuFlushing keeps the whole window silent (SPEC 10 §4.3.3).
+  rTable.io.writeValid               := updateValid && !updateRealUsePCRegion &&
+    updateAlloc.reduce(_ || _) && (if (HasBpuFlush) !bpuFlushing else true.B)
   rTable.io.writeRegion              := updateRealTargetRegion
   updateRealTargetOffset.pointer     := rTable.io.writePointer
 
@@ -402,8 +446,14 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   }
 
   for (i <- 0 until NumTables) {
-    tables(i).io.update.valid           := RegNext(updateMask(i), init = false.B)
-    tables(i).io.update.resetUsefulCnt  := RegNext(updateResetUsefulCnt, init = false.B)
+    // T2 update valid tokens drain naturally at the trigger edge (updateMask comes from the
+    // gated updateValid); the sender-side window gate keeps the interface silent during the
+    // flush window, matching the RegionWays rule. resetUsefulCnt carries no target but is gated
+    // alike so no useless scan starts during the window (SPEC 10 §4.6.2).
+    tables(i).io.update.valid           := RegNext(updateMask(i), init = false.B) &&
+      (if (HasBpuFlush) !bpuFlushing else true.B)
+    tables(i).io.update.resetUsefulCnt  := RegNext(updateResetUsefulCnt, init = false.B) &&
+      (if (HasBpuFlush) !bpuFlushing else true.B)
     tables(i).io.update.correct         := RegEnable(updateCorrect(i), updateMask(i))
     tables(i).io.update.alloc           := RegEnable(updateAlloc(i), updateMask(i))
     tables(i).io.update.oldCnt          := RegEnable(updateOldCnt(i), updateMask(i))

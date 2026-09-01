@@ -238,15 +238,28 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     fc.io.flushMask := currentFlushMask
 
     // aggregate done only for predictors selected by this transaction's mask
-    fc.io.resetDone := predictors.zipWithIndex.map { case (p, i) =>
+    val predictorsDone = predictors.zipWithIndex.map { case (p, i) =>
       !fc.io.activeFlushMask(i) || p.io.resetDone.get
     }.reduce(_ && _)
+    // PHR and CommonHR have no flush mask: they join every accepted flush transaction, so
+    // their done bits join the aggregation unconditionally (SPEC 11 §4.1, SPEC 12 §4.1).
+    fc.io.resetDone := predictorsDone && phr.io.resetDone.get && commonHR.io.resetDone.get
 
     // per-predictor dispatch gated by the latched activeFlushMask
     predictors.zipWithIndex.foreach { case (p, i) =>
       p.io.contextFlush.get := fc.io.contextFlush && fc.io.activeFlushMask(i)
       p.io.bpuFlushing.get  := fc.io.bpuFlushing  && fc.io.activeFlushMask(i)
     }
+
+    // PHR is not a BasePredictor and has no CSR flush-enable mask: dispatch the flush
+    // signals directly, ungated by activeFlushMask (SPEC 11 §4.1).
+    phr.io.contextFlush.get := fc.io.contextFlush
+    phr.io.bpuFlushing.get  := fc.io.bpuFlushing
+
+    // CommonHR is not a BasePredictor and has no CSR flush-enable mask either: dispatch the
+    // flush signals directly, ungated by activeFlushMask (SPEC 12 §4.1).
+    commonHR.io.contextFlush.get := fc.io.contextFlush
+    commonHR.io.bpuFlushing.get  := fc.io.bpuFlushing
   }
 
   /* *** predictor specific inputs *** */

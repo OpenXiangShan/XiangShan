@@ -40,16 +40,31 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     val s3ResolveMeta:  CommonHRResolveMeta = Output(new CommonHRResolveMeta)
 
     val s0_startPc: Option[PrunedAddr] = Some(Input(PrunedAddr(VAddrBits))) // for debug
+
+    // Context flush ports (SPEC 12 §4.1): CommonHR is all registers so the clear finishes in
+    // one cycle; bpuFlushing blocks updates and pipeline advance for the whole flush window.
+    // CommonHR has no CSR flush-enable bit and joins every accepted flush transaction. None of
+    // these ports is generated when HasBpuFlush is off.
+    val contextFlush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
+    val bpuFlushing:  Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
+    val resetDone:    Option[Bool] = Option.when(HasBpuFlush)(Output(Bool()))
   }
   val io = IO(new CommonHRIO)
 
-  // stage ctrl
-  private val s0_fire = io.stageCtrl.s0_fire
-  private val s1_fire = io.stageCtrl.s1_fire
-  private val s2_fire = io.stageCtrl.s2_fire
-  private val s3_fire = io.stageCtrl.s3_fire
+  // Unpack the flush inputs once (SPEC 12 §4.1); all consumers use these aliases.
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get else false.B
 
-  private val s3_override = io.update.s3Override
+  // stage ctrl
+  // The six control signals below are gated for the whole flush window, not just the single
+  // contextFlush cycle: old-context redirect/override/pipeline activity can keep arriving while
+  // the BPU waits for the SRAM-based predictors to finish clearing (SPEC 12 §4.3).
+  private val s0_fire = io.stageCtrl.s0_fire && (if (HasBpuFlush) !bpuFlushing else true.B)
+  private val s1_fire = io.stageCtrl.s1_fire && (if (HasBpuFlush) !bpuFlushing else true.B)
+  private val s2_fire = io.stageCtrl.s2_fire && (if (HasBpuFlush) !bpuFlushing else true.B)
+  private val s3_fire = io.stageCtrl.s3_fire && (if (HasBpuFlush) !bpuFlushing else true.B)
+
+  private val s3_override = io.update.s3Override && (if (HasBpuFlush) !bpuFlushing else true.B)
 
   // common history register
   private val s0_imli                = WireInit(0.U(ImliHistoryLength.W))
@@ -65,7 +80,6 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   private val debugCommonHR          = RegInit(0.U.asTypeOf(new CommonHREntry))
   private val s3_commonHRResolveMeta = WireInit(0.U.asTypeOf(new CommonHRResolveMeta))
 
-  private val r1_valid    = RegNext(io.redirect.valid, false.B)
   private val r1_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
 
   private val enqPtr     = RegInit(HistPtr(false.B, 0.U))
@@ -82,9 +96,12 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   s3_commonHRResolveMeta.bw    := s3_commonHR.bw
   s3_commonHRResolveMeta.imli  := s3_imli
 
-  io.s0_imli       := s0_imli
+  // The two S0 outputs are combinational Wires over registers that only clear at the
+  // end-of-cycle write, so zero their data on the contextFlush cycle itself (SPEC 12 §4.4).
+  io.s0_imli     := if (HasBpuFlush) Mux(contextFlush, 0.U(ImliHistoryLength.W), s0_imli) else s0_imli
+  io.s0_commonHR := if (HasBpuFlush) Mux(contextFlush, 0.U.asTypeOf(new CommonHREntry), s0_commonHR)
+    else s0_commonHR
   io.s3ResolveMeta := s3_commonHRResolveMeta
-  io.s0_commonHR   := s0_commonHR
 
   /*
    * Precompute per-CFI candidate information in s2 for the s3 CommonHR update.
@@ -165,7 +182,10 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   /*
    * ghr/bw is not involved in prediction during redirect; used here as a placeholder
    */
-  private val r0_valid    = io.redirect.valid
+  // r1_valid is derived from the gated r0_valid so a redirect arriving on the flush cycle
+  // cannot re-inject old-context state one cycle later (SPEC 12 §4.3).
+  private val r0_valid    = io.redirect.valid && (if (HasBpuFlush) !bpuFlushing else true.B)
+  private val r1_valid    = RegNext(r0_valid, false.B)
   private val r0_taken    = io.redirect.taken
   private val r0_isCond   = io.redirect.attribute.isConditional
   private val r0_bwTaken  = isBackwardBranch(io.redirect.cfiPc, io.redirect.target)
@@ -386,5 +406,49 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     dontTouch(r1_lessThanPcUInt)
     dontTouch(ghrUInt)
     dontTouch(bwUInt)
+  }
+
+  /* *** context flush (structurally eliminated when HasBpuFlush is off) (SPEC 12 §4.2/§4.4/§4.5) *** */
+  if (HasBpuFlush) {
+    // S3 metadata is held in registers that can still carry old-context values after the clear
+    // cycle, so keep these two outputs forced to zero for the whole bpuFlushing window.
+    when(bpuFlushing) {
+      io.s3ResolveMeta  := 0.U.asTypeOf(new CommonHRResolveMeta)
+      io.s3DedupHitMask := 0.U.asTypeOf(io.s3DedupHitMask)
+    }
+
+    // Last-connect clear of every register holding old-context state, with priority over the
+    // same-cycle updates (§4.2): core history state and the four pointers (the pointers must
+    // return to their RegInit state or the queue realigns from stale positions), S1~S3 history
+    // snapshots, and the S3 candidate latches written by s2_fire. debugCommonHR joins the clear
+    // because it feeds the equality XSError against commonHR. s0_commonHR/s0_imli are Wires and
+    // rely on the output isolation above; the r1 payload registers are only consumed under
+    // r1_valid, which the window gating keeps false, so they need no clear.
+    when(contextFlush) {
+      commonHR      := 0.U.asTypeOf(new CommonHREntry)
+      debugCommonHR := 0.U.asTypeOf(new CommonHREntry)
+      imli          := 0.U
+      histQueue     := 0.U.asTypeOf(histQueue)
+      enqPtr        := HistPtr(false.B, 0.U)
+      predPtr       := HistPtr(false.B, 0.U)
+      writePtr      := HistPtr(false.B, 0.U)
+      recoverPtr    := HistPtr(false.B, 0.U)
+
+      s1_commonHR := 0.U.asTypeOf(new CommonHREntry)
+      s2_commonHR := 0.U.asTypeOf(new CommonHREntry)
+      s3_commonHR := 0.U.asTypeOf(new CommonHREntry)
+      s1_imli     := 0.U
+      s2_imli     := 0.U
+      s3_imli     := 0.U
+
+      s3_hitMask          := 0.U.asTypeOf(s3_hitMask)
+      s3_numLessCandidate := 0.U.asTypeOf(s3_numLessCandidate)
+      s3_numHit           := 0.U
+      s3_bwTakenCandidate := 0.U.asTypeOf(s3_bwTakenCandidate)
+    }
+
+    // CommonHR is all registers: the one-cycle clear above is the whole reset, so done is
+    // exactly "not currently clearing" (§4.5); it does not depend on bpuFlushing.
+    io.resetDone.get := !contextFlush
   }
 }
