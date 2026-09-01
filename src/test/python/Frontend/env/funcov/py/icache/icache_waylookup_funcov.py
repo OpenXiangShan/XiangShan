@@ -7,7 +7,6 @@ _WL = "Frontend_top.Frontend.inner_icache.wayLookup."
 _ICACHE = "Frontend_top.Frontend.inner_icache."
 _MAIN = _ICACHE + "mainPipe."
 _PREFETCH = _ICACHE + "prefetcher."
-_TOP = "Frontend_top."
 
 _UPDATE_COUNT = 64
 _ENTRY_FIELD_NAMES = (
@@ -146,13 +145,10 @@ _SIGNALS = {
         _PREFETCH + "__Vtogcov__io_wayLookupWrite_0_ready",
     ),
     "write1_ready": (
-        # The generated ICache wrapper exposes only port 0's ready signal;
-        # ICacheWayLookup drives both Decoupled write ports from the same
-        # free-entry/exception condition.
+        # RTL drives both Vec ports from one expression; generated RTL keeps
+        # only port 0 as the shared ready signal.
         _PREFETCH + "io_wayLookupWrite_0_ready",
         _PREFETCH + "__Vtogcov__io_wayLookupWrite_0_ready",
-        _PREFETCH + "io_wayLookupWrite_1_ready",
-        _PREFETCH + "__Vtogcov__io_wayLookupWrite_1_ready",
     ),
     "update_valid": (
         _MAIN + "io_missResp_valid",
@@ -183,7 +179,7 @@ _SIGNALS = {
     "flush": (
         _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
     ),
-    "fencei": (_TOP + "io_fencei", _TOP + "__Vtogcov__io_fencei"),
+    "fencei": ("Frontend_top.io_fencei", "Frontend_top.__Vtogcov__io_fencei"),
     "bpu_flush": (
         _ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",
         _MAIN + "io_flushFromBpu_s3_valid",
