@@ -39,8 +39,20 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     val commit:         Valid[Train]          = Input(Valid(new Train)) // trian bp data from reslove
     val oldFoldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val trainFoldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+
+    // Context flush ports (SPEC 11 §4.1): PHR is all registers so the clear finishes in one
+    // cycle; bpuFlushing blocks the three update paths for the whole flush window. PHR has no
+    // CSR flush-enable bit and joins every accepted flush transaction. None of these ports is
+    // generated when HasBpuFlush is off.
+    val contextFlush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
+    val bpuFlushing:  Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
+    val resetDone:    Option[Bool] = Option.when(HasBpuFlush)(Output(Bool()))
   }
   val io: PhrIO = IO(new PhrIO)
+
+  // Unpack the flush inputs once (SPEC 11 §4.1); all consumers use these aliases.
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get else false.B
 
   private val phr    = RegInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
   private val phrPtr = RegInit(0.U.asTypeOf(new PhrPtr))
@@ -78,7 +90,10 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
    */
 
   private val s0_stall = io.train.s0_stall
-  private val s1_valid = io.s1Train.valid
+  // All three update sources are blocked for the whole flush window, not just the single
+  // contextFlush cycle: old-context redirect/override/train can keep arriving while the BPU
+  // waits for the SRAM-based predictors to finish clearing (SPEC 11 §4.4).
+  private val s1_valid = io.s1Train.valid && (if (HasBpuFlush) !bpuFlushing else true.B)
   private val s0_fire  = io.train.stageCtrl.s0_fire
   private val s1_fire  = io.train.stageCtrl.s1_fire
   private val s2_fire  = io.train.stageCtrl.s2_fire
@@ -128,13 +143,13 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
 
   // Organize the input data into the structure required for PHR updates
 
-  redirectData.valid   := io.train.redirect.valid
+  redirectData.valid   := io.train.redirect.valid && (if (HasBpuFlush) !bpuFlushing else true.B)
   redirectData.taken   := io.train.redirect.bits.taken
   redirectData.cfiPc   := io.train.redirect.bits.cfiPc
   redirectData.target  := io.train.redirect.bits.target
   redirectData.phrMeta := io.train.redirect.bits.meta.phr
 
-  s3_override             := io.train.s3_override
+  s3_override             := io.train.s3_override && (if (HasBpuFlush) !bpuFlushing else true.B)
   s3_overrideData.valid   := s3_override
   s3_overrideData.taken   := io.train.s3_prediction.taken
   s3_overrideData.cfiPc   := getCfiPcFromPosition(io.train.s3_startPc, io.train.s3_prediction.cfiPosition)
@@ -315,6 +330,56 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   io.s3_foldedPhr   := s3_foldedPhrReg
   io.trainFoldedPhr := metaPhrFolded
   io.oldFoldedPhr   := oldFoldedPhr
+
+  /* *** context flush (structurally eliminated when HasBpuFlush is off) (SPEC 11 §4.2~§4.6) *** */
+  if (HasBpuFlush) {
+    // Register clears only land at the end-of-cycle write, so on the contextFlush cycle both
+    // read paths could still present old-context history; zero the seven locally-generated
+    // outputs combinationally (§4.5). trainFoldedPhr is derived from commit meta, which does
+    // not follow the local clear, so it stays forced to zero for the whole bpuFlushing window.
+    when(contextFlush) {
+      io.phr          := 0.U(PhrHistoryLength.W)
+      io.phrMeta      := 0.U.asTypeOf(new PhrMeta)
+      io.s0_foldedPhr := 0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+      io.s1_foldedPhr := 0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+      io.s2_foldedPhr := 0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+      io.s3_foldedPhr := 0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+      io.oldFoldedPhr := 0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    }
+    when(bpuFlushing) {
+      io.trainFoldedPhr := 0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    }
+
+    // Last-connect clear of every register holding old-context state, with priority over the
+    // same-cycle three-path updates and the pending write-back to the physical phr: phr/phrPtr
+    // (§4.2, phrPtr must return to flag=false/value=0 or updatePtr starts from a stale ring
+    // position), pending payload (§4.3.1), folded-PHR pipeline and s1 snapshot (§4.3.1),
+    // PhrMeta pipeline and S3 pre-read oldest bits (§4.3.2). s1_phrMeta and s2_oldestBits are
+    // combinational and read the cleared state, so they need no explicit clear.
+    when(contextFlush) {
+      phr    := 0.U.asTypeOf(Vec(PhrHistoryLength, Bool()))
+      phrPtr := 0.U.asTypeOf(new PhrPtr)
+
+      pendingValid     := false.B
+      pendingTaken     := false.B
+      pendingLowBits   := 0.U
+      pendingShiftBits := 0.U
+
+      s0_foldedPhrReg := 0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+      s1_foldedPhrReg := 0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+      s2_foldedPhrReg := 0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+      s3_foldedPhrReg := 0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+
+      s1_phrPtr     := 0.U.asTypeOf(new PhrPtr)
+      s2_phrMeta    := 0.U.asTypeOf(new PhrMeta)
+      s3_phrMeta    := 0.U.asTypeOf(new PhrMeta)
+      s3_oldestBits := 0.U.asTypeOf(new PhrAllFoldedHistoryOldestBits(AllFoldedHistoryInfo))
+    }
+
+    // PHR is all registers: the one-cycle clear above is the whole reset, so done is exactly
+    // "not currently clearing" (§4.6); it does not depend on bpuFlushing.
+    io.resetDone.get := !contextFlush
+  }
 
   // TODO: Currently unavailable，waiting for ftq commit info
   // commit time phr checker

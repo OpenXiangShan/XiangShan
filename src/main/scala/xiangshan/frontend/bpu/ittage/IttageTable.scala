@@ -73,9 +73,19 @@ class IttageTable(
     val update: Update           = Input(new Update)
 
     val sramResetDone: Bool = Output(Bool())
+
+    // Context flush ports (SPEC 10 §4.1.1): contextFlush starts the runtime SRAM reset and
+    // clears the WriteBuffer, bpuFlushing blocks normal access for the whole flush window.
+    // Neither port is generated when HasBpuFlush is off.
+    val contextFlush: Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
+    val bpuFlushing:  Option[Bool] = Option.when(HasBpuFlush)(Input(Bool()))
   }
 
   val io: IttageTableIO = IO(new IttageTableIO)
+
+  // Unpack the read-only flush ports once (SPEC 10 §4.0.1); all consumers use these aliases.
+  private val contextFlush = if (HasBpuFlush) io.contextFlush.get else false.B
+  private val bpuFlushing  = if (HasBpuFlush) io.bpuFlushing.get else false.B
 
   // Banked organization: split rows evenly across banks to allow predict/read and update on different banks.
   private val foldedWidth = if (NumSetsPerBank >= TableSramSize) NumSetsPerBank / TableSramSize else 1
@@ -139,6 +149,7 @@ class IttageTable(
       set = NumSetsPerBank,
       width = foldedWidth,
       shouldReset = true,
+      extraReset = HasBpuFlush, // elaboration-time constant: extra_reset port is not generated when off
       holdRead = true,
       singlePort = true,
       useBitmask = true,
@@ -151,9 +162,20 @@ class IttageTable(
 
   io.sramResetDone := tables.map(_.io.resetDone).reduce(_ && _)
 
+  // Runtime context-flush reset: contextFlush starts a parallel write-zero sweep of every bank's
+  // rows (the whole entry is cleared, so valid/tag/target/counters all go to zero); resetDone
+  // stays low until all banks finish (SPEC 10 §4.1.2).
+  if (HasBpuFlush) {
+    tables.foreach { bank =>
+      bank.extra_reset.get := contextFlush
+    }
+  }
+
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeIttage", hasMbist)
   tables.zipWithIndex.foreach { case (bank, idx) =>
-    bank.io.r.req.valid       := io.req.fire && s0_bankMask(idx)
+    // Block read requests for the whole flush window: the SRAM is single-port, so a read
+    // during the runtime reset would compete with the write-zero sweep (SPEC 10 §4.1.3).
+    bank.io.r.req.valid       := io.req.fire && s0_bankMask(idx) && (if (HasBpuFlush) !bpuFlushing else true.B)
     bank.io.r.req.bits.setIdx := s0_setIdx
   }
 
@@ -200,18 +222,26 @@ class IttageTable(
     Each bank owns its own buffer so an update to bank A can proceed while bank B is serving a read.
   */
   private val writeBuffers = Seq.tabulate(NumBanks) { bankIdx =>
-    Module(new WriteBuffer(
+    val buffer = Module(new WriteBuffer(
       gen = new IttageWriteReq(tagLen, NumSetsPerBank, ittageEntrySz),
       numEntries = TableWriteBufferSize,
       numPorts = 1,
+      hasContextFlush = HasBpuFlush, // reuse the generic context-flush clear (SPEC 10 §4.2.2)
       nameSuffix = s"ittageTable${tableIdx}_bank$bankIdx"
     )).suggestName(s"ittage_write_buffer_bank$bankIdx")
+    if (HasBpuFlush) {
+      buffer.io.contextFlush.get := contextFlush
+    }
+    buffer
   }
 
   // write to per-bank write buffers
   writeBuffers.zipWithIndex.foreach { case (writeBuffer, bankIdx) =>
     val writePort = writeBuffer.io.write.head
-    writePort.valid        := (io.update.valid && updateBankMask(bankIdx)) || usefulCanReset
+    // Enqueue is blocked for the whole flush window: both normal updates and the useful-only
+    // aging requests share this buffer, and neither may re-enter after the SRAM is cleared (SPEC 10 §4.2.3).
+    writePort.valid        := ((io.update.valid && updateBankMask(bankIdx)) || usefulCanReset) &&
+      (if (HasBpuFlush) !bpuFlushing else true.B)
     writePort.bits.entry   := updateWdata
     writePort.bits.setIdx  := Mux(usefulCanReset, resetSet, updateIdx)
     writePort.bits.bitmask := updateBitmask
@@ -220,12 +250,14 @@ class IttageTable(
   // read the stored write req from write buffer and push into the matching bank SRAM
   tables.zip(writeBuffers).zipWithIndex.foreach { case ((bank, writeBuffer), bankIdx) =>
     val readPort     = writeBuffer.io.read.head
-    val writeValid   = readPort.valid && !bank.io.r.req.valid
+    // Gating readPort.ready alone cannot stop an already-dequeued request from writing the SRAM,
+    // so writeValid joins the same window gate (SPEC 10 §4.2.3).
+    val writeValid   = readPort.valid && !bank.io.r.req.valid && (if (HasBpuFlush) !bpuFlushing else true.B)
     val writeEntry   = readPort.bits.entry
     val writeSetIdx  = readPort.bits.setIdx
     val writeBitMask = readPort.bits.bitmask
     bank.io.w.apply(writeValid, writeEntry, writeSetIdx, true.B, writeBitMask)
-    readPort.ready := bank.io.w.req.ready && !bank.io.r.req.valid
+    readPort.ready := bank.io.w.req.ready && !bank.io.r.req.valid && (if (HasBpuFlush) !bpuFlushing else true.B)
   }
 
   // Power-on reset
