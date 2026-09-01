@@ -63,33 +63,38 @@ class RasStack(implicit p: Parameters) extends RasModule
     val debug:            RasDebug = new RasDebug
   }
   val io: RasStackIO = IO(new RasStackIO)
+  class NosEntry(implicit p: Parameters) extends RasBundle {
+    val nos:    RasPtr = new RasPtr
+    val inSpec: Bool   = Bool()
+  }
 
   private val commitStack =
     RegInit(VecInit(Seq.fill(CommitStackSize)(RasEntry(GuardedPcInit(0.U(GuardedVAddrBits.W)), 0.U))))
   private val specQueue =
     RegInit(VecInit(Seq.fill(SpecQueueSize)(RasEntry(GuardedPcInit(0.U(GuardedVAddrBits.W)), 0.U))))
-  private val specNos = RegInit(VecInit(Seq.fill(SpecQueueSize)(RasPtr(false.B, 0.U))))
+  private val specNosList = RegInit(VecInit(Seq.fill(SpecQueueSize)(0.U.asTypeOf(new NosEntry))))
 
   private val nsp = RegInit(0.U(log2Up(CommitStackSize).W))
   private val ssp = RegInit(0.U(log2Up(CommitStackSize).W))
 
-  private val sctr = RegInit(0.U(StackCounterWidth.W))
-  private val tosr = RegInit(RasPtr(true.B, (SpecQueueSize - 1).U))
-  private val tosw = RegInit(RasPtr(false.B, 0.U))
-  private val bos  = RegInit(RasPtr(false.B, 0.U))
+  private val sctr      = RegInit(0.U(StackCounterWidth.W))
+  private val tosr      = RegInit(RasPtr(true.B, (SpecQueueSize - 1).U))
+  private val tosw      = RegInit(RasPtr(false.B, 0.U))
+  private val bos       = RegInit(RasPtr(false.B, 0.U))
+  private val topInSpec = RegInit(false.B)
 
   private val specNearOverflowed = RegInit(false.B)
 
-  private val writeBypassEntry = Reg(new RasEntry)
-  private val writeBypassNos   = Reg(new RasPtr)
+  private val writeBypassEntry    = Reg(new RasEntry)
+  private val writeBypassNosEntry = Reg(new NosEntry)
 
   private val writeBypassValid     = RegInit(0.B)
   private val writeBypassValidWire = Wire(Bool())
 
-  def tosrInRange(currTosr: RasPtr, currTosw: RasPtr): Bool = {
+  def tosrInRange(currTosr: RasPtr, currTosw: RasPtr, currInSpec: Bool): Bool = {
     val inflightValid = WireInit(false.B)
     // if in range, tosr should be no younger than bos and strictly younger than tosw
-    when(!isBefore(currTosr, bos) && isBefore(currTosr, currTosw)) {
+    when(!isBefore(currTosr, bos) && isBefore(currTosr, currTosw) && currInSpec) {
       inflightValid := true.B
     }
     inflightValid
@@ -97,32 +102,43 @@ class RasStack(implicit p: Parameters) extends RasModule
 
   def getCommitTop(currSsp: UInt): RasEntry = commitStack(currSsp)
 
-  def getTopNos(currTosr: RasPtr, allowBypass: Boolean): RasPtr = {
-    val ret = Wire(new RasPtr)
+  def getTopNos(currTosr: RasPtr, currTosw: RasPtr, currInSpec: Bool, allowBypass: Boolean): NosEntry = {
+    val ret = Wire(new NosEntry)
     if (allowBypass) {
       when(writeBypassValid) {
-        ret := writeBypassNos
+        ret := writeBypassNosEntry
+      }.elsewhen(tosrInRange(currTosr, currTosw, currInSpec)) {
+        ret := specNosList(currTosr.value)
       }.otherwise {
-        ret := specNos(currTosr.value)
+        ret := 0.U.asTypeOf(new NosEntry)
       }
-    } else {
-      ret := specNos(currTosr.value) // invalid when tosr is not in range
+    } else when(tosrInRange(currTosr, currTosw, currInSpec)) {
+      ret := specNosList(currTosr.value)
+    }.otherwise {
+      ret := 0.U.asTypeOf(new NosEntry)
     }
     ret
   }
 
-  def getTop(currSsp: UInt, currSctr: UInt, currTosr: RasPtr, currTosw: RasPtr, allowBypass: Boolean): RasEntry = {
+  def getTop(
+      currSsp:     UInt,
+      currSctr:    UInt,
+      currTosr:    RasPtr,
+      currTosw:    RasPtr,
+      allowBypass: Boolean,
+      currInSpec:  Bool
+  ): RasEntry = {
     val ret = Wire(new RasEntry)
     if (allowBypass) {
       when(writeBypassValid) {
         ret := writeBypassEntry
-      }.elsewhen(tosrInRange(currTosr, currTosw)) {
+      }.elsewhen(tosrInRange(currTosr, currTosw, currInSpec)) {
         ret := specQueue(currTosr.value)
       }.otherwise {
         ret := getCommitTop(currSsp)
       }
     } else {
-      when(tosrInRange(currTosr, currTosw)) {
+      when(tosrInRange(currTosr, currTosw, currInSpec)) {
         ret := specQueue(currTosr.value)
       }.otherwise {
         ret := getCommitTop(currSsp)
@@ -139,8 +155,9 @@ class RasStack(implicit p: Parameters) extends RasModule
       currTosw: RasPtr,
       topEntry: RasEntry
   ): Unit = {
-    tosr := currTosw
-    tosw := specPtrInc(currTosw)
+    tosr      := currTosw
+    tosw      := specPtrInc(currTosw)
+    topInSpec := true.B
     // spec sp and ctr should always be maintained
     when(topEntry.retAddr === retAddr && currSctr < StackCounterMax.U) {
       sctr := currSctr + 1.U
@@ -150,15 +167,26 @@ class RasStack(implicit p: Parameters) extends RasModule
     }
   }
 
-  def specPop(currSsp: UInt, currSctr: UInt, currTosr: RasPtr, currTosw: RasPtr, currTopNos: RasPtr): Unit = {
+  def specPop(
+      currSsp:       UInt,
+      currSctr:      UInt,
+      currTosr:      RasPtr,
+      currTosw:      RasPtr,
+      currTopNos:    RasPtr,
+      currTopInSpec: Bool,
+      currInSpec:    Bool
+  ): Unit = {
     // tosr is only maintained when spec queue is not empty
-    when(tosrInRange(currTosr, currTosw)) {
-      tosr := currTopNos
+    when(tosrInRange(currTosr, currTosw, currInSpec)) {
+      tosr      := currTopNos
+      topInSpec := currTopInSpec
+    }.otherwise {
+      topInSpec := false.B
     }
     // spec sp and ctr should always be maintained
     when(currSctr > 0.U) {
       sctr := currSctr - 1.U
-    }.elsewhen(tosrInRange(currTopNos, currTosw)) {
+    }.elsewhen(tosrInRange(currTopNos, currTosw, currTopInSpec)) {
       // in range, use inflight data
       ssp  := ptrDec(currSsp)
       sctr := specQueue(currTopNos.value).ctr
@@ -185,20 +213,22 @@ class RasStack(implicit p: Parameters) extends RasModule
     writeBypassValid     := false.B
   }
 
-  private val topEntry = getTop(ssp, sctr, tosr, tosw, allowBypass = true)
-  private val topNos   = getTopNos(tosr, allowBypass = true)
+  private val topEntry    = getTop(ssp, sctr, tosr, tosw, allowBypass = true, topInSpec)
+  private val topNosEntry = getTopNos(tosr, tosw, topInSpec, allowBypass = true)
+  private val topNos      = topNosEntry.nos
   private val redirectTopEntry =
     getTop(
       io.redirect.meta.ssp,
       io.redirect.meta.sctr,
       io.redirect.meta.tosr,
       io.redirect.meta.tosw,
-      allowBypass = false
+      allowBypass = false,
+      io.redirect.meta.topInSpec
     )
   private val redirectTopNos = io.redirect.meta.nos
 
-  private val writeEntry = Wire(new RasEntry)
-  private val writeNos   = Wire(new RasPtr)
+  private val writeEntry    = Wire(new RasEntry)
+  private val writeNosEntry = Wire(new NosEntry)
   writeEntry.retAddr := Mux(io.redirect.valid && io.redirect.isCall, io.redirect.callAddr, io.spec.pushAddr)
   writeEntry.ctr := Mux(
     io.redirect.valid && io.redirect.isCall,
@@ -209,26 +239,27 @@ class RasStack(implicit p: Parameters) extends RasModule
     ),
     Mux(topEntry.retAddr === io.spec.pushAddr && topEntry.ctr < StackCounterMax.U, sctr + 1.U, 0.U)
   )
-
-  writeNos := Mux(io.redirect.valid && io.redirect.isCall, io.redirect.meta.tosr, tosr)
+  writeNosEntry.nos := Mux(io.redirect.valid && io.redirect.isCall, io.redirect.meta.tosr, tosr)
+  writeNosEntry.inSpec := Mux(
+    io.redirect.valid && io.redirect.isCall,
+    tosrInRange(io.redirect.meta.tosr, io.redirect.meta.tosw, io.redirect.meta.topInSpec),
+    tosrInRange(tosr, tosw, topInSpec)
+  )
 
   when(io.spec.pushValid || (io.redirect.valid && io.redirect.isCall)) {
-    writeBypassEntry := writeEntry
-    writeBypassNos   := writeNos
+    writeBypassEntry    := writeEntry
+    writeBypassNosEntry := writeNosEntry
   }
 
   private val realPush       = Wire(Bool())
   private val realWriteEntry = Wire(new RasEntry)
   private val timingTop      = RegInit(0.U.asTypeOf(new RasEntry))
-  private val timingNos      = RegInit(0.U.asTypeOf(new RasPtr))
 
   when(writeBypassValidWire) {
     when((io.redirect.valid && io.redirect.isCall) || io.spec.pushValid) {
       timingTop := writeEntry
-      timingNos := writeNos
     }.otherwise {
       timingTop := writeBypassEntry
-      timingNos := writeBypassNos
     }
   }.elsewhen(io.redirect.valid && io.redirect.isRet) {
     // getTop using redirect Nos as tosr
@@ -240,7 +271,7 @@ class RasStack(implicit p: Parameters) extends RasModule
     when(io.redirect.meta.sctr > 0.U) {
       popRedSctr := io.redirect.meta.sctr - 1.U
       popRedSsp  := io.redirect.meta.ssp
-    }.elsewhen(tosrInRange(popRedTosr, tosw)) {
+    }.elsewhen(tosrInRange(popRedTosr, popRedTosw, io.redirect.meta.nosInSpec)) {
       popRedSsp  := ptrDec(io.redirect.meta.ssp)
       popRedSctr := specQueue(popRedTosr.value).ctr
     }.otherwise {
@@ -248,7 +279,14 @@ class RasStack(implicit p: Parameters) extends RasModule
       popRedSctr := getCommitTop(ptrDec(io.redirect.meta.ssp)).ctr
     }
     // We are deciding top for the next cycle, no need to use bypass here
-    timingTop := getTop(popRedSsp, popRedSctr, popRedTosr, popRedTosw, allowBypass = false)
+    timingTop := getTop(
+      popRedSsp,
+      popRedSctr,
+      popRedTosr,
+      popRedTosw,
+      allowBypass = false,
+      io.redirect.meta.nosInSpec
+    )
   }.elsewhen(io.redirect.valid) {
     // Neither call nor ret
     val popSsp  = io.redirect.meta.ssp
@@ -256,7 +294,7 @@ class RasStack(implicit p: Parameters) extends RasModule
     val popTosr = io.redirect.meta.tosr
     val popTosw = io.redirect.meta.tosw
 
-    timingTop := getTop(popSsp, popSctr, popTosr, popTosw, allowBypass = false)
+    timingTop := getTop(popSsp, popSctr, popTosr, popTosw, allowBypass = false, io.redirect.meta.topInSpec)
   }.elsewhen(io.spec.popValid) {
     // getTop using current Nos as tosr
     val popSsp  = Wire(UInt(log2Up(CommitStackSize).W))
@@ -267,7 +305,7 @@ class RasStack(implicit p: Parameters) extends RasModule
     when(sctr > 0.U) {
       popSctr := sctr - 1.U
       popSsp  := ssp
-    }.elsewhen(tosrInRange(popTosr, tosw)) {
+    }.elsewhen(tosrInRange(popTosr, popTosw, topNosEntry.inSpec)) {
       popSsp  := ptrDec(ssp)
       popSctr := specQueue(popTosr.value).ctr
     }.otherwise {
@@ -275,7 +313,7 @@ class RasStack(implicit p: Parameters) extends RasModule
       popSctr := getCommitTop(ptrDec(ssp)).ctr
     }
     // We are deciding top for the next cycle, no need to use bypass here
-    timingTop := getTop(popSsp, popSctr, popTosr, popTosw, allowBypass = false)
+    timingTop := getTop(popSsp, popSctr, popTosr, popTosw, allowBypass = false, topNosEntry.inSpec)
   }.elsewhen(realPush) {
     // just updating spec queue, cannot read from there
     timingTop := realWriteEntry
@@ -285,7 +323,7 @@ class RasStack(implicit p: Parameters) extends RasModule
     val popSctr = sctr
     val popTosr = tosr
     val popTosw = tosw
-    timingTop := getTop(popSsp, popSctr, popTosr, popTosw, allowBypass = false)
+    timingTop := getTop(popSsp, popSctr, popTosr, popTosw, allowBypass = false, topInSpec)
   }
   private val diffTop = Mux(writeBypassValid, writeBypassEntry.retAddr, topEntry.retAddr)
 
@@ -299,8 +337,8 @@ class RasStack(implicit p: Parameters) extends RasModule
     io.spec.fire || (io.redirect.valid && io.redirect.isCall)
   )
 
-  private val realNos = RegEnable(
-    Mux(io.redirect.valid && io.redirect.isCall, io.redirect.meta.tosr, tosr),
+  private val realNosEntry = RegEnable(
+    writeNosEntry,
     io.spec.fire || (io.redirect.valid && io.redirect.isCall)
   )
 
@@ -310,8 +348,8 @@ class RasStack(implicit p: Parameters) extends RasModule
   )
 
   when(realPush) {
-    specQueue(realWriteAddr.value) := realWriteEntry
-    specNos(realWriteAddr.value)   := realNos
+    specQueue(realWriteAddr.value)   := realWriteEntry
+    specNosList(realWriteAddr.value) := realNosEntry
   }
 
   when(io.spec.pushValid) {
@@ -319,16 +357,18 @@ class RasStack(implicit p: Parameters) extends RasModule
   }
 
   when(io.spec.popValid) {
-    specPop(ssp, sctr, tosr, tosw, topNos)
+    specPop(ssp, sctr, tosr, tosw, topNos, topNosEntry.inSpec, topInSpec)
   }
 
   io.spec.popAddr := timingTop.retAddr
 
-  io.meta.tosw := tosw
-  io.meta.tosr := tosr
-  io.meta.nos  := topNos
-  io.meta.ssp  := ssp
-  io.meta.sctr := sctr
+  io.meta.tosw      := tosw
+  io.meta.tosr      := tosr
+  io.meta.nos       := topNos
+  io.meta.topInSpec := topInSpec
+  io.meta.nosInSpec := topNosEntry.inSpec
+  io.meta.ssp       := ssp
+  io.meta.sctr      := sctr
 
   private val commitTop = commitStack(nsp)
 
@@ -375,8 +415,13 @@ class RasStack(implicit p: Parameters) extends RasModule
     // XSError(io.commit.pushAddr =/= commitPushAddr, "addr from commit mismatch with addr from spec")
   }
 
+  private val tmpWriteTosr  = RegEnable(io.commit.metaTosw, io.commit.pushValid)
+  private val tmpWriteValid = RegEnable(io.commit.pushValid, false.B, io.commit.pushValid)
   when(io.commit.pushValid) {
     bos := io.commit.metaTosw
+    when(tmpWriteValid) {
+      specNosList(tmpWriteTosr.value).inSpec := false.B
+    }
   }.elsewhen(io.commit.valid && (distanceBetween(io.commit.metaTosw, bos) > 2.U)) {
     bos := specPtrDec(io.commit.metaTosw)
   }
@@ -387,10 +432,11 @@ class RasStack(implicit p: Parameters) extends RasModule
 //  )
 
   when(io.redirect.valid) {
-    tosr := io.redirect.meta.tosr
-    tosw := io.redirect.meta.tosw
-    ssp  := io.redirect.meta.ssp
-    sctr := io.redirect.meta.sctr
+    tosr      := io.redirect.meta.tosr
+    tosw      := io.redirect.meta.tosw
+    ssp       := io.redirect.meta.ssp
+    sctr      := io.redirect.meta.sctr
+    topInSpec := io.redirect.meta.topInSpec
 
     when(io.redirect.isCall) {
       specPush(
@@ -408,7 +454,9 @@ class RasStack(implicit p: Parameters) extends RasModule
         io.redirect.meta.sctr,
         io.redirect.meta.tosr,
         io.redirect.meta.tosw,
-        redirectTopNos
+        redirectTopNos,
+        io.redirect.meta.nosInSpec,
+        io.redirect.meta.topInSpec
       )
     }
   }
@@ -423,6 +471,6 @@ class RasStack(implicit p: Parameters) extends RasModule
   XSPerfAccumulate("specNearOverflow", specNearOverflowed)
   io.debug.bos := bos
   io.debug.commitStack.zipWithIndex.foreach { case (a, i) => a := commitStack(i) }
-  io.debug.specNos.zipWithIndex.foreach { case (a, i) => a := specNos(i) }
+  io.debug.specNos.zipWithIndex.foreach { case (a, i) => a := specNosList(i).nos }
   io.debug.specQueue.zipWithIndex.foreach { case (a, i) => a := specQueue(i) }
 }
