@@ -576,7 +576,6 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   ))
   pipe_req.miss := false.B
   pipe_req.probe := false.B
-  pipe_req.probe_need_data := false.B
   pipe_req.source := AMO_SOURCE.U
   pipe_req.addr   := get_block_addr(paddr)
   pipe_req.vaddr  := get_block_addr(vaddr)

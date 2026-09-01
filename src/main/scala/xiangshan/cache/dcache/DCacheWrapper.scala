@@ -33,8 +33,8 @@ import xiangshan.cache.wpu._
 import xiangshan.mem.prefetch._
 import xiangshan.mem.Bundles.SbufferForwardReq
 import xiangshan.mem.{AddPipelineReg, HasL1PrefetchSourceParameter, HasMemBlockParameters, LqPtr, MemorySize}
-import freechips.rocketchip.tilelink.TLMessages.GrantData
 import xiangshan.mem.L1PrefetchReq
+import oceanus.compactchi._
 
 // DCache specific parameters
 case class DCacheParameters
@@ -143,7 +143,8 @@ trait HasDCacheParameters
   require(isPow2(cfg.nMissEntries)) // TODO
   // require(isPow2(cfg.nReleaseEntries))
   require(cfg.nMissEntries < cfg.nReleaseEntries)
-  val nEntries = cfg.nMissEntries + cfg.nReleaseEntries + 1 // nMissEntries + nReleaseEntries + 1CMO_Entry
+  val nEntries = cfg.nMissEntries + cfg.nReleaseEntries + 1 // MSHR + CMO + WBQ
+  val cmoTxnId = cfg.nMissEntries // dedicated slot; WBQ starts at releaseIdBase
   val releaseIdBase = cfg.nMissEntries + 1
   val EnableDataEcc = cacheParams.enableDataEcc
   val EnableTagEcc = cacheParams.enableTagEcc
@@ -866,6 +867,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val debugTopDown = new DCacheTopDownIO
   val debugRolling = Flipped(new RobDebugRollingIO)
   val l2_hint = Vec(cfg.numMemChannels, Input(Valid(new L2ToL1Hint())))
+  val cchi = Vec(cfg.numMemChannels, new CCHIType1Port)
   val cmoOpReq = Flipped(DecoupledIO(new CMOReq))
   val cmoOpResp = DecoupledIO(new CMOResp)
   val l1Miss = Output(Bool())
@@ -958,43 +960,6 @@ class MissReadyGen(val n: Int)(implicit p: Parameters) extends XSModule {
 class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParameters {
   override def shouldBeInlined: Boolean = false
 
-  val reqFields: Seq[BundleFieldBase] = Seq(
-    PrefetchField(),
-    ReqSourceField(),
-    VaddrField(VAddrBits - blockOffBits),
-    MemBackTypeMMField(),
-    MemPageTypeNCField()
-  //  IsKeywordField()
-  ) ++ l2ClientPcBitsOpt.map(PCField(_)).toSeq ++ cacheParams.aliasBitsOpt.map(AliasField)
-  val echoFields: Seq[BundleFieldBase] = Seq(
-    IsKeywordField()
-  )
-
-  // ========== Multi-channel support ==========
-  // Each channel gets its own TLClientNode with independent source IDs.
-  // When channelSelByAddr is enabled, address space is partitioned across channels
-  // using the lower memChannelBits of the block address.
-  val clientNodes = Seq.tabulate(numMemChannels) { i =>
-    val visibility = if (channelSelByAddr) {
-      // Partition address space: channel i gets addresses where the lower
-      // memChannelBits of the block address equal i.
-      val channelMask = ~BigInt(((1 << memChannelBits) - 1) * cfg.blockBytes)
-      Seq(AddressSet(i * cfg.blockBytes, channelMask))
-    } else {
-      Seq(AddressSet.everything)
-    }
-    TLClientNode(Seq(TLMasterPortParameters.v1(
-      Seq(TLMasterParameters.v1(
-        name = if (i == 0) "dcache" else s"dcache_ch$i",
-        sourceId = IdRange(0, nEntries + 1),
-        visibility = visibility,
-        supportsProbe = TransferSizes(cfg.blockBytes)
-      )),
-      requestFields = reqFields,
-      echoFields = echoFields
-    )))
-  }
-
   val cacheCtrlOpt = cacheCtrlParamsOpt.map(params => LazyModule(new CtrlUnit(params)))
 
   lazy val module = new DCacheImp(this)
@@ -1006,19 +971,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val io = IO(new DCacheIO)
 
-  // ========== Multi-channel support ==========
-  // All channels' bus/edge, indexed by channel.
-  val buses: Seq[TLBundle] = outer.clientNodes.map(_.out.head._1)
-  val edges: Seq[TLEdgeOut] = outer.clientNodes.map(_.out.head._2)
-  // Channel 0 aliases for backward compatibility with existing non-channel-specific code
-  val bus  = buses(0)
-  val edge = edges(0)
+  def lowestArb[T <: Data](out: DecoupledIO[T], ins: Seq[DecoupledIO[T]]): Unit = {
+    val sel = PriorityEncoderOH(ins.map(_.valid))
+    out.valid := ins.map(_.valid).reduce(_ || _)
+    out.bits := Mux1H(sel, ins.map(_.bits))
+    ins.zip(sel).foreach { case (in, s) => in.ready := out.ready && s }
+  }
 
   require(pseudoErrorMaskBits >= tagBits, "pseudo-error masks must cover tagBits")
   require(pseudoErrorMaskBits >= DCacheSRAMRowBits, "pseudo-error masks must cover data-bank row width")
-  require(bus.d.bits.data.getWidth == l1BusDataWidth, "DCache: tilelink width does not match")
-
-
 
   println("DCache:")
   println("  DCacheSets: " + DCacheSets)
@@ -1090,9 +1051,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val stu = Seq.tabulate(StorePipelineWidth)({ i => Module(new StorePipe(i))})
   val mainPipe     = Module(new MainPipe)
   // val refillPipe   = Module(new RefillPipe)
-  val missQueue    = Module(new MissQueue(edge, MissReqPortCount))
-  val probeQueue   = Module(new ProbeQueue(edge))
-  val wb           = Module(new WritebackQueue(edge))
+  val missQueue    = Module(new MissQueue(MissReqPortCount))
+  val probeQueue   = Module(new ProbeQueue())
+  val wb           = Module(new WritebackQueue())
 
   missQueue.io.lqEmpty := io.lqEmpty
   missQueue.io.hartId := io.hartId
@@ -1103,7 +1064,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.occupy_set.zip(ldu.map(_.io.occupy_set)).foreach { case (l, r) => l <> r }
   missQueue.io.occupy_fail.zip(ldu.map(_.io.occupy_fail)).foreach { case (l, r) => l <> r }
   mainPipe.io.refill_info := missQueue.io.refill_info
-  mainPipe.io.replace <> missQueue.io.replace
   mainPipe.io.sms_agt_evict_req <> io.sms_agt_evict_req
   io.mshr_store_empty := missQueue.io.mshr_store_empty
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
@@ -1358,7 +1318,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
   })
 
-  def processChannel(forward: DCacheForward, bus: TLBundle, i: Int): Unit = {
+  // Forward rxdat CompData into load forward_D (per mem channel)
+  def forwardCompData(forward: DCacheForward, rxdat: DecoupledIO[FlitDnDAT], loadPipeIdx: Int): Unit = {
     val s0ReqValid = forward.s0Req.valid
     val s0Req = forward.s0Req.bits
     val s1ReqValid = RegNext(s0ReqValid)
@@ -1366,14 +1327,15 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     val mshrId = s1Req.mshrId
     val paddr = forward.s1Req.paddr
 
-    val (_, _, done, _) = edge.count(bus.d)
-    val mshrMatch = mshrId === bus.d.bits.source
-    val beatMatch = (bus.d.bits.echo.lift(IsKeywordKey).getOrElse(false.B) ^ done) === paddr(log2Up(refillBytes))
-    val paddrMatch = missQueue.io.forwardS1PAddrMatch(i)
-    val s1RespValid = s1ReqValid && bus.d.valid && bus.d.bits.opcode === TLMessages.GrantData &&
+    val mshrMatch = mshrId === rxdat.bits.TxnID(log2Up(cfg.nMissEntries) - 1, 0)
+    val beatMatch = rxdat.bits.DataID(0) === paddr(log2Up(refillBytes))
+    val compDataValid = rxdat.valid &&
+      CCHIOpcode.CompData.is(rxdat.bits.Opcode, rxdat.valid)
+    val paddrMatch = missQueue.io.forwardS1PAddrMatch(loadPipeIdx)
+    val s1RespValid = s1ReqValid && compDataValid &&
       mshrMatch && beatMatch && paddrMatch
     val s1RespForwardData = VecInit.tabulate(l1BusDataWidth / VLEN) { i =>
-      bus.d.bits.data((i + 1) * VLEN - 1, i * VLEN)
+      rxdat.bits.Data((i + 1) * VLEN - 1, i * VLEN)
     }(paddr(log2Up(VLEN / 8)))
 
     val s2Resp = forward.s2Resp
@@ -1381,17 +1343,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     s2Resp.bits.matchInvalid := false.B
     s2Resp.bits.forwardData := RegEnable(s1RespForwardData.asTypeOf(s2Resp.bits.forwardData), s1ReqValid)
     s2Resp.bits.forwardMask := VecInit(Seq.fill(VLEN / 8)(RegNext(s1RespValid)))
-    s2Resp.bits.denied := RegEnable(bus.d.bits.denied, s1ReqValid)
-    s2Resp.bits.corrupt := RegEnable(bus.d.bits.corrupt, s1ReqValid)
+    s2Resp.bits.denied := RegEnable(DCacheCCHI.Rx.denied(rxdat.bits.RespErr), s1ReqValid)
+    s2Resp.bits.corrupt := RegEnable(DCacheCCHI.Rx.corrupt(rxdat.bits.RespErr), s1ReqValid)
   }
 
   io.lsu.forward_D.zipWithIndex.foreach { case (forwards, i) =>
     for (ch <- 0 until numMemChannels) {
-      processChannel(forwards(ch), buses(ch), i)
+      forwardCompData(forwards(ch), io.cchi(ch).rxdat, i)
     }
   }
 
-  // tl D channel wakeup
   val loadWakeups = Wire(chiselTypeOf(io.lsu.loadWakeup))
   loadWakeups.foreach { wakeup =>
     wakeup.valid := false.B
@@ -1399,10 +1360,11 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
 
   for (ch <- 0 until numMemChannels) {
-    when (buses(ch).d.bits.opcode === TLMessages.GrantData || buses(ch).d.bits.opcode === TLMessages.Grant) {
-      loadWakeups(ch).valid := buses(ch).d.valid
-      loadWakeups(ch).bits.mshrId := buses(ch).d.bits.source(log2Up(cfg.nMissEntries) - 1, 0)
-    }
+    val compDataWakeup = io.cchi(ch).rxdat.valid &&
+      CCHIOpcode.CompData.is(io.cchi(ch).rxdat.bits.Opcode, io.cchi(ch).rxdat.valid) &&
+      io.cchi(ch).rxdat.bits.TxnID < cfg.nMissEntries.U
+    loadWakeups(ch).valid := compDataWakeup
+    loadWakeups(ch).bits.mshrId := io.cchi(ch).rxdat.bits.TxnID(log2Up(cfg.nMissEntries) - 1, 0)
   }
   io.lsu.loadWakeup := loadWakeups
   mainPipe.io.force_write <> io.force_write
@@ -1590,48 +1552,79 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // refill to load queue
  // io.lsu.lsq <> missQueue.io.refill_to_ldq
 
-  // tilelink stuff
-  // ========== Multi-channel support ==========
-  // Each channel connects to its corresponding MissQueue TL interface
+  // Compact CHI: per-channel MQ / WBQ / Probe
+  val wbTxnIdBase = releaseIdBase.U(8.W)
+  val wbTxnIdEnd = (releaseIdBase + cfg.nReleaseEntries).U(8.W)
+
+  val rxsnpArb = Wire(Decoupled(new FlitSNP))
+  val rxsnpSel = VecInit((0 until numMemChannels).map(ch => io.cchi(ch).rxsnp.valid))
+  rxsnpArb.valid := rxsnpSel.asUInt.orR
+  rxsnpArb.bits := Mux1H(rxsnpSel, (0 until numMemChannels).map(ch => io.cchi(ch).rxsnp.bits))
   for (ch <- 0 until numMemChannels) {
-    buses(ch).a <> missQueue.io.mem_acquire(ch)
-    buses(ch).e <> missQueue.io.mem_finish(ch)
+    io.cchi(ch).rxsnp.ready := rxsnpArb.ready && rxsnpSel(ch)
+  }
+  val rxsnpChannel = OHToUInt(rxsnpSel.asUInt)
+  probeQueue.io.rxsnp_channel := rxsnpChannel
+
+  for (ch <- 0 until numMemChannels) {
+    io.cchi(ch).txreq <> missQueue.io.txreq(ch)
+    lowestArb(io.cchi(ch).txrsp, Seq(missQueue.io.txrsp(ch), wb.io.txrsp(ch)))
+    io.cchi(ch).txevt <> wb.io.txevt(ch)
+    io.cchi(ch).txdat <> wb.io.txdat(ch)
+    missQueue.io.rxdat(ch) <> io.cchi(ch).rxdat
+
+    val rxrsp = io.cchi(ch).rxrsp
+    val rxrspTxnId = rxrsp.bits.TxnID
+    val rxrspIsCompCMO = rxrsp.valid &&
+      CCHIOpcode.CompCMO.is(rxrsp.bits.Opcode, rxrsp.valid) &&
+      rxrspTxnId === cmoTxnId.U
+    val rxrspIsMqComp = rxrsp.valid &&
+      CCHIOpcode.Comp.is(rxrsp.bits.Opcode, rxrsp.valid) &&
+      rxrspTxnId < cfg.nMissEntries.U
+    val rxrspIsWbq = rxrsp.valid &&
+      rxrspTxnId >= wbTxnIdBase && rxrspTxnId < wbTxnIdEnd
+    val rxrspIsWbqComp = rxrspIsWbq &&
+      CCHIOpcode.Comp.is(rxrsp.bits.Opcode, rxrsp.valid)
+    val rxrspIsWbqDbid = rxrspIsWbq && (
+      CCHIOpcode.DBIDResp.is(rxrsp.bits.Opcode, rxrsp.valid) ||
+      CCHIOpcode.CompDBIDResp.is(rxrsp.bits.Opcode, rxrsp.valid))
+    val rxrspToMq = rxrspIsCompCMO || rxrspIsMqComp
+    val rxrspToWb = rxrspIsWbqComp || rxrspIsWbqDbid
+
+    missQueue.io.rxrsp(ch).valid := rxrsp.valid && rxrspToMq
+    missQueue.io.rxrsp(ch).bits := rxrsp.bits
+    wb.io.rxrsp(ch).valid := rxrsp.valid && rxrspToWb
+    wb.io.rxrsp(ch).bits := rxrsp.bits
+    rxrsp.ready := Mux(rxrspToMq, missQueue.io.rxrsp(ch).ready,
+      Mux(rxrspToWb, wb.io.rxrsp(ch).ready, true.B))
   }
 
+  val snp = rxsnpArb.bits
+  val snp_addr = Cat(snp.Addr, 0.U(3.W))
+  missQueue.io.probe.req.valid := rxsnpArb.valid
+  missQueue.io.probe.req.bits.addr := snp_addr
+  if (DCacheAboveIndexOffset > DCacheTagOffset) {
+    val alias_addr_frag = snp.alias
+    missQueue.io.probe.req.bits.vaddr := Cat(
+      0.U(PAddrBits - 1, DCacheAboveIndexOffset),
+      alias_addr_frag(DCacheAboveIndexOffset - DCacheTagOffset - 1, 0),
+      snp_addr(DCacheTagOffset - 1, 0)
+    )
+  } else {
+    missQueue.io.probe.req.bits.vaddr := snp_addr
+  }
+
+  block_decoupled(rxsnpArb, probeQueue.io.rxsnp, missQueue.io.probe.block)
   missQueue.io.evict_set := mainPipe.io.evict_set
   missQueue.io.btot_ways_for_set <> mainPipe.io.btot_ways_for_set
   missQueue.io.replace <> mainPipe.io.replace
-  val probeArb = Wire(Decoupled(new TLBundleB(edge.bundle)))
-  TLArbiter.lowest(edge, probeArb, buses.map(_.b):_*)
-  missQueue.io.probe.req.valid := probeArb.valid
-  missQueue.io.probe.req.bits.addr := probeArb.bits.address
-  if(DCacheAboveIndexOffset > DCacheTagOffset) {
-    // have alias problem, extra alias bits needed for index
-    val alias_addr_frag = probeArb.bits.data(2, 1)
-    missQueue.io.probe.req.bits.vaddr := Cat(
-      0.U(PAddrBits - 1, DCacheAboveIndexOffset), // dontcare
-      alias_addr_frag(DCacheAboveIndexOffset - DCacheTagOffset - 1, 0), // index
-      probeArb.bits.address(DCacheTagOffset - 1, 0)                 // index & others
-    )
-  } else { // no alias problem
-    missQueue.io.probe.req.bits.vaddr := probeArb.bits.address
-  }
-
   missQueue.io.main_pipe_resp.valid := RegNext(mainPipe.io.atomic_resp.valid)
   missQueue.io.main_pipe_resp.bits := RegEnable(mainPipe.io.atomic_resp.bits, mainPipe.io.atomic_resp.valid)
-
-  //----------------------------------------
-  // probe
-  // probeQueue.io.mem_probe <> bus.b
-  block_decoupled(probeArb, probeQueue.io.mem_probe, missQueue.io.probe.block)
   probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block
   probeQueue.io.update_resv_set <> mainPipe.io.update_resv_set
 
-  val refill_req = RegNext(missQueue.io.main_pipe_req.valid && ((missQueue.io.main_pipe_req.bits.isLoad) | (missQueue.io.main_pipe_req.bits.isStore)))
   //----------------------------------------
-  // mainPipe
-  // when a req enters main pipe, if it is set-conflict with replace pipe or refill pipe,
-  // block the req in main pipe
+  // probe / mainPipe (continued)
   probeQueue.io.pipe_req <> mainPipe.io.probe_req
   io.lsu.store.req <> mainPipe.io.store_req
 
@@ -1660,13 +1653,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // wb
   // add a queue between MainPipe and WritebackUnit to reduce MainPipe stalls due to WritebackUnit busy
   wb.io.req <> mainPipe.io.wb
-  for (ch <- 0 until numMemChannels) {
-    buses(ch).c <> wb.io.mem_release(ch)
-  }
-  // wb.io.release_wakeup := refillPipe.io.release_wakeup
-  // wb.io.release_update := mainPipe.io.release_update
-  //wb.io.probe_ttob_check_req <> mainPipe.io.probe_ttob_check_req
-  //wb.io.probe_ttob_check_resp <> mainPipe.io.probe_ttob_check_resp
 
   io.lsu.release.valid := RegNext(wb.io.req.fire)
   io.lsu.release.bits.paddr := RegEnable(wb.io.req.bits.addr, wb.io.req.fire)
@@ -1675,28 +1661,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // * load / load violation check logic
   // * and timing requirements
   // CHANGE IT WITH CARE
-
-  // connect bus d - route Grant/ReleaseAck to MissQueue or WritebackQueue
-  for (ch <- 0 until numMemChannels) {
-    missQueue.io.mem_grant(ch).valid := false.B
-    missQueue.io.mem_grant(ch).bits  := DontCare
-    wb.io.mem_grant(ch).valid := false.B
-    wb.io.mem_grant(ch).bits  := DontCare
-
-    val busGrant = buses(ch).d.valid && (buses(ch).d.bits.opcode === TLMessages.Grant ||
-      buses(ch).d.bits.opcode === TLMessages.GrantData || buses(ch).d.bits.opcode === TLMessages.CBOAck)
-    val busReleaseAck = buses(ch).d.valid && buses(ch).d.bits.opcode === TLMessages.ReleaseAck
-
-    missQueue.io.mem_grant(ch).valid := busGrant
-    missQueue.io.mem_grant(ch).bits  := buses(ch).d.bits
-    wb.io.mem_grant(ch).valid := busReleaseAck
-    wb.io.mem_grant(ch).bits  := buses(ch).d.bits
-
-    buses(ch).d.ready := Mux(busGrant, missQueue.io.mem_grant(ch).ready,
-      Mux(busReleaseAck, wb.io.mem_grant(ch).ready, false.B))
-
-    assert(!(buses(ch).d.fire && !busGrant && !busReleaseAck))
-  }
 
   //----------------------------------------
   // Bloom Filter
@@ -1754,14 +1718,16 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // assertions
   // dcache should only deal with DRAM addresses
-  when (bus.a.fire) {
-    assert(PmemRanges.map(_.cover(bus.a.bits.address)).reduce(_ || _))
-  }
-  when (bus.b.fire) {
-    assert(PmemRanges.map(_.cover(bus.b.bits.address)).reduce(_ || _))
-  }
-  when (bus.c.fire) {
-    assert(PmemRanges.map(_.cover(bus.c.bits.address)).reduce(_ || _))
+  for (ch <- 0 until numMemChannels) {
+    when (io.cchi(ch).txreq.fire) {
+      assert(PmemRanges.map(_.cover(io.cchi(ch).txreq.bits.Addr)).reduce(_ || _))
+    }
+    when (io.cchi(ch).rxsnp.fire) {
+      assert(PmemRanges.map(_.cover(Cat(io.cchi(ch).rxsnp.bits.Addr, 0.U(3.W)))).reduce(_ || _))
+    }
+    when (io.cchi(ch).txevt.fire) {
+      assert(PmemRanges.map(_.cover(io.cchi(ch).txevt.bits.Addr)).reduce(_ || _))
+    }
   }
 
   //----------------------------------------
@@ -1808,14 +1774,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   for (ch <- 0 until numMemChannels) {
     val chSuffix = s"_$ch"
 
-    val grant_data_fire = {
-      val (first, last, done, count) = edges(ch).count(buses(ch).d)
-      buses(ch).d.fire && first && buses(ch).d.bits.opcode === GrantData
-    }
+    val grant_data_fire = io.cchi(ch).rxdat.fire &&
+      CCHIOpcode.CompData.is(io.cchi(ch).rxdat.bits.Opcode, io.cchi(ch).rxdat.valid) &&
+      io.cchi(ch).rxdat.bits.DataID === 0.U
     XSPerfAccumulate(s"grant_data_fire$chSuffix", grant_data_fire)
 
     val hint_source = io.l2_hint(ch).bits.sourceId
-    val grant_data_source = buses(ch).d.bits.source
+    val grant_data_source = io.cchi(ch).rxdat.bits.TxnID(log2Up(cfg.nMissEntries) - 1, 0)
 
     val hintPipe2 = Module(new Pipeline(UInt(32.W), 3))
     hintPipe2.io.in.valid := io.l2_hint(ch).valid
@@ -1861,15 +1826,7 @@ class DCacheWrapper()(implicit p: Parameters) extends LazyModule
   override def shouldBeInlined: Boolean = false
 
   val useDcache = coreParams.dcacheParametersOpt.nonEmpty
-  // ========== Multi-channel support ==========
-  // Each memory channel gets its own TLIdentityNode to connect to the dcache's TLClientNode.
-  // Now we only support 1 or 2 clientNode.
-  val clientNodes = if (useDcache) Seq.fill(numMemChannels)(TLIdentityNode()) else Seq.empty
-
   val dcache = if (useDcache) LazyModule(new DCache()) else null
-  if (useDcache) {
-    clientNodes.zip(dcache.clientNodes).foreach { case (wrapperNode, dcacheNode) => wrapperNode := dcacheNode }
-  }
   val uncacheNode = OptionWrapper(cacheCtrlParamsOpt.isDefined, TLIdentityNode())
   require(
     (uncacheNode.isDefined && dcache.cacheCtrlOpt.isDefined) ||

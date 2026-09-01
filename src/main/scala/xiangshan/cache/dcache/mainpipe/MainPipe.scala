@@ -39,7 +39,10 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
 
   val probe = Bool()
   val probe_param = UInt(TLPermissions.bdWidth.W)
-  val probe_need_data = Bool()
+  val probe_snp_txn_id = UInt(8.W)
+  val probe_snp_trace_tag = UInt(1.W)
+  val probe_snp_make_invalid = Bool()
+  val probe_snp_channel = UInt(memChannelBits.W)
 
   // request info
   // reqs from Store, AMO use this
@@ -88,7 +91,6 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.miss := false.B
     req.miss_dirty := false.B
     req.probe := false.B
-    req.probe_need_data := false.B
     req.source := STORE_SOURCE.U
     req.cmd := store.cmd
     req.addr := store.addr
@@ -108,7 +110,6 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.miss := false.B
     req.miss_dirty := false.B
     req.probe := false.B
-    req.probe_need_data := false.B
     req.source := DCACHE_PREFETCH_SOURCE.U
     req.cmd := MemoryOpConstants.M_PFR
     req.addr := prefetch.paddr
@@ -820,11 +821,14 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val need_wb = miss_wb || probe_wb || replace_wb
 
   val writeback_param = Mux(probe_wb, probe_shrink_param, miss_shrink_param)
+  val probe_has_data = s3_tag_match && s3_req.probe &&
+    s3_coh === ClientStates.Dirty && !s3_req.probe_snp_make_invalid
   val writeback_data = if (dcacheParameters.alwaysReleaseData) {
-    s3_tag_match && s3_req.probe && s3_req.probe_need_data ||
-      s3_coh === ClientStates.Dirty || (miss_wb || replace_wb) && s3_coh.state =/= ClientStates.Nothing
+    probe_has_data ||
+      (s3_coh === ClientStates.Dirty && !s3_req.probe) ||
+      (miss_wb || replace_wb) && s3_coh.state =/= ClientStates.Nothing
   } else {
-    s3_tag_match && s3_req.probe && s3_req.probe_need_data || s3_coh === ClientStates.Dirty
+    probe_has_data || (s3_coh === ClientStates.Dirty && !s3_req.probe)
   }
 
   val s3_probe_can_go = s3_req.probe && io.wb.ready && (io.meta_write.ready || !probe_update_meta)
@@ -1107,8 +1111,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.wb.bits.dirty := s3_coh === ClientStates.Dirty
   io.wb.bits.data := s3_data_line
   io.wb.bits.corrupt := s3_tag_error_wb || s3_data_error_wb
-  io.wb.bits.delay_release := s3_req.replace
-  io.wb.bits.miss_id := s3_req.miss_id
+  io.wb.bits.chi_txn_id := Mux(s3_req.probe, s3_req.probe_snp_txn_id, 0.U)
+  io.wb.bits.trace_tag := Mux(s3_req.probe, s3_req.probe_snp_trace_tag, 0.U)
+  io.wb.bits.chi_channel := Mux(s3_req.probe, s3_req.probe_snp_channel, 0.U)
 
   // update plru in main pipe s3
   io.replace_access.valid := GatedValidRegNext(s2_fire_to_s3) && !s3_req.probe && (s3_req.miss || ((s3_req.isAMO || s3_req.isStore) && s3_hit))
