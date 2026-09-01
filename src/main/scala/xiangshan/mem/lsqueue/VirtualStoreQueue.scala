@@ -98,6 +98,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   val stateNext     = WireInit(state)
   val needCancel    = WireInit(VecInit(Seq.fill(Size)(false.B)))
   val retireVec     = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
+  val retireCarryVec = WireInit(VecInit(Seq.fill(CommitWidth)(false.B)))
   val physicalQueueEnqPtr = RegInit(0.U.asTypeOf(PhysicalQueuePtr.cloneType))
 
   // Reconstruct per-entry end sqIdx from the snapshot group's first-entry end sqIdx.
@@ -145,6 +146,8 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
 
   val deqPtrHead = deqPtrVec.head
 
+  private val empty = deqPtrVec.head === enqPtrVec.head
+
   // enq
   val allocatedPtrVec     = VecInit((0 until EnqLength).map(i =>
     enqPtrVec(PopCount(io.enq.req.take(i).map(req => req.valid && req.bits.needAlloc)))))
@@ -160,7 +163,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
     val enqBits     = Mux1H(enqOH, io.enq.req.map(_.bits))
     val enqSet      = enqOH.reduce(_ || _) && !io.redirect.valid
     val deqCancel   = deqPtrVec.zipWithIndex.map{ case (ptr, j) =>
-      ptr.value === i.U && retireVec(j)}.reduce(_ || _)
+      ptr.value === i.U && retireCarryVec(j)}.reduce(_ || _)
 
     when(enqSet) {
       ctrlEntries(i).allocated := true.B
@@ -212,10 +215,12 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   allowEnqueue := enqPtrVec.head >= deqPtrVec.head && state === WalkState.idle
 
   // update enter queue pointer
-  val cancelCount = PopCount(needCancel)
+  val needCancelReg = RegNext(needCancel, VecInit(Seq.fill(Size)(false.B)))
+  val cancelCount = PopCount(needCancelReg)
+  val needCancelRegValid = RegNext(redirectReg.valid, false.B)
   val enqPtrVecNext = enqPtrVec.map{ case ptr =>
     val newPtr = WireInit(ptr)
-    when(redirectReg.valid) {
+    when(needCancelRegValid) {
       newPtr := ptr - cancelCount
     }.otherwise {
       newPtr := ptr + enqNumber
@@ -224,7 +229,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   }
 
   val redirectLastValidPtrMoveCnt = cancelCount + 1.U
-  val redirectLastValidPtr = RegEnable(enqPtrVec.head - redirectLastValidPtrMoveCnt, redirectReg.valid)
+  val redirectLastValidPtr = RegEnable(enqPtrVec.head - redirectLastValidPtrMoveCnt, needCancelRegValid)
 
   enqPtrVec := enqPtrVecNext
 
@@ -247,13 +252,13 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   }
 
   // retired store, which had retired by rob
-  val deqRobIdxVec = VecInit(deqPtrVec.map(ptr => dataEntries(ptr.value).robIdx))
-  val deqAllocatedVec = VecInit(deqPtrVec.map(ptr => ctrlEntries(ptr.value).allocated))
+  val retireRobIdxVec = VecInit(deqPtrVec.map(ptr => dataEntries(ptr.value).robIdx))
+  val retireAllocatedVec = VecInit(deqPtrVec.map(ptr => ctrlEntries(ptr.value).allocated))
   val deqReqNumVec = VecInit(deqPtrVec.map(ptr => dataEntries(ptr.value).reqNum.asUInt))
-  val retireBaseVec = VecInit((0 until CommitWidth).map(i => isBefore(deqRobIdxVec(i), robHeadPtr) && deqAllocatedVec(i)))
+  val retireBaseVec = VecInit((0 until CommitWidth).map(i => isBefore(retireRobIdxVec(i), robHeadPtr) && retireAllocatedVec(i)))
   val retireCount = PopCount(retireVec)
+  val deqPtrVecNext = deqPtrVec.map(_ + retireCount)
   val preCommitRelease = WireInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
-  val retireCarryVec = Wire(Vec(CommitWidth, Bool()))
 
   for (i <- 0 until CommitWidth) {
     val releaseHit = if (i < EnsbufferWidth) preCommitRelease(i) else false.B
@@ -262,7 +267,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
     } else {
       retireCarryVec(i) := (retireBaseVec(i) && retireCarryVec(i - 1)) || releaseHit
     }
-    retireVec(i) := retireCarryVec(i)
+    retireVec(i) := RegNext(retireCarryVec(i), false.B)
   }
 
   val retireValid = retireVec.reduce(_ || _)
@@ -272,7 +277,6 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   val retireReqNumReg = RegEnable(sumBalanced(retiredReqNumVec), retireValid)
   val retireValidReg = RegNext(retireValid)
 
-  val deqPtrVecNext = deqPtrVec.map(_ + retireCount)
   deqPtrVec := deqPtrVecNext
 
   // precommit store, it will be write to sbuffer before rob retire.
@@ -301,7 +305,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
 
   // io assign
   io.enq.canAccept := allowEnqueue
-  io.empty := deqPtrVec.head === enqPtrVec.head
+  io.empty := empty
 
   io.toPhysicalQueue.physicalQueueEnqPtr := physicalQueueEnqPtr
 
@@ -326,21 +330,51 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   io.toPhysicalQueue.preCommitPtr.valid := preCommitValid
   io.toPhysicalQueue.preCommitPtr.bits  := physicalQueuePreCommitPtr
 
-  // redirect logic, event driver
-  val toPhysicalQueueRedirectValid = DelayN(redirectReg.valid, 2)
+  /**
+    * Redirect recovery pipeline
+    *
+    * Pointer roles:
+    *   enqPtrVec           - virtual SQ tail
+    *   redirectLastValidPtr - last virtual entry kept after recovery
+    *   redirectPtr         - recovered exclusive physical SQ tail
+    *
+    * Timeline (P0 is the redirectReg.valid cycle; releasing retired heads may delay P0):
+    *
+    *   P0  redirectReg.valid
+    *       Generate needCancel for entries younger than the redirect.
+    *
+    *   P1  needCancelRegValid
+    *       PopCount needCancelReg to get cancelCount.
+    *       Form enqPtrVecNext and capture redirectLastValidPtr from the old enqPtrVec.
+    *
+    *   P2  redirectLastValidPtrValid
+    *       enqPtrVec has rolled back, so empty reflects the recovered VSQ.
+    *       Select the last entry's physical end pointer, or retirePtrNext when empty,
+    *       and capture the result in toPhysicalQueueRedirectPtr.
+    *
+    *   P3  toPhysicalQueue.redirectPtr.valid
+    *       Update physicalQueueEnqPtr and LsqEnqCtrl.sqTailPtr.
+    *       PhysicalStoreQueue registers the same redirectPtr.
+    *
+    *   P4  PhysicalStoreQueue recovery
+    *       Remove physical entries at and after redirectPtr.
+    */
+  val redirectLastValidPtrValid = RegNext(needCancelRegValid, false.B)
+  val toPhysicalQueueRedirectValid = RegNext(redirectLastValidPtrValid, false.B)
   val redirectRecoverPtr = WireInit(toPhysicalQueueRetirePtr)
-  when(ctrlEntries(redirectLastValidPtr.value).allocated) {
+  when(!empty) {
     redirectRecoverPtr := getEntryEndSqIdx(redirectLastValidPtr)
   }.otherwise {
     redirectRecoverPtr := toPhysicalQueueRetirePtrNext
   }
-  val toPhysicalQueueRedirectPtr = RegEnable(redirectRecoverPtr, RegNext(redirectReg.valid))
+  val toPhysicalQueueRedirectPtr = RegEnable(redirectRecoverPtr, redirectLastValidPtrValid)
   io.toPhysicalQueue.redirectPtr.valid := toPhysicalQueueRedirectValid
   io.toPhysicalQueue.redirectPtr.bits := toPhysicalQueueRedirectPtr
 
   io.toPhysicalQueue.headRobIdx := RegEnable(dataEntries(preCommitPtr.value).robIdx, preCommitMoveValid)
 
-  val sqRecoverStall = state =/= WalkState.idle || RegNext(redirectReg.valid) || DelayN(redirectReg.valid, 2)
+  val sqRecoverStall = state =/= WalkState.idle || needCancelRegValid ||
+    redirectLastValidPtrValid || toPhysicalQueueRedirectValid
   io.sqRecoverStall := sqRecoverStall
 
   // preCommit entries release
