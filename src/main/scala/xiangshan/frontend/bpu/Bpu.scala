@@ -330,7 +330,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s1_taken             = s1_prediction.taken
   private val useAbtb              = s1_abtbValid && s1_abtbResult.taken
   private val debug_s1UseUbtb      = s1_taken && !useAbtb
-  private val debug_s1UseUbtbUtage = s1_taken && !useAbtb
   private val debug_s1UseAbtb      = s1_taken && useAbtb && !s1_utageHitMask.reduce(_ || _)
   private val debug_s1UseAbtbUtage = s1_taken && useAbtb && s1_utageHitMask.reduce(_ || _)
 
@@ -591,7 +590,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       BpuPredictionSource.Stage1.Fallthrough,
       Seq(
         debug_s1UseUbtb      -> BpuPredictionSource.Stage1.Ubtb,
-        debug_s1UseUbtbUtage -> BpuPredictionSource.Stage1.UbtbUtage,
         debug_s1UseAbtb      -> BpuPredictionSource.Stage1.Abtb,
         debug_s1UseAbtbUtage -> BpuPredictionSource.Stage1.AbtbUtage
       )
@@ -682,7 +680,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     Seq(
       ("ubtb", debug_s1UseUbtb),
       ("abtb", debug_s1UseAbtb),
-      ("ubtb_microTage", debug_s1UseUbtbUtage),
       ("abtb_microTage", debug_s1UseAbtbUtage),
       ("fallThrough", !s1_taken)
     )

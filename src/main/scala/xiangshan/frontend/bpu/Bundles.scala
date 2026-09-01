@@ -166,7 +166,7 @@ object BpuPredictionSource {
   object Stage1 extends EnumUInt(5) {
     def Ubtb:        UInt = 0.U(width.W)
     def Abtb:        UInt = 1.U(width.W)
-    def UbtbUtage:   UInt = 2.U(width.W)
+    def UbtbUtage:   UInt = 2.U(width.W) // now utage must work with abtb, so this is unused and reserved
     def AbtbUtage:   UInt = 3.U(width.W)
     def Fallthrough: UInt = 4.U(width.W)
   }
