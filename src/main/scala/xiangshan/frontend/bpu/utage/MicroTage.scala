@@ -64,7 +64,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   // Problem scenario: the same entry accessed by different branches in different cycles.
   private val a0_fire                = io.enable && io.stageCtrl.s0_fire
   private val a1_fire                = a0_fire
-  private val a2_fire                = io.stageCtrl.s1_fire
+  private val a2_fire                = io.enable && io.stageCtrl.s1_fire
   private val overrideValid          = io.overrideValid
   private val redirectValid          = io.redirectValid
   private val a0_indexPc             = io.startPc.unGuard
@@ -243,7 +243,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
   private val t0_train                  = RegNext(io.fastTrain.get.bits, 0.U.asTypeOf(new FastTrain))
-  private val t0_fire                   = RegNext(io.fastTrain.get.valid, false.B)
+  private val t0_fire                   = io.enable && RegNext(io.fastTrain.get.valid, false.B)
   private val t0_trainMeta              = t0_train.utageMeta
   private val t0_abtbResult             = t0_trainMeta.abtbResult
   private val t0_trainRead              = VecInit(tables.map(_.train.t0_read))

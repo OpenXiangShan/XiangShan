@@ -194,6 +194,11 @@ class BpuCtrl extends Bundle {
   val ittageEnable: Bool = Bool()
   val rasEnable:    Bool = Bool()
 }
+// for constantin
+class BpuConstCtrl extends Bundle {
+  val use:  Bool    = Bool()
+  val ctrl: BpuCtrl = new BpuCtrl
+}
 
 // Bpu -> Ftq
 class BpuPrediction(implicit p: Parameters) extends BpuBundle {
