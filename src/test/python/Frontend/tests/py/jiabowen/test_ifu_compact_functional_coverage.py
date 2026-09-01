@@ -1424,7 +1424,7 @@ def test_dual_source_writeback_rejects_mismatched_ordered_tags(tmp_path):
     assert not recorder.key_hit("ifu_writeback", "dual_fetch_sources_match")
 
 
-def test_second_block_suppression_uses_post_range_output_checkpoint(tmp_path):
+def test_second_block_suppression_requires_preclip_block_one_witness(tmp_path):
     recorder, env, dut, memory = _make_recorder(tmp_path)
     base = 0x80000000
     first_entries = [
@@ -1442,13 +1442,63 @@ def test_second_block_suppression_uses_post_range_output_checkpoint(tmp_path):
     dut.set(_PREFIX + "s2_fetchBlock_1_valid", 1)
 
     sample_cfvec_coverage(recorder, env, 1)
-    assert recorder.key_hit("ifu_data_slice", "second_block_suppressed")
+    assert not recorder.key_hit("ifu_data_slice", "second_block_suppressed")
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_014")
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_063")
+    assert any(
+        item.get("event") == "ifu_second_block_preclip_witness_absent"
+        for item in recorder.risk_observations
+    )
 
     suppressed_entry = (2, base + 0x40, 0x00000013, 0, 1, 0, 4, 0)
     _set_aligned_slot(dut, 2, suppressed_entry, block_sel=1, branch_type=0)
     sample_cfvec_coverage(recorder, env, 2)
 
     assert recorder.key_hit("ifu_data_slice", "second_block_suppressed")
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_014")
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_063")
+    definition = recorder.definition_by_bin_id["BIN-874"]
+    hit = recorder.hits[definition.key]
+    preclip_evidence = [
+        item for item in hit.evidence if "preclip_second_block_slots" in item
+    ]
+    assert preclip_evidence[-1]["preclip_second_block_slots"] == [2]
+    assert preclip_evidence[-1]["preclip_signal_paths"]["2"] == {
+        "valid": _PREFIX + "s2_alignedInstrVec_2_valid",
+        "block_sel": _PREFIX + "s2_alignedInstrVec_2_blockSel",
+    }
+
+
+def test_second_block_suppression_fails_closed_when_block_owner_probe_is_missing(
+    tmp_path,
+):
+    recorder, env, dut, memory = _make_recorder(tmp_path)
+    base = 0x80000000
+    first_entries = [
+        (0, base, 0x00000013, 0, 1, 0, 3, 0),
+        (1, base + 4, 0x00000013, 0, 3, 0, 3, 0),
+    ]
+    for entry in first_entries:
+        memory.write32(entry[1], entry[2])
+    _set_ifu_output(dut, first_entries)
+    for slot, entry in enumerate(first_entries):
+        _set_aligned_slot(dut, slot, entry, block_sel=0, branch_type=0)
+    suppressed_entry = (2, base + 0x40, 0x00000013, 0, 1, 0, 4, 0)
+    _set_aligned_slot(dut, 2, suppressed_entry, block_sel=1, branch_type=0)
+    delattr(dut, _PREFIX + "s2_alignedInstrVec_2_blockSel")
+    dut.set(_PREFIX + "s2_fetchBlock_0_valid", 1)
+    dut.set(_PREFIX + "s2_fetchBlock_1_valid", 1)
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert not recorder.key_hit("ifu_data_slice", "second_block_suppressed")
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_014")
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_063")
+    assert any(
+        item.get("event") == "ifu_second_block_preclip_probe_unobservable"
+        and "s2_alignedInstrVec_2_blockSel" in item.get("missing", [])
+        for item in recorder.risk_observations
+    )
 
 
 def test_ifu_illegal_rvc_and_fetch_exception_priority_bins(tmp_path):

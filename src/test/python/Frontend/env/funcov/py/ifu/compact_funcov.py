@@ -57,6 +57,23 @@ def _record_cfi_offset_risk_once(
     )
 
 
+def _record_preclip_witness_risk_once(
+    recorder,
+    cycle: int,
+    event: str,
+    **observations: Any,
+) -> None:
+    seen = getattr(recorder, "_ifu_preclip_witness_risks", set())
+    key = (str(event), repr(observations))
+    if key in seen:
+        return
+    seen.add(key)
+    recorder._ifu_preclip_witness_risks = seen
+    recorder.risk_observations.append(
+        {"event": str(event), "cycle": int(cycle), **observations}
+    )
+
+
 def _read_ifu_output_slot(recorder, dut, field: str, slot: int, suffix: str = "") -> Optional[int]:
     return _read_ifu_internal(recorder, dut, f"io_toIBuffer_bits_{field}_{int(slot)}{suffix}")
 
@@ -3054,25 +3071,55 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
             recorder.mark("ifu_data_slice", "rvc_keeps_second_halfword", cycle, evidence)
 
     preclip_second_slots = []
+    preclip_second_paths = {}
+    preclip_probe_missing = []
     for slot in range(_IFU_OUTPUT_SLOT_COUNT):
-        aligned_valid = _read_ifu_internal(
-            recorder, dut, f"s2_alignedInstrVec_{slot}_valid"
+        valid_stem = f"s2_alignedInstrVec_{slot}_valid"
+        block_sel_stem = f"s2_alignedInstrVec_{slot}_blockSel"
+        aligned_valid, valid_path = _read_ifu_internal_with_path(
+            recorder, dut, valid_stem
         )
-        block_sel = _read_ifu_internal(
-            recorder, dut, f"s2_alignedInstrVec_{slot}_blockSel"
+        if aligned_valid != 1:
+            continue
+        block_sel, block_sel_path = _read_ifu_internal_with_path(
+            recorder, dut, block_sel_stem
         )
-        if aligned_valid == 1 and block_sel == 1:
+        if block_sel is None:
+            preclip_probe_missing.append(block_sel_stem)
+            continue
+        if block_sel == 1:
             preclip_second_slots.append(slot)
+            preclip_second_paths[str(slot)] = {
+                "valid": valid_path,
+                "block_sel": block_sel_path,
+            }
     active_second_slots = [
         item["slot"] for item in internal_records if item["effective_owner"] == 1
     ]
-    if (
+    second_block_suppression_candidate = (
         fetch1_valid == 1
         and s2_fire == 1
         and s2_req_is_uncache == 0
         and first_source
         and not active_second_slots
-    ):
+    )
+    if second_block_suppression_candidate and preclip_probe_missing:
+        _record_preclip_witness_risk_once(
+            recorder,
+            cycle,
+            "ifu_second_block_preclip_probe_unobservable",
+            missing=preclip_probe_missing,
+            fetch_block_1_valid=int(fetch1_valid),
+        )
+    elif second_block_suppression_candidate and not preclip_second_slots:
+        _record_preclip_witness_risk_once(
+            recorder,
+            cycle,
+            "ifu_second_block_preclip_witness_absent",
+            fetch_block_1_valid=int(fetch1_valid),
+            delivered_first_block_slots=[item["slot"] for item in first_source],
+        )
+    elif second_block_suppression_candidate:
         mark_owner_v3_checked(
             recorder,
             "BIN-912",
@@ -3081,28 +3128,14 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                 **evidence,
                 "event": "ifu_instr_range_first_block_only",
                 "fetch_block_1_valid": int(fetch1_valid),
+                "preclip_second_block_slots": preclip_second_slots,
+                "preclip_signal_paths": preclip_second_paths,
                 "delivered_first_block_slots": [item["slot"] for item in first_source],
                 "delivered_second_block_slots": active_second_slots,
                 "first_block_only_after_range_clip": True,
             },
             producer="ifu_instr_range_sampler",
         )
-        if fetch1_valid != 1:
-            mark_owner_v3_checked(
-                recorder,
-                "BIN-874",
-                cycle,
-                {
-                    **evidence,
-                    "event": "ifu_first_block_range_only",
-                    "fetch_block_1_valid": fetch1_valid,
-                    "valid_mask": int(valid_mask),
-                    "enq_enable": int(enq_enable),
-                    "range_source": "predchecker_fixed_instr_valid",
-                    "mapping_note": "second fetch block is absent and the fixed range clips the remaining window",
-                },
-                producer="ifu_instr_range_sampler",
-            )
         mark_owner_v3_checked(
             recorder,
             "BIN-874",
@@ -3110,17 +3143,16 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
             {
                 **evidence,
                 "event": "ifu_second_block_range_suppressed",
-                "fetch_block_1_valid": fetch1_valid,
+                "fetch_block_1_valid": int(fetch1_valid),
+                "preclip_second_block_slots": preclip_second_slots,
+                "preclip_signal_paths": preclip_second_paths,
                 "valid_mask": int(valid_mask),
                 "enq_enable": int(enq_enable),
                 "range_source": "predchecker_fixed_instr_valid",
-                "mapping_note": "same DUT range-clip checkpoint as BIN-912, recorded under the data-slice leaf",
+                "mapping_note": "block-one aligned slots exist before clipping and no block-one owner is delivered",
             },
             producer="ifu_instr_range_sampler",
         )
-        # The current RTL exposes the post-range aligned vector, while some
-        # builds prune the old preclip vector.  A valid second fetch block with
-        # first-block output only is the architectural suppression checkpoint.
         recorder.mark(
             "ifu_data_slice",
             "second_block_suppressed",
@@ -3128,9 +3160,11 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
             {
                 **evidence,
                 "fetch_block_1_valid": int(fetch1_valid),
+                "preclip_second_block_slots": preclip_second_slots,
+                "preclip_signal_paths": preclip_second_paths,
                 "delivered_first_block_slots": [item["slot"] for item in first_source],
                 "delivered_second_slots": active_second_slots,
-                "range_clip_checkpoint": "post_range_aligned_vector",
+                "range_clip_checkpoint": "preclip_block_one_to_fired_block_zero",
             },
         )
     if (
@@ -3296,25 +3330,6 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
             },
             producer="ifu_instr_range_sampler",
         )
-        if fetch1_valid != 1 and first_source and not active_second_slots:
-            mark_owner_v3_checked(
-                recorder,
-                "BIN-874",
-                cycle,
-                {
-                    **evidence,
-                    "event": "ifu_second_block_range_suppressed",
-                    "fetch_block_1_valid": fetch1_valid,
-                    "valid_mask": int(valid_mask),
-                    "enq_enable": int(enq_enable),
-                    "delivered_first_block_slots": [item["slot"] for item in first_source],
-                    "delivered_second_block_slots": active_second_slots,
-                    "range_source": "predchecker_fixed_instr_valid",
-                    "mapping_note": "current RTL emits first-block output with the absent second fetch block clipped by the fixed range",
-                },
-                producer="ifu_instr_range_sampler",
-            )
-
     if any(record["is_last_in_ftq_entry"] == 1 for record in records):
         recorder.mark("ifu_ibuffer_output", "last_in_ftq_entry", cycle, evidence)
 
