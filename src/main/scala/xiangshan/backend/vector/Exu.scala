@@ -52,13 +52,13 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
   inEx.valid := in.uop.valid
   inEx.bits :<#= in.uop.bits
   inEx.bits.fuSel := VecInit(param.fuConfigs.map(_.fuSel2(in.uop.bits)))
+  inEx.bits.data.src := bypass.out.src
 
   ex zip (inEx +: ex) foreach {
     case (sink: ValidIO[Exu.ExStage], source: ValidIO[Exu.ExStage]) =>
       sink.valid := source.valid && !source.bits.ctrl.robIdx.needFlush(in.flush)
       when(source.valid) {
         sink.bits := source.bits
-        sink.bits.data.src := bypass.out.src
       }
   }
 
