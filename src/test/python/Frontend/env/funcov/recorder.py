@@ -333,6 +333,8 @@ class FunctionalCoverageRecorder:
         }
         self.events_tail: deque[dict] = deque(maxlen=256)
         self.risk_observations: deque[dict] = deque(maxlen=128)
+        self.contract_errors: deque[dict] = deque(maxlen=128)
+        self._contract_error_keys: deque[tuple[str, int, str]] = deque(maxlen=128)
         self.env = None
         self._reset_seen_high = False
         self._reset_release_cycle: Optional[int] = None
@@ -590,6 +592,26 @@ class FunctionalCoverageRecorder:
         key = self._coverage_key(str(coverage_group), str(bin_name), coverpoint=coverpoint)
         hit = self.hits.get(key)
         return bool(hit and hit.hits > 0)
+
+    def record_contract_error(
+        self,
+        event: str,
+        cycle: int,
+        details: Optional[dict] = None,
+    ) -> None:
+        sanitized = _sanitize(dict(details or {}))
+        key = (str(event), int(cycle), json.dumps(sanitized, sort_keys=True))
+        if key in self._contract_error_keys:
+            return
+        self._contract_error_keys.append(key)
+        self.contract_errors.append(
+            {
+                "kind": "FUNCOV_CONTRACT_ERROR",
+                "event": str(event),
+                "cycle": int(cycle),
+                **sanitized,
+            }
+        )
 
     def mark(
         self,
@@ -1171,15 +1193,17 @@ class FunctionalCoverageRecorder:
             except Exception:
                 errors = []
 
+        artifact_errors = [*errors, *list(self.contract_errors)]
+
         run = dict(self.run_metadata)
         checker = dict(run.get("checker") or {})
         monitor = (stats.get("monitor") or {}) if isinstance(stats, dict) else {}
         if checker.get("status") in {None, "", "unknown"}:
-            checker_errors = len(errors) + int(monitor.get("error_count", 0) or 0)
+            checker_errors = len(artifact_errors) + int(monitor.get("error_count", 0) or 0)
             checker = {
                 "status": "pass" if checker_errors == 0 else "fail",
                 "error_count": checker_errors,
-                "errors": errors[:32],
+                "errors": artifact_errors[:32],
             }
         run["checker"] = _sanitize(checker)
         run["pytest_outcome"] = str(run.get("pytest_outcome") or "unknown").lower()
@@ -1209,7 +1233,7 @@ class FunctionalCoverageRecorder:
             "summary": self._summary_rows(),
             "unhit": self._unhit_rows(),
             "stats": stats,
-            "errors": errors,
+            "errors": artifact_errors,
             "run": _sanitize(run),
             "outcome": {
                 "status": run["pytest_outcome"],
