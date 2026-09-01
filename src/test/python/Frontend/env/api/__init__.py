@@ -27,6 +27,10 @@ from ..support.signal_utils import get_sig
 
 logger = logging.getLogger("env.api")
 
+_STALL_SNAPSHOT_IFU_LANES = 36
+_STALL_SNAPSHOT_IFU_DYNAMIC_LANES = _STALL_SNAPSHOT_IFU_LANES - 1
+_STALL_SNAPSHOT_IFU_CROSS_BLOCK_LANES = _STALL_SNAPSHOT_IFU_LANES - 2
+
 
 def _env_config(env):
     return getattr(env, "config", DEFAULT_ENV_CONFIG)
@@ -86,19 +90,31 @@ def _read_sig(dut, name: str, default=None):
     return get_sig(dut, name, default)
 
 
+def _read_sig_present(dut, name: str):
+    """Read a DUT signal without hiding an absent probe behind a zero."""
+    if dut is None:
+        return None
+    try:
+        pin = getattr(dut, name, None)
+    except Exception:  # pragma: no cover - simulator proxy may reject a lookup
+        pin = None
+    if pin is None:
+        getter = getattr(dut, "GetInternalSignal", None)
+        if callable(getter):
+            try:
+                pin = getter(name)
+            except Exception:
+                pin = None
+    if pin is None:
+        return None
+    try:
+        return int(getattr(pin, "value", pin))
+    except Exception:
+        return None
+
+
 def _read_addr_sig(dut, name: str) -> int:
     return int(_read_sig(dut, name, 0)) << 1
-
-
-def _read_indexed_bits(dut, prefix: str, count: int) -> tuple[list[int], int]:
-    bits: list[int] = []
-    mask = 0
-    for idx in range(int(count)):
-        bit = 1 if int(_read_sig(dut, f"{prefix}{idx}", 0)) else 0
-        bits.append(bit)
-        if bit:
-            mask |= 1 << idx
-    return bits, mask
 
 
 def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
@@ -180,25 +196,96 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
         )
 
     stall_reason = [_read_sig(dut, f"io_backend_stallReason_reason_{idx}", 0) for idx in range(8)]
-    s3_instr_valid_bits, s3_instr_valid_mask = _read_indexed_bits(
-        dut,
-        "Frontend_top.Frontend.inner_ifu.s3_alignInstrValid_",
-        12,
+
+    # The V3 alignment contract is response-fire -> S1 computation -> S2
+    # registered consumption.  Keep a presence ledger so a stale alias cannot
+    # silently turn into an apparently valid all-zero diagnostic snapshot.
+    missing_probes: list[str] = []
+
+    def _snapshot_sig(name: str, default=0):
+        value = _read_sig_present(dut, name)
+        if value is None:
+            if name not in missing_probes:
+                missing_probes.append(name)
+            return default
+        return value
+
+    def _snapshot_addr(name: str) -> int:
+        return int(_snapshot_sig(name, 0)) << 1
+
+    def _snapshot_indexed_bits(pattern: str, count: int) -> tuple[list[int], int]:
+        bits: list[int] = []
+        mask = 0
+        for idx in range(int(count)):
+            bit = 1 if int(_snapshot_sig(pattern.format(index=idx), 0)) else 0
+            bits.append(bit)
+            if bit:
+                mask |= 1 << idx
+        return bits, mask
+
+    s2_stage_ready = _snapshot_sig("Frontend_top.Frontend.inner_ifu.s2_ready", 0)
+    s2_stage_valid = _snapshot_sig("Frontend_top.Frontend.inner_ifu.s2_valid_valid", 0)
+    s2_stage_fire = _snapshot_sig("Frontend_top.Frontend.inner_ifu.s2_fire", 0)
+    s2_block_valid_bits, s2_block_valid_mask = _snapshot_indexed_bits(
+        "Frontend_top.Frontend.inner_ifu.s2_fetchBlock_{index}_valid",
+        2,
     )
-    s3_invalid_taken_bits, s3_invalid_taken_mask = _read_indexed_bits(
-        dut,
-        "Frontend_top.Frontend.inner_ifu.s3_alignInvalidTaken_",
-        12,
+    s2_block_ftq = [
+        {
+            "flag": _snapshot_sig(
+                f"Frontend_top.Frontend.inner_ifu.s2_fetchBlock_{idx}_ftqIdx_flag",
+                0,
+            ),
+            "value": _snapshot_sig(
+                f"Frontend_top.Frontend.inner_ifu.s2_fetchBlock_{idx}_ftqIdx_value",
+                0,
+            ),
+        }
+        for idx in range(2)
+    ]
+    s2_start_pc = _snapshot_addr("Frontend_top.Frontend.inner_ifu.s2_fetchBlock_0_startVAddr_addr")
+    s2_second_start_pc = _snapshot_addr("Frontend_top.Frontend.inner_ifu.s2_fetchBlock_1_startVAddr_addr")
+
+    s2_instr_valid_value = _snapshot_sig("Frontend_top.Frontend.inner_ifu.s2_alignedInstrValid", 0)
+    s2_fixed_instr_valid_value = _snapshot_sig("Frontend_top.Frontend.inner_ifu.s2_fixedInstrValid", 0)
+    s2_instr_valid_bits = [
+        (int(s2_instr_valid_value) >> idx) & 1 for idx in range(_STALL_SNAPSHOT_IFU_LANES)
+    ]
+    s2_instr_valid_mask = sum(bit << idx for idx, bit in enumerate(s2_instr_valid_bits))
+    s2_fixed_instr_valid_mask = int(s2_fixed_instr_valid_value) & ((1 << _STALL_SNAPSHOT_IFU_LANES) - 1)
+    s2_invalid_taken_bits, s2_invalid_taken_mask = _snapshot_indexed_bits(
+        "Frontend_top.Frontend.inner_ifu.s2_alignedInstrVec_{index}_invalidTaken",
+        _STALL_SNAPSHOT_IFU_DYNAMIC_LANES,
     )
-    s3_select_block_bits, s3_select_block_mask = _read_indexed_bits(
-        dut,
-        "Frontend_top.Frontend.inner_ifu.s3_alignCompactInfo_selectBlock_",
-        12,
+    s2_raw_block_sel_bits, s2_raw_block_sel_mask = _snapshot_indexed_bits(
+        "Frontend_top.Frontend.inner_ifu.s2_alignedInstrVec_{index}_blockSel",
+        _STALL_SNAPSHOT_IFU_DYNAMIC_LANES,
     )
-    fixed_two_fetch_bits, fixed_two_fetch_mask = _read_indexed_bits(
-        dut,
-        "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage1Out_fixedTwoFetchRange_",
-        12,
+    s2_cross_block_bits, s2_cross_block_mask = _snapshot_indexed_bits(
+        "Frontend_top.Frontend.inner_ifu.s2_alignedInstrVec_{index}_isCrossBlockInstr",
+        _STALL_SNAPSHOT_IFU_CROSS_BLOCK_LANES,
+    )
+    # The compacted range cannot place a cross-block instruction in lane 34,
+    # and Ifu.scala assigns lane 35 to zero. Release builds fold both probes.
+    s2_invalid_taken_bits.append(0)
+    s2_raw_block_sel_bits.append(0)
+    s2_cross_block_bits.extend((0, 0))
+    s2_effective_owner_bits = [
+        int(raw_block_sel or is_cross_block)
+        for raw_block_sel, is_cross_block in zip(s2_raw_block_sel_bits, s2_cross_block_bits)
+    ]
+    s2_effective_owner_mask = sum(bit << idx for idx, bit in enumerate(s2_effective_owner_bits))
+    s2_prev_end_half_rvi_valid = _snapshot_sig(
+        "Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_valid",
+        0,
+    )
+    s2_first_end_half_rvi_valid = _snapshot_sig(
+        "Frontend_top.Frontend.inner_ifu.s2_firstEndHalfRvi_valid",
+        0,
+    )
+    s2_total_end_half_rvi_valid = _snapshot_sig(
+        "Frontend_top.Frontend.inner_ifu.s2_totalEndHalfRvi_valid",
+        0,
     )
     ifu_ptr_flag = _read_sig(dut, "Frontend_top.Frontend.inner_ftq.ifuPtr_ptrs_0_flag", 0)
     ifu_ptr_value = _read_sig(dut, "Frontend_top.Frontend.inner_ftq.ifuPtr_ptrs_0_value", 0)
@@ -337,34 +424,40 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
             "to_ibuffer_valid": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.io_toIBuffer_valid", 0),
             "s0_fire": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s0_fire", 0),
             "s1_fire": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s1_fire", 0),
-            "s2_fire": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s2_fire", 0),
+            "s2_fire": s2_stage_fire,
             "s1_ready": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s1_ready", 0),
-            "s2_ready": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s2_ready", 0),
-            "s3_ready": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s3_ready", 0),
+            "s2_ready": s2_stage_ready,
             "s1_valid": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s1_valid", 0),
-            "s2_valid": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s2_valid", 0),
-            "s3_valid": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s3_valid_valid", 0),
+            "s2_valid": s2_stage_valid,
             "s1_start_pc": _read_addr_sig(dut, "Frontend_top.Frontend.inner_ifu.s1_fetchBlock_0_startVAddr_addr"),
-            "s2_start_pc": _read_addr_sig(dut, "Frontend_top.Frontend.inner_ifu.s2_fetchBlock_0_startVAddr_addr"),
-            "s3_start_pc": _read_addr_sig(dut, "Frontend_top.Frontend.inner_ifu.s3_alignFetchBlock_0_startVAddr_addr"),
-            "s3_target_pc": _read_addr_sig(dut, "Frontend_top.Frontend.inner_ifu.s3_alignFetchBlock_0_target_addr"),
-            "s3_ftq": {
-                "flag": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s3_alignFetchBlock_0_ftqIdx_flag", 0),
-                "value": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s3_alignFetchBlock_0_ftqIdx_value", 0),
-            },
-            "to_ibuffer_enq_enable_mask": _read_sig(
-                dut,
-                "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0",
-                0,
+            "s2_start_pc": s2_start_pc,
+            "s2_second_start_pc": s2_second_start_pc,
+            "s2_block_valid_bits": s2_block_valid_bits,
+            "s2_block_valid_mask": s2_block_valid_mask,
+            "s2_block_ftq": s2_block_ftq,
+            "to_ibuffer_enq_enable_mask": _snapshot_sig(
+                "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0", 0
             ),
-            "s3_instr_valid_bits": s3_instr_valid_bits,
-            "s3_instr_valid_mask": s3_instr_valid_mask,
-            "s3_invalid_taken_bits": s3_invalid_taken_bits,
-            "s3_invalid_taken_mask": s3_invalid_taken_mask,
-            "s3_select_block_bits": s3_select_block_bits,
-            "s3_select_block_mask": s3_select_block_mask,
-            "fixed_two_fetch_range_bits": fixed_two_fetch_bits,
-            "fixed_two_fetch_range_mask": fixed_two_fetch_mask,
+            "s2_instr_valid_bits": s2_instr_valid_bits,
+            "s2_instr_valid_mask": s2_instr_valid_mask,
+            "s2_fixed_instr_valid_mask": s2_fixed_instr_valid_mask,
+            "s2_invalid_taken_bits": s2_invalid_taken_bits,
+            "s2_invalid_taken_mask": s2_invalid_taken_mask,
+            "s2_raw_block_sel_bits": s2_raw_block_sel_bits,
+            "s2_raw_block_sel_mask": s2_raw_block_sel_mask,
+            "s2_cross_block_bits": s2_cross_block_bits,
+            "s2_cross_block_mask": s2_cross_block_mask,
+            "s2_effective_owner_bits": s2_effective_owner_bits,
+            "s2_effective_owner_mask": s2_effective_owner_mask,
+            "s2_half_rvi_valid": {
+                "previous": s2_prev_end_half_rvi_valid,
+                "first": s2_first_end_half_rvi_valid,
+                "total": s2_total_end_half_rvi_valid,
+            },
+            "probe_contract": {
+                "complete": not missing_probes,
+                "missing": sorted(missing_probes),
+            },
             "ibuffer_lane_pcs": ibuffer_lane_pcs,
         },
         "cfvec_valid_count": len(cfvec),
@@ -482,12 +575,14 @@ def _format_stall_snapshot(snapshot: dict) -> str:
         "pred={prediction_ptr_value} ifu_entry={ifu_entry} bpu_entry={bpu_entry} "
         "redirects=[{ftq_backend_redirect},{ftq_redirect},{ftq_redirect_reg},{ftq_redirect_next}]) "
         "ifu_runtime=(req_ready={ifu_req_ready} taken_valid={ifu_req_taken_valid} to_ibuf_valid={ifu_to_ibuf_valid} "
-        "fire=[{s0_fire},{s1_fire},{s2_fire}] ready=[{s1_ready},{s2_ready},{s3_ready}] "
-        "valid=[{s1_valid},{s2_valid},{s3_valid}] s1={ifu_s1_start} s2={ifu_s2_start} "
-        "s3={ifu_s3_start} s3_target={ifu_s3_target} s3_ftq=({ifu_s3_ftq_flag},{ifu_s3_ftq_value}) "
-        "enq=0x{ifu_enq_mask:x} s3_valid_mask=0x{ifu_s3_valid_mask:x} "
-        "invalid_taken_mask=0x{ifu_s3_invalid_taken_mask:x} select_block_mask=0x{ifu_s3_select_block_mask:x} "
-        "fixed_range_mask=0x{ifu_fixed_range_mask:x} ibuf_pcs={ibuf_pcs}) "
+        "fire=[{s0_fire},{s1_fire},{s2_fire}] ready=[{s1_ready},{s2_ready}] "
+        "valid=[{s1_valid},{s2_valid}] s1={ifu_s1_start} "
+        "s2=[{ifu_s2_start},{ifu_s2_second_start}] blocks=0x{ifu_s2_block_valid_mask:x} "
+        "ftq=[{ifu_s2_ftq_0},{ifu_s2_ftq_1}] "
+        "enq=0x{ifu_enq_mask:x} aligned=0x{ifu_s2_valid_mask:x} fixed=0x{ifu_s2_fixed_mask:x} "
+        "invalid_taken=0x{ifu_s2_invalid_taken_mask:x} raw_block=0x{ifu_s2_raw_block_mask:x} "
+        "cross_block=0x{ifu_s2_cross_block_mask:x} effective_owner=0x{ifu_s2_effective_owner_mask:x} "
+        "half_rvi={ifu_s2_half_rvi} contract={ifu_probe_contract} ibuf_pcs={ibuf_pcs}) "
         "cfvec_valid_count={cfvec_valid_count}"
     ).format(
         backend_can_accept=int(snapshot["backend_can_accept"]),
@@ -589,21 +684,39 @@ def _format_stall_snapshot(snapshot: dict) -> str:
         s2_fire=int(ifu_runtime["s2_fire"]),
         s1_ready=int(ifu_runtime["s1_ready"]),
         s2_ready=int(ifu_runtime["s2_ready"]),
-        s3_ready=int(ifu_runtime["s3_ready"]),
         s1_valid=int(ifu_runtime["s1_valid"]),
         s2_valid=int(ifu_runtime["s2_valid"]),
-        s3_valid=int(ifu_runtime["s3_valid"]),
         ifu_s1_start=_format_optional_pc(ifu_runtime["s1_start_pc"]),
         ifu_s2_start=_format_optional_pc(ifu_runtime["s2_start_pc"]),
-        ifu_s3_start=_format_optional_pc(ifu_runtime["s3_start_pc"]),
-        ifu_s3_target=_format_optional_pc(ifu_runtime["s3_target_pc"]),
-        ifu_s3_ftq_flag=int(ifu_runtime["s3_ftq"]["flag"]),
-        ifu_s3_ftq_value=int(ifu_runtime["s3_ftq"]["value"]),
+        ifu_s2_second_start=_format_optional_pc(ifu_runtime["s2_second_start_pc"]),
+        ifu_s2_block_valid_mask=int(ifu_runtime["s2_block_valid_mask"]),
+        ifu_s2_ftq_0="{}/{}".format(
+            int(ifu_runtime["s2_block_ftq"][0]["flag"]),
+            int(ifu_runtime["s2_block_ftq"][0]["value"]),
+        ),
+        ifu_s2_ftq_1="{}/{}".format(
+            int(ifu_runtime["s2_block_ftq"][1]["flag"]),
+            int(ifu_runtime["s2_block_ftq"][1]["value"]),
+        ),
         ifu_enq_mask=int(ifu_runtime["to_ibuffer_enq_enable_mask"]),
-        ifu_s3_valid_mask=int(ifu_runtime["s3_instr_valid_mask"]),
-        ifu_s3_invalid_taken_mask=int(ifu_runtime["s3_invalid_taken_mask"]),
-        ifu_s3_select_block_mask=int(ifu_runtime["s3_select_block_mask"]),
-        ifu_fixed_range_mask=int(ifu_runtime["fixed_two_fetch_range_mask"]),
+        ifu_s2_valid_mask=int(ifu_runtime["s2_instr_valid_mask"]),
+        ifu_s2_fixed_mask=int(ifu_runtime["s2_fixed_instr_valid_mask"]),
+        ifu_s2_invalid_taken_mask=int(ifu_runtime["s2_invalid_taken_mask"]),
+        ifu_s2_raw_block_mask=int(ifu_runtime["s2_raw_block_sel_mask"]),
+        ifu_s2_cross_block_mask=int(ifu_runtime["s2_cross_block_mask"]),
+        ifu_s2_effective_owner_mask=int(ifu_runtime["s2_effective_owner_mask"]),
+        ifu_s2_half_rvi="{previous}/{first}/{total}".format(
+            previous=int(ifu_runtime["s2_half_rvi_valid"]["previous"]),
+            first=int(ifu_runtime["s2_half_rvi_valid"]["first"]),
+            total=int(ifu_runtime["s2_half_rvi_valid"]["total"]),
+        ),
+        ifu_probe_contract=(
+            "ok"
+            if ifu_runtime["probe_contract"]["complete"]
+            else "missing[{}]".format(
+                ",".join(str(name) for name in ifu_runtime["probe_contract"]["missing"])
+            )
+        ),
         ibuf_pcs="[" + ",".join(_format_optional_pc(pc) for pc in ifu_runtime["ibuffer_lane_pcs"]) + "]",
         cfvec_valid_count=int(snapshot["cfvec_valid_count"]),
     )
