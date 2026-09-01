@@ -363,8 +363,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // lsu side tag match
   val s2_hit_dup_lsu = RegNext(s1_tag_match_dup_lsu)
+  val s2_rob_hit = io.robForwardResp.valid
 
-  io.lsu.s2_hit := (s2_hit_dup_lsu || io.robForwardResp.valid) && !s2_wpu_pred_fail
+  io.lsu.s2_hit := (s2_hit_dup_lsu || s2_rob_hit) && !s2_wpu_pred_fail
 
   val s2_hit_meta = RegEnable(s1_hit_meta, s1_fire)
   val s2_hit_coh = RegEnable(s1_hit_coh, s1_fire)
@@ -380,7 +381,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   //
   val s2_can_send_miss_req = RegEnable(s1_will_send_miss_req, s1_fire)
   val s2_can_send_miss_req_dup = RegEnable(s1_will_send_miss_req, s1_fire)
-  val s2_rob_hit = io.robForwardResp.valid
 
   val s2_miss_req_valid     = s2_valid && s2_can_send_miss_req && !s2_rob_hit
   val s2_miss_req_valid_dup = s2_valid_dup && s2_can_send_miss_req_dup && !s2_rob_hit
@@ -412,15 +412,20 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_l1dbp_dead = RegEnable(io.l1dbp.resp.bits.dead, false.B, s1_fire)
   val s2_hit_refill_latency = RegEnable(s1_hit_refill_latency, s1_fire)
 
-  val s2_hit = (s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh || s2_rob_hit) &&
-    !s2_wpu_pred_fail
+  val s2_dcache_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh
+  val s2_load_hit = (s2_dcache_hit || s2_rob_hit) && !s2_wpu_pred_fail
+
+  assert(!(s2_valid && s2_dcache_hit && s2_rob_hit),
+    "a cache line must not hit both DCache and the read-only buffer")
 
   val s2_data128bit = Cat((0 until DCacheVWordBankCount).reverse.map(i => io.banked_data_resp(i).raw_data))
   val s2_resp_data  = s2_data128bit
 
   val s2_is_prefetch = s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U
   // only dump these signals when they are actually valid
-  dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
+  dump_pipeline_valids("LoadPipe s2", "s2_dcache_hit", s2_valid && s2_dcache_hit)
+  dump_pipeline_valids("LoadPipe s2", "s2_rob_hit", s2_valid && s2_rob_hit)
+  dump_pipeline_valids("LoadPipe s2", "s2_load_hit", s2_valid && s2_load_hit)
   dump_pipeline_valids("LoadPipe s2", "s2_nack", s2_valid && s2_nack)
   dump_pipeline_valids("LoadPipe s2", "s2_nack_hit", s2_valid && s2_nack_hit)
   dump_pipeline_valids("LoadPipe s2", "s2_nack_no_mshr", s2_valid && s2_nack_no_mshr)
@@ -428,7 +433,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   if(EnableTagEcc) {
     s2_tag_error := s2_tag_errors.orR // error reported by tag ecc check
   }
-  io.pseudo_data_error_inj_done := s2_fire && s2_hit && !io.bank_conflict_slow
+  io.pseudo_data_error_inj_done := s2_fire && s2_dcache_hit && !s2_wpu_pred_fail && !io.bank_conflict_slow
   io.pseudo_error.ready := false.B
 
   // send load miss to miss queue
@@ -473,7 +478,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.real_miss := real_miss
   resp.bits.miss := real_miss
   resp.bits.data := s2_resp_data
-  io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
+  io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_load_hit
   // load pipe need replay when there is a bank conflict or wpu predict fail
   resp.bits.replay := (resp.bits.miss && (s2_nack || io.miss_req.bits.cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail || s2_btot_occupy_fail
   resp.bits.replayCarry.valid := (resp.bits.miss && (s2_nack || io.miss_req.bits.cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail || s2_btot_occupy_fail
@@ -486,7 +491,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.handled := s2_miss_req_fire && !io.miss_req.bits.cancel && !io.wbq_block_miss_req && io.miss_resp.handled
   resp.bits.debug_robIdx := s2_req.debug_robIdx
   // debug info
-  io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_hit
+  io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_load_hit
   io.lsu.debug_s2_real_way_num := OneHot.OHToUIntStartOne(s2_real_way_en)
   if(dwpuParam.enWPU) {
     io.lsu.debug_s2_pred_way_num := OneHot.OHToUIntStartOne(s2_pred_way_en)
@@ -501,12 +506,14 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
 
   XSPerfAccumulate("dcache_read_bank_conflict", io.bank_conflict_slow && s2_valid)
-  XSPerfAccumulate("dcache_read_from_prefetched_line", s2_valid && isPrefetchRelated(s2_hit_prefetch) && !resp.bits.miss)
-  XSPerfAccumulate("dcache_first_read_from_prefetched_line", s2_valid && isPrefetchRelated(s2_hit_prefetch) && !resp.bits.miss && !s2_hit_access)
+  XSPerfAccumulate("dcache_read_from_prefetched_line",
+    s2_valid && s2_dcache_hit && isPrefetchRelated(s2_hit_prefetch) && !resp.bits.miss)
+  XSPerfAccumulate("dcache_first_read_from_prefetched_line",
+    s2_valid && s2_dcache_hit && isPrefetchRelated(s2_hit_prefetch) && !resp.bits.miss && !s2_hit_access)
 
   // if ldu0 and ldu1 hit the same, count for 1
   val total_prefetch = s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
-  val pf_late_in_cache = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
+  val pf_late_in_cache = s2_valid && s2_dcache_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
   val hit_pf_in_cache = Wire(Bool()) // assigned in s3 for filtering
   val hit_source = Wire(UInt(L1PfSourceBits.W))
   
@@ -519,7 +526,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.prefetch_stat.hit_pf_in_cache := hit_pf_in_cache
   io.prefetch_stat.hit_source := hit_source
 
-  io.prefetch_stat.demand_miss := s2_valid && (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && !s2_hit && s2_req.isFirstIssue
+  io.prefetch_stat.demand_miss := s2_valid &&
+    (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && !s2_load_hit && s2_req.isFirstIssue
   io.prefetch_stat.pollution := io.prefetch_stat.demand_miss && io.bloom_filter_query.resp.valid && io.bloom_filter_query.resp.bits.res
 
   io.lsu.resp.valid := resp.valid
@@ -545,7 +553,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_read_error_lane_mask = RegEnable(bankMaskToReadErrorLaneMask(s2_bank_oh, addrToVWordBankBase(s2_vaddr)), s2_fire)
   val s3_vaddr = RegEnable(s2_vaddr, s2_fire)
   val s3_paddr = RegEnable(s2_paddr, s2_fire)
-  val s3_hit = RegEnable(s2_hit, s2_fire)
+  val s3_dcache_hit = RegEnable(s2_dcache_hit && !s2_wpu_pred_fail, s2_fire)
   val s3_tag_match_way = RegEnable(s2_tag_match_way, s2_fire)
   val s3_req_instrtype = RegEnable(s2_req.instrtype, s2_fire)
   val s3_is_prefetch = s3_req_instrtype === DCACHE_PREFETCH_SOURCE.U
@@ -555,7 +563,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     s3_load128Req,
     io.read_error_delayed.asUInt.orR,
     (io.read_error_delayed.asUInt & s3_read_error_lane_mask).orR
-  ) && s3_hit
+  ) && s3_dcache_hit
   val s3_tag_error = RegEnable(s2_tag_error, s2_fire)
   val s3_tl_error = RegEnable(s2_tl_error, s2_fire)
   val s3_flag_error = s3_tl_error.asUInt.orR
@@ -563,7 +571,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_error = s3_tag_error || s3_flag_error || s3_data_error
 
   // error_delayed signal will be used to update uop.exception 1 cycle after load writeback
-  resp.bits.error_delayed := s3_error && (s3_hit || s3_tag_error) && s3_valid
+  resp.bits.error_delayed := s3_error && (s3_dcache_hit || s3_tag_error) && s3_valid
   resp.bits.tl_error_delayed.tl_denied := s3_tl_error.tl_denied & s3_valid
   resp.bits.tl_error_delayed.tl_corrupt := s3_tl_error.tl_corrupt & s3_valid
   resp.bits.data_delayed := s3_banked_data_resp_word
@@ -580,12 +588,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // report tag error / l2 corrupted to CACHE_ERROR csr
   io.error.valid := s3_error && s3_valid
 
-  io.replace_access.valid := s3_valid && s3_hit
+  io.replace_access.valid := s3_valid && s3_dcache_hit
   io.replace_access.bits.set := RegNext(RegNext(get_dcache_idx(s1_req.vaddr)))
   io.replace_access.bits.way := RegNext(RegNext(OHToUInt(s1_tag_match_way_dup_dc)))
 
   // update access bit
-  io.access_flag_write.valid := s3_valid && s3_hit && !s3_is_prefetch
+  io.access_flag_write.valid := s3_valid && s3_dcache_hit && !s3_is_prefetch
   io.access_flag_write.bits.idx := get_dcache_idx(s3_vaddr)
   io.access_flag_write.bits.way_en := s3_tag_match_way
   io.access_flag_write.bits.flag := true.B
@@ -593,7 +601,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // clear prefetch source when prefetch hit
   // so that next load to the same line won't be considered as prefetch hit
   // A prefetch block will only be counted once
-  val s3_clear_pf_flag_en = s3_valid && s3_hit && !s3_is_prefetch && isFromL1Prefetch(s3_hit_prefetch)
+  val s3_clear_pf_flag_en = s3_valid && s3_dcache_hit && !s3_is_prefetch && isFromL1Prefetch(s3_hit_prefetch)
   io.prefetch_flag_write.valid := s3_clear_pf_flag_en && !io.counter_filter_query.resp
   io.prefetch_flag_write.bits.idx := get_dcache_idx(s3_vaddr)
   io.prefetch_flag_write.bits.way_en := s3_tag_match_way
