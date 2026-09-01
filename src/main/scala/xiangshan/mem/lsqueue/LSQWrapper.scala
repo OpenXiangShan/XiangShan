@@ -375,8 +375,8 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
     val waitLsqRecover = Value // wait lsq recover pointer
   }
 
-  private val lqDeq = Mux(io.lqDeq.valid, io.lqDeq.bits, 0.U)
-  private val sqDeq = Mux(io.sqDeq.valid, io.sqDeq.bits, 0.U)
+  private val lqDeq = RegNext(Mux(io.lqDeq.valid, io.lqDeq.bits, 0.U), 0.U)
+  private val sqDeq = RegNext(Mux(io.sqDeq.valid, io.sqDeq.bits, 0.U), 0.U)
 
   val lqHeadPtr = RegInit(0.U.asTypeOf(new LqPtr))
   val sqHeadPtr = RegInit(0.U.asTypeOf(new SqPtr))
@@ -458,7 +458,7 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
       lqTailPtr.addWrapCircles(lqAllocNumber)
     )
   )
-  // sqRedirect will arrive after 3 -> (3 + virtual store queue walk cycles) cycle of io.redirect.
+  // sqRedirect will arrive after 4 -> (4 + virtual store queue walk cycles) cycle of io.redirect.
   val sqTailPtrNext = Mux(io.sqRedirectPtr.valid,
     io.sqRedirectPtr.bits,
     Mux(io.redirect.valid,
