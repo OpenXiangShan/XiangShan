@@ -19,21 +19,19 @@ package xiangshan.cache
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.{TLBundleB, TLEdgeOut, TLMessages, TLPermissions}
-import utils.HasTLDump
+import freechips.rocketchip.tilelink.TLPermissions
+import oceanus.compactchi._
 import utility.{XSDebug, XSPerfAccumulate, HasPerfEvents}
 
 class ProbeReq(implicit p: Parameters) extends DCacheBundle
 {
-  val source = UInt()
+  val source = UInt(8.W) // Compact CHI SNP TxnID
   val opcode = UInt()
   val addr   = UInt(PAddrBits.W)
   val vaddr  = UInt(VAddrBits.W) // l2 uses vaddr index to probe l1
   val param  = UInt(TLPermissions.bdWidth.W)
-  val needData = Bool()
-
-  // probe queue entry ID
-  val id = UInt(log2Up(cfg.nProbeEntries).W)
+  val trace_tag = UInt(1.W)
+  val snp_channel = UInt(memChannelBits.W)
 
   def dump(cond: Bool) = {
     XSDebug(cond, "ProbeReq source: %d opcode: %d addr: %x param: %d\n",
@@ -102,7 +100,10 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     pipe_req.probe_param := req.param
     pipe_req.addr   := req.addr
     pipe_req.vaddr  := req.vaddr
-    pipe_req.probe_need_data := req.needData
+    pipe_req.probe_snp_txn_id := req.source
+    pipe_req.probe_snp_trace_tag := req.trace_tag
+    pipe_req.probe_snp_make_invalid := CCHIOpcode.SnpMakeInvalid.is(req.opcode, true.B)
+    pipe_req.probe_snp_channel := req.snp_channel
     pipe_req.error := false.B
     pipe_req.id := io.id
     pipe_req.miss_fail_cause_evict_btot := false.B
@@ -125,10 +126,11 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
   XSPerfAccumulate("probe_penalty_blocked_by_pipeline", state === s_pipe_req && io.pipe_req.valid && !io.pipe_req.ready)
 }
 
-class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump with HasPerfEvents
+class ProbeQueue()(implicit p: Parameters) extends DCacheModule with HasPerfEvents
 {
   val io = IO(new Bundle {
-    val mem_probe = Flipped(Decoupled(new TLBundleB(edge.bundle)))
+    val rxsnp = Flipped(DecoupledIO(new FlitSNP))
+    val rxsnp_channel = Input(UInt(memChannelBits.W))
     val pipe_req  = DecoupledIO(new MainPipeReq)
     val lrsc_locked_block = Input(Valid(UInt()))
     val update_resv_set = Input(Bool())
@@ -141,34 +143,40 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   val allocate = primary_ready.asUInt.orR
   val alloc_idx = PriorityEncoder(primary_ready)
 
-  // translate to inner req
+  // translate SNP to inner req
   val req = Wire(new ProbeReq)
-  val alias_addr_frag = io.mem_probe.bits.data(2, 1) // add extra 2 bits from vaddr to get vindex
-  req.source := io.mem_probe.bits.source
-  req.opcode := io.mem_probe.bits.opcode
-  req.addr := io.mem_probe.bits.address
+  val snp = io.rxsnp.bits
+  val snp_addr = Cat(snp.Addr, 0.U(3.W))
+  val alias_addr_frag = snp.alias
+  req.source := snp.TxnID
+  req.opcode := snp.Opcode
+  req.addr := snp_addr
   if(DCacheAboveIndexOffset > DCacheTagOffset) {
-    // have alias problem, extra alias bits needed for index
     req.vaddr := Cat(
-      0.U((PAddrBits - DCacheAboveIndexOffset).W), // dontcare
-      alias_addr_frag(DCacheAboveIndexOffset - DCacheTagOffset - 1 , 0), // index
-      io.mem_probe.bits.address(DCacheTagOffset - 1, 0)                 // index & others
+      0.U((PAddrBits - DCacheAboveIndexOffset).W),
+      alias_addr_frag(DCacheAboveIndexOffset - DCacheTagOffset - 1 , 0),
+      snp_addr(DCacheTagOffset - 1, 0)
     )
-  } else { // no alias problem
-    req.vaddr := io.mem_probe.bits.address
+  } else {
+    req.vaddr := snp_addr
   }
-  req.param := io.mem_probe.bits.param
-  req.needData := io.mem_probe.bits.data(0)
-  req.id := DontCare
+  req.param := MuxLookup(snp.Opcode, TLPermissions.toN)(Seq(
+    CCHIOpcode.SnpToClean.U -> TLPermissions.toT,
+    CCHIOpcode.SnpToShared.U -> TLPermissions.toB,
+    CCHIOpcode.SnpToInvalid.U -> TLPermissions.toN,
+    CCHIOpcode.SnpMakeInvalid.U -> TLPermissions.toN
+  ))
+  req.trace_tag := snp.TraceTag
+  req.snp_channel := io.rxsnp_channel
 
-  io.mem_probe.ready := allocate
+  io.rxsnp.ready := allocate
 
   val entries = (0 until cfg.nProbeEntries) map { i =>
     val entry = Module(new ProbeEntry)
     entry.io.id := i.U
 
     // entry req
-    entry.io.req.valid := (i.U === alloc_idx) && allocate && io.mem_probe.valid
+    entry.io.req.valid := (i.U === alloc_idx) && allocate && io.rxsnp.valid
     primary_ready(i)   := entry.io.req.ready
     entry.io.req.bits  := req
 
@@ -207,22 +215,22 @@ class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule w
   }
 
   // print all input/output requests for debug purpose
-  when (io.mem_probe.valid) {
-    // before a probe finishes, L2 should not further issue probes on this block
-    val probe_conflict = VecInit(entries.map(e => e.io.block_addr.valid && get_block(e.io.block_addr.bits) === get_block(io.mem_probe.bits.address))).asUInt.orR
-    assert (!probe_conflict)
-    // for now, we can only deal with ProbeBlock
-    assert (io.mem_probe.bits.opcode === TLMessages.Probe)
+  when (io.rxsnp.valid) {
+    val probe_conflict = VecInit(entries.map(e =>
+      e.io.block_addr.valid && get_block(e.io.block_addr.bits) === get_block(snp_addr))).asUInt.orR
+    assert(!probe_conflict)
+    assert(CCHIOpcode.SnpToClean.is(snp.Opcode, io.rxsnp.valid) ||
+      CCHIOpcode.SnpToShared.is(snp.Opcode, io.rxsnp.valid) ||
+      CCHIOpcode.SnpToInvalid.is(snp.Opcode, io.rxsnp.valid) ||
+      CCHIOpcode.SnpMakeInvalid.is(snp.Opcode, io.rxsnp.valid))
   }
 
-  // debug output
-  XSDebug(io.mem_probe.fire, "mem_probe: ")
-  io.mem_probe.bits.dump(io.mem_probe.fire)
+  XSDebug(io.rxsnp.fire, "rxsnp addr: %x opcode: %d txn: %d\n", snp_addr, snp.Opcode, snp.TxnID)
 
 // io.pipe_req.bits.dump(io.pipe_req.fire)
 
   XSDebug(io.lrsc_locked_block.valid, "lrsc_locked_block: %x\n", io.lrsc_locked_block.bits)
-  XSPerfAccumulate("ProbeL1DCache", io.mem_probe.fire)
+  XSPerfAccumulate("ProbeL1DCache", io.rxsnp.fire)
 
   val perfValidCount = RegNext(PopCount(entries.map(e => e.io.block_addr.valid)))
   val perfEvents = Seq(

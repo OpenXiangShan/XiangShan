@@ -58,14 +58,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   memBlock.beu_local_int_sink := l2top.inner.beu_local_int_source_buffer
 
   // =========== Components' Connection ============
-  // L1 to l1_xbar
-  coreParams.dcacheParametersOpt.map { params =>
-    val clientNodes = memBlock.dcache.clientNodes
-    (memBlock.dcache_port zip memBlock.l1d_to_l2_buffer zip clientNodes).zipWithIndex.foreach {
-      case (((port, buffer), clientNode), i) =>
-        l2top.inner.misc_l2_pmu := l2top.inner.l1d_logger(i) := port := buffer.node := clientNode
-    }
-  }
+  // L1D cacheable path uses Compact CHI (see DCache.io.cchi); no TileLink clientNode.
+  // coreParams.dcacheParametersOpt.map { _ => ... } intentionally omitted.
 
   l2top.inner.misc_l2_pmu := l2top.inner.l1i_logger := memBlock.frontendBridge.icache_node
   if (!coreParams.softPTW) {
