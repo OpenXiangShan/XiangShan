@@ -184,5 +184,6 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
     iopmp.module.apb_s.pwdata   <> iopmp_apb.pwdata
     iopmp.module.apb_s.pready   <> iopmp_apb.pready
     iopmp.module.apb_s.prdata   <> iopmp_apb.prdata
+    iopmp.module.apb_s.pslverr  <> iopmp_apb.pslverr
   }
 }
