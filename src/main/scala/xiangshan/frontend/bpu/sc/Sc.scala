@@ -310,7 +310,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
         (predValid && tageConfLow)  -> s2_sumAboveThresholdShift3(i)
       )
     )
-    s2_useScPred(i)     := conf
+    s2_useScPred(i)     := conf && io.enable
     s2_sumAboveThres(i) := Mux(predValid, conf, true.B)
     dontTouch(tageConfHigh)
     dontTouch(tageConfMid)

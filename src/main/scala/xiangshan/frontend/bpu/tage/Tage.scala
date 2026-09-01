@@ -87,7 +87,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      - compute tags
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val s1_fire       = io.stageCtrl.s1_fire
+  private val s1_fire       = io.stageCtrl.s1_fire && io.enable
   private val s1_startPc    = RegEnable(s0_startPc, s0_fire)
   private val s1_foldedHist = RegEnable(s0_foldedHist, s0_fire)
 
@@ -113,7 +113,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
      - select the alternate and complete the prediction for each branch
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val s2_fire     = io.stageCtrl.s2_fire
+  private val s2_fire     = io.stageCtrl.s2_fire && io.enable
   private val s2_readResp = RegEnable(s1_readResp, s1_fire)
   private val s2_hits     = RegEnable(s1_hits, s1_fire)
   private val s2_branches = io.fromMainBtb.result
@@ -172,10 +172,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     // use the alternate prediction.
     val useProvider = hasProvider && !(useAltOnNa && provider.takenCtr.isWeak)
 
-    io.prediction.takenVec(i).valid := useProvider || hasAlt
+    io.prediction.takenVec(i).valid := (useProvider || hasAlt) && io.enable
     io.prediction.takenVec(i).bits  := Mux(useProvider, provider.takenCtr.isPositive, alt.takenCtr.isPositive)
 
-    io.toSc.providerTakenCtrVec(i).valid := hasProvider && branch.valid
+    io.toSc.providerTakenCtrVec(i).valid := (hasProvider && branch.valid) && io.enable
     io.toSc.providerTakenCtrVec(i).bits  := provider.takenCtr
 
     io.meta.entries(i).useProvider       := useProvider
