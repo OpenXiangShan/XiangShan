@@ -18,6 +18,7 @@ from env.funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_pa
 _ICACHE_PREFIX = "Frontend_top.Frontend.inner_icache."
 _IFU_PREFIX = "Frontend_top.Frontend.inner_ifu."
 _NOP_CACHE_LINE = sum(0x00000013 << (32 * index) for index in range(16))
+_RVC_NOP_CACHE_LINE = sum(0x0001 << (16 * index) for index in range(32))
 
 
 class _Signal:
@@ -162,6 +163,16 @@ def _idle_request(dut):
     dut.set(_SIGNALS["s0_flush"][0], 0)
 
 
+def _set_full_rvc_request(dut):
+    return _set_request(
+        dut,
+        size0=32,
+        range0=(1 << 32) - 1,
+        data0=_RVC_NOP_CACHE_LINE,
+        maybe_rvc_map=(1 << 32) - 1,
+    )
+
+
 def _set_registered_stage(
     dut,
     stage,
@@ -264,6 +275,22 @@ def _set_registered_stage(
                 f"{_IFU_PREFIX}s2_alignedPdInfoVec_{active_slot}_brAttribute_rasAction",
                 semantic["ras_action"],
             )
+
+
+def _prime_lane34_registered_transaction(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    blocks = _set_full_rvc_request(dut)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    _idle_request(dut)
+    _set_s1(dut, blocks)
+    _set_registered_stage(
+        dut, "s1", blocks, slot=3, instr_count=32, align_shift=3
+    )
+    delattr(dut, f"{_IFU_PREFIX}s1_alignedInstrVec_34_isCrossBlockInstr")
+    delattr(dut, f"{_IFU_PREFIX}s1_alignedInstrPcVec_34_addr")
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+    return recorder, env, dut, blocks
 
 
 @pytest.mark.parametrize(
@@ -1104,6 +1131,130 @@ def test_cacheable_s1_s2_transaction_missing_cross_probe_is_visible(tmp_path):
         and any("isCrossBlockInstr" in name for name in item.get("missing", []))
         for item in recorder.risk_observations
     )
+
+
+def test_cacheable_lane34_structural_cross_and_deferred_s1_pc_pass_at_s2(
+    tmp_path,
+):
+    recorder, env, dut, blocks = _prime_lane34_registered_transaction(tmp_path)
+
+    assert recorder._ifu_cacheable_s1_s2_pending is not None
+    pending_slot = recorder._ifu_cacheable_s1_s2_pending["s1"]["slots"][-1]
+    assert pending_slot["slot"] == 34
+    assert pending_slot["pc"] is None
+    assert pending_slot["is_cross_block_instr"] == 0
+    assert pending_slot["observation_modes"] == {
+        "is_cross_block_instr": "rtl_structural_zero",
+        "pc": "deferred_to_s2",
+    }
+
+    dut.set(_SIGNALS["s1_valid"][0], 0)
+    dut.set(_SIGNALS["s1_fire"][0], 0)
+    dut.set(f"{_IFU_PREFIX}s2_valid_valid", 1)
+    dut.set(f"{_IFU_PREFIX}s2_flush", 0)
+    _set_registered_stage(
+        dut, "s2", blocks, slot=3, instr_count=32, align_shift=3
+    )
+    delattr(dut, f"{_IFU_PREFIX}s2_alignedInstrVec_34_isCrossBlockInstr")
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 3)
+
+    passes = [
+        item
+        for item in recorder.risk_observations
+        if item.get("event") == "ifu_s1_s2_registered_transaction_pass"
+    ]
+    assert len(passes) == 1
+    assert passes[0]["s2"]["slots"][-1]["pc"] == 0x4000001F
+    assert passes[0]["s2"]["slots"][-1]["observation_modes"] == {
+        "is_cross_block_instr": "rtl_structural_zero"
+    }
+    assert recorder._raw_dict()["errors"] == []
+
+
+@pytest.mark.parametrize(
+    ("field", "stem"),
+    (
+        ("cross", "s1_alignedInstrVec_33_isCrossBlockInstr"),
+        ("pc", "s1_alignedInstrPcVec_33_addr"),
+    ),
+)
+def test_cacheable_lane33_missing_probe_still_fails_closed(tmp_path, field, stem):
+    recorder, env, dut = _make_recorder(tmp_path)
+    blocks = _set_full_rvc_request(dut)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    _idle_request(dut)
+    _set_s1(dut, blocks)
+    _set_registered_stage(
+        dut, "s1", blocks, slot=2, instr_count=32, align_shift=2
+    )
+    delattr(dut, f"{_IFU_PREFIX}{stem}")
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+
+    assert recorder._ifu_cacheable_s1_s2_pending is None
+    assert any(
+        item.get("event") == "ifu_s1_s2_transaction_probe_unobservable"
+        and item.get("stage") == "s1"
+        and stem in item.get("missing", [])
+        for item in recorder.risk_observations
+    ), field
+
+
+def test_cacheable_lane34_fallback_requires_exact_tail_shape(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    blocks = _set_full_rvc_request(dut)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    _idle_request(dut)
+    _set_s1(dut, blocks)
+    _set_registered_stage(
+        dut, "s1", blocks, slot=3, instr_count=32, align_shift=3
+    )
+    dut.set(f"{_IFU_PREFIX}s1_instrCount", 31)
+    delattr(dut, f"{_IFU_PREFIX}s1_alignedInstrVec_34_isCrossBlockInstr")
+    delattr(dut, f"{_IFU_PREFIX}s1_alignedInstrPcVec_34_addr")
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+
+    errors = recorder._raw_dict()["errors"]
+    assert any(
+        error.get("event") == "ifu_s1_s2_transaction_probe_unobservable"
+        and "s1_alignedInstrVec_34_isCrossBlockInstr" in error.get("missing", [])
+        and "s1_alignedInstrPcVec_34_addr" in error.get("missing", [])
+        for error in errors
+    )
+
+
+@pytest.mark.parametrize("failure", ("missing", "wrong"))
+def test_cacheable_lane34_s2_pc_must_be_observed_and_correct(tmp_path, failure):
+    recorder, env, dut, blocks = _prime_lane34_registered_transaction(tmp_path)
+    assert recorder._ifu_cacheable_s1_s2_pending is not None
+
+    dut.set(_SIGNALS["s1_valid"][0], 0)
+    dut.set(_SIGNALS["s1_fire"][0], 0)
+    dut.set(f"{_IFU_PREFIX}s2_valid_valid", 1)
+    dut.set(f"{_IFU_PREFIX}s2_flush", 0)
+    _set_registered_stage(
+        dut, "s2", blocks, slot=3, instr_count=32, align_shift=3
+    )
+    delattr(dut, f"{_IFU_PREFIX}s2_alignedInstrVec_34_isCrossBlockInstr")
+    pc_stem = f"{_IFU_PREFIX}s2_alignedInstrPcVec_34_addr"
+    if failure == "missing":
+        delattr(dut, pc_stem)
+    else:
+        dut.set(pc_stem, 0x40000020)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 3)
+
+    assert not any(
+        item.get("event") == "ifu_s1_s2_registered_transaction_pass"
+        for item in recorder.risk_observations
+    )
+    errors = recorder._raw_dict()["errors"]
+    expected_event = (
+        "ifu_s1_s2_transaction_probe_unobservable"
+        if failure == "missing"
+        else "ifu_s2_registered_semantic_mismatch"
+    )
+    assert any(error.get("event") == expected_event for error in errors)
 
 
 def test_cacheable_s1_s2_transaction_predecode_mismatch_is_not_a_pass(tmp_path):

@@ -14,6 +14,12 @@ _FETCH_BLOCK_INST_NUM = 32
 _ICACHE_HALFWORDS = 32
 _PRUNED_GUARDED_ADDR_BITS = 50
 _REGISTERED_TRANSACTION_SLOT_COUNT = 35
+_STRUCTURAL_TAIL_SLOT = 34
+_STRUCTURAL_TAIL_INSTR_COUNT = 32
+_STRUCTURAL_TAIL_ALIGN_SHIFT = 3
+_STRUCTURAL_TAIL_VALID_MASK = (
+    ((1 << _STRUCTURAL_TAIL_INSTR_COUNT) - 1) << _STRUCTURAL_TAIL_ALIGN_SHIFT
+)
 _CONTRACT_FAILURE_EVENTS = frozenset(
     {
         "ifu_s1_alignment_probe_unobservable",
@@ -1082,6 +1088,16 @@ def _read_ifu_pipeline_internal(recorder, stem: str) -> Optional[int]:
     return None if value is None else int(value)
 
 
+def _is_structural_tail_slot(snapshot: dict, slot: int) -> bool:
+    instr_count = snapshot.get("instr_count")
+    return (
+        int(slot) == _STRUCTURAL_TAIL_SLOT
+        and instr_count is not None
+        and int(instr_count) == _STRUCTURAL_TAIL_INSTR_COUNT
+        and int(snapshot["valid_mask"]) == _STRUCTURAL_TAIL_VALID_MASK
+    )
+
+
 def _registered_stage_snapshot(recorder, stage: str) -> tuple[Optional[dict], list[str]]:
     valid_mask = _read_ifu_pipeline_internal(recorder, f"{stage}_alignedInstrValid")
     missing = [] if valid_mask is not None else [f"{stage}_alignedInstrValid"]
@@ -1118,13 +1134,32 @@ def _registered_stage_snapshot(recorder, stage: str) -> tuple[Optional[dict], li
             "branch_type": f"{stage}_alignedPdInfoVec_{slot}_brAttribute_branchType",
         }
         values = {name: _read_ifu_pipeline_internal(recorder, stem) for name, stem in fields.items()}
-        missing.extend(stem for name, stem in fields.items() if values[name] is None)
+        observation_modes = {}
+        deferred_to_s2 = set()
+        # Compacted slot 31 shifted by three lands in lane 34. It has no next
+        # instruction to cross into, and its S1 PC expression survives at S2.
+        if _is_structural_tail_slot(snapshot, slot):
+            if values["is_cross_block_instr"] is None:
+                values["is_cross_block_instr"] = 0
+                observation_modes["is_cross_block_instr"] = "rtl_structural_zero"
+            if stage == "s1" and values["pc"] is None:
+                deferred_to_s2.add("pc")
+                observation_modes["pc"] = "deferred_to_s2"
+        missing.extend(
+            stem
+            for name, stem in fields.items()
+            if values[name] is None and name not in deferred_to_s2
+        )
         values["slot"] = int(slot)
         values["effective_owner"] = (
             None
             if values["raw_block_sel"] is None or values["is_cross_block_instr"] is None
             else int(values["raw_block_sel"]) | int(values["is_cross_block_instr"])
         )
+        if observation_modes:
+            values["observation_modes"] = observation_modes
+        if deferred_to_s2:
+            values["deferred_to_s2"] = sorted(deferred_to_s2)
         snapshot["slots"].append(values)
     return snapshot, missing
 
@@ -1159,6 +1194,38 @@ _S2_SEMANTIC_FIELDS = (
 
 def _semantic_view(item: dict, fields: tuple[str, ...]) -> dict:
     return {field: item[field] for field in fields}
+
+
+_REGISTERED_SLOT_FIELDS = (
+    "slot",
+    "data",
+    "is_rvc",
+    "raw_block_sel",
+    "is_cross_block_instr",
+    "effective_owner",
+    "pc",
+    "branch_type",
+)
+
+
+def _registered_consistency_view(
+    snapshot: dict,
+    deferred_fields_by_slot: Optional[dict[int, tuple[str, ...]]] = None,
+) -> dict:
+    deferred_fields_by_slot = deferred_fields_by_slot or {}
+    return {
+        "valid_mask": snapshot["valid_mask"],
+        "instr_count": snapshot["instr_count"],
+        "fetch_blocks": snapshot["fetch_blocks"],
+        "slots": [
+            {
+                field: item[field]
+                for field in _REGISTERED_SLOT_FIELDS
+                if field not in deferred_fields_by_slot.get(int(item["slot"]), ())
+            }
+            for item in snapshot["slots"]
+        ],
+    }
 
 
 def _check_s1_aggregate_semantics(
@@ -1272,6 +1339,10 @@ def _check_s1_aggregate_semantics(
         observed = {**slot_item, "index": int(index)}
         expected = expected_by_slot.get(slot)
         observed_view = _semantic_view(observed, _S1_SEMANTIC_FIELDS)
+        deferred_fields = set(slot_item.get("deferred_to_s2", ()))
+        compared_fields = tuple(
+            field for field in _S1_SEMANTIC_FIELDS if field not in deferred_fields
+        )
         observed_items.append(observed_view)
         if expected is None:
             mismatches.append(
@@ -1284,7 +1355,11 @@ def _check_s1_aggregate_semantics(
             continue
         expected_view = _semantic_view(expected, _S1_SEMANTIC_FIELDS)
         expected_items.append(expected_view)
-        if observed_view != expected_view:
+        if deferred_fields:
+            observed_view["deferred_to_s2"] = sorted(deferred_fields)
+        if _semantic_view(observed, compared_fields) != _semantic_view(
+            expected, compared_fields
+        ):
             mismatches.append(
                 {
                     "slot": slot,
@@ -1416,17 +1491,21 @@ def _sample_registered_s1_s2_transaction(recorder, cycle: int) -> None:
                     s1_cycle=pending["s1_cycle"],
                     missing=missing,
                 )
-            elif observed != pending["s1"]:
+            else:
+                observed_registered = _registered_consistency_view(
+                    observed, pending["deferred_fields_by_slot"]
+                )
+            if not missing and observed_registered != pending["registered"]:
                 _record_mismatch(
                     recorder,
                     "ifu_s1_s2_registered_transaction_mismatch",
                     cycle,
                     s1_cycle=pending["s1_cycle"],
                     aggregate=pending["aggregate"],
-                    expected=pending["s1"],
-                    observed=observed,
+                    expected=pending["registered"],
+                    observed=observed_registered,
                 )
-            else:
+            elif not missing:
                 s2_semantic, semantic_missing = _s2_semantic_snapshot(
                     recorder, observed
                 )
@@ -1509,11 +1588,20 @@ def _sample_registered_s1_s2_transaction(recorder, cycle: int) -> None:
     )
     if semantics is None:
         return
+    deferred_fields_by_slot = {
+        int(item["slot"]): tuple(item.get("deferred_to_s2", ()))
+        for item in s1_snapshot["slots"]
+        if item.get("deferred_to_s2")
+    }
     recorder._ifu_cacheable_s1_s2_pending = {
         "s0_cycle": int(verified["accepted_cycle"]),
         "s1_cycle": int(cycle),
         "aggregate": verified["aggregate"],
         "s1": s1_snapshot,
+        "registered": _registered_consistency_view(
+            s1_snapshot, deferred_fields_by_slot
+        ),
+        "deferred_fields_by_slot": deferred_fields_by_slot,
         "semantics": semantics,
     }
 
