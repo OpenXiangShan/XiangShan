@@ -7,6 +7,7 @@ import pytest
 
 from env.agents.backend_agent import BackendAgent
 from env.core.backend_model import BackendModel
+from env.core.transactions import BackendRedirectClass
 from env.model.backend_state import ActiveWrongPathEpisode
 from env.model.backend_state import BackendEvent
 from env.model.backend_state import ROB_COMMIT_STATE_COMMITTED
@@ -157,13 +158,52 @@ def test_backend_agent_drives_satp_flush_and_redirect_level() -> None:
     drive_if = _redirect_drive_if()
     agent._drive_if = drive_if
 
-    agent.drive_redirect({"pc": 0x80000020, "target_pc": 0x80000100, "level": 1, "satp_flush": 1})
+    agent.drive_redirect(
+        {
+            "pc": 0x80000020,
+            "target_pc": 0x80000100,
+            "level": 1,
+            "satp_flush": 1,
+            "redirect_class": BackendRedirectClass.OTHER,
+        }
+    )
 
     assert drive_if.redirect_bits_pc.value == 0x80000020
     assert drive_if.redirect_bits_target.value == 0x80000100
     assert drive_if.redirect_bits_level.value == 1
     assert drive_if.redirect_bits_satp_flush.value == 1
     assert drive_if.redirect_valid.value == 1
+
+
+@pytest.mark.parametrize(
+    ("redirect_class", "debug_is_ctrl", "debug_is_mem_vio"),
+    (
+        (BackendRedirectClass.CONTROL_FLOW, 1, 0),
+        (BackendRedirectClass.MEMORY_VIOLATION, 0, 1),
+        (BackendRedirectClass.OTHER, 0, 0),
+    ),
+)
+def test_backend_agent_encodes_redirect_class(
+    redirect_class: BackendRedirectClass,
+    debug_is_ctrl: int,
+    debug_is_mem_vio: int,
+) -> None:
+    agent = BackendAgent()
+    drive_if = _redirect_drive_if()
+    agent._drive_if = drive_if
+
+    agent.drive_redirect({"redirect_class": redirect_class})
+
+    assert drive_if.redirect_bits_debug_is_ctrl.value == debug_is_ctrl
+    assert drive_if.redirect_bits_debug_is_mem_vio.value == debug_is_mem_vio
+
+
+def test_backend_agent_rejects_redirect_without_structured_class() -> None:
+    agent = BackendAgent()
+    agent._drive_if = _redirect_drive_if()
+
+    with pytest.raises(ValueError, match="valid BackendRedirectClass"):
+        agent.drive_redirect({"redirect_class": "control_flow"})
 
 
 def test_plan_redirect_payload_preserves_level_and_satp_flush() -> None:
@@ -180,11 +220,87 @@ def test_plan_redirect_payload_preserves_level_and_satp_flush() -> None:
             "is_rvc": 1,
             "level": 1,
             "satp_flush": 1,
+            "redirect_class": BackendRedirectClass.OTHER,
         }
     )
 
     assert payload["level"] == 1
     assert payload["satp_flush"] == 1
+    assert payload["redirect_class"] is BackendRedirectClass.OTHER
+
+
+def test_redirect_reason_does_not_select_redirect_class() -> None:
+    model = BackendModel()
+
+    payload = model._plan_redirect_payload(
+        {
+            "target_pc": 0x80000100,
+            "reason": "memVio",
+        }
+    )
+
+    assert payload["redirect_class"] is BackendRedirectClass.CONTROL_FLOW
+
+
+@pytest.mark.parametrize(
+    "redirect_class",
+    (BackendRedirectClass.MEMORY_VIOLATION, BackendRedirectClass.OTHER),
+)
+def test_source_bound_non_cfi_redirect_accepts_non_control_class(
+    redirect_class: BackendRedirectClass,
+) -> None:
+    model = BackendModel()
+    source = _queue_instr(0x80000020, 0, 9)
+    model._cfvec_queue = deque([source])
+
+    model.inject_redirect_from_cfvec(
+        source_pc=source.pc,
+        source_ftq_flag=source.ftq_flag,
+        source_ftq_value=source.ftq_value,
+        source_ftq_offset=source.ftq_offset,
+        target_pc=0x80000100,
+        reason="structured-class",
+        redirect_class=redirect_class,
+    )
+
+    assert model.pending_events[0].payload["redirect_class"] is redirect_class
+
+
+def test_source_bound_control_redirect_rejects_non_cfi_source() -> None:
+    model = BackendModel()
+    source = _queue_instr(0x80000020, 0, 9)
+    model._cfvec_queue = deque([source])
+
+    with pytest.raises(AssertionError, match="control redirect source must be a CFI"):
+        model.inject_redirect_from_cfvec(
+            source_pc=source.pc,
+            source_ftq_flag=source.ftq_flag,
+            source_ftq_value=source.ftq_value,
+            source_ftq_offset=source.ftq_offset,
+            target_pc=0x80000100,
+            reason="control-flow",
+            redirect_class=BackendRedirectClass.CONTROL_FLOW,
+        )
+
+
+def test_memory_violation_redirect_rejects_fault_or_satp_flush() -> None:
+    model = BackendModel()
+    source = _queue_instr(0x80000020, 0, 9)
+    source.exception_marked = True
+    source.exception_bits = 1 << 12
+    model._cfvec_queue = deque([source])
+
+    with pytest.raises(AssertionError, match="cannot carry backend fault or satpFlush"):
+        model.inject_redirect_from_cfvec(
+            source_pc=source.pc,
+            source_ftq_flag=source.ftq_flag,
+            source_ftq_value=source.ftq_value,
+            source_ftq_offset=source.ftq_offset,
+            target_pc=0x80000100,
+            reason="invalid-memory-violation",
+            backend_ipf=1,
+            redirect_class=BackendRedirectClass.MEMORY_VIOLATION,
+        )
 
 
 def test_recovery_target_requires_matching_pc_and_ftq() -> None:

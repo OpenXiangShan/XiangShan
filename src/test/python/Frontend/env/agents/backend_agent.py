@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Iterable, Mapping, Optional
 
 from ..bundles import BackendCtrlBundle
+from ..core.transactions import BackendRedirectClass, FtqIdxAheadTxn
 from ..model.backend_state import FtqEntry, ResolveEntry
 
 
@@ -28,12 +29,6 @@ class BackendAgent:
     def _encode_backend_addr(addr: int) -> int:
         return int(addr) >> 1
 
-    def _assert_ftq_idx_ahead_unused(self) -> None:
-        assert self._drive_if is not None
-        value = getattr(self._drive_if.ftq_idx_ahead_0_valid, "value", 0)
-        if int(value) != 0:
-            raise AssertionError("ftqIdxAhead(0) is not modeled by the frontend env drive path")
-
     def clear_one_shot_signals(self) -> None:
         assert self._drive_if is not None
         self._write(self._drive_if.redirect_valid, 0)
@@ -43,15 +38,27 @@ class BackendAgent:
             self._write(self._drive_if.call_ret_commit_valid[lane], 0)
             self._write(self._drive_if.call_ret_commit_bits_ras_action[lane], 0)
             self._write(self._drive_if.call_ret_commit_bits_ftq_ptr_value[lane], 0)
-        self._write(self._drive_if.ftq_idx_ahead_0_valid, 0)
+        self._write(self._drive_if.ftq_idx_ahead_valid, 0)
+        self._write(self._drive_if.ftq_idx_ahead_flag, 0)
+        self._write(self._drive_if.ftq_idx_ahead_value, 0)
 
     def start_cycle(self, can_accept: int, wfi_req: int = 0, backend_empty: int = 1) -> None:
         assert self._drive_if is not None
-        self._assert_ftq_idx_ahead_unused()
         self._write(self._drive_if.can_accept, int(can_accept))
         self._write(self._drive_if.backend_empty, 1 if int(backend_empty) else 0)
         self.clear_one_shot_signals()
         self._write(self._drive_if.wfi_req, 1 if int(wfi_req) else 0)
+
+    def drive_ftq_idx_ahead(self, txn: Optional[FtqIdxAheadTxn]) -> None:
+        assert self._drive_if is not None
+        self._write(self._drive_if.ftq_idx_ahead_valid, 0)
+        self._write(self._drive_if.ftq_idx_ahead_flag, 0)
+        self._write(self._drive_if.ftq_idx_ahead_value, 0)
+        if txn is None:
+            return
+        self._write(self._drive_if.ftq_idx_ahead_flag, int(txn.ftq_flag))
+        self._write(self._drive_if.ftq_idx_ahead_value, int(txn.ftq_value))
+        self._write(self._drive_if.ftq_idx_ahead_valid, 1)
 
     def drive_commit(self, entry: Optional[FtqEntry]) -> None:
         assert self._drive_if is not None
@@ -83,8 +90,17 @@ class BackendAgent:
             self._write(self._drive_if.call_ret_commit_bits_ftq_ptr_value[lane], int(getattr(inst, "ftq_value", 0)))
             self._write(self._drive_if.call_ret_commit_valid[lane], 1)
 
-    def drive_redirect(self, payload: Mapping[str, int]) -> None:
+    def drive_redirect(self, payload: Mapping[str, object]) -> None:
         assert self._drive_if is not None
+        redirect_class = payload.get("redirect_class")
+        debug_encoding = {
+            BackendRedirectClass.CONTROL_FLOW: (1, 0),
+            BackendRedirectClass.MEMORY_VIOLATION: (0, 1),
+            BackendRedirectClass.OTHER: (0, 0),
+        }
+        if not isinstance(redirect_class, BackendRedirectClass):
+            raise ValueError("redirect payload requires a valid BackendRedirectClass")
+        debug_is_ctrl, debug_is_mem_vio = debug_encoding[redirect_class]
         self._write(self._drive_if.redirect_bits_pc, int(payload.get("pc", 0)))
         self._write(self._drive_if.redirect_bits_target, int(payload.get("target_pc", 0)))
         self._write(self._drive_if.redirect_bits_taken, int(payload.get("taken", 1)))
@@ -99,6 +115,6 @@ class BackendAgent:
         self._write(self._drive_if.redirect_bits_backend_ipf, int(payload.get("backend_ipf", 0)))
         self._write(self._drive_if.redirect_bits_backend_iaf, int(payload.get("backend_iaf", 0)))
         self._write(self._drive_if.redirect_bits_satp_flush, int(payload.get("satp_flush", 0)))
-        self._write(self._drive_if.redirect_bits_debug_is_ctrl, 1)
-        self._write(self._drive_if.redirect_bits_debug_is_mem_vio, 0)
+        self._write(self._drive_if.redirect_bits_debug_is_ctrl, debug_is_ctrl)
+        self._write(self._drive_if.redirect_bits_debug_is_mem_vio, debug_is_mem_vio)
         self._write(self._drive_if.redirect_valid, 1)

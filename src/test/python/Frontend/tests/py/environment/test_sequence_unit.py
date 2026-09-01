@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from env.monitors import Observation
 from env.model.golden_trace import GoldenTrace, TraceEntry
 from env.sequences import CheckPcSequence, InjectRedirectSequence, LoadGoldenTraceSequence, RunUntilGoldenTraceCompleteSequence
-from env.core.transactions import GoldenTraceSource, PcSequenceExpectation, RedirectTxn
+from env.core.transactions import BackendRedirectClass, GoldenTraceSource, PcSequenceExpectation, RedirectTxn
 
 
 class _NoRawDutAccess:
@@ -193,6 +193,7 @@ def test_inject_redirect_sequence_uses_source_bound_redirect_when_requested():
             level=1,
             backend_ipf=1,
             satp_flush=1,
+            redirect_class=BackendRedirectClass.OTHER,
             max_cycles=2,
         ),
     ).run(env)
@@ -211,6 +212,7 @@ def test_inject_redirect_sequence_uses_source_bound_redirect_when_requested():
         "backend_ipf": 1,
         "backend_iaf": 0,
         "satp_flush": 1,
+        "redirect_class": BackendRedirectClass.OTHER,
     }
 
 

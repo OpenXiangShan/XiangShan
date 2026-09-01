@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from ..core.transactions import FtqIdxAheadTxn
+
 
 @dataclass(frozen=True)
 class BackendObservationSnapshot:
@@ -20,6 +22,7 @@ class BackendCycleActions:
     commit_entry: Optional[Any] = None
     resolve_entries: tuple = ()
     call_ret_commit_group: tuple = ()
+    ftq_idx_ahead: Optional[FtqIdxAheadTxn] = None
     redirect_payload: Optional[dict] = None
 
 
