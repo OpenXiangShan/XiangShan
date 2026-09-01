@@ -298,15 +298,27 @@ def test_upstream_dual_block_suppression_reaches_single_block_output(
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", bin_name)
 
 
-def _set_line0_late_fault(dut, *, ready, fire, flush, ftq_value=13):
+def _set_line0_late_fault(
+    dut,
+    *,
+    ready,
+    fire,
+    flush,
+    ftq_value=13,
+    ecc_corrupt=1,
+    req_is_uncache=0,
+    input_exception=0,
+    merged_exception=5,
+):
     dut.set(_SIGNALS["s1_valid"][0], 1)
     dut.set(_SIGNALS["s1_ready"][0], ready)
     dut.set(_SIGNALS["s1_fire"][0], fire)
     dut.set(_SIGNALS["s1_flush"][0], flush)
-    dut.set(_LATE_FAULT_SIGNALS["line0_corrupt"][0], 1)
+    dut.set(_SIGNALS["s1_req_uncache"][0], req_is_uncache)
+    dut.set(_LATE_FAULT_SIGNALS["line0_corrupt"][0], ecc_corrupt)
     dut.set(_LATE_FAULT_SIGNALS["line1_corrupt"][0], 0)
-    dut.set(_LATE_FAULT_SIGNALS["s1_meta_in_exception"][0], 0)
-    dut.set(_LATE_FAULT_SIGNALS["s1_merged_exception"][0], 5)
+    dut.set(_LATE_FAULT_SIGNALS["s1_meta_in_exception"][0], input_exception)
+    dut.set(_LATE_FAULT_SIGNALS["s1_merged_exception"][0], merged_exception)
     dut.set(_LATE_FAULT_SIGNALS["s1_ftq_flag"][0], 0)
     dut.set(_LATE_FAULT_SIGNALS["s1_ftq_value"][0], ftq_value)
 
@@ -354,6 +366,129 @@ def test_line0_late_fault_flushes_without_s2_delivery(tmp_path):
     sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
 
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_008")
+
+
+@pytest.mark.parametrize("req_is_uncache", [0, 1])
+def test_exception_code_without_explicit_late_fault_source_does_not_hit(
+    tmp_path, req_is_uncache
+):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_line0_late_fault(
+        dut,
+        ready=0,
+        fire=0,
+        flush=0,
+        ecc_corrupt=0,
+        req_is_uncache=req_is_uncache,
+        input_exception=3,
+        merged_exception=3,
+    )
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+    _set_line0_late_fault(
+        dut,
+        ready=1,
+        fire=1,
+        flush=0,
+        ecc_corrupt=0,
+        req_is_uncache=req_is_uncache,
+        input_exception=3,
+        merged_exception=3,
+    )
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_008")
+    assert recorder._ifu_late_fault_stall_pending is None
+
+
+def test_line0_tl_fault_requires_matching_s0_source_before_s1_stall(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_request(dut, ftq0=(0, 13))
+    dut.set(
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_info_0_icacheMeta_exception_value",
+        3,
+    )
+    dut.set(_LATE_FAULT_SIGNALS["line0_tl_corrupt"][0], 1)
+    dut.set(_LATE_FAULT_SIGNALS["line0_tl_denied"][0], 1)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    _idle_request(dut)
+    _set_line0_late_fault(
+        dut,
+        ready=0,
+        fire=0,
+        flush=0,
+        ecc_corrupt=0,
+        input_exception=3,
+        merged_exception=3,
+    )
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+    assert recorder._ifu_late_fault_stall_pending is not None
+    assert recorder._ifu_late_fault_stall_pending["fault_source"] == "tl_denied"
+
+    _set_line0_late_fault(
+        dut,
+        ready=1,
+        fire=1,
+        flush=0,
+        ecc_corrupt=0,
+        input_exception=3,
+        merged_exception=3,
+    )
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 3)
+    dut.set(_SIGNALS["s1_valid"][0], 0)
+    dut.set(_SIGNALS["s1_fire"][0], 0)
+    for key, value in {
+        "s2_valid": 1,
+        "s2_ftq_flag": 0,
+        "s2_ftq_value": 13,
+        "s2_exception": 3,
+        "s2_instr_count": 1,
+        "to_ibuffer_valid": 1,
+        "to_ibuffer_ready": 1,
+        "to_ibuffer_exception": 3,
+        "to_ibuffer_enq": 1,
+    }.items():
+        dut.set(_LATE_FAULT_SIGNALS[key][0], value)
+    for slot in range(35):
+        dut.set(
+            f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask_{slot}",
+            int(slot == 0),
+        )
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 4)
+
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_008")
+    hit = recorder.hits[recorder.definition_by_bin_id["BIN-906"].key]
+    observations = hit.evidence[-1]["observations"]
+    assert observations["fault_source"] == "tl_denied"
+    assert observations["source_signal_paths"] == {
+        "line0_tl_corrupt": _LATE_FAULT_SIGNALS["line0_tl_corrupt"][0],
+        "line0_tl_denied": _LATE_FAULT_SIGNALS["line0_tl_denied"][0],
+    }
+
+
+def test_missing_line0_tl_source_probe_is_visible_and_fail_closed(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_request(dut, ftq0=(0, 13))
+    dut.set(
+        f"{_ICACHE_PREFIX}__Vtogcov__io_toIfu_req_bits_info_0_icacheMeta_exception_value",
+        3,
+    )
+    for key in ("line0_tl_corrupt", "line0_tl_denied"):
+        for name in _LATE_FAULT_SIGNALS[key]:
+            if hasattr(dut, name):
+                delattr(dut, name)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_008")
+    assert any(
+        item.get("event") == "ifu_line0_late_fault_source_unobservable"
+        for item in recorder.risk_observations
+    )
+    assert any(
+        item.get("kind") == "FUNCOV_CONTRACT_ERROR"
+        and item.get("event") == "ifu_line0_late_fault_source_unobservable"
+        for item in recorder.contract_errors
+    )
 
 
 def test_line1_late_fault_records_blocked_attribution_risk(tmp_path):

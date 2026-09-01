@@ -29,6 +29,8 @@ _CONTRACT_FAILURE_EVENTS = frozenset(
         "ifu_cacheable_backend_flush_source_changed",
         "ifu_cacheable_backend_flush_lost_to_fire",
         "ifu_cacheable_backend_flush_timeout",
+        "ifu_line0_late_fault_source_pending_collision",
+        "ifu_line0_late_fault_source_unobservable",
     }
 )
 
@@ -154,6 +156,14 @@ _UPSTREAM_SIGNALS = {
 _LATE_FAULT_SIGNALS = {
     "line0_corrupt": (f"{_MAINPIPE_PREFIX}io_toIfu_corrupt_0_0",),
     "line1_corrupt": (f"{_MAINPIPE_PREFIX}io_toIfu_corrupt_0_1",),
+    "line0_tl_corrupt": (
+        f"{_MAINPIPE_PREFIX}s1_tlCorrupt_r",
+        f"{_MAINPIPE_PREFIX}__Vtogcov__s1_tlCorrupt_r",
+    ),
+    "line0_tl_denied": (
+        f"{_MAINPIPE_PREFIX}s1_tlDenied_r",
+        f"{_MAINPIPE_PREFIX}__Vtogcov__s1_tlDenied_r",
+    ),
     "s1_meta_in_exception": (
         f"{_IFU_PREFIX}s1_icacheMetaIn_0_exception_value",
     ),
@@ -198,6 +208,7 @@ def initialize_ifu_cacheable_pipeline_state(recorder) -> None:
     recorder._ifu_late_fault_stall_pending = None
     recorder._ifu_late_fault_delivery_pending = None
     recorder._ifu_late_fault_flush_pending = None
+    recorder._ifu_late_fault_source_pending = None
     recorder._ifu_invalid_taken_exception_pending = None
 
 
@@ -218,6 +229,19 @@ def _read_upstream_signal(recorder, key: str) -> Optional[int]:
 def _read_late_fault_signal(recorder, key: str) -> Optional[int]:
     value = _read_first(recorder, _LATE_FAULT_SIGNALS[key])
     return None if value is None else int(value)
+
+
+def _read_late_fault_signal_with_path(
+    recorder, key: str
+) -> tuple[Optional[int], Optional[str]]:
+    dut = _dut(recorder)
+    if dut is None:
+        return None, None
+    for name in _LATE_FAULT_SIGNALS[key]:
+        value = recorder._try_read_dut_signal(dut, name)
+        if value is not None:
+            return int(value), str(name)
+    return None, None
 
 
 def _read_exception_mask(recorder) -> Optional[int]:
@@ -243,6 +267,91 @@ def _mark_late_fault_owner(recorder, cycle: int, evidence: dict) -> None:
         evidence,
         producer="ifu_cacheable_late_fault_sampler",
     )
+
+
+def _capture_line0_tl_fault_source(recorder, cycle: int) -> None:
+    handshake = {
+        "req_valid": _read_signal(recorder, "req_valid"),
+        "req_ready": _read_signal(recorder, "req_ready"),
+        "s0_fire": _read_signal(recorder, "s0_fire"),
+    }
+    if any(value is None for value in handshake.values()) or any(
+        value != 1 for value in handshake.values()
+    ):
+        return
+
+    identity = (
+        _read_req_field(recorder, 0, "ftqIdx_flag"),
+        _read_req_field(recorder, 0, "ftqIdx_value"),
+    )
+    payload_exception = _read_req_field(
+        recorder, 0, "icacheMeta_exception_value"
+    )
+    tl_corrupt, tl_corrupt_path = _read_late_fault_signal_with_path(
+        recorder, "line0_tl_corrupt"
+    )
+    tl_denied, tl_denied_path = _read_late_fault_signal_with_path(
+        recorder, "line0_tl_denied"
+    )
+    if None in {*identity, payload_exception}:
+        return
+    if tl_corrupt is None or tl_denied is None:
+        if int(payload_exception) in {3, 5}:
+            _record_mismatch(
+                recorder,
+                "ifu_line0_late_fault_source_unobservable",
+                cycle,
+                ftq_identity=list(identity),
+                payload_exception=int(payload_exception),
+                missing_source_probes=[
+                    key
+                    for key, value in (
+                        ("line0_tl_corrupt", tl_corrupt),
+                        ("line0_tl_denied", tl_denied),
+                    )
+                    if value is None
+                ],
+            )
+        return
+
+    source_exception = 3 if int(tl_denied) else 5 if int(tl_corrupt) else 0
+    if source_exception == 0:
+        return
+    if int(payload_exception) != source_exception:
+        _record_mismatch(
+            recorder,
+            "ifu_line0_late_fault_masked_by_prior_exception",
+            cycle,
+            ftq_identity=list(identity),
+            payload_exception=int(payload_exception),
+            source_exception=int(source_exception),
+            line0_tl_corrupt=int(tl_corrupt),
+            line0_tl_denied=int(tl_denied),
+        )
+        return
+
+    if recorder._ifu_late_fault_source_pending is not None:
+        _record_mismatch(
+            recorder,
+            "ifu_line0_late_fault_source_pending_collision",
+            cycle,
+            previous=recorder._ifu_late_fault_source_pending,
+            ftq_identity=list(identity),
+        )
+        recorder._ifu_late_fault_source_pending = None
+        return
+    recorder._ifu_late_fault_source_pending = {
+        "source_cycle": int(cycle),
+        "ftq_identity": tuple(int(value) for value in identity),
+        "fault_source": "tl_denied" if int(tl_denied) else "tl_corrupt",
+        "source_exception": int(source_exception),
+        "line0_tl_corrupt": int(tl_corrupt),
+        "line0_tl_denied": int(tl_denied),
+        "source_signal_paths": {
+            "line0_tl_corrupt": tl_corrupt_path,
+            "line0_tl_denied": tl_denied_path,
+        },
+    }
 
 
 def _sample_late_fault_attribution(recorder, cycle: int) -> None:
@@ -336,6 +445,7 @@ def _sample_late_fault_attribution(recorder, cycle: int) -> None:
         "ready": _read_signal(recorder, "s1_ready"),
         "fire": _read_signal(recorder, "s1_fire"),
         "flush": _read_signal(recorder, "s1_flush"),
+        "req_is_uncache": _read_signal(recorder, "s1_req_uncache"),
         **{
             key: _read_late_fault_signal(recorder, key)
             for key in (
@@ -349,6 +459,7 @@ def _sample_late_fault_attribution(recorder, cycle: int) -> None:
         },
     }
     if any(value is None for value in s1_values.values()) or s1_values["valid"] != 1:
+        _capture_line0_tl_fault_source(recorder, cycle)
         return
     identity = (int(s1_values["s1_ftq_flag"]), int(s1_values["s1_ftq_value"]))
     if s1_values["line1_corrupt"] == 1:
@@ -361,26 +472,66 @@ def _sample_late_fault_attribution(recorder, cycle: int) -> None:
             blocked_bin_id="BIN-909",
         )
 
-    first_line_fault = (
+    source_pending = recorder._ifu_late_fault_source_pending
+    matched_tl_source = (
+        source_pending is not None
+        and identity == source_pending["ftq_identity"]
+        and 0 < int(cycle) - int(source_pending["source_cycle"]) <= 2
+        and s1_values["s1_meta_in_exception"] == source_pending["source_exception"]
+        and s1_values["s1_merged_exception"] == source_pending["source_exception"]
+    )
+    ecc_fault = (
         s1_values["line0_corrupt"] == 1
         and s1_values["s1_merged_exception"] == 5
-    ) or s1_values["s1_meta_in_exception"] in {3, 5}
-    if not first_line_fault:
+    )
+    stall_pending = recorder._ifu_late_fault_stall_pending
+    verified_stall_context = (
+        stall_pending is not None
+        and identity == stall_pending["ftq_identity"]
+        and s1_values["s1_merged_exception"] == stall_pending["source_exception"]
+    )
+    if source_pending is not None and (
+        matched_tl_source
+        or int(cycle) - int(source_pending["source_cycle"]) > 2
+    ):
+        recorder._ifu_late_fault_source_pending = None
+    if s1_values["req_is_uncache"] != 0 or not (
+        ecc_fault or matched_tl_source or verified_stall_context
+    ):
+        _capture_line0_tl_fault_source(recorder, cycle)
         return
+    source_evidence = (
+        dict(source_pending)
+        if matched_tl_source
+        else dict(stall_pending)
+        if verified_stall_context
+        else {
+            "source_cycle": int(cycle),
+            "fault_source": "ecc",
+            "source_exception": 5,
+            "source_signal_paths": {
+                "line0_corrupt": _LATE_FAULT_SIGNALS["line0_corrupt"][0]
+            },
+        }
+    )
     evidence = {
+        **source_evidence,
         "cycle": int(cycle),
         "ftq_identity": identity,
+        "s1_req_is_uncache": int(s1_values["req_is_uncache"]),
         "line0_corrupt": int(s1_values["line0_corrupt"]),
         "s1_meta_in_exception": int(s1_values["s1_meta_in_exception"]),
         "s1_merged_exception": int(s1_values["s1_merged_exception"]),
     }
     if s1_values["flush"] == 1 and s1_values["fire"] == 0:
         recorder._ifu_late_fault_flush_pending = evidence
+        recorder._ifu_late_fault_stall_pending = None
+        _capture_line0_tl_fault_source(recorder, cycle)
         return
     if s1_values["ready"] == 0 and s1_values["fire"] == 0:
         recorder._ifu_late_fault_stall_pending = evidence
+        _capture_line0_tl_fault_source(recorder, cycle)
         return
-    stall_pending = recorder._ifu_late_fault_stall_pending
     if (
         s1_values["fire"] == 1
         and stall_pending is not None
@@ -393,6 +544,7 @@ def _sample_late_fault_attribution(recorder, cycle: int) -> None:
             "release_exception": int(s1_values["s1_merged_exception"]),
         }
         recorder._ifu_late_fault_stall_pending = None
+    _capture_line0_tl_fault_source(recorder, cycle)
 
 
 def _sample_upstream_window_invariants(recorder, cycle: int) -> None:

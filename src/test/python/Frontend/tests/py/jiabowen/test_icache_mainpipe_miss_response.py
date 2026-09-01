@@ -69,6 +69,54 @@ _SIGNALS = {
     ),
 }
 
+_BIN906_SIGNALS = {
+    "s1_valid": _aliases("Frontend_top.Frontend.inner_ifu.s1_valid"),
+    "s1_ready": _aliases("Frontend_top.Frontend.inner_ifu.__Vtogcov__s1_ready"),
+    "s1_fire": _aliases("Frontend_top.Frontend.inner_ifu.__Vtogcov__s1_fire"),
+    "s1_flush": _aliases("Frontend_top.Frontend.inner_ifu.__Vtogcov__s1_flush"),
+    "s1_req_uncache": _aliases(
+        "Frontend_top.Frontend.inner_ifu.s1_reqIsUncache"
+    ),
+    "s1_input_exception": _aliases(
+        "Frontend_top.Frontend.inner_ifu.s1_icacheMetaIn_0_exception_value"
+    ),
+    "s1_merged_exception": _aliases(
+        "Frontend_top.Frontend.inner_ifu.s1_icacheMeta_0_exception_value"
+    ),
+    "s1_ftq_flag": _aliases(
+        "Frontend_top.Frontend.inner_ifu.s1_fetchBlock_0_ftqIdx_flag"
+    ),
+    "s1_ftq_value": _aliases(
+        "Frontend_top.Frontend.inner_ifu.s1_fetchBlock_0_ftqIdx_value"
+    ),
+    "s2_valid": _aliases("Frontend_top.Frontend.inner_ifu.s2_valid_valid"),
+    "s2_exception": _aliases(
+        "Frontend_top.Frontend.inner_ifu.s2_icacheMeta_0_exception_value"
+    ),
+    "s2_ftq_flag": _aliases(
+        "Frontend_top.Frontend.inner_ifu.s2_fetchBlock_0_ftqIdx_flag"
+    ),
+    "s2_ftq_value": _aliases(
+        "Frontend_top.Frontend.inner_ifu.s2_fetchBlock_0_ftqIdx_value"
+    ),
+    "s2_instr_count": _aliases("Frontend_top.Frontend.inner_ifu.s2_instrCount"),
+    "to_ibuffer_valid": _aliases(
+        "Frontend_top.Frontend.inner_ifu.io_toIBuffer_valid"
+    ),
+    "to_ibuffer_ready": _aliases(
+        "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_ready"
+    ),
+    "to_ibuffer_exception": _aliases(
+        "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_exceptionType_value"
+    ),
+    "to_ibuffer_enq": _aliases(
+        "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_enqEnable"
+    ),
+    "wb_redirect_valid": _aliases(
+        "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toFtq_wbRedirect_valid"
+    ),
+}
+
 for _index in range(4):
     _SIGNALS[f"should_fetch_{_index}"] = _aliases(
         f"Frontend_top.Frontend.inner_icache.mainPipe.s1_shouldFetch_{_index}"
@@ -119,6 +167,71 @@ def _register_mainpipe_observer(env) -> list[dict]:
 
     env.register_cycle_observer(observe)
     return samples
+
+
+def _sample_bin906_pipeline(env) -> dict:
+    sample = {
+        name: _require_read(env, aliases) for name, aliases in _BIN906_SIGNALS.items()
+    }
+    sample["cycle"] = int(env.current_cycle)
+    sample["exception_mask"] = sum(
+        _require_read(
+            env,
+            _aliases(
+                "Frontend_top.Frontend.inner_ifu."
+                f"__Vtogcov__io_toIBuffer_bits_exceptionMask_{slot}"
+            ),
+        )
+        << slot
+        for slot in range(35)
+    )
+    return sample
+
+
+def _sample_bin906_slot(env, slot: int) -> dict:
+    prefix = "Frontend_top.Frontend"
+    return {
+        "instr": _require_read(
+            env,
+            _aliases(f"{prefix}._inner_ifu_io_toIBuffer_bits_instrs_{slot}"),
+        ),
+        "pc": _require_read(
+            env,
+            _aliases(f"{prefix}._inner_ifu_io_toIBuffer_bits_pc_{slot}_addr"),
+        ),
+        "ftq_flag": _require_read(
+            env,
+            _aliases(f"{prefix}._inner_ifu_io_toIBuffer_bits_ftqPtr_{slot}_flag"),
+        ),
+        "ftq_value": _require_read(
+            env,
+            _aliases(f"{prefix}._inner_ifu_io_toIBuffer_bits_ftqPtr_{slot}_value"),
+        ),
+        "end_offset": _require_read(
+            env,
+            _aliases(
+                f"{prefix}._inner_ifu_io_toIBuffer_bits_instrEndOffset_{slot}_offset"
+            ),
+        ),
+        "s2_instr": _require_read(
+            env,
+            _aliases(
+                f"{prefix}.inner_ifu.s2_alignedInstrVec_{slot}_data"
+            ),
+        ),
+        "s2_pc": _require_read(
+            env,
+            _aliases(
+                f"{prefix}.inner_ifu.s2_alignedInstrPcVec_{slot}_addr"
+            ),
+        ),
+        "s2_end_offset": _require_read(
+            env,
+            _aliases(
+                f"{prefix}.inner_ifu.s2_alignedInstrVec_{slot}_endOffset"
+            ),
+        ),
+    }
 
 
 def _run_until(env, predicate: Callable[[], bool], *, max_cycles: int) -> bool:
@@ -679,6 +792,108 @@ def test_icache_refill_fault_reaches_ifu_exception(env, fault, expected_exceptio
     stats = env.icache_agent.get_stats()
     assert int(stats["corrupt_resp_count"]) == 1
     assert int(stats["denied_resp_count"]) == (1 if fault.get("denied") else 0)
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-906")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_denied_refill_stalls_in_ifu_and_delivers_one_owned_exception(env) -> None:
+    target = _BASE + 0x100
+    env.icache_agent.inject_response_fault_at(target, denied=1)
+    _initialize_cacheable_stream(env, _BASE, latency=24)
+    env.backend_model.set_can_accept(0)
+
+    stalled: list[dict] = []
+    tail: list[dict] = []
+    for _ in range(6000):
+        env.step(1)
+        sample = _sample_bin906_pipeline(env)
+        tail.append(sample)
+        tail = tail[-32:]
+        if (
+            sample["s1_valid"] == 1
+            and sample["s1_ready"] == 0
+            and sample["s1_fire"] == 0
+            and sample["s1_flush"] == 0
+            and sample["s1_req_uncache"] == 0
+            and sample["s1_input_exception"] == 3
+            and sample["s1_merged_exception"] == 3
+        ):
+            stalled.append(sample)
+            if len(stalled) >= 2:
+                break
+    assert len(stalled) >= 2, {
+        "reason": "denied cacheable response did not form a stable IFU s1 stall",
+        "target": hex(target),
+        "tail": tail,
+        "icache": env.icache_agent.get_stats(),
+    }
+    stalled_identity = (stalled[0]["s1_ftq_flag"], stalled[0]["s1_ftq_value"])
+    assert all(
+        (sample["s1_ftq_flag"], sample["s1_ftq_value"]) == stalled_identity
+        for sample in stalled
+    )
+    assert all(sample["wb_redirect_valid"] == 0 for sample in stalled)
+
+    env.backend_model.set_can_accept(1)
+    delivery = None
+    slot_observation = None
+    release_tail: list[dict] = []
+    for _ in range(1000):
+        env.step(1)
+        sample = _sample_bin906_pipeline(env)
+        release_tail.append(sample)
+        release_tail = release_tail[-32:]
+        if (
+            sample["to_ibuffer_valid"] == 1
+            and sample["to_ibuffer_ready"] == 1
+            and sample["to_ibuffer_exception"] == 3
+            and sample["s2_valid"] == 1
+            and sample["s2_exception"] == 3
+        ):
+            delivery = sample
+            enq = int(sample["to_ibuffer_enq"])
+            if enq.bit_count() == 1:
+                slot = (enq & -enq).bit_length() - 1
+                slot_observation = _sample_bin906_slot(env, slot)
+            break
+    assert delivery is not None and slot_observation is not None, {
+        "reason": "stalled cacheable fault did not deliver one observable exception slot",
+        "stalled_identity": stalled_identity,
+        "tail": release_tail,
+    }
+    assert delivery["s2_instr_count"] == 1
+    assert delivery["to_ibuffer_enq"].bit_count() == 1
+    assert delivery["exception_mask"] == delivery["to_ibuffer_enq"]
+    assert (delivery["s2_ftq_flag"], delivery["s2_ftq_value"]) == stalled_identity
+    assert (
+        slot_observation["ftq_flag"],
+        slot_observation["ftq_value"],
+    ) == stalled_identity
+    assert slot_observation["instr"] == slot_observation["s2_instr"] == _NOP
+    assert slot_observation["pc"] == slot_observation["s2_pc"]
+    assert slot_observation["end_offset"] == slot_observation["s2_end_offset"]
+    assert delivery["wb_redirect_valid"] == 0
+
+    recorder = env.functional_coverage
+    assert recorder is not None
+    assert _run_until(
+        env,
+        lambda: recorder.key_hit(
+            "ifu_v3_pipeline_owner_model", "owner_leaf_008"
+        ),
+        max_cycles=8,
+    ), {
+        "reason": "BIN-906 producer did not accept the independently checked witness",
+        "stalled_identity": stalled_identity,
+        "delivery": delivery,
+    }
+    hit = recorder.hits[recorder.definition_by_bin_id["BIN-906"].key]
+    observations = hit.evidence[-1]["observations"]
+    assert observations["fault_source"] == "tl_denied"
+    assert tuple(observations["ftq_identity"]) == stalled_identity
+    assert observations["s1_req_is_uncache"] == 0
+    assert not recorder.contract_errors
     assert not env.monitor.get_errors()
 
 
