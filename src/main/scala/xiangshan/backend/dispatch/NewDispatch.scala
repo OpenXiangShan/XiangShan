@@ -927,7 +927,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   XSPerfHistogram("slots_valid_rough", PopCount(io.enqRob.req.map(_.valid)), true.B, 0, RenameWidth+1, 1)
 
   val perfEvents = Seq(
-    ("dispatch_in",                 PopCount(fromRename.map(_.valid && fromRename(0).ready))                       ),
+    ("dispatch_in",                 PopCount(fromRename.map(_.fire))                                               ),
     ("dispatch_empty",              !hasValidInstr                                                                 ),
     ("dispatch_utili",              PopCount(fromRename.map(_.valid))                                              ),
     ("dispatch_waitinstr",          PopCount(fromRename.map(!_.valid && canAccept))                                ),
