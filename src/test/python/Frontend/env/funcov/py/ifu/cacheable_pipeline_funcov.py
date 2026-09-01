@@ -10,6 +10,7 @@ from .owner_v3_funcov import mark_owner_v3_checked
 _ICACHE_PREFIX = "Frontend_top.Frontend.inner_icache."
 _IFU_PREFIX = "Frontend_top.Frontend.inner_ifu."
 _MAINPIPE_PREFIX = f"{_ICACHE_PREFIX}mainPipe."
+_REGISTERED_TRANSACTION_SLOT_COUNT = 35
 
 
 IFU_CACHEABLE_PIPELINE_COVERPOINTS = {
@@ -163,6 +164,7 @@ def initialize_ifu_cacheable_pipeline_state(recorder) -> None:
     recorder._ifu_cacheable_s1_stall = None
     recorder._ifu_cacheable_last_accept_cycle = None
     recorder._ifu_cacheable_last_verified = None
+    recorder._ifu_cacheable_s1_s2_pending = None
     recorder._ifu_cacheable_verified_windows = deque(maxlen=64)
     recorder._ifu_cacheable_start_regions = set()
     recorder._ifu_cacheable_alignments = set()
@@ -647,6 +649,183 @@ def _record_mismatch(recorder, event: str, cycle: int, **details) -> None:
     recorder.risk_observations.append({"event": event, "cycle": int(cycle), **details})
 
 
+def _read_ifu_pipeline_internal(recorder, stem: str) -> Optional[int]:
+    candidates = [
+        f"{_IFU_PREFIX}{stem}",
+        f"{_IFU_PREFIX}__Vtogcov__{stem}",
+    ]
+    if stem == "s1_alignedInstrValid":
+        candidates.append(f"{_IFU_PREFIX}_s1_alignedInstrValid_T")
+    if stem.startswith("s1_alignedInstrVec_") and stem.endswith("_data"):
+        slot = stem.removeprefix("s1_alignedInstrVec_").removesuffix("_data")
+        if slot.isdigit() and int(slot) >= 4:
+            candidates.extend(
+                (
+                    f"{_IFU_PREFIX}s1_baseInstrData_{slot}",
+                    f"{_IFU_PREFIX}__Vtogcov__s1_baseInstrData_{slot}",
+                )
+            )
+    value = _read_first(
+        recorder,
+        tuple(candidates),
+    )
+    return None if value is None else int(value)
+
+
+def _registered_stage_snapshot(recorder, stage: str) -> tuple[Optional[dict], list[str]]:
+    valid_mask = _read_ifu_pipeline_internal(recorder, f"{stage}_alignedInstrValid")
+    missing = [] if valid_mask is not None else [f"{stage}_alignedInstrValid"]
+    if valid_mask is None:
+        return None, missing
+
+    snapshot = {
+        "valid_mask": int(valid_mask),
+        "instr_count": _read_ifu_pipeline_internal(recorder, f"{stage}_instrCount"),
+        "fetch_blocks": [],
+        "slots": [],
+    }
+    if snapshot["instr_count"] is None:
+        missing.append(f"{stage}_instrCount")
+    for block in range(2):
+        block_snapshot = {}
+        for field in ("valid", "ftqIdx_flag", "ftqIdx_value", "startVAddr_addr"):
+            stem = f"{stage}_fetchBlock_{block}_{field}"
+            value = _read_ifu_pipeline_internal(recorder, stem)
+            block_snapshot[field] = value
+            if value is None:
+                missing.append(stem)
+        snapshot["fetch_blocks"].append(block_snapshot)
+
+    for slot in range(_REGISTERED_TRANSACTION_SLOT_COUNT):
+        if ((int(valid_mask) >> slot) & 1) == 0:
+            continue
+        fields = {
+            "data": f"{stage}_alignedInstrVec_{slot}_data",
+            "is_rvc": f"{stage}_alignedInstrVec_{slot}_isRvc",
+            "raw_block_sel": f"{stage}_alignedInstrVec_{slot}_blockSel",
+            "is_cross_block_instr": f"{stage}_alignedInstrVec_{slot}_isCrossBlockInstr",
+            "pc": f"{stage}_alignedInstrPcVec_{slot}_addr",
+            "branch_type": f"{stage}_alignedPdInfoVec_{slot}_brAttribute_branchType",
+        }
+        values = {name: _read_ifu_pipeline_internal(recorder, stem) for name, stem in fields.items()}
+        missing.extend(stem for name, stem in fields.items() if values[name] is None)
+        values["slot"] = int(slot)
+        values["effective_owner"] = (
+            None
+            if values["raw_block_sel"] is None or values["is_cross_block_instr"] is None
+            else int(values["raw_block_sel"]) | int(values["is_cross_block_instr"])
+        )
+        snapshot["slots"].append(values)
+    return snapshot, missing
+
+
+def _sample_registered_s1_s2_transaction(recorder, cycle: int) -> None:
+    pending = recorder._ifu_cacheable_s1_s2_pending
+    if pending is not None:
+        s2_flush = _read_ifu_pipeline_internal(recorder, "s2_flush")
+        s2_valid = _read_ifu_pipeline_internal(recorder, "s2_valid_valid")
+        if s2_flush is None or s2_valid is None:
+            _record_mismatch(
+                recorder,
+                "ifu_s1_s2_transaction_control_unobservable",
+                cycle,
+                s1_cycle=pending["s1_cycle"],
+                missing=[
+                    name
+                    for name, value in (("s2_flush", s2_flush), ("s2_valid_valid", s2_valid))
+                    if value is None
+                ],
+            )
+            recorder._ifu_cacheable_s1_s2_pending = None
+        elif s2_flush == 1:
+            _record_mismatch(
+                recorder,
+                "ifu_s1_s2_transaction_flushed",
+                cycle,
+                s1_cycle=pending["s1_cycle"],
+                aggregate=pending["aggregate"],
+            )
+            recorder._ifu_cacheable_s1_s2_pending = None
+        elif s2_valid == 1:
+            observed, missing = _registered_stage_snapshot(recorder, "s2")
+            if missing:
+                _record_mismatch(
+                    recorder,
+                    "ifu_s1_s2_transaction_probe_unobservable",
+                    cycle,
+                    stage="s2",
+                    s1_cycle=pending["s1_cycle"],
+                    missing=missing,
+                )
+            elif observed != pending["s1"]:
+                _record_mismatch(
+                    recorder,
+                    "ifu_s1_s2_registered_transaction_mismatch",
+                    cycle,
+                    s1_cycle=pending["s1_cycle"],
+                    aggregate=pending["aggregate"],
+                    expected=pending["s1"],
+                    observed=observed,
+                )
+            else:
+                recorder.risk_observations.append(
+                    {
+                        "event": "ifu_s1_s2_registered_transaction_pass",
+                        "cycle": int(cycle),
+                        "s0_cycle": int(pending["s0_cycle"]),
+                        "s1_cycle": int(pending["s1_cycle"]),
+                        "aggregate": pending["aggregate"],
+                        "s1": pending["s1"],
+                        "s2": observed,
+                    }
+                )
+            recorder._ifu_cacheable_s1_s2_pending = None
+        elif int(cycle) > int(pending["s1_cycle"]) + 2:
+            _record_mismatch(
+                recorder,
+                "ifu_s1_s2_transaction_timeout",
+                cycle,
+                s1_cycle=pending["s1_cycle"],
+                aggregate=pending["aggregate"],
+            )
+            recorder._ifu_cacheable_s1_s2_pending = None
+
+    verified = recorder._ifu_cacheable_last_verified
+    if (
+        verified is None
+        or int(verified["cycle"]) != int(cycle)
+        or _read_signal(recorder, "s1_fire") != 1
+        or _read_signal(recorder, "s1_flush") == 1
+    ):
+        return
+    if recorder._ifu_cacheable_s1_s2_pending is not None:
+        _record_mismatch(
+            recorder,
+            "ifu_s1_s2_transaction_pending_collision",
+            cycle,
+            previous=recorder._ifu_cacheable_s1_s2_pending,
+            new_aggregate=verified["source"],
+        )
+        return
+    s1_snapshot, missing = _registered_stage_snapshot(recorder, "s1")
+    if missing:
+        _record_mismatch(
+            recorder,
+            "ifu_s1_s2_transaction_probe_unobservable",
+            cycle,
+            stage="s1",
+            aggregate=verified["source"],
+            missing=missing,
+        )
+        return
+    recorder._ifu_cacheable_s1_s2_pending = {
+        "s0_cycle": int(verified["accepted_cycle"]),
+        "s1_cycle": int(cycle),
+        "aggregate": verified["source"],
+        "s1": s1_snapshot,
+    }
+
+
 def _sample_verified_transfer(recorder, cycle: int, s1_snapshot: Optional[dict]) -> None:
     pending = recorder._ifu_cacheable_pending_transfer
     if pending is not None and _read_signal(recorder, "s1_flush") == 1:
@@ -808,7 +987,11 @@ def _sample_verified_transfer(recorder, cycle: int, s1_snapshot: Optional[dict])
             cycle,
             {**evidence, "previous": previous},
         )
-    recorder._ifu_cacheable_last_verified = {"cycle": int(cycle), "source": expected}
+    recorder._ifu_cacheable_last_verified = {
+        "cycle": int(cycle),
+        "accepted_cycle": int(pending["cycle"]),
+        "source": expected,
+    }
     for block in expected_blocks:
         if block.get("valid") != 1:
             continue
@@ -840,6 +1023,7 @@ def sample_ifu_cacheable_pipeline_coverage(recorder, env, cycle: int) -> None:
     s1_snapshot = _s1_snapshot(recorder) if _read_signal(recorder, "s1_valid") == 1 else None
 
     _sample_verified_transfer(recorder, cycle, s1_snapshot)
+    _sample_registered_s1_s2_transaction(recorder, cycle)
 
     if req_valid == 1 and req_ready == 0:
         recorder.mark(

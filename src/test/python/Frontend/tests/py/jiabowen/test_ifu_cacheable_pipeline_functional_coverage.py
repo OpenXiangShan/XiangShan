@@ -149,6 +149,47 @@ def _idle_request(dut):
     dut.set(_SIGNALS["s0_flush"][0], 0)
 
 
+def _set_registered_stage(
+    dut,
+    stage,
+    blocks,
+    *,
+    branch_type=0,
+    expose_cross_flag=True,
+    slot=0,
+):
+    valid_mask = 1 << int(slot)
+    dut.set(f"{_IFU_PREFIX}{stage}_alignedInstrValid", valid_mask)
+    dut.set(f"{_IFU_PREFIX}{stage}_instrCount", 1)
+    for index, block in enumerate(blocks):
+        for field, default in (
+            ("valid", 0),
+            ("ftqIdx_flag", 0),
+            ("ftqIdx_value", 0),
+            ("startVAddr_addr", 0),
+        ):
+            dut.set(
+                f"{_IFU_PREFIX}{stage}_fetchBlock_{index}_{field}",
+                block.get(field, default),
+            )
+    data_name = (
+        f"{_IFU_PREFIX}s1_baseInstrData_{slot}"
+        if stage == "s1" and int(slot) >= 4
+        else f"{_IFU_PREFIX}{stage}_alignedInstrVec_{slot}_data"
+    )
+    dut.set(data_name, 0x00000013)
+    for stem, value in (
+        (f"alignedInstrVec_{slot}_isRvc", 0),
+        (f"alignedInstrVec_{slot}_blockSel", 0),
+        (f"alignedInstrPcVec_{slot}_addr", blocks[0]["startVAddr_addr"]),
+        (f"alignedPdInfoVec_{slot}_brAttribute_branchType", branch_type),
+    ):
+        dut.set(f"{_IFU_PREFIX}{stage}_{stem}", value)
+    cross_name = f"{_IFU_PREFIX}{stage}_alignedInstrVec_{slot}_isCrossBlockInstr"
+    if expose_cross_flag:
+        dut.set(cross_name, 0)
+
+
 @pytest.mark.parametrize(
     ("cause", "bin_name"),
     (("mmio", "owner_leaf_006"), ("second_itlb", "owner_leaf_010")),
@@ -501,6 +542,159 @@ def test_cacheable_pending_transfer_is_not_credited_when_s1_flushes(tmp_path):
     )
 
 
+def test_cacheable_aggregate_transaction_keeps_registered_s1_s2_fields(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    second = {
+        "valid": 1,
+        "ftqIdx_flag": 0,
+        "ftqIdx_value": 4,
+        "startVAddr_addr": 0x40000008,
+        "takenCfiOffset_valid": 0,
+        "takenCfiOffset_bits": 7,
+        "range": 0xFF00,
+        "size": 8,
+        "data": 0x55667788,
+    }
+    blocks = _set_request(dut, second=second)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    _idle_request(dut)
+    _set_s1(dut, blocks)
+    _set_registered_stage(dut, "s1", blocks, branch_type=2)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+
+    dut.set(_SIGNALS["s1_valid"][0], 0)
+    dut.set(_SIGNALS["s1_fire"][0], 0)
+    dut.set(f"{_IFU_PREFIX}s2_valid_valid", 1)
+    dut.set(f"{_IFU_PREFIX}s2_flush", 0)
+    _set_registered_stage(dut, "s2", blocks, branch_type=2)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 3)
+
+    passes = [
+        item
+        for item in recorder.risk_observations
+        if item.get("event") == "ifu_s1_s2_registered_transaction_pass"
+    ]
+    assert len(passes) == 1
+    assert passes[0]["s0_cycle"] == 1
+    assert passes[0]["s1_cycle"] == 2
+    assert passes[0]["s2"]["slots"][0]["effective_owner"] == 0
+
+
+def test_cacheable_s1_s2_transaction_survives_one_valid_hole(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    blocks = _set_request(dut)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    _idle_request(dut)
+    _set_s1(dut, blocks)
+    _set_registered_stage(dut, "s1", blocks, branch_type=2)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+
+    dut.set(_SIGNALS["s1_valid"][0], 0)
+    dut.set(_SIGNALS["s1_fire"][0], 0)
+    dut.set(f"{_IFU_PREFIX}s2_valid_valid", 0)
+    dut.set(f"{_IFU_PREFIX}s2_flush", 0)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 3)
+
+    assert recorder._ifu_cacheable_s1_s2_pending is not None
+    assert not any(
+        item.get("event")
+        in {
+            "ifu_s1_s2_registered_transaction_pass",
+            "ifu_s1_s2_registered_transaction_mismatch",
+            "ifu_s1_s2_transaction_timeout",
+        }
+        for item in recorder.risk_observations
+    )
+
+    dut.set(f"{_IFU_PREFIX}s2_valid_valid", 1)
+    _set_registered_stage(dut, "s2", blocks, branch_type=2)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 4)
+
+    passes = [
+        item
+        for item in recorder.risk_observations
+        if item.get("event") == "ifu_s1_s2_registered_transaction_pass"
+    ]
+    assert len(passes) == 1
+    assert passes[0]["s1_cycle"] == 2
+    assert passes[0]["cycle"] == 4
+
+
+def test_cacheable_s1_s2_transaction_missing_cross_probe_is_visible(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    blocks = _set_request(dut)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    _idle_request(dut)
+    _set_s1(dut, blocks)
+    _set_registered_stage(dut, "s1", blocks, expose_cross_flag=False)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+
+    assert recorder._ifu_cacheable_s1_s2_pending is None
+    assert any(
+        item.get("event") == "ifu_s1_s2_transaction_probe_unobservable"
+        and item.get("stage") == "s1"
+        and any("isCrossBlockInstr" in name for name in item.get("missing", []))
+        for item in recorder.risk_observations
+    )
+
+
+def test_cacheable_s1_s2_transaction_predecode_mismatch_is_not_a_pass(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    blocks = _set_request(dut)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    _idle_request(dut)
+    _set_s1(dut, blocks)
+    _set_registered_stage(dut, "s1", blocks, branch_type=1)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+
+    dut.set(_SIGNALS["s1_valid"][0], 0)
+    dut.set(_SIGNALS["s1_fire"][0], 0)
+    dut.set(f"{_IFU_PREFIX}s2_valid_valid", 1)
+    dut.set(f"{_IFU_PREFIX}s2_flush", 0)
+    _set_registered_stage(dut, "s2", blocks, branch_type=2)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 3)
+
+    assert not any(
+        item.get("event") == "ifu_s1_s2_registered_transaction_pass"
+        for item in recorder.risk_observations
+    )
+    assert any(
+        item.get("event") == "ifu_s1_s2_registered_transaction_mismatch"
+        for item in recorder.risk_observations
+    )
+
+
+def test_cacheable_s1_s2_transaction_uses_current_s1_base_data_alias(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    blocks = _set_request(dut)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    _idle_request(dut)
+    _set_s1(dut, blocks)
+    _set_registered_stage(dut, "s1", blocks, slot=4)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+
+    dut.set(_SIGNALS["s1_valid"][0], 0)
+    dut.set(_SIGNALS["s1_fire"][0], 0)
+    dut.set(f"{_IFU_PREFIX}s2_valid_valid", 1)
+    dut.set(f"{_IFU_PREFIX}s2_flush", 0)
+    _set_registered_stage(dut, "s2", blocks, slot=4)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 3)
+
+    passes = [
+        item
+        for item in recorder.risk_observations
+        if item.get("event") == "ifu_s1_s2_registered_transaction_pass"
+    ]
+    assert len(passes) == 1
+    assert passes[0]["s1"]["slots"][0]["slot"] == 4
+    assert passes[0]["s1"]["slots"][0]["data"] == 0x00000013
+
+
 def test_cacheable_sampler_signals_match_generated_contract():
     root = Path(__file__).resolve().parents[7]
     offset = root / "build-frontend/pylib-verilator/Frontend/Frontend_offset.yaml"
@@ -529,6 +723,20 @@ def test_cacheable_sampler_signals_match_generated_contract():
         f"{_IFU_PREFIX}s1_totalRange",
         f"{_IFU_PREFIX}s1_firstICacheData",
         f"{_IFU_PREFIX}s1_secondICacheData",
+        f"{_IFU_PREFIX}_s1_alignedInstrValid_T",
+        f"{_IFU_PREFIX}s1_alignedInstrVec_0_data",
+        f"{_IFU_PREFIX}s1_alignedInstrVec_0_isRvc",
+        f"{_IFU_PREFIX}s1_alignedInstrVec_0_blockSel",
+        f"{_IFU_PREFIX}s1_alignedInstrVec_0_isCrossBlockInstr",
+        f"{_IFU_PREFIX}s1_alignedInstrPcVec_0_addr",
+        f"{_IFU_PREFIX}s1_alignedPdInfoVec_0_brAttribute_branchType",
+        f"{_IFU_PREFIX}s2_alignedInstrValid",
+        f"{_IFU_PREFIX}s2_alignedInstrVec_0_data",
+        f"{_IFU_PREFIX}s2_alignedInstrVec_0_isRvc",
+        f"{_IFU_PREFIX}s2_alignedInstrVec_0_blockSel",
+        f"{_IFU_PREFIX}s2_alignedInstrVec_0_isCrossBlockInstr",
+        f"{_IFU_PREFIX}s2_alignedInstrPcVec_0_addr",
+        f"{_IFU_PREFIX}s2_alignedPdInfoVec_0_brAttribute_branchType",
         _UPSTREAM_SIGNALS["mainpipe_fire"][0],
         _UPSTREAM_SIGNALS["second_requested"][0],
         _UPSTREAM_SIGNALS["second_waylookup_valid"][0],
@@ -547,6 +755,10 @@ def test_cacheable_sampler_signals_match_generated_contract():
     required |= {
         f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask_{slot}"
         for slot in range(35)
+    }
+    required |= {
+        f"{_IFU_PREFIX}s1_baseInstrData_{slot}"
+        for slot in range(4, 35)
     }
     required |= {
         f"{_ICACHE_PREFIX}mainPipe._s1_data_T_{3 * bank + int(bank >= 8) + 1}"
