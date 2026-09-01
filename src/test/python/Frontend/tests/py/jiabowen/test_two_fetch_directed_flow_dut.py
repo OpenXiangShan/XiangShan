@@ -20,6 +20,10 @@ _BASE = 0x80000000
 _BLOCK_BYTES = 64
 _BLOCK_COUNT = 8
 _PROGRAM_BYTES = _BLOCK_BYTES * _BLOCK_COUNT
+_SECOND_TAKEN_LOOP_OFFSET = 0x3E
+_SECOND_TAKEN_BRANCH_OFFSET = 0x74
+_SECOND_TAKEN_LONG_BLOCK_OFFSET = 0x100
+_SECOND_TAKEN_LONG_BRANCH_OFFSET = 0x13E
 _REDIRECT_TARGET = _BASE + 4 * _BLOCK_BYTES
 _CNOP = 0x0001
 _IBUFFER_PAYLOAD_PREFIX = (
@@ -110,6 +114,29 @@ def _trained_short_block_loop() -> bytes:
     return b"".join(int(halfword).to_bytes(2, "little") for halfword in halfwords)
 
 
+def _second_block_taken_loop() -> bytes:
+    """Train a conflict-free 17+11 target pair plus a size-blocked entry."""
+    halfwords: list[int] = [_CNOP] * (_SECOND_TAKEN_LOOP_OFFSET // 2)
+    loop_start = len(halfwords) * 2
+    halfwords.extend([_CNOP] * 17)
+    assert len(halfwords) * 2 == 0x60
+    halfwords.extend([_CNOP] * 10)
+    branch_pc = len(halfwords) * 2
+    assert branch_pc == _SECOND_TAKEN_BRANCH_OFFSET
+    halfwords.append(_c_j(_SECOND_TAKEN_LONG_BLOCK_OFFSET - branch_pc))
+    halfwords.extend(
+        [_CNOP]
+        * ((_SECOND_TAKEN_LONG_BLOCK_OFFSET - len(halfwords) * 2) // 2)
+    )
+    assert len(halfwords) * 2 == _SECOND_TAKEN_LONG_BLOCK_OFFSET
+    halfwords.extend([_CNOP] * 31)
+    long_branch_pc = len(halfwords) * 2
+    assert long_branch_pc == _SECOND_TAKEN_LONG_BRANCH_OFFSET
+    halfwords.append(_c_j(loop_start - long_branch_pc))
+    halfwords.extend([_CNOP] * 64)
+    return b"".join(int(halfword).to_bytes(2, "little") for halfword in halfwords)
+
+
 def _load_and_reset(env) -> None:
     LoadProgramSequence(
         image=ProgramImage(payload=_trained_short_block_loop(), base_addr=_BASE),
@@ -118,6 +145,23 @@ def _load_and_reset(env) -> None:
     env.initialize(reset_vector=_BASE, bare_mode=True, reset_cycles=20)
     env.monitor.clear()
     env.monitor.set_expected_pc(_BASE)
+
+
+def _load_second_block_taken_and_reset(env) -> None:
+    LoadProgramSequence(
+        image=ProgramImage(payload=_second_block_taken_loop(), base_addr=_BASE),
+        step_cycles=0,
+    ).run(env)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=8,
+        miss_rate=0.0,
+        seed=0x918,
+    )
+    loop_start = _BASE + _SECOND_TAKEN_LOOP_OFFSET
+    env.initialize(reset_vector=loop_start, bare_mode=True, reset_cycles=20)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(loop_start)
 
 
 def _cycle_limit(name: str, default: int) -> int:
@@ -399,6 +443,75 @@ def test_two_fetch_directed_flow_signal_contract_matches_dut_inventory():
         "missing_payload_fields": sorted(payload_required - payload_names),
         "observable_payload_field_count": len(payload_names),
     }
+
+
+def test_second_block_taken_program_has_ftq_legal_17_plus_11_layout():
+    payload = _second_block_taken_loop()
+
+    assert payload[_SECOND_TAKEN_LOOP_OFFSET:_SECOND_TAKEN_BRANCH_OFFSET] == (
+        int(_CNOP).to_bytes(2, "little") * 27
+    )
+    assert int.from_bytes(
+        payload[_SECOND_TAKEN_BRANCH_OFFSET : _SECOND_TAKEN_BRANCH_OFFSET + 2],
+        "little",
+    ) == _c_j(
+        _SECOND_TAKEN_LONG_BLOCK_OFFSET - _SECOND_TAKEN_BRANCH_OFFSET
+    )
+    assert payload[
+        _SECOND_TAKEN_LONG_BLOCK_OFFSET:_SECOND_TAKEN_LONG_BRANCH_OFFSET
+    ] == (int(_CNOP).to_bytes(2, "little") * 31)
+    assert int.from_bytes(
+        payload[
+            _SECOND_TAKEN_LONG_BRANCH_OFFSET : _SECOND_TAKEN_LONG_BRANCH_OFFSET + 2
+        ],
+        "little",
+    ) == _c_j(
+        _SECOND_TAKEN_LOOP_OFFSET - _SECOND_TAKEN_LONG_BRANCH_OFFSET
+    )
+
+
+@pytest.mark.funcov_bins("BIN-918")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_two_fetch_second_block_taken_uses_unified_compacted_index(env):
+    _load_second_block_taken_and_reset(env)
+    recorder = _recorder(env)
+    observed: list[dict] = []
+    target_key = ("ifu_v3_pipeline_owner_model", "owner_leaf_020")
+
+    for _ in range(_cycle_limit("TB_TWO_FETCH_SECOND_TAKEN_MAX_CYCLES", 4000)):
+        env.step(1)
+        if any(
+            _read_key(recorder, key) == 1
+            for key in ("ftq_req1_valid", "way_real_two", "ifu_second_valid")
+        ):
+            observed.append(
+                {
+                    "cycle": int(env.current_cycle),
+                    "ftq_req1_valid": _read_key(recorder, "ftq_req1_valid"),
+                    "way_real_two": _read_key(recorder, "way_real_two"),
+                    "ifu_second_valid": _read_key(recorder, "ifu_second_valid"),
+                }
+            )
+            observed = observed[-32:]
+        if recorder.key_hit(*target_key):
+            break
+
+    assert recorder.key_hit(*target_key), {
+        "reason": "second-block taken prediction never reached the unified S1 coordinate",
+        "observed_two_fetch_states": observed,
+        "icache": env.icache_agent.get_stats(),
+        "backend": env.backend_model.get_stats(),
+    }
+    hit = recorder.hits[recorder.definition_by_bin_id["BIN-918"].key]
+    observations = hit.evidence[-1]["observations"]
+    assert observations["selected_block"] == 1
+    assert observations["block_valid"] == [1, 1]
+    assert observations["taken_valid"] == [0, 1]
+    assert observations["total_instr_count"] > observations["first_instr_count"] > 0
+    assert observations["s1_merged_pred_taken_mask"] == (
+        1 << observations["expected_compacted_index"]
+    )
+    assert not env.monitor.get_errors()
 
 
 @pytest.mark.funcov_bins("BIN-538", "BIN-539")

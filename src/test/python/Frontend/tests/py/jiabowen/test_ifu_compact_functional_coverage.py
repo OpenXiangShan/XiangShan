@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from env.funcov.py.ifu.owner_v3_funcov import (
     OWNER_V3_BLOCKED_BIN_IDS,
     OWNER_V3_BIN_SPECS,
@@ -895,6 +897,37 @@ def test_ifu_pred_taken_indices_match_compacted_first_and_second_blocks(tmp_path
     dut.set(_PREFIX + "s1_fetchBlock_1_takenCfiOffset_valid", 1)
     sample_cfvec_coverage(recorder, env, 2)
     assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_020")
+
+
+@pytest.mark.parametrize(
+    "second_block_valid,merged_taken_mask",
+    [
+        pytest.param(0, 0b0100, id="invalid-second-block"),
+        pytest.param(1, 0b0010, id="unshifted-second-taken-index"),
+    ],
+)
+def test_ifu_second_block_taken_index_rejects_incomplete_coordinate_mapping(
+    tmp_path, second_block_valid, merged_taken_mask
+):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    for name, value in {
+        "s1_valid": 1,
+        "s1_rawInstrValid": 0b1011,
+        "s1_totalRange": 0b1111,
+        "s1_firstRange": 0b0011,
+        "s1_mergedPredTakenMask": merged_taken_mask,
+        "s1_fetchBlock_0_valid": 1,
+        "s1_fetchBlock_1_valid": second_block_valid,
+        "s1_fetchBlock_0_takenCfiOffset_valid": 0,
+        "s1_fetchBlock_1_takenCfiOffset_valid": 1,
+        "s1_firstEndIsHalfRvi": 0,
+        "s1_totalEndIsHalfRvi": 0,
+    }.items():
+        dut.set(_PREFIX + name, value)
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_020")
 
 
 def test_ifu_instr_boundary_cross_block_rvi_checks_data_and_pc(tmp_path):
