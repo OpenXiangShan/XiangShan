@@ -89,6 +89,51 @@ def test_tl_a_stall_requires_each_observed_field_to_remain_stable():
     assert not _hit(recorder, 3)
 
 
+def test_tl_a_stall_missing_user_attributes_do_not_default_to_hits():
+    snapshot = _snapshot()
+    snapshot.update(
+        {
+            "tl_a_valid": 1,
+            "tl_a_ready": 0,
+            "tl_a_addr": 0x2000,
+            "tl_a_mem_back_type_mm": None,
+            "tl_a_mem_page_type_nc": None,
+        }
+    )
+    recorder = _Recorder()
+
+    _sample(recorder, 1, snapshot)
+    _sample(recorder, 2, snapshot)
+
+    assert _hit(recorder, 1)
+    assert not _hit(recorder, 2)
+    assert not _hit(recorder, 3)
+
+
+def test_tl_a_stall_user_attribute_changes_reject_corresponding_hits():
+    snapshot = _snapshot()
+    snapshot.update(
+        {
+            "tl_a_valid": 1,
+            "tl_a_ready": 0,
+            "tl_a_addr": 0x2000,
+            "tl_a_mem_back_type_mm": 1,
+            "tl_a_mem_page_type_nc": 1,
+        }
+    )
+    changed = dict(snapshot)
+    changed["tl_a_mem_back_type_mm"] = 0
+    changed["tl_a_mem_page_type_nc"] = 0
+    recorder = _Recorder()
+
+    _sample(recorder, 1, snapshot)
+    _sample(recorder, 2, changed)
+
+    assert _hit(recorder, 1)
+    assert not _hit(recorder, 2)
+    assert not _hit(recorder, 3)
+
+
 def test_snapshot_resolves_v3_tilelink_user_attribute_names():
     recorder = _Recorder(
         {
