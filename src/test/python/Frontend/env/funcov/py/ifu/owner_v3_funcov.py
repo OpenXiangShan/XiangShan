@@ -49,7 +49,7 @@ def _build_owner_v3_bin_specs() -> tuple[OwnerV3BinSpec, ...]:
 
 OWNER_V3_BIN_SPECS = _build_owner_v3_bin_specs()
 OWNER_V3_BIN_BY_ID = {spec.bin_id: spec for spec in OWNER_V3_BIN_SPECS}
-OWNER_V3_BLOCKED_BIN_IDS = frozenset({"BIN-909"})
+OWNER_V3_BLOCKED_BIN_IDS = frozenset({"BIN-909", "BIN-1004"})
 OWNER_V3_COVERPOINTS = {
     spec.coverage_group: OWNER_V3_COVERPOINT for spec in OWNER_V3_BIN_SPECS
 }

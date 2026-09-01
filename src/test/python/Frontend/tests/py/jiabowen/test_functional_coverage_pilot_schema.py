@@ -1,12 +1,17 @@
+import ast
 import csv
 import re
 from pathlib import Path
 
 import pytest
 
+from env.funcov.py.ifu import cacheable_pipeline_funcov, compact_funcov
+from env.funcov.py.ifu import instr_uncache_owner_funcov as instr_uncache_sampler
+from env.funcov.py.ifu import mmio_nc_owner_funcov as mmio_nc_owner_sampler
 from env.funcov.py.ifu.owner_v3_funcov import (
     OWNER_V3_BIN_SPECS,
     OWNER_V3_BLOCKED_BIN_IDS,
+    OWNER_V3_SOURCE_RULES,
 )
 from env.funcov.py.ifu.mmio_nc_owner_funcov import (
     MMIO_NC_OWNER_COVERPOINT,
@@ -88,6 +93,19 @@ IFU_V3_FORBIDDEN_OWNER_TERMS = {
     "f3/s3",
     "s3 payload",
 }
+MODELED_RUNTIME_PRODUCER_GAP_BIN_IDS = frozenset(
+    {
+        "BIN-900",
+        "BIN-921",
+        "BIN-922",
+        "BIN-927",
+        "BIN-928",
+        "BIN-951",
+        "BIN-953",
+        "BIN-955",
+        "BIN-956",
+    }
+)
 
 
 def test_active_pilot_has_global_unique_identifiers_and_mappings():
@@ -191,6 +209,162 @@ def test_jiabowen_owner_event_bins_are_exactly_mapped_once():
     assert {
         bin_id for bin_id, row in mapped.items() if row["status"] == "BLOCKED"
     } == OWNER_V3_BLOCKED_BIN_IDS
+
+
+def _owner_runtime_producer_bin_ids() -> set[str]:
+    result = {rule.bin_id for rule in OWNER_V3_SOURCE_RULES}
+    for module in (
+        cacheable_pipeline_funcov,
+        compact_funcov,
+        mmio_nc_owner_sampler,
+    ):
+        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+        for function in (
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ):
+            has_runtime_mark = any(
+                isinstance(node, ast.Call)
+                and (
+                    isinstance(node.func, ast.Name)
+                    and node.func.id == "mark_owner_v3_checked"
+                )
+                for node in ast.walk(function)
+            )
+            if not has_runtime_mark:
+                continue
+            result.update(
+                str(node.value)
+                for node in ast.walk(function)
+                if isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and re.fullmatch(r"BIN-\d+", node.value)
+            )
+    return result
+
+
+def _resolve_instr_uncache_mark_indices(tree: ast.AST) -> set[int]:
+    result: set[int] = set()
+
+    def integer_constants(node: ast.AST) -> set[int]:
+        if isinstance(node, ast.Constant) and isinstance(node.value, int):
+            return {int(node.value)}
+        if isinstance(node, ast.IfExp):
+            return integer_constants(node.body) | integer_constants(node.orelse)
+        return set()
+
+    for function in (
+        node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    ):
+        assignments = {
+            target.id: node.value
+            for node in ast.walk(function)
+            if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+        for call in (
+            node
+            for node in ast.walk(function)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "_mark"
+            and len(node.args) >= 2
+        ):
+            index_arg = call.args[1]
+            result.update(integer_constants(index_arg))
+            if not isinstance(index_arg, ast.Name):
+                continue
+            for loop in (
+                node
+                for node in ast.walk(function)
+                if isinstance(node, ast.For)
+                and isinstance(node.target, (ast.Tuple, ast.List))
+                and node.target.elts
+                and isinstance(node.target.elts[0], ast.Name)
+                and node.target.elts[0].id == index_arg.id
+                and isinstance(node.iter, ast.Name)
+            ):
+                values = assignments.get(loop.iter.id)
+                if not isinstance(values, (ast.Tuple, ast.List)):
+                    continue
+                result.update(
+                    int(item.elts[0].value)
+                    for item in values.elts
+                    if isinstance(item, (ast.Tuple, ast.List))
+                    and item.elts
+                    and isinstance(item.elts[0], ast.Constant)
+                    and isinstance(item.elts[0].value, int)
+                )
+    return result
+
+
+def _literal_recorder_mark_keys(repo_root: Path) -> set[tuple[str, str]]:
+    result: set[tuple[str, str]] = set()
+    sampler_root = repo_root / "src/test/python/Frontend/env/funcov"
+    for path in sampler_root.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        result.update(
+            (str(node.args[0].value), str(node.args[1].value))
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "mark"
+            and len(node.args) >= 2
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+        )
+    return result
+
+
+def test_modeled_jiabowen_runtime_producer_gap_inventory_is_current():
+    repo_root = Path(__file__).resolve().parents[7]
+    pilot_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
+    )
+    testpoint_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+    )
+    with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
+        pilot_rows = {row["Bin_ID"]: row for row in csv.DictReader(handle)}
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+
+    owner_producers = _owner_runtime_producer_bin_ids()
+    instr_tree = ast.parse(
+        Path(instr_uncache_sampler.__file__).read_text(encoding="utf-8")
+    )
+    instr_indices = _resolve_instr_uncache_mark_indices(instr_tree)
+    direct_keys = _literal_recorder_mark_keys(repo_root)
+    missing = []
+    for physical_line, row in enumerate(rows, start=2):
+        if not any(
+            start <= physical_line <= end
+            for start, end in IFU_V3_CANONICAL_BLOCK_RANGES
+        ):
+            continue
+        if not row["Checkpoint"].strip() or row["status"] != "MODELED":
+            continue
+        bin_ids = re.findall(r"BIN-\d+", row["coverage"])
+        assert bin_ids, (physical_line, row["coverage"])
+        bin_id = bin_ids[-1]
+        pilot = pilot_rows[bin_id]
+        if bin_id in {spec.bin_id for spec in OWNER_V3_BIN_SPECS}:
+            produced = bin_id in owner_producers
+        elif pilot["Coverage_Group"] == INSTR_UNCACHE_OWNER_GROUP:
+            produced = int(pilot["Bin_Name"].rsplit("_", 1)[1]) in instr_indices
+        else:
+            produced = (pilot["Coverage_Group"], pilot["Bin_Name"]) in direct_keys
+        if not produced:
+            missing.append((physical_line, bin_id, pilot["Coverage_Group"], pilot["Bin_Name"]))
+
+    # A producer gap is a closure-work inventory, not a MODELED status gate.
+    assert {item[1] for item in missing} == MODELED_RUNTIME_PRODUCER_GAP_BIN_IDS
 
 
 def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
