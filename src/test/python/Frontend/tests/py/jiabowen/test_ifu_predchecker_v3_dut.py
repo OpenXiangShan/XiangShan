@@ -388,6 +388,41 @@ def test_fe_ifu_predchecker_invalid_taken(env) -> None:
         ),
     )
     assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-824")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_fe_ifu_invalid_taken_fetch_exception_priority(env) -> None:
+    _load_and_reset(env)
+    block_start = _BASE + 2 * _BLOCK_BYTES
+    branch_pc = block_start + 30
+    _warm_until_prediction(env, branch_pc)
+
+    env.backend_model.set_can_accept(0)
+    try:
+        env.backend_model.inject_redirect(
+            _BASE,
+            "ifu_invalid_taken_fetch_exception_priority",
+            delay_cycles=1,
+        )
+        env.step(2)
+        env.memory.write_u32(branch_pc, _BRANCH_SAME_TARGET)
+        env.icache_agent.inject_response_fault_at(block_start, corrupt=1)
+        _pulse_fencei(env)
+        env.monitor.clear()
+        _run_until_bin(
+            env,
+            "ifu_invalid_taken_exception",
+            "observed",
+            max_cycles=2048,
+            debug_pc=branch_pc,
+        )
+    finally:
+        env.backend_model.set_can_accept(1)
+    assert int(env.icache_agent.get_stats()["corrupt_resp_count"]) == 1
+    assert not env.monitor.get_errors()
+
+
 @pytest.mark.funcov_bins(
     "BIN-976",
     "BIN-980",

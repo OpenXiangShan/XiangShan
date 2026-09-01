@@ -15,6 +15,7 @@ from env.support.rvc_decoder import expand_rvc
 _PREFIX = "Frontend_top.Frontend.inner_ifu.__Vtogcov__"
 _FTQ_PREFIX = "Frontend_top.Frontend.inner_ftq."
 _TRIGGER_PREFIX = "Frontend_top.Frontend.inner_ifu.frontendTrigger."
+_IBUFFER_PREFIX = "Frontend_top.Frontend.inner_ibuffer."
 
 
 class _Signal:
@@ -214,6 +215,8 @@ def _set_ifu_output(
         is_for_vs_nonleaf_pte,
     )
     dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_value", gp_addr_mem_waddr)
+    for slot in range(35):
+        dut.set(_PREFIX + f"io_toIBuffer_bits_exceptionMask_{slot}", 0)
     for slot, pc, instr, is_rvc, end_offset, ftq_flag, ftq_value, exception_mask in entries:
         slot = int(slot)
         enq_enable |= 1 << slot
@@ -1274,24 +1277,248 @@ def test_ifu_illegal_rvc_and_fetch_exception_priority_bins(tmp_path):
         assert priority.key_hit("ifu_v3_boundary_owner_model", bin_name)
 
 
-def test_invalid_taken_fetch_exception_cross_is_stimulus_coverage(tmp_path):
-    recorder, env, dut, _memory = _make_recorder(tmp_path)
+def _set_invalid_taken_exception_s1(
+    dut,
+    *,
+    instr_count=1,
+    exception_type=3,
+    ftq_flag=1,
+    ftq_value=7,
+    start_pc=0x80000000,
+):
+    _set_ibuffer_state(dut)
+    dut.set(_PREFIX + "s2_valid_valid", 0)
+    dut.set(_PREFIX + "s2_flush", 0)
+    dut.set(_PREFIX + "s2_reqIsUncache", 0)
+    dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_flag", 0)
+    dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_value", 0)
+    dut.set(_PREFIX + "s2_icacheMeta_0_exception_value", 0)
+    dut.set(_PREFIX + "s2_instrCount", 0)
+    dut.set(_PREFIX + "io_toIBuffer_valid", 0)
+    dut.set(_PREFIX + "io_toIBuffer_ready", 0)
+    dut.set(_PREFIX + "io_toIBuffer_bits_enqEnable", 0)
+    dut.set(_PREFIX + "io_toIBuffer_bits_valid", 0)
+    dut.set(_PREFIX + "io_toIBuffer_bits_exceptionType_value", 0)
+    dut.set(_PREFIX + "io_toIBuffer_bits_pc_0_addr", 0)
+    dut.set(_PREFIX + "io_toIBuffer_bits_ftqPtr_0_flag", 0)
+    dut.set(_PREFIX + "io_toIBuffer_bits_ftqPtr_0_value", 0)
+    for slot in range(35):
+        dut.set(_PREFIX + f"io_toIBuffer_bits_exceptionMask_{slot}", 0)
     dut.set(_PREFIX + "s1_valid", 1)
+    dut.set(_PREFIX + "s1_fire", 1)
     dut.set(_PREFIX + "s1_invalidTaken_0", 1)
-    dut.set(_PREFIX + "s1_icacheMeta_0_exception_value", 0)
-    dut.set(_PREFIX + "s1_instrCount", 1)
+    dut.set(_PREFIX + "s1_icacheMeta_0_exception_value", exception_type)
+    dut.set(_PREFIX + "s1_instrCount", instr_count)
     dut.set(_PREFIX + "s1_flush", 0)
+    dut.set(_PREFIX + "s1_fetchBlock_0_ftqIdx_flag", ftq_flag)
+    dut.set(_PREFIX + "s1_fetchBlock_0_ftqIdx_value", ftq_value)
+    dut.set(_PREFIX + "s1_fetchBlock_0_startVAddr_addr", start_pc >> 1)
+    dut.set(_PREFIX + "s1_prevEndHalfRviInfo_valid", 0)
+    dut.set(_PREFIX + "s1_prevEndHalfRviInfo_bits_pc_addr", 0)
+
+
+def _set_ibuffer_state(
+    dut,
+    *,
+    num_valid=3,
+    enq_pointer=(0, 11),
+    deq_pointer=(0, 8),
+    head_valid=1,
+    head_pc=0x7FFFFFE0,
+    head_ftq=(0, 6),
+    head_offset=3,
+    head_instr=0x00000013,
+    flush=0,
+    backend_can_accept=0,
+):
+    dut.set(_IBUFFER_PREFIX + "numValid", num_valid)
+    dut.set(_IBUFFER_PREFIX + "enqPtrDup_0_flag", enq_pointer[0])
+    dut.set(_IBUFFER_PREFIX + "enqPtrDup_0_value", enq_pointer[1])
+    dut.set(_IBUFFER_PREFIX + "deqPtrVec_0_flag", deq_pointer[0])
+    dut.set(_IBUFFER_PREFIX + "deqPtrVec_0_value", deq_pointer[1])
+    dut.set(_IBUFFER_PREFIX + "outputEntries_0_valid", head_valid)
+    dut.set(_IBUFFER_PREFIX + "outputEntries_0_bits_pc_addr", head_pc >> 1)
+    dut.set(_IBUFFER_PREFIX + "outputEntries_0_bits_ftqPtr_flag", head_ftq[0])
+    dut.set(_IBUFFER_PREFIX + "outputEntries_0_bits_ftqPtr_value", head_ftq[1])
+    dut.set(_IBUFFER_PREFIX + "outputEntries_0_bits_instrEndOffset", head_offset)
+    dut.set(_IBUFFER_PREFIX + "outputEntries_0_bits_inst", head_instr)
+    dut.set("Frontend_top.Frontend.inner_needFlush", flush)
+    dut.set("Frontend_top.io_backend_toIBuf_decodeCanAccept", backend_can_accept)
+
+
+def _set_invalid_taken_exception_s2(
+    dut,
+    *,
+    entries,
+    exception_type=3,
+    ftq_flag=1,
+    ftq_value=7,
+):
+    _set_ifu_output(
+        dut,
+        entries,
+        exception_type=exception_type,
+        instr_count=len(entries),
+    )
+    dut.set(_PREFIX + "s1_valid", 0)
+    dut.set(_PREFIX + "s2_valid_valid", 1)
+    dut.set(_PREFIX + "s2_flush", 0)
+    dut.set(_PREFIX + "s2_reqIsUncache", 0)
+    dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_flag", ftq_flag)
+    dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_value", ftq_value)
+    dut.set(_PREFIX + "s2_icacheMeta_0_exception_value", exception_type)
+
+
+def test_invalid_taken_fetch_exception_requires_same_transaction_delivery(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_invalid_taken_exception_s1(dut, exception_type=0)
 
     sample_cfvec_coverage(recorder, env, 1)
     assert not recorder.key_hit("ifu_invalid_taken_exception", "observed")
 
-    dut.set(_PREFIX + "s1_icacheMeta_0_exception_value", 3)
-    # Coverage records the stimulus even if a pre-fix DUT computes the wrong
-    # count. A checker must independently require instrCount == 1.
-    dut.set(_PREFIX + "s1_instrCount", 4)
+    _set_invalid_taken_exception_s1(dut)
     sample_cfvec_coverage(recorder, env, 2)
+    assert not recorder.key_hit("ifu_invalid_taken_exception", "observed")
+
+    entry = (0, 0x80000000, 0x00000013, 0, 1, 1, 7, 1)
+    _set_invalid_taken_exception_s2(dut, entries=[entry])
+    sample_cfvec_coverage(recorder, env, 3)
+    assert not recorder.key_hit("ifu_invalid_taken_exception", "observed")
+
+    _set_ibuffer_state(dut, num_valid=4, enq_pointer=(0, 12))
+    sample_cfvec_coverage(recorder, env, 4)
 
     assert recorder.key_hit("ifu_invalid_taken_exception", "observed")
+    hit = recorder.hits[("ifu_invalid_taken_exception", "stimulus_cross", "observed")]
+    assert hit.evidence[-1]["old_unconsumed_entry_preserved"]
+    assert hit.evidence[-1]["ibuffer_pointer_update_correct"]
+
+
+def test_invalid_taken_fetch_exception_rejects_bad_count_and_younger_delivery(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_invalid_taken_exception_s1(dut, instr_count=4)
+    sample_cfvec_coverage(recorder, env, 1)
+
+    entry = (0, 0x80000000, 0x00000013, 0, 1, 1, 7, 1)
+    _set_invalid_taken_exception_s2(dut, entries=[entry])
+    sample_cfvec_coverage(recorder, env, 2)
+    assert not recorder.key_hit("ifu_invalid_taken_exception", "observed")
+    assert any(
+        item.get("risk") == "ifu_invalid_taken_exception_not_truncated_in_s1"
+        for item in recorder.risk_observations
+    )
+
+    _set_invalid_taken_exception_s1(dut)
+    sample_cfvec_coverage(recorder, env, 3)
+    younger = (1, 0x80000004, 0x00000013, 0, 3, 1, 7, 0)
+    _set_invalid_taken_exception_s2(dut, entries=[entry, younger])
+    sample_cfvec_coverage(recorder, env, 4)
+
+    assert not recorder.key_hit("ifu_invalid_taken_exception", "observed")
+    assert any(
+        item.get("risk") == "ifu_invalid_taken_exception_checkpoint_failed"
+        for item in recorder.risk_observations
+    )
+
+
+def test_invalid_taken_fetch_exception_survives_backpressure_until_fire(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_invalid_taken_exception_s1(dut)
+    sample_cfvec_coverage(recorder, env, 1)
+
+    entry = (0, 0x80000000, 0x00000013, 0, 1, 1, 7, 1)
+    _set_invalid_taken_exception_s2(dut, entries=[entry])
+    dut.set(_PREFIX + "io_toIBuffer_ready", 0)
+    sample_cfvec_coverage(recorder, env, 2)
+    sample_cfvec_coverage(recorder, env, 3)
+
+    pending = recorder._ifu_invalid_taken_exception_pending
+    assert pending is not None
+    assert pending["held_cycles"] == 2
+    assert not recorder.key_hit("ifu_invalid_taken_exception", "observed")
+    assert not any(
+        item.get("risk") == "ifu_invalid_taken_exception_checkpoint_failed"
+        for item in recorder.risk_observations
+    )
+
+    dut.set(_PREFIX + "io_toIBuffer_ready", 1)
+    sample_cfvec_coverage(recorder, env, 4)
+    assert recorder._ifu_invalid_taken_exception_pending["phase"] == "await_ibuffer_post"
+
+    _set_ibuffer_state(dut, num_valid=4, enq_pointer=(0, 12))
+    sample_cfvec_coverage(recorder, env, 5)
+    assert recorder.key_hit("ifu_invalid_taken_exception", "observed")
+
+
+def test_invalid_taken_fetch_exception_does_not_replace_pending_transaction(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_invalid_taken_exception_s1(dut, ftq_value=7)
+    sample_cfvec_coverage(recorder, env, 1)
+
+    _set_invalid_taken_exception_s1(dut, ftq_value=9)
+    _set_ibuffer_state(
+        dut,
+        num_valid=0,
+        enq_pointer=(0, 8),
+        deq_pointer=(0, 8),
+        head_valid=0,
+    )
+    sample_cfvec_coverage(recorder, env, 2)
+
+    pending = recorder._ifu_invalid_taken_exception_pending
+    assert pending is not None
+    assert pending["s1_cycle"] == 1
+    assert pending["ftq_identity"] == (1, 7)
+    assert not recorder.risk_observations
+
+
+def test_invalid_taken_fetch_exception_rejects_stale_identity_and_timeout(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_invalid_taken_exception_s1(dut)
+    sample_cfvec_coverage(recorder, env, 1)
+
+    entry = (0, 0x80000000, 0x00000013, 0, 1, 1, 8, 1)
+    _set_invalid_taken_exception_s2(dut, entries=[entry], ftq_value=8)
+    sample_cfvec_coverage(recorder, env, 2)
+    assert recorder._ifu_invalid_taken_exception_pending is None
+    assert any(
+        item.get("risk") == "ifu_invalid_taken_exception_s2_identity_mismatch"
+        for item in recorder.risk_observations
+    )
+
+    timeout_recorder, timeout_env, timeout_dut, _memory = _make_recorder(
+        tmp_path / "timeout"
+    )
+    _set_invalid_taken_exception_s1(timeout_dut)
+    sample_cfvec_coverage(timeout_recorder, timeout_env, 10)
+    timeout_dut.set(_PREFIX + "s1_valid", 0)
+    timeout_dut.set(_PREFIX + "s2_valid_valid", 0)
+    for cycle in range(11, 28):
+        sample_cfvec_coverage(timeout_recorder, timeout_env, cycle)
+    assert timeout_recorder._ifu_invalid_taken_exception_pending is None
+    assert any(
+        item.get("risk") == "ifu_invalid_taken_exception_s2_timeout"
+        for item in timeout_recorder.risk_observations
+    )
+
+
+def test_invalid_taken_fetch_exception_rejects_ibuffer_pointer_mismatch(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_invalid_taken_exception_s1(dut)
+    sample_cfvec_coverage(recorder, env, 1)
+
+    entry = (0, 0x80000000, 0x00000013, 0, 1, 1, 7, 1)
+    _set_invalid_taken_exception_s2(dut, entries=[entry])
+    sample_cfvec_coverage(recorder, env, 2)
+    _set_ibuffer_state(dut, num_valid=3, enq_pointer=(0, 11))
+    sample_cfvec_coverage(recorder, env, 3)
+
+    assert not recorder.key_hit("ifu_invalid_taken_exception", "observed")
+    assert any(
+        item.get("risk") == "ifu_invalid_taken_exception_checkpoint_failed"
+        and not item.get("ibuffer_pointer_update_correct", True)
+        for item in recorder.risk_observations
+    )
 
 
 def _set_frontend_trigger_config(
@@ -1547,6 +1774,9 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "s1_invalidTaken_0",
         _PREFIX + "s1_icacheMeta_0_exception_value",
         _PREFIX + "s1_instrCount",
+        _PREFIX + "s1_fetchBlock_0_ftqIdx_flag",
+        _PREFIX + "s1_fetchBlock_0_ftqIdx_value",
+        _PREFIX + "s1_fetchBlock_0_startVAddr_addr",
         _PREFIX + "s1_fire",
         _PREFIX + "s1_flush",
         _PREFIX + "s1_reqIsUncache",
@@ -1564,8 +1794,12 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "s1_firstEndIsHalfRvi",
         _PREFIX + "s2_prevIBufEnqPtr_value",
         _PREFIX + "s2_instrCount",
+        _PREFIX + "s2_icacheMeta_0_exception_value",
+        "Frontend_top.Frontend.inner_ifu.s2_fetchBlock_0_ftqIdx_flag",
+        "Frontend_top.Frontend.inner_ifu.s2_fetchBlock_0_ftqIdx_value",
         _PREFIX + "s2_fire",
         _PREFIX + "s2_reqIsUncache",
+        _PREFIX + "s2_flush",
         _PREFIX + "s2_alignShiftNum",
         _PREFIX + "s2_prevEndIsHalfRviInfo_valid",
         _PREFIX + "s2_prevEndIsHalfRviInfo_bits_pc_addr",
@@ -1600,6 +1834,19 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         "Frontend_top.io_backend_fromIfu_gpAddrMem_waddr",
         "Frontend_top.io_backend_fromIfu_gpAddrMem_wdata_gpaddr",
         "Frontend_top.io_backend_fromIfu_gpAddrMem_wdata_isForVSnonLeafPTE",
+        "Frontend_top.io_backend_toIBuf_decodeCanAccept",
+        _IBUFFER_PREFIX + "numValid",
+        _IBUFFER_PREFIX + "enqPtrDup_0_flag",
+        _IBUFFER_PREFIX + "enqPtrDup_0_value",
+        _IBUFFER_PREFIX + "deqPtrVec_0_flag",
+        _IBUFFER_PREFIX + "deqPtrVec_0_value",
+        _IBUFFER_PREFIX + "outputEntries_0_valid",
+        _IBUFFER_PREFIX + "outputEntries_0_bits_pc_addr",
+        _IBUFFER_PREFIX + "outputEntries_0_bits_ftqPtr_flag",
+        _IBUFFER_PREFIX + "outputEntries_0_bits_ftqPtr_value",
+        _IBUFFER_PREFIX + "outputEntries_0_bits_instrEndOffset",
+        _IBUFFER_PREFIX + "outputEntries_0_bits_inst",
+        "Frontend_top.Frontend.inner_needFlush",
     }
     required |= {
         _FTQ_PREFIX + f"resolveQueue.io_bpuTrain_bits_branches_{index}_{field}"

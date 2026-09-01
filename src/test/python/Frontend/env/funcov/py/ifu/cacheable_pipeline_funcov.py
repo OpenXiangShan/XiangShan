@@ -172,6 +172,7 @@ def initialize_ifu_cacheable_pipeline_state(recorder) -> None:
     recorder._ifu_late_fault_stall_pending = None
     recorder._ifu_late_fault_delivery_pending = None
     recorder._ifu_late_fault_flush_pending = None
+    recorder._ifu_invalid_taken_exception_pending = None
 
 
 def reset_ifu_cacheable_pipeline_state(recorder) -> None:

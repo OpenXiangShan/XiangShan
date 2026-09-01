@@ -17,6 +17,8 @@ _IFU_OUTPUT_SLOT_COUNT = 36
 _FETCH_BLOCK_INST_COUNT = 32
 _IBUFFER_ENTRY_COUNT = 48
 _FETCH_EXCEPTION_VALUES = frozenset({1, 2, 3, 5})
+_INVALID_TAKEN_S2_TIMEOUT_CYCLES = 16
+_INVALID_TAKEN_HOLD_TIMEOUT_CYCLES = 512
 
 
 def _read_ifu_internal(recorder, dut, stem: str) -> Optional[int]:
@@ -28,6 +30,96 @@ def _read_ifu_internal(recorder, dut, stem: str) -> Optional[int]:
 
 def _read_ifu_output_slot(recorder, dut, field: str, slot: int, suffix: str = "") -> Optional[int]:
     return _read_ifu_internal(recorder, dut, f"io_toIBuffer_bits_{field}_{int(slot)}{suffix}")
+
+
+def _read_ibuffer_internal(recorder, dut, stem: str) -> Optional[int]:
+    return recorder._read_first_dut_signal(
+        dut,
+        (
+            "Frontend_top.Frontend.inner_ibuffer." + str(stem),
+            "Frontend_top.Frontend.inner_ibuffer.__Vtogcov__" + str(stem),
+            "Frontend_top.Frontend._inner_ibuffer_" + str(stem),
+        ),
+    )
+
+
+def _ibuffer_pointer(flag: Optional[int], value: Optional[int]) -> Optional[tuple[int, int]]:
+    if flag is None or value is None:
+        return None
+    return int(flag), int(value)
+
+
+def _advance_ibuffer_pointer(pointer: tuple[int, int], count: int) -> tuple[int, int]:
+    absolute = (int(pointer[0]) & 1) * _IBUFFER_ENTRY_COUNT + int(pointer[1])
+    advanced = (absolute + int(count)) % (2 * _IBUFFER_ENTRY_COUNT)
+    return advanced // _IBUFFER_ENTRY_COUNT, advanced % _IBUFFER_ENTRY_COUNT
+
+
+def _ibuffer_pointer_distance(
+    newer: tuple[int, int], older: tuple[int, int]
+) -> int:
+    newer_absolute = (int(newer[0]) & 1) * _IBUFFER_ENTRY_COUNT + int(newer[1])
+    older_absolute = (int(older[0]) & 1) * _IBUFFER_ENTRY_COUNT + int(older[1])
+    return (newer_absolute - older_absolute) % (2 * _IBUFFER_ENTRY_COUNT)
+
+
+def _read_ibuffer_state(recorder, dut) -> dict[str, Any]:
+    enq_pointer = _ibuffer_pointer(
+        _read_ibuffer_internal(recorder, dut, "enqPtrDup_0_flag"),
+        _read_ibuffer_internal(recorder, dut, "enqPtrDup_0_value"),
+    )
+    deq_pointer = _ibuffer_pointer(
+        _read_ibuffer_internal(recorder, dut, "deqPtrVec_0_flag"),
+        _read_ibuffer_internal(recorder, dut, "deqPtrVec_0_value"),
+    )
+    head_values = (
+        _read_ibuffer_internal(recorder, dut, "outputEntries_0_bits_pc_addr"),
+        _read_ibuffer_internal(recorder, dut, "outputEntries_0_bits_ftqPtr_flag"),
+        _read_ibuffer_internal(recorder, dut, "outputEntries_0_bits_ftqPtr_value"),
+        _read_ibuffer_internal(recorder, dut, "outputEntries_0_bits_instrEndOffset"),
+        _read_ibuffer_internal(recorder, dut, "outputEntries_0_bits_inst"),
+    )
+    head_identity = (
+        None
+        if any(value is None for value in head_values)
+        else tuple(int(value) for value in head_values)
+    )
+    return {
+        "num_valid": _read_ibuffer_internal(recorder, dut, "numValid"),
+        "enq_pointer": enq_pointer,
+        "deq_pointer": deq_pointer,
+        "head_valid": _read_ibuffer_internal(recorder, dut, "outputEntries_0_valid"),
+        "head_identity": head_identity,
+        "flush": recorder._read_first_dut_signal(
+            dut,
+            (
+                "Frontend_top.Frontend.inner_needFlush",
+                "Frontend_top.Frontend.__Vtogcov__inner_needFlush",
+            ),
+        ),
+        "backend_can_accept": recorder._read_first_dut_signal(
+            dut,
+            (
+                "Frontend_top.io_backend_toIBuf_decodeCanAccept",
+                "Frontend_top.__Vtogcov__io_backend_toIBuf_decodeCanAccept",
+            ),
+        ),
+    }
+
+
+def _ibuffer_state_complete(state: dict[str, Any]) -> bool:
+    return all(
+        state.get(field) is not None
+        for field in (
+            "num_valid",
+            "enq_pointer",
+            "deq_pointer",
+            "head_valid",
+            "head_identity",
+            "flush",
+            "backend_can_accept",
+        )
+    )
 
 
 def _read_predchecker(recorder, dut, stem: str) -> Optional[int]:
@@ -645,6 +737,17 @@ def _active_ifu_output_slots(enq_enable: int, valid_mask: int) -> list[int]:
     return [slot for slot in range(_IFU_OUTPUT_SLOT_COUNT) if active_mask & (1 << slot)]
 
 
+def _read_ifu_output_mask(recorder, dut, field: str) -> Optional[int]:
+    mask = 0
+    # The final aligned slot is a sentinel and is not part of IBufferEnqueueWidth.
+    for slot in range(_IFU_OUTPUT_SLOT_COUNT - 1):
+        value = _read_ifu_output_slot(recorder, dut, field, slot)
+        if value is None:
+            return None
+        mask |= (int(value) & 1) << slot
+    return mask
+
+
 def _is_contiguous(slots: list[int]) -> bool:
     return len(slots) >= 2 and slots == list(range(slots[0], slots[-1] + 1))
 
@@ -1099,30 +1202,413 @@ def _sample_exception_metadata(recorder, dut, cycle: int) -> None:
         )
 
 
+def _record_invalid_taken_risk(
+    recorder,
+    cycle: int,
+    risk: str,
+    pending: dict[str, Any],
+    **observations: Any,
+) -> None:
+    recorder.risk_observations.append(
+        {
+            "cycle": int(cycle),
+            "risk": str(risk),
+            **pending,
+            **observations,
+        }
+    )
+    recorder._ifu_invalid_taken_exception_pending = None
+
+
 def _sample_invalid_taken_exception_cross(recorder, dut, cycle: int) -> None:
+    pending = getattr(recorder, "_ifu_invalid_taken_exception_pending", None)
+    if pending is not None and int(cycle) > int(pending["s1_cycle"]):
+        if pending.get("phase") == "await_ibuffer_post":
+            fire_cycle = int(pending["fire_cycle"])
+            if int(cycle) > fire_cycle:
+                pre_state = pending["ibuffer_pre_fire"]
+                post_state = _read_ibuffer_state(recorder, dut)
+                s1_state = pending["ibuffer_s1"]
+                if not _ibuffer_state_complete(post_state):
+                    _record_invalid_taken_risk(
+                        recorder,
+                        cycle,
+                        "ifu_invalid_taken_exception_ibuffer_post_unavailable",
+                        pending,
+                        ibuffer_post=post_state,
+                    )
+                else:
+                    expected_enq_pointer = _advance_ibuffer_pointer(
+                        pre_state["enq_pointer"], 1
+                    )
+                    pre_distance = _ibuffer_pointer_distance(
+                        pre_state["enq_pointer"], pre_state["deq_pointer"]
+                    )
+                    post_distance = _ibuffer_pointer_distance(
+                        post_state["enq_pointer"], post_state["deq_pointer"]
+                    )
+                    old_head_distinct = (
+                        int(pre_state["head_identity"][0]) << 1
+                        != int(pending["output_pc"])
+                        or tuple(pre_state["head_identity"][1:3])
+                        != tuple(pending["output_ftq_identity"])
+                    )
+                    old_entry_preserved = (
+                        int(s1_state["num_valid"]) > 0
+                        and int(pre_state["num_valid"]) > 0
+                        and int(s1_state["head_valid"]) == 1
+                        and int(pre_state["head_valid"]) == 1
+                        and int(post_state["head_valid"]) == 1
+                        and s1_state["head_identity"] == pre_state["head_identity"]
+                        and pre_state["head_identity"] == post_state["head_identity"]
+                        and s1_state["deq_pointer"] == pre_state["deq_pointer"]
+                        and pre_state["deq_pointer"] == post_state["deq_pointer"]
+                        and old_head_distinct
+                    )
+                    pointer_update_correct = (
+                        post_state["enq_pointer"] == expected_enq_pointer
+                        and int(post_state["num_valid"])
+                        == int(pre_state["num_valid"]) + 1
+                        and pre_distance == int(pre_state["num_valid"])
+                        and post_distance == int(post_state["num_valid"])
+                    )
+                    pressure_held = (
+                        int(s1_state["backend_can_accept"]) == 0
+                        and int(pre_state["backend_can_accept"]) == 0
+                        and int(post_state["backend_can_accept"]) == 0
+                    )
+                    no_ibuffer_flush = (
+                        int(s1_state["flush"]) == 0
+                        and int(pre_state["flush"]) == 0
+                        and int(post_state["flush"]) == 0
+                    )
+                    checkpoint_passed = (
+                        bool(pending["s2_checkpoint_passed"])
+                        and old_entry_preserved
+                        and pointer_update_correct
+                        and pressure_held
+                        and no_ibuffer_flush
+                    )
+                    observations = {
+                        **pending,
+                        "event": "ifu_invalid_taken_fetch_exception_priority",
+                        "ibuffer_post_cycle": int(cycle),
+                        "ibuffer_post": post_state,
+                        "expected_enq_pointer": expected_enq_pointer,
+                        "pre_pointer_distance": int(pre_distance),
+                        "post_pointer_distance": int(post_distance),
+                        "old_head_distinct_from_exception": bool(old_head_distinct),
+                        "old_unconsumed_entry_preserved": bool(old_entry_preserved),
+                        "ibuffer_pointer_update_correct": bool(pointer_update_correct),
+                        "backend_pressure_held": bool(pressure_held),
+                        "no_ibuffer_flush": bool(no_ibuffer_flush),
+                        "checkpoint_passed": bool(checkpoint_passed),
+                    }
+                    if checkpoint_passed:
+                        recorder.mark(
+                            "ifu_invalid_taken_exception",
+                            "observed",
+                            cycle,
+                            observations,
+                        )
+                        recorder._ifu_invalid_taken_exception_pending = None
+                    else:
+                        _record_invalid_taken_risk(
+                            recorder,
+                            cycle,
+                            "ifu_invalid_taken_exception_checkpoint_failed",
+                            pending,
+                            **observations,
+                        )
+        else:
+            age = int(cycle) - int(pending["s1_cycle"])
+            values = {
+                "s2_valid": _read_ifu_internal(recorder, dut, "s2_valid_valid"),
+                "s2_flush": _read_ifu_internal(recorder, dut, "s2_flush"),
+                "s2_req_is_uncache": _read_ifu_internal(recorder, dut, "s2_reqIsUncache"),
+                "s2_ftq_flag": _read_ifu_internal(
+                    recorder, dut, "s2_fetchBlock_0_ftqIdx_flag"
+                ),
+                "s2_ftq_value": _read_ifu_internal(
+                    recorder, dut, "s2_fetchBlock_0_ftqIdx_value"
+                ),
+                "s2_exception": _read_ifu_internal(
+                    recorder, dut, "s2_icacheMeta_0_exception_value"
+                ),
+                "s2_instr_count": _read_ifu_internal(recorder, dut, "s2_instrCount"),
+                "to_ibuffer_valid": _read_ifu_internal(
+                    recorder, dut, "io_toIBuffer_valid"
+                ),
+                "to_ibuffer_ready": _read_ifu_internal(
+                    recorder, dut, "io_toIBuffer_ready"
+                ),
+                "to_ibuffer_enq": _read_ifu_internal(
+                    recorder, dut, "io_toIBuffer_bits_enqEnable"
+                ),
+                "to_ibuffer_valid_mask": _read_ifu_internal(
+                    recorder, dut, "io_toIBuffer_bits_valid"
+                ),
+                "to_ibuffer_exception": _read_ifu_internal(
+                    recorder, dut, "io_toIBuffer_bits_exceptionType_value"
+                ),
+            }
+            exception_mask = _read_ifu_output_mask(recorder, dut, "exceptionMask")
+            if values["s2_flush"] == 1:
+                recorder._ifu_invalid_taken_exception_pending = None
+            elif age > _INVALID_TAKEN_S2_TIMEOUT_CYCLES and not pending.get(
+                "held_payload_signature"
+            ):
+                _record_invalid_taken_risk(
+                    recorder,
+                    cycle,
+                    "ifu_invalid_taken_exception_s2_timeout",
+                    pending,
+                    s2_observation=values,
+                )
+            elif all(value is not None for value in values.values()) and exception_mask is not None:
+                observed_identity = (
+                    int(values["s2_ftq_flag"]),
+                    int(values["s2_ftq_value"]),
+                )
+                same_s2_identity = (
+                    int(values["s2_valid"]) == 1
+                    and observed_identity == tuple(pending["ftq_identity"])
+                )
+                if int(values["s2_valid"]) == 1 and not same_s2_identity:
+                    _record_invalid_taken_risk(
+                        recorder,
+                        cycle,
+                        "ifu_invalid_taken_exception_s2_identity_mismatch",
+                        pending,
+                        observed_s2_identity=observed_identity,
+                        s2_observation=values,
+                    )
+                elif same_s2_identity:
+                    if int(values["to_ibuffer_valid"]) != 1:
+                        if pending.get("held_payload_signature") is not None:
+                            _record_invalid_taken_risk(
+                                recorder,
+                                cycle,
+                                "ifu_invalid_taken_exception_payload_dropped_under_backpressure",
+                                pending,
+                                s2_observation=values,
+                            )
+                    else:
+                        active_mask = int(values["to_ibuffer_enq"]) & int(
+                            values["to_ibuffer_valid_mask"]
+                        )
+                        active_slots = _active_ifu_output_slots(
+                            int(values["to_ibuffer_enq"]),
+                            int(values["to_ibuffer_valid_mask"]),
+                        )
+                        active_slot = active_slots[0] if len(active_slots) == 1 else None
+                        output_pc = (
+                            None
+                            if active_slot is None
+                            else _decode_pruned_pc(
+                                _read_ifu_output_slot(
+                                    recorder, dut, "pc", active_slot, "_addr"
+                                )
+                            )
+                        )
+                        output_ftq = (
+                            None
+                            if active_slot is None
+                            else (
+                                _read_ifu_output_slot(
+                                    recorder, dut, "ftqPtr", active_slot, "_flag"
+                                ),
+                                _read_ifu_output_slot(
+                                    recorder, dut, "ftqPtr", active_slot, "_value"
+                                ),
+                            )
+                        )
+                        s2_checkpoint_passed = (
+                            int(values["s2_req_is_uncache"]) == 0
+                            and int(values["s2_exception"])
+                            == int(pending["exception_type"])
+                            and int(values["to_ibuffer_exception"])
+                            == int(pending["exception_type"])
+                            and int(values["s2_instr_count"]) == 1
+                            and int(values["to_ibuffer_enq"]).bit_count() == 1
+                            and int(values["to_ibuffer_valid_mask"]).bit_count() == 1
+                            and active_mask.bit_count() == 1
+                            and int(exception_mask) == active_mask
+                            and output_pc == pending["expected_pc"]
+                            and output_ftq == tuple(pending["ftq_identity"])
+                        )
+                        payload_signature = (
+                            int(active_mask),
+                            int(exception_mask),
+                            output_pc,
+                            output_ftq,
+                            int(values["to_ibuffer_exception"]),
+                            int(values["s2_instr_count"]),
+                        )
+                        held_signature = pending.get("held_payload_signature")
+                        if held_signature is not None and payload_signature != tuple(
+                            held_signature
+                        ):
+                            _record_invalid_taken_risk(
+                                recorder,
+                                cycle,
+                                "ifu_invalid_taken_exception_payload_changed_under_backpressure",
+                                pending,
+                                current_payload_signature=payload_signature,
+                                s2_observation=values,
+                            )
+                        elif not s2_checkpoint_passed:
+                            _record_invalid_taken_risk(
+                                recorder,
+                                cycle,
+                                "ifu_invalid_taken_exception_checkpoint_failed",
+                                pending,
+                                s2_observation=values,
+                                active_slot=active_slot,
+                                active_mask=int(active_mask),
+                                exception_mask=int(exception_mask),
+                                output_pc=output_pc,
+                                output_ftq_identity=output_ftq,
+                            )
+                        elif int(values["to_ibuffer_ready"]) == 0:
+                            pending["held_payload_signature"] = payload_signature
+                            pending["held_cycles"] = int(pending.get("held_cycles", 0)) + 1
+                            pending["last_held_cycle"] = int(cycle)
+                            if int(pending["held_cycles"]) > _INVALID_TAKEN_HOLD_TIMEOUT_CYCLES:
+                                _record_invalid_taken_risk(
+                                    recorder,
+                                    cycle,
+                                    "ifu_invalid_taken_exception_backpressure_timeout",
+                                    pending,
+                                    s2_observation=values,
+                                )
+                        else:
+                            pre_state = _read_ibuffer_state(recorder, dut)
+                            if not _ibuffer_state_complete(pre_state):
+                                _record_invalid_taken_risk(
+                                    recorder,
+                                    cycle,
+                                    "ifu_invalid_taken_exception_ibuffer_pre_unavailable",
+                                    pending,
+                                    ibuffer_pre_fire=pre_state,
+                                )
+                            else:
+                                pending.update(
+                                    {
+                                        "phase": "await_ibuffer_post",
+                                        "fire_cycle": int(cycle),
+                                        "s2_cycle": int(cycle),
+                                        "s2_observation": values,
+                                        "active_slot": active_slot,
+                                        "active_mask": int(active_mask),
+                                        "exception_mask": int(exception_mask),
+                                        "output_pc": output_pc,
+                                        "output_ftq_identity": output_ftq,
+                                        "exception_won": True,
+                                        "single_instruction_delivered": True,
+                                        "younger_normal_instruction_delivered": False,
+                                        "s2_checkpoint_passed": True,
+                                        "ibuffer_pre_fire": pre_state,
+                                    }
+                                )
+
     s1_valid = _read_ifu_internal(recorder, dut, "s1_valid")
+    s1_fire = _read_ifu_internal(recorder, dut, "s1_fire")
     invalid_taken = _read_ifu_internal(recorder, dut, "s1_invalidTaken_0")
     exception = _read_ifu_internal(recorder, dut, "s1_icacheMeta_0_exception_value")
     instr_count = _read_ifu_internal(recorder, dut, "s1_instrCount")
     s1_flush = _read_ifu_internal(recorder, dut, "s1_flush")
-    if None in {s1_valid, invalid_taken, exception, instr_count, s1_flush}:
+    ftq_flag = _read_ifu_internal(recorder, dut, "s1_fetchBlock_0_ftqIdx_flag")
+    ftq_value = _read_ifu_internal(recorder, dut, "s1_fetchBlock_0_ftqIdx_value")
+    start_pc = _read_ifu_internal(recorder, dut, "s1_fetchBlock_0_startVAddr_addr")
+    prev_half_valid = _read_ifu_internal(
+        recorder, dut, "s1_prevEndHalfRviInfo_valid"
+    )
+    prev_half_pc = _read_ifu_internal(
+        recorder, dut, "s1_prevEndHalfRviInfo_bits_pc_addr"
+    )
+    if None in {
+        s1_valid,
+        s1_fire,
+        invalid_taken,
+        exception,
+        instr_count,
+        s1_flush,
+        ftq_flag,
+        ftq_value,
+        start_pc,
+        prev_half_valid,
+        prev_half_pc,
+    }:
         return
     if (
-        int(s1_valid) == 1
+        getattr(recorder, "_ifu_invalid_taken_exception_pending", None) is None
+        and int(s1_valid) == 1
+        and int(s1_fire) == 1
         and int(invalid_taken) == 1
         and int(exception) in _FETCH_EXCEPTION_VALUES
         and int(s1_flush) == 0
     ):
-        recorder.mark(
-            "ifu_invalid_taken_exception",
-            "observed",
-            cycle,
-            {
-                "event": "ifu_s1_invalid_taken_with_fetch_exception",
-                "exception_type": int(exception),
-                "s1_instr_count": int(instr_count),
-            },
-        )
+        evidence = {
+            "event": "ifu_s1_invalid_taken_with_fetch_exception",
+            "s1_cycle": int(cycle),
+            "exception_type": int(exception),
+            "s1_instr_count": int(instr_count),
+            "ftq_identity": (int(ftq_flag), int(ftq_value)),
+            "expected_pc": (
+                int(prev_half_pc) if int(prev_half_valid) else int(start_pc)
+            )
+            << 1,
+            "previous_half_rvi": bool(prev_half_valid),
+            "invalid_taken_observed": True,
+            "fetch_exception_observed": True,
+        }
+        if int(instr_count) == 1:
+            ibuffer_s1 = _read_ibuffer_state(recorder, dut)
+            evidence.update(
+                {
+                    "phase": "await_s2",
+                    "held_cycles": 0,
+                    "ibuffer_s1": ibuffer_s1,
+                }
+            )
+            s1_pointer_consistent = (
+                _ibuffer_state_complete(ibuffer_s1)
+                and _ibuffer_pointer_distance(
+                    ibuffer_s1["enq_pointer"], ibuffer_s1["deq_pointer"]
+                )
+                == int(ibuffer_s1["num_valid"])
+            )
+            old_unconsumed_entry_present = (
+                _ibuffer_state_complete(ibuffer_s1)
+                and int(ibuffer_s1["num_valid"]) > 0
+                and int(ibuffer_s1["head_valid"]) == 1
+                and int(ibuffer_s1["backend_can_accept"]) == 0
+                and int(ibuffer_s1["flush"]) == 0
+                and s1_pointer_consistent
+            )
+            if (
+                getattr(recorder, "_ifu_invalid_taken_exception_pending", None)
+                is None
+                and old_unconsumed_entry_present
+            ):
+                recorder._ifu_invalid_taken_exception_pending = evidence
+            elif not old_unconsumed_entry_present:
+                _record_invalid_taken_risk(
+                    recorder,
+                    cycle,
+                    "ifu_invalid_taken_exception_missing_old_ibuffer_entry",
+                    evidence,
+                    s1_pointer_consistent=bool(s1_pointer_consistent),
+                )
+        else:
+            recorder.risk_observations.append(
+                {
+                    "cycle": int(cycle),
+                    "risk": "ifu_invalid_taken_exception_not_truncated_in_s1",
+                    **evidence,
+                }
+            )
 
 
 def _sample_instr_boundary_tail(recorder, dut, cycle: int) -> None:
