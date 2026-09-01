@@ -72,13 +72,20 @@ ICACHE_MAINPIPE_S2_ECC_BIN_IDS = {
     *(f"BIN-{index:03d}" for index in range(770, 777)),
 }
 
-ICACHE_MAPPED_STATUSES = {"MODELED", "PARTIAL", "HIT"}
+ICACHE_MAPPED_STATUSES = {"MODELED", "PARTIAL", "HIT", "BLOCKED"}
 MMIO_NC_OWNER_BIN_IDS = {f"BIN-{index}" for index in range(1016, 1094)}
 INSTR_UNCACHE_OWNER_BIN_IDS = {f"BIN-{index}" for index in range(1094, 1132)}
 
 IFU_V3_OWNER_MARKER_BLOCK_LEAF_COUNTS = (139, 43, 42, 81)
 IFU_V3_CANONICAL_BLOCK_RANGES = ((595, 770), (1026, 1142), (1184, 1243), (1245, 1349))
 IFU_V3_CANONICAL_BLOCK_LEAF_COUNTS = (139, 81, 42, 81)
+IFU_V3_OBSOLETE_6220_CONTRACT = re.compile(
+    r"selectBlock|halfPc|halfData|halfInstr|isHalfInstr|prevEndHalfRviData|"
+    r"s1_totalInstrRange|s1_prevIBufEnqPtr(?!Dup)|s2_alignInstrData|"
+    r"s2_realAlignInstrData|s2_alignPc|s2_alignInstrValid|"
+    r"s2_prevEndHalfRviData|s2_prevEndHalfPc|secondRange|"
+    r"wbAlignInstrEndOffset|io_toIfu_req_bits_[01]_"
+)
 IFU_V3_FORBIDDEN_OWNER_TERMS = {
     "ifu_instr_boundary_v2",
     "targetFault",
@@ -183,6 +190,105 @@ def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
         for row in block:
             if row[4].strip():
                 assert row[9].strip() != "UNMAPPED"
+
+
+def test_current_ifu_contract_rows_reject_obsolete_6220_signal_semantics():
+    repo_root = Path(__file__).resolve().parents[7]
+    testpoint_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+    )
+    pilot_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
+    )
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        physical_rows = list(csv.reader(handle))
+
+    fields = physical_rows[0]
+    canonical_rows = [
+        dict(zip(fields, row, strict=True))
+        for start, end in IFU_V3_CANONICAL_BLOCK_RANGES
+        for row in physical_rows[start - 1 : end]
+        if row[4].strip()
+    ]
+    assert len(canonical_rows) == 343
+
+    mapped = {}
+    for row in canonical_rows:
+        bin_ids = set(re.findall(r"BIN-\d+", row["coverage"]))
+        assert len(bin_ids) == 1
+        bin_id = bin_ids.pop()
+        assert bin_id not in mapped
+        mapped[bin_id] = row
+
+    for bin_id, row in mapped.items():
+        active_contract = " | ".join(
+            row[field]
+            for field in ("五级测试点", "Condition", "Checkpoint", "Object")
+        )
+        assert IFU_V3_OBSOLETE_6220_CONTRACT.search(active_contract) is None, bin_id
+
+    with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
+        pilot_by_id = {row["Bin_ID"].strip(): row for row in csv.DictReader(handle)}
+    assert set(mapped) <= set(pilot_by_id)
+    for bin_id in mapped:
+        pilot = pilot_by_id[bin_id]
+        active_contract = " | ".join(
+            pilot[field]
+            for field in ("映射测试点路径", "建议采样事件", "建议观测对象", "命中判据")
+        )
+        assert IFU_V3_OBSOLETE_6220_CONTRACT.search(active_contract) is None, bin_id
+
+    for bin_id in {
+        "BIN-427",
+        "BIN-849",
+        "BIN-872",
+        "BIN-897",
+        "BIN-941",
+        "BIN-946",
+        "BIN-947",
+    }:
+        active_contract = " | ".join(
+            mapped[bin_id][field]
+            for field in ("五级测试点", "Condition", "Checkpoint", "Object")
+        )
+        assert "blockSel" in active_contract
+        assert "isCrossBlockInstr" in active_contract
+
+    half_state_bins = {
+        "BIN-858",
+        "BIN-859",
+        "BIN-860",
+        "BIN-861",
+        "BIN-862",
+        "BIN-863",
+        "BIN-866",
+        "BIN-867",
+        "BIN-920",
+        "BIN-921",
+        "BIN-922",
+        "BIN-948",
+        "BIN-950",
+        "BIN-951",
+        "BIN-953",
+        "BIN-957",
+        "BIN-960",
+        "BIN-1037",
+        "BIN-1038",
+        "BIN-1039",
+        "BIN-1041",
+        "BIN-1083",
+        "BIN-1119",
+        "BIN-1120",
+        "BIN-1122",
+    }
+    for bin_id in half_state_bins:
+        active_contract = " | ".join(
+            mapped[bin_id][field]
+            for field in ("五级测试点", "Condition", "Checkpoint", "Object")
+        )
+        assert "halfRviInfo" in active_contract or "EndHalfRviInfo" in active_contract
 
 
 def test_jiabowen_owner_event_bins_are_exactly_mapped_once():

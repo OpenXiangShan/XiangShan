@@ -174,6 +174,16 @@ def test_bpu_all_not_taken_differences_are_guarded_by_s3_taken() -> None:
     assert "s3_taken                   -> Mux1H" in source
 
 
+def test_not_cfi_taken_redirect_is_eligible_for_training() -> None:
+    source = _read(_FRONTEND / "ifu/Ifu.scala")
+
+    assert (
+        "checkerRedirect.bits.invalidTaken || checkerRedirect.bits.notCfiTaken"
+        in source
+    )
+    assert "b.bits.canTrain  := canTrain" in source
+
+
 def test_prefetch_depth_is_shared_by_ftq_and_waylookup() -> None:
     parameters = _read(_FRONTEND / "FrontendParameters.scala")
     ftq = _read(_FRONTEND / "ftq/Ftq.scala")

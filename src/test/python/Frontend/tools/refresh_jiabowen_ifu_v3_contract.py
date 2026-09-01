@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the reviewed Jiabowen IFU testpoint contract for V3 c0ca46459."""
+"""Apply the reviewed Jiabowen IFU testpoint contract for current V3."""
 
 from __future__ import annotations
 
@@ -42,6 +42,7 @@ class ContractUpdate:
 
 _CACHEABLE = "PMA可缓存且可执行地址"
 _REVIEW = "RTL_REVIEW:c0ca46459"
+_CURRENT_REVIEW = "RTL_REVIEW:e5c70547f"
 _SUPERSEDED_EVIDENCE = {
     "BIN-1067": (
         f"{_REVIEW}:PredChecker is a cacheable writeback path; this leaf covers "
@@ -59,7 +60,259 @@ _SUPERSEDED_EVIDENCE = {
     ),
 }
 
+
+def _reviewed_group_updates(
+    leaves: dict[str, str],
+    *,
+    checkpoint: str,
+    observation: str,
+    review_note: str,
+    condition_prefix: str = _CACHEABLE,
+) -> dict[str, ContractUpdate]:
+    return {
+        bin_id: ContractUpdate(
+            leaf,
+            f"{condition_prefix}；{leaf}",
+            f"{checkpoint}；确认：{leaf}",
+            observation,
+            evidence=f"{_CURRENT_REVIEW}:{review_note}",
+        )
+        for bin_id, leaf in leaves.items()
+    }
+
+
 _UPDATES = {
+    **_reviewed_group_updates(
+        {
+            "BIN-807": "聚合响应仅info(0).valid时建立单块窗口",
+            "BIN-808": "聚合响应info(0/1)均有效时建立双块窗口",
+            "BIN-828": "跨cacheline聚合响应保留info(1)身份、raw data和offset",
+            "BIN-829": "fetch size变化时顶层firstRange/totalRange保持同一坐标",
+            "BIN-902": "顶层firstRange边界正确生成raw blockSel",
+        },
+        checkpoint=(
+            "聚合response以顶层firstRange/totalRange/maybeRvcMap建立统一坐标，"
+            "info(0/1)身份、raw data和meta保持同事务；raw blockSel仅表示起始halfword"
+        ),
+        observation=(
+            "ICache→IFU req.valid/ready、bits.info(0/1)、顶层firstRange/totalRange/"
+            "maybeRvcMap；IFU s0_fire、s1 fetchBlock/range/raw blockSel"
+        ),
+        review_note=(
+            "#6220 aggregate MainPipeToIfuReq replaces per-block range/map and selectBlock"
+        ),
+    ),
+    **_reviewed_group_updates(
+        {
+            "BIN-844": "全RVI窗口按真实4B边界形成raw instruction起点",
+            "BIN-845": "全RVC窗口按真实2B边界形成raw instruction起点",
+            "BIN-846": "RVC/RVI混合窗口按maybeRvcMap形成真实指令边界",
+            "BIN-847": "RVI高halfword即使编码像RVC也不形成新指令起点",
+            "BIN-911": "聚合maybeRvcMap按窗口起点对齐到统一fetch坐标",
+            "BIN-912": "firstRange/totalRange仅允许预测窗口内的指令起点",
+            "BIN-913": "s0_prevEndIsHalfRvi使窗口首halfword用于补齐上一条RVI",
+            "BIN-914": "firstRange限制第一fetch block的末尾有效边界",
+            "BIN-915": "totalRange限制taken预测后的整体有效边界",
+            "BIN-916": "taken offset落在真实指令起点时映射到压缩后predTakenIdx",
+            "BIN-917": "taken offset指向范围末端RVI低半时形成invalidTaken",
+            "BIN-918": "第二块taken offset结合第一块size映射到统一坐标",
+            "BIN-919": "Not-Taken窗口无CFI时不产生有效predTakenIdx",
+        },
+        checkpoint=(
+            "聚合maybeRvcMap、firstRange和totalRange以同一fetch坐标进入InstrBoundary；"
+            "raw instruction边界、end mask、invalidTaken及predTakenIdx保持同一事务"
+        ),
+        observation=(
+            "ICache→IFU聚合info(0/1)/maybeRvcMap/firstRange/totalRange、s0_fire、"
+            "InstrBoundary rawInstrVec/instrEndMask/firstEndIsHalfRvi/totalEndIsHalfRvi及s1_invalidTaken/predTakenIdx"
+        ),
+        review_note="#6220 moves maybeRvc alignment into ICache and uses top-level aggregate ranges",
+    ),
+    **_reviewed_group_updates(
+        {
+            "BIN-860": "下一窗口首halfword与s1_prevEndHalfRviInfo.bits.data拼成完整RVI",
+            "BIN-861": "恢复RVI的PC使用s1_prevEndHalfRviInfo.bits.pc",
+            "BIN-863": "窗口尾部半条RVI原子保存为Valid EndHalfRviInfo",
+            "BIN-920": "backend redirect清除半条RVI valid且旧bits不可复用",
+            "BIN-921": "checker redirect通过wbRedirect.halfRviInfo恢复半条RVI状态",
+            "BIN-922": "uncacheRedirect.halfRviInfo不污染后续cacheable半条状态",
+        },
+        checkpoint=(
+            "Valid[EndHalfRviInfo]的valid、bits.pc和bits.data原子保存、恢复或清除；"
+            "invalid valid不得以零PC/data替代"
+        ),
+        observation=(
+            "s0_prevEndIsHalfRvi、s1_prevEndHalfRviInfo、s1_first/totalEndHalfRvi、"
+            "wbRedirect.halfRviInfo、uncacheRedirect.halfRviInfo及恢复后的instruction/PC"
+        ),
+        review_note=(
+            "#6220 replaces split half-RVI PC/data and isHalfInstr with Valid EndHalfRviInfo"
+        ),
+    ),
+    **_reviewed_group_updates(
+        {
+            "BIN-858": "窗口首halfword使用s1_prevEndHalfRviInfo补齐上一窗口RVI",
+            "BIN-859": "窗口尾部RVI低半原子形成s1_totalEndHalfRvi",
+            "BIN-862": "窗口起点为上一RVI高半时使用s1_prevEndHalfRviInfo而非解码新RVC",
+            "BIN-866": "预测块尾部RVI低半原子保存为Valid EndHalfRviInfo",
+            "BIN-867": "下一预测块首halfword与保存的EndHalfRviInfo拼成一条RVI",
+            "BIN-960": "flush或redirect清除半条RVI valid且旧bits不得复用",
+        },
+        checkpoint=(
+            "半条状态以Valid[EndHalfRviInfo]的valid、bits.pc和bits.data原子传递；"
+            "补齐后的instruction/PC来自同一保存状态，flush后旧bits不可见"
+        ),
+        observation=(
+            "s0_prevEndIsHalfRvi、s1_prevEndHalfRviInfo.valid/bits.pc/bits.data、"
+            "s1_firstEndHalfRvi/s1_totalEndHalfRvi、s2注册instruction/PC及IBuffer输出"
+        ),
+        review_note="#6220 makes half-RVI state atomic and moves stitching into s1",
+    ),
+    **_reviewed_group_updates(
+        {
+            "BIN-854": "s1_prevIBufEnqPtrDup为0时从IBuffer第0槽开始对齐",
+            "BIN-855": "s1_prevIBufEnqPtrDup非0时按指针低位平移输出槽位",
+            "BIN-857": "s1_fire后prevIBufEnqPtr按当前事务指令数更新",
+            "BIN-864": "上一窗口半条RVI补齐后占用当前align head槽位",
+            "BIN-876": "s1对齐的valid、PC、data和predecode同槽注册到s2",
+            "BIN-923": "flush或redirect后prevIBufEnqPtr按当前redirect语义恢复或清零",
+        },
+        checkpoint=(
+            "s1按prevIBufEnqPtrDup对raw slots对齐并把valid/PC/data/predecode同事务注册到s2；"
+            "fire、stall和redirect不得造成槽位或事务串拍"
+        ),
+        observation=(
+            "s1_prevIBufEnqPtrDup、s1_alignedInstrValid/InstrVec/InstrPcVec/PdInfoVec、"
+            "s2对应注册字段、s1_fire/s2_fire和backend/wb/uncache redirect"
+        ),
+        review_note="#6220 moves alignment/predecode work to s1 and registers the complete transaction into s2",
+    ),
+    "BIN-824": ContractUpdate(
+        "invalidTaken与取指异常同拍时异常优先且仅交付一条",
+        "第一块takenCfiOffset指向范围末端RVI低半并形成s1_invalidTaken(0)；同一事务存在PF、AF或parity/ECC异常；无flush抢占",
+        "s1同时观测invalidTaken和fetch exception时将s1_instrCount固定为1；toIBuffer fire仅一个enqEnable/exceptionMask槽有效且不覆盖IBuffer旧项",
+        "s1_valid/invalidTaken/icacheMeta.exception/instrCount/prevIBufEnqPtrDup、toIBuffer valid/enqEnable/exceptionMask及IBuffer enqPtr/旧有效项",
+        evidence=f"{_CURRENT_REVIEW}:#6220 current alignment pointer is s1_prevIBufEnqPtrDup",
+    ),
+    "BIN-856": ContractUpdate(
+        "最大32条指令叠加最大对齐偏移时不截断",
+        f"{_CACHEABLE}；s1_instrCount=32且s1_prevIBufEnqPtrDup低2位为3",
+        "32个有效指令完整注册并落在toIBuffer槽3到34，末槽保持无效且无指令被截断",
+        "s1_prevIBufEnqPtrDup/s1_instrCount/s1_alignedInstrValid、s2_alignShiftNum/s2_instrCount及toIBuffer valid/enqEnable",
+        evidence=f"{_CURRENT_REVIEW}:#6220 alignment is computed in s1 and consumed from registered s2 fields",
+    ),
+    **_reviewed_group_updates(
+        {
+            "BIN-848": "raw instruction valid仅压缩真实指令起点",
+            "BIN-849": "raw blockSel保留起始块且effective owner显式包含跨块RVI",
+            "BIN-850": "跨双块压缩后保留原始start/end offset",
+            "BIN-851": "有效指令压缩到连续IBuffer槽位且无空洞",
+            "BIN-870": "第一块raw data按统一index取出RVC/RVI",
+            "BIN-871": "第二块raw data按index取数且身份不串项",
+            "BIN-872": "第一块尾部RVI使用两块raw data拼接并归第二块owner",
+            "BIN-873": "第一块尾部RVC不消耗第二块halfword",
+            "BIN-875": "instrCountBeforeCurrent与压缩后slot一致",
+        },
+        checkpoint=(
+            "s1按index取数/拼接并保持raw blockSel、isCrossBlockInstr、PC、offset和"
+            "predecode同slot；IBuffer/FTQ effective owner为两者OR"
+        ),
+        observation=(
+            "s1 raw cache-line data/index、s1/s2 alignedInstrVec.blockSel/"
+            "isCrossBlockInstr/data/PC/offset、s2注册predecode、IBuffer ftqPtr/enqEnable"
+        ),
+        review_note=(
+            "#6220 moves raw-data extraction and predecode to s1 and requires explicit effective owner"
+        ),
+    ),
+    **_reviewed_group_updates(
+        {
+            "BIN-930": "全not-taken且无结束型CFI时不产生checker redirect",
+            "BIN-931": "taken预测命中真实Branch起点时不产生remask fault",
+            "BIN-932": "taken预测命中真实JAL/JALR/RET起点时不产生remask fault",
+            "BIN-935": "taken指向范围末端RVI低半字时产生invalidTaken",
+            "BIN-936": "JAL/JALR/CALL/RET未被正确预测时产生对应fault",
+            "BIN-937": "多个预测错误按最早指令选择checker redirect",
+            "BIN-938": "checker fault之前的合法指令仍可交付",
+            "BIN-939": "checker fault之后的指令不得继续交付",
+            "BIN-940": "invalidTaken恢复保留所需halfRviInfo",
+            "BIN-941": "checkerRedirect同拍携带PC、target、endOffset及双重block身份",
+        },
+        checkpoint=(
+            "PredChecker消费同一s2注册事务；redirect保留raw blockSel和"
+            "isCrossBlockInstr，IBuffer/FTQ归属使用effective owner，payload不串拍"
+        ),
+        observation=(
+            "s2 registered instruction/PC/predecode/jumpOffset、fixedInstrValid/fixedTaken、"
+            "checkerRedirect.blockSel/isCrossBlockInstr/mispredPc/target/endOffset/attribute"
+        ),
+        review_note=(
+            "#6220/#6354 registered PredChecker payload uses raw blockSel plus isCrossBlockInstr"
+        ),
+    ),
+    "BIN-897": ContractUpdate(
+        "checkerRedirect携带raw blockSel、isCrossBlockInstr、mispredPc、endOffset、isRVC和invalidTaken",
+        "预测错误覆盖第一块、第二块及raw blockSel=0的跨块RVI位置",
+        "所有redirect字段来自同一s2注册事务；FTQ归属按blockSel OR isCrossBlockInstr计算，raw blockSel仍保留起始块语义",
+        "checkerRedirect.blockSel/isCrossBlockInstr/mispredPc/endOffset/isRVC/invalidTaken、toFtq.wbRedirect.ftqIdx",
+        evidence=f"{_CURRENT_REVIEW}:#6220 effective owner is raw blockSel OR isCrossBlockInstr",
+    ),
+    "BIN-946": ContractUpdate(
+        "checkerRedirect有效归属为第一fetch block时写回第一FTQ entry",
+        f"{_CACHEABLE}；checkerRedirect.blockSel=0且isCrossBlockInstr=0",
+        "toFtq.wbRedirect选择第一块ftqIdx/start PC；halfRviInfo仍按raw blockSel选择边界状态",
+        "checkerRedirect.blockSel/isCrossBlockInstr、两块ftqIdx/startVAddr、toFtq.wbRedirect、wbRedirect.halfRviInfo",
+        evidence=f"{_CURRENT_REVIEW}:#6220 separates effective FTQ owner from raw half-state selection",
+    ),
+    "BIN-947": ContractUpdate(
+        "checkerRedirect有效归属为第二fetch block时写回第二FTQ entry",
+        f"{_CACHEABLE}；checkerRedirect.blockSel=1或isCrossBlockInstr=1",
+        "toFtq.wbRedirect按blockSel OR isCrossBlockInstr选择第二块ftqIdx/start PC；跨块RVI的halfRviInfo选择仍使用raw blockSel",
+        "checkerRedirect.blockSel/isCrossBlockInstr、两块ftqIdx/startVAddr、toFtq.wbRedirect、wbRedirect.halfRviInfo",
+        evidence=f"{_CURRENT_REVIEW}:#6220 cross-block RVI has raw blockSel=0 and effective owner=1",
+    ),
+    "BIN-427": ContractUpdate(
+        "双fetch输出raw blockSel与effective owner均正确",
+        "输入来自两个fetch block/cacheline，包含普通第二块指令及raw blockSel=0的跨块RVI",
+        "raw blockSel仅表示起始halfword所在块；effective owner按blockSel OR isCrossBlockInstr计算，toIBuffer ftqPtr与entry-last归属一致",
+        "s2_alignedInstrVec.blockSel/isCrossBlockInstr、两块ftqIdx、toIBuffer ftqPtr/isLastInFtqEntry及instruction/PC",
+        evidence=f"{_CURRENT_REVIEW}:#6220 separates raw source selection from effective IBuffer/FTQ ownership",
+    ),
+    **_reviewed_group_updates(
+        {
+            "BIN-944": "toFtq.wbRedirect.ftqOffset与同一checkerRedirect.endOffset一致",
+            "BIN-945": "checkerRedirect写回保持正确ftqIdx、PC、target和CFI属性",
+            "BIN-948": "invalidTaken仅在所选边界有效时保存wbRedirect.halfRviInfo",
+            "BIN-949": "backend redirect与checkerRedirect竞争时backend清理优先",
+            "BIN-950": "wbRedirect产生时清理s0/s1/s2旧事务及旧halfRviInfo",
+            "BIN-951": "backend redirect清理s0/s1/s2 valid及旧halfRviInfo",
+            "BIN-953": "reset后halfRviInfo、prevIBufEnqPtr和流水valid均为初始值",
+        },
+        checkpoint=(
+            "checkerRedirect、toFtq.wbRedirect和wbRedirect来自同一注册事务；"
+            "ftqIdx/PC/target/endOffset/attribute一致，halfRviInfo原子保存且flush后无旧副作用"
+        ),
+        observation=(
+            "wbValid、checkerRedirect.blockSel/isCrossBlockInstr/endOffset/target/attribute、"
+            "toFtq.wbRedirect、wbRedirect.halfRviInfo、s0/s1/s2 valid/flush和prevIBufEnqPtr"
+        ),
+        review_note="#6220 registers redirect payload identity and replaces split wb half-PC/data state",
+    ),
+    **_reviewed_group_updates(
+        {
+            "BIN-976": "跨预测块RVI-JAL由注册PC/predecode识别并归属起始PC",
+            "BIN-982": "跨预测块RVI-JALR由注册PC/predecode识别并归属起始PC",
+        },
+        checkpoint=(
+            "s2注册instruction/PC/predecode/jumpOffset保持同一跨块RVI身份；"
+            "对应JAL/JALR fault和checkerRedirect payload归属RVI起始PC"
+        ),
+        observation=(
+            "s2_alignedInstrVec.blockSel/isCrossBlockInstr、s2_alignedInstrPcVec/"
+            "PdInfoVec/JumpOffsetVec、JAL/JALR fault及checkerRedirect"
+        ),
+        review_note="#6220 moves cross-block stitching/predecode into s1 before registered s2 checking",
+    ),
     "BIN-899": ContractUpdate(
         "taken预测返回块保留takenCfiOffset、range和size元数据",
         f"{_CACHEABLE}；ICache返回taken预测块",
@@ -206,9 +459,9 @@ _UPDATES = {
         "cacheable到NC/MMIO连续事务切换时PC、half和属性状态不串扰",
         "分别执行cacheable→NC、cacheable→MMIO、NC→cacheable和NC→MMIO连续合法事务",
         "每次切换均通过独立单块事务完成；后继路径PC、half状态、PBMT/PMP属性和顺序门控只来自当前事务",
-        "路径接受/交付事件、PC、halfPc/halfData、PBMT/PMP属性、WaitLastCommit、redirect",
+        "路径接受/交付事件、PC、halfRviInfo.valid/bits.pc/bits.data、PBMT/PMP属性、WaitLastCommit、redirect",
         status="MODELED",
-        evidence=f"{_REVIEW}:sequential path transitions replace illegal mixed dual-block input",
+        evidence=f"{_CURRENT_REVIEW}:sequential path transitions use atomic halfRviInfo and replace illegal mixed dual-block input",
     ),
     "BIN-958": ContractUpdate(
         "FTQ训练仅保留首个mispredict及其之前分支",
@@ -233,6 +486,32 @@ _UPDATES = {
         status="MODELED",
         evidence=f"{_REVIEW}:generic IfuUncache handshake contract uses a legal PBMT.NC witness and observes the real valid signal",
     ),
+    **_reviewed_group_updates(
+        {
+            "BIN-1037": "页尾RVI needResend触发uncacheRedirect.halfRviInfo.valid",
+            "BIN-1038": "uncacheRedirect.halfRviInfo.bits.pc保持RVI起始PC",
+            "BIN-1039": "uncacheRedirect.halfRviInfo.bits.data保持第一页低halfword",
+            "BIN-1040": "跨页补半请求不等待前一半指令commit而形成顺序死锁",
+            "BIN-1041": "下一页补半成功后只拼成并交付一条完整RVI",
+            "BIN-1042": "页尾RVC不触发needResend或halfRviInfo.valid",
+            "BIN-1043": "页尾RVC不因保守incomplete进入补半等待",
+            "BIN-1044": "第一页低半不可执行时异常身份归属RVI起始PC",
+            "BIN-1045": "第二页补半PF/AF/GPF仍归属原RVI起始PC",
+            "BIN-1046": "MMIO返回RVC时仅交付一条RVC且PC按2B推进",
+            "BIN-1047": "MMIO返回RVI时仅交付一条RVI且PC按4B推进",
+            "BIN-1048": "跨8B beat的RVI由InstrUncache补齐后再进入IFU注册译码",
+        },
+        checkpoint=(
+            "MMIO跨页/跨beat事务以uncacheRedirect.halfRviInfo原子保存valid/PC/data；"
+            "补齐、异常、stall或redirect后输出instruction/PC/exception和事务身份一致且无旧状态泄漏"
+        ),
+        observation=(
+            "s2 MMIO属性及事务身份、IfuUncache/InstrUncache req/resp/needResend、"
+            "uncacheRedirect.halfRviInfo、s1_prevEndHalfRviInfo、toIBuffer和toFtq.wbRedirect"
+        ),
+        review_note="#6220 replaces split uncache half-PC/data with atomic EndHalfRviInfo",
+        condition_prefix="合法MMIO取指事务",
+    ),
     "BIN-1062": ContractUpdate(
         "NC路径复用InstrUncache SendReq反压契约（cross-reference BIN-1032）",
         "PBMT.NC进入SendReq且IBuffer反压；作为canonical BIN-1032的合法路径witness",
@@ -249,6 +528,13 @@ _UPDATES = {
         status="PARTIAL",
         evidence=f"{_REVIEW}:RTL permits a different-ftqIdx younger NC in s1 or s2 when checker redirect arrives; s1 is flushed unconditionally, s2 is flushed unless s2_wbNotFlush, and IfuUncacheUnit flush overrides same-cycle Idle request capture; existing 91b6219d3 evidence only proves post-redirect recovery",
     ),
+    "BIN-1083": ContractUpdate(
+        "NC跨页补半后通过原子halfRviInfo完成一条RVI交付",
+        "合法PBMT.NC页尾RVI事务产生needResend并顺序补取下一页",
+        "uncacheRedirect.halfRviInfo的valid/PC/data绑定原事务；下一页返回后只交付一条完整RVI且旧状态不泄漏",
+        "PBMT.NC属性、IfuUncache/InstrUncache req/resp、uncacheRedirect.halfRviInfo、s1_prevEndHalfRviInfo及toIBuffer instruction/PC",
+        evidence=f"{_CURRENT_REVIEW}:#6220 makes NC cross-page half-RVI state atomic",
+    ),
     "BIN-1084": ContractUpdate(
         "NC第一页权限异常不发InstrUncache请求且保留后端异常身份",
         "PBMT.NC事务在ITLB/PMP权限检查产生PF/AF；异常发生在InstrUncache请求发出前，页尾2B场景作为directed witness",
@@ -264,6 +550,23 @@ _UPDATES = {
         "PBMT.NC/PMP属性、s2起始PC、s2_reqIsUncache、s2_useUncacheFetch、toIBuffer valid/ready/exceptionType",
         status="MODELED",
         evidence=f"{_REVIEW}:first-page IAF is a functional exception contract; cfVec.pc is debug-only",
+    ),
+    **_reviewed_group_updates(
+        {
+            "BIN-1119": "needResend触发uncacheRedirect并原子保存halfRviInfo",
+            "BIN-1120": "IFU保存halfRviInfo后以新事务补取下一页",
+            "BIN-1122": "跨页补半期间backend redirect清除halfRviInfo且旧半条不泄漏",
+        },
+        checkpoint=(
+            "uncacheRedirect以Valid[EndHalfRviInfo]原子携带valid、起始PC和低halfword；"
+            "补取或backend redirect后请求、IBuffer输出及旧状态副作用符合当前事务身份"
+        ),
+        observation=(
+            "InstrUncache needResend、uncacheRedirect.halfRviInfo、s0_prevEndIsHalfRvi、"
+            "s1_prevEndHalfRviInfo、下一页请求、backend redirect及toIBuffer instruction/PC"
+        ),
+        review_note="#6220 replaces IFU split half-PC/data redirect state with atomic EndHalfRviInfo",
+        condition_prefix="合法MMIO或PBMT.NC跨页RVI事务",
     ),
 }
 
