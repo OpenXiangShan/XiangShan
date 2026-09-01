@@ -97,15 +97,15 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       csrCtrl
 
   fallThrough.io.enable := true.B // fallThrough is always enabled
-  utage.io.enable       := true.B
-  uras.io.enable        := true.B
+  utage.io.enable       := ctrl.abtbEnable
+  uras.io.enable        := ctrl.rasEnable && ctrl.mbtbEnable
   ubtb.io.enable        := ctrl.ubtbEnable
   abtb.io.enable        := ctrl.abtbEnable
   mbtb.io.enable        := ctrl.mbtbEnable
-  tage.io.enable        := ctrl.tageEnable
-  sc.io.enable          := ctrl.scEnable
-  ittage.io.enable      := ctrl.ittageEnable
-  ras.io.enable         := ctrl.rasEnable
+  tage.io.enable        := ctrl.tageEnable && ctrl.mbtbEnable
+  sc.io.enable          := ctrl.scEnable && ctrl.mbtbEnable
+  ittage.io.enable      := ctrl.ittageEnable && ctrl.mbtbEnable
+  ras.io.enable         := ctrl.rasEnable && ctrl.mbtbEnable
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
 
