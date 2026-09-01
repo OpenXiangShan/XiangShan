@@ -259,13 +259,26 @@ def _set_ifu_output(
     dut.set(_PREFIX + "uncacheRedirect_valid", 0)
 
 
-def _set_aligned_slot(dut, slot, entry, *, block_sel, branch_type, rd=0, rs=0):
+def _set_aligned_slot(
+    dut,
+    slot,
+    entry,
+    *,
+    block_sel,
+    branch_type,
+    is_cross_block_instr=0,
+    rd=0,
+    rs=0,
+):
     _slot, pc, instr, is_rvc, end_offset, _flag, _value, _exception = entry
     dut.set(_PREFIX + f"s2_alignedInstrVec_{slot}_valid", 1)
     dut.set(_PREFIX + f"s2_alignedInstrPcVec_{slot}_addr", int(pc) >> 1)
     dut.set(_PREFIX + f"s2_alignedInstrVec_{slot}_isRvc", is_rvc)
     dut.set(_PREFIX + f"s2_alignedInstrVec_{slot}_blockSel", block_sel)
-    dut.set(_PREFIX + f"s2_alignedInstrVec_{slot}_isCrossBlockInstr", 0)
+    dut.set(
+        _PREFIX + f"s2_alignedInstrVec_{slot}_isCrossBlockInstr",
+        is_cross_block_instr,
+    )
     dut.set(_PREFIX + f"s2_alignedInstrVec_{slot}_endOffset", end_offset)
     dut.set(_PREFIX + f"s2_expandedInstrDataVec_{slot}", instr)
     dut.set(_PREFIX + f"s2_alignedPdInfoVec_{slot}_brAttribute_branchType", branch_type)
@@ -314,7 +327,7 @@ def _set_predchecker_request(dut, entries):
             entry.get("pc_addr", 0x40000000 + slot * 2),
         )
         dut.set(
-            _PREFIX + f"predChecker.io_req_bits_jumpOffsetVec_{slot}_addr",
+            _PREFIX + f"s2_alignedJumpOffsetVec_{slot}_addr",
             entry.get("jump_offset_addr", 4),
         )
         dut.set(
@@ -1019,7 +1032,7 @@ def test_ifu_dual_slice_alignment_and_predecode_are_coherent(tmp_path):
             rs=rs,
         )
         if branch_type in {1, 2}:
-            dut.set(_PREFIX + f"predChecker.io_req_bits_jumpOffsetVec_{slot}_addr", 0)
+            dut.set(_PREFIX + f"s2_alignedJumpOffsetVec_{slot}_addr", 0)
     dut.set(_PREFIX + "s2_fetchBlock_0_valid", 1)
     dut.set(_PREFIX + "s2_fetchBlock_1_valid", 1)
     dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_flag", 0)
@@ -1040,6 +1053,141 @@ def test_ifu_dual_slice_alignment_and_predecode_are_coherent(tmp_path):
     assert recorder.key_hit("ifu_predecode", "cfi_offset_correct")
     assert recorder.key_hit("ifu_predecode", "slot_mapping_coherent")
     assert recorder.key_hit("ifu_ibuffer_output", "predecode_matches_encoding")
+
+
+def _setup_single_jal_predecode_case(dut, memory, instruction=0x000000EF):
+    base = 0x80000000
+    entry = (0, base, int(instruction), 0, 1, 0, 3, 0)
+    memory.write32(base, entry[2])
+    _set_ifu_output(dut, [entry])
+    _set_aligned_slot(dut, 0, entry, block_sel=0, branch_type=2, rd=1)
+    dut.set(_PREFIX + "s2_fetchBlock_0_valid", 1)
+    dut.set(_PREFIX + "s2_fetchBlock_1_valid", 0)
+    dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_flag", 0)
+    dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_value", 3)
+
+
+def test_ifu_cfi_offset_requires_current_s2_probe_and_exact_value(tmp_path):
+    missing, missing_env, missing_dut, missing_memory = _make_recorder(
+        tmp_path / "missing"
+    )
+    _setup_single_jal_predecode_case(missing_dut, missing_memory)
+    missing_dut.set(
+        _PREFIX + "predChecker.io_req_bits_jumpOffsetVec_0_addr", 0
+    )
+    sample_cfvec_coverage(missing, missing_env, 1)
+    assert not missing.key_hit("ifu_predecode", "cfi_offset_correct")
+    assert any(
+        item.get("risk") == "ifu_predecode_cfi_offset_probe_missing"
+        for item in missing.risk_observations
+    )
+
+    mismatch, mismatch_env, mismatch_dut, mismatch_memory = _make_recorder(
+        tmp_path / "mismatch"
+    )
+    _setup_single_jal_predecode_case(mismatch_dut, mismatch_memory)
+    mismatch_dut.set(_PREFIX + "s2_alignedJumpOffsetVec_0_addr", 1)
+    sample_cfvec_coverage(mismatch, mismatch_env, 1)
+    assert not mismatch.key_hit("ifu_predecode", "cfi_offset_correct")
+    assert any(
+        item.get("risk") == "ifu_predecode_cfi_offset_mismatch"
+        for item in mismatch.risk_observations
+    )
+
+    correct, correct_env, correct_dut, correct_memory = _make_recorder(
+        tmp_path / "correct"
+    )
+    _setup_single_jal_predecode_case(correct_dut, correct_memory)
+    correct_dut.set(_PREFIX + "s2_alignedJumpOffsetVec_0_addr", 0)
+    sample_cfvec_coverage(correct, correct_env, 1)
+    assert correct.key_hit("ifu_predecode", "cfi_offset_correct")
+    hit = correct.hits[("ifu_predecode", "decode_coherence", "cfi_offset_correct")]
+    assert hit.evidence[-1]["signal_path"].endswith(
+        "s2_alignedJumpOffsetVec_0_addr"
+    )
+    assert hit.evidence[-1]["observed_byte_offset"] == 0
+
+    negative, negative_env, negative_dut, negative_memory = _make_recorder(
+        tmp_path / "negative"
+    )
+    _setup_single_jal_predecode_case(
+        negative_dut, negative_memory, instruction=0xFFDFF06F
+    )
+    negative_dut.set(
+        _PREFIX + "s2_alignedJumpOffsetVec_0_addr",
+        (-2) & ((1 << 50) - 1),
+    )
+    sample_cfvec_coverage(negative, negative_env, 1)
+    assert negative.key_hit("ifu_predecode", "cfi_offset_correct")
+    negative_hit = negative.hits[
+        ("ifu_predecode", "decode_coherence", "cfi_offset_correct")
+    ]
+    assert negative_hit.evidence[-1]["decoded_byte_offset"] == -4
+    assert negative_hit.evidence[-1]["observed_byte_offset"] == -4
+
+
+def test_ifu_cross_block_rvi_uses_second_effective_owner_with_raw_block_zero(tmp_path):
+    recorder, env, dut, memory = _make_recorder(tmp_path)
+    base = 0x8000001E
+    entries = [
+        (0, base, 0x00100093, 0, 0, 0, 4, 0),
+        (1, base + 4, 0x00000013, 0, 1, 0, 4, 0),
+    ]
+    for entry in entries:
+        memory.write32(entry[1], entry[2])
+    _set_ifu_output(dut, entries)
+    _set_aligned_slot(
+        dut,
+        0,
+        entries[0],
+        block_sel=0,
+        is_cross_block_instr=1,
+        branch_type=0,
+    )
+    _set_aligned_slot(dut, 1, entries[1], block_sel=1, branch_type=0)
+    dut.set(_PREFIX + "s2_fetchBlock_0_valid", 1)
+    dut.set(_PREFIX + "s2_fetchBlock_1_valid", 1)
+    dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_flag", 0)
+    dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_value", 3)
+    dut.set(_PREFIX + "s2_fetchBlock_1_ftqIdx_flag", 0)
+    dut.set(_PREFIX + "s2_fetchBlock_1_ftqIdx_value", 4)
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert recorder.key_hit("ifu_data_slice", "second_block_source_coherent")
+    assert recorder.key_hit("ifu_data_slice", "rvi_crosses_fetch_blocks")
+    assert not recorder.key_hit("ifu_data_slice", "first_block_coherent")
+
+
+def test_ifu_cross_block_rvi_rejects_first_ftq_owner(tmp_path):
+    recorder, env, dut, memory = _make_recorder(tmp_path)
+    base = 0x8000001E
+    entries = [
+        (0, base, 0x00100093, 0, 0, 0, 3, 0),
+        (1, base + 4, 0x00000013, 0, 1, 0, 4, 0),
+    ]
+    for entry in entries:
+        memory.write32(entry[1], entry[2])
+    _set_ifu_output(dut, entries)
+    _set_aligned_slot(
+        dut,
+        0,
+        entries[0],
+        block_sel=0,
+        is_cross_block_instr=1,
+        branch_type=0,
+    )
+    _set_aligned_slot(dut, 1, entries[1], block_sel=1, branch_type=0)
+    dut.set(_PREFIX + "s2_fetchBlock_0_valid", 1)
+    dut.set(_PREFIX + "s2_fetchBlock_1_valid", 1)
+    dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_flag", 0)
+    dut.set(_PREFIX + "s2_fetchBlock_0_ftqIdx_value", 3)
+    dut.set(_PREFIX + "s2_fetchBlock_1_ftqIdx_flag", 0)
+    dut.set(_PREFIX + "s2_fetchBlock_1_ftqIdx_value", 4)
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert not recorder.key_hit("ifu_data_slice", "rvi_crosses_fetch_blocks")
 
 
 def test_ifu_backpressure_release_and_writeback_match_enqueue(tmp_path):
@@ -1818,6 +1966,8 @@ def test_ifu_compact_sampler_signals_are_present_in_generated_contract():
         _PREFIX + "s1_prevIBufEnqPtrDup_dup_0_value",
         _PREFIX + "s2_valid_valid",
         _PREFIX + "s2_alignedInstrValid",
+        _PREFIX + "s2_alignedInstrVec_0_blockSel",
+        _PREFIX + "s2_alignedInstrVec_0_isCrossBlockInstr",
         _PREFIX + "io_frontendTrigger_tUpdate_valid",
         _PREFIX + "io_frontendTrigger_tUpdate_bits_addr",
         _PREFIX + "io_frontendTrigger_debugMode",

@@ -19,12 +19,41 @@ _IBUFFER_ENTRY_COUNT = 48
 _FETCH_EXCEPTION_VALUES = frozenset({1, 2, 3, 5})
 _INVALID_TAKEN_S2_TIMEOUT_CYCLES = 16
 _INVALID_TAKEN_HOLD_TIMEOUT_CYCLES = 512
+_GUARDED_PC_ADDR_WIDTH = 50
 
 
 def _read_ifu_internal(recorder, dut, stem: str) -> Optional[int]:
     return recorder._read_first_dut_signal(
         dut,
         tuple(prefix + str(stem) for prefix in _IFU_INTERNAL_PREFIXES),
+    )
+
+
+def _read_ifu_internal_with_path(
+    recorder, dut, stem: str
+) -> tuple[Optional[int], Optional[str]]:
+    for prefix in _IFU_INTERNAL_PREFIXES:
+        path = prefix + str(stem)
+        value = recorder._try_read_dut_signal(dut, path)
+        if value is not None:
+            return int(value), path
+    return None, None
+
+
+def _record_cfi_offset_risk_once(
+    recorder,
+    cycle: int,
+    risk: str,
+    **observations: Any,
+) -> None:
+    key = (str(risk), tuple(sorted((str(k), repr(v)) for k, v in observations.items())))
+    seen = getattr(recorder, "_ifu_predecode_cfi_offset_risks", set())
+    if key in seen:
+        return
+    seen.add(key)
+    recorder._ifu_predecode_cfi_offset_risks = seen
+    recorder.risk_observations.append(
+        {"cycle": int(cycle), "risk": str(risk), **observations}
     )
 
 
@@ -2612,6 +2641,16 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                 dut,
                 f"s2_alignedInstrVec_{int(first_exception['slot'])}_blockSel",
             )
+            first_exception_cross_block = _read_ifu_internal(
+                recorder,
+                dut,
+                f"s2_alignedInstrVec_{int(first_exception['slot'])}_isCrossBlockInstr",
+            )
+            first_exception_owner = (
+                None
+                if first_exception_block is None or first_exception_cross_block is None
+                else int(first_exception_block) | int(first_exception_cross_block)
+            )
             second_fetch_valid = _read_ifu_internal(
                 recorder, dut, "s2_fetchBlock_1_valid"
             )
@@ -2631,7 +2670,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
             # fetch block carries the exception while later aligned records
             # remain normal.  Keep it outside the no-normal-delivery branch.
             if (
-                first_exception_block == 0
+                first_exception_owner == 0
                 and second_fetch_valid in {None, 1}
                 and any(
                     int(record["slot"]) > int(first_exception["slot"])
@@ -2645,7 +2684,11 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                     cycle,
                     {
                         **exception_evidence,
-                        "first_exception_block": int(first_exception_block),
+                        "first_exception_raw_block_sel": int(first_exception_block),
+                        "first_exception_is_cross_block_instr": int(
+                            first_exception_cross_block
+                        ),
+                        "first_exception_effective_owner": int(first_exception_owner),
                         "second_fetch_block_valid": int(second_fetch_valid),
                         "normal_delivery_after_exception": True,
                     },
@@ -2892,6 +2935,14 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         )
         aligned_is_rvc = _read_ifu_internal(recorder, dut, f"s2_alignedInstrVec_{slot}_isRvc")
         block_sel = _read_ifu_internal(recorder, dut, f"s2_alignedInstrVec_{slot}_blockSel")
+        is_cross_block_instr = _read_ifu_internal(
+            recorder, dut, f"s2_alignedInstrVec_{slot}_isCrossBlockInstr"
+        )
+        effective_owner = (
+            None
+            if block_sel is None or is_cross_block_instr is None
+            else int(block_sel) | int(is_cross_block_instr)
+        )
         aligned_end_offset = _read_ifu_internal(
             recorder, dut, f"s2_alignedInstrVec_{slot}_endOffset"
         )
@@ -2909,6 +2960,8 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                 "aligned_pc": aligned_pc,
                 "aligned_is_rvc": aligned_is_rvc,
                 "block_sel": block_sel,
+                "is_cross_block_instr": is_cross_block_instr,
+                "effective_owner": effective_owner,
                 "aligned_end_offset": aligned_end_offset,
                 "expanded": expanded,
                 "branch_type": branch_type,
@@ -2933,8 +2986,14 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
             {**evidence, "internal": internal_records},
         )
 
-    first_source = [item for item in coherent if item["block_sel"] == 0]
-    second_source = [item for item in coherent if item["block_sel"] == 1]
+    first_source = [
+        item
+        for item in coherent
+        if item["block_sel"] == 0
+        and item["is_cross_block_instr"] == 0
+        and item["effective_owner"] == 0
+    ]
+    second_source = [item for item in coherent if item["effective_owner"] == 1]
     if first_source:
         recorder.mark(
             "ifu_data_slice",
@@ -2961,12 +3020,37 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
     for before, after in zip(internal_records, internal_records[1:]):
         if before["block_sel"] != 0 or after["block_sel"] != 1:
             continue
-        if None in {before["pc"], before["is_rvc"], after["pc"]}:
+        if None in {
+            before["pc"],
+            before["is_rvc"],
+            before["is_cross_block_instr"],
+            before["effective_owner"],
+            after["pc"],
+            after["effective_owner"],
+        }:
             continue
         contiguous = int(after["pc"]) == int(before["pc"]) + (2 if before["is_rvc"] else 4)
-        if contiguous and before["is_rvc"] == 0:
+        second_owner_coherent = (
+            fetch_tags[1] is not None
+            and before["ftq_ptr"] == fetch_tags[1]
+            and after["ftq_ptr"] == fetch_tags[1]
+            and before["effective_owner"] == 1
+            and after["effective_owner"] == 1
+        )
+        if (
+            contiguous
+            and before["is_rvc"] == 0
+            and before["is_cross_block_instr"] == 1
+            and second_owner_coherent
+        ):
             recorder.mark("ifu_data_slice", "rvi_crosses_fetch_blocks", cycle, evidence)
-        if contiguous and before["is_rvc"] == 1:
+        if (
+            contiguous
+            and before["is_rvc"] == 1
+            and before["is_cross_block_instr"] == 0
+            and before["effective_owner"] == 0
+            and after["effective_owner"] == 1
+        ):
             recorder.mark("ifu_data_slice", "rvc_keeps_second_halfword", cycle, evidence)
 
     preclip_second_slots = []
@@ -2980,7 +3064,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
         if aligned_valid == 1 and block_sel == 1:
             preclip_second_slots.append(slot)
     active_second_slots = [
-        item["slot"] for item in internal_records if item["block_sel"] == 1
+        item["slot"] for item in internal_records if item["effective_owner"] == 1
     ]
     if (
         fetch1_valid == 1
@@ -3108,20 +3192,54 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
 
         expected_offset = _decode_cfi_offset(int(item["instr"]), expected_type)
         if expected_offset is not None:
-            observed_offset = _read_ifu_internal(
+            offset_stem = f"s2_alignedJumpOffsetVec_{int(item['slot'])}_addr"
+            observed_offset, offset_path = _read_ifu_internal_with_path(
                 recorder,
                 dut,
-                f"predChecker.io_req_bits_jumpOffsetVec_{int(item['slot'])}_addr",
+                offset_stem,
             )
-            if observed_offset is not None:
-                observed_full = int(observed_offset) << 1
-                if observed_full == (int(expected_offset) & ((1 << 50) - 1)):
-                    recorder.mark(
-                        "ifu_predecode",
-                        "cfi_offset_correct",
-                        cycle,
-                        {**evidence, "slot": item, "offset": expected_offset},
-                    )
+            if observed_offset is None:
+                _record_cfi_offset_risk_once(
+                    recorder,
+                    cycle,
+                    "ifu_predecode_cfi_offset_probe_missing",
+                    slot=int(item["slot"]),
+                    required_paths=[
+                        prefix + offset_stem for prefix in _IFU_INTERNAL_PREFIXES
+                    ],
+                )
+                continue
+
+            sign_bit = 1 << (_GUARDED_PC_ADDR_WIDTH - 1)
+            observed_halfwords = (int(observed_offset) ^ sign_bit) - sign_bit
+            observed_byte_offset = int(observed_halfwords) << 1
+            offset_evidence = {
+                **evidence,
+                "slot": item,
+                "decoded_byte_offset": int(expected_offset),
+                "observed_pruned_addr": int(observed_offset),
+                "observed_byte_offset": int(observed_byte_offset),
+                "signal_path": str(offset_path),
+                "signal_stage": "ifu_s2_registered_predecode",
+            }
+            if observed_byte_offset == int(expected_offset):
+                recorder.mark(
+                    "ifu_predecode",
+                    "cfi_offset_correct",
+                    cycle,
+                    offset_evidence,
+                )
+            else:
+                _record_cfi_offset_risk_once(
+                    recorder,
+                    cycle,
+                    "ifu_predecode_cfi_offset_mismatch",
+                    slot=int(item["slot"]),
+                    decoded_byte_offset=int(expected_offset),
+                    observed_pruned_addr=int(observed_offset),
+                    observed_byte_offset=int(observed_byte_offset),
+                    signal_path=str(offset_path),
+                )
 
     if len(predecode_coherent) == len(internal_records):
         recorder.mark(
