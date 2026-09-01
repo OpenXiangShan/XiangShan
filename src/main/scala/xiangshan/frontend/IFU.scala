@@ -1213,7 +1213,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     ("ifu_miss                     ", io.toIbuffer.fire && !f3_perf_info.hit),
     ("ifu_req_cacheline_0          ", f3_req_0),
     ("ifu_req_cacheline_1          ", f3_req_1),
-    ("ifu_req_cacheline_0_hit      ", f3_hit_1),
+    ("ifu_req_cacheline_0_hit      ", f3_hit_0),
     ("ifu_req_cacheline_1_hit      ", f3_hit_1),
     ("only_0_hit                   ", f3_perf_info.only_0_hit && io.toIbuffer.fire),
     ("only_0_miss                  ", f3_perf_info.only_0_miss && io.toIbuffer.fire),
