@@ -190,6 +190,15 @@ def _pulse_fencei(env) -> None:
     env.step(2)
 
 
+def _replace_u32_while_fencei_held(env, address: int, value: int) -> None:
+    env.clock_reset.io_fencei.value = 1
+    env.step(2)
+    env.memory.write_u32(int(address), int(value))
+    env.step(1)
+    env.clock_reset.io_fencei.value = 0
+    env.step(2)
+
+
 def _run_until_bin(
     env,
     group: str,
@@ -312,11 +321,7 @@ def test_fe_ifu_predchecker_false_taken(env) -> None:
 
     # Keep the taken prediction, but replace the RVI JAL ending at halfword 14
     # with a complete RVI Non-CFI at the same position.
-    env.memory.write_u32(branch_pc, _ADDI_X0_X0_0)
-    _pulse_fencei(env)
-    # Ignore only the intentional memory/old-ICache disagreement before
-    # fence.i takes effect; the post-redirect V3 recovery remains checked.
-    env.monitor.clear()
+    _replace_u32_while_fencei_held(env, branch_pc, _ADDI_X0_X0_0)
     env.backend_model.inject_redirect(_BASE, "ifu_predchecker_v3_not_cfi", delay_cycles=1)
 
     _run_until_bin(env, "ifu_predchecker_v3_fault", "not_cfi_taken")
@@ -344,9 +349,7 @@ def test_fe_ifu_predchecker_invalid_taken(env) -> None:
     # Offset 15 used to end a C.J. It now points at the low half of a
     # conditional RVI branch. Conditional branches avoid the higher-priority
     # JAL/JALR/NotCFI fault classes, isolating V3 invalidTaken.
-    env.memory.write_u32(branch_pc, _BRANCH_SAME_TARGET)
-    _pulse_fencei(env)
-    env.monitor.clear()
+    _replace_u32_while_fencei_held(env, branch_pc, _BRANCH_SAME_TARGET)
     env.backend_model.inject_redirect(
         block_start,
         "ifu_predchecker_v3_invalid_taken",
