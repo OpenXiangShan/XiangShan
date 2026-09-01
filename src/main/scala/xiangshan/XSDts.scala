@@ -70,17 +70,7 @@ trait HasXSDts {
       dcache ++ icache ++ dtlb ++ itlb ++ mmu ++ pmp
     }
 
-    def nextLevelCacheProperty: PropertyOption = {
-      if(coreParams.dcacheParametersOpt.nonEmpty){
-        val outer = memBlock.inner.dcache.clientNodes.head.edges.out.flatMap(_.manager.managers)
-          .filter(_.supportsAcquireB)
-          .flatMap(_.resources.headOption)
-          .map(_.owner.label)
-          .distinct
-        if (outer.isEmpty) None
-        else Some("next-level-cache" -> outer.map(l => ResourceReference(l)).toList)
-      } else None
-    }
+    def nextLevelCacheProperty: PropertyOption = None // L1D uses Compact CHI, not TileLink clientNode
 
     override def describe(resources: ResourceBindings): Description = {
       val Description(name, mapping) = super.describe(resources)

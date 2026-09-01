@@ -58,18 +58,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   memBlock.beu_local_int_sink := l2top.inner.beu_local_int_source_buffer
 
   // =========== Components' Connection ============
-  // L1D clients connect directly to the custom L1-to-L2 fabric. Its channel queues are
-  // placed after arbitration, so there is no per-client TLBuffer here.
-  coreParams.dcacheParametersOpt.foreach { _ =>
-    val clientNodes = memBlock.dcache.clientNodes
-    (memBlock.dcache_port zip clientNodes).zipWithIndex.foreach {
-      case ((port, clientNode), i) =>
-        l2top.inner.misc_l2_pmu := l2top.inner.l1d_logger(i) := port := clientNode
-    }
-  }
-  l2top.inner.l1_l2_fabric.specSink.foreach { sink =>
-    sink := memBlock.dcache.dcache.specFabricSource.get
-  }
+  // L1D cacheable path uses Compact CHI (see DCache.io.cchi); no TileLink clientNode.
+  // coreParams.dcacheParametersOpt.map { _ => ... } intentionally omitted.
 
   l2top.inner.misc_l2_pmu := l2top.inner.l1i_logger := memBlock.frontendBridge.icache_node
   if (!coreParams.softPTW) {
