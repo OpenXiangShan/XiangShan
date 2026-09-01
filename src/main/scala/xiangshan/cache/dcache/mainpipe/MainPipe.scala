@@ -1072,7 +1072,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val perfEvents = Seq(
     ("l1D_write_dcache_access", s2_fire && (s2_isStore || (s2_isAMO && isWrite(s2_req.cmd)))), // store_req (cacheline evited from Sbuffer to L1D) & amo write
-    ("l1D_write_dcache_miss  ", s2_fire && (s2_isStore || (s2_isAMO && isWrite(s2_req.cmd)) && !s2_hit)),
+    ("l1D_write_dcache_miss  ", s2_fire && (s2_isStore || (s2_isAMO && isWrite(s2_req.cmd))) && !s2_hit),
     ("dcache_mp_req          ", s0_fire                                                      ),
     ("dcache_mp_total_penalty", PopCount(VecInit(Seq(s0_fire, s1_valid, s2_valid, s3_valid))))
   )
