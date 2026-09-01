@@ -241,6 +241,10 @@ ifeq ($(DUMP_CSR),1)
 TOPMAIN_ARGS += --dump-csr
 endif
 
+ifeq ($(DUMP_HPM),1)
+TOPMAIN_ARGS += --dump-hpm
+endif
+
 TIMELOG = $(BUILD_DIR)/time.log
 TIME_CMD = time -avp -o $(TIMELOG)
 

@@ -64,7 +64,7 @@ class LsqEnqIO(implicit p: Parameters) extends MemBlockBundle {
 }
 
 // Load / Store Queue Wrapper for XiangShan Out of Order LSU
-class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasPerfEvents {
+class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParameters with HasPerfEventInfos {
   val io = IO(new Bundle() {
     val hartId = Input(UInt(hartIdLen.W))
     val brqRedirect = Flipped(ValidIO(new Redirect))
@@ -332,7 +332,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   }
 
 
-  val perfEvents = Seq(loadQueue, storeQueue).flatMap(_.getPerfEvents)
+  val perfEvents = Seq(loadQueue, storeQueue).flatMap(_.getPerfEventInfos)
   generatePerfEvent()
 }
 

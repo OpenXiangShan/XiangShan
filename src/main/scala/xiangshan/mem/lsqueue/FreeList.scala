@@ -24,7 +24,7 @@ import xiangshan._
 
 class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boolean = false, moduleName: String = "")(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
-  with HasPerfEvents
+  with HasPerfEventInfos
 {
   val io = IO(new Bundle() {
     val allocateReq = Input(Vec(allocWidth, Bool()))
@@ -132,8 +132,8 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
   io.validCount := size.U - freeSlotCnt
 
   XSPerfAccumulate("empty", io.empty)
-  val perfEvents: Seq[(String, UInt)] = Seq(
-    ("empty", io.empty)
+  val perfEvents = Seq(
+    ("empty", io.empty).withDescription("Cycle in which this allocation free list has no available entry.")
   )
   generatePerfEvent()
 
