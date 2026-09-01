@@ -927,15 +927,15 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   XSPerfHistogram("slots_valid_rough", PopCount(io.enqRob.req.map(_.valid)), true.B, 0, RenameWidth+1, 1)
 
   val perfEvents = Seq(
-    ("dispatch_in",                 PopCount(fromRename.map(_.fire))                                               ),
-    ("dispatch_empty",              !hasValidInstr                                                                 ),
-    ("dispatch_utili",              PopCount(fromRename.map(_.valid))                                              ),
-    ("dispatch_waitinstr",          PopCount(fromRename.map(!_.valid && canAccept))                                ),
-    ("dispatch_stall_cycle_lsq",    false.B                                                                        ),
-    ("dispatch_stall_cycle_rob",    stall_rob                                                                      ),
-    ("dispatch_stall_cycle_int_dq", stall_int_dq                                                                   ),
-    ("dispatch_stall_cycle_fp_dq",  stall_fp_dq                                                                    ),
-    ("dispatch_stall_cycle_ls_dq",  stall_ls_dq                                                                    )
+    ("dispatch_in"                , PopCount(fromRename.map(_.fire))).withDescription("Valid instructions accepted by dispatch."),
+    ("dispatch_empty"             , !hasValidInstr).withDescription("Cycles in which dispatch has no valid instruction."),
+    ("dispatch_utili"             , PopCount(fromRename.map(_.valid))).withDescription("Valid instruction slots presented to dispatch."),
+    ("dispatch_waitinstr"         , PopCount(fromRename.map(!_.valid && canAccept))).withDescription("Dispatch slots that can accept input but receive no valid instruction."),
+    ("dispatch_stall_cycle_lsq"   , false.B).withDescription("Reserved dispatch-LSQ stall event; its current increment is always zero."),
+    ("dispatch_stall_cycle_rob"   , stall_rob).withDescription("Dispatch stall cycles caused by ROB backpressure."),
+    ("dispatch_stall_cycle_int_dq", stall_int_dq).withDescription("Dispatch stall cycles caused by an integer dispatch queue."),
+    ("dispatch_stall_cycle_fp_dq" , stall_fp_dq).withDescription("Dispatch stall cycles caused by a floating-point dispatch queue."),
+    ("dispatch_stall_cycle_ls_dq" , stall_ls_dq).withDescription("Dispatch stall cycles caused by a load/store dispatch queue.")
   )
   generatePerfEvent()
 }

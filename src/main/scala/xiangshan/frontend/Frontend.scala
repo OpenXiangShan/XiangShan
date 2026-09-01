@@ -456,21 +456,26 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   pfevent.io.distribute_csr := io.csrCtrl.distribute_csr
   val csrevents = pfevent.io.hpmevent.take(8)
 
-  val perfFromUnits = Seq(ifu, ibuffer, icache, ftq, bpu).flatMap(_.getPerfEvents)
+  val perfFromUnits = Seq(ifu, ibuffer, icache, ftq, bpu).flatMap(_.getPerfEventInfos)
   val perfFromIO    = Seq()
   val perfBlock     = Seq()
-  val perfFromITLB  = itlb.getPerfEvents.map { case (str, idx) => ("itlb_" + str, idx) }
+  val perfFromITLB  = itlb.getPerfEventInfos.map(event => event.withName("itlb_" + event.name))
   // let index = 0 be no event
-  val allPerfEvents = Seq(("noEvent", 0.U)) ++ perfFromUnits ++ perfFromIO ++ perfBlock ++ perfFromITLB
+  val allPerfEvents = Seq(("noEvent", 0.U).withDescription("No event; the counter increment is always zero.")) ++
+    perfFromUnits ++ perfFromIO ++ perfBlock ++ perfFromITLB
+
+  if (p(DebugOptionsKey).DumpHPM) {
+    HPMDocDump.register("Frontend perfEvents Set", "mhpmcounter3-mhpmcounter10", allPerfEvents)
+  }
 
   if (printEventCoding) {
-    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-      println("Frontend perfEvents Set", name, inc, i)
+    for ((event, i) <- allPerfEvents.zipWithIndex) {
+      println("Frontend perfEvents Set", event.name, event.value, i)
     }
   }
 
-  val allPerfInc          = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
-  override val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
+  val allPerfInc          = allPerfEvents.map(_.value.asTypeOf(new PerfEvent))
+  override val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEventInfos
   generatePerfEvent()
 
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(Int.MaxValue, "MbistPipeFrontend", hasMbist)

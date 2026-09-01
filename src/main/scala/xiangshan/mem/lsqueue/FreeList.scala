@@ -132,8 +132,8 @@ class FreeList(size: Int, allocWidth: Int, freeWidth: Int, enablePreAlloc: Boole
   io.validCount := size.U - freeSlotCnt
 
   XSPerfAccumulate("empty", io.empty)
-  val perfEvents: Seq[(String, UInt)] = Seq(
-    ("empty", io.empty)
+  val perfEvents = Seq(
+    ("empty", io.empty).withDescription("Cycle in which this allocation free list has no available entry.")
   )
   generatePerfEvent()
 

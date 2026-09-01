@@ -182,10 +182,10 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   XSPerfAccumulate("busy_count", PopCount(table))
 
   val perfEvents = Seq(
-    ("bt_std_freelist_1_4_valid", busyCount <= (numPhyPregs / 4).U                                       ),
-    ("bt_std_freelist_2_4_valid", busyCount > (numPhyPregs / 4).U && busyCount <= (numPhyPregs / 2).U    ),
-    ("bt_std_freelist_3_4_valid", busyCount > (numPhyPregs / 2).U && busyCount <= (numPhyPregs * 3 / 4).U),
-    ("bt_std_freelist_4_4_valid", busyCount > (numPhyPregs * 3 / 4).U                                    )
+    ("bt_std_freelist_1_4_valid", busyCount <= (numPhyPregs / 4).U).withDescription("Cycles with at most one quarter of this busy table's physical registers busy."),
+    ("bt_std_freelist_2_4_valid", busyCount > (numPhyPregs / 4).U && busyCount <= (numPhyPregs / 2).U).withDescription("Cycles with this busy table above one quarter and at most one half full."),
+    ("bt_std_freelist_3_4_valid", busyCount > (numPhyPregs / 2).U && busyCount <= (numPhyPregs * 3 / 4).U).withDescription("Cycles with this busy table above one half and at most three quarters full."),
+    ("bt_std_freelist_4_4_valid", busyCount > (numPhyPregs * 3 / 4).U).withDescription("Cycles with this busy table more than three quarters full.")
   )
   generatePerfEvent()
 
@@ -257,4 +257,3 @@ class VlBusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregW
     vlRes.is_vlmax := !vlmaxTable(res.req)
   }
 }
-

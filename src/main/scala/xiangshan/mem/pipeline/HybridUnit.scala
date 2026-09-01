@@ -1420,13 +1420,13 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   // bug lyq: some signals in perfEvents are no longer suitable for the current MemBlock design
   // hardware performance counter
   val perfEvents = Seq(
-    ("load_s0_in_fire         ", s0_fire                                                        ),
-    ("load_to_load_forward    ", s1_fire && s1_try_ptr_chasing && !s1_ptr_chasing_canceled      ),
-    ("stall_dcache            ", s0_valid && s0_can_go && !io.ldu_io.dcache.req.ready           ),
-    ("load_s1_in_fire         ", s0_fire                                                        ),
-    ("load_s1_tlb_miss        ", s1_fire && io.tlb.resp.bits.miss                               ),
-    ("load_s2_in_fire         ", s1_fire                                                        ),
-    ("load_s2_dcache_miss     ", s2_fire && io.ldu_io.dcache.resp.bits.miss                     ),
+    ("load_s0_in_fire"     , s0_fire).withDescription("Hybrid load requests accepted by pipeline stage 0."),
+    ("load_to_load_forward", s1_fire && s1_try_ptr_chasing && !s1_ptr_chasing_canceled).withDescription("Hybrid load-to-load pointer-chasing forwards accepted by stage 1."),
+    ("stall_dcache"        , s0_valid && s0_can_go && !io.ldu_io.dcache.req.ready).withDescription("Hybrid load stage-0 cycles blocked because the data cache is not ready."),
+    ("load_s1_in_fire"     , s0_fire).withDescription("Hybrid load requests transferred from stage 0 into stage 1."),
+    ("load_s1_tlb_miss"    , s1_fire && io.tlb.resp.bits.miss).withDescription("Hybrid stage-1 load requests that miss in the data TLB."),
+    ("load_s2_in_fire"     , s1_fire).withDescription("Hybrid load requests transferred from stage 1 into stage 2."),
+    ("load_s2_dcache_miss" , s2_fire && io.ldu_io.dcache.resp.bits.miss).withDescription("Hybrid stage-2 load requests whose data-cache response is a miss."),
   )
   generatePerfEvent()
 }

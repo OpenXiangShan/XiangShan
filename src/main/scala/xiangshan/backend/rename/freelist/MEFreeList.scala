@@ -98,10 +98,10 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   XSPerfAccumulate("can_alloc_wrong", !io.canAllocate && freeRegCnt >= RenameWidth.U)
 
   val perfEvents = Seq(
-    ("me_freelist_1_4_valid", freeRegCntReg <= (size / 4).U                                     ),
-    ("me_freelist_2_4_valid", freeRegCntReg >  (size / 4).U && freeRegCntReg <= (size / 2).U    ),
-    ("me_freelist_3_4_valid", freeRegCntReg >  (size / 2).U && freeRegCntReg <= (size * 3 / 4).U),
-    ("me_freelist_4_4_valid", freeRegCntReg >  (size * 3 / 4).U                                 ),
+    ("me_freelist_1_4_valid", freeRegCntReg <= (size / 4).U).withDescription("Cycles with at most one quarter of move-elimination integer registers free."),
+    ("me_freelist_2_4_valid", freeRegCntReg > (size / 4).U && freeRegCntReg <= (size / 2).U).withDescription("Cycles with more than one quarter and at most one half of move-elimination integer registers free."),
+    ("me_freelist_3_4_valid", freeRegCntReg > (size / 2).U && freeRegCntReg <= (size * 3 / 4).U).withDescription("Cycles with more than one half and at most three quarters of move-elimination integer registers free."),
+    ("me_freelist_4_4_valid", freeRegCntReg > (size * 3 / 4).U).withDescription("Cycles with more than three quarters of move-elimination integer registers free."),
   )
   generatePerfEvent()
 }

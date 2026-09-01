@@ -491,15 +491,15 @@ class IBuffer(implicit p: Parameters) extends XSModule with HasCircularQueuePtrH
   XSPerfAccumulate("if_fetch_bubble_eq_max", fetchLatency)
 
   val perfEvents = Seq(
-    ("IBuffer_Flushed  ", io.flush),
-    ("IBuffer_hungry   ", instrHungry),
-    ("IBuffer_1_4_valid", (numValid > (0 * (IBufSize / 4)).U) & (numValid < (1 * (IBufSize / 4)).U)),
-    ("IBuffer_2_4_valid", (numValid >= (1 * (IBufSize / 4)).U) & (numValid < (2 * (IBufSize / 4)).U)),
-    ("IBuffer_3_4_valid", (numValid >= (2 * (IBufSize / 4)).U) & (numValid < (3 * (IBufSize / 4)).U)),
-    ("IBuffer_4_4_valid", (numValid >= (3 * (IBufSize / 4)).U) & (numValid < (4 * (IBufSize / 4)).U)),
-    ("IBuffer_full     ", numValid === IBufSize.U),
-    ("Front_Bubble     ", FrontBubble),
-    ("Fetch_Latency_Bound", fetchLatency)
+    ("IBuffer_Flushed"    , io.flush).withDescription("Cycles in which the instruction buffer is flushed."),
+    ("IBuffer_hungry"     , instrHungry).withDescription("Cycles after initialization in which the instruction buffer is empty without a flush bubble."),
+    ("IBuffer_1_4_valid"  , (numValid > (0 * (IBufSize / 4)).U) & (numValid < (1 * (IBufSize / 4)).U)).withDescription("Cycles with instruction-buffer occupancy between zero and one quarter."),
+    ("IBuffer_2_4_valid"  , (numValid >= (1 * (IBufSize / 4)).U) & (numValid < (2 * (IBufSize / 4)).U)).withDescription("Cycles with instruction-buffer occupancy from one quarter up to one half."),
+    ("IBuffer_3_4_valid"  , (numValid >= (2 * (IBufSize / 4)).U) & (numValid < (3 * (IBufSize / 4)).U)).withDescription("Cycles with instruction-buffer occupancy from one half up to three quarters."),
+    ("IBuffer_4_4_valid"  , (numValid >= (3 * (IBufSize / 4)).U) & (numValid < (4 * (IBufSize / 4)).U)).withDescription("Cycles with instruction-buffer occupancy from three quarters up to full."),
+    ("IBuffer_full"       , numValid === IBufSize.U).withDescription("Cycles in which instruction-buffer occupancy equals its configured capacity."),
+    ("Front_Bubble"       , FrontBubble).withDescription("Decode-width slots not supplied by the instruction buffer while decode can accept instructions."),
+    ("Fetch_Latency_Bound", fetchLatency).withDescription("Cycles in which decode can accept instructions but the instruction buffer supplies none.")
   )
   generatePerfEvent()
 }

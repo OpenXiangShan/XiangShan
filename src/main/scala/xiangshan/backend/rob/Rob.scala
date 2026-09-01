@@ -1635,25 +1635,25 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val commitBranchVec = VecInit(commitBranchValid)
   val commitStoreVec = VecInit(io.commits.commitValid.zip(commitIsStore).map { case (v, t) => v && t })
   val perfEvents = Seq(
-    ("rob_interrupt_num      ", io.flushOut.valid && intrEnable),
-    ("rob_exception_num      ", io.flushOut.valid && deqHasException),
-    ("rob_flush_pipe_num     ", io.flushOut.valid && isFlushPipe),
-    ("rob_replay_inst_num    ", io.flushOut.valid && isFlushPipe && deqHasReplayInst),
-    ("rob_commitUop          ", ifCommit(commitCnt)),
-    ("rob_commitInstr        ", ifCommitReg(trueCommitCnt)),
-    ("rob_commitInstrFused   ", ifCommitReg(fuseCommitCnt)),
-    ("rob_commitInstrLoad    ", ifCommitReg(PopCount(RegEnable(commitLoadVec, isCommit)))),
-    ("rob_commitInstrBranch  ", ifCommitReg(PopCount(RegEnable(commitBranchVec, isCommit)))),
-    ("rob_commitInstrStore   ", ifCommitReg(PopCount(RegEnable(commitStoreVec, isCommit)))),
-    ("rob_walkInstr          ", Mux(io.commits.isWalk, PopCount(io.commits.walkValid), 0.U)),
-    ("rob_walkCycle          ", (state === s_walk)),
-    ("rob_1_4_valid          ", numValidEntries <= (RobSize / 4).U),
-    ("rob_2_4_valid          ", numValidEntries > (RobSize / 4).U && numValidEntries <= (RobSize / 2).U),
-    ("rob_3_4_valid          ", numValidEntries > (RobSize / 2).U && numValidEntries <= (RobSize * 3 / 4).U),
-    ("rob_4_4_valid          ", numValidEntries > (RobSize * 3 / 4).U),
-    ("BRANCH_JUMP            ", brhJump),
-    ("BR_MIS_PRED            ", misPred),
-    ("TOTAL_FLUSH            ", io.redirect.valid)
+    ("rob_interrupt_num"    , io.flushOut.valid && intrEnable).withDescription("ROB flushes caused by interrupts."),
+    ("rob_exception_num"    , io.flushOut.valid && deqHasException).withDescription("ROB flushes caused by exceptions."),
+    ("rob_flush_pipe_num"   , io.flushOut.valid && isFlushPipe).withDescription("ROB flush-pipeline operations."),
+    ("rob_replay_inst_num"  , io.flushOut.valid && isFlushPipe && deqHasReplayInst).withDescription("ROB flush-pipeline operations caused by replay instructions."),
+    ("rob_commitUop"        , ifCommit(commitCnt)).withDescription("Micro-operations committed by the ROB."),
+    ("rob_commitInstr"      , ifCommitReg(trueCommitCnt)).withDescription("Architectural instructions committed by the ROB."),
+    ("rob_commitInstrFused" , ifCommitReg(fuseCommitCnt)).withDescription("Fused architectural instructions committed by the ROB."),
+    ("rob_commitInstrLoad"  , ifCommitReg(PopCount(RegEnable(commitLoadVec, isCommit)))).withDescription("Load instructions committed by the ROB."),
+    ("rob_commitInstrBranch", ifCommitReg(PopCount(RegEnable(commitBranchVec, isCommit)))).withDescription("Branch instructions committed by the ROB."),
+    ("rob_commitInstrStore" , ifCommitReg(PopCount(RegEnable(commitStoreVec, isCommit)))).withDescription("Store instructions committed by the ROB."),
+    ("rob_walkInstr"        , Mux(io.commits.isWalk, PopCount(io.commits.walkValid), 0.U)).withDescription("Instructions processed during ROB walk recovery."),
+    ("rob_walkCycle"        , state === s_walk).withDescription("Cycles in which the ROB is in walk-recovery state."),
+    ("rob_1_4_valid"        , numValidEntries <= (RobSize / 4).U).withDescription("Cycles with at most one quarter of ROB entries valid."),
+    ("rob_2_4_valid"        , numValidEntries > (RobSize / 4).U && numValidEntries <= (RobSize / 2).U).withDescription("Cycles with ROB occupancy above one quarter and at most one half."),
+    ("rob_3_4_valid"        , numValidEntries > (RobSize / 2).U && numValidEntries <= (RobSize * 3 / 4).U).withDescription("Cycles with ROB occupancy above one half and at most three quarters."),
+    ("rob_4_4_valid"        , numValidEntries > (RobSize * 3 / 4).U).withDescription("Cycles with more than three quarters of ROB entries valid."),
+    ("BRANCH_JUMP"          , brhJump).withDescription("Valid branch and jump execution-unit writebacks."),
+    ("BR_MIS_PRED"          , misPred).withDescription("Redirects marked as control-flow mispredictions."),
+    ("TOTAL_FLUSH"          , io.redirect.valid).withDescription("All backend redirects that flush the pipeline.")
   )
   generatePerfEvent()
 

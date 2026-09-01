@@ -330,7 +330,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   }
 
 
-  val perfEvents = Seq(loadQueue, storeQueue).flatMap(_.getPerfEvents)
+  val perfEvents = Seq(loadQueue, storeQueue).flatMap(_.getPerfEventInfos)
   generatePerfEvent()
 }
 

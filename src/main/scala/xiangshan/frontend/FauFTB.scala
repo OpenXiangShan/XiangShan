@@ -225,8 +225,8 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   }
 
   override val perfEvents = Seq(
-    ("fauftb_commit_hit       ", u_valid && u_meta.hit),
-    ("fauftb_commit_miss      ", u_valid && !u_meta.hit)
+    ("fauftb_commit_hit" , u_valid && u_meta.hit).withDescription("Committed updates that were predicted as hits by the fully-associative uFTB."),
+    ("fauftb_commit_miss", u_valid && !u_meta.hit).withDescription("Committed updates that were predicted as misses by the fully-associative uFTB.")
   )
   generatePerfEvent()
 

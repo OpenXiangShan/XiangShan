@@ -1988,15 +1988,15 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // bug lyq: some signals in perfEvents are no longer suitable for the current MemBlock design
   // hardware performance counter
   val perfEvents = Seq(
-    ("load_s0_in_fire         ", s0_fire                                                        ),
-    ("load_to_load_forward    ", s1_fire && s1_try_ptr_chasing && !s1_ptr_chasing_canceled      ),
-    ("stall_dcache            ", s0_valid && s0_can_go && !io.dcache.req.ready                  ),
-    ("load_s1_in_fire         ", s0_fire                                                        ),
-    ("load_s1_tlb_miss        ", s1_fire && s1_tlb_miss                                         ),
-    ("load_s2_in_fire         ", s1_fire                                                        ),
-    ("load_s2_dcache_miss     ", s2_fire && io.dcache.resp.bits.miss                            ),
-    ("l1D_load_hw_prf_access  ", s2_fire && s2_hw_prf                                           ),// Only hw prf
-    ("l1D_load_hw_prf_miss    ", s2_fire && s2_hw_prf && io.dcache.resp.bits.miss               ) // Only hw prf
+    ("load_s0_in_fire"       , s0_fire).withDescription("Load requests accepted by load-pipeline stage 0."),
+    ("load_to_load_forward"  , s1_fire && s1_try_ptr_chasing && !s1_ptr_chasing_canceled).withDescription("Load-to-load pointer-chasing forwards accepted by stage 1."),
+    ("stall_dcache"          , s0_valid && s0_can_go && !io.dcache.req.ready).withDescription("Load stage-0 cycles blocked because the data cache is not ready."),
+    ("load_s1_in_fire"       , s0_fire).withDescription("Load requests transferred from stage 0 into stage 1."),
+    ("load_s1_tlb_miss"      , s1_fire && s1_tlb_miss).withDescription("Stage-1 load requests with a valid data-TLB miss response."),
+    ("load_s2_in_fire"       , s1_fire).withDescription("Load requests transferred from stage 1 into stage 2."),
+    ("load_s2_dcache_miss"   , s2_fire && io.dcache.resp.bits.miss).withDescription("Stage-2 load requests whose data-cache response is a miss."),
+    ("l1D_load_hw_prf_access", s2_fire && s2_hw_prf).withDescription("Hardware-prefetch load accesses handled by load stage 2."),
+    ("l1D_load_hw_prf_miss"  , s2_fire && s2_hw_prf && io.dcache.resp.bits.miss).withDescription("Hardware-prefetch load accesses that miss in L1D.")
   )
   generatePerfEvent()
 

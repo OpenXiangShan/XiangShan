@@ -1208,19 +1208,19 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_hit_1     = io.toIbuffer.fire && f3_doubleLine & f3_perf_info.bank_hit(1)
   val f3_hit       = f3_perf_info.hit
   val perfEvents = Seq(
-    ("frontendFlush                ", wb_redirect),
-    ("ifu_req                      ", io.toIbuffer.fire),
-    ("ifu_miss                     ", io.toIbuffer.fire && !f3_perf_info.hit),
-    ("ifu_req_cacheline_0          ", f3_req_0),
-    ("ifu_req_cacheline_1          ", f3_req_1),
-    ("ifu_req_cacheline_0_hit      ", f3_hit_0),
-    ("ifu_req_cacheline_1_hit      ", f3_hit_1),
-    ("only_0_hit                   ", f3_perf_info.only_0_hit && io.toIbuffer.fire),
-    ("only_0_miss                  ", f3_perf_info.only_0_miss && io.toIbuffer.fire),
-    ("hit_0_hit_1                  ", f3_perf_info.hit_0_hit_1 && io.toIbuffer.fire),
-    ("hit_0_miss_1                 ", f3_perf_info.hit_0_miss_1 && io.toIbuffer.fire),
-    ("miss_0_hit_1                 ", f3_perf_info.miss_0_hit_1 && io.toIbuffer.fire),
-    ("miss_0_miss_1                ", f3_perf_info.miss_0_miss_1 && io.toIbuffer.fire)
+    ("frontendFlush"          , wb_redirect).withDescription("Frontend writeback redirects that flush the fetch pipeline."),
+    ("ifu_req"                , io.toIbuffer.fire).withDescription("IFU fetch responses accepted by the instruction buffer."),
+    ("ifu_miss"               , io.toIbuffer.fire && !f3_perf_info.hit).withDescription("Accepted IFU fetch responses for which the requested lines did not all hit."),
+    ("ifu_req_cacheline_0"    , f3_req_0).withDescription("Accepted IFU requests for the first fetch cache line."),
+    ("ifu_req_cacheline_1"    , f3_req_1).withDescription("Accepted IFU requests that also use the second fetch cache line."),
+    ("ifu_req_cacheline_0_hit", f3_hit_0).withDescription("Accepted IFU requests for which the first cache line hits."),
+    ("ifu_req_cacheline_1_hit", f3_hit_1).withDescription("Accepted two-line IFU requests for which the second cache line hits."),
+    ("only_0_hit"             , f3_perf_info.only_0_hit && io.toIbuffer.fire).withDescription("Accepted single-line IFU requests whose first cache line hits."),
+    ("only_0_miss"            , f3_perf_info.only_0_miss && io.toIbuffer.fire).withDescription("Accepted single-line IFU requests whose first cache line misses."),
+    ("hit_0_hit_1"            , f3_perf_info.hit_0_hit_1 && io.toIbuffer.fire).withDescription("Accepted two-line IFU requests for which both cache lines hit."),
+    ("hit_0_miss_1"           , f3_perf_info.hit_0_miss_1 && io.toIbuffer.fire).withDescription("Accepted two-line IFU requests for which only the first cache line hits."),
+    ("miss_0_hit_1"           , f3_perf_info.miss_0_hit_1 && io.toIbuffer.fire).withDescription("Accepted two-line IFU requests for which only the second cache line hits."),
+    ("miss_0_miss_1"          , f3_perf_info.miss_0_miss_1 && io.toIbuffer.fire).withDescription("Accepted two-line IFU requests for which both cache lines miss.")
   )
   generatePerfEvent()
 

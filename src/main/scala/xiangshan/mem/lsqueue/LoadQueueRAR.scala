@@ -276,9 +276,9 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   QueuePerf(LoadQueueRARSize, validCount, !allowEnqueue)
   XSPerfAccumulate("enq", canEnqCount)
   XSPerfAccumulate("ld_ld_violation", ldLdViolationCount)
-  val perfEvents: Seq[(String, UInt)] = Seq(
-    ("enq", canEnqCount),
-    ("ld_ld_violation", ldLdViolationCount)
+  val perfEvents = Seq(
+    ("enq"            , canEnqCount).withDescription("Entries allocated in the load RAR violation queue."),
+    ("ld_ld_violation", ldLdViolationCount).withDescription("Load-load ordering violations detected by the RAR queue.")
   )
   generatePerfEvent()
   // End

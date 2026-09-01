@@ -613,13 +613,20 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   XSPerfAccumulate("forward_vaddr_match_failed", PopCount(f1_tagMismatchVec))
 
   val perfEvents = Seq(
-    ("uncache_mmio_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc),
-    ("uncache_mmio_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc),
-    ("uncache_nc_store", io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc),
-    ("uncache_nc_load", io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc),
-    ("uncache_outstanding", uState =/= s_idle && mem_acquire.fire),
-    ("forward_count", PopCount(io.forward.map(_.forwardMask.asUInt.orR))),
+    ("uncache_mmio_store"        , io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc)
+      .withDescription("MMIO store request accepted by the uncached unit."),
+    ("uncache_mmio_load"         , io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && !io.lsq.req.bits.nc)
+      .withDescription("MMIO load request accepted by the uncached unit."),
+    ("uncache_nc_store"          , io.lsq.req.fire && isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc)
+      .withDescription("Non-cacheable store request accepted by the uncached unit."),
+    ("uncache_nc_load"           , io.lsq.req.fire && !isStore(io.lsq.req.bits.cmd) && io.lsq.req.bits.nc)
+      .withDescription("Non-cacheable load request accepted by the uncached unit."),
+    ("uncache_outstanding"       , uState =/= s_idle && mem_acquire.fire)
+      .withDescription("Memory request issued while another uncached request is outstanding."),
+    ("forward_count"             , PopCount(io.forward.map(_.forwardMask.asUInt.orR)))
+      .withDescription("Uncached loads receiving forwarded store data."),
     ("forward_vaddr_match_failed", PopCount(f1_tagMismatchVec))
+      .withDescription("Forward candidates rejected because their virtual-address tags differ.")
   )
 
   generatePerfEvent()
