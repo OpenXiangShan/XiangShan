@@ -510,7 +510,7 @@ def test_icache_trained_two_fetch_hit_hit_then_fencei_miss_miss(env) -> None:
         pytest.param(
             "hit_miss",
             1,
-            marks=pytest.mark.funcov_bins("BIN-521", "BIN-524"),
+            marks=pytest.mark.funcov_bins("BIN-521", "BIN-524", "BIN-887"),
         ),
         pytest.param(
             "miss_hit",
@@ -627,6 +627,13 @@ def test_icache_trained_two_fetch_asymmetric_line_refill(
     assert int(result["fire_cycle"]) >= max(
         cycle for cycle in result["registered_cycles"] if cycle is not None
     )
+    recorder = getattr(env, "functional_coverage", None)
+    assert recorder is not None
+    hit = recorder.hits[recorder.definition_by_bin_id["BIN-887"].key]
+    evidence = hit.evidence[-1]
+    assert evidence["source_valids"] == [1, 1]
+    assert evidence["source_tags"] == evidence["wb_tags"]
+    assert len(evidence["source_tags"]) == 2
     assert not env.monitor.get_errors()
 
 
