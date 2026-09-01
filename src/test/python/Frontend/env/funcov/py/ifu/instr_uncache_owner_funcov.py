@@ -19,6 +19,7 @@ INSTR_UNCACHE_OWNER_SAMPLER_BIN_KEYS = frozenset(
 _ENTRY_IDLE = 0
 _ENTRY_REFILL_REQ = 1
 _ENTRY_REFILL_RESP = 2
+_REDIRECTED_RESEND_TIMEOUT_CYCLES = 512
 
 
 def initialize_instr_uncache_owner_coverage_state(recorder) -> None:
@@ -34,6 +35,7 @@ def initialize_instr_uncache_owner_coverage_state(recorder) -> None:
         "latest_accepted_request": None,
         "active_instruncache_request": None,
         "redirected_wait_d_pending": None,
+        "redirected_resend_pending": None,
         "second_page_exception_types": set(),
         "non_cross_rvi_offsets": set(),
         "attribute_modes": set(),
@@ -55,6 +57,12 @@ def _mark(recorder, index: int, cycle: int, evidence: dict[str, Any]) -> None:
         int(cycle),
         {"event": "instr_uncache_protocol_observation", **evidence},
     )
+
+
+def _record_risk(recorder, event: str, cycle: int, evidence: dict[str, Any]) -> None:
+    risks = getattr(recorder, "risk_observations", None)
+    if isinstance(risks, list):
+        risks.append({"event": str(event), "cycle": int(cycle), **evidence})
 
 
 def _response_half(data: Optional[int], pruned_addr: Optional[int]) -> Optional[int]:
@@ -551,12 +559,24 @@ def sample_instr_uncache_owner_coverage(
         and not entry_resending
         and response_is_rvi
     ):
+        identity_source = active_request or state["latest_accepted_request"]
+        old_identity = None
+        if identity_source is not None:
+            candidate_identity = (
+                identity_source.get("s2_ftq_flag"),
+                identity_source.get("s2_ftq_value"),
+                identity_source.get("s2_instr_pc"),
+            )
+            if None not in candidate_identity:
+                old_identity = candidate_identity
         state["cross_8b_pending"] = {
             "entry_addr": entry_addr,
             "first_half": _response_half(s["tl_d_data"], entry_addr),
             "second_a": False,
+            "second_a_fire": False,
             "second_d": False,
             "expected_data": None,
+            "old_identity": old_identity,
         }
 
     cross_8b = state["cross_8b_pending"]
@@ -565,6 +585,7 @@ def sample_instr_uncache_owner_coverage(
             expected_addr = ((int(cross_8b["entry_addr"]) >> 2) + 1) << 3
             if s["tl_a_addr"] is not None and int(s["tl_a_addr"]) == expected_addr:
                 cross_8b["second_a"] = True
+                cross_8b["second_a_fire"] |= tl_a_fire
                 _mark(
                     recorder,
                     12,
@@ -586,6 +607,152 @@ def sample_instr_uncache_owner_coverage(
                 )
         if cross_8b["second_d"] and not entry_resending and s["instr_resp_valid"] == 1:
             state["cross_8b_pending"] = None
+
+    redirect_kind = None
+    if s["backend_redirect"] == 1:
+        redirect_kind = "backend"
+    elif s["checker_redirect"] == 1 and s["wb_redirect"] == 1:
+        redirect_kind = "checker"
+    if (
+        redirect_kind is not None
+        and state["redirected_resend_pending"] is None
+        and cross_8b is not None
+        and cross_8b["second_a_fire"]
+        and not cross_8b["second_d"]
+        and cross_8b["old_identity"] is not None
+        and entry_resending
+        and entry_state == _ENTRY_REFILL_RESP
+    ):
+        state["redirected_resend_pending"] = {
+            "redirect_cycle": int(cycle),
+            "redirect_kind": redirect_kind,
+            "old_identity": cross_8b["old_identity"],
+            "first_entry_addr": cross_8b["entry_addr"],
+            "expected_second_addr": ((int(cross_8b["entry_addr"]) >> 2) + 1)
+            << 3,
+            "saw_second_a_fire": True,
+            "saw_second_d": False,
+            "saw_instr_response": False,
+            "resending_cleared": False,
+            "expected_data": None,
+        }
+
+    redirected_resend = state["redirected_resend_pending"]
+    if redirected_resend is not None:
+        elapsed = int(cycle) - int(redirected_resend["redirect_cycle"])
+        delivered_identity = None
+        if (
+            s["to_valid"] == 1
+            and s["to_ready"] == 1
+            and single_delivery
+            and None not in (s["to_ftq_flag"], s["to_ftq_value"], s["to_pc"])
+        ):
+            delivered_identity = (
+                s["to_ftq_flag"],
+                s["to_ftq_value"],
+                s["to_pc"],
+            )
+        if delivered_identity == redirected_resend["old_identity"]:
+            _record_risk(
+                recorder,
+                "ifu_instruncache_redirected_resend_old_identity_leak",
+                cycle,
+                {
+                    **evidence,
+                    "redirect_kind": redirected_resend["redirect_kind"],
+                    "redirect_cycle": redirected_resend["redirect_cycle"],
+                    "old_identity": redirected_resend["old_identity"],
+                },
+            )
+            state["redirected_resend_pending"] = None
+        elif elapsed > 0:
+            if tl_d_valid and entry_resending:
+                if clean_d:
+                    redirected_resend["saw_second_d"] = True
+                    if cross_8b is not None:
+                        redirected_resend["expected_data"] = cross_8b.get(
+                            "expected_data"
+                        )
+                else:
+                    _record_risk(
+                        recorder,
+                        "ifu_instruncache_redirected_resend_second_d_fault",
+                        cycle,
+                        {
+                            **evidence,
+                            "redirect_kind": redirected_resend["redirect_kind"],
+                            "redirect_cycle": redirected_resend["redirect_cycle"],
+                        },
+                    )
+                    state["redirected_resend_pending"] = None
+            if (
+                state["redirected_resend_pending"] is not None
+                and redirected_resend["saw_second_d"]
+                and s["instr_resp_valid"] == 1
+            ):
+                expected_data = redirected_resend["expected_data"]
+                response_matches = (
+                    expected_data is not None
+                    and s["instr_resp_data"] is not None
+                    and int(s["instr_resp_data"]) == int(expected_data)
+                )
+                if (
+                    response_matches
+                    and s["instr_resp_corrupt"] == 0
+                    and s["instr_resp_denied"] == 0
+                    and s["instr_resp_need_resend"] == 0
+                    and not entry_resending
+                ):
+                    redirected_resend["saw_instr_response"] = True
+                    redirected_resend["resending_cleared"] = True
+            if (
+                state["redirected_resend_pending"] is not None
+                and redirected_resend["saw_second_d"]
+                and redirected_resend["saw_instr_response"]
+                and redirected_resend["resending_cleared"]
+                and delivered_identity is not None
+                and delivered_identity != redirected_resend["old_identity"]
+                and s["to_exception"] == 0
+            ):
+                _mark(
+                    recorder,
+                    11,
+                    cycle,
+                    {
+                        **evidence,
+                        "redirect_kind": redirected_resend["redirect_kind"],
+                        "redirect_cycle": redirected_resend["redirect_cycle"],
+                        "first_entry_addr": redirected_resend["first_entry_addr"],
+                        "expected_second_addr": redirected_resend[
+                            "expected_second_addr"
+                        ],
+                        "second_a_fire_before_redirect": True,
+                        "second_d_after_redirect": True,
+                        "instr_response_after_redirect": True,
+                        "resending_cleared": True,
+                        "old_identity_delivery_suppressed": True,
+                        "old_identity": redirected_resend["old_identity"],
+                        "recovery_identity": delivered_identity,
+                    },
+                )
+                state["redirected_resend_pending"] = None
+        if (
+            state["redirected_resend_pending"] is not None
+            and elapsed > _REDIRECTED_RESEND_TIMEOUT_CYCLES
+        ):
+            _record_risk(
+                recorder,
+                "ifu_instruncache_redirected_resend_timeout",
+                cycle,
+                {
+                    "redirect_kind": redirected_resend["redirect_kind"],
+                    "redirect_cycle": redirected_resend["redirect_cycle"],
+                    "old_identity": redirected_resend["old_identity"],
+                    "saw_second_d": redirected_resend["saw_second_d"],
+                    "saw_instr_response": redirected_resend["saw_instr_response"],
+                },
+            )
+            state["redirected_resend_pending"] = None
 
     cross_page = state["cross_page_pending"]
     if cross_page is not None:

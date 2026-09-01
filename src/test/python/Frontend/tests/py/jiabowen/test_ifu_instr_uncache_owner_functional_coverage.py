@@ -1,3 +1,6 @@
+import ast
+import inspect
+
 from env.funcov.py.ifu import instr_uncache_owner_funcov as protocol
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner
 from env.support import fold_pc
@@ -7,6 +10,7 @@ class _Recorder:
     def __init__(self, signals=None):
         self.hits = set()
         self.evidence = []
+        self.risk_observations = []
         self.signals = {} if signals is None else dict(signals)
 
     def _read_first_dut_signal(self, _dut, names):
@@ -39,6 +43,21 @@ def test_protocol_sampler_contract_has_all_38_canonical_leaves():
         group == protocol.INSTR_UNCACHE_OWNER_GROUP
         for group, _ in protocol.INSTR_UNCACHE_OWNER_SAMPLER_BIN_KEYS
     )
+
+
+def test_bin1104_leaf11_has_bin_specific_runtime_mark_site():
+    tree = ast.parse(inspect.getsource(protocol))
+    literal_mark_indices = {
+        int(node.args[1].value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_mark"
+        and len(node.args) >= 2
+        and isinstance(node.args[1], ast.Constant)
+        and isinstance(node.args[1].value, int)
+    }
+    assert 11 in literal_mark_indices
 
 
 def test_tl_a_stall_requires_each_observed_field_to_remain_stable():
@@ -207,6 +226,228 @@ def test_redirected_wait_d_requires_old_response_completion_and_new_identity():
     assert _hit(drive(), 10)
     assert not _hit(drive(d_before_redirect=True), 10)
     assert not _hit(drive(leak_old_identity=True), 10)
+
+
+def _drive_redirected_cross_8b_resend(
+    *,
+    redirect_kind="backend",
+    redirect_before_second_a=False,
+    leak_old_identity=False,
+    omit_second_d=False,
+):
+    recorder = _Recorder()
+    snapshot = _snapshot()
+    first_addr = 0x803
+    second_addr = ((first_addr >> 2) + 1) << 3
+    old_identity = (0, 7, 0x4000)
+
+    snapshot.update(
+        {
+            "req_valid": 1,
+            "req_ready": 1,
+            "req_is_mmio": 1,
+            "req_pbmt": 0,
+            "s2_ftq_flag": old_identity[0],
+            "s2_ftq_value": old_identity[1],
+            "s2_instr_pc": old_identity[2],
+        }
+    )
+    _sample(recorder, 1, snapshot)
+    snapshot.update(
+        {
+            "req_valid": 0,
+            "entry_state": protocol._ENTRY_REFILL_REQ,
+            "entry_req_addr": first_addr,
+            "tl_a_valid": 1,
+            "tl_a_ready": 1,
+            "tl_a_addr": first_addr << 1,
+        }
+    )
+    _sample(recorder, 2, snapshot)
+    snapshot.update(
+        {
+            "entry_state": protocol._ENTRY_REFILL_RESP,
+            "tl_a_valid": 0,
+            "tl_d_valid": 1,
+            "tl_d_data": 0x0003 << 48,
+            "tl_d_corrupt": 0,
+            "tl_d_denied": 0,
+        }
+    )
+    _sample(recorder, 3, snapshot)
+    snapshot.update(
+        {
+            "entry_state": 3,
+            "tl_d_valid": 0,
+            "instr_resp_valid": 1,
+            "instr_resp_data": 0x0003,
+            "instr_resp_corrupt": 0,
+            "instr_resp_denied": 0,
+            "instr_resp_need_resend": 1,
+        }
+    )
+    _sample(recorder, 4, snapshot)
+
+    snapshot.update(
+        {
+            "entry_state": protocol._ENTRY_REFILL_RESP
+            if redirect_before_second_a
+            else protocol._ENTRY_REFILL_REQ,
+            "entry_resending": 1,
+            "instr_resp_valid": 0,
+            "tl_a_valid": int(not redirect_before_second_a),
+            "tl_a_ready": 1,
+            "tl_a_addr": second_addr,
+            "backend_redirect": int(
+                redirect_before_second_a and redirect_kind == "backend"
+            ),
+            "checker_redirect": int(
+                redirect_before_second_a and redirect_kind == "checker"
+            ),
+            "wb_redirect": int(
+                redirect_before_second_a and redirect_kind == "checker"
+            ),
+            "ifu_flush": int(redirect_before_second_a),
+        }
+    )
+    _sample(recorder, 5, snapshot)
+    if redirect_before_second_a:
+        snapshot.update(
+            {
+                "entry_state": protocol._ENTRY_REFILL_REQ,
+                "tl_a_valid": 1,
+                "backend_redirect": 0,
+                "checker_redirect": 0,
+                "wb_redirect": 0,
+                "ifu_flush": 0,
+            }
+        )
+        _sample(recorder, 6, snapshot)
+
+    redirect_cycle = 7 if redirect_before_second_a else 6
+    snapshot.update(
+        {
+            "entry_state": protocol._ENTRY_REFILL_RESP,
+            "tl_a_valid": 0,
+            "backend_redirect": int(
+                not redirect_before_second_a and redirect_kind == "backend"
+            ),
+            "checker_redirect": int(
+                not redirect_before_second_a and redirect_kind == "checker"
+            ),
+            "wb_redirect": int(
+                not redirect_before_second_a and redirect_kind == "checker"
+            ),
+            "ifu_flush": int(not redirect_before_second_a),
+        }
+    )
+    _sample(recorder, redirect_cycle, snapshot)
+    snapshot.update(
+        {
+            "backend_redirect": 0,
+            "checker_redirect": 0,
+            "wb_redirect": 0,
+            "ifu_flush": 0,
+            "tl_d_valid": int(not omit_second_d),
+            "tl_d_data": 0x00000013,
+        }
+    )
+    _sample(recorder, redirect_cycle + 1, snapshot)
+    snapshot.update(
+        {
+            "entry_state": 3,
+            "entry_resending": 0,
+            "tl_d_valid": 0,
+            "instr_resp_valid": 1,
+            "instr_resp_data": 0x00130003,
+            "instr_resp_need_resend": 0,
+        }
+    )
+    _sample(recorder, redirect_cycle + 2, snapshot)
+    snapshot.update(
+        {
+            "entry_state": protocol._ENTRY_IDLE,
+            "instr_resp_valid": 0,
+            "to_valid": 1,
+            "to_ready": 1,
+            "to_enq": 1,
+            "to_ftq_flag": old_identity[0],
+            "to_ftq_value": old_identity[1] if leak_old_identity else 8,
+            "to_pc": old_identity[2] if leak_old_identity else 0x4040,
+            "to_exception": 0,
+        }
+    )
+    _sample(recorder, redirect_cycle + 3, snapshot)
+    if leak_old_identity:
+        snapshot.update({"to_ftq_value": 8, "to_pc": 0x4040})
+        _sample(recorder, redirect_cycle + 4, snapshot)
+    return recorder, snapshot, redirect_cycle
+
+
+def test_redirected_cross_8b_resend_requires_natural_completion_and_recovery():
+    for redirect_kind in ("backend", "checker"):
+        recorder, _snapshot_after, _redirect_cycle = _drive_redirected_cross_8b_resend(
+            redirect_kind=redirect_kind
+        )
+        assert _hit(recorder, 11)
+        evidence = next(item[2] for item in recorder.evidence if item[1].endswith("011"))
+        assert evidence["redirect_kind"] == redirect_kind
+        assert evidence["second_a_fire_before_redirect"] is True
+        assert evidence["second_d_after_redirect"] is True
+        assert evidence["old_identity_delivery_suppressed"] is True
+
+
+def test_redirected_cross_8b_resend_rejects_incomplete_or_leaking_episodes():
+    recorder, _snapshot_after, _redirect_cycle = _drive_redirected_cross_8b_resend(
+        redirect_before_second_a=True
+    )
+    assert not _hit(recorder, 11)
+
+    recorder, _snapshot_after, _redirect_cycle = _drive_redirected_cross_8b_resend(
+        omit_second_d=True
+    )
+    assert not _hit(recorder, 11)
+
+    recorder, _snapshot_after, _redirect_cycle = _drive_redirected_cross_8b_resend(
+        leak_old_identity=True
+    )
+    assert not _hit(recorder, 11)
+    assert any(
+        item["event"] == "ifu_instruncache_redirected_resend_old_identity_leak"
+        for item in recorder.risk_observations
+    )
+
+
+def test_redirected_cross_8b_resend_timeout_and_reset_clear_pending_state():
+    recorder, snapshot, redirect_cycle = _drive_redirected_cross_8b_resend(
+        omit_second_d=True
+    )
+    snapshot.update(
+        {
+            "to_valid": 0,
+            "to_ready": 0,
+            "to_enq": 0,
+            "entry_resending": 0,
+            "instr_resp_valid": 0,
+        }
+    )
+    _sample(
+        recorder,
+        redirect_cycle + protocol._REDIRECTED_RESEND_TIMEOUT_CYCLES + 1,
+        snapshot,
+    )
+    assert recorder._ifu_instr_uncache_owner_state["redirected_resend_pending"] is None
+    assert any(
+        item["event"] == "ifu_instruncache_redirected_resend_timeout"
+        for item in recorder.risk_observations
+    )
+
+    recorder, _snapshot_after, _redirect_cycle = _drive_redirected_cross_8b_resend(
+        omit_second_d=True
+    )
+    assert recorder._ifu_instr_uncache_owner_state["redirected_resend_pending"]
+    protocol.reset_instr_uncache_owner_coverage_state(recorder)
+    assert recorder._ifu_instr_uncache_owner_state["redirected_resend_pending"] is None
 
 
 def test_d_response_fields_are_checked_at_instruncache_response():
