@@ -323,7 +323,11 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
       lowAddrLoad.fullva := req.fullva
       highAddrLoad.uop := req.uop
       highAddrLoad.uop.exceptionVec(loadAddrMisaligned) := false.B
-      highAddrLoad.fullva := req.fullva
+      highAddrLoad.fullva := (if (VAddrBits > 48) {
+        Cat(req.fullva(XLEN - 1, VAddrBits), highAddrLoad.vaddr)
+      } else {
+        req.fullva
+      })
 
       switch (alignedType(1, 0)) {
         is (LB) {
