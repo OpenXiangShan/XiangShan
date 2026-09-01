@@ -572,6 +572,66 @@ def test_cacheable_flush_causes_block_old_s0_return(tmp_path, cause, bin_name):
     assert not recorder.key_hit("ifu_cacheable_ingress", "accepted")
 
 
+def test_backend_redirect_closes_held_response_on_ifu_routed_cycle(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_request(dut, ready=0, fire=0, flush=0)
+    dut.set(_SIGNALS["backend_redirect"][0], 1)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    assert not recorder.key_hit("ifu_cacheable_flush", "backend_redirect_blocks")
+    _idle_request(dut)
+    dut.set(_SIGNALS["backend_redirect"][0], 0)
+    dut.set(_SIGNALS["ifu_backend_redirect"][0], 1)
+    dut.set(_SIGNALS["s0_flush"][0], 1)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+
+    assert recorder.key_hit("ifu_cacheable_flush", "backend_redirect_blocks")
+    assert recorder.key_hit("ifu_cacheable_flush", "flush_wins_fire")
+    hit = recorder.hits[recorder.definition_by_bin_id["BIN-812"].key]
+    evidence = hit.evidence[-1]
+    assert evidence["event"] == "ifu_s0_backend_redirect_blocks_aggregate_response"
+    assert evidence["redirect_cycle"] == 1
+    assert evidence["flush_cycle"] == 2
+    assert evidence["req_valid_at_flush"] == 0
+    assert not recorder.contract_errors
+
+
+def test_backend_redirect_does_not_credit_changed_aggregate_response(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_request(dut, ready=0, fire=0, flush=0, ftq0=(0, 3))
+    dut.set(_SIGNALS["backend_redirect"][0], 1)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    _set_request(dut, ready=1, fire=0, flush=1, ftq0=(0, 4))
+    dut.set(_SIGNALS["backend_redirect"][0], 0)
+    dut.set(_SIGNALS["ifu_backend_redirect"][0], 1)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+
+    assert not recorder.key_hit("ifu_cacheable_flush", "backend_redirect_blocks")
+    assert any(
+        error["event"] == "ifu_cacheable_backend_flush_source_changed"
+        for error in recorder.contract_errors
+    )
+
+
+def test_backend_redirect_missing_ifu_probe_is_contract_error(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    delattr(dut, _SIGNALS["ifu_backend_redirect"][0])
+    _set_request(dut, ready=0, fire=0, flush=0)
+    dut.set(_SIGNALS["backend_redirect"][0], 1)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    _idle_request(dut)
+    dut.set(_SIGNALS["backend_redirect"][0], 0)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+
+    assert not recorder.key_hit("ifu_cacheable_flush", "backend_redirect_blocks")
+    assert any(
+        error["event"] == "ifu_cacheable_backend_flush_internal_unobservable"
+        for error in recorder.contract_errors
+    )
+
+
 def test_cacheable_nonmatching_bpu_flush_allows_s0_fire(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
     _set_request(dut)

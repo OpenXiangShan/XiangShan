@@ -24,6 +24,11 @@ _CONTRACT_FAILURE_EVENTS = frozenset(
         "ifu_s2_registered_semantic_mismatch",
         "ifu_s1_s2_transaction_pending_collision",
         "ifu_s1_s2_transaction_timeout",
+        "ifu_cacheable_backend_flush_source_unobservable",
+        "ifu_cacheable_backend_flush_internal_unobservable",
+        "ifu_cacheable_backend_flush_source_changed",
+        "ifu_cacheable_backend_flush_lost_to_fire",
+        "ifu_cacheable_backend_flush_timeout",
     }
 )
 
@@ -98,6 +103,9 @@ _SIGNALS = {
         f"{_IFU_PREFIX}__Vtogcov__s1_icacheMeta_0_exception_value",
     ),
     "backend_redirect": ("Frontend_top.io_backend_toFtq_redirect_valid",),
+    "ifu_backend_redirect": (
+        f"{_IFU_PREFIX}__Vtogcov__io_fromFtq_redirect_valid",
+    ),
     "wb_redirect": (
         f"{_IFU_PREFIX}__Vtogcov__wbRedirect_valid",
         f"{_IFU_PREFIX}__Vtogcov__io_toFtq_wbRedirect_valid",
@@ -185,6 +193,7 @@ def initialize_ifu_cacheable_pipeline_state(recorder) -> None:
     recorder._ifu_cacheable_alignments = set()
     recorder._ifu_cacheable_fetch_sizes = set()
     recorder._ifu_cacheable_last_ftq_ptr = None
+    recorder._ifu_cacheable_backend_flush_pending = None
     recorder._ifu_upstream_suppression_pending = deque(maxlen=8)
     recorder._ifu_late_fault_stall_pending = None
     recorder._ifu_late_fault_delivery_pending = None
@@ -1540,6 +1549,151 @@ def _sample_verified_transfer(recorder, cycle: int, s1_snapshot: Optional[dict])
     recorder._ifu_cacheable_pending_transfer = None
 
 
+def _arm_backend_flush_causality(
+    recorder,
+    cycle: int,
+    *,
+    source: Optional[dict],
+    req_valid: Optional[int],
+    s0_fire: Optional[int],
+    backend_redirect: Optional[int],
+) -> None:
+    if backend_redirect != 1 or req_valid != 1 or s0_fire != 0:
+        return
+    if source is None:
+        _record_mismatch(
+            recorder,
+            "ifu_cacheable_backend_flush_source_unobservable",
+            cycle,
+            input_path=_SIGNALS["backend_redirect"][0],
+        )
+        return
+    pending = recorder._ifu_cacheable_backend_flush_pending
+    if pending is not None:
+        if pending["source"] == source:
+            return
+        _record_mismatch(
+            recorder,
+            "ifu_cacheable_backend_flush_source_changed",
+            cycle,
+            redirect_cycle=int(pending["redirect_cycle"]),
+            expected=pending["source"],
+            observed=source,
+        )
+    recorder._ifu_cacheable_backend_flush_pending = {
+        "redirect_cycle": int(cycle),
+        "source": source,
+        "input_path": _SIGNALS["backend_redirect"][0],
+        "ifu_path": _SIGNALS["ifu_backend_redirect"][0],
+    }
+
+
+def _resolve_backend_flush_causality(
+    recorder,
+    cycle: int,
+    *,
+    source: Optional[dict],
+    req_valid: Optional[int],
+    req_ready: Optional[int],
+    s0_fire: Optional[int],
+    s0_flush: Optional[int],
+    ifu_backend_redirect: Optional[int],
+) -> bool:
+    pending = recorder._ifu_cacheable_backend_flush_pending
+    if pending is None:
+        return False
+    age = int(cycle) - int(pending["redirect_cycle"])
+    if age <= 0:
+        return False
+    if ifu_backend_redirect is None:
+        _record_mismatch(
+            recorder,
+            "ifu_cacheable_backend_flush_internal_unobservable",
+            cycle,
+            redirect_cycle=int(pending["redirect_cycle"]),
+            path=pending["ifu_path"],
+        )
+        recorder._ifu_cacheable_backend_flush_pending = None
+        return False
+    if req_valid == 1 and source is None:
+        _record_mismatch(
+            recorder,
+            "ifu_cacheable_backend_flush_source_unobservable",
+            cycle,
+            redirect_cycle=int(pending["redirect_cycle"]),
+            input_path=pending["input_path"],
+        )
+        recorder._ifu_cacheable_backend_flush_pending = None
+        return False
+    if req_valid == 1 and source != pending["source"]:
+        _record_mismatch(
+            recorder,
+            "ifu_cacheable_backend_flush_source_changed",
+            cycle,
+            redirect_cycle=int(pending["redirect_cycle"]),
+            expected=pending["source"],
+            observed=source,
+        )
+        recorder._ifu_cacheable_backend_flush_pending = None
+        return False
+    if ifu_backend_redirect == 1:
+        if s0_fire == 1 or s0_flush != 1:
+            _record_mismatch(
+                recorder,
+                "ifu_cacheable_backend_flush_lost_to_fire",
+                cycle,
+                redirect_cycle=int(pending["redirect_cycle"]),
+                s0_fire=s0_fire,
+                s0_flush=s0_flush,
+                req_valid=req_valid,
+            )
+            recorder._ifu_cacheable_backend_flush_pending = None
+            return False
+        evidence = {
+            "event": "ifu_s0_backend_redirect_blocks_aggregate_response",
+            "redirect_cycle": int(pending["redirect_cycle"]),
+            "flush_cycle": int(cycle),
+            "pipeline_latency": int(age),
+            "req_valid_at_flush": req_valid,
+            "req_ready_at_flush": req_ready,
+            "s0_fire": s0_fire,
+            "s0_flush": s0_flush,
+            "backend_redirect_input_path": pending["input_path"],
+            "ifu_backend_redirect_path": pending["ifu_path"],
+            "source": pending["source"],
+        }
+        recorder.mark("ifu_cacheable_flush", "flush_wins_fire", cycle, evidence)
+        recorder.mark("ifu_cacheable_flush", "backend_redirect_blocks", cycle, evidence)
+        recorder._ifu_cacheable_backend_flush_pending = None
+        return True
+    if s0_fire == 1:
+        _record_mismatch(
+            recorder,
+            "ifu_cacheable_backend_flush_lost_to_fire",
+            cycle,
+            redirect_cycle=int(pending["redirect_cycle"]),
+            s0_fire=s0_fire,
+            s0_flush=s0_flush,
+            req_valid=req_valid,
+        )
+        recorder._ifu_cacheable_backend_flush_pending = None
+        return False
+    if age > 3:
+        _record_mismatch(
+            recorder,
+            "ifu_cacheable_backend_flush_timeout",
+            cycle,
+            redirect_cycle=int(pending["redirect_cycle"]),
+            age=int(age),
+            req_valid=req_valid,
+            s0_fire=s0_fire,
+            s0_flush=s0_flush,
+            ifu_backend_redirect=ifu_backend_redirect,
+        )
+        recorder._ifu_cacheable_backend_flush_pending = None
+    return False
+
+
 def sample_ifu_cacheable_pipeline_coverage(recorder, env, cycle: int) -> None:
     if _dut(recorder) is None:
         return
@@ -1638,6 +1792,7 @@ def sample_ifu_cacheable_pipeline_coverage(recorder, env, cycle: int) -> None:
         recorder._ifu_cacheable_s1_stall = None
 
     backend_redirect = _read_signal(recorder, "backend_redirect")
+    ifu_backend_redirect = _read_signal(recorder, "ifu_backend_redirect")
     wb_redirect = _read_signal(recorder, "wb_redirect")
     bpu_s3_flush = _read_signal(recorder, "bpu_s3_flush")
     s0_flush_bpu = _read_signal(recorder, "s0_flush_bpu")
@@ -1646,14 +1801,31 @@ def sample_ifu_cacheable_pipeline_coverage(recorder, env, cycle: int) -> None:
         "event": "ifu_s0_flush_blocks_icache_return",
         "req_ready": req_ready,
         "backend_redirect": backend_redirect,
+        "ifu_backend_redirect": ifu_backend_redirect,
         "wb_redirect": wb_redirect,
         "bpu_s3_flush": bpu_s3_flush,
         "s0_flush_bpu": s0_flush_bpu,
         "source": source,
     }
+    had_backend_flush_pending = recorder._ifu_cacheable_backend_flush_pending is not None
+    causal_backend_flush = _resolve_backend_flush_causality(
+        recorder,
+        cycle,
+        source=source,
+        req_valid=req_valid,
+        req_ready=req_ready,
+        s0_fire=s0_fire,
+        s0_flush=s0_flush,
+        ifu_backend_redirect=ifu_backend_redirect,
+    )
     if flush_blocks:
-        recorder.mark("ifu_cacheable_flush", "flush_wins_fire", cycle, flush_evidence)
-        if backend_redirect == 1:
+        if not causal_backend_flush:
+            recorder.mark("ifu_cacheable_flush", "flush_wins_fire", cycle, flush_evidence)
+        if (
+            (backend_redirect == 1 or ifu_backend_redirect == 1)
+            and not causal_backend_flush
+            and not had_backend_flush_pending
+        ):
             recorder.mark("ifu_cacheable_flush", "backend_redirect_blocks", cycle, flush_evidence)
         if wb_redirect == 1:
             recorder.mark("ifu_cacheable_flush", "wb_redirect_blocks", cycle, flush_evidence)
@@ -1672,6 +1844,16 @@ def sample_ifu_cacheable_pipeline_coverage(recorder, env, cycle: int) -> None:
                     },
                     producer="ifu_cacheable_bpu_window_sampler",
                 )
+
+    if not flush_blocks:
+        _arm_backend_flush_causality(
+            recorder,
+            cycle,
+            source=source,
+            req_valid=req_valid,
+            s0_fire=s0_fire,
+            backend_redirect=backend_redirect,
+        )
 
     accepted = req_valid == 1 and req_ready == 1 and s0_fire == 1 and s0_flush == 0
     if accepted and source is not None:

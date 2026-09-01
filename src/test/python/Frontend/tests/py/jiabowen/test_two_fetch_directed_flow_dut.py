@@ -5,6 +5,10 @@ from typing import Iterable, Sequence
 
 import pytest
 
+from env.funcov.py.ifu.cacheable_pipeline_funcov import (
+    _SIGNALS as _IFU_CACHEABLE_SIGNALS,
+    _request_snapshot as _ifu_cacheable_request_snapshot,
+)
 from env.funcov.py.ftq.sampler import _TWO_FETCH_SIGNALS
 from env.runtime.pylib import frontend_offset_path
 from env.sequences import LoadProgramSequence
@@ -146,6 +150,11 @@ def _read_required(recorder, names: Iterable[str], *, label: str) -> int:
 def _read_key(recorder, key: str) -> int:
     assert key in _TWO_FETCH_SIGNALS, key
     return _read_required(recorder, _TWO_FETCH_SIGNALS[key], label=key)
+
+
+def _read_cacheable_key(recorder, key: str) -> int:
+    assert key in _IFU_CACHEABLE_SIGNALS, key
+    return _read_required(recorder, _IFU_CACHEABLE_SIGNALS[key], label=key)
 
 
 def _payload_signal_names(recorder) -> tuple[str, ...]:
@@ -730,4 +739,181 @@ def test_backend_redirect_drops_dual_miss_and_ignores_delayed_old_response(env):
         }
         for item in recorder.risk_observations
     ), recorder.risk_observations
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-812", "BIN-816")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_backend_redirect_blocks_held_icache_response(env):
+    _load_and_reset(env)
+    recorder = _recorder(env)
+    _warm_frontend_execution(env)
+
+    env.backend_model.set_can_accept(0)
+    held_source: dict | None = None
+    held_stable_cycles = 0
+    required_stable_cycles = _cycle_limit("TB_IFU_HELD_STABLE_CYCLES", 3)
+    for _ in range(_cycle_limit("TB_IFU_HELD_RESPONSE_MAX_CYCLES", 1024)):
+        env.step(1)
+        if (
+            _read_cacheable_key(recorder, "req_valid") == 1
+            and _read_cacheable_key(recorder, "req_ready") == 0
+            and _read_cacheable_key(recorder, "s0_fire") == 0
+            and _read_cacheable_key(recorder, "s0_flush") == 0
+        ):
+            current_source = _ifu_cacheable_request_snapshot(recorder)
+            if current_source is not None and current_source == held_source:
+                held_stable_cycles += 1
+            else:
+                held_source = current_source
+                held_stable_cycles = 1 if current_source is not None else 0
+            if held_stable_cycles >= required_stable_cycles:
+                break
+        else:
+            held_source = None
+            held_stable_cycles = 0
+    assert held_source is not None, {
+        "reason": "backend pressure did not hold an aggregate ICache response",
+        "cycle": int(env.current_cycle),
+        "held_stable_cycles": held_stable_cycles,
+        "required_stable_cycles": required_stable_cycles,
+        "icache": env.icache_agent.get_stats(),
+        "backend": env.backend_model.get_stats(),
+    }
+    assert held_stable_cycles >= required_stable_cycles
+
+    valid_blocks = [
+        block for block in held_source["blocks"] if int(block.get("valid", 0)) == 1
+    ]
+    assert valid_blocks
+    old_windows = {
+        (
+            int(block["ftqIdx_flag"]),
+            int(block["ftqIdx_value"]),
+            int(block["startVAddr_addr"]) << 1,
+        )
+        for block in valid_blocks
+    }
+    old_starts = {start_pc for _, _, start_pc in old_windows}
+    redirect_target = next(
+        _BASE + block * _BLOCK_BYTES
+        for block in range(_BLOCK_COUNT)
+        if _BASE + block * _BLOCK_BYTES not in old_starts
+    )
+    env.backend_model.inject_redirect(
+        redirect_target,
+        "ifu_held_response_competition",
+        delay_cycles=0,
+    )
+
+    witness: dict | None = None
+    phase_samples: list[dict] = []
+    for _ in range(16):
+        env.step(1)
+        sample = {
+            key: _read_cacheable_key(recorder, key)
+            for key in (
+                "req_valid",
+                "req_ready",
+                "s0_fire",
+                "s0_flush",
+                "backend_redirect",
+                "ifu_backend_redirect",
+            )
+        }
+        phase_samples.append({"cycle": int(env.current_cycle), **sample})
+        if sample["backend_redirect"] == 1:
+            assert _read_key(recorder, "backend_redirect_target") == redirect_target
+        if (
+            recorder.key_hit("ifu_cacheable_flush", "backend_redirect_blocks")
+            and recorder.key_hit("ifu_cacheable_flush", "flush_wins_fire")
+        ):
+            hit = recorder.hits[recorder.definition_by_bin_id["BIN-812"].key]
+            witness = dict(hit.evidence[-1])
+            break
+    assert witness is not None, {
+        "reason": "backend redirect did not suppress the held aggregate response",
+        "held_source": held_source,
+        "redirect_target": redirect_target,
+        "cycle": int(env.current_cycle),
+        "phase_samples": phase_samples,
+    }
+    assert witness["event"] == "ifu_s0_backend_redirect_blocks_aggregate_response"
+    assert witness["source"] == held_source
+    assert witness["s0_fire"] == 0
+    assert witness["s0_flush"] == 1
+    assert witness["pipeline_latency"] <= 3
+
+    env.backend_model.set_can_accept(1)
+    first_fire: dict | None = None
+    stale_pipeline: list[dict] = []
+    for _ in range(_cycle_limit("TB_IFU_REDIRECT_RECOVERY_MAX_CYCLES", 4000)):
+        env.step(1)
+        for stage, valid_key in (("s1", "s1_valid"), ("s2", "ifu_s2_valid")):
+            stage_valid = (
+                _read_cacheable_key(recorder, valid_key)
+                if stage == "s1"
+                else _read_key(recorder, valid_key)
+            )
+            if stage_valid != 1:
+                continue
+            for block in range(2):
+                valid = _read_required(
+                    recorder,
+                    (f"Frontend_top.Frontend.inner_ifu.{stage}_fetchBlock_{block}_valid",),
+                    label=f"{stage}.fetchBlock[{block}].valid",
+                )
+                if valid != 1:
+                    continue
+                ftq_flag = _read_required(
+                    recorder,
+                    (f"Frontend_top.Frontend.inner_ifu.{stage}_fetchBlock_{block}_ftqIdx_flag",),
+                    label=f"{stage}.fetchBlock[{block}].ftqIdx.flag",
+                )
+                ftq_value = _read_required(
+                    recorder,
+                    (f"Frontend_top.Frontend.inner_ifu.{stage}_fetchBlock_{block}_ftqIdx_value",),
+                    label=f"{stage}.fetchBlock[{block}].ftqIdx.value",
+                )
+                start_pc = 2 * _read_required(
+                    recorder,
+                    (f"Frontend_top.Frontend.inner_ifu.{stage}_fetchBlock_{block}_startVAddr_addr",),
+                    label=f"{stage}.fetchBlock[{block}].startVAddr",
+                )
+                identity = (int(ftq_flag), int(ftq_value), int(start_pc))
+                if identity in old_windows:
+                    stale_pipeline.append(
+                        {
+                            "cycle": int(env.current_cycle),
+                            "stage": stage,
+                            "block": block,
+                            "identity": identity,
+                        }
+                    )
+
+        if (
+            _read_key(recorder, "to_ibuffer_valid") == 1
+            and _read_key(recorder, "to_ibuffer_ready") == 1
+        ):
+            entries = _ibuffer_entries(recorder)
+            if first_fire is None and entries:
+                first_fire = {"cycle": int(env.current_cycle), "entries": entries}
+                break
+
+    assert not stale_pipeline, {
+        "reason": "held pre-redirect response survived into IFU pipeline",
+        "witness": witness,
+        "old_windows": sorted(old_windows),
+        "stale_pipeline": stale_pipeline,
+    }
+    assert first_fire is not None, {
+        "reason": "redirect target never reached IBuffer",
+        "witness": witness,
+        "redirect_target": redirect_target,
+    }
+    assert int(first_fire["entries"][0]["pc"]) == redirect_target, {
+        "reason": "first post-redirect IBuffer transfer did not start at target",
+        "redirect_target": redirect_target,
+        "first_fire": first_fire,
+    }
     assert not env.monitor.get_errors()
