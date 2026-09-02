@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import pytest
 
+from env.funcov.py.ifu.mmio_nc_owner_funcov import (
+    derive_nc_pending,
+    read_nc_timing_runtime_snapshot,
+)
 from env.sequences import (
     TranslationPmpPmaEntry,
     TranslationPte,
@@ -14,46 +18,21 @@ from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
 
 
 _CFVEC_EXCEPTION_BITS = (1, 2, 12, 19, 20)
-_NC_TIMING_SIGNALS = {
-    "nc_pending": (
-        "Frontend_top.Frontend.u_frontend_funcov_hub.u_nc.nc_pending",
-    ),
-    "backend_redirect": (
-        "Frontend_top.Frontend.inner_ftq.backendRedirect_valid",
-    ),
-    "ifu_flush": (
-        "Frontend_top.Frontend.inner_ifu.s2_flush",
-    ),
-    "uncache_resp_valid": (
-        "Frontend_top.Frontend.inner_ifu._uncacheUnit_io_resp_valid",
-    ),
-    "uncache_state": (
-        "Frontend_top.Frontend.inner_ifu.uncacheUnit.uncacheState",
-    ),
-    "to_ibuffer_valid": (
-        "Frontend_top.Frontend._inner_ifu_io_toIBuffer_valid",
-    ),
-    "to_ibuffer_ready": (
-        "Frontend_top.Frontend._inner_ibuffer_io_in_ready",
-    ),
-    "to_ibuffer_enq": (
-        "Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_enqEnable",
-    ),
-    "exception_cross_page": (
-        "Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_exceptionCrossPage",
-    ),
-    "exception_type": (
-        "Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_exceptionType_value",
-    ),
-    "prev_end_half_rvi": (
-        "Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_valid",
-    ),
-    "wb_path_valid": (
-        "Frontend_top.Frontend.inner_ifu.wbValid",
-    ),
-    "wb_redirect": (
-        "Frontend_top.Frontend.inner_ifu.wbRedirect_valid",
-    ),
+_NC_TIMING_SNAPSHOT_KEYS = {
+    "backend_redirect": "backend_redirect",
+    "ifu_flush": "ifu_flush",
+    "uncache_resp_valid": "resp_valid",
+    "instr_uncache_resp_valid": "instr_resp_valid",
+    "uncache_state": "uncache_state",
+    "to_ibuffer_valid": "to_valid",
+    "to_ibuffer_ready": "to_ready",
+    "to_ibuffer_enq": "to_enq",
+    "exception_cross_page": "to_exception_cross_page",
+    "exception_type": "to_exception",
+    "prev_end_half_rvi": "prev_end_half",
+    "wb_path_valid": "wb_path_valid",
+    "wb_redirect": "checker_redirect",
+    "tl_a_valid": "tl_a_valid",
 }
 
 
@@ -61,15 +40,28 @@ def _register_nc_timing_observer(env) -> list[dict]:
     samples: list[dict] = []
 
     def capture(cycle, current_env) -> None:
+        recorder = current_env.functional_coverage
+        assert recorder is not None, "NC timing observer requires functional coverage"
+        snapshot = read_nc_timing_runtime_snapshot(recorder, current_env.dut)
+        missing = [
+            snapshot_key
+            for snapshot_key in _NC_TIMING_SNAPSHOT_KEYS.values()
+            if snapshot[snapshot_key] is None
+        ]
+        assert not missing, {"missing_runtime_semantics": missing}
+        state = getattr(recorder, "_ifu_mmio_nc_owner_state", None)
+        assert isinstance(state, dict) and "nc_active" in state
         sample = {
-            name: uncache._require_first_dut_signal(current_env, signal_names)
-            for name, signal_names in _NC_TIMING_SIGNALS.items()
+            name: int(snapshot[snapshot_key])
+            for name, snapshot_key in _NC_TIMING_SNAPSHOT_KEYS.items()
         }
+        sample["nc_pending"] = int(
+            derive_nc_pending(snapshot, nc_active=bool(state["nc_active"]))
+        )
         sample["cycle"] = int(cycle)
-        sample["tl_a_valid"] = int(current_env.uncache_if.a_valid.value)
         samples.append(sample)
 
-    env.register_cycle_observer(capture)
+    env.register_pre_drive_cycle_observer(capture)
     return samples
 
 
@@ -1141,17 +1133,38 @@ def test_nc_response_and_redirect_same_cycle_recover_on_cacheable_path(env):
     )
 
     assert uncache._wait_for_uncache_resp(env, max_cycles=6000) > 0
+    # Both agents drive after the ready-cycle rising-edge callback. Step() is
+    # measured in half-cycles, so advance through the next rising edge where
+    # the DUT consumes the response and redirect together.
+    env.step(2)
     coincident = [
         sample
         for sample in timing_samples
         if sample["backend_redirect"] == 1
         and sample["ifu_flush"] == 1
-        and sample["uncache_resp_valid"] == 1
+        and sample["instr_uncache_resp_valid"] == 1
+        and sample["uncache_resp_valid"] == 0
+    ]
+    timing_window = [
+        {
+            key: sample[key]
+            for key in (
+                "cycle",
+                "backend_redirect",
+                "ifu_flush",
+                "uncache_resp_valid",
+                "instr_uncache_resp_valid",
+                "uncache_state",
+                "nc_pending",
+            )
+        }
+        for sample in timing_samples
+        if ready_cycle - 2 <= sample["cycle"] <= ready_cycle + 2
     ]
     assert coincident, {
         "ready_cycle": ready_cycle,
         "redirect_delay": redirect_delay,
-        "timing_tail": timing_samples[-64:],
+        "timing_window": timing_window,
     }
     assert uncache._wait_for_icache_req(env, max_cycles=6000) > 0
     assert uncache._wait_for_observed_pc(env, cacheable_target, max_cycles=12000), {

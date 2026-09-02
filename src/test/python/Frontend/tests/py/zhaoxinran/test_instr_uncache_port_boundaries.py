@@ -632,6 +632,10 @@ _IFU_PREV_HALF_RVI_SIGNALS = {
         "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRviInfo_bits_pc_addr",
     ),
 }
+_IFU_S1_VALID_SIGNALS = (
+    "Frontend_top.Frontend.inner_ifu.s1_valid",
+    "TOP.Frontend_top.Frontend.inner_ifu.s1_valid",
+)
 _IFU_BACKEND_REDIRECT_SIGNALS = (
     "Frontend_top.Frontend.inner_ftq.backendRedirect_valid",
     "TOP.Frontend_top.Frontend.inner_ftq.backendRedirect_valid",
@@ -654,6 +658,7 @@ def test_uncache_prev_half_signal_contract_matches_dut_inventory():
     }
     required = [
         *_IFU_PREV_HALF_RVI_SIGNALS.values(),
+        _IFU_S1_VALID_SIGNALS,
         _IFU_BACKEND_REDIRECT_SIGNALS,
         _IFU_UNCACHE_NEED_RESEND_SIGNALS,
     ]
@@ -675,6 +680,7 @@ def _capture_prev_half_rvi_state(env, cycle: int) -> dict:
         "s2_valid": _require_first_dut_signal(env, _IFU_PREV_HALF_RVI_SIGNALS["s2_valid"]),
         "s2_data": _require_first_dut_signal(env, _IFU_PREV_HALF_RVI_SIGNALS["s2_data"]),
         "s2_pc": _require_first_dut_signal(env, _IFU_PREV_HALF_RVI_SIGNALS["s2_pc"]),
+        "s1_pipeline_valid": _require_first_dut_signal(env, _IFU_S1_VALID_SIGNALS),
         "backend_redirect": _require_first_dut_signal(env, _IFU_BACKEND_REDIRECT_SIGNALS),
         "need_resend": _require_first_dut_signal(env, _IFU_UNCACHE_NEED_RESEND_SIGNALS),
         "req_count": int(stats.get("req_count", 0)),
@@ -701,6 +707,61 @@ def _pending_uncache_samples(samples: Sequence[dict], addr: int) -> list[dict]:
         and sample["last_response_addr"] != int(addr)
         and int(sample["pending_count"]) > 0
     ]
+
+
+def _half_rvi_state_is_quiescent(sample: dict) -> bool:
+    return (
+        int(sample["s0"]) == 0
+        and int(sample["s1_data"]) == 0
+        and int(sample["s1_pc"]) == 0
+        and (int(sample["s1"]) == 0 or int(sample["s1_pipeline_valid"]) == 0)
+        and (int(sample["s2"]) == 0 or int(sample["s2_valid"]) == 0)
+    )
+
+
+def test_half_rvi_quiescence_requires_no_consumable_stale_state():
+    sample = {
+        "s0": 0,
+        "s1": 1,
+        "s1_data": 0,
+        "s1_pc": 0,
+        "s1_pipeline_valid": 0,
+        "s2": 1,
+        "s2_valid": 0,
+    }
+    assert _half_rvi_state_is_quiescent(sample)
+
+    active_s1 = dict(sample, s1_pipeline_valid=1)
+    assert not _half_rvi_state_is_quiescent(active_s1)
+
+    active_s2 = dict(sample, s2_valid=1)
+    assert not _half_rvi_state_is_quiescent(active_s2)
+
+    stale_payload = dict(sample, s1_data=0x13)
+    assert not _half_rvi_state_is_quiescent(stale_payload)
+
+
+def _wait_for_first_active_s1_after(
+    env,
+    samples: Sequence[dict],
+    cycle: int,
+    *,
+    max_cycles: int = 64,
+) -> dict | None:
+    for _ in range(int(max_cycles)):
+        active = next(
+            (
+                sample
+                for sample in samples
+                if int(sample["cycle"]) > int(cycle)
+                and int(sample["s1_pipeline_valid"]) == 1
+            ),
+            None,
+        )
+        if active is not None:
+            return active
+        env.step(1)
+    return None
 
 
 def _assert_ifu_uncache_state(env, expected: int) -> None:
@@ -2590,16 +2651,22 @@ def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
     ]
     # S2 payload registers are RegEnable state; redirect invalidates them via
     # s2_valid rather than requiring the physically stale bits to be zero.
-    assert any(
-        int(sample["s0"]) == 0
-        and int(sample["s1"]) == 0
-        and int(sample["s1_data"]) == 0
-        and int(sample["s1_pc"]) == 0
-        and int(sample["s2_valid"]) == 0
-        for sample in redirect_clear_window
-    ), {
+    assert any(_half_rvi_state_is_quiescent(sample) for sample in redirect_clear_window), {
         "reason": "backend redirect did not clear saved half-RVI payload",
         "redirect_clear_window": redirect_clear_window,
+    }
+    first_recovery_s1 = _wait_for_first_active_s1_after(
+        env,
+        prev_half_samples,
+        first_redirect_cycle,
+    )
+    assert first_recovery_s1 is not None, {
+        "reason": "redirect target never reached an active S1 transaction",
+        "samples": prev_half_samples[-16:],
+    }
+    assert int(first_recovery_s1["s1"]) == 0, {
+        "reason": "redirect target inherited the old half-RVI valid state",
+        "sample": first_recovery_s1,
     }
     assert not any(
         int(obs.pc) == _CROSS_PAGE_PC
@@ -2704,14 +2771,22 @@ def test_uncache_cross_page_half_is_flushed_while_second_page_response_pending(e
         for sample in redirect_samples
         if first_redirect_cycle <= int(sample["cycle"]) <= first_redirect_cycle + 3
     ]
-    assert any(
-        int(sample["s0"]) == 0
-        and int(sample["s1"]) == 0
-        and int(sample["s1_data"]) == 0
-        and int(sample["s1_pc"]) == 0
-        and int(sample["s2_valid"]) == 0
-        for sample in clear_window
-    ), {"clear_window": clear_window}
+    assert any(_half_rvi_state_is_quiescent(sample) for sample in clear_window), {
+        "clear_window": clear_window
+    }
+    first_recovery_s1 = _wait_for_first_active_s1_after(
+        env,
+        prev_half_samples,
+        first_redirect_cycle,
+    )
+    assert first_recovery_s1 is not None, {
+        "reason": "redirect target never reached an active S1 transaction",
+        "samples": prev_half_samples[-16:],
+    }
+    assert int(first_recovery_s1["s1"]) == 0, {
+        "reason": "redirect target inherited the old half-RVI valid state",
+        "sample": first_recovery_s1,
+    }
     assert not any(
         int(obs.pc) == _CROSS_PAGE_PC
         for obs in env.monitor.observations[observations_before_redirect:]
