@@ -23,6 +23,10 @@ class seq_csr_common;
     static bit          csr_control_enable = 1'b0;
     static int          csr_control_min_interval = 1;
     static int          csr_control_max_interval = 1;
+    // 中文注释：静态 Sv39 CSR 的 PBMTE 快照。load_from_plus() 在 testcase 启动时冻结，
+    // getter 只供静态 CSR sequence 驱动 mPBMTE/hPBMTE；不会改写 CSR monitor runtime state。
+    static bit          mmu_sv39_m_pbmte_en = 1'b0;
+    static bit          mmu_sv39_h_pbmte_en = 1'b0;
     static bit          sfence_control_enable = 1'b0;
     static int          sfence_control_min_interval = 1;
     static int          sfence_control_max_interval = 1;
@@ -290,6 +294,8 @@ class seq_csr_common;
         csr_control_enable          = plus::MEMBLOCK_CSR_CONTROL_ENABLE;
         csr_control_min_interval    = plus::MEMBLOCK_CSR_CONTROL_MIN_INTERVAL;
         csr_control_max_interval    = plus::MEMBLOCK_CSR_CONTROL_MAX_INTERVAL;
+        mmu_sv39_m_pbmte_en          = plus::MEMBLOCK_MMU_SV39_M_PBMTE_EN;
+        mmu_sv39_h_pbmte_en          = plus::MEMBLOCK_MMU_SV39_H_PBMTE_EN;
         sfence_control_enable       = plus::MEMBLOCK_SFENCE_CONTROL_ENABLE;
         sfence_control_min_interval = plus::MEMBLOCK_SFENCE_CONTROL_MIN_INTERVAL;
         sfence_control_max_interval = plus::MEMBLOCK_SFENCE_CONTROL_MAX_INTERVAL;
@@ -1068,6 +1074,16 @@ class seq_csr_common;
         check_initialized("get_csr_control_max_interval");
         return csr_control_max_interval;
     endfunction:get_csr_control_max_interval
+
+    static function bit get_mmu_sv39_m_pbmte_en();
+        check_initialized("get_mmu_sv39_m_pbmte_en");
+        return mmu_sv39_m_pbmte_en;
+    endfunction:get_mmu_sv39_m_pbmte_en
+
+    static function bit get_mmu_sv39_h_pbmte_en();
+        check_initialized("get_mmu_sv39_h_pbmte_en");
+        return mmu_sv39_h_pbmte_en;
+    endfunction:get_mmu_sv39_h_pbmte_en
 
     static function bit get_sfence_control_enable();
         check_initialized("get_sfence_control_enable");
