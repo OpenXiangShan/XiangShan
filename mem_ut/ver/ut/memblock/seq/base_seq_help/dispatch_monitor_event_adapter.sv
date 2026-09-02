@@ -211,17 +211,26 @@ class dispatch_monitor_event_adapter extends uvm_object;
 
         case (wb_event.target)
             MEMBLOCK_ISSUE_TARGET_LOAD: begin
-                if (!status.active_lq_mapped) begin
-                    if (strict_candidate) `uvm_fatal("INT_WB_ATTACH", $sformatf("LOAD uid=%0d has no active LQ mapping", uid))
-                    return 1'b0;
-                end
                 lq_key.flag = status.lqIdx_flag;
                 lq_key.value = status.lqIdx_value;
                 if (!data.is_valid_lq_key(lq_key)) begin
                     `uvm_fatal("INT_WB_ATTACH", $sformatf("LOAD uid=%0d has incomplete LQ key", uid))
                 end
-                if (!data.lookup_active_uid_by_lq(lq_key, mapped_uid) || mapped_uid != uid) begin
-                    `uvm_fatal("INT_WB_ATTACH", $sformatf("LOAD LQ owner mismatch uid=%0d", uid))
+                if (status.active_lq_mapped) begin
+                    if (!data.lookup_active_uid_by_lq(lq_key, mapped_uid) || mapped_uid != uid) begin
+                        `uvm_fatal("INT_WB_ATTACH", $sformatf("LOAD LQ owner mismatch uid=%0d", uid))
+                    end
+                end else begin
+                    // 中文注释：真实 lqDeq 会先释放可复用的物理 LQ owner map；后到的
+                    // scalar Load WB 已由 ROB、issue epoch 和 flush provenance 唯一归属当前 UID，
+                    // 此处只复用 status 保留的历史 LQ identity，不能再按可能复用的 live map 反查。
+                    if (!status.lsq_deq) begin
+                        if (strict_candidate) begin
+                            `uvm_fatal("INT_WB_ATTACH",
+                                       $sformatf("LOAD uid=%0d lost active LQ mapping before lqDeq", uid))
+                        end
+                        return 1'b0;
+                    end
                 end
                 wb_event.lq_key = lq_key;
                 wb_event.has_lq = 1'b1;

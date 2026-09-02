@@ -3019,10 +3019,13 @@ class common_data_transaction extends uvm_object;
 
     function bit resolve_uid_for_event(input memblock_wb_event_t wb_event,
                                        output memblock_uid_t uid);
-        memblock_uid_t rob_uid;
-        memblock_uid_t lq_uid;
-        memblock_uid_t sq_uid;
-        bit            have_uid;
+        memblock_uid_t     rob_uid;
+        memblock_uid_t     lq_uid;
+        memblock_uid_t     sq_uid;
+        status_transaction resolved_status;
+        memblock_lq_key_t  resolved_lq_key;
+        bit                use_dequeued_load_lq_identity;
+        bit                have_uid;
 
         uid = 0;
         have_uid = 1'b0;
@@ -3045,14 +3048,29 @@ class common_data_transaction extends uvm_object;
             have_uid = 1'b1;
         end
         if (wb_event.has_lq) begin
-            if (!lookup_active_uid_by_lq(wb_event.lq_key, lq_uid)) begin
-                return 1'b0;
+            use_dequeued_load_lq_identity = 1'b0;
+            if (have_uid && wb_event.target == MEMBLOCK_ISSUE_TARGET_LOAD) begin
+                resolved_status = get_status(uid);
+                resolved_lq_key.flag  = resolved_status.lqIdx_flag;
+                resolved_lq_key.value = resolved_status.lqIdx_value;
+                // 中文注释：Load WB 已先由 UID/ROB 归属后，真实 lqDeq 可以让该物理
+                // LQ slot 被后续 UID 复用。此时 event LQ key 仅校验当前 UID 的历史 identity，
+                // 不能再查询 uid_by_lq 并把新 owner 误判为这笔 WB 的 owner。
+                use_dequeued_load_lq_identity = !resolved_status.active_lq_mapped &&
+                                                 resolved_status.lsq_deq &&
+                                                 resolved_lq_key.flag == wb_event.lq_key.flag &&
+                                                 resolved_lq_key.value == wb_event.lq_key.value;
             end
-            if (have_uid && uid != lq_uid) begin
-                `uvm_fatal("COMMON_DATA", $sformatf("WB_UID_MISMATCH uid=%0d lq_uid=%0d", uid, lq_uid))
+            if (!use_dequeued_load_lq_identity) begin
+                if (!lookup_active_uid_by_lq(wb_event.lq_key, lq_uid)) begin
+                    return 1'b0;
+                end
+                if (have_uid && uid != lq_uid) begin
+                    `uvm_fatal("COMMON_DATA", $sformatf("WB_UID_MISMATCH uid=%0d lq_uid=%0d", uid, lq_uid))
+                end
+                uid = lq_uid;
+                have_uid = 1'b1;
             end
-            uid = lq_uid;
-            have_uid = 1'b1;
         end
         if (wb_event.has_sq) begin
             if (!lookup_active_uid_by_sq(wb_event.sq_key, sq_uid)) begin
