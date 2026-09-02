@@ -21,7 +21,7 @@ import chisel3.util._
 class BpuFlushCtrlIO(numPredictors: Int) extends Bundle {
   val flush      = Input(Bool())       // phase-1: io.flush (Bpu top-level Option port's .get)
   val redirectEn = Input(Bool())       // phase-2: io.fromFtq.redirect.valid
-  val bpuFlushEn = Input(Bool())       // runtime enable: ctrl.bpuFlushEn (Option's .get)
+  val bpuFlushEn = Input(Bool())       // sticky enable: once set, sbpctl.BPU_FLUSH_EN stays high until reset
   val flushMask  = Input(UInt(numPredictors.W))  // per-predictor enables on the phase-1 cycle
   val resetDone  = Input(Bool())       // aggregated done: all predictors selected by activeFlushMask
   val contextFlush = Output(Bool())

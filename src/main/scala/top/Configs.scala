@@ -520,7 +520,15 @@ class CVMTestCompile extends Config((site, here, up) => {
 })
 
 class BPUFlushCompile extends Config((site, here, up) => {
-  case XSTileKey => up(XSTileKey).map(_.copy(HasBpuFlush = true))
+  case XSTileKey => up(XSTileKey).map(_.copy(
+    HasBpuFlush = true,
+    HasBpuFlushDefault = false))
+})
+
+class BPUFlushDefaultOnCompile extends Config((site, here, up) => {
+  case XSTileKey => up(XSTileKey).map(_.copy(
+    HasBpuFlush = true,
+    HasBpuFlushDefault = true))
 })
 
 class MinimalAliasDebugConfig(n: Int = 1) extends Config(
@@ -556,6 +564,11 @@ class CVMTestConfig(n: Int = 1) extends Config(
 
 class BPUFlushConfig(n: Int = 1) extends Config(
   new BPUFlushCompile
+    ++ new DefaultConfig(n)
+) with DeprecatedConfigWarning
+
+class BPUFlushDefaultOnConfig(n: Int = 1) extends Config(
+  new BPUFlushDefaultOnCompile
     ++ new DefaultConfig(n)
 ) with DeprecatedConfigWarning
 

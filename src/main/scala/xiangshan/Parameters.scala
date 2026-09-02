@@ -60,6 +60,7 @@ case class XSCoreParameters
   HasBitmapCheck: Boolean = true,
   HasBitmapCheckDefault: Boolean = false,
   HasBpuFlush: Boolean = true,
+  HasBpuFlushDefault: Boolean = false,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
   HasHExtension: Boolean = true,
@@ -591,6 +592,7 @@ trait HasXSParameter {
   def HasBitmapCheck = coreParams.HasBitmapCheck
   def HasBitmapCheckDefault = coreParams.HasBitmapCheckDefault
   def HasBpuFlush: Boolean = coreParams.HasBpuFlush
+  def HasBpuFlushDefault: Boolean = coreParams.HasBpuFlushDefault
 
   /** prefetch config */
   def prefetcherSeq = coreParams.prefetcher
