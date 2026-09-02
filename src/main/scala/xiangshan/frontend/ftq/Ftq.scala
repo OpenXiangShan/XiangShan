@@ -185,6 +185,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   private val prediction = io.fromBpu.prediction
 
+  private val bpuS2Redirect = prediction.valid && prediction.bits.s2Override
   private val bpuS3Redirect = prediction.valid && prediction.bits.s3Override
 
   io.toBpu.bpuPtr := bpuPtr(0)
@@ -193,17 +194,20 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val predictionPtr = MuxCase(
     bpuPtr(0),
     Seq(
-      prediction.bits.s3Override -> io.fromBpu.s3FtqPtr
+      prediction.bits.s3Override -> io.fromBpu.s3FtqPtr,
+      prediction.bits.s2Override -> io.fromBpu.s2FtqPtr
     )
   )
 
   when(prediction.bits.s3Override) {
     bpuPtr := io.fromBpu.s3FtqPtr + 1.U
+  }.elsewhen(prediction.bits.s2Override) {
+    bpuPtr := io.fromBpu.s2FtqPtr + 1.U
   }.elsewhen(bpuEnqueue) {
     bpuPtr := bpuPtr + 1.U
   }
 
-  when((prediction.fire || bpuS3Redirect) && !redirect.valid) {
+  when((prediction.fire || bpuS2Redirect || bpuS3Redirect) && !redirect.valid) {
     entryQueue(predictionPtr.value).startPc     := prediction.bits.startPc
     entryQueue(predictionPtr.value).taken       := prediction.bits.taken
     entryQueue(predictionPtr.value).endPosition := prediction.bits.endPosition
@@ -251,10 +255,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
     fetchPtr := Mux(io.fromICache.fromMainPipe.realTwoFetchValid, fetchPtr + 2.U, fetchPtr + 1.U)
   }
 
-  // TODO: wait for Ifu/ICache to remove bpu s2 flush
-  for (stage <- 3 to 3) {
-    val redirect = if (stage == 3) prediction.bits.s3Override else false.B
-    val ftqIdx   = if (stage == 3) io.fromBpu.s3FtqPtr else 0.U.asTypeOf(new FtqPtr)
+  for (stage <- 2 to 3) {
+    val redirect = if (stage == 2) prediction.bits.s2Override else prediction.bits.s3Override
+    val ftqIdx   = if (stage == 2) io.fromBpu.s2FtqPtr else io.fromBpu.s3FtqPtr
 
     io.toICache.flushFromBpu.stage(stage).valid := redirect
     io.toICache.flushFromBpu.stage(stage).bits  := ftqIdx
@@ -352,7 +355,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // Interaction with backend
   // --------------------------------------------------------------------------------
 
-  io.toBackend.wen     := (prediction.fire || bpuS3Redirect) && !redirect.valid
+  io.toBackend.wen     := (prediction.fire || bpuS2Redirect || bpuS3Redirect) && !redirect.valid
   io.toBackend.ftqIdx  := predictionPtr.value
   io.toBackend.startPc := prediction.bits.startPc
 
@@ -580,7 +583,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   XSPerfSeqAccumulate(
     "resolve_branch_mispredicts_s1_source",
-    backendRedirect.valid && backendRedirect.bits.isMisPred && !redirectPerfMeta.bpSource.s3Override,
+    backendRedirect.valid && backendRedirect.bits.isMisPred &&
+      !redirectPerfMeta.bpSource.s2Override && !redirectPerfMeta.bpSource.s3Override,
     perf_mispredS1SourceVec
   )
 
@@ -632,7 +636,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   XSPerfSeqAccumulate(
     "commit_branch_mispredicts_s1_mispred_s1_source",
-    perf_commitHasMispredict && !commitPerfMeta.bpuPerf.bpSource.s3Override,
+    perf_commitHasMispredict &&
+      !commitPerfMeta.bpuPerf.bpSource.s2Override && !commitPerfMeta.bpuPerf.bpSource.s3Override,
     BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source)
   )
   XSPerfSeqAccumulate(

@@ -149,6 +149,7 @@ object BranchAttribute {
 class BpuPredictionSource extends Bundle {
   val s1Source:   UInt = BpuPredictionSource.Stage1()
   val s3Source:   UInt = BpuPredictionSource.Stage3()
+  val s2Override: Bool = Bool()
   val s3Override: Bool = Bool()
 
   def s1Ubtb:        Bool = s1Source === BpuPredictionSource.Stage1.Ubtb
@@ -202,6 +203,7 @@ class BpuPrediction(implicit p: Parameters) extends BpuBundle {
   val taken:       Bool      = Bool()
   val endPosition: UInt      = UInt(CfiPositionWidth.W)
   // override valid
+  val s2Override: Bool = Bool()
   val s3Override: Bool = Bool()
 
   def fromStage(startPc: GuardedPc, prediction: Prediction): Unit = {
@@ -336,11 +338,18 @@ class BpuPerfMeta(implicit p: Parameters) extends BpuBundle {
   val scUsed:       UInt                = UInt(NumBtbResultEntries.W)
   val startPc:      Pc                  = new Pc
   val s1Prediction: Prediction          = new Prediction
+  val s2Prediction: Prediction          = new Prediction
   val s3Prediction: Prediction          = new Prediction
   val mbtbMeta:     MainBtbMeta         = new MainBtbMeta
   val bpSource:     BpuPredictionSource = new BpuPredictionSource
 
-  def bpPred: Prediction = Mux(bpSource.s3Override, s3Prediction, s1Prediction)
+  def bpPred: Prediction = MuxCase(
+    s1Prediction,
+    Seq(
+      bpSource.s3Override -> s3Prediction,
+      bpSource.s2Override -> s2Prediction
+    )
+  )
 }
 
 class BpuMeta(implicit p: Parameters) extends BpuBundle {
