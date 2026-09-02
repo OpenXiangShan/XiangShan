@@ -1,6 +1,6 @@
 # V2 L2TLB PBMTE 驱动 PBMT 创建期门控与返回期 PF/GPF 叠加方案
 
-状态：`undo`，执行中。创建期门控、返回期 payload 冻结和 software-only 闭环已完成；real-DUT 动态 PBMTE smoke 待完成。
+状态：`undo`，实现完成；real-DUT 联调被已确认的 V2 RTL X 传播缺陷阻塞。创建期门控、返回期 payload 冻结、software-only 闭环与 dynamic smoke 编译均已完成；不把未通过的 real-DUT smoke 或任何 PBMTE-on 压力日志作为本计划验收结果。
 
 本文定义 V2 `L2TLB_agent` 对 PBMT 的两阶段建模：首次创建 live entry 时，按 request-time C-2 CSR 的 PBMTE 决定是否允许生成非零 PBMT；已经保存非零 PBMT 的 entry 在后续返回时，按 response-visible C-2 CSR 的 PBMTE 叠加 S1 PF 或 S2 GPF。本文不修改 RTL、StoreUnit、StoreQueue、RM、scoreboard 或功能覆盖率；RM 对已完成 response payload 的读取和异常推导另立专项文档，不属于本计划实现范围。
 
@@ -626,3 +626,26 @@ fault entry 失效。该场景必须显式构造新的 DTLB miss，才有资格�
 `seq/plus_cfg/tc_l2tlb_pbmt_response_fault.cfg` 和本 plan。重跑必须观察 token 0/1/2，
 其中 token 2 的日志 lookup 为 range hit、C 的 Store exception bit15 为 0，且 RM 的 C
 compare 为 PASS。
+
+## 14. 实施结果与 real-DUT 阻塞
+
+### 14.1 已落地内容
+
+| 功能 | 实现提交 | 验证结果 |
+|---|---|---|
+| request-time PBMTE 创建期 gate | `18feb204a` | 已由 software-only 定向场景覆盖。 |
+| response sample payload 冻结与 PBMT PF/GPF overlay | `7ca81261c` | 已由 software-only 定向场景覆盖。 |
+| software-only 闭环和动态 smoke 场景接线 | `1322b5fc4`、`cffd754d1` 及后续 smoke 定向修正提交 | `tc_l2tlb_pbmt_csr_gate` 通过，`UVM_ERROR=0`、`UVM_FATAL=0`；dynamic 编译为 `0 error(s), 0 warning(s)`。 |
+
+### 14.2 阻塞结论
+
+real-DUT `memblock_l2tlb_pbmt_response_fault_vseq` 在本计划的合法 NC/no-translate 路径中，于 `825.3ns` 被 `INT_WB_MON: LDA1 valid is X/Z` 中止。独立 RTL 复核确认根因位于 V2 DTLB `no_translate` 与 PMP payload 的生命周期不一致：`noTranslateReg` 可单独置高 PMP valid，而 `cmd/size/hlvx` 仍从只在普通 request fire 时锁存的 `req_out` 读取。
+
+完整的波形路径、源码证据和 RTL 修复方向见：
+`AI_DOC/analysis/rtl/v2/flows/memory_pmp_pma_permission_flow.md` 的“DTLB `no_translate` 的 PMP payload 生命周期缺陷”章节。
+
+该问题不是 L2TLB agent 的 response payload、PBMT overlay 或 RM 的错误。本计划不修改 RTL，且按任务终止条件：
+
+1. 保持本 plan 在 `undo`，不归档到 `do`。
+2. 停止后续 10,000 笔真实 DUT 验收；在 RTL 修复并重新生成/适配 DUT 前，该验收没有有效的通过判据。
+3. 不将已有 `PBMTE=1` 且 PBMT `01/10` 权重非零的压力运行当作“非 NC/MMIO”配置的验收。
