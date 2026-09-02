@@ -133,12 +133,16 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
       freqidx_req := false.B
     } // freqidx update cfg is cleared auto by hardware.
     val time_en      = withClockAndReset(rtc_clock, rtc_reset)(RegInit(false.B))
+    val time_toggle_en  = withClockAndReset(rtc_clock, rtc_reset)(RegInit(false.B))
     val incwidth_mux = Mux(inc_update, incwidth, incr_width_value)
 
     when(stop_sync) {
       time_en := false.B
     }.otherwise {
       time_en := true.B
+    }
+    when(time_en) {
+      time_toggle_en := !time_toggle_en
     }
 
     when(time_req_rtc_ris) {
@@ -156,7 +160,8 @@ class SYSCNT(params: SYSCNTParams, beatBytes: Int)(implicit p: Parameters) exten
     val timeasync    = withClockAndReset(bus_clock, bus_reset)(Module(new TimeAsync()))
     val time_rpt_bus = timeasync.io.o_time.bits
 
-    timeasync.io.i_time := io.time
+    timeasync.io.i_time.bits := io.time.bits
+    timeasync.io.i_time.valid := time_toggle_en
     /* 0000 msip hart 0
      * 0004 msip hart 1
      * 4000 mtimecmp hart 0 lo
