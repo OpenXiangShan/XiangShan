@@ -1458,14 +1458,22 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   XSDebug(RegNext(sfence_dup(0).valid), p"[sfence] spv:${Binary(spv)}\n")
 
   val perfEvents = Seq(
-    ("access           ", base_valid_access_0),
-    ("l2_hit           ", base_valid_access_0 && io.resp.bits.toFsm.l2Hit && !io.resp.bits.toFsm.l1Hit && !io.resp.bits.hit),
-    ("l1_hit           ", base_valid_access_0 && io.resp.bits.toFsm.l1Hit && !io.resp.bits.hit),
-    ("l0_hit           ", base_valid_access_0 && resp_l0),
-    ("sp_hit           ", base_valid_access_0 && resp_sp),
-    ("pte_hit          ", base_valid_access_0 && io.resp.bits.hit),
-    ("rwHarzad         ", io.req.valid && !io.req.ready   ),
-    ("out_blocked      ", io.resp.valid && !io.resp.ready ),
+    ("access"     , base_valid_access_0)
+      .withDescription("Page-table cache lookup processed."),
+    ("l2_hit"     , base_valid_access_0 && io.resp.bits.toFsm.l2Hit && !io.resp.bits.toFsm.l1Hit && !io.resp.bits.hit)
+      .withDescription("Page-table cache lookup hit at level 2."),
+    ("l1_hit"     , base_valid_access_0 && io.resp.bits.toFsm.l1Hit && !io.resp.bits.hit)
+      .withDescription("Page-table cache lookup hit at level 1."),
+    ("l0_hit"     , base_valid_access_0 && resp_l0)
+      .withDescription("Page-table cache lookup hit at level 0."),
+    ("sp_hit"     , base_valid_access_0 && resp_sp)
+      .withDescription("Page-table cache lookup hit a superpage entry."),
+    ("pte_hit"    , base_valid_access_0 && io.resp.bits.hit)
+      .withDescription("Page-table cache lookup returned a final PTE."),
+    ("rwHarzad"   , io.req.valid && !io.req.ready)
+      .withDescription("Page-table cache request stalled by a read-write hazard."),
+    ("out_blocked", io.resp.valid && !io.resp.ready)
+      .withDescription("Page-table cache response blocked by its consumer."),
   )
   generatePerfEvent()
 }

@@ -853,7 +853,7 @@ class CtrlBlockImp(
   io.perfInfo.ctrlInfo.fpdqFull := false.B
   io.perfInfo.ctrlInfo.lsdqFull := false.B
 
-  val perfEvents = Seq(decode, rename, dispatch, rob).flatMap(_.getPerfEvents)
+  val perfEvents = Seq(decode, rename, dispatch, rob).flatMap(_.getPerfEventInfos)
   generatePerfEvent()
 
   val criticalErrors = rob.getCriticalErrors

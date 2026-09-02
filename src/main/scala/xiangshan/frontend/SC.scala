@@ -462,9 +462,9 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
   override def getFoldedHistoryInfo = Some(tage_fh_info ++ sc_fh_info)
 
   override val perfEvents = Seq(
-    ("tage_tht_hit                  ", PopCount(updateMeta.providers.map(_.valid))),
-    ("sc_update_on_mispred          ", PopCount(update_on_mispred)),
-    ("sc_update_on_unconf           ", PopCount(update_on_unconf))
+    ("tage_tht_hit"        , PopCount(updateMeta.providers.map(_.valid))).withDescription("Valid TAGE provider entries observed during predictor update."),
+    ("sc_update_on_mispred", PopCount(update_on_mispred)).withDescription("Statistical-corrector updates caused by mispredictions."),
+    ("sc_update_on_unconf" , PopCount(update_on_unconf)).withDescription("Statistical-corrector updates caused by low-confidence predictions.")
   )
   generatePerfEvent()
 }

@@ -1559,14 +1559,14 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   val perfValidCount = distanceBetween(enqPtrExt(0), deqPtrExt(0))
   val perfEvents = Seq(
-    ("mmioCycle      ", mmioState =/= s_idle),
-    ("mmioCnt        ", mmioDoReq),
-    ("mmio_wb_success", io.mmioStout.fire || io.vecmmioStout.fire),
-    ("mmio_wb_blocked", (io.mmioStout.valid && !io.mmioStout.ready) || (io.vecmmioStout.valid && !io.vecmmioStout.ready)),
-    ("stq_1_4_valid  ", (perfValidCount < (StoreQueueSize.U/4.U))),
-    ("stq_2_4_valid  ", (perfValidCount > (StoreQueueSize.U/4.U)) & (perfValidCount <= (StoreQueueSize.U/2.U))),
-    ("stq_3_4_valid  ", (perfValidCount > (StoreQueueSize.U/2.U)) & (perfValidCount <= (StoreQueueSize.U*3.U/4.U))),
-    ("stq_4_4_valid  ", (perfValidCount > (StoreQueueSize.U*3.U/4.U))),
+    ("mmioCycle"      , mmioState =/= s_idle).withDescription("Cycles in which the store queue is processing an MMIO request."),
+    ("mmioCnt"        , mmioDoReq).withDescription("MMIO requests issued by the store queue."),
+    ("mmio_wb_success", io.mmioStout.fire || io.vecmmioStout.fire).withDescription("Scalar or vector MMIO store writebacks accepted."),
+    ("mmio_wb_blocked", (io.mmioStout.valid && !io.mmioStout.ready) || (io.vecmmioStout.valid && !io.vecmmioStout.ready)).withDescription("Cycles in which an MMIO store writeback is valid but blocked."),
+    ("stq_1_4_valid"  , perfValidCount <= (StoreQueueSize.U / 4.U)).withDescription("Cycles with at most one quarter of store-queue entries valid."),
+    ("stq_2_4_valid"  , perfValidCount > (StoreQueueSize.U / 4.U) && perfValidCount <= (StoreQueueSize.U / 2.U)).withDescription("Cycles with store-queue occupancy above one quarter and at most one half."),
+    ("stq_3_4_valid"  , perfValidCount > (StoreQueueSize.U / 2.U) && perfValidCount <= (StoreQueueSize.U * 3.U / 4.U)).withDescription("Cycles with store-queue occupancy above one half and at most three quarters."),
+    ("stq_4_4_valid"  , perfValidCount > (StoreQueueSize.U * 3.U / 4.U)).withDescription("Cycles with more than three quarters of store-queue entries valid."),
   )
   generatePerfEvent()
 

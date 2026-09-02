@@ -114,10 +114,10 @@ class StdFreeList(freeListSize: Int, numLogicRegs: Int, regType: RegType, realNu
 
   val freeRegCntReg = RegNext(freeRegCnt)
   val perfEvents = Seq(
-    ("std_freelist_1_4_valid", freeRegCntReg <  (freeListSize / 4).U                                            ),
-    ("std_freelist_2_4_valid", freeRegCntReg >= (freeListSize / 4).U && freeRegCntReg < (freeListSize / 2).U    ),
-    ("std_freelist_3_4_valid", freeRegCntReg >= (freeListSize / 2).U && freeRegCntReg < (freeListSize * 3 / 4).U),
-    ("std_freelist_4_4_valid", freeRegCntReg >= (freeListSize * 3 / 4).U                                        )
+    ("std_freelist_1_4_valid", freeRegCntReg < (freeListSize / 4).U).withDescription(s"Cycles with fewer than one quarter of $regType physical registers free."),
+    ("std_freelist_2_4_valid", freeRegCntReg >= (freeListSize / 4).U && freeRegCntReg < (freeListSize / 2).U).withDescription(s"Cycles with between one quarter and one half of $regType physical registers free."),
+    ("std_freelist_3_4_valid", freeRegCntReg >= (freeListSize / 2).U && freeRegCntReg < (freeListSize * 3 / 4).U).withDescription(s"Cycles with between one half and three quarters of $regType physical registers free."),
+    ("std_freelist_4_4_valid", freeRegCntReg >= (freeListSize * 3 / 4).U).withDescription(s"Cycles with at least three quarters of $regType physical registers free.")
   )
 
   QueuePerf(size = freeListSize, utilization = freeRegCntReg, full = freeRegCntReg === 0.U)

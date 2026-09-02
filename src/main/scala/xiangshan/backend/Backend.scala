@@ -924,34 +924,37 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   pfevent.io.distribute_csr := RegNext(csrio.customCtrl.distribute_csr)
   val csrevents = pfevent.io.hpmevent.slice(8,16)
 
-  val ctrlBlockPerf    = ctrlBlock.getPerfEvents
-  val intSchedulerPerf = intScheduler.asInstanceOf[SchedulerArithImp].getPerfEvents
-  val fpSchedulerPerf  = fpScheduler.asInstanceOf[SchedulerArithImp].getPerfEvents
-  val vecSchedulerPerf = vfScheduler.asInstanceOf[SchedulerArithImp].getPerfEvents
-  val memSchedulerPerf = memScheduler.asInstanceOf[SchedulerMemImp].getPerfEvents
-  val dataPathPerf = dataPath.getPerfEvents
+  val ctrlBlockPerf    = ctrlBlock.getPerfEventInfos
+  val intSchedulerPerf = intScheduler.asInstanceOf[SchedulerArithImp].getPerfEventInfos
+  val fpSchedulerPerf  = fpScheduler.asInstanceOf[SchedulerArithImp].getPerfEventInfos
+  val vecSchedulerPerf = vfScheduler.asInstanceOf[SchedulerArithImp].getPerfEventInfos
+  val memSchedulerPerf = memScheduler.asInstanceOf[SchedulerMemImp].getPerfEventInfos
+  val dataPathPerf = dataPath.getPerfEventInfos
 
   XSPerfAccumulate("cpu_cycle", true.B)
   XSPerfAccumulate("ref_cpu_cycle", io.fromTop.clintTime.valid)
 
   val perfBackend  = Seq(
-    ("cpu_cycle",     true.B),
-    ("ref_cpu_cycle", io.fromTop.clintTime.valid)
+    ("cpu_cycle"    , true.B).withDescription("Core clock cycles."),
+    ("ref_cpu_cycle", io.fromTop.clintTime.valid).withDescription("Cycles in which the CLINT reference-time update is valid.")
   )
   // let index = 0 be no event
-  val allPerfEvents = Seq(("noEvent", 0.U)) ++ ctrlBlockPerf  ++ dataPathPerf ++
+  val allPerfEvents = Seq(("noEvent", 0.U).withDescription("No event; the counter increment is always zero.")) ++ ctrlBlockPerf ++ dataPathPerf ++
     intSchedulerPerf ++ fpSchedulerPerf ++ vecSchedulerPerf ++ memSchedulerPerf ++ perfBackend
 
+  if (p(DebugOptionsKey).DumpHPM) {
+    HPMDocDump.register("backend perfEvents Set", "mhpmcounter11-mhpmcounter18", allPerfEvents)
+  }
 
   if (printEventCoding) {
-    for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-      println("backend perfEvents Set", name, inc, i)
+    for ((event, i) <- allPerfEvents.zipWithIndex) {
+      println("backend perfEvents Set", event.name, event.value, i)
     }
   }
 
-  val allPerfInc = allPerfEvents.map(_._2.asTypeOf(new PerfEvent))
-  val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEvents
-  csrio.perf.perfEventsBackend := VecInit(perfEvents.map(_._2.asTypeOf(new PerfEvent)))
+  val allPerfInc = allPerfEvents.map(_.value.asTypeOf(new PerfEvent))
+  val perfEvents = HPerfMonitor(csrevents, allPerfInc).getPerfEventInfos
+  csrio.perf.perfEventsBackend := VecInit(perfEvents.map(_.value.asTypeOf(new PerfEvent)))
 
   val ctrlBlockError = ctrlBlock.getCriticalErrors
   val intExuBlockError = intExuBlock.getCriticalErrors

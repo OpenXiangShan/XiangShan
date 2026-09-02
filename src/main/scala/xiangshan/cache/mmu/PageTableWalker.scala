@@ -613,13 +613,20 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   XSPerfAccumulate("mem_blocked", mem.req.valid && !mem.req.ready)
 
   val perfEvents = Seq(
-    ("fsm_count         ", io.req.fire                                     ),
-    ("fsm_busy          ", !idle                                           ),
-    ("fsm_idle          ", idle                                            ),
-    ("resp_blocked      ", io.resp.valid && !io.resp.ready                 ),
-    ("mem_count         ", mem.req.fire                                    ),
-    ("mem_cycle         ", BoolStopWatch(mem.req.fire, mem.resp.fire, true)),
-    ("mem_blocked       ", mem.req.valid && !mem.req.ready                 ),
+    ("fsm_count"   , io.req.fire)
+      .withDescription("Page-walk request accepted by the PTW state machine."),
+    ("fsm_busy"    , !idle)
+      .withDescription("Cycle in which the PTW state machine is busy."),
+    ("fsm_idle"    , idle)
+      .withDescription("Cycle in which the PTW state machine is idle."),
+    ("resp_blocked", io.resp.valid && !io.resp.ready)
+      .withDescription("PTW response blocked by its consumer."),
+    ("mem_count"   , mem.req.fire)
+      .withDescription("Memory request issued by the PTW."),
+    ("mem_cycle"   , BoolStopWatch(mem.req.fire, mem.resp.fire, true))
+      .withDescription("Cycle with an outstanding PTW memory request."),
+    ("mem_blocked" , mem.req.valid && !mem.req.ready)
+      .withDescription("PTW memory request blocked by the memory interface."),
   )
   generatePerfEvent()
 }
@@ -1123,10 +1130,14 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   XSPerfAccumulate("blocked_in", io.in.valid && !io.in.ready)
 
   val perfEvents = Seq(
-    ("tlbllptw_incount           ", io.in.fire               ),
-    ("tlbllptw_inblock           ", io.in.valid && !io.in.ready),
-    ("tlbllptw_memcount          ", io.mem.req.fire          ),
-    ("tlbllptw_memcycle          ", PopCount(is_waiting)       ),
+    ("tlbllptw_incount" , io.in.fire)
+      .withDescription("Request accepted by the last-level page-table walker."),
+    ("tlbllptw_inblock" , io.in.valid && !io.in.ready)
+      .withDescription("Last-level page-walk request blocked at the input."),
+    ("tlbllptw_memcount", io.mem.req.fire)
+      .withDescription("Memory request issued by the last-level page-table walker."),
+    ("tlbllptw_memcycle", PopCount(is_waiting))
+      .withDescription("Last-level page-walk entries waiting for memory responses."),
   )
   generatePerfEvent()
 }

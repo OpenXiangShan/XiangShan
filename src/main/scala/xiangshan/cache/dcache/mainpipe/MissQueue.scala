@@ -1361,11 +1361,11 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val perfValidCount = RegNext(PopCount(entries.map(entry => (!entry.io.primary_ready))))
   val perfEvents = Seq(
-    ("dcache_missq_req      ", io.req.fire),
-    ("dcache_missq_1_4_valid", (perfValidCount < (cfg.nMissEntries.U/4.U))),
-    ("dcache_missq_2_4_valid", (perfValidCount > (cfg.nMissEntries.U/4.U)) & (perfValidCount <= (cfg.nMissEntries.U/2.U))),
-    ("dcache_missq_3_4_valid", (perfValidCount > (cfg.nMissEntries.U/2.U)) & (perfValidCount <= (cfg.nMissEntries.U*3.U/4.U))),
-    ("dcache_missq_4_4_valid", (perfValidCount > (cfg.nMissEntries.U*3.U/4.U))),
+    ("dcache_missq_req"      , io.req.fire).withDescription("Miss requests accepted by the L1D miss queue."),
+    ("dcache_missq_1_4_valid", perfValidCount <= (cfg.nMissEntries.U / 4.U)).withDescription("Cycles with at most one quarter of L1D miss entries valid."),
+    ("dcache_missq_2_4_valid", perfValidCount > (cfg.nMissEntries.U / 4.U) && perfValidCount <= (cfg.nMissEntries.U / 2.U)).withDescription("Cycles with L1D miss-queue occupancy above one quarter and at most one half."),
+    ("dcache_missq_3_4_valid", perfValidCount > (cfg.nMissEntries.U / 2.U) && perfValidCount <= (cfg.nMissEntries.U * 3.U / 4.U)).withDescription("Cycles with L1D miss-queue occupancy above one half and at most three quarters."),
+    ("dcache_missq_4_4_valid", perfValidCount > (cfg.nMissEntries.U * 3.U / 4.U)).withDescription("Cycles with more than three quarters of L1D miss entries valid."),
   )
   generatePerfEvent()
 }

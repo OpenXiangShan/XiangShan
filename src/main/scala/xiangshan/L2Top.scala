@@ -344,10 +344,13 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       io.l2_tlb_req.req_kill := l2.io.l2_tlb_req.req_kill
       io.perfEvents := l2.io_perf
 
-      val allPerfEvents = l2.getPerfEvents
+      val allPerfEvents = l2.getPerfEventInfos
+      if (p(DebugOptionsKey).DumpHPM) {
+        HPMDocDump.register("L2 Cache perfEvents Set", "mhpmcounter27-mhpmcounter31", allPerfEvents)
+      }
       if (printEventCoding) {
-        for (((name, inc), i) <- allPerfEvents.zipWithIndex) {
-          println("L2 Cache perfEvents Set", name, inc, i)
+        for ((event, i) <- allPerfEvents.zipWithIndex) {
+          println("L2 Cache perfEvents Set", event.name, event.value, i)
         }
       }
 
