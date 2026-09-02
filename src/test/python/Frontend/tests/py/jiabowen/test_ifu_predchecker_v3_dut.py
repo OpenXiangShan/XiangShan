@@ -18,6 +18,12 @@ _ADDI_X0_X0_0 = 0x00000013
 _BRANCH_SAME_TARGET = 0x02000163
 _C_JALR_X1 = 0x9082
 _JALR_X0_X1_0 = 0x00008067
+_CROSS_TRAIN_LOOP_OFFSET = 0x3E
+_CROSS_TRAIN_RVI_OFFSET = 0x5E
+_CROSS_TRAIN_SECOND_START_OFFSET = 0x60
+_CROSS_TRAIN_BRANCH_OFFSET = 0x74
+_CROSS_TRAIN_LONG_BLOCK_OFFSET = 0x100
+_CROSS_TRAIN_LONG_BRANCH_OFFSET = 0x13E
 _IFU_PREFIX = "Frontend_top.Frontend.inner_ifu.__Vtogcov__"
 _OBSERVABLE_S2_SLOTS = 35
 _PREDICTOR_WARMUP_OWNER_BINS = (
@@ -111,26 +117,44 @@ def _load_and_reset(
     env.monitor.set_expected_pc(_BASE)
 
 
-def _load_cross_block_rvi_and_reset(env, instruction: int) -> int:
-    """Place a 32-bit CFI with its low halfword at the block-tail boundary."""
-    payload = bytearray(_CNOP.to_bytes(2, "little") * (_BLOCK_COUNT * 32))
-    branch_pc = _BASE + 30
-    low_offset = 30
-    high_offset = _BLOCK_BYTES
-    payload[low_offset : low_offset + 2] = (int(instruction) & 0xFFFF).to_bytes(
-        2, "little"
+def _cross_block_not_taken_training_loop() -> bytes:
+    halfwords: list[int] = [_CNOP] * (_CROSS_TRAIN_LOOP_OFFSET // 2)
+    halfwords.extend([_CNOP] * 17)
+    assert len(halfwords) * 2 == _CROSS_TRAIN_SECOND_START_OFFSET
+    halfwords.extend([_CNOP] * 10)
+    assert len(halfwords) * 2 == _CROSS_TRAIN_BRANCH_OFFSET
+    halfwords.append(
+        _c_j(_CROSS_TRAIN_LONG_BLOCK_OFFSET - _CROSS_TRAIN_BRANCH_OFFSET)
     )
-    payload[high_offset : high_offset + 2] = (
-        ((int(instruction) >> 16) & 0xFFFF).to_bytes(2, "little")
+    halfwords.extend(
+        [_CNOP] * ((_CROSS_TRAIN_LONG_BLOCK_OFFSET - len(halfwords) * 2) // 2)
     )
+    halfwords.extend([_CNOP] * 31)
+    assert len(halfwords) * 2 == _CROSS_TRAIN_LONG_BRANCH_OFFSET
+    halfwords.append(
+        _c_j(_CROSS_TRAIN_LOOP_OFFSET - _CROSS_TRAIN_LONG_BRANCH_OFFSET)
+    )
+    halfwords.extend([_CNOP] * 64)
+    return b"".join(int(halfword).to_bytes(2, "little") for halfword in halfwords)
+
+
+def _load_cross_block_not_taken_training_and_reset(env) -> int:
+    payload = _cross_block_not_taken_training_loop()
     LoadProgramSequence(
-        image=ProgramImage(payload=bytes(payload), base_addr=_BASE),
+        image=ProgramImage(payload=payload, base_addr=_BASE),
         step_cycles=0,
     ).run(env)
-    env.initialize(reset_vector=_BASE, bare_mode=True, reset_cycles=20)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=8,
+        miss_rate=0.0,
+        seed=0x976,
+    )
+    loop_start = _BASE + _CROSS_TRAIN_LOOP_OFFSET
+    env.initialize(reset_vector=loop_start, bare_mode=True, reset_cycles=20)
     env.monitor.clear()
-    env.monitor.set_expected_pc(_BASE)
-    return branch_pc
+    env.monitor.set_expected_pc(loop_start)
+    return _BASE + _CROSS_TRAIN_RVI_OFFSET
 
 
 def _read_required(recorder, *names: str) -> int:
@@ -165,6 +189,29 @@ def _s2_has_predicted_taken_at(recorder, target_pc: int) -> bool:
     return False
 
 
+def _s2_has_cross_training_window(recorder) -> bool:
+    block_prefixes = tuple(f"{_IFU_PREFIX}s2_fetchBlock_{index}_" for index in range(2))
+    if any(_read_required(recorder, prefix + "valid") != 1 for prefix in block_prefixes):
+        return False
+    starts = tuple(
+        _read_required(
+            recorder,
+            prefix + "startVAddr_addr",
+            prefix.replace(".__Vtogcov__", ".") + "startVAddr_addr",
+        )
+        << 1
+        for prefix in block_prefixes
+    )
+    taken_valid = tuple(
+        _read_required(recorder, prefix + "takenCfiOffset_valid")
+        for prefix in block_prefixes
+    )
+    return starts == (
+        _BASE + _CROSS_TRAIN_LOOP_OFFSET,
+        _BASE + _CROSS_TRAIN_SECOND_START_OFFSET,
+    ) and taken_valid == (0, 1)
+
+
 def _warm_until_prediction(env, branch_pc: int, max_cycles: int = 6000) -> None:
     recorder = env.functional_coverage
     assert recorder is not None
@@ -183,6 +230,68 @@ def _warm_until_prediction(env, branch_pc: int, max_cycles: int = 6000) -> None:
     )
 
 
+def _warm_until_cross_training_window(env, max_cycles: int = 4000) -> None:
+    recorder = env.functional_coverage
+    assert recorder is not None
+    for _ in range(int(max_cycles)):
+        env.step(1)
+        if _s2_has_cross_training_window(recorder):
+            return
+    raise AssertionError(
+        {
+            "reason": "17+11 fixture did not reach its explicit two-fetch window",
+            "cycles": int(max_cycles),
+            "backend": env.backend_model.get_stats(),
+            "icache": env.icache_agent.get_stats(),
+        }
+    )
+
+
+def _warm_until_first_taken_two_fetch_window(
+    env,
+    *,
+    max_cycles: int = 6000,
+) -> tuple[int, int]:
+    """Wait until a trained first-block CFI reaches a real two-fetch window."""
+
+    recorder = env.functional_coverage
+    assert recorder is not None
+    for _ in range(int(max_cycles)):
+        env.step(1)
+        block0 = _IFU_PREFIX + "s2_fetchBlock_0_"
+        block1 = _IFU_PREFIX + "s2_fetchBlock_1_"
+        if (
+            _read_required(recorder, block0 + "valid") != 1
+            or _read_required(recorder, block1 + "valid") != 1
+            or _read_required(recorder, block0 + "takenCfiOffset_valid") != 1
+            or _read_required(recorder, block0 + "takenCfiOffset_bits") != 14
+        ):
+            continue
+        starts = (
+            _read_required(
+                recorder,
+                block0 + "startVAddr_addr",
+                block0.replace(".__Vtogcov__", ".") + "startVAddr_addr",
+            )
+            << 1,
+            _read_required(
+                recorder,
+                block1 + "startVAddr_addr",
+                block1.replace(".__Vtogcov__", ".") + "startVAddr_addr",
+            )
+            << 1,
+        )
+        return tuple(int(value) for value in starts)
+    raise AssertionError(
+        {
+            "reason": "trained first-block CFI did not reach a real two-fetch window",
+            "cycles": int(max_cycles),
+            "backend": env.backend_model.get_stats(),
+            "icache": env.icache_agent.get_stats(),
+        }
+    )
+
+
 def _pulse_fencei(env) -> None:
     env.clock_reset.io_fencei.value = 1
     env.step(1)
@@ -190,14 +299,90 @@ def _pulse_fencei(env) -> None:
     env.step(2)
 
 
-def _replace_u32_while_fencei_held(env, address: int, value: int) -> None:
+def _replace_u32s_while_fencei_held(
+    env, replacements: tuple[tuple[int, int], ...]
+) -> None:
     env.clock_reset.io_fencei.value = 1
     env.step(2)
-    env.memory.write_u32(int(address), int(value))
+    for address, value in replacements:
+        env.memory.write_u32(int(address), int(value))
     env.step(1)
     env.clock_reset.io_fencei.value = 0
     env.step(2)
 
+
+def _replace_u32_while_fencei_held(env, address: int, value: int) -> None:
+    _replace_u32s_while_fencei_held(env, ((int(address), int(value)),))
+
+
+def _replace_u32s_after_redirect_flush(
+    env,
+    replacements: tuple[tuple[int, int], ...],
+    *,
+    redirect_target: int,
+    reason: str,
+) -> None:
+    """Retarget a trained window without exposing an old accepted payload."""
+    env.backend_model.set_can_accept(0)
+    env.step(2)
+    assert not env.monitor.get_errors()
+
+    env.clock_reset.io_fencei.value = 1
+    env.backend_model.inject_redirect(
+        int(redirect_target),
+        str(reason),
+        delay_cycles=0,
+    )
+
+    # Backend inputs are driven on one edge and consumed on the next.  Keep
+    # memory unchanged until both that redirect and the registered fence.i
+    # have reached the frontend, so any still-visible old payload remains
+    # checker-consistent and is then flushed before the replacement.
+    env.step(3)
+    assert not env.monitor.get_errors()
+    for address, value in replacements:
+        env.memory.write_u32(int(address), int(value))
+    env.step(2)
+    env.clock_reset.io_fencei.value = 0
+    env.step(2)
+    env.backend_model.set_can_accept(1)
+
+
+def _replace_u32_after_redirect_flush(
+    env,
+    address: int,
+    value: int,
+    *,
+    redirect_target: int,
+    reason: str,
+) -> None:
+    _replace_u32s_after_redirect_flush(
+        env,
+        ((int(address), int(value)),),
+        redirect_target=redirect_target,
+        reason=reason,
+    )
+
+
+def test_cross_block_not_taken_training_layout_is_contiguous() -> None:
+    payload = _cross_block_not_taken_training_loop()
+    assert payload[
+        _CROSS_TRAIN_RVI_OFFSET : _CROSS_TRAIN_SECOND_START_OFFSET + 2
+    ] == (_CNOP.to_bytes(2, "little") * 2)
+    assert int.from_bytes(
+        payload[_CROSS_TRAIN_BRANCH_OFFSET : _CROSS_TRAIN_BRANCH_OFFSET + 2],
+        "little",
+    ) == _c_j(
+        _CROSS_TRAIN_LONG_BLOCK_OFFSET - _CROSS_TRAIN_BRANCH_OFFSET
+    )
+    assert int.from_bytes(
+        payload[
+            _CROSS_TRAIN_LONG_BRANCH_OFFSET : _CROSS_TRAIN_LONG_BRANCH_OFFSET + 2
+        ],
+        "little",
+    ) == _c_j(
+        _CROSS_TRAIN_LOOP_OFFSET - _CROSS_TRAIN_LONG_BRANCH_OFFSET
+    )
 
 def _run_until_bin(
     env,
@@ -328,6 +513,40 @@ def test_fe_ifu_predchecker_false_taken(env) -> None:
     _run_until_bin(env, "ifu_v3_pipeline_owner_model", "owner_leaf_036")
     _assert_owner_bins(env, (*_PREDICTOR_WARMUP_OWNER_BINS, "BIN-934"))
     assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-874")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_fe_ifu_predchecker_first_block_false_taken_clips_second_fetch(env) -> None:
+    """A stale first-block prediction must clip, rather than deliver, block one."""
+
+    _load_and_reset(env, branch_halfword=13, rvi_jal=True)
+    first_start, _second_start = _warm_until_first_taken_two_fetch_window(env)
+    branch_pc = int(first_start) + 26
+
+    # Preserve the trained BPU entry while changing the predicted JAL into a
+    # same-width ordinary instruction. The existing false-taken fixture
+    # establishes this as a legal, monitor-clean stale-prediction sequence.
+    _replace_u32s_after_redirect_flush(
+        env,
+        tuple(
+            (_BASE + block * _BLOCK_BYTES + 26, _ADDI_X0_X0_0)
+            for block in range(_BLOCK_COUNT)
+        ),
+        redirect_target=int(first_start),
+        reason="ifu_predchecker_v3_first_block_clip_second_fetch",
+    )
+
+    _run_until_bin(
+        env,
+        "ifu_data_slice",
+        "second_block_suppressed",
+        max_cycles=4096,
+        debug_pc=branch_pc,
+    )
+    _assert_owner_bins(env, ("BIN-874",))
+    assert not env.monitor.get_errors()
+
 
 @pytest.mark.funcov_bins(
     "BIN-893",
@@ -513,9 +732,17 @@ def test_fe_ifu_predchecker_illegal_rvc_cacheable(env) -> None:
 @pytest.mark.funcov_bins("BIN-976")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_fe_ifu_predchecker_rvi_jal_cross_block_not_taken(env) -> None:
-    branch_pc = _load_cross_block_rvi_and_reset(env, _jal_x0(0))
-    env.backend_model.inject_redirect(
-        _BASE, "ifu_predchecker_v3_rvi_jal_cross_block", delay_cycles=8
+    static_jal = _jal_x0(
+        _CROSS_TRAIN_LONG_BLOCK_OFFSET - _CROSS_TRAIN_RVI_OFFSET
+    )
+    branch_pc = _load_cross_block_not_taken_training_and_reset(env)
+    _warm_until_cross_training_window(env)
+    _replace_u32_after_redirect_flush(
+        env,
+        branch_pc,
+        static_jal,
+        redirect_target=_BASE + _CROSS_TRAIN_LOOP_OFFSET,
+        reason="ifu_predchecker_v3_rvi_jal_cross_block",
     )
     _run_until_bin(
         env,
@@ -530,9 +757,14 @@ def test_fe_ifu_predchecker_rvi_jal_cross_block_not_taken(env) -> None:
 @pytest.mark.funcov_bins("BIN-982")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_fe_ifu_predchecker_rvi_jalr_cross_block_not_taken(env) -> None:
-    branch_pc = _load_cross_block_rvi_and_reset(env, _JALR_X0_X1_0)
-    env.backend_model.inject_redirect(
-        _BASE, "ifu_predchecker_v3_rvi_jalr_cross_block", delay_cycles=8
+    branch_pc = _load_cross_block_not_taken_training_and_reset(env)
+    _warm_until_cross_training_window(env)
+    _replace_u32_after_redirect_flush(
+        env,
+        branch_pc,
+        _JALR_X0_X1_0,
+        redirect_target=_BASE + _CROSS_TRAIN_LOOP_OFFSET,
+        reason="ifu_predchecker_v3_rvi_jalr_cross_block",
     )
     _run_until_bin(
         env,
