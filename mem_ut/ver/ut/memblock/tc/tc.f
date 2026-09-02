@@ -10,3 +10,5 @@ tc_pkg.sv
 // ./src/tc_sanity.sv
 // ./src/tc_smoke.sv
 // ./src/soft_test/soft_test_tc_l2tlb_range_lookup.sv
+// ./src/soft_test/soft_test_tc_l2tlb_pbmt_csr_gate.sv
+// ./src/soft_test/soft_test_tc_rm_pbmt_effective_fault.sv

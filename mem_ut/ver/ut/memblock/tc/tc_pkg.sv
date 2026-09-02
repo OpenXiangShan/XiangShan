@@ -79,6 +79,8 @@ package tc_pkg;
     `include "soft_test_tc_dispatch_replay_smoke.sv"
     `include "soft_test_tc_dispatch_fault_smoke.sv"
     `include "soft_test_tc_l2tlb_range_lookup.sv"
+    `include "soft_test_tc_l2tlb_pbmt_csr_gate.sv"
+    `include "soft_test_tc_rm_pbmt_effective_fault.sv"
     `include "tc_dispatch_real_smoke.sv"
     `include "tc_dispatch_real_store_smoke.sv"
     `include "tc_dispatch_real_store_wb_smoke.sv"

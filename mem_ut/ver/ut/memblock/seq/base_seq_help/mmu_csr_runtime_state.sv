@@ -213,6 +213,37 @@ class mmu_csr_runtime_state extends uvm_object;
         endcase
     endfunction:get_stage_pbmt_enable_from_bits
 
+    // 中文注释：按同一份冻结 CSR 和 raw PBMT 计算本次 response 需要叠加的
+    // S1 PF/S2 GPF。该 helper 只输出局部 force bit，不修改 entry，也不判断
+    // PBMT=11 或 inactive-stage payload；调用者负责先完成 entry 形状校验。
+    static function void compute_pbmt_fault_overlay(
+        input bit       s1_active,
+        input bit       s2_active,
+        input bit [1:0] s2xlate,
+        input bit [1:0] s1_pbmt,
+        input bit [1:0] s2_pbmt,
+        input bit       m_pbmt_en_i,
+        input bit       h_pbmt_en_i,
+        output bit      force_s1_pf,
+        output bit      force_s2_gpf
+    );
+        bit s1_enabled;
+        bit s2_enabled;
+
+        force_s1_pf = 1'b0;
+        force_s2_gpf = 1'b0;
+        if (s1_active) begin
+            s1_enabled = get_stage_pbmt_enable_from_bits(
+                1'b1, s2xlate, m_pbmt_en_i, h_pbmt_en_i);
+            force_s1_pf = (s1_pbmt != 2'd0) && !s1_enabled;
+        end
+        if (s2_active) begin
+            s2_enabled = get_stage_pbmt_enable_from_bits(
+                1'b0, s2xlate, m_pbmt_en_i, h_pbmt_en_i);
+            force_s2_gpf = (s2_pbmt != 2'd0) && !s2_enabled;
+        end
+    endfunction:compute_pbmt_fault_overlay
+
     // 中文注释：instance wrapper 只转发本对象冻结的 PBMTE bit；不读取
     // runtime latest，也不改变 CSR snapshot。调用者用 s2xlate 指定翻译路径。
     function bit get_stage_pbmt_enable(input bit is_s1,

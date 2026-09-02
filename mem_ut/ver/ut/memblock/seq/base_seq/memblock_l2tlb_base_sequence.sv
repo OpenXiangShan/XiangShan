@@ -1392,9 +1392,6 @@ function void memblock_l2tlb_base_sequence::apply_pbmt_response_overlay(
     input mmu_csr_runtime_state response_csr,
     output bit force_s1_pf,
     output bit force_s2_gpf);
-    bit s1_enabled;
-    bit s2_enabled;
-
     force_s1_pf = 1'b0;
     force_s2_gpf = 1'b0;
     if (entry == null || response_csr == null) begin
@@ -1411,18 +1408,11 @@ function void memblock_l2tlb_base_sequence::apply_pbmt_response_overlay(
                    $sformatf("response S2 PBMT=11 is reserved token entry vpn=0x%0h",
                              entry.lookup_key.vpn))
     end
-    if (entry.s1_stage_active) begin
-        s1_enabled = mmu_csr_runtime_state::get_stage_pbmt_enable_from_bits(
-            1'b1, entry.s2xlate, response_csr.m_pbmt_en,
-            response_csr.h_pbmt_en);
-        force_s1_pf = (entry.s1_entry_pbmt != 2'd0) && !s1_enabled;
-    end
-    if (entry.s2_stage_active) begin
-        s2_enabled = mmu_csr_runtime_state::get_stage_pbmt_enable_from_bits(
-            1'b0, entry.s2xlate, response_csr.m_pbmt_en,
-            response_csr.h_pbmt_en);
-        force_s2_gpf = (entry.s2_entry_pbmt != 2'd0) && !s2_enabled;
-    end
+    mmu_csr_runtime_state::compute_pbmt_fault_overlay(
+        entry.s1_stage_active, entry.s2_stage_active, entry.s2xlate,
+        entry.s1_entry_pbmt, entry.s2_entry_pbmt,
+        response_csr.m_pbmt_en, response_csr.h_pbmt_en,
+        force_s1_pf, force_s2_gpf);
     // PBMT remains visible in the response.  Only the effective fault bits are
     // overlaid, and raw fault provenance is intentionally left untouched.
     entry.fault_effective_s1_pf |= force_s1_pf;
