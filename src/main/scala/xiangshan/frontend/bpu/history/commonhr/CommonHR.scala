@@ -28,11 +28,8 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   class CommonHRIO extends CommonHRBundle {
     val stageCtrl:      StageCtrl           = Input(new StageCtrl)
     val s1_imliTaken:   Bool                = Input(Bool())
-    val s2StartPc:      Pc                  = Input(Pc())
-    val s2CondHitMask:  Vec[Bool]           = Input(Vec(NumBtbResultEntries, Bool()))
-    val s2CfiPositions: Vec[UInt]           = Input(Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W)))
-    val s2CfiTargets:   Vec[Pc]             = Input(Vec(NumBtbResultEntries, Pc()))
-    val update:         CommonHRUpdate      = Input(new CommonHRUpdate)
+    val s2Update:       S2Update            = Input(new S2Update)
+    val s3Update:       S3Update            = Input(new S3Update)
     val redirect:       CommonHRRedirect    = Input(new CommonHRRedirect)
     val s0_imli:        UInt                = Output(UInt(ImliHistoryLength.W))
     val s0_commonHR:    CommonHREntry       = Output(new CommonHREntry)
@@ -49,7 +46,8 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   private val s2_fire = io.stageCtrl.s2_fire
   private val s3_fire = io.stageCtrl.s3_fire
 
-  private val s3_override = io.update.s3Override
+  private val s2_override = io.s2Update.isOverride
+  private val s3_override = io.s3Update.isOverride
 
   // common history register
   private val s0_imli                = WireInit(0.U(ImliHistoryLength.W))
@@ -90,18 +88,20 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
    * Precompute per-CFI candidate information in s2 for the s3 CommonHR update.
    */
   // Deduplicate conditional hits by position before counting older conditional branches.
-  private val s2_hitMask          = dedupHitPositions(io.s2CondHitMask, io.s2CfiPositions)
+  private val s2_update           = io.s2Update
+  private val s2_prediction       = s2_update.prediction
+  private val s2_hitMask          = dedupHitPositions(s2_update.condHitMask, s2_update.positions)
   private val s2_numHit           = PopCount(s2_hitMask)
   private val s2_bwTakenCandidate = Wire(Vec(NumBtbResultEntries, Bool()))
   private val s2_numLessCandidate = Wire(Vec(NumBtbResultEntries, UInt(log2Ceil(NumBtbResultEntries + 1).W)))
 
   for (i <- 0 until NumBtbResultEntries) {
-    val pos    = io.s2CfiPositions(i)
-    val target = io.s2CfiTargets(i)
-    val lessThanCurrent = VecInit(io.s2CfiPositions.zip(s2_hitMask).map { case (otherPos, hit) =>
+    val pos    = s2_update.positions(i)
+    val target = s2_update.targets(i)
+    val lessThanCurrent = VecInit(s2_update.positions.zip(s2_hitMask).map { case (otherPos, hit) =>
       hit && (otherPos < pos)
     })
-    val currentCfiPc = getCfiPcFromPosition(io.s2StartPc, pos)
+    val currentCfiPc = getCfiPcFromPosition(s2_update.startPc, pos)
 
     s2_numLessCandidate(i) := PopCount(lessThanCurrent)
     s2_bwTakenCandidate(i) := isBackwardBranch(currentCfiPc, target)
@@ -110,14 +110,15 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   /*
    * Use the latched s2 candidate information to update CommonHR when s3 fires.
    */
-  private val s3_update           = io.update // bp pipeline s3 level update
+  private val s3_update           = io.s3Update // bp pipeline s3 level update
+  private val s3_prediction       = s3_update.prediction
   private val s3_hitMask          = RegEnable(s2_hitMask, s2_fire)
-  private val s3_taken            = s3_update.taken
-  private val s3_firstTakenPos    = s3_update.firstTakenBranch.bits.cfiPosition
-  private val s3_firstTakenIsCond = s3_update.firstTakenBranch.bits.attribute.isConditional
+  private val s3_taken            = s3_prediction.taken
+  private val s3_firstTakenPos    = s3_prediction.cfiPosition
+  private val s3_firstTakenIsCond = s3_prediction.attribute.isConditional
   private val s3_cfiPc            = getCfiPcFromPosition(s3_update.startPc, s3_firstTakenPos)
   private val s3_bwTakenDiff      = WireInit(false.B)
-  private val s3_bwTaken          = isBackwardBranch(s3_cfiPc, s3_update.target)
+  private val s3_bwTaken          = isBackwardBranch(s3_cfiPc, s3_prediction.target.unGuard)
 
   // NOTE: Usually, the maximum value of GhrShamt is NumBtbResultEntries, but in reality, the maximum value is NumBtbResultEntries+ 1
   private val s3_numLessCandidate = RegEnable(s2_numLessCandidate, s2_fire)
@@ -138,7 +139,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   s3_takenCommonHR.foreach(_ := 0.U.asTypeOf(new CommonHREntry))
   for (i <- 0 until NumBtbResultEntries) {
     val candidate      = s3_takenCommonHR(i)
-    val isCond         = s3_update.attributes(i).isConditional
+    val isCond         = s3_firstTakenIsCond
     val numLessCurrent = s3_numLessCandidate(i)
     val currentBwTaken = s3_bwTakenCandidate(i)
     candidate.valid           := s3_fire
@@ -159,7 +160,10 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   s3_defaultCommonHR.ghr             := (commonHR.ghr << s3_numHit)(GhrHistoryLength - 1, 0)
   s3_defaultCommonHR.bw              := (commonHR.bw << s3_numHit)(BWHistoryLength - 1, 0)
 
-  XSError(s3_fire && s3_taken && !s3_update.firstTakenBranchOH.reduce(_ || _), "taken but no firstTakenBranchOH")
+  XSError(
+    s3_fire && s3_taken && !s3_update.firstTakenBranchOH.reduce(_ || _),
+    "taken but no firstTakenBranchOH"
+  )
   s3_newCommonHR := Mux(s3_taken, s3_selectedTakenCommonHR, s3_defaultCommonHR)
 
   /*
@@ -267,6 +271,11 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   }
 
   // imli update
+  private val s2_overrideCfiPc   = getCfiPcFromPosition(s2_update.startPc, s2_prediction.cfiPosition)
+  private val s2_overrideBwTaken = isBackwardBranch(s2_overrideCfiPc, s2_prediction.target.unGuard)
+  private val s2_overrideImliTaken =
+    s2_prediction.taken && s2_overrideBwTaken && s2_prediction.attribute.isConditional
+
   when(r0_valid) {
     val r0_newImli = Mux(
       r0_taken && r0_bwTaken && r0_isCond,
@@ -279,6 +288,14 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     val s3_newImli = Mux(s3_taken && s3_bwTaken && s3_firstTakenIsCond, Mux(s3_imli.andR, s3_imli, s3_imli + 1.U), 0.U)
     imli    := s3_newImli
     s0_imli := s3_newImli
+  }.elsewhen(s2_override) {
+    val s2_newImli = Mux(
+      s2_overrideImliTaken,
+      Mux(s2_imli.andR, s2_imli, s2_imli + 1.U),
+      0.U
+    )
+    imli    := s2_newImli
+    s0_imli := s2_newImli
   }.elsewhen(s1_fire) {
     val s1_newImli = Mux(io.s1_imliTaken, Mux(s1_imli.andR, s1_imli, s1_imli + 1.U), 0.U)
     imli    := s1_newImli
@@ -318,6 +335,26 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     predPtr                           := realRecoverPtr
     writePtr                          := writePtr + 1.U
     recoverPtr                        := realRecoverPtr
+  }.elsewhen(s2_override) {
+    // S2 keeps the corrected block, flushes the younger S1 block, and starts a
+    // new S0 block. Compact the queue so the next write still corresponds to
+    // the block that will reach S3 next.
+    val writePtrPlus1 = writePtr + 1.U
+    val writePtrPlus2 = writePtr + 2.U
+    val writePtrPlus3 = writePtr + 3.U
+    val nextWritePtr  = Mux(s3_fire, writePtrPlus1, writePtr)
+    val newS0Ptr      = Mux(s3_fire, writePtrPlus2, writePtrPlus1)
+    val nextEnqPtr    = Mux(s3_fire, writePtrPlus3, writePtrPlus2)
+
+    when(s3_fire) {
+      histQueue(writePtr.value) := s3_newCommonHR
+    }
+    histQueue(newS0Ptr.value) := initCommonHR
+
+    enqPtr     := nextEnqPtr
+    predPtr    := Mux(predEnable, predPtr + 1.U, predPtr)
+    writePtr   := nextWritePtr
+    recoverPtr := Mux(recoverInc, recoverPtr + 1.U, recoverPtr)
   }.otherwise {
     when(enqEnable) {
       histQueue(enqPtr.value) := initCommonHR

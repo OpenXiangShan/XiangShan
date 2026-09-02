@@ -44,8 +44,9 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val phr    = RegInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
   private val phrPtr = RegInit(0.U.asTypeOf(new PhrPtr))
 
-  // s1Train and s3 override commit to the physical PHR one cycle later.
-  // A redirect cancels any pending write; s3 override also cancels pending writes from s1.
+  // s1Train, s2 override and s3 override commit to the physical PHR one
+  // cycle later. A redirect cancels any pending write; either override also
+  // cancels pending writes from s1.
   private val pendingValid     = RegInit(false.B)
   private val pendingTaken     = RegInit(false.B)
   private val pendingLowBits   = RegInit(0.U(PathHashHighWidth.W))
@@ -108,13 +109,21 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
 
   private val s1UpdateData    = WireInit(0.U.asTypeOf(new PhrUpdateData))
   private val redirectData    = WireInit(0.U.asTypeOf(new PhrUpdateData))
-  private val s3_override     = WireInit(false.B)
-  private val s3_overrideData = WireInit(0.U.asTypeOf(new PhrUpdateData))
+  private val s2_overrideData = Wire(new PhrUpdateData)
+  private val s3_overrideData = Wire(new PhrUpdateData)
+  s2_overrideData.fromUpdateStage(io.train.s2)
+  s3_overrideData.fromUpdateStage(io.train.s3)
+  private val s2_override = s2_overrideData.valid
+  private val s3_override = s3_overrideData.valid
 
   private val redirectS0PhrPtr     = WireInit(0.U.asTypeOf(new PhrPtr))
   private val redirectS0PhrLowBits = WireInit(0.U(PathHashHighWidth.W))
   private val redirectS0FoldedPhr  = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   private val redirectUpdate       = WireInit(0.U.asTypeOf(new PhrUpdateResult))
+  private val s2S0PhrPtr           = WireInit(0.U.asTypeOf(new PhrPtr))
+  private val s2S0PhrLowBits       = WireInit(0.U(PathHashHighWidth.W))
+  private val s2S0FoldedPhr        = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+  private val s2Update             = WireInit(0.U.asTypeOf(new PhrUpdateResult))
   private val s3S0PhrPtr           = WireInit(0.U.asTypeOf(new PhrPtr))
   private val s3S0PhrLowBits       = WireInit(0.U(PathHashHighWidth.W))
   private val s3S0FoldedPhr        = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
@@ -133,13 +142,6 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   redirectData.target  := io.train.redirect.bits.target.unGuard
   redirectData.phrMeta := io.train.redirect.bits.meta.phr
 
-  s3_override             := io.train.s3_override
-  s3_overrideData.valid   := s3_override
-  s3_overrideData.taken   := io.train.s3_prediction.taken
-  s3_overrideData.cfiPc   := getCfiPcFromPosition(io.train.s3_startPc, io.train.s3_prediction.cfiPosition)
-  s3_overrideData.target  := io.train.s3_prediction.target.unGuard
-  s3_overrideData.phrMeta := io.train.s3_phrMeta
-
   s1UpdateData.valid              := s1_valid
   s1UpdateData.taken              := io.s1Train.prediction.taken
   s1UpdateData.cfiPc              := getCfiPcFromPosition(io.s1Train.startPc, io.s1Train.prediction.cfiPosition)
@@ -149,22 +151,28 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
 
   // Compute all ShiftBits values and the high bits of the hash
   private val redirectHashComponents = getPathHashComponents(redirectData.cfiPc, redirectData.target)
+  private val s2HashComponents       = getPathHashComponents(s2_overrideData.cfiPc, s2_overrideData.target)
   private val s3HashComponents       = getPathHashComponents(s3_overrideData.cfiPc, s3_overrideData.target)
   private val s1HashComponents       = getPathHashComponents(s1UpdateData.cfiPc, s1UpdateData.target)
 
   private val redirectShiftBits = redirectHashComponents._1
   private val redirectHashHigh  = redirectHashComponents._2
+  private val s2ShiftBits       = s2HashComponents._1
+  private val s2HashHigh        = s2HashComponents._2
   private val s3ShiftBits       = s3HashComponents._1
   private val s3HashHigh        = s3HashComponents._2
 
   // Compute all phrPtr and phrLowBits for updates
   redirectUpdate := getUpdatePtrs(redirectData, redirectHashHigh)
+  s2Update       := getUpdatePtrs(s2_overrideData, s2HashHigh)
   s3Update       := getUpdatePtrs(s3_overrideData, s3HashHigh)
   s1Update       := getUpdatePtrs(s1UpdateData, s1HashComponents._2)
   private val s1ShiftBits = s1HashComponents._1
 
   redirectS0PhrPtr     := redirectUpdate.phrPtr
   redirectS0PhrLowBits := redirectUpdate.phrLowBits
+  s2S0PhrPtr           := s2Update.phrPtr
+  s2S0PhrLowBits       := s2Update.phrLowBits
   s3S0PhrPtr           := s3Update.phrPtr
   s3S0PhrLowBits       := s3Update.phrLowBits
   s1S0PhrPtr           := Mux(io.s1Train.prediction.taken, s1Update.phrPtr, s1_phrPtr)
@@ -175,6 +183,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     Seq(
       redirectData.valid -> redirectS0PhrPtr,
       s3_override        -> s3S0PhrPtr,
+      s2_override        -> s2S0PhrPtr,
       s1_valid           -> s1S0PhrPtr
     )
   )
@@ -183,6 +192,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     Seq(
       redirectData.valid -> redirectS0PhrPtr,
       s3_override        -> s3S0PhrPtr,
+      s2_override        -> s2S0PhrPtr,
       s1_valid           -> s1S0PhrPtr
     )
   )
@@ -203,8 +213,20 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     RegEnable(s2_oldestBits, 0.U.asTypeOf(new PhrAllFoldedHistoryOldestBits(AllFoldedHistoryInfo)), s2_fire)
 
   XSError(
-    s3_fire && s3_override && s3_phrMeta.asUInt =/= io.train.s3_phrMeta.asUInt,
+    s2_fire && s2_override && s2_phrMeta.asUInt =/= io.train.s2.phrMeta.asUInt,
+    "s2_phrMeta mismatch!\n"
+  )
+  XSError(
+    s3_fire && s3_override && s3_phrMeta.asUInt =/= io.train.s3.phrMeta.asUInt,
     "s3_phrMeta mismatch!\n"
+  )
+
+  s2S0FoldedPhr := getNextFoldedPhr(
+    s2_overrideData,
+    s2_oldestBits,
+    s2_foldedPhrReg,
+    s2HashHigh,
+    s2ShiftBits
   )
 
   s3S0FoldedPhr := getNextFoldedPhr(
@@ -239,13 +261,19 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
 
   private val redirectBits = Cat(redirectS0PhrLowBits, redirectShiftBits)
 
-  private val s1UpdateWins = s1_valid && io.s1Train.prediction.taken && !redirectData.valid && !s3_override
+  private val s1UpdateWins =
+    s1_valid && io.s1Train.prediction.taken && !redirectData.valid && !s3_override && !s2_override
+  private val s2UpdateWins = s2_override && !redirectData.valid && !s3_override
   private val s3UpdateWins = s3_override && !redirectData.valid
-  pendingValid := s3UpdateWins || s1UpdateWins
+  pendingValid := s3UpdateWins || s2UpdateWins || s1UpdateWins
   when(s3UpdateWins) {
     pendingTaken     := s3_overrideData.taken
     pendingLowBits   := s3S0PhrLowBits
     pendingShiftBits := s3ShiftBits
+  }.elsewhen(s2UpdateWins) {
+    pendingTaken     := s2_overrideData.taken
+    pendingLowBits   := s2S0PhrLowBits
+    pendingShiftBits := s2ShiftBits
   }.elsewhen(s1UpdateWins) {
     pendingTaken     := true.B
     pendingLowBits   := s1S0PhrLowBits
@@ -277,6 +305,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     Seq(
       redirectData.valid                        -> redirectS0FoldedPhr,
       s3_override                               -> s3S0FoldedPhr,
+      s2_override                               -> s2S0FoldedPhr,
       (s1_valid && io.s1Train.prediction.taken) -> s1S0FoldedPhr
     )
   )
@@ -302,6 +331,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     Seq(
       redirectData.valid -> computeAllFoldedPhr(redirectPhr),
       s3_override        -> s3_foldedPhrReg,
+      s2_override        -> s2_foldedPhrReg,
       s1_valid           -> s1_foldedPhrReg
     )
   )

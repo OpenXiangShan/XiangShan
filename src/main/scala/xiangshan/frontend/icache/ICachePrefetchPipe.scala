@@ -93,8 +93,10 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s0_readMetaSetIdx = s0_twoPrefetchCase.selectMetaSetIdx(s0_req)
   private val s0_readDoubleLine = s0_twoPrefetchCase.selectIsCrossLine(s0_req)
 
-  fromBpuS0Flush := !s0_isSoftPrefetch && io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid)
-  s0_flush       := io.flush || fromBpuS0Flush || s1_flush
+  fromBpuS0Flush := !s0_isSoftPrefetch &&
+    (io.flushFromBpu.shouldFlushByStage2(s0_ftqIdx, s0_valid) ||
+      io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid))
+  s0_flush := io.flush || fromBpuS0Flush || s1_flush
 
   io.fromFtq.ready := s1_ready && toItlb.ready && toMeta.ready && !s0_flush
 
