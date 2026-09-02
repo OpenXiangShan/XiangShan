@@ -6,9 +6,11 @@
 `ifndef MEMBLOCK_MAIN_DISPATCH_PBMT_RESPONSE_FAULT_SEQUENCE__SV
 `define MEMBLOCK_MAIN_DISPATCH_PBMT_RESPONSE_FAULT_SEQUENCE__SV
 
-// 中文注释：该 sequence 只为 PBMTE 动态切换 smoke 构造 A/B/C 三笔同 VPN Load。
-// A 使用既有 issue delay 等待 PMP bootstrap，B/C 再分别留出 CSR C-2 可见窗口。它
-// 不直接驱动 CSR 或 L2TLB 接口，仍由 vseq 中的唯一 CSR producer 和 responder 负责。
+// 中文注释：该 sequence 为 PBMTE 动态切换 smoke 构造同 VPN 的 A Load、B Store
+// 和 C Store。A 填充 Load DTLB；B/C 使用独立的 Store DTLB，确保 B 在 PBMTE
+// 关闭后真实发出 L2TLB request。B fault 不应填充 Store DTLB，因此 C 在重新
+// enable 后必须再次走 L2TLB response。该 sequence 不直接驱动 CSR 或 L2TLB
+// 接口，仍由 vseq 中的唯一 CSR producer 和 responder 负责。
 class memblock_main_dispatch_pbmt_response_fault_sequence extends
     memblock_main_dispatch_manual_main_table_sequence;
 
@@ -16,7 +18,10 @@ class memblock_main_dispatch_pbmt_response_fault_sequence extends
     // producer 已依次写入 pmpaddr0 与 pmpcfg0，使 U 态访存不会被 reset PMP deny。
     localparam int unsigned PBMT_A_DELAY_CYCLES = 64;
     localparam int unsigned PBMT_B_DELAY_CYCLES = 1024;
-    localparam int unsigned PBMT_C_DELAY_CYCLES = 2048;
+    // B 的 Store PF 在真实 STA replay/fault-retire 路径中需要略长于 2048 个
+    // scheduler tick；保留额外窗口，确保 CSR producer 已观察 B terminal 并让
+    // C 的 response-visible C-2 CSR 稳定回到 mPBMTE=1。
+    localparam int unsigned PBMT_C_DELAY_CYCLES = 3072;
 
     `uvm_object_utils(memblock_main_dispatch_pbmt_response_fault_sequence)
 
@@ -57,13 +62,15 @@ task memblock_main_dispatch_pbmt_response_fault_sequence::body();
     `uvm_info(get_type_name(), "PBMT response-fault main sequence completed", UVM_LOW)
 endtask:body
 
-// 抽象职责：建立相同 S1 VPN 的 A/B/C scalar Load。A 的 delay 先覆盖 PMP bootstrap
-// 管线，B/C 的 delay 则只控制现有 issue queue 的 ready_cycle；三者都不改变 LSQ
-// admission 或 L2TLB token 生命周期，因此 CSR sequence 可在 A/B terminal 后安全切换。
+// 抽象职责：建立相同 S1 VPN 的 A Load、B Store 和 C Store。A 的 delay 先覆盖 PMP
+// bootstrap 管线，B/C 的 delay 则只控制现有 issue queue 的 ready_cycle；B/C 利用
+// Store DTLB 与 A 的 Load DTLB 独立这一 DUT 事实，获得各自的 L2TLB token。三者
+// 都不改变 LSQ admission 或 L2TLB token 生命周期，因此 CSR sequence 可在 A/B
+// terminal 后安全切换。
 task memblock_main_dispatch_pbmt_response_fault_sequence::build_directed_mixed_main_table();
     main_control_transaction a_load;
-    main_control_transaction b_load;
-    main_control_transaction c_load;
+    main_control_transaction b_store;
+    main_control_transaction c_store;
 
     clear_manual_main_table();
 
@@ -74,25 +81,26 @@ task memblock_main_dispatch_pbmt_response_fault_sequence::build_directed_mixed_m
     a_load.delay = PBMT_A_DELAY_CYCLES;
     set_manual_main_transaction(0, a_load);
 
-    b_load = make_directed_transaction("pbmt_disable_reuse_load",
-                                       MEMBLOCK_OP_CLASS_INT_LOAD,
-                                       1,
-                                       64'h0000_0000_8000_1000);
-    b_load.delay = PBMT_B_DELAY_CYCLES;
-    set_manual_main_transaction(1, b_load);
+    b_store = make_directed_transaction("pbmt_disable_reuse_store",
+                                        MEMBLOCK_OP_CLASS_STORE,
+                                        1,
+                                        64'h0000_0000_8000_1000);
+    b_store.delay = PBMT_B_DELAY_CYCLES;
+    set_manual_main_transaction(1, b_store);
 
-    c_load = make_directed_transaction("pbmt_reenable_reuse_load",
-                                       MEMBLOCK_OP_CLASS_INT_LOAD,
-                                       2,
-                                       64'h0000_0000_8000_1000);
-    c_load.delay = PBMT_C_DELAY_CYCLES;
-    set_manual_main_transaction(2, c_load);
+    c_store = make_directed_transaction("pbmt_reenable_reuse_store",
+                                        MEMBLOCK_OP_CLASS_STORE,
+                                        2,
+                                        64'h0000_0000_8000_1000);
+    c_store.delay = PBMT_C_DELAY_CYCLES;
+    set_manual_main_transaction(2, c_store);
 
     import_manual_main_table();
 endtask:build_directed_mixed_main_table
 
-// 抽象职责：检查三个 UID 从同一 raw entry 得到的 response payload。B 的 PF 是 token
-// 私有 overlay；C 的正常 payload 和 raw entry 必须证明 B 没有回写 live entry。
+// 抽象职责：检查三个 UID 从同一 raw entry 得到的 response payload。B 的 Store PF
+// 是 token 私有 overlay；C 的正常 Store payload 和 raw entry 必须证明 B 没有回写
+// live entry。
 function void memblock_main_dispatch_pbmt_response_fault_sequence::
     check_pbmt_response_fault_results();
     memblock_uid_tlb_record a_record;
@@ -133,10 +141,10 @@ function void memblock_main_dispatch_pbmt_response_fault_sequence::
                              b_record.payload.s1_entry_pbmt,
                              c_record.payload.s1_entry_pbmt))
     end
-    if (!b_record.payload.fault_effective_s1_pf || !b_status.exception_vec[13]) begin
+    if (!b_record.payload.fault_effective_s1_pf || !b_status.exception_vec[15]) begin
         `uvm_fatal(get_type_name(), "PBMT-disabled B did not return/retire an S1 page fault")
     end
-    if (c_record.payload.fault_effective_s1_pf || c_status.exception_vec[13]) begin
+    if (c_record.payload.fault_effective_s1_pf || c_status.exception_vec[15]) begin
         `uvm_fatal(get_type_name(), "PBMT re-enabled C inherited B token-local S1 page fault")
     end
     if (raw_entry.s1_entry_pbmt == 2'd0 || raw_entry.fault_effective_s1_pf ||
