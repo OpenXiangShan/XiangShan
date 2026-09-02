@@ -179,7 +179,7 @@ class FauFTB(implicit p: Parameters) extends BasePredictor with FauFTBParams {
   val uftb_write_fallThrough = u_s1_ftb_entry.getFallThrough(uftb_write_pc)
   when(u_s1_valid && u_s1_hit) {
     assert(
-      uftb_write_pc + (FetchWidth * 4).U >= uftb_write_fallThrough,
+      SignExt(uftb_write_pc, VAddrBits + 1) + (FetchWidth * 4).U >= uftb_write_fallThrough,
       s"FauFTB write entry fallThrough address error!"
     )
   }
