@@ -519,10 +519,12 @@ AI_DOC/mem_ut_flow_doc/csr_runtime_sync_flow.md
 `mPBMTE`，A 立即发射。
 
 实现调整：该场景的唯一 CSR producer 在前两笔 item 通过既有
-`io_ooo_to_mem_csrCtrl_distribute_csr_w_*` 通道依次写入 `pmpaddr0=0x4000_0000_0000`
-和 `pmpcfg0=0x0f`。这形成 entry0 的 TOR、RWX、非锁定 PMP allow 区，覆盖 48-bit
-物理地址范围。A 使用已有 `delay` 字段延后 64 个 cycle 发射，确保两笔 CSR 写和 PMP
-管线生效；B/C 的 PBMTE 切换与 token 串行化保持不变。
+`io_ooo_to_mem_csrCtrl_distribute_csr_w_*` 通道依次写入
+`pmpaddr0=0x3fff_ffff_ffff` 和 `pmpcfg0=0x0f`。`pmpaddr0` 在 V2 中只有
+PA[47:2] 的 46 bit，数学端点 `0x4000_0000_0000` 会截断为零；因此采用最大可表示
+值，使 entry0 的 TOR、RWX、非锁定 allow 区覆盖本场景使用的 48-bit PA 窗口。A 使用已有
+`delay` 字段延后 64 个 cycle 发射，确保两笔 CSR 写和 PMP 管线生效；B/C 的 PBMTE
+切换与 token 串行化保持不变。
 
 原因：这是 Sv39/U 场景驱动真实 translated memory access 的 DUT 前置条件。没有该
 bootstrap，PMP access fault 会在 PBMT response 之后覆盖 Load 正常路径，导致该用例无法
