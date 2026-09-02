@@ -137,6 +137,11 @@ class rm_ls_program_item_t;
     bit             expected_pma_cache_path_fault;
     bit             expected_dcache_denied;
     bit             expected_dcache_corrupt;
+    // 中文注释：当前 Load/Store 的任一翻译 byte 是否因 PBMT 非零且对应
+    // PBMTE 关闭而额外产生 S1 PF/S2 GPF。由 RM 在 commit 构建期设置，
+    // 仅用于异常期望诊断，不参与 live TLB entry 生命周期。
+    bit             expected_pbmt_forced_s1_pf;
+    bit             expected_pbmt_forced_s2_gpf;
     int unsigned    dynamic_epoch;
     longint unsigned access_sample;
     bit [63:0]      store_data;
@@ -151,6 +156,8 @@ class rm_ls_program_item_t;
         expected_keyid_fault = 1'b0; expected_pma_atomic_fault = 1'b0;
         expected_pma_cache_path_fault = 1'b0;
         expected_dcache_denied = 1'b0; expected_dcache_corrupt = 1'b0;
+        expected_pbmt_forced_s1_pf = 1'b0;
+        expected_pbmt_forced_s2_gpf = 1'b0;
         dynamic_epoch = 0; access_sample = 0;
         store_data = '0; store_byte_mask = '0;
         foreach (pa_by_byte[i]) pa_by_byte[i] = '0;
