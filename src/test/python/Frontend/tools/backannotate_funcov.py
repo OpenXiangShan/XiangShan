@@ -1079,7 +1079,7 @@ def _normalized_hierarchy_filters(
     return {
         str(field): str(value).strip()
         for field, value in (hierarchy_filters or {}).items()
-        if str(value).strip()
+        if value is not None and str(value).strip()
     }
 
 

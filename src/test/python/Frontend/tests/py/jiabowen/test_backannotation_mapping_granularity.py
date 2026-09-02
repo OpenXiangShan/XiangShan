@@ -153,6 +153,33 @@ def test_hierarchy_filter_preserves_rows_outside_the_selected_branch(
     assert rows[1]["evidence"] == "historical"
 
 
+def test_none_hierarchy_filters_are_ignored(tmp_path):
+    pilot_path = tmp_path / "pilot.csv"
+    testpoint_path = tmp_path / "testpoints.csv"
+    _write_pilot(pilot_path)
+    _write_testpoints(
+        testpoint_path,
+        "covergroup group_a, coverpoint point_a, bins value_a (BIN-001)",
+    )
+
+    counts = backannotate_funcov.backannotate(
+        testpoint_path,
+        backannotate_funcov.load_pilot(pilot_path, bin_prefix="BIN-001"),
+        [],
+        apply=False,
+        bin_prefix="BIN-001",
+        hierarchy_filters={"一级测试点": None, "二级测试点": None},
+    )
+
+    assert counts == {
+        "model": 1,
+        "partial": 0,
+        "hit": 0,
+        "failed": 0,
+        "closed_preserved": 0,
+    }
+
+
 def test_scoped_artifacts_do_not_downgrade_existing_partial(tmp_path):
     pilot_path = tmp_path / "pilot.csv"
     testpoint_path = tmp_path / "testpoints.csv"
