@@ -534,3 +534,36 @@ bootstrap，PMP access fault 会在 PBMT response 之后覆盖 Load 正常路径
 `memblock_main_dispatch_pbmt_response_fault_sequence`，不修改通用静态 CSR sequence、
 PMA/PMP RM 模型、L2TLB responder 或 RTL。验证需确认 A 不再产生 access fault、B 得到
 S1 PF、C 恢复无 PF，且日志中能观察到两笔 PMP distribute CSR write。
+
+### [IMPLEMENTATION_DELTA] real-DUT response path 的 DTLB cache isolation
+
+来源：应用前两个 delta 后的 real-DUT 波形。A 在 625.3ns 已经通过 L2TLB response
+填充 Load DTLB；PBMTE 于 835.3ns 关闭后，B 在 5415.3ns 的 Load DTLB response 为
+`pbmt=01`、`miss=0`、`pf_ld=0`。同一时段 CSR interface、`MemBlock` 寄存器和 PTW
+delay output 的 `mPBMTE` 都为 0，且日志中没有新的 `accept L2TLB token`。因此 B
+从未进入 L2TLB responder，不能用它验证 response-time overlay。
+
+原 plan：A/B/C 都是同 VPN scalar Load，并假定每一笔都会建立新的 L2TLB token。
+
+实现调整：A 保持 Load，用于在 PBMTE=1 时创建 nonzero PBMT raw live entry；B 和 C
+改为相同 VPN 的 scalar Store。Load DTLB 与 Store DTLB 是独立的 DUT request path，故 B
+在 PBMTE=0 时会对 Store DTLB miss 并向 L2TLB agent 发起新 token。B 的 response PF
+不会形成可命中的 Store DTLB refill；C 在 PBMTE 重新开启后仍经 Store DTLB miss 获得新
+token，用于验证 B 的 token-local overlay 没有污染 raw live entry 或 C payload。B/C 的
+状态断言相应从 Load S1 PF bit 13 改为 Store S1 PF bit 15。
+
+原因：L2TLB agent 只代替 DTLB miss 后的 responder，不能拦截既有 DTLB hit。该变更只让
+real-DUT smoke 实际经过计划定义的 response-select/driver/completion path，不把缓存 hit
+路径误判为 responder 缺陷，也不要求 RTL 在 cached PBMT hit 上重新解释 PBMTE。
+
+影响范围：仅修改
+`seq/base_seq/memblock_main_dispatch_pbmt_response_fault_sequence.sv` 与本 plan；不修改
+L2TLB responder、RM、CSR runtime state、DTLB connect 或 RTL。重新运行时必须观察 token
+0(A)、token 1(B)、token 2(C) 三次 accept/complete，B 的 Store exception bit 15 为 1，C
+的 Store exception bit 15 为 0。
+
+后续首次 Store 版本实跑补充：`PBMT_C_DELAY_CYCLES=2048` 时，C 的 STA issue 在
+10.5453us 发出，而 B 因真实 STA replay/fault-retire 到 10.5903us 才 terminal；C 早 45ns
+进入 fault 路径，CSR producer 尚未观察 B terminal，故仍使用 disabled PBMTE。将 C delay
+增至 3072 仅增加 directed start window，不引入新的同步状态、CSR control、SFENCE 或
+process switch；重跑须证明 C 在 B terminal 后才产生 token 2。
