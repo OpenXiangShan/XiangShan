@@ -1,5 +1,7 @@
 ### Project Specific stuff
 test_run_dir/*
+# BPU is developed as a standalone repo, not tracked as a submodule
+/XiangShan-BPU/
 ### XilinxISE template
 # intermediate build files
 *.bgn
