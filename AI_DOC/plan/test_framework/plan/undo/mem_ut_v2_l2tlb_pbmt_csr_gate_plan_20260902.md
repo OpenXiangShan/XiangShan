@@ -608,9 +608,11 @@ overlay 的错误。
 原 plan：A/B/C 使用相同 VPN，假定 B 的 fault response 不会填充 Store DTLB，C 会自动
 产生 token 2。
 
-实现调整：配置既有 `MEMBLOCK_L2TLB_LEVEL_WEIGHT_EN` 与 S1 level 权重，固定 A 创建
-level-1 的 2MB superpage raw entry。A/B 保持 `0x8000_1000`，C 改为同一 superpage 内
-另一 4KB VPN `0x8000_2000`。C 因 VPN 不同而 Store DTLB miss，因 superpage 覆盖范围而在
+实现调整：配置既有 `MEMBLOCK_L2TLB_LEVEL_WEIGHT_EN` 与 S1 level 权重，并将
+`MEMBLOCK_MAIN_MEM_RANGES_EN` 置为 `0`，满足 level 权重只能在 sparse memory mode
+下选择的既有静态约束；root PPN 仍由 `PADDR_BASE` 取得。固定 A 创建 level-1 的 2MB
+superpage raw entry。A/B 保持 `0x8000_1000`，C 改为同一 superpage 内另一 4KB VPN
+`0x8000_2000`。C 因 VPN 不同而 Store DTLB miss，因 superpage 覆盖范围而在
 `common_data_transaction::find_tlb_range_hit_by_req()` 命中 A 的 raw entry；其响应仍是
 独立 token-local payload。专项结果检查额外验证 A/C VPN 不同且 entry generation 相同。
 
