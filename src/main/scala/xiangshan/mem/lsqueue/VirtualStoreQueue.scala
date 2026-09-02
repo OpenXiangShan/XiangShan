@@ -146,6 +146,8 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
 
   val deqPtrHead = deqPtrVec.head
 
+  private val empty = deqPtrVec.head === enqPtrVec.head
+
   // enq
   val allocatedPtrVec     = VecInit((0 until EnqLength).map(i =>
     enqPtrVec(PopCount(io.enq.req.take(i).map(req => req.valid && req.bits.needAlloc)))))
@@ -304,7 +306,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
 
   // io assign
   io.enq.canAccept := allowEnqueue
-  io.empty := deqPtrVec.head === enqPtrVec.head
+  io.empty := empty
 
   io.toPhysicalQueue.physicalQueueEnqPtr := physicalQueueEnqPtr
 
@@ -329,11 +331,39 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   io.toPhysicalQueue.preCommitPtr.valid := preCommitValid
   io.toPhysicalQueue.preCommitPtr.bits  := physicalQueuePreCommitPtr
 
-  // redirect logic, event driver
+  /**
+    * Redirect recovery pipeline
+    *
+    * Pointer roles:
+    *   enqPtrVec           - virtual SQ tail
+    *   redirectLastValidPtr - last virtual entry kept after recovery
+    *   redirectPtr         - recovered exclusive physical SQ tail
+    *
+    * Timeline (P0 is the redirectReg.valid cycle; releasing retired heads may delay P0):
+    *
+    *   P0  redirectReg.valid
+    *       Generate needCancel for entries younger than the redirect.
+    *
+    *   P1  needCancelRegValid
+    *       PopCount needCancelReg to get cancelCount.
+    *       Form enqPtrVecNext and capture redirectLastValidPtr from the old enqPtrVec.
+    *
+    *   P2  redirectLastValidPtrValid
+    *       enqPtrVec has rolled back, so empty reflects the recovered VSQ.
+    *       Select the last entry's physical end pointer, or retirePtrNext when empty,
+    *       and capture the result in toPhysicalQueueRedirectPtr.
+    *
+    *   P3  toPhysicalQueue.redirectPtr.valid
+    *       Update physicalQueueEnqPtr and LsqEnqCtrl.sqTailPtr.
+    *       PhysicalStoreQueue registers the same redirectPtr.
+    *
+    *   P4  PhysicalStoreQueue recovery
+    *       Remove physical entries at and after redirectPtr.
+    */
   val redirectLastValidPtrValid = RegNext(needCancelRegValid, false.B)
   val toPhysicalQueueRedirectValid = RegNext(redirectLastValidPtrValid, false.B)
   val redirectRecoverPtr = WireInit(toPhysicalQueueRetirePtr)
-  when(ctrlEntries(redirectLastValidPtr.value).allocated) {
+  when(!empty) {
     redirectRecoverPtr := getEntryEndSqIdx(redirectLastValidPtr)
   }.otherwise {
     redirectRecoverPtr := toPhysicalQueueRetirePtrNext
