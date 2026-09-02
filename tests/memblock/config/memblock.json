@@ -1,0 +1,97 @@
+{
+  "module": "MemBlock",
+  "rtl": "build/rtl/MemBlock.sv",
+  "rtl_filelist": {
+    "source": "build/rtl/filelist.f",
+    "top_file": "MemBlock.sv",
+    "exclude_basenames": ["XSTop.sv"],
+    "supplemental_globs": ["*_ext.v"]
+  },
+  "default_group": "misc",
+  "group_rules": [
+    {
+      "name": "infrastructure",
+      "exact": ["clock", "reset"]
+    },
+    {
+      "name": "ooo_to_mem",
+      "prefixes": ["io_ooo_to_mem_"]
+    },
+    {
+      "name": "mem_to_ooo",
+      "prefixes": ["io_mem_to_ooo_"]
+    },
+    {
+      "name": "dcache_tilelink",
+      "prefixes": ["auto_inner_dcache_client_"]
+    },
+    {
+      "name": "frontend_tilelink",
+      "prefixes": ["auto_inner_frontendBridge_"]
+    },
+    {
+      "name": "ptw_tilelink",
+      "prefixes": ["auto_inner_ptw_to_l2_buffer_"]
+    },
+    {
+      "name": "uncache_tilelink",
+      "prefixes": ["auto_inner_buffers_out_"]
+    },
+    {
+      "name": "perf",
+      "prefixes": ["io_perf_"]
+    }
+  ],
+  "lane_dimensions": {
+    "issue.scalar_load": "io_ooo_to_mem_issueLda_([0-9]+)_valid",
+    "issue.scalar_store_address": "io_ooo_to_mem_issueSta_([0-9]+)_valid",
+    "issue.scalar_store_data": "io_ooo_to_mem_issueStd_([0-9]+)_valid",
+    "issue.vector_load": "io_ooo_to_mem_issueVldu_([0-9]+)_valid",
+    "writeback.scalar_load": "io_mem_to_ooo_writebackLda_([0-9]+)_valid",
+    "writeback.scalar_store_address": "io_mem_to_ooo_writebackSta_([0-9]+)_valid",
+    "writeback.scalar_store_data": "io_mem_to_ooo_writebackStd_([0-9]+)_valid",
+    "writeback.vector_load": "io_mem_to_ooo_writebackVldu_([0-9]+)_valid"
+  },
+  "width_dimensions": {
+    "identity.rob_value_bits": "io_ooo_to_mem_issueLda_0_bits_uop_robIdx_value",
+    "identity.lq_value_bits": "io_ooo_to_mem_issueLda_0_bits_uop_lqIdx_value",
+    "identity.sq_value_bits": "io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_value",
+    "tilelink.dcache_data_bits": "auto_inner_dcache_client_out_a_bits_data",
+    "tilelink.dcache_source_bits": "auto_inner_dcache_client_out_a_bits_source",
+    "tilelink.ptw_data_bits": "auto_inner_ptw_to_l2_buffer_out_a_bits_data",
+    "tilelink.uncache_data_bits": "auto_inner_buffers_out_a_bits_data"
+  },
+  "fixed_dimensions": {
+    "queue.store_entries": 56
+  },
+  "expected_stats": {
+    "port_count": 1335,
+    "by_direction.input": 749,
+    "by_direction.output": 586,
+    "by_group.ooo_to_mem": 532,
+    "by_group.mem_to_ooo": 260,
+    "by_group.dcache_tilelink": 53,
+    "by_group.frontend_tilelink": 88,
+    "by_group.ptw_tilelink": 21,
+    "by_group.uncache_tilelink": 20,
+    "by_group.perf": 8
+  },
+  "expected_dimensions": {
+    "issue.scalar_load": 3,
+    "issue.scalar_store_address": 2,
+    "issue.scalar_store_data": 2,
+    "issue.vector_load": 2,
+    "writeback.scalar_load": 3,
+    "writeback.scalar_store_address": 2,
+    "writeback.scalar_store_data": 2,
+    "writeback.vector_load": 2,
+    "identity.rob_value_bits": 8,
+    "identity.lq_value_bits": 7,
+    "identity.sq_value_bits": 6,
+    "tilelink.dcache_data_bits": 256,
+    "tilelink.dcache_source_bits": 6,
+    "tilelink.ptw_data_bits": 256,
+    "tilelink.uncache_data_bits": 64,
+    "queue.store_entries": 56
+  }
+}
