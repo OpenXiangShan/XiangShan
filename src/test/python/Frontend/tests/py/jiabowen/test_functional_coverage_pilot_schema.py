@@ -73,12 +73,16 @@ ICACHE_MAINPIPE_S2_ECC_BIN_IDS = {
     *(f"BIN-{index:03d}" for index in range(770, 777)),
 }
 
+ICACHE_MAINPIPE_ALIGNMENT_BIN_IDS = {
+    *(f"BIN-{index}" for index in range(1132, 1140)),
+}
+
 ICACHE_MAPPED_STATUSES = {"MODELED", "PARTIAL", "HIT", "BLOCKED"}
 MMIO_NC_OWNER_BIN_IDS = {f"BIN-{index}" for index in range(1016, 1094)}
 INSTR_UNCACHE_OWNER_BIN_IDS = {f"BIN-{index}" for index in range(1094, 1132)}
 
 IFU_V3_OWNER_MARKER_BLOCK_LEAF_COUNTS = (139, 43, 42, 81)
-IFU_V3_CANONICAL_BLOCK_RANGES = ((595, 770), (1026, 1142), (1184, 1243), (1245, 1349))
+IFU_V3_CANONICAL_BLOCK_RANGES = ((595, 770), (1034, 1150), (1192, 1251), (1253, 1357))
 IFU_V3_CANONICAL_BLOCK_LEAF_COUNTS = (139, 81, 42, 81)
 IFU_V3_OBSOLETE_6220_CONTRACT = re.compile(
     r"selectBlock|halfPc|halfData|halfInstr|isHalfInstr|prevEndHalfRviData|"
@@ -122,7 +126,7 @@ def test_active_pilot_has_global_unique_identifiers_and_mappings():
 
     summary = validate_pilot_schema(pilot_path)
 
-    assert summary == {"rows": 724, "bin_ids": 724, "mapping_keys": 724, "legacy_ids": 4}
+    assert summary == {"rows": 731, "bin_ids": 731, "mapping_keys": 731, "legacy_ids": 4}
 
 
 def test_jiabowen_ifu_owner_blocks_follow_v3_rtl_baseline():
@@ -484,12 +488,12 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
     active = [row for row in rows if row["Coverpoint"].strip()]
     legacy_bpu_ftq = [row for row in rows if "旧BPU_FTQ" in row["映射测试点路径"]]
 
-    assert len(active) == 566
+    assert len(active) == 573
     assert {row["Bin_ID"] for row in active} == {
         *(f"BIN-{index:03d}" for index in range(401, 424)),
         *(f"BIN-{index:03d}" for index in range(424, 433)),
         *(f"BIN-{index:03d}" for index in range(501, 542)),
-        *(f"BIN-{index:03d}" for index in range(601, 619)),
+        *(f"BIN-{index:03d}" for index in range(601, 619) if index != 611),
         *(f"BIN-{index:03d}" for index in range(620, 627)),
         *(f"BIN-{index:03d}" for index in range(628, 632)),
         *(f"BIN-{index:03d}" for index in range(633, 637)),
@@ -506,6 +510,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
         *(f"BIN-{index:03d}" for index in range(717, 759) if index not in (725, 729, 730)),
         *(f"BIN-{index:03d}" for index in range(759, 781)),
         *(f"BIN-{index:03d}" for index in range(801, 1132)),
+        *(f"BIN-{index}" for index in range(1132, 1140)),
     }
     assert legacy_bpu_ftq
     assert all(not row["Coverpoint"].strip() for row in legacy_bpu_ftq)
@@ -686,6 +691,52 @@ def test_icache_mainpipe_s2_ecc_leaves_are_single_bin_and_match_registry():
             mapped_rows[bin_id] = row
 
     assert set(mapped_rows) == ICACHE_MAINPIPE_S2_ECC_BIN_IDS
+
+
+def test_icache_mainpipe_alignment_leaves_are_single_bin_and_match_registry():
+    repo_root = Path(__file__).resolve().parents[7]
+    pilot_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
+    )
+    testpoint_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+    )
+    with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
+        pilot_rows = {
+            row["Bin_ID"]: row
+            for row in csv.DictReader(handle)
+            if row["Bin_ID"] in ICACHE_MAINPIPE_ALIGNMENT_BIN_IDS
+        }
+    assert set(pilot_rows) == ICACHE_MAINPIPE_ALIGNMENT_BIN_IDS
+
+    mapped_rows = {}
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            bin_ids = (
+                set(re.findall(r"BIN-\d+", row["coverage"]))
+                & ICACHE_MAINPIPE_ALIGNMENT_BIN_IDS
+            )
+            if not bin_ids:
+                continue
+            assert len(bin_ids) == 1, row["coverage"]
+            bin_id = bin_ids.pop()
+            assert bin_id not in mapped_rows, bin_id
+            assert all(
+                row[column].strip()
+                for column in ("Condition", "Checkpoint", "Object")
+            )
+            pilot = pilot_rows[bin_id]
+            assert row["coverage"] == (
+                f"covergroup {pilot['Coverage_Group']}, "
+                f"coverpoint {pilot['Coverpoint']}, "
+                f"bins {pilot['Bin_Name']} ({bin_id})"
+            )
+            assert row["status"] in ICACHE_MAPPED_STATUSES
+            mapped_rows[bin_id] = row
+
+    assert set(mapped_rows) == ICACHE_MAINPIPE_ALIGNMENT_BIN_IDS
 
 
 def test_ifu_predecode_and_two_fetch_leaves_are_single_bin_and_actionable():

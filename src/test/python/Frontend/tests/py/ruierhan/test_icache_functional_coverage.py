@@ -90,8 +90,8 @@ def _hit(recorder, group, bin_name):
 
 
 def test_icache_mainpipe_sampler_contract_has_one_key_per_leaf():
-    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 47
-    assert len(set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)) == 47
+    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 54
+    assert len(set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)) == 54
 
 
 def test_icache_prefetchpipe_sampler_contract_has_one_key_per_leaf():
@@ -505,32 +505,19 @@ def _set_mainpipe_crossline_sram_hit(recorder, *, bank_mask=(1, 1, 1, 1, 1, 1, 1
     recorder.env.dut.set(_MAIN + "s1_sramRespValid", int(bank_mask[-1]))
 
 
-def test_mainpipe_crossline_sram_bins_sample_conditions_not_checkpoints():
+def test_mainpipe_crossline_sram_hit_samples_condition_not_checkpoints():
     recorder = _Recorder()
     _set_mainpipe_crossline_sram_hit(recorder)
 
     sample_icache_mainpipe_coverage(recorder, recorder.env, 16)
 
     assert _hit(recorder, "icache_mainpipe_s1_sram", "cross_line_dual_sram_hit")
-    assert _hit(recorder, "icache_mainpipe_s1_sram", "cross_line_bank_mapping")
 
     recorder = _Recorder()
     _set_mainpipe_crossline_sram_hit(recorder)
     recorder.env.dut.set(_MAIN + "s1_hits_0_1", 0)
     sample_icache_mainpipe_coverage(recorder, recorder.env, 17)
     assert not _hit(recorder, "icache_mainpipe_s1_sram", "cross_line_dual_sram_hit")
-
-    recorder = _Recorder()
-    _set_mainpipe_crossline_sram_hit(recorder, bank_mask=(1, 1, 0, 1, 1, 1, 1, 1))
-    sample_icache_mainpipe_coverage(recorder, recorder.env, 18)
-    assert _hit(recorder, "icache_mainpipe_s1_sram", "cross_line_bank_mapping")
-
-    recorder = _Recorder()
-    _set_mainpipe_crossline_sram_hit(recorder)
-    recorder.env.dut.set(_MAIN + "s1_req_0_vAddr_0_addr", 0)
-    sample_icache_mainpipe_coverage(recorder, recorder.env, 19)
-    assert not _hit(recorder, "icache_mainpipe_s1_sram", "cross_line_bank_mapping")
-
 
 def _set_mainpipe_dual_request_independent(recorder):
     recorder.set_key("s1_valid", 1)
@@ -580,6 +567,213 @@ def test_mainpipe_dual_request_samples_condition_not_hit_checkpoints():
     sample_icache_mainpipe_coverage(recorder, recorder.env, 23)
 
     assert not _hit(recorder, "icache_mainpipe_s1_sram", "dual_request_independent")
+
+
+def _set_mainpipe_alignment_snapshot(
+    recorder,
+    *,
+    req1_valid=0,
+    cross0=0,
+    cross1=0,
+    shift_right=0,
+    shifts=(4, 27, 2, 27),
+    raw_maps=(0xF0, 0x3, 0x30, 0x1),
+    sram_valid=(1, 0, 0, 0),
+    mshr_reg=(0, 0, 0, 0),
+):
+    first_range = 0xFF
+    total_range = 0xFFFF
+    aligned_maps = (
+        int(raw_maps[0]) >> int(shifts[0]),
+        (int(raw_maps[1]) << (int(shifts[1]) + 1)) & 0xFFFF_FFFF,
+        (
+            int(raw_maps[2]) >> int(shifts[2])
+            if shift_right
+            else (int(raw_maps[2]) << int(shifts[2])) & 0xFFFF_FFFF
+        ),
+        (int(raw_maps[3]) << (int(shifts[3]) + 2)) & 0xFFFF_FFFF,
+    )
+    masks = (first_range, first_range, total_range ^ first_range, total_range ^ first_range)
+    effective_masks = masks if req1_valid else (*masks[:2], 0, 0)
+    output_map = 0
+    for aligned_map, mask in zip(aligned_maps, effective_masks):
+        output_map |= int(aligned_map) & int(mask)
+
+    for key, value in {
+        "s1_valid": 1,
+        "req1_valid": req1_valid,
+        "two_fetch_valid": req1_valid,
+        "cross0": cross0,
+        "cross1": cross1,
+        "align_shift_right": shift_right,
+        "align_first_range": first_range,
+        "align_total_range": total_range,
+        "toifu_maybe_rvc_map": output_map,
+        "toifu_first_range": first_range,
+        "toifu_total_range": total_range if req1_valid else first_range,
+    }.items():
+        recorder.set_key(key, value)
+
+    sram_valid_names = (
+        _MAIN + "s1_sramRespValid",
+        _MAIN + "s1_sramValid_0_1",
+        _MAIN + "s1_sramValid_1_0",
+        _MAIN + "s1_sramValid_1_1",
+    )
+    for index in range(4):
+        req, line = divmod(index, 2)
+        recorder.env.dut.set(
+            _MAIN + f"s1_maybeRvcAlignInfo_shiftNum_{index}", shifts[index]
+        )
+        recorder.env.dut.set(
+            _MAIN + f"s1_wayLookupEntry_{req}_maybeRvcMap_{line}", raw_maps[index]
+        )
+        recorder.env.dut.set(
+            _MAIN
+            + f"s1_maybeRvcAlignInfo_sramAlignedMaybeRvcMap_{req}_{line}",
+            aligned_maps[index],
+        )
+        recorder.env.dut.set(
+            _MAIN + f"s1_maybeRvcAlignInfo_alignedMaybeRvcMaskVec_{req}_{line}",
+            masks[index],
+        )
+        suffix = "" if index == 0 else f"_{index}"
+        recorder.env.dut.set(
+            _MAIN + f"s1_alignedMaybeRvcMapVec_REG{suffix}", aligned_maps[index]
+        )
+        recorder.env.dut.set(
+            _MAIN + f"s1_wayLookupEntry_{req}_waymask_{line}",
+            int(bool(sram_valid[index])),
+        )
+        recorder.env.dut.set(sram_valid_names[index], sram_valid[index])
+        recorder.env.dut.set(
+            _MAIN + f"s1_mshrValidReg_{req}_{line}", mshr_reg[index]
+        )
+    recorder.env.dut.set(_MAIN + "s1_mshrAlignedMaybeRvcMapReg_0", 0x12)
+    recorder.env.dut.set(_MAIN + "s1_mshrAlignedMaybeRvcMapReg_1", 0x34)
+
+
+def test_mainpipe_sram_maybe_rvc_alignment_bins_cover_all_shift_modes():
+    cases = (
+        (
+            "sram_req0_line0_shift_right",
+            {"cross0": 0, "sram_valid": (1, 0, 0, 0)},
+        ),
+        (
+            "sram_req0_line1_shift_left",
+            {"cross0": 1, "sram_valid": (1, 1, 0, 0)},
+        ),
+        (
+            "sram_req1_shift_right",
+            {
+                "req1_valid": 1,
+                "shift_right": 1,
+                "sram_valid": (0, 0, 1, 0),
+            },
+        ),
+        (
+            "sram_req1_line1_shift_left",
+            {
+                "req1_valid": 1,
+                "cross1": 1,
+                "sram_valid": (0, 0, 1, 1),
+            },
+        ),
+    )
+    for cycle, (bin_name, kwargs) in enumerate(cases, start=30):
+        recorder = _Recorder()
+        _set_mainpipe_alignment_snapshot(recorder, **kwargs)
+        sample_icache_mainpipe_coverage(recorder, recorder.env, cycle)
+        assert _hit(recorder, "icache_mainpipe_maybe_rvc_align", bin_name)
+        evidence = recorder.hit_evidence[("icache_mainpipe_maybe_rvc_align", bin_name)]
+        assert evidence["sram_alignment_matches"]
+        assert evidence["toifu_maybe_rvc_map_matches"]
+        assert evidence["range_output_matches"]
+
+
+def test_mainpipe_req1_left_and_zero_shift_requires_both_subcases():
+    recorder = _Recorder()
+    _set_mainpipe_alignment_snapshot(
+        recorder,
+        req1_valid=1,
+        shift_right=0,
+        shifts=(4, 27, 2, 27),
+        sram_valid=(0, 0, 1, 0),
+    )
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 40)
+    assert not _hit(
+        recorder, "icache_mainpipe_maybe_rvc_align", "sram_req1_shift_left_zero"
+    )
+
+    _set_mainpipe_alignment_snapshot(
+        recorder,
+        req1_valid=1,
+        shift_right=0,
+        shifts=(4, 27, 0, 27),
+        sram_valid=(0, 0, 1, 0),
+    )
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 41)
+    assert _hit(
+        recorder, "icache_mainpipe_maybe_rvc_align", "sram_req1_shift_left_zero"
+    )
+
+
+def test_mainpipe_invalid_req1_alignment_inputs_are_covered_for_masking():
+    recorder = _Recorder()
+    _set_mainpipe_alignment_snapshot(
+        recorder,
+        req1_valid=0,
+        raw_maps=(0xF0, 0x3, 0x55, 0xAA),
+    )
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 42)
+    assert _hit(recorder, "icache_mainpipe_maybe_rvc_align", "invalid_req1_masked")
+    evidence = recorder.hit_evidence[
+        ("icache_mainpipe_maybe_rvc_align", "invalid_req1_masked")
+    ]
+    assert evidence["effective_aligned_masks"][2:] == (0, 0)
+    assert evidence["range_output_matches"]
+
+
+def test_mainpipe_mshr_alignment_requires_complete_request_line_matrix():
+    recorder = _Recorder()
+    cases = (
+        {"mshr_reg": (1, 0, 0, 0)},
+        {"cross0": 1, "mshr_reg": (0, 1, 0, 0)},
+        {"req1_valid": 1, "shift_right": 0, "mshr_reg": (0, 0, 1, 0)},
+        {"req1_valid": 1, "shift_right": 1, "mshr_reg": (0, 0, 1, 0)},
+        {
+            "req1_valid": 1,
+            "cross1": 1,
+            "mshr_reg": (0, 0, 0, 1),
+        },
+    )
+    for cycle, kwargs in enumerate(cases, start=50):
+        _set_mainpipe_alignment_snapshot(
+            recorder,
+            sram_valid=(0, 0, 0, 0),
+            **kwargs,
+        )
+        sample_icache_mainpipe_coverage(recorder, recorder.env, cycle)
+
+    assert _hit(
+        recorder, "icache_mainpipe_maybe_rvc_align", "mshr_request_line_alignment"
+    )
+    evidence = recorder.hit_evidence[
+        ("icache_mainpipe_maybe_rvc_align", "mshr_request_line_alignment")
+    ]
+    assert len(evidence["mshr_alignment_cases_seen"]) == 5
+
+
+def test_mainpipe_mixed_sram_mshr_sources_sample_merge_bin():
+    recorder = _Recorder()
+    _set_mainpipe_alignment_snapshot(
+        recorder,
+        cross0=1,
+        sram_valid=(1, 0, 0, 0),
+        mshr_reg=(0, 1, 0, 0),
+    )
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 60)
+    assert _hit(recorder, "icache_mainpipe_maybe_rvc_align", "mixed_source_merge")
 
 
 def _set_single_hit(recorder):

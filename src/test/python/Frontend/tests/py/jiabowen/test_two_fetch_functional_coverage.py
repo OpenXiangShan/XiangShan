@@ -885,7 +885,7 @@ def test_canonical_registry_matches_the_single_sampler_contract():
     assert len(CFVEC_SAMPLER_BIN_KEYS) == 17
     assert len(IFU_CFVEC_SAMPLER_BIN_KEYS) == 94
     assert len(TWO_FETCH_SAMPLER_BIN_KEYS) == 41
-    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 47
+    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 54
     assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 37
     assert len(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS) == 34
     assert len(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS) == 41
@@ -1110,7 +1110,7 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     assert "s1_icacheMeta_0_pmpMmio" not in recorder_source
     assert "s1_icacheMetaIn_0_itlbPbmt" in recorder_source
     assert "s1_icacheMetaIn_0_pmpMmio" in recorder_source
-    assert len(recorder.definitions) == 566
+    assert len(recorder.definitions) == 573
     assert all(item.coverpoint for item in recorder.definitions)
     assert "FunctionalCoverageRecorder.from_pilot_csv" in fixture_source
     assert "set_line_coverage" in fixture_source

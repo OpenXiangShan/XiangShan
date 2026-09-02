@@ -223,12 +223,16 @@ def test_tc_icache_mainpipe_single_line_sram_hit(env) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-609", "BIN-611")
+@pytest.mark.funcov_bins("BIN-609", "BIN-1133")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_cross_line_dual_sram_hit(env) -> None:
     samples = _initialize_loop(env, _CROSS_BASE, target_offset=0x34, latency=8)
     _wait_hit(env, "icache_mainpipe_s1_sram", "cross_line_dual_sram_hit")
-    _wait_hit(env, "icache_mainpipe_s1_sram", "cross_line_bank_mapping")
+    _wait_hit(
+        env,
+        "icache_mainpipe_maybe_rvc_align",
+        "sram_req0_line1_shift_left",
+    )
     assert any(
         sample["s1_valid"] == 1
         and sample["cross0"] == 1
@@ -241,6 +245,19 @@ def test_tc_icache_mainpipe_cross_line_dual_sram_hit(env) -> None:
         and ((sample["s1_addr"] << 1) & 0x3F) >= 8
         for sample in samples
     ), {"tail": samples[-96:]}
+    alignment_hit = env.functional_coverage.hits[
+        (
+            "icache_mainpipe_maybe_rvc_align",
+            "alignment_behavior",
+            "sram_req0_line1_shift_left",
+        )
+    ]
+    assert any(
+        evidence.get("sram_alignment_matches") is True
+        and evidence.get("toifu_maybe_rvc_map_matches") is True
+        and evidence.get("range_output_matches") is True
+        for evidence in alignment_hit.evidence
+    ), {"alignment_evidence": alignment_hit.evidence}
     assert not env.monitor.get_errors()
 
 
