@@ -25,7 +25,9 @@ class memblock_l2tlb_pbmt_toggle_csr_sequence extends memblock_mmu_sv39_csr_sequ
     // response 行为。两笔 distribute CSR write 只用于该 smoke 的 DUT 前置条件。
     localparam bit [11:0] PBMT_PMPADDR0_CSR_ADDR = 12'h3b0;
     localparam bit [11:0] PBMT_PMPCFG0_CSR_ADDR  = 12'h3a0;
-    localparam bit [63:0] PBMT_PMPADDR0_TOR_TOP  = 64'h0000_4000_0000_0000;
+    // 中文注释：`pmpaddr0` 仅保存 PA[47:2] 的 46 bit；数学上的 2^46 端点
+    // 会被硬件截断为零，因此用最大可表示值覆盖本场景的低端物理地址窗口。
+    localparam bit [63:0] PBMT_PMPADDR0_TOR_TOP  = 64'h0000_3fff_ffff_ffff;
     localparam bit [63:0] PBMT_PMPCFG0_TOR_RWX   = 64'h0000_0000_0000_000f;
 
     memblock_pbmt_toggle_state_e toggle_state;
