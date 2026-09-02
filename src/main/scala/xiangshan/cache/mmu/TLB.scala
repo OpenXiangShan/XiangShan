@@ -248,7 +248,10 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     }
   }
 
-  val refill = ptw.resp.fire && !(ptw.resp.bits.getGpa) && !need_gpa && !maybe_need_gpa_not_allow_refill && !flush_mmu || (if (HasMptCheck) (ptw.resp.fire && BareMode.get) else false.B)
+  val refill = ptw.resp.fire &&
+    (!(ptw.resp.bits.getGpa) && !need_gpa && !maybe_need_gpa_not_allow_refill ||
+      (if (HasMptCheck) BareMode.get else false.B)) &&
+    !flush_mmu
   // mpt only mode also returns and save to l1tlb
   // prevent ptw refill when: 1) it's a getGpa request; 2) l1tlb is in need_gpa state; 3) mmu is being flushed.
 
