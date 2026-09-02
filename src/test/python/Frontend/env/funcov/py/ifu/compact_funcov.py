@@ -74,6 +74,79 @@ def _record_preclip_witness_risk_once(
     )
 
 
+def _record_predchecker_jalr_form_candidate(
+    recorder,
+    cycle: int,
+    forms: set[tuple[str, int]],
+    entries: list[dict[str, Any]],
+) -> None:
+    """Expose partial JALR-form observation without promoting an owner leaf."""
+
+    observed = tuple(sorted((str(kind), int(width)) for kind, width in forms))
+    if not observed:
+        return
+    previous = getattr(recorder, "_ifu_owner_reported_jalr_forms", ())
+    if observed == previous:
+        return
+    recorder._ifu_owner_reported_jalr_forms = observed
+    recorder.risk_observations.append(
+        {
+            "event": "ifu_predchecker_correct_jalr_form_candidate",
+            "cycle": int(cycle),
+            "observed_correct_jalr_forms": [list(form) for form in observed],
+            "taken_jalr_entries": [
+                entry
+                for entry in entries
+                if entry["pred_taken"] == 1 and entry["branch_type"] == 3
+            ],
+            "coverage_promotion": "none",
+        }
+    )
+
+
+def _taken_jalr_form(entry: dict[str, Any]) -> tuple[str, int] | None:
+    if entry["pred_taken"] != 1 or entry["branch_type"] != 3:
+        return None
+    if entry["ras_action"] & 1:
+        kind = "ret"
+    elif entry["ras_action"] & 2:
+        kind = "call"
+    else:
+        kind = "jalr"
+    return kind, int(entry["is_rvc"])
+
+
+def _record_predchecker_taken_jalr_form_observation(
+    recorder,
+    cycle: int,
+    entries: list[dict[str, Any]],
+    faults: list[dict[str, Any]],
+) -> None:
+    """Record raw taken forms so co-faults cannot be mistaken for misses."""
+
+    forms = tuple(
+        sorted(form for entry in entries if (form := _taken_jalr_form(entry)) is not None)
+    )
+    if not forms:
+        return
+    previous = getattr(recorder, "_ifu_owner_reported_taken_jalr_forms", ())
+    if forms == previous:
+        return
+    recorder._ifu_owner_reported_taken_jalr_forms = forms
+    recorder.risk_observations.append(
+        {
+            "event": "ifu_predchecker_taken_jalr_form_observation",
+            "cycle": int(cycle),
+            "observed_taken_jalr_forms": [list(form) for form in forms],
+            "same_request_faults": [
+                str(entry["fault"]) for entry in faults if entry["fault"] is not None
+            ],
+            "eligible_for_bin973": not bool(faults),
+            "coverage_promotion": "none",
+        }
+    )
+
+
 def _read_ifu_output_slot(recorder, dut, field: str, slot: int, suffix: str = "") -> Optional[int]:
     return _read_ifu_internal(recorder, dut, f"io_toIBuffer_bits_{field}_{int(slot)}{suffix}")
 
@@ -1930,7 +2003,7 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             dut,
             "io_resp_stage2Out_checkerRedirect_bits_isCrossBlockInstr",
         )
-        select_block = (
+        effective_owner = (
             None
             if block_sel is None or is_cross_block_instr is None
             else int(block_sel) | int(is_cross_block_instr)
@@ -1955,7 +2028,7 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             "is_rvc": is_rvc,
             "block_sel": block_sel,
             "is_cross_block_instr": is_cross_block_instr,
-            "select_block": select_block,
+            "effective_owner": effective_owner,
             "branch_type": branch_type,
             "ras_action": ras_action,
             "end_offset": end_offset,
@@ -1994,7 +2067,7 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             and is_rvc == pending["is_rvc"]
             and block_sel == pending["block_sel"]
             and is_cross_block_instr == pending["is_cross_block_instr"]
-            and select_block == pending["select_block"]
+            and effective_owner == pending["effective_owner"]
             and branch_type == expected_branch_type
             and ras_action == expected_ras_action
             and end_offset == pending["end_offset"]
@@ -2021,7 +2094,7 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
                     checked_redirect,
                     producer="ifu_predchecker_v3_sampler",
                 )
-            if select_block == 0:
+            if effective_owner == 0:
                 mark_owner_v3_checked(
                     recorder,
                     "BIN-946",
@@ -2029,7 +2102,7 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
                     checked_redirect,
                     producer="ifu_predchecker_v3_sampler",
                 )
-            elif select_block == 1:
+            elif effective_owner == 1:
                 mark_owner_v3_checked(
                     recorder,
                     "BIN-947",
@@ -2115,7 +2188,7 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             prefix + "isCrossBlockInstr",
             f"s2_alignedInstrVec_{slot}_isCrossBlockInstr",
         )
-        select_block = (
+        effective_owner = (
             None
             if block_sel is None or is_cross_block_instr is None
             else int(block_sel) | int(is_cross_block_instr)
@@ -2163,7 +2236,7 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             is_rvc,
             block_sel,
             is_cross_block_instr,
-            select_block,
+            effective_owner,
             end_offset,
             branch_type,
             ras_action,
@@ -2192,7 +2265,7 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
                 "is_rvc": int(is_rvc),
                 "block_sel": int(block_sel),
                 "is_cross_block_instr": int(is_cross_block_instr),
-                "select_block": int(select_block),
+                "effective_owner": int(effective_owner),
                 "end_offset": int(end_offset),
                 "branch_type": int(branch_type),
                 "ras_action": int(ras_action),
@@ -2203,6 +2276,7 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
         )
 
     faults = [entry for entry in entries if entry["fault"] is not None]
+    _record_predchecker_taken_jalr_form_observation(recorder, cycle, entries, faults)
     if not faults:
         not_taken_no_ending_cfi = bool(entries) and all(
             entry["pred_taken"] == 0 and entry["branch_type"] in {0, 1}
@@ -2232,17 +2306,17 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
         for entry in taken_entries:
             if entry["branch_type"] == 2:
                 correct_cfi_kinds.add("jal")
-            elif entry["branch_type"] == 3 and entry["ras_action"] & 1:
-                correct_cfi_kinds.add("ret")
-                correct_jalr_forms.add(("ret", int(entry["is_rvc"])))
-            elif entry["branch_type"] == 3 and entry["ras_action"] & 2:
-                correct_cfi_kinds.add("call")
-                correct_jalr_forms.add(("call", int(entry["is_rvc"])))
-            elif entry["branch_type"] == 3:
-                correct_cfi_kinds.add("jalr")
-                correct_jalr_forms.add(("jalr", int(entry["is_rvc"])))
+            elif (form := _taken_jalr_form(entry)) is not None:
+                correct_cfi_kinds.add(form[0])
+                correct_jalr_forms.add(form)
         recorder._ifu_owner_correct_cfi_kinds = correct_cfi_kinds
         recorder._ifu_owner_correct_jalr_forms = correct_jalr_forms
+        _record_predchecker_jalr_form_candidate(
+            recorder,
+            cycle,
+            correct_jalr_forms,
+            entries,
+        )
         if {"jal", "jalr", "ret"}.issubset(correct_cfi_kinds):
             mark_owner_v3_checked(
                 recorder,
@@ -2384,8 +2458,11 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
             producer="ifu_predchecker_v3_sampler",
         )
 
-    first_is_cross_block_rvi = first["is_rvc"] == 0 and (
-        first["is_cross_block_instr"] == 1 or first["end_offset"] == 16
+    first_is_cross_block_rvi = (
+        first["is_rvc"] == 0
+        and first["block_sel"] == 0
+        and first["is_cross_block_instr"] == 1
+        and first["effective_owner"] == 1
     )
     if first["fault"] == "jal_not_taken" and first["is_rvc"] == 1:
         mark_owner_v3_checked(recorder, "BIN-975", cycle, fault_evidence, producer="ifu_predchecker_v3_sampler")
@@ -2420,10 +2497,9 @@ def _sample_predchecker_v3(recorder, dut, cycle: int) -> None:
         )
         if any(
             entry["is_rvc"] == 0
-            and (
-                entry["is_cross_block_instr"] == 1
-                or entry["end_offset"] == 16
-            )
+            and entry["block_sel"] == 0
+            and entry["is_cross_block_instr"] == 1
+            and entry["effective_owner"] == 1
             for entry in younger_taken_cfi
         ):
             mark_owner_v3_checked(
@@ -2683,35 +2759,6 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                         exception_evidence,
                         producer="ifu_compact_exception_sampler",
                     )
-            # BIN-907 is specifically the complementary case: the first
-            # fetch block carries the exception while later aligned records
-            # remain normal.  Keep it outside the no-normal-delivery branch.
-            if (
-                first_exception_owner == 0
-                and second_fetch_valid in {None, 1}
-                and any(
-                    int(record["slot"]) > int(first_exception["slot"])
-                    and record["exception_mask"] == 0
-                    for record in records
-                )
-            ):
-                mark_owner_v3_checked(
-                    recorder,
-                    "BIN-907",
-                    cycle,
-                    {
-                        **exception_evidence,
-                        "first_exception_raw_block_sel": int(first_exception_block),
-                        "first_exception_is_cross_block_instr": int(
-                            first_exception_cross_block
-                        ),
-                        "first_exception_effective_owner": int(first_exception_owner),
-                        "second_fetch_block_valid": int(second_fetch_valid),
-                        "normal_delivery_after_exception": True,
-                    },
-                    producer="ifu_compact_exception_sampler",
-                )
-
     source_tags: list[tuple[int, int]] = []
     for record in records:
         if record["ftq_ptr"] is not None and record["ftq_ptr"] not in source_tags:
@@ -3499,11 +3546,10 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                     cycle,
                     {**evidence, "slot": record["slot"], "raw": raw},
                 )
-                # The fetch-exception-over-illegal-RVC priority case is also
-                # an owner-v3 scenario: retain the exception slot, suppress
-                # later normal/invalid slots, and preserve the output/boundary
-                # context.  Emit only after the same sampled record and the
-                # second-block-valid observation are both present.
+                # This priority observation proves only the delivered slot.
+                # BIN-907 additionally requires a pre-truncation S1 window and
+                # same-transaction S2/IBuffer proof, which is checked by the
+                # cacheable-pipeline sampler.
                 priority_evidence = {
                     **evidence,
                     "event": "ifu_fetch_exception_over_illegal_rvc",
@@ -3525,7 +3571,6 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
                 }
                 if priority_evidence["second_fetch_block_valid"] == 1:
                     for bin_id in (
-                        "BIN-907",
                         "BIN-910",
                         "BIN-929",
                         "BIN-942",

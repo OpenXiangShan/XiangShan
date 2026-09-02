@@ -419,6 +419,34 @@ def test_ifu_predchecker_v3_tracks_correct_jalr_forms_and_taken_offsets(tmp_path
             cycle += 1
 
     assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_075")
+    candidates = [
+        item
+        for item in recorder.risk_observations
+        if item.get("event") == "ifu_predchecker_correct_jalr_form_candidate"
+    ]
+    assert candidates
+    assert candidates[-1]["observed_correct_jalr_forms"] == [
+        ["call", 0],
+        ["call", 1],
+        ["jalr", 0],
+        ["jalr", 1],
+        ["ret", 0],
+        ["ret", 1],
+    ]
+    assert candidates[-1]["coverage_promotion"] == "none"
+    raw_forms = [
+        item
+        for item in recorder.risk_observations
+        if item.get("event") == "ifu_predchecker_taken_jalr_form_observation"
+    ]
+    assert {
+        tuple(form)
+        for item in raw_forms
+        for form in item["observed_taken_jalr_forms"]
+    } == {
+        tuple(form) for form in candidates[-1]["observed_correct_jalr_forms"]
+    }
+    assert all(item["eligible_for_bin973"] is True for item in raw_forms)
 
     for end_offset in range(16):
         _set_predchecker_request(
@@ -438,39 +466,154 @@ def test_ifu_predchecker_v3_tracks_correct_jalr_forms_and_taken_offsets(tmp_path
     assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_076")
 
 
-def test_ifu_predchecker_v3_cross_block_bins_use_explicit_cross_flag(tmp_path):
+def test_ifu_predchecker_v3_partial_jalr_form_is_diagnostic_not_hit(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_predchecker_request(
+        dut,
+        [{"slot": 0, "branch_type": 3, "ras_action": 0, "pred_taken": 1}],
+    )
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_075")
+    candidates = [
+        item
+        for item in recorder.risk_observations
+        if item.get("event") == "ifu_predchecker_correct_jalr_form_candidate"
+    ]
+    assert len(candidates) == 1
+    assert candidates[0]["observed_correct_jalr_forms"] == [["jalr", 0]]
+    assert candidates[0]["taken_jalr_entries"][0]["fault"] is None
+    assert candidates[0]["coverage_promotion"] == "none"
+
+
+def test_ifu_predchecker_v3_taken_jalr_with_cofault_stays_diagnostic(tmp_path):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+    _set_predchecker_request(
+        dut,
+        [
+            {"slot": 0, "branch_type": 2, "pred_taken": 0},
+            {"slot": 1, "branch_type": 3, "ras_action": 0, "pred_taken": 1},
+        ],
+    )
+
+    sample_cfvec_coverage(recorder, env, 1)
+
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_075")
+    raw_forms = [
+        item
+        for item in recorder.risk_observations
+        if item.get("event") == "ifu_predchecker_taken_jalr_form_observation"
+    ]
+    assert raw_forms == [
+        {
+            "event": "ifu_predchecker_taken_jalr_form_observation",
+            "cycle": 1,
+            "observed_taken_jalr_forms": [["jalr", 0]],
+            "same_request_faults": ["jal_not_taken"],
+            "eligible_for_bin973": False,
+            "coverage_promotion": "none",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("branch_type", "pred_taken", "owner_leaf"),
+    (
+        (2, 0, "owner_leaf_078"),
+        (3, 0, "owner_leaf_084"),
+        (0, 1, "owner_leaf_087"),
+    ),
+)
+def test_ifu_predchecker_v3_cross_block_bins_require_explicit_effective_owner(
+    tmp_path, branch_type, pred_taken, owner_leaf
+):
     recorder, env, dut, _memory = _make_recorder(tmp_path)
 
     _set_predchecker_request(
         dut,
-        [{"slot": 15, "branch_type": 2, "end_offset": 15}],
+        [
+            {
+                "slot": 15,
+                "branch_type": branch_type,
+                "pred_taken": pred_taken,
+                "is_rvc": 0,
+                "block_sel": 0,
+                "is_cross_block_instr": 0,
+                "end_offset": 16,
+            }
+        ],
     )
     sample_cfvec_coverage(recorder, env, 1)
-    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_078")
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", owner_leaf)
 
-    scenarios = (
-        (2, 0, "owner_leaf_078"),
-        (3, 0, "owner_leaf_084"),
-        (0, 1, "owner_leaf_087"),
+    _set_predchecker_request(
+        dut,
+        [
+            {
+                "slot": 15,
+                "branch_type": branch_type,
+                "pred_taken": pred_taken,
+                "is_rvc": 0,
+                "block_sel": 1,
+                "is_cross_block_instr": 1,
+                "end_offset": 0,
+            }
+        ],
     )
-    for cycle, (branch_type, pred_taken, owner_leaf) in enumerate(
-        scenarios, start=2
-    ):
+    sample_cfvec_coverage(recorder, env, 2)
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", owner_leaf)
+
+    _set_predchecker_request(
+        dut,
+        [
+            {
+                "slot": 15,
+                "branch_type": branch_type,
+                "pred_taken": pred_taken,
+                "is_rvc": 0,
+                "block_sel": 0,
+                "is_cross_block_instr": 1,
+                "end_offset": 0,
+            }
+        ],
+    )
+    sample_cfvec_coverage(recorder, env, 3)
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", owner_leaf)
+
+
+def test_ifu_predchecker_v3_younger_cross_bin_requires_explicit_effective_owner(
+    tmp_path,
+):
+    recorder, env, dut, _memory = _make_recorder(tmp_path)
+
+    def sample_younger(cycle, *, block_sel, is_cross_block_instr, end_offset):
         _set_predchecker_request(
             dut,
             [
+                {"slot": 0, "branch_type": 2},
                 {
-                    "slot": 15,
-                    "branch_type": branch_type,
-                    "pred_taken": pred_taken,
+                    "slot": 1,
+                    "branch_type": 1,
+                    "pred_taken": 1,
                     "is_rvc": 0,
-                    "is_cross_block_instr": 1,
-                    "end_offset": 0,
-                }
+                    "block_sel": block_sel,
+                    "is_cross_block_instr": is_cross_block_instr,
+                    "end_offset": end_offset,
+                },
             ],
         )
         sample_cfvec_coverage(recorder, env, cycle)
-        assert recorder.key_hit("ifu_v3_boundary_owner_model", owner_leaf)
+
+    sample_younger(1, block_sel=0, is_cross_block_instr=0, end_offset=16)
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_079")
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_080")
+
+    sample_younger(2, block_sel=1, is_cross_block_instr=1, end_offset=0)
+    assert not recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_080")
+
+    sample_younger(3, block_sel=0, is_cross_block_instr=1, end_offset=0)
+    assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_080")
 
 
 def test_ifu_predchecker_v3_owner_priority_crosses_use_observed_slot_order(tmp_path):
@@ -1525,7 +1668,7 @@ def test_ifu_illegal_rvc_and_fetch_exception_priority_bins(tmp_path):
     sample_cfvec_coverage(priority, priority_env, 1)
 
     assert priority.key_hit("ifu_rvc_exception", "fetch_exception_over_illegal_rvc")
-    assert priority.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
+    assert not priority.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
     assert not priority.key_hit("ifu_rvc_exception", "illegal_rvc")
     for bin_name in (
         "owner_leaf_012",
