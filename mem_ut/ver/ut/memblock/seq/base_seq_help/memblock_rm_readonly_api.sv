@@ -381,6 +381,16 @@ class memblock_rm_readonly_api extends uvm_object;
         input  bit [51:0] request_vpn,
         output tlb_request_context_view_t view
     );
+    // 中文注释：RM 与 software-only 检查共用的纯值 PBMT/PBMTE 语义入口。
+    // 只消费 readonly view，不访问 common_data owner，也不修改任何 entry。
+    extern static function bit eval_pbmt_fault_overlay(
+        input tlb_entry_view_t entry,
+        input tlb_request_context_view_t tlb_context,
+        input bit s1_active,
+        input bit s2_active,
+        output bit force_s1_pf,
+        output bit force_s2_gpf
+    );
     extern function bit read_uid_tlb_for_rm(
         input  memblock_uid_t uid,
         output uid_tlb_view_t view
@@ -748,6 +758,41 @@ function void memblock_rm_readonly_api::copy_tlb_entry(
     view.create_cycle           = source.create_cycle;
     view.last_hit_cycle         = source.last_hit_cycle;
 endfunction:copy_tlb_entry
+
+// 抽象职责：校验 RM 当前 byte 使用的 entry/context 形状，并计算 PBMT
+// 非零且对应 PBMTE 关闭时的局部 PF/GPF overlay。该函数不产生 RM error，
+// 调用者可将返回 0 解释为 entry/context 不一致。
+function bit memblock_rm_readonly_api::eval_pbmt_fault_overlay(
+    input tlb_entry_view_t entry,
+    input tlb_request_context_view_t tlb_context,
+    input bit s1_active,
+    input bit s2_active,
+    output bit force_s1_pf,
+    output bit force_s2_gpf
+);
+    force_s1_pf = 1'b0;
+    force_s2_gpf = 1'b0;
+    if (!entry.valid || !tlb_context.valid) begin
+        return 1'b0;
+    end
+    if (entry.s1_stage_active != s1_active ||
+        entry.s2_stage_active != s2_active ||
+        entry.s2xlate != tlb_context.s2xlate) begin
+        return 1'b0;
+    end
+    if ((!s1_active && entry.s1_entry_pbmt != 2'd0) ||
+        (!s2_active && entry.s2_entry_pbmt != 2'd0) ||
+        (s1_active && entry.s1_entry_pbmt == 2'b11) ||
+        (s2_active && entry.s2_entry_pbmt == 2'b11)) begin
+        return 1'b0;
+    end
+    mmu_csr_runtime_state::compute_pbmt_fault_overlay(
+        s1_active, s2_active, tlb_context.s2xlate,
+        entry.s1_entry_pbmt, entry.s2_entry_pbmt,
+        tlb_context.m_pbmt_en, tlb_context.h_pbmt_en,
+        force_s1_pf, force_s2_gpf);
+    return 1'b1;
+endfunction:eval_pbmt_fault_overlay
 
 function void memblock_rm_readonly_api::copy_uid_tlb_record(
     input  memblock_uid_tlb_record source,

@@ -34,6 +34,7 @@ seq_pkg.sv
 // ./base_seq/soft_test/soft_test_memblock_dispatch_replay_smoke_sequence.sv
 // ./base_seq/soft_test/soft_test_l2tlb_range_lookup_sequence.sv
 // ./base_seq/soft_test/soft_test_memblock_pending_mmio_directed_sequence.sv
+// ./base_seq/soft_test/soft_test_l2tlb_pbmt_csr_gate_sequence.sv
 // ./base_seq/memblock_lsqenq_dispatch_base_sequence.sv
 // ./base_seq/memblock_issue_dispatch_base_sequence.sv
 // ./base_seq/memblock_lsqcommit_dispatch_base_sequence.sv

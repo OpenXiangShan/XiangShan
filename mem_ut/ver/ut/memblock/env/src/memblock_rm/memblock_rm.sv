@@ -272,41 +272,9 @@ function bit memblock_rm::observer_eval_pbmt_fault_overlay(
     output bit force_s1_pf,
     output bit force_s2_gpf
 );
-    bit s1_enabled;
-    bit s2_enabled;
-
-    force_s1_pf = 1'b0;
-    force_s2_gpf = 1'b0;
-    if (!entry.valid || !tlb_context.valid) begin
-        return 1'b0;
-    end
-    if (entry.s1_stage_active != s1_active ||
-        entry.s2_stage_active != s2_active ||
-        entry.s2xlate != tlb_context.s2xlate) begin
-        return 1'b0;
-    end
-    // Inactive stages must retain their reset PBMT, and PBMT=11 is reserved
-    // for this V2 model.  These are malformed-entry diagnostics, not faults
-    // that should be silently converted into an architectural exception.
-    if ((!s1_active && entry.s1_entry_pbmt != 2'd0) ||
-        (!s2_active && entry.s2_entry_pbmt != 2'd0) ||
-        (s1_active && entry.s1_entry_pbmt == 2'b11) ||
-        (s2_active && entry.s2_entry_pbmt == 2'b11)) begin
-        return 1'b0;
-    end
-    if (s1_active) begin
-        s1_enabled = mmu_csr_runtime_state::get_stage_pbmt_enable_from_bits(
-            1'b1, tlb_context.s2xlate, tlb_context.m_pbmt_en,
-            tlb_context.h_pbmt_en);
-        force_s1_pf = (entry.s1_entry_pbmt != 2'd0) && !s1_enabled;
-    end
-    if (s2_active) begin
-        s2_enabled = mmu_csr_runtime_state::get_stage_pbmt_enable_from_bits(
-            1'b0, tlb_context.s2xlate, tlb_context.m_pbmt_en,
-            tlb_context.h_pbmt_en);
-        force_s2_gpf = (entry.s2_entry_pbmt != 2'd0) && !s2_enabled;
-    end
-    return 1'b1;
+    return memblock_rm_readonly_api::eval_pbmt_fault_overlay(
+        entry, tlb_context, s1_active, s2_active,
+        force_s1_pf, force_s2_gpf);
 endfunction:observer_eval_pbmt_fault_overlay
 
 function bit memblock_rm::observer_build_commit_item(
