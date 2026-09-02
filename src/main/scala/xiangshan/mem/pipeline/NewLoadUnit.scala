@@ -910,7 +910,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     uop.exceptionVec(loadPageFault) ||
     uop.exceptionVec(loadGuestPageFault)
   val tlbAccessable = !tlbUnaccessable
-  val pmpUnaccessable = pmp.ld && tlbHit
+  val pmpUnaccessable = (pmp.ld || (pmp.instr && LSUOpType.isHlvx(uop.fuOpType))) && tlbHit
 
   val isNC = tlbHit && tlbAccessable && Pbmt.isNC(pbmt)
   val isMMIO = tlbHit && tlbAccessable && (Pbmt.isIO(pbmt) || Pbmt.isPMA(pbmt) && pmp.mmio)
