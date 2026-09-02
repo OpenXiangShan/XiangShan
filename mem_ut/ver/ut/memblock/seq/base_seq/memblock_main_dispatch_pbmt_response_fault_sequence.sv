@@ -6,13 +6,16 @@
 `ifndef MEMBLOCK_MAIN_DISPATCH_PBMT_RESPONSE_FAULT_SEQUENCE__SV
 `define MEMBLOCK_MAIN_DISPATCH_PBMT_RESPONSE_FAULT_SEQUENCE__SV
 
-// 中文注释：该 sequence 为 PBMTE 动态切换 smoke 构造同 VPN 的 A Load、B Store
-// 和 C Store。A 填充 Load DTLB；B/C 使用独立的 Store DTLB，确保 B 在 PBMTE
-// 关闭后真实发出 L2TLB request。B fault 不应填充 Store DTLB，因此 C 在重新
-// enable 后必须再次走 L2TLB response。该 sequence 不直接驱动 CSR 或 L2TLB
-// 接口，仍由 vseq 中的唯一 CSR producer 和 responder 负责。
+// 中文注释：该 sequence 为 PBMTE 动态切换 smoke 构造同一 S1 superpage 内的 A
+// Load、B Store 和 C Store。A/B 使用首个 4KB VPN；C 使用另一 4KB VPN，使其
+// Store DTLB 不命中 B 的 fault cache，但 L2TLB 可 range-hit A 的 raw entry。该
+// sequence 不直接驱动 CSR 或 L2TLB 接口，仍由 vseq 中的唯一 CSR producer 和
+// responder 负责。
 class memblock_main_dispatch_pbmt_response_fault_sequence extends
     memblock_main_dispatch_manual_main_table_sequence;
+
+    localparam bit [63:0] PBMT_A_B_VADDR = 64'h0000_0000_8000_1000;
+    localparam bit [63:0] PBMT_C_VADDR   = 64'h0000_0000_8000_2000;
 
     // 中文注释：为 CSR -> PMP 的实际流水线留出启动窗口；A 发射前，定向 CSR
     // producer 已依次写入 pmpaddr0 与 pmpcfg0，使 U 态访存不会被 reset PMP deny。
@@ -62,11 +65,12 @@ task memblock_main_dispatch_pbmt_response_fault_sequence::body();
     `uvm_info(get_type_name(), "PBMT response-fault main sequence completed", UVM_LOW)
 endtask:body
 
-// 抽象职责：建立相同 S1 VPN 的 A Load、B Store 和 C Store。A 的 delay 先覆盖 PMP
-// bootstrap 管线，B/C 的 delay 则只控制现有 issue queue 的 ready_cycle；B/C 利用
-// Store DTLB 与 A 的 Load DTLB 独立这一 DUT 事实，获得各自的 L2TLB token。三者
-// 都不改变 LSQ admission 或 L2TLB token 生命周期，因此 CSR sequence 可在 A/B
-// terminal 后安全切换。
+// 抽象职责：建立同一 S1 superpage 内的 A Load、B Store 和 C Store。A/B 使用相同
+// 4KB VPN，C 使用相邻 VPN；A 的 delay 先覆盖 PMP bootstrap 管线，B/C 的 delay
+// 则只控制现有 issue queue 的 ready_cycle。B 通过 Store DTLB 与 A 的 Load DTLB
+// 独立取得 token，C 通过不同 Store VPN 避开 B 的 cached fault，同时由 L2TLB
+// superpage range-hit 复用 A 的 raw entry。三者都不改变 LSQ admission 或 L2TLB
+// token 生命周期，因此 CSR sequence 可在 A/B terminal 后安全切换。
 task memblock_main_dispatch_pbmt_response_fault_sequence::build_directed_mixed_main_table();
     main_control_transaction a_load;
     main_control_transaction b_store;
@@ -77,21 +81,21 @@ task memblock_main_dispatch_pbmt_response_fault_sequence::build_directed_mixed_m
     a_load = make_directed_transaction("pbmt_enable_build_load",
                                        MEMBLOCK_OP_CLASS_INT_LOAD,
                                        0,
-                                       64'h0000_0000_8000_1000);
+                                       PBMT_A_B_VADDR);
     a_load.delay = PBMT_A_DELAY_CYCLES;
     set_manual_main_transaction(0, a_load);
 
     b_store = make_directed_transaction("pbmt_disable_reuse_store",
                                         MEMBLOCK_OP_CLASS_STORE,
                                         1,
-                                        64'h0000_0000_8000_1000);
+                                        PBMT_A_B_VADDR);
     b_store.delay = PBMT_B_DELAY_CYCLES;
     set_manual_main_transaction(1, b_store);
 
     c_store = make_directed_transaction("pbmt_reenable_reuse_store",
                                         MEMBLOCK_OP_CLASS_STORE,
                                         2,
-                                        64'h0000_0000_8000_1000);
+                                        PBMT_C_VADDR);
     c_store.delay = PBMT_C_DELAY_CYCLES;
     set_manual_main_transaction(2, c_store);
 
@@ -99,8 +103,8 @@ task memblock_main_dispatch_pbmt_response_fault_sequence::build_directed_mixed_m
 endtask:build_directed_mixed_main_table
 
 // 抽象职责：检查三个 UID 从同一 raw entry 得到的 response payload。B 的 Store PF
-// 是 token 私有 overlay；C 的正常 Store payload 和 raw entry 必须证明 B 没有回写
-// live entry。
+// 是 token 私有 overlay；C 使用不同 request VPN 的正常 Store payload 和 raw entry
+// 必须共同证明 B 没有回写 live entry。
 function void memblock_main_dispatch_pbmt_response_fault_sequence::
     check_pbmt_response_fault_results();
     memblock_uid_tlb_record a_record;
@@ -123,6 +127,15 @@ function void memblock_main_dispatch_pbmt_response_fault_sequence::
 
     if (!a_record.pte_valid || !b_record.pte_valid || !c_record.pte_valid) begin
         `uvm_fatal(get_type_name(), "PBMT directed scenario has an incomplete UID TLB payload")
+    end
+    if (a_record.lookup_key.vpn == c_record.lookup_key.vpn ||
+        a_record.payload.entry_generation != c_record.payload.entry_generation) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("PBMT C did not range-hit A raw entry A/C vpn=0x%0h/0x%0h generation=%0d/%0d",
+                             a_record.lookup_key.vpn,
+                             c_record.lookup_key.vpn,
+                             a_record.payload.entry_generation,
+                             c_record.payload.entry_generation))
     end
     if (!a_record.csr_snapshot.m_pbmt_en || b_record.csr_snapshot.m_pbmt_en ||
         !c_record.csr_snapshot.m_pbmt_en) begin

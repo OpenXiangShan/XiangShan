@@ -596,3 +596,31 @@ request，response 必须先被 DUT 消费才能产生执行结果和 terminal r
 L2TLB token、UID record、response overlay、RM、DTLB cache 或 RTL。重跑必须观察
 `B terminal retire: drive mPBMTE=1 for C`，随后 token 2 在 enable-C CSR 上完成，且 C
 没有 Store S1 PF。
+
+### [IMPLEMENTATION_DELTA] C 的 Store DTLB cache isolation 与 L2TLB range-hit
+
+来源：terminal-retire 条件修正后的 real-DUT smoke。B 的 PBMT-induced Store PF 被 DUT
+的 Store DTLB 缓存；C 复用相同 VPN 时不再产生 L2TLB token，而是直接得到 B 的 cached
+`0x8000`。RM 按 C 的 enabled PBMTE 和 raw entry 正确推导 normal expectation，因此该
+mismatch 说明 directed scenario 没有再次经过 responder，不是 RM 规则或 RTL response
+overlay 的错误。
+
+原 plan：A/B/C 使用相同 VPN，假定 B 的 fault response 不会填充 Store DTLB，C 会自动
+产生 token 2。
+
+实现调整：配置既有 `MEMBLOCK_L2TLB_LEVEL_WEIGHT_EN` 与 S1 level 权重，固定 A 创建
+level-1 的 2MB superpage raw entry。A/B 保持 `0x8000_1000`，C 改为同一 superpage 内
+另一 4KB VPN `0x8000_2000`。C 因 VPN 不同而 Store DTLB miss，因 superpage 覆盖范围而在
+`common_data_transaction::find_tlb_range_hit_by_req()` 命中 A 的 raw entry；其响应仍是
+独立 token-local payload。专项结果检查额外验证 A/C VPN 不同且 entry generation 相同。
+
+原因：真实 DTLB 缓存是 responder 的上游消费者；PBMTE re-enable 不会自动使 B 的 cached
+fault entry 失效。该场景必须显式构造新的 DTLB miss，才有资格验证 C 是否从未被 B overlay
+污染的 raw entry 产生正常 response。superpage range-hit 同时保留了本专项要求的 raw entry
+复用，不需要 SFENCE、process switch、TLB flush 或 RTL 修改。
+
+影响范围：仅修改
+`seq/base_seq/memblock_main_dispatch_pbmt_response_fault_sequence.sv`、
+`seq/plus_cfg/tc_l2tlb_pbmt_response_fault.cfg` 和本 plan。重跑必须观察 token 0/1/2，
+其中 token 2 的日志 lookup 为 range hit、C 的 Store exception bit15 为 0，且 RM 的 C
+compare 为 PASS。
