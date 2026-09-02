@@ -17,6 +17,8 @@ _REGISTERED_TRANSACTION_SLOT_COUNT = 35
 _STRUCTURAL_TAIL_SLOT = 34
 _STRUCTURAL_TAIL_INSTR_COUNT = 32
 _STRUCTURAL_TAIL_ALIGN_SHIFT = 3
+_BIN907_TIMEOUT_CYCLES = 16
+_BIN907_FETCH_EXCEPTION_VALUES = frozenset({1, 2, 3, 5})
 _STRUCTURAL_TAIL_VALID_MASK = (
     ((1 << _STRUCTURAL_TAIL_INSTR_COUNT) - 1) << _STRUCTURAL_TAIL_ALIGN_SHIFT
 )
@@ -37,6 +39,11 @@ _CONTRACT_FAILURE_EVENTS = frozenset(
         "ifu_cacheable_backend_flush_timeout",
         "ifu_line0_late_fault_source_pending_collision",
         "ifu_line0_late_fault_source_unobservable",
+        "ifu_bin907_probe_unobservable",
+        "ifu_bin907_s1_truncation_mismatch",
+        "ifu_bin907_s2_identity_mismatch",
+        "ifu_bin907_delivery_mismatch",
+        "ifu_bin907_transaction_timeout",
     }
 )
 
@@ -196,6 +203,60 @@ _LATE_FAULT_SIGNALS = {
     ),
 }
 
+_BIN907_SIGNALS = {
+    "s1_instr_count": (
+        f"{_IFU_PREFIX}s1_instrCount",
+        f"{_IFU_PREFIX}__Vtogcov__s1_instrCount",
+    ),
+    "s1_total_range": (
+        f"{_IFU_PREFIX}s1_totalRange",
+        f"{_IFU_PREFIX}__Vtogcov__s1_totalRange",
+    ),
+    "s1_later_data": (
+        f"{_IFU_PREFIX}s1_baseInstrData_1",
+        f"{_IFU_PREFIX}__Vtogcov__s1_baseInstrData_1",
+    ),
+    "s1_ftq_flag": (f"{_IFU_PREFIX}s1_fetchBlock_0_ftqIdx_flag",),
+    "s1_ftq_value": (f"{_IFU_PREFIX}s1_fetchBlock_0_ftqIdx_value",),
+    "s2_flush": (
+        f"{_IFU_PREFIX}s2_flush",
+        f"{_IFU_PREFIX}__Vtogcov__s2_flush",
+    ),
+    "s2_valid": (f"{_IFU_PREFIX}s2_valid_valid",),
+    "s2_ftq_flag": (f"{_IFU_PREFIX}s2_fetchBlock_0_ftqIdx_flag",),
+    "s2_ftq_value": (f"{_IFU_PREFIX}s2_fetchBlock_0_ftqIdx_value",),
+    "s2_exception": (f"{_IFU_PREFIX}s2_icacheMeta_0_exception_value",),
+    "s2_instr_count": (
+        f"{_IFU_PREFIX}s2_instrCount",
+        f"{_IFU_PREFIX}__Vtogcov__s2_instrCount",
+    ),
+    "to_ibuffer_valid": (f"{_IFU_PREFIX}io_toIBuffer_valid",),
+    "to_ibuffer_ready": (
+        f"{_IFU_PREFIX}io_toIBuffer_ready",
+        f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_ready",
+    ),
+    "to_ibuffer_exception": (
+        f"{_IFU_PREFIX}io_toIBuffer_bits_exceptionType_value",
+        f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionType_value",
+    ),
+    "to_ibuffer_enq": (
+        f"{_IFU_PREFIX}io_toIBuffer_bits_enqEnable",
+        f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_enqEnable",
+    ),
+    "to_ibuffer_valid_mask": (
+        f"{_IFU_PREFIX}io_toIBuffer_bits_valid",
+        f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_valid",
+    ),
+}
+
+_BIN907_INSTR_END_MASK_SIGNALS = tuple(
+    (
+        f"{_IFU_PREFIX}s1_instrEndMask_{index}",
+        f"{_IFU_PREFIX}__Vtogcov__s1_instrEndMask_{index}",
+    )
+    for index in range(_FETCH_BLOCK_INST_NUM)
+)
+
 
 def initialize_ifu_cacheable_pipeline_state(recorder) -> None:
     recorder._ifu_cacheable_pending_transfer = None
@@ -216,6 +277,7 @@ def initialize_ifu_cacheable_pipeline_state(recorder) -> None:
     recorder._ifu_late_fault_flush_pending = None
     recorder._ifu_late_fault_source_pending = None
     recorder._ifu_invalid_taken_exception_pending = None
+    recorder._ifu_bin907_pending = None
 
 
 def reset_ifu_cacheable_pipeline_state(recorder) -> None:
@@ -248,6 +310,69 @@ def _read_late_fault_signal_with_path(
         if value is not None:
             return int(value), str(name)
     return None, None
+
+
+def _read_bin907_signal_with_path(
+    recorder, key: str
+) -> tuple[Optional[int], Optional[str]]:
+    dut = _dut(recorder)
+    if dut is None:
+        return None, None
+    for name in _BIN907_SIGNALS[key]:
+        value = recorder._try_read_dut_signal(dut, name)
+        if value is not None:
+            return int(value), str(name)
+    return None, None
+
+
+def _read_bin907_signal(recorder, key: str) -> Optional[int]:
+    value, _path = _read_bin907_signal_with_path(recorder, key)
+    return value
+
+
+def _read_bin907_raw_candidate_count(
+    recorder,
+) -> tuple[Optional[int], dict[str, object], list[str]]:
+    total_range, total_range_path = _read_bin907_signal_with_path(
+        recorder, "s1_total_range"
+    )
+    paths: dict[str, object] = {
+        "s1_total_range": total_range_path,
+        "s1_instr_end_mask": [],
+    }
+    missing = [] if total_range is not None else ["s1_total_range"]
+    instr_end_mask = 0
+    dut = _dut(recorder)
+    for index, candidates in enumerate(_BIN907_INSTR_END_MASK_SIGNALS):
+        value = None
+        path = None
+        if dut is not None:
+            for candidate in candidates:
+                observed = recorder._try_read_dut_signal(dut, candidate)
+                if observed is not None:
+                    value = int(observed)
+                    path = candidate
+                    break
+        cast_paths = paths["s1_instr_end_mask"]
+        assert isinstance(cast_paths, list)
+        cast_paths.append(path)
+        if value is None:
+            missing.append(f"s1_instr_end_mask_{index}")
+        else:
+            instr_end_mask |= (int(value) & 1) << index
+    if missing:
+        return None, paths, missing
+    assert total_range is not None
+    raw_candidate_count = (int(instr_end_mask) & int(total_range)).bit_count()
+    return (
+        int(raw_candidate_count),
+        {
+            **paths,
+            "s1_instr_end_mask_value": int(instr_end_mask),
+            "s1_total_range_value": int(total_range),
+        },
+        [],
+    )
 
 
 def _read_exception_mask(recorder) -> Optional[int]:
@@ -831,6 +956,316 @@ def _record_mismatch(recorder, event: str, cycle: int, **details) -> None:
     recorder.risk_observations.append({"event": event, "cycle": int(cycle), **details})
     if event in _CONTRACT_FAILURE_EVENTS:
         recorder.record_contract_error(event, cycle, details)
+
+
+def _record_bin907_unobservable(
+    recorder,
+    cycle: int,
+    *,
+    stage: str,
+    missing: list[str],
+    pending: Optional[dict] = None,
+) -> None:
+    _record_mismatch(
+        recorder,
+        "ifu_bin907_probe_unobservable",
+        cycle,
+        stage=str(stage),
+        missing=list(missing),
+        pending=pending,
+    )
+
+
+def _read_bin907_output_identity(
+    recorder, slot: int
+) -> tuple[Optional[tuple[int, int]], dict[str, Optional[str]]]:
+    values = []
+    paths = {}
+    dut = _dut(recorder)
+    for field in ("flag", "value"):
+        stem = f"io_toIBuffer_bits_ftqPtr_{int(slot)}_{field}"
+        value = None
+        path = None
+        if dut is not None:
+            for candidate in (
+                f"{_IFU_PREFIX}{stem}",
+                f"{_IFU_PREFIX}__Vtogcov__{stem}",
+            ):
+                observed = recorder._try_read_dut_signal(dut, candidate)
+                if observed is not None:
+                    value = int(observed)
+                    path = candidate
+                    break
+        values.append(value)
+        paths[field] = path
+    identity = (
+        None
+        if any(value is None for value in values)
+        else (int(values[0]), int(values[1]))
+    )
+    return identity, paths
+
+
+def _sample_bin907_exception_truncation(recorder, cycle: int) -> None:
+    pending = recorder._ifu_bin907_pending
+    if pending is not None:
+        s2_flush = _read_bin907_signal(recorder, "s2_flush")
+        s2_valid = _read_bin907_signal(recorder, "s2_valid")
+        missing_control = [
+            name
+            for name, value in (("s2_flush", s2_flush), ("s2_valid", s2_valid))
+            if value is None
+        ]
+        if missing_control:
+            _record_bin907_unobservable(
+                recorder,
+                cycle,
+                stage="s2_control",
+                missing=missing_control,
+                pending=pending,
+            )
+            recorder._ifu_bin907_pending = None
+        elif int(s2_flush) == 1:
+            _record_mismatch(
+                recorder,
+                "ifu_bin907_transaction_flushed",
+                cycle,
+                pending=pending,
+            )
+            recorder._ifu_bin907_pending = None
+        elif int(s2_valid) == 1:
+            s2_values = {
+                key: _read_bin907_signal(recorder, key)
+                for key in (
+                    "s2_ftq_flag",
+                    "s2_ftq_value",
+                    "s2_exception",
+                    "s2_instr_count",
+                )
+            }
+            missing = [key for key, value in s2_values.items() if value is None]
+            if missing:
+                _record_bin907_unobservable(
+                    recorder,
+                    cycle,
+                    stage="s2_identity",
+                    missing=missing,
+                    pending=pending,
+                )
+                recorder._ifu_bin907_pending = None
+            else:
+                s2_identity = (
+                    int(s2_values["s2_ftq_flag"]),
+                    int(s2_values["s2_ftq_value"]),
+                )
+                if s2_identity != pending["ftq_identity"]:
+                    _record_mismatch(
+                        recorder,
+                        "ifu_bin907_s2_identity_mismatch",
+                        cycle,
+                        pending=pending,
+                        observed_s2_identity=list(s2_identity),
+                    )
+                    recorder._ifu_bin907_pending = None
+                else:
+                    output_control = {
+                        key: _read_bin907_signal(recorder, key)
+                        for key in ("to_ibuffer_valid", "to_ibuffer_ready")
+                    }
+                    missing = [
+                        key for key, value in output_control.items() if value is None
+                    ]
+                    if missing:
+                        _record_bin907_unobservable(
+                            recorder,
+                            cycle,
+                            stage="ibuffer_control",
+                            missing=missing,
+                            pending=pending,
+                        )
+                        recorder._ifu_bin907_pending = None
+                    elif (
+                        int(output_control["to_ibuffer_valid"]) == 1
+                        and int(output_control["to_ibuffer_ready"]) == 1
+                    ):
+                        output_values = {
+                            key: _read_bin907_signal(recorder, key)
+                            for key in (
+                                "to_ibuffer_exception",
+                                "to_ibuffer_enq",
+                                "to_ibuffer_valid_mask",
+                            )
+                        }
+                        output_values["exception_mask"] = _read_exception_mask(recorder)
+                        missing = [
+                            key for key, value in output_values.items() if value is None
+                        ]
+                        if missing:
+                            _record_bin907_unobservable(
+                                recorder,
+                                cycle,
+                                stage="ibuffer_payload",
+                                missing=missing,
+                                pending=pending,
+                            )
+                            recorder._ifu_bin907_pending = None
+                        else:
+                            enq_mask = int(output_values["to_ibuffer_enq"])
+                            valid_mask = int(output_values["to_ibuffer_valid_mask"])
+                            exception_mask = int(output_values["exception_mask"])
+                            active_mask = enq_mask & valid_mask
+                            slot = (
+                                (active_mask & -active_mask).bit_length() - 1
+                                if active_mask
+                                else -1
+                            )
+                            output_identity, output_identity_paths = (
+                                _read_bin907_output_identity(recorder, slot)
+                                if slot >= 0
+                                else (None, {"flag": None, "value": None})
+                            )
+                            checks = {
+                                "s2_exception_matches": int(s2_values["s2_exception"])
+                                == int(pending["exception_type"]),
+                                "s2_instr_count_is_one": int(
+                                    s2_values["s2_instr_count"]
+                                )
+                                == 1,
+                                "output_exception_matches": int(
+                                    output_values["to_ibuffer_exception"]
+                                )
+                                == int(pending["exception_type"]),
+                                "single_enabled_slot": enq_mask.bit_count() == 1,
+                                "single_valid_slot": valid_mask.bit_count() == 1,
+                                "single_active_slot": active_mask.bit_count() == 1,
+                                "exception_mask_matches_active": exception_mask
+                                == active_mask,
+                                "output_ftq_matches": output_identity
+                                == pending["ftq_identity"],
+                            }
+                            evidence = {
+                                **pending,
+                                "event": "ifu_bin907_exception_truncation_pass",
+                                "s2_cycle": int(cycle),
+                                "s2_identity": list(s2_identity),
+                                "s2_exception": int(s2_values["s2_exception"]),
+                                "s2_instr_count": int(
+                                    s2_values["s2_instr_count"]
+                                ),
+                                "enq_enable": enq_mask,
+                                "valid_mask": valid_mask,
+                                "active_mask": active_mask,
+                                "exception_mask": exception_mask,
+                                "exception_slot": int(slot),
+                                "output_ftq_identity": (
+                                    None
+                                    if output_identity is None
+                                    else list(output_identity)
+                                ),
+                                "output_identity_signal_paths": output_identity_paths,
+                                "checks": checks,
+                            }
+                            if all(checks.values()):
+                                mark_owner_v3_checked(
+                                    recorder,
+                                    "BIN-907",
+                                    cycle,
+                                    evidence,
+                                    producer="ifu_cacheable_exception_truncation_sampler",
+                                )
+                            else:
+                                _record_mismatch(
+                                    recorder,
+                                    "ifu_bin907_delivery_mismatch",
+                                    cycle,
+                                    evidence=evidence,
+                                )
+                            recorder._ifu_bin907_pending = None
+        if (
+            recorder._ifu_bin907_pending is not None
+            and int(s2_valid or 0) == 0
+            and int(cycle) - int(pending["s1_cycle"]) > _BIN907_TIMEOUT_CYCLES
+        ):
+            _record_mismatch(
+                recorder,
+                "ifu_bin907_transaction_timeout",
+                cycle,
+                pending=pending,
+                timeout_cycles=_BIN907_TIMEOUT_CYCLES,
+            )
+            recorder._ifu_bin907_pending = None
+
+    s1_control = {
+        "valid": _read_signal(recorder, "s1_valid"),
+        "fire": _read_signal(recorder, "s1_fire"),
+        "flush": _read_signal(recorder, "s1_flush"),
+        "req_is_uncache": _read_signal(recorder, "s1_req_uncache"),
+        "exception": _read_signal(recorder, "s1_exception"),
+    }
+    if any(value is None for value in s1_control.values()) or not (
+        int(s1_control["valid"]) == 1
+        and int(s1_control["fire"]) == 1
+        and int(s1_control["flush"]) == 0
+        and int(s1_control["req_is_uncache"]) == 0
+        and int(s1_control["exception"]) in _BIN907_FETCH_EXCEPTION_VALUES
+    ):
+        return
+
+    s1_values = {}
+    signal_paths = {}
+    for key in ("s1_instr_count", "s1_later_data", "s1_ftq_flag", "s1_ftq_value"):
+        value, path = _read_bin907_signal_with_path(recorder, key)
+        s1_values[key] = value
+        signal_paths[key] = path
+    missing = [key for key, value in s1_values.items() if value is None]
+    raw_candidate_count, raw_candidate_paths, raw_candidate_missing = (
+        _read_bin907_raw_candidate_count(recorder)
+    )
+    missing.extend(raw_candidate_missing)
+    if missing:
+        _record_bin907_unobservable(
+            recorder,
+            cycle,
+            stage="s1_truncation",
+            missing=missing,
+        )
+        return
+    assert raw_candidate_count is not None
+    if int(raw_candidate_count) <= 1:
+        return
+    if int(s1_values["s1_instr_count"]) != 1:
+        _record_mismatch(
+            recorder,
+            "ifu_bin907_s1_truncation_mismatch",
+            cycle,
+            exception_type=int(s1_control["exception"]),
+            raw_candidate_count=int(raw_candidate_count),
+            instr_count=int(s1_values["s1_instr_count"]),
+            later_instruction_data=int(s1_values["s1_later_data"]),
+        )
+        return
+    if recorder._ifu_bin907_pending is not None:
+        _record_mismatch(
+            recorder,
+            "ifu_bin907_pending_collision",
+            cycle,
+            previous=recorder._ifu_bin907_pending,
+        )
+        return
+    recorder._ifu_bin907_pending = {
+        "s1_cycle": int(cycle),
+        "ftq_identity": (
+            int(s1_values["s1_ftq_flag"]),
+            int(s1_values["s1_ftq_value"]),
+        ),
+        "exception_type": int(s1_control["exception"]),
+        "raw_candidate_count": int(raw_candidate_count),
+        "raw_candidate_signal_paths": raw_candidate_paths,
+        "instr_count": int(s1_values["s1_instr_count"]),
+        "later_instruction_slot": 1,
+        "later_instruction_data": int(s1_values["s1_later_data"]),
+        "s1_signal_paths": signal_paths,
+    }
 
 
 def _bit(value: int, index: int) -> int:
@@ -1950,6 +2385,7 @@ def sample_ifu_cacheable_pipeline_coverage(recorder, env, cycle: int) -> None:
 
     _sample_verified_transfer(recorder, cycle, s1_snapshot)
     _sample_registered_s1_s2_transaction(recorder, cycle)
+    _sample_bin907_exception_truncation(recorder, cycle)
 
     if req_valid == 1 and req_ready == 0:
         recorder.mark(

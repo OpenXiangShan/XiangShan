@@ -89,6 +89,14 @@ _BIN906_SIGNALS = {
     "s1_ftq_value": _aliases(
         "Frontend_top.Frontend.inner_ifu.s1_fetchBlock_0_ftqIdx_value"
     ),
+    "s1_spec_instr_count": _aliases(
+        "Frontend_top.Frontend.inner_ifu.s1_specInstrCount"
+    ),
+    "s1_instr_count": _aliases("Frontend_top.Frontend.inner_ifu.s1_instrCount"),
+    "s1_total_range": _aliases("Frontend_top.Frontend.inner_ifu.s1_totalRange"),
+    "s1_later_data": _aliases(
+        "Frontend_top.Frontend.inner_ifu.s1_baseInstrData_1"
+    ),
     "s2_valid": _aliases("Frontend_top.Frontend.inner_ifu.s2_valid_valid"),
     "s2_exception": _aliases(
         "Frontend_top.Frontend.inner_ifu.s2_icacheMeta_0_exception_value"
@@ -111,6 +119,9 @@ _BIN906_SIGNALS = {
     ),
     "to_ibuffer_enq": _aliases(
         "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_enqEnable"
+    ),
+    "to_ibuffer_valid_mask": _aliases(
+        "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_valid"
     ),
     "wb_redirect_valid": _aliases(
         "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toFtq_wbRedirect_valid"
@@ -174,6 +185,17 @@ def _sample_bin906_pipeline(env) -> dict:
         name: _require_read(env, aliases) for name, aliases in _BIN906_SIGNALS.items()
     }
     sample["cycle"] = int(env.current_cycle)
+    instr_end_mask = sum(
+        _require_read(
+            env,
+            _aliases(f"Frontend_top.Frontend.inner_ifu.s1_instrEndMask_{index}"),
+        )
+        << index
+        for index in range(32)
+    )
+    sample["s1_raw_candidate_count"] = (
+        int(instr_end_mask) & int(sample["s1_total_range"])
+    ).bit_count()
     sample["exception_mask"] = sum(
         _require_read(
             env,
@@ -795,7 +817,7 @@ def test_icache_refill_fault_reaches_ifu_exception(env, fault, expected_exceptio
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-906")
+@pytest.mark.funcov_bins("BIN-906", "BIN-907")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_denied_refill_stalls_in_ifu_and_delivers_one_owned_exception(env) -> None:
     target = _BASE + 0x100
@@ -837,6 +859,7 @@ def test_icache_denied_refill_stalls_in_ifu_and_delivers_one_owned_exception(env
 
     env.backend_model.set_can_accept(1)
     delivery = None
+    truncation = None
     slot_observation = None
     release_tail: list[dict] = []
     for _ in range(1000):
@@ -844,6 +867,16 @@ def test_icache_denied_refill_stalls_in_ifu_and_delivers_one_owned_exception(env
         sample = _sample_bin906_pipeline(env)
         release_tail.append(sample)
         release_tail = release_tail[-32:]
+        if (
+            sample["s1_valid"] == 1
+            and sample["s1_fire"] == 1
+            and sample["s1_flush"] == 0
+            and sample["s1_req_uncache"] == 0
+            and sample["s1_merged_exception"] == 3
+            and sample["s1_raw_candidate_count"] > 1
+            and sample["s1_instr_count"] == 1
+        ):
+            truncation = sample
         if (
             sample["to_ibuffer_valid"] == 1
             and sample["to_ibuffer_ready"] == 1
@@ -857,13 +890,14 @@ def test_icache_denied_refill_stalls_in_ifu_and_delivers_one_owned_exception(env
                 slot = (enq & -enq).bit_length() - 1
                 slot_observation = _sample_bin906_slot(env, slot)
             break
-    assert delivery is not None and slot_observation is not None, {
+    assert delivery is not None and truncation is not None and slot_observation is not None, {
         "reason": "stalled cacheable fault did not deliver one observable exception slot",
         "stalled_identity": stalled_identity,
         "tail": release_tail,
     }
     assert delivery["s2_instr_count"] == 1
     assert delivery["to_ibuffer_enq"].bit_count() == 1
+    assert delivery["to_ibuffer_valid_mask"] == delivery["to_ibuffer_enq"]
     assert delivery["exception_mask"] == delivery["to_ibuffer_enq"]
     assert (delivery["s2_ftq_flag"], delivery["s2_ftq_value"]) == stalled_identity
     assert (
@@ -893,6 +927,24 @@ def test_icache_denied_refill_stalls_in_ifu_and_delivers_one_owned_exception(env
     assert observations["fault_source"] == "tl_denied"
     assert tuple(observations["ftq_identity"]) == stalled_identity
     assert observations["s1_req_is_uncache"] == 0
+    assert _run_until(
+        env,
+        lambda: recorder.key_hit(
+            "ifu_v3_pipeline_owner_model", "owner_leaf_009"
+        ),
+        max_cycles=8,
+    ), {
+        "reason": "BIN-907 producer did not accept the independently checked witness",
+        "truncation": truncation,
+        "delivery": delivery,
+    }
+    bin907_hit = recorder.hits[recorder.definition_by_bin_id["BIN-907"].key]
+    bin907_observations = bin907_hit.evidence[-1]["observations"]
+    assert truncation["s1_spec_instr_count"] == 1
+    assert bin907_observations["raw_candidate_count"] > 1
+    assert bin907_observations["instr_count"] == 1
+    assert tuple(bin907_observations["ftq_identity"]) == stalled_identity
+    assert all(bin907_observations["checks"].values())
     assert not recorder.contract_errors
     assert not env.monitor.get_errors()
 

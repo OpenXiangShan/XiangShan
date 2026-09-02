@@ -4,6 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 from env.funcov.py.ifu.cacheable_pipeline_funcov import (
+    _BIN907_SIGNALS,
+    _BIN907_TIMEOUT_CYCLES,
     IFU_CACHEABLE_PIPELINE_SAMPLER_BIN_KEYS,
     _LATE_FAULT_SIGNALS,
     _SIGNALS,
@@ -51,6 +53,10 @@ def _make_recorder(tmp_path):
         dut.set(candidates[0], 0)
     for candidates in _LATE_FAULT_SIGNALS.values():
         dut.set(candidates[0], 0)
+    for candidates in _BIN907_SIGNALS.values():
+        dut.set(candidates[0], 0)
+    for index in range(32):
+        dut.set(f"{_IFU_PREFIX}s1_instrEndMask_{index}", 0)
     for stem in (
         "s1_prevIBufEnqPtrDup_dup_0_value",
         "s1_prevIBufEnqPtrDup_dup_1_value",
@@ -173,6 +179,77 @@ def _set_full_rvc_request(dut):
     )
 
 
+def _set_bin907_s1(
+    dut,
+    *,
+    ftq=(0, 7),
+    exception=3,
+    raw_candidate_count=2,
+    spec_instr_count=1,
+    instr_count=1,
+    expose_later_data=True,
+    expose_raw_candidate_probe=True,
+):
+    dut.set(_SIGNALS["s1_valid"][0], 1)
+    dut.set(_SIGNALS["s1_ready"][0], 1)
+    dut.set(_SIGNALS["s1_fire"][0], 1)
+    dut.set(_SIGNALS["s1_flush"][0], 0)
+    dut.set(_SIGNALS["s1_req_uncache"][0], 0)
+    dut.set(_SIGNALS["s1_exception"][0], exception)
+    dut.set(_BIN907_SIGNALS["s1_instr_count"][0], instr_count)
+    raw_candidate_count = int(raw_candidate_count)
+    assert 0 <= raw_candidate_count <= 32
+    raw_candidate_mask = (1 << raw_candidate_count) - 1
+    dut.set(_BIN907_SIGNALS["s1_total_range"][0], raw_candidate_mask)
+    for index in range(32):
+        signal_name = f"{_IFU_PREFIX}s1_instrEndMask_{index}"
+        if not expose_raw_candidate_probe and index == 0:
+            delattr(dut, signal_name)
+        else:
+            dut.set(signal_name, (raw_candidate_mask >> index) & 1)
+    if expose_later_data:
+        dut.set(_BIN907_SIGNALS["s1_later_data"][0], _NOP_CACHE_LINE & 0xFFFFFFFF)
+    else:
+        delattr(dut, _BIN907_SIGNALS["s1_later_data"][0])
+    dut.set(_BIN907_SIGNALS["s1_ftq_flag"][0], ftq[0])
+    dut.set(_BIN907_SIGNALS["s1_ftq_value"][0], ftq[1])
+
+
+def _set_bin907_s2(
+    dut,
+    *,
+    ftq=(0, 7),
+    output_ftq=None,
+    exception=3,
+    slot=2,
+    younger_output=False,
+):
+    dut.set(_SIGNALS["s1_valid"][0], 0)
+    dut.set(_SIGNALS["s1_fire"][0], 0)
+    dut.set(_BIN907_SIGNALS["s2_flush"][0], 0)
+    dut.set(_BIN907_SIGNALS["s2_valid"][0], 1)
+    dut.set(_BIN907_SIGNALS["s2_ftq_flag"][0], ftq[0])
+    dut.set(_BIN907_SIGNALS["s2_ftq_value"][0], ftq[1])
+    dut.set(_BIN907_SIGNALS["s2_exception"][0], exception)
+    dut.set(_BIN907_SIGNALS["s2_instr_count"][0], 1)
+    dut.set(_BIN907_SIGNALS["to_ibuffer_valid"][0], 1)
+    dut.set(_BIN907_SIGNALS["to_ibuffer_ready"][0], 1)
+    dut.set(_BIN907_SIGNALS["to_ibuffer_exception"][0], exception)
+    active_mask = (1 << int(slot)) | (
+        (1 << (int(slot) + 1)) if younger_output else 0
+    )
+    dut.set(_BIN907_SIGNALS["to_ibuffer_enq"][0], active_mask)
+    dut.set(_BIN907_SIGNALS["to_ibuffer_valid_mask"][0], active_mask)
+    for index in range(35):
+        dut.set(
+            f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask_{index}",
+            int(index == int(slot)),
+        )
+    output_ftq = ftq if output_ftq is None else output_ftq
+    dut.set(f"{_IFU_PREFIX}io_toIBuffer_bits_ftqPtr_{slot}_flag", output_ftq[0])
+    dut.set(f"{_IFU_PREFIX}io_toIBuffer_bits_ftqPtr_{slot}_value", output_ftq[1])
+
+
 def _set_registered_stage(
     dut,
     stage,
@@ -291,6 +368,135 @@ def _prime_lane34_registered_transaction(tmp_path):
     delattr(dut, f"{_IFU_PREFIX}s1_alignedInstrPcVec_34_addr")
     sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
     return recorder, env, dut, blocks
+
+
+def test_bin907_requires_same_transaction_exception_truncation(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_bin907_s1(dut)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    assert recorder._ifu_bin907_pending is not None
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
+
+    _set_bin907_s2(dut)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
+    hit = recorder.hits[recorder.definition_by_bin_id["BIN-907"].key]
+    observations = hit.evidence[-1]["observations"]
+    assert observations["raw_candidate_count"] == 2
+    assert observations["instr_count"] == 1
+    assert observations["checks"] == {
+        "s2_exception_matches": True,
+        "s2_instr_count_is_one": True,
+        "output_exception_matches": True,
+        "single_enabled_slot": True,
+        "single_valid_slot": True,
+        "single_active_slot": True,
+        "exception_mask_matches_active": True,
+        "output_ftq_matches": True,
+    }
+    assert recorder._raw_dict()["errors"] == []
+
+
+def test_bin907_missing_later_data_probe_is_visible_and_fail_closed(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_bin907_s1(dut, expose_later_data=False)
+
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    assert recorder._ifu_bin907_pending is None
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
+    assert any(
+        error.get("event") == "ifu_bin907_probe_unobservable"
+        and "s1_later_data" in error.get("missing", [])
+        for error in recorder._raw_dict()["errors"]
+    )
+
+
+def test_bin907_requires_multiple_raw_pretruncation_candidates(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_bin907_s1(dut, raw_candidate_count=1)
+
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    assert recorder._ifu_bin907_pending is None
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
+    assert recorder._raw_dict()["errors"] == []
+
+
+def test_bin907_missing_raw_candidate_probe_is_visible_and_fail_closed(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_bin907_s1(dut, expose_raw_candidate_probe=False)
+
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    assert recorder._ifu_bin907_pending is None
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
+    assert any(
+        error.get("event") == "ifu_bin907_probe_unobservable"
+        and "s1_instr_end_mask_0" in error.get("missing", [])
+        for error in recorder._raw_dict()["errors"]
+    )
+
+
+@pytest.mark.parametrize(
+    ("s2_ftq", "output_ftq", "expected_event"),
+    (
+        ((0, 8), (0, 7), "ifu_bin907_s2_identity_mismatch"),
+        ((0, 7), (0, 8), "ifu_bin907_delivery_mismatch"),
+    ),
+)
+def test_bin907_rejects_identity_mismatch(
+    tmp_path, s2_ftq, output_ftq, expected_event
+):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_bin907_s1(dut)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    _set_bin907_s2(dut, ftq=s2_ftq, output_ftq=output_ftq)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
+    assert any(
+        error.get("event") == expected_event
+        for error in recorder._raw_dict()["errors"]
+    )
+
+
+def test_bin907_rejects_younger_output(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_bin907_s1(dut)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    _set_bin907_s2(dut, younger_output=True)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 2)
+
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
+    assert any(
+        error.get("event") == "ifu_bin907_delivery_mismatch"
+        for error in recorder._raw_dict()["errors"]
+    )
+
+
+def test_bin907_timeout_is_visible_and_fail_closed(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    _set_bin907_s1(dut)
+    sample_ifu_cacheable_pipeline_coverage(recorder, env, 1)
+
+    dut.set(_SIGNALS["s1_valid"][0], 0)
+    dut.set(_SIGNALS["s1_fire"][0], 0)
+    dut.set(_BIN907_SIGNALS["s2_valid"][0], 0)
+    dut.set(_BIN907_SIGNALS["s2_flush"][0], 0)
+    for cycle in range(2, _BIN907_TIMEOUT_CYCLES + 3):
+        sample_ifu_cacheable_pipeline_coverage(recorder, env, cycle)
+
+    assert recorder._ifu_bin907_pending is None
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_009")
+    assert any(
+        error.get("event") == "ifu_bin907_transaction_timeout"
+        for error in recorder._raw_dict()["errors"]
+    )
 
 
 @pytest.mark.parametrize(
