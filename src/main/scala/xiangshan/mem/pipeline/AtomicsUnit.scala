@@ -316,6 +316,9 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
       (pmp.ld || exception_pa_mmio_nc) && isLr
     exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st ||
       (pmp.ld || exception_pa_mmio_nc) && !isLr
+    // if used atomic access mmio region, should report *accessFault first.
+    exceptionVec(loadAddrMisaligned)  := exceptionVec(loadAddrMisaligned) && !exception_pa_mmio_nc
+    exceptionVec(storeAddrMisaligned) := exceptionVec(storeAddrMisaligned) && !exception_pa_mmio_nc
   }
 
   when (state === s_wait_flush_sbuffer_resp) {
@@ -459,6 +462,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     stdCnt := 0.U
     pdest1Valid := false.B
     pdest2Valid := false.B
+    exceptionVec := ExceptSparseVec.zeros(param.exceptionOut)
   }
 
   /**
