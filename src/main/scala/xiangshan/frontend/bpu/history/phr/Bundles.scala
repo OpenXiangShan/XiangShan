@@ -24,6 +24,7 @@ import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.FoldedHistoryInfo
+import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.StageCtrl
 
@@ -48,17 +49,34 @@ class S1Train(implicit p: Parameters) extends PhrBundle {
   val prediction: Prediction = new Prediction
 }
 
-class PhrUpdateData(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
+class PhrUpdateData(implicit p: Parameters) extends PhrBundle with HasPhrParameters with HalfAlignHelper {
   val valid:   Bool    = Bool()
   val taken:   Bool    = Bool()
   val cfiPc:   Pc      = Pc()
   val target:  Pc      = Pc()
   val phrMeta: PhrMeta = new PhrMeta()
+
+  def fromUpdateStage(stage: PhrUpdate.Stage): Unit = {
+    valid   := stage.overrideValid
+    taken   := stage.prediction.taken
+    cfiPc   := getCfiPcFromPosition(stage.startPc, stage.prediction.cfiPosition)
+    target  := stage.prediction.target.unGuard
+    phrMeta := stage.phrMeta
+  }
 }
 
 class PhrUpdateResult(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
   val phrPtr:     PhrPtr = new PhrPtr
   val phrLowBits: UInt   = UInt(PathHashHighWidth.W)
+}
+
+object PhrUpdate {
+  class Stage(implicit p: Parameters) extends PhrBundle {
+    val overrideValid: Bool       = Bool()
+    val phrMeta:       PhrMeta    = new PhrMeta()
+    val prediction:    Prediction = new Prediction()
+    val startPc:       Pc         = Pc()
+  }
 }
 
 class PhrUpdate(implicit p: Parameters) extends PhrBundle {
@@ -68,10 +86,8 @@ class PhrUpdate(implicit p: Parameters) extends PhrBundle {
 
   val redirect: Valid[BpuRedirect] = Valid(new BpuRedirect)
 
-  val s3_override:   Bool       = Bool()
-  val s3_phrMeta:    PhrMeta    = new PhrMeta()
-  val s3_prediction: Prediction = new Prediction()
-  val s3_startPc:    Pc         = Pc()
+  val s2: PhrUpdate.Stage = new PhrUpdate.Stage
+  val s3: PhrUpdate.Stage = new PhrUpdate.Stage
 }
 
 class PhrMeta(implicit p: Parameters) extends PhrBundle {
