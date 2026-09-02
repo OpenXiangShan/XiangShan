@@ -167,6 +167,10 @@ def _wait_waylookup_occupancy(env, minimum: int, *, max_cycles: int) -> None:
         max_cycles=max_cycles,
         label=f"WayLookup occupancy >= {int(minimum)}",
     )
+_IFU_CACHEABLE_REQ_VALID = (
+    "Frontend_top.Frontend.inner_icache.mainPipe.io_toIfu_req_valid",
+    "Frontend_top.Frontend.inner_icache.mainPipe.__Vtogcov__io_toIfu_req_valid",
+)
 
 
 def _load_nops(env, base: int, *, words: int = 512) -> None:
@@ -280,6 +284,21 @@ def _wait_for_target_response(
             "monitor_errors": env.monitor.get_errors(),
         }
     )
+
+
+def _read_first_signal(env, names: tuple[str, ...]) -> int | None:
+    for name in names:
+        try:
+            signal = getattr(env.dut, name, None)
+            if signal is None:
+                getter = getattr(env.dut, "GetInternalSignal", None)
+                signal = getter(name) if callable(getter) else None
+            value = None if signal is None else getattr(signal, "value", None)
+            if value is not None:
+                return int(value)
+        except Exception:
+            continue
+    return None
 
 
 def _clear_soft_prefetch(env) -> None:
@@ -1024,3 +1043,126 @@ def test_icache_lowrisk_hitmiss_refill_sequence(lowrisk_cleanup) -> None:
     )
     assert int(env.icache_agent.get_stats()["resp_line_count"]) >= 1
     assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-759")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "current V3 standalone DUT does not expose a checker-eligible repeated "
+        "same-line SRAM-hit sequence in this fixture"
+    ),
+)
+def test_icache_cacheable_same_line_sram_hit(lowrisk_cleanup) -> None:
+    """Refetch a completed line so the hit-path sampler sees a real SRAM hit."""
+    env = lowrisk_cleanup
+    base = 0x8004_0000
+    _load_nops(env, base, words=256)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=32,
+        miss_rate=1.0,
+        seed=0x6277,
+    )
+    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(base)
+    initial_resp_line_count = int(env.icache_agent.get_stats()["resp_line_count"])
+
+    _run_until(
+        env,
+        lambda: int(env.icache_agent.get_stats()["resp_line_count"])
+        > initial_resp_line_count,
+        max_cycles=2048,
+        label="initial cache line refill",
+    )
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=32,
+        miss_rate=0.0,
+        seed=0x6278,
+    )
+    env.backend_model.inject_redirect(base, "ctrl_redirect", delay_cycles=0)
+    _wait_funcov_hit(
+        env,
+        "icache_hit_path",
+        "continuous_same_line_sram_hit",
+        max_cycles=2048,
+        label="cacheable same-line SRAM hit after redirect",
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-812", "BIN-816")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "current V3 standalone DUT/backend scheduler does not provide a stable "
+        "non-stale FTQ context for repeated cacheable redirect attempts"
+    ),
+)
+def test_ifu_cacheable_backend_redirect_blocks_pending_response(lowrisk_cleanup) -> None:
+    """Align a real backend redirect with an in-flight ICache-to-IFU response."""
+    env = lowrisk_cleanup
+    base = 0x8004_0000
+    _load_nops(env, base, words=512)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=32,
+        miss_rate=1.0,
+        seed=0x6278,
+    )
+    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(base)
+
+    for attempt in range(48):
+        for _ in range(4096):
+            if env.functional_coverage.key_hit(
+                "ifu_cacheable_flush", "backend_redirect_blocks"
+            ):
+                assert env.functional_coverage.key_hit(
+                    "ifu_cacheable_flush", "flush_wins_fire"
+                )
+                assert not env.monitor.get_errors()
+                return
+            req_valid = _read_first_signal(env, _IFU_CACHEABLE_REQ_VALID)
+            if req_valid == 1:
+                env.backend_model.inject_redirect(
+                    base + 0x100 + ((attempt & 0x1F) * 0x40),
+                    "ctrl_redirect",
+                    delay_cycles=0,
+                )
+                break
+            env.step(1)
+        else:
+            raise AssertionError(
+                {
+                    "reason": "no ICache-to-IFU response window observed",
+                    "attempt": attempt,
+                    "current_cycle": int(env.current_cycle),
+                    "icache": env.icache_agent.get_stats(),
+                }
+            )
+        for _ in range(64):
+            if env.functional_coverage.key_hit(
+                "ifu_cacheable_flush", "backend_redirect_blocks"
+            ):
+                assert env.functional_coverage.key_hit(
+                    "ifu_cacheable_flush", "flush_wins_fire"
+                )
+                assert not env.monitor.get_errors()
+                return
+            env.step(1)
+
+    raise AssertionError(
+        {
+            "reason": "backend redirect did not align with IFU cacheable flush window",
+            "attempts": 48,
+            "current_cycle": int(env.current_cycle),
+            "icache": env.icache_agent.get_stats(),
+            "monitor_errors": env.monitor.get_errors(),
+        }
+    )
