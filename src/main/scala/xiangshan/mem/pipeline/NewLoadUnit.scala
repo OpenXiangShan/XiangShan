@@ -1494,7 +1494,12 @@ class LoadUnitS3(param: ExeUnitParams)(
   // Writeback to LQ
   val lqWriteValid = pipeIn.valid && !doFastReplay && endPipe
   val lqWriteReady = io.lqWrite.ready
-  val lqWriteCause = Mux(s4HeadValid && s4HeadShouldReplay, s4HeadReplayCause, cause)
+  
+  val useS4HeadReplay = s4HeadValid && s4HeadShouldReplay
+  val lqWriteCause = Mux(useS4HeadReplay, s4HeadReplayCause, cause)
+  val lqWriteTlbId = Mux(useS4HeadReplay, s4Head.tlbId.get, in.tlbId.get)
+  val lqWriteTlbFull = Mux(useS4HeadReplay, s4Head.tlbFull.get, in.tlbFull.get)
+  
   val lqWriteNeedReplay = lqWriteCause.asUInt.orR
   val lqWriteCauseOH = PriorityEncoderOH(lqWriteCause)
   val lqWrite = Wire(new LqWriteBundle)
@@ -1540,8 +1545,8 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.rep_info.need_rep := lqWriteNeedReplay
   lqWrite.rep_info.cause := lqWriteCauseOH
   lqWrite.rep_info.debug := uop.perfDebugInfo
-  lqWrite.rep_info.tlb_id := in.tlbId.get
-  lqWrite.rep_info.tlb_full := in.tlbFull.get
+  lqWrite.rep_info.tlb_id := lqWriteTlbId
+  lqWrite.rep_info.tlb_full := lqWriteTlbFull
 
   val perfIsReplayExec = LoadEntrance.isReplay(entrance) || s4HeadIsReplay && s4HeadValid
   val perfMdpAddrValid = Mux(s4HeadValid, s4Head.perfMdpAddrValid.get, in.perfMdpAddrValid.get)
