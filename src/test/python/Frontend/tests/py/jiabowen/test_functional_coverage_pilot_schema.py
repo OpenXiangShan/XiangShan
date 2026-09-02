@@ -106,8 +106,6 @@ MODELED_RUNTIME_PRODUCER_GAP_BIN_IDS = frozenset(
         "BIN-900",
         "BIN-921",
         "BIN-922",
-        "BIN-927",
-        "BIN-928",
         "BIN-951",
         "BIN-955",
         "BIN-956",

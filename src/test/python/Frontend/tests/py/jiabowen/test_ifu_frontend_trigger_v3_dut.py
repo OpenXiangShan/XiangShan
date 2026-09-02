@@ -16,8 +16,11 @@ _BASE = 0x8000_0000
 _TARGET = _BASE + 0x200
 _RECOVERY_TARGET = _BASE + 0x3000
 _CNOP = 0x0001
-_OWNER_GROUP = "ifu_v3_boundary_owner_model"
+_PIPELINE_OWNER_GROUP = "ifu_v3_pipeline_owner_model"
+_BOUNDARY_OWNER_GROUP = "ifu_v3_boundary_owner_model"
 _OWNER_LEAVES = {
+    "BIN-927": "owner_leaf_029",
+    "BIN-928": "owner_leaf_030",
     "BIN-996": "owner_leaf_098",
     "BIN-997": "owner_leaf_099",
     "BIN-998": "owner_leaf_100",
@@ -96,7 +99,12 @@ def _wait_until(env, predicate, *, max_cycles: int = 3000) -> None:
 
 
 def _hit(env, bin_id: str) -> bool:
-    return env.functional_coverage.key_hit(_OWNER_GROUP, _OWNER_LEAVES[str(bin_id)])
+    group = (
+        _PIPELINE_OWNER_GROUP
+        if str(bin_id) in {"BIN-927", "BIN-928"}
+        else _BOUNDARY_OWNER_GROUP
+    )
+    return env.functional_coverage.key_hit(group, _OWNER_LEAVES[str(bin_id)])
 
 
 def _redirect_to_target(env) -> None:
@@ -104,6 +112,8 @@ def _redirect_to_target(env) -> None:
 
 
 @pytest.mark.funcov_bins(
+    "BIN-927",
+    "BIN-928",
     "BIN-996",
     "BIN-997",
     "BIN-998",
@@ -227,6 +237,8 @@ def test_frontend_trigger_config_compare_chain_action_and_lane_alignment(env) ->
     assert all(
         _hit(env, bin_id)
         for bin_id in (
+            "BIN-927",
+            "BIN-928",
             "BIN-996",
             "BIN-997",
             "BIN-998",

@@ -340,6 +340,8 @@ def _frontend_trigger_state(recorder) -> dict[str, Any]:
             "suppression_samples": set(),
             "chain_samples": set(),
             "action_samples": set(),
+            "s2_transaction_baselines": {},
+            "s2_transaction_missing": set(),
             "held_trigger": None,
             "marked": set(),
         }
@@ -364,6 +366,45 @@ def _mark_frontend_trigger_once(
         producer="ifu_frontend_trigger_v3_sampler",
     ):
         state["marked"].add(str(bin_id))
+
+
+def _read_frontend_trigger_s2_transaction(recorder, dut, lane: int) -> Optional[dict[str, int]]:
+    """Read the registered S2 payload needed to prove trigger lane semantics."""
+
+    prefix = f"s2_alignedInstrVec_{int(lane)}"
+    pd_prefix = f"s2_alignedPdInfoVec_{int(lane)}"
+    values = {
+        "instr": _read_ifu_internal(recorder, dut, f"{prefix}_data"),
+        "pc_addr": _read_ifu_internal(recorder, dut, f"s2_alignedInstrPcVec_{int(lane)}_addr"),
+        "is_rvc": _read_ifu_internal(recorder, dut, f"{prefix}_isRvc"),
+        "pred_taken": _read_ifu_internal(recorder, dut, f"{prefix}_isPredTaken"),
+        "invalid_taken": _read_ifu_internal(recorder, dut, f"{prefix}_invalidTaken"),
+        "block_sel": _read_ifu_internal(recorder, dut, f"{prefix}_blockSel"),
+        "is_cross_block_instr": _read_ifu_internal(
+            recorder, dut, f"{prefix}_isCrossBlockInstr"
+        ),
+        "end_offset": _read_ifu_internal(recorder, dut, f"{prefix}_endOffset"),
+        "pd_is_rvc": _read_ifu_internal(recorder, dut, f"{pd_prefix}_isRVC"),
+        "branch_type": _read_ifu_internal(
+            recorder, dut, f"{pd_prefix}_brAttribute_branchType"
+        ),
+        "ras_action": _read_ifu_internal(
+            recorder, dut, f"{pd_prefix}_brAttribute_rasAction"
+        ),
+        "jump_offset_addr": _read_ifu_internal(
+            recorder, dut, f"s2_alignedJumpOffsetVec_{int(lane)}_addr"
+        ),
+        "expanded": _read_ifu_internal(
+            recorder, dut, f"s2_expandedInstrDataVec_{int(lane)}"
+        ),
+        "exception_mask": _read_ifu_output_slot(
+            recorder, dut, "exceptionMask", int(lane)
+        ),
+    }
+    missing = tuple(name for name, value in values.items() if value is None)
+    if missing:
+        return None
+    return {name: int(value) for name, value in values.items()}
 
 
 def _sample_frontend_trigger(recorder, dut, cycle: int) -> None:
@@ -500,6 +541,85 @@ def _sample_frontend_trigger(recorder, dut, cycle: int) -> None:
             else int(output_triggered),
         }
         lanes.append(lane_observation)
+
+        s2_transaction = _read_frontend_trigger_s2_transaction(recorder, dut, lane)
+        trigger_hit_slots = [
+            slot
+            for slot, value in enumerate(lane_observation["hits"])
+            if int(value) == 1
+        ]
+        if s2_transaction is None:
+            if trigger_hit_slots:
+                missing_key = (int(lane), tuple(trigger_hit_slots))
+                if missing_key not in state["s2_transaction_missing"]:
+                    state["s2_transaction_missing"].add(missing_key)
+                    recorder.risk_observations.append(
+                        {
+                            "event": "frontend_trigger_s2_transaction_probe_missing",
+                            "cycle": int(cycle),
+                            "lane": int(lane),
+                            "trigger_hit_slots": trigger_hit_slots,
+                            "coverage_promotion": "none",
+                        }
+                    )
+        else:
+            s2_pc = int(s2_transaction["pc_addr"]) << 1
+            s2_transaction["pc"] = s2_pc
+            no_trigger_hit = not trigger_hit_slots
+            if no_trigger_hit:
+                state["s2_transaction_baselines"][s2_pc] = {
+                    key: value
+                    for key, value in s2_transaction.items()
+                    if key not in {"exception_mask", "pc"}
+                }
+
+            for slot in trigger_hit_slots:
+                config = configs[slot] if slot < len(configs) else None
+                if config is None:
+                    continue
+                match_type, select, _timing, _action, _chain, tdata2 = config
+                expected_hit = int(
+                    _frontend_trigger_compare(s2_pc, match_type, tdata2)
+                    and enable[slot] == 1
+                    and select == 0
+                    and int(debug_mode) == 0
+                )
+                if expected_hit != 1 or s2_pc != int(pc):
+                    continue
+                trigger_evidence = {
+                    "event": "frontend_trigger_s2_lane_consistency",
+                    "cycle": int(cycle),
+                    "lane": int(lane),
+                    "trigger_slot": int(slot),
+                    "pc": int(pc),
+                    "s2_transaction": s2_transaction,
+                    "trigger_config": list(config),
+                    "trigger_hit_slots": trigger_hit_slots,
+                    "pc_matches_s2_lane": True,
+                }
+                _mark_frontend_trigger_once(
+                    recorder, state, "BIN-927", cycle, trigger_evidence
+                )
+                baseline = state["s2_transaction_baselines"].get(s2_pc)
+                if baseline is not None:
+                    current = {
+                        key: value
+                        for key, value in s2_transaction.items()
+                        if key not in {"exception_mask", "pc"}
+                    }
+                    if current == baseline:
+                        _mark_frontend_trigger_once(
+                            recorder,
+                            state,
+                            "BIN-928",
+                            cycle,
+                            {
+                                **trigger_evidence,
+                                "baseline_s2_transaction": baseline,
+                                "s2_transaction_unchanged": True,
+                                "predchecker_input_unchanged": True,
+                            },
+                        )
 
         for slot, config in enumerate(configs[:3]):
             match_type, select, timing, action, chain, tdata2 = config

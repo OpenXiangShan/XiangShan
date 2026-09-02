@@ -2016,6 +2016,21 @@ def _set_frontend_trigger_lane(
     dut.set(_PREFIX + "s2_alignedInstrValid", 1 if valid else 0)
     dut.set(_PREFIX + "s2_alignedInstrPcVec_0_addr", int(pc) >> 1)
     dut.set(_PREFIX + "io_toIBuffer_bits_pc_0_addr", int(pc) >> 1)
+    # Keep a complete registered S2 transaction available to the trigger
+    # producer; trigger-only tests still use the same deterministic payload.
+    dut.set(_PREFIX + "s2_alignedInstrVec_0_data", 0x0001)
+    dut.set(_PREFIX + "s2_alignedInstrVec_0_isRvc", 1)
+    dut.set(_PREFIX + "s2_alignedInstrVec_0_isPredTaken", 0)
+    dut.set(_PREFIX + "s2_alignedInstrVec_0_invalidTaken", 0)
+    dut.set(_PREFIX + "s2_alignedInstrVec_0_blockSel", 0)
+    dut.set(_PREFIX + "s2_alignedInstrVec_0_endOffset", 0)
+    dut.set(_PREFIX + "s2_alignedInstrVec_0_isCrossBlockInstr", 0)
+    dut.set(_PREFIX + "s2_alignedPdInfoVec_0_isRVC", 1)
+    dut.set(_PREFIX + "s2_alignedPdInfoVec_0_brAttribute_branchType", 0)
+    dut.set(_PREFIX + "s2_alignedPdInfoVec_0_brAttribute_rasAction", 0)
+    dut.set(_PREFIX + "s2_alignedJumpOffsetVec_0_addr", 0)
+    dut.set(_PREFIX + "s2_expandedInstrDataVec_0", 0x0001)
+    dut.set(_PREFIX + "io_toIBuffer_bits_exceptionMask_0", 0)
     for slot in range(4):
         dut.set(_TRIGGER_PREFIX + f"triggerHitVec_0_{slot}", hits[slot])
         dut.set(_TRIGGER_PREFIX + f"triggerCanFireVec_{slot}", can_fire[slot])
@@ -2156,6 +2171,49 @@ def test_frontend_trigger_sampler_requires_checked_config_and_lane_results(tmp_p
     )
     _sample_frontend_trigger(recorder, dut, 14)
     assert recorder.key_hit("ifu_v3_boundary_owner_model", "owner_leaf_103")
+
+
+def test_frontend_trigger_sampler_checks_s2_transaction_consistency(tmp_path):
+    recorder, _env, dut, _memory = _make_recorder(tmp_path)
+    for slot in range(4):
+        _set_frontend_trigger_config(dut, slot)
+        dut.set(_TRIGGER_PREFIX + f"triggerEnableVec_{slot}", int(slot == 0))
+    target = 0x80000100
+    _set_frontend_trigger_config(dut, 0, tdata2=target)
+    dut.set(_PREFIX + "io_frontendTrigger_tUpdate_valid", 0)
+    dut.set(_PREFIX + "io_frontendTrigger_debugMode", 0)
+    dut.set(_PREFIX + "io_frontendTrigger_triggerCanRaiseBpExp", 1)
+
+    _set_frontend_trigger_lane(
+        dut, pc=target, hits=(0, 0, 0, 0), can_fire=(0, 0, 0, 0)
+    )
+    _sample_frontend_trigger(recorder, dut, 1)
+    _set_frontend_trigger_lane(
+        dut, pc=target, hits=(1, 0, 0, 0), can_fire=(1, 0, 0, 0), triggered=0
+    )
+    _sample_frontend_trigger(recorder, dut, 2)
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_029")
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_030")
+
+    mismatch, _env, mismatch_dut, _memory = _make_recorder(tmp_path / "mismatch")
+    for slot in range(4):
+        _set_frontend_trigger_config(mismatch_dut, slot)
+        mismatch_dut.set(_TRIGGER_PREFIX + f"triggerEnableVec_{slot}", int(slot == 0))
+    _set_frontend_trigger_config(mismatch_dut, 0, tdata2=target)
+    mismatch_dut.set(_PREFIX + "io_frontendTrigger_tUpdate_valid", 0)
+    mismatch_dut.set(_PREFIX + "io_frontendTrigger_debugMode", 0)
+    mismatch_dut.set(_PREFIX + "io_frontendTrigger_triggerCanRaiseBpExp", 1)
+    _set_frontend_trigger_lane(
+        mismatch_dut, pc=target, hits=(0, 0, 0, 0), can_fire=(0, 0, 0, 0)
+    )
+    _sample_frontend_trigger(mismatch, mismatch_dut, 1)
+    _set_frontend_trigger_lane(
+        mismatch_dut, pc=target, hits=(1, 0, 0, 0), can_fire=(1, 0, 0, 0), triggered=0
+    )
+    mismatch_dut.set(_PREFIX + "s2_alignedInstrVec_0_endOffset", 2)
+    _sample_frontend_trigger(mismatch, mismatch_dut, 2)
+    assert mismatch.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_029")
+    assert not mismatch.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_030")
 
 
 def test_frontend_trigger_sampler_requires_held_pc_ftq_identity_at_redirect_flush(
