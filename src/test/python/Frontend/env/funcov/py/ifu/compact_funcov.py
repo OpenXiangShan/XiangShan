@@ -1127,6 +1127,66 @@ def _sample_redirect_lifecycle(recorder, dut, cycle: int) -> None:
     }
 
 
+def _sample_reset_release_state(recorder, dut, cycle: int) -> None:
+    """Record the reset-state leaf only from visible DUT state on release."""
+
+    if getattr(recorder, "_reset_release_cycle", None) != int(cycle):
+        return
+
+    fields = (
+        "s0_prevEndIsHalfRvi",
+        "s1_prevEndHalfRviInfo_valid",
+        "s1_prevEndHalfRviInfo_bits_data",
+        "s1_prevEndHalfRviInfo_bits_pc_addr",
+        "s1_prevIBufEnqPtrDup_dup_0_value",
+        "s1_prevIBufEnqPtrDup_dup_1_value",
+        "s1_valid",
+        "s2_valid_valid",
+    )
+    values: dict[str, int | None] = {}
+    paths: dict[str, str] = {}
+    missing: list[str] = []
+    for field in fields:
+        value, path = _read_ifu_internal_with_path(recorder, dut, field)
+        values[field] = value
+        if value is None:
+            missing.append(field)
+        elif path is not None:
+            paths[field] = path
+
+    if missing:
+        _record_cfi_offset_risk_once(
+            recorder,
+            cycle,
+            "ifu_reset_state_probe_unavailable",
+            missing=missing,
+        )
+        return
+    if any(int(value) != 0 for value in values.values() if value is not None):
+        recorder.risk_observations.append(
+            {
+                "event": "ifu_reset_state_not_initial",
+                "cycle": int(cycle),
+                "observations": values,
+                "coverage_promotion": "none",
+            }
+        )
+        return
+
+    mark_owner_v3_checked(
+        recorder,
+        "BIN-953",
+        cycle,
+        {
+            "event": "ifu_reset_release_state",
+            "reset_release_cycle": int(cycle),
+            "observations": values,
+            "signal_paths": paths,
+        },
+        producer="ifu_reset_release_sampler",
+    )
+
+
 def _sample_writeback(recorder, dut, cycle: int, pointer_redirect: bool) -> None:
     pending = list(getattr(recorder, "_ifu_wb_pending", ()))
     pending = [item for item in pending if int(cycle) - int(item["cycle"]) <= 4]
@@ -2612,6 +2672,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
     if dut is None:
         return
 
+    _sample_reset_release_state(recorder, dut, cycle)
     _sample_invalid_taken_exception_cross(recorder, dut, cycle)
     _sample_instr_boundary_tail(recorder, dut, cycle)
     _sample_pred_taken_index_mapping(recorder, dut, cycle)

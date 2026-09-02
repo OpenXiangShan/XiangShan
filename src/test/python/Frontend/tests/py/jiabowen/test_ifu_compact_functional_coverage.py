@@ -9,7 +9,10 @@ from env.funcov.py.ifu.owner_v3_funcov import (
     OWNER_V3_EVENT_TYPE,
 )
 from env.funcov.py.ifu.sampler import sample_cfvec_coverage
-from env.funcov.py.ifu.compact_funcov import _sample_frontend_trigger
+from env.funcov.py.ifu.compact_funcov import (
+    _sample_frontend_trigger,
+    _sample_reset_release_state,
+)
 from env.funcov.recorder import FunctionalCoverageRecorder, default_pilot_csv_path
 from env.support.rvc_decoder import expand_rvc
 
@@ -79,6 +82,57 @@ def _mark_source_bin(recorder, bin_id, cycle):
         {"unit_source_bin_id": bin_id},
         coverpoint=definition.coverpoint,
     )
+
+
+def _set_reset_release_signals(dut, *, nonzero=None, omit=()):
+    fields = (
+        "s0_prevEndIsHalfRvi",
+        "s1_prevEndHalfRviInfo_valid",
+        "s1_prevEndHalfRviInfo_bits_data",
+        "s1_prevEndHalfRviInfo_bits_pc_addr",
+        "s1_prevIBufEnqPtrDup_dup_0_value",
+        "s1_prevIBufEnqPtrDup_dup_1_value",
+        "s1_valid",
+        "s2_valid_valid",
+    )
+    for field in fields:
+        if field not in omit:
+            dut.set(_PREFIX + field, 1 if field == nonzero else 0)
+
+
+def test_reset_release_owner_leaf_requires_complete_visible_zero_state(tmp_path):
+    recorder, _env, dut, _memory = _make_recorder(tmp_path)
+    _set_reset_release_signals(dut)
+    recorder._reset_release_cycle = 7
+
+    _sample_reset_release_state(recorder, dut, 7)
+
+    assert recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_055")
+    evidence = recorder.hits[
+        ("ifu_v3_pipeline_owner_model", "verified_leaf_event", "owner_leaf_055")
+    ].evidence[-1]
+    assert evidence["producer"] == "ifu_reset_release_sampler"
+    assert evidence["observations"]["reset_release_cycle"] == 7
+
+
+@pytest.mark.parametrize(
+    ("nonzero", "omit"),
+    (
+        ("s1_valid", ()),
+        (None, ("s1_prevEndHalfRviInfo_bits_data",)),
+    ),
+)
+def test_reset_release_owner_leaf_rejects_nonzero_or_missing_probe(
+    tmp_path, nonzero, omit
+):
+    recorder, _env, dut, _memory = _make_recorder(tmp_path)
+    _set_reset_release_signals(dut, nonzero=nonzero, omit=omit)
+    recorder._reset_release_cycle = 7
+
+    _sample_reset_release_state(recorder, dut, 7)
+
+    assert not recorder.key_hit("ifu_v3_pipeline_owner_model", "owner_leaf_055")
+    assert recorder.risk_observations
 
 
 def test_ifu_v3_owner_event_model_requires_checked_observations(tmp_path):
