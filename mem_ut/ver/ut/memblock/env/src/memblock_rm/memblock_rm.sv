@@ -68,6 +68,16 @@ class memblock_rm  extends tcnt_rm_base #(.seq_item_t(memblock_common_xaction));
         bit store_access,
         bit stage_one
     );
+    // 中文注释：按当前 UID 冻结的 CSR 判断 raw PBMT 是否需要附加 PF/GPF。
+    // 返回的 force bit 只属于当前 RM item，不回写 readonly entry 或公共 TLB 表。
+    extern function bit observer_eval_pbmt_fault_overlay(
+        memblock_rm_readonly_api::tlb_entry_view_t entry,
+        memblock_rm_readonly_api::tlb_request_context_view_t tlb_context,
+        bit s1_active,
+        bit s2_active,
+        output bit force_s1_pf,
+        output bit force_s2_gpf
+    );
     extern function bit observer_build_commit_item(
         memblock_rm_readonly_api::main_transaction_view_t main_view,
         memblock_rm_readonly_api::status_view_t status_view,
@@ -251,6 +261,54 @@ function bit memblock_rm::observer_stage_permission_fault(
     return !pte_v || (pte_w && !pte_r) || !operation_allowed || !privilege_allowed;
 endfunction:observer_stage_permission_fault
 
+// 中文注释：RM 在每个已命中的 TLB entry 上重建 PBMT/PBMTE 的 response-visible
+// fault 语义。输入均来自 UID 冻结 context 和 readonly entry；本函数不读取
+// runtime current CSR，也不修改 entry，只输出本次访问的局部 force 标记。
+function bit memblock_rm::observer_eval_pbmt_fault_overlay(
+    memblock_rm_readonly_api::tlb_entry_view_t entry,
+    memblock_rm_readonly_api::tlb_request_context_view_t tlb_context,
+    bit s1_active,
+    bit s2_active,
+    output bit force_s1_pf,
+    output bit force_s2_gpf
+);
+    bit s1_enabled;
+    bit s2_enabled;
+
+    force_s1_pf = 1'b0;
+    force_s2_gpf = 1'b0;
+    if (!entry.valid || !tlb_context.valid) begin
+        return 1'b0;
+    end
+    if (entry.s1_stage_active != s1_active ||
+        entry.s2_stage_active != s2_active ||
+        entry.s2xlate != tlb_context.s2xlate) begin
+        return 1'b0;
+    end
+    // Inactive stages must retain their reset PBMT, and PBMT=11 is reserved
+    // for this V2 model.  These are malformed-entry diagnostics, not faults
+    // that should be silently converted into an architectural exception.
+    if ((!s1_active && entry.s1_entry_pbmt != 2'd0) ||
+        (!s2_active && entry.s2_entry_pbmt != 2'd0) ||
+        (s1_active && entry.s1_entry_pbmt == 2'b11) ||
+        (s2_active && entry.s2_entry_pbmt == 2'b11)) begin
+        return 1'b0;
+    end
+    if (s1_active) begin
+        s1_enabled = mmu_csr_runtime_state::get_stage_pbmt_enable_from_bits(
+            1'b1, tlb_context.s2xlate, tlb_context.m_pbmt_en,
+            tlb_context.h_pbmt_en);
+        force_s1_pf = (entry.s1_entry_pbmt != 2'd0) && !s1_enabled;
+    end
+    if (s2_active) begin
+        s2_enabled = mmu_csr_runtime_state::get_stage_pbmt_enable_from_bits(
+            1'b0, tlb_context.s2xlate, tlb_context.m_pbmt_en,
+            tlb_context.h_pbmt_en);
+        force_s2_gpf = (entry.s2_entry_pbmt != 2'd0) && !s2_enabled;
+    end
+    return 1'b1;
+endfunction:observer_eval_pbmt_fault_overlay
+
 function bit memblock_rm::observer_build_commit_item(
     memblock_rm_readonly_api::main_transaction_view_t main_view,
     memblock_rm_readonly_api::status_view_t status_view,
@@ -267,6 +325,8 @@ function bit memblock_rm::observer_build_commit_item(
     bit entry_stage_one_fault;
     bit entry_stage_two_fault;
     bit entry_translation_fault;
+    bit pbmt_force_s1_pf;
+    bit pbmt_force_s2_gpf;
     bit misaligned;
     bit store_access;
     bit s1_active;
@@ -306,9 +366,11 @@ function bit memblock_rm::observer_build_commit_item(
         item.translation_valid = 1'b1;
         if (!observer_trace_translation_emitted.exists(item.uid)) begin
             `uvm_info("RM_LS_TRACE_TRANSLATION",
-                      $sformatf("node=TRANSLATION uid=%0d rob=%0d/%0d kind=%s path=NOT_REQUIRED va=0x%0h pa_mask=0x0 expected_exception=0x%0h",
+                      $sformatf("node=TRANSLATION uid=%0d rob=%0d/%0d kind=%s path=NOT_REQUIRED va=0x%0h pa_mask=0x0 pbmt_force_s1_pf=%0d pbmt_force_s2_gpf=%0d expected_exception=0x%0h",
                                 item.uid, item.rob.flag, item.rob.value,
                                 observer_kind_name(item.kind), item.computed_vaddr,
+                                item.expected_pbmt_forced_s1_pf,
+                                item.expected_pbmt_forced_s2_gpf,
                                 item.expected_exception),
                       UVM_LOW)
             observer_trace_translation_emitted[item.uid] = 1'b1;
@@ -412,18 +474,35 @@ function bit memblock_rm::observer_build_commit_item(
                                              item.uid, byte_index));
                 return 1'b0;
             end
+            if (!observer_eval_pbmt_fault_overlay(
+                    entry, tlb_context, s1_active, s2_active,
+                    pbmt_force_s1_pf, pbmt_force_s2_gpf)) begin
+                ls_model.set_error(
+                    RM_LS_ERR_TLB_ENTRY_INCONSISTENT,
+                    $sformatf("uid %0d byte %0d TLB PBMT payload/context is inconsistent s2xlate=%0d s1_pbmt=%0d s2_pbmt=%0d mPBMTE=%0d hPBMTE=%0d",
+                              item.uid, byte_index, tlb_context.s2xlate,
+                              entry.s1_entry_pbmt, entry.s2_entry_pbmt,
+                              tlb_context.m_pbmt_en, tlb_context.h_pbmt_en));
+                return 1'b0;
+            end
+            item.expected_pbmt_forced_s1_pf |= pbmt_force_s1_pf;
+            item.expected_pbmt_forced_s2_gpf |= pbmt_force_s2_gpf;
             if (byte_index == 0) item.translation_key = tlb_context.entry_key;
             access_fault |= entry.pma_af || entry.fault_effective_s1_af ||
                             entry.fault_effective_s2_gaf;
             entry_stage_one_fault = entry.fault_effective_s1_pf ||
                                     observer_stage_permission_fault(entry, tlb_context,
-                                                                    store_access, 1'b1);
+                                                                    store_access, 1'b1) ||
+                                    pbmt_force_s1_pf;
             entry_stage_two_fault = entry.fault_effective_s2_gpf ||
                                     observer_stage_permission_fault(entry, tlb_context,
-                                                                    store_access, 1'b0);
+                                                                    store_access, 1'b0) ||
+                                    pbmt_force_s2_gpf;
             stage_one_fault |= entry_stage_one_fault;
             stage_two_fault |= entry_stage_two_fault;
-            if (!entry.fault && !entry.pma_af && tlb_context.request_translation_valid) begin
+            if (!entry.fault && !entry.pma_af &&
+                !pbmt_force_s1_pf && !pbmt_force_s2_gpf &&
+                tlb_context.request_translation_valid) begin
                 if (entry.s2_stage_active) final_ppn = tlb_context.request_s2_resolved_ppn;
                 else if (entry.s1_stage_active) final_ppn = tlb_context.request_s1_resolved_ppn;
                 else begin
@@ -511,12 +590,16 @@ function bit memblock_rm::observer_build_commit_item(
     item.translation_valid = 1'b1;
     if (!observer_trace_translation_emitted.exists(item.uid)) begin
         `uvm_info("RM_LS_TRACE_TRANSLATION",
-                  $sformatf("node=TRANSLATION uid=%0d rob=%0d/%0d kind=%s path=%s va=0x%0h first_pa=0x%0h last_pa=0x%0h pa_mask=0x%0h expected_exception=0x%0h",
+                  $sformatf("node=TRANSLATION uid=%0d rob=%0d/%0d kind=%s path=%s va=0x%0h first_pa=0x%0h last_pa=0x%0h pa_mask=0x%0h s2xlate=%0d mPBMTE=%0d hPBMTE=%0d pbmt_force_s1_pf=%0d pbmt_force_s2_gpf=%0d expected_exception=0x%0h",
                             item.uid, item.rob.flag, item.rob.value,
                             observer_kind_name(item.kind),
                             bare_identity ? "BARE_IDENTITY" : "PAGED_ENTRY",
                             item.computed_vaddr, item.pa_by_byte[0],
                             item.pa_by_byte[item.size_bytes - 1], item.pa_valid_mask,
+                            tlb_context.s2xlate, tlb_context.m_pbmt_en,
+                            tlb_context.h_pbmt_en,
+                            item.expected_pbmt_forced_s1_pf,
+                            item.expected_pbmt_forced_s2_gpf,
                             item.expected_exception),
                   UVM_LOW)
         observer_trace_translation_emitted[item.uid] = 1'b1;
