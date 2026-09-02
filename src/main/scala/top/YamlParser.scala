@@ -62,6 +62,7 @@ case class YamlConfig(
   EnableBitmapCheck: Option[Boolean],
   EnableBitmapCheckDefault: Option[Boolean],
   EnableBpuFlush: Option[Boolean],
+  EnableBpuFlushDefault: Option[Boolean],
 )
 
 object YamlParser {
@@ -217,6 +218,11 @@ object YamlParser {
     yamlConfig.EnableBpuFlush.foreach { enable =>
       newConfig = newConfig.alter((site, here, up) => {
         case XSTileKey => up(XSTileKey).map(_.copy(HasBpuFlush = enable))
+      })
+    }
+    yamlConfig.EnableBpuFlushDefault.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case XSTileKey => up(XSTileKey).map(_.copy(HasBpuFlushDefault = enable))
       })
     }
     newConfig

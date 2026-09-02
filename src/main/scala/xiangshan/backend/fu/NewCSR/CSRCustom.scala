@@ -14,7 +14,20 @@ import scala.collection.immutable.SeqMap
 
 trait CSRCustom { self: NewCSR =>
   // Supervisor Custom Read/Write
-  val sbpctl = Module(new CSRModule("Sbpctl", new SbpctlBundle))
+  val sbpctl = Module(new CSRModule("Sbpctl", new SbpctlBundle) {
+    if (HasBpuFlush) {
+      val bpuFlushLock = reg.BPU_FLUSH_EN.get.asBool
+      if (!HasBpuFlushDefault) {
+        reg.BPU_FLUSH_EN.get := Mux(
+          wen && !bpuFlushLock,
+          wdata.BPU_FLUSH_EN.get,
+          reg.BPU_FLUSH_EN.get,
+        )
+      } else {
+        reg.BPU_FLUSH_EN.get := 1.U
+      }
+    }
+  })
     .setAddr(0x5C0)
 
   val spfctl = Module(new CSRModule("Spfctl", new SpfctlBundle))
@@ -76,9 +89,9 @@ class SbpctlBundle(implicit val p: Parameters) extends CSRBundle with HasXSParam
   val ABTB_ENABLE   = RW(1).withReset(true.B).withDescription("Enable the alternate branch target buffer.")
   val UBTB_ENABLE   = RW(0).withReset(true.B).withDescription("Enable the micro-BTB predictor.")
   // BPU context flush enables (not generated when HasBpuFlush is off)
-  val BPU_FLUSH_EN        = Option.when(HasBpuFlush)(RW(7) .withReset(true.B).withDescription("Enable the BPU context flush mechanism."))
-  val UBTB_FLUSH_ENABLE   = Option.when(HasBpuFlush)(RW(8) .withReset(true.B).withDescription("Enable uBTB flush on BPU context flush."))
-  val ABTB_FLUSH_ENABLE   = Option.when(HasBpuFlush)(RW(9) .withReset(true.B).withDescription("Enable aBTB flush on BPU context flush."))
+  val BPU_FLUSH_EN        = Option.when(HasBpuFlush)(RW(7).withReset(false.B).withDescription("Enable BPU context flush. Once set, it remains set until reset."))
+  val UBTB_FLUSH_ENABLE   = Option.when(HasBpuFlush)(RW(8).withReset(true.B).withDescription("Enable uBTB flush on BPU context flush."))
+  val ABTB_FLUSH_ENABLE   = Option.when(HasBpuFlush)(RW(9).withReset(true.B).withDescription("Enable aBTB flush on BPU context flush."))
   val MBTB_FLUSH_ENABLE   = Option.when(HasBpuFlush)(RW(10).withReset(true.B).withDescription("Enable mBTB flush on BPU context flush."))
   val TAGE_FLUSH_ENABLE   = Option.when(HasBpuFlush)(RW(11).withReset(true.B).withDescription("Enable TAGE flush on BPU context flush."))
   val SC_FLUSH_ENABLE     = Option.when(HasBpuFlush)(RW(12).withReset(true.B).withDescription("Enable SC flush on BPU context flush."))
