@@ -36,6 +36,15 @@ class memblock_l2tlb_pending_req extends uvm_object;
     // response 完成、flush 或 driver 重试都不能从 live table 重新读取或改写它。
     longint unsigned pending_entry_generation;
     L2tlb_agent_agent_xaction resp_tr;
+    // 中文注释：response select 时绑定的 DUT sample 和 PBMTE 结果。首次 select
+    // 会在 entry_snapshot 上叠加 effective PF/GPF 并置 frozen；completion 必须
+    // 使用同一 sample/C-2 PBMTE，不能让后续 CSR 变化改写已驱动 payload。
+    longint unsigned response_visible_sample_seq;
+    bit response_payload_frozen;
+    bit response_m_pbmt_en;
+    bit response_h_pbmt_en;
+    bit response_pbmt_forced_s1_pf;
+    bit response_pbmt_forced_s2_gpf;
     // 中文注释：accept/due序号定义最早response边界；complete允许因端口竞争晚于due。
     longint unsigned accept_sample_seq;
     memblock_l2tlb_latency_bucket_e latency_bucket;
@@ -64,6 +73,12 @@ class memblock_l2tlb_pending_req extends uvm_object;
         entry_snapshot = null;
         pending_entry_generation = 0;
         resp_tr = null;
+        response_visible_sample_seq = 0;
+        response_payload_frozen = 1'b0;
+        response_m_pbmt_en = 1'b0;
+        response_h_pbmt_en = 1'b0;
+        response_pbmt_forced_s1_pf = 1'b0;
+        response_pbmt_forced_s2_gpf = 1'b0;
         accept_sample_seq = 0;
         latency_bucket = L2TLB_LATENCY_1C;
         min_latency = 1;
@@ -193,7 +208,9 @@ class memblock_l2tlb_base_sequence extends L2tlb_agent_agent_default_sequence;
         input memblock_sync_pkg::memblock_l2tlb_event_record_t event_record);
     extern function int unsigned apply_due_l2tlb_flush_barriers(
         input longint unsigned current_sample_seq);
-    extern function bit get_request_csr_snapshot(output mmu_csr_runtime_state snapshot);
+    extern function bit get_csr_snapshot_for_sample(
+        input longint unsigned target_sample_seq,
+        output mmu_csr_runtime_state snapshot);
     extern function bit select_due_response(input longint unsigned next_sample_seq,
                                             output L2tlb_agent_agent_xaction cycle_tr);
     extern function void complete_driving_response();
@@ -201,6 +218,11 @@ class memblock_l2tlb_base_sequence extends L2tlb_agent_agent_default_sequence;
     extern function void clear_l2tlb_xaction(input L2tlb_agent_agent_xaction tr);
     extern function void fill_dtlb_resp_from_entry(input memblock_tlb_entry entry,
                                                    ref L2tlb_agent_agent_xaction resp);
+    extern function void apply_pbmt_response_overlay(
+        input memblock_tlb_entry entry,
+        input mmu_csr_runtime_state response_csr,
+        output bit force_s1_pf,
+        output bit force_s2_gpf);
     extern function void stamp_lifecycle_item(
         input L2tlb_agent_agent_xaction tr,
         input memblock_sync_pkg::memblock_l2tlb_release_item_kind_e item_kind,
@@ -965,20 +987,18 @@ function int unsigned memblock_l2tlb_base_sequence::outstanding_count();
     return pending_q.size() + (driving_valid ? 1 : 0);
 endfunction:outstanding_count
 
-function bit memblock_l2tlb_base_sequence::get_request_csr_snapshot(
+function bit memblock_l2tlb_base_sequence::get_csr_snapshot_for_sample(
+    input longint unsigned target_sample_seq,
     output mmu_csr_runtime_state snapshot);
     memblock_sync_pkg::dispatch_raw_csr_t raw_csr;
 
     snapshot = null;
-    if (!memblock_sync_pkg::get_l2tlb_request_csr_history(sample_seq,
+    if (!memblock_sync_pkg::get_l2tlb_request_csr_history(target_sample_seq,
                                                           raw_csr)) begin
-        `uvm_fatal(get_type_name(),
-                   $sformatf("missing V2 C-2 CSR history for request sample=%0d",
-                             sample_seq))
         return 1'b0;
     end
     snapshot = mmu_csr_runtime_state::type_id::create(
-        $sformatf("l2tlb_request_csr_%0d", sample_seq));
+        $sformatf("l2tlb_csr_sample_%0d", target_sample_seq));
     if (snapshot == null) begin
         `uvm_fatal(get_type_name(), "failed to allocate request CSR snapshot")
         return 1'b0;
@@ -986,7 +1006,7 @@ function bit memblock_l2tlb_base_sequence::get_request_csr_snapshot(
     snapshot.reset();
     snapshot.update_from_raw_csr(raw_csr);
     return 1'b1;
-endfunction:get_request_csr_snapshot
+endfunction:get_csr_snapshot_for_sample
 
 function void memblock_l2tlb_base_sequence::check_l2tlb_lifecycle_accounting(input string audit_context);
     longint unsigned accounted_count;
@@ -1058,7 +1078,10 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
     next_request_token++;
     pending.vpn = sampled_req_vpn;
     pending.s2xlate = sampled_req_s2xlate;
-    if (!get_request_csr_snapshot(pending.csr_snapshot)) begin
+    if (!get_csr_snapshot_for_sample(sample_seq, pending.csr_snapshot)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("missing V2 C-2 CSR history for request sample=%0d",
+                             sample_seq))
         pending.csr_snapshot = null;
     end
     if (pending.csr_snapshot == null) begin
@@ -1128,7 +1151,6 @@ function memblock_l2tlb_pending_req memblock_l2tlb_base_sequence::capture_fired_
     pending.resp_tr.io_ptw_req_0_valid = 1'b1;
     pending.resp_tr.io_ptw_req_0_bits_vpn = pending.vpn;
     pending.resp_tr.io_ptw_req_0_bits_s2xlate = pending.s2xlate;
-    fill_dtlb_resp_from_entry(pending.entry_snapshot, pending.resp_tr);
     pending.min_latency = choose_latency(pending.latency_bucket);
     pending.accept_sample_seq = sample_seq;
     pending.due_sample_seq = sample_seq + pending.min_latency;
@@ -1224,6 +1246,9 @@ function bit memblock_l2tlb_base_sequence::select_due_response(
     int unsigned eligible_indices[$];
     int unsigned eligible_count;
     int unsigned choice;
+    mmu_csr_runtime_state response_csr;
+    bit force_s1_pf;
+    bit force_s2_gpf;
 
     cycle_tr = null;
     foreach (barrier_q[barrier_idx]) begin
@@ -1234,6 +1259,14 @@ function bit memblock_l2tlb_base_sequence::select_due_response(
         end
     end
     if (pending_q.size() == 0) begin
+        return 1'b0;
+    end
+    // The response payload is defined by the C-2 CSR visible at the sample in
+    // which valid will be raised.  Keep the token pending if that history is
+    // not published yet; selecting it earlier would make PBMT fault state
+    // depend on a later/current CSR read.
+    if (!get_csr_snapshot_for_sample(next_sample_seq, response_csr) ||
+        response_csr == null) begin
         return 1'b0;
     end
     if (stopping || !resp_reorder_en) begin
@@ -1261,6 +1294,20 @@ function bit memblock_l2tlb_base_sequence::select_due_response(
     driving_req = pending_q[selected_index];
     pending_q.delete(selected_index);
     driving_valid = 1'b1;
+    if (driving_req.response_payload_frozen) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("selected L2TLB token already has frozen response payload token=%0d",
+                             driving_req.request_token))
+    end
+    apply_pbmt_response_overlay(driving_req.entry_snapshot, response_csr,
+                                force_s1_pf, force_s2_gpf);
+    driving_req.response_visible_sample_seq = next_sample_seq;
+    driving_req.response_m_pbmt_en = response_csr.m_pbmt_en;
+    driving_req.response_h_pbmt_en = response_csr.h_pbmt_en;
+    driving_req.response_pbmt_forced_s1_pf = force_s1_pf;
+    driving_req.response_pbmt_forced_s2_gpf = force_s2_gpf;
+    driving_req.response_payload_frozen = 1'b1;
+    fill_dtlb_resp_from_entry(driving_req.entry_snapshot, driving_req.resp_tr);
     cycle_tr = driving_req.resp_tr;
     if (cycle_tr == null) begin
         `uvm_fatal(get_type_name(), "selected L2TLB pending record has null response transaction")
@@ -1272,7 +1319,7 @@ endfunction:select_due_response
 function void memblock_l2tlb_base_sequence::complete_driving_response();
     int unsigned record_update_count;
     longint unsigned complete_sample_seq;
-    mmu_csr_runtime_state response_filter_csr_snapshot;
+    mmu_csr_runtime_state actual_response_csr_snapshot;
 
     if (!driving_valid || driving_req == null) begin
         `uvm_fatal(get_type_name(), "complete_driving_response got invalid driving slot")
@@ -1286,15 +1333,39 @@ function void memblock_l2tlb_base_sequence::complete_driving_response();
                              driving_req.due_sample_seq,
                              complete_sample_seq))
     end
-    if (!get_request_csr_snapshot(response_filter_csr_snapshot) ||
-        response_filter_csr_snapshot == null) begin
+    if (!driving_req.response_payload_frozen) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("L2TLB response completed before payload freeze token=%0d",
+                             driving_req.request_token))
+    end
+    if (driving_req.response_visible_sample_seq != complete_sample_seq) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("L2TLB response sample drift token=%0d selected=%0d complete=%0d",
+                             driving_req.request_token,
+                             driving_req.response_visible_sample_seq,
+                             complete_sample_seq))
+    end
+    if (!get_csr_snapshot_for_sample(complete_sample_seq,
+                                     actual_response_csr_snapshot) ||
+        actual_response_csr_snapshot == null) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("missing response-visible C-2 CSR for L2TLB response sample=%0d",
                              complete_sample_seq))
     end
+    if (actual_response_csr_snapshot.m_pbmt_en != driving_req.response_m_pbmt_en ||
+        actual_response_csr_snapshot.h_pbmt_en != driving_req.response_h_pbmt_en) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("L2TLB response PBMTE drift token=%0d selected m/h=%0d/%0d actual=%0d/%0d sample=%0d",
+                             driving_req.request_token,
+                             driving_req.response_m_pbmt_en,
+                             driving_req.response_h_pbmt_en,
+                             actual_response_csr_snapshot.m_pbmt_en,
+                             actual_response_csr_snapshot.h_pbmt_en,
+                             complete_sample_seq))
+    end
     record_update_count = data.complete_waiting_uid_records_by_response(
         driving_req.entry_snapshot,
-        response_filter_csr_snapshot);
+        actual_response_csr_snapshot);
     `uvm_info(get_type_name(),
               $sformatf("complete L2TLB token=%0d bucket=%0d min_latency=%0d accept=%0d due=%0d complete=%0d extra_wait=%0d uid_records=%0d pending=%0d",
                         driving_req.request_token,
@@ -1312,6 +1383,51 @@ function void memblock_l2tlb_base_sequence::complete_driving_response();
     completed_count++;
     check_l2tlb_lifecycle_accounting("response_complete");
 endfunction:complete_driving_response
+
+// 中文注释：response select 前依据目标 sample 的 C-2 CSR，在 token 私有 entry
+// snapshot 上一次性叠加 PBMT 导致的 S1 PF/S2 GPF。该函数不访问 live table、UID
+// 记录或其他 pending token；调用者随后将同一 snapshot 同时交给 driver 和 UID 回填。
+function void memblock_l2tlb_base_sequence::apply_pbmt_response_overlay(
+    input memblock_tlb_entry entry,
+    input mmu_csr_runtime_state response_csr,
+    output bit force_s1_pf,
+    output bit force_s2_gpf);
+    bit s1_enabled;
+    bit s2_enabled;
+
+    force_s1_pf = 1'b0;
+    force_s2_gpf = 1'b0;
+    if (entry == null || response_csr == null) begin
+        `uvm_fatal(get_type_name(), "apply_pbmt_response_overlay got null input")
+    end
+    entry.check_inactive_stage_defaults("RESPONSE_OVERLAY");
+    if (entry.s1_stage_active && entry.s1_entry_pbmt == 2'b11) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("response S1 PBMT=11 is reserved token entry vpn=0x%0h",
+                             entry.lookup_key.vpn))
+    end
+    if (entry.s2_stage_active && entry.s2_entry_pbmt == 2'b11) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("response S2 PBMT=11 is reserved token entry vpn=0x%0h",
+                             entry.lookup_key.vpn))
+    end
+    if (entry.s1_stage_active) begin
+        s1_enabled = mmu_csr_runtime_state::get_stage_pbmt_enable_from_bits(
+            1'b1, entry.s2xlate, response_csr.m_pbmt_en,
+            response_csr.h_pbmt_en);
+        force_s1_pf = (entry.s1_entry_pbmt != 2'd0) && !s1_enabled;
+    end
+    if (entry.s2_stage_active) begin
+        s2_enabled = mmu_csr_runtime_state::get_stage_pbmt_enable_from_bits(
+            1'b0, entry.s2xlate, response_csr.m_pbmt_en,
+            response_csr.h_pbmt_en);
+        force_s2_gpf = (entry.s2_entry_pbmt != 2'd0) && !s2_enabled;
+    end
+    // PBMT remains visible in the response.  Only the effective fault bits are
+    // overlaid, and raw fault provenance is intentionally left untouched.
+    entry.fault_effective_s1_pf |= force_s1_pf;
+    entry.fault_effective_s2_gpf |= force_s2_gpf;
+endfunction:apply_pbmt_response_overlay
 
 function L2tlb_agent_agent_xaction memblock_l2tlb_base_sequence::create_l2tlb_xaction(input string name);
     L2tlb_agent_agent_xaction tr;
