@@ -191,6 +191,36 @@ class mmu_csr_runtime_state extends uvm_object;
         return priv_virt && (hgatp_mode != 4'd0);
     endfunction:current_s2xlate_enabled
 
+    // 中文注释：按 V2 s2xlate 选择某个翻译 stage 实际使用的 PBMTE。
+    // 该纯值 helper 同时供 L2TLB responder 和 RM 调用，避免两处各自维护
+    // M/HS/VS/allStage 映射。不存在的 stage 返回 0，但调用者必须先确认
+    // stage active，不能把不存在 stage 解释成 PBMT fault。
+    static function bit get_stage_pbmt_enable_from_bits(
+        input bit       is_s1,
+        input bit [1:0] s2xlate,
+        input bit       m_pbmt_en_i,
+        input bit       h_pbmt_en_i
+    );
+        case (s2xlate)
+            2'd0: return is_s1 ? m_pbmt_en_i : 1'b0;
+            2'd1: return is_s1 ? h_pbmt_en_i : 1'b0;
+            2'd2: return is_s1 ? 1'b0 : m_pbmt_en_i;
+            2'd3: return is_s1 ? h_pbmt_en_i : m_pbmt_en_i;
+            default: begin
+                `uvm_fatal("MMU_CSR", $sformatf("invalid s2xlate=%0d for PBMTE lookup", s2xlate))
+                return 1'b0;
+            end
+        endcase
+    endfunction:get_stage_pbmt_enable_from_bits
+
+    // 中文注释：instance wrapper 只转发本对象冻结的 PBMTE bit；不读取
+    // runtime latest，也不改变 CSR snapshot。调用者用 s2xlate 指定翻译路径。
+    function bit get_stage_pbmt_enable(input bit is_s1,
+                                       input bit [1:0] s2xlate);
+        return get_stage_pbmt_enable_from_bits(is_s1, s2xlate,
+                                               m_pbmt_en, h_pbmt_en);
+    endfunction:get_stage_pbmt_enable
+
     function bit [15:0] current_asid(input bit [1:0] s2xlate);
         case (s2xlate)
             2'd0: return satp_asid;

@@ -34,11 +34,22 @@ class tlb_map_builder extends uvm_object;
     endfunction:choose_bit
 
     // Abstract responsibility: choose one PBMT encoding for a single active
-    // stage.  The return value is independent of level, fault and PTE fields.
-    function bit [1:0] choose_pbmt(input bit s1);
+    // stage under the request-time CSR snapshot.  A disabled stage is forced
+    // to 00 before weights are read; an enabled stage keeps weighted random.
+    function bit [1:0] choose_pbmt(input bit s1,
+                                   input bit [1:0] s2xlate,
+                                   input mmu_csr_runtime_state csr_state);
         bit [1:0] chosen;
         int unsigned w0, w1, w2;
+        bit pbmt_enabled;
 
+        if (csr_state == null) begin
+            `uvm_fatal("L2TLB_PAYLOAD_CFG", "choose_pbmt got null request CSR snapshot")
+        end
+        pbmt_enabled = csr_state.get_stage_pbmt_enable(s1, s2xlate);
+        if (!pbmt_enabled) begin
+            return 2'd0;
+        end
         w0 = seq_csr_common::get_l2tlb_pbmt_wt(s1, 0);
         w1 = seq_csr_common::get_l2tlb_pbmt_wt(s1, 1);
         w2 = seq_csr_common::get_l2tlb_pbmt_wt(s1, 2);
@@ -54,6 +65,32 @@ class tlb_map_builder extends uvm_object;
         end
         return chosen;
     endfunction:choose_pbmt
+
+    // 中文注释：创建期 PBMT gate 的二次一致性检查。正常路径由 choose_pbmt()
+    // 已经保证 disabled stage 为 00；这里仅防止未来调用点绕过 gate 或产生保留编码。
+    function void check_pbmt_build_csr_compatibility(
+        input bit                  s1,
+        input bit [1:0]            s2xlate,
+        input mmu_csr_runtime_state csr_state,
+        input bit [1:0]            pbmt
+    );
+        bit enabled;
+
+        if (csr_state == null) begin
+            `uvm_fatal("L2TLB_PAYLOAD_CFG", "PBMT compatibility check got null CSR snapshot")
+        end
+        if (pbmt == 2'b11) begin
+            `uvm_fatal("L2TLB_PAYLOAD_CFG",
+                       $sformatf("active %s PBMT=11 is reserved s2xlate=%0d",
+                                 s1 ? "S1" : "S2", s2xlate))
+        end
+        enabled = csr_state.get_stage_pbmt_enable(s1, s2xlate);
+        if (!enabled && pbmt != 2'd0) begin
+            `uvm_fatal("L2TLB_PAYLOAD_CFG",
+                       $sformatf("disabled %s PBMTE produced non-zero PBMT=%0d s2xlate=%0d",
+                                 s1 ? "S1" : "S2", pbmt, s2xlate))
+        end
+    endfunction:check_pbmt_build_csr_compatibility
 
     function void validate_active_paged_mode(input bit s1,
                                               input bit [3:0] mode,
@@ -614,7 +651,9 @@ class tlb_map_builder extends uvm_object;
                                             entry.s1_pte_n, s1_canonical_ppn,
                                             entry);
             build_s1_sector_payload(s1_canonical_ppn, entry);
-            entry.s1_entry_pbmt = choose_pbmt(1'b1);
+            entry.s1_entry_pbmt = choose_pbmt(1'b1, entry.s2xlate, csr_state);
+            check_pbmt_build_csr_compatibility(1'b1, entry.s2xlate, csr_state,
+                                               entry.s1_entry_pbmt);
             if (!entry.has_effective_fault()) begin
                 reject_unsupported_valid_s1_nonleaf(entry);
                 s1_resolvable = entry.s1_pte_v &&
@@ -657,7 +696,9 @@ class tlb_map_builder extends uvm_object;
                                             entry.s2_pte_n, s2_canonical_ppn,
                                             entry);
             entry.s2_entry_ppn_raw = encode_s2_entry_ppn(s2_canonical_ppn);
-            entry.s2_entry_pbmt = choose_pbmt(1'b0);
+            entry.s2_entry_pbmt = choose_pbmt(1'b0, entry.s2xlate, csr_state);
+            check_pbmt_build_csr_compatibility(1'b0, entry.s2xlate, csr_state,
+                                               entry.s2_entry_pbmt);
             if (!entry.has_effective_fault()) begin
                 s2_resolvable = (key.s2xlate != 2'd2 || s2_request_in_range) &&
                                 napot_raw_ppn_is_model_resolvable(1'b0,

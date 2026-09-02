@@ -152,8 +152,10 @@ function void memblock_mmu_sv39_csr_sequence::configure_static_sv39_xaction(
     // instruction/data 地址翻译模式；其余 privilege 相关位仍保持 Scala reset 值。
     tr.io_ooo_to_mem_tlbCsr_priv_imode = MEMBLOCK_PRIV_MODE_U;
     tr.io_ooo_to_mem_tlbCsr_priv_dmode = MEMBLOCK_PRIV_MODE_U;
-    tr.io_ooo_to_mem_tlbCsr_mPBMTE = 1'b0;
-    tr.io_ooo_to_mem_tlbCsr_hPBMTE = 1'b0;
+    // 中文注释：PBMTE 由 testcase 启动前冻结的公共参数控制。静态 producer 只驱动
+    // CSR xaction，CSR monitor 仍是 m_pbmt_en/h_pbmt_en runtime snapshot 的唯一发布者。
+    tr.io_ooo_to_mem_tlbCsr_mPBMTE = seq_csr_common::get_mmu_sv39_m_pbmte_en();
+    tr.io_ooo_to_mem_tlbCsr_hPBMTE = seq_csr_common::get_mmu_sv39_h_pbmte_en();
     tr.io_ooo_to_mem_tlbCsr_pmm_mseccfg = '0;
     tr.io_ooo_to_mem_tlbCsr_pmm_menvcfg = '0;
     tr.io_ooo_to_mem_tlbCsr_pmm_henvcfg = '0;
