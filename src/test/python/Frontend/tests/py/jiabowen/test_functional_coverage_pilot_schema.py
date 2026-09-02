@@ -24,6 +24,7 @@ from env.funcov.py.ifu.instr_uncache_owner_funcov import (
     INSTR_UNCACHE_OWNER_GROUP,
     INSTR_UNCACHE_OWNER_SAMPLER_BIN_KEYS,
 )
+from tools import model_jiabowen_instr_uncache_v3_owner as instr_uncache_model
 from tools.backannotate_funcov import validate_pilot_schema
 
 
@@ -947,3 +948,11 @@ def test_icache_hitmiss_leaves_are_single_bin_and_match_registry():
             mapped_rows[bin_id] = row
 
     assert set(mapped_rows) == ICACHE_HITMISS_FUNCOV_BIN_IDS
+
+
+def test_instr_uncache_model_emits_atomic_current_v3_half_contract():
+    snapshot = instr_uncache_model.current_v3_contract_snapshot()
+
+    assert snapshot["design_baseline"].startswith("e5c70547f")
+    assert snapshot["half_state_contract"] == "Valid EndHalfRviInfo / halfRviInfo"
+    assert snapshot["legacy_aliases_input_only"] is True

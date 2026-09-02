@@ -79,6 +79,7 @@ class FrontendEnv:
         self._nemu_hgatp_override: Optional[int] = None
         self.current_cycle = 0
         self.translation_epoch = 0
+        self._pre_drive_cycle_observers = []
         self._cycle_observers = []
         self.csr_write_log = []
         self._pmp_pma_cfg_words = {"pmp": {}, "pma": {}}
@@ -108,6 +109,11 @@ class FrontendEnv:
 
     def register_cycle_observer(self, observer: Callable[[int, "FrontendEnv"], None]) -> None:
         self._cycle_observers.append(observer)
+
+    def register_pre_drive_cycle_observer(
+        self, observer: Callable[[int, "FrontendEnv"], None]
+    ) -> None:
+        self._pre_drive_cycle_observers.append(observer)
 
     def _create_collaborators(self) -> Dict[str, object]:
         backend_random_seed = os.getenv(
@@ -619,6 +625,8 @@ class FrontendEnv:
 
     def _on_clock_edge(self, cycle: int) -> None:
         self.current_cycle = int(cycle)
+        for observer in list(self._pre_drive_cycle_observers):
+            observer(int(cycle), self)
         if self._read(self.clock_reset.reset, 0):
             self.icache_agent.reset()
         else:

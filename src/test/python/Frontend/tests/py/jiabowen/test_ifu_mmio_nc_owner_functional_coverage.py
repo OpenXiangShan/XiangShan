@@ -72,8 +72,12 @@ def test_snapshot_reads_current_verilator_derived_aliases():
             "Frontend_top.Frontend.inner_ifu.s2_alignedInstrPcVec_0_addr": 0x400,
             "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable": 1,
             "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_pc_0_addr": 0x400,
-            "Frontend_top.Frontend.inner_ifu.wbRedirect_valid": 1,
+            "Frontend_top.Frontend.inner_ifu.__Vtogcov__s2_flush": 1,
+            "Frontend_top.Frontend.inner_ifu.__Vtogcov__wbRedirect_valid": 1,
+            "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_ready": 1,
+            "Frontend_top.Frontend.inner_ifu.io_toIBuffer_valid": 1,
             "Frontend_top.Frontend.inner_instrUncache.entries_0.state": owner._IDLE,
+            "Frontend_top.Frontend.inner_ifu.uncacheUnit.__Vtogcov__io_resp_valid": 1,
             "Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_valid": 1,
             "Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_bits_data": 0x5678,
             "Frontend_top.Frontend.inner_instrUncache.__Vtogcov__io_toIfu_resp_bits_corrupt": 0,
@@ -87,6 +91,7 @@ def test_snapshot_reads_current_verilator_derived_aliases():
     )
 
     snapshot = owner._snapshot(recorder, object())
+    timing = owner.read_nc_timing_runtime_snapshot(recorder, object())
 
     assert snapshot["req_ready"] == 1
     assert snapshot["resp_valid"] == 1
@@ -99,7 +104,10 @@ def test_snapshot_reads_current_verilator_derived_aliases():
     assert snapshot["s2_uncache_data"] == 0xAABBCCDD
     assert snapshot["s2_instr_pc"] == 0x400
     assert snapshot["to_pc"] == 0x400
+    assert snapshot["ifu_flush"] == 1
     assert snapshot["checker_redirect"] == 1
+    assert snapshot["to_valid"] == 1
+    assert snapshot["to_ready"] == 1
     assert snapshot["instr_resp_valid"] == 1
     assert snapshot["instr_resp_data"] == 0x5678
     assert snapshot["instr_resp_corrupt"] == 0
@@ -109,6 +117,39 @@ def test_snapshot_reads_current_verilator_derived_aliases():
     assert snapshot["waylookup_valid"] == 1
     assert snapshot["waymask_0"] == 3
     assert snapshot["waymask_1"] == 0
+    assert timing["ifu_flush"] == 1
+    assert timing["resp_valid"] == 1
+    assert timing["instr_resp_valid"] == 1
+    assert timing["to_valid"] == 1
+    assert timing["to_ready"] == 1
+    assert timing["checker_redirect"] == 1
+
+
+def test_nc_pending_reconstructs_optimized_sv_wire_from_runtime_state():
+    snapshot = _empty_snapshot()
+    assert not owner.derive_nc_pending(snapshot, nc_active=False)
+
+    snapshot.update(
+        {
+            "s2_valid": 1,
+            "s2_req_uncache": 1,
+            "s2_pmp_mmio": 0,
+            "s2_pbmt": owner._PBMT_NC,
+        }
+    )
+    assert owner.derive_nc_pending(snapshot, nc_active=False)
+
+    snapshot.update(
+        {
+            "s2_valid": 0,
+            "uncache_busy": 1,
+            "uncache_state": owner._WAIT_RESP,
+        }
+    )
+    assert owner.derive_nc_pending(snapshot, nc_active=False)
+
+    snapshot.update({"uncache_busy": 0, "uncache_state": owner._IDLE})
+    assert owner.derive_nc_pending(snapshot, nc_active=True)
 
 
 def test_nc_accept_uses_current_pbmt_encoding_and_selects_uncache_path():

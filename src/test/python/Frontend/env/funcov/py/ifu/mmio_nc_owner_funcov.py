@@ -410,6 +410,66 @@ def _snapshot(recorder, dut) -> dict[str, Optional[int]]:
     }
 
 
+def read_nc_timing_runtime_snapshot(recorder, dut) -> dict[str, Optional[int]]:
+    """Read the retained DUT semantics needed by NC timing canaries."""
+    return {
+        "s2_valid": _read_ifu(recorder, dut, "s2_valid_valid"),
+        "s2_req_uncache": _read_ifu(recorder, dut, "s2_reqIsUncache"),
+        "s2_pmp_mmio": _read_ifu(recorder, dut, "s2_icacheMeta_0_pmpMmio"),
+        "s2_pbmt": _read_ifu(recorder, dut, "s2_icacheMeta_0_itlbPbmt"),
+        "uncache_busy": _read_ifu(recorder, dut, "uncacheBusy"),
+        "uncache_state": _read_uncache(recorder, dut, "uncacheState"),
+        "backend_redirect": _read(
+            recorder,
+            dut,
+            "Frontend_top.Frontend.inner_ftq.backendRedirect_valid",
+            "TOP.Frontend_top.Frontend.inner_ftq.backendRedirect_valid",
+            "Frontend_top.io_backend_toFtq_redirect_valid",
+            "io_backend_toFtq_redirect_valid",
+        ),
+        "ifu_flush": _read_ifu(recorder, dut, "s2_flush"),
+        "resp_valid": _read_uncache(recorder, dut, "io_resp_valid"),
+        "instr_resp_valid": _read_instr_uncache(
+            recorder, dut, "io_toIfu_resp_valid"
+        ),
+        "to_valid": _read_ifu(recorder, dut, "io_toIBuffer_valid"),
+        "to_ready": _read_ifu(recorder, dut, "io_toIBuffer_ready"),
+        "to_enq": _read_ifu(recorder, dut, "io_toIBuffer_bits_enqEnable"),
+        "to_exception_cross_page": _read_ifu(
+            recorder, dut, "io_toIBuffer_bits_exceptionCrossPage"
+        ),
+        "to_exception": _read_ifu(
+            recorder, dut, "io_toIBuffer_bits_exceptionType_value"
+        ),
+        "prev_end_half": _read_ifu(
+            recorder, dut, "s2_prevEndIsHalfRviInfo_valid"
+        ),
+        "wb_path_valid": _read_ifu(recorder, dut, "wbValid"),
+        "checker_redirect": _read_ifu(recorder, dut, "wbRedirect_valid"),
+        "tl_a_valid": _read(
+            recorder, dut, "auto_inner_instrUncache_client_out_a_valid"
+        ),
+    }
+
+
+def derive_nc_pending(
+    snapshot: dict[str, Optional[int]], *, nc_active: bool
+) -> bool:
+    """Reconstruct the SV ``nc_pending`` wire from retained DUT state."""
+    nc_candidate = (
+        snapshot["s2_valid"] == 1
+        and snapshot["s2_req_uncache"] == 1
+        and snapshot["s2_pmp_mmio"] == 0
+        and snapshot["s2_pbmt"] == _PBMT_NC
+    )
+    uncache_inflight = (
+        snapshot["uncache_busy"] == 1
+        and snapshot["uncache_state"] is not None
+        and snapshot["uncache_state"] != _IDLE
+    )
+    return bool(nc_candidate or nc_active or uncache_inflight)
+
+
 def _sample_mmio(
     recorder, cycle: int, s: dict[str, Optional[int]], state: dict
 ) -> None:
@@ -761,7 +821,7 @@ def _sample_nc(recorder, cycle: int, s: dict[str, Optional[int]], state: dict) -
     )
     nc_delivery = nc_active and s["to_valid"] == 1 and s["to_ready"] == 1
     clean_delivery = nc_delivery and s["resp_exception"] == 0
-    pending = nc_candidate or nc_active
+    pending = derive_nc_pending(s, nc_active=nc_active)
     ifu_stall = s["ifu_stall"]
     if ifu_stall is None and s["ibuffer_ready"] is not None:
         ifu_stall = int(s["ibuffer_ready"] == 0)
@@ -1467,7 +1527,9 @@ __all__ = [
     "MMIO_OWNER_LEAF_COUNT",
     "NC_OWNER_GROUP",
     "NC_OWNER_LEAF_COUNT",
+    "derive_nc_pending",
     "initialize_mmio_nc_owner_coverage_state",
+    "read_nc_timing_runtime_snapshot",
     "reset_mmio_nc_owner_coverage_state",
     "sample_mmio_nc_owner_coverage",
 ]

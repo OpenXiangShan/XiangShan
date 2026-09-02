@@ -5,7 +5,14 @@ import csv
 import io
 from pathlib import Path
 
-from refresh_jiabowen_ifu_v3_contract import _mapped_paths, _read_csv, _write_csv
+try:
+    from .refresh_jiabowen_ifu_v3_contract import (
+        _mapped_paths,
+        _read_csv,
+        _write_csv,
+    )
+except ImportError:  # pragma: no cover - direct script compatibility
+    from refresh_jiabowen_ifu_v3_contract import _mapped_paths, _read_csv, _write_csv
 
 
 _FRONTEND_ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +31,14 @@ _PILOT_PATH = (
 _GROUP = "ifu_instruncache_owner_v3"
 _COVERPOINT = "protocol_leaf"
 _MODEL_EVIDENCE = "MODEL:sample_instr_uncache_owner_coverage"
+_CURRENT_V3_DESIGN_BASELINE = "e5c70547f3a966accf20a4b065ec1d8e33443180"
+_OBSOLETE_HALF_STATE_TERMS = (
+    "halfPc",
+    "halfData",
+    "isHalfInstr",
+    "prevEndHalfRviData",
+    "prevEndHalfRviPc",
+)
 
 _LEAVES = (
     "A通道valid保持期间地址addr不变化",
@@ -51,10 +66,10 @@ _LEAVES = (
     "跨页RVI不假设物理页连续，不能在InstrUncache内部直接取下一页",
     "跨页RVC页尾2B不返回needResend",
     "跨页第一半corrupt=1（denied可为0或1）时不返回needResend",
-    "needResend触发IFU uncacheRedirect并保存halfPc/halfData",
-    "IFU保存halfPc/halfData后重新发起下一页取指",
+    "needResend触发IFU uncacheRedirect并原子保存halfRviInfo",
+    "IFU保存halfRviInfo后重新发起下一页取指",
     "下一页返回后由IFU侧完成跨页RVI拼接",
-    "跨页补半期间flush必须清理IFU half状态与InstrUncache内部状态",
+    "跨页补半期间flush必须清理IFU halfRviInfo状态与InstrUncache内部状态",
     "RVI第一页低半PMP execute deny时不应继续按第二页数据误译码",
     "RVI第一页低半PMP execute deny时mtval应为RVI起始PC",
     "RVI第一页低半PMP execute deny且第二页可执行时mcause仍为Instruction Access Fault",
@@ -69,6 +84,9 @@ _LEAVES = (
 _LEGACY_LEAF_ALIASES = {
     "跨页第一半corrupt/denied时不返回needResend": _LEAVES[24],
     "needResend由IFU转化为uncacheRedirect.isHalfInstr": _LEAVES[25],
+    "needResend触发IFU uncacheRedirect并保存halfPc/halfData": _LEAVES[25],
+    "IFU保存halfPc/halfData后重新发起下一页取指": _LEAVES[26],
+    "跨页补半期间flush必须清理IFU half状态与InstrUncache内部状态": _LEAVES[28],
 }
 
 _RTL_CONTRACT_REWRITES = {
@@ -96,23 +114,23 @@ _RTL_CONTRACT_REWRITES = {
     _LEAVES[24]: {
         "五级测试点": _LEAVES[24],
         "Condition": "RVI低半位于4KB页尾2B；第一页TL D返回合法异常组合：corrupt=1且denied为0或1",
-        "Checkpoint": "InstrUncache响应保持corrupt/denied且needResend=0；IFU不建立prevEnd half状态，不把后续独立事务误归因为补半",
-        "Object": "第一页TL D corrupt/denied、InstrUncache response、needResend、s0/s1/s2 prevEnd half状态",
-        "evidence": "RTL_REVIEW:c0ca46459:needResend=crossPageBoundary&&!respCorruptReg&&!isRVC; TileLink denied requires corrupt",
+        "Checkpoint": "InstrUncache响应保持corrupt/denied且needResend=0；IFU不建立Valid EndHalfRviInfo状态，不把后续独立事务误归因为补半",
+        "Object": "第一页TL D corrupt/denied、InstrUncache response、needResend、s0/s1/s2 EndHalfRviInfo",
+        "evidence": f"RTL_REVIEW:{_CURRENT_V3_DESIGN_BASELINE}:needResend=crossPageBoundary&&!respCorruptReg&&!isRVC; TileLink denied requires corrupt",
     },
     _LEAVES[25]: {
         "五级测试点": _LEAVES[25],
         "Condition": "跨页RVI第一页clean响应产生needResend，IFU s2事务有效且toIBuffer ready",
-        "Checkpoint": "uncacheRedirect.valid由needResend触发并按RTL置isHalfInstr；halfPc/halfData随后进入prevEnd half状态，保留原RVI身份",
-        "Object": "needResend、uncacheRedirect.valid、s0/s1/s2 prevEndIsHalfRvi、halfPc、halfData",
-        "evidence": "RTL_REVIEW:c0ca46459:Ifu.scala:635-640 binds isHalfInstr to uncacheNeedResend and captures uncachePc/data",
+        "Checkpoint": "uncacheRedirect.valid由needResend触发并以halfRviInfo原子携带valid/pc/data；随后进入s1_prevEndHalfRviInfo，保留原RVI身份",
+        "Object": "needResend、uncacheRedirect.valid/halfRviInfo、s0_prevEndIsHalfRvi、s1/s2_prevEndHalfRviInfo",
+        "evidence": f"RTL_REVIEW:{_CURRENT_V3_DESIGN_BASELINE}:#6220 replaces split half-PC/data redirect state with Valid EndHalfRviInfo",
     },
     _LEAVES[28]: {
-        "五级测试点": "跨页补半期间backend redirect清理IFU half有效状态且旧半条不得泄漏",
-        "Condition": "IFU已保存第一页halfPc/halfData并等待下一页事务；随后backend redirect",
-        "Checkpoint": "s0/s1 half存储和s2有效状态被清理，旧half不得拼接或交付到新路径；InstrUncache此时无flush契约",
-        "Object": "backend redirect、IFU s0/s1/s2 half valid/data/PC、下一页请求和IBuffer新旧身份",
-        "evidence": "RTL_REVIEW:c0ca46459:half state belongs to IFU; InstrUncache.io.flush is tied false",
+        "五级测试点": _LEAVES[28],
+        "Condition": "IFU已保存第一页halfRviInfo并等待下一页事务；随后backend redirect",
+        "Checkpoint": "s0/s1 EndHalfRviInfo存储和s2有效状态被清理，旧half不得拼接或交付到新路径；InstrUncache此时无flush契约",
+        "Object": "backend redirect、IFU s0_prevEndIsHalfRvi/s1_prevEndHalfRviInfo/s2_prevEndHalfRviInfo、下一页请求和IBuffer新旧身份",
+        "evidence": f"RTL_REVIEW:{_CURRENT_V3_DESIGN_BASELINE}:#6220 keeps half state in IFU Valid EndHalfRviInfo; InstrUncache.io.flush is tied false",
     },
 }
 
@@ -126,6 +144,41 @@ _P0_LEAVES = {
 }
 
 
+def current_v3_contract_snapshot() -> dict[str, object]:
+    """Validate that future synchronization emits only the current V3 half state.
+
+    Legacy names remain accepted as input aliases so an old row can be located,
+    but they must never be emitted into the refreshed CSV/pilot contract.
+    """
+    emitted = [*_LEAVES]
+    for rewrite in _RTL_CONTRACT_REWRITES.values():
+        emitted.extend(str(value) for value in rewrite.values())
+    stale = sorted(
+        {
+            term
+            for term in _OBSOLETE_HALF_STATE_TERMS
+            if any(term in text for text in emitted)
+        }
+    )
+    if stale:
+        raise ValueError(
+            "current V3 InstrUncache model emits obsolete half-state terms: "
+            + ", ".join(stale)
+        )
+    required = ("halfRviInfo", "EndHalfRviInfo")
+    missing = [term for term in required if not any(term in text for text in emitted)]
+    if missing:
+        raise ValueError(
+            "current V3 InstrUncache model lacks atomic half-state terms: "
+            + ", ".join(missing)
+        )
+    return {
+        "design_baseline": _CURRENT_V3_DESIGN_BASELINE,
+        "half_state_contract": "Valid EndHalfRviInfo / halfRviInfo",
+        "legacy_aliases_input_only": True,
+    }
+
+
 def _append_pilot_rows(fields: list[str], rows: list[dict[str, str]]) -> None:
     buffer = io.StringIO(newline="")
     writer = csv.DictWriter(buffer, fieldnames=fields, lineterminator="\n")
@@ -135,6 +188,9 @@ def _append_pilot_rows(fields: list[str], rows: list[dict[str, str]]) -> None:
 
 
 def synchronize() -> dict[str, int]:
+    # Fail closed before any CSV write if a future edit reintroduces old V3
+    # split-half semantics.
+    current_v3_contract_snapshot()
     testpoint_fields, testpoint_rows = _read_csv(_TESTPOINT_PATH)
     pilot_fields, pilot_rows = _read_csv(_PILOT_PATH)
     pilot_by_id = {row["Bin_ID"].strip(): row for row in pilot_rows}
