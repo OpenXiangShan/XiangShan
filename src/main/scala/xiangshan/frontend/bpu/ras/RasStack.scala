@@ -414,7 +414,7 @@ class RasStack(implicit p: Parameters) extends RasModule
     // XSError(io.commit.metaSsp =/= nsp, "nsp mismatch with expected ssp")
     // XSError(io.commit.pushAddr =/= commitPushAddr, "addr from commit mismatch with addr from spec")
   }
-
+  XSPerfAccumulate("commit_ssp_mismatch", (io.commit.popValid || io.commit.pushValid) && (io.commit.metaSsp =/= nsp))
   private val tmpWriteTosr  = RegEnable(io.commit.metaTosw, io.commit.pushValid)
   private val tmpWriteValid = RegEnable(io.commit.pushValid, false.B, io.commit.pushValid)
   when(io.commit.pushValid) {
