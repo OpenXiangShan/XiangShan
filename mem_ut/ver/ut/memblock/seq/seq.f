@@ -47,10 +47,13 @@ seq_pkg.sv
 // ./base_seq/memblock_main_dispatch_manual_main_table_sequence.sv
 // ./base_seq/memblock_main_dispatch_manual_control_main_table_sequence.sv
 // ./base_seq/memblock_main_dispatch_cancel_reconcile_sequence.sv
+// ./base_seq/memblock_main_dispatch_pbmt_response_fault_sequence.sv
 // ../env/src/memblock_virtual_sequencer.sv
 // ./virtual_sequence/virtual_base_sequence.sv
 // ./virtual_sequence/memblock_mmu_sv39_csr_sequence.sv
+// ./virtual_sequence/memblock_l2tlb_pbmt_toggle_csr_sequence.sv
 // ./virtual_sequence/memblock_pending_mmio_directed_vseq.sv
 // ./virtual_sequence/memblock_dispatch_real_smoke_vseq.sv
 // ./virtual_sequence/memblock_dispatch_manual_control_vseq.sv
 // ./virtual_sequence/memblock_dispatch_real_cancel_reconcile_vseq.sv
+// ./virtual_sequence/memblock_l2tlb_pbmt_response_fault_vseq.sv
