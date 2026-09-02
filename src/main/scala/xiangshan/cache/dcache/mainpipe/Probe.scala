@@ -151,7 +151,7 @@ class ProbeQueue()(implicit p: Parameters) extends DCacheModule with HasPerfEven
   req.source := snp.TxnID
   req.opcode := snp.Opcode
   req.addr := snp_addr
-  if(DCacheAboveIndexOffset > DCacheTagOffset) {
+  if (DCacheAboveIndexOffset > DCacheTagOffset) {
     req.vaddr := Cat(
       0.U((PAddrBits - DCacheAboveIndexOffset).W),
       alias_addr_frag(DCacheAboveIndexOffset - DCacheTagOffset - 1 , 0),
