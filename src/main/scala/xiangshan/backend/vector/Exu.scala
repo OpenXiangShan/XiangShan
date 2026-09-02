@@ -97,14 +97,29 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       fu.in.vxrm.zip(in.vxrm).foreach { case (sink, source) => sink := source }
   }
 
+  private val isWidenEx = mgus.indices.map {
+    case i =>
+      Mux1H(fus.flatMap(_.out.ex.lift(i)).map(fuOut =>
+        fuOut.valid -> fuOut.bits.data.vec.flatMap(_.isWiden).getOrElse(false.B)
+      ))
+  }
+
+  private val eewOHEx = mgus.indices.map {
+    case i =>
+      val normalEewOH = UIntToOH(ex(i).bits.ctrl.vtype.get.vsew, SewOH.width)
+      Mux(
+        isWidenEx(i),
+        Cat(normalEewOH.tail(1), 0.U(1.W)),
+        normalEewOH
+      )
+  }
+
   mgus.zipWithIndex.foreach {
     case (mgu, i) =>
       val vl = ex(i).bits.data.vl.get.suggestName(s"ex${i}_vl")
-      // Todo: widen uop should use 2x value
-      val eewOH = UIntToOH(ex(i).bits.ctrl.vtype.get.vsew, SewOH.width).suggestName(s"ex${i}_eewOH")
       val vdIdx = ex(i).bits.ctrl.uopIdx // Todo: may by wrong for some kind of uops
-      val vlMapVdIdx = elemIdxMapVdIdx(vl, eewOH)(3, 0) // 4 bits 0~8
-      val end = elemIdxMapElemE8Idx(vl, eewOH)
+      val vlMapVdIdx = elemIdxMapVdIdx(vl, eewOHEx(i))(3, 0) // 4 bits 0~8
+      val end = elemIdxMapElemE8Idx(vl, eewOHEx(i))
       val vd = Mux1H(fus.flatMap(_.out.ex.lift(i)).map(validIO =>
         validIO.valid -> validIO.bits.data.vec.get.normal
       )).suggestName(s"ex${i}_vd")
