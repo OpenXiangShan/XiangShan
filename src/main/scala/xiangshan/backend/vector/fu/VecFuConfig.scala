@@ -196,6 +196,7 @@ case class VecFuConfig (
     this.fuType,
     FuType.vialu,
     FuType.vfcvt,
+    FuType.vfma,
   )
 
   def needNarrowOut: Boolean = FuType.FuTypeOrR(
