@@ -700,6 +700,7 @@ def test_nc_cross_page_second_page_pf_attributes_to_rvi_start(env):
         page_count=2,
         s1_pte=uncache.TranslationPte(pbmt=uncache._PBMT_NC),
         expected_path="fault",
+        expected_result="page_fault",
         pmp_entries=(
             uncache.TranslationPmpPmaEntry(
                 kind="pmp",
