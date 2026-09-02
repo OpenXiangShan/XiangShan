@@ -285,7 +285,13 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val firstUnmask            = genVFirstUnmask(selPort(0).mask).asUInt
     val addrOffset             = Mux(entryIsUS, firstUnmask, 0.U)
     val vaddr                  = selVaddr + addrOffset
-    val gpaddr                 = selPort(0).gpaddr + addrOffset
+    // VS-non-leaf faults report the page-walk GPA directly.  The vector
+    // element offset applies to the data address, but not to this fault GPA.
+    val gpaddr                 = Mux(
+      selPort(0).isForVSnonLeafPTE,
+      selPort(0).gpaddr,
+      selPort(0).gpaddr + addrOffset
+    )
     val vstart                 = Mux(entryIsUS, selPort(0).vstart, selElemInfield)
 
     // select oldest port to raise exception
