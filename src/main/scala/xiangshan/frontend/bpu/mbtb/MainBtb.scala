@@ -126,8 +126,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   s3_fire := io.enable && io.stageCtrl.s3_fire
   // io.result is flattened, so is s3_takenMask from Bpu top, here we need to slice it back to alignBank structure
   alignBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.s3_takenMask     := io.s3_takenMask.slice(i * 2 * NumWay, (i * 2 + 1) * NumWay)
-    b.io.s3_vbtbTakenMask := io.s3_takenMask.slice((i * 2 + 1) * NumWay, (i * 2 + 2) * NumWay)
+    b.io.s3_vbtbTakenMask := io.s3_takenMask.slice(i * (NumWay + 1) + NumWay, i * (NumWay + 1) + NumWay + 1)
   }
 
   /* *** t0 ***

@@ -32,6 +32,11 @@ object TakenCounter extends SaturateCounterFactory {
     p(XSCoreParamsKey).frontendParameters.bpuParameters.mbtbParameters.TakenCntWidth
 }
 
+object VictimBtbUsefulCounter extends SaturateCounterFactory {
+  def width(implicit p: Parameters): Int =
+    p(XSCoreParamsKey).frontendParameters.bpuParameters.mbtbParameters.VictimBtbUsefulCntWidth
+}
+
 class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   // whether the entry is valid
   def valid: Bool = !attribute.isNone
@@ -67,6 +72,12 @@ class MainBtbCounterSramWriteReq(implicit p: Parameters) extends MainBtbBundle {
   val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
 }
 
+class MainBtbSnapshotResp(implicit p: Parameters) extends MainBtbBundle {
+  val setIdx:   UInt         = UInt(SetIdxLen.W)
+  val evicted:  MainBtbEntry = new MainBtbEntry
+  val incoming: MainBtbEntry = new MainBtbEntry
+}
+
 class MainBtbMetaEntry(implicit p: Parameters) extends MainBtbBundle {
   val rawHit:    Bool            = Bool()
   val position:  UInt            = UInt(CfiPositionWidth.W)
@@ -77,7 +88,7 @@ class MainBtbMetaEntry(implicit p: Parameters) extends MainBtbBundle {
 }
 
 class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
-  val entries: Vec[Vec[MainBtbMetaEntry]] = Vec(NumAlignBanks, Vec(2 * NumWay, new MainBtbMetaEntry))
+  val entries: Vec[Vec[MainBtbMetaEntry]] = Vec(NumAlignBanks, Vec(NumWay + 1, new MainBtbMetaEntry))
 }
 
 class MainBtbAlignBankTrace(implicit p: Parameters) extends MainBtbBundle {
@@ -101,7 +112,9 @@ class MainBtbTrace(implicit p: Parameters) extends MainBtbBundle {
 }
 
 class VictimBtbEntry(implicit p: Parameters) extends MainBtbBundle {
-  val setIdx:  UInt            = UInt(SetIdxLen.W)
-  val entry:   MainBtbEntry    = new MainBtbEntry
-  val counter: SaturateCounter = TakenCounter()
+  val setIdx:          UInt            = UInt(SetIdxLen.W)
+  val internalBankIdx: UInt            = UInt(InternalBankIdxLen.W)
+  val entry:           MainBtbEntry    = new MainBtbEntry
+  val counter:         SaturateCounter = TakenCounter()
+  val usefulCnt:       SaturateCounter = VictimBtbUsefulCounter()
 }

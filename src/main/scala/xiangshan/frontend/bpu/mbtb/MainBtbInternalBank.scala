@@ -73,12 +73,7 @@ class MainBtbInternalBank(
     }
 
     class Snapshot extends Bundle {
-      class Resp extends Bundle {
-        val setIdx:   UInt         = UInt(SetIdxLen.W)
-        val evicted:  MainBtbEntry = new MainBtbEntry
-        val incoming: MainBtbEntry = new MainBtbEntry
-      }
-      val resp: Valid[Resp] = Valid(new Resp)
+      val resp: DecoupledIO[MainBtbSnapshotResp] = Decoupled(new MainBtbSnapshotResp)
     }
 
     val sramResetDone: Bool = Output(Bool())
@@ -162,20 +157,29 @@ class MainBtbInternalBank(
   // - snapshotReq(i) keeps the buffered incoming write request.
   // - snapshotResp(i) keeps the old MainBtb entry returned by the entry SRAM read.
   //
-  // snapshotValidOH serializes snapshot write-back with PriorityEncoderOH, so at most one
-  // way writes the incoming entry back to MainBtb and emits a snapshot response per cycle.
+  // Eligible snapshot ways are arbitrated in round-robin order, so at most one way writes the
+  // incoming entry back to MainBtb and emits a snapshot response per cycle without starving
+  // higher-numbered ways.
   private val snapshotValid     = RegInit(VecInit.fill(NumWay)(false.B))
   private val snapshotValidNext = RegNext(snapshotValid, init = VecInit.fill(NumWay)(false.B))
-  private val snapshotValidOH   = PriorityEncoderOH(snapshotValid)
   // snapshotDataValid fires one cycle after snapshotValid rises,
   //   when the old entry read response is available.
-  // snapshotRespValid fires one cycle after snapshotValid falls,
-  //   after the incoming entry has been accepted for write-back to MainBtb.
   private val snapshotDataValid = snapshotValid.zip(snapshotValidNext).map { case (v, n) => !n && v }
-  private val snapshotRespValid = snapshotValid.zip(snapshotValidNext).map { case (v, n) => !v && n }
 
   private val snapshotReq  = Reg(Vec(NumWay, new MainBtbEntrySramWriteReq))
   private val snapshotResp = Reg(Vec(NumWay, new MainBtbEntry))
+  private val snapshotEligible = VecInit(snapshotValid.zip(snapshotValidNext).zip(pendingReady).map {
+    case ((valid, dataReady), writeReady) => valid && dataReady && writeReady
+  })
+  private val snapshotWayArbiter = Module(new RRArbiter(UInt(log2Up(NumWay).W), NumWay, initLastGrant = true))
+  snapshotWayArbiter.io.in.zipWithIndex.foreach { case (in, i) =>
+    in.valid := snapshotEligible(i)
+    in.bits  := i.U
+  }
+  snapshotWayArbiter.io.out.ready := snapshot.resp.ready
+  private val snapshotSelectOH = UIntToOH(snapshotWayArbiter.io.chosen, NumWay) &
+    Fill(NumWay, snapshotWayArbiter.io.out.valid)
+  private val snapshotGrantOH = VecInit(snapshotWayArbiter.io.in.map(_.fire))
 
   Seq.tabulate(NumWay) { i =>
     switch(snapshotValid(i)) {
@@ -189,10 +193,9 @@ class MainBtbInternalBank(
         }
       }
       is(true.B) {
-        // Once the old entry has been read and this way is selected by snapshotValidOH, write
-        // the incoming entry into MainBtb. Clearing snapshotValid schedules snapshot.resp for
-        // the following cycle, when the VBTB path receives a stable incoming/evicted pair.
-        when(pendingReady(i) && snapshotValidOH(i)) {
+        // Clear the snapshot only after both the incoming MainBtb write and the shared VBTB
+        // transfer are accepted.
+        when(snapshotGrantOH(i)) {
           snapshotValid(i) := false.B
         }
       }
@@ -203,10 +206,10 @@ class MainBtbInternalBank(
       snapshotResp(i) := entrySrams(i).io.r.resp.data.head
     }
   }
-  snapshot.resp.valid         := snapshotRespValid.reduce(_ || _)
-  snapshot.resp.bits.setIdx   := Mux1H(snapshotRespValid, snapshotReq.map(_.setIdx))
-  snapshot.resp.bits.incoming := Mux1H(snapshotRespValid, snapshotReq.map(_.entry))
-  snapshot.resp.bits.evicted  := Mux1H(snapshotRespValid, snapshotResp)
+  snapshot.resp.valid         := snapshotWayArbiter.io.out.valid
+  snapshot.resp.bits.setIdx   := Mux1H(snapshotSelectOH, snapshotReq.map(_.setIdx))
+  snapshot.resp.bits.incoming := Mux1H(snapshotSelectOH, snapshotReq.map(_.entry))
+  snapshot.resp.bits.evicted  := Mux1H(snapshotSelectOH, snapshotResp)
 
   /* *** sram -> io *** */
   entrySrams.zipWithIndex.foreach { case (s, i) =>
@@ -227,12 +230,15 @@ class MainBtbInternalBank(
   // entry
   (entrySrams zip entryWriteBuffer.io.read).zipWithIndex.foreach { case ((way, bufRead), i) =>
     // Hit writes can update the selected way directly. Miss writes are held in snapshotReq
-    // and are written only when their snapshot is selected by snapshotValidOH, after the old
-    // entry has been read for VBTB insertion. Reads block writes because entry SRAMs are
-    // single-ported.
-    way.io.w.req.valid        := Mux(snapshotValid(i), snapshotValidOH(i), hitValid(i)) && !way.io.r.req.valid
-    way.io.w.req.bits.data(0) := Mux(snapshotValidOH(i), snapshotReq(i).entry, bufRead.bits.entry)
-    way.io.w.req.bits.setIdx  := Mux(snapshotValidOH(i), snapshotReq(i).setIdx, bufRead.bits.setIdx)
+    // and are written only when their eligible snapshot wins arbitration, after the old entry
+    // has been read for VBTB insertion. Reads block writes because entry SRAMs are single-ported.
+    way.io.w.req.valid := Mux(
+      snapshotValid(i),
+      snapshotGrantOH(i),
+      hitValid(i)
+    ) && !way.io.r.req.valid
+    way.io.w.req.bits.data(0) := Mux(snapshotValid(i), snapshotReq(i).entry, bufRead.bits.entry)
+    way.io.w.req.bits.setIdx  := Mux(snapshotValid(i), snapshotReq(i).setIdx, bufRead.bits.setIdx)
     bufRead.ready := Mux(
       !snapshotValid(i),
       // A hit write leaves the write buffer when its direct SRAM write can proceed. A miss
@@ -306,4 +312,12 @@ class MainBtbInternalBank(
     "entry_writebuffer_overwrite",
     perfEntryOverwrite
   )
+  XSPerfAccumulate(
+    "vbtb_snapshot_wait_cycle",
+    snapshot.resp.valid && !snapshot.resp.ready
+  )
+  snapshotWayArbiter.io.in.zipWithIndex.foreach { case (in, i) =>
+    XSPerfAccumulate(s"vbtb_snapshot_way_${i}_wait_cycle", in.valid && !in.ready)
+    XSPerfAccumulate(s"vbtb_snapshot_way_${i}_grant", in.fire)
+  }
 }

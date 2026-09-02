@@ -24,33 +24,31 @@ import xiangshan.frontend.bpu.SaturateCounter
 class VictimBtb(implicit p: Parameters) extends MainBtbModule {
   class VictimBtbIO extends Bundle {
     class Read extends Bundle {
-      class Req extends Bundle {
-        val setIdx: UInt = UInt(VictimBtbSetIdxLen.W)
-      }
       class Resp extends Bundle {
-        val entries: Vec[VictimBtbEntry] = Vec(NumWay, new VictimBtbEntry)
+        val entries: Vec[VictimBtbEntry] = Vec(NumVictimBtbWays, new VictimBtbEntry)
       }
-      val req:  Req  = Flipped(new Req)
       val resp: Resp = Output(new Resp)
     }
 
     class WriteEntry extends Bundle {
       class Req extends Bundle {
-        val setIdx:    UInt         = UInt(SetIdxLen.W)
-        val wayMask:   UInt         = UInt(NumWay.W)
-        val flushMask: UInt         = UInt(NumWay.W)
-        val entry:     MainBtbEntry = new MainBtbEntry
+        val setIdx:          UInt         = UInt(SetIdxLen.W)
+        val internalBankIdx: UInt         = UInt(InternalBankIdxLen.W)
+        val wayMask:         UInt         = UInt(NumVictimBtbWays.W)
+        val flushMask:       UInt         = UInt(NumVictimBtbWays.W)
+        val entry:           MainBtbEntry = new MainBtbEntry
       }
       val req: Valid[Req] = Flipped(Valid(new Req))
     }
 
     class TrainEntry extends Bundle {
       class Req extends Bundle {
-        val setIdx:         UInt                 = UInt(SetIdxLen.W)
-        val entryWayMask:   UInt                 = UInt(NumWay.W)
-        val counterWayMask: UInt                 = UInt(NumWay.W)
+        val entryWayMask:   UInt                 = UInt(NumVictimBtbWays.W)
+        val counterWayMask: UInt                 = UInt(NumVictimBtbWays.W)
+        val usefulWayMask:  UInt                 = UInt(NumVictimBtbWays.W)
         val entry:          MainBtbEntry         = new MainBtbEntry
-        val counters:       Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
+        val counters:       Vec[SaturateCounter] = Vec(NumVictimBtbWays, TakenCounter())
+        val usefulCnts:     Vec[SaturateCounter] = Vec(NumVictimBtbWays, VictimBtbUsefulCounter())
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))
@@ -58,8 +56,7 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule {
 
     class Flush extends Bundle {
       class Req extends Bundle {
-        val setIdx:  UInt = UInt(VictimBtbSetIdxLen.W)
-        val wayMask: UInt = UInt(NumWay.W)
+        val wayMask: UInt = UInt(NumVictimBtbWays.W)
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))
@@ -81,58 +78,59 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule {
   private val trainEntry     = io.trainEntry
   private val flush          = io.flush
 
-  private val entries = Reg(Vec(NumVictimBtbSets, Vec(NumWay, new VictimBtbEntry)))
+  private val entries = Reg(Vec(NumVictimBtbWays, new VictimBtbEntry))
 
-  // VBTB read ports are combinational Reg reads. MainBtbAlignBank drives the
-  // truncated setIdx in S1/T1/writeback paths and does full setIdx/tag/position
-  // matching outside this module.
-  read.resp.entries           := entries(read.req.setIdx)
-  writeEntryRead.resp.entries := entries(writeEntryRead.req.setIdx)
-  trainEntryRead.resp.entries := entries(trainEntryRead.req.setIdx)
+  // The VBTB is fully associative. All entries are exposed through combinational
+  // Reg reads and MainBtbAlignBank performs full setIdx/tag/position matching.
+  read.resp.entries           := entries
+  writeEntryRead.resp.entries := entries
+  trainEntryRead.resp.entries := entries
 
-  // Training can update entry and counter independently:
+  // Training can update entry and counters independently:
   // - entryWayMask rewrites the victim BTB entry payload.
   // - counterWayMask updates the taken counter for conditional branches.
+  // - usefulWayMask updates the uBTB-style usefulness counter.
   // This allows a VBTB hit to be repaired in place without allocating MainBtb.
-  private val updateEntries = entries(trainEntry.req.bits.setIdx.take(VictimBtbSetIdxLen))
-  for (w <- 0 until NumWay) {
+  for (w <- 0 until NumVictimBtbWays) {
     when(trainEntry.req.valid) {
       when(trainEntry.req.bits.counterWayMask(w)) {
-        updateEntries(w).counter := trainEntry.req.bits.counters(w)
+        entries(w).counter := trainEntry.req.bits.counters(w)
       }
       when(trainEntry.req.bits.entryWayMask(w)) {
-        updateEntries(w).entry := trainEntry.req.bits.entry
+        entries(w).entry := trainEntry.req.bits.entry
+      }
+      when(trainEntry.req.bits.usefulWayMask(w)) {
+        entries(w).usefulCnt := trainEntry.req.bits.usefulCnts(w)
       }
     }
-  }
 
-  // Snapshot write inserts an entry evicted from MainBtb. If the same cycle also
-  // flushes a duplicated incoming entry, write has higher priority so the
-  // newly evicted entry is not lost.
-  private val writeEntries = entries(writeEntry.req.bits.setIdx.take(VictimBtbSetIdxLen))
-  for (w <- 0 until NumWay) {
+    // Flushes override ordinary training updates.
+    when(flush.req.valid && flush.req.bits.wayMask(w)) {
+      entries(w).entry.attribute := BranchAttribute.None
+      entries(w).usefulCnt       := VictimBtbUsefulCounter.SaturateNegative
+    }
+
+    // Snapshot insertion has priority over training and flushes. This preserves
+    // a newly evicted MainBtb entry if the same physical VBTB way is also flushed.
     when(writeEntry.req.valid) {
       when(writeEntry.req.bits.flushMask(w)) {
-        writeEntries(w).entry.attribute := BranchAttribute.None
+        entries(w).entry.attribute := BranchAttribute.None
+        entries(w).usefulCnt       := VictimBtbUsefulCounter.SaturateNegative
       }
-      // write entry has higher priority than flush
       when(writeEntry.req.bits.wayMask(w)) {
-        writeEntries(w).entry   := writeEntry.req.bits.entry
-        writeEntries(w).setIdx  := writeEntry.req.bits.setIdx
-        writeEntries(w).counter := TakenCounter.WeakPositive
+        entries(w).entry           := writeEntry.req.bits.entry
+        entries(w).setIdx          := writeEntry.req.bits.setIdx
+        entries(w).internalBankIdx := writeEntry.req.bits.internalBankIdx
+        entries(w).counter         := TakenCounter.WeakPositive
+        entries(w).usefulCnt       := VictimBtbUsefulCounter.SaturatePositive
       }
-    }
-  }
-
-  // Flush is used to remove duplicated VBTB entries when MainBtb already holds
-  // a matching prediction position.
-  for (w <- 0 until NumWay) {
-    when(flush.req.valid && flush.req.bits.wayMask(w)) {
-      entries(flush.req.bits.setIdx)(w).entry.attribute := BranchAttribute.None
     }
   }
 
   when(reset.asBool) {
-    entries.foreach(_.foreach(_.entry.attribute := BranchAttribute.None))
+    entries.foreach { e =>
+      e.entry.attribute := BranchAttribute.None
+      e.usefulCnt       := VictimBtbUsefulCounter.SaturateNegative
+    }
   }
 }

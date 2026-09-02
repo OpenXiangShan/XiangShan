@@ -18,85 +18,34 @@ package xiangshan.frontend.bpu.mbtb
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan.frontend.bpu.replacer.{ReplacerState, ReplacerStateGen}
+import utility.ReplacementPolicy
+import xiangshan.frontend.bpu.SaturateCounter
 
 class VictimBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   class VictimBtbReplacerIO extends Bundle {
-    class Touch extends Bundle {
-      val setIdx:  UInt = UInt(VictimBtbSetIdxLen.W)
-      val wayMask: UInt = UInt(NumWay.W)
-    }
-
-    class Victim extends Bundle {
-      val wayMask: UInt = UInt(NumWay.W)
-    }
-
-    val victim: Victim            = Output(new Victim)
-    val touch:  Vec[Valid[Touch]] = Vec(2, Flipped(Valid(new Touch))) // magic number 2: predict and train
-
-    def predictTouch: Valid[Touch] = touch(0)
-    def trainTouch:   Valid[Touch] = touch(1)
+    val predTouch:  Valid[UInt]          = Flipped(Valid(UInt(log2Up(NumVictimBtbWays).W)))
+    val trainTouch: Valid[UInt]          = Flipped(Valid(UInt(log2Up(NumVictimBtbWays).W)))
+    val valids:     Vec[Bool]            = Input(Vec(NumVictimBtbWays, Bool()))
+    val usefulCnt:  Vec[SaturateCounter] = Input(Vec(NumVictimBtbWays, VictimBtbUsefulCounter()))
+    val victim:     UInt                 = Output(UInt(log2Up(NumVictimBtbWays).W))
   }
 
   val io: VictimBtbReplacerIO = IO(new VictimBtbReplacerIO)
 
-  private val predictStateGen = Module(ReplacerStateGen(Replacer, NumWay, accessSize = NumWay))
-  private val trainStateGen   = Module(ReplacerStateGen(Replacer, NumWay, accessSize = 1))
-  private val stateBank       = Module(new ReplacerState(NumVictimBtbSets, predictStateGen.StateWidth))
+  // The VBTB is fully associative, so use the same policy object as uBTB.
+  // Prediction touch is applied before training touch, matching the ordering
+  // used by the existing uBTB replacer for simultaneous accesses.
+  private val replacer = ReplacementPolicy.fromString(VictimBtbReplacerPolicy, NumVictimBtbWays)
 
-  /* *** predict *** */
-  // read current state
-  stateBank.io.predictRead.setIdx := io.predictTouch.bits.setIdx
-  private val predictState = stateBank.io.predictRead.state
+  replacer.access(Seq(io.predTouch, io.trainTouch))
 
-  // compose touch way vec
-  private val predictTouchWay = VecInit((0 until NumWay).map { i =>
-    val wayValid = Wire(Valid(UInt(log2Up(NumWay).W)))
-    wayValid.valid := io.predictTouch.valid && io.predictTouch.bits.wayMask(i)
-    wayValid.bits  := i.U
-    wayValid
-  })
+  private val invalidMask  = VecInit(io.valids.map(!_)).asUInt
+  private val notUsefulVec = VecInit(io.usefulCnt.map(_.isSaturateNegative))
+  private val notUseful    = notUsefulVec.asUInt.orR
 
-  // generate next state
-  predictStateGen.io.state   := predictState
-  predictStateGen.io.touches := predictTouchWay
-  private val predictNextState = Mux(io.predictTouch.valid, predictStateGen.io.nextState, predictState)
-
-  // write back next state
-  stateBank.io.predictWrite.valid       := io.predictTouch.valid
-  stateBank.io.predictWrite.bits.setIdx := io.predictTouch.bits.setIdx
-  stateBank.io.predictWrite.bits.state  := predictNextState
-
-  /* *** train *** */
-  // read current state
-  stateBank.io.trainRead.setIdx := io.trainTouch.bits.setIdx
-
-  private val predictSameSet = io.predictTouch.valid && (io.predictTouch.bits.setIdx === io.trainTouch.bits.setIdx)
-  private val trainState = Mux(
-    predictSameSet,
-    predictNextState,
-    stateBank.io.trainRead.state
-  )
-
-  // compose touch way vec
-  private val trainTouchWay = Wire(Valid(UInt(log2Up(NumWay).W)))
-  trainTouchWay.valid := io.trainTouch.valid
-  trainTouchWay.bits  := OHToUInt(io.trainTouch.bits.wayMask) // MainBtbAlignBank ensures this is one-hot
-  assert(
-    !io.trainTouch.valid || PopCount(io.trainTouch.bits.wayMask) <= 1.U,
-    "victim wayMask should be at-most-one-hot"
-  )
-
-  // generate next state
-  trainStateGen.io.state   := trainState
-  trainStateGen.io.touches := VecInit(Seq(trainTouchWay))
-  private val trainNextState = Mux(io.trainTouch.valid, trainStateGen.io.nextState, trainState)
-
-  // write back next state
-  stateBank.io.trainWrite.valid       := io.trainTouch.valid
-  stateBank.io.trainWrite.bits.setIdx := io.trainTouch.bits.setIdx
-  stateBank.io.trainWrite.bits.state  := trainNextState
-
-  /* *** victim *** */
-  io.victim.wayMask := UIntToOH(trainStateGen.io.victim)
+  io.victim := PriorityMux(Seq(
+    invalidMask.orR -> PriorityEncoder(invalidMask),
+    notUseful       -> PriorityEncoder(notUsefulVec),
+    true.B          -> replacer.way
+  ))
 }
