@@ -144,8 +144,8 @@ trait HasDCacheParameters
   // require(isPow2(cfg.nReleaseEntries))
   require(cfg.nMissEntries < cfg.nReleaseEntries)
   val nEntries = cfg.nMissEntries + cfg.nReleaseEntries + 1 // MSHR + CMO + WBQ
-  val cmoTxnId = cfg.nMissEntries // dedicated slot; WBQ starts at releaseIdBase
-  val releaseIdBase = cfg.nMissEntries + 1
+  val cmoTxnId = cfg.nMissEntries // dedicated slot
+  val releaseIdBase = cfg.nMissEntries + 1 // WBQ starts after CMO
   val EnableDataEcc = cacheParams.enableDataEcc
   val EnableTagEcc = cacheParams.enableTagEcc
 
@@ -375,6 +375,15 @@ trait HasDCacheParameters
   }
   val numReplaceRespPorts = 2
 
+  def selectMemChannel(addr: UInt, id: UInt = 0.U): UInt = {
+    if (hasDualChannel) {
+      if (channelSelByAddr) get_block(addr)(memChannelBits - 1, 0)
+      else id(memChannelBits - 1, 0)
+    } else {
+      0.U(memChannelBits.W)
+    }
+  }
+
   // Demux a DecoupledIO source into N channels based on the channel select signal.
   def demuxByChannel[T <: Data](source: DecoupledIO[T], channel: UInt, n: Int): Vec[DecoupledIO[T]] = {
     val outputs = Wire(Vec(n, chiselTypeOf(source)))
@@ -384,6 +393,13 @@ trait HasDCacheParameters
     }
     source.ready := Mux1H((0 until n).map(i => (channel === i.U) -> outputs(i).ready))
     outputs
+  }
+
+  def lowestArb[T <: Data](out: DecoupledIO[T], ins: Seq[DecoupledIO[T]]): Unit = {
+    val sel = PriorityEncoderOH(ins.map(_.valid))
+    out.valid := ins.map(_.valid).reduce(_ || _)
+    out.bits := Mux1H(sel, ins.map(_.bits))
+    ins.zip(sel).foreach { case (in, s) => in.ready := out.ready && s }
   }
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
@@ -971,13 +987,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val io = IO(new DCacheIO)
 
-  def lowestArb[T <: Data](out: DecoupledIO[T], ins: Seq[DecoupledIO[T]]): Unit = {
-    val sel = PriorityEncoderOH(ins.map(_.valid))
-    out.valid := ins.map(_.valid).reduce(_ || _)
-    out.bits := Mux1H(sel, ins.map(_.bits))
-    ins.zip(sel).foreach { case (in, s) => in.ready := out.ready && s }
-  }
-
   require(pseudoErrorMaskBits >= tagBits, "pseudo-error masks must cover tagBits")
   require(pseudoErrorMaskBits >= DCacheSRAMRowBits, "pseudo-error masks must cover data-bank row width")
 
@@ -1329,8 +1338,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
     val mshrMatch = mshrId === rxdat.bits.TxnID(log2Up(cfg.nMissEntries) - 1, 0)
     val beatMatch = rxdat.bits.DataID(0) === paddr(log2Up(refillBytes))
-    val compDataValid = rxdat.valid &&
-      CCHIOpcode.CompData.is(rxdat.bits.Opcode, rxdat.valid)
+    val compDataValid = rxdat.valid && CCHIOpcode.CompData.is(rxdat.bits.Opcode, rxdat.valid)
     val paddrMatch = missQueue.io.forwardS1PAddrMatch(loadPipeIdx)
     val s1RespValid = s1ReqValid && compDataValid &&
       mshrMatch && beatMatch && paddrMatch
@@ -1575,21 +1583,18 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
     val rxrsp = io.cchi(ch).rxrsp
     val rxrspTxnId = rxrsp.bits.TxnID
-    val rxrspIsCompCMO = rxrsp.valid &&
-      CCHIOpcode.CompCMO.is(rxrsp.bits.Opcode, rxrsp.valid) &&
-      rxrspTxnId === cmoTxnId.U
-    val rxrspIsMqComp = rxrsp.valid &&
-      CCHIOpcode.Comp.is(rxrsp.bits.Opcode, rxrsp.valid) &&
-      rxrspTxnId < cfg.nMissEntries.U
-    val rxrspIsWbq = rxrsp.valid &&
-      rxrspTxnId >= wbTxnIdBase && rxrspTxnId < wbTxnIdEnd
-    val rxrspIsWbqComp = rxrspIsWbq &&
+    val rxrspIsCompCMO = rxrsp.valid && CCHIOpcode.CompCMO.is(rxrsp.bits.Opcode, rxrsp.valid)
+    val rxrspIsMqComp = rxrsp.valid && rxrspTxnId < cfg.nMissEntries.U &&
       CCHIOpcode.Comp.is(rxrsp.bits.Opcode, rxrsp.valid)
+    val rxrspIsWbq = rxrsp.valid && rxrspTxnId >= wbTxnIdBase
+    val rxrspIsWbqComp = rxrspIsWbq && CCHIOpcode.Comp.is(rxrsp.bits.Opcode, rxrsp.valid)
     val rxrspIsWbqDbid = rxrspIsWbq && (
       CCHIOpcode.DBIDResp.is(rxrsp.bits.Opcode, rxrsp.valid) ||
       CCHIOpcode.CompDBIDResp.is(rxrsp.bits.Opcode, rxrsp.valid))
     val rxrspToMq = rxrspIsCompCMO || rxrspIsMqComp
     val rxrspToWb = rxrspIsWbqComp || rxrspIsWbqDbid
+    assert(!(rxrspIsCompCMO && rxrspTxnId =/= cmoTxnId.U), "CompCMO TxnID must match CMO slot")
+    assert(!(rxrspIsWbq && rxrspTxnId >= wbTxnIdEnd), "WBQ TxnID must be within range")
 
     missQueue.io.rxrsp(ch).valid := rxrsp.valid && rxrspToMq
     missQueue.io.rxrsp(ch).bits := rxrsp.bits
@@ -1604,10 +1609,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.probe.req.valid := rxsnpArb.valid
   missQueue.io.probe.req.bits.addr := snp_addr
   if (DCacheAboveIndexOffset > DCacheTagOffset) {
-    val alias_addr_frag = snp.alias
     missQueue.io.probe.req.bits.vaddr := Cat(
       0.U(PAddrBits - 1, DCacheAboveIndexOffset),
-      alias_addr_frag(DCacheAboveIndexOffset - DCacheTagOffset - 1, 0),
+      snp.alias(DCacheAboveIndexOffset - DCacheTagOffset - 1, 0),
       snp_addr(DCacheTagOffset - 1, 0)
     )
   } else {

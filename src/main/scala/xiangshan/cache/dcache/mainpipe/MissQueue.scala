@@ -358,15 +358,7 @@ class CMOUnit(implicit p: Parameters) extends DCacheModule {
     }
   }
 
-  private def selectChannel(addr: UInt): UInt = {
-    if (hasDualChannel) {
-      if (channelSelByAddr) get_block(addr)(memChannelBits - 1, 0)
-      else 0.U(memChannelBits.W)
-    } else {
-      0.U(memChannelBits.W)
-    }
-  }
-  io.channel_sel := Mux(RegNext(io.req.fire), selectChannel(req.address), 0.U)
+  io.channel_sel := Mux(RegNext(io.req.fire), selectMemChannel(req.address), 0.U)
 
   io.req.ready := state === s_idle
   assert(!(io.req.fire && io.req.bits.opcode === 3.U), "cbo.zero must not use CCHI REQ")
@@ -558,15 +550,7 @@ class MissEntry(reqNum: Int)(implicit p: Parameters) extends DCacheModule
 
   val full_overwrite = Reg(Bool())
 
-  private def selectChannel(addr: UInt, mshrId: UInt): UInt = {
-    if (hasDualChannel) {
-      if (channelSelByAddr) get_block(addr)(memChannelBits - 1, 0)
-      else mshrId(memChannelBits - 1, 0)
-    } else {
-      0.U(memChannelBits.W)
-    }
-  }
-  val channel_sel = Mux(req_valid, selectChannel(req.addr, io.id), 0.U)
+  val channel_sel = Mux(req_valid, selectMemChannel(req.addr, io.id), 0.U)
   io.channel_sel := channel_sel
 
   val got_dataid0 = RegInit(false.B)
@@ -1656,34 +1640,16 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
     assert(!RegNext(out.valid && PopCount(Cat(in.map(_.valid))) > 1.U))
   }
 
-  def lowestArb[T <: Data](out: DecoupledIO[T], ins: Seq[DecoupledIO[T]]): Unit = {
-    val sel = PriorityEncoderOH(ins.map(_.valid))
-    out.valid := ins.map(_.valid).reduce(_ || _)
-    out.bits := Mux1H(sel, ins.map(_.bits))
-    ins.zip(sel).foreach { case (in, s) => in.ready := out.ready && s }
-  }
-
-  private def selectChannel(addr: UInt, mshrId: UInt): UInt = {
-    if (hasDualChannel) {
-      if (channelSelByAddr) get_block(addr)(memChannelBits - 1, 0)
-      else mshrId(memChannelBits - 1, 0)
-    } else {
-      0.U(memChannelBits.W)
-    }
-  }
-
   for (ch <- 0 until numMemChannels) {
     io.rxdat(ch).ready := true.B
     when (io.rxdat(ch).valid) {
-      assert(CCHIOpcode.CompData.is(io.rxdat(ch).bits.Opcode, io.rxdat(ch).valid),
-        "DnDAT should only be CompData")
-      assert(io.rxdat(ch).bits.TxnID < cfg.nMissEntries.U,
-        "DnDAT TxnID must be MSHR id")
+      assert(CCHIOpcode.CompData.is(io.rxdat(ch).bits.Opcode, io.rxdat(ch).valid), "DnDAT should only be CompData")
+      assert(io.rxdat(ch).bits.TxnID < cfg.nMissEntries.U, "DnDAT TxnID must be MSHR id")
     }
   }
   val rxrspIsCompCMO = (0 until numMemChannels).map { ch =>
     io.rxrsp(ch).valid && CCHIOpcode.CompCMO.is(io.rxrsp(ch).bits.Opcode, io.rxrsp(ch).valid) &&
-      io.rxrsp(ch).bits.TxnID === cmoTxnId.U
+    io.rxrsp(ch).bits.TxnID === cmoTxnId.U
   }
   for (ch <- 0 until numMemChannels) {
     io.rxrsp(ch).ready := Mux(rxrspIsCompCMO(ch), cmo_unit.io.rxrsp.ready, true.B)
@@ -1799,7 +1765,8 @@ class MissQueue(reqNum: Int)(implicit p: Parameters) extends DCacheModule
   }
 
   for(i <- 0 until reqNum) {
-    parallel_regs_channel(i) := selectChannel(parallel_pipe_regs(i).req.addr, parallel_pipe_regs(i).mshr_id)
+    parallel_regs_channel(i) := selectMemChannel(
+      parallel_pipe_regs(i).req.addr, parallel_pipe_regs(i).mshr_id)
   }
 
   if (numMemChannels > 1) {

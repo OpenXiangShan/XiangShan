@@ -66,15 +66,6 @@ class WritebackReq(implicit p: Parameters) extends WritebackReqWodata {
 
 class WritebackEntry()(implicit p: Parameters) extends DCacheModule
 {
-  private def selectChannel(addr: UInt): UInt = {
-    if (hasDualChannel) {
-      if (channelSelByAddr) get_block(addr)(memChannelBits - 1, 0)
-      else 0.U(memChannelBits.W)
-    } else {
-      0.U(memChannelBits.W)
-    }
-  }
-
   val io = IO(new Bundle {
     val id = Input(UInt())
 
@@ -154,7 +145,7 @@ class WritebackEntry()(implicit p: Parameters) extends DCacheModule
     snp_txn_id := io.req.bits.chi_txn_id
     trace_tag := io.req.bits.trace_tag
     resp_channel := Mux(io.req.bits.voluntary,
-      selectChannel(io.req.bits.addr),
+      selectMemChannel(io.req.bits.addr),
       io.req.bits.chi_channel)
     got_dbid := false.B
     got_comp := false.B
@@ -360,13 +351,6 @@ class WritebackQueue()(implicit p: Parameters) extends DCacheModule with HasPerf
 
   for (ch <- 0 until numMemChannels) {
     io.rxrsp(ch).ready := VecInit(entries.map(_.io.rxrsp.ready)).asUInt.orR
-  }
-
-  def lowestArb[T <: Data](out: DecoupledIO[T], ins: Seq[DecoupledIO[T]]): Unit = {
-    val sel = PriorityEncoderOH(ins.map(_.valid))
-    out.valid := ins.map(_.valid).reduce(_ || _)
-    out.bits := Mux1H(sel, ins.map(_.bits))
-    ins.zip(sel).foreach { case (in, s) => in.ready := out.ready && s }
   }
 
   if (numMemChannels > 1) {

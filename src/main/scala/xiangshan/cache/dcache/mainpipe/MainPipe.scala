@@ -824,9 +824,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val probe_has_data = s3_tag_match && s3_req.probe &&
     s3_coh === ClientStates.Dirty && !s3_req.probe_snp_make_invalid
   val writeback_data = if (dcacheParameters.alwaysReleaseData) {
-    probe_has_data ||
-      (s3_coh === ClientStates.Dirty && !s3_req.probe) ||
-      (miss_wb || replace_wb) && s3_coh.state =/= ClientStates.Nothing
+    probe_has_data || (s3_coh === ClientStates.Dirty && !s3_req.probe) ||
+    (miss_wb || replace_wb) && s3_coh.state =/= ClientStates.Nothing
   } else {
     probe_has_data || (s3_coh === ClientStates.Dirty && !s3_req.probe)
   }
