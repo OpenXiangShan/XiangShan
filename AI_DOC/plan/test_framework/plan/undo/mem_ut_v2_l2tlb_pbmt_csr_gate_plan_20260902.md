@@ -567,3 +567,32 @@ L2TLB responder、RM、CSR runtime state、DTLB connect 或 RTL。重新运行�
 进入 fault 路径，CSR producer 尚未观察 B terminal，故仍使用 disabled PBMTE。将 C delay
 增至 3072 仅增加 directed start window，不引入新的同步状态、CSR control、SFENCE 或
 process switch；重跑须证明 C 在 B terminal 后才产生 token 2。
+
+### [IMPLEMENTATION_DELTA] Store fault replay 下的 CSR 切换终态条件
+
+来源：采用 Store DTLB 隔离后的 real-DUT smoke。B 的首个 L2TLB token 在 5.4303us
+已经完成，随后真实 STA fault replay 在 10.5853us 使 UID1 terminal retire；但 CSR
+producer 没有切换到 enable-C，C 仍在 disabled PBMTE 下得到 `0x8000`。`uid_tlb_record`
+的 `init_context()` 在同一 UID 的新 replay attempt 开始时将 `pte_valid` 清零，因此
+`terminal_done && tlb_entry_ready_for_uid()` 不是 Store fault 路径中“历史 token 已完成”的
+稳定条件。
+
+原 plan：CSR producer 在目标 UID `terminal_done` 且 UID TLB record 的
+`pte_valid=1` 时切换，以同时表达 instruction terminal 和 token completion。
+
+实现调整：将该 directed producer 的 helper 改为 `uid_terminal_retired()`，只以
+`status.terminal_done` 驱动 A->B 和 B->C 两次 PBMTE 切换。对于真实 DTLB/L2TLB
+request，response 必须先被 DUT 消费才能产生执行结果和 terminal retire；因此该条件仍保证
+前一条目标指令及其有效 response 已结束。它不把 replay 后新 epoch 的 `pte_valid` 误当作
+前一 response token 的生命周期标志。
+
+原因：该 smoke 的目标是验证 PBMTE 在两条完整指令之间改变，且用户定义的串行化合同就是
+“每次切换保证当前指令执行完”。`terminal_done` 是公共状态表中唯一跨 Store replay 保持的
+终态信号；`pte_valid` 是当前等待 epoch 的过程状态，不能作为该 directed CSR state machine
+的额外门槛。
+
+影响范围：仅修改
+`seq/virtual_sequence/memblock_l2tlb_pbmt_toggle_csr_sequence.sv` 和本 plan；不修改
+L2TLB token、UID record、response overlay、RM、DTLB cache 或 RTL。重跑必须观察
+`B terminal retire: drive mPBMTE=1 for C`，随后 token 2 在 enable-C CSR 上完成，且 C
+没有 Store S1 PF。

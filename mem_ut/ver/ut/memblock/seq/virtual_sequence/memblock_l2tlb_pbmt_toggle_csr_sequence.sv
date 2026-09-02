@@ -38,7 +38,7 @@ class memblock_l2tlb_pbmt_toggle_csr_sequence extends memblock_mmu_sv39_csr_sequ
 
     extern function new(string name = "memblock_l2tlb_pbmt_toggle_csr_sequence");
     extern virtual task body();
-    extern virtual function bit uid_terminal_with_tlb(input memblock_uid_t uid);
+    extern virtual function bit uid_terminal_retired(input memblock_uid_t uid);
     extern virtual function void configure_toggle_xaction(
         input bit [43:0] root_ppn,
         input int unsigned item_index,
@@ -57,9 +57,11 @@ function memblock_l2tlb_pbmt_toggle_csr_sequence::new(
     saw_reenable = 1'b0;
 endfunction:new
 
-// 抽象职责：在主表完成后持续提交完整 CSR payload，并仅在 A/B 已经 terminal 且其
-// L2TLB UID record 完成的边界转换 PBMTE state。它不读取或修改 live entry，也不承担
-// response 检查；转换结果由同一拍及之后的 CSR C-2 history 提供给 responder。
+// 抽象职责：在主表完成后持续提交完整 CSR payload，并仅在 A/B 已经 terminal retire 的
+// 边界转换 PBMTE state。L2TLB response 是指令执行和 terminal retire 的前置条件；Store
+// fault replay 可能为同一 UID 建立新的等待 epoch，不能再用瞬时 pte_valid 代表历史
+// response 是否完成。它不读取或修改 live entry，也不承担 response 检查；转换结果由
+// 同一拍及之后的 CSR C-2 history 提供给 responder。
 task memblock_l2tlb_pbmt_toggle_csr_sequence::body();
     bit [43:0] root_ppn;
     int unsigned item_index;
@@ -84,16 +86,16 @@ task memblock_l2tlb_pbmt_toggle_csr_sequence::body();
     item_index = 0;
     while (!data.is_global_stop_requested()) begin
         if (toggle_state == MEMBLOCK_PBMT_TOGGLE_ENABLE_A &&
-            uid_terminal_with_tlb(0)) begin
+            uid_terminal_retired(0)) begin
             toggle_state = MEMBLOCK_PBMT_TOGGLE_DISABLE_B;
             saw_disable = 1'b1;
-            `uvm_info(get_type_name(), "A terminal/TLB complete: drive mPBMTE=0 for B", UVM_LOW)
+            `uvm_info(get_type_name(), "A terminal retire: drive mPBMTE=0 for B", UVM_LOW)
         end
         else if (toggle_state == MEMBLOCK_PBMT_TOGGLE_DISABLE_B &&
-                 uid_terminal_with_tlb(1)) begin
+                 uid_terminal_retired(1)) begin
             toggle_state = MEMBLOCK_PBMT_TOGGLE_ENABLE_C;
             saw_reenable = 1'b1;
-            `uvm_info(get_type_name(), "B terminal/TLB complete: drive mPBMTE=1 for C", UVM_LOW)
+            `uvm_info(get_type_name(), "B terminal retire: drive mPBMTE=1 for C", UVM_LOW)
         end
 
         configure_toggle_xaction(root_ppn, item_index, toggle_state, tr);
@@ -108,14 +110,14 @@ task memblock_l2tlb_pbmt_toggle_csr_sequence::body();
     end
 endtask:body
 
-function bit memblock_l2tlb_pbmt_toggle_csr_sequence::uid_terminal_with_tlb(
+function bit memblock_l2tlb_pbmt_toggle_csr_sequence::uid_terminal_retired(
     input memblock_uid_t uid
 );
     if (data == null || !data.is_valid_uid(uid)) begin
         return 1'b0;
     end
-    return data.get_status(uid).terminal_done && data.tlb_entry_ready_for_uid(uid);
-endfunction:uid_terminal_with_tlb
+    return data.get_status(uid).terminal_done;
+endfunction:uid_terminal_retired
 
 // 抽象职责：复用静态 Sv39/U CSR payload，并按当前 directed state 覆盖 mPBMTE。
 // 前两笔 item 额外写入 PMP bootstrap；其余 item 不产生 generic CSR write 或 change
