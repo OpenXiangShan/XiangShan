@@ -124,19 +124,11 @@ class MptOutputSwitchBox(implicit p: Parameters) extends XSModule with MPTCacheP
   io.mptIn.valid    := false.B
   io.l1TLB.valid    := false.B
   nextState         := curState
-  switch(curState) {
-    is(s_idle) {
-      when(io.mptOut.valid && io.mptOut.bits.mptOnly) { //mptonly mode
-        // mpt valid without merge arb first implies that it is mpt only request.try change later
-        io.l1TLB.valid := true.B
-        when(io.l1TLB.ready) {
-          io.mergeArb.ready := true.B
-          nextState         := s_idle
-        }.otherwise {
-          nextState := s_send_l1_tlb
-        }
-      }.elsewhen(io.mergeArb.valid) { // normal mode, two modes are mutually exclusive
-        when(io.mergeArb.bits.fault || !mptEn) {
+  when(!flush) {
+    switch(curState) {
+      is(s_idle) {
+        when(io.mptOut.valid && io.mptOut.bits.mptOnly) { //mptonly mode
+          // mpt valid without merge arb first implies that it is mpt only request.try change later
           io.l1TLB.valid := true.B
           when(io.l1TLB.ready) {
             io.mergeArb.ready := true.B
@@ -144,33 +136,43 @@ class MptOutputSwitchBox(implicit p: Parameters) extends XSModule with MPTCacheP
           }.otherwise {
             nextState := s_send_l1_tlb
           }
-        }.otherwise {
-          io.mptIn.valid := true.B
-          when(io.mptIn.ready) {
-            nextState := s_send_mpt
+        }.elsewhen(io.mergeArb.valid) { // normal mode, two modes are mutually exclusive
+          when(io.mergeArb.bits.fault || !mptEn) {
+            io.l1TLB.valid := true.B
+            when(io.l1TLB.ready) {
+              io.mergeArb.ready := true.B
+              nextState         := s_idle
+            }.otherwise {
+              nextState := s_send_l1_tlb
+            }
+          }.otherwise {
+            io.mptIn.valid := true.B
+            when(io.mptIn.ready) {
+              nextState := s_send_mpt
+            }
           }
         }
       }
-    }
 
-    is(s_send_mpt) { // delay+1+mptclk
-      io.mptIn.valid := false.B
-      when(io.mptOut.valid) {
+      is(s_send_mpt) { // delay+1+mptclk
+        io.mptIn.valid := false.B
+        when(io.mptOut.valid) {
+          io.l1TLB.valid := true.B
+          when(io.l1TLB.ready) {
+            io.mergeArb.ready := true.B
+            nextState         := s_idle
+          }.otherwise {
+            nextState := s_send_l1_tlb
+          }
+        }
+      }
+
+      is(s_send_l1_tlb) {
         io.l1TLB.valid := true.B
         when(io.l1TLB.ready) {
           io.mergeArb.ready := true.B
           nextState         := s_idle
-        }.otherwise {
-          nextState := s_send_l1_tlb
         }
-      }
-    }
-
-    is(s_send_l1_tlb) {
-      io.l1TLB.valid := true.B
-      when(io.l1TLB.ready) {
-        io.mergeArb.ready := true.B
-        nextState         := s_idle
       }
     }
   }
