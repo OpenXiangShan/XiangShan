@@ -233,7 +233,7 @@ module frontend_funcov_hub (
   input logic [3:0]  nc_icache_waymask_0,
   input logic [3:0]  nc_icache_waymask_1,
   input logic                 rfr_backend_redirect_valid,
-  input logic [49:0]          rfr_backend_redirect_target,
+  input logic [50:0]          rfr_backend_redirect_target,
   input logic                 rfr_backend_redirect_level,
   input logic                 rfr_backend_redirect_is_rvc,
   input logic                 rfr_backend_redirect_iaf,
@@ -251,7 +251,7 @@ module frontend_funcov_hub (
   input logic                 rfr_ftq_meta_idx_flag,
   input logic [5:0]           rfr_ftq_meta_idx_value,
   input logic                 rfr_to_bpu_redirect_valid,
-  input logic [48:0]          rfr_to_bpu_redirect_target,
+  input logic [49:0]          rfr_to_bpu_redirect_target,
   input logic                 rfr_icache_redirect_flush,
   input logic                 rfr_bpu_flush_valid,
   input logic                 rfr_ifu_wb_redirect_valid,
@@ -274,6 +274,8 @@ module frontend_funcov_hub (
   input logic                 rfr_icache_to_ifu_valid,
   input logic                 rfr_main_fetch_valid,
   input logic                 rfr_main_fetch_ready,
+  input logic                 rfr_main_fetch_has_backend_exception,
+  input logic                 rfr_backend_exception_active,
   input logic                 rfr_prefetch_valid,
   input logic                 rfr_ifu_s1_valid,
   input logic                 rfr_ifu_s2_valid,
@@ -296,8 +298,7 @@ module frontend_funcov_hub (
   input logic [7:0][49:0]     rfr_cfvec_pc,
   input logic [7:0]           rfr_cfvec_iaf,
   input logic [7:0]           rfr_cfvec_ipf,
-  input logic [7:0]           rfr_cfvec_igpf,
-  input logic [7:0]           rfr_cfvec_backend_exception
+  input logic [7:0]           rfr_cfvec_igpf
 );
 
   frontend_atp_funcov u_atp (
@@ -627,6 +628,8 @@ module frontend_funcov_hub (
     .icache_to_ifu_valid(rfr_icache_to_ifu_valid),
     .main_fetch_valid(rfr_main_fetch_valid),
     .main_fetch_ready(rfr_main_fetch_ready),
+    .main_fetch_has_backend_exception(rfr_main_fetch_has_backend_exception),
+    .backend_exception_active(rfr_backend_exception_active),
     .prefetch_valid(rfr_prefetch_valid),
     .ifu_s1_valid(rfr_ifu_s1_valid),
     .ifu_s2_valid(rfr_ifu_s2_valid),
@@ -649,8 +652,7 @@ module frontend_funcov_hub (
     .cfvec_pc(rfr_cfvec_pc),
     .cfvec_iaf(rfr_cfvec_iaf),
     .cfvec_ipf(rfr_cfvec_ipf),
-    .cfvec_igpf(rfr_cfvec_igpf),
-    .cfvec_backend_exception(rfr_cfvec_backend_exception)
+    .cfvec_igpf(rfr_cfvec_igpf)
   );
 endmodule
 
@@ -1068,7 +1070,7 @@ bind Frontend frontend_funcov_hub u_frontend_funcov_hub (
   .rfr_ibuffer_empty(_inner_ibuffer_io_empty),
   .rfr_ibuffer_ready(_inner_ibuffer_io_in_ready),
   .rfr_icache_response_valid(auto_inner_icache_client_out_d_valid),
-  .rfr_uncache_response_valid(auto_inner_instrUncache_client_out_d_valid),
+  .rfr_uncache_response_valid(_inner_instrUncache_io_toIfu_resp_valid),
   .rfr_uncache_response_need_resend(_inner_instrUncache_io_toIfu_resp_bits_needResend),
   .rfr_uncache_entry_req_addr(inner_instrUncache.entries_0.reqReg_addr_addr),
   .rfr_icache_a_valid(auto_inner_icache_client_out_a_valid),
@@ -1081,6 +1083,10 @@ bind Frontend frontend_funcov_hub u_frontend_funcov_hub (
   .rfr_icache_to_ifu_valid(_inner_icache_io_toIfu_req_valid),
   .rfr_main_fetch_valid(_inner_ftq_io_toICache_toMainPipe_valid),
   .rfr_main_fetch_ready(_inner_icache_io_fromFtq_toMainPipe_ready),
+  .rfr_main_fetch_has_backend_exception(
+    _inner_ftq_io_toICache_toMainPipe_bits_req_0_hasBackendException
+  ),
+  .rfr_backend_exception_active(|inner_ftq.backendException_value),
   .rfr_prefetch_valid(_inner_ftq_io_toICache_toPrefetch_valid),
   .rfr_ifu_s1_valid(|inner_ifu.s1_valid),
   .rfr_ifu_s2_valid(inner_ifu.s2_fetchBlock_0_valid || inner_ifu.s2_fetchBlock_1_valid),
@@ -1170,11 +1176,7 @@ bind Frontend frontend_funcov_hub u_frontend_funcov_hub (
               io_backend_cfVec_3_bits_exceptionVec_12, io_backend_cfVec_2_bits_exceptionVec_12,
               io_backend_cfVec_1_bits_exceptionVec_12, io_backend_cfVec_0_bits_exceptionVec_12}),
   .rfr_cfvec_igpf({io_backend_cfVec_7_bits_exceptionVec_20, io_backend_cfVec_6_bits_exceptionVec_20,
-               io_backend_cfVec_5_bits_exceptionVec_20, io_backend_cfVec_4_bits_exceptionVec_20,
-               io_backend_cfVec_3_bits_exceptionVec_20, io_backend_cfVec_2_bits_exceptionVec_20,
-               io_backend_cfVec_1_bits_exceptionVec_20, io_backend_cfVec_0_bits_exceptionVec_20}),
-  .rfr_cfvec_backend_exception({io_backend_cfVec_7_bits_backendException, io_backend_cfVec_6_bits_backendException,
-                            io_backend_cfVec_5_bits_backendException, io_backend_cfVec_4_bits_backendException,
-                            io_backend_cfVec_3_bits_backendException, io_backend_cfVec_2_bits_backendException,
-                            io_backend_cfVec_1_bits_backendException, io_backend_cfVec_0_bits_backendException})
+                   io_backend_cfVec_5_bits_exceptionVec_20, io_backend_cfVec_4_bits_exceptionVec_20,
+                   io_backend_cfVec_3_bits_exceptionVec_20, io_backend_cfVec_2_bits_exceptionVec_20,
+                   io_backend_cfVec_1_bits_exceptionVec_20, io_backend_cfVec_0_bits_exceptionVec_20})
 );

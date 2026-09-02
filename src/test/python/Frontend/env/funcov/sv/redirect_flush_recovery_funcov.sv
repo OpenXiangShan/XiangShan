@@ -2,7 +2,7 @@ module frontend_redirect_flush_recovery_funcov (
   input logic                 clock,
   input logic                 reset,
   input logic                 backend_redirect_valid,
-  input logic [49:0]          backend_redirect_target,
+  input logic [50:0]          backend_redirect_target,
   input logic                 backend_redirect_level,
   input logic                 backend_redirect_is_rvc,
   input logic                 backend_redirect_iaf,
@@ -20,7 +20,7 @@ module frontend_redirect_flush_recovery_funcov (
   input logic                 ftq_meta_idx_flag,
   input logic [5:0]           ftq_meta_idx_value,
   input logic                 to_bpu_redirect_valid,
-  input logic [48:0]          to_bpu_redirect_target,
+  input logic [49:0]          to_bpu_redirect_target,
   input logic                 icache_redirect_flush,
   input logic                 bpu_flush_valid,
   input logic                 ifu_wb_redirect_valid,
@@ -43,6 +43,8 @@ module frontend_redirect_flush_recovery_funcov (
   input logic                 icache_to_ifu_valid,
   input logic                 main_fetch_valid,
   input logic                 main_fetch_ready,
+  input logic                 main_fetch_has_backend_exception,
+  input logic                 backend_exception_active,
   input logic                 prefetch_valid,
   input logic                 ifu_s1_valid,
   input logic                 ifu_s2_valid,
@@ -65,8 +67,7 @@ module frontend_redirect_flush_recovery_funcov (
   input logic [7:0][49:0]     cfvec_pc,
   input logic [7:0]           cfvec_iaf,
   input logic [7:0]           cfvec_ipf,
-  input logic [7:0]           cfvec_igpf,
-  input logic [7:0]           cfvec_backend_exception
+  input logic [7:0]           cfvec_igpf
 );
 
   logic        recovery_pending;
@@ -81,15 +82,14 @@ module frontend_redirect_flush_recovery_funcov (
   logic        cfvec_iaf_seen;
   logic        cfvec_ipf_seen;
   logic        cfvec_igpf_seen;
-  logic        cfvec_backend_exception_seen;
   logic        ahead_idx_prev_valid;
   logic        ahead_idx_prev_flag;
   logic [5:0]  ahead_idx_prev_value;
   logic [63:0] ftq_redirect_meta_seen;
   logic [63:0] ftq_redirect_meta_epoch;
   logic        main_fetch_pending_last_cycle;
-  logic        backend_exception_fetch_tracking;
-  logic [1:0]  backend_exception_main_fetch_count;
+  logic        backend_exception_active_prev;
+  logic        backend_exception_marked_fetch_seen;
   logic        backend_exception_three_main_fetch_sample;
   logic [15:0] icache_outstanding_sources;
   logic [15:0] old_icache_sources;
@@ -118,13 +118,11 @@ module frontend_redirect_flush_recovery_funcov (
     cfvec_iaf_seen = 1'b0;
     cfvec_ipf_seen = 1'b0;
     cfvec_igpf_seen = 1'b0;
-    cfvec_backend_exception_seen = 1'b0;
     for (int slot = 0; slot < 8; slot++) begin
       cfvec_target_seen |= cfvec_valid[slot] && cfvec_pc[slot] == recovery_target;
       cfvec_iaf_seen |= cfvec_valid[slot] && cfvec_iaf[slot];
       cfvec_ipf_seen |= cfvec_valid[slot] && cfvec_ipf[slot];
       cfvec_igpf_seen |= cfvec_valid[slot] && cfvec_igpf[slot];
-      cfvec_backend_exception_seen |= cfvec_valid[slot] && cfvec_backend_exception[slot];
     end
 
   end
@@ -145,8 +143,8 @@ module frontend_redirect_flush_recovery_funcov (
       ftq_redirect_meta_seen <= '0;
       ftq_redirect_meta_epoch <= '0;
       main_fetch_pending_last_cycle <= 1'b0;
-      backend_exception_fetch_tracking <= 1'b0;
-      backend_exception_main_fetch_count <= '0;
+      backend_exception_active_prev <= 1'b0;
+      backend_exception_marked_fetch_seen <= 1'b0;
       backend_exception_three_main_fetch_sample <= 1'b0;
       icache_outstanding_sources <= '0;
       old_icache_sources <= '0;
@@ -164,6 +162,7 @@ module frontend_redirect_flush_recovery_funcov (
         ftq_redirect_meta_epoch[ftq_meta_idx_value] <= ftq_meta_idx_flag;
       end
       main_fetch_pending_last_cycle <= main_fetch_pending;
+      backend_exception_active_prev <= backend_exception_active;
       backend_exception_three_main_fetch_sample <= 1'b0;
       old_prefetch_response_sample <= 1'b0;
       old_icache_response_sample <= 1'b0;
@@ -190,7 +189,7 @@ module frontend_redirect_flush_recovery_funcov (
       if (backend_redirect_valid) begin
         recovery_pending <= 1'b1;
         recovery_age <= '0;
-        recovery_target <= backend_redirect_target;
+        recovery_target <= backend_redirect_target[49:0];
         recovery_iaf <= backend_redirect_iaf;
         recovery_ipf <= backend_redirect_ipf;
         recovery_igpf <= backend_redirect_igpf;
@@ -203,17 +202,17 @@ module frontend_redirect_flush_recovery_funcov (
         if (&recovery_age) recovery_pending <= 1'b0;
       end
 
-      if (backend_redirect_valid) begin
-        backend_exception_fetch_tracking <= backend_redirect_iaf ||
-          backend_redirect_ipf || backend_redirect_igpf;
-        backend_exception_main_fetch_count <= '0;
-      end else if (backend_exception_fetch_tracking && main_fetch_fire) begin
-        if (backend_exception_main_fetch_count == 2'd2) begin
-          backend_exception_three_main_fetch_sample <= 1'b1;
-          backend_exception_fetch_tracking <= 1'b0;
-        end else begin
-          backend_exception_main_fetch_count <= backend_exception_main_fetch_count + 1'b1;
-        end
+      if (backend_redirect_valid &&
+          (backend_redirect_iaf || backend_redirect_ipf || backend_redirect_igpf)) begin
+        backend_exception_marked_fetch_seen <= 1'b0;
+      end else if (main_fetch_fire && main_fetch_has_backend_exception) begin
+        backend_exception_marked_fetch_seen <= 1'b1;
+      end
+
+      if (backend_exception_active_prev && !backend_exception_active &&
+          backend_exception_marked_fetch_seen) begin
+        backend_exception_three_main_fetch_sample <= 1'b1;
+        backend_exception_marked_fetch_seen <= 1'b0;
       end
     end
   end
@@ -231,8 +230,8 @@ module frontend_redirect_flush_recovery_funcov (
       bins observed = {1'b1};
     }
     RFR_unclassified_redirect_recovery_cp: coverpoint (recovery_pending && recovery_unclassified &&
-          cfvec_backend_exception_seen) iff (!reset) {
-      bins backend_exception_cfvec = {1'b1};
+          cfvec_target_seen) iff (!reset) {
+      bins target_recovered = {1'b1};
     }
     RFR_iaf_delivery_cp: coverpoint (recovery_pending && recovery_iaf && cfvec_iaf_seen) iff (!reset) { bins observed = {1'b1}; }
     RFR_ipf_delivery_cp: coverpoint (recovery_pending && recovery_ipf && cfvec_ipf_seen) iff (!reset) { bins observed = {1'b1}; }
@@ -333,8 +332,8 @@ module frontend_redirect_flush_recovery_funcov (
         bins observed = {1'b1};
     }
 
-    RFR_backend_redirect_to_bpu_cp: coverpoint (recovery_pending && to_bpu_redirect_valid &&
-      to_bpu_redirect_target == recovery_target[48:0] && !ifu_wb_redirect_valid) iff (!reset) {
+    RFR_backend_redirect_to_bpu_cp: coverpoint (backend_redirect_valid && to_bpu_redirect_valid &&
+      to_bpu_redirect_target == backend_redirect_target[50:1] && !ifu_wb_redirect_valid) iff (!reset) {
       bins target_matched = {1'b1};
     }
     RFR_ibuffer_delayed_empty_cp: coverpoint (recovery_pending && recovery_age == 4'd1 && ibuffer_empty) iff (!reset) {
