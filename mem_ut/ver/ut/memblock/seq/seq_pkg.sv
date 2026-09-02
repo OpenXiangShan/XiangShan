@@ -104,6 +104,7 @@ package seq_pkg;
     `include "memblock_main_dispatch_manual_main_table_sequence.sv"
     `include "memblock_main_dispatch_manual_control_main_table_sequence.sv"
     `include "memblock_main_dispatch_cancel_reconcile_sequence.sv"
+    `include "memblock_main_dispatch_pbmt_response_fault_sequence.sv"
     `include "mem_base_sequence.sv"
     `include "memblock_rm_dut_writeback_observer.sv"
     `include "memblock_rm_readonly_api.sv"
@@ -111,10 +112,12 @@ package seq_pkg;
     `include "memblock_virtual_sequencer.sv"
     `include "virtual_base_sequence.sv"
     `include "memblock_mmu_sv39_csr_sequence.sv"
+    `include "memblock_l2tlb_pbmt_toggle_csr_sequence.sv"
     `include "memblock_pending_mmio_directed_vseq.sv"
     `include "memblock_dispatch_real_smoke_vseq.sv"
     `include "memblock_dispatch_manual_control_vseq.sv"
     `include "memblock_dispatch_real_cancel_reconcile_vseq.sv"
+    `include "memblock_l2tlb_pbmt_response_fault_vseq.sv"
 
 endpackage
 
