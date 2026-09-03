@@ -354,7 +354,7 @@ case class ExeUnitParams(
 
   def hasVStdFu = fuConfigs.map(_.name == "vstd").reduce(_ || _)
 
-  def hasVIAluFu = fuConfigs.map(_.fuType == FuType.vialuF).reduce(_ || _)
+  def hasVIAluFu = fuConfigs.map(_.fuType == FuType.vialu).reduce(_ || _)
 
   def CanCompress = !hasBrhFu || (hasBrhFu && hasi2vFu)
 

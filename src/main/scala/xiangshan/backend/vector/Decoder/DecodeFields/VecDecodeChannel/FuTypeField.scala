@@ -77,7 +77,7 @@ object FuTypeField {
       case _: Opcode.VFCvtOpcodes.type => FuType.vfcvt
       case _: Opcode.VFMiscOpcodes.type => FuType.vfalu
       case _: Opcode.VSetOpcodes.type => FuType.vset
-      case _: Opcode.VIAluOpcodes.type => FuType.vialuF
+      case _: Opcode.VIAluOpcodes.type => FuType.vialu
       case _: Opcode.VMoveOpcodes.type => FuType.vmove
       case _: Opcode.VMAluOpcodes.type => FuType.vmpu
       case _: Opcode.VIMacOpcodes.type => FuType.vimac

@@ -40,7 +40,7 @@ object FuType extends ChiselOHEnum {
   // vec
   val vipu = addType(name = "vipu")
   val vmpu = addType(name = "vmpu")
-  val vialuF = addType(name = "vialuF")
+  val vialu = addType(name = "vialu")
   val vppu = addType(name = "vppu")
   val vimac = addType(name = "vimac")
   val vidiv = addType(name = "vidiv")
@@ -113,7 +113,7 @@ object FuType extends ChiselOHEnum {
   }
   val fpArithAll = Seq(falu, fcvt, fmac, fDivSqrt, f2v, fcmp)
   val scalaMemAll = Seq(ldu, stu, mou)
-  val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv)
+  val vecOPI = Seq(vipu, vialu, vppu, vimac, vidiv)
   val vecOPF = Seq(vfalu, vfma, vfdiv, vfcvt)
   val vecVSET = Seq(vset)
   val vecArith = vecOPI ++ vecOPF
@@ -174,7 +174,7 @@ object FuType extends ChiselOHEnum {
 
   def isVArith(fuType: UInt): Bool = FuTypeOrR(fuType, vecArith)
 
-  def isVIAluF(fuType: UInt): Bool = FuTypeOrR(fuType, vialuF)
+  def isVIAlu(fuType: UInt): Bool = FuTypeOrR(fuType, vialu)
 
   def isVls(fuType: UInt): Bool = FuTypeOrR(fuType, vldu, vstu, vsegldu, vsegstu)
 
@@ -234,7 +234,7 @@ object FuType extends ChiselOHEnum {
     stu -> "store",
     mou -> "mou",
     vipu -> "vipu",
-    vialuF -> "vialuF",
+    vialu -> "vialu",
     vldu -> "vldu",
     vstu -> "vstu",
     vppu -> "vppu",

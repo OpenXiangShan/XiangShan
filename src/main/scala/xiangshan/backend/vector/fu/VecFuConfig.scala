@@ -178,7 +178,7 @@ case class VecFuConfig (
 
   def isVStd: Boolean = name == "vstd"
 
-  def isVecArith: Boolean = fuType == FuType.vialuF || fuType == FuType.vimac ||
+  def isVecArith: Boolean = fuType == FuType.vialu || fuType == FuType.vimac ||
                             fuType == FuType.vppu || fuType == FuType.vipu ||
                             fuType == FuType.vfalu || fuType == FuType.vfma ||
                             fuType == FuType.vfdiv || fuType == FuType.vfcvt ||

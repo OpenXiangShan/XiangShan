@@ -1,15 +1,11 @@
 package xiangshan.backend.fu.vector
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
-import xiangshan._
+import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
 import xiangshan.backend.fu.FuConfig.VialuCfg
-import xiangshan.backend.fu.vector.Bundles.VConfig
-import xiangshan.backend.fu.vector.utils.ScalaDupToVector
 import xiangshan.backend.fu.{FuConfig, FuncUnit, HasPipelineReg}
-import yunsuan.VialuFixType
 import yunsuan.vector.Common._
 
 trait VecFuncUnitAlias { this: FuncUnit =>
