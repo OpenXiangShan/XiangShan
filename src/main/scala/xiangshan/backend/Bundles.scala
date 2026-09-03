@@ -888,6 +888,7 @@ object Bundles {
     val singleStep = Bool()
     val crossPageIPFFix = Bool()
     val isInterrupt = Bool()
+    val boundaryInterrupt = Bool()
     val isHls = Bool()
     val vls = Bool()
     val trigger = TriggerAction()
