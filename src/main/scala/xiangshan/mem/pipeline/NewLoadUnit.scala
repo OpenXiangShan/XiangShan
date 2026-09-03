@@ -1180,7 +1180,9 @@ class LoadUnitS2(param: ExeUnitParams)(
   io.prefetchTrain.bits.pc := uop.pc
   io.prefetchTrain.bits.vaddr := in.vaddr
   io.prefetchTrain.bits.paddr := paddr
-  io.prefetchTrain.bits.miss := io.dcacheResp.bits.miss
+  // ROB forwarding completes the load but still represents a physical DCache
+  // miss, which should participate in demand-miss prefetch training.
+  io.prefetchTrain.bits.miss := io.dcacheResp.bits.miss || io.robForwardResp.valid
   io.prefetchTrain.bits.isFirstIssue := in.isFirstIssue()
   io.prefetchTrain.bits.metaSource := io.dcacheResp.bits.meta_prefetch
   io.prefetchTrain.bits.isHwPrefetch := accessType.isHwPrefetch()

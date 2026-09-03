@@ -473,12 +473,15 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // they can sit in load queue and wait for refill
   //
   // * report a miss if bank conflict is detected
+  // ROB forwarding completes the load, so it must not enter the DCache-miss
+  // replay path. Prefetch training accounts for this as a miss separately.
   val real_miss = !s2_real_way_en.orR && !s2_rob_hit
 
   resp.bits.real_miss := real_miss
   resp.bits.miss := real_miss
   resp.bits.data := s2_resp_data
-  io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_load_hit
+  // A ROB-served load is a load completion, but not a DCache first hit.
+  io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_dcache_hit && !s2_wpu_pred_fail
   // load pipe need replay when there is a bank conflict or wpu predict fail
   resp.bits.replay := (resp.bits.miss && (s2_nack || io.miss_req.bits.cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail || s2_btot_occupy_fail
   resp.bits.replayCarry.valid := (resp.bits.miss && (s2_nack || io.miss_req.bits.cancel)) || io.bank_conflict_slow || s2_wpu_pred_fail || s2_btot_occupy_fail
@@ -491,7 +494,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   resp.bits.handled := s2_miss_req_fire && !io.miss_req.bits.cancel && !io.wbq_block_miss_req && io.miss_resp.handled
   resp.bits.debug_robIdx := s2_req.debug_robIdx
   // debug info
-  io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_load_hit
+  io.lsu.s2_first_hit := s2_req.isFirstIssue && s2_dcache_hit && !s2_wpu_pred_fail
   io.lsu.debug_s2_real_way_num := OneHot.OHToUIntStartOne(s2_real_way_en)
   if(dwpuParam.enWPU) {
     io.lsu.debug_s2_pred_way_num := OneHot.OHToUIntStartOne(s2_pred_way_en)
@@ -527,7 +530,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.prefetch_stat.hit_source := hit_source
 
   io.prefetch_stat.demand_miss := s2_valid &&
-    (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) && !s2_load_hit && s2_req.isFirstIssue
+    (s2_req.instrtype =/= DCACHE_PREFETCH_SOURCE.U) &&
+    !s2_dcache_hit && !s2_wpu_pred_fail && s2_req.isFirstIssue
   io.prefetch_stat.pollution := io.prefetch_stat.demand_miss && io.bloom_filter_query.resp.valid && io.bloom_filter_query.resp.bits.res
 
   io.lsu.resp.valid := resp.valid
@@ -676,6 +680,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   XSPerfAccumulate("load_replay_for_dcache_wpu_pred_fail", io.lsu.resp.fire && resp.bits.replay && s2_wpu_pred_fail)
   XSPerfAccumulate("load_hit", io.lsu.resp.fire && !real_miss)
   XSPerfAccumulate("load_miss", io.lsu.resp.fire && real_miss)
+  XSPerfAccumulate("load_dcache_miss_rob_hit",
+    io.lsu.resp.fire && !s2_dcache_hit && s2_rob_hit && !s2_wpu_pred_fail)
   XSPerfAccumulate("l1dbp_demand_query", io.l1dbp.query.valid)
   XSPerfAccumulate("l1dbp_demand_miss_sample_set",
     io.miss_req.fire && io.miss_req.bits.isFromLoad && isL1DBPSampleSet(get_dcache_idx(s2_vaddr)))
