@@ -287,7 +287,7 @@ Before a duration run:
 2. Every green focused scenario passes on the current complete RTL hash.
 3. A multi-seed, five-scenario matrix passes with backpressure enabled.
 4. The executable, Verilated model, xspcomm, resolved system libraries, runner,
-   streaming verifier, controller sources, and RTL metadata are frozen and
+   streaming verifier, runtime-freeze script, controller sources, and RTL metadata are frozen and
    hashed. The verifier script is passed as a controller input so its acceptance
    logic is part of the recorded provenance.
 
@@ -311,10 +311,11 @@ the exact VS-non-leaf GPA and first-active-element VA against the software
 oracle. On the historical clean RTL it must produce at least one mismatch;
 after the fix it must produce an all-pass campaign with the same oracle.
 
-An independent streaming verifier (whose own SHA-256 is recorded in the
-controller inputs) checks the result artifact, duration,
+An independent streaming verifier (whose own SHA-256 and runtime-freeze script
+are recorded in the controller inputs) checks the result artifact, duration,
 scenario set, transaction counts, per-seed coverage, aggregate counts,
-continuous seeds, complete RTL identity, and before/after frozen-runtime hashes.
+continuous seeds, eight-worker configuration, complete RTL identity, and
+before/after frozen-runtime hashes.
 
 ## Failure Triage
 

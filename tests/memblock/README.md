@@ -148,7 +148,7 @@ values plus every resolved system-library hash in `runtime.json`.
 
 ```sh
 make extended-regression PICKER="$PICKER" \
-  REGRESSION_JOBS=8 DURATION_SECONDS=21600 MIXED_TRANSACTIONS=4096 \
+  REGRESSION_JOBS=8 DURATION_SECONDS=14400 MIXED_TRANSACTIONS=4096 \
   EXTENDED_RESULT="$PWD/../../build/memblock/extended-mixed-frozen-4h.json"
 ```
 
@@ -174,9 +174,11 @@ comes from consecutive seeded invocations. The verifier separately checks the
 requested command value and these bounded completed counts.
 
 Before and after the campaign, the runner verifies the frozen artifacts,
-system libraries, runner source, RTL metadata, and the C++/SVA/config controller
-files listed in `CONTROLLER_FILES`. A hash change in any of them makes the
-result fail. The runtime may also be prepared and inspected directly:
+system libraries, runner source, RTL metadata, the runtime-freeze script, and
+the C++/SVA/config controller files listed in `CONTROLLER_FILES`. A hash change
+in any of them makes the result fail. The verifier also requires the recorded
+worker count to be eight for duration-campaign acceptance. The runtime may also
+be prepared and inspected directly:
 
 ```sh
 make freeze-runtime PICKER="$PICKER"
