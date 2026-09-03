@@ -335,6 +335,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val storeDataWakeupCancel = VecInit(io.storeDataWakeupCancel.map(cancel => RegNext(cancel, 0.U.asTypeOf(cancel))))
   val loadWakeup = VecInit(io.loadWakeup.map(delayWakeup(_)))
   val loadWakeupPrev = VecInit(loadWakeup.map(delayWakeup(_)))
+  val loadWakeupPrevPrev = VecInit(loadWakeupPrev.map(delayWakeup(_)))
   // Fast hint selects C_TM replays directly. The delayed original hint remains the fallback.
   val fastTlbHintResp = io.fast_tlb_hint
   val tlbHintResp = delayWakeup(io.tlb_hint.resp)
@@ -433,6 +434,10 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
   private def tlDChannelHitPrev(mshrId: UInt): Bool = {
     VecInit(loadWakeupPrev.map(ch => ch.valid && ch.bits.mshrId === mshrId)).asUInt.orR
+  }
+
+  private def tlDChannelHitPrevPrev(mshrId: UInt): Bool = {
+    VecInit(loadWakeupPrevPrev.map(ch => ch.valid && ch.bits.mshrId === mshrId)).asUInt.orR
   }
 
   private def l2HintMatchVec(mshrId: UInt): Seq[Bool] = {
@@ -923,9 +928,11 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       when (replayInfo.cause(LoadReplayCauses.C_DM) && enq.bits.handledByMSHR) {
         val tlDHitThisCycle = tlDChannelHit(replayInfo.mshr_id)
         val tlDHitPrevCycle = tlDChannelHitPrev(replayInfo.mshr_id)
+        val tlDHitPrevPrevCycle = tlDChannelHitPrevPrev(replayInfo.mshr_id)
         blocking(enqIndex) := !replayInfo.full_fwd && //  dcache miss
                               !tlDHitThisCycle && // no refill in this cycle
-                              !tlDHitPrevCycle // not refill in last cycle
+                              !tlDHitPrevCycle && // not refill in last cycle
+                              !(replayInfo.rep_from_unalign_head && tlDHitPrevPrevCycle)
       }
 
       when (isFF) {
