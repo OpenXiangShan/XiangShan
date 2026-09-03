@@ -366,6 +366,14 @@ stack.info*
 *.bin
 *.fst
 
+# DVE files
+/DVEfiles/
+
+# Verdi files
+/vdCovLog/
+/verdiLog/
+/novas.*
+
 !ready-to-run/*
 
 # Log files
