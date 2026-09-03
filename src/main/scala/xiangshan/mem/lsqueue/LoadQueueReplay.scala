@@ -903,10 +903,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       // special case: tlb miss
       when (replayInfo.cause(LoadReplayCauses.C_TM)) {
         blocking(enqIndex) := !replayInfo.tlb_full &&
-          !(tlbHintResp.valid && (tlbHintResp.bits.id === replayInfo.tlb_id || tlbHintResp.bits.replay_all))
-        when (fastTlbHintResp.valid && fastTlbHintResp.bits.id === replayInfo.tlb_id) {
-          blocking(enqIndex) := false.B
-        }
+          !(tlbHintResp.valid && (tlbHintResp.bits.id === replayInfo.tlb_id || tlbHintResp.bits.replay_all)) && 
+          !(fastTlbHintResp.valid && fastTlbHintResp.bits.id === replayInfo.tlb_id)
         tlbHintId(enqIndex) := replayInfo.tlb_id
       }
 

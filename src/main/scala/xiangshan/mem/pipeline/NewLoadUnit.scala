@@ -2053,7 +2053,15 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s3 <> s2
   s4 <> s3
   s0.io.unalignTail <> s1.io.unalignTail
-  s0.io.fastReplay <> s3.io.fastReplay
+  // skidBuffer to cut timing path of ready
+  skidBuffer(
+    s3.io.fastReplay,
+    s0.io.fastReplay,
+     Mux(s3.io.fastReplay.fire,
+      s3.io.fastReplay.bits.uop.robIdx.needFlush(io.redirect),
+      s0.io.fastReplay.bits.uop.robIdx.needFlush(io.redirect)),
+    "FastReplaySkidBuffer"
+  )
   s3.io.unalignTailValid := s2.io.unalignTailValid
   s3.io.unalignConcat <> s4.io.unalignConcat
   s1.io.kill := false.B
