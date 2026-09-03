@@ -196,7 +196,7 @@ long-final-regression: $(RUNTIME_METADATA)
 	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(LONG_RESULT) --jobs $${REGRESSION_JOBS:-$(JOBS)} --duration-seconds $${DURATION_SECONDS:-21600} --scenarios random-mixed --mixed-transactions $${MIXED_TRANSACTIONS:-4096} --progress-interval-seconds 60
 
 verify-extended-results:
-	$(PYTHON) scripts/verify_regression.py --input $(EXTENDED_RESULT) --expected-file-sha256 $(EXTENDED_RESULT_SHA256) --min-duration-seconds 14400 --min-results 1 --scenario random-mixed --transactions 64 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) --runner scripts/run_regression.py
+	$(PYTHON) scripts/verify_regression.py --input $(EXTENDED_RESULT) --expected-file-sha256 $(EXTENDED_RESULT_SHA256) --min-duration-seconds 14400 --min-results 1 --scenario random-mixed --transactions 64 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
 
 verify-final-results:
 	$(PYTHON) scripts/verify_regression.py --input $(FINAL_RESULT) --min-duration-seconds 21600 --min-results 1 --scenarios random-mixed --transactions 1000 --mixed-transactions 4096 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py

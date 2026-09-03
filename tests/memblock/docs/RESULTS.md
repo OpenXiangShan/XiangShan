@@ -119,7 +119,8 @@ The previous runner did not hash these source files, so these values were not
 independently enforced by the JSON artifact. The reviewed runner now records
 and verifies source hashes as controller inputs for new campaigns. The final
 six-hour artifact above predates that change and is therefore not
-provenance-complete for this reviewed harness revision.
+provenance-complete for this reviewed harness revision; a new final campaign
+is required after this review.
 
 The current mixed summary reports vector load and store address-mode coverage
 separately (`vec_load_modes` and `vec_store_modes`), so a load cannot mask a

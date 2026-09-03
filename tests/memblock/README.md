@@ -174,8 +174,9 @@ comes from consecutive seeded invocations. The verifier separately checks the
 requested command value and these bounded completed counts.
 
 Before and after the campaign, the runner verifies the frozen artifacts,
-system libraries, runner source, and RTL metadata. A hash change in any of them
-makes the result fail. The runtime may also be prepared and inspected directly:
+system libraries, runner source, RTL metadata, and the C++/SVA/config controller
+files listed in `CONTROLLER_FILES`. A hash change in any of them makes the
+result fail. The runtime may also be prepared and inspected directly:
 
 ```sh
 make freeze-runtime PICKER="$PICKER"
