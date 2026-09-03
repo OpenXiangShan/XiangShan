@@ -83,12 +83,14 @@ _SIGNALS = {
     ),
     "backend_redirect": ("Frontend_top.io_backend_toFtq_redirect_valid",),
     "wb_redirect": (
+        f"{_IFU_PREFIX}io_toFtq_wbRedirect_valid",
+        "Frontend_top.Frontend._inner_ifu_io_toFtq_wbRedirect_valid",
         f"{_IFU_PREFIX}__Vtogcov__wbRedirect_valid",
         f"{_IFU_PREFIX}__Vtogcov__io_toFtq_wbRedirect_valid",
     ),
     "bpu_s3_flush": (
-        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",
         f"{_ICACHE_PREFIX}mainPipe.io_flushFromBpu_s3_valid",
+        f"{_ICACHE_PREFIX}__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",
     ),
 }
 
@@ -145,13 +147,18 @@ _LATE_FAULT_SIGNALS = {
     "s2_instr_count": (f"{_IFU_PREFIX}s2_instrCount",),
     "to_ibuffer_valid": (f"{_IFU_PREFIX}io_toIBuffer_valid",),
     "to_ibuffer_ready": (
+        "Frontend_top.io_backend_toIBuf_decodeCanAccept",
         f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_ready",
         "inner_ifu.io_toIBuffer_ready",
     ),
     "to_ibuffer_exception": (
+        "Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_exceptionType_value",
+        f"{_IFU_PREFIX}io_toIBuffer_bits_exceptionType_value",
         f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionType_value",
     ),
     "to_ibuffer_enq": (
+        f"{_IFU_PREFIX}io_toIBuffer_bits_enqEnable_0",
+        "Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_enqEnable",
         f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_enqEnable",
     ),
 }
@@ -189,6 +196,13 @@ def _read_upstream_signal(recorder, key: str) -> Optional[int]:
 
 
 def _read_late_fault_signal(recorder, key: str) -> Optional[int]:
+    if key == "to_ibuffer_ready":
+        # io_toIBuffer_ready is the IBuffer module output and is not retained
+        # as a semantic IFU path in this build.  The backend edge snapshot is
+        # the timing contract consumed by the environment and checker.
+        from ..common.dut import _backend_can_accept_at_edge
+
+        return _backend_can_accept_at_edge(recorder, default=1)
     value = _read_first(recorder, _LATE_FAULT_SIGNALS[key])
     return None if value is None else int(value)
 
@@ -199,6 +213,8 @@ def _read_exception_mask(recorder) -> Optional[int]:
         value = _read_first(
             recorder,
             (
+                f"{_IFU_PREFIX}io_toIBuffer_bits_exceptionMask_{slot}",
+                f"Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_exceptionMask_{slot}",
                 f"{_IFU_PREFIX}__Vtogcov__io_toIBuffer_bits_exceptionMask_{slot}",
             ),
         )

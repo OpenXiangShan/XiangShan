@@ -9,9 +9,9 @@ from .owner_v3_funcov import mark_owner_v3_checked
 
 
 _IFU_INTERNAL_PREFIXES = (
-    "Frontend_top.Frontend.inner_ifu.__Vtogcov__",
     "Frontend_top.Frontend.inner_ifu.",
     "Frontend_top.Frontend._inner_ifu_",
+    "Frontend_top.Frontend.inner_ifu.__Vtogcov__",
 )
 _IFU_OUTPUT_SLOT_COUNT = 36
 _FETCH_BLOCK_INST_COUNT = 32
@@ -20,10 +20,13 @@ _FETCH_EXCEPTION_VALUES = frozenset({1, 2, 3, 5})
 
 
 def _read_ifu_internal(recorder, dut, stem: str) -> Optional[int]:
-    return recorder._read_first_dut_signal(
-        dut,
-        tuple(prefix + str(stem) for prefix in _IFU_INTERNAL_PREFIXES),
-    )
+    stem = str(stem)
+    names = [prefix + stem for prefix in _IFU_INTERNAL_PREFIXES]
+    # Chisel emits this vector output with a retained ``_0`` suffix on the
+    # semantic module signal in the current V3 Verilator build.
+    if stem == "io_toIBuffer_bits_enqEnable":
+        names.insert(1, "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0")
+    return recorder._read_first_dut_signal(dut, tuple(names))
 
 
 def _read_ifu_output_slot(recorder, dut, field: str, slot: int, suffix: str = "") -> Optional[int]:
@@ -34,8 +37,8 @@ def _read_predchecker(recorder, dut, stem: str) -> Optional[int]:
     value = recorder._read_first_dut_signal(
         dut,
         (
-            "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__" + str(stem),
             "Frontend_top.Frontend.inner_ifu.predChecker." + str(stem),
+            "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__" + str(stem),
         ),
     )
     if value is not None:
@@ -79,8 +82,8 @@ def _read_gpaddr_output(recorder, dut, stem: str) -> Optional[int]:
 
 
 _FRONTEND_TRIGGER_PREFIXES = (
-    "Frontend_top.Frontend.inner_ifu.frontendTrigger.__Vtogcov__",
     "Frontend_top.Frontend.inner_ifu.frontendTrigger.",
+    "Frontend_top.Frontend.inner_ifu.frontendTrigger.__Vtogcov__",
 )
 
 

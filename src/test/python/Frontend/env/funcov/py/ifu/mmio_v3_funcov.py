@@ -22,17 +22,17 @@ MMIO_V3_SAMPLER_BIN_KEYS = frozenset(
 _IFU_PREFIXES = (
     "Frontend_top.Frontend.inner_ifu.",
     "Frontend.inner_ifu.",
-    "Frontend_top.Frontend.inner_ifu.__Vtogcov__",
     "Frontend_top.Frontend._inner_ifu_",
     "Frontend._inner_ifu_",
+    "Frontend_top.Frontend.inner_ifu.__Vtogcov__",
 )
 _UNCACHE_UNIT_PREFIXES = (
     "Frontend_top.Frontend.inner_ifu.uncacheUnit.",
     "Frontend.inner_ifu.uncacheUnit.",
-    "Frontend_top.Frontend.inner_ifu.uncacheUnit.__Vtogcov__",
-    "Frontend.inner_ifu.uncacheUnit.__Vtogcov__",
     "Frontend_top.Frontend.inner_ifu._uncacheUnit_",
     "Frontend.inner_ifu._uncacheUnit_",
+    "Frontend_top.Frontend.inner_ifu.uncacheUnit.__Vtogcov__",
+    "Frontend.inner_ifu.uncacheUnit.__Vtogcov__",
 )
 
 
@@ -41,7 +41,11 @@ def _read(recorder, dut, *names: str) -> Optional[int]:
 
 
 def _ifu_names(stem: str) -> tuple[str, ...]:
-    return tuple(prefix + str(stem) for prefix in _IFU_PREFIXES)
+    stem = str(stem)
+    names = [prefix + stem for prefix in _IFU_PREFIXES]
+    if stem == "io_toIBuffer_bits_enqEnable":
+        names.insert(2, "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0")
+    return tuple(names)
 
 
 def _read_ifu(recorder, dut, stem: str) -> Optional[int]:
