@@ -98,14 +98,32 @@ class TranslationPermissionOracle:
         ):
             raise ValueError("translation oracle page_indexes must select declared scenario pages")
         page_outcomes = [all_page_outcomes[page] for page in selected_pages]
-        expected_fault = self._expected_fault(state, page_outcomes[0])
+        fault_outcome = next(
+            (outcome for outcome in page_outcomes if not bool(outcome.get("ok", False))),
+            page_outcomes[0],
+        )
+        expected_fault = self._expected_fault(state, fault_outcome)
         s2xlate = int(state.expected_ptw_request["s2xlate"])
         response_covers_selected_pages = (
             (s2xlate != 2 and int(state.scenario.s1_pte.level) > 0)
             or (s2xlate in {2, 3} and int(state.scenario.s2_pte.level) > 0)
-            or bool(state.scenario.s1_sector_lanes)
         )
-        ptw_pages = selected_pages[:1] if response_covers_selected_pages else selected_pages
+        if response_covers_selected_pages:
+            ptw_pages = selected_pages[:1]
+        elif state.scenario.s1_sector_lanes:
+            invalid_lanes = {
+                int(entry.lane)
+                for entry in state.scenario.s1_sector_lanes
+                if not int(entry.valid)
+            }
+            base_vpn = int(state.scenario.va) >> 12
+            ptw_pages = selected_pages[:1] + tuple(
+                page
+                for page in selected_pages[1:]
+                if ((base_vpn + page) & 0x7) in invalid_lanes
+            )
+        else:
+            ptw_pages = selected_pages
         expected_ptw_requests = [] if not expect_ptw or (
             str(state.scenario.mode).lower() == "bare" and s2xlate == 0
         ) else [
@@ -432,6 +450,10 @@ class TranslationPermissionOracle:
                 )
                 return
             self.active["observed_out_of_scope_fetch_pas"].append(actual_pa)
+            return
+        if self.active["expected_path"] == "fault":
+            self._record(cycle, "fetch_request", path=actual_path, pa=actual_pa)
+            self._error(cycle, "unexpected_fetch_after_fault", path=actual_path, pa=actual_pa)
             return
         if self.active["fetch_seen"]:
             return
