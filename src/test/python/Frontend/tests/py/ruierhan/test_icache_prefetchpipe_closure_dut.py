@@ -17,6 +17,7 @@ from env.sequences import TranslationScenario, TranslationScenarioBuilder
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     test_icache_trained_two_fetch_hit_hit_then_fencei_miss_miss as _run_trained_refill,
 )
+from tests.py.jiabowen.test_two_fetch_directed_flow_dut import _c_j
 from tests.py.zhaoxinran.test_multi_branch import (
     test_large_loop_multi_segment as _run_large_loop,
 )
@@ -104,6 +105,18 @@ def _wait_refill_waymask(env, address: int, *, max_cycles: int = 4096) -> int:
 
 def _load_nops(env, base: int, *, words: int = 8192) -> None:
     env.load_program((_NOP.to_bytes(4, "little")) * int(words), int(base))
+
+
+def _load_overlap2_loop(env, base: int) -> int:
+    # A starts at +0x60 and jumps to B at +0x30 without crossing a line.
+    # B crosses into the next line and jumps back to A at +0x50.  Once both
+    # branches are trained, consecutive FTQ entries repeat the Overlap2 layout.
+    noncross_entry = int(base) + 0x60
+    payload = bytearray((0x0001).to_bytes(2, "little") * 128)
+    payload[0x50:0x52] = _c_j(0x10).to_bytes(2, "little")
+    payload[0x70:0x72] = _c_j(-0x40).to_bytes(2, "little")
+    env.load_program(bytes(payload), int(base))
+    return noncross_entry
 
 
 def _prepare_nops(
@@ -515,7 +528,7 @@ def test_tc_icache_prefetch_corrupt_refill(prefetchpipe_env) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-771", "BIN-772", "BIN-778", "BIN-780")
+@pytest.mark.funcov_bins("BIN-758", "BIN-771", "BIN-772", "BIN-778", "BIN-780")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_prefetchpipe_large_loop_layout(prefetchpipe_env) -> None:
     env = prefetchpipe_env
@@ -525,10 +538,61 @@ def test_tc_icache_prefetchpipe_large_loop_layout(prefetchpipe_env) -> None:
         [
             ("icache_prefetchpipe_s1_meta", "dual_layout_overlap1"),
             ("icache_prefetchpipe_s1_meta", "dual_layout_interleave"),
+            ("icache_waylookup_wrap", "dual_wrap"),
             ("icache_mainpipe_s2_ecc", "meta_code_mismatch_zero_way_ignored"),
             ("icache_mainpipe_s2_ecc", "meta_invalid_line_masked"),
         ],
         max_cycles=6000,
+    )
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-779")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_prefetchpipe_overlap2_layout(prefetchpipe_env) -> None:
+    env = prefetchpipe_env
+    base = _SOFT_BASE + 0x1_0000
+    noncross_entry = _load_overlap2_loop(env, base)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=16,
+        miss_rate=1.0,
+        seed=0x6779,
+    )
+    env.initialize(reset_vector=noncross_entry, bare_mode=True, reset_cycles=20)
+    env.monitor.clear()
+    env.monitor.set_expected_pc(noncross_entry)
+    for _ in range(1200):
+        if int(env.backend_model.get_stats().get("commit_count", 0)) >= 96:
+            break
+        env.step(1)
+    else:
+        raise AssertionError(
+            {
+                "reason": "Overlap2 branch pair did not train",
+                "backend": env.backend_model.get_stats(),
+            }
+        )
+
+    env.backend_model.set_can_accept(0)
+    for _ in range(1600):
+        occupancy = _signal(env, "waylookup_num_valid")
+        if occupancy is not None and int(occupancy) >= 30:
+            break
+        env.step(1)
+    else:
+        raise AssertionError(
+            {
+                "reason": "FTQ did not build enough prefetch backlog",
+                "waylookup_num_valid": _signal(env, "waylookup_num_valid"),
+                "backend": env.backend_model.get_stats(),
+            }
+        )
+    env.backend_model.set_can_accept(1)
+    _wait_bins(
+        env,
+        [("icache_prefetchpipe_s1_meta", "dual_layout_overlap2")],
+        max_cycles=2000,
     )
     assert not env.monitor.get_errors()
 

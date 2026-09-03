@@ -20,6 +20,7 @@ from tests.py.zhaoxinran.test_multi_branch import (
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 _BASE = 0x8008_0000
 _CROSS_BASE = 0x8009_0000
+_MULTI_BRANCH_BASE = 0x8000_0000
 _NOP = 0x0000_0013
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
 
@@ -74,6 +75,28 @@ for _index in range(4):
 
 _SIGNALS["sram_valid_0"] = _aliases(_MAIN + "s1_sramRespValid")
 _SIGNALS["sram_valid_1"] = _aliases(_MAIN + "s1_sramValid_0_1")
+_SIGNALS["two_fetch_valid"] = _aliases(_MAIN + "s1_twoFetchValid")
+_SIGNALS["to_ifu_maybe_rvc_map"] = _aliases(
+    _MAIN + "io_toIfu_req_bits_maybeRvcMap"
+)
+for _index in range(4):
+    _suffix = "" if _index == 0 else f"_{_index}"
+    _comb_suffix = ("", "_3", "_6", "_9")[_index]
+    _enable_suffix = ("_1", "_4", "_7", "_10")[_index]
+    _req = _index // 2
+    _line = _index % 2
+    _SIGNALS[f"aligned_map_stored_{_index}"] = _aliases(
+        _MAIN + f"s1_alignedMaybeRvcMapVec_r{_suffix}"
+    )
+    _SIGNALS[f"aligned_map_comb_{_index}"] = _aliases(
+        _MAIN + f"_s1_alignedMaybeRvcMapVec_T{_comb_suffix}"
+    )
+    _SIGNALS[f"aligned_map_enable_{_index}"] = _aliases(
+        _MAIN + f"_s1_alignedMaybeRvcMapVec_T{_enable_suffix}"
+    )
+    _SIGNALS[f"aligned_mask_{_index}"] = _aliases(
+        _MAIN + f"s1_maybeRvcAlignInfo_alignedMaybeRvcMaskVec_{_req}_{_line}"
+    )
 
 
 def _cycle_limit(name: str, default: int) -> int:
@@ -158,6 +181,21 @@ def _wait_hit(env, group: str, bin_name: str, *, max_cycles: int = 6000) -> None
         max_cycles=max_cycles,
         label=f"{group}.{bin_name}",
     )
+
+
+def _direct_alignment_matches(sample: dict[str, int]) -> bool:
+    if sample["s1_valid"] != 1 or sample["to_ifu_valid"] != 1:
+        return False
+    effective_lines = 4 if sample["two_fetch_valid"] == 1 else 2
+    expected = 0
+    for index in range(effective_lines):
+        aligned_map = (
+            sample[f"aligned_map_comb_{index}"]
+            if sample[f"aligned_map_enable_{index}"] == 1
+            else sample[f"aligned_map_stored_{index}"]
+        )
+        expected |= aligned_map & sample[f"aligned_mask_{index}"]
+    return sample["to_ifu_maybe_rvc_map"] == (expected & 0xFFFF_FFFF)
 
 
 def _jal(rd: int, offset: int) -> int:
@@ -245,23 +283,25 @@ def test_tc_icache_mainpipe_cross_line_dual_sram_hit(env) -> None:
         and ((sample["s1_addr"] << 1) & 0x3F) >= 8
         for sample in samples
     ), {"tail": samples[-96:]}
-    alignment_hit = env.functional_coverage.hits[
-        (
-            "icache_mainpipe_maybe_rvc_align",
-            "alignment_behavior",
-            "sram_req0_line1_shift_left",
-        )
-    ]
     assert any(
-        evidence.get("sram_alignment_matches") is True
-        and evidence.get("toifu_maybe_rvc_map_matches") is True
-        and evidence.get("range_output_matches") is True
-        for evidence in alignment_hit.evidence
-    ), {"alignment_evidence": alignment_hit.evidence}
+        sample["cross0"] == 1
+        and sample["sram_valid_0"] == 1
+        and sample["sram_valid_1"] == 1
+        and _direct_alignment_matches(sample)
+        for sample in samples
+    ), {"tail": samples[-96:]}
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-612")
+@pytest.mark.funcov_bins(
+    "BIN-612",
+    "BIN-1132",
+    "BIN-1133",
+    "BIN-1134",
+    "BIN-1135",
+    "BIN-1136",
+    "BIN-1137",
+)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_dual_request_independent(env) -> None:
     samples = _register_observer(env)
@@ -278,6 +318,20 @@ def test_tc_icache_mainpipe_dual_request_independent(env) -> None:
         "dual_request_independent",
         max_cycles=1,
     )
+    for bin_name in (
+        "sram_req0_line0_shift_right",
+        "sram_req0_line1_shift_left",
+        "sram_req1_shift_right",
+        "sram_req1_shift_left_zero",
+        "sram_req1_line1_shift_left",
+        "invalid_req1_masked",
+    ):
+        _wait_hit(
+            env,
+            "icache_mainpipe_maybe_rvc_align",
+            bin_name,
+            max_cycles=1,
+        )
     assert any(
         sample["s1_valid"] == 1
         and sample["req1_valid"] == 1
@@ -292,6 +346,67 @@ def test_tc_icache_mainpipe_dual_request_independent(env) -> None:
         )
         for sample in samples
     ), {"tail": samples[-96:]}
+    assert any(_direct_alignment_matches(sample) for sample in samples), {
+        "tail": samples[-96:]
+    }
+
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-1138", "BIN-1139")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_tc_icache_mainpipe_mshr_alignment(env) -> None:
+    """Train varied dual requests, then replay them through MainPipe refills."""
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=2,
+        miss_rate=1.0,
+        seed=0x7138,
+    )
+    random_state = random.getstate()
+    random.seed(1)
+    try:
+        _run_multi_branch_positions(env)
+    finally:
+        random.setstate(random_state)
+
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
+    fencei = getattr(env.clock_reset, "io_fencei", None)
+    assert fencei is not None, {"missing_signal": "io_fencei"}
+    for _episode in range(8):
+        fencei.value = 1
+        env.step(1)
+        fencei.value = 0
+        for _ in range(192):
+            if all(
+                env.functional_coverage.key_hit(
+                    "icache_mainpipe_maybe_rvc_align",
+                    bin_name,
+                )
+                for bin_name in (
+                    "mshr_request_line_alignment",
+                    "mixed_source_merge",
+                )
+            ):
+                break
+            env.step(1)
+        if all(
+            env.functional_coverage.key_hit(
+                "icache_mainpipe_maybe_rvc_align",
+                bin_name,
+            )
+            for bin_name in ("mshr_request_line_alignment", "mixed_source_merge")
+        ):
+            break
+
+    for bin_name in ("mshr_request_line_alignment", "mixed_source_merge"):
+        _wait_hit(
+            env,
+            "icache_mainpipe_maybe_rvc_align",
+            bin_name,
+            max_cycles=1,
+        )
+    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
     assert not env.monitor.get_errors()
 
 

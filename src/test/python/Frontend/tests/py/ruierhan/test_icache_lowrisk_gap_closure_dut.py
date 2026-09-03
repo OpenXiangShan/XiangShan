@@ -21,6 +21,7 @@ from env.funcov.py.icache.icache_waylookup_funcov import (
 from env.support.pmp_pma import PmpPmaConfig
 from tests.py.jiabowen.test_icache_mainpipe_miss_response import (
     _initialize_cacheable_stream,
+    test_icache_trained_two_fetch_asymmetric_line_refill as _run_asymmetric_refill,
 )
 from tests.py.jiabowen.test_two_fetch_directed_flow_dut import (
     _load_and_reset as _load_two_fetch_loop,
@@ -584,7 +585,7 @@ def test_icache_lowrisk_waylookup_updates_and_flush(lowrisk_cleanup) -> None:
 
 
 @pytest.mark.funcov_bins(
-    "BIN-720", "BIN-726", "BIN-727",
+    "BIN-720", "BIN-726", "BIN-727", "BIN-728", "BIN-735", "BIN-777",
 )
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_waylookup_queue_read_dut(lowrisk_cleanup) -> None:
@@ -626,8 +627,33 @@ def test_icache_lowrisk_waylookup_queue_read_dut(lowrisk_cleanup) -> None:
     )
     _set_predictors(env, True)
 
+    _wait_funcov_hits(
+        env,
+        (
+            ("icache_waylookup_update", "update_head"),
+            ("icache_waylookup_update", "update_second_entry_stall"),
+            ("icache_prefetchpipe_s0_entry", "bpu_flush_miss_allows_hw"),
+        ),
+        max_cycles=1,
+        label="WayLookup update and nonmatching BPU flush coverage",
+    )
+
     assert blocked["num_valid"] is not None and int(blocked["num_valid"]) >= 1
     assert not env.monitor.get_errors()
+
+
+@pytest.mark.funcov_bins("BIN-733")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_lowrisk_waylookup_corrupt_update_dut(lowrisk_cleanup) -> None:
+    env = lowrisk_cleanup
+    _run_asymmetric_refill(env, expected_pattern="hit_miss", evict_req=1)
+    _wait_funcov_hit(
+        env,
+        "icache_waylookup_update",
+        "update_corrupt_ignored",
+        max_cycles=1,
+        label="corrupt refill matching a queued WayLookup entry",
+    )
 
 
 @pytest.mark.funcov_bins(
@@ -811,37 +837,41 @@ def test_icache_lowrisk_hit_pmp_exception(lowrisk_cleanup) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-757", "BIN-1011")
+@pytest.mark.funcov_bins(
+    "BIN-680", "BIN-753", "BIN-754", "BIN-756", "BIN-757", "BIN-758", "BIN-1011"
+)
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_lowrisk_waylookup_capacity_wrap_dut(lowrisk_cleanup) -> None:
-    """Run sustained traffic until both WayLookup pointers cross their boundary."""
+    """Fill WayLookup with dual writes, then release one blocked transaction."""
     env = lowrisk_cleanup
-    base = 0x8007_0000
-    _load_nops(env, base, words=32768)
-    env.icache_agent.configure(
-        hit_latency=1,
-        miss_latency=8,
-        miss_rate=1.0,
-        seed=0x757,
-    )
-    env.initialize(reset_vector=base, bare_mode=True, reset_cycles=20)
-    env.monitor.clear()
-    env.monitor.set_expected_pc(base)
-    for _ in range(8192):
-        if all(
-            env.functional_coverage.key_hit("icache_waylookup_wrap", name)
-            for name in ("single_read_wrap", "single_write_wrap")
-        ):
-            break
-        env.step(1)
+    _load_two_fetch_loop(env)
+    _warm_two_fetch_execution(env)
+
+    env.backend_model.set_can_accept(0)
+    _wait_waylookup_occupancy(env, 32, max_cycles=12000)
     _wait_funcov_hits(
         env,
         (
+            ("icache_waylookup_capacity", "one_slot_blocks_dual"),
+            ("icache_waylookup_capacity", "full_blocks_write"),
+        ),
+        max_cycles=256,
+        label="WayLookup one-slot and full dual-write backpressure",
+    )
+    env.step(4)
+    env.backend_model.set_can_accept(1)
+
+    _wait_funcov_hits(
+        env,
+        (
+            ("icache_prefetchpipe_s1_meta", "waylookup_backpressure_recovery"),
+            ("icache_waylookup_capacity", "read_write_boundary"),
             ("icache_waylookup_wrap", "single_read_wrap"),
             ("icache_waylookup_wrap", "single_write_wrap"),
+            ("icache_waylookup_wrap", "dual_wrap"),
         ),
-        max_cycles=1,
-        label="WayLookup read/write pointer wrap coverage",
+        max_cycles=12000,
+        label="WayLookup capacity recovery and pointer wrap coverage",
     )
     assert not env.monitor.get_errors()
 

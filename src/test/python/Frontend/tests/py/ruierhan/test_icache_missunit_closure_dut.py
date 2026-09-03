@@ -671,7 +671,7 @@ def test_icache_missunit_prefetch_capacity_dut(env) -> None:
     _assert_clean(env)
 
 
-@pytest.mark.funcov_bins("BIN-693", "BIN-694")
+@pytest.mark.funcov_bins("BIN-625", "BIN-693", "BIN-694", "BIN-698")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_acquire_priority_dut(env) -> None:
     _prepare(
@@ -706,8 +706,10 @@ def test_icache_missunit_acquire_priority_dut(env) -> None:
     _wait_bins(
         env,
         [
+            ("icache_mainpipe_s1_refill", "cross_line_split_refill"),
             ("icache_missunit_acquire", "fetch_priority_over_prefetch"),
             ("icache_missunit_acquire", "fetch_index_priority"),
+            ("icache_missunit_acquire", "acquire_backpressure_recovery"),
         ]
     )
     _assert_clean(env)
@@ -942,7 +944,7 @@ def test_icache_missunit_fencei_dut(env) -> None:
     _assert_clean(env)
 
 
-@pytest.mark.funcov_bins("BIN-707", "BIN-708", "BIN-711")
+@pytest.mark.funcov_bins("BIN-629", "BIN-707", "BIN-708", "BIN-711")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_fencei_unissued_dut(env) -> None:
     samples = _prepare(
@@ -988,6 +990,7 @@ def test_icache_missunit_fencei_unissued_dut(env) -> None:
     _wait_bins(
         env,
         [
+            ("icache_mainpipe_s1_miss", "missunit_backpressure_stable"),
             ("icache_missunit_fencei", "fencei_blocks_new_nonduplicate"),
             ("icache_missunit_fencei", "fencei_cancels_unissued_mshr"),
             ("icache_missunit_fencei", "fencei_clears_prefetch_fifo"),
