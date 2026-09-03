@@ -287,7 +287,6 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   val deqAllocatedVec = VecInit(deqPtrVec.map(ptr => ctrlEntries(ptr.value).allocated))
   val deqReqNumVec = VecInit(deqPtrVec.map(ptr => dataEntries(ptr.value).reqNum.asUInt))
   val retireBaseVec = VecInit((0 until CommitWidth).map(i => isBefore(deqRobIdxVec(i), robHeadPtr) && deqAllocatedVec(i)))
-  val mbCommitVec = VecInit((0 until CommitWidth).map(i => (deqRobIdxVec(i) === robHeadPtr) && deqAllocatedVec(i)))
   val retireCount = PopCount(retireVec)
   val preCommitRelease = WireInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
   val retireCarryVec = Wire(Vec(CommitWidth, Bool()))
@@ -295,9 +294,9 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   for (i <- 0 until CommitWidth) {
     val releaseHit = if (i < EnsbufferWidth) preCommitRelease(i) else false.B
     if (i == 0) {
-      retireCarryVec(i) := (retireBaseVec(i) || mbCommitVec(i)) || releaseHit
+      retireCarryVec(i) := retireBaseVec(i) || releaseHit
     } else {
-      retireCarryVec(i) := ((retireBaseVec(i) || mbCommitVec(i)) && retireCarryVec(i - 1)) || releaseHit
+      retireCarryVec(i) := (retireBaseVec(i) && retireCarryVec(i - 1)) || releaseHit
     }
     retireVec(i) := retireCarryVec(i)
   }
@@ -314,8 +313,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
 
   // precommit store, it will be write to sbuffer before rob retire.
   val preCommitEntry = ctrlEntries(preCommitPtr.value)
-  val preCommitMoveValid = dataEntries(preCommitPtr.value).robIdx === robHeadPtr &&
-    preCommitEntry.allocated
+  val preCommitMoveValid = dataEntries(preCommitPtr.value).robIdx === robHeadPtr && preCommitEntry.allocated
 
   val preCommitPtrNext = WireInit(preCommitPtr)
   when(redirectReg.valid) { // redirect next cycle update preCommitPtr

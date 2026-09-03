@@ -1692,12 +1692,9 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
     /*============================================== vector ctrl =====================================================*/
     /*================================================================================================================*/
 
-    val vecIncativCommit = commitPtrExt.map(ptr => !ctrlEntries(i).addrValid && !ctrlEntries(i).dataValid && ptr.isBefore(virtualStoreQueueRetiredPtr) && ptr.value === i.U).reduce(_ || _)
-    when(vecIncativCommit) { //TODO: will be fixed in the future
-      ctrlEntries(i).vecInactive := true.B
-    }.elsewhen(deqCancel || needCancel(i)) {
-      ctrlEntries(i).vecInactive := false.B
-    }
+    // Todo[vector]: support vector non-continuous store
+    // Set it always false because continuous store should not set it.
+    ctrlEntries(i).vecInactive := false.B
 
     XSError(ctrlEntries(i).vecInactive && staSetValid, s"inactive vector element allocate! index: ${i}\n")
 
