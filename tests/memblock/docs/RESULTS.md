@@ -108,18 +108,18 @@ clean. `HISTORICAL_BUG_AUDIT.md` records the strict status and boundary contract
 for all 58 commits in scope.
 
 The source hashes below identify the harness revision used for the historical
-results above. They are retained as historical provenance only; the current
-source hashes are recorded by the next campaign artifact after the oracle-plan
-review:
+results above. They are retained as historical provenance only; the previous
+artifact did not enforce them:
 
 - historical `memblock_main.cpp`: `2b8a372c88565e26231ecdd87f917335b0f1c2a2980bad7590cd0502e12acc10`;
 - historical `memblock_env.hpp`: `f1a638a87547df505696a05200350e1c1b0fa79f15947f9325278a89d77563ad`;
 - historical protocol SVA: `31feec579cf939d04f446114071e5860e17ed990e8c680a67f6f9b5c0c91ff6d`.
 
 The previous runner did not hash these source files, so these values were not
-independently enforced by the JSON artifact. The reviewed runner must record
-and verify source hashes as controller inputs before a new long campaign is
-accepted.
+independently enforced by the JSON artifact. The reviewed runner now records
+and verifies source hashes as controller inputs for new campaigns. The final
+six-hour artifact above predates that change and is therefore not
+provenance-complete for this reviewed harness revision.
 
 The current mixed summary reports vector load and store address-mode coverage
 separately (`vec_load_modes` and `vec_store_modes`), so a load cannot mask a
@@ -257,8 +257,10 @@ Artifact: `build/memblock/final-frozen-6h.json`, SHA-256
 `make verify-final-results` independently validated the artifact and reported
 `MEMBLOCK_REGRESSION_ARTIFACT_PASS` for seeds `1..3802`.
 
-This is evidence that the repaired RTL satisfies the tested contracts under this
-campaign; it is not a proof that untested MemBlock boundary gaps are bug-free.
+This is evidence that the repaired RTL satisfies the tested contracts under the
+pre-review harness. It is not a proof that untested MemBlock boundary gaps are
+bug-free, and it is not the acceptance artifact for the reviewed oracle/source
+provenance changes described above.
 No additional CPU bug was exposed by this repaired campaign. Historical mutant
 results remain the evidence for the four independently reproduced LSU defects
 listed above; any future failure should be triaged from its recorded seed and
