@@ -94,7 +94,7 @@ cacheable tests pass.
 | Point family | Values and crosses to generate | Current status |
 | --- | --- | --- |
 | Integer loads | `lb/lbu/lh/lhu/lw/lwu/ld`, all destination classes, all issue lanes, zero/sign-extension patterns | Implemented |
-| Integer stores | `sb/sh/sw/sd`, address-first/data-first, byte masks, all issue lanes, commit timing | Implemented |
+| Integer stores | `sb/sh/sw/sd`, address-first/data-first, byte masks, all issue lanes, commit timing | Partial; issue/commit and modeled readback are covered, but the boundary exposes no store payload monitor |
 | Floating loads/stores | FLW/FLD and narrow/widening formats, NaN-boxing, FP exception bits, integer/FP destination separation | Planned at MemBlock boundary |
 | Vector unit stride | EEW 8/16/32/64, `vl=0..VLEN`, `vstart` at start/middle/end, `vm`, mask holes, `vma/vta` | Implemented for modeled 128-bit operations |
 | Vector strided | Positive, zero, and negative legal strides; element overlap and gaps; line/page crossings | Partial; negative-stride and overlap crosses planned |
@@ -128,7 +128,7 @@ cacheable tests pass.
 | --- | --- | --- |
 | DCache lookup | warm hit, cold miss, same-line merge, bank conflict, set pressure beyond associativity, synonym/alias | Partial; cold/warm and dirty set pressure implemented |
 | Refill/replay | delayed A/D responses, beat reordering where legal, partial refill, killed request, replay after miss | Partial |
-| Eviction | clean release, dirty ReleaseData, partial byte masks, replacement under pressure, release backpressure | Partial; whole-line pre-eviction snapshot is planned |
+| Eviction | clean release, dirty ReleaseData, partial byte masks, replacement under pressure, release backpressure | Partial; immutable whole-line snapshot is checked for the dedicated dirty-pressure phase, while broader release/response classes remain planned |
 | TileLink coherence | Probe/B/C/E traffic, source reuse, denied/corrupt/error responses, manager ordering | Planned/partial; probe/error injection absent |
 | Uncache/MMIO | Get/Put widths, byte enables, side effects, ordering, response delay, denied/error response | Partial; generic uncache/PBMT-NC only |
 | ECC/cache errors | correctable/uncorrectable data, error lifetime, retry or architectural exception | Planned |

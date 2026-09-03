@@ -31,9 +31,9 @@ historical failing value.
 | Domain | Independent calculation | DUT-observable check | Status |
 | --- | --- | --- | --- |
 | Scalar load data | Read bytes from pre-state sparse memory, then apply operation width and sign/zero extension | One matching scalar writeback with exact data, destination, ROB/uop identity, and exception bits | Implemented |
-| Scalar store data | Apply byte enables and little-endian store bytes to a copy of reference memory at commit | Address/data issue and later readback are checked for modeled stores | Partial; output-only store pulses and a fully independent immutable snapshot are planned |
+| Scalar store data | Apply byte enables and little-endian store bytes to a copy of reference memory at commit | Address/data issue and independent post-commit readback for modeled stores | Partial; output-only store pulses remain unobservable, so broader payload checking is planned |
 | Vector load data | Decode unit/strided/indexed addresses independently; apply EEW, `vl`, `vstart`, mask, tail/merge policy, and old destination | Exact 128-bit writeback, active-element behavior, metadata, and identity | Implemented for modeled vector memory operations |
-| Vector store data | Generate each active element's byte addresses and bytes from source data; apply mask and split rules | Active-byte readback, completion, replay progress, and queue drain are checked for modeled stores | Partial; independent post-commit memory checking is being strengthened |
+| Vector store data | Generate each active element's byte addresses and bytes from source data; apply mask and split rules | Active-byte readback, completion, replay progress, and queue drain are checked for modeled stores | Partial; generic mixed stores remain limited by the output-only store boundary |
 | Store forwarding | Overlay the youngest legal store bytes on the pre-state load bytes, per byte and per age rule | Scalar/vector load returns the byte-accurate overlay before store commit | Implemented |
 | Sv39 translation | Walk independently populated PTEs, checking valid/leaf, level, permissions, SUM/MXR, A/D, and PBMT policy | Returned data comes from calculated PA, or exact page/access fault and fault VA | Partially implemented; permission matrix expansion planned |
 | Sv39x4 translation | Perform VS walk followed by G-stage walk; retain the exact failing PTE GPA and VS-non-leaf classification | Exact host PA or guest fault cause, VA, GPA, and marker | Implemented for current modeled cases |
@@ -42,7 +42,7 @@ historical failing value.
 | Register side effects | Architectural rule for the instruction class, including no RF write on exceptional load and no RF write for prefetch | RF writeback present only when allowed, with exact destination/data | Implemented for modeled scalar/vector/prefetch paths |
 | Prefetch | Prefetch has no architectural destination and does not require data return; translation policy is modeled separately | Completion without RF write or load exception, with legal request behavior | Implemented for software prefetch cases |
 | Cache refill | Sparse memory is authoritative for returned line bytes; line address and transfer size are decoded independently | Complete legal refill, no byte corruption, and eventual response consumption | Implemented |
-| Dirty eviction | Reference memory tracks committed bytes; an independent immutable pre-eviction line image is required for every release | Correct Release/ReleaseData/ReleaseAck sequence and exact bytes for the whole line | Partial; current agent updates the shared model while consuming release data, so full independent line comparison is planned |
+| Dirty eviction | Reference memory tracks committed bytes; an independent immutable pre-eviction line image is captured before replacement | Correct Release/ReleaseData/ReleaseAck sequence and exact bytes for the captured pressure lines | Partial; the dedicated pressure phase is byte-checked, while general release coverage remains planned |
 | Uncache/PBMT-NC | Ordered byte memory model with request size, mask, and source identity | Correct AccessAck/Data, ordered store visibility, and exact load data | Partial; current modeled Get/Put path is checked, but denied/corrupt/error response classes are planned |
 | Ready/valid | Protocol definition: payload remains stable while `valid && !ready`; accepted items need identity-preserving disposition | Generated SVA checks producer stability; channel monitors must independently validate response identity and legality | Partial; response opcode/source/size/denied/corrupt checks are planned |
 | Queue conservation | Accepted LQ/SQ enqueue handshakes, architectural dequeues, and redirect events | `allocated = dequeued + canceled` at quiescence, with identity and flag preservation | Partial; current allocation/cancellation totals are driver-accounted and acceptance observation is planned |
@@ -89,7 +89,8 @@ root and mode separately from the DUT. The current software walk returns a
 physical address or a limited structured fault containing validity, leaf level,
 alignment, and guest/host walk information. It does not yet model the complete
 RISC-V permission matrix, SUM/MXR, A/D updates, or access-specific fault reason;
-those are planned independent extensions. For a VS-non-leaf fault, the GPA is
+those are planned independent extensions. For a VS-non-leaf fault, the reported
+vector VA is the first active element selected by `vstart` and masking, while the GPA is
 the guest physical address of the failing page-table access; it is not adjusted
 by a vector element offset. This rule is architectural and is deliberately
 tested with randomized vector width, mask, and offset.

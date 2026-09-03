@@ -187,7 +187,7 @@ regression: $(PICKER_TEST_BINARY)
 	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --output $(REGRESSION_OUTPUT) --jobs $${REGRESSION_JOBS:-$(JOBS)} --seeds $${SEEDS:-8} --transactions $${TRANSACTIONS:-1000} --forwarding-transactions $${FORWARD_TRANSACTIONS:-48} --mixed-transactions $${MIXED_TRANSACTIONS:-512}
 
 extended-regression: $(RUNTIME_METADATA)
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(EXTENDED_RESULT) --jobs $${REGRESSION_JOBS:-$(JOBS)} --duration-seconds $${DURATION_SECONDS:-21600} --scenarios random-mixed --mixed-transactions $${MIXED_TRANSACTIONS:-4096} --progress-interval-seconds 60
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(EXTENDED_RESULT) --jobs $${REGRESSION_JOBS:-$(JOBS)} --duration-seconds $${DURATION_SECONDS:-14400} --scenarios random-mixed --mixed-transactions $${MIXED_TRANSACTIONS:-4096} --progress-interval-seconds 60
 
 final-regression: $(RUNTIME_METADATA)
 	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(FINAL_RESULT) --jobs $${REGRESSION_JOBS:-$(JOBS)} --duration-seconds $${DURATION_SECONDS:-21600} --scenarios random-mixed --mixed-transactions $${MIXED_TRANSACTIONS:-4096} --progress-interval-seconds 60

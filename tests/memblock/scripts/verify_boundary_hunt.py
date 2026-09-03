@@ -13,6 +13,14 @@ class BoundaryHuntError(RuntimeError):
     pass
 
 
+def _valid_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
 def verify_boundary_hunt(
     path: Path,
     *,
@@ -26,7 +34,7 @@ def verify_boundary_hunt(
     if rtl_metadata is not None:
         metadata = json.loads(rtl_metadata.read_text(encoding="utf-8"))
         metadata_hash = metadata.get("complete_rtl_sha256")
-        if not isinstance(metadata_hash, str):
+        if not _valid_sha256(metadata_hash):
             raise BoundaryHuntError("RTL metadata has no complete hash")
         rtl_sha256 = metadata_hash
     results = document.get("results")
@@ -50,7 +58,7 @@ def verify_boundary_hunt(
         if result.get("status") != expected_status:
             raise BoundaryHuntError("boundary hunt status does not match failure count")
         returncode = result.get("returncode")
-        if not isinstance(returncode, int):
+        if not isinstance(returncode, int) or isinstance(returncode, bool):
             raise BoundaryHuntError("boundary hunt has no integer return code")
         if (failures == 0 and returncode != 0) or (failures != 0 and returncode == 0):
             raise BoundaryHuntError("boundary hunt return code does not match status")

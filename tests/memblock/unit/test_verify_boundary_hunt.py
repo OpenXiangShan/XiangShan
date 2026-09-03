@@ -94,6 +94,36 @@ class VerifyBoundaryHuntTest(unittest.TestCase):
                     path, min_seeds=1, transactions=4, rtl_sha256="a" * 64
                 )
 
+    def test_rejects_boolean_returncode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hunt.json"
+            bad = result(7)
+            bad["returncode"] = True
+            path.write_text(json.dumps({"results": [bad]}))
+            with self.assertRaisesRegex(
+                verify_boundary_hunt.BoundaryHuntError, "integer return code"
+            ):
+                verify_boundary_hunt.verify_boundary_hunt(
+                    path, min_seeds=1, transactions=4, rtl_sha256="a" * 64
+                )
+
+    def test_rejects_malformed_metadata_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            metadata = root / "rtl.json"
+            metadata.write_text(json.dumps({"complete_rtl_sha256": "bad"}))
+            path = root / "hunt.json"
+            path.write_text(json.dumps({"results": [result(7)]}))
+            with self.assertRaisesRegex(
+                verify_boundary_hunt.BoundaryHuntError, "complete hash"
+            ):
+                verify_boundary_hunt.verify_boundary_hunt(
+                    path,
+                    min_seeds=1,
+                    transactions=4,
+                    rtl_metadata=metadata,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3180,11 +3180,21 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         candidate.mask_bits |= static_cast<std::uint16_t>(1U << element);
                     }
                 }
-                // A VS-non-leaf fault reports the virtual address of the
-                // faulting vector instruction, not the selected active
-                // element.  The active element still controls the split
-                // shape, while the architectural VA remains the base.
-                const std::uint64_t expected_exception_vaddr = address;
+                // Vector memory faults report the VA of the first active
+                // element selected by vstart/mask.  The VS-non-leaf GPA is
+                // different: it remains the exact page-table byte reported
+                // by the two-stage walk and is never element-offset.
+                unsigned first_active_element = 0;
+                while (first_active_element < element_count &&
+                       ((memblock::active_vector_elements(candidate) >>
+                         first_active_element) & 1U) == 0) {
+                    ++first_active_element;
+                }
+                if (first_active_element == element_count) {
+                    return false;
+                }
+                const std::uint64_t expected_exception_vaddr = address +
+                    static_cast<std::uint64_t>(first_active_element << eew);
                 candidate.expected_exception_mask =
                     memblock::kExceptionLoadGuestPageFault;
                 if (!environment.set_rob_head(candidate.rob, candidate.rob_flag) ||
@@ -3338,6 +3348,16 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             dirty_stores[index] = make_store(
                 line + 24, 0xc001d00d00000000ULL | index,
                 memblock::StoreOp::sd, index % 2, (index + 1) % 2);
+            std::vector<unsigned char> expected_line =
+                environment.memory().read_beat(line, line_bytes);
+            for (unsigned byte = 0; byte < sizeof(std::uint64_t); ++byte) {
+                expected_line[24 + byte] = static_cast<unsigned char>(
+                    dirty_stores[index].data >> (8 * byte));
+            }
+            // Snapshot the architectural line before the DUT can evict it.
+            // The TileLink agent compares ReleaseData against this immutable
+            // image before updating its backing memory model.
+            environment.expect_release_line(line, expected_line);
             if (index == 0) {
                 environment.expect_store(dirty_stores[index]);
                 if (!environment.enqueue_store(
@@ -3374,21 +3394,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             !environment.run_cycles(32)) {
             return false;
         }
-        unsigned preserved_dirty_stores = 0;
-        for (const auto &store : dirty_stores) {
-            if (environment.memory().expected_load(
-                    store.address, memblock::LoadOp::ld) == store.data) {
-                ++preserved_dirty_stores;
-            }
-        }
-        coverage.dirty_pressure = preserved_dirty_stores;
+        coverage.dirty_pressure = environment.tilelink_release_data_verified();
 
         phase = "seeded-mixed-tail";
         const unsigned target_before_redirect = options.transactions - 2;
         // The tail is a constrained-random issue window. Each window contains
         // all five producer classes before any completion drain, so cache,
         // TLB, forwarding, and queue timing can interact in one simulation.
-        while (actions + 5 <= target_before_redirect) {
+        while (actions + 6 <= target_before_redirect) {
             const std::uint64_t window_base =
                 cache0_base + 0x10000 + (random() % 256) * 128;
             const auto required_mode = static_cast<memblock::VectorAddressingMode>(
@@ -3534,7 +3547,20 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             if (!environment.run_until_all_complete(4096) ||
                 !environment.run_cycles(8) ||
                 !environment.commit_store(scalar_store, 4096) ||
-                !environment.commit_vector_store(vector_store, 4096) ||
+                !environment.commit_vector_store(vector_store, 4096)) {
+                return false;
+            }
+            const unsigned scalar_bytes =
+                1U << static_cast<unsigned>(scalar_store.op);
+            const auto scalar_readback = make_load(
+                scalar_store.address,
+                static_cast<memblock::LoadOp>(scalar_store.op), random() % 3);
+            if (!issue_load(
+                    scalar_readback,
+                    scalar_forward_value(scalar_store.data, scalar_bytes, false))) {
+                return false;
+            }
+            if (
                 // Keep the commit boundary at the last uop in this window.
                 // StoreQueue treats a uop whose ROB equals pendingPtr as
                 // committed; pointing at the next ROB would auto-commit the
@@ -3551,12 +3577,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 return false;
             }
             ++coverage.concurrent_windows;
-            coverage.concurrent_actions += 5;
+            coverage.concurrent_actions += 6;
             for (auto &count : coverage.concurrent_ops) {
                 ++count;
             }
             actions += 5;
-            coverage.cacheable += 5;
+            coverage.cacheable += 6;
         }
         while (actions < target_before_redirect) {
             const unsigned remaining = target_before_redirect - actions;

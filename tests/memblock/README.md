@@ -4,12 +4,13 @@ This directory contains a block-level verification environment for the generated
 Kunminghu-v2 `MemBlock`. It uses Picker/XS-MLVP for the C++ DUT wrapper and keeps
 the testbench source independent from generated build products.
 
-The current environment verifies scalar and 128-bit vector load/store behavior,
-all vector load and store address modes independently, software prefetch, scalar/vector misalignment and
-cross-page splits, the virtual load and store queues, Sv39 and two-stage
-Sv39x4 translation, exact guest-page-fault metadata, DCache misses/refills and
-dirty replacement, all four store-forwarding directions, PBMT=NC, redirects,
-and queue pressure. MMIO, atomics, CBO/CMO, HLV/HLVX/HSV, VSegment, and
+The current environment verifies modeled scalar and 128-bit vector load/store
+behavior, all vector load and store address modes independently, software
+prefetch, scalar/vector misalignment and cross-page splits, the virtual load and
+store queues, Sv39 and two-stage Sv39x4 translation, exact guest-page-fault
+metadata, DCache misses/refills and a byte-checked dirty-pressure phase, all
+four store-forwarding directions, PBMT=NC, redirects, and queue pressure. MMIO,
+atomics, CBO/CMO, HLV/HLVX/HSV, VSegment, and
 manager-originated probes remain explicit boundary gaps; they are not silently
 randomized as though they were legal cacheable flows.
 
@@ -126,8 +127,9 @@ every vector EEW and every load/store address mode independently, scalar/vector 
 `prefetch.i/r/w`, both cross-forwarding directions, Sv39 and Sv39x4 cold/warm
 translation, a vector guest-page fault with exact VA/GPA metadata, PBMT=NC,
 dirty same-set replacement, redirect/reallocation, and randomized DCache/PTW/
-uncache backpressure. Every seed must meet its own coverage and final
-LSQ-accounting gates.
+uncache backpressure. Store payload and general coherence response checks remain
+partial at this boundary; every seed must meet its own bounded coverage and
+final LSQ-accounting gates.
 
 ```sh
 make regression PICKER="$PICKER" \

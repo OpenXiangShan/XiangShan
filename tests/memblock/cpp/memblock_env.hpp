@@ -626,6 +626,43 @@ public:
     std::uint64_t response_delay_cycles() const { return response_delay_cycles_; }
     std::uint64_t release_count() const { return release_count_; }
     std::uint64_t release_data_count() const { return release_data_count_; }
+    std::uint64_t release_data_verified_count() const
+    {
+        return release_data_verified_count_;
+    }
+    void expect_release_line(
+        std::uint64_t base, const std::vector<unsigned char> &bytes)
+    {
+        if (bytes.empty() || bytes.size() % kBeatBytes != 0) {
+            error_ = "expected ReleaseData line is not beat sized";
+            return;
+        }
+        expected_release_lines_[base] = bytes;
+    }
+
+    bool verify_memory_bytes(
+        std::uint64_t address, const std::vector<unsigned char> &expected)
+    {
+        for (std::size_t index = 0; index < expected.size(); ++index) {
+            if (memory_.read_byte(address + index) != expected[index]) {
+                std::ostringstream message;
+                message << "post-commit store readback mismatch address=0x"
+                        << std::hex << (address + index)
+                        << " expected=0x" << static_cast<unsigned>(expected[index])
+                        << " actual=0x"
+                        << static_cast<unsigned>(memory_.read_byte(address + index));
+                error_ = message.str();
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool check_memory_bytes(
+        std::uint64_t address, const std::vector<unsigned char> &expected)
+    {
+        return verify_memory_bytes(address, expected);
+    }
 
 private:
     static constexpr std::size_t kBeatBytes = 32;
@@ -742,6 +779,29 @@ private:
             error_ = "interleaved or inconsistent DCache ReleaseData transaction";
             return;
         }
+        const auto expected = expected_release_lines_.find(base);
+        const bool has_expected_line = expected != expected_release_lines_.end();
+        if (expected != expected_release_lines_.end()) {
+            const std::size_t offset = release_data_->received * kBeatBytes;
+            if (offset + kBeatBytes > expected->second.size()) {
+                error_ = "ReleaseData exceeded expected immutable line image";
+                return;
+            }
+            for (std::size_t byte = 0; byte < kBeatBytes; ++byte) {
+                if (request.data.at(byte) != expected->second[offset + byte]) {
+                    std::ostringstream message;
+                    message << "ReleaseData byte mismatch base=0x" << std::hex
+                            << base << " beat=" << std::dec
+                            << release_data_->received << " byte=" << byte
+                            << " expected=0x" << std::hex
+                            << static_cast<unsigned>(expected->second[offset + byte])
+                            << " actual=0x"
+                            << static_cast<unsigned>(request.data.at(byte));
+                    error_ = message.str();
+                    return;
+                }
+            }
+        }
         for (std::size_t byte = 0; byte < kBeatBytes; ++byte) {
             memory_.write_byte(
                 base + release_data_->received * kBeatBytes + byte,
@@ -754,6 +814,10 @@ private:
                 std::vector<unsigned char>(kBeatBytes, 0),
             });
             release_data_.reset();
+            if (has_expected_line) {
+                ++release_data_verified_count_;
+                expected_release_lines_.erase(base);
+            }
             ++release_count_;
             ++release_data_count_;
         }
@@ -772,12 +836,15 @@ private:
     std::optional<ARequest> captured_a_;
     std::optional<CRequest> captured_c_;
     std::optional<ReleaseDataState> release_data_;
+    std::unordered_map<std::uint64_t, std::vector<unsigned char>>
+        expected_release_lines_;
     bool a_fire_ = false;
     bool c_fire_ = false;
     bool d_fire_ = false;
     std::uint64_t request_count_ = 0;
     std::uint64_t release_count_ = 0;
     std::uint64_t release_data_count_ = 0;
+    std::uint64_t release_data_verified_count_ = 0;
     std::uint64_t random_state_ = 1;
     unsigned d_gap_ = 0;
     bool random_backpressure_ = false;
@@ -1622,6 +1689,11 @@ public:
     ~Environment() { dut_.Finish(); }
 
     SparseMemory &memory() { return memory_; }
+    void expect_release_line(
+        std::uint64_t base, const std::vector<unsigned char> &bytes)
+    {
+        memory_agent_.expect_release_line(base, bytes);
+    }
     void configure_backpressure(std::uint64_t seed, bool enabled)
     {
         memory_agent_.configure_backpressure(seed, enabled);
@@ -1636,6 +1708,10 @@ public:
     std::uint64_t tilelink_release_data() const
     {
         return memory_agent_.release_data_count();
+    }
+    std::uint64_t tilelink_release_data_verified() const
+    {
+        return memory_agent_.release_data_verified_count();
     }
     std::uint64_t ptw_requests() const { return ptw_agent_.request_count(); }
     std::uint64_t dcache_request_stalls() const
