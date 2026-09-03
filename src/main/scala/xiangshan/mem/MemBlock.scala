@@ -42,6 +42,7 @@ import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
 import xiangshan.backend.Bundles._
 import xiangshan.cache._
 import xiangshan.cache.mmu._
+import xiangshan.frontend.icache.CCHIType4Port
 import xiangshan.frontend.instruncache.HasInstrUncacheConst
 import xiangshan.mem.prefetch.{PrefetcherWrapper, TLBPlace}
 
@@ -277,19 +278,15 @@ class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule with HasIn
   }
 }
 
-// triple buffer applied in L1I$-L2 path (two at MemBlock, one at L2Top)
-class ICacheBuffer()(implicit p: Parameters) extends LazyModule {
-  val node = new TLBufferNode(BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default)
-  lazy val module = new ICacheBufferImpl
+// double Queue buffer on L1I CHI path (same depth as legacy ICacheBuffer: BufferParams.default x2)
+object ICacheCCHIBuffer {
+  private val depth = 2
 
-  class ICacheBufferImpl extends LazyModuleImp(this) {
-    (node.in zip node.out) foreach { case ((in, edgeIn), (out, edgeOut)) =>
-      out.a <> BufferParams.default(BufferParams.default(in.a))
-      in.d <> BufferParams.default(BufferParams.default(out.d))
-    }
-  }
+  def apply[T <: Data](x: DecoupledIO[T]): DecoupledIO[T] =
+    Queue(Queue(x, depth), depth)
 }
 
+// triple buffer applied in L1I ctrl-mmio path (two at MemBlock, one at L2Top)
 class ICacheCtrlBuffer()(implicit p: Parameters) extends LazyModule {
   val node = new TLBufferNode(BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default, BufferParams.default)
   lazy val module = new ICacheCtrlBufferImpl
@@ -304,7 +301,7 @@ class ICacheCtrlBuffer()(implicit p: Parameters) extends LazyModule {
 
 // Frontend bus goes through MemBlock
 class FrontendBridge()(implicit p: Parameters) extends LazyModule {
-  val icache_node = LazyModule(new ICacheBuffer()).suggestName("icache").node// to keep IO port name
+  // ICache cacheable refill uses Compact CHI in MemBlockInlinedImp (ICacheCCHIBuffer)
   val icachectrl_node = LazyModule(new ICacheCtrlBuffer()).suggestName("icachectrl").node
   val instr_uncache_node = LazyModule(new InstrUncacheBuffer()).suggestName("instr_uncache").node
   lazy val module = new LazyModuleImp(this) {
@@ -414,6 +411,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val inner_hc_perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
     val outer_hc_perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
     val outer_l2PfCtrl = Output(new PrefetchCtrlFromCore)
+
+    // ICache Compact CHI Type 4 (cacheable refill); buffered in MemBlock like legacy ICacheBuffer
+    val inner_icache_cchi = Flipped(new CCHIType4Port)
+    val outer_icache_cchi = new CCHIType4Port
 
     // reset signals of frontend & backend are generated in memblock
     val reset_backend = Output(Reset())
@@ -1474,6 +1475,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.outer_beu_errors_icache := RegNext(io.inner_beu_errors_icache)
   io.inner_hc_perfEvents <> RegNext(io.outer_hc_perfEvents)
   io.outer_l2PfCtrl := DelayN(io.ooo_to_mem.csrCtrl.pf_ctrl.toL2PrefetchCtrl(), 2)
+
+  // txreq: Frontend -> L2; rxdat: L2 -> Frontend (mirror legacy ICacheBuffer A/D)
+  io.outer_icache_cchi.txreq <> ICacheCCHIBuffer(io.inner_icache_cchi.txreq)
+  io.inner_icache_cchi.rxdat <> ICacheCCHIBuffer(io.outer_icache_cchi.rxdat)
 
   // vector segmentUnit
   // TODO: DONT use `head` find segment

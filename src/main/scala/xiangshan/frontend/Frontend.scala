@@ -64,6 +64,7 @@ import xiangshan.cache.mmu.VectorTlbPtwIO
 import xiangshan.frontend.bpu.Bpu
 import xiangshan.frontend.ftq.Ftq
 import xiangshan.frontend.ibuffer.IBuffer
+import xiangshan.frontend.icache.CCHIType4Port
 import xiangshan.frontend.icache.ICache
 import xiangshan.frontend.ifu.Ifu
 import xiangshan.frontend.instruncache.InstrUncache
@@ -79,6 +80,8 @@ class FrontendIO(implicit p: Parameters) extends FrontendBundle {
   val softPrefetch: Vec[Valid[SoftIfetchPrefetchBundle]] =
     Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
   val error: L1BusErrorUnitInfo = Output(new L1BusErrorUnitInfo)
+  // Compact CHI Type 4 (ICache miss refill); not connected to L2 in phase 2.1
+  val icache_cchi: CCHIType4Port = new CCHIType4Port
 
   // ctrl
   val tlbCsr:  TlbCsrBundle    = Input(new TlbCsrBundle)
@@ -268,6 +271,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   io.error <> RegNext(errorReg.bits.toL1BusErrorUnitInfo(errorReg.valid))
 
   icache.io.hartId := io.hartId
+  io.icache_cchi <> icache.io.cchi
 
   itlbRepeater1.io.debugTopDown.robHeadVaddr := io.debugTopDown.robHeadVaddr.map(_.toUInt)
 

@@ -17,8 +17,6 @@ package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.TLBundleA
-import freechips.rocketchip.tilelink.TLEdgeOut
 import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 import xiangshan.SoftIfetchPrefetchBundle
@@ -367,10 +365,11 @@ class MshrInfoBundle(implicit p: Parameters) extends ICacheBundle {
   val way:      UInt = UInt(wayBits.W)
 }
 
-// Mshr -> tilelink bus
-class MshrAcquireBundle(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
-  val acquire: TLBundleA = new TLBundleA(edge.bundle)
-  val vSetIdx: UInt      = UInt(idxBits.W)
+// Mshr -> miss unit TXREQ arbiter
+class MshrReqBundle(implicit p: Parameters) extends ICacheBundle {
+  val blkPAddr: UInt = UInt((PAddrBits - blockOffBits).W)
+  val vSetIdx:  UInt = UInt(idxBits.W)
+  val mshrId:   UInt = UInt(log2Ceil(NumAllMshr).W)
 }
 
 /* ***** Pmp ***** */

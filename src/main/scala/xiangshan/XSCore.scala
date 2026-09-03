@@ -33,6 +33,7 @@ import xiangshan.backend._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.trace.TraceCoreInterface
+import xiangshan.frontend.icache.CCHIType4Port
 import xiangshan.mem._
 import xiangshan.cache.mmu._
 import xiangshan.cache.mmu.TlbRequestIO
@@ -67,7 +68,6 @@ abstract class XSCoreBase()(implicit p: config.Parameters) extends LazyModule
 
   val memBlock = LazyModule(new MemBlock)
 
-  memBlock.inner.frontendBridge.icache_node := frontend.inner.icache.clientNode
   memBlock.inner.frontendBridge.instr_uncache_node := frontend.inner.instrUncache.clientNode
   if (icacheCtrlEnabled) {
     frontend.inner.icache.ctrlUnitOpt.get.node := memBlock.inner.frontendBridge.icachectrl_node
@@ -117,6 +117,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     })
     val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
     val dft_reset = Option.when(hasDFT)(Input(new DFTResetSignals()))
+    // Compact CHI Type 4 ICache (from Frontend); not wired to L2 in phase 2.1
+    val icache_cchi = new CCHIType4Port
   })
 
   dontTouch(io.l2_flush_done)
@@ -193,6 +195,13 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.outer_hc_perfEvents := io.perfEvents
   // frontend -> memBlock
   memBlock.io.inner_beu_errors_icache <> frontend.io.error
+  // ICache Compact CHI Type 4: Frontend <-> MemBlock buffer <-> tile; RXDAT not wired to L2 in phase 2.1
+  memBlock.io.inner_icache_cchi <> frontend.io.icache_cchi
+  io.icache_cchi.txreq <> memBlock.io.outer_icache_cchi.txreq
+  io.icache_cchi.rxdat <> memBlock.io.outer_icache_cchi.rxdat
+  io.icache_cchi.txreq.ready := true.B
+  io.icache_cchi.rxdat.valid := false.B
+  io.icache_cchi.rxdat.bits  := DontCare
   memBlock.io.ooo_to_mem.backendToTopBypass := backend.io.toTop
   memBlock.io.ooo_to_mem.intIssue <> backend.io.mem.intIssue
   memBlock.io.ooo_to_mem.vecIssue <> backend.io.mem.vecIssue
