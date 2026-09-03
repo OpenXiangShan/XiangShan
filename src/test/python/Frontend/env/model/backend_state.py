@@ -248,8 +248,7 @@ class BackendState:
 
     @staticmethod
     def redirect_reuses_same_ftq_slot(ftq_offset: int, is_rvc: bool) -> bool:
-        del is_rvc
-        return int(ftq_offset) == 0
+        return int(ftq_offset) == 0 or (int(ftq_offset) == 1 and not bool(is_rvc))
 
     def ftq_ptr_rank_after_commit(self, flag: int, value: int) -> int:
         modulus = max(1, int(self.ftq_size) * 2)

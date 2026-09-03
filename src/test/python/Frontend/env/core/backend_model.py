@@ -3444,6 +3444,8 @@ class BackendModel:
         return int(start_pc)
 
     def _simfrontend_redirect_drive_override(self, payload: dict) -> Optional[dict]:
+        if bool(payload.get("source_bound", False)):
+            return None
         if "mismatch" in str(payload.get("reason", "")):
             return None
         if int(payload.get("branch_type", 0)) == 3:
@@ -4230,6 +4232,28 @@ class BackendModel:
             flush_itself=bool(flush_itself),
         )
         if bool(payload.get("flush_on_drive", False)):
+            if bool(payload.get("source_bound", False)):
+                source_indices = [
+                    int(idx)
+                    for idx, entry in enumerate(self._cfvec_queue)
+                    if int(entry.pc) == int(from_pc)
+                    and int(entry.ftq_flag) == int(ftq_flag)
+                    and int(entry.ftq_value) == int(ftq_value)
+                    and int(entry.ftq_offset) == int(ftq_offset)
+                ]
+                if len(source_indices) != 1:
+                    raise AssertionError(
+                        "source-bound redirect lost its unique live cfVec source before drive: "
+                        f"pc=0x{int(from_pc):x} ftq=({int(ftq_flag)},{int(ftq_value)}) "
+                        f"offset={int(ftq_offset)} matches={len(source_indices)}"
+                    )
+                flush_origin = int(source_indices[0]) + (0 if flush_itself else 1)
+                self._set_active_wrong_path_episode(
+                    origin_index=int(flush_origin),
+                    target_pc=int(target_pc),
+                    redirect_context=None,
+                    expected_recovery_ftq=expected_recovery_ftq,
+                )
             state = self._sync_backend_state()
             self._ftq_scoreboard.apply_redirect_flush(
                 ftq_flag=ftq_flag,
@@ -4278,29 +4302,30 @@ class BackendModel:
         drive_from_pc = from_pc
         drive_ftq_offset = ftq_offset
         drive_is_rvc = is_rvc
-        drive_override = self._simfrontend_redirect_drive_override(payload)
-        if drive_override is not None:
-            drive_ftq_flag = int(drive_override.get("ftq_flag", drive_ftq_flag))
-            drive_ftq_value = int(drive_override.get("ftq_value", drive_ftq_value))
-            drive_from_pc = int(drive_override.get("pc", drive_from_pc))
-            drive_ftq_offset = int(drive_override.get("ftq_offset", drive_ftq_offset))
-            drive_is_rvc = int(drive_override.get("is_rvc", drive_is_rvc))
-        if self._redirect_drive_ftq_is_stale_relative_to_commit(int(drive_ftq_flag), int(drive_ftq_value)):
-            fallback_context = self._latest_non_stale_redirect_drive_context()
-            if fallback_context is not None:
-                drive_ftq_flag = int(fallback_context.get("ftq_flag", drive_ftq_flag))
-                drive_ftq_value = int(fallback_context.get("ftq_value", drive_ftq_value))
-                drive_from_pc = int(fallback_context.get("pc", drive_from_pc))
-                drive_ftq_offset = int(fallback_context.get("ftq_offset", drive_ftq_offset))
-                drive_is_rvc = int(fallback_context.get("is_rvc", drive_is_rvc))
-        self._assert_redirect_drive_ftq_not_stale(
-            payload_ftq_flag=int(ftq_flag),
-            payload_ftq_value=int(ftq_value),
-            drive_ftq_flag=int(drive_ftq_flag),
-            drive_ftq_value=int(drive_ftq_value),
-            target_pc=int(target_pc),
-            reason=str(reason),
-        )
+        if not bool(payload.get("source_bound", False)):
+            drive_override = self._simfrontend_redirect_drive_override(payload)
+            if drive_override is not None:
+                drive_ftq_flag = int(drive_override.get("ftq_flag", drive_ftq_flag))
+                drive_ftq_value = int(drive_override.get("ftq_value", drive_ftq_value))
+                drive_from_pc = int(drive_override.get("pc", drive_from_pc))
+                drive_ftq_offset = int(drive_override.get("ftq_offset", drive_ftq_offset))
+                drive_is_rvc = int(drive_override.get("is_rvc", drive_is_rvc))
+            if self._redirect_drive_ftq_is_stale_relative_to_commit(int(drive_ftq_flag), int(drive_ftq_value)):
+                fallback_context = self._latest_non_stale_redirect_drive_context()
+                if fallback_context is not None:
+                    drive_ftq_flag = int(fallback_context.get("ftq_flag", drive_ftq_flag))
+                    drive_ftq_value = int(fallback_context.get("ftq_value", drive_ftq_value))
+                    drive_from_pc = int(fallback_context.get("pc", drive_from_pc))
+                    drive_ftq_offset = int(fallback_context.get("ftq_offset", drive_ftq_offset))
+                    drive_is_rvc = int(fallback_context.get("is_rvc", drive_is_rvc))
+            self._assert_redirect_drive_ftq_not_stale(
+                payload_ftq_flag=int(ftq_flag),
+                payload_ftq_value=int(ftq_value),
+                drive_ftq_flag=int(drive_ftq_flag),
+                drive_ftq_value=int(drive_ftq_value),
+                target_pc=int(target_pc),
+                reason=str(reason),
+            )
 
         drive_payload = {
             "pc": drive_from_pc,
@@ -4499,6 +4524,7 @@ class BackendModel:
 
         context = self._build_redirect_context_from_queue_entry(None, source)
         payload_extra = {
+            "source_bound": True,
             "pc": int(source.pc),
             "ftq_flag": int(source.ftq_flag),
             "ftq_value": int(source.ftq_value),
@@ -4592,7 +4618,14 @@ class BackendModel:
         redirect_payload = self._ready_redirect_for_cycle()
         resolve_entries = self._ready_resolves_for_cycle()
         self._plan_instruction_commits_for_cycle()
-        commit_entry = self._plan_commit_entry_for_cycle(apply=False)
+        backend_fault_redirect = bool(
+            redirect_payload is not None
+            and any(
+                int(redirect_payload.get(key, 0))
+                for key in ("backend_iaf", "backend_ipf", "backend_igpf")
+            )
+        )
+        commit_entry = None if backend_fault_redirect else self._plan_commit_entry_for_cycle(apply=False)
         call_ret_commit_group = self._current_semantic_call_ret_commit_group()
         self._schedule_next_queue_call_ret_commit_group()
         return BackendCycleActions(

@@ -194,6 +194,8 @@ def test_inject_redirect_sequence_uses_source_bound_redirect_when_requested():
             backend_ipf=1,
             satp_flush=1,
             redirect_class=BackendRedirectClass.OTHER,
+            ftq_idx_ahead_flag=0,
+            ftq_idx_ahead_value=10,
             max_cycles=2,
         ),
     ).run(env)
@@ -213,6 +215,8 @@ def test_inject_redirect_sequence_uses_source_bound_redirect_when_requested():
         "backend_iaf": 0,
         "satp_flush": 1,
         "redirect_class": BackendRedirectClass.OTHER,
+        "ftq_idx_ahead_flag": 0,
+        "ftq_idx_ahead_value": 10,
     }
 
 

@@ -7,7 +7,7 @@ import pytest
 
 from env.agents.backend_agent import BackendAgent
 from env.core.backend_model import BackendModel
-from env.core.transactions import BackendRedirectClass
+from env.core.transactions import BackendRedirectClass, FtqIdxAheadTxn
 from env.model.backend_state import ActiveWrongPathEpisode
 from env.model.backend_state import BackendEvent
 from env.model.backend_state import ROB_COMMIT_STATE_COMMITTED
@@ -66,6 +66,14 @@ def _queue_instr(pc: int, ftq_flag: int, ftq_value: int) -> QueueInstr:
     )
 
 
+def _source_bound_cfi_model() -> tuple[BackendModel, QueueInstr]:
+    model = BackendModel()
+    source = _queue_instr(0x80000020, 1, 9)
+    source.is_cfi = True
+    model._cfvec_queue = deque([source])
+    return model, source
+
+
 def _redirect_drive_if():
     fields = (
         "redirect_bits_pc",
@@ -85,6 +93,15 @@ def _redirect_drive_if():
         "redirect_bits_debug_is_ctrl",
         "redirect_bits_debug_is_mem_vio",
         "redirect_valid",
+    )
+    return SimpleNamespace(**{field: _Signal() for field in fields})
+
+
+def _ftq_idx_ahead_drive_if():
+    fields = (
+        "ftq_idx_ahead_valid",
+        "ftq_idx_ahead_flag",
+        "ftq_idx_ahead_value",
     )
     return SimpleNamespace(**{field: _Signal() for field in fields})
 
@@ -131,6 +148,82 @@ def test_source_bound_exception_redirect_uses_observed_cfvec_context() -> None:
     assert event.payload["backend_ipf"] == 1
     assert event.payload["level"] == 1
     assert event.payload["flush_on_drive"] is True
+
+
+def test_source_bound_exception_redirect_is_not_remapped_to_historical_target() -> None:
+    model = BackendModel()
+    source = _queue_instr(0x80000020, 0, 4)
+    source.ftq_offset = 1
+    source.exception_marked = True
+    source.exception_bits = 1 << 1
+    model._cfvec_queue = deque([source])
+    model._ftq_group_pc_history[(0, 13)] = [
+        (0x80000240, False),
+        (0x80000100, False),
+    ]
+    model._pc_group_occurrences[0x80000100] = [(0, 13, 1)]
+
+    model.inject_redirect_from_cfvec(
+        source_pc=source.pc,
+        source_ftq_flag=source.ftq_flag,
+        source_ftq_value=source.ftq_value,
+        source_ftq_offset=source.ftq_offset,
+        target_pc=0x80000100,
+        reason="instruction-access-fault-recovery",
+        level=1,
+        backend_iaf=1,
+        redirect_class=BackendRedirectClass.OTHER,
+    )
+
+    payload = model._plan_redirect_payload(model.pending_events[0].payload)
+
+    assert payload["pc"] == source.pc
+    assert payload["ftq_flag"] == source.ftq_flag
+    assert payload["ftq_value"] == source.ftq_value
+    assert payload["ftq_offset"] == source.ftq_offset
+    assert not model._cfvec_queue
+
+
+@pytest.mark.parametrize(
+    ("ftq_offset", "is_rvc", "expected"),
+    (
+        (0, False, (1, 9)),
+        (0, True, (1, 9)),
+        (1, False, (1, 9)),
+        (1, True, (1, 10)),
+        (2, False, (1, 10)),
+    ),
+)
+def test_flush_itself_recovery_ftq_matches_redirect_new_ftq_idx(
+    ftq_offset: int,
+    is_rvc: bool,
+    expected: tuple[int, int],
+) -> None:
+    model = BackendModel()
+
+    assert model._expected_recovery_ftq_for_redirect(
+        ftq_flag=1,
+        ftq_value=9,
+        ftq_offset=ftq_offset,
+        is_rvc=is_rvc,
+        flush_itself=True,
+    ) == expected
+
+
+def test_backend_fault_redirect_suppresses_same_cycle_ftq_commit(monkeypatch) -> None:
+    model = BackendModel()
+    candidate = FtqEntry(ftq_flag=0, ftq_value=4)
+    monkeypatch.setattr(
+        model,
+        "_ready_redirect_for_cycle",
+        lambda: {"backend_iaf": 1, "backend_ipf": 0, "backend_igpf": 0},
+    )
+    monkeypatch.setattr(model, "_plan_commit_entry_for_cycle", lambda apply=False: candidate)
+
+    actions = model.plan_cycle_actions()
+
+    assert actions.redirect_payload is not None
+    assert actions.commit_entry is None
 
 
 def test_source_bound_fault_redirect_rejects_unmatched_exception_bit() -> None:
@@ -204,6 +297,128 @@ def test_backend_agent_rejects_redirect_without_structured_class() -> None:
 
     with pytest.raises(ValueError, match="valid BackendRedirectClass"):
         agent.drive_redirect({"redirect_class": "control_flow"})
+
+
+def test_backend_agent_drives_and_clears_ftq_idx_ahead() -> None:
+    agent = BackendAgent()
+    drive_if = _ftq_idx_ahead_drive_if()
+    agent._drive_if = drive_if
+
+    agent.drive_ftq_idx_ahead(FtqIdxAheadTxn(ftq_flag=1, ftq_value=63))
+
+    assert drive_if.ftq_idx_ahead_valid.value == 1
+    assert drive_if.ftq_idx_ahead_flag.value == 1
+    assert drive_if.ftq_idx_ahead_value.value == 63
+
+    agent.drive_ftq_idx_ahead(None)
+
+    assert drive_if.ftq_idx_ahead_valid.value == 0
+    assert drive_if.ftq_idx_ahead_flag.value == 0
+    assert drive_if.ftq_idx_ahead_value.value == 0
+
+
+@pytest.mark.parametrize(
+    ("ftq_idx_ahead_flag", "ftq_idx_ahead_value"),
+    ((1, 9), (0, 10)),
+    ids=("match", "mismatch"),
+)
+def test_source_bound_redirect_drives_ftq_idx_ahead_one_cycle_early(
+    ftq_idx_ahead_flag: int,
+    ftq_idx_ahead_value: int,
+) -> None:
+    model, source = _source_bound_cfi_model()
+    model.current_cycle = 20
+
+    model.inject_redirect_from_cfvec(
+        source_pc=source.pc,
+        source_ftq_flag=source.ftq_flag,
+        source_ftq_value=source.ftq_value,
+        source_ftq_offset=source.ftq_offset,
+        target_pc=0x80000100,
+        reason="ftq-idx-ahead-timing",
+        delay_cycles=3,
+        ftq_idx_ahead_flag=ftq_idx_ahead_flag,
+        ftq_idx_ahead_value=ftq_idx_ahead_value,
+    )
+
+    assert model.pending_events[0].ready_cycle == 23
+    for cycle in (20, 21):
+        model.current_cycle = cycle
+        assert model._ready_ftq_idx_ahead_for_cycle() is None
+
+    model.current_cycle = 22
+    ahead = model._ready_ftq_idx_ahead_for_cycle()
+    assert ahead == FtqIdxAheadTxn(
+        ftq_flag=ftq_idx_ahead_flag,
+        ftq_value=ftq_idx_ahead_value,
+    )
+    assert model._ready_redirect_for_cycle() is None
+
+    model.current_cycle = 23
+    assert model._ready_ftq_idx_ahead_for_cycle() is None
+    redirect = model._ready_redirect_for_cycle()
+    assert redirect is not None
+    assert redirect["ftq_flag"] == source.ftq_flag
+    assert redirect["ftq_value"] == source.ftq_value
+
+
+@pytest.mark.parametrize(
+    ("ftq_idx_ahead_flag", "ftq_idx_ahead_value", "error"),
+    (
+        (1, None, "flag and value cannot be None"),
+        (None, 9, "flag and value cannot be None"),
+        (2, 9, "flag must be 0 or 1"),
+        (1, 64, "value must be within"),
+    ),
+)
+def test_source_bound_redirect_rejects_invalid_ftq_idx_ahead(
+    ftq_idx_ahead_flag: int | None,
+    ftq_idx_ahead_value: int | None,
+    error: str,
+) -> None:
+    model, source = _source_bound_cfi_model()
+
+    with pytest.raises(ValueError, match=error):
+        model.inject_redirect_from_cfvec(
+            source_pc=source.pc,
+            source_ftq_flag=source.ftq_flag,
+            source_ftq_value=source.ftq_value,
+            source_ftq_offset=source.ftq_offset,
+            target_pc=0x80000100,
+            reason="invalid-ftq-idx-ahead",
+            delay_cycles=3,
+            ftq_idx_ahead_flag=ftq_idx_ahead_flag,
+            ftq_idx_ahead_value=ftq_idx_ahead_value,
+        )
+
+
+def test_source_bound_redirect_rejects_ftq_idx_ahead_without_lead_cycle() -> None:
+    model, source = _source_bound_cfi_model()
+
+    with pytest.raises(ValueError, match="ready at least one cycle later"):
+        model.inject_redirect_from_cfvec(
+            source_pc=source.pc,
+            source_ftq_flag=source.ftq_flag,
+            source_ftq_value=source.ftq_value,
+            source_ftq_offset=source.ftq_offset,
+            target_pc=0x80000100,
+            reason="zero-delay-ftq-idx-ahead",
+            delay_cycles=0,
+            ftq_idx_ahead_flag=source.ftq_flag,
+            ftq_idx_ahead_value=source.ftq_value,
+        )
+
+
+def test_redirect_without_source_rejects_ftq_idx_ahead() -> None:
+    model = BackendModel()
+
+    with pytest.raises(ValueError, match="requires source-bound redirect FTQ context"):
+        model.inject_redirect(
+            target_pc=0x80000100,
+            reason="missing-source-ftq-idx-ahead",
+            ftq_idx_ahead_flag=1,
+            ftq_idx_ahead_value=9,
+        )
 
 
 def test_plan_redirect_payload_preserves_level_and_satp_flush() -> None:
