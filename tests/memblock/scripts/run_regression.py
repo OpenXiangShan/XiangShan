@@ -231,7 +231,12 @@ def run_seed(
             result["status"] = "error"
             result["error"] = "simulation returned nonzero after a pass summary"
     except subprocess.TimeoutExpired as error:
-        output = (error.stdout or "") + (error.stderr or "")
+        def _timeout_text(value: str | bytes | None) -> str:
+            if value is None:
+                return ""
+            return value.decode(errors="replace") if isinstance(value, bytes) else value
+
+        output = _timeout_text(error.stdout) + _timeout_text(error.stderr)
         result = {
             "status": "timeout",
             "returncode": None,

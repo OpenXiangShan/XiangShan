@@ -393,6 +393,7 @@ def verify_regression(
     expected_scenarios: tuple[str, ...] | None = None,
     expected_forwarding_transactions: int | None = None,
     expected_mixed_transactions: int | None = None,
+    expected_jobs: int | None = None,
     expected_rtl_sha256: str | None = None,
     expected_file_sha256: str | None = None,
     require_backpressure: bool = False,
@@ -494,6 +495,11 @@ def verify_regression(
 
     configuration = metadata.get("configuration")
     _require(isinstance(configuration, dict), "configuration is absent")
+    if expected_jobs is not None:
+        _require(
+            configuration.get("jobs") == expected_jobs,
+            "configured worker count differs from verifier expectation",
+        )
     _require(
         configuration.get("duration_seconds") is not None
         and configuration["duration_seconds"] >= min_duration_seconds,
@@ -653,6 +659,7 @@ def main() -> int:
     parser.add_argument("--transactions", type=int, default=64)
     parser.add_argument("--forwarding-transactions", type=int)
     parser.add_argument("--mixed-transactions", type=int)
+    parser.add_argument("--expected-jobs", type=int)
     parser.add_argument("--rtl-sha256")
     parser.add_argument("--expected-file-sha256")
     parser.add_argument("--require-backpressure", action="store_true")
@@ -685,6 +692,7 @@ def main() -> int:
             expected_scenarios=expected_scenarios,
             expected_forwarding_transactions=args.forwarding_transactions,
             expected_mixed_transactions=args.mixed_transactions,
+            expected_jobs=args.expected_jobs,
             expected_rtl_sha256=args.rtl_sha256,
             expected_file_sha256=args.expected_file_sha256,
             require_backpressure=args.require_backpressure,

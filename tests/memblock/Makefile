@@ -30,7 +30,7 @@ RUNTIME_DIR := $(PREPARED_DIR)/runtime
 RUNTIME_METADATA := $(RUNTIME_DIR)/runtime.json
 CPP_MAIN := cpp/memblock_main.cpp
 CPP_ENV := cpp/memblock_env.hpp
-CONTROLLER_FILES := --controller-file $(CPP_MAIN) --controller-file $(CPP_ENV) --controller-file $(CPP_DEFAULTS) --controller-file $(SVA) --controller-file $(CONFIG) --controller-file $(VERIFY_SCRIPT)
+CONTROLLER_FILES := --controller-file $(CPP_MAIN) --controller-file $(CPP_ENV) --controller-file $(CPP_DEFAULTS) --controller-file $(SVA) --controller-file $(CONFIG) --controller-file $(VERIFY_SCRIPT) --controller-file scripts/freeze_runtime.py
 
 .PHONY: ports check-ports prepare-rtl check-ports check-rtl bootstrap-picker export-picker picker-model freeze-runtime smoke pin-space single-load scalar-misaligned misaligned-stores exception-contracts two-stage-translation scalar-guest-fault vector-guest-fault vector-guest-fault-split vector-load vector-split-load vector-addressing vector-store-forwarding store-forwarding store-rdata-order store-tlb-miss-preserve dcache-release redirect queue-pressure random-loads random-vector-loads random-forwarding random-vector-forwarding random-mixed random-mixed-hunt random-boundary-hunt random-boundary-regression known-bug-sentinel regression hunt-regression verify-boundary-hunt extended-regression final-regression long-final-regression verify-extended-results verify-final-results verify-long-results unit
 
@@ -196,13 +196,13 @@ long-final-regression: $(RUNTIME_METADATA)
 	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(LONG_RESULT) --jobs $${REGRESSION_JOBS:-$(JOBS)} --duration-seconds $${DURATION_SECONDS:-21600} --scenarios random-mixed --mixed-transactions $${MIXED_TRANSACTIONS:-4096} --progress-interval-seconds 60
 
 verify-extended-results:
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(EXTENDED_RESULT) --min-duration-seconds 14400 --min-results 1 --scenario random-mixed --transactions 1000 --mixed-transactions 4096 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(EXTENDED_RESULT) --min-duration-seconds 14400 --min-results 1 --scenario random-mixed --transactions 1000 --mixed-transactions 4096 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
 
 verify-final-results:
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(FINAL_RESULT) --min-duration-seconds 21600 --min-results 1 --scenarios random-mixed --transactions 1000 --mixed-transactions 4096 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(FINAL_RESULT) --min-duration-seconds 21600 --min-results 1 --scenarios random-mixed --transactions 1000 --mixed-transactions 4096 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
 
 verify-long-results:
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(LONG_RESULT) --min-duration-seconds 21600 --min-results 1 --scenarios random-mixed --transactions 1000 --mixed-transactions 4096 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(LONG_RESULT) --min-duration-seconds 21600 --min-results 1 --scenarios random-mixed --transactions 1000 --mixed-transactions 4096 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
 
 unit:
 	$(PYTHON) -m unittest discover -s unit -p 'test_*.py' -v

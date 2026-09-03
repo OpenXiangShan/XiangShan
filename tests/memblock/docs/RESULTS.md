@@ -190,8 +190,8 @@ Artifact: `build/memblock/extended-mixed-frozen-4h.json` is currently a stale
 one-second development artifact (not tracked), SHA-256
 `3943cd27585ffc0b36c35b7d8ed3dd8c225da4bf0dc3e290bf66632c5523af0f`.
 `make verify-extended-results` is expected to reject it because its duration and
-published hash do not satisfy the old four-hour gate. The final six-hour
-campaign below is the only duration artifact accepted for the repaired RTL.
+provenance do not satisfy the four-hour gate. The final six-hour campaign below
+is the only duration artifact accepted for the repaired RTL.
 
 ## Earlier Extended Campaign
 

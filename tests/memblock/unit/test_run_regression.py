@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -17,6 +18,17 @@ import run_regression  # noqa: E402
 
 
 class RunRegressionTest(unittest.TestCase):
+    def test_timeout_bytes_are_recorded_without_type_error(self) -> None:
+        timeout = run_regression.subprocess.TimeoutExpired(
+            ["memblock_sim"], 1.0, output=b"partial", stderr=b"diagnostic"
+        )
+        with mock.patch.object(run_regression.subprocess, "run", side_effect=timeout):
+            result = run_regression.run_seed(
+                Path("/bin/true"), 7, "random-loads", 1, 1, 128, 1.0, True
+            )
+        self.assertEqual(result["status"], "timeout")
+        self.assertIn("partialdiagnostic", result["output"])
+
     def test_default_worker_count_uses_measured_host_scaling(self) -> None:
         self.assertEqual(run_regression.DEFAULT_JOBS, 8)
 

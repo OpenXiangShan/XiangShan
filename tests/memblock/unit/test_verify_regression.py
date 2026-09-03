@@ -103,6 +103,7 @@ def regression_document(results: list[dict[str, object]]) -> dict[str, object]:
         "configuration": {
             "backpressure": True,
             "duration_seconds": 4.0,
+            "jobs": 8,
             "mixed_transactions_per_seed": 64,
             "scenarios": ["random-mixed"],
             "start_seed": 7,
@@ -150,6 +151,7 @@ class VerifyRegressionTest(unittest.TestCase):
                 expected_rtl_sha256=RTL_HASH,
                 require_backpressure=True,
                 require_frozen_runtime=True,
+                expected_jobs=8,
                 chunk_size=17,
             )
 
@@ -187,6 +189,25 @@ class VerifyRegressionTest(unittest.TestCase):
                     controller_files=(source,),
                 )
                 self.assertEqual(verified["result_count"], 2)
+
+    def test_rejects_wrong_worker_count(self) -> None:
+        document = regression_document([mixed_result(7), mixed_result(8)])
+        document["configuration"]["jobs"] = 1
+        with self.assertRaisesRegex(verify_regression.VerificationError, "worker count"):
+            with tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "result.json"
+                path.write_text(json.dumps(document), encoding="utf-8")
+                verify_regression.verify_regression(
+                    path,
+                    min_duration_seconds=4,
+                    min_results=2,
+                    expected_scenario="random-mixed",
+                    expected_transactions=64,
+                    expected_rtl_sha256=RTL_HASH,
+                    expected_jobs=8,
+                    require_backpressure=True,
+                    require_frozen_runtime=True,
+                )
 
     def test_streaming_number_is_not_truncated_at_chunk_boundary(self) -> None:
         reader = verify_regression.StreamingJsonReader(io.StringIO("12345,"), chunk_size=2)
