@@ -167,9 +167,9 @@ elapsed. Already running seeds are allowed to finish, so the recorded wall time
 is at least the requested duration. Any failing or timed-out seed stops further
 submission but preserves all completed results in JSON.
 
-`FORWARD_TRANSACTIONS=64` is the requested pressure level. The scalar and
-vector forwarding scenarios cap one invocation at 48 and 24 transactions to
-avoid reusing an LSQ pointer within a focused scenario; long-duration pressure
+`FORWARD_TRANSACTIONS=48` is the default requested scalar forwarding level;
+the vector forwarding scenario is capped at 24 transactions per invocation to
+avoid reusing an LSQ pointer within a focused scenario. Long-duration pressure
 comes from consecutive seeded invocations. The verifier separately checks the
 requested command value and these bounded completed counts.
 

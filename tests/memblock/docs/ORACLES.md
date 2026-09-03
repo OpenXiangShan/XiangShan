@@ -31,9 +31,9 @@ historical failing value.
 | Domain | Independent calculation | DUT-observable check | Status |
 | --- | --- | --- | --- |
 | Scalar load data | Read bytes from pre-state sparse memory, then apply operation width and sign/zero extension | One matching scalar writeback with exact data, destination, ROB/uop identity, and exception bits | Implemented |
-| Scalar store data | Apply byte enables and little-endian store bytes to a copy of reference memory at commit | Address/data halves are accepted, commit is legal, and a later independent load observes exactly the committed bytes | Implemented |
+| Scalar store data | Apply byte enables and little-endian store bytes to a copy of reference memory at commit | Address/data issue and later readback are checked for modeled stores | Partial; output-only store pulses and a fully independent immutable snapshot are planned |
 | Vector load data | Decode unit/strided/indexed addresses independently; apply EEW, `vl`, `vstart`, mask, tail/merge policy, and old destination | Exact 128-bit writeback, active-element behavior, metadata, and identity | Implemented for modeled vector memory operations |
-| Vector store data | Generate each active element's byte addresses and bytes from source data; apply mask and split rules | Exact active-byte readback after commit, one completion, replay progress, and queue drain | Implemented for modeled vector memory operations |
+| Vector store data | Generate each active element's byte addresses and bytes from source data; apply mask and split rules | Active-byte readback, completion, replay progress, and queue drain are checked for modeled stores | Partial; independent post-commit memory checking is being strengthened |
 | Store forwarding | Overlay the youngest legal store bytes on the pre-state load bytes, per byte and per age rule | Scalar/vector load returns the byte-accurate overlay before store commit | Implemented |
 | Sv39 translation | Walk independently populated PTEs, checking valid/leaf, level, permissions, SUM/MXR, A/D, and PBMT policy | Returned data comes from calculated PA, or exact page/access fault and fault VA | Partially implemented; permission matrix expansion planned |
 | Sv39x4 translation | Perform VS walk followed by G-stage walk; retain the exact failing PTE GPA and VS-non-leaf classification | Exact host PA or guest fault cause, VA, GPA, and marker | Implemented for current modeled cases |
@@ -65,10 +65,12 @@ beat boundary.
 
 The operation decoder maps each legal load/store encoding to its byte width and
 signedness. The expected value is assembled from bytes and extended to XLEN
-without consulting the DUT's internal decoder. Destination, ROB flag, and
-queue identity are part of the response key. A duplicate response or a
-response with an unknown identity is a failure even when its data happens to
-match.
+without consulting the DUT's internal decoder. The current response key
+primarily uses ROB value/flag plus destination and operation fields available at
+the boundary; queue/source/address identity is not always observable. A
+duplicate or unknown identity is rejected where the monitor can distinguish it,
+while unmatched output-only store-data pulses remain a documented residual
+risk.
 
 ### Vector operations
 
@@ -111,8 +113,9 @@ over-constraining implementation timing:
   response;
 - a response is not emitted for a redirected/canceled identity where the
   current monitor can observe that identity;
-- producer-side TileLink fields are checked for legal combinations; independent
-  consumer-side response opcode/source/size/denied/corrupt validation is planned;
+- the current agents drive only supported producer-side TileLink combinations;
+  independent consumer-side response opcode/source/size/denied/corrupt and E
+  channel validation is planned;
 - release data is captured by line, beat, source, and byte contents, but a
   separate immutable line snapshot is required before claiming full integrity;
 - PTW and uncache request/response identity and denied/corrupt legality are
