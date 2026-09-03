@@ -1,14 +1,14 @@
-name: Feature request
-description: Suggest an idea for XiangShan project.
+name: Other Question
+description: Any other question about XiangShan.
 labels:
-  - 'type: feature/requested'
+  'type: question'
 body:
   - type: markdown
     attributes:
       value: |
-        This template is only for proposing ideas, feature requests, or improvement suggestions for the XiangShan project. If this does not match your case, please go back and choose another template.
+        This template is only for questions that do not fit the other templates. Please check the other templates before using this one.
 
-        这个 issue 模板仅用于向香山提出想法、建议、特性需求。如果您遇到的不是此类问题，请回退并选择其他模板。
+        这个 issue 此模板仅适用于其他模板无法覆盖的问题，请先确认其他模板是否适用。
   - type: checkboxes
     id: before-start
     attributes:
@@ -25,22 +25,11 @@ body:
   - type: textarea
     id: describe
     attributes:
-      label: Describe the feature you'd like
+      label: Describe the question
       description: |
-        A clear and concise description of what you want and your considerations behind it.
+        A clear and concise description of your question.
 
-        请清晰、准确地描述您期望的特性，以及您的具体考虑。
+        请清晰、准确地描述您的问题。
       placeholder:
     validations:
       required: true
-  - type: textarea
-    id: additional
-    attributes:
-      label: Additional context
-      description: |
-        Add any other relevant context here.
-
-        可在此处附上其他相关信息。
-      placeholder:
-    validations:
-      required: false

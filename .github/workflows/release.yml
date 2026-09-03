@@ -18,8 +18,25 @@ env:
   UNITYCHIP_ENV: /nfs/home/share/ci-workloads/unitychip
 
 jobs:
+  changes:
+    name: Changes Detection
+    permissions:
+      pull-requests: read
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          predicate-quantifier: 'every'
+          filters: .github/filters.yaml
+
   build-xsdev-image:
     name: Build XSDev Docker Image
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -69,6 +86,8 @@ jobs:
 
   build-xspdb:
     name: Build XSPdb
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
     runs-on:
       - builder
       - open # use open servers only, keep node servers for emu jobs
@@ -122,7 +141,14 @@ jobs:
 
   artifacts-uploading:
     name: Upload Artifacts
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/openxiangshan/xs-env:ubuntu-24.04
+      volumes:
+        - /mnt:/mnt
+      options: --privileged # for swapon
     steps:
       - name: Set test branch or commit
         id: set_test
@@ -130,20 +156,16 @@ jobs:
           REF="${{ inputs.test_branch || github.ref }}"
           echo "Using checkout ref: ${REF}"
           echo "commit_sha=${REF}" >> $GITHUB_OUTPUT
-
       - name: Checkout code
         uses: actions/checkout@v7
         with:
           ref: ${{ steps.set_test.outputs.commit_sha }}
-      - name: Install deps
-        run: |
-          sudo apt install python3-psutil
-          mkdir -p ~/.local/bin
-          curl -L https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.0.4/mill-dist-1.0.4-mill.sh -o ~/.local/bin/mill
-          chmod +x ~/.local/bin/mill
-          export PATH=~/.local/bin:$PATH
       - name: Init submodules
-        run: make init-force
+        run: |
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
+          make init-force
+          # also override NOOP_HOME to the current workspace (in container)
+          echo NOOP_HOME=${GITHUB_WORKSPACE} >> $GITHUB_ENV
       - name: Init swapfile
         run: |
           if [ -f /mnt/swapfile ]; then

@@ -378,7 +378,7 @@ jobs:
       - name: Check XSCache
         run: cd XSCache && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
       - name: Check ChiselAIA
-        run: cd ChiselAIA && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/kunminghu-v3
+        run: cd ChiselAIA && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/main
 
   # Check format
   check-format:
@@ -386,22 +386,11 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
     runs-on: ubuntu-latest
+    container: ghcr.io/openxiangshan/xs-env:ubuntu-24.04
     timeout-minutes: 30
     continue-on-error: false
     steps:
       - uses: actions/checkout@v7
-      - name: Install Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: 'graalvm'
-          java-version: '21'
-      - name: Install mill
-        env:
-          MILL_VERSION: 1.0.4
-        run: |
-          mkdir -p ~/.local/bin
-          curl -L https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/${MILL_VERSION}/mill-dist-${MILL_VERSION}-mill.sh -o ~/.local/bin/mill
-          chmod +x ~/.local/bin/mill
       - name: Run check-format
         run: |
           export PATH=~/.local/bin:$PATH

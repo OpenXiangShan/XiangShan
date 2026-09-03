@@ -1,0 +1,31 @@
+name: Weekly Regression
+
+on:
+  schedule:
+    #run at 10:00 UTC (18:00 UTC+8) on Friday
+    - cron: '0 10 * * 5'
+  workflow_dispatch:
+    inputs:
+      test_branch:
+        description: Only fill this option when retrying with the same branch/commit as previous attempts
+        required: false
+        type: string
+        default: kunminghu-v3
+
+jobs:
+  run:
+    name: Run GCC16 Performance Test
+    uses: ./.github/workflows/perf-template.yml
+    with:
+      test_branch: ${{ github.event.inputs.test_branch }}
+      benchmark_type: spec06-rva23-novec-gcc16-1.0c
+      servers: all
+
+  run-xscc:
+    name: Run XSCC Performance Test
+    uses: ./.github/workflows/perf-template.yml
+    with:
+      test_branch: ${{ github.event.inputs.test_branch }}
+      benchmark_type: spec06-xscc-1.0c
+      artifact_name: score-xscc
+      servers: all
