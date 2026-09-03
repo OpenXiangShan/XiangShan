@@ -269,6 +269,13 @@ def main() -> int:
         help="frozen runtime.json; its binary and all dependency hashes are verified",
     )
     parser.add_argument("--rtl-metadata", type=Path)
+    parser.add_argument(
+        "--controller-file",
+        type=Path,
+        action="append",
+        default=[],
+        help="additional harness/config source to hash before and after the run",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--jobs", type=int, default=DEFAULT_JOBS)
     parser.add_argument("--start-seed", type=int, default=1)
@@ -362,6 +369,23 @@ def main() -> int:
     controller_paths = {"runner": Path(__file__).resolve()}
     if args.rtl_metadata is not None:
         controller_paths["rtl_metadata"] = args.rtl_metadata.resolve()
+    seen_controller_paths = {path.resolve() for path in controller_paths.values()}
+    for index, path in enumerate(args.controller_file):
+        resolved = path.resolve()
+        if not resolved.is_file():
+            print(
+                f"run_regression.py: error: controller file is not a file: {resolved}",
+                file=sys.stderr,
+            )
+            return 2
+        if resolved in seen_controller_paths:
+            print(
+                f"run_regression.py: error: duplicate controller file: {resolved}",
+                file=sys.stderr,
+            )
+            return 2
+        seen_controller_paths.add(resolved)
+        controller_paths[f"controller_file_{index}"] = resolved
     try:
         controller_hashes_before = {
             role: sha256(path) for role, path in controller_paths.items()

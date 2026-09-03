@@ -206,6 +206,13 @@ class RunRegressionTest(unittest.TestCase):
             path.write_bytes(b"after")
             self.assertNotEqual(before, run_regression.sha256(path))
 
+    def test_controller_file_arguments_are_recordable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "source.cpp"
+            path.write_text("source", encoding="utf-8")
+            self.assertEqual(path.resolve(), path.resolve())
+            self.assertEqual(len(run_regression.sha256(path)), 64)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -107,13 +107,19 @@ comment, mutants use the same final C++ harness and generated SVA semantics as
 clean. `HISTORICAL_BUG_AUDIT.md` records the strict status and boundary contract
 for all 58 commits in scope.
 
-Final verification-source SHA-256 values for the current harness are
-`2b8a372c88565e26231ecdd87f917335b0f1c2a2980bad7590cd0502e12acc10`
-for `memblock_main.cpp`,
-`f1a638a87547df505696a05200350e1c1b0fa79f15947f9325278a89d77563ad`
-for `memblock_env.hpp`, and
-`31feec579cf939d04f446114071e5860e17ed990e8c680a67f6f9b5c0c91ff6d`
-for the protocol SVA.
+The source hashes below identify the harness revision used for the historical
+results above. They are retained as historical provenance only; the current
+source hashes are recorded by the next campaign artifact after the oracle-plan
+review:
+
+- historical `memblock_main.cpp`: `2b8a372c88565e26231ecdd87f917335b0f1c2a2980bad7590cd0502e12acc10`;
+- historical `memblock_env.hpp`: `f1a638a87547df505696a05200350e1c1b0fa79f15947f9325278a89d77563ad`;
+- historical protocol SVA: `31feec579cf939d04f446114071e5860e17ed990e8c680a67f6f9b5c0c91ff6d`.
+
+The previous runner did not hash these source files, so these values were not
+independently enforced by the JSON artifact. The reviewed runner must record
+and verify source hashes as controller inputs before a new long campaign is
+accepted.
 
 The current mixed summary reports vector load and store address-mode coverage
 separately (`vec_load_modes` and `vec_store_modes`), so a load cannot mask a
@@ -160,10 +166,13 @@ and an eight-seed, five-scenario matrix:
 Artifacts: `build/memblock/runtime-short.json` and
 `build/memblock/runtime-matrix.json` (generated, not tracked).
 
-## Provenance-Safe Extended Campaign
+## Historical Extended Campaign (Stale Artifact)
 
-On 2026-09-01 (Asia/Shanghai), the complete frozen runtime finished an
-eight-process duration-based `random-mixed` campaign against the baseline RTL:
+An earlier eight-process duration-based `random-mixed` campaign was intended to
+run for four hours against the historical baseline RTL. Its original artifact
+was overwritten during development by a one-second smoke artifact and is no
+longer available for independent verification. The numbers below are retained
+as historical notes only and must not be used as acceptance evidence:
 
 - requested duration: 14,400 seconds;
 - measured monotonic elapsed time: 14,400.633 seconds;
@@ -176,12 +185,12 @@ eight-process duration-based `random-mixed` campaign against the baseline RTL:
 - no assertion, scoreboard, timeout, process, coverage-gate, or RTL failure was
   observed.
 
-Artifact: `build/memblock/extended-mixed-frozen-4h.json` (generated, not
-tracked), 434,971,428 bytes, SHA-256
-`0d55a7c4e71f0c6d0e4457e91a000523f5f4a8d19412466744e43c45cd86f8ba`.
-`make verify-extended-results` independently streams every result and checks
-the published hash, duration, continuous seed range, per-seed mixed coverage,
-aggregate counts, complete RTL identity, and frozen runtime/controller hashes.
+Artifact: `build/memblock/extended-mixed-frozen-4h.json` is currently a stale
+one-second development artifact (not tracked), SHA-256
+`3943cd27585ffc0b36c35b7d8ed3dd8c225da4bf0dc3e290bf66632c5523af0f`.
+`make verify-extended-results` is expected to reject it because its duration and
+published hash do not satisfy the old four-hour gate. The final six-hour
+campaign below is the only duration artifact accepted for the repaired RTL.
 
 ## Earlier Extended Campaign
 

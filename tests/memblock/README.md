@@ -38,6 +38,14 @@ The reusable C++ components are in `cpp/memblock_env.hpp`:
 - byte-accurate vector masking, old-destination, and SQ-forwarding models;
 - deterministic transaction and functional coverage reporting.
 
+The correctness contracts are cataloged separately in
+`docs/ORACLES.md`. `docs/VERIFICATION_PLAN.md` contains the complete test-point
+inventory, including explicit planned gaps for MMIO, atomics, CBO/CMO,
+VSegment, hypervisor accesses, PMP/PMA matrices, coherence probes, error
+injection, concurrent exception priority, and four-state behavior. A passing
+cacheable mixed campaign must not be interpreted as verification of those
+planned rows.
+
 The structure follows UVM responsibilities without requiring a SystemVerilog
 class runtime:
 
@@ -175,14 +183,18 @@ LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ldd ../../build/memblock/runtime/memblock_sim
 ```
 
-The recorded four-hour artifact can be independently rechecked without loading
-its 435 MB JSON document into memory. This validates every seed and its mixed
-coverage fields, the continuous seed range, duration, aggregate counts, RTL
-identity, runtime/controller before-after hashes, current frozen files, and the
-published artifact SHA-256:
+The old four-hour artifact was overwritten by a one-second development smoke
+run and is intentionally non-accepting. `make verify-extended-results` should
+reject the current stale file because its duration and published hash do not
+meet that historical gate. Use the final six-hour artifact for current
+acceptance:
 
 ```sh
 make verify-extended-results
+```
+
+```sh
+make verify-final-results
 ```
 
 ## Reproduction

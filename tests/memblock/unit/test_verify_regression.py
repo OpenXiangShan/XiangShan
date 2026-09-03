@@ -159,6 +159,34 @@ class VerifyRegressionTest(unittest.TestCase):
         self.assertEqual(verified["first_seed"], 7)
         self.assertEqual(verified["last_seed"], 8)
 
+    def test_controller_file_hash_is_checked_when_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "source.cpp"
+            source.write_text("source", encoding="utf-8")
+            document = regression_document([mixed_result(7), mixed_result(8)])
+            document["controller"]["paths"] = {"source": str(source)}
+            document["controller"]["hashes_before"] = {
+                **document["controller"]["hashes_before"],
+                "source": verify_regression.run_regression.sha256(source),
+            }
+            document["controller"]["hashes_after"] = document["controller"]["hashes_before"]
+            with tempfile.NamedTemporaryFile(suffix=".json") as artifact:
+                artifact_path = Path(artifact.name)
+                artifact_path.write_text(json.dumps(document), encoding="utf-8")
+                verified = verify_regression.verify_regression(
+                    artifact_path,
+                    min_duration_seconds=4,
+                    min_results=2,
+                    expected_scenario="random-mixed",
+                    expected_transactions=64,
+                    expected_rtl_sha256=RTL_HASH,
+                    require_backpressure=True,
+                    require_frozen_runtime=True,
+                    runner=None,
+                    controller_files=(source,),
+                )
+                self.assertEqual(verified["result_count"], 2)
+
     def test_streaming_number_is_not_truncated_at_chunk_boundary(self) -> None:
         reader = verify_regression.StreamingJsonReader(io.StringIO("12345,"), chunk_size=2)
         self.assertEqual(reader.value(), 12345)

@@ -399,6 +399,7 @@ def verify_regression(
     runtime_metadata: Path | None = None,
     rtl_metadata: Path | None = None,
     runner: Path | None = None,
+    controller_files: tuple[Path, ...] = (),
     chunk_size: int = 1024 * 1024,
 ) -> dict[str, Any]:
     if expected_scenarios is None:
@@ -585,6 +586,22 @@ def verify_regression(
             controller_hashes.get("rtl_metadata") == run_regression.sha256(rtl_metadata),
             "current RTL metadata differs from the recorded controller input",
         )
+    if controller_files:
+        recorded_paths = controller.get("paths")
+        _require(isinstance(recorded_paths, dict), "controller paths are absent")
+        recorded_by_path = {
+            str(Path(value).resolve()): role
+            for role, value in recorded_paths.items()
+            if isinstance(value, str)
+        }
+        for controller_file in controller_files:
+            resolved = str(controller_file.resolve())
+            role = recorded_by_path.get(resolved)
+            _require(role is not None, f"controller file is not recorded: {resolved}")
+            _require(
+                controller_hashes.get(role) == run_regression.sha256(Path(resolved)),
+                f"current controller file differs from the recorded input: {resolved}",
+            )
 
     runtime = metadata.get("runtime")
     if require_frozen_runtime or runtime_metadata is not None:
@@ -642,6 +659,10 @@ def main() -> int:
     parser.add_argument("--runtime-metadata", type=Path)
     parser.add_argument("--rtl-metadata", type=Path)
     parser.add_argument("--runner", type=Path)
+    parser.add_argument(
+        "--controller-file", type=Path, action="append", default=[],
+        help="source file that must be present and hash-matched in controller metadata",
+    )
     args = parser.parse_args()
 
     try:
@@ -670,6 +691,7 @@ def main() -> int:
             runtime_metadata=args.runtime_metadata,
             rtl_metadata=args.rtl_metadata,
             runner=args.runner,
+            controller_files=tuple(args.controller_file),
         )
     except (OSError, json.JSONDecodeError, run_regression.RegressionError, VerificationError) as error:
         print(f"verify_regression.py: error: {error}", file=sys.stderr)
