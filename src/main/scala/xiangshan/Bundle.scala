@@ -19,8 +19,6 @@ package xiangshan
 import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chisel3.util._
-import chisel3.util.BitPat.bitPatToUInt
-import chisel3.util.experimental.decode.EspressoMinimizer
 import utility._
 import utils._
 import _root_.utils.{OptionWrapper, NamedUInt}
@@ -36,7 +34,6 @@ import xiangshan.frontend.FrontendRedirect
 import xiangshan.backend.Bundles.DynInst
 import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.{BackendToIBufBundle, CtrlToFtqIO}
-import xiangshan.backend.decode.XDecode
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.NewCSR.Mcontrol6
 import xiangshan.backend.fu.NewCSR.Tdata1Bundle
@@ -152,21 +149,6 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   // then replay from this inst itself
   val replayInst = Bool()
   val canRobCompress = Bool()
-
-  private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
-    isXSTrap, noSpecExec, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
-
-  def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
-    val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table, EspressoMinimizer)
-    allSignals zip decoder foreach { case (s, d) => s := d }
-    commitType := DontCare
-    this
-  }
-
-  def decode(bit: List[BitPat]): CtrlSignals = {
-    allSignals.zip(bit.map(bitPatToUInt(_))).foreach{ case (s, d) => s := d }
-    this
-  }
 
   def isWFI: Bool = fuType === FuType.csr.U && fuOpType === CSROpType.wfi
   def isSoftPrefetch: Bool = {

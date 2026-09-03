@@ -25,7 +25,8 @@ import utils._
 import xiangshan._
 import xiangshan.TopDownCounters._
 import xiangshan.backend.Bundles.{DecodeOutUop, RenameOutUop, connectSamePort}
-import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_Z, XSDebugDecode}
+import xiangshan.backend.decode.{FusionDecodeInfo, ImmUnion, Imm_Z}
+import xiangshan.backend.decode.isa.CustomInstructions.SIM_TRIG
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.{StoreBubbleReason, PipelineStallReason}
 import xiangshan.backend.rename.freelist._
@@ -355,7 +356,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       // Only assign performance counters in debugInfo
       uopDbg.perfDebugInfo := 0.U.asTypeOf(uopDbg.perfDebugInfo)
       uopDbg.perfDebugInfo.renameTime := GTimer()
-      uopDbg.debug_sim_trig := (compressMasksVec(i) & Cat(io.in.map(_.bits.instr === XSDebugDecode.SIM_TRIG).reverse)).orR
+      uopDbg.debug_sim_trig := (compressMasksVec(i) & Cat(io.in.map(_.bits.instr === SIM_TRIG).reverse)).orR
     }
   }
   private val fuType       = uops.map(_.fuType)

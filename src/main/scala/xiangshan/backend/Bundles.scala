@@ -2,7 +2,6 @@ package xiangshan.backend
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
 import utils.BundleUtils.makeValid
 import utils.{NamedUInt, OptionWrapper}
@@ -10,7 +9,7 @@ import xiangshan._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.{DataSource, WakeUpConfig}
 import xiangshan.backend.datapath.WbConfig.PregWB
-import xiangshan.backend.decode.{ImmUnion, XDecode}
+import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
@@ -190,18 +189,6 @@ object Bundles {
     val latency = Latency()
 
     val debug = OptionWrapper(backendParams.debugEn, new DecodeOutUopDebug())
-
-    private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
-      waitForward, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
-
-    def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): DecodeOutUop = {
-      val decoder: Seq[UInt] = ListLookup(
-        inst, XDecode.decodeDefault.map(bitPatToUInt),
-        table.map { case (pat, pats) => (pat, pats.map(bitPatToUInt)) }.toArray
-      )
-      allSignals zip decoder foreach { case (s, d) => s := d }
-      this
-    }
 
     def isSoftPrefetch: Bool = {
       fuType === FuType.alu.U && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
