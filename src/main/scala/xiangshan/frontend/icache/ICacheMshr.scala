@@ -17,16 +17,12 @@ package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.TLEdgeOut
 import org.chipsalliance.cde.config.Parameters
-import utility.MemReqSource
-import utility.ReqSourceKey
+import utility.XSPerfHistogram
 import xiangshan.WfiReqBundle
-import xscache.common.AliasKey
-import xscache.coupledL2.MemBackTypeMM
 
-class ICacheMshr(edge: TLEdgeOut, val id: Int)(implicit p: Parameters) extends ICacheModule {
-  class ICacheMshrIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
+class ICacheMshr(val id: Int)(implicit p: Parameters) extends ICacheModule {
+  class ICacheMshrIO(implicit p: Parameters) extends ICacheBundle {
     val fencei: Bool         = Input(Bool())
     val flush:  Bool         = Input(Bool())
     val wfi:    WfiReqBundle = Flipped(new WfiReqBundle)
@@ -37,8 +33,8 @@ class ICacheMshr(edge: TLEdgeOut, val id: Int)(implicit p: Parameters) extends I
     // NOTE: lookUps Vec(2) is not Vec(PortNumber), it's mainPipe + prefetchPipe
     val lookUps: Vec[MshrLookupBundle] = Flipped(Vec(2, new MshrLookupBundle))
 
-    // send request to L2 (tilelink bus)
-    val acquire: DecoupledIO[MshrAcquireBundle] = DecoupledIO(new MshrAcquireBundle(edge))
+    // send request to L2 (Compact CHI TXREQ)
+    val acquire: DecoupledIO[MshrReqBundle] = DecoupledIO(new MshrReqBundle)
     // select the victim way when acquire fire
     val victimWay: UInt = Input(UInt(wayBits.W))
 
@@ -50,7 +46,7 @@ class ICacheMshr(edge: TLEdgeOut, val id: Int)(implicit p: Parameters) extends I
     val perf_latency: UInt = Output(UInt(16.W)) // magic number: latency should less than 65536 cycles
   }
 
-  val io: ICacheMshrIO = IO(new ICacheMshrIO(edge))
+  val io: ICacheMshrIO = IO(new ICacheMshrIO)
 
   def isFetch: Boolean = id < NumFetchMshr
 
@@ -67,10 +63,6 @@ class ICacheMshr(edge: TLEdgeOut, val id: Int)(implicit p: Parameters) extends I
   private val blkPAddr = RegInit(0.U((PAddrBits - blockOffBits).W))
   private val vSetIdx  = RegInit(0.U(idxBits.W))
   private val way      = RegInit(0.U(wayBits.W))
-  // resolve aliasing, refer to comments on AliasTagBits in trait HasICacheParameters
-  // vSetIdx is vAddr(untagBits, blockOffBits), aliasTag should be vAddr(untagBits, pgIdxBits)
-  // and, AliasTagBits = untagBits - pgIdxBits, so we actually need AliasTagBits-most-significant bits of vSetIdx
-  private val aliasTag = AliasTagBits.map(w => vSetIdx.head(w))
 
   // look up and return result at the same cycle
   private val hits = io.lookUps.map { lookup =>
@@ -79,11 +71,6 @@ class ICacheMshr(edge: TLEdgeOut, val id: Int)(implicit p: Parameters) extends I
   }
   // Decoupling valid and bits
   (0 until 2).foreach(i => io.lookUps(i).resp.hit := hits(i))
-
-  // disable wake up when hit MSHR (fencei is low)
-  // when(hit) {
-  //   flush := false.B
-  // }
 
   // invalid when the req hasn't been issued
   when(io.fencei || io.flush) {
@@ -105,18 +92,11 @@ class ICacheMshr(edge: TLEdgeOut, val id: Int)(implicit p: Parameters) extends I
     vSetIdx  := io.req.bits.vSetIdx
   }
 
-  // send request to L2
+  // send request to L2; alias for CHI REQ is derived from vSetIdx in MissUnit (aliasFromVSetIdx)
   io.acquire.valid := valid && !issue && !io.flush && !io.fencei && !io.wfi.wfiReq
-  private val getBlock = edge.Get(
-    fromSource = id.U,
-    toAddress = Cat(blkPAddr, 0.U(blockOffBits.W)),
-    lgSize = log2Up(blockBytes).U
-  )._2
-  io.acquire.bits.acquire := getBlock
-  io.acquire.bits.acquire.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUInst.id.U)
-  io.acquire.bits.acquire.user.lift(MemBackTypeMM).foreach(_ := true.B) // icache is always requesting main memory
-  io.acquire.bits.acquire.user.lift(AliasKey).foreach(_ := aliasTag.get)
-  io.acquire.bits.vSetIdx := vSetIdx
+  io.acquire.bits.blkPAddr := blkPAddr
+  io.acquire.bits.vSetIdx  := vSetIdx
+  io.acquire.bits.mshrId   := id.U
 
   // get victim way when acquire fire
   when(io.acquire.fire) {

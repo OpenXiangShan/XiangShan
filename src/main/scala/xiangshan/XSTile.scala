@@ -59,9 +59,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
   // =========== Components' Connection ============
   // L1D cacheable path uses Compact CHI (see DCache.io.cchi); no TileLink clientNode.
-  // coreParams.dcacheParametersOpt.map { _ => ... } intentionally omitted.
+  // L1I cacheable path uses Compact CHI Type 4 (see MemBlock.io.icache_cchi); not connected to L2 yet.
 
-  l2top.inner.misc_l2_pmu := l2top.inner.l1i_logger := memBlock.frontendBridge.icache_node
   if (!coreParams.softPTW) {
     l2top.inner.misc_l2_pmu := l2top.inner.ptw_logger := l2top.inner.ptw_to_l2_buffer.node := memBlock.ptw_to_l2_buffer.node
   }

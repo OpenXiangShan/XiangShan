@@ -32,8 +32,8 @@ class CCHIType1Port extends Bundle {
  */
 object DCacheCCHI {
   object Params {
-    val srcId: UInt = 0.U
-    val tgtId: UInt = 0.U
+    val srcId: UInt = L1CCHINodeId.DCacheSrcId
+    val tgtId: UInt = L1CCHINodeId.L2TgtId
     // CHI MemAttr[3:0] = {Allocate, Cacheable, Device, EWA}; cacheable DCache: 0b1101
     val memAttr: UInt = "b1101".U(4.W)
     val size64: UInt = CCHISize.B64.U
