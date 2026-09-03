@@ -1,22 +1,19 @@
 package xiangshan.backend.datapath
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
 import utility.{GatedValidRegNext, SignExt, ZeroExt}
-import utils.SeqUtils._
 import xiangshan._
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuVec, ImmInfo}
-import xiangshan.backend.issue._
+import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig.RegDataMaxWidth
 import xiangshan.backend.decode.ImmUnion
-import xiangshan.backend.regcache._
-import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
-import xiangshan.backend.fu.{FuConfig, FuType}
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Utils.{SplitMask, VecDataToMaskDataVec}
-import yunsuan.VialuFixType
+import xiangshan.backend.issue._
+import xiangshan.backend.regcache._
 import xiangshan.backend.vector.datapath.VecImmExtractor
 
 class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {
@@ -192,7 +189,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     val fuOpType = exuInput.bits.fuOpType
     val fuType = exuInput.bits.fuType
     val isAlu = FuType.isAlu(fuType)
-    val isViAlu = FuType.isVIAluF(fuType)
+    val isViAlu = FuType.isVIAlu(fuType)
 
     exuInput.bits.src.zipWithIndex.foreach { case (src, srcIdx) =>
       val dataSource = exuInput.bits.dataSources(srcIdx)

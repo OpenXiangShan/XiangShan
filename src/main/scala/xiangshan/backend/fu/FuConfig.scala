@@ -165,10 +165,10 @@ case class FuConfig (
 
   def needVecCtrl: Boolean = {
     import FuType._
-    Seq(vipu, vialuF, vimac, vidiv, vppu, vfalu, vmove, vfma, vfdiv, vfcvt, vldu, vstu, vsha256ms, vsha256c).contains(fuType)
+    Seq(vipu, vialu, vimac, vidiv, vppu, vfalu, vmove, vfma, vfdiv, vfcvt, vldu, vstu, vsha256ms, vsha256c).contains(fuType)
   }
 
-  def needVIaluCtrl: Boolean = Seq(FuType.vialuF).contains(fuType)
+  def needVIaluCtrl: Boolean = Seq(FuType.vialu).contains(fuType)
 
   def needUncertainWakeup: Boolean = {
     FuConfig.needUncertainWakeupFuConfigs.contains(this)
@@ -189,7 +189,7 @@ case class FuConfig (
 
   def isFence: Boolean = fuType == FuType.fence
 
-  def isVecArith: Boolean = fuType == FuType.vialuF || fuType == FuType.vimac ||
+  def isVecArith: Boolean = fuType == FuType.vialu || fuType == FuType.vimac ||
                             fuType == FuType.vppu || fuType == FuType.vipu ||
                             fuType == FuType.vfalu || fuType == FuType.vfma ||
                             fuType == FuType.vfdiv || fuType == FuType.vfcvt ||
@@ -561,8 +561,8 @@ object FuConfig {
   )
 
   val VialuCfg = FuConfig (
-    name = "vialuFix",
-    fuType = FuType.vialuF,
+    name = "vialu",
+    fuType = FuType.vialu,
     fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()),  // vs1, vs2, vd_old
