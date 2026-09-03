@@ -120,6 +120,10 @@ class SQDataEntryBundle(implicit p: Parameters) extends MemBlockBundle {
 
   def byteStart: UInt          = vaddr(log2Ceil(VLEN/8) - 1, 0)
   def byteEnd: UInt            = (byteStart +& MemorySize.ByteOffset(size)).ensuring(_.getWidth == (byteStart.getWidth + 1))
+  // DefaultConfig: virtual address bits [49:12] (VAddrBits=50, pageOffset=12), the virtual page-number tag.
+  def vaddrPageTag: UInt       = vaddr(VAddrBits - 1, pageOffset)
+  // DefaultConfig: virtual address bits [11:4] (pageOffset=12, VLENB=16), the page-local 16B-word offset.
+  def vaddrPageOffset: UInt    = vaddr(pageOffset - 1, log2Up(VLENB))
 
   val memoryType               = MemoryType()
   val cboType                  = CboType()
@@ -164,6 +168,11 @@ class UnalignBufferEntry(implicit p: Parameters) extends MemBlockBundle {
   val sqIdx              = new SqPtr
 
   val debugRobIdx        = new RobPtr
+}
+
+class UnalignQueueForwardEntry(implicit p: Parameters) extends MemBlockBundle {
+  val paddr = UInt(PAddrBits.W)
+  val sqIdx = new SqPtr
 }
 
 class WriteToSbufferReqEntry(implicit p: Parameters) extends MemBlockBundle {
@@ -249,6 +258,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val query           = Flipped(Vec(LoadPipelineWidth, new SQForward))
       val dataEntriesIn   = Vec(StoreQueuePhysicalSize, Input(new SQDataEntryBundle())) // from storeQueue data
       val ctrlEntriesIn   = Vec(StoreQueuePhysicalSize, Input(new SQCtrlEntryBundle())) // from storeQueue ctrl info
+      val unalignEntriesIn = Vec(SQUnalignQueueSize, Input(new UnalignQueueForwardEntry))
+      val unalignValidIn   = Vec(SQUnalignQueueSize, Input(Bool()))
       val ctrlInfo = new Bundle {
         val deqPtr = Input(new SqPtr())
         val physicalQueueUpper = Input(new SqPtr())
@@ -437,10 +448,19 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val s1Req = io.query(i).s1Req
       val s1QueryPaddr = s1Req.paddr(PAddrBits - 1, VWordOffset)
       val byteRangeWidth = VWordOffset + 2
-      // prevent X-state
-      val s1Same16BMatchVec = WireInit(VecInit(io.dataEntriesIn.map(_.vaddr(VAddrBits - 1, VWordOffset) === s1LoadVaddr)))
+      // Keep the 16B offset comparison within the page. The page number is a tag,
+      // so a cross-page store is handled by UnalignQueue instead of a long carry.
+      val s1LoadVaddrTag    = s1LoadVaddr(s1LoadVaddr.getWidth - 1, pageOffset - VWordOffset)
+      val s1LoadPageOffset  = s1LoadVaddr(pageOffset - VWordOffset - 1, 0)
+      val s1Same16BMatchVec = WireInit(VecInit(io.dataEntriesIn.map { dataEntry =>
+        dataEntry.vaddrPageTag === s1LoadVaddrTag &&
+          dataEntry.vaddrPageOffset === s1LoadPageOffset
+      }))
       val s1Next16BMatchVec = WireInit(VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).map { case (dataEntry, ctrlEntry) =>
-        ctrlEntry.cross16Byte && (dataEntry.vaddr(VAddrBits - 1, VWordOffset) + 1.U) === s1LoadVaddr
+        val storePageOffset = dataEntry.vaddrPageOffset
+        ctrlEntry.cross16Byte &&
+          dataEntry.vaddrPageTag === s1LoadVaddrTag &&
+          (storePageOffset +& 1.U) === Cat(0.U(1.W), s1LoadPageOffset)
       }))
       val s1SameLineMatchVec = WireInit(VecInit(io.dataEntriesIn.map(dataEntry =>
         dataEntry.vaddr(VAddrBits - 1, DCacheLineOffset) ===
@@ -452,6 +472,14 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
 
         (s1Same16BMatchVec(j) || s1Next16BMatchVec(j) || (storeIsCbo && s1SameLineMatchVec(j))) && ctrlEntry.addrValid
       }).asUInt
+
+      // An UnalignQueue hit identifies the second page of an older cross-page store.
+      // Gate the comparison with the allocation bit so uninitialized entries cannot
+      // propagate X states into the forwarding decision.
+      val s1UnalignQueueMatch = VecInit(io.unalignEntriesIn.zip(io.unalignValidIn).map {
+        case (entry, valid) =>
+            valid && entry.sqIdx.isBefore(s1LoadSqIdx) && entry.paddr(PAddrBits - 1, VWordOffset) === s1QueryPaddr
+      }).asUInt.orR && s1Valid
 
       // Byte overlap check in the store-relative 16B coordinate space.
       val s1OverlapMask  = VecInit(io.dataEntriesIn.zip(io.ctrlEntriesIn).zipWithIndex.map { case ((dataEntry, ctrlEntry), j) =>
@@ -534,6 +562,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val s2WaitStrictSqIdx  = RegEnable(s1LoadSqIdx - 1.U, s1Valid)
       val s2MultiMatch       = RegEnable(s1MultiMatch, s1Valid)
       val s2LoadPaddr        = RegEnable(s1QueryPaddr, s1Valid)
+      val s2UnalignQueueMatch = RegEnable(s1UnalignQueueMatch, s1Valid)
       val s2LoadStart        = RegEnable(s1LoadStart, s1Valid)
       val s2LoadEnd          = RegEnable(s1LoadEnd, s1Valid)
       val s2ForwardValid     = RegEnable(s1SelectOH.orR, s1Valid) // indicate whether forward is valid.
@@ -601,7 +630,6 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       val s2FullOverlap        = s2SelectDataEntry.byteStart <= s2LoadStart && s2SelectDataEntry.byteEnd >= s2LoadEnd
       // First condition: access extends beyond the lower log2Ceil(VLEN/8) bits.
       // Second condition: higher bits of the virtual address within the page offset are non-zero, indicating a potential cross-page access.
-      val s2Cross4KPage        = s2SelectDataEntry.byteEnd(VWordOffset) && s2SelectDataEntry.vaddr(pageOffset - 1, VWordOffset).andR && s2ForwardValid
       val s2SafeForward        = !s2MultiMatch || s2FullOverlap
 
       //TODO: only use for 128-bit align forward, should revert when other forward source support rotate forward !!!!
@@ -624,8 +652,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       s2Resp.bits.dataInvalid.bits  := s2DataInvalidSqIdx
       s2Resp.bits.addrInvalid.valid := Mux(s2LoadWaitStrict, s2StrictMdpWait, s2NeedPreciseMdpWait) // maby can't select a entry
       s2Resp.bits.addrInvalid.bits := Mux(s2LoadWaitStrict, s2WaitStrictSqIdx, s2WaitSqIdx)
-      s2Resp.bits.forwardInvalid   := !s2SafeForward || s2CboForwardFail || s2Cross4KPage // do not support cross page forward.
-      s2Resp.bits.matchInvalid     := s2PaddrNoMatch && !s2Cross4KPage && s2SafeForward // if cross Page/multi match, let load replay.
+      s2Resp.bits.forwardInvalid   := !s2SafeForward || s2CboForwardFail || s2UnalignQueueMatch // do not support cross page forward.
+      s2Resp.bits.matchInvalid     := s2PaddrNoMatch && s2SafeForward // if multi match, let load replay.
       s2Resp.valid                 := s2Valid
 
       // Perf-only response fields
@@ -1402,6 +1430,8 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
         val paddr        = UInt(PAddrBits.W)
         val sqIdx        = new SqPtr
       })
+      val forwardEntries = Vec(SQUnalignQueueSize, Output(new UnalignQueueForwardEntry))
+      val forwardValid   = Vec(SQUnalignQueueSize, Output(Bool()))
     })
     private val enqWidth: Int  = io.fromStaS1.length
     private val queueSize: Int = SQUnalignQueueSize
@@ -1465,6 +1495,11 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
     io.toDeqModule.bits.paddr := headEntry.paddr
     io.toDeqModule.bits.sqIdx := headEntry.sqIdx
     io.toDeqModule.valid      := !empty
+    io.forwardEntries.zip(entries).foreach { case (sink, source) =>
+      sink.paddr := source.paddr
+      sink.sqIdx := source.sqIdx
+    }
+    io.forwardValid := allocated
 
     io.fromStaS1.map{case sink =>
       sink.ready := !full && io.fromSQ.addrReadyPtr === sink.bits.sqIdx && !io.redirect.valid
@@ -1538,6 +1573,10 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
   forwardModule.io.query           <> io.forward
   forwardModule.io.ctrlInfo.deqPtr := deqPtrExt.head
   forwardModule.io.ctrlInfo.physicalQueueUpper := physicalQueueUpper
+  forwardModule.io.unalignEntriesIn.zip(unalignQueue.io.forwardEntries).foreach { case (sink, source) =>
+    sink := source
+  }
+  forwardModule.io.unalignValidIn := unalignQueue.io.forwardValid
   dataEntries.zip(forwardModule.io.dataEntriesIn).foreach{ case (source, sink) =>
     sink := source
   }
