@@ -469,7 +469,6 @@ object Bundles {
     val pdest     = UInt(PhyRegIdxWidth.W)
     val pdestV0   = Option.when(params.writeV0Rf)(UInt(V0PhyRegIdxWidth.W)) // Todo: merge it with pdestVl
     val pdestVl   = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W)) // Todo: reuse psrc to store it
-    val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // for mdp
     val storeSetHit       = Option.when(params.isLdAddrIQ || params.isStAddrIQ)(Bool())
@@ -510,7 +509,6 @@ object Bundles {
     val uopIdx   = Option.when(params.inVfSchd)(UopIdx())
     val lastUop  = Option.when(params.inVfSchd)(Bool())
     // from rename
-    val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // for mdp
     val storeSetHit    = Option.when(params.isLdAddrIQ || params.isStAddrIQ)(Bool())
@@ -539,7 +537,6 @@ object Bundles {
     val uopIdx   = Option.when(params.issueBlockParam.inVfSchd)(UopIdx())
     val lastUop  = Option.when(params.issueBlockParam.inVfSchd)(Bool())
     // from rename
-    val numLsElem = Option.when(params.issueBlockParam.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
     // psrc are used in datapath to generate regfile's bank Ren
     val psrc      = Vec(params.numRegSrc, UInt(params.rdPregIdxWidth.W))
@@ -1026,7 +1023,6 @@ object Bundles {
     val oldVType = Option.when(exuParams.writeVType)(VType())
     val vtype    = Option.when(exuParams.readVlRf)(VType())
     val fflagsWen = Option.when(exuParams.writeFflags)(Bool())
-    val numLsElem = Option.when(iqParams.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(exuParams.needRasAction)(BranchAttribute.RasAction())
     val storeSetHit    = Option.when(exuParams.hasLoadExu || exuParams.hasStoreAddrExu)(Bool())
     val waitForRobIdx  = Option.when(iqParams.isLdAddrIQ)(new RobPtr)
@@ -1091,7 +1087,6 @@ object Bundles {
       this.oldVType.foreach(_ := 0.U.asTypeOf(VType()))
       this.vtype.foreach(_ := 0.U.asTypeOf(VType()))
       this.fflagsWen.foreach(_ := false.B)
-      this.numLsElem.foreach(_ := 0.U.asTypeOf(NumLsElem()))
       this.rasAction.foreach(_ := 0.U)
       this.storeSetHit.foreach(_ := false.B)
       this.waitForRobIdx.foreach(_ := 0.U.asTypeOf(new RobPtr))
@@ -1120,7 +1115,6 @@ object Bundles {
       this.vpu.foreach(_ := source.vpu.get)
       this.fflagsWen.foreach(_ := source.fflagsWen.get)
 
-      this.numLsElem.foreach(_ := source.numLsElem.get)
       this.rasAction.foreach(_ := source.rasAction.get)
 
       this.storeSetHit.foreach(_ := source.storeSetHit.get)
@@ -1250,9 +1244,8 @@ object Bundles {
     val loadWaitStrict = OptionWrapper(params.hasLoadExu, Bool()) // load inst will not be executed until ALL former store addr calcuated
     val ssid           = OptionWrapper(params.hasLoadExu || params.hasStoreAddrExu, UInt(SSIDWidth.W))
     // only vector load store need
-    val numLsElem      = OptionWrapper(params.hasVecLsFu, NumLsElem())
-    val lqIdx = OptionWrapper(params.hasLoadFu || params.hasVecLsFu, new LqPtr)
-    val sqIdx = OptionWrapper(params.hasLoadFu || params.hasStoreAddrFu || params.hasStdFu || params.hasVecLsFu || params.hasVStdFu, new SqPtr)
+    val lqIdx = OptionWrapper(params.hasLoadFu, new LqPtr)
+    val sqIdx = OptionWrapper(params.hasLoadFu || params.hasStoreAddrFu || params.hasStdFu || params.hasVStdFu, new SqPtr)
     val dataSources = Vec(params.numRegSrc, DataSource())
     val exuSources = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuSource(params)))
     val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
@@ -1285,7 +1278,6 @@ object Bundles {
       this.fflagsWen     .foreach(_ := source.fflagsWen.get)
       this.vpu           .foreach(_ := source.vpu.get)
       this.frm           .foreach(_ := source.frm.get)
-      this.numLsElem     .foreach(_ := source.numLsElem.get)
       this.rasAction     .foreach(_ := source.rasAction.get)
       this.storeSetHit   .foreach(_ := source.storeSetHit.get)
       this.waitForRobIdx .foreach(_ := source.waitForRobIdx.get)
@@ -1329,7 +1321,6 @@ object Bundles {
       uop.frm            := this.frm.getOrElse(0.U.asTypeOf(Frm()))
       uop.isRVC          := this.isRVC.getOrElse(false.B)
       uop.rasAction      := this.rasAction.getOrElse(0.U)
-      uop.numLsElem      := this.numLsElem.getOrElse(0.U)
       uop
     }
   }
@@ -1403,9 +1394,8 @@ object Bundles {
     val storeSetHit    = Option.when(params.hasLoadExu || params.hasStoreAddrExu)(Bool())     // inst has been allocated an store set
     val loadWaitStrict = Option.when(params.hasLoadExu)(Bool())     // load inst will not be executed until ALL former store addr calcuated
     val ssid           = Option.when(params.hasLoadExu || params.hasStoreAddrExu)(UInt(SSIDWidth.W))
-    val numLsElem      = Option.when(params.hasVecLsFu)(NumLsElem())
-    val lqIdx          = Option.when(params.hasLoadExu || params.hasVecLsFu)(new LqPtr)
-    val sqIdx          = Option.when(params.hasLoadExu || params.hasStoreAddrFu || params.hasStdFu || params.hasVecLsFu || params.hasVStdFu)(new SqPtr)
+    val lqIdx          = Option.when(params.hasLoadExu)(new LqPtr)
+    val sqIdx          = Option.when(params.hasLoadExu || params.hasStoreAddrFu || params.hasStdFu || params.hasVStdFu)(new SqPtr)
     val perfDebugInfo  = Option.when(backendParams.debugEn)(new PerfDebugInfo())
     val debug_seqNum   = Option.when(backendParams.debugEn)(InstSeqNum())
   }
@@ -1452,19 +1442,7 @@ object Bundles {
     val trigger      = if (params.trigger)      Some(TriggerAction())         else None
     // uop info
     val isRVC        = if(params.needIsRVC)      Some(Bool())                  else None
-    // vldu used only
-    val vls = OptionWrapper(params.hasVLoadFu, new Bundle {
-      val vpu = new VPUCtrlSignals
-      val oldVdPsrc = UInt(PhyRegIdxWidth.W)
-      val vdIdx = UInt(3.W)
-      val vdIdxInField = UInt(3.W)
-      val isIndexed = Bool()
-      val isMasked = Bool()
-      val isStrided = Bool()
-      val isWhole = Bool()
-      val isVecLoad = Bool()
-      val isVlm = Bool()
-    })
+
     // LoadUnit only
     // isFromLoadUnit indicates whether this ExuOutput is issued from LoadUnit (e.g., not so for atomics)
     val isFromLoadUnit = if (params.hasLoadFu) Some(Bool()) else None
@@ -1498,7 +1476,6 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val replay       = Option.when(params.replayInst)(Bool())
     val lqIdx        = Option.when(params.hasLoadFu)(new LqPtr())
     val sqIdx        = Option.when(params.hasStoreAddrFu || params.hasStdFu || params.hasVStdFu)(new SqPtr())
-    val vls          = Option.when(params.hasVLoadFu)(new ExuOutputVLoad(params))
   }
   class NewExuOutput(
     val params: ExeUnitParams,
@@ -1782,7 +1759,6 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val lqIdx         = Option.when(params.hasLoadFu)(new LqPtr())
     val sqIdx         = Option.when(params.hasStoreAddrFu || params.hasStdFu)(new SqPtr())
     val trigger       = Option.when(params.trigger)(TriggerAction())
-    val vls           = Option.when(params.hasVLoadFu)(new ExuOutputVLoad(params))
     val data          = UInt(params.destDataBitsMax.W)
     val pdest         = UInt(params.wbPregIdxWidth.W)
     val vecWen        = Option.when(params.writeVecRf)(Bool())
@@ -1905,8 +1881,6 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val debug = new DebugBundle
     val vecDebug = if (isVector) Some(new VecMissalignedDebugBundle) else None
 
-    def isVls = FuType.isVls(uop.fuType)
-
     // TODO: delete this after MemExuOutput is thoroughly removed
     def toExuOutput(param: ExeUnitParams): ExuOutput = {
       val output = Wire(new ExuOutput(param))
@@ -1928,18 +1902,6 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
       output.lqIdx.foreach(_ := this.uop.lqIdx)
       output.sqIdx.foreach(_ := this.uop.sqIdx)
       output.isRVC.foreach(_ := this.uop.isRVC)
-      output.vls.foreach(x => {
-        x.vdIdx := this.vdIdx.get
-        x.vdIdxInField := this.vdIdxInField.get
-        x.vpu   := this.uop.vpu
-        x.oldVdPsrc := this.uop.psrc(2)
-        x.isIndexed := VlduType.isIndexed(this.uop.fuOpType)
-        x.isMasked := VlduType.isMasked(this.uop.fuOpType)
-        x.isStrided := VlduType.isStrided(this.uop.fuOpType)
-        x.isWhole := VlduType.isWhole(this.uop.fuOpType)
-        x.isVecLoad := VlduType.isVecLd(this.uop.fuOpType)
-        x.isVlm := VlduType.isMasked(this.uop.fuOpType) && VlduType.isVecLd(this.uop.fuOpType)
-      })
       output.isFromLoadUnit.foreach(_ := this.isFromLoadUnit)
       output.trigger.foreach(_ := this.uop.trigger)
       output

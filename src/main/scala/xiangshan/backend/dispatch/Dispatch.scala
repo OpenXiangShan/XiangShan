@@ -671,12 +671,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   private val isStoreVec = VecInit(fromRename.map(x => x.valid && FuType.isStore(x.bits.fuType)))
   private val isAMOVec = fromRename.map(x => x.valid && FuType.isAMO(x.bits.fuType))
   private val isStoreAMOVec = fromRename.map(x => x.valid && (FuType.isStore(x.bits.fuType) || FuType.isAMO(x.bits.fuType)))
-  private val isVLoadVec = VecInit(fromRename.map(x => x.valid && FuType.isVLoad(x.bits.fuType)))
-  private val isVStoreVec = VecInit(fromRename.map(x => x.valid && FuType.isVStore(x.bits.fuType)))
 
   private val loadCntVec = VecInit(isLoadVec.indices.map(x => PopCount(isLoadVec.slice(0, x + 1))))
   private val storeAMOCntVec = VecInit(isStoreAMOVec.indices.map(x => PopCount(isStoreAMOVec.slice(0, x + 1))))
-  private val vloadCntVec = VecInit(isVLoadVec.indices.map(x => PopCount(isVLoadVec.slice(0, x + 1))))
 
   for (i <- 0 until RenameWidth) {
     // update lqIdx sqIdx
@@ -686,23 +683,18 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   val loadBlockVec = VecInit(loadCntVec.map(_ > numLoadDeq.U))
   val storeAMOBlockVec = VecInit(storeAMOCntVec.map(_ > numStoreAMODeq.U))
-  val vloadBlockVec = VecInit(vloadCntVec.map(_ > numVLoadDeq.U))
-  val lsStructBlockVec = VecInit((loadBlockVec.zip(storeAMOBlockVec)).zip(vloadBlockVec).map(x => x._1._1 || x._1._2 || x._2))
+  val lsStructBlockVec = VecInit(loadBlockVec.zip(storeAMOBlockVec).map(x => x._1 || x._2))
   if (backendParams.debugEn) {
     dontTouch(loadBlockVec)
     dontTouch(storeAMOBlockVec)
     dontTouch(lsStructBlockVec)
-    dontTouch(vloadBlockVec)
     dontTouch(isLoadVec)
-    dontTouch(isVLoadVec)
     dontTouch(loadCntVec)
   }
 
   private val uop = fromRename.map(_.bits)
   private val fuType = uop.map(_.fuType)
 
-  private val isSegment = fuType.map(fuTypeItem => FuType.isVsegls(fuTypeItem)).zip(fromRename.map(_.valid)).map(x => x._1 && x._2)
-  private val isfofFixVlUop = uop.map { x => x.vpu.isVleff && x.lastUop }
   private val numLsElem = VecInit(uop.map(_.numLsElem))
 
   /*
@@ -716,9 +708,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val lqDeqIdx = io.fromLsqEnqCtrl.lsqHeadPtr.lqIdx
     val sqDeqIdx = io.fromLsqEnqCtrl.lsqHeadPtr.sqIdx
     val allowDispatchPrevious = if (index == 0) true.B else allowDispatch(index - 1)
-    when((isStoreVec(index) || isVStoreVec(index)) && !isSegment(index) && !isfofFixVlUop(index)) {
+
+    // Todo: use Mux1H instead
+    when(isStoreVec(index)) {
       allowDispatch(index) := (sqIdxEnd > sqDeqIdx) && allowDispatchPrevious
-    }.elsewhen((isLoadVec(index) || isVLoadVec(index)) && !isSegment(index) && !isfofFixVlUop(index)) {
+    }.elsewhen(isLoadVec(index)) {
       allowDispatch(index) := (lqIdxEnd > lqDeqIdx) && allowDispatchPrevious
     }.elsewhen(isAMOVec(index)) {
       allowDispatch(index) := allowDispatchPrevious
@@ -731,14 +725,14 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   for (i <- enqLsqIO.req.indices) {
     when(!io.fromRename(i).fire) {
       enqLsqIO.needAlloc(i) := 0.U
-    }.elsewhen(isStoreVec(i) || isVStoreVec(i)) {
+    }.elsewhen(isStoreVec(i)) {
       enqLsqIO.needAlloc(i) := 2.U // store | vstore
-    }.elsewhen(isLoadVec(i) || isVLoadVec(i)){
+    }.elsewhen(isLoadVec(i)){
       enqLsqIO.needAlloc(i) := 1.U // load | vload
     }.otherwise {
       enqLsqIO.needAlloc(i) := 0.U
     }
-    enqLsqIO.req(i).valid := io.fromRename(i).fire && !isAMOVec(i) && !isSegment(i) && !isfofFixVlUop(i)
+    enqLsqIO.req(i).valid := io.fromRename(i).fire && !isAMOVec(i)
     enqLsqIO.req(i).bits.uop.connectRenameOutUop(io.fromRename(i).bits)
 
     enqLsqIO.req(i).bits.reqEndPtr := io.fromRename(i).bits.lsqIdxEnd
@@ -749,12 +743,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   val isFp = VecInit(fromRename.map(req => FuType.isFArith(req.bits.fuType)))
   val isVec    = VecInit(fromRename.map(req => FuType.isVArith (req.bits.fuType)))
-  val isMem    = VecInit(fromRename.map(req => FuType.isMem(req.bits.fuType) ||
-                                                  FuType.isVls (req.bits.fuType)))
+  val isMem    = VecInit(fromRename.map(req => FuType.isMem(req.bits.fuType)))
   val isLs     = VecInit(fromRename.map(req => FuType.isLoadStore(req.bits.fuType)))
-  val isVls    = VecInit(fromRename.map(req => FuType.isVls (req.bits.fuType)))
   val isStore  = VecInit(fromRename.map(req => FuType.isStore(req.bits.fuType)))
-  val isVStore = VecInit(fromRename.map(req => FuType.isVStore(req.bits.fuType)))
   val isAMO    = VecInit(fromRename.map(req => FuType.isAMO(req.bits.fuType)))
   val isBlockBackward  = VecInit(fromRename.map(x => x.valid && x.bits.blockBackward))
   val isWaitForward    = VecInit(fromRename.map(x => x.valid && x.bits.waitForward))
@@ -1074,8 +1065,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     FuType.isInt(issueQueueStallFutype)         -> BalanceDispatchPolicyStallInt.id.U   ,
     FuType.isFArith(issueQueueStallFutype)      -> BalanceDispatchPolicyStallFp.id.U    ,
     FuType.isVArith(issueQueueStallFutype)      -> BalanceDispatchPolicyStallVec.id.U   ,
-    FuType.isLoadVload(issueQueueStallFutype)   -> BalanceDispatchPolicyStallLoad.id.U  ,
-    FuType.isStoreVstore(issueQueueStallFutype) -> BalanceDispatchPolicyStallStore.id.U ,
+    FuType.isLoad(issueQueueStallFutype)   -> BalanceDispatchPolicyStallLoad.id.U  ,
+    FuType.isStore(issueQueueStallFutype) -> BalanceDispatchPolicyStallStore.id.U ,
   ))
   val issueQueueStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
     robHeadStall                                -> robHeadStallReason          ,
@@ -1087,8 +1078,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     FuType.isInt(issueQueueStallFutype)         -> IntIQFullStallOther.id.U    ,
     FuType.isFArith(issueQueueStallFutype)      -> FpIQFullStall.id.U          ,
     FuType.isVArith(issueQueueStallFutype)      -> VecIQFullStall.id.U         ,
-    FuType.isLoadVload(issueQueueStallFutype)   -> LoadIQFullStall.id.U        ,
-    FuType.isStoreVstore(issueQueueStallFutype) -> StoreIQFullStall.id.U       ,
+    FuType.isLoad(issueQueueStallFutype)   -> LoadIQFullStall.id.U        ,
+    FuType.isStore(issueQueueStallFutype) -> StoreIQFullStall.id.U       ,
     issueQueueStall                             -> OtherIQFullStall.id.U       ,
   ))
 
@@ -1096,8 +1087,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val dispatchlsqStallFutype = PriorityMux(dispatchlsqBubbleVec , fuTypes)
   val dispatchlsqStallReason = MuxCase(NoStall.id.U, Seq(
     robHeadStall                                 -> robHeadStallReason    ,
-    FuType.isLoadVload(dispatchlsqStallFutype)   -> LqStall.id.U          ,
-    FuType.isStoreVstore(dispatchlsqStallFutype) -> SqStall.id.U          ,
+    FuType.isLoad(dispatchlsqStallFutype)   -> LqStall.id.U          ,
+    FuType.isStore(dispatchlsqStallFutype) -> SqStall.id.U          ,
   ))
 
   // block backward will not stall whole pipe in current cycle
@@ -1129,8 +1120,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val dispatchBandWidthPolicyBubble = PriorityMux(issueQueueStallVec, fromRenameFutypeOvecIQEnqBandwidth)
   val dispatchBandWidthPolicyBubbleFutype = PriorityMux(fromRenameFutypeOvecIQEnqBandwidth, fuTypes)
   val dispatchBandWidthPolicyBubbleReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
-    FuType.isLoadVload(dispatchBandWidthPolicyBubbleFutype)   -> LoadDispatchPolicyStall.id.U  ,
-    FuType.isStoreVstore(dispatchBandWidthPolicyBubbleFutype) -> StoreDispatchPolicyStall.id.U ,
+    FuType.isLoad(dispatchBandWidthPolicyBubbleFutype)   -> LoadDispatchPolicyStall.id.U  ,
+    FuType.isStore(dispatchBandWidthPolicyBubbleFutype) -> StoreDispatchPolicyStall.id.U ,
     dispatchBandWidthPolicyBubble                             -> OtherDispatchPolicyStall.id.U ,
   ))
 
@@ -1154,8 +1145,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     FuType.isInt(issueQueueStallFutype)         -> IntIQFullStallOther.id.U    ,
     FuType.isFArith(issueQueueStallFutype)      -> FpIQFullStall.id.U          ,
     FuType.isVArith(issueQueueStallFutype)      -> VecIQFullStall.id.U         ,
-    FuType.isLoadVload(issueQueueStallFutype)   -> LoadIQFullStall.id.U        ,
-    FuType.isStoreVstore(issueQueueStallFutype) -> StoreIQFullStall.id.U       ,
+    FuType.isLoad(issueQueueStallFutype)   -> LoadIQFullStall.id.U        ,
+    FuType.isStore(issueQueueStallFutype) -> StoreIQFullStall.id.U       ,
   ))
 
   /** Dispatch lsq Bubble : lsq cannot enter caculate by dispatch: allowdispatch*/
@@ -1163,8 +1154,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   val dispatchlsqBubbleFutype = PriorityMux(dispatchlsqBubbleVec , fuTypes)
   val dispatchlsqBubbleReason = MuxCase(NoStall.id.U, Seq(
     robHeadStall                                  -> robHeadStallReason    ,
-    FuType.isLoadVload(dispatchlsqBubbleFutype)   -> LqStall.id.U  ,
-    FuType.isStoreVstore(dispatchlsqBubbleFutype) -> SqStall.id.U ,
+    FuType.isLoad(dispatchlsqBubbleFutype)   -> LqStall.id.U  ,
+    FuType.isStore(dispatchlsqBubbleFutype) -> SqStall.id.U ,
   ))
 
   /** Special Instruction bubble: wait forward or block backward */

@@ -147,7 +147,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   })
 
   val exuWBs: Seq[ValidIO[WriteBackRobBundle]] = io.exuWriteback
-  val vldWBs: Seq[ValidIO[WriteBackRobBundle]] = io.exuWriteback.filter(_.bits.params.hasVLoadFu).toSeq
   val fflagsWBs = io.exuWriteback.filter(x => x.bits.fflags.nonEmpty).toSeq
   val exceptionWBs = io.writeback.filter(x => x.bits.params.needExceptionGen).toSeq
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
@@ -1255,18 +1254,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.crossPageIPFFix := false.B
     val trigger = wb.bits.trigger.getOrElse(TriggerAction.None).asTypeOf(exc_wb.bits.trigger)
     exc_wb.bits.trigger := trigger
-    exc_wb.bits.vstartEn := (if (wb.bits.vls.nonEmpty) wb.bits.exceptionVec.orR || TriggerAction.isDmode(trigger) else 0.U)
-    exc_wb.bits.vstart := (if (wb.bits.vls.nonEmpty) wb.bits.vls.get.vpu.vstart else 0.U)
-    exc_wb.bits.vuopIdx := (if (wb.bits.vls.nonEmpty) wb.bits.vls.get.vpu.vuopIdx else 0.U)
-    exc_wb.bits.isVecLoad := wb.bits.vls.map(_.isVecLoad).getOrElse(false.B)
-    exc_wb.bits.isVlm := wb.bits.vls.map(_.isVlm).getOrElse(false.B)
-    exc_wb.bits.isStrided := wb.bits.vls.map(_.isStrided).getOrElse(false.B) // strided need two mode tmp vreg
-    exc_wb.bits.isIndexed := wb.bits.vls.map(_.isIndexed).getOrElse(false.B) // indexed and nf=0 need non-sequential uopidx -> vdidx
-    exc_wb.bits.isWhole := wb.bits.vls.map(_.isWhole).getOrElse(false.B) // indexed and nf=0 need non-sequential uopidx -> vdidx
-    exc_wb.bits.nf := wb.bits.vls.map(_.vpu.nf).getOrElse(0.U)
-    exc_wb.bits.vsew := wb.bits.vls.map(_.vpu.vsew).getOrElse(0.U)
-    exc_wb.bits.veew := wb.bits.vls.map(_.vpu.veew).getOrElse(0.U)
-    exc_wb.bits.vlmul := wb.bits.vls.map(_.vpu.vlmul).getOrElse(0.U)
+    exc_wb.bits.vstartEn := false.B // Todo[Vector]: support vector ls exception
+    exc_wb.bits.vstart := 0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.vuopIdx :=  0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.isVecLoad := false.B // Todo[Vector]: support vector ls exception
+    exc_wb.bits.isVlm := false.B // Todo[Vector]: support vector ls exception
+    exc_wb.bits.isStrided := false.B // Todo[Vector]: remove it
+    exc_wb.bits.isIndexed := false.B // Todo[Vector]: remove it
+    exc_wb.bits.isWhole := false.B // Todo[Vector]: remove it
+    exc_wb.bits.nf := 0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.vsew := 0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.veew := 0.U // Todo[Vector]: support vector ls exception
+    exc_wb.bits.vlmul := 0.U // Todo[Vector]: support vector ls exception
   }
 
   fflagsDataRead := (0 until CommitWidth).map(i => robEntries(deqPtrVec(i).value).fflags)
@@ -1540,15 +1539,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val debug_VecOtherPdest = RegInit(VecInit.fill(RobSize)(VecInit.fill(8)(0.U(PhyRegIdxWidth.W))))
 
-  vldWBs.map{ vldWb =>
-    val vldWbPdest  = vldWb.bits.pdest
-    val vldWbRobIdx = vldWb.bits.robIdx.value
-    val vldWbvdIdx  = vldWb.bits.vls.get.vdIdx
-    when (vldWb.fire && robEntries(vldWbRobIdx).valid && (vldWb.bits.vecWen.get || vldWb.bits.v0Wen.get)) {
-      debug_VecOtherPdest(vldWbRobIdx)(vldWbvdIdx) := vldWbPdest
-    }
-  }
-
   // topdown
   val notIssue = !debug_lsIssue(deqPtr.value)
   val tlbReplay = io.debugTopDown.fromCore.fromMem.robHeadTlbReplay
@@ -1664,8 +1654,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         (robHeadTime < idealWaitTime)
       val robHeadExecStallReason =  MuxCase(OtherNotReadyStall.id.U, Seq(
         FuType.isAMO(robHeadFutype)          -> AtomicStall.id.U          ,
-        FuType.isStoreVstore(robHeadFutype)  -> StoreStall.id.U           ,
-        FuType.isLoadVload(robHeadFutype)    -> ldReason                  ,
+        FuType.isStore(robHeadFutype)  -> StoreStall.id.U           ,
+        FuType.isLoad(robHeadFutype)    -> ldReason                  ,
         FuType.isDivSqrt(robHeadFutype)      -> DivStall.id.U             ,
         FuType.isInt(robHeadFutype)          -> IntNotReadyStall.id.U     ,
         FuType.isFArith(robHeadFutype)       -> FPNotReadyStall.id.U      ,
