@@ -117,8 +117,6 @@ case class BackendParams(
   def StdCnt = allSchdParams.map(_.StdCnt).sum
   def LduCnt = allSchdParams.map(_.LduCnt).sum
   def HyuCnt = allSchdParams.map(_.HyuCnt).sum
-  def VlduCnt = allSchdParams.map(_.VlduCnt).sum
-  def VstuCnt = allSchdParams.map(_.VstuCnt).sum
   def LsExuCnt = StaCnt + LduCnt + HyuCnt
   val LdExuCnt = LduCnt + HyuCnt
   val StaExuCnt = StaCnt + HyuCnt
@@ -736,7 +734,7 @@ object BackendV2SchdParams {
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX0",
-          Seq(VialuCfg, VfaluCfg, VfmaCfg, VimacCfg, VppuCfg, VipuCfg, VfcvtCfg, VSetRvfWvfCfg, VmoveCfg),
+          Seq(VialuCfg, VfaluCfg, VfmaCfg, VimacCfg, VfcvtCfg, VSetRvfWvfCfg, VmoveCfg),
           Seq(VfWB(port = 0, 0), V0WB(port = 0, 0), IntWB(port = 7, 0), FpWB(port = 6, 0)),
           Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(V0RD(0, 0))),
           vlWB = VlWB(port = vfSchdVlWbPort, 0),
@@ -750,26 +748,6 @@ object BackendV2SchdParams {
           Seq(VfWB(port = 1, 0), V0WB(port = 1, 0), FpWB(port = 7, 0)),
           Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)), Seq(V0RD(1, 0))),
           vlRD = VlRD(1, 0),
-        ),
-      ), numEntries = 16, numEnq = 2, numComp = 12),
-      IssueBlockParams(Seq(
-        ExeUnitParams(
-          "VLSU0",
-          Seq(VlduCfg, VstuCfg, VseglduCfg, VsegstuCfg),
-          Seq(VfWB(2, 0), V0WB(2, 0)),
-          Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(V0RD(2, 0))),
-          vlWB = VlWB(port = 2, 0),
-          vlRD = VlRD(2, 0),
-        ),
-      ), numEntries = 16, numEnq = 2, numComp = 12),
-      IssueBlockParams(Seq(
-        ExeUnitParams(
-          "VLSU1",
-          Seq(VlduCfg, VstuCfg),
-          Seq(VfWB(3, 0), V0WB(3, 0)),
-          Seq(Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)), Seq(V0RD(3, 0))),
-          vlWB = VlWB(port = 3, 0),
-          vlRD = VlRD(3, 0),
         ),
       ), numEntries = 16, numEnq = 2, numComp = 12),
     ),

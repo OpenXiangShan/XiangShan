@@ -360,51 +360,16 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
   }
   private val fuType       = uops.map(_.fuType)
-  private val fuOpType     = uops.map(_.fuOpType)
-  private val vtype        = uops.map(_.vpu.vtype)
-  private val sew          = vtype.map(_.vsew)
-  private val lmul         = vtype.map(_.vlmul)
-  private val eew          = uops.map(_.vpu.veew)
-  private val mop          = fuOpType.map(fuOpTypeItem => LSUOpType.getVecLSMop(fuOpTypeItem))
-  private val isVlsType    = fuType.map(fuTypeItem => isVls(fuTypeItem))
-  private val isSegment    = fuType.map(fuTypeItem => isVsegls(fuTypeItem))
-  private val isUnitStride = fuOpType.map(fuOpTypeItem => LSUOpType.isAllUS(fuOpTypeItem))
-  private val nf           = fuOpType.zip(uops.map(_.vpu.nf)).map { case (fuOpTypeItem, nfItem) => Mux(LSUOpType.isWhole(fuOpTypeItem), 0.U, nfItem) }
-  private val mulBits      = 3 // dirty code
-  private val emul         = fuOpType.zipWithIndex.map { case (fuOpTypeItem, index) =>
-    Mux(
-      LSUOpType.isWhole(fuOpTypeItem),
-      GenUSWholeEmul(nf(index)),
-      Mux(
-        LSUOpType.isMasked(fuOpTypeItem),
-        0.U(mulBits.W),
-        EewLog2(eew(index)) - sew(index) + lmul(index)
-      )
-    )
-  }
-  private val isVecUnitType = isVlsType.zip(isUnitStride).map { case (isVlsTypeItme, isUnitStrideItem) =>
-    isVlsTypeItme && isUnitStrideItem
-  }
-  private val isfofFixVlUop   = uops.map{x => x.vpu.isVleff && x.lastUop}
-  private val instType = isSegment.zip(mop).map { case (isSegementItem, mopItem) => Cat(isSegementItem, mopItem) }
+
   private val isAMOVec      = fuType.map(fuTypeItem => FuType.isAMO(fuTypeItem))
-  // There is no way to calculate the 'flow' for 'unit-stride' exactly:
-  //  Whether 'unit-stride' needs to be split can only be known after obtaining the address.
-  // For scalar instructions, this is not handled here, and different assignments are done later according to the situation.
-  private val numLsElem = instType.zipWithIndex.map { case (instTypeItem, index) =>
-    Mux(
-      isVecUnitType(index),
-      VecMemUnitStrideMaxFlowNum.U,
-      GenRealFlowNum(instTypeItem, emul(index), lmul(index), eew(index), sew(index))
-    )
-  }
+
   uops.zipWithIndex.map { case(u, i) =>
-    u.numLsElem := Mux(isVlsType(i) && !isfofFixVlUop(i), numLsElem(i), 1.U)
+    u.numLsElem := 1.U
   }
 
   // speculatively assign the sqIdx/lqIdx
   io.toLsqEnqCtrl.req.zipWithIndex.map{ case (port, i) =>
-    port.valid := io.out(i).valid && io.out.head.ready && !isAMOVec(i) && !isSegment(i) && !isfofFixVlUop(i) //TODO: !isAMOVec(i) && !isSegment(i) && !isfofFixVlUop(i) will be remove in the future.
+    port.valid := io.out(i).valid && io.out.head.ready && !isAMOVec(i)
     port.bits.num := uops(i).numLsElem // here will be change to io.in.bits in the future, this port need `numLsElem`
     port.bits.fuType := uops(i).fuType
   }

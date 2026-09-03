@@ -169,19 +169,6 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
       exuInput.bits.params.immType,
     )
 
-    val vecImm = Option.when(
-      exuInput.bits.params.hasVecFu
-    )(
-      VecImmExtractor(
-        VLEN,
-        exuInput.bits.params.immType,
-      )(
-        fromDPs(exuIdx).bits.imm.getOrElse(0.U),
-        fromDPs(exuIdx).bits.selImm.getOrElse(0.U),
-        exuInput.bits.vtype.get.vsew
-      )
-    )
-
     val exuParm = exuInput.bits.params
     val immLoadSrc0 = Option.when(exuParm.hasLoadFu)(SignExt(ImmUnion.U.toImm32(fromDPs(exuIdx).bits.imm.get(31, ImmUnion.I.len)), XLEN))
     val isIntScheduler = exuParm.isIntExeUnit
@@ -234,7 +221,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
           readZero       -> 0.U,
           readRegOH      -> fromDPs(exuIdx).bits.src(srcIdx),
           readRegCache   -> fromDPsRCData(exuIdx)(srcIdx),
-          readImm        -> (if (exuParm.hasLoadExu && srcIdx == 0) immLoadSrc0.get else if (exuParm.aluNeedPc) immALU else if (vecImm.nonEmpty) vecImm.get else imm)
+          readImm        -> (if (exuParm.hasLoadExu && srcIdx == 0) immLoadSrc0.get else if (exuParm.aluNeedPc) immALU else imm)
         )
       )
       src := originSrc

@@ -358,12 +358,6 @@ object Opcode {
       op(Size.width, 1) === sz(this).U
     }
 
-    def makeLsUop(isHlv: Bool, isHlvx: Bool, size: UInt): UInt = {
-      Cat(isHlv, isHlvx, bitPatToUInt(sign), size.pad(Size.width), 0.U(1.W))
-    }
-
-    def getVecLSMop(fuOpType: UInt): UInt = fuOpType(6, 5)
-
     val idxDC = bb"00" // Don't care
     val idx0 = bb"00"
     val idx1 = bb"01"

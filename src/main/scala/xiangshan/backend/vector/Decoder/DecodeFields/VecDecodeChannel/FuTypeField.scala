@@ -7,11 +7,9 @@ import xiangshan.backend.decode.opcode.Opcode
 import xiangshan.backend.decode.opcode.Opcode.{Opcode, Opcodes}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.vector.Decoder.DecodePatterns.InstSewLmulNfPattern
-import xiangshan.backend.vector.Decoder.InstPattern.VecMemInstPattern
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.DecodePatternComb
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.BitPatToExt
-import xiangshan.backend.vector.util.Decode
 
 import scala.language.implicitConversions
 
@@ -81,8 +79,8 @@ object FuTypeField {
       case _: Opcode.VMoveOpcodes.type => FuType.vmove
       case _: Opcode.VMAluOpcodes.type => FuType.vmpu
       case _: Opcode.VIMacOpcodes.type => FuType.vimac
-      case _: Opcode.VIRedOpcodes.type => FuType.vipu
-      case _: Opcode.VIPermOpcodes.type => FuType.vppu
+      case _: Opcode.VIRedOpcodes.type => FuType.vredu
+      case _: Opcode.VIPermOpcodes.type => FuType.vperm
       case _: Opcode.VIDivOpcodes.type => FuType.vidiv
       case _: Opcode.VFRedOpcodes.type => FuType.vfalu
       case _: Opcode.VSha256msOpcodes.type => FuType.vsha256ms

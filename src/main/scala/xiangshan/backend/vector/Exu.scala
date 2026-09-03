@@ -5,25 +5,22 @@ import chisel3.experimental.BundleLiterals._
 import chisel3.util._
 import freechips.rocketchip.util._
 import org.chipsalliance.cde.config.Parameters
-import xiangshan._
 import xiangshan.backend.Bundles
 import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.datapath.DataConfig._
-import xiangshan.backend.datapath.RdConfig.IntRD
 import xiangshan.backend.datapath.WbConfig.WbConfig
 import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.{Fflags, Frm}
-import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{Frm => VecFrm}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm, _}
 import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{Frm => VecFrm}
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, BypassSource}
 import xiangshan.backend.vector.VecRegionModule.DebugBundle
 import xiangshan.backend.vector.fu._
-import xiangshan.{ExceptSparseVec, Redirect, TriggerAction, XSBundle}
-import xiangshan.mem.StoreQueueDataWrite
-import xiangshan.mem.SqPtr
+import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
+import xiangshan._
 import yunsuan.vector.Common.{SewOH, VSew, _}
 import yunsuan.vector.v2.MergeUnit
 
@@ -264,7 +261,6 @@ object Exu {
       exuInput.storeSetHit.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.loadWaitStrict.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.ssid.foreach(x => x := 0.U.asTypeOf(x))
-      exuInput.numLsElem.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.lqIdx.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.sqIdx.foreach(x => x := this.ctrl.sqIdx.get)
       exuInput.dataSources.foreach(x => x := 0.U.asTypeOf(x))
@@ -482,71 +478,6 @@ object Exu {
     val trigger       = Option.when(param.needTrigger)(TriggerAction())
     val debug         = Option.when(backendParams.debugEn)(new DebugBundle)
 
-    def toOldExuOutput(implicit p: Parameters): xiangshan.backend.Bundles.ExuOutput = {
-      val exuOutput = Wire(new Bundles.ExuOutput(param.getExeUnitParams()))
-
-      exuOutput.data.foreach(_ := 0.U)
-      exuOutput.pdest := 0.U
-      exuOutput.pdestV0.foreach(_ := 0.U)
-      exuOutput.pdestVl.foreach(_ := 0.U)
-      exuOutput.robIdx := this.robIdx
-      exuOutput.intWen.foreach(_ := false.B)
-      exuOutput.fpWen.foreach(_ := false.B)
-      exuOutput.vecWen.foreach(_ := false.B)
-      exuOutput.v0Wen.foreach(_ := false.B)
-      exuOutput.vlWen.foreach(_ := false.B)
-      exuOutput.redirect.foreach(_ := this.redirect.get)
-      exuOutput.fflagsWen.foreach(_ := this.fflags.get.orR)
-      exuOutput.fflags.foreach(_ := this.fflags.get)
-      exuOutput.vxsat.foreach(_ := this.vxsat.get)
-      exuOutput.exceptionVec := this.exceptionVec
-      exuOutput.flushPipe.foreach(_ := this.flushPipe.get)
-      exuOutput.replay.foreach(_ := this.replay.get)
-      exuOutput.lqIdx.foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.sqIdx.foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.trigger.foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.isRVC.foreach(_ := false.B)
-      exuOutput.vls.foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.isFromLoadUnit.foreach(_ := false.B)
-      exuOutput.debug := this.debug.map(_.debug).getOrElse(0.U.asTypeOf(exuOutput.debug))
-      exuOutput.perfDebugInfo.foreach(_ := this.debug.get.perfDebugInfo)
-      exuOutput.debug_seqNum.foreach(_ := this.debug.get.seqNum)
-
-      exuOutput
-    }
-
-    def toNewExuOutput(valid: Bool)(implicit p: Parameters): xiangshan.backend.Bundles.NewExuOutput = {
-      val exuOutput = Wire(new Bundles.NewExuOutput(param.getExeUnitParams()))
-
-      exuOutput.toRob.valid := valid
-      exuOutput.toRob.bits.robIdx := this.robIdx
-      exuOutput.toRob.bits.fflags      .foreach(_ := this.fflags.get)
-      exuOutput.toRob.bits.fflagsWen   .foreach(_ := this.fflags.get.orR)
-      exuOutput.toRob.bits.vxsat       .foreach(_ := this.vxsat.get)
-      exuOutput.toRob.bits.exceptionVec := this.exceptionVec
-      exuOutput.toRob.bits.flushPipe   .foreach(_ := this.flushPipe.get)
-      exuOutput.toRob.bits.trigger     .foreach(_ := this.trigger.get)
-      exuOutput.toRob.bits.vxsat       .foreach(_ := this.vxsat.get)
-      exuOutput.toRob.bits.lqIdx       .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.toRob.bits.sqIdx       .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.toRob.bits.vls         .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.pdest                                  := 0.U
-      exuOutput.pdestV0                .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.pdestVl                .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.toIntRf                .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.toFpRf                 .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.toVecRf                .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.toV0Rf                 .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.toVlRf                 .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.redirect               .foreach(_ := this.redirect.get)
-      exuOutput.isFromLoadUnit         .foreach(x => x := 0.U.asTypeOf(x))
-      exuOutput.debug                             := this.debug.map(_.debug).getOrElse(0.U.asTypeOf(exuOutput.debug))
-      exuOutput.perfDebugInfo          .foreach(_ := this.debug.get.perfDebugInfo)
-      exuOutput.debug_seqNum           .foreach(_ := this.debug.get.seqNum)
-
-      exuOutput
-    }
-
     def toWriteBackRobBundle(implicit p: Parameters): xiangshan.backend.Bundles.WriteBackRobBundle = {
       val toRob = Wire(new Bundles.WriteBackRobBundle(param.getExeUnitParams(), backendParams))
 
@@ -561,7 +492,6 @@ object Exu {
       toRob.lqIdx         .foreach(x => x := 0.U.asTypeOf(x))
       toRob.sqIdx         .foreach(x => x := 0.U.asTypeOf(x))
       toRob.trigger       .foreach(x => x := 0.U.asTypeOf(x))
-      toRob.vls           .foreach(x => x := 0.U.asTypeOf(x))
       toRob.data          := 0.U
       toRob.pdest         := 0.U
       toRob.vecWen        .foreach(_ := false.B)
