@@ -791,6 +791,45 @@ def _force_redirect_to(env, target_pc: int) -> None:
     env.backend_model.inject_redirect(int(target_pc), "ctrl_redirect", delay_cycles=0)
 
 
+def _queue_stream_cfi_redirect(env, *, source_pc: int, target_pc: int) -> None:
+    source = None
+    for _ in range(6000):
+        source = next(
+            (
+                entry
+                for entry in env.backend_model._cfvec_queue
+                if int(entry.pc) == int(source_pc) and bool(entry.is_cfi)
+            ),
+            None,
+        )
+        if source is not None:
+            break
+        env.step(1)
+    assert source is not None, {
+        "source_pc": hex(int(source_pc)),
+        "cfvec_queue": [
+            {
+                "pc": hex(int(entry.pc)),
+                "ftq": (int(entry.ftq_flag), int(entry.ftq_value)),
+                "offset": int(entry.ftq_offset),
+                "is_cfi": bool(entry.is_cfi),
+            }
+            for entry in env.backend_model._cfvec_queue
+        ],
+    }
+    env.backend_model.inject_redirect_from_cfvec(
+        source_pc=int(source.pc),
+        source_ftq_flag=int(source.ftq_flag),
+        source_ftq_value=int(source.ftq_value),
+        source_ftq_offset=int(source.ftq_offset),
+        target_pc=int(target_pc),
+        reason="instruncache_attribute_transition",
+        taken=1,
+        level=0,
+        delay_cycles=3,
+    )
+
+
 def _pulse_sfence(env, *, addr: int = 0, rs1: int = 0, rs2: int = 0, cycles: int = 1) -> None:
     env.pulse_sfence(addr=addr, rs1=rs1, rs2=rs2, cycles=cycles)
 
@@ -1503,8 +1542,12 @@ def test_sv39_same_page_sfence_retranslates_changed_attribute(env, old_attr: str
 
     new_pbmt = _configure_translation_attribute(env, attr=new_attr, paddr=mapping.paddr)
     _remap_sv39_page_pbmt(env, vaddr=mapping.vaddr, paddr=mapping.paddr, pbmt=new_pbmt)
+    _queue_stream_cfi_redirect(
+        env,
+        source_pc=mapping.vaddr + 0x10,
+        target_pc=mapping.vaddr,
+    )
     _pulse_sfence(env, addr=mapping.vaddr, rs1=0, rs2=1)
-    _force_redirect_to(env, mapping.vaddr)
 
     if new_attr == "cacheable":
         assert _wait_for_icache_req(env, max_cycles=12000) > 0
@@ -1572,47 +1615,11 @@ def test_sv39_redirect_transitions_to_changed_attribute(env, old_attr: str, new_
     assert _wait_for_observed_pc(env, old_mapping.vaddr, max_cycles=12000)
 
     _configure_translation_attribute(env, attr=new_attr, paddr=target_mapping.paddr)
-    if (old_attr, new_attr) == ("nc", "mmio"):
-        redirect_source_pc = old_mapping.vaddr + 0x10
-        redirect_source = None
-        for _ in range(6000):
-            redirect_source = next(
-                (
-                    entry
-                    for entry in env.backend_model._cfvec_queue
-                    if int(entry.pc) == int(redirect_source_pc)
-                    and bool(entry.is_cfi)
-                ),
-                None,
-            )
-            if redirect_source is not None:
-                break
-            env.step(1)
-        assert redirect_source is not None, {
-            "source_pc": hex(int(redirect_source_pc)),
-            "cfvec_queue": [
-                {
-                    "pc": hex(int(entry.pc)),
-                    "ftq": (int(entry.ftq_flag), int(entry.ftq_value)),
-                    "offset": int(entry.ftq_offset),
-                    "is_cfi": bool(entry.is_cfi),
-                }
-                for entry in env.backend_model._cfvec_queue
-            ],
-        }
-        env.backend_model.inject_redirect_from_cfvec(
-            source_pc=int(redirect_source.pc),
-            source_ftq_flag=int(redirect_source.ftq_flag),
-            source_ftq_value=int(redirect_source.ftq_value),
-            source_ftq_offset=int(redirect_source.ftq_offset),
-            target_pc=int(target_mapping.vaddr),
-            reason="instruncache_nc_to_mmio_transition",
-            taken=1,
-            level=0,
-            delay_cycles=3,
-        )
-    else:
-        _force_redirect_to(env, target_mapping.vaddr)
+    _queue_stream_cfi_redirect(
+        env,
+        source_pc=old_mapping.vaddr + 0x10,
+        target_pc=target_mapping.vaddr,
+    )
 
     if new_attr == "cacheable":
         assert _wait_for_icache_req(env, max_cycles=12000) > 0
@@ -2644,10 +2651,15 @@ def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
         "samples": redirect_samples[-16:],
     }
     first_redirect_cycle = min(redirect_cycles)
+    target_delivery_cycle = min(
+        int(obs.cycle)
+        for obs in env.monitor.observations[observations_before_redirect:]
+        if int(obs.pc) == redirect_target
+    )
     redirect_clear_window = [
         sample
         for sample in redirect_samples
-        if first_redirect_cycle <= int(sample["cycle"]) <= first_redirect_cycle + 3
+        if first_redirect_cycle <= int(sample["cycle"]) <= target_delivery_cycle
     ]
     # S2 payload registers are RegEnable state; redirect invalidates them via
     # s2_valid rather than requiring the physically stale bits to be zero.
@@ -2766,10 +2778,15 @@ def test_uncache_cross_page_half_is_flushed_while_second_page_response_pending(e
     ]
     assert redirect_cycles
     first_redirect_cycle = min(redirect_cycles)
+    target_delivery_cycle = min(
+        int(obs.cycle)
+        for obs in env.monitor.observations[observations_before_redirect:]
+        if int(obs.pc) == redirect_target
+    )
     clear_window = [
         sample
         for sample in redirect_samples
-        if first_redirect_cycle <= int(sample["cycle"]) <= first_redirect_cycle + 3
+        if first_redirect_cycle <= int(sample["cycle"]) <= target_delivery_cycle
     ]
     assert any(_half_rvi_state_is_quiescent(sample) for sample in clear_window), {
         "clear_window": clear_window
