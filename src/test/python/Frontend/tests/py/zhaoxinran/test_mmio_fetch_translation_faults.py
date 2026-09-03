@@ -13,6 +13,7 @@ from env.sequences import (
     TranslationScenarioBuilder,
 )
 from env.support import PmpPmaConfig, fold_pc
+from tests.py.zhaoxinran import test_address_translation_fault as translation_faults
 from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
 
 
@@ -33,7 +34,10 @@ def _prepare_cross_page_mmio_rvi(env) -> tuple[int, int, bytes]:
 
 def _cross_page_fault_scenario(
     *,
-    fault: str,
+    case_id: str,
+    s2xlate: int,
+    response_field: str,
+    expected_result: str,
     va: int,
     pa: int,
     payload: bytes,
@@ -59,39 +63,23 @@ def _cross_page_fault_scenario(
         )
         for page in range(2)
     )
-    if fault == "gpf":
-        gpa = uncache._NORMAL_PHYS_BASE + uncache._SV39_PAGE_SIZE - 2
-        overrides = (
-            TranslationPtwResponseOverride(
-                vpn=(va >> 12) + 1,
-                s2xlate=3,
-                patch=(("s2_gpf", 1),),
-            ),
+    translation = {
+        "mode": "bare" if s2xlate == 2 else "sv39",
+        "s2xlate": s2xlate,
+        "priv_virt": int(s2xlate != 0),
+    }
+    if s2xlate == 3:
+        translation.update(
+            {
+                "gpa": uncache._NORMAL_PHYS_BASE + uncache._SV39_PAGE_SIZE - 2,
+                "s1_pte": TranslationPte(asid=5, vmid=7),
+                "s2_pte": TranslationPte(vmid=7),
+                "vsatp_asid": 5,
+                "hgatp_vmid": 7,
+            }
         )
-        return TranslationScenario(
-            scenario_id="mmio-cross-page-second-gpf",
-            va=va,
-            gpa=gpa,
-            pa=pa,
-            payload=payload,
-            page_count=2,
-            s2xlate=3,
-            priv_virt=1,
-            s1_pte=TranslationPte(asid=5, vmid=7),
-            s2_pte=TranslationPte(vmid=7),
-            vsatp_asid=5,
-            hgatp_vmid=7,
-            ptw_response_overrides=overrides,
-            expected_path="fault",
-            expected_result="guest_fault",
-            pmp_entries=pmp_entries,
-            pma_entries=pma_entries,
-        )
-
-    patch_name = "s1_pf" if fault == "pf" else "s1_af"
-    expected_result = "page_fault" if fault == "pf" else "access_fault"
     return TranslationScenario(
-        scenario_id=f"mmio-cross-page-second-{fault}",
+        scenario_id=f"mmio-cross-page-second-{case_id}",
         va=va,
         pa=pa,
         payload=payload,
@@ -99,24 +87,39 @@ def _cross_page_fault_scenario(
         ptw_response_overrides=(
             TranslationPtwResponseOverride(
                 vpn=(va >> 12) + 1,
-                s2xlate=0,
-                patch=((patch_name, 1),),
+                s2xlate=s2xlate,
+                patch=((response_field, 1),),
             ),
         ),
         expected_path="fault",
         expected_result=expected_result,
         pmp_entries=pmp_entries,
         pma_entries=pma_entries,
+        **translation,
     )
 
 
-@pytest.mark.parametrize("fault", ["pf", "gpf", "af"])
+@pytest.mark.parametrize(
+    "s2xlate,response_field,expected_result,expected_fault",
+    translation_faults._CROSS_PAGE_FAULT_CASES,
+)
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_mmio_cross_page_second_page_translation_fault(env, fault: str):
+def test_mmio_cross_page_second_page_translation_fault(
+    env,
+    s2xlate: int,
+    response_field: str,
+    expected_result: str,
+    expected_fault: str,
+):
     cross_page_va, cross_page_pa, payload = _prepare_cross_page_mmio_rvi(env)
     uncache._initialize_sv39_fetch(env, reset_vector=cross_page_va)
+    gpaddr_writes = translation_faults._capture_gpaddr_writes(env)
+    cfvec_deliveries = translation_faults._capture_cfvec_deliveries(env)
     scenario = _cross_page_fault_scenario(
-        fault=fault,
+        case_id=f"s2xlate-{s2xlate}-{response_field}",
+        s2xlate=s2xlate,
+        response_field=response_field,
+        expected_result=expected_result,
         va=cross_page_va,
         pa=cross_page_pa,
         payload=payload,
@@ -141,18 +144,53 @@ def test_mmio_cross_page_second_page_translation_fault(env, fault: str):
     active = env.translation_oracle.get_active()
     assert int(env.ptw_agent.get_stats().get("response_override_hit_count", 0)) >= 1
     assert active is not None and active.get("fault_seen"), {
-        "fault": fault,
+        "s2xlate": s2xlate,
+        "response_field": response_field,
         "active": active,
         "ptw": env.ptw_agent.get_stats(),
         "uncache": env.uncache_agent.get_stats(),
     }
-    assert active["expected_fault"] == {
-        "pf": "instruction_page_fault",
-        "gpf": "instruction_guest_page_fault",
-        "af": "instruction_access_fault",
-    }[fault]
+    second_page_vpn = (cross_page_va >> 12) + 1
+    assert any(
+        int(request["vpn"]) == second_page_vpn
+        and int(request["s2xlate"]) == s2xlate
+        for request in active["expected_ptw_requests"]
+    ), active["expected_ptw_requests"]
+    assert active["expected_fault"] == expected_fault
+    exception_records = [
+        record
+        for record in env.translation_oracle.get_stats()["records"]
+        if record["kind"] == "cfvec_exception"
+    ]
+    assert any(
+        int(record["pc"]) == cross_page_va
+        and record["fault"] == expected_fault
+        and bool(record["cross_page"])
+        for record in exception_records
+    ), exception_records
+    uncache_stats = env.uncache_agent.get_stats()
+    first_beat = cross_page_pa & ~(uncache._UNCACHE_BEAT_BYTES - 1)
+    next_page_pa = (cross_page_pa & ~(uncache._SV39_PAGE_SIZE - 1)) + uncache._SV39_PAGE_SIZE
+    assert first_beat in uncache_stats.get("request_addrs", [])
+    assert next_page_pa not in uncache_stats.get("request_addrs", [])
+    assert env.monitor.exception_mark_count > 0
+    _, ftq_value = translation_faults._assert_fault_ftq_identity(
+        cfvec_deliveries,
+        pc=cross_page_va,
+        expected_fault=expected_fault,
+        cross_page=True,
+    )
+    if expected_fault == "instruction_guest_page_fault":
+        assert gpaddr_writes, {"expected_fault": expected_fault}
+        assert all(record["waddr"] == ftq_value for record in gpaddr_writes), gpaddr_writes
+    else:
+        assert not gpaddr_writes, {
+            "expected_fault": expected_fault,
+            "gpaddr_writes": gpaddr_writes,
+        }
     assert env.assert_translation_scenario()["error_count"] == 0
     assert not env.monitor.get_errors()
+    assert not env.get_errors()
 
 
 @pytest.mark.funcov_bins("BIN-1123", "BIN-1124", "BIN-1125")

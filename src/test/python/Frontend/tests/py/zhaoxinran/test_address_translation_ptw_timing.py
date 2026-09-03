@@ -12,7 +12,7 @@ from env.sequences import (
     TranslationScenarioSequence,
     TranslationSectorLane,
 )
-from env.support import PmpPmaConfig
+from env.support import PmpPmaConfig, fold_pc
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -248,5 +248,20 @@ def test_ptw_timing_by_translation_stage(
         assert all(outcome["ok"] for outcome in state.expected_page_outcomes)
     else:
         assert state.expected_page_outcomes[0]["outcome"] == expected_fault
-        assert env.monitor.exception_mark_count > 0
+        exception_records = [
+            record
+            for record in env.translation_oracle.get_stats()["records"]
+            if record["kind"] == "cfvec_exception"
+        ]
+        assert any(
+            record["fault"] == expected_fault
+            and (
+                int(record["pc"]) == int(scenario.va)
+                or (
+                    int(record["pc"]) == 0
+                    and int(record["folded_pc"]) == fold_pc(scenario.va)
+                )
+            )
+            for record in exception_records
+        ), exception_records
     assert not env.get_errors()

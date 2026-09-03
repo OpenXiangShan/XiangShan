@@ -1,8 +1,48 @@
 from __future__ import annotations
 
 import pytest
+from env.core.transactions import BackendRedirectClass
 from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
+
+
+_INSTRUCTION_ACCESS_FAULT_BIT = 1
+_HARDWARE_ERROR_BIT = 19
+
+
+def _read_exception_bit(signal) -> int:
+    value = getattr(signal, "value", None)
+    return 0 if value is None else int(value)
+
+
+def _capture_cfvec_exceptions(env) -> list[dict]:
+    records: list[dict] = []
+
+    def capture(cycle: int, active_env) -> None:
+        observe = active_env.backend_observe_if
+        for slot in range(8):
+            if int(observe.cfvec_valid[slot].value) != 1:
+                continue
+            records.append(
+                {
+                    "cycle": int(cycle),
+                    "pc": int(observe.cfvec_pc[slot].value),
+                    "exception_bits": tuple(
+                        bit
+                        for bit in range(24)
+                        if _read_exception_bit(observe.cfvec_exception_vec[slot][bit]) == 1
+                    ),
+                }
+            )
+
+    env.register_cycle_observer(capture)
+    return records
+
+
+def _assert_target_exception(records: list[dict], *, pc: int, expected_bit: int) -> None:
+    target = [record for record in records if int(record["pc"]) == int(pc)]
+    assert target, {"missing_exception_pc": hex(int(pc)), "records": records[-64:]}
+    assert all(record["exception_bits"] == (int(expected_bit),) for record in target), target
 
 
 def _load_mmio_payload(env, payload: bytes) -> None:
@@ -123,6 +163,7 @@ def test_mmio_cross_8b_clean_rvi_requests_next_beat_and_delivers(env):
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_8b_first_beat_fault_reports_without_resend(env, fault: dict[str, int]):
     uncache._prepare_cross_beat_rvi_stream(env)
+    cfvec_records = _capture_cfvec_exceptions(env)
     env.uncache_agent.inject_response_fault_at(
         uncache._MMIO_BASE,
         **fault,
@@ -137,18 +178,27 @@ def test_mmio_cross_8b_first_beat_fault_reports_without_resend(env, fault: dict[
     assert int(stats.get("denied_resp_count", 0)) == int(fault.get("denied", 0))
     assert stats.get("request_addrs", []).count(uncache._MMIO_BASE) == 1
     assert uncache._MMIO_BASE + 8 not in stats.get("request_addrs", [])
+    _assert_target_exception(
+        cfvec_records,
+        pc=uncache._CROSS_BEAT_PC,
+        expected_bit=(
+            _INSTRUCTION_ACCESS_FAULT_BIT if fault.get("denied") else _HARDWARE_ERROR_BIT
+        ),
+    )
     assert not env.monitor.get_errors()
+    assert not env.get_errors()
 
 
-@pytest.mark.parametrize("fault", [None, "corrupt", "denied", "corrupt_and_denied"])
+@pytest.mark.parametrize("fault", [None, "corrupt", "corrupt_and_denied"])
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_cross_8b_second_beat_response_modes(env, fault: str | None):
     uncache._prepare_cross_beat_rvi_stream(env)
+    cfvec_records = _capture_cfvec_exceptions(env)
     if fault is not None:
         env.uncache_agent.inject_response_fault_at(
             uncache._MMIO_BASE + 8,
-            corrupt=int(fault in {"corrupt", "corrupt_and_denied"}),
-            denied=int(fault in {"denied", "corrupt_and_denied"}),
+            corrupt=1,
+            denied=int(fault == "corrupt_and_denied"),
         )
     uncache._initialize_mmio_fetch(env, reset_vector=uncache._CROSS_BEAT_PC)
 
@@ -166,13 +216,33 @@ def test_mmio_cross_8b_second_beat_response_modes(env, fault: str | None):
     else:
         assert uncache._wait_for_monitor_exception(env)
         assert env.monitor.exception_mark_count > 0
+        stats = env.uncache_agent.get_stats()
+        assert stats.get("request_addrs", []).count(uncache._MMIO_BASE) == 1
+        assert stats.get("request_addrs", []).count(uncache._MMIO_BASE + 8) == 1
+        _assert_target_exception(
+            cfvec_records,
+            pc=uncache._CROSS_BEAT_PC,
+            expected_bit=(
+                _INSTRUCTION_ACCESS_FAULT_BIT
+                if fault == "corrupt_and_denied"
+                else _HARDWARE_ERROR_BIT
+            ),
+        )
     assert not env.monitor.get_errors()
+    assert not env.get_errors()
 
 
-@pytest.mark.parametrize("fault", [{"corrupt": 1}, {"denied": 1}])
+@pytest.mark.parametrize(
+    "fault",
+    [
+        pytest.param({"corrupt": 1}, id="corrupt"),
+        pytest.param({"corrupt": 1, "denied": 1}, id="corrupt-and-denied"),
+    ],
+)
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_mmio_single_beat_d_response_fault_is_reported(env, fault: dict[str, int]):
     uncache._prepare_mmio_cnop_stream(env)
+    cfvec_records = _capture_cfvec_exceptions(env)
     env.uncache_agent.inject_next_response_fault(**fault)
     uncache._initialize_mmio_fetch(env)
 
@@ -180,12 +250,18 @@ def test_mmio_single_beat_d_response_fault_is_reported(env, fault: dict[str, int
     assert uncache._wait_for_uncache_resp(env)
     assert uncache._wait_for_monitor_exception(env)
     stats = env.uncache_agent.get_stats()
-    if fault.get("corrupt"):
-        assert int(stats.get("corrupt_resp_count", 0)) == 1
-    else:
-        assert int(stats.get("denied_resp_count", 0)) == 1
+    assert int(stats.get("corrupt_resp_count", 0)) == 1
+    assert int(stats.get("denied_resp_count", 0)) == int(fault.get("denied", 0))
     assert env.monitor.exception_mark_count > 0
+    _assert_target_exception(
+        cfvec_records,
+        pc=uncache._MMIO_BASE,
+        expected_bit=(
+            _INSTRUCTION_ACCESS_FAULT_BIT if fault.get("denied") else _HARDWARE_ERROR_BIT
+        ),
+    )
     assert not env.monitor.get_errors()
+    assert not env.get_errors()
 
 
 @pytest.mark.skipif(not uncache._RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -213,7 +289,11 @@ def test_mmio_branch_instruction_is_delivered_as_control_flow(env):
     assert any(
         sample["req_valid"] == 1
         and sample["is_first"] == 1
-        and sample["uncache_state"] == uncache._IFU_UNCACHE_SEND_REQ
+        and sample["uncache_state"] == uncache._IFU_UNCACHE_INVALID
+        for sample in snapshots
+    ), {"snapshots": snapshots[-64:]}
+    assert any(
+        sample["uncache_state"] == uncache._IFU_UNCACHE_SEND_REQ
         for sample in snapshots
     ), {"snapshots": snapshots[-64:]}
     assert uncache._wait_for_observed_pc(env, uncache._MMIO_BASE, max_cycles=8000)
@@ -292,7 +372,7 @@ def test_mmio_redirect_drops_a_ready_stalled_request(env):
     env.step(8)
     assert uncache._MMIO_BASE not in env.uncache_agent.get_stats().get("request_addrs", [])
     assert any(
-        sample["uncache_state"] == uncache._IFU_UNCACHE_SEND_REQ
+        sample["uncache_state"] == uncache._IFU_UNCACHE_WAIT_RESP
         and sample["tl_a_valid"] == 1
         and sample["tl_a_ready"] == 0
         and sample["backend_redirect"] == 1
@@ -311,6 +391,8 @@ def test_mmio_redirect_cancels_wait_last_commit_before_request(env):
     """Redirect a non-first MMIO while it is still commit ordered."""
     uncache._prepare_mmio_cnop_stream(env)
     env.backend_model.set_can_accept(1)
+    env.backend_model.commit_min_delay = 1000
+    env.backend_model.commit_max_delay = 1000
     env.backend_model.backend_empty_for_dut = lambda: 0
     snapshots: list[dict[str, int | None]] = []
 
@@ -327,6 +409,8 @@ def test_mmio_redirect_cancels_wait_last_commit_before_request(env):
     env.register_cycle_observer(capture)
     uncache._initialize_mmio_fetch(env)
 
+    assert uncache._wait_for_uncache_req(env)
+    assert uncache._wait_for_uncache_resp(env)
     for _ in range(8000):
         if snapshots and snapshots[-1]["uncache_state"] == uncache._IFU_UNCACHE_WAIT_LAST_COMMIT:
             break
@@ -337,7 +421,22 @@ def test_mmio_redirect_cancels_wait_last_commit_before_request(env):
 
     target_pc = uncache._MMIO_BASE + 0x40
     old_req_count = int(env.uncache_agent.get_stats().get("req_count", 0))
-    uncache._force_redirect_to(env, target_pc)
+    observations_before_redirect = len(env.monitor.observations)
+    source = next(
+        entry
+        for entry in env.backend_model._cfvec_queue
+        if int(entry.pc) == uncache._MMIO_BASE
+    )
+    env.backend_model.inject_redirect_from_cfvec(
+        source_pc=int(source.pc),
+        source_ftq_flag=int(source.ftq_flag),
+        source_ftq_value=int(source.ftq_value),
+        source_ftq_offset=int(source.ftq_offset),
+        target_pc=target_pc,
+        reason="mmio_wait_last_commit_cancel",
+        redirect_class=BackendRedirectClass.MEMORY_VIOLATION,
+        delay_cycles=0,
+    )
     env.step(8)
 
     assert any(
@@ -352,9 +451,13 @@ def test_mmio_redirect_cancels_wait_last_commit_before_request(env):
     ), {"snapshots": snapshots[-64:]}
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) == old_req_count
 
+    env.backend_model.backend_empty_for_dut = lambda: 1
     assert uncache._wait_for_request_addr(env, target_pc, max_cycles=8000)
     assert uncache._wait_for_observed_pc(env, target_pc, max_cycles=8000)
-    assert not any(int(item.pc) == uncache._MMIO_BASE for item in env.monitor.observations)
+    assert not any(
+        int(item.pc) == uncache._MMIO_BASE
+        for item in env.monitor.observations[observations_before_redirect:]
+    )
     assert not env.monitor.get_errors()
 
 

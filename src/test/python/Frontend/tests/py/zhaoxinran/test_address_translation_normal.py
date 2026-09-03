@@ -172,7 +172,12 @@ _NORMAL_CASES = (
         id="bare-cross-page",
     ),
     pytest.param(
-        *_scenario("translation-normal-virtual-bare-cross-page", mode="sv39", priv_virt=1),
+        *_scenario(
+            "translation-normal-virtual-bare-cross-page",
+            mode="sv39",
+            s2xlate=1,
+            priv_virt=1,
+        ),
         id="virtual-bare-cross-page",
     ),
     pytest.param(

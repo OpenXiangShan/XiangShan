@@ -7,6 +7,7 @@ import pytest
 from env.sequences import (
     TranslationPmpPmaEntry,
     TranslationScenario,
+    TranslationScenarioBuilder,
     TranslationScenarioPhase,
     TranslationScenarioRandomizer,
     TranslationScenarioSequence,
@@ -46,6 +47,51 @@ def _normal_cross_page_scenarios() -> tuple[TranslationScenario, ...]:
     )
 
 
+def _translation_complete(env) -> bool:
+    active = env.translation_oracle.get_active()
+    if active is None:
+        return False
+    expected_ptw_requests = {
+        (int(request["vpn"]), int(request["s2xlate"]), int(request["get_gpa"]))
+        for request in active["expected_ptw_requests"]
+    }
+    if active["expected_path"] == "fault":
+        return bool(
+            active["fault_seen"]
+            and expected_ptw_requests.issubset(active["responded_ptw_request_keys"])
+        )
+    expected_cfvec_pages = {
+        int(page)
+        for page, outcome in zip(
+            active["selected_pages"], active["expected_page_outcomes"]
+        )
+        if bool(outcome.get("ok", False))
+    }
+    return bool(
+        expected_ptw_requests.issubset(active["responded_ptw_request_keys"])
+        and len(active["expected_fetches"]) == len(active["observed_fetch_pas"])
+        and expected_cfvec_pages.issubset(active["observed_normal_cfvec_pages"])
+        and int(active["observed_normal_cfvec_count"]) >= 2
+    )
+
+
+def _fault_probe_pages(state) -> tuple[int, ...] | None:
+    if state.expected_page_outcomes[0]["ok"]:
+        return None
+
+    base_vpn = int(state.scenario.va) >> 12
+    pages = {0}
+    for probe in state.scenario.permission_probes:
+        first_page = (int(probe.va) >> 12) - base_vpn
+        last_page = ((int(probe.va) + max(1, int(probe.size)) - 1) >> 12) - base_vpn
+        pages.update(
+            page
+            for page in range(first_page, last_page + 1)
+            if 0 <= page < len(state.expected_page_outcomes)
+        )
+    return tuple(sorted(pages))
+
+
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_translation_constrained_random_stream_dut(env) -> None:
     seed = _read_int("TB_TRANSLATION_RANDOM_SEED", "0x5a390001")
@@ -59,11 +105,33 @@ def test_translation_constrained_random_stream_dut(env) -> None:
     phase_results = []
     for ordinal in range(start_ordinal, start_ordinal + count):
         scenario = TranslationScenarioRandomizer(seed).next(ordinal).scenario
-        sequence = TranslationScenarioSequence(actions=(
-            TranslationScenarioPhase(scenario=scenario),
-        ))
-        sequence.initialize_first_phase(env)
-        phase_results.extend(record for record in sequence.run(env) if record["kind"] == "phase")
+        translation_enabled = str(scenario.mode).lower() != "bare" or int(scenario.s2xlate) != 0
+        env.translation_oracle.disarm()
+        env.initialize(reset_vector=scenario.va, bare_mode=not translation_enabled)
+        prepared: dict[str, object] = {}
+
+        def arm_before_reset_release() -> None:
+            state = TranslationScenarioBuilder(env).build(scenario)
+            env.monitor.clear()
+            env.monitor.set_expected_pc(scenario.va)
+            env.translation_oracle.clear()
+            env.arm_translation_scenario(state, page_indexes=_fault_probe_pages(state))
+            prepared["state"] = state
+
+        env.reset(before_release=arm_before_reset_release)
+        state = prepared["state"]
+        for _ in range(12000):
+            if _translation_complete(env) or env.translation_oracle.get_stats()["errors"]:
+                break
+            env.step(1)
+        env.assert_translation_scenario()
+        phase_results.append(
+            {
+                "kind": "phase",
+                "scenario_id": scenario.scenario_id,
+                "state": state,
+            }
+        )
 
     assert len(phase_results) == count
     assert [record["scenario_id"] for record in phase_results] == [

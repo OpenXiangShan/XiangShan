@@ -141,14 +141,18 @@ _PTE_PERMISSION_CASES = (
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_address_translation_pte_permission(env, scenario: TranslationScenario, expected_fault: str) -> None:
     env.initialize(reset_vector=scenario.va, bare_mode=False)
-    state = TranslationScenarioBuilder(env).build(scenario)
+    prepared: dict[str, object] = {}
 
     def arm_before_reset_release() -> None:
+        state = TranslationScenarioBuilder(env).build(scenario)
         env.monitor.clear()
         env.monitor.set_expected_pc(scenario.va)
+        env.translation_oracle.clear()
         env.arm_translation_scenario(state, page_indexes=(0,))
+        prepared["state"] = state
 
     env.reset(before_release=arm_before_reset_release)
+    state = prepared["state"]
 
     for _ in range(6000):
         active = env.translation_oracle.get_active()

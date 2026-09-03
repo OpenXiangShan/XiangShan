@@ -2,20 +2,57 @@ from __future__ import annotations
 
 import pytest
 
-from env.funcov.py.ifu import mmio_nc_owner_funcov as owner_funcov
 from tests.py.zhaoxinran import test_instr_uncache_port_boundaries as uncache
 
 
+def _read_dut_signal(env, name: str) -> int:
+    signal = getattr(env.dut, str(name), None)
+    if signal is None:
+        signal = env.dut.GetInternalSignal(str(name))
+    assert signal is not None, {"missing_dut_signal": name}
+    value = getattr(signal, "value", None)
+    assert value is not None, {"unreadable_dut_signal": name}
+    return int(value)
+
+
+def _flush_snapshot(env) -> dict[str, int]:
+    ifu = "Frontend_top.Frontend.inner_ifu."
+    from_ftq_redirect = _read_dut_signal(
+        env, f"{ifu}__Vtogcov__io_fromFtq_redirect_valid"
+    )
+    wb_redirect = _read_dut_signal(env, f"{ifu}__Vtogcov__wbRedirect_valid")
+    wb_not_flush = _read_dut_signal(env, f"{ifu}s2_wbNotFlush")
+    return {
+        "entry_state": _read_dut_signal(
+            env, "Frontend_top.Frontend.inner_instrUncache.entries_0.state"
+        ),
+        "entry_resending": _read_dut_signal(
+            env, "Frontend_top.Frontend.inner_instrUncache.entries_0.resending"
+        ),
+        "prev_end_half": _read_dut_signal(
+            env, f"{ifu}s2_prevEndIsHalfRviInfo_valid"
+        ),
+        "tl_a_valid": _read_dut_signal(
+            env, "Frontend_top.auto_inner_instrUncache_client_out_a_valid"
+        ),
+        "tl_d_valid": _read_dut_signal(
+            env, "Frontend_top.auto_inner_instrUncache_client_out_d_valid"
+        ),
+        "ifu_flush": int(
+            from_ftq_redirect == 1
+            or (wb_redirect == 1 and wb_not_flush == 0)
+        ),
+    }
+
+
 def _register_flush_snapshot_observer(env):
-    snapshots: list[dict[str, int | None]] = []
+    snapshots: list[dict[str, int]] = []
 
     def capture(cycle: int, active_env) -> None:
         snapshots.append(
             {
                 "cycle": int(cycle),
-                **owner_funcov._snapshot(
-                    active_env.functional_coverage, active_env.dut
-                ),
+                **_flush_snapshot(active_env),
             }
         )
 
@@ -110,7 +147,7 @@ def test_mmio_d_response_coincides_with_ifu_flush(env):
     assert uncache._wait_for_request_addr(env, uncache._MMIO_BASE, max_cycles=8000)
     assert env.uncache_agent.pending
     response_cycle = int(env.uncache_agent.pending[0].ready_cycle)
-    while int(env.current_cycle) < response_cycle - 1:
+    while int(env.current_cycle) < response_cycle - 2:
         env.step(1)
 
     target_pc = uncache._MMIO_BASE + 0x40

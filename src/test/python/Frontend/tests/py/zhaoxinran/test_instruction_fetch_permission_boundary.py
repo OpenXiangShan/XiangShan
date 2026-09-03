@@ -1,29 +1,33 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import os
 
 import pytest
 
-from env.core.transactions import RedirectTxn
+from env.core.transactions import BackendRedirectClass, RedirectTxn
 from env.sequences import (
     InjectRedirectSequence,
     TranslationPmpPmaEntry,
     TranslationPte,
+    TranslationPtwResponseOverride,
     TranslationScenario,
     TranslationScenarioBuilder,
     TranslationScenarioPhase,
     TranslationScenarioSequence,
 )
-from env.support import PmpPmaConfig
+from env.support import PmpPmaConfig, fold_pc
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 _VA = 0x8020_0F00
 _PA = 0x8040_0F00
+_SINGLE_PAGE_VA = 0x8020_0800
+_SINGLE_PAGE_PA = 0x8040_0800
 _PAGE_SIZE = 0x1000
-_PAYLOAD = b"\x13\x00\x00\x00" * 512
-_TRAP_VA = 0x8020_3F00
-_TRAP_PA = 0x8040_3F00
+_PAYLOAD = b"\x13\x00\x00\x00" * 64
+_CROSS_PAGE_PAYLOAD = b"\x13\x00\x00\x00" * 512
+_OBSERVED_EXCEPTION_BITS = (1, 2, 12, 19, 20)
 
 
 def _entry(
@@ -41,10 +45,10 @@ def _scenario(
     *,
     pmp_entries: tuple[TranslationPmpPmaEntry, ...],
     pma_entries: tuple[TranslationPmpPmaEntry, ...],
-    va: int = _VA,
-    pa: int = _PA,
+    va: int = _SINGLE_PAGE_VA,
+    pa: int = _SINGLE_PAGE_PA,
     payload: bytes = _PAYLOAD,
-    page_count: int = 2,
+    page_count: int = 1,
     priv_imode: int = 1,
     expected_fault: str | None = "instruction_access_fault",
     s1_pte: TranslationPte = TranslationPte(),
@@ -76,17 +80,79 @@ def _wait_until(env, predicate, *, description: str, max_cycles: int = 2000) -> 
         raise AssertionError(f"timed out waiting for {description}")
 
 
-def _translation_complete(env) -> bool:
-    active = env.translation_oracle.get_active()
-    if active is None:
-        return False
-    expected_ptw = {
-        (int(request["vpn"]), int(request["s2xlate"]), int(request["get_gpa"]))
-        for request in active["expected_ptw_requests"]
-    }
-    return expected_ptw.issubset({tuple(map(int, item)) for item in active["responded_ptw_request_keys"]}) and len(
-        active["expected_fetches"]
-    ) == len(active["observed_fetch_pas"])
+def _assert_exact_oracle_fault(env, *, pc: int, expected_fault: str) -> None:
+    exception_records = [
+        record
+        for record in env.translation_oracle.get_stats()["records"]
+        if record["kind"] == "cfvec_exception"
+    ]
+    assert any(
+        record["fault"] == expected_fault
+        and (
+            int(record["pc"]) == int(pc)
+            or (
+                int(record["pc"]) == 0
+                and int(record["folded_pc"]) == fold_pc(pc)
+            )
+        )
+        for record in exception_records
+    ), exception_records
+
+
+def _capture_backend_fault_recovery(env) -> dict[str, list[dict]]:
+    records: dict[str, list[dict]] = {"redirects": [], "cfvec": []}
+
+    def capture(cycle: int, active_env) -> None:
+        ctrl = active_env.backend_ctrl_if
+        if int(ctrl.redirect_valid.value) == 1:
+            records["redirects"].append(
+                {
+                    "cycle": int(cycle),
+                    "pc": int(ctrl.redirect_bits_pc.value),
+                    "target_pc": int(ctrl.redirect_bits_target.value),
+                    "ftq_flag": int(ctrl.redirect_bits_ftq_idx_flag.value),
+                    "ftq_value": int(ctrl.redirect_bits_ftq_idx_value.value),
+                    "ftq_offset": int(ctrl.redirect_bits_ftq_offset.value),
+                    "level": int(ctrl.redirect_bits_level.value),
+                    "backend_iaf": int(ctrl.redirect_bits_backend_iaf.value),
+                    "backend_ipf": int(ctrl.redirect_bits_backend_ipf.value),
+                    "backend_igpf": int(ctrl.redirect_bits_backend_igpf.value),
+                    "debug_is_ctrl": int(ctrl.redirect_bits_debug_is_ctrl.value),
+                    "debug_is_mem_vio": int(ctrl.redirect_bits_debug_is_mem_vio.value),
+                }
+            )
+
+        observe = active_env.backend_observe_if
+        for slot in range(8):
+            if int(observe.cfvec_valid[slot].value) != 1:
+                continue
+            backend_exception = getattr(
+                active_env.dut,
+                f"io_backend_cfVec_{slot}_bits_backendException",
+                None,
+            )
+            assert backend_exception is not None
+            records["cfvec"].append(
+                {
+                    "cycle": int(cycle),
+                    "slot": int(slot),
+                    "pc": int(observe.cfvec_pc[slot].value),
+                    "foldpc": int(observe.cfvec_foldpc[slot].value),
+                    "ftq_flag": int(observe.cfvec_ftq_ptr_flag[slot].value),
+                    "ftq_value": int(observe.cfvec_ftq_ptr_value[slot].value),
+                    "ftq_offset": int(observe.cfvec_ftq_offset[slot].value),
+                    "is_rvc": int(observe.cfvec_is_rvc[slot].value),
+                    "backend_exception": int(backend_exception.value or 0),
+                    "exception_bits": tuple(
+                        bit
+                        for bit in _OBSERVED_EXCEPTION_BITS
+                        if int(observe.cfvec_exception_vec[slot][bit].value or 0) == 1
+                    ),
+                }
+            )
+
+    env.register_cycle_observer(capture)
+    return records
 
 
 _PMP_ALLOW = _entry(
@@ -318,6 +384,7 @@ _PERMISSION_CASES = (
             pma_entries=(
                 _entry("pma", 0, PmpPmaConfig(match="off"), 0x8040_0000),
                 _entry("pma", 1, PmpPmaConfig(match="tor", read=True, execute=False, cacheable=True), 0x8040_1000),
+                _entry("pma", 2, PmpPmaConfig(match="tor", read=True, execute=False, cacheable=True), 0x8040_2000),
             ),
         ),
         "instruction_access_fault",
@@ -462,66 +529,193 @@ def test_instruction_fetch_permission_boundary(
 
     assert len(phases) == 1
     state = phases[0]["state"]
-    assert state.expected_page_outcomes[0]["outcome"] == expected_fault
+    expected_outcome = "normal" if expected_fault is None else expected_fault
+    assert state.expected_page_outcomes[0]["outcome"] == expected_outcome
     if expected_fault is None:
         assert any(int(observation.pc) == scenario.va for observation in env.monitor.observations)
     else:
-        assert env.monitor.exception_mark_count > 0
+        _assert_exact_oracle_fault(env, pc=scenario.va, expected_fault=expected_fault)
     assert not env.get_errors()
 
 
-@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
-def test_pmp_fault_redirects_from_exception_cfvec_to_trap(env) -> None:
+def _backend_fault_recovery_scenarios(fault_kind: str) -> tuple[TranslationScenario, TranslationScenario]:
     region_base = _PA & ~0x3FFF
-    fault = _scenario(
-        "fetch-permission-pmp-fault-redirect-source",
-        pmp_entries=(
-            _entry("pmp", 0, PmpPmaConfig(match="napot", read=True, execute=False), region_base, 0x4000),
-        ),
-        pma_entries=(
-            _entry("pma", 0, PmpPmaConfig(match="napot", read=True, execute=True, cacheable=True), region_base, 0x4000),
-        ),
-    )
-    trap = _scenario(
-        "fetch-permission-pmp-fault-trap-target",
-        va=_TRAP_VA,
-        pa=_TRAP_PA,
-        payload=_PAYLOAD,
+    second_page_va = (_VA & ~(_PAGE_SIZE - 1)) + _PAGE_SIZE
+    second_page_pa = (_PA & ~(_PAGE_SIZE - 1)) + _PAGE_SIZE
+    normal = _scenario(
+        f"backend-{fault_kind}-redirect-recovery-target",
+        va=_VA,
+        pa=_PA,
+        payload=_CROSS_PAGE_PAYLOAD,
         page_count=2,
-        expected_fault=None,
         pmp_entries=(
             _entry("pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), region_base, 0x4000),
         ),
         pma_entries=(
             _entry("pma", 0, PmpPmaConfig(match="napot", read=True, execute=True, cacheable=True), region_base, 0x4000),
         ),
+        expected_fault=None,
     )
-    builder = TranslationScenarioBuilder(env)
-
-    env.initialize(reset_vector=fault.va, bare_mode=False)
-    fault_state = builder.build(fault)
-    env.monitor.clear()
-    env.monitor.set_expected_pc(fault.va)
-    env.arm_translation_scenario(fault_state, page_indexes=(0,))
-    _wait_until(env, lambda: env.monitor.exception_mark_count > 0, description="PMP access-fault cfVec")
-    env.assert_translation_scenario()
-
-    trap_state = builder.build(trap)
-    env.monitor.set_expected_pc(trap.va)
-    env.arm_translation_scenario(trap_state)
-    env.translation_oracle.set_fetch_observation_ready(ready=False)
-    assert InjectRedirectSequence(
-        RedirectTxn(
-            source_pc=fault.va,
-            target_pc=trap.va,
-            reason="pmp-access-fault-trap",
-            level=1,
-            backend_iaf=1,
+    if fault_kind == "iaf":
+        fault = replace(
+            normal,
+            scenario_id="backend-iaf-redirect-source",
+            pmp_entries=(
+                _entry("pmp", 0, PmpPmaConfig(match="napot", read=True, execute=True), _PA & ~(_PAGE_SIZE - 1), _PAGE_SIZE),
+                _entry("pmp", 1, PmpPmaConfig(match="napot", read=True, execute=False), second_page_pa, _PAGE_SIZE),
+            ),
+            expected_path="fault",
+            expected_result="access_fault",
         )
-    ).run(env)
-    env.translation_oracle.set_fetch_observation_ready(ready=True)
-    _wait_until(env, lambda: _translation_complete(env), description="trap-target translation")
+    elif fault_kind == "ipf":
+        fault = replace(
+            normal,
+            scenario_id="backend-ipf-redirect-source",
+            ptw_response_overrides=(
+                TranslationPtwResponseOverride(
+                    vpn=second_page_va >> 12,
+                    s2xlate=0,
+                    patch=(("s1_pf", 1),),
+                ),
+            ),
+            expected_path="fault",
+            expected_result="page_fault",
+        )
+    elif fault_kind == "igpf":
+        normal = replace(
+            normal,
+            mode="bare",
+            stage2_mode="sv39",
+            s2xlate=2,
+            priv_virt=1,
+        )
+        fault = replace(
+            normal,
+            scenario_id="backend-igpf-redirect-source",
+            ptw_response_overrides=(
+                TranslationPtwResponseOverride(
+                    vpn=second_page_va >> 12,
+                    s2xlate=2,
+                    patch=(("s2_gpf", 1),),
+                ),
+            ),
+            expected_path="fault",
+            expected_result="guest_fault",
+        )
+    else:
+        raise ValueError(f"unsupported backend fault kind: {fault_kind}")
+    return fault, normal
+
+
+@pytest.mark.parametrize(
+    ("fault_kind", "fault_bit", "redirect_faults"),
+    (
+        pytest.param("iaf", 1, {"backend_iaf": 1}, id="instruction-access-fault"),
+        pytest.param("ipf", 12, {"backend_ipf": 1}, id="instruction-page-fault"),
+        pytest.param("igpf", 20, {"backend_igpf": 1}, id="instruction-guest-page-fault"),
+    ),
+)
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_backend_fault_redirect_recovery(
+    env,
+    fault_kind: str,
+    fault_bit: int,
+    redirect_faults: dict[str, int],
+) -> None:
+    fault, normal = _backend_fault_recovery_scenarios(fault_kind)
+    fault_pc = (fault.va & ~(_PAGE_SIZE - 1)) + _PAGE_SIZE
+    builder = TranslationScenarioBuilder(env)
+    records = _capture_backend_fault_recovery(env)
+
+    env.initialize(reset_vector=fault_pc, bare_mode=False)
+
+    def arm_fault_before_reset_release() -> None:
+        fault_state = builder.build(fault)
+        env.monitor.clear()
+        env.monitor.set_expected_pc(fault_pc)
+        env.translation_oracle.clear()
+        env.arm_translation_scenario(fault_state, page_indexes=(1,))
+
+    env.reset(before_release=arm_fault_before_reset_release)
+    _wait_until(
+        env,
+        lambda: any(
+                record["pc"] == fault_pc
+            and record["exception_bits"] == (fault_bit,)
+            and record["backend_exception"] == 0
+            for record in records["cfvec"]
+        ),
+        description=f"frontend {fault_kind} cfVec source",
+    )
     env.assert_translation_scenario()
+    source = next(
+        record
+        for record in records["cfvec"]
+        if record["pc"] == fault_pc
+        and record["exception_bits"] == (fault_bit,)
+        and record["backend_exception"] == 0
+    )
+
+    reuses_source_ftq = source["ftq_offset"] == 0 or (
+        source["ftq_offset"] == 1 and source["is_rvc"] == 0
+    )
+    assert reuses_source_ftq
+    InjectRedirectSequence(
+        RedirectTxn(
+            source_pc=source["pc"],
+            source_ftq_flag=source["ftq_flag"],
+            source_ftq_value=source["ftq_value"],
+            source_ftq_offset=source["ftq_offset"],
+            target_pc=fault_pc,
+            reason=f"backend-{fault_kind}-recovery",
+            level=1,
+            redirect_class=BackendRedirectClass.OTHER,
+            **redirect_faults,
+        )
+    ).inject(env)
+    builder.build(normal)
+    env.translation_oracle.disarm()
+    env.monitor.set_expected_pc(fault_pc)
+
+    _wait_until(env, lambda: bool(records["redirects"]), description=f"backend {fault_kind} redirect")
+    redirect = records["redirects"][-1]
+    expected_fault_encoding = {
+        "backend_iaf": int(fault_kind == "iaf"),
+        "backend_ipf": int(fault_kind == "ipf"),
+        "backend_igpf": int(fault_kind == "igpf"),
+    }
+    assert redirect == {
+        "cycle": redirect["cycle"],
+        "pc": source["pc"],
+        "target_pc": fault_pc,
+        "ftq_flag": source["ftq_flag"],
+        "ftq_value": source["ftq_value"],
+        "ftq_offset": source["ftq_offset"],
+        "level": 1,
+        **expected_fault_encoding,
+        "debug_is_ctrl": 0,
+        "debug_is_mem_vio": 0,
+    }
+
+    if reuses_source_ftq:
+        expected_new_ftq = (source["ftq_flag"], source["ftq_value"])
+    else:
+        expected_new_ftq = (
+            source["ftq_flag"] ^ int(source["ftq_value"] == 63),
+            (source["ftq_value"] + 1) % 64,
+        )
+    _wait_until(
+        env,
+        lambda: any(
+            record["cycle"] >= redirect["cycle"] + 2
+            and (record["pc"] == fault_pc or record["foldpc"] == fold_pc(fault_pc))
+            and (record["ftq_flag"], record["ftq_value"]) == expected_new_ftq
+            and record["exception_bits"] == (fault_bit,)
+            and record["backend_exception"] == 1
+            for record in records["cfvec"]
+        ),
+        description=f"backend {fault_kind} recovery cfVec",
+    )
     assert not env.get_errors()
 
 
