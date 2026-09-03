@@ -63,6 +63,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     val flush:  Bool = Input(Bool())
     // wfi
     val wfi: WfiReqBundle = Flipped(new WfiReqBundle)
+    // Compact CHI Type 4 (ReadOnce + CompData)
+    val cchi: CCHIType4Port = new CCHIType4Port
   }
 
   val io: ICacheIO = IO(new ICacheIO)
@@ -97,12 +99,10 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
     ) ++ AliasTagBits.map(w => ("aliasTag", pgIdxBits, w))
   ).show(indent = 4)
 
-  val (bus, edge) = outer.clientNode.out.head
-
   private val metaArray  = Module(new ICacheMetaArray)
   private val dataArray  = Module(new ICacheDataArray)
   private val mainPipe   = Module(new ICacheMainPipe)
-  private val missUnit   = Module(new ICacheMissUnit(edge))
+  private val missUnit   = Module(new ICacheMissUnit)
   private val replacer   = Module(new ICacheReplacer)
   private val prefetcher = Module(new ICachePrefetchPipe)
   private val wayLookup  = Module(new ICacheWayLookup)
@@ -183,9 +183,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   missUnit.io.wfi <> io.wfi
   missUnit.io.fetchReq <> mainPipe.io.missReq
   missUnit.io.prefetchReq <> prefetcher.io.missReq
-  missUnit.io.memGrant.valid := false.B
-  missUnit.io.memGrant.bits  := DontCare
-  missUnit.io.memGrant <> bus.d
+  missUnit.io.txreq <> io.cchi.txreq
+  missUnit.io.rxdat <> io.cchi.rxdat
 
   mainPipe.io.flush        := io.fromFtq.redirectFlush
   mainPipe.io.flushFromBpu := io.fromFtq.flushFromBpu
@@ -228,14 +227,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   io.toIfu.topdown.iCacheMissBubble := mainPipe.io.perf.pendingMiss
   // when prefetcher is handling an Itlb miss, and wayLookup is empty, it will create a bubble in MainPipe
   io.toIfu.topdown.itlbMissBubble := prefetcher.io.perf.pendingItlbMiss && wayLookup.io.perf.empty
-
-  bus.b.ready := false.B
-  bus.c.valid := false.B
-  bus.c.bits  := DontCare
-  bus.e.valid := false.B
-  bus.e.bits  := DontCare
-
-  bus.a <> missUnit.io.memAcquire
 
   // send parity error to BEU
   io.error <> RegNextWithEnable(mainPipe.io.error)
