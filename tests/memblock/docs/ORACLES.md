@@ -179,6 +179,10 @@ forwarding-direction, and dirty-pressure counters include generator-side
 bookkeeping; they are not by themselves proof that the corresponding RTL event
 occurred.
 
+The streaming verifier script is included in the campaign controller hash set;
+changing its acceptance logic invalidates the artifact. Boundary-hunt remains a
+diagnostic campaign and does not substitute for the full mixed-run verifier.
+
 These limitations are why the status column uses `Partial` and why the planned
 oracle rows cannot be closed by another long green run alone.
 

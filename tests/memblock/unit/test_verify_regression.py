@@ -50,6 +50,7 @@ def mixed_result(seed: int) -> dict[str, object]:
         "vstart": "3,3",
         "vl": "3,3",
         "align": "3,3",
+        "store_order": "3,3",
         "waves": 2,
         "coissue": 1,
         "forwarding": "1,1,1,1",
@@ -221,6 +222,21 @@ class VerifyRegressionTest(unittest.TestCase):
             }
         )
         with self.assertRaisesRegex(verify_regression.VerificationError, "vec_store_modes"):
+            verify_regression._check_mixed_coverage(result)
+
+    def test_rejects_missing_scalar_store_issue_order(self) -> None:
+        result = mixed_result(7)
+        result.update(
+            {
+                "transactions": 128,
+                "store_order": "1,0",
+                "store_misaligned": "1,1",
+                "vector_replays": 1,
+                "virtualization": 2,
+                "exceptions": 2,
+            }
+        )
+        with self.assertRaisesRegex(verify_regression.VerificationError, "store_order"):
             verify_regression._check_mixed_coverage(result)
 
     def test_enhanced_mixed_requires_replay_virtualization_and_exceptions(self) -> None:

@@ -60,7 +60,9 @@ still decided by the returned data or exact exception, not by the hit itself.
 | Queue pressure/wrap | Two 60-entry LQ waves; more than 72 LQ and 160 ROB positions over long runs | Every accepted item retires or is explicitly canceled; flag/value identity remains continuous |
 | Backpressure | Independent deterministic gaps on DCache A/D, PTW A/D, and uncache request/response | Ready-valid stability plus eventual progress |
 
-Every `random-mixed` seed contains mandatory phases before constrained-random traffic. The tail is made of rolling five-class windows, not isolated tests:
+Every `random-mixed` seed contains mandatory phases before constrained-random traffic. The tail is made of rolling five-class windows, not isolated tests. The
+requested transaction count is the total action budget, including the mandatory
+prefix; only the tail is constrained-random:
 
 - all scalar load and store widths and all scalar issue lanes;
 - all vector EEWs and unit/strided/indexed-unordered/indexed-ordered modes;
@@ -285,11 +287,14 @@ Before a duration run:
 2. Every green focused scenario passes on the current complete RTL hash.
 3. A multi-seed, five-scenario matrix passes with backpressure enabled.
 4. The executable, Verilated model, xspcomm, resolved system libraries, runner,
-   and RTL metadata are frozen and hashed.
+   streaming verifier, controller sources, and RTL metadata are frozen and
+   hashed. The verifier script is passed as a controller input so its acceptance
+   logic is part of the recorded provenance.
 
 The final campaign runs at least 21,600 monotonic seconds (six hours) with eight
-workers and the `random-mixed` scenario. Each seed requests at least 4096 constrained-random
-actions, including hundreds of five-class overlap windows. Every window
+workers and the `random-mixed` scenario. Each seed requests at least 4096 total
+actions, including the mandatory coverage prefix and a constrained-random tail
+with five-class overlap windows. Every window
 randomizes producer parameters, legal alignment class, data, masks, vector
 shape, issue order, store half order, and manager delay; mandatory sanity waves
 are kept only where the interface has a proven legal encoding. The artifact
@@ -306,7 +311,8 @@ the exact VS-non-leaf GPA and first-active-element VA against the software
 oracle. On the historical clean RTL it must produce at least one mismatch;
 after the fix it must produce an all-pass campaign with the same oracle.
 
-An independent streaming verifier checks the result artifact, duration,
+An independent streaming verifier (whose own SHA-256 is recorded in the
+controller inputs) checks the result artifact, duration,
 scenario set, transaction counts, per-seed coverage, aggregate counts,
 continuous seeds, complete RTL identity, and before/after frozen-runtime hashes.
 

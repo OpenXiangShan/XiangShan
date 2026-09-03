@@ -153,6 +153,7 @@ def _check_mixed_coverage(
         ("vstart", 2),
         ("vl", 2),
         ("align", 2),
+        ("store_order", 2),
         ("forwarding", 4),
         ("memory_types", 2),
         ("dcache", 2),

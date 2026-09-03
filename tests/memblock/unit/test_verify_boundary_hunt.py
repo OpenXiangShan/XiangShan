@@ -18,6 +18,7 @@ def result(seed: int, transactions: int = 4) -> dict[str, object]:
         "seed": seed,
         "scenario": "random-boundary-hunt",
         "status": "fail",
+        "returncode": 1,
         "transactions": transactions,
         "failures": 2,
         "rtl_sha256": "a" * 64,
@@ -56,6 +57,7 @@ class VerifyBoundaryHuntTest(unittest.TestCase):
             passing = result(7)
             passing["status"] = "pass"
             passing["failures"] = 0
+            passing["returncode"] = 0
             passing["output"] = ""
             path.write_text(json.dumps({"results": [passing]}))
             with self.assertRaisesRegex(
@@ -71,12 +73,26 @@ class VerifyBoundaryHuntTest(unittest.TestCase):
             passing = result(7)
             passing["status"] = "pass"
             passing["failures"] = 0
+            passing["returncode"] = 0
             passing["output"] = ""
             path.write_text(json.dumps({"results": [passing]}))
             summary = verify_boundary_hunt.verify_boundary_hunt(
                 path, min_seeds=1, transactions=4, require_failure=False
             )
             self.assertEqual(summary["failures"], 0)
+
+    def test_rejects_status_returncode_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hunt.json"
+            bad = result(7)
+            bad["returncode"] = 0
+            path.write_text(json.dumps({"results": [bad]}))
+            with self.assertRaisesRegex(
+                verify_boundary_hunt.BoundaryHuntError, "return code"
+            ):
+                verify_boundary_hunt.verify_boundary_hunt(
+                    path, min_seeds=1, transactions=4, rtl_sha256="a" * 64
+                )
 
 
 if __name__ == "__main__":

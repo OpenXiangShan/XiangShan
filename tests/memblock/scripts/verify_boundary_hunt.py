@@ -49,6 +49,11 @@ def verify_boundary_hunt(
         expected_status = "fail" if failures else "pass"
         if result.get("status") != expected_status:
             raise BoundaryHuntError("boundary hunt status does not match failure count")
+        returncode = result.get("returncode")
+        if not isinstance(returncode, int):
+            raise BoundaryHuntError("boundary hunt has no integer return code")
+        if (failures == 0 and returncode != 0) or (failures != 0 and returncode == 0):
+            raise BoundaryHuntError("boundary hunt return code does not match status")
         reported_hash = result.get("rtl_sha256")
         if rtl_sha256 is not None and reported_hash != rtl_sha256:
             raise BoundaryHuntError("boundary hunt RTL hash mismatch")

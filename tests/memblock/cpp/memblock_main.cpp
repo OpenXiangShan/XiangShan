@@ -364,7 +364,9 @@ struct MixedCoverage {
                std::to_string(split) + " scalar_misaligned=" +
                std::to_string(scalar_misaligned) + " store_misaligned=" +
                std::to_string(scalar_store_misaligned) + ',' +
-               std::to_string(vector_store_misaligned) + " vector_replays=" +
+               std::to_string(vector_store_misaligned) + " store_order=" +
+               std::to_string(address_first) + ',' +
+               std::to_string(data_first) + " vector_replays=" +
                std::to_string(vector_replays) + " virtualization=" +
                std::to_string(two_stage) + " exceptions=" +
                std::to_string(exceptions) + " waves=" +
@@ -3461,6 +3463,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             if (!environment.run_cycles(random_delay(0, 3))) {
                 return false;
             }
+            bool scalar_store_data_first = false;
             for (const unsigned issue_class : issue_order) {
                 switch (issue_class) {
                 case 0:
@@ -3474,8 +3477,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     }
                     break;
                 case 2:
-                    if (!environment.issue_store_address(scalar_store, 2048) ||
-                        !environment.issue_store_data(scalar_store, 2048)) {
+                    scalar_store_data_first = (random() & 1U) != 0;
+                    if (scalar_store_data_first
+                            ? (!environment.issue_store_data(scalar_store, 2048) ||
+                               !environment.issue_store_address(scalar_store, 2048))
+                            : (!environment.issue_store_address(scalar_store, 2048) ||
+                               !environment.issue_store_data(scalar_store, 2048))) {
                         return false;
                     }
                     break;
@@ -3521,7 +3528,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
             coverage.sample(scalar);
             coverage.sample(vector_load);
-            coverage.sample(scalar_store, true);
+            coverage.sample(scalar_store, scalar_store_data_first);
             coverage.sample(vector_store);
             coverage.sample(prefetch);
             if (!environment.run_until_all_complete(4096) ||

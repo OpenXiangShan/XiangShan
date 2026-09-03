@@ -149,7 +149,7 @@ values plus every resolved system-library hash in `runtime.json`.
 ```sh
 make extended-regression PICKER="$PICKER" \
   REGRESSION_JOBS=8 DURATION_SECONDS=21600 MIXED_TRANSACTIONS=4096 \
-  REGRESSION_OUTPUT="$PWD/../../build/memblock/extended-regression.json"
+  EXTENDED_RESULT="$PWD/../../build/memblock/extended-mixed-frozen-4h.json"
 ```
 
 The final acceptance campaign is six hours of the fully mixed scenario. Each
@@ -159,7 +159,7 @@ seed requests 4096 actions and contains repeated five-class overlap windows:
 make final-regression PICKER="$PICKER" \
   REGRESSION_JOBS=8 DURATION_SECONDS=21600 TRANSACTIONS=1000 \
   MIXED_TRANSACTIONS=4096 \
-  REGRESSION_OUTPUT="$PWD/../../build/memblock/final-frozen-6h.json"
+  FINAL_RESULT="$PWD/../../build/memblock/final-frozen-6h.json"
 ```
 
 The runner stops submitting new work only after the requested duration has
@@ -186,13 +186,11 @@ LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
 
 The old four-hour artifact was overwritten by a one-second development smoke
 run and is intentionally non-accepting. `make verify-extended-results` should
-reject the current stale file because its duration and published hash do not
-meet that historical gate. Use the final six-hour artifact for current
-acceptance:
-
-```sh
-make verify-extended-results
-```
+reject the current stale file because its duration and provenance do not meet
+the historical gate. The checked-in six-hour artifact also predates the
+current controller and verifier provenance checks, so it is historical
+evidence only. A newly generated artifact must pass the final verifier for
+current acceptance:
 
 ```sh
 make verify-final-results
