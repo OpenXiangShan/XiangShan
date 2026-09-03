@@ -8,6 +8,7 @@ object CustomInstructions {
   outer =>
 
   def TRAP = BitPat("b000000000000?????000000001101011")
+  def SIM_TRIG = BitPat("b11011111101010010010000000010011") // HINT, slti x0, x18, -518
 
   object XSTrapType extends InstType {
     def TRAP = outer.TRAP
