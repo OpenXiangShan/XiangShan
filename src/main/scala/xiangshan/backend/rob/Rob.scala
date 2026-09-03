@@ -113,6 +113,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val readGPAMemAddr = ValidIO(new Bundle {
       val ftqPtr = new FtqPtr()
       val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+      val isRVC = Bool()
     })
     val readGPAMemData = Input(new GPAMemEntry)
     val vstartIsZero = Input(Bool())
@@ -717,6 +718,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.readGPAMemAddr.valid := exceptionHappen
   io.readGPAMemAddr.bits.ftqPtr := exceptionDataRead.bits.ftqPtr
   io.readGPAMemAddr.bits.ftqOffset := exceptionDataRead.bits.ftqOffset
+  io.readGPAMemAddr.bits.isRVC := exceptionDataRead.bits.isRVC
 
   XSDebug(io.flushOut.valid,
     p"generate redirect: pc 0x${Hexadecimal(io.exception.bits.pc)} intr $intrEnable " +
@@ -1204,6 +1206,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exceptionGen.io.enq(i).bits.robIdx := io.enq.req(i).bits.robIdx
     exceptionGen.io.enq(i).bits.ftqPtr := io.enq.req(i).bits.ftqPtr
     exceptionGen.io.enq(i).bits.ftqOffset := io.enq.req(i).bits.ftqOffset
+    exceptionGen.io.enq(i).bits.isRVC := io.enq.req(i).bits.isRVC
     exceptionGen.io.enq(i).bits.exceptionVec := io.enq.req(i).bits.exceptionVec
     exceptionGen.io.enq(i).bits.satpFlushFirstFetchFault := io.enq.req(i).bits.satpFlushFirstFetchFault
     exceptionGen.io.enq(i).bits.hasException := io.enq.req(i).bits.hasException
@@ -1242,6 +1245,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     // only enq inst use ftqPtr to read gpa
     exc_wb.bits.ftqPtr          := 0.U.asTypeOf(exc_wb.bits.ftqPtr)
     exc_wb.bits.ftqOffset       := 0.U.asTypeOf(exc_wb.bits.ftqOffset)
+    exc_wb.bits.isRVC           := false.B
     exc_wb.bits.exceptionVec    := wb.bits.exceptionVec
     exc_wb.bits.satpFlushFirstFetchFault := false.B
     exc_wb.bits.hasException    := wb.bits.exceptionVec.orR // Todo: use io.writebackNeedFlush(i) instead
