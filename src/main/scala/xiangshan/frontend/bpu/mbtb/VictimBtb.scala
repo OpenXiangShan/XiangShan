@@ -45,10 +45,8 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule {
       class Req extends Bundle {
         val entryWayMask:   UInt                 = UInt(NumVictimBtbWays.W)
         val counterWayMask: UInt                 = UInt(NumVictimBtbWays.W)
-        val usefulWayMask:  UInt                 = UInt(NumVictimBtbWays.W)
         val entry:          MainBtbEntry         = new MainBtbEntry
         val counters:       Vec[SaturateCounter] = Vec(NumVictimBtbWays, TakenCounter())
-        val usefulCnts:     Vec[SaturateCounter] = Vec(NumVictimBtbWays, VictimBtbUsefulCounter())
       }
 
       val req: Valid[Req] = Flipped(Valid(new Req))
@@ -89,7 +87,6 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule {
   // Training can update entry and counters independently:
   // - entryWayMask rewrites the victim BTB entry payload.
   // - counterWayMask updates the taken counter for conditional branches.
-  // - usefulWayMask updates the uBTB-style usefulness counter.
   // This allows a VBTB hit to be repaired in place without allocating MainBtb.
   for (w <- 0 until NumVictimBtbWays) {
     when(trainEntry.req.valid) {
@@ -99,15 +96,11 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule {
       when(trainEntry.req.bits.entryWayMask(w)) {
         entries(w).entry := trainEntry.req.bits.entry
       }
-      when(trainEntry.req.bits.usefulWayMask(w)) {
-        entries(w).usefulCnt := trainEntry.req.bits.usefulCnts(w)
-      }
     }
 
     // Flushes override ordinary training updates.
     when(flush.req.valid && flush.req.bits.wayMask(w)) {
       entries(w).entry.attribute := BranchAttribute.None
-      entries(w).usefulCnt       := VictimBtbUsefulCounter.SaturateNegative
     }
 
     // Snapshot insertion has priority over training and flushes. This preserves
@@ -115,22 +108,17 @@ class VictimBtb(implicit p: Parameters) extends MainBtbModule {
     when(writeEntry.req.valid) {
       when(writeEntry.req.bits.flushMask(w)) {
         entries(w).entry.attribute := BranchAttribute.None
-        entries(w).usefulCnt       := VictimBtbUsefulCounter.SaturateNegative
       }
       when(writeEntry.req.bits.wayMask(w)) {
         entries(w).entry           := writeEntry.req.bits.entry
         entries(w).setIdx          := writeEntry.req.bits.setIdx
         entries(w).internalBankIdx := writeEntry.req.bits.internalBankIdx
         entries(w).counter         := TakenCounter.WeakPositive
-        entries(w).usefulCnt       := VictimBtbUsefulCounter.SaturatePositive
       }
     }
   }
 
   when(reset.asBool) {
-    entries.foreach { e =>
-      e.entry.attribute := BranchAttribute.None
-      e.usefulCnt       := VictimBtbUsefulCounter.SaturateNegative
-    }
+    entries.foreach(e => e.entry.attribute := BranchAttribute.None)
   }
 }

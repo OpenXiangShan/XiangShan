@@ -32,11 +32,6 @@ object TakenCounter extends SaturateCounterFactory {
     p(XSCoreParamsKey).frontendParameters.bpuParameters.mbtbParameters.TakenCntWidth
 }
 
-object VictimBtbUsefulCounter extends SaturateCounterFactory {
-  def width(implicit p: Parameters): Int =
-    p(XSCoreParamsKey).frontendParameters.bpuParameters.mbtbParameters.VictimBtbUsefulCntWidth
-}
-
 class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   // whether the entry is valid
   def valid: Bool = !attribute.isNone
@@ -116,5 +111,4 @@ class VictimBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   val internalBankIdx: UInt            = UInt(InternalBankIdxLen.W)
   val entry:           MainBtbEntry    = new MainBtbEntry
   val counter:         SaturateCounter = TakenCounter()
-  val usefulCnt:       SaturateCounter = VictimBtbUsefulCounter()
 }

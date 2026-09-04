@@ -19,15 +19,13 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.ReplacementPolicy
-import xiangshan.frontend.bpu.SaturateCounter
 
 class VictimBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   class VictimBtbReplacerIO extends Bundle {
-    val predTouch:  Valid[UInt]          = Flipped(Valid(UInt(log2Up(NumVictimBtbWays).W)))
-    val trainTouch: Valid[UInt]          = Flipped(Valid(UInt(log2Up(NumVictimBtbWays).W)))
-    val valids:     Vec[Bool]            = Input(Vec(NumVictimBtbWays, Bool()))
-    val usefulCnt:  Vec[SaturateCounter] = Input(Vec(NumVictimBtbWays, VictimBtbUsefulCounter()))
-    val victim:     UInt                 = Output(UInt(log2Up(NumVictimBtbWays).W))
+    val predTouch:  Valid[UInt] = Flipped(Valid(UInt(log2Up(NumVictimBtbWays).W)))
+    val trainTouch: Valid[UInt] = Flipped(Valid(UInt(log2Up(NumVictimBtbWays).W)))
+    val valids:     Vec[Bool]   = Input(Vec(NumVictimBtbWays, Bool()))
+    val victim:     UInt        = Output(UInt(log2Up(NumVictimBtbWays).W))
   }
 
   val io: VictimBtbReplacerIO = IO(new VictimBtbReplacerIO)
@@ -39,13 +37,10 @@ class VictimBtbReplacer(implicit p: Parameters) extends MainBtbModule {
 
   replacer.access(Seq(io.predTouch, io.trainTouch))
 
-  private val invalidMask  = VecInit(io.valids.map(!_)).asUInt
-  private val notUsefulVec = VecInit(io.usefulCnt.map(_.isSaturateNegative))
-  private val notUseful    = notUsefulVec.asUInt.orR
+  private val invalidMask = VecInit(io.valids.map(!_)).asUInt
 
   io.victim := PriorityMux(Seq(
     invalidMask.orR -> PriorityEncoder(invalidMask),
-    notUseful       -> PriorityEncoder(notUsefulVec),
     true.B          -> replacer.way
   ))
 }

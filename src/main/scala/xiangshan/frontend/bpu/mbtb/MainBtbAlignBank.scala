@@ -107,8 +107,7 @@ class MainBtbAlignBank(
   // this align bank. Each entry carries the originating internal-bank index.
   private val victimBtb         = Module(new VictimBtb)
   private val victimBtbReplacer = Module(new VictimBtbReplacer)
-  victimBtbReplacer.io.valids    := VecInit(victimBtb.io.read.resp.entries.map(_.entry.valid))
-  victimBtbReplacer.io.usefulCnt := VecInit(victimBtb.io.read.resp.entries.map(_.usefulCnt))
+  victimBtbReplacer.io.valids := VecInit(victimBtb.io.read.resp.entries.map(_.entry.valid))
 
   io.sramResetDone := internalBanks.map(_.io.sramResetDone).reduce(_ && _)
 
@@ -382,9 +381,6 @@ class MainBtbAlignBank(
   private val t1_vbtbNewCounters      = Wire(Vec(NumVictimBtbWays, TakenCounter()))
   private val t1_vbtbCounterWayMask   = Wire(Vec(NumVictimBtbWays, Bool()))
   private val t1_vbtbCounterNeedWrite = t1_vbtbCounterWayMask.reduce(_ || _)
-  private val t1_vbtbNewUsefulCnts    = Wire(Vec(NumVictimBtbWays, VictimBtbUsefulCounter()))
-  private val t1_vbtbUsefulWayMask    = Wire(Vec(NumVictimBtbWays, Bool()))
-  private val t1_vbtbUsefulNeedWrite  = t1_vbtbUsefulWayMask.reduce(_ || _)
 
   t1_vbtbEntries.zipWithIndex.foreach { case (e, i) =>
     val entryMatchesBlock = e.internalBankIdx === t1_internalBankIdx && e.setIdx === t1_setIdx &&
@@ -398,25 +394,6 @@ class MainBtbAlignBank(
     t1_vbtbCounterWayMask(i) := hitMask.reduce(_ || _) || entryOverridden
     t1_vbtbNewCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, e.counter.getUpdate(actualTaken))
 
-    val usefulHitMask = t1_branches.map { branch =>
-      entryMatchesBlock && branch.valid && Cat(t1_posHigherBits, e.entry.position) === branch.bits.cfiPosition
-    }
-    val usefulHit       = usefulHitMask.reduce(_ || _)
-    val usefulTaken     = Mux1H(usefulHitMask, t1_branches.map(_.bits.taken))
-    val usefulAttribute = Mux1H(usefulHitMask, t1_branches.map(_.bits.attribute))
-    val usefulTarget    = Mux1H(usefulHitMask, t1_branches.map(_.bits.target))
-    val targetCarryMatches = e.entry.targetCarry
-      .map(_ === getTargetCarry(t1_startPc, usefulTarget))
-      .getOrElse(true.B)
-    val predictionMatches = e.entry.attribute === usefulAttribute &&
-      e.entry.targetLowerBits === getTargetLowerBits(usefulTarget) && targetCarryMatches
-
-    t1_vbtbUsefulWayMask(i) := usefulHit || entryOverridden
-    t1_vbtbNewUsefulCnts(i) := Mux(
-      entryOverridden,
-      VictimBtbUsefulCounter.SaturatePositive,
-      e.usefulCnt.getUpdate(usefulTaken && predictionMatches)
-    )
   }
 
   /* *** victim btb train and snapshot insertion *** */
@@ -433,8 +410,7 @@ class MainBtbAlignBank(
   private val victimEntries   = victimBtb.io.writeEntryRead.resp.entries
 
   // Train the single VBTB with the selected internal-bank prediction metadata.
-  private val t1_victimNeedTrain =
-    t1_vbtbEntryNeedWrite || t1_vbtbCounterNeedWrite || t1_vbtbUsefulNeedWrite
+  private val t1_victimNeedTrain = t1_vbtbEntryNeedWrite || t1_vbtbCounterNeedWrite
   victimBtb.io.trainEntry.req.valid := t1_fire && t1_victimNeedTrain
   victimBtb.io.trainEntry.req.bits.entryWayMask := Mux(
     t1_vbtbEntryNeedWrite,
@@ -446,14 +422,8 @@ class MainBtbAlignBank(
     t1_vbtbCounterWayMask.asUInt,
     0.U(NumVictimBtbWays.W)
   )
-  victimBtb.io.trainEntry.req.bits.usefulWayMask := Mux(
-    t1_vbtbUsefulNeedWrite,
-    t1_vbtbUsefulWayMask.asUInt,
-    0.U(NumVictimBtbWays.W)
-  )
-  victimBtb.io.trainEntry.req.bits.entry      := t1_entry
-  victimBtb.io.trainEntry.req.bits.counters   := t1_vbtbNewCounters
-  victimBtb.io.trainEntry.req.bits.usefulCnts := t1_vbtbNewUsefulCnts
+  victimBtb.io.trainEntry.req.bits.entry    := t1_entry
+  victimBtb.io.trainEntry.req.bits.counters := t1_vbtbNewCounters
 
   val evictedValid = snapshotResp.evicted.valid
   val evictedHitMask = victimEntries.map { e =>
@@ -493,11 +463,16 @@ class MainBtbAlignBank(
 
   // A snapshot allocation is the newest access and wins if it coincides with
   // ordinary VBTB training. Otherwise touch one trained entry, as uBTB does.
-  victimBtbReplacer.io.trainTouch.valid := writeEvicted || (t1_fire && t1_vbtbUsefulNeedWrite)
+  private val t1_vbtbTrainTouch = t1_fire && t1_victimNeedTrain
+  victimBtbReplacer.io.trainTouch.valid := writeEvicted || t1_vbtbTrainTouch
   victimBtbReplacer.io.trainTouch.bits := Mux(
     writeEvicted,
     OHToUInt(entryWayMask),
-    PriorityEncoder(t1_vbtbUsefulWayMask)
+    Mux(
+      t1_vbtbEntryNeedWrite,
+      OHToUInt(t1_vbtbEntryWayMask),
+      PriorityEncoder(t1_vbtbCounterWayMask)
+    )
   )
   assert(PopCount(VecInit(incomingHitMask)) <= 1.U, "incoming hit mask should be one-hot")
   assert(PopCount(VecInit(evictedHitMask)) <= 1.U, "evicted hit mask should be one-hot")

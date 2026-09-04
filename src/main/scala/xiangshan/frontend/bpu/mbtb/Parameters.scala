@@ -34,9 +34,8 @@ case class MainBtbParameters(
     // Mbtb write trace
     EnableMainbtbTrace: Boolean = false,
     // Vbtb
-    NumVictimBtbEntries:     Int = 32, // 16 entries per align bank
-    VictimBtbUsefulCntWidth: Int = 2,
-    VictimBtbReplacer:       String = "plru"
+    NumVictimBtbEntries: Int = 32, // 16 entries per align bank
+    VictimBtbReplacer:   String = "plru"
 ) {}
 
 trait HasMainBtbParameters extends HasBpuParameters {
@@ -70,7 +69,6 @@ trait HasMainBtbParameters extends HasBpuParameters {
   // Victim Btb
   def NumVictimBtbEntries:     Int    = mbtbParameters.NumVictimBtbEntries
   def NumVictimBtbWays:        Int    = NumVictimBtbEntries / NumAlignBanks
-  def VictimBtbUsefulCntWidth: Int    = mbtbParameters.VictimBtbUsefulCntWidth
   def VictimBtbReplacerPolicy: String = mbtbParameters.VictimBtbReplacer
 
   require(
@@ -78,5 +76,4 @@ trait HasMainBtbParameters extends HasBpuParameters {
     "VBTB entries must be evenly distributed across align banks"
   )
   require(NumVictimBtbWays > 0)
-  require(VictimBtbUsefulCntWidth >= 2)
 }
