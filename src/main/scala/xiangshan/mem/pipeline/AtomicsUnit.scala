@@ -483,6 +483,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule
   io.out.bits.uop.fuType := FuType.mou.U
   io.out.bits.uop.pdest := Mux(state === s_finish2, pdest2, pdest1)
   io.out.bits.uop.exceptionVec := exceptionVec
+  io.out.bits.uop.rfWen := uop.rfWen && !exceptionVec.asUInt.orR
   io.out.bits.uop.trigger := trigger
   io.out.bits.data := Mux(state === s_finish2, resp_data >> XLEN, resp_data)
   io.out.bits.debug.isMMIO := is_mmio
