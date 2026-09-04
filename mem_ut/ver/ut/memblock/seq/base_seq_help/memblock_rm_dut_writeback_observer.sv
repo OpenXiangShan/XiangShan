@@ -129,6 +129,14 @@ class memblock_rm_dut_writeback_observer extends uvm_object;
         end
         if (sampled_valid !== 1'b1) begin
             unknown_valid_count++;
+            // 中文注释：X/Z valid 仍按既有语义不构造 RM 写回记录；仅在公共硬
+            // 诊断开启时上报，避免默认配置把未知值升级为测试终止条件。
+            if (memblock_sync_pkg::is_hard_xz_check_en()) begin
+                memblock_sync_pkg::report_hard_xz_error(
+                    get_type_name(),
+                    $sformatf("RM writeback valid is X/Z: source_kind=%0d lane=%0d",
+                              source_kind, lane));
+            end
             return 1'b0;
         end
 

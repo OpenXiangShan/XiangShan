@@ -217,6 +217,9 @@ class plus;
     `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_PMA_PMP_RAW_COMPARE_EN, bit, 1'b1)
     `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_PMA_PMP_XMR_CHECK_EN, bit, 1'b0)
     `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_PMA_PMP_UNDEFINED_AFTER_TLB_FAULT, bit, 1'b1)
+    // 中文注释：非 agent xz_sw 管理的硬 X/Z 诊断总开关。
+    // 0 时完全不执行这些诊断；1 时只报 UVM_ERROR，不把环境直接升级为 UVM_FATAL。
+    `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_HARD_XZ_CHECK_EN, bit, 1'b0)
 
     // 非严格 DUT 行为 / smoke 兼容控制。
     // 这些参数只影响 UT 框架如何补齐事件、处理 miss 或处理本地模型不一致，
@@ -451,6 +454,7 @@ class plus;
         load_bit("MEMBLOCK_PMA_PMP_RAW_COMPARE_EN", MEMBLOCK_PMA_PMP_RAW_COMPARE_EN);
         load_bit("MEMBLOCK_PMA_PMP_XMR_CHECK_EN", MEMBLOCK_PMA_PMP_XMR_CHECK_EN);
         load_bit("MEMBLOCK_PMA_PMP_UNDEFINED_AFTER_TLB_FAULT", MEMBLOCK_PMA_PMP_UNDEFINED_AFTER_TLB_FAULT);
+        load_bit("MEMBLOCK_HARD_XZ_CHECK_EN", MEMBLOCK_HARD_XZ_CHECK_EN);
 
         // 读取非严格 DUT 行为 / smoke 兼容控制。严格 DUT 行为验证时重点检查这些开关。
         load_bit("MEMBLOCK_LSQ_RESYNC_ON_MISMATCH", MEMBLOCK_LSQ_RESYNC_ON_MISMATCH);

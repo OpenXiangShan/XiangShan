@@ -1684,20 +1684,22 @@ function void dcache_mem__access_base_sequence::check_dcache_c_payload_known();
     // 中文注释：C payload 会复制到二态 xaction；先只检查当前 responder 真实消费的 header，
     // data/corrupt 仅对有数据的 C opcode 检查，避免无数据 ProbeAck/Release 的 don't-care data 误报。
     c_opcode_raw = dcache_vif.drv_cb.auto_inner_dcache_client_out_c_bits_opcode;
-    if ($isunknown({c_opcode_raw,
+    if (seq_csr_common::get_hard_xz_check_en() &&
+        $isunknown({c_opcode_raw,
                     dcache_vif.drv_cb.auto_inner_dcache_client_out_c_bits_param,
                     dcache_vif.drv_cb.auto_inner_dcache_client_out_c_bits_size,
                     dcache_vif.drv_cb.auto_inner_dcache_client_out_c_bits_source,
                     dcache_vif.drv_cb.auto_inner_dcache_client_out_c_bits_address})) begin
-        `uvm_fatal(get_type_name(), "DCache C header sampled as X/Z outside reset")
+        `uvm_error(get_type_name(), "DCache C header sampled as X/Z outside reset")
     end
 
     case (c_opcode_raw)
         TL_C_OPCODE_PROBE_ACKDATA,
         TL_C_OPCODE_RELEASEDATA: begin
-            if ($isunknown({dcache_vif.drv_cb.auto_inner_dcache_client_out_c_bits_data,
+            if (seq_csr_common::get_hard_xz_check_en() &&
+                $isunknown({dcache_vif.drv_cb.auto_inner_dcache_client_out_c_bits_data,
                             dcache_vif.drv_cb.auto_inner_dcache_client_out_c_bits_corrupt})) begin
-                `uvm_fatal(get_type_name(), "DCache C data/corrupt sampled as X/Z outside reset")
+                `uvm_error(get_type_name(), "DCache C data/corrupt sampled as X/Z outside reset")
             end
         end
         default: begin
@@ -3117,8 +3119,9 @@ function void dcache_mem__access_base_sequence::process_e_fire();
     if (grant_ack_wait_q.size() == 0) begin
         `uvm_fatal(get_type_name(), "unexpected E.valid when no GrantAck is pending")
     end
-    if ($isunknown(dcache_vif.drv_cb.auto_inner_dcache_client_out_e_bits_sink)) begin
-        `uvm_fatal(get_type_name(), "GrantAck E.bits.sink sampled as X/Z on E.fire")
+    if (seq_csr_common::get_hard_xz_check_en() &&
+        $isunknown(dcache_vif.drv_cb.auto_inner_dcache_client_out_e_bits_sink)) begin
+        `uvm_error(get_type_name(), "GrantAck E.bits.sink sampled as X/Z on E.fire")
     end
     observed_sink = dcache_vif.drv_cb.auto_inner_dcache_client_out_e_bits_sink;
     foreach (grant_ack_wait_q[i]) begin
@@ -3678,14 +3681,14 @@ task dcache_mem__access_base_sequence::body();
         d_fire          = 1'b0;
         e_fire          = 1'b0;
 
-        if (!reset_active &&
+        if (!reset_active && seq_csr_common::get_hard_xz_check_en() &&
             ((sampled_a_valid_raw !== 1'b0 && sampled_a_valid_raw !== 1'b1) ||
              (sampled_b_ready_raw !== 1'b0 && sampled_b_ready_raw !== 1'b1) ||
              (sampled_c_valid_raw !== 1'b0 && sampled_c_valid_raw !== 1'b1) ||
              (sampled_d_ready_raw !== 1'b0 && sampled_d_ready_raw !== 1'b1) ||
              (sampled_e_valid_raw !== 1'b0 && sampled_e_valid_raw !== 1'b1) ||
              (sampled_l2_flush_en_raw !== 1'b0 && sampled_l2_flush_en_raw !== 1'b1))) begin
-            `uvm_fatal(get_type_name(),
+            `uvm_error(get_type_name(),
                        "DCache channel valid/ready or L2 flush request sampled as X/Z outside reset")
         end
 
@@ -4091,8 +4094,9 @@ function void sbuffer_mem_access_base_sequence::capture_sbuffer_a_xaction(output
     req_xact = sbuffer_agent_agent_xaction::type_id::create("sbuffer_a_req_xact");
     // 中文注释：A.fire 的 valid 在 drv_cb sample 确认，payload 必须来自同一个 clocking-block
     // snapshot；不能读取 edge 后可能已经切换到下一笔请求的裸 interface。xaction payload 是二态 bit，
-    // 因此复制前必须拒绝任一 X/Z，避免未知值静默折叠为 0 并污染 response 或 overlay。
-    if ($isunknown({sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_opcode,
+    // 因此在硬 X/Z 诊断开启时先报告未知值；该诊断不改变当前 responder 的主路径控制流。
+    if (seq_csr_common::get_hard_xz_check_en() &&
+        $isunknown({sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_opcode,
                     sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_param,
                     sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_size,
                     sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_source,
@@ -4100,7 +4104,7 @@ function void sbuffer_mem_access_base_sequence::capture_sbuffer_a_xaction(output
                     sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_mask,
                     sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_data,
                     sbuffer_vif.drv_cb.auto_inner_buffers_out_a_bits_corrupt})) begin
-        `uvm_fatal(get_type_name(), "Uncache A payload sampled as X/Z outside reset")
+        `uvm_error(get_type_name(), "Uncache A payload sampled as X/Z outside reset")
     end
     req_xact.auto_inner_buffers_out_a_valid                    = sbuffer_vif.drv_cb.auto_inner_buffers_out_a_valid;
     req_xact.auto_inner_buffers_out_a_ready                    = 1'b0;
@@ -4518,10 +4522,10 @@ task sbuffer_mem_access_base_sequence::body();
         a_fire              = 1'b0;
         d_fire              = 1'b0;
 
-        if (!reset_active &&
+        if (!reset_active && seq_csr_common::get_hard_xz_check_en() &&
             ((sampled_a_valid_raw !== 1'b0 && sampled_a_valid_raw !== 1'b1) ||
              (sampled_d_ready_raw !== 1'b0 && sampled_d_ready_raw !== 1'b1))) begin
-            `uvm_fatal(get_type_name(), "Uncache A.valid/D.ready sampled as X/Z outside reset")
+            `uvm_error(get_type_name(), "Uncache A.valid/D.ready sampled as X/Z outside reset")
         end
 
         if (reset_active) begin

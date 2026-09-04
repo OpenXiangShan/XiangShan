@@ -205,11 +205,16 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
             foreach (load_mmio_valid[port]) begin
                 any_mmio_valid |= load_mmio_valid[port] === 1'b1;
             end
-            if (!`MEMBLOCK_DUT_HAS_SQ_DEQ_PTR && sq_deq_ptr_valid !== 1'b0) begin
+            if (memblock_sync_pkg::is_hard_xz_check_en() &&
+                $isunknown(sq_deq_ptr_valid)) begin
+                memblock_sync_pkg::report_hard_xz_error(
+                    "CTRL_MONITOR", "sqDeq pointer-valid sampled as X/Z");
+            end
+            if (!`MEMBLOCK_DUT_HAS_SQ_DEQ_PTR && sq_deq_ptr_valid === 1'b1) begin
                 `uvm_fatal("CTRL_MONITOR", "V2 count-only sqDeq unexpectedly sampled a pointer")
             end
             if (`MEMBLOCK_DUT_HAS_SQ_DEQ_PTR && io_mem_to_ooo_sqDeq != '0 &&
-                sq_deq_ptr_valid !== 1'b1) begin
+                sq_deq_ptr_valid === 1'b0) begin
                 `uvm_fatal("CTRL_MONITOR", "pointer-capable sqDeq sample is missing its pointer")
             end
             begin

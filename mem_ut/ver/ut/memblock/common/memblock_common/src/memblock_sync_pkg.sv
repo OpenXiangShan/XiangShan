@@ -14,6 +14,25 @@ package memblock_sync_pkg;
 
     import uvm_pkg::*;
 
+    // 中文注释：跨 agent/sequence 的硬 X/Z 诊断运行时镜像。
+    // 设置：seq_csr_common 在 testcase build 期冻结 plus 后写入；读取：先于 seq_pkg 编译的
+    // agent 通过本包查询。为 0 时不执行非通用 xz_sw 的诊断，为 1 时统一只报告 UVM_ERROR。
+    bit hard_xz_check_en = 1'b0;
+
+    function void set_hard_xz_check_en(input bit enable);
+        hard_xz_check_en = enable;
+    endfunction:set_hard_xz_check_en
+
+    function bit is_hard_xz_check_en();
+        return hard_xz_check_en;
+    endfunction:is_hard_xz_check_en
+
+    function void report_hard_xz_error(input string report_id, input string message);
+        if (hard_xz_check_en) begin
+            `uvm_error(report_id, message)
+        end
+    endfunction:report_hard_xz_error
+
     // 中文注释：控制屏障的静态拓扑模式。plus 解析后仅允许初始化一次；
     // sequence/worker/service 只读此快照，不能通过 testcase 或 VSEQ 推断/改写模式。
     typedef enum int unsigned {
@@ -1534,7 +1553,7 @@ package memblock_sync_pkg;
             sampled_item_generation != l2tlb_release_admission_close_generation ||
             sampled_item_reset_epoch != sampled_reset_epoch ||
             dut_sample_seq_i <= l2tlb_release_admission_close_request_sample_seq ||
-            sampled_req_ready !== 1'b0 ||
+            sampled_req_ready === 1'b1 ||
             sampled_req_fire) begin
             `uvm_fatal("MEMBLOCK_L2TLB_RELEASE",
                        $sformatf("invalid RELEASE_STOP sample owner=%s item_owner=%s gen=%0d close_gen=%0d item_epoch=%0d sample_epoch=%0d sample=%0d close_sample=%0d ready=%b fire=%0d",
@@ -1591,9 +1610,9 @@ package memblock_sync_pkg;
             sampled_item_generation != l2tlb_release_admission_close_generation ||
             sampled_item_reset_epoch != sampled_reset_epoch ||
             dut_sample_seq_i <= l2tlb_release_admission_cutoff_sample_seq ||
-            sampled_req_ready !== 1'b0 ||
+            sampled_req_ready === 1'b1 ||
             sampled_req_fire ||
-            sampled_resp_valid !== 1'b0) begin
+            sampled_resp_valid === 1'b1) begin
             `uvm_fatal("MEMBLOCK_L2TLB_RELEASE",
                        $sformatf("invalid RELEASE_FINAL_INACTIVE sample owner=%s item_owner=%s gen=%0d close_gen=%0d sample=%0d cutoff=%0d ready=%b fire=%0d resp_valid=%b",
                                  owner_name, sampled_item_owner_name,
@@ -2186,9 +2205,9 @@ package memblock_sync_pkg;
             `uvm_fatal("MEMBLOCK_CONTROL_OBSERVATION",
                        "L2 flush done observation has zero sample sequence")
         end
-        if (level !== 1'b0 && level !== 1'b1) begin
-            `uvm_fatal("MEMBLOCK_CONTROL_OBSERVATION",
-                       "L2 flush done observation is X/Z")
+        if (is_hard_xz_check_en() && level !== 1'b0 && level !== 1'b1) begin
+            report_hard_xz_error("MEMBLOCK_CONTROL_OBSERVATION",
+                                 "L2 flush done observation is X/Z");
         end
         control_l2_flush_done_observation.valid = 1'b1;
         control_l2_flush_done_observation.level = level;

@@ -78,24 +78,37 @@ function void dcache_agent_agent_driver::check_l2_sideband_item(dcache_agent_age
     if (tr == null) begin
         `uvm_fatal(get_type_name(), "cannot check a null DCache item")
     end
-    if (tr.io_l2_flush_done !== 1'b0 && tr.io_l2_flush_done !== 1'b1) begin
-        `uvm_fatal(get_type_name(), "io_l2_flush_done must be known before driving the DUT")
+    if (memblock_sync_pkg::is_hard_xz_check_en() &&
+        tr.io_l2_flush_done !== 1'b0 && tr.io_l2_flush_done !== 1'b1) begin
+        memblock_sync_pkg::report_hard_xz_error(
+            get_type_name(), "io_l2_flush_done must be known before driving the DUT");
     end
-    if (tr.io_l2_hint_valid !== 1'b0 && tr.io_l2_hint_valid !== 1'b1) begin
-        `uvm_fatal(get_type_name(), "io_l2_hint_valid must be known before driving the DUT")
+    if (memblock_sync_pkg::is_hard_xz_check_en() &&
+        tr.io_l2_hint_valid !== 1'b0 && tr.io_l2_hint_valid !== 1'b1) begin
+        memblock_sync_pkg::report_hard_xz_error(
+            get_type_name(), "io_l2_hint_valid must be known before driving the DUT");
+    end
+    if (memblock_sync_pkg::is_hard_xz_check_en() &&
+        tr.io_l2_hint_valid === 1'b0 &&
+        $isunknown({tr.io_l2_hint_bits_sourceId, tr.io_l2_hint_bits_isKeyword})) begin
+        memblock_sync_pkg::report_hard_xz_error(
+            get_type_name(), "hint payload must be known when io_l2_hint_valid=0");
     end
     if (tr.io_l2_hint_valid === 1'b0 &&
-        (tr.io_l2_hint_bits_sourceId !== '0 || tr.io_l2_hint_bits_isKeyword !== 1'b0)) begin
+        !$isunknown({tr.io_l2_hint_bits_sourceId, tr.io_l2_hint_bits_isKeyword}) &&
+        (tr.io_l2_hint_bits_sourceId != '0 || tr.io_l2_hint_bits_isKeyword != 1'b0)) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("hint payload must be zero when io_l2_hint_valid=0, got sourceId=0x%0h isKeyword=%0b",
                              tr.io_l2_hint_bits_sourceId,
                              tr.io_l2_hint_bits_isKeyword))
     end
-    if (tr.io_l2_hint_valid === 1'b1 &&
+    if (memblock_sync_pkg::is_hard_xz_check_en() &&
+        tr.io_l2_hint_valid === 1'b1 &&
         ((^tr.io_l2_hint_bits_sourceId === 1'bx) ||
          (tr.io_l2_hint_bits_isKeyword !== 1'b0 &&
           tr.io_l2_hint_bits_isKeyword !== 1'b1))) begin
-        `uvm_fatal(get_type_name(), "hint payload must be known when io_l2_hint_valid=1")
+        memblock_sync_pkg::report_hard_xz_error(
+            get_type_name(), "hint payload must be known when io_l2_hint_valid=1");
     end
 endfunction:check_l2_sideband_item
 

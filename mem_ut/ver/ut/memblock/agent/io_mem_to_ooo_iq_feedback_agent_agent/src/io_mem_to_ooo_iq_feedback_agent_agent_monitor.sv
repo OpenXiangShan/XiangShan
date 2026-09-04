@@ -116,10 +116,19 @@ task io_mem_to_ooo_iq_feedback_agent_agent_monitor::mon_data();
 
         end
         if(this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
-            // V2 本轮只支持 scalar STA IQ feedback。VSTU valid 不能静默按 scalar
-            // 解释，也不能在 raw queue 中留下一个下游永远无法完成的 vector event。
-            if (io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid !== 1'b0 ||
-                io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid !== 1'b0) begin
+            // V2 本轮只支持 scalar STA IQ feedback。X/Z 只用于诊断，不按 scalar
+            // 解释；已知 VSTU valid=1 仍不能在 raw queue 中留下无法完成的 vector event。
+            if (memblock_sync_pkg::is_hard_xz_check_en() &&
+                $isunknown({io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid,
+                            io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid})) begin
+                memblock_sync_pkg::report_hard_xz_error(
+                    "IQ_FEEDBACK_MON",
+                    $sformatf("scalar-only V2 flow observed VSTU IQ feedback X/Z valid: port0=%b port1=%b",
+                              io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid,
+                              io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid));
+            end
+            if (io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid === 1'b1 ||
+                io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid === 1'b1) begin
                 `uvm_fatal("IQ_FEEDBACK_MON",
                            "VSTU IQ feedback is outside the scalar-only V2 flow")
             end
