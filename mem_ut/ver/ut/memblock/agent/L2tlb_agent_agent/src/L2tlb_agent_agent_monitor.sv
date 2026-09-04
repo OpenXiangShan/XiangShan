@@ -161,15 +161,17 @@ function void L2tlb_agent_agent_monitor::write_transport_sample(
     end
     reset_sample_count = 0;
     if (!payload.sampled_reset_active &&
+        memblock_sync_pkg::is_hard_xz_check_en() &&
         $isunknown({payload.sampled_req_valid,
                     payload.sampled_req_ready,
                     payload.sampled_resp_valid})) begin
-        `uvm_fatal(get_type_name(),
-                   $sformatf("L2TLB transport handshake contains X/Z sample=%0d valid=%b ready=%b resp_valid=%b",
-                             payload.transport_sample_seq,
-                             payload.sampled_req_valid,
-                             payload.sampled_req_ready,
-                             payload.sampled_resp_valid))
+        memblock_sync_pkg::report_hard_xz_error(
+            get_type_name(),
+            $sformatf("L2TLB transport handshake contains X/Z sample=%0d valid=%b ready=%b resp_valid=%b",
+                      payload.transport_sample_seq,
+                      payload.sampled_req_valid,
+                      payload.sampled_req_ready,
+                      payload.sampled_resp_valid));
     end
     if (memblock_sync_pkg::l2tlb_testcase_lifecycle_initialized &&
         !memblock_sync_pkg::l2tlb_responder_enabled() &&

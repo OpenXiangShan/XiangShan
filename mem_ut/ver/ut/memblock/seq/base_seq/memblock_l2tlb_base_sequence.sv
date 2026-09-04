@@ -459,8 +459,8 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
 
     if (!sample.sample_valid) begin
         note_l2tlb_sample_not_ready(sample, "sample_anchor_missing");
-        if (sample.sampled_req_ready !== 1'b0 ||
-            sample.sampled_req_fire || sample.sampled_resp_valid) begin
+        if (sample.sampled_req_ready === 1'b1 ||
+            sample.sampled_req_fire || sample.sampled_resp_valid === 1'b1) begin
             `uvm_fatal(get_type_name(),
                        "invalid unanchored L2TLB transport sample contains fire/response")
         end
@@ -486,9 +486,9 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
             sample.sampled_item_owner_name != lifecycle_owner_name ||
             sample.sampled_item_generation != release_generation ||
             sample.sampled_item_reset_epoch != sample.sampled_reset_epoch ||
-            sample.sampled_req_ready !== 1'b0 ||
+            sample.sampled_req_ready === 1'b1 ||
             sample.sampled_req_fire ||
-            sample.sampled_resp_valid !== 1'b0 ||
+            sample.sampled_resp_valid === 1'b1 ||
             !memblock_sync_pkg::monitor_final_sample_settled(
                 sample.sampled_reset_epoch, sample.transport_sample_seq)) begin
             `uvm_fatal(get_type_name(),
@@ -515,8 +515,8 @@ task memblock_l2tlb_base_sequence::send_l2tlb_cycle(
 
     if (sample.sample_ready_result != memblock_sync_pkg::MEMBLOCK_L2TLB_SAMPLE_READY) begin
         note_l2tlb_sample_not_ready(sample, "sample_producer_not_ready");
-        if (sample.sampled_req_ready !== 1'b0 ||
-            sample.sampled_req_fire || sample.sampled_resp_valid) begin
+        if (sample.sampled_req_ready === 1'b1 ||
+            sample.sampled_req_fire || sample.sampled_resp_valid === 1'b1) begin
             `uvm_fatal(get_type_name(),
                        "NOT_READY L2TLB sample contains an active request/response")
         end

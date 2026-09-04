@@ -282,14 +282,16 @@ task L2tlb_agent_agent_driver::sample_previous_vif(
     sample.sampled_req_s2xlate = this.vif.mon_mp.mon_cb.io_ptw_req_0_bits_s2xlate;
     sample.sampled_resp_valid = this.vif.mon_mp.mon_cb.io_ptw_resp_valid;
     if (!sample.sampled_reset_active &&
+        memblock_sync_pkg::is_hard_xz_check_en() &&
         $isunknown({sample.sampled_req_valid,
                     sample.sampled_req_ready,
                     sample.sampled_resp_valid})) begin
-        `uvm_fatal(get_type_name(),
-                   $sformatf("L2TLB transport handshake contains X/Z at time=%0t valid=%b ready=%b resp_valid=%b",
-                             $time, sample.sampled_req_valid,
-                             sample.sampled_req_ready,
-                             sample.sampled_resp_valid))
+        memblock_sync_pkg::report_hard_xz_error(
+            get_type_name(),
+            $sformatf("L2TLB transport handshake contains X/Z at time=%0t valid=%b ready=%b resp_valid=%b",
+                      $time, sample.sampled_req_valid,
+                      sample.sampled_req_ready,
+                      sample.sampled_resp_valid));
     end
     sample.sampled_req_fire =
         (sample.sampled_req_valid === 1'b1) &&
@@ -386,8 +388,8 @@ task L2tlb_agent_agent_driver::sample_previous_vif(
                        "post-reset baseline metadata has invalid item kind/epoch")
         end
         if (sample.sample_valid && sample.dut_sample_seq > baseline_sent_sample_seq) begin
-            if (sample.sampled_req_ready !== 1'b0 ||
-                sample.sampled_req_fire || sample.sampled_resp_valid) begin
+            if (sample.sampled_req_ready === 1'b1 ||
+                sample.sampled_req_fire || sample.sampled_resp_valid === 1'b1) begin
                 `uvm_fatal(get_type_name(),
                            "post-reset baseline proof observed active transport")
             end

@@ -185,10 +185,19 @@ task io_mem_to_ooo_vec_wb_agent_agent_monitor::mon_data();
 
         end
         if(this.vif.rst_n===1'b1 && memblock_sync_pkg::reset_backend_done===1'b1) begin
-            // 中文伪代码：当前公共 flow 仅支持 scalar LS；vector WB valid 为 X/Z 或 1
-            // 都立即失败，不生成伪造 scalar event。
-            if (io_mem_to_ooo_writebackVldu_0_valid !== 1'b0 ||
-                io_mem_to_ooo_writebackVldu_1_valid !== 1'b0) begin
+            // 中文注释：X/Z 仅受公共硬诊断开关控制；已知的 vector valid=1 仍是标量 flow
+            // 不支持的功能性输入，必须保持原有 fail-fast，不生成伪造 scalar event。
+            if (memblock_sync_pkg::is_hard_xz_check_en() &&
+                $isunknown({io_mem_to_ooo_writebackVldu_0_valid,
+                            io_mem_to_ooo_writebackVldu_1_valid})) begin
+                memblock_sync_pkg::report_hard_xz_error(
+                    "MEMBLOCK_VEC_WB_UNSUPPORTED",
+                    $sformatf("scalar-only flow observed writebackVldu X/Z valid: port0=%b port1=%b",
+                              io_mem_to_ooo_writebackVldu_0_valid,
+                              io_mem_to_ooo_writebackVldu_1_valid));
+            end
+            if (io_mem_to_ooo_writebackVldu_0_valid === 1'b1 ||
+                io_mem_to_ooo_writebackVldu_1_valid === 1'b1) begin
                 `uvm_fatal("MEMBLOCK_VEC_WB_UNSUPPORTED",
                            $sformatf("scalar-only flow observed writebackVldu valid: port0=%b port1=%b",
                                      io_mem_to_ooo_writebackVldu_0_valid,

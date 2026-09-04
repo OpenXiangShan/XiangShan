@@ -54,6 +54,8 @@
 - 公共 helper、公共 sequence、公共 transaction 约束不应长期直接读取 `plus::MEMBLOCK_*`，而应读取 `seq_csr_common::get_*()`。
 - `seq_csr_common` 只保存测试框架参数，不保存 DUT CSR 实时状态、不保存运行期队列状态、不保存 monitor 采样结果。
 
+`MEMBLOCK_HARD_XZ_CHECK_EN` 是非通用 `xz_sw` 路径的公共 X/Z 诊断开关，默认值为 `0`。testcase build 阶段由 `plus.sv -> seq_csr_common` 冻结；由于 agent package 的编译顺序早于 `seq_pkg`，agent 通过 `memblock_sync_pkg` 的只读镜像查询同一冻结值。设为 `1` 时，L2TLB transport、issue ready、DCache/Uncache responder、integer/vector writeback 等既有硬 X/Z 诊断统一报告 `UVM_ERROR`，但不再使用 `UVM_FATAL`；设为 `0` 时这些非通用诊断不执行。各 agent 自身的 `xz_sw` 与 `TCNT_CHECK_SIG_XZ` 行为不受此参数改变。
+
 主表地址窗口与 TLB 物理映射窗口规则：
 
 - `MEMBLOCK_MAIN_VADDR_BASE/RANGE` 只控制自动主表 normal transaction 的 `src_0/imm/vaddr` 生成范围。

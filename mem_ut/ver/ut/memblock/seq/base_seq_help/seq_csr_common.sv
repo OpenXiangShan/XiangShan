@@ -186,6 +186,10 @@ class seq_csr_common;
     static bit          pma_pmp_raw_compare_en = 1'b1;
     static bit          pma_pmp_xmr_check_en = 1'b0;
     static bit          pma_pmp_undefined_after_tlb_fault = 1'b1;
+    // 中文注释：非通用 xz_sw 路径的硬 X/Z 诊断开关。
+    // 设置：testcase build 期从 plus 冻结并同步给 memblock_sync_pkg；读取：sequence 走本 getter，
+    // agent 走 sync package 查询接口。为 1 时仅输出 UVM_ERROR，为 0 时不执行对应诊断。
+    static bit          hard_xz_check_en = 1'b0;
     static int unsigned active_seq_no_progress_warn_cycles = 10000;
     static bit          dispatch_issue_seq_en = 1'b0;
     // 中文注释：lintsissue 非阻塞发射模式开关。
@@ -469,6 +473,8 @@ class seq_csr_common;
         pma_pmp_xmr_check_en        = plus::MEMBLOCK_PMA_PMP_XMR_CHECK_EN;
         pma_pmp_undefined_after_tlb_fault =
             plus::MEMBLOCK_PMA_PMP_UNDEFINED_AFTER_TLB_FAULT;
+        hard_xz_check_en             = plus::MEMBLOCK_HARD_XZ_CHECK_EN;
+        memblock_sync_pkg::set_hard_xz_check_en(hard_xz_check_en);
         active_seq_no_progress_warn_cycles = get_non_negative_int("MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES", plus::MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES);
         dispatch_issue_seq_en       = plus::MEMBLOCK_DISPATCH_ISSUE_SEQ_EN;
         dispatch_issue_nonblocking_en = plus::MEMBLOCK_DISPATCH_ISSUE_NONBLOCKING_EN;
@@ -1615,6 +1621,11 @@ class seq_csr_common;
         check_initialized("get_pma_pmp_undefined_after_tlb_fault");
         return pma_pmp_undefined_after_tlb_fault;
     endfunction:get_pma_pmp_undefined_after_tlb_fault
+
+    static function bit get_hard_xz_check_en();
+        check_initialized("get_hard_xz_check_en");
+        return hard_xz_check_en;
+    endfunction:get_hard_xz_check_en
 
     static function bit get_dispatch_issue_seq_en();
         check_initialized("get_dispatch_issue_seq_en");

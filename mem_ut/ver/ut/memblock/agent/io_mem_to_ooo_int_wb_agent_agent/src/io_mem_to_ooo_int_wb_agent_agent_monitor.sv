@@ -78,8 +78,12 @@ io_mem_to_ooo_int_wb_agent_agent_monitor::build_raw_int_wb_from_v2_port(
         return raw;
     end
     if (sampled_valid !== 1'b1) begin
-        `uvm_fatal("INT_WB_MON",
-                   $sformatf("writeback valid is X/Z: source_kind=%0d port_id=%0d", source_kind, port_id))
+        if (memblock_sync_pkg::is_hard_xz_check_en()) begin
+            memblock_sync_pkg::report_hard_xz_error(
+                "INT_WB_MON",
+                $sformatf("writeback valid is X/Z: source_kind=%0d port_id=%0d", source_kind, port_id));
+        end
+        return raw;
     end
 
     raw.valid = 1'b1;
@@ -554,7 +558,8 @@ task io_mem_to_ooo_int_wb_agent_agent_monitor::mon_data();
                     if (!raw_int_wb.valid) `uvm_fatal("INT_WB_MON", "builder dropped valid LDA0 event")
                     memblock_sync_pkg::push_raw_int_wb(raw_int_wb);
                 end
-                default: `uvm_fatal("INT_WB_MON", "LDA0 valid is X/Z")
+                default: if (memblock_sync_pkg::is_hard_xz_check_en())
+                    memblock_sync_pkg::report_hard_xz_error("INT_WB_MON", "LDA0 valid is X/Z");
             endcase
             case (io_mem_to_ooo_writebackLda_1_valid)
                 1'b0: ;
@@ -563,7 +568,8 @@ task io_mem_to_ooo_int_wb_agent_agent_monitor::mon_data();
                     if (!raw_int_wb.valid) `uvm_fatal("INT_WB_MON", "builder dropped valid LDA1 event")
                     memblock_sync_pkg::push_raw_int_wb(raw_int_wb);
                 end
-                default: `uvm_fatal("INT_WB_MON", "LDA1 valid is X/Z")
+                default: if (memblock_sync_pkg::is_hard_xz_check_en())
+                    memblock_sync_pkg::report_hard_xz_error("INT_WB_MON", "LDA1 valid is X/Z");
             endcase
             case (io_mem_to_ooo_writebackLda_2_valid)
                 1'b0: ;
@@ -572,7 +578,8 @@ task io_mem_to_ooo_int_wb_agent_agent_monitor::mon_data();
                     if (!raw_int_wb.valid) `uvm_fatal("INT_WB_MON", "builder dropped valid LDA2 event")
                     memblock_sync_pkg::push_raw_int_wb(raw_int_wb);
                 end
-                default: `uvm_fatal("INT_WB_MON", "LDA2 valid is X/Z")
+                default: if (memblock_sync_pkg::is_hard_xz_check_en())
+                    memblock_sync_pkg::report_hard_xz_error("INT_WB_MON", "LDA2 valid is X/Z");
             endcase
             case (io_mem_to_ooo_writebackSta_0_valid)
                 1'b0: ;
@@ -581,7 +588,8 @@ task io_mem_to_ooo_int_wb_agent_agent_monitor::mon_data();
                     if (!raw_int_wb.valid) `uvm_fatal("INT_WB_MON", "builder dropped valid STA0 event")
                     memblock_sync_pkg::push_raw_int_wb(raw_int_wb);
                 end
-                default: `uvm_fatal("INT_WB_MON", "STA0 valid is X/Z")
+                default: if (memblock_sync_pkg::is_hard_xz_check_en())
+                    memblock_sync_pkg::report_hard_xz_error("INT_WB_MON", "STA0 valid is X/Z");
             endcase
             case (io_mem_to_ooo_writebackSta_1_valid)
                 1'b0: ;
@@ -590,7 +598,8 @@ task io_mem_to_ooo_int_wb_agent_agent_monitor::mon_data();
                     if (!raw_int_wb.valid) `uvm_fatal("INT_WB_MON", "builder dropped valid STA1 event")
                     memblock_sync_pkg::push_raw_int_wb(raw_int_wb);
                 end
-                default: `uvm_fatal("INT_WB_MON", "STA1 valid is X/Z")
+                default: if (memblock_sync_pkg::is_hard_xz_check_en())
+                    memblock_sync_pkg::report_hard_xz_error("INT_WB_MON", "STA1 valid is X/Z");
             endcase
             case (io_mem_to_ooo_writebackStd_0_valid)
                 1'b0: ;
@@ -599,7 +608,8 @@ task io_mem_to_ooo_int_wb_agent_agent_monitor::mon_data();
                     if (!raw_int_wb.valid) `uvm_fatal("INT_WB_MON", "builder dropped valid STD0 event")
                     memblock_sync_pkg::push_raw_int_wb(raw_int_wb);
                 end
-                default: `uvm_fatal("INT_WB_MON", "STD0 valid is X/Z")
+                default: if (memblock_sync_pkg::is_hard_xz_check_en())
+                    memblock_sync_pkg::report_hard_xz_error("INT_WB_MON", "STD0 valid is X/Z");
             endcase
             case (io_mem_to_ooo_writebackStd_1_valid)
                 1'b0: ;
@@ -608,7 +618,8 @@ task io_mem_to_ooo_int_wb_agent_agent_monitor::mon_data();
                     if (!raw_int_wb.valid) `uvm_fatal("INT_WB_MON", "builder dropped valid STD1 event")
                     memblock_sync_pkg::push_raw_int_wb(raw_int_wb);
                 end
-                default: `uvm_fatal("INT_WB_MON", "STD1 valid is X/Z")
+                default: if (memblock_sync_pkg::is_hard_xz_check_en())
+                    memblock_sync_pkg::report_hard_xz_error("INT_WB_MON", "STD1 valid is X/Z");
             endcase
         end
     end

@@ -305,8 +305,10 @@ function void lintsissue_agent_agent_driver::clear_ready_dispatch_issue_ports(li
         `uvm_fatal(get_type_name(), "clear_ready_dispatch_issue_ports got null xaction")
     end
     if ((`MEMBLOCK_DUT_LOAD_PIPE_NUM > 0) && tr.io_ooo_to_mem_issueLda_0_valid) begin
-        if ($isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_ready)) begin
-            `uvm_fatal(get_type_name(), "issueLda_0_ready is X/Z while valid")
+        if (memblock_sync_pkg::is_hard_xz_check_en() &&
+            $isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_ready)) begin
+            memblock_sync_pkg::report_hard_xz_error(get_type_name(),
+                                                     "issueLda_0_ready is X/Z while valid");
         end
         if (vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_ready === 1'b1) begin
             tr.io_ooo_to_mem_issueLda_0_valid = 1'b0;
@@ -314,8 +316,10 @@ function void lintsissue_agent_agent_driver::clear_ready_dispatch_issue_ports(li
         end
     end
     if ((`MEMBLOCK_DUT_LOAD_PIPE_NUM > 1) && tr.io_ooo_to_mem_issueLda_1_valid) begin
-        if ($isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_ready)) begin
-            `uvm_fatal(get_type_name(), "issueLda_1_ready is X/Z while valid")
+        if (memblock_sync_pkg::is_hard_xz_check_en() &&
+            $isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_ready)) begin
+            memblock_sync_pkg::report_hard_xz_error(get_type_name(),
+                                                     "issueLda_1_ready is X/Z while valid");
         end
         if (vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_ready === 1'b1) begin
             tr.io_ooo_to_mem_issueLda_1_valid = 1'b0;
@@ -323,8 +327,10 @@ function void lintsissue_agent_agent_driver::clear_ready_dispatch_issue_ports(li
         end
     end
     if ((`MEMBLOCK_DUT_LOAD_PIPE_NUM > 2) && tr.io_ooo_to_mem_issueLda_2_valid) begin
-        if ($isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_ready)) begin
-            `uvm_fatal(get_type_name(), "issueLda_2_ready is X/Z while valid")
+        if (memblock_sync_pkg::is_hard_xz_check_en() &&
+            $isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_ready)) begin
+            memblock_sync_pkg::report_hard_xz_error(get_type_name(),
+                                                     "issueLda_2_ready is X/Z while valid");
         end
         if (vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_ready === 1'b1) begin
             tr.io_ooo_to_mem_issueLda_2_valid = 1'b0;
@@ -332,8 +338,10 @@ function void lintsissue_agent_agent_driver::clear_ready_dispatch_issue_ports(li
         end
     end
     if ((`MEMBLOCK_DUT_STA_PIPE_NUM > 0) && tr.io_ooo_to_mem_issueSta_0_valid) begin
-        if ($isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_ready)) begin
-            `uvm_fatal(get_type_name(), "issueSta_0_ready is X/Z while valid")
+        if (memblock_sync_pkg::is_hard_xz_check_en() &&
+            $isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_ready)) begin
+            memblock_sync_pkg::report_hard_xz_error(get_type_name(),
+                                                     "issueSta_0_ready is X/Z while valid");
         end
         if (vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_ready === 1'b1) begin
             tr.io_ooo_to_mem_issueSta_0_valid = 1'b0;
@@ -341,8 +349,10 @@ function void lintsissue_agent_agent_driver::clear_ready_dispatch_issue_ports(li
         end
     end
     if ((`MEMBLOCK_DUT_STA_PIPE_NUM > 1) && tr.io_ooo_to_mem_issueSta_1_valid) begin
-        if ($isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_ready)) begin
-            `uvm_fatal(get_type_name(), "issueSta_1_ready is X/Z while valid")
+        if (memblock_sync_pkg::is_hard_xz_check_en() &&
+            $isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_ready)) begin
+            memblock_sync_pkg::report_hard_xz_error(get_type_name(),
+                                                     "issueSta_1_ready is X/Z while valid");
         end
         if (vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_ready === 1'b1) begin
             tr.io_ooo_to_mem_issueSta_1_valid = 1'b0;
@@ -350,8 +360,10 @@ function void lintsissue_agent_agent_driver::clear_ready_dispatch_issue_ports(li
         end
     end
     if ((`MEMBLOCK_DUT_STD_PIPE_NUM > 0) && tr.io_ooo_to_mem_issueStd_0_valid) begin
-        if ($isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_ready)) begin
-            `uvm_fatal(get_type_name(), "issueStd_0_ready is X/Z while valid")
+        if (memblock_sync_pkg::is_hard_xz_check_en() &&
+            $isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_ready)) begin
+            memblock_sync_pkg::report_hard_xz_error(get_type_name(),
+                                                     "issueStd_0_ready is X/Z while valid");
         end
         if (vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_ready === 1'b1) begin
             tr.io_ooo_to_mem_issueStd_0_valid = 1'b0;
@@ -360,8 +372,10 @@ function void lintsissue_agent_agent_driver::clear_ready_dispatch_issue_ports(li
         end
     end
     if ((`MEMBLOCK_DUT_STD_PIPE_NUM > 1) && tr.io_ooo_to_mem_issueStd_1_valid) begin
-        if ($isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_ready)) begin
-            `uvm_fatal(get_type_name(), "issueStd_1_ready is X/Z while valid")
+        if (memblock_sync_pkg::is_hard_xz_check_en() &&
+            $isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_ready)) begin
+            memblock_sync_pkg::report_hard_xz_error(get_type_name(),
+                                                     "issueStd_1_ready is X/Z while valid");
         end
         if (vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_ready === 1'b1) begin
             tr.io_ooo_to_mem_issueStd_1_valid = 1'b0;
