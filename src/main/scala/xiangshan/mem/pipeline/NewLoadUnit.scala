@@ -353,7 +353,9 @@ class LoadUnitS0(param: ExeUnitParams)(
 
   val uncacheForwardReqValid = replayHiPrio.fire && replayHiPrio.bits.isUncacheReplay()
 
-  val dcacheForwardReqValid = replayHiPrio.fire && replayHiPrio.bits.forwardDChannel.get
+  // Any accepted demand load may overlap an inflight refill. The physical
+  // address and refill-beat checks are performed after address translation.
+  val dcacheForwardReqValid = sink.fire && !isPrefetch && !isUncacheReplay
   val dcacheForwardReq = Wire(new DCacheForwardReqS0)
   dcacheForwardReq.vaddr := sink.bits.vaddr
   dcacheForwardReq.size := sink.bits.size
