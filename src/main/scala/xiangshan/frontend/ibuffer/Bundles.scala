@@ -53,7 +53,6 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val foldpc:           UInt   = UInt(MemPredPCWidth.W)
   val isRvc:            Bool   = Bool()
   val predTaken:        Bool   = Bool()
-  val fixedTaken:       Bool   = Bool()
   val ftqPtr:           FtqPtr = new FtqPtr
   val instrEndOffset:   UInt   = UInt(FetchBlockInstOffsetWidth.W)
   val triggered:        UInt   = TriggerAction()
@@ -67,7 +66,6 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     foldpc           := fetch.foldpc(i)
     isRvc            := fetch.isRvc(i)
     predTaken        := fetch.instrEndOffset(i).predTaken
-    fixedTaken       := fetch.instrEndOffset(i).fixedTaken
     ftqPtr           := fetch.ftqPtr(i)
     instrEndOffset   := fetch.instrEndOffset(i).offset
     triggered        := fetch.triggered(i)
@@ -85,7 +83,6 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     result.foldpc             := foldpc
     result.isRvc              := isRvc
     result.predTaken          := predTaken
-    result.fixedTaken         := fixedTaken
     result.ftqPtr             := ftqPtr
     result.exceptionType      := exception.exceptionType
     result.exceptionCrossPage := exception.exceptionCrossPage
@@ -125,7 +122,6 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val foldpc:             UInt          = UInt(MemPredPCWidth.W)
   val isRvc:              Bool          = Bool()
   val predTaken:          Bool          = Bool()
-  val fixedTaken:         Bool          = Bool()
   val ftqPtr:             FtqPtr        = new FtqPtr
   val exceptionType:      ExceptionType = new ExceptionType
   val exceptionCrossPage: Bool          = Bool()
@@ -154,7 +150,6 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.satpFlushFirstFetchFault                      := hasSatpFlush && exceptionType.hasException
     cf.trigger                                       := triggered
     cf.isRvc                                         := isRvc
-    cf.fixedTaken                                    := fixedTaken
     cf.predTaken                                     := predTaken
     cf.crossPageIPFFix                               := exceptionCrossPage
     cf.storeSetHit                                   := DontCare
