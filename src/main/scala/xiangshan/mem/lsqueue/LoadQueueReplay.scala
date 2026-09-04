@@ -917,10 +917,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
           tlbHintPrevCycleValid &&
           (tlbHintPrevCycleBits.id === replayInfo.tlb_id || tlbHintPrevCycleBits.replay_all)
         blocking(enqIndex) := !replayInfo.tlb_full &&
-          !(tlbHintHitThisCycle || tlbHintHitPrevCycle)
-        when (fastTlbHintResp.valid && fastTlbHintResp.bits.id === replayInfo.tlb_id) {
-          blocking(enqIndex) := false.B
-        }
+          !(tlbHintHitThisCycle || tlbHintHitPrevCycle) &&
+          !(fastTlbHintResp.valid && fastTlbHintResp.bits.id === replayInfo.tlb_id)
         tlbHintId(enqIndex) := replayInfo.tlb_id
       }
 
