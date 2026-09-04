@@ -1217,7 +1217,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     // forward missqueue
     val forward = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
-    val forwardS1PAddrMatch = Output(Vec(LoadPipelineWidth, Bool()))
+    val forwardS1PAddrMatch = Output(Vec(LoadPipelineWidth, Vec(cfg.nMissEntries, Bool())))
     // If a store is miss and accepted by mshr, Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
     // Note: the resp of this st-ld forwarding is merged into io.forward.S2Resp interface
     val forward_stData = Flipped(Vec(LoadPipelineWidth, new SbufferForwardReq))
@@ -1662,10 +1662,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   io.forward.zipWithIndex.foreach { case (forward, i) =>
     val s0ReqValid = forward.s0Req.valid
-    val s0Req = forward.s0Req.bits
     val s1ReqValid = RegNext(s0ReqValid)
-    val s1Req = RegEnable(s0Req, s0ReqValid)
-    val mshrIdOH = UIntToOH(s1Req.mshrId)
     val s1BeatMatchVec  = VecInit(forwardInfo_vec.map{ case info =>
       Mux(paddrFwd(i)(log2Up(refillBytes)).asBool,
         info.lastbeat_valid,
@@ -1691,7 +1688,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     ))
     forward.s2Resp.bits.denied := RegEnable(s1ForwardInfo(i).denied, s1ReqValid) && s2Resp_Valid
     forward.s2Resp.bits.corrupt := RegEnable(s1ForwardInfo(i).corrupt, s1ReqValid) && s2Resp_Valid
-    io.forwardS1PAddrMatch(i) := s1ReqValid && (mshrIdOH & s1PaddrMatchVec(i).asUInt).orR
+    io.forwardS1PAddrMatch(i) := s1PaddrMatchVec(i)
     XSError(((s1SelectOH(i) - 1.U) & s1SelectOH(i)).orR && s1RespValid, "multi mshr hit when forward!\n")
   }
 

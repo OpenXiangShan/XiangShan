@@ -1362,18 +1362,14 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   def processChannel(forward: DCacheForward, bus: TLBundle, i: Int): Unit = {
     val s0ReqValid = forward.s0Req.valid
-    val s0Req = forward.s0Req.bits
     val s1ReqValid = RegNext(s0ReqValid)
-    val s1Req = RegEnable(s0Req, s0ReqValid)
-    val mshrId = s1Req.mshrId
     val paddr = forward.s1Req.paddr
 
     val (_, _, done, _) = edge.count(bus.d)
-    val mshrMatch = mshrId === bus.d.bits.source
     val beatMatch = (bus.d.bits.echo.lift(IsKeywordKey).getOrElse(false.B) ^ done) === paddr(log2Up(refillBytes))
-    val paddrMatch = missQueue.io.forwardS1PAddrMatch(i)
-    val s1RespValid = s1ReqValid && bus.d.valid && bus.d.bits.opcode === TLMessages.GrantData &&
-      mshrMatch && beatMatch && paddrMatch
+    val sourceMatch = Mux1H(UIntToOH(bus.d.bits.source, cfg.nMissEntries), missQueue.io.forwardS1PAddrMatch(i))
+    val s1RespValid = s1ReqValid && bus.d.valid &&
+      bus.d.bits.opcode === TLMessages.GrantData && beatMatch && sourceMatch
     val s1RespForwardData = VecInit.tabulate(l1BusDataWidth / VLEN) { i =>
       bus.d.bits.data((i + 1) * VLEN - 1, i * VLEN)
     }(paddr(log2Up(VLEN / 8)))
