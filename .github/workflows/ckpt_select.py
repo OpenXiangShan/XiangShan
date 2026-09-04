@@ -72,10 +72,16 @@ class CkptJson:
         return self.path.parent.parent / "checkpoint"
 
 
+def __format_name(group: str, benchmark: str) -> str:
+    """Format the name of the checkpoint"""
+    return f"{group}_{benchmark}" if benchmark else group
+
+
 def __select_ckpts(
     j: CkptJson,
     prefix: str,
     select_func: Callable[[dict[tuple[str, str], float]], tuple[str, str]],
+    exclude: set[tuple[str, str]] = set(),
 ) -> list[SelectedCkpt]:
     """Select checkpoints based on the provided selection function"""
     selected = []
@@ -85,9 +91,10 @@ def __select_ckpts(
             (benchmark, point): weight
             for benchmark, data in benchmarks.items()
             for point, weight in data.points.items()
+            if (__format_name(group, benchmark), point) not in exclude
         }
         benchmark, point = select_func(flattened)
-        name = f"{group}_{benchmark}" if benchmark else group
+        name = __format_name(group, benchmark)
         ckpt_path = next((j.ckpt_path / name / point).glob("*.zstd"), None)
         if ckpt_path is None:
             print(
@@ -113,11 +120,15 @@ def select_most_weighted(j: CkptJson, prefix: str) -> list[SelectedCkpt]:
         j, prefix, lambda points: max(points, key=lambda p: points[p])
     )
 
-
-def select_random(j: CkptJson, prefix: str, n: int) -> list[SelectedCkpt]:
+def select_random(
+    j: CkptJson, prefix: str, n: int, already_selected: list[SelectedCkpt]
+) -> list[SelectedCkpt]:
     """Select n random benchmarks, and 1 checkpoint for each benchmark"""
     selected = __select_ckpts(
-        j, prefix, lambda points: random.choice(list(points.keys()))
+        j,
+        prefix,
+        lambda points: random.choice(list(points.keys())),
+        exclude={(c.name, c.point) for c in already_selected},
     )
     return random.sample(selected, min(n, len(selected))) if selected else []
 
@@ -133,16 +144,18 @@ def main() -> None:
         legacy_ckpt_json = CkptJson.from_json(Path(CKPT_JSON_LEGACY))
         selected.extend(select_most_weighted(legacy_ckpt_json, "legacy-"))
 
-    # run random 5 checkpoints from xscc
-    # use fuzz- prefix to skip performance report
-    xscc_ckpt_json = CkptJson.from_json(Path(CKPT_JSON_XSCC))
-    selected.extend(select_random(xscc_ckpt_json, "fuzz-", 5))
-
     # run the most weighted checkpoints from the main ckpt json
     ckpt_json = CkptJson.from_json(Path(CKPT_JSON))
     selected.extend(select_most_weighted(ckpt_json, ""))
-    # also run random 5 checkpoints from the main ckpt json, use fuzz- prefix too
-    selected.extend(select_random(ckpt_json, "fuzz-", 5))
+
+    # run random 5 checkpoints from the main ckpt json
+    # use fuzz- prefix to skip performance report
+    selected.extend(select_random(ckpt_json, "fuzz-", 5, already_selected=selected))
+
+    # also run random 5 checkpoints from xscc, use fuzz- prefix too
+    if CKPT_JSON_XSCC != "":
+        xscc_ckpt_json = CkptJson.from_json(Path(CKPT_JSON_XSCC))
+        selected.extend(select_random(xscc_ckpt_json, "fuzz-", 5, already_selected=selected))
 
     print(json.dumps([asdict(c) for c in selected]))
 
