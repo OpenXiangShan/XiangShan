@@ -648,6 +648,47 @@ def test_icache_missunit_request_and_concurrent_dut(env) -> None:
     _assert_clean(env)
 
 
+@pytest.mark.funcov_bins("BIN-688")
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_icache_missunit_fetch_capacity_dut(env) -> None:
+    """Fill all demand MSHRs and hold one distinct request under backpressure."""
+    _prepare(
+        env,
+        latency=48,
+        words=32768,
+        prefetch_enabled=False,
+        backend_can_accept=False,
+    )
+    _wait_initial_refill(env)
+    env.icache_agent.configure(
+        hit_latency=1,
+        miss_latency=4096,
+        miss_rate=1.0,
+        seed=0x688,
+    )
+
+    redirect_index = 0
+    for _ in range(16):
+        if _mshr_count(_snapshot(env), range(4)) == 4:
+            break
+        target = _BASE + 0x6000 + redirect_index * 0x1000 + 0x38
+        redirect_index += 1
+        env.monitor.set_expected_pc(target)
+        env.backend_model.inject_redirect(target, "ctrl_redirect", delay_cycles=0)
+        env.step(8)
+
+    held_target = _BASE + 0x6000 + redirect_index * 0x1000
+    env.monitor.set_expected_pc(held_target)
+    env.backend_model.inject_redirect(held_target, "ctrl_redirect", delay_cycles=0)
+    _wait_bins(
+        env,
+        [("icache_missunit_capacity", "fetch_full_backpressure")],
+        max_cycles=2048,
+    )
+    assert _mshr_count(_snapshot(env), range(4)) == 4
+    _assert_clean(env)
+
+
 @pytest.mark.funcov_bins("BIN-689")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_icache_missunit_prefetch_capacity_dut(env) -> None:

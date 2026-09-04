@@ -19,6 +19,7 @@ class _ICachePending:
     ready_cycle: int
     denied: int = 0
     corrupt: int = 0
+    fault_beat: Optional[int] = None
     beat_idx: int = 0
 
 
@@ -120,25 +121,51 @@ class ICacheAgent:
         return int(addr) & ~0x3F
 
     @staticmethod
-    def _normalize_fault(*, denied: int = 0, corrupt: int = 0) -> Dict[str, int]:
+    def _normalize_fault(
+        *,
+        denied: int = 0,
+        corrupt: int = 0,
+        beat: Optional[int] = None,
+    ) -> Dict[str, Optional[int]]:
+        if beat is not None and int(beat) not in (0, 1):
+            raise ValueError("ICache response fault beat must be 0, 1, or None")
         denied_value = 1 if int(denied) else 0
         # A denied AccessAckData beat must also be corrupt according to TileLink.
         corrupt_value = 1 if int(corrupt) or denied_value else 0
-        return {"denied": denied_value, "corrupt": corrupt_value}
+        return {
+            "denied": denied_value,
+            "corrupt": corrupt_value,
+            "beat": None if beat is None else int(beat),
+        }
 
-    def inject_next_response_fault(self, *, denied: int = 0, corrupt: int = 0) -> None:
-        """Fault the next accepted cache-line request on every returned beat."""
+    def inject_next_response_fault(
+        self,
+        *,
+        denied: int = 0,
+        corrupt: int = 0,
+        beat: Optional[int] = None,
+    ) -> None:
+        """Fault every beat, or one selected beat, of the next cache-line response."""
         self._next_response_faults.append(
-            self._normalize_fault(denied=denied, corrupt=corrupt)
+            self._normalize_fault(denied=denied, corrupt=corrupt, beat=beat)
         )
 
-    def inject_response_fault_at(self, addr: int, *, denied: int = 0, corrupt: int = 0) -> None:
-        """Fault the next response for one 64-byte-aligned cache line."""
+    def inject_response_fault_at(
+        self,
+        addr: int,
+        *,
+        denied: int = 0,
+        corrupt: int = 0,
+        beat: Optional[int] = None,
+    ) -> None:
+        """Fault every beat, or one selected beat, of a cache-line response."""
         line_addr = self._cacheline_addr(addr)
         queue = self._response_faults_by_addr.setdefault(line_addr, deque())
-        queue.append(self._normalize_fault(denied=denied, corrupt=corrupt))
+        queue.append(
+            self._normalize_fault(denied=denied, corrupt=corrupt, beat=beat)
+        )
 
-    def _take_response_fault(self, addr: int) -> Dict[str, int]:
+    def _take_response_fault(self, addr: int) -> Dict[str, Optional[int]]:
         line_addr = self._cacheline_addr(addr)
         queue = self._response_faults_by_addr.get(line_addr)
         if queue:
@@ -148,7 +175,7 @@ class ICacheAgent:
             return fault
         if self._next_response_faults:
             return self._next_response_faults.popleft()
-        return {"denied": 0, "corrupt": 0}
+        return {"denied": 0, "corrupt": 0, "beat": None}
 
     def _handle_request(self, cycle: int) -> None:
         assert self.interface is not None
@@ -171,6 +198,7 @@ class ICacheAgent:
                 ready_cycle=cycle + latency,
                 denied=int(fault["denied"]),
                 corrupt=int(fault["corrupt"]),
+                fault_beat=fault["beat"],
             )
         )
         self.request_records.append(
@@ -182,6 +210,7 @@ class ICacheAgent:
                 "miss": bool(is_miss),
                 "denied": int(fault["denied"]),
                 "corrupt": int(fault["corrupt"]),
+                "fault_beat": fault["beat"],
             }
         )
         self._emit(
@@ -194,6 +223,7 @@ class ICacheAgent:
                 "miss": bool(is_miss),
                 "denied": int(fault["denied"]),
                 "corrupt": int(fault["corrupt"]),
+                "fault_beat": fault["beat"],
             },
             level="DEBUG",
         )
@@ -210,24 +240,29 @@ class ICacheAgent:
         top = self.pending[0]
         if cycle < top.ready_cycle:
             return
+        sent_beat_idx = int(top.beat_idx)
+        fault_this_beat = (
+            top.fault_beat is None or int(top.fault_beat) == sent_beat_idx
+        )
+        denied = int(top.denied) if fault_this_beat else 0
+        corrupt = int(top.corrupt) if fault_this_beat else 0
         data = top.beat0 if top.beat_idx == 0 else top.beat1
         self._write(self.interface.d_valid, 1)
         self._write(self.interface.d_bits_opcode, 1)
         self._write(self.interface.d_bits_source, top.source)
         self._write(self.interface.d_bits_data, data)
-        self._write(self.interface.d_bits_denied, top.denied)
-        self._write(self.interface.d_bits_corrupt, top.corrupt)
+        self._write(self.interface.d_bits_denied, denied)
+        self._write(self.interface.d_bits_corrupt, corrupt)
 
         self.resp_beat_count += 1
-        sent_beat_idx = int(top.beat_idx)
         self.response_records.append(
             {
                 "cycle": int(cycle),
                 "source": int(top.source),
                 "address": int(top.addr),
                 "beat_idx": sent_beat_idx,
-                "denied": int(top.denied),
-                "corrupt": int(top.corrupt),
+                "denied": denied,
+                "corrupt": corrupt,
             }
         )
         if top.beat_idx == 1:
@@ -245,8 +280,8 @@ class ICacheAgent:
                 "address": int(top.addr),
                 "beat_idx": sent_beat_idx,
                 "ready_cycle": int(top.ready_cycle),
-                "denied": int(top.denied),
-                "corrupt": int(top.corrupt),
+                "denied": denied,
+                "corrupt": corrupt,
             },
             level="DEBUG",
         )

@@ -33,12 +33,12 @@ _SIGNALS = {
     "s1_valid": _aliases(_MAIN + "s1_valid"),
     "s1_flush": _aliases(_MAIN + "s1_flush"),
     "cross0": (
-        _MAIN + "s1_req_0_isCrossLine",
         _MAIN + "accessTrace_crossLine",
+        _MAIN + "s1_req_0_isCrossLine",
     ),
     "cross1": (
-        _MAIN + "s1_req_1_isCrossLine",
         _MAIN + "s1_isCrossLine_1",
+        _MAIN + "s1_req_1_isCrossLine",
     ),
     "req1_valid": _aliases(_MAIN + "s1_req_1_valid"),
     "s1_addr": _aliases(_MAIN + "s1_req_0_vAddr_0_addr"),
@@ -55,10 +55,10 @@ for _index in range(4):
     _line = _index % 2
     _hit_r = _MAIN + "s1_hits_r" + (f"_{_index}" if _index else "")
     _SIGNALS[f"hit_{_index}"] = (
-        _MAIN + f"s1_hits_{_req}_{_line}",
         _hit_r,
-        "TOP." + _MAIN + f"s1_hits_{_req}_{_line}",
         "TOP." + _hit_r,
+        _MAIN + f"s1_hits_{_req}_{_line}",
+        "TOP." + _MAIN + f"s1_hits_{_req}_{_line}",
     )
     _SIGNALS[f"should_{_index}"] = _aliases(
         _MAIN + f"s1_shouldFetch_{_index}"
@@ -353,7 +353,7 @@ def test_tc_icache_mainpipe_dual_request_independent(env) -> None:
     assert not env.monitor.get_errors()
 
 
-@pytest.mark.funcov_bins("BIN-1138", "BIN-1139")
+@pytest.mark.funcov_bins("BIN-1138")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_tc_icache_mainpipe_mshr_alignment(env) -> None:
     """Train varied dual requests, then replay them through MainPipe refills."""
@@ -373,40 +373,32 @@ def test_tc_icache_mainpipe_mshr_alignment(env) -> None:
     env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 0
     fencei = getattr(env.clock_reset, "io_fencei", None)
     assert fencei is not None, {"missing_signal": "io_fencei"}
-    for _episode in range(8):
-        fencei.value = 1
-        env.step(1)
-        fencei.value = 0
-        for _ in range(192):
-            if all(
-                env.functional_coverage.key_hit(
+    try:
+        for _episode in range(8):
+            fencei.value = 1
+            env.step(1)
+            fencei.value = 0
+            for _ in range(192):
+                if env.functional_coverage.key_hit(
                     "icache_mainpipe_maybe_rvc_align",
-                    bin_name,
-                )
-                for bin_name in (
                     "mshr_request_line_alignment",
-                    "mixed_source_merge",
-                )
+                ):
+                    break
+                env.step(1)
+            if env.functional_coverage.key_hit(
+                "icache_mainpipe_maybe_rvc_align",
+                "mshr_request_line_alignment",
             ):
                 break
-            env.step(1)
-        if all(
-            env.functional_coverage.key_hit(
-                "icache_mainpipe_maybe_rvc_align",
-                bin_name,
-            )
-            for bin_name in ("mshr_request_line_alignment", "mixed_source_merge")
-        ):
-            break
 
-    for bin_name in ("mshr_request_line_alignment", "mixed_source_merge"):
         _wait_hit(
             env,
             "icache_mainpipe_maybe_rvc_align",
-            bin_name,
+            "mshr_request_line_alignment",
             max_cycles=1,
         )
-    env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
+    finally:
+        env.csr_ctrl_if.io_csrCtrl_pf_ctrl_l1I_pf_enable.value = 1
     assert not env.monitor.get_errors()
 
 

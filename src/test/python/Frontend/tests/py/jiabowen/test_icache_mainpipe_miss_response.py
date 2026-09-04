@@ -479,6 +479,31 @@ def test_icache_agent_fault_injection_obeys_tilelink_contract(
     assert all(int(item["corrupt"]) == expected_corrupt for item in stats["response_records"])
 
 
+@pytest.mark.parametrize("beat", [0, 1])
+def test_icache_agent_fault_injection_can_select_one_refill_beat(beat) -> None:
+    memory = MemoryModel()
+    memory.load_bin((_NOP.to_bytes(4, "little")) * 16, _BASE)
+    agent = ICacheAgent(memory)
+    interface = _unit_icache_interface()
+    agent.interface = interface
+    agent.configure(hit_latency=0, miss_latency=0, miss_rate=1.0, seed=1)
+    agent.inject_response_fault_at(_BASE, corrupt=1, beat=beat)
+
+    interface.a_valid.value = 1
+    interface.a_bits_source.value = 2
+    interface.a_bits_address.value = _BASE
+    agent.on_clock_edge(10)
+    interface.a_valid.value = 0
+    agent.on_clock_edge(11)
+
+    stats = agent.get_stats()
+    assert [int(item["corrupt"]) for item in stats["response_records"]] == [
+        int(beat == 0),
+        int(beat == 1),
+    ]
+    assert int(stats["corrupt_resp_count"]) == 1
+
+
 def test_icache_agent_reset_discards_pending_response() -> None:
     memory = MemoryModel()
     agent = ICacheAgent(memory)
