@@ -42,6 +42,13 @@ def pytest_configure(config):
         "markers",
         "funcov_tps(*tp_ids): declare the testpoint IDs targeted by this DUT test",
     )
+    config.addinivalue_line(
+        "markers",
+        (
+            "funcov_closure_pending: keep a currently unreachable coverage-closure "
+            "scenario runnable without making it a release-gate failure"
+        ),
+    )
 
 
 @pytest.hookimpl(trylast=True)

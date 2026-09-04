@@ -16,6 +16,18 @@ _MMIO_BASE = 0x1000
 _NOP = 0x00000013
 
 
+def _funcov_domain_enabled(domain: str) -> bool:
+    raw = os.getenv("TB_FUNCOV_SAMPLER_DOMAINS", "").strip().lower()
+    if not raw:
+        return True
+    domains = {
+        token
+        for token in raw.replace(",", " ").replace(";", " ").split()
+        if token
+    }
+    return "all" in domains or str(domain).strip().lower() in domains
+
+
 def _instructions_to_bytes(instructions: Iterable[int]) -> bytes:
     buf = bytearray()
     for instr in instructions:
@@ -178,10 +190,11 @@ def test_baremode_seq_icache_basic_pilot(env):
 
     assert commits >= 4
     ifu_result.assert_passed()
-    assert env.functional_coverage.key_hit("ifu_instr_size_type", "rvi_seen")
-    assert env.functional_coverage.key_hit("ifu_pc_step_type", "step_4b_rvi")
-    assert env.functional_coverage.key_hit("ifu_boundary_event", "rvi_start")
-    assert env.functional_coverage.key_hit("ifu_cfi_decode_type", "non_cfi")
+    if _funcov_domain_enabled("ifu"):
+        assert env.functional_coverage.key_hit("ifu_instr_size_type", "rvi_seen")
+        assert env.functional_coverage.key_hit("ifu_pc_step_type", "step_4b_rvi")
+        assert env.functional_coverage.key_hit("ifu_boundary_event", "rvi_start")
+        assert env.functional_coverage.key_hit("ifu_cfi_decode_type", "non_cfi")
     assert not env.monitor.get_errors()
 
 
@@ -330,16 +343,17 @@ def test_baremode_cacheable_stream_delivery_pilot(env):
     commits = _warmup_commits(env, target_count=14, max_cycles=5000)
 
     assert commits >= 14
-    for group, bin_name in (
-        ("ifu_cacheable_delivery", "backend_recovery_multi_instr"),
-        ("ifu_cacheable_delivery", "same_cacheline_multi_rvc"),
-        ("ifu_cacheable_delivery", "same_cacheline_multi_rvi"),
-        ("ifu_cacheable_delivery", "rvc_then_rvi"),
-        ("ifu_cacheable_delivery", "rvi_then_rvc"),
-        ("ifu_cacheable_cfi_flow", "branch_next_pc_matches_decode"),
-        ("ifu_cacheable_cfi_flow", "jal_target_without_stale_delivery"),
-    ):
-        assert env.functional_coverage.key_hit(group, bin_name)
+    if _funcov_domain_enabled("ifu"):
+        for group, bin_name in (
+            ("ifu_cacheable_delivery", "backend_recovery_multi_instr"),
+            ("ifu_cacheable_delivery", "same_cacheline_multi_rvc"),
+            ("ifu_cacheable_delivery", "same_cacheline_multi_rvi"),
+            ("ifu_cacheable_delivery", "rvc_then_rvi"),
+            ("ifu_cacheable_delivery", "rvi_then_rvc"),
+            ("ifu_cacheable_cfi_flow", "branch_next_pc_matches_decode"),
+            ("ifu_cacheable_cfi_flow", "jal_target_without_stale_delivery"),
+        ):
+            assert env.functional_coverage.key_hit(group, bin_name)
     assert not env.monitor.get_errors()
 
 
@@ -355,7 +369,8 @@ def test_baremode_direct_jmp_coverage_pilot(env):
 
     assert commits >= 4
     assert env.branch_checker.get_stats()["by_type"]["jump"] >= 1
-    assert env.functional_coverage.key_hit("ifu_cfi_decode_type", "jal")
+    if _funcov_domain_enabled("ifu"):
+        assert env.functional_coverage.key_hit("ifu_cfi_decode_type", "jal")
     assert not env.monitor.get_errors()
 
 
@@ -371,5 +386,6 @@ def test_baremode_cond_nt_coverage_pilot(env):
 
     assert commits >= 4
     assert env.branch_checker.get_stats()["by_type"]["branch"] >= 1
-    assert env.functional_coverage.key_hit("ifu_cfi_decode_type", "branch")
+    if _funcov_domain_enabled("ifu"):
+        assert env.functional_coverage.key_hit("ifu_cfi_decode_type", "branch")
     assert not env.monitor.get_errors()

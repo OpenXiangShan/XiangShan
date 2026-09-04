@@ -159,7 +159,12 @@ _SIGNALS = {
     ),
     "update_vset": (_MAIN + "__Vtogcov__io_missResp_bits_vSetIdx",),
     "update_paddr": (_MAIN + "__Vtogcov__io_missResp_bits_blkPAddr",),
-    "update_waymask": (_MAIN + "__Vtogcov__io_missResp_bits_waymask",),
+    "update_waymask": (
+        _MAIN + "__Vtogcov__io_missResp_bits_waymask",
+        _MAIN + "io_missResp_bits_waymask",
+        _ICACHE + "missUnit.io_resp_bits_waymask",
+        _ICACHE + "missUnit.__Vtogcov__io_resp_bits_waymask",
+    ),
     "update_updated": tuple(
         _WL + "entryUpdate_updated" + (f"_{index}" if index else "")
         for index in range(_UPDATE_COUNT)

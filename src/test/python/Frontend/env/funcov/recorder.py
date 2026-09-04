@@ -193,6 +193,7 @@ COMPATIBILITY_FIELDS = (
     "generated_rtl_sha256",
     "registry_sha256",
     "sampler_sha256",
+    "sampler_domains",
     "verification_env_sha256",
     "signal_contract_sha256",
     "build_config",
@@ -212,6 +213,19 @@ def _normalize_string_list(values: Optional[Iterable[Any]]) -> List[str]:
         seen.add(text)
         result.append(text)
     return result
+
+
+def _configured_sampler_domains() -> frozenset[str]:
+    """Return the explicitly enabled functional-coverage sampler domains."""
+    raw = os.getenv("TB_FUNCOV_SAMPLER_DOMAINS", "").strip().lower()
+    if not raw:
+        return frozenset({"all"})
+    domains = {
+        token
+        for token in raw.replace(",", " ").replace(";", " ").split()
+        if token
+    }
+    return frozenset(domains or {"all"})
 
 
 UNCACHE_EVENT_SAMPLER_BIN_KEYS = frozenset(
@@ -304,6 +318,7 @@ class FunctionalCoverageRecorder:
         self.hits: Dict[Tuple[str, str, str], CoverageHit] = {}
         self.testcase_name = str(testcase_name)
         self.artifact_tag = str(artifact_tag)
+        self.sampler_domains = _configured_sampler_domains()
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.source_csv = str(source_csv) if source_csv is not None else None
@@ -510,6 +525,7 @@ class FunctionalCoverageRecorder:
             ),
             "definitions_sha256": definitions_sha256,
             "sampler_sha256": sampler_sha256,
+            "sampler_domains": sorted(self.sampler_domains),
             "verification_env_sha256": verification_env_sha256,
             "signal_contract_sha256": build["signal_contract_sha256"],
             "build_config": build_config,
@@ -591,6 +607,9 @@ class FunctionalCoverageRecorder:
         hit = self.hits.get(key)
         return bool(hit and hit.hits > 0)
 
+    def sampler_domain_enabled(self, domain: str) -> bool:
+        return "all" in self.sampler_domains or str(domain).strip().lower() in self.sampler_domains
+
     def record_contract_error(
         self,
         event: str,
@@ -634,12 +653,13 @@ class FunctionalCoverageRecorder:
         if evidence is not None and len(hit.evidence) < 8:
             hit.evidence.append(_sanitize(evidence))
         definition = self.definition_by_key[key]
-        derive_owner_v3_from_source(
-            self,
-            definition.bin_id,
-            int(cycle),
-            evidence,
-        )
+        if self.sampler_domain_enabled("ifu"):
+            derive_owner_v3_from_source(
+                self,
+                definition.bin_id,
+                int(cycle),
+                evidence,
+            )
         return True
 
     def _coverage_key(
@@ -665,8 +685,17 @@ class FunctionalCoverageRecorder:
         cycle = int(evt.get("cycle", 0))
         payload = evt.get("payload", {}) or {}
 
-        handle_owner_v3_event(self, evt)
-        handle_mmio_v3_checked_event(self, evt)
+        # Event-driven state outside ICache must not influence an ICache-only run.
+        event_sampling_enabled = any(
+            self.sampler_domain_enabled(domain)
+            for domain in ("ifu", "ftq", "uncache", "mmio", "ibuffer")
+        )
+        if not event_sampling_enabled:
+            return
+
+        if self.sampler_domain_enabled("ifu"):
+            handle_owner_v3_event(self, evt)
+            handle_mmio_v3_checked_event(self, evt)
 
         if event_type == "handshake.icache_a":
             if (
@@ -685,7 +714,7 @@ class FunctionalCoverageRecorder:
                 self._redirected_fetch_path = None
             self._last_fetch_path = "icache_seq"
             self._last_fetch_cycle = cycle
-        elif event_type == "handshake.uncache_a":
+        elif event_type == "handshake.uncache_a" and self.sampler_domain_enabled("uncache"):
             address = int(payload.get("address", 0))
             if (
                 self._redirected_fetch_path is not None
@@ -719,7 +748,7 @@ class FunctionalCoverageRecorder:
             self._last_fetch_path = "mmio_uncache"
             self._last_fetch_cycle = cycle
             self._sample_uncache_a_event(cycle, payload)
-        elif event_type == "backend.redirect":
+        elif event_type == "backend.redirect" and self.sampler_domain_enabled("ifu"):
             self._redirected_fetch_path = {
                 "path": self._last_fetch_path,
                 "pbmt_nc": bool(self._last_uncache_was_nc),
@@ -765,19 +794,24 @@ class FunctionalCoverageRecorder:
         elif self._reset_seen_high and self._reset_release_cycle is None:
             self._reset_release_cycle = cycle
 
-        sample_two_fetch_coverage(self, env, cycle)
-        sample_cfvec_coverage(self, env, cycle)
-        sample_ifu_cacheable_pipeline_coverage(self, env, cycle)
-        sample_mmio_v3_coverage(self, env, cycle)
-        sample_mmio_nc_owner_coverage(self, env, cycle)
-        sample_icache_mainpipe_coverage(self, env, cycle)
-        sample_icache_prefetchpipe_coverage(self, env, cycle)
-        sample_icache_missunit_coverage(self, env, cycle)
-        sample_icache_waylookup_coverage(self, env, cycle)
-        sample_icache_hitmiss_coverage(self, env, cycle)
+        if self.sampler_domain_enabled("ftq"):
+            sample_two_fetch_coverage(self, env, cycle)
+        if self.sampler_domain_enabled("ifu"):
+            sample_cfvec_coverage(self, env, cycle)
+            sample_ifu_cacheable_pipeline_coverage(self, env, cycle)
+            sample_mmio_v3_coverage(self, env, cycle)
+            sample_mmio_nc_owner_coverage(self, env, cycle)
+        if self.sampler_domain_enabled("icache"):
+            sample_icache_mainpipe_coverage(self, env, cycle)
+            sample_icache_prefetchpipe_coverage(self, env, cycle)
+            sample_icache_missunit_coverage(self, env, cycle)
+            sample_icache_waylookup_coverage(self, env, cycle)
+            sample_icache_hitmiss_coverage(self, env, cycle)
 
-        self._sample_ibuffer_contract(dut, cycle)
-        self._sample_uncache_cycle_state(dut, cycle, env)
+        if self.sampler_domain_enabled("ibuffer"):
+            self._sample_ibuffer_contract(dut, cycle)
+        if self.sampler_domain_enabled("uncache"):
+            self._sample_uncache_cycle_state(dut, cycle, env)
 
     def _lookup_dut_signal(self, dut, name: str):
         name = str(name)

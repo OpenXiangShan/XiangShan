@@ -185,6 +185,7 @@ def _eligible_provenance():
     values["registry_sha256"] = file_sha256(default_pilot_csv_path())
     values["definitions_sha256"] = definitions_sha256
     values["sampler_sha256"] = sampler_sha256
+    values["sampler_domains"] = ["all"]
     values["verification_env_sha256"] = current_verification_environment_sha256()
     values["simulator"] = "verilator"
     values["dut_source_sha"] = "a" * 40
@@ -215,6 +216,7 @@ def _resign_provenance(values):
         "generated_rtl_sha256",
         "registry_sha256",
         "sampler_sha256",
+        "sampler_domains",
         "verification_env_sha256",
         "signal_contract_sha256",
         "build_config",
@@ -1213,6 +1215,7 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
         ).hexdigest(),
         "definitions_sha256": hashlib.sha256(b"[]").hexdigest(),
         "sampler_sha256": sampler_sha256,
+        "sampler_domains": ["all"],
         "verification_env_sha256": verification_env_sha256,
         "signal_contract_sha256": manifest["signal_contract_sha256"],
         "build_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
@@ -1241,6 +1244,7 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
                         default_pilot_csv_path().read_bytes()
                     ).hexdigest(),
                     "sampler_sha256": sampler_sha256,
+                    "sampler_domains": ["all"],
                     "verification_env_sha256": verification_env_sha256,
                     "signal_contract_sha256": manifest["signal_contract_sha256"],
                     "build_config": "frontend-test",

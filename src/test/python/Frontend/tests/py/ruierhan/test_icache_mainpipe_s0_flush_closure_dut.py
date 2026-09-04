@@ -314,6 +314,7 @@ def _drive_bpu_s3_until_hit(env, bin_name: str, *, max_cycles: int) -> None:
             if _s0_sampling_window(env):
                 s0_windows += 1
                 disable_cycles.append(int(env.current_cycle))
+                env.backend_model.set_can_accept(0)
                 _trigger_bpu_s3_flush(env)
                 elapsed += 1
                 for _ in range(min(40, int(max_cycles) - elapsed)):
@@ -328,10 +329,12 @@ def _drive_bpu_s3_until_hit(env, bin_name: str, *, max_cycles: int) -> None:
                     env.step(1)
                     elapsed += 1
                 _restore_predictors(env)
+                env.backend_model.set_can_accept(1)
             else:
                 env.step(1)
                 elapsed += 1
     finally:
+        env.backend_model.set_can_accept(1)
         _restore_predictors(env)
 
     assert env.functional_coverage.key_hit("icache_mainpipe_s0_flush", bin_name), {

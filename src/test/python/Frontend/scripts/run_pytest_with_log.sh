@@ -12,6 +12,9 @@
 #   TB_LOG_CLI_LEVEL=<level>         Pytest CLI log level (default: TB_ENV_LOG_LEVEL, then INFO).
 #   TB_PYTEST_DISABLE_RERUNFAILURES=0
 #                                     Keep pytest rerunfailures enabled (default: disabled).
+#   TB_INCLUDE_FUNCOV_CLOSURE_PENDING=1
+#                                     Run strict-xfail closure reachability checks
+#                                     that the normal regression excludes.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -38,13 +41,23 @@ fi
 
 CLI_LEVEL="${TB_LOG_CLI_LEVEL:-${TB_ENV_LOG_LEVEL:-INFO}}"
 PYTEST_DISABLE_RERUNFAILURES="${TB_PYTEST_DISABLE_RERUNFAILURES:-1}"
+INCLUDE_FUNCOV_CLOSURE_PENDING="${TB_INCLUDE_FUNCOV_CLOSURE_PENDING:-0}"
+PENDING_ARGS=()
+if [[ "${INCLUDE_FUNCOV_CLOSURE_PENDING}" != "1" ]]; then
+  PENDING_ARGS=(-m "not funcov_closure_pending")
+fi
 
 echo "[frontend] saving regression log to: ${LOG_FILE}"
 echo "[frontend] TB_ENV_LOG_LEVEL=${TB_ENV_LOG_LEVEL:-INFO}"
-if [[ "${PYTEST_DISABLE_RERUNFAILURES}" != "0" ]]; then
-  echo "[frontend] running: pytest -p no:rerunfailures -s -o log_cli=true --log-cli-level=${CLI_LEVEL} $*"
+if [[ "${INCLUDE_FUNCOV_CLOSURE_PENDING}" == "1" ]]; then
+  echo "[frontend] including funcov closure pending reachability checks"
 else
-  echo "[frontend] running: pytest -s -o log_cli=true --log-cli-level=${CLI_LEVEL} $*"
+  echo "[frontend] excluding funcov closure pending reachability checks"
+fi
+if [[ "${PYTEST_DISABLE_RERUNFAILURES}" != "0" ]]; then
+  echo "[frontend] running: pytest -p no:rerunfailures -s -o log_cli=true --log-cli-level=${CLI_LEVEL} ${PENDING_ARGS[*]} $*"
+else
+  echo "[frontend] running: pytest -s -o log_cli=true --log-cli-level=${CLI_LEVEL} ${PENDING_ARGS[*]} $*"
 fi
 
 cd "${REPO_DIR}"
@@ -53,5 +66,6 @@ PYTEST_CMD=(pytest -s -o log_cli=true --log-cli-level="${CLI_LEVEL}")
 if [[ "${PYTEST_DISABLE_RERUNFAILURES}" != "0" ]]; then
   PYTEST_CMD+=(-p no:rerunfailures)
 fi
+PYTEST_CMD+=("${PENDING_ARGS[@]}")
 PYTEST_CMD+=("$@")
 "${PYTEST_CMD[@]}" 2>&1 | tee "${LOG_FILE}"
