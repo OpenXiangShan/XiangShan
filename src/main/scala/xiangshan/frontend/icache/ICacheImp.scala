@@ -33,6 +33,7 @@ import utility.XSPerfAccumulate
 import utils.AddrField
 import xiangshan.L1CacheErrorInfo
 import xiangshan.SoftIfetchPrefetchBundle
+import xiangshan.cache.CCHIType4Port
 import xiangshan.WfiReqBundle
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.frontend.FtqToICacheIO

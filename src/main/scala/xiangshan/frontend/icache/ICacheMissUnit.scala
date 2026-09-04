@@ -21,6 +21,7 @@ import difftest.DiffRefillEvent
 import difftest.DifftestModule
 import oceanus.compactchi._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.cache.ICacheCCHI
 import utility.ChiselDB
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram

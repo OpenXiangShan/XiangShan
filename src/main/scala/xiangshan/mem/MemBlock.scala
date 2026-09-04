@@ -42,7 +42,7 @@ import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
 import xiangshan.backend.Bundles._
 import xiangshan.cache._
 import xiangshan.cache.mmu._
-import xiangshan.frontend.icache.CCHIType4Port
+import xiangshan.cache.CCHIType4Port
 import xiangshan.frontend.instruncache.HasInstrUncacheConst
 import xiangshan.mem.prefetch.{PrefetcherWrapper, TLBPlace}
 
@@ -281,7 +281,13 @@ class InstrUncacheBuffer()(implicit p: Parameters) extends LazyModule with HasIn
 // double Queue buffer on L1I CHI path (same depth as legacy ICacheBuffer: BufferParams.default x2)
 object ICacheCCHIBuffer {
   private val depth = 2
+  def apply[T <: Data](x: DecoupledIO[T]): DecoupledIO[T] =
+    Queue(Queue(x, depth), depth)
+}
 
+// double Queue buffer on PTW CHI path (same depth as legacy ptw_to_l2_buffer at MemBlock)
+object PTWCCHIBuffer {
+  private val depth = 2
   def apply[T <: Data](x: DecoupledIO[T]): DecoupledIO[T] =
     Queue(Queue(x, depth), depth)
 }
@@ -317,7 +323,6 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val uncache_port = TLTempNode()
   val uncache_xbar = TLXbar()
   val ptw = LazyModule(new L2TLBWrapper())
-  val ptw_to_l2_buffer = if (!coreParams.softPTW) LazyModule(new TLBuffer) else null
   // muti buffer and port for multi-channel L1-L2 interface
   val l1d_to_l2_buffer = if (coreParams.dcacheParametersOpt.nonEmpty)
     Seq.tabulate(numMemChannelsFromDcache)(i => LazyModule(new TLBuffer))
@@ -337,9 +342,6 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val nmi_int_sink = IntSinkNode(IntSinkPortSimple(1, (new NonmaskableInterruptIO).elements.size))
   val beu_local_int_sink = IntSinkNode(IntSinkPortSimple(1, 1))
 
-  if (!coreParams.softPTW) {
-    ptw_to_l2_buffer.node := ptw.node
-  }
   uncache_xbar := TLBuffer() := uncache.clientNode
   if (dcache.uncacheNode.isDefined) {
     dcache.uncacheNode.get := TLBuffer.chainNode(2) := uncache_xbar
@@ -415,6 +417,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // ICache Compact CHI Type 4 (cacheable refill); buffered in MemBlock like legacy ICacheBuffer
     val inner_icache_cchi = Flipped(new CCHIType4Port)
     val outer_icache_cchi = new CCHIType4Port
+
+    // PTW Compact CHI Type 4 (page-table refill); buffered in MemBlock like legacy ptw_to_l2_buffer
+    val inner_ptw_cchi = Flipped(new CCHIType4Port)
+    val outer_ptw_cchi = new CCHIType4Port
 
     // reset signals of frontend & backend are generated in memblock
     val reset_backend = Output(Reset())
@@ -569,7 +575,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val sfence = RegNext(RegNext(io.ooo_to_mem.sfence))
   val tlbcsr = RegNext(RegNext(io.ooo_to_mem.tlbCsr))
   private val ptw = outer.ptw.module
-  private val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
   private val l1d_to_l2_buffer = outer.l1d_to_l2_buffer.map(_.module)
   ptw.io.hartId := io.hartId
   ptw.io.sfence <> sfence
@@ -1480,6 +1485,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.outer_icache_cchi.txreq <> ICacheCCHIBuffer(io.inner_icache_cchi.txreq)
   io.inner_icache_cchi.rxdat <> ICacheCCHIBuffer(io.outer_icache_cchi.rxdat)
 
+  // txreq: L2TLB -> L2; rxdat: L2 -> L2TLB (mirror legacy ptw_to_l2_buffer A/D)
+  io.outer_ptw_cchi.txreq <> PTWCCHIBuffer(io.inner_ptw_cchi.txreq)
+  io.inner_ptw_cchi.rxdat <> PTWCCHIBuffer(io.outer_ptw_cchi.rxdat)
+  ptw.io.cchi <> io.inner_ptw_cchi
+
   // vector segmentUnit
   // TODO: DONT use `head` find segment
   vSegmentUnit.io.in.bits <> issueVldu.head.bits
@@ -1506,7 +1516,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val leftResetTree = ResetGenNode(
       Seq(
         ModuleNode(ptw),
-        ModuleNode(ptw_to_l2_buffer),
         ModuleNode(lsq),
         ModuleNode(dtlb_st_tlb_st),
         ModuleNode(dtlb_prefetch_tlb_prefetch),

@@ -28,6 +28,17 @@ class CCHIType1Port extends Bundle {
 }
 
 /*
+ * Compact CHI Type 4 (read-only non-coherent) upstream port.
+ *
+ * Active channels: TXREQ (ReadOnce) + RXDAT (CompData).
+ * Used by ICache and PTW (L2TLB).
+ */
+class CCHIType4Port extends Bundle {
+  val txreq = DecoupledIO(new FlitREQ)
+  val rxdat = Flipped(DecoupledIO(new FlitDnDAT))
+}
+
+/*
  * DCache-side Compact CHI helpers: phase-1 pinned params, TX builders, RX decoders.
  */
 object DCacheCCHI {
@@ -170,5 +181,73 @@ object DCacheCCHI {
     def dirty(resp: UInt): Bool = CCHIResp.isPD(resp)
     def denied(respErr: UInt): Bool = respErr === "b11".U // NDERR
     def corrupt(respErr: UInt): Bool = respErr === "b10".U || respErr === "b11".U // DERR | NDERR
+  }
+}
+
+object ICacheCCHI {
+  object Params {
+    val srcId: UInt = L1CCHINodeId.ICacheSrcId
+    val tgtId: UInt = L1CCHINodeId.L2TgtId
+    val memAttr: UInt = DCacheCCHI.Params.memAttr
+    val size64: UInt = DCacheCCHI.Params.size64
+  }
+
+  object Tx {
+    def missReq(req: FlitREQ, txnId: UInt, addr: UInt, alias: UInt): Unit = {
+      req.TxnID := txnId
+      req.SrcID := Params.srcId
+      req.TgtID := Params.tgtId
+      req.Opcode := CCHIOpcode.ReadOnce.U
+      req.Size := Params.size64
+      req.Addr := addr(47, 0)
+      req.alias := alias(1, 0)
+      req.NS := false.B
+      req.Order := 0.U
+      req.MemAttr := Params.memAttr
+      req.Excl := false.B
+      req.ExpCompData := true.B
+      req.WayValid := false.B
+      req.Way := 0.U
+      req.TraceTag := 0.U(1.W)
+    }
+  }
+
+  object Rx {
+    def denied(respErr: UInt): Bool = DCacheCCHI.Rx.denied(respErr)
+    def corrupt(respErr: UInt): Bool = DCacheCCHI.Rx.corrupt(respErr)
+  }
+}
+
+object PtwCCHI {
+  object Params {
+    val srcId: UInt = L1CCHINodeId.PtwSrcId
+    val tgtId: UInt = L1CCHINodeId.L2TgtId
+    val memAttr: UInt = DCacheCCHI.Params.memAttr
+    val size64: UInt = DCacheCCHI.Params.size64
+  }
+
+  object Tx {
+    def readReq(req: FlitREQ, txnId: UInt, addr: UInt): Unit = {
+      req.TxnID := txnId
+      req.SrcID := Params.srcId
+      req.TgtID := Params.tgtId
+      req.Opcode := CCHIOpcode.ReadOnce.U
+      req.Size := Params.size64
+      req.Addr := addr(47, 0)
+      req.alias := 0.U(2.W)
+      req.NS := false.B
+      req.Order := 0.U
+      req.MemAttr := Params.memAttr
+      req.Excl := false.B
+      req.ExpCompData := true.B
+      req.WayValid := false.B
+      req.Way := 0.U
+      req.TraceTag := 0.U(1.W)
+    }
+  }
+
+  object Rx {
+    def denied(respErr: UInt): Bool = DCacheCCHI.Rx.denied(respErr)
+    def corrupt(respErr: UInt): Bool = DCacheCCHI.Rx.corrupt(respErr)
   }
 }

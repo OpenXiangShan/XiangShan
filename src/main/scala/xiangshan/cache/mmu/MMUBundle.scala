@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan._
+import xiangshan.cache.CCHIType4Port
 import utils._
 import utility._
 import xiangshan.backend.rob.RobPtr
@@ -1516,6 +1517,7 @@ class L2TLBIO(implicit p: Parameters) extends PtwBundle {
     val tlb = Input(new TlbCsrBundle)
     val distribute_csr = Flipped(new DistributedCSRIO)
   }
+  val cchi = new CCHIType4Port
 }
 
 class L2TlbMemReqBundle(implicit p: Parameters) extends PtwBundle {

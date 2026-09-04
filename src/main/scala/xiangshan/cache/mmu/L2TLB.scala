@@ -23,11 +23,11 @@ import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
 import xiangshan._
-import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
+import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants, PtwCCHI}
 import utils._
 import utility._
-import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
-import freechips.rocketchip.tilelink._
+import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
+import oceanus.compactchi.CCHIOpcode
 import xiangshan.backend.fu.{PMP, PMPChecker, PMPReqBundle, PMPRespBundle}
 import xiangshan.backend.fu.util.HasCSRConst
 import difftest._
@@ -35,20 +35,10 @@ import difftest._
 class L2TLB()(implicit p: Parameters) extends LazyModule with HasPtwConst {
   override def shouldBeInlined: Boolean = false
 
-  val node = TLClientNode(Seq(TLMasterPortParameters.v1(
-    clients = Seq(TLMasterParameters.v1(
-      "ptw",
-      sourceId = IdRange(0, MemReqWidth)
-    )),
-    requestFields = Seq(ReqSourceField())
-  )))
-
   lazy val module = new L2TLBImp(this)
 }
 
 class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) with HasCSRConst with HasPerfEvents {
-
-  val (mem, edge) = outer.node.out.head
 
   val io = IO(new L2TLBIO)
   val difftestIO = IO(new Bundle() {
@@ -509,7 +499,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
 
   if (HasMptCheck) {mem_arb.io.in(3) <> mptc.get.io.mem.req}
-  mem_arb.io.out.ready := mem.a.ready && !flush && !wfiReq
+  mem_arb.io.out.ready := io.cchi.txreq.ready && !flush && !wfiReq
 
   // // assert, should not send mem access at same addr for twice.
   // val last_resp_vpn = RegEnable(cache.io.refill.bits.req_info_dup(0).vpn, cache.io.refill.valid)
@@ -540,35 +530,69 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     hptw_bypassed := from_hptw(mem_arb.io.out.bits.id) && mem_arb.io.out.bits.hptw_bypassed ||
       (if (HasMptCheck) from_mptc(mem_arb.io.out.bits.id) else false.B)
   }
-  // mem read
-  val memRead =  edge.Get(
-    fromSource = mem_arb.io.out.bits.id,
-    // toAddress  = memAddr(log2Up(CacheLineSize / 2 / 8) - 1, 0),
-    toAddress  = blockBytes_align(mem_arb.io.out.bits.addr),
-    lgSize     = log2Up(l2tlbParams.blockBytes).U
-  )._2
-  mem.a.bits := memRead
-  mem.a.valid := mem_arb.io.out.valid && !flush && !wfiReq
-  mem.a.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.PTW.id.U)
-  mem.d.ready := true.B
-  // mem -> data buffer
-  val refill_data = RegInit(VecInit.fill(blockBits / l1BusDataWidth)(0.U(l1BusDataWidth.W)))
-  val refill_helper = edge.firstlastHelper(mem.d.bits, mem.d.fire)
-  val mem_resp_done = refill_helper._3
-  val mem_resp_from_llptw = from_llptw(mem.d.bits.source)
-  val mem_resp_from_ptw = from_ptw(mem.d.bits.source)
-  val mem_resp_from_hptw = from_hptw(mem.d.bits.source)
-  val mem_resp_from_bitmap = from_bitmap(mem.d.bits.source)
 
-  val mem_resp_from_mptc = from_mptc(mem.d.bits.source)
-
-  when (mem.d.valid) {
-    assert(mem.d.bits.source < MemReqWidth.U)
-    refill_data(refill_helper._4) := mem.d.bits.data
+  // CHI ReadOnce request
+  io.cchi.txreq.valid := mem_arb.io.out.valid && !flush && !wfiReq
+  when (io.cchi.txreq.fire) {
+    PtwCCHI.Tx.readReq(
+      io.cchi.txreq.bits,
+      txnId = mem_arb.io.out.bits.id,
+      addr = blockBytes_align(mem_arb.io.out.bits.addr)
+    )
   }
+
+  // CHI CompData collection (DataID 0/1 may arrive out of order)
+  private val refillCycles = blockBits / l1BusDataWidth
+  private val gotDataId0 = RegInit(false.B)
+  private val gotDataId1 = RegInit(false.B)
+  private val refillTxnId = Reg(UInt(bMemID.W))
+
+  val compDataValid =
+    io.cchi.rxdat.valid && CCHIOpcode.CompData.is(io.cchi.rxdat.bits.Opcode, io.cchi.rxdat.valid)
+  val compDataFire = io.cchi.rxdat.fire && compDataValid
+  val beatMatches =
+    (!gotDataId0 && !gotDataId1) || io.cchi.rxdat.bits.TxnID === refillTxnId
+
+  // mem -> data buffer
+  val refill_data = RegInit(VecInit.fill(refillCycles)(0.U(l1BusDataWidth.W)))
+
+  when (compDataFire && beatMatches) {
+    when (!gotDataId0 && !gotDataId1) {
+      refillTxnId := io.cchi.rxdat.bits.TxnID
+    }
+    when (io.cchi.rxdat.bits.DataID === 0.U) {
+      gotDataId0 := true.B
+      refill_data(0) := io.cchi.rxdat.bits.Data
+    }
+    when (io.cchi.rxdat.bits.DataID === 1.U) {
+      gotDataId1 := true.B
+      refill_data(1) := io.cchi.rxdat.bits.Data
+    }
+  }
+
+  val lastFire = compDataFire && beatMatches && (
+    (io.cchi.rxdat.bits.DataID === 0.U && gotDataId1) ||
+      (io.cchi.rxdat.bits.DataID === 1.U && gotDataId0)
+  )
+  io.cchi.rxdat.ready := true.B
+
+  when (lastFire) {
+    gotDataId0 := false.B
+    gotDataId1 := false.B
+  }
+
+  val mem_resp_done = lastFire
+  val mem_resp_from_llptw = from_llptw(refillTxnId)
+  val mem_resp_from_ptw = from_ptw(refillTxnId)
+  val mem_resp_from_hptw = from_hptw(refillTxnId)
+  val mem_resp_from_bitmap = from_bitmap(refillTxnId)
+  val mem_resp_from_mptc = from_mptc(refillTxnId)
+
   // refill_data_tmp is the wire fork of refill_data, but one cycle earlier
   val refill_data_tmp = WireInit(refill_data)
-  refill_data_tmp(refill_helper._4) := mem.d.bits.data
+  when (compDataFire && beatMatches) {
+    refill_data_tmp(io.cchi.rxdat.bits.DataID) := io.cchi.rxdat.bits.Data
+  }
 
   // save only one pte for each id
   // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
@@ -619,8 +643,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
       // mem -> bitmap
       Bitmap.io.mem.resp.valid := mem_resp_done && mem_resp_from_bitmap
-      Bitmap.io.mem.resp.bits.id := DataHoldBypass(mem.d.bits.source, mem.d.valid)
-      Bitmap.io.mem.resp.bits.value := DataHoldBypass(refill_data_tmp.asUInt, mem.d.valid)
+      Bitmap.io.mem.resp.bits.id := DataHoldBypass(refillTxnId, compDataFire && beatMatches)
+      Bitmap.io.mem.resp.bits.value := DataHoldBypass(refill_data_tmp.asUInt, compDataFire && beatMatches)
     }
 
     // ptwcache -> hptw llptw
@@ -630,8 +654,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   // mem -> llptw
   llptw_mem.resp.valid := mem_resp_done && mem_resp_from_llptw
-  llptw_mem.resp.bits.id := DataHoldBypass(mem.d.bits.source, mem.d.valid)
-  llptw_mem.resp.bits.value := DataHoldBypass(refill_data_tmp.asUInt, mem.d.valid)
+  llptw_mem.resp.bits.id := DataHoldBypass(refillTxnId, lastFire)
+  llptw_mem.resp.bits.value := DataHoldBypass(refill_data_tmp.asUInt, lastFire)
   // mem -> ptw
   ptw.io.mem.resp.valid := mem_resp_done && mem_resp_from_ptw
   ptw.io.mem.resp.bits := resp_pte.apply(l2tlbParams.llptwsize)
@@ -650,27 +674,27 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val refill_level = Mux(refill_from_llptw, 0.U, Mux(refill_from_ptw, RegEnable(ptw.io.refill.level, 0.U, ptw.io.mem.req.fire), RegEnable(hptw.io.refill.level, 0.U, hptw.io.mem.req.fire)))
   val refill_valid = mem_resp_done && (if (HasBitmapCheck) !mem_resp_from_bitmap else true.B) &&
     (if (HasMptCheck) !mem_resp_from_mptc else true.B) &&
-    !flush && !flush_latch(mem.d.bits.source) &&
-    !(from_hptw(mem.d.bits.source) && hptw_bypassed)
+    !flush && !flush_latch(refillTxnId) &&
+    !(from_hptw(refillTxnId) && hptw_bypassed)
 
   cache.io.refill.valid := GatedValidRegNext(refill_valid, false.B)
   cache.io.refill.bits.ptes := refill_data.asUInt
   cache.io.refill.bits.req_info_dup.map(_ := RegEnable(Mux(refill_from_llptw, llptw_mem.refill, Mux(refill_from_ptw, ptw.io.refill.req_info, hptw.io.refill.req_info)), refill_valid))
   cache.io.refill.bits.level_dup.map(_ := RegEnable(refill_level, refill_valid))
   cache.io.refill.bits.levelOH(refill_level, refill_valid)
-  cache.io.refill.bits.sel_pte_dup.map(_ := RegEnable(sel_data(refill_data_tmp.asUInt, req_addr_low(mem.d.bits.source)), refill_valid))
+  cache.io.refill.bits.sel_pte_dup.map(_ := RegEnable(sel_data(refill_data_tmp.asUInt, req_addr_low(refillTxnId)), refill_valid))
 
   if (env.EnableDifftest) {
     val difftest_ptw_addr = RegInit(VecInit(Seq.fill(MemReqWidth)(0.U(PAddrBits.W))))
-    when (mem.a.valid) {
-      difftest_ptw_addr(mem.a.bits.source) := mem.a.bits.address
+    when (io.cchi.txreq.fire) {
+      difftest_ptw_addr(io.cchi.txreq.bits.TxnID) := io.cchi.txreq.bits.Addr
     }
 
     val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
     difftest.coreid := io.hartId
     difftest.index := 2.U
     difftest.valid := cache.io.refill.valid
-    difftest.addr := difftest_ptw_addr(RegEnable(mem.d.bits.source, mem.d.valid))
+    difftest.addr := difftest_ptw_addr(RegEnable(refillTxnId, lastFire))
     difftest.data := refill_data.asTypeOf(difftest.data)
     difftest.mask := VecInit.fill(difftest.mask.getWidth)(true.B).asUInt
   }
@@ -863,8 +887,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // mem -> control signal
   // waiting_resp and sfence_latch will be reset when mem_resp_done
   when (mem_resp_done) {
-    waiting_resp(mem.d.bits.source) := false.B
-    flush_latch(mem.d.bits.source) := false.B
+    waiting_resp(refillTxnId) := false.B
+    flush_latch(refillTxnId) := false.B
   }
 
   def get_4kppn(ppn: UInt, vpn: UInt, level: UInt, n: Bool): UInt = {
@@ -1026,7 +1050,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     XSPerfAccumulate(s"mem_req_util${i}", PopCount(waiting_resp) === i.U)
   }
   XSPerfAccumulate("mem_cycle", PopCount(waiting_resp) =/= 0.U)
-  XSPerfAccumulate("mem_count", mem.a.fire)
+  XSPerfAccumulate("mem_count", io.cchi.txreq.fire)
   for (i <- 0 until PtwWidth) {
     XSPerfAccumulate(s"llptw_ppn_af${i}", mergeArb(i).in(outArbMqPort).valid && mergeArb(i).in(outArbMqPort).bits.s1.entry(OHToUInt(mergeArb(i).in(outArbMqPort).bits.s1.pteidx)).af && !llptw_out.bits.af)
     XSPerfAccumulate(s"access_fault${i}", io.tlb(i).resp.fire && io.tlb(i).resp.bits.s1.af)
@@ -1212,17 +1236,21 @@ class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
 class L2TLBWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
   override def shouldBeInlined: Boolean = false
   val useSoftPTW = coreParams.softPTW
-  val node = if (!useSoftPTW) TLIdentityNode() else null
   val ptw = if (!useSoftPTW) LazyModule(new L2TLB()) else null
-  if (!useSoftPTW) {
-    node := ptw.node
-  }
 
   class L2TLBWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasPerfEvents {
     val io = IO(new L2TLBIO)
     val perfEvents = if (useSoftPTW) {
       val fake_ptw = Module(new FakePTW())
-      io <> fake_ptw.io
+      fake_ptw.io.hartId := io.hartId
+      fake_ptw.io.sfence := io.sfence
+      fake_ptw.io.wfi <> io.wfi
+      fake_ptw.io.csr.tlb := io.csr.tlb
+      fake_ptw.io.csr.distribute_csr <> io.csr.distribute_csr
+      io.tlb <> fake_ptw.io.tlb
+      io.cchi.txreq.ready := true.B
+      io.cchi.rxdat.valid := false.B
+      io.cchi.rxdat.bits  := DontCare
       Seq()
     }
     else {
