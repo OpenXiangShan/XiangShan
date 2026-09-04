@@ -20,6 +20,7 @@ class basicTest extends tcnt_test_base ;
 
       function bit vseq_starts_l2tlb(input string vseq_name);
           return vseq_name == "memblock_dispatch_real_smoke_vseq" ||
+                 vseq_name == "memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq" ||
                  vseq_name == "memblock_dispatch_manual_control_vseq" ||
                  vseq_name == "memblock_dispatch_real_cancel_reconcile_vseq" ||
                  vseq_name == "memblock_l2tlb_pbmt_response_fault_vseq";
@@ -37,6 +38,7 @@ class basicTest extends tcnt_test_base ;
       // 否则旧 default sequence 会在同一个 sequencer 上插入随机 CSR 或 SFence。
       function bit vseq_owns_static_mmu_csr(input string vseq_name);
           return (vseq_name == "memblock_dispatch_real_smoke_vseq" ||
+                  vseq_name == "memblock_dispatch_real_mmu_sv39_pbmt0_non_nc_vseq" ||
                   vseq_name == "memblock_l2tlb_pbmt_response_fault_vseq") &&
                  !memblock_sync_pkg::uses_control_barrier_topology();
       endfunction:vseq_owns_static_mmu_csr
