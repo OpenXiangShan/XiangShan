@@ -31,6 +31,7 @@ import utility.HasPerfEvents
 import utility.RegNextWithEnable
 import utils.AddrField
 import xiangshan.L1CacheErrorInfo
+import xiangshan.cache.CCHIType4Port
 import xiangshan.WfiReqBundle
 import xiangshan.cache.mmu.TlbRequestIO
 import xiangshan.frontend.FtqToICacheIO

@@ -64,7 +64,7 @@ import xiangshan.cache.mmu.VectorTlbPtwIO
 import xiangshan.frontend.bpu.Bpu
 import xiangshan.frontend.ftq.Ftq
 import xiangshan.frontend.ibuffer.IBuffer
-import xiangshan.frontend.icache.CCHIType4Port
+import xiangshan.cache.CCHIType4Port
 import xiangshan.frontend.icache.ICache
 import xiangshan.frontend.ifu.Ifu
 import xiangshan.frontend.instruncache.InstrUncache
