@@ -12,7 +12,7 @@ import chisel3._
 object L1CCHINodeId {
   val DCacheSrcId: UInt = 0.U
   val ICacheSrcId: UInt = 1.U
-  // val PtwSrcId: UInt = 2.U // reserved for PTW Type 4
+  val PtwSrcId: UInt = 2.U
 
   val L2TgtId: UInt = 0.U
 }

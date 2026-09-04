@@ -60,10 +60,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // =========== Components' Connection ============
   // L1D cacheable path uses Compact CHI (see DCache.io.cchi); no TileLink clientNode.
   // L1I cacheable path uses Compact CHI Type 4 (see MemBlock.io.icache_cchi); not connected to L2 yet.
-
-  if (!coreParams.softPTW) {
-    l2top.inner.misc_l2_pmu := l2top.inner.ptw_logger := l2top.inner.ptw_to_l2_buffer.node := memBlock.ptw_to_l2_buffer.node
-  }
+  // PTW page-table refill uses Compact CHI Type 4 (see MemBlock.io.ptw_cchi); not connected to L2 yet.
 
   // L2 Prefetch
   l2top.inner.l2cache match {
