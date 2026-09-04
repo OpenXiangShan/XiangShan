@@ -326,6 +326,7 @@ class RobExceptionInfo(exceptList: Seq[Int]=ExceptionNO.all)(implicit p: Paramet
   val robIdx = new RobPtr
   val ftqPtr = new FtqPtr
   val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+  val isRVC = Bool()
   // set 1 if there is 1 exists in exceptionVec
   val hasException = Bool()
   // This signal is valid iff currentValid is true

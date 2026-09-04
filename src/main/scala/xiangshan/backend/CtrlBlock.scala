@@ -452,6 +452,7 @@ class CtrlBlockImp(
     gpaMem.io.exceptionReadAddr.valid := rob.io.readGPAMemAddr.valid
     gpaMem.io.exceptionReadAddr.bits.ftqPtr := rob.io.readGPAMemAddr.bits.ftqPtr
     gpaMem.io.exceptionReadAddr.bits.ftqOffset := rob.io.readGPAMemAddr.bits.ftqOffset
+    gpaMem.io.exceptionReadAddr.bits.isRVC := rob.io.readGPAMemAddr.bits.isRVC
   }
 
   // vtype commit
