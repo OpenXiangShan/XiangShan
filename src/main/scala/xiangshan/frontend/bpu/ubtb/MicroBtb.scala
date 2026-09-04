@@ -123,62 +123,33 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val t0_target      = getEntryTarget(t0_fullTarget)
   private val t0_targetCarry = if (EnableTargetFix) Option(getTargetCarry(t0_startPc, t0_fullTarget)) else None
 
-  private val t0_hitOH = VecInit(entries.map(e => e.valid && e.tag === t0_tag)).asUInt
-  // t0 may hit t1, so we add a "real" prefix for entries hit
-  private val t0_realHit    = t0_hitOH.orR
-  private val t0_realHitIdx = OHToUInt(t0_hitOH)
-
-  // If there are two contiguous trains, the first one is too late to be written to the entries,
-  // the second train might be a false "not hit" and allocate a new entry, causing a multi-hit;
-  // or, the first may replace the entry, causing a false "hit" in the second train, causing wrong update.
-  // So, we define some of the t1 signals in advance, and use them to check if the contiguous trains are hit.
-  private val t1_tag          = Wire(UInt(TagWidth.W))
-  private val t1_updateIdx    = Wire(UInt(log2Up(NumEntries).W))
-  private val t1_hitEntry     = Wire(new MicroBtbEntry)
-  private val t1_updatedEntry = WireDefault(t1_hitEntry) // will be updated in t1, then write back to entries
-
-  // if t0_tag === t1_tag, t1 must be updating the entry, so we can see it as a hit, and use t1_updateIdx as hitIdx
-  private val t0_hitT1Update = Wire(Bool())
-  // if t0 hits but t1 is replacing it, we should see it as not hit
-  private val t0_hitT1Victim = t1_fire && t0_realHitIdx === replacer.io.victim && t1_allocate
-
-  // fix final hit
-  private val t0_hit = t0_realHit && !t0_hitT1Victim || t0_hitT1Update
-  // select hit entry: use t1_updatedEntry if t0_hitT1Update, otherwise use real hit entry
-  private val t0_hitIdx   = Mux(t0_hitT1Update, t1_updateIdx, t0_realHitIdx)
-  private val t0_hitEntry = Mux(t0_hitT1Update, t1_updatedEntry, Mux1H(t0_hitOH, entries))
-
-  // calculate hit flags, valid only when t0_hit
-  private val t0_hitNotUseful     = t0_hitEntry.usefulCnt.isSaturateNegative
-  private val t0_hitPositionSame  = t0_hitEntry.slot1.position === t0_position
-  private val t0_hitAttributeSame = t0_hitEntry.slot1.attribute === t0_attribute
-  private val t0_hitTargetSame    = t0_hitEntry.slot1.target === t0_target
-
   /* *** train stage 1 ***
+   * - read entries & if hits entries
    * - select victim
    * - generate updated entry
    * - update entries
    * - update replacer
    */
   t1_fire := RegNext(t0_fire, false.B)
-  t1_tag  := RegEnable(t0_tag, t0_fire)
+  private val t1_tag         = RegEnable(t0_tag, t0_fire)
   private val t1_actualTaken = RegEnable(t0_actualTaken, t0_fire)
   private val t1_position    = RegEnable(t0_position, t0_fire)
   private val t1_target      = RegEnable(t0_target, t0_fire)
   private val t1_attribute   = RegEnable(t0_attribute, t0_fire)
   private val t1_targetCarry = t0_targetCarry.map(w => RegEnable(w, t0_fire)) // if (EnableTargetFix)
 
-  private val t1_hit    = RegEnable(t0_hit, t0_fire)
-  private val t1_hitIdx = RegEnable(t0_hitIdx, t0_fire)
-  t1_hitEntry := RegEnable(t0_hitEntry, t0_fire)
+  private val t1_hitOH    = VecInit(entries.map(e => e.valid && e.tag === t1_tag)).asUInt
+  private val t1_hit      = t1_hitOH.orR
+  private val t1_hitIdx   = OHToUInt(t1_hitOH)
+  private val t1_hitEntry = Mux1H(t1_hitOH, entries)
+
+  private val t1_updatedEntry = WireDefault(t1_hitEntry)
 
   // hit states (flags), valid only when t1_hit
-  private val t1_hitNotUseful     = RegEnable(t0_hitNotUseful, t0_fire)
-  private val t1_hitPositionSame  = RegEnable(t0_hitPositionSame, t0_fire)
-  private val t1_hitAttributeSame = RegEnable(t0_hitAttributeSame, t0_fire)
-  private val t1_hitTargetSame    = RegEnable(t0_hitTargetSame, t0_fire)
-  // only when t1 is updating/allocating can t0 hit it
-  t0_hitT1Update := t1_fire && t0_tag === t1_tag && (t1_hit || t1_allocate)
+  private val t1_hitNotUseful     = t1_hitEntry.usefulCnt.isSaturateNegative
+  private val t1_hitPositionSame  = t1_hitEntry.slot1.position === t1_position
+  private val t1_hitAttributeSame = t1_hitEntry.slot1.attribute === t1_attribute
+  private val t1_hitTargetSame    = t1_hitEntry.slot1.target === t1_target
   // init a new entry
   private def initEntryIfNotUseful(notUseful: Bool): Unit =
     when(notUseful) {
@@ -217,8 +188,8 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   }
 
   // select the entry: if hit, use the hit entry, otherwise use the victim from replacer (first not useful, or Plru)
-  t1_allocate  := !t1_hit && t1_actualTaken
-  t1_updateIdx := Mux(t1_hit, t1_hitIdx, replacer.io.victim)
+  t1_allocate := !t1_hit && t1_actualTaken
+  private val t1_updateIdx = Mux(t1_hit, t1_hitIdx, replacer.io.victim)
   // and write back the updated entry
   when(t1_fire && (t1_hit || t1_allocate)) { // update entry if hit, or alloc entry only for taken branches
     entries(t1_updateIdx) := t1_updatedEntry
@@ -239,9 +210,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   XSPerfAccumulate("s1InvalidatedEntries", t1_fire && t1_hit && !t1_actualTaken && t1_hitNotUseful)
 
-  XSPerfAccumulate("trainHitEntries", t0_fire && t0_realHit)
-  XSPerfAccumulate("trainHitT1Update", t0_fire && t0_hitT1Update)
-  XSPerfAccumulate("trainHitT1Victim", t0_fire && t0_hitT1Victim)
+  XSPerfAccumulate("trainHitEntries", t1_fire && t1_hit)
 
   XSPerfAccumulate("allocateNotUseful", t1_fire && t1_allocate && replacer.io.perf.replaceNotUseful)
   XSPerfAccumulate("allocatePlru", t1_fire && t1_allocate && !replacer.io.perf.replaceNotUseful)
