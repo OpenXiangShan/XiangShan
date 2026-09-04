@@ -507,6 +507,19 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.prf_i         := false.B
     out.sched_idx     := 0.U
     out.vecActive     := true.B
+    // MMIO is accepted in S0 and then delayed directly to the common writeback
+    // port. Keep its externally generated error bits explicit for the source
+    // adapter as well; the normal S1/S2 TLB path is not used for this source.
+    out.uop.exceptionVec(loadAddrMisaligned) :=
+      src.uop.exceptionVec(loadAddrMisaligned)
+    out.uop.exceptionVec(loadAccessFault) :=
+      src.uop.exceptionVec(loadAccessFault)
+    out.uop.exceptionVec(loadPageFault) :=
+      src.uop.exceptionVec(loadPageFault)
+    out.uop.exceptionVec(loadGuestPageFault) :=
+      src.uop.exceptionVec(loadGuestPageFault)
+    out.uop.exceptionVec(hardwareError) :=
+      src.uop.exceptionVec(hardwareError)
     out
   }
 
@@ -523,6 +536,18 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out.vecActive := src.vecActive
     out.isnc := true.B
     out.data := src.data
+    // NC responses carry architectural error bits from the external
+    // TileLink response and must retain them across this adapter.
+    out.uop.exceptionVec(loadAddrMisaligned) :=
+      src.uop.exceptionVec(loadAddrMisaligned)
+    out.uop.exceptionVec(loadAccessFault) :=
+      src.uop.exceptionVec(loadAccessFault)
+    out.uop.exceptionVec(loadPageFault) :=
+      src.uop.exceptionVec(loadPageFault)
+    out.uop.exceptionVec(loadGuestPageFault) :=
+      src.uop.exceptionVec(loadGuestPageFault)
+    out.uop.exceptionVec(hardwareError) :=
+      src.uop.exceptionVec(hardwareError)
     out
   }
 
@@ -1026,9 +1051,19 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // current ori test will cause the case of ldest == 0, below will be modifeid in the future.
     // af & pf exception were modified
     // if is tlbNoQuery request, don't trigger exception from tlb resp
-    s1_out.uop.exceptionVec(loadPageFault)   := io.tlb.resp.bits.excp(0).pf.ld && s1_vecActive && !s1_tlb_miss && !s1_in.tlbNoQuery
-    s1_out.uop.exceptionVec(loadGuestPageFault)   := io.tlb.resp.bits.excp(0).gpf.ld && !s1_tlb_miss && !s1_in.tlbNoQuery
-    s1_out.uop.exceptionVec(loadAccessFault) := io.tlb.resp.bits.excp(0).af.ld && s1_vecActive && !s1_tlb_miss && !s1_in.tlbNoQuery
+    // Preserve an exception already attached by an NC response. NC enters the
+    // ordinary S1/S2 flow but intentionally does not query the TLB; assigning
+    // only its response would erase Uncache denied/corrupt errors before
+    // writeback. MMIO is a separate S0-to-three-cycle path below.
+    s1_out.uop.exceptionVec(loadPageFault) :=
+      s1_in.uop.exceptionVec(loadPageFault) ||
+        (io.tlb.resp.bits.excp(0).pf.ld && s1_vecActive && !s1_tlb_miss && !s1_in.tlbNoQuery)
+    s1_out.uop.exceptionVec(loadGuestPageFault) :=
+      s1_in.uop.exceptionVec(loadGuestPageFault) ||
+        (io.tlb.resp.bits.excp(0).gpf.ld && !s1_tlb_miss && !s1_in.tlbNoQuery)
+    s1_out.uop.exceptionVec(loadAccessFault) :=
+      s1_in.uop.exceptionVec(loadAccessFault) ||
+        (io.tlb.resp.bits.excp(0).af.ld && s1_vecActive && !s1_tlb_miss && !s1_in.tlbNoQuery)
     when (RegNext(io.tlb.req.bits.checkfullva) &&
       (s1_out.uop.exceptionVec(loadPageFault) ||
         s1_out.uop.exceptionVec(loadGuestPageFault) ||
