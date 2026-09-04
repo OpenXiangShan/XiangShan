@@ -16,7 +16,18 @@
 class memblock_mmu_sv39_csr_sequence extends uvm_sequence #(csr_ctrl_agent_agent_xaction);
 
     localparam bit [3:0] MEMBLOCK_SATP_MODE_SV39 = 4'd8;
+    localparam bit [3:0] MEMBLOCK_SATP_MODE_BARE = 4'd0;
     localparam bit [1:0] MEMBLOCK_PRIV_MODE_U = 2'd0;
+    // 中文注释：U 态 reset 后 PMP 默认全 OFF。静态 Sv39 场景先建立一个覆盖
+    // 低端物理内存的 TOR/RWX entry，再发布 Sv39，保证首笔 translated access
+    // 不会被 reset PMP deny 掩盖。
+    localparam bit [11:0] MEMBLOCK_PMPADDR0_CSR_ADDR = 12'h3b0;
+    localparam bit [11:0] MEMBLOCK_PMPCFG0_CSR_ADDR  = 12'h3a0;
+    localparam bit [63:0] MEMBLOCK_PMPADDR0_TOR_TOP  =
+        64'h0000_3fff_ffff_ffff;
+    localparam bit [63:0] MEMBLOCK_PMPCFG0_TOR_RWX   =
+        64'h0000_0000_0000_000f;
+    localparam int unsigned MEMBLOCK_PMP_SETTLE_ITEMS = 64;
 
     common_data_transaction data;
 
@@ -184,9 +195,33 @@ function void memblock_mmu_sv39_csr_sequence::configure_static_sv39_xaction(
     tr.io_ooo_to_mem_csrCtrl_power_down_enable = 1'b0;
     tr.io_ooo_to_mem_csrCtrl_flush_l2_enable = 1'b0;
 
-    tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_valid = 1'b0;
-    tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_addr = '0;
-    tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_data = '0;
+    // 中文注释：两个 generic CSR write 经过 NewCSR/PMP 流水线后，才让
+    // real-smoke 的 Sv39 mirror barrier 放行 issue/L2TLB。期间维持 Bare，
+    // 但仍持续驱动完整的 U 态 CSR baseline。
+    if (item_index < (2 + MEMBLOCK_PMP_SETTLE_ITEMS)) begin
+        tr.io_ooo_to_mem_tlbCsr_satp_mode = MEMBLOCK_SATP_MODE_BARE;
+    end
+    case (item_index)
+        0: begin
+            tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_valid = 1'b1;
+            tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_addr =
+                MEMBLOCK_PMPADDR0_CSR_ADDR;
+            tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_data =
+                MEMBLOCK_PMPADDR0_TOR_TOP;
+        end
+        1: begin
+            tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_valid = 1'b1;
+            tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_addr =
+                MEMBLOCK_PMPCFG0_CSR_ADDR;
+            tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_data =
+                MEMBLOCK_PMPCFG0_TOR_RWX;
+        end
+        default: begin
+            tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_valid = 1'b0;
+            tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_addr = '0;
+            tr.io_ooo_to_mem_csrCtrl_distribute_csr_w_bits_data = '0;
+        end
+    endcase
     tr.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_valid = 1'b0;
     tr.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_addr = '0;
     tr.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_matchType = '0;
