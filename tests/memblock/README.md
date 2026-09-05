@@ -237,11 +237,11 @@ non-aligned Sv39 2 MiB leaf. It checks stage-specific page-fault versus
 guest-page-fault bits, the first failing walk level, and the independently
 predicted faulting GPA.
 
-`translation-permissions` executes read-only and execute-only mappings at both
-stage-1 and G-stage. It checks successful reads from read-only pages and
-stage-specific page faults for data reads from execute-only pages. Store
-permission faults remain outside the independently observable scalar-store
-address writeback boundary.
+`translation-permissions` executes 36 independent cases. Its table-driven
+oracle covers Sv39/Sv48 U/S access, SUM, MXR, missing A/D, VS-stage VSUM/VMXR,
+and G-stage MXR/A behavior for scalar loads and stores. Passing stores require
+exact post-commit readback; faulting stores must not reach DCache or Uncache
+and must balance through explicit SQ cancellation.
 
 `fp-loads` exercises the separate FP destination-enable path for 32-bit and
 64-bit load widths. The scoreboard requires no integer-register write and an

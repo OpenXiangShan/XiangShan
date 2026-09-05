@@ -145,11 +145,12 @@ GPAs above their architectural limits, and a malformed Sv39 2 MiB leaf with a
 misaligned physical base. The expected stage-specific page-fault or
 guest-page-fault contract was observed.
 
-`make translation-permissions` passed the executable permission cases: read-only
-Sv39 and G-stage pages were readable, while execute-only Sv39 and G-stage pages
-produced the expected stage-specific load page fault. A read-only Sv39 scalar
-store produced `StorePageFault`, issued no DCache/Uncache request, and was
-explicitly accounted as an SQ cancellation.
+`make translation-permissions` passed 36 fresh-environment permission cases:
+16 stage-1 loads, 11 stage-1 stores, and nine two-stage loads. The independent
+truth table covered Sv39/Sv48 U/S pages, SUM, MXR, missing A/D, VSUM/VMXR, and
+G-stage MXR/A selection. Passing stores committed and matched exact scalar
+readback; faulting stores reported `StorePageFault`, issued no DCache/Uncache
+request, and balanced the SQ through explicit cancellation.
 
 `make fp-loads` passed cacheable 32-bit and 64-bit FP destination transactions.
 The 32-bit result was checked as a NaN-boxed 64-bit value, with integer RF
@@ -200,7 +201,7 @@ parameters and verifies the independent Sv39x4 GPA oracle.
 
 Latest focused correction evidence:
 
-- 103 Python unit tests and the complete port/SVA/filelist checks pass;
+- 104 Python unit tests and the complete port/SVA/filelist checks pass;
 - the common constrained-random interface passed an override run whose tail
   enabled only scalar loads (`seed=29`, 256 actions): actual constrained
   operations were `155,0,0,0,0,0,0,0`, and all 155 locality selections used

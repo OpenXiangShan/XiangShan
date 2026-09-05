@@ -509,6 +509,51 @@ enum class ReferencePageMode : std::uint8_t {
     sv48 = 9,
 };
 
+enum class ReferencePrivilegeMode : std::uint8_t {
+    user = 0,
+    supervisor = 1,
+};
+
+struct ReferencePtePermissions {
+    bool readable = true;
+    bool writable = true;
+    bool executable = false;
+    bool user = false;
+    bool accessed = true;
+    bool dirty = true;
+};
+
+inline bool reference_load_permitted(
+    const ReferencePtePermissions &permissions,
+    ReferencePrivilegeMode privilege,
+    bool sum,
+    bool mxr,
+    bool guest_stage = false)
+{
+    const bool mode_permitted = guest_stage
+        ? permissions.user
+        : privilege == ReferencePrivilegeMode::user
+            ? permissions.user
+            : !permissions.user || sum;
+    return mode_permitted && permissions.accessed &&
+           (permissions.readable || (mxr && permissions.executable));
+}
+
+inline bool reference_store_permitted(
+    const ReferencePtePermissions &permissions,
+    ReferencePrivilegeMode privilege,
+    bool sum,
+    bool guest_stage = false)
+{
+    const bool mode_permitted = guest_stage
+        ? permissions.user
+        : privilege == ReferencePrivilegeMode::user
+            ? permissions.user
+            : !permissions.user || sum;
+    return mode_permitted && permissions.accessed && permissions.dirty &&
+           permissions.writable;
+}
+
 inline unsigned reference_page_levels(ReferencePageMode mode)
 {
     if (mode == ReferencePageMode::bare) {
@@ -2929,12 +2974,14 @@ public:
         bool writable = true,
         bool executable = false,
         bool user = false,
-        bool noncacheable = false)
+        bool noncacheable = false,
+        bool accessed = true,
+        std::optional<bool> dirty = std::nullopt)
     {
         return map_reference_leaf(
             virtual_address, physical_address, root_page_table,
             ReferencePageMode::sv39, false, leaf_level, readable, writable,
-            executable, user, noncacheable);
+            executable, user, noncacheable, accessed, dirty);
     }
 
     bool map_sv39_2m(
@@ -2976,12 +3023,14 @@ public:
         bool writable = true,
         bool executable = false,
         bool user = false,
-        bool noncacheable = false)
+        bool noncacheable = false,
+        bool accessed = true,
+        std::optional<bool> dirty = std::nullopt)
     {
         return map_reference_leaf(
             virtual_address, physical_address, root_page_table,
             ReferencePageMode::sv48, false, leaf_level, readable, writable,
-            executable, user, noncacheable);
+            executable, user, noncacheable, accessed, dirty);
     }
 
     bool map_sv48_2m(
@@ -3115,12 +3164,15 @@ public:
         std::uint64_t root_page_table = 0x95000000ULL,
         bool readable = true,
         bool writable = true,
-        bool executable = false)
+        bool executable = false,
+        bool accessed = true,
+        std::optional<bool> dirty = std::nullopt,
+        bool user = true)
     {
         return map_reference_leaf(
             guest_physical_address, host_physical_address, root_page_table,
             ReferencePageMode::sv48, true, leaf_level, readable, writable,
-            executable, true, false);
+            executable, user, false, accessed, dirty);
     }
 
     bool map_sv48x4_2m(
@@ -3174,7 +3226,9 @@ private:
         bool writable,
         bool executable,
         bool user,
-        bool noncacheable)
+        bool noncacheable,
+        bool accessed = true,
+        std::optional<bool> dirty = std::nullopt)
     {
         constexpr std::uint64_t page_mask = 0xfff;
         constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
@@ -3250,8 +3304,9 @@ private:
             (readable ? pte_read : 0) |
             (writable ? pte_write : 0) |
             (executable ? pte_execute : 0) |
-            ((user || x4) ? pte_user : 0) |
-            pte_accessed | (writable ? pte_dirty : 0) |
+            (user ? pte_user : 0) |
+            (accessed ? pte_accessed : 0) |
+            (dirty.value_or(writable) ? pte_dirty : 0) |
             (noncacheable ? pte_pbmt_nc : 0);
         memory_.write_u64(
             table + leaf_index * 8,
@@ -3357,12 +3412,15 @@ public:
         std::uint64_t root_page_table = 0x95000000ULL,
         bool readable = true,
         bool writable = true,
-        bool executable = false)
+        bool executable = false,
+        bool accessed = true,
+        std::optional<bool> dirty = std::nullopt,
+        bool user = true)
     {
         return map_reference_leaf(
             guest_physical_address, host_physical_address, root_page_table,
             ReferencePageMode::sv39, true, leaf_level, readable, writable,
-            executable, true, false);
+            executable, user, false, accessed, dirty);
     }
 
     bool map_sv39x4_2m(
@@ -3436,6 +3494,24 @@ public:
         dut_.io_ooo_to_mem_tlbCsr_vsatp_changed.ImmSet(std::uint64_t{0});
         dut_.io_ooo_to_mem_tlbCsr_hgatp_changed.ImmSet(std::uint64_t{0});
         dut_.io_ooo_to_mem_tlbCsr_priv_virt_changed.ImmSet(std::uint64_t{0});
+        return run_cycles(16) && check_components();
+    }
+
+    bool set_translation_permissions(
+        ReferencePrivilegeMode data_privilege,
+        bool mxr = false,
+        bool sum = false,
+        bool vmxr = false,
+        bool vsum = false)
+    {
+        dut_.io_ooo_to_mem_tlbCsr_priv_dmode.ImmSet(
+            static_cast<std::uint64_t>(data_privilege));
+        dut_.io_ooo_to_mem_tlbCsr_priv_mxr.ImmSet(mxr);
+        dut_.io_ooo_to_mem_tlbCsr_priv_sum.ImmSet(sum);
+        dut_.io_ooo_to_mem_tlbCsr_priv_vmxr.ImmSet(vmxr);
+        dut_.io_ooo_to_mem_tlbCsr_priv_vsum.ImmSet(vsum);
+        // TlbCsrBundle is registered and duplicated before it reaches every
+        // DTLB port. Let all copies settle before issuing the first request.
         return run_cycles(16) && check_components();
     }
 

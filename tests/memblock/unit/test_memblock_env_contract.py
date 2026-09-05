@@ -409,6 +409,37 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("kExceptionStorePageFault", main)
         self.assertIn("account_sq_cancellation(1)", main)
 
+    def test_translation_permission_matrix_uses_top_level_csr_controls(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "ReferencePtePermissions",
+            "reference_load_permitted",
+            "reference_store_permitted",
+            "set_translation_permissions",
+            "io_ooo_to_mem_tlbCsr_priv_dmode",
+            "io_ooo_to_mem_tlbCsr_priv_mxr",
+            "io_ooo_to_mem_tlbCsr_priv_sum",
+            "io_ooo_to_mem_tlbCsr_priv_vmxr",
+            "io_ooo_to_mem_tlbCsr_priv_vsum",
+        ):
+            self.assertIn(contract, environment)
+        for contract in (
+            "std::array<StageOneLoadCase, 14>",
+            "std::array<StageOneStoreCase, 10>",
+            "std::array<TwoStageLoadCase, 8>",
+            "sv39-s-user-sum0",
+            "sv48-xonly-mxr1",
+            "sv39-store-dirty0",
+            "sv48-store-accessed0",
+            "vs-xonly-vmxr1",
+            "g-accessed0",
+            "stage1_load_cases=",
+            "stage1_store_cases=",
+            "two_stage_load_cases=",
+        ):
+            self.assertIn(contract, main)
+
     def test_stress_driver_requires_real_burst_overlap_and_combo_gates(self) -> None:
         driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
         for contract in (
