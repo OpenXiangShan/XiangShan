@@ -263,6 +263,13 @@ Latest focused correction evidence:
   stopped diagnostic artifact contains 114,688 passing actions and remains at
   `build/memblock/spec-interface-1h-16384.json`, SHA-256
   `f660ae1aab340b7df124ea4caf1bb6108449036ebebaee4118fcce12d5605e71`;
+- the corrected frozen runtime then completed the replacement one-hour `spec`
+  campaign: continuous seeds 1-125 all passed, totaling 2,048,000 actions in
+  3,817.717522 seconds. The independent artifact verifier accepted every
+  command, coverage gate, queue count, controller input, runtime dependency,
+  and RTL hash. Artifact:
+  `build/memblock/spec-interface-fixed-1h-16384.json`, SHA-256
+  `a6aba912e56c3ad8e7cf00f6c6d9cb53f0778d7acba8c32c12cc0189a71b10c4`;
 - the common constrained-random interface passed an override run whose tail
   enabled only scalar loads (`seed=29`, 256 actions): actual constrained
   operations were `155,0,0,0,0,0,0,0`, and all 155 locality selections used
