@@ -133,6 +133,14 @@ misalignment, vector corner bias, and response latency. The complete interface
 and performance-counter calibration are specified in
 [`CONSTRAINED_RANDOM.md`](CONSTRAINED_RANDOM.md).
 
+Constraint-interface closure is tracked separately from architectural prefix
+coverage. The current interface still has hard-coded atomic subtypes, NC/MMIO
+load/store ratios, a five-class-only overlap window, fixed tail translation
+state, and one shared manager-latency profile. These choices must become
+validated, replayable fields with observed coverage counters on the same
+`random-mixed` generator. They must not become separately maintained random
+scenarios.
+
 Every result records both resolved targets and observed counts. Each nonzero
 operation/locality weight is a per-seed coverage obligation; nonzero TLB-flush
 and `spec` latency constraints similarly require observed events. This prevents

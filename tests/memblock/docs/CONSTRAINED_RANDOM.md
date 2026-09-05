@@ -64,6 +64,43 @@ values, and unknown latency profiles fail before simulation traffic begins.
 `random-mixed` requires at least 256 actions so the mandatory architectural
 prefix, four overlap windows, and each enabled constrained class can coexist.
 
+## Constraint Extension Contract
+
+The interface is the verification abstraction, not only a command-line
+convenience. A new workload direction must be expressible as a set of fields on
+`RandomConstraints` and must continue to use the same transaction builders,
+scheduler, reference model, scoreboards, and final drain. Presets only assign
+defaults to those fields. They must not add hidden phases or select another
+scenario implementation.
+
+For every new field, the generator must also provide all of the following:
+
+- strict value/range validation before any request is issued;
+- the resolved target in the replayable terminal summary and regression
+  artifact;
+- an observed counter that distinguishes the generated class from neighboring
+  classes;
+- a per-seed coverage obligation whenever the field enables a class;
+- deterministic replay from the seed and complete constraint assignment.
+
+An audit of the current tail found several remaining hard-coded choices. These
+are interface gaps, not reasons to create more tests:
+
+| Dimension | Current hard-coded behavior | Required common-interface extension |
+| --- | --- | --- |
+| Concurrent operation mix | Overlap windows always contain scalar load/store, vector load/store, and prefetch; atomic, NC, and MMIO tail operations drain serially | Let the operation weights populate legal rolling windows, with dependency-aware eligibility for every enabled class |
+| Atomic subtype | The random tail selects nine D-width AMOs uniformly | Add weights for W/D AMO, LR/SC, and AMOCAS families, while retaining legal reservation and compare dependencies |
+| NC/MMIO direction | NC is fixed to 25% stores; MMIO is load-only | Add load/store mix constraints for both memory types and count each direction separately |
+| Translation state | The mandatory prefix covers the mode matrix, but tail translation reuse/miss behavior is mostly fixed and `tlb-flush` is the only knob | Add Bare/Sv39/Sv48 and VS/G-stage mode weights plus translated-access, cold-walk/reuse, and legal fence rates |
+| Response latency | One `latency` value controls DCache, PTW, and Uncache together | Allow independent manager profiles and keep the existing common value as a shorthand |
+| Error injection | Errors are confined to focused deterministic contracts | Add a normally-zero or very-low random error rate with independently checked denied/corrupt outcomes; realistic presets must keep this rare |
+
+Until these dimensions are implemented, `coverage`, `spec`, and `corner` are
+different settings of the same generator, but they cannot yet steer every
+meaningful MemBlock dimension. Closing the table means lifting each choice into
+the common interface and its coverage contract, not adding `random-spec`,
+`random-corner`, or feature-specific random scenario functions.
+
 ## Shipped Presets
 
 Operation columns are relative weights. Locality is `hot/warm/cold`; the next
