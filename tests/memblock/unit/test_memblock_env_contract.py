@@ -296,6 +296,15 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, main)
 
+        for contract in (
+            "kExceptionStorePageFault",
+            "kExceptionStoreGuestPageFault",
+            "stage1_store_pte_encoding_cases=",
+            "gstage_store_pte_encoding_cases=",
+            "faulting store reached memory or unbalanced SQ",
+        ):
+            self.assertIn(contract, main)
+
     def test_mixed_commit_boundary_does_not_auto_commit_next_rob(self) -> None:
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
         self.assertIn("rob_offset - 1", main)

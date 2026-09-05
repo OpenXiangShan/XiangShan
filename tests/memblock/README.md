@@ -250,12 +250,14 @@ that no stale page-table walk is required.
 
 `translation-faults` executes a noncanonical Sv48 VA, Sv39x4 and Sv48x4 GPAs
 above their architectural limits, a malformed non-aligned Sv39 2 MiB leaf, and
-52 fresh-environment PTE encoding faults split evenly across Sv39/Sv48 stage-1
-and Sv39x4/Sv48x4 G-stage. The shared encoding table crosses V/W/R, both ends
-of reserved bits 60:54, PBMT=3, disabled PBMTE, exhausted L0, illegal non-leaf
-U/A/D/PBMT/N fields, and an invalid NAPOT encoding. It checks the independent
-walk's failing PTE/level, exact stage-specific exception and fault VA/GPA, and
-that no faulting data request reaches DCache or Uncache.
+52 PTE encoding faults split evenly across Sv39/Sv48 stage-1 and
+Sv39x4/Sv48x4 G-stage. Every encoding is exercised by both a scalar load and a
+scalar store, for 109 architectural fault transactions in total. The shared
+encoding table crosses V/W/R, both ends of reserved bits 60:54, PBMT=3,
+disabled PBMTE, exhausted L0, illegal non-leaf U/A/D/PBMT/N fields, and an
+invalid NAPOT encoding. It checks the independent walk's failing PTE/level,
+exact access- and stage-specific exception, load fault VA/GPA, zero faulting
+DCache/Uncache data requests, and store SQ conservation.
 
 `translation-permissions` executes 36 independent cases. Its table-driven
 oracle covers Sv39/Sv48 U/S access, SUM, MXR, missing A/D, VS-stage VSUM/VMXR,

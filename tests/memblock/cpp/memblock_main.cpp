@@ -6181,6 +6181,49 @@ int run_translation_faults(int argc, char **argv)
                       << "-bypass reason=fault issued a data-manager request\n";
             return 1;
         }
+
+        const std::uint64_t store_dcache_before =
+            environment.tilelink_requests();
+        const std::uint64_t store_uncache_before =
+            environment.uncache_requests();
+        const memblock::StoreTransaction store{
+            .address = virtual_address + 0x188,
+            .data = 0x1020304050607080ULL + index,
+            .op = memblock::StoreOp::sd,
+            .rob = 1,
+            .sq = 0,
+            .address_lane = static_cast<unsigned>(
+                index % memblock::kScalarStoreLanes),
+            .data_lane = static_cast<unsigned>(
+                (index + 1) % memblock::kScalarStoreLanes),
+            .expected_exception_mask = memblock::kExceptionStorePageFault,
+        };
+        environment.expect_store(store);
+        if (!environment.set_rob_head(store.rob, store.rob_flag) ||
+            !environment.enqueue_store(store, 0) ||
+            !environment.issue_store_address(store, 2048) ||
+            !environment.issue_store_data(store, 2048) ||
+            !environment.run_until_store_complete_with_replay(store, 16384)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
+                      << test.name << "-store-execution reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        if (environment.tilelink_requests() != store_dcache_before ||
+            environment.uncache_requests() != store_uncache_before ||
+            (environment.sq_dequeued() + environment.sq_canceled() <
+                 environment.sq_allocated() &&
+             !environment.account_sq_cancellation(1)) ||
+            environment.sq_dequeued() + environment.sq_canceled() !=
+                environment.sq_allocated()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
+                      << test.name
+                      << "-store-side-effect reason="
+                      << (environment.error().empty()
+                              ? "faulting store reached memory or unbalanced SQ"
+                              : environment.error()) << '\n';
+            return 1;
+        }
     }
 
     for (std::size_t index = 0; index < pte_encoding_cases.size(); ++index) {
@@ -6304,11 +6347,59 @@ int run_translation_faults(int argc, char **argv)
                       << "-bypass reason=fault issued a data-manager request\n";
             return 1;
         }
+
+        const std::uint64_t store_dcache_before =
+            environment.tilelink_requests();
+        const std::uint64_t store_uncache_before =
+            environment.uncache_requests();
+        const memblock::StoreTransaction store{
+            .address = guest_virtual + 0x188,
+            .data = 0x8899aabbccddeeffULL ^ index,
+            .op = memblock::StoreOp::sd,
+            .rob = 1,
+            .sq = 0,
+            .address_lane = static_cast<unsigned>(
+                index % memblock::kScalarStoreLanes),
+            .data_lane = static_cast<unsigned>(
+                (index + 1) % memblock::kScalarStoreLanes),
+            .expected_exception_mask =
+                memblock::kExceptionStoreGuestPageFault,
+        };
+        environment.expect_store(store);
+        if (!environment.set_rob_head(store.rob, store.rob_flag) ||
+            !environment.enqueue_store(store, 0) ||
+            !environment.issue_store_address(store, 2048) ||
+            !environment.issue_store_data(store, 2048) ||
+            !environment.run_until_store_complete_with_replay(store, 32768)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=g-"
+                      << test.name << "-store-execution reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        if (environment.tilelink_requests() != store_dcache_before ||
+            environment.uncache_requests() != store_uncache_before ||
+            (environment.sq_dequeued() + environment.sq_canceled() <
+                 environment.sq_allocated() &&
+             !environment.account_sq_cancellation(1)) ||
+            environment.sq_dequeued() + environment.sq_canceled() !=
+                environment.sq_allocated()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=g-"
+                      << test.name
+                      << "-store-side-effect reason="
+                      << (environment.error().empty()
+                              ? "faulting store reached memory or unbalanced SQ"
+                              : environment.error()) << '\n';
+            return 1;
+        }
     }
 
-    std::cout << "MEMBLOCK_TRANSLATION_FAULTS_PASS cases=57"
+    std::cout << "MEMBLOCK_TRANSLATION_FAULTS_PASS cases=109"
               << " stage1_pte_encoding_cases=" << pte_encoding_cases.size()
               << " gstage_pte_encoding_cases=" << pte_encoding_cases.size()
+              << " stage1_store_pte_encoding_cases="
+              << pte_encoding_cases.size()
+              << " gstage_store_pte_encoding_cases="
+              << pte_encoding_cases.size()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

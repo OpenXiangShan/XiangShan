@@ -144,26 +144,30 @@ Sv48 stage-1 2 MiB/1 GiB leaves, Sv48 512 GiB, and the corresponding
 Sv39x4/Sv48x4 G-stage leaves. Every case matched the independent leaf-address
 oracle and completed an architectural load.
 
-`make translation-faults` passed 57 deterministic fault cases. The original
+`make translation-faults` passed 109 deterministic fault transactions. The original
 five cover a noncanonical Sv48 VA, invalid Sv39 root PTE, Sv39x4/Sv48x4 GPA
 overflow, and a malformed Sv39 2 MiB leaf. The added 26 fresh-environment
 Sv39/Sv48 cases cross invalid V/W/R, reserved bits 60:54, PBMT=3, PBMTE off,
 exhausted L0, illegal non-leaf U/A/D/PBMT/N, and invalid NAPOT encoding. Each
-case matched the independent failing PTE/level and exact load page fault, with
-no DCache or Uncache data request.
+case matched the independent failing PTE/level and exact load page fault. The
+same 26 encodings also produced exact store page faults with balanced SQ
+retirement. Neither access type issued a DCache or Uncache data request.
 
 The same 26-entry encoding table also passed through final-data G-stage walks,
 split across Sv39x4 and Sv48x4. Every case produced the exact load guest-page
-fault, fault VA/GPA, and `isForVSnonLeafPTE=0`, while issuing no DCache or
-Uncache data request. The G-stage data GPA deliberately uses a different x4
-root index from the VS page-table GPAs so root-level mutations cannot turn the
-test into an earlier implicit-walk fault.
+fault, fault VA/GPA, and `isForVSnonLeafPTE=0`; the paired store produced the
+exact store guest-page fault and balanced its SQ entry. Neither access type
+issued a DCache or Uncache data request. The G-stage data GPA deliberately uses
+a different x4 root index from the VS page-table GPAs so root-level mutations
+cannot turn the test into an earlier implicit-walk fault.
 
 During this run, an unspecified scalar-load `debug.isNCIO` expectation caused
 a test-only false positive on a faulting PBMT PTE. The scoreboard had collapsed
 an absent `optional<bool>` to false. It now checks optional debug metadata only
-when explicitly constrained; stable MMIO/NC cases remain strict. The 57-case
-rerun and neighboring MMIO/translation regressions passed.
+when explicitly constrained; stable MMIO/NC cases remain strict. The store
+extension likewise left debug MMIO/NCIO unconstrained for exceptional PTEs,
+while keeping exact architectural exception and side-effect checks. The
+109-transaction rerun and neighboring MMIO/translation regressions passed.
 
 `make translation-permissions` passed 36 fresh-environment permission cases:
 16 stage-1 loads, 11 stage-1 stores, and nine two-stage loads. The independent
