@@ -2516,6 +2516,15 @@ public:
         bool pmp_mmio = false;
     };
 
+    struct FrontendBridgeStats {
+        std::uint64_t requests = 0;
+        std::uint64_t responses = 0;
+        std::uint64_t request_stalls = 0;
+        std::uint64_t response_stalls = 0;
+        std::uint64_t source_credit_stalls = 0;
+        std::uint64_t field_checks = 0;
+    };
+
     Environment(int argc, char **argv)
         : dut_(argc, argv), memory_(&bus_memory_),
           memory_agent_(bus_memory_, memory_),
@@ -2806,6 +2815,530 @@ public:
         return vector_replay_feedbacks_;
     }
     std::uint64_t pin_space_digest() const { return pin_space_digest_; }
+    const FrontendBridgeStats &frontend_bridge_stats() const
+    {
+        return frontend_bridge_stats_;
+    }
+
+    bool exercise_frontend_bridges(
+        unsigned transaction_count, std::uint64_t seed)
+    {
+        if (transaction_count < 32) {
+            error_ = "frontend bridge coverage requires at least 32 transactions";
+            return false;
+        }
+        frontend_bridge_stats_ = {};
+
+        auto mix64 = [](std::uint64_t value) -> std::uint64_t {
+            value += 0x9e3779b97f4a7c15ULL;
+            value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+            value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+            return value ^ (value >> 31);
+        };
+        auto pattern_u64 = [&](std::uint64_t domain,
+                               std::uint64_t index) -> std::uint64_t {
+            return mix64(seed ^ domain ^
+                         (index * 0xd6e8feb86659fd93ULL));
+        };
+        auto pattern_bytes = [&](std::uint64_t domain, std::uint64_t index,
+                                 std::size_t count) {
+            std::vector<unsigned char> result(count);
+            for (std::size_t byte = 0; byte < count; ++byte) {
+                const std::uint64_t word = pattern_u64(
+                    domain + byte / sizeof(std::uint64_t), index);
+                result[byte] = static_cast<unsigned char>(
+                    word >> (8 * (byte % sizeof(std::uint64_t))));
+            }
+            return result;
+        };
+        auto fail_value = [&](const char *path, std::uint64_t index,
+                              const char *field, std::uint64_t expected,
+                              std::uint64_t actual) {
+            std::ostringstream message;
+            message << "frontend bridge mismatch path=" << path
+                    << " index=" << index << " field=" << field
+                    << " expected=0x" << std::hex << expected
+                    << " actual=0x" << actual;
+            error_ = message.str();
+            return false;
+        };
+        auto check_value = [&](const char *path, std::uint64_t index,
+                               const char *field, std::uint64_t expected,
+                               std::uint64_t actual) {
+            if (expected != actual) {
+                return fail_value(path, index, field, expected, actual);
+            }
+            ++frontend_bridge_stats_.field_checks;
+            return true;
+        };
+        auto check_bytes = [&](const char *path, std::uint64_t index,
+                               const char *field,
+                               const std::vector<unsigned char> &expected,
+                               const std::vector<unsigned char> &actual) {
+            if (expected != actual) {
+                std::ostringstream message;
+                message << "frontend bridge mismatch path=" << path
+                        << " index=" << index << " field=" << field;
+                error_ = message.str();
+                return false;
+            }
+            ++frontend_bridge_stats_.field_checks;
+            return true;
+        };
+        auto check_index = [&](const char *path, std::uint64_t index,
+                               std::uint64_t limit) {
+            if (index < limit) {
+                return true;
+            }
+            std::ostringstream message;
+            message << "unexpected extra frontend bridge transfer path=" << path
+                    << " index=" << index << " limit=" << limit;
+            error_ = message.str();
+            return false;
+        };
+        auto icache_address = [](std::uint64_t index) -> std::uint64_t {
+            return 0x84000000ULL + index * 64;
+        };
+        auto instr_address = [](std::uint64_t index) -> std::uint64_t {
+            return 0x88000000ULL + index * 8;
+        };
+        auto ctrl_opcode = [](std::uint64_t index) {
+            constexpr std::array<std::uint8_t, 3> opcodes{0, 1, 4};
+            return opcodes[index % opcodes.size()];
+        };
+        auto ctrl_size = [](std::uint64_t index) {
+            return static_cast<unsigned>(index % 4);
+        };
+        auto ctrl_address = [&](std::uint64_t index) -> std::uint64_t {
+            const unsigned bytes = 1U << ctrl_size(index);
+            const unsigned lane = static_cast<unsigned>(
+                ((index * 3U) & 7U) / bytes * bytes);
+            return 0x100000ULL + index * 16 + lane;
+        };
+        auto ctrl_mask = [&](std::uint64_t index) {
+            const unsigned bytes = 1U << ctrl_size(index);
+            const unsigned lane = static_cast<unsigned>(ctrl_address(index) & 7U);
+            std::uint8_t mask = static_cast<std::uint8_t>(
+                ((1U << bytes) - 1U) << lane);
+            if (ctrl_opcode(index) == 1 && bytes > 1) {
+                const std::uint8_t partial = static_cast<std::uint8_t>(
+                    pattern_u64(0x6374726c6d61736bULL, index));
+                mask &= partial;
+                if (mask == 0) {
+                    mask = static_cast<std::uint8_t>(1U << lane);
+                }
+            }
+            return mask;
+        };
+
+        std::uint64_t readiness = seed ^ 0x6a09e667f3bcc909ULL;
+        if (readiness == 0) {
+            readiness = 1;
+        }
+        auto next_ready = [&]() {
+            readiness ^= readiness << 13;
+            readiness ^= readiness >> 7;
+            readiness ^= readiness << 17;
+            return (readiness & 3U) != 0;
+        };
+
+        std::uint64_t icache_input = 0;
+        std::uint64_t icache_requests = 0;
+        std::uint64_t icache_response_input = 0;
+        std::uint64_t icache_responses = 0;
+        std::uint64_t instr_input = 0;
+        std::uint64_t instr_requests = 0;
+        std::uint64_t instr_response_input = 0;
+        std::uint64_t instr_responses = 0;
+        std::uint64_t ctrl_input = 0;
+        std::uint64_t ctrl_requests = 0;
+        std::uint64_t ctrl_response_input = 0;
+        std::uint64_t ctrl_responses = 0;
+        const std::uint64_t icache_response_count =
+            std::uint64_t{transaction_count} * 2;
+        const std::uint64_t timeout =
+            std::uint64_t{transaction_count} * 64 + 4096;
+
+        for (std::uint64_t local_cycle = 0; local_cycle < timeout; ++local_cycle) {
+            const bool initial_request_stall = local_cycle < 16;
+            const bool icache_a_ready =
+                !initial_request_stall && next_ready();
+            const bool instr_a_ready =
+                !initial_request_stall && next_ready();
+            const bool ctrl_a_ready =
+                !initial_request_stall && next_ready();
+            const bool ctrl_d_ready = local_cycle >= 48 && next_ready();
+
+            const std::uint64_t icache_completed_requests =
+                icache_responses / 2;
+            frontend_bridge_stats_.source_credit_stalls +=
+                (icache_input < transaction_count &&
+                 icache_input - icache_completed_requests >= 16) +
+                (instr_input < transaction_count &&
+                 instr_input != instr_responses) +
+                (ctrl_input < transaction_count &&
+                 ctrl_input - ctrl_responses >= 32);
+            const bool icache_input_valid = icache_input < transaction_count &&
+                icache_input - icache_completed_requests < 16;
+            dut_.auto_inner_frontendBridge_icache_in_a_valid.ImmSet(
+                icache_input_valid);
+            if (icache_input_valid) {
+                dut_.auto_inner_frontendBridge_icache_in_a_bits_source.ImmSet(
+                    icache_input & 0xfU);
+                dut_.auto_inner_frontendBridge_icache_in_a_bits_address.ImmSet(
+                    icache_address(icache_input));
+            }
+            dut_.auto_inner_frontendBridge_icache_out_a_ready.ImmSet(
+                icache_a_ready);
+
+            const bool instr_input_valid = instr_input < transaction_count &&
+                instr_input == instr_responses;
+            dut_.auto_inner_frontendBridge_instr_uncache_in_a_valid.ImmSet(
+                instr_input_valid);
+            if (instr_input_valid) {
+                dut_.auto_inner_frontendBridge_instr_uncache_in_a_bits_address.ImmSet(
+                    instr_address(instr_input));
+            }
+            dut_.auto_inner_frontendBridge_instr_uncache_out_a_ready.ImmSet(
+                instr_a_ready);
+
+            const bool ctrl_input_valid = ctrl_input < transaction_count &&
+                ctrl_input - ctrl_responses < 32;
+            dut_.auto_inner_frontendBridge_icachectrl_in_a_valid.ImmSet(
+                ctrl_input_valid);
+            if (ctrl_input_valid) {
+                dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_opcode.ImmSet(
+                    ctrl_opcode(ctrl_input));
+                dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_param.ImmSet(
+                    std::uint64_t{0});
+                dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_size.ImmSet(
+                    ctrl_size(ctrl_input));
+                dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_source.ImmSet(
+                    ctrl_input & 0x1fU);
+                dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_address.ImmSet(
+                    ctrl_address(ctrl_input));
+                dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_mask.ImmSet(
+                    ctrl_mask(ctrl_input));
+                dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_data.ImmSet(
+                    pattern_u64(0x6374726c64617461ULL, ctrl_input));
+                dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_corrupt.ImmSet(
+                    std::uint64_t{0});
+            }
+            dut_.auto_inner_frontendBridge_icachectrl_out_a_ready.ImmSet(
+                ctrl_a_ready);
+            dut_.auto_inner_frontendBridge_icachectrl_in_d_ready.ImmSet(
+                ctrl_d_ready);
+
+            const bool icache_d_valid =
+                icache_response_input < icache_requests * 2;
+            dut_.auto_inner_frontendBridge_icache_out_d_valid.ImmSet(
+                icache_d_valid);
+            if (icache_d_valid) {
+                const std::uint64_t request = icache_response_input / 2;
+                dut_.auto_inner_frontendBridge_icache_out_d_bits_opcode.ImmSet(
+                    std::uint64_t{1});
+                dut_.auto_inner_frontendBridge_icache_out_d_bits_param.ImmSet(
+                    std::uint64_t{0});
+                dut_.auto_inner_frontendBridge_icache_out_d_bits_size.ImmSet(
+                    std::uint64_t{6});
+                dut_.auto_inner_frontendBridge_icache_out_d_bits_source.ImmSet(
+                    request & 0xfU);
+                dut_.auto_inner_frontendBridge_icache_out_d_bits_sink.ImmSet(
+                    std::uint64_t{0});
+                dut_.auto_inner_frontendBridge_icache_out_d_bits_denied.ImmSet(
+                    std::uint64_t{0});
+                auto data = pattern_bytes(
+                    0x6963616368656461ULL, icache_response_input, 32);
+                dut_.auto_inner_frontendBridge_icache_out_d_bits_data.ImmSetBytes(
+                    data);
+                dut_.auto_inner_frontendBridge_icache_out_d_bits_corrupt.ImmSet(
+                    (icache_response_input % 11U) == 0);
+            }
+
+            const bool instr_d_valid = instr_response_input < instr_requests;
+            dut_.auto_inner_frontendBridge_instr_uncache_out_d_valid.ImmSet(
+                instr_d_valid);
+            if (instr_d_valid) {
+                dut_.auto_inner_frontendBridge_instr_uncache_out_d_bits_opcode.ImmSet(
+                    std::uint64_t{1});
+                dut_.auto_inner_frontendBridge_instr_uncache_out_d_bits_param.ImmSet(
+                    std::uint64_t{0});
+                dut_.auto_inner_frontendBridge_instr_uncache_out_d_bits_size.ImmSet(
+                    std::uint64_t{3});
+                dut_.auto_inner_frontendBridge_instr_uncache_out_d_bits_source.ImmSet(
+                    std::uint64_t{0});
+                dut_.auto_inner_frontendBridge_instr_uncache_out_d_bits_sink.ImmSet(
+                    std::uint64_t{0});
+                dut_.auto_inner_frontendBridge_instr_uncache_out_d_bits_denied.ImmSet(
+                    std::uint64_t{0});
+                dut_.auto_inner_frontendBridge_instr_uncache_out_d_bits_data.ImmSet(
+                    pattern_u64(0x696e737472646174ULL, instr_response_input));
+                dut_.auto_inner_frontendBridge_instr_uncache_out_d_bits_corrupt.ImmSet(
+                    (instr_response_input % 13U) == 0);
+            }
+
+            const bool ctrl_d_valid = ctrl_response_input < ctrl_requests;
+            dut_.auto_inner_frontendBridge_icachectrl_out_d_valid.ImmSet(
+                ctrl_d_valid);
+            if (ctrl_d_valid) {
+                dut_.auto_inner_frontendBridge_icachectrl_out_d_bits_opcode.ImmSet(
+                    ctrl_opcode(ctrl_response_input) == 4 ? 1 : 0);
+                dut_.auto_inner_frontendBridge_icachectrl_out_d_bits_size.ImmSet(
+                    ctrl_size(ctrl_response_input));
+                dut_.auto_inner_frontendBridge_icachectrl_out_d_bits_source.ImmSet(
+                    ctrl_response_input & 0x1fU);
+                dut_.auto_inner_frontendBridge_icachectrl_out_d_bits_data.ImmSet(
+                    pattern_u64(0x6374726c72657370ULL, ctrl_response_input));
+            }
+
+            dut_.RefreshComb();
+
+            if (dut_.auto_inner_frontendBridge_icache_out_a_valid.B()) {
+                if (!check_index("icache-a", icache_requests, transaction_count) ||
+                    !check_value("icache-a", icache_requests, "opcode", 4,
+                                 dut_.auto_inner_frontendBridge_icache_out_a_bits_opcode.U()) ||
+                    !check_value("icache-a", icache_requests, "param", 0,
+                                 dut_.auto_inner_frontendBridge_icache_out_a_bits_param.U()) ||
+                    !check_value("icache-a", icache_requests, "size", 6,
+                                 dut_.auto_inner_frontendBridge_icache_out_a_bits_size.U()) ||
+                    !check_value("icache-a", icache_requests, "source",
+                                 icache_requests & 0xfU,
+                                 dut_.auto_inner_frontendBridge_icache_out_a_bits_source.U()) ||
+                    !check_value("icache-a", icache_requests, "address",
+                                 icache_address(icache_requests),
+                                 dut_.auto_inner_frontendBridge_icache_out_a_bits_address.U()) ||
+                    !check_value("icache-a", icache_requests, "alias", 0,
+                                 dut_.auto_inner_frontendBridge_icache_out_a_bits_user_alias.U()) ||
+                    !check_value("icache-a", icache_requests, "reqSource", 1,
+                                 dut_.auto_inner_frontendBridge_icache_out_a_bits_user_reqSource.U()) ||
+                    !check_value("icache-a", icache_requests, "needHint", 0,
+                                 dut_.auto_inner_frontendBridge_icache_out_a_bits_user_needHint.U()) ||
+                    !check_value("icache-a", icache_requests, "mask", 0xffffffffU,
+                                 dut_.auto_inner_frontendBridge_icache_out_a_bits_mask.U()) ||
+                    !check_bytes("icache-a", icache_requests, "data",
+                                 std::vector<unsigned char>(32, 0),
+                                 dut_.auto_inner_frontendBridge_icache_out_a_bits_data.GetBytes()) ||
+                    !check_value("icache-a", icache_requests, "corrupt", 0,
+                                 dut_.auto_inner_frontendBridge_icache_out_a_bits_corrupt.U())) {
+                    return false;
+                }
+            }
+            if (dut_.auto_inner_frontendBridge_instr_uncache_out_a_valid.B()) {
+                if (!check_index("instr-a", instr_requests, transaction_count) ||
+                    !check_value("instr-a", instr_requests, "param", 0,
+                                 dut_.auto_inner_frontendBridge_instr_uncache_out_a_bits_param.U()) ||
+                    !check_value("instr-a", instr_requests, "address",
+                                 instr_address(instr_requests),
+                                 dut_.auto_inner_frontendBridge_instr_uncache_out_a_bits_address.U()) ||
+                    !check_value("instr-a", instr_requests, "corrupt", 0,
+                                 dut_.auto_inner_frontendBridge_instr_uncache_out_a_bits_corrupt.U())) {
+                    return false;
+                }
+            }
+            if (dut_.auto_inner_frontendBridge_icachectrl_out_a_valid.B()) {
+                if (!check_index("ctrl-a", ctrl_requests, transaction_count) ||
+                    !check_value("ctrl-a", ctrl_requests, "opcode",
+                                 ctrl_opcode(ctrl_requests),
+                                 dut_.auto_inner_frontendBridge_icachectrl_out_a_bits_opcode.U()) ||
+                    !check_value("ctrl-a", ctrl_requests, "size",
+                                 ctrl_size(ctrl_requests),
+                                 dut_.auto_inner_frontendBridge_icachectrl_out_a_bits_size.U()) ||
+                    !check_value("ctrl-a", ctrl_requests, "source",
+                                 ctrl_requests & 0x1fU,
+                                 dut_.auto_inner_frontendBridge_icachectrl_out_a_bits_source.U()) ||
+                    !check_value("ctrl-a", ctrl_requests, "address",
+                                 ctrl_address(ctrl_requests),
+                                 dut_.auto_inner_frontendBridge_icachectrl_out_a_bits_address.U()) ||
+                    !check_value("ctrl-a", ctrl_requests, "mask",
+                                 ctrl_mask(ctrl_requests),
+                                 dut_.auto_inner_frontendBridge_icachectrl_out_a_bits_mask.U()) ||
+                    !check_value("ctrl-a", ctrl_requests, "data",
+                                 pattern_u64(0x6374726c64617461ULL, ctrl_requests),
+                                 dut_.auto_inner_frontendBridge_icachectrl_out_a_bits_data.U())) {
+                    return false;
+                }
+            }
+
+            if (dut_.auto_inner_frontendBridge_icache_in_d_valid.B()) {
+                if (!check_index(
+                        "icache-d", icache_responses, icache_response_count) ||
+                    !check_value("icache-d", icache_responses, "opcode", 1,
+                                 dut_.auto_inner_frontendBridge_icache_in_d_bits_opcode.U()) ||
+                    !check_value("icache-d", icache_responses, "source",
+                                 (icache_responses / 2) & 0xfU,
+                                 dut_.auto_inner_frontendBridge_icache_in_d_bits_source.U()) ||
+                    !check_bytes("icache-d", icache_responses, "data",
+                                 pattern_bytes(
+                                     0x6963616368656461ULL, icache_responses, 32),
+                                 dut_.auto_inner_frontendBridge_icache_in_d_bits_data.GetBytes()) ||
+                    !check_value("icache-d", icache_responses, "corrupt",
+                                 (icache_responses % 11U) == 0,
+                                 dut_.auto_inner_frontendBridge_icache_in_d_bits_corrupt.U())) {
+                    return false;
+                }
+            }
+            if (dut_.auto_inner_frontendBridge_instr_uncache_in_d_valid.B()) {
+                if (!check_index("instr-d", instr_responses, transaction_count) ||
+                    !check_value("instr-d", instr_responses, "source", 0,
+                                 dut_.auto_inner_frontendBridge_instr_uncache_in_d_bits_source.U()) ||
+                    !check_value("instr-d", instr_responses, "data",
+                                 pattern_u64(0x696e737472646174ULL, instr_responses),
+                                 dut_.auto_inner_frontendBridge_instr_uncache_in_d_bits_data.U()) ||
+                    !check_value("instr-d", instr_responses, "corrupt",
+                                 (instr_responses % 13U) == 0,
+                                 dut_.auto_inner_frontendBridge_instr_uncache_in_d_bits_corrupt.U())) {
+                    return false;
+                }
+            }
+            if (dut_.auto_inner_frontendBridge_icachectrl_in_d_valid.B()) {
+                if (!check_index("ctrl-d", ctrl_responses, transaction_count) ||
+                    !check_value("ctrl-d", ctrl_responses, "opcode",
+                                 ctrl_opcode(ctrl_responses) == 4 ? 1 : 0,
+                                 dut_.auto_inner_frontendBridge_icachectrl_in_d_bits_opcode.U()) ||
+                    !check_value("ctrl-d", ctrl_responses, "param", 0,
+                                 dut_.auto_inner_frontendBridge_icachectrl_in_d_bits_param.U()) ||
+                    !check_value("ctrl-d", ctrl_responses, "size",
+                                 ctrl_size(ctrl_responses),
+                                 dut_.auto_inner_frontendBridge_icachectrl_in_d_bits_size.U()) ||
+                    !check_value("ctrl-d", ctrl_responses, "source",
+                                 ctrl_responses & 0x1fU,
+                                 dut_.auto_inner_frontendBridge_icachectrl_in_d_bits_source.U()) ||
+                    !check_value("ctrl-d", ctrl_responses, "sink", 0,
+                                 dut_.auto_inner_frontendBridge_icachectrl_in_d_bits_sink.U()) ||
+                    !check_value("ctrl-d", ctrl_responses, "denied", 0,
+                                 dut_.auto_inner_frontendBridge_icachectrl_in_d_bits_denied.U()) ||
+                    !check_value("ctrl-d", ctrl_responses, "data",
+                                 pattern_u64(0x6374726c72657370ULL, ctrl_responses),
+                                 dut_.auto_inner_frontendBridge_icachectrl_in_d_bits_data.U()) ||
+                    !check_value("ctrl-d", ctrl_responses, "corrupt", 0,
+                                 dut_.auto_inner_frontendBridge_icachectrl_in_d_bits_corrupt.U())) {
+                    return false;
+                }
+            }
+
+            const bool icache_input_fire = icache_input_valid &&
+                dut_.auto_inner_frontendBridge_icache_in_a_ready.B();
+            const bool instr_input_fire = instr_input_valid &&
+                dut_.auto_inner_frontendBridge_instr_uncache_in_a_ready.B();
+            const bool ctrl_input_fire = ctrl_input_valid &&
+                dut_.auto_inner_frontendBridge_icachectrl_in_a_ready.B();
+            const bool icache_request_fire =
+                dut_.auto_inner_frontendBridge_icache_out_a_valid.B() &&
+                icache_a_ready;
+            const bool instr_request_fire =
+                dut_.auto_inner_frontendBridge_instr_uncache_out_a_valid.B() &&
+                instr_a_ready;
+            const bool ctrl_request_fire =
+                dut_.auto_inner_frontendBridge_icachectrl_out_a_valid.B() &&
+                ctrl_a_ready;
+            const bool icache_response_input_fire = icache_d_valid &&
+                dut_.auto_inner_frontendBridge_icache_out_d_ready.B();
+            const bool instr_response_input_fire = instr_d_valid &&
+                dut_.auto_inner_frontendBridge_instr_uncache_out_d_ready.B();
+            const bool ctrl_response_input_fire = ctrl_d_valid &&
+                dut_.auto_inner_frontendBridge_icachectrl_out_d_ready.B();
+            const bool icache_response_fire =
+                dut_.auto_inner_frontendBridge_icache_in_d_valid.B();
+            const bool instr_response_fire =
+                dut_.auto_inner_frontendBridge_instr_uncache_in_d_valid.B();
+            const bool ctrl_response_fire =
+                dut_.auto_inner_frontendBridge_icachectrl_in_d_valid.B() &&
+                ctrl_d_ready;
+
+            frontend_bridge_stats_.request_stalls +=
+                (icache_input_valid &&
+                 !dut_.auto_inner_frontendBridge_icache_in_a_ready.B()) +
+                (instr_input_valid &&
+                 !dut_.auto_inner_frontendBridge_instr_uncache_in_a_ready.B()) +
+                (ctrl_input_valid &&
+                 !dut_.auto_inner_frontendBridge_icachectrl_in_a_ready.B()) +
+                (dut_.auto_inner_frontendBridge_icache_out_a_valid.B() &&
+                 !icache_a_ready) +
+                (dut_.auto_inner_frontendBridge_instr_uncache_out_a_valid.B() &&
+                 !instr_a_ready) +
+                (dut_.auto_inner_frontendBridge_icachectrl_out_a_valid.B() &&
+                 !ctrl_a_ready);
+            frontend_bridge_stats_.response_stalls +=
+                (icache_d_valid &&
+                 !dut_.auto_inner_frontendBridge_icache_out_d_ready.B()) +
+                (instr_d_valid &&
+                 !dut_.auto_inner_frontendBridge_instr_uncache_out_d_ready.B()) +
+                (ctrl_d_valid &&
+                 !dut_.auto_inner_frontendBridge_icachectrl_out_d_ready.B()) +
+                (dut_.auto_inner_frontendBridge_icachectrl_in_d_valid.B() &&
+                 !ctrl_d_ready);
+
+            tick(false);
+            icache_input += icache_input_fire;
+            instr_input += instr_input_fire;
+            ctrl_input += ctrl_input_fire;
+            icache_requests += icache_request_fire;
+            instr_requests += instr_request_fire;
+            ctrl_requests += ctrl_request_fire;
+            icache_response_input += icache_response_input_fire;
+            instr_response_input += instr_response_input_fire;
+            ctrl_response_input += ctrl_response_input_fire;
+            icache_responses += icache_response_fire;
+            instr_responses += instr_response_fire;
+            ctrl_responses += ctrl_response_fire;
+
+            if (icache_input == transaction_count &&
+                icache_requests == transaction_count &&
+                icache_response_input == icache_response_count &&
+                icache_responses == icache_response_count &&
+                instr_input == transaction_count &&
+                instr_requests == transaction_count &&
+                instr_response_input == transaction_count &&
+                instr_responses == transaction_count &&
+                ctrl_input == transaction_count &&
+                ctrl_requests == transaction_count &&
+                ctrl_response_input == transaction_count &&
+                ctrl_responses == transaction_count) {
+                frontend_bridge_stats_.requests =
+                    icache_requests + instr_requests + ctrl_requests;
+                frontend_bridge_stats_.responses =
+                    icache_responses + instr_responses + ctrl_responses;
+                if (frontend_bridge_stats_.request_stalls == 0 ||
+                    frontend_bridge_stats_.response_stalls == 0 ||
+                    frontend_bridge_stats_.source_credit_stalls == 0) {
+                    error_ = "frontend bridge run missed a required stall class";
+                    return false;
+                }
+                dut_.auto_inner_frontendBridge_icache_in_a_valid.ImmSet(
+                    std::uint64_t{0});
+                dut_.auto_inner_frontendBridge_instr_uncache_in_a_valid.ImmSet(
+                    std::uint64_t{0});
+                dut_.auto_inner_frontendBridge_icachectrl_in_a_valid.ImmSet(
+                    std::uint64_t{0});
+                dut_.auto_inner_frontendBridge_icache_out_d_valid.ImmSet(
+                    std::uint64_t{0});
+                dut_.auto_inner_frontendBridge_instr_uncache_out_d_valid.ImmSet(
+                    std::uint64_t{0});
+                dut_.auto_inner_frontendBridge_icachectrl_out_d_valid.ImmSet(
+                    std::uint64_t{0});
+                dut_.auto_inner_frontendBridge_icache_out_a_ready.ImmSet(
+                    std::uint64_t{1});
+                dut_.auto_inner_frontendBridge_instr_uncache_out_a_ready.ImmSet(
+                    std::uint64_t{1});
+                dut_.auto_inner_frontendBridge_icachectrl_out_a_ready.ImmSet(
+                    std::uint64_t{1});
+                dut_.auto_inner_frontendBridge_icachectrl_in_d_ready.ImmSet(
+                    std::uint64_t{1});
+                return check_idle(8);
+            }
+        }
+
+        std::ostringstream message;
+        message << "timed out draining frontend bridges"
+                << " icache=" << icache_input << '/' << icache_requests
+                << '/' << icache_response_input << '/' << icache_responses
+                << " instr=" << instr_input << '/' << instr_requests
+                << '/' << instr_response_input << '/' << instr_responses
+                << " ctrl=" << ctrl_input << '/' << ctrl_requests
+                << '/' << ctrl_response_input << '/' << ctrl_responses;
+        error_ = message.str();
+        return false;
+    }
 
     bool check_pin_space()
     {
@@ -5232,6 +5765,7 @@ private:
     StoreScoreboard store_scoreboard_;
     VectorMemoryScoreboard vector_scoreboard_;
     std::uint64_t pin_space_digest_ = 0;
+    FrontendBridgeStats frontend_bridge_stats_;
     std::uint64_t lq_allocated_ = 0;
     std::uint64_t lq_dequeued_ = 0;
     std::uint64_t lq_canceled_ = 0;

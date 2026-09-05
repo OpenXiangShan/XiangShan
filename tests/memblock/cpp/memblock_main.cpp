@@ -1312,6 +1312,34 @@ int run_pin_space(int argc, char **argv)
     return 0;
 }
 
+int run_frontend_bridge(int argc, char **argv, const Options &options)
+{
+    memblock::Environment environment(argc, argv);
+    if (!environment.reset() ||
+        !environment.exercise_frontend_bridges(
+            options.transactions, options.seed)) {
+        std::cerr << "MEMBLOCK_FRONTEND_BRIDGE_FAIL"
+                  << " seed=" << options.seed
+                  << " transactions=" << options.transactions
+                  << " cycle=" << environment.cycle()
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+    const auto &stats = environment.frontend_bridge_stats();
+    std::cout << "MEMBLOCK_FRONTEND_BRIDGE_PASS"
+              << " seed=" << options.seed
+              << " transactions=" << options.transactions
+              << " cycle=" << environment.cycle()
+              << " requests=" << stats.requests
+              << " responses=" << stats.responses
+              << " request_stalls=" << stats.request_stalls
+              << " response_stalls=" << stats.response_stalls
+              << " source_credit_stalls=" << stats.source_credit_stalls
+              << " field_checks=" << stats.field_checks
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_single_load(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -10634,6 +10662,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "pin-space") {
             return run_pin_space(argc, argv);
+        }
+        if (options.test == "frontend-bridge") {
+            return run_frontend_bridge(argc, argv, options);
         }
         if (options.test == "single-load") {
             return run_single_load(argc, argv);

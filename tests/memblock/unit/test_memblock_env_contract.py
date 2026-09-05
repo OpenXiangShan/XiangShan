@@ -109,6 +109,26 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main + makefile)
 
+    def test_frontend_bridge_has_semantic_transaction_coverage(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        for contract in (
+            "exercise_frontend_bridges",
+            "auto_inner_frontendBridge_icache_out_a_bits_user_reqSource",
+            "auto_inner_frontendBridge_icache_out_a_bits_mask",
+            "auto_inner_frontendBridge_instr_uncache_in_d_bits_corrupt",
+            "auto_inner_frontendBridge_icachectrl_in_d_bits_denied",
+            "icache_input - icache_completed_requests < 16",
+            "instr_input == instr_responses",
+            "ctrl_input - ctrl_responses < 32",
+            "source_credit_stalls",
+            "frontend bridge run missed a required stall class",
+            "MEMBLOCK_FRONTEND_BRIDGE_PASS",
+            "frontend-bridge",
+        ):
+            self.assertIn(contract, environment + main + makefile)
+
     def test_mixed_environment_has_combined_drain_and_queue_accounting(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

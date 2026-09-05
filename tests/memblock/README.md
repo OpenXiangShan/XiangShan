@@ -14,9 +14,12 @@ and queue pressure. D-width AMOs (ADD/XOR/AND/OR/SWAP/MIN/MAX, signed and
 unsigned) plus LR/SC are covered through the atomic unit, including old-value
 writeback, AMOCAS compare success/failure, reservation success/failure, and
 cache visibility. The L2-to-L1 DTLB and L2 hint input boundaries are checked for
-legal miss/cancel/metadata behavior. Uncache denied and corrupt D-channel responses are checked
-through scalar exception writeback. PBMT=IO MMIO metadata and error propagation
-are covered; MMIO device side effects, CMO CLEAN/FLUSH/INVAL, HLV/HLVX/HSV, VSegment, and
+legal miss/cancel/metadata behavior. All three frontend bridge paths are driven
+with concurrent legal TileLink traffic, randomized request/response backpressure,
+source-credit-safe wrap, and field-exact request/response scoreboards. Uncache
+denied and corrupt D-channel responses are checked through scalar exception
+writeback. PBMT=IO MMIO metadata and error propagation are covered; MMIO device
+side effects, CMO CLEAN/FLUSH/INVAL, HLV/HLVX/HSV, VSegment, and
 manager-originated probes remain explicit boundary gaps; they are not silently
 randomized as though they were legal cacheable flows.
 
@@ -176,6 +179,7 @@ Common setup failures are:
 make ports prepare-rtl check-ports check-rtl unit
 make smoke PICKER="$PICKER" JOBS=8
 make pin-space PICKER="$PICKER" JOBS=8
+make frontend-bridge PICKER="$PICKER" JOBS=8 SEED=1 TRANSACTIONS=4096
 make single-load PICKER="$PICKER" JOBS=8
 make fp-loads PICKER="$PICKER" JOBS=8
 make trigger-contracts PICKER="$PICKER" JOBS=8
