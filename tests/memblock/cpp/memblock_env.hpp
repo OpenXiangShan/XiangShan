@@ -607,6 +607,48 @@ inline bool reference_pte_is_leaf(std::uint64_t pte)
     return (pte & (2U | 8U)) != 0;
 }
 
+inline bool reference_pte_encoding_fault(
+    std::uint64_t pte,
+    unsigned level,
+    bool pbmte = true)
+{
+    constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
+    constexpr std::uint64_t pte_read = std::uint64_t{1} << 1;
+    constexpr std::uint64_t pte_write = std::uint64_t{1} << 2;
+    constexpr std::uint64_t pte_execute = std::uint64_t{1} << 3;
+    constexpr std::uint64_t pte_user = std::uint64_t{1} << 4;
+    constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
+    constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
+    constexpr std::uint64_t pte_reserved = std::uint64_t{0x7f} << 54;
+    constexpr std::uint64_t pte_pbmt_mask = std::uint64_t{3} << 61;
+    constexpr std::uint64_t pte_napot = std::uint64_t{1} << 63;
+
+    const unsigned pbmt = static_cast<unsigned>((pte >> 61) & 3U);
+    if ((pte & pte_reserved) != 0 || pbmt == 3U || (!pbmte && pbmt != 0U)) {
+        return true;
+    }
+    const bool valid = (pte & pte_valid) != 0;
+    const bool readable = (pte & pte_read) != 0;
+    const bool writable = (pte & pte_write) != 0;
+    const bool executable = (pte & pte_execute) != 0;
+    const bool next = valid && !readable && !writable && !executable;
+    if (next) {
+        return (pte & (pte_user | pte_accessed | pte_dirty |
+                       pte_pbmt_mask | pte_napot)) != 0;
+    }
+    if (!valid || (!readable && writable)) {
+        return true;
+    }
+    if ((pte & pte_napot) != 0 &&
+        (level != 0 || (reference_pte_ppn(pte) & 0xfU) != 8U)) {
+        return true;
+    }
+    const unsigned lower_ppn_bits = 9 * level;
+    return reference_pte_is_leaf(pte) && lower_ppn_bits != 0 &&
+           (reference_pte_ppn(pte) &
+            ((std::uint64_t{1} << lower_ppn_bits) - 1)) != 0;
+}
+
 inline std::uint64_t reference_leaf_address(
     std::uint64_t pte, std::uint64_t input_address, unsigned level)
 {
@@ -621,7 +663,8 @@ inline ReferenceStageWalkResult reference_page_walk(
     std::uint64_t root_page_table,
     std::uint64_t input_address,
     ReferencePageMode mode,
-    bool x4 = false)
+    bool x4 = false,
+    bool pbmte = true)
 {
     if (mode == ReferencePageMode::bare) {
         return {true, input_address, 0, 0};
@@ -642,16 +685,11 @@ inline ReferenceStageWalkResult reference_page_walk(
         const std::uint64_t index = (input_address >> shift) & index_mask;
         const std::uint64_t pte_address = table + index * 8;
         const std::uint64_t pte = memory.read_u64(pte_address);
-        if (reference_pte_is_invalid(pte)) {
+        if (reference_pte_encoding_fault(
+                pte, static_cast<unsigned>(level), pbmte)) {
             return {false, 0, pte_address, static_cast<unsigned>(level)};
         }
         if (reference_pte_is_leaf(pte)) {
-            const unsigned lower_ppn_bits = 9 * static_cast<unsigned>(level);
-            if (lower_ppn_bits != 0 &&
-                (reference_pte_ppn(pte) &
-                 ((std::uint64_t{1} << lower_ppn_bits) - 1)) != 0) {
-                return {false, 0, pte_address, static_cast<unsigned>(level)};
-            }
             return {
                 true,
                 reference_leaf_address(pte, input_address, level),
@@ -665,6 +703,42 @@ inline ReferenceStageWalkResult reference_page_walk(
         table = reference_pte_ppn(pte) << 12;
     }
     return {};
+}
+
+inline std::optional<std::uint64_t> reference_pte_address_at_level(
+    const SparseMemory &memory,
+    std::uint64_t root_page_table,
+    std::uint64_t input_address,
+    ReferencePageMode mode,
+    unsigned target_level,
+    bool x4 = false)
+{
+    const unsigned levels = reference_page_levels(mode);
+    if (levels == 0 || target_level >= levels ||
+        (root_page_table & (x4 ? 0x3fffULL : 0xfffULL)) != 0 ||
+        (x4 ? !reference_gpa_in_range(input_address, mode)
+            : !reference_canonical_virtual_address(input_address, mode))) {
+        return std::nullopt;
+    }
+    std::uint64_t table = root_page_table;
+    for (int level = static_cast<int>(levels) - 1;
+         level >= static_cast<int>(target_level); --level) {
+        const unsigned shift = 12 + 9 * static_cast<unsigned>(level);
+        const std::uint64_t index_mask =
+            x4 && static_cast<unsigned>(level) == levels - 1 ? 0x7ff : 0x1ff;
+        const std::uint64_t index = (input_address >> shift) & index_mask;
+        const std::uint64_t pte_address = table + index * 8;
+        if (static_cast<unsigned>(level) == target_level) {
+            return pte_address;
+        }
+        const std::uint64_t pte = memory.read_u64(pte_address);
+        if (reference_pte_encoding_fault(pte, static_cast<unsigned>(level)) ||
+            reference_pte_is_leaf(pte)) {
+            return std::nullopt;
+        }
+        table = reference_pte_ppn(pte) << 12;
+    }
+    return std::nullopt;
 }
 
 inline ReferenceStageWalkResult reference_sv39_walk(
@@ -1708,9 +1782,9 @@ public:
         bool fp_wen;
         std::uint8_t trigger;
         bool flush_pipe;
-        bool debug_is_mmio;
-        bool debug_is_ncio;
-        bool debug_is_perf_cnt;
+        std::optional<bool> debug_is_mmio;
+        std::optional<bool> debug_is_ncio;
+        std::optional<bool> debug_is_perf_cnt;
         std::uint64_t address;
         std::uint16_t op;
     };
@@ -1730,9 +1804,9 @@ public:
                 transaction.expected_exception_mask == 0 && transaction.fp_wen,
                 transaction.expected_trigger,
                 transaction.input_flush_pipe,
-                transaction.expected_debug_is_mmio.value_or(false),
-                transaction.expected_debug_is_ncio.value_or(false),
-                transaction.expected_debug_is_perf_cnt.value_or(false),
+                transaction.expected_debug_is_mmio,
+                transaction.expected_debug_is_ncio,
+                transaction.expected_debug_is_perf_cnt,
                 transaction.address,
                 static_cast<std::uint16_t>(transaction.op),
             });
@@ -1752,9 +1826,9 @@ public:
             Expected{
                 0, 0, transaction.rob_flag, true, 0, false, false, false,
                 transaction.expected_trigger, transaction.input_flush_pipe,
-                transaction.expected_debug_is_mmio.value_or(false),
-                transaction.expected_debug_is_ncio.value_or(false),
-                transaction.expected_debug_is_perf_cnt.value_or(false),
+                transaction.expected_debug_is_mmio,
+                transaction.expected_debug_is_ncio,
+                transaction.expected_debug_is_perf_cnt,
                 transaction.address, static_cast<std::uint16_t>(transaction.op)});
         if (!inserted && error_.empty()) {
             error_ = "duplicate outstanding scalar load ROB value";
@@ -1781,9 +1855,13 @@ public:
                 writeback.trigger != it->second.trigger ||
                 writeback.flush_pipe != it->second.flush_pipe ||
                 writeback.rob_flag != it->second.rob_flag ||
-                writeback.debug_is_mmio != it->second.debug_is_mmio ||
-                writeback.debug_is_ncio != it->second.debug_is_ncio ||
-                writeback.debug_is_perf_cnt != it->second.debug_is_perf_cnt) {
+                optional_mismatch(
+                    writeback.debug_is_mmio, it->second.debug_is_mmio) ||
+                optional_mismatch(
+                    writeback.debug_is_ncio, it->second.debug_is_ncio) ||
+                optional_mismatch(
+                    writeback.debug_is_perf_cnt,
+                    it->second.debug_is_perf_cnt)) {
                 fail("mismatched software-prefetch completion", lane, writeback,
                      &it->second);
                 return;
@@ -1800,9 +1878,13 @@ public:
             writeback.flush_pipe != it->second.flush_pipe ||
             writeback.pdest != it->second.pdest ||
             writeback.rob_flag != it->second.rob_flag ||
-            writeback.debug_is_mmio != it->second.debug_is_mmio ||
-            writeback.debug_is_ncio != it->second.debug_is_ncio ||
-            writeback.debug_is_perf_cnt != it->second.debug_is_perf_cnt ||
+            optional_mismatch(
+                writeback.debug_is_mmio, it->second.debug_is_mmio) ||
+            optional_mismatch(
+                writeback.debug_is_ncio, it->second.debug_is_ncio) ||
+            optional_mismatch(
+                writeback.debug_is_perf_cnt,
+                it->second.debug_is_perf_cnt) ||
             ((it->second.exception_mask == 0 ||
               it->second.check_data_on_exception) &&
              writeback.data != it->second.data)) {
@@ -1834,6 +1916,13 @@ public:
     }
 
 private:
+    static bool optional_mismatch(
+        bool actual,
+        const std::optional<bool> &expected)
+    {
+        return expected.has_value() && actual != *expected;
+    }
+
     void fail(
         const char *reason,
         unsigned lane,
@@ -1869,9 +1958,24 @@ private:
                     << " expected_fp_wen=" << expected->fp_wen
                     << " expected_flush_pipe=" << expected->flush_pipe
                     << " expected_trigger=" << static_cast<unsigned>(expected->trigger)
-                    << " expected_mmio=" << expected->debug_is_mmio
-                    << " expected_ncio=" << expected->debug_is_ncio
-                    << " expected_perf_cnt=" << expected->debug_is_perf_cnt;
+                    << " expected_mmio=";
+            if (expected->debug_is_mmio.has_value()) {
+                message << *expected->debug_is_mmio;
+            } else {
+                message << "unchecked";
+            }
+            message << " expected_ncio=";
+            if (expected->debug_is_ncio.has_value()) {
+                message << *expected->debug_is_ncio;
+            } else {
+                message << "unchecked";
+            }
+            message << " expected_perf_cnt=";
+            if (expected->debug_is_perf_cnt.has_value()) {
+                message << *expected->debug_is_perf_cnt;
+            } else {
+                message << "unchecked";
+            }
         }
         error_ = message.str();
     }
@@ -3512,6 +3616,15 @@ public:
         dut_.io_ooo_to_mem_tlbCsr_priv_vsum.ImmSet(vsum);
         // TlbCsrBundle is registered and duplicated before it reaches every
         // DTLB port. Let all copies settle before issuing the first request.
+        return run_cycles(16) && check_components();
+    }
+
+    bool set_page_based_memory_types(
+        bool machine_enabled,
+        bool hypervisor_enabled)
+    {
+        dut_.io_ooo_to_mem_tlbCsr_mPBMTE.ImmSet(machine_enabled);
+        dut_.io_ooo_to_mem_tlbCsr_hPBMTE.ImmSet(hypervisor_enabled);
         return run_cycles(16) && check_components();
     }
 

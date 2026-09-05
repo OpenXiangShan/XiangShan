@@ -241,6 +241,38 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, main + environment)
 
+    def test_scalar_load_optional_metadata_is_checked_only_when_constrained(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        load_scoreboard = environment.split("class LoadScoreboard", 1)[1].split(
+            "class StoreScoreboard", 1
+        )[0]
+        self.assertIn("std::optional<bool> debug_is_mmio", load_scoreboard)
+        self.assertIn("optional_mismatch(", load_scoreboard)
+        self.assertNotIn("expected_debug_is_ncio.value_or(false)", load_scoreboard)
+        self.assertNotIn("expected_debug_is_mmio.value_or(false)", load_scoreboard)
+
+    def test_translation_faults_cover_stage_one_pte_encoding_matrix(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "reference_pte_encoding_fault",
+            "pte_reserved",
+            "pbmt == 3U",
+            "reference_pte_address_at_level",
+            "set_page_based_memory_types",
+        ):
+            self.assertIn(contract, environment)
+        for contract in (
+            "std::array<PteEncodingCase, 26>",
+            "leaf-pbmt-disabled",
+            "l0-nonleaf",
+            "nonleaf-u",
+            "nonleaf-pbmt",
+            "leaf-napot-encoding",
+            "pte_encoding_cases=",
+        ):
+            self.assertIn(contract, main)
+
     def test_mixed_commit_boundary_does_not_auto_commit_next_rob(self) -> None:
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
         self.assertIn("rob_offset - 1", main)

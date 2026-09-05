@@ -234,11 +234,13 @@ checked against the independent leaf-address oracle and an architectural load.
 degenerations. It checks that the selected stage is bypassed exactly once and
 that no stale page-table walk is required.
 
-`translation-faults` executes a noncanonical Sv48 VA, invalid Sv39 root PTE,
-Sv39x4 and Sv48x4 GPAs above their architectural limits, and a malformed
-non-aligned Sv39 2 MiB leaf. It checks stage-specific page-fault versus
-guest-page-fault bits, the first failing walk level, and the independently
-predicted faulting GPA.
+`translation-faults` executes a noncanonical Sv48 VA, Sv39x4 and Sv48x4 GPAs
+above their architectural limits, a malformed non-aligned Sv39 2 MiB leaf, and
+26 fresh-environment Sv39/Sv48 PTE encoding faults. The encoding table crosses
+V/W/R, both ends of reserved bits 60:54, PBMT=3, disabled PBMTE, exhausted L0,
+illegal non-leaf U/A/D/PBMT/N fields, and an invalid NAPOT encoding. It checks
+the independent walk's failing PTE/level, exact stage-specific exception, and
+that no faulting data request reaches DCache or Uncache.
 
 `translation-permissions` executes 36 independent cases. Its table-driven
 oracle covers Sv39/Sv48 U/S access, SUM, MXR, missing A/D, VS-stage VSUM/VMXR,

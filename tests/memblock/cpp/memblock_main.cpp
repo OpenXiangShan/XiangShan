@@ -5522,7 +5522,142 @@ int run_translation_faults(int argc, char **argv)
         }
     }
 
-    std::cout << "MEMBLOCK_TRANSLATION_FAULTS_PASS cases=5"
+    struct PteEncodingCase {
+        const char *name;
+        memblock::ReferencePageMode mode;
+        bool mutate_root;
+        bool pbmte;
+        std::uint64_t set_bits;
+        std::uint64_t clear_bits;
+    };
+    constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
+    constexpr std::uint64_t pte_read = std::uint64_t{1} << 1;
+    constexpr std::uint64_t pte_write = std::uint64_t{1} << 2;
+    constexpr std::uint64_t pte_execute = std::uint64_t{1} << 3;
+    constexpr std::uint64_t pte_user = std::uint64_t{1} << 4;
+    constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
+    constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
+    constexpr std::uint64_t pte_reserved_54 = std::uint64_t{1} << 54;
+    constexpr std::uint64_t pte_reserved_60 = std::uint64_t{1} << 60;
+    constexpr std::uint64_t pte_pbmt_nc = std::uint64_t{1} << 61;
+    constexpr std::uint64_t pte_pbmt_mask = std::uint64_t{3} << 61;
+    constexpr std::uint64_t pte_napot = std::uint64_t{1} << 63;
+    constexpr std::uint64_t pte_nonleaf_clear =
+        pte_read | pte_write | pte_execute | pte_user | pte_accessed |
+        pte_dirty | pte_reserved_54 | pte_reserved_60 | pte_pbmt_mask |
+        pte_napot;
+#define MEMBLOCK_PTE_ENCODING_CASES(mode_name) \
+    {#mode_name "-leaf-v0", memblock::ReferencePageMode::mode_name, false, true, 0, pte_valid}, \
+    {#mode_name "-leaf-w1-r0", memblock::ReferencePageMode::mode_name, false, true, pte_write, pte_read}, \
+    {#mode_name "-leaf-reserved54", memblock::ReferencePageMode::mode_name, false, true, pte_reserved_54, 0}, \
+    {#mode_name "-leaf-reserved60", memblock::ReferencePageMode::mode_name, false, true, pte_reserved_60, 0}, \
+    {#mode_name "-leaf-pbmt3", memblock::ReferencePageMode::mode_name, false, true, pte_pbmt_mask, pte_pbmt_mask}, \
+    {#mode_name "-leaf-pbmt-disabled", memblock::ReferencePageMode::mode_name, false, false, pte_pbmt_nc, pte_pbmt_mask}, \
+    {#mode_name "-l0-nonleaf", memblock::ReferencePageMode::mode_name, false, true, pte_valid, pte_nonleaf_clear}, \
+    {#mode_name "-nonleaf-u", memblock::ReferencePageMode::mode_name, true, true, pte_user, 0}, \
+    {#mode_name "-nonleaf-a", memblock::ReferencePageMode::mode_name, true, true, pte_accessed, 0}, \
+    {#mode_name "-nonleaf-d", memblock::ReferencePageMode::mode_name, true, true, pte_dirty, 0}, \
+    {#mode_name "-nonleaf-pbmt", memblock::ReferencePageMode::mode_name, true, true, pte_pbmt_nc, 0}, \
+    {#mode_name "-nonleaf-n", memblock::ReferencePageMode::mode_name, true, true, pte_napot, 0}, \
+    {#mode_name "-leaf-napot-encoding", memblock::ReferencePageMode::mode_name, false, true, pte_napot, 0}
+    const std::array<PteEncodingCase, 26> pte_encoding_cases{{
+        MEMBLOCK_PTE_ENCODING_CASES(sv39),
+        MEMBLOCK_PTE_ENCODING_CASES(sv48),
+    }};
+#undef MEMBLOCK_PTE_ENCODING_CASES
+
+    for (std::size_t index = 0; index < pte_encoding_cases.size(); ++index) {
+        const auto &test = pte_encoding_cases[index];
+        memblock::Environment environment(argc, argv);
+        const std::uint64_t virtual_address =
+            test.mode == memblock::ReferencePageMode::sv48
+                ? 0xffff900000000000ULL
+                : 0x74000000ULL;
+        constexpr std::uint64_t physical_address = 0xcc000000ULL;
+        constexpr std::uint64_t root = 0xaa000000ULL;
+        if (!environment.reset()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
+                      << test.name << "-reset reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const bool mapped = test.mode == memblock::ReferencePageMode::sv48
+            ? environment.map_sv48_4k(
+                  virtual_address, physical_address, root)
+            : environment.map_sv39_4k(
+                  virtual_address, physical_address, root);
+        const unsigned target_level = test.mutate_root
+            ? memblock::reference_page_levels(test.mode) - 1
+            : 0;
+        const auto pte_address = memblock::reference_pte_address_at_level(
+            environment.memory(), root, virtual_address + 0x188,
+            test.mode, target_level);
+        if (!mapped || !pte_address.has_value()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
+                      << test.name << "-setup reason="
+                      << (environment.error().empty()
+                              ? "reference PTE locator failed"
+                              : environment.error())
+                      << '\n';
+            return 1;
+        }
+        const std::uint64_t original =
+            environment.memory().read_u64(*pte_address);
+        environment.memory().write_u64(
+            *pte_address, (original & ~test.clear_bits) | test.set_bits);
+        const auto reference = memblock::reference_page_walk(
+            environment.memory(), root, virtual_address + 0x188,
+            test.mode, false, test.pbmte);
+        if (reference.translated ||
+            reference.faulting_pte_address != *pte_address ||
+            reference.fault_level != target_level) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
+                      << test.name << "-reference\n";
+            return 1;
+        }
+        const bool activated = test.mode == memblock::ReferencePageMode::sv48
+            ? environment.activate_sv48(root, 43)
+            : environment.activate_sv39(root, 43);
+        if (!activated ||
+            !environment.set_page_based_memory_types(test.pbmte, true)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
+                      << test.name << "-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        const memblock::LoadTransaction transaction{
+            .address = virtual_address + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = static_cast<std::uint8_t>(145 + index),
+            .lane = static_cast<unsigned>(index % memblock::kScalarLoadLanes),
+            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        };
+        environment.expect_load(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 2048) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
+                      << test.name << "-execution reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        if (environment.tilelink_requests() != dcache_before ||
+            environment.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase="
+                      << test.name
+                      << "-bypass reason=fault issued a data-manager request\n";
+            return 1;
+        }
+    }
+
+    std::cout << "MEMBLOCK_TRANSLATION_FAULTS_PASS cases=31"
+              << " pte_encoding_cases=" << pte_encoding_cases.size()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

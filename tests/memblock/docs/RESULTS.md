@@ -141,11 +141,19 @@ Sv48 stage-1 2 MiB/1 GiB leaves, Sv48 512 GiB, and the corresponding
 Sv39x4/Sv48x4 G-stage leaves. Every case matched the independent leaf-address
 oracle and completed an architectural load.
 
-`make translation-faults` passed all five deterministic fault cases: a
-noncanonical Sv48 virtual address, an invalid Sv39 root PTE, Sv39x4 and Sv48x4
-GPAs above their architectural limits, and a malformed Sv39 2 MiB leaf with a
-misaligned physical base. The expected stage-specific page-fault or
-guest-page-fault contract was observed.
+`make translation-faults` passed 31 deterministic fault cases. The original
+five cover a noncanonical Sv48 VA, invalid Sv39 root PTE, Sv39x4/Sv48x4 GPA
+overflow, and a malformed Sv39 2 MiB leaf. The added 26 fresh-environment
+Sv39/Sv48 cases cross invalid V/W/R, reserved bits 60:54, PBMT=3, PBMTE off,
+exhausted L0, illegal non-leaf U/A/D/PBMT/N, and invalid NAPOT encoding. Each
+case matched the independent failing PTE/level and exact load page fault, with
+no DCache or Uncache data request.
+
+During this run, an unspecified scalar-load `debug.isNCIO` expectation caused
+a test-only false positive on a faulting PBMT PTE. The scoreboard had collapsed
+an absent `optional<bool>` to false. It now checks optional debug metadata only
+when explicitly constrained; stable MMIO/NC cases remain strict. See
+[`SCALAR_LOAD_OPTIONAL_METADATA_ORACLE.md`](SCALAR_LOAD_OPTIONAL_METADATA_ORACLE.md).
 
 `make translation-permissions` passed 36 fresh-environment permission cases:
 16 stage-1 loads, 11 stage-1 stores, and nine two-stage loads. The independent
