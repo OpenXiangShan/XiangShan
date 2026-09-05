@@ -170,3 +170,9 @@ Session: `01a06732-901c-7581-be22-854bdc2f93f0`.
 33. [`2026-09-05 08:15:39 CST`] `记得每次工作有进展就commit & push哦`
 
 34. [`2026-09-05 09:57:44 CST`] `针对ATOMIC_DCHANNEL_ERROR.md那个问题，我问了一下设计，他说不是bug吧，amo denied写回dcache的时候还会把error写回，后续的load也会af。`
+
+35. [`2026-09-05 10:32:50 CST`] `我现在在想，你现在的stress里面，constrained random的约束是倾向于哪边？真实CPU负载下，应该没有那么多的error吧，所以error这些少见场景测试一定程度之后，你应该把约束调成更倾向于真实负载那种环境，各种load store，包括vector/mmio/nc/amo等等特殊类型，混发，然后有TLB miss啥的，有cache miss，cache miss之后的refill时间还长短不一样，有的长到大几百拍，等等。这样的约束可能更能找到真实场景下的CPU BUG。可以参考/home/xuyinan/xs2/XiangShan/cr260831-8f8494560-KunminghuV2Config里面的计数器，看看真实speccpu下面负载的计数器行为长什么样`
+
+36. [`2026-09-05 10:53:28 CST`] `不同的约束可能是一个tradeoff，一方面我们要关注常见系统负载的高load/store压力，另一方面也要关注corner case，所以可能不同的验证场景和阶段下我们关注的方向也不一样，这个是constrained random的核心内涵之一，即通过调整constrain实现不同方向的验证激励。所以，你可能需要思考一下，如何设计一个constrain界面，允许UT开发者指定不同的约束，从而针对不同的场景。你可以额外再参考一下cr260831-4f29a0951-KunminghuV2Config和cr260902-5d3934132-KunminghuV2Config的性能数据`
+
+37. [`2026-09-05 10:53:47 CST`] `所以之后你不见得要独立维护不同的测试，而是提供一个通用的constrain界面，通过调整contrain的条件，实现不同的测试方向。不同测试方向就相当于是不同的约束了`

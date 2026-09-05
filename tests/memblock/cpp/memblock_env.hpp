@@ -712,16 +712,74 @@ inline ReferenceTwoStageWalkResult reference_two_stage_walk(
     return {true, final_translation.physical_address, false, false, 0, false};
 }
 
+enum class ResponseLatencyProfile {
+    compact,
+    spec,
+};
+
+struct ResponseLatencyStats {
+    std::array<std::uint64_t, 4> buckets{};
+    std::uint64_t samples = 0;
+    std::uint64_t total_cycles = 0;
+    unsigned max_cycles = 0;
+
+    void sample(unsigned cycles)
+    {
+        const std::size_t bucket = cycles < 20 ? 0 : cycles < 40 ? 1 :
+            cycles < 100 ? 2 : 3;
+        ++buckets[bucket];
+        ++samples;
+        total_cycles += cycles;
+        max_cycles = std::max(max_cycles, cycles);
+    }
+};
+
+inline unsigned sample_response_latency(
+    ResponseLatencyProfile profile, std::uint64_t random,
+    std::uint64_t sample_index = 4)
+{
+    if (profile == ResponseLatencyProfile::compact) {
+        return 1 + static_cast<unsigned>(random % 4);
+    }
+
+    // Give short smoke runs a deterministic floor in every latency class;
+    // subsequent samples follow the calibrated distribution.
+    if (sample_index < 4) {
+        const std::array<unsigned, 4> floor{{12, 25, 60, 100}};
+        return sample_index == 3
+            ? floor[3] + static_cast<unsigned>(random % 301)
+            : floor[sample_index];
+    }
+
+    // Final-measurement MSHR A-to-D latency from 4,206 SPEC checkpoints:
+    // about 74.1% <20, 14.4% 20-39, 5.1% 40-99, and 6.4% >=100.
+    const unsigned percentile = static_cast<unsigned>(random % 10000);
+    if (percentile < 7410) {
+        return 8 + static_cast<unsigned>((random >> 16) % 12);
+    }
+    if (percentile < 8853) {
+        return 20 + static_cast<unsigned>((random >> 16) % 20);
+    }
+    if (percentile < 9359) {
+        return 40 + static_cast<unsigned>((random >> 16) % 60);
+    }
+    return 100 + static_cast<unsigned>((random >> 16) % 301);
+}
+
 class TileLinkMemoryAgent {
 public:
     TileLinkMemoryAgent(SparseMemory &memory, const SparseMemory &reference_memory)
         : memory_(memory), reference_memory_(reference_memory)
     {}
 
-    void configure_backpressure(std::uint64_t seed, bool enabled)
+    void configure_backpressure(
+        std::uint64_t seed, bool enabled,
+        ResponseLatencyProfile latency_profile = ResponseLatencyProfile::compact)
     {
         random_state_ = seed == 0 ? 1 : seed;
         random_backpressure_ = enabled;
+        latency_profile_ = latency_profile;
+        response_latency_stats_ = {};
         force_a_stall_ = enabled;
     }
 
@@ -839,14 +897,10 @@ public:
         if (d_fire_) {
             d_beats_.pop_front();
             d_presenting_ = false;
-            d_gap_ = random_backpressure_ ? static_cast<unsigned>(next_random() % 4) : 0;
+            d_gap_ = d_beats_.empty() ? 0 : d_beats_.front().delay_before;
         }
         if (a_fire_ && captured_a_) {
-            const bool was_empty = d_beats_.empty();
             respond(*captured_a_);
-            if (was_empty && !d_beats_.empty() && random_backpressure_) {
-                d_gap_ = 1 + static_cast<unsigned>(next_random() % 4);
-            }
             ++request_count_;
         }
         if (c_fire_ && captured_c_) {
@@ -864,6 +918,10 @@ public:
     std::uint64_t request_count() const { return request_count_; }
     std::uint64_t request_stall_cycles() const { return request_stall_cycles_; }
     std::uint64_t response_delay_cycles() const { return response_delay_cycles_; }
+    const ResponseLatencyStats &response_latency_stats() const
+    {
+        return response_latency_stats_;
+    }
     std::uint64_t release_count() const { return release_count_; }
     std::uint64_t release_data_count() const { return release_data_count_; }
     std::uint64_t release_data_verified_count() const
@@ -926,6 +984,7 @@ private:
         std::vector<unsigned char> data;
         bool denied = false;
         bool corrupt = false;
+        unsigned delay_before = 0;
     };
 
     struct CRequest {
@@ -958,10 +1017,10 @@ private:
         switch (request.opcode) {
         case 4: { // Get -> AccessAckData
             const std::uint64_t beat_base = request.address & ~(kBeatBytes - 1);
-            d_beats_.push_back(DBeat{
+            push_response(DBeat{
                 1, 0, request.size, request.source, 0, request.keyword,
                 memory_.read_beat(beat_base, kBeatBytes), denied, corrupt,
-            });
+            }, true);
             break;
         }
         case 6: { // AcquireBlock -> GrantData
@@ -970,19 +1029,19 @@ private:
                 transfer_bytes > kBeatBytes ? transfer_bytes / kBeatBytes : 1);
             for (std::size_t beat = 0; beat < beats; ++beat) {
                 const std::size_t memory_beat = request.keyword ? beat ^ 1U : beat;
-                d_beats_.push_back(DBeat{
+                push_response(DBeat{
                     5, cap, request.size, request.source, 1, request.keyword,
                     memory_.read_beat(base + memory_beat * kBeatBytes, kBeatBytes),
                     denied, corrupt,
-                });
+                }, beat == 0);
             }
             break;
         }
         case 7: // AcquirePerm -> Grant
-            d_beats_.push_back(DBeat{
+            push_response(DBeat{
                 4, 0, request.size, request.source, 1, request.keyword,
                 std::vector<unsigned char>(kBeatBytes, 0),
-            });
+            }, true);
             break;
         default: {
             std::ostringstream message;
@@ -997,10 +1056,10 @@ private:
     void accept_release(const CRequest &request)
     {
         if (request.opcode == 6) { // Release -> ReleaseAck
-            d_beats_.push_back(DBeat{
+            push_response(DBeat{
                 6, 0, request.size, request.source, 0, request.keyword,
                 std::vector<unsigned char>(kBeatBytes, 0),
-            });
+            }, true);
             ++release_count_;
             return;
         }
@@ -1057,10 +1116,10 @@ private:
         }
         ++release_data_->received;
         if (release_data_->received == release_data_->beats) {
-            d_beats_.push_back(DBeat{
+            push_response(DBeat{
                 6, 0, request.size, request.source, 0, request.keyword,
                 std::vector<unsigned char>(kBeatBytes, 0),
-            });
+            }, true);
             release_data_.reset();
             ++release_data_verified_count_;
             if (has_expected_line) {
@@ -1077,6 +1136,31 @@ private:
         random_state_ ^= random_state_ >> 7;
         random_state_ ^= random_state_ << 17;
         return random_state_;
+    }
+
+    unsigned response_delay(bool first_beat)
+    {
+        if (!random_backpressure_) {
+            return 0;
+        }
+        if (!first_beat) {
+            return static_cast<unsigned>(next_random() % 4);
+        }
+        const unsigned delay = sample_response_latency(
+            latency_profile_, next_random(), response_latency_stats_.samples);
+        response_latency_stats_.sample(delay);
+        return delay;
+    }
+
+    void push_response(DBeat response, bool first_beat)
+    {
+        const bool was_empty = d_beats_.empty();
+        response.delay_before = response_delay(first_beat);
+        d_beats_.push_back(std::move(response));
+        if (was_empty) {
+            d_presenting_ = false;
+            d_gap_ = d_beats_.front().delay_before;
+        }
     }
 
     SparseMemory &memory_;
@@ -1097,6 +1181,8 @@ private:
     std::uint64_t random_state_ = 1;
     unsigned d_gap_ = 0;
     bool random_backpressure_ = false;
+    ResponseLatencyProfile latency_profile_ = ResponseLatencyProfile::compact;
+    ResponseLatencyStats response_latency_stats_;
     bool force_a_stall_ = false;
     bool d_presenting_ = false;
     bool inject_denied_ = false;
@@ -1110,10 +1196,14 @@ class PtwMemoryAgent {
 public:
     explicit PtwMemoryAgent(SparseMemory &memory) : memory_(memory) {}
 
-    void configure_backpressure(std::uint64_t seed, bool enabled)
+    void configure_backpressure(
+        std::uint64_t seed, bool enabled,
+        ResponseLatencyProfile latency_profile = ResponseLatencyProfile::compact)
     {
         random_state_ = seed == 0 ? 1 : seed;
         random_backpressure_ = enabled;
+        latency_profile_ = latency_profile;
+        response_latency_stats_ = {};
         force_a_stall_ = enabled;
     }
 
@@ -1203,16 +1293,10 @@ public:
         if (d_fire_) {
             responses_.pop_front();
             d_presenting_ = false;
-            d_gap_ = random_backpressure_
-                ? static_cast<unsigned>(next_random() & 3U)
-                : 0;
+            d_gap_ = responses_.empty() ? 0 : responses_.front().delay_before;
         }
         if (a_fire_ && request_) {
-            const bool was_empty = responses_.empty();
             respond(*request_);
-            if (was_empty && !responses_.empty() && random_backpressure_) {
-                d_gap_ = 1 + static_cast<unsigned>(next_random() % 4);
-            }
             ++request_count_;
         }
         a_fire_ = false;
@@ -1225,6 +1309,10 @@ public:
     std::uint64_t request_count() const { return request_count_; }
     std::uint64_t request_stall_cycles() const { return request_stall_cycles_; }
     std::uint64_t response_delay_cycles() const { return response_delay_cycles_; }
+    const ResponseLatencyStats &response_latency_stats() const
+    {
+        return response_latency_stats_;
+    }
 
 private:
     static constexpr std::size_t kBeatBytes = 32;
@@ -1243,6 +1331,7 @@ private:
         std::uint8_t size;
         std::uint8_t source;
         std::vector<unsigned char> data;
+        unsigned delay_before = 0;
     };
 
     void respond(const Request &request)
@@ -1259,13 +1348,13 @@ private:
         const std::size_t beats = static_cast<std::size_t>(
             transfer_bytes > kBeatBytes ? transfer_bytes / kBeatBytes : 1);
         for (std::size_t beat = 0; beat < beats; ++beat) {
-            responses_.push_back(Response{
+            push_response(Response{
                 static_cast<std::uint8_t>(request.opcode == 4 ? 1 : 5),
                 static_cast<std::uint8_t>(request.opcode == 4 ? 0 : 1),
                 request.size,
                 request.source,
                 memory_.read_beat(base + beat * kBeatBytes, kBeatBytes),
-            });
+            }, beat == 0);
         }
     }
 
@@ -1277,6 +1366,31 @@ private:
         return random_state_;
     }
 
+    unsigned response_delay(bool first_beat)
+    {
+        if (!random_backpressure_) {
+            return 0;
+        }
+        if (!first_beat) {
+            return static_cast<unsigned>(next_random() % 4);
+        }
+        const unsigned delay = sample_response_latency(
+            latency_profile_, next_random(), response_latency_stats_.samples);
+        response_latency_stats_.sample(delay);
+        return delay;
+    }
+
+    void push_response(Response response, bool first_beat)
+    {
+        const bool was_empty = responses_.empty();
+        response.delay_before = response_delay(first_beat);
+        responses_.push_back(std::move(response));
+        if (was_empty) {
+            d_presenting_ = false;
+            d_gap_ = responses_.front().delay_before;
+        }
+    }
+
     SparseMemory &memory_;
     std::deque<Response> responses_;
     std::optional<Request> request_;
@@ -1286,6 +1400,8 @@ private:
     std::uint64_t random_state_ = 1;
     unsigned d_gap_ = 0;
     bool random_backpressure_ = false;
+    ResponseLatencyProfile latency_profile_ = ResponseLatencyProfile::compact;
+    ResponseLatencyStats response_latency_stats_;
     bool force_a_stall_ = false;
     bool d_presenting_ = false;
     std::uint64_t request_stall_cycles_ = 0;
@@ -1303,10 +1419,14 @@ public:
         inject_corrupt_ = corrupt;
     }
 
-    void configure_backpressure(std::uint64_t seed, bool enabled)
+    void configure_backpressure(
+        std::uint64_t seed, bool enabled,
+        ResponseLatencyProfile latency_profile = ResponseLatencyProfile::compact)
     {
         random_state_ = seed == 0 ? 1 : seed;
         random_backpressure_ = enabled;
+        latency_profile_ = latency_profile;
+        response_latency_stats_ = {};
         force_a_stall_ = enabled;
     }
 
@@ -1403,13 +1523,10 @@ public:
         if (d_fire_) {
             responses_.pop_front();
             d_presenting_ = false;
+            d_gap_ = responses_.empty() ? 0 : responses_.front().delay_before;
         }
         if (a_fire_ && request_) {
-            const bool was_empty = responses_.empty();
             respond(*request_);
-            if (was_empty && !responses_.empty() && random_backpressure_) {
-                d_gap_ = 1 + static_cast<unsigned>(next_random() % 4);
-            }
             ++request_count_;
         }
         a_fire_ = false;
@@ -1422,6 +1539,10 @@ public:
     std::uint64_t request_count() const { return request_count_; }
     std::uint64_t request_stall_cycles() const { return request_stall_cycles_; }
     std::uint64_t response_delay_cycles() const { return response_delay_cycles_; }
+    const ResponseLatencyStats &response_latency_stats() const
+    {
+        return response_latency_stats_;
+    }
 
 private:
     struct Request {
@@ -1440,6 +1561,7 @@ private:
         std::uint64_t data;
         bool denied = false;
         bool corrupt = false;
+        unsigned delay_before = 0;
     };
 
     void respond(const Request &request)
@@ -1450,13 +1572,13 @@ private:
         inject_corrupt_ = false;
         if (request.opcode == 4) {
             const std::uint64_t beat_base = request.address & ~std::uint64_t{7};
-            responses_.push_back(Response{
+            push_response(Response{
                 1, request.size, request.source,
                 // TileLink returns the complete 8-byte beat. LoadUnit selects
                 // the requested byte lane later using the physical address.
                 memory_.read_u64(beat_base),
                 denied, corrupt,
-            });
+            }, true);
             return;
         }
         if (request.opcode != 0 && request.opcode != 1) {
@@ -1474,7 +1596,8 @@ private:
                     static_cast<std::uint8_t>(request.data >> (8 * byte)));
             }
         }
-        responses_.push_back(Response{0, request.size, request.source, 0, denied, corrupt});
+        push_response(
+            Response{0, request.size, request.source, 0, denied, corrupt}, true);
     }
 
     std::uint64_t next_random()
@@ -1483,6 +1606,28 @@ private:
         random_state_ ^= random_state_ >> 7;
         random_state_ ^= random_state_ << 17;
         return random_state_;
+    }
+
+    unsigned response_delay()
+    {
+        if (!random_backpressure_) {
+            return 0;
+        }
+        const unsigned delay = sample_response_latency(
+            latency_profile_, next_random(), response_latency_stats_.samples);
+        response_latency_stats_.sample(delay);
+        return delay;
+    }
+
+    void push_response(Response response, bool first_beat)
+    {
+        const bool was_empty = responses_.empty();
+        response.delay_before = first_beat ? response_delay() : 0;
+        responses_.push_back(std::move(response));
+        if (was_empty) {
+            d_presenting_ = false;
+            d_gap_ = responses_.front().delay_before;
+        }
     }
 
     SparseMemory &memory_;
@@ -1494,6 +1639,8 @@ private:
     std::uint64_t random_state_ = 1;
     unsigned d_gap_ = 0;
     bool random_backpressure_ = false;
+    ResponseLatencyProfile latency_profile_ = ResponseLatencyProfile::compact;
+    ResponseLatencyStats response_latency_stats_;
     bool force_a_stall_ = false;
     bool d_presenting_ = false;
     std::uint64_t request_stall_cycles_ = 0;
@@ -2190,6 +2337,10 @@ private:
 class Environment {
     struct VectorReplayRequest {
         unsigned lane;
+        bool lq_flag;
+        std::uint8_t lq_value;
+        bool sq_flag;
+        std::uint8_t sq_value;
         bool is_part_replay;
         std::uint16_t replay_mask;
         std::uint8_t replay_mb_index;
@@ -2230,13 +2381,15 @@ public:
     {
         memory_agent_.expect_release_line(base, bytes);
     }
-    void configure_backpressure(std::uint64_t seed, bool enabled)
+    void configure_backpressure(
+        std::uint64_t seed, bool enabled,
+        ResponseLatencyProfile latency_profile = ResponseLatencyProfile::compact)
     {
-        memory_agent_.configure_backpressure(seed, enabled);
+        memory_agent_.configure_backpressure(seed, enabled, latency_profile);
         ptw_agent_.configure_backpressure(
-            seed ^ 0x9e3779b97f4a7c15ULL, enabled);
+            seed ^ 0x9e3779b97f4a7c15ULL, enabled, latency_profile);
         uncache_agent_.configure_backpressure(
-            seed ^ 0x3c6ef372fe94f82aULL, enabled);
+            seed ^ 0x3c6ef372fe94f82aULL, enabled, latency_profile);
     }
 
     void inject_next_dcache_response_error(bool denied, bool corrupt)
@@ -2389,6 +2542,10 @@ public:
     {
         return memory_agent_.response_delay_cycles();
     }
+    const ResponseLatencyStats &dcache_response_latency_stats() const
+    {
+        return memory_agent_.response_latency_stats();
+    }
     std::uint64_t ptw_request_stalls() const
     {
         return ptw_agent_.request_stall_cycles();
@@ -2396,6 +2553,10 @@ public:
     std::uint64_t ptw_response_delays() const
     {
         return ptw_agent_.response_delay_cycles();
+    }
+    const ResponseLatencyStats &ptw_response_latency_stats() const
+    {
+        return ptw_agent_.response_latency_stats();
     }
     std::uint64_t exception_vaddr()
     {
@@ -2420,6 +2581,10 @@ public:
     std::uint64_t uncache_response_delays() const
     {
         return uncache_agent_.response_delay_cycles();
+    }
+    const ResponseLatencyStats &uncache_response_latency_stats() const
+    {
+        return uncache_agent_.response_latency_stats();
     }
     bool store_mmio_valid()
     {
@@ -4052,6 +4217,32 @@ public:
         return issue_store_address(transaction);
     }
 
+    bool run_until_store_complete_with_replay(
+        const StoreTransaction &transaction, unsigned timeout = 4096)
+    {
+        constexpr unsigned replay_interval = 32;
+        for (unsigned elapsed = 0;
+             elapsed < timeout && !store_scoreboard_.done();) {
+            const unsigned cycles = std::min(replay_interval, timeout - elapsed);
+            if (!run_cycles(cycles)) {
+                return false;
+            }
+            elapsed += cycles;
+            if (store_scoreboard_.done()) {
+                return check_components();
+            }
+            if (!issue_store_address(transaction, replay_interval)) {
+                return false;
+            }
+            ++elapsed;
+        }
+        if (!store_scoreboard_.done()) {
+            error_ = "timed out waiting for replayed scalar store writeback";
+            return false;
+        }
+        return check_components();
+    }
+
     bool run_until_store_tlb_misses(
         std::uint64_t target, unsigned timeout = 512)
     {
@@ -4189,15 +4380,34 @@ public:
     {
         const std::uint64_t deadline = cycle() + timeout;
         while (!vector_scoreboard_.done() && cycle() < deadline) {
-            if (vector_replay_requests_.empty()) {
+            const auto replay_it = std::find_if(
+                vector_replay_requests_.begin(), vector_replay_requests_.end(),
+                [&](const VectorReplayRequest &request) {
+                    const unsigned entries = transaction.store
+                        ? kStoreQueueEntries : kVirtualLoadQueueEntries;
+                    const unsigned value = transaction.store
+                        ? request.sq_value : request.lq_value;
+                    const bool flag = transaction.store
+                        ? request.sq_flag : request.lq_flag;
+                    const unsigned base = transaction.store
+                        ? transaction.sq : transaction.lq;
+                    const bool base_flag = transaction.store
+                        ? transaction.sq_flag : transaction.lq_flag;
+                    const unsigned packed = value + (flag ? entries : 0);
+                    const unsigned packed_base = base + (base_flag ? entries : 0);
+                    const unsigned distance =
+                        (packed + 2 * entries - packed_base) % (2 * entries);
+                    return distance < transaction.flow_num;
+                });
+            if (replay_it == vector_replay_requests_.end()) {
                 tick();
                 if (!check_components()) {
                     return false;
                 }
                 continue;
             }
-            const VectorReplayRequest request = vector_replay_requests_.front();
-            vector_replay_requests_.pop_front();
+            const VectorReplayRequest request = *replay_it;
+            vector_replay_requests_.erase(replay_it);
             auto replay = transaction;
             replay.lane = request.lane;
             replay.is_part_replay = request.is_part_replay;
@@ -4215,6 +4425,35 @@ public:
         if (!vector_scoreboard_.done()) {
             std::ostringstream message;
             message << "timed out waiting for vector memory writeback after replay"
+                    << " store=" << transaction.store
+                    << " address=0x" << std::hex << transaction.address << std::dec
+                    << " addressing="
+                    << static_cast<unsigned>(transaction.addressing)
+                    << " eew=" << static_cast<unsigned>(transaction.eew)
+                    << " vl=" << static_cast<unsigned>(transaction.vl)
+                    << " vstart=" << static_cast<unsigned>(transaction.vstart)
+                    << " vm=" << transaction.vm
+                    << " mask=0x" << std::hex << transaction.mask_bits << std::dec
+                    << " active=0x" << std::hex
+                    << active_vector_elements(transaction) << std::dec
+                    << " index=0x" << std::hex;
+            for (auto it = transaction.index.rbegin();
+                 it != transaction.index.rend(); ++it) {
+                message << std::setw(2) << std::setfill('0')
+                        << static_cast<unsigned>(*it);
+            }
+            message << std::dec
+                    << " stride=" << transaction.stride
+                    << " flow_num="
+                    << static_cast<unsigned>(transaction.flow_num)
+                    << " lane=" << transaction.lane
+                    << " rob=" << static_cast<unsigned>(transaction.rob)
+                    << " lq=" << static_cast<unsigned>(transaction.lq)
+                    << '/' << transaction.lq_flag
+                    << " sq=" << static_cast<unsigned>(transaction.sq)
+                    << '/' << transaction.sq_flag
+                    << " ptw_requests=" << ptw_agent_.request_count()
+                    << " dcache_requests=" << memory_agent_.request_count()
                     << " replay_feedbacks=" << vector_replay_feedbacks_
                     << " pending_replays=" << vector_replay_requests_.size();
             error_ = message.str();
@@ -4414,6 +4653,15 @@ public:
             memory_.write_reference_byte(
                 address + byte,
                 static_cast<std::uint8_t>(transaction.data >> (8 * byte)));
+        }
+    }
+
+    void record_atomic_result(std::uint64_t address, std::uint64_t value)
+    {
+        for (unsigned byte = 0; byte < 8; ++byte) {
+            memory_.write_reference_byte(
+                address + byte,
+                static_cast<std::uint8_t>(value >> (8 * byte)));
         }
     }
 
@@ -4655,6 +4903,12 @@ private:
             !dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit.B()) {
             vector_replay_requests_.push_back(VectorReplayRequest{
                 .lane = 0,
+                .lq_flag = dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_flag.B(),
+                .lq_value = static_cast<std::uint8_t>(
+                    dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_value.U()),
+                .sq_flag = dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_flag.B(),
+                .sq_value = static_cast<std::uint8_t>(
+                    dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_value.U()),
                 .is_part_replay = dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_isVecPartReplay.B(),
                 .replay_mask = static_cast<std::uint16_t>(
                     dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_vecReplayMask.U()),
@@ -4667,6 +4921,12 @@ private:
             !dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit.B()) {
             vector_replay_requests_.push_back(VectorReplayRequest{
                 .lane = 1,
+                .lq_flag = dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_flag.B(),
+                .lq_value = static_cast<std::uint8_t>(
+                    dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_value.U()),
+                .sq_flag = dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_flag.B(),
+                .sq_value = static_cast<std::uint8_t>(
+                    dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_value.U()),
                 .is_part_replay = dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_isVecPartReplay.B(),
                 .replay_mask = static_cast<std::uint16_t>(
                     dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_vecReplayMask.U()),

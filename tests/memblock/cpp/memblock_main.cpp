@@ -21,6 +21,8 @@ struct Options {
     unsigned transactions = 200;
     bool backpressure = true;
     bool hunt_boundaries = false;
+    std::string constraint_profile = "coverage";
+    std::vector<std::string> constraint_overrides;
 };
 
 // Keep long stress runs reproducible while avoiding accidental correlation
@@ -65,6 +67,215 @@ std::uint64_t parse_u64(std::string_view text, const char *option)
     return value;
 }
 
+struct RandomConstraints {
+    enum Operation : unsigned {
+        scalar_load,
+        scalar_store,
+        vector_load,
+        vector_store,
+        prefetch,
+        atomic,
+        noncacheable,
+        mmio,
+        operation_count,
+    };
+
+    std::string name;
+    std::array<unsigned, operation_count> operation_weights{};
+    std::array<unsigned, 3> locality_weights{};
+    unsigned concurrent_actions_per_mille = 1000;
+    unsigned tlb_flushes_per_mille = 0;
+    unsigned misaligned_per_mille = 0;
+    unsigned vector_corner_per_mille = 0;
+    memblock::ResponseLatencyProfile response_latency =
+        memblock::ResponseLatencyProfile::compact;
+
+    static RandomConstraints preset(std::string_view name)
+    {
+        if (name == "coverage") {
+            return RandomConstraints{
+                .name = "coverage",
+                .operation_weights = {200, 150, 150, 150, 100, 100, 75, 75},
+                .locality_weights = {250, 250, 500},
+                .concurrent_actions_per_mille = 1000,
+                .tlb_flushes_per_mille = 50,
+                .misaligned_per_mille = 500,
+                .vector_corner_per_mille = 1000,
+                .response_latency = memblock::ResponseLatencyProfile::compact,
+            };
+        }
+        if (name == "spec") {
+            // The ordinary load/store split comes from the aggregate final
+            // measurement counters. Rare operations are verification floors,
+            // not claims about their exact SPEC frequency.
+            return RandomConstraints{
+                .name = "spec",
+                .operation_weights = {650, 270, 20, 10, 35, 5, 5, 5},
+                .locality_weights = {800, 150, 50},
+                .concurrent_actions_per_mille = 100,
+                .tlb_flushes_per_mille = 20,
+                .misaligned_per_mille = 5,
+                .vector_corner_per_mille = 100,
+                .response_latency = memblock::ResponseLatencyProfile::spec,
+            };
+        }
+        if (name == "corner") {
+            return RandomConstraints{
+                .name = "corner",
+                .operation_weights = {125, 125, 125, 125, 125, 125, 125, 125},
+                .locality_weights = {100, 200, 700},
+                .concurrent_actions_per_mille = 500,
+                .tlb_flushes_per_mille = 100,
+                .misaligned_per_mille = 500,
+                .vector_corner_per_mille = 1000,
+                .response_latency = memblock::ResponseLatencyProfile::spec,
+            };
+        }
+        throw std::invalid_argument(
+            "unknown random constraint preset: " + std::string(name));
+    }
+
+    void apply(std::string_view assignment)
+    {
+        const std::size_t separator = assignment.find('=');
+        if (separator == std::string_view::npos || separator == 0 ||
+            separator + 1 == assignment.size()) {
+            throw std::invalid_argument(
+                "--constraint expects key=value, got: " +
+                std::string(assignment));
+        }
+        const std::string_view key = assignment.substr(0, separator);
+        const std::string_view value = assignment.substr(separator + 1);
+        if (key == "latency") {
+            if (value == "compact") {
+                response_latency = memblock::ResponseLatencyProfile::compact;
+            } else if (value == "spec") {
+                response_latency = memblock::ResponseLatencyProfile::spec;
+            } else {
+                throw std::invalid_argument(
+                    "constraint latency must be compact or spec");
+            }
+            return;
+        }
+
+        const unsigned parsed = static_cast<unsigned>(
+            parse_u64(value, "--constraint"));
+        const std::array<std::pair<std::string_view, Operation>, operation_count>
+            operation_keys{{
+                {"scalar-load", scalar_load},
+                {"scalar-store", scalar_store},
+                {"vector-load", vector_load},
+                {"vector-store", vector_store},
+                {"prefetch", prefetch},
+                {"atomic", atomic},
+                {"nc", noncacheable},
+                {"mmio", mmio},
+            }};
+        for (const auto &[candidate, operation] : operation_keys) {
+            if (key == candidate) {
+                operation_weights[operation] = parsed;
+                return;
+            }
+        }
+        if (key == "locality-hot") {
+            locality_weights[0] = parsed;
+        } else if (key == "locality-warm") {
+            locality_weights[1] = parsed;
+        } else if (key == "locality-cold") {
+            locality_weights[2] = parsed;
+        } else if (key == "concurrent") {
+            concurrent_actions_per_mille = parsed;
+        } else if (key == "tlb-flush") {
+            tlb_flushes_per_mille = parsed;
+        } else if (key == "misaligned") {
+            misaligned_per_mille = parsed;
+        } else if (key == "vector-corner") {
+            vector_corner_per_mille = parsed;
+        } else {
+            throw std::invalid_argument(
+                "unknown random constraint key: " + std::string(key));
+        }
+    }
+
+    void validate() const
+    {
+        if (std::accumulate(
+                operation_weights.begin(), operation_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "random operation constraint weights cannot all be zero");
+        }
+        if (std::accumulate(
+                locality_weights.begin(), locality_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "random locality constraint weights cannot all be zero");
+        }
+        if (concurrent_actions_per_mille > 1000 ||
+            tlb_flushes_per_mille > 1000 || misaligned_per_mille > 1000 ||
+            vector_corner_per_mille > 1000) {
+            throw std::invalid_argument(
+                "per-mille random constraints must be in 0..1000");
+        }
+    }
+
+    unsigned choose_operation(std::uint64_t random) const
+    {
+        const std::uint64_t total = std::accumulate(
+            operation_weights.begin(), operation_weights.end(), 0ULL);
+        std::uint64_t selection = random % total;
+        for (unsigned operation = 0; operation < operation_count; ++operation) {
+            if (selection < operation_weights[operation]) {
+                return operation;
+            }
+            selection -= operation_weights[operation];
+        }
+        return scalar_load;
+    }
+
+    unsigned choose_locality(std::uint64_t random) const
+    {
+        const std::uint64_t total = std::accumulate(
+            locality_weights.begin(), locality_weights.end(), 0ULL);
+        std::uint64_t selection = random % total;
+        for (unsigned locality = 0; locality < locality_weights.size(); ++locality) {
+            if (selection < locality_weights[locality]) {
+                return locality;
+            }
+            selection -= locality_weights[locality];
+        }
+        return 0;
+    }
+
+    std::string summary() const
+    {
+        std::ostringstream stream;
+        stream << "constraints=" << name << " target_ops=";
+        for (std::size_t index = 0; index < operation_weights.size(); ++index) {
+            stream << (index == 0 ? "" : ",") << operation_weights[index];
+        }
+        stream << " target_locality=" << locality_weights[0] << ','
+               << locality_weights[1] << ',' << locality_weights[2]
+               << " target_concurrent=" << concurrent_actions_per_mille
+               << " target_tlb_flush=" << tlb_flushes_per_mille
+               << " target_misaligned=" << misaligned_per_mille
+               << " target_vector_corner=" << vector_corner_per_mille
+               << " target_latency="
+               << (response_latency == memblock::ResponseLatencyProfile::compact
+                       ? "compact" : "spec");
+        return stream.str();
+    }
+};
+
+RandomConstraints resolve_random_constraints(const Options &options)
+{
+    RandomConstraints constraints =
+        RandomConstraints::preset(options.constraint_profile);
+    for (const auto &assignment : options.constraint_overrides) {
+        constraints.apply(assignment);
+    }
+    constraints.validate();
+    return constraints;
+}
+
 Options parse_options(int argc, char **argv)
 {
     Options options;
@@ -81,6 +292,10 @@ Options parse_options(int argc, char **argv)
             options.backpressure = false;
         } else if (argument == "--hunt-boundaries") {
             options.hunt_boundaries = true;
+        } else if (argument == "--constraints" && index + 1 < argc) {
+            options.constraint_profile = argv[++index];
+        } else if (argument == "--constraint" && index + 1 < argc) {
+            options.constraint_overrides.emplace_back(argv[++index]);
         }
     }
     return options;
@@ -193,6 +408,77 @@ struct VectorCoverage {
                " active=" + std::to_string(active) + " inactive=" +
                std::to_string(inactive) + " hits=" + std::to_string(cache_hits) +
                " misses=" + std::to_string(cache_misses);
+    }
+};
+
+struct ConstraintCoverage {
+    std::array<std::uint64_t, RandomConstraints::operation_count> operations{};
+    std::array<std::uint64_t, 3> locality{};
+    std::uint64_t tlb_flushes = 0;
+    std::uint64_t dcache_hits = 0;
+    std::uint64_t dcache_misses = 0;
+    std::uint64_t actions = 0;
+
+    void sample_operation(unsigned operation)
+    {
+        ++operations.at(operation);
+        ++actions;
+    }
+
+    void sample_dcache(
+        std::uint64_t requests_before, std::uint64_t requests_after)
+    {
+        ++(requests_after == requests_before ? dcache_hits : dcache_misses);
+    }
+
+    bool complete(
+        const RandomConstraints &constraints, bool backpressure,
+        const memblock::ResponseLatencyStats &latency) const
+    {
+        for (std::size_t index = 0; index < operations.size(); ++index) {
+            if (constraints.operation_weights[index] != 0 &&
+                operations[index] == 0) {
+                return false;
+            }
+        }
+        for (std::size_t index = 0; index < locality.size(); ++index) {
+            if (constraints.locality_weights[index] != 0 &&
+                locality[index] == 0) {
+                return false;
+            }
+        }
+        if (constraints.tlb_flushes_per_mille != 0 && tlb_flushes == 0) {
+            return false;
+        }
+        if (backpressure &&
+            constraints.response_latency == memblock::ResponseLatencyProfile::spec) {
+            return latency.samples >= latency.buckets.size() &&
+                std::all_of(
+                    latency.buckets.begin(), latency.buckets.end(),
+                    [](auto samples) { return samples != 0; });
+        }
+        return actions != 0;
+    }
+
+    std::string summary(
+        const RandomConstraints &constraints,
+        const memblock::ResponseLatencyStats &latency) const
+    {
+        std::ostringstream stream;
+        stream << constraints.summary() << " actual_ops=";
+        for (std::size_t index = 0; index < operations.size(); ++index) {
+            stream << (index == 0 ? "" : ",") << operations[index];
+        }
+        stream << " actual_locality=" << locality[0] << ',' << locality[1]
+               << ',' << locality[2] << " actual_tlb_flush=" << tlb_flushes
+               << " actual_dcache=" << dcache_hits << ',' << dcache_misses
+               << " latency_samples=" << latency.samples
+               << " latency_buckets=" << latency.buckets[0] << ','
+               << latency.buckets[1] << ',' << latency.buckets[2] << ','
+               << latency.buckets[3]
+               << " latency_total=" << latency.total_cycles
+               << " latency_max=" << latency.max_cycles;
+        return stream.str();
     }
 };
 
@@ -337,7 +623,7 @@ struct MixedCoverage {
         ++prefetch_ops.at(encoding - 8);
     }
 
-    bool complete() const
+    bool complete(bool require_concurrent = true) const
     {
         const auto all_nonzero = [](const auto &values) {
             return std::all_of(
@@ -367,10 +653,12 @@ struct MixedCoverage {
                vector_to_scalar != 0 && cacheable != 0 && noncacheable != 0 &&
                dcache_hits != 0 && dcache_misses != 0 && tlb_reuse != 0 &&
                redirect_recovery != 0 && dirty_pressure != 0 &&
-               max_outstanding >= 5 && concurrent_windows >= 4 &&
-               all_nonzero(concurrent_ops) && concurrent_actions != 0 &&
-               unresolved_overlap_samples != 0 && max_unresolved >= 2 &&
-               max_unresolved_classes >= 2 && rvc != 0 && non_rvc != 0 &&
+               max_outstanding >= 5 &&
+               (!require_concurrent ||
+                (concurrent_windows >= 4 && all_nonzero(concurrent_ops) &&
+                 concurrent_actions != 0 && unresolved_overlap_samples != 0 &&
+                 max_unresolved >= 2 && max_unresolved_classes >= 2)) &&
+               rvc != 0 && non_rvc != 0 &&
                ftq_nonzero != 0 && store_set_hit != 0 && store_set_miss != 0 &&
                load_wait != 0;
     }
@@ -3636,7 +3924,7 @@ int run_vector_addressing(int argc, char **argv)
         return 1;
     }
 
-    std::array<memblock::VectorMemoryTransaction, 3> loads{};
+    std::array<memblock::VectorMemoryTransaction, 6> loads{};
     loads[0] = memblock::VectorMemoryTransaction{
         .address = base + 0x100,
         .stride = 6,
@@ -3671,6 +3959,22 @@ int run_vector_addressing(int argc, char **argv)
         .lane = 0,
         .flow_num = 4,
     };
+    for (unsigned index = 3; index < loads.size(); ++index) {
+        loads[index] = memblock::VectorMemoryTransaction{
+            .address = base + (index == 3 ? 0x1800 : 0x1803),
+            .addressing = memblock::VectorAddressingMode::indexed_unordered,
+            .eew = 3,
+            .vl = 2,
+            .vstart = 1,
+            .vm = false,
+            .mask_bits = 0x2,
+            .rob = static_cast<std::uint8_t>(index),
+            .lq = static_cast<std::uint8_t>(28 + 2 * (index - 3)),
+            .pdest = static_cast<std::uint8_t>(73 + index - 3),
+            .lane = 1,
+            .flow_num = 2,
+        };
+    }
     for (unsigned element = 0; element < 16; ++element) {
         loads[1].index[element] = static_cast<unsigned char>((element * 13) & 63);
     }
@@ -3681,13 +3985,20 @@ int run_vector_addressing(int argc, char **argv)
                 word_indices[element] >> (8 * byte));
         }
     }
+    for (unsigned index = 3; index < loads.size(); ++index) {
+        loads[index].index[0] = 0xc8;
+        loads[index].index[8] = index == 4 ? 0xa0 : 0xa8;
+    }
     for (std::size_t index = 0; index < loads.size(); ++index) {
         auto &transaction = loads[index];
         for (unsigned byte = 0; byte < transaction.data.size(); ++byte) {
             transaction.data[byte] = static_cast<unsigned char>(0xd0 + byte);
         }
         environment.expect_vector(transaction);
-        if (!environment.enqueue_vector(transaction) ||
+        if ((!transaction.store &&
+             !environment.set_rob_head(
+                 transaction.rob, transaction.rob_flag)) ||
+            !environment.enqueue_vector(transaction) ||
             !environment.issue_vector(transaction, 512) ||
             !environment.run_until_vector_complete(8192) ||
             !environment.run_until_lq_retired(2048)) {
@@ -3702,17 +4013,17 @@ int run_vector_addressing(int argc, char **argv)
     stores[0] = memblock::VectorMemoryTransaction{
         .store = true, .address = base + 0xc00, .stride = 5,
         .addressing = memblock::VectorAddressingMode::strided, .eew = 0,
-        .vl = 16, .rob = 3, .lq = 28, .sq = 0, .lane = 1, .flow_num = 16,
+        .vl = 16, .rob = 6, .lq = 34, .sq = 0, .lane = 1, .flow_num = 16,
     };
     stores[1] = memblock::VectorMemoryTransaction{
         .store = true, .address = base + 0x1000,
         .addressing = memblock::VectorAddressingMode::indexed_unordered, .eew = 1,
-        .vl = 8, .rob = 5, .lq = 44, .sq = 16, .lane = 0, .flow_num = 8,
+        .vl = 8, .rob = 8, .lq = 50, .sq = 16, .lane = 0, .flow_num = 8,
     };
     stores[2] = memblock::VectorMemoryTransaction{
         .store = true, .address = base + 0x1400,
         .addressing = memblock::VectorAddressingMode::indexed_ordered, .eew = 2,
-        .vl = 4, .rob = 7, .lq = 52, .sq = 24, .lane = 1, .flow_num = 4,
+        .vl = 4, .rob = 10, .lq = 58, .sq = 24, .lane = 1, .flow_num = 4,
     };
     for (std::size_t store_index = 0; store_index < stores.size(); ++store_index) {
         auto &store = stores[store_index];
@@ -5991,6 +6302,7 @@ int run_random_forwarding(int argc, char **argv, const Options &options)
 
 int run_random_mixed(int argc, char **argv, const Options &options)
 {
+    const RandomConstraints constraints = resolve_random_constraints(options);
     // The constrained coverage prefix consumes most of a short run. Require
     // enough randomized windows afterwards to exercise producer overlap.
     constexpr unsigned minimum_actions = 128;
@@ -6005,17 +6317,23 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     memblock::Environment environment(argc, argv);
     std::mt19937_64 random(options.seed ^ 0x510e527fade682d1ULL);
     MixedCoverage coverage;
+    ConstraintCoverage constraint_coverage;
     std::string phase = "reset";
     unsigned actions = 0;
     std::uint64_t rob_offset = 0;
     std::uint64_t lq_offset = 0;
     std::uint64_t sq_offset = 0;
+    std::uint64_t constrained_cold_line = 0;
     constexpr std::uint64_t bare_base = memblock::kDefaultMemoryBase + 0x100000;
     constexpr std::uint64_t cache0_base = memblock::kDefaultMemoryBase + 0x200000;
     constexpr std::uint64_t cache1_base =
         memblock::kDefaultMemoryBase + (std::uint64_t{1} << 30) + 0x200000;
     constexpr std::uint64_t nc_base =
         memblock::kDefaultMemoryBase + (std::uint64_t{2} << 30) + 0x200000;
+    constexpr std::uint64_t mmio_virtual = 0x50038000ULL;
+    constexpr std::uint64_t mmio_physical = 0x90038000ULL;
+    constexpr std::uint64_t sv39_root = 0x90000000ULL;
+    constexpr std::uint64_t atomic_base = cache0_base + 0xa0000;
     constexpr std::uint64_t guest_virtual = 0x60000000ULL;
     constexpr std::uint64_t guest_fault_virtual = 0xa0000000ULL;
     constexpr std::uint64_t guest_physical = 0xb0000000ULL;
@@ -6024,9 +6342,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     constexpr std::uint64_t g_root = 0x97000000ULL;
 
     environment.memory().fill_incrementing(bare_base, 0x20000, 0x19);
-    environment.memory().fill_incrementing(cache0_base, 0x20000, 0x43);
+    environment.memory().fill_incrementing(cache0_base, 0x90000, 0x43);
     environment.memory().fill_incrementing(cache1_base, 0x10000, 0x71);
     environment.memory().fill_incrementing(nc_base, 0x1000, 0xa3);
+    environment.memory().fill_incrementing(mmio_physical, 0x1000, 0xb7);
+    environment.memory().fill_incrementing(atomic_base, 0x1000, 0xd3);
     environment.memory().fill_incrementing(host_physical, 0x1000, 0xc5);
     environment.configure_backpressure(
         options.seed ^ 0x1f83d9abfb41bd6bULL, options.backpressure);
@@ -6142,6 +6462,22 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         transaction.vlmul = 0;
         return transaction;
     };
+    auto make_atomic = [&](std::uint64_t address, memblock::AtomicOp op,
+                           std::uint64_t data) {
+        const std::uint64_t rob = rob_offset++;
+        return memblock::AtomicTransaction{
+            .address = address,
+            .op = op,
+            .data = data,
+            .rob = memblock::rob_pointer_value(rob),
+            .rob_flag = memblock::rob_pointer_flag(rob),
+            .sq = memblock::sq_pointer_value(sq_offset),
+            .sq_flag = memblock::sq_pointer_flag(sq_offset),
+            .pdest = static_cast<std::uint8_t>(1 + random() % 255),
+            .address_lane = static_cast<unsigned>(random() % 2),
+            .data_lane = static_cast<unsigned>(random() % 2),
+        };
+    };
     auto random_delay = [&](unsigned minimum, unsigned maximum) {
         return minimum + static_cast<unsigned>(random() % (maximum - minimum + 1));
     };
@@ -6150,6 +6486,40 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         const std::uint64_t offset = random() % span;
         return region + ((offset / alignment) * alignment);
     };
+    auto constrained_cacheable_address = [&](unsigned alignment) {
+        unsigned locality = constraints.choose_locality(random());
+        for (unsigned candidate = 0;
+             candidate < constraint_coverage.locality.size(); ++candidate) {
+            if (constraints.locality_weights[candidate] != 0 &&
+                constraint_coverage.locality[candidate] == 0) {
+                locality = candidate;
+                break;
+            }
+        }
+        ++constraint_coverage.locality[locality];
+        std::uint64_t line = 0;
+        if (locality == 0) {
+            line = random() % 32;
+        } else if (locality == 1) {
+            line = random() % 512;
+        } else {
+            // Traverse a working set eight times larger than L1D without
+            // making the line sequence trivially ascending.
+            line = (constrained_cold_line++ * 4051U) % 8192;
+        }
+        std::uint64_t address = cache0_base + 0x10000 + line * 64;
+        const bool misaligned = alignment > 1 &&
+            random() % 1000 < constraints.misaligned_per_mille;
+        if (misaligned) {
+            address += 1 + random() % (alignment - 1);
+        } else {
+            address += ((random() % 64) / alignment) * alignment;
+        }
+        return address;
+    };
+    const unsigned constrained_completion_timeout =
+        constraints.response_latency == memblock::ResponseLatencyProfile::spec
+        ? 16384 : 2048;
     auto issue_load = [&](const memblock::LoadTransaction &transaction,
                           std::optional<std::uint64_t> expected = std::nullopt) {
         if (expected) {
@@ -6159,7 +6529,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         }
         if (!environment.enqueue_load(transaction) ||
             !environment.issue_load(transaction) ||
-            !environment.run_until_all_complete(2048)) {
+            !environment.run_until_all_complete(constrained_completion_timeout)) {
             return false;
         }
         coverage.sample(transaction);
@@ -6175,9 +6545,29 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         } else {
             environment.expect_vector(transaction);
         }
-        if (!environment.enqueue_vector(transaction) ||
+        bool requires_misaligned_head = false;
+        if (!transaction.store) {
+            const unsigned element_bytes = 1U << transaction.eew;
+            const std::uint16_t active =
+                memblock::active_vector_elements(transaction);
+            for (unsigned element = 0;
+                 element < 16U / element_bytes; ++element) {
+                if (((active >> element) & 1U) == 0) {
+                    continue;
+                }
+                const std::uint64_t address =
+                    memblock::vector_element_address(transaction, element);
+                requires_misaligned_head |=
+                    ((address & 0xfU) + element_bytes) > 16U;
+            }
+        }
+        if ((requires_misaligned_head &&
+             !environment.set_rob_head(
+                 transaction.rob, transaction.rob_flag)) ||
+            !environment.enqueue_vector(transaction) ||
             !environment.issue_vector(transaction) ||
-            !environment.run_until_all_complete(2048)) {
+            !environment.run_until_vector_complete_with_replays(
+                transaction, constrained_completion_timeout)) {
             return false;
         }
         coverage.sample(transaction);
@@ -6195,7 +6585,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                        environment.issue_store_address(transaction)
                                  : environment.issue_store_address(transaction) &&
                                        environment.issue_store_data(transaction));
-        if (!issued || !environment.run_until_all_complete(1024)) {
+        if (!issued || !environment.run_until_store_complete_with_replay(
+                           transaction, constrained_completion_timeout)) {
             return false;
         }
         coverage.sample(transaction, data_first);
@@ -6210,6 +6601,35 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             : (std::uint64_t{1} << bits) - 1;
         const std::uint64_t raw = data & mask;
         return is_unsigned ? raw : memblock::sign_extend(raw, bits);
+    };
+    auto atomic_result = [](memblock::AtomicOp op, std::uint64_t old_value,
+                            std::uint64_t operand) {
+        switch (op) {
+        case memblock::AtomicOp::amoadd_d:
+            return old_value + operand;
+        case memblock::AtomicOp::amoxor_d:
+            return old_value ^ operand;
+        case memblock::AtomicOp::amoand_d:
+            return old_value & operand;
+        case memblock::AtomicOp::amoor_d:
+            return old_value | operand;
+        case memblock::AtomicOp::amoswap_d:
+            return operand;
+        case memblock::AtomicOp::amomin_d:
+            return static_cast<std::int64_t>(old_value) <
+                    static_cast<std::int64_t>(operand)
+                ? old_value : operand;
+        case memblock::AtomicOp::amomax_d:
+            return static_cast<std::int64_t>(old_value) >
+                    static_cast<std::int64_t>(operand)
+                ? old_value : operand;
+        case memblock::AtomicOp::amominu_d:
+            return std::min(old_value, operand);
+        case memblock::AtomicOp::amomaxu_d:
+            return std::max(old_value, operand);
+        default:
+            return old_value;
+        }
     };
     auto overlay_vector_store = [&](const memblock::VectorMemoryTransaction &store,
                                     const memblock::VectorMemoryTransaction &load) {
@@ -6955,7 +7375,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         phase = "sv39-configuration";
         if (!environment.configure_sv39(cache0_base, cache0_base) ||
             !environment.configure_sv39(cache1_base, cache1_base) ||
-            !environment.configure_sv39_nc(nc_base, nc_base)) {
+            !environment.configure_sv39_nc(nc_base, nc_base) ||
+            !environment.map_sv39_4k(
+                mmio_virtual, mmio_physical, sv39_root,
+                true, true, false, false, false, true) ||
+            !environment.activate_sv39(sv39_root)) {
             return false;
         }
 
@@ -7139,20 +7563,47 @@ int run_random_mixed(int argc, char **argv, const Options &options)
 
         phase = "seeded-mixed-tail";
         const unsigned target_before_redirect = options.transactions - 2;
+        environment.configure_backpressure(
+            options.seed ^ 0x1f83d9abfb41bd6bULL, options.backpressure,
+            constraints.response_latency);
+        const unsigned available_tail_actions = target_before_redirect - actions;
+        const unsigned requested_concurrent_actions = static_cast<unsigned>(
+            std::uint64_t{available_tail_actions} *
+            constraints.concurrent_actions_per_mille / 1000);
+        const unsigned minimum_concurrent_actions =
+            constraints.concurrent_actions_per_mille == 0
+            ? 0
+            : std::min(28U, available_tail_actions);
+        const unsigned concurrent_action_budget = std::max(
+            requested_concurrent_actions, minimum_concurrent_actions);
+        const unsigned constrained_floor_actions = static_cast<unsigned>(
+            std::count_if(
+                constraints.operation_weights.begin(),
+                constraints.operation_weights.end(),
+                [](unsigned weight) { return weight != 0; }));
+        const unsigned maximum_concurrent_limit =
+            target_before_redirect -
+            std::min(constrained_floor_actions, available_tail_actions);
+        const unsigned concurrent_action_limit = std::min(
+            maximum_concurrent_limit, actions + concurrent_action_budget);
         // The tail is a constrained-random issue window. Each window contains
         // all five producer classes before any completion drain, so cache,
         // TLB, forwarding, and queue timing can interact in one simulation.
-        while (actions + 7 <= target_before_redirect) {
+        while (actions + 7 <= concurrent_action_limit) {
+            const std::uint64_t requests_at_window_start =
+                environment.tilelink_requests();
             const std::uint64_t window_base =
-                cache0_base + 0x10000 + (random() % 256) * 128;
+                constrained_cacheable_address(64) & ~std::uint64_t{63};
+            const bool vector_corner =
+                random() % 1000 < constraints.vector_corner_per_mille;
             const auto required_load_mode = static_cast<memblock::VectorAddressingMode>(
                 coverage.concurrent_windows < 4
                     ? coverage.concurrent_windows
-                    : random() % 4);
+                    : vector_corner ? random() % 4 : 0);
             const auto required_store_mode = static_cast<memblock::VectorAddressingMode>(
                 coverage.concurrent_windows < 4
                     ? (coverage.concurrent_windows + 1) % 4
-                    : random() % 4);
+                    : vector_corner ? random() % 4 : 0);
             auto scalar = make_load(
                 window_base + random() % 64U,
                 static_cast<memblock::LoadOp>(random() % 7), random() % 3);
@@ -7170,14 +7621,18 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             auto prefetch = make_prefetch(
                 window_base + 0x180 + (random() % 8U) * 8U,
                 static_cast<memblock::PrefetchOp>(8 + random() % 3), random() % 3);
-            vector_load.vm = (random() & 1U) != 0;
+            vector_load.vm = !vector_corner || (random() & 1U) != 0;
             vector_load.mask_bits = static_cast<std::uint16_t>(random());
-            vector_store.vm = (random() & 1U) != 0;
+            vector_store.vm = !vector_corner || (random() & 1U) != 0;
             vector_store.mask_bits = static_cast<std::uint16_t>(random());
-            vector_load.vl = static_cast<std::uint8_t>(
-                random() % ((16U >> vector_load.eew) + 1));
-            vector_store.vl = static_cast<std::uint8_t>(
-                random() % ((16U >> vector_store.eew) + 1));
+            vector_load.vl = vector_corner
+                ? static_cast<std::uint8_t>(
+                      random() % ((16U >> vector_load.eew) + 1))
+                : static_cast<std::uint8_t>(16U >> vector_load.eew);
+            vector_store.vl = vector_corner
+                ? static_cast<std::uint8_t>(
+                      random() % ((16U >> vector_store.eew) + 1))
+                : static_cast<std::uint8_t>(16U >> vector_store.eew);
             vector_load.vstart = vector_load.vl == 0
                 ? 0 : static_cast<std::uint8_t>(random() % (vector_load.vl + 1));
             vector_store.vstart = vector_store.vl == 0
@@ -7368,99 +7823,216 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             for (auto &count : coverage.concurrent_ops) {
                 ++count;
             }
+            constraint_coverage.operations[RandomConstraints::scalar_load] += 2;
+            ++constraint_coverage.operations[RandomConstraints::scalar_store];
+            constraint_coverage.operations[RandomConstraints::vector_load] += 2;
+            ++constraint_coverage.operations[RandomConstraints::vector_store];
+            ++constraint_coverage.operations[RandomConstraints::prefetch];
+            constraint_coverage.actions += 7;
+            constraint_coverage.sample_dcache(
+                requests_at_window_start, environment.tilelink_requests());
             actions += 5;
             coverage.cacheable += 7;
         }
+        const std::array<memblock::AtomicOp, 9> atomic_operations{{
+            memblock::AtomicOp::amoadd_d,
+            memblock::AtomicOp::amoxor_d,
+            memblock::AtomicOp::amoand_d,
+            memblock::AtomicOp::amoor_d,
+            memblock::AtomicOp::amoswap_d,
+            memblock::AtomicOp::amomin_d,
+            memblock::AtomicOp::amomax_d,
+            memblock::AtomicOp::amominu_d,
+            memblock::AtomicOp::amomaxu_d,
+        }};
+        std::array<std::uint64_t, 16> atomic_values{};
+        for (std::size_t slot = 0; slot < atomic_values.size(); ++slot) {
+            atomic_values[slot] = environment.memory().expected_load(
+                atomic_base + slot * 64, memblock::LoadOp::ld);
+        }
+
         while (actions < target_before_redirect) {
-            const unsigned remaining = target_before_redirect - actions;
-            unsigned kind = static_cast<unsigned>(random() % 4);
-            if (remaining == 1) {
-                kind &= 1U;
+            unsigned kind = constraints.choose_operation(random());
+            for (unsigned candidate = 0;
+                 candidate < RandomConstraints::operation_count; ++candidate) {
+                if (constraints.operation_weights[candidate] != 0 &&
+                    constraint_coverage.operations[candidate] == 0) {
+                    kind = candidate;
+                    break;
+                }
             }
-            const std::uint64_t address =
-                cache0_base + 0x10000 + (random() % 256) * 64;
-            if (kind == 0) {
+            const bool nc_store = kind == RandomConstraints::noncacheable &&
+                (random() & 3U) == 0;
+            const bool can_tlb_flush =
+                kind == RandomConstraints::scalar_load ||
+                kind == RandomConstraints::scalar_store ||
+                kind == RandomConstraints::vector_load ||
+                kind == RandomConstraints::prefetch ||
+                kind == RandomConstraints::mmio ||
+                (kind == RandomConstraints::noncacheable && !nc_store);
+            if (can_tlb_flush &&
+                constraints.tlb_flushes_per_mille != 0 &&
+                (constraint_coverage.tlb_flushes == 0 ||
+                 random() % 1000 < constraints.tlb_flushes_per_mille)) {
+                const std::uint64_t fence_address =
+                    kind == RandomConstraints::mmio
+                    ? mmio_virtual
+                    : kind == RandomConstraints::noncacheable
+                    ? nc_base
+                    : cache0_base;
+                if (!environment.issue_sfence(
+                        fence_address, 0, false, false)) {
+                    return false;
+                }
+                ++constraint_coverage.tlb_flushes;
+            }
+
+            const std::uint64_t requests_before = environment.tilelink_requests();
+            bool sample_dcache = true;
+            if (kind == RandomConstraints::scalar_load) {
+                const auto op = static_cast<memblock::LoadOp>(random() % 7);
+                const unsigned size =
+                    1U << (static_cast<unsigned>(op) & 3U);
                 const auto transaction = make_load(
-                    address, static_cast<memblock::LoadOp>(random() % 7),
-                    random() % 3);
+                    constrained_cacheable_address(size), op, random() % 3);
                 if (!issue_load(transaction)) {
                     return false;
                 }
                 ++coverage.cacheable;
-            } else if (kind == 1) {
-                const unsigned eew = random() % 4;
-                const auto addressing = static_cast<memblock::VectorAddressingMode>(
-                    random() % 4);
-                auto transaction = make_vector(
-                    false, address + ((random() & 1U) ? (1U << eew) : 0),
-                    eew, random() % 2, addressing);
-                randomize_vector_addressing(transaction);
-                const unsigned elements = 16U >> eew;
-                transaction.vm = (random() & 1U) != 0;
-                transaction.mask_bits = static_cast<std::uint16_t>(random());
-                transaction.vl = static_cast<std::uint8_t>(random() % (elements + 1));
-                transaction.vstart = transaction.vl == 0
-                    ? 0
-                    : static_cast<std::uint8_t>(random() % (transaction.vl + 1));
-                if (!issue_vector(transaction)) {
+            } else if (kind == RandomConstraints::scalar_store) {
+                const auto op = static_cast<memblock::StoreOp>(random() % 4);
+                const unsigned size = 1U << static_cast<unsigned>(op);
+                const auto transaction = make_store(
+                    constrained_cacheable_address(size), random(), op,
+                    random() % 2, random() % 2);
+                if (!issue_store(transaction, (random() & 1U) != 0) ||
+                    !environment.commit_store(transaction, 8192) ||
+                    !environment.run_until_queues_retired(8192)) {
                     return false;
                 }
                 ++coverage.cacheable;
-            } else if (kind == 2) {
-                const unsigned op = random() % 4;
-                const unsigned size = 1U << op;
-                const bool is_unsigned = op != 3 && (random() & 1U) != 0;
-                const auto store = make_store(
-                    address + (8 - size), random(),
-                    static_cast<memblock::StoreOp>(op), random() % 2,
-                    random() % 2);
-                if (!issue_store(store, (random() & 1U) != 0)) {
-                    return false;
-                }
-                const auto load = make_load(
-                    store.address,
-                    static_cast<memblock::LoadOp>(op + (is_unsigned ? 4U : 0U)),
-                    random() % 3);
-                if (!issue_load(
-                        load, scalar_forward_value(store.data, size, is_unsigned)) ||
-                    !environment.commit_store(store)) {
-                    return false;
-                }
-                ++coverage.scalar_forwarding;
-                coverage.cacheable += 2;
-            } else {
+            } else if (kind == RandomConstraints::vector_load ||
+                       kind == RandomConstraints::vector_store) {
+                const bool store = kind == RandomConstraints::vector_store;
                 const unsigned eew = random() % 4;
+                const bool vector_corner =
+                    random() % 1000 < constraints.vector_corner_per_mille;
                 const auto addressing = static_cast<memblock::VectorAddressingMode>(
-                    random() % 4);
-                auto store = make_vector(
-                    true, address, eew, random() % 2, addressing);
-                randomize_vector_addressing(store);
+                    vector_corner ? random() % 4 : 0);
+                auto transaction = make_vector(
+                    store, constrained_cacheable_address(1U << eew), eew,
+                    random() % 2, addressing);
+                randomize_vector_addressing(transaction);
                 const unsigned elements = 16U >> eew;
-                store.vm = (random() & 1U) != 0;
-                store.mask_bits = static_cast<std::uint16_t>(random());
-                store.vl = static_cast<std::uint8_t>(random() % (elements + 1));
-                store.vstart = store.vl == 0
-                    ? 0
-                    : static_cast<std::uint8_t>(random() % (store.vl + 1));
-                if (!issue_vector(store)) {
+                transaction.vm = !vector_corner || (random() & 1U) != 0;
+                transaction.mask_bits = static_cast<std::uint16_t>(random());
+                transaction.vl = vector_corner
+                    ? static_cast<std::uint8_t>(random() % (elements + 1))
+                    : static_cast<std::uint8_t>(elements);
+                transaction.vstart = vector_corner && transaction.vl != 0
+                    ? static_cast<std::uint8_t>(random() % (transaction.vl + 1))
+                    : 0;
+                if (!issue_vector(transaction) ||
+                    (store && (!environment.commit_vector_store(transaction, 8192) ||
+                               !environment.run_until_queues_retired(8192)))) {
                     return false;
                 }
-                auto load = make_vector(
-                    false, store.address, eew, random() % 2, store.addressing);
-                load.vl = store.vl;
-                load.vstart = store.vstart;
-                load.vm = store.vm;
-                load.mask_bits = store.mask_bits;
-                load.vma = store.vma;
-                load.vta = store.vta;
-                load.stride = store.stride;
-                load.index = store.index;
-                if (!issue_vector(load, overlay_vector_store(store, load)) ||
-                    !environment.commit_vector_store(store)) {
+                ++coverage.cacheable;
+            } else if (kind == RandomConstraints::prefetch) {
+                const auto transaction = make_prefetch(
+                    constrained_cacheable_address(8),
+                    static_cast<memblock::PrefetchOp>(8 + random() % 3),
+                    random() % 3);
+                environment.expect_prefetch(transaction);
+                if (!environment.enqueue_prefetch(transaction) ||
+                    !environment.issue_prefetch(transaction, 4096) ||
+                    !environment.run_until_all_complete(8192)) {
                     return false;
                 }
-                ++coverage.vector_forwarding;
-                coverage.cacheable += 2;
+                coverage.sample(transaction);
+                ++actions;
+                ++coverage.cacheable;
+            } else if (kind == RandomConstraints::atomic) {
+                const std::size_t slot = random() % atomic_values.size();
+                const auto op = atomic_operations[random() % atomic_operations.size()];
+                const std::uint64_t operand = random();
+                const auto transaction = make_atomic(
+                    atomic_base + slot * 64, op, operand);
+                const memblock::LoadTransaction old_value_writeback{
+                    .address = transaction.address,
+                    .op = memblock::LoadOp::ld,
+                    .rob = transaction.rob,
+                    .rob_flag = transaction.rob_flag,
+                    .pdest = transaction.pdest,
+                    .lane = 0,
+                    .rf_wen = true,
+                };
+                environment.expect_load_data(
+                    old_value_writeback, atomic_values[slot]);
+                if (!environment.issue_atomic(transaction, 4096) ||
+                    !environment.run_until_complete(16384)) {
+                    return false;
+                }
+                atomic_values[slot] = atomic_result(
+                    op, atomic_values[slot], operand);
+                environment.record_atomic_result(
+                    transaction.address, atomic_values[slot]);
+                ++actions;
+                ++coverage.cacheable;
+            } else if (kind == RandomConstraints::noncacheable) {
+                const std::uint64_t offset = (random() % 128) * 8;
+                if (!nc_store) {
+                    const auto transaction = make_load(
+                        nc_base + offset, memblock::LoadOp::ld, random() % 3);
+                    if (!issue_load(transaction)) {
+                        return false;
+                    }
+                } else {
+                    auto transaction = make_store(
+                        nc_base + offset, random(), memblock::StoreOp::sd,
+                        random() % 2, random() % 2);
+                    transaction.expected_debug_is_mmio = false;
+                    transaction.expected_debug_is_ncio = false;
+                    if (!issue_store(transaction, (random() & 1U) != 0) ||
+                        !environment.commit_store(transaction, 8192) ||
+                        !environment.run_until_queues_retired(8192)) {
+                        return false;
+                    }
+                }
+                ++coverage.noncacheable;
+            } else {
+                const std::uint64_t offset = (random() % 128) * 8;
+                auto transaction = make_load(
+                    mmio_virtual + offset, memblock::LoadOp::ld, random() % 3);
+                transaction.oracle_address = mmio_physical + offset;
+                transaction.expected_debug_is_mmio = true;
+                transaction.expected_debug_is_ncio = false;
+                transaction.expected_debug_is_perf_cnt = false;
+                const std::uint64_t uncache_before =
+                    environment.uncache_requests();
+                environment.expect_load(transaction);
+                if (!environment.set_rob_head(
+                        transaction.rob, transaction.rob_flag) ||
+                    !environment.enqueue_load(transaction) ||
+                    !environment.issue_load(transaction, 4096) ||
+                    !environment.wait_for_mmio_request(
+                        transaction.rob, transaction.rob_flag, 8192) ||
+                    !environment.run_until_uncache_requests(
+                        uncache_before + 1, 8192) ||
+                    !environment.run_until_complete(16384) ||
+                    !environment.run_until_lq_retired(8192)) {
+                    return false;
+                }
+                coverage.sample(transaction);
+                ++actions;
+                ++coverage.noncacheable;
+                sample_dcache = false;
+            }
+
+            constraint_coverage.sample_operation(kind);
+            if (sample_dcache) {
+                constraint_coverage.sample_dcache(
+                    requests_before, environment.tilelink_requests());
             }
         }
 
@@ -7517,7 +8089,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.lq_allocated() ||
             environment.sq_dequeued() + environment.sq_canceled() !=
                 environment.sq_allocated() ||
-            !coverage.complete() ||
+            !coverage.complete(
+                constraints.concurrent_actions_per_mille != 0) ||
+            !constraint_coverage.complete(
+                constraints, options.backpressure,
+                environment.dcache_response_latency_stats()) ||
             !coverage.backpressure_complete(options.backpressure)) {
             phase = "coverage-gates";
             return false;
@@ -7544,7 +8120,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   << (environment.error().empty()
                           ? "mixed_coverage_or_accounting_gate_failed"
                           : environment.error())
-                  << ' ' << coverage.summary() << '\n';
+                  << ' ' << coverage.summary() << ' '
+                  << constraint_coverage.summary(
+                         constraints,
+                         environment.dcache_response_latency_stats())
+                  << '\n';
         return 1;
     }
 
@@ -7569,7 +8149,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
               << " sq=" << environment.sq_dequeued() << '+'
               << environment.sq_canceled() << '/'
               << environment.sq_allocated()
-              << ' ' << coverage.summary()
+              << ' ' << coverage.summary() << ' '
+              << constraint_coverage.summary(
+                     constraints, environment.dcache_response_latency_stats())
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

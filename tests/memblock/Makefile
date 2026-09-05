@@ -33,6 +33,8 @@ FROZEN_RTL_METADATA := $(RUNTIME_DIR)/rtl.json
 CPP_MAIN := cpp/memblock_main.cpp
 CPP_ENV := cpp/memblock_env.hpp
 CONTROLLER_FILES := --controller-file $(CPP_MAIN) --controller-file $(CPP_ENV) --controller-file $(CPP_DEFAULTS) --controller-file $(SVA) --controller-file $(CONFIG) --controller-file $(VERIFY_SCRIPT) --controller-file scripts/freeze_runtime.py --controller-file Makefile
+CONSTRAINT_ARGS = $(if $(CONSTRAINTS),--constraints $(CONSTRAINTS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
+LONG_CONSTRAINT_ARGS = --constraints $(or $(CONSTRAINTS),spec) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
 .PHONY: ports check-ports prepare-rtl check-rtl bootstrap-picker export-picker picker-model freeze-runtime smoke pin-space single-load fp-loads trigger-contracts metadata-contracts dcache-errors atomic-contracts atomic-dchannel-errors uncache-errors uncache-widths mmio-contracts cbo-zero-contracts reset-recovery scalar-misaligned misaligned-stores exception-contracts l2-tlb-contracts two-stage-translation translation-matrix translation-fence translation-context translation-bare translation-faults translation-permissions translation-superpages scalar-guest-fault vector-guest-fault vector-guest-fault-split vector-load vector-split-load vector-addressing vector-store-forwarding store-forwarding store-rdata-order store-tlb-miss-preserve dcache-release redirect queue-pressure random-loads random-vector-loads random-forwarding random-vector-forwarding random-mixed random-stress random-mixed-hunt random-boundary-hunt random-boundary-regression known-bug-sentinel regression hunt-regression stress-regression verify-stress-results verify-boundary-hunt extended-regression final-regression long-final-regression verify-extended-results verify-final-results verify-long-results final-acceptance unit
 
@@ -181,13 +183,13 @@ known-bug-sentinel: $(PICKER_TEST_BINARY)
 	$(PYTHON) scripts/check_known_bug.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --timeout-seconds 300 --expect repaired-pass
 
 random-mixed-hunt: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-mixed --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) --hunt-boundaries
+	$(PICKER_TEST_BINARY) --test random-mixed --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) --hunt-boundaries --constraints $(or $(CONSTRAINTS),corner) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
 random-boundary-hunt: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test random-boundary-hunt --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),512)
 
 hunt-regression: $(PICKER_TEST_BINARY) $(PREPARED_METADATA)
-	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --output $(PREPARED_DIR)/boundary-hunt.json --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),16384) --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) --scenarios random-mixed --hunt-boundaries --continue-on-failure
+	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --output $(PREPARED_DIR)/boundary-hunt.json --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),16384) --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) --scenarios random-mixed --hunt-boundaries --continue-on-failure --constraints $(or $(CONSTRAINTS),corner) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
 random-boundary-regression: $(PICKER_TEST_BINARY) $(PREPARED_METADATA)
 	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --output $(PREPARED_DIR)/random-boundary-hunt.json --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),512) --scenarios random-boundary-hunt --hunt-boundaries --continue-on-failure
@@ -241,14 +243,14 @@ random-vector-forwarding: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test random-vector-forwarding --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),24)
 
 random-mixed: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-mixed --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384)
+	$(PICKER_TEST_BINARY) --test random-mixed --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) $(CONSTRAINT_ARGS)
 
 random-stress: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test random-stress --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384)
 
 regression: $(PICKER_TEST_BINARY)
 	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --output $(REGRESSION_OUTPUT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),8) --transactions $(or $(TRANSACTIONS),16384) --forwarding-transactions $(or $(FORWARD_TRANSACTIONS),48) --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384)
+	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --output $(REGRESSION_OUTPUT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),8) --transactions $(or $(TRANSACTIONS),16384) --forwarding-transactions $(or $(FORWARD_TRANSACTIONS),48) --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) $(CONSTRAINT_ARGS)
 
 stress-regression: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
 	$(MAKE) check-rtl
@@ -260,15 +262,15 @@ verify-stress-results:
 
 extended-regression: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
 	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(EXTENDED_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),21600) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),8192) --progress-interval-seconds 60
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(EXTENDED_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),21600) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),8192) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
 
 final-regression: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
 	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(FINAL_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),28800) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) --progress-interval-seconds 60
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(FINAL_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),28800) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
 
 long-final-regression: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
 	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(LONG_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),43200) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),32768) --progress-interval-seconds 60
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(LONG_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),43200) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),32768) --progress-interval-seconds 60 $(LONG_CONSTRAINT_ARGS)
 
 verify-extended-results:
 	$(MAKE) check-rtl

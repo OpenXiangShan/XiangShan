@@ -332,6 +332,12 @@ and only rebuild the small C++ harness when its sources change.
 ## Random Regression
 
 The normal regression includes the focused random scenarios and `random-mixed`.
+`random-mixed` is one configurable generator: realistic, balanced-coverage,
+and corner-heavy directions are selected with the `spec`, `coverage`, and
+`corner` constraint presets, and every field can be overridden without adding
+another scenario implementation. See
+[`docs/CONSTRAINED_RANDOM.md`](docs/CONSTRAINED_RANDOM.md) for the complete
+interface, preset values, SPEC counter calibration, and coverage gates.
 The mixed scenario keeps heterogeneous transactions outstanding in one
 simulation. Its constrained-random tail enqueues scalar load, scalar store,
 vector load, vector store, and software prefetch in the same rolling window,
@@ -347,6 +353,20 @@ checks committed scalar/vector stores through architectural readback, validates
 dirty ReleaseData before updating the separate bus memory, and meets bounded
 coverage plus final LSQ-accounting gates. Manager-originated coherence traffic
 remains outside this modeled boundary.
+
+For example, these commands run the same generator in two directions:
+
+```sh
+make random-mixed PICKER="$PICKER" SEED=1 TRANSACTIONS=65536 \
+  CONSTRAINTS=spec
+make random-mixed PICKER="$PICKER" SEED=2 TRANSACTIONS=32768 \
+  CONSTRAINTS=corner CONSTRAINT='tlb-flush=200 concurrent=750'
+```
+
+`extended-regression`, `final-regression`, and `long-final-regression` default
+to `spec`; boundary hunts default to `corner`. `CONSTRAINTS` and `CONSTRAINT`
+override those defaults. The ordinary `regression` and direct `random-mixed`
+target default to `coverage` when no preset is supplied.
 
 `random-stress` is the high-pressure constrained-random campaign. Each burst
 builds one or two groups before any drain. A group contains independent and
@@ -365,6 +385,9 @@ also requires at least ten simultaneous outstanding scoreboard entries and four 
 feature crosses derived from generated burst fields. Ordered-indexed vector issue remains in the
 `random-mixed` baseline because the DUT requires older LSQ retirement before
 that operation can be accepted.
+This separate entry point is retained for compatibility with its historical
+artifacts and burst-specific acceptance checks. New workload directions belong
+in the common `random-mixed` constraint interface.
 
 For a reproducible local pressure run:
 

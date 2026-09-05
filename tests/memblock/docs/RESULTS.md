@@ -200,7 +200,21 @@ parameters and verifies the independent Sv39x4 GPA oracle.
 
 Latest focused correction evidence:
 
-- 98 Python unit tests and the complete port/SVA checks pass;
+- 101 Python unit tests and the complete port/SVA/filelist checks pass;
+- the common constrained-random interface passed an override run whose tail
+  enabled only scalar loads (`seed=29`, 256 actions): actual constrained
+  operations were `155,0,0,0,0,0,0,0`, and all 155 locality selections used
+  the requested hot set;
+- `random-mixed --seed 31 --transactions 16384 --constraints spec` passed
+  16,384 actions in 577,224 cycles. Its constrained tail produced 9,971 scalar
+  loads, 4,187 scalar stores, 756 vector loads, 394 vector stores, 755
+  prefetches, 86 atomics, 63 NC accesses, and 71 MMIO accesses. It observed 313
+  TLB flushes and DCache latency buckets `1380,263,93,112`, with a 394-cycle
+  maximum;
+- `random-mixed --seed 37 --transactions 4096 --constraints corner` passed
+  4,096 actions in 193,043 cycles. It included 223 atomics, 218 NC accesses,
+  257 MMIO accesses, 144 TLB flushes, 218 dirty ReleaseData beats, and all four
+  response-latency buckets, with a 396-cycle maximum;
 - `atomic-dchannel-errors` passes on current complete RTL hash
   `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`;
 - neighboring `atomic-contracts`, `dcache-errors`, `uncache-errors`,
@@ -208,6 +222,20 @@ Latest focused correction evidence:
   that hash;
 - older full-mode and long constrained-random runs are retained below as
   superseded evidence and will not be described as current-RTL acceptance.
+
+The first attempts at the two constrained runs above found a UT reference-model
+bug at dirty atomic line `0x802a0100`: AMO old-value checking and the local AMO
+model advanced, but the architectural reference memory did not. A later
+ReleaseData was therefore compared with stale initialization data. The fix
+updates only the architectural reference after a successful AMO, leaving bus
+memory unchanged until the checked ReleaseData arrives. Both original seeds
+then passed without weakening the ReleaseData checker. See
+[`CONSTRAINED_RANDOM_ATOMIC_RELEASE_ORACLE.md`](CONSTRAINED_RANDOM_ATOMIC_RELEASE_ORACLE.md).
+
+Neighboring current-binary checks also pass: `vector-addressing` (including the
+cross-16-byte ROB-head contract), `atomic-contracts`, `dcache-errors`,
+`uncache-errors`, `mmio-contracts`, and a 4,096-action legacy `random-stress`
+seed that reached 12 outstanding scoreboard entries.
 
 The current RTL contains three confirmed CPU/MemBlock bug fixes. The first
 described here concerns Uncache: denied or corrupt D-channel responses set

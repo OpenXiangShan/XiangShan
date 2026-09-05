@@ -34,6 +34,8 @@ DEFAULT_SCENARIOS = (
 )
 BOUNDARY_HUNT_SCENARIO = "random-boundary-hunt"
 STRESS_SCENARIO = "random-stress"
+CONSTRAINED_SCENARIO = "random-mixed"
+CONSTRAINT_PROFILES = ("coverage", "spec", "corner")
 DEFAULT_JOBS = 8
 MINIMUM_MIXED_TRANSACTIONS = 128
 DEFAULT_TRANSACTIONS = 16384
@@ -283,6 +285,8 @@ def run_seed(
     backpressure: bool,
     environment: dict[str, str] | None = None,
     hunt_boundaries: bool = False,
+    constraint_profile: str = "coverage",
+    constraint_overrides: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     command = [
         str(binary),
@@ -295,6 +299,10 @@ def run_seed(
             scenario, transactions, forwarding_transactions, mixed_transactions
         )),
     ]
+    if scenario == CONSTRAINED_SCENARIO:
+        command.extend(("--constraints", constraint_profile))
+        for constraint in constraint_overrides:
+            command.extend(("--constraint", constraint))
     if not backpressure:
         command.append("--no-backpressure")
     if hunt_boundaries:
@@ -378,6 +386,18 @@ def main() -> int:
     parser.add_argument("--forwarding-transactions", type=int, default=48)
     parser.add_argument(
         "--mixed-transactions", type=int, default=DEFAULT_MIXED_TRANSACTIONS
+    )
+    parser.add_argument(
+        "--constraints",
+        choices=CONSTRAINT_PROFILES,
+        default="coverage",
+        help="random-mixed constraint preset",
+    )
+    parser.add_argument(
+        "--constraint",
+        action="append",
+        default=[],
+        help="random-mixed key=value override; may be repeated",
     )
     parser.add_argument(
         "--scenarios", default=",".join(DEFAULT_SCENARIOS),
@@ -541,6 +561,8 @@ def main() -> int:
                 not args.no_backpressure,
                 execution_environment,
                 args.hunt_boundaries,
+                args.constraints,
+                tuple(args.constraint),
             )
             pending[future] = (next_case, time.monotonic() - started)
             next_case += 1
@@ -680,7 +702,9 @@ def main() -> int:
             "backpressure": not args.no_backpressure,
             "progress_interval_seconds": args.progress_interval_seconds,
             "hunt_boundaries": args.hunt_boundaries,
-            },
+            "constraint_profile": args.constraints,
+            "constraint_overrides": args.constraint,
+        },
         "summary": {
             "seeds_completed": len(results),
             "statuses": statuses,

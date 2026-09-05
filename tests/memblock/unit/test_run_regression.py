@@ -33,6 +33,60 @@ class RunRegressionTest(unittest.TestCase):
     def test_default_worker_count_uses_measured_host_scaling(self) -> None:
         self.assertEqual(run_regression.DEFAULT_JOBS, 8)
 
+    def test_constraint_interface_is_forwarded_only_to_random_mixed(self) -> None:
+        with mock.patch.object(
+            run_regression,
+            "_run_process",
+            return_value=(
+                0,
+                "MEMBLOCK_RANDOM_MIXED_PASS seed=3 transactions=128\n",
+                False,
+            ),
+        ):
+            result = run_regression.run_seed(
+                Path("/bin/true"),
+                3,
+                "random-mixed",
+                128,
+                48,
+                128,
+                1.0,
+                True,
+                constraint_profile="spec",
+                constraint_overrides=("tlb-flush=40", "latency=compact"),
+            )
+        self.assertEqual(
+            result["command"][-6:],
+            [
+                "--constraints",
+                "spec",
+                "--constraint",
+                "tlb-flush=40",
+                "--constraint",
+                "latency=compact",
+            ],
+        )
+
+        with mock.patch.object(
+            run_regression,
+            "_run_process",
+            return_value=(0, "MEMBLOCK_RANDOM_PASS seed=3 transactions=128\n", False),
+        ):
+            scalar = run_regression.run_seed(
+                Path("/bin/true"),
+                3,
+                "random-loads",
+                128,
+                48,
+                128,
+                1.0,
+                True,
+                constraint_profile="corner",
+                constraint_overrides=("tlb-flush=100",),
+            )
+        self.assertNotIn("--constraints", scalar["command"])
+        self.assertNotIn("--constraint", scalar["command"])
+
     def test_mixed_minimum_leaves_random_tail_after_mandatory_phases(self) -> None:
         self.assertEqual(run_regression.MINIMUM_MIXED_TRANSACTIONS, 128)
         self.assertEqual(run_regression.DEFAULT_TRANSACTIONS, 16384)

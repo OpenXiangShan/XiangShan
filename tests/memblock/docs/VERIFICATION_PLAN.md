@@ -124,6 +124,20 @@ prefix; only the tail is constrained-random:
   redirect recovery, simultaneous heterogeneous issue, and both cross-type
   forwarding directions.
 
+There is one canonical mixed generator. Realistic traffic, balanced coverage,
+and corner pressure are constraint sets over that generator, not independently
+maintained scenario implementations. `--constraints coverage|spec|corner`
+selects a baseline and repeatable `--constraint key=value` arguments override
+operation mix, address locality, heterogeneous overlap, TLB flush rate,
+misalignment, vector corner bias, and response latency. The complete interface
+and performance-counter calibration are specified in
+[`CONSTRAINED_RANDOM.md`](CONSTRAINED_RANDOM.md).
+
+Every result records both resolved targets and observed counts. Each nonzero
+operation/locality weight is a per-seed coverage obligation; nonzero TLB-flush
+and `spec` latency constraints similarly require observed events. This prevents
+a valid constraint set from producing an accidentally untested short seed.
+
 The seed fails if any required class has a zero count, fewer than four mixed
 windows, no sample with two unresolved classes, or if final queue conservation
 fails. Each window first enqueues all five producer classes, then varies issue
@@ -151,9 +165,11 @@ T5 is the stress layer, not a substitute for deterministic mode/fault tests.
 
 ### High-Pressure Constrained-Random UT
 
-`random-stress` is the primary pressure-oriented UT campaign. It is separate
-from the frozen `random-mixed` artifact so the baseline remains replayable while
-the stress model evolves. A burst contains one or two transaction groups. Each
+`random-mixed` with configurable constraints is the primary campaign path.
+`random-stress` is retained for compatibility with historical artifacts and its
+burst-specific acceptance gates; new workload directions are added as common
+constraint dimensions rather than new generators. A legacy stress burst
+contains one or two transaction groups. Each
 group is enqueued before issue and includes independent scalar/vector accesses,
 store-to-load byte overlays, and prefetch traffic. The issue scheduler chooses
 random legal candidates while preserving only the scalar and vector forwarding
@@ -410,7 +426,7 @@ Before a duration run:
    logic is part of the recorded provenance.
 
 The final campaign runs at least 28,800 monotonic seconds (eight hours) with eight
-workers and the `random-mixed` scenario. Each seed requests 16,384 total
+workers and the `random-mixed --constraints spec` scenario. Each seed requests 16,384 total
 actions, including the mandatory coverage prefix and a constrained-random tail
 with five-class overlap windows. Every window
 randomizes producer parameters, legal alignment class, data, masks, vector

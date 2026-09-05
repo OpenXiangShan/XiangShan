@@ -457,6 +457,77 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("scalar_misaligned && strided_vector", driver)
         self.assertIn("indexed_vector && scalar_forwarding", driver)
 
+    def test_random_mixed_has_one_configurable_constraint_interface(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        runner = (MEMBLOCK_ROOT / "scripts/run_regression.py").read_text()
+
+        for contract in (
+            "struct RandomConstraints",
+            'name == "coverage"',
+            'name == "spec"',
+            'name == "corner"',
+            'argument == "--constraints"',
+            'argument == "--constraint"',
+            "operation_weights",
+            "locality_weights",
+            "concurrent_actions_per_mille",
+            "tlb_flushes_per_mille",
+            "misaligned_per_mille",
+            "vector_corner_per_mille",
+            "ConstraintCoverage",
+            "target_ops=",
+            "actual_ops=",
+        ):
+            self.assertIn(contract, driver)
+        for key in (
+            "scalar-load",
+            "scalar-store",
+            "vector-load",
+            "vector-store",
+            "prefetch",
+            "atomic",
+            "nc",
+            "mmio",
+            "locality-hot",
+            "locality-warm",
+            "locality-cold",
+            "concurrent",
+            "tlb-flush",
+            "misaligned",
+            "vector-corner",
+            "latency",
+        ):
+            self.assertIn('"' + key + '"', driver)
+
+        for contract in (
+            "enum class ResponseLatencyProfile",
+            "struct ResponseLatencyStats",
+            "percentile < 7410",
+            "percentile < 8853",
+            "percentile < 9359",
+            "100 + static_cast<unsigned>",
+            "run_until_store_complete_with_replay",
+            "run_until_vector_complete_with_replays",
+            "record_atomic_result",
+        ):
+            self.assertIn(contract, environment)
+        self.assertIn(
+            "environment.record_atomic_result(", driver
+        )
+        self.assertIn("CONSTRAINT_ARGS", makefile)
+        self.assertIn("LONG_CONSTRAINT_ARGS", makefile)
+        self.assertIn("constraint_profile", runner)
+        self.assertIn("constraint_overrides", runner)
+
+    def test_vector_cross_16_misalignment_advances_rob_head(self) -> None:
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        self.assertIn("requires_misaligned_head", driver)
+        self.assertIn("((address & 0xfU) + element_bytes) > 16U", driver)
+        self.assertIn(".address = base + (index == 3 ? 0x1800 : 0x1803)", driver)
+        self.assertIn("loads[index].index[8] = index == 4 ? 0xa0 : 0xa8", driver)
+
     def test_make_targets_forward_make_variable_seed_and_transaction_counts(self) -> None:
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         self.assertIn("--seed $(or $(SEED),1)", makefile)
