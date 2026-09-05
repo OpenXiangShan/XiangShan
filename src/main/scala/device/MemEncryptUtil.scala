@@ -596,6 +596,7 @@ class TweakTable(implicit p: Parameters) extends MemEncryptModule {
 
   // write tweak table entry logic
   when(io.write.valid) {
+      assert(!tweak_table(io.write.bits.id).v_flag, "[MemEncrypt] TweakTable overwrite detected: duplicate AXI ID")
       val write_entry = tweak_table(io.write.bits.id)
       write_entry.tweak_encrpty    := io.write.bits.tweak_encrpty
       write_entry.keyid            := io.write.bits.addr(PAddrBits-1, PAddrBits-KeyIDBits)
