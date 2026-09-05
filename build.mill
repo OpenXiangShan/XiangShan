@@ -96,6 +96,10 @@ object XSCache extends ChiselModule {
   def millSourcePath = pwd / "XSCache"
 
   def moduleDeps = Seq(`rocket-chip`, utility, openNCB)
+
+  object test extends SbtTests with TestModule.ScalaTest {
+    def ivyDeps: T[Agg[Dep]] = super.ivyDeps() ++ Agg(mvn"org.scalatest::scalatest:3.2.19")
+  }
 }
 
 object openNCB extends ChiselModule {

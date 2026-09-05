@@ -310,7 +310,7 @@ case class L2CacheConfig
   tp: Boolean = true,
   nl: Boolean = false,
   cdp: Boolean = true,
-  enablePC: Boolean = false, // Enable PC field for L1Param
+  enablePC: Boolean = true, // CQF needs the trigger PC on the L1-to-L2 request path
   enableFlush: Boolean = false
 ) extends Config((site, here, up) => {
   case XSTileKey =>
@@ -343,7 +343,7 @@ case class L2CacheConfig
         enableDataECC = true,
         dataCheck = Some("oddparity"),
         enablePoison = true,
-        prefetch = Seq(BOPParameters()) ++
+        prefetch = Seq(BOPParameters(enableCQF = true)) ++
           (if (tp) Seq(TPParameters()) else Nil) ++
           (if (nl) Seq(NLParameters()) else Nil) ++
           (if (cdp) Seq(CDPParameters()) else Nil) ++
