@@ -13,12 +13,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`
-- Current rebuilt and frozen UT executable SHA-256: `38f4283585fed1b1288cfc6c9bf18858ab436a635da18baa48b31e957652ddca`
+- Current rebuilt and frozen UT executable SHA-256: `5525cf3d245add9f89efa812caabfce949d91e15b3b8c43a65f38afd03563810`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `af39b980658fd5cf913d1ad0d768b41643ef2331c45edb95584159dc537161a0`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `0814ee0cdc63c87d1799f3ced61562a2f9072593e76a94f16fdb01b719feda1c`
-- Frozen runtime manifest SHA-256: `c067c81c687ef86decb3576e5add6f92c5781503eb7fedd3b3d43195a21cbd5f`
+- Frozen runtime manifest SHA-256: `64fff57111a410481ed16c0457e9ea421ce0e3df2dfc938d79813d6b713be509`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
