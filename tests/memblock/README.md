@@ -200,6 +200,7 @@ make two-stage-translation PICKER="$PICKER" JOBS=8
 make translation-matrix PICKER="$PICKER" JOBS=8
 make translation-fence PICKER="$PICKER" JOBS=8
 make translation-fence-all PICKER="$PICKER" JOBS=8
+make translation-inflight-context-all PICKER="$PICKER" JOBS=8
 make translation-context PICKER="$PICKER" JOBS=8
 make translation-bare PICKER="$PICKER" JOBS=8
 make translation-faults PICKER="$PICKER" JOBS=8
@@ -243,6 +244,13 @@ nested G delayed PTE responses. Every race waits for the exact target PTE
 TileLink request with at least 12 cycles of assigned response latency before
 replacing the PTE and fencing; the selective `HFENCE.GVMA` operand is encoded
 as `GPA >> 2`.
+
+`translation-inflight-context-all` holds the first PTW response for 256 cycles,
+changes stage-1 root/ASID or both nested roots plus ASID/VMID, and redirects the
+younger old-context load. It then reuses that load's ROB/LQ identity and checks
+that only the new mapping writes back. Separate processes cover Sv39 and Sv48
+stage-1 plus all four VS/G mode pairs; keeping this matrix out of the already
+large fence process avoids the DPI shared-library static-TLS instance limit.
 
 `translation-context` checks five context families with 14 architectural
 loads: direct Sv39-to-Sv48 mode/root switching, same-mode `satp` ASID/root,
