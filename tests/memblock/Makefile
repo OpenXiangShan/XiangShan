@@ -29,6 +29,7 @@ PICKER_TEST_BINARY := $(PICKER_HARNESS)/build/UTMemBlock_example
 XSPCOMM_LIBRARY := $(PICKER_ROOT)/build/dependence/xcomm/lib/libxspcomm.so.0.0.1
 RUNTIME_DIR := $(PREPARED_DIR)/runtime
 RUNTIME_METADATA := $(RUNTIME_DIR)/runtime.json
+FROZEN_RTL_METADATA := $(RUNTIME_DIR)/rtl.json
 CPP_MAIN := cpp/memblock_main.cpp
 CPP_ENV := cpp/memblock_env.hpp
 CONTROLLER_FILES := --controller-file $(CPP_MAIN) --controller-file $(CPP_ENV) --controller-file $(CPP_DEFAULTS) --controller-file $(SVA) --controller-file $(CONFIG) --controller-file $(VERIFY_SCRIPT) --controller-file scripts/freeze_runtime.py --controller-file Makefile
@@ -86,10 +87,10 @@ $(PICKER_TEST_BINARY): $(PICKER_HARNESS_STAMP)
 	CXXFLAGS=-I$(CURDIR)/cpp $(MAKE) -C $(PICKER_HARNESS) compile NPROC=$(JOBS)
 	@test -x $@
 
-freeze-runtime: $(RUNTIME_METADATA)
+freeze-runtime: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
 
-$(RUNTIME_METADATA): $(PICKER_TEST_BINARY) $(PICKER_HARNESS)/libUTMemBlock.so $(XSPCOMM_LIBRARY) scripts/freeze_runtime.py
-	$(PYTHON) scripts/freeze_runtime.py --binary $(PICKER_TEST_BINARY) --model $(PICKER_HARNESS)/libUTMemBlock.so --xspcomm $(XSPCOMM_LIBRARY) --output $(RUNTIME_DIR)
+$(RUNTIME_METADATA) $(FROZEN_RTL_METADATA) &: $(PICKER_TEST_BINARY) $(PICKER_HARNESS)/libUTMemBlock.so $(XSPCOMM_LIBRARY) $(PREPARED_METADATA) scripts/freeze_runtime.py
+	$(PYTHON) scripts/freeze_runtime.py --binary $(PICKER_TEST_BINARY) --model $(PICKER_HARNESS)/libUTMemBlock.so --xspcomm $(XSPCOMM_LIBRARY) --rtl-metadata $(PREPARED_METADATA) --output $(RUNTIME_DIR)
 
 smoke: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test smoke
@@ -249,43 +250,43 @@ regression: $(PICKER_TEST_BINARY)
 	$(MAKE) check-rtl
 	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --output $(REGRESSION_OUTPUT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),8) --transactions $(or $(TRANSACTIONS),16384) --forwarding-transactions $(or $(FORWARD_TRANSACTIONS),48) --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384)
 
-stress-regression: $(RUNTIME_METADATA)
+stress-regression: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
 	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(STRESS_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),3600) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-stress --mixed-transactions $(or $(STRESS_TRANSACTIONS),16384) --progress-interval-seconds 60
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(STRESS_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),3600) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-stress --transactions $(or $(STRESS_TRANSACTIONS),16384) --mixed-transactions $(or $(STRESS_TRANSACTIONS),16384) --progress-interval-seconds 60
 
 verify-stress-results:
 	$(MAKE) check-rtl
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(STRESS_RESULT) --min-duration-seconds $(or $(MIN_DURATION_SECONDS),3600) --min-results $(or $(MIN_RESULTS),128) --scenario random-stress --transactions $(or $(TRANSACTIONS),4096) --mixed-transactions $(or $(STRESS_TRANSACTIONS),16384) --expected-jobs $(or $(REGRESSION_JOBS),$(JOBS)) --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(STRESS_RESULT) --min-duration-seconds $(or $(MIN_DURATION_SECONDS),3600) --min-results $(or $(MIN_RESULTS),128) --scenario random-stress --transactions $(or $(STRESS_TRANSACTIONS),16384) --mixed-transactions $(or $(STRESS_TRANSACTIONS),16384) --expected-jobs $(or $(REGRESSION_JOBS),$(JOBS)) --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
 
-extended-regression: $(RUNTIME_METADATA)
+extended-regression: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
 	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(EXTENDED_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),21600) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),8192) --progress-interval-seconds 60
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(EXTENDED_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),21600) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),8192) --progress-interval-seconds 60
 
-final-regression: $(RUNTIME_METADATA)
+final-regression: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
 	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(FINAL_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),28800) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) --progress-interval-seconds 60
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(FINAL_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),28800) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) --progress-interval-seconds 60
 
-long-final-regression: $(RUNTIME_METADATA)
+long-final-regression: $(RUNTIME_METADATA) $(FROZEN_RTL_METADATA)
 	$(MAKE) check-rtl
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(LONG_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),43200) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),32768) --progress-interval-seconds 60
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --output $(LONG_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),43200) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),32768) --progress-interval-seconds 60
 
 verify-extended-results:
 	$(MAKE) check-rtl
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(EXTENDED_RESULT) --min-duration-seconds 21600 --min-results 128 --scenario random-mixed --transactions 4096 --mixed-transactions 8192 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(EXTENDED_RESULT) --min-duration-seconds 21600 --min-results 128 --scenario random-mixed --transactions 4096 --mixed-transactions 8192 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
 
 verify-final-results:
 	$(MAKE) check-rtl
 	$(MAKE) dcache-release
 	$(MAKE) known-bug-sentinel
 	$(MAKE) verify-boundary-hunt
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(FINAL_RESULT) --min-duration-seconds 28800 --min-results 128 --scenarios random-mixed --transactions 4096 --mixed-transactions 16384 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(FINAL_RESULT) --min-duration-seconds 28800 --min-results 128 --scenarios random-mixed --transactions 4096 --mixed-transactions 16384 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
 
 verify-long-results:
 	$(MAKE) check-rtl
 	$(MAKE) dcache-release
 	$(MAKE) known-bug-sentinel
 	$(MAKE) verify-boundary-hunt
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(LONG_RESULT) --min-duration-seconds 43200 --min-results 128 --scenarios random-mixed --transactions 4096 --mixed-transactions 32768 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(LONG_RESULT) --min-duration-seconds 43200 --min-results 128 --scenarios random-mixed --transactions 4096 --mixed-transactions 32768 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(FROZEN_RTL_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
 
 final-acceptance:
 	$(MAKE) unit

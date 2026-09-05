@@ -95,7 +95,12 @@ def mixed_result(seed: int) -> dict[str, object]:
 
 
 def regression_document(results: list[dict[str, object]]) -> dict[str, object]:
-    runtime_hashes = {"binary": "b" * 64, "model": "c" * 64, "xspcomm": "d" * 64}
+    runtime_hashes = {
+        "binary": "b" * 64,
+        "model": "c" * 64,
+        "rtl_metadata": "2" * 64,
+        "xspcomm": "d" * 64,
+    }
     external_hashes = {"/lib/system.so": "e" * 64}
     controller_hashes = {"runner": "f" * 64, "rtl_metadata": "1" * 64}
     return {

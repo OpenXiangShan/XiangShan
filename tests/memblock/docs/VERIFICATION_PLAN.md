@@ -175,6 +175,14 @@ continues to be checked by `random-mixed`, where its required older-LSQ drain is
 modeled explicitly. A stress result with a passing terminal marker but missing
 one of these combinations is rejected by `verify-stress-results`.
 
+Before a duration campaign starts, the executable, Verilated model, xspcomm,
+and prepared RTL metadata are copied into one read-only runtime directory and
+hashed. The runner and verifier both use that frozen RTL metadata rather than
+the mutable preparation path. `STRESS_TRANSACTIONS` is also passed to both the
+stress command and the verifier's generic transaction-count check. These are
+acceptance invariants: an all-pass simulator result is evidence, but is not an
+accepted campaign when its frozen provenance cannot be verified.
+
 ## Complete Verification-Point Inventory
 
 The following inventory is the closure target for the MemBlock boundary. Each

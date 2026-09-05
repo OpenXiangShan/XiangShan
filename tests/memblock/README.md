@@ -388,11 +388,14 @@ command, seed, scenario, simulator output, elapsed time, executable hash, full
 ordered-filelist RTL hash, and aggregate status. The run fails if the hash
 reported by any simulation differs from the prepared RTL metadata.
 
-For a time-based campaign, the regression targets first freeze
-the executable, Verilated model, and pinned xspcomm library into
+For a time-based campaign, the regression targets first freeze the executable,
+Verilated model, pinned xspcomm library, and the exact prepared RTL metadata into
 `build/memblock/runtime`. It verifies that both shared libraries resolve from
-that directory, makes all three artifacts read-only, and records their SHA-256
-values plus every resolved system-library hash in `runtime.json`.
+that directory, makes all four artifacts read-only, and records their SHA-256
+values plus every resolved system-library hash in `runtime.json`. Duration
+campaigns use the frozen `runtime/rtl.json`; rebuilding or removing the mutable
+`build/memblock/rtl.json` cannot invalidate an otherwise unchanged run at
+shutdown.
 
 ```sh
 make extended-regression PICKER="$PICKER" \
@@ -440,6 +443,13 @@ make freeze-runtime PICKER="$PICKER"
 LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ldd ../../build/memblock/runtime/memblock_sim
 ```
+
+`stress-regression` and `verify-stress-results` use the same
+`STRESS_TRANSACTIONS` value for both the command and verifier configuration.
+This prevents a 16,384-action stress artifact from being rejected by a stale
+4,096-action verifier default. The 2026-09-05 failure that exposed both
+hardening issues is recorded in
+[`docs/REGRESSION_PROVENANCE_FAILURE.md`](docs/REGRESSION_PROVENANCE_FAILURE.md).
 
 The old four-hour artifact was overwritten by a one-second development smoke
 run and is intentionally non-accepting. `make verify-extended-results` should

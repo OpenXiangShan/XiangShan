@@ -43,7 +43,7 @@ MAX_CAPTURED_OUTPUT_BYTES = 16000
 SUPPORTED_SCENARIOS = frozenset(
     (*DEFAULT_SCENARIOS, BOUNDARY_HUNT_SCENARIO, STRESS_SCENARIO)
 )
-RUNTIME_ROLES = frozenset({"binary", "model", "xspcomm"})
+RUNTIME_ROLES = frozenset({"binary", "model", "rtl_metadata", "xspcomm"})
 FORWARDING_SCENARIOS = frozenset(
     {"random-forwarding", "random-vector-forwarding"}
 )

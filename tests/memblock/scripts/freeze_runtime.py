@@ -25,6 +25,7 @@ class FreezeError(RuntimeError):
 ARTIFACT_NAMES = {
     "binary": "memblock_sim",
     "model": "libUTMemBlock.so",
+    "rtl_metadata": "rtl.json",
     "xspcomm": "libxspcomm.so.0.0.1",
 }
 
@@ -115,9 +116,15 @@ def freeze(
     binary: Path,
     model: Path,
     xspcomm: Path,
+    rtl_metadata: Path,
     output: Path,
 ) -> Path:
-    sources = {"binary": binary, "model": model, "xspcomm": xspcomm}
+    sources = {
+        "binary": binary,
+        "model": model,
+        "rtl_metadata": rtl_metadata,
+        "xspcomm": xspcomm,
+    }
     for role, source in sources.items():
         source = source.resolve()
         if not source.is_file():
@@ -181,11 +188,18 @@ def main() -> int:
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--xspcomm", type=Path, required=True)
+    parser.add_argument("--rtl-metadata", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
 
     try:
-        metadata = freeze(args.binary, args.model, args.xspcomm, args.output.resolve())
+        metadata = freeze(
+            args.binary,
+            args.model,
+            args.xspcomm,
+            args.rtl_metadata,
+            args.output.resolve(),
+        )
     except (OSError, FreezeError) as error:
         print(f"freeze_runtime.py: error: {error}", file=sys.stderr)
         return 2

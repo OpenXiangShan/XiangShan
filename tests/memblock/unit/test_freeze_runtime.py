@@ -26,9 +26,14 @@ class FreezeRuntimeTest(unittest.TestCase):
             binary = sources / "sim"
             model = sources / "model.so"
             xspcomm = sources / "xspcomm.so"
+            rtl_metadata = sources / "rtl.json"
             binary.write_bytes(b"binary")
             model.write_bytes(b"model")
             xspcomm.write_bytes(b"xspcomm")
+            rtl_metadata.write_text(
+                json.dumps({"complete_rtl_sha256": "a" * 64}),
+                encoding="utf-8",
+            )
             output = root / "runtime"
 
             def dependencies(frozen_binary: Path, directory: Path):
@@ -52,18 +57,25 @@ class FreezeRuntimeTest(unittest.TestCase):
             with mock.patch.object(
                 freeze_runtime, "resolved_dependencies", side_effect=dependencies
             ):
-                metadata = freeze_runtime.freeze(binary, model, xspcomm, output)
+                metadata = freeze_runtime.freeze(
+                    binary, model, xspcomm, rtl_metadata, output
+                )
 
             document = json.loads(metadata.read_text())
             self.assertEqual(
                 {entry["role"] for entry in document["artifacts"]},
-                {"binary", "model", "xspcomm"},
+                {"binary", "model", "rtl_metadata", "xspcomm"},
             )
             self.assertEqual(
                 stat.S_IMODE((output / "memblock_sim").stat().st_mode), 0o555
             )
             self.assertEqual(
                 stat.S_IMODE((output / "libUTMemBlock.so").stat().st_mode), 0o444
+            )
+            self.assertEqual(stat.S_IMODE((output / "rtl.json").stat().st_mode), 0o444)
+            self.assertEqual(
+                (output / "rtl.json").read_text(encoding="utf-8"),
+                rtl_metadata.read_text(encoding="utf-8"),
             )
             self.assertEqual(stat.S_IMODE(metadata.stat().st_mode), 0o444)
 

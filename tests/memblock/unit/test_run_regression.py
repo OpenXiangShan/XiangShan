@@ -188,6 +188,7 @@ class RunRegressionTest(unittest.TestCase):
             for role, name in (
                 ("binary", "memblock_sim"),
                 ("model", "libUTMemBlock.so"),
+                ("rtl_metadata", "rtl.json"),
                 ("xspcomm", "libxspcomm.so.0.0.1"),
             ):
                 artifact = root / name

@@ -11,16 +11,35 @@
   the expanded UT commit follows the three CPU repair commits.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `b69e387eb081a3f311311079ade435206817c7c6a20bd8f3a5f11889ec1dcbf4`
-- Current rebuilt UT executable SHA-256: `b499197dd2c0aa3d21351a7f0a3a8791373c84899d0263cbbe9fa388650c2586`
+- Current rebuilt and frozen UT executable SHA-256: `a127bebd09cad8e38cc0b66b4d49dd0421dbb482c6e2ec2bee3f12236d59c1e4`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
-- Current rebuilt Verilated model SHA-256: `00e7fffff732786103469acbfbdd40334ee724a380743947ccb5775abe1454d9`
-- Frozen runtime model SHA-256: `d2d51b8a705f3e79e1ed53f363ea513962918fd1f2c4ac98eea79ec0edac95da`
+- Current rebuilt and frozen Verilated model SHA-256: `1b805dc55a411d17931ec3b25ef16776f3f4b2db6c3be4001e113c5583a0eeae`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
-- Frozen runtime manifest SHA-256: `cfe45209adb2cd4f0605056c3adba5bb679f901b80b5ca32b3058d2072e8809d`
+- Frozen RTL metadata SHA-256: `f3b17cc5d056ec9055970874ae306d28ccb7d082ded369c1e326081107873df9`
+- Frozen runtime manifest SHA-256: `57847e36e2f41ecf4d3a84113acdb2d8c92d61b6fea68833dbb8cff516679839`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
 ## Earlier Current-Worktree Stress
+
+### Provenance-rejected one-hour stress run
+
+On 2026-09-05, 191/191 continuous `random-stress` seeds completed successfully
+with eight workers and 16,384 actions per seed. The run executed 3,129,344
+actions over 3,741.172444 seconds; every per-seed summary passed the independent
+coverage, backpressure, queue-accounting, command, and RTL-hash checks. The
+aggregate artifact is deliberately non-accepting because the mutable prepared
+`build/memblock/rtl.json` disappeared before the shutdown controller hash.
+The frozen binary/model/xspcomm and system dependencies remained unchanged,
+and regenerating the metadata reproduced its launch hash exactly. The same
+investigation found that `verify-stress-results` expected 4,096 generic actions
+while the runner recorded 16,384. Both framework defects are fixed; the original
+artifact remains unmodified evidence rather than being relabeled as a pass.
+See [`REGRESSION_PROVENANCE_FAILURE.md`](REGRESSION_PROVENANCE_FAILURE.md).
+
+Artifact: `build/memblock/stress-frozen-a32d74a61-1h-16384.json` (generated,
+not tracked), SHA-256
+`0c4d8a1a68bc9325df35bd465f60a0a0ab4ed3cd368e7f80cd03ef7372ae04e1`.
 
 These 16,384-action direct runs were completed earlier in the current worktree;
 the newer 32,768-action pair is recorded below:

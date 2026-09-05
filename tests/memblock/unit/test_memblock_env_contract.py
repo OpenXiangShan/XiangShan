@@ -456,6 +456,19 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         self.assertIn("--seed $(or $(SEED),1)", makefile)
         self.assertIn("--transactions $(or $(TRANSACTIONS),16384)", makefile)
+        self.assertIn(
+            "--transactions $(or $(STRESS_TRANSACTIONS),16384)", makefile
+        )
+        stress_rule = makefile[
+            makefile.index("stress-regression:"):makefile.index("verify-stress-results:")
+        ]
+        self.assertIn(
+            "--transactions $(or $(STRESS_TRANSACTIONS),16384)", stress_rule
+        )
+        self.assertIn(
+            "--mixed-transactions $(or $(STRESS_TRANSACTIONS),16384)", stress_rule
+        )
+        self.assertIn("--rtl-metadata $(FROZEN_RTL_METADATA)", makefile)
         self.assertNotIn("$${SEED:-1}", makefile)
         self.assertNotIn("$${TRANSACTIONS:-", makefile)
 
