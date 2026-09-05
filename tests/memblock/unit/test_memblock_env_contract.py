@@ -559,6 +559,19 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main)
 
+    def test_translation_faults_cover_both_canonicality_directions(self) -> None:
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "sv39-high",
+            "sv48-high",
+            "sv39-upper-zero-sign-one",
+            "sv39-upper-one-sign-zero",
+            "sv48-upper-zero-sign-one",
+            "sv48-upper-one-sign-zero",
+            "canonical_boundary_cases=",
+        ):
+            self.assertIn(contract, main)
+
     def test_translation_permission_matrix_uses_top_level_csr_controls(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

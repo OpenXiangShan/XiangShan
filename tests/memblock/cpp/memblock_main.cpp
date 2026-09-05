@@ -7217,28 +7217,51 @@ int run_translation_bare(int argc, char **argv)
 
 int run_translation_faults(int argc, char **argv)
 {
-    {
+    unsigned canonical_boundary_cases = 0;
+    std::uint64_t noncanonical_ptw_requests = 0;
+    struct CanonicalAddressCase {
+        const char *name;
+        memblock::ReferencePageMode mode;
+        std::uint64_t address;
+    };
+    constexpr std::array<CanonicalAddressCase, 2> canonical_addresses{{
+        {"sv39-high", memblock::ReferencePageMode::sv39,
+         0xffffffc040000188ULL},
+        {"sv48-high", memblock::ReferencePageMode::sv48,
+         0xffff800040000188ULL},
+    }};
+    for (std::size_t index = 0; index < canonical_addresses.size(); ++index) {
+        const auto &test = canonical_addresses[index];
         memblock::Environment environment(argc, argv);
-        constexpr std::uint64_t canonical = 0x0000400012340000ULL;
-        constexpr std::uint64_t physical = 0xca000000ULL;
-        constexpr std::uint64_t root = 0x9b000000ULL;
-        // Sv48 VA bit 47 is one while bits 63:48 are zero: intentionally
-        // noncanonical and therefore a stage-1 load page fault.
-        constexpr std::uint64_t noncanonical = 0x0000800012340188ULL;
+        const std::uint64_t physical = 0xca000000ULL + index * 0x200000ULL;
+        const std::uint64_t root = 0x9b000000ULL + index * 0x100000ULL;
         environment.memory().fill_incrementing(physical, 0x1000, 0x21);
+        if (!environment.reset()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=" << test.name
+                      << "-reset reason=" << environment.error() << '\n';
+            return 1;
+        }
+        const std::uint64_t virtual_page = test.address & ~std::uint64_t{0xfff};
+        const bool mapped = test.mode == memblock::ReferencePageMode::sv48
+            ? environment.map_sv48_4k(virtual_page, physical, root)
+            : environment.map_sv39_4k(virtual_page, physical, root);
+        const auto mapped_reference = memblock::reference_page_walk(
+            environment.memory(), root, test.address, test.mode);
         const memblock::LoadTransaction transaction{
-            .address = noncanonical,
+            .address = test.address,
+            .oracle_address = physical + (test.address & 0xfff),
             .op = memblock::LoadOp::ld,
             .rob = 0,
             .lq = 0,
-            .pdest = 140,
-            .lane = 0,
-            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+            .pdest = static_cast<std::uint8_t>(140 + index),
+            .lane = static_cast<unsigned>(index),
         };
-        if (!environment.reset() ||
-            !environment.map_sv48_4k(canonical, physical, root) ||
-            !environment.activate_sv48(root, 23)) {
-            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=noncanonical-configuration reason="
+        const bool activated = test.mode == memblock::ReferencePageMode::sv48
+            ? environment.activate_sv48(root, 23 + index)
+            : environment.activate_sv39(root, 23 + index);
+        if (!mapped || !mapped_reference.translated || !activated) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=" << test.name
+                      << "-configuration reason="
                       << environment.error() << '\n';
             return 1;
         }
@@ -7248,10 +7271,114 @@ int run_translation_faults(int argc, char **argv)
             !environment.issue_load(transaction, 1024) ||
             !environment.run_until_complete(16384) ||
             !environment.run_until_lq_retired(4096)) {
-            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=noncanonical-execution reason="
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=" << test.name
+                      << "-execution reason="
                       << environment.error() << '\n';
             return 1;
         }
+        ++canonical_boundary_cases;
+    }
+
+    constexpr std::array<CanonicalAddressCase, 4> noncanonical_addresses{{
+        {"sv39-upper-zero-sign-one", memblock::ReferencePageMode::sv39,
+         0x0000004000000188ULL},
+        {"sv39-upper-one-sign-zero", memblock::ReferencePageMode::sv39,
+         0xffffff8000000188ULL},
+        {"sv48-upper-zero-sign-one", memblock::ReferencePageMode::sv48,
+         0x0000800012340188ULL},
+        {"sv48-upper-one-sign-zero", memblock::ReferencePageMode::sv48,
+         0xffff000012340188ULL},
+    }};
+    for (std::size_t index = 0; index < noncanonical_addresses.size(); ++index) {
+        const auto &test = noncanonical_addresses[index];
+        memblock::Environment environment(argc, argv);
+        const std::uint64_t root = 0xa0000000ULL + index * 0x100000ULL;
+        if (!environment.reset()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=" << test.name
+                      << "-reset reason=" << environment.error() << '\n';
+            return 1;
+        }
+        const auto reference = memblock::reference_page_walk(
+            environment.memory(), root, test.address, test.mode);
+        const bool activated = test.mode == memblock::ReferencePageMode::sv48
+            ? environment.activate_sv48(root, 27 + index)
+            : environment.activate_sv39(root, 27 + index);
+        if (reference.translated || !activated) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=" << test.name
+                      << "-configuration reason=" << environment.error() << '\n';
+            return 1;
+        }
+        const std::uint64_t ptw_before = environment.ptw_requests();
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        const memblock::LoadTransaction load{
+            .address = test.address,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = static_cast<std::uint8_t>(142 + index),
+            .lane = static_cast<unsigned>(index % memblock::kScalarLoadLanes),
+            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        };
+        environment.expect_load(load);
+        if (!environment.set_rob_head(load.rob, load.rob_flag) ||
+            !environment.enqueue_load(load) ||
+            !environment.issue_load(load, 1024) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(4096) ||
+            environment.tilelink_requests() != dcache_before ||
+            environment.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=" << test.name
+                      << "-load reason="
+                      << (environment.error().empty()
+                              ? "noncanonical load reached a memory manager"
+                              : environment.error()) << '\n';
+            return 1;
+        }
+        ++canonical_boundary_cases;
+
+        const memblock::StoreTransaction store{
+            .address = test.address,
+            .data = 0x8877665544332211ULL ^ index,
+            .op = memblock::StoreOp::sd,
+            .rob = 1,
+            .sq = 0,
+            .address_lane = static_cast<unsigned>(
+                index % memblock::kScalarStoreLanes),
+            .data_lane = static_cast<unsigned>(
+                (index + 1) % memblock::kScalarStoreLanes),
+            .expected_exception_mask = memblock::kExceptionStorePageFault,
+        };
+        environment.expect_store(store);
+        if (!environment.set_rob_head(store.rob, store.rob_flag) ||
+            !environment.enqueue_store(store, 0) ||
+            !environment.issue_store_address(store, 2048) ||
+            !environment.issue_store_data(store, 2048) ||
+            !environment.run_until_store_complete_with_replay(store, 16384) ||
+            environment.tilelink_requests() != dcache_before ||
+            environment.uncache_requests() != uncache_before ||
+            (environment.sq_dequeued() + environment.sq_canceled() <
+                 environment.sq_allocated() &&
+             !environment.account_sq_cancellation(1)) ||
+            environment.sq_dequeued() + environment.sq_canceled() !=
+                environment.sq_allocated()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=" << test.name
+                      << "-store reason="
+                      << (environment.error().empty()
+                              ? "noncanonical store reached memory or unbalanced SQ"
+                              : environment.error())
+                      << " ptw=" << ptw_before << '/' << environment.ptw_requests()
+                      << " dcache=" << dcache_before << '/'
+                      << environment.tilelink_requests()
+                      << " uncache=" << uncache_before << '/'
+                      << environment.uncache_requests()
+                      << " sq=" << environment.sq_dequeued() << '+'
+                      << environment.sq_canceled() << '/'
+                      << environment.sq_allocated() << '\n';
+            return 1;
+        }
+        noncanonical_ptw_requests += environment.ptw_requests() - ptw_before;
+        ++canonical_boundary_cases;
     }
 
     {
@@ -7805,7 +7932,10 @@ int run_translation_faults(int argc, char **argv)
         }
     }
 
-    std::cout << "MEMBLOCK_TRANSLATION_FAULTS_PASS cases=109"
+    std::cout << "MEMBLOCK_TRANSLATION_FAULTS_PASS cases="
+              << canonical_boundary_cases + 4 + pte_encoding_cases.size() * 4
+              << " canonical_boundary_cases=" << canonical_boundary_cases
+              << " noncanonical_ptw_requests=" << noncanonical_ptw_requests
               << " stage1_pte_encoding_cases=" << pte_encoding_cases.size()
               << " gstage_pte_encoding_cases=" << pte_encoding_cases.size()
               << " stage1_store_pte_encoding_cases="
