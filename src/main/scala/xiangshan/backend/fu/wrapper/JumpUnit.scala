@@ -34,13 +34,12 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   jumpDataModule.io.func := func
   jumpDataModule.io.isRVC := isRVC
 
-  val fixedTaken = io.in.bits.ctrl.predictInfo.get.fixedTaken
   val predTaken  = io.in.bits.ctrl.predictInfo.get.predTaken
   val jmpPredictTarget = io.in.bits.ctrl.predictInfo.get.target
   val jumpRealTarget = jumpDataModule.io.target(VAddrData().dataWidth - 1, 0)
 
   val targetWrong = jumpRealTarget =/= jmpPredictTarget
-  val needRedirect = !fixedTaken || targetWrong
+  val needRedirect = !predTaken || targetWrong
   val needTrain = !predTaken || targetWrong
 
   val redirect = io.out.bits.res.redirect.get.bits

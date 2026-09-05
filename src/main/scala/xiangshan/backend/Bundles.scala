@@ -109,7 +109,6 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
-    val fixedTaken = Bool()
     val predTaken  = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
@@ -143,7 +142,6 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
-    val fixedTaken = Bool()
     val predTaken  = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
@@ -233,7 +231,6 @@ object Bundles {
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
-    val fixedTaken = Bool()
     val predTaken = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr = new FtqPtr
@@ -371,7 +368,6 @@ object Bundles {
     def numSrc = backendParams.numSrc
     // from frontend
     val isRVC = Bool()
-    val fixedTaken = Bool()
     val predTaken = Bool()
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
@@ -438,7 +434,6 @@ object Bundles {
     def numSrc = params.numSrc
     // from frontend
     val isRVC      = Option.when(params.needIsRVC)(Bool())
-    val fixedTaken = Option.when(params.needTaken)(Bool())
     val predTaken  = Option.when(params.needTaken)(Bool())
     val ftqPtr     = Option.when(params.needFtqPtr)(new FtqPtr)
     val ftqOffset  = Option.when(params.needFtqPtr)(UInt(FetchBlockInstOffsetWidth.W))
@@ -496,7 +491,6 @@ object Bundles {
 
     // from frontend
     val isRVC      = Option.when(params.needIsRVC)(Bool())
-    val fixedTaken = Option.when(params.needTaken)(Bool())
     val predTaken  = Option.when(params.needTaken)(Bool())
     // from decode
     val fuOpType = Opcode()
@@ -526,7 +520,6 @@ object Bundles {
     def numSrc = params.numSrc
     // from frontend
     val isRVC      = Option.when(params.needIsRVC || params.aluNeedPc)(Bool())
-    val fixedTaken = Option.when(params.needTaken)(Bool())
     val predTaken  = Option.when(params.needTaken)(Bool())
     // from decode
     val fuOpType = FuOpType()
@@ -603,7 +596,6 @@ object Bundles {
     val hasException    = Bool()
     val trigger         = TriggerAction()
     val isRVC           = Bool()
-    val fixedTaken      = Bool()
     val predTaken       = Bool()
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
@@ -1014,7 +1006,6 @@ object Bundles {
     val exuSources     = Option.when(exuParams.isIQWakeUpSink)(Vec(exuParams.numRegSrc, ExuSource(exuParams)))
     val loadDependency = OptionWrapper(exuParams.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val isRVC          = Option.when(exuParams.needIsRVC || exuParams.aluNeedPc)(Bool())
-    val fixedTaken     = Option.when(exuParams.needTaken)(Bool())
     val predTaken      = Option.when(exuParams.needTaken)(Bool())
     val fuOpType       = FuOpType()
     val selImm         = Option.when(exuParams.needImm)(SelImm())
@@ -1079,7 +1070,6 @@ object Bundles {
       // fields not carried in Og0InUop are explicitly cleared here
       this.rfRen.foreach(_.foreach(_ := false.B))
       this.isRVC.foreach(_ := false.B)
-      this.fixedTaken.foreach(_ := false.B)
       this.predTaken.foreach(_ := false.B)
       this.fuOpType := 0.U
       this.selImm.foreach(_ := 0.U)
@@ -1105,7 +1095,6 @@ object Bundles {
 
     def fromIssueDeqOg1PayloadBundle(source: IssueQueueDeqOg1Payload): Unit = {
       this.isRVC.foreach(_ := source.isRVC.get)
-      this.fixedTaken.foreach(_ := source.fixedTaken.get)
       this.predTaken.foreach(_ := source.predTaken.get)
 
       this.fuOpType := source.fuOpType
@@ -1271,7 +1260,6 @@ object Bundles {
 
     def fromIssueOg1PayloadBundle(source: EntryOg1Payload): Unit = {
       this.isRVC         .foreach(_ := source.isRVC.get)
-      this.predictInfo.foreach(_.fixedTaken := source.fixedTaken.get)
       this.predictInfo.foreach(_.predTaken  := source.predTaken.get)
       this.fuOpType                 := source.fuOpType
       this.imm                      := source.imm.getOrElse(0.U) // sta need this, other use immInfo assign in bypassNetwork
@@ -1328,7 +1316,6 @@ object Bundles {
 
   class PredictInfo(implicit p: Parameters) extends XSBundle {
     val target = UInt(VAddrData().dataWidth.W)
-    val fixedTaken = Bool()
     val predTaken = Bool()
   }
 

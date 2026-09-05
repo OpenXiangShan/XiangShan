@@ -298,9 +298,8 @@ class FtqPcOffset(implicit p: Parameters) extends FrontendBundle {
 }
 
 class InstrEndOffset(implicit p: Parameters) extends FrontendBundle {
-  val predTaken:  Bool = Bool()
-  val fixedTaken: Bool = Bool()
-  val offset:     UInt = UInt(FetchBlockInstOffsetWidth.W)
+  val predTaken: Bool = Bool()
+  val offset:    UInt = UInt(FetchBlockInstOffsetWidth.W)
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {

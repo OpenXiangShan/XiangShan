@@ -636,7 +636,6 @@ class MopCtrlBundle(implicit p: Parameters) extends XSBundle {
   val isFetchMalAddr   = Bool()
   val trigger          = TriggerAction()
   val isRVC            = Bool()
-  val fixedTaken       = Bool()
   val predTaken        = Bool()
   val crossPageIPFFix  = Bool()
   val ftqPtr           = new FtqPtr
