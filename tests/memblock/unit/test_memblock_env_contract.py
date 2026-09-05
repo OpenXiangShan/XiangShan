@@ -761,6 +761,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("struct TranslationContext", driver)
         self.assertIn("reference_two_stage_walk", driver)
         self.assertIn("environment.set_page_based_memory_types(true, true)", driver)
+        self.assertIn("stage1_weight + nested_weight", driver)
+        self.assertIn("translation_coverage_closed", driver)
         self.assertIn("CONSTRAINT_ARGS", makefile)
         self.assertIn("LONG_CONSTRAINT_ARGS", makefile)
         self.assertIn("constraint_profile", runner)

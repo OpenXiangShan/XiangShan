@@ -10939,6 +10939,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         }
         TranslationContext current_translation{};
         bool translation_context_valid = false;
+        bool translation_coverage_closed = false;
         const auto first_enabled_mode = [](const std::array<unsigned, 2> &weights) {
             return weights[0] != 0 ? 0U : 1U;
         };
@@ -10955,8 +10956,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         };
         const auto translated_context = [&]() {
             TranslationContext context;
-            if (constraints.translation_weights[
-                    RandomConstraints::translation_stage1] != 0) {
+            const std::uint64_t stage1_weight = constraints.translation_weights[
+                RandomConstraints::translation_stage1];
+            const std::uint64_t nested_weight = constraints.translation_weights[
+                RandomConstraints::translation_nested];
+            if (random() % (stage1_weight + nested_weight) < stage1_weight) {
                 context.regime = RandomConstraints::translation_stage1;
                 context.stage1_mode = constraints.choose_stage1_mode(random());
             } else {
@@ -11051,6 +11055,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         const auto choose_translation_context = [&]() {
             if (const auto required = required_translation_context()) {
                 return *required;
+            }
+            if (!translation_coverage_closed) {
+                translation_coverage_closed = true;
+                return random_translation_context();
             }
             if (translation_context_valid &&
                 random() % 1000 >=
