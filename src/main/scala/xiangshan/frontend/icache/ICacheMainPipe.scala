@@ -367,13 +367,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     })
   })
 
-  /* *** Update replacer *** */
-  (0 until PortNumber).foreach { i =>
-    io.replacerTouch.req(i).bits.vSetIdx := s1_req(0).vSetIdx(i)                      // FIXME
-    io.replacerTouch.req(i).bits.way     := OHToUInt(s1_wayLookupEntry(0).waymask(i)) // FIXME
+  /* *** Update replacer on a hit (miss will be handled in MissUnit) *** */
+  io.replacerTouch.req.zipWithIndex.foreach { case (reqPort, reqIdx) =>
+    reqPort.zipWithIndex.foreach { case (port, portIdx) =>
+      port.valid        := s1_sramValid(reqIdx)(portIdx) && s1_sramHits(reqIdx)(portIdx)
+      port.bits.vSetIdx := s1_req(reqIdx).vSetIdx(portIdx)
+      port.bits.way     := OHToUInt(s1_wayLookupEntry(reqIdx).waymask(portIdx))
+    }
   }
-  io.replacerTouch.req(0).valid := RegNext(s0_fire) && s1_sramHits(0)(0)                      // FIXME
-  io.replacerTouch.req(1).valid := RegNext(s0_fire) && s1_sramHits(0)(1) && s1_isCrossLine(0) // FIXME
 
   /* *** PMP check (to be removed) *** */
   // if itlb has exception, pAddr can be invalid, therefore pmp check can be skipped do not do this now for timing
