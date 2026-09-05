@@ -1346,7 +1346,13 @@ public:
         response_latency_stats_ = {};
         outstanding_requests_ = 0;
         max_outstanding_requests_ = 0;
+        forced_next_response_delay_.reset();
         force_a_stall_ = enabled;
+    }
+
+    void force_next_response_delay(unsigned cycles)
+    {
+        forced_next_response_delay_ = cycles;
     }
 
     void drive(UTMemBlock &dut)
@@ -1567,6 +1573,12 @@ private:
 
     unsigned response_delay(bool first_beat)
     {
+        if (first_beat && forced_next_response_delay_) {
+            const unsigned delay = *forced_next_response_delay_;
+            forced_next_response_delay_.reset();
+            response_latency_stats_.sample(delay);
+            return delay;
+        }
         if (!random_backpressure_) {
             return 0;
         }
@@ -1604,6 +1616,7 @@ private:
     bool random_backpressure_ = false;
     ResponseLatencyProfile latency_profile_ = ResponseLatencyProfile::compact;
     ResponseLatencyStats response_latency_stats_;
+    std::optional<unsigned> forced_next_response_delay_;
     bool force_a_stall_ = false;
     bool d_presenting_ = false;
     std::uint64_t outstanding_requests_ = 0;
@@ -2658,6 +2671,11 @@ public:
     void inject_next_uncache_response_error(bool denied, bool corrupt)
     {
         uncache_agent_.inject_next_response_error(denied, corrupt);
+    }
+
+    void force_next_ptw_response_delay(unsigned cycles)
+    {
+        ptw_agent_.force_next_response_delay(cycles);
     }
 
     void configure_cache_error_enable(bool enable)
@@ -4278,6 +4296,30 @@ public:
         dut_.io_ooo_to_mem_tlbCsr_vsatp_changed.ImmSet(std::uint64_t{1});
         tick(false);
         dut_.io_ooo_to_mem_tlbCsr_vsatp_changed.ImmSet(std::uint64_t{0});
+        return run_cycles(16) && check_components();
+    }
+
+    bool update_two_stage_context(
+        ReferencePageMode vs_mode,
+        ReferencePageMode g_mode,
+        std::uint64_t vs_root_page_table,
+        std::uint64_t g_root_page_table,
+        std::uint16_t asid,
+        std::uint16_t vmid)
+    {
+        dut_.io_ooo_to_mem_tlbCsr_vsatp_mode.ImmSet(
+            static_cast<std::uint64_t>(vs_mode));
+        dut_.io_ooo_to_mem_tlbCsr_vsatp_asid.ImmSet(asid);
+        dut_.io_ooo_to_mem_tlbCsr_vsatp_ppn.ImmSet(vs_root_page_table >> 12);
+        dut_.io_ooo_to_mem_tlbCsr_hgatp_mode.ImmSet(
+            static_cast<std::uint64_t>(g_mode));
+        dut_.io_ooo_to_mem_tlbCsr_hgatp_vmid.ImmSet(vmid);
+        dut_.io_ooo_to_mem_tlbCsr_hgatp_ppn.ImmSet(g_root_page_table >> 12);
+        dut_.io_ooo_to_mem_tlbCsr_vsatp_changed.ImmSet(std::uint64_t{1});
+        dut_.io_ooo_to_mem_tlbCsr_hgatp_changed.ImmSet(std::uint64_t{1});
+        tick(false);
+        dut_.io_ooo_to_mem_tlbCsr_vsatp_changed.ImmSet(std::uint64_t{0});
+        dut_.io_ooo_to_mem_tlbCsr_hgatp_changed.ImmSet(std::uint64_t{0});
         return run_cycles(16) && check_components();
     }
 

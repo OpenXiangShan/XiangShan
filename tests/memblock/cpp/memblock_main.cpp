@@ -6427,6 +6427,205 @@ int run_translation_fence(
     return 0;
 }
 
+int run_translation_inflight_context(
+    int argc,
+    char **argv,
+    bool outstanding_vs_sv48,
+    bool outstanding_g_sv48)
+{
+    std::uint64_t outstanding_cycles = 0;
+    std::uint64_t outstanding_ptw_requests = 0;
+    std::uint64_t outstanding_writebacks = 0;
+
+    // A context-changing instruction is older than the translated load and
+    // redirects it. Hold the old PTW response beyond the CSR propagation and
+    // redirect interval, then reuse the same ROB/LQ identity under a different
+    // root and ID. Only the new mapping may produce an architectural writeback.
+    unsigned inflight_context_cases = 0;
+    const auto run_inflight_context_switch = [&](bool nested_translation) {
+        memblock::Environment context(argc, argv);
+        constexpr std::uint64_t virtual_page = 0x40000000ULL;
+        constexpr std::uint64_t address = virtual_page + 0x188;
+        constexpr std::array<std::uint64_t, 2> guest_pages{{
+            0x800000000ULL, 0x840000000ULL}};
+        constexpr std::array<std::uint64_t, 2> physical_pages{{
+            0x80000000ULL, 0xc0000000ULL}};
+        constexpr std::array<std::uint64_t, 2> stage1_roots{{
+            0xbc000000ULL, 0xbd000000ULL}};
+        constexpr std::array<std::uint64_t, 2> vs_roots{{
+            0x100000000ULL, 0x140000000ULL}};
+        constexpr std::array<std::uint64_t, 2> g_roots{{
+            0x90000000ULL, 0x94000000ULL}};
+        for (unsigned index = 0; index < physical_pages.size(); ++index) {
+            context.memory().fill_incrementing(
+                physical_pages[index], 0x1000,
+                static_cast<std::uint8_t>(0x3d + index * 0x71));
+        }
+        context.configure_backpressure(
+            nested_translation ? 0x510e527fade682d1ULL
+                               : 0x9b05688c2b3e6c1fULL,
+            true,
+            memblock::ResponseLatencyProfiles{
+                memblock::ResponseLatencyProfile::compact,
+                memblock::ResponseLatencyProfile::spec,
+                memblock::ResponseLatencyProfile::compact});
+        bool configured = context.reset();
+        for (unsigned index = 0; configured && index < 2; ++index) {
+            configured = nested_translation
+                ? (outstanding_vs_sv48
+                    ? context.map_sv48_1g(
+                          virtual_page, guest_pages[index], vs_roots[index])
+                    : context.map_sv39_1g(
+                          virtual_page, guest_pages[index], vs_roots[index]))
+                : (outstanding_vs_sv48
+                    ? context.map_sv48_1g(
+                          virtual_page, physical_pages[index],
+                          stage1_roots[index])
+                    : context.map_sv39_1g(
+                          virtual_page, physical_pages[index],
+                          stage1_roots[index]));
+            if (configured && nested_translation) {
+                configured = outstanding_g_sv48
+                    ? context.map_sv48x4_1g(
+                          vs_roots[index], vs_roots[index], g_roots[index])
+                    : context.map_sv39x4_1g(
+                          vs_roots[index], vs_roots[index], g_roots[index]);
+            }
+            if (configured && nested_translation) {
+                configured = outstanding_g_sv48
+                    ? context.map_sv48x4_1g(
+                          guest_pages[index], physical_pages[index],
+                          g_roots[index])
+                    : context.map_sv39x4_1g(
+                          guest_pages[index], physical_pages[index],
+                          g_roots[index]);
+            }
+        }
+        if (configured) {
+            configured = nested_translation
+                ? context.activate_two_stage_modes(
+                      outstanding_vs_sv48
+                          ? memblock::ReferencePageMode::sv48
+                          : memblock::ReferencePageMode::sv39,
+                      outstanding_g_sv48
+                          ? memblock::ReferencePageMode::sv48
+                          : memblock::ReferencePageMode::sv39,
+                      vs_roots[0], g_roots[0], 101, 103)
+                : (outstanding_vs_sv48
+                    ? context.activate_sv48(stage1_roots[0], 101)
+                    : context.activate_sv39(stage1_roots[0], 101));
+        }
+        if (!configured) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << context.cycle() << " phase=inflight-context-"
+                      << (nested_translation ? "nested" : "stage1")
+                      << "-configuration reason=" << context.error() << '\n';
+            return false;
+        }
+
+        memblock::LoadTransaction canceled{
+            .address = address,
+            .oracle_address = physical_pages[0] + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 50,
+            .lq = 0,
+            .pdest = 126,
+            .lane = 0,
+        };
+        context.force_next_ptw_response_delay(256);
+        const std::uint64_t first_ptw_request = context.ptw_requests();
+        if (!context.set_rob_head(canceled.rob, canceled.rob_flag) ||
+            !context.enqueue_load(canceled) ||
+            !context.issue_load(canceled, 512) ||
+            !context.run_until_ptw_requests(first_ptw_request + 1, 4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << context.cycle() << " phase=inflight-context-"
+                      << (nested_translation ? "nested" : "stage1")
+                      << "-old-request reason=" << context.error() << '\n';
+            return false;
+        }
+        const std::uint64_t stale_ptw_snapshot = context.ptw_requests();
+        const bool switched = nested_translation
+            ? context.update_two_stage_context(
+                  outstanding_vs_sv48
+                      ? memblock::ReferencePageMode::sv48
+                      : memblock::ReferencePageMode::sv39,
+                  outstanding_g_sv48
+                      ? memblock::ReferencePageMode::sv48
+                      : memblock::ReferencePageMode::sv39,
+                  vs_roots[1], g_roots[1], 102, 104)
+            : context.update_stage_one_context(
+                  outstanding_vs_sv48
+                      ? memblock::ReferencePageMode::sv48
+                      : memblock::ReferencePageMode::sv39,
+                  stage1_roots[1], 102);
+        if (!switched || !context.redirect_after(49, false, false) ||
+            context.writebacks() != 0) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << context.cycle() << " phase=inflight-context-"
+                      << (nested_translation ? "nested" : "stage1")
+                      << "-switch reason="
+                      << (context.error().empty()
+                              ? "redirected old context produced a writeback"
+                              : context.error()) << '\n';
+            return false;
+        }
+        if (context.lq_dequeued() + context.lq_canceled() <
+                context.lq_allocated() &&
+            !context.account_lq_cancellation(1)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << context.cycle() << " phase=inflight-context-"
+                      << (nested_translation ? "nested" : "stage1")
+                      << "-cancel-accounting reason=" << context.error() << '\n';
+            return false;
+        }
+
+        canceled.oracle_address = physical_pages[1] + 0x188;
+        canceled.pdest = 127;
+        canceled.lane = 1;
+        context.expect_load(canceled);
+        if (!context.enqueue_load(canceled) ||
+            !context.issue_load(canceled, 2048) ||
+            !context.run_until_complete(32768) ||
+            !context.run_until_lq_retired(4096) ||
+            context.ptw_requests() <= stale_ptw_snapshot ||
+            context.writebacks() != 1 ||
+            context.lq_dequeued() + context.lq_canceled() !=
+                context.lq_allocated()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << context.cycle() << " phase=inflight-context-"
+                      << (nested_translation ? "nested" : "stage1")
+                      << "-new-request reason="
+                      << (context.error().empty()
+                              ? "new context reused stale translation"
+                              : context.error()) << '\n';
+            return false;
+        }
+        outstanding_cycles += context.cycle();
+        outstanding_ptw_requests += context.ptw_requests();
+        outstanding_writebacks += context.writebacks();
+        ++inflight_context_cases;
+        return true;
+    };
+
+    if (!run_inflight_context_switch(false) ||
+        !run_inflight_context_switch(true)) {
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_TRANSLATION_INFLIGHT_CONTEXT_PASS"
+              << " cycle=" << outstanding_cycles
+              << " ptw_requests=" << outstanding_ptw_requests
+              << " writebacks=" << outstanding_writebacks
+              << " outstanding_vs_mode="
+              << (outstanding_vs_sv48 ? "sv48" : "sv39")
+              << " outstanding_g_mode="
+              << (outstanding_g_sv48 ? "sv48x4" : "sv39x4")
+              << " inflight_context_cases=" << inflight_context_cases
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_translation_context(int argc, char **argv)
 {
     auto run_context_load = [](
@@ -13127,6 +13326,18 @@ int main(int argc, char **argv)
         }
         if (options.test == "translation-fence-sv48-sv39x4-selective") {
             return run_translation_fence(argc, argv, true, true, false);
+        }
+        if (options.test == "translation-inflight-context") {
+            return run_translation_inflight_context(argc, argv, false, false);
+        }
+        if (options.test == "translation-inflight-context-sv48") {
+            return run_translation_inflight_context(argc, argv, true, true);
+        }
+        if (options.test == "translation-inflight-context-sv39-sv48x4") {
+            return run_translation_inflight_context(argc, argv, false, true);
+        }
+        if (options.test == "translation-inflight-context-sv48-sv39x4") {
+            return run_translation_inflight_context(argc, argv, true, false);
         }
         if (options.test == "translation-context") {
             return run_translation_context(argc, argv);

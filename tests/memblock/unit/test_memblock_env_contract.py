@@ -462,6 +462,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "translation-fence-sv48-sv39x4",
             "translation-fence-sv48-sv39x4-selective",
             "translation-fence-all",
+            "translation-inflight-context-all",
             "translation-context",
             "translation-bare",
             "translation-faults",
@@ -534,6 +535,21 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "outstanding_g=",
             "outstanding_nested_vs=",
             "outstanding_nested_g=",
+        ):
+            self.assertIn(contract, environment + main)
+
+    def test_translation_fence_covers_inflight_context_switches(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "force_next_ptw_response_delay",
+            "update_two_stage_context",
+            "run_inflight_context_switch(false)",
+            "run_inflight_context_switch(true)",
+            '"-old-request reason="',
+            '"-switch reason="',
+            '"-new-request reason="',
+            "inflight_context_cases=",
         ):
             self.assertIn(contract, environment + main)
 
