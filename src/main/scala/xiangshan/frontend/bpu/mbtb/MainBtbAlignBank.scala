@@ -68,15 +68,13 @@ class MainBtbAlignBank(
       val req: Valid[Req] = Flipped(Valid(new Req))
     }
 
+    val enable:        Bool      = Input(Bool())
     val sramResetDone: Bool      = Output(Bool())
     val stageCtrl:     StageCtrl = Input(new StageCtrl)
 
     val read:  Read                  = new Read
     val write: Write                 = new Write
     val trace: MainBtbAlignBankTrace = Output(new MainBtbAlignBankTrace)
-
-    // final s3_takenMask (mbtb + tage + sc), used to touch replacer accurately
-    val s3_takenMask: Vec[Bool] = Input(Vec(NumWay, Bool()))
 
     // fast path of train pc, used to read replacer in advance for better timing
     val t0_startPc: Pc = Input(new Pc)
@@ -99,7 +97,7 @@ class MainBtbAlignBank(
   /* *** s0 ***
    * send read req to internal banks (srams)
    */
-  private val s0_fire             = io.stageCtrl.s0_fire
+  private val s0_fire             = io.stageCtrl.s0_fire && io.enable
   private val s0_startPc          = r.req.startPc
   private val s0_posHigherBits    = r.req.posHigherBits
   private val s0_crossPage        = r.req.crossPage
@@ -121,7 +119,7 @@ class MainBtbAlignBank(
    * receive read resp from internal banks
    * select 1 internal bank's resp
    */
-  private val s1_fire             = io.stageCtrl.s1_fire
+  private val s1_fire             = io.stageCtrl.s1_fire && io.enable
   private val s1_startPc          = RegEnable(s0_startPc, s0_fire)
   private val s1_posHigherBits    = RegEnable(s0_posHigherBits, s0_fire)
   private val s1_crossPage        = RegEnable(s0_crossPage, s0_fire)
@@ -143,7 +141,7 @@ class MainBtbAlignBank(
    * filter-out unneeded entries
    * send resp to top
    */
-  private val s2_fire             = io.stageCtrl.s2_fire
+  private val s2_fire             = io.stageCtrl.s2_fire && io.enable
   private val s2_startPc          = RegEnable(s1_startPc, s1_fire)
   private val s2_posHigherBits    = RegEnable(s1_posHigherBits, s1_fire)
   private val s2_crossPage        = RegEnable(s1_crossPage, s1_fire)
@@ -167,13 +165,13 @@ class MainBtbAlignBank(
     // filter out branches before alignedInstOffset
     // also filter out all entries if crossPage to satisfy Ifu/ICache's requirement
     val hit = rawHit && e.position >= s2_alignedInstOffset && !s2_crossPage
-    pred.valid            := hit
+    pred.valid            := hit && io.enable
     pred.bits.cfiPosition := Cat(s2_posHigherBits, e.position)
     pred.bits.target      := getFullTarget(s2_startPc, e.targetLowerBits, e.targetCarry)
     pred.bits.attribute   := e.attribute
     pred.bits.taken       := c.isPositive
 
-    meta.rawHit    := rawHit
+    meta.rawHit    := rawHit && io.enable
     meta.attribute := e.attribute
     meta.position  := Cat(s2_posHigherBits, e.position)
     meta.counter   := c
@@ -183,17 +181,10 @@ class MainBtbAlignBank(
   private val s2_hitMask = VecInit(r.resp.predictions.map(_.valid))
   dontTouch(s2_hitMask)
 
-  /* *** s3 ***
-   * touch replacer using final takenMask (mbtb + tage + sc)
-   */
-  private val s3_fire           = io.stageCtrl.s3_fire
-  private val s3_replacerSetIdx = RegEnable(getReplacerSetIndex(s2_startPc), s2_fire)
-  private val s3_takenMask      = io.s3_takenMask
-
   /* *** t0 ***
    * read replacer in advance for better timing
    */
-  private val t0_fire    = io.stageCtrl.t0_fire
+  private val t0_fire    = io.stageCtrl.t0_fire && io.enable
   private val t0_startPc = io.t0_startPc
 
   replacer.io.train.t0_setIdx := getReplacerSetIndex(t0_startPc)

@@ -88,31 +88,24 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val redirect = io.fromFtq.redirect
 
   /* *** CSR ctrl sub-predictor enable *** */
-  private val ctrl      = DelayN(io.ctrl, 2) // delay 2 cycle for timing
-  private val constCtrl = Constantin.createRecord("constCtrl")
+  private val csrCtrl   = DelayN(io.ctrl, 2) // delay 2 cycle for timing
+  private val constCtrl = Constantin.createRecord("BpuCtrl").asTypeOf(new BpuConstCtrl)
+  private val ctrl =
+    if (env.EnableConstantin && !env.FPGAPlatform)
+      Mux(constCtrl.use, constCtrl.ctrl, csrCtrl)
+    else
+      csrCtrl
 
   fallThrough.io.enable := true.B // fallThrough is always enabled
-  utage.io.enable       := true.B
-  uras.io.enable        := true.B
-  if (env.EnableConstantin && !env.FPGAPlatform) {
-    ubtb.io.enable   := Mux(constCtrl(0), constCtrl(1), ctrl.ubtbEnable)
-    abtb.io.enable   := Mux(constCtrl(0), constCtrl(2), ctrl.abtbEnable)
-    mbtb.io.enable   := Mux(constCtrl(0), constCtrl(3), ctrl.mbtbEnable)
-    tage.io.enable   := Mux(constCtrl(0), constCtrl(4), ctrl.tageEnable)
-    sc.io.enable     := Mux(constCtrl(0), constCtrl(5), ctrl.scEnable)
-    ittage.io.enable := Mux(constCtrl(0), constCtrl(6), ctrl.ittageEnable)
-    ras.io.enable    := Mux(constCtrl(0), constCtrl(7), ctrl.rasEnable)
-    // utage.io.enable  := Mux(constCtrl(0), constCtrl(8), ctrl.utageEnable)
-  } else {
-    ubtb.io.enable   := ctrl.ubtbEnable
-    abtb.io.enable   := ctrl.abtbEnable
-    mbtb.io.enable   := ctrl.mbtbEnable
-    tage.io.enable   := ctrl.tageEnable
-    sc.io.enable     := ctrl.scEnable
-    ittage.io.enable := ctrl.ittageEnable
-    ras.io.enable    := ctrl.rasEnable
-    // utage.io.enable  := ctrl.utageEnable
-  }
+  utage.io.enable       := ctrl.abtbEnable
+  uras.io.enable        := ctrl.rasEnable && ctrl.mbtbEnable
+  ubtb.io.enable        := ctrl.ubtbEnable
+  abtb.io.enable        := ctrl.abtbEnable
+  mbtb.io.enable        := ctrl.mbtbEnable
+  tage.io.enable        := ctrl.tageEnable && ctrl.mbtbEnable
+  sc.io.enable          := ctrl.scEnable && ctrl.mbtbEnable
+  ittage.io.enable      := ctrl.ittageEnable && ctrl.mbtbEnable
+  ras.io.enable         := ctrl.rasEnable && ctrl.mbtbEnable
   // For some reason s0 stalled, usually FTQ Full
   private val s0_stall = Wire(Bool())
 
@@ -330,7 +323,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s1_taken             = s1_prediction.taken
   private val useAbtb              = s1_abtbValid && s1_abtbResult.taken
   private val debug_s1UseUbtb      = s1_taken && !useAbtb
-  private val debug_s1UseUbtbUtage = s1_taken && !useAbtb
   private val debug_s1UseAbtb      = s1_taken && useAbtb && !s1_utageHitMask.reduce(_ || _)
   private val debug_s1UseAbtbUtage = s1_taken && useAbtb && s1_utageHitMask.reduce(_ || _)
 
@@ -391,8 +383,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   private val s3_firstTakenBranchOH = s3_compareMatrix.getLeastElementOH(s3_takenMask)
   private val s3_firstTakenBranch   = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult)
-  private val s3_useRas             = s3_firstTakenBranch.bits.attribute.isReturn
-  private val s3_useIttage          = s3_firstTakenBranch.bits.attribute.needIttage && ittage.io.prediction.hit
+  // tage, ittage, etc.'s `hit` is gated by `enable` so no extra `&& .enable` is required,
+  // but ras does not have a `hit` or `valid` output, so gate directly using `.enable`
+  private val s3_useRas    = s3_firstTakenBranch.bits.attribute.isReturn && ras.io.enable
+  private val s3_useIttage = s3_firstTakenBranch.bits.attribute.needIttage && ittage.io.prediction.hit
 
   private val s2_fallThroughPrediction = RegEnable(fallThrough.io.prediction, s1_fire)
   private val s3_fallThroughPrediction = RegEnable(s2_fallThroughPrediction, s2_fire)
@@ -591,7 +585,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       BpuPredictionSource.Stage1.Fallthrough,
       Seq(
         debug_s1UseUbtb      -> BpuPredictionSource.Stage1.Ubtb,
-        debug_s1UseUbtbUtage -> BpuPredictionSource.Stage1.UbtbUtage,
         debug_s1UseAbtb      -> BpuPredictionSource.Stage1.Abtb,
         debug_s1UseAbtbUtage -> BpuPredictionSource.Stage1.AbtbUtage
       )
@@ -682,7 +675,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     Seq(
       ("ubtb", debug_s1UseUbtb),
       ("abtb", debug_s1UseAbtb),
-      ("ubtb_microTage", debug_s1UseUbtbUtage),
       ("abtb_microTage", debug_s1UseAbtbUtage),
       ("fallThrough", !s1_taken)
     )

@@ -199,7 +199,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }
 
   io.prediction.zipWithIndex.foreach { case (pred, i) =>
-    pred.valid            := s2_valid && s2_hitMask(i)
+    pred.valid            := s2_valid && s2_hitMask(i) && io.enable
     pred.bits.taken       := s2_ctrResult(i)
     pred.bits.cfiPosition := s2_entries(i).position
     pred.bits.attribute   := s2_entries(i).attribute
@@ -209,7 +209,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   io.predCtrl.jumpValidVec      := s2_jumpValidVec
   io.predCtrl.conditionValidVec := s2_conditionValidVec
   io.abtbResult.zipWithIndex.foreach { case (pred, i) =>
-    pred.valid             := s2_valid && s2_hitMask(i)
+    pred.valid             := s2_valid && s2_hitMask(i) && io.enable
     pred.bits.taken        := s2_ctrResult(i)
     pred.bits.cfiPosition  := s2_entries(i).position
     pred.bits.attribute    := s2_entries(i).attribute
@@ -224,7 +224,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     pos := s1_realEntries(i).position
   }
 
-  io.meta.valid    := s2_valid
+  io.meta.valid    := s2_valid && io.enable
   io.meta.setIdx   := s2_setIdx
   io.meta.bankMask := s2_bankMask
   io.meta.entries.zipWithIndex.foreach { case (e, i) =>
@@ -244,7 +244,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   private val t0_train = io.fastTrain.get.bits
 
-  private val t0_fire = io.enable && io.fastTrain.get.valid && t0_train.abtbMeta.valid
+  private val t0_fire = io.fastTrain.get.valid && t0_train.abtbMeta.valid && io.enable
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1
