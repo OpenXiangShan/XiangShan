@@ -136,9 +136,12 @@ response for at least 12 cycles, replaced the PTE, and aligned a global
 writeback; reuse of the same ROB/LQ identity forced a new PTW request and
 returned only the new-page data. The same delayed-response construction also
 passed in VS-only and G-only modes under global `HFENCE.VVMA` and
-`HFENCE.GVMA`. The full scenario passed in 2,814 aggregate cycles with 79 PTW
-requests, 19 load writebacks, three same-ID root reuses, and three
-outstanding-walk fence races (one each for stage-1, VS-stage, and G-stage).
+`HFENCE.GVMA`. Two fully nested Sv39/Sv39x4 cases used the PTW manager's
+accepted request-address history to wait for the exact old VS root-leaf or
+final G root-leaf beat before applying the corresponding fence. The full
+scenario passed in 4,264 aggregate cycles with 89 PTW requests, 21 load
+writebacks, three same-ID root reuses, and five outstanding-walk fence races:
+stage-1, VS-only, G-only, fully nested VS, and fully nested G.
 
 `make translation-context` passed five context families and 14 same-address
 loads: direct Sv39-to-Sv48 mode/root, same-mode host ASID/root, VS ASID/root,

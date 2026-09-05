@@ -1436,6 +1436,7 @@ public:
             d_gap_ = responses_.empty() ? 0 : responses_.front().delay_before;
         }
         if (a_fire_ && request_) {
+            request_history_.push_back(*request_);
             respond(*request_);
             ++request_count_;
         }
@@ -1452,6 +1453,23 @@ public:
     const ResponseLatencyStats &response_latency_stats() const
     {
         return response_latency_stats_;
+    }
+    bool request_covers_address_since(
+        std::uint64_t address, std::uint64_t first_request) const
+    {
+        if (first_request >= request_history_.size()) {
+            return false;
+        }
+        for (std::size_t index = static_cast<std::size_t>(first_request);
+             index < request_history_.size(); ++index) {
+            const Request &request = request_history_[index];
+            const std::uint64_t bytes = std::uint64_t{1} << request.size;
+            const std::uint64_t base = request.address & ~(bytes - 1);
+            if (address >= base && address - base < bytes) {
+                return true;
+            }
+        }
+        return false;
     }
 
 private:
@@ -1533,6 +1551,7 @@ private:
 
     SparseMemory &memory_;
     std::deque<Response> responses_;
+    std::vector<Request> request_history_;
     std::optional<Request> request_;
     bool a_fire_ = false;
     bool d_fire_ = false;
@@ -5159,6 +5178,30 @@ public:
         }
         if (ptw_agent_.request_count() < target) {
             error_ = "timed out waiting for page-table walk request";
+            return false;
+        }
+        return check_components();
+    }
+
+    bool run_until_ptw_request_covering(
+        std::uint64_t address,
+        std::uint64_t first_request,
+        unsigned timeout = 4096)
+    {
+        for (unsigned cycle = 0;
+             cycle < timeout &&
+             !ptw_agent_.request_covers_address_since(address, first_request);
+             ++cycle) {
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        if (!ptw_agent_.request_covers_address_since(address, first_request)) {
+            std::ostringstream message;
+            message << "timed out waiting for PTW request covering address 0x"
+                    << std::hex << address;
+            error_ = message.str();
             return false;
         }
         return check_components();

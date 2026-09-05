@@ -237,8 +237,9 @@ the PTE, and aligns a global `SFENCE.VMA` with the redirect. The canceled load
 must not write back, and a same-identity survivor must refill and return only
 the new physical data. Matching VS-only and G-only races apply global
 `HFENCE.VVMA` and `HFENCE.GVMA` to delayed root-leaf responses. Selective
-in-flight fences and the fully nested VS+G walk composition remain separate
-coverage points.
+in-flight fences and the Sv48/Sv48x4 outstanding-walk crosses remain separate
+coverage points; fully nested Sv39/Sv39x4 cases additionally wait for the exact
+VS or final G PTE TileLink beat before replacing it and fencing.
 
 `translation-context` checks five context families with 14 architectural
 loads: direct Sv39-to-Sv48 mode/root switching, same-mode `satp` ASID/root,

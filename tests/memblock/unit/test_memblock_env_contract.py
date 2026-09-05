@@ -512,9 +512,14 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "outstanding-refill",
             "run_outstanding_hfence(true)",
             "run_outstanding_hfence(false)",
+            "run_until_ptw_request_covering",
+            "run_fully_nested_hfence(true)",
+            "run_fully_nested_hfence(false)",
             "outstanding_stage1=1",
             "outstanding_vs=",
             "outstanding_g=",
+            "outstanding_nested_vs=",
+            "outstanding_nested_g=",
         ):
             self.assertIn(contract, environment + main)
 
