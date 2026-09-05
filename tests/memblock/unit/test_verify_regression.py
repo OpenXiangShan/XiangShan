@@ -151,6 +151,63 @@ def regression_document(results: list[dict[str, object]]) -> dict[str, object]:
 
 
 class VerifyRegressionTest(unittest.TestCase):
+    def test_constraint_schema_requires_enabled_translation_crosses(self) -> None:
+        result = mixed_result(7)
+        result.update(
+            {
+                "constraint_schema": 2,
+                "target_translation": "1,1,1",
+                "actual_translation": "4,8,16",
+                "target_stage1_mode": "1,1",
+                "actual_stage1_mode": "4,4",
+                "target_vs_mode": "1,1",
+                "actual_vs_mode": "8,8",
+                "target_g_mode": "1,1",
+                "actual_g_mode": "8,8",
+                "actual_nested_pairs": "4,4,4,4",
+                "target_fence_kind": "1,1,1",
+                "target_fence_scope": "1,1",
+                "target_tlb_flush": 50,
+                "actual_fences": "1,1,1,1,1,1",
+                "actual_translation_switch": 6,
+                "actual_translation_walk_reuse": "5,19",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+
+        result["actual_nested_pairs"] = "4,4,0,4"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "actual_nested_pairs"
+        ):
+            verify_regression._check_mixed_coverage(result)
+
+    def test_constraint_schema_requires_walk_and_reuse(self) -> None:
+        result = mixed_result(7)
+        result.update(
+            {
+                "constraint_schema": 2,
+                "target_translation": "0,1,0",
+                "actual_translation": "0,8,0",
+                "target_stage1_mode": "1,0",
+                "actual_stage1_mode": "8,0",
+                "target_vs_mode": "1,1",
+                "actual_vs_mode": "0,0",
+                "target_g_mode": "1,1",
+                "actual_g_mode": "0,0",
+                "actual_nested_pairs": "0,0,0,0",
+                "target_fence_kind": "1,0,0",
+                "target_fence_scope": "1,1",
+                "target_tlb_flush": 20,
+                "actual_fences": "1,1,0,0,0,0",
+                "actual_translation_switch": 0,
+                "actual_translation_walk_reuse": "8,0",
+            }
+        )
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "cold-walk or reuse"
+        ):
+            verify_regression._check_mixed_coverage(result)
+
     def test_historical_coverage_gate_is_independent_of_submission_minimum(self) -> None:
         self.assertEqual(
             verify_regression.ENHANCED_MIXED_COVERAGE_TRANSACTIONS, 128

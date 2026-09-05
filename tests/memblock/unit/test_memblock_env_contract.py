@@ -663,8 +663,15 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "locality_weights",
             "atomic_family_weights",
             "atomic_width_weights",
+            "translation_weights",
+            "stage1_mode_weights",
+            "vs_mode_weights",
+            "g_mode_weights",
+            "fence_kind_weights",
+            "fence_scope_weights",
             "concurrent_actions_per_mille",
             "special_concurrent_per_mille",
+            "translation_switches_per_mille",
             "tlb_flushes_per_mille",
             "misaligned_per_mille",
             "vector_corner_per_mille",
@@ -678,6 +685,14 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_nc_direction=",
             "actual_mmio_direction=",
             "actual_special_concurrent=",
+            "actual_translation=",
+            "actual_stage1_mode=",
+            "actual_vs_mode=",
+            "actual_g_mode=",
+            "actual_nested_pairs=",
+            "actual_fences=",
+            "actual_translation_switch=",
+            "actual_translation_walk_reuse=",
         ):
             self.assertIn(contract, driver)
         for key in (
@@ -699,6 +714,21 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "locality-cold",
             "concurrent",
             "special-concurrent",
+            "translation-bare",
+            "translation-stage1",
+            "translation-nested",
+            "stage1-sv39",
+            "stage1-sv48",
+            "vs-sv39",
+            "vs-sv48",
+            "g-sv39x4",
+            "g-sv48x4",
+            "translation-switch",
+            "fence-sfence",
+            "fence-hfence-vvma",
+            "fence-hfence-gvma",
+            "fence-global",
+            "fence-selective",
             "tlb-flush",
             "misaligned",
             "vector-corner",
@@ -722,11 +752,15 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "run_until_store_complete_with_replay",
             "run_until_vector_complete_with_replays",
             "record_atomic_result",
+            "const std::vector<VectorMemoryTransaction> &transactions",
         ):
             self.assertIn(contract, environment)
         self.assertIn(
             "environment.record_atomic_result(", driver
         )
+        self.assertIn("struct TranslationContext", driver)
+        self.assertIn("reference_two_stage_walk", driver)
+        self.assertIn("environment.set_page_based_memory_types(true, true)", driver)
         self.assertIn("CONSTRAINT_ARGS", makefile)
         self.assertIn("LONG_CONSTRAINT_ARGS", makefile)
         self.assertIn("constraint_profile", runner)

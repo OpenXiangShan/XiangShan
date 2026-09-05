@@ -5432,6 +5432,76 @@ public:
         return check_components();
     }
 
+    bool run_until_vector_complete_with_replays(
+        const std::vector<VectorMemoryTransaction> &transactions,
+        unsigned timeout,
+        bool pulse_store_commit_after_replay = false)
+    {
+        const auto matches = [](const VectorMemoryTransaction &transaction,
+                                const VectorReplayRequest &request) {
+            const unsigned entries = transaction.store
+                ? kStoreQueueEntries : kVirtualLoadQueueEntries;
+            const unsigned value = transaction.store
+                ? request.sq_value : request.lq_value;
+            const bool flag = transaction.store
+                ? request.sq_flag : request.lq_flag;
+            const unsigned base = transaction.store
+                ? transaction.sq : transaction.lq;
+            const bool base_flag = transaction.store
+                ? transaction.sq_flag : transaction.lq_flag;
+            const unsigned packed = value + (flag ? entries : 0);
+            const unsigned packed_base = base + (base_flag ? entries : 0);
+            const unsigned distance =
+                (packed + 2 * entries - packed_base) % (2 * entries);
+            return distance < transaction.flow_num;
+        };
+
+        const std::uint64_t deadline = cycle() + timeout;
+        while (!vector_scoreboard_.done() && cycle() < deadline) {
+            if (vector_replay_requests_.empty()) {
+                tick();
+                if (!check_components()) {
+                    return false;
+                }
+                continue;
+            }
+            const VectorReplayRequest request = vector_replay_requests_.front();
+            vector_replay_requests_.pop_front();
+            const auto transaction = std::find_if(
+                transactions.begin(), transactions.end(),
+                [&](const VectorMemoryTransaction &candidate) {
+                    return matches(candidate, request);
+                });
+            if (transaction == transactions.end()) {
+                error_ = "vector replay did not match a mixed-window transaction";
+                return false;
+            }
+            auto replay = *transaction;
+            replay.lane = request.lane;
+            replay.is_part_replay = request.is_part_replay;
+            replay.replay_mask = request.replay_mask;
+            replay.replay_mb_index = request.replay_mb_index;
+            if (!issue_vector(replay, 256)) {
+                return false;
+            }
+            if (pulse_store_commit_after_replay && replay.store &&
+                (!run_cycles(32) ||
+                 !pulse_pending_store(replay.rob, replay.rob_flag))) {
+                return false;
+            }
+        }
+        if (!vector_scoreboard_.done()) {
+            std::ostringstream message;
+            message << "timed out waiting for mixed vector replays"
+                    << " transactions=" << transactions.size()
+                    << " pending_replays=" << vector_replay_requests_.size()
+                    << " ptw_requests=" << ptw_agent_.request_count();
+            error_ = message.str();
+            return false;
+        }
+        return check_components();
+    }
+
     bool run_until_all_complete(unsigned timeout)
     {
         for (unsigned cycle = 0;

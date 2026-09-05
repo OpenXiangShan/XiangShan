@@ -127,6 +127,14 @@ def _require(condition: bool, message: str) -> None:
 
 
 def _positive_csv(result: dict[str, Any], name: str, fields: int) -> None:
+    counts = _csv_counts(result, name, fields)
+    _require(
+        all(count > 0 for count in counts),
+        f"{name} has an uncovered class: {result.get(name)}",
+    )
+
+
+def _csv_counts(result: dict[str, Any], name: str, fields: int) -> list[int]:
     value = result.get(name)
     _require(isinstance(value, str), f"{name} is not a string")
     try:
@@ -134,7 +142,111 @@ def _positive_csv(result: dict[str, Any], name: str, fields: int) -> None:
     except ValueError as error:
         raise VerificationError(f"{name} is not a decimal count list: {value!r}") from error
     _require(len(counts) == fields, f"{name} has {len(counts)} fields, expected {fields}")
-    _require(all(count > 0 for count in counts), f"{name} has an uncovered class: {value}")
+    _require(all(count >= 0 for count in counts), f"{name} has a negative count: {value}")
+    return counts
+
+
+def _check_constraint_coverage(result: dict[str, Any]) -> None:
+    if result.get("constraint_schema") != 2:
+        return
+
+    target_translation = _csv_counts(result, "target_translation", 3)
+    actual_translation = _csv_counts(result, "actual_translation", 3)
+    target_stage1 = _csv_counts(result, "target_stage1_mode", 2)
+    actual_stage1 = _csv_counts(result, "actual_stage1_mode", 2)
+    target_vs = _csv_counts(result, "target_vs_mode", 2)
+    actual_vs = _csv_counts(result, "actual_vs_mode", 2)
+    target_g = _csv_counts(result, "target_g_mode", 2)
+    actual_g = _csv_counts(result, "actual_g_mode", 2)
+
+    _require(
+        all(
+            weight == 0 or count > 0
+            for weight, count in zip(target_translation, actual_translation)
+        ),
+        "actual_translation has an enabled but uncovered class: "
+        f"{actual_translation}",
+    )
+    if target_translation[1] != 0:
+        _require(
+            all(
+                weight == 0 or count > 0
+                for weight, count in zip(target_stage1, actual_stage1)
+            ),
+            f"actual_stage1_mode has an enabled but uncovered class: {actual_stage1}",
+        )
+    if target_translation[2] != 0:
+        for name, target, actual in (
+            ("actual_vs_mode", target_vs, actual_vs),
+            ("actual_g_mode", target_g, actual_g),
+        ):
+            _require(
+                all(
+                    weight == 0 or count > 0
+                    for weight, count in zip(target, actual)
+                ),
+                f"{name} has an enabled but uncovered class: {actual}",
+            )
+
+    actual_nested = _csv_counts(result, "actual_nested_pairs", 4)
+    if target_translation[2] != 0:
+        for vs_mode, vs_weight in enumerate(target_vs):
+            for g_mode, g_weight in enumerate(target_g):
+                if vs_weight != 0 and g_weight != 0:
+                    _require(
+                        actual_nested[vs_mode * 2 + g_mode] > 0,
+                        "actual_nested_pairs has an enabled but uncovered pair: "
+                        f"{actual_nested}",
+                    )
+
+    target_fence = _csv_counts(result, "target_fence_kind", 3)
+    target_scope = _csv_counts(result, "target_fence_scope", 2)
+    actual_fences = _csv_counts(result, "actual_fences", 6)
+    target_flush = result.get("target_tlb_flush")
+    _require(
+        isinstance(target_flush, int) and not isinstance(target_flush, bool),
+        f"target_tlb_flush is not an integer: {target_flush!r}",
+    )
+    if target_flush != 0:
+        for kind, weight in enumerate(target_fence):
+            compatible = (
+                kind == 0 and target_translation[1] != 0
+            ) or (
+                kind != 0 and target_translation[2] != 0
+            )
+            if not compatible or weight == 0:
+                continue
+            for scope, scope_weight in enumerate(target_scope):
+                if scope_weight != 0:
+                    _require(
+                        actual_fences[kind * 2 + scope] > 0,
+                        "actual_fences has an enabled but uncovered class: "
+                        f"{actual_fences}",
+                    )
+
+    translated = target_translation[1] != 0 or target_translation[2] != 0
+    walk_reuse = _csv_counts(result, "actual_translation_walk_reuse", 2)
+    if translated:
+        _require(
+            all(count > 0 for count in walk_reuse),
+            "actual_translation_walk_reuse lacks cold-walk or reuse coverage: "
+            f"{walk_reuse}",
+        )
+    required_contexts = int(target_translation[0] != 0)
+    if target_translation[1] != 0:
+        required_contexts += sum(weight != 0 for weight in target_stage1)
+    if target_translation[2] != 0:
+        required_contexts += (
+            sum(weight != 0 for weight in target_vs)
+            * sum(weight != 0 for weight in target_g)
+        )
+    actual_switches = result.get("actual_translation_switch")
+    _require(
+        isinstance(actual_switches, int) and not isinstance(actual_switches, bool),
+        f"actual_translation_switch is not an integer: {actual_switches!r}",
+    )
+    if required_contexts > 1:
+        _require(actual_switches > 0, "translation contexts never switched")
 
 
 def _positive_csv_prefix(
@@ -168,6 +280,7 @@ def _balanced_queue(result: dict[str, Any], name: str) -> None:
 def _check_mixed_coverage(
     result: dict[str, Any], require_backpressure: bool = False
 ) -> None:
+    _check_constraint_coverage(result)
     for name, fields in (
         ("load_ops", 7),
         ("store_ops", 4),

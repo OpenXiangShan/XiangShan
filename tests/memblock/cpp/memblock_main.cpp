@@ -87,13 +87,34 @@ struct RandomConstraints {
         atomic_family_count,
     };
 
+    enum TranslationRegime : unsigned {
+        translation_bare,
+        translation_stage1,
+        translation_nested,
+        translation_regime_count,
+    };
+
+    enum FenceKind : unsigned {
+        fence_sfence,
+        fence_hfence_vvma,
+        fence_hfence_gvma,
+        fence_kind_count,
+    };
+
     std::string name;
     std::array<unsigned, operation_count> operation_weights{};
     std::array<unsigned, 3> locality_weights{};
     std::array<unsigned, atomic_family_count> atomic_family_weights{};
     std::array<unsigned, 2> atomic_width_weights{};
+    std::array<unsigned, translation_regime_count> translation_weights{};
+    std::array<unsigned, 2> stage1_mode_weights{};
+    std::array<unsigned, 2> vs_mode_weights{};
+    std::array<unsigned, 2> g_mode_weights{};
+    std::array<unsigned, fence_kind_count> fence_kind_weights{};
+    std::array<unsigned, 2> fence_scope_weights{};
     unsigned concurrent_actions_per_mille = 1000;
     unsigned special_concurrent_per_mille = 0;
+    unsigned translation_switches_per_mille = 0;
     unsigned tlb_flushes_per_mille = 0;
     unsigned misaligned_per_mille = 0;
     unsigned vector_corner_per_mille = 0;
@@ -110,8 +131,15 @@ struct RandomConstraints {
                 .locality_weights = {250, 250, 500},
                 .atomic_family_weights = {8, 2, 2},
                 .atomic_width_weights = {1, 1},
+                .translation_weights = {1, 1, 1},
+                .stage1_mode_weights = {1, 1},
+                .vs_mode_weights = {1, 1},
+                .g_mode_weights = {1, 1},
+                .fence_kind_weights = {1, 1, 1},
+                .fence_scope_weights = {1, 1},
                 .concurrent_actions_per_mille = 1000,
                 .special_concurrent_per_mille = 500,
+                .translation_switches_per_mille = 500,
                 .tlb_flushes_per_mille = 50,
                 .misaligned_per_mille = 500,
                 .vector_corner_per_mille = 1000,
@@ -130,8 +158,15 @@ struct RandomConstraints {
                 .locality_weights = {800, 150, 50},
                 .atomic_family_weights = {90, 5, 5},
                 .atomic_width_weights = {1, 1},
+                .translation_weights = {5, 990, 5},
+                .stage1_mode_weights = {95, 5},
+                .vs_mode_weights = {1, 1},
+                .g_mode_weights = {1, 1},
+                .fence_kind_weights = {98, 1, 1},
+                .fence_scope_weights = {95, 5},
                 .concurrent_actions_per_mille = 100,
                 .special_concurrent_per_mille = 20,
+                .translation_switches_per_mille = 1,
                 .tlb_flushes_per_mille = 20,
                 .misaligned_per_mille = 5,
                 .vector_corner_per_mille = 100,
@@ -150,8 +185,15 @@ struct RandomConstraints {
                 .locality_weights = {100, 200, 700},
                 .atomic_family_weights = {1, 1, 1},
                 .atomic_width_weights = {1, 1},
+                .translation_weights = {1, 1, 1},
+                .stage1_mode_weights = {1, 1},
+                .vs_mode_weights = {1, 1},
+                .g_mode_weights = {1, 1},
+                .fence_kind_weights = {1, 1, 1},
+                .fence_scope_weights = {1, 1},
                 .concurrent_actions_per_mille = 500,
                 .special_concurrent_per_mille = 750,
+                .translation_switches_per_mille = 750,
                 .tlb_flushes_per_mille = 100,
                 .misaligned_per_mille = 500,
                 .vector_corner_per_mille = 1000,
@@ -245,6 +287,62 @@ struct RandomConstraints {
             atomic_width_weights[1] = parsed;
             return;
         }
+        const std::array<std::pair<std::string_view, TranslationRegime>,
+                         translation_regime_count> translation_keys{{
+            {"translation-bare", translation_bare},
+            {"translation-stage1", translation_stage1},
+            {"translation-nested", translation_nested},
+        }};
+        for (const auto &[candidate, regime] : translation_keys) {
+            if (key == candidate) {
+                translation_weights[regime] = parsed;
+                return;
+            }
+        }
+        if (key == "stage1-sv39") {
+            stage1_mode_weights[0] = parsed;
+            return;
+        }
+        if (key == "stage1-sv48") {
+            stage1_mode_weights[1] = parsed;
+            return;
+        }
+        if (key == "vs-sv39") {
+            vs_mode_weights[0] = parsed;
+            return;
+        }
+        if (key == "vs-sv48") {
+            vs_mode_weights[1] = parsed;
+            return;
+        }
+        if (key == "g-sv39x4") {
+            g_mode_weights[0] = parsed;
+            return;
+        }
+        if (key == "g-sv48x4") {
+            g_mode_weights[1] = parsed;
+            return;
+        }
+        const std::array<std::pair<std::string_view, FenceKind>,
+                         fence_kind_count> fence_keys{{
+            {"fence-sfence", fence_sfence},
+            {"fence-hfence-vvma", fence_hfence_vvma},
+            {"fence-hfence-gvma", fence_hfence_gvma},
+        }};
+        for (const auto &[candidate, kind] : fence_keys) {
+            if (key == candidate) {
+                fence_kind_weights[kind] = parsed;
+                return;
+            }
+        }
+        if (key == "fence-global") {
+            fence_scope_weights[0] = parsed;
+            return;
+        }
+        if (key == "fence-selective") {
+            fence_scope_weights[1] = parsed;
+            return;
+        }
         if (key == "locality-hot") {
             locality_weights[0] = parsed;
         } else if (key == "locality-warm") {
@@ -255,6 +353,8 @@ struct RandomConstraints {
             concurrent_actions_per_mille = parsed;
         } else if (key == "special-concurrent") {
             special_concurrent_per_mille = parsed;
+        } else if (key == "translation-switch") {
+            translation_switches_per_mille = parsed;
         } else if (key == "tlb-flush") {
             tlb_flushes_per_mille = parsed;
         } else if (key == "misaligned") {
@@ -297,8 +397,30 @@ struct RandomConstraints {
             throw std::invalid_argument(
                 "atomic width constraint weights cannot all be zero");
         }
+        if (std::accumulate(
+                translation_weights.begin(), translation_weights.end(),
+                0ULL) == 0) {
+            throw std::invalid_argument(
+                "translation regime constraint weights cannot all be zero");
+        }
+        if (translation_weights[translation_stage1] != 0 &&
+            std::accumulate(
+                stage1_mode_weights.begin(), stage1_mode_weights.end(),
+                0ULL) == 0) {
+            throw std::invalid_argument(
+                "stage-1 mode constraint weights cannot all be zero");
+        }
+        if (translation_weights[translation_nested] != 0 &&
+            (std::accumulate(vs_mode_weights.begin(), vs_mode_weights.end(),
+                             0ULL) == 0 ||
+             std::accumulate(g_mode_weights.begin(), g_mode_weights.end(),
+                             0ULL) == 0)) {
+            throw std::invalid_argument(
+                "nested VS/G mode constraint weights cannot all be zero");
+        }
         if (concurrent_actions_per_mille > 1000 ||
             special_concurrent_per_mille > 1000 ||
+            translation_switches_per_mille > 1000 ||
             tlb_flushes_per_mille > 1000 || misaligned_per_mille > 1000 ||
             vector_corner_per_mille > 1000 || nc_stores_per_mille > 1000 ||
             mmio_stores_per_mille > 1000) {
@@ -311,9 +433,10 @@ struct RandomConstraints {
                 "dcache-latency=spec requires a cacheable operation weight");
         }
         if (response_latency.ptw == memblock::ResponseLatencyProfile::spec &&
-            tlb_flushes_per_mille == 0) {
+            (tlb_flushes_per_mille == 0 || !uses_translation())) {
             throw std::invalid_argument(
-                "ptw-latency=spec requires a nonzero tlb-flush rate");
+                "ptw-latency=spec requires translated traffic and a nonzero "
+                "tlb-flush rate");
         }
         if (response_latency.uncache == memblock::ResponseLatencyProfile::spec &&
             !uses_uncache()) {
@@ -329,6 +452,44 @@ struct RandomConstraints {
             !uses_concurrent_special_operations()) {
             throw std::invalid_argument(
                 "special-concurrent requires nc or mmio traffic");
+        }
+        if (tlb_flushes_per_mille != 0) {
+            const bool has_stage1_fence =
+                translation_weights[translation_stage1] != 0 &&
+                fence_kind_weights[fence_sfence] != 0;
+            const bool has_nested_fence =
+                translation_weights[translation_nested] != 0 &&
+                (fence_kind_weights[fence_hfence_vvma] != 0 ||
+                 fence_kind_weights[fence_hfence_gvma] != 0);
+            if (!has_stage1_fence && !has_nested_fence) {
+                throw std::invalid_argument(
+                    "tlb-flush requires a fence kind compatible with an "
+                    "enabled translated regime");
+            }
+            if (std::accumulate(
+                    fence_scope_weights.begin(), fence_scope_weights.end(),
+                    0ULL) == 0) {
+                throw std::invalid_argument(
+                    "fence scope constraint weights cannot all be zero");
+            }
+        }
+        if ((operation_weights[noncacheable] != 0 ||
+             operation_weights[mmio] != 0) &&
+            !uses_translation()) {
+            throw std::invalid_argument(
+                "NC/MMIO traffic requires stage-1 or nested PBMT translation "
+                "at the MemBlock UT boundary");
+        }
+        if (translation_weights[translation_bare] != 0 &&
+            (operation_weights[noncacheable] != 0 ||
+             operation_weights[mmio] != 0) &&
+            std::accumulate(
+                operation_weights.begin(),
+                operation_weights.begin() + noncacheable,
+                0ULL) == 0) {
+            throw std::invalid_argument(
+                "NC/MMIO-only traffic cannot satisfy Bare translation coverage "
+                "at the MemBlock UT boundary");
         }
     }
 
@@ -370,6 +531,58 @@ struct RandomConstraints {
         return choose_weighted(atomic_width_weights, random);
     }
 
+    unsigned choose_translation_regime(std::uint64_t random) const
+    {
+        return choose_weighted(translation_weights, random);
+    }
+
+    unsigned choose_stage1_mode(std::uint64_t random) const
+    {
+        return choose_weighted(stage1_mode_weights, random);
+    }
+
+    unsigned choose_vs_mode(std::uint64_t random) const
+    {
+        return choose_weighted(vs_mode_weights, random);
+    }
+
+    unsigned choose_g_mode(std::uint64_t random) const
+    {
+        return choose_weighted(g_mode_weights, random);
+    }
+
+    unsigned choose_fence_scope(std::uint64_t random) const
+    {
+        return choose_weighted(fence_scope_weights, random);
+    }
+
+    unsigned choose_fence_kind(
+        unsigned translation_regime, std::uint64_t random) const
+    {
+        std::array<unsigned, fence_kind_count> compatible{};
+        if (translation_regime == translation_stage1) {
+            compatible[fence_sfence] = fence_kind_weights[fence_sfence];
+        } else if (translation_regime == translation_nested) {
+            compatible[fence_hfence_vvma] =
+                fence_kind_weights[fence_hfence_vvma];
+            compatible[fence_hfence_gvma] =
+                fence_kind_weights[fence_hfence_gvma];
+        }
+        return choose_weighted(compatible, random);
+    }
+
+    bool has_compatible_fence_kind(unsigned translation_regime) const
+    {
+        if (translation_regime == translation_stage1) {
+            return fence_kind_weights[fence_sfence] != 0;
+        }
+        if (translation_regime == translation_nested) {
+            return fence_kind_weights[fence_hfence_vvma] != 0 ||
+                fence_kind_weights[fence_hfence_gvma] != 0;
+        }
+        return false;
+    }
+
     unsigned choose_concurrent_special_operation(std::uint64_t random) const
     {
         const std::array<unsigned, 2> weights{{
@@ -406,7 +619,38 @@ struct RandomConstraints {
                 ++actions;
             }
         }
-        return actions;
+        unsigned translation_actions =
+            translation_weights[translation_bare] != 0;
+        if (translation_weights[translation_stage1] != 0) {
+            translation_actions += static_cast<unsigned>(std::count_if(
+                stage1_mode_weights.begin(), stage1_mode_weights.end(),
+                [](unsigned weight) { return weight != 0; }));
+        }
+        if (translation_weights[translation_nested] != 0) {
+            const unsigned vs_modes = static_cast<unsigned>(std::count_if(
+                vs_mode_weights.begin(), vs_mode_weights.end(),
+                [](unsigned weight) { return weight != 0; }));
+            const unsigned g_modes = static_cast<unsigned>(std::count_if(
+                g_mode_weights.begin(), g_mode_weights.end(),
+                [](unsigned weight) { return weight != 0; }));
+            translation_actions += vs_modes * g_modes;
+        }
+        unsigned fence_actions = 0;
+        if (tlb_flushes_per_mille != 0) {
+            const unsigned scopes = static_cast<unsigned>(std::count_if(
+                fence_scope_weights.begin(), fence_scope_weights.end(),
+                [](unsigned weight) { return weight != 0; }));
+            if (translation_weights[translation_stage1] != 0 &&
+                fence_kind_weights[fence_sfence] != 0) {
+                fence_actions += scopes;
+            }
+            if (translation_weights[translation_nested] != 0) {
+                fence_actions += scopes * static_cast<unsigned>(
+                    (fence_kind_weights[fence_hfence_vvma] != 0) +
+                    (fence_kind_weights[fence_hfence_gvma] != 0));
+            }
+        }
+        return std::max({actions, translation_actions, fence_actions});
     }
 
     bool uses_dcache() const
@@ -422,10 +666,17 @@ struct RandomConstraints {
             operation_weights[mmio] != 0;
     }
 
+    bool uses_translation() const
+    {
+        return translation_weights[translation_stage1] != 0 ||
+            translation_weights[translation_nested] != 0;
+    }
+
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraints=" << name << " target_ops=";
+        stream << "constraint_schema=2 constraints=" << name
+               << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
         }
@@ -435,9 +686,23 @@ struct RandomConstraints {
                << atomic_family_weights[1] << ',' << atomic_family_weights[2]
                << " target_atomic_width=" << atomic_width_weights[0] << ','
                << atomic_width_weights[1]
+               << " target_translation=" << translation_weights[0] << ','
+               << translation_weights[1] << ',' << translation_weights[2]
+               << " target_stage1_mode=" << stage1_mode_weights[0] << ','
+               << stage1_mode_weights[1]
+               << " target_vs_mode=" << vs_mode_weights[0] << ','
+               << vs_mode_weights[1]
+               << " target_g_mode=" << g_mode_weights[0] << ','
+               << g_mode_weights[1]
+               << " target_fence_kind=" << fence_kind_weights[0] << ','
+               << fence_kind_weights[1] << ',' << fence_kind_weights[2]
+               << " target_fence_scope=" << fence_scope_weights[0] << ','
+               << fence_scope_weights[1]
                << " target_concurrent=" << concurrent_actions_per_mille
                << " target_special_concurrent="
                << special_concurrent_per_mille
+               << " target_translation_switch="
+               << translation_switches_per_mille
                << " target_tlb_flush=" << tlb_flushes_per_mille
                << " target_misaligned=" << misaligned_per_mille
                << " target_vector_corner=" << vector_corner_per_mille
@@ -488,6 +753,24 @@ RandomConstraints resolve_random_constraints(const Options &options)
     constraints.validate();
     return constraints;
 }
+
+struct TranslationContext {
+    unsigned regime = RandomConstraints::translation_bare;
+    unsigned stage1_mode = 0;
+    unsigned vs_mode = 0;
+    unsigned g_mode = 0;
+
+    bool operator==(const TranslationContext &other) const
+    {
+        return regime == other.regime && stage1_mode == other.stage1_mode &&
+            vs_mode == other.vs_mode && g_mode == other.g_mode;
+    }
+
+    bool operator!=(const TranslationContext &other) const
+    {
+        return !(*this == other);
+    }
+};
 
 Options parse_options(int argc, char **argv)
 {
@@ -635,6 +918,17 @@ struct ConstraintCoverage {
     // Atomic operations are pipeline-serializing at the MemBlock boundary;
     // only NC and MMIO traffic can be added to a legal mixed issue window.
     std::array<std::uint64_t, 2> special_concurrent{};
+    std::array<std::uint64_t, RandomConstraints::translation_regime_count>
+        translation_regimes{};
+    std::array<std::uint64_t, 2> stage1_modes{};
+    std::array<std::uint64_t, 2> vs_modes{};
+    std::array<std::uint64_t, 2> g_modes{};
+    std::array<std::uint64_t, 4> nested_mode_pairs{};
+    std::array<std::array<std::uint64_t, 2>, RandomConstraints::fence_kind_count>
+        fences{};
+    std::uint64_t translation_switches = 0;
+    std::uint64_t translation_walk_windows = 0;
+    std::uint64_t translation_reuse_windows = 0;
     std::uint64_t tlb_flushes = 0;
     std::uint64_t dcache_hits = 0;
     std::uint64_t dcache_misses = 0;
@@ -650,6 +944,86 @@ struct ConstraintCoverage {
         std::uint64_t requests_before, std::uint64_t requests_after)
     {
         ++(requests_after == requests_before ? dcache_hits : dcache_misses);
+    }
+
+    void sample_translation(
+        const TranslationContext &context,
+        std::uint64_t ptw_requests_before,
+        std::uint64_t ptw_requests_after,
+        unsigned action_count = 1)
+    {
+        translation_regimes.at(context.regime) += action_count;
+        if (context.regime == RandomConstraints::translation_stage1) {
+            stage1_modes.at(context.stage1_mode) += action_count;
+        } else if (context.regime == RandomConstraints::translation_nested) {
+            vs_modes.at(context.vs_mode) += action_count;
+            g_modes.at(context.g_mode) += action_count;
+            nested_mode_pairs.at(context.vs_mode * 2 + context.g_mode) +=
+                action_count;
+        }
+        if (context.regime != RandomConstraints::translation_bare) {
+            ++(ptw_requests_after > ptw_requests_before
+                    ? translation_walk_windows
+                    : translation_reuse_windows);
+        }
+    }
+
+    bool translation_complete(const RandomConstraints &constraints) const
+    {
+        for (unsigned regime = 0;
+             regime < RandomConstraints::translation_regime_count; ++regime) {
+            if (constraints.translation_weights[regime] != 0 &&
+                translation_regimes[regime] == 0) {
+                return false;
+            }
+        }
+        if (constraints.translation_weights[
+                RandomConstraints::translation_stage1] != 0) {
+            for (unsigned mode = 0; mode < stage1_modes.size(); ++mode) {
+                if (constraints.stage1_mode_weights[mode] != 0 &&
+                    stage1_modes[mode] == 0) {
+                    return false;
+                }
+            }
+        }
+        if (constraints.translation_weights[
+                RandomConstraints::translation_nested] != 0) {
+            for (unsigned vs = 0; vs < vs_modes.size(); ++vs) {
+                for (unsigned g = 0; g < g_modes.size(); ++g) {
+                    if (constraints.vs_mode_weights[vs] != 0 &&
+                        constraints.g_mode_weights[g] != 0 &&
+                        nested_mode_pairs[vs * 2 + g] == 0) {
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    bool fences_complete(const RandomConstraints &constraints) const
+    {
+        if (constraints.tlb_flushes_per_mille == 0) {
+            return true;
+        }
+        for (unsigned kind = 0; kind < RandomConstraints::fence_kind_count;
+             ++kind) {
+            const bool compatible = kind == RandomConstraints::fence_sfence
+                ? constraints.translation_weights[
+                      RandomConstraints::translation_stage1] != 0
+                : constraints.translation_weights[
+                      RandomConstraints::translation_nested] != 0;
+            if (!compatible || constraints.fence_kind_weights[kind] == 0) {
+                continue;
+            }
+            for (unsigned scope = 0; scope < fences[kind].size(); ++scope) {
+                if (constraints.fence_scope_weights[scope] != 0 &&
+                    fences[kind][scope] == 0) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     bool operation_complete(
@@ -701,6 +1075,15 @@ struct ConstraintCoverage {
                 locality[index] == 0) {
                 return false;
             }
+        }
+        if (!translation_complete(constraints) ||
+            !fences_complete(constraints)) {
+            return false;
+        }
+        if (constraints.uses_translation() &&
+            (translation_walk_windows == 0 ||
+             translation_reuse_windows == 0)) {
+            return false;
         }
         if (constraints.tlb_flushes_per_mille != 0 && tlb_flushes == 0) {
             return false;
@@ -759,6 +1142,22 @@ struct ConstraintCoverage {
                << mmio_directions[1]
                << " actual_special_concurrent=" << special_concurrent[0] << ','
                << special_concurrent[1]
+               << " actual_translation=" << translation_regimes[0] << ','
+               << translation_regimes[1] << ',' << translation_regimes[2]
+               << " actual_stage1_mode=" << stage1_modes[0] << ','
+               << stage1_modes[1]
+               << " actual_vs_mode=" << vs_modes[0] << ',' << vs_modes[1]
+               << " actual_g_mode=" << g_modes[0] << ',' << g_modes[1]
+               << " actual_nested_pairs=" << nested_mode_pairs[0] << ','
+               << nested_mode_pairs[1] << ',' << nested_mode_pairs[2] << ','
+               << nested_mode_pairs[3]
+               << " actual_fences=" << fences[0][0] << ',' << fences[0][1]
+               << ',' << fences[1][0] << ',' << fences[1][1] << ','
+               << fences[2][0] << ',' << fences[2][1]
+               << " actual_translation_switch=" << translation_switches
+               << " actual_translation_walk_reuse="
+               << translation_walk_windows << ','
+               << translation_reuse_windows
                << " actual_tlb_flush=" << tlb_flushes
                << " actual_dcache=" << dcache_hits << ',' << dcache_misses
                << latency_summary("dcache_latency", dcache_latency)
@@ -9105,6 +9504,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     constexpr std::uint64_t host_physical = 0xd0000000ULL;
     constexpr std::uint64_t vs_root = 0x96000000ULL;
     constexpr std::uint64_t g_root = 0x97000000ULL;
+    constexpr std::array<std::uint64_t, 2> random_stage1_roots{{
+        0xe0000000ULL, 0xe1000000ULL}};
+    constexpr std::array<std::uint64_t, 2> random_vs_roots{{
+        0xe2000000ULL, 0xe3000000ULL}};
+    constexpr std::array<std::uint64_t, 2> random_g_roots{{
+        0xe4000000ULL, 0xe5000000ULL}};
 
     environment.memory().fill_incrementing(bare_base, 0x20000, 0x19);
     environment.memory().fill_incrementing(cache0_base, 0x90000, 0x43);
@@ -9537,6 +9942,145 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     static_cast<unsigned char>(offset >> (8 * byte));
             }
         }
+    };
+
+    const auto page_mode = [](unsigned index) {
+        return index == 0
+            ? memblock::ReferencePageMode::sv39
+            : memblock::ReferencePageMode::sv48;
+    };
+    const auto map_stage_page = [&](unsigned mode, std::uint64_t root,
+                                    std::uint64_t virtual_address,
+                                    std::uint64_t physical_address,
+                                    bool noncacheable = false,
+                                    bool io = false) {
+        return mode == 0
+            ? environment.map_sv39_4k(
+                  virtual_address, physical_address, root, true, true, false,
+                  false, noncacheable, io)
+            : environment.map_sv48_4k(
+                  virtual_address, physical_address, root, true, true, false,
+                  false, noncacheable, io);
+    };
+    const auto map_g_page = [&](unsigned mode, std::uint64_t root,
+                                std::uint64_t guest_physical_address,
+                                std::uint64_t host_physical_address) {
+        return mode == 0
+            ? environment.map_sv39x4_4k(
+                  guest_physical_address, host_physical_address, root)
+            : environment.map_sv48x4_4k(
+                  guest_physical_address, host_physical_address, root);
+    };
+    const auto prepare_random_translation_contexts = [&]() {
+        const auto map_all_contexts = [&](std::uint64_t virtual_address,
+                                          std::uint64_t physical_address,
+                                          bool noncacheable = false,
+                                          bool io = false) {
+            for (unsigned mode = 0; mode < 2; ++mode) {
+                if (!map_stage_page(
+                        mode, random_stage1_roots[mode], virtual_address,
+                        physical_address, noncacheable, io) ||
+                    !map_stage_page(
+                        mode, random_vs_roots[mode], virtual_address,
+                        physical_address, noncacheable, io) ||
+                    !map_g_page(
+                        mode, random_g_roots[mode], physical_address,
+                        physical_address)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        // Include a page of padding for negative vector strides and a page
+        // beyond the nominal cold set for indexed/split vector accesses.
+        for (std::uint64_t page = cache0_base + 0xf000;
+             page <= cache0_base + 0x92000; page += 0x1000) {
+            if (!map_all_contexts(page, page)) {
+                return false;
+            }
+        }
+        if (!map_all_contexts(cache1_base + 0xf000, cache1_base + 0xf000) ||
+            !map_all_contexts(atomic_base, atomic_base) ||
+            !map_all_contexts(nc_base, nc_base, true, false)) {
+            return false;
+        }
+        for (unsigned mode = 0; mode < 2; ++mode) {
+            if (!map_stage_page(
+                    mode, random_stage1_roots[mode], mmio_virtual,
+                    mmio_physical, false, true) ||
+                !map_stage_page(
+                    mode, random_vs_roots[mode], mmio_virtual,
+                    mmio_physical, false, true) ||
+                !map_g_page(
+                    mode, random_g_roots[mode], mmio_physical,
+                    mmio_physical)) {
+                return false;
+            }
+        }
+
+        // G-stage must translate implicit accesses to every VS page-table
+        // page. Keep these mappings at 4 KiB: this both matches ordinary
+        // page-table memory and avoids making an implicit PTE access depend
+        // on a separate G-stage superpage behavior.
+        for (unsigned g_mode = 0; g_mode < 2; ++g_mode) {
+            for (const std::uint64_t vs_page_table : random_vs_roots) {
+                for (std::uint64_t page = vs_page_table;
+                     page < vs_page_table + 0x200000; page += 0x1000) {
+                    if (!map_g_page(
+                            g_mode, random_g_roots[g_mode], page, page)) {
+                        return false;
+                    }
+                }
+            }
+        }
+        const std::array<std::pair<std::uint64_t, std::uint64_t>, 4>
+            reference_addresses{{
+                {cache0_base + 0x106a8, cache0_base + 0x106a8},
+                {cache1_base + 0xf800, cache1_base + 0xf800},
+                {nc_base + 0x188, nc_base + 0x188},
+                {mmio_virtual + 0x188, mmio_physical + 0x188},
+            }};
+        for (unsigned vs_mode = 0; vs_mode < 2; ++vs_mode) {
+            for (unsigned g_mode = 0; g_mode < 2; ++g_mode) {
+                for (const auto &[virtual_address, physical_address] :
+                     reference_addresses) {
+                    const auto walk = memblock::reference_two_stage_walk(
+                        environment.memory(), random_vs_roots[vs_mode],
+                        random_g_roots[g_mode], virtual_address,
+                        page_mode(vs_mode), page_mode(g_mode));
+                    if (!walk.translated ||
+                        walk.physical_address != physical_address) {
+                        std::ostringstream detail;
+                        detail << "random-translation-reference"
+                               << ":vs=" << vs_mode << ":g=" << g_mode
+                               << ":va=0x" << std::hex << virtual_address
+                               << ":expected=0x" << physical_address
+                               << ":actual=0x" << walk.physical_address;
+                        phase = detail.str();
+                        return false;
+                    }
+                }
+            }
+        }
+        return true;
+    };
+    const auto activate_translation_context = [&](const TranslationContext &context) {
+        if (context.regime == RandomConstraints::translation_bare) {
+            return environment.activate_bare();
+        }
+        if (context.regime == RandomConstraints::translation_stage1) {
+            return context.stage1_mode == 0
+                ? environment.activate_sv39(
+                      random_stage1_roots[context.stage1_mode], 23)
+                : environment.activate_sv48(
+                      random_stage1_roots[context.stage1_mode], 23);
+        }
+        return environment.activate_two_stage_modes(
+                   page_mode(context.vs_mode), page_mode(context.g_mode),
+                   random_vs_roots[context.vs_mode],
+                   random_g_roots[context.g_mode], 29, 31) &&
+            environment.set_page_based_memory_types(true, true);
     };
 
     const bool completed = [&]() {
@@ -10389,6 +10933,232 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         // later releases must follow the live architectural reference image.
         environment.clear_release_line_expectations();
 
+        phase = "random-translation-map";
+        if (!prepare_random_translation_contexts()) {
+            return false;
+        }
+        TranslationContext current_translation{};
+        bool translation_context_valid = false;
+        const auto first_enabled_mode = [](const std::array<unsigned, 2> &weights) {
+            return weights[0] != 0 ? 0U : 1U;
+        };
+        const auto random_translation_context = [&]() {
+            TranslationContext context;
+            context.regime = constraints.choose_translation_regime(random());
+            if (context.regime == RandomConstraints::translation_stage1) {
+                context.stage1_mode = constraints.choose_stage1_mode(random());
+            } else if (context.regime == RandomConstraints::translation_nested) {
+                context.vs_mode = constraints.choose_vs_mode(random());
+                context.g_mode = constraints.choose_g_mode(random());
+            }
+            return context;
+        };
+        const auto translated_context = [&]() {
+            TranslationContext context;
+            if (constraints.translation_weights[
+                    RandomConstraints::translation_stage1] != 0) {
+                context.regime = RandomConstraints::translation_stage1;
+                context.stage1_mode = constraints.choose_stage1_mode(random());
+            } else {
+                context.regime = RandomConstraints::translation_nested;
+                context.vs_mode = constraints.choose_vs_mode(random());
+                context.g_mode = constraints.choose_g_mode(random());
+            }
+            return context;
+        };
+        const auto required_translation_context = [&]()
+            -> std::optional<TranslationContext> {
+            if (constraints.translation_weights[
+                    RandomConstraints::translation_bare] != 0 &&
+                constraint_coverage.translation_regimes[
+                    RandomConstraints::translation_bare] == 0) {
+                return TranslationContext{};
+            }
+            if (constraints.translation_weights[
+                    RandomConstraints::translation_stage1] != 0) {
+                for (unsigned mode = 0; mode < 2; ++mode) {
+                    if (constraints.stage1_mode_weights[mode] != 0 &&
+                        constraint_coverage.stage1_modes[mode] == 0) {
+                        TranslationContext context;
+                        context.regime = RandomConstraints::translation_stage1;
+                        context.stage1_mode = mode;
+                        return context;
+                    }
+                }
+            }
+            if (constraints.translation_weights[
+                    RandomConstraints::translation_nested] != 0) {
+                for (unsigned vs_mode = 0; vs_mode < 2; ++vs_mode) {
+                    for (unsigned g_mode = 0; g_mode < 2; ++g_mode) {
+                        if (constraints.vs_mode_weights[vs_mode] != 0 &&
+                            constraints.g_mode_weights[g_mode] != 0 &&
+                            constraint_coverage.nested_mode_pairs[
+                                vs_mode * 2 + g_mode] == 0) {
+                            TranslationContext context;
+                            context.regime =
+                                RandomConstraints::translation_nested;
+                            context.vs_mode = vs_mode;
+                            context.g_mode = g_mode;
+                            return context;
+                        }
+                    }
+                }
+            }
+            if (constraints.uses_translation() &&
+                constraint_coverage.translation_walk_windows != 0 &&
+                constraint_coverage.translation_reuse_windows == 0 &&
+                translation_context_valid &&
+                current_translation.regime !=
+                    RandomConstraints::translation_bare) {
+                return current_translation;
+            }
+            if (constraints.tlb_flushes_per_mille == 0) {
+                return std::nullopt;
+            }
+            for (unsigned kind = 0;
+                 kind < RandomConstraints::fence_kind_count; ++kind) {
+                const bool compatible = kind == RandomConstraints::fence_sfence
+                    ? constraints.translation_weights[
+                          RandomConstraints::translation_stage1] != 0
+                    : constraints.translation_weights[
+                          RandomConstraints::translation_nested] != 0;
+                if (!compatible || constraints.fence_kind_weights[kind] == 0) {
+                    continue;
+                }
+                for (unsigned scope = 0; scope < 2; ++scope) {
+                    if (constraints.fence_scope_weights[scope] != 0 &&
+                        constraint_coverage.fences[kind][scope] == 0) {
+                        TranslationContext context;
+                        if (kind == RandomConstraints::fence_sfence) {
+                            context.regime =
+                                RandomConstraints::translation_stage1;
+                            context.stage1_mode = first_enabled_mode(
+                                constraints.stage1_mode_weights);
+                        } else {
+                            context.regime =
+                                RandomConstraints::translation_nested;
+                            context.vs_mode = first_enabled_mode(
+                                constraints.vs_mode_weights);
+                            context.g_mode = first_enabled_mode(
+                                constraints.g_mode_weights);
+                        }
+                        return context;
+                    }
+                }
+            }
+            return std::nullopt;
+        };
+        const auto choose_translation_context = [&]() {
+            if (const auto required = required_translation_context()) {
+                return *required;
+            }
+            if (translation_context_valid &&
+                random() % 1000 >=
+                    constraints.translation_switches_per_mille) {
+                return current_translation;
+            }
+            return random_translation_context();
+        };
+        const auto enter_translation_context =
+            [&](const TranslationContext &context) {
+                if (translation_context_valid &&
+                    context == current_translation) {
+                    return true;
+                }
+                if (!environment.run_until_all_complete(4096) ||
+                    !environment.run_until_queues_retired(4096) ||
+                    !activate_translation_context(context)) {
+                    return false;
+                }
+                if (translation_context_valid) {
+                    ++constraint_coverage.translation_switches;
+                }
+                current_translation = context;
+                translation_context_valid = true;
+                return true;
+            };
+        const auto issue_constrained_fence =
+            [&](unsigned operation_kind) {
+                if (current_translation.regime ==
+                        RandomConstraints::translation_bare ||
+                    constraints.tlb_flushes_per_mille == 0 ||
+                    !constraints.has_compatible_fence_kind(
+                        current_translation.regime)) {
+                    return true;
+                }
+                std::optional<std::pair<unsigned, unsigned>> required;
+                for (unsigned kind = 0;
+                     kind < RandomConstraints::fence_kind_count && !required;
+                     ++kind) {
+                    const bool compatible =
+                        (current_translation.regime ==
+                             RandomConstraints::translation_stage1 &&
+                         kind == RandomConstraints::fence_sfence) ||
+                        (current_translation.regime ==
+                             RandomConstraints::translation_nested &&
+                         kind != RandomConstraints::fence_sfence);
+                    if (!compatible ||
+                        constraints.fence_kind_weights[kind] == 0) {
+                        continue;
+                    }
+                    for (unsigned scope = 0; scope < 2; ++scope) {
+                        if (constraints.fence_scope_weights[scope] != 0 &&
+                            constraint_coverage.fences[kind][scope] == 0) {
+                            required = std::make_pair(kind, scope);
+                            break;
+                        }
+                    }
+                }
+                if (!required &&
+                    random() % 1000 >= constraints.tlb_flushes_per_mille) {
+                    return true;
+                }
+                const unsigned kind = required
+                    ? required->first
+                    : constraints.choose_fence_kind(
+                          current_translation.regime, random());
+                const unsigned scope = required
+                    ? required->second
+                    : constraints.choose_fence_scope(random());
+                const bool global = scope == 0;
+                std::uint64_t virtual_address = cache0_base + 0x10000;
+                if (operation_kind == RandomConstraints::noncacheable) {
+                    virtual_address = nc_base;
+                } else if (operation_kind == RandomConstraints::mmio) {
+                    virtual_address = mmio_virtual;
+                }
+                std::uint64_t fence_address = global ? 0 : virtual_address;
+                std::uint16_t id = 0;
+                bool hypervisor_virtual = false;
+                bool hypervisor_guest = false;
+                if (kind == RandomConstraints::fence_sfence) {
+                    id = 23;
+                } else if (kind == RandomConstraints::fence_hfence_vvma) {
+                    id = 29;
+                    hypervisor_virtual = true;
+                } else {
+                    id = 31;
+                    hypervisor_guest = true;
+                    const std::uint64_t guest_physical_address =
+                        operation_kind == RandomConstraints::mmio
+                        ? mmio_physical : virtual_address;
+                    fence_address = global ? 0 : guest_physical_address >> 2;
+                }
+                if (!environment.issue_sfence(
+                        fence_address, id, global, global,
+                        hypervisor_virtual, hypervisor_guest)) {
+                    return false;
+                }
+                ++constraint_coverage.fences[kind][scope];
+                ++constraint_coverage.tlb_flushes;
+                return true;
+            };
+        const auto mmio_access_address = [&]() {
+            return current_translation.regime ==
+                    RandomConstraints::translation_bare
+                ? mmio_physical : mmio_virtual;
+        };
+
         phase = "seeded-mixed-tail";
         const unsigned target_before_redirect = options.transactions - 2;
         environment.configure_backpressure(
@@ -10419,10 +11189,6 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         // all five producer classes before any completion drain, so cache,
         // TLB, forwarding, and queue timing can interact in one simulation.
         while (actions + 7 <= concurrent_action_limit) {
-            const std::uint64_t requests_at_window_start =
-                environment.tilelink_requests();
-            const std::uint64_t window_base =
-                constrained_cacheable_address(64) & ~std::uint64_t{63};
             std::optional<unsigned> special_kind;
             if (actions + 8 <= concurrent_action_limit &&
                 constraints.special_concurrent_per_mille != 0 &&
@@ -10444,6 +11210,24 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         constraints.choose_concurrent_special_operation(random());
                 }
             }
+            TranslationContext translation = choose_translation_context();
+            if (special_kind &&
+                (*special_kind == RandomConstraints::noncacheable ||
+                 *special_kind == RandomConstraints::mmio) &&
+                translation.regime == RandomConstraints::translation_bare) {
+                translation = translated_context();
+            }
+            if (!enter_translation_context(translation) ||
+                !issue_constrained_fence(
+                    special_kind.value_or(RandomConstraints::scalar_load))) {
+                return false;
+            }
+            const std::uint64_t ptw_at_window_start =
+                environment.ptw_requests();
+            const std::uint64_t requests_at_window_start =
+                environment.tilelink_requests();
+            const std::uint64_t window_base =
+                constrained_cacheable_address(64) & ~std::uint64_t{63};
             std::optional<memblock::LoadTransaction> special_load;
             if (special_kind == RandomConstraints::noncacheable) {
                 special_load = make_load(
@@ -10452,7 +11236,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             } else if (special_kind == RandomConstraints::mmio) {
                 const std::uint64_t offset = (random() % 128) * 8;
                 special_load = make_load(
-                    mmio_virtual + offset, memblock::LoadOp::ld, random() % 3);
+                    mmio_access_address() + offset,
+                    memblock::LoadOp::ld, random() % 3);
                 special_load->oracle_address = mmio_physical + offset;
                 special_load->expected_debug_is_mmio = true;
                 special_load->expected_debug_is_ncio = false;
@@ -10659,11 +11444,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 1U << static_cast<unsigned>(scalar_store.op);
             const bool scalar_store_crosses_page =
                 (scalar_store.address & 0xfffU) + scalar_store_bytes > 0x1000U;
+            const std::vector<memblock::VectorMemoryTransaction>
+                window_vectors{vector_load, vector_store};
             if ((scalar_store_crosses_page &&
                  (!environment.set_rob_head(
                       scalar_store.rob, scalar_store.rob_flag) ||
                   !environment.pulse_pending_store(
                       scalar_store.rob, scalar_store.rob_flag))) ||
+                !environment.run_until_store_complete_with_replay(
+                    scalar_store, constrained_completion_timeout) ||
+                !environment.run_until_vector_complete_with_replays(
+                    window_vectors, constrained_completion_timeout) ||
                 !environment.run_until_all_complete(
                     constrained_completion_timeout) ||
                 !environment.run_cycles(8) ||
@@ -10748,6 +11539,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
             constraint_coverage.sample_dcache(
                 requests_at_window_start, environment.tilelink_requests());
+            constraint_coverage.sample_translation(
+                translation, ptw_at_window_start, environment.ptw_requests(),
+                special_kind ? 8 : 7);
             actions += 5;
             coverage.cacheable += 7;
         }
@@ -10812,30 +11606,19 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     mmio_store = true;
                 }
             }
-            const bool can_tlb_flush =
-                kind == RandomConstraints::scalar_load ||
-                kind == RandomConstraints::scalar_store ||
-                kind == RandomConstraints::vector_load ||
-                kind == RandomConstraints::prefetch ||
-                kind == RandomConstraints::mmio ||
-                (kind == RandomConstraints::noncacheable && !nc_store);
-            if (can_tlb_flush &&
-                constraints.tlb_flushes_per_mille != 0 &&
-                (constraint_coverage.tlb_flushes == 0 ||
-                 random() % 1000 < constraints.tlb_flushes_per_mille)) {
-                const std::uint64_t fence_address =
-                    kind == RandomConstraints::mmio
-                    ? mmio_virtual
-                    : kind == RandomConstraints::noncacheable
-                    ? nc_base
-                    : cache0_base;
-                if (!environment.issue_sfence(
-                        fence_address, 0, false, false)) {
-                    return false;
-                }
-                ++constraint_coverage.tlb_flushes;
+            TranslationContext translation = choose_translation_context();
+            if ((kind == RandomConstraints::noncacheable ||
+                 kind == RandomConstraints::mmio) &&
+                translation.regime == RandomConstraints::translation_bare) {
+                translation = translated_context();
+            }
+            if (!enter_translation_context(translation) ||
+                !issue_constrained_fence(kind)) {
+                return false;
             }
 
+            const std::uint64_t ptw_requests_before =
+                environment.ptw_requests();
             const std::uint64_t requests_before = environment.tilelink_requests();
             bool sample_dcache = true;
             if (kind == RandomConstraints::scalar_load) {
@@ -11035,7 +11818,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 const std::uint64_t offset = (random() % 128) * 8;
                 if (!mmio_store) {
                     auto transaction = make_load(
-                        mmio_virtual + offset, memblock::LoadOp::ld, random() % 3);
+                        mmio_access_address() + offset,
+                        memblock::LoadOp::ld, random() % 3);
                     transaction.oracle_address = mmio_physical + offset;
                     transaction.expected_debug_is_mmio = true;
                     transaction.expected_debug_is_ncio = false;
@@ -11059,7 +11843,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     coverage.sample(transaction);
                 } else {
                     auto transaction = make_store(
-                        mmio_virtual + offset, random(), memblock::StoreOp::sd,
+                        mmio_access_address() + offset, random(),
+                        memblock::StoreOp::sd,
                         random() % 2, random() % 2);
                     transaction.oracle_address = mmio_physical + offset;
                     transaction.expected_debug_is_mmio = false;
@@ -11106,6 +11891,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
 
             constraint_coverage.sample_operation(kind);
+            constraint_coverage.sample_translation(
+                translation, ptw_requests_before, environment.ptw_requests());
             if (sample_dcache) {
                 constraint_coverage.sample_dcache(
                     requests_before, environment.tilelink_requests());
