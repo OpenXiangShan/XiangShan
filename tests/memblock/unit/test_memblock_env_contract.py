@@ -548,11 +548,14 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "run_inflight_context_switch(true, false)",
             "run_inflight_context_switch(false, true)",
             "run_inflight_context_switch(true, true)",
+            "run_inflight_virtualization_switch(true)",
+            "run_inflight_virtualization_switch(false)",
             '"-old-request reason="',
             '"-switch reason="',
             '"-new-request reason="',
             "inflight_context_cases=",
             "inflight_mode_cases=",
+            "inflight_v_cases=",
         ):
             self.assertIn(contract, environment + main)
 

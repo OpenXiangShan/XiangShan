@@ -6629,6 +6629,166 @@ int run_translation_inflight_context(
         return 1;
     }
 
+    unsigned inflight_v_cases = 0;
+    const auto run_inflight_virtualization_switch = [&](bool to_nested) {
+        memblock::Environment context(argc, argv);
+        constexpr std::uint64_t virtual_page = 0x40000000ULL;
+        constexpr std::uint64_t address = virtual_page + 0x188;
+        constexpr std::uint64_t guest_page = 0x880000000ULL;
+        constexpr std::array<std::uint64_t, 2> physical_pages{{
+            0x80000000ULL, 0xc0000000ULL}};
+        constexpr std::uint64_t stage1_root = 0xbe000000ULL;
+        constexpr std::uint64_t vs_root = 0x180000000ULL;
+        constexpr std::uint64_t g_root = 0x98000000ULL;
+        for (unsigned index = 0; index < physical_pages.size(); ++index) {
+            context.memory().fill_incrementing(
+                physical_pages[index], 0x1000,
+                static_cast<std::uint8_t>(0x4f + index * 0x63));
+        }
+        context.configure_backpressure(
+            to_nested ? 0x1f83d9abfb41bd6bULL
+                      : 0x5be0cd19137e2179ULL,
+            true,
+            memblock::ResponseLatencyProfiles{
+                memblock::ResponseLatencyProfile::compact,
+                memblock::ResponseLatencyProfile::spec,
+                memblock::ResponseLatencyProfile::compact});
+        const std::uint64_t host_physical =
+            to_nested ? physical_pages[0] : physical_pages[1];
+        const std::uint64_t nested_physical =
+            to_nested ? physical_pages[1] : physical_pages[0];
+        bool configured = context.reset() &&
+            (outstanding_vs_sv48
+                ? context.map_sv48_1g(
+                      virtual_page, host_physical, stage1_root)
+                : context.map_sv39_1g(
+                      virtual_page, host_physical, stage1_root)) &&
+            (outstanding_vs_sv48
+                ? context.map_sv48_1g(
+                      virtual_page, guest_page, vs_root)
+                : context.map_sv39_1g(
+                      virtual_page, guest_page, vs_root)) &&
+            (outstanding_g_sv48
+                ? context.map_sv48x4_1g(vs_root, vs_root, g_root)
+                : context.map_sv39x4_1g(vs_root, vs_root, g_root)) &&
+            (outstanding_g_sv48
+                ? context.map_sv48x4_1g(
+                      guest_page, nested_physical, g_root)
+                : context.map_sv39x4_1g(
+                      guest_page, nested_physical, g_root));
+        if (configured) {
+            configured = to_nested
+                ? (outstanding_vs_sv48
+                    ? context.activate_sv48(stage1_root, 111)
+                    : context.activate_sv39(stage1_root, 111))
+                : context.activate_two_stage_modes(
+                      outstanding_vs_sv48
+                          ? memblock::ReferencePageMode::sv48
+                          : memblock::ReferencePageMode::sv39,
+                      outstanding_g_sv48
+                          ? memblock::ReferencePageMode::sv48
+                          : memblock::ReferencePageMode::sv39,
+                      vs_root, g_root, 113, 115);
+        }
+        if (!configured) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << context.cycle() << " phase=inflight-v-"
+                      << (to_nested ? "host-to-nested" : "nested-to-host")
+                      << "-configuration reason=" << context.error() << '\n';
+            return false;
+        }
+
+        memblock::LoadTransaction canceled{
+            .address = address,
+            .oracle_address =
+                (to_nested ? host_physical : nested_physical) + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 52,
+            .lq = 0,
+            .pdest = 128,
+            .lane = 0,
+        };
+        context.force_next_ptw_response_delay(256);
+        const std::uint64_t first_ptw_request = context.ptw_requests();
+        if (!context.set_rob_head(canceled.rob, canceled.rob_flag) ||
+            !context.enqueue_load(canceled) ||
+            !context.issue_load(canceled, 512) ||
+            !context.run_until_ptw_requests(first_ptw_request + 1, 4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << context.cycle() << " phase=inflight-v-"
+                      << (to_nested ? "host-to-nested" : "nested-to-host")
+                      << "-old-request reason=" << context.error() << '\n';
+            return false;
+        }
+        const std::uint64_t stale_ptw_snapshot = context.ptw_requests();
+        const bool switched = to_nested
+            ? context.activate_two_stage_modes(
+                  outstanding_vs_sv48
+                      ? memblock::ReferencePageMode::sv48
+                      : memblock::ReferencePageMode::sv39,
+                  outstanding_g_sv48
+                      ? memblock::ReferencePageMode::sv48
+                      : memblock::ReferencePageMode::sv39,
+                  vs_root, g_root, 114, 116)
+            : (outstanding_vs_sv48
+                ? context.activate_sv48(stage1_root, 112)
+                : context.activate_sv39(stage1_root, 112));
+        if (!switched || !context.redirect_after(51, false, false) ||
+            context.writebacks() != 0) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << context.cycle() << " phase=inflight-v-"
+                      << (to_nested ? "host-to-nested" : "nested-to-host")
+                      << "-switch reason="
+                      << (context.error().empty()
+                              ? "redirected old virtualization context wrote back"
+                              : context.error()) << '\n';
+            return false;
+        }
+        if (context.lq_dequeued() + context.lq_canceled() <
+                context.lq_allocated() &&
+            !context.account_lq_cancellation(1)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << context.cycle() << " phase=inflight-v-"
+                      << (to_nested ? "host-to-nested" : "nested-to-host")
+                      << "-cancel-accounting reason=" << context.error() << '\n';
+            return false;
+        }
+
+        canceled.oracle_address =
+            (to_nested ? nested_physical : host_physical) + 0x188;
+        canceled.pdest = 129;
+        canceled.lane = 1;
+        context.expect_load(canceled);
+        if (!context.enqueue_load(canceled) ||
+            !context.issue_load(canceled, 2048) ||
+            !context.run_until_complete(32768) ||
+            !context.run_until_lq_retired(4096) ||
+            context.ptw_requests() <= stale_ptw_snapshot ||
+            context.writebacks() != 1 ||
+            context.lq_dequeued() + context.lq_canceled() !=
+                context.lq_allocated()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << context.cycle() << " phase=inflight-v-"
+                      << (to_nested ? "host-to-nested" : "nested-to-host")
+                      << "-new-request reason="
+                      << (context.error().empty()
+                              ? "new virtualization context reused stale translation"
+                              : context.error()) << '\n';
+            return false;
+        }
+        outstanding_cycles += context.cycle();
+        outstanding_ptw_requests += context.ptw_requests();
+        outstanding_writebacks += context.writebacks();
+        ++inflight_context_cases;
+        ++inflight_v_cases;
+        return true;
+    };
+
+    if (!run_inflight_virtualization_switch(true) ||
+        !run_inflight_virtualization_switch(false)) {
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_TRANSLATION_INFLIGHT_CONTEXT_PASS"
               << " cycle=" << outstanding_cycles
               << " ptw_requests=" << outstanding_ptw_requests
@@ -6639,6 +6799,7 @@ int run_translation_inflight_context(
               << (outstanding_g_sv48 ? "sv48x4" : "sv39x4")
               << " inflight_context_cases=" << inflight_context_cases
               << " inflight_mode_cases=" << inflight_mode_cases
+              << " inflight_v_cases=" << inflight_v_cases
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
