@@ -13,12 +13,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`
-- Current rebuilt and frozen UT executable SHA-256: `51110a71ef1c5f432cc80ddb3ed378c9ff0f01da1eaf4851663e3f3288b259b1`
+- Current rebuilt and frozen UT executable SHA-256: `e9845e23db6f91cdd0b1ffd6c831e20059882fa7e825f02c29d8e359c37540b7`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `af39b980658fd5cf913d1ad0d768b41643ef2331c45edb95584159dc537161a0`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `0814ee0cdc63c87d1799f3ced61562a2f9072593e76a94f16fdb01b719feda1c`
-- Frozen runtime manifest SHA-256: `1e0da0a7941d69b8e3be447f0e6d3b798af83ff44daa68b5a775007078a3e53c`
+- Frozen runtime manifest SHA-256: `07539f7cef34faa37ca5fdbd64728d013216ed38add4b67198572a1b89eb84d5`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -191,6 +191,17 @@ store readback matched exact data, and all LQ/SQ entries retired. Neighboring
 `translation-permissions`, `translation-matrix`, `translation-faults`,
 `translation-superpages`, `mmio-contracts`, and `uncache-widths` passed on the
 same RTL SHA-256.
+
+The final frozen harness then passed an independently verified eight-seed
+`spec` campaign with 8,192 actions per seed. All 65,536 constrained-random
+actions completed over 2,365,067 simulated cycles in 124.585011 seconds, with
+8,363 DCache TileLink requests, 1,309 PTW requests, 647 Uncache requests, 299
+dirty ReleaseData beats, 1,150 TLB flushes, 153 scalar misaligned accesses, and
+eight vector replays. DCache, PTW, and Uncache response latencies reached 398,
+397, and 399 cycles respectively. The frozen runtime and all controller hashes
+were unchanged across the run. The independently checked artifact is
+`build/memblock/spec-final-8x8192.json`, SHA-256
+`19bac99771d9da03dc6d6714150eb55dbed8735c0144328be1619dee5c0847d2`.
 
 After the 57-case fault expansion, `random-mixed --seed 419 --transactions
 4096 --constraints spec` passed in 152,052 cycles. It mixed 2,467 loads, 1,011
