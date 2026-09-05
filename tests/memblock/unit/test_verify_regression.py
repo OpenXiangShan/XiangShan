@@ -184,6 +184,22 @@ class VerifyRegressionTest(unittest.TestCase):
         self.assertEqual(verified["first_seed"], 7)
         self.assertEqual(verified["last_seed"], 8)
 
+    def test_constraint_command_must_match_recorded_configuration(self) -> None:
+        document = regression_document([mixed_result(7), mixed_result(8)])
+        document["configuration"]["constraint_profile"] = "spec"
+        document["configuration"]["constraint_overrides"] = ["tlb-flush=40"]
+        for result in document["results"]:
+            result["command"].extend(
+                ("--constraints", "spec", "--constraint", "tlb-flush=40")
+            )
+        self.verify(document)
+
+        document["results"][0]["command"][-1] = "tlb-flush=400"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "command options"
+        ):
+            self.verify(document)
+
     def test_allow_finite_campaign_without_duration_deadline(self) -> None:
         document = regression_document([mixed_result(7), mixed_result(8)])
         document["configuration"]["duration_seconds"] = None

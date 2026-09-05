@@ -520,7 +520,7 @@ A campaign seed should be replayed from its recorded frozen runtime:
 ```sh
 LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
   ../../build/memblock/runtime/memblock_sim \
-  --test random-mixed --seed 17 --transactions 64
+  --test random-mixed --seed 17 --transactions 256
 ```
 
 ## Complete Pin Audit

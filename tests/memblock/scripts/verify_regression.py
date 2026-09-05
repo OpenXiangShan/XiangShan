@@ -326,7 +326,7 @@ def _check_result(
     requested_transactions: dict[str, int],
     completed_transactions: dict[str, int],
     require_backpressure: bool = False,
-) -> tuple[int, str, str, int, str, float]:
+) -> tuple[int, str, str, int, str, float, tuple[str, ...]]:
     prefix = f"result {index}"
     _require(isinstance(result, dict), f"{prefix} is not an object")
     _require(result.get("status") == "pass", f"{prefix} status is {result.get('status')!r}")
@@ -394,10 +394,12 @@ def _check_result(
     ]
     _require(
         isinstance(command, list)
-        and len(command) == len(expected_tail) + 1
-        and command[1:] == expected_tail,
+        and len(command) >= len(expected_tail) + 1
+        and command[1 : len(expected_tail) + 1] == expected_tail
+        and all(isinstance(item, str) for item in command),
         f"{prefix} command does not replay its recorded case",
     )
+    command_options = tuple(command[len(expected_tail) + 1 :])
 
     summary = result.get("summary")
     _require(isinstance(summary, str), f"{prefix} has no simulator summary")
@@ -427,6 +429,7 @@ def _check_result(
         int(transactions),
         rtl_hash,
         float(completed_offset),
+        command_options,
     )
 
 
@@ -446,6 +449,7 @@ def _read_document(
     transaction_sum = 0
     result_count = 0
     completion_offsets: list[float] = []
+    command_options: set[tuple[str, tuple[str, ...]]] = set()
 
     with path.open("r", encoding="utf-8") as stream:
         reader = StreamingJsonReader(stream, chunk_size=chunk_size)
@@ -476,6 +480,7 @@ def _read_document(
                             transactions,
                             rtl_hash,
                             completed_offset,
+                            options,
                         ) = _check_result(
                             result,
                             result_count,
@@ -494,6 +499,7 @@ def _read_document(
                     statuses["pass"] += 1
                     transaction_sum += transactions
                     completion_offsets.append(completed_offset)
+                    command_options.add((scenario, options))
                     result_count += 1
                     first_result = False
             first_member = False
@@ -508,6 +514,7 @@ def _read_document(
         "statuses": dict(statuses),
         "transactions": transaction_sum,
         "completion_offsets": completion_offsets,
+        "command_options": command_options,
     }
 
 
@@ -708,6 +715,45 @@ def verify_regression(
         )
     if require_backpressure:
         _require(configuration.get("backpressure") is True, "backpressure was disabled")
+
+    backpressure = configuration.get("backpressure")
+    _require(isinstance(backpressure, bool), "configuration has no boolean backpressure mode")
+    hunt_boundaries = configuration.get("hunt_boundaries", False)
+    _require(isinstance(hunt_boundaries, bool), "configuration has invalid boundary-hunt mode")
+    expected_command_options: set[tuple[str, tuple[str, ...]]] = set()
+    for scenario in scenarios:
+        options: list[str] = []
+        if scenario == run_regression.CONSTRAINED_SCENARIO:
+            has_profile = "constraint_profile" in configuration
+            has_overrides = "constraint_overrides" in configuration
+            _require(
+                has_profile == has_overrides,
+                "constraint profile and overrides must be recorded together",
+            )
+            if has_profile:
+                profile = configuration.get("constraint_profile")
+                overrides = configuration.get("constraint_overrides")
+                _require(
+                    profile in run_regression.CONSTRAINT_PROFILES,
+                    f"invalid recorded constraint profile: {profile!r}",
+                )
+                _require(
+                    isinstance(overrides, list)
+                    and all(isinstance(item, str) for item in overrides),
+                    "invalid recorded constraint overrides",
+                )
+                options.extend(("--constraints", profile))
+                for override in overrides:
+                    options.extend(("--constraint", override))
+        if not backpressure:
+            options.append("--no-backpressure")
+        if hunt_boundaries:
+            options.append("--hunt-boundaries")
+        expected_command_options.add((scenario, tuple(options)))
+    _require(
+        observed["command_options"] == expected_command_options,
+        "per-result command options differ from recorded configuration",
+    )
 
     result_count = observed["result_count"]
     _require(result_count >= min_results, f"only {result_count} results were recorded")

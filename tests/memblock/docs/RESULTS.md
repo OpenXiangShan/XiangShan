@@ -13,12 +13,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`
-- Current rebuilt and frozen UT executable SHA-256: `9ff336366af0d42b87568b3f3270188709e8275602e858bab8ea9e6ff7058fcd`
+- Current rebuilt and frozen UT executable SHA-256: `38f4283585fed1b1288cfc6c9bf18858ab436a635da18baa48b31e957652ddca`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
-- Current rebuilt and frozen Verilated model SHA-256: `654b6e0cc1b38df659557731f7ab29460b214ce179024a37fb7666783ef9ab9b`
+- Current rebuilt and frozen Verilated model SHA-256: `af39b980658fd5cf913d1ad0d768b41643ef2331c45edb95584159dc537161a0`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `0814ee0cdc63c87d1799f3ced61562a2f9072593e76a94f16fdb01b719feda1c`
-- Frozen runtime manifest SHA-256: `f0fe2bfce44438b76175ee8dbc50b2dcc784118227d1e1c04aa6bb37de1aeb15`
+- Frozen runtime manifest SHA-256: `c067c81c687ef86decb3576e5add6f92c5781503eb7fedd3b3d43195a21cbd5f`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -200,11 +200,18 @@ parameters and verifies the independent Sv39x4 GPA oracle.
 
 Latest focused correction evidence:
 
-- 101 Python unit tests and the complete port/SVA/filelist checks pass;
+- 103 Python unit tests and the complete port/SVA/filelist checks pass;
 - the common constrained-random interface passed an override run whose tail
   enabled only scalar loads (`seed=29`, 256 actions): actual constrained
   operations were `155,0,0,0,0,0,0,0`, and all 155 locality selections used
   the requested hot set;
+- the final frozen runtime passed the minimum accepted `spec` run (`seed=1`,
+  256 actions) in 11,490 cycles. It produced all eight operation classes,
+  exactly four heterogeneous overlap windows, six TLB flushes, all four DCache
+  latency buckets, and a 387-cycle maximum response delay. The independent
+  verifier accepted the frozen hashes, exact command options, coverage fields,
+  and queue accounting; artifact SHA-256 is
+  `be0646adb73e281ece4b2461f933972be8f4fba4abce2c0e03ecf808498102eb`;
 - `random-mixed --seed 31 --transactions 16384 --constraints spec` passed
   16,384 actions in 577,224 cycles. Its constrained tail produced 9,971 scalar
   loads, 4,187 scalar stores, 756 vector loads, 394 vector stores, 755
@@ -231,6 +238,16 @@ updates only the architectural reference after a successful AMO, leaving bus
 memory unchanged until the checked ReleaseData arrives. Both original seeds
 then passed without weakening the ReleaseData checker. See
 [`CONSTRAINED_RANDOM_ATOMIC_RELEASE_ORACLE.md`](CONSTRAINED_RANDOM_ATOMIC_RELEASE_ORACLE.md).
+
+Frozen-boundary validation also exposed two UT framework defects, neither an
+RTL failure. The old 128-action lower bound could not always fit four overlap
+windows after the architectural prefix, and the offline verifier did not yet
+recognize the new constraint command options. The lower bound is now 256 while
+historical 128-action artifacts retain their enhanced coverage checks; command
+options must exactly match campaign configuration. See
+[`CONSTRAINED_RANDOM_MINIMUM_BUDGET.md`](CONSTRAINED_RANDOM_MINIMUM_BUDGET.md)
+and
+[`CONSTRAINED_RANDOM_COMMAND_REPLAY.md`](CONSTRAINED_RANDOM_COMMAND_REPLAY.md).
 
 Neighboring current-binary checks also pass: `vector-addressing` (including the
 cross-16-byte ROB-head contract), `atomic-contracts`, `dcache-errors`,
