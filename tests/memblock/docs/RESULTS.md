@@ -224,7 +224,7 @@ parameters and verifies the independent Sv39x4 GPA oracle.
 
 Latest focused correction evidence:
 
-- 113 Python unit tests and the complete port/SVA/filelist checks pass;
+- 115 Python unit tests and the complete port/SVA/filelist checks pass;
 - `frontend-bridge` closes legal-transaction semantics for the 88 top-level
   frontend TileLink fields. Four seeds with 4,096 transactions on each path and
   a fifth seed with 16,384 transactions per path all passed. Across the
@@ -236,6 +236,23 @@ Latest focused correction evidence:
   sizes, full/partial masks, corrupt polarity, FIFO ordering, and final
   quiescence. The newly frozen runtime separately passed seed 29 with 4,096
   transactions per path;
+- the regression runner and independent artifact verifier now include
+  `frontend-bridge` in the normal six-scenario matrix. A frozen-runtime
+  32-seed run at 4,096 transactions per path passed all 32 cases in 43.065253
+  seconds, totaling 393,216 A requests, 524,288 D beats, 6,345,239 field
+  comparisons, 175,708 request stalls, 86,636 response stalls, and 831,760
+  source-credit stalls. Runtime and controller hashes were unchanged and the
+  verifier accepted artifact SHA-256
+  `dcf45dea560ea8d6689c2b214f7c34ec3cbad3a3282da99de74eb0a5fa82fcb0`;
+- an eight-seed matrix then passed all 48 invocations of `random-loads`,
+  `random-forwarding`, `random-vector-loads`, `random-vector-forwarding`,
+  `random-mixed --constraints spec`, and `frontend-bridge`. It completed
+  131,648 reported transactions in 186.104745 seconds on complete RTL
+  `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`;
+  the independent verifier accepted exact commands, per-scenario coverage,
+  backpressure, continuous seeds, and unchanged frozen/controller hashes.
+  Artifact SHA-256:
+  `33a2fc52e8c405c7161589accf284407704ee44963929b182b82db3cd6ae1de8`;
 - after making mixed-window scalar addresses obey `misaligned` and supplying
   the required ROB-head pulse for the rare cross-page store, the exact former
   timeout command (`random-mixed --seed 42 --transactions 16384 --constraints
