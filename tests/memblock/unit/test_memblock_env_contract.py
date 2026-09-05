@@ -473,6 +473,24 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("kExceptionStorePageFault", main)
         self.assertIn("account_sq_cancellation(1)", main)
 
+    def test_translation_fence_covers_same_id_root_reuse(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for helper in (
+            "update_stage_one_context",
+            "update_vs_context",
+            "update_g_context",
+        ):
+            self.assertIn(helper, environment)
+            self.assertIn(helper, main)
+        for phase in (
+            "same-asid-refill",
+            "same-vs-asid-refill",
+            "same-vmid-refill",
+            "same_id_reuses=3",
+        ):
+            self.assertIn(phase, main)
+
     def test_translation_permission_matrix_uses_top_level_csr_controls(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

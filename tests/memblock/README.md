@@ -228,8 +228,10 @@ requests.
 
 `translation-fence` updates live stage-1 and nested leaves, then checks global
 and selective `SFENCE.VMA`, selective `HFENCE.VVMA`, and global
-`HFENCE.GVMA` visibility after the required refill. Same-ID ASID/VMID reuse
-and outstanding-walk ordering remain separate coverage points.
+`HFENCE.GVMA` visibility after the required refill. It also rebinds the same
+host ASID, VS ASID, and VMID to distinct page-table roots, applies the matching
+targeted fence, and checks distinct physical data after a new PTW refill.
+Outstanding-walk ordering remains a separate coverage point.
 
 `translation-context` checks five context families with 14 architectural
 loads: direct Sv39-to-Sv48 mode/root switching, same-mode `satp` ASID/root,

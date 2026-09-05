@@ -126,8 +126,12 @@ permission/fault matrix remain explicit boundary work.
 `make translation-fence` also passed: a same-VA Sv39 leaf update stayed on the
 old translation before the fence and refilled to the new physical page after a
 global and selective `SFENCE.VMA`; nested VS and G-stage leaf updates refilled
-after selective `HFENCE.VVMA` and global `HFENCE.GVMA` respectively (35 PTW
-requests and ten load writebacks across all checks).
+after selective `HFENCE.VVMA` and global `HFENCE.GVMA` respectively. The
+extended scenario also rebound one host ASID, one VS ASID, and one VMID to new
+page-table roots under the matching targeted fence. All three same-ID cases
+returned the distinct new-page data and produced a fresh PTW refill. The full
+scenario passed in 2,305 aggregate cycles with 73 PTW requests and 16 load
+writebacks.
 
 `make translation-context` passed five context families and 14 same-address
 loads: direct Sv39-to-Sv48 mode/root, same-mode host ASID/root, VS ASID/root,
@@ -224,7 +228,7 @@ parameters and verifies the independent Sv39x4 GPA oracle.
 
 Latest focused correction evidence:
 
-- 115 Python unit tests and the complete port/SVA/filelist checks pass;
+- 116 Python unit tests and the complete port/SVA/filelist checks pass;
 - `frontend-bridge` closes legal-transaction semantics for the 88 top-level
   frontend TileLink fields. Four seeds with 4,096 transactions on each path and
   a fifth seed with 16,384 transactions per path all passed. Across the

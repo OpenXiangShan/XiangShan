@@ -4158,6 +4158,51 @@ public:
         return run_cycles(16) && check_components();
     }
 
+    bool update_stage_one_context(
+        ReferencePageMode mode,
+        std::uint64_t root_page_table,
+        std::uint16_t asid)
+    {
+        dut_.io_ooo_to_mem_tlbCsr_satp_mode.ImmSet(
+            static_cast<std::uint64_t>(mode));
+        dut_.io_ooo_to_mem_tlbCsr_satp_asid.ImmSet(asid);
+        dut_.io_ooo_to_mem_tlbCsr_satp_ppn.ImmSet(root_page_table >> 12);
+        dut_.io_ooo_to_mem_tlbCsr_satp_changed.ImmSet(std::uint64_t{1});
+        tick(false);
+        dut_.io_ooo_to_mem_tlbCsr_satp_changed.ImmSet(std::uint64_t{0});
+        return run_cycles(16) && check_components();
+    }
+
+    bool update_vs_context(
+        ReferencePageMode mode,
+        std::uint64_t root_page_table,
+        std::uint16_t asid)
+    {
+        dut_.io_ooo_to_mem_tlbCsr_vsatp_mode.ImmSet(
+            static_cast<std::uint64_t>(mode));
+        dut_.io_ooo_to_mem_tlbCsr_vsatp_asid.ImmSet(asid);
+        dut_.io_ooo_to_mem_tlbCsr_vsatp_ppn.ImmSet(root_page_table >> 12);
+        dut_.io_ooo_to_mem_tlbCsr_vsatp_changed.ImmSet(std::uint64_t{1});
+        tick(false);
+        dut_.io_ooo_to_mem_tlbCsr_vsatp_changed.ImmSet(std::uint64_t{0});
+        return run_cycles(16) && check_components();
+    }
+
+    bool update_g_context(
+        ReferencePageMode mode,
+        std::uint64_t root_page_table,
+        std::uint16_t vmid)
+    {
+        dut_.io_ooo_to_mem_tlbCsr_hgatp_mode.ImmSet(
+            static_cast<std::uint64_t>(mode));
+        dut_.io_ooo_to_mem_tlbCsr_hgatp_vmid.ImmSet(vmid);
+        dut_.io_ooo_to_mem_tlbCsr_hgatp_ppn.ImmSet(root_page_table >> 12);
+        dut_.io_ooo_to_mem_tlbCsr_hgatp_changed.ImmSet(std::uint64_t{1});
+        tick(false);
+        dut_.io_ooo_to_mem_tlbCsr_hgatp_changed.ImmSet(std::uint64_t{0});
+        return run_cycles(16) && check_components();
+    }
+
     bool set_translation_permissions(
         ReferencePrivilegeMode data_privilege,
         bool mxr = false,

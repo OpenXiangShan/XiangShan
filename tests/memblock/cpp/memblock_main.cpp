@@ -4895,6 +4895,30 @@ int run_translation_matrix(int argc, char **argv)
 
 int run_translation_fence(int argc, char **argv)
 {
+    const auto run_fenced_load = [](
+        memblock::Environment &test_environment,
+        std::uint64_t virtual_address,
+        std::uint64_t physical_address,
+        unsigned index,
+        std::uint8_t pdest) {
+        const memblock::LoadTransaction transaction{
+            .address = virtual_address,
+            .oracle_address = physical_address,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(index),
+            .lq = static_cast<std::uint8_t>(index),
+            .pdest = pdest,
+            .lane = index % memblock::kScalarLoadLanes,
+        };
+        test_environment.expect_load(transaction);
+        return test_environment.set_rob_head(
+                   transaction.rob, transaction.rob_flag) &&
+            test_environment.enqueue_load(transaction) &&
+            test_environment.issue_load(transaction, 2048) &&
+            test_environment.run_until_complete(16384) &&
+            test_environment.run_until_lq_retired(4096);
+    };
+
     memblock::Environment environment(argc, argv);
     constexpr std::uint64_t virtual_base = 0x62000000ULL;
     constexpr std::uint64_t old_physical = 0xc1000000ULL;
@@ -5196,12 +5220,174 @@ int run_translation_fence(int argc, char **argv)
         return 1;
     }
 
+    std::uint64_t same_id_cycles = 0;
+    std::uint64_t same_id_ptw_requests = 0;
+    std::uint64_t same_id_writebacks = 0;
+
+    // Reuse one host ASID for a different root, then invalidate that ASID.
+    {
+        memblock::Environment reuse(argc, argv);
+        constexpr std::uint64_t address = 0x67000188ULL;
+        constexpr std::uint64_t virtual_page = 0x67000000ULL;
+        constexpr std::uint64_t physical_a = 0xd2000000ULL;
+        constexpr std::uint64_t physical_b = 0xd3000000ULL;
+        constexpr std::uint64_t root_a = 0xb8000000ULL;
+        constexpr std::uint64_t root_b = 0xba000000ULL;
+        constexpr std::uint16_t asid = 47;
+        reuse.memory().fill_incrementing(physical_a, 0x1000, 0x35);
+        reuse.memory().fill_incrementing(physical_b, 0x1000, 0xc5);
+        reuse.configure_backpressure(0x082efa98ec4e6c89ULL, true);
+        if (!reuse.reset() ||
+            !reuse.map_sv39_4k(virtual_page, physical_a, root_a) ||
+            !reuse.map_sv39_4k(virtual_page, physical_b, root_b) ||
+            !reuse.activate_sv39(root_a, asid) ||
+            !run_fenced_load(reuse, address, physical_a + 0x188, 0, 112)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << reuse.cycle() << " phase=same-asid-cold reason="
+                      << reuse.error() << '\n';
+            return 1;
+        }
+        const std::uint64_t ptw_before_reuse = reuse.ptw_requests();
+        if (!reuse.update_stage_one_context(
+                memblock::ReferencePageMode::sv39, root_b, asid) ||
+            !reuse.issue_sfence(0, asid, true, false) ||
+            !run_fenced_load(reuse, address, physical_b + 0x188, 1, 113) ||
+            reuse.ptw_requests() <= ptw_before_reuse) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << reuse.cycle() << " phase=same-asid-refill reason="
+                      << (reuse.error().empty()
+                              ? "same-ASID root reuse did not refill"
+                              : reuse.error()) << '\n';
+            return 1;
+        }
+        same_id_cycles += reuse.cycle();
+        same_id_ptw_requests += reuse.ptw_requests();
+        same_id_writebacks += reuse.writebacks();
+    }
+
+    // Reuse one VS ASID for another VS root while retaining the G context.
+    {
+        memblock::Environment reuse(argc, argv);
+        constexpr std::uint64_t address = 0x69000188ULL;
+        constexpr std::uint64_t virtual_page = 0x69000000ULL;
+        constexpr std::uint64_t guest_a = 0x90000000ULL;
+        constexpr std::uint64_t guest_b = 0x90100000ULL;
+        constexpr std::uint64_t physical_a = 0xd4000000ULL;
+        constexpr std::uint64_t physical_b = 0xd5000000ULL;
+        constexpr std::uint64_t vs_root_a = 0xbc000000ULL;
+        constexpr std::uint64_t vs_root_b = 0xbd000000ULL;
+        constexpr std::uint64_t g_root = 0xbe000000ULL;
+        constexpr std::uint16_t asid = 51;
+        constexpr std::uint16_t vmid = 61;
+        reuse.memory().fill_incrementing(physical_a, 0x1000, 0x46);
+        reuse.memory().fill_incrementing(physical_b, 0x1000, 0xd6);
+        reuse.configure_backpressure(0x452821e638d01377ULL, true);
+        if (!reuse.reset() ||
+            !reuse.map_sv39_4k(virtual_page, guest_a, vs_root_a) ||
+            !reuse.map_sv39_4k(virtual_page, guest_b, vs_root_b) ||
+            !reuse.map_sv39x4_4k(vs_root_a, vs_root_a, g_root) ||
+            !reuse.map_sv39x4_4k(
+                vs_root_a + 0x1000, vs_root_a + 0x1000, g_root) ||
+            !reuse.map_sv39x4_4k(
+                vs_root_a + 0x2000, vs_root_a + 0x2000, g_root) ||
+            !reuse.map_sv39x4_4k(vs_root_b, vs_root_b, g_root) ||
+            !reuse.map_sv39x4_4k(
+                vs_root_b + 0x1000, vs_root_b + 0x1000, g_root) ||
+            !reuse.map_sv39x4_4k(
+                vs_root_b + 0x2000, vs_root_b + 0x2000, g_root) ||
+            !reuse.map_sv39x4_4k(guest_a, physical_a, g_root) ||
+            !reuse.map_sv39x4_4k(guest_b, physical_b, g_root) ||
+            !reuse.activate_two_stage(vs_root_a, g_root, asid, vmid) ||
+            !run_fenced_load(reuse, address, physical_a + 0x188, 0, 114)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << reuse.cycle() << " phase=same-vs-asid-cold reason="
+                      << reuse.error() << '\n';
+            return 1;
+        }
+        const std::uint64_t ptw_before_reuse = reuse.ptw_requests();
+        if (!reuse.update_vs_context(
+                memblock::ReferencePageMode::sv39, vs_root_b, asid) ||
+            !reuse.issue_sfence(0, asid, true, false, true, false) ||
+            !run_fenced_load(reuse, address, physical_b + 0x188, 1, 115) ||
+            reuse.ptw_requests() <= ptw_before_reuse) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << reuse.cycle() << " phase=same-vs-asid-refill reason="
+                      << (reuse.error().empty()
+                              ? "same VS-ASID root reuse did not refill"
+                              : reuse.error()) << '\n';
+            return 1;
+        }
+        same_id_cycles += reuse.cycle();
+        same_id_ptw_requests += reuse.ptw_requests();
+        same_id_writebacks += reuse.writebacks();
+    }
+
+    // Reuse one VMID for another G-stage root while retaining the VS context.
+    {
+        memblock::Environment reuse(argc, argv);
+        constexpr std::uint64_t address = 0x6b000188ULL;
+        constexpr std::uint64_t virtual_page = 0x6b000000ULL;
+        constexpr std::uint64_t guest = 0x92000000ULL;
+        constexpr std::uint64_t physical_a = 0xd6000000ULL;
+        constexpr std::uint64_t physical_b = 0xd7000000ULL;
+        constexpr std::uint64_t vs_root = 0xcf000000ULL;
+        constexpr std::uint64_t g_root_a = 0xd0000000ULL;
+        constexpr std::uint64_t g_root_b = 0xd1000000ULL;
+        constexpr std::uint16_t asid = 53;
+        constexpr std::uint16_t vmid = 63;
+        reuse.memory().fill_incrementing(physical_a, 0x1000, 0x57);
+        reuse.memory().fill_incrementing(physical_b, 0x1000, 0xe7);
+        reuse.configure_backpressure(0xbe5466cf34e90c6cULL, true);
+        if (!reuse.reset() ||
+            !reuse.map_sv39_4k(virtual_page, guest, vs_root) ||
+            !reuse.map_sv39x4_4k(vs_root, vs_root, g_root_a) ||
+            !reuse.map_sv39x4_4k(
+                vs_root + 0x1000, vs_root + 0x1000, g_root_a) ||
+            !reuse.map_sv39x4_4k(
+                vs_root + 0x2000, vs_root + 0x2000, g_root_a) ||
+            !reuse.map_sv39x4_4k(guest, physical_a, g_root_a) ||
+            !reuse.map_sv39x4_4k(vs_root, vs_root, g_root_b) ||
+            !reuse.map_sv39x4_4k(
+                vs_root + 0x1000, vs_root + 0x1000, g_root_b) ||
+            !reuse.map_sv39x4_4k(
+                vs_root + 0x2000, vs_root + 0x2000, g_root_b) ||
+            !reuse.map_sv39x4_4k(guest, physical_b, g_root_b) ||
+            !reuse.activate_two_stage(vs_root, g_root_a, asid, vmid) ||
+            !run_fenced_load(reuse, address, physical_a + 0x188, 0, 116)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << reuse.cycle() << " phase=same-vmid-cold reason="
+                      << reuse.error() << '\n';
+            return 1;
+        }
+        const std::uint64_t ptw_before_reuse = reuse.ptw_requests();
+        if (!reuse.update_g_context(
+                memblock::ReferencePageMode::sv39, g_root_b, vmid) ||
+            !reuse.issue_sfence(0, vmid, true, false, false, true) ||
+            !run_fenced_load(reuse, address, physical_b + 0x188, 1, 117) ||
+            reuse.ptw_requests() <= ptw_before_reuse) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << reuse.cycle() << " phase=same-vmid-refill reason="
+                      << (reuse.error().empty()
+                              ? "same-VMID root reuse did not refill"
+                              : reuse.error()) << '\n';
+            return 1;
+        }
+        same_id_cycles += reuse.cycle();
+        same_id_ptw_requests += reuse.ptw_requests();
+        same_id_writebacks += reuse.writebacks();
+    }
+
     std::cout << "MEMBLOCK_TRANSLATION_FENCE_PASS"
-              << " cycle=" << (environment.cycle() + nested.cycle() + vvma.cycle())
+              << " cycle="
+              << (environment.cycle() + nested.cycle() + vvma.cycle() +
+                  same_id_cycles)
               << " ptw_requests="
-              << (environment.ptw_requests() + nested.ptw_requests() + vvma.ptw_requests())
+              << (environment.ptw_requests() + nested.ptw_requests() +
+                  vvma.ptw_requests() + same_id_ptw_requests)
               << " writebacks="
-              << (environment.writebacks() + nested.writebacks() + vvma.writebacks())
+              << (environment.writebacks() + nested.writebacks() +
+                  vvma.writebacks() + same_id_writebacks)
+              << " same_id_reuses=3"
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
