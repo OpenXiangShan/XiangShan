@@ -1601,6 +1601,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.rep_info.debug := uop.perfDebugInfo
   lqWrite.rep_info.tlb_id := lqWriteTlbId
   lqWrite.rep_info.tlb_full := lqWriteTlbFull
+  lqWrite.rep_info.rep_from_unalign_head := useS4HeadReplay
 
   val perfIsReplayExec = LoadEntrance.isReplay(entrance) || s4HeadIsReplay && s4HeadValid
   val perfMdpAddrValid = Mux(s4HeadValid, s4Head.perfMdpAddrValid.get, in.perfMdpAddrValid.get)
