@@ -143,13 +143,30 @@ scenario passed in 4,264 aggregate cycles with 89 PTW requests, 21 load
 writebacks, three same-ID root reuses, and five outstanding-walk fence races:
 stage-1, VS-only, G-only, fully nested VS, and fully nested G.
 
-`make translation-fence-selective` passed the same five delayed-response races
-with address and ASID/VMID matching enabled. It completed in 3,923 aggregate
-cycles with 87 PTW requests and 21 load writebacks. The `HFENCE.GVMA` cases
-encoded the selective address as `GPA >> 2`, while `SFENCE.VMA` and
-`HFENCE.VVMA` used the virtual address directly. In every case the redirected
-old walk produced no writeback and the reused identity returned only new-page
-data after a fresh PTW request.
+`make translation-fence-all` passed the same five delayed-response classes at
+both global and selective scope for all four VS/G mode pairs. The isolated
+stage-1 and VS/G tests select the corresponding mode from the pair; the fully
+nested VS and G tests exercise the pair itself. Every target PTE request had at
+least 12 assigned response-delay cycles before the PTE was replaced and the
+fence was issued.
+
+| VS/G modes | Scope | Cycles | PTW requests | Load writebacks |
+| --- | --- | ---: | ---: | ---: |
+| Sv39/Sv39x4 | Global | 4,264 | 89 | 21 |
+| Sv39/Sv39x4 | Selective | 3,923 | 87 | 21 |
+| Sv39/Sv48x4 | Global | 4,343 | 94 | 21 |
+| Sv39/Sv48x4 | Selective | 3,811 | 90 | 21 |
+| Sv48/Sv39x4 | Global | 4,556 | 97 | 21 |
+| Sv48/Sv39x4 | Selective | 3,774 | 91 | 21 |
+| Sv48/Sv48x4 | Global | 5,100 | 102 | 21 |
+| Sv48/Sv48x4 | Selective | 3,901 | 94 | 21 |
+
+The `HFENCE.GVMA` selective address was encoded as `GPA >> 2`, while
+`SFENCE.VMA` and `HFENCE.VVMA` used the virtual address directly. In all 40
+process-level race executions, the redirected old walk produced no writeback
+and the reused identity returned only new-page data after a fresh PTW request.
+Some stage-only executions intentionally repeat between pairs; the fully nested
+portion covers all four distinct VS/G combinations.
 
 `make translation-context` passed five context families and 14 same-address
 loads: direct Sv39-to-Sv48 mode/root, same-mode host ASID/root, VS ASID/root,

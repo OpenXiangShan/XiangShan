@@ -4894,7 +4894,11 @@ int run_translation_matrix(int argc, char **argv)
 }
 
 int run_translation_fence(
-    int argc, char **argv, bool outstanding_selective = false)
+    int argc,
+    char **argv,
+    bool outstanding_selective = false,
+    bool outstanding_vs_sv48 = false,
+    bool outstanding_g_sv48 = false)
 {
     const auto run_fenced_load = [](
         memblock::Environment &test_environment,
@@ -5395,6 +5399,7 @@ int run_translation_fence(
         constexpr std::uint64_t new_physical = 0xc0000000ULL;
         constexpr std::uint64_t root = 0xbc000000ULL;
         const char *const scope = selective ? "selective" : "global";
+        const char *const mode = outstanding_vs_sv48 ? "sv48" : "sv39";
         outstanding.memory().fill_incrementing(old_physical, 0x1000, 0x16);
         outstanding.memory().fill_incrementing(new_physical, 0x1000, 0xa6);
         outstanding.configure_backpressure(
@@ -5404,12 +5409,19 @@ int run_translation_fence(
                 memblock::ResponseLatencyProfile::compact,
                 memblock::ResponseLatencyProfile::spec,
                 memblock::ResponseLatencyProfile::compact});
-        if (!outstanding.reset() ||
-            !outstanding.map_sv39_1g(virtual_page, old_physical, root) ||
-            !outstanding.activate_sv39(root, 71)) {
+        const bool configured = outstanding.reset() &&
+            (outstanding_vs_sv48
+                ? outstanding.map_sv48_1g(
+                      virtual_page, old_physical, root)
+                : outstanding.map_sv39_1g(
+                      virtual_page, old_physical, root)) &&
+            (outstanding_vs_sv48
+                ? outstanding.activate_sv48(root, 71)
+                : outstanding.activate_sv39(root, 71));
+        if (!configured) {
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << outstanding.cycle() << " phase=outstanding-stage1-"
-                      << scope << "-configuration reason="
+                      << mode << '-' << scope << "-configuration reason="
                       << outstanding.error() << '\n';
             return false;
         }
@@ -5424,22 +5436,29 @@ int run_translation_fence(
             .lane = 2,
         };
         const std::uint64_t ptw_before_walk = outstanding.ptw_requests();
+        const std::uint64_t target_pte =
+            root + (outstanding_vs_sv48 ? 0x1000ULL : 0) +
+            ((virtual_page >> 30) & 0x1ff) * 8;
         if (!outstanding.set_rob_head(canceled.rob, canceled.rob_flag) ||
             !outstanding.enqueue_load(canceled) ||
             !outstanding.issue_load(canceled, 512) ||
-            !outstanding.run_until_ptw_requests(ptw_before_walk + 1, 2048) ||
-            outstanding.ptw_response_latency_stats().max_cycles < 12) {
+            !outstanding.run_until_ptw_request_covering(
+                target_pte, ptw_before_walk, 4096, 12)) {
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << outstanding.cycle() << " phase=outstanding-stage1-"
-                      << scope << "-old-pte-request reason="
+                      << mode << '-' << scope << "-old-pte-request reason="
                       << (outstanding.error().empty()
                               ? "PTW response was not held outstanding"
                               : outstanding.error()) << '\n';
             return false;
         }
         const std::uint64_t stale_ptw_snapshot = outstanding.ptw_requests();
-        if (!outstanding.map_sv39_1g(
-                virtual_page, new_physical, root) ||
+        const bool remapped = outstanding_vs_sv48
+            ? outstanding.map_sv48_1g(
+                  virtual_page, new_physical, root)
+            : outstanding.map_sv39_1g(
+                  virtual_page, new_physical, root);
+        if (!remapped ||
             !outstanding.issue_sfence_with_redirect(
                 19,
                 false,
@@ -5451,7 +5470,7 @@ int run_translation_fence(
             outstanding.writebacks() != 0) {
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << outstanding.cycle() << " phase=outstanding-stage1-"
-                      << scope << "-fence reason="
+                      << mode << '-' << scope << "-fence reason="
                       << (outstanding.error().empty()
                               ? "redirected stale walk produced a writeback"
                               : outstanding.error()) << '\n';
@@ -5462,7 +5481,7 @@ int run_translation_fence(
             !outstanding.account_lq_cancellation(1)) {
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << outstanding.cycle() << " phase=outstanding-stage1-"
-                      << scope << "-cancel-accounting reason="
+                      << mode << '-' << scope << "-cancel-accounting reason="
                       << outstanding.error() << '\n';
             return false;
         }
@@ -5481,7 +5500,7 @@ int run_translation_fence(
                 outstanding.lq_allocated()) {
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << outstanding.cycle() << " phase=outstanding-stage1-"
-                      << scope << "-refill reason="
+                      << mode << '-' << scope << "-refill reason="
                       << (outstanding.error().empty()
                               ? "post-fence access reused the stale walk"
                               : outstanding.error()) << '\n';
@@ -5509,6 +5528,11 @@ int run_translation_fence(
         constexpr std::uint64_t root = 0xbc000000ULL;
         const char *const stage = vs_stage ? "vs" : "g";
         const char *const scope = selective ? "selective" : "global";
+        const bool stage_sv48 =
+            vs_stage ? outstanding_vs_sv48 : outstanding_g_sv48;
+        const char *const mode = stage_sv48
+            ? (vs_stage ? "sv48" : "sv48x4")
+            : (vs_stage ? "sv39" : "sv39x4");
         outstanding.memory().fill_incrementing(old_physical, 0x1000, 0x2b);
         outstanding.memory().fill_incrementing(new_physical, 0x1000, 0xbb);
         outstanding.configure_backpressure(
@@ -5520,17 +5544,27 @@ int run_translation_fence(
                 memblock::ResponseLatencyProfile::compact});
         const bool configured = outstanding.reset() &&
             (vs_stage
-                ? outstanding.map_sv39_1g(
-                      virtual_page, old_physical, root)
-                : outstanding.map_sv39x4_1g(
-                      virtual_page, old_physical, root)) &&
+                ? (stage_sv48
+                    ? outstanding.map_sv48_1g(
+                          virtual_page, old_physical, root)
+                    : outstanding.map_sv39_1g(
+                          virtual_page, old_physical, root))
+                : (stage_sv48
+                    ? outstanding.map_sv48x4_1g(
+                          virtual_page, old_physical, root)
+                    : outstanding.map_sv39x4_1g(
+                          virtual_page, old_physical, root))) &&
             outstanding.activate_two_stage_modes(
                 vs_stage
-                    ? memblock::ReferencePageMode::sv39
+                    ? (stage_sv48
+                        ? memblock::ReferencePageMode::sv48
+                        : memblock::ReferencePageMode::sv39)
                     : memblock::ReferencePageMode::bare,
                 vs_stage
                     ? memblock::ReferencePageMode::bare
-                    : memblock::ReferencePageMode::sv39,
+                    : (stage_sv48
+                        ? memblock::ReferencePageMode::sv48
+                        : memblock::ReferencePageMode::sv39),
                 vs_stage ? root : 0,
                 vs_stage ? 0 : root,
                 73,
@@ -5538,7 +5572,8 @@ int run_translation_fence(
         if (!configured) {
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << outstanding.cycle() << " phase=outstanding-"
-                      << stage << '-' << scope << "-configuration reason="
+                      << stage << '-' << mode << '-' << scope
+                      << "-configuration reason="
                       << outstanding.error() << '\n';
             return false;
         }
@@ -5553,14 +5588,19 @@ int run_translation_fence(
             .lane = 0,
         };
         const std::uint64_t ptw_before_walk = outstanding.ptw_requests();
+        const std::uint64_t target_pte = root +
+            (stage_sv48 ? (vs_stage ? 0x1000ULL : 0x4000ULL) : 0) +
+            ((virtual_page >> 30) &
+             (stage_sv48 || vs_stage ? 0x1ffULL : 0x7ffULL)) * 8;
         if (!outstanding.set_rob_head(canceled.rob, canceled.rob_flag) ||
             !outstanding.enqueue_load(canceled) ||
             !outstanding.issue_load(canceled, 512) ||
-            !outstanding.run_until_ptw_requests(ptw_before_walk + 1, 2048) ||
-            outstanding.ptw_response_latency_stats().max_cycles < 12) {
+            !outstanding.run_until_ptw_request_covering(
+                target_pte, ptw_before_walk, 4096, 12)) {
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << outstanding.cycle() << " phase=outstanding-"
-                      << stage << '-' << scope << "-old-pte-request reason="
+                      << stage << '-' << mode << '-' << scope
+                      << "-old-pte-request reason="
                       << (outstanding.error().empty()
                               ? "PTW response was not held outstanding"
                               : outstanding.error()) << '\n';
@@ -5568,8 +5608,16 @@ int run_translation_fence(
         }
         const std::uint64_t stale_ptw_snapshot = outstanding.ptw_requests();
         const bool remapped = vs_stage
-            ? outstanding.map_sv39_1g(virtual_page, new_physical, root)
-            : outstanding.map_sv39x4_1g(virtual_page, new_physical, root);
+            ? (stage_sv48
+                ? outstanding.map_sv48_1g(
+                      virtual_page, new_physical, root)
+                : outstanding.map_sv39_1g(
+                      virtual_page, new_physical, root))
+            : (stage_sv48
+                ? outstanding.map_sv48x4_1g(
+                      virtual_page, new_physical, root)
+                : outstanding.map_sv39x4_1g(
+                      virtual_page, new_physical, root));
         if (!remapped ||
             !outstanding.issue_sfence_with_redirect(
                 23,
@@ -5584,7 +5632,8 @@ int run_translation_fence(
             outstanding.writebacks() != 0) {
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << outstanding.cycle() << " phase=outstanding-"
-                      << stage << '-' << scope << "-fence reason="
+                      << stage << '-' << mode << '-' << scope
+                      << "-fence reason="
                       << (outstanding.error().empty()
                               ? "redirected stale walk produced a writeback"
                               : outstanding.error()) << '\n';
@@ -5595,7 +5644,7 @@ int run_translation_fence(
             !outstanding.account_lq_cancellation(1)) {
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << outstanding.cycle() << " phase=outstanding-"
-                      << stage << '-' << scope
+                      << stage << '-' << mode << '-' << scope
                       << "-cancel-accounting reason="
                       << outstanding.error() << '\n';
             return false;
@@ -5615,7 +5664,8 @@ int run_translation_fence(
                 outstanding.lq_allocated()) {
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << outstanding.cycle() << " phase=outstanding-"
-                      << stage << '-' << scope << "-refill reason="
+                      << stage << '-' << mode << '-' << scope
+                      << "-refill reason="
                       << (outstanding.error().empty()
                               ? "post-fence access reused the stale walk"
                               : outstanding.error()) << '\n';
@@ -5651,6 +5701,9 @@ int run_translation_fence(
         constexpr std::uint64_t g_root = 0x90000000ULL;
         const char *const stage = vs_stage ? "nested-vs" : "nested-g";
         const char *const scope = selective ? "selective" : "global";
+        const char *const mode = outstanding_vs_sv48
+            ? (outstanding_g_sv48 ? "sv48-sv48x4" : "sv48-sv39x4")
+            : (outstanding_g_sv48 ? "sv39-sv48x4" : "sv39-sv39x4");
         outstanding.memory().fill_incrementing(old_physical, 0x1000, 0x3c);
         outstanding.memory().fill_incrementing(new_physical, 0x1000, 0xcc);
         outstanding.configure_backpressure(
@@ -5661,19 +5714,39 @@ int run_translation_fence(
                 memblock::ResponseLatencyProfile::spec,
                 memblock::ResponseLatencyProfile::compact});
         const bool configured = outstanding.reset() &&
-            outstanding.map_sv39_1g(
-                virtual_page, old_guest, vs_root) &&
-            outstanding.map_sv39x4_1g(
-                vs_root, vs_root, g_root) &&
-            outstanding.map_sv39x4_1g(
-                old_guest, old_physical, g_root) &&
-            (!vs_stage || outstanding.map_sv39x4_1g(
-                new_guest, new_physical, g_root)) &&
-            outstanding.activate_two_stage(vs_root, g_root, 83, 89);
+            (outstanding_vs_sv48
+                ? outstanding.map_sv48_1g(
+                      virtual_page, old_guest, vs_root)
+                : outstanding.map_sv39_1g(
+                      virtual_page, old_guest, vs_root)) &&
+            (outstanding_g_sv48
+                ? outstanding.map_sv48x4_1g(
+                      vs_root, vs_root, g_root)
+                : outstanding.map_sv39x4_1g(
+                      vs_root, vs_root, g_root)) &&
+            (outstanding_g_sv48
+                ? outstanding.map_sv48x4_1g(
+                      old_guest, old_physical, g_root)
+                : outstanding.map_sv39x4_1g(
+                      old_guest, old_physical, g_root)) &&
+            (!vs_stage || (outstanding_g_sv48
+                ? outstanding.map_sv48x4_1g(
+                      new_guest, new_physical, g_root)
+                : outstanding.map_sv39x4_1g(
+                      new_guest, new_physical, g_root))) &&
+            outstanding.activate_two_stage_modes(
+                outstanding_vs_sv48
+                    ? memblock::ReferencePageMode::sv48
+                    : memblock::ReferencePageMode::sv39,
+                outstanding_g_sv48
+                    ? memblock::ReferencePageMode::sv48
+                    : memblock::ReferencePageMode::sv39,
+                vs_root, g_root, 83, 89);
         if (!configured) {
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << outstanding.cycle() << " phase=outstanding-"
-                      << stage << '-' << scope << "-configuration reason="
+                      << stage << '-' << mode << '-' << scope
+                      << "-configuration reason="
                       << outstanding.error() << '\n';
             return false;
         }
@@ -5689,24 +5762,35 @@ int run_translation_fence(
         };
         const std::uint64_t first_ptw_request = outstanding.ptw_requests();
         const std::uint64_t target_pte = vs_stage
-            ? vs_root + ((virtual_page >> 30) & 0x1ff) * 8
-            : g_root + ((old_guest >> 30) & 0x7ff) * 8;
+            ? vs_root + (outstanding_vs_sv48 ? 0x1000ULL : 0) +
+                  ((virtual_page >> 30) & 0x1ff) * 8
+            : g_root + (outstanding_g_sv48 ? 0x4000ULL : 0) +
+                  ((old_guest >> 30) &
+                   (outstanding_g_sv48 ? 0x1ffULL : 0x7ffULL)) * 8;
         if (!outstanding.set_rob_head(canceled.rob, canceled.rob_flag) ||
             !outstanding.enqueue_load(canceled) ||
             !outstanding.issue_load(canceled, 512) ||
             !outstanding.run_until_ptw_request_covering(
-                target_pte, first_ptw_request, 8192)) {
+                target_pte, first_ptw_request, 8192, 12)) {
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << outstanding.cycle() << " phase=outstanding-"
-                      << stage << '-' << scope << "-old-pte-request reason="
+                      << stage << '-' << mode << '-' << scope
+                      << "-old-pte-request reason="
                       << outstanding.error() << '\n';
             return false;
         }
         const std::uint64_t stale_ptw_snapshot = outstanding.ptw_requests();
         const bool remapped = vs_stage
-            ? outstanding.map_sv39_1g(virtual_page, new_guest, vs_root)
-            : outstanding.map_sv39x4_1g(
-                  old_guest, new_physical, g_root);
+            ? (outstanding_vs_sv48
+                ? outstanding.map_sv48_1g(
+                      virtual_page, new_guest, vs_root)
+                : outstanding.map_sv39_1g(
+                      virtual_page, new_guest, vs_root))
+            : (outstanding_g_sv48
+                ? outstanding.map_sv48x4_1g(
+                      old_guest, new_physical, g_root)
+                : outstanding.map_sv39x4_1g(
+                      old_guest, new_physical, g_root));
         if (!remapped ||
             !outstanding.issue_sfence_with_redirect(
                 27,
@@ -5721,7 +5805,8 @@ int run_translation_fence(
             outstanding.writebacks() != 0) {
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << outstanding.cycle() << " phase=outstanding-"
-                      << stage << '-' << scope << "-fence reason="
+                      << stage << '-' << mode << '-' << scope
+                      << "-fence reason="
                       << (outstanding.error().empty()
                               ? "redirected stale walk produced a writeback"
                               : outstanding.error()) << '\n';
@@ -5732,7 +5817,7 @@ int run_translation_fence(
             !outstanding.account_lq_cancellation(1)) {
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << outstanding.cycle() << " phase=outstanding-"
-                      << stage << '-' << scope
+                      << stage << '-' << mode << '-' << scope
                       << "-cancel-accounting reason="
                       << outstanding.error() << '\n';
             return false;
@@ -5752,7 +5837,8 @@ int run_translation_fence(
                 outstanding.lq_allocated()) {
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << outstanding.cycle() << " phase=outstanding-"
-                      << stage << '-' << scope << "-refill reason="
+                      << stage << '-' << mode << '-' << scope
+                      << "-refill reason="
                       << (outstanding.error().empty()
                               ? "post-fence access reused the stale walk"
                               : outstanding.error()) << '\n';
@@ -5787,6 +5873,10 @@ int run_translation_fence(
                   vvma.writebacks() + same_id_writebacks +
                   outstanding_writebacks)
               << " same_id_reuses=3"
+              << " outstanding_vs_mode="
+              << (outstanding_vs_sv48 ? "sv48" : "sv39")
+              << " outstanding_g_mode="
+              << (outstanding_g_sv48 ? "sv48x4" : "sv39x4")
               << " outstanding_scope="
               << (outstanding_selective ? "selective" : "global")
               << " outstanding_walks="
@@ -12067,10 +12157,28 @@ int main(int argc, char **argv)
             return run_translation_matrix(argc, argv);
         }
         if (options.test == "translation-fence") {
-            return run_translation_fence(argc, argv, false);
+            return run_translation_fence(argc, argv, false, false, false);
         }
         if (options.test == "translation-fence-selective") {
-            return run_translation_fence(argc, argv, true);
+            return run_translation_fence(argc, argv, true, false, false);
+        }
+        if (options.test == "translation-fence-sv48") {
+            return run_translation_fence(argc, argv, false, true, true);
+        }
+        if (options.test == "translation-fence-sv48-selective") {
+            return run_translation_fence(argc, argv, true, true, true);
+        }
+        if (options.test == "translation-fence-sv39-sv48x4") {
+            return run_translation_fence(argc, argv, false, false, true);
+        }
+        if (options.test == "translation-fence-sv39-sv48x4-selective") {
+            return run_translation_fence(argc, argv, true, false, true);
+        }
+        if (options.test == "translation-fence-sv48-sv39x4") {
+            return run_translation_fence(argc, argv, false, true, false);
+        }
+        if (options.test == "translation-fence-sv48-sv39x4-selective") {
+            return run_translation_fence(argc, argv, true, true, false);
         }
         if (options.test == "translation-context") {
             return run_translation_context(argc, argv);

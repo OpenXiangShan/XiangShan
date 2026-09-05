@@ -199,6 +199,7 @@ make l2-tlb-contracts PICKER="$PICKER" JOBS=8
 make two-stage-translation PICKER="$PICKER" JOBS=8
 make translation-matrix PICKER="$PICKER" JOBS=8
 make translation-fence PICKER="$PICKER" JOBS=8
+make translation-fence-all PICKER="$PICKER" JOBS=8
 make translation-context PICKER="$PICKER" JOBS=8
 make translation-bare PICKER="$PICKER" JOBS=8
 make translation-faults PICKER="$PICKER" JOBS=8
@@ -235,13 +236,13 @@ targeted fence, and checks distinct physical data after a new PTW refill. A
 stage-1 race holds an old 1-GiB root-leaf response in the PTW manager, replaces
 the PTE, and aligns `SFENCE.VMA` with the redirect. The canceled load must not
 write back, and a same-identity survivor must refill and return only the new
-physical data. Separate `translation-fence` and `translation-fence-selective`
-processes apply global and address/identity-selective fences to stage-1,
-VS-only, G-only, fully nested VS, and fully nested G delayed PTE responses. The
-fully nested Sv39/Sv39x4 cases wait for the exact VS or final G PTE TileLink
-beat before replacing it and fencing; the selective `HFENCE.GVMA` operand is
-encoded as `GPA >> 2`. Sv48/Sv48x4 outstanding-walk crosses remain separate
-coverage points.
+physical data. `translation-fence-all` runs separate global and selective
+processes for all four Sv39/Sv48 and Sv39x4/Sv48x4 mode pairs. Each process
+applies its fence scope to stage-1, VS-only, G-only, fully nested VS, and fully
+nested G delayed PTE responses. Every race waits for the exact target PTE
+TileLink request with at least 12 cycles of assigned response latency before
+replacing the PTE and fencing; the selective `HFENCE.GVMA` operand is encoded
+as `GPA >> 2`.
 
 `translation-context` checks five context families with 14 architectural
 loads: direct Sv39-to-Sv48 mode/root switching, same-mode `satp` ASID/root,

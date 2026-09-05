@@ -1436,8 +1436,8 @@ public:
             d_gap_ = responses_.empty() ? 0 : responses_.front().delay_before;
         }
         if (a_fire_ && request_) {
+            request_->response_delay = respond(*request_);
             request_history_.push_back(*request_);
-            respond(*request_);
             ++request_count_;
         }
         a_fire_ = false;
@@ -1472,6 +1472,26 @@ public:
         return false;
     }
 
+    bool request_covering_address_has_min_delay_since(
+        std::uint64_t address,
+        std::uint64_t first_request,
+        unsigned min_response_delay) const
+    {
+        if (first_request >= request_history_.size()) {
+            return false;
+        }
+        for (std::size_t index = static_cast<std::size_t>(first_request);
+             index < request_history_.size(); ++index) {
+            const Request &request = request_history_[index];
+            const std::uint64_t bytes = std::uint64_t{1} << request.size;
+            const std::uint64_t base = request.address & ~(bytes - 1);
+            if (address >= base && address - base < bytes) {
+                return request.response_delay >= min_response_delay;
+            }
+        }
+        return false;
+    }
+
 private:
     static constexpr std::size_t kBeatBytes = 32;
 
@@ -1481,6 +1501,7 @@ private:
         std::uint8_t size;
         std::uint8_t source;
         std::uint64_t address;
+        unsigned response_delay = 0;
     };
 
     struct Response {
@@ -1492,28 +1513,33 @@ private:
         unsigned delay_before = 0;
     };
 
-    void respond(const Request &request)
+    unsigned respond(const Request &request)
     {
         if (request.opcode != 4 && request.opcode != 6) {
             std::ostringstream message;
             message << "unsupported PTW TileLink A opcode "
                     << static_cast<unsigned>(request.opcode);
             error_ = message.str();
-            return;
+            return 0;
         }
         const std::uint64_t transfer_bytes = std::uint64_t{1} << request.size;
         const std::uint64_t base = request.address & ~(transfer_bytes - 1);
         const std::size_t beats = static_cast<std::size_t>(
             transfer_bytes > kBeatBytes ? transfer_bytes / kBeatBytes : 1);
+        unsigned first_response_delay = 0;
         for (std::size_t beat = 0; beat < beats; ++beat) {
-            push_response(Response{
+            const unsigned delay = push_response(Response{
                 static_cast<std::uint8_t>(request.opcode == 4 ? 1 : 5),
                 static_cast<std::uint8_t>(request.opcode == 4 ? 0 : 1),
                 request.size,
                 request.source,
                 memory_.read_beat(base + beat * kBeatBytes, kBeatBytes),
             }, beat == 0);
+            if (beat == 0) {
+                first_response_delay = delay;
+            }
         }
+        return first_response_delay;
     }
 
     std::uint64_t next_random()
@@ -1538,15 +1564,17 @@ private:
         return delay;
     }
 
-    void push_response(Response response, bool first_beat)
+    unsigned push_response(Response response, bool first_beat)
     {
         const bool was_empty = responses_.empty();
         response.delay_before = response_delay(first_beat);
+        const unsigned delay = response.delay_before;
         responses_.push_back(std::move(response));
         if (was_empty) {
             d_presenting_ = false;
             d_gap_ = responses_.front().delay_before;
         }
+        return delay;
     }
 
     SparseMemory &memory_;
@@ -5186,7 +5214,8 @@ public:
     bool run_until_ptw_request_covering(
         std::uint64_t address,
         std::uint64_t first_request,
-        unsigned timeout = 4096)
+        unsigned timeout = 4096,
+        unsigned min_response_delay = 0)
     {
         for (unsigned cycle = 0;
              cycle < timeout &&
@@ -5201,6 +5230,16 @@ public:
             std::ostringstream message;
             message << "timed out waiting for PTW request covering address 0x"
                     << std::hex << address;
+            error_ = message.str();
+            return false;
+        }
+        if (!ptw_agent_.request_covering_address_has_min_delay_since(
+                address, first_request, min_response_delay)) {
+            std::ostringstream message;
+            message << "PTW request covering address 0x" << std::hex
+                    << address << std::dec
+                    << " did not receive the required minimum response delay "
+                    << min_response_delay;
             error_ = message.str();
             return false;
         }
