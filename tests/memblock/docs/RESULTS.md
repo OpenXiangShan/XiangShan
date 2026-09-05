@@ -13,12 +13,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`
-- Current rebuilt and frozen UT executable SHA-256: `5525cf3d245add9f89efa812caabfce949d91e15b3b8c43a65f38afd03563810`
+- Current rebuilt and frozen UT executable SHA-256: `58d7382b9c9db4ff9b47697cdefe0cf51709d271958d557b3d67ee74a0a58d3c`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `af39b980658fd5cf913d1ad0d768b41643ef2331c45edb95584159dc537161a0`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `0814ee0cdc63c87d1799f3ced61562a2f9072593e76a94f16fdb01b719feda1c`
-- Frozen runtime manifest SHA-256: `64fff57111a410481ed16c0457e9ea421ce0e3df2dfc938d79813d6b713be509`
+- Frozen runtime manifest SHA-256: `170cd827354830d41a479bb6f6eda126fb80b13705932b74546bd8aa47358165`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -224,7 +224,7 @@ parameters and verifies the independent Sv39x4 GPA oracle.
 
 Latest focused correction evidence:
 
-- 111 Python unit tests and the complete port/SVA/filelist checks pass;
+- 112 Python unit tests and the complete port/SVA/filelist checks pass;
 - after making mixed-window scalar addresses obey `misaligned` and supplying
   the required ROB-head pulse for the rare cross-page store, the exact former
   timeout command (`random-mixed --seed 42 --transactions 16384 --constraints
@@ -249,6 +249,20 @@ Latest focused correction evidence:
   `fcd1209c009e3fe5ca456ea483cce4e607ad159fe96d485377c05abfa696ca44`;
   the post-scheduler-fix `corner` artifact SHA-256 is
   `c1e5323a0cc513c7387d559d2660757a4d411d7f0df0908cfecd966d1f154e30`;
+- the first one-hour `spec` launch stopped after seven complete 16,384-action
+  seeds when seed 8 revisited a dirty-pressure line. This was a UT oracle
+  lifetime defect: the directed replacement phase left exact initialization
+  snapshots registered for cache lines that the random tail could legally
+  modify. A later ReleaseData was compared against the stale snapshot instead
+  of the live architectural reference image. The directed phase now discards
+  only its surviving snapshots after checking its required releases; subsequent
+  releases retain full byte checking against the live reference. The exact
+  `random-mixed --seed 8 --transactions 16384 --constraints spec` replay then
+  passed 16,384 actions in 579,296 cycles with 140 ReleaseData transactions,
+  316 PTW requests, 143 Uncache requests, and exact LQ/SQ accounting. The
+  stopped diagnostic artifact contains 114,688 passing actions and remains at
+  `build/memblock/spec-interface-1h-16384.json`, SHA-256
+  `f660ae1aab340b7df124ea4caf1bb6108449036ebebaee4118fcce12d5605e71`;
 - the common constrained-random interface passed an override run whose tail
   enabled only scalar loads (`seed=29`, 256 actions): actual constrained
   operations were `155,0,0,0,0,0,0,0`, and all 155 locality selections used

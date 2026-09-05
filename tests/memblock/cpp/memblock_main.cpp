@@ -8959,6 +8959,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         }
         coverage.dirty_pressure = verified_release_delta;
 
+        // Exact snapshots belong only to the directed replacement check above.
+        // The random tail may legally revisit the surviving dirty lines, so its
+        // later releases must follow the live architectural reference image.
+        environment.clear_release_line_expectations();
+
         phase = "seeded-mixed-tail";
         const unsigned target_before_redirect = options.transactions - 2;
         environment.configure_backpressure(

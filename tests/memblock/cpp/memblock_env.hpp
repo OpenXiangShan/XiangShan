@@ -1061,6 +1061,11 @@ public:
         expected_release_lines_[base] = bytes;
     }
 
+    void clear_release_line_expectations()
+    {
+        expected_release_lines_.clear();
+    }
+
     bool verify_memory_bytes(
         std::uint64_t address, const std::vector<unsigned char> &expected)
     {
@@ -2533,6 +2538,10 @@ public:
         std::uint64_t base, const std::vector<unsigned char> &bytes)
     {
         memory_agent_.expect_release_line(base, bytes);
+    }
+    void clear_release_line_expectations()
+    {
+        memory_agent_.clear_release_line_expectations();
     }
     void configure_backpressure(
         std::uint64_t seed, bool enabled,

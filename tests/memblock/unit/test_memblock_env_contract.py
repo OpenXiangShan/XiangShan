@@ -670,6 +670,20 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, driver)
 
+    def test_random_mixed_drops_directed_release_snapshots_before_random_tail(
+        self,
+    ) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        directed_end = driver.index('phase = "seeded-mixed-tail"')
+        dirty_pressure = driver.index('phase = "dcache-dirty-pressure"')
+        directed_region = driver[dirty_pressure:directed_end]
+
+        self.assertIn("void clear_release_line_expectations()", environment)
+        self.assertIn(
+            "environment.clear_release_line_expectations();", directed_region
+        )
+
     def test_random_mmio_store_replays_until_tlb_hit(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
