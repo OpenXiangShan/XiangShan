@@ -544,12 +544,15 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         for contract in (
             "force_next_ptw_response_delay",
             "update_two_stage_context",
-            "run_inflight_context_switch(false)",
-            "run_inflight_context_switch(true)",
+            "run_inflight_context_switch(false, false)",
+            "run_inflight_context_switch(true, false)",
+            "run_inflight_context_switch(false, true)",
+            "run_inflight_context_switch(true, true)",
             '"-old-request reason="',
             '"-switch reason="',
             '"-new-request reason="',
             "inflight_context_cases=",
+            "inflight_mode_cases=",
         ):
             self.assertIn(contract, environment + main)
 

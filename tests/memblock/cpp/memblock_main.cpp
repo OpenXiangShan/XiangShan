@@ -6442,7 +6442,9 @@ int run_translation_inflight_context(
     // redirect interval, then reuse the same ROB/LQ identity under a different
     // root and ID. Only the new mapping may produce an architectural writeback.
     unsigned inflight_context_cases = 0;
-    const auto run_inflight_context_switch = [&](bool nested_translation) {
+    unsigned inflight_mode_cases = 0;
+    const auto run_inflight_context_switch = [&](
+        bool nested_translation, bool switch_mode) {
         memblock::Environment context(argc, argv);
         constexpr std::uint64_t virtual_page = 0x40000000ULL;
         constexpr std::uint64_t address = virtual_page + 0x188;
@@ -6471,13 +6473,19 @@ int run_translation_inflight_context(
                 memblock::ResponseLatencyProfile::compact});
         bool configured = context.reset();
         for (unsigned index = 0; configured && index < 2; ++index) {
+            const bool map_vs_sv48 =
+                index == 0 || !switch_mode
+                    ? outstanding_vs_sv48 : !outstanding_vs_sv48;
+            const bool map_g_sv48 =
+                index == 0 || !switch_mode
+                    ? outstanding_g_sv48 : !outstanding_g_sv48;
             configured = nested_translation
-                ? (outstanding_vs_sv48
+                ? (map_vs_sv48
                     ? context.map_sv48_1g(
                           virtual_page, guest_pages[index], vs_roots[index])
                     : context.map_sv39_1g(
                           virtual_page, guest_pages[index], vs_roots[index]))
-                : (outstanding_vs_sv48
+                : (map_vs_sv48
                     ? context.map_sv48_1g(
                           virtual_page, physical_pages[index],
                           stage1_roots[index])
@@ -6485,14 +6493,14 @@ int run_translation_inflight_context(
                           virtual_page, physical_pages[index],
                           stage1_roots[index]));
             if (configured && nested_translation) {
-                configured = outstanding_g_sv48
+                configured = map_g_sv48
                     ? context.map_sv48x4_1g(
                           vs_roots[index], vs_roots[index], g_roots[index])
                     : context.map_sv39x4_1g(
                           vs_roots[index], vs_roots[index], g_roots[index]);
             }
             if (configured && nested_translation) {
-                configured = outstanding_g_sv48
+                configured = map_g_sv48
                     ? context.map_sv48x4_1g(
                           guest_pages[index], physical_pages[index],
                           g_roots[index])
@@ -6519,6 +6527,7 @@ int run_translation_inflight_context(
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << context.cycle() << " phase=inflight-context-"
                       << (nested_translation ? "nested" : "stage1")
+                      << (switch_mode ? "-mode" : "-root-id")
                       << "-configuration reason=" << context.error() << '\n';
             return false;
         }
@@ -6541,21 +6550,22 @@ int run_translation_inflight_context(
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << context.cycle() << " phase=inflight-context-"
                       << (nested_translation ? "nested" : "stage1")
+                      << (switch_mode ? "-mode" : "-root-id")
                       << "-old-request reason=" << context.error() << '\n';
             return false;
         }
         const std::uint64_t stale_ptw_snapshot = context.ptw_requests();
         const bool switched = nested_translation
             ? context.update_two_stage_context(
-                  outstanding_vs_sv48
+                  (switch_mode ? !outstanding_vs_sv48 : outstanding_vs_sv48)
                       ? memblock::ReferencePageMode::sv48
                       : memblock::ReferencePageMode::sv39,
-                  outstanding_g_sv48
+                  (switch_mode ? !outstanding_g_sv48 : outstanding_g_sv48)
                       ? memblock::ReferencePageMode::sv48
                       : memblock::ReferencePageMode::sv39,
                   vs_roots[1], g_roots[1], 102, 104)
             : context.update_stage_one_context(
-                  outstanding_vs_sv48
+                  (switch_mode ? !outstanding_vs_sv48 : outstanding_vs_sv48)
                       ? memblock::ReferencePageMode::sv48
                       : memblock::ReferencePageMode::sv39,
                   stage1_roots[1], 102);
@@ -6564,6 +6574,7 @@ int run_translation_inflight_context(
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << context.cycle() << " phase=inflight-context-"
                       << (nested_translation ? "nested" : "stage1")
+                      << (switch_mode ? "-mode" : "-root-id")
                       << "-switch reason="
                       << (context.error().empty()
                               ? "redirected old context produced a writeback"
@@ -6576,6 +6587,7 @@ int run_translation_inflight_context(
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << context.cycle() << " phase=inflight-context-"
                       << (nested_translation ? "nested" : "stage1")
+                      << (switch_mode ? "-mode" : "-root-id")
                       << "-cancel-accounting reason=" << context.error() << '\n';
             return false;
         }
@@ -6595,6 +6607,7 @@ int run_translation_inflight_context(
             std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
                       << context.cycle() << " phase=inflight-context-"
                       << (nested_translation ? "nested" : "stage1")
+                      << (switch_mode ? "-mode" : "-root-id")
                       << "-new-request reason="
                       << (context.error().empty()
                               ? "new context reused stale translation"
@@ -6605,11 +6618,14 @@ int run_translation_inflight_context(
         outstanding_ptw_requests += context.ptw_requests();
         outstanding_writebacks += context.writebacks();
         ++inflight_context_cases;
+        inflight_mode_cases += switch_mode;
         return true;
     };
 
-    if (!run_inflight_context_switch(false) ||
-        !run_inflight_context_switch(true)) {
+    if (!run_inflight_context_switch(false, false) ||
+        !run_inflight_context_switch(true, false) ||
+        !run_inflight_context_switch(false, true) ||
+        !run_inflight_context_switch(true, true)) {
         return 1;
     }
 
@@ -6622,6 +6638,7 @@ int run_translation_inflight_context(
               << " outstanding_g_mode="
               << (outstanding_g_sv48 ? "sv48x4" : "sv39x4")
               << " inflight_context_cases=" << inflight_context_cases
+              << " inflight_mode_cases=" << inflight_mode_cases
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
