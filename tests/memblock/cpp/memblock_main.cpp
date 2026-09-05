@@ -6259,6 +6259,139 @@ int run_translation_fence(
         return 1;
     }
 
+    // Keep two unrelated root-leaf walks in flight at once.  The PTW manager
+    // delays its first D response; both loads must still be pending after the
+    // first A request is accepted.  The external PTW TileLink channel may
+    // legally serialize the two requests, so request history independently
+    // proves that both leaf PTEs were fetched.
+    unsigned concurrent_walk_cases = 0;
+    std::uint64_t concurrent_ptw_max_outstanding = 0;
+    const auto run_concurrent_walks = [&](bool nested_translation) {
+        memblock::Environment concurrent(argc, argv);
+        constexpr std::array<std::uint64_t, 2> virtual_pages{{
+            0x40000000ULL, 0x80000000ULL}};
+        constexpr std::array<std::uint64_t, 2> guest_pages{{
+            0x800000000ULL, 0x840000000ULL}};
+        constexpr std::array<std::uint64_t, 2> physical_pages{{
+            0x80000000ULL, 0xc0000000ULL}};
+        constexpr std::uint64_t stage1_root = 0xbc000000ULL;
+        constexpr std::uint64_t vs_root = 0x100000000ULL;
+        constexpr std::uint64_t g_root = 0x90000000ULL;
+        for (unsigned index = 0; index < physical_pages.size(); ++index) {
+            concurrent.memory().fill_incrementing(
+                physical_pages[index], 0x1000,
+                static_cast<std::uint8_t>(0x29 + index * 0x70));
+        }
+        concurrent.configure_backpressure(
+            nested_translation ? 0x6a09e667f3bcc909ULL
+                               : 0xbb67ae8584caa73bULL,
+            true,
+            memblock::ResponseLatencyProfiles{
+                memblock::ResponseLatencyProfile::compact,
+                memblock::ResponseLatencyProfile::spec,
+                memblock::ResponseLatencyProfile::compact});
+        bool configured = concurrent.reset();
+        for (unsigned index = 0;
+             configured && index < virtual_pages.size(); ++index) {
+            if (nested_translation) {
+                configured = outstanding_vs_sv48
+                    ? concurrent.map_sv48_1g(
+                          virtual_pages[index], guest_pages[index], vs_root)
+                    : concurrent.map_sv39_1g(
+                          virtual_pages[index], guest_pages[index], vs_root);
+            } else {
+                configured = outstanding_vs_sv48
+                    ? concurrent.map_sv48_1g(
+                          virtual_pages[index], physical_pages[index], stage1_root)
+                    : concurrent.map_sv39_1g(
+                          virtual_pages[index], physical_pages[index], stage1_root);
+            }
+        }
+        if (configured && nested_translation) {
+            configured = outstanding_g_sv48
+                ? concurrent.map_sv48x4_1g(vs_root, vs_root, g_root)
+                : concurrent.map_sv39x4_1g(vs_root, vs_root, g_root);
+        }
+        for (unsigned index = 0;
+             configured && nested_translation &&
+                 index < guest_pages.size(); ++index) {
+            configured = outstanding_g_sv48
+                ? concurrent.map_sv48x4_1g(
+                      guest_pages[index], physical_pages[index], g_root)
+                : concurrent.map_sv39x4_1g(
+                      guest_pages[index], physical_pages[index], g_root);
+        }
+        if (configured) {
+            configured = nested_translation
+                ? concurrent.activate_two_stage_modes(
+                      outstanding_vs_sv48
+                          ? memblock::ReferencePageMode::sv48
+                          : memblock::ReferencePageMode::sv39,
+                      outstanding_g_sv48
+                          ? memblock::ReferencePageMode::sv48
+                          : memblock::ReferencePageMode::sv39,
+                      vs_root, g_root, 97, 99)
+                : (outstanding_vs_sv48
+                    ? concurrent.activate_sv48(stage1_root, 97)
+                    : concurrent.activate_sv39(stage1_root, 97));
+        }
+        std::vector<memblock::LoadTransaction> loads;
+        for (unsigned index = 0;
+             configured && index < virtual_pages.size(); ++index) {
+            loads.push_back(memblock::LoadTransaction{
+                .address = virtual_pages[index] + 0x188,
+                .oracle_address = physical_pages[index] + 0x188,
+                .op = memblock::LoadOp::ld,
+                .rob = static_cast<std::uint8_t>(40 + index),
+                .lq = static_cast<std::uint8_t>(index),
+                .pdest = static_cast<std::uint8_t>(124 + index),
+                .lane = index,
+            });
+            concurrent.expect_load(loads.back());
+            configured = concurrent.enqueue_load(loads.back());
+        }
+        const char *const stage = nested_translation ? "nested" : "stage1";
+        const std::uint64_t first_ptw_request = concurrent.ptw_requests();
+        const auto target_pte = [&](std::uint64_t virtual_page) {
+            const std::uint64_t walk_root = nested_translation
+                ? vs_root : stage1_root;
+            return walk_root + (outstanding_vs_sv48 ? 0x1000ULL : 0) +
+                ((virtual_page >> 30) & 0x1ffULL) * 8;
+        };
+        if (!configured ||
+            !concurrent.set_rob_head(loads.back().rob, loads.back().rob_flag) ||
+            !concurrent.issue_load_batch(loads, 2048) ||
+            !concurrent.run_until_ptw_requests(first_ptw_request + 1, 4096) ||
+            concurrent.pending_scalar_loads() != loads.size() ||
+            !concurrent.run_until_all_complete(32768) ||
+            !concurrent.run_until_lq_retired(4096) ||
+            !concurrent.run_until_ptw_request_covering(
+                target_pte(virtual_pages[0]), first_ptw_request, 1) ||
+            !concurrent.run_until_ptw_request_covering(
+                target_pte(virtual_pages[1]), first_ptw_request, 1) ||
+            concurrent.writebacks() != loads.size()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << concurrent.cycle() << " phase=concurrent-" << stage
+                      << "-walks max_ptw_outstanding="
+                      << concurrent.ptw_max_outstanding_requests()
+                      << " writebacks=" << concurrent.writebacks()
+                      << " reason=" << concurrent.error() << '\n';
+            return false;
+        }
+        outstanding_cycles += concurrent.cycle();
+        outstanding_ptw_requests += concurrent.ptw_requests();
+        outstanding_writebacks += concurrent.writebacks();
+        concurrent_ptw_max_outstanding = std::max(
+            concurrent_ptw_max_outstanding,
+            concurrent.ptw_max_outstanding_requests());
+        ++concurrent_walk_cases;
+        return true;
+    };
+
+    if (!run_concurrent_walks(false) || !run_concurrent_walks(true)) {
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_TRANSLATION_FENCE_PASS"
               << " cycle="
               << (environment.cycle() + nested.cycle() + vvma.cycle() +
@@ -6287,6 +6420,9 @@ int run_translation_fence(
               << " outstanding_g=" << outstanding_g_walks
               << " outstanding_nested_vs=" << fully_nested_vs_walks
               << " outstanding_nested_g=" << fully_nested_g_walks
+              << " concurrent_walk_cases=" << concurrent_walk_cases
+              << " concurrent_ptw_max_outstanding="
+              << concurrent_ptw_max_outstanding
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

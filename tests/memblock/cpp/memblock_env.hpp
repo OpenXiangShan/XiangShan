@@ -1344,6 +1344,8 @@ public:
         random_backpressure_ = enabled;
         latency_profile_ = latency_profile;
         response_latency_stats_ = {};
+        outstanding_requests_ = 0;
+        max_outstanding_requests_ = 0;
         force_a_stall_ = enabled;
     }
 
@@ -1431,7 +1433,11 @@ public:
     void update_after_tick()
     {
         if (d_fire_) {
+            const bool completed_request = responses_.front().last_beat;
             responses_.pop_front();
+            if (completed_request) {
+                --outstanding_requests_;
+            }
             d_presenting_ = false;
             d_gap_ = responses_.empty() ? 0 : responses_.front().delay_before;
         }
@@ -1439,6 +1445,9 @@ public:
             request_->response_delay = respond(*request_);
             request_history_.push_back(*request_);
             ++request_count_;
+            ++outstanding_requests_;
+            max_outstanding_requests_ = std::max(
+                max_outstanding_requests_, outstanding_requests_);
         }
         a_fire_ = false;
         d_fire_ = false;
@@ -1450,6 +1459,10 @@ public:
     std::uint64_t request_count() const { return request_count_; }
     std::uint64_t request_stall_cycles() const { return request_stall_cycles_; }
     std::uint64_t response_delay_cycles() const { return response_delay_cycles_; }
+    std::uint64_t max_outstanding_requests() const
+    {
+        return max_outstanding_requests_;
+    }
     const ResponseLatencyStats &response_latency_stats() const
     {
         return response_latency_stats_;
@@ -1510,6 +1523,7 @@ private:
         std::uint8_t size;
         std::uint8_t source;
         std::vector<unsigned char> data;
+        bool last_beat = true;
         unsigned delay_before = 0;
     };
 
@@ -1534,6 +1548,7 @@ private:
                 request.size,
                 request.source,
                 memory_.read_beat(base + beat * kBeatBytes, kBeatBytes),
+                beat + 1 == beats,
             }, beat == 0);
             if (beat == 0) {
                 first_response_delay = delay;
@@ -1591,6 +1606,8 @@ private:
     ResponseLatencyStats response_latency_stats_;
     bool force_a_stall_ = false;
     bool d_presenting_ = false;
+    std::uint64_t outstanding_requests_ = 0;
+    std::uint64_t max_outstanding_requests_ = 0;
     std::uint64_t request_stall_cycles_ = 0;
     std::uint64_t response_delay_cycles_ = 0;
     std::string error_;
@@ -2794,6 +2811,10 @@ public:
     std::uint64_t ptw_response_delays() const
     {
         return ptw_agent_.response_delay_cycles();
+    }
+    std::uint64_t ptw_max_outstanding_requests() const
+    {
+        return ptw_agent_.max_outstanding_requests();
     }
     const ResponseLatencyStats &ptw_response_latency_stats() const
     {

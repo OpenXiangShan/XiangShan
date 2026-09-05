@@ -72,6 +72,15 @@ the corner artifact SHA-256 is
 The generated artifacts are `/tmp/memblock-translation-spec-post-sq-target-verified-8x4096.json`
 and `/tmp/memblock-translation-corner-post-sq-target-verified-8x4096.json`.
 
+`translation-fence-all` was then extended with two distinct-page loads issued
+before a shared drain. The first PTW D response is delayed, and the gate
+requires both loads to remain pending after the first PTW A request plus two
+independently observed leaf-PTE addresses and exact final data. All eight
+Sv39/Sv48 x Sv39x4/Sv48x4 and global/selective variants passed, for 16 total
+stage-1/nested double-walk cases. The exported PTW manager legally serialized
+the requests (`concurrent_ptw_max_outstanding=1`); this is recorded rather than
+misclassified as an RTL concurrency failure.
+
 ## Superseded Pre-Clarification Stress
 
 ### Provenance-rejected one-hour stress run
