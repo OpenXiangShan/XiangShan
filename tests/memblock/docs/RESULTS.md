@@ -84,12 +84,13 @@ misclassified as an RTL concurrency failure.
 `translation-inflight-context` was added as a separate process-level matrix so
 the directed race does not exceed the DPI shared-library static-TLS load limit
 of the already large `translation-fence` process. Its four mode variants held
-the first PTW response for 256 cycles, changed the stage-1 root/ASID/MODE or
-both VS/G roots plus ASID/VMID/MODE, redirected the old load, and reused the
-same ROB/LQ identity. All 16 host/nested root-ID and mode-switch cases passed
-with exactly four valid new-context writebacks per variant. Every starting
-mode-pair made 15 external PTW requests; cycle totals were 2,190 for the
-Sv39/Sv39x4 and Sv48/Sv48x4 variants and 2,540 for the two mixed pairs. All
+the first PTW response for 256 cycles, changed the stage-1 root/ASID/MODE,
+both VS/G roots plus ASID/VMID/MODE, or `V` in either host/nested direction,
+redirected the old load, and reused the same ROB/LQ identity. All 24 root-ID,
+mode-switch, and virtualization-switch cases passed with exactly six valid
+new-context writebacks per variant. The Sv39/Sv39x4, Sv48/Sv48x4,
+Sv39/Sv48x4, and Sv48/Sv39x4 variants respectively made 21, 24, 22, and 23
+external PTW requests in 3,415, 3,787, 3,817, and 3,852 aggregate cycles. All
 runs used complete RTL SHA-256
 `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
 The static-TLS limit was a UT process-structure issue, not an RTL failure.

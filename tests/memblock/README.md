@@ -246,12 +246,12 @@ replacing the PTE and fencing; the selective `HFENCE.GVMA` operand is encoded
 as `GPA >> 2`.
 
 `translation-inflight-context-all` holds the first PTW response for 256 cycles,
-changes stage-1 root/ASID/MODE or both nested roots plus ASID/VMID/MODE, and
-redirects the younger old-context load. It then reuses that load's ROB/LQ
-identity and checks that only the new mapping writes back. Separate processes
-cover both Sv39/Sv48 directions and all four VS/G starting mode pairs; keeping
-this matrix out of the already large fence process avoids the DPI shared-library
-static-TLS instance limit.
+changes stage-1 root/ASID/MODE, both nested roots plus ASID/VMID/MODE, or `V`
+in either host/nested direction, and redirects the younger old-context load. It
+then reuses that load's ROB/LQ identity and checks that only the new mapping
+writes back. Separate processes cover both Sv39/Sv48 directions and all four
+VS/G starting mode pairs; keeping this matrix out of the already large fence
+process avoids the DPI shared-library static-TLS instance limit.
 
 `translation-context` checks five context families with 14 architectural
 loads: direct Sv39-to-Sv48 mode/root switching, same-mode `satp` ASID/root,
