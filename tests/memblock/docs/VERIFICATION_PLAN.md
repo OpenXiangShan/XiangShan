@@ -51,7 +51,11 @@ This MemBlock boundary can currently drive data accesses and observe selected
 fault metadata, but it cannot by itself prove instruction-fetch trap entry,
 `mtval2/htval`, `htinst`, or execution of fence instructions. Those remain
 explicit integration tests unless the corresponding architectural observation
-is added to the harness.
+is added to the harness. It also receives an already-decoded `TlbCsrBundle`,
+not architectural CSR write/readback traffic. The harness can therefore verify
+translation under legal Bare/Sv39/Sv48 and Bare/Sv39x4/Sv48x4 input modes, but
+CSR WARL filtering and software-visible exposure of those modes belong to a
+CSR or full-core integration test.
 
 ## Stable Oracles
 
@@ -94,7 +98,7 @@ still decided by the returned data or exact exception, not by the hit itself.
 | Vector loads | EEW 8/16/32/64; both lanes; unit, strided, indexed unordered/ordered; mask, `vstart`, partial `vl`; split windows | Exact 128-bit result, active mask, metadata, replay, LQ drain; each address mode counted independently |
 | Vector stores | All EEWs and address modes; mask, `vstart`, partial `vl`; misaligned and cross-page split/replay | Exact active-byte readback, completion, commit, SQ drain; each address mode counted independently |
 | Software prefetch | `prefetch.i/r/w`, all scalar issue lanes, mapped and unmapped VAs | Completion without RF write or exception; LQ drain |
-| Translation mode selection | `satp` Bare/Sv39/Sv48; `vsatp` Bare/Sv39/Sv48; `hgatp` Bare/Sv39x4/Sv48x4; supported-to-unsupported mode transitions | CSR mode is reflected after the required flush; no stale translation from the previous mode |
+| Translation mode selection | Legal decoded `satp` Bare/Sv39/Sv48, `vsatp` Bare/Sv39/Sv48, and `hgatp` Bare/Sv39x4/Sv48x4 inputs | Selected mode is reflected after the required flush; no stale translation from the previous legal mode; architectural CSR WARL write/readback behavior is integration-level |
 | Sv39 | 3-level walk; 4-KiB, 2-MiB, and 1-GiB leaves; low and high canonical VAs; both noncanonical sign-extension directions; cold/warm reuse | PA-derived data, exact page/access fault, PTW activity/reuse, leaf alignment; high-half canonical and both noncanonical directions are executable |
 | Sv48 | 4-level walk; 4-KiB, 2-MiB, 1-GiB, and 512-GiB leaves; L3 non-leaf and leaf faults; low and high canonical VAs; both noncanonical sign-extension directions | PA-derived data, exact page/access fault, fourth-level walk, canonicality fault; 4-KiB and superpage paths, high-half canonical, and both noncanonical directions are executable |
 | G-stage Sv39x4 | 3-level walk with 16-KiB root and 41-bit GPA; 4-KiB/2-MiB/1-GiB leaves; high-GPA overflow | Host PA-derived data or guest-page fault; exact GPA and root/index alignment; high-GPA execution is covered by `translation-faults` |
@@ -172,7 +176,7 @@ mask an untested mode or a self-consistent reference-model bug:
 
 | Phase | Required implementation | Exit criterion |
 | --- | --- | --- |
-| T0: mode contract | Enumerate legal `satp`, `vsatp`, and `hgatp` MODE values and reject unsupported values without changing the old context | CSR mode transition tests pass; unsupported writes do not create a new translation context |
+| T0: mode contract | Enumerate legal decoded `satp`, `vsatp`, and `hgatp` MODE values at the MemBlock input; test CSR WARL writes at the owning CSR/full-core boundary | Bare/Sv39/Sv48 and Bare/Sv39x4/Sv48x4 MemBlock transitions pass; unsupported architectural writes retain the old CSR value in a separate integration test |
 | T1: independent walks | Parameterized Sv39/Sv48 and Sv39x4/Sv48x4 builders, canonical/high-bit checks, root alignment, all leaf levels, superpage alignment | Four-level 4-KiB builders/walks, all supported superpage leaf levels, valid high halves, both noncanonical sign-extension directions, and G-stage high-bit overflow are executable; broader boundary crosses remain |
 | T2: nested composition | Independent VS walk plus G walk for all four mode pairs, plus VS-only/G-only/Bare degenerations | Four-pair 4-KiB matrix has cold and warm PA checks, implicit page-table accesses, and no stage elision; Bare degenerations execute in `translation-bare` |
 | T3: protection/faults | PTE V/R/W/X/U/G/A/D, PBMT/N/reserved bits, SUM/MXR, stage-specific access type, noncanonical VA, high-GPA overflow | Each invalid class produces the correct stage/cause/VA/GPA and no forbidden side effect |
@@ -409,6 +413,9 @@ are planned work items, not silently accepted coverage:
 - VSegment/VFOF takeover, multi-uop segment streams, fault-only-first, and
   segment-specific redirect behavior;
 - HLV, HLVX, HSV, SPVP, final physical execute permission, and hypervisor PMP;
+- architectural `satp`/`vsatp`/`hgatp` write/readback and WARL mode filtering;
+  the MemBlock UT directly supplies the post-CSR `TlbCsrBundle` and therefore
+  cannot establish software-visible Sv48/Sv48x4 enablement by itself;
 - complete PMP/PMA TOR/NA4/NAPOT, lock, priority, cacheability, and region-edge
   matrices;
 - hardware A/D updates and concurrent page-walk invalidation races (missing-A
