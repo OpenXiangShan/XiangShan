@@ -147,11 +147,22 @@ SPEC CPU checkpoint logs in these local datasets:
 Only the final counter block in each `simulator_err.txt` was counted, avoiding
 double counting periodic cumulative dumps. Relevant aggregates were:
 
-| Dataset | Loads | Stores | First TLB misses | DCache real misses | Miss allocations | Mean MSHR A-to-D |
+| Dataset | Loads | Stores | Load-unit first-issue TLB misses | DCache real misses | Miss allocations | Mean MSHR A-to-D |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `4f29a0951` | 5,449,853,667 | 2,335,870,195 | 89,439,821 | 572,769,182 | 483,469,995 | 30.28 cycles |
 | `5d3934132` | 15,297,507,427 | 6,294,915,699 | 475,042,094 | 1,491,848,202 | 1,039,068,487 | 32.16 cycles |
 | Combined | 20,747,361,094 | 8,630,785,894 | 564,481,915 | 2,064,617,384 | 1,522,538,482 | about 31.6 cycles |
+
+The TLB column is specifically the sum of the three load-unit
+`s1_tlb_miss_first_issue` counters. It is not a sum of every DTLB port's
+`first_miss` counter.
+
+The additional `cr260831-8f8494560-KunminghuV2Config` dataset contains 27 mcf
+checkpoints. Its final blocks report 196,764,856 loads, 54,612,731 stores,
+83,439,410 load-unit first-issue TLB misses, 128,703,205 DCache real misses,
+78,242,102 miss allocations, and a 36.35-cycle mean MSHR A-to-D latency. This
+small, memory-bound subset is useful as a high-miss stress reference, but is
+not pooled at equal weight with the two broad SPEC datasets above.
 
 The combined ordinary memory mix is about 70.6% loads and 29.4% stores. Atomic
 miss allocations were only 19,008 and 225,708 in the two datasets; reported
