@@ -316,6 +316,23 @@ passed with complete RTL SHA-256
 | `random-stress --seed 43 --transactions 65536` | Pass | 1,427,238 cycles; 64,740 TileLink requests; 12 maximum outstanding; 4,078 scalar misaligned operations; 10,923 scalar and 10,922 vector forwarding overlaps; four RNG streams; all required stress combinations; 21,278 request-stall and 271,007 response-delay cycles; LQ/SQ `76294+0/76294`, `54453+0/54453` |
 | `random-mixed --seed 47 --transactions 65536` | Pass | 1,861,069 cycles; 28,098 scalar, 9,351 prefetch, 9,365 scalar-store, 18,714 vector-load, and 9,358 vector-store writebacks; 15 PTW, two Uncache, ten ReleaseData, nested translation, three exception waves, redirect, dirty data, all forwarding classes and dispatch lanes, both vector stride signs, and all six manager backpressure counters nonzero; LQ/SQ `143506+1/143507`, `66307+0/66307` |
 
+## Current Full-Mode Sweep
+
+All 46 scenarios registered by the UT executable completed at least one passing
+run on the repaired RTL hash above: 39 deterministic modes and seven random
+modes. The larger supplemental random runs were:
+
+| Scenario | Result | Observed coverage |
+| --- | --- | --- |
+| `random-loads --seed 53 --transactions 8192` | Pass | 182,480 cycles; 8,192 checked writebacks across all seven scalar load operations and three issue lanes; 7,323 hits and 869 misses |
+| `random-vector-loads --seed 59 --transactions 8192` | Pass | 218,030 cycles; 8,192 checked vector writebacks, 16,384 balanced LQ allocations/dequeues, 845 TileLink requests, 18 releases, all four EEWs, both lanes, mask states, `vstart`, full/partial `vl`, and aligned/split addresses |
+| `random-boundary-hunt --seed 71 --transactions 4096` | Pass | 4,096 constrained-random VS-non-leaf boundary cases; zero failures |
+
+The specialized scalar/vector forwarding scenarios also passed, but their
+drivers intentionally clamp a single run to 48 and 24 transactions. High-count
+forwarding pressure is supplied by `random-stress`, which observed 10,923
+scalar and 10,922 vector forwarding overlaps in the 65,536-action run.
+
 ## Historical 32K Direct Runs
 
 The rebuilt executable also completed one 32,768-action pair with independent
