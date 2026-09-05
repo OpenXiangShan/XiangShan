@@ -554,40 +554,16 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     else Cat(s3_store_data_merged(i + 1), s3_store_data_merged(i))
   }))(s3_req.word_idx)
 
-  // A denied refill has no usable data or permission and must not be installed.
-  // A corrupt refill is installed with its error metadata, but atomic side
-  // effects must use neither kind of errored response.
-  val s3_l2_error_wb = RegEnable(s2_l2_error, s2_fire_to_s3)
-  val s3_refill_error_wb = s3_req.miss && s3_l2_error_wb.asUInt.orR
-  val s3_refill_denied_wb = s3_req.miss && s3_l2_error_wb.tl_denied
-
-  // report ecc error
-  val s3_tag_error_beu = RegEnable(s2_tag_error, s2_fire)
-  val s3_tag_error_wb = RegEnable(s2_tag_error, s2_fire_to_s3)
-
-  // data_error will be reported by data array 1 cycle after data read resp
-  val s3_data_error_beu = io.readline_error_delayed && GatedValidRegNext(s2_fire_to_s3) && RegEnable(s2_may_report_data_error, s2_fire)
-  val s3_data_error_wb = io.readline_error_delayed && RegEnable(s2_may_report_data_error, s2_fire_to_s3)
-
-  val s3_l2_error_beu = RegEnable(s2_l2_error, s2_fire)
-  val s3_flag_error_beu = RegEnable(s2_flag_error, s2_fire)
-
-  // error signal for amo inst
-  // s3_error_beu = s3_flag_error_beu || s3_tag_error_beu || s3_l2_error_beu || s3_data_error_beu
-  val s3_error_beu = RegEnable(s2_error, 0.U.asTypeOf(s2_error), s2_fire) || s3_data_error_beu
-  val s3_error_wb = RegEnable(s2_error, 0.U.asTypeOf(s2_error), s2_fire_to_s3) || s3_data_error_wb
-  val s3_error_paddr_beu = get_block_addr(RegEnable(Cat(s2_tag, get_untag(s2_req.vaddr)), s2_fire))
-
   val s3_sc_fail  = Wire(Bool()) // miss or lr mismatch
   val s3_need_replacement = RegEnable(s2_need_replacement && !s2_refill_tag_eq_way, s2_fire_to_s3)
 
   val (_, probe_shrink_param, probe_new_coh) = s3_coh.onProbe(s3_req.probe_param)
   val (_, miss_shrink_param, _) = s3_coh.onCacheControl(M_FLUSH)
 
-  val miss_update_meta = s3_req.miss && !s3_refill_denied_wb
+  val miss_update_meta = s3_req.miss
   val probe_update_meta = s3_req.probe && s3_tag_match && s3_coh =/= probe_new_coh
   val store_update_meta = s3_req.isStore && !s3_req.probe && s3_hit_coh =/= s3_new_hit_coh
-  val amo_update_meta = s3_req.isAMO && !s3_req.probe && s3_hit_coh =/= s3_new_hit_coh && !s3_sc_fail && !s3_error_wb
+  val amo_update_meta = s3_req.isAMO && !s3_req.probe && s3_hit_coh =/= s3_new_hit_coh && !s3_sc_fail
   val amo_wait_amoalu = s3_req.isAMO && s3_req.cmd =/= M_XLR && s3_req.cmd =/= M_XSC && !isAMOCAS(s3_req.cmd)
   val update_meta = (miss_update_meta || probe_update_meta || store_update_meta || amo_update_meta) && !s3_req.replace
 
@@ -606,6 +582,24 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   }
 
   val miss_new_coh = ClientMetadata(missCohGen(s3_req.cmd, s3_miss_param, s3_miss_dirty))
+
+  // report ecc error
+  val s3_tag_error_beu = RegEnable(s2_tag_error, s2_fire)
+  val s3_tag_error_wb = RegEnable(s2_tag_error, s2_fire_to_s3)
+
+  // data_error will be reported by data array 1 cycle after data read resp
+  val s3_data_error_beu = io.readline_error_delayed && GatedValidRegNext(s2_fire_to_s3) && RegEnable(s2_may_report_data_error, s2_fire)
+  val s3_data_error_wb = io.readline_error_delayed && RegEnable(s2_may_report_data_error, s2_fire_to_s3)
+
+  val s3_l2_error_beu = RegEnable(s2_l2_error, s2_fire)
+  val s3_l2_error_wb = RegEnable(s2_l2_error, s2_fire_to_s3)
+  val s3_flag_error_beu = RegEnable(s2_flag_error, s2_fire)
+
+  // error signal for amo inst
+  // s3_error_beu = s3_flag_error_beu || s3_tag_error_beu || s3_l2_error_beu || s3_data_error_beu
+  val s3_error_beu = RegEnable(s2_error, 0.U.asTypeOf(s2_error), s2_fire) || s3_data_error_beu
+  val s3_error_wb = RegEnable(s2_error, 0.U.asTypeOf(s2_error), s2_fire_to_s3) || s3_data_error_wb
+  val s3_error_paddr_beu = get_block_addr(RegEnable(Cat(s2_tag, get_untag(s2_req.vaddr)), s2_fire))
 
   // LR, SC and AMO
   val debug_sc_fail_addr = RegInit(0.U)
@@ -627,11 +621,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_cas_fail = s3_cas && (FillInterleaved(8, s3_req.amo_mask) & (s3_req.amo_cmp ^ s3_data_quad_word)) =/= 0.U
 
   val s3_can_do_amo = (s3_req.miss && !s3_req.probe && s3_req.isAMO) || s3_amo_hit
-  val s3_can_do_amo_success = s3_can_do_amo && !s3_error_wb
-  val s3_can_do_amo_write = s3_can_do_amo_success && isWrite(s3_req.cmd) && !s3_sc_fail && !s3_cas_fail
+  val s3_can_do_amo_write = s3_can_do_amo && isWrite(s3_req.cmd) && !s3_sc_fail && !s3_cas_fail
 
   when (s3_valid && (s3_lr || s3_sc)) {
-    when (s3_can_do_amo_success && s3_lr) {
+    when (s3_can_do_amo && s3_lr) {
       lrsc_count := (LRSCCycles - 1).U
       lrsc_addr := get_block_addr(s3_req.addr)
     } .otherwise {
@@ -653,7 +646,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   // When we update update_resv_set, block all probe req in the next cycle
   // It should give Probe reservation set addr compare an independent cycle,
   // which will lead to better timing
-  io.update_resv_set := s3_valid && s3_lr && s3_can_do_amo_success
+  io.update_resv_set := s3_valid && s3_lr && s3_can_do_amo
 
   when (s3_valid) {
     when (s3_req.addr === debug_sc_fail_addr) {
@@ -688,7 +681,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
 
   val banked_amo_wmask = UIntToOH(s3_req.word_idx)
-  val update_data = (s3_req.miss && !s3_refill_denied_wb) || s3_store_hit || s3_can_do_amo_write
+  val update_data = s3_req.miss || s3_store_hit || s3_can_do_amo_write
 
   // generate write data
   // AMO hits
@@ -783,7 +776,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     )
   )
   val banked_wmask = Mux(
-    s3_req.miss && !s3_refill_denied_wb,
+    s3_req.miss,
     banked_full_wmask,
     Mux(
       s3_store_hit,
@@ -922,7 +915,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   // if we use (prefetch_flag && meta =/= ClientStates.Nothing) for prefetch check
   // prefetch_flag_write can be omited
-  io.prefetch_flag_write.valid := s3_fire && s3_req.miss && !s3_refill_denied_wb
+  io.prefetch_flag_write.valid := s3_fire && s3_req.miss
   io.prefetch_flag_write.bits.idx := s3_idx
   io.prefetch_flag_write.bits.way_en := s3_way_en
   io.prefetch_flag_write.bits.source := s3_req.pf_source
@@ -942,20 +935,20 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   XSPerfAccumulate("mainpipe_slot_conflict_1_3", (s1_idx === s3_idx && s1_way_en === s3_way_en && s1_req.miss && s3_req.miss && s1_valid && s3_valid))
   XSPerfAccumulate("mainpipe_slot_conflict_2_3", (s2_idx === s3_idx && s2_way_en === s3_way_en && s2_req.miss && s3_req.miss && s2_valid && s3_valid))
   // probe / replace will not update access bit
-  io.access_flag_write.valid := s3_fire && !s3_req.probe && !s3_req.replace && !s3_refill_denied_wb
+  io.access_flag_write.valid := s3_fire && !s3_req.probe && !s3_req.replace
   io.access_flag_write.bits.idx := s3_idx
   io.access_flag_write.bits.way_en := s3_way_en
   // io.access_flag_write.bits.flag := true.B
   io.access_flag_write.bits.flag :=Mux(s3_req.miss, s3_req.access, true.B)
 
-  io.tag_write.valid := s3_fire && s3_req.miss && !s3_refill_denied_wb
+  io.tag_write.valid := s3_fire && s3_req.miss
   io.tag_write.bits.idx := s3_idx
   io.tag_write.bits.way_en := s3_way_en
   io.tag_write.bits.tag := get_tag(s3_req.addr)
   io.tag_write.bits.ecc := DontCare // generate ecc code in tagArray
   io.tag_write.bits.vaddr := s3_req.vaddr
 
-  io.tag_write_intend := s3_req.miss && s3_valid && !s3_refill_denied_wb
+  io.tag_write_intend := s3_req.miss && s3_valid
   XSPerfAccumulate("fake_tag_write_intend", io.tag_write_intend && !io.tag_write.valid)
   XSPerfAccumulate("mainpipe_tag_write", io.tag_write.valid)
 
@@ -972,19 +965,15 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.data_write.bits.addr := s3_req.vaddr
   io.data_write.bits.wmask := banked_wmask
   io.data_write.bits.data := Mux(
-    s3_refill_error_wb,
-    s3_store_data_merged,
+    amo_wait_amoalu,
+    s3_amo_data_merged_reg,
     Mux(
-      amo_wait_amoalu,
-      s3_amo_data_merged_reg,
+      s3_sc,
+      s3_sc_data_merged,
       Mux(
-        s3_sc,
-        s3_sc_data_merged,
-        Mux(
-          s3_cas,
-          s3_cas_data_merged,
-          s3_store_data_merged
-        )
+        s3_cas,
+        s3_cas_data_merged,
+        s3_store_data_merged
       )
     )
   )
@@ -1016,7 +1005,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.wb.bits.miss_id := s3_req.miss_id
 
   // update plru in main pipe s3
-  io.replace_access.valid := GatedValidRegNext(s2_fire_to_s3) && !s3_req.probe && !s3_refill_denied_wb && (s3_req.miss || ((s3_req.isAMO || s3_req.isStore) && s3_hit))
+  io.replace_access.valid := GatedValidRegNext(s2_fire_to_s3) && !s3_req.probe && (s3_req.miss || ((s3_req.isAMO || s3_req.isStore) && s3_hit))
   io.replace_access.bits.set := s3_idx
   io.replace_access.bits.way := OHToUInt(s3_way_en)
 
