@@ -36,8 +36,9 @@ set the expectation and therefore remain strict. Fault tests still require the
 exact exception, no RF write, one terminal completion, and no data-manager
 request.
 
-After the correction, all 31 `translation-faults` cases passed, including 26
-fresh-environment Sv39/Sv48 invalid/reserved/PBMT/NAPOT PTE encodings.
+After the correction, all 57 `translation-faults` cases passed, including 26
+fresh-environment Sv39/Sv48 and 26 Sv39x4/Sv48x4
+invalid/reserved/PBMT/NAPOT PTE encodings.
 
 The encoding oracle follows the RISC-V privileged architecture's
 [virtual-address translation process](https://docs.riscv.org/reference/isa/priv/supervisor.html#sv32algorithm)

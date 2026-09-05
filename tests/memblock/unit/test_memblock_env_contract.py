@@ -251,7 +251,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertNotIn("expected_debug_is_ncio.value_or(false)", load_scoreboard)
         self.assertNotIn("expected_debug_is_mmio.value_or(false)", load_scoreboard)
 
-    def test_translation_faults_cover_stage_one_pte_encoding_matrix(self) -> None:
+    def test_translation_faults_cover_stage_one_and_gstage_pte_encodings(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
         for contract in (
@@ -269,7 +269,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "nonleaf-u",
             "nonleaf-pbmt",
             "leaf-napot-encoding",
-            "pte_encoding_cases=",
+            "stage1_pte_encoding_cases=",
+            "gstage_pte_encoding_cases=",
+            "kExceptionLoadGuestPageFault",
+            "nested_reference.is_for_vs_nonleaf_pte",
         ):
             self.assertIn(contract, main)
 

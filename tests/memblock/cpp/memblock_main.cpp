@@ -5656,8 +5656,132 @@ int run_translation_faults(int argc, char **argv)
         }
     }
 
-    std::cout << "MEMBLOCK_TRANSLATION_FAULTS_PASS cases=31"
-              << " pte_encoding_cases=" << pte_encoding_cases.size()
+    for (std::size_t index = 0; index < pte_encoding_cases.size(); ++index) {
+        const auto &test = pte_encoding_cases[index];
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t guest_virtual = 0x76000000ULL;
+        // Keep the final data GPA in a different top-level x4 root entry from
+        // the VS page-table GPAs. Root-PTE mutations then exercise the final
+        // data translation instead of faulting an earlier implicit VS walk.
+        constexpr std::uint64_t guest_physical = 0x8000000000ULL;
+        constexpr std::uint64_t host_physical = 0xcd000000ULL;
+        constexpr std::uint64_t vs_root = 0xac000000ULL;
+        constexpr std::uint64_t g_root = 0xae000000ULL;
+        if (!environment.reset() ||
+            !environment.map_sv39_4k(
+                guest_virtual, guest_physical, vs_root)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=g-"
+                      << test.name << "-vs-setup reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const auto map_gstage = [&](std::uint64_t guest,
+                                    std::uint64_t host) {
+            return test.mode == memblock::ReferencePageMode::sv48
+                ? environment.map_sv48x4_4k(guest, host, g_root)
+                : environment.map_sv39x4_4k(guest, host, g_root);
+        };
+        if (!map_gstage(vs_root, vs_root) ||
+            !map_gstage(vs_root + 0x1000, vs_root + 0x1000) ||
+            !map_gstage(vs_root + 0x2000, vs_root + 0x2000) ||
+            !map_gstage(guest_physical, host_physical)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=g-"
+                      << test.name << "-g-setup reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const unsigned target_level = test.mutate_root
+            ? memblock::reference_page_levels(test.mode) - 1
+            : 0;
+        const auto pte_address = memblock::reference_pte_address_at_level(
+            environment.memory(), g_root, guest_physical + 0x188,
+            test.mode, target_level, true);
+        if (!pte_address.has_value()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=g-"
+                      << test.name
+                      << "-locator reason=reference PTE locator failed\n";
+            return 1;
+        }
+        const std::uint64_t original =
+            environment.memory().read_u64(*pte_address);
+        environment.memory().write_u64(
+            *pte_address, (original & ~test.clear_bits) | test.set_bits);
+        const auto g_reference = memblock::reference_page_walk(
+            environment.memory(), g_root, guest_physical + 0x188,
+            test.mode, true, test.pbmte);
+        const auto nested_reference = memblock::reference_two_stage_walk(
+            environment.memory(), vs_root, g_root, guest_virtual + 0x188,
+            memblock::ReferencePageMode::sv39, test.mode, true, test.pbmte);
+        if (g_reference.translated ||
+            g_reference.faulting_pte_address != *pte_address ||
+            g_reference.fault_level != target_level ||
+            nested_reference.translated ||
+            !nested_reference.guest_page_fault ||
+            nested_reference.stage1_page_fault ||
+            nested_reference.faulting_guest_physical_address !=
+                guest_physical + 0x188 ||
+            nested_reference.is_for_vs_nonleaf_pte) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=g-"
+                      << test.name << "-reference\n";
+            return 1;
+        }
+        if (!environment.activate_two_stage_modes(
+                memblock::ReferencePageMode::sv39, test.mode,
+                vs_root, g_root, 47, 49) ||
+            !environment.set_page_based_memory_types(test.pbmte, true)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=g-"
+                      << test.name << "-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        const memblock::LoadTransaction transaction{
+            .address = guest_virtual + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = static_cast<std::uint8_t>(180 + index),
+            .lane = static_cast<unsigned>(index % memblock::kScalarLoadLanes),
+            .expected_exception_mask =
+                memblock::kExceptionLoadGuestPageFault,
+        };
+        environment.expect_load(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 4096) ||
+            !environment.run_until_complete(32768) ||
+            !environment.run_until_lq_retired(8192)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=g-"
+                      << test.name << "-execution reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        if (environment.exception_vaddr() != transaction.address ||
+            environment.exception_gpaddr() != guest_physical + 0x188 ||
+            environment.exception_is_for_vs_nonleaf_pte()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=g-"
+                      << test.name << "-metadata expected_vaddr=0x"
+                      << std::hex << transaction.address
+                      << " actual_vaddr=0x" << environment.exception_vaddr()
+                      << " expected_gpaddr=0x" << guest_physical + 0x188
+                      << " actual_gpaddr=0x" << environment.exception_gpaddr()
+                      << " actual_vs_nonleaf=" << std::dec
+                      << environment.exception_is_for_vs_nonleaf_pte() << '\n';
+            return 1;
+        }
+        if (environment.tilelink_requests() != dcache_before ||
+            environment.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=g-"
+                      << test.name
+                      << "-bypass reason=fault issued a data-manager request\n";
+            return 1;
+        }
+    }
+
+    std::cout << "MEMBLOCK_TRANSLATION_FAULTS_PASS cases=57"
+              << " stage1_pte_encoding_cases=" << pte_encoding_cases.size()
+              << " gstage_pte_encoding_cases=" << pte_encoding_cases.size()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

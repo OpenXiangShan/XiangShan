@@ -778,7 +778,9 @@ inline ReferenceTwoStageWalkResult reference_two_stage_walk(
     std::uint64_t g_root_page_table,
     std::uint64_t guest_virtual_address,
     ReferencePageMode vs_mode = ReferencePageMode::sv39,
-    ReferencePageMode g_mode = ReferencePageMode::sv39)
+    ReferencePageMode g_mode = ReferencePageMode::sv39,
+    bool vs_pbmte = true,
+    bool g_pbmte = true)
 {
     if (vs_mode != ReferencePageMode::bare &&
         !reference_canonical_virtual_address(guest_virtual_address, vs_mode)) {
@@ -793,23 +795,18 @@ inline ReferenceTwoStageWalkResult reference_two_stage_walk(
             const std::uint64_t index = (guest_virtual_address >> shift) & 0x1ff;
             const std::uint64_t pte_gpa = vs_table_gpa + index * 8;
             const auto pte_translation = reference_page_walk(
-                memory, g_root_page_table, pte_gpa, g_mode, true);
+                memory, g_root_page_table, pte_gpa, g_mode, true, g_pbmte);
             if (!pte_translation.translated) {
                 return {false, 0, true, false, pte_gpa, true};
             }
 
             const std::uint64_t pte = memory.read_u64(
                 pte_translation.physical_address);
-            if (reference_pte_is_invalid(pte)) {
+            if (reference_pte_encoding_fault(
+                    pte, static_cast<unsigned>(level), vs_pbmte)) {
                 return {false, 0, false, true, pte_gpa, false};
             }
             if (reference_pte_is_leaf(pte)) {
-                const unsigned lower_ppn_bits = 9 * static_cast<unsigned>(level);
-                if (lower_ppn_bits != 0 &&
-                    (reference_pte_ppn(pte) &
-                     ((std::uint64_t{1} << lower_ppn_bits) - 1)) != 0) {
-                    return {false, 0, false, true, pte_gpa, false};
-                }
                 guest_physical_address = reference_leaf_address(
                     pte, guest_virtual_address, static_cast<unsigned>(level));
                 break;
@@ -824,7 +821,8 @@ inline ReferenceTwoStageWalkResult reference_two_stage_walk(
         return {true, guest_physical_address, false, false, 0, false};
     }
     const auto final_translation = reference_page_walk(
-        memory, g_root_page_table, guest_physical_address, g_mode, true);
+        memory, g_root_page_table, guest_physical_address, g_mode, true,
+        g_pbmte);
     if (!final_translation.translated) {
         return {false, 0, true, false, guest_physical_address, false};
     }

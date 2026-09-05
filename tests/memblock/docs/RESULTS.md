@@ -141,7 +141,7 @@ Sv48 stage-1 2 MiB/1 GiB leaves, Sv48 512 GiB, and the corresponding
 Sv39x4/Sv48x4 G-stage leaves. Every case matched the independent leaf-address
 oracle and completed an architectural load.
 
-`make translation-faults` passed 31 deterministic fault cases. The original
+`make translation-faults` passed 57 deterministic fault cases. The original
 five cover a noncanonical Sv48 VA, invalid Sv39 root PTE, Sv39x4/Sv48x4 GPA
 overflow, and a malformed Sv39 2 MiB leaf. The added 26 fresh-environment
 Sv39/Sv48 cases cross invalid V/W/R, reserved bits 60:54, PBMT=3, PBMTE off,
@@ -149,10 +149,18 @@ exhausted L0, illegal non-leaf U/A/D/PBMT/N, and invalid NAPOT encoding. Each
 case matched the independent failing PTE/level and exact load page fault, with
 no DCache or Uncache data request.
 
+The same 26-entry encoding table also passed through final-data G-stage walks,
+split across Sv39x4 and Sv48x4. Every case produced the exact load guest-page
+fault, fault VA/GPA, and `isForVSnonLeafPTE=0`, while issuing no DCache or
+Uncache data request. The G-stage data GPA deliberately uses a different x4
+root index from the VS page-table GPAs so root-level mutations cannot turn the
+test into an earlier implicit-walk fault.
+
 During this run, an unspecified scalar-load `debug.isNCIO` expectation caused
 a test-only false positive on a faulting PBMT PTE. The scoreboard had collapsed
 an absent `optional<bool>` to false. It now checks optional debug metadata only
-when explicitly constrained; stable MMIO/NC cases remain strict. See
+when explicitly constrained; stable MMIO/NC cases remain strict. The 57-case
+rerun and neighboring MMIO/translation regressions passed. See
 [`SCALAR_LOAD_OPTIONAL_METADATA_ORACLE.md`](SCALAR_LOAD_OPTIONAL_METADATA_ORACLE.md).
 
 `make translation-permissions` passed 36 fresh-environment permission cases:
@@ -161,6 +169,13 @@ truth table covered Sv39/Sv48 U/S pages, SUM, MXR, missing A/D, VSUM/VMXR, and
 G-stage MXR/A selection. Passing stores committed and matched exact scalar
 readback; faulting stores reported `StorePageFault`, issued no DCache/Uncache
 request, and balanced the SQ through explicit cancellation.
+
+After the 57-case fault expansion, `random-mixed --seed 419 --transactions
+4096 --constraints spec` passed in 152,052 cycles. It mixed 2,467 loads, 1,011
+stores, 181 prefetches, vector traffic, atomics, MMIO/NC, translation faults,
+99 PTW requests, and 45 Uncache requests. The latency model reached 398 cycles,
+all manager backpressure classes were nonzero, maximum scoreboard occupancy was
+seven, and every coverage and LQ/SQ accounting gate passed.
 
 `make fp-loads` passed cacheable 32-bit and 64-bit FP destination transactions.
 The 32-bit result was checked as a NaN-boxed 64-bit value, with integer RF

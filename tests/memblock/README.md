@@ -236,10 +236,11 @@ that no stale page-table walk is required.
 
 `translation-faults` executes a noncanonical Sv48 VA, Sv39x4 and Sv48x4 GPAs
 above their architectural limits, a malformed non-aligned Sv39 2 MiB leaf, and
-26 fresh-environment Sv39/Sv48 PTE encoding faults. The encoding table crosses
-V/W/R, both ends of reserved bits 60:54, PBMT=3, disabled PBMTE, exhausted L0,
-illegal non-leaf U/A/D/PBMT/N fields, and an invalid NAPOT encoding. It checks
-the independent walk's failing PTE/level, exact stage-specific exception, and
+52 fresh-environment PTE encoding faults split evenly across Sv39/Sv48 stage-1
+and Sv39x4/Sv48x4 G-stage. The shared encoding table crosses V/W/R, both ends
+of reserved bits 60:54, PBMT=3, disabled PBMTE, exhausted L0, illegal non-leaf
+U/A/D/PBMT/N fields, and an invalid NAPOT encoding. It checks the independent
+walk's failing PTE/level, exact stage-specific exception and fault VA/GPA, and
 that no faulting data request reaches DCache or Uncache.
 
 `translation-permissions` executes 36 independent cases. Its table-driven
