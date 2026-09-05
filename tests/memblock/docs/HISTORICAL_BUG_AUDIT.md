@@ -74,7 +74,7 @@ table below.
 | 2026-05-19 | `f2bbca15` | Avoid X in LoadQueueRAR | Non-functional/outside MemBlock UT | The two-state Verilator model cannot prove four-state X behavior. |
 | 2026-04-29 | `0d4264d5` | Misalignment exception logic | Covered, not mutated | Enabled/disabled scalar and vector misalignment, PBMT-NC misalignment, and exact exception bits. |
 | 2026-04-29 | `c45f5372` | CMO execution under PBMT | Boundary gap | CBO/CMO request-response model is absent. |
-| 2026-05-05 | `7a25d9c9` | Atomic cache-error lifetime | Boundary gap | Atomic issue and cache-error injection/reference semantics are absent. |
+| 2026-05-05 | `7a25d9c9` | Atomic cache-error lifetime | **Covered, not mutated** | `atomic-dchannel-errors` executes a clean cold AMO and warm readback after each complete denied/corrupt batch, proving that prior AtomicsUnit error state does not leak into a later clean operation. |
 | 2026-05-05 | `74479de4` | Misaligned vector store progress | Covered, not mutated | Focused and random mixed vector-store split/replay tests. |
 | 2026-05-05 | `7a5c5213` | Prefetch must not raise an exception | Covered, not mutated | `exception-contracts` issues an unmapped software prefetch and requires non-exceptional, no-RF-write completion. |
 | 2026-05-02 | `2ed71b93` | `mtvec` reset-valid plumbing | Non-functional/outside MemBlock UT | CSR reset integration outside memory transaction semantics. |

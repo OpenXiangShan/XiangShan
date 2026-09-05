@@ -55,7 +55,8 @@ The reusable C++ components are in `cpp/memblock_env.hpp`:
 
 The correctness contracts are cataloged separately in
 `docs/ORACLES.md`. `docs/VERIFICATION_PLAN.md` contains the complete test-point
-inventory, including explicit planned gaps for MMIO device side effects, reservation-interference and atomic alignment/error matrices, CMO CLEAN/FLUSH/INVAL,
+inventory, including explicit planned gaps for MMIO device side effects,
+reservation interference and full atomic alignment crosses, CMO CLEAN/FLUSH/INVAL,
 VSegment, hypervisor accesses, PMP/PMA matrices, coherence probes, error
 injection, concurrent exception priority, and four-state behavior. A passing
 cacheable mixed campaign must not be interpreted as verification of those
@@ -309,11 +310,14 @@ LSQ entries because the RTL routes them through `AtomicsUnit`.
 `atomic-dchannel-errors` injects denied and corrupt responses into cold misses
 for all 22 refill-capable W/D operations: LR, the nine AMO ALU operations, and
 AMOCAS. Every operation checks the exact exception class, suppressed `rfWen`,
-unmodified manager data, and the expected miss/hit request-count delta. It also
-requires denied LR not to establish a reservation and checks SC.W/D on cached
-corrupt metadata. SC itself cannot receive a cold-miss D response in this
-implementation: a missing line or reservation makes MainPipe return SC failure
-before issuing TileLink traffic. See
+and the expected miss/hit request-count delta. Both denied and corrupt refills
+are installed as poisoned lines; a later scalar load must hit without new
+traffic and re-report `loadAccessFault` or `hardwareError`. SC.W/D checks the
+same cached error metadata after LR.W/LR.D, and clean AMO/readback sequences
+after each error-kind batch guard AtomicsUnit error lifetime. Exceptional data
+is deliberately not compared because it is non-architectural. SC itself cannot
+receive a cold-miss D response in this implementation: a missing line or usable
+reservation makes MainPipe return SC failure before issuing TileLink traffic. See
 [`docs/ATOMIC_DCHANNEL_ERROR.md`](docs/ATOMIC_DCHANNEL_ERROR.md).
 
 

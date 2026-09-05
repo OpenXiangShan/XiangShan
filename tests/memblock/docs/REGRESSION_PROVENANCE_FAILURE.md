@@ -24,6 +24,10 @@ balanced queue accounting, nonzero required coverage, backpressure, and the
 same complete RTL SHA-256
 `b69e387eb081a3f311311079ade435206817c7c6a20bd8f3a5f11889ec1dcbf4`.
 The frozen executable, model, xspcomm, and system-library hashes were unchanged.
+That hash also contained the later-retracted local atomic D-channel policy
+change `8eedb3ad0`; after design clarification it is superseded and is not
+evidence for the current RTL behavior. This does not change the provenance
+failure diagnosis recorded here.
 
 The aggregate rejection was:
 

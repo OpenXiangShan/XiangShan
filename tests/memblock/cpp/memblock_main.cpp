@@ -1673,8 +1673,11 @@ int run_atomic_dchannel_errors(int argc, char **argv)
     std::size_t denied_cases = 0;
     std::size_t corrupt_cases = 0;
     std::size_t readbacks = 0;
-    std::size_t lr_reservation_checks = 0;
+    std::size_t denied_line_hits = 0;
+    std::size_t corrupt_line_hits = 0;
+    std::size_t sc_denied_hit_checks = 0;
     std::size_t sc_corrupt_hit_checks = 0;
+    std::size_t clean_recoveries = 0;
 
     for (unsigned error_kind = 0; error_kind < 2; ++error_kind) {
         const bool denied = error_kind == 0;
@@ -1693,15 +1696,16 @@ int run_atomic_dchannel_errors(int argc, char **argv)
                 static_cast<std::uint8_t>(0x31U + global_index));
             const std::uint64_t original =
                 environment.memory().expected_load(atomic_address, read_op);
-            const std::uint8_t atomic_rob =
-                static_cast<std::uint8_t>(global_index * 2);
+            const std::uint64_t atomic_rob_offset =
+                global_index * 2 + error_kind * 2;
             const memblock::AtomicTransaction atomic{
                 .address = atomic_address,
                 .op = test_case.op,
                 .data = 0xfedcba9876543210ULL ^
                     (0x0101010101010101ULL * global_index),
                 .compare = original,
-                .rob = atomic_rob,
+                .rob = memblock::rob_pointer_value(atomic_rob_offset),
+                .rob_flag = memblock::rob_pointer_flag(atomic_rob_offset),
                 .pdest = static_cast<std::uint8_t>(32 + global_index),
                 .address_lane = static_cast<unsigned>(global_index & 1U),
                 .data_lane = static_cast<unsigned>((global_index >> 1) & 1U),
@@ -1715,6 +1719,7 @@ int run_atomic_dchannel_errors(int argc, char **argv)
                 .address = atomic.address,
                 .op = read_op,
                 .rob = atomic.rob,
+                .rob_flag = atomic.rob_flag,
                 .pdest = atomic.pdest,
                 .lane = static_cast<unsigned>(global_index % 3),
                 .expected_exception_mask = expected_exception,
@@ -1723,7 +1728,7 @@ int run_atomic_dchannel_errors(int argc, char **argv)
             environment.inject_next_dcache_response_error(denied, corrupt);
             const std::uint64_t requests_before_atomic =
                 environment.tilelink_requests();
-            if (!environment.set_rob_head(atomic.rob) ||
+            if (!environment.set_rob_head(atomic.rob, atomic.rob_flag) ||
                 !environment.issue_atomic(atomic, 1024) ||
                 !environment.run_until_complete(8192) ||
                 environment.tilelink_requests() != requests_before_atomic + 1) {
@@ -1742,23 +1747,25 @@ int run_atomic_dchannel_errors(int argc, char **argv)
             denied_cases += denied;
             corrupt_cases += corrupt;
 
-            // A denied refill must not have installed the line, whereas a
-            // corrupt refill remains cached with its error metadata.  In both
-            // cases the diagnostic data must be the untouched manager value.
+            // Both denied and corrupt refills are installed as poisoned lines.
+            // Their error metadata must survive the miss response and make a
+            // following load fault on a cache hit.  Data on an exceptional
+            // writeback is not architectural and is deliberately not checked.
             environment.configure_cache_error_enable(false);
             const std::uint64_t requests_before_readback =
                 environment.tilelink_requests();
             const memblock::LoadTransaction readback{
                 .address = atomic.address,
                 .op = read_op,
-                .rob = static_cast<std::uint8_t>(atomic.rob + 1),
-                .lq = static_cast<std::uint8_t>(global_index),
+                .rob = memblock::rob_pointer_value(atomic_rob_offset + 1),
+                .rob_flag = memblock::rob_pointer_flag(atomic_rob_offset + 1),
+                .lq = memblock::lq_pointer_value(global_index + error_kind),
+                .lq_flag = memblock::lq_pointer_flag(global_index + error_kind),
                 .pdest = static_cast<std::uint8_t>(96 + global_index),
                 .lane = static_cast<unsigned>(global_index % 3),
-                .expected_exception_mask = corrupt
-                    ? memblock::kExceptionHardwareError
-                    : 0,
-                .check_data_on_exception = corrupt,
+                .expected_exception_mask = denied
+                    ? memblock::kExceptionLoadAccessFault
+                    : memblock::kExceptionHardwareError,
             };
             environment.expect_load_data(readback, original);
             const bool readback_completed =
@@ -1766,17 +1773,14 @@ int run_atomic_dchannel_errors(int argc, char **argv)
                 environment.enqueue_load(readback) &&
                 environment.issue_load(readback, 1024) &&
                 environment.run_until_complete(8192);
-            const std::uint64_t expected_requests = requests_before_readback +
-                (denied ? 1 : 0);
-            const bool readback_retired = corrupt
-                ? (environment.run_cycles(8) &&
-                   environment.redirect_after(
-                       readback.rob, readback.rob_flag, true) &&
-                   environment.run_cycles(96) &&
-                   (environment.lq_dequeued() + environment.lq_canceled() >=
-                        environment.lq_allocated() ||
-                    environment.account_lq_cancellation(1)))
-                : environment.run_until_lq_retired(1024);
+            const std::uint64_t expected_requests = requests_before_readback;
+            const bool readback_retired = environment.run_cycles(8) &&
+                environment.redirect_after(
+                    readback.rob, readback.rob_flag, true) &&
+                environment.run_cycles(96) &&
+                (environment.lq_dequeued() + environment.lq_canceled() >=
+                     environment.lq_allocated() ||
+                 environment.account_lq_cancellation(1));
             if (!readback_completed ||
                 environment.tilelink_requests() != expected_requests ||
                 !readback_retired) {
@@ -1792,12 +1796,16 @@ int run_atomic_dchannel_errors(int argc, char **argv)
                 return 1;
             }
             ++readbacks;
+            denied_line_hits += denied;
+            corrupt_line_hits += corrupt;
             environment.configure_cache_error_enable(true);
 
             if (denied && test_case.load_reserved) {
-                // A faulting LR must not establish a reservation.  The clean
-                // readback above installs the line without creating one, so a
-                // following SC must return failure without TileLink traffic.
+                // The delayed readback above leaves the denied line cached and
+                // lets the LR reservation timer expire.  A following SC must
+                // hit the poisoned line, report storeAccessFault, and issue no
+                // new request.  This observes the error policy, not the
+                // internal reservation bit.
                 const std::uint8_t sc_rob = static_cast<std::uint8_t>(
                     readback.rob + 1);
                 const memblock::AtomicTransaction sc{
@@ -1807,9 +1815,9 @@ int run_atomic_dchannel_errors(int argc, char **argv)
                         : memblock::AtomicOp::sc_d,
                     .data = 0x0123456789abcdefULL,
                     .rob = sc_rob,
-                    .pdest = static_cast<std::uint8_t>(150 + lr_reservation_checks),
-                    .address_lane = static_cast<unsigned>(lr_reservation_checks & 1U),
-                    .data_lane = static_cast<unsigned>(lr_reservation_checks & 1U),
+                    .pdest = static_cast<std::uint8_t>(150 + sc_denied_hit_checks),
+                    .address_lane = static_cast<unsigned>(sc_denied_hit_checks & 1U),
+                    .data_lane = static_cast<unsigned>(sc_denied_hit_checks & 1U),
                 };
                 const memblock::LoadTransaction sc_wb{
                     .address = sc.address,
@@ -1817,9 +1825,10 @@ int run_atomic_dchannel_errors(int argc, char **argv)
                     .rob = sc.rob,
                     .pdest = sc.pdest,
                     .lane = 0,
-                    .rf_wen = true,
+                    .expected_exception_mask =
+                        memblock::kExceptionStoreAccessFault,
                 };
-                environment.expect_load_data(sc_wb, 1);
+                environment.expect_load_data(sc_wb, 0);
                 const std::uint64_t requests_before_sc =
                     environment.tilelink_requests();
                 if (!environment.set_rob_head(sc.rob) ||
@@ -1828,7 +1837,7 @@ int run_atomic_dchannel_errors(int argc, char **argv)
                     environment.tilelink_requests() != requests_before_sc) {
                     std::cerr << "MEMBLOCK_ATOMIC_DCHANNEL_ERRORS_FAIL cycle="
                               << environment.cycle()
-                              << " phase=denied-lr-reservation op="
+                              << " phase=denied-sc-hit op="
                               << test_case.name << " reason="
                               << environment.error() << " dcache_requests="
                               << environment.tilelink_requests()
@@ -1836,13 +1845,13 @@ int run_atomic_dchannel_errors(int argc, char **argv)
                               << '\n';
                     return 1;
                 }
-                ++lr_reservation_checks;
+                ++sc_denied_hit_checks;
             } else if (corrupt && test_case.load_reserved) {
                 // SC cannot issue a D-channel request on a miss: it fails as
-                // soon as either the reservation or cache hit is absent.  A
-                // corrupt LR refill is retained without a reservation, making
-                // this the reachable SC error case: a hit on cached corrupt
-                // metadata must report hardwareError and perform no write.
+                // soon as either the reservation or cache hit is absent.  The
+                // corrupt LR refill is retained, making a following SC hit on
+                // cached corrupt metadata the reachable SC error case.  It
+                // must report hardwareError and perform no write.
                 const memblock::AtomicTransaction sc{
                     .address = atomic.address,
                     .op = test_case.word
@@ -1882,6 +1891,91 @@ int run_atomic_dchannel_errors(int argc, char **argv)
                 ++sc_corrupt_hit_checks;
             }
         }
+
+        // A clean AMO immediately after each complete error-kind matrix must
+        // not inherit AtomicsUnit exception state.  Use a new line so the AMO
+        // takes one cold request, then require an ordinary load to hit the
+        // updated line without further traffic.
+        const std::uint64_t recovery_line = base +
+            (cases.size() * 2 + error_kind) * 64;
+        const std::uint64_t recovery_address = recovery_line + 8;
+        const std::uint64_t recovery_operand =
+            0x5a5aa5a500000000ULL | error_kind;
+        environment.memory().fill_incrementing(
+            recovery_line, 64, static_cast<std::uint8_t>(0xc1U + error_kind));
+        const std::uint64_t recovery_old = environment.memory().expected_load(
+            recovery_address, memblock::LoadOp::ld);
+        const std::uint64_t recovery_rob_offset =
+            cases.size() * 2 * (error_kind + 1) + error_kind * 2;
+        const memblock::AtomicTransaction recovery_atomic{
+            .address = recovery_address,
+            .op = memblock::AtomicOp::amoswap_d,
+            .data = recovery_operand,
+            .rob = memblock::rob_pointer_value(recovery_rob_offset),
+            .rob_flag = memblock::rob_pointer_flag(recovery_rob_offset),
+            .pdest = static_cast<std::uint8_t>(200 + error_kind * 2),
+            .address_lane = error_kind & 1U,
+            .data_lane = error_kind & 1U,
+        };
+        const memblock::LoadTransaction recovery_wb{
+            .address = recovery_address,
+            .op = memblock::LoadOp::ld,
+            .rob = recovery_atomic.rob,
+            .rob_flag = recovery_atomic.rob_flag,
+            .pdest = recovery_atomic.pdest,
+            .lane = error_kind % 3,
+            .rf_wen = true,
+        };
+        environment.expect_load_data(recovery_wb, recovery_old);
+        const std::uint64_t requests_before_recovery =
+            environment.tilelink_requests();
+        if (!environment.set_rob_head(
+                recovery_atomic.rob, recovery_atomic.rob_flag) ||
+            !environment.issue_atomic(recovery_atomic, 1024) ||
+            !environment.run_until_complete(8192) ||
+            environment.tilelink_requests() != requests_before_recovery + 1) {
+            std::cerr << "MEMBLOCK_ATOMIC_DCHANNEL_ERRORS_FAIL cycle="
+                      << environment.cycle() << " phase="
+                      << (denied ? "denied" : "corrupt")
+                      << "-clean-recovery-atomic reason=" << environment.error()
+                      << " dcache_requests=" << environment.tilelink_requests()
+                      << " expected_requests=" << requests_before_recovery + 1
+                      << '\n';
+            return 1;
+        }
+
+        const std::uint64_t recovery_lq_offset =
+            cases.size() * (error_kind + 1) + error_kind;
+        const memblock::LoadTransaction recovery_readback{
+            .address = recovery_address,
+            .op = memblock::LoadOp::ld,
+            .rob = memblock::rob_pointer_value(recovery_rob_offset + 1),
+            .rob_flag = memblock::rob_pointer_flag(recovery_rob_offset + 1),
+            .lq = memblock::lq_pointer_value(recovery_lq_offset),
+            .lq_flag = memblock::lq_pointer_flag(recovery_lq_offset),
+            .pdest = static_cast<std::uint8_t>(201 + error_kind * 2),
+            .lane = (error_kind + 1) % 3,
+        };
+        environment.expect_load_data(recovery_readback, recovery_operand);
+        const std::uint64_t requests_before_recovery_readback =
+            environment.tilelink_requests();
+        if (!environment.set_rob_head(
+                recovery_readback.rob, recovery_readback.rob_flag) ||
+            !environment.enqueue_load(recovery_readback) ||
+            !environment.issue_load(recovery_readback, 1024) ||
+            !environment.run_until_complete(8192) ||
+            !environment.run_until_lq_retired(1024) ||
+            environment.tilelink_requests() != requests_before_recovery_readback) {
+            std::cerr << "MEMBLOCK_ATOMIC_DCHANNEL_ERRORS_FAIL cycle="
+                      << environment.cycle() << " phase="
+                      << (denied ? "denied" : "corrupt")
+                      << "-clean-recovery-readback reason=" << environment.error()
+                      << " dcache_requests=" << environment.tilelink_requests()
+                      << " expected_requests="
+                      << requests_before_recovery_readback << '\n';
+            return 1;
+        }
+        ++clean_recoveries;
     }
 
     std::cout << "MEMBLOCK_ATOMIC_DCHANNEL_ERRORS_PASS cycle="
@@ -1889,8 +1983,11 @@ int run_atomic_dchannel_errors(int argc, char **argv)
               << " denied_cases=" << denied_cases
               << " corrupt_cases=" << corrupt_cases
               << " readbacks=" << readbacks
-              << " lr_reservation_checks=" << lr_reservation_checks
+              << " denied_line_hits=" << denied_line_hits
+              << " corrupt_line_hits=" << corrupt_line_hits
+              << " sc_denied_hit_checks=" << sc_denied_hit_checks
               << " sc_corrupt_hit_checks=" << sc_corrupt_hit_checks
+              << " clean_recoveries=" << clean_recoveries
               << " tilelink_requests=" << environment.tilelink_requests()
               << " rtl_sha256="
               << memblock::generated::kRtlSha256 << '\n';

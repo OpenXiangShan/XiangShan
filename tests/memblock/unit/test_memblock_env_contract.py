@@ -178,10 +178,15 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             '" denied_cases="',
             '" corrupt_cases="',
             '" readbacks="',
-            '" lr_reservation_checks="',
+            '" denied_line_hits="',
+            '" corrupt_line_hits="',
+            '" sc_denied_hit_checks="',
             '" sc_corrupt_hit_checks="',
+            '" clean_recoveries="',
+            '"-clean-recovery-atomic reason="',
+            '"-clean-recovery-readback reason="',
             "SC cannot issue a D-channel request on a miss",
-            "check_data_on_exception = corrupt",
+            "Both denied and corrupt refills are installed as poisoned lines",
         ):
             self.assertIn(contract, main + makefile)
         self.assertIn("bool check_data_on_exception = false", environment)
