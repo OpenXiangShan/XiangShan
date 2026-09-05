@@ -88,9 +88,15 @@ trait HasBpuParameters extends HasFrontendParameters {
 
   // phr history
   def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =
-    bpuParameters.tageParameters.TableInfos.map {
-      _.getFoldedHistoryInfoSet(bpuParameters.tageParameters.NumBanks, bpuParameters.tageParameters.TagWidth)
-    }.reduce(_ ++ _) ++
+    bpuParameters.tageParameters.TableInfos.flatMap { info =>
+      val tage = bpuParameters.tageParameters
+      (tage.MinNumSetsLog2 to tage.MaxNumSetsLog2).flatMap { numSetsLog2 =>
+        (tage.MinTagWidth to tage.MaxTagWidth).flatMap { tagWidth =>
+          new TageTableInfo(numSetsLog2, info.NumWays, info.HistoryLength)
+            .getFoldedHistoryInfoSet(tagWidth)
+        }
+      }
+    }.toSet ++
       bpuParameters.ittageParameters.TableInfos.map {
         _.getFoldedHistoryInfoSet(bpuParameters.ittageParameters.TagWidth, bpuParameters.ittageParameters.NumBanks)
       }.reduce(_ ++ _) ++
