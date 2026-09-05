@@ -322,6 +322,37 @@ were unchanged across the run. The independently checked artifact is
 `build/memblock/spec-final-8x8192.json`, SHA-256
 `19bac99771d9da03dc6d6714150eb55dbed8735c0144328be1619dee5c0847d2`.
 
+### Frozen Eight-Hour SPEC Campaign Before Translation-Context Merge
+
+The frozen delivery harness at commit `e8ba63db9` completed a full duration
+campaign from 2026-09-05 17:57 to 2026-09-06 02:00 Asia/Shanghai. All 956
+continuous seeds passed with 16,384 `spec`-profile actions per seed: 15,663,104
+actions and 552,367,478 simulated cycles in 28,985.093764 seconds. Aggregate
+external traffic included 1,505,157 DCache TileLink requests, 295,803 PTW
+requests, 150,203 Uncache requests, 136,409 dirty ReleaseData beats, and
+276,214 TLB flushes. It also exercised 36,261 scalar misaligned accesses and
+956 vector replays; maximum DCache, PTW, and Uncache response latency was 400
+cycles and maximum scoreboard occupancy was seven.
+
+The frozen executable SHA-256 was
+`323cee26977a0d49b655750dd7d7ec9c35cd79c12abb404dd00400115998b6a8`.
+The complete RTL SHA-256 remained
+`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`,
+and every controller/runtime hash was unchanged. Direct invocation of the
+independent artifact verifier accepted seeds 1 through 956. The artifact is
+`build/memblock/spec-post-fence-final-8h-16384.json`, SHA-256
+`278e00031a03baeee1f2d98a5f806d55b37e4eb8674cbe1aecaa5de6e259cffa`.
+
+The composite `make verify-final-results` target stopped before this final
+artifact check because the separate build artifact
+`random-boundary-hunt.json` carries an older RTL hash. Its DCache release and
+known-bug sentinel prerequisites passed, and the exact final artifact command
+passed when run directly. This is stale prerequisite data, not an RTL failure.
+The campaign also predates the isolated random-translation, concurrent-walk,
+in-flight context, and canonical-boundary changes through `228840c8f`; after
+those controller changes are merged, a newly frozen campaign is still required
+for final acceptance of the merged harness.
+
 After the 57-case fault expansion, `random-mixed --seed 419 --transactions
 4096 --constraints spec` passed in 152,052 cycles. It mixed 2,467 loads, 1,011
 stores, 181 prefetches, vector traffic, atomics, MMIO/NC, translation faults,
@@ -839,11 +870,12 @@ split-vector, and randomized boundary controls now all report the exact oracle
 GPA. The clean-RTL failure remains in `CPU_BUG_VECTOR_GUEST_FAULT_SPLIT.md` as mutation
 evidence, while the repaired test is part of the green sentinel gate.
 
-The final acceptance section is populated only after the current eight-hour,
-16,384-action-per-seed
-frozen campaign has completed and `make verify-final-results` has independently
-validated its artifact. Historical baseline and mutation results above are
-retained as evidence and are not claims about the repaired RTL.
+The 2026-09-06 pre-merge eight-hour, 16,384-action-per-seed campaign passed its
+independent final artifact check. Because later translation controller changes
+alter the frozen harness, this remains provenance-complete pre-merge evidence;
+final acceptance of the merged harness requires a new freeze and campaign.
+Historical baseline and mutation results above remain evidence and are not
+claims about the repaired RTL.
 
 ## Historical Pre-Review Six-Hour Campaign
 
