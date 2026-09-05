@@ -553,13 +553,23 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             'argument == "--constraint"',
             "operation_weights",
             "locality_weights",
+            "atomic_family_weights",
+            "atomic_width_weights",
             "concurrent_actions_per_mille",
+            "special_concurrent_per_mille",
             "tlb_flushes_per_mille",
             "misaligned_per_mille",
             "vector_corner_per_mille",
+            "nc_stores_per_mille",
+            "mmio_stores_per_mille",
             "ConstraintCoverage",
             "target_ops=",
             "actual_ops=",
+            "actual_atomic_family=",
+            "actual_atomic_width=",
+            "actual_nc_direction=",
+            "actual_mmio_direction=",
+            "actual_special_concurrent=",
         ):
             self.assertIn(contract, driver)
         for key in (
@@ -571,19 +581,31 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "atomic",
             "nc",
             "mmio",
+            "atomic-amo",
+            "atomic-lrsc",
+            "atomic-cas",
+            "atomic-w",
+            "atomic-d",
             "locality-hot",
             "locality-warm",
             "locality-cold",
             "concurrent",
+            "special-concurrent",
             "tlb-flush",
             "misaligned",
             "vector-corner",
+            "nc-store",
+            "mmio-store",
             "latency",
+            "dcache-latency",
+            "ptw-latency",
+            "uncache-latency",
         ):
             self.assertIn('"' + key + '"', driver)
 
         for contract in (
             "enum class ResponseLatencyProfile",
+            "struct ResponseLatencyProfiles",
             "struct ResponseLatencyStats",
             "percentile < 7410",
             "percentile < 8853",
@@ -601,6 +623,21 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("LONG_CONSTRAINT_ARGS", makefile)
         self.assertIn("constraint_profile", runner)
         self.assertIn("constraint_overrides", runner)
+
+    def test_random_mixed_preserves_atomic_serialization_contract(self) -> None:
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        memblock = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/MemBlock.scala"
+        ).read_text()
+        concurrent_tail = driver[
+            driver.index('phase = "seeded-mixed-tail"'):
+            driver.index("const std::array<memblock::AtomicOp, 9>")
+        ]
+
+        self.assertIn("atomics insts (LR/SC/AMO) will block the pipeline", memblock)
+        self.assertIn("uses_concurrent_special_operations", concurrent_tail)
+        self.assertIn("RandomConstraints::noncacheable + index", concurrent_tail)
+        self.assertNotIn("issue_atomic", concurrent_tail)
 
     def test_vector_cross_16_misalignment_advances_rob_head(self) -> None:
         driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

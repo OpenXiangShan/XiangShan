@@ -80,15 +80,26 @@ struct RandomConstraints {
         operation_count,
     };
 
+    enum AtomicFamily : unsigned {
+        atomic_amo,
+        atomic_lrsc,
+        atomic_cas,
+        atomic_family_count,
+    };
+
     std::string name;
     std::array<unsigned, operation_count> operation_weights{};
     std::array<unsigned, 3> locality_weights{};
+    std::array<unsigned, atomic_family_count> atomic_family_weights{};
+    std::array<unsigned, 2> atomic_width_weights{};
     unsigned concurrent_actions_per_mille = 1000;
+    unsigned special_concurrent_per_mille = 0;
     unsigned tlb_flushes_per_mille = 0;
     unsigned misaligned_per_mille = 0;
     unsigned vector_corner_per_mille = 0;
-    memblock::ResponseLatencyProfile response_latency =
-        memblock::ResponseLatencyProfile::compact;
+    unsigned nc_stores_per_mille = 0;
+    unsigned mmio_stores_per_mille = 0;
+    memblock::ResponseLatencyProfiles response_latency{};
 
     static RandomConstraints preset(std::string_view name)
     {
@@ -97,11 +108,16 @@ struct RandomConstraints {
                 .name = "coverage",
                 .operation_weights = {200, 150, 150, 150, 100, 100, 75, 75},
                 .locality_weights = {250, 250, 500},
+                .atomic_family_weights = {8, 2, 2},
+                .atomic_width_weights = {1, 1},
                 .concurrent_actions_per_mille = 1000,
+                .special_concurrent_per_mille = 500,
                 .tlb_flushes_per_mille = 50,
                 .misaligned_per_mille = 500,
                 .vector_corner_per_mille = 1000,
-                .response_latency = memblock::ResponseLatencyProfile::compact,
+                .nc_stores_per_mille = 500,
+                .mmio_stores_per_mille = 500,
+                .response_latency = {},
             };
         }
         if (name == "spec") {
@@ -112,11 +128,19 @@ struct RandomConstraints {
                 .name = "spec",
                 .operation_weights = {650, 270, 20, 10, 35, 5, 5, 5},
                 .locality_weights = {800, 150, 50},
+                .atomic_family_weights = {90, 5, 5},
+                .atomic_width_weights = {1, 1},
                 .concurrent_actions_per_mille = 100,
+                .special_concurrent_per_mille = 20,
                 .tlb_flushes_per_mille = 20,
                 .misaligned_per_mille = 5,
                 .vector_corner_per_mille = 100,
-                .response_latency = memblock::ResponseLatencyProfile::spec,
+                .nc_stores_per_mille = 300,
+                .mmio_stores_per_mille = 300,
+                .response_latency = {
+                    memblock::ResponseLatencyProfile::spec,
+                    memblock::ResponseLatencyProfile::spec,
+                    memblock::ResponseLatencyProfile::spec},
             };
         }
         if (name == "corner") {
@@ -124,11 +148,19 @@ struct RandomConstraints {
                 .name = "corner",
                 .operation_weights = {125, 125, 125, 125, 125, 125, 125, 125},
                 .locality_weights = {100, 200, 700},
+                .atomic_family_weights = {1, 1, 1},
+                .atomic_width_weights = {1, 1},
                 .concurrent_actions_per_mille = 500,
+                .special_concurrent_per_mille = 750,
                 .tlb_flushes_per_mille = 100,
                 .misaligned_per_mille = 500,
                 .vector_corner_per_mille = 1000,
-                .response_latency = memblock::ResponseLatencyProfile::spec,
+                .nc_stores_per_mille = 500,
+                .mmio_stores_per_mille = 500,
+                .response_latency = {
+                    memblock::ResponseLatencyProfile::spec,
+                    memblock::ResponseLatencyProfile::spec,
+                    memblock::ResponseLatencyProfile::spec},
             };
         }
         throw std::invalid_argument(
@@ -146,15 +178,31 @@ struct RandomConstraints {
         }
         const std::string_view key = assignment.substr(0, separator);
         const std::string_view value = assignment.substr(separator + 1);
-        if (key == "latency") {
-            if (value == "compact") {
-                response_latency = memblock::ResponseLatencyProfile::compact;
-            } else if (value == "spec") {
-                response_latency = memblock::ResponseLatencyProfile::spec;
-            } else {
-                throw std::invalid_argument(
-                    "constraint latency must be compact or spec");
+        auto parse_latency = [&](std::string_view candidate) {
+            if (candidate == "compact") {
+                return memblock::ResponseLatencyProfile::compact;
             }
+            if (candidate == "spec") {
+                return memblock::ResponseLatencyProfile::spec;
+            }
+            throw std::invalid_argument(
+                "constraint latency must be compact or spec");
+        };
+        if (key == "latency") {
+            const auto profile = parse_latency(value);
+            response_latency = {profile, profile, profile};
+            return;
+        }
+        if (key == "dcache-latency") {
+            response_latency.dcache = parse_latency(value);
+            return;
+        }
+        if (key == "ptw-latency") {
+            response_latency.ptw = parse_latency(value);
+            return;
+        }
+        if (key == "uncache-latency") {
+            response_latency.uncache = parse_latency(value);
             return;
         }
 
@@ -177,6 +225,26 @@ struct RandomConstraints {
                 return;
             }
         }
+        const std::array<std::pair<std::string_view, AtomicFamily>,
+                         atomic_family_count> atomic_family_keys{{
+            {"atomic-amo", atomic_amo},
+            {"atomic-lrsc", atomic_lrsc},
+            {"atomic-cas", atomic_cas},
+        }};
+        for (const auto &[candidate, family] : atomic_family_keys) {
+            if (key == candidate) {
+                atomic_family_weights[family] = parsed;
+                return;
+            }
+        }
+        if (key == "atomic-w") {
+            atomic_width_weights[0] = parsed;
+            return;
+        }
+        if (key == "atomic-d") {
+            atomic_width_weights[1] = parsed;
+            return;
+        }
         if (key == "locality-hot") {
             locality_weights[0] = parsed;
         } else if (key == "locality-warm") {
@@ -185,12 +253,18 @@ struct RandomConstraints {
             locality_weights[2] = parsed;
         } else if (key == "concurrent") {
             concurrent_actions_per_mille = parsed;
+        } else if (key == "special-concurrent") {
+            special_concurrent_per_mille = parsed;
         } else if (key == "tlb-flush") {
             tlb_flushes_per_mille = parsed;
         } else if (key == "misaligned") {
             misaligned_per_mille = parsed;
         } else if (key == "vector-corner") {
             vector_corner_per_mille = parsed;
+        } else if (key == "nc-store") {
+            nc_stores_per_mille = parsed;
+        } else if (key == "mmio-store") {
+            mmio_stores_per_mille = parsed;
         } else {
             throw std::invalid_argument(
                 "unknown random constraint key: " + std::string(key));
@@ -209,11 +283,52 @@ struct RandomConstraints {
             throw std::invalid_argument(
                 "random locality constraint weights cannot all be zero");
         }
+        if (operation_weights[atomic] != 0 &&
+            std::accumulate(
+                atomic_family_weights.begin(), atomic_family_weights.end(),
+                0ULL) == 0) {
+            throw std::invalid_argument(
+                "atomic family constraint weights cannot all be zero");
+        }
+        if (operation_weights[atomic] != 0 &&
+            std::accumulate(
+                atomic_width_weights.begin(), atomic_width_weights.end(),
+                0ULL) == 0) {
+            throw std::invalid_argument(
+                "atomic width constraint weights cannot all be zero");
+        }
         if (concurrent_actions_per_mille > 1000 ||
+            special_concurrent_per_mille > 1000 ||
             tlb_flushes_per_mille > 1000 || misaligned_per_mille > 1000 ||
-            vector_corner_per_mille > 1000) {
+            vector_corner_per_mille > 1000 || nc_stores_per_mille > 1000 ||
+            mmio_stores_per_mille > 1000) {
             throw std::invalid_argument(
                 "per-mille random constraints must be in 0..1000");
+        }
+        if (response_latency.dcache == memblock::ResponseLatencyProfile::spec &&
+            !uses_dcache()) {
+            throw std::invalid_argument(
+                "dcache-latency=spec requires a cacheable operation weight");
+        }
+        if (response_latency.ptw == memblock::ResponseLatencyProfile::spec &&
+            tlb_flushes_per_mille == 0) {
+            throw std::invalid_argument(
+                "ptw-latency=spec requires a nonzero tlb-flush rate");
+        }
+        if (response_latency.uncache == memblock::ResponseLatencyProfile::spec &&
+            !uses_uncache()) {
+            throw std::invalid_argument(
+                "uncache-latency=spec requires a nonzero nc or mmio weight");
+        }
+        if (special_concurrent_per_mille != 0 &&
+            concurrent_actions_per_mille == 0) {
+            throw std::invalid_argument(
+                "special-concurrent requires a nonzero concurrent rate");
+        }
+        if (special_concurrent_per_mille != 0 &&
+            !uses_concurrent_special_operations()) {
+            throw std::invalid_argument(
+                "special-concurrent requires nc or mmio traffic");
         }
     }
 
@@ -245,6 +360,68 @@ struct RandomConstraints {
         return 0;
     }
 
+    unsigned choose_atomic_family(std::uint64_t random) const
+    {
+        return choose_weighted(atomic_family_weights, random);
+    }
+
+    unsigned choose_atomic_width(std::uint64_t random) const
+    {
+        return choose_weighted(atomic_width_weights, random);
+    }
+
+    unsigned choose_concurrent_special_operation(std::uint64_t random) const
+    {
+        const std::array<unsigned, 2> weights{{
+            operation_weights[noncacheable], operation_weights[mmio]}};
+        return noncacheable + choose_weighted(weights, random);
+    }
+
+    bool uses_concurrent_special_operations() const
+    {
+        return operation_weights[noncacheable] != 0 ||
+            operation_weights[mmio] != 0;
+    }
+
+    unsigned minimum_serial_actions() const
+    {
+        unsigned actions = 0;
+        for (unsigned operation = 0; operation < operation_count; ++operation) {
+            if (operation_weights[operation] == 0) {
+                continue;
+            }
+            if (operation == atomic) {
+                const unsigned families = static_cast<unsigned>(std::count_if(
+                    atomic_family_weights.begin(), atomic_family_weights.end(),
+                    [](unsigned weight) { return weight != 0; }));
+                const unsigned widths = static_cast<unsigned>(std::count_if(
+                    atomic_width_weights.begin(), atomic_width_weights.end(),
+                    [](unsigned weight) { return weight != 0; }));
+                actions += std::max(families, widths);
+            } else if (operation == noncacheable) {
+                actions += direction_classes(nc_stores_per_mille);
+            } else if (operation == mmio) {
+                actions += direction_classes(mmio_stores_per_mille);
+            } else {
+                ++actions;
+            }
+        }
+        return actions;
+    }
+
+    bool uses_dcache() const
+    {
+        return std::any_of(
+            operation_weights.begin(), operation_weights.begin() + noncacheable,
+            [](unsigned weight) { return weight != 0; });
+    }
+
+    bool uses_uncache() const
+    {
+        return operation_weights[noncacheable] != 0 ||
+            operation_weights[mmio] != 0;
+    }
+
     std::string summary() const
     {
         std::ostringstream stream;
@@ -254,14 +431,50 @@ struct RandomConstraints {
         }
         stream << " target_locality=" << locality_weights[0] << ','
                << locality_weights[1] << ',' << locality_weights[2]
+               << " target_atomic_family=" << atomic_family_weights[0] << ','
+               << atomic_family_weights[1] << ',' << atomic_family_weights[2]
+               << " target_atomic_width=" << atomic_width_weights[0] << ','
+               << atomic_width_weights[1]
                << " target_concurrent=" << concurrent_actions_per_mille
+               << " target_special_concurrent="
+               << special_concurrent_per_mille
                << " target_tlb_flush=" << tlb_flushes_per_mille
                << " target_misaligned=" << misaligned_per_mille
                << " target_vector_corner=" << vector_corner_per_mille
-               << " target_latency="
-               << (response_latency == memblock::ResponseLatencyProfile::compact
-                       ? "compact" : "spec");
+               << " target_nc_store=" << nc_stores_per_mille
+               << " target_mmio_store=" << mmio_stores_per_mille
+               << " target_latency=" << latency_name(response_latency.dcache)
+               << ',' << latency_name(response_latency.ptw) << ','
+               << latency_name(response_latency.uncache);
         return stream.str();
+    }
+
+private:
+    template <std::size_t N>
+    static unsigned choose_weighted(
+        const std::array<unsigned, N> &weights, std::uint64_t random)
+    {
+        const std::uint64_t total =
+            std::accumulate(weights.begin(), weights.end(), 0ULL);
+        std::uint64_t selection = random % total;
+        for (unsigned index = 0; index < weights.size(); ++index) {
+            if (selection < weights[index]) {
+                return index;
+            }
+            selection -= weights[index];
+        }
+        return 0;
+    }
+
+    static unsigned direction_classes(unsigned stores_per_mille)
+    {
+        return stores_per_mille == 0 || stores_per_mille == 1000 ? 1 : 2;
+    }
+
+    static const char *latency_name(memblock::ResponseLatencyProfile profile)
+    {
+        return profile == memblock::ResponseLatencyProfile::compact
+            ? "compact" : "spec";
     }
 };
 
@@ -414,6 +627,14 @@ struct VectorCoverage {
 struct ConstraintCoverage {
     std::array<std::uint64_t, RandomConstraints::operation_count> operations{};
     std::array<std::uint64_t, 3> locality{};
+    std::array<std::uint64_t, RandomConstraints::atomic_family_count>
+        atomic_families{};
+    std::array<std::uint64_t, 2> atomic_widths{};
+    std::array<std::uint64_t, 2> nc_directions{};
+    std::array<std::uint64_t, 2> mmio_directions{};
+    // Atomic operations are pipeline-serializing at the MemBlock boundary;
+    // only NC and MMIO traffic can be added to a legal mixed issue window.
+    std::array<std::uint64_t, 2> special_concurrent{};
     std::uint64_t tlb_flushes = 0;
     std::uint64_t dcache_hits = 0;
     std::uint64_t dcache_misses = 0;
@@ -431,13 +652,47 @@ struct ConstraintCoverage {
         ++(requests_after == requests_before ? dcache_hits : dcache_misses);
     }
 
+    bool operation_complete(
+        const RandomConstraints &constraints, unsigned operation) const
+    {
+        if (constraints.operation_weights[operation] == 0) {
+            return true;
+        }
+        if (operation == RandomConstraints::atomic) {
+            const bool families_complete = std::equal(
+                constraints.atomic_family_weights.begin(),
+                constraints.atomic_family_weights.end(),
+                atomic_families.begin(), [](unsigned weight, std::uint64_t count) {
+                    return weight == 0 || count != 0;
+                });
+            const bool widths_complete = std::equal(
+                constraints.atomic_width_weights.begin(),
+                constraints.atomic_width_weights.end(), atomic_widths.begin(),
+                [](unsigned weight, std::uint64_t count) {
+                    return weight == 0 || count != 0;
+                });
+            return operations[operation] != 0 && families_complete &&
+                widths_complete;
+        }
+        if (operation == RandomConstraints::noncacheable) {
+            return operations[operation] != 0 && direction_complete(
+                constraints.nc_stores_per_mille, nc_directions);
+        }
+        if (operation == RandomConstraints::mmio) {
+            return operations[operation] != 0 && direction_complete(
+                constraints.mmio_stores_per_mille, mmio_directions);
+        }
+        return operations[operation] != 0;
+    }
+
     bool complete(
         const RandomConstraints &constraints, bool backpressure,
-        const memblock::ResponseLatencyStats &latency) const
+        const memblock::ResponseLatencyStats &dcache_latency,
+        const memblock::ResponseLatencyStats &ptw_latency,
+        const memblock::ResponseLatencyStats &uncache_latency) const
     {
         for (std::size_t index = 0; index < operations.size(); ++index) {
-            if (constraints.operation_weights[index] != 0 &&
-                operations[index] == 0) {
+            if (!operation_complete(constraints, index)) {
                 return false;
             }
         }
@@ -450,19 +705,42 @@ struct ConstraintCoverage {
         if (constraints.tlb_flushes_per_mille != 0 && tlb_flushes == 0) {
             return false;
         }
-        if (backpressure &&
-            constraints.response_latency == memblock::ResponseLatencyProfile::spec) {
-            return latency.samples >= latency.buckets.size() &&
-                std::all_of(
-                    latency.buckets.begin(), latency.buckets.end(),
-                    [](auto samples) { return samples != 0; });
+        if (constraints.special_concurrent_per_mille != 0) {
+            for (unsigned index = 0; index < special_concurrent.size(); ++index) {
+                if (constraints.operation_weights[
+                        RandomConstraints::noncacheable + index] != 0 &&
+                    special_concurrent[index] == 0) {
+                    return false;
+                }
+            }
+        }
+        if (backpressure) {
+            const auto complete_latency = [](
+                memblock::ResponseLatencyProfile profile,
+                const memblock::ResponseLatencyStats &latency) {
+                return profile != memblock::ResponseLatencyProfile::spec ||
+                    (latency.samples >= latency.buckets.size() &&
+                     std::all_of(
+                         latency.buckets.begin(), latency.buckets.end(),
+                         [](auto samples) { return samples != 0; }));
+            };
+            if (!complete_latency(
+                    constraints.response_latency.dcache, dcache_latency) ||
+                !complete_latency(
+                    constraints.response_latency.ptw, ptw_latency) ||
+                !complete_latency(
+                    constraints.response_latency.uncache, uncache_latency)) {
+                return false;
+            }
         }
         return actions != 0;
     }
 
     std::string summary(
         const RandomConstraints &constraints,
-        const memblock::ResponseLatencyStats &latency) const
+        const memblock::ResponseLatencyStats &dcache_latency,
+        const memblock::ResponseLatencyStats &ptw_latency,
+        const memblock::ResponseLatencyStats &uncache_latency) const
     {
         std::ostringstream stream;
         stream << constraints.summary() << " actual_ops=";
@@ -470,14 +748,49 @@ struct ConstraintCoverage {
             stream << (index == 0 ? "" : ",") << operations[index];
         }
         stream << " actual_locality=" << locality[0] << ',' << locality[1]
-               << ',' << locality[2] << " actual_tlb_flush=" << tlb_flushes
+               << ',' << locality[2]
+               << " actual_atomic_family=" << atomic_families[0] << ','
+               << atomic_families[1] << ',' << atomic_families[2]
+               << " actual_atomic_width=" << atomic_widths[0] << ','
+               << atomic_widths[1]
+               << " actual_nc_direction=" << nc_directions[0] << ','
+               << nc_directions[1]
+               << " actual_mmio_direction=" << mmio_directions[0] << ','
+               << mmio_directions[1]
+               << " actual_special_concurrent=" << special_concurrent[0] << ','
+               << special_concurrent[1]
+               << " actual_tlb_flush=" << tlb_flushes
                << " actual_dcache=" << dcache_hits << ',' << dcache_misses
-               << " latency_samples=" << latency.samples
-               << " latency_buckets=" << latency.buckets[0] << ','
+               << latency_summary("dcache_latency", dcache_latency)
+               << latency_summary("ptw_latency", ptw_latency)
+               << latency_summary("uncache_latency", uncache_latency);
+        return stream.str();
+    }
+
+private:
+    static bool direction_complete(
+        unsigned stores_per_mille,
+        const std::array<std::uint64_t, 2> &directions)
+    {
+        if (stores_per_mille == 0) {
+            return directions[0] != 0;
+        }
+        if (stores_per_mille == 1000) {
+            return directions[1] != 0;
+        }
+        return directions[0] != 0 && directions[1] != 0;
+    }
+
+    static std::string latency_summary(
+        const char *name, const memblock::ResponseLatencyStats &latency)
+    {
+        std::ostringstream stream;
+        stream << ' ' << name << "_samples=" << latency.samples
+               << ' ' << name << "_buckets=" << latency.buckets[0] << ','
                << latency.buckets[1] << ',' << latency.buckets[2] << ','
                << latency.buckets[3]
-               << " latency_total=" << latency.total_cycles
-               << " latency_max=" << latency.max_cycles;
+               << ' ' << name << "_total=" << latency.total_cycles
+               << ' ' << name << "_max=" << latency.max_cycles;
         return stream.str();
     }
 };
@@ -7561,7 +7874,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         return base + offset;
     };
     const unsigned constrained_completion_timeout =
-        constraints.response_latency == memblock::ResponseLatencyProfile::spec
+        constraints.response_latency.dcache == memblock::ResponseLatencyProfile::spec ||
+        constraints.response_latency.ptw == memblock::ResponseLatencyProfile::spec ||
+        constraints.response_latency.uncache == memblock::ResponseLatencyProfile::spec
         ? 16384 : 2048;
     auto issue_load = [&](const memblock::LoadTransaction &transaction,
                           std::optional<std::uint64_t> expected = std::nullopt) {
@@ -7645,9 +7960,43 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         const std::uint64_t raw = data & mask;
         return is_unsigned ? raw : memblock::sign_extend(raw, bits);
     };
+    auto atomic_writeback = [](std::uint64_t old_value, bool word) {
+        return word
+            ? memblock::sign_extend(static_cast<std::uint32_t>(old_value), 32)
+            : old_value;
+    };
     auto atomic_result = [](memblock::AtomicOp op, std::uint64_t old_value,
                             std::uint64_t operand) {
+        const auto replace_word = [&](std::uint32_t value) {
+            return (old_value & ~std::uint64_t{0xffffffff}) | value;
+        };
+        const std::uint32_t old_word = static_cast<std::uint32_t>(old_value);
+        const std::uint32_t operand_word = static_cast<std::uint32_t>(operand);
         switch (op) {
+        case memblock::AtomicOp::amoadd_w:
+            return replace_word(old_word + operand_word);
+        case memblock::AtomicOp::amoxor_w:
+            return replace_word(old_word ^ operand_word);
+        case memblock::AtomicOp::amoand_w:
+            return replace_word(old_word & operand_word);
+        case memblock::AtomicOp::amoor_w:
+            return replace_word(old_word | operand_word);
+        case memblock::AtomicOp::amoswap_w:
+            return replace_word(operand_word);
+        case memblock::AtomicOp::amomin_w:
+            return replace_word(
+                static_cast<std::int32_t>(old_word) <
+                        static_cast<std::int32_t>(operand_word)
+                    ? old_word : operand_word);
+        case memblock::AtomicOp::amomax_w:
+            return replace_word(
+                static_cast<std::int32_t>(old_word) >
+                        static_cast<std::int32_t>(operand_word)
+                    ? old_word : operand_word);
+        case memblock::AtomicOp::amominu_w:
+            return replace_word(std::min(old_word, operand_word));
+        case memblock::AtomicOp::amomaxu_w:
+            return replace_word(std::max(old_word, operand_word));
         case memblock::AtomicOp::amoadd_d:
             return old_value + operand;
         case memblock::AtomicOp::amoxor_d:
@@ -8616,14 +8965,15 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         const unsigned minimum_concurrent_actions =
             constraints.concurrent_actions_per_mille == 0
             ? 0
-            : std::min(28U, available_tail_actions);
+            : std::min(
+                  constraints.special_concurrent_per_mille != 0 &&
+                          constraints.uses_concurrent_special_operations()
+                      ? 32U : 28U,
+                  available_tail_actions);
         const unsigned concurrent_action_budget = std::max(
             requested_concurrent_actions, minimum_concurrent_actions);
-        const unsigned constrained_floor_actions = static_cast<unsigned>(
-            std::count_if(
-                constraints.operation_weights.begin(),
-                constraints.operation_weights.end(),
-                [](unsigned weight) { return weight != 0; }));
+        const unsigned constrained_floor_actions =
+            constraints.minimum_serial_actions();
         const unsigned maximum_concurrent_limit =
             target_before_redirect -
             std::min(constrained_floor_actions, available_tail_actions);
@@ -8637,6 +8987,41 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.tilelink_requests();
             const std::uint64_t window_base =
                 constrained_cacheable_address(64) & ~std::uint64_t{63};
+            std::optional<unsigned> special_kind;
+            if (actions + 8 <= concurrent_action_limit &&
+                constraints.special_concurrent_per_mille != 0 &&
+                constraints.uses_concurrent_special_operations()) {
+                for (unsigned index = 0;
+                     index < constraint_coverage.special_concurrent.size();
+                     ++index) {
+                    if (constraints.operation_weights[
+                            RandomConstraints::noncacheable + index] != 0 &&
+                        constraint_coverage.special_concurrent[index] == 0) {
+                        special_kind = RandomConstraints::noncacheable + index;
+                        break;
+                    }
+                }
+                if (!special_kind &&
+                    random() % 1000 <
+                        constraints.special_concurrent_per_mille) {
+                    special_kind =
+                        constraints.choose_concurrent_special_operation(random());
+                }
+            }
+            std::optional<memblock::LoadTransaction> special_load;
+            if (special_kind == RandomConstraints::noncacheable) {
+                special_load = make_load(
+                    nc_base + (random() % 128) * 8,
+                    memblock::LoadOp::ld, random() % 3);
+            } else if (special_kind == RandomConstraints::mmio) {
+                const std::uint64_t offset = (random() % 128) * 8;
+                special_load = make_load(
+                    mmio_virtual + offset, memblock::LoadOp::ld, random() % 3);
+                special_load->oracle_address = mmio_physical + offset;
+                special_load->expected_debug_is_mmio = true;
+                special_load->expected_debug_is_ncio = false;
+                special_load->expected_debug_is_perf_cnt = false;
+            }
             const bool vector_corner =
                 random() % 1000 < constraints.vector_corner_per_mille;
             const auto required_load_mode = static_cast<memblock::VectorAddressingMode>(
@@ -8712,18 +9097,38 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 phase = window.str();
             }
 
+            if (special_load) {
+                environment.expect_load(*special_load);
+            }
             environment.expect_load(scalar);
             environment.expect_vector(vector_load);
             environment.expect_store(scalar_store);
             environment.expect_vector(vector_store);
             environment.expect_prefetch(prefetch);
-            if (!environment.enqueue_load(scalar) ||
+            if ((special_load && !environment.enqueue_load(*special_load)) ||
+                !environment.enqueue_load(scalar) ||
                 !environment.enqueue_vector(vector_load) ||
                 !environment.enqueue_store(
                     scalar_store, memblock::lq_pointer_value(lq_offset)) ||
                 !environment.enqueue_vector(vector_store) ||
                 !environment.enqueue_prefetch(prefetch)) {
                 return false;
+            }
+
+            if (special_load) {
+                const bool mmio = special_kind == RandomConstraints::mmio;
+                const std::uint64_t uncache_before =
+                    environment.uncache_requests();
+                if ((mmio && !environment.set_rob_head(
+                                 special_load->rob, special_load->rob_flag)) ||
+                    !environment.issue_load(*special_load, 2048) ||
+                    (mmio && !environment.wait_for_mmio_request(
+                                 special_load->rob, special_load->rob_flag,
+                                 8192)) ||
+                    (mmio && !environment.run_until_uncache_requests(
+                                 uncache_before + 1, 8192))) {
+                    return false;
+                }
             }
 
             std::array<unsigned, 5> issue_order{{0, 1, 2, 3, 4}};
@@ -8741,7 +9146,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     std::iter_swap(vector_position, scalar_position);
                 }
             }
-            if (!environment.run_cycles(random_delay(0, 3))) {
+            if (!environment.run_cycles(
+                    special_kind ? 0 : random_delay(0, 3))) {
                 return false;
             }
             bool scalar_store_data_first = false;
@@ -8831,6 +9237,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 !environment.run_until_queues_retired(4096)) {
                 return false;
             }
+            if (special_load) {
+                coverage.sample(*special_load);
+            }
             const auto scalar_readback = make_load(
                 scalar_store.address,
                 static_cast<memblock::LoadOp>(scalar_store.op), random() % 3);
@@ -8878,7 +9287,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 return false;
             }
             ++coverage.concurrent_windows;
-            coverage.concurrent_actions += 7;
+            coverage.concurrent_actions += special_kind ? 8 : 7;
             for (auto &count : coverage.concurrent_ops) {
                 ++count;
             }
@@ -8888,12 +9297,25 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             ++constraint_coverage.operations[RandomConstraints::vector_store];
             ++constraint_coverage.operations[RandomConstraints::prefetch];
             constraint_coverage.actions += 7;
+            if (special_kind) {
+                const unsigned special_index =
+                    *special_kind - RandomConstraints::noncacheable;
+                ++constraint_coverage.special_concurrent[special_index];
+                constraint_coverage.sample_operation(*special_kind);
+                auto &directions = *special_kind ==
+                        RandomConstraints::noncacheable
+                    ? constraint_coverage.nc_directions
+                    : constraint_coverage.mmio_directions;
+                ++directions[0];
+                ++coverage.noncacheable;
+                ++actions;
+            }
             constraint_coverage.sample_dcache(
                 requests_at_window_start, environment.tilelink_requests());
             actions += 5;
             coverage.cacheable += 7;
         }
-        const std::array<memblock::AtomicOp, 9> atomic_operations{{
+        const std::array<memblock::AtomicOp, 9> atomic_operations_d{{
             memblock::AtomicOp::amoadd_d,
             memblock::AtomicOp::amoxor_d,
             memblock::AtomicOp::amoand_d,
@@ -8903,6 +9325,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             memblock::AtomicOp::amomax_d,
             memblock::AtomicOp::amominu_d,
             memblock::AtomicOp::amomaxu_d,
+        }};
+        const std::array<memblock::AtomicOp, 9> atomic_operations_w{{
+            memblock::AtomicOp::amoadd_w,
+            memblock::AtomicOp::amoxor_w,
+            memblock::AtomicOp::amoand_w,
+            memblock::AtomicOp::amoor_w,
+            memblock::AtomicOp::amoswap_w,
+            memblock::AtomicOp::amomin_w,
+            memblock::AtomicOp::amomax_w,
+            memblock::AtomicOp::amominu_w,
+            memblock::AtomicOp::amomaxu_w,
         }};
         std::array<std::uint64_t, 16> atomic_values{};
         for (std::size_t slot = 0; slot < atomic_values.size(); ++slot) {
@@ -8915,13 +9348,34 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             for (unsigned candidate = 0;
                  candidate < RandomConstraints::operation_count; ++candidate) {
                 if (constraints.operation_weights[candidate] != 0 &&
-                    constraint_coverage.operations[candidate] == 0) {
+                    !constraint_coverage.operation_complete(
+                        constraints, candidate)) {
                     kind = candidate;
                     break;
                 }
             }
-            const bool nc_store = kind == RandomConstraints::noncacheable &&
-                (random() & 3U) == 0;
+            bool nc_store = kind == RandomConstraints::noncacheable &&
+                random() % 1000 < constraints.nc_stores_per_mille;
+            if (kind == RandomConstraints::noncacheable) {
+                if (constraints.nc_stores_per_mille != 1000 &&
+                    constraint_coverage.nc_directions[0] == 0) {
+                    nc_store = false;
+                } else if (constraints.nc_stores_per_mille != 0 &&
+                           constraint_coverage.nc_directions[1] == 0) {
+                    nc_store = true;
+                }
+            }
+            bool mmio_store = kind == RandomConstraints::mmio &&
+                random() % 1000 < constraints.mmio_stores_per_mille;
+            if (kind == RandomConstraints::mmio) {
+                if (constraints.mmio_stores_per_mille != 1000 &&
+                    constraint_coverage.mmio_directions[0] == 0) {
+                    mmio_store = false;
+                } else if (constraints.mmio_stores_per_mille != 0 &&
+                           constraint_coverage.mmio_directions[1] == 0) {
+                    mmio_store = true;
+                }
+            }
             const bool can_tlb_flush =
                 kind == RandomConstraints::scalar_load ||
                 kind == RandomConstraints::scalar_store ||
@@ -9013,29 +9467,110 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::atomic) {
                 const std::size_t slot = random() % atomic_values.size();
-                const auto op = atomic_operations[random() % atomic_operations.size()];
-                const std::uint64_t operand = random();
-                const auto transaction = make_atomic(
-                    atomic_base + slot * 64, op, operand);
-                const memblock::LoadTransaction old_value_writeback{
-                    .address = transaction.address,
-                    .op = memblock::LoadOp::ld,
-                    .rob = transaction.rob,
-                    .rob_flag = transaction.rob_flag,
-                    .pdest = transaction.pdest,
-                    .lane = 0,
-                    .rf_wen = true,
-                };
-                environment.expect_load_data(
-                    old_value_writeback, atomic_values[slot]);
-                if (!environment.issue_atomic(transaction, 4096) ||
-                    !environment.run_until_complete(16384)) {
-                    return false;
+                unsigned family = constraints.choose_atomic_family(random());
+                for (unsigned candidate = 0;
+                     candidate < RandomConstraints::atomic_family_count;
+                     ++candidate) {
+                    if (constraints.atomic_family_weights[candidate] != 0 &&
+                        constraint_coverage.atomic_families[candidate] == 0) {
+                        family = candidate;
+                        break;
+                    }
                 }
-                atomic_values[slot] = atomic_result(
-                    op, atomic_values[slot], operand);
+                unsigned width = constraints.choose_atomic_width(random());
+                for (unsigned candidate = 0; candidate < 2; ++candidate) {
+                    if (constraints.atomic_width_weights[candidate] != 0 &&
+                        constraint_coverage.atomic_widths[candidate] == 0) {
+                        width = candidate;
+                        break;
+                    }
+                }
+                const bool word = width == 0;
+                const std::uint64_t operand = random();
+                const std::uint64_t address = atomic_base + slot * 64;
+                const auto expect_atomic_writeback = [&](const auto &transaction,
+                                                         std::uint64_t value) {
+                    const memblock::LoadTransaction writeback{
+                        .address = transaction.address,
+                        .op = memblock::LoadOp::ld,
+                        .rob = transaction.rob,
+                        .rob_flag = transaction.rob_flag,
+                        .pdest = transaction.pdest,
+                        .lane = 0,
+                        .rf_wen = true,
+                    };
+                    environment.expect_load_data(writeback, value);
+                };
+                if (family == RandomConstraints::atomic_amo) {
+                    const auto &operations =
+                        word ? atomic_operations_w : atomic_operations_d;
+                    const auto op = operations[random() % operations.size()];
+                    const auto transaction = make_atomic(address, op, operand);
+                    expect_atomic_writeback(
+                        transaction, atomic_writeback(atomic_values[slot], word));
+                    if (!environment.issue_atomic(transaction, 4096) ||
+                        !environment.run_until_complete(
+                            constrained_completion_timeout)) {
+                        return false;
+                    }
+                    atomic_values[slot] = atomic_result(
+                        op, atomic_values[slot], operand);
+                } else if (family == RandomConstraints::atomic_cas) {
+                    auto transaction = make_atomic(
+                        address,
+                        word ? memblock::AtomicOp::amocas_w
+                             : memblock::AtomicOp::amocas_d,
+                        operand);
+                    const bool compare_match = (random() & 1U) != 0;
+                    const std::uint64_t old_value = atomic_values[slot];
+                    transaction.compare = compare_match
+                        ? old_value : old_value ^ 1U;
+                    expect_atomic_writeback(
+                        transaction, atomic_writeback(old_value, word));
+                    if (!environment.issue_atomic(transaction, 4096) ||
+                        !environment.run_until_complete(
+                            constrained_completion_timeout)) {
+                        return false;
+                    }
+                    if (compare_match) {
+                        atomic_values[slot] = word
+                            ? ((old_value & ~std::uint64_t{0xffffffff}) |
+                               static_cast<std::uint32_t>(operand))
+                            : operand;
+                    }
+                } else {
+                    const auto lr = make_atomic(
+                        address,
+                        word ? memblock::AtomicOp::lr_w
+                             : memblock::AtomicOp::lr_d,
+                        0);
+                    expect_atomic_writeback(
+                        lr, atomic_writeback(atomic_values[slot], word));
+                    if (!environment.issue_atomic(lr, 4096) ||
+                        !environment.run_until_complete(
+                            constrained_completion_timeout)) {
+                        return false;
+                    }
+                    const auto sc = make_atomic(
+                        address,
+                        word ? memblock::AtomicOp::sc_w
+                             : memblock::AtomicOp::sc_d,
+                        operand);
+                    expect_atomic_writeback(sc, 0);
+                    if (!environment.issue_atomic(sc, 4096) ||
+                        !environment.run_until_complete(
+                            constrained_completion_timeout)) {
+                        return false;
+                    }
+                    atomic_values[slot] = word
+                        ? ((atomic_values[slot] & ~std::uint64_t{0xffffffff}) |
+                           static_cast<std::uint32_t>(operand))
+                        : operand;
+                }
                 environment.record_atomic_result(
-                    transaction.address, atomic_values[slot]);
+                    address, atomic_values[slot]);
+                ++constraint_coverage.atomic_families[family];
+                ++constraint_coverage.atomic_widths[width];
                 ++actions;
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::noncacheable) {
@@ -9058,32 +9593,79 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         return false;
                     }
                 }
+                ++constraint_coverage.nc_directions[nc_store ? 1 : 0];
                 ++coverage.noncacheable;
             } else {
                 const std::uint64_t offset = (random() % 128) * 8;
-                auto transaction = make_load(
-                    mmio_virtual + offset, memblock::LoadOp::ld, random() % 3);
-                transaction.oracle_address = mmio_physical + offset;
-                transaction.expected_debug_is_mmio = true;
-                transaction.expected_debug_is_ncio = false;
-                transaction.expected_debug_is_perf_cnt = false;
-                const std::uint64_t uncache_before =
-                    environment.uncache_requests();
-                environment.expect_load(transaction);
-                if (!environment.set_rob_head(
-                        transaction.rob, transaction.rob_flag) ||
-                    !environment.enqueue_load(transaction) ||
-                    !environment.issue_load(transaction, 4096) ||
-                    !environment.wait_for_mmio_request(
-                        transaction.rob, transaction.rob_flag, 8192) ||
-                    !environment.run_until_uncache_requests(
-                        uncache_before + 1, 8192) ||
-                    !environment.run_until_complete(16384) ||
-                    !environment.run_until_lq_retired(8192)) {
-                    return false;
+                if (!mmio_store) {
+                    auto transaction = make_load(
+                        mmio_virtual + offset, memblock::LoadOp::ld, random() % 3);
+                    transaction.oracle_address = mmio_physical + offset;
+                    transaction.expected_debug_is_mmio = true;
+                    transaction.expected_debug_is_ncio = false;
+                    transaction.expected_debug_is_perf_cnt = false;
+                    const std::uint64_t uncache_before =
+                        environment.uncache_requests();
+                    environment.expect_load(transaction);
+                    if (!environment.set_rob_head(
+                            transaction.rob, transaction.rob_flag) ||
+                        !environment.enqueue_load(transaction) ||
+                        !environment.issue_load(transaction, 4096) ||
+                        !environment.wait_for_mmio_request(
+                            transaction.rob, transaction.rob_flag, 8192) ||
+                        !environment.run_until_uncache_requests(
+                            uncache_before + 1, 8192) ||
+                        !environment.run_until_complete(
+                            constrained_completion_timeout) ||
+                        !environment.run_until_lq_retired(8192)) {
+                        return false;
+                    }
+                    coverage.sample(transaction);
+                } else {
+                    auto transaction = make_store(
+                        mmio_virtual + offset, random(), memblock::StoreOp::sd,
+                        random() % 2, random() % 2);
+                    transaction.oracle_address = mmio_physical + offset;
+                    transaction.expected_debug_is_mmio = false;
+                    transaction.expected_debug_is_ncio = false;
+                    const std::uint64_t uncache_before =
+                        environment.uncache_requests();
+                    environment.expect_store(transaction);
+                    const bool prepared_mmio_store = environment.set_rob_head(
+                        transaction.rob, transaction.rob_flag);
+                    if (!prepared_mmio_store ||
+                        !environment.enqueue_store(
+                            transaction, memblock::lq_pointer_value(lq_offset)) ||
+                        !environment.issue_store_address(transaction, 4096) ||
+                        !environment.run_cycles(256) ||
+                        !environment.issue_store_address(transaction, 4096) ||
+                        !environment.issue_store_data(transaction, 4096) ||
+                        !environment.run_cycles(64) ||
+                        (environment.uncache_requests() == uncache_before &&
+                         !environment.wait_for_mmio_store_request(
+                             transaction.rob, transaction.rob_flag, 8192)) ||
+                        !environment.run_until_uncache_requests(
+                            uncache_before + 1, 8192) ||
+                        !environment.run_until_store_complete(
+                            constrained_completion_timeout) ||
+                        !environment.commit_stores_through(transaction, 1) ||
+                        !environment.run_cycles(16)) {
+                        std::ostringstream detail;
+                        detail << "mmio-store"
+                               << ":tlb_feedbacks="
+                               << environment.store_tlb_feedbacks()
+                               << ":tlb_misses=" << environment.store_tlb_misses()
+                               << ":uncache=" << environment.uncache_requests()
+                               << ":store_mmio_valid="
+                               << environment.store_mmio_valid();
+                        phase = detail.str();
+                        return false;
+                    }
+                    environment.record_committed_store(transaction);
+                    coverage.sample(transaction, false);
                 }
-                coverage.sample(transaction);
                 ++actions;
+                ++constraint_coverage.mmio_directions[mmio_store ? 1 : 0];
                 ++coverage.noncacheable;
                 sample_dcache = false;
             }
@@ -9152,7 +9734,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 constraints.concurrent_actions_per_mille != 0) ||
             !constraint_coverage.complete(
                 constraints, options.backpressure,
-                environment.dcache_response_latency_stats()) ||
+                environment.dcache_response_latency_stats(),
+                environment.ptw_response_latency_stats(),
+                environment.uncache_response_latency_stats()) ||
             !coverage.backpressure_complete(options.backpressure)) {
             phase = "coverage-gates";
             return false;
@@ -9182,7 +9766,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   << ' ' << coverage.summary() << ' '
                   << constraint_coverage.summary(
                          constraints,
-                         environment.dcache_response_latency_stats())
+                         environment.dcache_response_latency_stats(),
+                         environment.ptw_response_latency_stats(),
+                         environment.uncache_response_latency_stats())
                   << '\n';
         return 1;
     }
@@ -9210,7 +9796,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
               << environment.sq_allocated()
               << ' ' << coverage.summary() << ' '
               << constraint_coverage.summary(
-                     constraints, environment.dcache_response_latency_stats())
+                     constraints, environment.dcache_response_latency_stats(),
+                     environment.ptw_response_latency_stats(),
+                     environment.uncache_response_latency_stats())
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

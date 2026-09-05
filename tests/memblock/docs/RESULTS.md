@@ -224,7 +224,23 @@ parameters and verifies the independent Sv39x4 GPA oracle.
 
 Latest focused correction evidence:
 
-- 104 Python unit tests and the complete port/SVA/filelist checks pass;
+- 109 Python unit tests and the complete port/SVA/filelist checks pass;
+- after making mixed-window scalar addresses obey `misaligned` and supplying
+  the required ROB-head pulse for the rare cross-page store, the exact former
+  timeout command (`random-mixed --seed 42 --transactions 16384 --constraints
+  spec`) passed 16,384 actions in 582,384 cycles. It observed 40 misaligned
+  scalar loads and 17 misaligned scalar stores, including one split-store
+  sample, rather than the window's previous unconstrained byte offsets;
+- the expanded common constraint interface passed 256-action `coverage`,
+  `corner`, and `spec` seeds. Every run covered enabled AMO/LRSC/AMOCAS families,
+  W/D widths, NC/MMIO load/store directions, legal NC/MMIO overlap, and all
+  required manager-latency buckets. Isolated NC-only and MMIO-only overlap runs
+  also passed; an atomic-only request for `special-concurrent` was rejected
+  before reset because atomics are pipeline-serializing at this boundary;
+- an independent-latency run with DCache=`spec` and PTW/Uncache=`compact`
+  observed DCache buckets `60,8,5,5` while both other managers stayed in their
+  compact bucket. A separate constrained seed enabling only LR/SC.W within the
+  atomic class observed exactly that family and width and passed;
 - the common constrained-random interface passed an override run whose tail
   enabled only scalar loads (`seed=29`, 256 actions): actual constrained
   operations were `155,0,0,0,0,0,0,0`, and all 155 locality selections used

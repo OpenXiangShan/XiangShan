@@ -834,6 +834,12 @@ enum class ResponseLatencyProfile {
     spec,
 };
 
+struct ResponseLatencyProfiles {
+    ResponseLatencyProfile dcache = ResponseLatencyProfile::compact;
+    ResponseLatencyProfile ptw = ResponseLatencyProfile::compact;
+    ResponseLatencyProfile uncache = ResponseLatencyProfile::compact;
+};
+
 struct ResponseLatencyStats {
     std::array<std::uint64_t, 4> buckets{};
     std::uint64_t samples = 0;
@@ -2532,11 +2538,22 @@ public:
         std::uint64_t seed, bool enabled,
         ResponseLatencyProfile latency_profile = ResponseLatencyProfile::compact)
     {
-        memory_agent_.configure_backpressure(seed, enabled, latency_profile);
+        configure_backpressure(
+            seed, enabled,
+            ResponseLatencyProfiles{
+                latency_profile, latency_profile, latency_profile});
+    }
+
+    void configure_backpressure(
+        std::uint64_t seed, bool enabled,
+        const ResponseLatencyProfiles &latency_profiles)
+    {
+        memory_agent_.configure_backpressure(
+            seed, enabled, latency_profiles.dcache);
         ptw_agent_.configure_backpressure(
-            seed ^ 0x9e3779b97f4a7c15ULL, enabled, latency_profile);
+            seed ^ 0x9e3779b97f4a7c15ULL, enabled, latency_profiles.ptw);
         uncache_agent_.configure_backpressure(
-            seed ^ 0x3c6ef372fe94f82aULL, enabled, latency_profile);
+            seed ^ 0x3c6ef372fe94f82aULL, enabled, latency_profiles.uncache);
     }
 
     void inject_next_dcache_response_error(bool denied, bool corrupt)

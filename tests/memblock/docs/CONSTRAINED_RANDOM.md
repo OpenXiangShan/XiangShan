@@ -50,17 +50,24 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `scalar-load`, `scalar-store` | Relative scalar load/store weights |
 | `vector-load`, `vector-store` | Relative vector memory weights |
 | `prefetch`, `atomic`, `nc`, `mmio` | Relative special-operation weights |
+| `atomic-amo`, `atomic-lrsc`, `atomic-cas` | Relative atomic-family weights inside the `atomic` class |
+| `atomic-w`, `atomic-d` | Relative W/D atomic-width weights |
 | `locality-hot` | Lines selected from a 32-line hot set |
 | `locality-warm` | Lines selected from a 512-line warm set |
 | `locality-cold` | Permutation of an 8192-line cold set |
 | `concurrent` | Per-mille share of the tail reserved for heterogeneous overlap windows |
+| `special-concurrent` | Per-mille chance that a legal overlap window also contains an NC or MMIO load |
 | `tlb-flush` | Per-mille chance of a legal translation flush before an operation |
 | `misaligned` | Per-mille chance of a misaligned address when width permits it |
 | `vector-corner` | Per-mille chance of corner-biased vector shape/address generation |
-| `latency` | `compact` for 1-4 cycles or `spec` for calibrated long-tail responses |
+| `nc-store`, `mmio-store` | Per-mille store share within each memory-type class |
+| `latency` | Set DCache, PTW, and Uncache to `compact` or `spec` together |
+| `dcache-latency`, `ptw-latency`, `uncache-latency` | Override one manager's latency profile independently |
 
-Invalid names, all-zero operation/locality weights, out-of-range per-mille
-values, and unknown latency profiles fail before simulation traffic begins.
+Invalid names, all-zero operation/locality or enabled atomic-family/width
+weights, out-of-range per-mille values, inconsistent special-concurrency or
+manager-latency settings, and unknown latency profiles fail before simulation
+traffic begins.
 `random-mixed` requires at least 256 actions so the mandatory architectural
 prefix, four overlap windows, and each enabled constrained class can coexist.
 
@@ -83,23 +90,23 @@ For every new field, the generator must also provide all of the following:
 - a per-seed coverage obligation whenever the field enables a class;
 - deterministic replay from the seed and complete constraint assignment.
 
-An audit of the current tail found several remaining hard-coded choices. These
-are interface gaps, not reasons to create more tests:
+The interface audit tracks both completed dimensions and the remaining common
+generator work. These are interface dimensions, not reasons to create more
+scenario implementations:
 
-| Dimension | Current hard-coded behavior | Required common-interface extension |
+| Dimension | Implemented common-interface behavior | Remaining work |
 | --- | --- | --- |
-| Concurrent operation mix | Overlap windows always contain scalar load/store, vector load/store, and prefetch; atomic, NC, and MMIO tail operations drain serially | Let the operation weights populate legal rolling windows, with dependency-aware eligibility for every enabled class |
-| Atomic subtype | The random tail selects nine D-width AMOs uniformly | Add weights for W/D AMO, LR/SC, and AMOCAS families, while retaining legal reservation and compare dependencies |
-| NC/MMIO direction | NC is fixed to 25% stores; MMIO is load-only | Add load/store mix constraints for both memory types and count each direction separately |
+| Concurrent operation mix | Base windows overlap scalar load/store, vector load/store, and prefetch; `special-concurrent` can add NC/MMIO loads and records each class | Add more legal dependency-aware window shapes as their upstream scheduling contracts are modeled |
+| Atomic subtype | `atomic-amo`, `atomic-lrsc`, `atomic-cas`, `atomic-w`, and `atomic-d` select legal AMO, LR/SC, and compare-dependent AMOCAS sequences | Cross-hart reservation interference remains integration-level |
+| NC/MMIO direction | `nc-store` and `mmio-store` steer load/store direction and each direction has an independent coverage gate | Concurrent special stores remain deferred until multi-store ROB/commit scheduling is modeled |
 | Translation state | The mandatory prefix covers the mode matrix, but tail translation reuse/miss behavior is mostly fixed and `tlb-flush` is the only knob | Add Bare/Sv39/Sv48 and VS/G-stage mode weights plus translated-access, cold-walk/reuse, and legal fence rates |
-| Response latency | One `latency` value controls DCache, PTW, and Uncache together | Allow independent manager profiles and keep the existing common value as a shorthand |
+| Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
 | Error injection | Errors are confined to focused deterministic contracts | Add a normally-zero or very-low random error rate with independently checked denied/corrupt outcomes; realistic presets must keep this rare |
 
-Until these dimensions are implemented, `coverage`, `spec`, and `corner` are
-different settings of the same generator, but they cannot yet steer every
-meaningful MemBlock dimension. Closing the table means lifting each choice into
-the common interface and its coverage contract, not adding `random-spec`,
-`random-corner`, or feature-specific random scenario functions.
+The remaining rows do not change the architecture: `coverage`, `spec`, and
+`corner` are settings of the same generator. Closing them means lifting each
+choice into the common interface and its coverage contract, not adding
+`random-spec`, `random-corner`, or feature-specific random scenario functions.
 
 ## Shipped Presets
 
@@ -111,6 +118,13 @@ four columns are per-mille values.
 | `coverage` | 200/150 | 150/150 | 100 | 100 | 75 | 75 | 250/250/500 | 1000 | 50 | 500 | 1000 | compact |
 | `spec` | 650/270 | 20/10 | 35 | 5 | 5 | 5 | 800/150/50 | 100 | 20 | 5 | 100 | spec |
 | `corner` | 125/125 | 125/125 | 125 | 125 | 125 | 125 | 100/200/700 | 500 | 100 | 500 | 1000 | spec |
+
+Atomic family weights (AMO/LRSC/CAS) are `8/2/2`, `90/5/5`, and `1/1/1` for
+`coverage`, `spec`, and `corner`; all three use `1/1` W/D weights. Their
+NC/MMIO store shares are respectively `500/500`, `300/300`, and `500/500`.
+Their legal NC/MMIO overlap rates are `500`, `20`, and `750` per mille.
+`spec` and `corner` use the calibrated long-tail profile independently on all
+three managers; `coverage` uses compact latency.
 
 `coverage` is appropriate for short pre-submit checks. `spec` is the default
 for extended/final campaigns. `corner` is the default for boundary hunts. A
@@ -156,11 +170,14 @@ each latency class; later responses follow the distribution statistically.
 ## Coverage And Replay Contract
 
 Every terminal line prints the resolved target weights and actual operation,
-locality, TLB-flush, hit/miss, and latency counts. Each enabled operation and
-locality class must be observed at least once. A nonzero TLB-flush constraint
-must produce a flush. With backpressure and `latency=spec`, all four latency
-classes must be observed. These are minimum gates; distribution quality is
-evaluated over long multi-seed campaigns from the recorded counts.
+atomic family/width, NC/MMIO direction, legal special overlap, locality,
+TLB-flush, hit/miss, and per-manager latency counts. Each enabled operation and
+locality class must be observed at least once. Enabled atomic family/width and
+NC/MMIO direction classes have the same per-seed obligation. A nonzero
+TLB-flush constraint must produce a flush. With backpressure, each manager set
+to `spec` must independently observe all four latency classes. These are
+minimum gates; distribution quality is evaluated over long multi-seed
+campaigns from the recorded counts.
 
 The mandatory prefix still closes architectural invariants that should never be
 left to chance, including width/lane legality, nested translation mode pairs,
@@ -172,4 +189,7 @@ The harness also models upstream scheduling contracts needed for legal replay.
 Scalar stores are reissued when the DUT reports a replay. A vector load whose
 active element crosses a 16-byte boundary is advanced to the modeled ROB head
 before issue, matching `LoadMisalignBuffer` eligibility. Failure to drive that
-backend state creates a UT deadlock, not an RTL failure.
+backend state creates a UT deadlock, not an RTL failure. Atomic operations are
+also intentionally absent from overlap windows: `MemBlock` documents that
+LR/SC/AMO blocks the pipeline and redirects load-unit-0 control while active.
+They remain constrained-random serializing actions in the same generator.

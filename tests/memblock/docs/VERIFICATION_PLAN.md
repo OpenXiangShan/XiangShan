@@ -129,26 +129,31 @@ and corner pressure are constraint sets over that generator, not independently
 maintained scenario implementations. `--constraints coverage|spec|corner`
 selects a baseline and repeatable `--constraint key=value` arguments override
 operation mix, address locality, heterogeneous overlap, TLB flush rate,
-misalignment, vector corner bias, and response latency. The complete interface
+misalignment, vector corner bias, atomic family/width, NC/MMIO direction, legal
+special overlap, and independent DCache/PTW/Uncache response latency. The complete interface
 and performance-counter calibration are specified in
 [`CONSTRAINED_RANDOM.md`](CONSTRAINED_RANDOM.md).
 
 Constraint-interface closure is tracked separately from architectural prefix
-coverage. The current interface still has hard-coded atomic subtypes, NC/MMIO
-load/store ratios, a five-class-only overlap window, fixed tail translation
-state, and one shared manager-latency profile. These choices must become
-validated, replayable fields with observed coverage counters on the same
-`random-mixed` generator. They must not become separately maintained random
-scenarios.
+coverage. Atomic AMO/LRSC/AMOCAS family and W/D width, NC/MMIO load/store
+ratios, legal NC/MMIO load overlap, and per-manager response latency are now
+validated, replayable fields with observed coverage counters. Atomic operations
+remain serializing actions because the MemBlock boundary explicitly blocks the
+pipeline while LR/SC/AMO is active. Fixed tail translation state and random
+error injection remain interface work; they must be added to this generator,
+not as separately maintained random scenarios.
 
 Every result records both resolved targets and observed counts. Each nonzero
-operation/locality weight is a per-seed coverage obligation; nonzero TLB-flush
-and `spec` latency constraints similarly require observed events. This prevents
-a valid constraint set from producing an accidentally untested short seed.
+operation/locality and enabled atomic family/width or NC/MMIO direction is a
+per-seed coverage obligation; nonzero legal-special-overlap, TLB-flush, and each
+manager's `spec` latency constraint similarly require observed events. This
+prevents a valid constraint set from producing an accidentally untested short
+seed.
 
 The seed fails if any required class has a zero count, fewer than four mixed
 windows, no sample with two unresolved classes, or if final queue conservation
-fails. Each window first enqueues all five producer classes, then varies issue
+fails. Each window first enqueues all five producer classes and may add an NC or
+MMIO load, then varies issue
 order, scalar store address/data order, vector address mode, mask, alignment,
 cache residency, translation state, and manager delay while scoreboards remain
 outstanding. A bounded drain occurs only after the window, preserving real

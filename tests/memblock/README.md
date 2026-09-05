@@ -354,8 +354,12 @@ interface, preset values, SPEC counter calibration, and coverage gates.
 The mixed scenario keeps heterogeneous transactions outstanding in one
 simulation. Its constrained-random tail enqueues scalar load, scalar store,
 vector load, vector store, and software prefetch in the same rolling window,
-then randomizes issue order, store address/data order, and vector mode before a
-bounded drain. It includes simultaneous scalar/vector issue, every scalar width,
+can add legal NC/MMIO load overlap, then randomizes issue order, store
+address/data order, and vector mode before a bounded drain. Atomic traffic stays
+in the same generator but is issued as a serializing action because MemBlock's
+LR/SC/AMO path blocks the load pipeline while active. The generator constrains
+AMO/LRSC/AMOCAS family and W/D width, NC/MMIO load/store direction, and DCache,
+PTW, and Uncache latency independently. It includes simultaneous scalar/vector issue, every scalar width,
 every vector EEW and every load/store address mode independently, scalar/vector misalignment, software
 `prefetch.i/r/w`, both cross-forwarding directions, Sv39 and the currently
 modeled Sv39x4 cold/warm translation, a vector guest-page fault with exact
@@ -373,7 +377,8 @@ For example, these commands run the same generator in two directions:
 make random-mixed PICKER="$PICKER" SEED=1 TRANSACTIONS=65536 \
   CONSTRAINTS=spec
 make random-mixed PICKER="$PICKER" SEED=2 TRANSACTIONS=32768 \
-  CONSTRAINTS=corner CONSTRAINT='tlb-flush=200 concurrent=750'
+  CONSTRAINTS=corner \
+  CONSTRAINT='tlb-flush=200 concurrent=750 atomic-lrsc=20 mmio-store=400 ptw-latency=spec'
 ```
 
 `extended-regression`, `final-regression`, and `long-final-regression` default
