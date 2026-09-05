@@ -62,6 +62,14 @@ injection, concurrent exception priority, and four-state behavior. A passing
 cacheable mixed campaign must not be interpreted as verification of those
 planned rows.
 
+Standalone bug reports are reserved for independently reproduced and
+root-caused CPU RTL defects. Their filenames use the `CPU_BUG_*.md` prefix.
+UT harness, oracle, regression-controller, and provenance fixes are recorded in
+normal commits and consolidated documentation only; they do not receive a
+per-fix Markdown report. The confirmed reports currently retained are
+`CPU_BUG_UNCACHE_DCHANNEL_ERROR.md`, `CPU_BUG_ATOMIC_EXCEPTION_RF_WEN.md`, and
+`CPU_BUG_VECTOR_GUEST_FAULT_SPLIT.md`.
+
 The structure follows UVM responsibilities without requiring a SystemVerilog
 class runtime:
 
@@ -278,7 +286,7 @@ the exception contract through the PBMT=NC adapter. This test caught and now
 guards the LoadUnit S1 path that previously discarded response-generated
 exception bits. MMIO uses a distinct S0-to-three-cycle metadata bypass and is
 not implicated by this reproducer. The complete reproducer and root-cause analysis are in
-[`docs/UNCACHE_DCHANNEL_ERROR.md`](docs/UNCACHE_DCHANNEL_ERROR.md).
+[`docs/CPU_BUG_UNCACHE_DCHANNEL_ERROR.md`](docs/CPU_BUG_UNCACHE_DCHANNEL_ERROR.md).
 
 `uncache-widths` exercises all seven scalar load opcodes at every legal byte
 lane for 8-, 16-, 32-, and 64-bit Uncache transfers. The manager returns the
@@ -323,8 +331,7 @@ same cached error metadata after LR.W/LR.D, and clean AMO/readback sequences
 after each error-kind batch guard AtomicsUnit error lifetime. Exceptional data
 is deliberately not compared because it is non-architectural. SC itself cannot
 receive a cold-miss D response in this implementation: a missing line or usable
-reservation makes MainPipe return SC failure before issuing TileLink traffic. See
-[`docs/ATOMIC_DCHANNEL_ERROR.md`](docs/ATOMIC_DCHANNEL_ERROR.md).
+reservation makes MainPipe return SC failure before issuing TileLink traffic.
 
 
 `vector-guest-fault-split` is the deterministic regression for the historical
@@ -480,9 +487,7 @@ LD_LIBRARY_PATH="$PWD/../../build/memblock/runtime" \
 `stress-regression` and `verify-stress-results` use the same
 `STRESS_TRANSACTIONS` value for both the command and verifier configuration.
 This prevents a 16,384-action stress artifact from being rejected by a stale
-4,096-action verifier default. The 2026-09-05 failure that exposed both
-hardening issues is recorded in
-[`docs/REGRESSION_PROVENANCE_FAILURE.md`](docs/REGRESSION_PROVENANCE_FAILURE.md).
+4,096-action verifier default.
 
 The old four-hour artifact was overwritten by a one-second development smoke
 run and is intentionally non-accepting. `make verify-extended-results` should

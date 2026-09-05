@@ -1,4 +1,4 @@
-# Atomic Exception Writeback Must Not Enable `rfWen`
+# CPU Bug: Atomic Exception Writeback Must Not Enable `rfWen`
 
 ## Summary
 
@@ -51,6 +51,6 @@ The current UT executable for this result has SHA-256
 ## Scope
 
 This is separate from the previously documented PBMT=NC Uncache exception-loss
-bug in `UNCACHE_DCHANNEL_ERROR.md`.  It does not change the atomic memory
+bug in `CPU_BUG_UNCACHE_DCHANNEL_ERROR.md`.  It does not change the atomic memory
 operation result or reservation behavior; it fixes only exceptional writeback
 metadata.

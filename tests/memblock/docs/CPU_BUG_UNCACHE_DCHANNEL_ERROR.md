@@ -1,4 +1,4 @@
-# Uncache D-Channel Error Propagation
+# CPU Bug: Uncache D-Channel Error Propagation
 
 ## Status
 

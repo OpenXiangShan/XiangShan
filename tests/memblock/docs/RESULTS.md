@@ -37,7 +37,6 @@ and regenerating the metadata reproduced its launch hash exactly. The same
 investigation found that `verify-stress-results` expected 4,096 generic actions
 while the runner recorded 16,384. Both framework defects are fixed; the original
 artifact remains unmodified evidence rather than being relabeled as a pass.
-See [`REGRESSION_PROVENANCE_FAILURE.md`](REGRESSION_PROVENANCE_FAILURE.md).
 
 These runs used complete RTL hash `b69e387e...`, which contained the invalid
 local atomic D-channel policy change later reverted by `db6f6d844`. They remain
@@ -160,8 +159,7 @@ During this run, an unspecified scalar-load `debug.isNCIO` expectation caused
 a test-only false positive on a faulting PBMT PTE. The scoreboard had collapsed
 an absent `optional<bool>` to false. It now checks optional debug metadata only
 when explicitly constrained; stable MMIO/NC cases remain strict. The 57-case
-rerun and neighboring MMIO/translation regressions passed. See
-[`SCALAR_LOAD_OPTIONAL_METADATA_ORACLE.md`](SCALAR_LOAD_OPTIONAL_METADATA_ORACLE.md).
+rerun and neighboring MMIO/translation regressions passed.
 
 `make translation-permissions` passed 36 fresh-environment permission cases:
 16 stage-1 loads, 11 stage-1 stores, and nine two-stage loads. The independent
@@ -279,18 +277,14 @@ model advanced, but the architectural reference memory did not. A later
 ReleaseData was therefore compared with stale initialization data. The fix
 updates only the architectural reference after a successful AMO, leaving bus
 memory unchanged until the checked ReleaseData arrives. Both original seeds
-then passed without weakening the ReleaseData checker. See
-[`CONSTRAINED_RANDOM_ATOMIC_RELEASE_ORACLE.md`](CONSTRAINED_RANDOM_ATOMIC_RELEASE_ORACLE.md).
+then passed without weakening the ReleaseData checker.
 
 Frozen-boundary validation also exposed two UT framework defects, neither an
 RTL failure. The old 128-action lower bound could not always fit four overlap
 windows after the architectural prefix, and the offline verifier did not yet
 recognize the new constraint command options. The lower bound is now 256 while
 historical 128-action artifacts retain their enhanced coverage checks; command
-options must exactly match campaign configuration. See
-[`CONSTRAINED_RANDOM_MINIMUM_BUDGET.md`](CONSTRAINED_RANDOM_MINIMUM_BUDGET.md)
-and
-[`CONSTRAINED_RANDOM_COMMAND_REPLAY.md`](CONSTRAINED_RANDOM_COMMAND_REPLAY.md).
+options must exactly match campaign configuration.
 
 Neighboring current-binary checks also pass: `vector-addressing` (including the
 cross-16-byte ROB-head contract), `atomic-contracts`, `dcache-errors`,
@@ -309,14 +303,14 @@ reproducer. The
 `uncache-errors` scenario passes both denied and corrupt cases on the regenerated
 RTL, and the generated MemBlock boundary now retains the corresponding
 exception-vector fields. The full reproducer and root-cause evidence are in
-[`UNCACHE_DCHANNEL_ERROR.md`](UNCACHE_DCHANNEL_ERROR.md).
+[`CPU_BUG_UNCACHE_DCHANNEL_ERROR.md`](CPU_BUG_UNCACHE_DCHANNEL_ERROR.md).
 
 The second bug was found by extending `atomic-contracts` with misaligned
 `AMOADD.D` and `AMOOR.W` cases. `AtomicsUnit` returned the expected
 `storeAddrMisaligned=0x40`, but propagated `uop.rfWen=1` on that exceptional
 writeback. The output now masks `rfWen` whenever `exceptionVec` is nonzero;
 the full finding, before/after behavior, and scope are recorded in
-[`ATOMIC_EXCEPTION_RF_WEN.md`](ATOMIC_EXCEPTION_RF_WEN.md).
+[`CPU_BUG_ATOMIC_EXCEPTION_RF_WEN.md`](CPU_BUG_ATOMIC_EXCEPTION_RF_WEN.md).
 
 The apparent third atomic D-channel bug was a UT oracle error. MainPipe
 intentionally installs denied and corrupt atomic refills together with
@@ -326,8 +320,7 @@ cannot establish an architecturally visible atomic side effect. The corrected
 `atomic-dchannel-errors` contract covers both errors across all 22
 refill-capable W/D LR/AMO/AMOCAS operations, 44 poisoned-line readback hits,
 SC.W/D hits on both metadata types, and two clean error-lifetime recoveries. It
-passed in 7,108 cycles with the exact 46 cold TileLink requests. Full analysis is in
-[`ATOMIC_DCHANNEL_ERROR.md`](ATOMIC_DCHANNEL_ERROR.md).
+passed in 7,108 cycles with the exact 46 cold TileLink requests.
 
 During this iteration, a temporary harness defect changed the `mmio-contracts`
 page mapping's PBMT=IO argument while adding the CBO.ZERO case. The existing
@@ -616,7 +609,7 @@ candidate: `vector-guest-fault-split` reported GPA `0x94001808`, while the
 independent VS/G-stage page walk required `0x94001800`. The conditional
 `VMergeBuffer` fix was regenerated into the current RTL; scalar, aligned-vector,
 split-vector, and randomized boundary controls now all report the exact oracle
-GPA. The clean-RTL failure remains in `VECTOR_GUEST_FAULT_SPLIT.md` as mutation
+GPA. The clean-RTL failure remains in `CPU_BUG_VECTOR_GUEST_FAULT_SPLIT.md` as mutation
 evidence, while the repaired test is part of the green sentinel gate.
 
 The final acceptance section is populated only after the current eight-hour,
@@ -652,7 +645,7 @@ bug-free, and it is not the acceptance artifact for the reviewed oracle/source
 provenance changes described above.
 That historical campaign did not expose an additional CPU bug. The later
 current-worktree Uncache finding is documented separately in
-`UNCACHE_DCHANNEL_ERROR.md`; historical mutant results remain the evidence for
+`CPU_BUG_UNCACHE_DCHANNEL_ERROR.md`; historical mutant results remain the evidence for
 the four independently reproduced LSU defects listed above. Any future failure
 should be triaged from its recorded seed and runtime provenance rather than
 treated as a known-good result.

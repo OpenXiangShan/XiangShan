@@ -99,7 +99,7 @@ Session: `01a051f8-7787-7003-b87a-79852aa669a7`.
 
 44. [`2026-09-03 20:12:19 CST`] `/goal 1. 需要基于前面的说法，包括“不代表 MMIO、atomics、VSegment 等明确边界外功能已经验证”，完善地补充验证计划，将所有能想到的测试点都补充进去。2. review 验证oracle，也就是如何判断结果的正确性，不应该基于特定的case结果，而是一些通用的oracle，你需要将你用了哪些oracle告诉我，写进单独的文档里。3. 每次完成后，需要用一个独立上下文的agent review验证计划，然后再启动长时间的单元测试回归。`
 
-## Current Session: 37 Prompts
+## Current Session: 40 Prompts
 
 Session: `01a06732-901c-7581-be22-854bdc2f93f0`.
 
@@ -176,3 +176,9 @@ Session: `01a06732-901c-7581-be22-854bdc2f93f0`.
 36. [`2026-09-05 10:53:28 CST`] `不同的约束可能是一个tradeoff，一方面我们要关注常见系统负载的高load/store压力，另一方面也要关注corner case，所以可能不同的验证场景和阶段下我们关注的方向也不一样，这个是constrained random的核心内涵之一，即通过调整constrain实现不同方向的验证激励。所以，你可能需要思考一下，如何设计一个constrain界面，允许UT开发者指定不同的约束，从而针对不同的场景。你可以额外再参考一下cr260831-4f29a0951-KunminghuV2Config和cr260902-5d3934132-KunminghuV2Config的性能数据`
 
 37. [`2026-09-05 10:53:47 CST`] `所以之后你不见得要独立维护不同的测试，而是提供一个通用的constrain界面，通过调整contrain的条件，实现不同的测试方向。不同测试方向就相当于是不同的约束了`
+
+38. [`2026-09-05 13:16:54 CST`] `我看你前面往docs目录下面写了好几个CONSTRAINED_RANDOM*开头的markdown，他们都是指的是BUG吗？`
+
+39. [`2026-09-05 13:18:12 CST`] `SCALAR_LOAD_OPTIONAL_METADATA_ORACLE.md这个是BUG吗`
+
+40. [`2026-09-05 13:18:30 CST`] `好像今天这些都不是BUG吧，只有之前发现的那几个是BUG`

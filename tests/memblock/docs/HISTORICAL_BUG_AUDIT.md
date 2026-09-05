@@ -31,7 +31,7 @@ The current worktree has one additional RTL finding that is not yet associated
 with a committed historical change: Uncache denied/corrupt D-channel exception
 bits were discarded by the LoadUnit S1 NC path. The deterministic
 reproducer, pre-fix output, root-cause analysis, and repaired evidence are in
-[`UNCACHE_DCHANNEL_ERROR.md`](UNCACHE_DCHANNEL_ERROR.md). It is classified as
+[`CPU_BUG_UNCACHE_DCHANNEL_ERROR.md`](CPU_BUG_UNCACHE_DCHANNEL_ERROR.md). It is classified as
 confirmed/fixed current-worktree evidence rather than added to the 58-commit
 table below.
 
@@ -113,7 +113,7 @@ table below.
 On clean RTL, VA `0x60000188` produces GPA `0x94001808`; the independent page
 walk and scalar/aligned-vector controls produce `0x94001800`. This is retained
 as a deterministic RTL candidate rather than weakened to match the design.
-`VECTOR_GUEST_FAULT_SPLIT.md` records the reproducer and localizes the exact
+`CPU_BUG_VECTOR_GUEST_FAULT_SPLIT.md` records the reproducer and localizes the exact
 `+8` to the unconditional unit-stride GPA offset in `VMergeBuffer.scala`. A
 conditional GPA patch generated in an independent worktree makes the exact
 reproducer pass without weakening the oracle; it is validation evidence, not
