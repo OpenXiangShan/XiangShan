@@ -56,6 +56,8 @@
 
 `MEMBLOCK_HARD_XZ_CHECK_EN` 是非通用 `xz_sw` 路径的公共 X/Z 诊断开关，默认值为 `0`。testcase build 阶段由 `plus.sv -> seq_csr_common` 冻结；由于 agent package 的编译顺序早于 `seq_pkg`，agent 通过 `memblock_sync_pkg` 的只读镜像查询同一冻结值。设为 `1` 时，L2TLB transport、issue ready、DCache/Uncache responder、integer/vector writeback 等既有硬 X/Z 诊断统一报告 `UVM_ERROR`，但不再使用 `UVM_FATAL`；设为 `0` 时这些非通用诊断不执行。各 agent 自身的 `xz_sw` 与 `TCNT_CHECK_SIG_XZ` 行为不受此参数改变。
 
+`MEMBLOCK_CHECK_TRIGGER_EN` 是 DUT scalar writeback 输出 monitor 的 trigger metadata 公共诊断开关，默认值为 `1`，以保持已有 `INT_WB_CAP`、`INT_WB_METADATA`、`INT_WB_TRIGGER`、`INT_WB_TRIGGER_UNSUPPORTED` 与 `INT_WB_STA0_TRIGGER_PROVENANCE` 的严格检出。testcase build 阶段由 `plus.sv -> seq_csr_common` 冻结；只有 `dispatch_monitor_event_adapter` 通过 `get_trigger_check_en()` 读取。设为 `0` 时，只跳过输出 monitor 的 trigger capability/action/provenance 诊断；LSQ enqueue 输入 item 的 `trigger` 合同、key、exceptionVec、replay/flush、CBO、UID/RM 和 DUT trigger 行为均不改变。
+
 主表地址窗口与 TLB 物理映射窗口规则：
 
 - `MEMBLOCK_MAIN_VADDR_BASE/RANGE` 只控制自动主表 normal transaction 的 `src_0/imm/vaddr` 生成范围。
