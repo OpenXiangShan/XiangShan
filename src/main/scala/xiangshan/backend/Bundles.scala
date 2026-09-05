@@ -186,6 +186,8 @@ object Bundles {
     val isVset = Bool()
     val firstUop = Bool()
     val lastUop = Bool()
+    val isJ = Bool()
+    val isJr = Bool()
     val numWB = NumWB() // rob need this
     val latency = Latency()
 
@@ -525,7 +527,7 @@ object Bundles {
   class IssueQueueDeqOg1Payload(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     def numSrc = params.numSrc
     // from frontend
-    val isRVC      = Option.when(params.needIsRVC || params.aluNeedPc)(Bool())
+    val isRVC      = Option.when(params.needIsRVC)(Bool())
     val fixedTaken = Option.when(params.needTaken)(Bool())
     val predTaken  = Option.when(params.needTaken)(Bool())
     // from decode
@@ -1013,7 +1015,7 @@ object Bundles {
     val dataSources    = Vec(exuParams.numRegSrc, DataSource())
     val exuSources     = Option.when(exuParams.isIQWakeUpSink)(Vec(exuParams.numRegSrc, ExuSource(exuParams)))
     val loadDependency = OptionWrapper(exuParams.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
-    val isRVC          = Option.when(exuParams.needIsRVC || exuParams.aluNeedPc)(Bool())
+    val isRVC          = Option.when(exuParams.needIsRVC)(Bool())
     val fixedTaken     = Option.when(exuParams.needTaken)(Bool())
     val predTaken      = Option.when(exuParams.needTaken)(Bool())
     val fuOpType       = FuOpType()
@@ -1036,7 +1038,7 @@ object Bundles {
     val src = Vec(exuParams.numRegSrc, UInt(exuParams.srcDataBitsMax.W))
     val v0  = Option.when(exuParams.readV0Rf)(V0())
     val vl  = Option.when(exuParams.readVlRf)(Vl())
-    val pc  = Option.when(exuParams.needPc || exuParams.aluNeedPc)(UInt(VAddrData().dataWidth.W))
+    val pc  = Option.when(exuParams.needPc)(UInt(VAddrData().dataWidth.W))
     val predTarget = Option.when(exuParams.needTarget)(UInt(VAddrData().dataWidth.W))
 
     val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
@@ -1208,7 +1210,7 @@ object Bundles {
     val copySrc       = if(hasCopySrc) Some(Vec(params.numCopySrc, Vec(if(params.numRegSrc < 2) 1 else 2, UInt(params.srcDataBitsMax.W)))) else None
     val imm           = UInt(64.W)
     val selImm        = SelImm()
-    val nextPcOffset  = OptionWrapper(params.hasBrhFu, UInt((FetchBlockInstOffsetWidth + 2).W))
+    val nextPcOffset  = OptionWrapper(params.hasBrhFu || params.hasLinkFu, UInt((FetchBlockInstOffsetWidth + 2).W))
     val robIdx        = new RobPtr
     val iqIdx         = UInt(log2Up(params.issueBlockParam.numEntries).W)
     val isFirstIssue  = Bool()
@@ -1234,8 +1236,8 @@ object Bundles {
     val vtype         = Option.when(params.readVlRf)(VType())
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
     val rasAction     = if (params.hasRasAction)  Some(BranchAttribute.RasAction())   else None
-    val pc            = if (params.needPc || params.aluNeedPc)        Some(UInt(VAddrData().dataWidth.W)) else None
-    val isRVC         = if (params.needIsRVC || params.aluNeedPc)      Some(Bool())                        else None
+    val pc            = if (params.needPc)        Some(UInt(VAddrData().dataWidth.W)) else None
+    val isRVC         = if (params.needIsRVC)      Some(Bool())                        else None
     val ftqIdx        = if (params.needFtqPtr)    Some(new FtqPtr)                    else None
     val ftqOffset     = if (params.needFtqPtrOffset) Some(UInt(FetchBlockInstOffsetWidth.W))  else None
     val predictInfo   = if (params.needPdInfo)  Some(new PredictInfo) else None
@@ -1348,7 +1350,7 @@ object Bundles {
     val vtype          = Option.when(params.readVlRf)(VType())
     val flushPipe      = Option.when(params.flushPipe)(Bool())
     val rasAction      = Option.when(params.hasRasAction)(BranchAttribute.RasAction())
-    val isRVC          = Option.when(params.needIsRVC || params.aluNeedPc)(Bool())
+    val isRVC          = Option.when(params.needIsRVC)(Bool())
     val ftqIdx         = Option.when(params.needFtqPtr)(new FtqPtr)
     val ftqOffset      = Option.when(params.needFtqPtrOffset)(UInt(FetchBlockInstOffsetWidth.W))
     val predictInfo    = Option.when(params.needPdInfo)(new PredictInfo)
@@ -1362,8 +1364,8 @@ object Bundles {
     val v0  = Option.when(params.readV0Rf)(V0())
     val vl  = Option.when(params.readVlRf)(Vl())
     val imm = UInt(64.W)
-    val pc  = Option.when(params.needPc || params.aluNeedPc)(UInt(VAddrData().dataWidth.W))
-    val nextPcOffset = Option.when(params.hasBrhFu)(UInt((FetchBlockInstOffsetWidth + 2).W))
+    val pc  = Option.when(params.needPc)(UInt(VAddrData().dataWidth.W))
+    val nextPcOffset = Option.when(params.hasBrhFu || params.hasLinkFu)(UInt((FetchBlockInstOffsetWidth + 2).W))
   }
 
   class ExuInputToRegFileBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
