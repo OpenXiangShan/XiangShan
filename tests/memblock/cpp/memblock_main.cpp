@@ -5377,17 +5377,126 @@ int run_translation_fence(int argc, char **argv)
         same_id_writebacks += reuse.writebacks();
     }
 
+    std::uint64_t outstanding_cycles = 0;
+    std::uint64_t outstanding_ptw_requests = 0;
+    std::uint64_t outstanding_writebacks = 0;
+
+    // Snapshot an old root-leaf PTE in the delayed PTW response queue, then
+    // replace it and fence while the walk is still outstanding. The canceled
+    // access must not write back, and reuse of its identity must observe only
+    // the new mapping.
+    {
+        memblock::Environment outstanding(argc, argv);
+        constexpr std::uint64_t virtual_page = 0x40000000ULL;
+        constexpr std::uint64_t address = virtual_page + 0x188;
+        constexpr std::uint64_t old_physical = 0x80000000ULL;
+        constexpr std::uint64_t new_physical = 0xc0000000ULL;
+        constexpr std::uint64_t root = 0xbc000000ULL;
+        outstanding.memory().fill_incrementing(old_physical, 0x1000, 0x16);
+        outstanding.memory().fill_incrementing(new_physical, 0x1000, 0xa6);
+        outstanding.configure_backpressure(
+            0xa4093822299f31d0ULL,
+            true,
+            memblock::ResponseLatencyProfiles{
+                memblock::ResponseLatencyProfile::compact,
+                memblock::ResponseLatencyProfile::spec,
+                memblock::ResponseLatencyProfile::compact});
+        if (!outstanding.reset() ||
+            !outstanding.map_sv39_1g(virtual_page, old_physical, root) ||
+            !outstanding.activate_sv39(root, 71)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << outstanding.cycle()
+                      << " phase=outstanding-configuration reason="
+                      << outstanding.error() << '\n';
+            return 1;
+        }
+
+        const memblock::LoadTransaction canceled{
+            .address = address,
+            .oracle_address = old_physical + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 20,
+            .lq = 0,
+            .pdest = 118,
+            .lane = 2,
+        };
+        const std::uint64_t ptw_before_walk = outstanding.ptw_requests();
+        if (!outstanding.set_rob_head(canceled.rob, canceled.rob_flag) ||
+            !outstanding.enqueue_load(canceled) ||
+            !outstanding.issue_load(canceled, 512) ||
+            !outstanding.run_until_ptw_requests(ptw_before_walk + 1, 2048) ||
+            outstanding.ptw_response_latency_stats().max_cycles < 12) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << outstanding.cycle()
+                      << " phase=outstanding-old-pte-request reason="
+                      << (outstanding.error().empty()
+                              ? "PTW response was not held outstanding"
+                              : outstanding.error()) << '\n';
+            return 1;
+        }
+        const std::uint64_t stale_ptw_snapshot = outstanding.ptw_requests();
+        if (!outstanding.map_sv39_1g(
+                virtual_page, new_physical, root) ||
+            !outstanding.issue_sfence_with_redirect(
+                19, false, false, 0, 0, true, true) ||
+            outstanding.writebacks() != 0) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << outstanding.cycle()
+                      << " phase=outstanding-fence reason="
+                      << (outstanding.error().empty()
+                              ? "redirected stale walk produced a writeback"
+                              : outstanding.error()) << '\n';
+            return 1;
+        }
+        if (outstanding.lq_dequeued() + outstanding.lq_canceled() <
+                outstanding.lq_allocated() &&
+            !outstanding.account_lq_cancellation(1)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << outstanding.cycle()
+                      << " phase=outstanding-cancel-accounting reason="
+                      << outstanding.error() << '\n';
+            return 1;
+        }
+
+        auto survivor = canceled;
+        survivor.oracle_address = new_physical + 0x188;
+        survivor.pdest = 119;
+        survivor.lane = 1;
+        outstanding.expect_load(survivor);
+        if (!outstanding.enqueue_load(survivor) ||
+            !outstanding.issue_load(survivor, 2048) ||
+            !outstanding.run_until_complete(16384) ||
+            !outstanding.run_until_lq_retired(4096) ||
+            outstanding.ptw_requests() <= stale_ptw_snapshot ||
+            outstanding.lq_dequeued() + outstanding.lq_canceled() !=
+                outstanding.lq_allocated()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << outstanding.cycle()
+                      << " phase=outstanding-refill reason="
+                      << (outstanding.error().empty()
+                              ? "post-fence access reused the stale walk"
+                              : outstanding.error()) << '\n';
+            return 1;
+        }
+        outstanding_cycles = outstanding.cycle();
+        outstanding_ptw_requests = outstanding.ptw_requests();
+        outstanding_writebacks = outstanding.writebacks();
+    }
+
     std::cout << "MEMBLOCK_TRANSLATION_FENCE_PASS"
               << " cycle="
               << (environment.cycle() + nested.cycle() + vvma.cycle() +
-                  same_id_cycles)
+                  same_id_cycles + outstanding_cycles)
               << " ptw_requests="
               << (environment.ptw_requests() + nested.ptw_requests() +
-                  vvma.ptw_requests() + same_id_ptw_requests)
+                  vvma.ptw_requests() + same_id_ptw_requests +
+                  outstanding_ptw_requests)
               << " writebacks="
               << (environment.writebacks() + nested.writebacks() +
-                  vvma.writebacks() + same_id_writebacks)
+                  vvma.writebacks() + same_id_writebacks +
+                  outstanding_writebacks)
               << " same_id_reuses=3"
+              << " outstanding_walks=1"
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

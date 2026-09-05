@@ -501,6 +501,19 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(phase, main)
 
+    def test_translation_fence_covers_outstanding_ptw_response(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "issue_sfence_with_redirect",
+            "ResponseLatencyProfile::spec",
+            "ptw_response_latency_stats().max_cycles < 12",
+            "outstanding-old-pte-request",
+            "outstanding-refill",
+            "outstanding_walks=1",
+        ):
+            self.assertIn(contract, environment + main)
+
     def test_translation_permission_matrix_uses_top_level_csr_controls(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

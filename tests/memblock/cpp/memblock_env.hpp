@@ -4277,6 +4277,41 @@ public:
         return run_cycles(16) && check_components();
     }
 
+    bool issue_sfence_with_redirect(
+        std::uint8_t redirect_rob_value,
+        bool redirect_rob_flag,
+        bool redirect_flush_itself,
+        std::uint64_t address = 0,
+        std::uint16_t id = 0,
+        bool all_virtual_addresses = true,
+        bool all_contexts = true,
+        bool hypervisor_virtual = false,
+        bool hypervisor_guest = false,
+        bool flush_pipe = true)
+    {
+        dut_.io_ooo_to_mem_sfence_bits_rs1.ImmSet(all_virtual_addresses);
+        dut_.io_ooo_to_mem_sfence_bits_rs2.ImmSet(all_contexts);
+        dut_.io_ooo_to_mem_sfence_bits_addr.ImmSet(address);
+        dut_.io_ooo_to_mem_sfence_bits_id.ImmSet(id);
+        dut_.io_ooo_to_mem_sfence_bits_flushPipe.ImmSet(flush_pipe);
+        dut_.io_ooo_to_mem_sfence_bits_hv.ImmSet(hypervisor_virtual);
+        dut_.io_ooo_to_mem_sfence_bits_hg.ImmSet(hypervisor_guest);
+        dut_.io_ooo_to_mem_sfence_valid.ImmSet(std::uint64_t{1});
+        tick();
+        dut_.io_ooo_to_mem_sfence_valid.ImmSet(std::uint64_t{0});
+
+        // MemBlock registers sfence twice and redirect once. Pulse redirect
+        // one top-level cycle later so both reach their consumers together.
+        dut_.io_redirect_bits_robIdx_flag.ImmSet(redirect_rob_flag);
+        dut_.io_redirect_bits_robIdx_value.ImmSet(redirect_rob_value);
+        dut_.io_redirect_bits_level.ImmSet(redirect_flush_itself);
+        dut_.io_redirect_bits_isVlsException.ImmSet(std::uint64_t{0});
+        dut_.io_redirect_valid.ImmSet(std::uint64_t{1});
+        tick();
+        dut_.io_redirect_valid.ImmSet(std::uint64_t{0});
+        return run_cycles(16) && check_components();
+    }
+
     bool enable_misaligned_accesses(bool load = true, bool store = true)
     {
         dut_.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable.ImmSet(load);

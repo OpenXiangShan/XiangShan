@@ -129,9 +129,14 @@ global and selective `SFENCE.VMA`; nested VS and G-stage leaf updates refilled
 after selective `HFENCE.VVMA` and global `HFENCE.GVMA` respectively. The
 extended scenario also rebound one host ASID, one VS ASID, and one VMID to new
 page-table roots under the matching targeted fence. All three same-ID cases
-returned the distinct new-page data and produced a fresh PTW refill. The full
-scenario passed in 2,305 aggregate cycles with 73 PTW requests and 16 load
-writebacks.
+returned the distinct new-page data and produced a fresh PTW refill. A further
+stage-1 race accepted and snapshotted the old 1-GiB root-leaf PTE, held its PTW
+response for at least 12 cycles, replaced the PTE, and aligned a global
+`SFENCE.VMA` with the younger-load redirect. The canceled request produced no
+writeback; reuse of the same ROB/LQ identity forced a new PTW request and
+returned only the new-page data. The full scenario passed in 2,473 aggregate
+cycles with 75 PTW requests, 17 load writebacks, three same-ID root reuses, and
+one outstanding-walk fence race.
 
 `make translation-context` passed five context families and 14 same-address
 loads: direct Sv39-to-Sv48 mode/root, same-mode host ASID/root, VS ASID/root,

@@ -231,8 +231,12 @@ requests.
 and selective `SFENCE.VMA`, selective `HFENCE.VVMA`, and global
 `HFENCE.GVMA` visibility after the required refill. It also rebinds the same
 host ASID, VS ASID, and VMID to distinct page-table roots, applies the matching
-targeted fence, and checks distinct physical data after a new PTW refill.
-Outstanding-walk ordering remains a separate coverage point.
+targeted fence, and checks distinct physical data after a new PTW refill. A
+stage-1 race holds an old 1-GiB root-leaf response in the PTW manager, replaces
+the PTE, and aligns a global `SFENCE.VMA` with the redirect. The canceled load
+must not write back, and a same-identity survivor must refill and return only
+the new physical data. Outstanding VS/G-stage `HFENCE` races remain separate
+coverage points.
 
 `translation-context` checks five context families with 14 architectural
 loads: direct Sv39-to-Sv48 mode/root switching, same-mode `satp` ASID/root,
