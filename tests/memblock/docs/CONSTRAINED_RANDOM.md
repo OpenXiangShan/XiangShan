@@ -61,6 +61,8 @@ fields use per-mille values in the inclusive range `0..1000`.
 
 Invalid names, all-zero operation/locality weights, out-of-range per-mille
 values, and unknown latency profiles fail before simulation traffic begins.
+`random-mixed` requires at least 256 actions so the mandatory architectural
+prefix, four overlap windows, and each enabled constrained class can coexist.
 
 ## Shipped Presets
 

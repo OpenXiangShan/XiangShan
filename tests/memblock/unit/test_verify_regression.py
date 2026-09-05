@@ -151,6 +151,15 @@ def regression_document(results: list[dict[str, object]]) -> dict[str, object]:
 
 
 class VerifyRegressionTest(unittest.TestCase):
+    def test_historical_coverage_gate_is_independent_of_submission_minimum(self) -> None:
+        self.assertEqual(
+            verify_regression.ENHANCED_MIXED_COVERAGE_TRANSACTIONS, 128
+        )
+        self.assertLess(
+            verify_regression.ENHANCED_MIXED_COVERAGE_TRANSACTIONS,
+            verify_regression.run_regression.MINIMUM_MIXED_TRANSACTIONS,
+        )
+
     def verify(self, document: dict[str, object]) -> dict[str, object]:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "result.json"

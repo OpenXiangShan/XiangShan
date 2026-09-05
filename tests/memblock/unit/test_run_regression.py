@@ -88,7 +88,7 @@ class RunRegressionTest(unittest.TestCase):
         self.assertNotIn("--constraint", scalar["command"])
 
     def test_mixed_minimum_leaves_random_tail_after_mandatory_phases(self) -> None:
-        self.assertEqual(run_regression.MINIMUM_MIXED_TRANSACTIONS, 128)
+        self.assertEqual(run_regression.MINIMUM_MIXED_TRANSACTIONS, 256)
         self.assertEqual(run_regression.DEFAULT_TRANSACTIONS, 16384)
         self.assertEqual(run_regression.DEFAULT_MIXED_TRANSACTIONS, 16384)
         self.assertEqual(run_regression.DEFAULT_TIMEOUT_SECONDS, 1800)

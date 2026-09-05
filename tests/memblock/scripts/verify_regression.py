@@ -15,6 +15,12 @@ from typing import Any, TextIO
 import run_regression
 
 
+# Artifacts produced by the enhanced mixed-test format have carried these
+# coverage fields since 128 transactions. Keep their validation independent
+# from the larger minimum accepted for new constrained-random submissions.
+ENHANCED_MIXED_COVERAGE_TRANSACTIONS = 128
+
+
 class VerificationError(RuntimeError):
     pass
 
@@ -201,7 +207,7 @@ def _check_mixed_coverage(
     transactions = result.get("transactions")
     if (
         isinstance(transactions, int)
-        and transactions >= run_regression.MINIMUM_MIXED_TRANSACTIONS
+        and transactions >= ENHANCED_MIXED_COVERAGE_TRANSACTIONS
     ):
         _positive_csv(result, "vec_load_modes", 4)
         _positive_csv(result, "vec_store_modes", 4)
