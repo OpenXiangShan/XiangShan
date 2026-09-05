@@ -388,12 +388,13 @@ can add legal NC/MMIO load overlap, then randomizes issue order, store
 address/data order, and vector mode before a bounded drain. Atomic traffic stays
 in the same generator but is issued as a serializing action because MemBlock's
 LR/SC/AMO path blocks the load pipeline while active. The generator constrains
-AMO/LRSC/AMOCAS family and W/D width, NC/MMIO load/store direction, and DCache,
-PTW, and Uncache latency independently. It includes simultaneous scalar/vector issue, every scalar width,
-every vector EEW and every load/store address mode independently, scalar/vector misalignment, software
-`prefetch.i/r/w`, both cross-forwarding directions, Sv39 and the currently
-modeled Sv39x4 cold/warm translation, a vector guest-page fault with exact
-VA/GPA metadata, PBMT=NC,
+AMO/LRSC/AMOCAS family and W/D width, NC/MMIO load/store direction, Bare/Sv39/
+Sv48 and all four nested VS/G mode pairs, translation switch and legal fence
+kind/scope, and DCache, PTW, and Uncache latency independently. It includes
+simultaneous scalar/vector issue, every scalar width, every vector EEW and every
+load/store address mode independently, scalar/vector misalignment, software
+`prefetch.i/r/w`, both cross-forwarding directions, randomized cold/warm
+translation, a vector guest-page fault with exact VA/GPA metadata, PBMT=NC,
 dirty same-set replacement, redirect/reallocation, and randomized DCache/PTW/
 uncache backpressure. Every seed drives all six LSQ dispatch lanes and widths,
 checks committed scalar/vector stores through architectural readback, validates
@@ -408,7 +409,7 @@ make random-mixed PICKER="$PICKER" SEED=1 TRANSACTIONS=65536 \
   CONSTRAINTS=spec
 make random-mixed PICKER="$PICKER" SEED=2 TRANSACTIONS=32768 \
   CONSTRAINTS=corner \
-  CONSTRAINT='tlb-flush=200 concurrent=750 atomic-lrsc=20 mmio-store=400 ptw-latency=spec'
+  CONSTRAINT='translation-nested=250 translation-switch=750 tlb-flush=200 concurrent=750 atomic-lrsc=20 mmio-store=400 ptw-latency=spec'
 ```
 
 `extended-regression`, `final-regression`, and `long-final-regression` default

@@ -21,7 +21,7 @@ make random-mixed SEED=2 TRANSACTIONS=65536 CONSTRAINTS=spec
 
 # Start from SPEC, but deliberately increase translation and MMIO pressure.
 make random-mixed SEED=3 TRANSACTIONS=32768 CONSTRAINTS=spec \
-  CONSTRAINT='tlb-flush=100 mmio=30 nc=20 vector-load=80 vector-store=40'
+  CONSTRAINT='translation-nested=20 translation-switch=100 tlb-flush=100 mmio=30 nc=20 vector-load=80 vector-store=40'
 
 # Restrict the same generator to a scalar-load locality experiment.
 make random-mixed SEED=4 TRANSACTIONS=16384 CONSTRAINTS=spec \
@@ -55,6 +55,13 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `locality-hot` | Lines selected from a 32-line hot set |
 | `locality-warm` | Lines selected from a 512-line warm set |
 | `locality-cold` | Permutation of an 8192-line cold set |
+| `translation-bare`, `translation-stage1`, `translation-nested` | Relative Bare, host stage-1, and nested VS+G context weights |
+| `stage1-sv39`, `stage1-sv48` | Relative host stage-1 mode weights |
+| `vs-sv39`, `vs-sv48` | Relative VS-stage mode weights in nested contexts |
+| `g-sv39x4`, `g-sv48x4` | Relative G-stage mode weights in nested contexts |
+| `translation-switch` | Per-mille chance of choosing a new translation context at a drained action/window boundary |
+| `fence-sfence`, `fence-hfence-vvma`, `fence-hfence-gvma` | Relative weights for fence kinds compatible with the active context |
+| `fence-global`, `fence-selective` | Relative global/selective scope weights for generated translation fences |
 | `concurrent` | Per-mille share of the tail reserved for heterogeneous overlap windows |
 | `special-concurrent` | Per-mille chance that a legal overlap window also contains an NC or MMIO load |
 | `tlb-flush` | Per-mille chance of a legal translation flush before an operation |
@@ -67,7 +74,9 @@ fields use per-mille values in the inclusive range `0..1000`.
 Invalid names, all-zero operation/locality or enabled atomic-family/width
 weights, out-of-range per-mille values, inconsistent special-concurrency or
 manager-latency settings, and unknown latency profiles fail before simulation
-traffic begins.
+traffic begins. The harness has no programmable PMA region at this boundary,
+so randomized NC and MMIO traffic requires stage-1 or nested PBMT translation.
+An NC/MMIO-only operation mix cannot also request Bare coverage.
 `random-mixed` requires at least 256 actions so the mandatory architectural
 prefix, four overlap windows, and each enabled constrained class can coexist.
 
@@ -99,7 +108,7 @@ scenario implementations:
 | Concurrent operation mix | Base windows overlap scalar load/store, vector load/store, and prefetch; `special-concurrent` can add NC/MMIO loads and records each class | Add more legal dependency-aware window shapes as their upstream scheduling contracts are modeled |
 | Atomic subtype | `atomic-amo`, `atomic-lrsc`, `atomic-cas`, `atomic-w`, and `atomic-d` select legal AMO, LR/SC, and compare-dependent AMOCAS sequences | Cross-hart reservation interference remains integration-level |
 | NC/MMIO direction | `nc-store` and `mmio-store` steer load/store direction and each direction has an independent coverage gate | Concurrent special stores remain deferred until multi-store ROB/commit scheduling is modeled |
-| Translation state | The mandatory prefix covers the mode matrix, but tail translation reuse/miss behavior is mostly fixed and `tlb-flush` is the only knob | Add Bare/Sv39/Sv48 and VS/G-stage mode weights plus translated-access, cold-walk/reuse, and legal fence rates |
+| Translation state | Bare/Sv39/Sv48 and all four Sv39/Sv48 x Sv39x4/Sv48x4 pairs are weighted tail contexts; switches occur only at drained boundaries; cold walk/reuse and the legal fence kind/scope matrix are per-seed gates | Concurrent distinct-page multi-walk fences and in-flight context transitions remain directed/integration work |
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
 | Error injection | Errors are confined to focused deterministic contracts | Add a normally-zero or very-low random error rate with independently checked denied/corrupt outcomes; realistic presets must keep this rare |
 
@@ -125,6 +134,19 @@ NC/MMIO store shares are respectively `500/500`, `300/300`, and `500/500`.
 Their legal NC/MMIO overlap rates are `500`, `20`, and `750` per mille.
 `spec` and `corner` use the calibrated long-tail profile independently on all
 three managers; `coverage` uses compact latency.
+
+Translation presets use these relative weights and per-mille switch rates:
+
+| Preset | Bare/stage-1/nested | Stage-1 Sv39/Sv48 | VS Sv39/Sv48 | G Sv39x4/Sv48x4 | SFENCE/VVMA/GVMA | Global/selective | Switch |
+| --- | --- | --- | --- | --- | --- | --- | ---: |
+| `coverage` | 1/1/1 | 1/1 | 1/1 | 1/1 | 1/1/1 | 1/1 | 500 |
+| `spec` | 5/990/5 | 95/5 | 1/1 | 1/1 | 98/1/1 | 95/5 | 1 |
+| `corner` | 1/1/1 | 1/1 | 1/1 | 1/1 | 1/1/1 | 1/1 | 750 |
+
+The mandatory per-seed gate overrides sampling order only until every enabled
+mode, nested pair, and compatible fence kind/scope has appeared. Later choices
+follow the configured weights. This preserves coverage for short seeds without
+turning a long `spec` campaign into an equal-probability corner campaign.
 
 `coverage` is appropriate for short pre-submit checks. `spec` is the default
 for extended/final campaigns. `corner` is the default for boundary hunts. A
@@ -180,15 +202,17 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints the resolved target weights and actual operation,
-atomic family/width, NC/MMIO direction, legal special overlap, locality,
-TLB-flush, hit/miss, and per-manager latency counts. Each enabled operation and
-locality class must be observed at least once. Enabled atomic family/width and
-NC/MMIO direction classes have the same per-seed obligation. A nonzero
-TLB-flush constraint must produce a flush. With backpressure, each manager set
-to `spec` must independently observe all four latency classes. These are
-minimum gates; distribution quality is evaluated over long multi-seed
-campaigns from the recorded counts.
+Every terminal line prints `constraint_schema=2`, the resolved target weights,
+and actual operation, atomic family/width, NC/MMIO direction, legal special
+overlap, locality, translation regime/mode/pair, fence kind/scope, cold-walk/
+reuse, TLB-flush, hit/miss, and per-manager latency counts. Each enabled class
+must be observed at least once. More than one enabled translation context also
+requires an observed switch, and any translated profile requires both a PTW
+walk window and a reuse window. With backpressure, each manager set to `spec`
+must independently observe all four latency classes. The simulator and offline
+artifact verifier both enforce these obligations. They are minimum gates;
+distribution quality is evaluated over long multi-seed campaigns from the
+recorded counts.
 
 The mandatory prefix still closes architectural invariants that should never be
 left to chance, including width/lane legality, nested translation mode pairs,
@@ -205,7 +229,10 @@ also intentionally absent from overlap windows: `MemBlock` documents that
 LR/SC/AMO blocks the pipeline and redirects load-unit-0 control while active.
 They remain constrained-random serializing actions in the same generator.
 Translated MMIO stores reissue their address from observed store-TLB miss
-feedback until a hit is observed before the ROB-head pulse. Misaligned vector
-stores similarly drive ROB-head/pending state and replay; their SQ retirement
-target is captured when their flows are enqueued, so a writeback that retires
-before the helper's explicit commit step cannot be counted twice.
+feedback until a hit is observed before the ROB-head pulse. NC and MMIO actions
+are never emitted in Bare because only PBMT supplies those attributes in this
+harness. Misaligned vector stores similarly drive ROB-head/pending state and
+replay; concurrent vector replay feedback is matched to the originating load
+or store transaction by queue identity. Their SQ retirement target is captured
+when their flows are enqueued, so a writeback that retires before the helper's
+explicit commit step cannot be counted twice.

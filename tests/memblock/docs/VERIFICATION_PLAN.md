@@ -62,7 +62,7 @@ is added to the harness.
 | Vector load | Independent unit/strided/indexed address decoder, `vl`/`vstart`/mask rules, old destination, and legal `vma/vta` agnostic values | Exact active data and active-element mask for EEW 8/16/32/64; inactive data is constrained by RVV policy | Implemented for modeled 128-bit operations |
 | Vector store | The same independent address/mask decoder applied to source bytes | Eventual completion/commit, exact vector readback of every active byte, RF write-enable/flush metadata, and optional trigger/debug metadata | Implemented for modeled 128-bit stores |
 | Address translation | Mode-parameterized software walk for Bare/Sv39/Sv48 and Sv39x4/Sv48x4; independent canonicality, PTE validity, leaf level, alignment, permission, PBMT/N/reserved, and A/D checks | Accesses reach the independently calculated PA; invalid walks report the access-specific page/access/guest-page fault without a data-manager request | Partial: generic walker, Bare degenerations, all four 4-KiB nested paths, superpage leaves, Sv39/Sv48 permission cases, the complete valid two-stage PBMT matrix, and 52 stage-1/G-stage invalid/reserved/PBMT/NAPOT encodings are implemented for both scalar loads and stores; remaining fault crosses remain |
-| Nested translation | Independent VS-stage walk followed by independent G-stage walk for all four `vsatp` x `hgatp` mode pairs, including implicit page-table accesses and VS-over-G PBMT priority | Exact host PA or stage-specific fault; no stage may be skipped or silently treated as Bare; final PMA/NC/IO class follows architectural composition | Partial: all four 4-KiB pairs, VS/G/Bare degenerations, all 36 valid PBMT combinations, VS/G context switches, host/nested `V` transitions, same-ID root reuse with targeted fences, and global/selective stale-response races for isolated VS/G plus all four fully nested mode pairs are covered; concurrent multi-walk and context-transition races remain |
+| Nested translation | Independent VS-stage walk followed by independent G-stage walk for all four `vsatp` x `hgatp` mode pairs, including implicit page-table accesses and VS-over-G PBMT priority | Exact host PA or stage-specific fault; no stage may be skipped or silently treated as Bare; final PMA/NC/IO class follows architectural composition | Partial: all four 4-KiB pairs, VS/G/Bare degenerations, all 36 valid PBMT combinations, VS/G context switches, host/nested `V` transitions, same-ID root reuse with targeted fences, and global/selective stale-response races for isolated VS/G plus all four fully nested mode pairs are covered; the common random tail now weights and gates every pair with cold/reuse observations, while concurrent distinct-page multi-walk and in-flight context-transition races remain |
 | L2-to-L1 DTLB boundary | Drive all retained `io_l2_tlb_req_req_*` fields, including ordinary and prefetch requests, kill/no-translate controls, and response timing | Legal response valid/miss/PBMT/fault fields and exported PMP/MMIO classification; cold misses are delegated to the external L2 TLB | Implemented for ordinary and prefetch miss responses in `l2-tlb-contracts`; the MemBlock boundary has no L2 refill response input, so hit refill and external retry remain integration-level tests |
 | L2 hint propagation | Valid/invalid `io_l2_hint`, all `sourceId` values, and `isKeyword` polarity at an idle/no-matching-MSHR boundary | Hint is registered and distributed without producing a ghost writeback, queue corruption, or protocol error; matching-MSHR replay semantics are integration-tested with L2 | Implemented for both keyword polarities and all 16 source IDs with an idle no-MSHR safety oracle in `l2-tlb-contracts`; matching-MSHR replay remains an L2 integration scenario |
 | Frontend bridge | Independent request/response sequences for ICache, ICache-control, and instruction-Uncache, including the fields synthesized or narrowed by their diplomacy edges | Every accepted A request emerges once and in order with exact opcode/size/source/address/mask/data/user fields; every accepted D beat returns once with exact observable fields; a source is not reused before its response completes; payload remains stable under request and response stalls | Implemented in `frontend-bridge`: all 88 top-level frontend TileLink fields are explicitly driven or checked, the three paths run concurrently, source credits are enforced and observed, ICache uses two response beats, and the ICache-control path exercises Get/PutFull/PutPartial, sizes 1-8 bytes, all 32 sources, masks, and D-channel backpressure |
@@ -130,7 +130,8 @@ There is one canonical mixed generator. Realistic traffic, balanced coverage,
 and corner pressure are constraint sets over that generator, not independently
 maintained scenario implementations. `--constraints coverage|spec|corner`
 selects a baseline and repeatable `--constraint key=value` arguments override
-operation mix, address locality, heterogeneous overlap, TLB flush rate,
+operation mix, address locality, heterogeneous overlap, translation regime and
+Sv39/Sv48/VS/G modes, context-switch and legal fence kind/scope rates,
 misalignment, vector corner bias, atomic family/width, NC/MMIO direction, legal
 special overlap, and independent DCache/PTW/Uncache response latency. The complete interface
 and performance-counter calibration are specified in
@@ -138,17 +139,20 @@ and performance-counter calibration are specified in
 
 Constraint-interface closure is tracked separately from architectural prefix
 coverage. Atomic AMO/LRSC/AMOCAS family and W/D width, NC/MMIO load/store
-ratios, legal NC/MMIO load overlap, and per-manager response latency are now
-validated, replayable fields with observed coverage counters. Atomic operations
+ratios, legal NC/MMIO load overlap, translation regime/mode/fence selection,
+and per-manager response latency are now validated, replayable fields with
+observed coverage counters. Atomic operations
 remain serializing actions because the MemBlock boundary explicitly blocks the
-pipeline while LR/SC/AMO is active. Fixed tail translation state and random
-error injection remain interface work; they must be added to this generator,
-not as separately maintained random scenarios.
+pipeline while LR/SC/AMO is active. Random error injection remains interface
+work; it must be added to this generator, not as a separately maintained random
+scenario.
 
 Every result records both resolved targets and observed counts. Each nonzero
 operation/locality and enabled atomic family/width or NC/MMIO direction is a
-per-seed coverage obligation; nonzero legal-special-overlap, TLB-flush, and each
-manager's `spec` latency constraint similarly require observed events. This
+per-seed coverage obligation. The same applies to enabled translation regimes,
+stage-1 modes, nested VS/G crosses, compatible fence kind/scope crosses, cold
+walk/reuse, legal-special-overlap, TLB flush, and each manager's `spec` latency
+constraint. This
 prevents a valid constraint set from producing an accidentally untested short
 seed.
 
@@ -173,7 +177,7 @@ mask an untested mode or a self-consistent reference-model bug:
 | T2: nested composition | Independent VS walk plus G walk for all four mode pairs, plus VS-only/G-only/Bare degenerations | Four-pair 4-KiB matrix has cold and warm PA checks, implicit page-table accesses, and no stage elision; Bare degenerations execute in `translation-bare` |
 | T3: protection/faults | PTE V/R/W/X/U/G/A/D, PBMT/N/reserved bits, SUM/MXR, stage-specific access type, noncanonical VA, high-GPA overflow | Each invalid class produces the correct stage/cause/VA/GPA and no forbidden side effect |
 | T4: context and fences | ASID/VMID reuse, root changes, `V` transitions, `SFENCE.VMA`, `HFENCE.VVMA`, `HFENCE.GVMA`, outstanding walks | Host/VS/G root and ID switches, host/nested `V` transitions, global/selective leaf-update fences, targeted same-ID host-ASID/VS-ASID/VMID root reuse, and global/selective stale-response races through both stage-1 modes, both isolated VS/G modes, and all four fully nested pairs execute; concurrent multi-walk and in-flight context transitions remain |
-| T5: MemBlock stress | Mix all closed translation modes with LSQ wrap, split accesses, cache misses, redirect, and manager backpressure | Per-seed translation coverage and queue/progress gates remain green under long random runs |
+| T5: MemBlock stress | Mix all closed translation modes with LSQ wrap, split accesses, cache misses, redirect, and manager backpressure | The common random tail weights Bare/Sv39/Sv48 and all four nested pairs, switches only at drained boundaries, emits context-compatible global/selective fences, and requires every enabled mode/pair plus cold/reuse observations before a seed passes; long campaign evidence remains the acceptance criterion |
 
 T1-T4 are required before the corresponding rows can be marked implemented.
 T5 is the stress layer, not a substitute for deterministic mode/fault tests.
@@ -250,9 +254,9 @@ cacheable tests pass.
 | Stage-1 Sv48 walk | Bare/Sv48 mode, L3/L2/L1/L0 leaves (512-GiB/1-GiB/2-MiB/4-KiB), L3 faults, canonicality, permission/PBMT/A-D combinations | Partial; all leaf levels, noncanonical VA, U/S, SUM, MXR, missing-A/D, and the same 13 encoding cases execute for loads and stores; broader crosses remain |
 | G-stage Sv39x4 walk | 16-KiB root, widened root index, 41-bit GPA, all leaf levels, high-GPA overflow, G-stage permissions | Partial; all leaf levels, high-GPA overflow, load/store permission faults including `D=0`, all valid two-stage PBMT combinations, and 13 invalid/reserved/PBMT/NAPOT encoding cases execute for loads and stores |
 | G-stage Sv48x4 walk | 16-KiB root, widened root index, 50-bit GPA, all leaf levels, high-GPA overflow, G-stage permissions | Partial; all leaf levels, high-GPA overflow, load/store permission faults including `D=0`, all valid two-stage PBMT combinations, and the same 13 encoding cases execute for loads and stores |
-| Nested mode matrix | `Sv39->Sv39x4`, `Sv39->Sv48x4`, `Sv48->Sv39x4`, `Sv48->Sv48x4`, plus `vsatp`/`hgatp` Bare degenerations | Partial; all four 4-KiB pairs are executable in `translation-matrix`, including cold/warm TLB reuse; VS-only/G-only/fully-Bare degenerations execute in `translation-bare` |
+| Nested mode matrix | `Sv39->Sv39x4`, `Sv39->Sv48x4`, `Sv48->Sv39x4`, `Sv48->Sv48x4`, plus `vsatp`/`hgatp` Bare degenerations | Partial; all four 4-KiB pairs are executable in `translation-matrix`, including cold/warm TLB reuse; VS-only/G-only/fully-Bare degenerations execute in `translation-bare`; the same four non-Bare pairs are independently weighted and required in `random-mixed` |
 | Stage-only translation | HS/S/U stage-1 only, VS/VU stage-1 only, G-stage only for implicit page-table/HLV-class accesses | Partial; only current data-access paths are modeled |
-| TLB behavior | cold miss, hit, refill, duplicate miss, replay, invalidation, `sfence.vma`, concurrent page walks | Partial; `translation-fence-all` holds stale stage-1, VS-only, G-only, and fully nested VS/G leaf responses across global and selective fences for both supported modes and all four nested pairs, rejects canceled writeback, and requires new-data refills; duplicate/concurrent multi-walk coverage remains |
+| TLB behavior | cold miss, hit, refill, duplicate miss, replay, invalidation, `sfence.vma`, concurrent page walks | Partial; `translation-fence-all` holds stale stage-1, VS-only, G-only, and fully nested VS/G leaf responses across global and selective fences for both supported modes and all four nested pairs, rejects canceled writeback, and requires new-data refills; `random-mixed` requires observed cold-walk and warm-reuse windows plus every enabled legal fence cross; duplicate/concurrent distinct-page multi-walk coverage remains |
 | Page permissions | R/W/X/U/G, SUM/MXR at HS/VS stage, G-stage U-mode rule, read-only store, execute-only, access/dirty bit updates, privilege transitions | Partial; `translation-permissions` executes 58 cases across Sv39/Sv48 U/S, SUM, MXR, A/D, VSUM/VMXR, all four nested mode pairs, and G-stage load/store R/A/D/U permissions with exact readback, fault cause, manager non-use, and SQ conservation; `translation-faults` covers PBMT/reserved encoding faults, while `translation-pbmt` covers valid PBMT composition |
 | Mode/context switching | `satp/vsatp/hgatp` root and MODE changes, ASID/VMID reuse, `V` transitions, same VA under distinct contexts | Partial; `translation-context` covers five context families and 14 distinct-data same-address accesses across host ASID/root, VS ASID/root, G-stage VMID/root, mode, and `V` switches; `translation-fence` adds same-ID host-ASID/VS-ASID/VMID fenced root reuse; in-flight transitions remain |
 | Translation fences | `SFENCE.VMA`, `HFENCE.VVMA`, `HFENCE.GVMA`, selective/global scope and updates with outstanding traffic | Partial; global/selective leaf updates, targeted same-ID host-ASID/VS-ASID/VMID root reuse, and stale-response races spanning both stage-1 modes, both isolated VS/G modes, and all four fully nested pairs are implemented by `translation-fence-all`; concurrent multi-walk and in-flight context-transition ordering remain |

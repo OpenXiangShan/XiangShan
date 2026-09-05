@@ -22,6 +22,31 @@
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
+## Translation Constraint Interface Validation
+
+Commit `f6820b9ff` extends the common `random-mixed` generator with weighted
+Bare/Sv39/Sv48 and nested Sv39/Sv48 x Sv39x4/Sv48x4 contexts, drained-boundary
+context switching, legal global/selective SFENCE/HFENCE selection, and
+independent cold-walk/reuse coverage. The terminal summary uses
+`constraint_schema=2`; the offline verifier rejects any enabled translation,
+nested-pair, fence, walk, or reuse class that was not observed.
+
+The rebuilt model passed 119 Python contract/verifier tests and 256-action RTL
+runs for `coverage`, `spec`, `corner`, Sv48-only, nested-only, and Bare-only
+configurations. Representative seeds 41 and 47 covered all six legal fence
+kind/scope points, all four nested pairs, both cold walks and TLB reuse, and
+SPEC-style DCache/PTW/Uncache delays extending into the 100-400-cycle bucket.
+The complete RTL SHA-256 remained
+`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
+
+Three failures found while enabling this matrix were classified as harness
+issues: mixed vector replay feedback was initially routed to only one vector
+transaction, nested PBMT traffic initially omitted `hPBMTE`, and NC/MMIO was
+initially allowed in Bare even though this boundary supplies those attributes
+only through PBMT. All reproduced failures disappeared after correcting those
+drivers while the RTL remained unchanged. They are not CPU bugs and therefore
+do not have `CPU_BUG_*` documents.
+
 ## Superseded Pre-Clarification Stress
 
 ### Provenance-rejected one-hour stress run

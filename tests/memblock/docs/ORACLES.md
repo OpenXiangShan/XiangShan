@@ -110,6 +110,11 @@ bytes. The model does not assume a particular split-buffer state machine or
 replay count; it checks the final byte effect, legal replay progress, and
 single architectural completion.
 
+When a mixed window contains both a vector load and vector store, replay
+feedback is matched to the originating transaction with its load/store queue
+identity before reissue. Treating every replay as belonging to one arbitrarily
+chosen vector operation is a testbench error, not evidence of an RTL failure.
+
 ### Translation and faults
 
 The page-table builder must write known PTEs into sparse memory and retain the
@@ -141,6 +146,18 @@ exhaustively crosses PMA, NC, and IO at both stages for all four supported mode
 pairs. The oracle distinguishes the final type through DCache/Uncache routing,
 IO commit gating, exact data, and store readback rather than reading a DUT TLB
 entry.
+
+The constrained-random tail maintains an explicit translation context separate
+from the DUT. Context choices cover Bare, host Sv39/Sv48, and the four nested
+`VS={Sv39,Sv48}` x `G={Sv39x4,Sv48x4}` pairs. A context switch is legal only
+after all scoreboards and LSQ entries drain. Each translated window compares
+the external PTW request count before and after the operation, recording a cold
+walk or a reuse observation; the returned data and independent page-table walk
+remain the correctness oracle. Generated `SFENCE.VMA`, `HFENCE.VVMA`, and
+`HFENCE.GVMA` operations are restricted to compatible active contexts and use
+independent global/selective coverage points. NC and MMIO random actions are
+restricted to translated PBMT contexts because this UT boundary has no
+programmable PMA-region input.
 
 The model returns a physical address or a structured fault containing the
 first failing stage/level, exact faulting VA, guest physical address of an
