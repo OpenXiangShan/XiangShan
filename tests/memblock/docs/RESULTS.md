@@ -252,14 +252,25 @@ Sv48 stage-1 2 MiB/1 GiB leaves, Sv48 512 GiB, and the corresponding
 Sv39x4/Sv48x4 G-stage leaves. Every case matched the independent leaf-address
 oracle and completed an architectural load.
 
-`make translation-faults` passed 109 deterministic fault transactions. The original
-five cover a noncanonical Sv48 VA, invalid Sv39 root PTE, Sv39x4/Sv48x4 GPA
-overflow, and a malformed Sv39 2 MiB leaf. The added 26 fresh-environment
-Sv39/Sv48 cases cross invalid V/W/R, reserved bits 60:54, PBMT=3, PBMTE off,
-exhausted L0, illegal non-leaf U/A/D/PBMT/N, and invalid NAPOT encoding. Each
-case matched the independent failing PTE/level and exact load page fault. The
-same 26 encodings also produced exact store page faults with balanced SQ
-retirement. Neither access type issued a DCache or Uncache data request.
+`make translation-faults` passed 118 deterministic architectural transactions.
+Ten canonical-boundary transactions cover valid high-half Sv39/Sv48 loads and
+both sign-extension mismatch directions for each mode as scalar load and store
+page faults. The other four original cases cover an invalid Sv39 root PTE,
+Sv39x4/Sv48x4 GPA overflow, and a malformed Sv39 2 MiB leaf. The 26
+fresh-environment Sv39/Sv48 encoding cases cross invalid V/W/R, reserved bits
+60:54, PBMT=3, PBMTE off, exhausted L0, illegal non-leaf U/A/D/PBMT/N, and
+invalid NAPOT encoding. Each case matched the independent failing PTE/level and
+exact load page fault. The same 26 encodings also produced exact store page
+faults with balanced SQ retirement. No faulting access issued a DCache or
+Uncache data request.
+
+The first canonical-boundary run incorrectly required a noncanonical store to
+issue no PTW request. The RTL returned the exact `StorePageFault`, issued no
+DCache/Uncache request, and conserved the SQ entry, but its store DTLB path
+issued one PTW request before reporting the fault. That PTW-count requirement
+was an over-constrained UT anti-oracle, not a CPU bug. The corrected test records
+four such PTW requests as implementation coverage and keeps only architectural
+exception, data-manager non-use, and queue conservation as correctness oracles.
 
 The same 26-entry encoding table also passed through final-data G-stage walks,
 split across Sv39x4 and Sv48x4. Every case produced the exact load guest-page
@@ -275,7 +286,7 @@ an absent `optional<bool>` to false. It now checks optional debug metadata only
 when explicitly constrained; stable MMIO/NC cases remain strict. The store
 extension likewise left debug MMIO/NCIO unconstrained for exceptional PTEs,
 while keeping exact architectural exception and side-effect checks. The
-109-transaction rerun and neighboring MMIO/translation regressions passed.
+118-transaction rerun and neighboring MMIO/translation regressions passed.
 
 `make translation-permissions` passed 58 fresh-environment permission cases:
 16 stage-1 loads, 11 stage-1 stores, nine two-stage loads, and 22 two-stage
@@ -285,7 +296,7 @@ selection. Both Sv39x4 and Sv48x4 rejected a store when `D=0` with the exact
 `StoreGuestPageFault`. Passing stores committed and matched exact scalar
 readback; faulting stores issued no DCache/Uncache request and retained exact
 SQ retirement/cancellation accounting. Neighboring matrix, context, fence,
-Bare, 109-case fault, ten-case superpage, and basic two-stage scenarios passed
+Bare, 118-case fault, ten-case superpage, and basic two-stage scenarios passed
 on the same RTL SHA-256
 `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
 
