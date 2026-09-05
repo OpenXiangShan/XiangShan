@@ -62,7 +62,7 @@ is added to the harness.
 | Vector load | Independent unit/strided/indexed address decoder, `vl`/`vstart`/mask rules, old destination, and legal `vma/vta` agnostic values | Exact active data and active-element mask for EEW 8/16/32/64; inactive data is constrained by RVV policy | Implemented for modeled 128-bit operations |
 | Vector store | The same independent address/mask decoder applied to source bytes | Eventual completion/commit, exact vector readback of every active byte, RF write-enable/flush metadata, and optional trigger/debug metadata | Implemented for modeled 128-bit stores |
 | Address translation | Mode-parameterized software walk for Bare/Sv39/Sv48 and Sv39x4/Sv48x4; independent canonicality, PTE validity, leaf level, alignment, permission, PBMT, and A/D checks | Accesses reach the independently calculated PA; invalid walks report the access-specific page/access/guest-page fault | Partial: generic walker, Bare degenerations, all four 4-KiB nested paths, superpage leaves, and Sv39/Sv48 U/S, SUM, MXR, A/D permission cases are implemented; reserved/PBMT and remaining fault crosses remain |
-| Nested translation | Independent VS-stage walk followed by independent G-stage walk for all four `vsatp` x `hgatp` mode pairs, including implicit page-table accesses | Exact host PA or stage-specific fault; no stage may be skipped or silently treated as Bare | Partial: all four 4-KiB pairs and VS/G/Bare degenerations are covered by `translation-matrix`/`translation-bare`; context/fence isolation remains |
+| Nested translation | Independent VS-stage walk followed by independent G-stage walk for all four `vsatp` x `hgatp` mode pairs, including implicit page-table accesses | Exact host PA or stage-specific fault; no stage may be skipped or silently treated as Bare | Partial: all four 4-KiB pairs, VS/G/Bare degenerations, VS/G context switches, and host/nested `V` transitions are covered; same-ID reuse with fences and outstanding-walk ordering remain |
 | L2-to-L1 DTLB boundary | Drive all retained `io_l2_tlb_req_req_*` fields, including ordinary and prefetch requests, kill/no-translate controls, and response timing | Legal response valid/miss/PBMT/fault fields and exported PMP/MMIO classification; cold misses are delegated to the external L2 TLB | Implemented for ordinary and prefetch miss responses in `l2-tlb-contracts`; the MemBlock boundary has no L2 refill response input, so hit refill and external retry remain integration-level tests |
 | L2 hint propagation | Valid/invalid `io_l2_hint`, all `sourceId` values, and `isKeyword` polarity at an idle/no-matching-MSHR boundary | Hint is registered and distributed without producing a ghost writeback, queue corruption, or protocol error; matching-MSHR replay semantics are integration-tested with L2 | Implemented for both keyword polarities and all 16 source IDs with an idle no-MSHR safety oracle in `l2-tlb-contracts`; matching-MSHR replay remains an L2 integration scenario |
 | Guest-fault metadata | Reference VS/G-stage walk from PTE addresses, including explicit data faults and implicit VS-page-table faults | Exact fault VA, faulting PTE GPA, shifted `htval`-class value where observable, and VS-non-leaf-PTE marker | Partial: current VA/GPA/marker cases are covered; broader fault classes are planned |
@@ -157,7 +157,7 @@ mask an untested mode or a self-consistent reference-model bug:
 | T1: independent walks | Parameterized Sv39/Sv48 and Sv39x4/Sv48x4 builders, canonical/high-bit checks, root alignment, all leaf levels, superpage alignment | Four-level 4-KiB builders/walks and all supported superpage leaf levels are exercised by `translation-superpages`; fault differential tests remain |
 | T2: nested composition | Independent VS walk plus G walk for all four mode pairs, plus VS-only/G-only/Bare degenerations | Four-pair 4-KiB matrix has cold and warm PA checks, implicit page-table accesses, and no stage elision; Bare degenerations execute in `translation-bare` |
 | T3: protection/faults | PTE V/R/W/X/U/G/A/D, PBMT/N/reserved bits, SUM/MXR, stage-specific access type, noncanonical VA, high-GPA overflow | Each invalid class produces the correct stage/cause/VA/GPA and no forbidden side effect |
-| T4: context and fences | ASID/VMID reuse, root changes, `V` transitions, `SFENCE.VMA`, `HFENCE.VVMA`, `HFENCE.GVMA`, outstanding walks | Global/selective `SFENCE.VMA`, selective `HFENCE.VVMA`, and global `HFENCE.GVMA` leaf-update visibility are implemented; outstanding-walk ordering and full context isolation remain |
+| T4: context and fences | ASID/VMID reuse, root changes, `V` transitions, `SFENCE.VMA`, `HFENCE.VVMA`, `HFENCE.GVMA`, outstanding walks | Host/VS/G root and ID switches, host/nested `V` transitions, global/selective `SFENCE.VMA`, selective `HFENCE.VVMA`, and global `HFENCE.GVMA` execute; same-ID reuse with fences and outstanding-walk ordering remain |
 | T5: MemBlock stress | Mix all closed translation modes with LSQ wrap, split accesses, cache misses, redirect, and manager backpressure | Per-seed translation coverage and queue/progress gates remain green under long random runs |
 
 T1-T4 are required before the corresponding rows can be marked implemented.
@@ -238,8 +238,8 @@ cacheable tests pass.
 | Nested mode matrix | `Sv39->Sv39x4`, `Sv39->Sv48x4`, `Sv48->Sv39x4`, `Sv48->Sv48x4`, plus `vsatp`/`hgatp` Bare degenerations | Partial; all four 4-KiB pairs are executable in `translation-matrix`, including cold/warm TLB reuse; VS-only/G-only/fully-Bare degenerations execute in `translation-bare` |
 | Stage-only translation | HS/S/U stage-1 only, VS/VU stage-1 only, G-stage only for implicit page-table/HLV-class accesses | Partial; only current data-access paths are modeled |
 | TLB behavior | cold miss, hit, refill, duplicate miss, replay, invalidation, `sfence.vma`, concurrent page walks | Partial |
-| Page permissions | R/W/X/U/G, SUM/MXR at HS/VS stage, G-stage U-mode rule, read-only store, execute-only, access/dirty bit updates, privilege transitions | Partial; `translation-permissions` executes 36 cases across Sv39/Sv48 U/S, SUM, MXR, A/D, VSUM/VMXR, G-stage MXR/A, exact readback, fault cause, manager non-use, and SQ conservation; G-stage store-D, PBMT/reserved, and context transitions remain |
-| Mode/context switching | `satp/vsatp/hgatp` root and MODE changes, ASID/VMID reuse, `V` transitions, same VA under distinct contexts | Partial; `translation-context` covers same-VA Sv39-to-Sv48 root/MODE switch; VS/G-stage context isolation and `V` transitions remain |
+| Page permissions | R/W/X/U/G, SUM/MXR at HS/VS stage, G-stage U-mode rule, read-only store, execute-only, access/dirty bit updates, privilege transitions | Partial; `translation-permissions` executes 36 cases across Sv39/Sv48 U/S, SUM, MXR, A/D, VSUM/VMXR, G-stage MXR/A, exact readback, fault cause, manager non-use, and SQ conservation; G-stage store-D and PBMT/reserved cases remain |
+| Mode/context switching | `satp/vsatp/hgatp` root and MODE changes, ASID/VMID reuse, `V` transitions, same VA under distinct contexts | Partial; `translation-context` covers five context families and 14 distinct-data same-address accesses across host ASID/root, VS ASID/root, G-stage VMID/root, mode, and `V` switches; same-ID fenced reuse and in-flight transitions remain |
 | Translation fences | `SFENCE.VMA`, `HFENCE.VVMA`, `HFENCE.GVMA`, selective/global scope and updates with outstanding traffic | Partial; global/selective `SFENCE.VMA`, selective `HFENCE.VVMA`, and global `HFENCE.GVMA` leaf-update invalidation are implemented by `translation-fence` |
 | PMP/PMA | TOR/NA4/NAPOT, overlap priority, lock, M/R/W/X, cacheability, atomic/MMIO permissions, exact region edges | Planned |
 | Fault classes | load/store/instruction access fault, stage-1 page fault, G-stage guest-page fault, noncanonical VA, high-GPA overflow, address-misaligned, access-denied, bus/ECC error | Partial; load/store/page/misaligned, noncanonical, high-GPA, and denied/corrupt D-channel cases are executable; PMP/PMA access-denied and physical ECC injection remain |
@@ -389,14 +389,16 @@ are planned work items, not silently accepted coverage:
 - HLV, HLVX, HSV, SPVP, final physical execute permission, and hypervisor PMP;
 - complete PMP/PMA TOR/NA4/NAPOT, lock, priority, cacheability, and region-edge
   matrices;
-- VS/G-stage context isolation and `V` transitions (noncanonical and high-GPA
-  fault execution is covered by `translation-faults`; the four-level 4-KiB
-  builders, all four nested pairs, all Bare
-  degenerations, and all supported superpage leaves are covered by
-  `translation-matrix`/`translation-bare`/`translation-superpages`; a direct
-  Sv39-to-Sv48 root/MODE switch is covered by `translation-context`);
-- A/D updates, SUM/MXR combinations, invalidation races, and concurrent page
-  walks;
+- same-ID ASID/VMID reuse with the required fences, plus context transitions
+  while page walks remain outstanding (host/VS/G root-and-ID isolation and
+  `V` transitions are covered by `translation-context`; noncanonical and
+  high-GPA faults are covered by `translation-faults`; the four-level 4-KiB
+  builders, all four nested pairs, all Bare degenerations, and all supported
+  superpage leaves are covered by `translation-matrix`/`translation-bare`/
+  `translation-superpages`);
+- hardware A/D updates, invalidation races, and concurrent page walks (missing-A
+  load/store faults, missing-D store faults, and SUM/MXR/VSUM/VMXR permission
+  outcomes are covered by `translation-permissions`);
 - manager-originated TileLink probes, probe acknowledgements, denied/corrupt
   responses, ECC errors, and coherence error recovery;
 - simultaneous malformed/duplicate/early/late PTW and uncache responses;

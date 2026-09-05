@@ -4867,6 +4867,31 @@ int run_translation_fence(int argc, char **argv)
 
 int run_translation_context(int argc, char **argv)
 {
+    auto run_context_load = [](
+        memblock::Environment &environment,
+        std::uint64_t virtual_address,
+        std::uint64_t physical_address,
+        std::uint8_t rob,
+        std::uint8_t lq,
+        std::uint8_t pdest,
+        unsigned lane) {
+        const memblock::LoadTransaction transaction{
+            .address = virtual_address,
+            .oracle_address = physical_address,
+            .op = memblock::LoadOp::ld,
+            .rob = rob,
+            .lq = lq,
+            .pdest = pdest,
+            .lane = lane,
+        };
+        environment.expect_load(transaction);
+        return environment.set_rob_head(transaction.rob, transaction.rob_flag) &&
+            environment.enqueue_load(transaction) &&
+            environment.issue_load(transaction, 2048) &&
+            environment.run_until_complete(16384) &&
+            environment.run_until_lq_retired(4096);
+    };
+
     memblock::Environment environment(argc, argv);
     constexpr std::uint64_t virtual_address = 0x64000188ULL;
     constexpr std::uint64_t virtual_base = 0x64000000ULL;
@@ -4938,10 +4963,182 @@ int run_translation_context(int argc, char **argv)
         return 1;
     }
 
+    std::uint64_t total_ptw_requests = environment.ptw_requests();
+    std::uint64_t total_writebacks = environment.writebacks();
+    unsigned accesses = 2;
+
+    // Same-mode satp root and ASID changes must not reuse the old PA for the
+    // same VA. Switching back also checks that identity tags are not confused.
+    {
+        memblock::Environment context(argc, argv);
+        constexpr std::uint64_t address = 0x66000188ULL;
+        constexpr std::uint64_t virtual_base = 0x66000000ULL;
+        constexpr std::uint64_t physical_a = 0xc7000000ULL;
+        constexpr std::uint64_t physical_b = 0xc7100000ULL;
+        constexpr std::uint64_t root_a = 0xab000000ULL;
+        constexpr std::uint64_t root_b = 0xad000000ULL;
+        context.memory().fill_incrementing(physical_a, 0x1000, 0x31);
+        context.memory().fill_incrementing(physical_b, 0x1000, 0xc1);
+        if (!context.reset() ||
+            !context.map_sv39_4k(virtual_base, physical_a, root_a) ||
+            !context.map_sv39_4k(virtual_base, physical_b, root_b) ||
+            !context.activate_sv39(root_a, 17) ||
+            !run_context_load(
+                context, address, physical_a + 0x188, 0, 0, 100, 0) ||
+            !context.activate_sv39(root_b, 18) ||
+            !run_context_load(
+                context, address, physical_b + 0x188, 1, 1, 101, 1) ||
+            !context.activate_sv39(root_a, 17) ||
+            !run_context_load(
+                context, address, physical_a + 0x188, 2, 2, 102, 2)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_CONTEXT_FAIL phase=satp-asid reason="
+                      << context.error() << '\n';
+            return 1;
+        }
+        total_ptw_requests += context.ptw_requests();
+        total_writebacks += context.writebacks();
+        accesses += 3;
+    }
+
+    // Change only the VS root/ASID while retaining the G-stage root/VMID.
+    // Both VS page-table trees and both final GPAs are independently mapped.
+    {
+        memblock::Environment context(argc, argv);
+        constexpr std::uint64_t address = 0x68000188ULL;
+        constexpr std::uint64_t virtual_base = 0x68000000ULL;
+        constexpr std::uint64_t guest_a = 0x8c000000ULL;
+        constexpr std::uint64_t guest_b = 0x8d000000ULL;
+        constexpr std::uint64_t physical_a = 0xc7200000ULL;
+        constexpr std::uint64_t physical_b = 0xc7300000ULL;
+        constexpr std::uint64_t vs_root_a = 0xae000000ULL;
+        constexpr std::uint64_t vs_root_b = 0xaf000000ULL;
+        constexpr std::uint64_t g_root = 0xb0000000ULL;
+        context.memory().fill_incrementing(physical_a, 0x1000, 0x42);
+        context.memory().fill_incrementing(physical_b, 0x1000, 0xd2);
+        if (!context.reset() ||
+            !context.map_sv39_4k(virtual_base, guest_a, vs_root_a) ||
+            !context.map_sv39_4k(virtual_base, guest_b, vs_root_b) ||
+            !context.map_sv39x4_4k(vs_root_a, vs_root_a, g_root) ||
+            !context.map_sv39x4_4k(
+                vs_root_a + 0x1000, vs_root_a + 0x1000, g_root) ||
+            !context.map_sv39x4_4k(
+                vs_root_a + 0x2000, vs_root_a + 0x2000, g_root) ||
+            !context.map_sv39x4_4k(vs_root_b, vs_root_b, g_root) ||
+            !context.map_sv39x4_4k(
+                vs_root_b + 0x1000, vs_root_b + 0x1000, g_root) ||
+            !context.map_sv39x4_4k(
+                vs_root_b + 0x2000, vs_root_b + 0x2000, g_root) ||
+            !context.map_sv39x4_4k(guest_a, physical_a, g_root) ||
+            !context.map_sv39x4_4k(guest_b, physical_b, g_root) ||
+            !context.activate_two_stage(vs_root_a, g_root, 21, 31) ||
+            !run_context_load(
+                context, address, physical_a + 0x188, 0, 0, 103, 0) ||
+            !context.activate_two_stage(vs_root_b, g_root, 22, 31) ||
+            !run_context_load(
+                context, address, physical_b + 0x188, 1, 1, 104, 1) ||
+            !context.activate_two_stage(vs_root_a, g_root, 21, 31) ||
+            !run_context_load(
+                context, address, physical_a + 0x188, 2, 2, 105, 2)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_CONTEXT_FAIL phase=vsatp-asid reason="
+                      << context.error() << '\n';
+            return 1;
+        }
+        total_ptw_requests += context.ptw_requests();
+        total_writebacks += context.writebacks();
+        accesses += 3;
+    }
+
+    // Retain the VS translation while changing hgatp VMID/root. The same GPA
+    // deliberately resolves to different host pages under the two contexts.
+    {
+        memblock::Environment context(argc, argv);
+        constexpr std::uint64_t address = 0x6a000188ULL;
+        constexpr std::uint64_t virtual_base = 0x6a000000ULL;
+        constexpr std::uint64_t guest = 0x8e000000ULL;
+        constexpr std::uint64_t physical_a = 0xc7400000ULL;
+        constexpr std::uint64_t physical_b = 0xc7500000ULL;
+        constexpr std::uint64_t vs_root = 0xb1000000ULL;
+        constexpr std::uint64_t g_root_a = 0xb2000000ULL;
+        constexpr std::uint64_t g_root_b = 0xb3000000ULL;
+        context.memory().fill_incrementing(physical_a, 0x1000, 0x53);
+        context.memory().fill_incrementing(physical_b, 0x1000, 0xe3);
+        if (!context.reset() ||
+            !context.map_sv39_4k(virtual_base, guest, vs_root) ||
+            !context.map_sv39x4_4k(vs_root, vs_root, g_root_a) ||
+            !context.map_sv39x4_4k(
+                vs_root + 0x1000, vs_root + 0x1000, g_root_a) ||
+            !context.map_sv39x4_4k(
+                vs_root + 0x2000, vs_root + 0x2000, g_root_a) ||
+            !context.map_sv39x4_4k(guest, physical_a, g_root_a) ||
+            !context.map_sv39x4_4k(vs_root, vs_root, g_root_b) ||
+            !context.map_sv39x4_4k(
+                vs_root + 0x1000, vs_root + 0x1000, g_root_b) ||
+            !context.map_sv39x4_4k(
+                vs_root + 0x2000, vs_root + 0x2000, g_root_b) ||
+            !context.map_sv39x4_4k(guest, physical_b, g_root_b) ||
+            !context.activate_two_stage(vs_root, g_root_a, 25, 35) ||
+            !run_context_load(
+                context, address, physical_a + 0x188, 0, 0, 106, 0) ||
+            !context.activate_two_stage(vs_root, g_root_b, 25, 36) ||
+            !run_context_load(
+                context, address, physical_b + 0x188, 1, 1, 107, 1) ||
+            !context.activate_two_stage(vs_root, g_root_a, 25, 35) ||
+            !run_context_load(
+                context, address, physical_a + 0x188, 2, 2, 108, 2)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_CONTEXT_FAIL phase=hgatp-vmid reason="
+                      << context.error() << '\n';
+            return 1;
+        }
+        total_ptw_requests += context.ptw_requests();
+        total_writebacks += context.writebacks();
+        accesses += 3;
+    }
+
+    // Exercise virt_changed in both directions with the same input address.
+    {
+        memblock::Environment context(argc, argv);
+        constexpr std::uint64_t address = 0x6c000188ULL;
+        constexpr std::uint64_t virtual_base = 0x6c000000ULL;
+        constexpr std::uint64_t host_physical = 0xc7600000ULL;
+        constexpr std::uint64_t guest = 0x8f000000ULL;
+        constexpr std::uint64_t guest_host_physical = 0xc7700000ULL;
+        constexpr std::uint64_t host_root = 0xb4000000ULL;
+        constexpr std::uint64_t vs_root = 0xb5000000ULL;
+        constexpr std::uint64_t g_root = 0xb6000000ULL;
+        context.memory().fill_incrementing(host_physical, 0x1000, 0x64);
+        context.memory().fill_incrementing(guest_host_physical, 0x1000, 0xf4);
+        if (!context.reset() ||
+            !context.map_sv39_4k(virtual_base, host_physical, host_root) ||
+            !context.map_sv39_4k(virtual_base, guest, vs_root) ||
+            !context.map_sv39x4_4k(vs_root, vs_root, g_root) ||
+            !context.map_sv39x4_4k(
+                vs_root + 0x1000, vs_root + 0x1000, g_root) ||
+            !context.map_sv39x4_4k(
+                vs_root + 0x2000, vs_root + 0x2000, g_root) ||
+            !context.map_sv39x4_4k(guest, guest_host_physical, g_root) ||
+            !context.activate_sv39(host_root, 27) ||
+            !run_context_load(
+                context, address, host_physical + 0x188, 0, 0, 109, 0) ||
+            !context.activate_two_stage(vs_root, g_root, 28, 38) ||
+            !run_context_load(
+                context, address, guest_host_physical + 0x188, 1, 1, 110, 1) ||
+            !context.activate_sv39(host_root, 27) ||
+            !run_context_load(
+                context, address, host_physical + 0x188, 2, 2, 111, 2)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_CONTEXT_FAIL phase=virt-transition reason="
+                      << context.error() << '\n';
+            return 1;
+        }
+        total_ptw_requests += context.ptw_requests();
+        total_writebacks += context.writebacks();
+        accesses += 3;
+    }
+
     std::cout << "MEMBLOCK_TRANSLATION_CONTEXT_PASS"
-              << " cycle=" << environment.cycle()
-              << " ptw_requests=" << environment.ptw_requests()
-              << " writebacks=" << environment.writebacks()
+              << " contexts=5"
+              << " accesses=" << accesses
+              << " ptw_requests=" << total_ptw_requests
+              << " writebacks=" << total_writebacks
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

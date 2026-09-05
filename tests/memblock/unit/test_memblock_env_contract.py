@@ -440,6 +440,21 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, main)
 
+    def test_translation_context_covers_host_guest_and_virtuality_switches(self) -> None:
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "phase=satp-asid",
+            "phase=vsatp-asid",
+            "phase=hgatp-vmid",
+            "phase=virt-transition",
+            "activate_sv39(root_a, 17)",
+            "activate_two_stage(vs_root_b, g_root, 22, 31)",
+            "activate_two_stage(vs_root, g_root_b, 25, 36)",
+            '" contexts=5"',
+            '" accesses="',
+        ):
+            self.assertIn(contract, main)
+
     def test_stress_driver_requires_real_burst_overlap_and_combo_gates(self) -> None:
         driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
         for contract in (

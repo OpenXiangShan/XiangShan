@@ -216,12 +216,15 @@ requests.
 
 `translation-fence` updates live stage-1 and nested leaves, then checks global
 and selective `SFENCE.VMA`, selective `HFENCE.VVMA`, and global
-`HFENCE.GVMA` visibility after the required refill. Broader ASID/VMID
-isolation and outstanding-walk ordering remain separate coverage points.
+`HFENCE.GVMA` visibility after the required refill. Same-ID ASID/VMID reuse
+and outstanding-walk ordering remain separate coverage points.
 
-`translation-context` switches the same VA from an Sv39 root to an Sv48 root
-with a different ASID and verifies that the post-switch access performs a new
-walk and returns the new physical page.
+`translation-context` checks five context families with 14 architectural
+loads: direct Sv39-to-Sv48 mode/root switching, same-mode `satp` ASID/root,
+`vsatp` ASID/root under a retained G context, `hgatp` VMID/root under a retained
+VS context, and host/nested/host `virt` transitions. Each context maps the same
+input address to distinct data so stale translation reuse is externally
+observable.
 
 `translation-superpages` walks 2 MiB and 1 GiB leaves in Sv39/Sv48 and their
 Sv39x4/Sv48x4 G-stage equivalents, plus the Sv48 512 GiB leaf. Each case is

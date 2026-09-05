@@ -130,9 +130,11 @@ global and selective `SFENCE.VMA`; nested VS and G-stage leaf updates refilled
 after selective `HFENCE.VVMA` and global `HFENCE.GVMA` respectively (35 PTW
 requests and ten load writebacks across all checks).
 
-`make translation-context` passed the direct Sv39-to-Sv48 `satp` root/MODE and
-ASID switch on one VA: the first access used the Sv39 physical page, the switch
-forced a new four-level walk, and the second access used the Sv48 physical page.
+`make translation-context` passed five context families and 14 same-address
+loads: direct Sv39-to-Sv48 mode/root, same-mode host ASID/root, VS ASID/root,
+G-stage VMID/root, and host/nested/host `virt` transitions. Every switch and
+switch-back returned the independently selected physical-page data; 55 PTW
+requests completed without a stale-context result.
 
 `make translation-superpages` passed all ten deterministic leaf cases: Sv39 and
 Sv48 stage-1 2 MiB/1 GiB leaves, Sv48 512 GiB, and the corresponding
