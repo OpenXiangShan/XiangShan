@@ -40,6 +40,40 @@ class PteHelper() extends ExtModule {
   val s2_pte = IO(Output(UInt(64.W)))
   val s1_level = IO(Output(UInt(8.W)))
 
+  private val cppExtModule =
+    """
+      |void PteHelper (
+      |  uint8_t   enable,
+      |  uint64_t  satp,
+      |  uint64_t  vsatp,
+      |  uint64_t  hgatp,
+      |  uint8_t   mPBMTE,
+      |  uint8_t   hPBMTE,
+      |  uint64_t  vpn,
+      |  uint8_t   s2xlate,
+      |  uint64_t& pte,
+      |  uint8_t&  level,
+      |  uint8_t&  pfType,
+      |  uint64_t& s1_pte,
+      |  uint64_t& s2_pte,
+      |  uint8_t&  s1_level
+      |) {
+      |  pte = 0;
+      |  level = 0;
+      |  pfType = 0;
+      |  s1_pte = 0;
+      |  s2_pte = 0;
+      |  s1_level = 0;
+      |  if (enable) {
+      |    pfType = pte_helper(
+      |      satp, vsatp, hgatp, mPBMTE, hPBMTE, vpn, s2xlate,
+      |      &pte, &level, &s1_pte, &s2_pte, &s1_level
+      |    );
+      |  }
+      |}
+      |""".stripMargin
+  difftest.DifftestModule.createCppExtModule("PteHelper", cppExtModule, Some("\"golden.h\""))
+
   def connectCsr(csr: TlbCsrBundle): Unit = {
     satp := Cat(csr.satp.mode, csr.satp.asid, csr.satp.ppn)
     vsatp := Cat(csr.vsatp.mode, csr.vsatp.asid, csr.vsatp.ppn)
