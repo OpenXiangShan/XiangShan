@@ -31,7 +31,7 @@ independent cold-walk/reuse coverage. The terminal summary uses
 `constraint_schema=2`; the offline verifier rejects any enabled translation,
 nested-pair, fence, walk, or reuse class that was not observed.
 
-The rebuilt model passed 119 Python contract/verifier tests and 256-action RTL
+The rebuilt model passed 120 Python contract/verifier tests and 256-action RTL
 runs for `coverage`, `spec`, `corner`, Sv48-only, nested-only, and Bare-only
 configurations. Representative seeds 41 and 47 covered all six legal fence
 kind/scope points, all four nested pairs, both cold walks and TLB reuse, and
@@ -59,6 +59,18 @@ the vector path already did, made the same 4,096-action seed pass with balanced
 `3844/3844` SQ accounting. All reproduced failures disappeared after correcting
 the drivers while the RTL remained unchanged. They are not CPU bugs and
 therefore do not have `CPU_BUG_*` documents.
+
+The post-fix harness then completed provenance-checked SPEC seeds 304..311 and
+corner seeds 403..410, each with 4,096 actions per seed and eight parallel
+workers. Both 32,768-action artifacts passed the independent verifier with
+complete RTL SHA-256
+`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
+The SPEC artifact SHA-256 is
+`45a78daf7fff758f038c48d7c1a5ef5a9ad0b55f0e5ecd5505b71d2886a0ea67`;
+the corner artifact SHA-256 is
+`a8e1e42b54297b0dce073b6e40906563d9f7b423bcd69be5762849309bf486bf`.
+The generated artifacts are `/tmp/memblock-translation-spec-post-sq-target-verified-8x4096.json`
+and `/tmp/memblock-translation-corner-post-sq-target-verified-8x4096.json`.
 
 ## Superseded Pre-Clarification Stress
 
