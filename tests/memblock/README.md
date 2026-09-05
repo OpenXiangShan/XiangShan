@@ -233,13 +233,15 @@ and selective `SFENCE.VMA`, selective `HFENCE.VVMA`, and global
 host ASID, VS ASID, and VMID to distinct page-table roots, applies the matching
 targeted fence, and checks distinct physical data after a new PTW refill. A
 stage-1 race holds an old 1-GiB root-leaf response in the PTW manager, replaces
-the PTE, and aligns a global `SFENCE.VMA` with the redirect. The canceled load
-must not write back, and a same-identity survivor must refill and return only
-the new physical data. Matching VS-only and G-only races apply global
-`HFENCE.VVMA` and `HFENCE.GVMA` to delayed root-leaf responses. Selective
-in-flight fences and the Sv48/Sv48x4 outstanding-walk crosses remain separate
-coverage points; fully nested Sv39/Sv39x4 cases additionally wait for the exact
-VS or final G PTE TileLink beat before replacing it and fencing.
+the PTE, and aligns `SFENCE.VMA` with the redirect. The canceled load must not
+write back, and a same-identity survivor must refill and return only the new
+physical data. Separate `translation-fence` and `translation-fence-selective`
+processes apply global and address/identity-selective fences to stage-1,
+VS-only, G-only, fully nested VS, and fully nested G delayed PTE responses. The
+fully nested Sv39/Sv39x4 cases wait for the exact VS or final G PTE TileLink
+beat before replacing it and fencing; the selective `HFENCE.GVMA` operand is
+encoded as `GPA >> 2`. Sv48/Sv48x4 outstanding-walk crosses remain separate
+coverage points.
 
 `translation-context` checks five context families with 14 architectural
 loads: direct Sv39-to-Sv48 mode/root switching, same-mode `satp` ASID/root,
