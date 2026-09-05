@@ -203,6 +203,7 @@ make translation-context PICKER="$PICKER" JOBS=8
 make translation-bare PICKER="$PICKER" JOBS=8
 make translation-faults PICKER="$PICKER" JOBS=8
 make translation-permissions PICKER="$PICKER" JOBS=8
+make translation-pbmt PICKER="$PICKER" JOBS=8
 make translation-superpages PICKER="$PICKER" JOBS=8
 make scalar-guest-fault PICKER="$PICKER" JOBS=8
 make vector-guest-fault PICKER="$PICKER" JOBS=8
@@ -265,6 +266,12 @@ all four VS/G-stage mode pairs, and G-stage R/A/D/U behavior for scalar loads
 and stores. Passing stores require exact post-commit readback; faulting stores
 must not reach DCache or Uncache and must retire or be explicitly canceled so
 SQ accounting remains exact.
+
+`translation-pbmt` crosses all four Sv39/Sv48 and Sv39x4/Sv48x4 mode pairs
+with every VS-stage and G-stage `PMA/NC/IO` combination. The independent oracle
+applies the architectural VS-stage override priority, then checks exact load
+data, committed store readback, IO commit gating, DCache/Uncache selection, and
+LSQ conservation.
 
 `fp-loads` exercises the separate FP destination-enable path for 32-bit and
 64-bit load widths. The scoreboard requires no integer-register write and an

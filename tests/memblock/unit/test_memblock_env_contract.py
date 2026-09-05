@@ -458,6 +458,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "translation-bare",
             "translation-faults",
             "translation-permissions",
+            "translation-pbmt",
             "translation-superpages",
             "hfence-vvma",
             "fp-loads",
@@ -505,9 +506,12 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
         for contract in (
             "ReferencePtePermissions",
+            "ReferencePbmt",
             "reference_load_permitted",
             "reference_store_permitted",
+            "reference_two_stage_pbmt",
             "set_translation_permissions",
+            "set_page_based_memory_types",
             "io_ooo_to_mem_tlbCsr_priv_dmode",
             "io_ooo_to_mem_tlbCsr_priv_mxr",
             "io_ooo_to_mem_tlbCsr_priv_sum",
@@ -536,6 +540,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "stage1_store_cases=",
             "two_stage_load_cases=",
             "two_stage_store_cases=",
+            "MEMBLOCK_TRANSLATION_PBMT_PASS",
+            "final_pma=",
+            "final_nc=",
+            "final_io=",
         ):
             self.assertIn(contract, main)
 

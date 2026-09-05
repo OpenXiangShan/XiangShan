@@ -509,6 +509,18 @@ enum class ReferencePageMode : std::uint8_t {
     sv48 = 9,
 };
 
+enum class ReferencePbmt : std::uint8_t {
+    pma = 0,
+    nc = 1,
+    io = 2,
+};
+
+inline ReferencePbmt reference_two_stage_pbmt(
+    ReferencePbmt vs_pbmt, ReferencePbmt g_pbmt)
+{
+    return vs_pbmt == ReferencePbmt::pma ? g_pbmt : vs_pbmt;
+}
+
 enum class ReferencePrivilegeMode : std::uint8_t {
     user = 0,
     supervisor = 1,
@@ -3637,12 +3649,13 @@ public:
         bool user = false,
         bool noncacheable = false,
         bool accessed = true,
-        std::optional<bool> dirty = std::nullopt)
+        std::optional<bool> dirty = std::nullopt,
+        bool io = false)
     {
         return map_reference_leaf(
             virtual_address, physical_address, root_page_table,
             ReferencePageMode::sv39, false, leaf_level, readable, writable,
-            executable, user, noncacheable, accessed, dirty);
+            executable, user, noncacheable, accessed, dirty, io);
     }
 
     bool map_sv39_2m(
@@ -3686,12 +3699,13 @@ public:
         bool user = false,
         bool noncacheable = false,
         bool accessed = true,
-        std::optional<bool> dirty = std::nullopt)
+        std::optional<bool> dirty = std::nullopt,
+        bool io = false)
     {
         return map_reference_leaf(
             virtual_address, physical_address, root_page_table,
             ReferencePageMode::sv48, false, leaf_level, readable, writable,
-            executable, user, noncacheable, accessed, dirty);
+            executable, user, noncacheable, accessed, dirty, io);
     }
 
     bool map_sv48_2m(
@@ -3828,12 +3842,14 @@ public:
         bool executable = false,
         bool accessed = true,
         std::optional<bool> dirty = std::nullopt,
-        bool user = true)
+        bool user = true,
+        bool noncacheable = false,
+        bool io = false)
     {
         return map_reference_leaf(
             guest_physical_address, host_physical_address, root_page_table,
             ReferencePageMode::sv48, true, leaf_level, readable, writable,
-            executable, user, false, accessed, dirty);
+            executable, user, noncacheable, accessed, dirty, io);
     }
 
     bool map_sv48x4_2m(
@@ -3889,7 +3905,8 @@ private:
         bool user,
         bool noncacheable,
         bool accessed = true,
-        std::optional<bool> dirty = std::nullopt)
+        std::optional<bool> dirty = std::nullopt,
+        bool io = false)
     {
         constexpr std::uint64_t page_mask = 0xfff;
         constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
@@ -3900,6 +3917,7 @@ private:
         constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
         constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
         constexpr std::uint64_t pte_pbmt_nc = std::uint64_t{1} << 61;
+        constexpr std::uint64_t pte_pbmt_io = std::uint64_t{1} << 62;
         if (leaf_level >= reference_page_levels(mode)) {
             error_ = "page mapping leaf level exceeds selected mode";
             return false;
@@ -3923,6 +3941,10 @@ private:
         }
         if (writable && !readable) {
             error_ = "page mapping does not permit W=1,R=0 leaf mappings";
+            return false;
+        }
+        if (noncacheable && io) {
+            error_ = "page mapping cannot select NC and IO simultaneously";
             return false;
         }
 
@@ -3968,7 +3990,8 @@ private:
             (user ? pte_user : 0) |
             (accessed ? pte_accessed : 0) |
             (dirty.value_or(writable) ? pte_dirty : 0) |
-            (noncacheable ? pte_pbmt_nc : 0);
+            (noncacheable ? pte_pbmt_nc : 0) |
+            (io ? pte_pbmt_io : 0);
         memory_.write_u64(
             table + leaf_index * 8,
             (((physical_address & ~page_mask) >> 12) << 10) | flags);
@@ -4076,12 +4099,14 @@ public:
         bool executable = false,
         bool accessed = true,
         std::optional<bool> dirty = std::nullopt,
-        bool user = true)
+        bool user = true,
+        bool noncacheable = false,
+        bool io = false)
     {
         return map_reference_leaf(
             guest_physical_address, host_physical_address, root_page_table,
             ReferencePageMode::sv39, true, leaf_level, readable, writable,
-            executable, user, false, accessed, dirty);
+            executable, user, noncacheable, accessed, dirty, io);
     }
 
     bool map_sv39x4_2m(

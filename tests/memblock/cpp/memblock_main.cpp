@@ -7477,6 +7477,304 @@ int run_translation_permissions(int argc, char **argv)
     return 0;
 }
 
+int run_translation_pbmt(int argc, char **argv)
+{
+    constexpr std::array<memblock::ReferencePageMode, 2> modes{{
+        memblock::ReferencePageMode::sv39,
+        memblock::ReferencePageMode::sv48,
+    }};
+    constexpr std::array<memblock::ReferencePbmt, 3> pbmts{{
+        memblock::ReferencePbmt::pma,
+        memblock::ReferencePbmt::nc,
+        memblock::ReferencePbmt::io,
+    }};
+    auto pbmt_name = [](memblock::ReferencePbmt pbmt) {
+        switch (pbmt) {
+        case memblock::ReferencePbmt::pma:
+            return "pma";
+        case memblock::ReferencePbmt::nc:
+            return "nc";
+        case memblock::ReferencePbmt::io:
+            return "io";
+        }
+        return "invalid";
+    };
+
+    unsigned combinations = 0;
+    unsigned load_transactions = 0;
+    unsigned store_transactions = 0;
+    std::array<unsigned, 3> final_pbmt_counts{};
+    for (const auto vs_mode : modes) {
+        for (const auto g_mode : modes) {
+            for (const auto vs_pbmt : pbmts) {
+                for (const auto g_pbmt : pbmts) {
+                    const auto final_pbmt = memblock::reference_two_stage_pbmt(
+                        vs_pbmt, g_pbmt);
+                    const bool final_nc =
+                        final_pbmt == memblock::ReferencePbmt::nc;
+                    const bool final_io =
+                        final_pbmt == memblock::ReferencePbmt::io;
+                    const unsigned index = combinations;
+                    std::ostringstream phase;
+                    phase << (vs_mode == memblock::ReferencePageMode::sv48
+                                  ? "sv48"
+                                  : "sv39")
+                          << '-'
+                          << (g_mode == memblock::ReferencePageMode::sv48
+                                  ? "sv48x4"
+                                  : "sv39x4")
+                          << "-vs-" << pbmt_name(vs_pbmt)
+                          << "-g-" << pbmt_name(g_pbmt)
+                          << "-final-" << pbmt_name(final_pbmt);
+
+                    memblock::Environment environment(argc, argv);
+                    constexpr std::uint64_t guest_virtual = 0x61000000ULL;
+                    constexpr std::uint64_t guest_physical = 0x9e000000ULL;
+                    constexpr std::uint64_t host_physical = 0xc4000000ULL;
+                    constexpr std::uint64_t vs_root = 0xb0000000ULL;
+                    constexpr std::uint64_t g_root = 0xb2000000ULL;
+                    environment.memory().fill_incrementing(
+                        host_physical, 0x1000,
+                        static_cast<unsigned char>(0x31 + index));
+                    const bool vs_nc = vs_pbmt == memblock::ReferencePbmt::nc;
+                    const bool vs_io = vs_pbmt == memblock::ReferencePbmt::io;
+                    const bool g_nc = g_pbmt == memblock::ReferencePbmt::nc;
+                    const bool g_io = g_pbmt == memblock::ReferencePbmt::io;
+                    bool configured = environment.reset();
+                    configured = configured &&
+                        (vs_mode == memblock::ReferencePageMode::sv48
+                             ? environment.map_sv48_leaf(
+                                   guest_virtual, guest_physical, 0, vs_root,
+                                   true, true, false, false, vs_nc, true,
+                                   std::nullopt, vs_io)
+                             : environment.map_sv39_leaf(
+                                   guest_virtual, guest_physical, 0, vs_root,
+                                   true, true, false, false, vs_nc, true,
+                                   std::nullopt, vs_io));
+                    const unsigned vs_table_pages =
+                        vs_mode == memblock::ReferencePageMode::sv48 ? 4U : 3U;
+                    for (unsigned page = 0;
+                         configured && page < vs_table_pages; ++page) {
+                        const std::uint64_t address =
+                            vs_root + page * 0x1000ULL;
+                        configured =
+                            g_mode == memblock::ReferencePageMode::sv48
+                                ? environment.map_sv48x4_4k(
+                                      address, address, g_root)
+                                : environment.map_sv39x4_4k(
+                                      address, address, g_root);
+                    }
+                    configured = configured &&
+                        (g_mode == memblock::ReferencePageMode::sv48
+                             ? environment.map_sv48x4_leaf(
+                                   guest_physical, host_physical, 0, g_root,
+                                   true, true, false, true, std::nullopt, true,
+                                   g_nc, g_io)
+                             : environment.map_sv39x4_leaf(
+                                   guest_physical, host_physical, 0, g_root,
+                                   true, true, false, true, std::nullopt, true,
+                                   g_nc, g_io));
+                    configured = configured &&
+                        environment.activate_two_stage_modes(
+                            vs_mode, g_mode, vs_root, g_root,
+                            static_cast<std::uint16_t>(191 + index),
+                            static_cast<std::uint16_t>(231 + index));
+                    configured = configured &&
+                        environment.set_page_based_memory_types(true, true);
+                    configured = configured &&
+                        environment.set_translation_permissions(
+                            memblock::ReferencePrivilegeMode::supervisor);
+                    if (!configured) {
+                        std::cerr << "MEMBLOCK_TRANSLATION_PBMT_FAIL phase="
+                                  << phase.str() << "-configuration reason="
+                                  << environment.error() << '\n';
+                        return 1;
+                    }
+
+                    const memblock::LoadTransaction load{
+                        .address = guest_virtual + 0x188,
+                        .oracle_address = host_physical + 0x188,
+                        .op = memblock::LoadOp::ld,
+                        .rob = 0,
+                        .lq = 0,
+                        .pdest = static_cast<std::uint8_t>(180 + index),
+                        .lane = index % memblock::kScalarLoadLanes,
+                        .expected_debug_is_mmio = final_io,
+                        .expected_debug_is_ncio = final_io
+                            ? std::optional<bool>{false} : std::nullopt,
+                    };
+                    const std::uint64_t load_dcache_before =
+                        environment.tilelink_requests();
+                    const std::uint64_t load_uncache_before =
+                        environment.uncache_requests();
+                    environment.expect_load(load);
+                    if (!environment.set_rob_head(load.rob, load.rob_flag) ||
+                        !environment.enqueue_load(load) ||
+                        !environment.issue_load(load, 4096) ||
+                        (final_io && !environment.wait_for_mmio_request(
+                            load.rob, load.rob_flag, 16384)) ||
+                        !environment.run_until_complete(32768) ||
+                        !environment.run_until_lq_retired(8192)) {
+                        std::cerr << "MEMBLOCK_TRANSLATION_PBMT_FAIL phase="
+                                  << phase.str() << "-load reason="
+                                  << environment.error() << '\n';
+                        return 1;
+                    }
+                    const std::uint64_t expected_load_dcache =
+                        load_dcache_before + (final_nc || final_io ? 0U : 1U);
+                    const std::uint64_t expected_load_uncache =
+                        load_uncache_before + (final_nc || final_io ? 1U : 0U);
+                    if (environment.tilelink_requests() != expected_load_dcache ||
+                        environment.uncache_requests() != expected_load_uncache) {
+                        std::cerr << "MEMBLOCK_TRANSLATION_PBMT_FAIL phase="
+                                  << phase.str()
+                                  << "-load-path reason=wrong-manager"
+                                  << " dcache="
+                                  << environment.tilelink_requests() << '/'
+                                  << expected_load_dcache << " uncache="
+                                  << environment.uncache_requests() << '/'
+                                  << expected_load_uncache << '\n';
+                        return 1;
+                    }
+                    ++load_transactions;
+
+                    const memblock::StoreTransaction store{
+                        .address = guest_virtual + 0x288,
+                        .oracle_address = host_physical + 0x288,
+                        .data = 0x3141592653589700ULL + index,
+                        .op = memblock::StoreOp::sd,
+                        .rob = 1,
+                        .sq = 0,
+                        .address_lane = index % memblock::kScalarStoreLanes,
+                        .data_lane = (index + 1) % memblock::kScalarStoreLanes,
+                        .expected_debug_is_mmio = false,
+                        .expected_debug_is_ncio = false,
+                    };
+                    const std::uint64_t store_dcache_before =
+                        environment.tilelink_requests();
+                    const std::uint64_t store_uncache_before =
+                        environment.uncache_requests();
+                    environment.expect_store(store);
+                    bool store_ok =
+                        environment.set_rob_head(store.rob, store.rob_flag) &&
+                        environment.enqueue_store(store, 1) &&
+                        environment.issue_store_address_until_tlb_hit(
+                            store, 16384) &&
+                        environment.issue_store_data(store, 4096);
+                    if (store_ok && final_io) {
+                        store_ok = environment.run_cycles(64) &&
+                            environment.wait_for_mmio_store_request(
+                                store.rob, store.rob_flag, 16384) &&
+                            environment.run_until_uncache_requests(
+                                store_uncache_before + 1, 16384) &&
+                            environment.run_until_store_complete(32768) &&
+                            environment.commit_stores_through(store, 1) &&
+                            environment.run_cycles(16);
+                        if (store_ok) {
+                            environment.record_committed_store(store);
+                        }
+                    } else if (store_ok) {
+                        store_ok = environment.run_until_store_complete(32768) &&
+                            environment.commit_store(store, 16384);
+                    }
+                    if (!store_ok) {
+                        std::cerr << "MEMBLOCK_TRANSLATION_PBMT_FAIL phase="
+                                  << phase.str() << "-store reason="
+                                  << environment.error() << '\n';
+                        return 1;
+                    }
+                    if (environment.sq_dequeued() + environment.sq_canceled() !=
+                        environment.sq_allocated()) {
+                        std::cerr << "MEMBLOCK_TRANSLATION_PBMT_FAIL phase="
+                                  << phase.str()
+                                  << "-store-accounting reason=unbalanced-sq\n";
+                        return 1;
+                    }
+                    if ((final_nc || final_io) &&
+                        (environment.tilelink_requests() != store_dcache_before ||
+                         environment.uncache_requests() !=
+                             store_uncache_before + 1)) {
+                        std::cerr << "MEMBLOCK_TRANSLATION_PBMT_FAIL phase="
+                                  << phase.str()
+                                  << "-store-path reason=wrong-manager\n";
+                        return 1;
+                    }
+                    if (!final_nc && !final_io &&
+                        environment.uncache_requests() != store_uncache_before) {
+                        std::cerr << "MEMBLOCK_TRANSLATION_PBMT_FAIL phase="
+                                  << phase.str()
+                                  << "-store-path reason=PMA-used-uncache\n";
+                        return 1;
+                    }
+                    ++store_transactions;
+
+                    const memblock::LoadTransaction readback{
+                        .address = store.address,
+                        .oracle_address = store.oracle_address,
+                        .op = memblock::LoadOp::ld,
+                        .rob = 2,
+                        .lq = 1,
+                        .sq = 1,
+                        .pdest = static_cast<std::uint8_t>(220 + index),
+                        .lane = (index + 1) % memblock::kScalarLoadLanes,
+                        .expected_debug_is_mmio = final_io,
+                        .expected_debug_is_ncio = final_io
+                            ? std::optional<bool>{false} : std::nullopt,
+                    };
+                    const std::uint64_t readback_dcache_before =
+                        environment.tilelink_requests();
+                    const std::uint64_t readback_uncache_before =
+                        environment.uncache_requests();
+                    environment.expect_load_data(readback, store.data);
+                    if (!environment.set_rob_head(
+                            readback.rob, readback.rob_flag) ||
+                        !environment.enqueue_load(readback) ||
+                        !environment.issue_load(readback, 4096) ||
+                        (final_io && !environment.wait_for_mmio_request(
+                            readback.rob, readback.rob_flag, 16384)) ||
+                        !environment.run_until_complete(32768) ||
+                        !environment.run_until_lq_retired(8192)) {
+                        std::cerr << "MEMBLOCK_TRANSLATION_PBMT_FAIL phase="
+                                  << phase.str() << "-readback reason="
+                                  << environment.error() << '\n';
+                        return 1;
+                    }
+                    if ((final_nc || final_io) &&
+                        (environment.tilelink_requests() !=
+                             readback_dcache_before ||
+                         environment.uncache_requests() !=
+                             readback_uncache_before + 1)) {
+                        std::cerr << "MEMBLOCK_TRANSLATION_PBMT_FAIL phase="
+                                  << phase.str()
+                                  << "-readback-path reason=wrong-manager\n";
+                        return 1;
+                    }
+                    if (!final_nc && !final_io &&
+                        environment.uncache_requests() !=
+                            readback_uncache_before) {
+                        std::cerr << "MEMBLOCK_TRANSLATION_PBMT_FAIL phase="
+                                  << phase.str()
+                                  << "-readback-path reason=PMA-used-uncache\n";
+                        return 1;
+                    }
+                    ++load_transactions;
+                    ++final_pbmt_counts[static_cast<unsigned>(final_pbmt)];
+                    ++combinations;
+                }
+            }
+        }
+    }
+
+    std::cout << "MEMBLOCK_TRANSLATION_PBMT_PASS combinations="
+              << combinations << " loads=" << load_transactions
+              << " stores=" << store_transactions
+              << " final_pma=" << final_pbmt_counts[0]
+              << " final_nc=" << final_pbmt_counts[1]
+              << " final_io=" << final_pbmt_counts[2]
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_translation_superpages(int argc, char **argv)
 {
     struct StageCase {
@@ -11372,6 +11670,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "translation-permissions") {
             return run_translation_permissions(argc, argv);
+        }
+        if (options.test == "translation-pbmt") {
+            return run_translation_pbmt(argc, argv);
         }
         if (options.test == "translation-superpages") {
             return run_translation_superpages(argc, argv);

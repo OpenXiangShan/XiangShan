@@ -181,6 +181,17 @@ Bare, 109-case fault, ten-case superpage, and basic two-stage scenarios passed
 on the same RTL SHA-256
 `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
 
+`make translation-pbmt` passed all 36 valid two-stage PBMT combinations: each
+of the four Sv39/Sv48 and Sv39x4/Sv48x4 mode pairs crossed VS-stage
+`PMA/NC/IO` with G-stage `PMA/NC/IO`. The independent Svpbmt rule selected the
+VS-stage type when nonzero and otherwise the G-stage type, yielding four PMA,
+16 NC, and 16 IO combinations. Across 72 loads and 36 stores, the final type
+matched DCache/Uncache selection and IO commit gating; every load and committed
+store readback matched exact data, and all LQ/SQ entries retired. Neighboring
+`translation-permissions`, `translation-matrix`, `translation-faults`,
+`translation-superpages`, `mmio-contracts`, and `uncache-widths` passed on the
+same RTL SHA-256.
+
 After the 57-case fault expansion, `random-mixed --seed 419 --transactions
 4096 --constraints spec` passed in 152,052 cycles. It mixed 2,467 loads, 1,011
 stores, 181 prefetches, vector traffic, atomics, MMIO/NC, translation faults,
