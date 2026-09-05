@@ -62,8 +62,13 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
         return []
 
     lines = [
+        f"inline constexpr unsigned kLsqEnqueueLanes = {len(lsq_lanes)};",
+        "",
         "struct LsqEnqueue {",
         "    std::uint8_t need_alloc = 0;",
+        "    std::uint32_t exception_mask = 0;",
+        "    std::uint8_t trigger = 15;",
+        "    bool flush_pipe = false;",
         "    std::uint64_t fu_type = 0;",
         "    std::uint16_t fu_op_type = 0;",
         "    std::uint8_t uop_idx = 0;",
@@ -98,13 +103,13 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
         )
         for bit in range(24):
             lines.append(
-                f"        dut.{prefix}_bits_exceptionVec_{bit}.ImmSet(std::uint64_t{{0}});"
+                f"        dut.{prefix}_bits_exceptionVec_{bit}.ImmSet((item.exception_mask >> {bit}) & 1U);"
             )
         assignments = {
-            "trigger": "std::uint64_t{0}",
+            "trigger": "item.trigger",
             "fuType": "item.fu_type",
             "fuOpType": "item.fu_op_type",
-            "flushPipe": "std::uint64_t{0}",
+            "flushPipe": "item.flush_pipe",
             "uopIdx": "item.uop_idx",
             "lastUop": "item.last_uop",
             "robIdx_flag": "item.rob_flag",
@@ -128,6 +133,9 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
             "",
             "struct ScalarLoadIssue {",
             "    std::uint64_t pc = 0;",
+            "    bool predecode_rvc = false;",
+            "    std::uint64_t ftq_ptr = 0;",
+            "    std::uint8_t ftq_offset = 0;",
             "    std::uint16_t fu_op_type = 0;",
             "    bool rf_wen = true;",
             "    bool fp_wen = false;",
@@ -139,6 +147,11 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
             "    std::uint8_t lq_value = 0;",
             "    bool sq_flag = false;",
             "    std::uint8_t sq_value = 0;",
+            "    bool store_set_hit = false;",
+            "    bool wait_for_rob_flag = false;",
+            "    std::uint8_t wait_for_rob_value = 0;",
+            "    bool load_wait_bit = false;",
+            "    bool load_wait_strict = false;",
             "    std::uint64_t src = 0;",
             "};",
             "",
@@ -184,10 +197,10 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
     )
     issue_assignments = {
         "uop_pc": "item.pc",
-        "uop_preDecodeInfo_isRVC": "std::uint64_t{0}",
+        "uop_preDecodeInfo_isRVC": "item.predecode_rvc",
         "uop_ftqPtr_flag": "std::uint64_t{0}",
-        "uop_ftqPtr_value": "std::uint64_t{0}",
-        "uop_ftqOffset": "std::uint64_t{0}",
+        "uop_ftqPtr_value": "item.ftq_ptr",
+        "uop_ftqOffset": "item.ftq_offset",
         "uop_fuOpType": "item.fu_op_type",
         "uop_rfWen": "item.rf_wen",
         "uop_fpWen": "item.fp_wen",
@@ -195,11 +208,11 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
         "uop_pdest": "item.pdest",
         "uop_robIdx_flag": "item.rob_flag",
         "uop_robIdx_value": "item.rob_value",
-        "uop_storeSetHit": "std::uint64_t{0}",
-        "uop_waitForRobIdx_flag": "std::uint64_t{0}",
-        "uop_waitForRobIdx_value": "std::uint64_t{0}",
-        "uop_loadWaitBit": "std::uint64_t{0}",
-        "uop_loadWaitStrict": "std::uint64_t{0}",
+        "uop_storeSetHit": "item.store_set_hit",
+        "uop_waitForRobIdx_flag": "item.wait_for_rob_flag",
+        "uop_waitForRobIdx_value": "item.wait_for_rob_value",
+        "uop_loadWaitBit": "item.load_wait_bit",
+        "uop_loadWaitStrict": "item.load_wait_strict",
         "uop_lqIdx_flag": "item.lq_flag",
         "uop_lqIdx_value": "item.lq_value",
         "uop_sqIdx_flag": "item.sq_flag",
@@ -228,6 +241,11 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
             "    bool rf_wen = false;",
             "    bool fp_wen = false;",
             "    bool flush_pipe = false;",
+            "    std::uint8_t trigger = 15;",
+            "    bool is_from_load_unit = false;",
+            "    bool debug_is_mmio = false;",
+            "    bool debug_is_ncio = false;",
+            "    bool debug_is_perf_cnt = false;",
             "    std::uint8_t pdest = 0;",
             "    bool rob_flag = false;",
             "    std::uint8_t rob_value = 0;",
@@ -256,6 +274,7 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
             "rf_wen": "uop_rfWen",
             "fp_wen": "uop_fpWen",
             "flush_pipe": "uop_flushPipe",
+            "trigger": "uop_trigger",
             "pdest": "uop_pdest",
             "rob_flag": "uop_robIdx_flag",
             "rob_value": "uop_robIdx_value",
@@ -269,6 +288,15 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
                 continue
             method = "B()" if member in bool_fields else "U()"
             lines.append(f"        result.{member} = dut.{name}.{method};")
+        for member, suffix in (
+            ("is_from_load_unit", "isFromLoadUnit"),
+            ("debug_is_mmio", "debug_isMMIO"),
+            ("debug_is_ncio", "debug_isNCIO"),
+            ("debug_is_perf_cnt", "debug_isPerfCnt"),
+        ):
+            name = f"{prefix}_bits_{suffix}"
+            if name in port_names:
+                lines.append(f"        result.{member} = dut.{name}.B();")
         lines.append("        return result;")
     lines.extend(
         [
@@ -287,6 +315,7 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
             "    std::uint16_t fu_op_type = 0;",
             "    std::uint32_t imm = 0;",
             "    std::uint8_t pdest = 0;",
+            "    bool rf_wen = false;",
             "    bool rob_flag = false;",
             "    std::uint8_t rob_value = 0;",
             "    bool sq_flag = false;",
@@ -351,7 +380,7 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
     sta_assignments = {
         "uop_fuType": "item.fu_type",
         "uop_fuOpType": "item.fu_op_type",
-        "uop_rfWen": "std::uint64_t{0}",
+        "uop_rfWen": "item.rf_wen",
         "uop_imm": "item.imm",
         "uop_pdest": "item.pdest",
         "uop_robIdx_flag": "item.rob_flag",
@@ -409,6 +438,11 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
             "struct ScalarStoreWriteback {",
             "    bool valid = false;",
             "    std::uint32_t exception_mask = 0;",
+            "    std::uint8_t trigger = 15;",
+            "    bool flush_pipe = false;",
+            "    bool debug_is_mmio = false;",
+            "    bool debug_is_ncio = false;",
+            "    bool debug_is_perf_cnt = false;",
             "    bool rob_flag = false;",
             "    std::uint8_t rob_value = 0;",
             "};",
@@ -436,6 +470,16 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
         lines.append(
             f"        result.rob_value = dut.{prefix}_bits_uop_robIdx_value.U();"
         )
+        for member, suffix, method in (
+            ("trigger", "uop_trigger", "U()"),
+            ("flush_pipe", "uop_flushPipe", "B()"),
+            ("debug_is_mmio", "debug_isMMIO", "B()"),
+            ("debug_is_ncio", "debug_isNCIO", "B()"),
+            ("debug_is_perf_cnt", "debug_isPerfCnt", "B()"),
+        ):
+            name = f"{prefix}_bits_{suffix}"
+            if name in port_names:
+                lines.append(f"        result.{member} = dut.{name}.{method};")
         lines.extend(["        return result;"])
     lines.extend(
         [
@@ -485,6 +529,8 @@ def render_vector_adapters(manifest: dict[str, Any]) -> list[str]:
 
     lines = [
         "struct VectorMemoryIssue {",
+        "    std::uint64_t ftq_ptr = 0;",
+        "    std::uint8_t ftq_offset = 0;",
         "    std::uint64_t fu_type = 0;",
         "    std::uint16_t fu_op_type = 0;",
         "    bool vec_wen = true;",
@@ -551,8 +597,8 @@ def render_vector_adapters(manifest: dict[str, Any]) -> list[str]:
     )
     assignments = {
         "uop_ftqPtr_flag": "std::uint64_t{0}",
-        "uop_ftqPtr_value": "std::uint64_t{0}",
-        "uop_ftqOffset": "std::uint64_t{0}",
+        "uop_ftqPtr_value": "item.ftq_ptr",
+        "uop_ftqOffset": "item.ftq_offset",
         "uop_fuType": "item.fu_type",
         "uop_fuOpType": "item.fu_op_type",
         "uop_vecWen": "item.vec_wen",
@@ -624,6 +670,10 @@ def render_vector_adapters(manifest: dict[str, Any]) -> list[str]:
             "struct VectorMemoryWriteback {",
             "    bool valid = false;",
             "    std::uint32_t exception_mask = 0;",
+            "    std::uint8_t trigger = 15;",
+            "    bool debug_is_mmio = false;",
+            "    bool debug_is_ncio = false;",
+            "    bool debug_is_perf_cnt = false;",
             "    std::uint16_t fu_op_type = 0;",
             "    bool vec_wen = false;",
             "    bool v0_wen = false;",
@@ -654,6 +704,7 @@ def render_vector_adapters(manifest: dict[str, Any]) -> list[str]:
     )
     sample_assignments = {
         "fu_op_type": ("uop_fuOpType", "U()"),
+        "trigger": ("uop_trigger", "U()"),
         "vec_wen": ("uop_vecWen", "B()"),
         "v0_wen": ("uop_v0Wen", "B()"),
         "vl_wen": ("uop_vlWen", "B()"),
@@ -691,6 +742,14 @@ def render_vector_adapters(manifest: dict[str, Any]) -> list[str]:
         data_name = f"{prefix}_bits_data"
         if data_name in port_names:
             lines.append(f"        result.data = dut.{data_name}.GetBytes();")
+        for member, suffix in (
+            ("debug_is_mmio", "debug_isMMIO"),
+            ("debug_is_ncio", "debug_isNCIO"),
+            ("debug_is_perf_cnt", "debug_isPerfCnt"),
+        ):
+            name = f"{prefix}_bits_{suffix}"
+            if name in port_names:
+                lines.append(f"        result.{member} = dut.{name}.B();")
         lines.append("        return result;")
     lines.extend(
         [

@@ -27,6 +27,14 @@ strict:
 
 Structural pin stimulation is never used as evidence of semantic coverage.
 
+The current worktree has one additional RTL finding that is not yet associated
+with a committed historical change: Uncache denied/corrupt D-channel exception
+bits were discarded by the LoadUnit S1 NC path. The deterministic
+reproducer, pre-fix output, root-cause analysis, and repaired evidence are in
+[`UNCACHE_DCHANNEL_ERROR.md`](UNCACHE_DCHANNEL_ERROR.md). It is classified as
+confirmed/fixed current-worktree evidence rather than added to the 58-commit
+table below.
+
 ## Audit
 
 | Date | Commit | Fix | Status | Evidence or missing contract |

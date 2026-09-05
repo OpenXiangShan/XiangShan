@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import math
 import sys
 from collections import Counter
 from pathlib import Path
@@ -21,15 +22,8 @@ class VerificationError(RuntimeError):
 # The focused forwarding scenarios intentionally stop before LSQ pointer reuse.
 # The command records the requested stress level; the simulator summary records
 # the number of transactions that the bounded scenario can legally complete.
-FORWARDING_RESULT_CAPS = {
-    "random-forwarding": 48,
-    "random-vector-forwarding": 24,
-}
-
-
 def completed_transaction_count(scenario: str, requested: int) -> int:
-    cap = FORWARDING_RESULT_CAPS.get(scenario)
-    return requested if cap is None else min(requested, cap)
+    return run_regression.completed_transaction_count(scenario, requested)
 
 
 class StreamingJsonReader:
@@ -90,6 +84,16 @@ class StreamingJsonReader:
                 if end == len(self.buffer) and not self.eof:
                     self._fill()
                     continue
+                if (
+                    end < len(self.buffer)
+                    and self.buffer[end] not in " \t\r\n,:]}"
+                ):
+                    if not self.eof:
+                        self._fill()
+                        continue
+                    raise VerificationError(
+                        f"invalid character after JSON value: {self.buffer[end]!r}"
+                    )
                 self.offset = end
                 return value
             except json.JSONDecodeError as error:
@@ -127,6 +131,22 @@ def _positive_csv(result: dict[str, Any], name: str, fields: int) -> None:
     _require(all(count > 0 for count in counts), f"{name} has an uncovered class: {value}")
 
 
+def _positive_csv_prefix(
+    result: dict[str, Any], name: str, required_fields: int, total_fields: int
+) -> None:
+    value = result.get(name)
+    _require(isinstance(value, str), f"{name} is not a string")
+    try:
+        counts = [int(item, 10) for item in value.split(",")]
+    except ValueError as error:
+        raise VerificationError(f"{name} is not a decimal count list: {value!r}") from error
+    _require(len(counts) == total_fields, f"{name} has {len(counts)} fields, expected {total_fields}")
+    _require(
+        all(count > 0 for count in counts[:required_fields]),
+        f"{name} has an uncovered required class: {value}",
+    )
+
+
 def _balanced_queue(result: dict[str, Any], name: str) -> None:
     value = result.get(name)
     _require(isinstance(value, str), f"{name} accounting is not a string")
@@ -157,6 +177,8 @@ def _check_mixed_coverage(
         ("forwarding", 4),
         ("memory_types", 2),
         ("dcache", 2),
+        ("dispatch_widths", 6),
+        ("dispatch_lanes", 6),
     ):
         _positive_csv(result, name, fields)
     for name in (
@@ -183,6 +205,8 @@ def _check_mixed_coverage(
     ):
         _positive_csv(result, "vec_load_modes", 4)
         _positive_csv(result, "vec_store_modes", 4)
+        _positive_csv(result, "vec_load_stride", 3)
+        _positive_csv(result, "vec_store_stride", 2)
         value = result.get("scalar_misaligned")
         _require(
             isinstance(value, int) and not isinstance(value, bool) and value > 0,
@@ -220,18 +244,113 @@ def _check_mixed_coverage(
     _balanced_queue(result, "sq")
 
 
+def _check_stress_coverage(
+    result: dict[str, Any], require_backpressure: bool = False
+) -> None:
+    for name, fields in (
+        ("stress_load_ops", 7),
+        ("stress_store_ops", 4),
+        ("stress_load_lanes", 3),
+        ("stress_address_lanes", 2),
+        ("stress_data_lanes", 2),
+        ("stress_store_order", 2),
+        ("stress_eew_load", 4),
+        ("stress_eew_store", 4),
+        ("stress_vec_load_modes", 3),
+        ("stress_vec_store_modes", 3),
+        ("stress_vec_lanes", 2),
+        ("stress_prefetch", 3),
+        ("stress_vstart", 2),
+        ("stress_vl", 2),
+        ("stress_alignment", 2),
+        ("stress_forwarding", 2),
+        ("stress_dcache", 2),
+        ("stress_combinations", 4),
+    ):
+        if name in ("stress_vec_load_modes", "stress_vec_store_modes"):
+            _positive_csv_prefix(result, name, fields, 4)
+        else:
+            _positive_csv(result, name, fields)
+    for name in (
+        "stress_masked",
+        "stress_unmasked",
+        "stress_misaligned",
+        "stress_waves",
+        "stress_regions",
+    ):
+        value = result.get(name)
+        _require(
+            isinstance(value, int) and not isinstance(value, bool) and value > 0,
+            f"{name} coverage is absent: {value!r}",
+        )
+    _require(
+        isinstance(result.get("stress_waves"), int)
+        and result["stress_waves"] >= 4,
+        "stress campaign has too few bursts",
+    )
+    _require(
+        isinstance(result.get("stress_max_outstanding"), int)
+        and result["stress_max_outstanding"] >= 10,
+        "stress campaign never accumulated enough outstanding work",
+    )
+    _require(
+        result.get("stress_actions") == result.get("transactions"),
+        "stress coverage action count disagrees with transactions",
+    )
+    if require_backpressure:
+        value = result.get("stress_backpressure")
+        _require(isinstance(value, str), "stress_backpressure coverage is not a string")
+        try:
+            dcache_request, dcache_response, *_ = (
+                int(item, 10) for item in value.split(",")
+            )
+        except (ValueError, TypeError) as error:
+            raise VerificationError(
+                f"invalid stress_backpressure coverage: {value!r}"
+            ) from error
+        _require(
+            dcache_request > 0 and dcache_response > 0,
+            f"stress campaign lacks DCache backpressure: {value}",
+        )
+
+
 def _check_result(
     result: Any,
     index: int,
     requested_transactions: dict[str, int],
     completed_transactions: dict[str, int],
     require_backpressure: bool = False,
-) -> tuple[int, str, str, int, str]:
+) -> tuple[int, str, str, int, str, float]:
     prefix = f"result {index}"
     _require(isinstance(result, dict), f"{prefix} is not an object")
     _require(result.get("status") == "pass", f"{prefix} status is {result.get('status')!r}")
     _require(result.get("returncode") == 0, f"{prefix} return code is {result.get('returncode')!r}")
     _require(result.get("output") == "", f"{prefix} retained failure output")
+
+    elapsed = result.get("elapsed_seconds")
+    submitted_offset = result.get("submitted_offset_seconds")
+    completed_offset = result.get("completed_offset_seconds")
+    for name, value in (
+        ("elapsed_seconds", elapsed),
+        ("submitted_offset_seconds", submitted_offset),
+        ("completed_offset_seconds", completed_offset),
+    ):
+        _require(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value),
+            f"{prefix} has invalid {name} {value!r}",
+        )
+    _require(elapsed >= 0, f"{prefix} has negative elapsed time")
+    _require(submitted_offset >= 0, f"{prefix} was submitted before campaign start")
+    _require(
+        completed_offset >= submitted_offset,
+        f"{prefix} completed before it was submitted",
+    )
+    _require(
+        completed_offset + 0.01 >= submitted_offset + elapsed,
+        f"{prefix} elapsed time exceeds its campaign interval",
+    )
 
     seed = result.get("seed")
     _require(
@@ -277,7 +396,12 @@ def _check_result(
     summary = result.get("summary")
     _require(isinstance(summary, str), f"{prefix} has no simulator summary")
     try:
-        parsed = run_regression.parse_summary(summary)
+        parsed = run_regression.parse_summary(
+            summary,
+            expected_scenario=scenario,
+            expected_seed=seed,
+            expected_transactions=completed_count,
+        )
     except run_regression.RegressionError as error:
         raise VerificationError(f"{prefix} has invalid simulator summary: {error}") from error
     for name, value in parsed.items():
@@ -288,7 +412,16 @@ def _check_result(
             )
     if scenario == "random-mixed":
         _check_mixed_coverage(result, require_backpressure)
-    return seed, scenario, str(command[0]), int(transactions), rtl_hash
+    elif scenario == run_regression.STRESS_SCENARIO:
+        _check_stress_coverage(result, require_backpressure)
+    return (
+        seed,
+        scenario,
+        str(command[0]),
+        int(transactions),
+        rtl_hash,
+        float(completed_offset),
+    )
 
 
 def _read_document(
@@ -306,6 +439,7 @@ def _read_document(
     statuses: Counter[str] = Counter()
     transaction_sum = 0
     result_count = 0
+    completion_offsets: list[float] = []
 
     with path.open("r", encoding="utf-8") as stream:
         reader = StreamingJsonReader(stream, chunk_size=chunk_size)
@@ -329,7 +463,14 @@ def _read_document(
                         reader.expect(",")
                     result = reader.value()
                     try:
-                        seed, scenario, binary, transactions, rtl_hash = _check_result(
+                        (
+                            seed,
+                            scenario,
+                            binary,
+                            transactions,
+                            rtl_hash,
+                            completed_offset,
+                        ) = _check_result(
                             result,
                             result_count,
                             requested_transactions,
@@ -346,6 +487,7 @@ def _read_document(
                     rtl_hashes.add(rtl_hash)
                     statuses["pass"] += 1
                     transaction_sum += transactions
+                    completion_offsets.append(completed_offset)
                     result_count += 1
                     first_result = False
             first_member = False
@@ -359,6 +501,7 @@ def _read_document(
         "rtl_hashes": rtl_hashes,
         "statuses": dict(statuses),
         "transactions": transaction_sum,
+        "completion_offsets": completion_offsets,
     }
 
 
@@ -403,7 +546,13 @@ def verify_regression(
     runner: Path | None = None,
     controller_files: tuple[Path, ...] = (),
     chunk_size: int = 1024 * 1024,
+    allow_finite: bool = False,
 ) -> dict[str, Any]:
+    _require(
+        math.isfinite(min_duration_seconds) and min_duration_seconds > 0,
+        "minimum duration must be finite and positive",
+    )
+    _require(min_results > 0, "minimum result count must be positive")
     if expected_scenarios is None:
         scenarios = (expected_scenario or "random-mixed",)
     else:
@@ -480,9 +629,25 @@ def verify_regression(
         "result artifact changed while it was being verified",
     )
 
-    _require(metadata.get("schema_version") == 1, "unsupported regression schema")
+    _require(metadata.get("schema_version") == 2, "unsupported regression schema")
+    _require(
+        metadata.get("campaign_status") == "complete",
+        "regression campaign is not complete",
+    )
+    run_id = metadata.get("run_id")
+    _require(
+        isinstance(run_id, str)
+        and len(run_id) == 32
+        and set(run_id) <= set("0123456789abcdef"),
+        "regression campaign has no valid run id",
+    )
     elapsed = metadata.get("elapsed_seconds")
-    _require(isinstance(elapsed, (int, float)), "elapsed_seconds is not numeric")
+    _require(
+        isinstance(elapsed, (int, float))
+        and not isinstance(elapsed, bool)
+        and math.isfinite(elapsed),
+        "elapsed_seconds is not finite numeric data",
+    )
     _require(elapsed >= min_duration_seconds, f"elapsed time {elapsed} is below requirement")
     started = _parse_time(metadata.get("started_at"), "started_at")
     finished = _parse_time(metadata.get("finished_at"), "finished_at")
@@ -500,16 +665,22 @@ def verify_regression(
             configuration.get("jobs") == expected_jobs,
             "configured worker count differs from verifier expectation",
         )
-    _require(
-        configuration.get("duration_seconds") is not None
-        and configuration["duration_seconds"] >= min_duration_seconds,
-        "requested duration is below requirement",
-    )
+    requested_duration = configuration.get("duration_seconds")
+    if allow_finite and requested_duration is None:
+        pass
+    else:
+        _require(
+            isinstance(requested_duration, (int, float))
+            and not isinstance(requested_duration, bool)
+            and math.isfinite(requested_duration)
+            and requested_duration >= min_duration_seconds,
+            "requested duration is below requirement or not finite",
+        )
     _require(
         configuration.get("scenarios") == list(scenarios),
         "configured scenarios differ from verifier expectation",
     )
-    if "random-mixed" in scenarios:
+    if "random-mixed" in scenarios or run_regression.STRESS_SCENARIO in scenarios:
         _require(
             configuration.get("mixed_transactions_per_seed") == mixed_transactions,
             "configured mixed transaction count differs from verifier expectation",
@@ -534,6 +705,10 @@ def verify_regression(
 
     result_count = observed["result_count"]
     _require(result_count >= min_results, f"only {result_count} results were recorded")
+    _require(
+        max(observed["completion_offsets"], default=-1) >= min_duration_seconds,
+        "no recorded result completed after the required duration",
+    )
     start_seed = configuration.get("start_seed")
     _require(isinstance(start_seed, int), "configuration has no integer start seed")
     expected_cases = {
@@ -671,6 +846,11 @@ def main() -> int:
         "--controller-file", type=Path, action="append", default=[],
         help="source file that must be present and hash-matched in controller metadata",
     )
+    parser.add_argument(
+        "--allow-finite",
+        action="store_true",
+        help="verify a finite seed prefix without a requested duration",
+    )
     args = parser.parse_args()
 
     try:
@@ -701,6 +881,7 @@ def main() -> int:
             rtl_metadata=args.rtl_metadata,
             runner=args.runner,
             controller_files=tuple(args.controller_file),
+            allow_finite=args.allow_finite,
         )
     except (OSError, json.JSONDecodeError, run_regression.RegressionError, VerificationError) as error:
         print(f"verify_regression.py: error: {error}", file=sys.stderr)

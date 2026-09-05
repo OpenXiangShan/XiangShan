@@ -28,8 +28,10 @@ def verify_boundary_hunt(
     transactions: int,
     rtl_sha256: str | None = None,
     rtl_metadata: Path | None = None,
-    require_failure: bool = True,
+    expect: str = "historical-failure",
 ) -> dict[str, int | str]:
+    if expect not in ("historical-failure", "repaired-all-pass"):
+        raise BoundaryHuntError(f"unsupported boundary-hunt expectation: {expect}")
     document = json.loads(path.read_text(encoding="utf-8"))
     if rtl_metadata is not None:
         metadata = json.loads(rtl_metadata.read_text(encoding="utf-8"))
@@ -69,8 +71,12 @@ def verify_boundary_hunt(
             output = result.get("output", "")
             if "MEMBLOCK_RANDOM_BOUNDARY_HUNT_SAMPLE_FAIL" not in output:
                 raise BoundaryHuntError("boundary hunt omitted failing sample provenance")
-    if require_failure and total_failures == 0:
+    if expect == "historical-failure" and total_failures == 0:
         raise BoundaryHuntError("boundary hunt found no oracle failure across the campaign")
+    if expect == "repaired-all-pass" and total_failures != 0:
+        raise BoundaryHuntError(
+            f"repaired boundary hunt still found {total_failures} oracle failures"
+        )
     return {
         "seeds": len(ordered),
         "samples": sum(int(result["transactions"]) for result in ordered),
@@ -86,9 +92,9 @@ def main() -> int:
     parser.add_argument("--rtl-sha256")
     parser.add_argument("--rtl-metadata", type=Path)
     parser.add_argument(
-        "--allow-all-pass",
-        action="store_true",
-        help="accept a fully passing campaign after the RTL defect is fixed",
+        "--expect",
+        choices=("historical-failure", "repaired-all-pass"),
+        default="historical-failure",
     )
     args = parser.parse_args()
     try:
@@ -98,7 +104,7 @@ def main() -> int:
             transactions=args.transactions,
             rtl_sha256=args.rtl_sha256,
             rtl_metadata=args.rtl_metadata,
-            require_failure=not args.allow_all_pass,
+            expect=args.expect,
         )
     except (OSError, json.JSONDecodeError, BoundaryHuntError, TypeError, ValueError) as error:
         print(f"verify_boundary_hunt.py: error: {error}", file=sys.stderr)

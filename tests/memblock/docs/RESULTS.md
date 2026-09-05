@@ -2,18 +2,167 @@
 
 ## Current Repaired RTL
 
-- Branch: `kunminghu-v2`
-- CPU commit: `0fa7bb8259a7922481289d8d5932797afce84030`
-- MemBlock top-file SHA-256: `0b6c6aa34dc8aa148d0f6da91091df58e6622415136e60baf985d7560824e7e3`
-- Complete ordered RTL SHA-256: `0b6c6aa34dc8aa148d0f6da91091df58e6622415136e60baf985d7560824e7e3`
-- Repaired mixed-test executable SHA-256: `1b689baead6f77c05488a8feab6f8a00bc19aebcae884b103d8404d79fbb2f29`
-- Repaired Verilated model SHA-256: `0d8683c215556a96ecd46ba862f3df19e2c000cc7210e344828c1f2c53003`
+- Branch: `codex/memblock-ut-closure-20260905`
+- CPU baseline commit: `0fa7bb8259a7922481289d8d5932797afce84030`
+- CPU repair commits: `f8bb99518` (Uncache exception preservation),
+  `e1424686a` (exceptional atomic `rfWen` suppression), and `8eedb3ad0`
+  (D-channel-error atomic side-effect suppression).
+- Verification harness baseline: `98bdebbe0777ef051fa8451bd36641eb45f81963`;
+  the expanded UT commit follows the three CPU repair commits.
+- MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
+- Complete ordered RTL SHA-256: `b69e387eb081a3f311311079ade435206817c7c6a20bd8f3a5f11889ec1dcbf4`
+- Current rebuilt UT executable SHA-256: `b499197dd2c0aa3d21351a7f0a3a8791373c84899d0263cbbe9fa388650c2586`
+- Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
+- Current rebuilt Verilated model SHA-256: `00e7fffff732786103469acbfbdd40334ee724a380743947ccb5775abe1454d9`
+- Frozen runtime model SHA-256: `d2d51b8a705f3e79e1ed53f363ea513962918fd1f2c4ac98eea79ec0edac95da`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
-- Frozen runtime manifest SHA-256: `47eb52bff692a6e4c2fa6facc027788cb37709c4fe9f42f39dd577126baf9035`
+- Frozen runtime manifest SHA-256: `cfe45209adb2cd4f0605056c3adba5bb679f901b80b5ca32b3058d2072e8809d`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
+## Earlier Current-Worktree Stress
+
+These 16,384-action direct runs were completed earlier in the current worktree;
+the newer 32,768-action pair is recorded below:
+
+- `random-stress --seed 29 --transactions 16384` completed 16,384 actions in
+  357,217 cycles. It reached 12 outstanding entries, 10,923 vector load/store
+  operations, 5,463 masked/unmasked operations, 1,020 scalar misaligned
+  operations, 2,731 scalar/vector forwarding overlaps, all four required
+  cross-feature bins, and nonzero DCache request stalls and response delays.
+- `random-mixed --seed 31 --transactions 16384` completed 16,384 actions in
+  467,369 cycles. It produced 7,032 scalar, 4,672 vector-load, 2,336
+  vector-store, and 2,343 store writebacks, with 15 PTW requests, 2 Uncache
+  requests, dirty ReleaseData, nested translation, exceptions, redirect,
+  forwarding, and all six manager backpressure counters nonzero.
+- `random-stress --seed 37 --transactions 16384` completed 16,384 actions in
+  356,752 cycles with 12 outstanding entries, 2,731 forwarding overlaps,
+  1,048 scalar misaligned operations, all required stress combinations, and
+  nonzero DCache request stalls and response delays.
+- `random-mixed --seed 41 --transactions 16384` completed 16,384 actions in
+  467,199 cycles with 7,033 scalar, 4,671 vector-load, 2,336 vector-store,
+  and 2,343 store writebacks; it exercised nested translation, exceptions,
+  redirect, forwarding, dirty ReleaseData, and all six manager backpressure
+  counters.
+
+These are current rebuilt-RTL evidence; the frozen artifact below remains the
+immutable acceptance record and is not silently replaced by these exploratory
+long runs.
+
+The post-translation-matrix `random-stress` driver was exercised against the
+current rebuilt binary with a finite multi-seed campaign:
+
+- 8 continuous seeds (`1..8`) passed with eight workers;
+- 32,768 stress actions completed (`4,096` actions per seed; the runner maps
+  stress actions to `mixed_transactions_per_seed`);
+- every seed built one- and two-group bursts with scalar/vector forwarding,
+  mask/vstart/vl variation, vector EEW and addressing variation, queue pressure,
+  and randomized issue order;
+- every seed reached at least 12 outstanding scoreboard entries, all required
+  stress combinations, both cache regions, both DCache backpressure classes,
+  and balanced LQ/SQ accounting;
+- each terminal summary recorded four independent SplitMix64-derived RNG
+  streams for traffic, shape, payload, and scheduling;
+- `verify_regression.py --allow-finite --require-backpressure` checked every
+  recorded summary, continuous seed, command replay, RTL/controller hash,
+  coverage field, and artifact integrity;
+- the campaign completed in 68.134896 seconds with no scoreboard, assertion,
+  timeout, or queue-accounting failures.
+
+Artifact: `build/memblock/stress-current-translation-superpages.json` (generated,
+not tracked). Artifact SHA-256:
+`5ae6e1bfc90afe791d3e1e7034472905829626d0327b2a9aa62924f4370fabb`.
+An earlier 32-seed exploratory run found two false positives from zero-stride
+vector forwarding stores. The stress generator now constrains forwarding stores
+to non-overlapping positive/negative strides, matching the deterministic byte
+oracle; zero-stride independent loads remain covered by `random-mixed`, and
+repeated-address stores remain in explicit overlap tests.
+The duration-based acceptance target is `make stress-regression`, which uses
+the frozen runtime and a one-hour minimum by default. The earlier
+`stress-large-provenance-final.json` artifact predates the translation-matrix
+controller change and is historical rather than current acceptance evidence.
+
+## Sv48/Nested Translation Matrix
+
+The current harness now exercises the four non-Bare mode pairs independently:
+
+- `Sv39->Sv39x4`
+- `Sv39->Sv48x4`
+- `Sv48->Sv39x4`
+- `Sv48->Sv48x4`
+
+`make translation-matrix` passed all four pairs with DCache/PTW
+backpressure, a high-half canonical Sv48 VA, G-stage mappings for every VS
+page-table page, and cold/warm accesses. The run completed 1,129 cycles per
+pair on average, with 40 PTW requests and four data TileLink requests total;
+the second access in every pair reused the translation without an additional
+PTW request. This is the 4-KiB nested path; Bare degenerations and the full
+permission/fault matrix remain explicit boundary work.
+
+`make translation-fence` also passed: a same-VA Sv39 leaf update stayed on the
+old translation before the fence and refilled to the new physical page after a
+global and selective `SFENCE.VMA`; nested VS and G-stage leaf updates refilled
+after selective `HFENCE.VVMA` and global `HFENCE.GVMA` respectively (35 PTW
+requests and ten load writebacks across all checks).
+
+`make translation-context` passed the direct Sv39-to-Sv48 `satp` root/MODE and
+ASID switch on one VA: the first access used the Sv39 physical page, the switch
+forced a new four-level walk, and the second access used the Sv48 physical page.
+
+`make translation-superpages` passed all ten deterministic leaf cases: Sv39 and
+Sv48 stage-1 2 MiB/1 GiB leaves, Sv48 512 GiB, and the corresponding
+Sv39x4/Sv48x4 G-stage leaves. Every case matched the independent leaf-address
+oracle and completed an architectural load.
+
+`make translation-faults` passed all five deterministic fault cases: a
+noncanonical Sv48 virtual address, an invalid Sv39 root PTE, Sv39x4 and Sv48x4
+GPAs above their architectural limits, and a malformed Sv39 2 MiB leaf with a
+misaligned physical base. The expected stage-specific page-fault or
+guest-page-fault contract was observed.
+
+`make translation-permissions` passed the executable permission cases: read-only
+Sv39 and G-stage pages were readable, while execute-only Sv39 and G-stage pages
+produced the expected stage-specific load page fault. A read-only Sv39 scalar
+store produced `StorePageFault`, issued no DCache/Uncache request, and was
+explicitly accounted as an SQ cancellation.
+
+`make fp-loads` passed cacheable 32-bit and 64-bit FP destination transactions.
+The 32-bit result was checked as a NaN-boxed 64-bit value, with integer RF
+write disabled and FP write enabled in the observed writeback.
+
+## Historical Frozen Eight-Hour Acceptance
+
+This record predates the `random-stress` controller addition. It remains a
+valid historical result for the frozen executable listed above; after any
+controller change, `verify-final-results` must be regenerated before this
+record is treated as the current acceptance artifact.
+
+On 2026-09-04 (Asia/Shanghai), the reviewed harness completed the final
+frozen `random-mixed` campaign:
+
+- run id: `9d0fdae3136e4330b49dd4694cab3cb6`;
+- requested duration: 28,800 seconds; measured elapsed time:
+  28,960.984777 seconds;
+- 1,201/1,201 continuous seeds passed, from seed 1 through seed 1,201;
+- 19,677,184 mixed actions completed, with 16,384 actions per seed;
+- every result used eight workers, backpressure enabled, and complete RTL
+  SHA-256 `0b6c6aa34dc8aa148d0f6da91091df58e6622415136e60baf985d7560824e7e3`;
+- no scoreboard, assertion, timeout, process, coverage-gate, or queue-accounting
+  failure occurred.
+
+Artifact: `build/memblock/final-frozen-8h-16384.json`, SHA-256
+`c104f21bc2dc9198f5987ed626b046fd058519b18de4464b1809060c14a1b216`.
+The independent verifier reported `MEMBLOCK_REGRESSION_ARTIFACT_PASS` for
+seeds `1..1201` and verified the schema-2 completion marker, frozen runtime,
+controller hashes, finite timing, continuous seeds, per-seed coverage,
+backpressure, and exact LQ/SQ accounting. The final acceptance target also
+passed the dedicated dirty ReleaseData, repaired known-bug sentinel, and
+32-seed boundary-hunt gates.
+
 ## Focused Runs
+
+The deterministic focused scenarios below are rerun against the same generated
+RTL and runtime used by the current constrained-random evidence.
 
 ## Current Harness and RTL Fixes
 
@@ -26,13 +175,70 @@ parameters and verifies the independent Sv39x4 GPA oracle.
 
 Current acceptance evidence:
 
-- 61 Python unit tests and the complete port/SVA checks pass;
+- 98 Python unit tests and the complete port/SVA checks pass;
 - all focused MemBlock scenarios pass on repaired RTL hash
-  `0b6c6aa34dc8aa148d0f6da91091df58e6622415136e60baf985d7560824e7e3`;
-- 32 continuous boundary-hunt seeds produced 2048/2048 repaired oracle passes;
-- the five-scenario matrix completed 25/25 invocations and 5480 actions;
-- eight 4096-action `random-mixed` seeds completed 32768 actions with all
-  per-seed coverage and queue-conservation gates passing.
+  `b69e387eb081a3f311311079ade435206817c7c6a20bd8f3a5f11889ec1dcbf4`;
+- the four-pair Sv39/Sv48 nested translation matrix and all deterministic
+  translation, L2-to-L1 DTLB, fault, queue, cache, atomic, CBO.ZERO, and error
+  scenarios pass;
+- eight `random-stress` seeds completed 32,768 actions (`4,096` per seed)
+  with all per-seed coverage, backpressure, and queue-conservation gates
+  passing; the latest repaired-RTL direct runs completed 65,536 stress actions
+  and 65,536 mixed actions.
+
+The current RTL contains three confirmed CPU/MemBlock bug fixes. Uncache denied or
+corrupt D-channel responses set exception bits in `UncacheEntry`, but the
+LoadUnit S1 NC path previously replaced those incoming bits with a TLB-only
+exception value. NC requests do not query the TLB but still traverse S1, so the
+response error was erased before scalar writeback. The adapter now preserves all
+source-generated exception bits and S1 ORs them with TLB exceptions. MMIO is a
+separate S0-to-three-cycle metadata bypass path and is not implicated by this
+reproducer. The
+`uncache-errors` scenario passes both denied and corrupt cases on the regenerated
+RTL, and the generated MemBlock boundary now retains the corresponding
+exception-vector fields. The full reproducer and root-cause evidence are in
+[`UNCACHE_DCHANNEL_ERROR.md`](UNCACHE_DCHANNEL_ERROR.md).
+
+The second bug was found by extending `atomic-contracts` with misaligned
+`AMOADD.D` and `AMOOR.W` cases. `AtomicsUnit` returned the expected
+`storeAddrMisaligned=0x40`, but propagated `uop.rfWen=1` on that exceptional
+writeback. The output now masks `rfWen` whenever `exceptionVec` is nonzero;
+the full finding, before/after behavior, and scope are recorded in
+[`ATOMIC_EXCEPTION_RF_WEN.md`](ATOMIC_EXCEPTION_RF_WEN.md).
+
+The third bug was found by injecting a denied D-channel response into an
+`AMOADD.D` miss. MainPipe reported the atomic exception but still selected the
+AMO result for the cache data write; a later load hit and returned the denied
+operand (`0x0102030405060708`) with stale `loadAccessFault` metadata. The fix
+rejects denied refill installation, preserves the deliberate corrupt-line
+error metadata while installing only raw refill data, and suppresses every
+atomic state change when either the current response or an existing cache line
+has an error. The independent `atomic-dchannel-errors` contract covers denied
+and corrupt AMO misses, a corrupt-line AMO hit, and post-error readback. Full
+evidence is in [`ATOMIC_DCHANNEL_ERROR.md`](ATOMIC_DCHANNEL_ERROR.md).
+
+During this iteration, a temporary harness defect changed the `mmio-contracts`
+page mapping's PBMT=IO argument while adding the CBO.ZERO case. The existing
+MMIO metadata oracle immediately rejected the mismatch (`isMMIO` expected 1,
+actual 0); the call was restored, and the corrected scenario passed at cycle
+818. This was a testbench configuration regression, not an RTL defect.
+
+The first version of `l2-tlb-contracts` also assumed that warming an ordinary
+DTLB port would make the independent L2-to-L1 requestor hit. The observed
+`miss=1` response led to a source-level interface review: this requestor is an
+independent L1 lookup whose miss is deliberately delegated to the external L2,
+and MemBlock exposes no refill response input for it. The oracle was corrected
+to require legal miss delegation, `no_translate` completion, and kill-without-
+response; the final contract passes at cycle 236. This was an oracle assumption
+defect, not a CPU/RTL defect.
+
+The first `store-rdata-order` run also exposed an oracle defect rather than an
+RTL failure. Its exceptional StoreUnit address writeback carried the expected
+`storeAddrMisaligned=0x40` and `TriggerAction.None=15`, but the test had
+incorrectly expected zero (the zero-initialized value belongs to the separate
+standalone store-data adapter). The expectation now uses `kTriggerNone`; the
+current run passes at cycle 342 with both SQ entries dequeued. The failure did
+not indicate a data-ordering regression.
 
 The historical VS-non-leaf GPA defect in `VMergeBuffer` is repaired by leaving
 the page-walk GPA unchanged when `isForVSnonLeafPTE` is asserted, while keeping
@@ -52,9 +258,11 @@ checks for these rules.
 Focused scenarios and 20 independent `random-mixed` seeds, each with 512
 actions and backpressure enabled, passed after the fix. Seeds 1-20 completed
 with no scoreboard, timeout, coverage, assertion, or queue-accounting failure.
-The repaired executable SHA-256 is
+These 20 short seeds are retained as historical pre-current-worktree evidence;
+the current executable and RTL hashes are recorded at the top of this file and
+in the direct-run sections below. The historical executable SHA-256 is
 `1b689baead6f77c05488a8feab6f8a00bc19aebcae884b103d8404d79fbb2f29`;
-the repaired complete RTL SHA-256 is
+the historical complete RTL SHA-256 is
 `0b6c6aa34dc8aa148d0f6da91091df58e6622415136e60baf985d7560824e7e3`.
 
 | Test | Result | Key observation |
@@ -68,11 +276,60 @@ the repaired complete RTL SHA-256 is
 | Store forwarding | Pass | Four store widths and four matching scalar loads |
 | Vector forwarding | Pass | Four vector stores and loads with byte-accurate SQ overlay |
 | PBMT=NC store order | Pass | Two stores, two SQ dequeues, two PTW requests, one uncache request |
+| Uncache D-channel errors | Pass | One denied and one corrupt response each reached scalar exception writeback; two uncache requests |
+| Uncache widths/byte lanes | Pass | 29 scalar NC loads across all seven opcodes and legal 8-byte-beat lanes; 29 uncache requests, two request stalls, 90 response-delay cycles |
+| MMIO metadata/error path | Pass | Cycle 818; one normal, one denied, and one corrupt PBMT=IO load plus one cold-TLB scalar PBMT=IO store; a separate non-DebugModule `c=0` PMA load/store pair passed and a guarded DebugModule PMA access produced `LoadAccessFault` with no manager request; `dcache_requests=0`, four Uncache requests, exact load/store metadata, and SQ retirement matched |
+| CBO.ZERO cache-line zeroing | Pass | Cycle 370; cacheable `0x7` CBO.ZERO used the StoreQueue/SBuffer `wline` path, survived one forced DCache A stall and four response-delay cycles, produced exact non-MMIO store metadata, and a pre-mirror cache readback returned an all-zero line; no Uncache request was emitted |
+| Atomic operations and exception metadata | Pass | Cycle 1216; all 9 W-width and 9 D-width AMOs, AMOCAS.W/D compare success/failure, LR/SC success/failure, and all 7 forbidden D-width plus 3 forbidden W-width byte offsets; exceptional writeback carried `storeAddrMisaligned=0x40`, suppressed `rfWen`, and emitted no additional DCache request |
+| Atomic D-channel errors | Pass | Cycle 437; denied and corrupt `AMOADD.D` misses plus a corrupt-line hit reported exact exceptions with suppressed `rfWen`; denied data was not installed, corrupt raw refill/error metadata was retained, and neither AMO modified cache data |
+| L2-to-L1 DTLB boundary | Pass | Cycle 396; ordinary and prefetch requests returned legal L1 miss responses, `no_translate=1` completed without a translation/fault, `kill=1` produced no response for 128 cycles, 16 source IDs × two L2 hint polarities (32 pulses) were accepted without ghost traffic, PBMT stayed zero, and exported PMP/MMIO classification was observed; miss delegation to external L2 is explicit because MemBlock has no refill response input |
+| Reset recovery | Pass | Cycle 170; repeated reset with outstanding translated traffic, explicit cancellation of one pre-reset LQ entry, and one post-reset survivor with no stale writeback |
 | Store TLB-miss preservation | Pass | Cycle 156; two misses and two PTW requests; allocated SQ entry remained address-valid |
 | DCache dirty release | Pass | Ten stores; two ReleaseData writebacks preserved |
 | Redirect | Pass | Canceled miss suppressed; LQ slot reused |
 | Queue pressure | Pass | Two legal 60-entry waves; 120 checked writebacks |
 | Stateful mixed seed 1 | Pass | 96 actions; scalar/vector load/store, all scalar/vector address modes, `prefetch.i/r/w`, Sv39/Sv39x4, PBMT-NC, cross-forwarding, dirty ReleaseData, redirect recovery, six manager backpressure classes, exact LQ/SQ drain |
+
+## Earlier Current-Worktree 32K Direct Runs
+
+After the atomic exceptional-writeback fix and the store-rdata oracle
+correction, the pre-matrix-summary executable completed an independent
+32,768-action pair. Both runs used complete RTL SHA-256
+`670cf5d399c55e40c9d51c70183315b4cdd730e73843543aec5789414558b846` and
+executable SHA-256
+`bb25d12211d34a93a666a2835a7e7c0db1f87b21e508b56341b5ca35a4c90d86`.
+
+| Scenario | Result | Observed coverage |
+| --- | --- | --- |
+| `random-stress --seed 83 --transactions 32768` | Pass | 713,485 cycles; 32,298 TileLink requests; 12 maximum outstanding; 2,007 scalar misaligned operations; 5,461 forwarding overlaps; all required stress combinations; four RNG streams; 10,826 request-stall and 135,240 response-delay cycles; LQ/SQ `38072+0/38072`, `27150+0/27150` |
+| `random-mixed --seed 89 --transactions 32768` | Pass | 933,358 cycles; 14,052 scalar, 4,670 prefetch, 4,683 scalar-store, 9,355 vector-load, and 4,677 vector-store writebacks; 15 PTW, two Uncache, and 10 ReleaseData transactions; nested translation, three exception waves, redirect, dirty data, four forwarding classes, all dispatch lanes, both vector stride signs, and all manager backpressure counters nonzero; LQ/SQ `71250+1/71251`, `33213+0/33213` |
+
+## Current Repaired-RTL 64K Direct Runs
+
+To extend the request count beyond the normal 16K/32K campaigns, the
+post-fix executable completed a 65,536-action stress/mixed pair. Both runs
+passed with complete RTL SHA-256
+`b69e387eb081a3f311311079ade435206817c7c6a20bd8f3a5f11889ec1dcbf4`.
+
+| Scenario | Result | Observed coverage |
+| --- | --- | --- |
+| `random-stress --seed 43 --transactions 65536` | Pass | 1,427,238 cycles; 64,740 TileLink requests; 12 maximum outstanding; 4,078 scalar misaligned operations; 10,923 scalar and 10,922 vector forwarding overlaps; four RNG streams; all required stress combinations; 21,278 request-stall and 271,007 response-delay cycles; LQ/SQ `76294+0/76294`, `54453+0/54453` |
+| `random-mixed --seed 47 --transactions 65536` | Pass | 1,861,069 cycles; 28,098 scalar, 9,351 prefetch, 9,365 scalar-store, 18,714 vector-load, and 9,358 vector-store writebacks; 15 PTW, two Uncache, ten ReleaseData, nested translation, three exception waves, redirect, dirty data, all forwarding classes and dispatch lanes, both vector stride signs, and all six manager backpressure counters nonzero; LQ/SQ `143506+1/143507`, `66307+0/66307` |
+
+## Historical 32K Direct Runs
+
+The rebuilt executable also completed one 32,768-action pair with independent
+seeds and randomized manager backpressure. These are direct binary runs, not
+short smoke tests. They used the pre-L2-contract harness binary
+`74371d94790266646d4093a6c450fed4916cab85f0092593bad08e40829f3677`; the
+complete RTL hash for that historical run was `c97a89cd...`. The subsequent
+L2-only harness additions and the atomic exception fix changed the current
+binary and RTL hash, which are recorded at the top of this file.
+
+| Scenario | Result | Observed coverage |
+| --- | --- | --- |
+| `random-stress --seed 59 --transactions 32768` | Pass | 713,251 cycles; 32,289 DCache requests; 12 maximum outstanding; 2,051 scalar misaligned operations; 5,461 forwarding overlaps; 5,460 masked and 5,462 unmasked vector operations; four vector mode combinations; 10,766 request-stall and 134,830 response-delay cycles; LQ/SQ `38062+0/38062`, `27140+0/27140` |
+| `random-mixed --seed 61 --transactions 32768` | Pass | 931,075 cycles; 14,056 scalar, 9,351 vector-load, 4,676 vector-store, and 4,684 store writebacks; 15 PTW and two Uncache requests; 10 ReleaseData writebacks; nested translation, three exception waves, redirect, five forwarding classes, four dirty lines, and all six manager backpressure counters nonzero; LQ/SQ `70554+1/70555`, `32874+0/32874` |
 
 The early idle writeback observation was a harness error: the Picker clock had
 not been registered. It is not an RTL defect.
@@ -117,10 +374,8 @@ artifact did not enforce them:
 
 The previous runner did not hash these source files, so these values were not
 independently enforced by the JSON artifact. The reviewed runner now records
-and verifies source hashes as controller inputs for new campaigns. The final
-six-hour artifact above predates that change and is therefore not
-provenance-complete for this reviewed harness revision; a new final campaign
-is required after this review.
+and verifies source hashes as controller inputs. The current eight-hour
+artifact above is provenance-complete for this reviewed harness revision.
 
 The current mixed summary reports vector load and store address-mode coverage
 separately (`vec_load_modes` and `vec_store_modes`), so a load cannot mask a
@@ -190,8 +445,8 @@ Artifact: `build/memblock/extended-mixed-frozen-4h.json` is currently a stale
 one-second development artifact (not tracked), SHA-256
 `3943cd27585ffc0b36c35b7d8ed3dd8c225da4bf0dc3e290bf66632c5523af0f`.
 `make verify-extended-results` is expected to reject it because its duration and
-provenance do not satisfy the four-hour gate. The final six-hour campaign below
-is the only duration artifact accepted for the repaired RTL.
+provenance do not satisfy the four-hour gate. The current frozen eight-hour
+campaign above is the duration artifact accepted for the repaired RTL.
 
 ## Earlier Extended Campaign
 
@@ -232,12 +487,13 @@ split-vector, and randomized boundary controls now all report the exact oracle
 GPA. The clean-RTL failure remains in `VECTOR_GUEST_FAULT_SPLIT.md` as mutation
 evidence, while the repaired test is part of the green sentinel gate.
 
-The final acceptance section is populated only after the current six-hour
+The final acceptance section is populated only after the current eight-hour,
+16,384-action-per-seed
 frozen campaign has completed and `make verify-final-results` has independently
 validated its artifact. Historical baseline and mutation results above are
 retained as evidence and are not claims about the repaired RTL.
 
-## Final Six-Hour Campaign
+## Historical Pre-Review Six-Hour Campaign
 
 On 2026-09-03 (Asia/Shanghai), the repaired frozen runtime completed the final
 fully mixed campaign:
@@ -262,7 +518,9 @@ This is evidence that the repaired RTL satisfies the tested contracts under the
 pre-review harness. It is not a proof that untested MemBlock boundary gaps are
 bug-free, and it is not the acceptance artifact for the reviewed oracle/source
 provenance changes described above.
-No additional CPU bug was exposed by this repaired campaign. Historical mutant
-results remain the evidence for the four independently reproduced LSU defects
-listed above; any future failure should be triaged from its recorded seed and
-runtime provenance rather than treated as a known-good result.
+That historical campaign did not expose an additional CPU bug. The later
+current-worktree Uncache finding is documented separately in
+`UNCACHE_DCHANNEL_ERROR.md`; historical mutant results remain the evidence for
+the four independently reproduced LSU defects listed above. Any future failure
+should be triaged from its recorded seed and runtime provenance rather than
+treated as a known-good result.

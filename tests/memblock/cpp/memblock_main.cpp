@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace {
@@ -20,6 +21,37 @@ struct Options {
     unsigned transactions = 200;
     bool backpressure = true;
     bool hunt_boundaries = false;
+};
+
+// Keep long stress runs reproducible while avoiding accidental correlation
+// between transaction shape, payload bytes, and issue scheduling.  The
+// derived seeds are part of the scenario contract: changing one stream does
+// not silently perturb all other dimensions.
+struct StressRandom {
+    static std::uint64_t splitmix64(std::uint64_t value)
+    {
+        value += 0x9e3779b97f4a7c15ULL;
+        value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+        value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+        return value ^ (value >> 31);
+    }
+
+    explicit StressRandom(std::uint64_t seed)
+        : traffic(splitmix64(seed ^ 0x243f6a8885a308d3ULL)),
+          shape(splitmix64(seed ^ 0x13198a2e03707344ULL)),
+          payload(splitmix64(seed ^ 0xa4093822299f31d0ULL)),
+          scheduler(splitmix64(seed ^ 0x082efa98ec4e6c89ULL))
+    {}
+
+    std::uint64_t operator()() { return traffic(); }
+    std::uint64_t next_shape() { return shape(); }
+    std::uint64_t next_payload() { return payload(); }
+    std::uint64_t next_schedule() { return scheduler(); }
+
+    std::mt19937_64 traffic;
+    std::mt19937_64 shape;
+    std::mt19937_64 payload;
+    std::mt19937_64 scheduler;
 };
 
 std::uint64_t parse_u64(std::string_view text, const char *option)
@@ -166,6 +198,10 @@ struct VectorCoverage {
 
 struct MixedCoverage {
     static constexpr unsigned kConcurrentClasses = 5;
+    std::array<std::uint64_t, memblock::generated::kLsqEnqueueLanes>
+        dispatch_widths{};
+    std::array<std::uint64_t, memblock::generated::kLsqEnqueueLanes>
+        dispatch_lanes{};
     std::array<std::uint64_t, 7> load_ops{};
     std::array<std::uint64_t, 4> store_ops{};
     std::array<std::uint64_t, memblock::kScalarLoadLanes> load_lanes{};
@@ -175,6 +211,8 @@ struct MixedCoverage {
     std::array<std::uint64_t, 4> vector_store_eews{};
     std::array<std::uint64_t, 4> vector_load_address_modes{};
     std::array<std::uint64_t, 4> vector_store_address_modes{};
+    std::array<std::uint64_t, 3> vector_load_stride_signs{};
+    std::array<std::uint64_t, 2> vector_store_stride_signs{};
     std::array<std::uint64_t, 3> prefetch_ops{};
     std::array<std::uint64_t, memblock::kVectorMemoryLanes> vector_lanes{};
     std::uint64_t scalar_loads = 0;
@@ -223,12 +261,24 @@ struct MixedCoverage {
     std::uint64_t ptw_response_delays = 0;
     std::uint64_t uncache_request_stalls = 0;
     std::uint64_t uncache_response_delays = 0;
+    std::uint64_t rvc = 0;
+    std::uint64_t non_rvc = 0;
+    std::uint64_t ftq_nonzero = 0;
+    std::uint64_t store_set_hit = 0;
+    std::uint64_t store_set_miss = 0;
+    std::uint64_t load_wait = 0;
+    std::uint64_t strict_load_wait = 0;
 
     void sample(const memblock::LoadTransaction &transaction)
     {
         ++scalar_loads;
         ++load_ops.at(static_cast<unsigned>(transaction.op));
         ++load_lanes.at(transaction.lane);
+        ++(transaction.predecode_rvc ? rvc : non_rvc);
+        ftq_nonzero += transaction.ftq_ptr != 0 || transaction.ftq_offset != 0;
+        ++(transaction.store_set_hit ? store_set_hit : store_set_miss);
+        load_wait += transaction.load_wait_bit;
+        strict_load_wait += transaction.load_wait_strict;
         const unsigned size = 1U << (static_cast<unsigned>(transaction.op) & 3U);
         scalar_misaligned += (transaction.address & (size - 1)) != 0;
     }
@@ -254,6 +304,14 @@ struct MixedCoverage {
                ? vector_store_address_modes
                : vector_load_address_modes)
               .at(static_cast<unsigned>(transaction.addressing));
+        if (transaction.addressing == memblock::VectorAddressingMode::strided) {
+            if (transaction.store) {
+                ++vector_store_stride_signs.at(transaction.stride < 0 ? 0 : 1);
+            } else {
+                ++vector_load_stride_signs.at(
+                    transaction.stride < 0 ? 0 : (transaction.stride == 0 ? 1 : 2));
+            }
+        }
         ++(transaction.vm ? unmasked : masked);
         ++(transaction.vstart == 0 ? zero_vstart : nonzero_vstart);
         const unsigned elements = 16U >> transaction.eew;
@@ -285,13 +343,16 @@ struct MixedCoverage {
             return std::all_of(
                 values.begin(), values.end(), [](auto value) { return value != 0; });
         };
-        return all_nonzero(load_ops) && all_nonzero(store_ops) &&
+        return all_nonzero(dispatch_widths) && all_nonzero(dispatch_lanes) &&
+               all_nonzero(load_ops) && all_nonzero(store_ops) &&
                all_nonzero(load_lanes) && all_nonzero(address_lanes) &&
                all_nonzero(data_lanes) && all_nonzero(vector_load_eews) &&
                all_nonzero(vector_store_eews) && all_nonzero(prefetch_ops) &&
                all_nonzero(vector_lanes) &&
                all_nonzero(vector_load_address_modes) &&
                all_nonzero(vector_store_address_modes) &&
+               all_nonzero(vector_load_stride_signs) &&
+               all_nonzero(vector_store_stride_signs) &&
                scalar_loads != 0 && scalar_stores != 0 && vector_loads != 0 &&
                vector_stores != 0 && address_first != 0 && data_first != 0 &&
                masked != 0 && unmasked != 0 && zero_vstart != 0 &&
@@ -309,7 +370,9 @@ struct MixedCoverage {
                max_outstanding >= 5 && concurrent_windows >= 4 &&
                all_nonzero(concurrent_ops) && concurrent_actions != 0 &&
                unresolved_overlap_samples != 0 && max_unresolved >= 2 &&
-               max_unresolved_classes >= 2;
+               max_unresolved_classes >= 2 && rvc != 0 && non_rvc != 0 &&
+               ftq_nonzero != 0 && store_set_hit != 0 && store_set_miss != 0 &&
+               load_wait != 0;
     }
 
     bool backpressure_complete(bool required) const
@@ -323,7 +386,19 @@ struct MixedCoverage {
 
     std::string summary() const
     {
-        return "load_ops=" + std::to_string(load_ops[0]) + ',' +
+        return "dispatch_widths=" + std::to_string(dispatch_widths[0]) + ',' +
+               std::to_string(dispatch_widths[1]) + ',' +
+               std::to_string(dispatch_widths[2]) + ',' +
+               std::to_string(dispatch_widths[3]) + ',' +
+               std::to_string(dispatch_widths[4]) + ',' +
+               std::to_string(dispatch_widths[5]) + " dispatch_lanes=" +
+               std::to_string(dispatch_lanes[0]) + ',' +
+               std::to_string(dispatch_lanes[1]) + ',' +
+               std::to_string(dispatch_lanes[2]) + ',' +
+               std::to_string(dispatch_lanes[3]) + ',' +
+               std::to_string(dispatch_lanes[4]) + ',' +
+               std::to_string(dispatch_lanes[5]) + " load_ops=" +
+               std::to_string(load_ops[0]) + ',' +
                std::to_string(load_ops[1]) + ',' + std::to_string(load_ops[2]) +
                ',' + std::to_string(load_ops[3]) + ',' +
                std::to_string(load_ops[4]) + ',' + std::to_string(load_ops[5]) +
@@ -351,7 +426,19 @@ struct MixedCoverage {
                std::to_string(vector_store_address_modes[0]) + ',' +
                std::to_string(vector_store_address_modes[1]) + ',' +
                std::to_string(vector_store_address_modes[2]) + ',' +
-               std::to_string(vector_store_address_modes[3]) + " prefetch=" +
+               std::to_string(vector_store_address_modes[3]) +
+               " vec_load_stride=" +
+               std::to_string(vector_load_stride_signs[0]) + ',' +
+               std::to_string(vector_load_stride_signs[1]) + ',' +
+               std::to_string(vector_load_stride_signs[2]) +
+               " vec_store_stride=" +
+               std::to_string(vector_store_stride_signs[0]) + ',' +
+               std::to_string(vector_store_stride_signs[1]) + " metadata=" +
+               std::to_string(rvc) + ',' + std::to_string(non_rvc) + ',' +
+               std::to_string(ftq_nonzero) + ',' + std::to_string(store_set_hit) +
+               ',' + std::to_string(store_set_miss) + ',' +
+               std::to_string(load_wait) + ',' + std::to_string(strict_load_wait) +
+               " prefetch=" +
                std::to_string(prefetch_ops[0]) + ',' +
                std::to_string(prefetch_ops[1]) + ',' +
                std::to_string(prefetch_ops[2]) + " masked=" +
@@ -398,6 +485,190 @@ struct MixedCoverage {
                std::to_string(ptw_request_stalls) + ',' +
                std::to_string(ptw_response_delays) + ',' +
                std::to_string(uncache_request_stalls) + ',' +
+               std::to_string(uncache_response_delays);
+    }
+};
+
+struct StressCoverage {
+    std::array<std::uint64_t, 7> load_ops{};
+    std::array<std::uint64_t, 4> store_ops{};
+    std::array<std::uint64_t, 3> load_lanes{};
+    std::array<std::uint64_t, 2> address_lanes{};
+    std::array<std::uint64_t, 2> data_lanes{};
+    std::array<std::uint64_t, 2> store_order{};
+    std::array<std::uint64_t, 4> vector_load_eews{};
+    std::array<std::uint64_t, 4> vector_store_eews{};
+    std::array<std::uint64_t, 4> vector_load_modes{};
+    std::array<std::uint64_t, 4> vector_store_modes{};
+    std::array<std::uint64_t, 2> vector_lanes{};
+    std::array<std::uint64_t, 3> prefetch_ops{};
+    std::uint64_t masked = 0;
+    std::uint64_t unmasked = 0;
+    std::uint64_t zero_vstart = 0;
+    std::uint64_t nonzero_vstart = 0;
+    std::uint64_t full_vl = 0;
+    std::uint64_t partial_vl = 0;
+    std::uint64_t aligned = 0;
+    std::uint64_t split = 0;
+    std::uint64_t scalar_misaligned = 0;
+    std::uint64_t scalar_forwarding = 0;
+    std::uint64_t vector_forwarding = 0;
+    std::uint64_t waves = 0;
+    std::uint64_t actions = 0;
+    std::uint64_t max_outstanding = 0;
+    std::uint64_t dcache_hits = 0;
+    std::uint64_t dcache_misses = 0;
+    std::uint64_t memory_regions = 0;
+    std::array<std::uint64_t, 4> combinations{};
+    std::uint64_t dcache_request_stalls = 0;
+    std::uint64_t dcache_response_delays = 0;
+    std::uint64_t ptw_request_stalls = 0;
+    std::uint64_t ptw_response_delays = 0;
+    std::uint64_t uncache_request_stalls = 0;
+    std::uint64_t uncache_response_delays = 0;
+    std::uint64_t rvc = 0;
+    std::uint64_t non_rvc = 0;
+    std::uint64_t ftq_nonzero = 0;
+    std::uint64_t store_set_hit = 0;
+    std::uint64_t store_set_miss = 0;
+    std::uint64_t load_wait = 0;
+    std::uint64_t strict_load_wait = 0;
+
+    void sample(
+        const memblock::LoadTransaction &transaction,
+        std::uint64_t requests_before,
+        std::uint64_t requests_after)
+    {
+        ++load_ops.at(static_cast<unsigned>(transaction.op));
+        ++load_lanes.at(transaction.lane);
+        ++(transaction.predecode_rvc ? rvc : non_rvc);
+        ftq_nonzero += transaction.ftq_ptr != 0 || transaction.ftq_offset != 0;
+        ++(transaction.store_set_hit ? store_set_hit : store_set_miss);
+        load_wait += transaction.load_wait_bit;
+        strict_load_wait += transaction.load_wait_strict;
+        const unsigned size = 1U << (static_cast<unsigned>(transaction.op) & 3U);
+        scalar_misaligned += (transaction.address & (size - 1)) != 0;
+        ++(requests_after == requests_before ? dcache_hits : dcache_misses);
+    }
+
+    void sample(const memblock::StoreTransaction &transaction, bool data_first)
+    {
+        ++store_ops.at(static_cast<unsigned>(transaction.op));
+        ++address_lanes.at(transaction.address_lane);
+        ++data_lanes.at(transaction.data_lane);
+        ++store_order.at(data_first ? 1 : 0);
+        const unsigned size = 1U << static_cast<unsigned>(transaction.op);
+        scalar_misaligned += (transaction.address & (size - 1)) != 0;
+    }
+
+    void sample(
+        const memblock::VectorMemoryTransaction &transaction,
+        std::uint64_t requests_before,
+        std::uint64_t requests_after)
+    {
+        auto &eews = transaction.store ? vector_store_eews : vector_load_eews;
+        auto &modes = transaction.store ? vector_store_modes : vector_load_modes;
+        ++eews.at(transaction.eew);
+        ++modes.at(static_cast<unsigned>(transaction.addressing));
+        ++vector_lanes.at(transaction.lane);
+        ++(transaction.vm ? unmasked : masked);
+        ++(transaction.vstart == 0 ? zero_vstart : nonzero_vstart);
+        const unsigned elements = 16U >> transaction.eew;
+        ++(transaction.vl == elements ? full_vl : partial_vl);
+        ++((transaction.address & 15U) == 0 ? aligned : split);
+        ++(requests_after == requests_before ? dcache_hits : dcache_misses);
+    }
+
+    void sample(const memblock::PrefetchTransaction &transaction)
+    {
+        ++prefetch_ops.at(static_cast<unsigned>(transaction.op) - 8);
+    }
+
+    bool complete() const
+    {
+        const auto all_nonzero = [](const auto &values) {
+            return std::all_of(
+                values.begin(), values.end(), [](auto value) { return value != 0; });
+        };
+        const bool load_modes_without_ordered = vector_load_modes[0] != 0 &&
+            vector_load_modes[1] != 0 && vector_load_modes[2] != 0;
+        const bool store_modes_without_ordered = vector_store_modes[0] != 0 &&
+            vector_store_modes[1] != 0 && vector_store_modes[2] != 0;
+        return all_nonzero(load_ops) && all_nonzero(store_ops) &&
+               all_nonzero(load_lanes) && all_nonzero(address_lanes) &&
+               all_nonzero(data_lanes) && all_nonzero(store_order) &&
+               all_nonzero(vector_load_eews) &&
+               all_nonzero(vector_store_eews) && load_modes_without_ordered &&
+               store_modes_without_ordered &&
+               all_nonzero(vector_lanes) &&
+               all_nonzero(prefetch_ops) && masked != 0 && unmasked != 0 &&
+               zero_vstart != 0 && nonzero_vstart != 0 && full_vl != 0 &&
+               partial_vl != 0 && aligned != 0 && split != 0 &&
+               scalar_misaligned != 0 && scalar_forwarding != 0 &&
+               vector_forwarding != 0 && waves >= 4 && max_outstanding >= 10 &&
+               dcache_hits != 0 && dcache_misses != 0 && memory_regions >= 2 &&
+               all_nonzero(combinations) && rvc != 0 && non_rvc != 0 &&
+               ftq_nonzero != 0 && store_set_hit != 0 && store_set_miss != 0 &&
+               load_wait != 0;
+    }
+
+    bool backpressure_complete(bool required) const
+    {
+        return !required ||
+               (dcache_request_stalls != 0 && dcache_response_delays != 0);
+    }
+
+    std::string summary() const
+    {
+        auto csv = [](const auto &values) {
+            std::string result;
+            for (std::size_t index = 0; index < values.size(); ++index) {
+                result += (index == 0 ? "" : ",") + std::to_string(values[index]);
+            }
+            return result;
+        };
+        return "stress_load_ops=" + csv(load_ops) +
+               " stress_rng_streams=4" +
+               " stress_store_ops=" + csv(store_ops) +
+               " stress_load_lanes=" + csv(load_lanes) +
+               " stress_address_lanes=" + csv(address_lanes) +
+               " stress_data_lanes=" + csv(data_lanes) +
+               " stress_store_order=" + csv(store_order) +
+               " stress_eew_load=" + csv(vector_load_eews) +
+               " stress_eew_store=" + csv(vector_store_eews) +
+               " stress_vec_load_modes=" + csv(vector_load_modes) +
+               " stress_vec_store_modes=" + csv(vector_store_modes) +
+               " stress_vec_lanes=" + csv(vector_lanes) +
+               " stress_prefetch=" + csv(prefetch_ops) +
+               " stress_masked=" + std::to_string(masked) +
+               " stress_unmasked=" + std::to_string(unmasked) +
+               " stress_vstart=" + std::to_string(zero_vstart) + "," +
+               std::to_string(nonzero_vstart) +
+               " stress_vl=" + std::to_string(full_vl) + "," +
+               std::to_string(partial_vl) +
+               " stress_alignment=" + std::to_string(aligned) + "," +
+               std::to_string(split) +
+               " stress_metadata=" + std::to_string(rvc) + "," +
+               std::to_string(non_rvc) + "," + std::to_string(ftq_nonzero) +
+               "," + std::to_string(store_set_hit) + "," +
+               std::to_string(store_set_miss) + "," +
+               std::to_string(load_wait) + "," +
+               std::to_string(strict_load_wait) +
+               " stress_misaligned=" + std::to_string(scalar_misaligned) +
+               " stress_forwarding=" + std::to_string(scalar_forwarding) + "," +
+               std::to_string(vector_forwarding) +
+               " stress_waves=" + std::to_string(waves) +
+               " stress_actions=" + std::to_string(actions) +
+               " stress_max_outstanding=" + std::to_string(max_outstanding) +
+               " stress_dcache=" + std::to_string(dcache_hits) + "," +
+               std::to_string(dcache_misses) +
+               " stress_regions=" + std::to_string(memory_regions) +
+               " stress_combinations=" + csv(combinations) +
+               " stress_backpressure=" + std::to_string(dcache_request_stalls) + "," +
+               std::to_string(dcache_response_delays) + "," +
+               std::to_string(ptw_request_stalls) + "," +
+               std::to_string(ptw_response_delays) + "," +
+               std::to_string(uncache_request_stalls) + "," +
                std::to_string(uncache_response_delays);
     }
 };
@@ -478,6 +749,1639 @@ int run_single_load(int argc, char **argv)
     return 0;
 }
 
+int run_fp_loads(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x18000;
+    environment.memory().fill_incrementing(base, 64, 0x5b);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_FP_LOADS_FAIL cycle=" << environment.cycle()
+                  << " phase=reset reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    // The MemBlock boundary carries destination-class enables separately from
+    // the width opcode.  Exercise both narrow and wide FP writebacks and
+    // explicitly require that the integer register file remains untouched.
+    const std::array<memblock::LoadTransaction, 2> transactions{{
+        {
+            .address = base + 12,
+            .op = memblock::LoadOp::lw,
+            .rob = 12,
+            .lq = 0,
+            .pdest = 17,
+            .lane = 0,
+            .rf_wen = false,
+            .fp_wen = true,
+        },
+        {
+            .address = base + 24,
+            .op = memblock::LoadOp::ld,
+            .rob = 13,
+            .lq = 1,
+            .pdest = 19,
+            .lane = 1,
+            .rf_wen = false,
+            .fp_wen = true,
+        },
+    }};
+    for (const auto &transaction : transactions) {
+        const auto raw = environment.memory().expected_load(
+            transaction.address, transaction.op);
+        const auto expected = transaction.op == memblock::LoadOp::lw
+            ? (std::uint64_t{0xffffffff00000000ULL} | (raw & 0xffffffffULL))
+            : raw;
+        environment.expect_load_data(transaction, expected);
+        if (!environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 512) ||
+            !environment.run_until_complete(2048)) {
+            std::cerr << "MEMBLOCK_FP_LOADS_FAIL cycle=" << environment.cycle()
+                      << " phase=completion reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+    if (environment.writebacks() != transactions.size()) {
+        std::cerr << "MEMBLOCK_FP_LOADS_FAIL cycle=" << environment.cycle()
+                  << " phase=writeback-count expected=" << transactions.size()
+                  << " actual=" << environment.writebacks() << '\n';
+        return 1;
+    }
+    std::cout << "MEMBLOCK_FP_LOADS_PASS"
+              << " cycle=" << environment.cycle()
+              << " writebacks=" << environment.writebacks()
+              << " fp_destinations=" << transactions.size()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_trigger_contracts(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x2a000;
+    constexpr std::uint64_t address = base + 0x28;
+    environment.memory().fill_incrementing(base, 64, 0x62);
+    if (!environment.reset() ||
+        !environment.configure_memory_trigger(
+            0, address, 0, true, false)) {
+        std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    // TriggerAction.BreakpointExp is encoded as zero.  It must appear in the
+    // load writeback exception vector and suppress the destination write.
+    const memblock::LoadTransaction transaction{
+        .address = address,
+        .op = memblock::LoadOp::ld,
+        .rob = 33,
+        .lq = 0,
+        .sq = 0,
+        .pdest = 23,
+        .lane = 0,
+        .expected_exception_mask = memblock::kExceptionBreakpoint,
+        .expected_trigger = 0,
+        .predecode_rvc = true,
+        .ftq_ptr = 7,
+        .ftq_offset = 2,
+    };
+    environment.expect_load(transaction);
+    if (!environment.enqueue_load(transaction) ||
+        !environment.issue_load(transaction) ||
+        !environment.run_until_complete(512)) {
+        std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=breakpoint-load reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_TRIGGER_CONTRACTS_PASS"
+              << " cycle=" << environment.cycle()
+              << " breakpoint_loads=" << environment.writebacks()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_metadata_contracts(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x2b000;
+    const std::uint64_t address = base + 0x10;
+    environment.memory().fill_incrementing(base, 64, 0x37);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_METADATA_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::LoadTransaction transaction{
+        .address = address,
+        .op = memblock::LoadOp::ld,
+        .rob = 34,
+        .lq = 1,
+        .sq = 0,
+        .pdest = 24,
+        .lane = 1,
+        // The top-level issueLda contract does not expose exceptionVec: LSQ
+        // retains the enqueue copy for its own exception machinery, while
+        // LoadUnit receives a separately shaped issue uop.  Keep this runtime
+        // contract focused on the observable RVC/FTQ issue metadata.
+        .expected_exception_mask = 0,
+        .input_exception_mask = 0,
+        .predecode_rvc = true,
+        .ftq_ptr = 9,
+        .ftq_offset = 3,
+        .store_set_hit = true,
+        .wait_for_rob_flag = false,
+        .wait_for_rob_value = 0,
+        .load_wait_bit = true,
+        .load_wait_strict = true,
+    };
+    environment.expect_load(transaction);
+    if (!environment.enqueue_load(transaction) ||
+        !environment.issue_load(transaction) ||
+        !environment.run_until_complete(512)) {
+        std::cerr << "MEMBLOCK_METADATA_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=exception-vector reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_METADATA_CONTRACTS_PASS"
+              << " cycle=" << environment.cycle()
+              << " issue_metadata=rvc-ftq-store-set-wait"
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_dcache_errors(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x2c000;
+    environment.memory().fill_incrementing(base, 0x1000, 0x49);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle=" << environment.cycle()
+                  << " phase=reset reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::LoadTransaction denied{
+        .address = base + 0x100,
+        .op = memblock::LoadOp::ld,
+        .rob = 35,
+        .lq = 2,
+        .pdest = 25,
+        .lane = 0,
+        .expected_exception_mask = memblock::kExceptionLoadAccessFault,
+    };
+    environment.expect_load(denied);
+    environment.inject_next_dcache_response_error(true, false);
+    if (!environment.set_rob_head(denied.rob, denied.rob_flag) ||
+        !environment.enqueue_load(denied) ||
+        !environment.issue_load(denied) ||
+        !environment.run_until_complete(1024) ||
+        !environment.run_cycles(8) ||
+        !environment.redirect_after(denied.rob, denied.rob_flag, true) ||
+        !environment.run_cycles(96) ||
+        !environment.account_lq_cancellation(1)) {
+        std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle=" << environment.cycle()
+                  << " phase=denied reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::LoadTransaction corrupt{
+        .address = base + 0x200,
+        .op = memblock::LoadOp::ld,
+        .rob = 36,
+        .lq = 3,
+        .pdest = 26,
+        .lane = 1,
+        .expected_exception_mask = memblock::kExceptionHardwareError,
+    };
+    environment.expect_load(corrupt);
+    environment.inject_next_dcache_response_error(false, true);
+    if (!environment.set_rob_head(corrupt.rob, corrupt.rob_flag) ||
+        !environment.enqueue_load(corrupt) ||
+        !environment.issue_load(corrupt) ||
+        !environment.run_until_complete(1024) ||
+        !environment.run_cycles(8) ||
+        !environment.redirect_after(corrupt.rob, corrupt.rob_flag, true) ||
+        !environment.run_cycles(96) ||
+        !environment.account_lq_cancellation(1)) {
+        std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle=" << environment.cycle()
+                  << " phase=corrupt reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_DCACHE_ERRORS_PASS"
+              << " cycle=" << environment.cycle()
+              << " denied=1 corrupt=1"
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_atomic_contracts(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t address = memblock::kDefaultMemoryBase + 0x2e000;
+    environment.memory().fill_incrementing(address & ~std::uint64_t{63}, 64, 0x2d);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    std::uint64_t model_value = environment.memory().expected_load(
+        address, memblock::LoadOp::ld);
+    const std::array<std::pair<memblock::AtomicOp, std::uint64_t>, 9> operations{{
+        {memblock::AtomicOp::amoadd_d, 0x1020304050607080ULL},
+        {memblock::AtomicOp::amoxor_d, 0x00ff00ff00ff00ffULL},
+        {memblock::AtomicOp::amoand_d, 0xf0ffffffffffffffULL},
+        {memblock::AtomicOp::amoor_d, 0x0000000000001200ULL},
+        {memblock::AtomicOp::amoswap_d, 0x8899aabbccddeeffULL},
+        {memblock::AtomicOp::amomin_d, 0x7fffffffffffffffULL},
+        {memblock::AtomicOp::amomax_d, 0x8000000000000000ULL},
+        {memblock::AtomicOp::amominu_d, 0x0000000000000011ULL},
+        {memblock::AtomicOp::amomaxu_d, 0xfffffffffffffff0ULL},
+    }};
+    for (std::size_t index = 0; index < operations.size(); ++index) {
+        const auto [op, operand] = operations[index];
+        const std::uint8_t atomic_rob = static_cast<std::uint8_t>(index * 2);
+        const memblock::AtomicTransaction atomic{
+            .address = address,
+            .op = op,
+            .data = operand,
+            .rob = atomic_rob,
+            .pdest = static_cast<std::uint8_t>(62 + index),
+            .address_lane = static_cast<unsigned>(index & 1U),
+            .data_lane = static_cast<unsigned>(index & 1U),
+        };
+        const memblock::LoadTransaction old_value_wb{
+            .address = address,
+            .op = memblock::LoadOp::ld,
+            .rob = atomic.rob,
+            .pdest = atomic.pdest,
+            .lane = 0,
+            .rf_wen = true,
+        };
+        environment.expect_load_data(old_value_wb, model_value);
+        if (!environment.issue_atomic(atomic, 1024) ||
+            !environment.run_until_complete(8192)) {
+            std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=amo-writeback index="
+                      << index << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+
+        switch (op) {
+        case memblock::AtomicOp::amoadd_d:
+            model_value += operand;
+            break;
+        case memblock::AtomicOp::amoxor_d:
+            model_value ^= operand;
+            break;
+        case memblock::AtomicOp::amoand_d:
+            model_value &= operand;
+            break;
+        case memblock::AtomicOp::amoor_d:
+            model_value |= operand;
+            break;
+        case memblock::AtomicOp::amoswap_d:
+            model_value = operand;
+            break;
+        case memblock::AtomicOp::amomin_d:
+            model_value = static_cast<std::int64_t>(model_value) <
+                    static_cast<std::int64_t>(operand)
+                ? model_value
+                : operand;
+            break;
+        case memblock::AtomicOp::amomax_d:
+            model_value = static_cast<std::int64_t>(model_value) >
+                    static_cast<std::int64_t>(operand)
+                ? model_value
+                : operand;
+            break;
+        case memblock::AtomicOp::amominu_d:
+            model_value = std::min(model_value, operand);
+            break;
+        case memblock::AtomicOp::amomaxu_d:
+            model_value = std::max(model_value, operand);
+            break;
+        default:
+            break;
+        }
+
+        const memblock::LoadTransaction readback{
+            .address = address,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(atomic.rob + 1),
+            .lq = static_cast<std::uint8_t>(index),
+            .pdest = static_cast<std::uint8_t>(80 + index),
+            .lane = 1,
+        };
+        environment.expect_load_data(readback, model_value);
+        if (!environment.set_rob_head(readback.rob) ||
+            !environment.enqueue_load(readback) ||
+            !environment.issue_load(readback, 1024) ||
+            !environment.run_until_complete(8192) ||
+            !environment.run_until_lq_retired(1024)) {
+            std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=amo-readback index="
+                      << index << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+
+    const std::uint64_t word_address = address + 8;
+
+    // Atomics have no split/replay path: natural alignment is checked when
+    // the DTLB response arrives.  Exercise every byte offset forbidden by
+    // each operand width and require an exceptional writeback without any
+    // DCache transaction or architectural register write.
+    const std::uint64_t atomic_requests_before_misaligned =
+        environment.tilelink_requests();
+    auto check_misaligned_atomic = [&](std::uint64_t misaligned_address,
+                                       memblock::AtomicOp op,
+                                       std::uint64_t data,
+                                       std::uint8_t rob,
+                                       std::uint8_t pdest,
+                                       unsigned lane,
+                                       const char *phase) {
+        const memblock::AtomicTransaction atomic{
+            .address = misaligned_address,
+            .op = op,
+            .data = data,
+            .rob = rob,
+            .pdest = pdest,
+            .address_lane = lane,
+            .data_lane = lane,
+        };
+        const memblock::LoadTransaction writeback{
+            .address = atomic.address,
+            .op = memblock::LoadOp::ld,
+            .rob = atomic.rob,
+            .pdest = atomic.pdest,
+            .lane = lane,
+            .expected_exception_mask = memblock::kExceptionStoreAddressMisaligned,
+        };
+        environment.expect_load_data(writeback, 0);
+        return environment.issue_atomic(atomic, 1024) &&
+            environment.run_until_complete(8192) &&
+            environment.tilelink_requests() == atomic_requests_before_misaligned;
+    };
+    for (unsigned offset = 1; offset < 8; ++offset) {
+        if (!check_misaligned_atomic(
+                address + offset, memblock::AtomicOp::amoadd_d,
+                0x1122334455667788ULL ^ offset,
+                static_cast<std::uint8_t>(18 + offset),
+                static_cast<std::uint8_t>(118 + offset), offset & 1U,
+                "misaligned-d")) {
+            std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=misaligned-d offset="
+                      << offset << " reason=" << environment.error()
+                      << " dcache_requests=" << environment.tilelink_requests()
+                      << " expected=" << atomic_requests_before_misaligned << '\n';
+            return 1;
+        }
+    }
+    for (unsigned offset = 1; offset < 4; ++offset) {
+        if (!check_misaligned_atomic(
+                word_address + offset, memblock::AtomicOp::amoor_w,
+                0xa5a55a5aU ^ offset,
+                static_cast<std::uint8_t>(26 + offset),
+                static_cast<std::uint8_t>(126 + offset), offset & 1U,
+                "misaligned-w")) {
+            std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=misaligned-w offset="
+                      << offset << " reason=" << environment.error()
+                      << " dcache_requests=" << environment.tilelink_requests()
+                      << " expected=" << atomic_requests_before_misaligned << '\n';
+            return 1;
+        }
+    }
+
+    // Exercise the complete W-width ALU family independently from the
+    // D-width sequence.  Atomic W results are sign-extended to XLEN, while
+    // only the addressed 32-bit word is updated in the cache line.
+    std::uint64_t word_line_value = environment.memory().expected_load(
+        word_address, memblock::LoadOp::ld);
+    std::uint32_t word_value = static_cast<std::uint32_t>(
+        word_line_value);
+    const std::array<std::pair<memblock::AtomicOp, std::uint32_t>, 9>
+        word_operations{{
+            {memblock::AtomicOp::amoadd_w, 0x10203040U},
+            {memblock::AtomicOp::amoxor_w, 0x00ff00ffU},
+            {memblock::AtomicOp::amoand_w, 0xf0ffffffU},
+            {memblock::AtomicOp::amoor_w, 0x00001200U},
+            {memblock::AtomicOp::amoswap_w, 0x8899aabBU},
+            {memblock::AtomicOp::amomin_w, 0x7fffffffU},
+            {memblock::AtomicOp::amomax_w, 0x80000000U},
+            {memblock::AtomicOp::amominu_w, 0x00000011U},
+            {memblock::AtomicOp::amomaxu_w, 0xfffffff0U},
+        }};
+    for (std::size_t index = 0; index < word_operations.size(); ++index) {
+        const auto [op, operand] = word_operations[index];
+        const std::uint8_t atomic_rob = static_cast<std::uint8_t>(32 + index * 2);
+        const memblock::AtomicTransaction atomic{
+            .address = word_address,
+            .op = op,
+            .data = operand,
+            .rob = atomic_rob,
+            .pdest = static_cast<std::uint8_t>(102 + index),
+            .address_lane = static_cast<unsigned>(index & 1U),
+            .data_lane = static_cast<unsigned>(index & 1U),
+        };
+        const std::uint64_t old_value = memblock::sign_extend(word_value, 32);
+        const memblock::LoadTransaction old_value_wb{
+            .address = word_address,
+            .op = memblock::LoadOp::ld,
+            .rob = atomic.rob,
+            .pdest = atomic.pdest,
+            .lane = 0,
+            .rf_wen = true,
+        };
+        environment.expect_load_data(old_value_wb, old_value);
+        if (!environment.issue_atomic(atomic, 1024) ||
+            !environment.run_until_complete(8192)) {
+            std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=amo-w-writeback index="
+                      << index << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+
+        const std::int32_t signed_old = static_cast<std::int32_t>(word_value);
+        const std::int32_t signed_operand = static_cast<std::int32_t>(operand);
+        switch (op) {
+        case memblock::AtomicOp::amoadd_w:
+            word_value = static_cast<std::uint32_t>(word_value + operand);
+            break;
+        case memblock::AtomicOp::amoxor_w:
+            word_value ^= operand;
+            break;
+        case memblock::AtomicOp::amoand_w:
+            word_value &= operand;
+            break;
+        case memblock::AtomicOp::amoor_w:
+            word_value |= operand;
+            break;
+        case memblock::AtomicOp::amoswap_w:
+            word_value = operand;
+            break;
+        case memblock::AtomicOp::amomin_w:
+            word_value = signed_old < signed_operand ? word_value : operand;
+            break;
+        case memblock::AtomicOp::amomax_w:
+            word_value = signed_old > signed_operand ? word_value : operand;
+            break;
+        case memblock::AtomicOp::amominu_w:
+            word_value = std::min(word_value, operand);
+            break;
+        case memblock::AtomicOp::amomaxu_w:
+            word_value = std::max(word_value, operand);
+            break;
+        default:
+            break;
+        }
+        const memblock::LoadTransaction readback{
+            .address = word_address,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(atomic.rob + 1),
+            .lq = static_cast<std::uint8_t>(operations.size() + index),
+            .pdest = static_cast<std::uint8_t>(120 + index),
+            .lane = 1,
+        };
+        word_line_value = (word_line_value & ~std::uint64_t{0xffffffff}) |
+            static_cast<std::uint64_t>(word_value);
+        environment.expect_load_data(readback, word_line_value);
+        if (!environment.set_rob_head(readback.rob) ||
+            !environment.enqueue_load(readback) ||
+            !environment.issue_load(readback, 1024) ||
+            !environment.run_until_complete(8192) ||
+            !environment.run_until_lq_retired(1024)) {
+            std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=amo-w-readback index="
+                      << index << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+
+    auto run_compare_swap = [&](std::uint64_t cas_address,
+                                memblock::AtomicOp cas_op,
+                                std::uint64_t &line_value,
+                                std::uint64_t compare,
+                                std::uint64_t swap,
+                                std::uint8_t atomic_rob,
+                                std::uint8_t pdest,
+                                std::uint8_t lq,
+                                bool word) {
+        const std::uint64_t old_value = word
+            ? memblock::sign_extend(static_cast<std::uint32_t>(line_value), 32)
+            : line_value;
+        const memblock::AtomicTransaction atomic{
+            .address = cas_address,
+            .op = cas_op,
+            .data = swap,
+            .compare = compare,
+            .rob = atomic_rob,
+            .pdest = pdest,
+            .address_lane = 0,
+            .data_lane = 0,
+        };
+        const memblock::LoadTransaction old_value_wb{
+            .address = cas_address,
+            .op = memblock::LoadOp::ld,
+            .rob = atomic.rob,
+            .pdest = atomic.pdest,
+            .lane = 0,
+            .rf_wen = true,
+        };
+        environment.expect_load_data(old_value_wb, old_value);
+        if (!environment.issue_atomic(atomic, 1024) ||
+            !environment.run_until_complete(8192)) {
+            return false;
+        }
+        const bool match = word
+            ? static_cast<std::uint32_t>(line_value) ==
+                  static_cast<std::uint32_t>(compare)
+            : line_value == compare;
+        if (match) {
+            line_value = word
+                ? ((line_value & ~std::uint64_t{0xffffffff}) |
+                   static_cast<std::uint32_t>(swap))
+                : swap;
+        }
+        const memblock::LoadTransaction readback{
+            .address = cas_address,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(atomic.rob + 1),
+            .lq = lq,
+            .pdest = static_cast<std::uint8_t>(pdest + 1),
+            .lane = 1,
+        };
+        environment.expect_load_data(readback, line_value);
+        return environment.set_rob_head(readback.rob) &&
+            environment.enqueue_load(readback) &&
+            environment.issue_load(readback, 1024) &&
+            environment.run_until_complete(8192) &&
+            environment.run_until_lq_retired(1024);
+    };
+
+    const std::uint64_t word_compare = word_value;
+    if (!run_compare_swap(
+            word_address, memblock::AtomicOp::amocas_w, word_line_value,
+            word_compare, 0x2468ace0U, 50, 140, 18, true) ||
+        !run_compare_swap(
+            word_address, memblock::AtomicOp::amocas_w, word_line_value,
+            static_cast<std::uint32_t>(word_compare + 1), 0x13579bdfU,
+            52, 142, 19, true)) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=amocas-w reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    word_value = static_cast<std::uint32_t>(word_line_value);
+    if (!run_compare_swap(
+            address, memblock::AtomicOp::amocas_d, model_value,
+            model_value, 0x0123456789abcdefULL, 54, 144, 20, false) ||
+        !run_compare_swap(
+            address, memblock::AtomicOp::amocas_d, model_value,
+            model_value ^ 1U, 0xfedcba9876543210ULL, 56, 146, 21, false)) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=amocas-d reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::AtomicTransaction lr_word{
+        .address = word_address,
+        .op = memblock::AtomicOp::lr_w,
+        .rob = 58,
+        .pdest = 148,
+        .address_lane = 0,
+        .data_lane = 0,
+    };
+    const memblock::LoadTransaction lr_word_wb{
+        .address = word_address, .op = memblock::LoadOp::ld,
+        .rob = lr_word.rob, .pdest = lr_word.pdest, .lane = 0,
+        .rf_wen = true,
+    };
+    environment.expect_load_data(
+        lr_word_wb, memblock::sign_extend(word_value, 32));
+    if (!environment.issue_atomic(lr_word, 1024) ||
+        !environment.run_until_complete(8192)) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=lr-w reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    constexpr std::uint32_t word_reservation_value = 0x13579bdfU;
+    const memblock::AtomicTransaction sc_word{
+        .address = word_address,
+        .op = memblock::AtomicOp::sc_w,
+        .data = word_reservation_value,
+        .rob = 59,
+        .pdest = 149,
+        .address_lane = 1,
+        .data_lane = 1,
+    };
+    const memblock::LoadTransaction sc_word_wb{
+        .address = word_address, .op = memblock::LoadOp::ld,
+        .rob = sc_word.rob, .pdest = sc_word.pdest, .lane = 0,
+        .rf_wen = true,
+    };
+    environment.expect_load_data(sc_word_wb, 0);
+    if (!environment.issue_atomic(sc_word, 1024) ||
+        !environment.run_until_complete(8192)) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=sc-w-success reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    word_value = word_reservation_value;
+    word_line_value = (word_line_value & ~std::uint64_t{0xffffffff}) |
+        word_value;
+    const memblock::AtomicTransaction sc_word_failed{
+        .address = word_address,
+        .op = memblock::AtomicOp::sc_w,
+        .data = 0x2468ace0U,
+        .rob = 60,
+        .pdest = 150,
+        .address_lane = 0,
+        .data_lane = 0,
+    };
+    const memblock::LoadTransaction sc_word_failed_wb{
+        .address = word_address, .op = memblock::LoadOp::ld,
+        .rob = sc_word_failed.rob, .pdest = sc_word_failed.pdest,
+        .lane = 0, .rf_wen = true,
+    };
+    environment.expect_load_data(sc_word_failed_wb, 1);
+    if (!environment.issue_atomic(sc_word_failed, 1024) ||
+        !environment.run_until_complete(8192)) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=sc-w-failure reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction word_reservation_readback{
+        .address = word_address, .op = memblock::LoadOp::ld, .rob = 61,
+        .lq = 22, .pdest = 151, .lane = 1,
+    };
+    environment.expect_load_data(word_reservation_readback, word_line_value);
+    if (!environment.set_rob_head(word_reservation_readback.rob) ||
+        !environment.enqueue_load(word_reservation_readback) ||
+        !environment.issue_load(word_reservation_readback, 1024) ||
+        !environment.run_until_complete(8192) ||
+        !environment.run_until_lq_retired(1024)) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=sc-w-readback reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::AtomicTransaction lr{
+        .address = address,
+        .op = memblock::AtomicOp::lr_d,
+        .rob = 62,
+        .pdest = 92,
+        .address_lane = 0,
+        .data_lane = 0,
+    };
+    const memblock::LoadTransaction lr_wb{
+        .address = address, .op = memblock::LoadOp::ld, .rob = lr.rob,
+        .pdest = lr.pdest, .lane = 0, .rf_wen = true,
+    };
+    environment.expect_load_data(lr_wb, model_value);
+    if (!environment.issue_atomic(lr, 1024) ||
+        !environment.run_until_complete(8192)) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=lr reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    constexpr std::uint64_t reservation_value = 0xfeedfacecafebeefULL;
+    const memblock::AtomicTransaction sc{
+        .address = address,
+        .op = memblock::AtomicOp::sc_d,
+        .data = reservation_value,
+        .rob = 63,
+        .pdest = 93,
+        .address_lane = 1,
+        .data_lane = 1,
+    };
+    const memblock::LoadTransaction sc_wb{
+        .address = address, .op = memblock::LoadOp::ld, .rob = sc.rob,
+        .pdest = sc.pdest, .lane = 0, .rf_wen = true,
+    };
+    environment.expect_load_data(sc_wb, 0);
+    if (!environment.issue_atomic(sc, 1024) ||
+        !environment.run_until_complete(8192)) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=sc-success reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    model_value = reservation_value;
+
+    const memblock::AtomicTransaction sc_failed{
+        .address = address,
+        .op = memblock::AtomicOp::sc_d,
+        .data = 0x1111222233334444ULL,
+        .rob = 64,
+        .pdest = 94,
+        .address_lane = 0,
+        .data_lane = 0,
+    };
+    const memblock::LoadTransaction sc_failed_wb{
+        .address = address, .op = memblock::LoadOp::ld,
+        .rob = sc_failed.rob, .pdest = sc_failed.pdest,
+        .lane = 0, .rf_wen = true,
+    };
+    environment.expect_load_data(sc_failed_wb, 1);
+    if (!environment.issue_atomic(sc_failed, 1024) ||
+        !environment.run_until_complete(8192)) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=sc-failure reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::LoadTransaction reservation_readback{
+        .address = address, .op = memblock::LoadOp::ld, .rob = 65,
+        .lq = static_cast<std::uint8_t>(operations.size() +
+            word_operations.size() + 5),
+        .pdest = 95, .lane = 1,
+    };
+    environment.expect_load_data(reservation_readback, model_value);
+    if (!environment.set_rob_head(reservation_readback.rob) ||
+        !environment.enqueue_load(reservation_readback) ||
+        !environment.issue_load(reservation_readback, 1024) ||
+        !environment.run_until_complete(8192) ||
+        !environment.run_until_lq_retired(1024)) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=sc-readback reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_ATOMIC_CONTRACTS_PASS"
+              << " cycle=" << environment.cycle()
+              << " amo_d_variants=" << operations.size()
+              << " amo_w_variants=" << word_operations.size()
+              << " amocas_variants=4"
+              << " lr_sc=1 misaligned_d_offsets=7 misaligned_w_offsets=3"
+              << " misaligned=10"
+              << " final=0x" << std::hex << model_value << std::dec
+              << " tilelink_requests=" << environment.tilelink_requests()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_uncache_errors(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t virtual_base = 0x50032000ULL;
+    constexpr std::uint64_t physical_base = 0x90032000ULL;
+    constexpr std::uint64_t root = 0x97000000ULL;
+    environment.memory().fill_incrementing(physical_base & ~std::uint64_t{63}, 64, 0x5c);
+    environment.configure_backpressure(0x4d595df4d0f33173ULL, true);
+    if (!environment.reset() ||
+        !environment.map_sv39_4k(
+            virtual_base, physical_base, root, true, true, false, false, true) ||
+        !environment.activate_sv39(root)) {
+        std::cerr << "MEMBLOCK_UNCACHE_ERRORS_FAIL cycle="
+                  << environment.cycle() << " phase=configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::LoadTransaction denied{
+        .address = virtual_base + 8,
+        .oracle_address = physical_base + 8,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 104,
+        .lane = 0,
+        .expected_exception_mask = memblock::kExceptionLoadAccessFault,
+    };
+    environment.expect_load(denied);
+    environment.inject_next_uncache_response_error(true, false);
+    const auto retire_denied = [&]() {
+        return environment.lq_dequeued() + environment.lq_canceled() >=
+                environment.lq_allocated() ||
+            environment.account_lq_cancellation(1);
+    };
+    if (!environment.enqueue_load(denied) ||
+        !environment.issue_load(denied, 1024) ||
+        !environment.run_until_complete(8192) ||
+        !environment.run_cycles(8) ||
+        !environment.redirect_after(denied.rob, denied.rob_flag, true) ||
+        !environment.run_cycles(96) ||
+        !retire_denied()) {
+        std::cerr << "MEMBLOCK_UNCACHE_ERRORS_FAIL cycle="
+                  << environment.cycle() << " phase=denied reason="
+                  << environment.error()
+                  << " uncache_requests=" << environment.uncache_requests()
+                  << " dcache_requests=" << environment.tilelink_requests() << '\n';
+        return 1;
+    }
+
+    const memblock::LoadTransaction corrupt{
+        .address = virtual_base + 16,
+        .oracle_address = physical_base + 16,
+        .op = memblock::LoadOp::ld,
+        .rob = 1,
+        .lq = 1,
+        .pdest = 105,
+        .lane = 1,
+        .expected_exception_mask = memblock::kExceptionHardwareError,
+    };
+    environment.expect_load(corrupt);
+    environment.inject_next_uncache_response_error(false, true);
+    const auto retire_corrupt = [&]() {
+        return environment.lq_dequeued() + environment.lq_canceled() >=
+                environment.lq_allocated() ||
+            environment.account_lq_cancellation(1);
+    };
+    if (!environment.set_rob_head(corrupt.rob) ||
+        !environment.enqueue_load(corrupt) ||
+        !environment.issue_load(corrupt, 1024) ||
+        !environment.run_until_complete(8192) ||
+        !environment.run_cycles(8) ||
+        !environment.redirect_after(corrupt.rob, corrupt.rob_flag, true) ||
+        !environment.run_cycles(96) ||
+        !retire_corrupt()) {
+        std::cerr << "MEMBLOCK_UNCACHE_ERRORS_FAIL cycle="
+                  << environment.cycle() << " phase=corrupt reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_UNCACHE_ERRORS_PASS"
+              << " cycle=" << environment.cycle()
+              << " denied=1 corrupt=1"
+              << " uncache_requests=" << environment.uncache_requests()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_atomic_dchannel_errors(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t address = memblock::kDefaultMemoryBase + 0x32000;
+    environment.memory().fill_incrementing(address & ~std::uint64_t{63}, 64, 0x6b);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_ATOMIC_DCHANNEL_ERRORS_FAIL cycle="
+                  << environment.cycle() << " phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    environment.configure_cache_error_enable(true);
+
+    const memblock::AtomicTransaction denied_amo{
+        .address = address,
+        .op = memblock::AtomicOp::amoadd_d,
+        .data = 0x0102030405060708ULL,
+        .rob = 10,
+        .pdest = 10,
+        .address_lane = 0,
+        .data_lane = 0,
+    };
+    const memblock::LoadTransaction denied_wb{
+        .address = denied_amo.address,
+        .op = memblock::LoadOp::ld,
+        .rob = denied_amo.rob,
+        .pdest = denied_amo.pdest,
+        .lane = 0,
+        .expected_exception_mask = memblock::kExceptionStoreAccessFault,
+    };
+    environment.expect_load_data(denied_wb, 0);
+    environment.inject_next_dcache_response_error(true, false);
+    if (!environment.set_rob_head(denied_amo.rob) ||
+        !environment.issue_atomic(denied_amo, 1024) ||
+        !environment.run_until_complete(8192)) {
+        std::cerr << "MEMBLOCK_ATOMIC_DCHANNEL_ERRORS_FAIL cycle="
+                  << environment.cycle() << " phase=denied-amo reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::AtomicTransaction corrupt_amo{
+        .address = address + 0x80,
+        .op = memblock::AtomicOp::amoadd_d,
+        .data = 0x1122334455667788ULL,
+        .rob = 12,
+        .pdest = 12,
+        .address_lane = 1,
+        .data_lane = 1,
+    };
+    const memblock::LoadTransaction corrupt_wb{
+        .address = corrupt_amo.address,
+        .op = memblock::LoadOp::ld,
+        .rob = corrupt_amo.rob,
+        .pdest = corrupt_amo.pdest,
+        .lane = 0,
+        .expected_exception_mask = memblock::kExceptionHardwareError,
+    };
+    environment.expect_load_data(corrupt_wb, 0);
+    environment.inject_next_dcache_response_error(false, true);
+    if (!environment.set_rob_head(corrupt_amo.rob) ||
+        !environment.issue_atomic(corrupt_amo, 1024) ||
+        !environment.run_until_complete(8192)) {
+        std::cerr << "MEMBLOCK_ATOMIC_DCHANNEL_ERRORS_FAIL cycle="
+                  << environment.cycle() << " phase=corrupt-amo reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const std::uint64_t corrupt_hit_requests =
+        environment.tilelink_requests();
+    const memblock::AtomicTransaction corrupt_hit_amo{
+        .address = corrupt_amo.address,
+        .op = memblock::AtomicOp::amoadd_d,
+        .data = 0x8877665544332211ULL,
+        .rob = 13,
+        .pdest = 13,
+        .address_lane = 0,
+        .data_lane = 0,
+    };
+    const memblock::LoadTransaction corrupt_hit_wb{
+        .address = corrupt_hit_amo.address,
+        .op = memblock::LoadOp::ld,
+        .rob = corrupt_hit_amo.rob,
+        .pdest = corrupt_hit_amo.pdest,
+        .lane = 0,
+        .expected_exception_mask = memblock::kExceptionHardwareError,
+    };
+    environment.expect_load_data(corrupt_hit_wb, 0);
+    if (!environment.set_rob_head(corrupt_hit_amo.rob) ||
+        !environment.issue_atomic(corrupt_hit_amo, 1024) ||
+        !environment.run_until_complete(8192) ||
+        environment.tilelink_requests() != corrupt_hit_requests ||
+        !environment.run_cycles(64)) {
+        std::cerr << "MEMBLOCK_ATOMIC_DCHANNEL_ERRORS_FAIL cycle="
+                  << environment.cycle() << " phase=corrupt-hit-amo reason="
+                  << environment.error() << " dcache_requests="
+                  << environment.tilelink_requests() << '\n';
+        return 1;
+    }
+
+    environment.configure_cache_error_enable(false);
+    const std::uint64_t denied_readback_requests =
+        environment.tilelink_requests();
+    const memblock::LoadTransaction readback{
+        .address = denied_amo.address,
+        .op = memblock::LoadOp::ld,
+        .rob = 14,
+        .lq = 0,
+        .pdest = 14,
+        .lane = 0,
+    };
+    environment.expect_load_data(readback,
+                                 environment.memory().expected_load(
+                                     address, memblock::LoadOp::ld));
+    if (!environment.set_rob_head(readback.rob) ||
+        !environment.enqueue_load(readback) ||
+        !environment.issue_load(readback, 1024) ||
+        !environment.run_until_complete(8192) ||
+        environment.tilelink_requests() != denied_readback_requests + 1) {
+        std::cerr << "MEMBLOCK_ATOMIC_DCHANNEL_ERRORS_FAIL cycle="
+                  << environment.cycle() << " phase=denied-readback reason="
+                  << environment.error() << " dcache_requests="
+                  << environment.tilelink_requests() << '\n';
+        return 1;
+    }
+
+    const std::uint64_t corrupt_readback_requests =
+        environment.tilelink_requests();
+    const memblock::LoadTransaction corrupt_readback{
+        .address = corrupt_amo.address,
+        .op = memblock::LoadOp::ld,
+        .rob = 15,
+        .lq = 1,
+        .pdest = 15,
+        .lane = 1,
+        .expected_exception_mask = memblock::kExceptionHardwareError,
+        .check_data_on_exception = true,
+    };
+    environment.expect_load_data(corrupt_readback,
+                                 environment.memory().expected_load(
+                                     corrupt_amo.address, memblock::LoadOp::ld));
+    if (!environment.set_rob_head(corrupt_readback.rob) ||
+        !environment.enqueue_load(corrupt_readback) ||
+        !environment.issue_load(corrupt_readback, 1024) ||
+        !environment.run_until_complete(8192) ||
+        environment.tilelink_requests() != corrupt_readback_requests) {
+        std::cerr << "MEMBLOCK_ATOMIC_DCHANNEL_ERRORS_FAIL cycle="
+                  << environment.cycle() << " phase=corrupt-readback reason="
+                  << environment.error() << " dcache_requests="
+                  << environment.tilelink_requests() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_ATOMIC_DCHANNEL_ERRORS_PASS cycle="
+              << environment.cycle()
+              << " denied_amo=1 corrupt_amo=1 corrupt_hit_amo=1"
+              << " rtl_sha256="
+              << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_uncache_widths(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t virtual_base = 0x50034000ULL;
+    constexpr std::uint64_t physical_base = 0x90034000ULL;
+    constexpr std::uint64_t root = 0x97004000ULL;
+    environment.memory().fill_incrementing(physical_base, 64, 0x80);
+    environment.configure_backpressure(0x6a09e667f3bcc909ULL, true);
+    if (!environment.reset() ||
+        !environment.map_sv39_4k(
+            virtual_base, physical_base, root, true, true, false, false, true) ||
+        !environment.activate_sv39(root)) {
+        std::cerr << "MEMBLOCK_UNCACHE_WIDTHS_FAIL cycle="
+                  << environment.cycle() << " phase=configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    // Exercise every scalar width and sign mode at every legal byte lane of
+    // an 8-byte Uncache beat. The response agent returns the complete beat,
+    // so this catches address-lane, size, mask, and sign-extension mistakes.
+    const std::array<memblock::LoadOp, 2> byte_ops{
+        memblock::LoadOp::lb, memblock::LoadOp::lbu};
+    const std::array<memblock::LoadOp, 2> half_ops{
+        memblock::LoadOp::lh, memblock::LoadOp::lhu};
+    const std::array<memblock::LoadOp, 2> word_ops{
+        memblock::LoadOp::lw, memblock::LoadOp::lwu};
+    unsigned case_count = 0;
+    std::uint8_t rob = 0;
+    std::uint8_t lq = 0;
+    auto run_case = [&](memblock::LoadOp op, unsigned offset) {
+        const memblock::LoadTransaction transaction{
+            .address = virtual_base + offset,
+            .oracle_address = physical_base + offset,
+            .op = op,
+            .rob = rob,
+            .lq = lq,
+            .pdest = static_cast<std::uint8_t>(120 + case_count),
+            .lane = case_count % memblock::kScalarLoadLanes,
+        };
+        environment.expect_load(transaction);
+        if (!environment.set_rob_head(transaction.rob) ||
+            !environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 2048) ||
+            !environment.run_until_complete(8192) ||
+            !environment.run_until_lq_retired(2048)) {
+            std::cerr << "MEMBLOCK_UNCACHE_WIDTHS_FAIL cycle="
+                      << environment.cycle() << " case=" << case_count
+                      << " op=" << static_cast<unsigned>(op)
+                      << " offset=" << offset << " reason="
+                      << environment.error() << '\n';
+            return false;
+        }
+        ++case_count;
+        ++rob;
+        ++lq;
+        return true;
+    };
+
+    for (const auto op : byte_ops) {
+        for (unsigned offset = 0; offset < 8; ++offset) {
+            if (!run_case(op, offset)) {
+                return 1;
+            }
+        }
+    }
+    for (const auto op : half_ops) {
+        for (unsigned offset = 0; offset < 8; offset += 2) {
+            if (!run_case(op, offset)) {
+                return 1;
+            }
+        }
+    }
+    for (const auto op : word_ops) {
+        for (unsigned offset = 0; offset < 8; offset += 4) {
+            if (!run_case(op, offset)) {
+                return 1;
+            }
+        }
+    }
+    if (!run_case(memblock::LoadOp::ld, 0)) {
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_UNCACHE_WIDTHS_PASS"
+              << " cycle=" << environment.cycle()
+              << " cases=" << case_count
+              << " uncache_requests=" << environment.uncache_requests()
+              << " request_stalls=" << environment.uncache_request_stalls()
+              << " response_delays=" << environment.uncache_response_delays()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_mmio_contracts(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t virtual_base = 0x50038000ULL;
+    constexpr std::uint64_t physical_base = 0x90038000ULL;
+    constexpr std::uint64_t root = 0x9700c000ULL;
+    environment.memory().fill_incrementing(physical_base, 64, 0x2d);
+    environment.configure_backpressure(0x1f83d9abfb41bd6bULL, true);
+    if (!environment.reset() ||
+        !environment.map_sv39_4k(
+            virtual_base, physical_base, root, true, true, false, false,
+            false, true) ||
+        !environment.activate_sv39(root)) {
+        std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    unsigned normal_count = 0;
+    unsigned fault_count = 0;
+    auto run_case = [&](std::uint8_t rob, std::uint8_t lq,
+                        std::uint8_t pdest, std::uint64_t offset,
+                        std::uint32_t exception, bool denied, bool corrupt) {
+        const memblock::LoadTransaction transaction{
+            .address = virtual_base + offset,
+            .oracle_address = physical_base + offset,
+            .op = memblock::LoadOp::ld,
+            .rob = rob,
+            .lq = lq,
+            .pdest = pdest,
+            .lane = static_cast<unsigned>(rob % memblock::kScalarLoadLanes),
+            .expected_exception_mask = exception,
+            .expected_debug_is_mmio = true,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        environment.expect_load(transaction);
+        if (denied || corrupt) {
+            environment.inject_next_uncache_response_error(denied, corrupt);
+        }
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        if (!environment.set_rob_head(transaction.rob) ||
+            !environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 2048) ||
+            !environment.wait_for_mmio_request(
+                transaction.rob, transaction.rob_flag, 4096) ||
+            !environment.run_until_complete(8192)) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=writeback rob="
+                      << static_cast<unsigned>(rob) << " reason="
+                      << environment.error() << '\n';
+            return false;
+        }
+        if (environment.tilelink_requests() != dcache_before) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=dcache-bypass rob="
+                      << static_cast<unsigned>(rob) << " reason=MMIO issued a DCache request\n";
+            return false;
+        }
+        if (exception == 0) {
+            ++normal_count;
+            return environment.run_until_lq_retired(2048);
+        }
+        ++fault_count;
+        if (!environment.run_cycles(8) ||
+            !environment.redirect_after(transaction.rob, transaction.rob_flag, true) ||
+            !environment.run_cycles(96)) {
+            return false;
+        }
+        if (environment.lq_dequeued() + environment.lq_canceled() <
+            environment.lq_allocated()) {
+            return environment.account_lq_cancellation(1);
+        }
+        return true;
+    };
+
+    if (!run_case(0, 0, 150, 8, 0, false, false) ||
+        !run_case(1, 1, 151, 16, memblock::kExceptionLoadAccessFault,
+                  true, false) ||
+        !run_case(2, 2, 152, 24, memblock::kExceptionHardwareError,
+                  false, true)) {
+        std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=final reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    // MMIO stores are committed through StoreQueue's uncache state machine;
+    // unlike scalar MMIO loads they do not produce an address writeback until
+    // the request/response sequence has completed.  Check both the absence
+    // of DCache traffic and the final MMIO metadata on that delayed pulse.
+    const memblock::StoreTransaction mmio_store{
+        .address = virtual_base + 0x28,
+        .oracle_address = physical_base + 0x28,
+        .data = 0x0123456789abcdefULL,
+        .op = memblock::StoreOp::sd,
+        .rob = 3,
+        .sq = 0,
+        .address_lane = 0,
+        .data_lane = 1,
+        // The PBMT=IO page is backed by the configured DDR PMA region.  The
+        // StoreQueue writeback therefore reports memBackTypeMM=1 and
+        // debug.isMMIO=0; PMA-IO would be a separate device-map test.
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    const std::uint64_t dcache_before_store = environment.tilelink_requests();
+    const std::uint64_t uncache_before_store = environment.uncache_requests();
+    const std::uint64_t store_misses_before = environment.store_tlb_misses();
+    environment.expect_store(mmio_store);
+    if (!environment.set_rob_head(mmio_store.rob, mmio_store.rob_flag) ||
+        !environment.enqueue_store(mmio_store, 0) ||
+        !environment.issue_store_address(mmio_store, 2048) ||
+        !environment.run_until_store_tlb_misses(store_misses_before + 1, 4096) ||
+        !environment.run_cycles(256) ||
+        !environment.issue_store_address(mmio_store, 2048) ||
+        !environment.issue_store_data(mmio_store, 2048) ||
+        !environment.run_cycles(64) ||
+        !environment.wait_for_mmio_store_request(
+            mmio_store.rob, mmio_store.rob_flag, 8192) ||
+        !environment.run_until_store_complete(8192) ||
+        !environment.commit_stores_through(mmio_store, 1) ||
+        !environment.run_cycles(16)) {
+        std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=store-writeback reason="
+                  << environment.error()
+                  << " store_mmio_valid=" << environment.store_mmio_valid()
+                  << " store_mmio_rob="
+                  << static_cast<unsigned>(environment.store_mmio_rob())
+                  << " store_tlb_feedbacks="
+                  << environment.store_tlb_feedbacks()
+                  << " store_tlb_misses=" << environment.store_tlb_misses()
+                  << " uncache_requests=" << environment.uncache_requests()
+                  << '\n';
+        return 1;
+    }
+    environment.record_committed_store(mmio_store);
+    if (environment.sq_dequeued() != environment.sq_allocated()) {
+        std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=store-retirement reason="
+                  << "MMIO store did not leave SQ"
+                  << " sq_dequeued=" << environment.sq_dequeued()
+                  << " sq_allocated=" << environment.sq_allocated() << '\n';
+        return 1;
+    }
+    if (environment.tilelink_requests() != dcache_before_store ||
+        environment.uncache_requests() != uncache_before_store + 1) {
+        std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=store-bypass reason="
+                  << "MMIO store used the wrong manager path"
+                  << " dcache_requests=" << environment.tilelink_requests()
+                  << " uncache_requests=" << environment.uncache_requests()
+                  << '\n';
+        return 1;
+    }
+
+    // Exercise the SoC's physical PMA device window independently of PBMT=IO.
+    // The 0x30050000..0x3801ffff PMA interval has c=0 and is outside the
+    // DebugModule-only access guard, so normal CPU accesses are classified as
+    // MMIO from the physical PMA response.
+    unsigned pma_load_count = 0;
+    unsigned pma_store_count = 0;
+    unsigned pma_denied_count = 0;
+    {
+        memblock::Environment pma_environment(argc, argv);
+        constexpr std::uint64_t pma_physical_base = 0x35000000ULL;
+        pma_environment.memory().fill_incrementing(
+            pma_physical_base, 64, 0x63);
+        pma_environment.configure_backpressure(
+            0x5a17c3e9d2b84f61ULL, true);
+        if (!pma_environment.reset() ||
+            !pma_environment.activate_bare(43)) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << pma_environment.cycle()
+                      << " phase=pma-configuration reason="
+                      << pma_environment.error() << '\n';
+            return 1;
+        }
+
+        const memblock::LoadTransaction pma_load{
+            .address = pma_physical_base + 0x10,
+            .oracle_address = pma_physical_base + 0x10,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 158,
+            .lane = 0,
+            .expected_debug_is_mmio = true,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        pma_environment.expect_load(pma_load);
+        const std::uint64_t pma_dcache_before =
+            pma_environment.tilelink_requests();
+        if (!pma_environment.set_rob_head(pma_load.rob) ||
+            !pma_environment.enqueue_load(pma_load) ||
+            !pma_environment.issue_load(pma_load, 2048) ||
+            !pma_environment.wait_for_mmio_request(
+                pma_load.rob, pma_load.rob_flag, 4096) ||
+            !pma_environment.run_until_complete(8192) ||
+            !pma_environment.run_until_lq_retired(2048) ||
+            pma_environment.tilelink_requests() != pma_dcache_before) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << pma_environment.cycle()
+                      << " phase=pma-load reason="
+                      << pma_environment.error() << '\n';
+            return 1;
+        }
+        ++pma_load_count;
+
+        const memblock::StoreTransaction pma_store{
+            .address = pma_physical_base + 0x28,
+            .oracle_address = pma_physical_base + 0x28,
+            .data = 0x8877665544332211ULL,
+            .op = memblock::StoreOp::sd,
+            .rob = 1,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 1,
+            .expected_debug_is_mmio = true,
+            .expected_debug_is_ncio = false,
+        };
+        const std::uint64_t pma_uncache_before =
+            pma_environment.uncache_requests();
+        pma_environment.expect_store(pma_store);
+        if (!pma_environment.set_rob_head(pma_store.rob) ||
+            !pma_environment.enqueue_store(pma_store, 0) ||
+            !pma_environment.issue_store_address(pma_store, 2048) ||
+            !pma_environment.issue_store_data(pma_store, 2048) ||
+            !pma_environment.run_cycles(64) ||
+            !pma_environment.wait_for_mmio_store_request(
+                pma_store.rob, pma_store.rob_flag, 8192) ||
+            !pma_environment.run_until_store_complete(8192) ||
+            !pma_environment.commit_stores_through(pma_store, 1) ||
+            !pma_environment.run_cycles(16) ||
+            pma_environment.uncache_requests() != pma_uncache_before + 1) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << pma_environment.cycle()
+                      << " phase=pma-store reason="
+                      << pma_environment.error() << '\n';
+            return 1;
+        }
+        pma_environment.record_committed_store(pma_store);
+        if (pma_environment.sq_dequeued() != pma_environment.sq_allocated()) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << pma_environment.cycle()
+                      << " phase=pma-store-retirement reason="
+                      << "PMA MMIO store did not leave SQ\n";
+            return 1;
+        }
+        ++pma_store_count;
+
+        // The DebugModule PMA interval is c=0 but is additionally guarded by
+        // the CSR debug-mode bit.  A normal CPU access must report an access
+        // fault and must not leak a request onto either memory manager.
+        const memblock::LoadTransaction pma_denied{
+            .address = 0x38020010ULL,
+            .oracle_address = 0x38020010ULL,
+            .op = memblock::LoadOp::ld,
+            .rob = 2,
+            .lq = 1,
+            .pdest = 159,
+            .lane = 0,
+            .expected_exception_mask = memblock::kExceptionLoadAccessFault,
+        };
+        const std::uint64_t denied_dcache_before =
+            pma_environment.tilelink_requests();
+        const std::uint64_t denied_uncache_before =
+            pma_environment.uncache_requests();
+        pma_environment.expect_load(pma_denied);
+        if (!pma_environment.set_rob_head(pma_denied.rob) ||
+            !pma_environment.enqueue_load(pma_denied) ||
+            !pma_environment.issue_load(pma_denied, 2048) ||
+            !pma_environment.run_until_complete(8192) ||
+            !pma_environment.run_until_lq_retired(2048) ||
+            pma_environment.tilelink_requests() != denied_dcache_before ||
+            pma_environment.uncache_requests() != denied_uncache_before) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << pma_environment.cycle()
+                      << " phase=pma-debug-denied reason="
+                      << pma_environment.error() << '\n';
+            return 1;
+        }
+        ++pma_denied_count;
+    }
+
+    std::cout << "MEMBLOCK_MMIO_CONTRACTS_PASS"
+              << " cycle=" << environment.cycle()
+              << " normal=" << normal_count
+              << " denied=1 corrupt=1"
+              << " stores=1"
+              << " pma_loads=" << pma_load_count
+              << " pma_stores=" << pma_store_count
+              << " pma_denied=" << pma_denied_count
+              << " dcache_requests=" << environment.tilelink_requests()
+              << " uncache_requests=" << environment.uncache_requests()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_cbo_zero_contracts(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t virtual_base = 0x5003c000ULL;
+    constexpr std::uint64_t physical_base = 0x9003c000ULL;
+    constexpr std::uint64_t root = 0x97010000ULL;
+    environment.memory().fill_incrementing(physical_base, 64, 0xa7);
+    environment.configure_backpressure(0x4d595df4d0f33173ULL, true);
+    if (!environment.reset() ||
+        !environment.map_sv39_4k(
+            virtual_base, physical_base, root, true, true, false, false,
+            false, false) ||
+        !environment.activate_sv39(root)) {
+        std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    // CBO.ZERO uses the 0x7 encoding and writes an entire 64-byte line through
+    // the cacheable StoreQueue/SBuffer wline path.  Use a nonzero source
+    // operand so the test also proves the StoreQueue's CBO.ZERO data override.
+    const memblock::StoreTransaction cbo_zero{
+        .address = virtual_base + 0x20,
+        .oracle_address = physical_base,
+        .data = 0xdeadbeefcafef00dULL,
+        .op = memblock::StoreOp::cbo_zero,
+        .rob = 0,
+        .sq = 0,
+        .address_lane = 0,
+        .data_lane = 1,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    environment.expect_store(cbo_zero);
+    const std::uint64_t dcache_before = environment.tilelink_requests();
+    const std::uint64_t store_misses_before = environment.store_tlb_misses();
+    const std::uint64_t sq_target = environment.sq_dequeued() + 1;
+    if (!environment.set_rob_head(cbo_zero.rob, cbo_zero.rob_flag) ||
+        !environment.enqueue_store(cbo_zero, 0) ||
+        !environment.issue_store_address(cbo_zero, 2048) ||
+        !environment.run_until_store_tlb_misses(store_misses_before + 1, 4096) ||
+        !environment.run_cycles(256) ||
+        !environment.issue_store_address(cbo_zero, 2048) ||
+        !environment.issue_store_data(cbo_zero, 2048) ||
+        !environment.commit_stores_through(cbo_zero, 1) ||
+        !environment.run_until_store_complete(16384) ||
+        !environment.run_until_sq_dequeued(sq_target, 16384)) {
+        std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=zero-store reason="
+                  << environment.error() << " dcache_requests="
+                  << environment.tilelink_requests() << " sq="
+                  << environment.sq_dequeued() << '/' << environment.sq_allocated()
+                  << " store_mmio_valid=" << environment.store_mmio_valid()
+                  << '\n';
+        return 1;
+    }
+    if (environment.tilelink_requests() <= dcache_before ||
+        environment.uncache_requests() != 0 ||
+        environment.dcache_request_stalls() == 0) {
+        std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=manager-path reason="
+                  << "unexpected manager request count dcache="
+                  << environment.tilelink_requests() << " uncache="
+                  << environment.uncache_requests() << '\n';
+        return 1;
+    }
+
+    // Read the line through the cache before updating the reference mirror.
+    // This makes the result sensitive to the full-line zero emitted by RTL.
+    const memblock::LoadTransaction readback{
+        .address = virtual_base,
+        .oracle_address = physical_base,
+        .op = memblock::LoadOp::ld,
+        .rob = 1,
+        .lq = 0,
+        .pdest = 191,
+        .lane = 0,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+        .expected_debug_is_perf_cnt = false,
+    };
+    environment.expect_load_data(readback, 0);
+    if (!environment.set_rob_head(readback.rob) ||
+        !environment.enqueue_load(readback) ||
+        !environment.issue_load(readback, 2048) ||
+        !environment.run_until_complete(16384) ||
+        !environment.run_until_lq_retired(2048) ||
+        environment.uncache_requests() != 0) {
+        std::cerr << "MEMBLOCK_CBO_ZERO_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=zero-readback reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    environment.record_committed_store(cbo_zero);
+    std::cout << "MEMBLOCK_CBO_ZERO_CONTRACTS_PASS"
+              << " cycle=" << environment.cycle()
+              << " cbo_zero_line=1"
+              << " readback=1"
+              << " dcache_requests=" << environment.tilelink_requests()
+              << " uncache_requests=" << environment.uncache_requests()
+              << " dcache_request_stalls=" << environment.dcache_request_stalls()
+              << " dcache_response_delays=" << environment.dcache_response_delays()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_reset_recovery(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t virtual_base = 0x50036000ULL;
+    constexpr std::uint64_t physical_base = 0x90036000ULL;
+    constexpr std::uint64_t root = 0x97008000ULL;
+    environment.memory().fill_incrementing(physical_base, 64, 0x36);
+    environment.configure_backpressure(0x510e527fade682d1ULL, true);
+    if (!environment.reset() ||
+        !environment.map_sv39_4k(
+            virtual_base, physical_base, root) ||
+        !environment.activate_sv39(root)) {
+        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL cycle="
+                  << environment.cycle() << " phase=configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    // Do not register an expectation for the first load. It is deliberately
+    // reset while translation/manager traffic is outstanding; any stale
+    // writeback after reset is therefore an unexpected architectural event.
+    const memblock::LoadTransaction canceled{
+        .address = virtual_base + 24,
+        .oracle_address = physical_base + 24,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 140,
+        .lane = 0,
+    };
+    if (!environment.enqueue_load(canceled) ||
+        !environment.issue_load(canceled, 2048) ||
+        !environment.reset()) {
+        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL cycle="
+                  << environment.cycle() << " phase=reset-with-outstanding reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t retired =
+        environment.lq_dequeued() + environment.lq_canceled();
+    if (retired < environment.lq_allocated() &&
+        !environment.account_lq_cancellation(
+            static_cast<unsigned>(environment.lq_allocated() - retired))) {
+        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL cycle="
+                  << environment.cycle() << " phase=cancel-accounting reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::LoadTransaction survivor{
+        .address = virtual_base + 8,
+        .oracle_address = physical_base + 8,
+        .op = memblock::LoadOp::ld,
+        .rob = 1,
+        // The DUT's reset starts a fresh internal LQ epoch.  Its first
+        // post-reset allocation therefore reuses LQ slot zero even though
+        // the software conservation counter still includes the canceled
+        // pre-reset entry.
+        .lq = 0,
+        .pdest = 141,
+        .lane = 1,
+    };
+    if (!environment.map_sv39_4k(virtual_base, physical_base, root) ||
+        !environment.activate_sv39(root)) {
+        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL cycle="
+                  << environment.cycle() << " phase=reconfigure reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    environment.expect_load(survivor);
+    if (!environment.set_rob_head(survivor.rob) ||
+        !environment.enqueue_load(survivor) ||
+        !environment.issue_load(survivor, 2048) ||
+        !environment.run_until_complete(8192) ||
+        !environment.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL cycle="
+                  << environment.cycle() << " phase=survivor reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_RESET_RECOVERY_PASS"
+              << " cycle=" << environment.cycle()
+              << " resets=2"
+              << " canceled=1"
+              << " survivor_writebacks=1"
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_vector_load(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -499,6 +2403,12 @@ int run_vector_load(int argc, char **argv)
             .pdest = static_cast<std::uint8_t>(80 + eew),
             .lane = eew % memblock::kVectorMemoryLanes,
         };
+        if (transaction.lane == 0) {
+            transaction.expected_trigger = memblock::kVectorWritebackTriggerNone;
+            transaction.expected_debug_is_mmio = false;
+            transaction.expected_debug_is_ncio = false;
+            transaction.expected_debug_is_perf_cnt = false;
+        }
         for (unsigned byte = 0; byte < transaction.data.size(); ++byte) {
             transaction.data[byte] = static_cast<unsigned char>(0xa0 + byte);
         }
@@ -793,6 +2703,12 @@ int run_dcache_release(int argc, char **argv)
             .address_lane = index % memblock::kScalarStoreLanes,
             .data_lane = (index + 1) % memblock::kScalarStoreLanes,
         };
+        auto expected_line = environment.memory().read_beat(line, line_bytes);
+        for (unsigned byte = 0; byte < sizeof(std::uint64_t); ++byte) {
+            expected_line[24 + byte] = static_cast<unsigned char>(
+                stores[index].data >> (8 * byte));
+        }
+        environment.expect_release_line(line, expected_line);
     }
 
     environment.configure_backpressure(0x243f6a8885a308d3ULL, true);
@@ -829,14 +2745,21 @@ int run_dcache_release(int argc, char **argv)
 
     unsigned preserved_stores = 0;
     for (const auto &store : stores) {
-        if (environment.memory().expected_load(store.address, memblock::LoadOp::ld) ==
+        if (environment.bus_expected_load(store.address, memblock::LoadOp::ld) ==
             store.data) {
             ++preserved_stores;
         }
     }
-    if (preserved_stores == 0) {
+    const std::uint64_t verified_releases =
+        environment.tilelink_release_data_verified();
+    if (environment.tilelink_release_data() < line_count - dcache_ways ||
+        verified_releases != environment.tilelink_release_data() ||
+        preserved_stores != verified_releases) {
         std::cerr << "MEMBLOCK_DCACHE_RELEASE_FAIL cycle=" << environment.cycle()
-                  << " phase=data reason=ReleaseData did not update sparse memory\n";
+                  << " phase=data reason=not every observed ReleaseData preserved bytes"
+                  << " release_data=" << environment.tilelink_release_data()
+                  << " verified=" << verified_releases
+                  << " preserved=" << preserved_stores << '\n';
         return 1;
     }
 
@@ -877,6 +2800,9 @@ int run_store_rdata_order(int argc, char **argv)
         .address_lane = 1,
         .data_lane = 1,
         .expected_exception_mask = memblock::kExceptionStoreAddressMisaligned,
+        // StoreUnit propagates TriggerAction.None on the exceptional address
+        // writeback path; the standalone store-data adapter uses zero instead.
+        .expected_trigger = memblock::kTriggerNone,
     };
 
     if (!environment.reset() ||
@@ -922,10 +2848,13 @@ int run_store_rdata_order(int argc, char **argv)
         return 1;
     }
 
+    // Uncache stores update the bus-side memory agent directly.  The
+    // architectural reference image is intentionally updated only after an
+    // observed commit, so this ordering oracle must inspect the bus image.
     const std::uint64_t observed_older =
-        environment.memory().expected_load(older.address, memblock::LoadOp::ld);
+        environment.bus_expected_load(older.address, memblock::LoadOp::ld);
     const std::uint64_t observed_younger =
-        environment.memory().expected_load(younger.address, memblock::LoadOp::ld);
+        environment.bus_expected_load(younger.address, memblock::LoadOp::ld);
     if (observed_older != older.data || observed_younger != 0) {
         std::cerr << "MEMBLOCK_STORE_RDATA_ORDER_FAIL cycle="
                   << environment.cycle()
@@ -1288,6 +3217,9 @@ int run_misaligned_stores(int argc, char **argv)
             .sq = 0,
             .address_lane = 0,
             .data_lane = 1,
+            .expected_trigger = memblock::kStoreWritebackTriggerNone,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
         },
         {
             .address = bare_base + 61,
@@ -1297,6 +3229,9 @@ int run_misaligned_stores(int argc, char **argv)
             .sq = 1,
             .address_lane = 1,
             .data_lane = 0,
+            .expected_trigger = memblock::kStoreWritebackTriggerNone,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
         },
         {
             .address = bare_base + 0xffd,
@@ -1306,6 +3241,9 @@ int run_misaligned_stores(int argc, char **argv)
             .sq = 2,
             .address_lane = 0,
             .data_lane = 0,
+            .expected_trigger = memblock::kStoreWritebackTriggerNone,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
         },
     }};
     for (std::size_t index = 0; index < scalar_stores.size(); ++index) {
@@ -1389,6 +3327,10 @@ int run_misaligned_stores(int argc, char **argv)
     vector_readback.sq = 5;
     vector_readback.pdest = 40;
     vector_readback.lane = 0;
+    vector_readback.expected_trigger = memblock::kVectorWritebackTriggerNone;
+    vector_readback.expected_debug_is_mmio = false;
+    vector_readback.expected_debug_is_ncio = false;
+    vector_readback.expected_debug_is_perf_cnt = false;
     vector_readback.data.fill(0);
     environment.expect_vector_data(vector_readback, vector_store.data);
     if (!environment.set_rob_head(vector_readback.rob) ||
@@ -1419,6 +3361,10 @@ int run_misaligned_stores(int argc, char **argv)
     cross_page_store.lq = 5;
     cross_page_store.sq = 5;
     cross_page_store.lane = 0;
+    cross_page_store.expected_trigger = memblock::kVectorWritebackTriggerNone;
+    cross_page_store.expected_debug_is_mmio = false;
+    cross_page_store.expected_debug_is_ncio = false;
+    cross_page_store.expected_debug_is_perf_cnt = false;
     for (unsigned byte = 0; byte < cross_page_store.data.size(); ++byte) {
         cross_page_store.data[byte] = static_cast<unsigned char>(0xe3 - byte * 5);
     }
@@ -1718,6 +3664,131 @@ int run_exception_contracts(int argc, char **argv)
     return 0;
 }
 
+int run_l2_tlb_contracts(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t virtual_base = 0x50056000ULL;
+    constexpr std::uint64_t physical_base = 0xa0056000ULL;
+    constexpr std::uint64_t root = 0x97024000ULL;
+    environment.memory().fill_incrementing(physical_base, 0x1000, 0x71);
+    if (!environment.reset() ||
+        !environment.map_sv39_4k(
+            virtual_base, physical_base, root, true, true, false, false, false) ||
+        !environment.activate_sv39(root)) {
+        std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    // Warm the ordinary DTLB through a real load first.  The L2-to-L1 port is
+    // a separate non-blocking requestor: its response tells the external L2
+    // whether the L1 lookup hit.  A miss is intentionally returned to that
+    // external L2; MemBlock does not refill this port from its own PTW.
+    const memblock::LoadTransaction warm{
+        .address = virtual_base + 0x18,
+        .oracle_address = physical_base + 0x18,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 154,
+        .lane = 0,
+    };
+    environment.expect_load(warm);
+    if (!environment.set_rob_head(warm.rob) ||
+        !environment.enqueue_load(warm) ||
+        !environment.issue_load(warm, 2048) ||
+        !environment.run_until_complete(8192) ||
+        !environment.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=warm-load reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    for (std::uint8_t source_id = 0; source_id < 16; ++source_id) {
+        if (!environment.pulse_l2_hint(source_id, false) ||
+            !environment.pulse_l2_hint(source_id, true)) {
+            std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=l2-hint source="
+                      << static_cast<unsigned>(source_id) << " reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+    }
+
+    memblock::Environment::L2TlbResponse hit;
+    if (!environment.issue_l2_tlb_request(
+            warm.address, 0, false, false, false, hit) || !hit.miss ||
+        hit.page_fault || hit.guest_page_fault || hit.access_fault ||
+        hit.pbmt != 0) {
+        std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=l1-miss-response reason="
+                  << environment.error() << " miss=" << hit.miss
+                  << " paddr=0x" << std::hex << hit.paddr
+                  << std::dec << " pf=" << hit.page_fault
+                  << " gpf=" << hit.guest_page_fault
+                  << " af=" << hit.access_fault << '\n';
+        return 1;
+    }
+
+    // no_translate still goes through the PMP/PMA checker.  The generated
+    // MemBlock boundary does not retain the optional pmp_addr payload, so the
+    // top-level request observes the documented zero physical-address input;
+    // it must nevertheless complete without a translation miss or fault.
+    memblock::Environment::L2TlbResponse no_translate;
+    if (!environment.issue_l2_tlb_request(
+            0xa0056018ULL, 0, false, false, true, no_translate) ||
+        no_translate.miss || no_translate.page_fault ||
+        no_translate.guest_page_fault || no_translate.access_fault ||
+        no_translate.paddr != 0 || no_translate.pbmt != 0) {
+        std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=no-translate reason="
+                  << environment.error() << " miss=" << no_translate.miss
+                  << " paddr=0x" << std::hex << no_translate.paddr
+                  << std::dec << " pbmt=" << static_cast<unsigned>(no_translate.pbmt)
+                  << " pf=" << no_translate.page_fault
+                  << " gpf=" << no_translate.guest_page_fault
+                  << " af=" << no_translate.access_fault << '\n';
+        return 1;
+    }
+
+    if (!environment.issue_killed_l2_tlb_request(
+            warm.address, 0, true, false, 128)) {
+        std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=killed-request reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    memblock::Environment::L2TlbResponse miss;
+    const std::uint64_t unmapped = virtual_base + 0x2000;
+    if (!environment.issue_l2_tlb_request(
+            unmapped, 0, false, true, false, miss) || !miss.miss ||
+        miss.pbmt != 0 || miss.page_fault ||
+        miss.guest_page_fault || miss.access_fault) {
+        std::cerr << "MEMBLOCK_L2_TLB_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=cold-miss reason="
+                  << environment.error() << " miss=" << miss.miss
+                  << " paddr=0x" << std::hex << miss.paddr << std::dec
+                  << " pf=" << miss.page_fault
+                  << " gpf=" << miss.guest_page_fault
+                  << " af=" << miss.access_fault << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_L2_TLB_CONTRACTS_PASS"
+              << " cycle=" << environment.cycle()
+              << " l1_miss_response=1 no_translate=1 killed=1 prefetch_miss=1"
+              << " hints=32"
+              << " hit_paddr=0x" << std::hex << hit.paddr << std::dec
+              << " l2_pmp_ld=" << hit.pmp_load_denied
+              << " l2_pmp_mmio=" << hit.pmp_mmio
+              << " ptw_requests=" << environment.ptw_requests()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_two_stage_translation(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -1762,7 +3833,8 @@ int run_two_stage_translation(int argc, char **argv)
         .lane = 0,
     };
     environment.expect_load(cold);
-    if (!environment.enqueue_load(cold) ||
+    if (!environment.set_rob_head(cold.rob, cold.rob_flag) ||
+        !environment.enqueue_load(cold) ||
         !environment.issue_load(cold, 256) ||
         !environment.run_until_complete(8192) ||
         !environment.run_until_lq_retired(2048)) {
@@ -1797,6 +3869,1307 @@ int run_two_stage_translation(int argc, char **argv)
               << " writebacks=" << environment.writebacks()
               << " ptw_requests=" << environment.ptw_requests()
               << " tilelink_requests=" << environment.tilelink_requests()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_translation_matrix(int argc, char **argv)
+{
+    struct Pair {
+        memblock::ReferencePageMode vs_mode;
+        memblock::ReferencePageMode g_mode;
+        const char *name;
+    };
+    constexpr std::array<Pair, 4> pairs{{
+        {memblock::ReferencePageMode::sv39,
+         memblock::ReferencePageMode::sv39,
+         "Sv39-Sv39x4"},
+        {memblock::ReferencePageMode::sv39,
+         memblock::ReferencePageMode::sv48,
+         "Sv39-Sv48x4"},
+        {memblock::ReferencePageMode::sv48,
+         memblock::ReferencePageMode::sv39,
+         "Sv48-Sv39x4"},
+        {memblock::ReferencePageMode::sv48,
+         memblock::ReferencePageMode::sv48,
+         "Sv48-Sv48x4"},
+    }};
+    std::uint64_t total_ptw_requests = 0;
+    std::uint64_t total_tilelink_requests = 0;
+    std::uint64_t total_cycles = 0;
+
+    for (unsigned pair_index = 0; pair_index < pairs.size(); ++pair_index) {
+        const auto pair = pairs[pair_index];
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t guest_physical = 0x120000000ULL;
+        constexpr std::uint64_t host_physical = 0xc0000000ULL;
+        constexpr std::uint64_t vs_root = 0x94000000ULL;
+        constexpr std::uint64_t g_root = 0x95000000ULL;
+        const std::uint64_t guest_virtual_base = pair.vs_mode ==
+                memblock::ReferencePageMode::sv48
+            ? 0xffff800012340000ULL
+            : 0x60000000ULL;
+        const std::uint64_t guest_virtual = guest_virtual_base + 0x188;
+        environment.memory().fill_incrementing(
+            host_physical, 0x1000, 0x39 + pair_index * 0x11);
+        environment.configure_backpressure(
+            0x13198a2e03707344ULL ^ (pair_index * 0x9e3779b97f4a7c15ULL),
+            true);
+
+        const unsigned vs_table_pages = pair.vs_mode ==
+                memblock::ReferencePageMode::sv48
+            ? 4U
+            : 3U;
+        bool configured = environment.reset();
+        if (configured) {
+            if (pair.vs_mode == memblock::ReferencePageMode::sv48) {
+                configured = environment.map_sv48_4k(
+                    guest_virtual_base, guest_physical, vs_root);
+            } else {
+                configured = environment.map_sv39_4k(
+                    guest_virtual_base, guest_physical, vs_root);
+            }
+        }
+        for (unsigned page = 0; configured && page < vs_table_pages; ++page) {
+            const std::uint64_t address = vs_root + page * 0x1000ULL;
+            if (pair.g_mode == memblock::ReferencePageMode::sv48) {
+                configured = environment.map_sv48x4_4k(
+                    address, address, g_root);
+            } else {
+                configured = environment.map_sv39x4_4k(
+                    address, address, g_root);
+            }
+        }
+        if (configured) {
+            if (pair.g_mode == memblock::ReferencePageMode::sv48) {
+                configured = environment.map_sv48x4_4k(
+                    guest_physical, host_physical, g_root);
+            } else {
+                configured = environment.map_sv39x4_4k(
+                    guest_physical, host_physical, g_root);
+            }
+        }
+        if (configured) {
+            configured = environment.activate_two_stage_modes(
+                pair.vs_mode,
+                pair.g_mode,
+                vs_root,
+                g_root,
+                static_cast<std::uint16_t>(3 + pair_index),
+                static_cast<std::uint16_t>(5 + pair_index));
+        }
+        if (!configured) {
+            std::cerr << "MEMBLOCK_TRANSLATION_MATRIX_FAIL pair=" << pair.name
+                      << " cycle=" << environment.cycle()
+                      << " phase=configuration reason=" << environment.error()
+                      << '\n';
+            return 1;
+        }
+
+        const auto reference = memblock::reference_two_stage_walk(
+            environment.memory(),
+            vs_root,
+            g_root,
+            guest_virtual,
+            pair.vs_mode,
+            pair.g_mode);
+        if (!reference.translated ||
+            reference.physical_address != host_physical + 0x188) {
+            std::cerr << "MEMBLOCK_TRANSLATION_MATRIX_FAIL pair=" << pair.name
+                      << " cycle=" << environment.cycle()
+                      << " phase=reference-walk expected=0x" << std::hex
+                      << (host_physical + 0x188) << " actual=0x"
+                      << reference.physical_address << std::dec << '\n';
+            return 1;
+        }
+
+        const memblock::LoadTransaction cold{
+            .address = guest_virtual,
+            .oracle_address = reference.physical_address,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = static_cast<std::uint8_t>(60 + pair_index * 2),
+            .lane = pair_index % memblock::kScalarLoadLanes,
+        };
+        environment.expect_load(cold);
+        if (!environment.enqueue_load(cold) ||
+            !environment.issue_load(cold, 512) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_MATRIX_FAIL pair=" << pair.name
+                      << " cycle=" << environment.cycle()
+                      << " phase=cold reason=" << environment.error() << '\n';
+            return 1;
+        }
+        const std::uint64_t ptw_after_cold = environment.ptw_requests();
+        auto warm = cold;
+        warm.rob = 1;
+        warm.lq = 1;
+        warm.pdest = static_cast<std::uint8_t>(61 + pair_index * 2);
+        warm.lane = (pair_index + 1) % memblock::kScalarLoadLanes;
+        environment.expect_load(warm);
+        if (!environment.enqueue_load(warm) ||
+            !environment.issue_load(warm, 512) ||
+            !environment.run_until_complete(4096) ||
+            !environment.run_until_lq_retired(2048) ||
+            environment.ptw_requests() != ptw_after_cold) {
+            std::cerr << "MEMBLOCK_TRANSLATION_MATRIX_FAIL pair=" << pair.name
+                      << " cycle=" << environment.cycle()
+                      << " phase=warm reason="
+                      << (environment.error().empty()
+                              ? "two-stage TLB entry was not reused"
+                              : environment.error())
+                      << '\n';
+            return 1;
+        }
+        total_ptw_requests += environment.ptw_requests();
+        total_tilelink_requests += environment.tilelink_requests();
+        total_cycles += environment.cycle();
+    }
+
+    std::cout << "MEMBLOCK_TRANSLATION_MATRIX_PASS"
+              << " pairs=" << pairs.size()
+              << " ptw_requests=" << total_ptw_requests
+              << " tilelink_requests=" << total_tilelink_requests
+              << " cycles=" << total_cycles
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_translation_fence(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t virtual_base = 0x62000000ULL;
+    constexpr std::uint64_t old_physical = 0xc1000000ULL;
+    constexpr std::uint64_t new_physical = 0xc2000000ULL;
+    constexpr std::uint64_t root = 0x92000000ULL;
+    environment.memory().fill_incrementing(old_physical, 0x1000, 0x27);
+    environment.memory().fill_incrementing(new_physical, 0x1000, 0xa1);
+    environment.configure_backpressure(0x243f6a8885a308d3ULL, true);
+    if (!environment.reset() ||
+        !environment.map_sv39_4k(virtual_base, old_physical, root) ||
+        !environment.activate_sv39(root, 9)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << environment.cycle() << " phase=configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const auto make_load = [&](unsigned index, std::uint64_t physical) {
+        return memblock::LoadTransaction{
+            .address = virtual_base + 0x188,
+            .oracle_address = physical + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(index),
+            .lq = static_cast<std::uint8_t>(index),
+            .pdest = static_cast<std::uint8_t>(70 + index),
+            .lane = index % memblock::kScalarLoadLanes,
+        };
+    };
+
+    const auto cold = make_load(0, old_physical);
+    environment.expect_load(cold);
+    if (!environment.set_rob_head(cold.rob, cold.rob_flag) ||
+        !environment.enqueue_load(cold) ||
+        !environment.issue_load(cold, 512) ||
+        !environment.run_until_complete(8192) ||
+        !environment.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << environment.cycle() << " phase=cold reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t ptw_after_cold = environment.ptw_requests();
+
+    const auto stale = make_load(1, old_physical);
+    environment.expect_load(stale);
+    if (!environment.set_rob_head(stale.rob, stale.rob_flag) ||
+        !environment.enqueue_load(stale) ||
+        !environment.issue_load(stale, 512) ||
+        !environment.run_until_complete(4096) ||
+        !environment.run_until_lq_retired(2048) ||
+        environment.ptw_requests() != ptw_after_cold) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << environment.cycle() << " phase=pre-fence-hit reason="
+                  << (environment.error().empty()
+                          ? "unexpected PTW before fence"
+                          : environment.error())
+                  << '\n';
+        return 1;
+    }
+
+    if (!environment.map_sv39_4k(virtual_base, new_physical, root) ||
+        !environment.issue_sfence()) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << environment.cycle() << " phase=fence reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const auto refreshed = make_load(2, new_physical);
+    environment.expect_load(refreshed);
+    if (!environment.set_rob_head(refreshed.rob, refreshed.rob_flag) ||
+        !environment.enqueue_load(refreshed) ||
+        !environment.issue_load(refreshed, 512) ||
+        !environment.run_until_complete(8192) ||
+        !environment.run_until_lq_retired(2048) ||
+        environment.ptw_requests() <= ptw_after_cold) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << environment.cycle() << " phase=post-fence reason="
+                  << (environment.error().empty()
+                          ? "translation was not refilled after SFENCE.VMA"
+                          : environment.error())
+                  << '\n';
+        return 1;
+    }
+
+    constexpr std::uint64_t selective_physical = 0xc5000000ULL;
+    environment.memory().fill_incrementing(selective_physical, 0x1000, 0x63);
+    const std::uint64_t ptw_before_selective = environment.ptw_requests();
+    if (!environment.map_sv39_4k(
+            virtual_base, selective_physical, root) ||
+        !environment.issue_sfence(
+            virtual_base + 0x188, 9, false, false, false, false)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << environment.cycle() << " phase=selective-sfence reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const auto selectively_refreshed = make_load(3, selective_physical);
+    environment.expect_load(selectively_refreshed);
+    if (!environment.set_rob_head(
+            selectively_refreshed.rob, selectively_refreshed.rob_flag) ||
+        !environment.enqueue_load(selectively_refreshed) ||
+        !environment.issue_load(selectively_refreshed, 512) ||
+        !environment.run_until_complete(8192) ||
+        !environment.run_until_lq_retired(2048) ||
+        environment.ptw_requests() <= ptw_before_selective) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << environment.cycle() << " phase=selective-sfence-refill reason="
+                  << (environment.error().empty()
+                          ? "selective SFENCE.VMA did not invalidate the leaf"
+                          : environment.error()) << '\n';
+        return 1;
+    }
+
+    memblock::Environment nested(argc, argv);
+    constexpr std::uint64_t nested_virtual = 0x63000000ULL;
+    constexpr std::uint64_t nested_guest_physical = 0xb1000000ULL;
+    constexpr std::uint64_t nested_old_host = 0xc3000000ULL;
+    constexpr std::uint64_t nested_new_host = 0xc4000000ULL;
+    constexpr std::uint64_t nested_vs_root = 0x94000000ULL;
+    constexpr std::uint64_t nested_g_root = 0x95000000ULL;
+    nested.memory().fill_incrementing(nested_old_host, 0x1000, 0x4d);
+    nested.memory().fill_incrementing(nested_new_host, 0x1000, 0xd2);
+    nested.configure_backpressure(0x13198a2e03707344ULL, true);
+    if (!nested.reset() ||
+        !nested.map_sv39_4k(
+            nested_virtual, nested_guest_physical, nested_vs_root) ||
+        !nested.map_sv39x4_4k(
+            nested_vs_root, nested_vs_root, nested_g_root) ||
+        !nested.map_sv39x4_4k(
+            nested_vs_root + 0x1000,
+            nested_vs_root + 0x1000,
+            nested_g_root) ||
+        !nested.map_sv39x4_4k(
+            nested_vs_root + 0x2000,
+            nested_vs_root + 0x2000,
+            nested_g_root) ||
+        !nested.map_sv39x4_4k(
+            nested_guest_physical,
+            nested_old_host,
+            nested_g_root) ||
+        !nested.activate_two_stage(nested_vs_root, nested_g_root, 3, 5)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << nested.cycle() << " phase=hfence-configuration reason="
+                  << nested.error() << '\n';
+        return 1;
+    }
+    const auto nested_reference = memblock::reference_two_stage_walk(
+        nested.memory(),
+        nested_vs_root,
+        nested_g_root,
+        nested_virtual + 0x188);
+    if (!nested_reference.translated ||
+        nested_reference.physical_address != nested_old_host + 0x188) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << nested.cycle() << " phase=hfence-reference-walk\n";
+        return 1;
+    }
+    const auto make_nested_load = [&](unsigned index, std::uint64_t physical) {
+        return memblock::LoadTransaction{
+            .address = nested_virtual + 0x188,
+            .oracle_address = physical + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(index),
+            .lq = static_cast<std::uint8_t>(index),
+            .pdest = static_cast<std::uint8_t>(80 + index),
+            .lane = index % memblock::kScalarLoadLanes,
+        };
+    };
+    const auto nested_cold = make_nested_load(0, nested_old_host);
+    nested.expect_load(nested_cold);
+    if (!nested.enqueue_load(nested_cold) ||
+        !nested.issue_load(nested_cold, 512) ||
+        !nested.run_until_complete(16384) ||
+        !nested.run_until_lq_retired(4096)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << nested.cycle() << " phase=hfence-cold reason="
+                  << nested.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t nested_ptw_before_fence = nested.ptw_requests();
+    const auto nested_stale = make_nested_load(1, nested_old_host);
+    nested.expect_load(nested_stale);
+    if (!nested.enqueue_load(nested_stale) ||
+        !nested.issue_load(nested_stale, 512) ||
+        !nested.run_until_complete(4096) ||
+        !nested.run_until_lq_retired(2048) ||
+        nested.ptw_requests() != nested_ptw_before_fence) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << nested.cycle() << " phase=hfence-pre-hit reason="
+                  << nested.error() << '\n';
+        return 1;
+    }
+    if (!nested.map_sv39x4_4k(
+            nested_guest_physical,
+            nested_new_host,
+            nested_g_root) ||
+        !nested.issue_sfence(0, 5, true, true, false, true)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << nested.cycle() << " phase=hfence-gvma reason="
+                  << nested.error() << '\n';
+        return 1;
+    }
+    const auto nested_refreshed = make_nested_load(2, nested_new_host);
+    nested.expect_load(nested_refreshed);
+    if (!nested.enqueue_load(nested_refreshed) ||
+        !nested.issue_load(nested_refreshed, 512) ||
+        !nested.run_until_complete(16384) ||
+        !nested.run_until_lq_retired(4096) ||
+        nested.ptw_requests() <= nested_ptw_before_fence) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << nested.cycle() << " phase=hfence-post reason="
+                  << (nested.error().empty()
+                          ? "translation was not refilled after HFENCE.GVMA"
+                          : nested.error())
+                  << '\n';
+        return 1;
+    }
+
+    memblock::Environment vvma(argc, argv);
+    constexpr std::uint64_t vvma_virtual = 0x65000000ULL;
+    constexpr std::uint64_t vvma_old_guest = 0xb5000000ULL;
+    constexpr std::uint64_t vvma_new_guest = 0xb6000000ULL;
+    constexpr std::uint64_t vvma_old_host = 0xc7000000ULL;
+    constexpr std::uint64_t vvma_new_host = 0xc8000000ULL;
+    constexpr std::uint64_t vvma_vs_root = 0x96000000ULL;
+    constexpr std::uint64_t vvma_g_root = 0x97000000ULL;
+    vvma.memory().fill_incrementing(vvma_old_host, 0x1000, 0x19);
+    vvma.memory().fill_incrementing(vvma_new_host, 0x1000, 0xb8);
+    vvma.configure_backpressure(0xa4093822299f31d0ULL, true);
+    if (!vvma.reset() ||
+        !vvma.map_sv39_4k(vvma_virtual, vvma_old_guest, vvma_vs_root) ||
+        !vvma.map_sv39x4_4k(vvma_vs_root, vvma_vs_root, vvma_g_root) ||
+        !vvma.map_sv39x4_4k(
+            vvma_vs_root + 0x1000, vvma_vs_root + 0x1000, vvma_g_root) ||
+        !vvma.map_sv39x4_4k(
+            vvma_vs_root + 0x2000, vvma_vs_root + 0x2000, vvma_g_root) ||
+        !vvma.map_sv39x4_4k(vvma_old_guest, vvma_old_host, vvma_g_root) ||
+        !vvma.map_sv39x4_4k(vvma_new_guest, vvma_new_host, vvma_g_root) ||
+        !vvma.activate_two_stage(vvma_vs_root, vvma_g_root, 13, 17)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << vvma.cycle() << " phase=hfence-vvma-configuration reason="
+                  << vvma.error() << '\n';
+        return 1;
+    }
+    const auto vvma_load = [&](unsigned index, std::uint64_t physical) {
+        return memblock::LoadTransaction{
+            .address = vvma_virtual + 0x188,
+            .oracle_address = physical + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(index),
+            .lq = static_cast<std::uint8_t>(index),
+            .pdest = static_cast<std::uint8_t>(110 + index),
+            .lane = index % memblock::kScalarLoadLanes,
+        };
+    };
+    const auto vvma_cold = vvma_load(0, vvma_old_host);
+    vvma.expect_load(vvma_cold);
+    if (!vvma.enqueue_load(vvma_cold) ||
+        !vvma.issue_load(vvma_cold, 512) ||
+        !vvma.run_until_complete(16384) ||
+        !vvma.run_until_lq_retired(4096)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << vvma.cycle() << " phase=hfence-vvma-cold reason="
+                  << vvma.error() << '\n';
+        return 1;
+    }
+    const auto vvma_stale = vvma_load(1, vvma_old_host);
+    vvma.expect_load(vvma_stale);
+    if (!vvma.enqueue_load(vvma_stale) ||
+        !vvma.issue_load(vvma_stale, 512) ||
+        !vvma.run_until_complete(4096) ||
+        !vvma.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << vvma.cycle() << " phase=hfence-vvma-pre-hit reason="
+                  << vvma.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t vvma_ptw_before_fence = vvma.ptw_requests();
+    if (!vvma.map_sv39_4k(vvma_virtual, vvma_new_guest, vvma_vs_root) ||
+        !vvma.issue_sfence(
+            vvma_virtual + 0x188, 13, false, false, true, false)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << vvma.cycle() << " phase=hfence-vvma reason="
+                  << vvma.error() << '\n';
+        return 1;
+    }
+    const auto vvma_refreshed = vvma_load(2, vvma_new_host);
+    vvma.expect_load(vvma_refreshed);
+    if (!vvma.enqueue_load(vvma_refreshed) ||
+        !vvma.issue_load(vvma_refreshed, 512) ||
+        !vvma.run_until_complete(16384) ||
+        !vvma.run_until_lq_retired(4096) ||
+        vvma.ptw_requests() <= vvma_ptw_before_fence) {
+        std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                  << vvma.cycle() << " phase=hfence-vvma-refill reason="
+                  << (vvma.error().empty()
+                          ? "HFENCE.VVMA did not invalidate the VS leaf"
+                          : vvma.error()) << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_TRANSLATION_FENCE_PASS"
+              << " cycle=" << (environment.cycle() + nested.cycle() + vvma.cycle())
+              << " ptw_requests="
+              << (environment.ptw_requests() + nested.ptw_requests() + vvma.ptw_requests())
+              << " writebacks="
+              << (environment.writebacks() + nested.writebacks() + vvma.writebacks())
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_translation_context(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t virtual_address = 0x64000188ULL;
+    constexpr std::uint64_t virtual_base = 0x64000000ULL;
+    constexpr std::uint64_t sv39_physical = 0xc5000000ULL;
+    constexpr std::uint64_t sv48_physical = 0xc6000000ULL;
+    constexpr std::uint64_t sv39_root = 0x92000000ULL;
+    constexpr std::uint64_t sv48_root = 0x93000000ULL;
+    environment.memory().fill_incrementing(sv39_physical, 0x1000, 0x1d);
+    environment.memory().fill_incrementing(sv48_physical, 0x1000, 0xe7);
+    environment.configure_backpressure(0x9e3779b97f4a7c15ULL, true);
+    if (!environment.reset() ||
+        !environment.map_sv39_4k(virtual_base, sv39_physical, sv39_root) ||
+        !environment.map_sv48_4k(virtual_base, sv48_physical, sv48_root) ||
+        !environment.activate_sv39(sv39_root, 3)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_CONTEXT_FAIL cycle="
+                  << environment.cycle() << " phase=configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::LoadTransaction old_context{
+        .address = virtual_address,
+        .oracle_address = sv39_physical + 0x188,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 90,
+        .lane = 0,
+    };
+    environment.expect_load(old_context);
+    if (!environment.enqueue_load(old_context) ||
+        !environment.issue_load(old_context, 512) ||
+        !environment.run_until_complete(8192) ||
+        !environment.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_CONTEXT_FAIL cycle="
+                  << environment.cycle() << " phase=sv39 reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t ptw_before_switch = environment.ptw_requests();
+
+    if (!environment.activate_sv48(sv48_root, 4)) {
+        std::cerr << "MEMBLOCK_TRANSLATION_CONTEXT_FAIL cycle="
+                  << environment.cycle() << " phase=switch reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction new_context{
+        .address = virtual_address,
+        .oracle_address = sv48_physical + 0x188,
+        .op = memblock::LoadOp::ld,
+        .rob = 1,
+        .lq = 1,
+        .pdest = 91,
+        .lane = 1,
+    };
+    environment.expect_load(new_context);
+    if (!environment.enqueue_load(new_context) ||
+        !environment.issue_load(new_context, 512) ||
+        !environment.run_until_complete(16384) ||
+        !environment.run_until_lq_retired(4096) ||
+        environment.ptw_requests() <= ptw_before_switch) {
+        std::cerr << "MEMBLOCK_TRANSLATION_CONTEXT_FAIL cycle="
+                  << environment.cycle() << " phase=sv48 reason="
+                  << (environment.error().empty()
+                          ? "MODE/root switch reused stale translation"
+                          : environment.error())
+                  << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_TRANSLATION_CONTEXT_PASS"
+              << " cycle=" << environment.cycle()
+              << " ptw_requests=" << environment.ptw_requests()
+              << " writebacks=" << environment.writebacks()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_translation_bare(int argc, char **argv)
+{
+    unsigned completed = 0;
+    auto run_load = [&](memblock::Environment &environment,
+                        const memblock::LoadTransaction &transaction) {
+        environment.expect_load(transaction);
+        return environment.set_rob_head(transaction.rob, transaction.rob_flag) &&
+            environment.enqueue_load(transaction) &&
+            environment.issue_load(transaction, 1024) &&
+            environment.run_until_complete(16384) &&
+            environment.run_until_lq_retired(4096);
+    };
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t physical = 0x88000000ULL;
+        environment.memory().fill_incrementing(physical, 0x1000, 0x2a);
+        const memblock::LoadTransaction transaction{
+            .address = physical + 0x188,
+            .oracle_address = physical + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 130,
+            .lane = 0,
+        };
+        if (!environment.reset() || !environment.activate_bare() ||
+            !run_load(environment, transaction)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_BARE_FAIL phase=stage1 reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        ++completed;
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t guest = 0xb8000000ULL;
+        constexpr std::uint64_t host = 0xc9000000ULL;
+        constexpr std::uint64_t g_root = 0x99000000ULL;
+        environment.memory().fill_incrementing(host, 0x1000, 0x4f);
+        const memblock::LoadTransaction transaction{
+            .address = guest + 0x188,
+            .oracle_address = host + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 131,
+            .lane = 1,
+        };
+        if (!environment.reset() ||
+            !environment.map_sv39x4_4k(guest, host, g_root) ||
+            !environment.activate_two_stage_modes(
+                memblock::ReferencePageMode::bare,
+                memblock::ReferencePageMode::sv39,
+                0, g_root, 3, 5) ||
+            !run_load(environment, transaction)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_BARE_FAIL phase=g-only reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const auto reference = memblock::reference_two_stage_walk(
+            environment.memory(), 0, g_root, transaction.address,
+            memblock::ReferencePageMode::bare,
+            memblock::ReferencePageMode::sv39);
+        if (!reference.translated || reference.physical_address != transaction.oracle_address) {
+            std::cerr << "MEMBLOCK_TRANSLATION_BARE_FAIL phase=g-only-reference\n";
+            return 1;
+        }
+        ++completed;
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t virtual_address = 0x67000000ULL;
+        constexpr std::uint64_t guest = 0xba000000ULL;
+        constexpr std::uint64_t vs_root = 0x9a000000ULL;
+        environment.memory().fill_incrementing(guest, 0x1000, 0x73);
+        const memblock::LoadTransaction transaction{
+            .address = virtual_address + 0x188,
+            .oracle_address = guest + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 132,
+            .lane = 2,
+        };
+        if (!environment.reset() ||
+            !environment.map_sv39_4k(virtual_address, guest, vs_root) ||
+            !environment.activate_two_stage_modes(
+                memblock::ReferencePageMode::sv39,
+                memblock::ReferencePageMode::bare,
+                vs_root, 0, 7, 9) ||
+            !run_load(environment, transaction)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_BARE_FAIL phase=vs-only reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        ++completed;
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t physical = 0x8a000000ULL;
+        environment.memory().fill_incrementing(physical, 0x1000, 0x96);
+        const memblock::LoadTransaction transaction{
+            .address = physical + 0x188,
+            .oracle_address = physical + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 133,
+            .lane = 0,
+        };
+        if (!environment.reset() ||
+            !environment.activate_two_stage_modes(
+                memblock::ReferencePageMode::bare,
+                memblock::ReferencePageMode::bare,
+                0, 0, 11, 13) ||
+            !run_load(environment, transaction)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_BARE_FAIL phase=both-bare reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        ++completed;
+    }
+
+    std::cout << "MEMBLOCK_TRANSLATION_BARE_PASS"
+              << " cases=" << completed
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_translation_faults(int argc, char **argv)
+{
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t canonical = 0x0000400012340000ULL;
+        constexpr std::uint64_t physical = 0xca000000ULL;
+        constexpr std::uint64_t root = 0x9b000000ULL;
+        // Sv48 VA bit 47 is one while bits 63:48 are zero: intentionally
+        // noncanonical and therefore a stage-1 load page fault.
+        constexpr std::uint64_t noncanonical = 0x0000800012340188ULL;
+        environment.memory().fill_incrementing(physical, 0x1000, 0x21);
+        const memblock::LoadTransaction transaction{
+            .address = noncanonical,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 140,
+            .lane = 0,
+            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        };
+        if (!environment.reset() ||
+            !environment.map_sv48_4k(canonical, physical, root) ||
+            !environment.activate_sv48(root, 23)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=noncanonical-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        environment.expect_load(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 1024) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=noncanonical-execution reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t guest_virtual = 0x68000000ULL;
+        constexpr std::uint64_t high_guest_physical = 0x20000000000ULL;
+        constexpr std::uint64_t vs_root = 0x9c000000ULL;
+        constexpr std::uint64_t g_root = 0x9d000000ULL;
+        // Sv39x4 has a 41-bit GPA.  The VS leaf is valid, but its GPA is one
+        // bit above that range, so the fault must be a G-stage guest fault.
+        if (!environment.reset() ||
+            !environment.map_sv39_4k(
+                guest_virtual, high_guest_physical, vs_root) ||
+            !environment.map_sv39x4_4k(vs_root, vs_root, g_root) ||
+            !environment.map_sv39x4_4k(
+                vs_root + 0x1000, vs_root + 0x1000, g_root) ||
+            !environment.map_sv39x4_4k(
+                vs_root + 0x2000, vs_root + 0x2000, g_root) ||
+            !environment.activate_two_stage(
+                vs_root, g_root, 25, 27)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=high-gpa-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const auto reference = memblock::reference_two_stage_walk(
+            environment.memory(), vs_root, g_root, guest_virtual + 0x188);
+        if (reference.translated || !reference.guest_page_fault ||
+            reference.faulting_guest_physical_address != high_guest_physical + 0x188) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=high-gpa-reference\n";
+            return 1;
+        }
+        const memblock::LoadTransaction transaction{
+            .address = guest_virtual + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 141,
+            .lane = 1,
+            .expected_exception_mask = memblock::kExceptionLoadGuestPageFault,
+        };
+        environment.expect_load(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 2048) ||
+            !environment.run_until_complete(32768) ||
+            !environment.run_until_lq_retired(8192)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=high-gpa-execution reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t virtual_address = 0x20000000ULL;
+        constexpr std::uint64_t misaligned_physical = 0xc4001000ULL;
+        constexpr std::uint64_t root = 0x9f000000ULL;
+        constexpr std::uint64_t l1 = root + 0x1000ULL;
+        // A level-1 Sv39 leaf must describe a 2 MiB-aligned physical base.
+        // Keep the low PPN bits set to make the DUT reject this malformed
+        // superpage instead of silently masking them.
+        constexpr std::uint64_t pte_valid = 1ULL << 0;
+        constexpr std::uint64_t pte_read = 1ULL << 1;
+        constexpr std::uint64_t pte_write = 1ULL << 2;
+        constexpr std::uint64_t pte_accessed = 1ULL << 6;
+        constexpr std::uint64_t pte_dirty = 1ULL << 7;
+        constexpr std::uint64_t l2_index = 0;
+        constexpr std::uint64_t l1_index = (virtual_address >> 21) & 0x1ffULL;
+        if (!environment.reset()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=misaligned-superpage-reset reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        environment.memory().write_u64(
+            root + l2_index * 8,
+            ((l1 >> 12) << 10) | pte_valid);
+        environment.memory().write_u64(
+            l1 + l1_index * 8,
+            ((misaligned_physical >> 12) << 10) |
+                pte_valid | pte_read | pte_write | pte_accessed | pte_dirty);
+        const auto reference = memblock::reference_page_walk(
+            environment.memory(), root, virtual_address + 0x188,
+            memblock::ReferencePageMode::sv39);
+        if (reference.translated || reference.faulting_pte_address == 0 ||
+            reference.fault_level != 1) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=misaligned-superpage-reference\n";
+            return 1;
+        }
+        const memblock::LoadTransaction transaction{
+            .address = virtual_address + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 142,
+            .lane = 2,
+            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        };
+        if (!environment.activate_sv39(root, 29)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=misaligned-superpage-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        environment.expect_load(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 2048) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=misaligned-superpage-execution reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t virtual_address = 0x72000000ULL;
+        constexpr std::uint64_t root = 0xa3000000ULL;
+        if (!environment.reset()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=invalid-pte-reset reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const auto reference = memblock::reference_page_walk(
+            environment.memory(), root, virtual_address + 0x188,
+            memblock::ReferencePageMode::sv39);
+        if (reference.translated || reference.faulting_pte_address == 0 ||
+            reference.fault_level != 2) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=invalid-pte-reference\n";
+            return 1;
+        }
+        const memblock::LoadTransaction transaction{
+            .address = virtual_address + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 143,
+            .lane = 0,
+            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        };
+        if (!environment.activate_sv39(root, 37)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=invalid-pte-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        environment.expect_load(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 2048) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=invalid-pte-execution reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t guest_virtual = 0x6a000000ULL;
+        constexpr std::uint64_t high_guest_physical = 0x4000000000000ULL;
+        constexpr std::uint64_t vs_root = 0xa4000000ULL;
+        constexpr std::uint64_t g_root = 0xa5000000ULL;
+        if (!environment.reset() ||
+            !environment.map_sv48_4k(
+                guest_virtual, high_guest_physical, vs_root) ||
+            // A four-level VS walk creates root plus three child tables.
+            !environment.map_sv48x4_4k(vs_root, vs_root, g_root) ||
+            !environment.map_sv48x4_4k(vs_root + 0x1000, vs_root + 0x1000, g_root) ||
+            !environment.map_sv48x4_4k(vs_root + 0x2000, vs_root + 0x2000, g_root) ||
+            !environment.map_sv48x4_4k(vs_root + 0x3000, vs_root + 0x3000, g_root) ||
+            !environment.activate_two_stage_modes(
+                memblock::ReferencePageMode::sv48,
+                memblock::ReferencePageMode::sv48,
+                vs_root, g_root, 39, 41)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=high-gpa-sv48-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const auto reference = memblock::reference_two_stage_walk(
+            environment.memory(), vs_root, g_root, guest_virtual + 0x188,
+            memblock::ReferencePageMode::sv48,
+            memblock::ReferencePageMode::sv48);
+        if (reference.translated || !reference.guest_page_fault ||
+            reference.faulting_guest_physical_address != high_guest_physical + 0x188) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=high-gpa-sv48-reference\n";
+            return 1;
+        }
+        const memblock::LoadTransaction transaction{
+            .address = guest_virtual + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 144,
+            .lane = 1,
+            .expected_exception_mask = memblock::kExceptionLoadGuestPageFault,
+        };
+        environment.expect_load(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 4096) ||
+            !environment.run_until_complete(32768) ||
+            !environment.run_until_lq_retired(8192)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FAULTS_FAIL phase=high-gpa-sv48-execution reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+    }
+
+    std::cout << "MEMBLOCK_TRANSLATION_FAULTS_PASS cases=5"
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_translation_permissions(int argc, char **argv)
+{
+    // Keep each permission case in a fresh environment so a prior TLB entry
+    // cannot mask the PTE permission being tested.
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t virtual_address = 0x51000000ULL;
+        constexpr std::uint64_t physical_address = 0xc3000000ULL;
+        constexpr std::uint64_t root = 0x9e000000ULL;
+        environment.memory().fill_incrementing(physical_address, 0x1000, 0x51);
+        const memblock::LoadTransaction transaction{
+            .address = virtual_address + 0x188,
+            .oracle_address = physical_address + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 150,
+            .lane = 0,
+        };
+        if (!environment.reset() ||
+            !environment.map_sv39_4k(
+                virtual_address, physical_address, root, true, false) ||
+            !environment.activate_sv39(root, 31)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=readonly-load-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        environment.expect_load(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 2048) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=readonly-load-execution reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t virtual_address = 0x53000000ULL;
+        constexpr std::uint64_t physical_address = 0xc3200000ULL;
+        constexpr std::uint64_t root = 0xa0000000ULL;
+        const memblock::LoadTransaction transaction{
+            .address = virtual_address + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 151,
+            .lane = 1,
+            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        };
+        if (!environment.reset() ||
+            !environment.map_sv39_4k(
+                virtual_address, physical_address, root, false, false, true) ||
+            !environment.activate_sv39(root, 33)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=execute-only-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        environment.expect_load(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 2048) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=execute-only-execution reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t guest_virtual = 0x55000000ULL;
+        constexpr std::uint64_t guest_physical = 0x90000000ULL;
+        constexpr std::uint64_t host_physical = 0xc3400000ULL;
+        constexpr std::uint64_t vs_root = 0xa1000000ULL;
+        constexpr std::uint64_t g_root = 0xa2000000ULL;
+        environment.memory().fill_incrementing(host_physical, 0x1000, 0x5a);
+        const memblock::LoadTransaction transaction{
+            .address = guest_virtual + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 152,
+            .lane = 2,
+            .expected_exception_mask = memblock::kExceptionLoadGuestPageFault,
+        };
+        if (!environment.reset() ||
+            !environment.map_sv39_4k(guest_virtual, guest_physical, vs_root) ||
+            // G-stage must be able to read every VS page-table page before
+            // the final execute-only data mapping is checked.
+            !environment.map_sv39x4_4k(vs_root, vs_root, g_root) ||
+            !environment.map_sv39x4_4k(vs_root + 0x1000, vs_root + 0x1000, g_root) ||
+            !environment.map_sv39x4_4k(vs_root + 0x2000, vs_root + 0x2000, g_root) ||
+            !environment.map_sv39x4_4k(
+                guest_physical, host_physical, g_root, false, false, true) ||
+            !environment.activate_two_stage_modes(
+                memblock::ReferencePageMode::sv39,
+                memblock::ReferencePageMode::sv39,
+                vs_root, g_root, 35, 37)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=execute-only-g-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        environment.expect_load(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 2048) ||
+            !environment.run_until_complete(16384) ||
+            !environment.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=execute-only-g-execution reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+    }
+
+    // A read-only leaf must reject a scalar store before either cache manager
+    // sees a request. Keep this in a fresh environment so the store-side
+    // permission result cannot be hidden by a warm load translation.
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t virtual_address = 0x57000000ULL;
+        constexpr std::uint64_t physical_address = 0xc3600000ULL;
+        constexpr std::uint64_t root = 0xa3000000ULL;
+        const memblock::StoreTransaction transaction{
+            .address = virtual_address + 0x188,
+            .oracle_address = physical_address + 0x188,
+            .data = 0x0123456789abcdefULL,
+            .op = memblock::StoreOp::sd,
+            .rob = 0,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 1,
+            .expected_exception_mask = memblock::kExceptionStorePageFault,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+        };
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        if (!environment.reset() ||
+            !environment.map_sv39_4k(
+                virtual_address, physical_address, root, true, false) ||
+            !environment.activate_sv39(root, 39)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=readonly-store-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        environment.expect_store(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_store(transaction, 0) ||
+            !environment.warm_store_translation(transaction, 4096) ||
+            !environment.issue_store_data(transaction, 2048) ||
+            !environment.run_until_store_complete(16384)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=readonly-store-execution reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        if (environment.tilelink_requests() != dcache_before ||
+            environment.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=readonly-store-bypass reason="
+                      << "permission fault issued a memory-manager request\n";
+            return 1;
+        }
+        if (!environment.account_sq_cancellation(1) ||
+            environment.sq_dequeued() + environment.sq_canceled() !=
+                environment.sq_allocated()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=readonly-store-accounting reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+    }
+
+    std::cout << "MEMBLOCK_TRANSLATION_PERMISSIONS_PASS cases=4"
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_translation_superpages(int argc, char **argv)
+{
+    struct StageCase {
+        memblock::ReferencePageMode mode;
+        unsigned level;
+        const char *name;
+        std::uint64_t virtual_base;
+        std::uint64_t physical_base;
+    };
+    constexpr std::array<StageCase, 5> stage_cases{{
+        {memblock::ReferencePageMode::sv39, 1, "Sv39-2MiB",
+         0x20000000ULL, 0x80800000ULL},
+        {memblock::ReferencePageMode::sv39, 2, "Sv39-1GiB",
+         0x40000000ULL, 0xc0000000ULL},
+        {memblock::ReferencePageMode::sv48, 1, "Sv48-2MiB",
+         0x20000000ULL, 0x81800000ULL},
+        {memblock::ReferencePageMode::sv48, 2, "Sv48-1GiB",
+         0x40000000ULL, 0xc0000000ULL},
+        {memblock::ReferencePageMode::sv48, 3, "Sv48-512GiB",
+         0x00000000ULL, 0x8000000000ULL},
+    }};
+    unsigned completed = 0;
+    for (unsigned index = 0; index < stage_cases.size(); ++index) {
+        const auto &test = stage_cases[index];
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t root = 0x97000000ULL;
+        const std::uint64_t address = test.virtual_base + 0x188;
+        const std::uint64_t physical = test.physical_base + 0x188;
+        environment.memory().fill_incrementing(
+            test.physical_base, 0x1000, static_cast<std::uint8_t>(0x30 + index));
+        environment.configure_backpressure(
+            0x243f6a8885a308d3ULL ^ index, true);
+        bool configured = environment.reset();
+        if (configured) {
+            configured = test.mode == memblock::ReferencePageMode::sv39
+                ? environment.map_sv39_leaf(
+                    test.virtual_base, test.physical_base, test.level, root)
+                : environment.map_sv48_leaf(
+                    test.virtual_base, test.physical_base, test.level, root);
+        }
+        if (configured) {
+            configured = test.mode == memblock::ReferencePageMode::sv39
+                ? environment.activate_sv39(root, static_cast<std::uint16_t>(index))
+                : environment.activate_sv48(root, static_cast<std::uint16_t>(index));
+        }
+        const auto reference = configured
+            ? memblock::reference_page_walk(
+                environment.memory(), root, address, test.mode)
+            : memblock::ReferenceStageWalkResult{};
+        const memblock::LoadTransaction transaction{
+            .address = address,
+            .oracle_address = physical,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(index),
+            .lq = static_cast<std::uint8_t>(index),
+            .pdest = static_cast<std::uint8_t>(100 + index),
+            .lane = index % memblock::kScalarLoadLanes,
+        };
+        if (configured && reference.translated &&
+            reference.physical_address == physical) {
+            environment.expect_load(transaction);
+            configured = environment.set_rob_head(
+                    transaction.rob, transaction.rob_flag) &&
+                environment.enqueue_load(transaction) &&
+                environment.issue_load(transaction, 1024) &&
+                environment.run_until_complete(16384);
+        } else {
+            configured = false;
+        }
+        if (!configured) {
+            std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case="
+                      << test.name << " cycle=" << environment.cycle()
+                      << " writebacks=" << environment.writebacks()
+                      << " pending=" << environment.pending_scalar_loads()
+                      << " ptw_requests=" << environment.ptw_requests()
+                      << " tilelink_requests=" << environment.tilelink_requests()
+                      << " reason=" << (environment.error().empty()
+                          ? "reference-or-RTL translation mismatch"
+                          : environment.error()) << '\n';
+            return 1;
+        }
+        ++completed;
+    }
+
+    struct GCase {
+        memblock::ReferencePageMode mode;
+        unsigned level;
+        const char *name;
+        std::uint64_t base;
+        memblock::ReferencePageMode vs_mode;
+    };
+    constexpr std::array<GCase, 5> g_cases{{
+        {memblock::ReferencePageMode::sv39, 1, "Sv39x4-2MiB",
+         0x80000000ULL, memblock::ReferencePageMode::sv39},
+        {memblock::ReferencePageMode::sv39, 2, "Sv39x4-1GiB",
+         0x80000000ULL, memblock::ReferencePageMode::sv39},
+        {memblock::ReferencePageMode::sv48, 1, "Sv48x4-2MiB",
+         0x80000000ULL, memblock::ReferencePageMode::sv48},
+        {memblock::ReferencePageMode::sv48, 2, "Sv48x4-1GiB",
+         0x80000000ULL, memblock::ReferencePageMode::sv48},
+        {memblock::ReferencePageMode::sv48, 3, "Sv48x4-512GiB",
+         0x8000000000ULL, memblock::ReferencePageMode::sv48},
+    }};
+    for (unsigned index = 0; index < g_cases.size(); ++index) {
+        const auto &test = g_cases[index];
+        memblock::Environment environment(argc, argv);
+        const std::uint64_t vs_root = test.base + 0x100000ULL;
+        constexpr std::uint64_t g_root = 0x98000000ULL;
+        const std::uint64_t guest_data = test.base + 0x180000ULL;
+        const std::uint64_t guest_virtual = test.vs_mode ==
+                memblock::ReferencePageMode::sv48
+            ? 0x40000000ULL
+            : 0x20000000ULL;
+        const std::uint64_t address = guest_virtual + 0x188;
+        environment.memory().fill_incrementing(
+            guest_data, 0x1000, static_cast<std::uint8_t>(0x70 + index));
+        environment.configure_backpressure(
+            0x13198a2e03707344ULL ^ (index * 0x9e3779b97f4a7c15ULL), true);
+        bool configured = environment.reset();
+        if (configured) {
+            configured = test.mode == memblock::ReferencePageMode::sv39
+                ? environment.map_sv39x4_leaf(
+                    test.base, test.base, test.level, g_root)
+                : environment.map_sv48x4_leaf(
+                    test.base, test.base, test.level, g_root);
+        }
+        if (configured) {
+            configured = test.vs_mode == memblock::ReferencePageMode::sv39
+                ? environment.map_sv39_4k(address & ~0xfffULL, guest_data, vs_root)
+                : environment.map_sv48_4k(address & ~0xfffULL, guest_data, vs_root);
+        }
+        if (configured) {
+            configured = environment.activate_two_stage_modes(
+                test.vs_mode, test.mode, vs_root, g_root,
+                static_cast<std::uint16_t>(20 + index),
+                static_cast<std::uint16_t>(30 + index));
+        }
+        const auto reference = configured
+            ? memblock::reference_two_stage_walk(
+                environment.memory(), vs_root, g_root, address,
+                test.vs_mode, test.mode)
+            : memblock::ReferenceTwoStageWalkResult{};
+        const memblock::LoadTransaction transaction{
+            .address = address,
+            .oracle_address = guest_data + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = static_cast<std::uint8_t>(120 + index),
+            .lane = (index + 1) % memblock::kScalarLoadLanes,
+        };
+        if (configured && reference.translated &&
+            reference.physical_address == guest_data + 0x188) {
+            environment.expect_load(transaction);
+            configured = environment.set_rob_head(
+                    transaction.rob, transaction.rob_flag) &&
+                environment.enqueue_load(transaction) &&
+                environment.issue_load(transaction, 2048) &&
+                environment.run_until_complete(32768);
+        } else {
+            configured = false;
+        }
+        if (!configured) {
+            std::cerr << "MEMBLOCK_TRANSLATION_SUPERPAGES_FAIL case="
+                      << test.name << " cycle=" << environment.cycle()
+                      << " reason=" << (environment.error().empty()
+                          ? "nested reference-or-RTL translation mismatch"
+                          : environment.error()) << '\n';
+            return 1;
+        }
+        ++completed;
+    }
+
+    std::cout << "MEMBLOCK_TRANSLATION_SUPERPAGES_PASS"
+              << " cases=" << completed
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
@@ -2294,6 +5667,8 @@ int run_random_forwarding(int argc, char **argv, const Options &options)
     const unsigned transaction_count = std::min(options.transactions, max_transactions);
     constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x12000;
     environment.memory().fill_incrementing(base, 4096, 0x31);
+    environment.configure_backpressure(
+        options.seed ^ 0xd1b54a32d192ed03ULL, options.backpressure);
     if (!environment.reset()) {
         std::cerr << "MEMBLOCK_RANDOM_FORWARD_FAIL seed=" << options.seed
                   << " transaction=0 cycle=" << environment.cycle()
@@ -2456,7 +5831,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                          unsigned lane) {
         const std::uint64_t rob = rob_offset++;
         const std::uint64_t lq = lq_offset++;
-        return memblock::LoadTransaction{
+        auto transaction = memblock::LoadTransaction{
             .address = address,
             .op = op,
             .rob = memblock::rob_pointer_value(rob),
@@ -2468,13 +5843,29 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             .pdest = static_cast<std::uint8_t>(1 + random() % 255),
             .lane = lane,
         };
+        transaction.predecode_rvc = (rob % 4U) == 0 || (random() & 3U) == 0;
+        transaction.ftq_ptr = random() & 0x3fU;
+        transaction.ftq_offset = static_cast<std::uint8_t>(random() & 7U);
+        transaction.store_set_hit = (rob % 5U) == 0 || (random() % 5U) == 0;
+        transaction.load_wait_bit = rob != 0 &&
+            ((rob % 7U) == 0 || (random() % 7U) == 0);
+        // Strict wait is coupled to the backend's older-store scheduling;
+        // exercise that bit in the isolated metadata contract instead of
+        // creating an unbounded wait cycle in a mixed burst.
+        transaction.load_wait_strict = false;
+        transaction.wait_for_rob_flag = transaction.load_wait_bit &&
+            memblock::rob_pointer_flag(rob - 1);
+        transaction.wait_for_rob_value = transaction.load_wait_bit
+            ? memblock::rob_pointer_value(rob - 1)
+            : 0;
+        return transaction;
     };
     auto make_store = [&](std::uint64_t address, std::uint64_t data,
                           memblock::StoreOp op, unsigned address_lane,
                           unsigned data_lane) {
         const std::uint64_t rob = rob_offset++;
         const std::uint64_t sq = sq_offset++;
-        return memblock::StoreTransaction{
+        auto transaction = memblock::StoreTransaction{
             .address = address,
             .data = data,
             .op = op,
@@ -2485,6 +5876,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             .address_lane = address_lane,
             .data_lane = data_lane,
         };
+        return transaction;
     };
     auto make_prefetch = [&](std::uint64_t address, memblock::PrefetchOp op,
                              unsigned lane) {
@@ -2537,6 +5929,13 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         for (auto &byte : transaction.data) {
             byte = static_cast<unsigned char>(random());
         }
+        transaction.ftq_ptr = random() & 0x3fU;
+        transaction.ftq_offset = static_cast<std::uint8_t>(random() & 7U);
+        // VLSU flow_num and vtype/LMUL are coupled by the backend.  The
+        // standalone MemBlock boundary has no vset* state, so keep the legal
+        // baseline LMUL here; dedicated vector tests may override vlmul with
+        // a matching flow shape.
+        transaction.vlmul = 0;
         return transaction;
     };
     auto random_delay = [&](unsigned minimum, unsigned maximum) {
@@ -2611,16 +6010,35 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     auto overlay_vector_store = [&](const memblock::VectorMemoryTransaction &store,
                                     const memblock::VectorMemoryTransaction &load) {
         auto expected = environment.memory().expected_vector_load(load);
-        const unsigned bytes = 1U << store.eew;
-        const unsigned elements = 16U / bytes;
-        const std::uint16_t active = memblock::active_vector_elements(store);
-        for (unsigned element = 0; element < elements; ++element) {
-            if (((active >> element) & 1U) == 0) {
+        std::unordered_map<std::uint64_t, unsigned char> forwarded;
+        const unsigned store_bytes = 1U << store.eew;
+        const unsigned store_elements = 16U / store_bytes;
+        const std::uint16_t store_active = memblock::active_vector_elements(store);
+        for (unsigned element = 0; element < store_elements; ++element) {
+            if (((store_active >> element) & 1U) == 0) {
                 continue;
             }
-            for (unsigned byte = 0; byte < bytes; ++byte) {
-                const unsigned offset = element * bytes + byte;
-                expected[offset] = store.data[offset];
+            const std::uint64_t address =
+                memblock::vector_element_address(store, element);
+            for (unsigned byte = 0; byte < store_bytes; ++byte) {
+                forwarded[address + byte] =
+                    store.data[element * store_bytes + byte];
+            }
+        }
+        const unsigned load_bytes = 1U << load.eew;
+        const unsigned load_elements = 16U / load_bytes;
+        const std::uint16_t load_active = memblock::active_vector_elements(load);
+        for (unsigned element = 0; element < load_elements; ++element) {
+            if (((load_active >> element) & 1U) == 0) {
+                continue;
+            }
+            const std::uint64_t address =
+                memblock::vector_element_address(load, element);
+            for (unsigned byte = 0; byte < load_bytes; ++byte) {
+                const auto value = forwarded.find(address + byte);
+                if (value != forwarded.end()) {
+                    expected[element * load_bytes + byte] = value->second;
+                }
             }
         }
         return expected;
@@ -2629,17 +6047,44 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         const unsigned element_bytes = 1U << transaction.eew;
         const unsigned elements = 16U >> transaction.eew;
         if (transaction.addressing == memblock::VectorAddressingMode::strided) {
-            transaction.stride = static_cast<std::int64_t>(
-                element_bytes * (1U + random() % 4));
+            if (transaction.store) {
+                const std::array<std::int64_t, 5> stride_classes{{
+                    -static_cast<std::int64_t>(2U * element_bytes),
+                    -static_cast<std::int64_t>(element_bytes),
+                    static_cast<std::int64_t>(element_bytes),
+                    static_cast<std::int64_t>(2U * element_bytes),
+                    static_cast<std::int64_t>(4U * element_bytes),
+                }};
+                transaction.stride =
+                    stride_classes[random() % stride_classes.size()];
+            } else {
+                const std::array<std::int64_t, 6> stride_classes{{
+                    -static_cast<std::int64_t>(2U * element_bytes),
+                    -static_cast<std::int64_t>(element_bytes),
+                    0,
+                    static_cast<std::int64_t>(element_bytes),
+                    static_cast<std::int64_t>(2U * element_bytes),
+                    static_cast<std::int64_t>(4U * element_bytes),
+                }};
+                transaction.stride =
+                    stride_classes[random() % stride_classes.size()];
+            }
             return;
         }
         if (transaction.addressing != memblock::VectorAddressingMode::indexed_unordered &&
             transaction.addressing != memblock::VectorAddressingMode::indexed_ordered) {
             return;
         }
+        std::vector<unsigned> offset_slots(256U / element_bytes);
+        std::iota(offset_slots.begin(), offset_slots.end(), 0U);
+        if (transaction.store) {
+            std::shuffle(offset_slots.begin(), offset_slots.end(), random);
+        }
         for (unsigned element = 0; element < elements; ++element) {
-            const std::uint64_t offset =
-                (random() % (64U / element_bytes)) * element_bytes;
+            const std::uint64_t slot = transaction.store
+                ? offset_slots[element]
+                : random() % offset_slots.size();
+            const std::uint64_t offset = slot * element_bytes;
             for (unsigned byte = 0; byte < element_bytes; ++byte) {
                 transaction.index[element * element_bytes + byte] =
                     static_cast<unsigned char>(offset >> (8 * byte));
@@ -2749,6 +6194,57 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         actions += load_sweep.size();
         coverage.max_outstanding = std::max<std::uint64_t>(
             coverage.max_outstanding, load_sweep.size());
+
+        phase = "multi-lane-lsq-dispatch";
+        for (unsigned width = 1;
+             width <= memblock::generated::kLsqEnqueueLanes; ++width) {
+            std::vector<unsigned> dispatch_lanes(
+                memblock::generated::kLsqEnqueueLanes);
+            std::iota(dispatch_lanes.begin(), dispatch_lanes.end(), 0U);
+            std::shuffle(dispatch_lanes.begin(), dispatch_lanes.end(), random);
+            dispatch_lanes.resize(width);
+            std::sort(dispatch_lanes.begin(), dispatch_lanes.end());
+
+            std::vector<memblock::LoadTransaction> batch;
+            batch.reserve(width);
+            for (unsigned index = 0; index < width; ++index) {
+                const auto op = static_cast<memblock::LoadOp>((width + index) % 7);
+                const unsigned size = 1U <<
+                    (static_cast<unsigned>(op) & 3U);
+                batch.push_back(make_load(
+                    random_bare_address(
+                        bare_base + 0x5000 + width * 0x100, size, 0x80),
+                    op, index % memblock::kScalarLoadLanes));
+                environment.expect_load(batch.back());
+            }
+            if (!environment.enqueue_load_batch(batch, dispatch_lanes)) {
+                return false;
+            }
+            for (unsigned begin = 0; begin < batch.size();
+                 begin += memblock::kScalarLoadLanes) {
+                const unsigned end = std::min<unsigned>(
+                    begin + memblock::kScalarLoadLanes, batch.size());
+                const std::vector<memblock::LoadTransaction> issue_batch(
+                    batch.begin() + begin, batch.begin() + end);
+                if (!environment.issue_load_batch(issue_batch)) {
+                    return false;
+                }
+            }
+            if (!environment.run_until_all_complete(2048)) {
+                return false;
+            }
+            ++coverage.dispatch_widths[width - 1];
+            for (const unsigned lane : dispatch_lanes) {
+                ++coverage.dispatch_lanes[lane];
+            }
+            for (const auto &transaction : batch) {
+                coverage.sample(transaction);
+            }
+            actions += batch.size();
+            coverage.cacheable += batch.size();
+            coverage.max_outstanding = std::max<std::uint64_t>(
+                coverage.max_outstanding, batch.size());
+        }
 
         phase = "vector-load-shape-wave";
         std::vector<memblock::VectorMemoryTransaction> vector_sweep;
@@ -2860,6 +6356,32 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         }
         ++coverage.vector_forwarding;
         coverage.cacheable += 2;
+
+        phase = "vector-stride-signs";
+        constexpr std::array<std::int64_t, 3> load_strides{{-4, 0, 4}};
+        for (unsigned index = 0; index < load_strides.size(); ++index) {
+            auto load = make_vector(
+                false, bare_base + 0x7800 + index * 0x80 + 0x30, 2,
+                index % memblock::kVectorMemoryLanes,
+                memblock::VectorAddressingMode::strided);
+            load.stride = load_strides[index];
+            if (!issue_vector(load)) {
+                return false;
+            }
+            ++coverage.cacheable;
+        }
+        constexpr std::array<std::int64_t, 2> store_strides{{-4, 4}};
+        for (unsigned index = 0; index < store_strides.size(); ++index) {
+            auto store = make_vector(
+                true, bare_base + 0x7a00 + index * 0x80 + 0x30, 2,
+                index % memblock::kVectorMemoryLanes,
+                memblock::VectorAddressingMode::strided);
+            store.stride = store_strides[index];
+            if (!issue_vector(store) || !environment.commit_vector_store(store)) {
+                return false;
+            }
+            ++coverage.cacheable;
+        }
 
         phase = "scalar-forwarding";
         std::vector<unsigned> store_ops{0, 1, 2, 3};
@@ -3309,9 +6831,13 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         coverage.exceptions += 2;
 
         phase = "pbmt-nc-store-load";
-        const auto nc_store = make_store(
+        auto nc_store = make_store(
             nc_base + 0x180, 0x13579bdf2468ace0ULL,
             memblock::StoreOp::sd, 1, 0);
+        nc_store.expected_debug_is_mmio = false;
+        // PBMT=NC still targets main memory; NCIO is reserved for an
+        // uncached access whose PMA class is IO.
+        nc_store.expected_debug_is_ncio = false;
         environment.expect_store(nc_store);
         if (!environment.enqueue_store(
                 nc_store, memblock::lq_pointer_value(lq_offset)) ||
@@ -3335,11 +6861,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
 
         phase = "dcache-dirty-pressure";
         constexpr unsigned dcache_sets = 128;
+        constexpr unsigned dcache_ways = 8;
         constexpr unsigned line_bytes = 64;
         constexpr unsigned dirty_lines = 10;
         constexpr std::uint64_t same_set_stride = dcache_sets * line_bytes;
         constexpr std::uint64_t dirty_base = cache0_base + 0x30000;
         const std::uint64_t release_before = environment.tilelink_release_data();
+        const std::uint64_t verified_release_before =
+            environment.tilelink_release_data_verified();
         std::array<memblock::StoreTransaction, dirty_lines> dirty_stores{};
         for (unsigned index = 0; index < dirty_lines; ++index) {
             const std::uint64_t line = dirty_base + index * same_set_stride;
@@ -3394,34 +6923,46 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             !environment.run_cycles(32)) {
             return false;
         }
-        coverage.dirty_pressure = environment.tilelink_release_data_verified();
+        const std::uint64_t release_delta =
+            environment.tilelink_release_data() - release_before;
+        const std::uint64_t verified_release_delta =
+            environment.tilelink_release_data_verified() - verified_release_before;
+        if (release_delta < dirty_lines - dcache_ways ||
+            verified_release_delta != release_delta) {
+            return false;
+        }
+        coverage.dirty_pressure = verified_release_delta;
 
         phase = "seeded-mixed-tail";
         const unsigned target_before_redirect = options.transactions - 2;
         // The tail is a constrained-random issue window. Each window contains
         // all five producer classes before any completion drain, so cache,
         // TLB, forwarding, and queue timing can interact in one simulation.
-        while (actions + 6 <= target_before_redirect) {
+        while (actions + 7 <= target_before_redirect) {
             const std::uint64_t window_base =
                 cache0_base + 0x10000 + (random() % 256) * 128;
-            const auto required_mode = static_cast<memblock::VectorAddressingMode>(
+            const auto required_load_mode = static_cast<memblock::VectorAddressingMode>(
                 coverage.concurrent_windows < 4
                     ? coverage.concurrent_windows
                     : random() % 4);
+            const auto required_store_mode = static_cast<memblock::VectorAddressingMode>(
+                coverage.concurrent_windows < 4
+                    ? (coverage.concurrent_windows + 1) % 4
+                    : random() % 4);
             auto scalar = make_load(
-                window_base + (random() % 8U) * 8U,
+                window_base + random() % 64U,
                 static_cast<memblock::LoadOp>(random() % 7), random() % 3);
             auto vector_load = make_vector(
                 false, window_base + 32, random() % 4, random() % 2,
-                required_mode);
+                required_load_mode);
             auto scalar_store = make_store(
-                window_base + (random() % 8U) * 8U, random(),
+                window_base + random() % 64U, random(),
                 static_cast<memblock::StoreOp>(random() % 4), random() % 2,
                 random() % 2);
             auto vector_store = make_vector(
                 true, window_base + 0x100 + (random() % 8U) * 8U,
                 random() % 4, random() % 2,
-                required_mode);
+                required_store_mode);
             auto prefetch = make_prefetch(
                 window_base + 0x180 + (random() % 8U) * 8U,
                 static_cast<memblock::PrefetchOp>(8 + random() % 3), random() % 3);
@@ -3443,6 +6984,24 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 (random() % 8U) * (1U << vector_store.eew);
             randomize_vector_addressing(vector_load);
             randomize_vector_addressing(vector_store);
+
+            {
+                std::ostringstream window;
+                window << "seeded-mixed-tail"
+                       << ":window=" << coverage.concurrent_windows
+                       << ":scalar=0x" << std::hex << scalar.address
+                       << "/" << static_cast<unsigned>(scalar.op)
+                       << ":vload=0x" << vector_load.address << std::dec
+                       << "/" << static_cast<unsigned>(vector_load.addressing)
+                       << "/" << static_cast<unsigned>(vector_load.eew)
+                       << ":store=0x" << std::hex << scalar_store.address
+                       << std::dec << "/" << static_cast<unsigned>(scalar_store.op)
+                       << ":vstore=0x" << std::hex << vector_store.address
+                       << std::dec << "/"
+                       << static_cast<unsigned>(vector_store.addressing)
+                       << "/" << static_cast<unsigned>(vector_store.eew);
+                phase = window.str();
+            }
 
             environment.expect_load(scalar);
             environment.expect_vector(vector_load);
@@ -3480,7 +7039,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             for (const unsigned issue_class : issue_order) {
                 switch (issue_class) {
                 case 0:
-                    if (!environment.issue_load(scalar, 2048)) {
+                    if (!environment.set_rob_head(scalar.rob, scalar.rob_flag) ||
+                        !environment.issue_load(scalar, 2048)) {
                         return false;
                     }
                     break;
@@ -3547,7 +7107,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             if (!environment.run_until_all_complete(4096) ||
                 !environment.run_cycles(8) ||
                 !environment.commit_store(scalar_store, 4096) ||
-                !environment.commit_vector_store(vector_store, 4096)) {
+                !environment.commit_vector_store(vector_store, 4096) ||
+                !environment.set_rob_head(prefetch.rob, prefetch.rob_flag) ||
+                !environment.run_until_queues_retired(4096)) {
                 return false;
             }
             const unsigned scalar_bytes =
@@ -3555,9 +7117,30 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             const auto scalar_readback = make_load(
                 scalar_store.address,
                 static_cast<memblock::LoadOp>(scalar_store.op), random() % 3);
-            if (!issue_load(
+            if (!environment.set_rob_head(
+                    scalar_readback.rob, scalar_readback.rob_flag) ||
+                !issue_load(
                     scalar_readback,
-                    scalar_forward_value(scalar_store.data, scalar_bytes, false))) {
+                    scalar_forward_value(scalar_store.data, scalar_bytes, false)) ||
+                !environment.run_until_queues_retired(4096)) {
+                return false;
+            }
+            auto vector_readback = make_vector(
+                false, vector_store.address, vector_store.eew, random() % 2,
+                vector_store.addressing);
+            vector_readback.vl = vector_store.vl;
+            vector_readback.vstart = vector_store.vstart;
+            vector_readback.vm = vector_store.vm;
+            vector_readback.mask_bits = vector_store.mask_bits;
+            vector_readback.vma = vector_store.vma;
+            vector_readback.vta = vector_store.vta;
+            vector_readback.stride = vector_store.stride;
+            vector_readback.index = vector_store.index;
+            if (!environment.set_rob_head(
+                    vector_readback.rob, vector_readback.rob_flag) ||
+                !issue_vector(
+                    vector_readback,
+                    environment.memory().expected_vector_load(vector_readback))) {
                 return false;
             }
             if (
@@ -3577,12 +7160,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 return false;
             }
             ++coverage.concurrent_windows;
-            coverage.concurrent_actions += 6;
+            coverage.concurrent_actions += 7;
             for (auto &count : coverage.concurrent_ops) {
                 ++count;
             }
             actions += 5;
-            coverage.cacheable += 6;
+            coverage.cacheable += 7;
         }
         while (actions < target_before_redirect) {
             const unsigned remaining = target_before_redirect - actions;
@@ -3713,7 +7296,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
 
         phase = "final-drain";
         if (!environment.run_until_all_complete(2048) ||
-            !environment.run_until_queues_retired(4096)) {
+            !environment.run_until_queues_retired(4096) ||
+            !environment.run_cycles(32)) {
             return false;
         }
         coverage.dcache_request_stalls = environment.dcache_request_stalls();
@@ -3781,6 +7365,680 @@ int run_random_mixed(int argc, char **argv, const Options &options)
               << " sq=" << environment.sq_dequeued() << '+'
               << environment.sq_canceled() << '/'
               << environment.sq_allocated()
+              << ' ' << coverage.summary()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_random_stress(int argc, char **argv, const Options &options)
+{
+    constexpr unsigned minimum_actions = 96;
+    if (options.transactions < minimum_actions) {
+        std::cerr << "MEMBLOCK_RANDOM_STRESS_FAIL seed=" << options.seed
+                  << " transactions=0 cycle=0 reason=random-stress_requires_at_least_"
+                  << minimum_actions << "_actions\n";
+        return 1;
+    }
+
+    enum class Kind { scalar_store, scalar_load, vector_store, vector_load,
+                      prefetch, extra_load };
+    struct Action {
+        Kind kind;
+        unsigned group;
+    };
+    struct Group {
+        bool has_scalar_store = false;
+        bool has_scalar_load = false;
+        bool has_vector_store = false;
+        bool has_vector_load = false;
+        bool has_prefetch = false;
+        bool has_extra_load = false;
+        memblock::StoreTransaction scalar_store{};
+        memblock::LoadTransaction scalar_load{};
+        memblock::VectorMemoryTransaction vector_store{};
+        memblock::VectorMemoryTransaction vector_load{};
+        memblock::PrefetchTransaction prefetch{};
+        memblock::LoadTransaction extra_load{};
+    };
+
+    memblock::Environment environment(argc, argv);
+    StressRandom random(options.seed);
+    StressCoverage coverage;
+    // The generated DUT resets pendingPtr to ROB zero. Start at one so the
+    // first store cannot be interpreted as already committed before the
+    // stress driver's explicit commit point.
+    std::uint64_t rob_offset = 1;
+    std::uint64_t lq_offset = 0;
+    std::uint64_t sq_offset = 0;
+    unsigned completed_actions = 0;
+    unsigned burst_index = 0;
+    std::string phase = "reset";
+    constexpr std::uint64_t region0 = memblock::kDefaultMemoryBase + 0x500000;
+    constexpr std::uint64_t region1 = memblock::kDefaultMemoryBase + 0x900000;
+    constexpr std::uint64_t region_span = 0x400000;
+
+    environment.memory().fill_incrementing(region0, region_span, 0x13);
+    environment.memory().fill_incrementing(region1, region_span, 0x97);
+    environment.configure_backpressure(
+        StressRandom::splitmix64(options.seed ^ 0x13198a2e03707344ULL),
+        options.backpressure);
+
+    auto make_load = [&](std::uint64_t address, memblock::LoadOp op,
+                         unsigned lane) {
+        const std::uint64_t rob = rob_offset++;
+        const std::uint64_t lq = lq_offset++;
+        auto transaction = memblock::LoadTransaction{
+            .address = address,
+            .op = op,
+            .rob = memblock::rob_pointer_value(rob),
+            .rob_flag = memblock::rob_pointer_flag(rob),
+            .lq = memblock::lq_pointer_value(lq),
+            .lq_flag = memblock::lq_pointer_flag(lq),
+            .sq = memblock::sq_pointer_value(sq_offset),
+            .sq_flag = memblock::sq_pointer_flag(sq_offset),
+            .pdest = static_cast<std::uint8_t>(1 + random.next_payload() % 255),
+            .lane = lane,
+        };
+        transaction.predecode_rvc = (rob % 4U) == 0 ||
+            (random.next_shape() & 3U) == 0;
+        transaction.ftq_ptr = random.next_shape() & 0x3fU;
+        transaction.ftq_offset = static_cast<std::uint8_t>(random.next_shape() & 7U);
+        transaction.store_set_hit = (rob % 5U) == 0 ||
+            (random.next_shape() % 5U) == 0;
+        transaction.load_wait_bit = rob != 0 &&
+            ((rob % 7U) == 0 || (random.next_shape() % 7U) == 0);
+        // Keep strict wait out of overlapping stress bursts; its independent
+        // sideband drive is covered by metadata-contracts.
+        transaction.load_wait_strict = false;
+        transaction.wait_for_rob_flag = transaction.load_wait_bit &&
+            memblock::rob_pointer_flag(rob - 1);
+        transaction.wait_for_rob_value = transaction.load_wait_bit
+            ? memblock::rob_pointer_value(rob - 1)
+            : 0;
+        return transaction;
+    };
+    auto make_store = [&](std::uint64_t address, std::uint64_t data,
+                          memblock::StoreOp op, unsigned address_lane,
+                          unsigned data_lane) {
+        const std::uint64_t rob = rob_offset++;
+        const std::uint64_t sq = sq_offset++;
+        auto transaction = memblock::StoreTransaction{
+            .address = address,
+            .data = data,
+            .op = op,
+            .rob = memblock::rob_pointer_value(rob),
+            .rob_flag = memblock::rob_pointer_flag(rob),
+            .sq = memblock::sq_pointer_value(sq),
+            .sq_flag = memblock::sq_pointer_flag(sq),
+            .address_lane = address_lane,
+            .data_lane = data_lane,
+        };
+        return transaction;
+    };
+    auto make_prefetch = [&](std::uint64_t address, memblock::PrefetchOp op,
+                             unsigned lane) {
+        const std::uint64_t rob = rob_offset++;
+        const std::uint64_t lq = lq_offset++;
+        return memblock::PrefetchTransaction{
+            .address = address,
+            .op = op,
+            .rob = memblock::rob_pointer_value(rob),
+            .rob_flag = memblock::rob_pointer_flag(rob),
+            .lq = memblock::lq_pointer_value(lq),
+            .lq_flag = memblock::lq_pointer_flag(lq),
+            .sq = memblock::sq_pointer_value(sq_offset),
+            .sq_flag = memblock::sq_pointer_flag(sq_offset),
+            .lane = lane,
+        };
+    };
+    auto make_vector = [&](bool store, std::uint64_t address, unsigned eew,
+                           unsigned lane, memblock::VectorAddressingMode mode) {
+        const std::uint64_t rob = rob_offset++;
+        const std::uint64_t lq = lq_offset;
+        const std::uint64_t sq = sq_offset;
+        const std::uint8_t flow_num = mode ==
+                memblock::VectorAddressingMode::unit_stride
+            ? 2
+            : static_cast<std::uint8_t>(16U >> eew);
+        if (store) {
+            sq_offset += flow_num;
+        } else {
+            lq_offset += flow_num;
+        }
+        memblock::VectorMemoryTransaction transaction{
+            .store = store,
+            .address = address,
+            .addressing = mode,
+            .eew = static_cast<std::uint8_t>(eew),
+            .vl = static_cast<std::uint8_t>(16U >> eew),
+            .rob = memblock::rob_pointer_value(rob),
+            .rob_flag = memblock::rob_pointer_flag(rob),
+            .lq = memblock::lq_pointer_value(lq),
+            .lq_flag = memblock::lq_pointer_flag(lq),
+            .sq = memblock::sq_pointer_value(sq),
+            .sq_flag = memblock::sq_pointer_flag(sq),
+            .pdest = static_cast<std::uint8_t>(1 + random.next_payload() % 255),
+            .lane = lane,
+            .flow_num = flow_num,
+        };
+        for (auto &byte : transaction.data) {
+            byte = static_cast<unsigned char>(random.next_payload());
+        }
+        transaction.ftq_ptr = random.next_shape() & 0x3fU;
+        transaction.ftq_offset = static_cast<std::uint8_t>(random.next_shape() & 7U);
+        // Keep LMUL coupled to the explicitly modeled flow count; the
+        // standalone issue boundary does not carry vset/vl context.
+        transaction.vlmul = 0;
+        return transaction;
+    };
+    auto randomize_vector_addressing = [&](memblock::VectorMemoryTransaction &transaction) {
+        const unsigned element_bytes = 1U << transaction.eew;
+        const unsigned elements = 16U >> transaction.eew;
+        if (transaction.addressing == memblock::VectorAddressingMode::strided) {
+            // Repeated-address stores have no deterministic forwarding order.
+            // Keep forwarding bursts non-overlapping while retaining zero-
+            // stride coverage for independent loads in random-mixed.
+            if (transaction.store) {
+                const std::array<std::int64_t, 5> store_strides{{
+                    -static_cast<std::int64_t>(2U * element_bytes),
+                    -static_cast<std::int64_t>(element_bytes),
+                    static_cast<std::int64_t>(element_bytes),
+                    static_cast<std::int64_t>(2U * element_bytes),
+                    static_cast<std::int64_t>(4U * element_bytes)}};
+                transaction.stride = store_strides[
+                    random.next_shape() % store_strides.size()];
+            } else {
+                const std::array<std::int64_t, 6> load_strides{{
+                    -static_cast<std::int64_t>(2U * element_bytes),
+                    -static_cast<std::int64_t>(element_bytes), 0,
+                    static_cast<std::int64_t>(element_bytes),
+                    static_cast<std::int64_t>(2U * element_bytes),
+                    static_cast<std::int64_t>(4U * element_bytes)}};
+                transaction.stride = load_strides[
+                    random.next_shape() % load_strides.size()];
+            }
+            return;
+        }
+        if (transaction.addressing != memblock::VectorAddressingMode::indexed_unordered &&
+            transaction.addressing != memblock::VectorAddressingMode::indexed_ordered) {
+            return;
+        }
+        std::vector<unsigned> slots(256U / element_bytes);
+        std::iota(slots.begin(), slots.end(), 0U);
+        if (transaction.store) {
+            std::shuffle(slots.begin(), slots.end(), random.payload);
+        }
+        for (unsigned element = 0; element < elements; ++element) {
+            const std::uint64_t slot = transaction.store
+                ? slots[element]
+                : random.next_shape() % slots.size();
+            const std::uint64_t offset = slot * element_bytes;
+            for (unsigned byte = 0; byte < element_bytes; ++byte) {
+                transaction.index[element * element_bytes + byte] =
+                    static_cast<unsigned char>(offset >> (8 * byte));
+            }
+        }
+    };
+    auto scalar_forward_value = [&](const memblock::StoreTransaction &store,
+                                    const memblock::LoadTransaction &load) {
+        const unsigned load_bytes = 1U <<
+            (static_cast<unsigned>(load.op) & 3U);
+        const unsigned store_bytes = 1U << static_cast<unsigned>(store.op);
+        std::uint64_t value = 0;
+        const std::uint64_t old = load.oracle_address.value_or(load.address);
+        for (unsigned byte = 0; byte < load_bytes; ++byte) {
+            std::uint8_t result = environment.memory().read_byte(old + byte);
+            for (unsigned store_byte = 0; store_byte < store_bytes; ++store_byte) {
+                if (old + byte == store.address + store_byte) {
+                    result = static_cast<std::uint8_t>(
+                        store.data >> (8 * store_byte));
+                }
+            }
+            value |= std::uint64_t{result} << (8 * byte);
+        }
+        const bool is_unsigned = (static_cast<unsigned>(load.op) & 4U) != 0;
+        return is_unsigned ? value : memblock::sign_extend(value, load_bytes * 8);
+    };
+    auto vector_forward_value = [&](const memblock::VectorMemoryTransaction &store,
+                                    const memblock::VectorMemoryTransaction &load) {
+        auto expected = environment.memory().expected_vector_load(load);
+        std::unordered_map<std::uint64_t, unsigned char> forwarded;
+        const unsigned store_bytes = 1U << store.eew;
+        const unsigned store_elements = 16U >> store.eew;
+        const std::uint16_t store_active = memblock::active_vector_elements(store);
+        for (unsigned element = 0; element < store_elements; ++element) {
+            if (((store_active >> element) & 1U) == 0) {
+                continue;
+            }
+            const auto address = memblock::vector_element_address(store, element);
+            for (unsigned byte = 0; byte < store_bytes; ++byte) {
+                forwarded[address + byte] = store.data[element * store_bytes + byte];
+            }
+        }
+        const unsigned load_bytes = 1U << load.eew;
+        const unsigned load_elements = 16U >> load.eew;
+        const std::uint16_t load_active = memblock::active_vector_elements(load);
+        for (unsigned element = 0; element < load_elements; ++element) {
+            if (((load_active >> element) & 1U) == 0) {
+                continue;
+            }
+            const auto address = memblock::vector_element_address(load, element);
+            for (unsigned byte = 0; byte < load_bytes; ++byte) {
+                const auto it = forwarded.find(address + byte);
+                if (it != forwarded.end()) {
+                    expected[element * load_bytes + byte] = it->second;
+                }
+            }
+        }
+        return expected;
+    };
+    auto observe_outstanding = [&]() {
+        const std::size_t scalar = environment.pending_scalar_loads();
+        const std::size_t prefetch = environment.pending_prefetches();
+        const std::size_t store = environment.pending_scalar_stores();
+        const std::size_t vector_load = environment.pending_vector_loads();
+        const std::size_t vector_store = environment.pending_vector_stores();
+        const std::size_t total = scalar + prefetch + store + vector_load + vector_store;
+        coverage.max_outstanding = std::max<std::uint64_t>(coverage.max_outstanding, total);
+    };
+
+    if (!environment.reset() || !environment.enable_misaligned_accesses()) {
+        std::cerr << "MEMBLOCK_RANDOM_STRESS_FAIL seed=" << options.seed
+                  << " transactions=0 cycle=" << environment.cycle()
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    while (completed_actions < options.transactions) {
+        phase = "burst-" + std::to_string(burst_index);
+        const unsigned remaining = options.transactions - completed_actions;
+        const unsigned burst_actions = remaining >= 12 && burst_index >= 4 &&
+                burst_index % 5 != 0
+            ? 12
+            : std::min(6U, remaining);
+        const unsigned group_count = burst_actions > 6 ? 2 : 1;
+        std::vector<Group> groups(group_count);
+        std::vector<Action> issue_actions;
+        issue_actions.reserve(burst_actions);
+        const bool second_region = (burst_index & 1U) != 0;
+        const std::uint64_t region = second_region ? region1 : region0;
+        coverage.memory_regions = second_region ? 2 : std::max<std::uint64_t>(1, coverage.memory_regions);
+
+        for (unsigned group_index = 0; group_index < group_count; ++group_index) {
+            const unsigned slots = std::min(6U, burst_actions - group_index * 6);
+            auto &group = groups[group_index];
+            const unsigned eew = burst_index < 4
+                ? burst_index
+                : (group_count == 2 ? 1U + random.next_shape() % 3U
+                                     : random.next_shape() % 4U);
+            auto vector_mode = static_cast<memblock::VectorAddressingMode>(
+                burst_index < 3 ? burst_index : random.next_shape() % 3);
+            // Ordered indexed operations must see all older LSQ elements
+            // retired. Keep that mode in the single-group prefix; later
+            // two-group bursts still cover indexed unordered traffic while
+            // preserving genuine outstanding pressure.
+            if (group_count == 2 &&
+                vector_mode == memblock::VectorAddressingMode::indexed_ordered) {
+                vector_mode = memblock::VectorAddressingMode::indexed_unordered;
+            }
+            const auto store_mode = vector_mode ==
+                    memblock::VectorAddressingMode::indexed_ordered
+                ? memblock::VectorAddressingMode::indexed_unordered
+                : vector_mode;
+            const std::uint64_t base = region + (burst_index % 256) * 0x1000 +
+                group_index * 0x400;
+            const unsigned store_op_value = burst_index < 4
+                ? burst_index
+                : random.next_shape() % 4;
+            // Keep the store/forwarding pair naturally aligned.  The scalar
+            // load in front of it still alternates aligned and split-line
+            // addresses, so the stress campaign retains misaligned DCache
+            // traffic without depending on StoreQueue's known unsupported
+            // unaligned-forwarding replay path.
+            const auto store_address = base + 0x80;
+            // ROB order intentionally puts an independent load before the
+            // store, then creates dependent scalar/vector loads after it.
+            // This gives pendingPtr a legal head while retaining real
+            // forwarding checks for the younger loads.
+            group.has_scalar_load = slots >= 1;
+            group.has_scalar_store = slots >= 2;
+            group.has_extra_load = slots >= 3;
+            group.has_vector_store = slots >= 4;
+            group.has_vector_load = slots >= 5;
+            group.has_prefetch = slots >= 6;
+            if (group.has_scalar_load) {
+                const bool is_unsigned = store_op_value != 3 &&
+                    (random.next_shape() & 1U) != 0;
+                group.scalar_load = make_load(
+                    base + 0x40 + ((burst_index & 1U) ? 1U : 0U),
+                    static_cast<memblock::LoadOp>(store_op_value +
+                        (is_unsigned ? 4U : 0U)),
+                    (burst_index + group_index) % memblock::kScalarLoadLanes);
+            }
+            if (group.has_scalar_store) {
+                group.scalar_store = make_store(
+                    store_address, random.next_payload(),
+                    static_cast<memblock::StoreOp>(store_op_value),
+                    group_index % memblock::kScalarStoreLanes,
+                    (group_index + 1) % memblock::kScalarStoreLanes);
+            }
+            if (group.has_extra_load) {
+                group.extra_load = make_load(
+                    store_address, static_cast<memblock::LoadOp>(store_op_value),
+                    (burst_index + group_index + 2) % memblock::kScalarLoadLanes);
+            }
+            if (group.has_vector_store) {
+                group.vector_store = make_vector(
+                    true, base + 0x200 +
+                        ((burst_index & 1U) ? (1U << eew) : 0U),
+                    eew, (burst_index + group_index) % memblock::kVectorMemoryLanes,
+                    store_mode);
+                group.vector_store.vm = (burst_index % 2) == 0;
+                group.vector_store.mask_bits = static_cast<std::uint16_t>(
+                    random.next_shape());
+                const unsigned elements = 16U >> eew;
+                group.vector_store.vl = burst_index % 2 == 0
+                    ? static_cast<std::uint8_t>(elements)
+                    : static_cast<std::uint8_t>(
+                        1U + random.next_shape() % elements);
+                group.vector_store.vstart = burst_index % 3 == 1 &&
+                        group.vector_store.vl != 0
+                    ? static_cast<std::uint8_t>(std::min<unsigned>(1, group.vector_store.vl))
+                    : 0;
+                randomize_vector_addressing(group.vector_store);
+            }
+            if (group.has_vector_load) {
+                group.vector_load = make_vector(
+                    false, group.vector_store.address, eew,
+                    group_index % memblock::kVectorMemoryLanes,
+                    vector_mode);
+                group.vector_load.vl = group.vector_store.vl;
+                group.vector_load.vstart = group.vector_store.vstart;
+                group.vector_load.vm = group.vector_store.vm;
+                group.vector_load.mask_bits = group.vector_store.mask_bits;
+                group.vector_load.vma = group.vector_store.vma;
+                group.vector_load.vta = group.vector_store.vta;
+                group.vector_load.stride = group.vector_store.stride;
+                group.vector_load.index = group.vector_store.index;
+                group.vector_load.flow_num = group.vector_store.flow_num;
+            }
+            if (group.has_prefetch) {
+                group.prefetch = make_prefetch(
+                    base + 0x380, static_cast<memblock::PrefetchOp>(8 + burst_index % 3),
+                    (burst_index + group_index) % memblock::kScalarLoadLanes);
+            }
+            if (group.has_scalar_load) {
+                environment.expect_load(group.scalar_load);
+                if (!environment.enqueue_load(group.scalar_load)) {
+                    break;
+                }
+                issue_actions.push_back({Kind::scalar_load, group_index});
+            }
+            if (group.has_scalar_store) {
+                environment.expect_store(group.scalar_store);
+                if (!environment.enqueue_store(
+                        group.scalar_store, memblock::lq_pointer_value(lq_offset))) {
+                    break;
+                }
+                issue_actions.push_back({Kind::scalar_store, group_index});
+            }
+            if (group.has_extra_load) {
+                environment.expect_load_data(
+                    group.extra_load,
+                    scalar_forward_value(group.scalar_store, group.extra_load));
+                if (!environment.enqueue_load(group.extra_load)) {
+                    break;
+                }
+                issue_actions.push_back({Kind::extra_load, group_index});
+            }
+            if (group.has_vector_store) {
+                environment.expect_vector(group.vector_store);
+                if (!environment.enqueue_vector(group.vector_store)) {
+                    break;
+                }
+                issue_actions.push_back({Kind::vector_store, group_index});
+            }
+            if (group.has_vector_load) {
+                environment.expect_vector_data(
+                    group.vector_load,
+                    vector_forward_value(group.vector_store, group.vector_load));
+                if (!environment.enqueue_vector(group.vector_load)) {
+                    break;
+                }
+                issue_actions.push_back({Kind::vector_load, group_index});
+            }
+            if (group.has_prefetch) {
+                environment.expect_prefetch(group.prefetch);
+                if (!environment.enqueue_prefetch(group.prefetch)) {
+                    break;
+                }
+                issue_actions.push_back({Kind::prefetch, group_index});
+            }
+        }
+        if (!environment.ok() || issue_actions.size() != burst_actions) {
+            break;
+        }
+        const Group &first = groups.front();
+        const auto issue_head = first.has_scalar_load
+            ? memblock::rob_identity(first.scalar_load.rob, first.scalar_load.rob_flag)
+            : first.has_scalar_store
+                ? memblock::rob_identity(first.scalar_store.rob, first.scalar_store.rob_flag)
+                : first.has_extra_load
+                    ? memblock::rob_identity(first.extra_load.rob, first.extra_load.rob_flag)
+                    : first.has_vector_store
+                        ? memblock::rob_identity(first.vector_store.rob, first.vector_store.rob_flag)
+                        : first.has_vector_load
+                            ? memblock::rob_identity(first.vector_load.rob, first.vector_load.rob_flag)
+                            : memblock::rob_identity(first.prefetch.rob, first.prefetch.rob_flag);
+        if (!environment.set_rob_head(issue_head.value, issue_head.flag)) {
+            break;
+        }
+        std::vector<bool> issued(issue_actions.size(), false);
+        unsigned issued_count = 0;
+        while (issued_count < issue_actions.size()) {
+            std::vector<unsigned> candidates;
+            for (unsigned index = 0; index < issue_actions.size(); ++index) {
+                if (issued[index]) {
+                    continue;
+                }
+                const auto action = issue_actions[index];
+                bool dependency_ready = true;
+                if (action.kind == Kind::extra_load) {
+                    for (unsigned prior = 0; prior < issue_actions.size(); ++prior) {
+                        if (issue_actions[prior].group == action.group &&
+                            issue_actions[prior].kind == Kind::scalar_store) {
+                            dependency_ready = issued[prior];
+                        }
+                    }
+                }
+                if (action.kind == Kind::vector_load) {
+                    for (unsigned prior = 0; prior < issue_actions.size(); ++prior) {
+                        if (issue_actions[prior].group == action.group &&
+                            issue_actions[prior].kind == Kind::vector_store) {
+                            dependency_ready = issued[prior];
+                        }
+                    }
+                }
+                if (dependency_ready) {
+                    candidates.push_back(index);
+                }
+            }
+            if (candidates.empty()) {
+                phase = "issue-dependency-deadlock";
+                break;
+            }
+            const unsigned selected = candidates[
+                random.next_schedule() % candidates.size()];
+            const auto action = issue_actions[selected];
+            auto &group = groups[action.group];
+            bool ok = false;
+            std::uint64_t requests_before = environment.tilelink_requests();
+            switch (action.kind) {
+            case Kind::scalar_store: {
+                const bool data_first = (random.next_schedule() & 1U) != 0;
+                ok = data_first
+                    ? environment.issue_store_data(group.scalar_store, 2048) &&
+                          environment.issue_store_address(group.scalar_store, 2048)
+                    : environment.issue_store_address(group.scalar_store, 2048) &&
+                          environment.issue_store_data(group.scalar_store, 2048);
+                coverage.sample(group.scalar_store, data_first);
+                break;
+            }
+            case Kind::scalar_load:
+                ok = environment.issue_load(group.scalar_load, 2048);
+                coverage.sample(group.scalar_load, requests_before,
+                                environment.tilelink_requests());
+                break;
+            case Kind::vector_store:
+                ok = environment.issue_vector(group.vector_store, 2048);
+                coverage.sample(group.vector_store, requests_before,
+                                environment.tilelink_requests());
+                break;
+            case Kind::vector_load:
+                ok = environment.issue_vector(group.vector_load, 2048);
+                coverage.sample(group.vector_load, requests_before,
+                                environment.tilelink_requests());
+                ++coverage.vector_forwarding;
+                break;
+            case Kind::prefetch:
+                ok = environment.issue_prefetch(group.prefetch, 2048);
+                coverage.sample(group.prefetch);
+                break;
+            case Kind::extra_load:
+                ok = environment.issue_load(group.extra_load, 2048);
+                coverage.sample(group.extra_load, requests_before,
+                                environment.tilelink_requests());
+                ++coverage.scalar_forwarding;
+                break;
+            }
+            if (!ok || !environment.run_cycles(static_cast<unsigned>(
+                    random.next_schedule() % 4))) {
+                break;
+            }
+            issued[selected] = true;
+            ++issued_count;
+            observe_outstanding();
+        }
+        if (issued_count != issue_actions.size()) {
+            break;
+        }
+        const Group &last = groups.back();
+        const memblock::RobIdentity last_rob = last.has_prefetch
+            ? memblock::rob_identity(last.prefetch.rob, last.prefetch.rob_flag)
+            : last.has_vector_load
+                ? memblock::rob_identity(last.vector_load.rob, last.vector_load.rob_flag)
+                : last.has_vector_store
+                    ? memblock::rob_identity(last.vector_store.rob, last.vector_store.rob_flag)
+                    : last.has_extra_load
+                        ? memblock::rob_identity(last.extra_load.rob, last.extra_load.rob_flag)
+                        : last.has_scalar_store
+                            ? memblock::rob_identity(last.scalar_store.rob, last.scalar_store.rob_flag)
+                            : memblock::rob_identity(last.scalar_load.rob, last.scalar_load.rob_flag);
+        if (!environment.set_rob_head(last_rob.value, last_rob.flag) ||
+            !environment.run_until_all_complete(8192) ||
+            !environment.run_until_queues_retired(8192) ||
+            !environment.run_cycles(4)) {
+            break;
+        }
+        for (const auto &group : groups) {
+            if (group.has_scalar_store) {
+                environment.record_committed_store(group.scalar_store);
+            }
+            if (group.has_vector_store) {
+                environment.record_committed_vector_store(group.vector_store);
+            }
+        }
+        bool masked_vector = false;
+        bool unmasked_vector = false;
+        bool strided_vector = false;
+        bool indexed_vector = false;
+        bool scalar_misaligned = false;
+        bool scalar_forwarding = false;
+        for (const auto &group : groups) {
+            if (group.has_vector_store) {
+                masked_vector |= !group.vector_store.vm;
+                unmasked_vector |= group.vector_store.vm;
+                strided_vector |= group.vector_store.addressing ==
+                    memblock::VectorAddressingMode::strided;
+                indexed_vector |= group.vector_store.addressing ==
+                    memblock::VectorAddressingMode::indexed_unordered;
+            }
+            if (group.has_vector_load) {
+                strided_vector |= group.vector_load.addressing ==
+                    memblock::VectorAddressingMode::strided;
+                indexed_vector |= group.vector_load.addressing ==
+                    memblock::VectorAddressingMode::indexed_unordered;
+            }
+            if (group.has_scalar_load) {
+                const unsigned bytes = 1U <<
+                    (static_cast<unsigned>(group.scalar_load.op) & 3U);
+                scalar_misaligned |= (group.scalar_load.address & (bytes - 1)) != 0;
+            }
+            if (group.has_scalar_store) {
+                const unsigned bytes = 1U <<
+                    static_cast<unsigned>(group.scalar_store.op);
+                scalar_misaligned |= (group.scalar_store.address & (bytes - 1)) != 0;
+            }
+            scalar_forwarding |= group.has_extra_load;
+        }
+        // These counters represent actual generated crosses, rather than
+        // phase indices, so a passing gate proves feature overlap occurred.
+        if (group_count == 2 && masked_vector) {
+            ++coverage.combinations[0];
+        }
+        if (group_count == 2 && unmasked_vector) {
+            ++coverage.combinations[1];
+        }
+        if (scalar_misaligned && strided_vector) {
+            ++coverage.combinations[2];
+        }
+        if (indexed_vector && scalar_forwarding) {
+            ++coverage.combinations[3];
+        }
+        ++coverage.waves;
+        coverage.actions += burst_actions;
+        completed_actions += burst_actions;
+        ++burst_index;
+    }
+
+    coverage.dcache_request_stalls = environment.dcache_request_stalls();
+    coverage.dcache_response_delays = environment.dcache_response_delays();
+    coverage.ptw_request_stalls = environment.ptw_request_stalls();
+    coverage.ptw_response_delays = environment.ptw_response_delays();
+    coverage.uncache_request_stalls = environment.uncache_request_stalls();
+    coverage.uncache_response_delays = environment.uncache_response_delays();
+    const bool passed = completed_actions == options.transactions &&
+        environment.ok() && coverage.complete() &&
+        coverage.backpressure_complete(options.backpressure) &&
+        environment.lq_dequeued() + environment.lq_canceled() == environment.lq_allocated() &&
+        environment.sq_dequeued() + environment.sq_canceled() == environment.sq_allocated();
+    if (!passed) {
+        std::cerr << "MEMBLOCK_RANDOM_STRESS_FAIL seed=" << options.seed
+                  << " transactions=" << completed_actions
+                  << " requested=" << options.transactions
+                  << " cycle=" << environment.cycle()
+                  << " phase=" << phase
+                  << " lq=" << environment.lq_dequeued() << '+'
+                  << environment.lq_canceled() << '/' << environment.lq_allocated()
+                  << " sq=" << environment.sq_dequeued() << '+'
+                  << environment.sq_canceled() << '/' << environment.sq_allocated()
+                  << " reason=" << (environment.error().empty()
+                                         ? "stress_coverage_or_accounting_gate_failed"
+                                         : environment.error())
+                  << ' ' << coverage.summary() << '\n';
+        return 1;
+    }
+    std::cout << "MEMBLOCK_RANDOM_STRESS_PASS"
+              << " seed=" << options.seed
+              << " transactions=" << completed_actions
+              << " cycle=" << environment.cycle()
+              << " tilelink_requests=" << environment.tilelink_requests()
+              << " ptw_requests=" << environment.ptw_requests()
+              << " uncache_requests=" << environment.uncache_requests()
+              << " lq=" << environment.lq_dequeued() << '+'
+              << environment.lq_canceled() << '/' << environment.lq_allocated()
+              << " sq=" << environment.sq_dequeued() << '+'
+              << environment.sq_canceled() << '/' << environment.sq_allocated()
               << ' ' << coverage.summary()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
@@ -3937,6 +8195,39 @@ int main(int argc, char **argv)
         if (options.test == "single-load") {
             return run_single_load(argc, argv);
         }
+        if (options.test == "fp-loads") {
+            return run_fp_loads(argc, argv);
+        }
+        if (options.test == "trigger-contracts") {
+            return run_trigger_contracts(argc, argv);
+        }
+        if (options.test == "metadata-contracts") {
+            return run_metadata_contracts(argc, argv);
+        }
+        if (options.test == "dcache-errors") {
+            return run_dcache_errors(argc, argv);
+        }
+        if (options.test == "atomic-contracts") {
+            return run_atomic_contracts(argc, argv);
+        }
+        if (options.test == "uncache-errors") {
+            return run_uncache_errors(argc, argv);
+        }
+        if (options.test == "atomic-dchannel-errors") {
+            return run_atomic_dchannel_errors(argc, argv);
+        }
+        if (options.test == "uncache-widths") {
+            return run_uncache_widths(argc, argv);
+        }
+        if (options.test == "mmio-contracts") {
+            return run_mmio_contracts(argc, argv);
+        }
+        if (options.test == "cbo-zero-contracts") {
+            return run_cbo_zero_contracts(argc, argv);
+        }
+        if (options.test == "reset-recovery") {
+            return run_reset_recovery(argc, argv);
+        }
         if (options.test == "vector-load") {
             return run_vector_load(argc, argv);
         }
@@ -3985,8 +8276,32 @@ int main(int argc, char **argv)
         if (options.test == "exception-contracts") {
             return run_exception_contracts(argc, argv);
         }
+        if (options.test == "l2-tlb-contracts") {
+            return run_l2_tlb_contracts(argc, argv);
+        }
         if (options.test == "two-stage-translation") {
             return run_two_stage_translation(argc, argv);
+        }
+        if (options.test == "translation-matrix") {
+            return run_translation_matrix(argc, argv);
+        }
+        if (options.test == "translation-fence") {
+            return run_translation_fence(argc, argv);
+        }
+        if (options.test == "translation-context") {
+            return run_translation_context(argc, argv);
+        }
+        if (options.test == "translation-bare") {
+            return run_translation_bare(argc, argv);
+        }
+        if (options.test == "translation-faults") {
+            return run_translation_faults(argc, argv);
+        }
+        if (options.test == "translation-permissions") {
+            return run_translation_permissions(argc, argv);
+        }
+        if (options.test == "translation-superpages") {
+            return run_translation_superpages(argc, argv);
         }
         if (options.test == "vector-guest-fault") {
             return run_vector_guest_fault(argc, argv);
@@ -4002,6 +8317,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "random-mixed") {
             return run_random_mixed(argc, argv, options);
+        }
+        if (options.test == "random-stress") {
+            return run_random_stress(argc, argv, options);
         }
         if (options.test == "random-boundary-hunt") {
             return run_random_boundary_hunt(argc, argv, options);

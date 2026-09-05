@@ -19,10 +19,11 @@ import run_regression  # noqa: E402
 
 class RunRegressionTest(unittest.TestCase):
     def test_timeout_bytes_are_recorded_without_type_error(self) -> None:
-        timeout = run_regression.subprocess.TimeoutExpired(
-            ["memblock_sim"], 1.0, output=b"partial", stderr=b"diagnostic"
-        )
-        with mock.patch.object(run_regression.subprocess, "run", side_effect=timeout):
+        with mock.patch.object(
+            run_regression,
+            "_run_process",
+            return_value=(None, "partialdiagnostic", True),
+        ):
             result = run_regression.run_seed(
                 Path("/bin/true"), 7, "random-loads", 1, 1, 128, 1.0, True
             )
@@ -34,7 +35,9 @@ class RunRegressionTest(unittest.TestCase):
 
     def test_mixed_minimum_leaves_random_tail_after_mandatory_phases(self) -> None:
         self.assertEqual(run_regression.MINIMUM_MIXED_TRANSACTIONS, 128)
-        self.assertEqual(run_regression.DEFAULT_MIXED_TRANSACTIONS, 512)
+        self.assertEqual(run_regression.DEFAULT_TRANSACTIONS, 16384)
+        self.assertEqual(run_regression.DEFAULT_MIXED_TRANSACTIONS, 16384)
+        self.assertEqual(run_regression.DEFAULT_TIMEOUT_SECONDS, 1800)
 
     def test_reads_complete_rtl_hash_from_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -109,6 +112,12 @@ class RunRegressionTest(unittest.TestCase):
             ),
             37,
         )
+        self.assertEqual(
+            run_regression.transaction_count_for_scenario(
+                run_regression.STRESS_SCENARIO, 1000, 48, 16384
+            ),
+            16384,
+        )
 
     def test_parses_mixed_summary(self) -> None:
         parsed = run_regression.parse_summary(
@@ -129,9 +138,48 @@ class RunRegressionTest(unittest.TestCase):
         self.assertEqual(parsed["failures"], 4)
         self.assertEqual(parsed["rtl_sha256"], "abc")
 
+    def test_parses_stress_summary(self) -> None:
+        parsed = run_regression.parse_summary(
+            "MEMBLOCK_RANDOM_STRESS_PASS seed=9 transactions=16384 "
+            "stress_max_outstanding=12 stress_combinations=1,2,3,4\n",
+            expected_scenario=run_regression.STRESS_SCENARIO,
+            expected_seed=9,
+            expected_transactions=16384,
+        )
+        self.assertEqual(parsed["status"], "pass")
+        self.assertEqual(parsed["stress_max_outstanding"], 12)
+
     def test_rejects_missing_summary(self) -> None:
         with self.assertRaises(run_regression.RegressionError):
             run_regression.parse_summary("ordinary simulator output")
+
+    def test_rejects_conflicting_terminal_summaries(self) -> None:
+        output = (
+            "MEMBLOCK_RANDOM_FAIL seed=7 transactions=20\n"
+            "MEMBLOCK_RANDOM_PASS seed=7 transactions=20\n"
+        )
+        with self.assertRaisesRegex(run_regression.RegressionError, "expected one"):
+            run_regression.parse_summary(output, expected_scenario="random-loads")
+
+    def test_rejects_summary_for_wrong_scenario(self) -> None:
+        output = "MEMBLOCK_RANDOM_VECTOR_PASS seed=7 transactions=20\n"
+        with self.assertRaisesRegex(run_regression.RegressionError, "does not match"):
+            run_regression.parse_summary(
+                output,
+                expected_scenario="random-loads",
+                expected_seed=7,
+                expected_transactions=20,
+            )
+
+    def test_rejects_summary_without_expected_seed(self) -> None:
+        output = "MEMBLOCK_RANDOM_PASS transactions=20\n"
+        with self.assertRaisesRegex(run_regression.RegressionError, "seed"):
+            run_regression.parse_summary(
+                output,
+                expected_scenario="random-loads",
+                expected_seed=7,
+                expected_transactions=20,
+            )
 
     def test_verifies_complete_frozen_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -77,9 +77,23 @@ class VerifyBoundaryHuntTest(unittest.TestCase):
             passing["output"] = ""
             path.write_text(json.dumps({"results": [passing]}))
             summary = verify_boundary_hunt.verify_boundary_hunt(
-                path, min_seeds=1, transactions=4, require_failure=False
+                path, min_seeds=1, transactions=4, expect="repaired-all-pass"
             )
             self.assertEqual(summary["failures"], 0)
+
+    def test_repaired_campaign_rejects_any_remaining_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hunt.json"
+            path.write_text(json.dumps({"results": [result(7)]}))
+            with self.assertRaisesRegex(
+                verify_boundary_hunt.BoundaryHuntError, "still found"
+            ):
+                verify_boundary_hunt.verify_boundary_hunt(
+                    path,
+                    min_seeds=1,
+                    transactions=4,
+                    expect="repaired-all-pass",
+                )
 
     def test_rejects_status_returncode_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

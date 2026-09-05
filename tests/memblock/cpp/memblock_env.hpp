@@ -2,6 +2,7 @@
 
 #include "generated_port_defaults.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <deque>
@@ -43,8 +44,19 @@ constexpr std::uint16_t kVectorStoreIndexedUnordered = 0x120;
 constexpr std::uint16_t kVectorStoreStrided = 0x140;
 constexpr std::uint16_t kVectorStoreIndexedOrdered = 0x160;
 constexpr std::uint64_t kDefaultMemoryBase = 0x80000000ULL;
+// TriggerAction.None is the architectural no-trigger encoding.  Zero is a
+// breakpoint action, so leaving this field at zero would inject a breakpoint
+// into every software-generated uop.
+constexpr std::uint8_t kTriggerNone = 15;
+// The standalone MemBlock issue adapters do not carry trigger in the vector
+// or scalar-store issue payload.  Their writeback paths therefore expose the
+// zero-initialized action for an untriggered operation; keep that boundary
+// distinct from scalar-load/prefetch, whose uop carries TriggerAction.None.
+constexpr std::uint8_t kStoreWritebackTriggerNone = 0;
+constexpr std::uint8_t kVectorWritebackTriggerNone = 0;
 
 constexpr std::uint32_t kExceptionLoadAddressMisaligned = 1U << 4;
+constexpr std::uint32_t kExceptionBreakpoint = 1U << 3;
 constexpr std::uint32_t kExceptionLoadAccessFault = 1U << 5;
 constexpr std::uint32_t kExceptionStoreAddressMisaligned = 1U << 6;
 constexpr std::uint32_t kExceptionStoreAccessFault = 1U << 7;
@@ -110,12 +122,40 @@ enum class StoreOp : std::uint16_t {
     sh = 1,
     sw = 2,
     sd = 3,
+    cbo_zero = 7,
 };
 
 enum class PrefetchOp : std::uint16_t {
     instruction = 0x8,
     read = 0x9,
     write = 0xa,
+};
+
+enum class AtomicOp : std::uint16_t {
+    lr_w = 0x02,
+    sc_w = 0x06,
+    amoswap_w = 0x0a,
+    amoadd_w = 0x0e,
+    amoxor_w = 0x12,
+    amoand_w = 0x16,
+    amoor_w = 0x1a,
+    amomin_w = 0x1e,
+    amomax_w = 0x22,
+    amominu_w = 0x26,
+    amomaxu_w = 0x2a,
+    amocas_w = 0x2e,
+    lr_d = 0x03,
+    sc_d = 0x07,
+    amoswap_d = 0x0b,
+    amoadd_d = 0x0f,
+    amoxor_d = 0x13,
+    amoand_d = 0x17,
+    amoor_d = 0x1b,
+    amomin_d = 0x1f,
+    amomax_d = 0x23,
+    amominu_d = 0x27,
+    amomaxu_d = 0x2b,
+    amocas_d = 0x2f,
 };
 
 struct LoadTransaction {
@@ -131,8 +171,25 @@ struct LoadTransaction {
     std::uint8_t pdest = 0;
     unsigned lane = 0;
     std::uint32_t expected_exception_mask = 0;
+    bool check_data_on_exception = false;
     bool rf_wen = true;
     bool fp_wen = false;
+    std::uint32_t input_exception_mask = 0;
+    std::uint8_t input_trigger = kTriggerNone;
+    bool input_flush_pipe = false;
+    std::uint8_t expected_trigger = kTriggerNone;
+    bool predecode_rvc = false;
+    std::uint64_t ftq_ptr = 0;
+    std::uint8_t ftq_offset = 0;
+    bool store_set_hit = false;
+    bool wait_for_rob_flag = false;
+    std::uint8_t wait_for_rob_value = 0;
+    bool load_wait_bit = false;
+    bool load_wait_strict = false;
+    // Optional debug-class expectations for writeback sidebands.
+    std::optional<bool> expected_debug_is_mmio;
+    std::optional<bool> expected_debug_is_ncio;
+    std::optional<bool> expected_debug_is_perf_cnt;
 };
 
 struct StoreTransaction {
@@ -147,6 +204,29 @@ struct StoreTransaction {
     unsigned address_lane = 0;
     unsigned data_lane = 0;
     std::uint32_t expected_exception_mask = 0;
+    std::uint32_t input_exception_mask = 0;
+    std::uint8_t input_trigger = kTriggerNone;
+    bool input_flush_pipe = false;
+    std::optional<std::uint8_t> expected_trigger;
+    // Store-address writeback exposes the memory-class debug bits.  Keep
+    // these optional because existing callers may not model the translation
+    // class of an address yet.
+    std::optional<bool> expected_debug_is_mmio;
+    std::optional<bool> expected_debug_is_ncio;
+};
+
+struct AtomicTransaction {
+    std::uint64_t address = kDefaultMemoryBase;
+    AtomicOp op = AtomicOp::amoadd_d;
+    std::uint64_t data = 0;
+    std::uint64_t compare = 0;
+    std::uint8_t rob = 0;
+    bool rob_flag = false;
+    std::uint8_t sq = 0;
+    bool sq_flag = false;
+    std::uint8_t pdest = 0;
+    unsigned address_lane = 0;
+    unsigned data_lane = 0;
 };
 
 struct PrefetchTransaction {
@@ -160,6 +240,13 @@ struct PrefetchTransaction {
     std::uint8_t sq = 0;
     bool sq_flag = false;
     unsigned lane = 0;
+    std::uint32_t input_exception_mask = 0;
+    std::uint8_t input_trigger = kTriggerNone;
+    bool input_flush_pipe = false;
+    std::uint8_t expected_trigger = kTriggerNone;
+    std::optional<bool> expected_debug_is_mmio;
+    std::optional<bool> expected_debug_is_ncio;
+    std::optional<bool> expected_debug_is_perf_cnt;
 };
 
 enum class VectorAddressingMode : std::uint8_t {
@@ -197,6 +284,19 @@ struct VectorMemoryTransaction {
     std::uint16_t replay_mask = 0;
     std::uint8_t replay_mb_index = 0;
     std::uint32_t expected_exception_mask = 0;
+    std::uint32_t input_exception_mask = 0;
+    std::uint8_t input_trigger = kTriggerNone;
+    bool input_flush_pipe = false;
+    std::optional<std::uint8_t> expected_trigger;
+    std::uint64_t ftq_ptr = 0;
+    std::uint8_t ftq_offset = 0;
+    std::uint8_t vlmul = 0;
+    // Lane 0 exposes all three debug classes.  Lane 1 is intentionally
+    // checked only when a caller has an explicit expectation because those
+    // generated sideband ports are pruned in this top-level build.
+    std::optional<bool> expected_debug_is_mmio;
+    std::optional<bool> expected_debug_is_ncio;
+    std::optional<bool> expected_debug_is_perf_cnt;
 };
 
 inline std::uint16_t vector_fu_op_type(const VectorMemoryTransaction &transaction)
@@ -300,7 +400,19 @@ inline RobIdentity rob_identity(std::uint8_t value, bool flag)
 
 class SparseMemory {
 public:
+    explicit SparseMemory(SparseMemory *write_mirror = nullptr)
+        : write_mirror_(write_mirror)
+    {}
+
     void write_byte(std::uint64_t address, std::uint8_t value)
+    {
+        bytes_[address] = value;
+        if (write_mirror_ != nullptr) {
+            write_mirror_->write_reference_byte(address, value);
+        }
+    }
+
+    void write_reference_byte(std::uint64_t address, std::uint8_t value)
     {
         bytes_[address] = value;
     }
@@ -377,6 +489,7 @@ public:
     }
 
 private:
+    SparseMemory *write_mirror_;
     std::unordered_map<std::uint64_t, std::uint8_t> bytes_;
 };
 
@@ -386,6 +499,50 @@ struct ReferenceStageWalkResult {
     std::uint64_t faulting_pte_address = 0;
     unsigned fault_level = 0;
 };
+
+// RISC-V satp/hgatp mode encodings used by the MemBlock CSR interface.
+// Keeping the encoding here avoids accidentally testing a mode with a
+// different number of page-table levels than the DUT.
+enum class ReferencePageMode : std::uint8_t {
+    bare = 0,
+    sv39 = 8,
+    sv48 = 9,
+};
+
+inline unsigned reference_page_levels(ReferencePageMode mode)
+{
+    if (mode == ReferencePageMode::bare) {
+        return 0;
+    }
+    return mode == ReferencePageMode::sv48 ? 4U : 3U;
+}
+
+inline bool reference_canonical_virtual_address(
+    std::uint64_t address, ReferencePageMode mode)
+{
+    if (mode == ReferencePageMode::bare) {
+        return true;
+    }
+    if (mode == ReferencePageMode::sv48) {
+        const bool sign = ((address >> 47) & 1U) != 0;
+        const std::uint64_t upper = address >> 48;
+        return upper == (sign ? 0xffffU : 0U);
+    }
+    const bool sign = ((address >> 38) & 1U) != 0;
+    const std::uint64_t upper = address >> 39;
+    return upper == (sign ? 0x1ffffffU : 0U);
+}
+
+inline bool reference_gpa_in_range(
+    std::uint64_t address, ReferencePageMode mode)
+{
+    if (mode == ReferencePageMode::bare) {
+        return true;
+    }
+    // Sv39x4 exposes a 41-bit GPA and Sv48x4 exposes a 50-bit GPA.
+    const unsigned bits = mode == ReferencePageMode::sv48 ? 50U : 41U;
+    return (address >> bits) == 0;
+}
 
 inline std::uint64_t reference_pte_ppn(std::uint64_t pte)
 {
@@ -414,16 +571,29 @@ inline std::uint64_t reference_leaf_address(
            (input_address & low_mask);
 }
 
-inline ReferenceStageWalkResult reference_sv39_walk(
+inline ReferenceStageWalkResult reference_page_walk(
     const SparseMemory &memory,
     std::uint64_t root_page_table,
     std::uint64_t input_address,
-    bool sv39x4 = false)
+    ReferencePageMode mode,
+    bool x4 = false)
 {
+    if (mode == ReferencePageMode::bare) {
+        return {true, input_address, 0, 0};
+    }
+    if ((root_page_table & (x4 ? 0x3fffULL : 0xfffULL)) != 0) {
+        return {false, 0, root_page_table, 0};
+    }
+    if (x4 ? !reference_gpa_in_range(input_address, mode)
+           : !reference_canonical_virtual_address(input_address, mode)) {
+        return {false, 0, 0, 0};
+    }
+    const unsigned top_level = reference_page_levels(mode) - 1U;
     std::uint64_t table = root_page_table;
-    for (int level = 2; level >= 0; --level) {
+    for (int level = static_cast<int>(top_level); level >= 0; --level) {
         const unsigned shift = 12 + 9 * static_cast<unsigned>(level);
-        const std::uint64_t index_mask = sv39x4 && level == 2 ? 0x7ff : 0x1ff;
+        const std::uint64_t index_mask =
+            x4 && static_cast<unsigned>(level) == top_level ? 0x7ff : 0x1ff;
         const std::uint64_t index = (input_address >> shift) & index_mask;
         const std::uint64_t pte_address = table + index * 8;
         const std::uint64_t pte = memory.read_u64(pte_address);
@@ -452,6 +622,28 @@ inline ReferenceStageWalkResult reference_sv39_walk(
     return {};
 }
 
+inline ReferenceStageWalkResult reference_sv39_walk(
+    const SparseMemory &memory,
+    std::uint64_t root_page_table,
+    std::uint64_t input_address,
+    bool sv39x4 = false)
+{
+    return reference_page_walk(
+        memory, root_page_table, input_address,
+        ReferencePageMode::sv39, sv39x4);
+}
+
+inline ReferenceStageWalkResult reference_sv48_walk(
+    const SparseMemory &memory,
+    std::uint64_t root_page_table,
+    std::uint64_t input_address,
+    bool sv48x4 = false)
+{
+    return reference_page_walk(
+        memory, root_page_table, input_address,
+        ReferencePageMode::sv48, sv48x4);
+}
+
 struct ReferenceTwoStageWalkResult {
     bool translated = false;
     std::uint64_t physical_address = 0;
@@ -465,59 +657,78 @@ inline ReferenceTwoStageWalkResult reference_two_stage_walk(
     const SparseMemory &memory,
     std::uint64_t vs_root_page_table,
     std::uint64_t g_root_page_table,
-    std::uint64_t guest_virtual_address)
+    std::uint64_t guest_virtual_address,
+    ReferencePageMode vs_mode = ReferencePageMode::sv39,
+    ReferencePageMode g_mode = ReferencePageMode::sv39)
 {
-    std::uint64_t vs_table_gpa = vs_root_page_table;
-    for (int level = 2; level >= 0; --level) {
-        const unsigned shift = 12 + 9 * static_cast<unsigned>(level);
-        const std::uint64_t index = (guest_virtual_address >> shift) & 0x1ff;
-        const std::uint64_t pte_gpa = vs_table_gpa + index * 8;
-        const auto pte_translation = reference_sv39_walk(
-            memory, g_root_page_table, pte_gpa, true);
-        if (!pte_translation.translated) {
-            return {false, 0, true, false, pte_gpa, true};
-        }
+    if (vs_mode != ReferencePageMode::bare &&
+        !reference_canonical_virtual_address(guest_virtual_address, vs_mode)) {
+        return {};
+    }
+    std::uint64_t guest_physical_address = guest_virtual_address;
+    if (vs_mode != ReferencePageMode::bare) {
+        const unsigned top_level = reference_page_levels(vs_mode) - 1U;
+        std::uint64_t vs_table_gpa = vs_root_page_table;
+        for (int level = static_cast<int>(top_level); level >= 0; --level) {
+            const unsigned shift = 12 + 9 * static_cast<unsigned>(level);
+            const std::uint64_t index = (guest_virtual_address >> shift) & 0x1ff;
+            const std::uint64_t pte_gpa = vs_table_gpa + index * 8;
+            const auto pte_translation = reference_page_walk(
+                memory, g_root_page_table, pte_gpa, g_mode, true);
+            if (!pte_translation.translated) {
+                return {false, 0, true, false, pte_gpa, true};
+            }
 
-        const std::uint64_t pte = memory.read_u64(
-            pte_translation.physical_address);
-        if (reference_pte_is_invalid(pte)) {
-            return {false, 0, false, true, pte_gpa, false};
-        }
-        if (reference_pte_is_leaf(pte)) {
-            const unsigned lower_ppn_bits = 9 * static_cast<unsigned>(level);
-            if (lower_ppn_bits != 0 &&
-                (reference_pte_ppn(pte) &
-                 ((std::uint64_t{1} << lower_ppn_bits) - 1)) != 0) {
+            const std::uint64_t pte = memory.read_u64(
+                pte_translation.physical_address);
+            if (reference_pte_is_invalid(pte)) {
                 return {false, 0, false, true, pte_gpa, false};
             }
-            const std::uint64_t guest_physical_address =
-                reference_leaf_address(pte, guest_virtual_address, level);
-            const auto final_translation = reference_sv39_walk(
-                memory, g_root_page_table, guest_physical_address, true);
-            if (!final_translation.translated) {
-                return {
-                    false, 0, true, false, guest_physical_address, false,
-                };
+            if (reference_pte_is_leaf(pte)) {
+                const unsigned lower_ppn_bits = 9 * static_cast<unsigned>(level);
+                if (lower_ppn_bits != 0 &&
+                    (reference_pte_ppn(pte) &
+                     ((std::uint64_t{1} << lower_ppn_bits) - 1)) != 0) {
+                    return {false, 0, false, true, pte_gpa, false};
+                }
+                guest_physical_address = reference_leaf_address(
+                    pte, guest_virtual_address, static_cast<unsigned>(level));
+                break;
             }
-            return {true, final_translation.physical_address, false, false, 0, false};
+            if (level == 0) {
+                return {false, 0, false, true, pte_gpa, false};
+            }
+            vs_table_gpa = reference_pte_ppn(pte) << 12;
         }
-        if (level == 0) {
-            return {false, 0, false, true, pte_gpa, false};
-        }
-        vs_table_gpa = reference_pte_ppn(pte) << 12;
     }
-    return {};
+    if (g_mode == ReferencePageMode::bare) {
+        return {true, guest_physical_address, false, false, 0, false};
+    }
+    const auto final_translation = reference_page_walk(
+        memory, g_root_page_table, guest_physical_address, g_mode, true);
+    if (!final_translation.translated) {
+        return {false, 0, true, false, guest_physical_address, false};
+    }
+    return {true, final_translation.physical_address, false, false, 0, false};
 }
 
 class TileLinkMemoryAgent {
 public:
-    explicit TileLinkMemoryAgent(SparseMemory &memory) : memory_(memory) {}
+    TileLinkMemoryAgent(SparseMemory &memory, const SparseMemory &reference_memory)
+        : memory_(memory), reference_memory_(reference_memory)
+    {}
 
     void configure_backpressure(std::uint64_t seed, bool enabled)
     {
         random_state_ = seed == 0 ? 1 : seed;
         random_backpressure_ = enabled;
         force_a_stall_ = enabled;
+    }
+
+    void inject_next_response_error(bool denied, bool corrupt)
+    {
+        inject_denied_ = denied;
+        inject_corrupt_ = corrupt;
     }
 
     void drive(UTMemBlock &dut)
@@ -549,11 +760,11 @@ public:
         dut.auto_inner_dcache_client_out_d_bits_size.ImmSet(beat.size);
         dut.auto_inner_dcache_client_out_d_bits_source.ImmSet(beat.source);
         dut.auto_inner_dcache_client_out_d_bits_sink.ImmSet(beat.sink);
-        dut.auto_inner_dcache_client_out_d_bits_denied.ImmSet(std::uint64_t{0});
+        dut.auto_inner_dcache_client_out_d_bits_denied.ImmSet(beat.denied);
         dut.auto_inner_dcache_client_out_d_bits_echo_isKeyword.ImmSet(beat.keyword);
         auto bytes = beat.data;
         dut.auto_inner_dcache_client_out_d_bits_data.ImmSetBytes(bytes);
-        dut.auto_inner_dcache_client_out_d_bits_corrupt.ImmSet(std::uint64_t{0});
+        dut.auto_inner_dcache_client_out_d_bits_corrupt.ImmSet(beat.corrupt);
         dut.auto_inner_dcache_client_out_d_valid.ImmSet(std::uint64_t{1});
     }
 
@@ -575,6 +786,13 @@ public:
                 dut.auto_inner_dcache_client_out_a_bits_address.U(),
                 dut.auto_inner_dcache_client_out_a_bits_echo_isKeyword.B(),
             };
+            if (captured_a_->opcode != 4 && captured_a_->opcode != 6 &&
+                captured_a_->opcode != 7) {
+                error_ = "unsupported DCache TileLink A opcode";
+            }
+            if (captured_a_->size > 6) {
+                error_ = "oversized DCache TileLink A request";
+            }
         }
         c_fire_ = dut.auto_inner_dcache_client_out_c_valid.B() &&
                   dut.auto_inner_dcache_client_out_c_ready.B();
@@ -588,10 +806,32 @@ public:
                 dut.auto_inner_dcache_client_out_c_bits_echo_isKeyword.B(),
                 dut.auto_inner_dcache_client_out_c_bits_data.GetBytes(),
             };
+            if (captured_c_->opcode != 6 && captured_c_->opcode != 7) {
+                error_ = "unsupported DCache TileLink C opcode";
+            }
+            if (captured_c_->size > 6) {
+                error_ = "oversized DCache TileLink C request";
+            }
         }
         d_fire_ = !d_beats_.empty() &&
                   dut.auto_inner_dcache_client_out_d_valid.B() &&
                   dut.auto_inner_dcache_client_out_d_ready.B();
+        if (d_fire_) {
+            const DBeat &expected = d_beats_.front();
+            const auto actual_data =
+                dut.auto_inner_dcache_client_out_d_bits_data.GetBytes();
+            if (dut.auto_inner_dcache_client_out_d_bits_opcode.U() != expected.opcode ||
+                dut.auto_inner_dcache_client_out_d_bits_param.U() != expected.param ||
+                dut.auto_inner_dcache_client_out_d_bits_size.U() != expected.size ||
+                dut.auto_inner_dcache_client_out_d_bits_source.U() != expected.source ||
+                dut.auto_inner_dcache_client_out_d_bits_sink.U() != expected.sink ||
+                dut.auto_inner_dcache_client_out_d_bits_echo_isKeyword.B() != expected.keyword ||
+                dut.auto_inner_dcache_client_out_d_bits_denied.B() != expected.denied ||
+                dut.auto_inner_dcache_client_out_d_bits_corrupt.B() != expected.corrupt ||
+                actual_data != expected.data) {
+                error_ = "DCache TileLink D response identity or payload mismatch";
+            }
+        }
     }
 
     void update_after_tick()
@@ -684,6 +924,8 @@ private:
         std::uint16_t sink;
         bool keyword;
         std::vector<unsigned char> data;
+        bool denied = false;
+        bool corrupt = false;
     };
 
     struct CRequest {
@@ -707,6 +949,10 @@ private:
 
     void respond(const ARequest &request)
     {
+        const bool denied = inject_denied_;
+        const bool corrupt = inject_corrupt_;
+        inject_denied_ = false;
+        inject_corrupt_ = false;
         const std::uint64_t transfer_bytes = std::uint64_t{1} << request.size;
         const std::uint64_t base = request.address & ~(transfer_bytes - 1);
         switch (request.opcode) {
@@ -714,7 +960,7 @@ private:
             const std::uint64_t beat_base = request.address & ~(kBeatBytes - 1);
             d_beats_.push_back(DBeat{
                 1, 0, request.size, request.source, 0, request.keyword,
-                memory_.read_beat(beat_base, kBeatBytes),
+                memory_.read_beat(beat_base, kBeatBytes), denied, corrupt,
             });
             break;
         }
@@ -727,6 +973,7 @@ private:
                 d_beats_.push_back(DBeat{
                     5, cap, request.size, request.source, 1, request.keyword,
                     memory_.read_beat(base + memory_beat * kBeatBytes, kBeatBytes),
+                    denied, corrupt,
                 });
             }
             break;
@@ -781,25 +1028,26 @@ private:
         }
         const auto expected = expected_release_lines_.find(base);
         const bool has_expected_line = expected != expected_release_lines_.end();
-        if (expected != expected_release_lines_.end()) {
-            const std::size_t offset = release_data_->received * kBeatBytes;
-            if (offset + kBeatBytes > expected->second.size()) {
-                error_ = "ReleaseData exceeded expected immutable line image";
+        const std::size_t offset = release_data_->received * kBeatBytes;
+        if (has_expected_line && offset + kBeatBytes > expected->second.size()) {
+            error_ = "ReleaseData exceeded expected immutable line image";
+            return;
+        }
+        for (std::size_t byte = 0; byte < kBeatBytes; ++byte) {
+            const unsigned char expected_byte = has_expected_line
+                ? expected->second[offset + byte]
+                : reference_memory_.read_byte(base + offset + byte);
+            if (request.data.at(byte) != expected_byte) {
+                std::ostringstream message;
+                message << "ReleaseData byte mismatch base=0x" << std::hex
+                        << base << " beat=" << std::dec
+                        << release_data_->received << " byte=" << byte
+                        << " expected=0x" << std::hex
+                        << static_cast<unsigned>(expected_byte)
+                        << " actual=0x"
+                        << static_cast<unsigned>(request.data.at(byte));
+                error_ = message.str();
                 return;
-            }
-            for (std::size_t byte = 0; byte < kBeatBytes; ++byte) {
-                if (request.data.at(byte) != expected->second[offset + byte]) {
-                    std::ostringstream message;
-                    message << "ReleaseData byte mismatch base=0x" << std::hex
-                            << base << " beat=" << std::dec
-                            << release_data_->received << " byte=" << byte
-                            << " expected=0x" << std::hex
-                            << static_cast<unsigned>(expected->second[offset + byte])
-                            << " actual=0x"
-                            << static_cast<unsigned>(request.data.at(byte));
-                    error_ = message.str();
-                    return;
-                }
             }
         }
         for (std::size_t byte = 0; byte < kBeatBytes; ++byte) {
@@ -814,8 +1062,8 @@ private:
                 std::vector<unsigned char>(kBeatBytes, 0),
             });
             release_data_.reset();
+            ++release_data_verified_count_;
             if (has_expected_line) {
-                ++release_data_verified_count_;
                 expected_release_lines_.erase(base);
             }
             ++release_count_;
@@ -832,6 +1080,7 @@ private:
     }
 
     SparseMemory &memory_;
+    const SparseMemory &reference_memory_;
     std::deque<DBeat> d_beats_;
     std::optional<ARequest> captured_a_;
     std::optional<CRequest> captured_c_;
@@ -850,6 +1099,8 @@ private:
     bool random_backpressure_ = false;
     bool force_a_stall_ = false;
     bool d_presenting_ = false;
+    bool inject_denied_ = false;
+    bool inject_corrupt_ = false;
     std::uint64_t request_stall_cycles_ = 0;
     std::uint64_t response_delay_cycles_ = 0;
     std::string error_;
@@ -920,10 +1171,31 @@ public:
                     dut.auto_inner_ptw_to_l2_buffer_out_a_bits_source.U()),
                 dut.auto_inner_ptw_to_l2_buffer_out_a_bits_address.U(),
             };
+            if (request_->opcode != 4 && request_->opcode != 6) {
+                error_ = "unsupported PTW TileLink A opcode";
+            }
+            if (request_->size > 6) {
+                error_ = "oversized PTW TileLink A request";
+            }
         }
         d_fire_ = !responses_.empty() &&
                   dut.auto_inner_ptw_to_l2_buffer_out_d_valid.B() &&
                   dut.auto_inner_ptw_to_l2_buffer_out_d_ready.B();
+        if (d_fire_) {
+            const Response &expected = responses_.front();
+            const auto actual_data =
+                dut.auto_inner_ptw_to_l2_buffer_out_d_bits_data.GetBytes();
+            if (dut.auto_inner_ptw_to_l2_buffer_out_d_bits_opcode.U() != expected.opcode ||
+                dut.auto_inner_ptw_to_l2_buffer_out_d_bits_param.U() != expected.param ||
+                dut.auto_inner_ptw_to_l2_buffer_out_d_bits_size.U() != expected.size ||
+                dut.auto_inner_ptw_to_l2_buffer_out_d_bits_source.U() != expected.source ||
+                dut.auto_inner_ptw_to_l2_buffer_out_d_bits_sink.U() != 0 ||
+                dut.auto_inner_ptw_to_l2_buffer_out_d_bits_denied.B() ||
+                dut.auto_inner_ptw_to_l2_buffer_out_d_bits_corrupt.B() ||
+                actual_data != expected.data) {
+                error_ = "PTW TileLink D response identity or payload mismatch";
+            }
+        }
     }
 
     void update_after_tick()
@@ -1025,6 +1297,12 @@ class UncacheMemoryAgent {
 public:
     explicit UncacheMemoryAgent(SparseMemory &memory) : memory_(memory) {}
 
+    void inject_next_response_error(bool denied, bool corrupt)
+    {
+        inject_denied_ = denied;
+        inject_corrupt_ = corrupt;
+    }
+
     void configure_backpressure(std::uint64_t seed, bool enabled)
     {
         random_state_ = seed == 0 ? 1 : seed;
@@ -1057,9 +1335,9 @@ public:
         dut.auto_inner_buffers_out_d_bits_size.ImmSet(response.size);
         dut.auto_inner_buffers_out_d_bits_source.ImmSet(response.source);
         dut.auto_inner_buffers_out_d_bits_sink.ImmSet(std::uint64_t{0});
-        dut.auto_inner_buffers_out_d_bits_denied.ImmSet(std::uint64_t{0});
+        dut.auto_inner_buffers_out_d_bits_denied.ImmSet(response.denied);
         dut.auto_inner_buffers_out_d_bits_data.ImmSet(response.data);
-        dut.auto_inner_buffers_out_d_bits_corrupt.ImmSet(std::uint64_t{0});
+        dut.auto_inner_buffers_out_d_bits_corrupt.ImmSet(response.corrupt);
         dut.auto_inner_buffers_out_d_valid.ImmSet(std::uint64_t{1});
     }
 
@@ -1081,10 +1359,43 @@ public:
                 static_cast<std::uint8_t>(dut.auto_inner_buffers_out_a_bits_mask.U()),
                 dut.auto_inner_buffers_out_a_bits_data.U(),
             };
+            if (request_->opcode != 0 && request_->opcode != 1 &&
+                request_->opcode != 4) {
+                error_ = "unsupported uncache TileLink A opcode";
+            }
+            if (request_->size > 6) {
+                error_ = "oversized uncache TileLink A request";
+            }
+            if (request_->size > 3) {
+                error_ = "uncache TileLink A request exceeds the 8-byte beat";
+            } else {
+                const unsigned transfer_bytes = 1U << request_->size;
+                const unsigned beat_offset =
+                    static_cast<unsigned>(request_->address & 7U);
+                const std::uint8_t expected_mask = static_cast<std::uint8_t>(
+                    ((1U << transfer_bytes) - 1U) << beat_offset);
+                if ((request_->address & (transfer_bytes - 1U)) != 0 ||
+                    beat_offset + transfer_bytes > 8 ||
+                    request_->mask != expected_mask) {
+                    error_ = "uncache TileLink A size/address/mask mismatch";
+                }
+            }
         }
         d_fire_ = !responses_.empty() &&
                   dut.auto_inner_buffers_out_d_valid.B() &&
                   dut.auto_inner_buffers_out_d_ready.B();
+        if (d_fire_) {
+            const Response &expected = responses_.front();
+            if (dut.auto_inner_buffers_out_d_bits_opcode.U() != expected.opcode ||
+                dut.auto_inner_buffers_out_d_bits_size.U() != expected.size ||
+                dut.auto_inner_buffers_out_d_bits_source.U() != expected.source ||
+                dut.auto_inner_buffers_out_d_bits_sink.U() != 0 ||
+                dut.auto_inner_buffers_out_d_bits_denied.B() != expected.denied ||
+                dut.auto_inner_buffers_out_d_bits_corrupt.B() != expected.corrupt ||
+                dut.auto_inner_buffers_out_d_bits_data.U() != expected.data) {
+                error_ = "uncache TileLink D response identity or payload mismatch";
+            }
+        }
     }
 
     void update_after_tick()
@@ -1127,14 +1438,24 @@ private:
         std::uint8_t size;
         std::uint8_t source;
         std::uint64_t data;
+        bool denied = false;
+        bool corrupt = false;
     };
 
     void respond(const Request &request)
     {
+        const bool denied = inject_denied_;
+        const bool corrupt = inject_corrupt_;
+        inject_denied_ = false;
+        inject_corrupt_ = false;
         if (request.opcode == 4) {
+            const std::uint64_t beat_base = request.address & ~std::uint64_t{7};
             responses_.push_back(Response{
                 1, request.size, request.source,
-                memory_.expected_load(request.address, LoadOp::ld),
+                // TileLink returns the complete 8-byte beat. LoadUnit selects
+                // the requested byte lane later using the physical address.
+                memory_.read_u64(beat_base),
+                denied, corrupt,
             });
             return;
         }
@@ -1153,7 +1474,7 @@ private:
                     static_cast<std::uint8_t>(request.data >> (8 * byte)));
             }
         }
-        responses_.push_back(Response{0, request.size, request.source, 0});
+        responses_.push_back(Response{0, request.size, request.source, 0, denied, corrupt});
     }
 
     std::uint64_t next_random()
@@ -1177,6 +1498,8 @@ private:
     bool d_presenting_ = false;
     std::uint64_t request_stall_cycles_ = 0;
     std::uint64_t response_delay_cycles_ = 0;
+    bool inject_denied_ = false;
+    bool inject_corrupt_ = false;
     std::string error_;
 };
 
@@ -1188,8 +1511,16 @@ public:
         bool rob_flag;
         bool prefetch;
         std::uint32_t exception_mask;
+        bool check_data_on_exception;
         bool rf_wen;
         bool fp_wen;
+        std::uint8_t trigger;
+        bool flush_pipe;
+        bool debug_is_mmio;
+        bool debug_is_ncio;
+        bool debug_is_perf_cnt;
+        std::uint64_t address;
+        std::uint16_t op;
     };
 
     void expect(const LoadTransaction &transaction, std::uint64_t data)
@@ -1202,11 +1533,23 @@ public:
                 transaction.rob_flag,
                 false,
                 transaction.expected_exception_mask,
+                transaction.check_data_on_exception,
                 transaction.expected_exception_mask == 0 && transaction.rf_wen,
                 transaction.expected_exception_mask == 0 && transaction.fp_wen,
+                transaction.expected_trigger,
+                transaction.input_flush_pipe,
+                transaction.expected_debug_is_mmio.value_or(false),
+                transaction.expected_debug_is_ncio.value_or(false),
+                transaction.expected_debug_is_perf_cnt.value_or(false),
+                transaction.address,
+                static_cast<std::uint16_t>(transaction.op),
             });
         if (!inserted && error_.empty()) {
-            error_ = "duplicate outstanding scalar load ROB value";
+            std::ostringstream message;
+            message << "duplicate outstanding scalar load ROB value rob="
+                    << static_cast<unsigned>(transaction.rob)
+                    << " flag=" << transaction.rob_flag;
+            error_ = message.str();
         }
     }
 
@@ -1214,7 +1557,13 @@ public:
     {
         const auto [_, inserted] = expected_.emplace(
             rob_identity(transaction.rob, transaction.rob_flag),
-            Expected{0, 0, transaction.rob_flag, true, 0, false, false});
+            Expected{
+                0, 0, transaction.rob_flag, true, 0, false, false, false,
+                transaction.expected_trigger, transaction.input_flush_pipe,
+                transaction.expected_debug_is_mmio.value_or(false),
+                transaction.expected_debug_is_ncio.value_or(false),
+                transaction.expected_debug_is_perf_cnt.value_or(false),
+                transaction.address, static_cast<std::uint16_t>(transaction.op)});
         if (!inserted && error_.empty()) {
             error_ = "duplicate outstanding scalar load ROB value";
         } else if (inserted) {
@@ -1237,7 +1586,12 @@ public:
         if (it->second.prefetch) {
             if (writeback.exception_mask != 0 || writeback.replay ||
                 writeback.rf_wen || writeback.fp_wen ||
-                writeback.rob_flag != it->second.rob_flag) {
+                writeback.trigger != it->second.trigger ||
+                writeback.flush_pipe != it->second.flush_pipe ||
+                writeback.rob_flag != it->second.rob_flag ||
+                writeback.debug_is_mmio != it->second.debug_is_mmio ||
+                writeback.debug_is_ncio != it->second.debug_is_ncio ||
+                writeback.debug_is_perf_cnt != it->second.debug_is_perf_cnt) {
                 fail("mismatched software-prefetch completion", lane, writeback,
                      &it->second);
                 return;
@@ -1250,9 +1604,15 @@ public:
         if (writeback.exception_mask != it->second.exception_mask ||
             writeback.replay || writeback.rf_wen != it->second.rf_wen ||
             writeback.fp_wen != it->second.fp_wen ||
+            writeback.trigger != it->second.trigger ||
+            writeback.flush_pipe != it->second.flush_pipe ||
             writeback.pdest != it->second.pdest ||
             writeback.rob_flag != it->second.rob_flag ||
-            (it->second.exception_mask == 0 &&
+            writeback.debug_is_mmio != it->second.debug_is_mmio ||
+            writeback.debug_is_ncio != it->second.debug_is_ncio ||
+            writeback.debug_is_perf_cnt != it->second.debug_is_perf_cnt ||
+            ((it->second.exception_mask == 0 ||
+              it->second.check_data_on_exception) &&
              writeback.data != it->second.data)) {
             fail("mismatched load writeback", lane, writeback, &it->second);
             return;
@@ -1268,6 +1628,18 @@ public:
     std::uint64_t observed() const { return observed_; }
     std::uint64_t prefetch_observed() const { return prefetch_observed_; }
     const std::string &error() const { return error_; }
+    std::string pending_summary() const
+    {
+        std::ostringstream message;
+        for (const auto &[identity, expected] : expected_) {
+            message << " rob=" << static_cast<unsigned>(identity.value)
+                    << ':' << identity.flag
+                    << " address=0x" << std::hex << expected.address
+                    << " op=0x" << expected.op << std::dec
+                    << " prefetch=" << expected.prefetch;
+        }
+        return message.str();
+    }
 
 private:
     void fail(
@@ -1285,13 +1657,29 @@ private:
                 << " pdest=" << static_cast<unsigned>(actual.pdest)
                 << " data=0x" << std::hex << actual.data
                 << " exception=0x" << actual.exception_mask
-                << " replay=" << std::dec << actual.replay;
+                << " replay=" << std::dec << actual.replay
+                << " rf_wen=" << actual.rf_wen
+                << " fp_wen=" << actual.fp_wen
+                << " flush_pipe=" << actual.flush_pipe
+                << " trigger=" << static_cast<unsigned>(actual.trigger)
+                << " mmio=" << actual.debug_is_mmio
+                << " ncio=" << actual.debug_is_ncio
+                << " perf_cnt=" << actual.debug_is_perf_cnt;
         if (expected != nullptr) {
             message << " expected_pdest=" << static_cast<unsigned>(expected->pdest)
                     << " expected_rob_flag=" << expected->rob_flag
                     << " expected_exception=0x" << std::hex
                     << expected->exception_mask
-                    << " expected_data=0x" << std::hex << expected->data;
+                    << " expected_data=0x" << std::hex << expected->data
+                    << " check_data_on_exception=" << std::dec
+                    << expected->check_data_on_exception
+                    << " expected_rf_wen=" << std::dec << expected->rf_wen
+                    << " expected_fp_wen=" << expected->fp_wen
+                    << " expected_flush_pipe=" << expected->flush_pipe
+                    << " expected_trigger=" << static_cast<unsigned>(expected->trigger)
+                    << " expected_mmio=" << expected->debug_is_mmio
+                    << " expected_ncio=" << expected->debug_is_ncio
+                    << " expected_perf_cnt=" << expected->debug_is_perf_cnt;
         }
         error_ = message.str();
     }
@@ -1318,6 +1706,10 @@ public:
                 false,
                 0,
                 0,
+                transaction.expected_trigger,
+                transaction.input_flush_pipe,
+                transaction.expected_debug_is_mmio,
+                transaction.expected_debug_is_ncio,
             });
         if (!inserted && error_.empty()) {
             error_ = "duplicate outstanding scalar store ROB value";
@@ -1346,9 +1738,36 @@ public:
         if (sample_cycle < it->second.address_issue_cycle) {
             return;
         }
+        const bool trigger_mismatch =
+            (it->second.trigger.has_value() &&
+             writeback.trigger != *it->second.trigger);
+        const bool debug_mismatch =
+            (it->second.debug_is_mmio.has_value() &&
+             writeback.debug_is_mmio != *it->second.debug_is_mmio) ||
+            (it->second.debug_is_ncio.has_value() &&
+             writeback.debug_is_ncio != *it->second.debug_is_ncio);
         if (writeback.exception_mask != it->second.exception_mask ||
-            writeback.rob_flag != it->second.rob_flag) {
-            fail("mismatched store-address writeback", lane, writeback);
+            writeback.rob_flag != it->second.rob_flag ||
+            trigger_mismatch ||
+            writeback.flush_pipe != it->second.flush_pipe ||
+            debug_mismatch) {
+            if (error_.empty()) {
+                std::ostringstream message;
+                message << "mismatched store-address writeback lane=" << lane
+                        << " rob=" << static_cast<unsigned>(writeback.rob_value)
+                        << " rob_flag=" << writeback.rob_flag
+                        << " exception=0x" << std::hex << writeback.exception_mask
+                        << " trigger=" << std::dec
+                        << static_cast<unsigned>(writeback.trigger)
+                        << " flush_pipe=" << writeback.flush_pipe
+                        << " expected_rob_flag=" << it->second.rob_flag
+                        << " expected_exception=0x" << std::hex
+                        << it->second.exception_mask
+                        << " expected_trigger=" << std::dec
+                        << static_cast<unsigned>(it->second.trigger.value_or(kTriggerNone))
+                        << " expected_flush_pipe=" << it->second.flush_pipe;
+                error_ = message.str();
+            }
             return;
         }
         if (it->second.address_seen) {
@@ -1457,13 +1876,22 @@ private:
         bool data_issued;
         std::uint64_t address_issue_cycle;
         std::uint64_t data_issue_cycle;
+        std::optional<std::uint8_t> trigger;
+        bool flush_pipe;
+        std::optional<bool> debug_is_mmio;
+        std::optional<bool> debug_is_ncio;
     };
 
     using Iterator = std::unordered_map<RobIdentity, Expected, RobIdentityHash>::iterator;
 
     void retire_if_complete(Iterator it)
     {
-        if (it->second.address_seen && it->second.data_seen) {
+        // An exceptional scalar store reports its architectural disposition
+        // on the address writeback and intentionally has no data writeback.
+        // Normal stores still require both halves, so a missing data pulse
+        // cannot be hidden by this exception rule.
+        if (it->second.address_seen &&
+            (it->second.data_seen || it->second.exception_mask != 0)) {
             ++observed_;
             expected_.erase(it);
         }
@@ -1481,7 +1909,9 @@ private:
         message << reason << " lane=" << lane
                 << " rob=" << static_cast<unsigned>(writeback.rob_value)
                 << " rob_flag=" << writeback.rob_flag
-                << " exception=0x" << std::hex << writeback.exception_mask;
+                << " exception=0x" << std::hex << writeback.exception_mask
+                << " trigger=" << static_cast<unsigned>(writeback.trigger)
+                << " flush_pipe=" << std::dec << writeback.flush_pipe;
         if (reason == std::string("unexpected store-data writeback") ||
             reason == std::string("ambiguous store-data writeback")) {
             message << " pending_robs=";
@@ -1516,6 +1946,21 @@ public:
         std::uint8_t pdest;
         bool rob_flag;
         std::uint32_t exception_mask;
+        std::optional<std::uint8_t> trigger;
+        bool vec_wen;
+        bool v0_wen;
+        bool vl_wen;
+        bool flush_pipe;
+        std::optional<bool> debug_is_mmio;
+        std::optional<bool> debug_is_ncio;
+        std::optional<bool> debug_is_perf_cnt;
+        bool vma;
+        bool vta;
+        std::uint64_t address;
+        VectorAddressingMode addressing;
+        std::int64_t stride;
+        std::uint16_t mask_bits;
+        std::array<unsigned char, 16> index;
     };
 
     void expect(
@@ -1535,6 +1980,21 @@ public:
                 transaction.pdest,
                 transaction.rob_flag,
                 transaction.expected_exception_mask,
+                transaction.expected_trigger,
+                !transaction.store,
+                false,
+                false,
+                transaction.input_flush_pipe,
+                transaction.expected_debug_is_mmio,
+                transaction.expected_debug_is_ncio,
+                transaction.expected_debug_is_perf_cnt,
+                transaction.vma,
+                transaction.vta,
+                transaction.address,
+                transaction.addressing,
+                transaction.stride,
+                transaction.mask_bits,
+                transaction.index,
             });
         if (!inserted && error_.empty()) {
             error_ = "duplicate outstanding vector memory ROB value";
@@ -1555,8 +2015,24 @@ public:
         const Expected &expected = it->second;
         const bool normal_progress = expected.exception_mask == 0;
         const bool exception_progress = expected.exception_mask != 0;
+        const bool debug_mismatch =
+            (expected.debug_is_mmio.has_value() &&
+             writeback.debug_is_mmio != *expected.debug_is_mmio) ||
+            (expected.debug_is_ncio.has_value() &&
+             writeback.debug_is_ncio != *expected.debug_is_ncio) ||
+            (expected.debug_is_perf_cnt.has_value() &&
+             writeback.debug_is_perf_cnt != *expected.debug_is_perf_cnt);
+        const bool trigger_mismatch =
+            (expected.trigger.has_value() &&
+             writeback.trigger != *expected.trigger);
         if (writeback.exception_mask != expected.exception_mask || writeback.replay ||
-            writeback.flush_pipe || writeback.fu_op_type != expected.fu_op_type ||
+            writeback.flush_pipe != expected.flush_pipe ||
+            trigger_mismatch ||
+            writeback.vec_wen != expected.vec_wen ||
+            writeback.v0_wen != expected.v0_wen ||
+            writeback.vl_wen != expected.vl_wen ||
+            debug_mismatch ||
+            writeback.fu_op_type != expected.fu_op_type ||
             writeback.rob_flag != expected.rob_flag ||
             ((!exception_progress) &&
              (writeback.vsew != expected.eew || writeback.veew != expected.eew ||
@@ -1566,10 +2042,8 @@ public:
             return;
         }
         if (!expected.store && expected.exception_mask == 0) {
-            const std::vector<unsigned char> expected_data(
-                expected.data.begin(), expected.data.end());
             if (!writeback.vec_wen || writeback.pdest != expected.pdest ||
-                writeback.data != expected_data ||
+                !matches_load_data(writeback.data, expected) ||
                 !matches_active_mask(writeback.vmask, expected.active_elements)) {
                 fail("mismatched vector load data", lane, writeback, &expected);
                 return;
@@ -1603,6 +2077,39 @@ public:
     const std::string &error() const { return error_; }
 
 private:
+    static bool matches_load_data(
+        const std::vector<unsigned char> &actual, const Expected &expected)
+    {
+        if (actual.size() != expected.data.size()) {
+            return false;
+        }
+        const unsigned element_bytes = 1U << expected.eew;
+        const unsigned elements = expected.data.size() / element_bytes;
+        for (unsigned element = 0; element < elements; ++element) {
+            bool preserved = true;
+            bool all_ones = true;
+            for (unsigned byte = 0; byte < element_bytes; ++byte) {
+                const unsigned offset = element * element_bytes + byte;
+                preserved &= actual[offset] == expected.data[offset];
+                all_ones &= actual[offset] == 0xff;
+            }
+            const bool active =
+                ((expected.active_elements >> element) & 1U) != 0;
+            const bool tail_agnostic = element >= expected.vl && expected.vta;
+            const bool mask_agnostic =
+                element >= expected.vstart && element < expected.vl &&
+                !active && expected.vma;
+            if (active || (!tail_agnostic && !mask_agnostic)) {
+                if (!preserved) {
+                    return false;
+                }
+            } else if (!preserved && !all_ones) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     static bool matches_active_mask(
         const std::vector<unsigned char> &actual, std::uint16_t expected)
     {
@@ -1638,6 +2145,7 @@ private:
                 << " exception=0x" << actual.exception_mask
                 << " replay=" << std::dec << actual.replay
                 << " flush_pipe=" << actual.flush_pipe
+                << " trigger=" << static_cast<unsigned>(actual.trigger)
                 << " vec_wen=" << actual.vec_wen
                 << " pdest=" << static_cast<unsigned>(actual.pdest)
                 << " vl=" << static_cast<unsigned>(actual.vl)
@@ -1646,8 +2154,20 @@ private:
         if (expected != nullptr) {
             message << " expected_op=0x" << std::hex << expected->fu_op_type
                     << " expected_exception=0x" << expected->exception_mask
+                    << " expected_trigger="
+                    << static_cast<unsigned>(expected->trigger.value_or(kVectorWritebackTriggerNone))
                     << " expected_active=0x" << expected->active_elements
-                    << " actual_data=";
+                    << " address=0x" << expected->address << std::dec
+                    << " addressing="
+                    << static_cast<unsigned>(expected->addressing)
+                    << " stride=" << expected->stride
+                    << " mask=0x" << std::hex << expected->mask_bits
+                    << " index=";
+            for (const auto byte : expected->index) {
+                message << std::setw(2) << std::setfill('0')
+                        << static_cast<unsigned>(byte);
+            }
+            message << " actual_data=";
             for (const auto byte : actual.data) {
                 message << std::setw(2) << std::setfill('0')
                         << static_cast<unsigned>(byte);
@@ -1676,9 +2196,21 @@ class Environment {
     };
 
 public:
+    struct L2TlbResponse {
+        std::uint64_t paddr = 0;
+        std::uint8_t pbmt = 0;
+        bool miss = false;
+        bool guest_page_fault = false;
+        bool page_fault = false;
+        bool access_fault = false;
+        bool pmp_load_denied = false;
+        bool pmp_mmio = false;
+    };
+
     Environment(int argc, char **argv)
-        : dut_(argc, argv), memory_agent_(memory_), ptw_agent_(memory_),
-          uncache_agent_(memory_)
+        : dut_(argc, argv), memory_(&bus_memory_),
+          memory_agent_(bus_memory_, memory_),
+          ptw_agent_(bus_memory_), uncache_agent_(bus_memory_)
     {
         dut_.InitClock(dut_.clock);
         generated::drive_idle_inputs(dut_);
@@ -1689,6 +2221,10 @@ public:
     ~Environment() { dut_.Finish(); }
 
     SparseMemory &memory() { return memory_; }
+    std::uint64_t bus_expected_load(std::uint64_t address, LoadOp op) const
+    {
+        return bus_memory_.expected_load(address, op);
+    }
     void expect_release_line(
         std::uint64_t base, const std::vector<unsigned char> &bytes)
     {
@@ -1701,6 +2237,137 @@ public:
             seed ^ 0x9e3779b97f4a7c15ULL, enabled);
         uncache_agent_.configure_backpressure(
             seed ^ 0x3c6ef372fe94f82aULL, enabled);
+    }
+
+    void inject_next_dcache_response_error(bool denied, bool corrupt)
+    {
+        memory_agent_.inject_next_response_error(denied, corrupt);
+    }
+
+    void inject_next_uncache_response_error(bool denied, bool corrupt)
+    {
+        uncache_agent_.inject_next_response_error(denied, corrupt);
+    }
+
+    void configure_cache_error_enable(bool enable)
+    {
+        dut_.io_ooo_to_mem_csrCtrl_cache_error_enable.ImmSet(enable);
+    }
+
+    // The L2-to-L1 DTLB request has no ready pin at the MemBlock boundary:
+    // MemBlock ties the response consumer ready high internally.  Hold the
+    // request valid for one cycle, then wait for the returned response while
+    // the ordinary PTW agent services any page walk generated by the request.
+    bool issue_l2_tlb_request(
+        std::uint64_t vaddr, std::uint8_t cmd, bool kill, bool is_prefetch,
+        bool no_translate, L2TlbResponse &response, unsigned timeout = 4096)
+    {
+        dut_.io_l2_tlb_req_req_bits_vaddr.ImmSet(vaddr);
+        dut_.io_l2_tlb_req_req_bits_cmd.ImmSet(cmd);
+        dut_.io_l2_tlb_req_req_bits_kill.ImmSet(kill);
+        dut_.io_l2_tlb_req_req_bits_isPrefetch.ImmSet(is_prefetch);
+        dut_.io_l2_tlb_req_req_bits_no_translate.ImmSet(no_translate);
+        dut_.io_l2_tlb_req_req_valid.ImmSet(std::uint64_t{1});
+        tick(false);
+        dut_.io_l2_tlb_req_req_valid.ImmSet(std::uint64_t{0});
+        for (unsigned cycle = 0; cycle < timeout; ++cycle) {
+            if (dut_.io_l2_tlb_req_resp_valid.B()) {
+                response.paddr = dut_.io_l2_tlb_req_resp_bits_paddr_0.U();
+                response.pbmt = static_cast<std::uint8_t>(
+                    dut_.io_l2_tlb_req_resp_bits_pbmt_0.U());
+                response.miss = dut_.io_l2_tlb_req_resp_bits_miss.B();
+                response.guest_page_fault =
+                    dut_.io_l2_tlb_req_resp_bits_excp_0_gpf_ld.B();
+                response.page_fault =
+                    dut_.io_l2_tlb_req_resp_bits_excp_0_pf_ld.B();
+                response.access_fault =
+                    dut_.io_l2_tlb_req_resp_bits_excp_0_af_ld.B();
+                response.pmp_load_denied = dut_.io_l2_pmp_resp_ld.B();
+                response.pmp_mmio = dut_.io_l2_pmp_resp_mmio.B();
+                return check_components();
+            }
+            tick(false);
+        }
+        error_ = "timed out waiting for L2-to-L1 DTLB response";
+        return false;
+    }
+
+    bool issue_killed_l2_tlb_request(
+        std::uint64_t vaddr, std::uint8_t cmd, bool is_prefetch,
+        bool no_translate, unsigned timeout = 128)
+    {
+        dut_.io_l2_tlb_req_req_bits_vaddr.ImmSet(vaddr);
+        dut_.io_l2_tlb_req_req_bits_cmd.ImmSet(cmd);
+        dut_.io_l2_tlb_req_req_bits_kill.ImmSet(std::uint64_t{1});
+        dut_.io_l2_tlb_req_req_bits_isPrefetch.ImmSet(is_prefetch);
+        dut_.io_l2_tlb_req_req_bits_no_translate.ImmSet(no_translate);
+        dut_.io_l2_tlb_req_req_valid.ImmSet(std::uint64_t{1});
+        tick(false);
+        dut_.io_l2_tlb_req_req_valid.ImmSet(std::uint64_t{0});
+        for (unsigned cycle = 0; cycle < timeout; ++cycle) {
+            if (dut_.io_l2_tlb_req_resp_valid.B()) {
+                error_ = "killed L2-to-L1 DTLB request produced a response";
+                return false;
+            }
+            tick(false);
+        }
+        return check_components();
+    }
+
+    bool pulse_l2_hint(std::uint8_t source_id, bool is_keyword)
+    {
+        if (source_id >= 16) {
+            error_ = "L2 hint source ID exceeds the top-level field width";
+            return false;
+        }
+        dut_.io_l2_hint_bits_sourceId.ImmSet(source_id);
+        dut_.io_l2_hint_bits_isKeyword.ImmSet(is_keyword);
+        dut_.io_l2_hint_valid.ImmSet(std::uint64_t{1});
+        tick(false);
+        dut_.io_l2_hint_valid.ImmSet(std::uint64_t{0});
+        // MemBlock registers the hint before distributing it to DCache/LSQ.
+        // Let that one-cycle pulse drain and reject any unexpected terminal
+        // traffic caused by a hint with no matching outstanding MSHR.
+        return run_cycles(4) && check_components();
+    }
+
+    bool configure_memory_trigger(
+        unsigned index, std::uint64_t address, std::uint8_t action,
+        bool load, bool store, bool enable = true)
+    {
+        if (index >= 4) {
+            error_ = "memory trigger index exceeds TriggerNum";
+            return false;
+        }
+        // The CSR block presents a two-cycle delayed tdata update. Keep all
+        // trigger fields explicit so this helper is independent of the idle
+        // policy and can be reused by constrained-random trigger tests.
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_addr.ImmSet(index);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_matchType.ImmSet(std::uint64_t{0});
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_select.ImmSet(std::uint64_t{0});
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_action.ImmSet(action);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_chain.ImmSet(std::uint64_t{0});
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_store.ImmSet(store);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_load.ImmSet(load);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_tdata2.ImmSet(address);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_0.ImmSet(
+            index == 0 && enable);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_1.ImmSet(
+            index == 1 && enable);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_2.ImmSet(
+            index == 2 && enable);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_3.ImmSet(
+            index == 3 && enable);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_triggerCanRaiseBpExp.ImmSet(
+            std::uint64_t{1});
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_debugMode.ImmSet(
+            std::uint64_t{0});
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_valid.ImmSet(
+            std::uint64_t{1});
+        tick(false);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_valid.ImmSet(
+            std::uint64_t{0});
+        return run_cycles(3) && check_components();
     }
     std::uint64_t cycle() const { return dut_.xclock.clk; }
     std::uint64_t tilelink_requests() const { return memory_agent_.request_count(); }
@@ -1753,6 +2420,15 @@ public:
     std::uint64_t uncache_response_delays() const
     {
         return uncache_agent_.response_delay_cycles();
+    }
+    bool store_mmio_valid()
+    {
+        return dut_.io_mem_to_ooo_lsqio_storeMmio.B();
+    }
+    std::uint8_t store_mmio_rob()
+    {
+        return static_cast<std::uint8_t>(
+            dut_.io_mem_to_ooo_lsqio_storeMmioUop_robIdx_value.U());
     }
     std::uint64_t store_tlb_feedbacks() const { return store_tlb_feedbacks_; }
     std::uint64_t store_tlb_misses() const { return store_tlb_misses_; }
@@ -1817,6 +2493,10 @@ public:
 
     bool reset()
     {
+        // Re-assert external reset for every invocation.  Relying on the
+        // constructor's initial value made repeated-reset scenarios silently
+        // run without resetting the DUT.
+        dut_.reset.ImmSet(std::uint64_t{1});
         for (unsigned cycle = 0; cycle < 8; ++cycle) {
             tick(false);
         }
@@ -1898,7 +2578,8 @@ public:
         bool writable = true,
         bool executable = false,
         bool user = false,
-        bool noncacheable = false)
+        bool noncacheable = false,
+        bool io = false)
     {
         constexpr std::uint64_t page_mask = 0xfff;
         constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
@@ -1909,6 +2590,7 @@ public:
         constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
         constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
         constexpr std::uint64_t pte_pbmt_nc = std::uint64_t{1} << 61;
+        constexpr std::uint64_t pte_pbmt_io = std::uint64_t{1} << 62;
         if ((virtual_address & page_mask) != (physical_address & page_mask) ||
             (root_page_table & page_mask) != 0) {
             error_ = "Sv39 4-KiB mapping requires aligned root and equal page offsets";
@@ -1916,6 +2598,10 @@ public:
         }
         if (writable && !readable) {
             error_ = "Sv39 does not permit W=1,R=0 leaf mappings";
+            return false;
+        }
+        if (noncacheable && io) {
+            error_ = "Sv39 PBMT mapping cannot select NC and IO simultaneously";
             return false;
         }
 
@@ -1951,7 +2637,97 @@ public:
             (executable ? pte_execute : 0) |
             (user ? pte_user : 0) | pte_accessed |
             (writable ? pte_dirty : 0) |
-            (noncacheable ? pte_pbmt_nc : 0);
+            (noncacheable ? pte_pbmt_nc : 0) |
+            (io ? pte_pbmt_io : 0);
+        memory_.write_u64(
+            l0_it->second + vpn0 * 8,
+            (((physical_address & ~page_mask) >> 12) << 10) | flags);
+        return true;
+    }
+
+    bool map_sv48_4k(
+        std::uint64_t virtual_address,
+        std::uint64_t physical_address,
+        std::uint64_t root_page_table = 0x91000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false,
+        bool user = false,
+        bool noncacheable = false,
+        bool io = false)
+    {
+        constexpr std::uint64_t page_mask = 0xfff;
+        constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
+        constexpr std::uint64_t pte_read = std::uint64_t{1} << 1;
+        constexpr std::uint64_t pte_write = std::uint64_t{1} << 2;
+        constexpr std::uint64_t pte_execute = std::uint64_t{1} << 3;
+        constexpr std::uint64_t pte_user = std::uint64_t{1} << 4;
+        constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
+        constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
+        constexpr std::uint64_t pte_pbmt_nc = std::uint64_t{1} << 61;
+        constexpr std::uint64_t pte_pbmt_io = std::uint64_t{1} << 62;
+        if ((virtual_address & page_mask) != (physical_address & page_mask) ||
+            (root_page_table & page_mask) != 0) {
+            error_ = "Sv48 4-KiB mapping requires aligned root and equal page offsets";
+            return false;
+        }
+        if (writable && !readable) {
+            error_ = "Sv48 does not permit W=1,R=0 leaf mappings";
+            return false;
+        }
+        if (noncacheable && io) {
+            error_ = "Sv48 PBMT mapping cannot select NC and IO simultaneously";
+            return false;
+        }
+        if (!reference_canonical_virtual_address(
+                virtual_address, ReferencePageMode::sv48)) {
+            error_ = "Sv48 mapping requires a canonical virtual address";
+            return false;
+        }
+
+        auto allocate_table = [&]() {
+            auto [it, inserted] = next_page_table_.emplace(
+                root_page_table, root_page_table + 0x1000);
+            const std::uint64_t result = it->second;
+            it->second += 0x1000;
+            return result;
+        };
+        const std::uint64_t vpn3 = (virtual_address >> 39) & 0x1ff;
+        const std::uint64_t vpn2 = (virtual_address >> 30) & 0x1ff;
+        const std::uint64_t vpn1 = (virtual_address >> 21) & 0x1ff;
+        const std::uint64_t vpn0 = (virtual_address >> 12) & 0x1ff;
+        const std::uint64_t l2_key = root_page_table ^ (vpn3 << 12);
+        auto [l2_it, l2_inserted] = sv48_l2_tables_.emplace(l2_key, 0);
+        if (l2_inserted) {
+            l2_it->second = allocate_table();
+            memory_.write_u64(
+                root_page_table + vpn3 * 8,
+                ((l2_it->second >> 12) << 10) | pte_valid);
+        }
+        const std::uint64_t l1_key = l2_it->second ^ (vpn2 << 12);
+        auto [l1_it, l1_inserted] = sv48_l1_tables_.emplace(l1_key, 0);
+        if (l1_inserted) {
+            l1_it->second = allocate_table();
+            memory_.write_u64(
+                l2_it->second + vpn2 * 8,
+                ((l1_it->second >> 12) << 10) | pte_valid);
+        }
+        const std::uint64_t l0_key = l1_it->second ^ (vpn1 << 12);
+        auto [l0_it, l0_inserted] = sv48_l0_tables_.emplace(l0_key, 0);
+        if (l0_inserted) {
+            l0_it->second = allocate_table();
+            memory_.write_u64(
+                l1_it->second + vpn1 * 8,
+                ((l0_it->second >> 12) << 10) | pte_valid);
+        }
+        const std::uint64_t flags = pte_valid |
+            (readable ? pte_read : 0) |
+            (writable ? pte_write : 0) |
+            (executable ? pte_execute : 0) |
+            (user ? pte_user : 0) | pte_accessed |
+            (writable ? pte_dirty : 0) |
+            (noncacheable ? pte_pbmt_nc : 0) |
+            (io ? pte_pbmt_io : 0);
         memory_.write_u64(
             l0_it->second + vpn0 * 8,
             (((physical_address & ~page_mask) >> 12) << 10) | flags);
@@ -1962,12 +2738,374 @@ public:
         std::uint64_t root_page_table = 0x91000000ULL,
         std::uint16_t asid = 0)
     {
+        return activate_stage_one(
+            ReferencePageMode::sv39, root_page_table, asid);
+    }
+
+    bool activate_sv48(
+        std::uint64_t root_page_table = 0x91000000ULL,
+        std::uint16_t asid = 0)
+    {
+        return activate_stage_one(
+            ReferencePageMode::sv48, root_page_table, asid);
+    }
+
+    bool activate_bare(std::uint16_t asid = 0)
+    {
+        return activate_stage_one(ReferencePageMode::bare, 0, asid);
+    }
+
+    bool map_sv39_leaf(
+        std::uint64_t virtual_address,
+        std::uint64_t physical_address,
+        unsigned leaf_level,
+        std::uint64_t root_page_table = 0x91000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false,
+        bool user = false,
+        bool noncacheable = false)
+    {
+        return map_reference_leaf(
+            virtual_address, physical_address, root_page_table,
+            ReferencePageMode::sv39, false, leaf_level, readable, writable,
+            executable, user, noncacheable);
+    }
+
+    bool map_sv39_2m(
+        std::uint64_t virtual_address,
+        std::uint64_t physical_address,
+        std::uint64_t root_page_table = 0x91000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false,
+        bool user = false,
+        bool noncacheable = false)
+    {
+        return map_sv39_leaf(
+            virtual_address, physical_address, 1, root_page_table, readable,
+            writable, executable, user, noncacheable);
+    }
+
+    bool map_sv39_1g(
+        std::uint64_t virtual_address,
+        std::uint64_t physical_address,
+        std::uint64_t root_page_table = 0x91000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false,
+        bool user = false,
+        bool noncacheable = false)
+    {
+        return map_sv39_leaf(
+            virtual_address, physical_address, 2, root_page_table, readable,
+            writable, executable, user, noncacheable);
+    }
+
+    bool map_sv48_leaf(
+        std::uint64_t virtual_address,
+        std::uint64_t physical_address,
+        unsigned leaf_level,
+        std::uint64_t root_page_table = 0x91000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false,
+        bool user = false,
+        bool noncacheable = false)
+    {
+        return map_reference_leaf(
+            virtual_address, physical_address, root_page_table,
+            ReferencePageMode::sv48, false, leaf_level, readable, writable,
+            executable, user, noncacheable);
+    }
+
+    bool map_sv48_2m(
+        std::uint64_t virtual_address,
+        std::uint64_t physical_address,
+        std::uint64_t root_page_table = 0x91000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false,
+        bool user = false,
+        bool noncacheable = false)
+    {
+        return map_sv48_leaf(
+            virtual_address, physical_address, 1, root_page_table, readable,
+            writable, executable, user, noncacheable);
+    }
+
+    bool map_sv48_1g(
+        std::uint64_t virtual_address,
+        std::uint64_t physical_address,
+        std::uint64_t root_page_table = 0x91000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false,
+        bool user = false,
+        bool noncacheable = false)
+    {
+        return map_sv48_leaf(
+            virtual_address, physical_address, 2, root_page_table, readable,
+            writable, executable, user, noncacheable);
+    }
+
+    bool map_sv48_512g(
+        std::uint64_t virtual_address,
+        std::uint64_t physical_address,
+        std::uint64_t root_page_table = 0x91000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false,
+        bool user = false,
+        bool noncacheable = false)
+    {
+        return map_sv48_leaf(
+            virtual_address, physical_address, 3, root_page_table, readable,
+            writable, executable, user, noncacheable);
+    }
+
+    bool map_sv48x4_4k(
+        std::uint64_t guest_physical_address,
+        std::uint64_t host_physical_address,
+        std::uint64_t root_page_table = 0x95000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false)
+    {
+        constexpr std::uint64_t page_mask = 0xfff;
+        constexpr std::uint64_t root_mask = 0x3fff;
+        constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
+        constexpr std::uint64_t pte_read = std::uint64_t{1} << 1;
+        constexpr std::uint64_t pte_write = std::uint64_t{1} << 2;
+        constexpr std::uint64_t pte_execute = std::uint64_t{1} << 3;
+        constexpr std::uint64_t pte_user = std::uint64_t{1} << 4;
+        constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
+        constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
+        if ((guest_physical_address & page_mask) !=
+                (host_physical_address & page_mask) ||
+            (root_page_table & root_mask) != 0) {
+            error_ = "Sv48x4 mapping requires a 16-KiB root and equal page offsets";
+            return false;
+        }
+        if (writable && !readable) {
+            error_ = "Sv48x4 does not permit W=1,R=0 leaf mappings";
+            return false;
+        }
+        if (!reference_gpa_in_range(
+                guest_physical_address, ReferencePageMode::sv48)) {
+            error_ = "Sv48x4 mapping exceeds the 50-bit guest physical address space";
+            return false;
+        }
+
+        auto allocate_table = [&]() {
+            auto [it, inserted] = next_gstage_page_table_.emplace(
+                root_page_table, root_page_table + 0x4000);
+            const std::uint64_t result = it->second;
+            it->second += 0x1000;
+            return result;
+        };
+        const std::uint64_t vpn3 = (guest_physical_address >> 39) & 0x7ff;
+        const std::uint64_t vpn2 = (guest_physical_address >> 30) & 0x1ff;
+        const std::uint64_t vpn1 = (guest_physical_address >> 21) & 0x1ff;
+        const std::uint64_t vpn0 = (guest_physical_address >> 12) & 0x1ff;
+        const std::uint64_t l2_key = root_page_table ^ (vpn3 << 14);
+        auto [l2_it, l2_inserted] = gstage_sv48_l2_tables_.emplace(l2_key, 0);
+        if (l2_inserted) {
+            l2_it->second = allocate_table();
+            memory_.write_u64(
+                root_page_table + vpn3 * 8,
+                ((l2_it->second >> 12) << 10) | pte_valid);
+        }
+        const std::uint64_t l1_key = l2_it->second ^ (vpn2 << 12);
+        auto [l1_it, l1_inserted] = gstage_sv48_l1_tables_.emplace(l1_key, 0);
+        if (l1_inserted) {
+            l1_it->second = allocate_table();
+            memory_.write_u64(
+                l2_it->second + vpn2 * 8,
+                ((l1_it->second >> 12) << 10) | pte_valid);
+        }
+        const std::uint64_t l0_key = l1_it->second ^ (vpn1 << 12);
+        auto [l0_it, l0_inserted] = gstage_sv48_l0_tables_.emplace(l0_key, 0);
+        if (l0_inserted) {
+            l0_it->second = allocate_table();
+            memory_.write_u64(
+                l1_it->second + vpn1 * 8,
+                ((l0_it->second >> 12) << 10) | pte_valid);
+        }
+        const std::uint64_t flags = pte_valid |
+            (readable ? pte_read : 0) |
+            (writable ? pte_write : 0) |
+            (executable ? pte_execute : 0) | pte_user |
+            pte_accessed | (writable ? pte_dirty : 0);
+        memory_.write_u64(
+            l0_it->second + vpn0 * 8,
+            (((host_physical_address & ~page_mask) >> 12) << 10) | flags);
+        return true;
+    }
+
+    bool map_sv48x4_leaf(
+        std::uint64_t guest_physical_address,
+        std::uint64_t host_physical_address,
+        unsigned leaf_level,
+        std::uint64_t root_page_table = 0x95000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false)
+    {
+        return map_reference_leaf(
+            guest_physical_address, host_physical_address, root_page_table,
+            ReferencePageMode::sv48, true, leaf_level, readable, writable,
+            executable, true, false);
+    }
+
+    bool map_sv48x4_2m(
+        std::uint64_t guest_physical_address,
+        std::uint64_t host_physical_address,
+        std::uint64_t root_page_table = 0x95000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false)
+    {
+        return map_sv48x4_leaf(
+            guest_physical_address, host_physical_address, 1,
+            root_page_table, readable, writable, executable);
+    }
+
+    bool map_sv48x4_1g(
+        std::uint64_t guest_physical_address,
+        std::uint64_t host_physical_address,
+        std::uint64_t root_page_table = 0x95000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false)
+    {
+        return map_sv48x4_leaf(
+            guest_physical_address, host_physical_address, 2,
+            root_page_table, readable, writable, executable);
+    }
+
+    bool map_sv48x4_512g(
+        std::uint64_t guest_physical_address,
+        std::uint64_t host_physical_address,
+        std::uint64_t root_page_table = 0x95000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false)
+    {
+        return map_sv48x4_leaf(
+            guest_physical_address, host_physical_address, 3,
+            root_page_table, readable, writable, executable);
+    }
+
+private:
+    bool map_reference_leaf(
+        std::uint64_t input_address,
+        std::uint64_t physical_address,
+        std::uint64_t root_page_table,
+        ReferencePageMode mode,
+        bool x4,
+        unsigned leaf_level,
+        bool readable,
+        bool writable,
+        bool executable,
+        bool user,
+        bool noncacheable)
+    {
+        constexpr std::uint64_t page_mask = 0xfff;
+        constexpr std::uint64_t pte_valid = std::uint64_t{1} << 0;
+        constexpr std::uint64_t pte_read = std::uint64_t{1} << 1;
+        constexpr std::uint64_t pte_write = std::uint64_t{1} << 2;
+        constexpr std::uint64_t pte_execute = std::uint64_t{1} << 3;
+        constexpr std::uint64_t pte_user = std::uint64_t{1} << 4;
+        constexpr std::uint64_t pte_accessed = std::uint64_t{1} << 6;
+        constexpr std::uint64_t pte_dirty = std::uint64_t{1} << 7;
+        constexpr std::uint64_t pte_pbmt_nc = std::uint64_t{1} << 61;
+        if (leaf_level >= reference_page_levels(mode)) {
+            error_ = "page mapping leaf level exceeds selected mode";
+            return false;
+        }
+        const unsigned offset_bits = 12 + 9 * leaf_level;
+        const std::uint64_t offset_mask =
+            (std::uint64_t{1} << offset_bits) - 1;
+        const std::uint64_t root_mask = x4 ? 0x3fffULL : page_mask;
+        if ((root_page_table & root_mask) != 0 ||
+            (input_address & offset_mask) != (physical_address & offset_mask)) {
+            error_ = x4
+                ? "x4 mapping requires a 16-KiB root and equal leaf offsets"
+                : "mapping requires an aligned root and equal leaf offsets";
+            return false;
+        }
+        if (x4 ? !reference_gpa_in_range(input_address, mode)
+               : !reference_canonical_virtual_address(input_address, mode)) {
+            error_ = x4 ? "x4 mapping exceeds the guest address space"
+                        : "mapping requires a canonical virtual address";
+            return false;
+        }
+        if (writable && !readable) {
+            error_ = "page mapping does not permit W=1,R=0 leaf mappings";
+            return false;
+        }
+
+        auto &next_tables = x4 ? next_gstage_page_table_ : next_page_table_;
+        const std::uint64_t initial = root_page_table + (x4 ? 0x4000 : 0x1000);
+        auto allocate_table = [&]() {
+            auto [it, inserted] = next_tables.emplace(root_page_table, initial);
+            const std::uint64_t result = it->second;
+            it->second += 0x1000;
+            return result;
+        };
+
+        const unsigned top_level = reference_page_levels(mode) - 1;
+        std::uint64_t table = root_page_table;
+        for (int level = static_cast<int>(top_level);
+             level > static_cast<int>(leaf_level); --level) {
+            const unsigned shift = 12 + 9 * static_cast<unsigned>(level);
+            const std::uint64_t index_mask =
+                x4 && static_cast<unsigned>(level) == top_level ? 0x7ff : 0x1ff;
+            const std::uint64_t index = (input_address >> shift) & index_mask;
+            const std::uint64_t pte_address = table + index * 8;
+            const std::uint64_t pte = memory_.read_u64(pte_address);
+            std::uint64_t child = 0;
+            if ((pte & 1U) != 0 && !reference_pte_is_leaf(pte)) {
+                child = reference_pte_ppn(pte) << 12;
+            } else {
+                child = allocate_table();
+                memory_.write_u64(
+                    pte_address, ((child >> 12) << 10) | pte_valid);
+            }
+            table = child;
+        }
+
+        const unsigned leaf_shift = 12 + 9 * leaf_level;
+        const std::uint64_t leaf_mask =
+            x4 && leaf_level == top_level ? 0x7ff : 0x1ff;
+        const std::uint64_t leaf_index =
+            (input_address >> leaf_shift) & leaf_mask;
+        const std::uint64_t flags = pte_valid |
+            (readable ? pte_read : 0) |
+            (writable ? pte_write : 0) |
+            (executable ? pte_execute : 0) |
+            ((user || x4) ? pte_user : 0) |
+            pte_accessed | (writable ? pte_dirty : 0) |
+            (noncacheable ? pte_pbmt_nc : 0);
+        memory_.write_u64(
+            table + leaf_index * 8,
+            (((physical_address & ~page_mask) >> 12) << 10) | flags);
+        return true;
+    }
+
+    bool activate_stage_one(
+        ReferencePageMode mode,
+        std::uint64_t root_page_table,
+        std::uint16_t asid)
+    {
         if (!write_distributed_csr(0x3b0, ~std::uint64_t{0}) ||
             !write_distributed_csr(0x3a0, 0x1f)) {
             return false;
         }
         dut_.io_ooo_to_mem_tlbCsr_priv_dmode.ImmSet(std::uint64_t{1});
-        dut_.io_ooo_to_mem_tlbCsr_satp_mode.ImmSet(std::uint64_t{8});
+        dut_.io_ooo_to_mem_tlbCsr_satp_mode.ImmSet(
+            static_cast<std::uint64_t>(mode));
         dut_.io_ooo_to_mem_tlbCsr_satp_asid.ImmSet(asid);
         dut_.io_ooo_to_mem_tlbCsr_satp_ppn.ImmSet(root_page_table >> 12);
         dut_.io_ooo_to_mem_tlbCsr_mPBMTE.ImmSet(std::uint64_t{1});
@@ -1979,6 +3117,8 @@ public:
         dut_.io_ooo_to_mem_tlbCsr_priv_virt_changed.ImmSet(std::uint64_t{0});
         return run_cycles(16) && check_components();
     }
+
+public:
 
     bool map_sv39x4_4k(
         std::uint64_t guest_physical_address,
@@ -2045,7 +3185,65 @@ public:
         return true;
     }
 
+    bool map_sv39x4_leaf(
+        std::uint64_t guest_physical_address,
+        std::uint64_t host_physical_address,
+        unsigned leaf_level,
+        std::uint64_t root_page_table = 0x95000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false)
+    {
+        return map_reference_leaf(
+            guest_physical_address, host_physical_address, root_page_table,
+            ReferencePageMode::sv39, true, leaf_level, readable, writable,
+            executable, true, false);
+    }
+
+    bool map_sv39x4_2m(
+        std::uint64_t guest_physical_address,
+        std::uint64_t host_physical_address,
+        std::uint64_t root_page_table = 0x95000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false)
+    {
+        return map_sv39x4_leaf(
+            guest_physical_address, host_physical_address, 1,
+            root_page_table, readable, writable, executable);
+    }
+
+    bool map_sv39x4_1g(
+        std::uint64_t guest_physical_address,
+        std::uint64_t host_physical_address,
+        std::uint64_t root_page_table = 0x95000000ULL,
+        bool readable = true,
+        bool writable = true,
+        bool executable = false)
+    {
+        return map_sv39x4_leaf(
+            guest_physical_address, host_physical_address, 2,
+            root_page_table, readable, writable, executable);
+    }
+
     bool activate_two_stage(
+        std::uint64_t vs_root_page_table,
+        std::uint64_t g_root_page_table,
+        std::uint16_t asid = 0,
+        std::uint16_t vmid = 0)
+    {
+        return activate_two_stage_modes(
+            ReferencePageMode::sv39,
+            ReferencePageMode::sv39,
+            vs_root_page_table,
+            g_root_page_table,
+            asid,
+            vmid);
+    }
+
+    bool activate_two_stage_modes(
+        ReferencePageMode vs_mode,
+        ReferencePageMode g_mode,
         std::uint64_t vs_root_page_table,
         std::uint64_t g_root_page_table,
         std::uint16_t asid = 0,
@@ -2056,10 +3254,12 @@ public:
             return false;
         }
         dut_.io_ooo_to_mem_tlbCsr_satp_mode.ImmSet(std::uint64_t{0});
-        dut_.io_ooo_to_mem_tlbCsr_vsatp_mode.ImmSet(std::uint64_t{8});
+        dut_.io_ooo_to_mem_tlbCsr_vsatp_mode.ImmSet(
+            static_cast<std::uint64_t>(vs_mode));
         dut_.io_ooo_to_mem_tlbCsr_vsatp_asid.ImmSet(asid);
         dut_.io_ooo_to_mem_tlbCsr_vsatp_ppn.ImmSet(vs_root_page_table >> 12);
-        dut_.io_ooo_to_mem_tlbCsr_hgatp_mode.ImmSet(std::uint64_t{8});
+        dut_.io_ooo_to_mem_tlbCsr_hgatp_mode.ImmSet(
+            static_cast<std::uint64_t>(g_mode));
         dut_.io_ooo_to_mem_tlbCsr_hgatp_vmid.ImmSet(vmid);
         dut_.io_ooo_to_mem_tlbCsr_hgatp_ppn.ImmSet(g_root_page_table >> 12);
         dut_.io_ooo_to_mem_tlbCsr_priv_dmode.ImmSet(std::uint64_t{1});
@@ -2071,6 +3271,28 @@ public:
         dut_.io_ooo_to_mem_tlbCsr_vsatp_changed.ImmSet(std::uint64_t{0});
         dut_.io_ooo_to_mem_tlbCsr_hgatp_changed.ImmSet(std::uint64_t{0});
         dut_.io_ooo_to_mem_tlbCsr_priv_virt_changed.ImmSet(std::uint64_t{0});
+        return run_cycles(16) && check_components();
+    }
+
+    bool issue_sfence(
+        std::uint64_t address = 0,
+        std::uint16_t id = 0,
+        bool all_virtual_addresses = true,
+        bool all_contexts = true,
+        bool hypervisor_virtual = false,
+        bool hypervisor_guest = false,
+        bool flush_pipe = true)
+    {
+        dut_.io_ooo_to_mem_sfence_bits_rs1.ImmSet(all_virtual_addresses);
+        dut_.io_ooo_to_mem_sfence_bits_rs2.ImmSet(all_contexts);
+        dut_.io_ooo_to_mem_sfence_bits_addr.ImmSet(address);
+        dut_.io_ooo_to_mem_sfence_bits_id.ImmSet(id);
+        dut_.io_ooo_to_mem_sfence_bits_flushPipe.ImmSet(flush_pipe);
+        dut_.io_ooo_to_mem_sfence_bits_hv.ImmSet(hypervisor_virtual);
+        dut_.io_ooo_to_mem_sfence_bits_hg.ImmSet(hypervisor_guest);
+        dut_.io_ooo_to_mem_sfence_valid.ImmSet(std::uint64_t{1});
+        tick(false);
+        dut_.io_ooo_to_mem_sfence_valid.ImmSet(std::uint64_t{0});
         return run_cycles(16) && check_components();
     }
 
@@ -2089,6 +3311,39 @@ public:
         return check_components();
     }
 
+    bool pulse_pending_load(std::uint8_t value, bool flag = false)
+    {
+        dut_.io_ooo_to_mem_lsqio_pendingPtr_value.ImmSet(value);
+        dut_.io_ooo_to_mem_lsqio_pendingPtr_flag.ImmSet(flag);
+        dut_.io_ooo_to_mem_lsqio_pendingMMIOld.ImmSet(std::uint64_t{1});
+        tick();
+        dut_.io_ooo_to_mem_lsqio_pendingMMIOld.ImmSet(std::uint64_t{0});
+        return check_components();
+    }
+
+    bool wait_for_mmio_request(
+        std::uint8_t value, bool flag = false, unsigned timeout = 2048)
+    {
+        const std::uint64_t request_before = uncache_agent_.request_count();
+        dut_.io_ooo_to_mem_lsqio_pendingPtr_value.ImmSet(value);
+        dut_.io_ooo_to_mem_lsqio_pendingPtr_flag.ImmSet(flag);
+        dut_.io_ooo_to_mem_lsqio_pendingMMIOld.ImmSet(std::uint64_t{1});
+        for (unsigned cycle = 0; cycle < timeout; ++cycle) {
+            tick();
+            if (!check_components()) {
+                dut_.io_ooo_to_mem_lsqio_pendingMMIOld.ImmSet(std::uint64_t{0});
+                return false;
+            }
+            if (uncache_agent_.request_count() > request_before) {
+                dut_.io_ooo_to_mem_lsqio_pendingMMIOld.ImmSet(std::uint64_t{0});
+                return true;
+            }
+        }
+        dut_.io_ooo_to_mem_lsqio_pendingMMIOld.ImmSet(std::uint64_t{0});
+        error_ = "timed out waiting for MMIO Uncache request";
+        return false;
+    }
+
     bool pulse_pending_store(std::uint8_t value, bool flag = false)
     {
         dut_.io_ooo_to_mem_lsqio_pendingPtr_value.ImmSet(value);
@@ -2097,6 +3352,31 @@ public:
         tick();
         dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{0});
         return check_components();
+    }
+
+    bool wait_for_mmio_store_request(
+        std::uint8_t value, bool flag = false, unsigned timeout = 2048)
+    {
+        const std::uint64_t request_before = uncache_agent_.request_count();
+        dut_.io_ooo_to_mem_lsqio_pendingPtr_value.ImmSet(value);
+        dut_.io_ooo_to_mem_lsqio_pendingPtr_flag.ImmSet(flag);
+        // ROB exposes pendingst as a one-cycle commit pulse.  Keep the pulse
+        // shape here and only wait after it has been sampled by StoreQueue;
+        // holding it high changes the real ROB/LSQ timing contract.
+        dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{1});
+        tick();
+        dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{0});
+        for (unsigned cycle = 0; cycle < timeout; ++cycle) {
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+            if (uncache_agent_.request_count() > request_before) {
+                return true;
+            }
+        }
+        error_ = "timed out waiting for MMIO store Uncache request";
+        return false;
     }
 
     bool set_wfi(bool enabled)
@@ -2113,6 +3393,9 @@ public:
         }
         generated::LsqEnqueue enqueue;
         enqueue.need_alloc = 1;
+        enqueue.exception_mask = transaction.input_exception_mask;
+        enqueue.trigger = transaction.input_trigger;
+        enqueue.flush_pipe = transaction.input_flush_pipe;
         enqueue.fu_type = kFuTypeLoad;
         enqueue.fu_op_type = static_cast<std::uint16_t>(transaction.op);
         enqueue.rob_flag = transaction.rob_flag;
@@ -2128,10 +3411,58 @@ public:
         return check_components();
     }
 
+    bool enqueue_load_batch(
+        const std::vector<LoadTransaction> &transactions,
+        const std::vector<unsigned> &dispatch_lanes)
+    {
+        if (transactions.empty() ||
+            transactions.size() != dispatch_lanes.size() ||
+            transactions.size() > generated::kLsqEnqueueLanes ||
+            !std::is_sorted(dispatch_lanes.begin(), dispatch_lanes.end())) {
+            error_ = "LSQ load batch requires one sorted unique dispatch lane per load";
+            return false;
+        }
+        std::array<bool, generated::kLsqEnqueueLanes> lane_used{};
+        if (!wait_for_enqueue_capacity(transactions.size(), 0)) {
+            return false;
+        }
+        for (std::size_t index = 0; index < transactions.size(); ++index) {
+            const unsigned lane = dispatch_lanes[index];
+            if (lane >= generated::kLsqEnqueueLanes || lane_used[lane]) {
+                error_ = "LSQ load batch has an invalid or duplicate dispatch lane";
+                generated::clear_lsq_enqueue_valids(dut_);
+                return false;
+            }
+            lane_used[lane] = true;
+            const auto &transaction = transactions[index];
+            generated::LsqEnqueue enqueue;
+            enqueue.need_alloc = 1;
+            enqueue.exception_mask = transaction.input_exception_mask;
+            enqueue.trigger = transaction.input_trigger;
+            enqueue.flush_pipe = transaction.input_flush_pipe;
+            enqueue.fu_type = kFuTypeLoad;
+            enqueue.fu_op_type = static_cast<std::uint16_t>(transaction.op);
+            enqueue.rob_flag = transaction.rob_flag;
+            enqueue.rob_value = transaction.rob;
+            enqueue.lq_flag = transaction.lq_flag;
+            enqueue.lq_value = transaction.lq;
+            enqueue.sq_flag = transaction.sq_flag;
+            enqueue.sq_value = transaction.sq;
+            generated::drive_lsq_enqueue(dut_, lane, enqueue);
+        }
+        tick();
+        generated::clear_lsq_enqueue_valids(dut_);
+        lq_allocated_ += transactions.size();
+        return check_components();
+    }
+
     bool issue_load(const LoadTransaction &transaction, unsigned timeout = 32)
     {
         generated::ScalarLoadIssue issue;
         issue.pc = 0x1000 + transaction.rob * 4;
+        issue.predecode_rvc = transaction.predecode_rvc;
+        issue.ftq_ptr = transaction.ftq_ptr;
+        issue.ftq_offset = transaction.ftq_offset;
         issue.fu_op_type = static_cast<std::uint16_t>(transaction.op);
         issue.rf_wen = transaction.rf_wen;
         issue.fp_wen = transaction.fp_wen;
@@ -2142,6 +3473,11 @@ public:
         issue.lq_value = transaction.lq;
         issue.sq_flag = transaction.sq_flag;
         issue.sq_value = transaction.sq;
+        issue.store_set_hit = transaction.store_set_hit;
+        issue.wait_for_rob_flag = transaction.wait_for_rob_flag;
+        issue.wait_for_rob_value = transaction.wait_for_rob_value;
+        issue.load_wait_bit = transaction.load_wait_bit;
+        issue.load_wait_strict = transaction.load_wait_strict;
         issue.src = transaction.address;
 
         for (unsigned cycle = 0; cycle < timeout; ++cycle) {
@@ -2181,6 +3517,9 @@ public:
             lane_used[transaction.lane] = true;
             auto &issue = issues[index];
             issue.pc = 0x1000 + transaction.rob * 4;
+            issue.predecode_rvc = transaction.predecode_rvc;
+            issue.ftq_ptr = transaction.ftq_ptr;
+            issue.ftq_offset = transaction.ftq_offset;
             issue.fu_op_type = static_cast<std::uint16_t>(transaction.op);
             issue.rf_wen = transaction.rf_wen;
             issue.fp_wen = transaction.fp_wen;
@@ -2191,6 +3530,11 @@ public:
             issue.lq_value = transaction.lq;
             issue.sq_flag = transaction.sq_flag;
             issue.sq_value = transaction.sq;
+            issue.store_set_hit = transaction.store_set_hit;
+            issue.wait_for_rob_flag = transaction.wait_for_rob_flag;
+            issue.wait_for_rob_value = transaction.wait_for_rob_value;
+            issue.load_wait_bit = transaction.load_wait_bit;
+            issue.load_wait_strict = transaction.load_wait_strict;
             issue.src = transaction.address;
         }
 
@@ -2257,6 +3601,9 @@ public:
         }
         generated::LsqEnqueue enqueue;
         enqueue.need_alloc = 1;
+        enqueue.exception_mask = transaction.input_exception_mask;
+        enqueue.trigger = transaction.input_trigger;
+        enqueue.flush_pipe = transaction.input_flush_pipe;
         enqueue.fu_type = kFuTypeLoad;
         enqueue.fu_op_type = static_cast<std::uint16_t>(transaction.op);
         enqueue.rob_flag = transaction.rob_flag;
@@ -2321,6 +3668,9 @@ public:
         }
         generated::LsqEnqueue enqueue;
         enqueue.need_alloc = 2;
+        enqueue.exception_mask = transaction.input_exception_mask;
+        enqueue.trigger = transaction.input_trigger;
+        enqueue.flush_pipe = transaction.input_flush_pipe;
         enqueue.fu_type = kFuTypeStore;
         enqueue.fu_op_type = static_cast<std::uint16_t>(transaction.op);
         enqueue.rob_flag = transaction.rob_flag;
@@ -2360,6 +3710,9 @@ public:
         }
         generated::LsqEnqueue enqueue;
         enqueue.need_alloc = transaction.store ? 2 : 1;
+        enqueue.exception_mask = transaction.input_exception_mask;
+        enqueue.trigger = transaction.input_trigger;
+        enqueue.flush_pipe = transaction.input_flush_pipe;
         enqueue.fu_type = transaction.store ? kFuTypeVectorStore : kFuTypeVectorLoad;
         enqueue.fu_op_type = vector_fu_op_type(transaction);
         enqueue.rob_flag = transaction.rob_flag;
@@ -2384,13 +3737,15 @@ public:
         const VectorMemoryTransaction &transaction, unsigned timeout = 64)
     {
         generated::VectorMemoryIssue issue;
+        issue.ftq_ptr = transaction.ftq_ptr;
+        issue.ftq_offset = transaction.ftq_offset;
         issue.fu_type = transaction.store ? kFuTypeVectorStore : kFuTypeVectorLoad;
         issue.fu_op_type = vector_fu_op_type(transaction);
         issue.vec_wen = !transaction.store;
         issue.vma = transaction.vma;
         issue.vta = transaction.vta;
         issue.vsew = transaction.eew;
-        issue.vlmul = 0;
+        issue.vlmul = transaction.vlmul;
         issue.vm = transaction.vm;
         issue.vstart = transaction.vstart;
         issue.veew = transaction.eew;
@@ -2589,6 +3944,85 @@ public:
         return false;
     }
 
+    // Atomics enter the store-address port but are handled by AtomicsUnit,
+    // rather than StoreQueue.  They therefore do not have an LSQ allocation
+    // or StoreScoreboard entry; the scalar-load scoreboard observes their
+    // old-value writeback on the atomic WB port.
+    bool issue_atomic(const AtomicTransaction &transaction, unsigned timeout = 256)
+    {
+        generated::ScalarStoreIssue address;
+        address.fu_type = kFuTypeAtomic;
+        address.fu_op_type = static_cast<std::uint16_t>(transaction.op);
+        address.rf_wen = true;
+        address.pdest = transaction.pdest;
+        address.rob_flag = transaction.rob_flag;
+        address.rob_value = transaction.rob;
+        address.sq_flag = transaction.sq_flag;
+        address.sq_value = transaction.sq;
+        address.src = transaction.address;
+        for (unsigned cycle = 0; cycle < timeout; ++cycle) {
+            generated::drive_scalar_store_address(
+                dut_, transaction.address_lane, address);
+            dut_.RefreshComb();
+            const bool ready = generated::scalar_store_address_ready(
+                dut_, transaction.address_lane);
+            tick();
+            if (ready) {
+                generated::clear_scalar_store_issue_valids(dut_);
+                break;
+            }
+            if (!check_components()) {
+                generated::clear_scalar_store_issue_valids(dut_);
+                return false;
+            }
+            if (cycle + 1 == timeout) {
+                generated::clear_scalar_store_issue_valids(dut_);
+                error_ = "atomic address issue timed out waiting for ready";
+                return false;
+            }
+        }
+
+        const bool is_compare_swap = transaction.op == AtomicOp::amocas_w ||
+            transaction.op == AtomicOp::amocas_d;
+        const unsigned data_count = is_compare_swap ? 2 : 1;
+        for (unsigned data_index = 0; data_index < data_count; ++data_index) {
+            generated::ScalarStoreIssue data = address;
+            data.src = is_compare_swap && data_index == 0
+                ? transaction.compare
+                : transaction.data;
+            data.rf_wen = false;
+            // AtomicsUnit uses the upper fuOpType bits to identify the
+            // compare/swap std uop (index 0 and 1) while the low six bits
+            // retain the AMOCAS.W/D operation encoding.
+            data.fu_op_type = static_cast<std::uint16_t>(transaction.op) |
+                static_cast<std::uint16_t>(data_index << 6);
+            bool accepted = false;
+            for (unsigned cycle = 0; cycle < timeout; ++cycle) {
+                generated::drive_scalar_store_data(
+                    dut_, transaction.data_lane, data);
+                dut_.RefreshComb();
+                const bool ready = generated::scalar_store_data_ready(
+                    dut_, transaction.data_lane);
+                tick();
+                if (ready) {
+                    accepted = true;
+                    generated::clear_scalar_store_issue_valids(dut_);
+                    break;
+                }
+                if (!check_components()) {
+                    generated::clear_scalar_store_issue_valids(dut_);
+                    return false;
+                }
+            }
+            if (!accepted) {
+                generated::clear_scalar_store_issue_valids(dut_);
+                error_ = "atomic data issue timed out waiting for ready";
+                return false;
+            }
+        }
+        return check_components();
+    }
+
     bool warm_store_translation(
         const StoreTransaction &transaction, unsigned timeout = 512)
     {
@@ -2646,6 +4080,24 @@ public:
         }
         if (ptw_agent_.request_count() < target) {
             error_ = "timed out waiting for page-table walk request";
+            return false;
+        }
+        return check_components();
+    }
+
+    bool run_until_uncache_requests(
+        std::uint64_t target, unsigned timeout = 4096)
+    {
+        for (unsigned cycle = 0;
+             cycle < timeout && uncache_agent_.request_count() < target;
+             ++cycle) {
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        if (uncache_agent_.request_count() < target) {
+            error_ = "timed out waiting for target Uncache request count";
             return false;
         }
         return check_components();
@@ -2789,7 +4241,8 @@ public:
             message << "timed out waiting for mixed memory writebacks"
                     << " scalar_load_pending=" << scoreboard_.pending()
                     << " scalar_store_pending=" << store_scoreboard_.pending()
-                    << " vector_pending=" << vector_scoreboard_.pending();
+                    << " vector_pending=" << vector_scoreboard_.pending()
+                    << scoreboard_.pending_summary();
             error_ = message.str();
             return false;
         }
@@ -2882,13 +4335,22 @@ public:
             error_ = message.str();
             return false;
         }
-        const std::uint64_t address = transaction.oracle_address.value_or(
+        const std::uint64_t raw_address = transaction.oracle_address.value_or(
             transaction.address);
-        const unsigned bytes = 1U << static_cast<unsigned>(transaction.op);
+        const std::uint64_t address = transaction.op == StoreOp::cbo_zero
+            ? raw_address & ~std::uint64_t{63}
+            : raw_address;
+        // CBO.ZERO is encoded as 0x7 but architecturally covers one cache
+        // line, not a 128-byte scalar transfer.
+        const unsigned bytes = transaction.op == StoreOp::cbo_zero
+            ? 64U
+            : 1U << static_cast<unsigned>(transaction.op);
         for (unsigned byte = 0; byte < bytes; ++byte) {
-            memory_.write_byte(
+            memory_.write_reference_byte(
                 address + byte,
-                static_cast<std::uint8_t>(transaction.data >> (8 * byte)));
+                transaction.op == StoreOp::cbo_zero
+                    ? 0
+                    : static_cast<std::uint8_t>(transaction.data >> (8 * byte)));
         }
         return true;
     }
@@ -2932,12 +4394,46 @@ public:
             const std::uint64_t element_address =
                 vector_element_address(transaction, element);
             for (unsigned byte = 0; byte < element_bytes; ++byte) {
-                memory_.write_byte(
+                memory_.write_reference_byte(
                     element_address + byte,
                     transaction.data[element * element_bytes + byte]);
             }
         }
         return true;
+    }
+
+    // Stress bursts advance pendingPtr to retire a whole ROB window at once.
+    // Keep the architectural reference image synchronized with those DUT
+    // commits without issuing a second commit pulse for every store.
+    void record_committed_store(const StoreTransaction &transaction)
+    {
+        const std::uint64_t address = transaction.oracle_address.value_or(
+            transaction.address);
+        const unsigned bytes = 1U << static_cast<unsigned>(transaction.op);
+        for (unsigned byte = 0; byte < bytes; ++byte) {
+            memory_.write_reference_byte(
+                address + byte,
+                static_cast<std::uint8_t>(transaction.data >> (8 * byte)));
+        }
+    }
+
+    void record_committed_vector_store(
+        const VectorMemoryTransaction &transaction)
+    {
+        const unsigned element_bytes = 1U << transaction.eew;
+        const unsigned elements = 16U >> transaction.eew;
+        const std::uint16_t active = active_vector_elements(transaction);
+        for (unsigned element = 0; element < elements; ++element) {
+            if (((active >> element) & 1U) == 0) {
+                continue;
+            }
+            const std::uint64_t address = vector_element_address(transaction, element);
+            for (unsigned byte = 0; byte < element_bytes; ++byte) {
+                memory_.write_reference_byte(
+                    address + byte,
+                    transaction.data[element * element_bytes + byte]);
+            }
+        }
     }
 
     bool commit_stores_through(
@@ -3200,6 +4696,7 @@ private:
     }
 
     UTMemBlock dut_;
+    SparseMemory bus_memory_;
     SparseMemory memory_;
     TileLinkMemoryAgent memory_agent_;
     PtwMemoryAgent ptw_agent_;
@@ -3221,9 +4718,15 @@ private:
     std::unordered_map<std::uint64_t, std::uint64_t> next_page_table_;
     std::unordered_map<std::uint64_t, std::uint64_t> sv39_l1_tables_;
     std::unordered_map<std::uint64_t, std::uint64_t> sv39_l0_tables_;
+    std::unordered_map<std::uint64_t, std::uint64_t> sv48_l2_tables_;
+    std::unordered_map<std::uint64_t, std::uint64_t> sv48_l1_tables_;
+    std::unordered_map<std::uint64_t, std::uint64_t> sv48_l0_tables_;
     std::unordered_map<std::uint64_t, std::uint64_t> next_gstage_page_table_;
     std::unordered_map<std::uint64_t, std::uint64_t> gstage_l1_tables_;
     std::unordered_map<std::uint64_t, std::uint64_t> gstage_l0_tables_;
+    std::unordered_map<std::uint64_t, std::uint64_t> gstage_sv48_l2_tables_;
+    std::unordered_map<std::uint64_t, std::uint64_t> gstage_sv48_l1_tables_;
+    std::unordered_map<std::uint64_t, std::uint64_t> gstage_sv48_l0_tables_;
     std::string error_;
 };
 

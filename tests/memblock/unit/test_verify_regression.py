@@ -44,6 +44,8 @@ def mixed_result(seed: int) -> dict[str, object]:
         "eew_store": "1,1,1,1",
         "vec_load_modes": "1,1,1,1",
         "vec_store_modes": "1,1,1,1",
+        "vec_load_stride": "1,1,1",
+        "vec_store_stride": "1,1",
         "prefetch": "1,1,1",
         "masked": 2,
         "unmasked": 4,
@@ -56,6 +58,8 @@ def mixed_result(seed: int) -> dict[str, object]:
         "forwarding": "1,1,1,1",
         "memory_types": "5,2",
         "dcache": "1,1",
+        "dispatch_widths": "1,1,1,1,1,1",
+        "dispatch_lanes": "1,1,1,1,1,1",
         "tlb_reuse": 1,
         "redirects": 1,
         "dirty": 1,
@@ -75,6 +79,8 @@ def mixed_result(seed: int) -> dict[str, object]:
         "returncode": 0,
         "output": "",
         "elapsed_seconds": 0.1,
+        "submitted_offset_seconds": float(seed - 7) / 10,
+        "completed_offset_seconds": 4.5 + float(seed - 7) / 2,
         "command": [
             "/frozen/memblock_sim",
             "--test",
@@ -93,7 +99,9 @@ def regression_document(results: list[dict[str, object]]) -> dict[str, object]:
     external_hashes = {"/lib/system.so": "e" * 64}
     controller_hashes = {"runner": "f" * 64, "rtl_metadata": "1" * 64}
     return {
-        "schema_version": 1,
+        "schema_version": 2,
+        "campaign_status": "complete",
+        "run_id": "0123456789abcdef0123456789abcdef",
         "started_at": "2026-01-01T00:00:00+00:00",
         "finished_at": "2026-01-01T00:00:05+00:00",
         "elapsed_seconds": 5.0,
@@ -162,6 +170,26 @@ class VerifyRegressionTest(unittest.TestCase):
         self.assertEqual(verified["first_seed"], 7)
         self.assertEqual(verified["last_seed"], 8)
 
+    def test_allow_finite_campaign_without_duration_deadline(self) -> None:
+        document = regression_document([mixed_result(7), mixed_result(8)])
+        document["configuration"]["duration_seconds"] = None
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "finite.json"
+            path.write_text(json.dumps(document), encoding="utf-8")
+            verified = verify_regression.verify_regression(
+                path,
+                min_duration_seconds=4,
+                min_results=2,
+                expected_scenario="random-mixed",
+                expected_transactions=64,
+                expected_rtl_sha256=RTL_HASH,
+                require_backpressure=True,
+                require_frozen_runtime=True,
+                expected_jobs=8,
+                allow_finite=True,
+            )
+            self.assertEqual(verified["result_count"], 2)
+
     def test_controller_file_hash_is_checked_when_requested(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "source.cpp"
@@ -209,9 +237,38 @@ class VerifyRegressionTest(unittest.TestCase):
                     require_frozen_runtime=True,
                 )
 
+    def test_rejects_running_campaign_marker(self) -> None:
+        document = regression_document([mixed_result(7), mixed_result(8)])
+        document["campaign_status"] = "running"
+        with self.assertRaisesRegex(verify_regression.VerificationError, "not complete"):
+            self.verify(document)
+
+    def test_rejects_nonfinite_elapsed_time(self) -> None:
+        document = regression_document([mixed_result(7), mixed_result(8)])
+        document["elapsed_seconds"] = float("nan")
+        with self.assertRaisesRegex(verify_regression.VerificationError, "not finite"):
+            self.verify(document)
+
+    def test_requires_a_result_after_duration_deadline(self) -> None:
+        first = mixed_result(7)
+        second = mixed_result(8)
+        first["completed_offset_seconds"] = 3.0
+        second["completed_offset_seconds"] = 3.9
+        document = regression_document([first, second])
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "after the required duration"
+        ):
+            self.verify(document)
+
     def test_streaming_number_is_not_truncated_at_chunk_boundary(self) -> None:
         reader = verify_regression.StreamingJsonReader(io.StringIO("12345,"), chunk_size=2)
         self.assertEqual(reader.value(), 12345)
+        reader.expect(",")
+        reader.finish()
+
+    def test_streaming_float_is_not_truncated_before_decimal_point(self) -> None:
+        reader = verify_regression.StreamingJsonReader(io.StringIO("1234.5,"), chunk_size=5)
+        self.assertEqual(reader.value(), 1234.5)
         reader.expect(",")
         reader.finish()
 
@@ -244,6 +301,43 @@ class VerifyRegressionTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(verify_regression.VerificationError, "vec_store_modes"):
             verify_regression._check_mixed_coverage(result)
+
+    def test_stress_coverage_requires_combinations_and_outstanding_depth(self) -> None:
+        result: dict[str, object] = {
+            "stress_load_ops": "1,1,1,1,1,1,1",
+            "stress_store_ops": "1,1,1,1",
+            "stress_load_lanes": "1,1,1",
+            "stress_address_lanes": "1,1",
+            "stress_data_lanes": "1,1",
+            "stress_store_order": "1,1",
+            "stress_eew_load": "1,1,1,1",
+            "stress_eew_store": "1,1,1,1",
+            "stress_vec_load_modes": "1,1,1,0",
+            "stress_vec_store_modes": "1,1,1,0",
+            "stress_vec_lanes": "1,1",
+            "stress_prefetch": "1,1,1",
+            "stress_vstart": "1,1",
+            "stress_vl": "1,1",
+            "stress_alignment": "1,1",
+            "stress_forwarding": "1,1",
+            "stress_dcache": "1,1",
+            "stress_combinations": "1,1,1,1",
+            "stress_masked": 1,
+            "stress_unmasked": 1,
+            "stress_misaligned": 1,
+            "stress_waves": 4,
+            "stress_regions": 2,
+            "stress_max_outstanding": 10,
+            "stress_actions": 96,
+            "transactions": 96,
+            "stress_backpressure": "1,1,0,0,0,0",
+        }
+        verify_regression._check_stress_coverage(result, require_backpressure=True)
+        result["stress_combinations"] = "1,1,1,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "stress_combinations"
+        ):
+            verify_regression._check_stress_coverage(result)
 
     def test_rejects_missing_scalar_store_issue_order(self) -> None:
         result = mixed_result(7)
@@ -336,6 +430,9 @@ class VerifyRegressionTest(unittest.TestCase):
             "status": "pass",
             "returncode": 0,
             "output": "",
+            "elapsed_seconds": 0.1,
+            "submitted_offset_seconds": 0.0,
+            "completed_offset_seconds": 5.0,
             "command": [
                 "/frozen/memblock_sim",
                 "--test",

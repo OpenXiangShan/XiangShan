@@ -29,6 +29,15 @@ class GenerateCppTest(unittest.TestCase):
         self.assertIn("drive_pin_space_pattern", rendered)
         self.assertIn("verify_pin_space_pattern", rendered)
         self.assertIn("sample_all_outputs", rendered)
+        self.assertIn("std::uint32_t exception_mask = 0;", rendered)
+        self.assertIn("std::uint8_t trigger = 15;", rendered)
+        self.assertIn("bool predecode_rvc = false;", rendered)
+        self.assertIn("item.store_set_hit", rendered)
+        self.assertIn("item.ftq_ptr", rendered)
+        self.assertIn("dut.io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_0.ImmSet((item.exception_mask >> 0) & 1U)", rendered)
+        self.assertIn("dut.io_ooo_to_mem_enqLsq_req_0_bits_trigger.ImmSet(item.trigger)", rendered)
+        self.assertIn("result.is_from_load_unit = dut.io_mem_to_ooo_writebackLda_0_bits_isFromLoadUnit.B();", rendered)
+        self.assertIn("result.debug_is_mmio = dut.io_mem_to_ooo_writebackVldu_0_bits_debug_isMMIO.B();", rendered)
         self.assertIn("dut.auto_inner_buffers_out_a_ready.ImmSet(pin_pattern_u64", rendered)
         self.assertIn(
             "dut.auto_inner_dcache_client_out_d_bits_data.ImmSetBytes", rendered

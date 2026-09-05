@@ -8,11 +8,15 @@ import concurrent.futures
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import platform
+import signal
 import subprocess
 import sys
+import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -29,14 +33,33 @@ DEFAULT_SCENARIOS = (
     "random-mixed",
 )
 BOUNDARY_HUNT_SCENARIO = "random-boundary-hunt"
+STRESS_SCENARIO = "random-stress"
 DEFAULT_JOBS = 8
 MINIMUM_MIXED_TRANSACTIONS = 128
-DEFAULT_MIXED_TRANSACTIONS = 512
-SUPPORTED_SCENARIOS = frozenset((*DEFAULT_SCENARIOS, BOUNDARY_HUNT_SCENARIO))
+DEFAULT_TRANSACTIONS = 16384
+DEFAULT_MIXED_TRANSACTIONS = 16384
+DEFAULT_TIMEOUT_SECONDS = 1800
+MAX_CAPTURED_OUTPUT_BYTES = 16000
+SUPPORTED_SCENARIOS = frozenset(
+    (*DEFAULT_SCENARIOS, BOUNDARY_HUNT_SCENARIO, STRESS_SCENARIO)
+)
 RUNTIME_ROLES = frozenset({"binary", "model", "xspcomm"})
 FORWARDING_SCENARIOS = frozenset(
     {"random-forwarding", "random-vector-forwarding"}
 )
+TERMINAL_MARKERS = {
+    "random-loads": "MEMBLOCK_RANDOM",
+    "random-forwarding": "MEMBLOCK_RANDOM_FORWARD",
+    "random-vector-loads": "MEMBLOCK_RANDOM_VECTOR",
+    "random-vector-forwarding": "MEMBLOCK_RANDOM_VECTOR_FORWARD",
+    "random-mixed": "MEMBLOCK_RANDOM_MIXED",
+    STRESS_SCENARIO: "MEMBLOCK_RANDOM_STRESS",
+    BOUNDARY_HUNT_SCENARIO: "MEMBLOCK_RANDOM_BOUNDARY_HUNT",
+}
+COMPLETED_TRANSACTION_CAPS = {
+    "random-forwarding": 48,
+    "random-vector-forwarding": 24,
+}
 
 
 def transaction_count_for_scenario(
@@ -45,25 +68,48 @@ def transaction_count_for_scenario(
     forwarding_transactions: int,
     mixed_transactions: int = DEFAULT_MIXED_TRANSACTIONS,
 ) -> int:
-    if scenario == "random-mixed":
+    if scenario in ("random-mixed", STRESS_SCENARIO):
         return mixed_transactions
     if scenario == BOUNDARY_HUNT_SCENARIO:
         return transactions
     return forwarding_transactions if scenario in FORWARDING_SCENARIOS else transactions
 
 
-def parse_summary(output: str) -> dict[str, Any]:
+def completed_transaction_count(scenario: str, requested: int) -> int:
+    cap = COMPLETED_TRANSACTION_CAPS.get(scenario)
+    return requested if cap is None else min(requested, cap)
+
+
+def parse_summary(
+    output: str,
+    *,
+    expected_scenario: str | None = None,
+    expected_seed: int | None = None,
+    expected_transactions: int | None = None,
+) -> dict[str, Any]:
     lines = [line.strip() for line in output.splitlines() if line.strip()]
-    summaries = [
-        line
-        for line in lines
-        if line.startswith("MEMBLOCK_RANDOM_")
-        and (line.split()[0].endswith("_PASS") or line.split()[0].endswith("_FAIL"))
-    ]
+    valid_tokens = {
+        marker + suffix
+        for marker in TERMINAL_MARKERS.values()
+        for suffix in ("_PASS", "_FAIL")
+    }
+    summaries = [line for line in lines if line.split()[0] in valid_tokens]
     if not summaries:
         raise RegressionError("simulation output has no MEMBLOCK_RANDOM summary")
-    fields: dict[str, Any] = {"summary": summaries[-1]}
-    words = summaries[-1].split()
+    if len(summaries) != 1:
+        raise RegressionError(
+            f"simulation output has {len(summaries)} terminal summaries, expected one"
+        )
+    fields: dict[str, Any] = {"summary": summaries[0]}
+    words = summaries[0].split()
+    if expected_scenario is not None:
+        expected_marker = TERMINAL_MARKERS.get(expected_scenario)
+        if expected_marker is None:
+            raise RegressionError(f"unsupported expected scenario: {expected_scenario}")
+        if words[0] not in (expected_marker + "_PASS", expected_marker + "_FAIL"):
+            raise RegressionError(
+                f"terminal summary {words[0]} does not match {expected_scenario}"
+            )
     fields["status"] = "pass" if words[0].endswith("_PASS") else "fail"
     for word in words[1:]:
         if "=" not in word:
@@ -73,6 +119,14 @@ def parse_summary(output: str) -> dict[str, Any]:
             fields[key] = int(value, 0)
         except ValueError:
             fields[key] = value
+    for name, expected in (
+        ("seed", expected_seed),
+        ("transactions", expected_transactions),
+    ):
+        if expected is not None and fields.get(name) != expected:
+            raise RegressionError(
+                f"terminal summary {name} is {fields.get(name)!r}, expected {expected}"
+            )
     return fields
 
 
@@ -183,6 +237,41 @@ def verify_runtime_metadata(path: Path) -> dict[str, Any]:
     }
 
 
+def _run_process(
+    command: list[str], timeout_seconds: float, environment: dict[str, str] | None
+) -> tuple[int | None, str, bool]:
+    with tempfile.TemporaryFile(mode="w+b") as output_file:
+        process = subprocess.Popen(
+            command,
+            stdout=output_file,
+            stderr=subprocess.STDOUT,
+            env=environment,
+            start_new_session=True,
+        )
+        timed_out = False
+        try:
+            process.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
+        output_file.flush()
+        size = output_file.seek(0, os.SEEK_END)
+        output_file.seek(max(0, size - MAX_CAPTURED_OUTPUT_BYTES))
+        output = output_file.read().decode(errors="replace")
+        return (None if timed_out else process.returncode), output, timed_out
+
+
 def run_seed(
     binary: Path,
     seed: int,
@@ -211,32 +300,32 @@ def run_seed(
     if hunt_boundaries:
         command.append("--hunt-boundaries")
     started = time.monotonic()
-    try:
-        completed = subprocess.run(
-            command,
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=timeout_seconds,
-            env=environment,
-        )
-        output = completed.stdout
+    returncode, output, timed_out = _run_process(
+        command, timeout_seconds, environment
+    )
+    if not timed_out:
         try:
-            result = parse_summary(output)
+            result = parse_summary(
+                output,
+                expected_scenario=scenario,
+                expected_seed=seed,
+                expected_transactions=completed_transaction_count(
+                    scenario,
+                    transaction_count_for_scenario(
+                        scenario,
+                        transactions,
+                        forwarding_transactions,
+                        mixed_transactions,
+                    ),
+                ),
+            )
         except RegressionError as error:
             result = {"status": "error", "error": str(error)}
-        result["returncode"] = completed.returncode
-        if completed.returncode != 0 and result["status"] == "pass":
+        result["returncode"] = returncode
+        if returncode != 0 and result["status"] == "pass":
             result["status"] = "error"
             result["error"] = "simulation returned nonzero after a pass summary"
-    except subprocess.TimeoutExpired as error:
-        def _timeout_text(value: str | bytes | None) -> str:
-            if value is None:
-                return ""
-            return value.decode(errors="replace") if isinstance(value, bytes) else value
-
-        output = _timeout_text(error.stdout) + _timeout_text(error.stderr)
+    else:
         result = {
             "status": "timeout",
             "returncode": None,
@@ -248,7 +337,7 @@ def run_seed(
             "scenario": scenario,
             "elapsed_seconds": round(time.monotonic() - started, 6),
             "command": command,
-            "output": "" if result.get("status") == "pass" else output[-16000:],
+            "output": "" if result.get("status") == "pass" else output,
         }
     )
     return result
@@ -285,7 +374,7 @@ def main() -> int:
     parser.add_argument("--jobs", type=int, default=DEFAULT_JOBS)
     parser.add_argument("--start-seed", type=int, default=1)
     parser.add_argument("--seeds", type=int, default=8)
-    parser.add_argument("--transactions", type=int, default=1000)
+    parser.add_argument("--transactions", type=int, default=DEFAULT_TRANSACTIONS)
     parser.add_argument("--forwarding-transactions", type=int, default=48)
     parser.add_argument(
         "--mixed-transactions", type=int, default=DEFAULT_MIXED_TRANSACTIONS
@@ -294,7 +383,9 @@ def main() -> int:
         "--scenarios", default=",".join(DEFAULT_SCENARIOS),
         help="comma-separated test names",
     )
-    parser.add_argument("--timeout-seconds", type=float, default=600)
+    parser.add_argument(
+        "--timeout-seconds", type=float, default=DEFAULT_TIMEOUT_SECONDS
+    )
     parser.add_argument("--duration-seconds", type=float)
     parser.add_argument(
         "--progress-interval-seconds",
@@ -312,6 +403,22 @@ def main() -> int:
         help="continue submitting seeds after a failure for bug hunting",
     )
     args = parser.parse_args()
+    run_id = uuid.uuid4().hex
+    invoked_at = dt.datetime.now(dt.timezone.utc)
+    try:
+        write_results(
+            args.output,
+            {
+                "schema_version": 2,
+                "campaign_status": "running",
+                "run_id": run_id,
+                "started_at": invoked_at.isoformat(),
+                "results": [],
+            },
+        )
+    except OSError as error:
+        print(f"run_regression.py: error: cannot initialize output: {error}", file=sys.stderr)
+        return 2
 
     runtime_before: dict[str, Any] | None = None
     execution_environment: dict[str, str] | None = None
@@ -324,12 +431,7 @@ def main() -> int:
                     "--binary does not match the binary in --runtime-metadata"
                 )
             execution_environment = os.environ.copy()
-            previous = execution_environment.get("LD_LIBRARY_PATH")
-            execution_environment["LD_LIBRARY_PATH"] = (
-                str(runtime_before["root"])
-                if not previous
-                else str(runtime_before["root"]) + os.pathsep + previous
-            )
+            execution_environment["LD_LIBRARY_PATH"] = str(runtime_before["root"])
             execution_environment["LD_BIND_NOW"] = "1"
         else:
             binary = (args.binary or default_binary).resolve()
@@ -340,11 +442,16 @@ def main() -> int:
         print(f"run_regression.py: error: binary is not executable: {binary}", file=sys.stderr)
         return 2
     scenarios = [scenario.strip() for scenario in args.scenarios.split(",") if scenario.strip()]
-    if not scenarios or set(scenarios) - SUPPORTED_SCENARIOS:
+    if (
+        not scenarios
+        or len(set(scenarios)) != len(scenarios)
+        or set(scenarios) - SUPPORTED_SCENARIOS
+    ):
         print("run_regression.py: error: unsupported or empty scenarios", file=sys.stderr)
         return 2
     if (
         args.jobs < 1
+        or args.start_seed < 0
         or args.seeds < 1
         or args.transactions < 1
         or args.forwarding_transactions < 1
@@ -357,10 +464,16 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    if args.timeout_seconds <= 0 or (
-        args.duration_seconds is not None and args.duration_seconds <= 0
-    ) or args.progress_interval_seconds < 0:
-        print("run_regression.py: error: durations must be positive", file=sys.stderr)
+    duration_values = [args.timeout_seconds, args.progress_interval_seconds]
+    if args.duration_seconds is not None:
+        duration_values.append(args.duration_seconds)
+    if (
+        not all(math.isfinite(value) for value in duration_values)
+        or args.timeout_seconds <= 0
+        or (args.duration_seconds is not None and args.duration_seconds <= 0)
+        or args.progress_interval_seconds < 0
+    ):
+        print("run_regression.py: error: durations must be finite and positive", file=sys.stderr)
         return 2
     try:
         complete_rtl_hash = (
@@ -399,7 +512,7 @@ def main() -> int:
         print(f"run_regression.py: error: {error}", file=sys.stderr)
         return 2
 
-    started_wall = dt.datetime.now(dt.timezone.utc)
+    started_wall = invoked_at
     started = time.monotonic()
     deadline = None if args.duration_seconds is None else started + args.duration_seconds
     results: list[dict[str, Any]] = []
@@ -408,7 +521,9 @@ def main() -> int:
     last_progress = started
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as executor:
-        pending: dict[concurrent.futures.Future[dict[str, Any]], int] = {}
+        pending: dict[
+            concurrent.futures.Future[dict[str, Any]], tuple[int, float]
+        ] = {}
 
         def submit() -> None:
             nonlocal next_case
@@ -427,7 +542,7 @@ def main() -> int:
                 execution_environment,
                 args.hunt_boundaries,
             )
-            pending[future] = next_case
+            pending[future] = (next_case, time.monotonic() - started)
             next_case += 1
 
         requested_cases = args.seeds * len(scenarios)
@@ -440,10 +555,12 @@ def main() -> int:
                 pending, return_when=concurrent.futures.FIRST_COMPLETED
             )
             for future in done:
-                pending.pop(future)
+                _, submitted_offset = pending.pop(future)
                 result = future.result()
-                results.append(result)
                 now = time.monotonic()
+                result["submitted_offset_seconds"] = round(submitted_offset, 6)
+                result["completed_offset_seconds"] = round(now - started, 6)
+                results.append(result)
                 if result["status"] != "pass" or args.progress_interval_seconds == 0:
                     print(
                         result.get(
@@ -511,7 +628,9 @@ def main() -> int:
     )
     rtl_hash_consistent = complete_rtl_hash is None or rtl_hashes == [complete_rtl_hash]
     document = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "campaign_status": "complete",
+        "run_id": run_id,
         "started_at": started_wall.isoformat(),
         "finished_at": finished_wall.isoformat(),
         "elapsed_seconds": round(time.monotonic() - started, 6),

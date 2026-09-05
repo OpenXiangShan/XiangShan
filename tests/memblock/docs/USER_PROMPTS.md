@@ -1,66 +1,160 @@
 # User Prompts
 
-This file records the user requests issued during the MemBlock verification
-work. The original `/goal` is reproduced first, followed by the later requests
-in conversation order. Command-only follow-ups are listed separately from
-natural-language requirements.
+This file records every user prompt from the two Codex sessions that performed
+the MemBlock verification work. Entries are copied verbatim from
+`/home/xuyinan/.codex/history.jsonl` and kept in chronological order, including
+repeated commands and incomplete input. Timestamps use `Asia/Shanghai` (`CST`,
+UTC+08:00).
 
-## Initial `/goal` (verbatim)
+## Earlier Session: 44 Prompts
 
-The earliest MemBlock goal was recovered from the local Codex history record
-for this thread. It is reproduced below rather than paraphrased:
+Session: `01a051f8-7787-7003-b87a-79852aa669a7`.
 
-```text
-/goal XiangShan是一个高性能CPU。我现在想针对这个CPU的MemBlock（主要包含LSU和Dcache）做block level testing。请你详细阅读代码，基于make verilog出来的verilog代码，（1）分析memblock的端口信息，分解出可行的随机测试激励维度，尝试在IO层找到验证variant（assert，比如未被刷新的指令一定会执行完成且数据正确），并找到端口的约束（assume）；（2）测试是否可以用github XS-MLVP项目里面的UT框架，快速搭建其一套测试环境，最好是基于C++或者python的，这样维护起来比较方便；（3）基于UVM的验证方法学，合理确定软件架构，实现memblock BT测试环境，放在tests/memblock目录下；（4）确认BT框架是否能够正确运行，并修正所有false positive/negative，持续进行仿真；（5）对memblock进行BT测试，尽可能多地进行仿真测试，可以用本CPU的8线程进行仿真（如果8线程更快的话）。（6）整理tests/memblock测试框架代码，并将运行的随机BT测试结果报告给我，仿真测试时长需要超过4个小时。在测试过程中，如果你发现有CPU BUG，需要记录并修复，每个修复独立一个commit，同时汇总形成BUG修复报告给我
-```
+1. [`2026-08-30 17:27:38 CST`] `/goal XiangShan是一个高性能CPU。我现在想针对这个CPU的MemBlock（主要包含LSU和Dcache）做block level testing。请你详细阅读代码，基于make verilog出来的verilog代码，（1）分析memblock的端口信息，分解出可行的随机测试激励维度，尝试在IO层找到验证variant（assert，比如未被刷新的指令一定会执行完成且数据正确），并找到端口的约束（assume）；（2）测试是否可以用github XS-MLVP项目里面的UT框架，快速搭建其一套测试环境，最好是基于C++或者python的，这样维护起来比较方便；（3）基于UVM的验证方法学，合理确定软件架构，实现memblock BT测试环境，放在tests/memblock目录下；（4）确认BT框架是否能够正确运行，并修正所有false positive/negative，持续进行仿真；（5）对memblock进行BT测试，尽可能多地进行仿真测试，可以用本CPU的8线程进行仿真（如果8线程更快的话）。（6）整理tests/memblock测试框架代码，并将运行的随机BT测试结果报告给我，仿真测试时长需要超过4个小时。在测试过程中，如果你发现有CPU BUG，需要记录并修复，每个修复独立一个commit，同时汇总形成BUG修复报告给我`
 
-Source: `/home/xuyinan/.codex/history.jsonl`, session
-`01a051f8-7787-7003-b87a-79852aa669a7`.
+2. [`2026-08-30 18:58:41 CST`] `you should ensure things like vectored load/store is tested`
 
-## Consolidated Goal (reconstructed)
+3. [`2026-08-30 19:00:03 CST`] `You should check all IO pins and extensively explore their possible values to maximize input space and avoid missing tests`
 
-The later requests refine the initial goal into a defensive MemBlock/LSU
-functional-verification environment that mixes scalar and vector memory traffic
-under constrained-random control, exercises cache/TLB/translation/virtualiza-
-tion/misalignment/backpressure and queue-wrap conditions, uses explicit
-design-independent scoreboards and memory oracles, audits and reproduces
-relevant LSU bug fixes since January, and can sustain a long campaign of at
-least six hours without weakening failure detection.
+4. [`2026-08-30 20:41:35 CST`] `既然你跑了这么久没有BUG，请你同时回头看一下kunminghu-v2自今年1月开始的bug fix历史，挑选一些memblock的问题，尝试revert并看你的UT是否能测试出来吧。请不要停止工作直到memblock测试环境能够复现出他们。`
 
-The goal is processor functional verification and defensive validation, not an
-attack or security exploit. This paragraph is a summary, not a recovered quote.
+5. [`2026-08-30 21:16:56 CST`] `我们不是在尝试攻击，而是在尝试完成处理器的功能验证，做防御。请继续工作`
 
-## Later Requirements
+6. [`2026-08-30 21:18:47 CST`] `/goal resume`
 
-1. `you should ensure things like vectored load/store is tested`
+7. [`2026-08-31 09:35:02 CST`] `/goal resume`
 
-2. `You should check all IO pins and extensively explore their possible values to maximize input space and avoid missing tests`
+8. [`2026-08-31 10:45:41 CST`] `/goal resume`
 
-3. `既然你跑了这么久没有BUG，请你同时回头看一下kunminghu-v2自今年1月开始的bug fix历史，挑选一些memblock的问题，尝试revert并看你的UT是否能测试出来吧。请不要停止工作直到memblock测试环境能够复现出他们。`
+9. [`2026-08-31 11:07:51 CST`] `/goal resume`
 
-4. `我们不是在尝试攻击，而是在尝试完成处理器的功能验证，做防御。请继续工作。`
+10. [`2026-08-31 13:53:39 CST`] `/goal resume`
 
-5. `我看了一下你的测试，random-loads, random-vector-loads等等，这些可以继续混合发吗？就是各种loads/store/vector-load/vector-store甚至现在未覆盖的指令类型，以及dcache/tlb等等各种场景，都混合在一起发，可以吗。如果可以的话，你需要先增强一下现有的UT框架，尽可能完善覆盖各种LSU测试场景。在此基础上，一方面保证完善的测试能持续运行4小时以上，另一方面要尽可能发现CPU的功能BUG，用于CPU防御性验证。`
+11. [`2026-08-31 19:52:39 CST`] `/goal 我看了一下你的测试，random-loads, random-vector-loads等等，这些可以继续混合发吗？就是各种loads/store/vector-load/vector-store甚至现在未覆盖的指令类型，以及dcache/tlb等等各种场景，都混合在一起发，可以吗。如果可以的话，你需要先增强一下现有的UT框架，尽可能完善覆盖各种LSU测试场景。在此基础上，一方面保证完善的测试能持续运行4小时以上，另一方面要尽可能发现CPU的功能BUG，用于CPU防御性验证`
 
-6. `我看了一下，觉得1. 验证覆盖还是不够多，包括各种指令的类型、虚拟化的情况、cache miss的情况，可能需要有更多的激励进来；2. 验证计划里面的contract/oracle似乎不够明确，最好是一些清晰、长期没问题的oracle，而尽可能避免特定design detail里面的约束。3. 你前面说的非对齐等场景，需要添加验证用例。4. 最后的UT测试，请加大到6小时没问题，尽可能多得跑更长的用例，覆盖多样的压力场景。`
+12. [`2026-08-31 19:52:44 CST`] `我看了一下你的测试，random-loads, random-vector-loads等等，这些可以继续混合发吗？就是各种loads/store/vector-load/vector-store甚至现在未覆盖的指令类型，以及dcache/tlb等等各种场景，都混合在一起发，可以吗。如果可以的话，你需要先增强一下现有的UT框架，尽可能完善覆盖各种LSU测试场景。在此基础上，一方面保证完善的测试能持续运行4小时以上，另一方面要尽可能发现CPU的功能BUG，用于CPU防御性验证`
 
-7. `我看了一下，你还是在跑单独的用例，但是这样很难撞出问题。你需要同时把所有可能的激励都混合进去，然后基于constrained random的思路来持续跑UT测试，而且长度也要放到更长，而不是跑一些短用例自娱自乐。`
+13. [`2026-09-01 09:52:32 CST`] `我看了一下，觉得1. 验证覆盖还是不够多，包括各种指令的类型、虚拟化的情况、cache miss的情况，可能需要有更多的激励进来；2. 验证计划里面的contract/oracle似乎不够明确，最好是一些清晰、长期没问题的oracle，而尽可能避免特定design detail里面的约束。3. 请你再检查一次1月到现在的comit，应该有很多是LSU内部的bug，都请你确认现在的测试能否复现，如果不能的话，需要基于他们的情况再完善当前这个UT验证框架。4. 你前面说的非对齐等场景，需要添加验证用例。5. 最后的UT测试，请加大到6小时没问题，尽可能多得跑更长的用例，覆盖多样的压力场景。`
 
-8. `continue`
+14. [`2026-09-01 19:22:52 CST`] `我看了一下，你还是在跑单独的用例，但是这样很难撞出问题。你需要同时把所有可能的激励都混合进去，然后基于constrained random的思路来持续跑UT测试，而且长度也要放到更长，而不是跑一些短用例自娱自乐。`
 
-9. `不要停止现有工作。把我历史prompt输出到文档给我，这样我好知道我都发出了哪些命令。`
+15. [`2026-09-02 09:46:43 CST`] `continue`
 
-## Command-Only Follow-Ups
+16. [`2026-09-02 12:47:12 CST`] `不要停止现有工作。把我历史prompt输出到文档给我，这样我好知道我都发出了哪些命令`
 
-These commands continued or resumed the same MemBlock goal and are included
-because they affect the requested work history:
+17. [`2026-09-02 12:48:39 CST`] `我看了一下这个文件，里面没有一开始的/goal？`
 
-1. `/goal resume`
-2. `/goal resume`
-3. `/goal resume`
-4. `/goal resume`
-5. `/goal resume`
+18. [`2026-09-02 12:49:57 CST`] `我怎么觉得一开始的对话还是修了。我最开始是写一个UT的goal的`
 
-The first five entries were issued after the initial goal and before the later
-requirements above. The exact original `/goal` text is the authoritative record;
-the consolidated paragraph is intentionally labeled as reconstructed.
+19. [`2026-09-02 12:50:17 CST`] `丢了`
+
+20. [`2026-09-02 15:22:22 CST`] `我看--transactions 512比较小，能每一个跑长一些吗`
+
+21. [`2026-09-02 16:16:38 CST`] `你这个是不是不太对呀，因为我看你也没改香山的代码，那为啥UT一直能通过呢？不是已经找到一个BUG了，理论上它会一直有报错吧`
+
+22. [`2026-09-02 16:21:06 CST`] `我的意思不是针对这一个known bug，而是在质疑，为什么你运行的这些测试没有触发这个BUG。UT验证应该秉持contrained random策略，尽可能覆盖不同的场景，撞出BUG。你之前已经找到一个能撞出BUG的case，但应该还有其他很多的case也能撞出。那为什么你跑了那么久的UT，却没有再次遇到这个问题呢？可能需要重新思考一下现有UT运行用例是否在做无用功，然后让他能够尽可能多地测试不同场景，撞出新问题`
+
+23. [`2026-09-02 16:24:40 CST`] `对，你不能把case写死，而是要通过constrained random来随机生成用例`
+
+24. [`2026-09-02 16:36:14 CST`] `我觉得你该把之前不报错的都停了。2个小时都跑不出已知有BUG的问题，没有必要测了。你需要重新review UT框架，确保基于constrained random策略来完成设计，通过随机覆盖不同的场景，这样长时间运行才能覆盖新的点，才有测试价值。`
+
+25. [`2026-09-02 16:46:38 CST`] `不只是新的 harness 已成功编译。现在做关键验收：运行 constrained-random boundary-hunt（不是固定 offset），让每个 seed 随机生成多组 VS-non-leaf fault 边界组合这个的随机，你应该给各种东西都加上随机生成，类型、延迟、地址、数据等等`
+
+26. [`2026-09-02 17:38:54 CST`] `我的意思不是说“只约
+  束到能形成合法 Sv39x4 VS-non-leaf fault”，而是你应该根据memblock所有IO的约束，形成一个覆盖任意合法场景的随机测试用例，这个场景本身的case分布是可以带约束的。这个不是为了复现之前的bug，而是说理论上这个测试应该能触发之前的BUG。我是觉得，你可能需要先确保你的UT能触发BUG，这样说明至少UT是有用的；其次，把这个BUG修复掉之后，UT如果还能发现新BUG，那是真的说明有用了。一直这样持续下去，不断review自身的UT设计、不断跑新的测试，这样就能持续下去了`
+
+27. [`2026-09-02 18:06:42 CST`] `倒也不用每个seed都击中，只要能复现就行，复现之后就可以把它修掉之后继续深入跑测试了`
+
+28. [`2026-09-02 21:36:03 CST`] `除了之前那个页表的错误，还有发现其他cpu bug吗`
+
+29. [`2026-09-03 10:20:03 CST`] `1. 需要基于前面的说法，包括“不代表 MMIO、atomics、VSegment 等明确边界外功能已经验证”，完善地补充验证计划，将所有能想到的测试点都补充进去。2. review 验证oracle，也就是如何判断结果的正确性，不应该基于特定的case结果，而是一些通用的oracle，你需要将你用了哪些oracle告诉我，写进单独的文档里。3. 每次完成后，需要用一个独立上下文的agent review验证计划，然后再启动长时间的单元测试回归。`
+
+30. [`2026-09-03 19:57:38 CST`] `continue`
+
+31. [`2026-09-03 19:57:51 CST`] `continue`
+
+32. [`2026-09-03 19:58:48 CST`] `continue. Please ma`
+
+33. [`2026-09-03 19:58:56 CST`] `1. 需要基于前面的说法，包括“不代表 MMIO、atomics、VSegment 等明确边界外功能已经验证”，完善地补充验证计划，将所有能想到的测试点都补充进去。2. review 验证oracle，也就是如何判断结果的正确性，不应该基于特定的case结果，而是一些通用的oracle，你需要将你用了哪些oracle告诉我，写进单独的文档里。3. 每次完成后，需要用一个独立上下文的agent review验证计划，然后再启动长时间的单元测试回归。`
+
+34. [`2026-09-03 20:00:59 CST`] `1. 需要基于前面的说法，包括“不代表 MMIO、atomics、VSegment 等明确边界外功能已经验证”，完善地补充验证计划，将所有能想到的测试点都补充进去。2. review 验证oracle，也就是如何判断结果的正确性，不应该基于特定的case结果，而是一些通用的oracle，你需要将你用了哪些oracle告诉我，写进单独的文档里。3. 每次完成后，需要用一个独立上下文的agent review验证计划，然后再启动长时间的单元测试回归。`
+
+35. [`2026-09-03 20:01:39 CST`] `continue`
+
+36. [`2026-09-03 20:02:04 CST`] `continue`
+
+37. [`2026-09-03 20:02:45 CST`] `1. 需要基于前面的说法，包括“不代表 MMIO、atomics、VSegment 等明确边界外功能已经验证”，完善地补充验证计划，将所有能想到的测试点都补充进去。2. review 验证oracle，也就是如何判断结果的正确性，不应该基于特定的case结果，而是一些通用的oracle，你需要将你用了哪些oracle告诉我，写进单独的文档里。3. 每次完成后，需要用一个独立上下文的agent review验证计划，然后再启动长时间的单元测试回归。`
+
+38. [`2026-09-03 20:03:46 CST`] `continue`
+
+39. [`2026-09-03 20:04:32 CST`] `exit`
+
+40. [`2026-09-03 20:09:01 CST`] `continue`
+
+41. [`2026-09-03 20:09:39 CST`] `continue`
+
+42. [`2026-09-03 20:11:08 CST`] `continue`
+
+43. [`2026-09-03 20:12:03 CST`] `/goal remove`
+
+44. [`2026-09-03 20:12:19 CST`] `/goal 1. 需要基于前面的说法，包括“不代表 MMIO、atomics、VSegment 等明确边界外功能已经验证”，完善地补充验证计划，将所有能想到的测试点都补充进去。2. review 验证oracle，也就是如何判断结果的正确性，不应该基于特定的case结果，而是一些通用的oracle，你需要将你用了哪些oracle告诉我，写进单独的文档里。3. 每次完成后，需要用一个独立上下文的agent review验证计划，然后再启动长时间的单元测试回归。`
+
+## Current Session: 28 Prompts
+
+Session: `01a06732-901c-7581-be22-854bdc2f93f0`.
+
+1. [`2026-09-03 20:19:01 CST`] `/goal 当前仓库是香山CPU的设计仓库，它一定有设计BUG。现在我们有一个对memblock的UT测试，请你谨遵UVM方法学和contrained random基本理念，继续完成该UT测试框架的完善，并尽可能尝试更多的CPU BUG，包括(1) 用独立的上下文review激励覆盖度是否足够，是否有足够广泛的随机；（2）review oracle的设置是否合理，让oracle尽可能少地利用memblock内部信息，而是一些常用的IO约束进行测试；（3）不断进行UT测试，至少6个小时以上，(4) 努力发现所有的UT测试框架不足并改进，全力找到更多CPU BUG。`
+
+2. [`2026-09-03 20:20:26 CST`] `每次测试的请求数量也应该多一些，跑长一些`
+
+3. [`2026-09-03 20:22:00 CST`] `continue.我们是在做CPU验证`
+
+4. [`2026-09-04 08:41:56 CST`] `continue`
+
+5. [`2026-09-04 08:44:28 CST`] `我看了一下，似乎verification plan里面，缺了不少东西。比如地址翻译的部分，香山应该是支持sv48和sv48/sv39嵌套虚拟化的`
+
+6. [`2026-09-04 08:45:20 CST`] `可能你需要重新review一下这一块的规格，更完整地整理一下验证计划`
+
+7. [`2026-09-04 09:11:10 CST`] `单测没有很大的作用，需要的是足够大的单元测试压力，各种constrained random叠加，看看这个模块在各种corner场景下（通过随机撞出来），是否仍然功能正确。请你完善UT测试框架并可能多地进行测试`
+
+8. [`2026-09-04 10:58:31 CST`] `那你得把没实现的都实现了吧`
+
+9. [`2026-09-04 11:42:36 CST`] `/goal 请你审阅当前验证计划，并利用对MemBlock顶层IO事务各字段的理解，完善MemBlock UT测试框架。确保所有能想到的测试点都能被覆盖，并尽可能多地持续测试MemBlock模块。`
+
+10. [`2026-09-04 15:28:33 CST`] `所以前面这个是一个CPU BUG吗`
+
+11. [`2026-09-04 16:09:11 CST`] `如果是RTL BUG，你需要和VECTOR_GUEST_FAULT_SPLIT.md一样提供一个BUG的说明文档`
+
+12. [`2026-09-04 16:20:24 CST`] `我问了一下前面那个BUG，他们反馈说mmio 的元数据（包括异常）应该是直接打了三拍写回的，tlb 应该是影响不到的。是不是MMIO不走load unit这个流水线上的异常逻辑啊？`
+
+13. [`2026-09-04 16:56:33 CST`] `continue`
+
+14. [`2026-09-04 17:05:11 CST`] `continue`
+
+15. [`2026-09-04 17:07:01 CST`] `continue`
+
+16. [`2026-09-04 17:12:40 CST`] `/goal continue`
+
+17. [`2026-09-04 17:12:46 CST`] `/goal`
+
+18. [`2026-09-04 17:12:57 CST`] `continue`
+
+19. [`2026-09-04 17:46:48 CST`] `我看USER_PROMPTS.md里面没有更新了，请你把我最近的所有prompt历史都放进去吧`
+
+20. [`2026-09-04 17:59:59 CST`] `这个UT的事情，一共用了多少token呀`
+
+21. [`2026-09-04 18:00:08 CST`] `整个session从开始到现在的计算`
+
+22. [`2026-09-04 18:06:25 CST`] `累计工作时间约 21,937 秒，即 6 小时 5 分 37 秒。 这个应该只统计了当前goal的时间，但整个session我已经跑了五天了，能统计出所有token吗`
+
+23. [`2026-09-04 18:54:30 CST`] `在你验证的过程中，如果发现任何BUG，分析完成后都请尽快往docs目录里写入介绍情况哦`
+
+24. [`2026-09-05 07:14:28 CST`] `continue`
+
+25. [`2026-09-05 07:48:39 CST`] `在仿真的同时，整理一下之前的代码，把BUG修复单独commit，把UT测试框架也整理commit一下，然后push到远程的某一个分支`
+
+26. [`2026-09-05 07:49:12 CST`] `把所有prompt也都整理一下`
+
+27. [`2026-09-05 07:57:50 CST`] `另外你能把我各个prompt的时间也记录下来吗`
+
+28. [`2026-09-05 07:58:26 CST`] `把UT框架的改动也commit & push一下`

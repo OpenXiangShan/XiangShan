@@ -11,9 +11,10 @@ PREPARED_DIR := $(REPO_ROOT)/build/memblock
 PREPARED_FILELIST := $(PREPARED_DIR)/rtl.f
 PREPARED_METADATA := $(PREPARED_DIR)/rtl.json
 REGRESSION_OUTPUT ?= $(PREPARED_DIR)/regression.json
-EXTENDED_RESULT ?= $(PREPARED_DIR)/extended-mixed-frozen-4h.json
-FINAL_RESULT ?= $(PREPARED_DIR)/final-frozen-6h.json
-LONG_RESULT ?= $(PREPARED_DIR)/final-frozen-6h-4096.json
+EXTENDED_RESULT ?= $(PREPARED_DIR)/extended-mixed-frozen-6h-8192.json
+FINAL_RESULT ?= $(PREPARED_DIR)/final-frozen-8h-16384.json
+LONG_RESULT ?= $(PREPARED_DIR)/final-frozen-12h-32768.json
+STRESS_RESULT ?= $(PREPARED_DIR)/stress-frozen-1h-16384.json
 JOBS ?= 8
 PICKER_ROOT := $(PREPARED_DIR)/tools/picker
 PICKER ?= $(PICKER_ROOT)/build/bin/picker
@@ -30,9 +31,9 @@ RUNTIME_DIR := $(PREPARED_DIR)/runtime
 RUNTIME_METADATA := $(RUNTIME_DIR)/runtime.json
 CPP_MAIN := cpp/memblock_main.cpp
 CPP_ENV := cpp/memblock_env.hpp
-CONTROLLER_FILES := --controller-file $(CPP_MAIN) --controller-file $(CPP_ENV) --controller-file $(CPP_DEFAULTS) --controller-file $(SVA) --controller-file $(CONFIG) --controller-file $(VERIFY_SCRIPT) --controller-file scripts/freeze_runtime.py
+CONTROLLER_FILES := --controller-file $(CPP_MAIN) --controller-file $(CPP_ENV) --controller-file $(CPP_DEFAULTS) --controller-file $(SVA) --controller-file $(CONFIG) --controller-file $(VERIFY_SCRIPT) --controller-file scripts/freeze_runtime.py --controller-file Makefile
 
-.PHONY: ports check-ports prepare-rtl check-ports check-rtl bootstrap-picker export-picker picker-model freeze-runtime smoke pin-space single-load scalar-misaligned misaligned-stores exception-contracts two-stage-translation scalar-guest-fault vector-guest-fault vector-guest-fault-split vector-load vector-split-load vector-addressing vector-store-forwarding store-forwarding store-rdata-order store-tlb-miss-preserve dcache-release redirect queue-pressure random-loads random-vector-loads random-forwarding random-vector-forwarding random-mixed random-mixed-hunt random-boundary-hunt random-boundary-regression known-bug-sentinel regression hunt-regression verify-boundary-hunt extended-regression final-regression long-final-regression verify-extended-results verify-final-results verify-long-results unit
+.PHONY: ports check-ports prepare-rtl check-rtl bootstrap-picker export-picker picker-model freeze-runtime smoke pin-space single-load fp-loads trigger-contracts metadata-contracts dcache-errors atomic-contracts atomic-dchannel-errors uncache-errors uncache-widths mmio-contracts cbo-zero-contracts reset-recovery scalar-misaligned misaligned-stores exception-contracts l2-tlb-contracts two-stage-translation translation-matrix translation-fence translation-context translation-bare translation-faults translation-permissions translation-superpages scalar-guest-fault vector-guest-fault vector-guest-fault-split vector-load vector-split-load vector-addressing vector-store-forwarding store-forwarding store-rdata-order store-tlb-miss-preserve dcache-release redirect queue-pressure random-loads random-vector-loads random-forwarding random-vector-forwarding random-mixed random-stress random-mixed-hunt random-boundary-hunt random-boundary-regression known-bug-sentinel regression hunt-regression stress-regression verify-stress-results verify-boundary-hunt extended-regression final-regression long-final-regression verify-extended-results verify-final-results verify-long-results final-acceptance unit
 
 ports: $(PORT_JSON) $(PORT_DOC) $(SVA) $(CPP_DEFAULTS)
 
@@ -99,6 +100,39 @@ pin-space: $(PICKER_TEST_BINARY)
 single-load: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test single-load
 
+fp-loads: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test fp-loads
+
+trigger-contracts: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test trigger-contracts
+
+metadata-contracts: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test metadata-contracts
+
+dcache-errors: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test dcache-errors
+
+atomic-contracts: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test atomic-contracts
+
+atomic-dchannel-errors: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test atomic-dchannel-errors
+
+uncache-errors: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test uncache-errors
+
+uncache-widths: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test uncache-widths
+
+mmio-contracts: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test mmio-contracts
+
+cbo-zero-contracts: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test cbo-zero-contracts
+
+reset-recovery: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test reset-recovery
+
 scalar-misaligned: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test scalar-misaligned
 
@@ -108,8 +142,32 @@ misaligned-stores: $(PICKER_TEST_BINARY)
 exception-contracts: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test exception-contracts
 
+l2-tlb-contracts: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test l2-tlb-contracts
+
 two-stage-translation: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test two-stage-translation
+
+translation-matrix: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test translation-matrix
+
+translation-fence: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test translation-fence
+
+translation-context: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test translation-context
+
+translation-bare: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test translation-bare
+
+translation-faults: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test translation-faults
+
+translation-permissions: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test translation-permissions
+
+translation-superpages: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test translation-superpages
 
 vector-guest-fault: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test vector-guest-fault
@@ -118,22 +176,23 @@ vector-guest-fault-split: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test vector-guest-fault-split
 
 known-bug-sentinel: $(PICKER_TEST_BINARY)
-	$(PYTHON) scripts/check_known_bug.py --binary $(PICKER_TEST_BINARY) --expect repaired-pass
+	$(MAKE) check-rtl
+	$(PYTHON) scripts/check_known_bug.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --timeout-seconds 300 --expect repaired-pass
 
 random-mixed-hunt: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-mixed --seed $${SEED:-1} --transactions $${TRANSACTIONS:-512} --hunt-boundaries
+	$(PICKER_TEST_BINARY) --test random-mixed --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384) --hunt-boundaries
 
 random-boundary-hunt: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-boundary-hunt --seed $${SEED:-1} --transactions $${TRANSACTIONS:-64}
+	$(PICKER_TEST_BINARY) --test random-boundary-hunt --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),512)
 
 hunt-regression: $(PICKER_TEST_BINARY) $(PREPARED_METADATA)
-	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --output $(PREPARED_DIR)/boundary-hunt.json --jobs $${REGRESSION_JOBS:-$(JOBS)} --seeds $${SEEDS:-32} --transactions $${TRANSACTIONS:-512} --scenarios random-mixed --hunt-boundaries --continue-on-failure
+	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --output $(PREPARED_DIR)/boundary-hunt.json --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),16384) --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) --scenarios random-mixed --hunt-boundaries --continue-on-failure
 
 random-boundary-regression: $(PICKER_TEST_BINARY) $(PREPARED_METADATA)
-	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --output $(PREPARED_DIR)/random-boundary-hunt.json --jobs $${REGRESSION_JOBS:-$(JOBS)} --seeds $${SEEDS:-32} --transactions $${TRANSACTIONS:-64} --scenarios random-boundary-hunt --hunt-boundaries --continue-on-failure
+	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --output $(PREPARED_DIR)/random-boundary-hunt.json --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),512) --scenarios random-boundary-hunt --hunt-boundaries --continue-on-failure
 
 verify-boundary-hunt:
-	$(PYTHON) scripts/verify_boundary_hunt.py --input $(PREPARED_DIR)/random-boundary-hunt.json --min-seeds $${SEEDS:-32} --transactions $${TRANSACTIONS:-64} --rtl-metadata $(PREPARED_METADATA) --allow-all-pass
+	$(PYTHON) scripts/verify_boundary_hunt.py --input $(PREPARED_DIR)/random-boundary-hunt.json --min-seeds $(or $(SEEDS),32) --transactions $(or $(TRANSACTIONS),512) --rtl-metadata $(PREPARED_METADATA) --expect repaired-all-pass
 
 scalar-guest-fault: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test scalar-guest-fault
@@ -169,40 +228,92 @@ queue-pressure: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test queue-pressure
 
 random-loads: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-loads --seed $${SEED:-1} --transactions $${TRANSACTIONS:-200}
+	$(PICKER_TEST_BINARY) --test random-loads --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384)
 
 random-vector-loads: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-vector-loads --seed $${SEED:-1} --transactions $${TRANSACTIONS:-200}
+	$(PICKER_TEST_BINARY) --test random-vector-loads --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384)
 
 random-forwarding: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-forwarding --seed $${SEED:-1} --transactions $${TRANSACTIONS:-48}
+	$(PICKER_TEST_BINARY) --test random-forwarding --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),48)
 
 random-vector-forwarding: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-vector-forwarding --seed $${SEED:-1} --transactions $${TRANSACTIONS:-24}
+	$(PICKER_TEST_BINARY) --test random-vector-forwarding --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),24)
 
 random-mixed: $(PICKER_TEST_BINARY)
-	$(PICKER_TEST_BINARY) --test random-mixed --seed $${SEED:-1} --transactions $${TRANSACTIONS:-512}
+	$(PICKER_TEST_BINARY) --test random-mixed --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384)
+
+random-stress: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test random-stress --seed $(or $(SEED),1) --transactions $(or $(TRANSACTIONS),16384)
 
 regression: $(PICKER_TEST_BINARY)
-	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --output $(REGRESSION_OUTPUT) --jobs $${REGRESSION_JOBS:-$(JOBS)} --seeds $${SEEDS:-8} --transactions $${TRANSACTIONS:-1000} --forwarding-transactions $${FORWARD_TRANSACTIONS:-48} --mixed-transactions $${MIXED_TRANSACTIONS:-512}
+	$(MAKE) check-rtl
+	$(PYTHON) scripts/run_regression.py --binary $(PICKER_TEST_BINARY) --rtl-metadata $(PREPARED_METADATA) --output $(REGRESSION_OUTPUT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --seeds $(or $(SEEDS),8) --transactions $(or $(TRANSACTIONS),16384) --forwarding-transactions $(or $(FORWARD_TRANSACTIONS),48) --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384)
+
+stress-regression: $(RUNTIME_METADATA)
+	$(MAKE) check-rtl
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(STRESS_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),3600) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-stress --mixed-transactions $(or $(STRESS_TRANSACTIONS),16384) --progress-interval-seconds 60
+
+verify-stress-results:
+	$(MAKE) check-rtl
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(STRESS_RESULT) --min-duration-seconds $(or $(MIN_DURATION_SECONDS),3600) --min-results $(or $(MIN_RESULTS),128) --scenario random-stress --transactions $(or $(TRANSACTIONS),4096) --mixed-transactions $(or $(STRESS_TRANSACTIONS),16384) --expected-jobs $(or $(REGRESSION_JOBS),$(JOBS)) --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
 
 extended-regression: $(RUNTIME_METADATA)
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(EXTENDED_RESULT) --jobs $${REGRESSION_JOBS:-$(JOBS)} --duration-seconds $${DURATION_SECONDS:-14400} --scenarios random-mixed --mixed-transactions $${MIXED_TRANSACTIONS:-4096} --progress-interval-seconds 60
+	$(MAKE) check-rtl
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(EXTENDED_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),21600) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),8192) --progress-interval-seconds 60
 
 final-regression: $(RUNTIME_METADATA)
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(FINAL_RESULT) --jobs $${REGRESSION_JOBS:-$(JOBS)} --duration-seconds $${DURATION_SECONDS:-21600} --scenarios random-mixed --mixed-transactions $${MIXED_TRANSACTIONS:-4096} --progress-interval-seconds 60
+	$(MAKE) check-rtl
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(FINAL_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),28800) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),16384) --progress-interval-seconds 60
 
 long-final-regression: $(RUNTIME_METADATA)
-	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(LONG_RESULT) --jobs $${REGRESSION_JOBS:-$(JOBS)} --duration-seconds $${DURATION_SECONDS:-21600} --scenarios random-mixed --mixed-transactions $${MIXED_TRANSACTIONS:-4096} --progress-interval-seconds 60
+	$(MAKE) check-rtl
+	$(PYTHON) scripts/run_regression.py --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --output $(LONG_RESULT) --jobs $(or $(REGRESSION_JOBS),$(JOBS)) --duration-seconds $(or $(DURATION_SECONDS),43200) --timeout-seconds $(or $(TIMEOUT_SECONDS),1800) --scenarios random-mixed --mixed-transactions $(or $(MIXED_TRANSACTIONS),32768) --progress-interval-seconds 60
 
 verify-extended-results:
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(EXTENDED_RESULT) --min-duration-seconds 14400 --min-results 1 --scenario random-mixed --transactions 1000 --mixed-transactions 4096 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
+	$(MAKE) check-rtl
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(EXTENDED_RESULT) --min-duration-seconds 21600 --min-results 128 --scenario random-mixed --transactions 4096 --mixed-transactions 8192 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
 
 verify-final-results:
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(FINAL_RESULT) --min-duration-seconds 21600 --min-results 1 --scenarios random-mixed --transactions 1000 --mixed-transactions 4096 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
+	$(MAKE) check-rtl
+	$(MAKE) dcache-release
+	$(MAKE) known-bug-sentinel
+	$(MAKE) verify-boundary-hunt
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(FINAL_RESULT) --min-duration-seconds 28800 --min-results 128 --scenarios random-mixed --transactions 4096 --mixed-transactions 16384 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
 
 verify-long-results:
-	$(PYTHON) $(VERIFY_SCRIPT) --input $(LONG_RESULT) --min-duration-seconds 21600 --min-results 1 --scenarios random-mixed --transactions 1000 --mixed-transactions 4096 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
+	$(MAKE) check-rtl
+	$(MAKE) dcache-release
+	$(MAKE) known-bug-sentinel
+	$(MAKE) verify-boundary-hunt
+	$(PYTHON) $(VERIFY_SCRIPT) --input $(LONG_RESULT) --min-duration-seconds 43200 --min-results 128 --scenarios random-mixed --transactions 4096 --mixed-transactions 32768 --expected-jobs 8 --require-backpressure --require-frozen-runtime --runtime-metadata $(RUNTIME_METADATA) --rtl-metadata $(PREPARED_METADATA) $(CONTROLLER_FILES) --runner scripts/run_regression.py
+
+final-acceptance:
+	$(MAKE) unit
+	$(MAKE) trigger-contracts
+	$(MAKE) metadata-contracts
+	$(MAKE) fp-loads
+	$(MAKE) dcache-errors
+	$(MAKE) uncache-errors
+	$(MAKE) uncache-widths
+	$(MAKE) mmio-contracts
+	$(MAKE) cbo-zero-contracts
+	$(MAKE) reset-recovery
+	$(MAKE) atomic-contracts
+	$(MAKE) atomic-dchannel-errors
+	$(MAKE) translation-matrix
+	$(MAKE) translation-fence
+	$(MAKE) translation-context
+	$(MAKE) translation-bare
+	$(MAKE) translation-faults
+	$(MAKE) translation-permissions
+	$(MAKE) translation-superpages
+	$(MAKE) l2-tlb-contracts
+	$(MAKE) dcache-release
+	$(MAKE) known-bug-sentinel
+	$(MAKE) random-boundary-regression
+	$(MAKE) verify-boundary-hunt
+	$(MAKE) final-regression
+	$(MAKE) verify-final-results
 
 unit:
 	$(PYTHON) -m unittest discover -s unit -p 'test_*.py' -v
