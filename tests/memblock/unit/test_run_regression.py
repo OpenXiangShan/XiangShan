@@ -141,6 +141,7 @@ class RunRegressionTest(unittest.TestCase):
                 "random-vector-loads",
                 "random-vector-forwarding",
                 "random-mixed",
+                "frontend-bridge",
             },
         )
 
@@ -181,6 +182,19 @@ class RunRegressionTest(unittest.TestCase):
         self.assertEqual(parsed["status"], "pass")
         self.assertEqual(parsed["transactions"], 64)
         self.assertEqual(parsed["lq"], "55+1/56")
+
+    def test_parses_frontend_bridge_summary(self) -> None:
+        parsed = run_regression.parse_summary(
+            "MEMBLOCK_FRONTEND_BRIDGE_PASS seed=13 transactions=32 cycle=441 "
+            "requests=96 responses=128 request_stalls=161 response_stalls=106 "
+            "source_credit_stalls=379 field_checks=3599 rtl_sha256=abc\n",
+            expected_scenario=run_regression.FRONTEND_BRIDGE_SCENARIO,
+            expected_seed=13,
+            expected_transactions=32,
+        )
+        self.assertEqual(parsed["status"], "pass")
+        self.assertEqual(parsed["requests"], 96)
+        self.assertEqual(parsed["source_credit_stalls"], 379)
 
     def test_parses_boundary_hunt_hash_and_failures(self) -> None:
         parsed = run_regression.parse_summary(

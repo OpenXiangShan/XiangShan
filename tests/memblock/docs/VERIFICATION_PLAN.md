@@ -440,7 +440,11 @@ Before a duration run:
 
 1. `check-ports`, `check-rtl`, and all Python unit tests pass.
 2. Every green focused scenario passes on the current complete RTL hash.
-3. A multi-seed, five-scenario matrix passes with backpressure enabled.
+3. A multi-seed, six-scenario matrix passes with backpressure enabled. The
+   sixth scenario is `frontend-bridge`; its offline verifier independently
+   requires three A requests and four D beats per requested transaction,
+   request/response/source-credit stalls, and at least 39 field checks per
+   transaction.
 4. The executable, Verilated model, xspcomm, resolved system libraries, runner,
    streaming verifier, runtime-freeze script, controller sources, and RTL metadata are frozen and
    hashed. The verifier script is passed as a controller input so its acceptance

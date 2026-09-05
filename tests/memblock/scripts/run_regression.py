@@ -25,12 +25,14 @@ class RegressionError(RuntimeError):
     pass
 
 
+FRONTEND_BRIDGE_SCENARIO = "frontend-bridge"
 DEFAULT_SCENARIOS = (
     "random-loads",
     "random-forwarding",
     "random-vector-loads",
     "random-vector-forwarding",
     "random-mixed",
+    FRONTEND_BRIDGE_SCENARIO,
 )
 BOUNDARY_HUNT_SCENARIO = "random-boundary-hunt"
 STRESS_SCENARIO = "random-stress"
@@ -55,6 +57,7 @@ TERMINAL_MARKERS = {
     "random-vector-loads": "MEMBLOCK_RANDOM_VECTOR",
     "random-vector-forwarding": "MEMBLOCK_RANDOM_VECTOR_FORWARD",
     "random-mixed": "MEMBLOCK_RANDOM_MIXED",
+    FRONTEND_BRIDGE_SCENARIO: "MEMBLOCK_FRONTEND_BRIDGE",
     STRESS_SCENARIO: "MEMBLOCK_RANDOM_STRESS",
     BOUNDARY_HUNT_SCENARIO: "MEMBLOCK_RANDOM_BOUNDARY_HUNT",
 }

@@ -320,6 +320,37 @@ def _check_stress_coverage(
         )
 
 
+def _check_frontend_bridge_coverage(result: dict[str, Any]) -> None:
+    transactions = result.get("transactions")
+    _require(
+        isinstance(transactions, int)
+        and not isinstance(transactions, bool)
+        and transactions >= 32,
+        f"frontend bridge has insufficient transactions: {transactions!r}",
+    )
+    _require(
+        result.get("requests") == transactions * 3,
+        "frontend bridge request count disagrees with three request paths",
+    )
+    _require(
+        result.get("responses") == transactions * 4,
+        "frontend bridge response count disagrees with the expected beat count",
+    )
+    for name in ("request_stalls", "response_stalls", "source_credit_stalls"):
+        value = result.get(name)
+        _require(
+            isinstance(value, int) and not isinstance(value, bool) and value > 0,
+            f"frontend bridge {name} coverage is absent: {value!r}",
+        )
+    field_checks = result.get("field_checks")
+    _require(
+        isinstance(field_checks, int)
+        and not isinstance(field_checks, bool)
+        and field_checks >= transactions * 39,
+        f"frontend bridge field checking is incomplete: {field_checks!r}",
+    )
+
+
 def _check_result(
     result: Any,
     index: int,
@@ -422,6 +453,8 @@ def _check_result(
         _check_mixed_coverage(result, require_backpressure)
     elif scenario == run_regression.STRESS_SCENARIO:
         _check_stress_coverage(result, require_backpressure)
+    elif scenario == run_regression.FRONTEND_BRIDGE_SCENARIO:
+        _check_frontend_bridge_coverage(result)
     return (
         seed,
         scenario,

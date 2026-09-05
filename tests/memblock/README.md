@@ -348,7 +348,11 @@ and only rebuild the small C++ harness when its sources change.
 
 ## Random Regression
 
-The normal regression includes the focused random scenarios and `random-mixed`.
+The normal regression includes the focused scalar/vector random scenarios,
+`random-mixed`, and `frontend-bridge`. The bridge scenario gives every seed
+independent concurrent ICache, ICache-control, and instruction-Uncache traffic;
+its offline acceptance gate checks exact request/response counts, field-check
+volume, request/response stalls, and legal source-credit stalls.
 `random-mixed` is one configurable generator: realistic, balanced-coverage,
 and corner-heavy directions are selected with the `spec`, `coverage`, and
 `corner` constraint presets, and every field can be overridden without adding

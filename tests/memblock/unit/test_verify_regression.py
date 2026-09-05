@@ -369,6 +369,40 @@ class VerifyRegressionTest(unittest.TestCase):
         ):
             verify_regression._check_stress_coverage(result)
 
+    def test_frontend_bridge_coverage_checks_counts_stalls_and_fields(self) -> None:
+        result: dict[str, object] = {
+            "transactions": 32,
+            "requests": 96,
+            "responses": 128,
+            "request_stalls": 1,
+            "response_stalls": 1,
+            "source_credit_stalls": 1,
+            "field_checks": 32 * 39,
+        }
+        verify_regression._check_frontend_bridge_coverage(result)
+
+        for name in ("request_stalls", "response_stalls", "source_credit_stalls"):
+            invalid = dict(result)
+            invalid[name] = 0
+            with self.assertRaisesRegex(
+                verify_regression.VerificationError, name
+            ):
+                verify_regression._check_frontend_bridge_coverage(invalid)
+
+        invalid = dict(result)
+        invalid["responses"] = 127
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "response count"
+        ):
+            verify_regression._check_frontend_bridge_coverage(invalid)
+
+        invalid = dict(result)
+        invalid["field_checks"] = 32 * 39 - 1
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "field checking"
+        ):
+            verify_regression._check_frontend_bridge_coverage(invalid)
+
     def test_rejects_missing_scalar_store_issue_order(self) -> None:
         result = mixed_result(7)
         result.update(
