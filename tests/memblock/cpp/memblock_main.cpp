@@ -7147,10 +7147,332 @@ int run_translation_permissions(int argc, char **argv)
         ++completed;
     }
 
+    struct TwoStageStoreCase {
+      const char *name;
+      memblock::ReferencePageMode vs_mode;
+      memblock::ReferencePageMode g_mode;
+      memblock::ReferencePtePermissions vs_permissions;
+      memblock::ReferencePtePermissions g_permissions;
+      bool vsum;
+      std::uint32_t exception;
+    };
+    const std::array<TwoStageStoreCase, 22> two_stage_store_cases{{
+        {
+            .name = "sv39-sv39x4-store-valid",
+            .vs_mode = memblock::ReferencePageMode::sv39,
+            .g_mode = memblock::ReferencePageMode::sv39,
+            .vs_permissions = {},
+            .g_permissions = {.user = true},
+        },
+        {
+            .name = "sv39-sv48x4-store-valid",
+            .vs_mode = memblock::ReferencePageMode::sv39,
+            .g_mode = memblock::ReferencePageMode::sv48,
+            .vs_permissions = {},
+            .g_permissions = {.user = true},
+        },
+        {
+            .name = "sv48-sv39x4-store-valid",
+            .vs_mode = memblock::ReferencePageMode::sv48,
+            .g_mode = memblock::ReferencePageMode::sv39,
+            .vs_permissions = {},
+            .g_permissions = {.user = true},
+        },
+        {
+            .name = "sv48-sv48x4-store-valid",
+            .vs_mode = memblock::ReferencePageMode::sv48,
+            .g_mode = memblock::ReferencePageMode::sv48,
+            .vs_permissions = {},
+            .g_permissions = {.user = true},
+        },
+        {
+            .name = "sv39-store-vs-readonly",
+            .vs_mode = memblock::ReferencePageMode::sv39,
+            .g_mode = memblock::ReferencePageMode::sv39,
+            .vs_permissions = {.writable = false},
+            .g_permissions = {.user = true},
+            .exception = memblock::kExceptionStorePageFault,
+        },
+        {
+            .name = "sv39-store-vs-accessed0",
+            .vs_mode = memblock::ReferencePageMode::sv39,
+            .g_mode = memblock::ReferencePageMode::sv39,
+            .vs_permissions = {.accessed = false},
+            .g_permissions = {.user = true},
+            .exception = memblock::kExceptionStorePageFault,
+        },
+        {
+            .name = "sv39-store-vs-dirty0",
+            .vs_mode = memblock::ReferencePageMode::sv39,
+            .g_mode = memblock::ReferencePageMode::sv39,
+            .vs_permissions = {.dirty = false},
+            .g_permissions = {.user = true},
+            .exception = memblock::kExceptionStorePageFault,
+        },
+        {
+            .name = "sv39-store-vs-user-vsum0",
+            .vs_mode = memblock::ReferencePageMode::sv39,
+            .g_mode = memblock::ReferencePageMode::sv39,
+            .vs_permissions = {.user = true},
+            .g_permissions = {.user = true},
+            .exception = memblock::kExceptionStorePageFault,
+        },
+        {
+            .name = "sv39-store-vs-user-vsum1",
+            .vs_mode = memblock::ReferencePageMode::sv39,
+            .g_mode = memblock::ReferencePageMode::sv39,
+            .vs_permissions = {.user = true},
+            .g_permissions = {.user = true},
+            .vsum = true,
+        },
+        {
+            .name = "sv48-store-vs-readonly",
+            .vs_mode = memblock::ReferencePageMode::sv48,
+            .g_mode = memblock::ReferencePageMode::sv48,
+            .vs_permissions = {.writable = false},
+            .g_permissions = {.user = true},
+            .exception = memblock::kExceptionStorePageFault,
+        },
+        {
+            .name = "sv48-store-vs-accessed0",
+            .vs_mode = memblock::ReferencePageMode::sv48,
+            .g_mode = memblock::ReferencePageMode::sv48,
+            .vs_permissions = {.accessed = false},
+            .g_permissions = {.user = true},
+            .exception = memblock::kExceptionStorePageFault,
+        },
+        {
+            .name = "sv48-store-vs-dirty0",
+            .vs_mode = memblock::ReferencePageMode::sv48,
+            .g_mode = memblock::ReferencePageMode::sv48,
+            .vs_permissions = {.dirty = false},
+            .g_permissions = {.user = true},
+            .exception = memblock::kExceptionStorePageFault,
+        },
+        {
+            .name = "sv48-store-vs-user-vsum0",
+            .vs_mode = memblock::ReferencePageMode::sv48,
+            .g_mode = memblock::ReferencePageMode::sv48,
+            .vs_permissions = {.user = true},
+            .g_permissions = {.user = true},
+            .exception = memblock::kExceptionStorePageFault,
+        },
+        {
+            .name = "sv48-store-vs-user-vsum1",
+            .vs_mode = memblock::ReferencePageMode::sv48,
+            .g_mode = memblock::ReferencePageMode::sv48,
+            .vs_permissions = {.user = true},
+            .g_permissions = {.user = true},
+            .vsum = true,
+        },
+        {
+            .name = "sv39x4-store-g-readonly",
+            .vs_mode = memblock::ReferencePageMode::sv39,
+            .g_mode = memblock::ReferencePageMode::sv39,
+            .vs_permissions = {},
+            .g_permissions = {.writable = false, .user = true},
+            .exception = memblock::kExceptionStoreGuestPageFault,
+        },
+        {
+            .name = "sv39x4-store-g-accessed0",
+            .vs_mode = memblock::ReferencePageMode::sv39,
+            .g_mode = memblock::ReferencePageMode::sv39,
+            .vs_permissions = {},
+            .g_permissions = {.user = true, .accessed = false},
+            .exception = memblock::kExceptionStoreGuestPageFault,
+        },
+        {
+            .name = "sv39x4-store-g-dirty0",
+            .vs_mode = memblock::ReferencePageMode::sv39,
+            .g_mode = memblock::ReferencePageMode::sv39,
+            .vs_permissions = {},
+            .g_permissions = {.user = true, .dirty = false},
+            .exception = memblock::kExceptionStoreGuestPageFault,
+        },
+        {
+            .name = "sv39x4-store-g-user0",
+            .vs_mode = memblock::ReferencePageMode::sv39,
+            .g_mode = memblock::ReferencePageMode::sv39,
+            .vs_permissions = {},
+            .g_permissions = {},
+            .exception = memblock::kExceptionStoreGuestPageFault,
+        },
+        {
+            .name = "sv48x4-store-g-readonly",
+            .vs_mode = memblock::ReferencePageMode::sv48,
+            .g_mode = memblock::ReferencePageMode::sv48,
+            .vs_permissions = {},
+            .g_permissions = {.writable = false, .user = true},
+            .exception = memblock::kExceptionStoreGuestPageFault,
+        },
+        {
+            .name = "sv48x4-store-g-accessed0",
+            .vs_mode = memblock::ReferencePageMode::sv48,
+            .g_mode = memblock::ReferencePageMode::sv48,
+            .vs_permissions = {},
+            .g_permissions = {.user = true, .accessed = false},
+            .exception = memblock::kExceptionStoreGuestPageFault,
+        },
+        {
+            .name = "sv48x4-store-g-dirty0",
+            .vs_mode = memblock::ReferencePageMode::sv48,
+            .g_mode = memblock::ReferencePageMode::sv48,
+            .vs_permissions = {},
+            .g_permissions = {.user = true, .dirty = false},
+            .exception = memblock::kExceptionStoreGuestPageFault,
+        },
+        {
+            .name = "sv48x4-store-g-user0",
+            .vs_mode = memblock::ReferencePageMode::sv48,
+            .g_mode = memblock::ReferencePageMode::sv48,
+            .vs_permissions = {},
+            .g_permissions = {},
+            .exception = memblock::kExceptionStoreGuestPageFault,
+        },
+    }};
+
+    for (std::size_t index = 0; index < two_stage_store_cases.size(); ++index) {
+        const auto &test = two_stage_store_cases[index];
+        const bool vs_permitted = memblock::reference_store_permitted(
+            test.vs_permissions, memblock::ReferencePrivilegeMode::supervisor, test.vsum);
+        const bool g_permitted = memblock::reference_store_permitted(
+            test.g_permissions, memblock::ReferencePrivilegeMode::supervisor, false, true);
+        const std::uint32_t oracle_exception = !vs_permitted ? memblock::kExceptionStorePageFault
+                                               : !g_permitted
+                                                   ? memblock::kExceptionStoreGuestPageFault
+                                                   : 0U;
+        if (oracle_exception != test.exception) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=" << test.name
+                      << " reason=reference-oracle\n";
+            return 1;
+        }
+
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t guest_virtual = 0x5f000000ULL;
+        constexpr std::uint64_t guest_physical = 0x9c000000ULL;
+        constexpr std::uint64_t host_physical = 0xc3e00000ULL;
+        constexpr std::uint64_t vs_root = 0xac000000ULL;
+        constexpr std::uint64_t g_root = 0xae000000ULL;
+        const auto &vs = test.vs_permissions;
+        const auto &g = test.g_permissions;
+        bool configured = environment.reset();
+        configured = configured &&
+                     (test.vs_mode == memblock::ReferencePageMode::sv48
+                          ? environment.map_sv48_leaf(guest_virtual, guest_physical, 0, vs_root,
+                                                      vs.readable, vs.writable, vs.executable,
+                                                      vs.user, false, vs.accessed, vs.dirty)
+                          : environment.map_sv39_leaf(guest_virtual, guest_physical, 0, vs_root,
+                                                      vs.readable, vs.writable, vs.executable,
+                                                      vs.user, false, vs.accessed, vs.dirty));
+        const unsigned vs_table_pages = test.vs_mode == memblock::ReferencePageMode::sv48 ? 4U : 3U;
+        for (unsigned page = 0; configured && page < vs_table_pages; ++page) {
+            const std::uint64_t address = vs_root + page * 0x1000ULL;
+            configured = test.g_mode == memblock::ReferencePageMode::sv48
+                             ? environment.map_sv48x4_4k(address, address, g_root)
+                             : environment.map_sv39x4_4k(address, address, g_root);
+        }
+        configured = configured &&
+                     (test.g_mode == memblock::ReferencePageMode::sv48
+                          ? environment.map_sv48x4_leaf(guest_physical, host_physical, 0, g_root,
+                                                        g.readable, g.writable, g.executable,
+                                                        g.accessed, g.dirty, g.user)
+                          : environment.map_sv39x4_leaf(guest_physical, host_physical, 0, g_root,
+                                                        g.readable, g.writable, g.executable,
+                                                        g.accessed, g.dirty, g.user));
+        configured = configured && environment.activate_two_stage_modes(
+                                       test.vs_mode, test.g_mode, vs_root, g_root,
+                                       static_cast<std::uint16_t>(131 + index),
+                                       static_cast<std::uint16_t>(161 + index));
+        configured = configured && environment.set_translation_permissions(
+                                       memblock::ReferencePrivilegeMode::supervisor, false, false,
+                                       false, test.vsum);
+        if (!configured) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=" << test.name
+                      << "-configuration reason=" << environment.error() << '\n';
+            return 1;
+        }
+
+        environment.memory().fill_incrementing(host_physical, 0x1000,
+                                               static_cast<unsigned char>(0xc1 + index));
+        const memblock::StoreTransaction transaction{
+            .address = guest_virtual + 0x188,
+            .oracle_address = host_physical + 0x188,
+            .data = 0x8090a0b0c0d0e000ULL + index,
+            .op = memblock::StoreOp::sd,
+            .rob = 0,
+            .sq = 0,
+            .address_lane = static_cast<unsigned>(index % memblock::kScalarStoreLanes),
+            .data_lane = static_cast<unsigned>((index + 1) % memblock::kScalarStoreLanes),
+            .expected_exception_mask = test.exception,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+        };
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        environment.expect_store(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_store(transaction, 0) ||
+            !environment.issue_store_address_until_tlb_hit(transaction, 16384) ||
+            !environment.issue_store_data(transaction, 2048) ||
+            (test.exception == 0 &&
+             !environment.pulse_pending_store(transaction.rob, transaction.rob_flag)) ||
+            !environment.run_until_store_complete(32768)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=" << test.name
+                      << "-execution reason=" << environment.error() << '\n';
+            return 1;
+        }
+        if (test.exception == 0) {
+            if (!environment.commit_store(transaction, 16384)) {
+                std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=" << test.name
+                          << "-commit reason=" << environment.error() << '\n';
+                return 1;
+            }
+            const memblock::LoadTransaction readback{
+                .address = transaction.address,
+                .oracle_address = transaction.oracle_address,
+                .op = memblock::LoadOp::ld,
+                .rob = 1,
+                .lq = 0,
+                .sq = 1,
+                .pdest = static_cast<std::uint8_t>(224 + index),
+                .lane = static_cast<unsigned>(index % memblock::kScalarLoadLanes),
+            };
+            environment.expect_load_data(readback, transaction.data);
+            if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+                !environment.enqueue_load(readback) || !environment.issue_load(readback, 4096) ||
+                !environment.run_until_complete(32768) || !environment.run_until_lq_retired(8192)) {
+                std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=" << test.name
+                          << "-readback reason=" << environment.error() << '\n';
+                return 1;
+            }
+        } else {
+            if (environment.tilelink_requests() != dcache_before ||
+                environment.uncache_requests() != uncache_before) {
+                std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=" << test.name
+                          << "-side-effect reason=" << "permission fault reached memory manager\n";
+                return 1;
+            }
+            if (environment.sq_dequeued() + environment.sq_canceled() <
+                    environment.sq_allocated() &&
+                !environment.account_sq_cancellation(1)) {
+                std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=" << test.name
+                          << "-cancellation reason=" << environment.error() << '\n';
+                return 1;
+            }
+        }
+        if (environment.sq_dequeued() + environment.sq_canceled() != environment.sq_allocated()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_PERMISSIONS_FAIL phase=" << test.name
+                      << "-accounting reason=unbalanced-sq\n";
+            return 1;
+        }
+        ++completed;
+    }
+
     std::cout << "MEMBLOCK_TRANSLATION_PERMISSIONS_PASS cases=" << completed
               << " stage1_load_cases=" << (2 + stage_one_load_cases.size())
               << " stage1_store_cases=" << (1 + stage_one_store_cases.size())
               << " two_stage_load_cases=" << (1 + two_stage_load_cases.size())
+              << " two_stage_store_cases=" << two_stage_store_cases.size()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

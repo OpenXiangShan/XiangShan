@@ -259,11 +259,12 @@ invalid NAPOT encoding. It checks the independent walk's failing PTE/level,
 exact access- and stage-specific exception, load fault VA/GPA, zero faulting
 DCache/Uncache data requests, and store SQ conservation.
 
-`translation-permissions` executes 36 independent cases. Its table-driven
+`translation-permissions` executes 58 independent cases. Its table-driven
 oracle covers Sv39/Sv48 U/S access, SUM, MXR, missing A/D, VS-stage VSUM/VMXR,
-and G-stage MXR/A behavior for scalar loads and stores. Passing stores require
-exact post-commit readback; faulting stores must not reach DCache or Uncache
-and must balance through explicit SQ cancellation.
+all four VS/G-stage mode pairs, and G-stage R/A/D/U behavior for scalar loads
+and stores. Passing stores require exact post-commit readback; faulting stores
+must not reach DCache or Uncache and must retire or be explicitly canceled so
+SQ accounting remains exact.
 
 `fp-loads` exercises the separate FP destination-enable path for 32-bit and
 64-bit load widths. The scoreboard requires no integer-register write and an

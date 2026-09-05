@@ -519,15 +519,23 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "std::array<StageOneLoadCase, 14>",
             "std::array<StageOneStoreCase, 10>",
             "std::array<TwoStageLoadCase, 8>",
+            "std::array<TwoStageStoreCase, 22>",
             "sv39-s-user-sum0",
             "sv48-xonly-mxr1",
             "sv39-store-dirty0",
             "sv48-store-accessed0",
             "vs-xonly-vmxr1",
             "g-accessed0",
+            "sv39-sv48x4-store-valid",
+            "sv48-sv39x4-store-valid",
+            "sv39x4-store-g-dirty0",
+            "sv48x4-store-g-dirty0",
+            "sv39x4-store-g-user0",
+            "sv48x4-store-g-user0",
             "stage1_load_cases=",
             "stage1_store_cases=",
             "two_stage_load_cases=",
+            "two_stage_store_cases=",
         ):
             self.assertIn(contract, main)
 
