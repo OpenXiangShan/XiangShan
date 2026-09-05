@@ -36,6 +36,14 @@ runs for `coverage`, `spec`, `corner`, Sv48-only, nested-only, and Bare-only
 configurations. Representative seeds 41 and 47 covered all six legal fence
 kind/scope points, all four nested pairs, both cold walks and TLB reuse, and
 SPEC-style DCache/PTW/Uncache delays extending into the 100-400-cycle bucket.
+After coverage closure was made to reselect the normal weighted context, SPEC
+seeds 225 and 226 each passed 4,096 actions with actual Bare/stage-1/nested
+counts `7/3960/28`; every rare mode and fence cross remained covered without
+letting the mandatory nested prefix dominate the realistic tail. Coverage seed
+227 also passed 4,096 actions with 378 PTW and 274 Uncache requests. An earlier
+four-seed SPEC artifact covering seeds 201..204 and 16,384 total actions passed
+the independent schema-2 artifact verifier; it is retained as pre-reselection
+stress evidence rather than the final campaign result.
 The complete RTL SHA-256 remained
 `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
 

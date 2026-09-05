@@ -145,8 +145,11 @@ Translation presets use these relative weights and per-mille switch rates:
 
 The mandatory per-seed gate overrides sampling order only until every enabled
 mode, nested pair, and compatible fence kind/scope has appeared. Later choices
-follow the configured weights. This preserves coverage for short seeds without
-turning a long `spec` campaign into an equal-probability corner campaign.
+follow the configured weights. At that boundary the generator immediately
+reselects a baseline context from the configured distribution, so the last
+mandatory rare mode is not retained for the normal low switch interval. This
+preserves coverage for short seeds without turning a long `spec` campaign into
+an equal-probability corner campaign.
 
 `coverage` is appropriate for short pre-submit checks. `spec` is the default
 for extended/final campaigns. `corner` is the default for boundary hunts. A
