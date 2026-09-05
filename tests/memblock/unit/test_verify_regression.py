@@ -151,6 +151,14 @@ def regression_document(results: list[dict[str, object]]) -> dict[str, object]:
 
 
 class VerifyRegressionTest(unittest.TestCase):
+    def test_unknown_constraint_schema_is_rejected(self) -> None:
+        result = mixed_result(7)
+        result["constraint_schema"] = 3
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "unsupported constraint_schema"
+        ):
+            verify_regression._check_mixed_coverage(result)
+
     def test_constraint_schema_requires_enabled_translation_crosses(self) -> None:
         result = mixed_result(7)
         result.update(

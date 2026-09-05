@@ -147,8 +147,10 @@ def _csv_counts(result: dict[str, Any], name: str, fields: int) -> list[int]:
 
 
 def _check_constraint_coverage(result: dict[str, Any]) -> None:
-    if result.get("constraint_schema") != 2:
+    schema = result.get("constraint_schema")
+    if schema is None:
         return
+    _require(schema == 2, f"unsupported constraint_schema: {schema!r}")
 
     target_translation = _csv_counts(result, "target_translation", 3)
     actual_translation = _csv_counts(result, "actual_translation", 3)

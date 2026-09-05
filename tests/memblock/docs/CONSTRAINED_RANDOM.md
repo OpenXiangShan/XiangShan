@@ -146,10 +146,11 @@ Translation presets use these relative weights and per-mille switch rates:
 The mandatory per-seed gate overrides sampling order only until every enabled
 mode, nested pair, and compatible fence kind/scope has appeared. Later choices
 follow the configured weights. At that boundary the generator immediately
-reselects a baseline context from the configured distribution, so the last
-mandatory rare mode is not retained for the normal low switch interval. This
-preserves coverage for short seeds without turning a long `spec` campaign into
-an equal-probability corner campaign.
+reselects the highest-weight enabled context, so the last mandatory rare mode
+is not retained for the normal low switch interval. Later random context
+switches still select from the configured distribution. This preserves
+coverage for short seeds without turning a long `spec` campaign into an
+equal-probability corner campaign.
 
 `coverage` is appropriate for short pre-submit checks. `spec` is the default
 for extended/final campaigns. `corner` is the default for boundary hunts. A
@@ -239,3 +240,7 @@ replay; concurrent vector replay feedback is matched to the originating load
 or store transaction by queue identity. Their SQ retirement target is captured
 when their flows are enqueued, so a writeback that retires before the helper's
 explicit commit step cannot be counted twice.
+Scalar store retirement uses the same enqueue-time target. This matters for a
+misaligned store held at the ROB head: it can legally leave the SQ while the
+other transaction classes in the overlap window are still draining, before
+the driver reaches its explicit architectural-memory update.

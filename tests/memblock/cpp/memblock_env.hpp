@@ -4745,6 +4745,8 @@ public:
         tick();
         generated::clear_lsq_enqueue_valids(dut_);
         ++sq_allocated_;
+        scalar_store_sq_targets_[scalar_store_key(transaction)] =
+            sq_allocated_ - sq_canceled_;
         return check_components();
     }
 
@@ -5597,8 +5599,18 @@ public:
 
     bool commit_store(const StoreTransaction &transaction, unsigned timeout = 512)
     {
-        const std::uint64_t target = sq_dequeued_ + 1;
-        if (!commit_stores_through(transaction, 1)) {
+        const auto target_it = scalar_store_sq_targets_.find(
+            scalar_store_key(transaction));
+        if (target_it == scalar_store_sq_targets_.end()) {
+            error_ = "scalar store has no recorded SQ allocation target";
+            return false;
+        }
+        const std::uint64_t target = target_it->second;
+        // A misaligned store at the ROB head can leave the SQ while another
+        // outstanding class is still draining.  Do not turn that completed
+        // store into a wait for the following SQ entry.
+        if (sq_dequeued_ < target &&
+            !commit_stores_through(transaction, 1)) {
             return false;
         }
         if (!run_until_sq_dequeued(target, timeout)) {
@@ -5614,6 +5626,7 @@ public:
             error_ = message.str();
             return false;
         }
+        scalar_store_sq_targets_.erase(target_it);
         const std::uint64_t raw_address = transaction.oracle_address.value_or(
             transaction.address);
         const std::uint64_t address = transaction.op == StoreOp::cbo_zero
@@ -6003,6 +6016,14 @@ private:
         return error_.empty();
     }
 
+    static std::uint64_t scalar_store_key(const StoreTransaction &transaction)
+    {
+        return transaction.rob |
+            (std::uint64_t{transaction.rob_flag} << 8) |
+            (std::uint64_t{transaction.sq} << 9) |
+            (std::uint64_t{transaction.sq_flag} << 17);
+    }
+
     static std::uint64_t vector_store_key(
         const VectorMemoryTransaction &transaction)
     {
@@ -6029,6 +6050,8 @@ private:
     std::uint64_t sq_allocated_ = 0;
     std::uint64_t sq_dequeued_ = 0;
     std::uint64_t sq_canceled_ = 0;
+    std::unordered_map<std::uint64_t, std::uint64_t>
+        scalar_store_sq_targets_;
     std::unordered_map<std::uint64_t, std::uint64_t>
         vector_store_sq_targets_;
     std::uint64_t store_tlb_feedbacks_ = 0;

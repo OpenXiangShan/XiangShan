@@ -47,13 +47,18 @@ stress evidence rather than the final campaign result.
 The complete RTL SHA-256 remained
 `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
 
-Three failures found while enabling this matrix were classified as harness
+Four failures found while enabling this matrix were classified as harness
 issues: mixed vector replay feedback was initially routed to only one vector
 transaction, nested PBMT traffic initially omitted `hPBMTE`, and NC/MMIO was
 initially allowed in Bare even though this boundary supplies those attributes
-only through PBMT. All reproduced failures disappeared after correcting those
-drivers while the RTL remained unchanged. They are not CPU bugs and therefore
-do not have `CPU_BUG_*` documents.
+only through PBMT. Corner seed 403 also exposed scalar SQ retirement accounting
+that targeted `current_dequeue+1`; a cross-page store already at the ROB head
+could legally retire before that helper ran, making it wait for the following
+vector store. Recording the scalar store's enqueue-time retirement target, as
+the vector path already did, made the same 4,096-action seed pass with balanced
+`3844/3844` SQ accounting. All reproduced failures disappeared after correcting
+the drivers while the RTL remained unchanged. They are not CPU bugs and
+therefore do not have `CPU_BUG_*` documents.
 
 ## Superseded Pre-Clarification Stress
 

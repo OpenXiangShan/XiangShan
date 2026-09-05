@@ -10954,6 +10954,23 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
             return context;
         };
+        const auto dominant_translation_context = [&]() {
+            const auto dominant_index = [](const auto &weights) {
+                return static_cast<unsigned>(std::distance(
+                    weights.begin(),
+                    std::max_element(weights.begin(), weights.end())));
+            };
+            TranslationContext context;
+            context.regime = dominant_index(constraints.translation_weights);
+            if (context.regime == RandomConstraints::translation_stage1) {
+                context.stage1_mode = dominant_index(
+                    constraints.stage1_mode_weights);
+            } else if (context.regime == RandomConstraints::translation_nested) {
+                context.vs_mode = dominant_index(constraints.vs_mode_weights);
+                context.g_mode = dominant_index(constraints.g_mode_weights);
+            }
+            return context;
+        };
         const auto translated_context = [&]() {
             TranslationContext context;
             const std::uint64_t stage1_weight = constraints.translation_weights[
@@ -11058,7 +11075,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             }
             if (!translation_coverage_closed) {
                 translation_coverage_closed = true;
-                return random_translation_context();
+                return dominant_translation_context();
             }
             if (translation_context_valid &&
                 random() % 1000 >=
