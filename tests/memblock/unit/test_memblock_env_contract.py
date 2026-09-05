@@ -609,6 +609,18 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn(".address = base + (index == 3 ? 0x1800 : 0x1803)", driver)
         self.assertIn("loads[index].index[8] = index == 4 ? 0xa0 : 0xa8", driver)
 
+    def test_random_mixed_window_honors_scalar_misalignment_contract(self) -> None:
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "constrained_window_address",
+            "constraints.misaligned_per_mille",
+            "scalar_store_crosses_page",
+            "(scalar_store.address & 0xfffU) + scalar_store_bytes > 0x1000U",
+            "environment.set_rob_head(\n                      scalar_store.rob",
+            "environment.pulse_pending_store(\n                      scalar_store.rob",
+        ):
+            self.assertIn(contract, driver)
+
     def test_make_targets_forward_make_variable_seed_and_transaction_counts(self) -> None:
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
         self.assertIn("--seed $(or $(SEED),1)", makefile)

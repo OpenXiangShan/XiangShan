@@ -7544,6 +7544,22 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         }
         return address;
     };
+    auto constrained_window_address = [&](std::uint64_t base,
+                                          unsigned alignment) {
+        if (alignment <= 1) {
+            return base + random() % 64;
+        }
+        const bool misaligned =
+            random() % 1000 < constraints.misaligned_per_mille;
+        if (!misaligned) {
+            return base + ((random() % 64) / alignment) * alignment;
+        }
+        unsigned offset = 0;
+        do {
+            offset = random() % 64;
+        } while ((offset & (alignment - 1)) == 0);
+        return base + offset;
+    };
     const unsigned constrained_completion_timeout =
         constraints.response_latency == memblock::ResponseLatencyProfile::spec
         ? 16384 : 2048;
@@ -8631,16 +8647,23 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 coverage.concurrent_windows < 4
                     ? (coverage.concurrent_windows + 1) % 4
                     : vector_corner ? random() % 4 : 0);
+            const auto scalar_op =
+                static_cast<memblock::LoadOp>(random() % 7);
             auto scalar = make_load(
-                window_base + random() % 64U,
-                static_cast<memblock::LoadOp>(random() % 7), random() % 3);
+                constrained_window_address(
+                    window_base,
+                    1U << (static_cast<unsigned>(scalar_op) & 3U)),
+                scalar_op, random() % 3);
             auto vector_load = make_vector(
                 false, window_base + 32, random() % 4, random() % 2,
                 required_load_mode);
+            const auto scalar_store_op =
+                static_cast<memblock::StoreOp>(random() % 4);
             auto scalar_store = make_store(
-                window_base + random() % 64U, random(),
-                static_cast<memblock::StoreOp>(random() % 4), random() % 2,
-                random() % 2);
+                constrained_window_address(
+                    window_base,
+                    1U << static_cast<unsigned>(scalar_store_op)),
+                random(), scalar_store_op, random() % 2, random() % 2);
             auto vector_store = make_vector(
                 true, window_base + 0x100 + (random() % 8U) * 8U,
                 random() % 4, random() % 2,
@@ -8790,7 +8813,17 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             coverage.sample(scalar_store, scalar_store_data_first);
             coverage.sample(vector_store);
             coverage.sample(prefetch);
-            if (!environment.run_until_all_complete(4096) ||
+            const unsigned scalar_store_bytes =
+                1U << static_cast<unsigned>(scalar_store.op);
+            const bool scalar_store_crosses_page =
+                (scalar_store.address & 0xfffU) + scalar_store_bytes > 0x1000U;
+            if ((scalar_store_crosses_page &&
+                 (!environment.set_rob_head(
+                      scalar_store.rob, scalar_store.rob_flag) ||
+                  !environment.pulse_pending_store(
+                      scalar_store.rob, scalar_store.rob_flag))) ||
+                !environment.run_until_all_complete(
+                    constrained_completion_timeout) ||
                 !environment.run_cycles(8) ||
                 !environment.commit_store(scalar_store, 4096) ||
                 !environment.commit_vector_store(vector_store, 4096) ||
@@ -8798,8 +8831,6 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 !environment.run_until_queues_retired(4096)) {
                 return false;
             }
-            const unsigned scalar_bytes =
-                1U << static_cast<unsigned>(scalar_store.op);
             const auto scalar_readback = make_load(
                 scalar_store.address,
                 static_cast<memblock::LoadOp>(scalar_store.op), random() % 3);
@@ -8807,7 +8838,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     scalar_readback.rob, scalar_readback.rob_flag) ||
                 !issue_load(
                     scalar_readback,
-                    scalar_forward_value(scalar_store.data, scalar_bytes, false)) ||
+                    scalar_forward_value(
+                        scalar_store.data, scalar_store_bytes, false)) ||
                 !environment.run_until_queues_retired(4096)) {
                 return false;
             }
