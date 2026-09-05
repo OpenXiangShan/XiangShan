@@ -15,7 +15,8 @@ env:
   PERF_HOME: /nfs/home/ci-runner/emu-performance/${{ github.run_number }}
   CKPT_JSON_LEGACY: /nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260604/json/checkpoints_all.json
   CKPT_JSON: /nfs/home/share/checkpoints_profiles/spec06_gcc16_rva23_novec_260820/json/checkpoints_all.json
-  CKPT_JSON_XSCC: /nfs/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json
+#  CKPT_JSON_XSCC: /nfs/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json
+  PROFILE_PATH: /nfs/share/ci-workloads/env-scripts/perf_trigger/profile
 
 jobs:
   changes:
