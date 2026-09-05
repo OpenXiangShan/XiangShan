@@ -190,6 +190,9 @@ class seq_csr_common;
     // 设置：testcase build 期从 plus 冻结并同步给 memblock_sync_pkg；读取：sequence 走本 getter，
     // agent 走 sync package 查询接口。为 1 时仅输出 UVM_ERROR，为 0 时不执行对应诊断。
     static bit          hard_xz_check_en = 1'b0;
+    // 中文注释：DUT scalar writeback 输出的 trigger metadata 诊断快照。默认开启以保持既有严格行为；
+    // writeback adapter 通过 getter 读取，不影响 LSQ enqueue 输入 item 的结构合同。
+    static bit          trigger_check_en = 1'b1;
     static int unsigned active_seq_no_progress_warn_cycles = 10000;
     static bit          dispatch_issue_seq_en = 1'b0;
     // 中文注释：lintsissue 非阻塞发射模式开关。
@@ -475,6 +478,7 @@ class seq_csr_common;
             plus::MEMBLOCK_PMA_PMP_UNDEFINED_AFTER_TLB_FAULT;
         hard_xz_check_en             = plus::MEMBLOCK_HARD_XZ_CHECK_EN;
         memblock_sync_pkg::set_hard_xz_check_en(hard_xz_check_en);
+        trigger_check_en             = plus::MEMBLOCK_CHECK_TRIGGER_EN;
         active_seq_no_progress_warn_cycles = get_non_negative_int("MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES", plus::MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES);
         dispatch_issue_seq_en       = plus::MEMBLOCK_DISPATCH_ISSUE_SEQ_EN;
         dispatch_issue_nonblocking_en = plus::MEMBLOCK_DISPATCH_ISSUE_NONBLOCKING_EN;
@@ -1626,6 +1630,11 @@ class seq_csr_common;
         check_initialized("get_hard_xz_check_en");
         return hard_xz_check_en;
     endfunction:get_hard_xz_check_en
+
+    static function bit get_trigger_check_en();
+        check_initialized("get_trigger_check_en");
+        return trigger_check_en;
+    endfunction:get_trigger_check_en
 
     static function bit get_dispatch_issue_seq_en();
         check_initialized("get_dispatch_issue_seq_en");

@@ -56,6 +56,7 @@ mem_ut/ver/ut/memblock/seq/plus_cfg/default.cfg
 - `seq_csr_common.sv` 读取 plus 最终值，执行 clamp/fatal/warning 等合法性处理，并提供 getter。
 - 公共 sequence/helper 不长期直接读 `plus::MEMBLOCK_*`，应读 `seq_csr_common::get_*()`。
 - 新增使能类参数默认值必须保守，避免无意启动 directed 行为。
+- 仅用于保持既有诊断严格性的检查开关可以默认开启，但必须说明关闭时精确跳过的 report 条件；不得借此关闭 key、exception、flush、生命周期或 DUT 行为检查。若 agent 因编译顺序不能读取 `seq_csr_common`，必须通过 `memblock_sync_pkg` 同步同一冻结值，不建立第二个参数来源。
 
 ## testcase preset 规则
 

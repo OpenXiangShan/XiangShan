@@ -659,8 +659,10 @@ class dispatch_monitor_event_adapter extends uvm_object;
 
     function void check_raw_int_wb_capability(input memblock_sync_pkg::dispatch_raw_int_wb_t raw);
         bit [23:0] allowed_exception_mask;
+        bit        trigger_check_en;
 
         allowed_exception_mask = 24'b0;
+        trigger_check_en = seq_csr_common::get_trigger_check_en();
         if (raw.source_kind == memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_INVALID) begin
             `uvm_fatal("INT_WB_CAP", "valid raw event has INVALID source_kind")
         end
@@ -668,7 +670,8 @@ class dispatch_monitor_event_adapter extends uvm_object;
             memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_SCALAR_LDA: begin
                 if (raw.port_id > 2 || !raw.rob_valid || raw.rob_value_only_without_flag ||
                     raw.lq_valid || raw.sq_valid || !raw.key_needs_state_lookup ||
-                    !raw.replay_inst_valid || !raw.flush_pipe_valid || !raw.trigger_valid) begin
+                    !raw.replay_inst_valid || !raw.flush_pipe_valid ||
+                    (trigger_check_en && !raw.trigger_valid)) begin
                     `uvm_fatal("INT_WB_CAP", $sformatf("invalid SCALAR_LDA raw capability lane=%0d", raw.port_id))
                 end
                 if (raw.port_id == 0) begin
@@ -680,7 +683,7 @@ class dispatch_monitor_event_adapter extends uvm_object;
             memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STA: begin
                 if (raw.port_id > 1 || !raw.rob_valid || raw.rob_value_only_without_flag ||
                     raw.lq_valid || raw.sq_valid || !raw.key_needs_state_lookup ||
-                    raw.replay_inst_valid || !raw.trigger_valid ||
+                    raw.replay_inst_valid || (trigger_check_en && !raw.trigger_valid) ||
                     raw.flush_pipe_valid != (raw.port_id == 0) ||
                     raw.replay_inst || (!raw.flush_pipe_valid && raw.flush_pipe)) begin
                     `uvm_fatal("INT_WB_CAP", $sformatf("invalid STA raw capability lane=%0d", raw.port_id))
@@ -694,9 +697,10 @@ class dispatch_monitor_event_adapter extends uvm_object;
             memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STD: begin
                 if (raw.port_id > 1 || raw.rob_valid || !raw.rob_value_only_without_flag ||
                     raw.lq_valid || raw.sq_valid || !raw.key_needs_state_lookup ||
-                    raw.replay_inst_valid || raw.flush_pipe_valid || raw.trigger_valid ||
+                    raw.replay_inst_valid || raw.flush_pipe_valid ||
+                    (trigger_check_en && (raw.trigger_valid || raw.trigger != 4'hf)) ||
                     raw.replay_inst || raw.flush_pipe ||
-                    raw.exception_vec != 24'b0 || raw.trigger != 4'hf) begin
+                    raw.exception_vec != 24'b0) begin
                     `uvm_fatal("INT_WB_CAP", $sformatf("invalid STD value-only raw capability lane=%0d", raw.port_id))
                 end
             end
@@ -718,6 +722,9 @@ class dispatch_monitor_event_adapter extends uvm_object;
             if (raw.flush_pipe) begin
                 `uvm_fatal("INT_WB_SCALAR_LDA_FLUSH_PIPE_INVARIANT", "SCALAR_LDA flushPipe must be zero in current V2 profile")
             end
+        end
+        if (!seq_csr_common::get_trigger_check_en()) begin
+            return;
         end
         if (!raw.trigger_valid) begin
             if (raw.trigger != 4'hf) begin
@@ -754,7 +761,8 @@ class dispatch_monitor_event_adapter extends uvm_object;
                 end
                 `uvm_fatal("INT_WB_STA0_CBO_UNSUPPORTED", "STA0 CBO flushAfter has no current adapter consumer")
             end
-            if (raw.trigger == 4'h0 && !raw.exception_vec[3] &&
+            if (seq_csr_common::get_trigger_check_en() &&
+                raw.trigger == 4'h0 && !raw.exception_vec[3] &&
                 main_tr.op_class != MEMBLOCK_OP_CLASS_CBO &&
                 !raw.debug_is_mmio && !raw.debug_is_ncio) begin
                 `uvm_fatal("INT_WB_STA0_TRIGGER_PROVENANCE", "STA0 trigger=0 without breakpoint needs uncache/CBO provenance")
