@@ -99,7 +99,7 @@ Session: `01a051f8-7787-7003-b87a-79852aa669a7`.
 
 44. [`2026-09-03 20:12:19 CST`] `/goal 1. 需要基于前面的说法，包括“不代表 MMIO、atomics、VSegment 等明确边界外功能已经验证”，完善地补充验证计划，将所有能想到的测试点都补充进去。2. review 验证oracle，也就是如何判断结果的正确性，不应该基于特定的case结果，而是一些通用的oracle，你需要将你用了哪些oracle告诉我，写进单独的文档里。3. 每次完成后，需要用一个独立上下文的agent review验证计划，然后再启动长时间的单元测试回归。`
 
-## Current Session: 33 Prompts
+## Current Session: 37 Prompts
 
 Session: `01a06732-901c-7581-be22-854bdc2f93f0`.
 
