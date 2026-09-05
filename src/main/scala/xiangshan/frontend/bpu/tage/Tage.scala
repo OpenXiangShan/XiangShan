@@ -21,6 +21,8 @@ import freechips.rocketchip.util.SeqToAugmentedSeq
 import org.chipsalliance.cde.config.Parameters
 import utility.ChiselDB
 import utility.DataHoldBypass
+import utility.ParallelORR
+import utility.ParallelPriorityMux
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.frontend.bpu.BasePredictor
@@ -82,63 +84,85 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 1
      - get read resp from tables
-     - compute tag
+     - compute tags
      -------------------------------------------------------------------------------------------------------------- */
 
   private val s1_fire       = io.stageCtrl.s1_fire
   private val s1_startPc    = RegEnable(s0_startPc, s0_fire)
   private val s1_foldedHist = RegEnable(s0_foldedHist, s0_fire)
 
-  // Vec[NumBtbResultEntries][NumTables]
-  private val s1_tag = VecInit(io.fromMainBtb.s1_positions.map { position =>
-    VecInit((tables zip s1_foldedHist).map { case (table, hist) =>
+  private val s1_readResp = DataHoldBypass(VecInit(tables.map(_.io.readResp(0))), RegNext(s0_fire))
+
+  private val s1_tags = VecInit(io.fromMainBtb.s1_positions.map { position =>
+    VecInit(tables.zip(s1_foldedHist).map { case (table, hist) =>
       table.getTag(s1_startPc, hist.forTag, position)
     })
   })
 
-  private val s1_readResp = DataHoldBypass(VecInit(tables.map(_.io.readResp(0))), RegNext(s0_fire))
+  private val s1_hits = VecInit(s1_tags.map { branchTags =>
+    VecInit(s1_readResp.zip(branchTags).map { case (tableReadResp, tag) =>
+      tableReadResp.entries.map(entry => entry.valid && entry.tag === tag).asUInt
+    })
+  })
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 2
      - get results from mbtb
-     - get prediction for each branch
+     - compare tags
+     - generate the fast provider candidate for each table way
+     - select the hit way and provider
+     - select the alternate and complete the prediction for each branch
      -------------------------------------------------------------------------------------------------------------- */
 
   private val s2_fire     = io.stageCtrl.s2_fire
-  private val s2_startPc  = RegEnable(s1_startPc, s1_fire)
-  private val s2_tag      = RegEnable(s1_tag, s1_fire)
   private val s2_readResp = RegEnable(s1_readResp, s1_fire)
-
+  private val s2_hits     = RegEnable(s1_hits, s1_fire)
   private val s2_branches = io.fromMainBtb.result
 
-  s2_branches.zipWithIndex.foreach { case (branch, i) =>
-    val position = branch.bits.cfiPosition
+  s2_branches.indices.foreach { branchIdx =>
+    val candidates = TableInfos.indices.reverse.flatMap { tableIdx =>
+      (0 until TableInfos(tableIdx).NumWays).map { wayIdx =>
+        val hit   = s2_hits(branchIdx)(tableIdx)(wayIdx)
+        val taken = s2_readResp(tableIdx).entries(wayIdx).takenCtr.isPositive
+        hit -> taken
+      }
+    }
+    io.prediction.fastTakenVec(branchIdx).valid := ParallelORR(candidates.map(_._1))
+    io.prediction.fastTakenVec(branchIdx).bits  := ParallelPriorityMux(candidates)
+  }
 
-    // compare tags of each branch with all tables
+  s2_branches.zipWithIndex.foreach { case (branch, i) =>
     val allTableTagMatchResults = s2_readResp.zipWithIndex.map { case (tableReadResp, tableIdx) =>
-      val tag          = s2_tag(i)(tableIdx)
-      val hitWayMask   = tableReadResp.entries.map(entry => entry.valid && entry.tag === tag)
+      val hitWayMask   = s2_hits(i)(tableIdx)
       val hitWayMaskOH = PriorityEncoderOH(hitWayMask)
 
-      val result = Wire(new PredictTagMatchResult).suggestName(s"s2_branch_${i}_table_${tableIdx}_result")
-      result.hit          := hitWayMask.reduce(_ || _)
+      val result = Wire(new PredictTagMatchResult)
+      result.hit          := hitWayMask.orR
       result.hitWayMaskOH := hitWayMaskOH.asUInt
       result.takenCtr     := Mux1H(hitWayMaskOH, tableReadResp.entries.map(_.takenCtr))
       result.usefulCtr    := Mux1H(hitWayMaskOH, tableReadResp.usefulCtrs)
       result.hitWayMask   := hitWayMask.asUInt
       result
     }
+
     // find the provider, the table with the longest history among the hit tables
-    val hitTableMask    = allTableTagMatchResults.map(_.hit)
-    val hasProvider     = hitTableMask.reduce(_ || _)
-    val providerTableOH = getLongestHistTableOH(hitTableMask)
-    val provider        = Mux1H(providerTableOH, allTableTagMatchResults)
+    val hitTableMask = VecInit(allTableTagMatchResults.map(_.hit)).asUInt
+    val hasProvider  = ParallelORR(hitTableMask)
+    val providerTableOH = ParallelPriorityMux(
+      allTableTagMatchResults.zipWithIndex.reverse.map { case (result, tableIdx) =>
+        result.hit -> UIntToOH(tableIdx.U, NumTables)
+      }
+    )
+    val provider = ParallelPriorityMux(
+      allTableTagMatchResults.reverse.map(result => result.hit -> result)
+    )
 
     // find the alt, the table with the second longest history among the hit tables
-    val hitTableMaskNoProvider = hitTableMask.zip(providerTableOH).map { case (a, b) => a && !b }
-    val hasAlt                 = hasProvider && hitTableMaskNoProvider.reduce(_ || _)
-    val altTableOH             = getLongestHistTableOH(hitTableMaskNoProvider)
-    val alt                    = Mux1H(altTableOH, allTableTagMatchResults)
+    val hitTableMaskNoProvider = hitTableMask & (~providerTableOH)
+    val hasAlt                 = hasProvider && ParallelORR(hitTableMaskNoProvider)
+    val alt = ParallelPriorityMux(
+      hitTableMaskNoProvider.asBools.zip(allTableTagMatchResults).reverse
+    )
 
     val altConf          = Mux(hasAlt, !alt.takenCtr.isWeak, io.fromMainBtb.baseConf(i))
     val providerTableIdx = OHToUInt(providerTableOH)
@@ -696,6 +720,16 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     "predict_cond_num", {
       val condMask = s2_branches.map(branch => branch.valid && branch.bits.attribute.isConditional)
       Mux(io.stageCtrl.s2_fire, PopCount(condMask), 0.U)
+    }
+  )
+  XSPerfAccumulate(
+    "fast_final_prediction_mismatch", {
+      val mismatchMask = s2_branches.zipWithIndex.map { case (branch, i) =>
+        val fastTaken  = Mux(io.prediction.fastTakenVec(i).valid, io.prediction.fastTakenVec(i).bits, branch.bits.taken)
+        val finalTaken = Mux(io.prediction.takenVec(i).valid, io.prediction.takenVec(i).bits, branch.bits.taken)
+        branch.valid && branch.bits.attribute.isConditional && fastTaken =/= finalTaken
+      }
+      Mux(s2_fire, PopCount(mismatchMask), 0.U)
     }
   )
   XSPerfAccumulate("total_train", io.stageCtrl.t0_fire)

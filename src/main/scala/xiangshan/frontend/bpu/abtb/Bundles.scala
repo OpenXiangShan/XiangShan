@@ -19,8 +19,10 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
-import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.frontend.bpu.Prediction
+import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterFactory
 import xiangshan.frontend.bpu.TargetCarry
 import xiangshan.frontend.bpu.WriteReqBundle
@@ -90,14 +92,45 @@ class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {
   val targetCarry: Option[TargetCarry] = if (EnableTargetFix) Option(new TargetCarry) else None
 }
 
+class PipelineState(implicit p: Parameters) extends AheadBtbBundle with Helpers {
+  val startPc:   GuardedPc            = GuardedPc()
+  val setIdx:    UInt                 = UInt(SetIdxWidth.W)
+  val bankIdx:   UInt                 = UInt(BankIdxWidth.W)
+  val bankMask:  UInt                 = UInt(NumBanks.W)
+  val entries:   Vec[AheadBtbEntry]   = Vec(NumWays, new AheadBtbEntry)
+  val ctrVec:    Vec[SaturateCounter] = Vec(NumWays, TakenCounter())
+  val hitMask:   Vec[Bool]            = Vec(NumWays, Bool())
+  val isJumpVec: Vec[Bool]            = Vec(NumAheadBtbPredictionEntries, Bool())
+  val isCondVec: Vec[Bool]            = Vec(NumAheadBtbPredictionEntries, Bool())
+
+  val debug_indexPc: Option[GuardedPc] = Option.when(!env.FPGAPlatform)(GuardedPc())
+
+  def getHitMask: Vec[Bool] =
+    VecInit(entries.map(e => e.valid && e.tag === getTag(startPc)))
+
+  def getIsJumpVec: Vec[Bool] =
+    VecInit(entries.zip(hitMask).map { case (e, hit) => hit && (e.attribute.isDirect || e.attribute.isIndirect) })
+
+  def getIsCondVec: Vec[Bool] =
+    VecInit(entries.zip(hitMask).map { case (e, hit) => hit && e.attribute.isConditional })
+}
+
 class AheadBtbResult(implicit p: Parameters) extends AheadBtbBundle {
+  val entries:       Vec[Valid[Prediction]] = Vec(NumAheadBtbPredictionEntries, Valid(new Prediction))
+  val isJumpVec:     Vec[Bool]              = Vec(NumAheadBtbPredictionEntries, Bool())
+  val isCondVec:     Vec[Bool]              = Vec(NumAheadBtbPredictionEntries, Bool())
+  val debug_startPc: Option[GuardedPc]      = Option.when(!env.FPGAPlatform)(GuardedPc())
+}
+
+class AheadBtbToMicroTageResult(implicit p: Parameters) extends AheadBtbBundle {
   val taken:        Bool            = Bool()
   val cfiPosition:  UInt            = UInt(CfiPositionWidth.W)
   val attribute:    BranchAttribute = new BranchAttribute
   val isStrongBias: Bool            = Bool()
 }
 
-class AbtbBranchCtrl(implicit p: Parameters) extends AheadBtbBundle {
-  val jumpValidVec:      Vec[Bool] = Vec(NumAheadBtbPredictionEntries, Bool())
-  val conditionValidVec: Vec[Bool] = Vec(NumAheadBtbPredictionEntries, Bool())
+class AheadBtbToMicroTageIO(implicit p: Parameters) extends AheadBtbBundle {
+  val result: Vec[Valid[AheadBtbToMicroTageResult]] =
+    Vec(NumAheadBtbPredictionEntries, Valid(new AheadBtbToMicroTageResult))
+  val fastPositions: Vec[UInt] = Vec(NumAheadBtbPredictionEntries, UInt(CfiPositionWidth.W))
 }
