@@ -510,7 +510,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "ptw_response_latency_stats().max_cycles < 12",
             "outstanding-old-pte-request",
             "outstanding-refill",
-            "outstanding_walks=1",
+            "run_outstanding_hfence(true)",
+            "run_outstanding_hfence(false)",
+            "outstanding_stage1=1",
+            "outstanding_vs=",
+            "outstanding_g=",
         ):
             self.assertIn(contract, environment + main)
 

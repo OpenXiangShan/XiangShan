@@ -5483,6 +5483,138 @@ int run_translation_fence(int argc, char **argv)
         outstanding_writebacks = outstanding.writebacks();
     }
 
+    unsigned outstanding_hfence_walks = 0;
+    const auto run_outstanding_hfence = [&](bool vs_stage) {
+        memblock::Environment outstanding(argc, argv);
+        constexpr std::uint64_t virtual_page = 0x40000000ULL;
+        constexpr std::uint64_t address = virtual_page + 0x188;
+        constexpr std::uint64_t old_physical = 0x80000000ULL;
+        constexpr std::uint64_t new_physical = 0xc0000000ULL;
+        constexpr std::uint64_t root = 0xbc000000ULL;
+        const char *const stage = vs_stage ? "vs" : "g";
+        outstanding.memory().fill_incrementing(old_physical, 0x1000, 0x2b);
+        outstanding.memory().fill_incrementing(new_physical, 0x1000, 0xbb);
+        outstanding.configure_backpressure(
+            vs_stage ? 0x299f31d0a4093822ULL : 0x082efa98ec4e6c89ULL,
+            true,
+            memblock::ResponseLatencyProfiles{
+                memblock::ResponseLatencyProfile::compact,
+                memblock::ResponseLatencyProfile::spec,
+                memblock::ResponseLatencyProfile::compact});
+        const bool configured = outstanding.reset() &&
+            (vs_stage
+                ? outstanding.map_sv39_1g(
+                      virtual_page, old_physical, root)
+                : outstanding.map_sv39x4_1g(
+                      virtual_page, old_physical, root)) &&
+            outstanding.activate_two_stage_modes(
+                vs_stage
+                    ? memblock::ReferencePageMode::sv39
+                    : memblock::ReferencePageMode::bare,
+                vs_stage
+                    ? memblock::ReferencePageMode::bare
+                    : memblock::ReferencePageMode::sv39,
+                vs_stage ? root : 0,
+                vs_stage ? 0 : root,
+                73,
+                79);
+        if (!configured) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << outstanding.cycle() << " phase=outstanding-"
+                      << stage << "-configuration reason="
+                      << outstanding.error() << '\n';
+            return false;
+        }
+
+        const memblock::LoadTransaction canceled{
+            .address = address,
+            .oracle_address = old_physical + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 24,
+            .lq = 0,
+            .pdest = 120,
+            .lane = 0,
+        };
+        const std::uint64_t ptw_before_walk = outstanding.ptw_requests();
+        if (!outstanding.set_rob_head(canceled.rob, canceled.rob_flag) ||
+            !outstanding.enqueue_load(canceled) ||
+            !outstanding.issue_load(canceled, 512) ||
+            !outstanding.run_until_ptw_requests(ptw_before_walk + 1, 2048) ||
+            outstanding.ptw_response_latency_stats().max_cycles < 12) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << outstanding.cycle() << " phase=outstanding-"
+                      << stage << "-old-pte-request reason="
+                      << (outstanding.error().empty()
+                              ? "PTW response was not held outstanding"
+                              : outstanding.error()) << '\n';
+            return false;
+        }
+        const std::uint64_t stale_ptw_snapshot = outstanding.ptw_requests();
+        const bool remapped = vs_stage
+            ? outstanding.map_sv39_1g(virtual_page, new_physical, root)
+            : outstanding.map_sv39x4_1g(virtual_page, new_physical, root);
+        if (!remapped ||
+            !outstanding.issue_sfence_with_redirect(
+                23,
+                false,
+                false,
+                0,
+                0,
+                true,
+                true,
+                vs_stage,
+                !vs_stage) ||
+            outstanding.writebacks() != 0) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << outstanding.cycle() << " phase=outstanding-"
+                      << stage << "-fence reason="
+                      << (outstanding.error().empty()
+                              ? "redirected stale walk produced a writeback"
+                              : outstanding.error()) << '\n';
+            return false;
+        }
+        if (outstanding.lq_dequeued() + outstanding.lq_canceled() <
+                outstanding.lq_allocated() &&
+            !outstanding.account_lq_cancellation(1)) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << outstanding.cycle() << " phase=outstanding-"
+                      << stage << "-cancel-accounting reason="
+                      << outstanding.error() << '\n';
+            return false;
+        }
+
+        auto survivor = canceled;
+        survivor.oracle_address = new_physical + 0x188;
+        survivor.pdest = 121;
+        survivor.lane = 2;
+        outstanding.expect_load(survivor);
+        if (!outstanding.enqueue_load(survivor) ||
+            !outstanding.issue_load(survivor, 2048) ||
+            !outstanding.run_until_complete(16384) ||
+            !outstanding.run_until_lq_retired(4096) ||
+            outstanding.ptw_requests() <= stale_ptw_snapshot ||
+            outstanding.lq_dequeued() + outstanding.lq_canceled() !=
+                outstanding.lq_allocated()) {
+            std::cerr << "MEMBLOCK_TRANSLATION_FENCE_FAIL cycle="
+                      << outstanding.cycle() << " phase=outstanding-"
+                      << stage << "-refill reason="
+                      << (outstanding.error().empty()
+                              ? "post-fence access reused the stale walk"
+                              : outstanding.error()) << '\n';
+            return false;
+        }
+        outstanding_cycles += outstanding.cycle();
+        outstanding_ptw_requests += outstanding.ptw_requests();
+        outstanding_writebacks += outstanding.writebacks();
+        ++outstanding_hfence_walks;
+        return true;
+    };
+
+    if (!run_outstanding_hfence(true) ||
+        !run_outstanding_hfence(false)) {
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_TRANSLATION_FENCE_PASS"
               << " cycle="
               << (environment.cycle() + nested.cycle() + vvma.cycle() +
@@ -5496,7 +5628,10 @@ int run_translation_fence(int argc, char **argv)
                   vvma.writebacks() + same_id_writebacks +
                   outstanding_writebacks)
               << " same_id_reuses=3"
-              << " outstanding_walks=1"
+              << " outstanding_walks=" << 1 + outstanding_hfence_walks
+              << " outstanding_stage1=1"
+              << " outstanding_vs=" << (outstanding_hfence_walks > 0)
+              << " outstanding_g=" << (outstanding_hfence_walks > 1)
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

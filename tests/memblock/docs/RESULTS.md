@@ -134,9 +134,11 @@ stage-1 race accepted and snapshotted the old 1-GiB root-leaf PTE, held its PTW
 response for at least 12 cycles, replaced the PTE, and aligned a global
 `SFENCE.VMA` with the younger-load redirect. The canceled request produced no
 writeback; reuse of the same ROB/LQ identity forced a new PTW request and
-returned only the new-page data. The full scenario passed in 2,473 aggregate
-cycles with 75 PTW requests, 17 load writebacks, three same-ID root reuses, and
-one outstanding-walk fence race.
+returned only the new-page data. The same delayed-response construction also
+passed in VS-only and G-only modes under global `HFENCE.VVMA` and
+`HFENCE.GVMA`. The full scenario passed in 2,814 aggregate cycles with 79 PTW
+requests, 19 load writebacks, three same-ID root reuses, and three
+outstanding-walk fence races (one each for stage-1, VS-stage, and G-stage).
 
 `make translation-context` passed five context families and 14 same-address
 loads: direct Sv39-to-Sv48 mode/root, same-mode host ASID/root, VS ASID/root,
