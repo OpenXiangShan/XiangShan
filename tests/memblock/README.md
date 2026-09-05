@@ -306,14 +306,15 @@ misaligned D/W atomics for `storeAddrMisaligned`, suppressed exceptional
 `rfWen`, and no DCache request. Atomic uops are intentionally not counted as
 LSQ entries because the RTL routes them through `AtomicsUnit`.
 
-`atomic-dchannel-errors` injects denied and corrupt responses into cacheable
-AMO misses. It requires denied data to remain uninstalled, corrupt data to be
-installed only as the unmodified refill with its error metadata, and a second
-AMO hit on that corrupt line to report `hardwareError` without changing data.
-The final readbacks check exact TileLink request-count changes; a dedicated
-diagnostic oracle also compares the non-architectural data field on the
-corrupt-line exceptional writeback to prove that the cached refill was not
-modified. See [`docs/ATOMIC_DCHANNEL_ERROR.md`](docs/ATOMIC_DCHANNEL_ERROR.md).
+`atomic-dchannel-errors` injects denied and corrupt responses into cold misses
+for all 22 refill-capable W/D operations: LR, the nine AMO ALU operations, and
+AMOCAS. Every operation checks the exact exception class, suppressed `rfWen`,
+unmodified manager data, and the expected miss/hit request-count delta. It also
+requires denied LR not to establish a reservation and checks SC.W/D on cached
+corrupt metadata. SC itself cannot receive a cold-miss D response in this
+implementation: a missing line or reservation makes MainPipe return SC failure
+before issuing TileLink traffic. See
+[`docs/ATOMIC_DCHANNEL_ERROR.md`](docs/ATOMIC_DCHANNEL_ERROR.md).
 
 
 `vector-guest-fault-split` is the deterministic regression for the historical

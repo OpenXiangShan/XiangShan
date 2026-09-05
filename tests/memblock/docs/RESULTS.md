@@ -213,9 +213,12 @@ operand (`0x0102030405060708`) with stale `loadAccessFault` metadata. The fix
 rejects denied refill installation, preserves the deliberate corrupt-line
 error metadata while installing only raw refill data, and suppresses every
 atomic state change when either the current response or an existing cache line
-has an error. The independent `atomic-dchannel-errors` contract covers denied
-and corrupt AMO misses, a corrupt-line AMO hit, and post-error readback. Full
-evidence is in [`ATOMIC_DCHANNEL_ERROR.md`](ATOMIC_DCHANNEL_ERROR.md).
+has an error. The independent `atomic-dchannel-errors` contract now covers
+denied and corrupt cold misses for all 22 refill-capable W/D LR/AMO/AMOCAS
+operations, 44 post-error readbacks, two denied-LR reservation checks, and
+SC.W/D hits on corrupt metadata. It passed in 5,019 cycles with 66 exact
+TileLink requests. Full evidence is in
+[`ATOMIC_DCHANNEL_ERROR.md`](ATOMIC_DCHANNEL_ERROR.md).
 
 During this iteration, a temporary harness defect changed the `mmio-contracts`
 page mapping's PBMT=IO argument while adding the CBO.ZERO case. The existing

@@ -20,23 +20,27 @@ Run:
 make -C tests/memblock atomic-dchannel-errors
 ```
 
-The deterministic contract performs four checks:
+The deterministic contract crosses both D-channel error kinds with every
+refill-capable atomic encoding at W and D width: LR, AMOSWAP, AMOADD, AMOXOR,
+AMOAND, AMOOR, AMOMIN, AMOMAX, AMOMINU, AMOMAXU, and AMOCAS. These 22
+operations produce 44 independent cold-miss error cases under randomized
+request/response backpressure.
 
-1. Inject `denied=1` on an `AMOADD.D` miss. The writeback must contain
-   `storeAccessFault`, suppress `rfWen`, and leave no installed cache line.
-2. Inject `corrupt=1` on another `AMOADD.D` miss. The writeback must contain
-   `hardwareError`; the cache may retain the refill only with its D-channel
-   error metadata and without applying the AMO operation.
-3. Issue a second `AMOADD.D` to the corrupt line with error reporting enabled.
-   It must hit without a new TileLink request, report `hardwareError`, suppress
-   `rfWen`, and perform no atomic state change.
-4. Disable generic cache-error reporting and read both addresses. The denied
-   address must miss and fetch the pre-operation value. The corrupt address
-   must hit without a new TileLink request and re-report `hardwareError` because
-   LoadUnit classifies delayed TileLink errors independently of that CSR bit.
-   A diagnostic-only scoreboard option also checks the otherwise
-   non-architectural writeback data field against the original refill, proving
-   that neither AMO modified it.
+For each denied case, the atomic writeback must report `loadAccessFault` for LR
+or `storeAccessFault` for AMO/AMOCAS, suppress `rfWen`, and leave no installed
+line. A legal scalar readback must issue exactly one new TileLink request and
+return the original manager bytes. For each corrupt case, the writeback must
+report `hardwareError` and suppress `rfWen`; the scalar readback must hit
+without a request, re-report `hardwareError` even after generic cache-error
+reporting is disabled, and expose only the unmodified refill through the
+diagnostic exceptional-data oracle.
+
+SC has a separate reachable-path contract. MainPipe immediately returns SC
+failure when either the reservation or cache hit is absent, so SC cannot
+receive a cold-miss D-channel response. The test therefore requires a denied
+LR.W/LR.D not to establish a reservation (the following SC returns `1` without
+traffic), and requires SC.W/SC.D on the cached line left by a corrupt LR to
+report `hardwareError` without traffic or a register write.
 
 The original failing observation was:
 
@@ -57,7 +61,7 @@ late external response.
 
 For a denied atomic D-channel response:
 
-- LR reports `loadAccessFault`; AMO/SC reports `storeAccessFault`;
+- LR reports `loadAccessFault`; AMO/AMOCAS reports `storeAccessFault`;
 - integer register writeback is suppressed;
 - no data, tag, coherence, replacement, access, or prefetch state is installed;
 - a later legal access refetches and observes the pre-operation value.
@@ -72,6 +76,11 @@ For a corrupt atomic D-channel response:
 - an implementation-level diagnostic may inspect the exceptional writeback's
   non-architectural data field to prove that it contains only the unmodified
   refill value.
+
+SC reports its ordinary success/failure result only on a cache hit with a live
+reservation. It has no cold-miss response-error case at this boundary. Cached
+corrupt metadata is still architectural error input to SC and must produce
+`hardwareError` with no state change.
 
 ## Root Cause
 
@@ -108,7 +117,7 @@ then passed on complete ordered RTL SHA-256
 `b69e387eb081a3f311311079ade435206817c7c6a20bd8f3a5f11889ec1dcbf4`:
 
 ```text
-MEMBLOCK_ATOMIC_DCHANNEL_ERRORS_PASS cycle=437 denied_amo=1 corrupt_amo=1 corrupt_hit_amo=1 rtl_sha256=b69e387eb081a3f311311079ade435206817c7c6a20bd8f3a5f11889ec1dcbf4
+MEMBLOCK_ATOMIC_DCHANNEL_ERRORS_PASS cycle=5019 denied_cases=22 corrupt_cases=22 readbacks=44 lr_reservation_checks=2 sc_corrupt_hit_checks=2 tilelink_requests=66 rtl_sha256=b69e387eb081a3f311311079ade435206817c7c6a20bd8f3a5f11889ec1dcbf4
 ```
 
 The neighboring `atomic-contracts`, `dcache-errors`, `uncache-errors`,
@@ -119,8 +128,10 @@ timeout, or queue-accounting failure.
 
 ## Scope and Remaining Coverage
 
-The regression directly covers denied and corrupt `AMOADD.D` misses plus a
-corrupt-line `AMOADD.D` hit. The shared MainPipe gates also protect LR, SC, and
-AMOCAS, but their complete denied/corrupt matrix and explicit failed-reservation
-checks remain verification work and are listed as gaps in the verification
-plan.
+The regression now covers the complete legal refill-error encoding matrix for
+W/D LR, AMO ALU, and AMOCAS operations, plus both reachable SC error-adjacent
+paths. Remaining atomic work is cross-hart reservation interference, ordering
+with concurrent memory traffic, the full operation-by-misaligned-offset cross,
+and physical tag/data-array ECC injection. Manager-originated probes and their
+reservation invalidation behavior also remain outside this MemBlock manager
+model.

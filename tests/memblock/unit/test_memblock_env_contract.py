@@ -174,8 +174,14 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "atomic-contracts",
             "run_atomic_dchannel_errors",
             "atomic-dchannel-errors",
-            "denied_amo=1 corrupt_amo=1 corrupt_hit_amo=1",
-            "check_data_on_exception = true",
+            "std::array<AtomicErrorCase, 22>",
+            '" denied_cases="',
+            '" corrupt_cases="',
+            '" readbacks="',
+            '" lr_reservation_checks="',
+            '" sc_corrupt_hit_checks="',
+            "SC cannot issue a D-channel request on a miss",
+            "check_data_on_exception = corrupt",
         ):
             self.assertIn(contract, main + makefile)
         self.assertIn("bool check_data_on_exception = false", environment)
