@@ -212,6 +212,23 @@ Latest focused correction evidence:
   verifier accepted the frozen hashes, exact command options, coverage fields,
   and queue accounting; artifact SHA-256 is
   `be0646adb73e281ece4b2461f933972be8f4fba4abce2c0e03ecf808498102eb`;
+- one final-frozen comparison used the same `random-mixed` generator for two
+  4,096-action seeds under each shipped preset (24,576 total actions). All six
+  seeds passed independent artifact, command-replay, backpressure, coverage,
+  and queue-accounting verification. The constrained tails resolved to:
+  `coverage=2281,1141,2279,1140,1140,3,4,2`,
+  `spec=4916,2086,361,168,351,35,39,34`, and
+  `corner=1671,1037,1619,1097,1041,473,533,519` for scalar load/store,
+  vector load/store, prefetch, atomic, NC, and MMIO respectively. `coverage`
+  formed 569 overlap windows per seed with compact delays; `spec` reached a
+  400-cycle response and 158 TLB flushes; `corner` reached 396 cycles, 312 TLB
+  flushes, and 413 dirty ReleaseData beats. Artifact SHA-256 values are
+  `5655306119aa50a5e02cba60d1b00c4bc6086d8f6380a68486eb15b64d8f19f4`
+  (`coverage`),
+  `38e1b9628a8367086fd765fb354e7f7c3af40ba1d452b4e81133bde883ad59c7`
+  (`spec`), and
+  `01881180f71972ee4939ad0afd3dfeb6155995ff7d0efe0c56431d948df97290`
+  (`corner`);
 - `random-mixed --seed 31 --transactions 16384 --constraints spec` passed
   16,384 actions in 577,224 cycles. Its constrained tail produced 9,971 scalar
   loads, 4,187 scalar stores, 756 vector loads, 394 vector stores, 755
