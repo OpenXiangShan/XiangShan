@@ -179,6 +179,7 @@ object Bundles {
     val oldVType = VType()
     val vlsInstr = Bool()
     val fflagsWen = Bool()
+    val dirtyVs = Bool()
     val isMove = Bool()
     val uopIdx = UopIdx()
     val uopSplitType = UopSplitType()
