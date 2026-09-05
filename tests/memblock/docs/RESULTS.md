@@ -224,7 +224,7 @@ parameters and verifies the independent Sv39x4 GPA oracle.
 
 Latest focused correction evidence:
 
-- 109 Python unit tests and the complete port/SVA/filelist checks pass;
+- 111 Python unit tests and the complete port/SVA/filelist checks pass;
 - after making mixed-window scalar addresses obey `misaligned` and supplying
   the required ROB-head pulse for the rare cross-page store, the exact former
   timeout command (`random-mixed --seed 42 --transactions 16384 --constraints
@@ -241,6 +241,14 @@ Latest focused correction evidence:
   observed DCache buckets `60,8,5,5` while both other managers stayed in their
   compact bucket. A separate constrained seed enabling only LR/SC.W within the
   atomic class observed exactly that family and width and passed;
+- the rebuilt interface completed `spec` seeds 1-8 and `corner` seeds 101-108
+  at 4,096 actions per seed: 65,536 constrained-random actions in total. Both
+  eight-seed artifacts passed the independent verifier with exact queue
+  accounting, backpressure, coverage, command, and RTL-hash checks. The
+  `spec` artifact SHA-256 is
+  `fcd1209c009e3fe5ca456ea483cce4e607ad159fe96d485377c05abfa696ca44`;
+  the post-scheduler-fix `corner` artifact SHA-256 is
+  `c1e5323a0cc513c7387d559d2660757a4d411d7f0df0908cfecd966d1f154e30`;
 - the common constrained-random interface passed an override run whose tail
   enabled only scalar loads (`seed=29`, 256 actions): actual constrained
   operations were `155,0,0,0,0,0,0,0`, and all 155 locality selections used

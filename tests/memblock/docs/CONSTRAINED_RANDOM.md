@@ -193,3 +193,8 @@ backend state creates a UT deadlock, not an RTL failure. Atomic operations are
 also intentionally absent from overlap windows: `MemBlock` documents that
 LR/SC/AMO blocks the pipeline and redirects load-unit-0 control while active.
 They remain constrained-random serializing actions in the same generator.
+Translated MMIO stores reissue their address from observed store-TLB miss
+feedback until a hit is observed before the ROB-head pulse. Misaligned vector
+stores similarly drive ROB-head/pending state and replay; their SQ retirement
+target is captured when their flows are enqueued, so a writeback that retires
+before the helper's explicit commit step cannot be counted twice.

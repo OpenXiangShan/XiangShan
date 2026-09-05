@@ -7904,28 +7904,34 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             environment.expect_vector(transaction);
         }
         bool requires_misaligned_head = false;
-        if (!transaction.store) {
-            const unsigned element_bytes = 1U << transaction.eew;
-            const std::uint16_t active =
-                memblock::active_vector_elements(transaction);
-            for (unsigned element = 0;
-                 element < 16U / element_bytes; ++element) {
-                if (((active >> element) & 1U) == 0) {
-                    continue;
-                }
-                const std::uint64_t address =
-                    memblock::vector_element_address(transaction, element);
-                requires_misaligned_head |=
-                    ((address & 0xfU) + element_bytes) > 16U;
+        bool requires_store_pending = false;
+        const unsigned element_bytes = 1U << transaction.eew;
+        const std::uint16_t active =
+            memblock::active_vector_elements(transaction);
+        for (unsigned element = 0;
+             element < 16U / element_bytes; ++element) {
+            if (((active >> element) & 1U) == 0) {
+                continue;
             }
+            const std::uint64_t address =
+                memblock::vector_element_address(transaction, element);
+            requires_misaligned_head |= !transaction.store &&
+                ((address & 0xfU) + element_bytes) > 16U;
+            requires_store_pending |= transaction.store &&
+                (address & (element_bytes - 1)) != 0;
         }
-        if ((requires_misaligned_head &&
+        if (((requires_misaligned_head || requires_store_pending) &&
              !environment.set_rob_head(
                  transaction.rob, transaction.rob_flag)) ||
             !environment.enqueue_vector(transaction) ||
             !environment.issue_vector(transaction) ||
+            (requires_store_pending &&
+             (!environment.run_cycles(32) ||
+              !environment.pulse_pending_store(
+                  transaction.rob, transaction.rob_flag))) ||
             !environment.run_until_vector_complete_with_replays(
-                transaction, constrained_completion_timeout)) {
+                transaction, constrained_completion_timeout,
+                requires_store_pending)) {
             return false;
         }
         coverage.sample(transaction);
@@ -9636,9 +9642,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     if (!prepared_mmio_store ||
                         !environment.enqueue_store(
                             transaction, memblock::lq_pointer_value(lq_offset)) ||
-                        !environment.issue_store_address(transaction, 4096) ||
-                        !environment.run_cycles(256) ||
-                        !environment.issue_store_address(transaction, 4096) ||
+                        !environment.issue_store_address_until_tlb_hit(
+                            transaction, constrained_completion_timeout) ||
                         !environment.issue_store_data(transaction, 4096) ||
                         !environment.run_cycles(64) ||
                         (environment.uncache_requests() == uncache_before &&

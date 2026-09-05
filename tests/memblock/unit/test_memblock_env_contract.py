@@ -281,6 +281,15 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("rob_offset - 1", main)
         self.assertIn("Keep the commit boundary at the last uop", main)
 
+    def test_vector_store_commit_uses_its_enqueue_time_sq_target(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        self.assertIn(
+            "vector_store_sq_targets_[vector_store_key(transaction)]", environment
+        )
+        self.assertIn("sq_allocated_ - sq_canceled_", environment)
+        self.assertIn("const std::uint64_t target = target_it->second", environment)
+        self.assertIn("if (sq_dequeued_ < target", environment)
+
     def test_reference_memory_is_separate_from_bus_backing_memory(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         for contract in (
@@ -643,6 +652,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
         self.assertIn("requires_misaligned_head", driver)
         self.assertIn("((address & 0xfU) + element_bytes) > 16U", driver)
+        self.assertIn("requires_store_pending", driver)
+        self.assertIn("(address & (element_bytes - 1)) != 0", driver)
+        self.assertIn("requires_store_pending))", driver)
         self.assertIn(".address = base + (index == 3 ? 0x1800 : 0x1803)", driver)
         self.assertIn("loads[index].index[8] = index == 4 ? 0xa0 : 0xa8", driver)
 
@@ -657,6 +669,16 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "environment.pulse_pending_store(\n                      scalar_store.rob",
         ):
             self.assertIn(contract, driver)
+
+    def test_random_mmio_store_replays_until_tlb_hit(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        self.assertIn("bool issue_store_address_until_tlb_hit(", environment)
+        self.assertIn("store_tlb_feedbacks_ == feedbacks_before", environment)
+        self.assertIn("store_tlb_misses_ == misses_before", environment)
+        self.assertIn(
+            "environment.issue_store_address_until_tlb_hit(", driver
+        )
 
     def test_make_targets_forward_make_variable_seed_and_transaction_counts(self) -> None:
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()

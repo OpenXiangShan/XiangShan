@@ -4098,6 +4098,8 @@ public:
             lq_allocated_ += enqueue.num_ls_elem;
         } else {
             sq_allocated_ += enqueue.num_ls_elem;
+            vector_store_sq_targets_[vector_store_key(transaction)] =
+                sq_allocated_ - sq_canceled_;
         }
         return check_components();
     }
@@ -4419,6 +4421,41 @@ public:
             return false;
         }
         return issue_store_address(transaction);
+    }
+
+    bool issue_store_address_until_tlb_hit(
+        const StoreTransaction &transaction, unsigned timeout = 4096)
+    {
+        const std::uint64_t deadline = cycle() + timeout;
+        while (cycle() < deadline) {
+            const std::uint64_t feedbacks_before = store_tlb_feedbacks_;
+            const std::uint64_t misses_before = store_tlb_misses_;
+            const unsigned issue_timeout = static_cast<unsigned>(std::min(
+                std::uint64_t{256}, deadline - cycle()));
+            if (issue_timeout == 0 ||
+                !issue_store_address(transaction, issue_timeout)) {
+                return false;
+            }
+            while (cycle() < deadline &&
+                   store_tlb_feedbacks_ == feedbacks_before) {
+                tick();
+                if (!check_components()) {
+                    return false;
+                }
+            }
+            if (store_tlb_feedbacks_ == feedbacks_before) {
+                break;
+            }
+            if (store_tlb_misses_ == misses_before) {
+                return check_components();
+            }
+            if (!run_cycles(static_cast<unsigned>(std::min(
+                    std::uint64_t{8}, deadline - cycle())))) {
+                return false;
+            }
+        }
+        error_ = "timed out replaying store address until DTLB hit";
+        return false;
     }
 
     bool run_until_store_complete_with_replay(
@@ -4805,12 +4842,19 @@ public:
             error_ = "cannot commit a vector load as a store";
             return false;
         }
-        const std::uint64_t target = sq_dequeued_ + transaction.flow_num;
+        const auto target_it = vector_store_sq_targets_.find(
+            vector_store_key(transaction));
+        if (target_it == vector_store_sq_targets_.end()) {
+            error_ = "vector store has no recorded SQ allocation target";
+            return false;
+        }
+        const std::uint64_t target = target_it->second;
         StoreTransaction commit_point{
             .rob = transaction.rob,
             .rob_flag = transaction.rob_flag,
         };
-        if (!commit_stores_through(commit_point, 1)) {
+        if (sq_dequeued_ < target &&
+            !commit_stores_through(commit_point, 1)) {
             return false;
         }
         if (!run_until_sq_dequeued(target, timeout)) {
@@ -4825,6 +4869,7 @@ public:
             error_ = message.str();
             return false;
         }
+        vector_store_sq_targets_.erase(target_it);
         const std::uint64_t address = transaction.oracle_address.value_or(
             transaction.address);
         const unsigned element_bytes = 1U << transaction.eew;
@@ -5159,6 +5204,15 @@ private:
         return error_.empty();
     }
 
+    static std::uint64_t vector_store_key(
+        const VectorMemoryTransaction &transaction)
+    {
+        return transaction.rob |
+            (std::uint64_t{transaction.rob_flag} << 8) |
+            (std::uint64_t{transaction.sq} << 9) |
+            (std::uint64_t{transaction.sq_flag} << 17);
+    }
+
     UTMemBlock dut_;
     SparseMemory bus_memory_;
     SparseMemory memory_;
@@ -5175,6 +5229,8 @@ private:
     std::uint64_t sq_allocated_ = 0;
     std::uint64_t sq_dequeued_ = 0;
     std::uint64_t sq_canceled_ = 0;
+    std::unordered_map<std::uint64_t, std::uint64_t>
+        vector_store_sq_targets_;
     std::uint64_t store_tlb_feedbacks_ = 0;
     std::uint64_t store_tlb_misses_ = 0;
     std::deque<VectorReplayRequest> vector_replay_requests_;
