@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `eb22eebf481740388b60ce6e08913ef4e4d127989dc1746c0011c5b031e535ee`
+- Current rebuilt and frozen UT executable SHA-256: `b9b6fa267b03d1da04923c36492319a91b00f544fb8e3ee78b6cdd7c4301c51c`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `40f566e500af18a7ad56e9c30030398876ac73605431f6e1b88b6c30cbfbd736`
+- Frozen runtime manifest SHA-256: `6e33fac421aa14f42cf7cfc11551916d127858d92a6a609be20c9d55978ca776`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -73,20 +73,22 @@ observed.
 
 ## Top-Level Control Bypasses
 
-On 2026-09-07, `top-control-contracts` passed in 57 cycles on complete RTL
+On 2026-09-07, `top-control-contracts` passed in 281 cycles on complete RTL
 SHA-256
 `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
 It covered all eight power-down/halt/critical-error combinations while applying
 eight independent hart-ID and reset-vector patterns. Cycle-by-cycle checks
 proved that hart ID and power-down are combinational, while reset vector, CPU
-halted, and CPU critical error are exactly one-cycle delayed. A further 32
-patterns covered combinational MSI-ack/frontend-reset bypass, valid-gated
+halted, and CPU critical error are exactly one-cycle delayed. A further 256
+patterns exhaustively covered all eight interrupt-sink input bits and checked
+the seven one-cycle outputs, including the BEU-local/NMI0 OR mapping. They also
+covered combinational MSI-ack/frontend-reset bypass, valid-gated
 one-cycle MSI-info and CLINT delivery, one-cycle I-cache BEU metadata, all 67
 shared hardware-counter event lanes, and all six two-cycle L2-prefetch-control
 fields. The patterns covered all 32 prefetch-enable combinations, all four
 MSI/CLINT valid combinations, zero and maximum prefetch delay, and all 64
 six-bit event values. The elaborated output event lane 0 remained tied to zero;
-the standalone boundary prunes outer lane 0 and inner lane 68. All 43 monitored
+the standalone boundary prunes outer lane 0 and inner lane 68. All 267 monitored
 cycles passed. No CPU defect was observed.
 
 ## Reset With Outstanding Manager Traffic
@@ -1125,7 +1127,7 @@ the historical complete RTL SHA-256 is
 | --- | --- | --- |
 | Idle smoke | Pass | 38 cycles; registered DUT clock and internal reset release |
 | Outer L2 flush bridge | Pass | 24 cycles; all four enable/done combinations, four enable transitions, five done transitions, and ten exact combinational/one-cycle timing checks |
-| Top-level control and metadata bridges | Pass | 57 cycles and 43 continuous checks; eight power/halt/error combinations, eight hart/reset patterns, all 32 L2-prefetch enable combinations, all four MSI/CLINT valid combinations, 67 shared perf-event lanes, and all 64 event values passed exact combinational/one-cycle/two-cycle timing oracles |
+| Top-level control and metadata bridges | Pass | 281 cycles and 267 continuous checks; eight power/halt/error combinations, all 256 interrupt-sink combinations, eight hart/reset patterns, all 32 L2-prefetch enable combinations, all four MSI/CLINT valid combinations, 67 shared perf-event lanes, and all 64 event values passed exact combinational/one-cycle/two-cycle timing oracles |
 | Complete pin space | Pass | 749 inputs/7,155 bits and 586 outputs/5,434 bits; 256 patterns; digest `0xc36e86e25361ff60` |
 | Cold-load refill, partial progress, and merge | Pass | Cycle 74 for two cold lines selecting opposite virtual-address bit-5 values: one ordinary and one `isKeyword` AcquireBlock, two exact 64-bit writebacks, and two GrantAcks. A separate same-line pair completed two exact loads in 172 cycles from one AcquireBlock held for 128 cycles. A partial-refill load wrote back at cycle 44 after only its critical beat; the delayed second beat drained by cycle 300 with no duplicate writeback |
 | Vector loads | Pass | Four EEWs, both vector lanes, four exact 128-bit results |

@@ -425,10 +425,11 @@ all eight power/halt/error combinations plus eight independent 6-bit hart-ID
 and 48-bit reset-vector patterns. It also checks combinational MSI-ack and
 frontend-reset bypasses, one-cycle MSI-info/CLINT/BEU metadata, all 67
 observable hardware-counter event lanes, and the full two-cycle L2 prefetch
-control bundle. Thirty-two bridge patterns cover every combination of the five
-prefetch control enables, all four MSI/CLINT valid combinations, zero/maximum
-delay, and all 64 event values. These timing oracles also remain active in every
-monitored functional scenario.
+control bundle. Two hundred fifty-six bridge patterns exhaust all eight
+interrupt-sink input bits, including the BEU-local/NMI0 OR mapping, while also
+covering every combination of the five prefetch-control enables, all four
+MSI/CLINT valid combinations, zero/maximum delay, and all 64 event values.
+These timing oracles also remain active in every monitored functional scenario.
 `random-mixed` keeps constant-space lane counters and
 requires both canceled and uncanceled wakeups on every lane. When hardware
 stride prefetch is enabled, that backend gate is frozen before training begins

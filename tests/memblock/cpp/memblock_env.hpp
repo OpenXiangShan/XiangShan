@@ -3305,6 +3305,18 @@ struct L2PrefetchControl {
     bool operator==(const L2PrefetchControl &) const = default;
 };
 
+struct ExternalInterruptState {
+    bool msip = false;
+    bool mtip = false;
+    bool meip = false;
+    bool seip = false;
+    bool debug = false;
+    bool nmi_31 = false;
+    bool nmi_43 = false;
+
+    bool operator==(const ExternalInterruptState &) const = default;
+};
+
 struct TopBridgeStimulus {
     bool msi_ack = false;
     bool frontend_reset = false;
@@ -3314,6 +3326,14 @@ struct TopBridgeStimulus {
     std::uint16_t msi_info = 0;
     bool clint_time_valid = false;
     std::uint64_t clint_time = 0;
+    bool interrupt_msip = false;
+    bool interrupt_mtip = false;
+    bool interrupt_meip = false;
+    bool interrupt_seip = false;
+    bool interrupt_debug = false;
+    bool interrupt_nmi_31 = false;
+    bool interrupt_nmi_43 = false;
+    bool interrupt_beu_local = false;
     std::array<
         std::uint8_t, generated::kHcPerfEventHighestInputLane + 1>
         hc_perf_events{};
@@ -5920,6 +5940,15 @@ public:
         dut_.io_fromTopToBackend_clintTime_valid.ImmSet(
             stimulus.clint_time_valid);
         dut_.io_fromTopToBackend_clintTime_bits.ImmSet(stimulus.clint_time);
+        dut_.auto_inner_clint_int_sink_in_0.ImmSet(stimulus.interrupt_msip);
+        dut_.auto_inner_clint_int_sink_in_1.ImmSet(stimulus.interrupt_mtip);
+        dut_.auto_inner_plic_int_sink_in_0_0.ImmSet(stimulus.interrupt_meip);
+        dut_.auto_inner_plic_int_sink_in_1_0.ImmSet(stimulus.interrupt_seip);
+        dut_.auto_inner_debug_int_sink_in_0.ImmSet(stimulus.interrupt_debug);
+        dut_.auto_inner_nmi_int_sink_in_0.ImmSet(stimulus.interrupt_nmi_31);
+        dut_.auto_inner_nmi_int_sink_in_1.ImmSet(stimulus.interrupt_nmi_43);
+        dut_.auto_inner_beu_local_int_sink_in_0.ImmSet(
+            stimulus.interrupt_beu_local);
         for (unsigned lane = generated::kHcPerfEventFirstInputLane;
              lane <= generated::kHcPerfEventHighestInputLane; ++lane) {
             generated::drive_hc_perf_event(
@@ -7986,6 +8015,16 @@ private:
             dut_.io_fromTopToBackend_clintTime_valid.B();
         const std::uint64_t clint_time_input =
             dut_.io_fromTopToBackend_clintTime_bits.U();
+        const ExternalInterruptState external_interrupt_input{
+            .msip = dut_.auto_inner_clint_int_sink_in_0.B(),
+            .mtip = dut_.auto_inner_clint_int_sink_in_1.B(),
+            .meip = dut_.auto_inner_plic_int_sink_in_0_0.B(),
+            .seip = dut_.auto_inner_plic_int_sink_in_1_0.B(),
+            .debug = dut_.auto_inner_debug_int_sink_in_0.B(),
+            .nmi_31 = dut_.auto_inner_nmi_int_sink_in_0.B() ||
+                      dut_.auto_inner_beu_local_int_sink_in_0.B(),
+            .nmi_43 = dut_.auto_inner_nmi_int_sink_in_1.B(),
+        };
         std::array<
             std::uint8_t, generated::kHcPerfEventHighestInputLane + 1>
             hc_perf_event_inputs{};
@@ -8067,6 +8106,18 @@ private:
                  dut_.io_mem_to_ooo_topToBackendBypass_clintTime_bits.U() !=
                      expected_clint_time_)) {
                 error_ = "CLINT time violated valid-gated one-cycle delay";
+            }
+            const ExternalInterruptState external_interrupt_output{
+                .msip = dut_.io_mem_to_ooo_topToBackendBypass_externalInterrupt_msip.B(),
+                .mtip = dut_.io_mem_to_ooo_topToBackendBypass_externalInterrupt_mtip.B(),
+                .meip = dut_.io_mem_to_ooo_topToBackendBypass_externalInterrupt_meip.B(),
+                .seip = dut_.io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip.B(),
+                .debug = dut_.io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug.B(),
+                .nmi_31 = dut_.io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31.B(),
+                .nmi_43 = dut_.io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43.B(),
+            };
+            if (external_interrupt_output != expected_external_interrupt_) {
+                error_ = "external interrupts violated one-cycle mapping";
             }
             if (generated::sample_hc_perf_event_output(
                     dut_, generated::kHcPerfEventFirstOutputLane) != 0) {
@@ -8216,6 +8267,7 @@ private:
         if (clint_time_valid_input) {
             expected_clint_time_ = clint_time_input;
         }
+        expected_external_interrupt_ = external_interrupt_input;
         expected_hc_perf_events_ = hc_perf_event_inputs;
         expected_l2_prefetch_output_ = l2_prefetch_delay_stage_;
         l2_prefetch_delay_stage_ = l2_prefetch_input;
@@ -8399,6 +8451,7 @@ private:
     std::uint16_t expected_msi_info_ = 0;
     bool expected_clint_time_valid_ = false;
     std::uint64_t expected_clint_time_ = 0;
+    ExternalInterruptState expected_external_interrupt_{};
     std::array<
         std::uint8_t, generated::kHcPerfEventHighestInputLane + 1>
         expected_hc_perf_events_{};

@@ -2015,7 +2015,7 @@ int run_top_control_contracts(int argc, char **argv)
     std::uint64_t perf_value_bitmap = 0;
     bool saw_zero_delay = false;
     bool saw_max_delay = false;
-    for (unsigned index = 0; index < 32; ++index) {
+    for (unsigned index = 0; index < 256; ++index) {
         memblock::TopBridgeStimulus stimulus;
         stimulus.msi_info_valid = (index & 1U) != 0;
         stimulus.clint_time_valid = (index & 2U) != 0;
@@ -2030,6 +2030,14 @@ int run_top_control_contracts(int argc, char **argv)
         stimulus.clint_time =
             0x0123456789abcdefULL ^
             (std::uint64_t{index} * 0x1111111111111111ULL);
+        stimulus.interrupt_msip = (index & 1U) != 0;
+        stimulus.interrupt_mtip = (index & 2U) != 0;
+        stimulus.interrupt_meip = (index & 4U) != 0;
+        stimulus.interrupt_seip = (index & 8U) != 0;
+        stimulus.interrupt_debug = (index & 16U) != 0;
+        stimulus.interrupt_nmi_31 = (index & 32U) != 0;
+        stimulus.interrupt_nmi_43 = (index & 64U) != 0;
+        stimulus.interrupt_beu_local = (index & 128U) != 0;
         for (unsigned lane = memblock::generated::kHcPerfEventFirstInputLane;
              lane <= memblock::generated::kHcPerfEventHighestInputLane;
              ++lane) {
@@ -2047,7 +2055,7 @@ int run_top_control_contracts(int argc, char **argv)
             .delay_latency = static_cast<std::uint16_t>(
                 index == 0 ? 0 : index == 31 ? 0x3ff : index * 31U),
         };
-        prefetch_control_bitmap |= std::uint32_t{1} << index;
+        prefetch_control_bitmap |= std::uint32_t{1} << (index & 31U);
         msi_clint_valid_bitmap |=
             1U << ((stimulus.msi_info_valid ? 1U : 0U) |
                    (stimulus.clint_time_valid ? 2U : 0U));
@@ -2098,7 +2106,8 @@ int run_top_control_contracts(int argc, char **argv)
               << " reset_vector_patterns=" << reset_vectors.size()
               << " transitions=" << power_transitions << ','
               << halt_transitions << ',' << error_transitions
-              << " bridge_patterns=32"
+              << " bridge_patterns=256"
+              << " interrupt_combinations=256"
               << " l2_prefetch_combinations=32"
               << " perf_event_shared_lanes="
               << memblock::generated::kHcPerfEventLastSharedLane -
