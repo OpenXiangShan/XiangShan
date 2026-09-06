@@ -353,6 +353,42 @@ in-flight context, and canonical-boundary changes through `228840c8f`; after
 those controller changes are merged, a newly frozen campaign is still required
 for final acceptance of the merged harness.
 
+### Frozen Eight-Hour SPEC Campaign Before Top-I/O Audit Merge
+
+After the translation-context and canonical-boundary changes were merged, the
+frozen harness at controller revision `97b9eb49f` ran from 2026-09-06 02:13 to 10:17
+Asia/Shanghai. All 860 continuous seeds passed with 16,384 `spec` actions per
+seed: 14,090,240 actions and 560,576,358 simulated cycles in 29,046.287660
+seconds. Per-seed wall time ranged from 249.578 to 299.499 seconds, with a
+268.264-second median and 268.988-second mean.
+
+The campaign produced 9,436,547 scalar load writebacks, 3,658,050 scalar store
+writebacks, 665,174 vector load writebacks, 333,582 vector store writebacks,
+and 642,134 software-prefetch writebacks. Aggregate manager traffic was
+1,342,718 DCache TileLink A requests, 1,850,164 PTW requests, 135,283 Uncache
+requests, and 121,772 dirty ReleaseData beats. The rolling concurrent windows
+issued 198,794 operations from each of their five producer classes. Every seed
+exercised a vector replay; maximum live scoreboard occupancy was seven, and all
+three manager response-latency profiles reached 400 cycles.
+
+The complete RTL SHA-256 remained
+`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
+Frozen binary/model/runtime, external libraries, RTL metadata, runner, and all
+eight controller hashes were unchanged before and after the campaign. Direct
+independent verification accepted seeds 1 through 860. The artifact is
+`build/memblock/spec-merged-final-8h-16384.json`, SHA-256
+`5b99eb4bea45b3e2491bb7e40a8077c87e4fa9e2877827dfde1b6e0c84aede07`.
+
+The composite `make verify-final-results` prerequisite check found the shared
+generated `build/memblock/rtl.f` had subsequently been prepared from the
+isolated top-I/O audit worktree, so the exact artifact verifier was invoked
+directly with the frozen metadata and controller set. It reported
+`MEMBLOCK_REGRESSION_ARTIFACT_PASS`. This is a generated-path provenance
+mismatch, not a simulation failure. The top-I/O audit, DCache B/C/E agent,
+endurance controller, IFU PTW bridge, and randomized Probe constraints are
+later controller changes, so this result remains valid pre-merge evidence and
+a newly frozen campaign is still required for the merged harness.
+
 After the 57-case fault expansion, `random-mixed --seed 419 --transactions
 4096 --constraints spec` passed in 152,052 cycles. It mixed 2,467 loads, 1,011
 stores, 181 prefetches, vector traffic, atomics, MMIO/NC, translation faults,
