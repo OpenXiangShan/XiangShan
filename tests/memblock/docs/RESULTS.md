@@ -15,12 +15,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `257396474c8bef35e3e3594a6adac2acf6aa7444e8370f0f4d3e413bd545f301`
 - Complete ordered RTL SHA-256: `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`
-- Current rebuilt and frozen UT executable SHA-256: `58bb4dfb2e26d9dd85876d3ba777ae080793bb3b82b94934fb6163bc8a114092`
+- Current rebuilt and frozen UT executable SHA-256: `bd517cae13ec25a5d1ae69307deda247994fb4f9bdce4fe07250ab5f4c41758e`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `577579039590a2ea7a5e5d4e22901ac1d76afbcc5fed158eaf1cd53c8e5d3984`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `3ffb5c0d39a3402bbe6507a54829d58866e907d02760179159d6945dde00344a`
-- Frozen runtime manifest SHA-256: `4a1201319ef1444e36fefcf27e2bf040da3f8223488ef5fd67d32cfe3cac918c`
+- Frozen runtime manifest SHA-256: `574b08355bde6fa9ae7ac9380b7e909e394b8eed0174470ff04ea59b4955edfd`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -266,6 +266,15 @@ and checked exact data and metadata. The combined scenario completed at cycle
 5719 with 135 vector-load writebacks, 63 vector-store writebacks, and 54
 TileLink requests against complete RTL hash
 `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`.
+No CPU defect was observed.
+
+Later on 2026-09-07, an indexed matrix crossed ordered/unordered operations
+with all four EEWs. Eight direct loads used repeated and non-monotonic indices;
+eight stores used non-monotonic unique indices and were flushed and read back
+by another eight indexed loads. Addresses crossed cache lines and a Bare
+4-KiB boundary, while 120 LQ and 60 SQ allocations drained exactly across
+pointer wraps. The current combined scenario passed at cycle 7414 with 151
+vector-load writebacks, 71 vector-store writebacks, and 84 TileLink requests.
 No CPU defect was observed.
 
 ## Top-Down Status Boundary
@@ -1310,7 +1319,7 @@ the historical complete RTL SHA-256 is
 | Complete pin space | Pass | 749 inputs/7,155 bits and 586 outputs/5,434 bits; 256 patterns; digest `0xc36e86e25361ff60` |
 | Cold-load refill, partial progress, and merge | Pass | Cycle 74 for two cold lines selecting opposite virtual-address bit-5 values: one ordinary and one `isKeyword` AcquireBlock, two exact 64-bit writebacks, and two GrantAcks. A separate same-line pair completed two exact loads in 172 cycles from one AcquireBlock held for 128 cycles. A partial-refill load wrote back at cycle 44 after only its critical beat; the delayed second beat drained by cycle 300 with no duplicate writeback |
 | Vector loads | Pass | Four EEWs, both vector lanes, four exact 128-bit results |
-| Vector addressing | Pass | Strided, indexed-unordered, and indexed-ordered vector stores each committed and read back exactly; all four load modes are checked |
+| Vector addressing | Pass | Cycle 7,414; ordered/unordered indexed load/store/readback crossed all four EEWs with alias/non-monotonic patterns and 120 LQ/60 SQ allocations, all 16 legal whole-register NF/EEW combinations added another 240 LQ/120 SQ allocations, and representative ordinary LMUL=2 unit/negative-stride/ordered-indexed pairs completed; 151 load and 71 store writebacks issued 84 TileLink requests |
 | Vector split load | Pass | Three checked writebacks including a split cold-load replay shape |
 | Store forwarding | Pass | Four store widths and four matching scalar loads |
 | Vector forwarding | Pass | Four vector stores and loads with byte-accurate SQ overlay |

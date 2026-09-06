@@ -13395,6 +13395,181 @@ int run_vector_addressing(int argc, char **argv)
         }
     }
 
+    memblock::Environment indexed_matrix(argc, argv);
+    constexpr std::uint64_t indexed_base =
+        memblock::kDefaultMemoryBase + 0xb0000;
+    indexed_matrix.memory().fill_incrementing(indexed_base, 0x20000, 0x93);
+    indexed_matrix.configure_backpressure(0x452821e638d01377ULL, true);
+    if (!indexed_matrix.reset() ||
+        !indexed_matrix.enable_misaligned_accesses()) {
+        std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                  << indexed_matrix.cycle()
+                  << " phase=indexed-matrix-reset reason="
+                  << indexed_matrix.error() << '\n';
+        return 1;
+    }
+
+    constexpr std::array<memblock::VectorAddressingMode, 2> indexed_modes{{
+        memblock::VectorAddressingMode::indexed_unordered,
+        memblock::VectorAddressingMode::indexed_ordered,
+    }};
+    std::uint64_t indexed_lq_cursor = 0;
+    std::uint64_t indexed_sq_cursor = 0;
+    std::uint8_t indexed_rob = 0;
+    unsigned indexed_cases = 0;
+    unsigned indexed_load_uops = 0;
+    unsigned indexed_store_uops = 0;
+    auto fill_indices = [](memblock::VectorMemoryTransaction &transaction,
+                           bool alias_last) {
+        const unsigned element_bytes = 1U << transaction.eew;
+        const unsigned elements = 16U >> transaction.eew;
+        const unsigned first_slot = 3U % elements;
+        for (unsigned element = 0; element < elements; ++element) {
+            const unsigned slot = alias_last && element + 1 == elements
+                ? first_slot
+                : (element * 5U + 3U) % elements;
+            const std::uint64_t offset =
+                static_cast<std::uint64_t>(slot) * element_bytes * 8U;
+            for (unsigned byte = 0; byte < element_bytes; ++byte) {
+                transaction.index[element * element_bytes + byte] =
+                    static_cast<unsigned char>(offset >> (8 * byte));
+            }
+        }
+    };
+    for (const auto mode : indexed_modes) {
+        for (std::uint8_t eew = 0; eew < 4; ++eew) {
+            const unsigned elements = 16U >> eew;
+            const std::uint64_t case_base =
+                indexed_base + indexed_cases * 0x3000;
+            memblock::VectorMemoryTransaction load{
+                .address = case_base + 0xfc0,
+                .addressing = mode,
+                .eew = eew,
+                .vl = static_cast<std::uint8_t>(elements),
+                .rob = indexed_rob++,
+                .lq = static_cast<std::uint8_t>(indexed_lq_cursor %
+                    memblock::kVirtualLoadQueueEntries),
+                .lq_flag = ((indexed_lq_cursor /
+                    memblock::kVirtualLoadQueueEntries) & 1U) != 0,
+                .pdest = static_cast<std::uint8_t>(96 + indexed_cases),
+                .lane = indexed_cases % memblock::kVectorMemoryLanes,
+                .flow_num = static_cast<std::uint8_t>(elements),
+            };
+            fill_indices(load, true);
+            indexed_matrix.expect_vector(load);
+            if (!indexed_matrix.set_rob_head(load.rob, load.rob_flag) ||
+                !indexed_matrix.enqueue_vector(load) ||
+                !indexed_matrix.issue_vector(load, 1024) ||
+                !indexed_matrix.run_until_vector_complete_with_replays(
+                    load, 32768) ||
+                !indexed_matrix.run_until_lq_retired(8192)) {
+                std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                          << indexed_matrix.cycle()
+                          << " phase=indexed-matrix-load mode="
+                          << static_cast<unsigned>(mode)
+                          << " eew=" << static_cast<unsigned>(eew)
+                          << " reason=" << indexed_matrix.error() << '\n';
+                return 1;
+            }
+            indexed_lq_cursor += elements;
+            ++indexed_load_uops;
+
+            memblock::VectorMemoryTransaction store{
+                .store = true,
+                .address = case_base + 0x1fc0,
+                .addressing = mode,
+                .eew = eew,
+                .vl = static_cast<std::uint8_t>(elements),
+                .rob = indexed_rob++,
+                .sq = static_cast<std::uint8_t>(indexed_sq_cursor %
+                    memblock::kStoreQueueEntries),
+                .sq_flag = ((indexed_sq_cursor /
+                    memblock::kStoreQueueEntries) & 1U) != 0,
+                .lane = (indexed_cases + 1) % memblock::kVectorMemoryLanes,
+                .flow_num = static_cast<std::uint8_t>(elements),
+            };
+            fill_indices(store, false);
+            for (unsigned byte = 0; byte < store.data.size(); ++byte) {
+                store.data[byte] = static_cast<unsigned char>(
+                    0x31 + indexed_cases * 19 + byte * 7);
+            }
+            indexed_matrix.expect_vector(store);
+            if (!indexed_matrix.enqueue_vector(store) ||
+                !indexed_matrix.issue_vector(store, 1024) ||
+                !indexed_matrix.run_until_vector_complete_with_replays(
+                    store, 32768) ||
+                !indexed_matrix.commit_vector_store(store, 8192) ||
+                !indexed_matrix.run_until_queues_retired(8192) ||
+                !indexed_matrix.pulse_sbuffer_flush() ||
+                !indexed_matrix.run_until_sbuffer_empty(32768)) {
+                std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                          << indexed_matrix.cycle()
+                          << " phase=indexed-matrix-store mode="
+                          << static_cast<unsigned>(mode)
+                          << " eew=" << static_cast<unsigned>(eew)
+                          << " reason=" << indexed_matrix.error() << '\n';
+                return 1;
+            }
+            indexed_sq_cursor += elements;
+            ++indexed_store_uops;
+
+            auto readback = store;
+            readback.store = false;
+            readback.rob = indexed_rob++;
+            readback.lq = static_cast<std::uint8_t>(indexed_lq_cursor %
+                memblock::kVirtualLoadQueueEntries);
+            readback.lq_flag = ((indexed_lq_cursor /
+                memblock::kVirtualLoadQueueEntries) & 1U) != 0;
+            readback.sq = static_cast<std::uint8_t>(indexed_sq_cursor %
+                memblock::kStoreQueueEntries);
+            readback.sq_flag = ((indexed_sq_cursor /
+                memblock::kStoreQueueEntries) & 1U) != 0;
+            readback.pdest = static_cast<std::uint8_t>(112 + indexed_cases);
+            readback.lane = indexed_cases % memblock::kVectorMemoryLanes;
+            readback.data.fill(0);
+            indexed_matrix.expect_vector_data(readback, store.data);
+            if (!indexed_matrix.set_rob_head(
+                    readback.rob, readback.rob_flag) ||
+                !indexed_matrix.enqueue_vector(readback) ||
+                !indexed_matrix.issue_vector(readback, 1024) ||
+                !indexed_matrix.run_until_vector_complete_with_replays(
+                    readback, 32768) ||
+                !indexed_matrix.run_until_lq_retired(8192)) {
+                std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                          << indexed_matrix.cycle()
+                          << " phase=indexed-matrix-readback mode="
+                          << static_cast<unsigned>(mode)
+                          << " eew=" << static_cast<unsigned>(eew)
+                          << " reason=" << indexed_matrix.error() << '\n';
+                return 1;
+            }
+            indexed_lq_cursor += elements;
+            ++indexed_load_uops;
+            ++indexed_cases;
+        }
+    }
+    if (indexed_cases != 8 || indexed_load_uops != 16 ||
+        indexed_store_uops != 8 || indexed_matrix.lq_allocated() != 120 ||
+        indexed_matrix.sq_allocated() != 60 ||
+        indexed_matrix.lq_allocated() !=
+            indexed_matrix.lq_dequeued() + indexed_matrix.lq_canceled() ||
+        indexed_matrix.sq_allocated() !=
+            indexed_matrix.sq_dequeued() + indexed_matrix.sq_canceled()) {
+        std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                  << indexed_matrix.cycle()
+                  << " phase=indexed-matrix-conservation"
+                  << " cases=" << indexed_cases
+                  << " load_uops=" << indexed_load_uops
+                  << " store_uops=" << indexed_store_uops
+                  << " lq=" << indexed_matrix.lq_allocated() << '/'
+                  << indexed_matrix.lq_dequeued() << '+'
+                  << indexed_matrix.lq_canceled()
+                  << " sq=" << indexed_matrix.sq_allocated() << '/'
+                  << indexed_matrix.sq_dequeued() << '+'
+                  << indexed_matrix.sq_canceled() << '\n';
+        return 1;
+    }
+
     memblock::Environment whole(argc, argv);
     constexpr std::uint64_t whole_base =
         memblock::kDefaultMemoryBase + 0x90000;
@@ -13582,21 +13757,30 @@ int run_vector_addressing(int argc, char **argv)
 
     std::cout << "MEMBLOCK_VECTOR_ADDRESSING_PASS"
               << " cycle=" << environment.cycle() + multi_uop.cycle() +
-                    whole.cycle()
+                    indexed_matrix.cycle() + whole.cycle()
               << " load_writebacks=" << environment.vector_load_writebacks() +
                     multi_uop.vector_load_writebacks() +
+                    indexed_matrix.vector_load_writebacks() +
                     whole.vector_load_writebacks()
               << " store_writebacks=" << environment.vector_store_writebacks()
-                    + whole.vector_store_writebacks()
+                    + indexed_matrix.vector_store_writebacks() +
+                    whole.vector_store_writebacks()
               << " store_modes=3"
               << " multi_uop_modes=3 multi_uop_writebacks=6"
+              << " indexed_cases=" << indexed_cases
+              << " indexed_load_uops=" << indexed_load_uops
+              << " indexed_store_uops=" << indexed_store_uops
+              << " indexed_lq_allocated=" << indexed_matrix.lq_allocated()
+              << " indexed_sq_allocated=" << indexed_matrix.sq_allocated()
               << " whole_cases=" << whole_cases
               << " whole_load_uops=" << whole_load_uops
               << " whole_store_uops=" << whole_store_uops
               << " whole_lq_allocated=" << whole.lq_allocated()
               << " whole_sq_allocated=" << whole.sq_allocated()
               << " tilelink_requests=" << environment.tilelink_requests() +
-                    multi_uop.tilelink_requests() + whole.tilelink_requests()
+                    multi_uop.tilelink_requests() +
+                    indexed_matrix.tilelink_requests() +
+                    whole.tilelink_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

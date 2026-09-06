@@ -819,6 +819,26 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, package + split + common)
 
+    def test_vector_indexed_matrix_covers_modes_eews_and_queue_wraps(self) -> None:
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "indexed_modes",
+            "VectorAddressingMode::indexed_unordered",
+            "VectorAddressingMode::indexed_ordered",
+            "fill_indices",
+            "alias_last",
+            "case_base + 0xfc0",
+            "case_base + 0x1fc0",
+            "indexed_cases != 8",
+            "indexed_load_uops != 16",
+            "indexed_store_uops != 8",
+            "indexed_matrix.lq_allocated() != 120",
+            "indexed_matrix.sq_allocated() != 60",
+            '<< " indexed_lq_allocated="',
+            '<< " indexed_sq_allocated="',
+        ):
+            self.assertIn(contract, main)
+
     def test_dcache_coherence_tracks_concurrent_probe_sources(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

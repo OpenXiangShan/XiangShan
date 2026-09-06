@@ -719,6 +719,13 @@ independent index vectors and obey ordered acceptance. Cross-uop masks and a
 tail element are selected by global element number. All six writebacks are
 checked against uop-aware addresses from the independent byte-memory model.
 
+An additional indexed matrix crosses ordered/unordered addressing with every
+EEW for load, store, and load readback. Direct loads duplicate one index to
+check aliasing; stores use a non-monotonic permutation without ambiguous
+same-address writes. The sparse-memory oracle checks addresses spread across
+cache lines and a Bare 4-KiB boundary, then requires all 120 LQ and 60 SQ
+allocations to drain across queue-pointer wraps.
+
 The same scenario also models `vlr`/`vsr` as distinct whole-register
 operations and executes all 16 combinations of one/two/four/eight registers
 and EEW 8/16/32/64. It deliberately supplies `vl=1`; the independent oracle
