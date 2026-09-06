@@ -150,7 +150,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     schema = result.get("constraint_schema")
     if schema is None:
         return
-    _require(schema == 2, f"unsupported constraint_schema: {schema!r}")
+    _require(schema in (2, 3), f"unsupported constraint_schema: {schema!r}")
 
     target_translation = _csv_counts(result, "target_translation", 3)
     actual_translation = _csv_counts(result, "actual_translation", 3)
@@ -249,6 +249,54 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     )
     if required_contexts > 1:
         _require(actual_switches > 0, "translation contexts never switched")
+
+    if schema == 3:
+        target_probe = result.get("target_probe")
+        target_to_b = result.get("target_probe_to_b")
+        target_need_data = result.get("target_probe_need_data")
+        for name, value in (
+            ("target_probe", target_probe),
+            ("target_probe_to_b", target_to_b),
+            ("target_probe_need_data", target_need_data),
+        ):
+            _require(
+                isinstance(value, int) and not isinstance(value, bool)
+                and 0 <= value <= 1000,
+                f"{name} is not a per-mille integer: {value!r}",
+            )
+        actual_sequences = result.get("actual_probe_sequences")
+        actual_caps = _csv_counts(result, "actual_probe_caps", 2)
+        actual_need_data = _csv_counts(
+            result, "actual_probe_need_data", 2
+        )
+        _require(
+            isinstance(actual_sequences, int)
+            and not isinstance(actual_sequences, bool)
+            and actual_sequences >= 0,
+            f"actual_probe_sequences is invalid: {actual_sequences!r}",
+        )
+        if target_probe != 0:
+            _require(actual_sequences > 0, "no constrained Probe sequence ran")
+            for name, target, actual in (
+                ("actual_probe_caps", target_to_b, actual_caps),
+                ("actual_probe_need_data", target_need_data, actual_need_data),
+            ):
+                _require(
+                    (target == 1000 or actual[0] > 0)
+                    and (target == 0 or actual[1] > 0),
+                    f"{name} has an enabled but uncovered class: {actual}",
+                )
+            _require(
+                sum(actual_caps) == actual_sequences
+                and sum(actual_need_data) == actual_sequences,
+                "constrained Probe coverage is not conserved",
+            )
+            probes = result.get("probes")
+            _require(
+                isinstance(probes, int) and not isinstance(probes, bool)
+                and probes == actual_sequences + actual_caps[1],
+                "manager Probe count does not match sequence/toB cleanup accounting",
+            )
 
 
 def _positive_csv_prefix(

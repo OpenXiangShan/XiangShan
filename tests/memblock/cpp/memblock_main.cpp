@@ -118,6 +118,9 @@ struct RandomConstraints {
     unsigned tlb_flushes_per_mille = 0;
     unsigned misaligned_per_mille = 0;
     unsigned vector_corner_per_mille = 0;
+    unsigned probes_per_mille = 0;
+    unsigned probe_to_b_per_mille = 0;
+    unsigned probe_need_data_per_mille = 0;
     unsigned nc_stores_per_mille = 0;
     unsigned mmio_stores_per_mille = 0;
     memblock::ResponseLatencyProfiles response_latency{};
@@ -143,6 +146,9 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 50,
                 .misaligned_per_mille = 500,
                 .vector_corner_per_mille = 1000,
+                .probes_per_mille = 20,
+                .probe_to_b_per_mille = 500,
+                .probe_need_data_per_mille = 500,
                 .nc_stores_per_mille = 500,
                 .mmio_stores_per_mille = 500,
                 .response_latency = {},
@@ -170,6 +176,9 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 20,
                 .misaligned_per_mille = 5,
                 .vector_corner_per_mille = 100,
+                .probes_per_mille = 1,
+                .probe_to_b_per_mille = 500,
+                .probe_need_data_per_mille = 500,
                 .nc_stores_per_mille = 300,
                 .mmio_stores_per_mille = 300,
                 .response_latency = {
@@ -197,6 +206,9 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 100,
                 .misaligned_per_mille = 500,
                 .vector_corner_per_mille = 1000,
+                .probes_per_mille = 100,
+                .probe_to_b_per_mille = 500,
+                .probe_need_data_per_mille = 500,
                 .nc_stores_per_mille = 500,
                 .mmio_stores_per_mille = 500,
                 .response_latency = {
@@ -361,6 +373,12 @@ struct RandomConstraints {
             misaligned_per_mille = parsed;
         } else if (key == "vector-corner") {
             vector_corner_per_mille = parsed;
+        } else if (key == "probe") {
+            probes_per_mille = parsed;
+        } else if (key == "probe-to-b") {
+            probe_to_b_per_mille = parsed;
+        } else if (key == "probe-need-data") {
+            probe_need_data_per_mille = parsed;
         } else if (key == "nc-store") {
             nc_stores_per_mille = parsed;
         } else if (key == "mmio-store") {
@@ -422,7 +440,10 @@ struct RandomConstraints {
             special_concurrent_per_mille > 1000 ||
             translation_switches_per_mille > 1000 ||
             tlb_flushes_per_mille > 1000 || misaligned_per_mille > 1000 ||
-            vector_corner_per_mille > 1000 || nc_stores_per_mille > 1000 ||
+            vector_corner_per_mille > 1000 || probes_per_mille > 1000 ||
+            probe_to_b_per_mille > 1000 ||
+            probe_need_data_per_mille > 1000 ||
+            nc_stores_per_mille > 1000 ||
             mmio_stores_per_mille > 1000) {
             throw std::invalid_argument(
                 "per-mille random constraints must be in 0..1000");
@@ -452,6 +473,10 @@ struct RandomConstraints {
             !uses_concurrent_special_operations()) {
             throw std::invalid_argument(
                 "special-concurrent requires nc or mmio traffic");
+        }
+        if (probes_per_mille != 0 && operation_weights[scalar_store] == 0) {
+            throw std::invalid_argument(
+                "probe requires a nonzero scalar-store weight");
         }
         if (tlb_flushes_per_mille != 0) {
             const bool has_stage1_fence =
@@ -675,7 +700,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=2 constraints=" << name
+        stream << "constraint_schema=3 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -706,6 +731,10 @@ struct RandomConstraints {
                << " target_tlb_flush=" << tlb_flushes_per_mille
                << " target_misaligned=" << misaligned_per_mille
                << " target_vector_corner=" << vector_corner_per_mille
+               << " target_probe=" << probes_per_mille
+               << " target_probe_to_b=" << probe_to_b_per_mille
+               << " target_probe_need_data="
+               << probe_need_data_per_mille
                << " target_nc_store=" << nc_stores_per_mille
                << " target_mmio_store=" << mmio_stores_per_mille
                << " target_latency=" << latency_name(response_latency.dcache)
@@ -932,6 +961,9 @@ struct ConstraintCoverage {
     std::uint64_t tlb_flushes = 0;
     std::uint64_t dcache_hits = 0;
     std::uint64_t dcache_misses = 0;
+    std::uint64_t probe_sequences = 0;
+    std::array<std::uint64_t, 2> probe_caps{};
+    std::array<std::uint64_t, 2> probe_need_data{};
     std::uint64_t actions = 0;
 
     void sample_operation(unsigned operation)
@@ -1097,6 +1129,14 @@ struct ConstraintCoverage {
                 }
             }
         }
+        if (constraints.probes_per_mille != 0 &&
+            (probe_sequences == 0 ||
+             !direction_complete(
+                 constraints.probe_to_b_per_mille, probe_caps) ||
+             !direction_complete(
+                 constraints.probe_need_data_per_mille, probe_need_data))) {
+            return false;
+        }
         if (backpressure) {
             const auto complete_latency = [](
                 memblock::ResponseLatencyProfile profile,
@@ -1160,6 +1200,11 @@ struct ConstraintCoverage {
                << translation_reuse_windows
                << " actual_tlb_flush=" << tlb_flushes
                << " actual_dcache=" << dcache_hits << ',' << dcache_misses
+               << " actual_probe_sequences=" << probe_sequences
+               << " actual_probe_caps=" << probe_caps[0] << ','
+               << probe_caps[1]
+               << " actual_probe_need_data=" << probe_need_data[0] << ','
+               << probe_need_data[1]
                << latency_summary("dcache_latency", dcache_latency)
                << latency_summary("ptw_latency", ptw_latency)
                << latency_summary("uncache_latency", uncache_latency);
@@ -12590,6 +12635,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.ptw_requests();
             const std::uint64_t requests_before = environment.tilelink_requests();
             bool sample_dcache = true;
+            std::optional<std::uint64_t> probe_candidate;
             if (kind == RandomConstraints::scalar_load) {
                 const auto op = static_cast<memblock::LoadOp>(random() % 7);
                 const unsigned size =
@@ -12611,6 +12657,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     !environment.run_until_queues_retired(8192)) {
                     return false;
                 }
+                probe_candidate = transaction.address & ~std::uint64_t{63};
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::vector_load ||
                        kind == RandomConstraints::vector_store) {
@@ -12865,6 +12912,69 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             if (sample_dcache) {
                 constraint_coverage.sample_dcache(
                     requests_before, environment.tilelink_requests());
+            }
+            const bool missing_probe_cap =
+                (constraints.probe_to_b_per_mille != 1000 &&
+                 constraint_coverage.probe_caps[0] == 0) ||
+                (constraints.probe_to_b_per_mille != 0 &&
+                 constraint_coverage.probe_caps[1] == 0);
+            const bool missing_probe_data =
+                (constraints.probe_need_data_per_mille != 1000 &&
+                 constraint_coverage.probe_need_data[0] == 0) ||
+                (constraints.probe_need_data_per_mille != 0 &&
+                 constraint_coverage.probe_need_data[1] == 0);
+            if (probe_candidate && constraints.probes_per_mille != 0 &&
+                (constraint_coverage.probe_sequences == 0 ||
+                 missing_probe_cap || missing_probe_data ||
+                 random() % 1000 < constraints.probes_per_mille)) {
+                phase = "random-probe";
+                bool to_b = false;
+                if (constraints.probe_to_b_per_mille != 1000 &&
+                    constraint_coverage.probe_caps[0] == 0) {
+                    to_b = false;
+                } else if (constraints.probe_to_b_per_mille != 0 &&
+                           constraint_coverage.probe_caps[1] == 0) {
+                    to_b = true;
+                } else {
+                    to_b = random() % 1000 <
+                        constraints.probe_to_b_per_mille;
+                }
+                bool need_data = false;
+                if (constraints.probe_need_data_per_mille != 1000 &&
+                    constraint_coverage.probe_need_data[0] == 0) {
+                    need_data = false;
+                } else if (constraints.probe_need_data_per_mille != 0 &&
+                           constraint_coverage.probe_need_data[1] == 0) {
+                    need_data = true;
+                } else {
+                    need_data = random() % 1000 <
+                        constraints.probe_need_data_per_mille;
+                }
+
+                const auto expected_line = environment.memory().read_beat(
+                    *probe_candidate, 64);
+                const std::uint64_t responses_before =
+                    environment.dcache_probe_responses();
+                if (!environment.run_cycles(64) ||
+                    !environment.request_dcache_probe(
+                        *probe_candidate, to_b ? 1U : 2U, need_data,
+                        to_b ? 0U : 1U, expected_line) ||
+                    !environment.run_until_probe_responses(
+                        responses_before + 1, constrained_completion_timeout)) {
+                    return false;
+                }
+                if (to_b &&
+                    (!environment.request_dcache_probe(
+                         *probe_candidate, 2, false, 2) ||
+                     !environment.run_until_probe_responses(
+                         responses_before + 2,
+                         constrained_completion_timeout))) {
+                    return false;
+                }
+                ++constraint_coverage.probe_sequences;
+                ++constraint_coverage.probe_caps[to_b ? 1 : 0];
+                ++constraint_coverage.probe_need_data[need_data ? 1 : 0];
+                phase = "seeded-mixed-tail";
             }
         }
 

@@ -422,7 +422,8 @@ in the same generator but is issued as a serializing action because MemBlock's
 LR/SC/AMO path blocks the load pipeline while active. The generator constrains
 AMO/LRSC/AMOCAS family and W/D width, NC/MMIO load/store direction, Bare/Sv39/
 Sv48 and all four nested VS/G mode pairs, translation switch and legal fence
-kind/scope, and DCache, PTW, and Uncache latency independently. It includes
+kind/scope, manager Probe rate/toB/need-data crosses, and DCache, PTW, and
+Uncache latency independently. It includes
 simultaneous scalar/vector issue, every scalar width, every vector EEW and every
 load/store address mode independently, scalar/vector misalignment, software
 `prefetch.i/r/w`, both cross-forwarding directions, randomized cold/warm
@@ -432,8 +433,11 @@ uncache backpressure. Every seed drives all six LSQ dispatch lanes and widths,
 checks committed scalar/vector stores through architectural readback, validates
 dirty ReleaseData before updating the separate bus memory, and meets bounded
 coverage plus final LSQ-accounting gates. The deterministic coherence scenario
-covers manager-originated probes; adding probes as a constrained-random
-dimension remains a follow-on cross-coverage item.
+covers its directed coherence state sequence. The random tail can follow a
+completed dirty scalar store with a byte-exact manager Probe, independently
+crosses toB/toN and requested/mandatory data, and cleans up retained toB lines.
+Concurrent Probe/refill overlap and multiple outstanding Probe sources remain
+follow-on cross-coverage items.
 
 For example, these commands run the same generator in two directions:
 

@@ -67,6 +67,9 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `tlb-flush` | Per-mille chance of a legal translation flush before an operation |
 | `misaligned` | Per-mille chance of a misaligned address when width permits it |
 | `vector-corner` | Per-mille chance of corner-biased vector shape/address generation |
+| `probe` | Per-mille chance that a completed cacheable scalar store is followed by a manager-originated dirty Probe sequence |
+| `probe-to-b` | Per-mille share of generated Probe sequences that retain the line in Branch state; the generator follows each with a toN cleanup Probe |
+| `probe-need-data` | Per-mille share of generated Probe sequences that explicitly request data; dirty lines must return exact data even when this is zero |
 | `nc-store`, `mmio-store` | Per-mille store share within each memory-type class |
 | `latency` | Set DCache, PTW, and Uncache to `compact` or `spec` together |
 | `dcache-latency`, `ptw-latency`, `uncache-latency` | Override one manager's latency profile independently |
@@ -110,6 +113,7 @@ scenario implementations:
 | NC/MMIO direction | `nc-store` and `mmio-store` steer load/store direction and each direction has an independent coverage gate | Concurrent special stores remain deferred until multi-store ROB/commit scheduling is modeled |
 | Translation state | Bare/Sv39/Sv48 and all four Sv39/Sv48 x Sv39x4/Sv48x4 pairs are weighted tail contexts; switches occur only at drained boundaries; cold walk/reuse and the legal fence kind/scope matrix are per-seed gates | Distinct-page walks and redirected root/ASID/VMID/MODE/`V` changes with delayed PTW responses are covered by directed matrices; random context changes remain restricted to drained boundaries |
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
+| Cache Probe | `probe`, `probe-to-b`, and `probe-need-data` generate manager Probes after randomized dirty scalar stores, check exact 64-byte ProbeAckData, cover toB/toN and requested/mandatory data, and invalidate retained toB lines with a checked cleanup Probe | Overlap Probes with unrelated misses/refills and support multiple outstanding Probe sources |
 | Error injection | Errors are confined to focused deterministic contracts | Add a normally-zero or very-low random error rate with independently checked denied/corrupt outcomes; realistic presets must keep this rare |
 
 The remaining rows do not change the architecture: `coverage`, `spec`, and
@@ -120,18 +124,22 @@ choice into the common interface and its coverage contract, not adding
 ## Shipped Presets
 
 Operation columns are relative weights. Locality is `hot/warm/cold`; the next
-four columns are per-mille values.
+five columns are per-mille values.
 
-| Preset | Scalar L/S | Vector L/S | Prefetch | Atomic | NC | MMIO | Locality | Concurrent | TLB flush | Misaligned | Vector corner | Latency |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | --- |
-| `coverage` | 200/150 | 150/150 | 100 | 100 | 75 | 75 | 250/250/500 | 1000 | 50 | 500 | 1000 | compact |
-| `spec` | 650/270 | 20/10 | 35 | 5 | 5 | 5 | 800/150/50 | 100 | 20 | 5 | 100 | spec |
-| `corner` | 125/125 | 125/125 | 125 | 125 | 125 | 125 | 100/200/700 | 500 | 100 | 500 | 1000 | spec |
+| Preset | Scalar L/S | Vector L/S | Prefetch | Atomic | NC | MMIO | Locality | Concurrent | TLB flush | Misaligned | Vector corner | Probe | Latency |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `coverage` | 200/150 | 150/150 | 100 | 100 | 75 | 75 | 250/250/500 | 1000 | 50 | 500 | 1000 | 20 | compact |
+| `spec` | 650/270 | 20/10 | 35 | 5 | 5 | 5 | 800/150/50 | 100 | 20 | 5 | 100 | 1 | spec |
+| `corner` | 125/125 | 125/125 | 125 | 125 | 125 | 125 | 100/200/700 | 500 | 100 | 500 | 1000 | 100 | spec |
 
 Atomic family weights (AMO/LRSC/CAS) are `8/2/2`, `90/5/5`, and `1/1/1` for
 `coverage`, `spec`, and `corner`; all three use `1/1` W/D weights. Their
 NC/MMIO store shares are respectively `500/500`, `300/300`, and `500/500`.
 Their legal NC/MMIO overlap rates are `500`, `20`, and `750` per mille.
+All three presets split generated Probes equally between toB/toN and explicit
+need-data/no-need-data requests. Since the candidate line is dirty, both
+need-data values require exact ProbeAckData; the bit tests the protocol rule,
+not whether the oracle checks returned bytes.
 `spec` and `corner` use the calibrated long-tail profile independently on all
 three managers; `coverage` uses compact latency.
 
@@ -206,11 +214,13 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=2`, the resolved target weights,
+Every terminal line prints `constraint_schema=3`, the resolved target weights,
 and actual operation, atomic family/width, NC/MMIO direction, legal special
 overlap, locality, translation regime/mode/pair, fence kind/scope, cold-walk/
-reuse, TLB-flush, hit/miss, and per-manager latency counts. Each enabled class
-must be observed at least once. More than one enabled translation context also
+reuse, TLB-flush, hit/miss, Probe sequence/cap/need-data, and per-manager
+latency counts. Each enabled class must be observed at least once. Probe counts
+must also conserve sequences and their toB cleanup requests. More than one
+enabled translation context also
 requires an observed switch, and any translated profile requires both a PTW
 walk window and a reuse window. With backpressure, each manager set to `spec`
 must independently observe all four latency classes. The simulator and offline

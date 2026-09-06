@@ -710,6 +710,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "tlb_flushes_per_mille",
             "misaligned_per_mille",
             "vector_corner_per_mille",
+            "probes_per_mille",
+            "probe_to_b_per_mille",
+            "probe_need_data_per_mille",
             "nc_stores_per_mille",
             "mmio_stores_per_mille",
             "ConstraintCoverage",
@@ -728,6 +731,12 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_fences=",
             "actual_translation_switch=",
             "actual_translation_walk_reuse=",
+            "target_probe=",
+            "target_probe_to_b=",
+            "target_probe_need_data=",
+            "actual_probe_sequences=",
+            "actual_probe_caps=",
+            "actual_probe_need_data=",
         ):
             self.assertIn(contract, driver)
         for key in (
@@ -767,6 +776,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "tlb-flush",
             "misaligned",
             "vector-corner",
+            "probe",
+            "probe-to-b",
+            "probe-need-data",
             "nc-store",
             "mmio-store",
             "latency",

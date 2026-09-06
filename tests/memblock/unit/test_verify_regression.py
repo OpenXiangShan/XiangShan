@@ -182,9 +182,46 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 3
+        result["constraint_schema"] = 4
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
+        ):
+            verify_regression._check_mixed_coverage(result)
+
+    def test_constraint_schema_three_requires_probe_crosses(self) -> None:
+        result = mixed_result(7)
+        result.update(
+            {
+                "constraint_schema": 3,
+                "target_translation": "0,1,0",
+                "actual_translation": "0,8,0",
+                "target_stage1_mode": "1,0",
+                "actual_stage1_mode": "8,0",
+                "target_vs_mode": "1,1",
+                "actual_vs_mode": "0,0",
+                "target_g_mode": "1,1",
+                "actual_g_mode": "0,0",
+                "actual_nested_pairs": "0,0,0,0",
+                "target_fence_kind": "1,0,0",
+                "target_fence_scope": "1,1",
+                "target_tlb_flush": 20,
+                "actual_fences": "1,1,0,0,0,0",
+                "actual_translation_switch": 0,
+                "actual_translation_walk_reuse": "4,4",
+                "target_probe": 1,
+                "target_probe_to_b": 500,
+                "target_probe_need_data": 500,
+                "actual_probe_sequences": 4,
+                "actual_probe_caps": "2,2",
+                "actual_probe_need_data": "2,2",
+                "probes": 6,
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+
+        result["actual_probe_caps"] = "4,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "actual_probe_caps"
         ):
             verify_regression._check_mixed_coverage(result)
 
