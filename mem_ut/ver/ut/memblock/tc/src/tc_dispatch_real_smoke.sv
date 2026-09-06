@@ -111,8 +111,12 @@ class tc_dispatch_real_smoke extends tc_base;
         super.main_phase(phase);
         run_real_smoke_sequence();
         // legacy testcase 的 responder 由 agent default_sequence 启动，必须等待
-        // DCache 在 global stop 后完成最后一个 safe idle，不能直接 drop objection。
+        // DCache/SBuffer 在 global stop 后完成最后一个 safe idle，不能直接 drop objection。
         wait(memblock_sync_pkg::dcache_responder_done === 1'b1);
+        wait(memblock_sync_pkg::sbuffer_responder_done === 1'b1);
+        // legacy topology 没有显式 vseq 的 wait fork；两个 responder 完成后在此做
+        // 全局 raw/status audit，随后才关闭 monitor capture。
+        common_data_transaction::get().end_test_check();
         memblock_sync_pkg::dispatch_real_smoke_active = 1'b0;
         phase.drop_objection(this);
     endtask:main_phase

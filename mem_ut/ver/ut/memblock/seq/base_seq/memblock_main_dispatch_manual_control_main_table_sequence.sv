@@ -49,8 +49,7 @@ task memblock_main_dispatch_manual_control_main_table_sequence::body();
                         data.main_trans_num),
               UVM_LOW)
     service_real_dispatch_flow();
-    data.end_test_check();
-    `uvm_info(get_type_name(), "manual control dispatch sequence completed", UVM_LOW)
+    `uvm_info(get_type_name(), "manual control dispatch core service completed; final audit is owned by scenario lifecycle", UVM_LOW)
 endtask:body
 
 // 抽象职责：构造当前专项的最小显式手工控制表。UID/ROB 由 import 路径统一编号；

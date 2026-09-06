@@ -85,6 +85,9 @@ task memblock_dispatch_real_cancel_reconcile_vseq::body();
 
     start_core_dispatch_flow();
     wait_for_background_responders();
+    // 派生 vseq 覆盖父类 body，因此在所有 background responder 自然返回后自行
+    // 执行最终公共 queue/status audit，随后才关闭 monitor capture。
+    data.end_test_check();
 
     memblock_sync_pkg::dispatch_real_smoke_active = 1'b0;
     `uvm_info(get_type_name(), "real cancel reconcile virtual sequence completed", UVM_LOW)

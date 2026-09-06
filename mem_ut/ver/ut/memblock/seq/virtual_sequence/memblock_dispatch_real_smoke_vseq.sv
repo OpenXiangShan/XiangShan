@@ -57,6 +57,10 @@ task memblock_dispatch_real_smoke_vseq::body();
     // responder miss its final stop sample and wait forever.
     wait fork;
 
+    // background join 表示 DCache/SBuffer/redirect 均已完成 terminal idle；主
+    // dispatch service 在此前持续消费 monitor raw，因此此处才可以检查并关闭 capture。
+    common_data_transaction::get().end_test_check();
+
     memblock_sync_pkg::dispatch_real_smoke_active = 1'b0;
     `uvm_info(get_type_name(), "real dispatch smoke virtual sequence completed", UVM_LOW)
 endtask:body
