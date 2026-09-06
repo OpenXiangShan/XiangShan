@@ -2,19 +2,14 @@ package xiangshan.backend.rename.freelist
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.formal._
-import iopmp._
 import org.chipsalliance.cde.config.Parameters
 import utility._
-import utils._
 import xiangshan._
 import xiangshan.backend.rename.FreeListSnapshotGenerator
 import xiangshan.backend.rename.RegType
 import xiangshan.backend.rename.Reg_I
 import xiangshan.backend.rename.Reg_F
 import xiangshan.backend.rename.Reg_V
-import cc.xiangshan.openncb.EnumAXIMasterOrder.Request
-import chisel3.{NumIntf => value}
 
 class FreeListBundle(numPhyRegs: Int, RenameWidth: Int, commitWidth: Int)(implicit
     p: Parameters
@@ -43,12 +38,20 @@ object FreeListBundle {
     new FreeListBundle(numPhyRegs, RenameWidth, commitWidth)
 }
 
-class NewFreeList(numPhyRegs: Int, commitWidth: Int, RenameWidth: Int,regType: RegType,numLogicRegs:Int = 32)(implicit p: Parameters)
+object NewFreeList {
+  val DefaultS1QueueSize = NewFLManager.DefaultS1QueueSize
+}
+
+class NewFreeList(
+  numPhyRegs: Int,
+  commitWidth: Int,
+  RenameWidth: Int,
+  regType: RegType,
+  numLogicRegs: Int = 32,
+  s1QueueSize: Int = NewFreeList.DefaultS1QueueSize
+)(implicit p: Parameters)
     extends XSModule with HasXSParameter with HasPerfEvents{
-  private val bankCount = RenameWidth / 2
-  private val inBankRegCount   = numPhyRegs / bankCount
   val io                = IO(FreeListBundle(numPhyRegs, RenameWidth, commitWidth))
-  require(RenameWidth % 2 == 0, "In FreeList RenameWidth must be even (current: %0d)");
   //Init
   def InitFreeList(reg_t: RegType) = {
     reg_t match {
@@ -62,43 +65,16 @@ class NewFreeList(numPhyRegs: Int, commitWidth: Int, RenameWidth: Int,regType: R
   val specfreeListReg   = InitFreeList(regType)
   val archfreeListReg   = InitFreeList(regType)
 
-  //get free phyreg
-  val getAllocatePhyReg   = Wire(Vec(RenameWidth, UInt(log2Up(numPhyRegs).W)))
-  val ifCanAllocateReg    = Wire(Vec(RenameWidth, Bool()))
-  for (bankIndex <- 0 until RenameWidth/2) {
-    val BankBit = specfreeListReg.asUInt(inBankRegCount * (bankIndex + 1) - 1, inBankRegCount * bankIndex)
-    val extendedBankBit = Cat(1.U(1.W), BankBit)
-    val inBankIndex = ParallelPriorityEncoder(extendedBankBit)
-    val reverseBankBit = Reverse(BankBit)
-    val reverseExtendedBankBit = Cat(1.U(1.W), reverseBankBit)
-    val inreverseBankIndex = ParallelPriorityEncoder(reverseExtendedBankBit)
-    getAllocatePhyReg(bankIndex) := inBankIndex + (inBankRegCount * bankIndex).U(log2Up(numPhyRegs).W)
-    getAllocatePhyReg(bankIndex+bankCount) :=  (inBankRegCount * (bankIndex+1)-1).U(log2Up(numPhyRegs).W) - inreverseBankIndex
+  /** NewFreeList owns the free bitmaps; NewFLManager owns preg allocation. */
+  val flManager = Module(new NewFLManager(numPhyRegs, RenameWidth, s1QueueSize))
+  flManager.in.freeBitmap := specfreeListReg.asUInt
+  flManager.in.allocateReq := io.allocateReq
+  flManager.in.doAllocate := io.doAllocate && !io.walk
+  flManager.in.flush := io.redirect || io.walk
 
-    ifCanAllocateReg(bankIndex)  := inBankIndex < inBankRegCount.U
-    ifCanAllocateReg(bankIndex+bankCount)  := (inBankIndex < inBankRegCount.U) && (getAllocatePhyReg(bankIndex) =/= getAllocatePhyReg(bankIndex+bankCount))
-  }
-  
-  //allocate phyreg
-  val salt = RegInit(0.U((log2Up(RenameWidth)-1).W))
-  when(io.doAllocate){
-    salt := salt+1.U
-  }
-  val ifCanAllocateRegOnSalt = Wire(Vec(RenameWidth, Bool()))
-  for(i <- 0 until RenameWidth){
-    val saltIndex = (salt + i.U(RenameWidth.W))(RenameWidth-1,0)
-    ifCanAllocateRegOnSalt(i) := Mux(io.allocateReq(i),ifCanAllocateReg(saltIndex),true.B)
-    io.allocatePhyReg(i) := getAllocatePhyReg(saltIndex)
-  }
-  io.canAllocate := ifCanAllocateRegOnSalt.asUInt.andR
+  io.allocatePhyReg := flManager.out.allocatePhyReg
+  io.canAllocate := flManager.out.canAllocate
 
-  val AllocateOHOR = (0 until RenameWidth).map { i =>
-    Mux(
-      io.allocateReq(i),
-      UIntToOH(io.allocatePhyReg(i), numPhyRegs),
-      0.U(numPhyRegs.W)
-    )
-  }.reduce(_ | _)
   val freePhyRegOHOR = (0 until commitWidth).map { i =>
     Mux(
       io.freeReq(i),
@@ -135,7 +111,7 @@ class NewFreeList(numPhyRegs: Int, commitWidth: Int, RenameWidth: Int,regType: R
   val isNormalAlloc = io.canAllocate && io.doAllocate
   val isAllocate = isWalkAlloc || isNormalAlloc
 
-  val allocate = Mux(io.walk,walkPhyRegOHOR,AllocateOHOR)
+  val allocate = Mux(io.walk,walkPhyRegOHOR,flManager.out.allocateBitmap)
   val freeListRegAllocate = Mux(lastCycleRedirect, redirectedFreeList, specfreeListReg.asUInt & (~allocate))
   // priority: (1) exception and flushPipe; (2) walking; (3) mis-prediction; (4) normal dequeue
   val realDoAllocate = !io.redirect && isAllocate
