@@ -1975,6 +1975,55 @@ int run_load_feedback(int argc, char **argv)
             return 1;
         }
     }
+
+    std::vector<memblock::LoadTransaction> bank_conflicts;
+    for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+        bank_conflicts.push_back(memblock::LoadTransaction{
+            .address = base + lane * 64 + 24,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(32 + lane),
+            .lq = static_cast<std::uint8_t>(6 + lane),
+            .pdest = static_cast<std::uint8_t>(60 + lane),
+            .lane = lane,
+        });
+        environment.expect_load(bank_conflicts.back());
+    }
+    const auto bank_stats_before = environment.scalar_load_feedback_stats();
+    const std::uint64_t bank_requests_before = environment.tilelink_requests();
+    if (!environment.enqueue_load_batch(bank_conflicts, {0, 1, 2}) ||
+        !environment.issue_load_batch(bank_conflicts, 256) ||
+        !check_wakeups(bank_conflicts, "bank-conflict-initial-wakeup") ||
+        !environment.run_until_complete(4096) ||
+        !environment.run_cycles(16)) {
+        if (!environment.error().empty()) {
+            std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=bank-conflict-complete reason="
+                      << environment.error() << '\n';
+        }
+        return 1;
+    }
+    const auto bank_stats_after = environment.scalar_load_feedback_stats();
+    std::uint64_t bank_conflict_wakeups = 0;
+    std::uint64_t bank_conflict_cancels = 0;
+    for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+        bank_conflict_wakeups +=
+            bank_stats_after.wakeups[lane] - bank_stats_before.wakeups[lane];
+        bank_conflict_cancels += bank_stats_after.ld2_cancels[lane] -
+            bank_stats_before.ld2_cancels[lane];
+    }
+    if (bank_conflict_cancels < 2 ||
+        bank_conflict_wakeups != bank_conflict_cancels + bank_conflicts.size() ||
+        environment.tilelink_requests() != bank_requests_before) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=bank-conflict-classification wakeups="
+                  << bank_conflict_wakeups << " cancels="
+                  << bank_conflict_cancels << " tilelink_before="
+                  << bank_requests_before << " tilelink_after="
+                  << environment.tilelink_requests() << '\n';
+        return 1;
+    }
     const auto &warm_stats = environment.scalar_load_feedback_stats();
     std::uint64_t wakeups = 0;
     std::uint64_t cancels = 0;
@@ -1986,7 +2035,8 @@ int run_load_feedback(int argc, char **argv)
     std::cout << "MEMBLOCK_LOAD_FEEDBACK_PASS"
               << " cycle=" << environment.cycle()
               << " lanes=" << memblock::kScalarLoadLanes
-              << " cold=3 warm=3"
+              << " cold=3 warm=3 bank_conflict=3"
+              << " bank_conflict_cancels=" << bank_conflict_cancels
               << " wakeups=" << wakeups
               << " ld2_cancels=" << cancels
               << " writebacks=" << environment.writebacks()

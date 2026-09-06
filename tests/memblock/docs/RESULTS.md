@@ -26,13 +26,16 @@
 
 The `load-feedback` scenario now samples every top-level scalar load wakeup and
 `ld2Cancel` lane. On the current RTL it passed three cold misses followed by
-three resident-line loads in 348 cycles: 26 wakeups, 20 cancellations, six
-exact scalar writebacks, and three total DCache TileLink requests. Each load
-had one final uncanceled wakeup, while intermediate way-prediction/resource
-replays were allowed rather than assigned a fixed count. The resident phase
-made no additional TileLink request. This closes basic lane and destination
-metadata semantics; broader cancellation crosses remain open in the
-verification plan.
+three resident-line loads and three same-bank concurrent resident loads in 394
+cycles: 32 wakeups, 23 cancellations, nine exact scalar writebacks, and three
+total DCache TileLink requests. Each load had one final uncanceled wakeup, while
+intermediate way-prediction/resource replays were allowed rather than assigned
+a fixed count. The same-bank phase produced three cancellations without a new
+TileLink request; its initial wakeups carried exact lane/destination metadata,
+and its replayed wakeups satisfied the conservation rule across lanes because
+legal replay can migrate to another LoadUnit. This closes basic lane,
+destination, and read/read bank-conflict semantics; broader cancellation
+crosses remain open in the verification plan.
 
 ## RAW Memory Violation Boundary
 

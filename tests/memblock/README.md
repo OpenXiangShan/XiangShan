@@ -330,7 +330,11 @@ three `ld2Cancel` pins. It checks issue-time `rfWen`, `fpWen`, and `pdest`,
 forces a cold miss on every lane, then repeats the accesses from resident cache
 lines without a new TileLink request. The oracle permits any number of legal
 replays but requires each completed normal load to have exactly one uncanceled
-wakeup: `wakeup_delta = ld2Cancel_delta + 1`. `random-mixed` keeps constant-space
+wakeup: `wakeup_delta = ld2Cancel_delta + 1`. It also issues three resident,
+different-set loads to the same DCache bank in one cycle. That phase requires
+at least two cancellations, no TileLink traffic, exact metadata on the initial
+wakeups, and the same conservation rule summed across lanes because legal
+replays may migrate between LoadUnits. `random-mixed` keeps constant-space
 lane counters and requires both canceled and uncanceled wakeups on every lane.
 When hardware stride prefetch is enabled, that backend gate is frozen before
 training begins because prefetch traffic produces load-pipeline cancel pulses
