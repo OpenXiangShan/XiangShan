@@ -6254,6 +6254,22 @@ int run_dcache_errors(int argc, char **argv)
         dcache_ctrl_base + 0x10;
     constexpr std::uint64_t tag_error_once = 0x11;
     constexpr std::uint64_t data_error_once = 0x19;
+    constexpr unsigned dcache_banks = 8;
+    constexpr std::array<std::uint64_t, dcache_banks> data_error_masks{{
+        1ULL << 0, 1ULL << 1, 1ULL << 7, 1ULL << 15,
+        1ULL << 31, 1ULL << 32, 1ULL << 47, 1ULL << 63,
+    }};
+    constexpr std::array<std::uint64_t, dcache_banks>
+        data_double_error_masks{{
+            (1ULL << 0) | (1ULL << 1),
+            (1ULL << 1) | (1ULL << 2),
+            (1ULL << 7) | (1ULL << 8),
+            (1ULL << 15) | (1ULL << 16),
+            (1ULL << 30) | (1ULL << 31),
+            (1ULL << 32) | (1ULL << 33),
+            (1ULL << 47) | (1ULL << 48),
+            (1ULL << 62) | (1ULL << 63),
+        }};
     constexpr std::uint64_t tag_address = ecc_base;
     constexpr std::uint64_t data_address = ecc_base + 0x40;
     ecc_environment.memory().fill_incrementing(ecc_base, 0x100, 0x9d);
@@ -6426,6 +6442,8 @@ int run_dcache_errors(int argc, char **argv)
     std::uint64_t physical_ecc_wakeups = 0;
     std::uint64_t physical_ecc_cancels = 0;
     std::uint64_t physical_ecc_reports = 0;
+    unsigned tag_ecc_cases = 0;
+    unsigned data_ecc_cases = 0;
     auto run_tag_ecc_error = [&](std::uint64_t address, std::uint64_t control,
                                  std::uint8_t control_rob,
                                  std::uint8_t control_sq, std::uint8_t load_rob,
@@ -6523,6 +6541,7 @@ int run_dcache_errors(int argc, char **argv)
 
     auto run_data_ecc_error = [&](std::uint64_t address,
                                   std::uint64_t control,
+                                  std::uint64_t expected_data_xor,
                                   std::uint8_t control_rob,
                                   std::uint8_t control_sq,
                                   std::uint8_t load_rob,
@@ -6540,7 +6559,8 @@ int run_dcache_errors(int argc, char **argv)
             ecc_environment.tilelink_requests();
         const std::uint64_t writebacks_before = ecc_environment.writebacks();
         if (!run_clean_load(
-                address, load_rob, load_lq, pdest, lane, phase, 1)) {
+                address, load_rob, load_lq, pdest, lane, phase,
+                expected_data_xor)) {
             return false;
         }
         const auto feedback_after = ecc_feedback_totals();
@@ -6578,17 +6598,100 @@ int run_dcache_errors(int argc, char **argv)
     };
 
     if (!write_dcache_ctrl(
-            dcache_ctrl_mask_bank0, 1, 44, 0, "ecc-mask") ||
+            dcache_ctrl_mask_bank0, 1, 44, 0,
+            "tag-ecc-mask") ||
         !run_tag_ecc_error(
             tag_address, tag_error_once, 45, 1, 46, 4, 44, 0,
             "tag-ecc") ||
         !write_dcache_ctrl(dcache_ctrl_base, 0, 47, 2, "tag-disable") ||
-        !run_clean_load(tag_address, 48, 4, 45, 1, "tag-survivor") ||
-        !run_data_ecc_error(
-            data_address, data_error_once, 49, 3, 50, 5, 46, 0,
-            "data-ecc") ||
-        !write_dcache_ctrl(dcache_ctrl_base, 0, 51, 4, "data-disable") ||
-        !run_clean_load(data_address, 52, 6, 47, 2, "data-survivor")) {
+        !run_clean_load(tag_address, 48, 4, 45, 1, "tag-survivor")) {
+        return 1;
+    }
+    ++tag_ecc_cases;
+    if (!run_clean_hit(
+            tag_address, 49, 5, 46, 2, "tag-double-resident") ||
+        !write_dcache_ctrl(
+            dcache_ctrl_mask_bank0, 3, 50, 3, "tag-double-mask") ||
+        !run_tag_ecc_error(
+            tag_address, tag_error_once, 51, 4, 52, 6, 47, 1,
+            "tag-double-ecc") ||
+        !write_dcache_ctrl(
+            dcache_ctrl_base, 0, 53, 5, "tag-double-disable") ||
+        !run_clean_load(
+            tag_address, 54, 6, 48, 0, "tag-double-survivor")) {
+        return 1;
+    }
+    ++tag_ecc_cases;
+    auto data_control_for_bank = [](unsigned bank) {
+        return std::uint64_t{0x9} | (std::uint64_t{1} << (4 + bank));
+    };
+    if (data_control_for_bank(0) != data_error_once) {
+        std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL phase=ecc-control-encoding\n";
+        return 1;
+    }
+    std::uint8_t next_rob = 55;
+    std::uint8_t next_lq = 7;
+    std::uint8_t next_sq = 6;
+    for (unsigned error_class = 0; error_class < 2; ++error_class) {
+        for (unsigned bank = 0; bank < dcache_banks; ++bank) {
+            const std::uint64_t address = data_address + bank * 8;
+            const std::uint64_t error_mask = error_class == 0
+                ? data_error_masks[bank]
+                : data_double_error_masks[bank];
+            const std::string prefix = std::string("data-ecc-") +
+                (error_class == 0 ? "single-bank" : "double-bank") +
+                std::to_string(bank);
+            const std::string resident_phase = prefix + "-resident";
+            const std::string mask_phase = prefix + "-mask";
+            const std::string error_phase = prefix + "-error";
+            const std::string disable_phase = prefix + "-disable";
+            const std::string survivor_phase = prefix + "-survivor";
+            const std::uint8_t resident_rob = next_rob++;
+            const std::uint8_t resident_lq = next_lq++;
+            const std::uint8_t mask_rob = next_rob++;
+            const std::uint8_t mask_sq = next_sq++;
+            const std::uint8_t control_rob = next_rob++;
+            const std::uint8_t control_sq = next_sq++;
+            const std::uint8_t error_rob = next_rob++;
+            const std::uint8_t error_lq = next_lq++;
+            const std::uint8_t disable_rob = next_rob++;
+            const std::uint8_t disable_sq = next_sq++;
+            const std::uint8_t survivor_rob = next_rob++;
+            const std::uint8_t survivor_lq = next_lq++;
+            if (!run_clean_hit(
+                    address, resident_rob, resident_lq,
+                    static_cast<std::uint8_t>(48 + bank * 3),
+                    bank % memblock::kScalarLoadLanes,
+                    resident_phase.c_str()) ||
+                !write_dcache_ctrl(
+                    dcache_ctrl_mask_bank0 + bank * 8,
+                    error_mask, mask_rob, mask_sq,
+                    mask_phase.c_str()) ||
+                !run_data_ecc_error(
+                    address, data_control_for_bank(bank), error_mask,
+                    control_rob, control_sq, error_rob, error_lq,
+                    static_cast<std::uint8_t>(50 + bank * 3),
+                    bank % memblock::kScalarLoadLanes,
+                    error_phase.c_str()) ||
+                !write_dcache_ctrl(
+                    dcache_ctrl_base, 0, disable_rob, disable_sq,
+                    disable_phase.c_str()) ||
+                !run_clean_load(
+                    address, survivor_rob, survivor_lq,
+                    static_cast<std::uint8_t>(51 + bank * 3),
+                    (bank + 1) % memblock::kScalarLoadLanes,
+                    survivor_phase.c_str())) {
+                return 1;
+            }
+            ++data_ecc_cases;
+        }
+    }
+    if (physical_ecc_reports != data_ecc_cases + tag_ecc_cases) {
+        std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                  << ecc_environment.cycle()
+                  << " phase=ecc-report-conservation"
+                  << " reports=" << physical_ecc_reports
+                  << " expected=" << data_ecc_cases + tag_ecc_cases << '\n';
         return 1;
     }
     if (ecc_environment.lq_allocated() !=
@@ -6617,7 +6720,9 @@ int run_dcache_errors(int argc, char **argv)
               << " denied_cancels=" << denied_feedback.second
               << " corrupt_wakeups=" << corrupt_wakeups
               << " corrupt_cancels=" << corrupt_cancels
-              << " tag_ecc=1 data_ecc=1 ecc_error_reports="
+              << " tag_ecc=" << tag_ecc_cases
+              << " data_ecc=" << data_ecc_cases
+              << " ecc_error_reports="
               << physical_ecc_reports
               << " ecc_wakeups=" << physical_ecc_wakeups
               << " ecc_cancels=" << physical_ecc_cancels

@@ -565,14 +565,16 @@ all-wakeups-canceled rule is checked by `scalar-guest-fault` for a G-stage fault
 whose VA, GPA, and VS-non-leaf classification are independently modeled. The
 scenario also fills two lines, waits for every refill beat and GrantAck, proves
 both targets are resident with zero-request hits, and programs the
-`L1DCacheCtrl` MMIO registers for one-shot bank-0 single-bit tag and data ECC
-injection. Tag ECC must report the exact physical address to BEU, cancel its
-speculative wakeup, produce no terminal writeback or new manager request, and
-permit a clean load after redirect with the canceled LQ slot reused. With this
-configuration's explicit `EnableAccurateLoadError=false`, data ECC must report
-the exact address to BEU without cancellation and write back the independently
-predicted bit-0-flipped data; a subsequent load must again return clean data.
-The phase finishes only when both LQ and SQ satisfy
+`L1DCacheCtrl` MMIO registers for one-shot tag and data ECC injection. The tag
+path covers bank 0 with representative single- and double-bit masks; each case
+must report the exact physical address to BEU, cancel its speculative wakeup,
+produce no terminal writeback or new manager request, and permit a clean load
+after redirect. The data path crosses all eight banks with spread single-bit
+and adjacent double-bit masks. With this configuration's explicit
+`EnableAccurateLoadError=false`, every data case must report the exact address
+to BEU without cancellation and write back the independently predicted XOR
+result; disabling injection must restore clean data. The phase finishes only
+when all 18 injected cases have reported and both LQ and SQ satisfy
 `allocated = dequeued + canceled`.
 
 `dcache-coherence` fills a clean line, invalidates it with a manager Probe,

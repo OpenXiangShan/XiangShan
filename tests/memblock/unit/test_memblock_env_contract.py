@@ -508,6 +508,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "dcache_ctrl_mask_bank0",
             "tag_error_once = 0x11",
             "data_error_once = 0x19",
+            "dcache_banks = 8",
+            "data_double_error_masks",
+            "data_control_for_bank",
             "dcache_grants_drained()",
             "run_clean_hit",
             "run_tag_ecc_error",
@@ -516,10 +519,13 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "reports != 1",
             "errors_after.last_dcache_address != address",
             "phase=ecc-queue-conservation",
-            "tag_ecc=1 data_ecc=1",
+            "physical_ecc_reports != data_ecc_cases + tag_ecc_cases",
+            '<< " tag_ecc=" << tag_ecc_cases',
+            '<< " data_ecc=" << data_ecc_cases',
         ):
             self.assertIn(contract, main)
         for contract in (
+            "val DCacheBanks = 8 // hardcoded",
             "EnableAccurateLoadError: Boolean = false",
             "newCtrlReg.ese := Mux(ctrlRegBundle.persist, ctrlRegBundle.ese, false.B)",
             "bankedDataArray.io.pseudo_error <> ctrlUnit.io_pseudoError(1)",
