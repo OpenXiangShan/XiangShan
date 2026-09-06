@@ -40,11 +40,13 @@ constexpr std::uint64_t kFuTypeVectorStore = std::uint64_t{1} << 32;
 constexpr std::uint64_t kFuTypeVectorSegmentLoad = std::uint64_t{1} << 33;
 constexpr std::uint64_t kFuTypeVectorSegmentStore = std::uint64_t{1} << 34;
 constexpr std::uint16_t kVectorLoadUnitStride = 0x080;
+constexpr std::uint16_t kVectorLoadWholeRegister = 0x088;
 constexpr std::uint16_t kVectorLoadFaultOnlyFirst = 0x090;
 constexpr std::uint16_t kVectorLoadIndexedUnordered = 0x0a0;
 constexpr std::uint16_t kVectorLoadStrided = 0x0c0;
 constexpr std::uint16_t kVectorLoadIndexedOrdered = 0x0e0;
 constexpr std::uint16_t kVectorStoreUnitStride = 0x100;
+constexpr std::uint16_t kVectorStoreWholeRegister = 0x108;
 constexpr std::uint16_t kVectorStoreIndexedUnordered = 0x120;
 constexpr std::uint16_t kVectorStoreStrided = 0x140;
 constexpr std::uint16_t kVectorStoreIndexedOrdered = 0x160;
@@ -371,6 +373,7 @@ enum class VectorAddressingMode : std::uint8_t {
 struct VectorMemoryTransaction {
     bool store = false;
     bool segment = false;
+    bool whole_register = false;
     std::uint64_t address = kDefaultMemoryBase;
     std::optional<std::uint64_t> oracle_address;
     std::array<unsigned char, 16> data{};
@@ -425,6 +428,21 @@ struct VectorMemoryTransaction {
 
 inline std::uint16_t vector_fu_op_type(const VectorMemoryTransaction &transaction)
 {
+    if (transaction.whole_register) {
+        const bool legal_nf = transaction.nf == 0 || transaction.nf == 1 ||
+            transaction.nf == 3 || transaction.nf == 7;
+        if (transaction.segment || transaction.fault_only_first ||
+            transaction.is_vleff ||
+            transaction.addressing != VectorAddressingMode::unit_stride ||
+            transaction.eew > 3 ||
+            !legal_nf) {
+            throw std::logic_error(
+                "whole-register vector memory operation has invalid fields");
+        }
+        return transaction.store
+            ? kVectorStoreWholeRegister
+            : kVectorLoadWholeRegister;
+    }
     if (transaction.fault_only_first) {
         if (transaction.store ||
             transaction.addressing != VectorAddressingMode::unit_stride) {
@@ -450,6 +468,17 @@ inline std::uint16_t vector_fu_op_type(const VectorMemoryTransaction &transactio
             : kVectorLoadIndexedOrdered;
     }
     throw std::logic_error("unknown vector addressing mode");
+}
+
+inline std::uint8_t vector_effective_vl(
+    const VectorMemoryTransaction &transaction)
+{
+    if (!transaction.whole_register) {
+        return transaction.vl;
+    }
+    const unsigned registers = static_cast<unsigned>(transaction.nf) + 1U;
+    return static_cast<std::uint8_t>(
+        (registers * 16U) >> transaction.eew);
 }
 
 inline std::uint64_t vector_fu_type(const VectorMemoryTransaction &transaction)
@@ -519,6 +548,7 @@ inline std::uint16_t active_vector_elements(
     const VectorMemoryTransaction &transaction)
 {
     const unsigned element_count = 16U >> transaction.eew;
+    const unsigned effective_vl = vector_effective_vl(transaction);
     const unsigned element_base = transaction.segment
         ? 0
         : transaction.vuop_idx * element_count;
@@ -526,7 +556,7 @@ inline std::uint16_t active_vector_elements(
     for (unsigned element = 0; element < element_count; ++element) {
         const unsigned global_element = element_base + element;
         const bool in_range = global_element >= transaction.vstart &&
-                              global_element < transaction.vl;
+                              global_element < effective_vl;
         const bool enabled = transaction.vm ||
             (global_element < 16 &&
              ((transaction.mask_bits >> global_element) & 1U) != 0);
@@ -3076,7 +3106,8 @@ public:
             return;
         }
         auto output_transaction = transaction;
-        output_transaction.vl = transaction.expected_vl.value_or(transaction.vl);
+        output_transaction.vl = transaction.expected_vl.value_or(
+            vector_effective_vl(transaction));
         const RobIdentity identity = rob_identity(
             transaction.rob, transaction.rob_flag);
         const auto range = expected_.equal_range(identity);

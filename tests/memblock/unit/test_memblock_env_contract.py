@@ -784,6 +784,41 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main)
 
+    def test_vector_whole_register_matrix_matches_rtl_contract(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        package = (REPO_ROOT / "src/main/scala/xiangshan/package.scala").read_text()
+        split = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VSplit.scala"
+        ).read_text()
+        common = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VecCommon.scala"
+        ).read_text()
+        for contract in (
+            "kVectorLoadWholeRegister = 0x088",
+            "kVectorStoreWholeRegister = 0x108",
+            "bool whole_register = false",
+            "vector_effective_vl",
+            "(registers * 16U) >> transaction.eew",
+            "whole_nfs{{0, 1, 3, 7}}",
+            ".whole_register = true",
+            ".vl = 1",
+            "whole_cases != 16",
+            "whole_load_uops != 120",
+            "whole_store_uops != 60",
+            '<< " whole_lq_allocated="',
+            '<< " whole_sq_allocated="',
+        ):
+            self.assertIn(contract, environment + main)
+        for contract in (
+            'def vlr       = "b01_00_01000".U',
+            'def vsr       = "b10_00_01000".U',
+            "GenUSWholeRegVL",
+            "GenUSWholeEmul",
+            "override def us_whole_reg",
+        ):
+            self.assertIn(contract, package + split + common)
+
     def test_dcache_coherence_tracks_concurrent_probe_sources(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

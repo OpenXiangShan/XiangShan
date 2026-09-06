@@ -100,7 +100,7 @@ The correctness contracts are cataloged separately in
 `docs/ORACLES.md`. `docs/VERIFICATION_PLAN.md` contains the complete test-point
 inventory, including explicit planned gaps for broader device/error ordering,
 reservation interference and full atomic alignment crosses, CMO CLEAN/FLUSH/INVAL,
-remaining segment LMUL/whole-register combinations, remaining PMP/PMA matrices,
+remaining ordinary LMUL/EMUL and segment combinations, remaining PMP/PMA matrices,
 coherence protocol negatives, error injection, cross-cause/vector exception
 priority, and four-state behavior. A passing
 cacheable mixed campaign must not be interpreted as verification of those
@@ -718,6 +718,14 @@ indexed loads. Unit/strided younger uops issue first; indexed uops carry
 independent index vectors and obey ordered acceptance. Cross-uop masks and a
 tail element are selected by global element number. All six writebacks are
 checked against uop-aware addresses from the independent byte-memory model.
+
+The same scenario also models `vlr`/`vsr` as distinct whole-register
+operations and executes all 16 combinations of one/two/four/eight registers
+and EEW 8/16/32/64. It deliberately supplies `vl=1`; the independent oracle
+instead derives EVL as `(nf + 1) * VLENB / EEW`. Each register uop uses its
+own 16-byte address window, exact data and metadata are checked, stores are
+flushed and read back through whole-register loads, and 240 LQ plus 120 SQ
+allocations must drain exactly across pointer wraps.
 
 `pmp-contracts` drives `pmpaddr0..1` and packed `pmpcfg0` writes through the
 MemBlock distributed CSR boundary. Hand-calculated TOR and NAPOT regions check

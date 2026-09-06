@@ -15,12 +15,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `257396474c8bef35e3e3594a6adac2acf6aa7444e8370f0f4d3e413bd545f301`
 - Complete ordered RTL SHA-256: `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`
-- Current rebuilt and frozen UT executable SHA-256: `2e39513495a02c5483b082d788674c1a3bc4fd42a77a5d8a0f2f572a2f430f7d`
+- Current rebuilt and frozen UT executable SHA-256: `eca1bcf420246d9c4cb41acb25559c7148591eadb7ec5e6801805a2999d233a3`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `577579039590a2ea7a5e5d4e22901ac1d76afbcc5fed158eaf1cd53c8e5d3984`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `3ffb5c0d39a3402bbe6507a54829d58866e907d02760179159d6945dde00344a`
-- Frozen runtime manifest SHA-256: `31808dc86ff78954f2e9f6bcb36ccd45fa294a9e139608326a80a555173287fd`
+- Frozen runtime manifest SHA-256: `a650f2df9cbcb597eb70cbe34a17353692036eec9fa26f71c64684d39de890f3`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -255,6 +255,18 @@ suppressed the final negative-stride tail element. Together with the existing
 cases, the scenario completed 15 vector-load and three vector-store writebacks
 plus exact store readback while issuing 14 TileLink requests. No CPU defect was
 observed.
+
+On 2026-09-07, the same scenario added the complete legal whole-register
+matrix: `vlr` and `vsr` each cross NF 1/2/4/8 registers with EEW 8/16/32/64.
+The driver deliberately supplies `vl=1`, while the independent oracle derives
+the effective VL from NF and EEW. Across load, store, flush, and whole-register
+load readback, the run completed 120 whole-register load uops and 60 store
+uops, allocated and drained 240 LQ plus 120 SQ entries across pointer wraps,
+and checked exact data and metadata. The combined scenario completed at cycle
+5719 with 135 vector-load writebacks, 63 vector-store writebacks, and 54
+TileLink requests against complete RTL hash
+`e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`.
+No CPU defect was observed.
 
 ## Top-Down Status Boundary
 

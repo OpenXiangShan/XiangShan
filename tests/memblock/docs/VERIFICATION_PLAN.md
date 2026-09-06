@@ -252,7 +252,7 @@ cacheable tests pass.
 | Vector strided | Positive, zero, and negative legal load strides; non-overlapping positive and negative store strides; element gaps and split windows | Implemented for modeled 128-bit operations, including an ordinary LMUL=2 negative-stride pair with exact elements-per-uop base advancement; overlapping stores remain excluded because their final memory value is not a single deterministic oracle |
 | Vector indexed unordered | Repeated indices, aliasing, non-monotonic indices, all EEWs, masked elements | Partial; basic unordered mode implemented |
 | Vector indexed ordered | Strict element order, repeated/aliasing indices, split beats/pages | Partial; basic ordered mode and an LMUL=2 pair with independent per-uop index vectors are implemented |
-| Vector segmented/whole-register | NF/segment count, multi-uop streams, load/store direction, EEW, mask/`vstart`, fault-only-first, redirect, and partial completion | Partial: `vector-segment` checks lane-0 takeover, interleaved load/store data, multi-uop identity, zero LSQ allocation, unit-stride/strided/indexed-unordered/indexed-ordered load/store/readback addressing, delayed-refill load redirect with survivor reuse, FOF data/fix-VL cancellation, and early store cancellation with original-data readback; `vector-segment-fof` contrasts a later-element page fault that is suppressed with `VL=1` against a first-element fault that remains architectural with exact fault VA and unchanged `VL=2`; `trigger-contracts` checks a field-1 indexed load breakpoint and strided store breakpoint with exact whole-segment `vstart` and prefix-request accounting; `vector-addressing` adds representative ordinary LMUL=2 unit/strided/indexed two-uop streams; schema-8 `random-mixed` independently gates load/store, all four EEWs, and NF 1..7 (2..8 fields). Whole-register transfers and the broader LMUL/EMUL matrix remain |
+| Vector segmented/whole-register | NF/segment count, multi-uop streams, load/store direction, EEW, mask/`vstart`, fault-only-first, redirect, and partial completion | Partial: `vector-segment` checks lane-0 takeover, interleaved load/store data, multi-uop identity, zero LSQ allocation, unit-stride/strided/indexed-unordered/indexed-ordered load/store/readback addressing, delayed-refill load redirect with survivor reuse, FOF data/fix-VL cancellation, and early store cancellation with original-data readback; `vector-segment-fof` contrasts a later-element page fault that is suppressed with `VL=1` against a first-element fault that remains architectural with exact fault VA and unchanged `VL=2`; `trigger-contracts` checks a field-1 indexed load breakpoint and strided store breakpoint with exact whole-segment `vstart` and prefix-request accounting; `vector-addressing` adds representative ordinary LMUL=2 unit/strided/indexed two-uop streams plus byte-exact `vlr`/`vsr` load/store/readback for all 16 NF 1/2/4/8 x EEW 8/16/32/64 whole-register combinations, independently deriving whole-register EVL and draining 240 LQ/120 SQ allocations across wraps; schema-8 `random-mixed` independently gates load/store, all four EEWs, and NF 1..7 (2..8 fields). The broader ordinary LMUL/EMUL matrix remains |
 | Vector data patterns | all zero/one, ramps, alternating bits, random bytes, same-byte aliases, old-destination merge | Implemented/partial by operation class |
 | Software prefetch | `prefetch.i/r/w`, mapped/unmapped, cacheable/NC/IO, all lanes, duplicate and outstanding requests | Partial: `ifetch-prefetch` checks every class/lane, a same-cycle `i/r/w` batch, unmapped cold data-hint drop without PTW/data traffic, warmed Sv39 cacheable data-prefetch hits, individual `r/w` DCache requests, and the intentional PBMT policy: resident-TLB NC `r/w` issue DCache hints without Uncache while IO `r/w` reach neither manager; broader duplicate/same-line contention remains |
 | Atomics | LR/SC, AMOADD/XOR/AND/OR/SWAP/MIN/MAX and signed/unsigned variants, AMOCAS, reservation loss, alignment | Partial; all exposed W/D-width AMO variants, AMOCAS.W/D compare success/failure, LR/SC success/failure, every illegal byte offset for representative D/W operations, and a fixed-device-PMA `AMOADD.D` denial execute in `atomic-contracts`; the PMA fault suppresses RF write and all manager/memory side effects. `atomic-dchannel-errors` crosses denied/corrupt with all 22 refill-capable W/D LR/AMO/AMOCAS operations, checks initial exception/RF contracts, later poisoned-line load hits, SC.W/D hits on denied/corrupt metadata, exact request counts, and clean AMO recovery. The SC checks do not claim internal reservation observability. SC cannot have a cold-miss D response because MainPipe returns failure before a request when the line or usable reservation is absent. Cross-hart reservation interference, full opcode-by-offset alignment crosses, and ordering with concurrent traffic remain |
@@ -398,9 +398,11 @@ TileLink, 20 Uncache TileLink, eight performance, and two infrastructure ports.
 The development-phase ordering is breadth first: close executable `planned`
 and `partial` rows with short directed and modest constrained-random runs,
 then restore million-action endurance only after the major semantic gaps have
-oracles and registered scenarios. The next closure work is physical-error
-`ldCancel`/wakeup crosses once their injection paths exist, followed by
-negative protocol injection and independent queue-acceptance accounting. Translation mode depth itself is no
+oracles and registered scenarios. Physical-error wakeup/cancel, bank/mask,
+and same-cycle isolation crosses are now executable, as is the complete legal
+whole-register NF/EEW matrix. The next closure work is negative protocol
+injection and independently observable queue acceptance where the elaborated
+top exposes a reliable contract. Translation mode depth itself is no
 longer
 the dominant gap: deterministic tests already execute Sv48 and all four
 Sv39/Sv48 x Sv39x4/Sv48x4 nested combinations. The separate IFU top-level
@@ -456,10 +458,11 @@ are planned work items, not silently accepted coverage:
 - CBO/CMO line operations, `fence`, and `fence.i` (translation-fence ordering
   for global/selective leaf updates, both supported stage modes, and all four
   fully nested VS/G pairs is covered by `translation-fence-all`);
-- whole-register VSegment transfers and the broader LMUL/EMUL cross matrix;
-  representative ordinary LMUL=2 unit/negative-stride/ordered-indexed streams,
-  segment addressing, direct load/store/FOF redirect cancellation, and both
-  first- and later-element segment FOF faults are covered;
+- the broader ordinary LMUL/EMUL cross matrix; all legal whole-register
+  NF/EEW load/store combinations, representative ordinary LMUL=2
+  unit/negative-stride/ordered-indexed streams, segment addressing, direct
+  load/store/FOF redirect cancellation, and both first- and later-element
+  segment FOF faults are covered;
 - broader PMA region/permission/edge crosses for HLV/HLVX/HSV plus hypervisor
   PMP region-edge cases;
   all four nested translation mode pairs, PBMT PMA/NC/IO priority, cacheable

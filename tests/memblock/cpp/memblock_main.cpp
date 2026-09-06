@@ -13330,15 +13330,208 @@ int run_vector_addressing(int argc, char **argv)
         }
     }
 
+    memblock::Environment whole(argc, argv);
+    constexpr std::uint64_t whole_base =
+        memblock::kDefaultMemoryBase + 0x90000;
+    whole.memory().fill_incrementing(whole_base, 0x10000, 0x27);
+    whole.configure_backpressure(0xa4093822299f31d0ULL, true);
+    if (!whole.reset()) {
+        std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                  << whole.cycle() << " phase=whole-register-reset reason="
+                  << whole.error() << '\n';
+        return 1;
+    }
+
+    constexpr std::array<std::uint8_t, 4> whole_nfs{{0, 1, 3, 7}};
+    std::uint64_t whole_lq_cursor = 0;
+    std::uint64_t whole_sq_cursor = 0;
+    std::uint8_t whole_rob = 80;
+    unsigned whole_cases = 0;
+    unsigned whole_load_uops = 0;
+    unsigned whole_store_uops = 0;
+    auto make_whole_uops = [&](bool store, std::uint64_t address,
+                               std::uint8_t rob, std::uint8_t nf,
+                               std::uint8_t eew, std::uint64_t queue_cursor,
+                               std::uint8_t data_seed) {
+        std::vector<memblock::VectorMemoryTransaction> uops;
+        const unsigned registers = static_cast<unsigned>(nf) + 1U;
+        uops.reserve(registers);
+        for (unsigned uop = 0; uop < registers; ++uop) {
+            memblock::VectorMemoryTransaction transaction{
+                .store = store,
+                .whole_register = true,
+                .address = address,
+                .eew = eew,
+                // Whole-register operations ignore architectural VL and
+                // derive EVL from NF and EEW. Keep this deliberately wrong.
+                .vl = 1,
+                .rob = rob,
+                .lq = static_cast<std::uint8_t>(
+                    queue_cursor % memblock::kVirtualLoadQueueEntries),
+                .lq_flag = ((queue_cursor /
+                    memblock::kVirtualLoadQueueEntries) & 1U) != 0,
+                .sq = static_cast<std::uint8_t>(
+                    queue_cursor % memblock::kStoreQueueEntries),
+                .sq_flag = ((queue_cursor /
+                    memblock::kStoreQueueEntries) & 1U) != 0,
+                .pdest = static_cast<std::uint8_t>(128 + uop),
+                .lane = uop % memblock::kVectorMemoryLanes,
+                .flow_num = 2,
+                .vuop_idx = static_cast<std::uint8_t>(uop),
+                .last_uop = uop + 1 == registers,
+                .nf = nf,
+            };
+            for (unsigned byte = 0; byte < transaction.data.size(); ++byte) {
+                transaction.data[byte] = static_cast<unsigned char>(
+                    data_seed + 17 * uop + 3 * byte);
+            }
+            uops.push_back(transaction);
+            queue_cursor += transaction.flow_num;
+        }
+        return uops;
+    };
+    auto run_whole_load = [&](std::vector<memblock::VectorMemoryTransaction> uops,
+                              const char *phase) {
+        if (!whole.set_rob_head(uops.front().rob, uops.front().rob_flag)) {
+            std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                      << whole.cycle() << " phase=" << phase
+                      << " reason=" << whole.error() << '\n';
+            return false;
+        }
+        for (const auto &uop : uops) {
+            whole.expect_vector(uop);
+            if (!whole.enqueue_vector(uop)) {
+                std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                          << whole.cycle() << " phase=" << phase
+                          << " reason=" << whole.error() << '\n';
+                return false;
+            }
+        }
+        for (auto uop = uops.rbegin(); uop != uops.rend(); ++uop) {
+            if (!whole.issue_vector(*uop, 1024)) {
+                std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                          << whole.cycle() << " phase=" << phase
+                          << " reason=" << whole.error() << '\n';
+                return false;
+            }
+        }
+        if (!whole.run_until_vector_complete_with_replays(uops, 32768) ||
+            !whole.run_until_lq_retired(8192)) {
+            std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                      << whole.cycle() << " phase=" << phase
+                      << " reason=" << whole.error() << '\n';
+            return false;
+        }
+        whole_load_uops += uops.size();
+        whole_lq_cursor += 2 * uops.size();
+        return true;
+    };
+
+    for (const std::uint8_t nf : whole_nfs) {
+        for (std::uint8_t eew = 0; eew < 4; ++eew) {
+            const unsigned case_index = whole_cases++;
+            const std::uint64_t source =
+                whole_base + case_index * 0x400;
+            const std::uint64_t destination = source + 0x200;
+            auto loads = make_whole_uops(
+                false, source, whole_rob++, nf, eew, whole_lq_cursor,
+                static_cast<std::uint8_t>(0x40 + case_index));
+            if (!run_whole_load(loads, "whole-register-load")) {
+                return 1;
+            }
+
+            auto stores = make_whole_uops(
+                true, destination, whole_rob++, nf, eew, whole_sq_cursor,
+                static_cast<std::uint8_t>(0x80 + case_index));
+            for (const auto &store : stores) {
+                whole.expect_vector(store);
+                if (!whole.enqueue_vector(store)) {
+                    std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                              << whole.cycle()
+                              << " phase=whole-register-store-enqueue reason="
+                              << whole.error() << '\n';
+                    return 1;
+                }
+            }
+            for (auto store = stores.rbegin(); store != stores.rend(); ++store) {
+                if (!whole.issue_vector(*store, 1024)) {
+                    std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                              << whole.cycle()
+                              << " phase=whole-register-store-issue reason="
+                              << whole.error() << '\n';
+                    return 1;
+                }
+            }
+            if (!whole.run_until_vector_complete_with_replays(stores, 32768)) {
+                std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                          << whole.cycle()
+                          << " phase=whole-register-store-complete reason="
+                          << whole.error() << '\n';
+                return 1;
+            }
+            for (const auto &store : stores) {
+                if (!whole.commit_vector_store(store, 8192)) {
+                    std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                              << whole.cycle()
+                              << " phase=whole-register-store-commit reason="
+                              << whole.error() << '\n';
+                    return 1;
+                }
+            }
+            whole_store_uops += stores.size();
+            whole_sq_cursor += 2 * stores.size();
+            if (!whole.run_until_queues_retired(8192) ||
+                !whole.pulse_sbuffer_flush() ||
+                !whole.run_until_sbuffer_empty(32768)) {
+                std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                          << whole.cycle()
+                          << " phase=whole-register-store-drain reason="
+                          << whole.error() << '\n';
+                return 1;
+            }
+
+            auto readbacks = make_whole_uops(
+                false, destination, whole_rob++, nf, eew, whole_lq_cursor,
+                static_cast<std::uint8_t>(0xd0 + case_index));
+            if (!run_whole_load(readbacks, "whole-register-readback")) {
+                return 1;
+            }
+        }
+    }
+    if (whole_cases != 16 || whole_load_uops != 120 ||
+        whole_store_uops != 60 ||
+        whole.lq_allocated() != whole.lq_dequeued() + whole.lq_canceled() ||
+        whole.sq_allocated() != whole.sq_dequeued() + whole.sq_canceled()) {
+        std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle=" << whole.cycle()
+                  << " phase=whole-register-conservation"
+                  << " cases=" << whole_cases
+                  << " load_uops=" << whole_load_uops
+                  << " store_uops=" << whole_store_uops
+                  << " lq=" << whole.lq_allocated() << '/'
+                  << whole.lq_dequeued() << '+' << whole.lq_canceled()
+                  << " sq=" << whole.sq_allocated() << '/'
+                  << whole.sq_dequeued() << '+' << whole.sq_canceled()
+                  << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_VECTOR_ADDRESSING_PASS"
-              << " cycle=" << environment.cycle() + multi_uop.cycle()
+              << " cycle=" << environment.cycle() + multi_uop.cycle() +
+                    whole.cycle()
               << " load_writebacks=" << environment.vector_load_writebacks() +
-                    multi_uop.vector_load_writebacks()
+                    multi_uop.vector_load_writebacks() +
+                    whole.vector_load_writebacks()
               << " store_writebacks=" << environment.vector_store_writebacks()
+                    + whole.vector_store_writebacks()
               << " store_modes=3"
               << " multi_uop_modes=3 multi_uop_writebacks=6"
+              << " whole_cases=" << whole_cases
+              << " whole_load_uops=" << whole_load_uops
+              << " whole_store_uops=" << whole_store_uops
+              << " whole_lq_allocated=" << whole.lq_allocated()
+              << " whole_sq_allocated=" << whole.sq_allocated()
               << " tilelink_requests=" << environment.tilelink_requests() +
-                    multi_uop.tilelink_requests()
+                    multi_uop.tilelink_requests() + whole.tilelink_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
