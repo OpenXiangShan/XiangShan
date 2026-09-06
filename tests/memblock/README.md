@@ -391,13 +391,21 @@ DCache request. This reflects the RTL ownership boundary: LoadUnit marks
 translation. The `random-mixed` coverage schema also requires at least one
 observed instruction-prefetch output in every seed.
 
-`hardware-prefetch` enables only the L1 stride trainer, holds the load PC
+`hardware-prefetch` first isolates the L1 stride trainer, holds the load PC
 constant, and issues cold misses at a 128-byte stride. Starting with the sixth
 training access, it requires one `Prefetch2L2Stride` output per access at the
 RTL-defined depth (`current address + 4096`), then disables the CSR and checks
-that further accesses do not emit requests. The present build elaborates L3
-stream prefetch disabled, so the L3 output is monitored and required to remain
-idle instead of being reported as positive functional coverage.
+that further accesses do not emit requests. An independent stream phase uses
+different PCs for 12 cold lines in one 1-KiB region, preventing stride
+confidence while requiring four exact `Prefetch2L2Stream` requests at the
+configured 640-line lookahead. It then crosses into the active neighboring
+region and trains a fixed-PC stride for six misses; stream requests must
+continue while source 12 remains suppressed, checking the RTL's stream-over-
+stride priority. The present build elaborates L3 stream prefetch disabled, so
+the L3 output is monitored and required to remain idle instead of being
+reported as positive functional coverage. SMS source-10 attribution remains
+open: direct AGT generation is hard-disabled in this RTL and the PHT path has
+no independent state observation at the MemBlock boundary.
 The same fixed-PC stream is available through the common `random-mixed`
 `stride-stream` constraint. It runs alongside the configured operation,
 translation, miss/refill, Probe, and response-latency mix and requires an L2

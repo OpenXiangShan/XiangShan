@@ -260,6 +260,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "run_hardware_prefetch",
             "stride_source = 12",
             "l2_depth = stride << 5",
+            "stream_source = 11",
+            "stream_l2_depth_lines = 640",
+            "stream_l2_width_lines = 4",
+            "stream-stride-priority",
+            "stride_suppressed=1",
             "hardware-prefetch",
         ):
             self.assertIn(contract, environment + main + makefile + generator)

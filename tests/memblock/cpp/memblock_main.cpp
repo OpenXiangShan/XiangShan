@@ -3316,8 +3316,140 @@ int run_hardware_prefetch(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment stream_environment(argc, argv);
+    constexpr std::uint64_t stream_base =
+        memblock::kDefaultMemoryBase + 0x300000;
+    constexpr std::uint8_t stream_source = 11;
+    constexpr unsigned stream_training_loads = 12;
+    constexpr std::uint64_t stream_l2_depth_lines = 640;
+    constexpr unsigned stream_l2_width_lines = 4;
+    stream_environment.memory().fill_incrementing(
+        stream_base, 0x20000, 0x5d);
+    if (!stream_environment.reset() ||
+        !stream_environment.configure_stride_prefetch(true)) {
+        std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                  << stream_environment.cycle()
+                  << " phase=stream-setup reason="
+                  << stream_environment.error() << '\n';
+        return 1;
+    }
+    for (unsigned index = 0; index < stream_training_loads; ++index) {
+        const memblock::LoadTransaction transaction{
+            .address = stream_base + index * 64,
+            .pc = 0x8000 + index * 0x40,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(index),
+            .lq = static_cast<std::uint8_t>(index),
+            .pdest = static_cast<std::uint8_t>(index + 1),
+            .lane = index % memblock::kScalarLoadLanes,
+        };
+        stream_environment.expect_load(transaction);
+        if (!stream_environment.enqueue_load(transaction) ||
+            !stream_environment.issue_load(transaction, 256) ||
+            !stream_environment.run_until_complete(2048) ||
+            !stream_environment.run_until_lq_retired(1024) ||
+            !stream_environment.run_cycles(32)) {
+            std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                      << stream_environment.cycle()
+                      << " phase=stream-train index=" << index
+                      << " reason=" << stream_environment.error() << '\n';
+            return 1;
+        }
+    }
+    if (!stream_environment.run_cycles(128)) {
+        std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                  << stream_environment.cycle()
+                  << " phase=stream-drain reason="
+                  << stream_environment.error() << '\n';
+        return 1;
+    }
+    const auto &stream_stats =
+        stream_environment.hardware_prefetch_stats();
+    const std::uint64_t expected_stream_last = stream_base +
+        (stream_training_loads - 1 + stream_l2_depth_lines +
+         stream_l2_width_lines - 1) * 64;
+    if (stream_stats.l2_source_counts[stream_source] !=
+            stream_l2_width_lines ||
+        stream_stats.last_l2_addr_by_source[stream_source] !=
+            expected_stream_last ||
+        stream_stats.l2_source_counts[10] != 0 ||
+        stream_stats.l2_source_counts[stride_source] != 0 ||
+        stream_stats.l3_requests != 0) {
+        std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                  << stream_environment.cycle()
+                  << " phase=stream-oracle stream="
+                  << stream_stats.l2_source_counts[stream_source]
+                  << " stride="
+                  << stream_stats.l2_source_counts[stride_source]
+                  << " sms=" << stream_stats.l2_source_counts[10]
+                  << " expected_last=0x" << std::hex
+                  << expected_stream_last << " actual_last=0x"
+                  << stream_stats.last_l2_addr_by_source[stream_source]
+                  << std::dec << " l2_total=" << stream_stats.l2_requests
+                  << " l3_total=" << stream_stats.l3_requests << '\n';
+        return 1;
+    }
+    const std::uint64_t isolated_stream_requests =
+        stream_stats.l2_source_counts[stream_source];
+    const std::uint64_t stream_before_priority =
+        stream_stats.l2_source_counts[stream_source];
+    const std::uint64_t stride_before_priority =
+        stream_stats.l2_source_counts[stride_source];
+    constexpr unsigned priority_training_loads = 6;
+    for (unsigned index = 0; index < priority_training_loads; ++index) {
+        const unsigned transaction_index = stream_training_loads + index;
+        const memblock::LoadTransaction transaction{
+            .address = stream_base + 1024 + index * 64,
+            .pc = 0x10000,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(transaction_index),
+            .lq = static_cast<std::uint8_t>(transaction_index),
+            .pdest = static_cast<std::uint8_t>(transaction_index + 1),
+            .lane = transaction_index % memblock::kScalarLoadLanes,
+        };
+        stream_environment.expect_load(transaction);
+        if (!stream_environment.enqueue_load(transaction) ||
+            !stream_environment.issue_load(transaction, 256) ||
+            !stream_environment.run_until_complete(2048) ||
+            !stream_environment.run_until_lq_retired(1024) ||
+            !stream_environment.run_cycles(32)) {
+            std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                      << stream_environment.cycle()
+                      << " phase=stream-priority index=" << index
+                      << " reason=" << stream_environment.error() << '\n';
+            return 1;
+        }
+    }
+    if (!stream_environment.run_cycles(128)) {
+        std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                  << stream_environment.cycle()
+                  << " phase=stream-priority-drain reason="
+                  << stream_environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t stream_priority_requests =
+        stream_stats.l2_source_counts[stream_source] - stream_before_priority;
+    if (stream_priority_requests == 0 ||
+        stream_stats.l2_source_counts[stride_source] !=
+            stride_before_priority ||
+        stream_stats.l2_source_counts[10] != 0 ||
+        stream_stats.l3_requests != 0) {
+        std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                  << stream_environment.cycle()
+                  << " phase=stream-stride-priority stream_delta="
+                  << stream_priority_requests << " stride_before="
+                  << stride_before_priority << " stride_after="
+                  << stream_stats.l2_source_counts[stride_source]
+                  << " sms=" << stream_stats.l2_source_counts[10]
+                  << " l3_total=" << stream_stats.l3_requests << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_HARDWARE_PREFETCH_PASS"
-              << " cycle=" << environment.cycle()
+              << " cycle="
+              << environment.cycle() + stream_environment.cycle()
+              << " stride_cycles=" << environment.cycle()
+              << " stream_cycles=" << stream_environment.cycle()
               << " training_loads=" << training_loads
               << " disabled_loads=3"
               << " l2_total=" << stats.l2_requests
@@ -3325,6 +3457,13 @@ int run_hardware_prefetch(int argc, char **argv)
               << " l2_stream=" << stats.l2_source_counts[11]
               << " l2_sms=" << stats.l2_source_counts[10]
               << " l3_total=" << stats.l3_requests
+              << " stream_loads=" << stream_training_loads
+              << " stream_l2=" << isolated_stream_requests
+              << " stream_last=0x" << std::hex
+              << expected_stream_last << std::dec
+              << " stream_priority_loads=" << priority_training_loads
+              << " stream_priority_l2=" << stream_priority_requests
+              << " stride_suppressed=1"
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

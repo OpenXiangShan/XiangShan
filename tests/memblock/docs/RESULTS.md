@@ -131,11 +131,20 @@ verified artifact `/tmp/memblock-ifetch-schema5.json` has SHA-256
 `d053e833417b505d8c7bdcb27be366ce33f1ddb9c491701f640067fea0e182ab`.
 
 The five L2/L3 hardware-prefetch sender pins were then sampled directly.
-`hardware-prefetch` passed in 942 cycles: eight fixed-PC, 128-byte-stride cold
-loads produced exactly three L2 stride-prefetch outputs, each with source 12
+`hardware-prefetch` first used eight fixed-PC, 128-byte-stride cold loads;
+these produced exactly three L2 stride-prefetch outputs, each with source 12
 and the independently calculated `current address + 4096` target. Three more
-loads after CSR disable produced no output. No SMS or stream output leaked into
-the isolated run. L3 remained idle as required because this RTL build's
+loads after CSR disable produced no output. An independent spatial-stream run
+used distinct PCs for 12 cold cache lines in one 1-KiB region, preventing
+stride confidence while producing exactly four source-11 requests. Their
+final address was `0x8030a380`, the exact end of the RTL-defined four-line
+window beginning 640 lines beyond the final training access. Six fixed-PC
+misses in the now-active neighboring region then produced nine further stream
+requests and no source-12 output, confirming stream-over-stride priority at
+the exposed sender. No source-10 request appeared in these isolated phases.
+Direct SMS AGT generation is hard-disabled by the current RTL; its PHT path
+remains an open state-observability problem rather than claimed positive
+coverage. L3 remained idle as required because this RTL build's
 `enableL3StreamPrefetch` elaboration constant is false; positive L3 coverage
 requires a configuration built with that feature enabled.
 
