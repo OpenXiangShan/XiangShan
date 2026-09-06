@@ -7897,7 +7897,13 @@ int run_mmio_contracts(int argc, char **argv)
         memblock::Environment device(argc, argv);
         constexpr std::uint64_t device_base = 0x35000100ULL;
         constexpr std::uint64_t initial_value = 0x8877665544332211ULL;
+        constexpr std::uint32_t denied_store_value = 0xdeadbeefU;
+        constexpr std::uint32_t corrupt_store_value = 0x0badf00dU;
         constexpr std::uint32_t store_value = 0xa1b2c3d4U;
+        constexpr std::uint64_t denied_store_bus_data =
+            (std::uint64_t{denied_store_value} << 32) | denied_store_value;
+        constexpr std::uint64_t corrupt_store_bus_data =
+            (std::uint64_t{corrupt_store_value} << 32) | corrupt_store_value;
         constexpr std::uint64_t store_bus_data =
             (std::uint64_t{store_value} << 32) | store_value;
         constexpr std::uint64_t stored_beat =
@@ -7916,7 +7922,9 @@ int run_mmio_contracts(int argc, char **argv)
         auto run_device_load = [&device](
                                    const char *name, std::uint8_t rob,
                                    std::uint8_t lq, std::uint8_t pdest,
-                                   std::uint64_t expected) {
+                                   std::uint64_t expected,
+                                   std::uint32_t expected_exception,
+                                   bool denied, bool corrupt) {
             const memblock::LoadTransaction load{
                 .address = device_base,
                 .oracle_address = device_base,
@@ -7925,74 +7933,159 @@ int run_mmio_contracts(int argc, char **argv)
                 .lq = lq,
                 .pdest = pdest,
                 .lane = static_cast<unsigned>(lq % memblock::kScalarLoadLanes),
+                .expected_exception_mask = expected_exception,
                 .expected_debug_is_mmio = true,
                 .expected_debug_is_ncio = false,
                 .expected_debug_is_perf_cnt = false,
             };
             device.expect_load_data(load, expected);
+            if (denied || corrupt) {
+                device.inject_next_uncache_response_error(denied, corrupt);
+            }
             if (!device.set_rob_head(load.rob, load.rob_flag) ||
                 !device.enqueue_load(load) ||
                 !device.issue_load(load, 2048) ||
                 !device.wait_for_mmio_request(load.rob, load.rob_flag, 4096) ||
-                !device.run_until_complete(8192) ||
-                !device.run_until_lq_retired(2048)) {
+                !device.run_until_complete(8192)) {
                 std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
                           << device.cycle() << " phase=" << name
                           << " reason=" << device.error() << '\n';
                 return false;
             }
-            return true;
+            if (expected_exception == 0) {
+                return device.run_until_lq_retired(2048);
+            }
+            if (!device.run_cycles(8) ||
+                !device.redirect_after(load.rob, load.rob_flag, true) ||
+                !device.run_cycles(96)) {
+                return false;
+            }
+            return device.lq_dequeued() + device.lq_canceled() >=
+                       device.lq_allocated() ||
+                device.account_lq_cancellation(1);
         };
 
-        if (!run_device_load("device-read-old", 0, 0, 163, initial_value) ||
+        if (!run_device_load(
+                "device-denied-read", 0, 0, 163, 0,
+                memblock::kExceptionLoadAccessFault, true, false) ||
+            device.bus_expected_load(device_base, memblock::LoadOp::ld) !=
+                initial_value ||
+            !run_device_load(
+                "device-corrupt-read", 1, 1, 164, 0,
+                memblock::kExceptionHardwareError, false, true) ||
+            device.bus_expected_load(device_base, memblock::LoadOp::ld) !=
+                initial_value ||
+            !run_device_load(
+                "device-read-old", 2, 2, 165, initial_value, 0,
+                false, false) ||
             device.bus_expected_load(device_base, memblock::LoadOp::ld) != 0 ||
-            !run_device_load("device-read-cleared", 1, 1, 164, 0)) {
+            !run_device_load(
+                "device-read-cleared", 3, 3, 166, 0, 0,
+                false, false)) {
             std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
                       << device.cycle()
-                      << " phase=device-read-clear bus_value=0x" << std::hex
+                      << " phase=device-read-error-policy bus_value=0x"
+                      << std::hex
                       << device.bus_expected_load(
                              device_base, memblock::LoadOp::ld)
                       << std::dec << " reason=" << device.error() << '\n';
             return 1;
         }
 
+        auto run_device_store = [&device](
+                                    const char *name,
+                                    const memblock::StoreTransaction &store,
+                                    bool denied, bool corrupt) {
+            device.expect_store(store);
+            if (denied || corrupt) {
+                device.inject_next_uncache_response_error(denied, corrupt);
+            }
+            if (!device.set_rob_head(store.rob, store.rob_flag) ||
+                !device.enqueue_store(store, 0) ||
+                !device.issue_store_address(store, 2048) ||
+                !device.issue_store_data(store, 2048) ||
+                !device.run_cycles(64) ||
+                !device.wait_for_mmio_store_request(
+                    store.rob, store.rob_flag, 8192) ||
+                !device.run_until_store_complete(8192)) {
+                std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                          << device.cycle() << " phase=" << name
+                          << " reason=" << device.error() << '\n';
+                return false;
+            }
+            if (store.expected_exception_mask == 0) {
+                if (!device.commit_stores_through(store, 1) ||
+                    !device.run_cycles(16)) {
+                    return false;
+                }
+                device.record_committed_store(store);
+            } else if (!device.run_cycles(8) ||
+                       !device.redirect_after(
+                           store.rob, store.rob_flag, true) ||
+                       !device.run_cycles(96) ||
+                       (device.sq_dequeued() + device.sq_canceled() <
+                            device.sq_allocated() &&
+                        !device.account_sq_cancellation(1))) {
+                return false;
+            }
+            return device.sq_dequeued() + device.sq_canceled() ==
+                device.sq_allocated();
+        };
+
+        const memblock::StoreTransaction denied_device_store{
+            .address = device_base + 4,
+            .oracle_address = device_base + 4,
+            .data = denied_store_value,
+            .op = memblock::StoreOp::sw,
+            .rob = 4,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 1,
+            .expected_exception_mask = memblock::kExceptionStoreAccessFault,
+            .expected_debug_is_mmio = true,
+            .expected_debug_is_ncio = false,
+        };
+        const memblock::StoreTransaction corrupt_device_store{
+            .address = device_base + 4,
+            .oracle_address = device_base + 4,
+            .data = corrupt_store_value,
+            .op = memblock::StoreOp::sw,
+            .rob = 5,
+            .sq = 1,
+            .address_lane = 1,
+            .data_lane = 0,
+            .expected_exception_mask = memblock::kExceptionHardwareError,
+            .expected_debug_is_mmio = true,
+            .expected_debug_is_ncio = false,
+        };
         const memblock::StoreTransaction device_store{
             .address = device_base + 4,
             .oracle_address = device_base + 4,
             .data = store_value,
             .op = memblock::StoreOp::sw,
-            .rob = 2,
-            .sq = 0,
+            .rob = 6,
+            .sq = 2,
             .address_lane = 0,
             .data_lane = 1,
             .expected_debug_is_mmio = true,
             .expected_debug_is_ncio = false,
         };
-        device.expect_store(device_store);
-        if (!device.set_rob_head(device_store.rob, device_store.rob_flag) ||
-            !device.enqueue_store(device_store, 0) ||
-            !device.issue_store_address(device_store, 2048) ||
-            !device.issue_store_data(device_store, 2048) ||
-            !device.run_cycles(64) ||
-            !device.wait_for_mmio_store_request(
-                device_store.rob, device_store.rob_flag, 8192) ||
-            !device.run_until_store_complete(8192) ||
-            !device.commit_stores_through(device_store, 1) ||
-            !device.run_cycles(16)) {
-            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
-                      << device.cycle() << " phase=device-partial-write reason="
-                      << device.error() << '\n';
-            return 1;
-        }
-        device.record_committed_store(device_store);
-        if (device.sq_dequeued() != device.sq_allocated() ||
+        if (!run_device_store(
+                "device-denied-write", denied_device_store, true, false) ||
+            device.bus_expected_load(device_base, memblock::LoadOp::ld) != 0 ||
+            !run_device_store(
+                "device-corrupt-write", corrupt_device_store, false, true) ||
+            device.bus_expected_load(device_base, memblock::LoadOp::ld) != 0 ||
+            !run_device_store(
+                "device-partial-write", device_store, false, false) ||
             device.bus_expected_load(device_base, memblock::LoadOp::ld) !=
                 stored_beat ||
             !run_device_load(
-                "device-read-written", 3, 2, 165, stored_beat)) {
+                "device-read-written", 7, 4, 167, stored_beat, 0,
+                false, false)) {
             std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
                       << device.cycle()
-                      << " phase=device-partial-readback bus_value=0x"
+                      << " phase=device-write-error-policy bus_value=0x"
                       << std::hex
                       << device.bus_expected_load(
                              device_base, memblock::LoadOp::ld)
@@ -8002,26 +8095,46 @@ int run_mmio_contracts(int argc, char **argv)
         }
 
         const auto &accesses = device.uncache_device_accesses();
-        if (device.tilelink_requests() != 0 || accesses.size() != 4 ||
+        if (device.tilelink_requests() != 0 || accesses.size() != 8 ||
             accesses[0].sequence != 0 || accesses[0].write ||
             accesses[0].address != device_base || accesses[0].size != 3 ||
             accesses[0].mask != 0xff ||
             accesses[0].read_data != initial_value ||
             accesses[1].sequence != 1 || accesses[1].write ||
             accesses[1].address != device_base || accesses[1].size != 3 ||
-            accesses[1].mask != 0xff || accesses[1].read_data != 0 ||
-            accesses[2].sequence != 2 || !accesses[2].write ||
-            accesses[2].address != device_base + 4 ||
-            accesses[2].size != 2 || accesses[2].mask != 0xf0 ||
-            accesses[2].data != store_bus_data ||
+            accesses[1].mask != 0xff ||
+            accesses[1].read_data != initial_value ||
+            accesses[2].sequence != 2 || accesses[2].write ||
+            accesses[2].address != device_base || accesses[2].size != 3 ||
+            accesses[2].mask != 0xff ||
+            accesses[2].read_data != initial_value ||
             accesses[3].sequence != 3 || accesses[3].write ||
             accesses[3].address != device_base || accesses[3].size != 3 ||
-            accesses[3].mask != 0xff ||
-            accesses[3].read_data != stored_beat ||
-            accesses[0].denied || accesses[0].corrupt ||
-            accesses[1].denied || accesses[1].corrupt ||
+            accesses[3].mask != 0xff || accesses[3].read_data != 0 ||
+            accesses[4].sequence != 4 || !accesses[4].write ||
+            accesses[4].address != device_base + 4 ||
+            accesses[4].size != 2 || accesses[4].mask != 0xf0 ||
+            accesses[4].data != denied_store_bus_data ||
+            accesses[5].sequence != 5 || !accesses[5].write ||
+            accesses[5].address != device_base + 4 ||
+            accesses[5].size != 2 || accesses[5].mask != 0xf0 ||
+            accesses[5].data != corrupt_store_bus_data ||
+            accesses[6].sequence != 6 || !accesses[6].write ||
+            accesses[6].address != device_base + 4 ||
+            accesses[6].size != 2 || accesses[6].mask != 0xf0 ||
+            accesses[6].data != store_bus_data ||
+            accesses[7].sequence != 7 || accesses[7].write ||
+            accesses[7].address != device_base || accesses[7].size != 3 ||
+            accesses[7].mask != 0xff ||
+            accesses[7].read_data != stored_beat ||
+            !accesses[0].denied || accesses[0].corrupt ||
+            accesses[1].denied || !accesses[1].corrupt ||
             accesses[2].denied || accesses[2].corrupt ||
             accesses[3].denied || accesses[3].corrupt ||
+            !accesses[4].denied || accesses[4].corrupt ||
+            accesses[5].denied || !accesses[5].corrupt ||
+            accesses[6].denied || accesses[6].corrupt ||
+            accesses[7].denied || accesses[7].corrupt ||
             device.bus_expected_load(device_base, memblock::LoadOp::ld) != 0) {
             std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
                       << device.cycle() << " phase=device-access-log"
@@ -8066,6 +8179,8 @@ int run_mmio_contracts(int argc, char **argv)
               << " pma_cycles=" << pma_cycles
               << " device_accesses=" << device_access_count
               << " device_read_clear=1 device_partial_write=1"
+              << " device_error_reads=2 device_error_writes=2"
+              << " device_error_side_effects=0"
               << " device_cycles=" << device_cycles
               << " dcache_requests=" << environment.tilelink_requests()
               << " uncache_requests=" << environment.uncache_requests()

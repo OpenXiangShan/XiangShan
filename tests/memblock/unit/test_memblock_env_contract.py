@@ -1050,11 +1050,14 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "pma_edge_dcache=",
             "pma_edge_uncache=",
             "pma_cycles=",
-            "phase=device-read-clear",
-            "phase=device-partial-write",
+            "phase=device-read-error-policy",
+            "phase=device-write-error-policy",
             "phase=device-access-log",
+            "accesses.size() != 8",
             "device_accesses=",
             "device_read_clear=1 device_partial_write=1",
+            "device_error_reads=2 device_error_writes=2",
+            "device_error_side_effects=0",
             "mmio-contracts",
         ):
             self.assertIn(contract, main + makefile)

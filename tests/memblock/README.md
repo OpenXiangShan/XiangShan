@@ -597,12 +597,14 @@ Two exact bare-mode loads straddle the `0x80000000` PMA boundary: the last
 aligned 64-bit device access below it must use Uncache, while the first DDR
 access must use DCache.
 The Uncache manager also provides a configurable side-effecting device window
-with a structured request log. A four-access bare-mode sequence proves that a
-read-clear register returns its old value exactly once, records a 32-bit write
-at byte offset four with the exact TileLink size, mask, and replicated bus
-data, and returns that partial write on the next read. The log enforces request
-order and all accesses bypass DCache. `cbo-zero-contracts` drives the
-`CBO.ZERO` encoding through
+with a structured request log. An eight-access bare-mode sequence first injects
+denied and corrupt reads and proves that neither clears the device register,
+then injects denied and corrupt writes and proves that neither changes any
+byte. Normal reads still implement read-clear, and a successful 32-bit write at
+byte offset four has the exact TileLink size, mask, and replicated bus data.
+The final read returns that partial write. The log enforces request order,
+response flags, no duplicate requests, and DCache bypass.
+`cbo-zero-contracts` drives the `CBO.ZERO` encoding through
 the cacheable StoreQueue/SBuffer wline path under randomized DCache
 backpressure, checks exact writeback metadata, and reads the resulting line
 back before updating the reference mirror.
