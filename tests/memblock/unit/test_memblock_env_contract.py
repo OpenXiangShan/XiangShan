@@ -12,6 +12,28 @@ REPO_ROOT = MEMBLOCK_ROOT.parents[1]
 
 
 class MemBlockEnvironmentContractTest(unittest.TestCase):
+    def test_pmp_contract_matches_platform_grain(self) -> None:
+        parameters = (REPO_ROOT / "src/main/scala/xiangshan/PMParameters.scala").read_text()
+        pmp = (REPO_ROOT / "src/main/scala/xiangshan/backend/fu/PMP.scala").read_text()
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        plan = (MEMBLOCK_ROOT / "docs/VERIFICATION_PLAN.md").read_text()
+
+        self.assertIn("PlatformGrain: Int = log2Ceil(4*1024)", parameters)
+        self.assertIn("if (CoarserGrain) { cfgVec(i).a :=", pmp)
+        for contract in (
+            "configure_pmp",
+            "pmp-contracts",
+            "pmp_na4_read_write",
+            "pmp_locked_napot_deny",
+            "machine-unlocked-bypass",
+            "machine-locked-rewrite-rejected",
+            "atomic_denied=1",
+        ):
+            self.assertIn(contract, environment + driver + makefile)
+        self.assertIn("NA4 unselectable", plan)
+
     def test_queue_capacity_constants_match_xiangshan_parameters(self) -> None:
         parameters = (
             REPO_ROOT / "src/main/scala/xiangshan/Parameters.scala"

@@ -5120,6 +5120,46 @@ public:
         return run_cycles(16) && check_components();
     }
 
+    bool configure_pmp(
+        const std::vector<std::uint64_t> &encoded_addresses,
+        const std::vector<std::uint8_t> &config_bytes)
+    {
+        constexpr unsigned pmp_entries = 32;
+        constexpr unsigned entries_per_config_csr = 8;
+        constexpr std::uint16_t pmpcfg0 = 0x3a0;
+        constexpr std::uint16_t pmpaddr0 = 0x3b0;
+        if (encoded_addresses.size() != config_bytes.size() ||
+            encoded_addresses.size() > pmp_entries) {
+            error_ = "PMP address/config vectors must have equal size at most 32";
+            return false;
+        }
+        // Address registers must be established before enabling TOR/NAPOT.
+        // This ordering also lets tests observe that a locked entry rejects a
+        // later address rewrite.
+        for (unsigned index = 0; index < encoded_addresses.size(); ++index) {
+            if (!write_distributed_csr(
+                    static_cast<std::uint16_t>(pmpaddr0 + index),
+                    encoded_addresses[index])) {
+                return false;
+            }
+        }
+        for (unsigned bank = 0; bank < pmp_entries / entries_per_config_csr;
+             ++bank) {
+            std::uint64_t packed = 0;
+            for (unsigned byte = 0; byte < entries_per_config_csr; ++byte) {
+                const unsigned index = bank * entries_per_config_csr + byte;
+                if (index < config_bytes.size()) {
+                    packed |= std::uint64_t{config_bytes[index]} << (byte * 8);
+                }
+            }
+            if (!write_distributed_csr(
+                    static_cast<std::uint16_t>(pmpcfg0 + bank * 2), packed)) {
+                return false;
+            }
+        }
+        return run_cycles(16) && check_components();
+    }
+
     bool set_page_based_memory_types(
         bool machine_enabled,
         bool hypervisor_enabled)

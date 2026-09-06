@@ -7374,6 +7374,390 @@ int run_exception_contracts(int argc, char **argv)
     return 0;
 }
 
+int run_pmp_contracts(int argc, char **argv)
+{
+    constexpr std::uint8_t pmp_tor_read = 0x09;
+    constexpr std::uint8_t pmp_na4_read_write = 0x13;
+    constexpr std::uint8_t pmp_napot_deny = 0x18;
+    constexpr std::uint8_t pmp_napot_read_write = 0x1b;
+    constexpr std::uint8_t pmp_locked_napot_deny = 0x98;
+    auto napot_address = [](std::uint64_t base, std::uint64_t size) {
+        return (base | (size / 2 - 1)) >> 2;
+    };
+    auto run_load = [](
+                        memblock::Environment &environment,
+                        const memblock::LoadTransaction &transaction,
+                        const char *phase) {
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        environment.expect_load(transaction);
+        const bool completed =
+            environment.set_rob_head(transaction.rob, transaction.rob_flag) &&
+            environment.enqueue_load(transaction) &&
+            environment.issue_load(transaction, 1024) &&
+            environment.run_until_complete(8192) &&
+            environment.run_until_lq_retired(2048);
+        if (!completed) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        if (transaction.expected_exception_mask != 0 &&
+            (environment.tilelink_requests() != dcache_before ||
+             environment.uncache_requests() != uncache_before)) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << " reason=denied-load-reached-memory"
+                      << " dcache_before=" << dcache_before
+                      << " dcache_after=" << environment.tilelink_requests()
+                      << " uncache_before=" << uncache_before
+                      << " uncache_after=" << environment.uncache_requests()
+                      << '\n';
+            return false;
+        }
+        return true;
+    };
+    auto configure_supervisor_bare = [](
+                                         memblock::Environment &environment,
+                                         const std::vector<std::uint64_t> &addresses,
+                                         const std::vector<std::uint8_t> &configs) {
+        return environment.reset() && environment.activate_bare() &&
+            environment.configure_pmp(addresses, configs);
+    };
+
+    std::uint64_t total_cycles = 0;
+    std::uint64_t total_load_writebacks = 0;
+    std::uint64_t total_store_writebacks = 0;
+    std::uint64_t total_dcache_requests = 0;
+    unsigned allowed_cases = 0;
+    unsigned denied_cases = 0;
+
+    // TOR entry 1 uses entry 0's address as its lower bound. Entry 0 stays
+    // OFF, and unmatched S-mode accesses are denied by the PMP default.
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t lower = 0x80200000ULL;
+        constexpr std::uint64_t upper = lower + 0x2000;
+        environment.memory().fill_incrementing(lower - 0x1000, 0x4000, 0x31);
+        if (!configure_supervisor_bare(
+                environment, {lower >> 2, upper >> 2}, {0, pmp_tor_read})) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=tor-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const std::array<memblock::LoadTransaction, 4> loads{{
+            memblock::LoadTransaction{
+                .address = lower,
+                .op = memblock::LoadOp::lbu,
+                .rob = 0, .lq = 0, .pdest = 20, .lane = 0,
+            },
+            memblock::LoadTransaction{
+                .address = upper - 1,
+                .op = memblock::LoadOp::lbu,
+                .rob = 1, .lq = 1, .pdest = 21, .lane = 1,
+            },
+            memblock::LoadTransaction{
+                .address = lower - 1,
+                .op = memblock::LoadOp::lbu,
+                .rob = 2, .lq = 2, .pdest = 22, .lane = 2,
+                .expected_exception_mask = memblock::kExceptionLoadAccessFault,
+            },
+            memblock::LoadTransaction{
+                .address = upper,
+                .op = memblock::LoadOp::lbu,
+                .rob = 3, .lq = 3, .pdest = 23, .lane = 0,
+                .expected_exception_mask = memblock::kExceptionLoadAccessFault,
+            },
+        }};
+        const std::array<const char *, 4> phases{{
+            "tor-lower", "tor-upper-minus-one", "tor-below", "tor-upper",
+        }};
+        for (unsigned index = 0; index < loads.size(); ++index) {
+            if (!run_load(environment, loads[index], phases[index])) {
+                return 1;
+            }
+            if (loads[index].expected_exception_mask == 0) {
+                ++allowed_cases;
+            } else {
+                ++denied_cases;
+            }
+        }
+
+        const memblock::AtomicTransaction atomic{
+            .address = lower + 0x180,
+            .op = memblock::AtomicOp::amoadd_d,
+            .data = 0x0102030405060708ULL,
+            .rob = 4,
+            .pdest = 24,
+            .address_lane = 0,
+            .data_lane = 1,
+        };
+        const memblock::LoadTransaction atomic_writeback{
+            .address = atomic.address,
+            .op = memblock::LoadOp::ld,
+            .rob = atomic.rob,
+            .pdest = atomic.pdest,
+            .expected_exception_mask = memblock::kExceptionStoreAccessFault,
+        };
+        environment.expect_load_data(atomic_writeback, 0);
+        const std::uint64_t dcache_before_atomic = environment.tilelink_requests();
+        const std::uint64_t uncache_before_atomic = environment.uncache_requests();
+        if (!environment.set_rob_head(atomic.rob) ||
+            !environment.issue_atomic(atomic, 1024) ||
+            !environment.run_until_complete(8192) ||
+            environment.tilelink_requests() != dcache_before_atomic ||
+            environment.uncache_requests() != uncache_before_atomic) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=tor-atomic-write-denied reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        ++denied_cases;
+
+        const memblock::StoreTransaction store{
+            .address = lower + 0x280,
+            .data = 0x8877665544332211ULL,
+            .op = memblock::StoreOp::sd,
+            .rob = 5,
+            .sq = 0,
+            .address_lane = 1,
+            .data_lane = 0,
+            .expected_exception_mask = memblock::kExceptionStoreAccessFault,
+        };
+        environment.expect_store(store);
+        const std::uint64_t dcache_before_store = environment.tilelink_requests();
+        const std::uint64_t uncache_before_store = environment.uncache_requests();
+        if (!environment.set_rob_head(store.rob) ||
+            !environment.enqueue_store(store, 0) ||
+            !environment.issue_store_address(store, 1024) ||
+            !environment.run_until_store_complete(8192) ||
+            environment.tilelink_requests() != dcache_before_store ||
+            environment.uncache_requests() != uncache_before_store ||
+            !environment.account_sq_cancellation(1)) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=tor-store-write-denied reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        ++denied_cases;
+        total_cycles += environment.cycle();
+        total_load_writebacks += environment.writebacks();
+        total_store_writebacks += environment.store_writebacks();
+        total_dcache_requests += environment.tilelink_requests();
+    }
+
+    // With a 4-KiB platform grain, requested NA4 is WARL-coerced to NAPOT.
+    // A 4-KiB NAPOT address verifies the minimum region and both permission
+    // bits at the first and last naturally aligned doubleword.
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t base = 0x80400000ULL;
+        constexpr std::uint64_t size = 0x1000;
+        environment.memory().fill_incrementing(base - size, size * 3, 0x52);
+        if (!configure_supervisor_bare(
+                environment,
+                {napot_address(base, size)},
+                {pmp_na4_read_write})) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=coarse-na4-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction first{
+            .address = base,
+            .op = memblock::LoadOp::ld,
+            .rob = 0, .lq = 0, .pdest = 30, .lane = 0,
+        };
+        const memblock::LoadTransaction last{
+            .address = base + size - 8,
+            .op = memblock::LoadOp::ld,
+            .rob = 1, .lq = 1, .pdest = 31, .lane = 1,
+        };
+        if (!run_load(environment, first, "coarse-na4-lower") ||
+            !run_load(environment, last, "coarse-na4-upper")) {
+            return 1;
+        }
+        allowed_cases += 2;
+        const memblock::StoreTransaction store{
+            .address = base + 0x180,
+            .data = 0xa5a55a5af00dcafeULL,
+            .op = memblock::StoreOp::sd,
+            .rob = 2,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 1,
+        };
+        environment.expect_store(store);
+        if (!environment.set_rob_head(store.rob) ||
+            !environment.enqueue_store(store, 0) ||
+            !environment.issue_store_address(store, 1024) ||
+            !environment.issue_store_data(store, 1024) ||
+            !environment.run_until_store_complete(8192) ||
+            !environment.commit_store(store, 8192)) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=coarse-na4-store reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        ++allowed_cases;
+        const memblock::LoadTransaction readback{
+            .address = store.address,
+            .op = memblock::LoadOp::ld,
+            .rob = 3, .lq = 2, .pdest = 32, .lane = 2,
+        };
+        if (!run_load(environment, readback, "coarse-na4-store-readback")) {
+            return 1;
+        }
+        ++allowed_cases;
+        const std::array<memblock::LoadTransaction, 2> outside{{
+            memblock::LoadTransaction{
+                .address = base - 8,
+                .op = memblock::LoadOp::ld,
+                .rob = 4, .lq = 3, .pdest = 33, .lane = 0,
+                .expected_exception_mask = memblock::kExceptionLoadAccessFault,
+            },
+            memblock::LoadTransaction{
+                .address = base + size,
+                .op = memblock::LoadOp::ld,
+                .rob = 5, .lq = 4, .pdest = 34, .lane = 1,
+                .expected_exception_mask = memblock::kExceptionLoadAccessFault,
+            },
+        }};
+        if (!run_load(environment, outside[0], "coarse-na4-below") ||
+            !run_load(environment, outside[1], "coarse-na4-above")) {
+            return 1;
+        }
+        denied_cases += 2;
+        total_cycles += environment.cycle();
+        total_load_writebacks += environment.writebacks();
+        total_store_writebacks += environment.store_writebacks();
+        total_dcache_requests += environment.tilelink_requests();
+    }
+
+    // Lower-numbered entries have priority. A deny-all 4-KiB entry shadows
+    // the first half of an otherwise readable/writable 8-KiB NAPOT entry.
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t base = 0x80600000ULL;
+        environment.memory().fill_incrementing(base, 0x2000, 0x73);
+        if (!configure_supervisor_bare(
+                environment,
+                {napot_address(base, 0x1000), napot_address(base, 0x2000)},
+                {pmp_napot_deny, pmp_napot_read_write})) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=priority-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction shadowed{
+            .address = base + 0x100,
+            .op = memblock::LoadOp::ld,
+            .rob = 0, .lq = 0, .pdest = 40, .lane = 0,
+            .expected_exception_mask = memblock::kExceptionLoadAccessFault,
+        };
+        const memblock::LoadTransaction visible{
+            .address = base + 0x1100,
+            .op = memblock::LoadOp::ld,
+            .rob = 1, .lq = 1, .pdest = 41, .lane = 1,
+        };
+        if (!run_load(environment, shadowed, "priority-shadowed") ||
+            !run_load(environment, visible, "priority-visible")) {
+            return 1;
+        }
+        ++denied_cases;
+        ++allowed_cases;
+        total_cycles += environment.cycle();
+        total_load_writebacks += environment.writebacks();
+        total_dcache_requests += environment.tilelink_requests();
+    }
+
+    // Unlocked PMP entries are bypassed in M mode. Locking the same entry
+    // enforces it in M mode and makes both its address and config immutable.
+    {
+        memblock::Environment unlocked(argc, argv);
+        constexpr std::uint64_t base = 0x80800000ULL;
+        unlocked.memory().fill_incrementing(base, 0x1000, 0x94);
+        if (!unlocked.reset() ||
+            !unlocked.configure_pmp(
+                {napot_address(base, 0x1000)}, {pmp_napot_deny})) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << unlocked.cycle()
+                      << " phase=machine-unlocked-configuration reason="
+                      << unlocked.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction bypassed{
+            .address = base + 0x80,
+            .op = memblock::LoadOp::ld,
+            .rob = 0, .lq = 0, .pdest = 50, .lane = 0,
+        };
+        if (!run_load(unlocked, bypassed, "machine-unlocked-bypass")) {
+            return 1;
+        }
+        ++allowed_cases;
+        total_cycles += unlocked.cycle();
+        total_load_writebacks += unlocked.writebacks();
+        total_dcache_requests += unlocked.tilelink_requests();
+
+        memblock::Environment locked(argc, argv);
+        constexpr std::uint64_t replacement = base + 0x2000;
+        locked.memory().fill_incrementing(base, 0x3000, 0xb5);
+        if (!locked.reset() ||
+            !locked.configure_pmp(
+                {napot_address(base, 0x1000)}, {pmp_locked_napot_deny}) ||
+            !locked.configure_pmp(
+                {napot_address(replacement, 0x1000)},
+                {pmp_napot_read_write})) {
+            std::cerr << "MEMBLOCK_PMP_CONTRACTS_FAIL cycle="
+                      << locked.cycle()
+                      << " phase=machine-lock-configuration reason="
+                      << locked.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction original{
+            .address = base + 0x80,
+            .op = memblock::LoadOp::ld,
+            .rob = 0, .lq = 0, .pdest = 51, .lane = 1,
+            .expected_exception_mask = memblock::kExceptionLoadAccessFault,
+        };
+        const memblock::LoadTransaction rewritten{
+            .address = replacement + 0x80,
+            .op = memblock::LoadOp::ld,
+            .rob = 1, .lq = 1, .pdest = 52, .lane = 2,
+        };
+        if (!run_load(locked, original, "machine-locked-original") ||
+            !run_load(locked, rewritten, "machine-locked-rewrite-rejected")) {
+            return 1;
+        }
+        ++denied_cases;
+        ++allowed_cases;
+        total_cycles += locked.cycle();
+        total_load_writebacks += locked.writebacks();
+        total_dcache_requests += locked.tilelink_requests();
+    }
+
+    std::cout << "MEMBLOCK_PMP_CONTRACTS_PASS"
+              << " cycles=" << total_cycles
+              << " cases=" << allowed_cases + denied_cases
+              << " allowed=" << allowed_cases
+              << " denied=" << denied_cases
+              << " load_writebacks=" << total_load_writebacks
+              << " store_writebacks=" << total_store_writebacks
+              << " dcache_a=" << total_dcache_requests
+              << " tor=1 napot=1 coarse_na4=1 priority=1 lock=1"
+              << " machine_bypass=1 atomic_denied=1"
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_l2_tlb_contracts(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -17532,6 +17916,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "exception-contracts") {
             return run_exception_contracts(argc, argv);
+        }
+        if (options.test == "pmp-contracts") {
+            return run_pmp_contracts(argc, argv);
         }
         if (options.test == "l2-tlb-contracts") {
             return run_l2_tlb_contracts(argc, argv);

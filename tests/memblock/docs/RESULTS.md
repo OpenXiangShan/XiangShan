@@ -92,6 +92,27 @@ legal wrapped/disagreeing queue-order stimulus for historical fixes `fb9fdc12`
 and `9045e063`; independent revert builds remain pending and the audit does not
 yet label either one reproduced. No current RTL defect was observed.
 
+## Data-Side PMP Contracts
+
+`pmp-contracts` passed 17 hand-calculated cases in 708 aggregate cycles on
+complete RTL SHA-256
+`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
+Nine accesses were allowed and eight produced the exact load/store access
+fault. TOR covered its inclusive lower and exclusive upper byte boundaries;
+NAPOT covered the first and last aligned doublewords plus both outside edges.
+A read-only TOR region rejected an ordinary store and AMO write without a
+DCache or Uncache request. Overlapping 4-KiB deny and 8-KiB allow entries
+selected the lower-numbered deny entry in the shared page and the allow entry
+in the adjacent page.
+
+The configured `PlatformGrain=12` makes NA4 unselectable, so an `A=2` write was
+verified to behave as the specified minimum 4-KiB NAPOT region. Separate
+M-mode runs observed unlocked-entry bypass, locked-entry enforcement, and
+rejection of later address/config rewrites to a locked entry. The complete run
+reported 15 load/atomic writebacks, two store writebacks, and eight permitted
+DCache requests. No CPU defect was observed. Instruction X permission,
+HLV/HLVX/HSV/SPVP, and the broader fixed-PMA matrix remain explicit gaps.
+
 ## RAW Memory Violation Boundary
 
 The `memory-violation` scenario first completed a same-line byte-disjoint load
@@ -907,6 +928,7 @@ the historical complete RTL SHA-256 is
 | Atomic operations and exception metadata | Pass | Cycle 1216; all 9 W-width and 9 D-width AMOs, AMOCAS.W/D compare success/failure, LR/SC success/failure, and all 7 forbidden D-width plus 3 forbidden W-width byte offsets; exceptional writeback carried `storeAddrMisaligned=0x40`, suppressed `rfWen`, and emitted no additional DCache request |
 | Atomic D-channel errors | Pass | Cycle 7,108; 22 W/D LR/AMO/AMOCAS operations crossed with denied and corrupt; all 44 later loads hit poisoned lines and re-reported exact errors, four SC hits reported cached errors, two clean AMO recoveries passed, exceptional `rfWen` stayed suppressed, and exactly 46 cold requests were issued |
 | Concurrent exception priority | Pass | Cycle 495; three simultaneous load page faults and two simultaneous PBMT-NC misaligned stores crossed ROB wrap with deliberately reversed LQ/SQ order; exact oldest load/store exception VAs were `0x50007000` and `0x50008011`, and toggling `isStoreException` while both buffers retained faults selected and restored the exact source VA |
+| Data-side PMP contracts | Pass | 17 cases in 708 aggregate cycles: TOR/NAPOT exact edges, 4-KiB-grain NA4 WARL conversion, R/W and AMO denial, overlap priority, M-mode unlocked bypass, lock enforcement, and locked address/config immutability; 9 allowed and 8 denied with zero forbidden manager requests |
 | L2-to-L1 DTLB boundary | Pass | Cycle 396; ordinary and prefetch requests returned legal L1 miss responses, `no_translate=1` completed without a translation/fault, `kill=1` produced no response for 128 cycles, 16 source IDs × two L2 hint polarities (32 pulses) were accepted without ghost traffic, PBMT stayed zero, and exported PMP/MMIO classification was observed; miss delegation to external L2 is explicit because MemBlock has no refill response input |
 | IFU-to-Mem PTW bridge | Pass | 36 cases in 26,580 aggregate cycles: valid Sv39/Sv48, all four nested pairs, Sv39/Sv48 VS-only and G-only, PBMT=NC/IO, invalid L0 leaves, all four nested pairs crossed with VS-leaf/final-G-leaf/implicit-page-table-G faults, a 256-cycle delayed IFU walk overlapped with a cold scalar DTLB walk, and two same-VPN requests coalesced into one three-request Sv39 walk with two exact responses. Eight delayed-walk races cover stage-1 and nested context replacement, global/selective `SFENCE.VMA`, and global/selective `HFENCE.VVMA`/`HFENCE.GVMA`, suppressing every stale response for 1,024 cycles before checking the exact replacement mapping; 231 PTW requests, manager outstanding depth 2, exact active-stage/fault/load results, and 185 response-stall cycles passed; RTL SHA-256 `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9` |
 | Reset recovery | Pass | Cycle 170; repeated reset with outstanding translated traffic, explicit cancellation of one pre-reset LQ entry, and one post-reset survivor with no stale writeback |

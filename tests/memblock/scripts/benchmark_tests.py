@@ -52,6 +52,7 @@ SCENARIOS = (
     "misaligned-stores",
     "vector-addressing",
     "exception-contracts",
+    "pmp-contracts",
     "l2-tlb-contracts",
     "ifetch-ptw-bridge",
     "two-stage-translation",

@@ -24,6 +24,14 @@ side effects, CMO CLEAN/FLUSH/INVAL, HLV/HLVX/HSV, and VSegment remain explicit
 boundary gaps; they are not silently
 randomized as though they were legal cacheable flows.
 
+`pmp-contracts` programs the distributed PMP CSR input and checks data-side
+TOR and NAPOT regions, exact lower/upper edges, R/W and AMO denial, overlapping
+entry priority, M-mode unlocked bypass, locked-entry enforcement, and locked
+address/config immutability. This build uses a 4-KiB PMP platform grain, so
+NA4 is not independently selectable: an `A=2` write is WARL-coerced to NAPOT
+and is checked as a 4-KiB minimum region. Instruction X permission,
+HLV/HLVX/HSV/SPVP, and a broader fixed-PMA region matrix remain gaps.
+
 The MemBlock-facing L2-to-L1 DTLB request/response boundary is also exercised.
 `l2-tlb-contracts` checks request-field acceptance, L1 miss responses for both
 ordinary and prefetch requests, PBMT/fault-field legality, and the exported PMP
@@ -47,6 +55,7 @@ The reusable C++ components are in `cpp/memblock_env.hpp`:
 
 - reset and cycle control with registered Picker clock;
 - typed LSQ, scalar load/store, vector load/store, and software-prefetch drivers;
+- distributed PMP CSR programming for packed config and address registers;
 - coherent TileLink A/B/C/D/E memory agent with randomized ready/response delay;
 - PTW TileLink agent with independent request and response backpressure;
 - uncache TileLink agent with forced-first and randomized request/response stalls;
@@ -62,7 +71,7 @@ The correctness contracts are cataloged separately in
 `docs/ORACLES.md`. `docs/VERIFICATION_PLAN.md` contains the complete test-point
 inventory, including explicit planned gaps for MMIO device side effects,
 reservation interference and full atomic alignment crosses, CMO CLEAN/FLUSH/INVAL,
-VSegment, hypervisor accesses, PMP/PMA matrices, coherence probes, error
+VSegment, hypervisor accesses, remaining PMP/PMA matrices, coherence probes, error
 injection, concurrent exception priority, and four-state behavior. A passing
 cacheable mixed campaign must not be interpreted as verification of those
 planned rows.
@@ -203,6 +212,7 @@ make atomic-dchannel-errors PICKER="$PICKER" JOBS=8
 make scalar-misaligned PICKER="$PICKER" JOBS=8
 make misaligned-stores PICKER="$PICKER" JOBS=8
 make exception-contracts PICKER="$PICKER" JOBS=8
+make pmp-contracts PICKER="$PICKER" JOBS=8
 make l2-tlb-contracts PICKER="$PICKER" JOBS=8
 make ifetch-ptw-bridge PICKER="$PICKER" JOBS=8
 make two-stage-translation PICKER="$PICKER" JOBS=8
@@ -495,6 +505,15 @@ oldest ROB in both cases, independently of LQ/SQ index order. With both load
 and store exception buffers populated, the test then switches
 `isStoreException` in both directions and checks the exact retained address
 after the two-register output path.
+
+`pmp-contracts` drives `pmpaddr0..1` and packed `pmpcfg0` writes through the
+MemBlock distributed CSR boundary. Hand-calculated TOR and NAPOT regions check
+both exact edges, first-match priority, R/W plus AMO write denial, and absence
+of DCache/Uncache traffic for every rejected operation. Separate M-mode
+environments distinguish unlocked bypass from locked enforcement and prove
+that later address/config writes cannot change a locked entry. Because
+`PlatformGrain=12`, the requested NA4 encoding is checked for its specified
+WARL conversion to a minimum 4-KiB NAPOT region rather than claimed as NA4.
 
 `atomic-contracts` drives all currently exposed W/D-width AMOs, AMOCAS.W/D, and
 LR/SC through the atomic store-address/data ports, checks old-value writeback,
