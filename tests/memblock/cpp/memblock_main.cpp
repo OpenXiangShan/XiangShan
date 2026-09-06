@@ -6551,16 +6551,230 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
     total_cycles += duplicate.cycle();
     total_ptw_requests += duplicate.ptw_requests();
 
+    enum class NestedFaultKind {
+        vs_leaf,
+        g_leaf,
+        implicit_g,
+    };
+    struct NestedFaultCase {
+        const char *name;
+        memblock::ReferencePageMode vs_mode;
+        memblock::ReferencePageMode g_mode;
+        NestedFaultKind kind;
+    };
+#define MEMBLOCK_IFETCH_NESTED_FAULT_CASES(vs_name, g_name)                  \
+    {#vs_name "-" #g_name "-VS-leaf",                                      \
+     memblock::ReferencePageMode::vs_name,                                  \
+     memblock::ReferencePageMode::g_name, NestedFaultKind::vs_leaf},        \
+    {#vs_name "-" #g_name "-G-leaf",                                       \
+     memblock::ReferencePageMode::vs_name,                                  \
+     memblock::ReferencePageMode::g_name, NestedFaultKind::g_leaf},         \
+    {#vs_name "-" #g_name "-implicit-G",                                   \
+     memblock::ReferencePageMode::vs_name,                                  \
+     memblock::ReferencePageMode::g_name, NestedFaultKind::implicit_g}
+    constexpr std::array<NestedFaultCase, 12> nested_fault_cases{{
+        MEMBLOCK_IFETCH_NESTED_FAULT_CASES(sv39, sv39),
+        MEMBLOCK_IFETCH_NESTED_FAULT_CASES(sv39, sv48),
+        MEMBLOCK_IFETCH_NESTED_FAULT_CASES(sv48, sv39),
+        MEMBLOCK_IFETCH_NESTED_FAULT_CASES(sv48, sv48),
+    }};
+#undef MEMBLOCK_IFETCH_NESTED_FAULT_CASES
+
+    for (unsigned case_index = 0; case_index < nested_fault_cases.size();
+         ++case_index) {
+        const auto &item = nested_fault_cases[case_index];
+        const std::uint64_t fault_vs_root =
+            0xa0000000ULL + case_index * 0x02000000ULL;
+        const std::uint64_t fault_g_root = fault_vs_root + 0x01000000ULL;
+        const std::uint64_t virtual_page =
+            0x70012000ULL + case_index * 0x200000ULL;
+        const std::uint64_t guest_page =
+            0x130012000ULL + case_index * 0x200000ULL;
+        const std::uint64_t host_page =
+            0xf0012000ULL + case_index * 0x200000ULL;
+        auto &environment = duplicate;
+        const std::uint64_t cycle_before = environment.cycle();
+        environment.configure_backpressure(
+            0xda942042e4dd58b5ULL ^ case_index, true,
+            memblock::ResponseLatencyProfile::spec);
+
+        bool configured = environment.reset();
+        if (configured) {
+            configured = item.vs_mode == memblock::ReferencePageMode::sv48
+                ? environment.map_sv48_4k(
+                      virtual_page, guest_page, fault_vs_root, true, false,
+                      true, false)
+                : environment.map_sv39_4k(
+                      virtual_page, guest_page, fault_vs_root, true, false,
+                      true, false);
+        }
+        const unsigned vs_table_pages =
+            memblock::reference_page_levels(item.vs_mode);
+        for (unsigned page = 0; configured && page < vs_table_pages; ++page) {
+            const std::uint64_t address = fault_vs_root + page * 0x1000ULL;
+            configured = item.g_mode == memblock::ReferencePageMode::sv48
+                ? environment.map_sv48x4_4k(
+                      address, address, fault_g_root, true, true, false)
+                : environment.map_sv39x4_4k(
+                      address, address, fault_g_root, true, true, false);
+        }
+        if (configured) {
+            configured = item.g_mode == memblock::ReferencePageMode::sv48
+                ? environment.map_sv48x4_4k(
+                      guest_page, host_page, fault_g_root, true, false, true)
+                : environment.map_sv39x4_4k(
+                      guest_page, host_page, fault_g_root, true, false, true);
+        }
+
+        const auto vs_leaf_pte = memblock::reference_pte_address_at_level(
+            environment.memory(), fault_vs_root, virtual_page, item.vs_mode,
+            0);
+        const std::uint64_t g_fault_input =
+            item.kind == NestedFaultKind::implicit_g
+                ? fault_vs_root
+                : guest_page;
+        const auto g_leaf_pte = memblock::reference_pte_address_at_level(
+            environment.memory(), fault_g_root, g_fault_input, item.g_mode,
+            0, true);
+        configured = configured && vs_leaf_pte && g_leaf_pte;
+        if (configured) {
+            environment.memory().write_u64(
+                item.kind == NestedFaultKind::vs_leaf
+                    ? *vs_leaf_pte
+                    : *g_leaf_pte,
+                0);
+            configured = environment.activate_two_stage_modes(
+                item.vs_mode, item.g_mode, fault_vs_root, fault_g_root, asid,
+                vmid);
+        }
+
+        const auto reference = memblock::reference_two_stage_walk(
+            environment.memory(), fault_vs_root, fault_g_root, virtual_page,
+            item.vs_mode, item.g_mode);
+        const bool reference_valid = item.kind == NestedFaultKind::vs_leaf
+            ? !reference.translated && reference.stage1_page_fault &&
+                !reference.guest_page_fault &&
+                !reference.is_for_vs_nonleaf_pte
+            : !reference.translated && !reference.stage1_page_fault &&
+                reference.guest_page_fault &&
+                reference.is_for_vs_nonleaf_pte ==
+                    (item.kind == NestedFaultKind::implicit_g);
+        configured = configured && reference_valid;
+        if (!configured) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=" << item.name
+                      << " cycle=" << environment.cycle()
+                      << " phase=configuration"
+                      << " reference_s1_pf=" << reference.stage1_page_fault
+                      << " reference_gpf=" << reference.guest_page_fault
+                      << " reference_implicit="
+                      << reference.is_for_vs_nonleaf_pte
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+
+        const std::uint64_t ptw_before = environment.ptw_requests();
+        memblock::Environment::IFetchPtwResponse response;
+        if (!environment.issue_ifetch_ptw_request(
+                virtual_page >> 12,
+                memblock::PtwTranslationMode::all_stages, response,
+                response_stall_cycles) ||
+            environment.ptw_requests() <= ptw_before) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=" << item.name
+                      << " cycle=" << environment.cycle()
+                      << " phase=request ptw_requests="
+                      << environment.ptw_requests() - ptw_before
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+
+        const std::uint64_t vpn = virtual_page >> 12;
+        const unsigned sector = static_cast<unsigned>(vpn & 7U);
+        const std::uint64_t reconstructed_s1_ppn =
+            (response.s1_ppn << 3) | response.s1_ppn_low[sector];
+        const bool mode_valid = response.s2xlate == static_cast<std::uint8_t>(
+            memblock::PtwTranslationMode::all_stages);
+        const bool stage1_fault_valid = item.kind != NestedFaultKind::vs_leaf ||
+            (response.s1_tag == (vpn >> 3) && response.s1_asid == asid &&
+             response.s1_vmid == vmid && !response.s1_n &&
+             response.s1_pbmt == 0 && response.s1_addr_low == sector &&
+             response.s1_pteidx == (1U << sector) &&
+             (response.s1_valididx & (1U << sector)) != 0 &&
+             !response.s1_d && !response.s1_a && !response.s1_g &&
+             !response.s1_u && !response.s1_x && !response.s1_w &&
+             !response.s1_r && response.s1_level == 0 && !response.s1_v &&
+             reconstructed_s1_ppn == 0 && response.s1_pf &&
+             !response.s1_af && !response.s2_gpf && !response.s2_gaf);
+        const bool stage1_success_valid =
+            item.kind != NestedFaultKind::g_leaf ||
+            (response.s1_tag == (vpn >> 3) && response.s1_asid == asid &&
+             response.s1_vmid == vmid && !response.s1_n &&
+             response.s1_pbmt == 0 && response.s1_addr_low == sector &&
+             response.s1_pteidx == (1U << sector) &&
+             (response.s1_valididx & (1U << sector)) != 0 &&
+             !response.s1_d && response.s1_a && !response.s1_g &&
+             !response.s1_u && response.s1_x && !response.s1_w &&
+             response.s1_r && response.s1_level == 0 && response.s1_v &&
+             reconstructed_s1_ppn == (guest_page >> 12) &&
+             !response.s1_pf && !response.s1_af);
+        const std::uint64_t expected_g_fault_address =
+            reference.faulting_guest_physical_address;
+        const auto g_reference = item.kind == NestedFaultKind::vs_leaf
+            ? memblock::ReferenceStageWalkResult{}
+            : memblock::reference_page_walk(
+                  environment.memory(), fault_g_root,
+                  expected_g_fault_address, item.g_mode, true);
+        const bool g_fault_valid = item.kind == NestedFaultKind::vs_leaf ||
+            (!g_reference.translated &&
+             response.s2_tag == (expected_g_fault_address >> 12) &&
+             response.s2_vmid == vmid &&
+             response.s2_level == g_reference.fault_level &&
+             response.s2_gpf && !response.s2_gaf &&
+             !response.s1_pf && !response.s1_af);
+        if (!mode_valid || !stage1_fault_valid || !stage1_success_valid ||
+            !g_fault_valid) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=" << item.name
+                      << " cycle=" << environment.cycle()
+                      << " phase=response"
+                      << " s2xlate="
+                      << static_cast<unsigned>(response.s2xlate)
+                      << " s1_tag=0x" << std::hex << response.s1_tag
+                      << " s1_ppn=0x" << reconstructed_s1_ppn
+                      << " s2_tag=0x" << response.s2_tag
+                      << " expected_g_fault=0x" << expected_g_fault_address
+                      << std::dec
+                      << " s1_asid=" << response.s1_asid
+                      << " s1_vmid=" << response.s1_vmid
+                      << " s2_vmid=" << response.s2_vmid
+                      << " s1_level="
+                      << static_cast<unsigned>(response.s1_level)
+                      << " s2_level="
+                      << static_cast<unsigned>(response.s2_level)
+                      << " expected_s2_level=" << g_reference.fault_level
+                      << " s1_v=" << response.s1_v
+                      << " s1_pf=" << response.s1_pf
+                      << " s1_af=" << response.s1_af
+                      << " s2_gpf=" << response.s2_gpf
+                      << " s2_gaf=" << response.s2_gaf << '\n';
+            return 1;
+        }
+        total_cycles += environment.cycle() - cycle_before;
+        total_ptw_requests += environment.ptw_requests() - ptw_before;
+    }
+
     std::cout << "MEMBLOCK_IFETCH_PTW_BRIDGE_PASS"
-              << " cases=" << cases.size() + degenerate_cases.size() + 2
+              << " cases=" << cases.size() + degenerate_cases.size() +
+                    nested_fault_cases.size() + 2
               << " stage1_valid=4 nested_valid=4 stage1_fault=2"
               << " pbmt=2 only_stage1=2 only_stage2=2"
+              << " nested_vs_fault=4 nested_g_leaf_fault=4"
+              << " nested_implicit_g_fault=4"
               << " ifu_dtlb_source_overlap=1"
               << " duplicate_requests=2 duplicate_walk_requests=3"
               << " ptw_bus_max_outstanding="
               << concurrent.ptw_max_outstanding_requests()
               << " response_stall_cycles="
-              << (cases.size() + degenerate_cases.size() + 3) *
+              << (cases.size() + degenerate_cases.size() +
+                  nested_fault_cases.size() + 3) *
                     response_stall_cycles
               << " ptw_requests=" << total_ptw_requests
               << " cycles=" << total_cycles

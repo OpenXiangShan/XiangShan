@@ -129,6 +129,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "ptw_max_outstanding_requests() < 2",
             "IFU-duplicate",
             "duplicate_requests=2 duplicate_walk_requests=3",
+            "NestedFaultKind",
+            "nested_vs_fault=4 nested_g_leaf_fault=4",
+            "nested_implicit_g_fault=4",
+            "reference.faulting_guest_physical_address",
             "ifetch-ptw-bridge",
         ):
             self.assertIn(contract, environment + main + makefile)

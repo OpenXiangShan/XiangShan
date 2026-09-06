@@ -383,9 +383,11 @@ one E-channel stall to check payload stability.
 `ifetch-ptw-bridge` directly drives the IFU-originated PTW request across the
 MemBlock top-level boundary. It checks valid and invalid Sv39/Sv48 stage-1
 walks, PBMT=NC/IO leaves, all four Sv39/Sv48 x Sv39x4/Sv48x4 nested walks,
-and both Sv39/Sv48 forms of the VS-only and G-only degenerations. It
+both Sv39/Sv48 forms of the VS-only and G-only degenerations, and all four
+nested mode pairs crossed with VS-leaf, final-G-leaf, and implicit VS-page-table
+G-stage faults. It
 reconstructs translated PPNs from the sector response, checks the active
-stage's ASID/VMID, permissions, PBMT, and faults, requires a cold PTW walk,
+stage's ASID/VMID, permissions, PBMT, fault level, and faults, requires a cold PTW walk,
 and holds response ready low to verify stable payload under backpressure. A
 separate overlap case delays the IFU root PTE response for 256 cycles, issues a
 cold scalar DTLB miss before retiring the IFU response, requires both leaf PTE
