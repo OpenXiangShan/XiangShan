@@ -4,6 +4,7 @@
 #include <array>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <numeric>
 #include <optional>
 #include <random>
@@ -128,6 +129,12 @@ struct RandomConstraints {
     unsigned tlb_flushes_per_mille = 0;
     unsigned misaligned_per_mille = 0;
     unsigned vector_corner_per_mille = 0;
+    std::array<unsigned, 4> vector_segment_addressing_weights{};
+    std::array<unsigned, 4> vector_segment_eew_weights{};
+    std::array<unsigned, 4> vector_segment_sew_weights{};
+    std::array<unsigned, 7> vector_segment_lmul_weights{};
+    std::array<unsigned, 7> vector_segment_emul_weights{};
+    std::array<unsigned, 7> vector_segment_nf_weights{};
     unsigned vector_segment_stores_per_mille = 0;
     unsigned probes_per_mille = 0;
     unsigned probe_to_b_per_mille = 0;
@@ -160,6 +167,12 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 50,
                 .misaligned_per_mille = 500,
                 .vector_corner_per_mille = 1000,
+                .vector_segment_addressing_weights = {1, 1, 1, 1},
+                .vector_segment_eew_weights = {1, 1, 1, 1},
+                .vector_segment_sew_weights = {1, 1, 1, 1},
+                .vector_segment_lmul_weights = {1, 1, 1, 1, 1, 1, 1},
+                .vector_segment_emul_weights = {1, 1, 1, 1, 1, 1, 1},
+                .vector_segment_nf_weights = {1, 1, 1, 1, 1, 1, 1},
                 .vector_segment_stores_per_mille = 500,
                 .probes_per_mille = 20,
                 .probe_to_b_per_mille = 500,
@@ -193,6 +206,12 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 20,
                 .misaligned_per_mille = 5,
                 .vector_corner_per_mille = 100,
+                .vector_segment_addressing_weights = {980, 10, 5, 5},
+                .vector_segment_eew_weights = {5, 3, 2, 1},
+                .vector_segment_sew_weights = {1, 2, 5, 2},
+                .vector_segment_lmul_weights = {1, 1, 2, 16, 8, 2, 1},
+                .vector_segment_emul_weights = {1, 1, 2, 16, 8, 2, 1},
+                .vector_segment_nf_weights = {32, 16, 8, 4, 2, 1, 1},
                 .vector_segment_stores_per_mille = 300,
                 .probes_per_mille = 1,
                 .probe_to_b_per_mille = 500,
@@ -227,6 +246,12 @@ struct RandomConstraints {
                 .tlb_flushes_per_mille = 100,
                 .misaligned_per_mille = 500,
                 .vector_corner_per_mille = 1000,
+                .vector_segment_addressing_weights = {1, 1, 1, 1},
+                .vector_segment_eew_weights = {1, 1, 1, 1},
+                .vector_segment_sew_weights = {1, 1, 1, 1},
+                .vector_segment_lmul_weights = {1, 1, 1, 1, 1, 1, 1},
+                .vector_segment_emul_weights = {1, 1, 1, 1, 1, 1, 1},
+                .vector_segment_nf_weights = {1, 1, 1, 1, 1, 1, 1},
                 .vector_segment_stores_per_mille = 500,
                 .probes_per_mille = 100,
                 .probe_to_b_per_mille = 500,
@@ -283,8 +308,12 @@ struct RandomConstraints {
             return;
         }
 
-        const unsigned parsed = static_cast<unsigned>(
-            parse_u64(value, "--constraint"));
+        const std::uint64_t parsed_value = parse_u64(value, "--constraint");
+        if (parsed_value > std::numeric_limits<unsigned>::max()) {
+            throw std::invalid_argument(
+                "constraint weight exceeds the supported unsigned range");
+        }
+        const unsigned parsed = static_cast<unsigned>(parsed_value);
         const std::array<std::pair<std::string_view, Operation>, operation_count>
             operation_keys{{
                 {"scalar-load", scalar_load},
@@ -335,6 +364,59 @@ struct RandomConstraints {
                 hypervisor_family_weights[family] = parsed;
                 return;
             }
+        }
+        const auto assign_weight = [&]<std::size_t N>(
+            const std::array<std::string_view, N> &keys,
+            std::array<unsigned, N> &weights) {
+            for (unsigned index = 0; index < keys.size(); ++index) {
+                if (key == keys[index]) {
+                    weights[index] = parsed;
+                    return true;
+                }
+            }
+            return false;
+        };
+        constexpr std::array<std::string_view, 4> segment_addressing_keys{{
+            "vector-segment-unit-stride",
+            "vector-segment-strided",
+            "vector-segment-indexed-unordered",
+            "vector-segment-indexed-ordered",
+        }};
+        constexpr std::array<std::string_view, 4> segment_eew_keys{{
+            "vector-segment-eew8", "vector-segment-eew16",
+            "vector-segment-eew32", "vector-segment-eew64",
+        }};
+        constexpr std::array<std::string_view, 4> segment_sew_keys{{
+            "vector-segment-sew8", "vector-segment-sew16",
+            "vector-segment-sew32", "vector-segment-sew64",
+        }};
+        constexpr std::array<std::string_view, 7> segment_lmul_keys{{
+            "vector-segment-lmul-mf8", "vector-segment-lmul-mf4",
+            "vector-segment-lmul-mf2", "vector-segment-lmul-m1",
+            "vector-segment-lmul-m2", "vector-segment-lmul-m4",
+            "vector-segment-lmul-m8",
+        }};
+        constexpr std::array<std::string_view, 7> segment_emul_keys{{
+            "vector-segment-emul-mf8", "vector-segment-emul-mf4",
+            "vector-segment-emul-mf2", "vector-segment-emul-m1",
+            "vector-segment-emul-m2", "vector-segment-emul-m4",
+            "vector-segment-emul-m8",
+        }};
+        constexpr std::array<std::string_view, 7> segment_nf_keys{{
+            "vector-segment-nf2", "vector-segment-nf3",
+            "vector-segment-nf4", "vector-segment-nf5",
+            "vector-segment-nf6", "vector-segment-nf7",
+            "vector-segment-nf8",
+        }};
+        if (assign_weight(
+                segment_addressing_keys,
+                vector_segment_addressing_weights) ||
+            assign_weight(segment_eew_keys, vector_segment_eew_weights) ||
+            assign_weight(segment_sew_keys, vector_segment_sew_weights) ||
+            assign_weight(segment_lmul_keys, vector_segment_lmul_weights) ||
+            assign_weight(segment_emul_keys, vector_segment_emul_weights) ||
+            assign_weight(segment_nf_keys, vector_segment_nf_weights)) {
+            return;
         }
         const std::array<std::pair<std::string_view, TranslationRegime>,
                          translation_regime_count> translation_keys{{
@@ -462,6 +544,100 @@ struct RandomConstraints {
                 hypervisor_family_weights.end(), 0ULL) == 0) {
             throw std::invalid_argument(
                 "hypervisor family constraint weights cannot all be zero");
+        }
+        if (operation_weights[vector_segment] != 0) {
+            const auto require_segment_weights = [](const auto &weights,
+                                                     const char *dimension) {
+                if (std::accumulate(
+                        weights.begin(), weights.end(), std::uint64_t{0}) == 0) {
+                    throw std::invalid_argument(
+                        std::string("vector segment ") + dimension +
+                        " constraint weights cannot all be zero");
+                }
+            };
+            require_segment_weights(
+                vector_segment_addressing_weights, "addressing");
+            require_segment_weights(vector_segment_eew_weights, "EEW");
+            require_segment_weights(vector_segment_sew_weights, "SEW");
+            require_segment_weights(vector_segment_lmul_weights, "LMUL");
+            require_segment_weights(vector_segment_emul_weights, "EMUL");
+            require_segment_weights(vector_segment_nf_weights, "NF");
+
+            std::array<bool, 4> reachable_addressing{};
+            std::array<bool, 4> reachable_eew{};
+            std::array<bool, 4> reachable_sew{};
+            std::array<bool, 7> reachable_lmul{};
+            std::array<bool, 7> reachable_emul{};
+            std::array<bool, 7> reachable_nf{};
+            for (unsigned addressing = 0; addressing < 4; ++addressing) {
+                if (vector_segment_addressing_weights[addressing] == 0) {
+                    continue;
+                }
+                const bool indexed = addressing >= 2;
+                for (unsigned eew = 0; eew < 4; ++eew) {
+                    if (vector_segment_eew_weights[eew] == 0) {
+                        continue;
+                    }
+                    for (unsigned vsew = 0; vsew < 4; ++vsew) {
+                        if (vector_segment_sew_weights[vsew] == 0) {
+                            continue;
+                        }
+                        for (int lmul_log2 = -3; lmul_log2 <= 3;
+                             ++lmul_log2) {
+                            if (vector_segment_lmul_weights[
+                                    lmul_log2 + 3] == 0) {
+                                continue;
+                            }
+                            const int emul_log2 = static_cast<int>(eew) -
+                                static_cast<int>(vsew) + lmul_log2;
+                            if (lmul_log2 < static_cast<int>(vsew) - 3 ||
+                                emul_log2 < -3 || emul_log2 > 3 ||
+                                vector_segment_emul_weights[
+                                    emul_log2 + 3] == 0) {
+                                continue;
+                            }
+                            const unsigned group_uops = 1U <<
+                                static_cast<unsigned>(std::max(
+                                    indexed ? lmul_log2 : emul_log2, 0));
+                            for (unsigned nf = 0; nf < 7; ++nf) {
+                                if (vector_segment_nf_weights[nf] != 0 &&
+                                    group_uops * (nf + 2U) <= 8) {
+                                    reachable_addressing[addressing] = true;
+                                    reachable_eew[eew] = true;
+                                    reachable_sew[vsew] = true;
+                                    reachable_lmul[lmul_log2 + 3] = true;
+                                    reachable_emul[emul_log2 + 3] = true;
+                                    reachable_nf[nf] = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            const auto require_reachable = [](const auto &weights,
+                                              const auto &reachable,
+                                              const char *dimension) {
+                for (unsigned index = 0; index < weights.size(); ++index) {
+                    if (weights[index] != 0 && !reachable[index]) {
+                        throw std::invalid_argument(
+                            std::string("vector segment ") + dimension +
+                            " constraint enables an unreachable class");
+                    }
+                }
+            };
+            require_reachable(
+                vector_segment_addressing_weights, reachable_addressing,
+                "addressing");
+            require_reachable(
+                vector_segment_eew_weights, reachable_eew, "EEW");
+            require_reachable(
+                vector_segment_sew_weights, reachable_sew, "SEW");
+            require_reachable(
+                vector_segment_lmul_weights, reachable_lmul, "LMUL");
+            require_reachable(
+                vector_segment_emul_weights, reachable_emul, "EMUL");
+            require_reachable(
+                vector_segment_nf_weights, reachable_nf, "NF");
         }
         if (std::accumulate(
                 translation_weights.begin(), translation_weights.end(),
@@ -723,8 +899,19 @@ struct RandomConstraints {
             } else if (operation == mmio) {
                 actions += direction_classes(mmio_stores_per_mille);
             } else if (operation == vector_segment) {
-                actions += std::max(
-                    7U, direction_classes(vector_segment_stores_per_mille));
+                const auto enabled = [](const auto &weights) {
+                    return static_cast<unsigned>(std::count_if(
+                        weights.begin(), weights.end(),
+                        [](unsigned weight) { return weight != 0; }));
+                };
+                actions += direction_classes(
+                    vector_segment_stores_per_mille);
+                actions += enabled(vector_segment_addressing_weights);
+                actions += enabled(vector_segment_eew_weights);
+                actions += enabled(vector_segment_sew_weights);
+                actions += enabled(vector_segment_lmul_weights);
+                actions += enabled(vector_segment_emul_weights);
+                actions += enabled(vector_segment_nf_weights);
             } else {
                 ++actions;
             }
@@ -787,7 +974,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=8 constraints=" << name
+        stream << "constraint_schema=9 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -824,6 +1011,19 @@ struct RandomConstraints {
                << " target_vector_corner=" << vector_corner_per_mille
                << " target_vector_segment_store="
                << vector_segment_stores_per_mille
+               << " target_vector_segment_addressing=";
+        append_weights(stream, vector_segment_addressing_weights);
+        stream << " target_vector_segment_eew=";
+        append_weights(stream, vector_segment_eew_weights);
+        stream << " target_vector_segment_sew=";
+        append_weights(stream, vector_segment_sew_weights);
+        stream << " target_vector_segment_lmul=";
+        append_weights(stream, vector_segment_lmul_weights);
+        stream << " target_vector_segment_emul=";
+        append_weights(stream, vector_segment_emul_weights);
+        stream << " target_vector_segment_nf=";
+        append_weights(stream, vector_segment_nf_weights);
+        stream
                << " target_probe=" << probes_per_mille
                << " target_probe_to_b=" << probe_to_b_per_mille
                << " target_probe_need_data="
@@ -838,6 +1038,15 @@ struct RandomConstraints {
     }
 
 private:
+    template <std::size_t N>
+    static void append_weights(
+        std::ostringstream &stream, const std::array<unsigned, N> &weights)
+    {
+        for (unsigned index = 0; index < weights.size(); ++index) {
+            stream << (index == 0 ? "" : ",") << weights[index];
+        }
+    }
+
     template <std::size_t N>
     static unsigned choose_weighted(
         const std::array<unsigned, N> &weights, std::uint64_t random)
@@ -1039,7 +1248,11 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, RandomConstraints::hypervisor_family_count>
         hypervisor_families{};
     std::array<std::uint64_t, 2> vector_segment_directions{};
+    std::array<std::uint64_t, 4> vector_segment_addressing{};
     std::array<std::uint64_t, 4> vector_segment_eews{};
+    std::array<std::uint64_t, 4> vector_segment_sews{};
+    std::array<std::uint64_t, 7> vector_segment_lmuls{};
+    std::array<std::uint64_t, 7> vector_segment_emuls{};
     std::array<std::uint64_t, 7> vector_segment_nfs{};
     std::array<std::uint64_t, 2> nc_directions{};
     std::array<std::uint64_t, 2> mmio_directions{};
@@ -1190,16 +1403,36 @@ struct ConstraintCoverage {
             return operations[operation] != 0 && families_complete;
         }
         if (operation == RandomConstraints::vector_segment) {
+            const auto enabled_complete = [](const auto &weights,
+                                             const auto &counts) {
+                return std::equal(
+                    weights.begin(), weights.end(), counts.begin(),
+                    [](unsigned weight, std::uint64_t count) {
+                        return weight == 0 || count != 0;
+                    });
+            };
             return operations[operation] != 0 &&
                 direction_complete(
                     constraints.vector_segment_stores_per_mille,
                     vector_segment_directions) &&
-                std::all_of(
-                    vector_segment_eews.begin(), vector_segment_eews.end(),
-                    [](std::uint64_t count) { return count != 0; }) &&
-                std::all_of(
-                    vector_segment_nfs.begin(), vector_segment_nfs.end(),
-                    [](std::uint64_t count) { return count != 0; });
+                enabled_complete(
+                    constraints.vector_segment_addressing_weights,
+                    vector_segment_addressing) &&
+                enabled_complete(
+                    constraints.vector_segment_eew_weights,
+                    vector_segment_eews) &&
+                enabled_complete(
+                    constraints.vector_segment_sew_weights,
+                    vector_segment_sews) &&
+                enabled_complete(
+                    constraints.vector_segment_lmul_weights,
+                    vector_segment_lmuls) &&
+                enabled_complete(
+                    constraints.vector_segment_emul_weights,
+                    vector_segment_emuls) &&
+                enabled_complete(
+                    constraints.vector_segment_nf_weights,
+                    vector_segment_nfs);
         }
         if (operation == RandomConstraints::noncacheable) {
             return operations[operation] != 0 && direction_complete(
@@ -1303,9 +1536,29 @@ struct ConstraintCoverage {
                << " actual_vector_segment_direction="
                << vector_segment_directions[0] << ','
                << vector_segment_directions[1]
+               << " actual_vector_segment_addressing="
+               << vector_segment_addressing[0] << ','
+               << vector_segment_addressing[1] << ','
+               << vector_segment_addressing[2] << ','
+               << vector_segment_addressing[3]
                << " actual_vector_segment_eew=" << vector_segment_eews[0]
                << ',' << vector_segment_eews[1] << ','
                << vector_segment_eews[2] << ',' << vector_segment_eews[3]
+               << " actual_vector_segment_sew=" << vector_segment_sews[0]
+               << ',' << vector_segment_sews[1] << ','
+               << vector_segment_sews[2] << ',' << vector_segment_sews[3]
+               << " actual_vector_segment_lmul="
+               << vector_segment_lmuls[0] << ',' << vector_segment_lmuls[1]
+               << ',' << vector_segment_lmuls[2] << ','
+               << vector_segment_lmuls[3] << ',' << vector_segment_lmuls[4]
+               << ',' << vector_segment_lmuls[5] << ','
+               << vector_segment_lmuls[6]
+               << " actual_vector_segment_emul="
+               << vector_segment_emuls[0] << ',' << vector_segment_emuls[1]
+               << ',' << vector_segment_emuls[2] << ','
+               << vector_segment_emuls[3] << ',' << vector_segment_emuls[4]
+               << ',' << vector_segment_emuls[5] << ','
+               << vector_segment_emuls[6]
                << " actual_vector_segment_nf=" << vector_segment_nfs[0]
                << ',' << vector_segment_nfs[1] << ',' << vector_segment_nfs[2]
                << ',' << vector_segment_nfs[3] << ',' << vector_segment_nfs[4]
@@ -26377,6 +26630,129 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         constexpr unsigned random_stride_slots = 2048;
         unsigned stride_stream_loads = 0;
 
+        struct RandomVectorSegmentShape {
+            unsigned addressing;
+            unsigned eew;
+            unsigned vsew;
+            int lmul_log2;
+            int emul_log2;
+            unsigned nf_index;
+            long double weight;
+        };
+        std::vector<RandomVectorSegmentShape> vector_segment_shapes;
+        for (unsigned addressing = 0; addressing < 4; ++addressing) {
+            if (constraints.vector_segment_addressing_weights[addressing] == 0) {
+                continue;
+            }
+            const bool indexed = addressing >= 2;
+            for (unsigned eew = 0; eew < 4; ++eew) {
+                if (constraints.vector_segment_eew_weights[eew] == 0) {
+                    continue;
+                }
+                for (unsigned vsew = 0; vsew < 4; ++vsew) {
+                    if (constraints.vector_segment_sew_weights[vsew] == 0) {
+                        continue;
+                    }
+                    for (int lmul_log2 = -3; lmul_log2 <= 3; ++lmul_log2) {
+                        if (constraints.vector_segment_lmul_weights[
+                                lmul_log2 + 3] == 0) {
+                            continue;
+                        }
+                        const int emul_log2 = static_cast<int>(eew) -
+                            static_cast<int>(vsew) + lmul_log2;
+                        if (lmul_log2 < static_cast<int>(vsew) - 3 ||
+                            emul_log2 < -3 || emul_log2 > 3 ||
+                            constraints.vector_segment_emul_weights[
+                                emul_log2 + 3] == 0) {
+                            continue;
+                        }
+                        const unsigned group_uops = 1U <<
+                            static_cast<unsigned>(std::max(
+                                indexed ? lmul_log2 : emul_log2, 0));
+                        for (unsigned nf_index = 0; nf_index < 7; ++nf_index) {
+                            if (constraints.vector_segment_nf_weights[
+                                    nf_index] == 0 ||
+                                group_uops * (nf_index + 2U) > 8) {
+                                continue;
+                            }
+                            long double weight =
+                                constraints.vector_segment_addressing_weights[
+                                    addressing];
+                            weight *= constraints.vector_segment_eew_weights[eew];
+                            weight *= constraints.vector_segment_sew_weights[vsew];
+                            weight *= constraints.vector_segment_lmul_weights[
+                                lmul_log2 + 3];
+                            weight *= constraints.vector_segment_emul_weights[
+                                emul_log2 + 3];
+                            weight *= constraints.vector_segment_nf_weights[
+                                nf_index];
+                            vector_segment_shapes.push_back({
+                                addressing, eew, vsew, lmul_log2, emul_log2,
+                                nf_index, weight});
+                        }
+                    }
+                }
+            }
+        }
+        const auto vector_segment_shape_deficit = [&] (
+            const RandomVectorSegmentShape &shape) {
+            return static_cast<unsigned>(
+                (constraint_coverage.vector_segment_addressing[
+                     shape.addressing] == 0) +
+                (constraint_coverage.vector_segment_eews[shape.eew] == 0) +
+                (constraint_coverage.vector_segment_sews[shape.vsew] == 0) +
+                (constraint_coverage.vector_segment_lmuls[
+                     shape.lmul_log2 + 3] == 0) +
+                (constraint_coverage.vector_segment_emuls[
+                     shape.emul_log2 + 3] == 0) +
+                (constraint_coverage.vector_segment_nfs[
+                     shape.nf_index] == 0));
+        };
+        auto choose_vector_segment_shape = [&]()
+            -> const RandomVectorSegmentShape & {
+            unsigned maximum_deficit = 0;
+            for (const auto &shape : vector_segment_shapes) {
+                maximum_deficit = std::max(
+                    maximum_deficit, vector_segment_shape_deficit(shape));
+            }
+            long double total_weight = 0;
+            for (const auto &shape : vector_segment_shapes) {
+                if (vector_segment_shape_deficit(shape) == maximum_deficit) {
+                    total_weight += shape.weight;
+                }
+            }
+            const long double unit = static_cast<long double>(random() >> 11) /
+                static_cast<long double>(std::uint64_t{1} << 53);
+            long double selection = unit * total_weight;
+            const RandomVectorSegmentShape *fallback = nullptr;
+            for (const auto &shape : vector_segment_shapes) {
+                if (vector_segment_shape_deficit(shape) != maximum_deficit) {
+                    continue;
+                }
+                fallback = &shape;
+                if (selection < shape.weight) {
+                    return shape;
+                }
+                selection -= shape.weight;
+            }
+            return *fallback;
+        };
+        const auto probe_coverage_incomplete = [&]() {
+            const bool missing_cap =
+                (constraints.probe_to_b_per_mille != 1000 &&
+                 constraint_coverage.probe_caps[0] == 0) ||
+                (constraints.probe_to_b_per_mille != 0 &&
+                 constraint_coverage.probe_caps[1] == 0);
+            const bool missing_data =
+                (constraints.probe_need_data_per_mille != 1000 &&
+                 constraint_coverage.probe_need_data[0] == 0) ||
+                (constraints.probe_need_data_per_mille != 0 &&
+                 constraint_coverage.probe_need_data[1] == 0);
+            return constraints.probes_per_mille != 0 &&
+                (constraint_coverage.probe_sequences == 0 ||
+                 missing_cap || missing_data);
+        };
+
         while (actions < target_before_redirect) {
             const bool closing_stride_stream =
                 constraints.stride_stream_per_mille != 0 &&
@@ -26384,7 +26760,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             unsigned kind = closing_stride_stream
                 ? RandomConstraints::scalar_load
                 : constraints.choose_operation(random());
-            if (!closing_stride_stream) {
+            if (!closing_stride_stream && probe_coverage_incomplete()) {
+                kind = RandomConstraints::scalar_store;
+            } else if (!closing_stride_stream) {
                 for (unsigned candidate = 0;
                      candidate < RandomConstraints::operation_count; ++candidate) {
                     if (constraints.operation_weights[candidate] != 0 &&
@@ -26536,48 +26914,86 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     !environment.run_until_queues_retired(8192)) {
                     return false;
                 }
-                unsigned eew = random() % 4;
-                for (unsigned candidate = 0;
-                     candidate < constraint_coverage.vector_segment_eews.size();
-                     ++candidate) {
-                    if (constraint_coverage.vector_segment_eews[candidate] == 0) {
-                        eew = candidate;
-                        break;
-                    }
-                }
-                unsigned nf = 1 + random() % 7;
-                for (unsigned candidate = 0;
-                     candidate < constraint_coverage.vector_segment_nfs.size();
-                     ++candidate) {
-                    if (constraint_coverage.vector_segment_nfs[candidate] == 0) {
-                        nf = candidate + 1;
-                        break;
-                    }
-                }
-                const unsigned elements = 16U >> eew;
+                const auto &shape = choose_vector_segment_shape();
+                const auto addressing =
+                    static_cast<memblock::VectorAddressingMode>(
+                        shape.addressing);
+                const bool indexed = shape.addressing >= 2;
+                const unsigned fields = shape.nf_index + 2U;
+                const unsigned lmul_uops = 1U << static_cast<unsigned>(
+                    std::max(shape.lmul_log2, 0));
+                const unsigned emul_uops = 1U << static_cast<unsigned>(
+                    std::max(shape.emul_log2, 0));
+                const unsigned data_group_uops = indexed
+                    ? lmul_uops : emul_uops;
+                const unsigned data_uops = data_group_uops * fields;
+                const unsigned uop_count = indexed
+                    ? std::max(data_uops, emul_uops) : data_uops;
+                const unsigned data_eew = indexed ? shape.vsew : shape.eew;
+                const unsigned data_bytes = 1U << data_eew;
+                const unsigned vector_bytes = shape.lmul_log2 < 0
+                    ? 16U >> static_cast<unsigned>(-shape.lmul_log2)
+                    : 16U << static_cast<unsigned>(shape.lmul_log2);
+                const unsigned vlmax = vector_bytes >> shape.vsew;
                 const bool vector_corner =
                     random() % 1000 < constraints.vector_corner_per_mille;
-                const std::uint64_t address =
-                    constrained_cacheable_address(1U << eew);
+                std::int64_t stride = 0;
+                if (addressing == memblock::VectorAddressingMode::strided) {
+                    const std::int64_t magnitude =
+                        static_cast<std::int64_t>(
+                            (fields + 1U) * data_bytes *
+                            (1U + random() % 4U));
+                    stride = (random() & 1U) == 0 ? magnitude : -magnitude;
+                }
+                std::uint64_t address = constrained_cacheable_address(data_bytes);
+                if (stride < 0) {
+                    address += static_cast<std::uint64_t>(-stride) *
+                        (vlmax - 1U);
+                }
                 const std::uint64_t rob = rob_offset++;
                 const std::uint8_t vl = static_cast<std::uint8_t>(
-                    vector_corner ? 1U + random() % elements : elements);
+                    vector_corner ? 1U + random() % vlmax : vlmax);
                 const bool vm = !vector_corner || (random() & 1U) != 0;
                 const std::uint16_t mask_bits =
                     static_cast<std::uint16_t>(random());
                 const std::uint8_t vstart = vector_corner
                     ? static_cast<std::uint8_t>(random() % (vl + 1U))
                     : 0;
-                const std::uint8_t first_pdest =
-                    static_cast<std::uint8_t>(1 + random() % (255 - nf));
-                std::vector<memblock::VectorMemoryTransaction> fields;
-                fields.reserve(nf + 1);
-                for (unsigned field = 0; field <= nf; ++field) {
-                    fields.push_back(memblock::VectorMemoryTransaction{
+                const std::uint8_t first_pdest = static_cast<std::uint8_t>(
+                    1 + random() % (256 - uop_count));
+                const std::uint8_t vlmul = static_cast<std::uint8_t>(
+                    shape.lmul_log2 < 0
+                        ? shape.lmul_log2 + 8 : shape.lmul_log2);
+                const unsigned bytes_per_data_uop = data_group_uops == 1 &&
+                        (indexed ? shape.lmul_log2 : shape.emul_log2) < 0
+                    ? 16U >> static_cast<unsigned>(
+                        -(indexed ? shape.lmul_log2 : shape.emul_log2))
+                    : 16U;
+                const unsigned flow_num = bytes_per_data_uop >> data_eew;
+                std::array<unsigned char, 128> index_group{};
+                if (indexed) {
+                    const unsigned index_bytes = 1U << shape.eew;
+                    for (unsigned element = 0; element < vlmax; ++element) {
+                        const std::uint64_t offset =
+                            static_cast<std::uint64_t>(element) * data_bytes *
+                            (fields + 1U);
+                        for (unsigned byte = 0; byte < index_bytes; ++byte) {
+                            index_group[element * index_bytes + byte] =
+                                static_cast<unsigned char>(offset >> (8 * byte));
+                        }
+                    }
+                }
+                std::vector<memblock::VectorMemoryTransaction> uops;
+                uops.reserve(uop_count);
+                for (unsigned uop = 0; uop < uop_count; ++uop) {
+                    uops.push_back(memblock::VectorMemoryTransaction{
                         .store = vector_segment_store,
                         .segment = true,
                         .address = address,
-                        .eew = static_cast<std::uint8_t>(eew),
+                        .stride = stride,
+                        .addressing = addressing,
+                        .eew = static_cast<std::uint8_t>(shape.eew),
+                        .vsew = static_cast<std::uint8_t>(shape.vsew),
                         .vl = vl,
                         .rob = memblock::rob_pointer_value(rob),
                         .rob_flag = memblock::rob_pointer_flag(rob),
@@ -26587,25 +27003,44 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         .sq_flag = memblock::sq_pointer_flag(sq_offset),
                         .pdest = vector_segment_store
                             ? std::uint8_t{0}
-                            : static_cast<std::uint8_t>(first_pdest + field),
+                            : static_cast<std::uint8_t>(first_pdest + uop),
                         .lane = 0,
-                        .flow_num = static_cast<std::uint8_t>(elements),
-                        .vuop_idx = static_cast<std::uint8_t>(field),
-                        .last_uop = field == nf,
-                        .nf = static_cast<std::uint8_t>(nf),
+                        .flow_num = static_cast<std::uint8_t>(flow_num),
+                        .vlmul = vlmul,
+                        .vuop_idx = static_cast<std::uint8_t>(uop),
+                        .last_uop = uop + 1 == uop_count,
+                        .nf = static_cast<std::uint8_t>(fields - 1U),
+                        .vec_wen = !vector_segment_store && uop < data_uops,
                     });
-                    auto &segment_field = fields.back();
-                    segment_field.vm = vm;
-                    segment_field.mask_bits = mask_bits;
-                    segment_field.vstart = vstart;
-                    segment_field.ftq_ptr = random() & 0x3fU;
-                    segment_field.ftq_offset =
+                    auto &segment_uop = uops.back();
+                    segment_uop.oracle_index_group = indexed
+                        ? std::optional{index_group} : std::nullopt;
+                    segment_uop.vm = vm;
+                    segment_uop.mask_bits = mask_bits;
+                    segment_uop.vstart = vstart;
+                    segment_uop.ftq_ptr = random() & 0x3fU;
+                    segment_uop.ftq_offset =
                         static_cast<std::uint8_t>(random() & 7U);
-                    for (auto &byte : segment_field.data) {
+                    for (auto &byte : segment_uop.data) {
                         byte = static_cast<unsigned char>(random());
                     }
-                    environment.expect_vector(segment_field);
-                    if (!environment.issue_vector(segment_field, 4096)) {
+                    if (indexed && uop < emul_uops) {
+                        const unsigned index_group_bytes = shape.emul_log2 < 0
+                            ? 16U >> static_cast<unsigned>(-shape.emul_log2)
+                            : 16U;
+                        const unsigned source_offset = shape.emul_log2 < 0
+                            ? 0 : uop * 16U;
+                        std::copy_n(
+                            index_group.begin() + source_offset,
+                            index_group_bytes, segment_uop.index.begin());
+                    }
+                    if (!vector_segment_store && uop >= data_uops) {
+                        environment.expect_vector_data(
+                            segment_uop, segment_uop.data);
+                    } else {
+                        environment.expect_vector(segment_uop);
+                    }
+                    if (!environment.issue_vector(segment_uop, 4096)) {
                         return false;
                     }
                 }
@@ -26613,8 +27048,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         constrained_completion_timeout)) {
                     return false;
                 }
-                for (const auto &field : fields) {
-                    coverage.sample(field);
+                for (unsigned uop = 0; uop < data_uops; ++uop) {
+                    coverage.sample(uops[uop]);
                 }
                 if (vector_segment_store) {
                     if (!environment.pulse_sbuffer_flush() ||
@@ -26622,15 +27057,16 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                             constrained_completion_timeout)) {
                         return false;
                     }
-                    for (const auto &field : fields) {
-                        environment.record_committed_vector_store(field);
+                    for (unsigned uop = 0; uop < data_uops; ++uop) {
+                        environment.record_committed_vector_store(uops[uop]);
                     }
                     const std::uint16_t active =
-                        memblock::active_vector_elements(fields.front());
-                    for (unsigned element = 0; element < elements; ++element) {
+                        memblock::active_vector_elements(uops.front());
+                    for (unsigned element = 0;
+                         element < 16U / data_bytes; ++element) {
                         if (((active >> element) & 1U) != 0) {
                             probe_candidate = memblock::vector_element_address(
-                                fields.front(), element) & ~std::uint64_t{63};
+                                uops.front(), element) & ~std::uint64_t{63};
                             break;
                         }
                     }
@@ -26638,8 +27074,15 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++actions;
                 ++constraint_coverage.vector_segment_directions[
                     vector_segment_store ? 1 : 0];
-                ++constraint_coverage.vector_segment_eews[eew];
-                ++constraint_coverage.vector_segment_nfs[nf - 1];
+                ++constraint_coverage.vector_segment_addressing[
+                    shape.addressing];
+                ++constraint_coverage.vector_segment_eews[shape.eew];
+                ++constraint_coverage.vector_segment_sews[shape.vsew];
+                ++constraint_coverage.vector_segment_lmuls[
+                    shape.lmul_log2 + 3];
+                ++constraint_coverage.vector_segment_emuls[
+                    shape.emul_log2 + 3];
+                ++constraint_coverage.vector_segment_nfs[shape.nf_index];
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::prefetch) {
                 const auto transaction = make_prefetch(
@@ -26909,19 +27352,8 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 constraint_coverage.sample_dcache(
                     requests_before, environment.tilelink_requests());
             }
-            const bool missing_probe_cap =
-                (constraints.probe_to_b_per_mille != 1000 &&
-                 constraint_coverage.probe_caps[0] == 0) ||
-                (constraints.probe_to_b_per_mille != 0 &&
-                 constraint_coverage.probe_caps[1] == 0);
-            const bool missing_probe_data =
-                (constraints.probe_need_data_per_mille != 1000 &&
-                 constraint_coverage.probe_need_data[0] == 0) ||
-                (constraints.probe_need_data_per_mille != 0 &&
-                 constraint_coverage.probe_need_data[1] == 0);
             if (probe_candidate && constraints.probes_per_mille != 0 &&
-                (constraint_coverage.probe_sequences == 0 ||
-                 missing_probe_cap || missing_probe_data ||
+                (probe_coverage_incomplete() ||
                  random() % 1000 < constraints.probes_per_mille)) {
                 phase = "random-probe";
                 bool to_b = false;

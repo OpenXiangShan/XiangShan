@@ -150,7 +150,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     schema = result.get("constraint_schema")
     if schema is None:
         return
-    _require(schema in (2, 3, 4, 5, 6, 7, 8), f"unsupported constraint_schema: {schema!r}")
+    _require(schema in (2, 3, 4, 5, 6, 7, 8, 9), f"unsupported constraint_schema: {schema!r}")
 
     target_translation = _csv_counts(result, "target_translation", 3)
     actual_translation = _csv_counts(result, "actual_translation", 3)
@@ -402,12 +402,6 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         actual_segment_direction = _csv_counts(
             result, "actual_vector_segment_direction", 2
         )
-        actual_segment_eew = _csv_counts(
-            result, "actual_vector_segment_eew", 4
-        )
-        actual_segment_nf = _csv_counts(
-            result, "actual_vector_segment_nf", 7
-        )
         if target_operations[4] != 0:
             _require(
                 (target_segment_store == 1000 or actual_segment_direction[0] > 0)
@@ -416,21 +410,64 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 f"class: {actual_segment_direction}",
             )
             _require(
-                all(count > 0 for count in actual_segment_eew),
-                "actual_vector_segment_eew has an uncovered class: "
-                f"{actual_segment_eew}",
+                sum(actual_segment_direction) == actual_operations[4],
+                "vector segment operation/direction coverage is not conserved",
             )
-            _require(
-                all(count > 0 for count in actual_segment_nf),
-                "actual_vector_segment_nf has an uncovered class: "
-                f"{actual_segment_nf}",
+        if schema == 8:
+            actual_segment_eew = _csv_counts(
+                result, "actual_vector_segment_eew", 4
             )
-            _require(
-                sum(actual_segment_direction) == actual_operations[4]
-                and sum(actual_segment_eew) == actual_operations[4]
-                and sum(actual_segment_nf) == actual_operations[4],
-                "vector segment operation/subclass coverage is not conserved",
+            actual_segment_nf = _csv_counts(
+                result, "actual_vector_segment_nf", 7
             )
+            if target_operations[4] != 0:
+                _require(
+                    all(count > 0 for count in actual_segment_eew),
+                    "actual_vector_segment_eew has an uncovered class: "
+                    f"{actual_segment_eew}",
+                )
+                _require(
+                    all(count > 0 for count in actual_segment_nf),
+                    "actual_vector_segment_nf has an uncovered class: "
+                    f"{actual_segment_nf}",
+                )
+                _require(
+                    sum(actual_segment_eew) == actual_operations[4]
+                    and sum(actual_segment_nf) == actual_operations[4],
+                    "vector segment operation/subclass coverage is not conserved",
+                )
+
+    if schema >= 9:
+        segment_dimensions = (
+            ("addressing", 4),
+            ("eew", 4),
+            ("sew", 4),
+            ("lmul", 7),
+            ("emul", 7),
+            ("nf", 7),
+        )
+        for dimension, fields in segment_dimensions:
+            target = _csv_counts(
+                result, f"target_vector_segment_{dimension}", fields
+            )
+            actual = _csv_counts(
+                result, f"actual_vector_segment_{dimension}", fields
+            )
+            if target_operations[4] != 0:
+                _require(
+                    all(
+                        (weight == 0 and count == 0)
+                        or (weight != 0 and count > 0)
+                        for weight, count in zip(target, actual)
+                    ),
+                    f"actual_vector_segment_{dimension} does not match its "
+                    f"enabled classes: target={target} actual={actual}",
+                )
+                _require(
+                    sum(actual) == actual_operations[4],
+                    "vector segment operation/subclass coverage is not "
+                    f"conserved for {dimension}",
+                )
 
 
 def _positive_csv_prefix(

@@ -15,12 +15,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `257396474c8bef35e3e3594a6adac2acf6aa7444e8370f0f4d3e413bd545f301`
 - Complete ordered RTL SHA-256: `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`
-- Current rebuilt and frozen UT executable SHA-256: `999b460b1426103daf5440ac1515f0e08e96bb59f121f620ef0d9a95837f500f`
+- Current rebuilt and frozen UT executable SHA-256: `119981f989225707f7e13618bb5bfd3c92f1851a0d74dbe575bae71e29614856`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `577579039590a2ea7a5e5d4e22901ac1d76afbcc5fed158eaf1cd53c8e5d3984`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `3ffb5c0d39a3402bbe6507a54829d58866e907d02760179159d6945dde00344a`
-- Frozen runtime manifest SHA-256: `0f9900a5cad67a70248dc5df0eeaae7dbe12f650300032a8fd60a260d7df765d`
+- Frozen runtime manifest SHA-256: `04c492cc9f07998b5ff4c4e5033b48428c3daa7a70700b91dc63d9592eaf5820`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -685,6 +685,44 @@ external PTW requests in 3,415, 3,787, 3,817, and 3,852 aggregate cycles. All
 runs used complete RTL SHA-256
 `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
 The static-TLS limit was a UT process-structure issue, not an RTL failure.
+
+## Vector Segment Constraint Interface
+
+On 2026-09-07, schema 9 promoted segment addressing, EEW, SEW, LMUL, derived
+EMUL, and NF into the common `random-mixed` constraint interface. It enumerates
+only shapes accepted by the non-indexed `ceil(EMUL)*NF <= 8` or indexed
+`ceil(LMUL)*NF <= 8` decoder rule, rejects any enabled but unreachable class
+before simulation, and biases toward still-uncovered values before applying
+the configured product weights. Indexed shapes carry the complete index group
+and explicitly model index-only uops.
+
+A finite 256-action `coverage` run at seed 1 passed in 15,335 cycles on complete
+RTL SHA-256 `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`.
+Its 11 segment instructions covered load/store 5/6, addressing modes 2/5/1/3,
+EEW 3/1/4/3, SEW 4/2/2/3, LMUL 1/2/2/3/1/1/1, EMUL
+1/2/2/1/2/2/1, and NF 2/2/1/1/1/1/3. All enabled schema-9 coverage and
+conservation gates passed. No CPU defect was observed.
+
+A second 256-action run constrained segment traffic to only unit-stride,
+EEW=SEW=32, LMUL=EMUL=M1, and NF2. Seed 2 passed in 13,522 cycles with exactly
+one segment load and one segment store; every disabled segment counter remained
+zero. It also exposed and repaired a harness-only closure issue: the concurrent
+prefix could mark scalar-store covered without producing a Probe candidate.
+While a Probe subclass remains uncovered, the common scheduler now explicitly
+selects a candidate-producing scalar store; both Probe cap and need-data counts
+closed at 1/1. An indexed-only LMUL=M8 configuration, which cannot satisfy
+`LMUL*NF <= 8` for NF2..8, was rejected before cycle 0. No CPU defect was
+observed.
+
+The weighted presets also passed finite 256-action checks. SPEC seed 3 ran
+34,016 cycles with eight segment instructions; despite the `980/10/5/5`
+addressing bias, its per-seed floor covered unit/strided/indexed-unordered/
+indexed-ordered as 4/1/1/2 and every enabled EEW/SEW/LMUL/EMUL/NF class. Corner
+seed 4 ran 37,520 cycles with 17 segment instructions and covered the same
+classes under equal weights. Both long-tail profiles observed all four latency
+buckets independently for DCache, PTW, and Uncache. No CPU defect was observed.
+Frozen-runtime coverage seed 5 also passed 256 actions in 15,787 cycles with
+all schema-9 segment dimensions and conservation gates complete.
 
 ## Superseded Pre-Clarification Stress
 

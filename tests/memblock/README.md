@@ -35,9 +35,10 @@ window: HLV and HSV must use Uncache with exact load/store data, while HLVX
 must report `LoadAccessFault` because that physical region is not executable.
 Vector FOF and unit-stride, strided, indexed-unordered, and
 indexed-ordered segment load/store takeover are covered by focused tests; the
-common constrained tail mixes segment operations across load/store, EEW
-8/16/32/64, and NF 1..7. Unsupported segment shapes are not silently randomized
-as ordinary LSQ traffic.
+common constrained tail composes segment load/store direction with all four
+addressing modes, EEW/SEW 8/16/32/64, fractional/integer LMUL and derived EMUL,
+and NF 2..8. It enumerates the legal decoder space before weighted selection;
+unsupported shapes are not silently randomized as ordinary LSQ traffic.
 
 The directed segment matrix exhausts all legal NF 2..8 crosses with the 78
 ELEN=64 EEW/SEW/LMUL/EMUL bases for all four addressing modes. Unit-stride and

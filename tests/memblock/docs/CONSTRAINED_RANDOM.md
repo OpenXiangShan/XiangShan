@@ -48,7 +48,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | Field | Meaning |
 | --- | --- |
 | `scalar-load`, `scalar-store` | Relative scalar load/store weights |
-| `vector-load`, `vector-store`, `vector-segment` | Relative vector memory weights; segment is a unit-stride VSegmentUnit transaction stream |
+| `vector-load`, `vector-store`, `vector-segment` | Relative vector memory weights; segment shape is selected by the dimensions below |
 | `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor` | Relative special-operation weights |
 | `atomic-amo`, `atomic-lrsc`, `atomic-cas` | Relative atomic-family weights inside the `atomic` class |
 | `atomic-w`, `atomic-d` | Relative W/D atomic-width weights |
@@ -68,7 +68,11 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `tlb-flush` | Per-mille chance of a legal translation flush before an operation |
 | `misaligned` | Per-mille chance of a misaligned address when width permits it |
 | `vector-corner` | Per-mille chance of corner-biased vector shape/address generation |
-| `vector-segment-store` | Per-mille store share within the vector-segment class; each enabled seed also gates EEW 8/16/32/64 and NF 1..7 |
+| `vector-segment-store` | Per-mille store share within the vector-segment class |
+| `vector-segment-unit-stride`, `vector-segment-strided`, `vector-segment-indexed-unordered`, `vector-segment-indexed-ordered` | Relative segment addressing-mode weights |
+| `vector-segment-eew8` .. `vector-segment-eew64`, `vector-segment-sew8` .. `vector-segment-sew64` | Relative segment index/memory EEW and data SEW weights |
+| `vector-segment-lmul-mf8` .. `vector-segment-lmul-m8`, `vector-segment-emul-mf8` .. `vector-segment-emul-m8` | Relative fractional/integer LMUL and derived EMUL weights. A shape is enabled only when `EMUL = EEW - SEW + LMUL` and both selected weights are nonzero |
+| `vector-segment-nf2` .. `vector-segment-nf8` | Relative segment field-count weights |
 | `probe` | Per-mille chance that a completed cacheable scalar store is followed by a manager-originated dirty Probe sequence |
 | `probe-to-b` | Per-mille share of generated Probe sequences that retain the line in Branch state; the generator follows each with a toN cleanup Probe |
 | `probe-need-data` | Per-mille share of generated Probe sequences that explicitly request data; dirty lines must return exact data even when this is zero |
@@ -119,7 +123,7 @@ scenario implementations:
 | Concurrent operation mix | Base windows overlap scalar load/store, vector load/store, and prefetch; `special-concurrent` can add NC/MMIO loads and records each class | Add more legal dependency-aware window shapes as their upstream scheduling contracts are modeled |
 | Atomic subtype | `atomic-amo`, `atomic-lrsc`, `atomic-cas`, `atomic-w`, and `atomic-d` select legal AMO, LR/SC, and compare-dependent AMOCAS sequences | Cross-hart reservation interference remains integration-level |
 | Hypervisor subtype | `hypervisor-hlv`, `hypervisor-hlvx`, and `hypervisor-hsv` select legal nested-translation HLV/HLVX/HSV operations and independently gate all enabled families | Add alternate mode, PBMT/device, misalignment, and broader PMP crosses to the same class |
-| Vector segment | `vector-segment` and `vector-segment-store` select unit-stride segment load/store streams; every enabled seed gates both directions when requested, all four EEWs, and NF 1..7. The directed oracle already exhausts all four addressing modes and legal NF/EEW/SEW/LMUL/EMUL crosses | Promote addressing mode and LMUL/EMUL into this common constraint interface; keep FOF and redirect as low-rate dimensions with explicit completion obligations |
+| Vector segment | Addressing, EEW, SEW, LMUL, derived EMUL, NF, and load/store direction are composable weights. The generator enumerates only decoder-legal shapes, prioritizes uncovered enabled classes, models complete index groups and index-only uops, and reports/conserves every dimension | Lift FOF and redirect into low-rate common dimensions only after their multi-uop cancellation scheduling is modeled without hidden directed phases |
 | NC/MMIO direction | `nc-store` and `mmio-store` steer load/store direction and each direction has an independent coverage gate | Concurrent special stores remain deferred until multi-store ROB/commit scheduling is modeled |
 | Translation state | Bare/Sv39/Sv48 and all four Sv39/Sv48 x Sv39x4/Sv48x4 pairs are weighted tail contexts; switches occur only at drained boundaries; cold walk/reuse and the legal fence kind/scope matrix are per-seed gates | Distinct-page walks and redirected root/ASID/VMID/MODE/`V` changes with delayed PTW responses are covered by directed matrices; random context changes remain restricted to drained boundaries |
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
@@ -147,6 +151,12 @@ Atomic family weights (AMO/LRSC/CAS) are `8/2/2`, `90/5/5`, and `1/1/1` for
 `coverage`, `spec`, and `corner`; all three use `1/1` W/D weights. Their
 hypervisor family weights (HLV/HLVX/HSV) are `1/1/1`, `90/5/5`, and `1/1/1`.
 Their vector-segment store shares are `500`, `300`, and `500` per mille.
+`coverage` and `corner` weight every segment addressing/EEW/SEW/LMUL/EMUL/NF
+class equally. `spec` favors unit stride (`980/10/5/5` across unit, strided,
+indexed-unordered, indexed-ordered), M1/M2, 32-bit SEW, and small NF while
+retaining a nonzero verification floor for every legal class. Per-seed closure
+temporarily prioritizes uncovered values; subsequent segment choices follow
+the products of the configured dimension weights.
 NC/MMIO store shares are respectively `500/500`, `300/300`, and `500/500`.
 Their legal NC/MMIO overlap rates are `500`, `20`, and `750` per mille.
 All three presets split generated Probes equally between toB/toN and explicit
@@ -235,9 +245,9 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=8`, the resolved target weights,
+Every terminal line prints `constraint_schema=9`, the resolved target weights,
 and actual operation, atomic family/width, hypervisor family, vector-segment
-direction/EEW/NF, NC/MMIO direction, legal special
+direction/addressing/EEW/SEW/LMUL/EMUL/NF, NC/MMIO direction, legal special
 overlap, locality, translation regime/mode/pair, fence kind/scope, cold-walk/
 reuse, TLB-flush, hit/miss, Probe sequence/cap/need-data, all three scalar-load
 wakeup/cancel lanes, IFU software instruction-prefetch observations, and
@@ -260,7 +270,7 @@ backend wakeup by design. When `stride-stream` is enabled, the architectural
 load replay gate therefore uses a counter snapshot taken immediately before
 the prefetcher is enabled. The terminal summary reports that gate window as
 `load_wakeups/load_cancels` and the full simulation as
-`raw_load_wakeups/raw_load_cancels`; schema 8 requires each raw count to be at
+`raw_load_wakeups/raw_load_cancels`; schema 9 requires each raw count to be at
 least its corresponding snapshot count. L2 source-12 observation is checked
 separately, so this separation neither hides prefetch activity nor mistakes it
 for a failed backend load.
