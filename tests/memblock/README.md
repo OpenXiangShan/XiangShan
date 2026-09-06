@@ -381,7 +381,10 @@ are opposite. The DCache must emit one ordinary and one `isKeyword`
 AcquireBlock, accept both 32-byte GrantData beat orders, return two exact
 64-bit values, and emit one GrantAck for each refill. An independent phase
 co-issues two offsets from one cold line while holding its GrantData response
-for 128 cycles; both loads must complete from one merged AcquireBlock.
+for 128 cycles; both loads must complete from one merged AcquireBlock. A third
+phase delays only the noncritical beat of an `isKeyword` refill by 128 cycles.
+The target load must write back after the critical beat, before the second beat
+arrives, and the eventual line drain must not duplicate that writeback.
 
 `load-feedback` observes all three backend scalar-load wakeup lanes and all
 three `ld2Cancel` pins. It checks issue-time `rfWen`, `fpWen`, and `pdest`,

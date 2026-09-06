@@ -1087,6 +1087,7 @@ public:
         latency_profile_ = latency_profile;
         response_latency_stats_ = {};
         forced_next_response_delay_.reset();
+        forced_next_interbeat_delay_.reset();
         force_a_stall_ = enabled;
         force_e_stall_ = enabled;
     }
@@ -1100,6 +1101,11 @@ public:
     void force_next_response_delay(unsigned cycles)
     {
         forced_next_response_delay_ = cycles;
+    }
+
+    void force_next_interbeat_delay(unsigned cycles)
+    {
+        forced_next_interbeat_delay_ = cycles;
     }
 
     void reset_link_state()
@@ -1120,6 +1126,7 @@ public:
         d_gap_ = 0;
         d_presenting_ = false;
         forced_next_response_delay_.reset();
+        forced_next_interbeat_delay_.reset();
         inject_denied_ = false;
         inject_corrupt_ = false;
         force_a_stall_ = random_backpressure_;
@@ -1289,6 +1296,9 @@ public:
                     probe_canceled_count_);
         }
         if (d_fire_) {
+            if (d_beats_.front().opcode == 5) {
+                ++grant_data_beat_count_;
+            }
             d_beats_.pop_front();
             d_presenting_ = false;
             d_gap_ = d_beats_.empty() ? 0 : d_beats_.front().delay_before;
@@ -1353,6 +1363,10 @@ public:
     }
     std::uint64_t probe_stall_cycles() const { return probe_stall_cycles_; }
     std::uint64_t grant_ack_count() const { return grant_ack_count_; }
+    std::uint64_t grant_data_beat_count() const
+    {
+        return grant_data_beat_count_;
+    }
     std::uint64_t grant_ack_stall_cycles() const
     {
         return grant_ack_stall_cycles_;
@@ -1729,6 +1743,11 @@ private:
             response_latency_stats_.sample(delay);
             return delay;
         }
+        if (!first_beat && forced_next_interbeat_delay_) {
+            const unsigned delay = *forced_next_interbeat_delay_;
+            forced_next_interbeat_delay_.reset();
+            return delay;
+        }
         if (!random_backpressure_) {
             return 0;
         }
@@ -1785,6 +1804,7 @@ private:
     std::uint64_t max_probe_outstanding_ = 0;
     std::uint64_t probe_stall_cycles_ = 0;
     std::uint64_t grant_ack_count_ = 0;
+    std::uint64_t grant_data_beat_count_ = 0;
     std::uint64_t grant_ack_stall_cycles_ = 0;
     std::uint8_t next_probe_source_ = 0;
     std::array<bool, 64> probe_sources_seen_{};
@@ -1800,6 +1820,7 @@ private:
     bool inject_denied_ = false;
     bool inject_corrupt_ = false;
     std::optional<unsigned> forced_next_response_delay_;
+    std::optional<unsigned> forced_next_interbeat_delay_;
     std::uint64_t request_stall_cycles_ = 0;
     std::uint64_t response_delay_cycles_ = 0;
     std::string error_;
@@ -3504,6 +3525,11 @@ public:
         memory_agent_.force_next_response_delay(cycles);
     }
 
+    void force_next_dcache_interbeat_delay(unsigned cycles)
+    {
+        memory_agent_.force_next_interbeat_delay(cycles);
+    }
+
     void inject_next_uncache_response_error(bool denied, bool corrupt)
     {
         uncache_agent_.inject_next_response_error(denied, corrupt);
@@ -3947,6 +3973,10 @@ public:
     std::uint64_t dcache_grant_acks() const
     {
         return memory_agent_.grant_ack_count();
+    }
+    std::uint64_t dcache_grant_data_beats() const
+    {
+        return memory_agent_.grant_data_beat_count();
     }
     std::uint64_t dcache_grant_ack_stalls() const
     {

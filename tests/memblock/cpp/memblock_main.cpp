@@ -2032,6 +2032,54 @@ int run_single_load(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment partial(argc, argv);
+    constexpr std::uint64_t partial_line = base + 0x400;
+    partial.memory().fill_incrementing(partial_line, 64, 0xd1);
+    if (!partial.reset()) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL phase=partial-reset reason="
+                  << partial.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction partial_load{
+        .address = partial_line + 0x28,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .sq = 0,
+        .pdest = 9,
+        .lane = 0,
+    };
+    partial.expect_load(partial_load);
+    partial.force_next_dcache_interbeat_delay(128);
+    if (!partial.enqueue_load(partial_load) ||
+        !partial.issue_load(partial_load) ||
+        !partial.run_until_complete(512) ||
+        partial.dcache_keyword_refills() != 1 ||
+        partial.dcache_grant_data_beats() != 1 ||
+        partial.dcache_grant_acks() != 1 || partial.writebacks() != 1) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle=" << partial.cycle()
+                  << " phase=partial-refill-early keyword="
+                  << partial.dcache_keyword_refills() << " grant_beats="
+                  << partial.dcache_grant_data_beats() << " grant_acks="
+                  << partial.dcache_grant_acks() << " writebacks="
+                  << partial.writebacks() << " reason=" << partial.error()
+                  << '\n';
+        return 1;
+    }
+    const std::uint64_t partial_writeback_cycle = partial.cycle();
+    if (!partial.run_cycles(256) ||
+        partial.dcache_grant_data_beats() != 2 ||
+        partial.dcache_grant_acks() != 1 || partial.writebacks() != 1 ||
+        !partial.dcache_grants_drained()) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle=" << partial.cycle()
+                  << " phase=partial-refill-drain grant_beats="
+                  << partial.dcache_grant_data_beats() << " grant_acks="
+                  << partial.dcache_grant_acks() << " writebacks="
+                  << partial.writebacks() << " reason=" << partial.error()
+                  << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_SINGLE_LOAD_PASS"
               << " cycle=" << environment.cycle()
               << " tilelink_requests=" << environment.tilelink_requests()
@@ -2043,6 +2091,10 @@ int run_single_load(int argc, char **argv)
               << " merged_loads=" << merged_loads.size()
               << " merge_refills=" << merge.dcache_refills()
               << " merge_cycles=" << merge.cycle()
+              << " partial_writeback_cycle=" << partial_writeback_cycle
+              << " partial_grant_beats="
+              << partial.dcache_grant_data_beats()
+              << " partial_cycles=" << partial.cycle()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

@@ -12,7 +12,7 @@ REPO_ROOT = MEMBLOCK_ROOT.parents[1]
 
 
 class MemBlockEnvironmentContractTest(unittest.TestCase):
-    def test_single_load_covers_both_refill_beat_orders(self) -> None:
+    def test_single_load_covers_refill_order_merge_and_partial_progress(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
         miss_queue = (
@@ -32,6 +32,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "phase=same-line-merge",
             "merged_loads=",
             "merge_refills=",
+            "force_next_dcache_interbeat_delay(128)",
+            "dcache_grant_data_beats()",
+            "phase=partial-refill-early",
+            "phase=partial-refill-drain",
+            "partial_writeback_cycle=",
         ):
             self.assertIn(contract, environment + driver)
         self.assertIn(
