@@ -19419,7 +19419,15 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     for (const auto &field : fields) {
                         environment.record_committed_vector_store(field);
                     }
-                    probe_candidate = address & ~std::uint64_t{63};
+                    const std::uint16_t active =
+                        memblock::active_vector_elements(fields.front());
+                    for (unsigned element = 0; element < elements; ++element) {
+                        if (((active >> element) & 1U) != 0) {
+                            probe_candidate = memblock::vector_element_address(
+                                fields.front(), element) & ~std::uint64_t{63};
+                            break;
+                        }
+                    }
                 }
                 ++actions;
                 ++constraint_coverage.vector_segment_directions[
