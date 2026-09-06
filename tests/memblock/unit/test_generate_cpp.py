@@ -42,6 +42,15 @@ class GenerateCppTest(unittest.TestCase):
         self.assertIn("sample_ifetch_prefetch", rendered)
         self.assertIn("sample_hardware_prefetch_outputs", rendered)
         self.assertIn("auto_inner_l2_pf_sender_out_pf_source", rendered)
+        self.assertIn("kHcPerfEventInputCount = 68", rendered)
+        self.assertIn("kHcPerfEventOutputCount = 68", rendered)
+        self.assertIn("kHcPerfEventFirstSharedLane = 1", rendered)
+        self.assertIn("kHcPerfEventLastSharedLane = 67", rendered)
+        self.assertIn("drive_hc_perf_event", rendered)
+        self.assertIn("sample_hc_perf_event_input", rendered)
+        self.assertIn("sample_hc_perf_event_output", rendered)
+        self.assertIn("io_outer_hc_perfEvents_68_value.ImmSet", rendered)
+        self.assertIn("io_inner_hc_perfEvents_0_value.U()", rendered)
         self.assertIn("item.store_set_hit", rendered)
         self.assertIn("item.ftq_ptr", rendered)
         self.assertIn("dut.io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_0.ImmSet((item.exception_mask >> 0) & 1U)", rendered)
@@ -162,6 +171,28 @@ class GenerateCppTest(unittest.TestCase):
         }
         with self.assertRaises(generate_cpp.CppGenerationError):
             generate_cpp.render(manifest)
+
+    def test_rejects_sparse_perf_event_bridge_lanes(self) -> None:
+        manifest = {
+            "ports": [
+                {
+                    "name": "io_outer_hc_perfEvents_1_value",
+                    "direction": "input",
+                },
+                {
+                    "name": "io_outer_hc_perfEvents_3_value",
+                    "direction": "input",
+                },
+                {
+                    "name": "io_inner_hc_perfEvents_1_value",
+                    "direction": "output",
+                },
+            ],
+        }
+        with self.assertRaisesRegex(
+            generate_cpp.CppGenerationError, "input lanes are not contiguous"
+        ):
+            generate_cpp.render_top_bridge_adapters(manifest)
 
 
 if __name__ == "__main__":

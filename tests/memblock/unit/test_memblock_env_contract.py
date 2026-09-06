@@ -190,10 +190,21 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "reset vector violated one-cycle delay",
             "CPU halt violated one-cycle delay",
             "CPU critical error violated one-cycle delay",
+            "drive_top_bridge_stimulus",
+            "MSI acknowledgement did not pass through combinationally",
+            "frontend reset bypass did not pass through combinationally",
+            "I-cache BEU metadata violated one-cycle delay",
+            "MSI information violated valid-gated one-cycle delay",
+            "CLINT time violated valid-gated one-cycle delay",
+            "hardware-counter perf event violated one-cycle delay",
+            "L2 prefetch control violated two-cycle delay",
             "top-control-contracts",
             "boolean_combinations=8",
             "hart_patterns=",
             "reset_vector_patterns=",
+            "bridge_patterns=32",
+            "l2_prefetch_combinations=32",
+            "perf_event_shared_lanes=",
         ):
             self.assertIn(contract, environment + driver + makefile + benchmark)
         for contract in (
@@ -202,6 +213,13 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "io.outer_cpu_halt := RegNext",
             "io.outer_power_down_en := io.ooo_to_mem.csrCtrl.power_down_enable",
             "io.outer_cpu_critical_error := RegNext",
+            "x.msiInfo           := DelayNWithValid",
+            "x.clintTime         := DelayNWithValid",
+            "io.outer_msi_ack := io.ooo_to_mem.backendToTopBypass.msiAck",
+            "io.outer_beu_errors_icache := RegNext",
+            "io.inner_hc_perfEvents <> RegNext",
+            "io.outer_l2PfCtrl := DelayN",
+            "io.resetInFrontendBypass.toL2Top := io.resetInFrontendBypass.fromFrontend",
         ):
             self.assertIn(contract, memblock)
 

@@ -34,6 +34,110 @@ def matching_lanes(port_names: set[str], pattern: str) -> list[int]:
     )
 
 
+def render_top_bridge_adapters(manifest: dict[str, Any]) -> list[str]:
+    """Render indexed accessors for flattened hardware-counter event vectors."""
+    input_names = {
+        port["name"]
+        for port in manifest["ports"]
+        if port["direction"] == "input"
+    }
+    output_names = {
+        port["name"]
+        for port in manifest["ports"]
+        if port["direction"] == "output"
+    }
+    input_lanes = matching_lanes(
+        input_names, r"io_outer_hc_perfEvents_([0-9]+)_value"
+    )
+    output_lanes = matching_lanes(
+        output_names, r"io_inner_hc_perfEvents_([0-9]+)_value"
+    )
+    if not input_lanes and not output_lanes:
+        return []
+    if not input_lanes or not output_lanes:
+        raise CppGenerationError(
+            "hardware-counter perf-event bridge is missing one direction"
+        )
+    for label, lanes in (("input", input_lanes), ("output", output_lanes)):
+        if lanes != list(range(min(lanes), max(lanes) + 1)):
+            raise CppGenerationError(
+                f"hardware-counter perf-event {label} lanes are not contiguous"
+            )
+
+    shared_lanes = sorted(set(input_lanes) & set(output_lanes))
+    if not shared_lanes:
+        raise CppGenerationError(
+            "hardware-counter perf-event bridge has no observable shared lane"
+        )
+    if shared_lanes != list(range(min(shared_lanes), max(shared_lanes) + 1)):
+        raise CppGenerationError(
+            "hardware-counter perf-event shared lanes are not contiguous"
+        )
+    lines = [
+        f"inline constexpr unsigned kHcPerfEventInputCount = {len(input_lanes)};",
+        f"inline constexpr unsigned kHcPerfEventOutputCount = {len(output_lanes)};",
+        f"inline constexpr unsigned kHcPerfEventFirstInputLane = {min(input_lanes)};",
+        f"inline constexpr unsigned kHcPerfEventHighestInputLane = {max(input_lanes)};",
+        f"inline constexpr unsigned kHcPerfEventFirstOutputLane = {min(output_lanes)};",
+        f"inline constexpr unsigned kHcPerfEventHighestOutputLane = {max(output_lanes)};",
+        f"inline constexpr unsigned kHcPerfEventFirstSharedLane = {min(shared_lanes)};",
+        f"inline constexpr unsigned kHcPerfEventLastSharedLane = {max(shared_lanes)};",
+        "",
+        "inline void drive_hc_perf_event(",
+        "    UTMemBlock &dut, unsigned lane, std::uint8_t value)",
+        "{",
+        "    switch (lane) {",
+    ]
+    for lane in input_lanes:
+        lines.append(
+            f"    case {lane}: dut.io_outer_hc_perfEvents_{lane}_value.ImmSet(value & 0x3fU); return;"
+        )
+    lines.extend(
+        [
+            "    default:",
+            '        throw std::out_of_range("invalid hardware-counter perf-event input lane");',
+            "    }",
+            "}",
+            "",
+            "inline std::uint8_t sample_hc_perf_event_input(",
+            "    UTMemBlock &dut, unsigned lane)",
+            "{",
+            "    switch (lane) {",
+        ]
+    )
+    for lane in input_lanes:
+        lines.append(
+            f"    case {lane}: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_{lane}_value.U());"
+        )
+    lines.extend(
+        [
+            "    default:",
+            '        throw std::out_of_range("invalid hardware-counter perf-event input lane");',
+            "    }",
+            "}",
+            "",
+            "inline std::uint8_t sample_hc_perf_event_output(",
+            "    UTMemBlock &dut, unsigned lane)",
+            "{",
+            "    switch (lane) {",
+        ]
+    )
+    for lane in output_lanes:
+        lines.append(
+            f"    case {lane}: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_{lane}_value.U());"
+        )
+    lines.extend(
+        [
+            "    default:",
+            '        throw std::out_of_range("invalid hardware-counter perf-event output lane");',
+            "    }",
+            "}",
+            "",
+        ]
+    )
+    return lines
+
+
 def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
     """Render typed adapters only when the complete MemBlock interfaces exist."""
     port_names = {port["name"] for port in manifest["ports"]}
@@ -1134,6 +1238,7 @@ def render(manifest: dict[str, Any]) -> str:
         ]
     )
     lines.extend(render_pin_space_helpers(manifest))
+    lines.extend(render_top_bridge_adapters(manifest))
     lines.extend(render_lane_adapters(manifest))
     lines.extend(render_vector_adapters(manifest))
     lines.extend(

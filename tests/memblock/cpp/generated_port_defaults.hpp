@@ -9960,6 +9960,246 @@ inline constexpr unsigned kSweptInputBitCount = 7153U;
 inline constexpr unsigned kSampledOutputBitCount = 5434U;
 inline constexpr unsigned kPinSpacePatternCount = 256U;
 
+inline constexpr unsigned kHcPerfEventInputCount = 68;
+inline constexpr unsigned kHcPerfEventOutputCount = 68;
+inline constexpr unsigned kHcPerfEventFirstInputLane = 1;
+inline constexpr unsigned kHcPerfEventHighestInputLane = 68;
+inline constexpr unsigned kHcPerfEventFirstOutputLane = 0;
+inline constexpr unsigned kHcPerfEventHighestOutputLane = 67;
+inline constexpr unsigned kHcPerfEventFirstSharedLane = 1;
+inline constexpr unsigned kHcPerfEventLastSharedLane = 67;
+
+inline void drive_hc_perf_event(
+    UTMemBlock &dut, unsigned lane, std::uint8_t value)
+{
+    switch (lane) {
+    case 1: dut.io_outer_hc_perfEvents_1_value.ImmSet(value & 0x3fU); return;
+    case 2: dut.io_outer_hc_perfEvents_2_value.ImmSet(value & 0x3fU); return;
+    case 3: dut.io_outer_hc_perfEvents_3_value.ImmSet(value & 0x3fU); return;
+    case 4: dut.io_outer_hc_perfEvents_4_value.ImmSet(value & 0x3fU); return;
+    case 5: dut.io_outer_hc_perfEvents_5_value.ImmSet(value & 0x3fU); return;
+    case 6: dut.io_outer_hc_perfEvents_6_value.ImmSet(value & 0x3fU); return;
+    case 7: dut.io_outer_hc_perfEvents_7_value.ImmSet(value & 0x3fU); return;
+    case 8: dut.io_outer_hc_perfEvents_8_value.ImmSet(value & 0x3fU); return;
+    case 9: dut.io_outer_hc_perfEvents_9_value.ImmSet(value & 0x3fU); return;
+    case 10: dut.io_outer_hc_perfEvents_10_value.ImmSet(value & 0x3fU); return;
+    case 11: dut.io_outer_hc_perfEvents_11_value.ImmSet(value & 0x3fU); return;
+    case 12: dut.io_outer_hc_perfEvents_12_value.ImmSet(value & 0x3fU); return;
+    case 13: dut.io_outer_hc_perfEvents_13_value.ImmSet(value & 0x3fU); return;
+    case 14: dut.io_outer_hc_perfEvents_14_value.ImmSet(value & 0x3fU); return;
+    case 15: dut.io_outer_hc_perfEvents_15_value.ImmSet(value & 0x3fU); return;
+    case 16: dut.io_outer_hc_perfEvents_16_value.ImmSet(value & 0x3fU); return;
+    case 17: dut.io_outer_hc_perfEvents_17_value.ImmSet(value & 0x3fU); return;
+    case 18: dut.io_outer_hc_perfEvents_18_value.ImmSet(value & 0x3fU); return;
+    case 19: dut.io_outer_hc_perfEvents_19_value.ImmSet(value & 0x3fU); return;
+    case 20: dut.io_outer_hc_perfEvents_20_value.ImmSet(value & 0x3fU); return;
+    case 21: dut.io_outer_hc_perfEvents_21_value.ImmSet(value & 0x3fU); return;
+    case 22: dut.io_outer_hc_perfEvents_22_value.ImmSet(value & 0x3fU); return;
+    case 23: dut.io_outer_hc_perfEvents_23_value.ImmSet(value & 0x3fU); return;
+    case 24: dut.io_outer_hc_perfEvents_24_value.ImmSet(value & 0x3fU); return;
+    case 25: dut.io_outer_hc_perfEvents_25_value.ImmSet(value & 0x3fU); return;
+    case 26: dut.io_outer_hc_perfEvents_26_value.ImmSet(value & 0x3fU); return;
+    case 27: dut.io_outer_hc_perfEvents_27_value.ImmSet(value & 0x3fU); return;
+    case 28: dut.io_outer_hc_perfEvents_28_value.ImmSet(value & 0x3fU); return;
+    case 29: dut.io_outer_hc_perfEvents_29_value.ImmSet(value & 0x3fU); return;
+    case 30: dut.io_outer_hc_perfEvents_30_value.ImmSet(value & 0x3fU); return;
+    case 31: dut.io_outer_hc_perfEvents_31_value.ImmSet(value & 0x3fU); return;
+    case 32: dut.io_outer_hc_perfEvents_32_value.ImmSet(value & 0x3fU); return;
+    case 33: dut.io_outer_hc_perfEvents_33_value.ImmSet(value & 0x3fU); return;
+    case 34: dut.io_outer_hc_perfEvents_34_value.ImmSet(value & 0x3fU); return;
+    case 35: dut.io_outer_hc_perfEvents_35_value.ImmSet(value & 0x3fU); return;
+    case 36: dut.io_outer_hc_perfEvents_36_value.ImmSet(value & 0x3fU); return;
+    case 37: dut.io_outer_hc_perfEvents_37_value.ImmSet(value & 0x3fU); return;
+    case 38: dut.io_outer_hc_perfEvents_38_value.ImmSet(value & 0x3fU); return;
+    case 39: dut.io_outer_hc_perfEvents_39_value.ImmSet(value & 0x3fU); return;
+    case 40: dut.io_outer_hc_perfEvents_40_value.ImmSet(value & 0x3fU); return;
+    case 41: dut.io_outer_hc_perfEvents_41_value.ImmSet(value & 0x3fU); return;
+    case 42: dut.io_outer_hc_perfEvents_42_value.ImmSet(value & 0x3fU); return;
+    case 43: dut.io_outer_hc_perfEvents_43_value.ImmSet(value & 0x3fU); return;
+    case 44: dut.io_outer_hc_perfEvents_44_value.ImmSet(value & 0x3fU); return;
+    case 45: dut.io_outer_hc_perfEvents_45_value.ImmSet(value & 0x3fU); return;
+    case 46: dut.io_outer_hc_perfEvents_46_value.ImmSet(value & 0x3fU); return;
+    case 47: dut.io_outer_hc_perfEvents_47_value.ImmSet(value & 0x3fU); return;
+    case 48: dut.io_outer_hc_perfEvents_48_value.ImmSet(value & 0x3fU); return;
+    case 49: dut.io_outer_hc_perfEvents_49_value.ImmSet(value & 0x3fU); return;
+    case 50: dut.io_outer_hc_perfEvents_50_value.ImmSet(value & 0x3fU); return;
+    case 51: dut.io_outer_hc_perfEvents_51_value.ImmSet(value & 0x3fU); return;
+    case 52: dut.io_outer_hc_perfEvents_52_value.ImmSet(value & 0x3fU); return;
+    case 53: dut.io_outer_hc_perfEvents_53_value.ImmSet(value & 0x3fU); return;
+    case 54: dut.io_outer_hc_perfEvents_54_value.ImmSet(value & 0x3fU); return;
+    case 55: dut.io_outer_hc_perfEvents_55_value.ImmSet(value & 0x3fU); return;
+    case 56: dut.io_outer_hc_perfEvents_56_value.ImmSet(value & 0x3fU); return;
+    case 57: dut.io_outer_hc_perfEvents_57_value.ImmSet(value & 0x3fU); return;
+    case 58: dut.io_outer_hc_perfEvents_58_value.ImmSet(value & 0x3fU); return;
+    case 59: dut.io_outer_hc_perfEvents_59_value.ImmSet(value & 0x3fU); return;
+    case 60: dut.io_outer_hc_perfEvents_60_value.ImmSet(value & 0x3fU); return;
+    case 61: dut.io_outer_hc_perfEvents_61_value.ImmSet(value & 0x3fU); return;
+    case 62: dut.io_outer_hc_perfEvents_62_value.ImmSet(value & 0x3fU); return;
+    case 63: dut.io_outer_hc_perfEvents_63_value.ImmSet(value & 0x3fU); return;
+    case 64: dut.io_outer_hc_perfEvents_64_value.ImmSet(value & 0x3fU); return;
+    case 65: dut.io_outer_hc_perfEvents_65_value.ImmSet(value & 0x3fU); return;
+    case 66: dut.io_outer_hc_perfEvents_66_value.ImmSet(value & 0x3fU); return;
+    case 67: dut.io_outer_hc_perfEvents_67_value.ImmSet(value & 0x3fU); return;
+    case 68: dut.io_outer_hc_perfEvents_68_value.ImmSet(value & 0x3fU); return;
+    default:
+        throw std::out_of_range("invalid hardware-counter perf-event input lane");
+    }
+}
+
+inline std::uint8_t sample_hc_perf_event_input(
+    UTMemBlock &dut, unsigned lane)
+{
+    switch (lane) {
+    case 1: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_1_value.U());
+    case 2: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_2_value.U());
+    case 3: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_3_value.U());
+    case 4: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_4_value.U());
+    case 5: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_5_value.U());
+    case 6: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_6_value.U());
+    case 7: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_7_value.U());
+    case 8: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_8_value.U());
+    case 9: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_9_value.U());
+    case 10: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_10_value.U());
+    case 11: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_11_value.U());
+    case 12: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_12_value.U());
+    case 13: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_13_value.U());
+    case 14: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_14_value.U());
+    case 15: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_15_value.U());
+    case 16: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_16_value.U());
+    case 17: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_17_value.U());
+    case 18: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_18_value.U());
+    case 19: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_19_value.U());
+    case 20: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_20_value.U());
+    case 21: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_21_value.U());
+    case 22: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_22_value.U());
+    case 23: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_23_value.U());
+    case 24: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_24_value.U());
+    case 25: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_25_value.U());
+    case 26: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_26_value.U());
+    case 27: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_27_value.U());
+    case 28: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_28_value.U());
+    case 29: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_29_value.U());
+    case 30: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_30_value.U());
+    case 31: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_31_value.U());
+    case 32: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_32_value.U());
+    case 33: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_33_value.U());
+    case 34: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_34_value.U());
+    case 35: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_35_value.U());
+    case 36: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_36_value.U());
+    case 37: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_37_value.U());
+    case 38: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_38_value.U());
+    case 39: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_39_value.U());
+    case 40: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_40_value.U());
+    case 41: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_41_value.U());
+    case 42: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_42_value.U());
+    case 43: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_43_value.U());
+    case 44: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_44_value.U());
+    case 45: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_45_value.U());
+    case 46: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_46_value.U());
+    case 47: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_47_value.U());
+    case 48: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_48_value.U());
+    case 49: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_49_value.U());
+    case 50: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_50_value.U());
+    case 51: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_51_value.U());
+    case 52: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_52_value.U());
+    case 53: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_53_value.U());
+    case 54: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_54_value.U());
+    case 55: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_55_value.U());
+    case 56: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_56_value.U());
+    case 57: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_57_value.U());
+    case 58: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_58_value.U());
+    case 59: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_59_value.U());
+    case 60: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_60_value.U());
+    case 61: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_61_value.U());
+    case 62: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_62_value.U());
+    case 63: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_63_value.U());
+    case 64: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_64_value.U());
+    case 65: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_65_value.U());
+    case 66: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_66_value.U());
+    case 67: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_67_value.U());
+    case 68: return static_cast<std::uint8_t>(dut.io_outer_hc_perfEvents_68_value.U());
+    default:
+        throw std::out_of_range("invalid hardware-counter perf-event input lane");
+    }
+}
+
+inline std::uint8_t sample_hc_perf_event_output(
+    UTMemBlock &dut, unsigned lane)
+{
+    switch (lane) {
+    case 0: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_0_value.U());
+    case 1: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_1_value.U());
+    case 2: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_2_value.U());
+    case 3: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_3_value.U());
+    case 4: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_4_value.U());
+    case 5: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_5_value.U());
+    case 6: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_6_value.U());
+    case 7: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_7_value.U());
+    case 8: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_8_value.U());
+    case 9: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_9_value.U());
+    case 10: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_10_value.U());
+    case 11: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_11_value.U());
+    case 12: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_12_value.U());
+    case 13: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_13_value.U());
+    case 14: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_14_value.U());
+    case 15: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_15_value.U());
+    case 16: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_16_value.U());
+    case 17: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_17_value.U());
+    case 18: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_18_value.U());
+    case 19: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_19_value.U());
+    case 20: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_20_value.U());
+    case 21: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_21_value.U());
+    case 22: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_22_value.U());
+    case 23: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_23_value.U());
+    case 24: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_24_value.U());
+    case 25: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_25_value.U());
+    case 26: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_26_value.U());
+    case 27: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_27_value.U());
+    case 28: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_28_value.U());
+    case 29: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_29_value.U());
+    case 30: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_30_value.U());
+    case 31: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_31_value.U());
+    case 32: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_32_value.U());
+    case 33: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_33_value.U());
+    case 34: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_34_value.U());
+    case 35: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_35_value.U());
+    case 36: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_36_value.U());
+    case 37: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_37_value.U());
+    case 38: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_38_value.U());
+    case 39: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_39_value.U());
+    case 40: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_40_value.U());
+    case 41: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_41_value.U());
+    case 42: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_42_value.U());
+    case 43: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_43_value.U());
+    case 44: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_44_value.U());
+    case 45: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_45_value.U());
+    case 46: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_46_value.U());
+    case 47: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_47_value.U());
+    case 48: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_48_value.U());
+    case 49: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_49_value.U());
+    case 50: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_50_value.U());
+    case 51: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_51_value.U());
+    case 52: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_52_value.U());
+    case 53: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_53_value.U());
+    case 54: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_54_value.U());
+    case 55: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_55_value.U());
+    case 56: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_56_value.U());
+    case 57: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_57_value.U());
+    case 58: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_58_value.U());
+    case 59: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_59_value.U());
+    case 60: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_60_value.U());
+    case 61: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_61_value.U());
+    case 62: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_62_value.U());
+    case 63: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_63_value.U());
+    case 64: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_64_value.U());
+    case 65: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_65_value.U());
+    case 66: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_66_value.U());
+    case 67: return static_cast<std::uint8_t>(dut.io_inner_hc_perfEvents_67_value.U());
+    default:
+        throw std::out_of_range("invalid hardware-counter perf-event output lane");
+    }
+}
+
 inline constexpr unsigned kLsqEnqueueLanes = 6;
 
 struct LsqEnqueue {

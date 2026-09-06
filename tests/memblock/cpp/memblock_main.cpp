@@ -2009,21 +2009,84 @@ int run_top_control_contracts(int argc, char **argv)
         previous_halt = cpu_halted;
         previous_error = cpu_critical_error;
     }
+
+    std::uint32_t prefetch_control_bitmap = 0;
+    unsigned msi_clint_valid_bitmap = 0;
+    std::uint64_t perf_value_bitmap = 0;
+    bool saw_zero_delay = false;
+    bool saw_max_delay = false;
+    for (unsigned index = 0; index < 32; ++index) {
+        memblock::TopBridgeStimulus stimulus;
+        stimulus.msi_info_valid = (index & 1U) != 0;
+        stimulus.clint_time_valid = (index & 2U) != 0;
+        stimulus.beu_valid = (index & 4U) != 0;
+        stimulus.msi_ack = (index & 8U) != 0;
+        stimulus.frontend_reset = (index & 16U) != 0;
+        stimulus.beu_address =
+            (0x123456789abcULL ^ (std::uint64_t{index} << 36)) &
+            0xffffffffffffULL;
+        stimulus.msi_info = static_cast<std::uint16_t>(
+            (0x5a5U ^ (index * 0x91U)) & 0xfffU);
+        stimulus.clint_time =
+            0x0123456789abcdefULL ^
+            (std::uint64_t{index} * 0x1111111111111111ULL);
+        for (unsigned lane = memblock::generated::kHcPerfEventFirstInputLane;
+             lane <= memblock::generated::kHcPerfEventHighestInputLane;
+             ++lane) {
+            const auto value = static_cast<std::uint8_t>(
+                (lane + index * 17U) & 0x3fU);
+            stimulus.hc_perf_events[lane] = value;
+            perf_value_bitmap |= std::uint64_t{1} << value;
+        }
+        stimulus.l2_prefetch = {
+            .master_enable = (index & 1U) != 0,
+            .receive_enable = (index & 2U) != 0,
+            .pbop_enable = (index & 4U) != 0,
+            .vbop_enable = (index & 8U) != 0,
+            .tp_enable = (index & 16U) != 0,
+            .delay_latency = static_cast<std::uint16_t>(
+                index == 0 ? 0 : index == 31 ? 0x3ff : index * 31U),
+        };
+        prefetch_control_bitmap |= std::uint32_t{1} << index;
+        msi_clint_valid_bitmap |=
+            1U << ((stimulus.msi_info_valid ? 1U : 0U) |
+                   (stimulus.clint_time_valid ? 2U : 0U));
+        saw_zero_delay |= stimulus.l2_prefetch.delay_latency == 0;
+        saw_max_delay |= stimulus.l2_prefetch.delay_latency == 0x3ff;
+        environment.drive_top_bridge_stimulus(stimulus);
+        if (!environment.run_cycles(1)) {
+            std::cerr << "MEMBLOCK_TOP_CONTROL_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=bridge index="
+                      << index << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
     environment.drive_top_controls(0, 0, false, false, false);
-    if (!environment.run_cycles(2) || environment.backend_hart_id() != 0 ||
+    environment.drive_top_bridge_stimulus({});
+    if (!environment.run_cycles(3) || environment.backend_hart_id() != 0 ||
         environment.inner_reset_vector() != 0 ||
         environment.outer_power_down_enabled() ||
         environment.outer_cpu_halted() ||
         environment.outer_cpu_critical_error() ||
         boolean_cross_bitmap != 0xff || power_transitions < 7 ||
-        halt_transitions < 3 || error_transitions < 1) {
+        halt_transitions < 3 || error_transitions < 1 ||
+        prefetch_control_bitmap != 0xffffffffU ||
+        msi_clint_valid_bitmap != 0xfU ||
+        perf_value_bitmap != ~std::uint64_t{0} ||
+        !saw_zero_delay || !saw_max_delay) {
         std::cerr << "MEMBLOCK_TOP_CONTROL_CONTRACTS_FAIL cycle="
                   << environment.cycle() << " phase=coverage"
                   << " boolean_cross_bitmap=0x" << std::hex
-                  << boolean_cross_bitmap << std::dec
+                  << boolean_cross_bitmap
+                  << " prefetch_control_bitmap=0x"
+                  << prefetch_control_bitmap
+                  << " msi_clint_valid_bitmap=0x"
+                  << msi_clint_valid_bitmap
+                  << " perf_value_bitmap=0x" << perf_value_bitmap << std::dec
                   << " transitions=" << power_transitions << ','
                   << halt_transitions << ',' << error_transitions
-                  << " checks=" << environment.top_control_checks()
+                  << " control_checks=" << environment.top_control_checks()
+                  << " bridge_checks=" << environment.top_bridge_checks()
                   << " reason=" << environment.error() << '\n';
         return 1;
     }
@@ -2035,7 +2098,14 @@ int run_top_control_contracts(int argc, char **argv)
               << " reset_vector_patterns=" << reset_vectors.size()
               << " transitions=" << power_transitions << ','
               << halt_transitions << ',' << error_transitions
-              << " delay_checks=" << environment.top_control_checks()
+              << " bridge_patterns=32"
+              << " l2_prefetch_combinations=32"
+              << " perf_event_shared_lanes="
+              << memblock::generated::kHcPerfEventLastSharedLane -
+                     memblock::generated::kHcPerfEventFirstSharedLane + 1
+              << " perf_event_values=64"
+              << " control_checks=" << environment.top_control_checks()
+              << " bridge_checks=" << environment.top_bridge_checks()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

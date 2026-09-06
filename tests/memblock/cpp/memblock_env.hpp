@@ -3294,6 +3294,32 @@ private:
     std::string error_;
 };
 
+struct L2PrefetchControl {
+    bool master_enable = false;
+    bool receive_enable = false;
+    bool pbop_enable = false;
+    bool vbop_enable = false;
+    bool tp_enable = false;
+    std::uint16_t delay_latency = 0;
+
+    bool operator==(const L2PrefetchControl &) const = default;
+};
+
+struct TopBridgeStimulus {
+    bool msi_ack = false;
+    bool frontend_reset = false;
+    bool beu_valid = false;
+    std::uint64_t beu_address = 0;
+    bool msi_info_valid = false;
+    std::uint16_t msi_info = 0;
+    bool clint_time_valid = false;
+    std::uint64_t clint_time = 0;
+    std::array<
+        std::uint8_t, generated::kHcPerfEventHighestInputLane + 1>
+        hc_perf_events{};
+    L2PrefetchControl l2_prefetch{};
+};
+
 class Environment {
     struct VectorReplayRequest {
         unsigned lane;
@@ -5878,6 +5904,46 @@ public:
         return top_control_checks_;
     }
 
+    void drive_top_bridge_stimulus(const TopBridgeStimulus &stimulus)
+    {
+        dut_.io_ooo_to_mem_backendToTopBypass_msiAck.ImmSet(stimulus.msi_ack);
+        dut_.io_resetInFrontendBypass_fromFrontend.ImmSet(
+            stimulus.frontend_reset);
+        dut_.io_inner_beu_errors_icache_ecc_error_valid.ImmSet(
+            stimulus.beu_valid);
+        dut_.io_inner_beu_errors_icache_ecc_error_bits.ImmSet(
+            stimulus.beu_address & ((std::uint64_t{1} << 48) - 1U));
+        dut_.io_fromTopToBackend_msiInfo_valid.ImmSet(
+            stimulus.msi_info_valid);
+        dut_.io_fromTopToBackend_msiInfo_bits.ImmSet(
+            stimulus.msi_info & 0xfffU);
+        dut_.io_fromTopToBackend_clintTime_valid.ImmSet(
+            stimulus.clint_time_valid);
+        dut_.io_fromTopToBackend_clintTime_bits.ImmSet(stimulus.clint_time);
+        for (unsigned lane = generated::kHcPerfEventFirstInputLane;
+             lane <= generated::kHcPerfEventHighestInputLane; ++lane) {
+            generated::drive_hc_perf_event(
+                dut_, lane, stimulus.hc_perf_events[lane]);
+        }
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_enable.ImmSet(
+            stimulus.l2_prefetch.master_enable);
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_recv_enable.ImmSet(
+            stimulus.l2_prefetch.receive_enable);
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_pbop_enable.ImmSet(
+            stimulus.l2_prefetch.pbop_enable);
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_vbop_enable.ImmSet(
+            stimulus.l2_prefetch.vbop_enable);
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_tp_enable.ImmSet(
+            stimulus.l2_prefetch.tp_enable);
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency.ImmSet(
+            stimulus.l2_prefetch.delay_latency & 0x3ffU);
+    }
+
+    std::uint64_t top_bridge_checks() const
+    {
+        return top_bridge_checks_;
+    }
+
     bool set_sbuffer_timeout(std::uint32_t cycles)
     {
         constexpr std::uint32_t timeout_width = 22;
@@ -7904,6 +7970,44 @@ private:
             dut_.io_ooo_to_mem_backendToTopBypass_cpuHalted.B();
         const bool cpu_critical_error_input =
             dut_.io_ooo_to_mem_backendToTopBypass_cpuCriticalError.B();
+        const bool msi_ack_input =
+            dut_.io_ooo_to_mem_backendToTopBypass_msiAck.B();
+        const bool frontend_reset_input =
+            dut_.io_resetInFrontendBypass_fromFrontend.B();
+        const bool beu_valid_input =
+            dut_.io_inner_beu_errors_icache_ecc_error_valid.B();
+        const std::uint64_t beu_address_input =
+            dut_.io_inner_beu_errors_icache_ecc_error_bits.U();
+        const bool msi_info_valid_input =
+            dut_.io_fromTopToBackend_msiInfo_valid.B();
+        const std::uint16_t msi_info_input = static_cast<std::uint16_t>(
+            dut_.io_fromTopToBackend_msiInfo_bits.U());
+        const bool clint_time_valid_input =
+            dut_.io_fromTopToBackend_clintTime_valid.B();
+        const std::uint64_t clint_time_input =
+            dut_.io_fromTopToBackend_clintTime_bits.U();
+        std::array<
+            std::uint8_t, generated::kHcPerfEventHighestInputLane + 1>
+            hc_perf_event_inputs{};
+        for (unsigned lane = generated::kHcPerfEventFirstInputLane;
+             lane <= generated::kHcPerfEventHighestInputLane; ++lane) {
+            hc_perf_event_inputs[lane] =
+                generated::sample_hc_perf_event_input(dut_, lane);
+        }
+        const L2PrefetchControl l2_prefetch_input{
+            .master_enable =
+                dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_enable.B(),
+            .receive_enable =
+                dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_recv_enable.B(),
+            .pbop_enable =
+                dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_pbop_enable.B(),
+            .vbop_enable =
+                dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_vbop_enable.B(),
+            .tp_enable =
+                dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_tp_enable.B(),
+            .delay_latency = static_cast<std::uint16_t>(
+                dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency.U()),
+        };
 
         // Writeback valid is a combinational projection of the execution-unit
         // output fire.  Observe the pins before the clock edge; after Step()
@@ -7935,6 +8039,59 @@ private:
             if (dut_.io_outer_cpu_critical_error.B() !=
                 expected_cpu_critical_error_) {
                 error_ = "CPU critical error violated one-cycle delay";
+            }
+            ++top_bridge_checks_;
+            if (dut_.io_outer_msi_ack.B() != msi_ack_input) {
+                error_ = "MSI acknowledgement did not pass through combinationally";
+            }
+            if (dut_.io_resetInFrontendBypass_toL2Top.B() !=
+                frontend_reset_input) {
+                error_ = "frontend reset bypass did not pass through combinationally";
+            }
+            if (dut_.io_outer_beu_errors_icache_ecc_error_valid.B() !=
+                    expected_beu_valid_ ||
+                dut_.io_outer_beu_errors_icache_ecc_error_bits.U() !=
+                    expected_beu_address_) {
+                error_ = "I-cache BEU metadata violated one-cycle delay";
+            }
+            if (dut_.io_mem_to_ooo_topToBackendBypass_msiInfo_valid.B() !=
+                    expected_msi_info_valid_ ||
+                (expected_msi_info_valid_ &&
+                 dut_.io_mem_to_ooo_topToBackendBypass_msiInfo_bits.U() !=
+                     expected_msi_info_)) {
+                error_ = "MSI information violated valid-gated one-cycle delay";
+            }
+            if (dut_.io_mem_to_ooo_topToBackendBypass_clintTime_valid.B() !=
+                    expected_clint_time_valid_ ||
+                (expected_clint_time_valid_ &&
+                 dut_.io_mem_to_ooo_topToBackendBypass_clintTime_bits.U() !=
+                     expected_clint_time_)) {
+                error_ = "CLINT time violated valid-gated one-cycle delay";
+            }
+            if (generated::sample_hc_perf_event_output(
+                    dut_, generated::kHcPerfEventFirstOutputLane) != 0) {
+                error_ = "constant hardware-counter event lane was nonzero";
+            }
+            for (unsigned lane = generated::kHcPerfEventFirstSharedLane;
+                 lane <= generated::kHcPerfEventLastSharedLane; ++lane) {
+                if (generated::sample_hc_perf_event_output(dut_, lane) !=
+                    expected_hc_perf_events_[lane]) {
+                    error_ = "hardware-counter perf event violated one-cycle delay";
+                }
+            }
+            const L2PrefetchControl l2_prefetch_output{
+                .master_enable =
+                    dut_.io_outer_l2PfCtrl_l2_pf_master_en.B(),
+                .receive_enable =
+                    dut_.io_outer_l2PfCtrl_l2_pf_recv_en.B(),
+                .pbop_enable = dut_.io_outer_l2PfCtrl_l2_pbop_en.B(),
+                .vbop_enable = dut_.io_outer_l2PfCtrl_l2_vbop_en.B(),
+                .tp_enable = dut_.io_outer_l2PfCtrl_l2_tp_en.B(),
+                .delay_latency = static_cast<std::uint16_t>(
+                    dut_.io_outer_l2PfCtrl_l2_pf_delay_latency.U()),
+            };
+            if (l2_prefetch_output != expected_l2_prefetch_output_) {
+                error_ = "L2 prefetch control violated two-cycle delay";
             }
             const bool top_down_l2_output =
                 dut_.io_topDownInfo_toBackend_l2TopMiss_l2Miss.B();
@@ -8049,6 +8206,19 @@ private:
         expected_reset_vector_ = reset_vector_input;
         expected_cpu_halted_ = cpu_halted_input;
         expected_cpu_critical_error_ = cpu_critical_error_input;
+        expected_beu_valid_ = beu_valid_input;
+        expected_beu_address_ = beu_address_input;
+        expected_msi_info_valid_ = msi_info_valid_input;
+        if (msi_info_valid_input) {
+            expected_msi_info_ = msi_info_input;
+        }
+        expected_clint_time_valid_ = clint_time_valid_input;
+        if (clint_time_valid_input) {
+            expected_clint_time_ = clint_time_input;
+        }
+        expected_hc_perf_events_ = hc_perf_event_inputs;
+        expected_l2_prefetch_output_ = l2_prefetch_delay_stage_;
+        l2_prefetch_delay_stage_ = l2_prefetch_input;
         memory_agent_.update_after_tick();
         ptw_agent_.update_after_tick();
         uncache_agent_.update_after_tick();
@@ -8223,6 +8393,18 @@ private:
     bool expected_cpu_halted_ = false;
     bool expected_cpu_critical_error_ = false;
     std::uint64_t top_control_checks_ = 0;
+    bool expected_beu_valid_ = false;
+    std::uint64_t expected_beu_address_ = 0;
+    bool expected_msi_info_valid_ = false;
+    std::uint16_t expected_msi_info_ = 0;
+    bool expected_clint_time_valid_ = false;
+    std::uint64_t expected_clint_time_ = 0;
+    std::array<
+        std::uint8_t, generated::kHcPerfEventHighestInputLane + 1>
+        expected_hc_perf_events_{};
+    L2PrefetchControl l2_prefetch_delay_stage_{};
+    L2PrefetchControl expected_l2_prefetch_output_{};
+    std::uint64_t top_bridge_checks_ = 0;
     std::uint64_t ifetch_ptw_pending_ = 0;
     std::uint64_t lq_allocated_ = 0;
     std::uint64_t lq_dequeued_ = 0;
