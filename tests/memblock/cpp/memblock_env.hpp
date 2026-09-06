@@ -1987,7 +1987,15 @@ public:
         random_backpressure_ = enabled;
         latency_profile_ = latency_profile;
         response_latency_stats_ = {};
+        outstanding_requests_ = 0;
+        max_outstanding_requests_ = 0;
+        forced_next_response_delay_.reset();
         force_a_stall_ = enabled;
+    }
+
+    void force_next_response_delay(unsigned cycles)
+    {
+        forced_next_response_delay_ = cycles;
     }
 
     void drive(UTMemBlock &dut)
@@ -2082,12 +2090,16 @@ public:
     {
         if (d_fire_) {
             responses_.pop_front();
+            --outstanding_requests_;
             d_presenting_ = false;
             d_gap_ = responses_.empty() ? 0 : responses_.front().delay_before;
         }
         if (a_fire_ && request_) {
             respond(*request_);
             ++request_count_;
+            ++outstanding_requests_;
+            max_outstanding_requests_ = std::max(
+                max_outstanding_requests_, outstanding_requests_);
         }
         a_fire_ = false;
         d_fire_ = false;
@@ -2099,6 +2111,14 @@ public:
     std::uint64_t request_count() const { return request_count_; }
     std::uint64_t request_stall_cycles() const { return request_stall_cycles_; }
     std::uint64_t response_delay_cycles() const { return response_delay_cycles_; }
+    std::uint64_t max_outstanding_requests() const
+    {
+        return max_outstanding_requests_;
+    }
+    std::uint64_t outstanding_requests() const
+    {
+        return outstanding_requests_;
+    }
     const ResponseLatencyStats &response_latency_stats() const
     {
         return response_latency_stats_;
@@ -2170,6 +2190,12 @@ private:
 
     unsigned response_delay()
     {
+        if (forced_next_response_delay_) {
+            const unsigned delay = *forced_next_response_delay_;
+            forced_next_response_delay_.reset();
+            response_latency_stats_.sample(delay);
+            return delay;
+        }
         if (!random_backpressure_) {
             return 0;
         }
@@ -2201,8 +2227,11 @@ private:
     bool random_backpressure_ = false;
     ResponseLatencyProfile latency_profile_ = ResponseLatencyProfile::compact;
     ResponseLatencyStats response_latency_stats_;
+    std::optional<unsigned> forced_next_response_delay_;
     bool force_a_stall_ = false;
     bool d_presenting_ = false;
+    std::uint64_t outstanding_requests_ = 0;
+    std::uint64_t max_outstanding_requests_ = 0;
     std::uint64_t request_stall_cycles_ = 0;
     std::uint64_t response_delay_cycles_ = 0;
     bool inject_denied_ = false;
@@ -3223,6 +3252,11 @@ public:
         ptw_agent_.force_next_response_delay(cycles);
     }
 
+    void force_next_uncache_response_delay(unsigned cycles)
+    {
+        uncache_agent_.force_next_response_delay(cycles);
+    }
+
     void configure_cache_error_enable(bool enable)
     {
         dut_.io_ooo_to_mem_csrCtrl_cache_error_enable.ImmSet(enable);
@@ -3671,6 +3705,14 @@ public:
     std::uint64_t uncache_response_delays() const
     {
         return uncache_agent_.response_delay_cycles();
+    }
+    std::uint64_t uncache_max_outstanding_requests() const
+    {
+        return uncache_agent_.max_outstanding_requests();
+    }
+    std::uint64_t uncache_outstanding_requests() const
+    {
+        return uncache_agent_.outstanding_requests();
     }
     const ResponseLatencyStats &uncache_response_latency_stats() const
     {
@@ -5290,6 +5332,13 @@ public:
         return run_cycles(16) && check_components();
     }
 
+    bool set_uncache_write_outstanding(bool enabled)
+    {
+        dut_.io_ooo_to_mem_csrCtrl_uncache_write_outstanding_enable.ImmSet(
+            enabled);
+        return run_cycles(16) && check_components();
+    }
+
     bool set_pointer_masking(const PointerMaskingConfig &config)
     {
         dut_.io_ooo_to_mem_tlbCsr_pmm_mseccfg.ImmSet(
@@ -6466,6 +6515,33 @@ public:
         }
         if (uncache_agent_.request_count() < target) {
             error_ = "timed out waiting for target Uncache request count";
+            return false;
+        }
+        return check_components();
+    }
+
+    bool run_until_uncache_drained(
+        std::uint64_t request_target, unsigned timeout = 32768)
+    {
+        for (unsigned cycle = 0;
+             cycle < timeout &&
+             (uncache_agent_.request_count() < request_target ||
+              uncache_agent_.outstanding_requests() != 0);
+             ++cycle) {
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        if (uncache_agent_.request_count() < request_target ||
+            uncache_agent_.outstanding_requests() != 0) {
+            std::ostringstream message;
+            message << "timed out waiting for Uncache traffic to drain"
+                    << " requests=" << uncache_agent_.request_count()
+                    << '/' << request_target
+                    << " outstanding="
+                    << uncache_agent_.outstanding_requests();
+            error_ = message.str();
             return false;
         }
         return check_components();

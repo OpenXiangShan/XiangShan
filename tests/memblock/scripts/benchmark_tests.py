@@ -35,6 +35,7 @@ SCENARIOS = (
     "atomic-dchannel-errors",
     "uncache-errors",
     "uncache-widths",
+    "uncache-outstanding",
     "mmio-contracts",
     "cbo-zero-contracts",
     "reset-recovery",

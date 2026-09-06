@@ -56,6 +56,25 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + driver + makefile)
 
+    def test_uncache_outstanding_contract_is_registered(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+
+        for contract in (
+            "set_uncache_write_outstanding",
+            "force_next_uncache_response_delay",
+            "uncache_max_outstanding_requests",
+            "run_until_uncache_drained",
+            "uncache-outstanding",
+            "disabled_load_max=",
+            "enabled_load_max=",
+            "disabled_store_max=",
+            "enabled_store_max=",
+            "delayed_first_response=4096",
+        ):
+            self.assertIn(contract, environment + driver + makefile)
+
     def test_pmp_contract_matches_platform_grain(self) -> None:
         parameters = (REPO_ROOT / "src/main/scala/xiangshan/PMParameters.scala").read_text()
         pmp = (REPO_ROOT / "src/main/scala/xiangshan/backend/fu/PMP.scala").read_text()

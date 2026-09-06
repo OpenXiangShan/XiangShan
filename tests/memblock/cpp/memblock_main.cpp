@@ -4984,6 +4984,238 @@ int run_uncache_widths(int argc, char **argv)
     return 0;
 }
 
+int run_uncache_outstanding(int argc, char **argv)
+{
+    constexpr unsigned request_count = 4;
+    std::uint64_t disabled_load_max = 0;
+    std::uint64_t enabled_load_max = 0;
+    std::uint64_t disabled_store_max = 0;
+    std::uint64_t enabled_store_max = 0;
+
+    auto configure = [&](memblock::Environment &environment,
+                         std::uint64_t virtual_base,
+                         std::uint64_t physical_base,
+                         std::uint64_t root,
+                         bool enabled,
+                         std::uint64_t seed) {
+        environment.memory().fill_incrementing(physical_base, 0x1000, 0x53);
+        const bool configured = environment.reset() &&
+            environment.map_sv39_4k(
+                virtual_base, physical_base, root, true, true, false,
+                false, true) &&
+            environment.activate_sv39(root) &&
+            environment.set_uncache_write_outstanding(enabled);
+        environment.configure_backpressure(
+            seed, true,
+            memblock::ResponseLatencyProfiles{
+                memblock::ResponseLatencyProfile::compact,
+                memblock::ResponseLatencyProfile::compact,
+                memblock::ResponseLatencyProfile::spec});
+        return configured;
+    };
+
+    auto run_loads = [&](bool enabled, std::uint64_t &observed_max) {
+        memblock::Environment environment(argc, argv);
+        const std::uint64_t virtual_base = enabled
+            ? 0x50048000ULL : 0x50044000ULL;
+        const std::uint64_t physical_base = enabled
+            ? 0x90048000ULL : 0x90044000ULL;
+        const std::uint64_t root = enabled
+            ? 0x97048000ULL : 0x97044000ULL;
+        if (!configure(
+                environment, virtual_base, physical_base, root, enabled,
+                enabled ? 0x510e527fade682d1ULL : 0x9b05688c2b3e6c1fULL)) {
+            std::cerr << "MEMBLOCK_UNCACHE_OUTSTANDING_FAIL cycle="
+                      << environment.cycle() << " phase="
+                      << (enabled ? "enabled" : "disabled")
+                      << "-load-configuration reason=" << environment.error()
+                      << '\n';
+            return false;
+        }
+        environment.force_next_uncache_response_delay(4096);
+        std::array<memblock::LoadTransaction, request_count> loads{};
+        for (unsigned index = 0; index < loads.size(); ++index) {
+            loads[index] = memblock::LoadTransaction{
+                .address = virtual_base + index * 64,
+                .oracle_address = physical_base + index * 64,
+                .op = memblock::LoadOp::ld,
+                .rob = static_cast<std::uint8_t>(index),
+                .lq = static_cast<std::uint8_t>(index),
+                .pdest = static_cast<std::uint8_t>(80 + index),
+                .lane = index % memblock::kScalarLoadLanes,
+                .expected_debug_is_mmio = false,
+                .expected_debug_is_ncio = false,
+            };
+            environment.expect_load(loads[index]);
+            if (!environment.enqueue_load(loads[index])) {
+                std::cerr << "MEMBLOCK_UNCACHE_OUTSTANDING_FAIL cycle="
+                          << environment.cycle() << " phase="
+                          << (enabled ? "enabled" : "disabled")
+                          << "-load-enqueue index=" << index << " reason="
+                          << environment.error() << '\n';
+                return false;
+            }
+        }
+        if (!environment.set_rob_head(loads.back().rob, loads.back().rob_flag)) {
+            return false;
+        }
+        for (unsigned index = 0; index < loads.size(); ++index) {
+            if (!environment.issue_load(loads[index], 4096)) {
+                std::cerr << "MEMBLOCK_UNCACHE_OUTSTANDING_FAIL cycle="
+                          << environment.cycle() << " phase="
+                          << (enabled ? "enabled" : "disabled")
+                          << "-load-issue index=" << index << " reason="
+                          << environment.error() << '\n';
+                return false;
+            }
+        }
+        if (!environment.run_until_complete(65536) ||
+            !environment.run_until_uncache_drained(request_count, 65536) ||
+            !environment.run_until_lq_retired(8192)) {
+            std::cerr << "MEMBLOCK_UNCACHE_OUTSTANDING_FAIL cycle="
+                      << environment.cycle() << " phase="
+                      << (enabled ? "enabled" : "disabled")
+                      << "-load-drain reason=" << environment.error() << '\n';
+            return false;
+        }
+        observed_max = environment.uncache_max_outstanding_requests();
+        const bool legal_window = enabled
+            ? observed_max > 1 && observed_max <= request_count
+            : observed_max == 1;
+        if (environment.uncache_requests() != request_count ||
+            !legal_window) {
+            std::cerr << "MEMBLOCK_UNCACHE_OUTSTANDING_FAIL cycle="
+                      << environment.cycle() << " phase="
+                      << (enabled ? "enabled" : "disabled")
+                      << "-load-window requests="
+                      << environment.uncache_requests() << " max_outstanding="
+                      << observed_max << " expected_range="
+                      << (enabled ? "2..4" : "1") << '\n';
+            return false;
+        }
+        return true;
+    };
+
+    auto run_stores = [&](bool enabled, std::uint64_t &observed_max) {
+        memblock::Environment environment(argc, argv);
+        const std::uint64_t virtual_base = enabled
+            ? 0x50050000ULL : 0x5004c000ULL;
+        const std::uint64_t physical_base = enabled
+            ? 0x90050000ULL : 0x9004c000ULL;
+        const std::uint64_t root = enabled
+            ? 0x97050000ULL : 0x9704c000ULL;
+        if (!configure(
+                environment, virtual_base, physical_base, root, enabled,
+                enabled ? 0x1f83d9abfb41bd6bULL : 0x5be0cd19137e2179ULL)) {
+            std::cerr << "MEMBLOCK_UNCACHE_OUTSTANDING_FAIL cycle="
+                      << environment.cycle() << " phase="
+                      << (enabled ? "enabled" : "disabled")
+                      << "-store-configuration reason=" << environment.error()
+                      << '\n';
+            return false;
+        }
+        std::array<memblock::StoreTransaction, request_count> stores{};
+        for (unsigned index = 0; index < stores.size(); ++index) {
+            stores[index] = memblock::StoreTransaction{
+                .address = virtual_base + index * 64,
+                .oracle_address = physical_base + index * 64,
+                .data = 0x1020304050607080ULL + index,
+                .op = memblock::StoreOp::sd,
+                .rob = static_cast<std::uint8_t>(index),
+                .sq = static_cast<std::uint8_t>(index),
+                .address_lane = index & 1U,
+                .data_lane = (index >> 1) & 1U,
+                .expected_debug_is_mmio = false,
+                .expected_debug_is_ncio = false,
+            };
+            environment.expect_store(stores[index]);
+            if (!environment.enqueue_store(stores[index], 0) ||
+                !environment.issue_store_address_until_tlb_hit(
+                    stores[index], 16384) ||
+                !environment.issue_store_data(stores[index], 4096) ||
+                !environment.run_until_store_complete(32768)) {
+                std::cerr << "MEMBLOCK_UNCACHE_OUTSTANDING_FAIL cycle="
+                          << environment.cycle() << " phase="
+                          << (enabled ? "enabled" : "disabled")
+                          << "-store-issue index=" << index << " reason="
+                          << environment.error() << '\n';
+                return false;
+            }
+        }
+        environment.force_next_uncache_response_delay(4096);
+        if (!environment.set_rob_head(stores.back().rob, stores.back().rob_flag) ||
+            !environment.commit_stores_through(
+                stores.back(), static_cast<unsigned>(stores.size())) ||
+            !environment.run_until_uncache_drained(request_count, 65536) ||
+            !environment.run_until_sq_dequeued(request_count, 8192)) {
+            std::cerr << "MEMBLOCK_UNCACHE_OUTSTANDING_FAIL cycle="
+                      << environment.cycle() << " phase="
+                      << (enabled ? "enabled" : "disabled")
+                      << "-store-drain reason=" << environment.error() << '\n';
+            return false;
+        }
+        observed_max = environment.uncache_max_outstanding_requests();
+        const bool legal_window = enabled
+            ? observed_max > 1 && observed_max <= request_count
+            : observed_max == 1;
+        if (environment.uncache_requests() != request_count ||
+            !legal_window) {
+            std::cerr << "MEMBLOCK_UNCACHE_OUTSTANDING_FAIL cycle="
+                      << environment.cycle() << " phase="
+                      << (enabled ? "enabled" : "disabled")
+                      << "-store-window requests="
+                      << environment.uncache_requests() << " max_outstanding="
+                      << observed_max << " expected_range="
+                      << (enabled ? "2..4" : "1") << '\n';
+            return false;
+        }
+        for (const auto &store : stores) {
+            environment.record_committed_store(store);
+        }
+        for (unsigned index = 0; index < stores.size(); ++index) {
+            const memblock::LoadTransaction readback{
+                .address = stores[index].address,
+                .oracle_address = stores[index].oracle_address,
+                .op = memblock::LoadOp::ld,
+                .rob = static_cast<std::uint8_t>(request_count + index),
+                .lq = static_cast<std::uint8_t>(index),
+                .pdest = static_cast<std::uint8_t>(96 + index),
+                .lane = index % memblock::kScalarLoadLanes,
+            };
+            environment.expect_load_data(readback, stores[index].data);
+            if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+                !environment.enqueue_load(readback) ||
+                !environment.issue_load(readback, 4096) ||
+                !environment.run_until_complete(32768) ||
+                !environment.run_until_lq_retired(8192)) {
+                std::cerr << "MEMBLOCK_UNCACHE_OUTSTANDING_FAIL cycle="
+                          << environment.cycle() << " phase="
+                          << (enabled ? "enabled" : "disabled")
+                          << "-store-readback index=" << index << " reason="
+                          << environment.error() << '\n';
+                return false;
+            }
+        }
+        return true;
+    };
+
+    if (!run_loads(false, disabled_load_max) ||
+        !run_loads(true, enabled_load_max) ||
+        !run_stores(false, disabled_store_max) ||
+        !run_stores(true, enabled_store_max)) {
+        return 1;
+    }
+    std::cout << "MEMBLOCK_UNCACHE_OUTSTANDING_PASS"
+              << " requests_per_case=" << request_count
+              << " disabled_load_max=" << disabled_load_max
+              << " enabled_load_max=" << enabled_load_max
+              << " disabled_store_max=" << disabled_store_max
+              << " enabled_store_max=" << enabled_store_max
+              << " delayed_first_response=4096"
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_mmio_contracts(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -19183,6 +19415,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "uncache-widths") {
             return run_uncache_widths(argc, argv);
+        }
+        if (options.test == "uncache-outstanding") {
+            return run_uncache_outstanding(argc, argv);
         }
         if (options.test == "mmio-contracts") {
             return run_mmio_contracts(argc, argv);
