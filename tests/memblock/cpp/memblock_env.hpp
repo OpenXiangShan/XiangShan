@@ -5348,6 +5348,17 @@ public:
         return check_components();
     }
 
+    bool set_sbuffer_timeout(std::uint32_t cycles)
+    {
+        constexpr std::uint32_t timeout_width = 22;
+        if (cycles >= (std::uint32_t{1} << timeout_width)) {
+            error_ = "SBuffer timeout exceeds the 22-bit CSR field";
+            return false;
+        }
+        dut_.io_ooo_to_mem_csrCtrl_sbuffer_timeout.ImmSet(cycles);
+        return run_cycles(4) && check_components();
+    }
+
     bool set_pointer_masking(const PointerMaskingConfig &config)
     {
         dut_.io_ooo_to_mem_tlbCsr_pmm_mseccfg.ImmSet(

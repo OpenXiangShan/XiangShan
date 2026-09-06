@@ -5400,6 +5400,149 @@ int run_sbuffer_flush(int argc, char **argv)
     return 0;
 }
 
+int run_sbuffer_timeout(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t virtual_base = 0x50056000ULL;
+    constexpr std::uint64_t physical_base = 0x90056000ULL;
+    constexpr std::uint64_t root = 0x97056000ULL;
+    constexpr std::uint32_t high_timeout = (1U << 22) - 1;
+    constexpr std::uint32_t low_timeout = 64;
+    constexpr unsigned high_observation_cycles = 512;
+    environment.memory().fill_incrementing(physical_base, 0x1000, 0x5a);
+    environment.configure_backpressure(0xbb67ae8584caa73bULL, false);
+    if (!environment.reset() ||
+        !environment.map_sv39_4k(
+            virtual_base, physical_base, root) ||
+        !environment.activate_sv39(root) ||
+        !environment.set_sbuffer_timeout(high_timeout)) {
+        std::cerr << "MEMBLOCK_SBUFFER_TIMEOUT_FAIL cycle="
+                  << environment.cycle() << " phase=configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    auto issue_and_commit = [&](const memblock::StoreTransaction &store) {
+        environment.expect_store(store);
+        return environment.set_rob_head(store.rob, store.rob_flag) &&
+            environment.enqueue_store(store, 0) &&
+            environment.issue_store_address_until_tlb_hit(store, 16384) &&
+            environment.issue_store_data(store, 4096) &&
+            environment.run_until_store_complete(32768) &&
+            environment.commit_store(store, 16384);
+    };
+    auto read_back = [&](const memblock::StoreTransaction &store,
+                         std::uint8_t rob, std::uint8_t lq,
+                         std::uint8_t pdest) {
+        const memblock::LoadTransaction load{
+            .address = store.address,
+            .oracle_address = store.oracle_address,
+            .op = memblock::LoadOp::ld,
+            .rob = rob,
+            .lq = lq,
+            .pdest = pdest,
+            .lane = static_cast<unsigned>(lq % memblock::kScalarLoadLanes),
+        };
+        environment.expect_load_data(load, store.data);
+        return environment.set_rob_head(load.rob, load.rob_flag) &&
+            environment.enqueue_load(load) &&
+            environment.issue_load(load, 4096) &&
+            environment.run_until_complete(32768) &&
+            environment.run_until_lq_retired(8192);
+    };
+
+    const memblock::StoreTransaction high_store{
+        .address = virtual_base + 0x80,
+        .oracle_address = physical_base + 0x80,
+        .data = 0x0123456789abcdefULL,
+        .op = memblock::StoreOp::sd,
+        .rob = 0,
+        .sq = 0,
+        .address_lane = 0,
+        .data_lane = 1,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    if (!issue_and_commit(high_store) || environment.sbuffer_empty()) {
+        std::cerr << "MEMBLOCK_SBUFFER_TIMEOUT_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=high-timeout-buffering reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t high_requests_before = environment.tilelink_requests();
+    if (!environment.run_cycles(high_observation_cycles) ||
+        environment.sbuffer_empty() ||
+        environment.tilelink_requests() != high_requests_before) {
+        std::cerr << "MEMBLOCK_SBUFFER_TIMEOUT_FAIL cycle="
+                  << environment.cycle() << " phase=high-timeout-hold"
+                  << " dcache_before=" << high_requests_before
+                  << " dcache_after=" << environment.tilelink_requests()
+                  << " sb_empty=" << environment.sbuffer_empty()
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+    if (!environment.pulse_sbuffer_flush() ||
+        !environment.run_until_sbuffer_empty(8192) ||
+        !read_back(high_store, 1, 0, 112)) {
+        std::cerr << "MEMBLOCK_SBUFFER_TIMEOUT_FAIL cycle="
+                  << environment.cycle() << " phase=high-timeout-drain reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::StoreTransaction low_store{
+        .address = virtual_base + 0xc8,
+        .oracle_address = physical_base + 0xc8,
+        .data = 0xfedcba9876543210ULL,
+        .op = memblock::StoreOp::sd,
+        .rob = 2,
+        .sq = 1,
+        .address_lane = 1,
+        .data_lane = 0,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    if (!environment.set_sbuffer_timeout(low_timeout) ||
+        !issue_and_commit(low_store) || environment.sbuffer_empty()) {
+        std::cerr << "MEMBLOCK_SBUFFER_TIMEOUT_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=low-timeout-buffering reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t low_start_cycle = environment.cycle();
+    const std::uint64_t low_requests_before = environment.tilelink_requests();
+    while (environment.tilelink_requests() == low_requests_before &&
+           environment.cycle() - low_start_cycle < 256) {
+        if (!environment.run_cycles(1)) {
+            break;
+        }
+    }
+    const std::uint64_t low_evict_cycles = environment.cycle() - low_start_cycle;
+    if (environment.tilelink_requests() != low_requests_before + 1 ||
+        low_evict_cycles == 0 || low_evict_cycles >= 256 ||
+        !environment.run_until_sbuffer_empty(8192) ||
+        !read_back(low_store, 3, 1, 113)) {
+        std::cerr << "MEMBLOCK_SBUFFER_TIMEOUT_FAIL cycle="
+                  << environment.cycle() << " phase=low-timeout-evict"
+                  << " dcache_before=" << low_requests_before
+                  << " dcache_after=" << environment.tilelink_requests()
+                  << " evict_cycles=" << low_evict_cycles
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_SBUFFER_TIMEOUT_PASS"
+              << " high_timeout=" << high_timeout
+              << " high_hold_cycles=" << high_observation_cycles
+              << " low_timeout=" << low_timeout
+              << " low_evict_cycles=" << low_evict_cycles
+              << " high_readback=1 low_readback=1"
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_mmio_contracts(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -19605,6 +19748,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "sbuffer-flush") {
             return run_sbuffer_flush(argc, argv);
+        }
+        if (options.test == "sbuffer-timeout") {
+            return run_sbuffer_timeout(argc, argv);
         }
         if (options.test == "mmio-contracts") {
             return run_mmio_contracts(argc, argv);
