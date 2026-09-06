@@ -395,6 +395,12 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "sample_hardware_prefetch_outputs",
             "HardwarePrefetchStats",
             "configure_stride_prefetch",
+            "l1D_pf_active_threshold.ImmSet",
+            "std::uint64_t{12}",
+            "l1D_pf_active_stride.ImmSet",
+            "std::uint64_t{30}",
+            "expect_l2_prefetch_control",
+            "io_outer_l2PfCtrl_l2_pf_delay_latency",
             "run_hardware_prefetch",
             "stride_source = 12",
             "l2_depth = stride << 5",
@@ -402,7 +408,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "stream_l2_depth_lines = 640",
             "stream_l2_width_lines = 4",
             "stream-stride-priority",
-            "stride_suppressed=1",
+            "stride_suppressed=1 l2_control_defaults=1",
             "hardware-prefetch",
         ):
             self.assertIn(contract, environment + main + makefile + generator)

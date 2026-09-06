@@ -3368,7 +3368,9 @@ int run_hardware_prefetch(int argc, char **argv)
     constexpr std::uint8_t stride_source = 12;
     constexpr unsigned training_loads = 8;
     environment.memory().fill_incrementing(base, 0x10000, 0x39);
-    if (!environment.reset() || !environment.configure_stride_prefetch(true)) {
+    if (!environment.reset() ||
+        !environment.configure_stride_prefetch(true) ||
+        !environment.expect_l2_prefetch_control(true, true)) {
         std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
                   << environment.cycle() << " phase=setup reason="
                   << environment.error() << '\n';
@@ -3420,7 +3422,8 @@ int run_hardware_prefetch(int argc, char **argv)
     }
 
     if (!environment.run_until_lq_retired(4096) ||
-        !environment.configure_stride_prefetch(false)) {
+        !environment.configure_stride_prefetch(false) ||
+        !environment.expect_l2_prefetch_control(false, false)) {
         std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
                   << environment.cycle() << " phase=disable reason="
                   << environment.error() << '\n';
@@ -3472,7 +3475,8 @@ int run_hardware_prefetch(int argc, char **argv)
     stream_environment.memory().fill_incrementing(
         stream_base, 0x20000, 0x5d);
     if (!stream_environment.reset() ||
-        !stream_environment.configure_stride_prefetch(true)) {
+        !stream_environment.configure_stride_prefetch(true) ||
+        !stream_environment.expect_l2_prefetch_control(true, true)) {
         std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
                   << stream_environment.cycle()
                   << " phase=stream-setup reason="
@@ -3609,7 +3613,7 @@ int run_hardware_prefetch(int argc, char **argv)
               << expected_stream_last << std::dec
               << " stream_priority_loads=" << priority_training_loads
               << " stream_priority_l2=" << stream_priority_requests
-              << " stride_suppressed=1"
+              << " stride_suppressed=1 l2_control_defaults=1"
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

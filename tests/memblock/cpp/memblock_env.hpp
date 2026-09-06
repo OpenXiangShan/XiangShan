@@ -3304,10 +3304,51 @@ public:
             std::uint64_t{0});
         dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_enable_pht.ImmSet(
             std::uint64_t{0});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_active_threshold.ImmSet(
+            std::uint64_t{12});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_active_stride.ImmSet(
+            std::uint64_t{30});
         dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_enable_stride.ImmSet(enable);
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_store_only.ImmSet(
+            std::uint64_t{0});
         dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_recv_enable.ImmSet(
+            enable);
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_pbop_enable.ImmSet(
+            std::uint64_t{1});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_vbop_enable.ImmSet(
+            std::uint64_t{1});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_tp_enable.ImmSet(
+            std::uint64_t{1});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency.ImmSet(
             std::uint64_t{0});
         return run_cycles(4);
+    }
+
+    bool expect_l2_prefetch_control(bool master_enabled, bool receive_enabled)
+    {
+        dut_.RefreshComb();
+        const bool matches =
+            dut_.io_outer_l2PfCtrl_l2_pf_master_en.B() == master_enabled &&
+            dut_.io_outer_l2PfCtrl_l2_pf_recv_en.B() == receive_enabled &&
+            dut_.io_outer_l2PfCtrl_l2_pbop_en.B() &&
+            dut_.io_outer_l2PfCtrl_l2_vbop_en.B() &&
+            dut_.io_outer_l2PfCtrl_l2_tp_en.B() &&
+            dut_.io_outer_l2PfCtrl_l2_pf_delay_latency.U() == 0;
+        if (!matches) {
+            std::ostringstream message;
+            message << "L2 prefetch control output mismatch master="
+                    << dut_.io_outer_l2PfCtrl_l2_pf_master_en.B()
+                    << " recv="
+                    << dut_.io_outer_l2PfCtrl_l2_pf_recv_en.B()
+                    << " pbop=" << dut_.io_outer_l2PfCtrl_l2_pbop_en.B()
+                    << " vbop=" << dut_.io_outer_l2PfCtrl_l2_vbop_en.B()
+                    << " tp=" << dut_.io_outer_l2PfCtrl_l2_tp_en.B()
+                    << " delay="
+                    << dut_.io_outer_l2PfCtrl_l2_pf_delay_latency.U();
+            error_ = message.str();
+            return false;
+        }
+        return check_components();
     }
 
     // The L2-to-L1 DTLB request has no ready pin at the MemBlock boundary:
