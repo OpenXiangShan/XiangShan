@@ -48,19 +48,19 @@ class NewFLManager(
   val s0Candidates = Wire(Vec(renameWidth, UInt(phyRegIdxWidth.W)))
   val s0CandidateValid = Wire(Vec(renameWidth, Bool()))
   for (bankIndex <- 0 until bankCount) {
-    // Proportional boundaries cover all registers even when numPhyRegs is not
-    // divisible by the bank count.
-    val bankStart = numPhyRegs * bankIndex / bankCount
-    val bankEnd = numPhyRegs * (bankIndex + 1) / bankCount
-    val bankWidth = bankEnd - bankStart
-    val bankBitmap = s0AllocBitmap(bankEnd - 1, bankStart)
+    // Match IntRegFileBank: the low-order preg bits select the bank
+    // (preg % bankCount), while the remaining bits select the bank-local row.
+    // Build each bank bitmap from interleaved physical-register indices rather
+    // than slicing four contiguous ranges.
+    val bankPRegs = (bankIndex until numPhyRegs by bankCount).toSeq
+    val bankWidth = bankPRegs.size
+    val bankBitmap = VecInit(bankPRegs.map(s0AllocBitmap(_))).asUInt
+    val bankPRegIndices = VecInit(bankPRegs.map(_.U(phyRegIdxWidth.W)))
+    val reverseBankPRegIndices = VecInit(bankPRegs.reverse.map(_.U(phyRegIdxWidth.W)))
     val firstInBank = ParallelPriorityEncoder(Cat(1.U(1.W), bankBitmap))
     val lastFromBankEnd = ParallelPriorityEncoder(Cat(1.U(1.W), Reverse(bankBitmap)))
-    // Widen both operands before adding the bank offset. Chisel `+` keeps the
-    // maximum operand width, so using the literals' inferred widths here can
-    // otherwise wrap a valid global index (for example, 56 + 8) back to zero.
-    val firstCandidate = firstInBank.pad(phyRegIdxWidth) + bankStart.U(phyRegIdxWidth.W)
-    val lastCandidate = (bankEnd - 1).U(phyRegIdxWidth.W) - lastFromBankEnd.pad(phyRegIdxWidth)
+    val firstCandidate = bankPRegIndices(firstInBank)
+    val lastCandidate = reverseBankPRegIndices(lastFromBankEnd)
     val bankHasCandidate = firstInBank < bankWidth.U
 
     s0Candidates(bankIndex) := firstCandidate
