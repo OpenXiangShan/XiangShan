@@ -10490,6 +10490,27 @@ inline ScalarLoadWriteback sample_scalar_load_writeback(
     }
 }
 
+struct HardwarePrefetchOutputs {
+    bool l2_valid = false;
+    std::uint64_t l2_addr = 0;
+    std::uint8_t l2_source = 0;
+    bool l3_valid = false;
+    std::uint64_t l3_addr = 0;
+};
+
+inline HardwarePrefetchOutputs sample_hardware_prefetch_outputs(
+    UTMemBlock &dut)
+{
+    return {
+        .l2_valid = dut.auto_inner_l2_pf_sender_out_addr_valid.B(),
+        .l2_addr = dut.auto_inner_l2_pf_sender_out_addr.U(),
+        .l2_source = static_cast<std::uint8_t>(
+            dut.auto_inner_l2_pf_sender_out_pf_source.U()),
+        .l3_valid = dut.auto_inner_l3_pf_sender_out_addr_valid.B(),
+        .l3_addr = dut.auto_inner_l3_pf_sender_out_addr.U(),
+    };
+}
+
 inline constexpr unsigned kScalarLoadFeedbackLanes = 3;
 
 struct ScalarLoadWakeup {

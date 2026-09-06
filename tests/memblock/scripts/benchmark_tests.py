@@ -25,6 +25,7 @@ SCENARIOS = (
     "memory-violation",
     "rar-violation",
     "ifetch-prefetch",
+    "hardware-prefetch",
     "fp-loads",
     "trigger-contracts",
     "metadata-contracts",

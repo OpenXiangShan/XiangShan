@@ -163,6 +163,7 @@ enum class AtomicOp : std::uint16_t {
 struct LoadTransaction {
     std::uint64_t address = kDefaultMemoryBase;
     std::optional<std::uint64_t> oracle_address;
+    std::optional<std::uint64_t> pc;
     LoadOp op = LoadOp::ld;
     std::uint8_t rob = 0;
     bool rob_flag = false;
@@ -2928,6 +2929,19 @@ public:
         std::array<std::uint64_t, kScalarLoadLanes> last_cycle{};
     };
 
+    struct HardwarePrefetchStats {
+        std::uint64_t l2_requests = 0;
+        std::uint64_t l3_requests = 0;
+        std::array<std::uint64_t, 32> l2_source_counts{};
+        std::array<std::uint64_t, 32> last_l2_addr_by_source{};
+        std::array<std::uint64_t, 32> last_l2_cycle_by_source{};
+        std::uint64_t last_l2_addr = 0;
+        std::uint8_t last_l2_source = 0;
+        std::uint64_t last_l2_cycle = 0;
+        std::uint64_t last_l3_addr = 0;
+        std::uint64_t last_l3_cycle = 0;
+    };
+
     Environment(int argc, char **argv)
         : dut_(argc, argv), memory_(&bus_memory_),
           memory_agent_(bus_memory_, memory_),
@@ -3008,6 +3022,22 @@ public:
     void configure_ldld_violation_check(bool enable)
     {
         dut_.io_ooo_to_mem_csrCtrl_ldld_vio_check_enable.ImmSet(enable);
+    }
+
+    bool configure_stride_prefetch(bool enable)
+    {
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_enable.ImmSet(enable);
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_enable.ImmSet(enable);
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_train_on_hit.ImmSet(
+            std::uint64_t{0});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_enable_agt.ImmSet(
+            std::uint64_t{0});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_enable_pht.ImmSet(
+            std::uint64_t{0});
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l1D_pf_enable_stride.ImmSet(enable);
+        dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_recv_enable.ImmSet(
+            std::uint64_t{0});
+        return run_cycles(4);
     }
 
     // The L2-to-L1 DTLB request has no ready pin at the MemBlock boundary:
@@ -3418,6 +3448,10 @@ public:
     const IfetchPrefetchStats &ifetch_prefetch_stats() const
     {
         return ifetch_prefetch_stats_;
+    }
+    const HardwarePrefetchStats &hardware_prefetch_stats() const
+    {
+        return hardware_prefetch_stats_;
     }
     bool sbuffer_empty()
     {
@@ -3990,6 +4024,7 @@ public:
         scalar_load_feedback_stats_ = {};
         memory_violation_stats_ = {};
         ifetch_prefetch_stats_ = {};
+        hardware_prefetch_stats_ = {};
         dut_.reset.ImmSet(std::uint64_t{1});
         for (unsigned cycle = 0; cycle < 8; ++cycle) {
             tick(false);
@@ -5110,7 +5145,7 @@ public:
     bool issue_load(const LoadTransaction &transaction, unsigned timeout = 32)
     {
         generated::ScalarLoadIssue issue;
-        issue.pc = 0x1000 + transaction.rob * 4;
+        issue.pc = transaction.pc.value_or(0x1000 + transaction.rob * 4);
         issue.predecode_rvc = transaction.predecode_rvc;
         issue.ftq_ptr = transaction.ftq_ptr;
         issue.ftq_offset = transaction.ftq_offset;
@@ -5167,7 +5202,8 @@ public:
             }
             lane_used[transaction.lane] = true;
             auto &issue = issues[index];
-            issue.pc = 0x1000 + transaction.rob * 4;
+            issue.pc = transaction.pc.value_or(
+                0x1000 + transaction.rob * 4);
             issue.predecode_rvc = transaction.predecode_rvc;
             issue.ftq_ptr = transaction.ftq_ptr;
             issue.ftq_offset = transaction.ftq_offset;
@@ -5470,7 +5506,7 @@ public:
         unsigned timeout = 64)
     {
         generated::ScalarLoadIssue scalar_issue;
-        scalar_issue.pc = 0x1000 + load.rob * 4;
+        scalar_issue.pc = load.pc.value_or(0x1000 + load.rob * 4);
         scalar_issue.fu_op_type = static_cast<std::uint16_t>(load.op);
         scalar_issue.rf_wen = load.rf_wen;
         scalar_issue.fp_wen = load.fp_wen;
@@ -6567,6 +6603,28 @@ private:
                 scoreboard_.observe(
                     lane, generated::sample_scalar_load_writeback(dut_, lane));
             }
+            const auto hardware_prefetch =
+                generated::sample_hardware_prefetch_outputs(dut_);
+            if (hardware_prefetch.l2_valid) {
+                ++hardware_prefetch_stats_.l2_requests;
+                ++hardware_prefetch_stats_.l2_source_counts[
+                    hardware_prefetch.l2_source];
+                hardware_prefetch_stats_.last_l2_addr_by_source[
+                    hardware_prefetch.l2_source] = hardware_prefetch.l2_addr;
+                hardware_prefetch_stats_.last_l2_cycle_by_source[
+                    hardware_prefetch.l2_source] = cycle();
+                hardware_prefetch_stats_.last_l2_addr =
+                    hardware_prefetch.l2_addr;
+                hardware_prefetch_stats_.last_l2_source =
+                    hardware_prefetch.l2_source;
+                hardware_prefetch_stats_.last_l2_cycle = cycle();
+            }
+            if (hardware_prefetch.l3_valid) {
+                ++hardware_prefetch_stats_.l3_requests;
+                hardware_prefetch_stats_.last_l3_addr =
+                    hardware_prefetch.l3_addr;
+                hardware_prefetch_stats_.last_l3_cycle = cycle();
+            }
             for (unsigned lane = 0; lane < kScalarStoreLanes; ++lane) {
                 const auto address_writeback =
                     generated::sample_scalar_store_address_writeback(dut_, lane);
@@ -6685,6 +6743,7 @@ private:
     ScalarLoadFeedbackStats scalar_load_feedback_stats_;
     MemoryViolationStats memory_violation_stats_;
     IfetchPrefetchStats ifetch_prefetch_stats_;
+    HardwarePrefetchStats hardware_prefetch_stats_;
     std::uint64_t lq_allocated_ = 0;
     std::uint64_t lq_dequeued_ = 0;
     std::uint64_t lq_canceled_ = 0;

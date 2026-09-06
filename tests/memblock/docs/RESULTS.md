@@ -64,6 +64,15 @@ five and three instruction-prefetch outputs respectively. The independently
 verified artifact `/tmp/memblock-ifetch-schema5.json` has SHA-256
 `d053e833417b505d8c7bdcb27be366ce33f1ddb9c491701f640067fea0e182ab`.
 
+The five L2/L3 hardware-prefetch sender pins were then sampled directly.
+`hardware-prefetch` passed in 942 cycles: eight fixed-PC, 128-byte-stride cold
+loads produced exactly three L2 stride-prefetch outputs, each with source 12
+and the independently calculated `current address + 4096` target. Three more
+loads after CSR disable produced no output. No SMS or stream output leaked into
+the isolated run. L3 remained idle as required because this RTL build's
+`enableL3StreamPrefetch` elaboration constant is false; positive L3 coverage
+requires a configuration built with that feature enabled.
+
 ## Translation Constraint Interface Validation
 
 Commit `f6820b9ff` extends the common `random-mixed` generator with weighted

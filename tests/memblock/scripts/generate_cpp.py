@@ -55,6 +55,14 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
     ifetch_prefetch_lanes = matching_lanes(
         port_names, r"io_ifetchPrefetch_([0-9]+)_valid"
     )
+    hardware_prefetch_ports = {
+        "auto_inner_l2_pf_sender_out_addr",
+        "auto_inner_l2_pf_sender_out_pf_source",
+        "auto_inner_l2_pf_sender_out_addr_valid",
+        "auto_inner_l3_pf_sender_out_addr",
+        "auto_inner_l3_pf_sender_out_addr_valid",
+    }
+    has_hardware_prefetch_outputs = hardware_prefetch_ports.issubset(port_names)
     sta_lanes = matching_lanes(
         port_names, r"io_ooo_to_mem_issueSta_([0-9]+)_valid"
     )
@@ -312,6 +320,38 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
             "    default:",
             '        throw std::out_of_range("invalid scalar load writeback lane");',
             "    }",
+            "}",
+            "",
+            "struct HardwarePrefetchOutputs {",
+            "    bool l2_valid = false;",
+            "    std::uint64_t l2_addr = 0;",
+            "    std::uint8_t l2_source = 0;",
+            "    bool l3_valid = false;",
+            "    std::uint64_t l3_addr = 0;",
+            "};",
+            "",
+            "inline HardwarePrefetchOutputs sample_hardware_prefetch_outputs(",
+            "    UTMemBlock &dut)",
+            "{",
+        ]
+    )
+    if has_hardware_prefetch_outputs:
+        lines.extend(
+            [
+                "    return {",
+                "        .l2_valid = dut.auto_inner_l2_pf_sender_out_addr_valid.B(),",
+                "        .l2_addr = dut.auto_inner_l2_pf_sender_out_addr.U(),",
+                "        .l2_source = static_cast<std::uint8_t>(",
+                "            dut.auto_inner_l2_pf_sender_out_pf_source.U()),",
+                "        .l3_valid = dut.auto_inner_l3_pf_sender_out_addr_valid.B(),",
+                "        .l3_addr = dut.auto_inner_l3_pf_sender_out_addr.U(),",
+                "    };",
+            ]
+        )
+    else:
+        lines.extend(["    return {};"])
+    lines.extend(
+        [
             "}",
             "",
         ]

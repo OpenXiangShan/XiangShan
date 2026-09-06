@@ -42,7 +42,7 @@ CONTROLLER_FILES := --controller-file $(CPP_MAIN) --controller-file $(CPP_ENV) -
 CONSTRAINT_ARGS = $(if $(CONSTRAINTS),--constraints $(CONSTRAINTS)) $(foreach item,$(CONSTRAINT),--constraint $(item))
 LONG_CONSTRAINT_ARGS = --constraints $(or $(CONSTRAINTS),spec) $(foreach item,$(CONSTRAINT),--constraint $(item))
 
-.PHONY: ports check-ports prepare-rtl check-rtl bootstrap-picker export-picker picker-model freeze-runtime smoke pin-space frontend-bridge single-load load-feedback memory-violation rar-violation ifetch-prefetch fp-loads trigger-contracts metadata-contracts dcache-errors dcache-coherence atomic-contracts atomic-dchannel-errors uncache-errors uncache-widths mmio-contracts cbo-zero-contracts reset-recovery scalar-misaligned misaligned-stores exception-contracts l2-tlb-contracts ifetch-ptw-bridge two-stage-translation translation-matrix translation-fence translation-fence-selective translation-fence-sv48 translation-fence-sv48-selective translation-fence-sv39-sv48x4 translation-fence-sv39-sv48x4-selective translation-fence-sv48-sv39x4 translation-fence-sv48-sv39x4-selective translation-fence-all translation-inflight-context translation-inflight-context-sv48 translation-inflight-context-sv39-sv48x4 translation-inflight-context-sv48-sv39x4 translation-inflight-context-all translation-context translation-bare translation-faults translation-permissions translation-pbmt translation-superpages scalar-guest-fault vector-guest-fault vector-guest-fault-split vector-load vector-split-load vector-addressing vector-store-forwarding store-forwarding store-rdata-order store-tlb-miss-preserve dcache-release redirect queue-pressure random-loads random-vector-loads random-forwarding random-vector-forwarding random-mixed random-stress random-mixed-hunt random-boundary-hunt random-boundary-regression known-bug-sentinel regression hunt-regression stress-regression verify-stress-results verify-boundary-hunt extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests verify-extended-results verify-final-results verify-long-results final-acceptance unit
+.PHONY: ports check-ports prepare-rtl check-rtl bootstrap-picker export-picker picker-model freeze-runtime smoke pin-space frontend-bridge single-load load-feedback memory-violation rar-violation ifetch-prefetch hardware-prefetch fp-loads trigger-contracts metadata-contracts dcache-errors dcache-coherence atomic-contracts atomic-dchannel-errors uncache-errors uncache-widths mmio-contracts cbo-zero-contracts reset-recovery scalar-misaligned misaligned-stores exception-contracts l2-tlb-contracts ifetch-ptw-bridge two-stage-translation translation-matrix translation-fence translation-fence-selective translation-fence-sv48 translation-fence-sv48-selective translation-fence-sv39-sv48x4 translation-fence-sv39-sv48x4-selective translation-fence-sv48-sv39x4 translation-fence-sv48-sv39x4-selective translation-fence-all translation-inflight-context translation-inflight-context-sv48 translation-inflight-context-sv39-sv48x4 translation-inflight-context-sv48-sv39x4 translation-inflight-context-all translation-context translation-bare translation-faults translation-permissions translation-pbmt translation-superpages scalar-guest-fault vector-guest-fault vector-guest-fault-split vector-load vector-split-load vector-addressing vector-store-forwarding store-forwarding store-rdata-order store-tlb-miss-preserve dcache-release redirect queue-pressure random-loads random-vector-loads random-forwarding random-vector-forwarding random-mixed random-stress random-mixed-hunt random-boundary-hunt random-boundary-regression known-bug-sentinel regression hunt-regression stress-regression verify-stress-results verify-boundary-hunt extended-regression final-regression long-final-regression endurance-regression verify-endurance-results benchmark-tests verify-extended-results verify-final-results verify-long-results final-acceptance unit
 
 ports: $(PORT_JSON) $(PORT_DOC) $(SVA) $(CPP_DEFAULTS)
 
@@ -123,6 +123,9 @@ rar-violation: $(PICKER_TEST_BINARY)
 
 ifetch-prefetch: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test ifetch-prefetch
+
+hardware-prefetch: $(PICKER_TEST_BINARY)
+	$(PICKER_TEST_BINARY) --test hardware-prefetch
 
 fp-loads: $(PICKER_TEST_BINARY)
 	$(PICKER_TEST_BINARY) --test fp-loads
@@ -389,6 +392,7 @@ final-acceptance:
 	$(MAKE) memory-violation
 	$(MAKE) rar-violation
 	$(MAKE) ifetch-prefetch
+	$(MAKE) hardware-prefetch
 	$(MAKE) fp-loads
 	$(MAKE) dcache-errors
 	$(MAKE) dcache-coherence

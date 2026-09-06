@@ -187,6 +187,7 @@ make load-feedback PICKER="$PICKER" JOBS=8
 make memory-violation PICKER="$PICKER" JOBS=8
 make rar-violation PICKER="$PICKER" JOBS=8
 make ifetch-prefetch PICKER="$PICKER" JOBS=8
+make hardware-prefetch PICKER="$PICKER" JOBS=8
 make fp-loads PICKER="$PICKER" JOBS=8
 make trigger-contracts PICKER="$PICKER" JOBS=8
 make metadata-contracts PICKER="$PICKER" JOBS=8
@@ -348,6 +349,14 @@ output to the frontend. Read/write data-prefetch operations are negative
 controls: they must complete without generating an instruction-prefetch pulse.
 The `random-mixed` coverage schema also requires at least one observed
 instruction-prefetch output in every seed.
+
+`hardware-prefetch` enables only the L1 stride trainer, holds the load PC
+constant, and issues cold misses at a 128-byte stride. Starting with the sixth
+training access, it requires one `Prefetch2L2Stride` output per access at the
+RTL-defined depth (`current address + 4096`), then disables the CSR and checks
+that further accesses do not emit requests. The present build elaborates L3
+stream prefetch disabled, so the L3 output is monitored and required to remain
+idle instead of being reported as positive functional coverage.
 
 `dcache-errors` injects one denied and one corrupt DCache response and checks
 the corresponding scalar load access-fault and hardware-error writebacks with

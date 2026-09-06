@@ -2359,6 +2359,123 @@ int run_ifetch_prefetch(int argc, char **argv)
     return 0;
 }
 
+int run_hardware_prefetch(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x200000;
+    constexpr std::uint64_t pc = 0x4000;
+    constexpr std::uint64_t stride = 128;
+    constexpr std::uint64_t l2_depth = stride << 5;
+    constexpr std::uint8_t stride_source = 12;
+    constexpr unsigned training_loads = 8;
+    environment.memory().fill_incrementing(base, 0x10000, 0x39);
+    if (!environment.reset() || !environment.configure_stride_prefetch(true)) {
+        std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                  << environment.cycle() << " phase=setup reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    for (unsigned index = 0; index < training_loads; ++index) {
+        const memblock::LoadTransaction transaction{
+            .address = base + index * stride,
+            .pc = pc,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(index),
+            .lq = static_cast<std::uint8_t>(index),
+            .sq = 0,
+            .pdest = static_cast<std::uint8_t>(index + 1),
+            .lane = index % memblock::kScalarLoadLanes,
+        };
+        const auto before = environment.hardware_prefetch_stats()
+                                .l2_source_counts[stride_source];
+        environment.expect_load(transaction);
+        if (!environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 256) ||
+            !environment.run_until_complete(2048) ||
+            !environment.run_cycles(64)) {
+            std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                      << environment.cycle() << " phase=train index=" << index
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        const auto &stats = environment.hardware_prefetch_stats();
+        const auto after = stats.l2_source_counts[stride_source];
+        const bool should_prefetch = index >= 5;
+        const std::uint64_t expected_addr = transaction.address + l2_depth;
+        if (after != before + (should_prefetch ? 1 : 0) ||
+            (should_prefetch &&
+             stats.last_l2_addr_by_source[stride_source] != expected_addr) ||
+            stats.l3_requests != 0) {
+            std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                      << environment.cycle() << " phase=oracle index=" << index
+                      << " source_before=" << before
+                      << " source_after=" << after
+                      << " expected_addr=0x" << std::hex << expected_addr
+                      << " actual_addr=0x"
+                      << stats.last_l2_addr_by_source[stride_source] << std::dec
+                      << " l2_total=" << stats.l2_requests
+                      << " l3_total=" << stats.l3_requests << '\n';
+            return 1;
+        }
+    }
+
+    if (!environment.run_until_lq_retired(4096) ||
+        !environment.configure_stride_prefetch(false)) {
+        std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                  << environment.cycle() << " phase=disable reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const auto stride_before_disable = environment.hardware_prefetch_stats()
+                                           .l2_source_counts[stride_source];
+    for (unsigned index = training_loads; index < training_loads + 3; ++index) {
+        const memblock::LoadTransaction transaction{
+            .address = base + index * stride,
+            .pc = pc,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(index),
+            .lq = static_cast<std::uint8_t>(index),
+            .sq = 0,
+            .pdest = static_cast<std::uint8_t>(index + 1),
+            .lane = index % memblock::kScalarLoadLanes,
+        };
+        environment.expect_load(transaction);
+        if (!environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 256) ||
+            !environment.run_until_complete(2048) ||
+            !environment.run_cycles(32)) {
+            std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                      << environment.cycle() << " phase=disabled-load index="
+                      << index << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+    const auto &stats = environment.hardware_prefetch_stats();
+    if (stats.l2_source_counts[stride_source] != stride_before_disable ||
+        stats.l3_requests != 0) {
+        std::cerr << "MEMBLOCK_HARDWARE_PREFETCH_FAIL cycle="
+                  << environment.cycle() << " phase=disabled-check"
+                  << " expected_stride=" << stride_before_disable
+                  << " actual_stride="
+                  << stats.l2_source_counts[stride_source]
+                  << " l3_total=" << stats.l3_requests << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_HARDWARE_PREFETCH_PASS"
+              << " cycle=" << environment.cycle()
+              << " training_loads=" << training_loads
+              << " disabled_loads=3"
+              << " l2_total=" << stats.l2_requests
+              << " l2_stride=" << stats.l2_source_counts[stride_source]
+              << " l2_stream=" << stats.l2_source_counts[11]
+              << " l2_sms=" << stats.l2_source_counts[10]
+              << " l3_total=" << stats.l3_requests
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_fp_loads(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -14534,6 +14651,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "ifetch-prefetch") {
             return run_ifetch_prefetch(argc, argv);
+        }
+        if (options.test == "hardware-prefetch") {
+            return run_hardware_prefetch(argc, argv);
         }
         if (options.test == "fp-loads") {
             return run_fp_loads(argc, argv);

@@ -40,6 +40,8 @@ class GenerateCppTest(unittest.TestCase):
         self.assertIn("sample_sbuffer_empty", rendered)
         self.assertIn("kIfetchPrefetchLanes = 3", rendered)
         self.assertIn("sample_ifetch_prefetch", rendered)
+        self.assertIn("sample_hardware_prefetch_outputs", rendered)
+        self.assertIn("auto_inner_l2_pf_sender_out_pf_source", rendered)
         self.assertIn("item.store_set_hit", rendered)
         self.assertIn("item.ftq_ptr", rendered)
         self.assertIn("dut.io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_0.ImmSet((item.exception_mask >> 0) & 1U)", rendered)
