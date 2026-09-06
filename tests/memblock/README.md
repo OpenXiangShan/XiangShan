@@ -739,10 +739,13 @@ WARL conversion to a minimum 4-KiB NAPOT region rather than claimed as NA4.
 `atomic-contracts` drives all currently exposed W/D-width AMOs, AMOCAS.W/D, and
 LR/SC through the atomic store-address/data ports, checks old-value writeback,
 compare success/failure, reservation success/failure, and then verifies cache
-visibility through ordinary scalar loads. It also checks representative
-misaligned D/W atomics for `storeAddrMisaligned`, suppressed exceptional
-`rfWen`, and no DCache request. A bare-mode `AMOADD.D` at the last naturally
-aligned device address below DDR checks the fixed PMA `atomic=0` attribute:
+visibility through ordinary scalar loads. Its alignment matrix crosses all 24
+exposed W/D LR, SC, AMO, and AMOCAS encodings with every illegal byte offset:
+36 W-width plus 84 D-width cases. LR must report `loadAddrMisaligned`; all
+other operations must report `storeAddrMisaligned`. Every case suppresses
+exceptional `rfWen`, adds no DCache request, and crosses the 160-entry ROB
+pointer boundary. A bare-mode `AMOADD.D` at the last naturally aligned device
+address below DDR checks the fixed PMA `atomic=0` attribute:
 it must report `StoreAccessFault`, preserve memory, and reach neither data
 manager. Atomic uops are intentionally not counted as LSQ entries because the
 RTL routes them through `AtomicsUnit`.

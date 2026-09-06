@@ -15,12 +15,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `257396474c8bef35e3e3594a6adac2acf6aa7444e8370f0f4d3e413bd545f301`
 - Complete ordered RTL SHA-256: `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`
-- Current rebuilt and frozen UT executable SHA-256: `eca1bcf420246d9c4cb41acb25559c7148591eadb7ec5e6801805a2999d233a3`
+- Current rebuilt and frozen UT executable SHA-256: `58bb4dfb2e26d9dd85876d3ba777ae080793bb3b82b94934fb6163bc8a114092`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `577579039590a2ea7a5e5d4e22901ac1d76afbcc5fed158eaf1cd53c8e5d3984`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `3ffb5c0d39a3402bbe6507a54829d58866e907d02760179159d6945dde00344a`
-- Frozen runtime manifest SHA-256: `a650f2df9cbcb597eb70cbe34a17353692036eec9fa26f71c64684d39de890f3`
+- Frozen runtime manifest SHA-256: `4a1201319ef1444e36fefcf27e2bf040da3f8223488ef5fd67d32cfe3cac918c`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -1233,6 +1233,14 @@ writeback. The output now masks `rfWen` whenever `exceptionVec` is nonzero;
 the full finding, before/after behavior, and scope are recorded in
 [`CPU_BUG_ATOMIC_EXCEPTION_RF_WEN.md`](CPU_BUG_ATOMIC_EXCEPTION_RF_WEN.md).
 
+On 2026-09-07, that alignment coverage was expanded from two representative
+operations to every exposed encoding and every illegal byte offset: 12
+W-width operations x three offsets and 12 D-width operations x seven offsets,
+for 120 cases. LR correctly reports `LoadAddressMisaligned`; SC, AMO, and
+AMOCAS report `StoreAddressMisaligned`. All cases suppress RF write, add no
+DCache request, and cross the ROB pointer wrap. The complete
+`atomic-contracts` scenario passed at cycle 1656. No new CPU defect was found.
+
 The apparent third atomic D-channel bug was a UT oracle error. MainPipe
 intentionally installs denied and corrupt atomic refills together with
 `DCacheExtraMeta.error`; later loads hit the poisoned line and re-report
@@ -1311,7 +1319,7 @@ the historical complete RTL SHA-256 is
 | Uncache widths/byte lanes | Pass | 29 scalar NC loads across all seven opcodes and legal 8-byte-beat lanes; 29 uncache requests, two request stalls, 90 response-delay cycles |
 | MMIO metadata/error, PMA edge, and device side effects | Pass | PBMT phase cycle 818: one normal, one denied, and one corrupt IO load plus one cold-TLB IO store. Bare PMA phase cycle 488: a non-DebugModule `c=0` load/store pair passed, guarded DebugModule access faulted with no manager request or uncanceled wakeup, and exact loads at `0x7ffffff8`/`0x80000000` selected one Uncache/one DCache request. A 1,003-cycle eight-access device log proved read-clear behavior, zero side effects for denied/corrupt reads and writes, exact offset-`SW` fields, recovery, no duplicates, and zero DCache requests. An 803-cycle phase queued three reads under 512/128-cycle delays; a 689-cycle phase pre-issued `load -> SW -> load` under two 256-cycle delays. Both required external depth one and exact device state/order |
 | CBO.ZERO cache-line zeroing | Pass | Cycle 370; cacheable `0x7` CBO.ZERO used the StoreQueue/SBuffer `wline` path, survived one forced DCache A stall and four response-delay cycles, produced exact non-MMIO store metadata, and a pre-mirror cache readback returned an all-zero line; no Uncache request was emitted |
-| Atomic operations and exception metadata | Pass | Main phase cycle 1,216: all 9 W-width and 9 D-width AMOs, AMOCAS.W/D compare success/failure, LR/SC success/failure, and all 7 forbidden D-width plus 3 forbidden W-width byte offsets. A separate 39-cycle device-PMA `AMOADD.D` produced `StoreAccessFault`, suppressed `rfWen`, preserved memory, and emitted no DCache/Uncache request |
+| Atomic operations and exception metadata | Pass | Main phase cycle 1,656: all 9 W-width and 9 D-width AMOs, AMOCAS.W/D compare success/failure, LR/SC success/failure, and a 120-case matrix crossing all 24 exposed encodings with every illegal W/D byte offset plus ROB wrap. LR returned load-misaligned while SC/AMO/AMOCAS returned store-misaligned; all suppressed `rfWen` and added no DCache request. A separate 39-cycle device-PMA `AMOADD.D` produced `StoreAccessFault`, suppressed `rfWen`, preserved memory, and emitted no DCache/Uncache request |
 | Atomic D-channel errors | Pass | Cycle 7,108; 22 W/D LR/AMO/AMOCAS operations crossed with denied and corrupt; all 44 later loads hit poisoned lines and re-reported exact errors, four SC hits reported cached errors, two clean AMO recoveries passed, exceptional `rfWen` stayed suppressed, and exactly 46 cold requests were issued |
 | Hypervisor memory operations | Pass | 76 cases in 17,599 aggregate cycles: all encodings, four nested mode pairs, five PBMT combinations, misaligned split paths, 18 M-mode/SPVP physical-PMP crosses including six locked R/RWX cases, and three fixed-PMA device cases. HLV required R, HLVX required R+X, and HSV required W; PMA-device HLV/HSV used Uncache while HLVX faulted; 11 total access faults, 656 PTW requests, and 48 DCache requests matched the oracle |
 | Concurrent exception priority | Pass | Cycle 1,351; wrapped/reversed queue age, same-ROB vector-uop order, cross-cause and scalar/vector replacement all passed. Two additional vector-load/store pairs populated the exception buffers in opposite arrival orders; toggling `isStoreException` selected and restored each exact source VA. Totals were 11 scalar-load, six vector-load, and six scalar-store writebacks |

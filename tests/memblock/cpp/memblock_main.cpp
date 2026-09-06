@@ -6987,60 +6987,121 @@ int run_atomic_contracts(int argc, char **argv)
                                        memblock::AtomicOp op,
                                        std::uint64_t data,
                                        std::uint8_t rob,
+                                       bool rob_flag,
                                        std::uint8_t pdest,
-                                       unsigned lane,
-                                       const char *phase) {
+                                       unsigned lane) {
         const memblock::AtomicTransaction atomic{
             .address = misaligned_address,
             .op = op,
             .data = data,
             .rob = rob,
+            .rob_flag = rob_flag,
             .pdest = pdest,
             .address_lane = lane,
             .data_lane = lane,
         };
+        const bool is_lr = op == memblock::AtomicOp::lr_w ||
+            op == memblock::AtomicOp::lr_d;
         const memblock::LoadTransaction writeback{
             .address = atomic.address,
             .op = memblock::LoadOp::ld,
             .rob = atomic.rob,
+            .rob_flag = atomic.rob_flag,
             .pdest = atomic.pdest,
             .lane = lane,
-            .expected_exception_mask = memblock::kExceptionStoreAddressMisaligned,
+            .expected_exception_mask = is_lr
+                ? memblock::kExceptionLoadAddressMisaligned
+                : memblock::kExceptionStoreAddressMisaligned,
         };
         environment.expect_load_data(writeback, 0);
         return environment.issue_atomic(atomic, 1024) &&
             environment.run_until_complete(8192) &&
             environment.tilelink_requests() == atomic_requests_before_misaligned;
     };
-    for (unsigned offset = 1; offset < 8; ++offset) {
-        if (!check_misaligned_atomic(
-                address + offset, memblock::AtomicOp::amoadd_d,
-                0x1122334455667788ULL ^ offset,
-                static_cast<std::uint8_t>(18 + offset),
-                static_cast<std::uint8_t>(118 + offset), offset & 1U,
-                "misaligned-d")) {
-            std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
-                      << environment.cycle() << " phase=misaligned-d offset="
-                      << offset << " reason=" << environment.error()
-                      << " dcache_requests=" << environment.tilelink_requests()
-                      << " expected=" << atomic_requests_before_misaligned << '\n';
-            return 1;
+    constexpr std::array<memblock::AtomicOp, 12> doubleword_atomic_ops{{
+        memblock::AtomicOp::lr_d,
+        memblock::AtomicOp::sc_d,
+        memblock::AtomicOp::amoswap_d,
+        memblock::AtomicOp::amoadd_d,
+        memblock::AtomicOp::amoxor_d,
+        memblock::AtomicOp::amoand_d,
+        memblock::AtomicOp::amoor_d,
+        memblock::AtomicOp::amomin_d,
+        memblock::AtomicOp::amomax_d,
+        memblock::AtomicOp::amominu_d,
+        memblock::AtomicOp::amomaxu_d,
+        memblock::AtomicOp::amocas_d,
+    }};
+    constexpr std::array<memblock::AtomicOp, 12> word_atomic_ops{{
+        memblock::AtomicOp::lr_w,
+        memblock::AtomicOp::sc_w,
+        memblock::AtomicOp::amoswap_w,
+        memblock::AtomicOp::amoadd_w,
+        memblock::AtomicOp::amoxor_w,
+        memblock::AtomicOp::amoand_w,
+        memblock::AtomicOp::amoor_w,
+        memblock::AtomicOp::amomin_w,
+        memblock::AtomicOp::amomax_w,
+        memblock::AtomicOp::amominu_w,
+        memblock::AtomicOp::amomaxu_w,
+        memblock::AtomicOp::amocas_w,
+    }};
+    std::uint64_t misaligned_rob_cursor = 66;
+    unsigned misaligned_d_cases = 0;
+    unsigned misaligned_w_cases = 0;
+    unsigned misaligned_rob_wraps = 0;
+    auto run_misaligned_matrix = [&](const auto &ops, std::uint64_t base,
+                                     unsigned alignment,
+                                     unsigned &case_count,
+                                     const char *phase) {
+        for (std::size_t op_index = 0; op_index < ops.size(); ++op_index) {
+            for (unsigned offset = 1; offset < alignment; ++offset) {
+                const std::uint64_t absolute_rob = misaligned_rob_cursor++;
+                misaligned_rob_wraps += absolute_rob != 66 &&
+                    absolute_rob % memblock::kRobEntries == 0;
+                const unsigned lane = (op_index + offset) & 1U;
+                if (!check_misaligned_atomic(
+                        base + offset, ops[op_index],
+                        0x1122334455667788ULL ^
+                            (static_cast<std::uint64_t>(op_index) << 8) ^ offset,
+                        static_cast<std::uint8_t>(absolute_rob %
+                            memblock::kRobEntries),
+                        ((absolute_rob / memblock::kRobEntries) & 1U) != 0,
+                        static_cast<std::uint8_t>(32 + case_count), lane)) {
+                    std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                              << environment.cycle() << " phase=" << phase
+                              << " op=0x" << std::hex
+                              << static_cast<unsigned>(ops[op_index])
+                              << std::dec << " offset=" << offset
+                              << " reason=" << environment.error()
+                              << " dcache_requests="
+                              << environment.tilelink_requests()
+                              << " expected="
+                              << atomic_requests_before_misaligned << '\n';
+                    return false;
+                }
+                ++case_count;
+            }
         }
+        return true;
+    };
+    if (!run_misaligned_matrix(
+            doubleword_atomic_ops, address, 8, misaligned_d_cases,
+            "misaligned-d-matrix") ||
+        !run_misaligned_matrix(
+            word_atomic_ops, word_address, 4, misaligned_w_cases,
+            "misaligned-w-matrix")) {
+        return 1;
     }
-    for (unsigned offset = 1; offset < 4; ++offset) {
-        if (!check_misaligned_atomic(
-                word_address + offset, memblock::AtomicOp::amoor_w,
-                0xa5a55a5aU ^ offset,
-                static_cast<std::uint8_t>(26 + offset),
-                static_cast<std::uint8_t>(126 + offset), offset & 1U,
-                "misaligned-w")) {
-            std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
-                      << environment.cycle() << " phase=misaligned-w offset="
-                      << offset << " reason=" << environment.error()
-                      << " dcache_requests=" << environment.tilelink_requests()
-                      << " expected=" << atomic_requests_before_misaligned << '\n';
-            return 1;
-        }
+    if (misaligned_d_cases != 84 || misaligned_w_cases != 36 ||
+        misaligned_rob_wraps != 1) {
+        std::cerr << "MEMBLOCK_ATOMIC_CONTRACTS_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=misaligned-matrix-conservation"
+                  << " d_cases=" << misaligned_d_cases
+                  << " w_cases=" << misaligned_w_cases
+                  << " rob_wraps=" << misaligned_rob_wraps << '\n';
+        return 1;
     }
 
     // Exercise the complete W-width ALU family independently from the
@@ -7462,8 +7523,12 @@ int run_atomic_contracts(int argc, char **argv)
               << " amo_d_variants=" << operations.size()
               << " amo_w_variants=" << word_operations.size()
               << " amocas_variants=4"
-              << " lr_sc=1 misaligned_d_offsets=7 misaligned_w_offsets=3"
-              << " misaligned=10"
+              << " lr_sc=1 misaligned_d_ops=" << doubleword_atomic_ops.size()
+              << " misaligned_w_ops=" << word_atomic_ops.size()
+              << " misaligned_d_cases=" << misaligned_d_cases
+              << " misaligned_w_cases=" << misaligned_w_cases
+              << " misaligned=" << misaligned_d_cases + misaligned_w_cases
+              << " misaligned_rob_wraps=" << misaligned_rob_wraps
               << " pma_atomic_denied=1"
               << " pma_atomic_cycles=" << pma_atomic.cycle()
               << " final=0x" << std::hex << model_value << std::dec
