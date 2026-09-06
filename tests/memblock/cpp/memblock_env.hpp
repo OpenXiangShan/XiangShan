@@ -2149,7 +2149,35 @@ private:
 
 class UncacheMemoryAgent {
 public:
+    struct DeviceAccess {
+        std::uint64_t sequence;
+        bool write;
+        std::uint8_t size;
+        std::uint8_t source;
+        std::uint64_t address;
+        std::uint8_t mask;
+        std::uint64_t data;
+        std::uint64_t read_data;
+        bool denied;
+        bool corrupt;
+    };
+
     explicit UncacheMemoryAgent(SparseMemory &memory) : memory_(memory) {}
+
+    void configure_device_window(
+        std::uint64_t base, std::uint64_t size, bool read_clear)
+    {
+        if (size == 0) {
+            throw std::invalid_argument("uncache device window cannot be empty");
+        }
+        device_window_ = DeviceWindow{base, size, read_clear};
+        device_accesses_.clear();
+    }
+
+    const std::vector<DeviceAccess> &device_accesses() const
+    {
+        return device_accesses_;
+    }
 
     void inject_next_response_error(bool denied, bool corrupt)
     {
@@ -2337,6 +2365,35 @@ private:
         unsigned delay_before = 0;
     };
 
+    struct DeviceWindow {
+        std::uint64_t base;
+        std::uint64_t size;
+        bool read_clear;
+    };
+
+    bool is_device_request(const Request &request) const
+    {
+        if (!device_window_ || request.size > 3 ||
+            request.address < device_window_->base) {
+            return false;
+        }
+        const std::uint64_t transfer_bytes = std::uint64_t{1} << request.size;
+        const std::uint64_t offset = request.address - device_window_->base;
+        return transfer_bytes <= device_window_->size &&
+               offset <= device_window_->size - transfer_bytes;
+    }
+
+    void record_device_access(
+        const Request &request, std::uint64_t read_data,
+        bool denied, bool corrupt)
+    {
+        device_accesses_.push_back(DeviceAccess{
+            device_accesses_.size(), request.opcode != 4, request.size,
+            request.source, request.address, request.mask, request.data,
+            read_data, denied, corrupt,
+        });
+    }
+
     void respond(const Request &request)
     {
         const bool denied = inject_denied_;
@@ -2345,11 +2402,22 @@ private:
         inject_corrupt_ = false;
         if (request.opcode == 4) {
             const std::uint64_t beat_base = request.address & ~std::uint64_t{7};
+            const std::uint64_t read_data = memory_.read_u64(beat_base);
+            if (is_device_request(request)) {
+                record_device_access(request, read_data, denied, corrupt);
+                if (device_window_->read_clear && !denied && !corrupt) {
+                    for (unsigned byte = 0; byte < 8; ++byte) {
+                        if (((request.mask >> byte) & 1U) != 0) {
+                            memory_.write_byte(beat_base + byte, 0);
+                        }
+                    }
+                }
+            }
             push_response(Response{
                 1, request.size, request.source,
                 // TileLink returns the complete 8-byte beat. LoadUnit selects
                 // the requested byte lane later using the physical address.
-                memory_.read_u64(beat_base),
+                read_data,
                 denied, corrupt,
             }, true);
             return;
@@ -2362,11 +2430,17 @@ private:
             return;
         }
         const std::uint64_t beat_base = request.address & ~std::uint64_t{7};
-        for (unsigned byte = 0; byte < 8; ++byte) {
-            if (((request.mask >> byte) & 1U) != 0) {
-                memory_.write_byte(
-                    beat_base + byte,
-                    static_cast<std::uint8_t>(request.data >> (8 * byte)));
+        const bool device_request = is_device_request(request);
+        if (device_request) {
+            record_device_access(request, 0, denied, corrupt);
+        }
+        if (!device_request || (!denied && !corrupt)) {
+            for (unsigned byte = 0; byte < 8; ++byte) {
+                if (((request.mask >> byte) & 1U) != 0) {
+                    memory_.write_byte(
+                        beat_base + byte,
+                        static_cast<std::uint8_t>(request.data >> (8 * byte)));
+                }
             }
         }
         push_response(
@@ -2429,6 +2503,8 @@ private:
     std::uint64_t response_delay_cycles_ = 0;
     bool inject_denied_ = false;
     bool inject_corrupt_ = false;
+    std::optional<DeviceWindow> device_window_;
+    std::vector<DeviceAccess> device_accesses_;
     std::string error_;
 };
 
@@ -3543,6 +3619,18 @@ public:
     void force_next_uncache_response_delay(unsigned cycles)
     {
         uncache_agent_.force_next_response_delay(cycles);
+    }
+
+    void configure_uncache_device(
+        std::uint64_t base, std::uint64_t size, bool read_clear)
+    {
+        uncache_agent_.configure_device_window(base, size, read_clear);
+    }
+
+    const std::vector<UncacheMemoryAgent::DeviceAccess> &
+    uncache_device_accesses() const
+    {
+        return uncache_agent_.device_accesses();
     }
 
     void configure_cache_error_enable(bool enable)

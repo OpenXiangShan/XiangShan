@@ -865,6 +865,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "io_ooo_to_mem_tlbCsr_priv_debug",
             "expected_debug_is_mmio",
             "expected_debug_is_ncio",
+            "struct DeviceAccess",
+            "configure_device_window",
+            "record_device_access",
+            "configure_uncache_device",
+            "uncache_device_accesses",
         ):
             self.assertIn(contract, environment)
         for contract in (
@@ -894,6 +899,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "pma_edge_dcache=",
             "pma_edge_uncache=",
             "pma_cycles=",
+            "phase=device-read-clear",
+            "phase=device-partial-write",
+            "phase=device-access-log",
+            "device_accesses=",
+            "device_read_clear=1 device_partial_write=1",
             "mmio-contracts",
         ):
             self.assertIn(contract, main + makefile)

@@ -91,7 +91,7 @@ The reusable C++ components are in `cpp/memblock_env.hpp`:
 
 The correctness contracts are cataloged separately in
 `docs/ORACLES.md`. `docs/VERIFICATION_PLAN.md` contains the complete test-point
-inventory, including explicit planned gaps for MMIO device side effects,
+inventory, including explicit planned gaps for broader device/error ordering,
 reservation interference and full atomic alignment crosses, CMO CLEAN/FLUSH/INVAL,
 remaining segment LMUL/whole-register/redirect combinations, remaining PMP/PMA matrices,
 coherence protocol negatives, error injection, cross-cause/vector exception
@@ -561,8 +561,13 @@ with no manager request, and proves every speculative load wakeup is canceled.
 Two exact bare-mode loads straddle the `0x80000000` PMA boundary: the last
 aligned 64-bit device access below it must use Uncache, while the first DDR
 access must use DCache.
-A side-effecting device model remains a planned boundary. `cbo-zero-contracts`
-drives the `CBO.ZERO` encoding through
+The Uncache manager also provides a configurable side-effecting device window
+with a structured request log. A four-access bare-mode sequence proves that a
+read-clear register returns its old value exactly once, records a 32-bit write
+at byte offset four with the exact TileLink size, mask, and replicated bus
+data, and returns that partial write on the next read. The log enforces request
+order and all accesses bypass DCache. `cbo-zero-contracts` drives the
+`CBO.ZERO` encoding through
 the cacheable StoreQueue/SBuffer wline path under randomized DCache
 backpressure, checks exact writeback metadata, and reads the resulting line
 back before updating the reference mirror.
