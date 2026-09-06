@@ -395,7 +395,11 @@ addresses and a PTW manager outstanding depth of at least two, and checks the
 load writeback against the independent memory oracle. A duplicate case accepts
 two same-VPN IFU requests before the delayed first response, requires two
 identical responses, and proves they coalesce by observing only the three
-memory requests of one cold Sv39 walk.
+memory requests of one cold Sv39 walk. Delayed-walk races then change the
+stage-1 or nested root, mode, ASID, or VMID, or issue global and selective
+`SFENCE.VMA`, `HFENCE.VVMA`, and `HFENCE.GVMA`. Each race requires a 1,024-cycle
+quiet window with no stale response before an independent cold walk returns
+the exact replacement stage-1 and G-stage mappings.
 This is separate from the data-side TLB translation tests.
 
 `uncache-errors` injects one denied and one corrupt Uncache response and checks

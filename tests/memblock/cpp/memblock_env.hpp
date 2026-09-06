@@ -3274,6 +3274,34 @@ public:
                 response, response_stall_cycles, timeout);
     }
 
+    bool confirm_ifetch_ptw_flushed(unsigned quiet_cycles = 1024)
+    {
+        if (ifetch_ptw_pending_ == 0) {
+            error_ = "no pending IFetch PTW request to flush";
+            return false;
+        }
+        dut_.io_fetch_to_mem_itlb_req_0_valid.ImmSet(std::uint64_t{0});
+        dut_.io_fetch_to_mem_itlb_resp_ready.ImmSet(std::uint64_t{1});
+        ifetch_ptw_pending_ = 0;
+        for (unsigned cycle = 0; cycle < quiet_cycles; ++cycle) {
+            dut_.RefreshComb();
+            if (dut_.io_fetch_to_mem_itlb_resp_valid.B()) {
+                error_ = "flushed IFetch PTW request produced a stale response";
+                return false;
+            }
+            tick(false);
+            if (!check_components()) {
+                return false;
+            }
+        }
+        dut_.RefreshComb();
+        if (dut_.io_fetch_to_mem_itlb_resp_valid.B()) {
+            error_ = "flushed IFetch PTW request produced a stale response";
+            return false;
+        }
+        return check_components();
+    }
+
     bool pulse_l2_hint(std::uint8_t source_id, bool is_keyword)
     {
         if (source_id >= 16) {

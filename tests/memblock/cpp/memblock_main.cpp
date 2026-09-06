@@ -6761,20 +6761,445 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
         total_ptw_requests += environment.ptw_requests() - ptw_before;
     }
 
+    const auto stage1_success_matches = [](
+        const memblock::Environment::IFetchPtwResponse &response,
+        std::uint64_t vpn, std::uint64_t output_page,
+        std::uint16_t expected_asid,
+        std::optional<std::uint16_t> expected_vmid = std::nullopt) {
+        const unsigned sector = static_cast<unsigned>(vpn & 7U);
+        const std::uint64_t reconstructed_ppn =
+            (response.s1_ppn << 3) | response.s1_ppn_low[sector];
+        return response.s1_tag == (vpn >> 3) &&
+            response.s1_asid == expected_asid &&
+            (!expected_vmid || response.s1_vmid == *expected_vmid) &&
+            !response.s1_n && response.s1_pbmt == 0 && !response.s1_d &&
+            response.s1_a && !response.s1_g && !response.s1_u &&
+            response.s1_x && !response.s1_w && response.s1_r &&
+            response.s1_level == 0 && response.s1_v &&
+            reconstructed_ppn == (output_page >> 12) &&
+            response.s1_addr_low == sector &&
+            response.s1_pteidx == (1U << sector) &&
+            (response.s1_valididx & (1U << sector)) != 0 &&
+            !response.s1_pf && !response.s1_af;
+    };
+    const auto stage2_success_matches = [](
+        const memblock::Environment::IFetchPtwResponse &response,
+        std::uint64_t input_page, std::uint64_t output_page,
+        std::uint16_t expected_vmid) {
+        return response.s2_tag == (input_page >> 12) &&
+            response.s2_vmid == expected_vmid && !response.s2_n &&
+            response.s2_pbmt == 0 &&
+            response.s2_ppn == (output_page >> 12) && !response.s2_d &&
+            response.s2_a && !response.s2_g && response.s2_u &&
+            response.s2_x && !response.s2_w && response.s2_r &&
+            response.s2_level == 0 && !response.s2_gpf && !response.s2_gaf;
+    };
+
+    const auto run_stage1_ifetch_race = [&](
+        bool explicit_fence, bool selective_fence = false) {
+        auto &environment = duplicate;
+        const char *const race_name = !explicit_fence
+            ? "context"
+            : selective_fence ? "sfence-selective" : "sfence-global";
+        const std::uint64_t cycle_before = environment.cycle();
+        constexpr std::uint64_t virtual_page = 0x58012000ULL;
+        const std::uint64_t old_physical = explicit_fence
+            ? 0xc8012000ULL : 0xc9012000ULL;
+        const std::uint64_t new_physical = explicit_fence
+            ? 0xca012000ULL : 0xcb012000ULL;
+        const std::uint64_t old_root = explicit_fence
+            ? 0xc4000000ULL : 0xc5000000ULL;
+        const std::uint64_t new_root = explicit_fence
+            ? old_root : 0xc6000000ULL;
+        const std::uint16_t new_asid = explicit_fence ? asid : asid + 1;
+        environment.configure_backpressure(
+            (explicit_fence ? 0x3c6ef372fe94f82bULL
+                            : 0xa54ff53a5f1d36f1ULL) ^
+                (selective_fence ? 0x9e3779b97f4a7c15ULL : 0),
+            true, memblock::ResponseLatencyProfile::spec);
+        bool configured = environment.reset() &&
+            environment.map_sv39_4k(
+                virtual_page, old_physical, old_root, true, false, true,
+                false);
+        if (configured && !explicit_fence) {
+            configured = environment.map_sv48_4k(
+                virtual_page, new_physical, new_root, true, false, true,
+                false);
+        }
+        if (configured) {
+            configured = environment.activate_sv39(old_root, asid);
+        }
+        const auto old_root_pte = memblock::reference_pte_address_at_level(
+            environment.memory(), old_root, virtual_page,
+            memblock::ReferencePageMode::sv39, 2);
+        if (!configured || !old_root_pte) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=IFU-"
+                      << race_name
+                      << "-race phase=configuration reason="
+                      << environment.error() << '\n';
+            return false;
+        }
+
+        const std::uint64_t ptw_before = environment.ptw_requests();
+        environment.force_next_ptw_response_delay(concurrent_ptw_delay);
+        if (!environment.start_ifetch_ptw_request(
+                virtual_page >> 12,
+                memblock::PtwTranslationMode::no_stage_two) ||
+            !environment.run_until_ptw_request_covering(
+                *old_root_pte, ptw_before, 4096, concurrent_ptw_delay)) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=IFU-"
+                      << race_name
+                      << "-race phase=old-request reason="
+                      << environment.error() << '\n';
+            return false;
+        }
+
+        const bool switched = explicit_fence
+            ? environment.map_sv39_4k(
+                  virtual_page, new_physical, old_root, true, false, true,
+                  false) &&
+                (selective_fence
+                    ? environment.issue_sfence(
+                          virtual_page, asid, false, false)
+                    : environment.issue_sfence())
+            : environment.update_stage_one_context(
+                  memblock::ReferencePageMode::sv48, new_root, new_asid);
+        const auto new_mode = explicit_fence
+            ? memblock::ReferencePageMode::sv39
+            : memblock::ReferencePageMode::sv48;
+        const auto new_leaf_pte = memblock::reference_pte_address_at_level(
+            environment.memory(), new_root, virtual_page, new_mode, 0);
+        if (!switched || !new_leaf_pte ||
+            !environment.confirm_ifetch_ptw_flushed(1024)) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=IFU-"
+                      << race_name
+                      << "-race phase=flush reason=" << environment.error()
+                      << '\n';
+            return false;
+        }
+
+        const std::uint64_t ptw_after_flush = environment.ptw_requests();
+        memblock::Environment::IFetchPtwResponse response;
+        if (!environment.issue_ifetch_ptw_request(
+                virtual_page >> 12,
+                memblock::PtwTranslationMode::no_stage_two, response,
+                response_stall_cycles) ||
+            environment.ptw_requests() <= ptw_after_flush ||
+            !environment.run_until_ptw_request_covering(
+                *new_leaf_pte, ptw_after_flush, 4096) ||
+            response.s2xlate != static_cast<std::uint8_t>(
+                memblock::PtwTranslationMode::no_stage_two) ||
+            !stage1_success_matches(
+                response, virtual_page >> 12, new_physical, new_asid)) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=IFU-"
+                      << race_name
+                      << "-race phase=new-request ptw=" << ptw_before << '/'
+                      << ptw_after_flush << '/' << environment.ptw_requests()
+                      << " s1_ppn=0x" << std::hex
+                      << ((response.s1_ppn << 3) |
+                          response.s1_ppn_low[(virtual_page >> 12) & 7U])
+                      << " expected=0x" << (new_physical >> 12) << std::dec
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        total_cycles += environment.cycle() - cycle_before;
+        total_ptw_requests += environment.ptw_requests() - ptw_before;
+        return true;
+    };
+
+    if (!run_stage1_ifetch_race(false) ||
+        !run_stage1_ifetch_race(true) ||
+        !run_stage1_ifetch_race(true, true)) {
+        return 1;
+    }
+
+    {
+        auto &environment = duplicate;
+        const std::uint64_t cycle_before = environment.cycle();
+        constexpr std::uint64_t virtual_page = 0x5c012000ULL;
+        constexpr std::uint64_t old_guest = 0x160012000ULL;
+        constexpr std::uint64_t new_guest = 0x170012000ULL;
+        constexpr std::uint64_t old_host = 0xcc012000ULL;
+        constexpr std::uint64_t new_host = 0xcd012000ULL;
+        constexpr std::uint64_t old_vs_root = 0xd0000000ULL;
+        constexpr std::uint64_t old_g_root = 0xd1000000ULL;
+        constexpr std::uint64_t new_vs_root = 0xd2000000ULL;
+        constexpr std::uint64_t new_g_root = 0xd3000000ULL;
+        constexpr std::uint16_t new_asid = asid + 2;
+        constexpr std::uint16_t new_vmid = vmid + 2;
+        environment.configure_backpressure(
+            0x510e527fade682d1ULL, true,
+            memblock::ResponseLatencyProfile::spec);
+        bool configured = environment.reset() &&
+            environment.map_sv39_4k(
+                virtual_page, old_guest, old_vs_root, true, false, true,
+                false) &&
+            environment.map_sv48_4k(
+                virtual_page, new_guest, new_vs_root, true, false, true,
+                false);
+        for (unsigned page = 0; configured && page < 3; ++page) {
+            const std::uint64_t address = old_vs_root + page * 0x1000ULL;
+            configured = environment.map_sv39x4_4k(
+                address, address, old_g_root, true, true, false);
+        }
+        if (configured) {
+            configured = environment.map_sv39x4_4k(
+                old_guest, old_host, old_g_root, true, false, true);
+        }
+        for (unsigned page = 0; configured && page < 4; ++page) {
+            const std::uint64_t address = new_vs_root + page * 0x1000ULL;
+            configured = environment.map_sv48x4_4k(
+                address, address, new_g_root, true, true, false);
+        }
+        if (configured) {
+            configured = environment.map_sv48x4_4k(
+                new_guest, new_host, new_g_root, true, false, true) &&
+                environment.activate_two_stage_modes(
+                    memblock::ReferencePageMode::sv39,
+                    memblock::ReferencePageMode::sv39, old_vs_root,
+                    old_g_root, asid, vmid);
+        }
+        const std::uint64_t old_vs_root_pte_gpa = old_vs_root +
+            ((virtual_page >> 30) & 0x1ffULL) * 8;
+        const auto old_first_g_pte = memblock::reference_pte_address_at_level(
+            environment.memory(), old_g_root, old_vs_root_pte_gpa,
+            memblock::ReferencePageMode::sv39, 2, true);
+        const auto new_vs_leaf_pte = memblock::reference_pte_address_at_level(
+            environment.memory(), new_vs_root, virtual_page,
+            memblock::ReferencePageMode::sv48, 0);
+        const auto new_g_leaf_pte = memblock::reference_pte_address_at_level(
+            environment.memory(), new_g_root, new_guest,
+            memblock::ReferencePageMode::sv48, 0, true);
+        if (!configured || !old_first_g_pte || !new_vs_leaf_pte ||
+            !new_g_leaf_pte) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL"
+                      << " case=IFU-nested-context-race"
+                      << " phase=configuration reason=" << environment.error()
+                      << '\n';
+            return 1;
+        }
+
+        const std::uint64_t ptw_before = environment.ptw_requests();
+        environment.force_next_ptw_response_delay(concurrent_ptw_delay);
+        if (!environment.start_ifetch_ptw_request(
+                virtual_page >> 12,
+                memblock::PtwTranslationMode::all_stages) ||
+            !environment.run_until_ptw_request_covering(
+                *old_first_g_pte, ptw_before, 4096,
+                concurrent_ptw_delay) ||
+            !environment.update_two_stage_context(
+                memblock::ReferencePageMode::sv48,
+                memblock::ReferencePageMode::sv48, new_vs_root, new_g_root,
+                new_asid, new_vmid) ||
+            !environment.confirm_ifetch_ptw_flushed(1024)) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL"
+                      << " case=IFU-nested-context-race phase=flush reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+
+        const std::uint64_t ptw_after_flush = environment.ptw_requests();
+        memblock::Environment::IFetchPtwResponse response;
+        if (!environment.issue_ifetch_ptw_request(
+                virtual_page >> 12,
+                memblock::PtwTranslationMode::all_stages, response,
+                response_stall_cycles) ||
+            environment.ptw_requests() <= ptw_after_flush ||
+            !environment.run_until_ptw_request_covering(
+                *new_vs_leaf_pte, ptw_after_flush, 4096) ||
+            !environment.run_until_ptw_request_covering(
+                *new_g_leaf_pte, ptw_after_flush, 4096) ||
+            response.s2xlate != static_cast<std::uint8_t>(
+                memblock::PtwTranslationMode::all_stages) ||
+            !stage1_success_matches(
+                response, virtual_page >> 12, new_guest, new_asid,
+                new_vmid) ||
+            !stage2_success_matches(
+                response, new_guest, new_host, new_vmid)) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL"
+                      << " case=IFU-nested-context-race"
+                      << " phase=new-request ptw=" << ptw_before << '/'
+                      << ptw_after_flush << '/' << environment.ptw_requests()
+                      << " s1_ppn=0x" << std::hex
+                      << ((response.s1_ppn << 3) |
+                          response.s1_ppn_low[(virtual_page >> 12) & 7U])
+                      << " s2_ppn=0x" << response.s2_ppn << std::dec
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        total_cycles += environment.cycle() - cycle_before;
+        total_ptw_requests += environment.ptw_requests() - ptw_before;
+    }
+
+    const auto run_nested_ifetch_fence_race = [&](
+        bool guest_fence, bool selective_fence = false) {
+        auto &environment = duplicate;
+        const std::uint64_t cycle_before = environment.cycle();
+        constexpr std::uint64_t virtual_page = 0x60012000ULL;
+        constexpr std::uint64_t old_guest = 0x180012000ULL;
+        constexpr std::uint64_t new_guest = 0x190012000ULL;
+        constexpr std::uint64_t old_host = 0xce012000ULL;
+        constexpr std::uint64_t new_host = 0xcf012000ULL;
+        const std::uint64_t vs_root = guest_fence
+            ? 0xd4000000ULL : 0xd6000000ULL;
+        const std::uint64_t g_root = guest_fence
+            ? 0xd5000000ULL : 0xd7000000ULL;
+        environment.configure_backpressure(
+            guest_fence ? 0x1f83d9abfb41bd6bULL
+                        : 0x5be0cd19137e2179ULL,
+            true, memblock::ResponseLatencyProfile::spec);
+        bool configured = environment.reset() &&
+            environment.map_sv39_4k(
+                virtual_page, old_guest, vs_root, true, false, true, false);
+        for (unsigned page = 0; configured && page < 3; ++page) {
+            const std::uint64_t address = vs_root + page * 0x1000ULL;
+            configured = environment.map_sv39x4_4k(
+                address, address, g_root, true, true, false);
+        }
+        if (configured) {
+            configured = environment.map_sv39x4_4k(
+                    old_guest, old_host, g_root, true, false, true) &&
+                environment.map_sv39x4_4k(
+                    new_guest, new_host, g_root, true, false, true) &&
+                environment.activate_two_stage_modes(
+                    memblock::ReferencePageMode::sv39,
+                    memblock::ReferencePageMode::sv39, vs_root, g_root,
+                    asid, vmid);
+        }
+        const std::uint64_t vs_root_pte_gpa = vs_root +
+            ((virtual_page >> 30) & 0x1ffULL) * 8;
+        const auto first_g_pte = memblock::reference_pte_address_at_level(
+            environment.memory(), g_root, vs_root_pte_gpa,
+            memblock::ReferencePageMode::sv39, 2, true);
+        if (!configured || !first_g_pte) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=IFU-HFENCE."
+                      << (guest_fence ? "GVMA" : "VVMA")
+                      << (selective_fence ? "-selective" : "-global")
+                      << "-race phase=configuration reason="
+                      << environment.error() << '\n';
+            return false;
+        }
+
+        const std::uint64_t ptw_before = environment.ptw_requests();
+        environment.force_next_ptw_response_delay(concurrent_ptw_delay);
+        if (!environment.start_ifetch_ptw_request(
+                virtual_page >> 12,
+                memblock::PtwTranslationMode::all_stages) ||
+            !environment.run_until_ptw_request_covering(
+                *first_g_pte, ptw_before, 4096,
+                concurrent_ptw_delay)) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=IFU-HFENCE."
+                      << (guest_fence ? "GVMA" : "VVMA")
+                      << (selective_fence ? "-selective" : "-global")
+                      << "-race phase=old-request reason="
+                      << environment.error() << '\n';
+            return false;
+        }
+
+        const bool updated = guest_fence
+            ? environment.map_sv39x4_4k(
+                  old_guest, new_host, g_root, true, false, true)
+            : environment.map_sv39_4k(
+                  virtual_page, new_guest, vs_root, true, false, true,
+                  false);
+        if (!updated ||
+            !environment.issue_sfence(
+                selective_fence
+                    ? (guest_fence ? old_guest : virtual_page)
+                    : 0,
+                guest_fence ? vmid : asid,
+                !selective_fence, !selective_fence,
+                !guest_fence, guest_fence) ||
+            !environment.confirm_ifetch_ptw_flushed(1024)) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=IFU-HFENCE."
+                      << (guest_fence ? "GVMA" : "VVMA")
+                      << (selective_fence ? "-selective" : "-global")
+                      << "-race phase=flush reason=" << environment.error()
+                      << '\n';
+            return false;
+        }
+
+        const std::uint64_t expected_guest =
+            guest_fence ? old_guest : new_guest;
+        const auto reference = memblock::reference_two_stage_walk(
+            environment.memory(), vs_root, g_root, virtual_page,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePageMode::sv39);
+        const auto vs_leaf_pte = memblock::reference_pte_address_at_level(
+            environment.memory(), vs_root, virtual_page,
+            memblock::ReferencePageMode::sv39, 0);
+        const auto g_leaf_pte = memblock::reference_pte_address_at_level(
+            environment.memory(), g_root, expected_guest,
+            memblock::ReferencePageMode::sv39, 0, true);
+        if (!reference.translated ||
+            reference.physical_address != new_host || !vs_leaf_pte ||
+            !g_leaf_pte) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=IFU-HFENCE."
+                      << (guest_fence ? "GVMA" : "VVMA")
+                      << (selective_fence ? "-selective" : "-global")
+                      << "-race phase=reference\n";
+            return false;
+        }
+
+        const std::uint64_t ptw_after_flush = environment.ptw_requests();
+        memblock::Environment::IFetchPtwResponse response;
+        if (!environment.issue_ifetch_ptw_request(
+                virtual_page >> 12,
+                memblock::PtwTranslationMode::all_stages, response,
+                response_stall_cycles) ||
+            environment.ptw_requests() <= ptw_after_flush ||
+            !environment.run_until_ptw_request_covering(
+                *vs_leaf_pte, ptw_after_flush, 4096) ||
+            !environment.run_until_ptw_request_covering(
+                *g_leaf_pte, ptw_after_flush, 4096) ||
+            response.s2xlate != static_cast<std::uint8_t>(
+                memblock::PtwTranslationMode::all_stages) ||
+            !stage1_success_matches(
+                response, virtual_page >> 12, expected_guest, asid, vmid) ||
+            !stage2_success_matches(
+                response, expected_guest, new_host, vmid)) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=IFU-HFENCE."
+                      << (guest_fence ? "GVMA" : "VVMA")
+                      << (selective_fence ? "-selective" : "-global")
+                      << "-race phase=new-request ptw=" << ptw_before << '/'
+                      << ptw_after_flush << '/' << environment.ptw_requests()
+                      << " s1_ppn=0x" << std::hex
+                      << ((response.s1_ppn << 3) |
+                          response.s1_ppn_low[(virtual_page >> 12) & 7U])
+                      << " s2_ppn=0x" << response.s2_ppn << std::dec
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        total_cycles += environment.cycle() - cycle_before;
+        total_ptw_requests += environment.ptw_requests() - ptw_before;
+        return true;
+    };
+
+    if (!run_nested_ifetch_fence_race(false) ||
+        !run_nested_ifetch_fence_race(true) ||
+        !run_nested_ifetch_fence_race(false, true) ||
+        !run_nested_ifetch_fence_race(true, true)) {
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_IFETCH_PTW_BRIDGE_PASS"
               << " cases=" << cases.size() + degenerate_cases.size() +
-                    nested_fault_cases.size() + 2
+                    nested_fault_cases.size() + 10
               << " stage1_valid=4 nested_valid=4 stage1_fault=2"
               << " pbmt=2 only_stage1=2 only_stage2=2"
               << " nested_vs_fault=4 nested_g_leaf_fault=4"
               << " nested_implicit_g_fault=4"
+              << " ifu_stage1_context_race=1"
+              << " ifu_sfence_global_race=1 ifu_sfence_selective_race=1"
+              << " ifu_nested_context_race=1"
+              << " ifu_hfence_vvma_race=2 ifu_hfence_gvma_race=2"
               << " ifu_dtlb_source_overlap=1"
               << " duplicate_requests=2 duplicate_walk_requests=3"
               << " ptw_bus_max_outstanding="
               << concurrent.ptw_max_outstanding_requests()
               << " response_stall_cycles="
               << (cases.size() + degenerate_cases.size() +
-                  nested_fault_cases.size() + 3) *
+                  nested_fault_cases.size() + 11) *
                     response_stall_cycles
               << " ptw_requests=" << total_ptw_requests
               << " cycles=" << total_cycles

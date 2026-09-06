@@ -132,6 +132,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "NestedFaultKind",
             "nested_vs_fault=4 nested_g_leaf_fault=4",
             "nested_implicit_g_fault=4",
+            "confirm_ifetch_ptw_flushed",
+            "ifu_stage1_context_race=1",
+            "ifu_sfence_global_race=1 ifu_sfence_selective_race=1",
+            "ifu_nested_context_race=1",
+            "ifu_hfence_vvma_race=2 ifu_hfence_gvma_race=2",
             "reference.faulting_guest_physical_address",
             "ifetch-ptw-bridge",
         ):
