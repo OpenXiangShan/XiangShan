@@ -124,6 +124,8 @@ prefix; only the tail is constrained-random:
 - all scalar load and store widths and all scalar issue lanes;
 - LSQ dispatch widths one through six and every physical dispatch lane;
 - all vector EEWs and unit/strided/indexed-unordered/indexed-ordered modes;
+- unit-stride vector segment load/store traffic, all four EEWs, and NF 1..7,
+  with interleaved field addressing and no LSQ allocation;
 - masked/unmasked, zero/nonzero `vstart`, full/partial `vl`, aligned/split data;
 - scalar and vector misaligned stores with replay and exact readback;
 - Sv39/Sv48 and Sv39x4/Sv48x4 cold/warm translation through all four nested
@@ -134,6 +136,8 @@ prefix; only the tail is constrained-random:
   forwarding directions;
 - fixed-PC stride streams mixed with scalar/vector/atomic/NC/MMIO traffic,
   translation changes, cache refills, Probes, and variable manager latency.
+- HLV/HLVX/HSV traffic under nested translation, with independent family
+  weights and per-seed family coverage.
 
 There is one canonical mixed generator. Realistic traffic, balanced coverage,
 and corner pressure are constraint sets over that generator, not independently
@@ -141,7 +145,8 @@ maintained scenario implementations. `--constraints coverage|spec|corner`
 selects a baseline and repeatable `--constraint key=value` arguments override
 operation mix, address locality, heterogeneous overlap, translation regime and
 Sv39/Sv48/VS/G modes, context-switch and legal fence kind/scope rates,
-misalignment, vector corner bias, atomic family/width, NC/MMIO direction, legal
+misalignment, vector corner bias, vector-segment direction, atomic family/width,
+hypervisor family, NC/MMIO direction, legal
 special overlap, hardware stride-stream pressure, and independent
 DCache/PTW/Uncache response latency. The complete interface
 and performance-counter calibration are specified in
@@ -246,12 +251,12 @@ cacheable tests pass.
 | Vector strided | Positive, zero, and negative legal load strides; non-overlapping positive and negative store strides; element gaps and split windows | Implemented for modeled 128-bit operations; overlapping stores remain excluded because their final memory value is not a single deterministic oracle |
 | Vector indexed unordered | Repeated indices, aliasing, non-monotonic indices, all EEWs, masked elements | Partial; basic unordered mode implemented |
 | Vector indexed ordered | Strict element order, repeated/aliasing indices, split beats/pages | Partial; basic ordered mode implemented |
-| Vector segmented/whole-register | NF/segment count, multi-uop streams, fault-only-first and partial completion | Planned |
+| Vector segmented/whole-register | NF/segment count, multi-uop streams, load/store direction, EEW, mask/`vstart`, fault-only-first and partial completion | Partial: `vector-segment` checks lane-0 takeover, interleaved load/store data, multi-uop identity, and zero LSQ allocation; `vector-segment-fof` checks a later-element page fault is suppressed and the segment-owned fix-VL uop reports `VL=1`; schema-8 `random-mixed` independently gates load/store, all four EEWs, and NF 1..7 (2..8 fields). Strided/indexed segment addressing, whole-register transfers, LMUL/EMUL crosses, first-element faults, and redirect remain |
 | Vector data patterns | all zero/one, ramps, alternating bits, random bytes, same-byte aliases, old-destination merge | Implemented/partial by operation class |
 | Software prefetch | `prefetch.i/r/w`, mapped/unmapped, cacheable/NC, all lanes, duplicate and outstanding requests | Implemented for modeled software prefetch |
 | Atomics | LR/SC, AMOADD/XOR/AND/OR/SWAP/MIN/MAX and signed/unsigned variants, AMOCAS, reservation loss, alignment | Partial; all exposed W/D-width AMO variants, AMOCAS.W/D compare success/failure, LR/SC success/failure, and every illegal byte offset for representative D/W operations execute in `atomic-contracts`; `atomic-dchannel-errors` crosses denied/corrupt with all 22 refill-capable W/D LR/AMO/AMOCAS operations, checks initial exception/RF contracts, later poisoned-line load hits, SC.W/D hits on denied/corrupt metadata, exact request counts, and clean AMO recovery. The SC checks do not claim internal reservation observability. SC cannot have a cold-miss D response because MainPipe returns failure before a request when the line or usable reservation is absent. Cross-hart reservation interference, full opcode-by-offset alignment crosses, and ordering with concurrent traffic remain |
 | CBO/CMO/fences | clean/invalidate/flush/zero, `fence`, `fence.i`, `sfence.vma`, ordering with outstanding traffic | Partial; cacheable `CBO.ZERO` StoreQueue/SBuffer line-zero and readback are executable (`cbo-zero-contracts`), and global `SFENCE.VMA` leaf-update behavior is implemented; CMO CLEAN/FLUSH/INVAL, `fence.i`, and full ordering remain because `cmoOpResp` is internal to DCache rather than a MemBlock top-level port |
-| Hypervisor memory ops | HLV/HLVX/HSV, effective privilege/SPVP, execute permission, guest/host faults | Planned |
+| Hypervisor memory ops | HLV/HLVX/HSV, effective privilege/SPVP, VSUM/VMXR, execute permission, guest/host faults | Partial: `hypervisor-contracts` executes all exposed HLV/HLVX/HSV encodings, SPVP user/supervisor cases, VSUM/VMXR permission changes, VS- and G-stage faults, HLVX execute-only access, and physical PMP execute denial. Schema-7+ `random-mixed` weights HLV/HLVX/HSV as one common-generator class. Alternate translation modes, PBMT/device behavior, misalignment, and broader PMP crosses remain |
 
 ### Address, translation, and protection points
 
@@ -270,7 +275,7 @@ cacheable tests pass.
 | Page permissions | R/W/X/U/G, SUM/MXR at HS/VS stage, G-stage U-mode rule, read-only store, execute-only, access/dirty bit updates, privilege transitions | Partial; `translation-permissions` executes 58 cases across Sv39/Sv48 U/S, SUM, MXR, A/D, VSUM/VMXR, all four nested mode pairs, and G-stage load/store R/A/D/U permissions with exact readback, fault cause, manager non-use, and SQ conservation; `translation-faults` covers PBMT/reserved encoding faults, while `translation-pbmt` covers valid PBMT composition |
 | Mode/context switching | `satp/vsatp/hgatp` root and MODE changes, ASID/VMID reuse, `V` transitions, same VA under distinct contexts | Implemented for the modeled modes; `translation-context` covers five drained context families and 14 distinct-data same-address accesses; `translation-fence` adds same-ID host-ASID/VS-ASID/VMID fenced root reuse; `translation-inflight-context-all` holds an old PTW response for 256 cycles, changes root/ID/MODE or `V`, redirects the old load, reuses its ROB/LQ identity, and requires the new PA for both host mode directions plus all four nested starting pairs and both host/nested directions |
 | Translation fences | `SFENCE.VMA`, `HFENCE.VVMA`, `HFENCE.GVMA`, selective/global scope and updates with outstanding traffic | Partial; global/selective leaf updates, targeted same-ID host-ASID/VS-ASID/VMID root reuse, stale-response races, and co-issued distinct-page stage-1/nested walks spanning both stage-1 modes, both G-stage modes, and all four fully nested pairs are implemented by `translation-fence-all`; the separate context-race matrix checks redirected root/ID changes while a response remains outstanding |
-| PMP/PMA | TOR/NA4/NAPOT, overlap priority, lock, M/R/W/X, cacheability, atomic/MMIO permissions, exact region edges | Partial; `pmp-contracts` programs the distributed PMP CSR boundary and checks TOR/NAPOT exact edges, R/W plus AMO denial, overlap priority, M-mode bypass, lock enforcement, and lock immutability. `PlatformGrain=12` makes NA4 unselectable and coerces `A=2` to a minimum 4-KiB NAPOT region, which is explicitly tested. Fixed SoC PMA cacheable/device/DebugModule classes are partly covered by `mmio-contracts`; execute permission, HLV/HLVX/HSV/SPVP, and the broader PMA class/atomic matrix remain |
+| PMP/PMA | TOR/NA4/NAPOT, overlap priority, lock, M/R/W/X, cacheability, atomic/MMIO permissions, exact region edges | Partial; `pmp-contracts` programs the distributed PMP CSR boundary and checks TOR/NAPOT exact edges, R/W plus AMO denial, overlap priority, M-mode bypass, lock enforcement, and lock immutability. `PlatformGrain=12` makes NA4 unselectable and coerces `A=2` to a minimum 4-KiB NAPOT region. HLVX physical execute denial and guarded DebugModule access are focused checks. Fixed SoC PMA cacheable/device classes are partly covered by `mmio-contracts`; the broader PMA class/atomic/overlap matrix remains |
 | Fault classes | load/store/instruction access fault, stage-1 page fault, G-stage guest-page fault, noncanonical VA, high-GPA overflow, address-misaligned, access-denied, bus/ECC error | Partial; load/store/page/misaligned, noncanonical, high-GPA, PMP access-denied, and denied/corrupt D-channel cases are executable; instruction-side PMP and physical ECC injection remain |
 | Fault metadata | exact VA, GPA/PTE address, first failing level/stage, shifted `htval`-class value, guest marker, cause priority, single reporting and replay suppression | Partial; VS-non-leaf metadata plus concurrent scalar load/store oldest-address selection across ROB wrap are implemented; cross-cause and same-ROB `uopIdx` priority remain |
 
@@ -295,7 +300,7 @@ cacheable tests pass.
 | ROB age | ordinary and wrapped pointers, flag transitions, same-cycle issue/commit/redirect | Partial |
 | Store-to-load forwarding | scalar-scalar, vector-vector, scalar-vector, vector-scalar, partial overlap, byte masks, older/younger stores | Implemented for modeled classes |
 | Exception priority | multiple legal faults, differing ROB vs LQ/SQ age, load/store/vector competition | Partial; wrapped ROB age deliberately disagrees with LQ/SQ order for simultaneous scalar load faults and simultaneous scalar store faults, and the retained load/store selector is switched while both buffers hold exceptions. Same-ROB `uopIdx`, cross-cause ordering, and vector competition remain planned |
-| Redirect/recovery | kill each producer class, in-flight miss/replay, canceled prefetch, pointer reuse, survivor data | Implemented for basic redirect; VLS/segment cases planned |
+| Redirect/recovery | kill each producer class, in-flight miss/replay, canceled prefetch, pointer reuse, survivor data | Implemented for basic scalar/vector LSQ redirect; direct VSegment redirect and FOF fix-uop cancellation remain planned |
 | Fence/commit ordering | outstanding cache/uncache/PTW traffic across commit and fence boundaries | Planned |
 | Backpressure | every producer/consumer ready-low pattern, long stalls, alternating stalls, response delay cross-product | Implemented for DCache/PTW/uncache and Probe responses; negative-error timing crosses remain planned |
 | Reset/quiescence | reset asserted/deasserted at legal boundaries, idle cycles, reset with outstanding traffic, repeated reset | Partial; initial reset plus repeated reset with an outstanding translated load and post-reset survivor are executable (`reset-recovery`); reset of every producer class remains planned |
@@ -378,6 +383,9 @@ TileLink, 20 Uncache TileLink, eight performance, and two infrastructure ports.
 | PTW and Uncache manager boundaries (41 ports) | Partial | Legal traffic, long latency, and backpressure are implemented. Add malformed/duplicate/early/late responses as explicit negative protocol modes rather than normal workload traffic |
 | IFU-to-Mem PTW request/response (`io_fetch_to_mem_itlb_*`, 64 ports) | Implemented | `ifetch-ptw-bridge` drives raw IFU PTW requests for valid/faulting Sv39/Sv48, all four nested pairs, both VS-only/G-only mode variants, PBMT=NC/IO, and all four nested pairs crossed with VS-leaf, final-G-leaf, and implicit page-table G-stage faults while forcing response backpressure and requiring cold page-table traffic. A 256-cycle IFU root-PTE delay overlaps a cold scalar DTLB walk and requires both translations, exact load writeback, and PTW outstanding depth >= 2. Two same-VPN IFU requests are accepted before the first response and must return twice while issuing only one three-level Sv39 memory walk. Delayed requests are invalidated by context switches and global/selective stage-appropriate fences; no stale response may escape, and the subsequent walk must return the independently computed replacement mapping |
 | Backend `memoryViolation` (8), `ldCancel` (3), and wakeup (12) outputs | Partial, high priority | `load-feedback` checks lane/destination metadata and wakeup/cancel conservation for cold, resident, same-bank, page-fault, PMP-denied, MMIO, NC, and forwarding-data-wait loads. Page and PMP faults leave no uncanceled wakeup or data-manager request; MMIO/NC retain one final wakeup through Uncache. DCache denied/corrupt and G-stage guest faults apply the same exceptional oracle in their owning scenarios. `random-mixed` gates canceled/uncanceled observations on every lane and freezes the architectural gate before hardware-prefetch training. `memory-violation` and `rar-violation` check all eight redirect fields, no-overlap controls, ROB wrap, vector participation, and concurrent cross-source oldest selection. `pmp-contracts` additionally checks terminal load/store/AMO access faults. Fixed-PMA denial and physical ECC cancel/wakeup crosses remain |
+| ROB/LSQ pending boundary (`pendingMMIOld`, `pendingst`, `pendingPtr`) | Implemented for elaborated fields | MMIO retirement holds `pendingMMIOld` with the matching ROB pointer until Uncache completion; replaying misaligned stores hold `pendingst` and the same pointer across retries. `pendingld`, `pendingVst`, and `pendingPtrNext` are source-level bundle members but are pruned from this generated MemBlock top, so no functional claim is made for nonexistent pins |
+| WFI request/safe boundary (2 ports) | Implemented | `wfi-safety` requires `wfiSafe=0` while independently delayed DCache, PTW, or Uncache manager work is outstanding, then requires assertion only after each manager drains; deasserting `wfiReq` clears the safe indication |
+| Direct maintenance/configuration controls | Partial | Focused tests cover direct SBuffer flush, timeout-driven eviction, Uncache outstanding enable/disable behavior, MBMC BME/CMODE/BCLEAR/BMA bitmap policy, architectural prefetch-control defaults, and guarded DebugModule PMA access. Dynamic reprogramming during arbitrary overlapping traffic and the remaining CSR cross-product remain |
 | IFU software instruction-prefetch outputs (`io_ifetchPrefetch_*`, 6 ports) | Implemented | `ifetch-prefetch` checks lane and virtual address for all three LoadUnit outputs, rejects data-prefetch false positives, and issues three unmapped requests together under active Sv39 while requiring exact per-lane VAs and zero PTW/DCache traffic. This matches LoadUnit's explicit `s0_tlb_no_query`; frontend owns subsequent fetch translation/faults. `random-mixed` requires an observed `prefetch.i` output in every seed |
 | L2/L3 prefetch sender outputs (5 ports) | Partial | `hardware-prefetch` checks fixed-PC stride confidence, exact source-12 L2 address/count, PC-independent 12-line spatial-stream activation, exact source-11 640-line lookahead/four-line width, stream-over-stride priority, CSR-disable suppression, and the configured-off L3 invariant. `random-mixed` adds weighted fixed-PC stride streams under ordinary/corner miss, refill, translation, Probe, and latency pressure with a per-seed L2 source-12 gate. Add SMS/PHT source-10 causality, exact random-stream address attribution, and a positive L3-enabled configuration; direct SMS AGT generation is hard-disabled in this RTL |
 | Store/vector IQ slow feedback | Implemented | `iq-slow-feedback` records every valid pulse and all exposed fields; checks both STA lanes returning same-cycle cold misses and warm hits with exact SQ identities, both VSTU lanes returning same-cycle hits with exact LQ/SQ and inactive replay metadata, and a strided misaligned vector-store partial replay with exact queue identity, nonzero replay mask, and merge-buffer index |
@@ -448,13 +456,15 @@ are planned work items, not silently accepted coverage:
 - CBO/CMO line operations, `fence`, and `fence.i` (translation-fence ordering
   for global/selective leaf updates, both supported stage modes, and all four
   fully nested VS/G pairs is covered by `translation-fence-all`);
-- VSegment/VFOF takeover, multi-uop segment streams, fault-only-first, and
-  segment-specific redirect behavior;
-- HLV, HLVX, HSV, SPVP, final physical execute permission, and hypervisor PMP;
+- strided/indexed VSegment addressing, whole-register transfers, LMUL/EMUL
+  crosses, first-element segment FOF faults, and segment-specific redirect;
+- alternate-mode and PBMT/misalignment crosses for HLV/HLVX/HSV plus the
+  broader hypervisor PMP matrix; basic SPVP/VSUM/VMXR, stage faults, HLVX
+  execute permission, and physical execute denial are covered;
 - architectural `satp`/`vsatp`/`hgatp` write/readback and WARL mode filtering;
   the MemBlock UT directly supplies the post-CSR `TlbCsrBundle` and therefore
   cannot establish software-visible Sv48/Sv48x4 enablement by itself;
-- instruction/hypervisor PMP permissions and the remaining fixed-PMA
+- remaining instruction/hypervisor PMP permissions and fixed-PMA
   cacheability, atomic, MMIO, overlap, and region-edge matrices; data-side
   TOR/NAPOT, lock, priority, R/W/AMO denial, and 4-KiB-grain WARL behavior are
   covered by `pmp-contracts`;

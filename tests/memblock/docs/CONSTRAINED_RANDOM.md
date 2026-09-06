@@ -48,10 +48,11 @@ fields use per-mille values in the inclusive range `0..1000`.
 | Field | Meaning |
 | --- | --- |
 | `scalar-load`, `scalar-store` | Relative scalar load/store weights |
-| `vector-load`, `vector-store` | Relative vector memory weights |
-| `prefetch`, `atomic`, `nc`, `mmio` | Relative special-operation weights |
+| `vector-load`, `vector-store`, `vector-segment` | Relative vector memory weights; segment is a unit-stride VSegmentUnit transaction stream |
+| `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor` | Relative special-operation weights |
 | `atomic-amo`, `atomic-lrsc`, `atomic-cas` | Relative atomic-family weights inside the `atomic` class |
 | `atomic-w`, `atomic-d` | Relative W/D atomic-width weights |
+| `hypervisor-hlv`, `hypervisor-hlvx`, `hypervisor-hsv` | Relative family weights inside the `hypervisor` class |
 | `locality-hot` | Lines selected from a 32-line hot set |
 | `locality-warm` | Lines selected from a 512-line warm set |
 | `locality-cold` | Permutation of an 8192-line cold set |
@@ -67,6 +68,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `tlb-flush` | Per-mille chance of a legal translation flush before an operation |
 | `misaligned` | Per-mille chance of a misaligned address when width permits it |
 | `vector-corner` | Per-mille chance of corner-biased vector shape/address generation |
+| `vector-segment-store` | Per-mille store share within the vector-segment class; each enabled seed also gates EEW 8/16/32/64 and NF 1..7 |
 | `probe` | Per-mille chance that a completed cacheable scalar store is followed by a manager-originated dirty Probe sequence |
 | `probe-to-b` | Per-mille share of generated Probe sequences that retain the line in Branch state; the generator follows each with a toN cleanup Probe |
 | `probe-need-data` | Per-mille share of generated Probe sequences that explicitly request data; dirty lines must return exact data even when this is zero |
@@ -75,12 +77,15 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `latency` | Set DCache, PTW, and Uncache to `compact` or `spec` together |
 | `dcache-latency`, `ptw-latency`, `uncache-latency` | Override one manager's latency profile independently |
 
-Invalid names, all-zero operation/locality or enabled atomic-family/width
+Invalid names, all-zero operation/locality or enabled atomic/hypervisor-family
+or atomic-width
 weights, out-of-range per-mille values, inconsistent special-concurrency or
 manager-latency settings, and unknown latency profiles fail before simulation
 traffic begins. The harness has no programmable PMA region at this boundary,
 so randomized NC and MMIO traffic requires stage-1 or nested PBMT translation.
 An NC/MMIO-only operation mix cannot also request Bare coverage.
+Hypervisor traffic requires nested translation; a hypervisor-only mix cannot
+also require Bare or host-stage-1 contexts.
 An enabled `stride-stream` requires nonzero scalar-load and cold-locality
 weights because the prefetch oracle depends on real cold load misses.
 `random-mixed` requires at least 256 actions so the mandatory architectural
@@ -113,6 +118,8 @@ scenario implementations:
 | --- | --- | --- |
 | Concurrent operation mix | Base windows overlap scalar load/store, vector load/store, and prefetch; `special-concurrent` can add NC/MMIO loads and records each class | Add more legal dependency-aware window shapes as their upstream scheduling contracts are modeled |
 | Atomic subtype | `atomic-amo`, `atomic-lrsc`, `atomic-cas`, `atomic-w`, and `atomic-d` select legal AMO, LR/SC, and compare-dependent AMOCAS sequences | Cross-hart reservation interference remains integration-level |
+| Hypervisor subtype | `hypervisor-hlv`, `hypervisor-hlvx`, and `hypervisor-hsv` select legal nested-translation HLV/HLVX/HSV operations and independently gate all enabled families | Add alternate mode, PBMT/device, misalignment, and broader PMP crosses to the same class |
+| Vector segment | `vector-segment` and `vector-segment-store` select unit-stride segment load/store streams; every enabled seed gates both directions when requested, all four EEWs, and NF 1..7 | Add strided/indexed addressing, LMUL/EMUL, FOF, and redirect dimensions after their legal scheduler contracts are modeled |
 | NC/MMIO direction | `nc-store` and `mmio-store` steer load/store direction and each direction has an independent coverage gate | Concurrent special stores remain deferred until multi-store ROB/commit scheduling is modeled |
 | Translation state | Bare/Sv39/Sv48 and all four Sv39/Sv48 x Sv39x4/Sv48x4 pairs are weighted tail contexts; switches occur only at drained boundaries; cold walk/reuse and the legal fence kind/scope matrix are per-seed gates | Distinct-page walks and redirected root/ASID/VMID/MODE/`V` changes with delayed PTW responses are covered by directed matrices; random context changes remain restricted to drained boundaries |
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
@@ -130,14 +137,16 @@ choice into the common interface and its coverage contract, not adding
 Operation columns are relative weights. Locality is `hot/warm/cold`; the
 remaining numeric direction columns are per-mille values.
 
-| Preset | Scalar L/S | Vector L/S | Prefetch | Atomic | NC | MMIO | Locality | Concurrent | TLB flush | Misaligned | Vector corner | Probe | Stride stream | Latency |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `coverage` | 200/150 | 150/150 | 100 | 100 | 75 | 75 | 250/250/500 | 1000 | 50 | 500 | 1000 | 20 | 500 | compact |
-| `spec` | 650/270 | 20/10 | 35 | 5 | 5 | 5 | 800/150/50 | 100 | 20 | 5 | 100 | 1 | 100 | spec |
-| `corner` | 125/125 | 125/125 | 125 | 125 | 125 | 125 | 100/200/700 | 500 | 100 | 500 | 1000 | 100 | 750 | spec |
+| Preset | Scalar L/S | Vector L/S | VSegment | Prefetch | Atomic | NC | MMIO | Hypervisor | Locality | Concurrent | TLB flush | Misaligned | Vector corner | Probe | Stride stream | Latency |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `coverage` | 200/150 | 150/150 | 75 | 100 | 100 | 75 | 75 | 75 | 250/250/500 | 1000 | 50 | 500 | 1000 | 20 | 500 | compact |
+| `spec` | 648/270 | 20/10 | 1 | 35 | 5 | 5 | 5 | 1 | 800/150/50 | 100 | 20 | 5 | 100 | 1 | 100 | spec |
+| `corner` | 125/125 | 125/125 | 125 | 125 | 125 | 125 | 125 | 125 | 100/200/700 | 500 | 100 | 500 | 1000 | 100 | 750 | spec |
 
 Atomic family weights (AMO/LRSC/CAS) are `8/2/2`, `90/5/5`, and `1/1/1` for
 `coverage`, `spec`, and `corner`; all three use `1/1` W/D weights. Their
+hypervisor family weights (HLV/HLVX/HSV) are `1/1/1`, `90/5/5`, and `1/1/1`.
+Their vector-segment store shares are `500`, `300`, and `500` per mille.
 NC/MMIO store shares are respectively `500/500`, `300/300`, and `500/500`.
 Their legal NC/MMIO overlap rates are `500`, `20`, and `750` per mille.
 All three presets split generated Probes equally between toB/toN and explicit
@@ -226,8 +235,9 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=6`, the resolved target weights,
-and actual operation, atomic family/width, NC/MMIO direction, legal special
+Every terminal line prints `constraint_schema=8`, the resolved target weights,
+and actual operation, atomic family/width, hypervisor family, vector-segment
+direction/EEW/NF, NC/MMIO direction, legal special
 overlap, locality, translation regime/mode/pair, fence kind/scope, cold-walk/
 reuse, TLB-flush, hit/miss, Probe sequence/cap/need-data, all three scalar-load
 wakeup/cancel lanes, IFU software instruction-prefetch observations, and
@@ -250,7 +260,7 @@ backend wakeup by design. When `stride-stream` is enabled, the architectural
 load replay gate therefore uses a counter snapshot taken immediately before
 the prefetcher is enabled. The terminal summary reports that gate window as
 `load_wakeups/load_cancels` and the full simulation as
-`raw_load_wakeups/raw_load_cancels`; schema 6 requires each raw count to be at
+`raw_load_wakeups/raw_load_cancels`; schema 8 requires each raw count to be at
 least its corresponding snapshot count. L2 source-12 observation is checked
 separately, so this separation neither hides prefetch activity nor mistakes it
 for a failed backend load.

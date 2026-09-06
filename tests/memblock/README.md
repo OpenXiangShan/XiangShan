@@ -20,9 +20,12 @@ with concurrent legal TileLink traffic, randomized request/response backpressure
 source-credit-safe wrap, and field-exact request/response scoreboards. Uncache
 denied and corrupt D-channel responses are checked through scalar exception
 writeback. PBMT=IO MMIO metadata and error propagation are covered; MMIO device
-side effects, CMO CLEAN/FLUSH/INVAL, HLV/HLVX/HSV, and VSegment remain explicit
-boundary gaps; they are not silently
-randomized as though they were legal cacheable flows.
+side effects and CMO CLEAN/FLUSH/INVAL remain explicit boundary gaps.
+`hypervisor-contracts` covers HLV/HLVX/HSV privilege, permission, fault, and PMP
+execute behavior. Vector FOF and unit-stride segment load/store takeover are
+covered by focused tests; the common constrained tail mixes segment operations
+across load/store, EEW 8/16/32/64, and NF 1..7. Unsupported segment shapes are
+not silently randomized as ordinary LSQ traffic.
 
 `pmp-contracts` programs the distributed PMP CSR input and checks data-side
 TOR and NAPOT regions, exact lower/upper edges, R/W and AMO denial, overlapping
@@ -30,7 +33,8 @@ entry priority, M-mode unlocked bypass, locked-entry enforcement, and locked
 address/config immutability. This build uses a 4-KiB PMP platform grain, so
 NA4 is not independently selectable: an `A=2` write is WARL-coerced to NAPOT
 and is checked as a 4-KiB minimum region. Instruction X permission,
-HLV/HLVX/HSV/SPVP, and a broader fixed-PMA region matrix remain gaps.
+HLVX physical execute denial, and DebugModule access are covered by focused
+tests; a broader fixed-PMA region matrix remains a gap.
 
 The MemBlock-facing L2-to-L1 DTLB request/response boundary is also exercised.
 `l2-tlb-contracts` checks request-field acceptance, L1 miss responses for both
@@ -71,8 +75,9 @@ The correctness contracts are cataloged separately in
 `docs/ORACLES.md`. `docs/VERIFICATION_PLAN.md` contains the complete test-point
 inventory, including explicit planned gaps for MMIO device side effects,
 reservation interference and full atomic alignment crosses, CMO CLEAN/FLUSH/INVAL,
-VSegment, hypervisor accesses, remaining PMP/PMA matrices, coherence probes, error
-injection, concurrent exception priority, and four-state behavior. A passing
+remaining segment address/LMUL/redirect combinations, remaining PMP/PMA matrices,
+coherence protocol negatives, error injection, same-ROB/vector exception
+priority, and four-state behavior. A passing
 cacheable mixed campaign must not be interpreted as verification of those
 planned rows.
 
@@ -204,8 +209,12 @@ make dcache-errors PICKER="$PICKER" JOBS=8
 make dcache-coherence PICKER="$PICKER" JOBS=8
 make uncache-errors PICKER="$PICKER" JOBS=8
 make uncache-widths PICKER="$PICKER" JOBS=8
+make uncache-outstanding PICKER="$PICKER" JOBS=8
+make sbuffer-flush PICKER="$PICKER" JOBS=8
+make sbuffer-timeout PICKER="$PICKER" JOBS=8
 make mmio-contracts PICKER="$PICKER" JOBS=8
 make cbo-zero-contracts PICKER="$PICKER" JOBS=8
+make wfi-safety PICKER="$PICKER" JOBS=8
 make reset-recovery PICKER="$PICKER" JOBS=8
 make atomic-contracts PICKER="$PICKER" JOBS=8
 make atomic-dchannel-errors PICKER="$PICKER" JOBS=8
@@ -213,6 +222,9 @@ make scalar-misaligned PICKER="$PICKER" JOBS=8
 make misaligned-stores PICKER="$PICKER" JOBS=8
 make exception-contracts PICKER="$PICKER" JOBS=8
 make pmp-contracts PICKER="$PICKER" JOBS=8
+make hypervisor-contracts PICKER="$PICKER" JOBS=8
+make pointer-masking-contracts PICKER="$PICKER" JOBS=8
+make mbmc-contracts PICKER="$PICKER" JOBS=8
 make l2-tlb-contracts PICKER="$PICKER" JOBS=8
 make ifetch-ptw-bridge PICKER="$PICKER" JOBS=8
 make two-stage-translation PICKER="$PICKER" JOBS=8
@@ -230,6 +242,9 @@ make scalar-guest-fault PICKER="$PICKER" JOBS=8
 make vector-guest-fault PICKER="$PICKER" JOBS=8
 make vector-load PICKER="$PICKER" JOBS=8
 make vector-split-load PICKER="$PICKER" JOBS=8
+make vector-fof PICKER="$PICKER" JOBS=8
+make vector-segment PICKER="$PICKER" JOBS=8
+make vector-segment-fof PICKER="$PICKER" JOBS=8
 make vector-addressing PICKER="$PICKER" JOBS=8
 make vector-store-forwarding PICKER="$PICKER" JOBS=8
 make store-forwarding PICKER="$PICKER" JOBS=8
