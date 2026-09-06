@@ -5374,46 +5374,240 @@ int run_trigger_contracts(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
     constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x2a000;
-    constexpr std::uint64_t address = base + 0x28;
-    environment.memory().fill_incrementing(base, 64, 0x62);
-    if (!environment.reset() ||
-        !environment.configure_memory_trigger(
-            0, address, 0, true, false)) {
+    environment.memory().fill_incrementing(base, 0x4000, 0x62);
+    if (!environment.reset()) {
         std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
                   << environment.cycle() << " phase=configuration reason="
                   << environment.error() << '\n';
         return 1;
     }
 
-    // TriggerAction.BreakpointExp is encoded as zero.  It must appear in the
-    // load writeback exception vector and suppress the destination write.
-    const memblock::LoadTransaction transaction{
-        .address = address,
-        .op = memblock::LoadOp::ld,
-        .rob = 33,
-        .lq = 0,
-        .sq = 0,
-        .pdest = 23,
-        .lane = 0,
-        .expected_exception_mask = memblock::kExceptionBreakpoint,
-        .expected_trigger = 0,
-        .predecode_rvc = true,
-        .ftq_ptr = 7,
-        .ftq_offset = 2,
+    unsigned next_identity = 0;
+    std::uint64_t breakpoint_loads = 0;
+    std::uint64_t suppressed_loads = 0;
+    const auto run_load = [&](std::uint64_t address, bool breakpoint,
+                              const char *phase) {
+        const auto identity = next_identity++;
+        const memblock::LoadTransaction transaction{
+            .address = address,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(33 + identity),
+            .lq = static_cast<std::uint8_t>(identity),
+            .sq = 0,
+            .pdest = static_cast<std::uint8_t>(23 + identity),
+            .lane = identity % memblock::kScalarLoadLanes,
+            .expected_exception_mask = breakpoint
+                ? memblock::kExceptionBreakpoint
+                : std::uint32_t{0},
+            .expected_trigger = breakpoint
+                ? memblock::kTriggerBreakpoint
+                : memblock::kTriggerNone,
+            .predecode_rvc = (identity & 1U) != 0,
+            .ftq_ptr = 7 + identity,
+            .ftq_offset = static_cast<std::uint8_t>(identity & 0xfU),
+        };
+        const std::uint64_t requests_before = environment.tilelink_requests();
+        environment.expect_load(transaction);
+        if (!environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 256) ||
+            !environment.run_until_complete(2048)) {
+            std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        const std::uint64_t requests_after = environment.tilelink_requests();
+        if ((breakpoint && requests_after != requests_before) ||
+            (!breakpoint && requests_after <= requests_before)) {
+            std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << " breakpoint=" << breakpoint
+                      << " dcache_requests=" << requests_before << "->"
+                      << requests_after << '\n';
+            return false;
+        }
+        if (breakpoint) {
+            ++breakpoint_loads;
+            if (!environment.redirect_after(
+                    transaction.rob, transaction.rob_flag, true) ||
+                !environment.run_cycles(16)) {
+                std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=" << phase
+                          << " reason=" << environment.error() << '\n';
+                return false;
+            }
+            const std::uint64_t retired = environment.lq_dequeued() +
+                environment.lq_canceled();
+            if (retired > environment.lq_allocated() ||
+                environment.lq_allocated() - retired > 1 ||
+                (retired < environment.lq_allocated() &&
+                 !environment.account_lq_cancellation(1))) {
+                std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=" << phase
+                          << " reason=load_queue_cancellation"
+                          << " allocated=" << environment.lq_allocated()
+                          << " retired=" << retired << '\n';
+                return false;
+            }
+        } else {
+            ++suppressed_loads;
+            if (!environment.run_until_lq_retired(2048)) {
+                std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=" << phase
+                          << " reason=" << environment.error() << '\n';
+                return false;
+            }
+        }
+        return true;
     };
-    environment.expect_load(transaction);
-    if (!environment.enqueue_load(transaction) ||
-        !environment.issue_load(transaction) ||
-        !environment.run_until_complete(512)) {
+
+    const auto configure_and_run = [&](const memblock::MemoryTriggerConfig &config,
+                                       std::uint64_t address, bool breakpoint,
+                                       const char *phase) {
+        if (!environment.configure_memory_trigger(config)) {
+            std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        return run_load(address, breakpoint, phase);
+    };
+
+    if (!configure_and_run(
+            {.index = 0, .address = base + 0x028},
+            base + 0x028, true, "equal-hit") ||
+        !configure_and_run(
+            {.index = 0, .address = base + 0x428,
+             .trigger_can_raise_breakpoint = false},
+            base + 0x428, false, "breakpoint-gate") ||
+        !configure_and_run(
+            {.index = 0, .address = base + 0x828, .debug_mode = true},
+            base + 0x828, false, "debug-mode-suppression") ||
+        !configure_and_run(
+            {.index = 0, .address = base + 0xc28, .enable_mask = 0},
+            base + 0xc28, false, "enable-suppression") ||
+        !configure_and_run(
+            {.index = 0, .address = base + 0x1028, .select = true},
+            base + 0x1028, false, "select-suppression") ||
+        !configure_and_run(
+            {.index = 0, .address = base + 0x1428,
+             .load = false, .store = true},
+            base + 0x1428, false, "load-select-suppression") ||
+        !configure_and_run(
+            {.index = 0, .address = base + 0x1800,
+             .match_type = memblock::kTriggerMatchGreaterOrEqual},
+            base + 0x1828, true, "greater-equal-hit") ||
+        !configure_and_run(
+            {.index = 0, .address = base + 0x1c80,
+             .match_type = memblock::kTriggerMatchGreaterOrEqual},
+            base + 0x1c28, false, "greater-equal-miss") ||
+        !configure_and_run(
+            {.index = 0, .address = base + 0x2080,
+             .match_type = memblock::kTriggerMatchLessThan},
+            base + 0x2028, true, "less-than-hit") ||
+        !configure_and_run(
+            {.index = 0, .address = base + 0x2400,
+             .match_type = memblock::kTriggerMatchLessThan},
+            base + 0x2428, false, "less-than-miss")) {
+        return 1;
+    }
+
+    const auto run_chain_case = [&](std::uint64_t first_address,
+                                    std::uint64_t second_address,
+                                    bool breakpoint, const char *phase) {
+        if (!environment.configure_memory_trigger({
+                .index = 0,
+                .address = first_address,
+                .enable_mask = 0,
+                .chain = true,
+            }) ||
+            !environment.configure_memory_trigger({
+                .index = 1,
+                .address = second_address,
+                .enable_mask = 0x3,
+            })) {
+            std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        return run_load(second_address, breakpoint, phase);
+    };
+    if (!run_chain_case(
+            base + 0x2828, base + 0x2828, true, "chain-hit") ||
+        !run_chain_case(
+            base + 0x2c28, base + 0x3028, false, "chain-miss") ||
+        !configure_and_run(
+            {.index = 2, .address = base + 0x3828, .enable_mask = 0x4},
+            base + 0x3828, true, "slot-two-hit") ||
+        !configure_and_run(
+            {.index = 3, .address = base + 0x3c28, .enable_mask = 0x8},
+            base + 0x3c28, true, "slot-three-hit")) {
+        return 1;
+    }
+
+    constexpr std::uint64_t store_address = base + 0x3428;
+    if (!environment.configure_memory_trigger({
+            .index = 0,
+            .address = store_address,
+            .load = false,
+            .store = true,
+        })) {
         std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
-                  << environment.cycle() << " phase=breakpoint-load reason="
+                  << environment.cycle() << " phase=store-configuration reason="
                   << environment.error() << '\n';
+        return 1;
+    }
+    const memblock::StoreTransaction store{
+        .address = store_address,
+        .data = 0xa5a55a5af0f00f0fULL,
+        .op = memblock::StoreOp::sd,
+        .rob = static_cast<std::uint8_t>(33 + next_identity),
+        .sq = 0,
+        .address_lane = 1,
+        .data_lane = 0,
+        .expected_exception_mask = memblock::kExceptionBreakpoint,
+        .expected_trigger = memblock::kTriggerBreakpoint,
+    };
+    const std::uint64_t store_requests_before = environment.tilelink_requests();
+    const std::uint64_t store_value_before =
+        environment.memory().read_u64(store_address);
+    environment.expect_store(store);
+    if (!environment.enqueue_store(store, 0) ||
+        !environment.issue_store_address(store, 256) ||
+        !environment.issue_store_data(store, 256) ||
+        !environment.run_until_store_complete(2048) ||
+        environment.tilelink_requests() != store_requests_before ||
+        !environment.redirect_after(store.rob, store.rob_flag, true) ||
+        !environment.run_cycles(16)) {
+        std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=store-hit"
+                  << " dcache_requests=" << store_requests_before << "->"
+                  << environment.tilelink_requests()
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t sq_retired = environment.sq_dequeued() +
+        environment.sq_canceled();
+    if (sq_retired > environment.sq_allocated() ||
+        environment.sq_allocated() - sq_retired > 1 ||
+        (sq_retired < environment.sq_allocated() &&
+         !environment.account_sq_cancellation(1)) ||
+        environment.memory().read_u64(store_address) != store_value_before) {
+        std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=store-cancellation"
+                  << " allocated=" << environment.sq_allocated()
+                  << " retired=" << sq_retired
+                  << " reason=" << environment.error() << '\n';
         return 1;
     }
 
     std::cout << "MEMBLOCK_TRIGGER_CONTRACTS_PASS"
               << " cycle=" << environment.cycle()
-              << " breakpoint_loads=" << environment.writebacks()
+              << " cases=15 match_types=3 enabled_slots=4"
+              << " breakpoint_loads=" << breakpoint_loads
+              << " suppressed_loads=" << suppressed_loads
+              << " store_breakpoints=1 chain_cases=2"
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

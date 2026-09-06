@@ -755,6 +755,31 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main)
 
+    def test_memory_trigger_has_control_match_chain_and_store_matrix(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "MemoryTriggerConfig",
+            "kTriggerMatchGreaterOrEqual",
+            "kTriggerMatchLessThan",
+            "config.enable_mask",
+            "config.trigger_can_raise_breakpoint",
+            "config.debug_mode",
+            '"equal-hit"',
+            '"breakpoint-gate"',
+            '"debug-mode-suppression"',
+            '"select-suppression"',
+            '"greater-equal-hit"',
+            '"less-than-hit"',
+            '"chain-hit"',
+            '"chain-miss"',
+            '"slot-two-hit"',
+            '"slot-three-hit"',
+            '" cases=15 match_types=3 enabled_slots=4"',
+            '" store_breakpoints=1 chain_cases=2"',
+        ):
+            self.assertIn(contract, environment + main)
+
     def test_frontend_bridge_has_semantic_transaction_coverage(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

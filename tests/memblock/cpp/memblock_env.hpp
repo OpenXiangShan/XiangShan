@@ -53,6 +53,11 @@ constexpr std::uint64_t kDefaultMemoryBase = 0x80000000ULL;
 // breakpoint action, so leaving this field at zero would inject a breakpoint
 // into every software-generated uop.
 constexpr std::uint8_t kTriggerNone = 15;
+constexpr std::uint8_t kTriggerBreakpoint = 0;
+constexpr std::uint8_t kTriggerDebugMode = 1;
+constexpr std::uint8_t kTriggerMatchEqual = 0;
+constexpr std::uint8_t kTriggerMatchGreaterOrEqual = 2;
+constexpr std::uint8_t kTriggerMatchLessThan = 3;
 // The standalone MemBlock issue adapters do not carry trigger in the vector
 // or scalar-store issue payload.  Their writeback paths therefore expose the
 // zero-initialized action for an untriggered operation; keep that boundary
@@ -303,6 +308,20 @@ struct StoreTransaction {
     // class of an address yet.
     std::optional<bool> expected_debug_is_mmio;
     std::optional<bool> expected_debug_is_ncio;
+};
+
+struct MemoryTriggerConfig {
+    unsigned index = 0;
+    std::uint64_t address = 0;
+    std::uint8_t action = kTriggerBreakpoint;
+    std::uint8_t match_type = kTriggerMatchEqual;
+    std::uint8_t enable_mask = 1;
+    bool select = false;
+    bool chain = false;
+    bool load = true;
+    bool store = false;
+    bool trigger_can_raise_breakpoint = true;
+    bool debug_mode = false;
 };
 
 struct AtomicTransaction {
@@ -4072,37 +4091,47 @@ public:
         return run_cycles(4) && check_components();
     }
 
-    bool configure_memory_trigger(
-        unsigned index, std::uint64_t address, std::uint8_t action,
-        bool load, bool store, bool enable = true)
+    bool configure_memory_trigger(const MemoryTriggerConfig &config)
     {
-        if (index >= 4) {
-            error_ = "memory trigger index exceeds TriggerNum";
+        if (config.index >= 4 || config.action >= 16 ||
+            (config.match_type != kTriggerMatchEqual &&
+             config.match_type != kTriggerMatchGreaterOrEqual &&
+             config.match_type != kTriggerMatchLessThan) ||
+            config.enable_mask >= 16) {
+            error_ = "invalid memory trigger configuration";
             return false;
         }
         // The CSR block presents a two-cycle delayed tdata update. Keep all
         // trigger fields explicit so this helper is independent of the idle
         // policy and can be reused by constrained-random trigger tests.
-        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_addr.ImmSet(index);
-        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_matchType.ImmSet(std::uint64_t{0});
-        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_select.ImmSet(std::uint64_t{0});
-        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_action.ImmSet(action);
-        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_chain.ImmSet(std::uint64_t{0});
-        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_store.ImmSet(store);
-        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_load.ImmSet(load);
-        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_tdata2.ImmSet(address);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_addr.ImmSet(
+            config.index);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_matchType.ImmSet(
+            config.match_type);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_select.ImmSet(
+            config.select);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_action.ImmSet(
+            config.action);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_chain.ImmSet(
+            config.chain);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_store.ImmSet(
+            config.store);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_load.ImmSet(
+            config.load);
+        dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_tdata2.ImmSet(
+            config.address);
         dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_0.ImmSet(
-            index == 0 && enable);
+            (config.enable_mask & 0x1U) != 0);
         dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_1.ImmSet(
-            index == 1 && enable);
+            (config.enable_mask & 0x2U) != 0);
         dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_2.ImmSet(
-            index == 2 && enable);
+            (config.enable_mask & 0x4U) != 0);
         dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_3.ImmSet(
-            index == 3 && enable);
+            (config.enable_mask & 0x8U) != 0);
         dut_.io_ooo_to_mem_csrCtrl_mem_trigger_triggerCanRaiseBpExp.ImmSet(
-            std::uint64_t{1});
+            config.trigger_can_raise_breakpoint);
         dut_.io_ooo_to_mem_csrCtrl_mem_trigger_debugMode.ImmSet(
-            std::uint64_t{0});
+            config.debug_mode);
         dut_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_valid.ImmSet(
             std::uint64_t{1});
         tick(false);
