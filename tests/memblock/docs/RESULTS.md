@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `d72c05b8e386b5350a17c76e7abbbabafac832eb894de05824839affb1d2773a`
+- Current rebuilt and frozen UT executable SHA-256: `255f670d2134fc196c2255cc92d3c9d822a7e9d795035f474c544965d6015d40`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `30b81e0aad48ac49d58a87f6845db885c7c52a1a74ba0e3a94af7519c33af001`
+- Frozen runtime manifest SHA-256: `9cff707764c74c68029d6838bc39b4127dd739ecc8ecfce0104391e08ab9846e`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -57,6 +57,18 @@ bytes produced the exact beat `0xa1b2c3d400000000`, which the fourth access
 returned before clearing it. The structured log checked sequence, direction,
 address, request fields, response data, and error flags. All four accesses used
 the SoC PMA device interval and emitted no DCache request. No CPU defect was
+observed.
+
+## Outer L2 Flush Control Bridge
+
+On 2026-09-07, `l2-flush-contracts` passed in 24 cycles on complete RTL
+SHA-256
+`4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
+It covered all four `flush_l2_enable`/`l2_flush_done` combinations, four enable
+transitions, and five completion transitions. Ten cycle-by-cycle checks proved
+that `outer_l2_flush_en` is a combinational copy of the CSR control and backend
+`l2FlushDone` is exactly the previous-cycle completion input. The same monitor
+now runs throughout every ordinary functional scenario. No CPU defect was
 observed.
 
 ## Reset With Outstanding Manager Traffic
@@ -1094,6 +1106,7 @@ the historical complete RTL SHA-256 is
 | Test | Result | Key observation |
 | --- | --- | --- |
 | Idle smoke | Pass | 38 cycles; registered DUT clock and internal reset release |
+| Outer L2 flush bridge | Pass | 24 cycles; all four enable/done combinations, four enable transitions, five done transitions, and ten exact combinational/one-cycle timing checks |
 | Complete pin space | Pass | 749 inputs/7,155 bits and 586 outputs/5,434 bits; 256 patterns; digest `0xc36e86e25361ff60` |
 | Cold-load refill, partial progress, and merge | Pass | Cycle 74 for two cold lines selecting opposite virtual-address bit-5 values: one ordinary and one `isKeyword` AcquireBlock, two exact 64-bit writebacks, and two GrantAcks. A separate same-line pair completed two exact loads in 172 cycles from one AcquireBlock held for 128 cycles. A partial-refill load wrote back at cycle 44 after only its critical beat; the delayed second beat drained by cycle 300 with no duplicate writeback |
 | Vector loads | Pass | Four EEWs, both vector lanes, four exact 128-bit results |

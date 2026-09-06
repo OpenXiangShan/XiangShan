@@ -1868,6 +1868,78 @@ int run_smoke(int argc, char **argv)
     return 0;
 }
 
+int run_l2_flush_contracts(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    if (!environment.reset() || environment.outer_l2_flush_enabled() ||
+        environment.backend_l2_flush_done()) {
+        std::cerr << "MEMBLOCK_L2_FLUSH_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    constexpr std::array<std::pair<bool, bool>, 8> patterns{{
+        {false, false},
+        {true, false},
+        {true, true},
+        {false, true},
+        {false, false},
+        {true, true},
+        {true, false},
+        {false, true},
+    }};
+    unsigned cross_bitmap = 0;
+    unsigned enable_transitions = 0;
+    unsigned done_transitions = 0;
+    bool previous_enable = false;
+    bool previous_done = false;
+    for (unsigned index = 0; index < patterns.size(); ++index) {
+        const auto [enable, done] = patterns[index];
+        cross_bitmap |= 1U << ((enable ? 2U : 0U) | (done ? 1U : 0U));
+        enable_transitions += enable != previous_enable;
+        done_transitions += done != previous_done;
+        environment.drive_l2_flush(enable, done);
+        if (!environment.run_cycles(1) ||
+            environment.outer_l2_flush_enabled() != enable ||
+            environment.backend_l2_flush_done() != done) {
+            std::cerr << "MEMBLOCK_L2_FLUSH_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=pattern index="
+                      << index << " expected_enable=" << enable
+                      << " observed_enable="
+                      << environment.outer_l2_flush_enabled()
+                      << " expected_done=" << done << " observed_done="
+                      << environment.backend_l2_flush_done()
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        previous_enable = enable;
+        previous_done = done;
+    }
+    environment.drive_l2_flush(false, false);
+    if (!environment.run_cycles(2) || environment.outer_l2_flush_enabled() ||
+        environment.backend_l2_flush_done() || cross_bitmap != 0xf ||
+        enable_transitions < 4 || done_transitions < 4) {
+        std::cerr << "MEMBLOCK_L2_FLUSH_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=coverage"
+                  << " cross_bitmap=0x" << std::hex << cross_bitmap << std::dec
+                  << " enable_transitions=" << enable_transitions
+                  << " done_transitions=" << done_transitions
+                  << " checks=" << environment.l2_flush_checks()
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_L2_FLUSH_CONTRACTS_PASS"
+              << " cycle=" << environment.cycle()
+              << " combinations=4"
+              << " enable_transitions=" << enable_transitions
+              << " done_transitions=" << done_transitions
+              << " delay_checks=" << environment.l2_flush_checks()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_pin_space(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -23736,6 +23808,9 @@ int main(int argc, char **argv)
         const Options options = parse_options(argc, argv);
         if (options.test == "smoke") {
             return run_smoke(argc, argv);
+        }
+        if (options.test == "l2-flush-contracts") {
+            return run_l2_flush_contracts(argc, argv);
         }
         if (options.test == "pin-space") {
             return run_pin_space(argc, argv);

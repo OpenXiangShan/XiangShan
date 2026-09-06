@@ -18,6 +18,7 @@ import run_regression
 
 SCENARIOS = (
     "smoke",
+    "l2-flush-contracts",
     "pin-space",
     "frontend-bridge",
     "single-load",

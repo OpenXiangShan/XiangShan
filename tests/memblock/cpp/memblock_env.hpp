@@ -5813,6 +5813,27 @@ public:
         return check_components();
     }
 
+    void drive_l2_flush(bool enable, bool done)
+    {
+        dut_.io_ooo_to_mem_csrCtrl_flush_l2_enable.ImmSet(enable);
+        dut_.io_l2_flush_done.ImmSet(done);
+    }
+
+    bool outer_l2_flush_enabled()
+    {
+        return dut_.io_outer_l2_flush_en.B();
+    }
+
+    bool backend_l2_flush_done()
+    {
+        return dut_.io_mem_to_ooo_topToBackendBypass_l2FlushDone.B();
+    }
+
+    std::uint64_t l2_flush_checks() const
+    {
+        return l2_flush_checks_;
+    }
+
     bool set_sbuffer_timeout(std::uint32_t cycles)
     {
         constexpr std::uint32_t timeout_width = 22;
@@ -7826,12 +7847,23 @@ private:
             dut_.io_topDownInfo_fromL2Top_l2Miss.B();
         const bool top_down_l3_input =
             dut_.io_topDownInfo_fromL2Top_l3Miss.B();
+        const bool l2_flush_enable_input =
+            dut_.io_ooo_to_mem_csrCtrl_flush_l2_enable.B();
+        const bool l2_flush_done_input = dut_.io_l2_flush_done.B();
 
         // Writeback valid is a combinational projection of the execution-unit
         // output fire.  Observe the pins before the clock edge; after Step()
         // they may already describe the following transaction.  LSQ dequeue
         // pulses are registered separately and are counted below instead.
         if (monitor) {
+            ++l2_flush_checks_;
+            if (dut_.io_outer_l2_flush_en.B() != l2_flush_enable_input) {
+                error_ = "L2 flush enable did not pass through combinationally";
+            }
+            if (dut_.io_mem_to_ooo_topToBackendBypass_l2FlushDone.B() !=
+                expected_l2_flush_done_) {
+                error_ = "L2 flush completion violated one-cycle delay";
+            }
             const bool top_down_l2_output =
                 dut_.io_topDownInfo_toBackend_l2TopMiss_l2Miss.B();
             const bool top_down_l3_output =
@@ -7941,6 +7973,7 @@ private:
         dut_.Step();
         expected_top_down_l2_miss_ = top_down_l2_input;
         expected_top_down_l3_miss_ = top_down_l3_input;
+        expected_l2_flush_done_ = l2_flush_done_input;
         memory_agent_.update_after_tick();
         ptw_agent_.update_after_tick();
         uncache_agent_.update_after_tick();
@@ -8109,6 +8142,8 @@ private:
     TopDownStats top_down_stats_;
     bool expected_top_down_l2_miss_ = false;
     bool expected_top_down_l3_miss_ = false;
+    bool expected_l2_flush_done_ = false;
+    std::uint64_t l2_flush_checks_ = 0;
     std::uint64_t ifetch_ptw_pending_ = 0;
     std::uint64_t lq_allocated_ = 0;
     std::uint64_t lq_dequeued_ = 0;

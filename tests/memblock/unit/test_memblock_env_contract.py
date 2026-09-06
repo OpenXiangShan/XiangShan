@@ -144,6 +144,36 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + driver + makefile)
 
+    def test_l2_flush_control_has_a_continuous_timing_oracle(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
+        memblock = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/MemBlock.scala"
+        ).read_text()
+
+        for contract in (
+            "drive_l2_flush",
+            "outer_l2_flush_enabled",
+            "backend_l2_flush_done",
+            "L2 flush enable did not pass through combinationally",
+            "L2 flush completion violated one-cycle delay",
+            "l2-flush-contracts",
+            "combinations=4",
+            "enable_transitions=",
+            "done_transitions=",
+            "delay_checks=",
+        ):
+            self.assertIn(contract, environment + driver + makefile + benchmark)
+        self.assertIn(
+            "x.l2FlushDone       := RegNext(io.l2_flush_done)", memblock
+        )
+        self.assertIn(
+            "io.outer_l2_flush_en := io.ooo_to_mem.csrCtrl.flush_l2_enable",
+            memblock,
+        )
+
     def test_sbuffer_timeout_contract_is_registered(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

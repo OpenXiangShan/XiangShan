@@ -218,6 +218,7 @@ make frontend-bridge PICKER="$PICKER" JOBS=8 SEED=1 TRANSACTIONS=4096
 make single-load PICKER="$PICKER" JOBS=8
 make load-feedback PICKER="$PICKER" JOBS=8
 make topdown-contracts PICKER="$PICKER" JOBS=8
+make l2-flush-contracts PICKER="$PICKER" JOBS=8
 make memory-violation PICKER="$PICKER" JOBS=8
 make rar-violation PICKER="$PICKER" JOBS=8
 make ifetch-prefetch PICKER="$PICKER" JOBS=8
@@ -411,6 +412,11 @@ independent bit pattern proves the exact one-cycle L2/L3 miss delay. A cold
 load with a delayed refill must assert both L1-miss and replay-allocation, 56
 unissued stores must reach StoreQueue full, and 16 distinct committed lines
 held behind a delayed refill must reach SBuffer full.
+`l2-flush-contracts` checks the separate outer-L2 control bridge. The CSR
+enable must pass through combinationally, while every L2 completion input must
+appear at the backend bypass exactly one cycle later. The timing oracle remains
+active during every monitored functional-test cycle; the focused test covers
+all four enable/completion combinations and repeated rising/falling edges.
 `random-mixed` keeps constant-space lane counters and
 requires both canceled and uncanceled wakeups on every lane. When hardware
 stride prefetch is enabled, that backend gate is frozen before training begins
