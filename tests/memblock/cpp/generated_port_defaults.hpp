@@ -10538,6 +10538,31 @@ inline bool sample_scalar_load_cancel(UTMemBlock &dut, unsigned lane)
     }
 }
 
+struct MemoryViolation {
+    bool valid = false;
+    bool is_rvc = false;
+    bool rob_flag = false;
+    std::uint8_t rob_value = 0;
+    bool ftq_flag = false;
+    std::uint8_t ftq_value = 0;
+    std::uint8_t ftq_offset = 0;
+    bool level = false;
+};
+
+inline MemoryViolation sample_memory_violation(UTMemBlock &dut)
+{
+    return {
+        .valid = dut.io_mem_to_ooo_memoryViolation_valid.B(),
+        .is_rvc = dut.io_mem_to_ooo_memoryViolation_bits_isRVC.B(),
+        .rob_flag = dut.io_mem_to_ooo_memoryViolation_bits_robIdx_flag.B(),
+        .rob_value = static_cast<std::uint8_t>(dut.io_mem_to_ooo_memoryViolation_bits_robIdx_value.U()),
+        .ftq_flag = dut.io_mem_to_ooo_memoryViolation_bits_ftqIdx_flag.B(),
+        .ftq_value = static_cast<std::uint8_t>(dut.io_mem_to_ooo_memoryViolation_bits_ftqIdx_value.U()),
+        .ftq_offset = static_cast<std::uint8_t>(dut.io_mem_to_ooo_memoryViolation_bits_ftqOffset.U()),
+        .level = dut.io_mem_to_ooo_memoryViolation_bits_level.B(),
+    };
+}
+
 struct ScalarStoreIssue {
     std::uint64_t fu_type = 0;
     std::uint16_t fu_op_type = 0;

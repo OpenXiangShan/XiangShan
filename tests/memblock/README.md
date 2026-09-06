@@ -184,6 +184,7 @@ make pin-space PICKER="$PICKER" JOBS=8
 make frontend-bridge PICKER="$PICKER" JOBS=8 SEED=1 TRANSACTIONS=4096
 make single-load PICKER="$PICKER" JOBS=8
 make load-feedback PICKER="$PICKER" JOBS=8
+make memory-violation PICKER="$PICKER" JOBS=8
 make fp-loads PICKER="$PICKER" JOBS=8
 make trigger-contracts PICKER="$PICKER" JOBS=8
 make metadata-contracts PICKER="$PICKER" JOBS=8
@@ -328,6 +329,11 @@ lines without a new TileLink request. The oracle permits any number of legal
 replays but requires each completed normal load to have exactly one uncanceled
 wakeup: `wakeup_delta = ld2Cancel_delta + 1`. `random-mixed` keeps constant-space
 lane counters and requires both canceled and uncanceled wakeups on every lane.
+
+`memory-violation` leaves an older store address unresolved, completes a
+younger same-byte load, and then resolves the store address. It requires one
+RAW replay redirect and compares every exposed `memoryViolation` field against
+the independently chosen younger-load ROB, FTQ, RVC, and flush-level metadata.
 
 `dcache-errors` injects one denied and one corrupt DCache response and checks
 the corresponding scalar load access-fault and hardware-error writebacks with

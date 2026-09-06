@@ -1980,6 +1980,115 @@ int run_load_feedback(int argc, char **argv)
     return 0;
 }
 
+int run_memory_violation(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x1b000;
+    constexpr std::uint64_t address = base + 24;
+    environment.memory().fill_incrementing(base, 64, 0x4d);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
+                  << environment.cycle() << " phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::StoreTransaction older_store{
+        .address = address,
+        .data = 0xdecafbad12345678ULL,
+        .op = memblock::StoreOp::sd,
+        .rob = 20,
+        .sq = 0,
+        .address_lane = 0,
+        .data_lane = 1,
+    };
+    const memblock::LoadTransaction younger_load{
+        .address = address,
+        .op = memblock::LoadOp::ld,
+        .rob = 21,
+        .lq = 0,
+        .sq = 1,
+        .pdest = 41,
+        .lane = 2,
+        .predecode_rvc = true,
+        .ftq_ptr = 37,
+        .ftq_offset = 6,
+    };
+
+    environment.expect_store(older_store);
+    environment.expect_load(younger_load);
+    if (!environment.enqueue_store(older_store, 0) ||
+        !environment.enqueue_load(younger_load) ||
+        !environment.issue_store_data(older_store, 256) ||
+        !environment.issue_load(younger_load, 256) ||
+        !environment.run_until_complete(4096)) {
+        std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=speculative-load reason=" << environment.error()
+                  << '\n';
+        return 1;
+    }
+
+    const auto violations_before = environment.memory_violation_stats().count;
+    if (!environment.issue_store_address(older_store, 256) ||
+        !environment.run_until_store_complete(512)) {
+        std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=store-address reason=" << environment.error()
+                  << '\n';
+        return 1;
+    }
+    for (unsigned cycle = 0;
+         cycle < 512 &&
+         environment.memory_violation_stats().count == violations_before;
+         ++cycle) {
+        if (!environment.run_cycles(1)) {
+            std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=redirect-wait reason=" << environment.error()
+                      << '\n';
+            return 1;
+        }
+    }
+
+    const auto &stats = environment.memory_violation_stats();
+    const auto &violation = stats.last;
+    if (stats.count != violations_before + 1 || !violation.valid ||
+        violation.is_rvc != younger_load.predecode_rvc ||
+        violation.rob_flag != younger_load.rob_flag ||
+        violation.rob_value != younger_load.rob || violation.ftq_flag ||
+        violation.ftq_value != younger_load.ftq_ptr ||
+        violation.ftq_offset != younger_load.ftq_offset || !violation.level) {
+        std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=redirect-check count=" << stats.count
+                  << " expected_count=" << violations_before + 1
+                  << " is_rvc=" << violation.is_rvc
+                  << " rob=" << violation.rob_flag << ':'
+                  << static_cast<unsigned>(violation.rob_value)
+                  << " ftq=" << violation.ftq_flag << ':'
+                  << static_cast<unsigned>(violation.ftq_value)
+                  << " ftq_offset="
+                  << static_cast<unsigned>(violation.ftq_offset)
+                  << " level=" << violation.level << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_MEMORY_VIOLATION_PASS"
+              << " cycle=" << environment.cycle()
+              << " violations=" << stats.count
+              << " rob=" << violation.rob_flag << ':'
+              << static_cast<unsigned>(violation.rob_value)
+              << " ftq=" << violation.ftq_flag << ':'
+              << static_cast<unsigned>(violation.ftq_value)
+              << " ftq_offset="
+              << static_cast<unsigned>(violation.ftq_offset)
+              << " is_rvc=" << violation.is_rvc
+              << " level=" << violation.level
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_fp_loads(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -14138,6 +14247,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "load-feedback") {
             return run_load_feedback(argc, argv);
+        }
+        if (options.test == "memory-violation") {
+            return run_memory_violation(argc, argv);
         }
         if (options.test == "fp-loads") {
             return run_fp_loads(argc, argv);

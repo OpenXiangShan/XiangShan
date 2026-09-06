@@ -2915,6 +2915,12 @@ public:
         std::array<std::uint64_t, kScalarLoadLanes> last_cancel_cycle{};
     };
 
+    struct MemoryViolationStats {
+        std::uint64_t count = 0;
+        generated::MemoryViolation last{};
+        std::uint64_t last_cycle = 0;
+    };
+
     Environment(int argc, char **argv)
         : dut_(argc, argv), memory_(&bus_memory_),
           memory_agent_(bus_memory_, memory_),
@@ -3392,6 +3398,10 @@ public:
     const ScalarLoadFeedbackStats &scalar_load_feedback_stats() const
     {
         return scalar_load_feedback_stats_;
+    }
+    const MemoryViolationStats &memory_violation_stats() const
+    {
+        return memory_violation_stats_;
     }
 
     bool exercise_frontend_bridges(
@@ -3942,6 +3952,7 @@ public:
         // constructor's initial value made repeated-reset scenarios silently
         // run without resetting the DUT.
         scalar_load_feedback_stats_ = {};
+        memory_violation_stats_ = {};
         dut_.reset.ImmSet(std::uint64_t{1});
         for (unsigned cycle = 0; cycle < 8; ++cycle) {
             tick(false);
@@ -6484,6 +6495,13 @@ private:
         // they may already describe the following transaction.  LSQ dequeue
         // pulses are registered separately and are counted below instead.
         if (monitor) {
+            const auto memory_violation =
+                generated::sample_memory_violation(dut_);
+            if (memory_violation.valid) {
+                ++memory_violation_stats_.count;
+                memory_violation_stats_.last = memory_violation;
+                memory_violation_stats_.last_cycle = cycle();
+            }
             for (unsigned lane = 0; lane < kScalarLoadLanes; ++lane) {
                 const auto wakeup =
                     generated::sample_scalar_load_wakeup(dut_, lane);
@@ -6620,6 +6638,7 @@ private:
     std::uint64_t pin_space_digest_ = 0;
     FrontendBridgeStats frontend_bridge_stats_;
     ScalarLoadFeedbackStats scalar_load_feedback_stats_;
+    MemoryViolationStats memory_violation_stats_;
     std::uint64_t lq_allocated_ = 0;
     std::uint64_t lq_dequeued_ = 0;
     std::uint64_t lq_canceled_ = 0;

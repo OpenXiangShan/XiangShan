@@ -22,6 +22,7 @@ SCENARIOS = (
     "frontend-bridge",
     "single-load",
     "load-feedback",
+    "memory-violation",
     "fp-loads",
     "trigger-contracts",
     "metadata-contracts",

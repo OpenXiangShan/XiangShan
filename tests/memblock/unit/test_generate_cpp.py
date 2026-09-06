@@ -35,6 +35,8 @@ class GenerateCppTest(unittest.TestCase):
         self.assertIn("kScalarLoadFeedbackLanes = 3", rendered)
         self.assertIn("sample_scalar_load_wakeup", rendered)
         self.assertIn("sample_scalar_load_cancel", rendered)
+        self.assertIn("sample_memory_violation", rendered)
+        self.assertIn("memoryViolation_bits_robIdx_value", rendered)
         self.assertIn("item.store_set_hit", rendered)
         self.assertIn("item.ftq_ptr", rendered)
         self.assertIn("dut.io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_0.ImmSet((item.exception_mask >> 0) & 1U)", rendered)

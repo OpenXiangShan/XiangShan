@@ -31,8 +31,18 @@ exact scalar writebacks, and three total DCache TileLink requests. Each load
 had one final uncanceled wakeup, while intermediate way-prediction/resource
 replays were allowed rather than assigned a fixed count. The resident phase
 made no additional TileLink request. This closes basic lane and destination
-metadata semantics; `memoryViolation` and broader cancellation crosses remain
-open in the verification plan.
+metadata semantics; broader cancellation crosses remain open in the
+verification plan.
+
+## RAW Memory Violation Boundary
+
+The `memory-violation` scenario completed a younger scalar load while an older
+store address was unresolved, then resolved the store onto the same eight
+bytes. Current RTL produced exactly one top-level redirect in 67 cycles with
+the independently selected younger-load identity: `rob=0:21`, `ftq=0:37`,
+`ftqOffset=6`, `isRVC=1`, and `level=flush`. This closes the basic scalar RAW
+contract and all eight exposed output pins; RAR, multiple-candidate arbitration,
+pointer wraparound, and vector crosses remain open.
 
 ## Translation Constraint Interface Validation
 
