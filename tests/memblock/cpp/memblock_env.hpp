@@ -1322,6 +1322,14 @@ public:
     std::uint64_t request_count() const { return request_count_; }
     std::uint64_t get_count() const { return get_count_; }
     std::uint64_t refill_count() const { return refill_count_; }
+    std::uint64_t keyword_refill_count() const
+    {
+        return keyword_refill_count_;
+    }
+    std::uint64_t nonkeyword_refill_count() const
+    {
+        return nonkeyword_refill_count_;
+    }
     std::uint64_t acquire_perm_count() const { return acquire_perm_count_; }
     std::uint64_t request_stall_cycles() const { return request_stall_cycles_; }
     std::uint64_t response_delay_cycles() const { return response_delay_cycles_; }
@@ -1514,6 +1522,11 @@ private:
         }
         case 6: { // AcquireBlock -> GrantData
             ++refill_count_;
+            if (request.keyword) {
+                ++keyword_refill_count_;
+            } else {
+                ++nonkeyword_refill_count_;
+            }
             const std::uint8_t cap = request.param == 0 ? 1 : 0;
             const std::uint16_t sink =
                 static_cast<std::uint16_t>(1U + request.source);
@@ -1758,6 +1771,8 @@ private:
     std::uint64_t request_count_ = 0;
     std::uint64_t get_count_ = 0;
     std::uint64_t refill_count_ = 0;
+    std::uint64_t keyword_refill_count_ = 0;
+    std::uint64_t nonkeyword_refill_count_ = 0;
     std::uint64_t acquire_perm_count_ = 0;
     std::uint64_t release_count_ = 0;
     std::uint64_t release_data_count_ = 0;
@@ -3884,6 +3899,14 @@ public:
     std::uint64_t tilelink_requests() const { return memory_agent_.request_count(); }
     std::uint64_t dcache_gets() const { return memory_agent_.get_count(); }
     std::uint64_t dcache_refills() const { return memory_agent_.refill_count(); }
+    std::uint64_t dcache_keyword_refills() const
+    {
+        return memory_agent_.keyword_refill_count();
+    }
+    std::uint64_t dcache_nonkeyword_refills() const
+    {
+        return memory_agent_.nonkeyword_refill_count();
+    }
     std::uint64_t dcache_acquire_perms() const
     {
         return memory_agent_.acquire_perm_count();

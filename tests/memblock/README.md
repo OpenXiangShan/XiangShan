@@ -376,6 +376,11 @@ its internal exception machinery, while page/access/guest-page faults are
 recomputed from the TLB in S1. The generated enqueue adapter is covered by
 unit tests for exception-vector bit mapping.
 
+`single-load` drives two cold scalar loads whose virtual-address bit 5 values
+are opposite. The DCache must emit one ordinary and one `isKeyword`
+AcquireBlock, accept both 32-byte GrantData beat orders, return two exact
+64-bit values, and emit one GrantAck for each refill.
+
 `load-feedback` observes all three backend scalar-load wakeup lanes and all
 three `ld2Cancel` pins. It checks issue-time `rfWen`, `fpWen`, and `pdest`,
 forces a cold miss on every lane, then repeats the accesses from resident cache

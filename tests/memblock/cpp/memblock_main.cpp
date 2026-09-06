@@ -1921,29 +1921,61 @@ int run_frontend_bridge(int argc, char **argv, const Options &options)
 int run_single_load(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
-    constexpr std::uint64_t line = memblock::kDefaultMemoryBase;
-    environment.memory().fill_incrementing(line, 64, 0x80);
+    constexpr std::uint64_t base = memblock::kDefaultMemoryBase;
+    environment.memory().fill_incrementing(base, 2 * 64, 0x80);
 
     if (!environment.reset()) {
         std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle=" << environment.cycle()
                   << " reason=" << environment.error() << '\n';
         return 1;
     }
-    const memblock::LoadTransaction transaction{
-        .address = line + 24,
-        .op = memblock::LoadOp::ld,
-        .rob = 1,
-        .lq = 0,
-        .sq = 0,
-        .pdest = 5,
-        .lane = 0,
-    };
-    environment.expect_load(transaction);
-    if (!environment.enqueue_load(transaction) ||
-        !environment.issue_load(transaction) ||
-        !environment.run_until_complete(512)) {
+    // MissQueue derives isKeyword from vaddr[5]. Exercise both legal refill
+    // beat orders on distinct cold lines and let the scalar scoreboard prove
+    // that the two 32-byte GrantData beats are restored to the right offsets.
+    const std::array<memblock::LoadTransaction, 2> transactions{{
+        {
+            .address = base + 0x18,
+            .op = memblock::LoadOp::ld,
+            .rob = 1,
+            .lq = 0,
+            .sq = 0,
+            .pdest = 5,
+            .lane = 0,
+        },
+        {
+            .address = base + 0x68,
+            .op = memblock::LoadOp::ld,
+            .rob = 2,
+            .lq = 1,
+            .sq = 0,
+            .pdest = 6,
+            .lane = 1,
+        },
+    }};
+    for (const auto &transaction : transactions) {
+        environment.expect_load(transaction);
+        if (!environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction) ||
+            !environment.run_until_complete(512)) {
+            std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle="
+                      << environment.cycle() << " address=0x" << std::hex
+                      << transaction.address << std::dec << " reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+    }
+    if (environment.dcache_refills() != 2 ||
+        environment.dcache_nonkeyword_refills() != 1 ||
+        environment.dcache_keyword_refills() != 1 ||
+        environment.dcache_grant_acks() != 2 ||
+        environment.writebacks() != 2) {
         std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle=" << environment.cycle()
-                  << " reason=" << environment.error() << '\n';
+                  << " phase=refill-order refills="
+                  << environment.dcache_refills() << " nonkeyword="
+                  << environment.dcache_nonkeyword_refills() << " keyword="
+                  << environment.dcache_keyword_refills() << " grant_acks="
+                  << environment.dcache_grant_acks() << " writebacks="
+                  << environment.writebacks() << '\n';
         return 1;
     }
 
@@ -1951,6 +1983,10 @@ int run_single_load(int argc, char **argv)
               << " cycle=" << environment.cycle()
               << " tilelink_requests=" << environment.tilelink_requests()
               << " writebacks=" << environment.writebacks()
+              << " nonkeyword_refills="
+              << environment.dcache_nonkeyword_refills()
+              << " keyword_refills=" << environment.dcache_keyword_refills()
+              << " grant_acks=" << environment.dcache_grant_acks()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

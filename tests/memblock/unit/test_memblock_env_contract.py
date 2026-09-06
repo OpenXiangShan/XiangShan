@@ -12,6 +12,29 @@ REPO_ROOT = MEMBLOCK_ROOT.parents[1]
 
 
 class MemBlockEnvironmentContractTest(unittest.TestCase):
+    def test_single_load_covers_both_refill_beat_orders(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        miss_queue = (
+            REPO_ROOT
+            / "src/main/scala/xiangshan/cache/dcache/mainpipe/MissQueue.scala"
+        ).read_text()
+
+        for contract in (
+            "keyword_refill_count_",
+            "nonkeyword_refill_count_",
+            "dcache_keyword_refills()",
+            "dcache_nonkeyword_refills()",
+            "phase=refill-order",
+            "nonkeyword_refills=",
+            "keyword_refills=",
+        ):
+            self.assertIn(contract, environment + driver)
+        self.assertIn(
+            "miss_req_pipe_reg_bits.vaddr(5).asBool", miss_queue
+        )
+        self.assertIn("refill_count ^ isKeyword", miss_queue)
+
     def test_hypervisor_load_store_contract_is_registered(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
