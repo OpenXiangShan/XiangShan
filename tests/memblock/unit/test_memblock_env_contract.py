@@ -75,6 +75,21 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + driver + makefile)
 
+    def test_direct_sbuffer_flush_contract_is_registered(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+
+        for contract in (
+            "pulse_sbuffer_flush",
+            "io_ooo_to_mem_flushSb",
+            "sbuffer-flush",
+            "phase=pre-flush-state",
+            "phase=flush-duration",
+            "combined_empty=1 cacheable_readback=1 nc_readback=1",
+        ):
+            self.assertIn(contract, environment + driver + makefile)
+
     def test_pmp_contract_matches_platform_grain(self) -> None:
         parameters = (REPO_ROOT / "src/main/scala/xiangshan/PMParameters.scala").read_text()
         pmp = (REPO_ROOT / "src/main/scala/xiangshan/backend/fu/PMP.scala").read_text()

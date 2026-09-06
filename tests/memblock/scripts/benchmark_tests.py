@@ -36,6 +36,7 @@ SCENARIOS = (
     "uncache-errors",
     "uncache-widths",
     "uncache-outstanding",
+    "sbuffer-flush",
     "mmio-contracts",
     "cbo-zero-contracts",
     "reset-recovery",

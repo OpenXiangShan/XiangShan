@@ -5339,6 +5339,15 @@ public:
         return run_cycles(16) && check_components();
     }
 
+    bool pulse_sbuffer_flush()
+    {
+        dut_.io_ooo_to_mem_flushSb.ImmSet(std::uint64_t{1});
+        tick();
+        dut_.io_ooo_to_mem_flushSb.ImmSet(std::uint64_t{0});
+        tick();
+        return check_components();
+    }
+
     bool set_pointer_masking(const PointerMaskingConfig &config)
     {
         dut_.io_ooo_to_mem_tlbCsr_pmm_mseccfg.ImmSet(

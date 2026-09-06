@@ -5216,6 +5216,190 @@ int run_uncache_outstanding(int argc, char **argv)
     return 0;
 }
 
+int run_sbuffer_flush(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t cacheable_virtual = 0x50054000ULL;
+    constexpr std::uint64_t cacheable_physical = 0x90054000ULL;
+    constexpr std::uint64_t nc_virtual = 0x50055000ULL;
+    constexpr std::uint64_t nc_physical = 0x90055000ULL;
+    constexpr std::uint64_t root = 0x97054000ULL;
+    constexpr std::uint64_t nc_data = 0x3141592653589793ULL;
+    constexpr std::uint64_t cacheable_data = 0x2718281828459045ULL;
+    environment.memory().fill_incrementing(cacheable_physical, 0x1000, 0x67);
+    environment.memory().fill_incrementing(nc_physical, 0x1000, 0x97);
+    if (!environment.reset() ||
+        !environment.map_sv39_4k(
+            cacheable_virtual, cacheable_physical, root) ||
+        !environment.map_sv39_4k(
+            nc_virtual, nc_physical, root, true, true, false, false, true) ||
+        !environment.activate_sv39(root) ||
+        !environment.set_uncache_write_outstanding(true)) {
+        std::cerr << "MEMBLOCK_SBUFFER_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    environment.configure_backpressure(
+        0x6a09e667f3bcc909ULL, true,
+        memblock::ResponseLatencyProfiles{
+            memblock::ResponseLatencyProfile::compact,
+            memblock::ResponseLatencyProfile::compact,
+            memblock::ResponseLatencyProfile::spec});
+
+    const memblock::StoreTransaction nc_store{
+        .address = nc_virtual + 0x80,
+        .oracle_address = nc_physical + 0x80,
+        .data = nc_data,
+        .op = memblock::StoreOp::sd,
+        .rob = 0,
+        .sq = 0,
+        .address_lane = 0,
+        .data_lane = 1,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    environment.expect_store(nc_store);
+    if (!environment.set_rob_head(nc_store.rob, nc_store.rob_flag) ||
+        !environment.enqueue_store(nc_store, 0) ||
+        !environment.issue_store_address_until_tlb_hit(nc_store, 16384) ||
+        !environment.issue_store_data(nc_store, 4096) ||
+        !environment.run_until_store_complete(32768)) {
+        std::cerr << "MEMBLOCK_SBUFFER_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=nc-store-issue reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    environment.force_next_uncache_response_delay(1024);
+    if (!environment.commit_store(nc_store, 16384) ||
+        !environment.run_until_uncache_requests(1, 4096) ||
+        environment.uncache_requests() != 1 ||
+        environment.uncache_outstanding_requests() != 1) {
+        std::cerr << "MEMBLOCK_SBUFFER_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=nc-store-outstanding"
+                  << " requests=" << environment.uncache_requests()
+                  << " outstanding="
+                  << environment.uncache_outstanding_requests()
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::StoreTransaction cacheable_store{
+        .address = cacheable_virtual + 0x88,
+        .oracle_address = cacheable_physical + 0x88,
+        .data = cacheable_data,
+        .op = memblock::StoreOp::sd,
+        .rob = 1,
+        .sq = 1,
+        .address_lane = 1,
+        .data_lane = 0,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+    };
+    environment.expect_store(cacheable_store);
+    if (!environment.set_rob_head(
+            cacheable_store.rob, cacheable_store.rob_flag) ||
+        !environment.enqueue_store(cacheable_store, 0) ||
+        !environment.issue_store_address_until_tlb_hit(
+            cacheable_store, 16384) ||
+        !environment.issue_store_data(cacheable_store, 4096) ||
+        !environment.run_until_store_complete(32768) ||
+        !environment.commit_store(cacheable_store, 16384)) {
+        std::cerr << "MEMBLOCK_SBUFFER_FLUSH_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=cacheable-store-buffering reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t requests_before_flush =
+        environment.tilelink_requests();
+    if (environment.sbuffer_empty() ||
+        environment.uncache_outstanding_requests() != 1) {
+        std::cerr << "MEMBLOCK_SBUFFER_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=pre-flush-state"
+                  << " sb_empty=" << environment.sbuffer_empty()
+                  << " uncache_outstanding="
+                  << environment.uncache_outstanding_requests() << '\n';
+        return 1;
+    }
+
+    const std::uint64_t flush_cycle = environment.cycle();
+    if (!environment.pulse_sbuffer_flush() ||
+        !environment.run_cycles(256) ||
+        environment.tilelink_requests() <= requests_before_flush ||
+        environment.sbuffer_empty()) {
+        std::cerr << "MEMBLOCK_SBUFFER_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=flush-start"
+                  << " dcache_before=" << requests_before_flush
+                  << " dcache_after=" << environment.tilelink_requests()
+                  << " sb_empty=" << environment.sbuffer_empty()
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+    if (!environment.run_until_sbuffer_empty(8192) ||
+        !environment.run_until_uncache_drained(1, 8192)) {
+        std::cerr << "MEMBLOCK_SBUFFER_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=flush-drain reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t flush_busy_cycles = environment.cycle() - flush_cycle;
+    if (flush_busy_cycles < 512 ||
+        environment.uncache_outstanding_requests() != 0) {
+        std::cerr << "MEMBLOCK_SBUFFER_FLUSH_FAIL cycle="
+                  << environment.cycle() << " phase=flush-duration"
+                  << " busy_cycles=" << flush_busy_cycles
+                  << " uncache_outstanding="
+                  << environment.uncache_outstanding_requests() << '\n';
+        return 1;
+    }
+
+    const std::array<memblock::LoadTransaction, 2> readbacks{{
+        {
+            .address = cacheable_store.address,
+            .oracle_address = cacheable_store.oracle_address,
+            .op = memblock::LoadOp::ld,
+            .rob = 2,
+            .lq = 0,
+            .pdest = 110,
+            .lane = 0,
+        },
+        {
+            .address = nc_store.address,
+            .oracle_address = nc_store.oracle_address,
+            .op = memblock::LoadOp::ld,
+            .rob = 3,
+            .lq = 1,
+            .pdest = 111,
+            .lane = 1,
+        },
+    }};
+    const std::array<std::uint64_t, 2> expected{{
+        cacheable_data, nc_data,
+    }};
+    for (unsigned index = 0; index < readbacks.size(); ++index) {
+        environment.expect_load_data(readbacks[index], expected[index]);
+        if (!environment.set_rob_head(
+                readbacks[index].rob, readbacks[index].rob_flag) ||
+            !environment.enqueue_load(readbacks[index]) ||
+            !environment.issue_load(readbacks[index], 4096) ||
+            !environment.run_until_complete(32768) ||
+            !environment.run_until_lq_retired(8192)) {
+            std::cerr << "MEMBLOCK_SBUFFER_FLUSH_FAIL cycle="
+                      << environment.cycle() << " phase=readback index="
+                      << index << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+    std::cout << "MEMBLOCK_SBUFFER_FLUSH_PASS"
+              << " flush_busy_cycles=" << flush_busy_cycles
+              << " dcache_requests=" << environment.tilelink_requests()
+              << " uncache_requests=" << environment.uncache_requests()
+              << " combined_empty=1 cacheable_readback=1 nc_readback=1"
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_mmio_contracts(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -19418,6 +19602,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "uncache-outstanding") {
             return run_uncache_outstanding(argc, argv);
+        }
+        if (options.test == "sbuffer-flush") {
+            return run_sbuffer_flush(argc, argv);
         }
         if (options.test == "mmio-contracts") {
             return run_mmio_contracts(argc, argv);
