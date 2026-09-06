@@ -6617,6 +6617,121 @@ int run_vector_split_load(int argc, char **argv)
     return 0;
 }
 
+int run_vector_fault_only_first(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t virtual_page = 0x52000000ULL;
+    constexpr std::uint64_t physical_page =
+        memblock::kDefaultMemoryBase + 0x5a000;
+    constexpr std::uint64_t root = 0x97900000ULL;
+    constexpr std::uint64_t address = virtual_page + 0xff8;
+    constexpr std::uint64_t physical_address = physical_page + 0xff8;
+    environment.memory().fill_incrementing(physical_address, 8, 0x6d);
+    environment.configure_backpressure(0x159b33b1f07c4a82ULL, true);
+    if (!environment.reset() ||
+        !environment.map_sv39_4k(address, physical_address, root) ||
+        !environment.activate_sv39(root, 37)) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_FAIL cycle=" << environment.cycle()
+                  << " phase=configuration reason=" << environment.error()
+                  << '\n';
+        return 1;
+    }
+
+    const auto first = memblock::reference_sv39_walk(
+        environment.memory(), root, address);
+    const auto second = memblock::reference_sv39_walk(
+        environment.memory(), root, address + 8);
+    if (!first.translated || first.physical_address != physical_address ||
+        second.translated) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_FAIL cycle=" << environment.cycle()
+                  << " phase=reference reason=expected one mapped and one unmapped element\n";
+        return 1;
+    }
+
+    // The data uop carries the original VL=2. Element zero succeeds, while
+    // element one reaches the next, deliberately unmapped page. VLEFF must
+    // suppress that later page fault and complete the vector result with VL=1.
+    memblock::VectorMemoryTransaction data_uop{
+        .address = address,
+        .oracle_address = physical_address,
+        .eew = 3,
+        .vl = 2,
+        .rob = 72,
+        .lq = 0,
+        .pdest = 118,
+        .lane = 0,
+        .flow_num = 2,
+        .expected_trigger = memblock::kVectorWritebackTriggerNone,
+        .vuop_idx = 0,
+        .last_uop = false,
+        .is_vleff = true,
+        .expected_debug_is_mmio = false,
+        .expected_debug_is_ncio = false,
+        .expected_debug_is_perf_cnt = false,
+    };
+    for (unsigned byte = 0; byte < data_uop.data.size(); ++byte) {
+        data_uop.data[byte] = static_cast<unsigned char>(0xb0 + byte);
+    }
+    auto expected_data = data_uop.data;
+    for (unsigned byte = 0; byte < 8; ++byte) {
+        expected_data[byte] = environment.memory().read_byte(
+            physical_address + byte);
+    }
+    environment.expect_vector_data(data_uop, expected_data);
+    if (!environment.set_rob_head(data_uop.rob, data_uop.rob_flag) ||
+        !environment.enqueue_vector(data_uop) ||
+        !environment.issue_vector(data_uop, 512) ||
+        !environment.run_until_vector_complete_with_replays(data_uop, 16384) ||
+        !environment.run_until_lq_retired(4096)) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_FAIL cycle=" << environment.cycle()
+                  << " phase=data-uop reason=" << environment.error()
+                  << " ptw_requests=" << environment.ptw_requests()
+                  << " vector_replays="
+                  << environment.vector_replay_feedbacks() << '\n';
+        return 1;
+    }
+
+    const std::uint64_t lq_allocated_before_fix = environment.lq_allocated();
+    auto fix_vl_uop = data_uop;
+    fix_vl_uop.pdest = 119;
+    fix_vl_uop.expected_vl = 1;
+    fix_vl_uop.vuop_idx = 1;
+    fix_vl_uop.last_uop = true;
+    fix_vl_uop.vl_wen = true;
+    fix_vl_uop.expected_debug_is_mmio.reset();
+    fix_vl_uop.expected_debug_is_ncio.reset();
+    fix_vl_uop.expected_debug_is_perf_cnt.reset();
+    environment.expect_vector_data(fix_vl_uop, {});
+    if (!environment.issue_vector(fix_vl_uop, 512) ||
+        !environment.run_until_vector_complete(2048) ||
+        environment.lq_allocated() != lq_allocated_before_fix ||
+        environment.lq_dequeued() != environment.lq_allocated() ||
+        environment.vector_fof_fix_writebacks() != 1) {
+        std::cerr << "MEMBLOCK_VECTOR_FOF_FAIL cycle=" << environment.cycle()
+                  << " phase=fix-vl-uop reason=" << environment.error()
+                  << " lq=" << environment.lq_dequeued() << '/'
+                  << environment.lq_allocated()
+                  << " fix_writebacks="
+                  << environment.vector_fof_fix_writebacks() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_VECTOR_FOF_PASS"
+              << " cycle=" << environment.cycle()
+              << " original_vl=2 final_vl=1"
+              << " data_writebacks="
+              << environment.vector_load_writebacks()
+              << " fix_vl_writebacks="
+              << environment.vector_fof_fix_writebacks()
+              << " ptw_requests=" << environment.ptw_requests()
+              << " vector_replays="
+              << environment.vector_replay_feedbacks()
+              << " lq_allocated=" << environment.lq_allocated()
+              << " lq_dequeued=" << environment.lq_dequeued()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_vector_store_forwarding(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -20297,6 +20412,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "vector-split-load") {
             return run_vector_split_load(argc, argv);
+        }
+        if (options.test == "vector-fof") {
+            return run_vector_fault_only_first(argc, argv);
         }
         if (options.test == "vector-store-forwarding") {
             return run_vector_store_forwarding(argc, argv);

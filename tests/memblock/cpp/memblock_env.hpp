@@ -38,6 +38,7 @@ constexpr std::uint64_t kFuTypeAtomic = std::uint64_t{1} << 17;
 constexpr std::uint64_t kFuTypeVectorLoad = std::uint64_t{1} << 31;
 constexpr std::uint64_t kFuTypeVectorStore = std::uint64_t{1} << 32;
 constexpr std::uint16_t kVectorLoadUnitStride = 0x080;
+constexpr std::uint16_t kVectorLoadFaultOnlyFirst = 0x090;
 constexpr std::uint16_t kVectorLoadIndexedUnordered = 0x0a0;
 constexpr std::uint16_t kVectorLoadStrided = 0x0c0;
 constexpr std::uint16_t kVectorLoadIndexedOrdered = 0x0e0;
@@ -353,6 +354,7 @@ struct VectorMemoryTransaction {
     VectorAddressingMode addressing = VectorAddressingMode::unit_stride;
     std::uint8_t eew = 0;
     std::uint8_t vl = 16;
+    std::optional<std::uint8_t> expected_vl;
     std::uint8_t vstart = 0;
     bool vm = true;
     std::uint16_t mask_bits = 0xffff;
@@ -378,6 +380,11 @@ struct VectorMemoryTransaction {
     std::uint64_t ftq_ptr = 0;
     std::uint8_t ftq_offset = 0;
     std::uint8_t vlmul = 0;
+    std::uint8_t vuop_idx = 0;
+    bool last_uop = true;
+    std::uint8_t nf = 0;
+    bool is_vleff = false;
+    bool vl_wen = false;
     // Lane 0 exposes all three debug classes.  Lane 1 is intentionally
     // checked only when a caller has an explicit expectation because those
     // generated sideband ports are pruned in this top-level build.
@@ -388,6 +395,13 @@ struct VectorMemoryTransaction {
 
 inline std::uint16_t vector_fu_op_type(const VectorMemoryTransaction &transaction)
 {
+    if (transaction.is_vleff) {
+        if (transaction.store ||
+            transaction.addressing != VectorAddressingMode::unit_stride) {
+            throw std::logic_error("vleff must be a unit-stride vector load");
+        }
+        return kVectorLoadFaultOnlyFirst;
+    }
     switch (transaction.addressing) {
     case VectorAddressingMode::unit_stride:
         return transaction.store ? kVectorStoreUnitStride : kVectorLoadUnitStride;
@@ -2758,6 +2772,8 @@ public:
         std::uint8_t eew;
         std::uint8_t vl;
         std::uint8_t vstart;
+        std::uint8_t vuop_idx;
+        std::uint8_t nf;
         std::uint8_t pdest;
         bool rob_flag;
         std::uint32_t exception_mask;
@@ -2782,23 +2798,27 @@ public:
         const VectorMemoryTransaction &transaction,
         const std::array<unsigned char, 16> &data)
     {
+        auto output_transaction = transaction;
+        output_transaction.vl = transaction.expected_vl.value_or(transaction.vl);
         const auto [_, inserted] = expected_.emplace(
             rob_identity(transaction.rob, transaction.rob_flag),
             Expected{
                 transaction.store,
                 data,
-                active_vector_elements(transaction),
+                active_vector_elements(output_transaction),
                 vector_fu_op_type(transaction),
                 transaction.eew,
-                transaction.vl,
+                output_transaction.vl,
                 transaction.vstart,
+                transaction.vuop_idx,
+                transaction.nf,
                 transaction.pdest,
                 transaction.rob_flag,
                 transaction.expected_exception_mask,
                 transaction.expected_trigger,
-                !transaction.store,
+                !transaction.store && !transaction.vl_wen,
                 false,
-                false,
+                transaction.vl_wen,
                 transaction.input_flush_pipe,
                 transaction.expected_debug_is_mmio,
                 transaction.expected_debug_is_ncio,
@@ -2852,11 +2872,32 @@ public:
             ((!exception_progress) &&
              (writeback.vsew != expected.eew || writeback.veew != expected.eew ||
               writeback.vl != expected.vl || writeback.vstart != 0 ||
-              writeback.vuop_idx != 0))) {
+              writeback.vuop_idx != expected.vuop_idx ||
+              writeback.nf != expected.nf))) {
             fail("mismatched vector memory metadata", lane, writeback, &expected);
             return;
         }
-        if (!expected.store && expected.exception_mask == 0) {
+        if (expected.vl_wen && expected.exception_mask == 0) {
+            const bool vl_data_matches =
+                writeback.data.size() == 16 &&
+                writeback.data[0] == expected.vl &&
+                std::all_of(
+                    writeback.data.begin() + 1, writeback.data.end(),
+                    [](unsigned char byte) { return byte == 0; });
+            const bool mask_matches =
+                writeback.vmask.size() == 16 &&
+                std::all_of(
+                    writeback.vmask.begin(), writeback.vmask.end(),
+                    [](unsigned char byte) { return byte == 0xff; });
+            if (lane != 1 || writeback.vec_wen ||
+                writeback.pdest != expected.pdest ||
+                !vl_data_matches || !mask_matches) {
+                fail("mismatched vector FOF fix-VL writeback", lane, writeback,
+                     &expected);
+                return;
+            }
+            ++fof_fix_observed_;
+        } else if (!expected.store && expected.exception_mask == 0) {
             if (!writeback.vec_wen || writeback.pdest != expected.pdest ||
                 !matches_load_data(writeback.data, expected) ||
                 !matches_active_mask(writeback.vmask, expected.active_elements)) {
@@ -2889,6 +2930,7 @@ public:
     bool ok() const { return error_.empty(); }
     std::uint64_t load_observed() const { return load_observed_; }
     std::uint64_t store_observed() const { return store_observed_; }
+    std::uint64_t fof_fix_observed() const { return fof_fix_observed_; }
     const std::string &error() const { return error_; }
 
 private:
@@ -2999,6 +3041,7 @@ private:
     std::unordered_map<RobIdentity, Expected, RobIdentityHash> expected_;
     std::uint64_t load_observed_ = 0;
     std::uint64_t store_observed_ = 0;
+    std::uint64_t fof_fix_observed_ = 0;
     std::string error_;
 };
 
@@ -3022,14 +3065,19 @@ class Environment {
         issue.ftq_offset = transaction.ftq_offset;
         issue.fu_type = transaction.store ? kFuTypeVectorStore : kFuTypeVectorLoad;
         issue.fu_op_type = vector_fu_op_type(transaction);
-        issue.vec_wen = !transaction.store;
+        issue.vec_wen = !transaction.store && !transaction.vl_wen;
+        issue.vl_wen = transaction.vl_wen;
         issue.vma = transaction.vma;
         issue.vta = transaction.vta;
         issue.vsew = transaction.eew;
         issue.vlmul = transaction.vlmul;
         issue.vm = transaction.vm;
         issue.vstart = transaction.vstart;
+        issue.vuop_idx = transaction.vuop_idx;
+        issue.last_uop = transaction.last_uop;
+        issue.nf = transaction.nf;
         issue.veew = transaction.eew;
+        issue.is_vleff = transaction.is_vleff;
         issue.pdest = transaction.pdest;
         issue.rob_flag = transaction.rob_flag;
         issue.rob_value = transaction.rob;
@@ -3839,6 +3887,10 @@ public:
     std::uint64_t vector_store_writebacks() const
     {
         return vector_scoreboard_.store_observed();
+    }
+    std::uint64_t vector_fof_fix_writebacks() const
+    {
+        return vector_scoreboard_.fof_fix_observed();
     }
     std::size_t pending_scalar_loads() const { return scoreboard_.pending_load(); }
     std::size_t pending_prefetches() const { return scoreboard_.pending_prefetch(); }
@@ -6149,6 +6201,8 @@ public:
         enqueue.flush_pipe = transaction.input_flush_pipe;
         enqueue.fu_type = transaction.store ? kFuTypeVectorStore : kFuTypeVectorLoad;
         enqueue.fu_op_type = vector_fu_op_type(transaction);
+        enqueue.uop_idx = transaction.vuop_idx;
+        enqueue.last_uop = transaction.last_uop;
         enqueue.rob_flag = transaction.rob_flag;
         enqueue.rob_value = transaction.rob;
         enqueue.lq_flag = transaction.lq_flag;

@@ -44,6 +44,7 @@ SCENARIOS = (
     "reset-recovery",
     "vector-load",
     "vector-split-load",
+    "vector-fof",
     "vector-store-forwarding",
     "store-forwarding",
     "dcache-release",

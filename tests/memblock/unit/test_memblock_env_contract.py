@@ -787,6 +787,29 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment)
 
+    def test_vector_fault_only_first_contract_is_registered(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
+        vfof = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VfofBuffer.scala"
+        ).read_text()
+        for contract in (
+            "kVectorLoadFaultOnlyFirst",
+            "issue.is_vleff = transaction.is_vleff",
+            "issue.last_uop = transaction.last_uop",
+            "issue.vl_wen = transaction.vl_wen",
+            "mismatched vector FOF fix-VL writeback",
+            "vector_fof_fix_writebacks",
+            "run_vector_fault_only_first",
+            "original_vl=2 final_vl=1",
+            "vector-fof",
+        ):
+            self.assertIn(contract, environment + main + makefile + benchmark)
+        self.assertIn("entries.hasException", vfof)
+        self.assertIn("io.uopWriteback.bits.data             := entries.vl", vfof)
+
     def test_translation_plan_matches_xiangshan_mode_contract(self) -> None:
         parameters = (REPO_ROOT / "src/main/scala/xiangshan/Parameters.scala").read_text()
         mmu_constants = (REPO_ROOT / "src/main/scala/xiangshan/cache/mmu/MMUConst.scala").read_text()
