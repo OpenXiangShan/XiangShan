@@ -7893,6 +7893,9 @@ int run_mmio_contracts(int argc, char **argv)
 
     unsigned device_access_count = 0;
     std::uint64_t device_cycles = 0;
+    unsigned queued_device_access_count = 0;
+    std::uint64_t queued_device_cycles = 0;
+    std::uint64_t queued_device_max_outstanding = 0;
     {
         memblock::Environment device(argc, argv);
         constexpr std::uint64_t device_base = 0x35000100ULL;
@@ -8161,6 +8164,161 @@ int run_mmio_contracts(int argc, char **argv)
         device_cycles = device.cycle();
     }
 
+    {
+        memblock::Environment queued(argc, argv);
+        constexpr std::uint64_t device_base = 0x35000200ULL;
+        constexpr std::uint64_t initial_value = 0xfedcba9876543210ULL;
+        queued.memory().write_u64(device_base, initial_value);
+        queued.configure_uncache_device(device_base, 8, true);
+        if (!queued.reset() || !queued.activate_bare(45) ||
+            !queued.set_uncache_write_outstanding(true)) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << queued.cycle()
+                      << " phase=device-queued-configuration reason="
+                      << queued.error() << '\n';
+            return 1;
+        }
+
+        const std::array<memblock::LoadTransaction, 3> loads{{
+            {
+                .address = device_base,
+                .oracle_address = device_base,
+                .op = memblock::LoadOp::ld,
+                .rob = 0,
+                .lq = 0,
+                .pdest = 168,
+                .lane = 0,
+                .expected_debug_is_mmio = true,
+                .expected_debug_is_ncio = false,
+                .expected_debug_is_perf_cnt = false,
+            },
+            {
+                .address = device_base,
+                .oracle_address = device_base,
+                .op = memblock::LoadOp::ld,
+                .rob = 1,
+                .lq = 1,
+                .pdest = 169,
+                .lane = 1,
+                .expected_debug_is_mmio = true,
+                .expected_debug_is_ncio = false,
+                .expected_debug_is_perf_cnt = false,
+            },
+            {
+                .address = device_base,
+                .oracle_address = device_base,
+                .op = memblock::LoadOp::ld,
+                .rob = 2,
+                .lq = 2,
+                .pdest = 170,
+                .lane = 2,
+                .expected_debug_is_mmio = true,
+                .expected_debug_is_ncio = false,
+                .expected_debug_is_perf_cnt = false,
+            },
+        }};
+        for (std::size_t index = 0; index < loads.size(); ++index) {
+            queued.expect_load_data(loads[index], index == 0 ? initial_value : 0);
+            if (!queued.enqueue_load(loads[index]) ||
+                !queued.issue_load(loads[index], 2048)) {
+                std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                          << queued.cycle()
+                          << " phase=device-queued-issue index=" << index
+                          << " reason=" << queued.error() << '\n';
+                return 1;
+            }
+        }
+        if (queued.uncache_requests() != 0 ||
+            queued.pending_scalar_loads() != loads.size()) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << queued.cycle()
+                      << " phase=device-queued-before-head requests="
+                      << queued.uncache_requests() << " pending="
+                      << queued.pending_scalar_loads() << '\n';
+            return 1;
+        }
+
+        queued.force_next_uncache_response_delay(512);
+        if (!queued.wait_for_mmio_request(loads[0].rob, loads[0].rob_flag, 4096) ||
+            !queued.run_cycles(256) || queued.uncache_requests() != 1 ||
+            queued.uncache_outstanding_requests() != 1 ||
+            queued.writebacks() != 0 ||
+            queued.uncache_device_accesses().size() != 1) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << queued.cycle()
+                      << " phase=device-queued-first-delay requests="
+                      << queued.uncache_requests() << " outstanding="
+                      << queued.uncache_outstanding_requests()
+                      << " writebacks=" << queued.writebacks()
+                      << " accesses="
+                      << queued.uncache_device_accesses().size()
+                      << " reason=" << queued.error() << '\n';
+            return 1;
+        }
+        if (!queued.run_until_load_writebacks(1, 4096)) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << queued.cycle()
+                      << " phase=device-queued-first-writeback reason="
+                      << queued.error() << '\n';
+            return 1;
+        }
+
+        queued.force_next_uncache_response_delay(128);
+        if (!queued.wait_for_mmio_request(loads[1].rob, loads[1].rob_flag, 4096) ||
+            !queued.run_cycles(64) || queued.uncache_requests() != 2 ||
+            queued.uncache_outstanding_requests() != 1 ||
+            queued.writebacks() != 1 ||
+            queued.uncache_device_accesses().size() != 2) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << queued.cycle()
+                      << " phase=device-queued-second-delay requests="
+                      << queued.uncache_requests() << " outstanding="
+                      << queued.uncache_outstanding_requests()
+                      << " writebacks=" << queued.writebacks()
+                      << " accesses="
+                      << queued.uncache_device_accesses().size()
+                      << " reason=" << queued.error() << '\n';
+            return 1;
+        }
+        if (!queued.run_until_load_writebacks(2, 4096) ||
+            !queued.wait_for_mmio_request(loads[2].rob, loads[2].rob_flag, 4096) ||
+            !queued.run_until_complete(4096) ||
+            !queued.run_until_lq_retired(2048)) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << queued.cycle()
+                      << " phase=device-queued-drain reason="
+                      << queued.error() << '\n';
+            return 1;
+        }
+
+        const auto &accesses = queued.uncache_device_accesses();
+        if (accesses.size() != loads.size() ||
+            queued.uncache_requests() != loads.size() ||
+            queued.uncache_max_outstanding_requests() != 1 ||
+            accesses[0].sequence != 0 || accesses[0].write ||
+            accesses[0].read_data != initial_value ||
+            accesses[1].sequence != 1 || accesses[1].write ||
+            accesses[1].read_data != 0 ||
+            accesses[2].sequence != 2 || accesses[2].write ||
+            accesses[2].read_data != 0 ||
+            accesses[0].denied || accesses[0].corrupt ||
+            accesses[1].denied || accesses[1].corrupt ||
+            accesses[2].denied || accesses[2].corrupt ||
+            queued.bus_expected_load(device_base, memblock::LoadOp::ld) != 0) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << queued.cycle()
+                      << " phase=device-queued-order requests="
+                      << queued.uncache_requests() << " max_outstanding="
+                      << queued.uncache_max_outstanding_requests()
+                      << " accesses=" << accesses.size() << '\n';
+            return 1;
+        }
+        queued_device_access_count = accesses.size();
+        queued_device_cycles = queued.cycle();
+        queued_device_max_outstanding =
+            queued.uncache_max_outstanding_requests();
+    }
+
     std::cout << "MEMBLOCK_MMIO_CONTRACTS_PASS"
               << " cycle=" << environment.cycle()
               << " normal=" << normal_count
@@ -8182,6 +8340,10 @@ int run_mmio_contracts(int argc, char **argv)
               << " device_error_reads=2 device_error_writes=2"
               << " device_error_side_effects=0"
               << " device_cycles=" << device_cycles
+              << " queued_device_loads=" << queued_device_access_count
+              << " queued_device_max_outstanding="
+              << queued_device_max_outstanding
+              << " queued_device_cycles=" << queued_device_cycles
               << " dcache_requests=" << environment.tilelink_requests()
               << " uncache_requests=" << environment.uncache_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';

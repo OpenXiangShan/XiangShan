@@ -1021,6 +1021,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "record_device_access",
             "configure_uncache_device",
             "uncache_device_accesses",
+            "run_until_load_writebacks",
         ):
             self.assertIn(contract, environment)
         for contract in (
@@ -1058,6 +1059,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "device_read_clear=1 device_partial_write=1",
             "device_error_reads=2 device_error_writes=2",
             "device_error_side_effects=0",
+            "phase=device-queued-first-delay",
+            "phase=device-queued-second-delay",
+            "phase=device-queued-order",
+            "queued_device_loads=",
+            "queued_device_max_outstanding=",
             "mmio-contracts",
         ):
             self.assertIn(contract, main + makefile)

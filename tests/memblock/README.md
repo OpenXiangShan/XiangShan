@@ -604,6 +604,11 @@ byte. Normal reads still implement read-clear, and a successful 32-bit write at
 byte offset four has the exact TileLink size, mask, and replicated bus data.
 The final read returns that partial write. The log enforces request order,
 response flags, no duplicate requests, and DCache bypass.
+A separate phase issues three same-address device loads into the LQ before
+allowing the first request. It holds the first two responses for 512 and 128
+cycles and proves that MMIO stays serialized at one external request in flight
+even when Uncache outstanding mode is enabled. The read-clear results must be
+the initial value followed by two zeros.
 `cbo-zero-contracts` drives the `CBO.ZERO` encoding through
 the cacheable StoreQueue/SBuffer wline path under randomized DCache
 backpressure, checks exact writeback metadata, and reads the resulting line

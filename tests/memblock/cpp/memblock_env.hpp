@@ -7528,6 +7528,25 @@ public:
         return check_components();
     }
 
+    bool run_until_load_writebacks(std::uint64_t target, unsigned timeout)
+    {
+        for (unsigned cycle = 0;
+             cycle < timeout && scoreboard_.observed() < target; ++cycle) {
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        if (scoreboard_.observed() < target) {
+            std::ostringstream message;
+            message << "timed out waiting for scalar load writebacks observed="
+                    << scoreboard_.observed() << '/' << target;
+            error_ = message.str();
+            return false;
+        }
+        return check_components();
+    }
+
     bool run_until_vector_complete(unsigned timeout)
     {
         for (unsigned cycle = 0;
