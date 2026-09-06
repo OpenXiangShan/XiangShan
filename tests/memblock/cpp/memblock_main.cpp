@@ -3138,12 +3138,75 @@ int run_ifetch_prefetch(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment concurrent(argc, argv);
+    constexpr std::uint64_t unmapped_base = 0x63000000ULL;
+    constexpr std::uint64_t empty_root = 0xe7000000ULL;
+    if (!concurrent.reset() || !concurrent.activate_sv39(empty_root)) {
+        std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                  << concurrent.cycle()
+                  << " phase=concurrent-configuration reason="
+                  << concurrent.error() << '\n';
+        return 1;
+    }
+    std::vector<memblock::PrefetchTransaction> concurrent_prefetches;
+    for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+        concurrent_prefetches.push_back(memblock::PrefetchTransaction{
+            .address = unmapped_base + lane * 0x1000 + 16,
+            .op = memblock::PrefetchOp::instruction,
+            .rob = static_cast<std::uint8_t>(16 + lane),
+            .lq = static_cast<std::uint8_t>(lane),
+            .sq = 0,
+            .lane = lane,
+        });
+        concurrent.expect_prefetch(concurrent_prefetches.back());
+    }
+    const std::uint64_t concurrent_ptw_before = concurrent.ptw_requests();
+    const std::uint64_t concurrent_dcache_before =
+        concurrent.tilelink_requests();
+    if (!concurrent.enqueue_prefetch_batch(
+            concurrent_prefetches, {0, 1, 2}) ||
+        !concurrent.issue_prefetch_batch_same_cycle(
+            concurrent_prefetches, 256) ||
+        !concurrent.run_until_complete(1024) ||
+        !concurrent.run_until_lq_retired(1024) ||
+        !concurrent.run_cycles(2)) {
+        std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                  << concurrent.cycle() << " phase=concurrent-complete reason="
+                  << concurrent.error() << '\n';
+        return 1;
+    }
+    const auto &concurrent_stats = concurrent.ifetch_prefetch_stats();
+    bool concurrent_match = true;
+    for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+        concurrent_match = concurrent_match &&
+            concurrent_stats.requests[lane] == 1 &&
+            concurrent_stats.last_vaddr[lane] ==
+                concurrent_prefetches[lane].address;
+    }
+    if (!concurrent_match ||
+        concurrent.ptw_requests() != concurrent_ptw_before ||
+        concurrent.tilelink_requests() != concurrent_dcache_before) {
+        std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                  << concurrent.cycle()
+                  << " phase=concurrent-translation-bypass requests="
+                  << concurrent_stats.requests[0] << ','
+                  << concurrent_stats.requests[1] << ','
+                  << concurrent_stats.requests[2] << " ptw_before="
+                  << concurrent_ptw_before << " ptw_after="
+                  << concurrent.ptw_requests() << " dcache_before="
+                  << concurrent_dcache_before << " dcache_after="
+                  << concurrent.tilelink_requests() << '\n';
+        return 1;
+    }
+
     const auto &stats = environment.ifetch_prefetch_stats();
     std::cout << "MEMBLOCK_IFETCH_PREFETCH_PASS"
               << " cycle=" << environment.cycle()
               << " lane_requests=" << stats.requests[0] << ','
               << stats.requests[1] << ',' << stats.requests[2]
               << " instruction=3 data=2"
+              << " concurrent_lanes=3 translation_bypass=3"
+              << " concurrent_cycles=" << concurrent.cycle()
               << " tilelink_requests=" << environment.tilelink_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;

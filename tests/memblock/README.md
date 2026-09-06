@@ -373,8 +373,12 @@ by circular ROB age rather than LoadUnit priority.
 three scalar load-unit lanes and checks the exact per-lane virtual-address
 output to the frontend. Read/write data-prefetch operations are negative
 controls: they must complete without generating an instruction-prefetch pulse.
-The `random-mixed` coverage schema also requires at least one observed
-instruction-prefetch output in every seed.
+An independent Sv39 phase dispatches and issues three unmapped `prefetch.i`
+requests in one cycle and requires one exact VA on each lane with no PTW or
+DCache request. This reflects the RTL ownership boundary: LoadUnit marks
+`prefetch.i` as `s0_tlb_no_query`, and the frontend performs any later fetch
+translation. The `random-mixed` coverage schema also requires at least one
+observed instruction-prefetch output in every seed.
 
 `hardware-prefetch` enables only the L1 stride trainer, holds the load PC
 constant, and issues cold misses at a 128-byte stride. Starting with the sixth

@@ -220,6 +220,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "run_ifetch_prefetch",
             "instruction-check",
             "data-prefetch-check",
+            "enqueue_prefetch_batch",
+            "issue_prefetch_batch_same_cycle",
+            "concurrent-translation-bypass",
+            "concurrent.ptw_requests() != concurrent_ptw_before",
+            "concurrent_lanes=3 translation_bypass=3",
             "ifetch_prefetches=",
             "ifetch-prefetch",
         ):

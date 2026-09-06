@@ -101,7 +101,12 @@ inputs. `ifetch-prefetch` passed in 129 cycles, observing exactly one request on
 each lane for three `prefetch.i` operations and no instruction-prefetch pulse
 for read/write data prefetch controls. The three instruction-prefetches issued
 no DCache TileLink request; the two data-prefetch controls accounted for the
-two observed requests. `constraint_schema=5` now requires a positive observed
+two observed requests. A separate 58-cycle run activated Sv39 with an empty
+root, then dispatched and issued three unmapped `prefetch.i` requests in one
+cycle. All three lanes emitted their exact VA, with no PTW or DCache request.
+This closes the MemBlock contract according to the RTL's explicit
+`s0_tlb_no_query` path; translation and faults for the forwarded VA belong to
+the frontend. `constraint_schema=5` now requires a positive observed
 instruction-prefetch count in every `random-mixed` seed. A two-worker schema-5
 check then passed seeds 912-913 for 512 mixed actions; the two seeds observed
 five and three instruction-prefetch outputs respectively. The independently

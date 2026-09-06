@@ -5447,6 +5447,51 @@ public:
         return check_components();
     }
 
+    bool enqueue_prefetch_batch(
+        const std::vector<PrefetchTransaction> &transactions,
+        const std::vector<unsigned> &dispatch_lanes)
+    {
+        if (transactions.empty() ||
+            transactions.size() != dispatch_lanes.size() ||
+            transactions.size() > generated::kLsqEnqueueLanes ||
+            !std::is_sorted(dispatch_lanes.begin(), dispatch_lanes.end())) {
+            error_ = "LSQ prefetch batch requires one sorted unique dispatch lane per request";
+            return false;
+        }
+        std::array<bool, generated::kLsqEnqueueLanes> lane_used{};
+        if (!wait_for_enqueue_capacity(transactions.size(), 0)) {
+            return false;
+        }
+        for (std::size_t index = 0; index < transactions.size(); ++index) {
+            const unsigned lane = dispatch_lanes[index];
+            if (lane >= generated::kLsqEnqueueLanes || lane_used[lane]) {
+                error_ = "LSQ prefetch batch has an invalid or duplicate dispatch lane";
+                generated::clear_lsq_enqueue_valids(dut_);
+                return false;
+            }
+            lane_used[lane] = true;
+            const auto &transaction = transactions[index];
+            generated::LsqEnqueue enqueue;
+            enqueue.need_alloc = 1;
+            enqueue.exception_mask = transaction.input_exception_mask;
+            enqueue.trigger = transaction.input_trigger;
+            enqueue.flush_pipe = transaction.input_flush_pipe;
+            enqueue.fu_type = kFuTypeLoad;
+            enqueue.fu_op_type = static_cast<std::uint16_t>(transaction.op);
+            enqueue.rob_flag = transaction.rob_flag;
+            enqueue.rob_value = transaction.rob;
+            enqueue.lq_flag = transaction.lq_flag;
+            enqueue.lq_value = transaction.lq;
+            enqueue.sq_flag = transaction.sq_flag;
+            enqueue.sq_value = transaction.sq;
+            generated::drive_lsq_enqueue(dut_, lane, enqueue);
+        }
+        tick();
+        generated::clear_lsq_enqueue_valids(dut_);
+        lq_allocated_ += transactions.size();
+        return check_components();
+    }
+
     bool issue_prefetch(
         const PrefetchTransaction &transaction, unsigned timeout = 32)
     {
@@ -5481,6 +5526,66 @@ public:
         generated::clear_scalar_load_issue_valid(
             dut_, transaction.lane);
         error_ = "software-prefetch issue timed out waiting for ready";
+        return false;
+    }
+
+    bool issue_prefetch_batch_same_cycle(
+        const std::vector<PrefetchTransaction> &transactions,
+        unsigned timeout = 64)
+    {
+        if (transactions.empty() || transactions.size() > kScalarLoadLanes) {
+            error_ = "software-prefetch batch must contain one to three requests";
+            return false;
+        }
+        std::array<bool, kScalarLoadLanes> lane_used{};
+        std::vector<generated::ScalarLoadIssue> issues(transactions.size());
+        for (std::size_t index = 0; index < transactions.size(); ++index) {
+            const auto &transaction = transactions[index];
+            if (transaction.lane >= kScalarLoadLanes ||
+                lane_used[transaction.lane]) {
+                error_ = "software-prefetch batch lanes must be unique";
+                return false;
+            }
+            lane_used[transaction.lane] = true;
+            auto &issue = issues[index];
+            issue.pc = 0x1800 + transaction.rob * 4;
+            issue.fu_op_type = static_cast<std::uint16_t>(transaction.op);
+            issue.rf_wen = false;
+            issue.fp_wen = false;
+            issue.pdest = 0;
+            issue.rob_flag = transaction.rob_flag;
+            issue.rob_value = transaction.rob;
+            issue.lq_flag = transaction.lq_flag;
+            issue.lq_value = transaction.lq;
+            issue.sq_flag = transaction.sq_flag;
+            issue.sq_value = transaction.sq;
+            issue.src = transaction.address;
+        }
+        for (unsigned cycle = 0; cycle < timeout; ++cycle) {
+            for (std::size_t index = 0; index < transactions.size(); ++index) {
+                generated::drive_scalar_load_issue(
+                    dut_, transactions[index].lane, issues[index]);
+            }
+            dut_.RefreshComb();
+            const bool all_ready = std::all_of(
+                transactions.begin(), transactions.end(),
+                [&](const auto &transaction) {
+                    return generated::scalar_load_issue_ready(
+                        dut_, transaction.lane);
+                });
+            if (all_ready) {
+                tick();
+                generated::clear_scalar_load_issue_valids(dut_);
+                return check_components();
+            }
+            generated::clear_scalar_load_issue_valids(dut_);
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        generated::clear_scalar_load_issue_valids(dut_);
+        error_ = "software-prefetch batch timed out waiting for same-cycle ready";
         return false;
     }
 
