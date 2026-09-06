@@ -1999,7 +1999,7 @@ int run_memory_violation(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
     constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x1b000;
-    constexpr std::uint64_t address = base + 24;
+    constexpr std::uint64_t conflict_address = base + 24;
     environment.memory().fill_incrementing(base, 64, 0x4d);
     if (!environment.reset()) {
         std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
@@ -2008,34 +2008,97 @@ int run_memory_violation(int argc, char **argv)
         return 1;
     }
 
+    const memblock::StoreTransaction nonoverlap_store{
+        .address = base + 8,
+        .data = 0x123456789abcdef0ULL,
+        .op = memblock::StoreOp::sd,
+        .rob = memblock::rob_pointer_value(156),
+        .rob_flag = memblock::rob_pointer_flag(156),
+        .sq = 0,
+        .address_lane = 1,
+        .data_lane = 0,
+    };
+    const memblock::LoadTransaction nonoverlap_load{
+        .address = base + 40,
+        .op = memblock::LoadOp::ld,
+        .rob = memblock::rob_pointer_value(157),
+        .rob_flag = memblock::rob_pointer_flag(157),
+        .lq = 0,
+        .sq = 1,
+        .pdest = 40,
+        .lane = 1,
+        .ftq_ptr = 36,
+        .ftq_offset = 4,
+    };
+    environment.expect_store(nonoverlap_store);
+    environment.expect_load(nonoverlap_load);
+    if (!environment.enqueue_store(nonoverlap_store, 0) ||
+        !environment.enqueue_load(nonoverlap_load) ||
+        !environment.issue_store_data(nonoverlap_store, 256) ||
+        !environment.issue_load(nonoverlap_load, 256) ||
+        !environment.run_until_complete(4096)) {
+        std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=nonoverlap-load reason=" << environment.error()
+                  << '\n';
+        return 1;
+    }
+    const auto nonoverlap_violations =
+        environment.memory_violation_stats().count;
+    if (!environment.issue_store_address(nonoverlap_store, 256) ||
+        !environment.run_until_store_complete(512) ||
+        !environment.run_cycles(64) ||
+        environment.memory_violation_stats().count != nonoverlap_violations ||
+        !environment.commit_store(nonoverlap_store, 4096) ||
+        !environment.run_until_sbuffer_empty(4096)) {
+        std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=nonoverlap-check count="
+                  << environment.memory_violation_stats().count
+                  << " expected_count=" << nonoverlap_violations
+                  << " reason=" << (environment.error().empty()
+                          ? "nonoverlap_generated_redirect"
+                          : environment.error()) << '\n';
+        return 1;
+    }
+
     const memblock::StoreTransaction older_store{
-        .address = address,
+        .address = conflict_address,
         .data = 0xdecafbad12345678ULL,
         .op = memblock::StoreOp::sd,
-        .rob = 20,
-        .sq = 0,
+        .rob = memblock::rob_pointer_value(158),
+        .rob_flag = memblock::rob_pointer_flag(158),
+        .sq = 1,
         .address_lane = 0,
         .data_lane = 1,
     };
-    const memblock::LoadTransaction younger_load{
-        .address = address,
-        .op = memblock::LoadOp::ld,
-        .rob = 21,
-        .lq = 0,
-        .sq = 1,
-        .pdest = 41,
-        .lane = 2,
-        .predecode_rvc = true,
-        .ftq_ptr = 37,
-        .ftq_offset = 6,
-    };
+    std::vector<memblock::LoadTransaction> younger_loads;
+    for (unsigned index = 0; index < memblock::kScalarLoadLanes; ++index) {
+        const std::uint64_t rob_offset = 159 + index;
+        younger_loads.push_back(memblock::LoadTransaction{
+            .address = conflict_address,
+            .op = memblock::LoadOp::ld,
+            .rob = memblock::rob_pointer_value(rob_offset),
+            .rob_flag = memblock::rob_pointer_flag(rob_offset),
+            .lq = static_cast<std::uint8_t>(1 + index),
+            .sq = 2,
+            .pdest = static_cast<std::uint8_t>(41 + index),
+            .lane = index,
+            .predecode_rvc = index == 0,
+            .ftq_ptr = 37 + index,
+            .ftq_offset = static_cast<std::uint8_t>(6 + index),
+        });
+    }
+    const auto &oldest_load = younger_loads.front();
 
     environment.expect_store(older_store);
-    environment.expect_load(younger_load);
+    for (const auto &load : younger_loads) {
+        environment.expect_load(load);
+    }
     if (!environment.enqueue_store(older_store, 0) ||
-        !environment.enqueue_load(younger_load) ||
+        !environment.enqueue_load_batch(younger_loads, {0, 1, 2}) ||
         !environment.issue_store_data(older_store, 256) ||
-        !environment.issue_load(younger_load, 256) ||
+        !environment.issue_load_batch(younger_loads, 256) ||
         !environment.run_until_complete(4096)) {
         std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
                   << environment.cycle()
@@ -2065,15 +2128,22 @@ int run_memory_violation(int argc, char **argv)
             return 1;
         }
     }
+    if (!environment.run_cycles(32)) {
+        std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=redirect-settle reason=" << environment.error()
+                  << '\n';
+        return 1;
+    }
 
     const auto &stats = environment.memory_violation_stats();
     const auto &violation = stats.last;
     if (stats.count != violations_before + 1 || !violation.valid ||
-        violation.is_rvc != younger_load.predecode_rvc ||
-        violation.rob_flag != younger_load.rob_flag ||
-        violation.rob_value != younger_load.rob || violation.ftq_flag ||
-        violation.ftq_value != younger_load.ftq_ptr ||
-        violation.ftq_offset != younger_load.ftq_offset || !violation.level) {
+        violation.is_rvc != oldest_load.predecode_rvc ||
+        violation.rob_flag != oldest_load.rob_flag ||
+        violation.rob_value != oldest_load.rob || violation.ftq_flag ||
+        violation.ftq_value != oldest_load.ftq_ptr ||
+        violation.ftq_offset != oldest_load.ftq_offset || !violation.level) {
         std::cerr << "MEMBLOCK_MEMORY_VIOLATION_FAIL cycle="
                   << environment.cycle()
                   << " phase=redirect-check count=" << stats.count
@@ -2092,6 +2162,9 @@ int run_memory_violation(int argc, char **argv)
     std::cout << "MEMBLOCK_MEMORY_VIOLATION_PASS"
               << " cycle=" << environment.cycle()
               << " violations=" << stats.count
+              << " non_overlap=1"
+              << " candidates=" << younger_loads.size()
+              << " rob_wrap=1"
               << " rob=" << violation.rob_flag << ':'
               << static_cast<unsigned>(violation.rob_value)
               << " ftq=" << violation.ftq_flag << ':'

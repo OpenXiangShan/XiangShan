@@ -36,12 +36,14 @@ verification plan.
 
 ## RAW Memory Violation Boundary
 
-The `memory-violation` scenario completed a younger scalar load while an older
-store address was unresolved, then resolved the store onto the same eight
-bytes. Current RTL produced exactly one top-level redirect in 67 cycles with
-the independently selected younger-load identity: `rob=0:21`, `ftq=0:37`,
-`ftqOffset=6`, `isRVC=1`, and `level=flush`. This closes the basic scalar RAW
-contract and all eight exposed output pins.
+The `memory-violation` scenario first completed a same-line byte-disjoint load
+before resolving an older store and observed no redirect. It then completed
+three same-byte candidate loads behind a store at ROB 158; the candidate ROB
+identities crossed the circular boundary at 159, 0, and 1. Current RTL passed
+in 364 cycles, produced exactly one top-level redirect, and selected the oldest
+candidate with independently assigned metadata: `rob=0:159`, `ftq=0:37`,
+`ftqOffset=6`, `isRVC=1`, and `level=flush`. This closes scalar RAW non-overlap,
+oldest-of-three selection, ROB wraparound, and all eight exposed output pins.
 
 The companion `rar-violation` scenario enables `ldld_vio_check`, completes a
 younger load, forces its dirty cache line through a one-Probe writeback/release,

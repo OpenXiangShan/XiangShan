@@ -336,10 +336,13 @@ When hardware stride prefetch is enabled, that backend gate is frozen before
 training begins because prefetch traffic produces load-pipeline cancel pulses
 without backend wakeups; full-run raw counters remain in the result.
 
-`memory-violation` leaves an older store address unresolved, completes a
-younger same-byte load, and then resolves the store address. It requires one
-RAW replay redirect and compares every exposed `memoryViolation` field against
-the independently chosen younger-load ROB, FTQ, RVC, and flush-level metadata.
+`memory-violation` first proves that same-line, byte-disjoint load/store traffic
+does not redirect. It then leaves an older store address unresolved, completes
+three younger same-byte loads whose ROB identities cross the 159-to-0 wrap,
+and resolves the store address. It requires exactly one RAW replay redirect,
+selects the oldest of the three loads across the circular pointer boundary,
+and compares every exposed `memoryViolation` field against that load's
+independently chosen ROB, FTQ, RVC, and flush-level metadata.
 `rar-violation` enables the architectural load-load check, lets a younger load
 complete first, drains an older store so the line is dirty, and forces a DCache
 writeback/release with a Probe before issuing the older load. It requires the

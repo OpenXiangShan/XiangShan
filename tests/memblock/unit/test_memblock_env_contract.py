@@ -141,6 +141,12 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "run_until_sbuffer_empty",
             "speculative-load",
             "redirect-check",
+            "non_overlap=1",
+            "candidates=",
+            "rob_wrap=1",
+            "rob_offset = 159 + index",
+            "rob_pointer_value(rob_offset)",
+            "rob_pointer_flag(rob_offset)",
             "memory-violation",
             "rar-violation",
         ):
