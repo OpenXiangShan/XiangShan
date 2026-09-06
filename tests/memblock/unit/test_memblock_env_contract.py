@@ -227,6 +227,44 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, memblock)
 
+    def test_trace_bridge_has_valid_gated_timing_oracles(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
+        memblock = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/MemBlock.scala"
+        ).read_text()
+
+        for contract in (
+            "drive_trace_bridge_stimulus",
+            "trace encoder feedback violated one-cycle delay",
+            "trace mstatus violated one-cycle delay",
+            "trace privilege violated group-0 valid hold contract",
+            "trace trap metadata violated trap-only hold contract",
+            "trace group unconditional fields violated one-cycle delay",
+            "trace group payload violated valid hold contract",
+            "trace-bridge-contracts",
+            "valid_combinations=8",
+            "itypes=16",
+            "ftq_offsets=16",
+            "encoder_combinations=4",
+        ):
+            self.assertIn(contract, environment + driver + makefile + benchmark)
+        for contract in (
+            "traceFromBackend.fromEncoder := RegNext",
+            "traceToL2Top.toEncoder.trap  := RegEnable",
+            "traceToL2Top.toEncoder.priv := RegEnable",
+            "traceToL2Top.toEncoder.mstatus := RegNext",
+            "groups(i).valid := RegNext",
+            "bits.iretire := RegNext",
+            "bits.itype := RegNext",
+            "bits.ilastsize := RegEnable",
+            "bits.iaddr := RegEnable",
+            "<< instOffsetBits",
+        ):
+            self.assertIn(contract, memblock)
+
     def test_sbuffer_timeout_contract_is_registered(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

@@ -3317,6 +3317,27 @@ struct ExternalInterruptState {
     bool operator==(const ExternalInterruptState &) const = default;
 };
 
+constexpr unsigned kTraceGroups = 3;
+
+struct TraceGroupState {
+    bool valid = false;
+    std::uint64_t iaddr = 0;
+    std::uint8_t ftq_offset = 0;
+    std::uint8_t itype = 0;
+    std::uint8_t iretire = 0;
+    bool ilastsize = false;
+};
+
+struct TraceBridgeStimulus {
+    bool encoder_enable = false;
+    bool encoder_stall = false;
+    std::uint8_t privilege = 0;
+    std::uint64_t mstatus = 0;
+    std::uint64_t trap_cause = 0;
+    std::uint64_t trap_tval = 0;
+    std::array<TraceGroupState, kTraceGroups> groups{};
+};
+
 struct TopBridgeStimulus {
     bool msi_ack = false;
     bool frontend_reset = false;
@@ -5973,6 +5994,62 @@ public:
         return top_bridge_checks_;
     }
 
+    void drive_trace_bridge_stimulus(const TraceBridgeStimulus &stimulus)
+    {
+        dut_.io_traceCoreInterfaceBypass_toL2Top_fromEncoder_enable.ImmSet(
+            stimulus.encoder_enable);
+        dut_.io_traceCoreInterfaceBypass_toL2Top_fromEncoder_stall.ImmSet(
+            stimulus.encoder_stall);
+        dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_priv.ImmSet(
+            stimulus.privilege & 0x7U);
+        dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_mstatus.ImmSet(
+            stimulus.mstatus);
+        dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_trap_cause.ImmSet(
+            stimulus.trap_cause);
+        dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_trap_tval.ImmSet(
+            stimulus.trap_tval & ((std::uint64_t{1} << 50) - 1U));
+
+        const auto drive_group = [](auto &valid, auto &iaddr, auto &ftq_offset,
+                                    auto &itype, auto &iretire, auto &ilastsize,
+                                    const TraceGroupState &group) {
+            valid.ImmSet(group.valid);
+            iaddr.ImmSet(group.iaddr & ((std::uint64_t{1} << 50) - 1U));
+            ftq_offset.ImmSet(group.ftq_offset & 0xfU);
+            itype.ImmSet(group.itype & 0xfU);
+            iretire.ImmSet(group.iretire & 0x7fU);
+            ilastsize.ImmSet(group.ilastsize);
+        };
+        drive_group(
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_valid,
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_bits_iaddr,
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_bits_ftqOffset,
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_bits_itype,
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_bits_iretire,
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_bits_ilastsize,
+            stimulus.groups[0]);
+        drive_group(
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_valid,
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_bits_iaddr,
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_bits_ftqOffset,
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_bits_itype,
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_bits_iretire,
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_bits_ilastsize,
+            stimulus.groups[1]);
+        drive_group(
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_valid,
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_bits_iaddr,
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_bits_ftqOffset,
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_bits_itype,
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_bits_iretire,
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_bits_ilastsize,
+            stimulus.groups[2]);
+    }
+
+    std::uint64_t trace_bridge_checks() const
+    {
+        return trace_bridge_checks_;
+    }
+
     bool set_sbuffer_timeout(std::uint32_t cycles)
     {
         constexpr std::uint32_t timeout_width = 22;
@@ -8047,6 +8124,53 @@ private:
             .delay_latency = static_cast<std::uint16_t>(
                 dut_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency.U()),
         };
+        const bool trace_encoder_enable_input =
+            dut_.io_traceCoreInterfaceBypass_toL2Top_fromEncoder_enable.B();
+        const bool trace_encoder_stall_input =
+            dut_.io_traceCoreInterfaceBypass_toL2Top_fromEncoder_stall.B();
+        const std::uint8_t trace_privilege_input = static_cast<std::uint8_t>(
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_priv.U());
+        const std::uint64_t trace_mstatus_input =
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_mstatus.U();
+        const std::uint64_t trace_trap_cause_input =
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_trap_cause.U();
+        const std::uint64_t trace_trap_tval_input =
+            dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_trap_tval.U();
+        const auto sample_trace_group = [](auto &valid, auto &iaddr,
+                                           auto &ftq_offset, auto &itype,
+                                           auto &iretire, auto &ilastsize) {
+            return TraceGroupState{
+                .valid = valid.B(),
+                .iaddr = iaddr.U(),
+                .ftq_offset = static_cast<std::uint8_t>(ftq_offset.U()),
+                .itype = static_cast<std::uint8_t>(itype.U()),
+                .iretire = static_cast<std::uint8_t>(iretire.U()),
+                .ilastsize = ilastsize.B(),
+            };
+        };
+        const std::array<TraceGroupState, kTraceGroups> trace_group_inputs{{
+            sample_trace_group(
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_valid,
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_bits_iaddr,
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_bits_ftqOffset,
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_bits_itype,
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_bits_iretire,
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_0_bits_ilastsize),
+            sample_trace_group(
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_valid,
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_bits_iaddr,
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_bits_ftqOffset,
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_bits_itype,
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_bits_iretire,
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_1_bits_ilastsize),
+            sample_trace_group(
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_valid,
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_bits_iaddr,
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_bits_ftqOffset,
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_bits_itype,
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_bits_iretire,
+                dut_.io_traceCoreInterfaceBypass_fromBackend_toEncoder_groups_2_bits_ilastsize),
+        }};
 
         // Writeback valid is a combinational projection of the execution-unit
         // output fire.  Observe the pins before the clock edge; after Step()
@@ -8143,6 +8267,74 @@ private:
             };
             if (l2_prefetch_output != expected_l2_prefetch_output_) {
                 error_ = "L2 prefetch control violated two-cycle delay";
+            }
+            ++trace_bridge_checks_;
+            if (dut_.io_traceCoreInterfaceBypass_fromBackend_fromEncoder_enable.B() !=
+                    expected_trace_encoder_enable_ ||
+                dut_.io_traceCoreInterfaceBypass_fromBackend_fromEncoder_stall.B() !=
+                    expected_trace_encoder_stall_) {
+                error_ = "trace encoder feedback violated one-cycle delay";
+            }
+            if (dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_mstatus.U() !=
+                expected_trace_mstatus_) {
+                error_ = "trace mstatus violated one-cycle delay";
+            }
+            if (trace_privilege_initialized_ &&
+                dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_priv.U() !=
+                    expected_trace_privilege_) {
+                error_ = "trace privilege violated group-0 valid hold contract";
+            }
+            if (trace_trap_initialized_ &&
+                (dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_trap_cause.U() !=
+                     expected_trace_trap_cause_ ||
+                 dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_trap_tval.U() !=
+                     expected_trace_trap_tval_)) {
+                error_ = "trace trap metadata violated trap-only hold contract";
+            }
+            const auto sample_trace_output = [](auto &valid, auto &iaddr,
+                                                auto &itype, auto &iretire,
+                                                auto &ilastsize) {
+                return TraceGroupState{
+                    .valid = valid.B(),
+                    .iaddr = iaddr.U(),
+                    .itype = static_cast<std::uint8_t>(itype.U()),
+                    .iretire = static_cast<std::uint8_t>(iretire.U()),
+                    .ilastsize = ilastsize.B(),
+                };
+            };
+            const std::array<TraceGroupState, kTraceGroups> trace_group_outputs{{
+                sample_trace_output(
+                    dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_0_valid,
+                    dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_0_bits_iaddr,
+                    dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_0_bits_itype,
+                    dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_0_bits_iretire,
+                    dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_0_bits_ilastsize),
+                sample_trace_output(
+                    dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_1_valid,
+                    dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_1_bits_iaddr,
+                    dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_1_bits_itype,
+                    dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_1_bits_iretire,
+                    dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_1_bits_ilastsize),
+                sample_trace_output(
+                    dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_2_valid,
+                    dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_2_bits_iaddr,
+                    dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_2_bits_itype,
+                    dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_2_bits_iretire,
+                    dut_.io_traceCoreInterfaceBypass_toL2Top_toEncoder_groups_2_bits_ilastsize),
+            }};
+            for (unsigned group = 0; group < kTraceGroups; ++group) {
+                const auto &actual = trace_group_outputs[group];
+                const auto &expected = expected_trace_groups_[group];
+                if (actual.valid != expected.valid ||
+                    actual.itype != expected.itype ||
+                    actual.iretire != expected.iretire) {
+                    error_ = "trace group unconditional fields violated one-cycle delay";
+                }
+                if (trace_group_payload_initialized_[group] &&
+                    (actual.iaddr != expected.iaddr ||
+                     actual.ilastsize != expected.ilastsize)) {
+                    error_ = "trace group payload violated valid hold contract";
+                }
             }
             const bool top_down_l2_output =
                 dut_.io_topDownInfo_toBackend_l2TopMiss_l2Miss.B();
@@ -8271,6 +8463,33 @@ private:
         expected_hc_perf_events_ = hc_perf_event_inputs;
         expected_l2_prefetch_output_ = l2_prefetch_delay_stage_;
         l2_prefetch_delay_stage_ = l2_prefetch_input;
+        expected_trace_encoder_enable_ = trace_encoder_enable_input;
+        expected_trace_encoder_stall_ = trace_encoder_stall_input;
+        expected_trace_mstatus_ = trace_mstatus_input;
+        for (unsigned group = 0; group < kTraceGroups; ++group) {
+            const auto &input = trace_group_inputs[group];
+            auto &expected = expected_trace_groups_[group];
+            expected.valid = input.valid;
+            expected.itype = input.itype;
+            expected.iretire = input.iretire;
+            if (input.valid) {
+                expected.iaddr =
+                    (input.iaddr + (std::uint64_t{input.ftq_offset} << 1)) &
+                    ((std::uint64_t{1} << 50) - 1U);
+                expected.ilastsize = input.ilastsize;
+                trace_group_payload_initialized_[group] = true;
+            }
+        }
+        if (trace_group_inputs[0].valid) {
+            expected_trace_privilege_ = trace_privilege_input;
+            trace_privilege_initialized_ = true;
+            if (trace_group_inputs[0].itype == 1 ||
+                trace_group_inputs[0].itype == 2) {
+                expected_trace_trap_cause_ = trace_trap_cause_input;
+                expected_trace_trap_tval_ = trace_trap_tval_input;
+                trace_trap_initialized_ = true;
+            }
+        }
         memory_agent_.update_after_tick();
         ptw_agent_.update_after_tick();
         uncache_agent_.update_after_tick();
@@ -8458,6 +8677,17 @@ private:
     L2PrefetchControl l2_prefetch_delay_stage_{};
     L2PrefetchControl expected_l2_prefetch_output_{};
     std::uint64_t top_bridge_checks_ = 0;
+    bool expected_trace_encoder_enable_ = false;
+    bool expected_trace_encoder_stall_ = false;
+    std::uint8_t expected_trace_privilege_ = 0;
+    std::uint64_t expected_trace_mstatus_ = 0;
+    std::uint64_t expected_trace_trap_cause_ = 0;
+    std::uint64_t expected_trace_trap_tval_ = 0;
+    std::array<TraceGroupState, kTraceGroups> expected_trace_groups_{};
+    std::array<bool, kTraceGroups> trace_group_payload_initialized_{};
+    bool trace_privilege_initialized_ = false;
+    bool trace_trap_initialized_ = false;
+    std::uint64_t trace_bridge_checks_ = 0;
     std::uint64_t ifetch_ptw_pending_ = 0;
     std::uint64_t lq_allocated_ = 0;
     std::uint64_t lq_dequeued_ = 0;

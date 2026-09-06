@@ -220,6 +220,7 @@ make load-feedback PICKER="$PICKER" JOBS=8
 make topdown-contracts PICKER="$PICKER" JOBS=8
 make l2-flush-contracts PICKER="$PICKER" JOBS=8
 make top-control-contracts PICKER="$PICKER" JOBS=8
+make trace-bridge-contracts PICKER="$PICKER" JOBS=8
 make memory-violation PICKER="$PICKER" JOBS=8
 make rar-violation PICKER="$PICKER" JOBS=8
 make ifetch-prefetch PICKER="$PICKER" JOBS=8
@@ -430,6 +431,14 @@ interrupt-sink input bits, including the BEU-local/NMI0 OR mapping, while also
 covering every combination of the five prefetch-control enables, all four
 MSI/CLINT valid combinations, zero/maximum delay, and all 64 event values.
 These timing oracles also remain active in every monitored functional scenario.
+`trace-bridge-contracts` checks the 45-port trace bypass as a transport
+contract. It verifies one-cycle encoder enable/stall feedback; unconditional
+one-cycle group valid/type/retire-count and `mstatus`; valid-gated address,
+last-size, and privilege holds; 50-bit `iaddr + (ftqOffset << 1)` arithmetic;
+and trap-only cause/tval updates for Exception and Interrupt itypes. Thirty-two
+patterns cover every three-group valid combination, all 16 itypes and FTQ
+offsets, all eight privilege encodings, both trap classes, and hold intervals.
+This checks the MemBlock bridge, not architectural trace generation.
 `random-mixed` keeps constant-space lane counters and
 requires both canceled and uncanceled wakeups on every lane. When hardware
 stride prefetch is enabled, that backend gate is frozen before training begins

@@ -2119,6 +2119,114 @@ int run_top_control_contracts(int argc, char **argv)
     return 0;
 }
 
+int run_trace_bridge_contracts(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_TRACE_BRIDGE_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    constexpr std::uint64_t address_mask =
+        (std::uint64_t{1} << 50) - 1U;
+    std::uint16_t group_zero_itype_bitmap = 0;
+    unsigned group_valid_bitmap = 0;
+    unsigned encoder_bitmap = 0;
+    unsigned privilege_bitmap = 0;
+    unsigned ftq_offset_bitmap = 0;
+    unsigned trap_updates = 0;
+    bool saw_zero_iretire = false;
+    bool saw_max_iretire = false;
+    for (unsigned index = 0; index < 32; ++index) {
+        memblock::TraceBridgeStimulus stimulus;
+        stimulus.encoder_enable = (index & 1U) != 0;
+        stimulus.encoder_stall = (index & 2U) != 0;
+        stimulus.privilege = static_cast<std::uint8_t>(index & 0x7U);
+        stimulus.mstatus =
+            0x8000000000000000ULL ^
+            (std::uint64_t{index} * 0x0101010101010101ULL);
+        stimulus.trap_cause = 0x1000ULL + index;
+        stimulus.trap_tval =
+            (0x2000000000000ULL + index * 0x101ULL) & address_mask;
+        stimulus.groups[0].valid = (index & 16U) != 0;
+        stimulus.groups[1].valid = (index & 1U) != 0;
+        stimulus.groups[2].valid = (index & 2U) != 0;
+        unsigned valid_pattern = 0;
+        for (unsigned group = 0; group < memblock::kTraceGroups; ++group) {
+            auto &trace_group = stimulus.groups[group];
+            const auto ftq_offset = static_cast<std::uint8_t>(
+                (index + group * 5U) & 0xfU);
+            trace_group.iaddr =
+                index == 31 && group == 0
+                    ? address_mask - 4U
+                    : (0x123456780000ULL + index * 0x101ULL +
+                       group * 0x10000ULL) & address_mask;
+            trace_group.ftq_offset = ftq_offset;
+            trace_group.itype = static_cast<std::uint8_t>(
+                (index + group * 5U) & 0xfU);
+            trace_group.iretire = static_cast<std::uint8_t>(
+                index == 31 && group == 2
+                    ? 0x7fU
+                    : (index * 7U + group * 11U) & 0x7fU);
+            trace_group.ilastsize = ((index + group) & 1U) != 0;
+            valid_pattern |= trace_group.valid ? 1U << group : 0U;
+            ftq_offset_bitmap |= 1U << ftq_offset;
+            saw_zero_iretire |= trace_group.iretire == 0;
+            saw_max_iretire |= trace_group.iretire == 0x7f;
+        }
+        if (stimulus.groups[0].valid) {
+            group_zero_itype_bitmap |=
+                std::uint16_t{1} << stimulus.groups[0].itype;
+            trap_updates += stimulus.groups[0].itype == 1 ||
+                            stimulus.groups[0].itype == 2;
+        }
+        group_valid_bitmap |= 1U << valid_pattern;
+        encoder_bitmap |=
+            1U << ((stimulus.encoder_enable ? 1U : 0U) |
+                   (stimulus.encoder_stall ? 2U : 0U));
+        privilege_bitmap |= 1U << stimulus.privilege;
+        environment.drive_trace_bridge_stimulus(stimulus);
+        if (!environment.run_cycles(1)) {
+            std::cerr << "MEMBLOCK_TRACE_BRIDGE_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=pattern index="
+                      << index << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+
+    environment.drive_trace_bridge_stimulus({});
+    if (!environment.run_cycles(2) ||
+        group_zero_itype_bitmap != 0xffffU ||
+        group_valid_bitmap != 0xffU || encoder_bitmap != 0xfU ||
+        privilege_bitmap != 0xffU || ftq_offset_bitmap != 0xffffU ||
+        trap_updates != 2 || !saw_zero_iretire || !saw_max_iretire ||
+        environment.trace_bridge_checks() < 34) {
+        std::cerr << "MEMBLOCK_TRACE_BRIDGE_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=coverage"
+                  << " itype_bitmap=0x" << std::hex
+                  << group_zero_itype_bitmap
+                  << " valid_bitmap=0x" << group_valid_bitmap
+                  << " encoder_bitmap=0x" << encoder_bitmap
+                  << " privilege_bitmap=0x" << privilege_bitmap
+                  << " ftq_offset_bitmap=0x" << ftq_offset_bitmap << std::dec
+                  << " trap_updates=" << trap_updates
+                  << " checks=" << environment.trace_bridge_checks()
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_TRACE_BRIDGE_CONTRACTS_PASS"
+              << " cycle=" << environment.cycle()
+              << " patterns=32 groups=3 valid_combinations=8"
+              << " itypes=16 ftq_offsets=16 privileges=8"
+              << " encoder_combinations=4 trap_updates=" << trap_updates
+              << " checks=" << environment.trace_bridge_checks()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_pin_space(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -23993,6 +24101,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "top-control-contracts") {
             return run_top_control_contracts(argc, argv);
+        }
+        if (options.test == "trace-bridge-contracts") {
+            return run_trace_bridge_contracts(argc, argv);
         }
         if (options.test == "pin-space") {
             return run_pin_space(argc, argv);

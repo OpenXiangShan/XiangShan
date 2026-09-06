@@ -20,6 +20,7 @@ SCENARIOS = (
     "smoke",
     "l2-flush-contracts",
     "top-control-contracts",
+    "trace-bridge-contracts",
     "pin-space",
     "frontend-bridge",
     "single-load",

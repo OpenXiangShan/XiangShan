@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `b9b6fa267b03d1da04923c36492319a91b00f544fb8e3ee78b6cdd7c4301c51c`
+- Current rebuilt and frozen UT executable SHA-256: `234468866fd43a1f51ae9e9fde4303ee8de1b8c763ab6a57f38814aaedd366f0`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `6e33fac421aa14f42cf7cfc11551916d127858d92a6a609be20c9d55978ca776`
+- Frozen runtime manifest SHA-256: `bb1b68dc70938afd40412af92878f8c1857dc07a3931f8e67fb44f0f0242163f`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -90,6 +90,20 @@ MSI/CLINT valid combinations, zero and maximum prefetch delay, and all 64
 six-bit event values. The elaborated output event lane 0 remained tied to zero;
 the standalone boundary prunes outer lane 0 and inner lane 68. All 267 monitored
 cycles passed. No CPU defect was observed.
+
+## Trace Bypass Transport
+
+On 2026-09-07, `trace-bridge-contracts` passed in 48 cycles on complete RTL
+SHA-256
+`4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
+Thirty-two patterns covered all eight valid combinations across three trace
+groups, all 16 itypes and FTQ offsets, all eight privilege encodings, and all
+four encoder enable/stall combinations. Thirty-four continuous checks proved
+the unconditional one-cycle fields, valid-gated address/last-size/privilege
+holds, exact 50-bit `iaddr + (ftqOffset << 1)` arithmetic including wraparound,
+and cause/tval updates only for the Exception and Interrupt itypes. This result
+claims MemBlock bridge transport only, not architectural trace-content
+generation. No CPU defect was observed.
 
 ## Reset With Outstanding Manager Traffic
 
@@ -1128,6 +1142,7 @@ the historical complete RTL SHA-256 is
 | Idle smoke | Pass | 38 cycles; registered DUT clock and internal reset release |
 | Outer L2 flush bridge | Pass | 24 cycles; all four enable/done combinations, four enable transitions, five done transitions, and ten exact combinational/one-cycle timing checks |
 | Top-level control and metadata bridges | Pass | 281 cycles and 267 continuous checks; eight power/halt/error combinations, all 256 interrupt-sink combinations, eight hart/reset patterns, all 32 L2-prefetch enable combinations, all four MSI/CLINT valid combinations, 67 shared perf-event lanes, and all 64 event values passed exact combinational/one-cycle/two-cycle timing oracles |
+| Trace bypass transport | Pass | 48 cycles and 34 continuous checks; all eight three-group valid combinations, 16 itypes, 16 FTQ offsets, eight privileges, four encoder states, valid-gated holds, trap-only updates, and 50-bit address addition passed |
 | Complete pin space | Pass | 749 inputs/7,155 bits and 586 outputs/5,434 bits; 256 patterns; digest `0xc36e86e25361ff60` |
 | Cold-load refill, partial progress, and merge | Pass | Cycle 74 for two cold lines selecting opposite virtual-address bit-5 values: one ordinary and one `isKeyword` AcquireBlock, two exact 64-bit writebacks, and two GrantAcks. A separate same-line pair completed two exact loads in 172 cycles from one AcquireBlock held for 128 cycles. A partial-refill load wrote back at cycle 44 after only its critical beat; the delayed second beat drained by cycle 300 with no duplicate writeback |
 | Vector loads | Pass | Four EEWs, both vector lanes, four exact 128-bit results |
