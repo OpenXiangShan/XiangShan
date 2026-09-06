@@ -10490,6 +10490,54 @@ inline ScalarLoadWriteback sample_scalar_load_writeback(
     }
 }
 
+inline constexpr unsigned kScalarLoadFeedbackLanes = 3;
+
+struct ScalarLoadWakeup {
+    bool valid = false;
+    bool rf_wen = false;
+    bool fp_wen = false;
+    std::uint8_t pdest = 0;
+};
+
+inline ScalarLoadWakeup sample_scalar_load_wakeup(
+    UTMemBlock &dut, unsigned lane)
+{
+    ScalarLoadWakeup result;
+    switch (lane) {
+    case 0:
+        result.valid = dut.io_mem_to_ooo_wakeup_0_valid.B();
+        result.rf_wen = dut.io_mem_to_ooo_wakeup_0_bits_rfWen.B();
+        result.fp_wen = dut.io_mem_to_ooo_wakeup_0_bits_fpWen.B();
+        result.pdest = dut.io_mem_to_ooo_wakeup_0_bits_pdest.U();
+        return result;
+    case 1:
+        result.valid = dut.io_mem_to_ooo_wakeup_1_valid.B();
+        result.rf_wen = dut.io_mem_to_ooo_wakeup_1_bits_rfWen.B();
+        result.fp_wen = dut.io_mem_to_ooo_wakeup_1_bits_fpWen.B();
+        result.pdest = dut.io_mem_to_ooo_wakeup_1_bits_pdest.U();
+        return result;
+    case 2:
+        result.valid = dut.io_mem_to_ooo_wakeup_2_valid.B();
+        result.rf_wen = dut.io_mem_to_ooo_wakeup_2_bits_rfWen.B();
+        result.fp_wen = dut.io_mem_to_ooo_wakeup_2_bits_fpWen.B();
+        result.pdest = dut.io_mem_to_ooo_wakeup_2_bits_pdest.U();
+        return result;
+    default:
+        throw std::out_of_range("invalid scalar load wakeup lane");
+    }
+}
+
+inline bool sample_scalar_load_cancel(UTMemBlock &dut, unsigned lane)
+{
+    switch (lane) {
+    case 0: return dut.io_mem_to_ooo_ldCancel_0_ld2Cancel.B();
+    case 1: return dut.io_mem_to_ooo_ldCancel_1_ld2Cancel.B();
+    case 2: return dut.io_mem_to_ooo_ldCancel_2_ld2Cancel.B();
+    default:
+        throw std::out_of_range("invalid scalar load cancel lane");
+    }
+}
+
 struct ScalarStoreIssue {
     std::uint64_t fu_type = 0;
     std::uint16_t fu_op_type = 0;

@@ -46,6 +46,12 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
     wb_lanes = matching_lanes(
         port_names, r"io_mem_to_ooo_writebackLda_([0-9]+)_valid"
     )
+    wakeup_lanes = matching_lanes(
+        port_names, r"io_mem_to_ooo_wakeup_([0-9]+)_valid"
+    )
+    cancel_lanes = matching_lanes(
+        port_names, r"io_mem_to_ooo_ldCancel_([0-9]+)_ld2Cancel"
+    )
     sta_lanes = matching_lanes(
         port_names, r"io_ooo_to_mem_issueSta_([0-9]+)_valid"
     )
@@ -302,6 +308,62 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
         [
             "    default:",
             '        throw std::out_of_range("invalid scalar load writeback lane");',
+            "    }",
+            "}",
+            "",
+        ]
+    )
+
+    lines.extend(
+        [
+            f"inline constexpr unsigned kScalarLoadFeedbackLanes = {len(wakeup_lanes)};",
+            "",
+            "struct ScalarLoadWakeup {",
+            "    bool valid = false;",
+            "    bool rf_wen = false;",
+            "    bool fp_wen = false;",
+            "    std::uint8_t pdest = 0;",
+            "};",
+            "",
+            "inline ScalarLoadWakeup sample_scalar_load_wakeup(",
+            "    UTMemBlock &dut, unsigned lane)",
+            "{",
+            "    ScalarLoadWakeup result;",
+            "    switch (lane) {",
+        ]
+    )
+    for lane in wakeup_lanes:
+        prefix = f"io_mem_to_ooo_wakeup_{lane}"
+        lines.extend(
+            [
+                f"    case {lane}:",
+                f"        result.valid = dut.{prefix}_valid.B();",
+                f"        result.rf_wen = dut.{prefix}_bits_rfWen.B();",
+                f"        result.fp_wen = dut.{prefix}_bits_fpWen.B();",
+                f"        result.pdest = dut.{prefix}_bits_pdest.U();",
+                "        return result;",
+            ]
+        )
+    lines.extend(
+        [
+            "    default:",
+            '        throw std::out_of_range("invalid scalar load wakeup lane");',
+            "    }",
+            "}",
+            "",
+            "inline bool sample_scalar_load_cancel(UTMemBlock &dut, unsigned lane)",
+            "{",
+            "    switch (lane) {",
+        ]
+    )
+    for lane in cancel_lanes:
+        lines.append(
+            f"    case {lane}: return dut.io_mem_to_ooo_ldCancel_{lane}_ld2Cancel.B();"
+        )
+    lines.extend(
+        [
+            "    default:",
+            '        throw std::out_of_range("invalid scalar load cancel lane");',
             "    }",
             "}",
             "",

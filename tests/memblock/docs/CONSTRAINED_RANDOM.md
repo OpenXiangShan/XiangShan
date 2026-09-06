@@ -218,12 +218,14 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=3`, the resolved target weights,
+Every terminal line prints `constraint_schema=4`, the resolved target weights,
 and actual operation, atomic family/width, NC/MMIO direction, legal special
 overlap, locality, translation regime/mode/pair, fence kind/scope, cold-walk/
-reuse, TLB-flush, hit/miss, Probe sequence/cap/need-data, and per-manager
-latency counts. Each enabled class must be observed at least once. Probe counts
-must also conserve sequences and their toB cleanup requests. More than one
+reuse, TLB-flush, hit/miss, Probe sequence/cap/need-data, all three scalar-load
+wakeup/cancel lanes, and per-manager latency counts. Each enabled class must be
+observed at least once. Probe counts must also conserve sequences and their toB
+cleanup requests. Every load lane must observe both canceled and uncanceled
+wakeups without constraining the legal replay count. More than one
 enabled translation context also
 requires an observed switch, and any translated profile requires both a PTW
 walk window and a reuse window. With backpressure, each manager set to `spec`

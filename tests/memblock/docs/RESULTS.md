@@ -22,6 +22,18 @@
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
+## Scalar Load Feedback Boundary
+
+The `load-feedback` scenario now samples every top-level scalar load wakeup and
+`ld2Cancel` lane. On the current RTL it passed three cold misses followed by
+three resident-line loads in 348 cycles: 26 wakeups, 20 cancellations, six
+exact scalar writebacks, and three total DCache TileLink requests. Each load
+had one final uncanceled wakeup, while intermediate way-prediction/resource
+replays were allowed rather than assigned a fixed count. The resident phase
+made no additional TileLink request. This closes basic lane and destination
+metadata semantics; `memoryViolation` and broader cancellation crosses remain
+open in the verification plan.
+
 ## Translation Constraint Interface Validation
 
 Commit `f6820b9ff` extends the common `random-mixed` generator with weighted

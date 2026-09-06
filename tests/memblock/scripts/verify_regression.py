@@ -150,7 +150,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     schema = result.get("constraint_schema")
     if schema is None:
         return
-    _require(schema in (2, 3), f"unsupported constraint_schema: {schema!r}")
+    _require(schema in (2, 3, 4), f"unsupported constraint_schema: {schema!r}")
 
     target_translation = _csv_counts(result, "target_translation", 3)
     actual_translation = _csv_counts(result, "actual_translation", 3)
@@ -250,7 +250,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     if required_contexts > 1:
         _require(actual_switches > 0, "translation contexts never switched")
 
-    if schema == 3:
+    if schema >= 3:
         target_probe = result.get("target_probe")
         target_to_b = result.get("target_probe_to_b")
         target_need_data = result.get("target_probe_need_data")
@@ -297,6 +297,19 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 and probes == actual_sequences + actual_caps[1],
                 "manager Probe count does not match sequence/toB cleanup accounting",
             )
+
+    if schema >= 4:
+        wakeups = _csv_counts(result, "load_wakeups", 3)
+        cancels = _csv_counts(result, "load_cancels", 3)
+        _require(
+            all(cancel > 0 for cancel in cancels),
+            f"load_cancels has an uncovered lane: {cancels}",
+        )
+        _require(
+            all(wakeup > cancel for wakeup, cancel in zip(wakeups, cancels)),
+            "each scalar load lane needs both canceled and uncanceled wakeups: "
+            f"wakeup={wakeups} cancel={cancels}",
+        )
 
 
 def _positive_csv_prefix(

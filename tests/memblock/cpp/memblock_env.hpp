@@ -19,6 +19,7 @@
 namespace memblock {
 
 constexpr unsigned kScalarLoadLanes = 3;
+static_assert(generated::kScalarLoadFeedbackLanes == kScalarLoadLanes);
 constexpr unsigned kScalarStoreLanes = 2;
 constexpr unsigned kVectorMemoryLanes = 2;
 constexpr unsigned kVirtualLoadQueueEntries = 72;
@@ -2899,6 +2900,21 @@ public:
         std::uint64_t field_checks = 0;
     };
 
+    struct ScalarLoadWakeupSample {
+        bool valid = false;
+        bool rf_wen = false;
+        bool fp_wen = false;
+        std::uint8_t pdest = 0;
+        std::uint64_t cycle = 0;
+    };
+
+    struct ScalarLoadFeedbackStats {
+        std::array<std::uint64_t, kScalarLoadLanes> wakeups{};
+        std::array<std::uint64_t, kScalarLoadLanes> ld2_cancels{};
+        std::array<ScalarLoadWakeupSample, kScalarLoadLanes> last_wakeup{};
+        std::array<std::uint64_t, kScalarLoadLanes> last_cancel_cycle{};
+    };
+
     Environment(int argc, char **argv)
         : dut_(argc, argv), memory_(&bus_memory_),
           memory_agent_(bus_memory_, memory_),
@@ -3372,6 +3388,10 @@ public:
     const FrontendBridgeStats &frontend_bridge_stats() const
     {
         return frontend_bridge_stats_;
+    }
+    const ScalarLoadFeedbackStats &scalar_load_feedback_stats() const
+    {
+        return scalar_load_feedback_stats_;
     }
 
     bool exercise_frontend_bridges(
@@ -3921,6 +3941,7 @@ public:
         // Re-assert external reset for every invocation.  Relying on the
         // constructor's initial value made repeated-reset scenarios silently
         // run without resetting the DUT.
+        scalar_load_feedback_stats_ = {};
         dut_.reset.ImmSet(std::uint64_t{1});
         for (unsigned cycle = 0; cycle < 8; ++cycle) {
             tick(false);
@@ -6464,6 +6485,22 @@ private:
         // pulses are registered separately and are counted below instead.
         if (monitor) {
             for (unsigned lane = 0; lane < kScalarLoadLanes; ++lane) {
+                const auto wakeup =
+                    generated::sample_scalar_load_wakeup(dut_, lane);
+                if (wakeup.valid) {
+                    ++scalar_load_feedback_stats_.wakeups[lane];
+                    scalar_load_feedback_stats_.last_wakeup[lane] = {
+                        .valid = true,
+                        .rf_wen = wakeup.rf_wen,
+                        .fp_wen = wakeup.fp_wen,
+                        .pdest = wakeup.pdest,
+                        .cycle = cycle(),
+                    };
+                }
+                if (generated::sample_scalar_load_cancel(dut_, lane)) {
+                    ++scalar_load_feedback_stats_.ld2_cancels[lane];
+                    scalar_load_feedback_stats_.last_cancel_cycle[lane] = cycle();
+                }
                 scoreboard_.observe(
                     lane, generated::sample_scalar_load_writeback(dut_, lane));
             }
@@ -6582,6 +6619,7 @@ private:
     VectorMemoryScoreboard vector_scoreboard_;
     std::uint64_t pin_space_digest_ = 0;
     FrontendBridgeStats frontend_bridge_stats_;
+    ScalarLoadFeedbackStats scalar_load_feedback_stats_;
     std::uint64_t lq_allocated_ = 0;
     std::uint64_t lq_dequeued_ = 0;
     std::uint64_t lq_canceled_ = 0;

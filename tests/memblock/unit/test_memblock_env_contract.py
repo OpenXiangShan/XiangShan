@@ -109,6 +109,24 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main + makefile)
 
+    def test_scalar_load_feedback_is_observed_on_every_lane(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        generator = (MEMBLOCK_ROOT / "scripts/generate_cpp.py").read_text()
+        for contract in (
+            "sample_scalar_load_wakeup",
+            "sample_scalar_load_cancel",
+            "ScalarLoadFeedbackStats",
+            "last_wakeup",
+            "ld2_cancels",
+            "run_load_feedback",
+            "unbalanced_early_wakeup",
+            "warm_feedback_or_residency_mismatch",
+            "load-feedback",
+        ):
+            self.assertIn(contract, environment + main + makefile + generator)
+
     def test_frontend_bridge_has_semantic_transaction_coverage(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

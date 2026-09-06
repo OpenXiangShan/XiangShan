@@ -182,9 +182,48 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 4
+        result["constraint_schema"] = 5
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
+        ):
+            verify_regression._check_mixed_coverage(result)
+
+    def test_constraint_schema_four_requires_load_feedback_crosses(self) -> None:
+        result = mixed_result(7)
+        result.update(
+            {
+                "constraint_schema": 4,
+                "target_translation": "0,0,0",
+                "actual_translation": "0,0,0",
+                "target_stage1_mode": "0,0",
+                "actual_stage1_mode": "0,0",
+                "target_vs_mode": "0,0",
+                "actual_vs_mode": "0,0",
+                "target_g_mode": "0,0",
+                "actual_g_mode": "0,0",
+                "actual_nested_pairs": "0,0,0,0",
+                "target_fence_kind": "0,0,0",
+                "target_fence_scope": "0,0",
+                "target_tlb_flush": 0,
+                "actual_fences": "0,0,0,0,0,0",
+                "actual_translation_switch": 0,
+                "actual_translation_walk_reuse": "0,0",
+                "target_probe": 0,
+                "target_probe_to_b": 500,
+                "target_probe_need_data": 500,
+                "actual_probe_sequences": 0,
+                "actual_probe_caps": "0,0",
+                "actual_probe_need_data": "0,0",
+                "probes": 0,
+                "load_wakeups": "9,7,5",
+                "load_cancels": "3,2,1",
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+
+        result["load_wakeups"] = "3,2,1"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "canceled and uncanceled"
         ):
             verify_regression._check_mixed_coverage(result)
 

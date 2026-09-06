@@ -21,6 +21,7 @@ SCENARIOS = (
     "pin-space",
     "frontend-bridge",
     "single-load",
+    "load-feedback",
     "fp-loads",
     "trigger-contracts",
     "metadata-contracts",

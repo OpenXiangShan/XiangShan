@@ -32,6 +32,9 @@ class GenerateCppTest(unittest.TestCase):
         self.assertIn("std::uint32_t exception_mask = 0;", rendered)
         self.assertIn("std::uint8_t trigger = 15;", rendered)
         self.assertIn("bool predecode_rvc = false;", rendered)
+        self.assertIn("kScalarLoadFeedbackLanes = 3", rendered)
+        self.assertIn("sample_scalar_load_wakeup", rendered)
+        self.assertIn("sample_scalar_load_cancel", rendered)
         self.assertIn("item.store_set_hit", rendered)
         self.assertIn("item.ftq_ptr", rendered)
         self.assertIn("dut.io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_0.ImmSet((item.exception_mask >> 0) & 1U)", rendered)
@@ -54,6 +57,13 @@ class GenerateCppTest(unittest.TestCase):
             self.assertIn(
                 f"result.valid = dut.io_mem_to_ooo_writebackLda_{lane}_valid.B()",
                 rendered,
+            )
+            self.assertIn(
+                f"result.valid = dut.io_mem_to_ooo_wakeup_{lane}_valid.B()",
+                rendered,
+            )
+            self.assertIn(
+                f"dut.io_mem_to_ooo_ldCancel_{lane}_ld2Cancel.B()", rendered
             )
         for lane in range(2):
             self.assertIn(

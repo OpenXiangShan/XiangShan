@@ -183,6 +183,7 @@ make smoke PICKER="$PICKER" JOBS=8
 make pin-space PICKER="$PICKER" JOBS=8
 make frontend-bridge PICKER="$PICKER" JOBS=8 SEED=1 TRANSACTIONS=4096
 make single-load PICKER="$PICKER" JOBS=8
+make load-feedback PICKER="$PICKER" JOBS=8
 make fp-loads PICKER="$PICKER" JOBS=8
 make trigger-contracts PICKER="$PICKER" JOBS=8
 make metadata-contracts PICKER="$PICKER" JOBS=8
@@ -319,6 +320,14 @@ contract does not expose `exceptionVec`; LSQ retains enqueue exception bits for
 its internal exception machinery, while page/access/guest-page faults are
 recomputed from the TLB in S1. The generated enqueue adapter is covered by
 unit tests for exception-vector bit mapping.
+
+`load-feedback` observes all three backend scalar-load wakeup lanes and all
+three `ld2Cancel` pins. It checks issue-time `rfWen`, `fpWen`, and `pdest`,
+forces a cold miss on every lane, then repeats the accesses from resident cache
+lines without a new TileLink request. The oracle permits any number of legal
+replays but requires each completed normal load to have exactly one uncanceled
+wakeup: `wakeup_delta = ld2Cancel_delta + 1`. `random-mixed` keeps constant-space
+lane counters and requires both canceled and uncanceled wakeups on every lane.
 
 `dcache-errors` injects one denied and one corrupt DCache response and checks
 the corresponding scalar load access-fault and hardware-error writebacks with

@@ -700,7 +700,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=3 constraints=" << name
+        stream << "constraint_schema=4 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -1818,6 +1818,164 @@ int run_single_load(int argc, char **argv)
               << " cycle=" << environment.cycle()
               << " tilelink_requests=" << environment.tilelink_requests()
               << " writebacks=" << environment.writebacks()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_load_feedback(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x1a000;
+    environment.memory().fill_incrementing(base, 3 * 64, 0x29);
+    environment.configure_backpressure(
+        0x243f6a8885a308d3ULL, true,
+        memblock::ResponseLatencyProfile::spec);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << environment.cycle() << " phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    std::vector<memblock::LoadTransaction> cold;
+    std::vector<unsigned> dispatch_lanes;
+    for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+        cold.push_back(memblock::LoadTransaction{
+            .address = base + lane * 64 + lane * 8,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(lane),
+            .lq = static_cast<std::uint8_t>(lane),
+            .pdest = static_cast<std::uint8_t>(17 + lane),
+            .lane = lane,
+            .rf_wen = lane != 1,
+            .fp_wen = lane == 1,
+        });
+        dispatch_lanes.push_back(lane);
+        environment.expect_load(cold.back());
+    }
+
+    if (!environment.enqueue_load_batch(cold, dispatch_lanes) ||
+        !environment.issue_load_batch(cold, 256)) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << environment.cycle() << " phase=cold-issue reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    auto check_wakeups = [&](const std::vector<memblock::LoadTransaction> &loads,
+                             const char *phase) {
+        const auto &stats = environment.scalar_load_feedback_stats();
+        for (const auto &load : loads) {
+            const auto &sample = stats.last_wakeup[load.lane];
+            if (stats.wakeups[load.lane] == 0 || !sample.valid ||
+                sample.pdest != load.pdest || sample.rf_wen != load.rf_wen ||
+                sample.fp_wen != load.fp_wen) {
+                std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                          << environment.cycle() << " phase=" << phase
+                          << " lane=" << load.lane
+                          << " expected_pdest="
+                          << static_cast<unsigned>(load.pdest)
+                          << " actual_pdest="
+                          << static_cast<unsigned>(sample.pdest)
+                          << " expected_rf_wen=" << load.rf_wen
+                          << " actual_rf_wen=" << sample.rf_wen
+                          << " expected_fp_wen=" << load.fp_wen
+                          << " actual_fp_wen=" << sample.fp_wen
+                          << " wakeups=" << stats.wakeups[load.lane] << '\n';
+                return false;
+            }
+        }
+        return true;
+    };
+    if (!check_wakeups(cold, "cold-wakeup") ||
+        !environment.run_until_complete(8192) ||
+        !environment.run_cycles(16)) {
+        if (!environment.error().empty()) {
+            std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                      << environment.cycle() << " phase=cold-complete reason="
+                      << environment.error() << '\n';
+        }
+        return 1;
+    }
+    const auto cold_stats = environment.scalar_load_feedback_stats();
+    for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+        if (cold_stats.ld2_cancels[lane] == 0 ||
+            cold_stats.wakeups[lane] != cold_stats.ld2_cancels[lane] + 1) {
+            std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                      << environment.cycle() << " phase=cold-cancel lane="
+                      << lane << " wakeups=" << cold_stats.wakeups[lane]
+                      << " ld2_cancels=" << cold_stats.ld2_cancels[lane]
+                      << " reason=unbalanced_early_wakeup\n";
+            return 1;
+        }
+    }
+
+    std::vector<memblock::LoadTransaction> warm = cold;
+    for (unsigned lane = 0; lane < warm.size(); ++lane) {
+        warm[lane].rob = static_cast<std::uint8_t>(16 + lane);
+        warm[lane].lq = static_cast<std::uint8_t>(3 + lane);
+        warm[lane].pdest = static_cast<std::uint8_t>(33 + lane);
+    }
+    environment.configure_backpressure(0, false);
+    if (!environment.run_cycles(32)) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << environment.cycle() << " phase=warm-settle reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    for (const auto &load : warm) {
+        const std::uint64_t wakeups_before =
+            environment.scalar_load_feedback_stats().wakeups[load.lane];
+        const std::uint64_t cancels_before =
+            environment.scalar_load_feedback_stats().ld2_cancels[load.lane];
+        const std::uint64_t requests_before = environment.tilelink_requests();
+        environment.expect_load(load);
+        if (!environment.enqueue_load(load) ||
+            !environment.issue_load(load, 256) ||
+            !check_wakeups({load}, "warm-wakeup") ||
+            !environment.run_until_complete(2048) ||
+            !environment.run_cycles(8)) {
+            if (!environment.error().empty()) {
+                std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                          << environment.cycle()
+                          << " phase=warm-complete lane=" << load.lane
+                          << " reason=" << environment.error() << '\n';
+            }
+            return 1;
+        }
+        const std::uint64_t cancels_after =
+            environment.scalar_load_feedback_stats().ld2_cancels[load.lane];
+        const std::uint64_t wakeups_after =
+            environment.scalar_load_feedback_stats().wakeups[load.lane];
+        if (wakeups_after - wakeups_before !=
+                cancels_after - cancels_before + 1 ||
+            environment.tilelink_requests() != requests_before) {
+            std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                      << environment.cycle() << " phase=warm-cancel lane="
+                      << load.lane
+                      << " wakeups=" << wakeups_after - wakeups_before
+                      << " ld2_cancels=" << cancels_after - cancels_before
+                      << " tilelink_before=" << requests_before
+                      << " tilelink_after=" << environment.tilelink_requests()
+                      << " reason=warm_feedback_or_residency_mismatch\n";
+            return 1;
+        }
+    }
+    const auto &warm_stats = environment.scalar_load_feedback_stats();
+    std::uint64_t wakeups = 0;
+    std::uint64_t cancels = 0;
+    for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+        wakeups += warm_stats.wakeups[lane];
+        cancels += warm_stats.ld2_cancels[lane];
+    }
+
+    std::cout << "MEMBLOCK_LOAD_FEEDBACK_PASS"
+              << " cycle=" << environment.cycle()
+              << " lanes=" << memblock::kScalarLoadLanes
+              << " cold=3 warm=3"
+              << " wakeups=" << wakeups
+              << " ld2_cancels=" << cancels
+              << " writebacks=" << environment.writebacks()
+              << " tilelink_requests=" << environment.tilelink_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
@@ -10509,6 +10667,25 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     environment.memory().fill_incrementing(host_physical, 0x1000, 0xc5);
     environment.configure_backpressure(
         options.seed ^ 0x1f83d9abfb41bd6bULL, options.backpressure);
+    const auto load_feedback_complete = [&]() {
+        const auto &feedback = environment.scalar_load_feedback_stats();
+        for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+            if (feedback.ld2_cancels[lane] == 0 ||
+                feedback.wakeups[lane] <= feedback.ld2_cancels[lane]) {
+                return false;
+            }
+        }
+        return true;
+    };
+    const auto load_feedback_summary = [&]() {
+        const auto &feedback = environment.scalar_load_feedback_stats();
+        std::ostringstream stream;
+        stream << "load_wakeups=" << feedback.wakeups[0] << ','
+               << feedback.wakeups[1] << ',' << feedback.wakeups[2]
+               << " load_cancels=" << feedback.ld2_cancels[0] << ','
+               << feedback.ld2_cancels[1] << ',' << feedback.ld2_cancels[2];
+        return stream.str();
+    };
 
     auto make_load = [&](std::uint64_t address, memblock::LoadOp op,
                          unsigned lane) {
@@ -13049,6 +13226,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.dcache_response_latency_stats(),
                 environment.ptw_response_latency_stats(),
                 environment.uncache_response_latency_stats()) ||
+            !load_feedback_complete() ||
             !coverage.backpressure_complete(options.backpressure)) {
             phase = "coverage-gates";
             return false;
@@ -13075,6 +13253,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   << (environment.error().empty()
                           ? "mixed_coverage_or_accounting_gate_failed"
                           : environment.error())
+                  << ' ' << load_feedback_summary()
                   << ' ' << coverage.summary() << ' '
                   << constraint_coverage.summary(
                          constraints,
@@ -13106,6 +13285,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
               << " release_data=" << environment.tilelink_release_data()
               << " ptw_requests=" << environment.ptw_requests()
               << " uncache_requests=" << environment.uncache_requests()
+              << ' ' << load_feedback_summary()
               << " lq=" << environment.lq_dequeued() << '+'
               << environment.lq_canceled() << '/'
               << environment.lq_allocated()
@@ -13955,6 +14135,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "single-load") {
             return run_single_load(argc, argv);
+        }
+        if (options.test == "load-feedback") {
+            return run_load_feedback(argc, argv);
         }
         if (options.test == "fp-loads") {
             return run_fp_loads(argc, argv);
