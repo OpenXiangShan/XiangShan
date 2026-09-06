@@ -9540,17 +9540,25 @@ int run_hypervisor_contracts(int argc, char **argv)
                          memblock::ReferencePageMode vs_mode =
                              memblock::ReferencePageMode::sv39,
                          memblock::ReferencePageMode g_mode =
-                             memblock::ReferencePageMode::sv39) {
+                             memblock::ReferencePageMode::sv39,
+                         memblock::ReferencePbmt vs_pbmt =
+                             memblock::ReferencePbmt::pma,
+                         memblock::ReferencePbmt g_pbmt =
+                             memblock::ReferencePbmt::pma) {
+        const bool vs_nc = vs_pbmt == memblock::ReferencePbmt::nc;
+        const bool vs_io = vs_pbmt == memblock::ReferencePbmt::io;
+        const bool g_nc = g_pbmt == memblock::ReferencePbmt::nc;
+        const bool g_io = g_pbmt == memblock::ReferencePbmt::io;
         bool ready = environment.reset();
         ready = ready && (vs_mode == memblock::ReferencePageMode::sv48
             ? environment.map_sv48_leaf(
                   guest_virtual, guest_physical, 0, vs_root,
-                  vs.readable, vs.writable, vs.executable, vs.user, false,
-                  vs.accessed, vs.dirty)
+                  vs.readable, vs.writable, vs.executable, vs.user, vs_nc,
+                  vs.accessed, vs.dirty, vs_io)
             : environment.map_sv39_leaf(
                   guest_virtual, guest_physical, 0, vs_root,
-                  vs.readable, vs.writable, vs.executable, vs.user, false,
-                  vs.accessed, vs.dirty));
+                  vs.readable, vs.writable, vs.executable, vs.user, vs_nc,
+                  vs.accessed, vs.dirty, vs_io));
         const unsigned vs_table_pages =
             vs_mode == memblock::ReferencePageMode::sv48 ? 4U : 3U;
         for (unsigned page = 0; ready && page < vs_table_pages; ++page) {
@@ -9565,12 +9573,12 @@ int run_hypervisor_contracts(int argc, char **argv)
             ? environment.map_sv48x4_leaf(
                   guest_physical, host_physical, 0, g_root,
                   g.readable, g.writable, g.executable,
-                  g.accessed, g.dirty, g.user)
+                  g.accessed, g.dirty, g.user, g_nc, g_io)
             : environment.map_sv39x4_leaf(
                   guest_physical, host_physical, 0, g_root,
                   g.readable, g.writable, g.executable,
-                  g.accessed, g.dirty, g.user));
-        return ready &&
+                  g.accessed, g.dirty, g.user, g_nc, g_io));
+        return ready && environment.set_page_based_memory_types(true, true) &&
             environment.activate_two_stage_modes(
                 vs_mode, g_mode,
                 vs_root, g_root, 61, 71) &&
@@ -9588,6 +9596,8 @@ int run_hypervisor_contracts(int argc, char **argv)
     unsigned access_faults = 0;
     unsigned translation_mode_pairs = 0;
     unsigned mode_family_cases = 0;
+    unsigned pbmt_combinations = 0;
+    unsigned pbmt_family_cases = 0;
 
     auto run_load_case = [&](
                              const char *name,
@@ -9602,7 +9612,11 @@ int run_hypervisor_contracts(int argc, char **argv)
                              memblock::ReferencePageMode vs_mode =
                                  memblock::ReferencePageMode::sv39,
                              memblock::ReferencePageMode g_mode =
-                                 memblock::ReferencePageMode::sv39) {
+                                 memblock::ReferencePageMode::sv39,
+                             memblock::ReferencePbmt vs_pbmt =
+                                 memblock::ReferencePbmt::pma,
+                             memblock::ReferencePbmt g_pbmt =
+                                 memblock::ReferencePbmt::pma) {
         const bool hlvx = op == memblock::LoadOp::hlvxhu ||
                           op == memblock::LoadOp::hlvxwu;
         const bool vs_permitted = hlvx
@@ -9622,12 +9636,16 @@ int run_hypervisor_contracts(int argc, char **argv)
                 : pmp_execute_denied
                     ? memblock::kExceptionLoadAccessFault
                     : 0U;
+        const auto final_pbmt =
+            memblock::reference_two_stage_pbmt(vs_pbmt, g_pbmt);
+        const bool final_nc = final_pbmt == memblock::ReferencePbmt::nc;
+        const bool final_io = final_pbmt == memblock::ReferencePbmt::io;
 
         memblock::Environment environment(argc, argv);
         environment.memory().fill_incrementing(host_physical, 0x1000, 0x31);
         if (!configure(
                 environment, vs, g, spvp, mxr, vmxr, vsum,
-                vs_mode, g_mode)) {
+                vs_mode, g_mode, vs_pbmt, g_pbmt)) {
             std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
                       << environment.cycle() << " phase=" << name
                       << "-configuration reason=" << environment.error()
@@ -9656,6 +9674,9 @@ int run_hypervisor_contracts(int argc, char **argv)
             .pdest = 40,
             .lane = 0,
             .expected_exception_mask = expected_exception,
+            .expected_debug_is_mmio = final_io,
+            .expected_debug_is_ncio = final_io
+                ? std::optional<bool>{false} : std::nullopt,
         };
         const std::uint64_t dcache_before = environment.tilelink_requests();
         const std::uint64_t uncache_before = environment.uncache_requests();
@@ -9665,6 +9686,9 @@ int run_hypervisor_contracts(int argc, char **argv)
         if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
             !environment.enqueue_load(transaction) ||
             !environment.issue_load(transaction, 4096) ||
+            (expected_exception == 0 && final_io &&
+             !environment.wait_for_mmio_request(
+                 transaction.rob, transaction.rob_flag, 8192)) ||
             !environment.run_until_complete(32768) ||
             !environment.run_until_lq_retired(8192)) {
             std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
@@ -9700,6 +9724,23 @@ int run_hypervisor_contracts(int argc, char **argv)
                       << " cancels=" << cancels << '\n';
             return false;
         }
+        if (expected_exception == 0) {
+            const std::uint64_t expected_dcache =
+                dcache_before + (final_nc || final_io ? 0U : 1U);
+            const std::uint64_t expected_uncache =
+                uncache_before + (final_nc || final_io ? 1U : 0U);
+            if (environment.tilelink_requests() != expected_dcache ||
+                environment.uncache_requests() != expected_uncache) {
+                std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=" << name
+                          << " reason=wrong-load-manager"
+                          << " dcache=" << environment.tilelink_requests()
+                          << '/' << expected_dcache
+                          << " uncache=" << environment.uncache_requests()
+                          << '/' << expected_uncache << '\n';
+                return false;
+            }
+        }
         ++load_cases;
         page_faults += expected_exception == memblock::kExceptionLoadPageFault;
         guest_page_faults +=
@@ -9723,7 +9764,11 @@ int run_hypervisor_contracts(int argc, char **argv)
                               memblock::ReferencePageMode vs_mode =
                                   memblock::ReferencePageMode::sv39,
                               memblock::ReferencePageMode g_mode =
-                                  memblock::ReferencePageMode::sv39) {
+                                  memblock::ReferencePageMode::sv39,
+                              memblock::ReferencePbmt vs_pbmt =
+                                  memblock::ReferencePbmt::pma,
+                              memblock::ReferencePbmt g_pbmt =
+                                  memblock::ReferencePbmt::pma) {
         const bool vs_permitted =
             memblock::reference_store_permitted(vs, spvp, vsum);
         const bool g_permitted = memblock::reference_store_permitted(
@@ -9733,12 +9778,16 @@ int run_hypervisor_contracts(int argc, char **argv)
             : !g_permitted
                 ? memblock::kExceptionStoreGuestPageFault
                 : 0U;
+        const auto final_pbmt =
+            memblock::reference_two_stage_pbmt(vs_pbmt, g_pbmt);
+        const bool final_nc = final_pbmt == memblock::ReferencePbmt::nc;
+        const bool final_io = final_pbmt == memblock::ReferencePbmt::io;
 
         memblock::Environment environment(argc, argv);
         environment.memory().fill_incrementing(host_physical, 0x1000, 0x71);
         if (!configure(
                 environment, vs, g, spvp, false, false, vsum,
-                vs_mode, g_mode)) {
+                vs_mode, g_mode, vs_pbmt, g_pbmt)) {
             std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
                       << environment.cycle() << " phase=" << name
                       << "-configuration reason=" << environment.error()
@@ -9765,6 +9814,9 @@ int run_hypervisor_contracts(int argc, char **argv)
             !environment.enqueue_store(transaction, 0) ||
             !environment.issue_store_address_until_tlb_hit(transaction, 16384) ||
             !environment.issue_store_data(transaction, 2048) ||
+            (expected_exception == 0 && final_io &&
+             !environment.wait_for_mmio_store_request(
+                 transaction.rob, transaction.rob_flag, 8192)) ||
             !environment.run_until_store_complete(32768)) {
             std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
                       << environment.cycle() << " phase=" << name
@@ -9783,12 +9835,34 @@ int run_hypervisor_contracts(int argc, char **argv)
                 memblock::LoadOp::hlvbu, memblock::LoadOp::hlvhu,
                 memblock::LoadOp::hlvwu, memblock::LoadOp::hlvd,
             }};
-            if (!environment.commit_store(transaction, 16384) ||
-                !environment.run_until_sbuffer_empty(16384)) {
+            const bool committed = final_io
+                ? environment.commit_stores_through(transaction, 1) &&
+                      environment.run_cycles(16)
+                : environment.commit_store(transaction, 16384) &&
+                      environment.run_until_sbuffer_empty(16384);
+            if (!committed) {
                 std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
                           << environment.cycle() << " phase=" << name
                           << "-commit reason=" << environment.error()
                           << '\n';
+                return false;
+            }
+            if (final_io) {
+                environment.record_committed_store(transaction);
+            }
+            const std::uint64_t expected_store_dcache =
+                dcache_before + (final_nc || final_io ? 0U : 1U);
+            const std::uint64_t expected_store_uncache =
+                uncache_before + (final_nc || final_io ? 1U : 0U);
+            if (environment.tilelink_requests() != expected_store_dcache ||
+                environment.uncache_requests() != expected_store_uncache) {
+                std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=" << name
+                          << " reason=wrong-store-manager"
+                          << " dcache=" << environment.tilelink_requests()
+                          << '/' << expected_store_dcache
+                          << " uncache=" << environment.uncache_requests()
+                          << '/' << expected_store_uncache << '\n';
                 return false;
             }
             const memblock::LoadTransaction readback{
@@ -9799,11 +9873,20 @@ int run_hypervisor_contracts(int argc, char **argv)
                 .lq = 0,
                 .pdest = 41,
                 .lane = 1,
+                .expected_debug_is_mmio = final_io,
+                .expected_debug_is_ncio = final_io
+                    ? std::optional<bool>{false} : std::nullopt,
             };
+            const std::uint64_t readback_dcache_before =
+                environment.tilelink_requests();
+            const std::uint64_t readback_uncache_before =
+                environment.uncache_requests();
             environment.expect_load_data(readback, data & mask);
             if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
                 !environment.enqueue_load(readback) ||
                 !environment.issue_load(readback, 4096) ||
+                (final_io && !environment.wait_for_mmio_request(
+                    readback.rob, readback.rob_flag, 8192)) ||
                 !environment.run_until_complete(32768) ||
                 !environment.run_until_lq_retired(8192)) {
                 std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
@@ -9811,6 +9894,15 @@ int run_hypervisor_contracts(int argc, char **argv)
                           << "-hlv-readback expected=0x" << std::hex
                           << (data & mask) << std::dec << " reason="
                           << environment.error() << '\n';
+                return false;
+            }
+            const std::uint64_t expected_readback_uncache =
+                readback_uncache_before + (final_nc || final_io ? 1U : 0U);
+            if (environment.tilelink_requests() != readback_dcache_before ||
+                environment.uncache_requests() != expected_readback_uncache) {
+                std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
+                          << environment.cycle() << " phase=" << name
+                          << " reason=wrong-readback-manager\n";
                 return false;
             }
         } else {
@@ -9972,6 +10064,49 @@ int run_hypervisor_contracts(int argc, char **argv)
         mode_family_cases += 3;
     }
 
+    struct PbmtPair {
+        memblock::ReferencePbmt vs_pbmt;
+        memblock::ReferencePbmt g_pbmt;
+    };
+    constexpr std::array<PbmtPair, 5> pbmt_pairs{{
+        {memblock::ReferencePbmt::pma, memblock::ReferencePbmt::pma},
+        {memblock::ReferencePbmt::pma, memblock::ReferencePbmt::nc},
+        {memblock::ReferencePbmt::pma, memblock::ReferencePbmt::io},
+        {memblock::ReferencePbmt::nc, memblock::ReferencePbmt::io},
+        {memblock::ReferencePbmt::io, memblock::ReferencePbmt::nc},
+    }};
+    for (unsigned index = 0; index < pbmt_pairs.size(); ++index) {
+        const auto pair = pbmt_pairs[index];
+        if (!run_load_case(
+                "pbmt-hlv", memblock::LoadOp::hlvd,
+                rw_supervisor, g_rw_user,
+                memblock::ReferencePrivilegeMode::supervisor,
+                false, false, false, false,
+                memblock::ReferencePageMode::sv48,
+                memblock::ReferencePageMode::sv48,
+                pair.vs_pbmt, pair.g_pbmt) ||
+            !run_load_case(
+                "pbmt-hlvx", memblock::LoadOp::hlvxwu,
+                x_supervisor, g_x_user,
+                memblock::ReferencePrivilegeMode::supervisor,
+                false, false, false, false,
+                memblock::ReferencePageMode::sv48,
+                memblock::ReferencePageMode::sv48,
+                pair.vs_pbmt, pair.g_pbmt) ||
+            !run_store_case(
+                "pbmt-hsv", memblock::StoreOp::hsvd,
+                rw_supervisor, g_rw_user,
+                memblock::ReferencePrivilegeMode::supervisor, false,
+                0x2718281828459000ULL + index,
+                memblock::ReferencePageMode::sv48,
+                memblock::ReferencePageMode::sv48,
+                pair.vs_pbmt, pair.g_pbmt)) {
+            return 1;
+        }
+        ++pbmt_combinations;
+        pbmt_family_cases += 3;
+    }
+
     std::cout << "MEMBLOCK_HYPERVISOR_CONTRACTS_PASS"
               << " cases=" << load_cases + store_cases
               << " load_cases=" << load_cases
@@ -9981,6 +10116,8 @@ int run_hypervisor_contracts(int argc, char **argv)
               << " access_faults=" << access_faults
               << " translation_mode_pairs=" << translation_mode_pairs
               << " mode_family_cases=" << mode_family_cases
+              << " pbmt_combinations=" << pbmt_combinations
+              << " pbmt_family_cases=" << pbmt_family_cases
               << " spvp=1 vsum=1 vmxr=1 hlvx=1 hsv=1 pmp_x=1"
               << " cycles=" << total_cycles
               << " ptw_requests=" << total_ptw_requests

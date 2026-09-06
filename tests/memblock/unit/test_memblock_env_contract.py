@@ -31,6 +31,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "hlvx-pmp-execute-denied",
             "translation_mode_pairs=",
             "mode_family_cases=",
+            "pbmt_combinations=",
+            "pbmt_family_cases=",
             "spvp=1 vsum=1 vmxr=1 hlvx=1 hsv=1 pmp_x=1",
         ):
             self.assertIn(contract, environment + driver + makefile)

@@ -23,11 +23,13 @@ writeback. PBMT=IO MMIO metadata and error propagation are covered; MMIO device
 side effects and CMO CLEAN/FLUSH/INVAL remain explicit boundary gaps.
 `hypervisor-contracts` covers HLV/HLVX/HSV privilege, permission, fault, PMP
 execute behavior, and each operation family across all four Sv39/Sv48 and
-Sv39x4/Sv48x4 two-stage translation pairs. Vector FOF and unit-stride, strided,
-indexed-unordered, and indexed-ordered segment load/store takeover are covered
-by focused tests; the common constrained tail mixes segment operations across
-load/store, EEW 8/16/32/64, and NF 1..7. Unsupported segment shapes are not
-silently randomized as ordinary LSQ traffic.
+Sv39x4/Sv48x4 two-stage translation pairs. A five-case PBMT basis covers final
+PMA/NC/IO classification and VS-over-G priority for every hypervisor operation
+family. Vector FOF and unit-stride, strided, indexed-unordered, and
+indexed-ordered segment load/store takeover are covered by focused tests; the
+common constrained tail mixes segment operations across load/store, EEW
+8/16/32/64, and NF 1..7. Unsupported segment shapes are not silently randomized
+as ordinary LSQ traffic.
 
 `vector-segment-fof` contrasts first- and later-element page faults. A later
 fault suppresses the exception and shortens VL, while a first-element fault
