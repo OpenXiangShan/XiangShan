@@ -3310,6 +3310,13 @@ public:
         std::uint64_t last_l3_cycle = 0;
     };
 
+    struct BusErrorStats {
+        std::uint64_t dcache_reports = 0;
+        std::uint64_t uncache_reports = 0;
+        std::uint64_t last_dcache_address = 0;
+        std::uint64_t last_uncache_address = 0;
+    };
+
     Environment(int argc, char **argv)
         : dut_(argc, argv), memory_(&bus_memory_),
           memory_agent_(bus_memory_, memory_),
@@ -3958,6 +3965,7 @@ public:
     {
         return scalar_load_feedback_stats_;
     }
+    const BusErrorStats &bus_error_stats() const { return bus_error_stats_; }
     const IqSlowFeedbackStats &iq_slow_feedback_stats() const
     {
         return iq_slow_feedback_stats_;
@@ -7542,6 +7550,16 @@ private:
         // they may already describe the following transaction.  LSQ dequeue
         // pulses are registered separately and are counted below instead.
         if (monitor) {
+            if (dut_.io_dcacheError_ecc_error_valid.B()) {
+                ++bus_error_stats_.dcache_reports;
+                bus_error_stats_.last_dcache_address =
+                    dut_.io_dcacheError_ecc_error_bits.U();
+            }
+            if (dut_.io_uncacheError_ecc_error_valid.B()) {
+                ++bus_error_stats_.uncache_reports;
+                bus_error_stats_.last_uncache_address =
+                    dut_.io_uncacheError_ecc_error_bits.U();
+            }
             const auto memory_violation =
                 generated::sample_memory_violation(dut_);
             if (memory_violation.valid) {
@@ -7779,6 +7797,7 @@ private:
     MemoryViolationStats memory_violation_stats_;
     IfetchPrefetchStats ifetch_prefetch_stats_;
     HardwarePrefetchStats hardware_prefetch_stats_;
+    BusErrorStats bus_error_stats_;
     std::uint64_t ifetch_ptw_pending_ = 0;
     std::uint64_t lq_allocated_ = 0;
     std::uint64_t lq_dequeued_ = 0;

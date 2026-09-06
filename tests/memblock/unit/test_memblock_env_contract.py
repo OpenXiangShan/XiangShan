@@ -243,6 +243,21 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main + makefile)
 
+    def test_uncache_store_bus_error_outputs_are_checked(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "struct BusErrorStats",
+            "io_dcacheError_ecc_error_valid",
+            "io_uncacheError_ecc_error_valid",
+            "last_uncache_address",
+            "run_store_error",
+            "store_denied=1 store_corrupt=1",
+            "expected_error_address",
+            "errors_after.uncache_reports != errors_before.uncache_reports + 1",
+        ):
+            self.assertIn(contract, environment + main)
+
     def test_ifetch_ptw_bridge_covers_concurrent_dtlb_walk(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

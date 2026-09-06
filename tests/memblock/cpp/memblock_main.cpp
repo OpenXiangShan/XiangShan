@@ -4559,9 +4559,119 @@ int run_uncache_errors(int argc, char **argv)
         return 1;
     }
 
+    unsigned store_error_reports = 0;
+    auto run_store_error = [&](const char *name, std::uint64_t offset,
+                               bool denied_response, bool corrupt_response,
+                               std::uint32_t expected_exception) {
+        memblock::Environment store_environment(argc, argv);
+        const std::uint64_t store_virtual = virtual_base + 0x1000 + offset;
+        const std::uint64_t store_physical = physical_base + 0x1000 + offset;
+        const std::uint64_t store_root = root + 0x10000;
+        store_environment.configure_backpressure(
+            0x94d049bb133111ebULL ^ offset, true);
+        if (!store_environment.reset() ||
+            !store_environment.map_sv39_4k(
+                store_virtual, store_physical, store_root,
+                true, true, false, false, false, true) ||
+            !store_environment.activate_sv39(store_root)) {
+            std::cerr << "MEMBLOCK_UNCACHE_ERRORS_FAIL cycle="
+                      << store_environment.cycle() << " phase=" << name
+                      << "-configuration reason="
+                      << store_environment.error() << '\n';
+            return false;
+        }
+        store_environment.configure_cache_error_enable(true);
+        if (!store_environment.run_cycles(4)) {
+            return false;
+        }
+        const memblock::StoreTransaction store{
+            .address = store_virtual,
+            .oracle_address = store_physical,
+            .data = 0x8877665544332211ULL ^ offset,
+            .op = memblock::StoreOp::sd,
+            .rob = static_cast<std::uint8_t>(2 + store_error_reports),
+            .sq = 0,
+            .address_lane = store_error_reports & 1U,
+            .data_lane = (store_error_reports + 1U) & 1U,
+            .expected_exception_mask = expected_exception,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+        };
+        const auto errors_before = store_environment.bus_error_stats();
+        const std::uint64_t dcache_before =
+            store_environment.tilelink_requests();
+        const std::uint64_t uncache_before =
+            store_environment.uncache_requests();
+        store_environment.expect_store(store);
+        store_environment.inject_next_uncache_response_error(
+            denied_response, corrupt_response);
+        if (!store_environment.set_rob_head(store.rob, store.rob_flag) ||
+            !store_environment.enqueue_store(store, 0) ||
+            !store_environment.issue_store_address_until_tlb_hit(store, 16384) ||
+            !store_environment.issue_store_data(store, 4096) ||
+            !store_environment.run_cycles(64) ||
+            (store_environment.uncache_requests() == uncache_before &&
+             !store_environment.wait_for_mmio_store_request(
+                 store.rob, store.rob_flag, 8192)) ||
+            !store_environment.run_until_uncache_requests(
+                uncache_before + 1, 8192) ||
+            !store_environment.run_until_store_complete(8192) ||
+            !store_environment.run_cycles(8) ||
+            !store_environment.redirect_after(store.rob, store.rob_flag, true) ||
+            !store_environment.run_cycles(96) ||
+            (store_environment.sq_dequeued() +
+                     store_environment.sq_canceled() <
+                 store_environment.sq_allocated() &&
+             !store_environment.account_sq_cancellation(1))) {
+            std::cerr << "MEMBLOCK_UNCACHE_ERRORS_FAIL cycle="
+                      << store_environment.cycle() << " phase=" << name
+                      << "-store reason=" << store_environment.error()
+                      << " uncache_requests="
+                      << store_environment.uncache_requests() << '\n';
+            return false;
+        }
+        const auto errors_after = store_environment.bus_error_stats();
+        const std::uint64_t expected_error_address =
+            store_physical & ~std::uint64_t{63};
+        if (store_environment.tilelink_requests() != dcache_before ||
+            store_environment.uncache_requests() != uncache_before + 1 ||
+            errors_after.dcache_reports != errors_before.dcache_reports ||
+            errors_after.uncache_reports != errors_before.uncache_reports + 1 ||
+            errors_after.last_uncache_address != expected_error_address ||
+            store_environment.sq_dequeued() +
+                    store_environment.sq_canceled() !=
+                store_environment.sq_allocated()) {
+            std::cerr << "MEMBLOCK_UNCACHE_ERRORS_FAIL cycle="
+                      << store_environment.cycle() << " phase=" << name
+                      << "-bus-error expected_address=0x" << std::hex
+                      << expected_error_address << " actual_address=0x"
+                      << errors_after.last_uncache_address << std::dec
+                      << " uncache_reports="
+                      << errors_after.uncache_reports -
+                             errors_before.uncache_reports
+                      << " dcache_reports="
+                      << errors_after.dcache_reports -
+                             errors_before.dcache_reports << '\n';
+            return false;
+        }
+        ++store_error_reports;
+        return true;
+    };
+
+    if (!run_store_error(
+            "denied", 8, true, false,
+            memblock::kExceptionStoreAccessFault) ||
+        !run_store_error(
+            "corrupt", 24, false, true,
+            memblock::kExceptionHardwareError)) {
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_UNCACHE_ERRORS_PASS"
               << " cycle=" << environment.cycle()
-              << " denied=1 corrupt=1"
+              << " load_denied=1 load_corrupt=1"
+              << " store_denied=1 store_corrupt=1"
+              << " uncache_error_reports=" << store_error_reports
               << " uncache_requests=" << environment.uncache_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
