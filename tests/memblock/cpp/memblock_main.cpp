@@ -5374,7 +5374,7 @@ int run_trigger_contracts(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
     constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x2a000;
-    environment.memory().fill_incrementing(base, 0x4000, 0x62);
+    environment.memory().fill_incrementing(base, 0x5000, 0x62);
     if (!environment.reset()) {
         std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
                   << environment.cycle() << " phase=configuration reason="
@@ -5385,8 +5385,17 @@ int run_trigger_contracts(int argc, char **argv)
     unsigned next_identity = 0;
     std::uint64_t breakpoint_loads = 0;
     std::uint64_t suppressed_loads = 0;
-    const auto run_load = [&](std::uint64_t address, bool breakpoint,
+    std::uint64_t debug_action_loads = 0;
+    const auto run_load = [&](std::uint64_t address,
+                              std::uint8_t expected_trigger,
+                              std::uint32_t expected_exception,
+                              bool expect_dcache_request,
                               const char *phase) {
+        const bool breakpoint =
+            expected_trigger == memblock::kTriggerBreakpoint;
+        const bool debug_action =
+            expected_trigger == memblock::kTriggerDebugMode;
+        const bool terminal_trigger = breakpoint || debug_action;
         const auto identity = next_identity++;
         const memblock::LoadTransaction transaction{
             .address = address,
@@ -5396,12 +5405,9 @@ int run_trigger_contracts(int argc, char **argv)
             .sq = 0,
             .pdest = static_cast<std::uint8_t>(23 + identity),
             .lane = identity % memblock::kScalarLoadLanes,
-            .expected_exception_mask = breakpoint
-                ? memblock::kExceptionBreakpoint
-                : std::uint32_t{0},
-            .expected_trigger = breakpoint
-                ? memblock::kTriggerBreakpoint
-                : memblock::kTriggerNone,
+            .expected_exception_mask = expected_exception,
+            .check_data = !debug_action,
+            .expected_trigger = expected_trigger,
             .predecode_rvc = (identity & 1U) != 0,
             .ftq_ptr = 7 + identity,
             .ftq_offset = static_cast<std::uint8_t>(identity & 0xfU),
@@ -5417,17 +5423,19 @@ int run_trigger_contracts(int argc, char **argv)
             return false;
         }
         const std::uint64_t requests_after = environment.tilelink_requests();
-        if ((breakpoint && requests_after != requests_before) ||
-            (!breakpoint && requests_after <= requests_before)) {
+        if ((!expect_dcache_request && requests_after != requests_before) ||
+            (expect_dcache_request && requests_after <= requests_before)) {
             std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
                       << environment.cycle() << " phase=" << phase
-                      << " breakpoint=" << breakpoint
+                      << " expected_trigger="
+                      << static_cast<unsigned>(expected_trigger)
                       << " dcache_requests=" << requests_before << "->"
                       << requests_after << '\n';
             return false;
         }
-        if (breakpoint) {
-            ++breakpoint_loads;
+        if (terminal_trigger) {
+            breakpoint_loads += breakpoint;
+            debug_action_loads += debug_action;
             if (!environment.redirect_after(
                     transaction.rob, transaction.rob_flag, true) ||
                 !environment.run_cycles(16)) {
@@ -5470,7 +5478,11 @@ int run_trigger_contracts(int argc, char **argv)
                       << " reason=" << environment.error() << '\n';
             return false;
         }
-        return run_load(address, breakpoint, phase);
+        return run_load(
+            address,
+            breakpoint ? memblock::kTriggerBreakpoint : memblock::kTriggerNone,
+            breakpoint ? memblock::kExceptionBreakpoint : std::uint32_t{0},
+            !breakpoint, phase);
     };
 
     if (!configure_and_run(
@@ -5531,7 +5543,11 @@ int run_trigger_contracts(int argc, char **argv)
                       << " reason=" << environment.error() << '\n';
             return false;
         }
-        return run_load(second_address, breakpoint, phase);
+        return run_load(
+            second_address,
+            breakpoint ? memblock::kTriggerBreakpoint : memblock::kTriggerNone,
+            breakpoint ? memblock::kExceptionBreakpoint : std::uint32_t{0},
+            !breakpoint, phase);
     };
     if (!run_chain_case(
             base + 0x2828, base + 0x2828, true, "chain-hit") ||
@@ -5546,68 +5562,235 @@ int run_trigger_contracts(int argc, char **argv)
         return 1;
     }
 
-    constexpr std::uint64_t store_address = base + 0x3428;
+    constexpr std::uint64_t debug_action_address = base + 0x4028;
     if (!environment.configure_memory_trigger({
             .index = 0,
-            .address = store_address,
+            .address = debug_action_address,
+            .action = memblock::kTriggerDebugMode,
+        }) ||
+        !run_load(
+            debug_action_address, memblock::kTriggerDebugMode, 0, false,
+            "debug-action")) {
+        return 1;
+    }
+
+    std::uint64_t scalar_store_breakpoints = 0;
+    const auto run_store = [&](std::uint64_t address, std::uint8_t sq,
+                               const char *phase) {
+        if (!environment.configure_memory_trigger({
+                .index = 0,
+                .address = address,
+                .load = false,
+                .store = true,
+            })) {
+            std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        const memblock::StoreTransaction store{
+            .address = address,
+            .data = 0xa5a55a5af0f00f0fULL ^ address,
+            .op = memblock::StoreOp::sd,
+            .rob = static_cast<std::uint8_t>(33 + next_identity++),
+            .sq = sq,
+            .address_lane = sq % memblock::kScalarStoreLanes,
+            .data_lane = (sq + 1) % memblock::kScalarStoreLanes,
+            .expected_exception_mask = memblock::kExceptionBreakpoint,
+            .expected_trigger = memblock::kTriggerBreakpoint,
+        };
+        const std::uint64_t requests_before = environment.tilelink_requests();
+        const std::uint64_t value_before = environment.memory().read_u64(address);
+        environment.expect_store(store);
+        if (!environment.enqueue_store(store, 0) ||
+            !environment.issue_store_address(store, 256) ||
+            !environment.issue_store_data(store, 256) ||
+            !environment.run_until_store_complete(2048) ||
+            environment.tilelink_requests() != requests_before ||
+            !environment.redirect_after(store.rob, store.rob_flag, true) ||
+            !environment.run_cycles(16)) {
+            std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << " dcache_requests=" << requests_before << "->"
+                      << environment.tilelink_requests()
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        const std::uint64_t retired = environment.sq_dequeued() +
+            environment.sq_canceled();
+        if (retired > environment.sq_allocated() ||
+            environment.sq_allocated() - retired > 1 ||
+            (retired < environment.sq_allocated() &&
+             !environment.account_sq_cancellation(1)) ||
+            environment.memory().read_u64(address) != value_before) {
+            std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << " allocated=" << environment.sq_allocated()
+                      << " retired=" << retired
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        ++scalar_store_breakpoints;
+        return true;
+    };
+    if (!run_store(base + 0x3428, 0, "aligned-store-hit") ||
+        !run_store(base + 0x442b, 1, "misaligned-store-hit")) {
+        return 1;
+    }
+
+    memblock::Environment vector_load_environment(argc, argv);
+    constexpr std::uint64_t vector_load_base =
+        memblock::kDefaultMemoryBase + 0x620000;
+    constexpr std::uint64_t vector_load_address = vector_load_base + 0x20;
+    vector_load_environment.memory().fill_incrementing(
+        vector_load_base, 0x1000, 0x49);
+    const memblock::VectorMemoryTransaction vector_load{
+        .address = vector_load_address,
+        .eew = 0,
+        .vl = 16,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 91,
+        .lane = 0,
+        .flow_num = 2,
+        .expected_exception_mask = memblock::kExceptionBreakpoint,
+        .expected_trigger = memblock::kTriggerBreakpoint,
+    };
+    if (!vector_load_environment.reset() ||
+        !vector_load_environment.configure_memory_trigger({
+            .index = 0,
+            .address = vector_load_address + 7,
+        })) {
+        std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                  << vector_load_environment.cycle()
+                  << " phase=vector-load-configuration reason="
+                  << vector_load_environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t vector_load_requests_before =
+        vector_load_environment.tilelink_requests();
+    vector_load_environment.expect_vector(vector_load);
+    if (!vector_load_environment.enqueue_vector(vector_load) ||
+        !vector_load_environment.issue_vector(vector_load, 256) ||
+        !vector_load_environment.run_until_vector_complete(2048) ||
+        vector_load_environment.tilelink_requests() !=
+            vector_load_requests_before ||
+        !vector_load_environment.redirect_after(
+            vector_load.rob, vector_load.rob_flag, true) ||
+        !vector_load_environment.run_cycles(16)) {
+        std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                  << vector_load_environment.cycle()
+                  << " phase=vector-load-hit reason="
+                  << vector_load_environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t vector_lq_retired =
+        vector_load_environment.lq_dequeued() +
+        vector_load_environment.lq_canceled();
+    const bool vector_lq_over_retired =
+        vector_lq_retired > vector_load_environment.lq_allocated();
+    const std::uint64_t vector_lq_remaining = vector_lq_over_retired
+        ? 0
+        : vector_load_environment.lq_allocated() - vector_lq_retired;
+    if (vector_lq_over_retired ||
+        vector_lq_remaining > vector_load.flow_num ||
+        (vector_lq_remaining != 0 &&
+         !vector_load_environment.account_lq_cancellation(
+             static_cast<unsigned>(vector_lq_remaining)))) {
+        std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                  << vector_load_environment.cycle()
+                  << " phase=vector-load-cancellation"
+                  << " allocated=" << vector_load_environment.lq_allocated()
+                  << " retired=" << vector_lq_retired << '\n';
+        return 1;
+    }
+
+    memblock::Environment vector_store_environment(argc, argv);
+    constexpr std::uint64_t vector_store_base =
+        memblock::kDefaultMemoryBase + 0x630000;
+    constexpr std::uint64_t vector_store_address = vector_store_base + 0x20;
+    vector_store_environment.memory().fill_incrementing(
+        vector_store_base, 0x1000, 0x6b);
+    memblock::VectorMemoryTransaction vector_store{
+        .store = true,
+        .address = vector_store_address,
+        .eew = 0,
+        .vl = 16,
+        .rob = 0,
+        .sq = 0,
+        .lane = 1,
+        .flow_num = 2,
+        .expected_exception_mask = memblock::kExceptionBreakpoint,
+        .expected_trigger = memblock::kTriggerBreakpoint,
+    };
+    for (unsigned byte = 0; byte < vector_store.data.size(); ++byte) {
+        vector_store.data[byte] = static_cast<unsigned char>(0xd1 + byte * 3);
+    }
+    const auto vector_store_before =
+        vector_store_environment.memory().read_beat(vector_store_address, 16);
+    if (!vector_store_environment.reset() ||
+        !vector_store_environment.configure_memory_trigger({
+            .index = 0,
+            .address = vector_store_address + 9,
             .load = false,
             .store = true,
         })) {
         std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
-                  << environment.cycle() << " phase=store-configuration reason="
-                  << environment.error() << '\n';
+                  << vector_store_environment.cycle()
+                  << " phase=vector-store-configuration reason="
+                  << vector_store_environment.error() << '\n';
         return 1;
     }
-    const memblock::StoreTransaction store{
-        .address = store_address,
-        .data = 0xa5a55a5af0f00f0fULL,
-        .op = memblock::StoreOp::sd,
-        .rob = static_cast<std::uint8_t>(33 + next_identity),
-        .sq = 0,
-        .address_lane = 1,
-        .data_lane = 0,
-        .expected_exception_mask = memblock::kExceptionBreakpoint,
-        .expected_trigger = memblock::kTriggerBreakpoint,
-    };
-    const std::uint64_t store_requests_before = environment.tilelink_requests();
-    const std::uint64_t store_value_before =
-        environment.memory().read_u64(store_address);
-    environment.expect_store(store);
-    if (!environment.enqueue_store(store, 0) ||
-        !environment.issue_store_address(store, 256) ||
-        !environment.issue_store_data(store, 256) ||
-        !environment.run_until_store_complete(2048) ||
-        environment.tilelink_requests() != store_requests_before ||
-        !environment.redirect_after(store.rob, store.rob_flag, true) ||
-        !environment.run_cycles(16)) {
+    const std::uint64_t vector_store_requests_before =
+        vector_store_environment.tilelink_requests();
+    vector_store_environment.expect_vector(vector_store);
+    if (!vector_store_environment.enqueue_vector(vector_store) ||
+        !vector_store_environment.issue_vector(vector_store, 256) ||
+        !vector_store_environment.run_until_vector_complete(2048) ||
+        vector_store_environment.tilelink_requests() !=
+            vector_store_requests_before ||
+        !vector_store_environment.redirect_after(
+            vector_store.rob, vector_store.rob_flag, true) ||
+        !vector_store_environment.run_cycles(16)) {
         std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
-                  << environment.cycle() << " phase=store-hit"
-                  << " dcache_requests=" << store_requests_before << "->"
-                  << environment.tilelink_requests()
-                  << " reason=" << environment.error() << '\n';
+                  << vector_store_environment.cycle()
+                  << " phase=vector-store-hit reason="
+                  << vector_store_environment.error() << '\n';
         return 1;
     }
-    const std::uint64_t sq_retired = environment.sq_dequeued() +
-        environment.sq_canceled();
-    if (sq_retired > environment.sq_allocated() ||
-        environment.sq_allocated() - sq_retired > 1 ||
-        (sq_retired < environment.sq_allocated() &&
-         !environment.account_sq_cancellation(1)) ||
-        environment.memory().read_u64(store_address) != store_value_before) {
+    const std::uint64_t vector_sq_retired =
+        vector_store_environment.sq_dequeued() +
+        vector_store_environment.sq_canceled();
+    const bool vector_sq_over_retired =
+        vector_sq_retired > vector_store_environment.sq_allocated();
+    const std::uint64_t vector_sq_remaining = vector_sq_over_retired
+        ? 0
+        : vector_store_environment.sq_allocated() - vector_sq_retired;
+    if (vector_sq_over_retired ||
+        vector_sq_remaining > vector_store.flow_num ||
+        (vector_sq_remaining != 0 &&
+         !vector_store_environment.account_sq_cancellation(
+             static_cast<unsigned>(vector_sq_remaining))) ||
+        vector_store_environment.memory().read_beat(
+            vector_store_address, 16) != vector_store_before) {
         std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
-                  << environment.cycle() << " phase=store-cancellation"
-                  << " allocated=" << environment.sq_allocated()
-                  << " retired=" << sq_retired
-                  << " reason=" << environment.error() << '\n';
+                  << vector_store_environment.cycle()
+                  << " phase=vector-store-cancellation"
+                  << " allocated=" << vector_store_environment.sq_allocated()
+                  << " retired=" << vector_sq_retired << '\n';
         return 1;
     }
 
     std::cout << "MEMBLOCK_TRIGGER_CONTRACTS_PASS"
-              << " cycle=" << environment.cycle()
-              << " cases=15 match_types=3 enabled_slots=4"
+              << " cycle=" << environment.cycle() +
+                    vector_load_environment.cycle() +
+                    vector_store_environment.cycle()
+              << " cases=19 actions=2 match_types=3 enabled_slots=4"
               << " breakpoint_loads=" << breakpoint_loads
               << " suppressed_loads=" << suppressed_loads
-              << " store_breakpoints=1 chain_cases=2"
+              << " debug_action_loads=" << debug_action_loads
+              << " scalar_store_breakpoints=" << scalar_store_breakpoints
+              << " vector_breakpoints=2 chain_cases=2"
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

@@ -765,6 +765,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "config.enable_mask",
             "config.trigger_can_raise_breakpoint",
             "config.debug_mode",
+            ".check_data = !debug_action",
+            "load data checking may only be disabled for DebugMode trigger",
             '"equal-hit"',
             '"breakpoint-gate"',
             '"debug-mode-suppression"',
@@ -775,8 +777,14 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             '"chain-miss"',
             '"slot-two-hit"',
             '"slot-three-hit"',
-            '" cases=15 match_types=3 enabled_slots=4"',
-            '" store_breakpoints=1 chain_cases=2"',
+            '"debug-action"',
+            '"misaligned-store-hit"',
+            "phase=vector-load-hit",
+            "phase=vector-store-hit",
+            '" cases=19 actions=2 match_types=3 enabled_slots=4"',
+            '" debug_action_loads="',
+            '" scalar_store_breakpoints="',
+            '" vector_breakpoints=2 chain_cases=2"',
         ):
             self.assertIn(contract, environment + main)
 

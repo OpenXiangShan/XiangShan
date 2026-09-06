@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `db638aff3e4dee72fc4c623e7645c1e41dc7e0573970517d434a4c35f6c81c94`
+- Current rebuilt and frozen UT executable SHA-256: `a94d25a4713b23b023faa6cba1aedd6e43311a38634c32c089f9805b461be351`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `876487ac194893735595410b05547b8286969a14544968d807940effd22ac5f1`
+- Frozen runtime manifest SHA-256: `8266dc808bc4efe9ce4a208381f8ae1c76b72d516ec064e006718447b67ce7a7`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -46,18 +46,21 @@ MMIO cases emitted five Uncache requests and zero DCache requests.
 
 ## Memory Trigger Matrix
 
-On 2026-09-07, the expanded `trigger-contracts` scenario passed 15 cases in
-605 cycles on complete RTL SHA-256
+On 2026-09-07, the expanded `trigger-contracts` scenario passed 19 cases in
+816 aggregate cycles on complete RTL SHA-256
 `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
 All four enable slots produced a positive scalar-load breakpoint. EQ, GE, and
 LT each exercised their qualifying boundary, while GE/LT misses plus disabled,
 load/store-mismatched, `select=1`, breakpoint-gated, and current-debug-mode
 controls produced eight normal cold-load completions. The two-entry chain
-fired only when both address comparisons matched. Six triggered cold loads and
-one triggered scalar store issued no external DCache request; each load
-reported the exact breakpoint exception/action with no RF write, and the
-store's pre-trigger memory image remained byte-exact. No CPU defect was
-observed.
+fired only when both address comparisons matched. A DebugMode-action load
+returned `trigger=1` without a breakpoint exception and issued no DCache
+request; its non-architectural data field was the only disabled data oracle.
+Six breakpoint loads, aligned and cacheable-misaligned scalar stores, and
+unit-stride vector load/store element-address hits all issued no external
+DCache request. Breakpoint loads suppressed RF write, every trigger action and
+exception matched exactly, and both scalar/vector store images remained
+byte-exact. No CPU defect was observed.
 
 ## Side-Effecting MMIO Device Model
 

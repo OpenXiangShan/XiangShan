@@ -367,18 +367,20 @@ both integer and FP register writes. Translation/PMP faults must reach neither
 data manager, and every MMIO case must bypass DCache.
 
 `trigger-contracts` programs all four memory-trigger slots through the
-top-level CSR interface. A 15-case matrix covers EQ/GE/LT hit and miss
+top-level CSR interface. A 19-case matrix covers EQ/GE/LT hit and miss
 boundaries, enable/load/store/select gating, breakpoint-exception permission,
 current-debug-mode suppression, a two-entry chain hit and predecessor miss,
-and scalar load/store breakpoint actions. Triggered cold operations must
-report the exact action and exception, suppress the load RF write, leave the
-store image unchanged, and issue no external DCache request; every untriggered
-cold load must complete normally and produce a DCache request. LSQ enqueue
+breakpoint and DebugMode actions, aligned/misaligned scalar stores, and
+unit-stride vector loads/stores. Triggered cold operations must report the
+exact action and exception, suppress a breakpoint load's RF write, leave store
+images unchanged, and issue no external DCache request; every untriggered cold
+load must complete normally and produce a DCache request. DebugMode action
+retains the incoming RF-enable field but makes returned data architecturally
+irrelevant; the scoreboard permits skipping that data comparison only for
+this exact action. LSQ enqueue
 metadata (`exceptionVec`, trigger, and `flushPipe`) is driven explicitly on
 every transaction; scalar load/store and vector writeback adapters compare the
-observable flush, RF-enable, and MMIO/NCIO/perf debug metadata. Vector and
-misaligned-store trigger fields remain observational where their RTL path
-legally regenerates the action.
+observable flush, RF-enable, and MMIO/NCIO/perf debug metadata.
 
 `metadata-contracts` drives non-default RVC/FTQ/store-set/load-wait values on
 the scalar issue interface and completes a load. The top-level `issueLda`

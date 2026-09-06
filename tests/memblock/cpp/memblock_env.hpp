@@ -266,6 +266,9 @@ struct LoadTransaction {
     unsigned lane = 0;
     std::uint32_t expected_exception_mask = 0;
     std::uint32_t allowed_additional_exception_mask = 0;
+    // Only a DebugMode trigger makes the returned data architecturally
+    // irrelevant; LoadScoreboard rejects disabling this oracle otherwise.
+    bool check_data = true;
     bool check_data_on_exception = false;
     bool rf_wen = true;
     bool fp_wen = false;
@@ -2536,6 +2539,7 @@ public:
         bool prefetch;
         std::uint32_t exception_mask;
         std::uint32_t allowed_additional_exception_mask;
+        bool check_data;
         bool check_data_on_exception;
         bool rf_wen;
         bool fp_wen;
@@ -2550,6 +2554,13 @@ public:
 
     void expect(const LoadTransaction &transaction, std::uint64_t data)
     {
+        if (!transaction.check_data &&
+            transaction.expected_trigger != kTriggerDebugMode) {
+            if (error_.empty()) {
+                error_ = "load data checking may only be disabled for DebugMode trigger";
+            }
+            return;
+        }
         const auto [_, inserted] = expected_.emplace(
             rob_identity(transaction.rob, transaction.rob_flag),
             Expected{
@@ -2559,6 +2570,7 @@ public:
                 false,
                 transaction.expected_exception_mask,
                 transaction.allowed_additional_exception_mask,
+                transaction.check_data,
                 transaction.check_data_on_exception,
                 transaction.expected_exception_mask == 0 && transaction.rf_wen,
                 transaction.expected_exception_mask == 0 && transaction.fp_wen,
@@ -2585,6 +2597,7 @@ public:
             rob_identity(transaction.rob, transaction.rob_flag),
             Expected{
                 0, 0, transaction.rob_flag, true, 0, 0, false, false, false,
+                false,
                 transaction.expected_trigger, transaction.input_flush_pipe,
                 transaction.expected_debug_is_mmio,
                 transaction.expected_debug_is_ncio,
@@ -2650,7 +2663,8 @@ public:
             optional_mismatch(
                 writeback.debug_is_perf_cnt,
                 it->second.debug_is_perf_cnt) ||
-            ((it->second.exception_mask == 0 ||
+            (it->second.check_data &&
+             (it->second.exception_mask == 0 ||
               it->second.check_data_on_exception) &&
              writeback.data != it->second.data)) {
             fail("mismatched load writeback", lane, writeback, &it->second);
@@ -2719,6 +2733,7 @@ private:
                     << " allowed_additional_exception=0x"
                     << expected->allowed_additional_exception_mask
                     << " expected_data=0x" << std::hex << expected->data
+                    << " check_data=" << std::dec << expected->check_data
                     << " check_data_on_exception=" << std::dec
                     << expected->check_data_on_exception
                     << " expected_rf_wen=" << std::dec << expected->rf_wen
