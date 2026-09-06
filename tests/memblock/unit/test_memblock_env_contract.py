@@ -106,6 +106,24 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + driver + makefile)
 
+    def test_mbmc_bitmap_contract_is_registered(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+
+        for contract in (
+            "reference_bitmap_word_address",
+            "reference_bitmap_deny_mask",
+            "set_mbmc",
+            "pulse_mbmc_bitmap_clear",
+            "ptw_requests_covering_since",
+            "mbmc-contracts",
+            "bme_gate=1 cmode_gate=1 bitmap_allow=1",
+            "cache_hit=1 bclear_refetch=1",
+            "load_access_fault=1 store_access_fault=1",
+        ):
+            self.assertIn(contract, environment + driver + makefile)
+
     def test_pmp_contract_matches_platform_grain(self) -> None:
         parameters = (REPO_ROOT / "src/main/scala/xiangshan/PMParameters.scala").read_text()
         pmp = (REPO_ROOT / "src/main/scala/xiangshan/backend/fu/PMP.scala").read_text()

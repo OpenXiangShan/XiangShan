@@ -58,6 +58,7 @@ SCENARIOS = (
     "pmp-contracts",
     "hypervisor-contracts",
     "pointer-masking-contracts",
+    "mbmc-contracts",
     "l2-tlb-contracts",
     "ifetch-ptw-bridge",
     "two-stage-translation",

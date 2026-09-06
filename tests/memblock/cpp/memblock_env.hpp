@@ -68,6 +68,19 @@ constexpr std::uint32_t kExceptionHardwareError = 1U << 19;
 constexpr std::uint32_t kExceptionLoadGuestPageFault = 1U << 21;
 constexpr std::uint32_t kExceptionStoreGuestPageFault = 1U << 23;
 
+constexpr std::uint64_t reference_bitmap_word_address(
+    std::uint64_t bitmap_base, std::uint64_t physical_address)
+{
+    const std::uint64_t physical_page_number = physical_address >> 12;
+    return bitmap_base + ((physical_page_number >> 6) << 3);
+}
+
+constexpr std::uint64_t reference_bitmap_deny_mask(
+    std::uint64_t physical_address)
+{
+    return std::uint64_t{1} << ((physical_address >> 12) & 63U);
+}
+
 enum class PointerMaskingMode : std::uint8_t {
     disabled = 0,
     pmlen7 = 2,
@@ -1832,6 +1845,20 @@ public:
             }
         }
         return false;
+    }
+
+    std::uint64_t request_covering_count_since(
+        std::uint64_t address, std::uint64_t first_request) const
+    {
+        std::uint64_t count = 0;
+        for (std::size_t index = static_cast<std::size_t>(first_request);
+             index < request_history_.size(); ++index) {
+            const Request &request = request_history_[index];
+            const std::uint64_t bytes = std::uint64_t{1} << request.size;
+            const std::uint64_t base = request.address & ~(bytes - 1);
+            count += address >= base && address - base < bytes;
+        }
+        return count;
     }
 
     bool request_covering_address_has_min_delay_since(
@@ -3646,6 +3673,11 @@ public:
         return memory_agent_.grant_acks_idle();
     }
     std::uint64_t ptw_requests() const { return ptw_agent_.request_count(); }
+    std::uint64_t ptw_requests_covering_since(
+        std::uint64_t address, std::uint64_t first_request) const
+    {
+        return ptw_agent_.request_covering_count_since(address, first_request);
+    }
     std::uint64_t pending_ifetch_ptw_requests() const
     {
         return ifetch_ptw_pending_;
@@ -5357,6 +5389,31 @@ public:
         }
         dut_.io_ooo_to_mem_csrCtrl_sbuffer_timeout.ImmSet(cycles);
         return run_cycles(4) && check_components();
+    }
+
+    bool set_mbmc(
+        bool bitmap_enabled, bool confidential_mode,
+        std::uint64_t bitmap_base)
+    {
+        if ((bitmap_base & 63U) != 0) {
+            error_ = "MBMC bitmap base must be 64-byte aligned";
+            return false;
+        }
+        dut_.io_ooo_to_mem_tlbCsr_mbmc_BME.ImmSet(bitmap_enabled);
+        dut_.io_ooo_to_mem_tlbCsr_mbmc_CMODE.ImmSet(confidential_mode);
+        dut_.io_ooo_to_mem_tlbCsr_mbmc_BCLEAR.ImmSet(std::uint64_t{0});
+        dut_.io_ooo_to_mem_tlbCsr_mbmc_BMA.ImmSet(bitmap_base >> 6);
+        return run_cycles(16) && check_components();
+    }
+
+    bool pulse_mbmc_bitmap_clear()
+    {
+        dut_.io_ooo_to_mem_tlbCsr_mbmc_BCLEAR.ImmSet(std::uint64_t{1});
+        if (!run_cycles(8)) {
+            return false;
+        }
+        dut_.io_ooo_to_mem_tlbCsr_mbmc_BCLEAR.ImmSet(std::uint64_t{0});
+        return run_cycles(8) && check_components();
     }
 
     bool set_pointer_masking(const PointerMaskingConfig &config)

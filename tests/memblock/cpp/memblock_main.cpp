@@ -5543,6 +5543,187 @@ int run_sbuffer_timeout(int argc, char **argv)
     return 0;
 }
 
+int run_mbmc_contracts(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t virtual_base = 0x50000000ULL;
+    constexpr std::uint64_t virtual_stride = 0x200000ULL;
+    constexpr std::uint64_t physical_base = 0x90060000ULL;
+    constexpr std::uint64_t root = 0x97060000ULL;
+    constexpr std::uint64_t bitmap_base = 0x98000000ULL;
+    constexpr std::uint64_t policy_word_address =
+        memblock::reference_bitmap_word_address(bitmap_base, physical_base);
+    constexpr std::uint64_t bme_gate_mask =
+        memblock::reference_bitmap_deny_mask(physical_base);
+    constexpr std::uint64_t cmode_gate_mask =
+        memblock::reference_bitmap_deny_mask(physical_base + 0x1000);
+    constexpr std::uint64_t cache_mask =
+        memblock::reference_bitmap_deny_mask(physical_base + 0x2000);
+    static_assert(policy_word_address == 0x98012008ULL);
+    static_assert(bme_gate_mask == (std::uint64_t{1} << 32));
+    static_assert(cmode_gate_mask == (std::uint64_t{1} << 33));
+    static_assert(cache_mask == (std::uint64_t{1} << 34));
+
+    environment.memory().fill_incrementing(physical_base, 0x3000, 0x35);
+    environment.memory().write_u64(
+        policy_word_address, bme_gate_mask | cmode_gate_mask);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_MBMC_CONTRACTS_FAIL phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    for (unsigned index = 0; index < 6; ++index) {
+        const std::uint64_t physical = physical_base +
+            (index == 0 ? 0 : index == 1 ? 0x1000 : 0x2000);
+        if (!environment.map_sv39_4k(
+                virtual_base + index * virtual_stride,
+                physical, root)) {
+            std::cerr << "MEMBLOCK_MBMC_CONTRACTS_FAIL phase=mapping index="
+                      << index << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+    if (!environment.activate_sv39(root, 91) ||
+        !environment.set_mbmc(false, false, bitmap_base)) {
+        std::cerr << "MEMBLOCK_MBMC_CONTRACTS_FAIL phase=configuration reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    auto run_load = [&](unsigned index, std::uint32_t exception,
+                        std::string_view phase) {
+        const std::uint64_t physical = physical_base +
+            (index == 0 ? 0 : index == 1 ? 0x1000 : 0x2000);
+        const memblock::LoadTransaction load{
+            .address = virtual_base + index * virtual_stride + 0x188,
+            .oracle_address = physical + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(index),
+            .lq = static_cast<std::uint8_t>(index),
+            .pdest = static_cast<std::uint8_t>(116 + index),
+            .lane = index % memblock::kScalarLoadLanes,
+            .expected_exception_mask = exception,
+        };
+        if (exception == 0) {
+            environment.expect_load(load);
+        } else {
+            environment.expect_load_data(load, 0);
+        }
+        if (!environment.set_rob_head(load.rob, load.rob_flag) ||
+            !environment.enqueue_load(load) ||
+            !environment.issue_load(load, 4096) ||
+            !environment.run_until_complete(32768) ||
+            !environment.run_until_lq_retired(8192)) {
+            std::cerr << "MEMBLOCK_MBMC_CONTRACTS_FAIL phase=" << phase
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        return true;
+    };
+
+    if (!run_load(0, 0, "bme-disabled") ||
+        !environment.set_mbmc(true, true, bitmap_base) ||
+        !run_load(1, 0, "cmode-disabled")) {
+        return 1;
+    }
+
+    if (!environment.set_mbmc(true, false, bitmap_base)) {
+        std::cerr << "MEMBLOCK_MBMC_CONTRACTS_FAIL phase=enable reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t allow_ptw_before = environment.ptw_requests();
+    if (!run_load(2, 0, "bitmap-allow") ||
+        environment.ptw_requests_covering_since(
+            policy_word_address, allow_ptw_before) != 1) {
+        std::cerr << "MEMBLOCK_MBMC_CONTRACTS_FAIL phase=bitmap-allow-fetch"
+                  << " bitmap_requests="
+                  << environment.ptw_requests_covering_since(
+                         policy_word_address, allow_ptw_before)
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    environment.memory().write_u64(
+        policy_word_address,
+        bme_gate_mask | cmode_gate_mask | cache_mask);
+    const std::uint64_t cached_ptw_before = environment.ptw_requests();
+    if (!run_load(3, 0, "bitmap-cache-retains-allow") ||
+        environment.ptw_requests_covering_since(
+            policy_word_address, cached_ptw_before) != 0) {
+        std::cerr << "MEMBLOCK_MBMC_CONTRACTS_FAIL phase=bitmap-cache-hit"
+                  << " bitmap_requests="
+                  << environment.ptw_requests_covering_since(
+                         policy_word_address, cached_ptw_before)
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    if (!environment.pulse_mbmc_bitmap_clear()) {
+        std::cerr << "MEMBLOCK_MBMC_CONTRACTS_FAIL phase=bclear reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t denied_dcache_before = environment.tilelink_requests();
+    const std::uint64_t denied_ptw_before = environment.ptw_requests();
+    if (!run_load(4, memblock::kExceptionLoadAccessFault,
+                  "bitmap-denied-load") ||
+        environment.tilelink_requests() != denied_dcache_before ||
+        environment.ptw_requests_covering_since(
+            policy_word_address, denied_ptw_before) != 1) {
+        std::cerr << "MEMBLOCK_MBMC_CONTRACTS_FAIL phase=bitmap-denied-load-side-effect"
+                  << " dcache_before=" << denied_dcache_before
+                  << " dcache_after=" << environment.tilelink_requests()
+                  << " bitmap_requests="
+                  << environment.ptw_requests_covering_since(
+                         policy_word_address, denied_ptw_before)
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    const memblock::StoreTransaction denied_store{
+        .address = virtual_base + 5 * virtual_stride + 0x1c8,
+        .oracle_address = physical_base + 0x2000 + 0x1c8,
+        .data = 0xa55aa55a01234567ULL,
+        .op = memblock::StoreOp::sd,
+        .rob = 6,
+        .sq = 0,
+        .address_lane = 0,
+        .data_lane = 1,
+        .expected_exception_mask = memblock::kExceptionStoreAccessFault,
+    };
+    const std::uint64_t store_dcache_before = environment.tilelink_requests();
+    environment.expect_store(denied_store);
+    if (!environment.set_rob_head(
+            denied_store.rob, denied_store.rob_flag) ||
+        !environment.enqueue_store(denied_store, 0) ||
+        !environment.issue_store_address(denied_store, 4096) ||
+        !environment.issue_store_data(denied_store, 4096) ||
+        !environment.run_until_store_complete_with_replay(
+            denied_store, 32768) ||
+        environment.tilelink_requests() != store_dcache_before ||
+        (environment.sq_dequeued() + environment.sq_canceled() <
+             environment.sq_allocated() &&
+         !environment.account_sq_cancellation(1)) ||
+        environment.sq_dequeued() + environment.sq_canceled() !=
+            environment.sq_allocated()) {
+        std::cerr << "MEMBLOCK_MBMC_CONTRACTS_FAIL phase=bitmap-denied-store"
+                  << " dcache_before=" << store_dcache_before
+                  << " dcache_after=" << environment.tilelink_requests()
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_MBMC_CONTRACTS_PASS"
+              << " bme_gate=1 cmode_gate=1 bitmap_allow=1"
+              << " cache_hit=1 bclear_refetch=1"
+              << " load_access_fault=1 store_access_fault=1"
+              << " policy_word=0x" << std::hex << policy_word_address
+              << std::dec
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_mmio_contracts(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -19751,6 +19932,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "sbuffer-timeout") {
             return run_sbuffer_timeout(argc, argv);
+        }
+        if (options.test == "mbmc-contracts") {
+            return run_mbmc_contracts(argc, argv);
         }
         if (options.test == "mmio-contracts") {
             return run_mmio_contracts(argc, argv);
