@@ -47,8 +47,13 @@ the backend `pendingMMIOld` handshake. The forwarding case then held matching
 store data unavailable for 16 cycles after its address was known. Current RTL
 produced one pre-data cancellation and completed in 123
 cycles after the data arrived, returning the exact store value with one final
-uncanceled wakeup and no post-warmup DCache request. Access-fault,
-guest-page-fault, and bus-error cancellation causes remain open.
+uncanceled wakeup and no post-warmup DCache request. The existing error tests
+now apply the same feedback oracle: DCache denied and corrupt responses each
+produced two wakeups and two cancellations, while the independently modeled
+G-stage guest-page fault produced three wakeups and three cancellations. Thus
+none left a normal backend wakeup after its exceptional writeback. PMP/PMA
+denial and physical ECC cancellation crosses remain open because their physical
+injection paths are not yet modeled.
 
 ## RAW Memory Violation Boundary
 

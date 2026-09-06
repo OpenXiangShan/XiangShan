@@ -390,7 +390,10 @@ source-12 observation in every enabled seed.
 
 `dcache-errors` injects one denied and one corrupt DCache response and checks
 the corresponding scalar load access-fault and hardware-error writebacks with
-RF writes suppressed.
+RF writes suppressed. Its backend feedback oracle independently requires
+nonzero cancellation for each error and no surviving normal wakeup. The same
+all-wakeups-canceled rule is checked by `scalar-guest-fault` for a G-stage fault
+whose VA, GPA, and VS-non-leaf classification are independently modeled.
 
 `dcache-coherence` fills a clean line, invalidates it with a manager Probe,
 refills it, requests clean ProbeAckData, refills it again, dirties the line,

@@ -167,6 +167,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "forwarding-pre-data-classification",
             "forwarding_wakeups != forwarding_cancels + 1",
             "forwarding_cancels=",
+            "denied_feedback.first != denied_feedback.second",
+            "corrupt_wakeups != corrupt_cancels",
+            "feedback_wakeups != feedback_cancels",
             "load-feedback",
         ):
             self.assertIn(contract, environment + main + makefile + generator)

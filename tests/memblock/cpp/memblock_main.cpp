@@ -3442,6 +3442,15 @@ int run_dcache_errors(int argc, char **argv)
                   << " phase=reset reason=" << environment.error() << '\n';
         return 1;
     }
+    const auto feedback_totals = [&environment]() {
+        const auto &feedback = environment.scalar_load_feedback_stats();
+        std::pair<std::uint64_t, std::uint64_t> totals{};
+        for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+            totals.first += feedback.wakeups[lane];
+            totals.second += feedback.ld2_cancels[lane];
+        }
+        return totals;
+    };
 
     const memblock::LoadTransaction denied{
         .address = base + 0x100,
@@ -3466,6 +3475,7 @@ int run_dcache_errors(int argc, char **argv)
                   << " phase=denied reason=" << environment.error() << '\n';
         return 1;
     }
+    const auto denied_feedback = feedback_totals();
 
     const memblock::LoadTransaction corrupt{
         .address = base + 0x200,
@@ -3490,10 +3500,31 @@ int run_dcache_errors(int argc, char **argv)
                   << " phase=corrupt reason=" << environment.error() << '\n';
         return 1;
     }
+    const auto combined_feedback = feedback_totals();
+    const std::uint64_t corrupt_wakeups =
+        combined_feedback.first - denied_feedback.first;
+    const std::uint64_t corrupt_cancels =
+        combined_feedback.second - denied_feedback.second;
+    if (denied_feedback.second == 0 ||
+        denied_feedback.first != denied_feedback.second ||
+        corrupt_cancels == 0 || corrupt_wakeups != corrupt_cancels) {
+        std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=feedback-classification denied_wakeups="
+                  << denied_feedback.first << " denied_cancels="
+                  << denied_feedback.second << " corrupt_wakeups="
+                  << corrupt_wakeups << " corrupt_cancels="
+                  << corrupt_cancels << '\n';
+        return 1;
+    }
 
     std::cout << "MEMBLOCK_DCACHE_ERRORS_PASS"
               << " cycle=" << environment.cycle()
               << " denied=1 corrupt=1"
+              << " denied_wakeups=" << denied_feedback.first
+              << " denied_cancels=" << denied_feedback.second
+              << " corrupt_wakeups=" << corrupt_wakeups
+              << " corrupt_cancels=" << corrupt_cancels
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
@@ -12520,12 +12551,29 @@ int run_scalar_guest_fault(int argc, char **argv)
                   << environment.exception_is_for_vs_nonleaf_pte() << '\n';
         return 1;
     }
+    const auto &feedback = environment.scalar_load_feedback_stats();
+    std::uint64_t feedback_wakeups = 0;
+    std::uint64_t feedback_cancels = 0;
+    for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+        feedback_wakeups += feedback.wakeups[lane];
+        feedback_cancels += feedback.ld2_cancels[lane];
+    }
+    if (feedback_cancels == 0 || feedback_wakeups != feedback_cancels) {
+        std::cerr << "MEMBLOCK_SCALAR_GUEST_FAULT_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=feedback-classification wakeups="
+                  << feedback_wakeups << " cancels=" << feedback_cancels
+                  << '\n';
+        return 1;
+    }
     std::cout << "MEMBLOCK_SCALAR_GUEST_FAULT_PASS"
               << " cycle=" << environment.cycle()
               << " writebacks=" << environment.writebacks()
               << " ptw_requests=" << environment.ptw_requests()
               << " vaddr=0x" << std::hex << environment.exception_vaddr()
               << " gpaddr=0x" << environment.exception_gpaddr() << std::dec
+              << " wakeups=" << feedback_wakeups
+              << " cancels=" << feedback_cancels
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
