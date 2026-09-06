@@ -6312,12 +6312,149 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
         total_ptw_requests += environment.ptw_requests();
     }
 
+    constexpr std::uint64_t concurrent_root = 0x96000000ULL;
+    constexpr std::uint64_t ifetch_virtual = 0x60012000ULL;
+    constexpr std::uint64_t ifetch_physical = 0xc0012000ULL;
+    constexpr std::uint64_t load_virtual = 0xa0012000ULL;
+    constexpr std::uint64_t load_physical = 0xd0012000ULL;
+    constexpr unsigned concurrent_ptw_delay = 256;
+    memblock::Environment concurrent(argc, argv);
+    concurrent.configure_backpressure(
+        0x8538ec6303f2f4ebULL, true,
+        memblock::ResponseLatencyProfile::spec);
+    concurrent.memory().fill_incrementing(load_physical, 0x1000, 0x5d);
+    bool concurrent_configured = concurrent.reset() &&
+        concurrent.map_sv39_4k(
+            ifetch_virtual, ifetch_physical, concurrent_root, true, false,
+            true, false) &&
+        concurrent.map_sv39_4k(
+            load_virtual, load_physical, concurrent_root, true, true,
+            false, false) &&
+        concurrent.activate_sv39(concurrent_root, asid);
+    const auto ifetch_reference = memblock::reference_page_walk(
+        concurrent.memory(), concurrent_root, ifetch_virtual,
+        memblock::ReferencePageMode::sv39);
+    const auto load_reference = memblock::reference_page_walk(
+        concurrent.memory(), concurrent_root, load_virtual + 0x188,
+        memblock::ReferencePageMode::sv39);
+    const auto ifetch_root_pte = memblock::reference_pte_address_at_level(
+        concurrent.memory(), concurrent_root, ifetch_virtual,
+        memblock::ReferencePageMode::sv39, 2);
+    const auto ifetch_leaf_pte = memblock::reference_pte_address_at_level(
+        concurrent.memory(), concurrent_root, ifetch_virtual,
+        memblock::ReferencePageMode::sv39, 0);
+    const auto load_root_pte = memblock::reference_pte_address_at_level(
+        concurrent.memory(), concurrent_root, load_virtual,
+        memblock::ReferencePageMode::sv39, 2);
+    const auto load_leaf_pte = memblock::reference_pte_address_at_level(
+        concurrent.memory(), concurrent_root, load_virtual,
+        memblock::ReferencePageMode::sv39, 0);
+    concurrent_configured = concurrent_configured &&
+        ifetch_reference.translated &&
+        ifetch_reference.physical_address == ifetch_physical &&
+        load_reference.translated &&
+        load_reference.physical_address == load_physical + 0x188 &&
+        ifetch_root_pte && ifetch_leaf_pte && load_root_pte && load_leaf_pte;
+    if (!concurrent_configured) {
+        std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=IFU-DTLB-concurrent"
+                  << " cycle=" << concurrent.cycle()
+                  << " phase=configuration reason=" << concurrent.error()
+                  << '\n';
+        return 1;
+    }
+
+    const memblock::LoadTransaction concurrent_load{
+        .address = load_virtual + 0x188,
+        .oracle_address = load_reference.physical_address,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 52,
+        .lane = 0,
+    };
+    concurrent.expect_load(concurrent_load);
+    const std::uint64_t concurrent_ptw_before = concurrent.ptw_requests();
+    concurrent.force_next_ptw_response_delay(concurrent_ptw_delay);
+    memblock::Environment::IFetchPtwResponse concurrent_response;
+    if (!concurrent.set_rob_head(
+            concurrent_load.rob, concurrent_load.rob_flag) ||
+        !concurrent.enqueue_load(concurrent_load) ||
+        !concurrent.start_ifetch_ptw_request(
+            ifetch_virtual >> 12,
+            memblock::PtwTranslationMode::no_stage_two) ||
+        !concurrent.run_until_ptw_requests(concurrent_ptw_before + 1, 4096) ||
+        !concurrent.issue_load(concurrent_load, 512) ||
+        concurrent.pending_scalar_loads() != 1 ||
+        !concurrent.run_until_ptw_request_covering(
+            *load_root_pte, concurrent_ptw_before, 4096) ||
+        !concurrent.complete_ifetch_ptw_request(
+            concurrent_response, response_stall_cycles) ||
+        !concurrent.run_until_complete(16384) ||
+        !concurrent.run_until_lq_retired(2048) ||
+        !concurrent.run_until_ptw_request_covering(
+            *ifetch_root_pte, concurrent_ptw_before, 4096,
+            concurrent_ptw_delay) ||
+        !concurrent.run_until_ptw_request_covering(
+            *ifetch_leaf_pte, concurrent_ptw_before, 4096) ||
+        !concurrent.run_until_ptw_request_covering(
+            *load_leaf_pte, concurrent_ptw_before, 4096) ||
+        concurrent.ptw_max_outstanding_requests() < 2 ||
+        concurrent.writebacks() != 1) {
+        std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=IFU-DTLB-concurrent"
+                  << " cycle=" << concurrent.cycle()
+                  << " phase=request"
+                  << " pending_loads=" << concurrent.pending_scalar_loads()
+                  << " max_ptw_outstanding="
+                  << concurrent.ptw_max_outstanding_requests()
+                  << " ptw_requests=" << concurrent.ptw_requests()
+                  << " writebacks=" << concurrent.writebacks()
+                  << " reason=" << concurrent.error() << '\n';
+        return 1;
+    }
+
+    const std::uint64_t concurrent_vpn = ifetch_virtual >> 12;
+    const unsigned concurrent_sector =
+        static_cast<unsigned>(concurrent_vpn & 7U);
+    const std::uint64_t concurrent_s1_ppn =
+        (concurrent_response.s1_ppn << 3) |
+        concurrent_response.s1_ppn_low[concurrent_sector];
+    if (concurrent_response.s2xlate != static_cast<std::uint8_t>(
+            memblock::PtwTranslationMode::no_stage_two) ||
+        concurrent_response.s1_tag != (concurrent_vpn >> 3) ||
+        concurrent_response.s1_asid != asid || concurrent_response.s1_n ||
+        concurrent_response.s1_pbmt != 0 || concurrent_response.s1_d ||
+        !concurrent_response.s1_a || concurrent_response.s1_g ||
+        concurrent_response.s1_u || !concurrent_response.s1_x ||
+        concurrent_response.s1_w || !concurrent_response.s1_r ||
+        concurrent_response.s1_level != 0 || !concurrent_response.s1_v ||
+        concurrent_s1_ppn != (ifetch_physical >> 12) ||
+        concurrent_response.s1_addr_low != concurrent_sector ||
+        concurrent_response.s1_pteidx != (1U << concurrent_sector) ||
+        (concurrent_response.s1_valididx & (1U << concurrent_sector)) == 0 ||
+        concurrent_response.s1_pf || concurrent_response.s1_af) {
+        std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=IFU-DTLB-concurrent"
+                  << " cycle=" << concurrent.cycle()
+                  << " phase=response"
+                  << " s1_tag=0x" << std::hex << concurrent_response.s1_tag
+                  << " s1_ppn=0x" << concurrent_s1_ppn << std::dec
+                  << " s1_asid=" << concurrent_response.s1_asid
+                  << " s1_v=" << concurrent_response.s1_v
+                  << " s1_pf=" << concurrent_response.s1_pf
+                  << " s1_af=" << concurrent_response.s1_af << '\n';
+        return 1;
+    }
+    total_cycles += concurrent.cycle();
+    total_ptw_requests += concurrent.ptw_requests();
+
     std::cout << "MEMBLOCK_IFETCH_PTW_BRIDGE_PASS"
-              << " cases=" << cases.size() + degenerate_cases.size()
+              << " cases=" << cases.size() + degenerate_cases.size() + 1
               << " stage1_valid=4 nested_valid=4 stage1_fault=2"
               << " pbmt=2 only_stage1=2 only_stage2=2"
+              << " ifu_dtlb_source_overlap=1"
+              << " ptw_bus_max_outstanding="
+              << concurrent.ptw_max_outstanding_requests()
               << " response_stall_cycles="
-              << (cases.size() + degenerate_cases.size()) *
+              << (cases.size() + degenerate_cases.size() + 1) *
                     response_stall_cycles
               << " ptw_requests=" << total_ptw_requests
               << " cycles=" << total_cycles

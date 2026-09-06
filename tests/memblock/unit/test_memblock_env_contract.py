@@ -109,6 +109,21 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main + makefile)
 
+    def test_ifetch_ptw_bridge_covers_concurrent_dtlb_walk(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        for contract in (
+            "start_ifetch_ptw_request",
+            "complete_ifetch_ptw_request",
+            "ifetch_ptw_pending_",
+            "IFU-DTLB-concurrent",
+            "ifu_dtlb_source_overlap=1",
+            "ptw_max_outstanding_requests() < 2",
+            "ifetch-ptw-bridge",
+        ):
+            self.assertIn(contract, environment + main + makefile)
+
     def test_scalar_load_feedback_is_observed_on_every_lane(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

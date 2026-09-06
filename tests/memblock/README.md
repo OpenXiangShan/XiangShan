@@ -386,7 +386,11 @@ walks, PBMT=NC/IO leaves, all four Sv39/Sv48 x Sv39x4/Sv48x4 nested walks,
 and both Sv39/Sv48 forms of the VS-only and G-only degenerations. It
 reconstructs translated PPNs from the sector response, checks the active
 stage's ASID/VMID, permissions, PBMT, and faults, requires a cold PTW walk,
-and holds response ready low to verify stable payload under backpressure.
+and holds response ready low to verify stable payload under backpressure. A
+separate overlap case delays the IFU root PTE response for 256 cycles, issues a
+cold scalar DTLB miss before retiring the IFU response, requires both leaf PTE
+addresses and a PTW manager outstanding depth of at least two, and checks the
+load writeback against the independent memory oracle.
 This is separate from the data-side TLB translation tests.
 
 `uncache-errors` injects one denied and one corrupt Uncache response and checks
