@@ -553,7 +553,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         for diagnostic in (
             "duplicate outstanding scalar load ROB value",
             "duplicate outstanding scalar store ROB value",
-            "duplicate outstanding vector memory ROB value",
+            "duplicate outstanding vector memory uop",
             "duplicate store-address writeback",
             "duplicate store-data writeback",
         ):
@@ -809,6 +809,28 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             self.assertIn(contract, environment + main + makefile + benchmark)
         self.assertIn("entries.hasException", vfof)
         self.assertIn("io.uopWriteback.bits.data             := entries.vl", vfof)
+
+    def test_vector_segment_contract_is_registered(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
+        segment = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VSegmentUnit.scala"
+        ).read_text()
+        for contract in (
+            "kFuTypeVectorSegmentLoad",
+            "kFuTypeVectorSegmentStore",
+            "std::unordered_multimap<RobIdentity, Expected",
+            "run_vector_segment",
+            "segment_load_writebacks=2",
+            "segment_store_writebacks=2",
+            "segment_lsq_allocations=0",
+            "vector-segment",
+        ):
+            self.assertIn(contract, environment + main + makefile + benchmark)
+        self.assertIn("class VSegmentUnit", segment)
+        self.assertIn("io.uopwriteback.valid", segment)
 
     def test_translation_plan_matches_xiangshan_mode_contract(self) -> None:
         parameters = (REPO_ROOT / "src/main/scala/xiangshan/Parameters.scala").read_text()

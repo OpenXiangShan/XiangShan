@@ -37,6 +37,8 @@ constexpr std::uint64_t kFuTypeStore = std::uint64_t{1} << 16;
 constexpr std::uint64_t kFuTypeAtomic = std::uint64_t{1} << 17;
 constexpr std::uint64_t kFuTypeVectorLoad = std::uint64_t{1} << 31;
 constexpr std::uint64_t kFuTypeVectorStore = std::uint64_t{1} << 32;
+constexpr std::uint64_t kFuTypeVectorSegmentLoad = std::uint64_t{1} << 33;
+constexpr std::uint64_t kFuTypeVectorSegmentStore = std::uint64_t{1} << 34;
 constexpr std::uint16_t kVectorLoadUnitStride = 0x080;
 constexpr std::uint16_t kVectorLoadFaultOnlyFirst = 0x090;
 constexpr std::uint16_t kVectorLoadIndexedUnordered = 0x0a0;
@@ -346,6 +348,7 @@ enum class VectorAddressingMode : std::uint8_t {
 
 struct VectorMemoryTransaction {
     bool store = false;
+    bool segment = false;
     std::uint64_t address = kDefaultMemoryBase;
     std::optional<std::uint64_t> oracle_address;
     std::array<unsigned char, 16> data{};
@@ -417,6 +420,16 @@ inline std::uint16_t vector_fu_op_type(const VectorMemoryTransaction &transactio
             : kVectorLoadIndexedOrdered;
     }
     throw std::logic_error("unknown vector addressing mode");
+}
+
+inline std::uint64_t vector_fu_type(const VectorMemoryTransaction &transaction)
+{
+    if (transaction.segment) {
+        return transaction.store
+            ? kFuTypeVectorSegmentStore
+            : kFuTypeVectorSegmentLoad;
+    }
+    return transaction.store ? kFuTypeVectorStore : kFuTypeVectorLoad;
 }
 
 inline std::uint64_t vector_element_address(
@@ -2766,6 +2779,7 @@ class VectorMemoryScoreboard {
 public:
     struct Expected {
         bool store;
+        bool segment;
         std::array<unsigned char, 16> data;
         std::uint16_t active_elements;
         std::uint16_t fu_op_type;
@@ -2800,10 +2814,25 @@ public:
     {
         auto output_transaction = transaction;
         output_transaction.vl = transaction.expected_vl.value_or(transaction.vl);
-        const auto [_, inserted] = expected_.emplace(
-            rob_identity(transaction.rob, transaction.rob_flag),
+        const RobIdentity identity = rob_identity(
+            transaction.rob, transaction.rob_flag);
+        const auto range = expected_.equal_range(identity);
+        const bool duplicate = std::any_of(
+            range.first, range.second, [&](const auto &entry) {
+                return entry.second.vuop_idx == transaction.vuop_idx &&
+                       entry.second.pdest == transaction.pdest;
+            });
+        if (duplicate) {
+            if (error_.empty()) {
+                error_ = "duplicate outstanding vector memory uop";
+            }
+            return;
+        }
+        expected_.emplace(
+            identity,
             Expected{
                 transaction.store,
+                transaction.segment,
                 data,
                 active_vector_elements(output_transaction),
                 vector_fu_op_type(transaction),
@@ -2831,9 +2860,6 @@ public:
                 transaction.mask_bits,
                 transaction.index,
             });
-        if (!inserted && error_.empty()) {
-            error_ = "duplicate outstanding vector memory ROB value";
-        }
     }
 
     void observe(unsigned lane, const generated::VectorMemoryWriteback &writeback)
@@ -2841,9 +2867,14 @@ public:
         if (!writeback.valid) {
             return;
         }
-        const auto it = expected_.find(
+        const auto range = expected_.equal_range(
             rob_identity(writeback.rob_value, writeback.rob_flag));
-        if (it == expected_.end()) {
+        const auto it = std::find_if(
+            range.first, range.second, [&](const auto &entry) {
+                return entry.second.vuop_idx == writeback.vuop_idx &&
+                       entry.second.pdest == writeback.pdest;
+            });
+        if (it == range.second) {
             fail("unexpected vector memory writeback", lane, writeback);
             return;
         }
@@ -2860,7 +2891,8 @@ public:
         const bool trigger_mismatch =
             (expected.trigger.has_value() &&
              writeback.trigger != *expected.trigger);
-        if (writeback.exception_mask != expected.exception_mask || writeback.replay ||
+        if ((expected.segment && lane != 0) ||
+            writeback.exception_mask != expected.exception_mask || writeback.replay ||
             writeback.flush_pipe != expected.flush_pipe ||
             trigger_mismatch ||
             writeback.vec_wen != expected.vec_wen ||
@@ -3038,7 +3070,7 @@ private:
         error_ = message.str();
     }
 
-    std::unordered_map<RobIdentity, Expected, RobIdentityHash> expected_;
+    std::unordered_multimap<RobIdentity, Expected, RobIdentityHash> expected_;
     std::uint64_t load_observed_ = 0;
     std::uint64_t store_observed_ = 0;
     std::uint64_t fof_fix_observed_ = 0;
@@ -3063,7 +3095,7 @@ class Environment {
         generated::VectorMemoryIssue issue;
         issue.ftq_ptr = transaction.ftq_ptr;
         issue.ftq_offset = transaction.ftq_offset;
-        issue.fu_type = transaction.store ? kFuTypeVectorStore : kFuTypeVectorLoad;
+        issue.fu_type = vector_fu_type(transaction);
         issue.fu_op_type = vector_fu_op_type(transaction);
         issue.vec_wen = !transaction.store && !transaction.vl_wen;
         issue.vl_wen = transaction.vl_wen;
@@ -6188,6 +6220,9 @@ public:
 
     bool enqueue_vector(const VectorMemoryTransaction &transaction)
     {
+        if (transaction.segment) {
+            return check_components();
+        }
         const unsigned elements = transaction.flow_num;
         if (!wait_for_enqueue_capacity(
                 transaction.store ? 0 : elements,
@@ -6199,7 +6234,7 @@ public:
         enqueue.exception_mask = transaction.input_exception_mask;
         enqueue.trigger = transaction.input_trigger;
         enqueue.flush_pipe = transaction.input_flush_pipe;
-        enqueue.fu_type = transaction.store ? kFuTypeVectorStore : kFuTypeVectorLoad;
+        enqueue.fu_type = vector_fu_type(transaction);
         enqueue.fu_op_type = vector_fu_op_type(transaction);
         enqueue.uop_idx = transaction.vuop_idx;
         enqueue.last_uop = transaction.last_uop;

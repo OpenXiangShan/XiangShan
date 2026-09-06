@@ -6732,6 +6732,147 @@ int run_vector_fault_only_first(int argc, char **argv)
     return 0;
 }
 
+int run_vector_segment(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t load_base = memblock::kDefaultMemoryBase + 0x5c000;
+    constexpr std::uint64_t store_base = memblock::kDefaultMemoryBase + 0x5c100;
+    environment.memory().fill_incrementing(load_base, 32, 0x31);
+    environment.memory().fill_incrementing(store_base, 32, 0xe1);
+    environment.configure_backpressure(0x7c9e4d11a6b328f0ULL, true);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL cycle=" << environment.cycle()
+                  << " phase=reset reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    const auto make_segment = [](
+        bool store, std::uint64_t address, std::uint8_t rob,
+        std::uint8_t vuop_idx, std::uint8_t pdest) {
+        memblock::VectorMemoryTransaction transaction{
+            .store = store,
+            .segment = true,
+            .address = address,
+            .eew = 3,
+            .vl = 2,
+            .rob = rob,
+            .pdest = pdest,
+            .lane = 0,
+            .flow_num = 2,
+            .expected_trigger = memblock::kVectorWritebackTriggerNone,
+            .vuop_idx = vuop_idx,
+            .last_uop = vuop_idx == 1,
+            .nf = 1,
+        };
+        for (unsigned byte = 0; byte < transaction.data.size(); ++byte) {
+            transaction.data[byte] = static_cast<unsigned char>(
+                (store ? 0x70 : 0xa0) + vuop_idx * 0x20 + byte);
+        }
+        return transaction;
+    };
+
+    std::array<memblock::VectorMemoryTransaction, 2> loads{{
+        make_segment(false, load_base, 73, 0, 120),
+        make_segment(false, load_base, 73, 1, 121),
+    }};
+    for (unsigned field = 0; field < loads.size(); ++field) {
+        auto expected = loads[field].data;
+        for (unsigned element = 0; element < 2; ++element) {
+            for (unsigned byte = 0; byte < 8; ++byte) {
+                expected[element * 8 + byte] = environment.memory().read_byte(
+                    load_base + (element * 2 + field) * 8 + byte);
+            }
+        }
+        environment.expect_vector_data(loads[field], expected);
+        if (!environment.issue_vector(loads[field], 512)) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL cycle="
+                      << environment.cycle() << " phase=load-issue field="
+                      << field << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+    if (!environment.run_until_vector_complete(32768) ||
+        environment.vector_load_writebacks() != 2 ||
+        environment.lq_allocated() != 0 || environment.sq_allocated() != 0) {
+        std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL cycle=" << environment.cycle()
+                  << " phase=load-complete reason=" << environment.error()
+                  << " writebacks=" << environment.vector_load_writebacks()
+                  << " lq=" << environment.lq_allocated()
+                  << " sq=" << environment.sq_allocated() << '\n';
+        return 1;
+    }
+
+    std::array<memblock::VectorMemoryTransaction, 2> stores{{
+        make_segment(true, store_base, 74, 0, 0),
+        make_segment(true, store_base, 74, 1, 0),
+    }};
+    for (unsigned field = 0; field < stores.size(); ++field) {
+        environment.expect_vector(stores[field]);
+        if (!environment.issue_vector(stores[field], 512)) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL cycle="
+                      << environment.cycle() << " phase=store-issue field="
+                      << field << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+    if (!environment.run_until_vector_complete(32768) ||
+        environment.vector_store_writebacks() != 2 ||
+        environment.lq_allocated() != 0 || environment.sq_allocated() != 0 ||
+        !environment.pulse_sbuffer_flush() ||
+        !environment.run_until_sbuffer_empty(32768)) {
+        std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL cycle=" << environment.cycle()
+                  << " phase=store-complete reason=" << environment.error()
+                  << " writebacks=" << environment.vector_store_writebacks()
+                  << " lq=" << environment.lq_allocated()
+                  << " sq=" << environment.sq_allocated() << '\n';
+        return 1;
+    }
+
+    for (unsigned element = 0; element < 2; ++element) {
+        memblock::VectorMemoryTransaction readback{
+            .address = store_base + element * 16,
+            .eew = 3,
+            .vl = 2,
+            .rob = static_cast<std::uint8_t>(75 + element),
+            .lq = static_cast<std::uint8_t>(element * 2),
+            .pdest = static_cast<std::uint8_t>(122 + element),
+            .lane = element,
+            .flow_num = 2,
+            .expected_trigger = memblock::kVectorWritebackTriggerNone,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        std::array<unsigned char, 16> expected{};
+        std::copy_n(
+            stores[0].data.begin() + element * 8, 8, expected.begin());
+        std::copy_n(
+            stores[1].data.begin() + element * 8, 8, expected.begin() + 8);
+        environment.expect_vector_data(readback, expected);
+        if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+            !environment.enqueue_vector(readback) ||
+            !environment.issue_vector(readback, 512) ||
+            !environment.run_until_vector_complete_with_replays(readback, 16384) ||
+            !environment.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL cycle="
+                      << environment.cycle() << " phase=store-readback element="
+                      << element << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+
+    std::cout << "MEMBLOCK_VECTOR_SEGMENT_PASS"
+              << " cycle=" << environment.cycle()
+              << " fields=2 elements=2"
+              << " segment_load_writebacks=2 segment_store_writebacks=2"
+              << " segment_lsq_allocations=0"
+              << " readback_lq_allocated=" << environment.lq_allocated()
+              << " readback_lq_dequeued=" << environment.lq_dequeued()
+              << " dcache_requests=" << environment.tilelink_requests()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_vector_store_forwarding(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -20415,6 +20556,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "vector-fof") {
             return run_vector_fault_only_first(argc, argv);
+        }
+        if (options.test == "vector-segment") {
+            return run_vector_segment(argc, argv);
         }
         if (options.test == "vector-store-forwarding") {
             return run_vector_store_forwarding(argc, argv);
