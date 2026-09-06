@@ -7915,6 +7915,708 @@ int run_hypervisor_contracts(int argc, char **argv)
     return 0;
 }
 
+int run_pointer_masking_contracts(int argc, char **argv)
+{
+    constexpr std::uint64_t tag7 = 0x5aULL << 57;
+    constexpr std::uint64_t tag16 = 0xabcdULL << 48;
+    constexpr std::uint64_t physical_base = 0xc6000000ULL;
+    constexpr std::uint64_t virtual_base = 0x62000000ULL;
+
+    unsigned cases = 0;
+    unsigned faults = 0;
+    std::uint64_t total_cycles = 0;
+    std::uint64_t total_dcache_requests = 0;
+    std::uint64_t total_ptw_requests = 0;
+
+    auto execute_load = [&](
+                            memblock::Environment &environment,
+                            const memblock::LoadTransaction &transaction,
+                            const char *phase) {
+        const std::uint64_t dcache_before = environment.tilelink_requests();
+        const std::uint64_t uncache_before = environment.uncache_requests();
+        environment.expect_load(transaction);
+        if (!environment.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !environment.enqueue_load(transaction) ||
+            !environment.issue_load(transaction, 4096) ||
+            !environment.run_until_complete(32768) ||
+            !environment.run_until_lq_retired(8192)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << " reason=" << environment.error() << '\n';
+            return false;
+        }
+        if (transaction.expected_exception_mask != 0 &&
+            (environment.tilelink_requests() != dcache_before ||
+             environment.uncache_requests() != uncache_before)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << phase
+                      << " reason=unmasked-fault-reached-data-manager"
+                      << " dcache_before=" << dcache_before
+                      << " dcache_after=" << environment.tilelink_requests()
+                      << " uncache_before=" << uncache_before
+                      << " uncache_after=" << environment.uncache_requests()
+                      << '\n';
+            return false;
+        }
+        ++cases;
+        faults += transaction.expected_exception_mask != 0;
+        total_cycles += environment.cycle();
+        total_dcache_requests += environment.tilelink_requests();
+        total_ptw_requests += environment.ptw_requests();
+        return true;
+    };
+
+    struct ScalarCase {
+        const char *name;
+        memblock::ReferencePageMode page_mode;
+        memblock::PointerMaskingMode pointer_mode;
+        bool mxr;
+        std::uint32_t exception;
+        bool high_half;
+    };
+    const std::array<ScalarCase, 7> scalar_cases{{
+        {"m-bare-pmlen7", memblock::ReferencePageMode::bare,
+         memblock::PointerMaskingMode::pmlen7, false, 0, false},
+        {"m-bare-pmlen16", memblock::ReferencePageMode::bare,
+         memblock::PointerMaskingMode::pmlen16, false, 0, false},
+        {"m-bare-disabled", memblock::ReferencePageMode::bare,
+         memblock::PointerMaskingMode::disabled, false,
+         memblock::kExceptionLoadAccessFault, false},
+        {"sv39-pmlen7", memblock::ReferencePageMode::sv39,
+         memblock::PointerMaskingMode::pmlen7, false, 0, false},
+        {"sv48-pmlen16", memblock::ReferencePageMode::sv48,
+         memblock::PointerMaskingMode::pmlen16, false, 0, false},
+        {"sv48-pmlen16-high", memblock::ReferencePageMode::sv48,
+         memblock::PointerMaskingMode::pmlen16, false, 0, true},
+        {"sv39-mxr-exempt", memblock::ReferencePageMode::sv39,
+         memblock::PointerMaskingMode::pmlen16, true,
+         memblock::kExceptionLoadPageFault, false},
+    }};
+
+    for (std::size_t index = 0; index < scalar_cases.size(); ++index) {
+        const auto &test = scalar_cases[index];
+        memblock::Environment environment(argc, argv);
+        const std::uint64_t physical = physical_base + index * 0x2000ULL;
+        const std::uint64_t virtual_address = test.high_half
+            ? 0xffff800062000000ULL
+            : virtual_base + index * 0x2000ULL;
+        const std::uint64_t tag = test.pointer_mode ==
+                memblock::PointerMaskingMode::pmlen7
+            ? tag7
+            : tag16;
+        const unsigned retained_bits = test.pointer_mode ==
+                memblock::PointerMaskingMode::pmlen7
+            ? 57U
+            : 48U;
+        const std::uint64_t retained_mask =
+            (std::uint64_t{1} << retained_bits) - 1U;
+        const std::uint64_t untagged = test.page_mode ==
+                memblock::ReferencePageMode::bare
+            ? physical + 0x180
+            : virtual_address + 0x180;
+        const std::uint64_t tagged = tag | (untagged & retained_mask);
+        const bool translated = test.page_mode !=
+            memblock::ReferencePageMode::bare;
+        const std::uint64_t expected_effective =
+            memblock::reference_pointer_mask(
+                tagged, test.pointer_mode, translated);
+        if (test.exception == 0 && expected_effective != untagged) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL phase="
+                      << test.name << " reason=reference-transform"
+                      << " tagged=0x" << std::hex << tagged
+                      << " expected=0x" << untagged
+                      << " actual=0x" << expected_effective << std::dec
+                      << '\n';
+            return 1;
+        }
+        environment.memory().fill_incrementing(physical, 0x1000, 0x31 + index);
+        const std::uint64_t root = 0xb4000000ULL + index * 0x10000ULL;
+        bool configured = environment.reset();
+        if (configured && translated) {
+            configured = test.page_mode == memblock::ReferencePageMode::sv48
+                ? environment.map_sv48_4k(virtual_address, physical, root)
+                : environment.map_sv39_4k(virtual_address, physical, root);
+            configured = configured &&
+                (test.page_mode == memblock::ReferencePageMode::sv48
+                     ? environment.activate_sv48(root, 80 + index)
+                     : environment.activate_sv39(root, 80 + index)) &&
+                environment.set_translation_permissions(
+                    memblock::ReferencePrivilegeMode::supervisor,
+                    test.mxr);
+        }
+        memblock::PointerMaskingConfig config;
+        if (translated) {
+            config.supervisor = test.pointer_mode;
+        } else {
+            config.machine = test.pointer_mode;
+        }
+        configured = configured && environment.set_pointer_masking(config);
+        if (!configured) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << test.name
+                      << "-configuration reason=" << environment.error()
+                      << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction transaction{
+            .address = tagged,
+            .oracle_address = physical + 0x180,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = static_cast<std::uint8_t>(40 + index),
+            .lane = static_cast<unsigned>(index % memblock::kScalarLoadLanes),
+            .expected_exception_mask = test.exception,
+        };
+        if (!execute_load(environment, transaction, test.name)) {
+            return 1;
+        }
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t physical = physical_base + 0xe000;
+        constexpr std::uint64_t tagged = tag16 | (physical + 0x180);
+        environment.memory().fill_incrementing(physical, 0x1000, 0x61);
+        memblock::PointerMaskingConfig config;
+        config.machine = memblock::PointerMaskingMode::pmlen16;
+        if (!environment.reset() || !environment.set_pointer_masking(config)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=fp-load-configuration"
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction transaction{
+            .address = tagged,
+            .oracle_address = physical + 0x180,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 59,
+            .lane = 0,
+            .rf_wen = false,
+            .fp_wen = true,
+        };
+        if (!execute_load(environment, transaction, "fp-load")) {
+            return 1;
+        }
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t physical = physical_base + 0x10000;
+        constexpr std::uint64_t tagged = tag16 | (physical + 0x188);
+        constexpr std::uint64_t data = 0x8877665544332211ULL;
+        environment.memory().fill_incrementing(physical, 0x1000, 0x71);
+        memblock::PointerMaskingConfig config;
+        config.machine = memblock::PointerMaskingMode::pmlen16;
+        const memblock::StoreTransaction store{
+            .address = tagged,
+            .oracle_address = physical + 0x188,
+            .data = data,
+            .op = memblock::StoreOp::sd,
+            .rob = 0,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 1,
+        };
+        if (!environment.reset() || !environment.set_pointer_masking(config)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=scalar-store-configuration"
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        environment.expect_store(store);
+        if (!environment.set_rob_head(store.rob) ||
+            !environment.enqueue_store(store, 0) ||
+            !environment.issue_store_address(store, 2048) ||
+            !environment.issue_store_data(store, 2048) ||
+            !environment.run_until_store_complete(16384) ||
+            !environment.commit_store(store, 16384) ||
+            !environment.run_until_sbuffer_empty(16384)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=scalar-store"
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction readback{
+            .address = tagged,
+            .oracle_address = physical + 0x188,
+            .op = memblock::LoadOp::ld,
+            .rob = 1,
+            .lq = 0,
+            .pdest = 60,
+            .lane = 1,
+        };
+        environment.expect_load_data(readback, data);
+        if (!environment.set_rob_head(readback.rob) ||
+            !environment.enqueue_load(readback) ||
+            !environment.issue_load(readback, 4096) ||
+            !environment.run_until_complete(32768) ||
+            !environment.run_until_lq_retired(8192)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=scalar-store-readback"
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        ++cases;
+        total_cycles += environment.cycle();
+        total_dcache_requests += environment.tilelink_requests();
+        total_ptw_requests += environment.ptw_requests();
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t physical = physical_base + 0x12000;
+        constexpr std::uint64_t tagged = tag16 | (physical + 0x140);
+        environment.memory().fill_incrementing(physical, 0x1000, 0x91);
+        memblock::PointerMaskingConfig config;
+        config.machine = memblock::PointerMaskingMode::pmlen16;
+        memblock::VectorMemoryTransaction transaction{
+            .address = tagged,
+            .oracle_address = physical + 0x140,
+            .eew = 0,
+            .vl = 16,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 61,
+            .lane = 0,
+        };
+        if (!environment.reset() || !environment.set_pointer_masking(config)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=vector-load-configuration"
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        environment.expect_vector(transaction);
+        if (!environment.set_rob_head(transaction.rob) ||
+            !environment.enqueue_vector(transaction) ||
+            !environment.issue_vector(transaction, 4096) ||
+            !environment.run_until_vector_complete(32768) ||
+            !environment.run_until_lq_retired(8192)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=vector-load"
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        ++cases;
+        total_cycles += environment.cycle();
+        total_dcache_requests += environment.tilelink_requests();
+        total_ptw_requests += environment.ptw_requests();
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t physical = physical_base + 0x13000;
+        constexpr std::uint64_t tagged = tag16 | (physical + 0x140);
+        environment.memory().fill_incrementing(physical, 0x1000, 0xa1);
+        memblock::PointerMaskingConfig config;
+        config.machine = memblock::PointerMaskingMode::pmlen16;
+        memblock::VectorMemoryTransaction store{
+            .store = true,
+            .address = tagged,
+            .oracle_address = physical + 0x140,
+            .eew = 0,
+            .vl = 16,
+            .rob = 0,
+            .lq = 0,
+            .sq = 0,
+            .lane = 1,
+        };
+        for (unsigned byte = 0; byte < store.data.size(); ++byte) {
+            store.data[byte] = static_cast<unsigned char>(0xc1 + byte * 3);
+        }
+        if (!environment.reset() || !environment.set_pointer_masking(config)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=vector-store-configuration reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        environment.expect_vector(store);
+        if (!environment.set_rob_head(store.rob, store.rob_flag) ||
+            !environment.enqueue_vector(store) ||
+            !environment.issue_vector(store, 4096) ||
+            !environment.run_until_vector_complete_with_replays(store, 32768) ||
+            !environment.commit_vector_store(store, 16384)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=vector-store reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        memblock::VectorMemoryTransaction readback{
+            .address = tagged,
+            .oracle_address = physical + 0x140,
+            .eew = 0,
+            .vl = 16,
+            .rob = 1,
+            .lq = 0,
+            .sq = 1,
+            .pdest = 62,
+            .lane = 0,
+        };
+        environment.expect_vector_data(readback, store.data);
+        if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+            !environment.enqueue_vector(readback) ||
+            !environment.issue_vector(readback, 4096) ||
+            !environment.run_until_vector_complete(32768) ||
+            !environment.run_until_lq_retired(8192)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=vector-store-readback reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        ++cases;
+        total_cycles += environment.cycle();
+        total_dcache_requests += environment.tilelink_requests();
+        total_ptw_requests += environment.ptw_requests();
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t physical = physical_base + 0x14000;
+        constexpr std::uint64_t tagged = tag16 | (physical + 0x180);
+        constexpr std::uint64_t operand = 0x0102030405060708ULL;
+        environment.memory().fill_incrementing(physical, 0x1000, 0xb1);
+        memblock::PointerMaskingConfig config;
+        config.machine = memblock::PointerMaskingMode::pmlen16;
+        const std::uint64_t old_value = environment.memory().expected_load(
+            physical + 0x180, memblock::LoadOp::ld);
+        const memblock::AtomicTransaction atomic{
+            .address = tagged,
+            .op = memblock::AtomicOp::amoadd_d,
+            .data = operand,
+            .rob = 0,
+            .pdest = 62,
+            .address_lane = 0,
+            .data_lane = 1,
+        };
+        const memblock::LoadTransaction writeback{
+            .address = tagged,
+            .oracle_address = physical + 0x180,
+            .op = memblock::LoadOp::ld,
+            .rob = atomic.rob,
+            .pdest = atomic.pdest,
+        };
+        if (!environment.reset() || !environment.set_pointer_masking(config)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=atomic-configuration"
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        environment.expect_load_data(writeback, old_value);
+        if (!environment.issue_atomic(atomic, 4096) ||
+            !environment.run_until_complete(32768)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=atomic"
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        environment.record_atomic_result(physical + 0x180, old_value + operand);
+        const memblock::LoadTransaction readback{
+            .address = tagged,
+            .oracle_address = physical + 0x180,
+            .op = memblock::LoadOp::ld,
+            .rob = 1,
+            .lq = 0,
+            .pdest = 63,
+            .lane = 1,
+        };
+        environment.expect_load_data(readback, old_value + operand);
+        if (!environment.set_rob_head(readback.rob) ||
+            !environment.enqueue_load(readback) ||
+            !environment.issue_load(readback, 4096) ||
+            !environment.run_until_complete(32768) ||
+            !environment.run_until_lq_retired(8192)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=atomic-readback"
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        ++cases;
+        total_cycles += environment.cycle();
+        total_dcache_requests += environment.tilelink_requests();
+        total_ptw_requests += environment.ptw_requests();
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t physical = physical_base + 0x16000;
+        constexpr std::uint64_t tagged = tag16 | (physical + 0x20);
+        environment.memory().fill_incrementing(physical, 64, 0xc7);
+        memblock::PointerMaskingConfig config;
+        config.machine = memblock::PointerMaskingMode::pmlen16;
+        const memblock::StoreTransaction cbo_zero{
+            .address = tagged,
+            .oracle_address = physical,
+            .data = 0xdeadbeefcafef00dULL,
+            .op = memblock::StoreOp::cbo_zero,
+            .rob = 0,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 1,
+        };
+        if (!environment.reset() || !environment.set_pointer_masking(config)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=cbo-zero-configuration"
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        const std::uint64_t sq_target = environment.sq_dequeued() + 1;
+        environment.expect_store(cbo_zero);
+        if (!environment.set_rob_head(cbo_zero.rob, cbo_zero.rob_flag) ||
+            !environment.enqueue_store(cbo_zero, 0) ||
+            !environment.issue_store_address(cbo_zero, 4096) ||
+            !environment.issue_store_data(cbo_zero, 4096) ||
+            !environment.commit_stores_through(cbo_zero, 1) ||
+            !environment.run_until_store_complete(32768) ||
+            !environment.run_until_sq_dequeued(sq_target, 16384)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=cbo-zero reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction readback{
+            .address = tag16 | physical,
+            .oracle_address = physical,
+            .op = memblock::LoadOp::ld,
+            .rob = 1,
+            .lq = 0,
+            .pdest = 64,
+            .lane = 0,
+        };
+        environment.expect_load_data(readback, 0);
+        if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+            !environment.enqueue_load(readback) ||
+            !environment.issue_load(readback, 4096) ||
+            !environment.run_until_complete(32768) ||
+            !environment.run_until_lq_retired(8192)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=cbo-zero-readback reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        environment.record_committed_store(cbo_zero);
+        ++cases;
+        total_cycles += environment.cycle();
+        total_dcache_requests += environment.tilelink_requests();
+        total_ptw_requests += environment.ptw_requests();
+    }
+
+    auto run_nested_case = [&](
+                               const char *name,
+                               memblock::ReferencePrivilegeMode privilege,
+                               bool hypervisor,
+                               bool hlvx,
+                               bool current_user) {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t guest_virtual = 0x64000000ULL;
+        constexpr std::uint64_t guest_physical = 0x9f000000ULL;
+        constexpr std::uint64_t host_physical = physical_base + 0x18000;
+        constexpr std::uint64_t vs_root = 0xb6000000ULL;
+        constexpr std::uint64_t g_root = 0xb8000000ULL;
+        constexpr std::uint64_t tagged = tag16 | (guest_virtual + 0x180);
+        const bool user = privilege == memblock::ReferencePrivilegeMode::user;
+        const bool executable = hlvx;
+        environment.memory().fill_incrementing(host_physical, 0x1000, 0xd1);
+        bool configured = environment.reset() &&
+            environment.map_sv39_leaf(
+                guest_virtual, guest_physical, 0, vs_root,
+                !hlvx, !hlvx, executable, user, false);
+        for (unsigned page = 0; configured && page < 3; ++page) {
+            const std::uint64_t address = vs_root + page * 0x1000ULL;
+            configured = environment.map_sv39x4_4k(
+                address, address, g_root, true, true, false);
+        }
+        configured = configured && environment.map_sv39x4_leaf(
+            guest_physical, host_physical, 0, g_root,
+            !hlvx, !hlvx, executable, true, std::nullopt, true) &&
+            environment.activate_two_stage_modes(
+                memblock::ReferencePageMode::sv39,
+                memblock::ReferencePageMode::sv39,
+                vs_root, g_root, 91, 92);
+        if (hypervisor) {
+            configured = configured &&
+                environment.set_hypervisor_access_permissions(privilege);
+            if (current_user) {
+                configured = configured && environment.set_instruction_privilege(
+                    memblock::ReferencePrivilegeMode::user);
+            }
+        } else {
+            configured = configured && environment.set_translation_permissions(
+                privilege);
+        }
+        memblock::PointerMaskingConfig config;
+        if (hypervisor) {
+            if (current_user) {
+                config.hypervisor_user = memblock::PointerMaskingMode::pmlen16;
+            } else if (user) {
+                config.user = memblock::PointerMaskingMode::pmlen16;
+            } else {
+                config.virtual_supervisor =
+                    memblock::PointerMaskingMode::pmlen16;
+            }
+        } else if (user) {
+            config.user = memblock::PointerMaskingMode::pmlen16;
+        } else {
+            config.virtual_supervisor = memblock::PointerMaskingMode::pmlen16;
+        }
+        configured = configured && environment.set_pointer_masking(config);
+        if (!configured) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=" << name
+                      << "-configuration reason=" << environment.error()
+                      << '\n';
+            return false;
+        }
+        const memblock::LoadTransaction transaction{
+            .address = tagged,
+            .oracle_address = host_physical + 0x180,
+            .op = hypervisor
+                ? (hlvx ? memblock::LoadOp::hlvxwu : memblock::LoadOp::hlvd)
+                : memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 70,
+            .lane = 0,
+            .expected_exception_mask = hlvx
+                ? memblock::kExceptionLoadPageFault
+                : 0U,
+            // The TLB reports the non-canonical page fault.  The later HLVX
+            // physical execute check may also see an invalid PMP address and
+            // append the lower-priority access-fault bit; XiangShan's trap
+            // priority still selects the required load-page-fault cause.
+            .allowed_additional_exception_mask = hlvx
+                ? memblock::kExceptionLoadAccessFault
+                : 0U,
+        };
+        return execute_load(environment, transaction, name);
+    };
+
+    if (!run_nested_case(
+            "nested-vs-henvcfg", memblock::ReferencePrivilegeMode::supervisor,
+            false, false, false) ||
+        !run_nested_case(
+            "nested-vu-senvcfg", memblock::ReferencePrivilegeMode::user,
+            false, false, false) ||
+        !run_nested_case(
+            "hlv-vs-henvcfg", memblock::ReferencePrivilegeMode::supervisor,
+            true, false, false) ||
+        !run_nested_case(
+            "hlv-vu-senvcfg", memblock::ReferencePrivilegeMode::user,
+            true, false, false) ||
+        !run_nested_case(
+            "hlv-u-hstatus", memblock::ReferencePrivilegeMode::user,
+            true, false, true) ||
+        !run_nested_case(
+            "hlvx-exempt", memblock::ReferencePrivilegeMode::supervisor,
+            true, true, false)) {
+        return 1;
+    }
+
+    {
+        memblock::Environment environment(argc, argv);
+        constexpr std::uint64_t guest_virtual = 0x66000000ULL;
+        constexpr std::uint64_t guest_physical = 0x9f200000ULL;
+        constexpr std::uint64_t host_physical = physical_base + 0x1a000;
+        constexpr std::uint64_t vs_root = 0xba000000ULL;
+        constexpr std::uint64_t g_root = 0xbc000000ULL;
+        constexpr std::uint64_t tagged = tag16 | (guest_virtual + 0x280);
+        constexpr std::uint64_t data = 0x5a6b7c8d9eaf1021ULL;
+        environment.memory().fill_incrementing(host_physical, 0x1000, 0xe1);
+        bool configured = environment.reset() &&
+            environment.map_sv39_leaf(
+                guest_virtual, guest_physical, 0, vs_root,
+                true, true, false, false, false);
+        for (unsigned page = 0; configured && page < 3; ++page) {
+            const std::uint64_t address = vs_root + page * 0x1000ULL;
+            configured = environment.map_sv39x4_4k(
+                address, address, g_root, true, true, false);
+        }
+        configured = configured && environment.map_sv39x4_leaf(
+            guest_physical, host_physical, 0, g_root,
+            true, true, false, true, std::nullopt, true) &&
+            environment.activate_two_stage_modes(
+                memblock::ReferencePageMode::sv39,
+                memblock::ReferencePageMode::sv39,
+                vs_root, g_root, 93, 94) &&
+            environment.set_hypervisor_access_permissions(
+                memblock::ReferencePrivilegeMode::supervisor);
+        memblock::PointerMaskingConfig config;
+        config.virtual_supervisor = memblock::PointerMaskingMode::pmlen16;
+        configured = configured && environment.set_pointer_masking(config);
+        if (!configured) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=hsv-configuration"
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        const memblock::StoreTransaction store{
+            .address = tagged,
+            .oracle_address = host_physical + 0x280,
+            .data = data,
+            .op = memblock::StoreOp::hsvd,
+            .rob = 0,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 1,
+        };
+        environment.expect_store(store);
+        if (!environment.set_rob_head(store.rob, store.rob_flag) ||
+            !environment.enqueue_store(store, 0) ||
+            !environment.issue_store_address_until_tlb_hit(store, 16384) ||
+            !environment.issue_store_data(store, 4096) ||
+            !environment.run_until_store_complete(32768) ||
+            !environment.commit_store(store, 16384) ||
+            !environment.run_until_sbuffer_empty(16384)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=hsv-store reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        const memblock::LoadTransaction readback{
+            .address = tagged,
+            .oracle_address = host_physical + 0x280,
+            .op = memblock::LoadOp::hlvd,
+            .rob = 1,
+            .lq = 0,
+            .pdest = 71,
+            .lane = 1,
+        };
+        environment.expect_load_data(readback, data);
+        if (!environment.set_rob_head(readback.rob, readback.rob_flag) ||
+            !environment.enqueue_load(readback) ||
+            !environment.issue_load(readback, 4096) ||
+            !environment.run_until_complete(32768) ||
+            !environment.run_until_lq_retired(8192)) {
+            std::cerr << "MEMBLOCK_POINTER_MASKING_CONTRACTS_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=hsv-hlv-readback reason="
+                      << environment.error() << '\n';
+            return 1;
+        }
+        ++cases;
+        total_cycles += environment.cycle();
+        total_dcache_requests += environment.tilelink_requests();
+        total_ptw_requests += environment.ptw_requests();
+    }
+
+    std::cout << "MEMBLOCK_POINTER_MASKING_CONTRACTS_PASS"
+              << " cases=" << cases
+              << " faults=" << faults
+              << " pmlen7=1 pmlen16=1 bare=1 sv39=1 sv48=1 nested=1"
+              << " scalar_load=1 scalar_store=1 fp_load=1"
+              << " vector_load=1 vector_store=1 atomic=1 cbo_zero=1"
+              << " hlv=1 hlvx_exempt=1 hsv=1 mxr_exempt=1"
+              << " cycles=" << total_cycles
+              << " dcache_a=" << total_dcache_requests
+              << " ptw_requests=" << total_ptw_requests
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_pmp_contracts(int argc, char **argv)
 {
     constexpr std::uint8_t pmp_tor_read = 0x09;
@@ -18550,6 +19252,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "hypervisor-contracts") {
             return run_hypervisor_contracts(argc, argv);
+        }
+        if (options.test == "pointer-masking-contracts") {
+            return run_pointer_masking_contracts(argc, argv);
         }
         if (options.test == "l2-tlb-contracts") {
             return run_l2_tlb_contracts(argc, argv);

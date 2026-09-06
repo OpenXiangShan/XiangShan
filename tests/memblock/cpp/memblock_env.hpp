@@ -68,6 +68,50 @@ constexpr std::uint32_t kExceptionHardwareError = 1U << 19;
 constexpr std::uint32_t kExceptionLoadGuestPageFault = 1U << 21;
 constexpr std::uint32_t kExceptionStoreGuestPageFault = 1U << 23;
 
+enum class PointerMaskingMode : std::uint8_t {
+    disabled = 0,
+    pmlen7 = 2,
+    pmlen16 = 3,
+};
+
+struct PointerMaskingConfig {
+    PointerMaskingMode machine = PointerMaskingMode::disabled;
+    PointerMaskingMode supervisor = PointerMaskingMode::disabled;
+    PointerMaskingMode virtual_supervisor = PointerMaskingMode::disabled;
+    PointerMaskingMode hypervisor_user = PointerMaskingMode::disabled;
+    PointerMaskingMode user = PointerMaskingMode::disabled;
+};
+
+constexpr std::uint64_t reference_pointer_mask(
+    std::uint64_t address,
+    PointerMaskingMode mode,
+    bool virtual_address)
+{
+    const unsigned retained_bits = mode == PointerMaskingMode::pmlen7
+        ? 57U
+        : mode == PointerMaskingMode::pmlen16 ? 48U : 64U;
+    if (retained_bits == 64U) {
+        return address;
+    }
+    const std::uint64_t retained_mask =
+        (std::uint64_t{1} << retained_bits) - 1U;
+    const std::uint64_t retained = address & retained_mask;
+    if (!virtual_address) {
+        return retained;
+    }
+    const std::uint64_t sign_bit = std::uint64_t{1} << (retained_bits - 1U);
+    return (retained ^ sign_bit) - sign_bit;
+}
+
+static_assert(reference_pointer_mask(
+                  0xabcd000012345678ULL,
+                  PointerMaskingMode::pmlen16,
+                  false) == 0x0000000012345678ULL);
+static_assert(reference_pointer_mask(
+                  0x1234800012345678ULL,
+                  PointerMaskingMode::pmlen16,
+                  true) == 0xffff800012345678ULL);
+
 constexpr std::uint8_t circular_pointer_value(
     std::uint64_t offset, unsigned entries)
 {
@@ -200,6 +244,7 @@ struct LoadTransaction {
     std::uint8_t pdest = 0;
     unsigned lane = 0;
     std::uint32_t expected_exception_mask = 0;
+    std::uint32_t allowed_additional_exception_mask = 0;
     bool check_data_on_exception = false;
     bool rf_wen = true;
     bool fp_wen = false;
@@ -2173,6 +2218,7 @@ public:
         bool rob_flag;
         bool prefetch;
         std::uint32_t exception_mask;
+        std::uint32_t allowed_additional_exception_mask;
         bool check_data_on_exception;
         bool rf_wen;
         bool fp_wen;
@@ -2195,6 +2241,7 @@ public:
                 transaction.rob_flag,
                 false,
                 transaction.expected_exception_mask,
+                transaction.allowed_additional_exception_mask,
                 transaction.check_data_on_exception,
                 transaction.expected_exception_mask == 0 && transaction.rf_wen,
                 transaction.expected_exception_mask == 0 && transaction.fp_wen,
@@ -2220,7 +2267,7 @@ public:
         const auto [_, inserted] = expected_.emplace(
             rob_identity(transaction.rob, transaction.rob_flag),
             Expected{
-                0, 0, transaction.rob_flag, true, 0, false, false, false,
+                0, 0, transaction.rob_flag, true, 0, 0, false, false, false,
                 transaction.expected_trigger, transaction.input_flush_pipe,
                 transaction.expected_debug_is_mmio,
                 transaction.expected_debug_is_ncio,
@@ -2267,7 +2314,12 @@ public:
             expected_.erase(it);
             return;
         }
-        if (writeback.exception_mask != it->second.exception_mask ||
+        const std::uint32_t missing_exception =
+            it->second.exception_mask & ~writeback.exception_mask;
+        const std::uint32_t unexpected_exception = writeback.exception_mask &
+            ~(it->second.exception_mask |
+              it->second.allowed_additional_exception_mask);
+        if (missing_exception != 0 || unexpected_exception != 0 ||
             writeback.replay || writeback.rf_wen != it->second.rf_wen ||
             writeback.fp_wen != it->second.fp_wen ||
             writeback.trigger != it->second.trigger ||
@@ -2347,6 +2399,8 @@ private:
                     << " expected_rob_flag=" << expected->rob_flag
                     << " expected_exception=0x" << std::hex
                     << expected->exception_mask
+                    << " allowed_additional_exception=0x"
+                    << expected->allowed_additional_exception_mask
                     << " expected_data=0x" << std::hex << expected->data
                     << " check_data_on_exception=" << std::dec
                     << expected->check_data_on_exception
@@ -5160,6 +5214,13 @@ public:
         return run_cycles(16) && check_components();
     }
 
+    bool set_instruction_privilege(ReferencePrivilegeMode privilege)
+    {
+        dut_.io_ooo_to_mem_tlbCsr_priv_imode.ImmSet(
+            static_cast<std::uint64_t>(privilege));
+        return run_cycles(16) && check_components();
+    }
+
     bool set_hypervisor_access_permissions(
         ReferencePrivilegeMode spvp,
         bool mxr = false,
@@ -5226,6 +5287,21 @@ public:
     {
         dut_.io_ooo_to_mem_tlbCsr_mPBMTE.ImmSet(machine_enabled);
         dut_.io_ooo_to_mem_tlbCsr_hPBMTE.ImmSet(hypervisor_enabled);
+        return run_cycles(16) && check_components();
+    }
+
+    bool set_pointer_masking(const PointerMaskingConfig &config)
+    {
+        dut_.io_ooo_to_mem_tlbCsr_pmm_mseccfg.ImmSet(
+            static_cast<std::uint64_t>(config.machine));
+        dut_.io_ooo_to_mem_tlbCsr_pmm_menvcfg.ImmSet(
+            static_cast<std::uint64_t>(config.supervisor));
+        dut_.io_ooo_to_mem_tlbCsr_pmm_henvcfg.ImmSet(
+            static_cast<std::uint64_t>(config.virtual_supervisor));
+        dut_.io_ooo_to_mem_tlbCsr_pmm_hstatus.ImmSet(
+            static_cast<std::uint64_t>(config.hypervisor_user));
+        dut_.io_ooo_to_mem_tlbCsr_pmm_senvcfg.ImmSet(
+            static_cast<std::uint64_t>(config.user));
         return run_cycles(16) && check_components();
     }
 

@@ -33,6 +33,29 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + driver + makefile)
 
+    def test_pointer_masking_contract_is_registered(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+
+        for contract in (
+            "enum class PointerMaskingMode",
+            "reference_pointer_mask",
+            "set_pointer_masking",
+            "pointer-masking-contracts",
+            "m-bare-pmlen7",
+            "sv48-pmlen16-high",
+            "nested-vu-senvcfg",
+            "hlv-u-hstatus",
+            "hlvx-exempt",
+            "allowed_additional_exception_mask",
+            "mxr_exempt=1",
+            "scalar_load=1 scalar_store=1 fp_load=1",
+            "vector_load=1 vector_store=1 atomic=1 cbo_zero=1",
+            "hlv=1 hlvx_exempt=1 hsv=1 mxr_exempt=1",
+        ):
+            self.assertIn(contract, environment + driver + makefile)
+
     def test_pmp_contract_matches_platform_grain(self) -> None:
         parameters = (REPO_ROOT / "src/main/scala/xiangshan/PMParameters.scala").read_text()
         pmp = (REPO_ROOT / "src/main/scala/xiangshan/backend/fu/PMP.scala").read_text()
