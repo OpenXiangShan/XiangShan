@@ -2187,6 +2187,137 @@ int run_load_feedback(int argc, char **argv)
         !run_uncache_feedback(false, nc_wakeups, nc_cancels, nc_cycles)) {
         return 1;
     }
+
+    memblock::Environment forwarding_environment(argc, argv);
+    constexpr std::uint64_t forwarding_line =
+        memblock::kDefaultMemoryBase + 0x1e000;
+    constexpr std::uint64_t forwarding_address = forwarding_line + 24;
+    forwarding_environment.memory().fill_incrementing(
+        forwarding_line, 64, 0xc3);
+    if (!forwarding_environment.reset()) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << forwarding_environment.cycle()
+                  << " phase=forwarding-reset reason="
+                  << forwarding_environment.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction forwarding_warm{
+        .address = forwarding_address,
+        .op = memblock::LoadOp::ld,
+        .rob = 88,
+        .lq = 0,
+        .sq = 0,
+        .pdest = 73,
+        .lane = 0,
+    };
+    forwarding_environment.expect_load(forwarding_warm);
+    if (!forwarding_environment.enqueue_load(forwarding_warm) ||
+        !forwarding_environment.issue_load(forwarding_warm, 256) ||
+        !forwarding_environment.run_until_complete(4096) ||
+        !forwarding_environment.run_until_lq_retired(1024)) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << forwarding_environment.cycle()
+                  << " phase=forwarding-warm reason="
+                  << forwarding_environment.error() << '\n';
+        return 1;
+    }
+    const auto &forwarding_before_stats =
+        forwarding_environment.scalar_load_feedback_stats();
+    std::uint64_t forwarding_wakeups_before = 0;
+    std::uint64_t forwarding_cancels_before = 0;
+    for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+        forwarding_wakeups_before += forwarding_before_stats.wakeups[lane];
+        forwarding_cancels_before += forwarding_before_stats.ld2_cancels[lane];
+    }
+    const std::uint64_t forwarding_dcache_before =
+        forwarding_environment.tilelink_requests();
+    const memblock::StoreTransaction forwarding_store{
+        .address = forwarding_address,
+        .data = 0xd1e2f30415263748ULL,
+        .op = memblock::StoreOp::sd,
+        .rob = 89,
+        .sq = 0,
+        .address_lane = 0,
+        .data_lane = 1,
+    };
+    const memblock::LoadTransaction forwarding_load{
+        .address = forwarding_address,
+        .op = memblock::LoadOp::ld,
+        .rob = 90,
+        .lq = 1,
+        .sq = 1,
+        .pdest = 74,
+        .lane = 1,
+    };
+    forwarding_environment.expect_store(forwarding_store);
+    forwarding_environment.expect_load_data(
+        forwarding_load, forwarding_store.data);
+    if (!forwarding_environment.enqueue_store(forwarding_store, 0) ||
+        !forwarding_environment.enqueue_load(forwarding_load) ||
+        !forwarding_environment.issue_store_address(forwarding_store, 256) ||
+        !forwarding_environment.issue_load(forwarding_load, 256) ||
+        !forwarding_environment.run_cycles(16)) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << forwarding_environment.cycle()
+                  << " phase=forwarding-data-wait reason="
+                  << forwarding_environment.error() << '\n';
+        return 1;
+    }
+    const auto &forwarding_wait_stats =
+        forwarding_environment.scalar_load_feedback_stats();
+    std::uint64_t forwarding_cancels_wait = 0;
+    for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+        forwarding_cancels_wait += forwarding_wait_stats.ld2_cancels[lane];
+    }
+    if (forwarding_cancels_wait <= forwarding_cancels_before) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << forwarding_environment.cycle()
+                  << " phase=forwarding-pre-data-classification cancels_before="
+                  << forwarding_cancels_before << " cancels_after="
+                  << forwarding_cancels_wait << '\n';
+        return 1;
+    }
+    if (!forwarding_environment.issue_store_data(forwarding_store, 256) ||
+        !forwarding_environment.run_until_store_complete(512) ||
+        !forwarding_environment.run_until_complete(4096) ||
+        !forwarding_environment.run_until_lq_retired(1024) ||
+        !forwarding_environment.run_cycles(16)) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << forwarding_environment.cycle()
+                  << " phase=forwarding-complete reason="
+                  << forwarding_environment.error() << '\n';
+        return 1;
+    }
+    const auto &forwarding_stats =
+        forwarding_environment.scalar_load_feedback_stats();
+    std::uint64_t forwarding_wakeups = 0;
+    std::uint64_t forwarding_cancels = 0;
+    bool forwarding_metadata_match = false;
+    for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+        forwarding_wakeups += forwarding_stats.wakeups[lane];
+        forwarding_cancels += forwarding_stats.ld2_cancels[lane];
+        const auto &sample = forwarding_stats.last_wakeup[lane];
+        forwarding_metadata_match = forwarding_metadata_match ||
+            (sample.valid && sample.pdest == forwarding_load.pdest &&
+             sample.rf_wen == forwarding_load.rf_wen &&
+             sample.fp_wen == forwarding_load.fp_wen);
+    }
+    forwarding_wakeups -= forwarding_wakeups_before;
+    forwarding_cancels -= forwarding_cancels_before;
+    if (forwarding_cancels == 0 ||
+        forwarding_wakeups != forwarding_cancels + 1 ||
+        !forwarding_metadata_match ||
+        forwarding_environment.tilelink_requests() != forwarding_dcache_before) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << forwarding_environment.cycle()
+                  << " phase=forwarding-classification wakeups="
+                  << forwarding_wakeups << " cancels=" << forwarding_cancels
+                  << " metadata_match=" << forwarding_metadata_match
+                  << " dcache_before=" << forwarding_dcache_before
+                  << " dcache_after="
+                  << forwarding_environment.tilelink_requests() << '\n';
+        return 1;
+    }
     const auto &warm_stats = environment.scalar_load_feedback_stats();
     std::uint64_t wakeups = 0;
     std::uint64_t cancels = 0;
@@ -2208,6 +2339,8 @@ int run_load_feedback(int argc, char **argv)
               << " nc_cancels=" << nc_cancels
               << " mmio_cycles=" << mmio_cycles
               << " nc_cycles=" << nc_cycles
+              << " forwarding_cancels=" << forwarding_cancels
+              << " forwarding_cycles=" << forwarding_environment.cycle()
               << " wakeups=" << wakeups
               << " ld2_cancels=" << cancels
               << " writebacks=" << environment.writebacks()

@@ -43,8 +43,12 @@ wakeups without leaving a normal wakeup. PBMT=IO MMIO and PBMT=NC loads complete
 in 246 and 248 cycles respectively; each observed two cancellations and one
 final uncanceled wakeup with exact destination metadata, one page-table walk,
 one Uncache request, and no DCache request. The MMIO run additionally completed
-the backend `pendingMMIOld` handshake. Forwarding and other exception-cause
-cancellation crosses remain open in the verification plan.
+the backend `pendingMMIOld` handshake. The forwarding case then held matching
+store data unavailable for 16 cycles after its address was known. Current RTL
+produced one pre-data cancellation and completed in 123
+cycles after the data arrived, returning the exact store value with one final
+uncanceled wakeup and no post-warmup DCache request. Access-fault,
+guest-page-fault, and bus-error cancellation causes remain open.
 
 ## RAW Memory Violation Boundary
 

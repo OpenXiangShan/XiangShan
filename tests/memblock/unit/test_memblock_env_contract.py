@@ -164,6 +164,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "mmio_cancels=",
             "nc_cancels=",
             "uncache_environment.tilelink_requests() != dcache_before",
+            "forwarding-pre-data-classification",
+            "forwarding_wakeups != forwarding_cancels + 1",
+            "forwarding_cancels=",
             "load-feedback",
         ):
             self.assertIn(contract, environment + main + makefile + generator)

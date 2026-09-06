@@ -339,8 +339,11 @@ three more causes: an Sv39 load-page fault must cancel every speculative wakeup
 without sending a DCache request, while PBMT=IO MMIO and PBMT=NC loads must each
 retain exactly one uncanceled wakeup, issue one Uncache request, and issue no
 DCache request. The MMIO case also performs the backend `pendingMMIOld`
-handshake before completion. `random-mixed` keeps constant-space lane counters
-and requires both canceled and uncanceled wakeups on every lane. When hardware
+handshake before completion. A forwarding case issues a younger load after the
+matching store address but before its data; it requires a pre-data cancellation,
+then exact store-data forwarding with one final uncanceled wakeup and no DCache
+request after line warmup. `random-mixed` keeps constant-space lane counters and
+requires both canceled and uncanceled wakeups on every lane. When hardware
 stride prefetch is enabled, that backend gate is frozen before training begins
 because prefetch traffic produces load-pipeline cancel pulses without backend
 wakeups; full-run raw counters remain in the result.
