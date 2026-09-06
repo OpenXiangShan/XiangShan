@@ -5,28 +5,47 @@
 - Branch: `codex/memblock-ut-closure-20260905`
 - CPU baseline commit: `0fa7bb8259a7922481289d8d5932797afce84030`
 - CPU repair commits: `f5b553973` (VS-non-leaf vector fault GPA),
-  `f8bb99518` (Uncache exception preservation), and `e1424686a`
-  (exceptional atomic `rfWen` suppression).
+  `f8bb99518` (Uncache exception preservation), `e1424686a` (exceptional
+  atomic `rfWen` suppression), and `7045fa175` (exceptional scalar FP-load
+  `fpWen` suppression).
 - Retracted RTL change: `8eedb3ad0` changed the intentional atomic D-channel
   poisoned-line policy and was reverted by `db6f6d844` after design review.
 - Verification harness baseline: `98bdebbe0777ef051fa8451bd36641eb45f81963`;
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
-- Complete ordered RTL SHA-256: `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`
-- Current rebuilt and frozen UT executable SHA-256: `e9845e23db6f91cdd0b1ffd6c831e20059882fa7e825f02c29d8e359c37540b7`
+- Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
+- Current rebuilt and frozen UT executable SHA-256: `5aa985de8b40d7a2dc5c5ed3ddb2b4eecc7de779eaaa3aa4fa306ab05b6e595b`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
-- Current rebuilt and frozen Verilated model SHA-256: `af39b980658fd5cf913d1ad0d768b41643ef2331c45edb95584159dc537161a0`
+- Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
-- Frozen RTL metadata SHA-256: `0814ee0cdc63c87d1799f3ced61562a2f9072593e76a94f16fdb01b719feda1c`
-- Frozen runtime manifest SHA-256: `07539f7cef34faa37ca5fdbd64728d013216ed38add4b67198572a1b89eb84d5`
+- Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
+- Frozen runtime manifest SHA-256: `1f17d44325430737f4fafe2e4861534b53e59d26a3da20e40b7f8b61d1941816`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
+
+## Floating-Point Load Exception Write Enable
+
+On 2026-09-06, extending `fp-loads` exposed a CPU RTL defect: a denied PBMT=IO
+FLW produced the correct `LoadAccessFault` and `rfWen=0`, but retained
+`fpWen=1`. The backend FP writeback arbiter consumes that enable without an
+exception gate. The focused repair in `7045fa175` applies the same final
+exception-vector gate already used by scalar integer loads; details and the
+original failing output are in `CPU_BUG_FP_EXCEPTION_FP_WEN.md`.
+
+After full DefaultConfig re-elaboration and Picker rebuild, `fp-loads` passed
+in 895 aggregate cycles on complete RTL SHA-256
+`4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
+It checked nine FP writebacks: cacheable FLH/FLW/FLD, normal PBMT=IO
+FLH/FLW/FLD, denied FLW, corrupt FLD, and an unmapped FLW page fault. Successful
+narrow loads were exactly NaN-boxed; all three exceptional operations retained
+their exact exception while suppressing both RF write enables. The five MMIO
+cases emitted five Uncache requests and zero DCache requests.
 
 ## Reset With Outstanding Manager Traffic
 
 On 2026-09-06, `reset-recovery` passed three independent reset phases in 576
 aggregate cycles on complete RTL SHA-256
-`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
+`4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
 Each phase first accepted a DCache refill, PTW walk, or Uncache/MMIO request and
 held its response for 256 cycles. Reset then canceled the corresponding LQ
 entry and synchronously discarded the tile-local manager's transient link

@@ -3848,12 +3848,22 @@ int run_fp_loads(int argc, char **argv)
     // The MemBlock boundary carries destination-class enables separately from
     // the width opcode.  Exercise both narrow and wide FP writebacks and
     // explicitly require that the integer register file remains untouched.
-    const std::array<memblock::LoadTransaction, 2> transactions{{
+    const std::array<memblock::LoadTransaction, 3> transactions{{
+        {
+            .address = base + 6,
+            .op = memblock::LoadOp::lh,
+            .rob = 11,
+            .lq = 0,
+            .pdest = 15,
+            .lane = 2,
+            .rf_wen = false,
+            .fp_wen = true,
+        },
         {
             .address = base + 12,
             .op = memblock::LoadOp::lw,
             .rob = 12,
-            .lq = 0,
+            .lq = 1,
             .pdest = 17,
             .lane = 0,
             .rf_wen = false,
@@ -3863,7 +3873,7 @@ int run_fp_loads(int argc, char **argv)
             .address = base + 24,
             .op = memblock::LoadOp::ld,
             .rob = 13,
-            .lq = 1,
+            .lq = 2,
             .pdest = 19,
             .lane = 1,
             .rf_wen = false,
@@ -3873,9 +3883,12 @@ int run_fp_loads(int argc, char **argv)
     for (const auto &transaction : transactions) {
         const auto raw = environment.memory().expected_load(
             transaction.address, transaction.op);
-        const auto expected = transaction.op == memblock::LoadOp::lw
-            ? (std::uint64_t{0xffffffff00000000ULL} | (raw & 0xffffffffULL))
-            : raw;
+        const auto expected = transaction.op == memblock::LoadOp::lh
+            ? (std::uint64_t{0xffffffffffff0000ULL} | (raw & 0xffffULL))
+            : transaction.op == memblock::LoadOp::lw
+                ? (std::uint64_t{0xffffffff00000000ULL} |
+                   (raw & 0xffffffffULL))
+                : raw;
         environment.expect_load_data(transaction, expected);
         if (!environment.enqueue_load(transaction) ||
             !environment.issue_load(transaction, 512) ||
@@ -3891,10 +3904,148 @@ int run_fp_loads(int argc, char **argv)
                   << " actual=" << environment.writebacks() << '\n';
         return 1;
     }
+
+    memblock::Environment mmio(argc, argv);
+    constexpr std::uint64_t mmio_virtual = 0x5003a000ULL;
+    constexpr std::uint64_t mmio_physical = 0x9003a000ULL;
+    constexpr std::uint64_t mmio_root = 0x97010000ULL;
+    mmio.memory().fill_incrementing(mmio_physical, 64, 0x8d);
+    mmio.configure_backpressure(0x243f6a8885a308d3ULL, true);
+    if (!mmio.reset() ||
+        !mmio.map_sv39_4k(
+            mmio_virtual, mmio_physical, mmio_root, true, true, false,
+            false, false, true) ||
+        !mmio.activate_sv39(mmio_root, 37)) {
+        std::cerr << "MEMBLOCK_FP_LOADS_FAIL cycle=" << mmio.cycle()
+                  << " phase=mmio-configuration reason=" << mmio.error()
+                  << '\n';
+        return 1;
+    }
+
+    unsigned mmio_faults = 0;
+    auto run_mmio_fp = [&](std::uint8_t rob, std::uint8_t lq,
+                           memblock::LoadOp op, std::uint64_t offset,
+                           std::uint32_t exception, bool denied, bool corrupt) {
+        const memblock::LoadTransaction transaction{
+            .address = mmio_virtual + offset,
+            .oracle_address = mmio_physical + offset,
+            .op = op,
+            .rob = rob,
+            .lq = lq,
+            .pdest = static_cast<std::uint8_t>(21 + rob),
+            .lane = static_cast<unsigned>(rob % memblock::kScalarLoadLanes),
+            .expected_exception_mask = exception,
+            .rf_wen = false,
+            .fp_wen = true,
+            .expected_debug_is_mmio = true,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        const std::uint64_t raw = mmio.memory().expected_load(
+            mmio_physical + offset, op);
+        const std::uint64_t expected = op == memblock::LoadOp::lh
+            ? std::uint64_t{0xffffffffffff0000ULL} | (raw & 0xffffULL)
+            : op == memblock::LoadOp::lw
+                ? std::uint64_t{0xffffffff00000000ULL} |
+                    (raw & 0xffffffffULL)
+                : raw;
+        mmio.expect_load_data(transaction, expected);
+        if (denied || corrupt) {
+            mmio.inject_next_uncache_response_error(denied, corrupt);
+        }
+        const std::uint64_t dcache_before = mmio.tilelink_requests();
+        const std::uint64_t uncache_before = mmio.uncache_requests();
+        if (!mmio.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !mmio.enqueue_load(transaction) ||
+            !mmio.issue_load(transaction, 2048) ||
+            !mmio.wait_for_mmio_request(
+                transaction.rob, transaction.rob_flag, 4096) ||
+            !mmio.run_until_complete(8192) ||
+            mmio.tilelink_requests() != dcache_before ||
+            mmio.uncache_requests() != uncache_before + 1) {
+            return false;
+        }
+        if (exception == 0) {
+            return mmio.run_until_lq_retired(2048);
+        }
+        ++mmio_faults;
+        if (!mmio.run_cycles(8) ||
+            !mmio.redirect_after(
+                transaction.rob, transaction.rob_flag, true) ||
+            !mmio.run_cycles(96)) {
+            return false;
+        }
+        if (mmio.lq_dequeued() + mmio.lq_canceled() < mmio.lq_allocated()) {
+            return mmio.account_lq_cancellation(1);
+        }
+        return true;
+    };
+
+    if (!run_mmio_fp(0, 0, memblock::LoadOp::lh, 2, 0, false, false) ||
+        !run_mmio_fp(1, 1, memblock::LoadOp::lw, 4, 0, false, false) ||
+        !run_mmio_fp(2, 2, memblock::LoadOp::ld, 16, 0, false, false) ||
+        !run_mmio_fp(
+            3, 3, memblock::LoadOp::lw, 28,
+            memblock::kExceptionLoadAccessFault, true, false) ||
+        !run_mmio_fp(
+            4, 4, memblock::LoadOp::ld, 40,
+            memblock::kExceptionHardwareError, false, true)) {
+        std::cerr << "MEMBLOCK_FP_LOADS_FAIL cycle=" << mmio.cycle()
+                  << " phase=mmio-completion reason=" << mmio.error()
+                  << " dcache_requests=" << mmio.tilelink_requests()
+                  << " uncache_requests=" << mmio.uncache_requests() << '\n';
+        return 1;
+    }
+
+    memblock::Environment page_fault(argc, argv);
+    constexpr std::uint64_t fault_address = 0x5003c000ULL;
+    constexpr std::uint64_t fault_root = 0x97014000ULL;
+    const memblock::LoadTransaction faulting_flw{
+        .address = fault_address,
+        .op = memblock::LoadOp::lw,
+        .rob = 5,
+        .lq = 0,
+        .pdest = 25,
+        .lane = 1,
+        .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        .rf_wen = false,
+        .fp_wen = true,
+    };
+    if (!page_fault.reset() || !page_fault.activate_sv39(fault_root, 41)) {
+        std::cerr << "MEMBLOCK_FP_LOADS_FAIL cycle=" << page_fault.cycle()
+                  << " phase=page-fault-configuration reason="
+                  << page_fault.error() << '\n';
+        return 1;
+    }
+    page_fault.expect_load_data(faulting_flw, 0);
+    if (!page_fault.set_rob_head(
+            faulting_flw.rob, faulting_flw.rob_flag) ||
+        !page_fault.enqueue_load(faulting_flw) ||
+        !page_fault.issue_load(faulting_flw, 2048) ||
+        !page_fault.run_until_complete(8192) ||
+        !page_fault.run_until_lq_retired(2048) ||
+        page_fault.tilelink_requests() != 0 ||
+        page_fault.uncache_requests() != 0) {
+        std::cerr << "MEMBLOCK_FP_LOADS_FAIL cycle=" << page_fault.cycle()
+                  << " phase=page-fault-completion reason="
+                  << page_fault.error()
+                  << " dcache_requests=" << page_fault.tilelink_requests()
+                  << " uncache_requests=" << page_fault.uncache_requests()
+                  << '\n';
+        return 1;
+    }
     std::cout << "MEMBLOCK_FP_LOADS_PASS"
-              << " cycle=" << environment.cycle()
-              << " writebacks=" << environment.writebacks()
+              << " cycle="
+              << environment.cycle() + mmio.cycle() + page_fault.cycle()
+              << " writebacks="
+              << environment.writebacks() + mmio.writebacks() +
+                     page_fault.writebacks()
               << " fp_destinations=" << transactions.size()
+              << " mmio_fp=5 mmio_flh=1 mmio_flw=2 mmio_fld=2"
+              << " mmio_faults=" << mmio_faults
+              << " page_faults=1"
+              << " mmio_dcache_requests=" << mmio.tilelink_requests()
+              << " mmio_uncache_requests=" << mmio.uncache_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

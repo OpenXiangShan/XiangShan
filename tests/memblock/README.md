@@ -95,8 +95,9 @@ root-caused CPU RTL defects. Their filenames use the `CPU_BUG_*.md` prefix.
 UT harness, oracle, regression-controller, and provenance fixes are recorded in
 normal commits and consolidated documentation only; they do not receive a
 per-fix Markdown report. The confirmed reports currently retained are
-`CPU_BUG_UNCACHE_DCHANNEL_ERROR.md`, `CPU_BUG_ATOMIC_EXCEPTION_RF_WEN.md`, and
-`CPU_BUG_VECTOR_GUEST_FAULT_SPLIT.md`.
+`CPU_BUG_UNCACHE_DCHANNEL_ERROR.md`, `CPU_BUG_ATOMIC_EXCEPTION_RF_WEN.md`,
+`CPU_BUG_VECTOR_GUEST_FAULT_SPLIT.md`, and
+`CPU_BUG_FP_EXCEPTION_FP_WEN.md`.
 
 The structure follows UVM responsibilities without requiring a SystemVerilog
 class runtime:
@@ -341,9 +342,12 @@ applies the architectural VS-stage override priority, then checks exact load
 data, committed store readback, IO commit gating, DCache/Uncache selection, and
 LSQ conservation.
 
-`fp-loads` exercises the separate FP destination-enable path for 32-bit and
-64-bit load widths. The scoreboard requires no integer-register write and an
-exact FP writeback payload for each transaction.
+`fp-loads` exercises the separate FP destination-enable path for cacheable and
+PBMT=IO 16-, 32-, and 64-bit load widths. The scoreboard requires exact FLH/FLW
+NaN-boxing, exact FLD data, and no integer-register write. A page-faulting FLW
+and denied/corrupt MMIO FLW/FLD additionally require exact exception metadata
+while suppressing both integer and FP register writes; every MMIO case must
+bypass DCache.
 
 `trigger-contracts` programs a memory breakpoint through the top-level CSR
 trigger interface and checks the breakpoint exception bit, trigger action, and

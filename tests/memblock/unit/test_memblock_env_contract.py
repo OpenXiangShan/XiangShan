@@ -801,6 +801,27 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             pma,
         )
 
+    def test_fp_loads_cover_nan_boxed_mmio_and_exception_suppression(self) -> None:
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        load_unit = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/pipeline/LoadUnit.scala"
+        ).read_text()
+        for contract in (
+            "mmio_fp=5 mmio_flh=1 mmio_flw=2 mmio_fld=2",
+            '" mmio_faults="',
+            '" page_faults=1"',
+            "kExceptionLoadAccessFault",
+            "kExceptionHardwareError",
+            "kExceptionLoadPageFault",
+            "mmio_dcache_requests=",
+        ):
+            self.assertIn(contract, main)
+        self.assertIn(
+            "io.ldout.bits.uop.fpWen := s3_fpWen && "
+            "!io.ldout.bits.uop.exceptionVec.asUInt.orR",
+            load_unit,
+        )
+
     def test_mixed_stimulus_drives_every_lsq_dispatch_lane_in_one_cycle(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
