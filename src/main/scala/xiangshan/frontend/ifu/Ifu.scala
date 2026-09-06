@@ -429,7 +429,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_isCrossBlockInstr = VecInit(s2_expandedInstrVec.map(_.isCrossBlockInstr))
   dontTouch(s2_blockSel)
 
-  private val s2_useUncacheFetch = RegEnable(s1_useUncacheFetch, s1_fire)
+  private val s2_useUncacheFetch = RegEnable(s1_useUncacheFetch, false.B, s1_fire)
   private val s2_uncacheCanGo =
     (uncacheUnit.io.resp.valid && !uncacheUnit.io.resp.bits.needResend) || !s2_useUncacheFetch
   private val s2_uncacheCrossPageMask = s2_valid && uncacheUnit.io.resp.valid && uncacheUnit.io.resp.bits.needResend
