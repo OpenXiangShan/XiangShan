@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `452059633b16a815e8ff63959b251325331fd27604b887ef57e0daaaded0db3c`
+- Current rebuilt and frozen UT executable SHA-256: `c2b1fba5d7f3f5ca451b36fdbec873d6a34acb74c7d329bafc89d8f34d188c9c`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `1815186bb6b3a8b6cca49d519e6125cdcb40bf7e035d928f12ab75894ab17458`
+- Frozen runtime manifest SHA-256: `2a430318feefb5f4ece21f14aea02896e542e1dfa081cbd954a67442a47868a6`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -168,6 +168,22 @@ queued response and therefore delivered old-line data after TileLink source
 reuse. `XSTileWrap` drives both the core/MemBlock and tile-local L2 from the
 same `childReset`, so retaining the manager response did not model the actual
 reset domain. This was a UT environment correction, not a CPU RTL defect.
+
+## Frontend Bridge Reset Recovery
+
+On 2026-09-07, `frontend-reset-recovery` passed in 81 cycles on both the
+mutable build and frozen runtime, on complete RTL SHA-256
+`4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
+The scenario first accepted one ICache, instruction-Uncache, and
+ICache-control A request, held all three downstream ready signals low until
+the requests reached the outer buffer stage, and checked exact payloads for
+four stalled cycles. Functional reset removed all three requests. It then
+accepted an ICache-control D response behind upstream backpressure, checked
+its exact payload for another four cycles, and proved reset removed that
+response. Three different-address post-reset requests subsequently emerged
+exactly once before a final clean reset and idle check. The other two D paths
+do not expose a consumer-ready input at this top-level boundary, so no stalled
+response-reset claim is made for them. No CPU defect was observed.
 
 ## Ordinary Vector Multi-Uop Addressing
 

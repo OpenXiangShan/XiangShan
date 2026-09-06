@@ -295,6 +295,25 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, memblock)
 
+    def test_frontend_bridge_reset_recovery_covers_requests_and_response(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
+        for contract in (
+            "check_frontend_bridge_reset_recovery",
+            '"pre-reset-request"',
+            '"request-reset"',
+            '"response-reset"',
+            '"post-reset-survivor"',
+            'options.test == "frontend-reset-recovery"',
+            "frontend-reset-recovery",
+            '" paths=3 canceled_requests="',
+            '" canceled_responses="',
+            '" survivor_requests="',
+        ):
+            self.assertIn(contract, environment + driver + makefile + benchmark)
+
     def test_sbuffer_timeout_contract_is_registered(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

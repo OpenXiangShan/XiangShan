@@ -215,6 +215,7 @@ make ports prepare-rtl check-ports check-rtl unit
 make smoke PICKER="$PICKER" JOBS=8
 make pin-space PICKER="$PICKER" JOBS=8
 make frontend-bridge PICKER="$PICKER" JOBS=8 SEED=1 TRANSACTIONS=4096
+make frontend-reset-recovery PICKER="$PICKER" JOBS=8
 make single-load PICKER="$PICKER" JOBS=8
 make load-feedback PICKER="$PICKER" JOBS=8
 make topdown-contracts PICKER="$PICKER" JOBS=8
@@ -632,6 +633,15 @@ The harness synchronously resets the corresponding tile-local manager model,
 accounts each canceled queue entry, changes the post-reset address or page-table
 root, and requires three survivor loads to return the new data. Any stale
 pre-reset manager response or architectural writeback fails the scenario.
+
+`frontend-reset-recovery` accepts one request on each of the ICache,
+instruction-Uncache, and ICache-control A paths while all three downstream
+consumers are stalled, verifies their stable buffered payloads, then resets the
+bridge and rejects any stale request. It separately buffers an ICache-control D
+response behind upstream backpressure and proves reset removes it. Three
+distinct post-reset requests must then emerge exactly once before a final clean
+reset. The other two D paths have no top-level consumer-ready input and
+therefore do not claim an unobservable stalled-response reset contract.
 
 `scalar-misaligned` checks scalar splits within a 16-byte beat and across cache
 lines and translated pages. Its queue-pressure phase first leaves three split

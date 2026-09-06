@@ -2300,6 +2300,41 @@ int run_frontend_bridge(int argc, char **argv, const Options &options)
     return 0;
 }
 
+int run_frontend_reset_recovery(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    if (!environment.check_frontend_bridge_reset_recovery() ||
+        environment.frontend_reset_canceled_requests() != 3 ||
+        environment.frontend_reset_canceled_responses() != 1 ||
+        environment.frontend_reset_survivor_requests() != 3 ||
+        environment.frontend_reset_stall_checks() != 8) {
+        std::cerr << "MEMBLOCK_FRONTEND_RESET_RECOVERY_FAIL cycle="
+                  << environment.cycle()
+                  << " canceled_requests="
+                  << environment.frontend_reset_canceled_requests()
+                  << " canceled_responses="
+                  << environment.frontend_reset_canceled_responses()
+                  << " survivor_requests="
+                  << environment.frontend_reset_survivor_requests()
+                  << " stall_checks="
+                  << environment.frontend_reset_stall_checks()
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+    std::cout << "MEMBLOCK_FRONTEND_RESET_RECOVERY_PASS"
+              << " cycle=" << environment.cycle()
+              << " paths=3 canceled_requests="
+              << environment.frontend_reset_canceled_requests()
+              << " canceled_responses="
+              << environment.frontend_reset_canceled_responses()
+              << " survivor_requests="
+              << environment.frontend_reset_survivor_requests()
+              << " stall_checks="
+              << environment.frontend_reset_stall_checks()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_single_load(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -24633,6 +24668,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "frontend-bridge") {
             return run_frontend_bridge(argc, argv, options);
+        }
+        if (options.test == "frontend-reset-recovery") {
+            return run_frontend_reset_recovery(argc, argv);
         }
         if (options.test == "single-load") {
             return run_single_load(argc, argv);

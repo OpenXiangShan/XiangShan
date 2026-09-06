@@ -4843,6 +4843,335 @@ public:
         return false;
     }
 
+    bool check_frontend_bridge_reset_recovery()
+    {
+        constexpr std::uint64_t old_icache_address = 0x84001000ULL;
+        constexpr std::uint64_t old_instr_address = 0x88001000ULL;
+        constexpr std::uint64_t old_ctrl_address = 0x00123464ULL;
+        constexpr std::uint64_t old_ctrl_data = 0x1122334455667788ULL;
+        constexpr std::uint64_t new_icache_address = 0x84002000ULL;
+        constexpr std::uint64_t new_instr_address = 0x88002000ULL;
+        constexpr std::uint64_t new_ctrl_address = 0x00124560ULL;
+        constexpr std::uint64_t new_ctrl_data = 0x8877665544332211ULL;
+        constexpr unsigned stalled_cycles = 4;
+
+        if (!reset()) {
+            return false;
+        }
+        frontend_reset_canceled_requests_ = 0;
+        frontend_reset_canceled_responses_ = 0;
+        frontend_reset_survivor_requests_ = 0;
+        frontend_reset_stall_checks_ = 0;
+
+        const auto drive_request_valid = [&](const std::array<bool, 3> &valid) {
+            dut_.auto_inner_frontendBridge_icache_in_a_valid.ImmSet(valid[0]);
+            dut_.auto_inner_frontendBridge_instr_uncache_in_a_valid.ImmSet(
+                valid[1]);
+            dut_.auto_inner_frontendBridge_icachectrl_in_a_valid.ImmSet(
+                valid[2]);
+        };
+        const auto drive_requests = [&](std::uint64_t icache_address,
+                                        std::uint64_t instr_address,
+                                        std::uint64_t ctrl_address,
+                                        std::uint64_t ctrl_data) {
+            dut_.auto_inner_frontendBridge_icache_in_a_bits_source.ImmSet(
+                std::uint64_t{3});
+            dut_.auto_inner_frontendBridge_icache_in_a_bits_address.ImmSet(
+                icache_address);
+            dut_.auto_inner_frontendBridge_instr_uncache_in_a_bits_address.ImmSet(
+                instr_address);
+            dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_opcode.ImmSet(
+                std::uint64_t{1});
+            dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_param.ImmSet(
+                std::uint64_t{0});
+            dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_size.ImmSet(
+                std::uint64_t{2});
+            dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_source.ImmSet(
+                std::uint64_t{27});
+            dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_address.ImmSet(
+                ctrl_address);
+            dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_mask.ImmSet(
+                std::uint64_t{0xf0});
+            dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_data.ImmSet(
+                ctrl_data);
+            dut_.auto_inner_frontendBridge_icachectrl_in_a_bits_corrupt.ImmSet(
+                std::uint64_t{0});
+        };
+        const auto request_input_fires = [&]() {
+            return std::array<bool, 3>{
+                dut_.auto_inner_frontendBridge_icache_in_a_ready.B(),
+                dut_.auto_inner_frontendBridge_instr_uncache_in_a_ready.B(),
+                dut_.auto_inner_frontendBridge_icachectrl_in_a_ready.B(),
+            };
+        };
+        const auto request_output_valids = [&]() {
+            return std::array<bool, 3>{
+                dut_.auto_inner_frontendBridge_icache_out_a_valid.B(),
+                dut_.auto_inner_frontendBridge_instr_uncache_out_a_valid.B(),
+                dut_.auto_inner_frontendBridge_icachectrl_out_a_valid.B(),
+            };
+        };
+        const auto check_request_payload = [&](std::uint64_t icache_address,
+                                               std::uint64_t instr_address,
+                                               std::uint64_t ctrl_address,
+                                               std::uint64_t ctrl_data,
+                                               const char *phase,
+                                               bool require_all_valid) {
+            const auto valid = request_output_valids();
+            const bool icache_mismatch = valid[0] &&
+                (dut_.auto_inner_frontendBridge_icache_out_a_bits_opcode.U() != 4 ||
+                 dut_.auto_inner_frontendBridge_icache_out_a_bits_size.U() != 6 ||
+                 dut_.auto_inner_frontendBridge_icache_out_a_bits_source.U() != 3 ||
+                 dut_.auto_inner_frontendBridge_icache_out_a_bits_address.U() !=
+                     icache_address);
+            const bool instr_mismatch = valid[1] &&
+                dut_.auto_inner_frontendBridge_instr_uncache_out_a_bits_address.U() !=
+                    instr_address;
+            const bool ctrl_mismatch = valid[2] &&
+                (dut_.auto_inner_frontendBridge_icachectrl_out_a_bits_opcode.U() != 1 ||
+                 dut_.auto_inner_frontendBridge_icachectrl_out_a_bits_size.U() != 2 ||
+                 dut_.auto_inner_frontendBridge_icachectrl_out_a_bits_source.U() != 27 ||
+                 dut_.auto_inner_frontendBridge_icachectrl_out_a_bits_address.U() !=
+                     ctrl_address ||
+                 dut_.auto_inner_frontendBridge_icachectrl_out_a_bits_mask.U() !=
+                     0xf0 ||
+                 dut_.auto_inner_frontendBridge_icachectrl_out_a_bits_data.U() !=
+                     ctrl_data);
+            if ((require_all_valid &&
+                 (!valid[0] || !valid[1] || !valid[2])) ||
+                icache_mismatch || instr_mismatch || ctrl_mismatch) {
+                std::ostringstream message;
+                message << "frontend request buffer mismatch phase=" << phase
+                        << " valid=" << valid[0] << valid[1] << valid[2];
+                error_ = message.str();
+                return false;
+            }
+            return true;
+        };
+        const auto accept_all_requests = [&](std::array<bool, 3> &accepted,
+                                             const char *phase) {
+            for (unsigned elapsed = 0; elapsed < 16; ++elapsed) {
+                const std::array<bool, 3> valid{
+                    !accepted[0], !accepted[1], !accepted[2]};
+                drive_request_valid(valid);
+                dut_.RefreshComb();
+                const auto ready = request_input_fires();
+                const std::array<bool, 3> fire{
+                    valid[0] && ready[0], valid[1] && ready[1],
+                    valid[2] && ready[2]};
+                tick(false);
+                for (unsigned path = 0; path < accepted.size(); ++path) {
+                    accepted[path] = accepted[path] || fire[path];
+                }
+                if (accepted[0] && accepted[1] && accepted[2]) {
+                    drive_request_valid({false, false, false});
+                    return true;
+                }
+            }
+            std::ostringstream message;
+            message << "timed out accepting frontend requests phase=" << phase
+                    << " accepted=" << accepted[0] << accepted[1]
+                    << accepted[2];
+            error_ = message.str();
+            return false;
+        };
+        const auto require_no_buffered_traffic = [&](const char *phase,
+                                                     unsigned cycles) {
+            for (unsigned elapsed = 0; elapsed < cycles; ++elapsed) {
+                dut_.RefreshComb();
+                const auto request_valid = request_output_valids();
+                if (request_valid[0] || request_valid[1] || request_valid[2] ||
+                    dut_.auto_inner_frontendBridge_icache_in_d_valid.B() ||
+                    dut_.auto_inner_frontendBridge_instr_uncache_in_d_valid.B() ||
+                    dut_.auto_inner_frontendBridge_icachectrl_in_d_valid.B()) {
+                    std::ostringstream message;
+                    message << "stale frontend bridge traffic phase=" << phase
+                            << " elapsed=" << elapsed;
+                    error_ = message.str();
+                    return false;
+                }
+                tick(false);
+            }
+            return true;
+        };
+
+        dut_.auto_inner_frontendBridge_icache_out_a_ready.ImmSet(
+            std::uint64_t{0});
+        dut_.auto_inner_frontendBridge_instr_uncache_out_a_ready.ImmSet(
+            std::uint64_t{0});
+        dut_.auto_inner_frontendBridge_icachectrl_out_a_ready.ImmSet(
+            std::uint64_t{0});
+        drive_requests(old_icache_address, old_instr_address,
+                       old_ctrl_address, old_ctrl_data);
+        std::array<bool, 3> accepted{};
+        if (!accept_all_requests(accepted, "pre-reset-request")) {
+            return false;
+        }
+        bool all_requests_buffered = false;
+        for (unsigned elapsed = 0; elapsed < 8; ++elapsed) {
+            dut_.RefreshComb();
+            const auto valid = request_output_valids();
+            if (valid[0] && valid[1] && valid[2]) {
+                all_requests_buffered = true;
+                break;
+            }
+            tick(false);
+        }
+        if (!all_requests_buffered) {
+            error_ = "timed out advancing accepted frontend requests to stalled outputs";
+            return false;
+        }
+        for (unsigned elapsed = 0; elapsed < stalled_cycles; ++elapsed) {
+            dut_.RefreshComb();
+            if (!check_request_payload(
+                    old_icache_address, old_instr_address, old_ctrl_address,
+                    old_ctrl_data, "pre-reset-stall", true)) {
+                return false;
+            }
+            ++frontend_reset_stall_checks_;
+            tick(false);
+        }
+        if (!reset() ||
+            !require_no_buffered_traffic("request-reset", stalled_cycles)) {
+            return false;
+        }
+        frontend_reset_canceled_requests_ = 3;
+
+        dut_.auto_inner_frontendBridge_icachectrl_in_d_ready.ImmSet(
+            std::uint64_t{0});
+        dut_.auto_inner_frontendBridge_icachectrl_out_d_bits_opcode.ImmSet(
+            std::uint64_t{1});
+        dut_.auto_inner_frontendBridge_icachectrl_out_d_bits_size.ImmSet(
+            std::uint64_t{2});
+        dut_.auto_inner_frontendBridge_icachectrl_out_d_bits_source.ImmSet(
+            std::uint64_t{27});
+        dut_.auto_inner_frontendBridge_icachectrl_out_d_bits_data.ImmSet(
+            std::uint64_t{0xa5a55a5adeadbeefULL});
+        dut_.auto_inner_frontendBridge_icachectrl_out_d_valid.ImmSet(
+            std::uint64_t{1});
+        bool response_accepted = false;
+        for (unsigned elapsed = 0; elapsed < 16 && !response_accepted;
+             ++elapsed) {
+            dut_.RefreshComb();
+            response_accepted =
+                dut_.auto_inner_frontendBridge_icachectrl_out_d_ready.B();
+            tick(false);
+        }
+        dut_.auto_inner_frontendBridge_icachectrl_out_d_valid.ImmSet(
+            std::uint64_t{0});
+        if (!response_accepted) {
+            error_ = "timed out buffering ICache-control response";
+            return false;
+        }
+        bool response_buffered = false;
+        for (unsigned elapsed = 0; elapsed < 8; ++elapsed) {
+            dut_.RefreshComb();
+            if (dut_.auto_inner_frontendBridge_icachectrl_in_d_valid.B()) {
+                response_buffered = true;
+                break;
+            }
+            tick(false);
+        }
+        if (!response_buffered) {
+            error_ = "timed out advancing ICache-control response to stalled output";
+            return false;
+        }
+        for (unsigned elapsed = 0; elapsed < stalled_cycles; ++elapsed) {
+            dut_.RefreshComb();
+            if (!dut_.auto_inner_frontendBridge_icachectrl_in_d_valid.B() ||
+                dut_.auto_inner_frontendBridge_icachectrl_in_d_bits_opcode.U() != 1 ||
+                dut_.auto_inner_frontendBridge_icachectrl_in_d_bits_size.U() != 2 ||
+                dut_.auto_inner_frontendBridge_icachectrl_in_d_bits_source.U() != 27 ||
+                dut_.auto_inner_frontendBridge_icachectrl_in_d_bits_data.U() !=
+                    0xa5a55a5adeadbeefULL) {
+                error_ = "ICache-control response changed while stalled before reset";
+                return false;
+            }
+            ++frontend_reset_stall_checks_;
+            tick(false);
+        }
+        if (!reset() ||
+            !require_no_buffered_traffic("response-reset", stalled_cycles)) {
+            return false;
+        }
+        frontend_reset_canceled_responses_ = 1;
+
+        dut_.auto_inner_frontendBridge_icache_out_a_ready.ImmSet(
+            std::uint64_t{1});
+        dut_.auto_inner_frontendBridge_instr_uncache_out_a_ready.ImmSet(
+            std::uint64_t{1});
+        dut_.auto_inner_frontendBridge_icachectrl_out_a_ready.ImmSet(
+            std::uint64_t{1});
+        dut_.auto_inner_frontendBridge_icachectrl_in_d_ready.ImmSet(
+            std::uint64_t{1});
+        drive_requests(new_icache_address, new_instr_address,
+                       new_ctrl_address, new_ctrl_data);
+        std::array<bool, 3> survivor_accepted{};
+        std::array<bool, 3> survivor_emerged{};
+        for (unsigned elapsed = 0; elapsed < 32; ++elapsed) {
+            const std::array<bool, 3> input_valid{
+                !survivor_accepted[0], !survivor_accepted[1],
+                !survivor_accepted[2]};
+            drive_request_valid(input_valid);
+            dut_.RefreshComb();
+            const auto input_ready = request_input_fires();
+            const auto output_valid = request_output_valids();
+            if ((output_valid[0] || output_valid[1] || output_valid[2]) &&
+                !check_request_payload(
+                    new_icache_address, new_instr_address, new_ctrl_address,
+                    new_ctrl_data, "post-reset-survivor", false)) {
+                return false;
+            }
+            const std::array<bool, 3> input_fire{
+                input_valid[0] && input_ready[0],
+                input_valid[1] && input_ready[1],
+                input_valid[2] && input_ready[2]};
+            tick(false);
+            for (unsigned path = 0; path < survivor_accepted.size(); ++path) {
+                survivor_accepted[path] =
+                    survivor_accepted[path] || input_fire[path];
+                if (output_valid[path]) {
+                    if (survivor_emerged[path]) {
+                        error_ = "duplicate post-reset frontend request";
+                        return false;
+                    }
+                    survivor_emerged[path] = true;
+                    ++frontend_reset_survivor_requests_;
+                }
+            }
+            if (survivor_emerged[0] && survivor_emerged[1] &&
+                survivor_emerged[2]) {
+                drive_request_valid({false, false, false});
+                break;
+            }
+        }
+        if (frontend_reset_survivor_requests_ != 3) {
+            error_ = "timed out draining post-reset frontend requests";
+            return false;
+        }
+        return reset() && check_idle(2);
+    }
+
+    std::uint64_t frontend_reset_canceled_requests() const
+    {
+        return frontend_reset_canceled_requests_;
+    }
+
+    std::uint64_t frontend_reset_canceled_responses() const
+    {
+        return frontend_reset_canceled_responses_;
+    }
+
+    std::uint64_t frontend_reset_survivor_requests() const
+    {
+        return frontend_reset_survivor_requests_;
+    }
+
+    std::uint64_t frontend_reset_stall_checks() const
+    {
+        return frontend_reset_stall_checks_;
+    }
+
     bool check_pin_space()
     {
         pin_space_digest_ = 1469598103934665603ULL;
@@ -8889,6 +9218,10 @@ private:
     VectorMemoryScoreboard vector_scoreboard_;
     std::uint64_t pin_space_digest_ = 0;
     FrontendBridgeStats frontend_bridge_stats_;
+    std::uint64_t frontend_reset_canceled_requests_ = 0;
+    std::uint64_t frontend_reset_canceled_responses_ = 0;
+    std::uint64_t frontend_reset_survivor_requests_ = 0;
+    std::uint64_t frontend_reset_stall_checks_ = 0;
     ScalarLoadFeedbackStats scalar_load_feedback_stats_;
     IqSlowFeedbackStats iq_slow_feedback_stats_;
     MemoryViolationStats memory_violation_stats_;

@@ -24,6 +24,7 @@ SCENARIOS = (
     "dft-bridge-contracts",
     "pin-space",
     "frontend-bridge",
+    "frontend-reset-recovery",
     "single-load",
     "load-feedback",
     "topdown-contracts",
