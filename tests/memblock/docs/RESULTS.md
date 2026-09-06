@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `b2b46321eddbdcde010fb25957ff5694d7c298a2e98742cffc61344bd250e2bf`
+- Current rebuilt and frozen UT executable SHA-256: `452059633b16a815e8ff63959b251325331fd27604b887ef57e0daaaded0db3c`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `1d0840c054195d88a38010e635e530586948e90f3967f10bda71fb47bc1cee5a`
+- Frozen runtime manifest SHA-256: `1815186bb6b3a8b6cca49d519e6125cdcb40bf7e035d928f12ab75894ab17458`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -135,7 +135,22 @@ combination matched the ten elaborated frontend outputs and four backend
 outputs combinationally; the pattern digest was `0x5760755e9ffa3b83`.
 The test restored idle DFT values and completed a fresh reset plus idle smoke
 before reporting success. This result proves MemBlock bridge routing only, not
-MBIST, scan, SRAM, or reset-tree behavior. No CPU defect was observed.
+MBIST or physical SRAM behavior. No CPU defect was observed.
+
+## Backend Reset Tree Contract
+
+On 2026-09-07, `reset-tree-contracts` passed in 63 cycles on the mutable build
+and the frozen runtime, on complete RTL SHA-256
+`4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
+One-, two-, and five-cycle functional reset pulses all asserted
+`io_reset_backend` without a clock edge, held it throughout the pulse, and
+released it after exactly six rising edges through the two cascaded
+three-stage ResetGen instances. DFT functional mode isolated external reset;
+active-low `lgc_rst_n` then asserted the output asynchronously and released it
+after exactly three rising edges. Scan mode directly followed both
+`lgc_rst_n` transitions without synchronized-release latency. The test
+restored all DFT controls, completed a fresh functional reset, and checked idle
+outputs. No CPU defect was observed.
 
 ## Reset With Outstanding Manager Traffic
 

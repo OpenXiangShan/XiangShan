@@ -4903,6 +4903,150 @@ public:
         return false;
     }
 
+    bool check_reset_backend_contract()
+    {
+        constexpr unsigned sync_stages = 3;
+        constexpr unsigned functional_release_cycles = 2 * sync_stages;
+        constexpr std::array<unsigned, 3> functional_pulse_widths{1, 2, 5};
+
+        if (!reset()) {
+            return false;
+        }
+        reset_functional_pulses_ = 0;
+        reset_dft_pulses_ = 0;
+        reset_scan_transitions_ = 0;
+        reset_async_assertions_ = 0;
+
+        const auto require_reset = [&](bool expected, const char *phase,
+                                       unsigned elapsed) {
+            dut_.RefreshComb();
+            const bool observed = dut_.io_reset_backend.B();
+            if (observed == expected) {
+                return true;
+            }
+            std::ostringstream message;
+            message << "backend reset mismatch phase=" << phase
+                    << " elapsed=" << elapsed
+                    << " expected=" << expected
+                    << " observed=" << observed;
+            error_ = message.str();
+            return false;
+        };
+        const auto require_synchronous_release = [&](unsigned latency,
+                                                     const char *phase) {
+            if (!require_reset(true, phase, 0)) {
+                return false;
+            }
+            for (unsigned elapsed = 1; elapsed <= latency; ++elapsed) {
+                tick(false);
+                if (!require_reset(elapsed < latency, phase, elapsed)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        // Functional reset crosses the top-level and right MemBlock reset
+        // generators. Both asynchronously assert and synchronously release.
+        for (const unsigned pulse_width : functional_pulse_widths) {
+            dut_.reset.ImmSet(std::uint64_t{1});
+            if (!require_reset(true, "functional-assert", 0)) {
+                return false;
+            }
+            ++reset_async_assertions_;
+            for (unsigned elapsed = 0; elapsed < pulse_width; ++elapsed) {
+                tick(false);
+                if (!require_reset(true, "functional-hold", elapsed + 1)) {
+                    return false;
+                }
+            }
+            dut_.reset.ImmSet(std::uint64_t{0});
+            if (!require_synchronous_release(
+                    functional_release_cycles, "functional-release")) {
+                return false;
+            }
+            ++reset_functional_pulses_;
+        }
+
+        // DFT functional mode selects lgc_rst_n independently in each
+        // ResetGen. External functional reset must therefore be isolated, and
+        // release reaches this output after one three-stage synchronizer.
+        dut_.io_dft_reset_lgc_rst_n.ImmSet(std::uint64_t{1});
+        dut_.io_dft_reset_mode.ImmSet(std::uint64_t{1});
+        dut_.io_dft_reset_scan_mode.ImmSet(std::uint64_t{0});
+        dut_.reset.ImmSet(std::uint64_t{1});
+        if (!require_reset(false, "dft-functional-isolation", 0)) {
+            return false;
+        }
+        tick(false);
+        if (!require_reset(false, "dft-functional-isolation", 1)) {
+            return false;
+        }
+        dut_.reset.ImmSet(std::uint64_t{0});
+        dut_.io_dft_reset_lgc_rst_n.ImmSet(std::uint64_t{0});
+        if (!require_reset(true, "dft-functional-assert", 0)) {
+            return false;
+        }
+        ++reset_async_assertions_;
+        for (unsigned elapsed = 0; elapsed < 2; ++elapsed) {
+            tick(false);
+            if (!require_reset(true, "dft-functional-hold", elapsed + 1)) {
+                return false;
+            }
+        }
+        dut_.io_dft_reset_lgc_rst_n.ImmSet(std::uint64_t{1});
+        if (!require_synchronous_release(
+                sync_stages, "dft-functional-release")) {
+            return false;
+        }
+        ++reset_dft_pulses_;
+
+        // Scan mode bypasses the synchronizer output and directly projects
+        // the active-low logic reset pin.
+        dut_.io_dft_reset_mode.ImmSet(std::uint64_t{0});
+        dut_.io_dft_reset_scan_mode.ImmSet(std::uint64_t{1});
+        if (!require_reset(false, "scan-idle", 0)) {
+            return false;
+        }
+        dut_.io_dft_reset_lgc_rst_n.ImmSet(std::uint64_t{0});
+        if (!require_reset(true, "scan-assert", 0)) {
+            return false;
+        }
+        ++reset_async_assertions_;
+        ++reset_scan_transitions_;
+        tick(false);
+        if (!require_reset(true, "scan-hold", 1)) {
+            return false;
+        }
+        dut_.io_dft_reset_lgc_rst_n.ImmSet(std::uint64_t{1});
+        if (!require_reset(false, "scan-release", 0)) {
+            return false;
+        }
+        ++reset_scan_transitions_;
+
+        dut_.io_dft_reset_scan_mode.ImmSet(std::uint64_t{0});
+        dut_.io_dft_reset_mode.ImmSet(std::uint64_t{0});
+        dut_.io_dft_reset_lgc_rst_n.ImmSet(std::uint64_t{1});
+        return reset() && check_idle(2);
+    }
+
+    std::uint64_t reset_functional_pulses() const
+    {
+        return reset_functional_pulses_;
+    }
+
+    std::uint64_t reset_dft_pulses() const { return reset_dft_pulses_; }
+
+    std::uint64_t reset_scan_transitions() const
+    {
+        return reset_scan_transitions_;
+    }
+
+    std::uint64_t reset_async_assertions() const
+    {
+        return reset_async_assertions_;
+    }
+
     bool configure_sv39(
         std::uint64_t virtual_address,
         std::uint64_t physical_address,
@@ -8786,6 +8930,10 @@ private:
     std::uint64_t trace_bridge_checks_ = 0;
     std::uint64_t dft_bridge_patterns_ = 0;
     std::uint64_t dft_bridge_digest_ = 0;
+    std::uint64_t reset_functional_pulses_ = 0;
+    std::uint64_t reset_dft_pulses_ = 0;
+    std::uint64_t reset_scan_transitions_ = 0;
+    std::uint64_t reset_async_assertions_ = 0;
     std::uint64_t ifetch_ptw_pending_ = 0;
     std::uint64_t lq_allocated_ = 0;
     std::uint64_t lq_dequeued_ = 0;

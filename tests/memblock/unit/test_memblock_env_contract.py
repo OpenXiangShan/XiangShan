@@ -976,6 +976,25 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main)
 
+    def test_reset_tree_contract_covers_functional_dft_and_scan_modes(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
+        for contract in (
+            "check_reset_backend_contract",
+            '"functional-assert"',
+            '"functional-release"',
+            '"dft-functional-isolation"',
+            '"dft-functional-release"',
+            '"scan-assert"',
+            '"scan-release"',
+            "functional_release_cycles = 2 * sync_stages",
+            'options.test == "reset-tree-contracts"',
+            "reset-tree-contracts",
+        ):
+            self.assertIn(contract, environment + main + makefile + benchmark)
+
     def test_wfi_safety_drains_each_memory_manager_before_safe(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

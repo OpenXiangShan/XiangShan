@@ -9000,6 +9000,42 @@ int run_reset_recovery(int argc, char **argv)
     return 0;
 }
 
+int run_reset_tree_contracts(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    if (!environment.check_reset_backend_contract() ||
+        environment.reset_functional_pulses() != 3 ||
+        environment.reset_dft_pulses() != 1 ||
+        environment.reset_scan_transitions() != 2 ||
+        environment.reset_async_assertions() != 5) {
+        std::cerr << "MEMBLOCK_RESET_TREE_CONTRACTS_FAIL cycle="
+                  << environment.cycle()
+                  << " functional_pulses="
+                  << environment.reset_functional_pulses()
+                  << " dft_pulses=" << environment.reset_dft_pulses()
+                  << " scan_transitions="
+                  << environment.reset_scan_transitions()
+                  << " async_assertions="
+                  << environment.reset_async_assertions()
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_RESET_TREE_CONTRACTS_PASS"
+              << " cycle=" << environment.cycle()
+              << " functional_pulses="
+              << environment.reset_functional_pulses()
+              << " functional_release_cycles=6"
+              << " dft_pulses=" << environment.reset_dft_pulses()
+              << " dft_release_cycles=3"
+              << " scan_transitions="
+              << environment.reset_scan_transitions()
+              << " async_assertions="
+              << environment.reset_async_assertions()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_vector_load(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -24666,6 +24702,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "reset-recovery") {
             return run_reset_recovery(argc, argv);
+        }
+        if (options.test == "reset-tree-contracts") {
+            return run_reset_tree_contracts(argc, argv);
         }
         if (options.test == "vector-load") {
             return run_vector_load(argc, argv);

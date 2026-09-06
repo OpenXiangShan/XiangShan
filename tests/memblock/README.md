@@ -240,6 +240,7 @@ make mmio-contracts PICKER="$PICKER" JOBS=8
 make cbo-zero-contracts PICKER="$PICKER" JOBS=8
 make wfi-safety PICKER="$PICKER" JOBS=8
 make reset-recovery PICKER="$PICKER" JOBS=8
+make reset-tree-contracts PICKER="$PICKER" JOBS=8
 make atomic-contracts PICKER="$PICKER" JOBS=8
 make atomic-dchannel-errors PICKER="$PICKER" JOBS=8
 make scalar-misaligned PICKER="$PICKER" JOBS=8
@@ -445,7 +446,14 @@ exhausting all 1,024 combinations of the seven SRAM-broadcast and three
 DFT-reset input bits. It checks the ten elaborated frontend outputs and four
 backend outputs combinationally, restores the idle DFT values, then performs a
 fresh functional reset. This checks MemBlock routing only; MBIST, scan, SRAM,
-and reset-tree behavior remain integration responsibilities.
+and physical SRAM behavior remain integration responsibilities.
+`reset-tree-contracts` checks the observable `io_reset_backend` reset-tree
+contract in a short standalone run. Three functional-reset pulse widths must
+assert asynchronously and release after exactly two three-stage ResetGen
+levels. DFT functional mode must isolate external reset and release after one
+three-stage level, while scan mode must directly follow active-low
+`lgc_rst_n`. The scenario restores functional DFT controls and performs a fresh
+reset before checking idle behavior.
 `random-mixed` keeps constant-space lane counters and
 requires both canceled and uncanceled wakeups on every lane. When hardware
 stride prefetch is enabled, that backend gate is frozen before training begins

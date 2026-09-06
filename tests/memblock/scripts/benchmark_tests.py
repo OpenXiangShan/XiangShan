@@ -47,6 +47,7 @@ SCENARIOS = (
     "cbo-zero-contracts",
     "wfi-safety",
     "reset-recovery",
+    "reset-tree-contracts",
     "vector-load",
     "vector-split-load",
     "vector-fof",
