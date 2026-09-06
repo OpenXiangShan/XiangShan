@@ -15,12 +15,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `257396474c8bef35e3e3594a6adac2acf6aa7444e8370f0f4d3e413bd545f301`
 - Complete ordered RTL SHA-256: `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`
-- Current rebuilt and frozen UT executable SHA-256: `119981f989225707f7e13618bb5bfd3c92f1851a0d74dbe575bae71e29614856`
+- Current rebuilt and frozen UT executable SHA-256: `ef48b0166f67aa7dee545571e4498a8c706cbbfe8b32ea508eb1c2bad4b88225`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `577579039590a2ea7a5e5d4e22901ac1d76afbcc5fed158eaf1cd53c8e5d3984`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `3ffb5c0d39a3402bbe6507a54829d58866e907d02760179159d6945dde00344a`
-- Frozen runtime manifest SHA-256: `04c492cc9f07998b5ff4c4e5033b48428c3daa7a70700b91dc63d9592eaf5820`
+- Frozen runtime manifest SHA-256: `2009cc5fb1a393f932cdbca659e08221d42b1778eb73a4eafeb5eb4ba97ad689`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -723,6 +723,37 @@ classes under equal weights. Both long-tail profiles observed all four latency
 buckets independently for DCache, PTW, and Uncache. No CPU defect was observed.
 Frozen-runtime coverage seed 5 also passed 256 actions in 15,787 cycles with
 all schema-9 segment dimensions and conservation gates complete.
+
+## Ordinary Vector Constraint Interface
+
+On 2026-09-07, schema 10 promoted ordinary vector addressing, EEW, SEW, LMUL,
+and derived EMUL into the same `random-mixed` constraint interface. Each
+selected operation is one architectural vector load or store and expands into
+the complete 1..8-uop stream. Unit-stride uses the conservative two-flow
+allocation contract; strided and indexed flows follow the directed matrix
+rules; indexed `EMUL>LMUL` shapes share `vd` across index uops. Large flow
+groups are streamed through capacity-bounded LQ/SQ windows without changing
+ROB/uop identity. Illegal or enabled-but-unreachable shape classes are rejected
+before simulation.
+
+A frozen finite 256-action `coverage` run at seed 12 passed in 16,928 cycles on complete
+RTL SHA-256 `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`.
+Its constrained-tail load/store split was 10/9. The 19 instructions covered
+addressing 4/5/7/3, EEW 6/6/4/3, SEW 6/7/3/3, LMUL 2/2/5/4/2/2/2, and
+EMUL 2/1/6/4/2/2/2. They expanded to 43 uops, with six multi-uop
+instructions. The frozen controller artifact passed the independent schema-10,
+runtime/controller hash, backpressure, enable/disable, per-dimension
+conservation, and 1..8-uop gates; artifact SHA-256 is
+`2e45390b12f5ae22b98cb34f3ccfb11aa81e1a7e653b80478b4f7579db1be66b`.
+
+A second 256-action run at seed 11 disabled vector stores and constrained the
+remaining ordinary vector traffic to only unit-stride, EEW=SEW=32, and
+LMUL=EMUL=M1. It passed in 15,244 cycles with a constrained-tail direction
+count of 6/0, six shape operations, exactly six uops, and zero counts in every
+disabled direction and shape class. A deliberately impossible
+EEW8/SEW64/LMUL=mf8 constraint was rejected before cycle 0 with `vector
+addressing constraint enables an unreachable class`. No CPU defect was
+observed in these runs.
 
 ## Superseded Pre-Clarification Stress
 

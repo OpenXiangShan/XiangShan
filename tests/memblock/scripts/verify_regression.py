@@ -150,7 +150,10 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     schema = result.get("constraint_schema")
     if schema is None:
         return
-    _require(schema in (2, 3, 4, 5, 6, 7, 8, 9), f"unsupported constraint_schema: {schema!r}")
+    _require(
+        schema in (2, 3, 4, 5, 6, 7, 8, 9, 10),
+        f"unsupported constraint_schema: {schema!r}",
+    )
 
     target_translation = _csv_counts(result, "target_translation", 3)
     actual_translation = _csv_counts(result, "actual_translation", 3)
@@ -468,6 +471,113 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                     "vector segment operation/subclass coverage is not "
                     f"conserved for {dimension}",
                 )
+
+    if schema >= 10:
+        vector_dimensions = (
+            ("addressing", 4),
+            ("eew", 4),
+            ("sew", 4),
+            ("lmul", 7),
+            ("emul", 7),
+        )
+        vector_targets: dict[str, list[int]] = {}
+        vector_shape_operations = result.get("actual_vector_shape_ops")
+        vector_uops = result.get("actual_vector_uops")
+        vector_multi_uop = result.get("actual_vector_multi_uop")
+        vector_directions = _csv_counts(
+            result, "actual_vector_direction", 2
+        )
+        for name, value in (
+            ("actual_vector_shape_ops", vector_shape_operations),
+            ("actual_vector_uops", vector_uops),
+            ("actual_vector_multi_uop", vector_multi_uop),
+        ):
+            _require(
+                isinstance(value, int) and not isinstance(value, bool)
+                and value >= 0,
+                f"{name} is not a nonnegative integer: {value!r}",
+            )
+        vector_enabled = target_operations[2] != 0 or target_operations[3] != 0
+        _require(
+            all(
+                (weight == 0 and count == 0)
+                or (weight != 0 and count > 0)
+                for weight, count in zip(
+                    target_operations[2:4], vector_directions
+                )
+            ),
+            "actual_vector_direction does not match enabled vector operation "
+            f"classes: target={target_operations[2:4]} "
+            f"actual={vector_directions}",
+        )
+        for dimension, fields in vector_dimensions:
+            target = _csv_counts(result, f"target_vector_{dimension}", fields)
+            actual = _csv_counts(result, f"actual_vector_{dimension}", fields)
+            vector_targets[dimension] = target
+            if vector_enabled:
+                _require(
+                    all(
+                        (weight == 0 and count == 0)
+                        or (weight != 0 and count > 0)
+                        for weight, count in zip(target, actual)
+                    ),
+                    f"actual_vector_{dimension} does not match its enabled "
+                    f"classes: target={target} actual={actual}",
+                )
+                _require(
+                    sum(actual) == vector_shape_operations,
+                    "ordinary vector shape/subclass coverage is not conserved "
+                    f"for {dimension}",
+                )
+            else:
+                _require(
+                    all(count == 0 for count in actual),
+                    f"actual_vector_{dimension} is nonzero while ordinary "
+                    "vector operations are disabled",
+                )
+        if vector_enabled:
+            _require(
+                vector_shape_operations > 0
+                and vector_shape_operations
+                <= actual_operations[2] + actual_operations[3],
+                "ordinary vector shape operations do not fit operation coverage",
+            )
+            _require(
+                sum(vector_directions) == vector_shape_operations,
+                "ordinary vector operation/direction coverage is not conserved",
+            )
+            _require(
+                vector_shape_operations <= vector_uops
+                <= 8 * vector_shape_operations,
+                "ordinary vector uop count is outside the architectural 1..8 "
+                "uops per instruction range",
+            )
+            _require(
+                0 <= vector_multi_uop <= vector_shape_operations
+                and vector_uops >= vector_shape_operations + vector_multi_uop,
+                "ordinary vector multi-uop accounting is inconsistent",
+            )
+            enabled_multi_uop = (
+                any(vector_targets["emul"][4:])
+                or (
+                    any(vector_targets["addressing"][2:])
+                    and any(vector_targets["lmul"][4:])
+                )
+            )
+            if enabled_multi_uop:
+                _require(
+                    vector_multi_uop > 0,
+                    "enabled ordinary vector shapes produced no multi-uop "
+                    "instruction",
+                )
+        else:
+            _require(
+                vector_shape_operations == 0
+                and vector_uops == 0
+                and vector_multi_uop == 0,
+                "ordinary vector counts are nonzero while vector operations "
+                "are disabled",
+            )
 
 
 def _positive_csv_prefix(

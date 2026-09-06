@@ -182,9 +182,114 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 10
+        result["constraint_schema"] = 11
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
+        ):
+            verify_regression._check_mixed_coverage(result)
+
+    def test_constraint_schema_ten_checks_weighted_vector_shapes(self) -> None:
+        result = mixed_result(10)
+        result.update(
+            {
+                "constraint_schema": 10,
+                "target_translation": "1,0,0",
+                "actual_translation": "7,0,0",
+                "target_stage1_mode": "0,0",
+                "actual_stage1_mode": "0,0",
+                "target_vs_mode": "0,0",
+                "actual_vs_mode": "0,0",
+                "target_g_mode": "0,0",
+                "actual_g_mode": "0,0",
+                "actual_nested_pairs": "0,0,0,0",
+                "target_fence_kind": "0,0,0",
+                "target_fence_scope": "0,0",
+                "target_tlb_flush": 0,
+                "actual_fences": "0,0,0,0,0,0",
+                "actual_translation_switch": 0,
+                "actual_translation_walk_reuse": "0,0",
+                "target_probe": 0,
+                "target_probe_to_b": 500,
+                "target_probe_need_data": 500,
+                "actual_probe_sequences": 0,
+                "actual_probe_caps": "0,0",
+                "actual_probe_need_data": "0,0",
+                "probes": 0,
+                "load_wakeups": "9,7,5",
+                "load_cancels": "3,2,1",
+                "ifetch_prefetches": 1,
+                "target_stride_stream": 0,
+                "l2_stride_prefetches": 0,
+                "raw_load_wakeups": "9,7,5",
+                "raw_load_cancels": "3,2,1",
+                "target_ops": "0,0,3,2,0,0,0,0,0,0",
+                "actual_ops": "0,0,3,2,0,0,0,0,0,0",
+                "target_hypervisor_family": "0,0,0",
+                "actual_hypervisor_family": "0,0,0",
+                "target_vector_segment_store": 0,
+                "actual_vector_segment_direction": "0,0",
+                "target_vector_segment_addressing": "0,0,0,0",
+                "actual_vector_segment_addressing": "0,0,0,0",
+                "target_vector_segment_eew": "0,0,0,0",
+                "actual_vector_segment_eew": "0,0,0,0",
+                "target_vector_segment_sew": "0,0,0,0",
+                "actual_vector_segment_sew": "0,0,0,0",
+                "target_vector_segment_lmul": "0,0,0,0,0,0,0",
+                "actual_vector_segment_lmul": "0,0,0,0,0,0,0",
+                "target_vector_segment_emul": "0,0,0,0,0,0,0",
+                "actual_vector_segment_emul": "0,0,0,0,0,0,0",
+                "target_vector_segment_nf": "0,0,0,0,0,0,0",
+                "actual_vector_segment_nf": "0,0,0,0,0,0,0",
+                "target_vector_addressing": "1,0,1,0",
+                "actual_vector_direction": "2,1",
+                "actual_vector_addressing": "2,0,1,0",
+                "target_vector_eew": "1,0,1,0",
+                "actual_vector_eew": "1,0,2,0",
+                "target_vector_sew": "0,1,0,1",
+                "actual_vector_sew": "0,2,0,1",
+                "target_vector_lmul": "0,0,1,1,1,0,0",
+                "actual_vector_lmul": "0,0,1,1,1,0,0",
+                "target_vector_emul": "0,1,0,1,0,1,0",
+                "actual_vector_emul": "0,1,0,1,0,1,0",
+                "actual_vector_shape_ops": 3,
+                "actual_vector_uops": 5,
+                "actual_vector_multi_uop": 1,
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+
+        result["actual_vector_lmul"] = "0,1,1,1,0,0,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "actual_vector_lmul"
+        ):
+            verify_regression._check_mixed_coverage(result)
+
+        result["actual_vector_lmul"] = "0,0,1,1,1,0,0"
+        result["actual_vector_shape_ops"] = 4
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "not conserved"
+        ):
+            verify_regression._check_mixed_coverage(result)
+
+        result.update(
+            {
+                "target_ops": "0,0,0,0,0,0,0,0,0,0",
+                "actual_ops": "0,0,0,0,0,0,0,0,0,0",
+                "actual_vector_direction": "0,0",
+                "actual_vector_addressing": "0,0,0,0",
+                "actual_vector_eew": "0,0,0,0",
+                "actual_vector_sew": "0,0,0,0",
+                "actual_vector_lmul": "0,0,0,0,0,0,0",
+                "actual_vector_emul": "0,0,0,0,0,0,0",
+                "actual_vector_shape_ops": 0,
+                "actual_vector_uops": 0,
+                "actual_vector_multi_uop": 0,
+            }
+        )
+        verify_regression._check_mixed_coverage(result)
+        result["actual_vector_uops"] = 1
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "operations are disabled"
         ):
             verify_regression._check_mixed_coverage(result)
 

@@ -840,7 +840,9 @@ kind/scope, manager Probe rate/toB/need-data crosses, and DCache, PTW, and
 Uncache latency independently. `stride-stream` also controls fixed-PC cold-load
 training pressure on the L1 stride prefetcher. It includes
 simultaneous scalar/vector issue, every scalar width, every vector EEW and every
-load/store address mode independently, scalar/vector misalignment, software
+load/store address mode independently, all legal ordinary vector
+EEW/SEW/LMUL/derived-EMUL shapes, 1..8-uop expansion with capacity-bounded
+queue windows, scalar/vector misalignment, software
 `prefetch.i/r/w`, both cross-forwarding directions, randomized cold/warm
 translation, a vector guest-page fault with exact VA/GPA metadata, PBMT=NC,
 dirty same-set replacement, redirect/reallocation, and randomized DCache/PTW/
@@ -889,6 +891,16 @@ that operation can be accepted.
 This separate entry point is retained for compatibility with its historical
 artifacts and burst-specific acceptance checks. New workload directions belong
 in the common `random-mixed` constraint interface.
+
+Schema 10 gives ordinary vector loads and stores one shared shape interface:
+`vector-{unit-stride,strided,indexed-unordered,indexed-ordered}`,
+`vector-eew{8,16,32,64}`, `vector-sew{8,16,32,64}`, and
+`vector-{lmul,emul}-{mf8,mf4,mf2,m1,m2,m4,m8}`. Illegal or unreachable
+combinations are rejected before cycle 0. Each action represents one complete
+vector instruction even when it expands into multiple uops; the terminal
+summary reports both instruction and uop counts and the offline verifier checks
+both enabled load/store directions, every enabled shape class,
+disabled-class zeros, and per-dimension conservation.
 
 For a reproducible local pressure run:
 

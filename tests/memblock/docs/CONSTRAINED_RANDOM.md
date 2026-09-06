@@ -48,7 +48,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | Field | Meaning |
 | --- | --- |
 | `scalar-load`, `scalar-store` | Relative scalar load/store weights |
-| `vector-load`, `vector-store`, `vector-segment` | Relative vector memory weights; segment shape is selected by the dimensions below |
+| `vector-load`, `vector-store`, `vector-segment` | Relative vector memory weights; ordinary and segment shapes are selected by the dimensions below |
 | `prefetch`, `atomic`, `nc`, `mmio`, `hypervisor` | Relative special-operation weights |
 | `atomic-amo`, `atomic-lrsc`, `atomic-cas` | Relative atomic-family weights inside the `atomic` class |
 | `atomic-w`, `atomic-d` | Relative W/D atomic-width weights |
@@ -68,6 +68,9 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `tlb-flush` | Per-mille chance of a legal translation flush before an operation |
 | `misaligned` | Per-mille chance of a misaligned address when width permits it |
 | `vector-corner` | Per-mille chance of corner-biased vector shape/address generation |
+| `vector-unit-stride`, `vector-strided`, `vector-indexed-unordered`, `vector-indexed-ordered` | Relative ordinary vector addressing-mode weights shared by loads and stores |
+| `vector-eew8` .. `vector-eew64`, `vector-sew8` .. `vector-sew64` | Relative ordinary vector index/memory EEW and data SEW weights |
+| `vector-lmul-mf8` .. `vector-lmul-m8`, `vector-emul-mf8` .. `vector-emul-m8` | Relative ordinary vector LMUL and derived EMUL weights. Only legal `EMUL = EEW - SEW + LMUL` shapes are generated |
 | `vector-segment-store` | Per-mille store share within the vector-segment class |
 | `vector-segment-unit-stride`, `vector-segment-strided`, `vector-segment-indexed-unordered`, `vector-segment-indexed-ordered` | Relative segment addressing-mode weights |
 | `vector-segment-eew8` .. `vector-segment-eew64`, `vector-segment-sew8` .. `vector-segment-sew64` | Relative segment index/memory EEW and data SEW weights |
@@ -81,9 +84,9 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `latency` | Set DCache, PTW, and Uncache to `compact` or `spec` together |
 | `dcache-latency`, `ptw-latency`, `uncache-latency` | Override one manager's latency profile independently |
 
-Invalid names, all-zero operation/locality or enabled atomic/hypervisor-family
-or atomic-width
-weights, out-of-range per-mille values, inconsistent special-concurrency or
+Invalid names, all-zero operation/locality, enabled atomic/hypervisor-family,
+atomic-width, or enabled vector-shape dimensions, unreachable vector shape
+classes, out-of-range per-mille values, inconsistent special-concurrency or
 manager-latency settings, and unknown latency profiles fail before simulation
 traffic begins. The harness has no programmable PMA region at this boundary,
 so randomized NC and MMIO traffic requires stage-1 or nested PBMT translation.
@@ -123,6 +126,7 @@ scenario implementations:
 | Concurrent operation mix | Base windows overlap scalar load/store, vector load/store, and prefetch; `special-concurrent` can add NC/MMIO loads and records each class | Add more legal dependency-aware window shapes as their upstream scheduling contracts are modeled |
 | Atomic subtype | `atomic-amo`, `atomic-lrsc`, `atomic-cas`, `atomic-w`, and `atomic-d` select legal AMO, LR/SC, and compare-dependent AMOCAS sequences | Cross-hart reservation interference remains integration-level |
 | Hypervisor subtype | `hypervisor-hlv`, `hypervisor-hlvx`, and `hypervisor-hsv` select legal nested-translation HLV/HLVX/HSV operations and independently gate all enabled families | Add alternate mode, PBMT/device, misalignment, and broader PMP crosses to the same class |
+| Ordinary vector shape | Addressing, EEW, SEW, LMUL, and derived EMUL are composable weights shared by vector loads/stores. The generator enumerates all legal shapes, prioritizes uncovered classes, expands one instruction into 1..8 uops, applies the indexed `EMUL>LMUL` shared-Vd mapping, and streams large flow groups through queue-capacity windows | Lift these shapes into every heterogeneous overlap-window slot; the current rolling windows retain their baseline single-uop vector members while the constrained serial tail interleaves full shapes with all other operation classes |
 | Vector segment | Addressing, EEW, SEW, LMUL, derived EMUL, NF, and load/store direction are composable weights. The generator enumerates only decoder-legal shapes, prioritizes uncovered enabled classes, models complete index groups and index-only uops, and reports/conserves every dimension | Lift FOF and redirect into low-rate common dimensions only after their multi-uop cancellation scheduling is modeled without hidden directed phases |
 | NC/MMIO direction | `nc-store` and `mmio-store` steer load/store direction and each direction has an independent coverage gate | Concurrent special stores remain deferred until multi-store ROB/commit scheduling is modeled |
 | Translation state | Bare/Sv39/Sv48 and all four Sv39/Sv48 x Sv39x4/Sv48x4 pairs are weighted tail contexts; switches occur only at drained boundaries; cold walk/reuse and the legal fence kind/scope matrix are per-seed gates | Distinct-page walks and redirected root/ASID/VMID/MODE/`V` changes with delayed PTW responses are covered by directed matrices; random context changes remain restricted to drained boundaries |
@@ -151,12 +155,14 @@ Atomic family weights (AMO/LRSC/CAS) are `8/2/2`, `90/5/5`, and `1/1/1` for
 `coverage`, `spec`, and `corner`; all three use `1/1` W/D weights. Their
 hypervisor family weights (HLV/HLVX/HSV) are `1/1/1`, `90/5/5`, and `1/1/1`.
 Their vector-segment store shares are `500`, `300`, and `500` per mille.
-`coverage` and `corner` weight every segment addressing/EEW/SEW/LMUL/EMUL/NF
-class equally. `spec` favors unit stride (`980/10/5/5` across unit, strided,
-indexed-unordered, indexed-ordered), M1/M2, 32-bit SEW, and small NF while
-retaining a nonzero verification floor for every legal class. Per-seed closure
-temporarily prioritizes uncovered values; subsequent segment choices follow
-the products of the configured dimension weights.
+`coverage` and `corner` weight every ordinary and segment
+addressing/EEW/SEW/LMUL/EMUL class equally, plus every segment NF. `spec`
+favors unit stride (`980/10/5/5` across unit, strided, indexed-unordered,
+indexed-ordered), M1/M2, and 32-bit SEW for both operation families, and small
+segment NF, while retaining a nonzero verification floor for every legal
+class. Per-seed closure temporarily prioritizes uncovered values; subsequent
+ordinary and segment choices follow the products of their configured dimension
+weights.
 NC/MMIO store shares are respectively `500/500`, `300/300`, and `500/500`.
 Their legal NC/MMIO overlap rates are `500`, `20`, and `750` per mille.
 All three presets split generated Probes equally between toB/toN and explicit
@@ -245,14 +251,17 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=9`, the resolved target weights,
-and actual operation, atomic family/width, hypervisor family, vector-segment
-direction/addressing/EEW/SEW/LMUL/EMUL/NF, NC/MMIO direction, legal special
-overlap, locality, translation regime/mode/pair, fence kind/scope, cold-walk/
-reuse, TLB-flush, hit/miss, Probe sequence/cap/need-data, all three scalar-load
-wakeup/cancel lanes, IFU software instruction-prefetch observations, and
-L2 stride-prefetch observations, and per-manager latency counts. Each enabled
-class must be observed at least once.
+Every terminal line prints `constraint_schema=10`, the resolved target weights,
+and actual operation, atomic family/width, hypervisor family, ordinary-vector
+direction/addressing/EEW/SEW/LMUL/EMUL/instruction/uop counts, vector-segment direction/
+addressing/EEW/SEW/LMUL/EMUL/NF, NC/MMIO direction, legal special overlap,
+locality, translation regime/mode/pair, fence kind/scope, cold-walk/reuse,
+TLB-flush, hit/miss, Probe sequence/cap/need-data, all three scalar-load
+wakeup/cancel lanes, IFU software instruction-prefetch observations, L2
+stride-prefetch observations, and per-manager latency counts. Each enabled
+class must be observed at least once. Every ordinary shape dimension conserves
+against `actual_vector_shape_ops`; uops must remain in the architectural 1..8
+range and any enabled multi-uop shape must produce a multi-uop instruction.
 Probe counts must also conserve sequences and their toB cleanup requests. Every
 load lane must observe both canceled and uncanceled wakeups without constraining
 the legal replay count, and every seed must emit at least one `prefetch.i`
@@ -270,7 +279,7 @@ backend wakeup by design. When `stride-stream` is enabled, the architectural
 load replay gate therefore uses a counter snapshot taken immediately before
 the prefetcher is enabled. The terminal summary reports that gate window as
 `load_wakeups/load_cancels` and the full simulation as
-`raw_load_wakeups/raw_load_cancels`; schema 9 requires each raw count to be at
+`raw_load_wakeups/raw_load_cancels`; schema 10 requires each raw count to be at
 least its corresponding snapshot count. L2 source-12 observation is checked
 separately, so this separation neither hides prefetch activity nor mistakes it
 for a failed backend load.
