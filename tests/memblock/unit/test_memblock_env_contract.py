@@ -887,6 +887,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "vector-segment-fof",
             ".fault_only_first = true",
             ".is_vleff = false",
+            "first_element_faults=2",
+            "first_fault_fix_vl=2",
+            "first_fault.exception_vaddr() != first_fault_virtual",
         ):
             self.assertIn(contract, environment + main + makefile + benchmark)
         self.assertIn("fofBufferValid", segment)

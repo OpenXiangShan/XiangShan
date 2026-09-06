@@ -7444,6 +7444,80 @@ int run_vector_segment_fault_only_first(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment first_fault(argc, argv);
+    constexpr std::uint64_t first_fault_virtual = 0x55000180ULL;
+    constexpr std::uint64_t first_fault_root = 0x97c00000ULL;
+    first_fault.configure_backpressure(0xbb67ae8584caa73bULL, true);
+    if (!first_fault.reset() ||
+        !first_fault.activate_sv39(first_fault_root, 43) ||
+        memblock::reference_sv39_walk(
+            first_fault.memory(), first_fault_root,
+            first_fault_virtual).translated) {
+        std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FOF_FAIL cycle="
+                  << first_fault.cycle()
+                  << " phase=first-fault-configuration reason="
+                  << first_fault.error() << '\n';
+        return 1;
+    }
+    std::array<memblock::VectorMemoryTransaction, 2> faulting_fields{};
+    for (unsigned field = 0; field < faulting_fields.size(); ++field) {
+        faulting_fields[field] = memblock::VectorMemoryTransaction{
+            .segment = true,
+            .address = first_fault_virtual,
+            .eew = 3,
+            .vl = 2,
+            .rob = 77,
+            .pdest = static_cast<std::uint8_t>(120 + field),
+            .lane = 0,
+            .flow_num = 2,
+            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+            .expected_trigger = memblock::kVectorWritebackTriggerNone,
+            .vuop_idx = static_cast<std::uint8_t>(field),
+            .last_uop = false,
+            .nf = 1,
+            .fault_only_first = true,
+            .is_vleff = false,
+        };
+        first_fault.expect_vector_data(
+            faulting_fields[field], faulting_fields[field].data);
+        if (!first_fault.issue_vector(faulting_fields[field], 512)) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FOF_FAIL cycle="
+                      << first_fault.cycle()
+                      << " phase=first-fault-data-issue field=" << field
+                      << " reason=" << first_fault.error() << '\n';
+            return 1;
+        }
+    }
+    auto first_fault_fix = faulting_fields[0];
+    first_fault_fix.pdest = 122;
+    first_fault_fix.expected_exception_mask = 0;
+    first_fault_fix.expected_vl = 2;
+    first_fault_fix.vuop_idx = 2;
+    first_fault_fix.last_uop = true;
+    first_fault_fix.vl_wen = true;
+    first_fault.expect_vector_data(first_fault_fix, {});
+    if (!first_fault.issue_vector(first_fault_fix, 512) ||
+        !first_fault.run_until_vector_complete(32768) ||
+        first_fault.vector_load_writebacks() != 2 ||
+        first_fault.vector_fof_fix_writebacks() != 1 ||
+        first_fault.ptw_requests() == 0 ||
+        first_fault.tilelink_requests() != 0 ||
+        first_fault.exception_vaddr() != first_fault_virtual ||
+        first_fault.lq_allocated() != 0 || first_fault.sq_allocated() != 0) {
+        std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FOF_FAIL cycle="
+                  << first_fault.cycle()
+                  << " phase=first-fault-completion reason="
+                  << first_fault.error() << " data_writebacks="
+                  << first_fault.vector_load_writebacks()
+                  << " fix_writebacks="
+                  << first_fault.vector_fof_fix_writebacks()
+                  << " fault_vaddr=0x" << std::hex
+                  << first_fault.exception_vaddr() << std::dec
+                  << " ptw=" << first_fault.ptw_requests()
+                  << " dcache=" << first_fault.tilelink_requests() << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_VECTOR_SEGMENT_FOF_PASS"
               << " cycle=" << environment.cycle()
               << " fields=2 original_vl=2 final_vl=1"
@@ -7452,6 +7526,9 @@ int run_vector_segment_fault_only_first(int argc, char **argv)
               << environment.vector_fof_fix_writebacks()
               << " segment_lsq_allocations=0"
               << " ptw_requests=" << environment.ptw_requests()
+              << " first_element_faults=2"
+              << " first_fault_fix_vl=2"
+              << " first_fault_ptw=" << first_fault.ptw_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

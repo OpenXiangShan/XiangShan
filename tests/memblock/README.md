@@ -27,6 +27,10 @@ indexed-ordered segment load/store takeover are covered by focused tests; the co
 across load/store, EEW 8/16/32/64, and NF 1..7. Unsupported segment shapes are
 not silently randomized as ordinary LSQ traffic.
 
+`vector-segment-fof` contrasts first- and later-element page faults. A later
+fault suppresses the exception and shortens VL, while a first-element fault
+retains the exception and fault VA and leaves VL unchanged.
+
 `pmp-contracts` programs the distributed PMP CSR input and checks data-side
 TOR and NAPOT regions, exact lower/upper edges, R/W and AMO denial, overlapping
 entry priority, M-mode unlocked bypass, locked-entry enforcement, and locked

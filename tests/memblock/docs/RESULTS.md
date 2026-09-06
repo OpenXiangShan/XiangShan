@@ -49,6 +49,13 @@ six checked store writebacks, and exact post-flush readback at every calculated
 element/field address. Segment traffic allocated no LQ or SQ entries. No CPU
 defect was observed.
 
+The companion `vector-segment-fof` scenario also passed both architectural
+fault positions. Its later-element page fault was suppressed and reduced VL
+from 2 to 1. A separate empty-page-table case faulted on the first element:
+both field uops retained `LoadPageFault`, the reported VA matched the first
+element, one PTW and no DCache request occurred, and the fix-VL uop preserved
+the original VL of 2.
+
 ## Scalar Load Feedback Boundary
 
 The `load-feedback` scenario now samples every top-level scalar load wakeup and
