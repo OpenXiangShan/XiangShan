@@ -960,6 +960,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "locality_weights",
             "atomic_family_weights",
             "atomic_width_weights",
+            "hypervisor_family_weights",
             "translation_weights",
             "stage1_mode_weights",
             "vs_mode_weights",
@@ -981,6 +982,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "ConstraintCoverage",
             "target_ops=",
             "actual_ops=",
+            "target_hypervisor_family=",
+            "actual_hypervisor_family=",
             "actual_atomic_family=",
             "actual_atomic_width=",
             "actual_nc_direction=",
@@ -1005,6 +1008,9 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_probe_sequences=",
             "actual_probe_caps=",
             "actual_probe_need_data=",
+            '"hypervisor-hlv"',
+            '"hypervisor-hlvx"',
+            '"hypervisor-hsv"',
             "run_cycles(constrained_completion_timeout / 2)",
         ):
             self.assertIn(contract, driver)

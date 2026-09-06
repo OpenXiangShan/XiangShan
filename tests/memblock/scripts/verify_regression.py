@@ -150,7 +150,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     schema = result.get("constraint_schema")
     if schema is None:
         return
-    _require(schema in (2, 3, 4, 5, 6), f"unsupported constraint_schema: {schema!r}")
+    _require(schema in (2, 3, 4, 5, 6, 7), f"unsupported constraint_schema: {schema!r}")
 
     target_translation = _csv_counts(result, "target_translation", 3)
     actual_translation = _csv_counts(result, "actual_translation", 3)
@@ -349,6 +349,39 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             _require(
                 stride_prefetches > 0,
                 "enabled stride stream produced no L2 prefetch output",
+            )
+
+    if schema >= 7:
+        target_operations = _csv_counts(result, "target_ops", 9)
+        actual_operations = _csv_counts(result, "actual_ops", 9)
+        _require(
+            all(
+                weight == 0 or count > 0
+                for weight, count in zip(target_operations, actual_operations)
+            ),
+            "actual_ops has an enabled but uncovered class: "
+            f"{actual_operations}",
+        )
+        target_hypervisor = _csv_counts(
+            result, "target_hypervisor_family", 3
+        )
+        actual_hypervisor = _csv_counts(
+            result, "actual_hypervisor_family", 3
+        )
+        if target_operations[8] != 0:
+            _require(
+                all(
+                    weight == 0 or count > 0
+                    for weight, count in zip(
+                        target_hypervisor, actual_hypervisor
+                    )
+                ),
+                "actual_hypervisor_family has an enabled but uncovered class: "
+                f"{actual_hypervisor}",
+            )
+            _require(
+                sum(actual_hypervisor) == actual_operations[8],
+                "hypervisor operation/family coverage is not conserved",
             )
 
 

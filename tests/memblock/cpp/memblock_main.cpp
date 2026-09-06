@@ -77,6 +77,7 @@ struct RandomConstraints {
         atomic,
         noncacheable,
         mmio,
+        hypervisor,
         operation_count,
     };
 
@@ -85,6 +86,13 @@ struct RandomConstraints {
         atomic_lrsc,
         atomic_cas,
         atomic_family_count,
+    };
+
+    enum HypervisorFamily : unsigned {
+        hypervisor_hlv,
+        hypervisor_hlvx,
+        hypervisor_hsv,
+        hypervisor_family_count,
     };
 
     enum TranslationRegime : unsigned {
@@ -106,6 +114,7 @@ struct RandomConstraints {
     std::array<unsigned, 3> locality_weights{};
     std::array<unsigned, atomic_family_count> atomic_family_weights{};
     std::array<unsigned, 2> atomic_width_weights{};
+    std::array<unsigned, hypervisor_family_count> hypervisor_family_weights{};
     std::array<unsigned, translation_regime_count> translation_weights{};
     std::array<unsigned, 2> stage1_mode_weights{};
     std::array<unsigned, 2> vs_mode_weights{};
@@ -131,10 +140,12 @@ struct RandomConstraints {
         if (name == "coverage") {
             return RandomConstraints{
                 .name = "coverage",
-                .operation_weights = {200, 150, 150, 150, 100, 100, 75, 75},
+                .operation_weights = {
+                    200, 150, 150, 150, 100, 100, 75, 75, 75},
                 .locality_weights = {250, 250, 500},
                 .atomic_family_weights = {8, 2, 2},
                 .atomic_width_weights = {1, 1},
+                .hypervisor_family_weights = {1, 1, 1},
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -162,10 +173,11 @@ struct RandomConstraints {
             // not claims about their exact SPEC frequency.
             return RandomConstraints{
                 .name = "spec",
-                .operation_weights = {650, 270, 20, 10, 35, 5, 5, 5},
+                .operation_weights = {649, 270, 20, 10, 35, 5, 5, 5, 1},
                 .locality_weights = {800, 150, 50},
                 .atomic_family_weights = {90, 5, 5},
                 .atomic_width_weights = {1, 1},
+                .hypervisor_family_weights = {90, 5, 5},
                 .translation_weights = {5, 990, 5},
                 .stage1_mode_weights = {95, 5},
                 .vs_mode_weights = {1, 1},
@@ -193,10 +205,12 @@ struct RandomConstraints {
         if (name == "corner") {
             return RandomConstraints{
                 .name = "corner",
-                .operation_weights = {125, 125, 125, 125, 125, 125, 125, 125},
+                .operation_weights = {
+                    125, 125, 125, 125, 125, 125, 125, 125, 125},
                 .locality_weights = {100, 200, 700},
                 .atomic_family_weights = {1, 1, 1},
                 .atomic_width_weights = {1, 1},
+                .hypervisor_family_weights = {1, 1, 1},
                 .translation_weights = {1, 1, 1},
                 .stage1_mode_weights = {1, 1},
                 .vs_mode_weights = {1, 1},
@@ -276,6 +290,7 @@ struct RandomConstraints {
                 {"atomic", atomic},
                 {"nc", noncacheable},
                 {"mmio", mmio},
+                {"hypervisor", hypervisor},
             }};
         for (const auto &[candidate, operation] : operation_keys) {
             if (key == candidate) {
@@ -302,6 +317,18 @@ struct RandomConstraints {
         if (key == "atomic-d") {
             atomic_width_weights[1] = parsed;
             return;
+        }
+        const std::array<std::pair<std::string_view, HypervisorFamily>,
+                         hypervisor_family_count> hypervisor_family_keys{{
+            {"hypervisor-hlv", hypervisor_hlv},
+            {"hypervisor-hlvx", hypervisor_hlvx},
+            {"hypervisor-hsv", hypervisor_hsv},
+        }};
+        for (const auto &[candidate, family] : hypervisor_family_keys) {
+            if (key == candidate) {
+                hypervisor_family_weights[family] = parsed;
+                return;
+            }
         }
         const std::array<std::pair<std::string_view, TranslationRegime>,
                          translation_regime_count> translation_keys{{
@@ -421,6 +448,13 @@ struct RandomConstraints {
             throw std::invalid_argument(
                 "atomic width constraint weights cannot all be zero");
         }
+        if (operation_weights[hypervisor] != 0 &&
+            std::accumulate(
+                hypervisor_family_weights.begin(),
+                hypervisor_family_weights.end(), 0ULL) == 0) {
+            throw std::invalid_argument(
+                "hypervisor family constraint weights cannot all be zero");
+        }
         if (std::accumulate(
                 translation_weights.begin(), translation_weights.end(),
                 0ULL) == 0) {
@@ -519,6 +553,21 @@ struct RandomConstraints {
                 "NC/MMIO traffic requires stage-1 or nested PBMT translation "
                 "at the MemBlock UT boundary");
         }
+        if (operation_weights[hypervisor] != 0 &&
+            translation_weights[translation_nested] == 0) {
+            throw std::invalid_argument(
+                "hypervisor traffic requires nested translation");
+        }
+        const std::uint64_t non_hypervisor_weight = std::accumulate(
+            operation_weights.begin(), operation_weights.end(), 0ULL) -
+            operation_weights[hypervisor];
+        if (non_hypervisor_weight == 0 &&
+            (translation_weights[translation_bare] != 0 ||
+             translation_weights[translation_stage1] != 0)) {
+            throw std::invalid_argument(
+                "hypervisor-only traffic cannot satisfy Bare or stage-1 "
+                "translation coverage");
+        }
         if (translation_weights[translation_bare] != 0 &&
             (operation_weights[noncacheable] != 0 ||
              operation_weights[mmio] != 0) &&
@@ -568,6 +617,11 @@ struct RandomConstraints {
     unsigned choose_atomic_width(std::uint64_t random) const
     {
         return choose_weighted(atomic_width_weights, random);
+    }
+
+    unsigned choose_hypervisor_family(std::uint64_t random) const
+    {
+        return choose_weighted(hypervisor_family_weights, random);
     }
 
     unsigned choose_translation_regime(std::uint64_t random) const
@@ -650,6 +704,11 @@ struct RandomConstraints {
                     atomic_width_weights.begin(), atomic_width_weights.end(),
                     [](unsigned weight) { return weight != 0; }));
                 actions += std::max(families, widths);
+            } else if (operation == hypervisor) {
+                actions += static_cast<unsigned>(std::count_if(
+                    hypervisor_family_weights.begin(),
+                    hypervisor_family_weights.end(),
+                    [](unsigned weight) { return weight != 0; }));
             } else if (operation == noncacheable) {
                 actions += direction_classes(nc_stores_per_mille);
             } else if (operation == mmio) {
@@ -697,7 +756,8 @@ struct RandomConstraints {
     {
         return std::any_of(
             operation_weights.begin(), operation_weights.begin() + noncacheable,
-            [](unsigned weight) { return weight != 0; });
+            [](unsigned weight) { return weight != 0; }) ||
+            operation_weights[hypervisor] != 0;
     }
 
     bool uses_uncache() const
@@ -715,7 +775,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=6 constraints=" << name
+        stream << "constraint_schema=7 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -726,6 +786,10 @@ struct RandomConstraints {
                << atomic_family_weights[1] << ',' << atomic_family_weights[2]
                << " target_atomic_width=" << atomic_width_weights[0] << ','
                << atomic_width_weights[1]
+               << " target_hypervisor_family="
+               << hypervisor_family_weights[0] << ','
+               << hypervisor_family_weights[1] << ','
+               << hypervisor_family_weights[2]
                << " target_translation=" << translation_weights[0] << ','
                << translation_weights[1] << ',' << translation_weights[2]
                << " target_stage1_mode=" << stage1_mode_weights[0] << ','
@@ -958,6 +1022,8 @@ struct ConstraintCoverage {
     std::array<std::uint64_t, RandomConstraints::atomic_family_count>
         atomic_families{};
     std::array<std::uint64_t, 2> atomic_widths{};
+    std::array<std::uint64_t, RandomConstraints::hypervisor_family_count>
+        hypervisor_families{};
     std::array<std::uint64_t, 2> nc_directions{};
     std::array<std::uint64_t, 2> mmio_directions{};
     // Atomic operations are pipeline-serializing at the MemBlock boundary;
@@ -1096,6 +1162,16 @@ struct ConstraintCoverage {
             return operations[operation] != 0 && families_complete &&
                 widths_complete;
         }
+        if (operation == RandomConstraints::hypervisor) {
+            const bool families_complete = std::equal(
+                constraints.hypervisor_family_weights.begin(),
+                constraints.hypervisor_family_weights.end(),
+                hypervisor_families.begin(),
+                [](unsigned weight, std::uint64_t count) {
+                    return weight == 0 || count != 0;
+                });
+            return operations[operation] != 0 && families_complete;
+        }
         if (operation == RandomConstraints::noncacheable) {
             return operations[operation] != 0 && direction_complete(
                 constraints.nc_stores_per_mille, nc_directions);
@@ -1192,6 +1268,9 @@ struct ConstraintCoverage {
                << atomic_families[1] << ',' << atomic_families[2]
                << " actual_atomic_width=" << atomic_widths[0] << ','
                << atomic_widths[1]
+               << " actual_hypervisor_family=" << hypervisor_families[0]
+               << ',' << hypervisor_families[1] << ','
+               << hypervisor_families[2]
                << " actual_nc_direction=" << nc_directions[0] << ','
                << nc_directions[1]
                << " actual_mmio_direction=" << mmio_directions[0] << ','
@@ -1331,7 +1410,7 @@ struct MixedCoverage {
     void sample(const memblock::LoadTransaction &transaction)
     {
         ++scalar_loads;
-        ++load_ops.at(static_cast<unsigned>(transaction.op));
+        ++load_ops.at(static_cast<unsigned>(transaction.op) & 7U);
         ++load_lanes.at(transaction.lane);
         ++(transaction.predecode_rvc ? rvc : non_rvc);
         ftq_nonzero += transaction.ftq_ptr != 0 || transaction.ftq_offset != 0;
@@ -1345,11 +1424,11 @@ struct MixedCoverage {
     void sample(const memblock::StoreTransaction &transaction, bool data_was_first)
     {
         ++scalar_stores;
-        ++store_ops.at(static_cast<unsigned>(transaction.op));
+        ++store_ops.at(static_cast<unsigned>(transaction.op) & 3U);
         ++address_lanes.at(transaction.address_lane);
         ++data_lanes.at(transaction.data_lane);
         ++(data_was_first ? data_first : address_first);
-        const unsigned size = 1U << static_cast<unsigned>(transaction.op);
+        const unsigned size = memblock::scalar_store_bytes(transaction.op);
         scalar_store_misaligned += (transaction.address & (size - 1)) != 0;
     }
 
@@ -15208,39 +15287,46 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                                     std::uint64_t virtual_address,
                                     std::uint64_t physical_address,
                                     bool noncacheable = false,
-                                    bool io = false) {
+                                    bool io = false,
+                                    bool executable = false) {
         return mode == 0
             ? environment.map_sv39_4k(
-                  virtual_address, physical_address, root, true, true, false,
+                  virtual_address, physical_address, root, true, true,
+                  executable,
                   false, noncacheable, io)
             : environment.map_sv48_4k(
-                  virtual_address, physical_address, root, true, true, false,
+                  virtual_address, physical_address, root, true, true,
+                  executable,
                   false, noncacheable, io);
     };
     const auto map_g_page = [&](unsigned mode, std::uint64_t root,
                                 std::uint64_t guest_physical_address,
-                                std::uint64_t host_physical_address) {
+                                std::uint64_t host_physical_address,
+                                bool executable = false) {
         return mode == 0
             ? environment.map_sv39x4_4k(
-                  guest_physical_address, host_physical_address, root)
+                  guest_physical_address, host_physical_address, root,
+                  true, true, executable)
             : environment.map_sv48x4_4k(
-                  guest_physical_address, host_physical_address, root);
+                  guest_physical_address, host_physical_address, root,
+                  true, true, executable);
     };
     const auto prepare_random_translation_contexts = [&]() {
         const auto map_all_contexts = [&](std::uint64_t virtual_address,
                                           std::uint64_t physical_address,
                                           bool noncacheable = false,
-                                          bool io = false) {
+                                          bool io = false,
+                                          bool executable = false) {
             for (unsigned mode = 0; mode < 2; ++mode) {
                 if (!map_stage_page(
                         mode, random_stage1_roots[mode], virtual_address,
-                        physical_address, noncacheable, io) ||
+                        physical_address, noncacheable, io, executable) ||
                     !map_stage_page(
                         mode, random_vs_roots[mode], virtual_address,
-                        physical_address, noncacheable, io) ||
+                        physical_address, noncacheable, io, executable) ||
                     !map_g_page(
                         mode, random_g_roots[mode], physical_address,
-                        physical_address)) {
+                        physical_address, executable)) {
                     return false;
                 }
             }
@@ -15251,12 +15337,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         // beyond the nominal cold set for indexed/split vector accesses.
         for (std::uint64_t page = cache0_base + 0xf000;
              page <= cache0_base + 0x92000; page += 0x1000) {
-            if (!map_all_contexts(page, page)) {
+            if (!map_all_contexts(page, page, false, false, true)) {
                 return false;
             }
         }
-        if (!map_all_contexts(cache1_base + 0xf000, cache1_base + 0xf000) ||
-            !map_all_contexts(atomic_base, atomic_base) ||
+        if (!map_all_contexts(
+                cache1_base + 0xf000, cache1_base + 0xf000,
+                false, false, true) ||
+            !map_all_contexts(atomic_base, atomic_base, false, false, true) ||
             !map_all_contexts(nc_base, nc_base, true, false)) {
             return false;
         }
@@ -16859,6 +16947,25 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             memblock::AtomicOp::amominu_w,
             memblock::AtomicOp::amomaxu_w,
         }};
+        const std::array<memblock::LoadOp, 7> hypervisor_load_operations{{
+            memblock::LoadOp::hlvb,
+            memblock::LoadOp::hlvh,
+            memblock::LoadOp::hlvw,
+            memblock::LoadOp::hlvd,
+            memblock::LoadOp::hlvbu,
+            memblock::LoadOp::hlvhu,
+            memblock::LoadOp::hlvwu,
+        }};
+        const std::array<memblock::LoadOp, 2> hypervisor_execute_operations{{
+            memblock::LoadOp::hlvxhu,
+            memblock::LoadOp::hlvxwu,
+        }};
+        const std::array<memblock::StoreOp, 4> hypervisor_store_operations{{
+            memblock::StoreOp::hsvb,
+            memblock::StoreOp::hsvh,
+            memblock::StoreOp::hsvw,
+            memblock::StoreOp::hsvd,
+        }};
         std::array<std::uint64_t, 16> atomic_values{};
         for (std::size_t slot = 0; slot < atomic_values.size(); ++slot) {
             atomic_values[slot] = environment.memory().expected_load(
@@ -16910,11 +17017,29 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     mmio_store = true;
                 }
             }
+            std::optional<unsigned> hypervisor_family;
+            if (kind == RandomConstraints::hypervisor) {
+                hypervisor_family =
+                    constraints.choose_hypervisor_family(random());
+                for (unsigned candidate = 0;
+                     candidate < RandomConstraints::hypervisor_family_count;
+                     ++candidate) {
+                    if (constraints.hypervisor_family_weights[candidate] != 0 &&
+                        constraint_coverage.hypervisor_families[candidate] == 0) {
+                        hypervisor_family = candidate;
+                        break;
+                    }
+                }
+            }
             TranslationContext translation = closing_stride_stream
                 ? dominant_translation_context()
                 : choose_translation_context();
-            if ((kind == RandomConstraints::noncacheable ||
-                 kind == RandomConstraints::mmio) &&
+            if (kind == RandomConstraints::hypervisor) {
+                translation.regime = RandomConstraints::translation_nested;
+                translation.vs_mode = constraints.choose_vs_mode(random());
+                translation.g_mode = constraints.choose_g_mode(random());
+            } else if ((kind == RandomConstraints::noncacheable ||
+                        kind == RandomConstraints::mmio) &&
                 translation.regime == RandomConstraints::translation_bare) {
                 translation = translated_context();
             }
@@ -17114,6 +17239,47 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++constraint_coverage.atomic_families[family];
                 ++constraint_coverage.atomic_widths[width];
                 ++actions;
+                ++coverage.cacheable;
+            } else if (kind == RandomConstraints::hypervisor) {
+                if (!environment.run_until_all_complete(8192) ||
+                    !environment.run_until_queues_retired(8192) ||
+                    !environment.set_hypervisor_access_permissions(
+                        memblock::ReferencePrivilegeMode::supervisor)) {
+                    return false;
+                }
+                if (*hypervisor_family == RandomConstraints::hypervisor_hsv) {
+                    const auto op = hypervisor_store_operations[
+                        random() % hypervisor_store_operations.size()];
+                    const auto transaction = make_store(
+                        constrained_cacheable_address(
+                            memblock::scalar_store_bytes(op)),
+                        random(), op, random() % 2, random() % 2);
+                    if (!issue_store(transaction, (random() & 1U) != 0) ||
+                        !environment.commit_store(transaction, 8192) ||
+                        !environment.run_until_queues_retired(8192)) {
+                        return false;
+                    }
+                    probe_candidate = transaction.address & ~std::uint64_t{63};
+                } else {
+                    const auto op = *hypervisor_family ==
+                            RandomConstraints::hypervisor_hlvx
+                        ? hypervisor_execute_operations[
+                              random() % hypervisor_execute_operations.size()]
+                        : hypervisor_load_operations[
+                              random() % hypervisor_load_operations.size()];
+                    const unsigned size =
+                        1U << (static_cast<unsigned>(op) & 3U);
+                    const auto transaction = make_load(
+                        constrained_cacheable_address(size), op, random() % 3);
+                    if (!issue_load(transaction) ||
+                        !environment.run_until_queues_retired(8192)) {
+                        return false;
+                    }
+                }
+                if (!activate_translation_context(translation)) {
+                    return false;
+                }
+                ++constraint_coverage.hypervisor_families[*hypervisor_family];
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::noncacheable) {
                 const std::uint64_t offset = (random() % 128) * 8;
