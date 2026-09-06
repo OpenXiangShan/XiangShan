@@ -710,10 +710,18 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         load_unit = (
             REPO_ROOT / "src/main/scala/xiangshan/mem/pipeline/LoadUnit.scala"
         ).read_text()
+        pma = (
+            REPO_ROOT / "src/main/scala/xiangshan/backend/fu/PMA.scala"
+        ).read_text()
+        new_csr = (
+            REPO_ROOT / "src/main/scala/xiangshan/backend/fu/NewCSR/NewCSR.scala"
+        ).read_text()
         for contract in (
             "pte_pbmt_io",
             "pulse_pending_load",
             "wait_for_mmio_store_request",
+            "set_debug_mode",
+            "io_ooo_to_mem_tlbCsr_priv_debug",
             "expected_debug_is_mmio",
             "expected_debug_is_ncio",
         ):
@@ -731,9 +739,19 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "pma_physical_base = 0x35000000ULL",
             "pma_denied_count",
             "phase=pma-debug-denied",
+            "debug_physical_base = 0x38020000ULL",
+            "phase=pma-debug-load",
+            "phase=pma-debug-store",
+            "pma_debug_loads=",
+            "pma_debug_stores=",
             "mmio-contracts",
         ):
             self.assertIn(contract, main + makefile)
+        self.assertIn("io.tlb.debug := debugMode", new_csr)
+        self.assertIn(
+            "Mux(addr >= debugStart.U && addr <= debugEnd.U, debug, true.B)",
+            pma,
+        )
 
     def test_mixed_stimulus_drives_every_lsq_dispatch_lane_in_one_cycle(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()

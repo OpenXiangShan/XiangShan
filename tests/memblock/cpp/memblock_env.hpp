@@ -5354,6 +5354,13 @@ public:
         return run_cycles(16) && check_components();
     }
 
+    bool set_debug_mode(bool enabled)
+    {
+        dut_.io_ooo_to_mem_tlbCsr_priv_debug.ImmSet(enabled);
+        // TlbCsrBundle is registered and duplicated before its PMA/PMP use.
+        return run_cycles(16) && check_components();
+    }
+
     bool set_hypervisor_access_permissions(
         ReferencePrivilegeMode spvp,
         bool mxr = false,

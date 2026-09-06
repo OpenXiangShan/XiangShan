@@ -5892,11 +5892,16 @@ int run_mmio_contracts(int argc, char **argv)
     unsigned pma_load_count = 0;
     unsigned pma_store_count = 0;
     unsigned pma_denied_count = 0;
+    unsigned pma_debug_load_count = 0;
+    unsigned pma_debug_store_count = 0;
     {
         memblock::Environment pma_environment(argc, argv);
         constexpr std::uint64_t pma_physical_base = 0x35000000ULL;
+        constexpr std::uint64_t debug_physical_base = 0x38020000ULL;
         pma_environment.memory().fill_incrementing(
             pma_physical_base, 64, 0x63);
+        pma_environment.memory().fill_incrementing(
+            debug_physical_base, 64, 0x91);
         pma_environment.configure_backpressure(
             0x5a17c3e9d2b84f61ULL, true);
         if (!pma_environment.reset() ||
@@ -6013,6 +6018,109 @@ int run_mmio_contracts(int argc, char **argv)
             return 1;
         }
         ++pma_denied_count;
+
+        // Entering Debug Mode makes the same PMA entry visible. It remains an
+        // uncached device mapping, so both directions must use Uncache rather
+        // than DCache and complete without an access fault.
+        if (!pma_environment.set_debug_mode(true)) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << pma_environment.cycle()
+                      << " phase=pma-debug-enable reason="
+                      << pma_environment.error() << '\n';
+            return 1;
+        }
+
+        const memblock::LoadTransaction pma_debug_load{
+            .address = debug_physical_base + 0x10,
+            .oracle_address = debug_physical_base + 0x10,
+            .op = memblock::LoadOp::ld,
+            .rob = 3,
+            .lq = 2,
+            .pdest = 160,
+            .lane = 0,
+            .expected_debug_is_mmio = true,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        const std::uint64_t debug_load_dcache_before =
+            pma_environment.tilelink_requests();
+        const std::uint64_t debug_load_uncache_before =
+            pma_environment.uncache_requests();
+        pma_environment.expect_load(pma_debug_load);
+        if (!pma_environment.set_rob_head(pma_debug_load.rob) ||
+            !pma_environment.enqueue_load(pma_debug_load) ||
+            !pma_environment.issue_load(pma_debug_load, 2048) ||
+            !pma_environment.wait_for_mmio_request(
+                pma_debug_load.rob, pma_debug_load.rob_flag, 4096) ||
+            !pma_environment.run_until_complete(8192) ||
+            !pma_environment.run_until_lq_retired(2048) ||
+            pma_environment.tilelink_requests() != debug_load_dcache_before ||
+            pma_environment.uncache_requests() !=
+                debug_load_uncache_before + 1) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << pma_environment.cycle()
+                      << " phase=pma-debug-load reason="
+                      << pma_environment.error()
+                      << " dcache_requests="
+                      << pma_environment.tilelink_requests()
+                      << " uncache_requests="
+                      << pma_environment.uncache_requests() << '\n';
+            return 1;
+        }
+        ++pma_debug_load_count;
+
+        const memblock::StoreTransaction pma_debug_store{
+            .address = debug_physical_base + 0x28,
+            .oracle_address = debug_physical_base + 0x28,
+            .data = 0xfedcba9876543210ULL,
+            .op = memblock::StoreOp::sd,
+            .rob = 4,
+            .sq = 1,
+            .address_lane = 0,
+            .data_lane = 1,
+            .expected_debug_is_mmio = true,
+            .expected_debug_is_ncio = false,
+        };
+        const std::uint64_t debug_store_dcache_before =
+            pma_environment.tilelink_requests();
+        const std::uint64_t debug_store_uncache_before =
+            pma_environment.uncache_requests();
+        pma_environment.expect_store(pma_debug_store);
+        if (!pma_environment.set_rob_head(pma_debug_store.rob) ||
+            !pma_environment.enqueue_store(pma_debug_store, 0) ||
+            !pma_environment.issue_store_address(pma_debug_store, 2048) ||
+            !pma_environment.issue_store_data(pma_debug_store, 2048) ||
+            !pma_environment.run_cycles(64) ||
+            !pma_environment.wait_for_mmio_store_request(
+                pma_debug_store.rob, pma_debug_store.rob_flag, 8192) ||
+            !pma_environment.run_until_store_complete(8192) ||
+            !pma_environment.commit_stores_through(pma_debug_store, 1) ||
+            !pma_environment.run_cycles(16) ||
+            pma_environment.tilelink_requests() != debug_store_dcache_before ||
+            pma_environment.uncache_requests() !=
+                debug_store_uncache_before + 1 ||
+            pma_environment.bus_expected_load(
+                pma_debug_store.address, memblock::LoadOp::ld) !=
+                pma_debug_store.data) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << pma_environment.cycle()
+                      << " phase=pma-debug-store reason="
+                      << pma_environment.error()
+                      << " dcache_requests="
+                      << pma_environment.tilelink_requests()
+                      << " uncache_requests="
+                      << pma_environment.uncache_requests() << '\n';
+            return 1;
+        }
+        pma_environment.record_committed_store(pma_debug_store);
+        if (pma_environment.sq_dequeued() != pma_environment.sq_allocated()) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << pma_environment.cycle()
+                      << " phase=pma-debug-store-retirement reason="
+                      << "Debug PMA MMIO store did not leave SQ\n";
+            return 1;
+        }
+        ++pma_debug_store_count;
     }
 
     std::cout << "MEMBLOCK_MMIO_CONTRACTS_PASS"
@@ -6023,6 +6131,8 @@ int run_mmio_contracts(int argc, char **argv)
               << " pma_loads=" << pma_load_count
               << " pma_stores=" << pma_store_count
               << " pma_denied=" << pma_denied_count
+              << " pma_debug_loads=" << pma_debug_load_count
+              << " pma_debug_stores=" << pma_debug_store_count
               << " dcache_requests=" << environment.tilelink_requests()
               << " uncache_requests=" << environment.uncache_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
