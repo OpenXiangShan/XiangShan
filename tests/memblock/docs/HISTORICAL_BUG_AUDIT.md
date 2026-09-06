@@ -58,7 +58,7 @@ table below.
 | 2026-06-24 | `098fa583` | VSplit must use vector uop index | Covered, not mutated | `vector-addressing` covers split flows and all address modes, but not a multi-uop segment stream. |
 | 2026-06-20 | `5b82411e` | Misaligned vector cross-page exception address | **Reproduced and fixed** | Clean RTL reproduced the split VS-non-leaf GPA offset (`0x94001808` vs `0x94001800`); `VMergeBuffer` now suppresses the offset for `isForVSnonLeafPTE`, and the repaired deterministic plus randomized boundary tests pass. |
 | 2026-06-20 | `756bbf59` | NaN-box half FP MMIO loads | Boundary gap | MMIO and FP-destination load contracts are not modeled. |
-| 2026-06-20 | `9045e063` | Store exception priority by ROB/uop, not SQ index | Boundary gap | Requires two legal concurrent store exceptions with wrapped/disagreeing SQ and ROB age. |
+| 2026-06-20 | `9045e063` | Store exception priority by ROB/uop, not SQ index | Covered, not mutated | `exception-contracts` issues two simultaneous PBMT-NC misaligned stores whose SQ and wrapped ROB orders disagree, then requires the exported VA of the oldest ROB. Independent revert RTL is deferred until the active endurance campaign releases elaboration resources. |
 | 2026-06-20 | `7ce99d4a` | VSplit threshold must not use LSQ pointer | Covered, not mutated | Split vector traffic plus LQ/SQ and ROB wrap/pressure are checked, but the exact threshold mutation was not built. |
 | 2026-06-20 | `e42d4b51` | Cross-page SMB matching uses SQ `rdataPtr` | Covered, not mutated | Translated cross-page vector store requires exact completion, SQ drain, and readback. |
 | 2026-06-20 | `9f988c01` | Non-debug mode cannot access debug memory | Boundary gap | Debug-region PMP/PMA configuration and architectural debug-mode transitions are absent. |
@@ -94,7 +94,7 @@ table below.
 | 2026-03-06 | `29c0c967` | Misaligned vector store progress | Covered, not mutated | Focused and mixed vector-store replay/readback. |
 | 2026-02-27 | `ef980dec` | Vector-store event refactor | Non-functional/outside MemBlock UT | Feature/refactor rather than a stated functional bug fix. |
 | 2026-01-28 | `607f09d9` | SBuffer timeout CSR feature | Non-functional/outside MemBlock UT | Feature addition; SBuffer timeout CSR programming is outside the current contract. |
-| 2026-01-19 | `fb9fdc12` | Load exception priority by ROB/uop, not LQ index | Boundary gap | Needs concurrent exceptions with legal wrapped/disagreeing LQ and ROB age. |
+| 2026-01-19 | `fb9fdc12` | Load exception priority by ROB/uop, not LQ index | Covered, not mutated | `exception-contracts` issues three simultaneous load page faults across ROB 158, 159, and 0 with opposite LQ order, then requires the exported VA of ROB 158. Independent revert RTL is deferred until the active endurance campaign releases elaboration resources. |
 | 2026-01-13 | `f9fd32a0` | Connect vector exception LQ/SQ indices | Boundary gap | LQ/SQ index is not exposed in the architectural exception-address result; concurrent priority test is still needed. |
 | 2026-01-04 | `fa34af08` | Scalar misaligned store progress | Covered, not mutated | `misaligned-stores` checks 16-byte, cache-line, and translated page splits with exact readback. |
 

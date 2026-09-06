@@ -485,6 +485,14 @@ traffic, accounts the canceled queue entry, then reconfigures translation and
 requires a post-reset load to complete normally. It also rejects any stale
 writeback from the canceled request.
 
+`exception-contracts` checks exact scalar load exception bits, RF-write
+suppression, software-prefetch fault suppression, and PBMT-NC misalignment. It
+also reverses queue order against program order: three simultaneous load page
+faults cross ROB 159-to-0 while LQ indices increase in the opposite direction,
+and two simultaneous PBMT-NC misaligned stores cross the same ROB boundary
+while SQ indices disagree. The final top-level exception VA must identify the
+oldest ROB in both cases, independently of LQ/SQ index order.
+
 `atomic-contracts` drives all currently exposed W/D-width AMOs, AMOCAS.W/D, and
 LR/SC through the atomic store-address/data ports, checks old-value writeback,
 compare success/failure, reservation success/failure, and then verifies cache

@@ -72,6 +72,22 @@ completed, and committed. The scenario passed against complete RTL SHA-256
 `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`;
 no CPU defect was observed.
 
+## Concurrent Exception Priority
+
+The expanded `exception-contracts` scenario passed in 450 aggregate cycles on
+complete RTL SHA-256
+`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
+Three load page faults were issued together with increasing LQ indices but ROB
+ages 0-after-wrap, 159, and 158; the retained top-level exception VA was
+`0x50007000`, belonging to ROB 158. A separate phase warmed a PBMT-NC store
+translation, then issued two misaligned stores together with increasing SQ
+indices but ROB ages 0-after-wrap and 159. The store exception VA was
+`0x50008011`, belonging to ROB 159. All five individual writebacks carried the
+expected cause and exceptional loads suppressed RF writes. This closes the
+legal wrapped/disagreeing queue-order stimulus for historical fixes `fb9fdc12`
+and `9045e063`; independent revert builds remain pending and the audit does not
+yet label either one reproduced. No current RTL defect was observed.
+
 ## RAW Memory Violation Boundary
 
 The `memory-violation` scenario first completed a same-line byte-disjoint load
@@ -886,6 +902,7 @@ the historical complete RTL SHA-256 is
 | CBO.ZERO cache-line zeroing | Pass | Cycle 370; cacheable `0x7` CBO.ZERO used the StoreQueue/SBuffer `wline` path, survived one forced DCache A stall and four response-delay cycles, produced exact non-MMIO store metadata, and a pre-mirror cache readback returned an all-zero line; no Uncache request was emitted |
 | Atomic operations and exception metadata | Pass | Cycle 1216; all 9 W-width and 9 D-width AMOs, AMOCAS.W/D compare success/failure, LR/SC success/failure, and all 7 forbidden D-width plus 3 forbidden W-width byte offsets; exceptional writeback carried `storeAddrMisaligned=0x40`, suppressed `rfWen`, and emitted no additional DCache request |
 | Atomic D-channel errors | Pass | Cycle 7,108; 22 W/D LR/AMO/AMOCAS operations crossed with denied and corrupt; all 44 later loads hit poisoned lines and re-reported exact errors, four SC hits reported cached errors, two clean AMO recoveries passed, exceptional `rfWen` stayed suppressed, and exactly 46 cold requests were issued |
+| Concurrent exception priority | Pass | Cycle 450; three simultaneous load page faults and two simultaneous PBMT-NC misaligned stores crossed ROB wrap with deliberately reversed LQ/SQ order; exact oldest load/store exception VAs were `0x50007000` and `0x50008011` |
 | L2-to-L1 DTLB boundary | Pass | Cycle 396; ordinary and prefetch requests returned legal L1 miss responses, `no_translate=1` completed without a translation/fault, `kill=1` produced no response for 128 cycles, 16 source IDs × two L2 hint polarities (32 pulses) were accepted without ghost traffic, PBMT stayed zero, and exported PMP/MMIO classification was observed; miss delegation to external L2 is explicit because MemBlock has no refill response input |
 | IFU-to-Mem PTW bridge | Pass | 36 cases in 26,580 aggregate cycles: valid Sv39/Sv48, all four nested pairs, Sv39/Sv48 VS-only and G-only, PBMT=NC/IO, invalid L0 leaves, all four nested pairs crossed with VS-leaf/final-G-leaf/implicit-page-table-G faults, a 256-cycle delayed IFU walk overlapped with a cold scalar DTLB walk, and two same-VPN requests coalesced into one three-request Sv39 walk with two exact responses. Eight delayed-walk races cover stage-1 and nested context replacement, global/selective `SFENCE.VMA`, and global/selective `HFENCE.VVMA`/`HFENCE.GVMA`, suppressing every stale response for 1,024 cycles before checking the exact replacement mapping; 231 PTW requests, manager outstanding depth 2, exact active-stage/fault/load results, and 185 response-stall cycles passed; RTL SHA-256 `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9` |
 | Reset recovery | Pass | Cycle 170; repeated reset with outstanding translated traffic, explicit cancellation of one pre-reset LQ entry, and one post-reset survivor with no stale writeback |

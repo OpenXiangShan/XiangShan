@@ -3554,6 +3554,10 @@ public:
     {
         return dut_.io_mem_to_ooo_lsqio_vaddr.U();
     }
+    void select_store_exception_address(bool store)
+    {
+        dut_.io_ooo_to_mem_isStoreException.ImmSet(store);
+    }
     std::uint64_t exception_gpaddr()
     {
         return dut_.io_mem_to_ooo_lsqio_gpaddr.U();

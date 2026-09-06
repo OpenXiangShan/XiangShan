@@ -7118,12 +7118,208 @@ int run_exception_contracts(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment load_priority(argc, argv);
+    constexpr std::uint64_t load_priority_root = 0x92200000ULL;
+    if (!load_priority.reset() ||
+        !load_priority.activate_sv39(load_priority_root)) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << load_priority.cycle()
+                  << " phase=load-priority-configuration reason="
+                  << load_priority.error() << '\n';
+        return 1;
+    }
+    const std::vector<memblock::LoadTransaction> load_faults{
+        memblock::LoadTransaction{
+            .address = virtual_base + 0x5000,
+            .op = memblock::LoadOp::ld,
+            .rob = memblock::rob_pointer_value(160),
+            .rob_flag = memblock::rob_pointer_flag(160),
+            .lq = memblock::lq_pointer_value(0),
+            .lq_flag = memblock::lq_pointer_flag(0),
+            .pdest = 42,
+            .lane = 0,
+            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        },
+        memblock::LoadTransaction{
+            .address = virtual_base + 0x6000,
+            .op = memblock::LoadOp::ld,
+            .rob = memblock::rob_pointer_value(159),
+            .rob_flag = memblock::rob_pointer_flag(159),
+            .lq = memblock::lq_pointer_value(1),
+            .lq_flag = memblock::lq_pointer_flag(1),
+            .pdest = 43,
+            .lane = 1,
+            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        },
+        memblock::LoadTransaction{
+            .address = virtual_base + 0x7000,
+            .op = memblock::LoadOp::ld,
+            .rob = memblock::rob_pointer_value(158),
+            .rob_flag = memblock::rob_pointer_flag(158),
+            .lq = memblock::lq_pointer_value(2),
+            .lq_flag = memblock::lq_pointer_flag(2),
+            .pdest = 44,
+            .lane = 2,
+            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        },
+    };
+    for (const auto &fault : load_faults) {
+        load_priority.expect_load(fault);
+    }
+    const auto &oldest_load_fault = load_faults.back();
+    if (!load_priority.set_rob_head(
+            oldest_load_fault.rob, oldest_load_fault.rob_flag) ||
+        !load_priority.enqueue_load_batch(load_faults, {0, 1, 2}) ||
+        !load_priority.issue_load_batch(load_faults, 256, true) ||
+        !load_priority.run_until_complete(8192) ||
+        !load_priority.run_cycles(8) ||
+        load_priority.exception_vaddr() != oldest_load_fault.address ||
+        !load_priority.run_until_lq_retired(1024)) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << load_priority.cycle()
+                  << " phase=load-priority expected_vaddr=0x" << std::hex
+                  << oldest_load_fault.address << " actual_vaddr=0x"
+                  << load_priority.exception_vaddr() << std::dec
+                  << " reason=" << load_priority.error() << '\n';
+        return 1;
+    }
+
+    memblock::Environment store_priority(argc, argv);
+    constexpr std::uint64_t store_priority_root = 0x92400000ULL;
+    constexpr std::uint64_t store_priority_virtual = virtual_base + 0x8000;
+    constexpr std::uint64_t store_priority_physical = physical_base + 0x8000;
+    if (!store_priority.reset() ||
+        !store_priority.enable_misaligned_accesses() ||
+        !store_priority.map_sv39_4k(
+            store_priority_virtual, store_priority_physical,
+            store_priority_root, true, true, false, false, true) ||
+        !store_priority.activate_sv39(store_priority_root)) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << store_priority.cycle()
+                  << " phase=store-priority-configuration reason="
+                  << store_priority.error() << '\n';
+        return 1;
+    }
+    store_priority.select_store_exception_address(true);
+    const std::vector<memblock::StoreTransaction> store_warmups{
+        memblock::StoreTransaction{
+            .address = store_priority_virtual + 0x20,
+            .oracle_address = store_priority_physical + 0x20,
+            .data = 0xa5a55a5a11223344ULL,
+            .op = memblock::StoreOp::sd,
+            .rob = memblock::rob_pointer_value(156),
+            .rob_flag = memblock::rob_pointer_flag(156),
+            .sq = memblock::sq_pointer_value(0),
+            .sq_flag = memblock::sq_pointer_flag(0),
+            .address_lane = 0,
+            .data_lane = 0,
+        },
+        memblock::StoreTransaction{
+            .address = store_priority_virtual + 0x28,
+            .oracle_address = store_priority_physical + 0x28,
+            .data = 0x5a5aa5a588776655ULL,
+            .op = memblock::StoreOp::sd,
+            .rob = memblock::rob_pointer_value(157),
+            .rob_flag = memblock::rob_pointer_flag(157),
+            .sq = memblock::sq_pointer_value(1),
+            .sq_flag = memblock::sq_pointer_flag(1),
+            .address_lane = 1,
+            .data_lane = 1,
+        },
+    };
+    for (std::size_t index = 0; index < store_warmups.size(); ++index) {
+        const auto &warmup = store_warmups[index];
+        store_priority.expect_store(warmup);
+        if (!store_priority.enqueue_store(warmup, 0) ||
+            !(index == 0
+                  ? store_priority.warm_store_translation(warmup)
+                  : store_priority.issue_store_address(warmup, 256)) ||
+            !store_priority.issue_store_data(warmup, 256)) {
+            std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                      << store_priority.cycle()
+                      << " phase=store-priority-warm reason="
+                      << store_priority.error() << '\n';
+            return 1;
+        }
+    }
+    if (!store_priority.run_until_store_complete(1024)) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << store_priority.cycle()
+                  << " phase=store-priority-warm-complete reason="
+                  << store_priority.error() << '\n';
+        return 1;
+    }
+    const std::vector<memblock::StoreTransaction> store_faults{
+        memblock::StoreTransaction{
+            .address = store_priority_virtual + 1,
+            .oracle_address = store_priority_physical + 1,
+            .data = 0x8877665544332211ULL,
+            .op = memblock::StoreOp::sd,
+            .rob = memblock::rob_pointer_value(160),
+            .rob_flag = memblock::rob_pointer_flag(160),
+            .sq = memblock::sq_pointer_value(2),
+            .sq_flag = memblock::sq_pointer_flag(2),
+            .address_lane = 0,
+            .data_lane = 0,
+            .expected_exception_mask =
+                memblock::kExceptionStoreAddressMisaligned,
+        },
+        memblock::StoreTransaction{
+            .address = store_priority_virtual + 0x11,
+            .oracle_address = store_priority_physical + 0x11,
+            .data = 0x1122334455667788ULL,
+            .op = memblock::StoreOp::sd,
+            .rob = memblock::rob_pointer_value(159),
+            .rob_flag = memblock::rob_pointer_flag(159),
+            .sq = memblock::sq_pointer_value(3),
+            .sq_flag = memblock::sq_pointer_flag(3),
+            .address_lane = 1,
+            .data_lane = 1,
+            .expected_exception_mask =
+                memblock::kExceptionStoreAddressMisaligned,
+        },
+    };
+    for (const auto &fault : store_faults) {
+        store_priority.expect_store(fault);
+    }
+    const auto &oldest_store_fault = store_faults.back();
+    if (!store_priority.set_rob_head(
+            oldest_store_fault.rob, oldest_store_fault.rob_flag) ||
+        !store_priority.enqueue_store(store_faults[0], 0) ||
+        !store_priority.enqueue_store(store_faults[1], 0) ||
+        !store_priority.issue_store_address_batch(store_faults, 256) ||
+        !store_priority.run_until_store_complete(8192) ||
+        !store_priority.run_cycles(8) ||
+        store_priority.exception_vaddr() != oldest_store_fault.address ||
+        !store_priority.account_sq_cancellation(
+            store_priority.sq_allocated() - store_priority.sq_dequeued() -
+            store_priority.sq_canceled())) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << store_priority.cycle()
+                  << " phase=store-priority expected_vaddr=0x" << std::hex
+                  << oldest_store_fault.address << " actual_vaddr=0x"
+                  << store_priority.exception_vaddr() << std::dec
+                  << " reason=" << store_priority.error() << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_EXCEPTION_CONTRACTS_PASS"
-              << " cycle=" << environment.cycle()
-              << " load_writebacks=" << environment.writebacks()
+              << " cycle=" << environment.cycle() + load_priority.cycle() +
+                    store_priority.cycle()
+              << " load_writebacks="
+              << environment.writebacks() + load_priority.writebacks()
+              << " store_writebacks=" << store_priority.store_writebacks()
               << " prefetch_writebacks=" << environment.prefetch_writebacks()
-              << " ptw_requests=" << environment.ptw_requests()
-              << " uncache_requests=" << environment.uncache_requests()
+              << " load_priority=3 store_priority=2"
+              << " load_oldest=0x" << std::hex
+              << oldest_load_fault.address
+              << " store_oldest=0x" << oldest_store_fault.address << std::dec
+              << " ptw_requests="
+              << environment.ptw_requests() + load_priority.ptw_requests() +
+                    store_priority.ptw_requests()
+              << " uncache_requests="
+              << environment.uncache_requests() + load_priority.uncache_requests() +
+                    store_priority.uncache_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

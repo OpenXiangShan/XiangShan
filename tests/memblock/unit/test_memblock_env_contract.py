@@ -269,6 +269,19 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main + makefile + generator)
 
+    def test_exception_priority_uses_rob_age_not_queue_order(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "select_store_exception_address",
+            "load_priority",
+            "store_priority",
+            "rob_pointer_value(160)",
+            "load_oldest=0x",
+            "store_oldest=0x",
+        ):
+            self.assertIn(contract, environment + main)
+
     def test_dcache_coherence_tracks_concurrent_probe_sources(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
