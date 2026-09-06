@@ -198,6 +198,7 @@ make pin-space PICKER="$PICKER" JOBS=8
 make frontend-bridge PICKER="$PICKER" JOBS=8 SEED=1 TRANSACTIONS=4096
 make single-load PICKER="$PICKER" JOBS=8
 make load-feedback PICKER="$PICKER" JOBS=8
+make topdown-contracts PICKER="$PICKER" JOBS=8
 make memory-violation PICKER="$PICKER" JOBS=8
 make rar-violation PICKER="$PICKER" JOBS=8
 make ifetch-prefetch PICKER="$PICKER" JOBS=8
@@ -370,6 +371,12 @@ matching store address but before its data; it requires a pre-data cancellation,
 then exact store-data forwarding with one final uncanceled wakeup and no DCache
 request after line warmup. A PMP-denied S-mode Bare load must cancel every
 speculative wakeup while issuing no PTW, DCache, or Uncache request.
+
+`topdown-contracts` checks every MemBlock top-down output semantically. An
+independent bit pattern proves the exact one-cycle L2/L3 miss delay. A cold
+load with a delayed refill must assert both L1-miss and replay-allocation, 56
+unissued stores must reach StoreQueue full, and 16 distinct committed lines
+held behind a delayed refill must reach SBuffer full.
 `random-mixed` keeps constant-space lane counters and
 requires both canceled and uncanceled wakeups on every lane. When hardware
 stride prefetch is enabled, that backend gate is frozen before training begins
@@ -480,8 +487,11 @@ quiet window with no stale response before an independent cold walk returns
 the exact replacement stage-1 and G-stage mappings.
 This is separate from the data-side TLB translation tests.
 
-`uncache-errors` injects one denied and one corrupt Uncache response and checks
-the exception contract through the PBMT=NC adapter. This test caught and now
+`uncache-errors` injects denied and corrupt Uncache load and store responses.
+Loads check the exception contract through the PBMT=NC adapter. Stores also
+require exactly one external Uncache error report at the 64-byte-aligned
+physical address, no DCache error report, exact exception metadata, and SQ
+conservation. This test caught and now
 guards the LoadUnit S1 path that previously discarded response-generated
 exception bits. MMIO uses a distinct S0-to-three-cycle metadata bypass and is
 not implicated by this reproducer. The complete reproducer and root-cause analysis are in

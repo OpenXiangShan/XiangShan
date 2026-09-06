@@ -3317,6 +3317,16 @@ public:
         std::uint64_t last_uncache_address = 0;
     };
 
+    struct TopDownStats {
+        std::uint64_t replay_allocate_cycles = 0;
+        std::uint64_t sq_full_cycles = 0;
+        std::uint64_t sb_full_cycles = 0;
+        std::uint64_t l1_miss_cycles = 0;
+        std::uint64_t l2_miss_cycles = 0;
+        std::uint64_t l3_miss_cycles = 0;
+        std::uint64_t delay_checks = 0;
+    };
+
     Environment(int argc, char **argv)
         : dut_(argc, argv), memory_(&bus_memory_),
           memory_agent_(bus_memory_, memory_),
@@ -3966,6 +3976,7 @@ public:
         return scalar_load_feedback_stats_;
     }
     const BusErrorStats &bus_error_stats() const { return bus_error_stats_; }
+    const TopDownStats &top_down_stats() const { return top_down_stats_; }
     const IqSlowFeedbackStats &iq_slow_feedback_stats() const
     {
         return iq_slow_feedback_stats_;
@@ -3986,6 +3997,12 @@ public:
     {
         dut_.RefreshComb();
         return generated::sample_sbuffer_empty(dut_);
+    }
+
+    void drive_top_down_misses(bool l2_miss, bool l3_miss)
+    {
+        dut_.io_topDownInfo_fromL2Top_l2Miss.ImmSet(l2_miss);
+        dut_.io_topDownInfo_fromL2Top_l3Miss.ImmSet(l3_miss);
     }
 
     bool run_until_sbuffer_empty(unsigned timeout = 4096)
@@ -4555,6 +4572,10 @@ public:
         memory_violation_stats_ = {};
         ifetch_prefetch_stats_ = {};
         hardware_prefetch_stats_ = {};
+        bus_error_stats_ = {};
+        top_down_stats_ = {};
+        expected_top_down_l2_miss_ = false;
+        expected_top_down_l3_miss_ = false;
         ifetch_ptw_pending_ = 0;
         dut_.io_fetch_to_mem_itlb_req_0_valid.ImmSet(std::uint64_t{0});
         dut_.io_fetch_to_mem_itlb_resp_ready.ImmSet(std::uint64_t{1});
@@ -6200,6 +6221,18 @@ public:
         if (!wait_for_enqueue_capacity(0, 1)) {
             return false;
         }
+        return enqueue_store_pressure(transaction, lq_value);
+    }
+
+    bool enqueue_store_pressure(
+        const StoreTransaction &transaction, std::uint8_t lq_value)
+    {
+        const std::uint64_t retired = sq_dequeued_ + sq_canceled_;
+        if (retired > sq_allocated_ ||
+            sq_allocated_ - retired >= kStoreQueueEntries) {
+            error_ = "store pressure enqueue exceeds StoreQueue capacity";
+            return false;
+        }
         generated::LsqEnqueue enqueue;
         enqueue.need_alloc = 2;
         enqueue.exception_mask = transaction.input_exception_mask;
@@ -7545,11 +7578,40 @@ private:
         ptw_agent_.capture_before_tick(dut_);
         uncache_agent_.capture_before_tick(dut_);
 
+        const bool top_down_l2_input =
+            dut_.io_topDownInfo_fromL2Top_l2Miss.B();
+        const bool top_down_l3_input =
+            dut_.io_topDownInfo_fromL2Top_l3Miss.B();
+
         // Writeback valid is a combinational projection of the execution-unit
         // output fire.  Observe the pins before the clock edge; after Step()
         // they may already describe the following transaction.  LSQ dequeue
         // pulses are registered separately and are counted below instead.
         if (monitor) {
+            const bool top_down_l2_output =
+                dut_.io_topDownInfo_toBackend_l2TopMiss_l2Miss.B();
+            const bool top_down_l3_output =
+                dut_.io_topDownInfo_toBackend_l2TopMiss_l3Miss.B();
+            ++top_down_stats_.delay_checks;
+            if (top_down_l2_output != expected_top_down_l2_miss_ ||
+                top_down_l3_output != expected_top_down_l3_miss_) {
+                std::ostringstream message;
+                message << "top-down L2/L3 miss output violated one-cycle delay"
+                        << " expected=" << expected_top_down_l2_miss_ << ','
+                        << expected_top_down_l3_miss_ << " observed="
+                        << top_down_l2_output << ',' << top_down_l3_output;
+                error_ = message.str();
+            }
+            top_down_stats_.replay_allocate_cycles +=
+                dut_.io_topDownInfo_toBackend_replayAllocate.B();
+            top_down_stats_.sq_full_cycles +=
+                dut_.io_topDownInfo_toBackend_sqFull.B();
+            top_down_stats_.sb_full_cycles +=
+                dut_.io_topDownInfo_toBackend_sbFull.B();
+            top_down_stats_.l1_miss_cycles +=
+                dut_.io_topDownInfo_toBackend_l1Miss.B();
+            top_down_stats_.l2_miss_cycles += top_down_l2_output;
+            top_down_stats_.l3_miss_cycles += top_down_l3_output;
             if (dut_.io_dcacheError_ecc_error_valid.B()) {
                 ++bus_error_stats_.dcache_reports;
                 bus_error_stats_.last_dcache_address =
@@ -7633,6 +7695,8 @@ private:
         }
 
         dut_.Step();
+        expected_top_down_l2_miss_ = top_down_l2_input;
+        expected_top_down_l3_miss_ = top_down_l3_input;
         memory_agent_.update_after_tick();
         ptw_agent_.update_after_tick();
         uncache_agent_.update_after_tick();
@@ -7798,6 +7862,9 @@ private:
     IfetchPrefetchStats ifetch_prefetch_stats_;
     HardwarePrefetchStats hardware_prefetch_stats_;
     BusErrorStats bus_error_stats_;
+    TopDownStats top_down_stats_;
+    bool expected_top_down_l2_miss_ = false;
+    bool expected_top_down_l3_miss_ = false;
     std::uint64_t ifetch_ptw_pending_ = 0;
     std::uint64_t lq_allocated_ = 0;
     std::uint64_t lq_dequeued_ = 0;

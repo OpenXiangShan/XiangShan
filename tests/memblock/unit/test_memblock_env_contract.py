@@ -258,6 +258,25 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main)
 
+    def test_topdown_outputs_have_semantic_contracts(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
+        for contract in (
+            "struct TopDownStats",
+            "top-down L2/L3 miss output violated one-cycle delay",
+            "io_topDownInfo_toBackend_replayAllocate",
+            "io_topDownInfo_toBackend_sqFull",
+            "io_topDownInfo_toBackend_sbFull",
+            "io_topDownInfo_toBackend_l1Miss",
+            "enqueue_store_pressure",
+            "run_topdown_contracts",
+            "MEMBLOCK_TOPDOWN_CONTRACTS_PASS",
+            "topdown-contracts",
+        ):
+            self.assertIn(contract, environment + main + makefile + benchmark)
+
     def test_ifetch_ptw_bridge_covers_concurrent_dtlb_walk(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

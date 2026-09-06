@@ -22,6 +22,22 @@
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
+## Top-Down Status Boundary
+
+On 2026-09-06, `topdown-contracts` passed on complete RTL SHA-256
+`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
+Ten independent delay checks propagated four L2-miss and four L3-miss cycles
+with exact one-cycle timing. A delayed cold load produced 138 L1-miss cycles
+and 137 replay-allocation cycles. Filling the 56-entry StoreQueue produced
+seven SQ-full cycles; holding 16 distinct committed store lines behind a
+delayed DCache refill produced two SBuffer-full cycles.
+
+The same build's extended `uncache-errors` scenario passed two load and two
+store response-error cases. Denied and corrupt stores each produced exactly
+one external Uncache error pulse at the 64-byte-aligned physical line address,
+no DCache error pulse, exact architectural exception metadata, and balanced SQ
+accounting.
+
 ## Scalar Load Feedback Boundary
 
 The `load-feedback` scenario now samples every top-level scalar load wakeup and

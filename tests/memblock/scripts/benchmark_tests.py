@@ -22,6 +22,7 @@ SCENARIOS = (
     "frontend-bridge",
     "single-load",
     "load-feedback",
+    "topdown-contracts",
     "memory-violation",
     "rar-violation",
     "ifetch-prefetch",

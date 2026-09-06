@@ -2534,6 +2534,183 @@ int run_load_feedback(int argc, char **argv)
     return 0;
 }
 
+int run_topdown_contracts(int argc, char **argv)
+{
+    memblock::Environment passthrough(argc, argv);
+    if (!passthrough.reset()) {
+        std::cerr << "MEMBLOCK_TOPDOWN_CONTRACTS_FAIL phase=reset reason="
+                  << passthrough.error() << '\n';
+        return 1;
+    }
+    constexpr std::array<std::pair<bool, bool>, 8> miss_pattern{{
+        {false, false}, {true, false}, {false, true}, {true, true},
+        {true, false}, {false, false}, {false, true}, {true, true},
+    }};
+    std::uint64_t expected_l2_cycles = 0;
+    std::uint64_t expected_l3_cycles = 0;
+    for (const auto &[l2_miss, l3_miss] : miss_pattern) {
+        passthrough.drive_top_down_misses(l2_miss, l3_miss);
+        expected_l2_cycles += l2_miss;
+        expected_l3_cycles += l3_miss;
+        if (!passthrough.run_cycles(1)) {
+            std::cerr << "MEMBLOCK_TOPDOWN_CONTRACTS_FAIL phase=l2-l3-delay"
+                      << " reason=" << passthrough.error() << '\n';
+            return 1;
+        }
+    }
+    passthrough.drive_top_down_misses(false, false);
+    if (!passthrough.run_cycles(2)) {
+        std::cerr << "MEMBLOCK_TOPDOWN_CONTRACTS_FAIL phase=l2-l3-drain"
+                  << " reason=" << passthrough.error() << '\n';
+        return 1;
+    }
+    const auto passthrough_stats = passthrough.top_down_stats();
+    if (passthrough_stats.l2_miss_cycles != expected_l2_cycles ||
+        passthrough_stats.l3_miss_cycles != expected_l3_cycles ||
+        passthrough_stats.delay_checks != miss_pattern.size() + 2) {
+        std::cerr << "MEMBLOCK_TOPDOWN_CONTRACTS_FAIL phase=l2-l3-counts"
+                  << " expected=" << expected_l2_cycles << ','
+                  << expected_l3_cycles << " observed="
+                  << passthrough_stats.l2_miss_cycles << ','
+                  << passthrough_stats.l3_miss_cycles << " checks="
+                  << passthrough_stats.delay_checks << '\n';
+        return 1;
+    }
+
+    memblock::Environment miss(argc, argv);
+    constexpr std::uint64_t miss_line =
+        memblock::kDefaultMemoryBase + 0x1e000;
+    miss.memory().fill_incrementing(miss_line, 64, 0x91);
+    if (!miss.reset()) {
+        std::cerr << "MEMBLOCK_TOPDOWN_CONTRACTS_FAIL phase=miss-reset reason="
+                  << miss.error() << '\n';
+        return 1;
+    }
+    miss.force_next_dcache_response_delay(128);
+    const memblock::LoadTransaction load{
+        .address = miss_line + 24,
+        .op = memblock::LoadOp::ld,
+        .rob = 1,
+        .lq = 0,
+        .sq = 0,
+        .pdest = 91,
+        .lane = 0,
+    };
+    miss.expect_load(load);
+    if (!miss.enqueue_load(load) || !miss.issue_load(load, 4096) ||
+        !miss.run_until_complete(8192) || !miss.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_TOPDOWN_CONTRACTS_FAIL phase=cold-miss reason="
+                  << miss.error() << '\n';
+        return 1;
+    }
+    const auto miss_stats = miss.top_down_stats();
+    if (miss_stats.l1_miss_cycles == 0 ||
+        miss_stats.replay_allocate_cycles == 0) {
+        std::cerr << "MEMBLOCK_TOPDOWN_CONTRACTS_FAIL phase=miss-events"
+                  << " l1_miss=" << miss_stats.l1_miss_cycles
+                  << " replay=" << miss_stats.replay_allocate_cycles << '\n';
+        return 1;
+    }
+
+    memblock::Environment sq(argc, argv);
+    if (!sq.reset()) {
+        std::cerr << "MEMBLOCK_TOPDOWN_CONTRACTS_FAIL phase=sq-reset reason="
+                  << sq.error() << '\n';
+        return 1;
+    }
+    for (unsigned index = 0; index < memblock::kStoreQueueEntries; ++index) {
+        const memblock::StoreTransaction store{
+            .address = memblock::kDefaultMemoryBase + 0x20000 + index * 8,
+            .data = 0x1000000000000000ULL + index,
+            .op = memblock::StoreOp::sd,
+            .rob = memblock::rob_pointer_value(index),
+            .rob_flag = memblock::rob_pointer_flag(index),
+            .sq = memblock::sq_pointer_value(index),
+            .sq_flag = memblock::sq_pointer_flag(index),
+            .address_lane = index % memblock::kScalarStoreLanes,
+            .data_lane = (index + 1) % memblock::kScalarStoreLanes,
+        };
+        if (!sq.enqueue_store_pressure(store, 0)) {
+            std::cerr << "MEMBLOCK_TOPDOWN_CONTRACTS_FAIL phase=sq-fill"
+                      << " index=" << index << " reason=" << sq.error()
+                      << '\n';
+            return 1;
+        }
+    }
+    if (!sq.run_cycles(4) || sq.top_down_stats().sq_full_cycles == 0 ||
+        sq.sq_allocated() != memblock::kStoreQueueEntries) {
+        std::cerr << "MEMBLOCK_TOPDOWN_CONTRACTS_FAIL phase=sq-full"
+                  << " allocated=" << sq.sq_allocated() << " full_cycles="
+                  << sq.top_down_stats().sq_full_cycles << " reason="
+                  << sq.error() << '\n';
+        return 1;
+    }
+
+    memblock::Environment sb(argc, argv);
+    constexpr std::uint64_t sb_base =
+        memblock::kDefaultMemoryBase + 0x24000;
+    sb.memory().fill_incrementing(sb_base, 16 * 64, 0x39);
+    sb.configure_backpressure(0x510e527fade682d1ULL, false);
+    if (!sb.reset() || !sb.set_sbuffer_timeout((1U << 22) - 1)) {
+        std::cerr << "MEMBLOCK_TOPDOWN_CONTRACTS_FAIL phase=sb-reset reason="
+                  << sb.error() << '\n';
+        return 1;
+    }
+    unsigned buffered_stores = 0;
+    for (unsigned index = 0; index < 16; ++index) {
+        const memblock::StoreTransaction store{
+            .address = sb_base + index * 64,
+            .data = 0xa500000000000000ULL + index,
+            .op = memblock::StoreOp::sd,
+            .rob = static_cast<std::uint8_t>(index),
+            .sq = static_cast<std::uint8_t>(index),
+            .address_lane = index % memblock::kScalarStoreLanes,
+            .data_lane = (index + 1) % memblock::kScalarStoreLanes,
+        };
+        sb.expect_store(store);
+        sb.force_next_dcache_response_delay(4096);
+        if (!sb.set_rob_head(store.rob, store.rob_flag) ||
+            !sb.enqueue_store(store, 0) ||
+            !sb.issue_store_address(store, 4096) ||
+            !sb.issue_store_data(store, 4096) ||
+            !sb.run_until_store_complete(8192) ||
+            !sb.commit_store(store, 8192)) {
+            std::cerr << "MEMBLOCK_TOPDOWN_CONTRACTS_FAIL phase=sb-fill"
+                      << " index=" << index << " reason=" << sb.error()
+                      << '\n';
+            return 1;
+        }
+        ++buffered_stores;
+        if (!sb.run_cycles(2)) {
+            std::cerr << "MEMBLOCK_TOPDOWN_CONTRACTS_FAIL phase=sb-sample"
+                      << " index=" << index << " reason=" << sb.error()
+                      << '\n';
+            return 1;
+        }
+        if (sb.top_down_stats().sb_full_cycles != 0) {
+            break;
+        }
+    }
+    if (sb.top_down_stats().sb_full_cycles == 0) {
+        std::cerr << "MEMBLOCK_TOPDOWN_CONTRACTS_FAIL phase=sb-full"
+                  << " buffered=" << buffered_stores << " dcache_requests="
+                  << sb.tilelink_requests() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_TOPDOWN_CONTRACTS_PASS"
+              << " delay_checks=" << passthrough_stats.delay_checks
+              << " l2_miss_cycles=" << passthrough_stats.l2_miss_cycles
+              << " l3_miss_cycles=" << passthrough_stats.l3_miss_cycles
+              << " l1_miss_cycles=" << miss_stats.l1_miss_cycles
+              << " replay_cycles=" << miss_stats.replay_allocate_cycles
+              << " sq_full_cycles=" << sq.top_down_stats().sq_full_cycles
+              << " sb_full_cycles=" << sb.top_down_stats().sb_full_cycles
+              << " buffered_stores=" << buffered_stores
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_memory_violation(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -20872,6 +21049,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "load-feedback") {
             return run_load_feedback(argc, argv);
+        }
+        if (options.test == "topdown-contracts") {
+            return run_topdown_contracts(argc, argv);
         }
         if (options.test == "memory-violation") {
             return run_memory_violation(argc, argv);
