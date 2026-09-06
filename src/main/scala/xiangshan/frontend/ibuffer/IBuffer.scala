@@ -41,7 +41,7 @@ import xiangshan.frontend.FrontendTopDownBundle
 class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueuePtrHelper with HasPerfEvents {
   class IBufferIO extends Bundle {
     val in:  DecoupledIO[FetchToIBuffer] = Flipped(DecoupledIO(new FetchToIBuffer))
-    val out: Vec[ValidIO[CtrlFlow]] = Vec(DecodeWidth, ValidIO(new CtrlFlow))
+    val out: Vec[ValidIO[CtrlFlow]]      = Vec(DecodeWidth, ValidIO(new CtrlFlow))
 
     val flush: Bool = Input(Bool())
 
@@ -66,8 +66,57 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val decodeCanAccept = io.fromBackend.decodeCanAccept
   private val resumingVType   = io.fromBackend.resumingVType
 
+  /**
+    * IBuffer has a raw banked FIFO ([[ibuf]]) and a DecodeStage-facing staging buffer
+    * ([[outputEntries]]). The internal data flow is as follows.
+    *
+    *      Normal path                                                 Bypass path
+    *           +------------------------[[io.in]]--------------------------+
+    *           |                                                           |
+    *           v                                                           |
+    *       [[ibuf]] (Reg)                                                  |
+    *           |                                                           |
+    *           v                                                           |
+    *    [[deqEntries]]----------------------+----------------------[[bypassEntries]]
+    *           |                            |                              |
+    *           |             uopNumOH       v       uopNumOH               |
+    *           +-----------------<----[[predUopNum]]---->------------------+
+    *           |                                                           |
+    *           +------------------+                                        |
+    *           |                  |                                        |
+    *           |  vtype/oldVType  v                            oldVType(0) |
+    *           +--------<----[[vtypeGen]]---->-----------------------------+
+    *           |                                                           |
+    *           |                                                           |
+    *           v                                                           v
+    *     deqOutEntries                                             bypassOutEntries
+    *           |                                                           |
+    *           +-----------------------------+-----------------------------+
+    *                                         v
+    *                                [[toOutputEntries]]
+    *                                         |
+    *                                         v
+    *                     +-------> [[outputEntriesNext]]
+    *                     |                   |
+    *                     |                   v
+    *                     |           [[outputEntries]] (Reg) --> [[io.out]]
+    *                     |                   |
+    *                     |                   v
+    *                     |           [[predInstAccept]]
+    *                     |                   |
+    *                     +----predAccNum / retained entries
+    *
+    *  When bypassing, [[vtypeGen]].validNum is zero, so it only supplies oldVType(0).
+    *
+    * [[vtypeGen]] is driven only by [[deqEntries]]: bypass is forbidden for VSET and
+    * does not advance its speculative VType state. [[predUopNum]] decorates entries
+    * entering [[outputEntries]], whereas [[predInstAccept]] predicts its drain rate.
+    */
+
   // Modules
-  private val vtypeGen = Module(new VTypeGen)
+  private val vtypeGen       = Module(new VTypeGen)
+  private val predInstAccept = Module(new PredInstAccept)
+  private val predUopNum     = Module(new PredUopNum)
 
   // cross-module parameters check
   require(
@@ -96,13 +145,18 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   // Bypass wire
   private val bypassEntries = WireDefault(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
+
   // Normal read wire
   private val deqEntries = WireDefault(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufEntry))))
+
   // Output register
   private val outputEntries     = RegInit(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufOutEntry))))
   private val outputEntriesNext = Wire(outputEntries.cloneType)
 
-  private val OutputEntriesValidNum =
+  private val bypassOutEntries = Wire(outputEntriesNext.cloneType)
+  private val deqOutEntries    = Wire(outputEntriesNext.cloneType)
+
+  private val outputEntriesValidNum =
     PriorityMuxDefault(outputEntries.map(_.valid).zip(Seq.range(1, DecodeWidth + 1).map(_.U)).reverse, 0.U)
 
   // Between Bank
@@ -136,29 +190,28 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   )
 
   // Predict How many inst that decoder can accept
-  private val predInstAccept = Module(new PredInstAccept)
-  predInstAccept.io.outputEntries := outputEntries
-  predInstAccept.io.flush         := io.flush
-  predInstAccept.io.decodeAccept  := decodeCanAccept
+  predInstAccept.in.outputEntries := outputEntries
+  predInstAccept.in.flush         := io.flush
+  predInstAccept.in.decodeAccept  := decodeCanAccept
 
-  private val predAccNum   = predInstAccept.io.predAccNum
+  private val predAccNum = predInstAccept.out.predAccNum
 
-  private val OutputEntriesOutNum = Mux(decodeCanAccept, predAccNum.min(OutputEntriesValidNum), 0.U)
-  private val OutputEntriesValidNumKeep = OutputEntriesValidNum - OutputEntriesOutNum
+  private val outputEntriesOutNum       = Mux(decodeCanAccept, predAccNum.min(outputEntriesValidNum), 0.U)
+  private val outputEntriesValidNumKeep = outputEntriesValidNum - outputEntriesOutNum
 
-  private val OutputEntriesInCapacity = DecodeWidth.U - OutputEntriesValidNumKeep
+  private val outputEntriesInCapacity = DecodeWidth.U - outputEntriesValidNumKeep
 
   if (backendParams.debugEn) {
     XSError(
-      decodeCanAccept && predInstAccept.io.predAccNum =/= io.fromBackend.accNum.get,
+      decodeCanAccept && predInstAccept.out.predAccNum =/= io.fromBackend.accNum.get,
       "PredInstAccept predAccNum mismatch: pred=%d backend=%d\n",
-      predInstAccept.io.predAccNum,
+      predInstAccept.out.predAccNum,
       io.fromBackend.accNum.get
     )
     XSError(
-      decodeCanAccept && predInstAccept.io.predUopBufferNum =/= io.fromBackend.uopBufferNum.get,
+      decodeCanAccept && predInstAccept.out.predUopBufferNum =/= io.fromBackend.uopBufferNum.get,
       "PredInstAccept predUopBufferNum mismatch: pred=%d backend=%d\n",
-      predInstAccept.io.predUopBufferNum,
+      predInstAccept.out.predUopBufferNum,
       io.fromBackend.uopBufferNum.get
     )
   }
@@ -226,7 +279,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val currentException  = Wire(new IBufExceptionEntry).fromFetch(io.in.bits)
   private val enqExceptionIndex = PriorityEncoder(io.in.bits.exceptionMask)
 
-  private val OutputEntriesWillNotFull = OutputEntriesValidNumKeep =/= DecodeWidth.U
+  private val OutputEntriesWillNotFull = outputEntriesValidNumKeep =/= DecodeWidth.U
   // when using bypass, bypassed entries do not enqueue
   // Timing optimization: only count enqEnable up to MaxBypassNum.
   // - Higher-index enqEnable bits arrive later (longer datapath).
@@ -234,15 +287,11 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val maybeBypassNum = Mux(io.in.valid, PopCount(io.in.bits.enqEnable.take(MaxBypassNum)), 0.U)
   numTryEnq := numFromFetch
 
-  numOut := Mux(
-    !resumingVType,
-    Mux(
-      useBypass,
-      maybeBypassNum,
-      numValid
-    ).min(OutputEntriesInCapacity),
-    0.U
-  )
+  when(resumingVType) {
+    numOut := 0.U
+  }.otherwise {
+    numOut := Mux(useBypass, maybeBypassNum, numValid).min(outputEntriesInCapacity)
+  }
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // Bypass
@@ -297,42 +346,40 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   // Non-bypass path: deqEntries → deqOutEntries
   // VTypeGen is fed from this path to keep bypass out of the vtype timing path.
 
-  private val predUopNumMod = Module(new PredUopNum)
   for (i <- 0 until DecodeWidth) {
-    predUopNumMod.io.valid(i) := Mux(useBypass, bypassEntries(i).valid, deqEntries(i).valid)
-    predUopNumMod.io.inst(i)  := Mux(useBypass, bypassEntries(i).bits.inst, deqEntries(i).bits.inst)
-    predUopNumMod.io.vtype(i) := Mux(useBypass, vtypeGen.out.oldVType(0), vtypeGen.out.vtype(i))
+    predUopNum.in.valid(i) := Mux(useBypass, bypassEntries(i).valid, deqEntries(i).valid)
+    predUopNum.in.inst(i)  := Mux(useBypass, bypassEntries(i).bits.inst, deqEntries(i).bits.inst)
+    predUopNum.in.vtype(i) := Mux(useBypass, vtypeGen.out.oldVType(0), vtypeGen.out.vtype(i))
   }
-  predUopNumMod.io.fromCSR := io.fromBackend.fromCSR
-  predUopNumMod.io.vstart  := io.fromBackend.vstart
-  val predUopNumOH = predUopNumMod.io.uopNumOH
+  predUopNum.in.fromCSR := io.fromBackend.fromCSR
+  predUopNum.in.vstart  := io.fromBackend.vstart
 
-  private val deqOutEntries = Wire(outputEntriesNext.cloneType)
+  val predUopNumOH = predUopNum.out.uopNumOH
   for (i <- 0 until DecodeWidth) {
     deqOutEntries(i).valid := deqEntries(i).valid
-    deqOutEntries(i).bits  := deqEntries(i).bits.toIBufOutEntry(
+    deqOutEntries(i).bits := deqEntries(i).bits.toIBufOutEntry(
       Mux(
         deqHasException && i.U === deqExceptionOffset,
         firstException.bits,
-        0.U.asTypeOf(firstException.bits),
+        0.U.asTypeOf(firstException.bits)
       ),
       vtypeGen.out.vtype(i),
       vtypeGen.out.oldVType(i),
-      predUopNumOH(i),
+      predUopNumOH(i)
     )
   }
 
-  private val bypassOutEntries = Wire(outputEntriesNext.cloneType)
   for (i <- 0 until DecodeWidth) {
-      bypassOutEntries(i).valid := bypassEntries(i).valid
-        bypassOutEntries(i).bits  := bypassEntries(i).bits.toIBufOutEntry(Mux(
-          bypassExceptionMask(i),
-          currentException,
-          0.U.asTypeOf(firstException.bits),
+    bypassOutEntries(i).valid := bypassEntries(i).valid
+    bypassOutEntries(i).bits := bypassEntries(i).bits.toIBufOutEntry(
+      Mux(
+        bypassExceptionMask(i),
+        currentException,
+        0.U.asTypeOf(firstException.bits)
       ),
       vtypeGen.out.oldVType(0),
       vtypeGen.out.oldVType(0),
-      predUopNumOH(i),
+      predUopNumOH(i)
     )
   }
 
@@ -341,9 +388,9 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   for (i <- 0 until DecodeWidth) {
     when(OutputEntriesWillNotFull && !resumingVType) {
       outputEntriesNext(i) := Mux(
-        i.U < OutputEntriesValidNumKeep,
-        outputEntries(i.U + OutputEntriesOutNum),
-        toOutputEntries(i.U - OutputEntriesValidNumKeep)
+        i.U < outputEntriesValidNumKeep,
+        outputEntries(i.U + outputEntriesOutNum),
+        toOutputEntries(i.U - outputEntriesValidNumKeep)
       )
     }.otherwise {
       outputEntriesNext(i) := outputEntries(i)
@@ -441,8 +488,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
   // Register the first encountered exceptions into the IBuffer.
-  private val receiveExceptionFire = io.in.fire && !io.flush && !firstException.valid
-  private val exceptionBypassed = useBypass && (bypassExceptionMask.asUInt & UIntToMask(numDeq, DecodeWidth)).orR
+  private val receiveExceptionFire  = io.in.fire && !io.flush && !firstException.valid
+  private val exceptionBypassed     = useBypass && (bypassExceptionMask.asUInt & UIntToMask(numDeq, DecodeWidth)).orR
   private val nextFirstHasException = currentException.exceptionType.hasException && !exceptionBypassed
 
   // When exceptions are registered in IBuffer, set firstHasExceptionExcludingRVCII.
@@ -503,10 +550,10 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   dontTouch(enqPtr)
   dontTouch(deqPtr)
 
-  dontTouch(OutputEntriesValidNum)
-  dontTouch(OutputEntriesOutNum)
-  dontTouch(OutputEntriesValidNumKeep)
-  dontTouch(OutputEntriesInCapacity)
+  dontTouch(outputEntriesValidNum)
+  dontTouch(outputEntriesOutNum)
+  dontTouch(outputEntriesValidNumKeep)
+  dontTouch(outputEntriesInCapacity)
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // TopDown

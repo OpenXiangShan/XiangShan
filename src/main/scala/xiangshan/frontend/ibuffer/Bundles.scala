@@ -26,15 +26,14 @@ import xiangshan.ExceptionNO
 import xiangshan.TriggerAction
 import xiangshan.XSCoreParamsKey
 import xiangshan.backend.decode.VTypeGen
+import xiangshan.backend.decode.VTypeGen.{Entry => VTypeEntry}
 import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.vector.Decoder.NumUopOH
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.Pc
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.backend.fu.vector.Bundles.VType
-import xiangshan.backend.decode.VTypeGen.{Entry => VTypeEntry}
-import xiangshan.backend.vector.Decoder.NumUopOH
 
 // FIXME: these ptrs have ambiguous names
 // FIXME: if these ptrs are never used outside ibuffer, we can move them to class IBuffer as private inner classes
@@ -83,10 +82,10 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   }
 
   def toIBufOutEntry(
-    exception: IBufExceptionEntry,
-    vtype: VType,
-    oldVType: VType,
-    uopNumOH: UInt,
+      exception: IBufExceptionEntry,
+      vtype:     VType,
+      oldVType:  VType,
+      uopNumOH:  UInt
   ): IBufOutEntry = {
     val result = Wire(new IBufOutEntry)
     result.inst               := inst
