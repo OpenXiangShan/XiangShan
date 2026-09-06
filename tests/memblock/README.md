@@ -353,7 +353,9 @@ DCache request. The MMIO case also performs the backend `pendingMMIOld`
 handshake before completion. A forwarding case issues a younger load after the
 matching store address but before its data; it requires a pre-data cancellation,
 then exact store-data forwarding with one final uncanceled wakeup and no DCache
-request after line warmup. `random-mixed` keeps constant-space lane counters and
+request after line warmup. A PMP-denied S-mode Bare load must cancel every
+speculative wakeup while issuing no PTW, DCache, or Uncache request.
+`random-mixed` keeps constant-space lane counters and
 requires both canceled and uncanceled wakeups on every lane. When hardware
 stride prefetch is enabled, that backend gate is frozen before training begins
 because prefetch traffic produces load-pipeline cancel pulses without backend

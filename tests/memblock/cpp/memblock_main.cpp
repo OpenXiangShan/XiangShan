@@ -2318,6 +2318,71 @@ int run_load_feedback(int argc, char **argv)
                   << forwarding_environment.tilelink_requests() << '\n';
         return 1;
     }
+
+    memblock::Environment pmp_environment(argc, argv);
+    constexpr std::uint64_t pmp_base =
+        memblock::kDefaultMemoryBase + 0xa0000;
+    constexpr std::uint64_t pmp_size = 0x1000;
+    const std::uint64_t pmp_napot_address =
+        (pmp_base | (pmp_size / 2 - 1)) >> 2;
+    const memblock::LoadTransaction pmp_load{
+        .address = pmp_base + 0x80,
+        .op = memblock::LoadOp::ld,
+        .rob = 96,
+        .lq = 0,
+        .pdest = 75,
+        .lane = 2,
+        .expected_exception_mask = memblock::kExceptionLoadAccessFault,
+    };
+    if (!pmp_environment.reset() || !pmp_environment.activate_bare() ||
+        !pmp_environment.configure_pmp({pmp_napot_address}, {0x18})) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << pmp_environment.cycle()
+                  << " phase=pmp-configuration reason="
+                  << pmp_environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t pmp_ptw_before = pmp_environment.ptw_requests();
+    const std::uint64_t pmp_dcache_before =
+        pmp_environment.tilelink_requests();
+    const std::uint64_t pmp_uncache_before = pmp_environment.uncache_requests();
+    pmp_environment.expect_load(pmp_load);
+    if (!pmp_environment.set_rob_head(pmp_load.rob) ||
+        !pmp_environment.enqueue_load(pmp_load) ||
+        !pmp_environment.issue_load(pmp_load, 256) ||
+        !pmp_environment.run_until_complete(4096) ||
+        !pmp_environment.run_until_lq_retired(1024) ||
+        !pmp_environment.run_cycles(16)) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << pmp_environment.cycle()
+                  << " phase=pmp-complete reason="
+                  << pmp_environment.error() << '\n';
+        return 1;
+    }
+    const auto &pmp_stats = pmp_environment.scalar_load_feedback_stats();
+    std::uint64_t pmp_wakeups = 0;
+    std::uint64_t pmp_cancels = 0;
+    for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+        pmp_wakeups += pmp_stats.wakeups[lane];
+        pmp_cancels += pmp_stats.ld2_cancels[lane];
+    }
+    if (pmp_cancels == 0 || pmp_wakeups != pmp_cancels ||
+        pmp_environment.ptw_requests() != pmp_ptw_before ||
+        pmp_environment.tilelink_requests() != pmp_dcache_before ||
+        pmp_environment.uncache_requests() != pmp_uncache_before) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << pmp_environment.cycle()
+                  << " phase=pmp-classification wakeups=" << pmp_wakeups
+                  << " cancels=" << pmp_cancels
+                  << " ptw_before=" << pmp_ptw_before << " ptw_after="
+                  << pmp_environment.ptw_requests()
+                  << " dcache_before=" << pmp_dcache_before
+                  << " dcache_after=" << pmp_environment.tilelink_requests()
+                  << " uncache_before=" << pmp_uncache_before
+                  << " uncache_after=" << pmp_environment.uncache_requests()
+                  << '\n';
+        return 1;
+    }
     const auto &warm_stats = environment.scalar_load_feedback_stats();
     std::uint64_t wakeups = 0;
     std::uint64_t cancels = 0;
@@ -2341,6 +2406,8 @@ int run_load_feedback(int argc, char **argv)
               << " nc_cycles=" << nc_cycles
               << " forwarding_cancels=" << forwarding_cancels
               << " forwarding_cycles=" << forwarding_environment.cycle()
+              << " pmp_cancels=" << pmp_cancels
+              << " pmp_cycles=" << pmp_environment.cycle()
               << " wakeups=" << wakeups
               << " ld2_cancels=" << cancels
               << " writebacks=" << environment.writebacks()
