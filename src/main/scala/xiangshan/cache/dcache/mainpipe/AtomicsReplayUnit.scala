@@ -72,6 +72,9 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
     val pipe_req = io.pipe_req.bits
     pipe_req := DontCare
     pipe_req.miss := false.B
+    pipe_req.toPB := false.B
+    pipe_req.pbReq := false.B
+    pipe_req.pbEligible := false.B
     pipe_req.probe := false.B
     pipe_req.probe_need_data := false.B
     pipe_req.source := AMO_SOURCE.U

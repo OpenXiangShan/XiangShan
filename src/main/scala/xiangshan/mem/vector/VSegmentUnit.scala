@@ -310,7 +310,7 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
 
   }.elsewhen(state === s_cache_resp){
     when(io.rdcache.resp.fire) {
-      when(io.rdcache.resp.bits.miss || io.rdcache.s2_bank_conflict) {
+      when(io.rdcache.resp.bits.miss || io.rdcache.resp.bits.pbRetry || io.rdcache.s2_bank_conflict) {
         stateNext := s_cache_req
       }.otherwise {
         stateNext := Mux(isVSegLoad, Mux(isMisalignReg && !notCross16ByteReg, s_misalign_merge_data, s_latch_and_merge_data), s_send_data)
@@ -711,6 +711,9 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.rdcache.s1_paddr_dup_dcache    := dcacheReqPaddr
   io.rdcache.s1_kill                := false.B
   io.rdcache.s2_kill                := false.B
+  io.rdcache.pbUse.valid := state === s_cache_resp && io.rdcache.resp.fire && isVSegLoad &&
+    io.rdcache.resp.bits.pbHit && !io.rdcache.resp.bits.pbRetry && !exceptionVec.orR
+  io.rdcache.pbUse.bits := io.rdcache.resp.bits.pbToken
   if (env.FPGAPlatform){
     io.rdcache.s0_pc                := DontCare
     io.rdcache.s1_pc                := DontCare
@@ -1014,4 +1017,3 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.exceptionInfo.bits.isHyper       := false.B
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.orR && !isEmpty(enqPtr, deqPtr)
 }
-

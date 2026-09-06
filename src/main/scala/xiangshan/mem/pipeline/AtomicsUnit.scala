@@ -548,6 +548,9 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   ) && state === s_cache_req
   val pipe_req = io.dcache.req.bits
   pipe_req := DontCare
+  pipe_req.toPB := false.B
+  pipe_req.pbReq := false.B
+  pipe_req.pbEligible := false.B
   pipe_req.cmd := LookupTree(uop.fuOpType, List(
     // TODO: optimize this
     LSUOpType.amoswap_b -> M_XA_SWAP,

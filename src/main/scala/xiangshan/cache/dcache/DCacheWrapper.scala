@@ -53,6 +53,7 @@ case class DCacheParameters
   nMMIOs: Int = 1,
   blockBytes: Int = 64,
   nMaxPrefetchEntry: Int = 1,
+  nPBEntries: Int = 8,
   alwaysReleaseData: Boolean = false,
   isKeywordBitsOpt: Option[Boolean] = Some(true),
   enableDataEcc: Boolean = false,
@@ -169,6 +170,11 @@ trait HasDCacheParameters
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
   val MaxPrefetchEntry = cacheParams.nMaxPrefetchEntry
+  val PBEntries = cacheParams.nPBEntries
+  val PBIdBits = log2Ceil(PBEntries max 2)
+  val PBCreditBits = log2Ceil((PBEntries + 3) max 2)
+  val PBAliasBits = cacheParams.aliasBitsOpt.getOrElse(0) max 1
+  require(PBEntries >= 0)
   def DCacheVWordBytes = VLEN / 8
 
   val DCacheSetDivBits = log2Ceil(DCacheSetDiv)
@@ -518,6 +524,10 @@ class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
   // s2
   val handled = Bool()
   val real_miss = Bool()
+  val pbHit = Bool()
+  val pbRetry = Bool()
+  val pbToken = new PBToken
+  val baseValid = Bool()
   // s3: 1 cycle after data resp
   val error_delayed = Bool() // all kinds of errors, include tag error
   val tl_error_delayed = new TLError()
@@ -679,6 +689,7 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   // kill previous cycle's req
   val s1_kill           = Output(Bool()) // kill loadpipe req at s1
   val s2_kill           = Output(Bool())
+  val pbUse = Valid(new PBToken)
   val s0_pc             = Output(UInt(VAddrBits.W))
   val s1_pc             = Output(UInt(VAddrBits.W))
   val s2_pc             = Output(UInt(VAddrBits.W))
@@ -1094,6 +1105,61 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val missQueue    = Module(new MissQueue(edge, MissReqPortCount))
   val probeQueue   = Module(new ProbeQueue(edge))
   val wb           = Module(new WritebackQueue(edge))
+  val pbSafe = WireInit(true.B)
+  val pbError = WireInit(0.U.asTypeOf(Valid(new L1CacheErrorInfo)))
+  mainPipe.io.pb.owners := missQueue.io.pb.owners
+  if (PBEntries > 0) {
+    val pb = Module(new PrefetchBuffer(MissReqPortCount))
+    pb.io.load.zip(ldu).foreach { case (port, pipe) => port <> pipe.io.pb }
+    pb.io.addr := mainPipe.io.pb.addr
+    mainPipe.io.pb.dir := pb.io.dir
+    mainPipe.io.pb.status := pb.io.status
+    pb.io.claim <> mainPipe.io.pb.claim
+    mainPipe.io.pb.op := pb.io.op
+    pb.io.read <> mainPipe.io.pb.read
+    mainPipe.io.pb.line <> pb.io.line
+    pb.io.abort := mainPipe.io.pb.abort
+    pb.io.finish := mainPipe.io.pb.finish
+    mainPipe.io.pb.replay := pb.io.replay
+    mainPipe.io.pb.maint <> pb.io.maint
+    mainPipe.io.pb.cancel := pb.io.cancel
+    pb.io.dispatch := mainPipe.io.pb.dispatch
+    pb.io.assist := mainPipe.io.pb.assist
+    pb.io.fill <> mainPipe.io.pbFill
+    pb.io.alloc := missQueue.io.pb.alloc
+    missQueue.io.pb.slot := pb.io.slot
+    pb.io.take := missQueue.io.pb.take
+    pb.io.free := missQueue.io.pb.free
+    missQueue.io.pb.status := pb.io.status
+    missQueue.io.pb.done := pb.io.fillDone
+    missQueue.io.pb.pub := pb.io.pub
+    pb.io.preA := missQueue.io.pb.preA
+    pb.io.wfi := io.wfi.wfiReq
+    pbSafe := pb.io.safe
+    pbError := pb.io.error
+    assert(!pb.io.fatal, "PB metadata integrity failure; coherence ownership is frozen")
+  } else {
+    ldu.foreach { pipe =>
+      pipe.io.pb.resp := 0.U.asTypeOf(new PBLoadResp)
+      pipe.io.pb.s2 := 0.U.asTypeOf(pipe.io.pb.s2)
+    }
+    mainPipe.io.pb.dir := 0.U.asTypeOf(new PBDir)
+    mainPipe.io.pb.status := 0.U.asTypeOf(mainPipe.io.pb.status)
+    mainPipe.io.pb.claim.foreach(_.ready := false.B)
+    mainPipe.io.pb.op.foreach(_ := PBOp.promote)
+    mainPipe.io.pb.read.ready := false.B
+    mainPipe.io.pb.line.valid := false.B
+    mainPipe.io.pb.line.bits := 0.U.asTypeOf(new PBLine)
+    mainPipe.io.pb.replay := 0.U.asTypeOf(mainPipe.io.pb.replay)
+    mainPipe.io.pb.maint.valid := false.B
+    mainPipe.io.pb.maint.bits := 0.U.asTypeOf(new PBMaint)
+    mainPipe.io.pb.cancel := false.B
+    mainPipe.io.pbFill.ready := false.B
+    missQueue.io.pb.slot := 0.U.asTypeOf(missQueue.io.pb.slot)
+    missQueue.io.pb.status := 0.U.asTypeOf(missQueue.io.pb.status)
+    missQueue.io.pb.done := 0.U.asTypeOf(missQueue.io.pb.done)
+    missQueue.io.pb.pub := 0.U.asTypeOf(missQueue.io.pb.pub)
+  }
 
   missQueue.io.lqEmpty := io.lqEmpty
   missQueue.io.hartId := io.hartId
@@ -1108,7 +1174,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   mainPipe.io.sms_agt_evict_req <> io.sms_agt_evict_req
   io.mshr_store_empty := missQueue.io.mshr_store_empty
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
-  io.wfi <> missQueue.io.wfi
+  missQueue.io.wfi.wfiReq := io.wfi.wfiReq
+  io.wfi.wfiSafe := missQueue.io.wfi.wfiSafe && pbSafe
   io.refillTrain := missQueue.io.refill_train
   mainPipe.io.prefetch_req <> io.prefetch_req
 
@@ -1147,7 +1214,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
                                          ldu.map(_.io.pseudo_data_error_inj_done).reduce(_|_))
   }
 
-  val errors = Seq(mainPipe.io.error) ++ // store / misc error
+  val errors = Seq(pbError, mainPipe.io.error) ++ // PB / store / misc error
         ldu.map(_.io.error)// load error
   val error_valid = errors.map(e => e.valid).reduce(_|_)
   io.error.bits <> RegEnable(

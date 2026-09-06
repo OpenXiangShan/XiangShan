@@ -98,6 +98,9 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     val pipe_req = io.pipe_req.bits
     pipe_req := DontCare
     pipe_req.miss := false.B
+    pipe_req.toPB := false.B
+    pipe_req.pbReq := false.B
+    pipe_req.pbEligible := false.B
     pipe_req.probe := true.B
     pipe_req.probe_param := req.param
     pipe_req.addr   := req.addr
