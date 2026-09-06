@@ -482,6 +482,56 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main)
 
+    def test_physical_dcache_ecc_contract_is_registered(self) -> None:
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        parameters = (
+            REPO_ROOT / "src/main/scala/xiangshan/Parameters.scala"
+        ).read_text()
+        ctrl_unit = (
+            REPO_ROOT / "src/main/scala/xiangshan/cache/dcache/CtrlUnit.scala"
+        ).read_text()
+        wrapper = (
+            REPO_ROOT
+            / "src/main/scala/xiangshan/cache/dcache/DCacheWrapper.scala"
+        ).read_text()
+        data_array = (
+            REPO_ROOT
+            / "src/main/scala/xiangshan/cache/dcache/data/BankedDataArray.scala"
+        ).read_text()
+        load_pipe = (
+            REPO_ROOT
+            / "src/main/scala/xiangshan/cache/dcache/loadpipe/LoadPipe.scala"
+        ).read_text()
+
+        for contract in (
+            "dcache_ctrl_base = 0x38022000ULL",
+            "dcache_ctrl_mask_bank0",
+            "tag_error_once = 0x11",
+            "data_error_once = 0x19",
+            "dcache_grants_drained()",
+            "run_clean_hit",
+            "run_tag_ecc_error",
+            "run_data_ecc_error",
+            "expected_data_xor",
+            "reports != 1",
+            "errors_after.last_dcache_address != address",
+            "phase=ecc-queue-conservation",
+            "tag_ecc=1 data_ecc=1",
+        ):
+            self.assertIn(contract, main)
+        for contract in (
+            "EnableAccurateLoadError: Boolean = false",
+            "newCtrlReg.ese := Mux(ctrlRegBundle.persist, ctrlRegBundle.ese, false.B)",
+            "bankedDataArray.io.pseudo_error <> ctrlUnit.io_pseudoError(1)",
+            "val pseudo_data_toggle_mask = io.pseudo_error.bits.map",
+            "raw_data := getDataFromEncWord(data_bank.io.r.data) ^ pseudo_data_toggle_mask",
+            "io.error.bits.report_to_beu := (s3_tag_error || s3_data_error) && s3_valid",
+        ):
+            self.assertIn(
+                contract,
+                parameters + ctrl_unit + wrapper + data_array + load_pipe,
+            )
+
     def test_topdown_outputs_have_semantic_contracts(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

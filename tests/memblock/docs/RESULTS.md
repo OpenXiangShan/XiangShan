@@ -15,12 +15,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `257396474c8bef35e3e3594a6adac2acf6aa7444e8370f0f4d3e413bd545f301`
 - Complete ordered RTL SHA-256: `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`
-- Current rebuilt and frozen UT executable SHA-256: `9486c3ead42ecd560e9f18a1d312b3e5ebbcda6a74250f94396a939f0def0d1c`
+- Current rebuilt and frozen UT executable SHA-256: `44844982d7b45fea335738f989a6532c72d4a6c675c59e54a28abb7d36c84dbe`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `577579039590a2ea7a5e5d4e22901ac1d76afbcc5fed158eaf1cd53c8e5d3984`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `3ffb5c0d39a3402bbe6507a54829d58866e907d02760179159d6945dde00344a`
-- Frozen runtime manifest SHA-256: `f4fbcf675573c51c472e5947469aa14077b9c9b22f9a0948678855980d11717f`
+- Frozen runtime manifest SHA-256: `6022a8f34ac3587246496bf1f2532857911fc1ed01d849cb7f35433fd81dc289`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -350,7 +350,21 @@ produced two wakeups and two cancellations, while the independently modeled
 G-stage guest-page fault produced three wakeups and three cancellations. Thus
 none left a normal backend wakeup after its exceptional writeback. The guarded
 fixed-PMA denial also canceled every speculative wakeup without issuing a
-DCache or Uncache request. Physical ECC cancellation injection remains open.
+DCache or Uncache request.
+
+The same short `dcache-errors` run now programs `L1DCacheCtrl` through its MMIO
+store path after fully draining two refills and proving both target lines are
+resident with zero-request hits. One-shot bank-0 bit-0 tag ECC produced an
+early wakeup/cancel pair, exactly one BEU report at the target physical
+address, no terminal writeback or new external DCache request, and a clean
+survivor after immediate redirect with the canceled LQ index reused. One-shot
+data ECC also produced exactly one BEU report and no external request; because
+this build explicitly sets `EnableAccurateLoadError=false`, it produced no
+cancel and one normal writeback containing the independently predicted
+bit-0-flipped value. Disabling injection restored exact clean data. The phase
+passed in 914 cycles with two physical-ECC BEU reports, three wakeups, one
+cancel, eight conserved LQ allocations (one canceled), and five conserved SQ
+allocations. No CPU RTL bug was identified by this closure.
 
 ## Store/Vector IQ Slow Feedback Boundary
 

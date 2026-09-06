@@ -6246,6 +6246,370 @@ int run_dcache_errors(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment ecc_environment(argc, argv);
+    constexpr std::uint64_t ecc_base =
+        memblock::kDefaultMemoryBase + 0x2d000;
+    constexpr std::uint64_t dcache_ctrl_base = 0x38022000ULL;
+    constexpr std::uint64_t dcache_ctrl_mask_bank0 =
+        dcache_ctrl_base + 0x10;
+    constexpr std::uint64_t tag_error_once = 0x11;
+    constexpr std::uint64_t data_error_once = 0x19;
+    constexpr std::uint64_t tag_address = ecc_base;
+    constexpr std::uint64_t data_address = ecc_base + 0x40;
+    ecc_environment.memory().fill_incrementing(ecc_base, 0x100, 0x9d);
+    if (!ecc_environment.reset()) {
+        std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                  << ecc_environment.cycle()
+                  << " phase=ecc-reset reason=" << ecc_environment.error()
+                  << '\n';
+        return 1;
+    }
+    ecc_environment.configure_cache_error_enable(true);
+    if (!ecc_environment.run_cycles(8)) {
+        std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                  << ecc_environment.cycle()
+                  << " phase=ecc-enable reason=" << ecc_environment.error()
+                  << '\n';
+        return 1;
+    }
+
+    auto run_clean_load = [&](std::uint64_t address, std::uint8_t rob,
+                              std::uint8_t lq, std::uint8_t pdest,
+                              unsigned lane, const char *phase,
+                              std::uint64_t expected_data_xor = 0) {
+        const memblock::LoadTransaction load{
+            .address = address,
+            .op = memblock::LoadOp::ld,
+            .rob = rob,
+            .lq = lq,
+            .pdest = pdest,
+            .lane = lane,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        ecc_environment.expect_load_data(
+            load,
+            ecc_environment.bus_expected_load(address, memblock::LoadOp::ld) ^
+                expected_data_xor);
+        if (!ecc_environment.set_rob_head(load.rob, load.rob_flag) ||
+            !ecc_environment.enqueue_load(load) ||
+            !ecc_environment.issue_load(load, 512) ||
+            !ecc_environment.run_until_complete(4096)) {
+            std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                      << ecc_environment.cycle() << " phase=" << phase
+                      << " reason=" << ecc_environment.error() << '\n';
+            return false;
+        }
+        for (unsigned cycle = 0;
+             cycle < 1024 && !ecc_environment.dcache_grants_drained();
+             ++cycle) {
+            if (!ecc_environment.run_cycles(1)) {
+                return false;
+            }
+        }
+        if (!ecc_environment.dcache_grants_drained() ||
+            !ecc_environment.run_cycles(16) ||
+            !ecc_environment.run_until_lq_retired(1024)) {
+            std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                      << ecc_environment.cycle() << " phase=" << phase
+                      << " reason=load did not drain refill/LQ"
+                      << " grant_acks=" << ecc_environment.dcache_grant_acks()
+                      << " data_beats="
+                      << ecc_environment.dcache_grant_data_beats()
+                      << " lq_allocated=" << ecc_environment.lq_allocated()
+                      << " lq_dequeued=" << ecc_environment.lq_dequeued()
+                      << " lq_canceled=" << ecc_environment.lq_canceled()
+                      << '\n';
+            return false;
+        }
+        return true;
+    };
+
+    auto run_clean_hit = [&](std::uint64_t address, std::uint8_t rob,
+                             std::uint8_t lq, std::uint8_t pdest,
+                             unsigned lane, const char *phase) {
+        const std::uint64_t requests_before =
+            ecc_environment.tilelink_requests();
+        if (!run_clean_load(address, rob, lq, pdest, lane, phase)) {
+            return false;
+        }
+        if (ecc_environment.tilelink_requests() != requests_before) {
+            std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                      << ecc_environment.cycle() << " phase=" << phase
+                      << " requests_before=" << requests_before
+                      << " requests_after="
+                      << ecc_environment.tilelink_requests()
+                      << " reason=ECC target was not resident in DCache\n";
+            return false;
+        }
+        return true;
+    };
+
+    if (!run_clean_load(tag_address, 40, 0, 40, 0, "tag-warm") ||
+        !run_clean_load(data_address, 41, 1, 41, 1, "data-warm") ||
+        !run_clean_hit(tag_address, 42, 2, 42, 0, "tag-warm-hit") ||
+        !run_clean_hit(data_address, 43, 3, 43, 1, "data-warm-hit")) {
+        return 1;
+    }
+
+    auto write_dcache_ctrl = [&](std::uint64_t address, std::uint64_t data,
+                                 std::uint8_t rob, std::uint8_t sq,
+                                 const char *phase) {
+        const memblock::StoreTransaction store{
+            .address = address,
+            .oracle_address = address,
+            .data = data,
+            .op = memblock::StoreOp::sd,
+            .rob = rob,
+            .sq = sq,
+            .address_lane = static_cast<unsigned>(sq & 1U),
+            .data_lane = static_cast<unsigned>((sq + 1U) & 1U),
+            .expected_debug_is_mmio = true,
+            .expected_debug_is_ncio = false,
+        };
+        const std::uint64_t dcache_before =
+            ecc_environment.tilelink_requests();
+        const std::uint64_t uncache_before =
+            ecc_environment.uncache_requests();
+        ecc_environment.expect_store(store);
+        if (!ecc_environment.set_rob_head(store.rob, store.rob_flag) ||
+            !ecc_environment.enqueue_store(store, 0) ||
+            !ecc_environment.issue_store_address(store, 512) ||
+            !ecc_environment.issue_store_data(store, 512) ||
+            !ecc_environment.run_until_store_complete_with_replay(
+                store, 8192, true) ||
+            !ecc_environment.commit_stores_through(store, 1) ||
+            !ecc_environment.run_cycles(16) ||
+            ecc_environment.tilelink_requests() != dcache_before ||
+            ecc_environment.uncache_requests() != uncache_before) {
+            std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                      << ecc_environment.cycle() << " phase=" << phase
+                      << " dcache_before=" << dcache_before
+                      << " dcache_after="
+                      << ecc_environment.tilelink_requests()
+                      << " uncache_before=" << uncache_before
+                      << " uncache_after="
+                      << ecc_environment.uncache_requests()
+                      << " pending_stores="
+                      << ecc_environment.pending_scalar_stores()
+                      << " store_writebacks="
+                      << ecc_environment.store_writebacks()
+                      << " sq_allocated=" << ecc_environment.sq_allocated()
+                      << " sq_dequeued=" << ecc_environment.sq_dequeued()
+                      << " sq_canceled=" << ecc_environment.sq_canceled()
+                      << " store_mmio_valid="
+                      << ecc_environment.store_mmio_valid()
+                      << " store_mmio_rob="
+                      << static_cast<unsigned>(
+                             ecc_environment.store_mmio_rob())
+                      << " store_tlb_feedbacks="
+                      << ecc_environment.store_tlb_feedbacks()
+                      << " store_tlb_misses="
+                      << ecc_environment.store_tlb_misses()
+                      << " reason=" << ecc_environment.error() << '\n';
+            return false;
+        }
+        ecc_environment.record_committed_store(store);
+        return true;
+    };
+
+    const auto ecc_feedback_totals = [&ecc_environment]() {
+        const auto &feedback = ecc_environment.scalar_load_feedback_stats();
+        std::pair<std::uint64_t, std::uint64_t> totals{};
+        for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+            totals.first += feedback.wakeups[lane];
+            totals.second += feedback.ld2_cancels[lane];
+        }
+        return totals;
+    };
+    std::uint64_t physical_ecc_wakeups = 0;
+    std::uint64_t physical_ecc_cancels = 0;
+    std::uint64_t physical_ecc_reports = 0;
+    auto run_tag_ecc_error = [&](std::uint64_t address, std::uint64_t control,
+                                 std::uint8_t control_rob,
+                                 std::uint8_t control_sq, std::uint8_t load_rob,
+                                 std::uint8_t load_lq, std::uint8_t pdest,
+                                 unsigned lane, const char *phase) {
+        if (!write_dcache_ctrl(
+                dcache_ctrl_base, control, control_rob, control_sq,
+                phase)) {
+            return false;
+        }
+        const auto feedback_before = ecc_feedback_totals();
+        const auto errors_before = ecc_environment.bus_error_stats();
+        const std::uint64_t requests_before =
+            ecc_environment.tilelink_requests();
+        const std::uint64_t writebacks_before = ecc_environment.writebacks();
+        const memblock::LoadTransaction load{
+            .address = address,
+            .op = memblock::LoadOp::ld,
+            .rob = load_rob,
+            .lq = load_lq,
+            .pdest = pdest,
+            .lane = lane,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        if (!ecc_environment.set_rob_head(load.rob, load.rob_flag) ||
+            !ecc_environment.enqueue_load(load) ||
+            !ecc_environment.issue_load(load, 512)) {
+            std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                      << ecc_environment.cycle() << " phase=" << phase
+                      << "-load reason=" << ecc_environment.error() << '\n';
+            return false;
+        }
+        bool observed_cancel = false;
+        for (unsigned cycle = 0; cycle < 128; ++cycle) {
+            const auto feedback = ecc_feedback_totals();
+            if (feedback.second > feedback_before.second) {
+                observed_cancel = true;
+                break;
+            }
+            if (!ecc_environment.run_cycles(1)) {
+                break;
+            }
+        }
+        if (observed_cancel &&
+            (!ecc_environment.redirect_after(
+                 load.rob, load.rob_flag, true) ||
+             !ecc_environment.run_cycles(96))) {
+            observed_cancel = false;
+        }
+        const auto feedback_after = ecc_feedback_totals();
+        const auto errors_after = ecc_environment.bus_error_stats();
+        const std::uint64_t wakeups =
+            feedback_after.first - feedback_before.first;
+        const std::uint64_t cancels =
+            feedback_after.second - feedback_before.second;
+        const bool lq_retired =
+            ecc_environment.lq_dequeued() + ecc_environment.lq_canceled() >=
+                ecc_environment.lq_allocated() ||
+            ecc_environment.account_lq_cancellation(1);
+        if (!observed_cancel || wakeups == 0 || cancels == 0 ||
+            cancels > wakeups ||
+            errors_after.dcache_reports != errors_before.dcache_reports + 1 ||
+            errors_after.last_dcache_address != address ||
+            ecc_environment.tilelink_requests() != requests_before ||
+            ecc_environment.writebacks() != writebacks_before ||
+            !lq_retired) {
+            std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                      << ecc_environment.cycle() << " phase=" << phase
+                      << "-classification wakeups=" << wakeups
+                      << " cancels=" << cancels
+                      << " error_reports_before="
+                      << errors_before.dcache_reports
+                      << " error_reports_after="
+                      << errors_after.dcache_reports
+                      << " error_address=0x" << std::hex
+                      << errors_after.last_dcache_address
+                      << " expected_address=0x" << address << std::dec
+                      << " requests_before=" << requests_before
+                      << " requests_after="
+                      << ecc_environment.tilelink_requests()
+                      << " writebacks_before=" << writebacks_before
+                      << " writebacks_after="
+                      << ecc_environment.writebacks()
+                      << " reason=" << ecc_environment.error() << '\n';
+            return false;
+        }
+        physical_ecc_wakeups += wakeups;
+        physical_ecc_cancels += cancels;
+        physical_ecc_reports +=
+            errors_after.dcache_reports - errors_before.dcache_reports;
+        return true;
+    };
+
+    auto run_data_ecc_error = [&](std::uint64_t address,
+                                  std::uint64_t control,
+                                  std::uint8_t control_rob,
+                                  std::uint8_t control_sq,
+                                  std::uint8_t load_rob,
+                                  std::uint8_t load_lq,
+                                  std::uint8_t pdest,
+                                  unsigned lane, const char *phase) {
+        if (!write_dcache_ctrl(
+                dcache_ctrl_base, control, control_rob, control_sq,
+                phase)) {
+            return false;
+        }
+        const auto feedback_before = ecc_feedback_totals();
+        const auto errors_before = ecc_environment.bus_error_stats();
+        const std::uint64_t requests_before =
+            ecc_environment.tilelink_requests();
+        const std::uint64_t writebacks_before = ecc_environment.writebacks();
+        if (!run_clean_load(
+                address, load_rob, load_lq, pdest, lane, phase, 1)) {
+            return false;
+        }
+        const auto feedback_after = ecc_feedback_totals();
+        const auto errors_after = ecc_environment.bus_error_stats();
+        const std::uint64_t wakeups =
+            feedback_after.first - feedback_before.first;
+        const std::uint64_t cancels =
+            feedback_after.second - feedback_before.second;
+        const std::uint64_t reports =
+            errors_after.dcache_reports - errors_before.dcache_reports;
+        if (wakeups == 0 || cancels != 0 || reports != 1 ||
+            errors_after.last_dcache_address != address ||
+            ecc_environment.tilelink_requests() != requests_before ||
+            ecc_environment.writebacks() != writebacks_before + 1) {
+            std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                      << ecc_environment.cycle() << " phase=" << phase
+                      << "-classification wakeups=" << wakeups
+                      << " cancels=" << cancels
+                      << " error_reports=" << reports
+                      << " error_address=0x" << std::hex
+                      << errors_after.last_dcache_address
+                      << " expected_address=0x" << address << std::dec
+                      << " requests_before=" << requests_before
+                      << " requests_after="
+                      << ecc_environment.tilelink_requests()
+                      << " writebacks_before=" << writebacks_before
+                      << " writebacks_after=" << ecc_environment.writebacks()
+                      << " reason=" << ecc_environment.error() << '\n';
+            return false;
+        }
+        physical_ecc_wakeups += wakeups;
+        physical_ecc_cancels += cancels;
+        physical_ecc_reports += reports;
+        return true;
+    };
+
+    if (!write_dcache_ctrl(
+            dcache_ctrl_mask_bank0, 1, 44, 0, "ecc-mask") ||
+        !run_tag_ecc_error(
+            tag_address, tag_error_once, 45, 1, 46, 4, 44, 0,
+            "tag-ecc") ||
+        !write_dcache_ctrl(dcache_ctrl_base, 0, 47, 2, "tag-disable") ||
+        !run_clean_load(tag_address, 48, 4, 45, 1, "tag-survivor") ||
+        !run_data_ecc_error(
+            data_address, data_error_once, 49, 3, 50, 5, 46, 0,
+            "data-ecc") ||
+        !write_dcache_ctrl(dcache_ctrl_base, 0, 51, 4, "data-disable") ||
+        !run_clean_load(data_address, 52, 6, 47, 2, "data-survivor")) {
+        return 1;
+    }
+    if (ecc_environment.lq_allocated() !=
+            ecc_environment.lq_dequeued() +
+                ecc_environment.lq_canceled() ||
+        ecc_environment.sq_allocated() !=
+            ecc_environment.sq_dequeued() +
+                ecc_environment.sq_canceled()) {
+        std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                  << ecc_environment.cycle()
+                  << " phase=ecc-queue-conservation"
+                  << " lq_allocated=" << ecc_environment.lq_allocated()
+                  << " lq_dequeued=" << ecc_environment.lq_dequeued()
+                  << " lq_canceled=" << ecc_environment.lq_canceled()
+                  << " sq_allocated=" << ecc_environment.sq_allocated()
+                  << " sq_dequeued=" << ecc_environment.sq_dequeued()
+                  << " sq_canceled=" << ecc_environment.sq_canceled()
+                  << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_DCACHE_ERRORS_PASS"
               << " cycle=" << environment.cycle()
               << " denied=1 corrupt=1"
@@ -6253,6 +6617,14 @@ int run_dcache_errors(int argc, char **argv)
               << " denied_cancels=" << denied_feedback.second
               << " corrupt_wakeups=" << corrupt_wakeups
               << " corrupt_cancels=" << corrupt_cancels
+              << " tag_ecc=1 data_ecc=1 ecc_error_reports="
+              << physical_ecc_reports
+              << " ecc_wakeups=" << physical_ecc_wakeups
+              << " ecc_cancels=" << physical_ecc_cancels
+              << " ecc_lq_allocated=" << ecc_environment.lq_allocated()
+              << " ecc_lq_canceled=" << ecc_environment.lq_canceled()
+              << " ecc_sq_allocated=" << ecc_environment.sq_allocated()
+              << " ecc_cycles=" << ecc_environment.cycle()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

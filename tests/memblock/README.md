@@ -562,7 +562,18 @@ the corresponding scalar load access-fault and hardware-error writebacks with
 RF writes suppressed. Its backend feedback oracle independently requires
 nonzero cancellation for each error and no surviving normal wakeup. The same
 all-wakeups-canceled rule is checked by `scalar-guest-fault` for a G-stage fault
-whose VA, GPA, and VS-non-leaf classification are independently modeled.
+whose VA, GPA, and VS-non-leaf classification are independently modeled. The
+scenario also fills two lines, waits for every refill beat and GrantAck, proves
+both targets are resident with zero-request hits, and programs the
+`L1DCacheCtrl` MMIO registers for one-shot bank-0 single-bit tag and data ECC
+injection. Tag ECC must report the exact physical address to BEU, cancel its
+speculative wakeup, produce no terminal writeback or new manager request, and
+permit a clean load after redirect with the canceled LQ slot reused. With this
+configuration's explicit `EnableAccurateLoadError=false`, data ECC must report
+the exact address to BEU without cancellation and write back the independently
+predicted bit-0-flipped data; a subsequent load must again return clean data.
+The phase finishes only when both LQ and SQ satisfy
+`allocated = dequeued + canceled`.
 
 `dcache-coherence` fills a clean line, invalidates it with a manager Probe,
 refills it, requests clean ProbeAckData, refills it again, dirties the line,
