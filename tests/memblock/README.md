@@ -554,14 +554,16 @@ make verify-endurance-results PICKER="$PICKER" REGRESSION_JOBS=8 \
   ENDURANCE_SEEDS=8 ENDURANCE_TRANSACTIONS=1000000
 ```
 
-On the recorded host, a 16,384-action `spec` seed averaged about 242 seconds.
-Linear scaling therefore puts a one-million-action seed near 4.1 hours, with
-host load and generated traffic mix affecting the actual result. The endurance
-timeout is eight hours per seed; using the ordinary 1,800-second timeout would
-turn the requested pressure into systematic timeouts. Keep shorter multi-seed
-campaigns as well: they explore more random initial states and localize a
-failure faster, while million-action seeds provide much deeper pointer-wrap
-and long-lived state pressure.
+On the recorded host, the current Probe-enabled 16,384-action `spec` seed took
+about 260 seconds alone and 279-298 seconds per worker in an eight-worker run.
+Linear scaling therefore puts a one-million-action seed near 4.4 hours alone or
+roughly 4.7-5.1 hours with eight concurrent workers, with host load and generated
+traffic mix affecting the actual result. The endurance timeout is eight hours
+per seed; using the ordinary 1,800-second timeout would turn the requested
+pressure into systematic timeouts. Keep shorter multi-seed campaigns as well:
+they explore more random initial states and localize a failure faster, while
+million-action seeds provide much deeper pointer-wrap and long-lived state
+pressure.
 
 `make benchmark-tests` executes every leaf scenario once and writes both JSON
 and Markdown inventories under `build/memblock/test-scale.*`. The table reports

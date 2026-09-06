@@ -389,6 +389,42 @@ endurance controller, IFU PTW bridge, and randomized Probe constraints are
 later controller changes, so this result remains valid pre-merge evidence and
 a newly frozen campaign is still required for the merged harness.
 
+### Post-Merge Probe Stability And Test Scale
+
+After the top-I/O audit changes and randomized Probe constraint were merged,
+the first eight-seed mixed matrix exposed a harness assumption at seed 5: SQ
+retirement had moved a store into SBuffer, but a Probe sent only 64 cycles later
+legally observed the line as N and returned NtoN. The test had incorrectly
+required dirty TtoN data. This was a test-state setup issue, not a CPU bug. The
+constraint now allows half of the bounded manager-completion window for older
+SBuffer traffic to drain before requiring the candidate line to be dirty, and
+the Probe mismatch diagnostic records both expected and observed opcode,
+permission, size, address, corrupt bit, and beat.
+
+With that correction, frozen-runtime seeds 1 through 8 each completed 16,384
+`spec` actions: 131,072 actions and 5,631,112 simulated cycles in 298.499484
+seconds. Aggregate traffic included 87,748 scalar load writebacks, 34,056
+scalar store writebacks, 6,219 vector load writebacks, 3,095 vector store
+writebacks, 6,060 prefetch writebacks, 12,490 DCache requests/GrantAcks, 17,532
+PTW requests, 1,302 Uncache requests, and 1,142 ReleaseData beats. The 51
+constrained Probe sequences issued 81 manager Probes including toB cleanup;
+toN/toB coverage was 21/30 and no-need-data/need-data coverage was 23/28. The
+independent artifact verifier accepted
+`build/memblock/post-probe-fix-mixed-8x16384.json`, SHA-256
+`34a296b963ff4b619bcde645f6a2b13cf8628f29e19aa64c131f981b7f18e7b9`.
+
+The same frozen runtime then passed all 61 leaf scenarios in 825.279134 seconds.
+At the common scale, `random-loads` completed 16,384 scalar loads in 356,934
+cycles and 145.609 seconds; `random-vector-loads` completed 16,384 vector loads
+in 427,968 cycles and 162.902 seconds; `random-stress` generated 16,262 DCache
+refills in 359,885 cycles and 134.999 seconds. The `random-mixed` measurement
+completed 16,384 actions in 705,714 cycles and 259.846 seconds, including
+10,175 scalar loads, 4,290 scalar stores, 799 vector loads, 388 vector stores,
+740 prefetches, 1,557 DCache refills/GrantAcks, 2,236 PTW requests, 158 Uncache
+requests, 10 Probes, and 140 ReleaseData beats. The full per-scenario table is
+`build/memblock/test-scale.md`; its JSON artifact SHA-256 is
+`acfc2594634a2b2beb4ef174f1dfbdae286cddfd4b0b3b3d50517cf5d37f8c10`.
+
 After the 57-case fault expansion, `random-mixed --seed 419 --transactions
 4096 --constraints spec` passed in 152,052 cycles. It mixed 2,467 loads, 1,011
 stores, 181 prefetches, vector traffic, atomics, MMIO/NC, translation faults,
