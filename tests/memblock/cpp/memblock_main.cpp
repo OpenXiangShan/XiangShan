@@ -11127,7 +11127,10 @@ int run_hypervisor_contracts(int argc, char **argv)
                          memblock::ReferencePbmt g_pbmt =
                              memblock::ReferencePbmt::pma,
                          memblock::ReferencePrivilegeMode current_privilege =
-                             memblock::ReferencePrivilegeMode::supervisor) {
+                             memblock::ReferencePrivilegeMode::supervisor,
+                         std::uint64_t final_physical_address = 0) {
+        const std::uint64_t mapped_physical = final_physical_address == 0
+            ? host_physical : final_physical_address;
         const bool vs_nc = vs_pbmt == memblock::ReferencePbmt::nc;
         const bool vs_io = vs_pbmt == memblock::ReferencePbmt::io;
         const bool g_nc = g_pbmt == memblock::ReferencePbmt::nc;
@@ -11154,11 +11157,11 @@ int run_hypervisor_contracts(int argc, char **argv)
         }
         ready = ready && (g_mode == memblock::ReferencePageMode::sv48
             ? environment.map_sv48x4_leaf(
-                  guest_physical, host_physical, 0, g_root,
+                  guest_physical, mapped_physical, 0, g_root,
                   g.readable, g.writable, g.executable,
                   g.accessed, g.dirty, g.user, g_nc, g_io)
             : environment.map_sv39x4_leaf(
-                  guest_physical, host_physical, 0, g_root,
+                  guest_physical, mapped_physical, 0, g_root,
                   g.readable, g.writable, g.executable,
                   g.accessed, g.dirty, g.user, g_nc, g_io));
         return ready && environment.set_page_based_memory_types(true, true) &&
@@ -11184,6 +11187,7 @@ int run_hypervisor_contracts(int argc, char **argv)
     unsigned pbmt_family_cases = 0;
     unsigned misaligned_family_cases = 0;
     unsigned physical_pmp_cases = 0;
+    unsigned physical_pma_cases = 0;
 
     auto run_load_case = [&](
                              const char *name,
@@ -11207,7 +11211,11 @@ int run_hypervisor_contracts(int argc, char **argv)
                              std::optional<std::uint8_t> physical_pmp_config =
                                  std::nullopt,
                              memblock::ReferencePrivilegeMode current_privilege =
-                                 memblock::ReferencePrivilegeMode::supervisor) {
+                                 memblock::ReferencePrivilegeMode::supervisor,
+                             std::uint64_t final_physical_address = 0,
+                             bool physical_pma_device = false) {
+        const std::uint64_t mapped_physical = final_physical_address == 0
+            ? host_physical : final_physical_address;
         const bool hlvx = op == memblock::LoadOp::hlvxhu ||
                           op == memblock::LoadOp::hlvxwu;
         const bool vs_permitted = hlvx
@@ -11228,23 +11236,28 @@ int run_hypervisor_contracts(int argc, char **argv)
         const bool physical_pmp_denied = active_pmp_config.has_value() &&
             (*active_pmp_config & required_pmp_permission) !=
                 required_pmp_permission;
+        const bool physical_pma_denied = physical_pma_device && hlvx;
         const std::uint32_t expected_exception = !vs_permitted
             ? memblock::kExceptionLoadPageFault
             : !g_permitted
                 ? memblock::kExceptionLoadGuestPageFault
-                : physical_pmp_denied
+                : physical_pmp_denied || physical_pma_denied
                     ? memblock::kExceptionLoadAccessFault
                     : 0U;
         const auto final_pbmt =
             memblock::reference_two_stage_pbmt(vs_pbmt, g_pbmt);
         const bool final_nc = final_pbmt == memblock::ReferencePbmt::nc;
-        const bool final_io = final_pbmt == memblock::ReferencePbmt::io;
+        const bool final_io = final_pbmt == memblock::ReferencePbmt::io ||
+            (final_pbmt == memblock::ReferencePbmt::pma &&
+             physical_pma_device);
 
         memblock::Environment environment(argc, argv);
-        environment.memory().fill_incrementing(host_physical, 0x1000, 0x31);
+        environment.memory().fill_incrementing(
+            mapped_physical, 0x1000, 0x31);
         if (!configure(
                 environment, vs, g, spvp, mxr, vmxr, vsum,
-                vs_mode, g_mode, vs_pbmt, g_pbmt, current_privilege)) {
+                vs_mode, g_mode, vs_pbmt, g_pbmt, current_privilege,
+                mapped_physical)) {
             std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
                       << environment.cycle() << " phase=" << name
                       << "-configuration reason=" << environment.error()
@@ -11267,15 +11280,16 @@ int run_hypervisor_contracts(int argc, char **argv)
         }
         const memblock::LoadTransaction transaction{
             .address = guest_virtual + address_offset,
-            .oracle_address = host_physical + address_offset,
+            .oracle_address = mapped_physical + address_offset,
             .op = op,
             .rob = 0,
             .lq = 0,
             .pdest = 40,
             .lane = 0,
             .expected_exception_mask = expected_exception,
-            .expected_debug_is_mmio = final_io,
-            .expected_debug_is_ncio = final_io
+            .expected_debug_is_mmio = physical_pma_denied
+                ? std::nullopt : std::optional<bool>{final_io},
+            .expected_debug_is_ncio = final_io && !physical_pma_denied
                 ? std::optional<bool>{false} : std::nullopt,
         };
         const std::uint64_t dcache_before = environment.tilelink_requests();
@@ -11384,7 +11398,11 @@ int run_hypervisor_contracts(int argc, char **argv)
                               std::optional<std::uint8_t> physical_pmp_config =
                                   std::nullopt,
                               memblock::ReferencePrivilegeMode current_privilege =
-                                  memblock::ReferencePrivilegeMode::supervisor) {
+                                  memblock::ReferencePrivilegeMode::supervisor,
+                              std::uint64_t final_physical_address = 0,
+                              bool physical_pma_device = false) {
+        const std::uint64_t mapped_physical = final_physical_address == 0
+            ? host_physical : final_physical_address;
         const bool vs_permitted =
             memblock::reference_store_permitted(vs, spvp, vsum);
         const bool g_permitted = memblock::reference_store_permitted(
@@ -11401,17 +11419,21 @@ int run_hypervisor_contracts(int argc, char **argv)
         const auto final_pbmt =
             memblock::reference_two_stage_pbmt(vs_pbmt, g_pbmt);
         const bool final_nc = final_pbmt == memblock::ReferencePbmt::nc;
-        const bool final_io = final_pbmt == memblock::ReferencePbmt::io;
+        const bool final_io = final_pbmt == memblock::ReferencePbmt::io ||
+            (final_pbmt == memblock::ReferencePbmt::pma &&
+             physical_pma_device);
         const unsigned access_bytes =
             1U << (static_cast<unsigned>(op) & 3U);
         const bool misaligned =
             ((guest_virtual + address_offset) & (access_bytes - 1U)) != 0;
 
         memblock::Environment environment(argc, argv);
-        environment.memory().fill_incrementing(host_physical, 0x1000, 0x71);
+        environment.memory().fill_incrementing(
+            mapped_physical, 0x1000, 0x71);
         if (!configure(
                 environment, vs, g, spvp, false, false, vsum,
-                vs_mode, g_mode, vs_pbmt, g_pbmt, current_privilege)) {
+                vs_mode, g_mode, vs_pbmt, g_pbmt, current_privilege,
+                mapped_physical)) {
             std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
                       << environment.cycle() << " phase=" << name
                       << "-configuration reason=" << environment.error()
@@ -11434,7 +11456,7 @@ int run_hypervisor_contracts(int argc, char **argv)
         }
         const memblock::StoreTransaction transaction{
             .address = guest_virtual + address_offset,
-            .oracle_address = host_physical + address_offset,
+            .oracle_address = mapped_physical + address_offset,
             .data = data,
             .op = op,
             .rob = 0,
@@ -11442,7 +11464,7 @@ int run_hypervisor_contracts(int argc, char **argv)
             .address_lane = 0,
             .data_lane = 1,
             .expected_exception_mask = expected_exception,
-            .expected_debug_is_mmio = false,
+            .expected_debug_is_mmio = physical_pma_device,
             .expected_debug_is_ncio = false,
         };
         const std::uint64_t dcache_before = environment.tilelink_requests();
@@ -11844,6 +11866,42 @@ int run_hypervisor_contracts(int argc, char **argv)
         physical_pmp_cases += 3;
     }
 
+    constexpr std::uint64_t pma_device_physical = 0x35000000ULL;
+    if (!run_load_case(
+            "pma-device-hlv", memblock::LoadOp::hlvd,
+            rw_user, g_rw_user, memblock::ReferencePrivilegeMode::user,
+            false, false, false, false,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePbmt::pma,
+            memblock::ReferencePbmt::pma, 0x180, std::nullopt,
+            memblock::ReferencePrivilegeMode::machine,
+            pma_device_physical, true) ||
+        !run_load_case(
+            "pma-device-hlvx", memblock::LoadOp::hlvxwu,
+            x_supervisor, g_x_user,
+            memblock::ReferencePrivilegeMode::supervisor,
+            false, false, false, false,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePbmt::pma,
+            memblock::ReferencePbmt::pma, 0x184, std::nullopt,
+            memblock::ReferencePrivilegeMode::machine,
+            pma_device_physical, true) ||
+        !run_store_case(
+            "pma-device-hsv", memblock::StoreOp::hsvd,
+            rw_user, g_rw_user, memblock::ReferencePrivilegeMode::user,
+            false, 0x0123456789abcdefULL,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePageMode::sv39,
+            memblock::ReferencePbmt::pma,
+            memblock::ReferencePbmt::pma, 0x280, std::nullopt,
+            memblock::ReferencePrivilegeMode::machine,
+            pma_device_physical, true)) {
+        return 1;
+    }
+    physical_pma_cases += 3;
+
     std::cout << "MEMBLOCK_HYPERVISOR_CONTRACTS_PASS"
               << " cases=" << load_cases + store_cases
               << " load_cases=" << load_cases
@@ -11857,6 +11915,7 @@ int run_hypervisor_contracts(int argc, char **argv)
               << " pbmt_family_cases=" << pbmt_family_cases
               << " misaligned_family_cases=" << misaligned_family_cases
               << " physical_pmp_cases=" << physical_pmp_cases
+              << " physical_pma_cases=" << physical_pma_cases
               << " spvp=1 vsum=1 vmxr=1 hlvx=1 hsv=1 pmp_x=1"
               << " machine_spvp_pmp=1"
               << " cycles=" << total_cycles

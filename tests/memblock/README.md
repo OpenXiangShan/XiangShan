@@ -30,7 +30,9 @@ It also executes HLV, HLVX, and HSV from M-mode under SPVP=U/S with physical
 PMP R-only, X-only, RW, and RX regions. The independent permission oracle
 requires R for HLV, R+X for HLVX, and W for HSV, so an accidental M-mode PMP
 bypass is observable as a wrong completion instead of a load/store access
-fault.
+fault. A separate two-stage mapping targets the SoC's fixed `c=0` PMA device
+window: HLV and HSV must use Uncache with exact load/store data, while HLVX
+must report `LoadAccessFault` because that physical region is not executable.
 Vector FOF and unit-stride, strided, indexed-unordered, and
 indexed-ordered segment load/store takeover are covered by focused tests; the
 common constrained tail mixes segment operations across load/store, EEW
@@ -48,8 +50,9 @@ address/config immutability. This build uses a 4-KiB PMP platform grain, so
 NA4 is not independently selectable: an `A=2` write is WARL-coerced to NAPOT
 and is checked as a 4-KiB minimum region. Instruction X permission, HLVX
 physical R+X permission, M-mode/SPVP hypervisor PMP selection, and DebugModule
-access are covered by focused tests; locked hypervisor PMP regions and a
-broader fixed-PMA region matrix remain gaps.
+access are covered by focused tests. HLV/HLVX/HSV also cross one fixed PMA
+device mapping; locked hypervisor PMP regions and broader PMA region/edge
+matrices remain gaps.
 
 The MemBlock-facing L2-to-L1 DTLB request/response boundary is also exercised.
 `l2-tlb-contracts` checks request-field acceptance, L1 miss responses for both

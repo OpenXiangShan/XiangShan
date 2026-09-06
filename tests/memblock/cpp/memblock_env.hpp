@@ -2697,7 +2697,21 @@ public:
                         << it->second.exception_mask
                         << " expected_trigger=" << std::dec
                         << static_cast<unsigned>(it->second.trigger.value_or(kTriggerNone))
-                        << " expected_flush_pipe=" << it->second.flush_pipe;
+                        << " expected_flush_pipe=" << it->second.flush_pipe
+                        << " mmio=" << writeback.debug_is_mmio
+                        << " ncio=" << writeback.debug_is_ncio
+                        << " expected_mmio=";
+                if (it->second.debug_is_mmio.has_value()) {
+                    message << *it->second.debug_is_mmio;
+                } else {
+                    message << "unchecked";
+                }
+                message << " expected_ncio=";
+                if (it->second.debug_is_ncio.has_value()) {
+                    message << *it->second.debug_is_ncio;
+                } else {
+                    message << "unchecked";
+                }
                 error_ = message.str();
             }
             return;
