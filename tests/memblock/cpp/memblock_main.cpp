@@ -2725,10 +2725,173 @@ int run_rar_violation(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment concurrent(argc, argv);
+    constexpr std::uint64_t concurrent_line =
+        memblock::kDefaultMemoryBase + 0x1d000;
+    concurrent.memory().fill_incrementing(concurrent_line, 64, 0x79);
+    if (!concurrent.reset()) {
+        std::cerr << "MEMBLOCK_RAR_VIOLATION_FAIL cycle="
+                  << concurrent.cycle()
+                  << " phase=concurrent-reset reason=" << concurrent.error()
+                  << '\n';
+        return 1;
+    }
+    concurrent.configure_ldld_violation_check(true);
+
+    const memblock::LoadTransaction concurrent_warm{
+        .address = concurrent_line + 40,
+        .op = memblock::LoadOp::ld,
+        .rob = memblock::rob_pointer_value(150),
+        .rob_flag = memblock::rob_pointer_flag(150),
+        .lq = 0,
+        .sq = 0,
+        .pdest = 60,
+        .lane = 0,
+    };
+    concurrent.expect_load(concurrent_warm);
+    if (!concurrent.enqueue_load(concurrent_warm) ||
+        !concurrent.issue_load(concurrent_warm, 256) ||
+        !concurrent.run_until_complete(4096)) {
+        std::cerr << "MEMBLOCK_RAR_VIOLATION_FAIL cycle="
+                  << concurrent.cycle()
+                  << " phase=concurrent-warm reason=" << concurrent.error()
+                  << '\n';
+        return 1;
+    }
+
+    const memblock::StoreTransaction concurrent_dirty{
+        .address = concurrent_line + 48,
+        .data = 0x6a5b4c3d2e1f8071ULL,
+        .op = memblock::StoreOp::sd,
+        .rob = memblock::rob_pointer_value(151),
+        .rob_flag = memblock::rob_pointer_flag(151),
+        .sq = 0,
+        .address_lane = 1,
+        .data_lane = 0,
+    };
+    concurrent.expect_store(concurrent_dirty);
+    if (!concurrent.enqueue_store(concurrent_dirty, 1) ||
+        !concurrent.issue_store_data(concurrent_dirty, 256) ||
+        !concurrent.issue_store_address(concurrent_dirty, 256) ||
+        !concurrent.run_until_store_complete(512) ||
+        !concurrent.commit_store(concurrent_dirty, 4096) ||
+        !concurrent.run_until_sbuffer_empty(4096) ||
+        !concurrent.run_cycles(16)) {
+        std::cerr << "MEMBLOCK_RAR_VIOLATION_FAIL cycle="
+                  << concurrent.cycle()
+                  << " phase=concurrent-dirty reason=" << concurrent.error()
+                  << '\n';
+        return 1;
+    }
+
+    std::vector<memblock::LoadTransaction> concurrent_older;
+    std::vector<memblock::LoadTransaction> concurrent_younger;
+    for (unsigned index = 0; index < memblock::kScalarLoadLanes; ++index) {
+        concurrent_older.push_back(memblock::LoadTransaction{
+            .address = concurrent_line + 8 + 8 * index,
+            .op = memblock::LoadOp::ld,
+            .rob = memblock::rob_pointer_value(158 + index),
+            .rob_flag = memblock::rob_pointer_flag(158 + index),
+            .lq = static_cast<std::uint8_t>(1 + index),
+            .sq = 1,
+            .pdest = static_cast<std::uint8_t>(61 + index),
+            .lane = index,
+            .predecode_rvc = index == 0,
+            .ftq_ptr = 55 + index,
+            .ftq_offset = static_cast<std::uint8_t>(12 + index),
+        });
+        concurrent_younger.push_back(memblock::LoadTransaction{
+            .address = concurrent_line + 8 + 8 * index,
+            .op = memblock::LoadOp::ld,
+            .rob = memblock::rob_pointer_value(161 + index),
+            .rob_flag = memblock::rob_pointer_flag(161 + index),
+            .lq = static_cast<std::uint8_t>(4 + index),
+            .sq = 1,
+            .pdest = static_cast<std::uint8_t>(64 + index),
+            .lane = index,
+            .ftq_ptr = 58 + index,
+            .ftq_offset = static_cast<std::uint8_t>(15 + index),
+        });
+    }
+    for (const auto &load : concurrent_younger) {
+        concurrent.expect_load(load);
+    }
+    if (!concurrent.enqueue_load_batch(concurrent_older, {0, 1, 2}) ||
+        !concurrent.enqueue_load_batch(concurrent_younger, {0, 1, 2}) ||
+        !concurrent.issue_load_batch(concurrent_younger, 256, true) ||
+        !concurrent.run_until_complete(4096) ||
+        !concurrent.request_dcache_probe(
+            concurrent_line, 2, false, 1,
+            concurrent.memory().read_beat(concurrent_line, 64)) ||
+        !concurrent.run_until_probe_responses(1) ||
+        !concurrent.run_cycles(8)) {
+        std::cerr << "MEMBLOCK_RAR_VIOLATION_FAIL cycle="
+                  << concurrent.cycle()
+                  << " phase=concurrent-younger-release reason="
+                  << concurrent.error() << '\n';
+        return 1;
+    }
+
+    for (const auto &load : concurrent_older) {
+        concurrent.expect_load(load);
+    }
+    const auto concurrent_before = concurrent.memory_violation_stats().count;
+    if (!concurrent.issue_load_batch(concurrent_older, 256, true)) {
+        std::cerr << "MEMBLOCK_RAR_VIOLATION_FAIL cycle="
+                  << concurrent.cycle()
+                  << " phase=concurrent-older-issue reason="
+                  << concurrent.error() << '\n';
+        return 1;
+    }
+    for (unsigned cycle = 0;
+         cycle < 1024 &&
+         concurrent.memory_violation_stats().count == concurrent_before;
+         ++cycle) {
+        if (!concurrent.run_cycles(1)) {
+            std::cerr << "MEMBLOCK_RAR_VIOLATION_FAIL cycle="
+                      << concurrent.cycle()
+                      << " phase=concurrent-redirect-wait reason="
+                      << concurrent.error() << '\n';
+            return 1;
+        }
+    }
+    const auto &concurrent_stats = concurrent.memory_violation_stats();
+    const auto &concurrent_violation = concurrent_stats.last;
+    const auto &concurrent_oldest = concurrent_older.front();
+    if (concurrent_stats.count != concurrent_before + 1 ||
+        !concurrent_violation.valid ||
+        concurrent_violation.is_rvc != concurrent_oldest.predecode_rvc ||
+        concurrent_violation.rob_flag != concurrent_oldest.rob_flag ||
+        concurrent_violation.rob_value != concurrent_oldest.rob ||
+        concurrent_violation.ftq_flag ||
+        concurrent_violation.ftq_value != concurrent_oldest.ftq_ptr ||
+        concurrent_violation.ftq_offset != concurrent_oldest.ftq_offset ||
+        concurrent_violation.level) {
+        std::cerr << "MEMBLOCK_RAR_VIOLATION_FAIL cycle="
+                  << concurrent.cycle()
+                  << " phase=concurrent-redirect-check count="
+                  << concurrent_stats.count << " expected_count="
+                  << concurrent_before + 1 << " is_rvc="
+                  << concurrent_violation.is_rvc << " rob="
+                  << concurrent_violation.rob_flag << ':'
+                  << static_cast<unsigned>(concurrent_violation.rob_value)
+                  << " ftq=" << concurrent_violation.ftq_flag << ':'
+                  << static_cast<unsigned>(concurrent_violation.ftq_value)
+                  << " ftq_offset="
+                  << static_cast<unsigned>(concurrent_violation.ftq_offset)
+                  << " level=" << concurrent_violation.level << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_RAR_VIOLATION_PASS"
               << " cycle=" << environment.cycle()
               << " violations=" << stats.count
               << " probes=" << environment.dcache_probes()
+              << " concurrent_sources=" << concurrent_older.size()
+              << " rob_wrap=1"
+              << " concurrent_cycle=" << concurrent.cycle()
+              << " concurrent_rob=" << concurrent_violation.rob_flag << ':'
+              << static_cast<unsigned>(concurrent_violation.rob_value)
               << " rob=" << violation.rob_flag << ':'
               << static_cast<unsigned>(violation.rob_value)
               << " ftq=" << violation.ftq_flag << ':'

@@ -361,7 +361,10 @@ ROB age rather than port priority.
 complete first, drains an older store so the line is dirty, and forces a DCache
 writeback/release with a Probe before issuing the older load. It requires the
 RAR redirect to identify the older load and use `flushAfter`, unlike RAW's
-self-flush.
+self-flush. It then issues three older queries on different DCache banks in one
+cycle after three corresponding younger loads have observed the same released
+line. Their ROB identities cross 158, 159, and 0; the redirect must select 158
+by circular ROB age rather than LoadUnit priority.
 
 `ifetch-prefetch` drives software instruction-prefetch operations through all
 three scalar load-unit lanes and checks the exact per-lane virtual-address

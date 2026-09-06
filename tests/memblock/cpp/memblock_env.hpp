@@ -5265,7 +5265,8 @@ public:
     }
 
     bool issue_load_batch(
-        const std::vector<LoadTransaction> &transactions, unsigned timeout = 64)
+        const std::vector<LoadTransaction> &transactions, unsigned timeout = 64,
+        bool require_same_cycle = false)
     {
         if (transactions.empty() || transactions.size() > kScalarLoadLanes) {
             error_ = "scalar load batch must contain one to three transactions";
@@ -5306,6 +5307,30 @@ public:
         }
 
         for (unsigned cycle = 0; cycle < timeout; ++cycle) {
+            if (require_same_cycle) {
+                for (std::size_t index = 0; index < transactions.size(); ++index) {
+                    generated::drive_scalar_load_issue(
+                        dut_, transactions[index].lane, issues[index]);
+                }
+                dut_.RefreshComb();
+                const bool all_ready = std::all_of(
+                    transactions.begin(), transactions.end(),
+                    [&](const auto &transaction) {
+                        return generated::scalar_load_issue_ready(
+                            dut_, transaction.lane);
+                    });
+                if (all_ready) {
+                    tick();
+                    generated::clear_scalar_load_issue_valids(dut_);
+                    return check_components();
+                }
+                generated::clear_scalar_load_issue_valids(dut_);
+                tick();
+                if (!check_components()) {
+                    return false;
+                }
+                continue;
+            }
             for (std::size_t index = 0; index < transactions.size(); ++index) {
                 if (pending[index]) {
                     generated::drive_scalar_load_issue(
@@ -5338,7 +5363,9 @@ public:
             }
         }
         generated::clear_scalar_load_issue_valids(dut_);
-        error_ = "scalar load issue batch timed out waiting for ready";
+        error_ = require_same_cycle
+            ? "scalar load issue batch timed out waiting for same-cycle ready"
+            : "scalar load issue batch timed out waiting for ready";
         return false;
     }
 

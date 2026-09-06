@@ -65,8 +65,12 @@ The companion `rar-violation` scenario enables `ldld_vio_check`, completes a
 younger load, forces its dirty cache line through a one-Probe writeback/release,
 and then executes the older load. Current RTL passed in 365 cycles with exactly
 one redirect identifying `rob=0:30`, `ftq=0:43`, `ftqOffset=5`, `isRVC=1`, and
-`level=flushAfter`. RAR-specific multiple-candidate and pointer-wrap crosses,
-plus independently classified cancellation causes, remain open.
+`level=flushAfter`. A second independent run issued three older loads on
+different DCache banks in one cycle after their corresponding younger loads had
+observed one released line. Their ROB identities crossed 158, 159, and 0;
+current RTL selected `rob=0:158`, proving circular-age arbitration across three
+simultaneous RAR sources rather than fixed LoadUnit priority. Other independently
+classified cancellation causes remain open.
 
 The `io_ifetchPrefetch_*` audit corrected the earlier direction/ownership
 classification: these are three LoadUnit outputs carrying software
