@@ -277,6 +277,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "load_priority",
             "store_priority",
             "rob_pointer_value(160)",
+            "selector_cross=1",
             "load_oldest=0x",
             "store_oldest=0x",
         ):

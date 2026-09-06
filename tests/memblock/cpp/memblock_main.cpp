@@ -7290,10 +7290,7 @@ int run_exception_contracts(int argc, char **argv)
         !store_priority.issue_store_address_batch(store_faults, 256) ||
         !store_priority.run_until_store_complete(8192) ||
         !store_priority.run_cycles(8) ||
-        store_priority.exception_vaddr() != oldest_store_fault.address ||
-        !store_priority.account_sq_cancellation(
-            store_priority.sq_allocated() - store_priority.sq_dequeued() -
-            store_priority.sq_canceled())) {
+        store_priority.exception_vaddr() != oldest_store_fault.address) {
         std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
                   << store_priority.cycle()
                   << " phase=store-priority expected_vaddr=0x" << std::hex
@@ -7303,14 +7300,67 @@ int run_exception_contracts(int argc, char **argv)
         return 1;
     }
 
+    const memblock::LoadTransaction selector_load{
+        .address = virtual_base + 0xa000,
+        .op = memblock::LoadOp::ld,
+        .rob = memblock::rob_pointer_value(161),
+        .rob_flag = memblock::rob_pointer_flag(161),
+        .lq = memblock::lq_pointer_value(0),
+        .lq_flag = memblock::lq_pointer_flag(0),
+        .pdest = 45,
+        .lane = 1,
+        .expected_exception_mask = memblock::kExceptionLoadPageFault,
+    };
+    store_priority.expect_load(selector_load);
+    if (!store_priority.enqueue_load(selector_load) ||
+        !store_priority.issue_load(selector_load, 256) ||
+        !store_priority.run_until_complete(8192) ||
+        !store_priority.run_cycles(8) ||
+        store_priority.exception_vaddr() != oldest_store_fault.address) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << store_priority.cycle()
+                  << " phase=selector-store-retention expected_vaddr=0x"
+                  << std::hex << oldest_store_fault.address
+                  << " actual_vaddr=0x" << store_priority.exception_vaddr()
+                  << std::dec << " reason=" << store_priority.error() << '\n';
+        return 1;
+    }
+    store_priority.select_store_exception_address(false);
+    if (!store_priority.run_cycles(3) ||
+        store_priority.exception_vaddr() != selector_load.address) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << store_priority.cycle()
+                  << " phase=selector-load expected_vaddr=0x" << std::hex
+                  << selector_load.address << " actual_vaddr=0x"
+                  << store_priority.exception_vaddr() << std::dec
+                  << " reason=" << store_priority.error() << '\n';
+        return 1;
+    }
+    store_priority.select_store_exception_address(true);
+    if (!store_priority.run_cycles(3) ||
+        store_priority.exception_vaddr() != oldest_store_fault.address ||
+        !store_priority.run_until_lq_retired(1024) ||
+        !store_priority.account_sq_cancellation(
+            store_priority.sq_allocated() - store_priority.sq_dequeued() -
+            store_priority.sq_canceled())) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << store_priority.cycle()
+                  << " phase=selector-store-restore expected_vaddr=0x"
+                  << std::hex << oldest_store_fault.address
+                  << " actual_vaddr=0x" << store_priority.exception_vaddr()
+                  << std::dec << " reason=" << store_priority.error() << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_EXCEPTION_CONTRACTS_PASS"
               << " cycle=" << environment.cycle() + load_priority.cycle() +
                     store_priority.cycle()
               << " load_writebacks="
-              << environment.writebacks() + load_priority.writebacks()
+              << environment.writebacks() + load_priority.writebacks() +
+                    store_priority.writebacks()
               << " store_writebacks=" << store_priority.store_writebacks()
               << " prefetch_writebacks=" << environment.prefetch_writebacks()
-              << " load_priority=3 store_priority=2"
+              << " load_priority=3 store_priority=2 selector_cross=1"
               << " load_oldest=0x" << std::hex
               << oldest_load_fault.address
               << " store_oldest=0x" << oldest_store_fault.address << std::dec
