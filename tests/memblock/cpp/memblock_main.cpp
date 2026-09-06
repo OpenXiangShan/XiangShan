@@ -5614,6 +5614,117 @@ int run_dcache_coherence(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment overlap(argc, argv);
+    constexpr std::uint64_t overlap_base =
+        memblock::kDefaultMemoryBase + 0xe0000;
+    constexpr std::uint64_t probe_line_a = overlap_base;
+    constexpr std::uint64_t probe_line_b = overlap_base + 0x1000;
+    constexpr std::uint64_t miss_line = overlap_base + 0x2000;
+    overlap.memory().fill_incrementing(probe_line_a, 64, 0x51);
+    overlap.memory().fill_incrementing(probe_line_b, 64, 0x67);
+    overlap.memory().fill_incrementing(miss_line, 64, 0x7d);
+    overlap.configure_backpressure(
+        0xbb67ae8584caa73bULL, true,
+        memblock::ResponseLatencyProfile::spec);
+    if (!overlap.reset()) {
+        std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                  << overlap.cycle() << " phase=overlap-reset reason="
+                  << overlap.error() << '\n';
+        return 1;
+    }
+    std::vector<memblock::LoadTransaction> overlap_loads;
+    for (unsigned index = 0; index < 3; ++index) {
+        const std::uint64_t load_line = index == 0
+            ? probe_line_a : index == 1 ? probe_line_b : miss_line;
+        overlap_loads.push_back(memblock::LoadTransaction{
+            .address = load_line + 24,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(40 + index),
+            .lq = static_cast<std::uint8_t>(index),
+            .sq = 0,
+            .pdest = static_cast<std::uint8_t>(30 + index),
+            .lane = index,
+        });
+    }
+    for (unsigned index = 0; index < 2; ++index) {
+        const auto &warm = overlap_loads[index];
+        overlap.expect_load(warm);
+        if (!overlap.enqueue_load(warm) || !overlap.issue_load(warm, 256) ||
+            !overlap.run_until_complete(4096)) {
+            std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                      << overlap.cycle() << " phase=overlap-warm-" << index
+                      << " reason=" << overlap.error() << '\n';
+            return 1;
+        }
+    }
+
+    const auto &cold = overlap_loads.back();
+    const std::uint64_t writebacks_before = overlap.writebacks();
+    const std::uint64_t refills_before = overlap.dcache_refills();
+    overlap.expect_load(cold);
+    if (!overlap.enqueue_load(cold) || !overlap.issue_load(cold, 256)) {
+        std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                  << overlap.cycle() << " phase=overlap-cold-issue reason="
+                  << overlap.error() << '\n';
+        return 1;
+    }
+    for (unsigned cycle = 0;
+         cycle < 1024 && overlap.dcache_refills() == refills_before;
+         ++cycle) {
+        if (!overlap.run_cycles(1)) {
+            std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                      << overlap.cycle()
+                      << " phase=overlap-refill-request reason="
+                      << overlap.error() << '\n';
+            return 1;
+        }
+    }
+    if (overlap.dcache_refills() != refills_before + 1 ||
+        overlap.writebacks() != writebacks_before ||
+        !overlap.request_dcache_probe(probe_line_a, 2, false, 2) ||
+        !overlap.request_dcache_probe(probe_line_b, 2, false, 2)) {
+        std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                  << overlap.cycle()
+                  << " phase=overlap-probe-request refills_before="
+                  << refills_before << " refills_after="
+                  << overlap.dcache_refills() << " writebacks_before="
+                  << writebacks_before << " writebacks_after="
+                  << overlap.writebacks() << " reason=" << overlap.error()
+                  << '\n';
+        return 1;
+    }
+    for (unsigned cycle = 0;
+         cycle < 1024 && overlap.dcache_probes() < 2; ++cycle) {
+        if (!overlap.run_cycles(1) ||
+            overlap.writebacks() != writebacks_before) {
+            std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                      << overlap.cycle()
+                      << " phase=overlap-probe-accept probes="
+                      << overlap.dcache_probes() << " writebacks_before="
+                      << writebacks_before << " writebacks_after="
+                      << overlap.writebacks() << " reason=" << overlap.error()
+                      << '\n';
+            return 1;
+        }
+    }
+    if (overlap.dcache_probes() != 2 ||
+        overlap.dcache_probe_sources() != 2 ||
+        overlap.dcache_max_probe_outstanding() < 2 ||
+        !overlap.run_until_probe_responses(2, 4096) ||
+        !overlap.run_until_complete(4096) ||
+        !overlap.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_DCACHE_COHERENCE_FAIL cycle="
+                  << overlap.cycle()
+                  << " phase=overlap-complete probes="
+                  << overlap.dcache_probes() << " probe_sources="
+                  << overlap.dcache_probe_sources() << " max_probe_outstanding="
+                  << overlap.dcache_max_probe_outstanding()
+                  << " probe_responses=" << overlap.dcache_probe_responses()
+                  << " writebacks=" << overlap.writebacks()
+                  << " reason=" << overlap.error() << '\n';
+        return 1;
+    }
+
     const std::uint64_t expected_grants =
         environment.dcache_refills() + environment.dcache_acquire_perms();
     const bool passed = environment.dcache_probes() == 3 &&
@@ -5652,6 +5763,11 @@ int run_dcache_coherence(int argc, char **argv)
               << " grant_acks=" << environment.dcache_grant_acks()
               << " grant_ack_stalls="
               << environment.dcache_grant_ack_stalls()
+              << " overlap_cycles=" << overlap.cycle()
+              << " overlap_refills=" << overlap.dcache_refills()
+              << " overlap_probe_sources=" << overlap.dcache_probe_sources()
+              << " overlap_probe_depth="
+              << overlap.dcache_max_probe_outstanding()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

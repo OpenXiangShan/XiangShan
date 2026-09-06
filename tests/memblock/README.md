@@ -401,7 +401,12 @@ and requires dirty ProbeAckData even when the manager did not explicitly ask
 for data. Every returned byte is compared with the independent line image and
 written into bus memory before a post-probe cold load. The agent also assigns
 and checks every Grant/GrantData sink on E-channel GrantAck and forces at least
-one E-channel stall to check payload stability.
+one E-channel stall to check payload stability. A separate phase holds an
+unrelated cold refill open while two clean resident lines receive different
+Probe B-source IDs. Both B requests must be accepted before the cold load writes
+back, the measured Probe depth must reach two, and both address-matched C-channel
+responses must complete. C-source is intentionally not equated with B-source:
+the DCache WritebackQueue allocates the former independently.
 
 `ifetch-ptw-bridge` directly drives the IFU-originated PTW request across the
 MemBlock top-level boundary. It checks valid and invalid Sv39/Sv48 stage-1

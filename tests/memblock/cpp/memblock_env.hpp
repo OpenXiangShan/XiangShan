@@ -1085,8 +1085,16 @@ public:
     void update_after_tick()
     {
         if (b_fire_) {
+            const std::uint8_t source = b_beats_.front().source;
+            if (!probe_sources_seen_[source]) {
+                probe_sources_seen_[source] = true;
+                ++probe_source_count_;
+            }
             b_beats_.pop_front();
             ++probe_request_count_;
+            max_probe_outstanding_ = std::max(
+                max_probe_outstanding_,
+                probe_request_count_ - probe_response_count_);
         }
         if (d_fire_) {
             d_beats_.pop_front();
@@ -1138,6 +1146,11 @@ public:
     std::uint64_t probe_request_count() const { return probe_request_count_; }
     std::uint64_t probe_response_count() const { return probe_response_count_; }
     std::uint64_t probe_data_count() const { return probe_data_count_; }
+    std::uint64_t probe_source_count() const { return probe_source_count_; }
+    std::uint64_t max_probe_outstanding() const
+    {
+        return max_probe_outstanding_;
+    }
     std::uint64_t probe_stall_cycles() const { return probe_stall_cycles_; }
     std::uint64_t grant_ack_count() const { return grant_ack_count_; }
     std::uint64_t grant_ack_stall_cycles() const
@@ -1156,23 +1169,27 @@ public:
             error_ = "invalid DCache Probe request or expectation";
             return false;
         }
-        if (!b_beats_.empty() || !probe_responses_.empty()) {
-            error_ = "DCache Probe requested while another probe is outstanding";
-            return false;
-        }
         std::vector<unsigned char> data(kBeatBytes, 0);
         // XiangShan carries the virtual-index alias in B.data[2:1] and the
         // manager's data request in B.data[0]. Bare mappings use PA == VA.
         data[0] = static_cast<unsigned char>(
             (need_data ? 1U : 0U) | ((address >> 11) & 0x6U));
         const std::uint8_t source = next_probe_source_;
+        if (std::any_of(
+                probe_responses_.begin(), probe_responses_.end(),
+                [source](const auto &response) {
+                    return response.b_source == source;
+                })) {
+            error_ = "DCache Probe source reused while still outstanding";
+            return false;
+        }
         next_probe_source_ = static_cast<std::uint8_t>(
             (next_probe_source_ + 1U) & 0x3fU);
         b_beats_.push_back(BBeat{
             6, cap, 6, source, address, 0xffffffffU,
             std::move(data), false});
         probe_responses_.push_back(ProbeResponseState{
-            address, expected_report, expected_data, 0});
+            source, address, expected_report, expected_data, 0});
         return true;
     }
 
@@ -1278,6 +1295,7 @@ private:
     };
 
     struct ProbeResponseState {
+        std::uint8_t b_source;
         std::uint64_t base;
         std::uint8_t report;
         std::vector<unsigned char> expected_data;
@@ -1343,11 +1361,16 @@ private:
 
     void accept_probe_response(const CRequest &response)
     {
-        if (probe_responses_.empty()) {
-            error_ = "unexpected DCache ProbeAck response";
+        const auto expected_it = std::find_if(
+            probe_responses_.begin(), probe_responses_.end(),
+            [&](const auto &expected) {
+                return expected.base == response.address;
+            });
+        if (expected_it == probe_responses_.end()) {
+            error_ = "unexpected DCache ProbeAck address";
             return;
         }
-        ProbeResponseState &expected = probe_responses_.front();
+        ProbeResponseState &expected = *expected_it;
         const bool with_data = !expected.expected_data.empty();
         const std::uint8_t expected_opcode = with_data ? 5 : 4;
         if (response.opcode != expected_opcode || response.param != expected.report ||
@@ -1396,7 +1419,7 @@ private:
             }
             ++probe_data_count_;
         }
-        probe_responses_.pop_front();
+        probe_responses_.erase(expected_it);
         ++probe_response_count_;
     }
 
@@ -1544,10 +1567,13 @@ private:
     std::uint64_t probe_request_count_ = 0;
     std::uint64_t probe_response_count_ = 0;
     std::uint64_t probe_data_count_ = 0;
+    std::uint64_t probe_source_count_ = 0;
+    std::uint64_t max_probe_outstanding_ = 0;
     std::uint64_t probe_stall_cycles_ = 0;
     std::uint64_t grant_ack_count_ = 0;
     std::uint64_t grant_ack_stall_cycles_ = 0;
     std::uint8_t next_probe_source_ = 0;
+    std::array<bool, 64> probe_sources_seen_{};
     std::uint64_t random_state_ = 1;
     std::uint64_t e_random_state_ = 1;
     unsigned d_gap_ = 0;
@@ -3385,6 +3411,14 @@ public:
     std::uint64_t dcache_probe_data() const
     {
         return memory_agent_.probe_data_count();
+    }
+    std::uint64_t dcache_probe_sources() const
+    {
+        return memory_agent_.probe_source_count();
+    }
+    std::uint64_t dcache_max_probe_outstanding() const
+    {
+        return memory_agent_.max_probe_outstanding();
     }
     std::uint64_t dcache_probe_stalls() const
     {

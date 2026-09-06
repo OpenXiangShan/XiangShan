@@ -81,6 +81,19 @@ current RTL selected `rob=0:158`, proving circular-age arbitration across three
 simultaneous RAR sources rather than fixed LoadUnit priority. Other independently
 classified cancellation causes remain open.
 
+## DCache Probe Overlap Boundary
+
+`dcache-coherence` retained its clean invalidate, requested clean data, mandatory
+dirty data, refill, and exact E-channel GrantAck checks, passing in 481 cycles
+with five refills, three Probe responses, two ProbeAckData responses, and five
+GrantAcks. An independent 285-cycle phase held a third cold-load refill open
+while the DCache accepted two Probes for unrelated resident lines. Both B
+requests used distinct source IDs and were accepted before the cold load wrote
+back; maximum accepted-but-unanswered Probe depth reached two, both C responses
+matched their expected line addresses, and all three refills completed. The
+scoreboard follows the RTL contract in which C-source is allocated by the
+WritebackQueue rather than echoing B-source.
+
 The `io_ifetchPrefetch_*` audit corrected the earlier direction/ownership
 classification: these are three LoadUnit outputs carrying software
 instruction-prefetch virtual addresses to the frontend, not IFU training

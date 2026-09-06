@@ -241,6 +241,23 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main + makefile + generator)
 
+    def test_dcache_coherence_tracks_concurrent_probe_sources(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        for contract in (
+            "expected.base == response.address",
+            "probe_request_count_ - probe_response_count_",
+            "probe_sources_seen_",
+            "dcache_max_probe_outstanding",
+            "phase=overlap-probe-accept",
+            "overlap.writebacks() != writebacks_before",
+            "overlap_probe_sources=",
+            "overlap_probe_depth=",
+            "dcache-coherence",
+        ):
+            self.assertIn(contract, environment + main + makefile)
+
     def test_frontend_bridge_has_semantic_transaction_coverage(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
