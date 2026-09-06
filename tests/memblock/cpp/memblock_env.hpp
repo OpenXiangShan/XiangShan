@@ -5611,21 +5611,21 @@ public:
         const std::uint64_t request_before = uncache_agent_.request_count();
         dut_.io_ooo_to_mem_lsqio_pendingPtr_value.ImmSet(value);
         dut_.io_ooo_to_mem_lsqio_pendingPtr_flag.ImmSet(flag);
-        // ROB exposes pendingst as a one-cycle commit pulse.  Keep the pulse
-        // shape here and only wait after it has been sampled by StoreQueue;
-        // holding it high changes the real ROB/LSQ timing contract.
+        // ROB keeps pendingst high while this store remains at its head. Keep
+        // the real level contract until StoreQueue emits the Uncache request.
         dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{1});
-        tick();
-        dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{0});
         for (unsigned cycle = 0; cycle < timeout; ++cycle) {
             tick();
             if (!check_components()) {
+                dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{0});
                 return false;
             }
             if (uncache_agent_.request_count() > request_before) {
+                dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{0});
                 return true;
             }
         }
+        dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{0});
         error_ = "timed out waiting for MMIO store Uncache request";
         return false;
     }
@@ -6586,24 +6586,42 @@ public:
     }
 
     bool run_until_store_complete_with_replay(
-        const StoreTransaction &transaction, unsigned timeout = 4096)
+        const StoreTransaction &transaction, unsigned timeout = 4096,
+        bool hold_pending_store = false)
     {
+        // ROB keeps pendingst asserted while the same store remains at its
+        // head. A cold replay may not enter StoreMisalignBuffer until well
+        // after the first address issue, so retain that level across replays.
+        if (hold_pending_store) {
+            dut_.io_ooo_to_mem_lsqio_pendingPtr_value.ImmSet(transaction.rob);
+            dut_.io_ooo_to_mem_lsqio_pendingPtr_flag.ImmSet(transaction.rob_flag);
+            dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{1});
+        }
+        const auto clear_pending_store = [&]() {
+            if (hold_pending_store) {
+                dut_.io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{0});
+            }
+        };
         constexpr unsigned replay_interval = 32;
         for (unsigned elapsed = 0;
              elapsed < timeout && !store_scoreboard_.done();) {
             const unsigned cycles = std::min(replay_interval, timeout - elapsed);
             if (!run_cycles(cycles)) {
+                clear_pending_store();
                 return false;
             }
             elapsed += cycles;
             if (store_scoreboard_.done()) {
+                clear_pending_store();
                 return check_components();
             }
             if (!issue_store_address(transaction, replay_interval)) {
+                clear_pending_store();
                 return false;
             }
             ++elapsed;
         }
+        clear_pending_store();
         if (!store_scoreboard_.done()) {
             error_ = "timed out waiting for replayed scalar store writeback";
             return false;

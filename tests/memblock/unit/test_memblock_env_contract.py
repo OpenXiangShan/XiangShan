@@ -1238,8 +1238,24 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "constraints.misaligned_per_mille",
             "scalar_store_crosses_page",
             "(scalar_store.address & 0xfffU) + scalar_store_bytes > 0x1000U",
-            "environment.set_rob_head(\n                      scalar_store.rob",
-            "environment.pulse_pending_store(\n                      scalar_store.rob",
+            "environment.set_rob_head(\n                     scalar_store.rob",
+            "scalar_store, constrained_completion_timeout,\n                    scalar_store_crosses_page",
+        ):
+            self.assertIn(contract, driver)
+
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        for contract in (
+            "bool hold_pending_store = false",
+            "const auto clear_pending_store",
+            "io_ooo_to_mem_lsqio_pendingst.ImmSet(std::uint64_t{1})",
+        ):
+            self.assertIn(contract, environment)
+
+        for contract in (
+            "phase=translated-scalar-store",
+            "run_until_store_tlb_misses",
+            "translated_store, 8192, true",
+            "translated_scalar_cross_page=1",
         ):
             self.assertIn(contract, driver)
 

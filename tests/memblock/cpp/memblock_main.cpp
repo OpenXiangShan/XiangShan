@@ -7884,16 +7884,99 @@ int run_misaligned_stores(int argc, char **argv)
         return 1;
     }
 
+    // Reproduce the constrained-random corner where a scalar store first
+    // misses in the DTLB and only enters StoreMisalignBuffer on a later replay.
+    // pendingst must remain high while that store stays at the ROB head.
+    memblock::Environment translated_scalar(argc, argv);
+    constexpr std::uint64_t scalar_virtual = 0x49000000ULL;
+    constexpr std::uint64_t scalar_physical0 = 0xa6000000ULL;
+    constexpr std::uint64_t scalar_physical1 = 0xa7000000ULL;
+    constexpr std::uint64_t scalar_root = 0x93010000ULL;
+    translated_scalar.memory().fill_incrementing(
+        scalar_physical0, 0x1000, 0x31);
+    translated_scalar.memory().fill_incrementing(
+        scalar_physical1, 0x1000, 0x97);
+    translated_scalar.configure_backpressure(0x510e527fade682d1ULL, true);
+    if (!translated_scalar.reset() ||
+        !translated_scalar.enable_misaligned_accesses() ||
+        !translated_scalar.map_sv39_4k(
+            scalar_virtual, scalar_physical0, scalar_root) ||
+        !translated_scalar.map_sv39_4k(
+            scalar_virtual + 0x1000, scalar_physical1, scalar_root) ||
+        !translated_scalar.activate_sv39(scalar_root)) {
+        std::cerr << "MEMBLOCK_MISALIGNED_STORES_FAIL cycle="
+                  << translated_scalar.cycle()
+                  << " phase=translated-scalar-configuration reason="
+                  << translated_scalar.error() << '\n';
+        return 1;
+    }
+    const memblock::StoreTransaction translated_store{
+        .address = scalar_virtual + 0xfff,
+        .oracle_address = scalar_physical0 + 0xfff,
+        .data = 0xa55a,
+        .op = memblock::StoreOp::sh,
+        .rob = 0,
+        .sq = 0,
+        .address_lane = 0,
+        .data_lane = 1,
+    };
+    translated_scalar.expect_store(translated_store);
+    const std::uint64_t translated_misses_before =
+        translated_scalar.store_tlb_misses();
+    if (!translated_scalar.enqueue_store(translated_store, 0) ||
+        !translated_scalar.issue_store_address(translated_store, 2048) ||
+        !translated_scalar.issue_store_data(translated_store, 2048) ||
+        !translated_scalar.run_until_store_tlb_misses(
+            translated_misses_before + 1, 4096) ||
+        !translated_scalar.set_rob_head(
+            translated_store.rob, translated_store.rob_flag) ||
+        !translated_scalar.run_until_store_complete_with_replay(
+            translated_store, 8192, true) ||
+        !translated_scalar.commit_store(translated_store, 8192)) {
+        std::cerr << "MEMBLOCK_MISALIGNED_STORES_FAIL cycle="
+                  << translated_scalar.cycle()
+                  << " phase=translated-scalar-store reason="
+                  << translated_scalar.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction translated_readback{
+        .address = translated_store.address,
+        .oracle_address = translated_store.oracle_address,
+        .op = memblock::LoadOp::lhu,
+        .rob = 1,
+        .lq = 0,
+        .sq = 1,
+        .pdest = 42,
+        .lane = 1,
+    };
+    translated_scalar.expect_load_data(
+        translated_readback, translated_store.data & 0xffffU);
+    if (!translated_scalar.set_rob_head(translated_readback.rob) ||
+        !translated_scalar.enqueue_load(translated_readback) ||
+        !translated_scalar.issue_load(translated_readback, 2048) ||
+        !translated_scalar.run_until_complete(8192) ||
+        !translated_scalar.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_MISALIGNED_STORES_FAIL cycle="
+                  << translated_scalar.cycle()
+                  << " phase=translated-scalar-readback reason="
+                  << translated_scalar.error() << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_MISALIGNED_STORES_PASS"
-              << " cycle=" << environment.cycle()
+              << " cycle=" << environment.cycle() + translated_scalar.cycle()
               << " scalar_store_writebacks=" << environment.store_writebacks()
+                  + translated_scalar.store_writebacks()
               << " scalar_load_writebacks=" << environment.writebacks()
+                  + translated_scalar.writebacks()
               << " vector_store_writebacks="
               << environment.vector_store_writebacks()
               << " vector_load_writebacks="
               << environment.vector_load_writebacks()
               << " vector_replays=" << environment.vector_replay_feedbacks()
-              << " ptw_requests=" << environment.ptw_requests()
+              << " ptw_requests="
+              << environment.ptw_requests() + translated_scalar.ptw_requests()
+              << " translated_scalar_cross_page=1"
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
@@ -18421,12 +18504,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             const std::vector<memblock::VectorMemoryTransaction>
                 window_vectors{vector_load, vector_store};
             if ((scalar_store_crosses_page &&
-                 (!environment.set_rob_head(
-                      scalar_store.rob, scalar_store.rob_flag) ||
-                  !environment.pulse_pending_store(
-                      scalar_store.rob, scalar_store.rob_flag))) ||
+                 !environment.set_rob_head(
+                     scalar_store.rob, scalar_store.rob_flag)) ||
                 !environment.run_until_store_complete_with_replay(
-                    scalar_store, constrained_completion_timeout) ||
+                    scalar_store, constrained_completion_timeout,
+                    scalar_store_crosses_page) ||
                 !environment.run_until_vector_complete_with_replays(
                     window_vectors, constrained_completion_timeout) ||
                 !environment.run_until_all_complete(
