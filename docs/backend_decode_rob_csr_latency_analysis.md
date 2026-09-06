@@ -146,6 +146,7 @@ Dispatch 对这些标志的实际阻塞逻辑在 `Dispatch.scala:738-739, 833-88
 - fast 和 state 通过统一的 `deqExceptionData` 选择 exception vector、trigger、single-step、flush/replay/satp、fetch-fault、FTQ 和向量元数据，避免 valid 提前而数据仍来自旧 state；
 - 原 state 路径保留两拍 `commit_w` 稳定保护，fast path 使用一拍保护，与 `out` 相对 state 提前一拍的时序对应；
 - flush-after 发生时锁存选中数据的 `isVset`，避免 fast redirect 清空 ExceptionGen 后丢失下一拍的 vtype 恢复通知；
+- 使用 `XSError` 检查 fast source 的 head/state/vector eligibility、fast/state bundle 一致性，以及 fast flush 只能消费 valid、writeback-complete、`needFlush` 的 ROB head；
 - 增加 `exception_head_fast_path` 计数器，用于后续统计动态命中次数。
 
 因此当前实现的确定收益是：对于 state 尚未命中、`out` 已命中 ROB head、且不是向量 load exception 的 exception/flush/replay，ROB 的 `flushOut` 最多提前 **1 拍**。原文估计的第 2 拍需要继续旁路 ExceptionGen 内部 oldest-tree 或 raw WB，这不在本次安全实现范围内。

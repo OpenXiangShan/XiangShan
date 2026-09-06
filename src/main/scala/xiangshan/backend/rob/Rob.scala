@@ -622,6 +622,25 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqExceptionData = Mux(deqUseExceptionGenOut, exceptionDataOut.bits, exceptionDataRead.bits)
   val deqHitExceptionGen = deqHitExceptionGenState || deqUseExceptionGenOut
   val deqNeedFlushAndHitExceptionGen = deqNeedFlush && deqHitExceptionGen
+  XSError(
+    deqUseExceptionGenOut && (
+      !exceptionDataOut.valid ||
+      exceptionDataOut.bits.robIdx =/= deqPtr ||
+      deqHitExceptionGenState ||
+      exceptionDataOut.bits.isVecLoad
+    ),
+    "ROB-head exception fast source violates its eligibility conditions\n"
+  )
+  XSError(
+    deqUseExceptionGenOut && deqExceptionData.asUInt =/= exceptionDataOut.bits.asUInt,
+    "ROB-head exception fast data does not match ExceptionGen out\n"
+  )
+  XSError(
+    deqHitExceptionGenState && (
+      deqUseExceptionGenOut || deqExceptionData.asUInt =/= exceptionDataRead.bits.asUInt
+    ),
+    "ROB-head exception state source lost priority or data coherence\n"
+  )
   val exceptionGenResultIsException = deqExceptionData.exceptionVec.orR || deqExceptionData.singleStep || TriggerAction.isDmode(deqExceptionData.trigger)
   val deqCommitWDelay1 = RegNext(deqPtrEntry.commit_w)
   val deqCommitWDelay2 = RegNext(deqCommitWDelay1)
@@ -679,6 +698,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || deqHasException || needModifyFtqIdxOffset, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
   io.flushOut.bits.interrupt := !isFlushPipe
   io.flushOut.bits.satpFlush := isFlushPipe && deqExceptionData.satpFlush
+  XSError(
+    io.flushOut.valid && deqUseExceptionGenOut && (
+      !deqPtrEntryValid || !deqPtrEntry.commit_w || !deqPtrEntry.needFlush
+    ),
+    "ROB-head exception fast path flushed an invalid, incomplete, or non-flushing head\n"
+  )
   XSPerfAccumulate("flush_num", io.flushOut.valid)
   XSPerfAccumulate("interrupt_num", io.flushOut.valid && intrEnable)
   XSPerfAccumulate("exception_num", io.flushOut.valid && deqHasException)
