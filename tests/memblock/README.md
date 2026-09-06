@@ -185,6 +185,7 @@ make frontend-bridge PICKER="$PICKER" JOBS=8 SEED=1 TRANSACTIONS=4096
 make single-load PICKER="$PICKER" JOBS=8
 make load-feedback PICKER="$PICKER" JOBS=8
 make memory-violation PICKER="$PICKER" JOBS=8
+make rar-violation PICKER="$PICKER" JOBS=8
 make fp-loads PICKER="$PICKER" JOBS=8
 make trigger-contracts PICKER="$PICKER" JOBS=8
 make metadata-contracts PICKER="$PICKER" JOBS=8
@@ -334,6 +335,11 @@ lane counters and requires both canceled and uncanceled wakeups on every lane.
 younger same-byte load, and then resolves the store address. It requires one
 RAW replay redirect and compares every exposed `memoryViolation` field against
 the independently chosen younger-load ROB, FTQ, RVC, and flush-level metadata.
+`rar-violation` enables the architectural load-load check, lets a younger load
+complete first, drains an older store so the line is dirty, and forces a DCache
+writeback/release with a Probe before issuing the older load. It requires the
+RAR redirect to identify the older load and use `flushAfter`, unlike RAW's
+self-flush.
 
 `dcache-errors` injects one denied and one corrupt DCache response and checks
 the corresponding scalar load access-fault and hardware-error writebacks with

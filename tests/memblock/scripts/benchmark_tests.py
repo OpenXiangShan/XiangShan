@@ -23,6 +23,7 @@ SCENARIOS = (
     "single-load",
     "load-feedback",
     "memory-violation",
+    "rar-violation",
     "fp-loads",
     "trigger-contracts",
     "metadata-contracts",

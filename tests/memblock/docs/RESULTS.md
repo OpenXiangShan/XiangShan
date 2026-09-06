@@ -41,8 +41,14 @@ store address was unresolved, then resolved the store onto the same eight
 bytes. Current RTL produced exactly one top-level redirect in 67 cycles with
 the independently selected younger-load identity: `rob=0:21`, `ftq=0:37`,
 `ftqOffset=6`, `isRVC=1`, and `level=flush`. This closes the basic scalar RAW
-contract and all eight exposed output pins; RAR, multiple-candidate arbitration,
-pointer wraparound, and vector crosses remain open.
+contract and all eight exposed output pins.
+
+The companion `rar-violation` scenario enables `ldld_vio_check`, completes a
+younger load, forces its dirty cache line through a one-Probe writeback/release,
+and then executes the older load. Current RTL passed in 365 cycles with exactly
+one redirect identifying `rob=0:30`, `ftq=0:43`, `ftqOffset=5`, `isRVC=1`, and
+`level=flushAfter`. Multiple-candidate arbitration, pointer wraparound, vector,
+and concurrent redirect crosses remain open.
 
 ## Translation Constraint Interface Validation
 

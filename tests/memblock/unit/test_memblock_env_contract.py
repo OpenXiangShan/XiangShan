@@ -136,9 +136,13 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "sample_memory_violation",
             "MemoryViolationStats",
             "run_memory_violation",
+            "run_rar_violation",
+            "configure_ldld_violation_check",
+            "run_until_sbuffer_empty",
             "speculative-load",
             "redirect-check",
             "memory-violation",
+            "rar-violation",
         ):
             self.assertIn(contract, environment + main + makefile + generator)
 

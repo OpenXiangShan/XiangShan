@@ -1795,7 +1795,6 @@ int run_single_load(int argc, char **argv)
                   << " reason=" << environment.error() << '\n';
         return 1;
     }
-
     const memblock::LoadTransaction transaction{
         .address = line + 24,
         .op = memblock::LoadOp::ld,
@@ -2077,6 +2076,165 @@ int run_memory_violation(int argc, char **argv)
     std::cout << "MEMBLOCK_MEMORY_VIOLATION_PASS"
               << " cycle=" << environment.cycle()
               << " violations=" << stats.count
+              << " rob=" << violation.rob_flag << ':'
+              << static_cast<unsigned>(violation.rob_value)
+              << " ftq=" << violation.ftq_flag << ':'
+              << static_cast<unsigned>(violation.ftq_value)
+              << " ftq_offset="
+              << static_cast<unsigned>(violation.ftq_offset)
+              << " is_rvc=" << violation.is_rvc
+              << " level=" << violation.level
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_rar_violation(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t line = memblock::kDefaultMemoryBase + 0x1c000;
+    constexpr std::uint64_t address = line + 24;
+    environment.memory().fill_incrementing(line, 64, 0x63);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_RAR_VIOLATION_FAIL cycle="
+                  << environment.cycle() << " phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+    environment.configure_ldld_violation_check(true);
+
+    const memblock::LoadTransaction warm_load{
+        .address = address,
+        .op = memblock::LoadOp::ld,
+        .rob = 28,
+        .lq = 0,
+        .sq = 0,
+        .pdest = 50,
+        .lane = 2,
+    };
+    environment.expect_load(warm_load);
+    if (!environment.enqueue_load(warm_load) ||
+        !environment.issue_load(warm_load, 256) ||
+        !environment.run_until_complete(4096)) {
+        std::cerr << "MEMBLOCK_RAR_VIOLATION_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=warm-line reason=" << environment.error()
+                  << '\n';
+        return 1;
+    }
+
+    const memblock::StoreTransaction dirty_store{
+        .address = address,
+        .data = 0xa5c35a3cc3a55ac3ULL,
+        .op = memblock::StoreOp::sd,
+        .rob = 29,
+        .sq = 0,
+        .address_lane = 0,
+        .data_lane = 1,
+    };
+    environment.expect_store(dirty_store);
+    if (!environment.enqueue_store(dirty_store, 1) ||
+        !environment.issue_store_data(dirty_store, 256) ||
+        !environment.issue_store_address(dirty_store, 256) ||
+        !environment.run_until_store_complete(512) ||
+        !environment.commit_store(dirty_store, 4096) ||
+        !environment.run_until_sbuffer_empty(4096) ||
+        !environment.run_cycles(16)) {
+        std::cerr << "MEMBLOCK_RAR_VIOLATION_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=dirty-line reason=" << environment.error()
+                  << '\n';
+        return 1;
+    }
+
+    const memblock::LoadTransaction older_load{
+        .address = address,
+        .op = memblock::LoadOp::ld,
+        .rob = 30,
+        .lq = 1,
+        .sq = 1,
+        .pdest = 51,
+        .lane = 0,
+        .predecode_rvc = true,
+        .ftq_ptr = 43,
+        .ftq_offset = 5,
+    };
+    const memblock::LoadTransaction younger_load{
+        .address = address,
+        .op = memblock::LoadOp::ld,
+        .rob = 31,
+        .lq = 2,
+        .sq = 1,
+        .pdest = 52,
+        .lane = 1,
+        .ftq_ptr = 44,
+        .ftq_offset = 6,
+    };
+
+    environment.expect_load(younger_load);
+    if (!environment.enqueue_load(older_load) ||
+        !environment.enqueue_load(younger_load) ||
+        !environment.issue_load(younger_load, 256) ||
+        !environment.run_until_complete(4096) ||
+        !environment.request_dcache_probe(
+            line, 2, false, 1, environment.memory().read_beat(line, 64)) ||
+        !environment.run_until_probe_responses(1) ||
+        !environment.run_cycles(8)) {
+        std::cerr << "MEMBLOCK_RAR_VIOLATION_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=younger-release reason=" << environment.error()
+                  << '\n';
+        return 1;
+    }
+
+    const auto violations_before = environment.memory_violation_stats().count;
+    environment.expect_load(older_load);
+    if (!environment.issue_load(older_load, 256)) {
+        std::cerr << "MEMBLOCK_RAR_VIOLATION_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=older-issue reason=" << environment.error()
+                  << '\n';
+        return 1;
+    }
+    for (unsigned cycle = 0;
+         cycle < 1024 &&
+         environment.memory_violation_stats().count == violations_before;
+         ++cycle) {
+        if (!environment.run_cycles(1)) {
+            std::cerr << "MEMBLOCK_RAR_VIOLATION_FAIL cycle="
+                      << environment.cycle()
+                      << " phase=redirect-wait reason=" << environment.error()
+                      << '\n';
+            return 1;
+        }
+    }
+
+    const auto &stats = environment.memory_violation_stats();
+    const auto &violation = stats.last;
+    if (stats.count != violations_before + 1 || !violation.valid ||
+        violation.is_rvc != older_load.predecode_rvc ||
+        violation.rob_flag != older_load.rob_flag ||
+        violation.rob_value != older_load.rob || violation.ftq_flag ||
+        violation.ftq_value != older_load.ftq_ptr ||
+        violation.ftq_offset != older_load.ftq_offset || violation.level) {
+        std::cerr << "MEMBLOCK_RAR_VIOLATION_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=redirect-check count=" << stats.count
+                  << " expected_count=" << violations_before + 1
+                  << " is_rvc=" << violation.is_rvc
+                  << " rob=" << violation.rob_flag << ':'
+                  << static_cast<unsigned>(violation.rob_value)
+                  << " ftq=" << violation.ftq_flag << ':'
+                  << static_cast<unsigned>(violation.ftq_value)
+                  << " ftq_offset="
+                  << static_cast<unsigned>(violation.ftq_offset)
+                  << " level=" << violation.level << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_RAR_VIOLATION_PASS"
+              << " cycle=" << environment.cycle()
+              << " violations=" << stats.count
+              << " probes=" << environment.dcache_probes()
               << " rob=" << violation.rob_flag << ':'
               << static_cast<unsigned>(violation.rob_value)
               << " ftq=" << violation.ftq_flag << ':'
@@ -14250,6 +14408,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "memory-violation") {
             return run_memory_violation(argc, argv);
+        }
+        if (options.test == "rar-violation") {
+            return run_rar_violation(argc, argv);
         }
         if (options.test == "fp-loads") {
             return run_fp_loads(argc, argv);

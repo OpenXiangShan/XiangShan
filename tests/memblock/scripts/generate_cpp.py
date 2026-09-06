@@ -392,6 +392,11 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
             "    };",
             "}",
             "",
+            "inline bool sample_sbuffer_empty(UTMemBlock &dut)",
+            "{",
+            "    return dut.io_mem_to_ooo_sbIsEmpty.B();",
+            "}",
+            "",
         ]
     )
 

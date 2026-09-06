@@ -10563,6 +10563,11 @@ inline MemoryViolation sample_memory_violation(UTMemBlock &dut)
     };
 }
 
+inline bool sample_sbuffer_empty(UTMemBlock &dut)
+{
+    return dut.io_mem_to_ooo_sbIsEmpty.B();
+}
+
 struct ScalarStoreIssue {
     std::uint64_t fu_type = 0;
     std::uint16_t fu_op_type = 0;

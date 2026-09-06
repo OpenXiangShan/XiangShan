@@ -2998,6 +2998,11 @@ public:
         dut_.io_ooo_to_mem_csrCtrl_cache_error_enable.ImmSet(enable);
     }
 
+    void configure_ldld_violation_check(bool enable)
+    {
+        dut_.io_ooo_to_mem_csrCtrl_ldld_vio_check_enable.ImmSet(enable);
+    }
+
     // The L2-to-L1 DTLB request has no ready pin at the MemBlock boundary:
     // MemBlock ties the response consumer ready high internally.  Hold the
     // request valid for one cycle, then wait for the returned response while
@@ -3402,6 +3407,26 @@ public:
     const MemoryViolationStats &memory_violation_stats() const
     {
         return memory_violation_stats_;
+    }
+    bool sbuffer_empty()
+    {
+        dut_.RefreshComb();
+        return generated::sample_sbuffer_empty(dut_);
+    }
+
+    bool run_until_sbuffer_empty(unsigned timeout = 4096)
+    {
+        for (unsigned cycle = 0; cycle < timeout && !sbuffer_empty(); ++cycle) {
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        if (!sbuffer_empty()) {
+            error_ = "timed out waiting for SBuffer to empty";
+            return false;
+        }
+        return check_components();
     }
 
     bool exercise_frontend_bridges(
