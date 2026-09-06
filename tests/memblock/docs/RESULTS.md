@@ -56,6 +56,19 @@ both field uops retained `LoadPageFault`, the reported VA matched the first
 element, one PTW and no DCache request occurred, and the fix-VL uop preserved
 the original VL of 2.
 
+## Hypervisor Memory Operation Mode Matrix
+
+The expanded `hypervisor-contracts` scenario passed 37 directed cases in 7,770
+aggregate cycles on complete RTL SHA-256
+`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
+In addition to every exposed HLV/HLVX/HSV encoding and the existing privilege,
+permission, fault, and PMP checks, it executed one HLV, one HLVX, and one HSV
+under each of `Sv39->Sv39x4`, `Sv39->Sv48x4`, `Sv48->Sv39x4`, and
+`Sv48->Sv48x4`. The run observed 308 PTW requests and 30 data DCache requests;
+successful stores were committed and read back through HLV. No CPU defect was
+observed. PBMT/device classification, misalignment, and the broader hypervisor
+PMP cross remain open.
+
 ## Scalar Load Feedback Boundary
 
 The `load-feedback` scenario now samples every top-level scalar load wakeup and
@@ -146,7 +159,7 @@ M-mode runs observed unlocked-entry bypass, locked-entry enforcement, and
 rejection of later address/config rewrites to a locked entry. The complete run
 reported 15 load/atomic writebacks, two store writebacks, and eight permitted
 DCache requests. No CPU defect was observed. Instruction X permission,
-HLV/HLVX/HSV/SPVP, and the broader fixed-PMA matrix remain explicit gaps.
+the broader hypervisor PMP cross, and the fixed-PMA matrix remain explicit gaps.
 
 ## RAW Memory Violation Boundary
 

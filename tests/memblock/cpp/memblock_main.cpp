@@ -9536,24 +9536,43 @@ int run_hypervisor_contracts(int argc, char **argv)
                          const memblock::ReferencePtePermissions &vs,
                          const memblock::ReferencePtePermissions &g,
                          memblock::ReferencePrivilegeMode spvp,
-                         bool mxr, bool vmxr, bool vsum) {
-        bool ready = environment.reset() &&
-            environment.map_sv39_leaf(
-                guest_virtual, guest_physical, 0, vs_root,
-                vs.readable, vs.writable, vs.executable, vs.user, false,
-                vs.accessed, vs.dirty);
-        for (unsigned page = 0; ready && page < 3; ++page) {
+                         bool mxr, bool vmxr, bool vsum,
+                         memblock::ReferencePageMode vs_mode =
+                             memblock::ReferencePageMode::sv39,
+                         memblock::ReferencePageMode g_mode =
+                             memblock::ReferencePageMode::sv39) {
+        bool ready = environment.reset();
+        ready = ready && (vs_mode == memblock::ReferencePageMode::sv48
+            ? environment.map_sv48_leaf(
+                  guest_virtual, guest_physical, 0, vs_root,
+                  vs.readable, vs.writable, vs.executable, vs.user, false,
+                  vs.accessed, vs.dirty)
+            : environment.map_sv39_leaf(
+                  guest_virtual, guest_physical, 0, vs_root,
+                  vs.readable, vs.writable, vs.executable, vs.user, false,
+                  vs.accessed, vs.dirty));
+        const unsigned vs_table_pages =
+            vs_mode == memblock::ReferencePageMode::sv48 ? 4U : 3U;
+        for (unsigned page = 0; ready && page < vs_table_pages; ++page) {
             const std::uint64_t address = vs_root + page * 0x1000ULL;
-            ready = environment.map_sv39x4_4k(
-                address, address, g_root, true, true, false);
+            ready = g_mode == memblock::ReferencePageMode::sv48
+                ? environment.map_sv48x4_4k(
+                      address, address, g_root, true, true, false)
+                : environment.map_sv39x4_4k(
+                      address, address, g_root, true, true, false);
         }
-        return ready && environment.map_sv39x4_leaf(
-                            guest_physical, host_physical, 0, g_root,
-                            g.readable, g.writable, g.executable,
-                            g.accessed, g.dirty, g.user) &&
+        ready = ready && (g_mode == memblock::ReferencePageMode::sv48
+            ? environment.map_sv48x4_leaf(
+                  guest_physical, host_physical, 0, g_root,
+                  g.readable, g.writable, g.executable,
+                  g.accessed, g.dirty, g.user)
+            : environment.map_sv39x4_leaf(
+                  guest_physical, host_physical, 0, g_root,
+                  g.readable, g.writable, g.executable,
+                  g.accessed, g.dirty, g.user));
+        return ready &&
             environment.activate_two_stage_modes(
-                memblock::ReferencePageMode::sv39,
-                memblock::ReferencePageMode::sv39,
+                vs_mode, g_mode,
                 vs_root, g_root, 61, 71) &&
             environment.set_hypervisor_access_permissions(
                 spvp, mxr, vmxr, vsum);
@@ -9567,6 +9586,8 @@ int run_hypervisor_contracts(int argc, char **argv)
     unsigned page_faults = 0;
     unsigned guest_page_faults = 0;
     unsigned access_faults = 0;
+    unsigned translation_mode_pairs = 0;
+    unsigned mode_family_cases = 0;
 
     auto run_load_case = [&](
                              const char *name,
@@ -9577,7 +9598,11 @@ int run_hypervisor_contracts(int argc, char **argv)
                              bool mxr = false,
                              bool vmxr = false,
                              bool vsum = false,
-                             bool pmp_execute_denied = false) {
+                             bool pmp_execute_denied = false,
+                             memblock::ReferencePageMode vs_mode =
+                                 memblock::ReferencePageMode::sv39,
+                             memblock::ReferencePageMode g_mode =
+                                 memblock::ReferencePageMode::sv39) {
         const bool hlvx = op == memblock::LoadOp::hlvxhu ||
                           op == memblock::LoadOp::hlvxwu;
         const bool vs_permitted = hlvx
@@ -9600,7 +9625,9 @@ int run_hypervisor_contracts(int argc, char **argv)
 
         memblock::Environment environment(argc, argv);
         environment.memory().fill_incrementing(host_physical, 0x1000, 0x31);
-        if (!configure(environment, vs, g, spvp, mxr, vmxr, vsum)) {
+        if (!configure(
+                environment, vs, g, spvp, mxr, vmxr, vsum,
+                vs_mode, g_mode)) {
             std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
                       << environment.cycle() << " phase=" << name
                       << "-configuration reason=" << environment.error()
@@ -9692,7 +9719,11 @@ int run_hypervisor_contracts(int argc, char **argv)
                               const memblock::ReferencePtePermissions &g,
                               memblock::ReferencePrivilegeMode spvp,
                               bool vsum,
-                              std::uint64_t data) {
+                              std::uint64_t data,
+                              memblock::ReferencePageMode vs_mode =
+                                  memblock::ReferencePageMode::sv39,
+                              memblock::ReferencePageMode g_mode =
+                                  memblock::ReferencePageMode::sv39) {
         const bool vs_permitted =
             memblock::reference_store_permitted(vs, spvp, vsum);
         const bool g_permitted = memblock::reference_store_permitted(
@@ -9705,7 +9736,9 @@ int run_hypervisor_contracts(int argc, char **argv)
 
         memblock::Environment environment(argc, argv);
         environment.memory().fill_incrementing(host_physical, 0x1000, 0x71);
-        if (!configure(environment, vs, g, spvp, false, false, vsum)) {
+        if (!configure(
+                environment, vs, g, spvp, false, false, vsum,
+                vs_mode, g_mode)) {
             std::cerr << "MEMBLOCK_HYPERVISOR_CONTRACTS_FAIL cycle="
                       << environment.cycle() << " phase=" << name
                       << "-configuration reason=" << environment.error()
@@ -9901,6 +9934,44 @@ int run_hypervisor_contracts(int argc, char **argv)
         return 1;
     }
 
+    struct TranslationModePair {
+        memblock::ReferencePageMode vs_mode;
+        memblock::ReferencePageMode g_mode;
+    };
+    constexpr std::array<TranslationModePair, 4> translation_modes{{
+        {memblock::ReferencePageMode::sv39,
+         memblock::ReferencePageMode::sv39},
+        {memblock::ReferencePageMode::sv39,
+         memblock::ReferencePageMode::sv48},
+        {memblock::ReferencePageMode::sv48,
+         memblock::ReferencePageMode::sv39},
+        {memblock::ReferencePageMode::sv48,
+         memblock::ReferencePageMode::sv48},
+    }};
+    for (unsigned index = 0; index < translation_modes.size(); ++index) {
+        const auto pair = translation_modes[index];
+        if (!run_load_case(
+                "mode-pair-hlv", memblock::LoadOp::hlvd,
+                rw_supervisor, g_rw_user,
+                memblock::ReferencePrivilegeMode::supervisor,
+                false, false, false, false, pair.vs_mode, pair.g_mode) ||
+            !run_load_case(
+                "mode-pair-hlvx", memblock::LoadOp::hlvxwu,
+                x_supervisor, g_x_user,
+                memblock::ReferencePrivilegeMode::supervisor,
+                false, false, false, false, pair.vs_mode, pair.g_mode) ||
+            !run_store_case(
+                "mode-pair-hsv", memblock::StoreOp::hsvd,
+                rw_supervisor, g_rw_user,
+                memblock::ReferencePrivilegeMode::supervisor, false,
+                0x3141592653589700ULL + index,
+                pair.vs_mode, pair.g_mode)) {
+            return 1;
+        }
+        ++translation_mode_pairs;
+        mode_family_cases += 3;
+    }
+
     std::cout << "MEMBLOCK_HYPERVISOR_CONTRACTS_PASS"
               << " cases=" << load_cases + store_cases
               << " load_cases=" << load_cases
@@ -9908,6 +9979,8 @@ int run_hypervisor_contracts(int argc, char **argv)
               << " page_faults=" << page_faults
               << " guest_page_faults=" << guest_page_faults
               << " access_faults=" << access_faults
+              << " translation_mode_pairs=" << translation_mode_pairs
+              << " mode_family_cases=" << mode_family_cases
               << " spvp=1 vsum=1 vmxr=1 hlvx=1 hsv=1 pmp_x=1"
               << " cycles=" << total_cycles
               << " ptw_requests=" << total_ptw_requests
