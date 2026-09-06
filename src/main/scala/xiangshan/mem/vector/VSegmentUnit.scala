@@ -472,7 +472,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   segmentTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   segmentTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
   segmentTrigger.io.memType                             := isVSegLoad
-  segmentTrigger.io.fromLoadStore.vaddr                 := Mux(isMisalignReg, misalignVaddr, latchVaddr)
+  segmentTrigger.io.fromLoadStore.vaddr                 := tlbReqVaddr
   segmentTrigger.io.fromLoadStore.isVectorUnitStride    := false.B
   segmentTrigger.io.fromLoadStore.mask                  := 0.U
 
@@ -960,4 +960,3 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.exceptionInfo.bits.vl            := instMicroOp.exceptionVl.bits
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && !isEmpty(enqPtr, deqPtr)
 }
-
