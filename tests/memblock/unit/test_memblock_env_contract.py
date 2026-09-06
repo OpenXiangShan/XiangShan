@@ -829,6 +829,51 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "EewLog2(s0_eew) - s0_sew + s0_lmul", split
         )
 
+    def test_vector_strided_lmul_emul_matrix_matches_rtl_contract(self) -> None:
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        common = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VecCommon.scala"
+        ).read_text()
+
+        configurations = 0
+        uops = 0
+        flows = 0
+        for eew in range(4):
+            for vsew in range(4):
+                for lmul_log2 in range(-3, 4):
+                    emul_log2 = eew - vsew + lmul_log2
+                    if lmul_log2 < vsew - 3 or not -3 <= emul_log2 <= 3:
+                        continue
+                    uop_count = 1 << max(emul_log2, 0)
+                    bytes_per_uop = 16 >> max(-emul_log2, 0)
+                    configurations += 1
+                    uops += uop_count
+                    flows += uop_count * (bytes_per_uop >> eew)
+        self.assertEqual(configurations, 78)
+        self.assertEqual(uops, 202)
+        self.assertEqual(flows, 1152)
+
+        for contract in (
+            "run_matrix_load",
+            "run_matrix_store",
+            "kVirtualLoadQueueEntries -",
+            "kLqEnqueueHeadroom",
+            "kStoreQueueEntries -",
+            "kSqEnqueueHeadroom",
+            "strided_configurations != 78",
+            "strided_load_uops != 404",
+            "strided_store_uops != 202",
+            "strided_positive != 39",
+            "strided_negative != 39",
+            "strided_matrix.lq_allocated() != 2304",
+            "strided_matrix.sq_allocated() != 1152",
+            '<< " strided_configurations="',
+        ):
+            self.assertIn(contract, main)
+        self.assertIn(
+            '(MulDataSize(emul) >> eew).asUInt, // strided', common
+        )
+
     def test_vector_whole_register_matrix_matches_rtl_contract(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

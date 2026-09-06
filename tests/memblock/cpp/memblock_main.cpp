@@ -13424,11 +13424,9 @@ int run_vector_addressing(int argc, char **argv)
     auto make_lmul_uops = [&] (
         bool store, std::uint64_t address, std::uint64_t absolute_rob,
         std::uint8_t eew, std::uint8_t vsew, int lmul_log2, int emul_log2,
-        std::uint8_t vl, std::uint64_t &queue_cursor,
+        memblock::VectorAddressingMode addressing, std::int64_t stride,
+        unsigned flow_num, std::uint8_t vl, std::uint64_t &queue_cursor,
         std::uint8_t data_seed) {
-        // Rename reserves the worst-case two packed flows for every
-        // unit-stride uop because 128-bit alignment is only known later.
-        const unsigned flow_num = memblock::kVectorUnitStrideMaxFlows;
         const unsigned uop_count = 1U << static_cast<unsigned>(
             std::max(emul_log2, 0));
         const std::uint8_t vlmul = static_cast<std::uint8_t>(
@@ -13439,6 +13437,8 @@ int run_vector_addressing(int argc, char **argv)
             memblock::VectorMemoryTransaction transaction{
                 .store = store,
                 .address = address,
+                .stride = stride,
+                .addressing = addressing,
                 .eew = eew,
                 .vsew = vsew,
                 .vl = vl,
@@ -13470,92 +13470,126 @@ int run_vector_addressing(int argc, char **argv)
         }
         return uops;
     };
-    auto run_lmul_load = [&] (
+    auto run_matrix_load = [&] (
+        memblock::Environment &matrix,
         const std::vector<memblock::VectorMemoryTransaction> &uops,
-        const char *phase) {
-        if (!lmul_matrix.set_rob_head(
-                uops.front().rob, uops.front().rob_flag)) {
-            std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
-                      << lmul_matrix.cycle() << " phase=" << phase
-                      << " reason=" << lmul_matrix.error() << '\n';
-            return false;
-        }
-        for (const auto &uop : uops) {
-            lmul_matrix.expect_vector(uop);
-            if (!lmul_matrix.enqueue_vector(uop)) {
+        const char *phase, unsigned &uop_counter) {
+        std::size_t begin = 0;
+        while (begin < uops.size()) {
+            std::size_t end = begin;
+            unsigned window_flows = 0;
+            while (end < uops.size() &&
+                   window_flows + uops[end].flow_num <=
+                       memblock::kVirtualLoadQueueEntries -
+                           memblock::kLqEnqueueHeadroom) {
+                window_flows += uops[end].flow_num;
+                ++end;
+            }
+            const std::vector<memblock::VectorMemoryTransaction> window(
+                uops.begin() + begin, uops.begin() + end);
+            if (!matrix.set_rob_head(
+                    window.front().rob, window.front().rob_flag)) {
                 std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
-                          << lmul_matrix.cycle() << " phase=" << phase
-                          << " reason=" << lmul_matrix.error() << '\n';
+                          << matrix.cycle() << " phase=" << phase
+                          << " reason=" << matrix.error() << '\n';
                 return false;
             }
-        }
-        for (auto uop = uops.rbegin(); uop != uops.rend(); ++uop) {
-            if (!lmul_matrix.issue_vector(*uop, 1024)) {
+            for (const auto &uop : window) {
+                matrix.expect_vector(uop);
+                if (!matrix.enqueue_vector(uop)) {
+                    std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                              << matrix.cycle() << " phase=" << phase
+                              << " reason=" << matrix.error() << '\n';
+                    return false;
+                }
+            }
+            for (auto uop = window.rbegin(); uop != window.rend(); ++uop) {
+                if (!matrix.issue_vector(*uop, 1024)) {
+                    std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                              << matrix.cycle() << " phase=" << phase
+                              << " reason=" << matrix.error() << '\n';
+                    return false;
+                }
+            }
+            if (!matrix.run_until_vector_complete_with_replays(
+                    window, 32768) ||
+                !matrix.run_until_lq_retired(8192)) {
                 std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
-                          << lmul_matrix.cycle() << " phase=" << phase
-                          << " reason=" << lmul_matrix.error() << '\n';
+                          << matrix.cycle() << " phase=" << phase
+                          << " reason=" << matrix.error() << '\n';
                 return false;
             }
+            begin = end;
         }
-        if (!lmul_matrix.run_until_vector_complete_with_replays(
-                uops, 32768) ||
-            !lmul_matrix.run_until_lq_retired(8192)) {
-            std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
-                      << lmul_matrix.cycle() << " phase=" << phase
-                      << " reason=" << lmul_matrix.error() << '\n';
-            return false;
-        }
-        lmul_load_uops += uops.size();
+        uop_counter += uops.size();
         return true;
     };
-    auto run_lmul_store = [&] (
+    auto run_matrix_store = [&] (
+        memblock::Environment &matrix,
         const std::vector<memblock::VectorMemoryTransaction> &uops,
-        const char *phase) {
-        for (const auto &store : uops) {
-            lmul_matrix.expect_vector(store);
-            if (!lmul_matrix.enqueue_vector(store)) {
+        const char *phase, unsigned &uop_counter) {
+        std::size_t begin = 0;
+        while (begin < uops.size()) {
+            std::size_t end = begin;
+            unsigned window_flows = 0;
+            while (end < uops.size() &&
+                   window_flows + uops[end].flow_num <=
+                       memblock::kStoreQueueEntries -
+                           memblock::kSqEnqueueHeadroom) {
+                window_flows += uops[end].flow_num;
+                ++end;
+            }
+            const std::vector<memblock::VectorMemoryTransaction> window(
+                uops.begin() + begin, uops.begin() + end);
+            for (const auto &store : window) {
+                matrix.expect_vector(store);
+                if (!matrix.enqueue_vector(store)) {
+                    std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                              << matrix.cycle() << " phase=" << phase
+                              << " reason=" << matrix.error() << '\n';
+                    return false;
+                }
+            }
+            for (auto store = window.rbegin(); store != window.rend();
+                 ++store) {
+                if (!matrix.issue_vector(*store, 1024)) {
+                    std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                              << matrix.cycle() << " phase=" << phase
+                              << " reason=" << matrix.error() << '\n';
+                    return false;
+                }
+            }
+            if (!matrix.run_until_vector_complete_with_replays(
+                    window, 32768)) {
                 std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
-                          << lmul_matrix.cycle() << " phase=" << phase
-                          << " reason=" << lmul_matrix.error() << '\n';
+                          << matrix.cycle() << " phase=" << phase
+                          << " reason=" << matrix.error() << '\n';
                 return false;
             }
-        }
-        for (auto store = uops.rbegin(); store != uops.rend(); ++store) {
-            if (!lmul_matrix.issue_vector(*store, 1024)) {
+            for (const auto &store : window) {
+                if (!matrix.commit_vector_store(store, 8192)) {
+                    std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                              << matrix.cycle() << " phase=" << phase
+                              << " reason=" << matrix.error() << '\n';
+                    return false;
+                }
+            }
+            if (!matrix.run_until_queues_retired(8192)) {
                 std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
-                          << lmul_matrix.cycle() << " phase=" << phase
-                          << " reason=" << lmul_matrix.error() << '\n';
+                          << matrix.cycle() << " phase=" << phase
+                          << " reason=" << matrix.error() << '\n';
                 return false;
             }
+            begin = end;
         }
-        if (!lmul_matrix.run_until_vector_complete_with_replays(uops, 32768)) {
+        if (!matrix.pulse_sbuffer_flush() ||
+            !matrix.run_until_sbuffer_empty(32768)) {
             std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
-                      << lmul_matrix.cycle() << " phase=" << phase
-                      << " reason=" << lmul_matrix.error() << '\n';
+                      << matrix.cycle() << " phase=" << phase
+                      << " reason=" << matrix.error() << '\n';
             return false;
         }
-        for (const auto &store : uops) {
-            if (!lmul_matrix.commit_vector_store(store, 8192)) {
-                std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
-                          << lmul_matrix.cycle() << " phase=" << phase
-                          << " reason=" << lmul_matrix.error() << '\n';
-                return false;
-            }
-        }
-        if (!lmul_matrix.run_until_queues_retired(8192)) {
-            std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
-                      << lmul_matrix.cycle() << " phase=" << phase
-                      << " reason=" << lmul_matrix.error() << '\n';
-            return false;
-        }
-        if (!lmul_matrix.pulse_sbuffer_flush() ||
-            !lmul_matrix.run_until_sbuffer_empty(32768)) {
-            std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
-                      << lmul_matrix.cycle() << " phase=" << phase
-                      << " reason=" << lmul_matrix.error() << '\n';
-            return false;
-        }
-        lmul_store_uops += uops.size();
+        uop_counter += uops.size();
         return true;
     };
 
@@ -13582,27 +13616,39 @@ int run_vector_addressing(int argc, char **argv)
                 auto loads = make_lmul_uops(
                     false, source, next_lmul_rob(), eew, vsew,
                     lmul_log2, emul_log2,
+                    memblock::VectorAddressingMode::unit_stride, 0,
+                    memblock::kVectorUnitStrideMaxFlows,
                     static_cast<std::uint8_t>(vlmax), lmul_lq_cursor,
                     static_cast<std::uint8_t>(0x21 + case_index));
-                if (!run_lmul_load(loads, "lmul-emul-load")) {
+                if (!run_matrix_load(
+                        lmul_matrix, loads, "lmul-emul-load",
+                        lmul_load_uops)) {
                     return 1;
                 }
 
                 auto stores = make_lmul_uops(
                     true, destination, next_lmul_rob(), eew, vsew,
                     lmul_log2, emul_log2,
+                    memblock::VectorAddressingMode::unit_stride, 0,
+                    memblock::kVectorUnitStrideMaxFlows,
                     static_cast<std::uint8_t>(vlmax), lmul_sq_cursor,
                     static_cast<std::uint8_t>(0x81 + case_index));
-                if (!run_lmul_store(stores, "lmul-emul-store")) {
+                if (!run_matrix_store(
+                        lmul_matrix, stores, "lmul-emul-store",
+                        lmul_store_uops)) {
                     return 1;
                 }
 
                 auto readbacks = make_lmul_uops(
                     false, destination, next_lmul_rob(), eew, vsew,
                     lmul_log2, emul_log2,
+                    memblock::VectorAddressingMode::unit_stride, 0,
+                    memblock::kVectorUnitStrideMaxFlows,
                     static_cast<std::uint8_t>(vlmax), lmul_lq_cursor,
                     static_cast<std::uint8_t>(0xe1 + case_index));
-                if (!run_lmul_load(readbacks, "lmul-emul-readback")) {
+                if (!run_matrix_load(
+                        lmul_matrix, readbacks, "lmul-emul-readback",
+                        lmul_load_uops)) {
                     return 1;
                 }
             }
@@ -13629,6 +13675,122 @@ int run_vector_addressing(int argc, char **argv)
                   << " sq=" << lmul_matrix.sq_allocated() << '/'
                   << lmul_matrix.sq_dequeued() << '+'
                   << lmul_matrix.sq_canceled() << '\n';
+        return 1;
+    }
+
+    memblock::Environment strided_matrix(argc, argv);
+    constexpr std::uint64_t strided_matrix_base =
+        memblock::kDefaultMemoryBase + 0x120000;
+    strided_matrix.memory().fill_incrementing(
+        strided_matrix_base, 0x80000, 0x39);
+    strided_matrix.configure_backpressure(0x94d049bb133111ebULL, true);
+    if (!strided_matrix.reset()) {
+        std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                  << strided_matrix.cycle()
+                  << " phase=strided-lmul-emul-reset reason="
+                  << strided_matrix.error() << '\n';
+        return 1;
+    }
+
+    std::uint64_t strided_lq_cursor = 0;
+    std::uint64_t strided_sq_cursor = 0;
+    std::uint64_t strided_rob_cursor = 0;
+    unsigned strided_configurations = 0;
+    unsigned strided_load_uops = 0;
+    unsigned strided_store_uops = 0;
+    unsigned strided_positive = 0;
+    unsigned strided_negative = 0;
+    auto next_strided_rob = [&]() { return strided_rob_cursor++; };
+    for (std::uint8_t eew = 0; eew < 4; ++eew) {
+        for (std::uint8_t vsew = 0; vsew < 4; ++vsew) {
+            for (int lmul_log2 = -3; lmul_log2 <= 3; ++lmul_log2) {
+                const int emul_log2 = static_cast<int>(eew) -
+                    static_cast<int>(vsew) + lmul_log2;
+                if (lmul_log2 < static_cast<int>(vsew) - 3 ||
+                    emul_log2 < -3 || emul_log2 > 3) {
+                    continue;
+                }
+                const unsigned vector_bytes = lmul_log2 < 0
+                    ? 16U >> static_cast<unsigned>(-lmul_log2)
+                    : 16U << static_cast<unsigned>(lmul_log2);
+                const unsigned vlmax = vector_bytes >> vsew;
+                const unsigned bytes_per_uop = emul_log2 < 0
+                    ? 16U >> static_cast<unsigned>(-emul_log2)
+                    : 16U;
+                const unsigned flow_num = bytes_per_uop >> eew;
+                const unsigned case_index = strided_configurations++;
+                const std::uint64_t case_base =
+                    strided_matrix_base + case_index * 0x1000;
+                const std::int64_t stride_magnitude =
+                    std::int64_t{2} << eew;
+                const std::int64_t stride = (case_index & 1U) == 0
+                    ? stride_magnitude
+                    : -stride_magnitude;
+                const std::uint64_t source = case_base + 0x400;
+                const std::uint64_t destination = case_base + 0xc00;
+                strided_positive += stride > 0;
+                strided_negative += stride < 0;
+
+                auto loads = make_lmul_uops(
+                    false, source, next_strided_rob(), eew, vsew,
+                    lmul_log2, emul_log2,
+                    memblock::VectorAddressingMode::strided, stride, flow_num,
+                    static_cast<std::uint8_t>(vlmax), strided_lq_cursor,
+                    static_cast<std::uint8_t>(0x43 + case_index));
+                if (!run_matrix_load(
+                        strided_matrix, loads, "strided-lmul-emul-load",
+                        strided_load_uops)) {
+                    return 1;
+                }
+
+                auto stores = make_lmul_uops(
+                    true, destination, next_strided_rob(), eew, vsew,
+                    lmul_log2, emul_log2,
+                    memblock::VectorAddressingMode::strided, stride, flow_num,
+                    static_cast<std::uint8_t>(vlmax), strided_sq_cursor,
+                    static_cast<std::uint8_t>(0xa3 + case_index));
+                if (!run_matrix_store(
+                        strided_matrix, stores, "strided-lmul-emul-store",
+                        strided_store_uops)) {
+                    return 1;
+                }
+
+                auto readbacks = make_lmul_uops(
+                    false, destination, next_strided_rob(), eew, vsew,
+                    lmul_log2, emul_log2,
+                    memblock::VectorAddressingMode::strided, stride, flow_num,
+                    static_cast<std::uint8_t>(vlmax), strided_lq_cursor,
+                    static_cast<std::uint8_t>(0xc3 + case_index));
+                if (!run_matrix_load(
+                        strided_matrix, readbacks,
+                        "strided-lmul-emul-readback", strided_load_uops)) {
+                    return 1;
+                }
+            }
+        }
+    }
+    if (strided_configurations != 78 || strided_load_uops != 404 ||
+        strided_store_uops != 202 || strided_positive != 39 ||
+        strided_negative != 39 || strided_matrix.lq_allocated() != 2304 ||
+        strided_matrix.sq_allocated() != 1152 ||
+        strided_matrix.lq_allocated() !=
+            strided_matrix.lq_dequeued() + strided_matrix.lq_canceled() ||
+        strided_matrix.sq_allocated() !=
+            strided_matrix.sq_dequeued() + strided_matrix.sq_canceled()) {
+        std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                  << strided_matrix.cycle()
+                  << " phase=strided-lmul-emul-conservation"
+                  << " configurations=" << strided_configurations
+                  << " load_uops=" << strided_load_uops
+                  << " store_uops=" << strided_store_uops
+                  << " positive/negative=" << strided_positive << '/'
+                  << strided_negative
+                  << " lq=" << strided_matrix.lq_allocated() << '/'
+                  << strided_matrix.lq_dequeued() << '+'
+                  << strided_matrix.lq_canceled()
+                  << " sq=" << strided_matrix.sq_allocated() << '/'
+                  << strided_matrix.sq_dequeued() << '+'
+                  << strided_matrix.sq_canceled() << '\n';
         return 1;
     }
 
@@ -13994,15 +14156,17 @@ int run_vector_addressing(int argc, char **argv)
 
     std::cout << "MEMBLOCK_VECTOR_ADDRESSING_PASS"
               << " cycle=" << environment.cycle() + multi_uop.cycle() +
-                    lmul_matrix.cycle() + indexed_matrix.cycle() +
-                    whole.cycle()
+                    lmul_matrix.cycle() + strided_matrix.cycle() +
+                    indexed_matrix.cycle() + whole.cycle()
               << " load_writebacks=" << environment.vector_load_writebacks() +
                     multi_uop.vector_load_writebacks() +
                     lmul_matrix.vector_load_writebacks() +
+                    strided_matrix.vector_load_writebacks() +
                     indexed_matrix.vector_load_writebacks() +
                     whole.vector_load_writebacks()
               << " store_writebacks=" << environment.vector_store_writebacks()
                     + lmul_matrix.vector_store_writebacks() +
+                    strided_matrix.vector_store_writebacks() +
                     indexed_matrix.vector_store_writebacks() +
                     whole.vector_store_writebacks()
               << " store_modes=3"
@@ -14013,6 +14177,13 @@ int run_vector_addressing(int argc, char **argv)
               << " lmul_rob_wraps=" << lmul_rob_wraps
               << " lmul_lq_allocated=" << lmul_matrix.lq_allocated()
               << " lmul_sq_allocated=" << lmul_matrix.sq_allocated()
+              << " strided_configurations=" << strided_configurations
+              << " strided_load_uops=" << strided_load_uops
+              << " strided_store_uops=" << strided_store_uops
+              << " strided_positive=" << strided_positive
+              << " strided_negative=" << strided_negative
+              << " strided_lq_allocated=" << strided_matrix.lq_allocated()
+              << " strided_sq_allocated=" << strided_matrix.sq_allocated()
               << " indexed_cases=" << indexed_cases
               << " indexed_load_uops=" << indexed_load_uops
               << " indexed_store_uops=" << indexed_store_uops
@@ -14026,6 +14197,7 @@ int run_vector_addressing(int argc, char **argv)
               << " tilelink_requests=" << environment.tilelink_requests() +
                     multi_uop.tilelink_requests() +
                     lmul_matrix.tilelink_requests() +
+                    strided_matrix.tilelink_requests() +
                     indexed_matrix.tilelink_requests() +
                     whole.tilelink_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
