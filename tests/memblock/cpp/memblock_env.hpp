@@ -2799,6 +2799,70 @@ class Environment {
     };
 
 public:
+    struct IFetchPtwResponse {
+        std::uint8_t s2xlate = 0;
+        std::uint64_t s1_tag = 0;
+        std::uint16_t s1_asid = 0;
+        std::uint16_t s1_vmid = 0;
+        bool s1_n = false;
+        std::uint8_t s1_pbmt = 0;
+        bool s1_d = false;
+        bool s1_a = false;
+        bool s1_g = false;
+        bool s1_u = false;
+        bool s1_x = false;
+        bool s1_w = false;
+        bool s1_r = false;
+        std::uint8_t s1_level = 0;
+        bool s1_v = false;
+        std::uint64_t s1_ppn = 0;
+        std::uint8_t s1_addr_low = 0;
+        std::array<std::uint8_t, 8> s1_ppn_low{};
+        std::uint8_t s1_valididx = 0;
+        std::uint8_t s1_pteidx = 0;
+        bool s1_pf = false;
+        bool s1_af = false;
+        std::uint64_t s2_tag = 0;
+        std::uint16_t s2_vmid = 0;
+        bool s2_n = false;
+        std::uint8_t s2_pbmt = 0;
+        std::uint64_t s2_ppn = 0;
+        bool s2_d = false;
+        bool s2_a = false;
+        bool s2_g = false;
+        bool s2_u = false;
+        bool s2_x = false;
+        bool s2_w = false;
+        bool s2_r = false;
+        std::uint8_t s2_level = 0;
+        bool s2_gpf = false;
+        bool s2_gaf = false;
+
+        bool operator==(const IFetchPtwResponse &other) const
+        {
+            return s2xlate == other.s2xlate && s1_tag == other.s1_tag &&
+                s1_asid == other.s1_asid && s1_vmid == other.s1_vmid &&
+                s1_n == other.s1_n && s1_pbmt == other.s1_pbmt &&
+                s1_d == other.s1_d && s1_a == other.s1_a &&
+                s1_g == other.s1_g && s1_u == other.s1_u &&
+                s1_x == other.s1_x && s1_w == other.s1_w &&
+                s1_r == other.s1_r && s1_level == other.s1_level &&
+                s1_v == other.s1_v && s1_ppn == other.s1_ppn &&
+                s1_addr_low == other.s1_addr_low &&
+                s1_ppn_low == other.s1_ppn_low &&
+                s1_valididx == other.s1_valididx &&
+                s1_pteidx == other.s1_pteidx && s1_pf == other.s1_pf &&
+                s1_af == other.s1_af && s2_tag == other.s2_tag &&
+                s2_vmid == other.s2_vmid && s2_n == other.s2_n &&
+                s2_pbmt == other.s2_pbmt && s2_ppn == other.s2_ppn &&
+                s2_d == other.s2_d && s2_a == other.s2_a &&
+                s2_g == other.s2_g && s2_u == other.s2_u &&
+                s2_x == other.s2_x && s2_w == other.s2_w &&
+                s2_r == other.s2_r && s2_level == other.s2_level &&
+                s2_gpf == other.s2_gpf && s2_gaf == other.s2_gaf;
+        }
+    };
+
     struct L2TlbResponse {
         std::uint64_t paddr = 0;
         std::uint8_t pbmt = 0;
@@ -2952,6 +3016,135 @@ public:
                 return false;
             }
             tick(false);
+        }
+        return check_components();
+    }
+
+    bool issue_ifetch_ptw_request(
+        std::uint64_t vpn, std::uint8_t s2xlate,
+        IFetchPtwResponse &response, unsigned response_stall_cycles = 4,
+        unsigned timeout = 16384)
+    {
+        if ((vpn >> 38) != 0 || s2xlate > 3) {
+            error_ = "invalid IFetch PTW request";
+            return false;
+        }
+        const auto capture = [&]() {
+            IFetchPtwResponse result;
+            result.s2xlate = static_cast<std::uint8_t>(
+                dut_.io_fetch_to_mem_itlb_resp_bits_s2xlate.U());
+            result.s1_tag = dut_.io_fetch_to_mem_itlb_resp_bits_s1_entry_tag.U();
+            result.s1_asid = static_cast<std::uint16_t>(
+                dut_.io_fetch_to_mem_itlb_resp_bits_s1_entry_asid.U());
+            result.s1_vmid = static_cast<std::uint16_t>(
+                dut_.io_fetch_to_mem_itlb_resp_bits_s1_entry_vmid.U());
+            result.s1_n = dut_.io_fetch_to_mem_itlb_resp_bits_s1_entry_n.B();
+            result.s1_pbmt = static_cast<std::uint8_t>(
+                dut_.io_fetch_to_mem_itlb_resp_bits_s1_entry_pbmt.U());
+            result.s1_d = dut_.io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_d.B();
+            result.s1_a = dut_.io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_a.B();
+            result.s1_g = dut_.io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_g.B();
+            result.s1_u = dut_.io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_u.B();
+            result.s1_x = dut_.io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_x.B();
+            result.s1_w = dut_.io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_w.B();
+            result.s1_r = dut_.io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_r.B();
+            result.s1_level = static_cast<std::uint8_t>(
+                dut_.io_fetch_to_mem_itlb_resp_bits_s1_entry_level.U());
+            result.s1_v = dut_.io_fetch_to_mem_itlb_resp_bits_s1_entry_v.B();
+            result.s1_ppn = dut_.io_fetch_to_mem_itlb_resp_bits_s1_entry_ppn.U();
+            result.s1_addr_low = static_cast<std::uint8_t>(
+                dut_.io_fetch_to_mem_itlb_resp_bits_s1_addr_low.U());
+#define CAPTURE_IFETCH_SECTOR(index)                                           \
+            result.s1_ppn_low[index] = static_cast<std::uint8_t>(             \
+                dut_.io_fetch_to_mem_itlb_resp_bits_s1_ppn_low_##index.U());  \
+            result.s1_valididx |= static_cast<std::uint8_t>(                  \
+                dut_.io_fetch_to_mem_itlb_resp_bits_s1_valididx_##index.B())  \
+                << index;                                                     \
+            result.s1_pteidx |= static_cast<std::uint8_t>(                    \
+                dut_.io_fetch_to_mem_itlb_resp_bits_s1_pteidx_##index.B())    \
+                << index
+            CAPTURE_IFETCH_SECTOR(0);
+            CAPTURE_IFETCH_SECTOR(1);
+            CAPTURE_IFETCH_SECTOR(2);
+            CAPTURE_IFETCH_SECTOR(3);
+            CAPTURE_IFETCH_SECTOR(4);
+            CAPTURE_IFETCH_SECTOR(5);
+            CAPTURE_IFETCH_SECTOR(6);
+            CAPTURE_IFETCH_SECTOR(7);
+#undef CAPTURE_IFETCH_SECTOR
+            result.s1_pf = dut_.io_fetch_to_mem_itlb_resp_bits_s1_pf.B();
+            result.s1_af = dut_.io_fetch_to_mem_itlb_resp_bits_s1_af.B();
+            result.s2_tag = dut_.io_fetch_to_mem_itlb_resp_bits_s2_entry_tag.U();
+            result.s2_vmid = static_cast<std::uint16_t>(
+                dut_.io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid.U());
+            result.s2_n = dut_.io_fetch_to_mem_itlb_resp_bits_s2_entry_n.B();
+            result.s2_pbmt = static_cast<std::uint8_t>(
+                dut_.io_fetch_to_mem_itlb_resp_bits_s2_entry_pbmt.U());
+            result.s2_ppn = dut_.io_fetch_to_mem_itlb_resp_bits_s2_entry_ppn.U();
+            result.s2_d = dut_.io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_d.B();
+            result.s2_a = dut_.io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_a.B();
+            result.s2_g = dut_.io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_g.B();
+            result.s2_u = dut_.io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_u.B();
+            result.s2_x = dut_.io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_x.B();
+            result.s2_w = dut_.io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_w.B();
+            result.s2_r = dut_.io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_r.B();
+            result.s2_level = static_cast<std::uint8_t>(
+                dut_.io_fetch_to_mem_itlb_resp_bits_s2_entry_level.U());
+            result.s2_gpf = dut_.io_fetch_to_mem_itlb_resp_bits_s2_gpf.B();
+            result.s2_gaf = dut_.io_fetch_to_mem_itlb_resp_bits_s2_gaf.B();
+            return result;
+        };
+
+        dut_.io_fetch_to_mem_itlb_resp_ready.ImmSet(std::uint64_t{0});
+        dut_.io_fetch_to_mem_itlb_req_0_bits_vpn.ImmSet(vpn);
+        dut_.io_fetch_to_mem_itlb_req_0_bits_s2xlate.ImmSet(s2xlate);
+        dut_.io_fetch_to_mem_itlb_req_0_valid.ImmSet(std::uint64_t{1});
+        bool accepted = false;
+        for (unsigned cycle = 0; cycle < timeout; ++cycle) {
+            const bool fire = dut_.io_fetch_to_mem_itlb_req_0_ready.B();
+            tick(false);
+            if (fire) {
+                accepted = true;
+                break;
+            }
+        }
+        dut_.io_fetch_to_mem_itlb_req_0_valid.ImmSet(std::uint64_t{0});
+        if (!accepted) {
+            error_ = "timed out accepting IFetch PTW request";
+            dut_.io_fetch_to_mem_itlb_resp_ready.ImmSet(std::uint64_t{1});
+            return false;
+        }
+
+        bool observed = false;
+        IFetchPtwResponse held;
+        for (unsigned cycle = 0; cycle < timeout; ++cycle) {
+            if (dut_.io_fetch_to_mem_itlb_resp_valid.B()) {
+                held = capture();
+                observed = true;
+                break;
+            }
+            tick(false);
+        }
+        if (!observed) {
+            error_ = "timed out waiting for IFetch PTW response";
+            dut_.io_fetch_to_mem_itlb_resp_ready.ImmSet(std::uint64_t{1});
+            return false;
+        }
+        for (unsigned cycle = 0; cycle < response_stall_cycles; ++cycle) {
+            if (!dut_.io_fetch_to_mem_itlb_resp_valid.B() ||
+                !(capture() == held)) {
+                error_ = "IFetch PTW response changed while stalled";
+                dut_.io_fetch_to_mem_itlb_resp_ready.ImmSet(std::uint64_t{1});
+                return false;
+            }
+            tick(false);
+        }
+        response = held;
+        dut_.io_fetch_to_mem_itlb_resp_ready.ImmSet(std::uint64_t{1});
+        tick(false);
+        if (dut_.io_fetch_to_mem_itlb_resp_valid.B()) {
+            error_ = "IFetch PTW response did not retire after handshake";
+            return false;
         }
         return check_components();
     }

@@ -199,6 +199,7 @@ make scalar-misaligned PICKER="$PICKER" JOBS=8
 make misaligned-stores PICKER="$PICKER" JOBS=8
 make exception-contracts PICKER="$PICKER" JOBS=8
 make l2-tlb-contracts PICKER="$PICKER" JOBS=8
+make ifetch-ptw-bridge PICKER="$PICKER" JOBS=8
 make two-stage-translation PICKER="$PICKER" JOBS=8
 make translation-matrix PICKER="$PICKER" JOBS=8
 make translation-fence PICKER="$PICKER" JOBS=8
@@ -330,6 +331,13 @@ for data. Every returned byte is compared with the independent line image and
 written into bus memory before a post-probe cold load. The agent also assigns
 and checks every Grant/GrantData sink on E-channel GrantAck and forces at least
 one E-channel stall to check payload stability.
+
+`ifetch-ptw-bridge` directly drives the IFU-originated PTW request across the
+MemBlock top-level boundary. It checks Sv39 and Sv48 stage-1 walks plus all
+four Sv39/Sv48 x Sv39x4/Sv48x4 nested walks, reconstructs the translated PPN
+from the sector response, checks ASID/VMID, permissions, faults, and stage-2
+metadata, and holds response ready low to verify stable payload under
+backpressure. This is separate from the data-side TLB translation tests.
 
 `uncache-errors` injects one denied and one corrupt Uncache response and checks
 the exception contract through the PBMT=NC adapter. This test caught and now

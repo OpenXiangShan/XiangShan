@@ -47,6 +47,7 @@ SCENARIOS = (
     "vector-addressing",
     "exception-contracts",
     "l2-tlb-contracts",
+    "ifetch-ptw-bridge",
     "two-stage-translation",
     "translation-matrix",
     "translation-fence",

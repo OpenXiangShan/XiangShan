@@ -5173,6 +5173,178 @@ int run_l2_tlb_contracts(int argc, char **argv)
     return 0;
 }
 
+int run_ifetch_ptw_bridge(int argc, char **argv)
+{
+    struct Case {
+        const char *name;
+        memblock::ReferencePageMode vs_mode;
+        memblock::ReferencePageMode g_mode;
+        bool nested;
+    };
+    constexpr std::array<Case, 6> cases{{
+        {"Sv39", memblock::ReferencePageMode::sv39,
+         memblock::ReferencePageMode::bare, false},
+        {"Sv48", memblock::ReferencePageMode::sv48,
+         memblock::ReferencePageMode::bare, false},
+        {"Sv39-Sv39x4", memblock::ReferencePageMode::sv39,
+         memblock::ReferencePageMode::sv39, true},
+        {"Sv39-Sv48x4", memblock::ReferencePageMode::sv39,
+         memblock::ReferencePageMode::sv48, true},
+        {"Sv48-Sv39x4", memblock::ReferencePageMode::sv48,
+         memblock::ReferencePageMode::sv39, true},
+        {"Sv48-Sv48x4", memblock::ReferencePageMode::sv48,
+         memblock::ReferencePageMode::sv48, true},
+    }};
+    constexpr std::uint64_t vs_root = 0x94000000ULL;
+    constexpr std::uint64_t g_root = 0x95000000ULL;
+    constexpr std::uint16_t asid = 0x35;
+    constexpr std::uint16_t vmid = 0x29;
+    constexpr unsigned response_stall_cycles = 5;
+    std::uint64_t total_cycles = 0;
+    std::uint64_t total_ptw_requests = 0;
+
+    for (unsigned case_index = 0; case_index < cases.size(); ++case_index) {
+        const auto &item = cases[case_index];
+        memblock::Environment environment(argc, argv);
+        const std::uint64_t virtual_page = 0x60012000ULL +
+            case_index * 0x200000ULL;
+        const std::uint64_t guest_page = 0x120012000ULL +
+            case_index * 0x200000ULL;
+        const std::uint64_t host_page = 0xc0012000ULL +
+            case_index * 0x200000ULL;
+        const std::uint64_t stage1_output = item.nested
+            ? guest_page
+            : host_page;
+        environment.configure_backpressure(
+            0xd1b54a32d192ed03ULL ^ case_index, true,
+            memblock::ResponseLatencyProfile::spec);
+
+        bool configured = environment.reset();
+        if (configured) {
+            configured = item.vs_mode == memblock::ReferencePageMode::sv48
+                ? environment.map_sv48_4k(
+                      virtual_page, stage1_output, vs_root, true, false,
+                      true, false)
+                : environment.map_sv39_4k(
+                      virtual_page, stage1_output, vs_root, true, false,
+                      true, false);
+        }
+        if (configured && item.nested) {
+            const unsigned vs_table_pages = item.vs_mode ==
+                    memblock::ReferencePageMode::sv48
+                ? 4U
+                : 3U;
+            for (unsigned page = 0; configured && page < vs_table_pages;
+                 ++page) {
+                const std::uint64_t address = vs_root + page * 0x1000ULL;
+                configured = item.g_mode == memblock::ReferencePageMode::sv48
+                    ? environment.map_sv48x4_4k(
+                          address, address, g_root, true, true, false)
+                    : environment.map_sv39x4_4k(
+                          address, address, g_root, true, true, false);
+            }
+            if (configured) {
+                configured = item.g_mode == memblock::ReferencePageMode::sv48
+                    ? environment.map_sv48x4_4k(
+                          guest_page, host_page, g_root, true, false, true)
+                    : environment.map_sv39x4_4k(
+                          guest_page, host_page, g_root, true, false, true);
+            }
+        }
+        if (configured) {
+            configured = item.nested
+                ? environment.activate_two_stage_modes(
+                      item.vs_mode, item.g_mode, vs_root, g_root, asid, vmid)
+                : item.vs_mode == memblock::ReferencePageMode::sv48
+                    ? environment.activate_sv48(vs_root, asid)
+                    : environment.activate_sv39(vs_root, asid);
+        }
+        if (!configured) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=" << item.name
+                      << " cycle=" << environment.cycle()
+                      << " phase=configuration reason=" << environment.error()
+                      << '\n';
+            return 1;
+        }
+
+        const std::uint64_t vpn = virtual_page >> 12;
+        memblock::Environment::IFetchPtwResponse response;
+        if (!environment.issue_ifetch_ptw_request(
+                vpn, item.nested ? 3U : 0U, response,
+                response_stall_cycles)) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=" << item.name
+                      << " cycle=" << environment.cycle()
+                      << " phase=request reason=" << environment.error()
+                      << '\n';
+            return 1;
+        }
+
+        const unsigned sector = static_cast<unsigned>(vpn & 7U);
+        const std::uint64_t stage1_ppn = stage1_output >> 12;
+        const std::uint64_t reconstructed_s1_ppn =
+            (response.s1_ppn << 3) | response.s1_ppn_low[sector];
+        const bool s1_valid =
+            response.s2xlate == (item.nested ? 3U : 0U) &&
+            response.s1_tag == (vpn >> 3) && response.s1_asid == asid &&
+            response.s1_n == false && response.s1_pbmt == 0 &&
+            !response.s1_d && response.s1_a && !response.s1_g &&
+            !response.s1_u && response.s1_x && !response.s1_w &&
+            response.s1_r && response.s1_level == 0 && response.s1_v &&
+            response.s1_addr_low == sector &&
+            response.s1_pteidx == (1U << sector) &&
+            (response.s1_valididx & (1U << sector)) != 0 &&
+            reconstructed_s1_ppn == stage1_ppn &&
+            !response.s1_pf && !response.s1_af;
+        const bool s2_valid = !item.nested ||
+            (response.s1_vmid == vmid &&
+             response.s2_tag == (guest_page >> 12) &&
+             response.s2_vmid == vmid && !response.s2_n &&
+             response.s2_pbmt == 0 && response.s2_ppn == (host_page >> 12) &&
+             !response.s2_d && response.s2_a && !response.s2_g &&
+             response.s2_u && response.s2_x && !response.s2_w &&
+             response.s2_r && response.s2_level == 0 &&
+             !response.s2_gpf && !response.s2_gaf);
+        if (!s1_valid || !s2_valid || environment.ptw_requests() == 0) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=" << item.name
+                      << " cycle=" << environment.cycle()
+                      << " phase=response"
+                      << " s2xlate=" << static_cast<unsigned>(response.s2xlate)
+                      << " s1_tag=0x" << std::hex << response.s1_tag
+                      << " s1_ppn=0x" << reconstructed_s1_ppn
+                      << " s2_tag=0x" << response.s2_tag
+                      << " s2_ppn=0x" << response.s2_ppn << std::dec
+                      << " s1_asid=" << response.s1_asid
+                      << " s1_vmid=" << response.s1_vmid
+                      << " s2_vmid=" << response.s2_vmid
+                      << " s1_perm=" << response.s1_d << response.s1_a
+                      << response.s1_g << response.s1_u << response.s1_x
+                      << response.s1_w << response.s1_r
+                      << " s2_perm=" << response.s2_d << response.s2_a
+                      << response.s2_g << response.s2_u << response.s2_x
+                      << response.s2_w << response.s2_r
+                      << " s1_pf=" << response.s1_pf
+                      << " s1_af=" << response.s1_af
+                      << " s2_gpf=" << response.s2_gpf
+                      << " s2_gaf=" << response.s2_gaf
+                      << " ptw_requests=" << environment.ptw_requests()
+                      << '\n';
+            return 1;
+        }
+        total_cycles += environment.cycle();
+        total_ptw_requests += environment.ptw_requests();
+    }
+
+    std::cout << "MEMBLOCK_IFETCH_PTW_BRIDGE_PASS"
+              << " cases=" << cases.size()
+              << " stage1=2 nested=4"
+              << " response_stall_cycles="
+              << cases.size() * response_stall_cycles
+              << " ptw_requests=" << total_ptw_requests
+              << " cycles=" << total_cycles
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_two_stage_translation(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -13750,6 +13922,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "l2-tlb-contracts") {
             return run_l2_tlb_contracts(argc, argv);
+        }
+        if (options.test == "ifetch-ptw-bridge") {
+            return run_ifetch_ptw_bridge(argc, argv);
         }
         if (options.test == "two-stage-translation") {
             return run_two_stage_translation(argc, argv);
