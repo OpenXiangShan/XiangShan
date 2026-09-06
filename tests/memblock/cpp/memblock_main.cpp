@@ -3777,22 +3777,180 @@ int run_ifetch_prefetch(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment memory_type(argc, argv);
+    constexpr std::uint64_t memory_type_virtual = 0x74000000ULL;
+    constexpr std::uint64_t memory_type_physical = 0xb5000000ULL;
+    constexpr std::uint64_t memory_type_root = 0xe7300000ULL;
+    memory_type.memory().fill_incrementing(
+        memory_type_physical, 0x4000, 0xa7);
+    if (!memory_type.reset()) {
+        std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                  << memory_type.cycle()
+                  << " phase=memory-type-reset reason="
+                  << memory_type.error() << '\n';
+        return 1;
+    }
+    for (unsigned index = 0; index < 4; ++index) {
+        const bool noncacheable = index < 2;
+        if (!memory_type.map_sv39_4k(
+                memory_type_virtual + index * 0x1000,
+                memory_type_physical + index * 0x1000,
+                memory_type_root, true, true, false, false,
+                noncacheable, !noncacheable)) {
+            std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                      << memory_type.cycle()
+                      << " phase=memory-type-map index=" << index
+                      << " reason=" << memory_type.error() << '\n';
+            return 1;
+        }
+    }
+    if (!memory_type.activate_sv39(memory_type_root, 29)) {
+        std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                  << memory_type.cycle()
+                  << " phase=memory-type-activate reason="
+                  << memory_type.error() << '\n';
+        return 1;
+    }
+
+    for (unsigned index = 0; index < 4; ++index) {
+        const memblock::LoadTransaction warmup{
+            .address = memory_type_virtual + index * 0x1000 + 0x80,
+            .oracle_address = memory_type_physical + index * 0x1000 + 0x80,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(64 + index),
+            .lq = static_cast<std::uint8_t>(index),
+            .pdest = static_cast<std::uint8_t>(80 + index),
+            .lane = index % memblock::kScalarLoadLanes,
+        };
+        memory_type.expect_load(warmup);
+        if (!memory_type.set_rob_head(warmup.rob, warmup.rob_flag) ||
+            !memory_type.enqueue_load(warmup) ||
+            !memory_type.issue_load(warmup, 512) ||
+            (index >= 2 && !memory_type.wait_for_mmio_request(
+                               warmup.rob, warmup.rob_flag, 4096)) ||
+            !memory_type.run_until_complete(8192) ||
+            !memory_type.run_until_lq_retired(2048)) {
+            std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                      << memory_type.cycle()
+                      << " phase=memory-type-warmup index=" << index
+                      << " reason=" << memory_type.error() << '\n';
+            return 1;
+        }
+    }
+    const std::uint64_t memory_type_ptw_before = memory_type.ptw_requests();
+    const std::uint64_t memory_type_dcache_before =
+        memory_type.tilelink_requests();
+    const std::uint64_t memory_type_uncache_before =
+        memory_type.uncache_requests();
+    const auto memory_type_ifetch_before =
+        memory_type.ifetch_prefetch_stats().requests;
+    if (memory_type_dcache_before != 0 || memory_type_uncache_before != 4) {
+        std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                  << memory_type.cycle()
+                  << " phase=memory-type-warmup-check dcache="
+                  << memory_type_dcache_before << " uncache="
+                  << memory_type_uncache_before << '\n';
+        return 1;
+    }
+
+    const std::array<memblock::PrefetchTransaction, 4> memory_type_prefetches{{
+        {
+            .address = memory_type_virtual + 0x100,
+            .oracle_address = memory_type_physical + 0x100,
+            .op = memblock::PrefetchOp::read,
+            .rob = 68,
+            .lq = 4,
+            .lane = 0,
+        },
+        {
+            .address = memory_type_virtual + 0x1000 + 0x140,
+            .oracle_address = memory_type_physical + 0x1000 + 0x140,
+            .op = memblock::PrefetchOp::write,
+            .rob = 69,
+            .lq = 5,
+            .lane = 1,
+        },
+        {
+            .address = memory_type_virtual + 0x2000 + 0x180,
+            .oracle_address = memory_type_physical + 0x2000 + 0x180,
+            .op = memblock::PrefetchOp::read,
+            .rob = 70,
+            .lq = 6,
+            .lane = 1,
+        },
+        {
+            .address = memory_type_virtual + 0x3000 + 0x1c0,
+            .oracle_address = memory_type_physical + 0x3000 + 0x1c0,
+            .op = memblock::PrefetchOp::write,
+            .rob = 71,
+            .lq = 7,
+            .lane = 2,
+        },
+    }};
+    for (unsigned index = 0; index < memory_type_prefetches.size(); ++index) {
+        const auto &prefetch = memory_type_prefetches[index];
+        const std::uint64_t dcache_before = memory_type.tilelink_requests();
+        const std::uint64_t uncache_before = memory_type.uncache_requests();
+        memory_type.expect_prefetch(prefetch);
+        if (!memory_type.set_rob_head(prefetch.rob, prefetch.rob_flag) ||
+            !memory_type.enqueue_prefetch(prefetch) ||
+            !memory_type.issue_prefetch(prefetch, 512) ||
+            !memory_type.run_until_complete(8192) ||
+            !memory_type.run_until_lq_retired(2048) ||
+            memory_type.ptw_requests() != memory_type_ptw_before ||
+            memory_type.uncache_requests() != uncache_before ||
+            memory_type.tilelink_requests() !=
+                dcache_before + (index < 2 ? 1 : 0)) {
+            std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                      << memory_type.cycle()
+                      << " phase=memory-type-prefetch index=" << index
+                      << " dcache_before=" << dcache_before
+                      << " dcache_after=" << memory_type.tilelink_requests()
+                      << " uncache_before=" << uncache_before
+                      << " uncache_after=" << memory_type.uncache_requests()
+                      << " reason=" << memory_type.error() << '\n';
+            return 1;
+        }
+    }
+    if (memory_type.prefetch_writebacks() != memory_type_prefetches.size() ||
+        memory_type.tilelink_requests() - memory_type_dcache_before != 2 ||
+        memory_type.uncache_requests() != memory_type_uncache_before ||
+        memory_type.ifetch_prefetch_stats().requests !=
+            memory_type_ifetch_before) {
+        std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                  << memory_type.cycle()
+                  << " phase=memory-type-check prefetch_writebacks="
+                  << memory_type.prefetch_writebacks()
+                  << " dcache_delta="
+                  << memory_type.tilelink_requests() -
+                         memory_type_dcache_before
+                  << " uncache_delta="
+                  << memory_type.uncache_requests() -
+                         memory_type_uncache_before << '\n';
+        return 1;
+    }
+
     const auto &stats = environment.ifetch_prefetch_stats();
     std::cout << "MEMBLOCK_IFETCH_PREFETCH_PASS"
               << " cycle="
-              << environment.cycle() + concurrent.cycle() + mixed_cycles
+              << environment.cycle() + concurrent.cycle() + mixed_cycles +
+                    memory_type.cycle()
               << " lane_requests=" << stats.requests[0] << ','
               << stats.requests[1] << ',' << stats.requests[2]
               << " instruction=3 data=2"
               << " concurrent_lanes=3 translation_bypass=3"
               << " mixed_unmapped=3 mixed_mapped=3 mapped_individual=2"
+              << " memory_type_prefetches=4"
               << " prefetch_writebacks="
               << environment.prefetch_writebacks() +
-                    concurrent.prefetch_writebacks() + mixed_writebacks
+                    concurrent.prefetch_writebacks() + mixed_writebacks +
+                    memory_type.prefetch_writebacks()
               << " unmapped_data_ptw=" << unmapped_data_ptw_requests
               << " mapped_warmup_ptw=" << mapped_warmup_ptw_requests
               << " mapped_data_ptw=" << mapped_data_ptw_requests
               << " mapped_data_dcache=" << mapped_data_dcache_requests
+              << " nc_prefetch_dcache=2 nc_prefetch_uncache=0"
+              << " io_prefetch_dcache=0 io_prefetch_uncache=0"
               << " tilelink_requests=" << environment.tilelink_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;

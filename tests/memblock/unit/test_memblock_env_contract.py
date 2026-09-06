@@ -425,6 +425,12 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "mapped_warmup_ptw=",
             "mapped_data_dcache=",
             "phase=mixed-mapped-individual-data",
+            "phase=memory-type-warmup-check",
+            "memory_type_uncache_before != 4",
+            "dcache_before + (index < 2 ? 1 : 0)",
+            "memory_type_prefetches=4",
+            "nc_prefetch_dcache=2 nc_prefetch_uncache=0",
+            "io_prefetch_dcache=0 io_prefetch_uncache=0",
             "ifetch_prefetches=",
             "ifetch-prefetch",
         ):

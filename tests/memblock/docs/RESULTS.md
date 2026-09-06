@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `5ba82e8c3b58dc48658c72a3ce5b5f149a630ba31b6e3cb4165c93fb02567731`
+- Current rebuilt and frozen UT executable SHA-256: `860aa4d0c7b69e41cde84ca7ad68fee1393068a6b2e75549d54f4f7dcfa78749`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `dcf8b6bdc77dcf58da0b792831821f3ddbe77065b60d69498a75ec7256c52643`
+- Frozen runtime manifest SHA-256: `eba740c068ba4283a4d81e097e4afa4e170a448170b4e4b7d9316ea386e51c39`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -270,8 +270,8 @@ WritebackQueue rather than echoing B-source.
 The `io_ifetchPrefetch_*` audit corrected the earlier direction/ownership
 classification: these are three LoadUnit outputs carrying software
 instruction-prefetch virtual addresses to the frontend, not IFU training
-inputs. On the current RTL, `ifetch-prefetch` passed in 495 aggregate cycles
-with 16 exact no-RF/no-exception completions. It first observed one exact
+inputs. On the current RTL, `ifetch-prefetch` passed in 840 aggregate cycles
+with 20 exact no-RF/no-exception prefetch completions. It first observed one exact
 `prefetch.i` VA on each lane and no IFU pulse for sequential `prefetch.r/w`.
 A separate empty-Sv39 run issued three unmapped `prefetch.i` requests together;
 all three lanes emitted their VA with no PTW or DCache request, matching the
@@ -284,7 +284,12 @@ created the TLB entries using six PTW requests; the three-operation batch then
 issued one best-effort DCache request and no new PTW request. Separate mapped
 cold-line `prefetch.r` and `prefetch.w` operations each issued one additional
 DCache request. Across all three mapped data requests, no data prefetch emitted
-an IFU-side pulse. PBMT-NC data-prefetch classification remains open.
+an IFU-side pulse. A final memory-type phase used ordinary loads to prove that
+two PBMT=NC and two PBMT=IO pages generated four Uncache requests, then reused
+the resident TLB entries for data hints. NC `prefetch.r/w` each generated one
+DCache request and no Uncache request, matching the intentional
+`6a3636fd2` policy; IO `prefetch.r/w` generated neither manager request. All
+four completed without an exception, RF write, new PTW request, or IFU pulse.
 
 `constraint_schema=5` also requires a positive observed instruction-prefetch
 count in every `random-mixed` seed. A historical two-worker schema-5 check
