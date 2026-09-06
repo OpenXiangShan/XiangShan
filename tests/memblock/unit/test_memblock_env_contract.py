@@ -1148,6 +1148,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         final_acceptance = makefile[
             makefile.index("final-acceptance:"):makefile.index("unit:")
         ]
+        self.assertIn("$(MAKE) benchmark-tests", final_acceptance)
         self.assertIn("$(MAKE) endurance-regression", final_acceptance)
         self.assertIn("$(MAKE) verify-endurance-results", final_acceptance)
 

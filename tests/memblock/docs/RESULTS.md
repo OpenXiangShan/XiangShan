@@ -607,6 +607,28 @@ requests, 10 Probes, and 140 ReleaseData beats. The full per-scenario table is
 `build/memblock/test-scale.md`; its JSON artifact SHA-256 is
 `acfc2594634a2b2beb4ef174f1dfbdae286cddfd4b0b3b3d50517cf5d37f8c10`.
 
+After PMP contracts, PMP load-cancel classification, and the final-acceptance
+inventory repair, the current frozen executable passed all 68 registered leaf
+scenarios in 816.650457 seconds. The inventory is now unit-checked against the
+C++ dispatch and is invoked directly by `final-acceptance`, so newly registered
+scenarios cannot be omitted by a stale hand-maintained target list. Focused
+coverage included 17 PMP cases, a two-source Probe overlap with an unrelated
+refill, 118 translation-fault cases, and 36 IFU-PTW bridge cases.
+
+At the common random scale, scalar and vector load scenarios each completed
+16,384 checked operations. `random-mixed` completed 16,384 actions in 710,326
+cycles, including 10,237 scalar loads, 4,234 scalar stores, 802 vector loads,
+381 vector stores, 736 prefetches, 2,614 DCache refills/GrantAcks, 2,566 PTW
+requests, 158 Uncache requests, five Probes, and 309 ReleaseData beats.
+`random-stress` completed another 16,384 actions with 16,262 refills and maximum
+outstanding depth 12. The frozen executable SHA-256 is
+`993422f6541f479a1d1be8842906843c4dbc549b48df58278257c112c47ec92f`;
+the complete RTL SHA-256 remains
+`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
+The JSON artifact is `build/memblock/test-scale.json`, SHA-256
+`9ae14b4feed67b243117709ba06e47b8f5428ac5bbd970714a1d7cba1770afd7`.
+No CPU defect was observed.
+
 ### Million-Action-Per-Seed Endurance Campaign
 
 The post-Probe frozen runtime completed eight independent `spec` seeds from

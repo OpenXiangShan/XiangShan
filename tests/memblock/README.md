@@ -719,7 +719,10 @@ million-action seeds provide much deeper pointer-wrap and long-lived state
 pressure.
 
 `make benchmark-tests` executes every leaf scenario once and writes both JSON
-and Markdown inventories under `build/memblock/test-scale.*`. The table reports
+and Markdown inventories under `build/memblock/test-scale.*`. Its scenario
+inventory is unit-checked against every C++ `--test` dispatch and is the
+focused-scenario gate used by `make final-acceptance`; adding a new executable
+scenario without adding it to that gate fails the unit suite. The table reports
 wall time, cycles, generated actions, load/store completions, DCache A requests,
 AcquireBlock refills, PTW and Uncache requests, Probe traffic, and ReleaseData
 when the scenario exposes each metric. An action is a generator scheduling

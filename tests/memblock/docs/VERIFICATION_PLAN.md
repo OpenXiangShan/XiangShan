@@ -490,7 +490,9 @@ included in the repaired sentinel and boundary-hunt gates.
 Before a duration run:
 
 1. `check-ports`, `check-rtl`, and all Python unit tests pass.
-2. Every green focused scenario passes on the current complete RTL hash.
+2. `benchmark-tests` passes every leaf scenario registered by the C++ dispatch
+   on the current frozen binary and complete RTL hash. A unit check requires its
+   inventory to remain exactly equal to the executable dispatch inventory.
 3. A multi-seed, six-scenario matrix passes with backpressure enabled. The
    sixth scenario is `frontend-bridge`; its offline verifier independently
    requires three A requests and four D beats per requested transaction,

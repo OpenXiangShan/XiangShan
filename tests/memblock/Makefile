@@ -391,38 +391,7 @@ verify-long-results:
 
 final-acceptance:
 	$(MAKE) unit
-	$(MAKE) frontend-bridge
-	$(MAKE) trigger-contracts
-	$(MAKE) metadata-contracts
-	$(MAKE) load-feedback
-	$(MAKE) memory-violation
-	$(MAKE) rar-violation
-	$(MAKE) ifetch-prefetch
-	$(MAKE) hardware-prefetch
-	$(MAKE) fp-loads
-	$(MAKE) dcache-errors
-	$(MAKE) dcache-coherence
-	$(MAKE) iq-slow-feedback
-	$(MAKE) uncache-errors
-	$(MAKE) uncache-widths
-	$(MAKE) mmio-contracts
-	$(MAKE) cbo-zero-contracts
-	$(MAKE) reset-recovery
-	$(MAKE) atomic-contracts
-	$(MAKE) atomic-dchannel-errors
-	$(MAKE) translation-matrix
-	$(MAKE) translation-fence-all
-	$(MAKE) translation-inflight-context-all
-	$(MAKE) translation-context
-	$(MAKE) translation-bare
-	$(MAKE) translation-faults
-	$(MAKE) translation-permissions
-	$(MAKE) translation-pbmt
-	$(MAKE) translation-superpages
-	$(MAKE) pmp-contracts
-	$(MAKE) l2-tlb-contracts
-	$(MAKE) ifetch-ptw-bridge
-	$(MAKE) dcache-release
+	$(MAKE) benchmark-tests
 	$(MAKE) known-bug-sentinel
 	$(MAKE) random-boundary-regression
 	$(MAKE) verify-boundary-hunt
