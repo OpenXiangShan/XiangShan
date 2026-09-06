@@ -11,6 +11,10 @@
 class memblock_main_dispatch_auto_build_main_table_base_sequence extends memblock_dispatch_base_sequence;
 
     virtual lintsissue_agent_agent_interface service_vif;
+    // 两个 responder 都交付 terminal idle 后，主 service 仍至少运行一个完整的
+    // monitor service 边界，避免同拍的收尾 raw sample 在 capture 关闭前漏消费。
+    bit            memory_responder_final_settle_pending;
+    longint unsigned memory_responder_final_settle_service_cycle;
 
     `uvm_object_utils(memblock_main_dispatch_auto_build_main_table_base_sequence)
 
@@ -19,6 +23,7 @@ class memblock_main_dispatch_auto_build_main_table_base_sequence extends membloc
     extern virtual function void ensure_service_vif();
     extern virtual task service_real_dispatch_flow();
     extern virtual task service_monitor_once();
+    extern virtual function bit memory_responders_ready_for_final_audit();
     extern virtual function bit all_transactions_terminal_done();
     extern virtual function void report_unfinished_status();
     extern virtual function void report_main_transaction(input memblock_uid_t uid);
@@ -30,7 +35,34 @@ endclass:memblock_main_dispatch_auto_build_main_table_base_sequence
 function memblock_main_dispatch_auto_build_main_table_base_sequence::new(string name = "memblock_main_dispatch_auto_build_main_table_base_sequence");
     super.new(name);
     service_vif = null;
+    memory_responder_final_settle_pending = 1'b0;
+    memory_responder_final_settle_service_cycle = 0;
 endfunction:new
+
+// 抽象职责：确认 DCache 与 SBuffer responder 都已完成 terminal idle，并在其后的
+// 一个完整 monitor service 边界检查共享写回暂存。该函数只读/报告共享队列，不清理
+// 任何残留；调用者据返回值决定是否可以结束主 dispatch service。
+function bit memblock_main_dispatch_auto_build_main_table_base_sequence::memory_responders_ready_for_final_audit();
+    if (memblock_sync_pkg::dcache_responder_done !== 1'b1 ||
+        memblock_sync_pkg::sbuffer_responder_done !== 1'b1) begin
+        memory_responder_final_settle_pending = 1'b0;
+        memory_responder_final_settle_service_cycle = 0;
+        return 1'b0;
+    end
+    if (!memory_responder_final_settle_pending) begin
+        memory_responder_final_settle_pending = 1'b1;
+        memory_responder_final_settle_service_cycle =
+            memblock_sync_pkg::get_dispatch_service_cycle();
+        return 1'b0;
+    end
+    if (memblock_sync_pkg::get_dispatch_service_cycle() <=
+        memory_responder_final_settle_service_cycle) begin
+        return 1'b0;
+    end
+    void'(mem_access_base_sequence::audit_shared_memory_drain_state(
+        "both memory responders completed and monitor settled"));
+    return 1'b1;
+endfunction:memory_responders_ready_for_final_audit
 
 task memblock_main_dispatch_auto_build_main_table_base_sequence::body();
     memblock_sync_pkg::memblock_control_worker_topology_mode_e topology_mode;
@@ -48,8 +80,7 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::body();
                         data.main_trans_num),
               UVM_LOW)
     service_real_dispatch_flow();
-    data.end_test_check();
-    `uvm_info(get_type_name(), "real dispatch smoke sequence completed", UVM_LOW)
+    `uvm_info(get_type_name(), "real dispatch smoke core service completed; final audit is owned by scenario lifecycle", UVM_LOW)
 endtask:body
 
 function void memblock_main_dispatch_auto_build_main_table_base_sequence::ensure_service_vif();
@@ -76,13 +107,22 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_real_di
         @(negedge service_vif.clk);
         if (service_vif.rst_n !== 1'b1 ||
             memblock_sync_pkg::reset_backend_done !== 1'b1) begin
+            // prepare 的 time stamp 只属于当前 reset epoch；若不清除，reset 后的
+            // 首次 terminal/drain 会把 reset 前已经经过的 1us 错当作静默窗口。
+            data.reset_global_stop_prepare();
+            memory_responder_final_settle_pending = 1'b0;
+            memory_responder_final_settle_service_cycle = 0;
             if (control_barrier_service != null) begin
                 control_barrier_service.begin_control_runtime_reset("physical reset");
             end
             continue;
         end
         service_monitor_once();
-        if (!data.is_global_stop_requested()) begin
+        // prepare 阶段不再构造新的 testcase issue route；仅让已经进入 DUT 或
+        // memory responder 的尾部流量继续收敛。若公共 runtime work 又出现，
+        // common_data 会撤销 prepare，下一轮自动恢复正常 route。
+        if (!data.is_global_stop_requested() &&
+            !data.is_global_stop_prepare_requested()) begin
             route_all_issue_queues();
         end
         void'(all_transactions_terminal_done());
@@ -101,7 +141,12 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_real_di
                     `uvm_fatal(get_type_name(),
                                "disabled L2TLB responder has dispatch/response or owner/release state")
                 end
-                break;
+                if (memory_responders_ready_for_final_audit()) begin
+                    break;
+                end
+                // disabled responder topology 不得继续走下方 enabled-only contract；
+                // 等待 DCache/SBuffer terminal settle 时仍保留主 monitor service。
+                continue;
             end
             if (!memblock_sync_pkg::l2tlb_dispatch_active() ||
                 !memblock_sync_pkg::l2tlb_testcase_needs_response) begin
@@ -126,7 +171,8 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_real_di
                 end
             end
             else if (!memblock_sync_pkg::l2tlb_lifecycle_owner_claimed &&
-                     memblock_sync_pkg::l2tlb_owner_claimed_once) begin
+                     memblock_sync_pkg::l2tlb_owner_claimed_once &&
+                     memory_responders_ready_for_final_audit()) begin
                 break;
             end
         end

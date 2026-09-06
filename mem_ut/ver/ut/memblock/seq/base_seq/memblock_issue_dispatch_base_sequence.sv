@@ -70,7 +70,13 @@ task memblock_issue_dispatch_base_sequence::drive_dispatch_issue_loop();
         bit has_fire;
         bit pending_issue_work;
 
-        issue_sched.route_all_ready_uids();
+        // global-stop prepare 已表示 terminal 前缀和公共 runtime work 收敛；此时
+        // 不得由独立 issue loop 重新把 ready UID 路由到 issue queue。prepare 若
+        // 被其它公共 work 撤销，下一个 iteration 自动恢复 route。
+        if (!data.is_global_stop_prepare_requested() &&
+            !data.is_global_stop_requested()) begin
+            issue_sched.route_all_ready_uids();
+        end
         send_issue_cycle(cycle_idx, has_fire);
         issue_sched.advance_issue_queue_delays();
         pending_issue_work = issue_sched.has_pending_issue_work();

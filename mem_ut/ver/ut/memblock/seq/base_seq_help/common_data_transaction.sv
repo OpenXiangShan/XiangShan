@@ -15,6 +15,10 @@ class common_data_transaction extends uvm_object;
     localparam bit [3:0] MEMBLOCK_SV48_MODE = 4'd9;
     localparam int unsigned MEMBLOCK_STA_LATE_FAULT_TOMBSTONE_MAX =
         `MEMBLOCK_DUT_SQ_SIZE;
+    // 中文注释：主表/公共队列已经收敛后，memory responder 仍允许接收尾请求的最短静默窗口。
+    // 该值是 global stop 的固定框架时序，不是 testcase 可改的 plus 参数；DCache/SBuffer
+    // 任一观察到新 activity 都会重新起算该窗口，避免在已知尾流量中途提交 global stop。
+    localparam time MEMBLOCK_GLOBAL_STOP_PREPARE_QUIET_TIME = 1us;
 
     typedef struct {
         memblock_sfence_payload_t payload;
@@ -29,9 +33,20 @@ class common_data_transaction extends uvm_object;
     int unsigned   main_trans_num;
     memblock_uid_t next_uid;
     bit            main_table_ready;
-    // global_stop_requested由顶层orchestration在所有主表transaction最终terminal_done后置位。
-    // 子sequence只读该标志进入收尾退出阶段，避免各自重复维护completion退出条件。
+    // global_stop_requested 只在 stop-prepare 静默窗口完成后由顶层 orchestration 置位。
+    // 子sequence只读该标志进入收尾退出阶段，避免各自重复维护 completion 退出条件。
     bit            global_stop_requested;
+    // 中文注释：global stop 的两阶段 prepare 状态。置位：所有 UID terminal 且公共 runtime
+    // 队列收敛时；清零：prepare 期间公共 runtime work 再次出现、reset 或真正 global stop 前重建。
+    // DCache/SBuffer 观察到 A/response/probe 等尾部 activity 时只刷新 last_activity_time，不清该位。
+    // 作用：为 memory-facing responder 留出连续静默窗口，避免其已知尾请求被 global stop 截断。
+    bit            global_stop_prepare_requested;
+    time           global_stop_prepare_last_activity_time;
+    // 中文注释：DCache/SBuffer 在 prepare 期间每个真实 responder sample 都回报自己的
+    // 时间。stop commit 除了等待 1us 无 activity，还必须等两边各完成一次 deadline 之后的
+    // sample，避免主 service 的 negedge 恰好先于同一仿真时刻 responder drv_cb 而漏看尾请求。
+    time           global_stop_prepare_dcache_last_sample_time;
+    time           global_stop_prepare_sbuffer_last_sample_time;
     // dispatch公共进度：所有admission/route/redirect扫描共享同一组边界，避免10万笔场景全表扫描。
     memblock_dispatch_progress_t dispatch_progress;
 
@@ -153,6 +168,10 @@ class common_data_transaction extends uvm_object;
         next_uid            = 0;
         main_table_ready    = 1'b0;
         global_stop_requested = 1'b0;
+        global_stop_prepare_requested = 1'b0;
+        global_stop_prepare_last_activity_time = 0;
+        global_stop_prepare_dcache_last_sample_time = 0;
+        global_stop_prepare_sbuffer_last_sample_time = 0;
         dispatch_progress   = '{default:'0};
         flush_in_progress   = 1'b0;
         active_redirect     = '{default:'0};
@@ -229,6 +248,10 @@ class common_data_transaction extends uvm_object;
         next_uid            = 0;
         main_table_ready    = 1'b0;
         global_stop_requested = 1'b0;
+        global_stop_prepare_requested = 1'b0;
+        global_stop_prepare_last_activity_time = 0;
+        global_stop_prepare_dcache_last_sample_time = 0;
+        global_stop_prepare_sbuffer_last_sample_time = 0;
         dispatch_progress.terminal_done_uid      = 0;
         dispatch_progress.max_enqueued_uid       = 0;
         dispatch_progress.max_enqueued_uid_valid = 1'b0;
@@ -236,6 +259,11 @@ class common_data_transaction extends uvm_object;
         memblock_sync_pkg::dispatch_flush_in_progress = 1'b0;
         memblock_sync_pkg::dispatch_flushsb_waiting_empty = 1'b0;
         memblock_sync_pkg::dispatch_flush_epoch = 0;
+        // 两个 done 标志属于本 testcase 的 responder 生命周期，不能继承上一次
+        // scenario 的 terminal idle 结论；每个新主表都要求本轮 DCache/SBuffer 重做
+        // 自然 drain 和最终 audit。
+        memblock_sync_pkg::dcache_responder_done = 1'b0;
+        memblock_sync_pkg::sbuffer_responder_done = 1'b0;
         // The shared L2TLB sample coordinator is initialized by top_tb at
         // time 0. This table reset only clears testcase-owned software state;
         // it must not rewind a sample already published by CSR monitor.
@@ -942,9 +970,98 @@ class common_data_transaction extends uvm_object;
                  control_workers_shutdown_complete()));
     endfunction:runtime_drain_complete
 
+    // 抽象职责：撤销尚未提交的 global-stop prepare。调用者只在公共框架 work 再次出现
+    // 或 testcase reset 时使用；它不清任何 responder 本地 queue，也不改 UID terminal 状态。
+    function void reset_global_stop_prepare();
+        global_stop_prepare_requested = 1'b0;
+        global_stop_prepare_last_activity_time = 0;
+        global_stop_prepare_dcache_last_sample_time = 0;
+        global_stop_prepare_sbuffer_last_sample_time = 0;
+    endfunction:reset_global_stop_prepare
+
+    // 抽象职责：由 DCache/SBuffer responder 报告其在 prepare 期间观察到的真实尾部 activity。
+    // 该函数只刷新静默窗口的起点；不会重新开放已经提交的 global stop，也不会改变 responder
+    // 的 request/response owner 或本地 queue。调用应覆盖 A.valid，不能只等待 A.fire。
+    function void note_global_stop_prepare_activity();
+        if (!global_stop_requested && global_stop_prepare_requested) begin
+            global_stop_prepare_last_activity_time = $time;
+        end
+    endfunction:note_global_stop_prepare_activity
+
+    // 抽象职责：记录 prepare 期间 DCache/SBuffer 已到达的真实 clocking-block sample。
+    // 该时间戳不是 activity，不重置 1us 静默窗口；它只为 commit 侧提供跨采样边界的
+    // settle proof。is_dcache=1 表示 DCache，0 表示 SBuffer。
+    function void note_global_stop_prepare_responder_sample(input bit is_dcache);
+        if (!global_stop_requested && global_stop_prepare_requested) begin
+            if (is_dcache) begin
+                global_stop_prepare_dcache_last_sample_time = $time;
+            end
+            else begin
+                global_stop_prepare_sbuffer_last_sample_time = $time;
+            end
+        end
+    endfunction:note_global_stop_prepare_responder_sample
+
+    // 抽象职责：判断两个 memory responder 是否均已跨过当前 quiet deadline 的真实
+    // sample。仅 real-dispatch 生命周期启用该约束；software-only directed sequence
+    // 没有 DCache/SBuffer responder，必须保留既有的立即 stop 语义。
+    function bit global_stop_prepare_responder_samples_settled();
+        time quiet_deadline;
+
+        if (!memblock_sync_pkg::dispatch_real_smoke_active) begin
+            return 1'b1;
+        end
+        quiet_deadline = global_stop_prepare_last_activity_time +
+                         MEMBLOCK_GLOBAL_STOP_PREPARE_QUIET_TIME;
+        return global_stop_prepare_dcache_last_sample_time >= quiet_deadline &&
+               global_stop_prepare_sbuffer_last_sample_time >= quiet_deadline;
+    endfunction:global_stop_prepare_responder_samples_settled
+
+    function bit is_global_stop_prepare_requested();
+        return global_stop_prepare_requested;
+    endfunction:is_global_stop_prepare_requested
+
+    // 抽象职责：把主表完成转换为两阶段 global stop。第一阶段只启动 1us 静默窗口；
+    // 第二阶段确认 UID/公共队列仍收敛且 DCache/SBuffer 未报告新 activity 后才提交 stop。
+    // 这样 responder 可以在 prepare 期间继续接收 DUT 内部尾请求，不能在此函数中等待或清队列。
     function void request_global_stop_if_done();
-        if (transaction_done() && runtime_drain_complete()) begin
+        if (global_stop_requested) begin
+            return;
+        end
+
+        if (!transaction_done() || !runtime_drain_complete()) begin
+            reset_global_stop_prepare();
+            return;
+        end
+
+        // 软件定向 sequence 不启动 memory-facing responder；对该拓扑保留原先在
+        // transaction/runtime drain 同拍提交 global stop 的行为，避免把无消费者的
+        // 1us settle 窗口变成永久等待。
+        if (!memblock_sync_pkg::dispatch_real_smoke_active) begin
             global_stop_requested = 1'b1;
+            return;
+        end
+
+        if (!global_stop_prepare_requested) begin
+            global_stop_prepare_requested = 1'b1;
+            global_stop_prepare_last_activity_time = $time;
+            global_stop_prepare_dcache_last_sample_time = 0;
+            global_stop_prepare_sbuffer_last_sample_time = 0;
+            `uvm_info("COMMON_DATA",
+                      $sformatf("global stop prepare started at time=%0t; require %0t quiet memory-responder window",
+                                $time, MEMBLOCK_GLOBAL_STOP_PREPARE_QUIET_TIME),
+                      UVM_LOW)
+            return;
+        end
+
+        if (($time - global_stop_prepare_last_activity_time) >=
+                MEMBLOCK_GLOBAL_STOP_PREPARE_QUIET_TIME &&
+            global_stop_prepare_responder_samples_settled()) begin
+            global_stop_requested = 1'b1;
+            `uvm_info("COMMON_DATA",
+                      $sformatf("global stop committed after %0t quiet memory-responder window",
+                                MEMBLOCK_GLOBAL_STOP_PREPARE_QUIET_TIME),
+                      UVM_LOW)
         end
     endfunction:request_global_stop_if_done
 
@@ -6312,13 +6429,21 @@ class common_data_transaction extends uvm_object;
     function void end_test_check();
         int unsigned uid;
 
-        memblock_sync_pkg::dispatch_monitor_capture_en = 1'b0;
         if (memblock_sync_pkg::raw_monitor_queue_size() != 0) begin
             `uvm_error("COMMON_DATA",
                        $sformatf("raw monitor queues are not drained at end_test_check: size=%0d",
                                  memblock_sync_pkg::raw_monitor_queue_size()))
         end
+        // PMA/PMP CSR FIFO 的正常 consumer 是下一次 request-fire；terminal 后没有
+        // 下一笔请求时它必须保留到最终审计报错，不能用它反向阻塞 global stop，也不能
+        // 在结束路径 delete。这样能同时保留语义可见性与 responder 自然退出。
+        if (memblock_sync_pkg::raw_pma_pmp_csr_write_q.size() != 0) begin
+            `uvm_error("COMMON_DATA",
+                       $sformatf("PMA/PMP CSR write FIFO is not drained at end_test_check: size=%0d",
+                                 memblock_sync_pkg::raw_pma_pmp_csr_write_q.size()))
+        end
         if (main_trans_num == 0) begin
+            memblock_sync_pkg::dispatch_monitor_capture_en = 1'b0;
             return;
         end
         if (next_uid != main_trans_num) begin
@@ -6374,6 +6499,9 @@ class common_data_transaction extends uvm_object;
         if (!runtime_drain_complete()) begin
             `uvm_error("COMMON_DATA", "runtime drain predicate is not complete at end_test_check")
         end
+        // 中文注释：最终检查必须先读取所有 raw queue；关闭 capture 只发生在全部
+        // responder/drain 已完成之后，不能让最后一拍 monitor event 被静默丢弃。
+        memblock_sync_pkg::dispatch_monitor_capture_en = 1'b0;
     endfunction:end_test_check
 
 endclass:common_data_transaction

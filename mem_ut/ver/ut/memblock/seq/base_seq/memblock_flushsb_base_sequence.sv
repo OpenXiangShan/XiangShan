@@ -68,6 +68,10 @@ task memblock_flushsb_base_sequence::body();
                       UVM_LOW)
             break;
         end
+        if (data.is_global_stop_prepare_requested()) begin
+            wait_clock_tick();
+            continue;
+        end
         wait_clock_tick();
         if (data.is_global_stop_requested()) begin
             `uvm_info(get_type_name(),
@@ -75,6 +79,9 @@ task memblock_flushsb_base_sequence::body();
                                 cycle_count),
                       UVM_LOW)
             break;
+        end
+        if (data.is_global_stop_prepare_requested()) begin
+            continue;
         end
         if (service_vif.rst_n !== 1'b1 ||
             memblock_sync_pkg::reset_backend_done !== 1'b1 ||
