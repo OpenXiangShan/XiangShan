@@ -40,6 +40,7 @@ SCENARIOS = (
     "sbuffer-timeout",
     "mmio-contracts",
     "cbo-zero-contracts",
+    "wfi-safety",
     "reset-recovery",
     "vector-load",
     "vector-split-load",

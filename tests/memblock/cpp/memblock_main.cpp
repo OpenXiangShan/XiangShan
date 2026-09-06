@@ -6136,6 +6136,154 @@ int run_cbo_zero_contracts(int argc, char **argv)
     return 0;
 }
 
+int run_wfi_safety(int argc, char **argv)
+{
+    constexpr unsigned response_delay = 256;
+    constexpr unsigned unsafe_window = 64;
+
+    memblock::Environment dcache(argc, argv);
+    constexpr std::uint64_t dcache_base =
+        memblock::kDefaultMemoryBase + 0x3a0000;
+    dcache.memory().fill_incrementing(dcache_base, 64, 0x47);
+    dcache.configure_backpressure(0x6a09e667f3bcc909ULL, true);
+    if (!dcache.reset() || !dcache.set_wfi(true) ||
+        !dcache.run_until_wfi_safe(256) || !dcache.set_wfi(false) ||
+        !dcache.run_cycles(4) || dcache.wfi_safe()) {
+        std::cerr << "MEMBLOCK_WFI_SAFETY_FAIL cycle=" << dcache.cycle()
+                  << " phase=idle-handshake reason=" << dcache.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction dcache_load{
+        .address = dcache_base + 24,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 180,
+        .lane = 0,
+    };
+    const std::uint64_t dcache_requests_before = dcache.tilelink_requests();
+    dcache.expect_load(dcache_load);
+    dcache.force_next_dcache_response_delay(response_delay);
+    if (!dcache.enqueue_load(dcache_load) ||
+        !dcache.issue_load(dcache_load, 2048) ||
+        !dcache.run_until_dcache_requests(dcache_requests_before + 1, 4096) ||
+        !dcache.set_wfi(true) ||
+        !dcache.require_wfi_unsafe(unsafe_window) ||
+        !dcache.run_until_wfi_safe(4096) ||
+        !dcache.set_wfi(false) || !dcache.run_cycles(4) || dcache.wfi_safe() ||
+        !dcache.run_until_complete(4096) ||
+        !dcache.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_WFI_SAFETY_FAIL cycle=" << dcache.cycle()
+                  << " phase=dcache-drain reason=" << dcache.error()
+                  << " dcache_requests=" << dcache.tilelink_requests()
+                  << " writebacks=" << dcache.writebacks() << '\n';
+        return 1;
+    }
+
+    memblock::Environment ptw(argc, argv);
+    constexpr std::uint64_t ptw_virtual = 0x5003a000ULL;
+    constexpr std::uint64_t ptw_physical = 0x9003a000ULL;
+    constexpr std::uint64_t ptw_root = 0x97010000ULL;
+    ptw.memory().fill_incrementing(ptw_physical, 64, 0x6d);
+    ptw.configure_backpressure(0xbb67ae8584caa73bULL, true);
+    if (!ptw.reset() ||
+        !ptw.map_sv39_4k(ptw_virtual, ptw_physical, ptw_root) ||
+        !ptw.activate_sv39(ptw_root)) {
+        std::cerr << "MEMBLOCK_WFI_SAFETY_FAIL cycle=" << ptw.cycle()
+                  << " phase=ptw-configuration reason=" << ptw.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction ptw_load{
+        .address = ptw_virtual + 8,
+        .oracle_address = ptw_physical + 8,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 181,
+        .lane = 1,
+    };
+    const std::uint64_t ptw_requests_before = ptw.ptw_requests();
+    const std::uint64_t ptw_dcache_before = ptw.tilelink_requests();
+    ptw.expect_load(ptw_load);
+    ptw.force_next_ptw_response_delay(response_delay);
+    if (!ptw.enqueue_load(ptw_load) || !ptw.issue_load(ptw_load, 2048) ||
+        !ptw.run_until_ptw_requests(ptw_requests_before + 1, 4096) ||
+        !ptw.set_wfi(true) || !ptw.require_wfi_unsafe(unsafe_window) ||
+        !ptw.run_until_wfi_safe(4096) ||
+        ptw.tilelink_requests() != ptw_dcache_before ||
+        !ptw.set_wfi(false) || !ptw.run_cycles(4) || ptw.wfi_safe() ||
+        !ptw.run_until_complete(8192) ||
+        !ptw.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_WFI_SAFETY_FAIL cycle=" << ptw.cycle()
+                  << " phase=ptw-drain reason=" << ptw.error()
+                  << " ptw_requests=" << ptw.ptw_requests()
+                  << " dcache_requests=" << ptw.tilelink_requests() << '\n';
+        return 1;
+    }
+
+    memblock::Environment uncache(argc, argv);
+    constexpr std::uint64_t mmio_virtual = 0x5003b000ULL;
+    constexpr std::uint64_t mmio_physical = 0x9003b000ULL;
+    constexpr std::uint64_t mmio_root = 0x97014000ULL;
+    uncache.memory().fill_incrementing(mmio_physical, 64, 0x93);
+    uncache.configure_backpressure(0x3c6ef372fe94f82bULL, true);
+    if (!uncache.reset() ||
+        !uncache.map_sv39_4k(
+            mmio_virtual, mmio_physical, mmio_root,
+            true, true, false, false, false, true) ||
+        !uncache.activate_sv39(mmio_root)) {
+        std::cerr << "MEMBLOCK_WFI_SAFETY_FAIL cycle=" << uncache.cycle()
+                  << " phase=uncache-configuration reason="
+                  << uncache.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction mmio_load{
+        .address = mmio_virtual + 16,
+        .oracle_address = mmio_physical + 16,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 182,
+        .lane = 2,
+        .expected_debug_is_mmio = true,
+        .expected_debug_is_ncio = false,
+        .expected_debug_is_perf_cnt = false,
+    };
+    const std::uint64_t uncache_requests_before = uncache.uncache_requests();
+    uncache.expect_load(mmio_load);
+    uncache.force_next_uncache_response_delay(response_delay);
+    if (!uncache.set_rob_head(mmio_load.rob, mmio_load.rob_flag) ||
+        !uncache.enqueue_load(mmio_load) ||
+        !uncache.issue_load(mmio_load, 2048) ||
+        !uncache.wait_for_mmio_request(mmio_load.rob, mmio_load.rob_flag, 4096) ||
+        uncache.uncache_requests() != uncache_requests_before + 1 ||
+        uncache.uncache_outstanding_requests() != 1 ||
+        !uncache.set_wfi(true) ||
+        !uncache.require_wfi_unsafe(unsafe_window) ||
+        !uncache.run_until_wfi_safe(4096) ||
+        !uncache.set_wfi(false) || !uncache.run_cycles(4) ||
+        uncache.wfi_safe() || !uncache.run_until_complete(4096) ||
+        !uncache.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_WFI_SAFETY_FAIL cycle=" << uncache.cycle()
+                  << " phase=uncache-drain reason=" << uncache.error()
+                  << " uncache_requests=" << uncache.uncache_requests()
+                  << " uncache_outstanding="
+                  << uncache.uncache_outstanding_requests() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_WFI_SAFETY_PASS"
+              << " cycle=" << dcache.cycle() + ptw.cycle() + uncache.cycle()
+              << " response_delay=" << response_delay
+              << " unsafe_window=" << unsafe_window
+              << " idle_safe=1 dcache_safe=1 ptw_safe=1 uncache_safe=1"
+              << " dcache_requests=" << dcache.tilelink_requests()
+              << " ptw_requests=" << ptw.ptw_requests()
+              << " uncache_requests=" << uncache.uncache_requests()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_reset_recovery(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -19945,6 +20093,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "cbo-zero-contracts") {
             return run_cbo_zero_contracts(argc, argv);
+        }
+        if (options.test == "wfi-safety") {
+            return run_wfi_safety(argc, argv);
         }
         if (options.test == "reset-recovery") {
             return run_reset_recovery(argc, argv);

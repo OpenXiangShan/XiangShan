@@ -1027,6 +1027,7 @@ public:
         random_backpressure_ = enabled;
         latency_profile_ = latency_profile;
         response_latency_stats_ = {};
+        forced_next_response_delay_.reset();
         force_a_stall_ = enabled;
         force_e_stall_ = enabled;
     }
@@ -1035,6 +1036,11 @@ public:
     {
         inject_denied_ = denied;
         inject_corrupt_ = corrupt;
+    }
+
+    void force_next_response_delay(unsigned cycles)
+    {
+        forced_next_response_delay_ = cycles;
     }
 
     void drive(UTMemBlock &dut)
@@ -1616,6 +1622,12 @@ private:
 
     unsigned response_delay(bool first_beat)
     {
+        if (first_beat && forced_next_response_delay_) {
+            const unsigned delay = *forced_next_response_delay_;
+            forced_next_response_delay_.reset();
+            response_latency_stats_.sample(delay);
+            return delay;
+        }
         if (!random_backpressure_) {
             return 0;
         }
@@ -1683,6 +1695,7 @@ private:
     bool d_presenting_ = false;
     bool inject_denied_ = false;
     bool inject_corrupt_ = false;
+    std::optional<unsigned> forced_next_response_delay_;
     std::uint64_t request_stall_cycles_ = 0;
     std::uint64_t response_delay_cycles_ = 0;
     std::string error_;
@@ -3267,6 +3280,11 @@ public:
     void inject_next_dcache_response_error(bool denied, bool corrupt)
     {
         memory_agent_.inject_next_response_error(denied, corrupt);
+    }
+
+    void force_next_dcache_response_delay(unsigned cycles)
+    {
+        memory_agent_.force_next_response_delay(cycles);
     }
 
     void inject_next_uncache_response_error(bool denied, bool corrupt)
@@ -5619,6 +5637,47 @@ public:
         return check_components();
     }
 
+    bool wfi_safe()
+    {
+        dut_.RefreshComb();
+        return dut_.io_wfi_wfiSafe.B();
+    }
+
+    bool require_wfi_unsafe(unsigned cycles)
+    {
+        for (unsigned elapsed = 0; elapsed < cycles; ++elapsed) {
+            dut_.RefreshComb();
+            if (dut_.io_wfi_wfiSafe.B()) {
+                std::ostringstream message;
+                message << "wfiSafe asserted while a manager response was pending"
+                        << " elapsed=" << elapsed;
+                error_ = message.str();
+                return false;
+            }
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool run_until_wfi_safe(unsigned timeout = 4096)
+    {
+        for (unsigned elapsed = 0; elapsed < timeout; ++elapsed) {
+            dut_.RefreshComb();
+            if (dut_.io_wfi_wfiSafe.B()) {
+                return check_components();
+            }
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        error_ = "timed out waiting for wfiSafe after manager drain";
+        return false;
+    }
+
     bool enqueue_load(const LoadTransaction &transaction)
     {
         if (!wait_for_enqueue_capacity(1, 0)) {
@@ -6580,6 +6639,24 @@ public:
         }
         if (ptw_agent_.request_count() < target) {
             error_ = "timed out waiting for page-table walk request";
+            return false;
+        }
+        return check_components();
+    }
+
+    bool run_until_dcache_requests(
+        std::uint64_t target, unsigned timeout = 4096)
+    {
+        for (unsigned elapsed = 0;
+             elapsed < timeout && memory_agent_.request_count() < target;
+             ++elapsed) {
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        if (memory_agent_.request_count() < target) {
+            error_ = "timed out waiting for target DCache request count";
             return false;
         }
         return check_components();

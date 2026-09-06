@@ -685,6 +685,24 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("reset-recovery", makefile)
         self.assertIn("account_lq_cancellation", main)
 
+    def test_wfi_safety_drains_each_memory_manager_before_safe(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
+        for contract in (
+            "force_next_dcache_response_delay",
+            "force_next_ptw_response_delay",
+            "force_next_uncache_response_delay",
+            "require_wfi_unsafe",
+            "run_until_wfi_safe",
+            "wfi-safety",
+            "idle_safe=1 dcache_safe=1 ptw_safe=1 uncache_safe=1",
+            "response_delay=",
+            "unsafe_window=",
+        ):
+            self.assertIn(contract, environment + main + makefile + benchmark)
+
     def test_mmio_contract_has_pbmt_io_mapping_and_three_cycle_boundary_test(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
