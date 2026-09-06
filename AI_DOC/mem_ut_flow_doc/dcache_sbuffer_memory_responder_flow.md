@@ -23,6 +23,11 @@ memory backend，但不共享协议 queue、timer、D hold、source、sink 或�
 | `aggregate snapshot` | DCache owner 一次发布的 resident/pending/drain 值型摘要 | `dcache_aggregate_snapshot` | API 只复制已发布快照 |
 | `corrupt mask` | 已观察到但不能正常比较的 overlay byte 范围 | `write_overlay_corrupt_byte_mask` | corrupt C response 置位；既有正常提交按 byte 清除 |
 | `overlay readiness` | RM 查询 committed overlay 前必须满足的单一 DCache 门槛 | `dcache_overlay_read_ready` | `valid=1 && ready=1` 才允许读取 |
+| `stop prepare` | UID 与公共 runtime work 已收敛、但尚未真正停止 responder 的准备阶段 | `global_stop_prepare_requested` | 由 `common_data_transaction` 启动 1us 静默窗口 |
+| `quiet window` | 从最近一次 responder activity 起连续没有新请求或进展的最小等待时间 | `global_stop_prepare_last_activity_time` | DCache/SBuffer activity 会重新起算；稳定卡住的 record 不会重复重置 |
+| `pre-stop A snapshot` | global stop 前已观察到、尚未完成 A.fire 的唯一 A payload | 两个 responder 的 `pre_stop_a_snapshot` | stop 后只允许这一笔保持 payload 一致后完成 fire |
+| `terminal idle` | responder 在所有瞬态协议 owner 收敛后发送的最后一个全零输出 item | 两个 responder 的 idle xaction | `send_*_xaction()` 完成最后 idle item 的交付后才置对应 `*_responder_done` |
+| `drain audit` | responder 结束路径的只读残留检查 | `audit_*_responder_state()` 与 `audit_shared_memory_drain_state()` | 不清 queue；非空或未收敛状态报 `UVM_ERROR` |
 
 ## 2. 调用 Flow
 
@@ -260,9 +265,27 @@ warning。它不超时删除 record、不改变 overlay、global stop、pass/fai
 | 默认分布 | SMALL `1`，其它 `0`，即 `1..10` | SMALL `1`，其它 `0`，即 `1..10` |
 | E/sink | Grant 动态 sink，等待 GrantAck | 不使用 GrantAck sink |
 
-两通道在 `global_stop_requested` 后不再接受未握手的新 request，却必须 drain 已建立的 record、timer 与
-D hold。DCache 还必须等待 GrantAck、Hint、Probe/C assembly 收敛；Uncache 还必须等待 armed A 和
-`uncache_rsp_q` 清空。任何一侧自然退出都不应清另一个 responder 的 shared memory 或协议状态。
+两通道的停止分为以下顺序：
+
+1. 所有 UID terminal、公共 runtime queue/map 已收敛时，`request_global_stop_if_done()` 只进入
+   `global_stop_prepare_requested`，不会立刻关闭 DCache/SBuffer。
+2. prepare 期间，DCache 使用有限的 A/C/E/flush、response/probe/assembly/CBO/flush 摘要，SBuffer 使用
+   A、response queue/timer、D hold 和 pre-stop A 摘要。任何 A/B/C/D/E fire 或摘要变化都会刷新 1us
+   静默窗口；持续不变的 D hold 或 queue 不会每拍重新计时。周期性 FlushSb producer 与 DCache 随机 Probe
+   在 prepare 期间暂停创建新工作。
+3. 连续静默满 1us 后才置 `global_stop_requested`。两个 responder 不再接受 stop 后新出现的 A；若 A 在
+   stop 前已经可见，则只能通过 `pre_stop_a_snapshot` 的严格 payload 稳定性检查后完成那一次 A.fire。
+4. 所有本地 owner、response queue、timer、D hold 和 pre-stop snapshot 归零时，responder 先发送
+   `terminal idle`，随后执行本地 `drain audit`，再置 `dcache_responder_done` 或
+   `sbuffer_responder_done`。audit 不会调用 `clear_runtime_state()` 或 `.delete()`；残留状态只报
+   `UVM_ERROR` 并保留现场。
+5. 主 dispatch service 在两个 done 都置位后，额外运行一个完整 monitor service 边界，再检查 shared
+   write batch 与 DCache fragment observer；scenario 的 `end_test_check()` 最后检查 raw/status 并关闭
+   `dispatch_monitor_capture_en`。
+
+DCache 还必须等待 GrantAck、Hint、Probe/C assembly 收敛；Uncache 还必须等待 armed A 和
+`uncache_rsp_q` 清空。任何一侧自然退出都不应清另一个 responder 的 shared memory 或协议状态。reset 会
+取消尚未提交的 prepare timestamp，不能把 reset 前已经经过的时间继承到新 epoch。
 
 ## 7. 边界与修改类型总结
 

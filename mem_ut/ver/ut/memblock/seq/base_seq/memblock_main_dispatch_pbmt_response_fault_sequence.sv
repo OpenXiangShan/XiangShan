@@ -61,8 +61,7 @@ task memblock_main_dispatch_pbmt_response_fault_sequence::body();
 
     service_real_dispatch_flow();
     check_pbmt_response_fault_results();
-    data.end_test_check();
-    `uvm_info(get_type_name(), "PBMT response-fault main sequence completed", UVM_LOW)
+    `uvm_info(get_type_name(), "PBMT response-fault core service completed; final audit is owned by scenario lifecycle", UVM_LOW)
 endtask:body
 
 // 抽象职责：建立同一 S1 superpage 内的 A Load、B Store 和 C Store。A/B 使用相同

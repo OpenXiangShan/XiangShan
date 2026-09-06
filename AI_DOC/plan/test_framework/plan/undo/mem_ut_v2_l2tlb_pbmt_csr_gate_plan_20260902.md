@@ -2,6 +2,8 @@
 
 状态：`undo`，实现完成；real-DUT 联调被已确认的 V2 RTL X 传播缺陷阻塞。创建期门控、返回期 payload 冻结、software-only 闭环与 dynamic smoke 编译均已完成；不把未通过的 real-DUT smoke 或任何 PBMTE-on 压力日志作为本计划验收结果。
 
+执行补充（2026-09-06）：本计划使用的 real-dispatch responder 生命周期已补齐 global-stop 尾请求收敛。该补充不改变 PBMTE、PBMT、L2TLB token、live entry 或 CSR 的功能语义：UID terminal 和公共 runtime drain 后先进入 1us `stop prepare`；DCache/SBuffer 继续自然排空已存在的请求，任一真实 activity 重新计时；静默并跨过两个 responder sample 后才提交 global stop。stop 前可见而未 A.fire 的唯一 A 请求以 `pre-stop A snapshot` 冻结，stop 后仅允许相同 payload 完成一次握手。两个 responder 都交付 terminal idle、主 service 再运行一个 monitor 边界并执行只读 shared-memory audit 后，scenario 才执行 `end_test_check()` 并关闭 monitor capture。该补充同时保证后续 PBMT real-DUT 场景不会因 stop 截断尾部 DCache/SBuffer 流量或提前关闭 raw capture。
+
 本文定义 V2 `L2TLB_agent` 对 PBMT 的两阶段建模：首次创建 live entry 时，按 request-time C-2 CSR 的 PBMTE 决定是否允许生成非零 PBMT；已经保存非零 PBMT 的 entry 在后续返回时，按 response-visible C-2 CSR 的 PBMTE 叠加 S1 PF 或 S2 GPF。本文不修改 RTL、StoreUnit、StoreQueue、RM、scoreboard 或功能覆盖率；RM 对已完成 response payload 的读取和异常推导另立专项文档，不属于本计划实现范围。
 
 关联实现与证据：
@@ -432,7 +434,7 @@ vseq::body:
   等待 PBMTE 的 C-2 生效边界；确认 A 建立的 live entry 没有被删除。
   构造相同翻译上下文的指令 B，使其命中 A 建立的 live entry。
   等待 B response；检查 driver/UID debug 记录：PBMT 保持非零，目标 S1 PF 或 S2 GPF 被置位。
-  正常 global stop 后等待 responder 自然 drain 并退出。
+  正常 global stop 后先经过 1us responder quiet window；随后等待 DCache/SBuffer 的 terminal idle、一个额外 monitor service 边界和只读 shared-memory drain audit，再执行最终检查并退出。
 ```
 
 该 real-DUT 场景至少覆盖 S1 `mPBMTE:1->0`；VS-S1 `hPBMTE:1->0` 与 S2 `mPBMTE:1->0` 可作为同一 vseq 的子场景或后续 directed 变体，但都必须复用同一 CSR producer 与 response token 生命周期，不得另建第二个 L2TLB pending queue。

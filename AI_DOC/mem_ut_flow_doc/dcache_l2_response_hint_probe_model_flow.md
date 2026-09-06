@@ -23,6 +23,7 @@ DCache responder 内部生命周期；V2 主表/LSQ 的主动 CBO flow 仍保持
 | `CBO reservation` | CBO A.fire 为未来 CBOAck 预留的一笔统一 D response 容量 | `cbo_response_reserved` | A.fire 建立；direct miss 或 CBO Probe 完成时转换为 CBOAck record |
 | `Hint record` | 已和某条最终选出的 GrantData 绑定、等待本拍输出的 Hint sideband | `dcache_hint_q` | scheduler 选中 GrantData 时入队；`service_hint()` 单拍消费 |
 | `fire` | 上一拍 responder 驱动的 valid/ready 与当前 DUT 采样值同为 1 | `a_fire/b_fire/c_fire/d_fire/e_fire` | 只有 fire 可以创建、推进或释放协议状态 |
+| `pre-stop A snapshot` | global stop 前已经可见、尚未 A.fire 的唯一 coherent A payload | `pre_stop_a_snapshot`、`pre_stop_a_snapshot_valid` | 非 stop sample 首次看到未 fire A.valid 时冻结；A.fire、valid 撤销或 reset 时清除 |
 | `line record` | physical line 的唯一轻量 alias 生命周期记录；不是完整 L2 directory | `cached_line_by_addr[line_addr]` | GrantAck 后 ACTIVE；Probe、alias conflict、GrantAck 等阶段更新 |
 | `probe record` | 一笔 B Probe 的稳定请求身份和 target 权限 | `probe_record_q` | submit 时创建；合法 C reply 完成后删除 |
 | `probe token` | 测试框架内部唯一 Probe 标识，不在 C payload 中传输 | `dcache_probe_token_t`、`c_assembly_probe_token` | 建 record 时分配；两拍 ProbeAckData 到齐前保持不变 |
@@ -120,10 +121,17 @@ item；它不读取 monitor analysis port，也不修改 dispatch 主表、LSQ �
   `try_start_probe()` 按 batch 数量和 toB 权重建立互不重复 record；PROBE 状态由 snapshot 驱动固定 toN；
   最后叠加本拍 Hint，并仅在 flush DONE 驱动 io_l2_flush_done=1。
 
-global stop：停止新的随机 Probe 和新 A 准入，只排空现有协议状态；CBO context/reservation/Probe 必须先
-自然收敛；若已经观察到 L2 flush request，
-仍必须先完成该 level handshake，不能提前退出。所有 queue、timer、D hold、GrantAck、Hint、Probe、
-C assembly、armed snapshot 与 flush state 收敛后发送最后一个 idle 并退出。
+global stop 分为 prepare 和 committed 两阶段。所有 UID terminal 且公共 runtime drain 后，
+`common_data_transaction` 先置 `global_stop_prepare_requested` 并从该拍开始计 1us；DCache 在每个
+responder sample 比较有限 lifecycle 摘要，并把 A/B/C/D/E fire、A/C/E/flush level、queue/timer/owner 的
+真实变化视为 activity，activity 到来即重新计时。稳定卡住的 record 不会每拍重复重置 timer。prepare 期间
+暂停新的随机 Probe，已有 A/B/C/D/E owner 继续自然推进；连续静默满 1us 才置
+`global_stop_requested`。此后停止新的随机 Probe 和 stop 后新出现的 A 准入，只排空现有协议状态。若非
+stop sample 已经观察到 A.valid、但 C/probe 优先级尚未让它 A.fire，先冻结 `pre_stop_a_snapshot`；stop 后
+仅当当前 A payload 仍与该 snapshot 完全一致时，才允许它打开一次 A.ready 并进入既有 D/E drain。没有此
+snapshot 的 stop 后 A.valid 仍 fail-fast。CBO context/reservation/Probe 必须先自然收敛；若已经观察到 L2
+flush request，仍必须先完成该 level handshake，不能提前退出。所有 queue、timer、D hold、GrantAck、Hint、
+Probe、C assembly、pre-stop A snapshot、armed snapshot 与 flush state 收敛后发送最后一个 idle 并退出。
 ```
 
 `response_visible_count` 在处理 A/C fire 前取得。因此本拍新建的 D response record 即使其 `eligible_cycle`
@@ -349,8 +357,10 @@ invalid 时递增 observer generation，reset 保持期间不重复递增。rese
 “DCache 当前为空”的真源。
 
 global stop 的退出条件包括：flush state 已回到 IDLE、无 queued/current D record、无运行 timer、无 GrantAck
-wait、无 Hint、无 B hold、`probe_record_q` 为空、无 C assembly/reservation、无 armed A/C snapshot 和当前
-未处理 A/C valid、无 CBO context/reservation/Probe。
+wait、无 Hint、无 B hold、`probe_record_q` 为空、无 C assembly/reservation、无 pre-stop A snapshot、无 armed
+A/C snapshot 和当前未处理 A/C valid、无 CBO context/reservation/Probe。pre-stop A snapshot 只能由 stop 前
+已经观察到的 A.valid 建立；它在 stop 后完成一次严格 payload 一致性检查和 A.fire 后清除，不能扩大为接受
+新的 post-stop request。
 已完成 GrantAck 的 ACTIVE line record 是历史状态，不阻止退出。
 
 本 flow 不拥有主表、LSQ admission、issue、writeback、commit/deq、redirect/replay、pass/fail 或 terminal。

@@ -40,8 +40,7 @@ task memblock_main_dispatch_manual_main_table_sequence::body();
                         data.main_trans_num),
               UVM_LOW)
     service_real_dispatch_flow();
-    data.end_test_check();
-    `uvm_info(get_type_name(), "real mixed dispatch smoke sequence completed", UVM_LOW)
+    `uvm_info(get_type_name(), "real mixed dispatch core service completed; final audit is owned by scenario lifecycle", UVM_LOW)
 endtask:body
 
 task memblock_main_dispatch_manual_main_table_sequence::build_directed_mixed_main_table();

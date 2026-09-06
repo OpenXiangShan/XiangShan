@@ -498,8 +498,7 @@ flushed uid重新开始；新launch创建新的`lsq_reservation_launch_epoch`，
 
 ### 8.2 Global stop 收敛
 
-`common_data_transaction::request_global_stop_if_done()`只有同时满足以下条件才置
-`global_stop_requested`：
+`common_data_transaction::request_global_stop_if_done()`先要求以下公共完成条件：
 
 - `terminal_done_uid >= main_trans_num`。
 - `cancel_record_q`为空，没有待应用software cancel。
@@ -507,8 +506,17 @@ flushed uid重新开始；新launch创建新的`lsq_reservation_launch_epoch`，
 - redirect anchor history和cancel snapshot history为空。
 - `raw_cancel_snapshot_q/raw_redirect_anchor_q`两条timing sideband raw queue为空。
 
-因此transaction terminal并不允许绕过迟到的cancel record/raw sideband。`end_test_check()`再次检查
-这些状态，防止测试在未对账时静默结束。
+满足这些条件后，函数先置 `global_stop_prepare_requested`，而不是同拍置
+`global_stop_requested`。prepare 期间主 issue route、周期 FlushSb 与新的随机 DCache Probe 暂停，
+但已经进入 DUT 或 responder 的 A/B/C/D/E、Probe、response 和 GrantAck 继续自然排空；DCache/SBuffer
+任一观察到真实进展都会重新起算 1us quiet window。只有窗口连续静默、且两个 responder 都已经跨过该
+quiet deadline 采样后，才提交 `global_stop_requested`。
+
+因此 transaction terminal 不会绕过迟到的 cancel record/raw sideband，也不会截断 stop 前尚未握手的
+memory 尾请求。global stop 后 responder 只允许已冻结的 pre-stop A snapshot 继续完成一次严格 payload
+一致的握手；无历史 snapshot 的新 A.valid 仍是协议错误。两个 responder 发布 terminal idle 后，主 service
+额外执行一个 monitor service 边界并审计 shared memory drain；scenario 最后调用 `end_test_check()` 检查
+raw/status 后才关闭 monitor capture，防止测试在未对账时静默结束。
 
 ### 8.3 `memblock_dispatch_real_cancel_reconcile_vseq`
 
