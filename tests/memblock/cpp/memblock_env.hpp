@@ -25,6 +25,7 @@ constexpr unsigned kScalarStoreLanes = 2;
 constexpr unsigned kVectorMemoryLanes = 2;
 constexpr unsigned kVirtualLoadQueueEntries = 72;
 constexpr unsigned kStoreQueueEntries = 56;
+constexpr unsigned kVectorUnitStrideMaxFlows = 2;
 // LsqEnqCtrl deliberately reserves the maximum dispatch width before it
 // asserts canAccept. Keep the software driver below the same watermark even
 // though the generated MemBlock top does not expose canAccept as an output.
@@ -381,6 +382,7 @@ struct VectorMemoryTransaction {
     std::int64_t stride = 0;
     VectorAddressingMode addressing = VectorAddressingMode::unit_stride;
     std::uint8_t eew = 0;
+    std::optional<std::uint8_t> vsew;
     std::uint8_t vl = 16;
     std::optional<std::uint8_t> expected_vl;
     std::uint8_t vstart = 0;
@@ -396,7 +398,7 @@ struct VectorMemoryTransaction {
     bool sq_flag = false;
     std::uint8_t pdest = 0;
     unsigned lane = 0;
-    std::uint8_t flow_num = 2;
+    std::uint8_t flow_num = kVectorUnitStrideMaxFlows;
     bool is_part_replay = false;
     std::uint16_t replay_mask = 0;
     std::uint8_t replay_mb_index = 0;
@@ -426,15 +428,23 @@ struct VectorMemoryTransaction {
     std::optional<bool> expected_debug_is_perf_cnt;
 };
 
+inline std::uint8_t vector_vsew(
+    const VectorMemoryTransaction &transaction)
+{
+    return transaction.vsew.value_or(transaction.eew);
+}
+
 inline std::uint16_t vector_fu_op_type(const VectorMemoryTransaction &transaction)
 {
+    if (transaction.eew > 3 || vector_vsew(transaction) > 3) {
+        throw std::logic_error("vector EEW/SEW encoding exceeds 64 bits");
+    }
     if (transaction.whole_register) {
         const bool legal_nf = transaction.nf == 0 || transaction.nf == 1 ||
             transaction.nf == 3 || transaction.nf == 7;
         if (transaction.segment || transaction.fault_only_first ||
             transaction.is_vleff ||
             transaction.addressing != VectorAddressingMode::unit_stride ||
-            transaction.eew > 3 ||
             !legal_nf) {
             throw std::logic_error(
                 "whole-register vector memory operation has invalid fields");
@@ -3068,6 +3078,8 @@ public:
         std::uint16_t active_elements;
         std::uint16_t fu_op_type;
         std::uint8_t eew;
+        std::uint8_t vsew;
+        std::uint8_t vlmul;
         std::uint8_t vl;
         std::uint8_t vstart;
         std::uint8_t vuop_idx;
@@ -3131,6 +3143,8 @@ public:
                 active_vector_elements(output_transaction),
                 vector_fu_op_type(transaction),
                 transaction.eew,
+                vector_vsew(transaction),
+                transaction.vlmul,
                 output_transaction.vl,
                 transaction.vstart,
                 transaction.vuop_idx,
@@ -3202,7 +3216,9 @@ public:
             writeback.rob_flag != expected.rob_flag ||
             vstart_mismatch ||
             ((!exception_progress) &&
-             (writeback.vsew != expected.eew || writeback.veew != expected.eew ||
+             (writeback.vsew != expected.vsew ||
+              writeback.veew != expected.eew ||
+              writeback.vlmul != expected.vlmul ||
               writeback.vl != expected.vl ||
               writeback.vuop_idx != expected.vuop_idx ||
               writeback.nf != expected.nf))) {
@@ -3341,7 +3357,9 @@ private:
                 << " pdest=" << static_cast<unsigned>(actual.pdest)
                 << " vl=" << static_cast<unsigned>(actual.vl)
                 << " vstart=" << static_cast<unsigned>(actual.vstart)
-                << " eew=" << static_cast<unsigned>(actual.veew);
+                << " sew/eew/lmul=" << static_cast<unsigned>(actual.vsew)
+                << '/' << static_cast<unsigned>(actual.veew) << '/'
+                << static_cast<unsigned>(actual.vlmul);
         if (expected != nullptr) {
             message << " expected_op=0x" << std::hex << expected->fu_op_type
                     << " expected_exception=0x" << expected->exception_mask
@@ -3359,6 +3377,10 @@ private:
                     << " expected_active=0x" << std::hex
                     << expected->active_elements
                     << " address=0x" << expected->address << std::dec
+                    << " expected_sew/eew/lmul="
+                    << static_cast<unsigned>(expected->vsew) << '/'
+                    << static_cast<unsigned>(expected->eew) << '/'
+                    << static_cast<unsigned>(expected->vlmul)
                     << " addressing="
                     << static_cast<unsigned>(expected->addressing)
                     << " stride=" << expected->stride
@@ -3480,7 +3502,7 @@ class Environment {
         issue.vl_wen = transaction.vl_wen;
         issue.vma = transaction.vma;
         issue.vta = transaction.vta;
-        issue.vsew = transaction.eew;
+        issue.vsew = vector_vsew(transaction);
         issue.vlmul = transaction.vlmul;
         issue.vm = transaction.vm;
         issue.vstart = transaction.vstart;
@@ -7581,49 +7603,8 @@ public:
         scalar_issue.sq_value = load.sq;
         scalar_issue.src = load.address;
 
-        generated::VectorMemoryIssue vector_issue;
-        vector_issue.fu_type = vector.store
-            ? kFuTypeVectorStore
-            : kFuTypeVectorLoad;
-        vector_issue.fu_op_type = vector_fu_op_type(vector);
-        vector_issue.vec_wen = !vector.store;
-        vector_issue.vma = vector.vma;
-        vector_issue.vta = vector.vta;
-        vector_issue.vsew = vector.eew;
-        vector_issue.vm = vector.vm;
-        vector_issue.vstart = vector.vstart;
-        vector_issue.veew = vector.eew;
-        vector_issue.pdest = vector.pdest;
-        vector_issue.rob_flag = vector.rob_flag;
-        vector_issue.rob_value = vector.rob;
-        vector_issue.lq_flag = vector.lq_flag;
-        vector_issue.lq_value = vector.lq;
-        vector_issue.sq_flag = vector.sq_flag;
-        vector_issue.sq_value = vector.sq;
-        vector_issue.flow_num = vector.flow_num;
-        vector_issue.is_part_replay = vector.is_part_replay;
-        vector_issue.replay_mask = vector.replay_mask;
-        vector_issue.replay_mb_index = vector.replay_mb_index;
-        for (unsigned byte = 0; byte < 8; ++byte) {
-            vector_issue.src[0][byte] = static_cast<unsigned char>(
-                vector.address >> (8 * byte));
-        }
-        vector_issue.src[2] = vector.data;
-        if (vector.addressing == VectorAddressingMode::strided) {
-            const auto stride = static_cast<std::uint64_t>(vector.stride);
-            for (unsigned byte = 0; byte < 8; ++byte) {
-                vector_issue.src[1][byte] = static_cast<unsigned char>(
-                    stride >> (8 * byte));
-            }
-        } else if (
-            vector.addressing == VectorAddressingMode::indexed_unordered ||
-            vector.addressing == VectorAddressingMode::indexed_ordered) {
-            vector_issue.src[1] = vector.index;
-        }
-        vector_issue.src[3][0] = static_cast<unsigned char>(vector.mask_bits);
-        vector_issue.src[3][1] = static_cast<unsigned char>(
-            vector.mask_bits >> 8);
-        vector_issue.src[4][0] = vector.vl;
+        const generated::VectorMemoryIssue vector_issue =
+            make_vector_memory_issue(vector);
 
         bool scalar_pending = true;
         bool vector_pending = true;

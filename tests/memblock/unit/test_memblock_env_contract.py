@@ -784,6 +784,51 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main)
 
+    def test_vector_unit_stride_lmul_emul_matrix_matches_rtl_contract(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        rename = (
+            REPO_ROOT / "src/main/scala/xiangshan/backend/rename/Rename.scala"
+        ).read_text()
+        split = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VSplit.scala"
+        ).read_text()
+
+        configurations = []
+        uops = 0
+        for eew in range(4):
+            for vsew in range(4):
+                for lmul_log2 in range(-3, 4):
+                    emul_log2 = eew - vsew + lmul_log2
+                    if lmul_log2 < vsew - 3 or not -3 <= emul_log2 <= 3:
+                        continue
+                    configurations.append((eew, vsew, lmul_log2, emul_log2))
+                    uops += 1 << max(emul_log2, 0)
+        self.assertEqual(len(configurations), 78)
+        self.assertEqual(uops, 202)
+
+        for contract in (
+            "kVectorUnitStrideMaxFlows = 2",
+            "std::optional<std::uint8_t> vsew",
+            "vector_vsew(transaction)",
+            "writeback.vsew != expected.vsew",
+            "writeback.veew != expected.eew",
+            "writeback.vlmul != expected.vlmul",
+            "issue.vsew = vector_vsew(transaction)",
+            "make_vector_memory_issue(vector)",
+            "lmul_configurations != 78",
+            "lmul_load_uops != 404",
+            "lmul_store_uops != 202",
+            "lmul_matrix.lq_allocated() != 808",
+            "lmul_matrix.sq_allocated() != 404",
+            '<< " lmul_configurations="',
+        ):
+            self.assertIn(contract, environment + main)
+        self.assertIn("VecMemUnitStrideMaxFlowNum.U", rename)
+        self.assertIn(
+            "EewLog2(s0_eew) - s0_sew + s0_lmul", split
+        )
+
     def test_vector_whole_register_matrix_matches_rtl_contract(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

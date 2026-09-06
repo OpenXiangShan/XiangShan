@@ -100,7 +100,7 @@ The correctness contracts are cataloged separately in
 `docs/ORACLES.md`. `docs/VERIFICATION_PLAN.md` contains the complete test-point
 inventory, including explicit planned gaps for broader device/error ordering,
 reservation interference and full atomic alignment crosses, CMO CLEAN/FLUSH/INVAL,
-remaining ordinary LMUL/EMUL and segment combinations, remaining PMP/PMA matrices,
+remaining non-unit-stride LMUL/EMUL and segment combinations, remaining PMP/PMA matrices,
 coherence protocol negatives, error injection, cross-cause/vector exception
 priority, and four-state behavior. A passing
 cacheable mixed campaign must not be interpreted as verification of those
@@ -718,6 +718,16 @@ indexed loads. Unit/strided younger uops issue first; indexed uops carry
 independent index vectors and obey ordered acceptance. Cross-uop masks and a
 tail element are selected by global element number. All six writebacks are
 checked against uop-aware addresses from the independent byte-memory model.
+
+The same scenario now exhausts the legal ordinary unit-stride configuration
+space for ELEN=64: all four EEWs, all four SEWs, and LMUL from fractional 1/8
+through 8 are filtered by `LMUL >= SEW/ELEN` and
+`EMUL = EEW/SEW * LMUL` remaining in fractional 1/8 through 8. The 78 legal
+configurations generate 202 load uops, 202 store uops, and 202 readback uops.
+The driver carries SEW independently from EEW, checks returned
+`vsew/veew/vlmul`, and mirrors Rename's conservative allocation of two LSQ
+flows per unit-stride uop. The run requires exact retirement of 808 LQ and 404
+SQ entries across queue and ROB pointer wraps.
 
 An additional indexed matrix crosses ordered/unordered addressing with every
 EEW for load, store, and load readback. Direct loads duplicate one index to
