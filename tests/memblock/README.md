@@ -573,8 +573,11 @@ after redirect. The data path crosses all eight banks with spread single-bit
 and adjacent double-bit masks. With this configuration's explicit
 `EnableAccurateLoadError=false`, every data case must report the exact address
 to BEU without cancellation and write back the independently predicted XOR
-result; disabling injection must restore clean data. The phase finishes only
-when all 18 injected cases have reported and both LQ and SQ satisfy
+result; disabling injection must restore clean data. A separate same-cycle
+pair injects bank 2 while a bank-5 companion remains clean, checks both load
+lanes independently, and proves one-shot auto-clear through clean survivors
+without an explicit disable write. The phase finishes only when all 19
+injected cases have reported and both LQ and SQ satisfy
 `allocated = dequeued + canceled`.
 
 `dcache-coherence` fills a clean line, invalidates it with a manager Probe,

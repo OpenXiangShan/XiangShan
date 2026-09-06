@@ -6444,6 +6444,7 @@ int run_dcache_errors(int argc, char **argv)
     std::uint64_t physical_ecc_reports = 0;
     unsigned tag_ecc_cases = 0;
     unsigned data_ecc_cases = 0;
+    unsigned concurrent_ecc_cases = 0;
     auto run_tag_ecc_error = [&](std::uint64_t address, std::uint64_t control,
                                  std::uint8_t control_rob,
                                  std::uint8_t control_sq, std::uint8_t load_rob,
@@ -6686,6 +6687,132 @@ int run_dcache_errors(int argc, char **argv)
             ++data_ecc_cases;
         }
     }
+
+    constexpr unsigned concurrent_target_bank = 2;
+    constexpr unsigned concurrent_companion_bank = 5;
+    constexpr std::uint64_t concurrent_error_mask = 1ULL << 23;
+    const std::uint64_t concurrent_target_address =
+        data_address + concurrent_target_bank * 8;
+    const std::uint64_t concurrent_companion_address =
+        data_address + concurrent_companion_bank * 8;
+    if (!write_dcache_ctrl(
+            dcache_ctrl_mask_bank0 + concurrent_target_bank * 8,
+            concurrent_error_mask, 151, 54, "data-ecc-concurrent-mask") ||
+        !write_dcache_ctrl(
+            dcache_ctrl_base,
+            data_control_for_bank(concurrent_target_bank), 152, 55,
+            "data-ecc-concurrent-control")) {
+        return 1;
+    }
+    const std::vector<memblock::LoadTransaction> concurrent_loads{
+        {
+            .address = concurrent_target_address,
+            .op = memblock::LoadOp::ld,
+            .rob = 153,
+            .lq = 55,
+            .pdest = 120,
+            .lane = 0,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        },
+        {
+            .address = concurrent_companion_address,
+            .op = memblock::LoadOp::ld,
+            .rob = 154,
+            .lq = 56,
+            .pdest = 121,
+            .lane = 1,
+            .expected_debug_is_mmio = false,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        },
+    };
+    ecc_environment.expect_load_data(
+        concurrent_loads[0],
+        ecc_environment.bus_expected_load(
+            concurrent_target_address, memblock::LoadOp::ld) ^
+            concurrent_error_mask);
+    ecc_environment.expect_load_data(
+        concurrent_loads[1],
+        ecc_environment.bus_expected_load(
+            concurrent_companion_address, memblock::LoadOp::ld));
+    const auto concurrent_feedback_before =
+        ecc_environment.scalar_load_feedback_stats();
+    const auto concurrent_errors_before = ecc_environment.bus_error_stats();
+    const std::uint64_t concurrent_requests_before =
+        ecc_environment.tilelink_requests();
+    const std::uint64_t concurrent_writebacks_before =
+        ecc_environment.writebacks();
+    if (!ecc_environment.set_rob_head(
+            concurrent_loads[0].rob, concurrent_loads[0].rob_flag) ||
+        !ecc_environment.enqueue_load_batch(concurrent_loads, {0, 1}) ||
+        !ecc_environment.issue_load_batch(concurrent_loads, 512, true) ||
+        !ecc_environment.run_until_complete(4096) ||
+        !ecc_environment.run_cycles(16) ||
+        !ecc_environment.run_until_lq_retired(1024)) {
+        std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                  << ecc_environment.cycle()
+                  << " phase=data-ecc-concurrent-execution reason="
+                  << ecc_environment.error() << '\n';
+        return 1;
+    }
+    const auto concurrent_feedback_after =
+        ecc_environment.scalar_load_feedback_stats();
+    const auto concurrent_errors_after = ecc_environment.bus_error_stats();
+    std::uint64_t concurrent_wakeups = 0;
+    std::uint64_t concurrent_cancels = 0;
+    for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+        concurrent_wakeups += concurrent_feedback_after.wakeups[lane] -
+            concurrent_feedback_before.wakeups[lane];
+        concurrent_cancels += concurrent_feedback_after.ld2_cancels[lane] -
+            concurrent_feedback_before.ld2_cancels[lane];
+    }
+    const bool both_load_lanes_woke =
+        concurrent_feedback_after.wakeups[0] >
+            concurrent_feedback_before.wakeups[0] &&
+        concurrent_feedback_after.wakeups[1] >
+            concurrent_feedback_before.wakeups[1];
+    if (!both_load_lanes_woke || concurrent_cancels != 0 ||
+        concurrent_errors_after.dcache_reports !=
+            concurrent_errors_before.dcache_reports + 1 ||
+        concurrent_errors_after.last_dcache_address !=
+            concurrent_target_address ||
+        ecc_environment.tilelink_requests() != concurrent_requests_before ||
+        ecc_environment.writebacks() != concurrent_writebacks_before + 2) {
+        std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
+                  << ecc_environment.cycle()
+                  << " phase=data-ecc-concurrent-classification"
+                  << " wakeups=" << concurrent_wakeups
+                  << " cancels=" << concurrent_cancels
+                  << " reports_before="
+                  << concurrent_errors_before.dcache_reports
+                  << " reports_after="
+                  << concurrent_errors_after.dcache_reports
+                  << " error_address=0x" << std::hex
+                  << concurrent_errors_after.last_dcache_address
+                  << " expected_address=0x" << concurrent_target_address
+                  << std::dec
+                  << " requests_before=" << concurrent_requests_before
+                  << " requests_after="
+                  << ecc_environment.tilelink_requests()
+                  << " writebacks_before=" << concurrent_writebacks_before
+                  << " writebacks_after=" << ecc_environment.writebacks()
+                  << '\n';
+        return 1;
+    }
+    physical_ecc_wakeups += concurrent_wakeups;
+    physical_ecc_reports += 1;
+    ++data_ecc_cases;
+    ++concurrent_ecc_cases;
+    if (!run_clean_load(
+            concurrent_target_address, 155, 57, 122, 2,
+            "data-ecc-concurrent-target-survivor") ||
+        !run_clean_load(
+            concurrent_companion_address, 156, 58, 123, 0,
+            "data-ecc-concurrent-companion-survivor")) {
+        return 1;
+    }
     if (physical_ecc_reports != data_ecc_cases + tag_ecc_cases) {
         std::cerr << "MEMBLOCK_DCACHE_ERRORS_FAIL cycle="
                   << ecc_environment.cycle()
@@ -6722,6 +6849,7 @@ int run_dcache_errors(int argc, char **argv)
               << " corrupt_cancels=" << corrupt_cancels
               << " tag_ecc=" << tag_ecc_cases
               << " data_ecc=" << data_ecc_cases
+              << " concurrent_ecc=" << concurrent_ecc_cases
               << " ecc_error_reports="
               << physical_ecc_reports
               << " ecc_wakeups=" << physical_ecc_wakeups
