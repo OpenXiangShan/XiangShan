@@ -219,6 +219,7 @@ make single-load PICKER="$PICKER" JOBS=8
 make load-feedback PICKER="$PICKER" JOBS=8
 make topdown-contracts PICKER="$PICKER" JOBS=8
 make l2-flush-contracts PICKER="$PICKER" JOBS=8
+make top-control-contracts PICKER="$PICKER" JOBS=8
 make memory-violation PICKER="$PICKER" JOBS=8
 make rar-violation PICKER="$PICKER" JOBS=8
 make ifetch-prefetch PICKER="$PICKER" JOBS=8
@@ -417,6 +418,12 @@ enable must pass through combinationally, while every L2 completion input must
 appear at the backend bypass exactly one cycle later. The timing oracle remains
 active during every monitored functional-test cycle; the focused test covers
 all four enable/completion combinations and repeated rising/falling edges.
+`top-control-contracts` checks the remaining simple top-level control bridges.
+Hart ID and power-down enable are combinational; reset vector, CPU halted, and
+CPU critical error must appear exactly one cycle later. The focused test covers
+all eight power/halt/error combinations plus eight independent 6-bit hart-ID
+and 48-bit reset-vector patterns. These timing oracles also remain active in
+every monitored functional scenario.
 `random-mixed` keeps constant-space lane counters and
 requires both canceled and uncanceled wakeups on every lane. When hardware
 stride prefetch is enabled, that backend gate is frozen before training begins

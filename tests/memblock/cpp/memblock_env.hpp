@@ -5834,6 +5834,50 @@ public:
         return l2_flush_checks_;
     }
 
+    void drive_top_controls(
+        std::uint8_t hart_id, std::uint64_t reset_vector,
+        bool power_down, bool cpu_halted, bool cpu_critical_error)
+    {
+        dut_.io_hartId.ImmSet(hart_id & 0x3fU);
+        dut_.io_outer_reset_vector.ImmSet(
+            reset_vector & ((std::uint64_t{1} << 48) - 1U));
+        dut_.io_ooo_to_mem_csrCtrl_power_down_enable.ImmSet(power_down);
+        dut_.io_ooo_to_mem_backendToTopBypass_cpuHalted.ImmSet(cpu_halted);
+        dut_.io_ooo_to_mem_backendToTopBypass_cpuCriticalError.ImmSet(
+            cpu_critical_error);
+    }
+
+    std::uint8_t backend_hart_id()
+    {
+        return static_cast<std::uint8_t>(
+            dut_.io_mem_to_ooo_topToBackendBypass_hartId.U());
+    }
+
+    std::uint64_t inner_reset_vector()
+    {
+        return dut_.io_inner_reset_vector.U();
+    }
+
+    bool outer_power_down_enabled()
+    {
+        return dut_.io_outer_power_down_en.B();
+    }
+
+    bool outer_cpu_halted()
+    {
+        return dut_.io_outer_cpu_halt.B();
+    }
+
+    bool outer_cpu_critical_error()
+    {
+        return dut_.io_outer_cpu_critical_error.B();
+    }
+
+    std::uint64_t top_control_checks() const
+    {
+        return top_control_checks_;
+    }
+
     bool set_sbuffer_timeout(std::uint32_t cycles)
     {
         constexpr std::uint32_t timeout_width = 22;
@@ -7850,6 +7894,16 @@ private:
         const bool l2_flush_enable_input =
             dut_.io_ooo_to_mem_csrCtrl_flush_l2_enable.B();
         const bool l2_flush_done_input = dut_.io_l2_flush_done.B();
+        const std::uint8_t hart_id_input =
+            static_cast<std::uint8_t>(dut_.io_hartId.U());
+        const std::uint64_t reset_vector_input =
+            dut_.io_outer_reset_vector.U();
+        const bool power_down_input =
+            dut_.io_ooo_to_mem_csrCtrl_power_down_enable.B();
+        const bool cpu_halted_input =
+            dut_.io_ooo_to_mem_backendToTopBypass_cpuHalted.B();
+        const bool cpu_critical_error_input =
+            dut_.io_ooo_to_mem_backendToTopBypass_cpuCriticalError.B();
 
         // Writeback valid is a combinational projection of the execution-unit
         // output fire.  Observe the pins before the clock edge; after Step()
@@ -7863,6 +7917,24 @@ private:
             if (dut_.io_mem_to_ooo_topToBackendBypass_l2FlushDone.B() !=
                 expected_l2_flush_done_) {
                 error_ = "L2 flush completion violated one-cycle delay";
+            }
+            ++top_control_checks_;
+            if (dut_.io_mem_to_ooo_topToBackendBypass_hartId.U() !=
+                hart_id_input) {
+                error_ = "backend hart ID did not pass through combinationally";
+            }
+            if (dut_.io_outer_power_down_en.B() != power_down_input) {
+                error_ = "power-down enable did not pass through combinationally";
+            }
+            if (dut_.io_inner_reset_vector.U() != expected_reset_vector_) {
+                error_ = "reset vector violated one-cycle delay";
+            }
+            if (dut_.io_outer_cpu_halt.B() != expected_cpu_halted_) {
+                error_ = "CPU halt violated one-cycle delay";
+            }
+            if (dut_.io_outer_cpu_critical_error.B() !=
+                expected_cpu_critical_error_) {
+                error_ = "CPU critical error violated one-cycle delay";
             }
             const bool top_down_l2_output =
                 dut_.io_topDownInfo_toBackend_l2TopMiss_l2Miss.B();
@@ -7974,6 +8046,9 @@ private:
         expected_top_down_l2_miss_ = top_down_l2_input;
         expected_top_down_l3_miss_ = top_down_l3_input;
         expected_l2_flush_done_ = l2_flush_done_input;
+        expected_reset_vector_ = reset_vector_input;
+        expected_cpu_halted_ = cpu_halted_input;
+        expected_cpu_critical_error_ = cpu_critical_error_input;
         memory_agent_.update_after_tick();
         ptw_agent_.update_after_tick();
         uncache_agent_.update_after_tick();
@@ -8144,6 +8219,10 @@ private:
     bool expected_top_down_l3_miss_ = false;
     bool expected_l2_flush_done_ = false;
     std::uint64_t l2_flush_checks_ = 0;
+    std::uint64_t expected_reset_vector_ = 0;
+    bool expected_cpu_halted_ = false;
+    bool expected_cpu_critical_error_ = false;
+    std::uint64_t top_control_checks_ = 0;
     std::uint64_t ifetch_ptw_pending_ = 0;
     std::uint64_t lq_allocated_ = 0;
     std::uint64_t lq_dequeued_ = 0;

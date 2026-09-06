@@ -174,6 +174,37 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             memblock,
         )
 
+    def test_top_control_bypasses_have_continuous_timing_oracles(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        benchmark = (MEMBLOCK_ROOT / "scripts/benchmark_tests.py").read_text()
+        memblock = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/MemBlock.scala"
+        ).read_text()
+
+        for contract in (
+            "drive_top_controls",
+            "backend hart ID did not pass through combinationally",
+            "power-down enable did not pass through combinationally",
+            "reset vector violated one-cycle delay",
+            "CPU halt violated one-cycle delay",
+            "CPU critical error violated one-cycle delay",
+            "top-control-contracts",
+            "boolean_combinations=8",
+            "hart_patterns=",
+            "reset_vector_patterns=",
+        ):
+            self.assertIn(contract, environment + driver + makefile + benchmark)
+        for contract in (
+            "x.hartId            := io.hartId",
+            "io.inner_reset_vector := RegNext(io.outer_reset_vector)",
+            "io.outer_cpu_halt := RegNext",
+            "io.outer_power_down_en := io.ooo_to_mem.csrCtrl.power_down_enable",
+            "io.outer_cpu_critical_error := RegNext",
+        ):
+            self.assertIn(contract, memblock)
+
     def test_sbuffer_timeout_contract_is_registered(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         driver = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

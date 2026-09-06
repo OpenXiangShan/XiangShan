@@ -1940,6 +1940,106 @@ int run_l2_flush_contracts(int argc, char **argv)
     return 0;
 }
 
+int run_top_control_contracts(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    if (!environment.reset() || environment.backend_hart_id() != 0 ||
+        environment.inner_reset_vector() != 0 ||
+        environment.outer_power_down_enabled() ||
+        environment.outer_cpu_halted() ||
+        environment.outer_cpu_critical_error()) {
+        std::cerr << "MEMBLOCK_TOP_CONTROL_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    constexpr std::array<std::uint8_t, 8> hart_ids{{
+        0x00, 0x01, 0x3f, 0x15, 0x2a, 0x20, 0x0f, 0x30,
+    }};
+    constexpr std::array<std::uint64_t, 8> reset_vectors{{
+        0x000000000000ULL,
+        0x000000000001ULL,
+        0xffffffffffffULL,
+        0x800000000000ULL,
+        0x000080000000ULL,
+        0x555555555555ULL,
+        0xaaaaaaaaaaaaULL,
+        0x123456789abcULL,
+    }};
+    unsigned boolean_cross_bitmap = 0;
+    unsigned power_transitions = 0;
+    unsigned halt_transitions = 0;
+    unsigned error_transitions = 0;
+    bool previous_power = false;
+    bool previous_halt = false;
+    bool previous_error = false;
+    for (unsigned index = 0; index < hart_ids.size(); ++index) {
+        const bool power_down = (index & 1U) != 0;
+        const bool cpu_halted = (index & 2U) != 0;
+        const bool cpu_critical_error = (index & 4U) != 0;
+        boolean_cross_bitmap |= 1U << index;
+        power_transitions += power_down != previous_power;
+        halt_transitions += cpu_halted != previous_halt;
+        error_transitions += cpu_critical_error != previous_error;
+        environment.drive_top_controls(
+            hart_ids[index], reset_vectors[index], power_down,
+            cpu_halted, cpu_critical_error);
+        if (!environment.run_cycles(1) ||
+            environment.backend_hart_id() != hart_ids[index] ||
+            environment.inner_reset_vector() != reset_vectors[index] ||
+            environment.outer_power_down_enabled() != power_down ||
+            environment.outer_cpu_halted() != cpu_halted ||
+            environment.outer_cpu_critical_error() != cpu_critical_error) {
+            std::cerr << "MEMBLOCK_TOP_CONTROL_CONTRACTS_FAIL cycle="
+                      << environment.cycle() << " phase=pattern index="
+                      << index << " hart="
+                      << static_cast<unsigned>(environment.backend_hart_id())
+                      << " reset_vector=0x" << std::hex
+                      << environment.inner_reset_vector() << std::dec
+                      << " power_down="
+                      << environment.outer_power_down_enabled()
+                      << " halted=" << environment.outer_cpu_halted()
+                      << " critical_error="
+                      << environment.outer_cpu_critical_error()
+                      << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        previous_power = power_down;
+        previous_halt = cpu_halted;
+        previous_error = cpu_critical_error;
+    }
+    environment.drive_top_controls(0, 0, false, false, false);
+    if (!environment.run_cycles(2) || environment.backend_hart_id() != 0 ||
+        environment.inner_reset_vector() != 0 ||
+        environment.outer_power_down_enabled() ||
+        environment.outer_cpu_halted() ||
+        environment.outer_cpu_critical_error() ||
+        boolean_cross_bitmap != 0xff || power_transitions < 7 ||
+        halt_transitions < 3 || error_transitions < 1) {
+        std::cerr << "MEMBLOCK_TOP_CONTROL_CONTRACTS_FAIL cycle="
+                  << environment.cycle() << " phase=coverage"
+                  << " boolean_cross_bitmap=0x" << std::hex
+                  << boolean_cross_bitmap << std::dec
+                  << " transitions=" << power_transitions << ','
+                  << halt_transitions << ',' << error_transitions
+                  << " checks=" << environment.top_control_checks()
+                  << " reason=" << environment.error() << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_TOP_CONTROL_CONTRACTS_PASS"
+              << " cycle=" << environment.cycle()
+              << " boolean_combinations=8"
+              << " hart_patterns=" << hart_ids.size()
+              << " reset_vector_patterns=" << reset_vectors.size()
+              << " transitions=" << power_transitions << ','
+              << halt_transitions << ',' << error_transitions
+              << " delay_checks=" << environment.top_control_checks()
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_pin_space(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -23811,6 +23911,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "l2-flush-contracts") {
             return run_l2_flush_contracts(argc, argv);
+        }
+        if (options.test == "top-control-contracts") {
+            return run_top_control_contracts(argc, argv);
         }
         if (options.test == "pin-space") {
             return run_pin_space(argc, argv);
