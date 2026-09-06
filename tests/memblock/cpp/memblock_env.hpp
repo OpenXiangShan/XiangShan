@@ -402,6 +402,10 @@ struct VectorMemoryTransaction {
     std::uint8_t input_trigger = kTriggerNone;
     bool input_flush_pipe = false;
     std::optional<std::uint8_t> expected_trigger;
+    std::optional<std::uint8_t> expected_writeback_vstart;
+    // As for scalar loads, only DebugMode action may make returned vector
+    // data non-architectural.  The scoreboard rejects every other opt-out.
+    bool check_data = true;
     std::uint64_t ftq_ptr = 0;
     std::uint8_t ftq_offset = 0;
     std::uint8_t vlmul = 0;
@@ -3042,6 +3046,8 @@ public:
         bool rob_flag;
         std::uint32_t exception_mask;
         std::optional<std::uint8_t> trigger;
+        std::optional<std::uint8_t> expected_writeback_vstart;
+        bool check_data;
         bool vec_wen;
         bool v0_wen;
         bool vl_wen;
@@ -3062,6 +3068,13 @@ public:
         const VectorMemoryTransaction &transaction,
         const std::array<unsigned char, 16> &data)
     {
+        if (!transaction.check_data &&
+            transaction.expected_trigger != kTriggerDebugMode) {
+            if (error_.empty()) {
+                error_ = "vector data checking may only be disabled for DebugMode trigger";
+            }
+            return;
+        }
         auto output_transaction = transaction;
         output_transaction.vl = transaction.expected_vl.value_or(transaction.vl);
         const RobIdentity identity = rob_identity(
@@ -3095,6 +3108,8 @@ public:
                 transaction.rob_flag,
                 transaction.expected_exception_mask,
                 transaction.expected_trigger,
+                transaction.expected_writeback_vstart,
+                transaction.check_data,
                 !transaction.store && !transaction.vl_wen,
                 false,
                 transaction.vl_wen,
@@ -3141,6 +3156,9 @@ public:
         const bool trigger_mismatch =
             (expected.trigger.has_value() &&
              writeback.trigger != *expected.trigger);
+        const bool vstart_mismatch = expected.expected_writeback_vstart
+            ? writeback.vstart != *expected.expected_writeback_vstart
+            : (!exception_progress && writeback.vstart != 0);
         if ((expected.segment && lane != 0) ||
             writeback.exception_mask != expected.exception_mask || writeback.replay ||
             writeback.flush_pipe != expected.flush_pipe ||
@@ -3151,9 +3169,10 @@ public:
             debug_mismatch ||
             writeback.fu_op_type != expected.fu_op_type ||
             writeback.rob_flag != expected.rob_flag ||
+            vstart_mismatch ||
             ((!exception_progress) &&
              (writeback.vsew != expected.eew || writeback.veew != expected.eew ||
-              writeback.vl != expected.vl || writeback.vstart != 0 ||
+              writeback.vl != expected.vl ||
               writeback.vuop_idx != expected.vuop_idx ||
               writeback.nf != expected.nf))) {
             fail("mismatched vector memory metadata", lane, writeback, &expected);
@@ -3182,7 +3201,8 @@ public:
             ++fof_fix_observed_;
         } else if (!expected.store && expected.exception_mask == 0) {
             if (!writeback.vec_wen || writeback.pdest != expected.pdest ||
-                !matches_load_data(writeback.data, expected) ||
+                (expected.check_data &&
+                 !matches_load_data(writeback.data, expected)) ||
                 !matches_active_mask(writeback.vmask, expected.active_elements)) {
                 fail("mismatched vector load data", lane, writeback, &expected);
                 return;
@@ -3296,7 +3316,17 @@ private:
                     << " expected_exception=0x" << expected->exception_mask
                     << " expected_trigger="
                     << static_cast<unsigned>(expected->trigger.value_or(kVectorWritebackTriggerNone))
-                    << " expected_active=0x" << expected->active_elements
+                    << " check_data=" << std::dec << expected->check_data
+                    << " expected_writeback_vstart=";
+            if (expected->expected_writeback_vstart) {
+                message << static_cast<unsigned>(
+                    *expected->expected_writeback_vstart);
+            } else {
+                message << "default";
+            }
+            message
+                    << " expected_active=0x" << std::hex
+                    << expected->active_elements
                     << " address=0x" << expected->address << std::dec
                     << " addressing="
                     << static_cast<unsigned>(expected->addressing)

@@ -73,14 +73,26 @@ translation, PMP checks, or the trigger match/action logic.
 
 ## Validation Status
 
-The pre-fix failure and root cause are confirmed. Post-fix validation requires
-fresh RTL elaboration and Picker model rebuild. The acceptance checks are:
+The repair is commit `d159ebdbd`. After fresh DefaultConfig elaboration and a
+full Picker model rebuild, the complete ordered RTL SHA-256 is
+`a7ddd8577d0982b8e3a3581cf3f74873813008ed039146d06b04d6a308aa9173`.
+The expanded regression passed:
 
-- the reproducer reports breakpoint and `vstart=0` after exactly one prefix
-  refill;
-- segment store and DebugMode-action cases match the current access rather
-  than the following access;
-- the existing `vector-segment`, `vector-segment-fof`, and non-segment trigger
-  controls continue to pass;
-- the complete ordered RTL hash and frozen runtime hashes are recorded after
-  rebuilding.
+```text
+MEMBLOCK_TRIGGER_CONTRACTS_PASS cycle=1433 cases=25 actions=2 match_types=3
+enabled_slots=4 vector_cases=8 vector_loads=4 vector_stores=4
+vector_breakpoints=6 vector_debug_actions=2 vector_segments=2
+vector_widths=4 vector_addressing_modes=4 chain_cases=2
+rtl_sha256=a7ddd8577d0982b8e3a3581cf3f74873813008ed039146d06b04d6a308aa9173
+```
+
+The original indexed-segment reproducer now reports breakpoint and `vstart=0`
+after exactly one legal prefix refill. The strided segment-store case also
+hits its current field address without modifying memory. Non-segment vector
+breakpoint and DebugMode cases cover current addresses at EEW 8/16/32/64 over
+all four addressing modes.
+
+Short controls on the same model passed: `vector-segment` in 397 cycles,
+`vector-segment-fof` in 304 cycles, `vector-load` in 163 cycles, and
+`misaligned-stores` in 1,200 cycles. Frozen runtime hashes are recorded in
+`RESULTS.md`.

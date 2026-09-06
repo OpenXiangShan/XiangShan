@@ -758,6 +758,22 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
     def test_memory_trigger_has_control_match_chain_and_store_matrix(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        segment_rtl = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VSegmentUnit.scala"
+        ).read_text()
+        vector_transaction = environment.split(
+            "struct VectorMemoryTransaction", 1
+        )[1].split("inline std::uint16_t vector_fu_op_type", 1)[0]
+        self.assertIn("bool check_data = true;", vector_transaction)
+        self.assertIn(
+            "segmentTrigger.io.fromLoadStore.vaddr                 := tlbReqVaddr",
+            segment_rtl,
+        )
+        self.assertNotIn(
+            "segmentTrigger.io.fromLoadStore.vaddr                 := "
+            "Mux(isMisalignReg, misalignVaddr, latchVaddr)",
+            segment_rtl,
+        )
         for contract in (
             "MemoryTriggerConfig",
             "kTriggerMatchGreaterOrEqual",
@@ -767,6 +783,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "config.debug_mode",
             ".check_data = !debug_action",
             "load data checking may only be disabled for DebugMode trigger",
+            "vector data checking may only be disabled for DebugMode trigger",
             '"equal-hit"',
             '"breakpoint-gate"',
             '"debug-mode-suppression"',
@@ -781,10 +798,16 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             '"misaligned-store-hit"',
             "phase=vector-load-hit",
             "phase=vector-store-hit",
-            '" cases=19 actions=2 match_types=3 enabled_slots=4"',
+            '"vector-segment-indexed-load-breakpoint"',
+            '"vector-segment-strided-store-breakpoint"',
+            '"vector-unit-eew32-debug-action"',
+            '"vector-indexed-eew64-store-debug-action"',
+            '" cases=25 actions=2 match_types=3 enabled_slots=4"',
             '" debug_action_loads="',
             '" scalar_store_breakpoints="',
-            '" vector_breakpoints=2 chain_cases=2"',
+            '" vector_cases=8 vector_loads=4 vector_stores=4"',
+            '" vector_debug_actions="',
+            '" vector_widths=4 vector_addressing_modes=4 chain_cases=2"',
         ):
             self.assertIn(contract, environment + main)
 

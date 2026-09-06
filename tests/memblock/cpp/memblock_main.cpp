@@ -5655,6 +5655,7 @@ int run_trigger_contracts(int argc, char **argv)
         .flow_num = 2,
         .expected_exception_mask = memblock::kExceptionBreakpoint,
         .expected_trigger = memblock::kTriggerBreakpoint,
+        .expected_writeback_vstart = 7,
     };
     if (!vector_load_environment.reset() ||
         !vector_load_environment.configure_memory_trigger({
@@ -5722,6 +5723,7 @@ int run_trigger_contracts(int argc, char **argv)
         .flow_num = 2,
         .expected_exception_mask = memblock::kExceptionBreakpoint,
         .expected_trigger = memblock::kTriggerBreakpoint,
+        .expected_writeback_vstart = 9,
     };
     for (unsigned byte = 0; byte < vector_store.data.size(); ++byte) {
         vector_store.data[byte] = static_cast<unsigned char>(0xd1 + byte * 3);
@@ -5781,16 +5783,326 @@ int run_trigger_contracts(int argc, char **argv)
         return 1;
     }
 
+    std::uint64_t vector_cross_cycles = 0;
+    std::uint64_t vector_breakpoints = 2;
+    std::uint64_t vector_debug_actions = 0;
+    std::uint64_t vector_segment_cases = 0;
+    const auto run_vector_cross = [argc, argv, &vector_cross_cycles,
+                                   &vector_breakpoints,
+                                   &vector_debug_actions,
+                                   &vector_segment_cases](
+        memblock::VectorMemoryTransaction transaction,
+        unsigned trigger_element, std::uint8_t action,
+        std::uint64_t expected_request_delta, const char *phase) {
+        memblock::Environment cross_environment(argc, argv);
+        const std::uint64_t page_base = transaction.address & ~0xfffULL;
+        cross_environment.memory().fill_incrementing(
+            page_base, 0x1000,
+            static_cast<std::uint8_t>(0x23 + vector_breakpoints * 7 +
+                                      vector_debug_actions * 11));
+
+        if (transaction.segment) {
+            transaction.nf = 1;
+            transaction.vuop_idx = 0;
+            transaction.last_uop = false;
+        }
+        std::vector<memblock::VectorMemoryTransaction> transactions{
+            transaction,
+        };
+        if (transaction.segment) {
+            auto last_field = transaction;
+            last_field.vuop_idx = 1;
+            last_field.last_uop = true;
+            if (!last_field.store) {
+                ++last_field.pdest;
+            }
+            transactions.push_back(last_field);
+        }
+        for (unsigned field = 0; field < transactions.size(); ++field) {
+            auto &field_transaction = transactions[field];
+            for (unsigned byte = 0; byte < field_transaction.data.size(); ++byte) {
+                field_transaction.data[byte] = static_cast<unsigned char>(
+                    0x51 + byte * 5 + field * 0x20 + vector_breakpoints * 3);
+            }
+            field_transaction.expected_trigger = action;
+            field_transaction.expected_exception_mask =
+                action == memblock::kTriggerBreakpoint
+                    ? memblock::kExceptionBreakpoint
+                    : std::uint32_t{0};
+            field_transaction.expected_writeback_vstart =
+                static_cast<std::uint8_t>(trigger_element);
+            field_transaction.check_data =
+                action != memblock::kTriggerDebugMode;
+        }
+
+        const unsigned element_count = 16U >> transaction.eew;
+        const std::uint16_t active =
+            memblock::active_vector_elements(transaction);
+        if (trigger_element >= element_count ||
+            ((active >> trigger_element) & 1U) == 0) {
+            std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL phase=" << phase
+                      << " reason=trigger element is inactive"
+                      << " element=" << trigger_element
+                      << " active=0x" << std::hex << active << std::dec << '\n';
+            return false;
+        }
+        const auto &trigger_transaction = transaction.segment
+            ? transactions.back()
+            : transactions.front();
+        const std::uint64_t trigger_address =
+            memblock::vector_element_address(
+                trigger_transaction, trigger_element);
+        std::vector<std::pair<std::uint64_t, unsigned char>> memory_before;
+        if (transaction.store) {
+            const unsigned element_bytes = 1U << transaction.eew;
+            for (const auto &field_transaction : transactions) {
+                for (unsigned element = 0; element < element_count; ++element) {
+                    if (((active >> element) & 1U) == 0) {
+                        continue;
+                    }
+                    const std::uint64_t element_address =
+                        memblock::vector_element_address(
+                            field_transaction, element);
+                    for (unsigned byte = 0; byte < element_bytes; ++byte) {
+                        memory_before.emplace_back(
+                            element_address + byte,
+                            cross_environment.memory().read_byte(
+                                element_address + byte));
+                    }
+                }
+            }
+        }
+        if (!cross_environment.reset() ||
+            !cross_environment.configure_memory_trigger({
+                .index = 0,
+                .address = trigger_address,
+                .action = action,
+                .load = !transaction.store,
+                .store = transaction.store,
+            })) {
+            std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                      << cross_environment.cycle() << " phase=" << phase
+                      << " reason=" << cross_environment.error() << '\n';
+            return false;
+        }
+
+        const std::uint64_t requests_before =
+            cross_environment.tilelink_requests();
+        for (const auto &field_transaction : transactions) {
+            cross_environment.expect_vector(field_transaction);
+            if (!cross_environment.enqueue_vector(field_transaction) ||
+                !cross_environment.issue_vector(field_transaction, 512)) {
+                std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                          << cross_environment.cycle() << " phase=" << phase
+                          << " reason=" << cross_environment.error() << '\n';
+                return false;
+            }
+        }
+        if (!cross_environment.run_until_vector_complete(4096) ||
+            cross_environment.tilelink_requests() !=
+                requests_before + expected_request_delta ||
+            !cross_environment.redirect_after(
+                transaction.rob, transaction.rob_flag, true) ||
+            !cross_environment.run_cycles(16)) {
+            std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                      << cross_environment.cycle() << " phase=" << phase
+                      << " dcache_requests=" << requests_before << "->"
+                      << cross_environment.tilelink_requests()
+                      << " reason=" << cross_environment.error() << '\n';
+            return false;
+        }
+
+        const std::uint64_t allocated = transaction.store
+            ? cross_environment.sq_allocated()
+            : cross_environment.lq_allocated();
+        const std::uint64_t retired = transaction.store
+            ? cross_environment.sq_dequeued() + cross_environment.sq_canceled()
+            : cross_environment.lq_dequeued() + cross_environment.lq_canceled();
+        const bool over_retired = retired > allocated;
+        const std::uint64_t remaining = over_retired ? 0 : allocated - retired;
+        const bool cancellation_failed = remaining != 0 &&
+            !(transaction.store
+                  ? cross_environment.account_sq_cancellation(
+                        static_cast<unsigned>(remaining))
+                  : cross_environment.account_lq_cancellation(
+                        static_cast<unsigned>(remaining)));
+        bool memory_changed = false;
+        for (const auto &[address, value] : memory_before) {
+            memory_changed |=
+                cross_environment.memory().read_byte(address) != value;
+        }
+        if (over_retired || remaining > transaction.flow_num ||
+            cancellation_failed ||
+            (transaction.segment && allocated != 0) || memory_changed) {
+            std::cerr << "MEMBLOCK_TRIGGER_CONTRACTS_FAIL cycle="
+                      << cross_environment.cycle() << " phase=" << phase
+                      << " allocated=" << allocated << " retired=" << retired
+                      << " remaining=" << remaining
+                      << " memory_changed=" << memory_changed
+                      << " reason=" << cross_environment.error() << '\n';
+            return false;
+        }
+
+        vector_cross_cycles += cross_environment.cycle();
+        vector_breakpoints += action == memblock::kTriggerBreakpoint;
+        vector_debug_actions += action == memblock::kTriggerDebugMode;
+        vector_segment_cases += transaction.segment;
+        return true;
+    };
+
+    memblock::VectorMemoryTransaction wide_strided_load{
+        .address = memblock::kDefaultMemoryBase + 0x640020,
+        .stride = 24,
+        .addressing = memblock::VectorAddressingMode::strided,
+        .eew = 3,
+        .vl = 2,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 92,
+        .lane = 1,
+        .flow_num = 2,
+    };
+    if (!run_vector_cross(
+            wide_strided_load, 1, memblock::kTriggerBreakpoint,
+            1,
+            "vector-strided-eew64-breakpoint")) {
+        return 1;
+    }
+
+    memblock::VectorMemoryTransaction indexed_store{
+        .store = true,
+        .address = memblock::kDefaultMemoryBase + 0x650020,
+        .addressing = memblock::VectorAddressingMode::indexed_unordered,
+        .eew = 2,
+        .vl = 4,
+        .rob = 0,
+        .sq = 0,
+        .lane = 0,
+        .flow_num = 4,
+    };
+    constexpr std::array<std::uint32_t, 4> indexed_store_offsets{
+        0x30, 0x08, 0x50, 0x18,
+    };
+    for (unsigned element = 0; element < indexed_store_offsets.size(); ++element) {
+        for (unsigned byte = 0; byte < 4; ++byte) {
+            indexed_store.index[element * 4 + byte] =
+                static_cast<unsigned char>(
+                    indexed_store_offsets[element] >> (8 * byte));
+        }
+    }
+    if (!run_vector_cross(
+            indexed_store, 0, memblock::kTriggerBreakpoint,
+            0,
+            "vector-indexed-eew32-store-breakpoint")) {
+        return 1;
+    }
+
+    memblock::VectorMemoryTransaction segment_load{
+        .segment = true,
+        .address = memblock::kDefaultMemoryBase + 0x660020,
+        .addressing = memblock::VectorAddressingMode::indexed_ordered,
+        .eew = 1,
+        .vl = 8,
+        .rob = 0,
+        .pdest = 93,
+        .lane = 0,
+        .flow_num = 8,
+        .vuop_idx = 0,
+        .nf = 1,
+    };
+    for (unsigned element = 0; element < 8; ++element) {
+        const std::uint16_t offset = static_cast<std::uint16_t>(
+            0x34 + element * 20);
+        segment_load.index[element * 2] =
+            static_cast<unsigned char>(offset);
+        segment_load.index[element * 2 + 1] =
+            static_cast<unsigned char>(offset >> 8);
+    }
+    if (!run_vector_cross(
+            segment_load, 0, memblock::kTriggerBreakpoint,
+            1,
+            "vector-segment-indexed-load-breakpoint")) {
+        return 1;
+    }
+
+    memblock::VectorMemoryTransaction segment_store{
+        .store = true,
+        .segment = true,
+        .address = memblock::kDefaultMemoryBase + 0x670100,
+        .stride = 12,
+        .addressing = memblock::VectorAddressingMode::strided,
+        .eew = 1,
+        .vl = 8,
+        .rob = 0,
+        .lane = 0,
+        .flow_num = 8,
+        .vuop_idx = 0,
+        .nf = 1,
+    };
+    if (!run_vector_cross(
+            segment_store, 0, memblock::kTriggerBreakpoint,
+            0,
+            "vector-segment-strided-store-breakpoint")) {
+        return 1;
+    }
+
+    memblock::VectorMemoryTransaction debug_vector_load{
+        .address = memblock::kDefaultMemoryBase + 0x680020,
+        .eew = 2,
+        .vl = 4,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 94,
+        .lane = 1,
+        .flow_num = 4,
+    };
+    if (!run_vector_cross(
+            debug_vector_load, 3, memblock::kTriggerDebugMode,
+            1,
+            "vector-unit-eew32-debug-action")) {
+        return 1;
+    }
+
+    memblock::VectorMemoryTransaction debug_vector_store{
+        .store = true,
+        .address = memblock::kDefaultMemoryBase + 0x690020,
+        .addressing = memblock::VectorAddressingMode::indexed_ordered,
+        .eew = 3,
+        .vl = 2,
+        .rob = 0,
+        .sq = 0,
+        .lane = 0,
+        .flow_num = 2,
+    };
+    constexpr std::array<std::uint64_t, 2> debug_store_offsets{0x40, 0x18};
+    for (unsigned element = 0; element < debug_store_offsets.size(); ++element) {
+        for (unsigned byte = 0; byte < 8; ++byte) {
+            debug_vector_store.index[element * 8 + byte] =
+                static_cast<unsigned char>(
+                    debug_store_offsets[element] >> (8 * byte));
+        }
+    }
+    if (!run_vector_cross(
+            debug_vector_store, 0, memblock::kTriggerDebugMode,
+            0,
+            "vector-indexed-eew64-store-debug-action")) {
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_TRIGGER_CONTRACTS_PASS"
               << " cycle=" << environment.cycle() +
                     vector_load_environment.cycle() +
-                    vector_store_environment.cycle()
-              << " cases=19 actions=2 match_types=3 enabled_slots=4"
+                    vector_store_environment.cycle() + vector_cross_cycles
+              << " cases=25 actions=2 match_types=3 enabled_slots=4"
               << " breakpoint_loads=" << breakpoint_loads
               << " suppressed_loads=" << suppressed_loads
               << " debug_action_loads=" << debug_action_loads
               << " scalar_store_breakpoints=" << scalar_store_breakpoints
-              << " vector_breakpoints=2 chain_cases=2"
+              << " vector_cases=8 vector_loads=4 vector_stores=4"
+              << " vector_breakpoints=" << vector_breakpoints
+              << " vector_debug_actions=" << vector_debug_actions
+              << " vector_segments=" << vector_segment_cases
+              << " vector_widths=4 vector_addressing_modes=4 chain_cases=2"
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

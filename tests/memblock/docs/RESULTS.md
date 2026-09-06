@@ -6,20 +6,21 @@
 - CPU baseline commit: `0fa7bb8259a7922481289d8d5932797afce84030`
 - CPU repair commits: `f5b553973` (VS-non-leaf vector fault GPA),
   `f8bb99518` (Uncache exception preservation), `e1424686a` (exceptional
-  atomic `rfWen` suppression), and `7045fa175` (exceptional scalar FP-load
-  `fpWen` suppression).
+  atomic `rfWen` suppression), `7045fa175` (exceptional scalar FP-load
+  `fpWen` suppression), and `d159ebdbd` (current vector-segment trigger
+  address selection).
 - Retracted RTL change: `8eedb3ad0` changed the intentional atomic D-channel
   poisoned-line policy and was reverted by `db6f6d844` after design review.
 - Verification harness baseline: `98bdebbe0777ef051fa8451bd36641eb45f81963`;
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
-- Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `a94d25a4713b23b023faa6cba1aedd6e43311a38634c32c089f9805b461be351`
+- Complete ordered RTL SHA-256: `a7ddd8577d0982b8e3a3581cf3f74873813008ed039146d06b04d6a308aa9173`
+- Current rebuilt and frozen UT executable SHA-256: `b0bd45d43f0e41ea9999f3b49fdf5908dba1abf9464ac39db57906066531b977`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
-- Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
+- Current rebuilt and frozen Verilated model SHA-256: `efef075f2d7a057647fcb1edafcadb2a897eefbb00d5690ead592fee95f7d807`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
-- Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `8266dc808bc4efe9ce4a208381f8ae1c76b72d516ec064e006718447b67ce7a7`
+- Frozen RTL metadata SHA-256: `dccfa4494f8db1313ff59c540c28128994d796a3e0398de5f913ba51cd2713da`
+- Frozen runtime manifest SHA-256: `52dff85bcd1fa1c26ca07a69a0190daf5556bb2835a3433229c390dcae25f83e`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -46,9 +47,9 @@ MMIO cases emitted five Uncache requests and zero DCache requests.
 
 ## Memory Trigger Matrix
 
-On 2026-09-07, the expanded `trigger-contracts` scenario passed 19 cases in
-816 aggregate cycles on complete RTL SHA-256
-`4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
+On 2026-09-07, the expanded `trigger-contracts` scenario passed 25 cases in
+1,433 aggregate cycles on complete RTL SHA-256
+`a7ddd8577d0982b8e3a3581cf3f74873813008ed039146d06b04d6a308aa9173`.
 All four enable slots produced a positive scalar-load breakpoint. EQ, GE, and
 LT each exercised their qualifying boundary, while GE/LT misses plus disabled,
 load/store-mismatched, `select=1`, breakpoint-gated, and current-debug-mode
@@ -57,10 +58,24 @@ fired only when both address comparisons matched. A DebugMode-action load
 returned `trigger=1` without a breakpoint exception and issued no DCache
 request; its non-architectural data field was the only disabled data oracle.
 Six breakpoint loads, aligned and cacheable-misaligned scalar stores, and
-unit-stride vector load/store element-address hits all issued no external
-DCache request. Breakpoint loads suppressed RF write, every trigger action and
-exception matched exactly, and both scalar/vector store images remained
-byte-exact. No CPU defect was observed.
+eight vector cases crossed load/store, all four EEWs, all four unit/strided/
+indexed-unordered/indexed-ordered addressing modes, both actions, and two
+two-field segment operations. Breakpoint loads suppressed RF write, every
+trigger action, exception, and vector `vstart` matched exactly, and all
+scalar/vector store images remained byte-exact. Element-zero hits issued no
+external DCache request; later-element/field hits counted only their exact
+legal prefix refill.
+
+The indexed segment field-1 case originally exposed a confirmed CPU RTL bug:
+the trigger compared the prior latched address, fired on the next access, and
+returned `vstart=1` for a field in segment 0. Repair commit `d159ebdbd` connects
+the trigger to the same current `tlbReqVaddr` used by the DTLB. The repaired
+case returns `vstart=0` after one prefix refill. Full details are in
+`CPU_BUG_VECTOR_SEGMENT_TRIGGER_ADDRESS_LAG.md`. Short controls on this same
+model passed: `vector-segment` in 397 cycles, `vector-segment-fof` in 304,
+`vector-load` in 163, and `misaligned-stores` in 1,200. The frozen runtime
+replayed the complete 25-case trigger scenario with the same 1,433-cycle
+summary.
 
 ## Side-Effecting MMIO Device Model
 
