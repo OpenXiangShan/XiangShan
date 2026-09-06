@@ -10568,6 +10568,37 @@ inline bool sample_sbuffer_empty(UTMemBlock &dut)
     return dut.io_mem_to_ooo_sbIsEmpty.B();
 }
 
+inline constexpr unsigned kIfetchPrefetchLanes = 3;
+
+struct IfetchPrefetch {
+    bool valid = false;
+    std::uint64_t vaddr = 0;
+};
+
+inline IfetchPrefetch sample_ifetch_prefetch(
+    UTMemBlock &dut, unsigned lane)
+{
+    switch (lane) {
+    case 0:
+        return {
+            .valid = dut.io_ifetchPrefetch_0_valid.B(),
+            .vaddr = dut.io_ifetchPrefetch_0_bits_vaddr.U(),
+        };
+    case 1:
+        return {
+            .valid = dut.io_ifetchPrefetch_1_valid.B(),
+            .vaddr = dut.io_ifetchPrefetch_1_bits_vaddr.U(),
+        };
+    case 2:
+        return {
+            .valid = dut.io_ifetchPrefetch_2_valid.B(),
+            .vaddr = dut.io_ifetchPrefetch_2_bits_vaddr.U(),
+        };
+    default:
+        throw std::out_of_range("invalid IFetch prefetch lane");
+    }
+}
+
 struct ScalarStoreIssue {
     std::uint64_t fu_type = 0;
     std::uint16_t fu_op_type = 0;

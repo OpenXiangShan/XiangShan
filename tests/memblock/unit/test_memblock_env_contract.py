@@ -146,6 +146,22 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main + makefile + generator)
 
+    def test_ifetch_prefetch_is_sampled_and_discriminated(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        generator = (MEMBLOCK_ROOT / "scripts/generate_cpp.py").read_text()
+        for contract in (
+            "sample_ifetch_prefetch",
+            "IfetchPrefetchStats",
+            "run_ifetch_prefetch",
+            "instruction-check",
+            "data-prefetch-check",
+            "ifetch_prefetches=",
+            "ifetch-prefetch",
+        ):
+            self.assertIn(contract, environment + main + makefile + generator)
+
     def test_frontend_bridge_has_semantic_transaction_coverage(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()

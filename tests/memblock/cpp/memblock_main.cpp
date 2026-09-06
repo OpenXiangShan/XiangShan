@@ -700,7 +700,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=4 constraints=" << name
+        stream << "constraint_schema=5 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -2243,6 +2243,118 @@ int run_rar_violation(int argc, char **argv)
               << static_cast<unsigned>(violation.ftq_offset)
               << " is_rvc=" << violation.is_rvc
               << " level=" << violation.level
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
+int run_ifetch_prefetch(int argc, char **argv)
+{
+    memblock::Environment environment(argc, argv);
+    constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x1d000;
+    environment.memory().fill_incrementing(base, 0x1000, 0x75);
+    if (!environment.reset()) {
+        std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                  << environment.cycle() << " phase=reset reason="
+                  << environment.error() << '\n';
+        return 1;
+    }
+
+    auto total_ifetch_requests = [&]() {
+        std::uint64_t total = 0;
+        for (const auto count :
+             environment.ifetch_prefetch_stats().requests) {
+            total += count;
+        }
+        return total;
+    };
+
+    for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+        const memblock::PrefetchTransaction transaction{
+            .address = base + lane * 64 + 16,
+            .op = memblock::PrefetchOp::instruction,
+            .rob = static_cast<std::uint8_t>(lane),
+            .lq = static_cast<std::uint8_t>(lane),
+            .sq = 0,
+            .lane = lane,
+        };
+        const auto requests_before =
+            environment.ifetch_prefetch_stats().requests;
+        const std::uint64_t tilelink_before = environment.tilelink_requests();
+        environment.expect_prefetch(transaction);
+        if (!environment.enqueue_prefetch(transaction) ||
+            !environment.issue_prefetch(transaction, 256) ||
+            !environment.run_until_complete(512) ||
+            !environment.run_cycles(2)) {
+            std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                      << environment.cycle() << " phase=instruction lane="
+                      << lane << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+        const auto &stats = environment.ifetch_prefetch_stats();
+        bool lanes_match = true;
+        for (unsigned observed = 0;
+             observed < memblock::kScalarLoadLanes; ++observed) {
+            const std::uint64_t expected =
+                requests_before[observed] + (observed == lane ? 1 : 0);
+            lanes_match = lanes_match && stats.requests[observed] == expected;
+        }
+        if (!lanes_match || stats.last_vaddr[lane] != transaction.address ||
+            environment.tilelink_requests() != tilelink_before) {
+            std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                      << environment.cycle() << " phase=instruction-check lane="
+                      << lane << " requests=" << stats.requests[0] << ','
+                      << stats.requests[1] << ',' << stats.requests[2]
+                      << " expected_vaddr=0x" << std::hex
+                      << transaction.address << " actual_vaddr=0x"
+                      << stats.last_vaddr[lane] << std::dec
+                      << " tilelink_before=" << tilelink_before
+                      << " tilelink_after=" << environment.tilelink_requests()
+                      << '\n';
+            return 1;
+        }
+    }
+
+    constexpr std::array<memblock::PrefetchOp, 2> data_ops{
+        memblock::PrefetchOp::read,
+        memblock::PrefetchOp::write,
+    };
+    const std::uint64_t ifetch_before_data = total_ifetch_requests();
+    for (unsigned index = 0; index < data_ops.size(); ++index) {
+        const memblock::PrefetchTransaction transaction{
+            .address = base + 0x400 + index * 64,
+            .op = data_ops[index],
+            .rob = static_cast<std::uint8_t>(3 + index),
+            .lq = static_cast<std::uint8_t>(3 + index),
+            .sq = 0,
+            .lane = index,
+        };
+        environment.expect_prefetch(transaction);
+        if (!environment.enqueue_prefetch(transaction) ||
+            !environment.issue_prefetch(transaction, 256) ||
+            !environment.run_until_complete(2048) ||
+            !environment.run_cycles(2)) {
+            std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                      << environment.cycle() << " phase=data-prefetch index="
+                      << index << " reason=" << environment.error() << '\n';
+            return 1;
+        }
+    }
+    if (total_ifetch_requests() != ifetch_before_data) {
+        std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                  << environment.cycle()
+                  << " phase=data-prefetch-check expected_ifetch="
+                  << ifetch_before_data
+                  << " actual_ifetch=" << total_ifetch_requests() << '\n';
+        return 1;
+    }
+
+    const auto &stats = environment.ifetch_prefetch_stats();
+    std::cout << "MEMBLOCK_IFETCH_PREFETCH_PASS"
+              << " cycle=" << environment.cycle()
+              << " lane_requests=" << stats.requests[0] << ','
+              << stats.requests[1] << ',' << stats.requests[2]
+              << " instruction=3 data=2"
+              << " tilelink_requests=" << environment.tilelink_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
@@ -10953,6 +11065,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                << feedback.ld2_cancels[1] << ',' << feedback.ld2_cancels[2];
         return stream.str();
     };
+    const auto total_ifetch_prefetches = [&]() {
+        const auto &stats = environment.ifetch_prefetch_stats();
+        return std::accumulate(
+            stats.requests.begin(), stats.requests.end(), std::uint64_t{0});
+    };
 
     auto make_load = [&](std::uint64_t address, memblock::LoadOp op,
                          unsigned lane) {
@@ -13493,6 +13610,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.dcache_response_latency_stats(),
                 environment.ptw_response_latency_stats(),
                 environment.uncache_response_latency_stats()) ||
+            total_ifetch_prefetches() == 0 ||
             !load_feedback_complete() ||
             !coverage.backpressure_complete(options.backpressure)) {
             phase = "coverage-gates";
@@ -13516,6 +13634,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   << " ptw=" << environment.ptw_requests()
                   << " uncache=" << environment.uncache_requests()
                   << " release_data=" << environment.tilelink_release_data()
+                  << " ifetch_prefetches=" << total_ifetch_prefetches()
                   << " reason="
                   << (environment.error().empty()
                           ? "mixed_coverage_or_accounting_gate_failed"
@@ -13550,6 +13669,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
               << " probes=" << environment.dcache_probes()
               << " grant_acks=" << environment.dcache_grant_acks()
               << " release_data=" << environment.tilelink_release_data()
+              << " ifetch_prefetches=" << total_ifetch_prefetches()
               << " ptw_requests=" << environment.ptw_requests()
               << " uncache_requests=" << environment.uncache_requests()
               << ' ' << load_feedback_summary()
@@ -14411,6 +14531,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "rar-violation") {
             return run_rar_violation(argc, argv);
+        }
+        if (options.test == "ifetch-prefetch") {
+            return run_ifetch_prefetch(argc, argv);
         }
         if (options.test == "fp-loads") {
             return run_fp_loads(argc, argv);

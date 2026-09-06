@@ -150,7 +150,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     schema = result.get("constraint_schema")
     if schema is None:
         return
-    _require(schema in (2, 3, 4), f"unsupported constraint_schema: {schema!r}")
+    _require(schema in (2, 3, 4, 5), f"unsupported constraint_schema: {schema!r}")
 
     target_translation = _csv_counts(result, "target_translation", 3)
     actual_translation = _csv_counts(result, "actual_translation", 3)
@@ -309,6 +309,15 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             all(wakeup > cancel for wakeup, cancel in zip(wakeups, cancels)),
             "each scalar load lane needs both canceled and uncanceled wakeups: "
             f"wakeup={wakeups} cancel={cancels}",
+        )
+
+    if schema >= 5:
+        ifetch_prefetches = result.get("ifetch_prefetches")
+        _require(
+            isinstance(ifetch_prefetches, int)
+            and not isinstance(ifetch_prefetches, bool)
+            and ifetch_prefetches > 0,
+            "no software instruction-prefetch output was observed",
         )
 
 

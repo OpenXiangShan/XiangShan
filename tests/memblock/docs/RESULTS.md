@@ -50,6 +50,20 @@ one redirect identifying `rob=0:30`, `ftq=0:43`, `ftqOffset=5`, `isRVC=1`, and
 `level=flushAfter`. Multiple-candidate arbitration, pointer wraparound, vector,
 and concurrent redirect crosses remain open.
 
+The `io_ifetchPrefetch_*` audit corrected the earlier direction/ownership
+classification: these are three LoadUnit outputs carrying software
+instruction-prefetch virtual addresses to the frontend, not IFU training
+inputs. `ifetch-prefetch` passed in 129 cycles, observing exactly one request on
+each lane for three `prefetch.i` operations and no instruction-prefetch pulse
+for read/write data prefetch controls. The three instruction-prefetches issued
+no DCache TileLink request; the two data-prefetch controls accounted for the
+two observed requests. `constraint_schema=5` now requires a positive observed
+instruction-prefetch count in every `random-mixed` seed. A two-worker schema-5
+check then passed seeds 912-913 for 512 mixed actions; the two seeds observed
+five and three instruction-prefetch outputs respectively. The independently
+verified artifact `/tmp/memblock-ifetch-schema5.json` has SHA-256
+`d053e833417b505d8c7bdcb27be366ce33f1ddb9c491701f640067fea0e182ab`.
+
 ## Translation Constraint Interface Validation
 
 Commit `f6820b9ff` extends the common `random-mixed` generator with weighted

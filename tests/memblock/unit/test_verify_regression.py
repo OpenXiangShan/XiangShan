@@ -182,13 +182,13 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 5
+        result["constraint_schema"] = 6
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
             verify_regression._check_mixed_coverage(result)
 
-    def test_constraint_schema_four_requires_load_feedback_crosses(self) -> None:
+    def test_constraint_schema_four_and_five_require_new_output_crosses(self) -> None:
         result = mixed_result(7)
         result.update(
             {
@@ -224,6 +224,17 @@ class VerifyRegressionTest(unittest.TestCase):
         result["load_wakeups"] = "3,2,1"
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "canceled and uncanceled"
+        ):
+            verify_regression._check_mixed_coverage(result)
+
+        result["load_wakeups"] = "9,7,5"
+        result["constraint_schema"] = 5
+        result["ifetch_prefetches"] = 1
+        verify_regression._check_mixed_coverage(result)
+
+        result["ifetch_prefetches"] = 0
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "instruction-prefetch"
         ):
             verify_regression._check_mixed_coverage(result)
 

@@ -52,6 +52,9 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
     cancel_lanes = matching_lanes(
         port_names, r"io_mem_to_ooo_ldCancel_([0-9]+)_ld2Cancel"
     )
+    ifetch_prefetch_lanes = matching_lanes(
+        port_names, r"io_ifetchPrefetch_([0-9]+)_valid"
+    )
     sta_lanes = matching_lanes(
         port_names, r"io_ooo_to_mem_issueSta_([0-9]+)_valid"
     )
@@ -395,6 +398,37 @@ def render_lane_adapters(manifest: dict[str, Any]) -> list[str]:
             "inline bool sample_sbuffer_empty(UTMemBlock &dut)",
             "{",
             "    return dut.io_mem_to_ooo_sbIsEmpty.B();",
+            "}",
+            "",
+            f"inline constexpr unsigned kIfetchPrefetchLanes = {len(ifetch_prefetch_lanes)};",
+            "",
+            "struct IfetchPrefetch {",
+            "    bool valid = false;",
+            "    std::uint64_t vaddr = 0;",
+            "};",
+            "",
+            "inline IfetchPrefetch sample_ifetch_prefetch(",
+            "    UTMemBlock &dut, unsigned lane)",
+            "{",
+            "    switch (lane) {",
+        ]
+    )
+    for lane in ifetch_prefetch_lanes:
+        prefix = f"io_ifetchPrefetch_{lane}"
+        lines.extend(
+            [
+                f"    case {lane}:",
+                "        return {",
+                f"            .valid = dut.{prefix}_valid.B(),",
+                f"            .vaddr = dut.{prefix}_bits_vaddr.U(),",
+                "        };",
+            ]
+        )
+    lines.extend(
+        [
+            "    default:",
+            '        throw std::out_of_range("invalid IFetch prefetch lane");',
+            "    }",
             "}",
             "",
         ]

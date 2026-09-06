@@ -20,6 +20,7 @@ namespace memblock {
 
 constexpr unsigned kScalarLoadLanes = 3;
 static_assert(generated::kScalarLoadFeedbackLanes == kScalarLoadLanes);
+static_assert(generated::kIfetchPrefetchLanes == kScalarLoadLanes);
 constexpr unsigned kScalarStoreLanes = 2;
 constexpr unsigned kVectorMemoryLanes = 2;
 constexpr unsigned kVirtualLoadQueueEntries = 72;
@@ -2921,6 +2922,12 @@ public:
         std::uint64_t last_cycle = 0;
     };
 
+    struct IfetchPrefetchStats {
+        std::array<std::uint64_t, kScalarLoadLanes> requests{};
+        std::array<std::uint64_t, kScalarLoadLanes> last_vaddr{};
+        std::array<std::uint64_t, kScalarLoadLanes> last_cycle{};
+    };
+
     Environment(int argc, char **argv)
         : dut_(argc, argv), memory_(&bus_memory_),
           memory_agent_(bus_memory_, memory_),
@@ -3407,6 +3414,10 @@ public:
     const MemoryViolationStats &memory_violation_stats() const
     {
         return memory_violation_stats_;
+    }
+    const IfetchPrefetchStats &ifetch_prefetch_stats() const
+    {
+        return ifetch_prefetch_stats_;
     }
     bool sbuffer_empty()
     {
@@ -3978,6 +3989,7 @@ public:
         // run without resetting the DUT.
         scalar_load_feedback_stats_ = {};
         memory_violation_stats_ = {};
+        ifetch_prefetch_stats_ = {};
         dut_.reset.ImmSet(std::uint64_t{1});
         for (unsigned cycle = 0; cycle < 8; ++cycle) {
             tick(false);
@@ -6528,6 +6540,14 @@ private:
                 memory_violation_stats_.last_cycle = cycle();
             }
             for (unsigned lane = 0; lane < kScalarLoadLanes; ++lane) {
+                const auto ifetch_prefetch =
+                    generated::sample_ifetch_prefetch(dut_, lane);
+                if (ifetch_prefetch.valid) {
+                    ++ifetch_prefetch_stats_.requests[lane];
+                    ifetch_prefetch_stats_.last_vaddr[lane] =
+                        ifetch_prefetch.vaddr;
+                    ifetch_prefetch_stats_.last_cycle[lane] = cycle();
+                }
                 const auto wakeup =
                     generated::sample_scalar_load_wakeup(dut_, lane);
                 if (wakeup.valid) {
@@ -6664,6 +6684,7 @@ private:
     FrontendBridgeStats frontend_bridge_stats_;
     ScalarLoadFeedbackStats scalar_load_feedback_stats_;
     MemoryViolationStats memory_violation_stats_;
+    IfetchPrefetchStats ifetch_prefetch_stats_;
     std::uint64_t lq_allocated_ = 0;
     std::uint64_t lq_dequeued_ = 0;
     std::uint64_t lq_canceled_ = 0;
