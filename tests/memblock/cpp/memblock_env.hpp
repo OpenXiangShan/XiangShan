@@ -1342,7 +1342,23 @@ private:
         if (response.opcode != expected_opcode || response.param != expected.report ||
             response.size != 6 || response.address != expected.base ||
             response.corrupt) {
-            error_ = "DCache ProbeAck identity or permission mismatch";
+            std::ostringstream message;
+            message << "DCache ProbeAck identity or permission mismatch"
+                    << " expected_opcode="
+                    << static_cast<unsigned>(expected_opcode)
+                    << " actual_opcode="
+                    << static_cast<unsigned>(response.opcode)
+                    << " expected_param="
+                    << static_cast<unsigned>(expected.report)
+                    << " actual_param="
+                    << static_cast<unsigned>(response.param)
+                    << " expected_size=6 actual_size="
+                    << static_cast<unsigned>(response.size)
+                    << " expected_address=0x" << std::hex << expected.base
+                    << " actual_address=0x" << response.address << std::dec
+                    << " corrupt=" << response.corrupt
+                    << " beat=" << expected.received;
+            error_ = message.str();
             return;
         }
         if (with_data) {

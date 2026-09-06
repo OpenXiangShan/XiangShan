@@ -737,6 +737,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_probe_sequences=",
             "actual_probe_caps=",
             "actual_probe_need_data=",
+            "run_cycles(constrained_completion_timeout / 2)",
         ):
             self.assertIn(contract, driver)
         for key in (

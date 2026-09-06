@@ -12951,11 +12951,21 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         constraints.probe_need_data_per_mille;
                 }
 
+                std::ostringstream probe_phase;
+                probe_phase << "random-probe:address=0x" << std::hex
+                            << *probe_candidate << std::dec
+                            << ":cap=" << (to_b ? "toB" : "toN")
+                            << ":need_data=" << need_data;
+                phase = probe_phase.str();
+
                 const auto expected_line = environment.memory().read_beat(
                     *probe_candidate, 64);
                 const std::uint64_t responses_before =
                     environment.dcache_probe_responses();
-                if (!environment.run_cycles(64) ||
+                // SQ retirement only moves the committed write into SBuffer.
+                // Allow the bounded manager backlog to drain before requiring
+                // the line to respond as dirty rather than accepting NtoN.
+                if (!environment.run_cycles(constrained_completion_timeout / 2) ||
                     !environment.request_dcache_probe(
                         *probe_candidate, to_b ? 1U : 2U, need_data,
                         to_b ? 0U : 1U, expected_line) ||

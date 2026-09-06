@@ -139,7 +139,11 @@ Their legal NC/MMIO overlap rates are `500`, `20`, and `750` per mille.
 All three presets split generated Probes equally between toB/toN and explicit
 need-data/no-need-data requests. Since the candidate line is dirty, both
 need-data values require exact ProbeAckData; the bit tests the protocol rule,
-not whether the oracle checks returned bytes.
+not whether the oracle checks returned bytes. SQ retirement only transfers a
+committed store into SBuffer, so the Probe sequence first allows half of the
+bounded manager-completion window for older SBuffer traffic to drain. This
+prevents a legal early NtoN response from being misclassified as a dirty-line
+failure under the long-tail latency profile.
 `spec` and `corner` use the calibrated long-tail profile independently on all
 three managers; `coverage` uses compact latency.
 
