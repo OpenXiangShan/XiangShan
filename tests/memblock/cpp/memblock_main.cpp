@@ -1979,6 +1979,59 @@ int run_single_load(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment merge(argc, argv);
+    constexpr std::uint64_t merge_line = base + 0x200;
+    merge.memory().fill_incrementing(merge_line, 64, 0x39);
+    if (!merge.reset()) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL phase=merge-reset reason="
+                  << merge.error() << '\n';
+        return 1;
+    }
+    const std::vector<memblock::LoadTransaction> merged_loads{
+        {
+            .address = merge_line + 0x08,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .sq = 0,
+            .pdest = 7,
+            .lane = 0,
+        },
+        {
+            .address = merge_line + 0x18,
+            .op = memblock::LoadOp::ld,
+            .rob = 1,
+            .lq = 1,
+            .sq = 0,
+            .pdest = 8,
+            .lane = 1,
+        },
+    };
+    for (const auto &transaction : merged_loads) {
+        merge.expect_load(transaction);
+    }
+    merge.force_next_dcache_response_delay(128);
+    if (!merge.enqueue_load_batch(merged_loads, {0, 1}) ||
+        !merge.issue_load_batch(merged_loads, 128, true) ||
+        !merge.run_until_complete(4096) ||
+        merge.tilelink_requests() != 1 || merge.dcache_refills() != 1 ||
+        merge.dcache_nonkeyword_refills() != 1 ||
+        merge.dcache_keyword_refills() != 0 ||
+        merge.dcache_grant_acks() != 1 || merge.writebacks() != 2 ||
+        merge.dcache_response_delays() < 128) {
+        std::cerr << "MEMBLOCK_SINGLE_LOAD_FAIL cycle=" << merge.cycle()
+                  << " phase=same-line-merge requests="
+                  << merge.tilelink_requests() << " refills="
+                  << merge.dcache_refills() << " nonkeyword="
+                  << merge.dcache_nonkeyword_refills() << " keyword="
+                  << merge.dcache_keyword_refills() << " grant_acks="
+                  << merge.dcache_grant_acks() << " writebacks="
+                  << merge.writebacks() << " response_delays="
+                  << merge.dcache_response_delays() << " reason="
+                  << merge.error() << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_SINGLE_LOAD_PASS"
               << " cycle=" << environment.cycle()
               << " tilelink_requests=" << environment.tilelink_requests()
@@ -1987,6 +2040,9 @@ int run_single_load(int argc, char **argv)
               << environment.dcache_nonkeyword_refills()
               << " keyword_refills=" << environment.dcache_keyword_refills()
               << " grant_acks=" << environment.dcache_grant_acks()
+              << " merged_loads=" << merged_loads.size()
+              << " merge_refills=" << merge.dcache_refills()
+              << " merge_cycles=" << merge.cycle()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

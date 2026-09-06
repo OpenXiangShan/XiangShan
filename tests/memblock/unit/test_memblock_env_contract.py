@@ -28,6 +28,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "phase=refill-order",
             "nonkeyword_refills=",
             "keyword_refills=",
+            "issue_load_batch(merged_loads, 128, true)",
+            "phase=same-line-merge",
+            "merged_loads=",
+            "merge_refills=",
         ):
             self.assertIn(contract, environment + driver)
         self.assertIn(

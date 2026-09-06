@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `a6791c14269575e687c06a77c0d692bd24a498e66a04ccc9d5ff7559f6468510`
+- Current rebuilt and frozen UT executable SHA-256: `b6ae60a46e1d4cf76061685b37cb3837bae556ae7700746fec53d6a19268c4c2`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `b88a0c4fafea43cd9710612415b812dc16e4fdd91ecb883efe39add5066867e9`
+- Frozen runtime manifest SHA-256: `e16d8598e4eb8481311552655a0148b67636db021807c4d1ca16b22af12d8f0e`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -1079,7 +1079,7 @@ the historical complete RTL SHA-256 is
 | --- | --- | --- |
 | Idle smoke | Pass | 38 cycles; registered DUT clock and internal reset release |
 | Complete pin space | Pass | 749 inputs/7,155 bits and 586 outputs/5,434 bits; 256 patterns; digest `0xc36e86e25361ff60` |
-| Cold-load refill beat order | Pass | Cycle 74; two cold lines selected opposite virtual-address bit-5 values, producing one ordinary and one `isKeyword` AcquireBlock, two exact 64-bit writebacks, and two GrantAcks |
+| Cold-load refill and merge | Pass | Cycle 74 for two cold lines selecting opposite virtual-address bit-5 values: one ordinary and one `isKeyword` AcquireBlock, two exact 64-bit writebacks, and two GrantAcks. A separate same-line pair completed two exact loads in 172 cycles from one AcquireBlock held for 128 cycles |
 | Vector loads | Pass | Four EEWs, both vector lanes, four exact 128-bit results |
 | Vector addressing | Pass | Strided, indexed-unordered, and indexed-ordered vector stores each committed and read back exactly; all four load modes are checked |
 | Vector split load | Pass | Three checked writebacks including a split cold-load replay shape |
