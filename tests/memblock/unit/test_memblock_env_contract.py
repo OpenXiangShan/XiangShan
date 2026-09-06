@@ -1145,6 +1145,12 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertNotIn("$${SEED:-1}", makefile)
         self.assertNotIn("$${TRANSACTIONS:-", makefile)
 
+        final_acceptance = makefile[
+            makefile.index("final-acceptance:"):makefile.index("unit:")
+        ]
+        self.assertIn("$(MAKE) endurance-regression", final_acceptance)
+        self.assertIn("$(MAKE) verify-endurance-results", final_acceptance)
+
 
 if __name__ == "__main__":
     unittest.main()

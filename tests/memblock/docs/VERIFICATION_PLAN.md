@@ -76,7 +76,7 @@ CSR or full-core integration test.
 | Misalignment | Byte concatenation/splitting across 16-byte, line, and page boundaries | Exact value/bytes when enabled; specified address-misaligned exception when disallowed by memory type/control | Partial: common scalar/vector splits are covered |
 | Exception side effects | RISC-V cause rules plus independent circular ROB-age ordering, deliberately opposed to LQ/SQ allocation order | Exact exception bit; exceptional scalar load has no integer/FP RF write; software prefetch never raises a load exception or writes an RF; the exported exception VA belongs to the oldest coexisting fault | Partial: `exception-contracts` checks three simultaneous load page faults and two simultaneous PBMT-NC misaligned stores across ROB 159-to-0 with reversed LQ/SQ order, then switches the top-level load/store exception selector while both buffers retain faults; same-ROB `uopIdx` and the full cross-cause matrix remain |
 | Redirect | ROB age and redirect level supplied by a legal backend transaction | Redirected younger work has no terminal writeback; surviving work completes with the same data | Partial: basic redirect is covered; cancellation observation is driver-accounted |
-| Cache coherence boundary | TileLink opcode/source/size/mask/data reference agent with separate bus and architectural memories | Stable producer payload while stalled, complete refill, sink-exact GrantAck, clean/dirty ProbeAck(Data), ReleaseAck, byte-exact dirty data, atomic refill/update, and denied/corrupt D-channel handling | Partial: `dcache-coherence` checks clean ProbeAck, requested clean ProbeAckData, mandatory dirty ProbeAckData, invalidation/refill, and E-channel GrantAck with forced backpressure. The common random tail generates byte-exact dirty toB/toN Probes and crosses requested/mandatory data; toB retention is followed by a checked toN cleanup. DCache denied/corrupt load errors and all 22 refill-capable W/D LR/AMO/AMOCAS error paths are also executable. Probe overlap with unrelated traffic, malformed responses, multiple Probe sources, and broader source reuse remain planned |
+| Cache coherence boundary | TileLink opcode/source/size/mask/data reference agent with separate bus and architectural memories | Stable producer payload while stalled, complete refill, sink-exact GrantAck, clean/dirty ProbeAck(Data), ReleaseAck, byte-exact dirty data, atomic refill/update, and denied/corrupt D-channel handling | Partial: `dcache-coherence` checks clean ProbeAck, requested clean ProbeAckData, mandatory dirty ProbeAckData, invalidation/refill, and E-channel GrantAck with forced backpressure. It also accepts two distinct Probe sources while an unrelated cold miss is outstanding and address-matches both responses. The common random tail generates byte-exact dirty toB/toN Probes and crosses requested/mandatory data; toB retention is followed by a checked toN cleanup. DCache denied/corrupt load errors and all 22 refill-capable W/D LR/AMO/AMOCAS error paths are executable. Malformed responses and broader source-reuse stress remain planned |
 | PTW/uncache boundary | TileLink and uncache ready-valid agents with deterministic memory | Stable request/response while stalled, legal source/opcode/size/address/mask, ordered NC/MMIO store data, exact beat/lane load response, denied/corrupt error propagation, and SQ retirement | Partial: legal backpressure, response identity, scalar Uncache width/lane and denied/corrupt propagation are executable (`uncache-widths`, `uncache-errors`); PBMT=IO direct MMIO load/store bypass, metadata/error path, and SQ retirement are executable (`mmio-contracts`); malformed/duplicate/early/late response injection remains planned |
 | Trigger and DynInst sidebands | Independent CSR trigger update plus explicit LSQ enqueue exception/trigger/flush and scalar issue RVC/FTQ/store-set/load-wait fields | Trigger breakpoint cause/action, exception-vector mapping, and no dropped issue sideband | Partial: scalar load breakpoint and scalar issue RVC/FTQ/store-set/load-wait paths are executable; generated enqueue exception-vector mapping is unit-tested, while the top-level issueLda boundary does not expose that vector; debug-mode, chained trigger, and broad sideband randomization remain |
 | Progress | Manager fairness: every observed request is eventually made ready and answered | Every non-canceled modeled operation terminates before the generous scenario deadline | Partial: enqueue/cancel acceptance is currently driver-accounted |
@@ -282,7 +282,7 @@ cacheable tests pass.
 | DCache lookup | warm hit, cold miss, same-line merge, bank conflict, set pressure beyond associativity, synonym/alias | Partial; cold/warm and dirty set pressure implemented |
 | Refill/replay | delayed A/D responses, beat reordering where legal, partial refill, killed request, replay after miss | Partial |
 | Eviction | clean release, dirty ReleaseData, partial byte masks, replacement under pressure, release backpressure | Partial; immutable whole-line snapshot is checked for the dedicated dirty-pressure phase, while broader release/response classes remain planned |
-| TileLink coherence | Probe/B/C/E traffic, source reuse, denied/corrupt/error responses, manager ordering | Partial; `dcache-coherence` executes three manager Probes spanning clean no-data, clean requested-data, and dirty mandatory-data responses, checks byte-exact C beats, forces E backpressure, and matches every GrantAck sink. `random-mixed` adds constrained dirty toB/toN Probes with requested/mandatory data and checked toB cleanup. Load and atomic denied/corrupt D responses are also injected and checked; concurrent Probe overlap, malformed responses, multiple Probe sources, and broader source-reuse stress remain planned |
+| TileLink coherence | Probe/B/C/E traffic, source reuse, denied/corrupt/error responses, manager ordering | Partial; `dcache-coherence` executes three manager Probes spanning clean no-data, clean requested-data, and dirty mandatory-data responses, checks byte-exact C beats, forces E backpressure, and matches every GrantAck sink. It separately accepts two distinct Probe sources before an unrelated delayed cold miss completes and checks outstanding depth and response addresses. `random-mixed` adds constrained dirty toB/toN Probes with requested/mandatory data and checked toB cleanup. Load and atomic denied/corrupt D responses are also injected and checked; malformed responses and broader source-reuse stress remain planned |
 | Uncache/MMIO | Get/Put widths, byte enables, side effects, ordering, response delay, denied/error response | Partial; PBMT-NC Get widths/byte lanes and scalar denied/corrupt response propagation are executable (`uncache-widths`, `uncache-errors`); PBMT=IO's direct three-cycle load metadata bypass plus scalar store request/response/SQ-retirement, DCache non-use, denied/corrupt load metadata preservation, and a physical non-DebugModule `c=0` PMA load/store pair are executable (`mmio-contracts`); cacheable CBO.ZERO line-zero/readback is executable (`cbo-zero-contracts`); device side effects and malformed/duplicate/early/late responses remain |
 | ECC/cache errors | correctable/uncorrectable data, error lifetime, retry or architectural exception | Partial; D-channel denied/corrupt metadata persistence and subsequent clean AtomicsUnit recovery are executable in `dcache-errors` and `atomic-dchannel-errors`; physical tag/data-array ECC injection and retry policy remain planned |
 | PTW manager | request/response backpressure, source reuse, malformed/denied response, concurrent walks | Partial; legal backpressure and response identity are implemented. Two co-issued distinct-page DTLB walks remain pending around a delayed response even where that scenario observes manager depth one; the separate IFU-plus-DTLB overlap reaches manager depth two. Two same-VPN IFU requests return twice while coalescing into one three-request Sv39 memory walk. Malformed/denied injection and broader source-reuse stress remain |
@@ -294,7 +294,7 @@ cacheable tests pass.
 | LQ/SQ occupancy | empty/near-full/full, wrap flags, simultaneous enqueue/dequeue, same-slot reuse | Implemented/partial |
 | ROB age | ordinary and wrapped pointers, flag transitions, same-cycle issue/commit/redirect | Partial |
 | Store-to-load forwarding | scalar-scalar, vector-vector, scalar-vector, vector-scalar, partial overlap, byte masks, older/younger stores | Implemented for modeled classes |
-| Exception priority | multiple legal faults, differing ROB vs LQ/SQ age, load/store/vector competition | Planned |
+| Exception priority | multiple legal faults, differing ROB vs LQ/SQ age, load/store/vector competition | Partial; wrapped ROB age deliberately disagrees with LQ/SQ order for simultaneous scalar load faults and simultaneous scalar store faults, and the retained load/store selector is switched while both buffers hold exceptions. Same-ROB `uopIdx`, cross-cause ordering, and vector competition remain planned |
 | Redirect/recovery | kill each producer class, in-flight miss/replay, canceled prefetch, pointer reuse, survivor data | Implemented for basic redirect; VLS/segment cases planned |
 | Fence/commit ordering | outstanding cache/uncache/PTW traffic across commit and fence boundaries | Planned |
 | Backpressure | every producer/consumer ready-low pattern, long stalls, alternating stalls, response delay cross-product | Implemented for DCache/PTW/uncache and Probe responses; negative-error timing crosses remain planned |
@@ -438,8 +438,9 @@ are planned work items, not silently accepted coverage:
 - floating-point store formatting, NaN-boxed MMIO loads, and FP exception side
   effects (cacheable FLW/FLD destination-class and NaN-boxed FLW data are
   covered by `fp-loads`);
-- MMIO/device reads and writes with side effects, ordering, denied responses,
-  and ROB marking;
+- MMIO/device reads and writes with modeled side effects and multi-request
+  ordering beyond the current PBMT=IO load/store, denied/corrupt, metadata, and
+  SQ-retirement contracts;
 - cross-hart LR/SC reservation interference, atomic ordering with concurrent
   traffic, full opcode-by-offset alignment crosses, and tag/data-array ECC
   injection (all operation encodings and reachable D-channel denied/corrupt
@@ -463,14 +464,19 @@ are planned work items, not silently accepted coverage:
   `translation-permissions`; global/selective single-walk races for both stage
   modes and all four fully nested pairs are covered by
   `translation-fence-all`);
-- manager-originated TileLink probes, probe acknowledgements, denied/corrupt
-  responses, ECC errors, and coherence error recovery;
+- malformed TileLink coherence responses, broader Probe/source-reuse stress,
+  physical tag/data-array ECC errors, and coherence error recovery (ordinary
+  clean/dirty Probes, two-source overlap with an unrelated miss, GrantAck, and
+  denied/corrupt load/atomic D responses are covered);
 - simultaneous malformed/duplicate/early/late PTW and uncache responses;
-- concurrent wrapped-age load/store/vector exception priority;
+- same-ROB `uopIdx`, cross-cause, and vector exception priority (concurrent
+  wrapped-age scalar load/store selection is covered);
 - multiple simultaneous split misaligned loads under LQ-RAR pressure;
 - multi-uop vector streams and broader overlapping indexed operations;
 - four-state/X behavior and reset-sensitive uninitialized storage;
-- full reset with outstanding requests and repeated reset/recovery cycles;
+- reset with every producer class outstanding (repeated reset with an
+  outstanding translated load, explicit cancellation, and a post-reset
+  survivor is covered);
 - performance-counter/top-down attribution and hardware-prefetch training
   metadata, which have no stable architectural MemBlock oracle.
 
@@ -495,9 +501,9 @@ Before a duration run:
    hashed. The verifier script is passed as a controller input so its acceptance
    logic is part of the recorded provenance.
 
-The final campaign runs at least 28,800 monotonic seconds (eight hours) with eight
-workers and the `random-mixed --constraints spec` scenario. Each seed requests 16,384 total
-actions, including the mandatory coverage prefix and a constrained-random tail
+The time-based breadth campaign runs at least 28,800 monotonic seconds (eight
+hours) with eight workers and the `random-mixed --constraints spec` scenario.
+Each seed requests 16,384 total actions, including the mandatory coverage prefix and a constrained-random tail
 with five-class overlap windows. Every window
 randomizes producer parameters, legal alignment class, data, masks, vector
 shape, issue order, store half order, and manager delay; mandatory sanity waves
@@ -508,6 +514,15 @@ the final result must complete after the duration deadline. Work already
 submitted at the deadline is allowed to finish. Any nonzero return, timeout, assertion, scoreboard error,
 coverage-gate failure, provenance change, or discontinuous seed range fails
 acceptance.
+
+Final acceptance additionally runs a finite within-seed endurance campaign:
+eight independent `spec` seeds, each with exactly 1,000,000 actions and an
+eight-hour per-seed timeout. Its verifier requires all 8,000,000 requested
+actions, every seed's functional/backpressure gates, and unchanged frozen RTL,
+runtime, runner, and controller hashes. The two campaigns are complementary:
+the duration campaign explores more initial seeds, while the endurance
+campaign stresses long-lived queue, pointer-wrap, cache, translation, and
+manager state without process restarts.
 
 The separate `random-boundary-hunt` campaign is a diagnostic and repair gate:
 it creates a fresh Sv39x4 environment for each sample, randomizes the faulting

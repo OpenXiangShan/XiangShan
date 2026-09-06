@@ -428,6 +428,8 @@ final-acceptance:
 	$(MAKE) verify-boundary-hunt
 	$(MAKE) final-regression
 	$(MAKE) verify-final-results
+	$(MAKE) endurance-regression
+	$(MAKE) verify-endurance-results
 
 unit:
 	$(PYTHON) -m unittest discover -s unit -p 'test_*.py' -v

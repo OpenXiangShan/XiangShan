@@ -701,6 +701,12 @@ make verify-endurance-results PICKER="$PICKER" REGRESSION_JOBS=8 \
   ENDURANCE_SEEDS=8 ENDURANCE_TRANSACTIONS=1000000
 ```
 
+`make final-acceptance` requires both the time-based eight-hour campaign and
+this finite eight-seed endurance campaign. The first supplies broad seed-space
+coverage; the second requires one million actions within every seed so that
+long-lived queue, cache, translation, and manager state cannot be replaced by
+many short process restarts.
+
 On the recorded host, the current Probe-enabled 16,384-action `spec` seed took
 about 260 seconds alone and 279-298 seconds per worker in an eight-worker run.
 Linear scaling therefore puts a one-million-action seed near 4.4 hours alone or
