@@ -482,6 +482,10 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "scalar_vector_priority=2",
             "phase=older-vector-replacement",
             "phase=older-scalar-replacement",
+            "run_store_vector_selector",
+            "phase=store-vector-retain-first",
+            "phase=store-vector-select-second",
+            "store_vector_priority=2",
         ):
             self.assertIn(contract, environment + main)
 

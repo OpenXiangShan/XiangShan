@@ -572,6 +572,10 @@ to replace the younger uop's retained page-fault VA. A page fault and a
 PBMT-NC misaligned fault then arrive together with queue order opposed to ROB
 age. Two further pairs retain a younger scalar or vector page fault first and
 require the later-arriving older fault from the other source to replace it.
+Two store/vector pairs then populate the load and store exception buffers in
+opposite arrival orders. Keeping the first source selected must preserve its
+VA after the second fault arrives; toggling `isStoreException` in both
+directions must return the exact vector-load or scalar-store page-fault VA.
 
 `vector-addressing` checks exact unit-stride, strided, indexed-unordered, and
 indexed-ordered data plus vector-store readback. Its ordinary LMUL=2 phase

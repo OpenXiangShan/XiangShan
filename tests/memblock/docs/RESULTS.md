@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `860aa4d0c7b69e41cde84ca7ad68fee1393068a6b2e75549d54f4f7dcfa78749`
+- Current rebuilt and frozen UT executable SHA-256: `393f65b97e5c0255ea85fa323e43b6e12546a22dce119b83d979bbad4a3d1d24`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `eba740c068ba4283a4d81e097e4afa4e170a448170b4e4b7d9316ea386e51c39`
+- Frozen runtime manifest SHA-256: `4df6125930f2713f28efbbdf14aeaf74b2be961d49da2df32525b2aedf88f5ec`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -203,9 +203,12 @@ order; both exact writebacks completed and the retained VA selected the older
 misaligned operation. Finally, a younger scalar page fault was retained before
 an older vector fault replaced it, then a separate environment checked the
 opposite vector-first/scalar-replacement direction. The complete scenario
-produced 11 scalar-load and four vector-load exception writebacks. Additional
-cause pairs, same-operation multi-cause priority, and store/vector competition
-remain open. No current RTL defect was observed.
+then populated vector-load and scalar-store exception buffers in both arrival
+orders, held the initially selected VA after the other source faulted, and
+switched/restored the exact selected VA through `isStoreException`. It passed
+in 1,351 aggregate cycles with 11 scalar-load, six vector-load, and six scalar
+store writebacks. Additional cause pairs and same-operation multi-cause
+priority remain open. No current RTL defect was observed.
 
 ## Data-Side PMP Contracts
 
@@ -1076,7 +1079,7 @@ the historical complete RTL SHA-256 is
 | CBO.ZERO cache-line zeroing | Pass | Cycle 370; cacheable `0x7` CBO.ZERO used the StoreQueue/SBuffer `wline` path, survived one forced DCache A stall and four response-delay cycles, produced exact non-MMIO store metadata, and a pre-mirror cache readback returned an all-zero line; no Uncache request was emitted |
 | Atomic operations and exception metadata | Pass | Cycle 1216; all 9 W-width and 9 D-width AMOs, AMOCAS.W/D compare success/failure, LR/SC success/failure, and all 7 forbidden D-width plus 3 forbidden W-width byte offsets; exceptional writeback carried `storeAddrMisaligned=0x40`, suppressed `rfWen`, and emitted no additional DCache request |
 | Atomic D-channel errors | Pass | Cycle 7,108; 22 W/D LR/AMO/AMOCAS operations crossed with denied and corrupt; all 44 later loads hit poisoned lines and re-reported exact errors, four SC hits reported cached errors, two clean AMO recoveries passed, exceptional `rfWen` stayed suppressed, and exactly 46 cold requests were issued |
-| Concurrent exception priority | Pass | Cycle 495; three simultaneous load page faults and two simultaneous PBMT-NC misaligned stores crossed ROB wrap with deliberately reversed LQ/SQ order; exact oldest load/store exception VAs were `0x50007000` and `0x50008011`, and toggling `isStoreException` while both buffers retained faults selected and restored the exact source VA |
+| Concurrent exception priority | Pass | Cycle 1,351; wrapped/reversed queue age, same-ROB vector-uop order, cross-cause and scalar/vector replacement all passed. Two additional vector-load/store pairs populated the exception buffers in opposite arrival orders; toggling `isStoreException` selected and restored each exact source VA. Totals were 11 scalar-load, six vector-load, and six scalar-store writebacks |
 | Data-side PMP contracts | Pass | 17 cases in 708 aggregate cycles: TOR/NAPOT exact edges, 4-KiB-grain NA4 WARL conversion, R/W and AMO denial, overlap priority, M-mode unlocked bypass, lock enforcement, and locked address/config immutability; 9 allowed and 8 denied with zero forbidden manager requests |
 | L2-to-L1 DTLB boundary | Pass | Cycle 396; ordinary and prefetch requests returned legal L1 miss responses, `no_translate=1` completed without a translation/fault, `kill=1` produced no response for 128 cycles, 16 source IDs × two L2 hint polarities (32 pulses) were accepted without ghost traffic, PBMT stayed zero, and exported PMP/MMIO classification was observed; miss delegation to external L2 is explicit because MemBlock has no refill response input |
 | IFU-to-Mem PTW bridge | Pass | 36 cases in 26,580 aggregate cycles: valid Sv39/Sv48, all four nested pairs, Sv39/Sv48 VS-only and G-only, PBMT=NC/IO, invalid L0 leaves, all four nested pairs crossed with VS-leaf/final-G-leaf/implicit-page-table-G faults, a 256-cycle delayed IFU walk overlapped with a cold scalar DTLB walk, and two same-VPN requests coalesced into one three-request Sv39 walk with two exact responses. Eight delayed-walk races cover stage-1 and nested context replacement, global/selective `SFENCE.VMA`, and global/selective `HFENCE.VVMA`/`HFENCE.GVMA`, suppressing every stale response for 1,024 cycles before checking the exact replacement mapping; 231 PTW requests, manager outstanding depth 2, exact active-stage/fault/load results, and 185 response-stall cycles passed; RTL SHA-256 `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9` |

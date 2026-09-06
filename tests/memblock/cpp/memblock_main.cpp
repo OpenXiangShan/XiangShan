@@ -10906,25 +10906,179 @@ int run_exception_contracts(int argc, char **argv)
         return 1;
     }
 
+    std::uint64_t store_vector_cycles = 0;
+    std::uint64_t store_vector_store_writebacks = 0;
+    std::uint64_t store_vector_load_writebacks = 0;
+    std::uint64_t store_vector_ptw_requests = 0;
+    auto run_store_vector_selector = [&](bool store_first) {
+        memblock::Environment source_priority(argc, argv);
+        const std::uint64_t source_base = store_first
+            ? 0x56000000ULL : 0x57000000ULL;
+        const std::uint64_t source_root = store_first
+            ? 0x92800000ULL : 0x92900000ULL;
+        const unsigned older_rob = store_first ? 120 : 130;
+        const memblock::StoreTransaction store_fault{
+            .address = source_base + 0x1000,
+            .data = 0x5aa53cc36996877aULL,
+            .op = memblock::StoreOp::sd,
+            .rob = memblock::rob_pointer_value(
+                older_rob + (store_first ? 1 : 0)),
+            .rob_flag = memblock::rob_pointer_flag(
+                older_rob + (store_first ? 1 : 0)),
+            .sq = 0,
+            .address_lane = store_first ? 0U : 1U,
+            .data_lane = store_first ? 0U : 1U,
+            .expected_exception_mask = memblock::kExceptionStorePageFault,
+        };
+        const memblock::VectorMemoryTransaction vector_fault{
+            .address = source_base + 0x2000,
+            .eew = 3,
+            .vl = 2,
+            .rob = memblock::rob_pointer_value(
+                older_rob + (store_first ? 0 : 1)),
+            .rob_flag = memblock::rob_pointer_flag(
+                older_rob + (store_first ? 0 : 1)),
+            .lq = 0,
+            .pdest = static_cast<std::uint8_t>(store_first ? 56 : 57),
+            .lane = store_first ? 1U : 0U,
+            .flow_num = 2,
+            .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        };
+        const std::uint8_t oldest_rob_value = memblock::rob_pointer_value(
+            older_rob);
+        const bool oldest_rob_flag = memblock::rob_pointer_flag(older_rob);
+        if (!source_priority.reset() ||
+            !source_priority.activate_sv39(
+                source_root, store_first ? 30 : 31) ||
+            !source_priority.set_rob_head(
+                oldest_rob_value, oldest_rob_flag)) {
+            std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                      << source_priority.cycle()
+                      << " phase=store-vector-configuration order="
+                      << (store_first ? "store-first" : "vector-first")
+                      << " reason=" << source_priority.error() << '\n';
+            return false;
+        }
+
+        auto issue_store_fault = [&]() {
+            source_priority.expect_store(store_fault);
+            return source_priority.enqueue_store(store_fault, 0) &&
+                source_priority.issue_store_address(store_fault, 512) &&
+                source_priority.issue_store_data(store_fault, 512) &&
+                source_priority.run_until_store_complete_with_replay(
+                    store_fault, 16384);
+        };
+        auto issue_vector_fault = [&]() {
+            source_priority.expect_vector(vector_fault);
+            return source_priority.enqueue_vector(vector_fault) &&
+                source_priority.issue_vector(vector_fault, 512) &&
+                source_priority.run_until_vector_complete_with_replays(
+                    vector_fault, 16384) &&
+                source_priority.run_until_lq_retired(2048);
+        };
+
+        source_priority.select_store_exception_address(store_first);
+        const bool first_issued = store_first
+            ? issue_store_fault() : issue_vector_fault();
+        const std::uint64_t first_address = store_first
+            ? store_fault.address : vector_fault.address;
+        if (!first_issued || !source_priority.run_cycles(8) ||
+            source_priority.exception_vaddr() != first_address) {
+            std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                      << source_priority.cycle()
+                      << " phase=store-vector-first order="
+                      << (store_first ? "store-first" : "vector-first")
+                      << " expected_vaddr=0x" << std::hex << first_address
+                      << " actual_vaddr=0x"
+                      << source_priority.exception_vaddr() << std::dec
+                      << " reason=" << source_priority.error() << '\n';
+            return false;
+        }
+
+        const bool second_issued = store_first
+            ? issue_vector_fault() : issue_store_fault();
+        if (!second_issued || !source_priority.run_cycles(8) ||
+            source_priority.exception_vaddr() != first_address) {
+            std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                      << source_priority.cycle()
+                      << " phase=store-vector-retain-first order="
+                      << (store_first ? "store-first" : "vector-first")
+                      << " expected_vaddr=0x" << std::hex << first_address
+                      << " actual_vaddr=0x"
+                      << source_priority.exception_vaddr() << std::dec
+                      << " reason=" << source_priority.error() << '\n';
+            return false;
+        }
+
+        const std::uint64_t second_address = store_first
+            ? vector_fault.address : store_fault.address;
+        source_priority.select_store_exception_address(!store_first);
+        if (!source_priority.run_cycles(3) ||
+            source_priority.exception_vaddr() != second_address) {
+            std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                      << source_priority.cycle()
+                      << " phase=store-vector-select-second order="
+                      << (store_first ? "store-first" : "vector-first")
+                      << " expected_vaddr=0x" << std::hex << second_address
+                      << " actual_vaddr=0x"
+                      << source_priority.exception_vaddr() << std::dec
+                      << " reason=" << source_priority.error() << '\n';
+            return false;
+        }
+        source_priority.select_store_exception_address(store_first);
+        if (!source_priority.run_cycles(3) ||
+            source_priority.exception_vaddr() != first_address ||
+            source_priority.tilelink_requests() != 0 ||
+            source_priority.uncache_requests() != 0 ||
+            !source_priority.account_sq_cancellation(
+                source_priority.sq_allocated() -
+                source_priority.sq_dequeued() -
+                source_priority.sq_canceled())) {
+            std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                      << source_priority.cycle()
+                      << " phase=store-vector-restore-first order="
+                      << (store_first ? "store-first" : "vector-first")
+                      << " expected_vaddr=0x" << std::hex << first_address
+                      << " actual_vaddr=0x"
+                      << source_priority.exception_vaddr() << std::dec
+                      << " reason=" << source_priority.error() << '\n';
+            return false;
+        }
+        store_vector_cycles += source_priority.cycle();
+        store_vector_store_writebacks +=
+            source_priority.store_writebacks();
+        store_vector_load_writebacks +=
+            source_priority.vector_load_writebacks();
+        store_vector_ptw_requests += source_priority.ptw_requests();
+        return true;
+    };
+    if (!run_store_vector_selector(true) ||
+        !run_store_vector_selector(false)) {
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_EXCEPTION_CONTRACTS_PASS"
               << " cycle=" << environment.cycle() + load_priority.cycle() +
                     uop_priority.cycle() + cross_cause.cycle() +
                     vector_over_scalar.cycle() + scalar_over_vector.cycle() +
-                    store_priority.cycle()
+                    store_priority.cycle() + store_vector_cycles
               << " load_writebacks="
               << environment.writebacks() + load_priority.writebacks() +
                     cross_cause.writebacks() +
                     vector_over_scalar.writebacks() +
                     scalar_over_vector.writebacks() + store_priority.writebacks()
-              << " store_writebacks=" << store_priority.store_writebacks()
+              << " store_writebacks=" << store_priority.store_writebacks() +
+                    store_vector_store_writebacks
               << " vector_writebacks="
               << uop_priority.vector_load_writebacks() +
                     vector_over_scalar.vector_load_writebacks() +
-                    scalar_over_vector.vector_load_writebacks()
+                    scalar_over_vector.vector_load_writebacks() +
+                    store_vector_load_writebacks
               << " prefetch_writebacks=" << environment.prefetch_writebacks()
               << " load_priority=3 same_rob_uop_priority=2"
               << " cross_cause_priority=2 scalar_vector_priority=2"
               << " store_priority=2 selector_cross=1"
+              << " store_vector_priority=2"
               << " load_oldest=0x" << std::hex
               << oldest_load_fault.address
               << " store_oldest=0x" << oldest_store_fault.address << std::dec
@@ -10932,7 +11086,8 @@ int run_exception_contracts(int argc, char **argv)
               << environment.ptw_requests() + load_priority.ptw_requests() +
                     vector_over_scalar.ptw_requests() +
                     scalar_over_vector.ptw_requests() +
-                    store_priority.ptw_requests()
+                    store_priority.ptw_requests() +
+                    store_vector_ptw_requests
               << " uncache_requests="
               << environment.uncache_requests() +
                     load_priority.uncache_requests() +
