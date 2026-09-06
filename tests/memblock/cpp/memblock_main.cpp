@@ -11334,6 +11334,296 @@ int run_vector_segment(int argc, char **argv)
         return 1;
     }
 
+    memblock::Environment indexed_segment_matrix(argc, argv);
+    constexpr std::uint64_t indexed_segment_base =
+        memblock::kDefaultMemoryBase + 0x800000;
+    indexed_segment_matrix.configure_backpressure(
+        0xa4093822299f31d0ULL, true);
+    if (!indexed_segment_matrix.reset()) {
+        std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL cycle="
+                  << indexed_segment_matrix.cycle()
+                  << " phase=indexed-segment-lmul-emul-reset reason="
+                  << indexed_segment_matrix.error() << '\n';
+        return 1;
+    }
+
+    constexpr std::array<memblock::VectorAddressingMode, 2>
+        indexed_segment_modes{{
+            memblock::VectorAddressingMode::indexed_unordered,
+            memblock::VectorAddressingMode::indexed_ordered,
+        }};
+    std::uint64_t indexed_segment_rob_cursor = 0;
+    unsigned indexed_segment_rob_wraps = 0;
+    unsigned indexed_segment_configurations = 0;
+    unsigned indexed_segment_unordered = 0;
+    unsigned indexed_segment_ordered = 0;
+    unsigned indexed_segment_extra_index_configs = 0;
+    unsigned indexed_segment_load_uops = 0;
+    unsigned indexed_segment_store_uops = 0;
+    unsigned indexed_segment_load_index_only_uops = 0;
+    unsigned indexed_segment_store_index_only_uops = 0;
+    auto next_indexed_segment_rob = [&]() {
+        const std::uint64_t absolute_rob = indexed_segment_rob_cursor++;
+        indexed_segment_rob_wraps += absolute_rob != 0 &&
+            absolute_rob % memblock::kRobEntries == 0;
+        return absolute_rob;
+    };
+    auto make_indexed_segment_uops = [&] (
+        bool store, std::uint64_t address, std::uint64_t absolute_rob,
+        std::uint8_t eew, std::uint8_t vsew, int lmul_log2,
+        int emul_log2, std::uint8_t nf,
+        memblock::VectorAddressingMode addressing, unsigned flow_num,
+        std::uint8_t vl, std::uint8_t data_seed) {
+        const unsigned fields = static_cast<unsigned>(nf) + 1U;
+        const unsigned lmul_uops = 1U << static_cast<unsigned>(
+            std::max(lmul_log2, 0));
+        const unsigned emul_uops = 1U << static_cast<unsigned>(
+            std::max(emul_log2, 0));
+        const unsigned data_uops = lmul_uops * fields;
+        const unsigned uop_count = std::max(data_uops, emul_uops);
+        const std::uint8_t vlmul = static_cast<std::uint8_t>(
+            lmul_log2 < 0 ? lmul_log2 + 8 : lmul_log2);
+        const unsigned index_bytes = 1U << eew;
+        const unsigned data_bytes = 1U << vsew;
+        std::array<unsigned char, 128> index_group{};
+        for (unsigned element = 0; element < vl; ++element) {
+            const std::uint64_t offset =
+                static_cast<std::uint64_t>(element) * data_bytes *
+                (fields + 1U);
+            for (unsigned byte = 0; byte < index_bytes; ++byte) {
+                index_group[element * index_bytes + byte] =
+                    static_cast<unsigned char>(offset >> (8 * byte));
+            }
+        }
+
+        std::vector<memblock::VectorMemoryTransaction> uops;
+        uops.reserve(uop_count);
+        for (unsigned uop = 0; uop < uop_count; ++uop) {
+            memblock::VectorMemoryTransaction transaction{
+                .store = store,
+                .segment = true,
+                .address = address,
+                .addressing = addressing,
+                .eew = eew,
+                .vsew = vsew,
+                .vl = vl,
+                .rob = static_cast<std::uint8_t>(absolute_rob %
+                    memblock::kRobEntries),
+                .rob_flag = ((absolute_rob /
+                    memblock::kRobEntries) & 1U) != 0,
+                .pdest = static_cast<std::uint8_t>(64 + uop),
+                .lane = 0,
+                .flow_num = static_cast<std::uint8_t>(flow_num),
+                .expected_trigger = memblock::kVectorWritebackTriggerNone,
+                .vlmul = vlmul,
+                .vuop_idx = static_cast<std::uint8_t>(uop),
+                .last_uop = uop + 1 == uop_count,
+                .nf = nf,
+                .vec_wen = !store && uop < data_uops,
+            };
+            transaction.oracle_index_group = index_group;
+            for (unsigned byte = 0; byte < transaction.data.size(); ++byte) {
+                transaction.data[byte] = static_cast<unsigned char>(
+                    data_seed + uop * 17 + byte * 7);
+            }
+            if (uop < emul_uops) {
+                const unsigned index_group_bytes = emul_log2 < 0
+                    ? 16U >> static_cast<unsigned>(-emul_log2)
+                    : 16U;
+                const unsigned source_offset = emul_log2 < 0
+                    ? 0
+                    : uop * 16U;
+                std::copy_n(
+                    index_group.begin() + source_offset,
+                    index_group_bytes, transaction.index.begin());
+            }
+            uops.push_back(transaction);
+        }
+        return std::pair{uops, data_uops};
+    };
+    auto initialize_indexed_segment_source = [&] (
+        const std::vector<memblock::VectorMemoryTransaction> &uops,
+        unsigned data_uops, unsigned case_index) {
+        for (unsigned uop_index = 0; uop_index < data_uops; ++uop_index) {
+            const auto &uop = uops[uop_index];
+            const unsigned element_bytes = 1U << memblock::vector_vsew(uop);
+            const std::uint16_t active = memblock::active_vector_elements(uop);
+            for (unsigned element = 0; element < 16U / element_bytes;
+                 ++element) {
+                if (((active >> element) & 1U) == 0) {
+                    continue;
+                }
+                const std::uint64_t address =
+                    memblock::vector_element_address(uop, element);
+                for (unsigned byte = 0; byte < element_bytes; ++byte) {
+                    indexed_segment_matrix.memory().write_byte(
+                        address + byte,
+                        static_cast<std::uint8_t>(
+                            0x3b + case_index * 31 +
+                            uop.vuop_idx * 11 + element * 7 + byte));
+                }
+            }
+        }
+    };
+    auto run_indexed_segment_instruction = [&] (
+        const std::vector<memblock::VectorMemoryTransaction> &uops,
+        unsigned data_uops, const char *phase, unsigned &uop_counter,
+        unsigned &index_only_counter) {
+        for (unsigned uop_index = 0; uop_index < uops.size(); ++uop_index) {
+            const auto &uop = uops[uop_index];
+            if (!uop.store && uop_index >= data_uops) {
+                indexed_segment_matrix.expect_vector_data(uop, uop.data);
+            } else {
+                indexed_segment_matrix.expect_vector(uop);
+            }
+            if (!indexed_segment_matrix.issue_vector(uop, 1024)) {
+                std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL cycle="
+                          << indexed_segment_matrix.cycle()
+                          << " phase=" << phase
+                          << " reason=" << indexed_segment_matrix.error()
+                          << '\n';
+                return false;
+            }
+        }
+        if (!indexed_segment_matrix.run_until_vector_complete(131072)) {
+            std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL cycle="
+                      << indexed_segment_matrix.cycle()
+                      << " phase=" << phase
+                      << " reason=" << indexed_segment_matrix.error() << '\n';
+            return false;
+        }
+        uop_counter += uops.size();
+        index_only_counter += uops.size() - data_uops;
+        return true;
+    };
+
+    for (const auto mode : indexed_segment_modes) {
+        for (std::uint8_t eew = 0; eew < 4; ++eew) {
+            for (std::uint8_t vsew = 0; vsew < 4; ++vsew) {
+                for (int lmul_log2 = -3; lmul_log2 <= 3; ++lmul_log2) {
+                    const int emul_log2 = static_cast<int>(eew) -
+                        static_cast<int>(vsew) + lmul_log2;
+                    if (lmul_log2 < static_cast<int>(vsew) - 3 ||
+                        emul_log2 < -3 || emul_log2 > 3) {
+                        continue;
+                    }
+                    const unsigned lmul_uops = 1U <<
+                        static_cast<unsigned>(std::max(lmul_log2, 0));
+                    const unsigned emul_uops = 1U <<
+                        static_cast<unsigned>(std::max(emul_log2, 0));
+                    const unsigned bytes_per_uop = lmul_log2 < 0
+                        ? 16U >> static_cast<unsigned>(-lmul_log2)
+                        : 16U;
+                    const unsigned flow_num = bytes_per_uop >> vsew;
+                    const unsigned vector_bytes = lmul_log2 < 0
+                        ? 16U >> static_cast<unsigned>(-lmul_log2)
+                        : 16U << static_cast<unsigned>(lmul_log2);
+                    const unsigned vlmax = vector_bytes >> vsew;
+                    for (unsigned fields = 2; fields <= 8; ++fields) {
+                        const unsigned data_uops = lmul_uops * fields;
+                        if (data_uops > 8) {
+                            continue;
+                        }
+                        const unsigned case_index =
+                            indexed_segment_configurations++;
+                        indexed_segment_unordered += mode ==
+                            memblock::VectorAddressingMode::indexed_unordered;
+                        indexed_segment_ordered += mode ==
+                            memblock::VectorAddressingMode::indexed_ordered;
+                        indexed_segment_extra_index_configs +=
+                            emul_uops > data_uops;
+                        const std::uint64_t case_base =
+                            indexed_segment_base + case_index * 0x1000;
+                        const std::uint64_t source = case_base + 0x400;
+                        const std::uint64_t destination = case_base + 0xc00;
+                        const auto nf = static_cast<std::uint8_t>(fields - 1);
+
+                        auto [loads, load_data_uops] =
+                            make_indexed_segment_uops(
+                                false, source, next_indexed_segment_rob(),
+                                eew, vsew, lmul_log2, emul_log2, nf, mode,
+                                flow_num, static_cast<std::uint8_t>(vlmax),
+                                static_cast<std::uint8_t>(0x23 + case_index));
+                        initialize_indexed_segment_source(
+                            loads, load_data_uops, case_index);
+                        if (!run_indexed_segment_instruction(
+                                loads, load_data_uops,
+                                "indexed-segment-lmul-emul-load",
+                                indexed_segment_load_uops,
+                                indexed_segment_load_index_only_uops)) {
+                            return 1;
+                        }
+
+                        auto [stores, store_data_uops] =
+                            make_indexed_segment_uops(
+                                true, destination, next_indexed_segment_rob(),
+                                eew, vsew, lmul_log2, emul_log2, nf, mode,
+                                flow_num, static_cast<std::uint8_t>(vlmax),
+                                static_cast<std::uint8_t>(0x63 + case_index));
+                        if (!run_indexed_segment_instruction(
+                                stores, store_data_uops,
+                                "indexed-segment-lmul-emul-store",
+                                indexed_segment_store_uops,
+                                indexed_segment_store_index_only_uops)) {
+                            return 1;
+                        }
+                        for (unsigned uop = 0; uop < store_data_uops; ++uop) {
+                            indexed_segment_matrix.
+                                record_committed_vector_store(stores[uop]);
+                        }
+
+                        auto [readbacks, readback_data_uops] =
+                            make_indexed_segment_uops(
+                                false, destination,
+                                next_indexed_segment_rob(), eew, vsew,
+                                lmul_log2, emul_log2, nf, mode, flow_num,
+                                static_cast<std::uint8_t>(vlmax),
+                                static_cast<std::uint8_t>(0xa3 + case_index));
+                        if (!run_indexed_segment_instruction(
+                                readbacks, readback_data_uops,
+                                "indexed-segment-lmul-emul-readback",
+                                indexed_segment_load_uops,
+                                indexed_segment_load_index_only_uops)) {
+                            return 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (!indexed_segment_matrix.pulse_sbuffer_flush() ||
+        !indexed_segment_matrix.run_until_sbuffer_empty(32768) ||
+        indexed_segment_configurations != 676 ||
+        indexed_segment_unordered != 338 || indexed_segment_ordered != 338 ||
+        indexed_segment_extra_index_configs != 32 ||
+        indexed_segment_load_uops != 7264 ||
+        indexed_segment_store_uops != 3632 ||
+        indexed_segment_load_index_only_uops != 168 ||
+        indexed_segment_store_index_only_uops != 84 ||
+        indexed_segment_rob_wraps != 12 ||
+        indexed_segment_matrix.lq_allocated() != 0 ||
+        indexed_segment_matrix.sq_allocated() != 0) {
+        std::cerr << "MEMBLOCK_VECTOR_SEGMENT_FAIL cycle="
+                  << indexed_segment_matrix.cycle()
+                  << " phase=indexed-segment-lmul-emul-conservation"
+                  << " configurations=" << indexed_segment_configurations
+                  << " unordered=" << indexed_segment_unordered
+                  << " ordered=" << indexed_segment_ordered
+                  << " extra_index_configs="
+                  << indexed_segment_extra_index_configs
+                  << " load_uops=" << indexed_segment_load_uops
+                  << " store_uops=" << indexed_segment_store_uops
+                  << " load_index_only="
+                  << indexed_segment_load_index_only_uops
+                  << " store_index_only="
+                  << indexed_segment_store_index_only_uops
+                  << " rob_wraps=" << indexed_segment_rob_wraps
+                  << " lq=" << indexed_segment_matrix.lq_allocated()
+                  << " sq=" << indexed_segment_matrix.sq_allocated()
+                  << " reason=" << indexed_segment_matrix.error() << '\n';
+        return 1;
+    }
+
     memblock::Environment redirect_environment(argc, argv);
     constexpr std::uint64_t redirect_base =
         memblock::kDefaultMemoryBase + 0x6a000;
@@ -11534,11 +11824,13 @@ int run_vector_segment(int argc, char **argv)
 
     const std::uint64_t aggregate_cycles =
         environment.cycle() + addressing_cycles + segment_lmul_matrix.cycle() +
+        indexed_segment_matrix.cycle() +
         redirect_environment.cycle() + fof_redirect_environment.cycle() +
         store_redirect_environment.cycle();
     const std::uint64_t aggregate_dcache_requests =
         environment.tilelink_requests() + addressing_dcache_requests +
         segment_lmul_matrix.tilelink_requests() +
+        indexed_segment_matrix.tilelink_requests() +
         redirect_environment.tilelink_requests() +
         fof_redirect_environment.tilelink_requests() +
         store_redirect_environment.tilelink_requests();
@@ -11559,6 +11851,19 @@ int run_vector_segment(int argc, char **argv)
               << " lmul_load_uops=" << segment_lmul_load_uops
               << " lmul_store_uops=" << segment_lmul_store_uops
               << " lmul_rob_wraps=" << segment_lmul_rob_wraps
+              << " indexed_lmul_configurations="
+                    << indexed_segment_configurations
+              << " indexed_lmul_unordered=" << indexed_segment_unordered
+              << " indexed_lmul_ordered=" << indexed_segment_ordered
+              << " indexed_lmul_extra_index_configs="
+                    << indexed_segment_extra_index_configs
+              << " indexed_lmul_load_uops=" << indexed_segment_load_uops
+              << " indexed_lmul_store_uops=" << indexed_segment_store_uops
+              << " indexed_lmul_load_index_only="
+                    << indexed_segment_load_index_only_uops
+              << " indexed_lmul_store_index_only="
+                    << indexed_segment_store_index_only_uops
+              << " indexed_lmul_rob_wraps=" << indexed_segment_rob_wraps
               << " segment_lsq_allocations=0"
               << " readback_lq_allocated=" << environment.lq_allocated()
               << " readback_lq_dequeued=" << environment.lq_dequeued()

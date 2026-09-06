@@ -379,6 +379,7 @@ struct VectorMemoryTransaction {
     std::optional<std::uint64_t> oracle_address;
     std::array<unsigned char, 16> data{};
     std::array<unsigned char, 16> index{};
+    std::optional<std::array<unsigned char, 128>> oracle_index_group;
     std::int64_t stride = 0;
     VectorAddressingMode addressing = VectorAddressingMode::unit_stride;
     std::uint8_t eew = 0;
@@ -420,6 +421,7 @@ struct VectorMemoryTransaction {
     bool fault_only_first = false;
     bool is_vleff = false;
     bool vl_wen = false;
+    std::optional<bool> vec_wen;
     // Lane 0 exposes all three debug classes.  Lane 1 is intentionally
     // checked only when a caller has an explicit expectation because those
     // generated sideband ports are pruned in this top-level build.
@@ -663,8 +665,12 @@ inline std::uint64_t vector_element_address(
         }
         std::uint64_t offset = 0;
         for (unsigned byte = 0; byte < index_bytes; ++byte) {
-            offset |= std::uint64_t{
-                          transaction.index[index_element * index_bytes + byte]}
+            const unsigned index_offset = index_element * index_bytes + byte;
+            const unsigned char value =
+                transaction.segment && transaction.oracle_index_group
+                ? transaction.oracle_index_group->at(index_offset)
+                : transaction.index.at(index_offset);
+            offset |= std::uint64_t{value}
                       << (8 * byte);
         }
         return base + offset + field_offset;
@@ -3322,7 +3328,8 @@ public:
                 transaction.expected_trigger,
                 transaction.expected_writeback_vstart,
                 transaction.check_data,
-                !transaction.store && !transaction.vl_wen,
+                transaction.vec_wen.value_or(
+                    !transaction.store && !transaction.vl_wen),
                 false,
                 transaction.vl_wen,
                 transaction.input_flush_pipe,
@@ -3413,7 +3420,8 @@ public:
                 return;
             }
             ++fof_fix_observed_;
-        } else if (!expected.store && expected.exception_mask == 0) {
+        } else if (!expected.store && expected.exception_mask == 0 &&
+                   expected.vec_wen) {
             if (!writeback.vec_wen || writeback.pdest != expected.pdest ||
                 (expected.check_data &&
                  !matches_load_data(writeback.data, expected)) ||
@@ -3421,6 +3429,8 @@ public:
                 fail("mismatched vector load data", lane, writeback, &expected);
                 return;
             }
+            ++load_observed_;
+        } else if (!expected.store && expected.exception_mask == 0) {
             ++load_observed_;
         } else if (expected.store) {
             ++store_observed_;
@@ -3669,7 +3679,8 @@ class Environment {
         issue.ftq_offset = transaction.ftq_offset;
         issue.fu_type = vector_fu_type(transaction);
         issue.fu_op_type = vector_fu_op_type(transaction);
-        issue.vec_wen = !transaction.store && !transaction.vl_wen;
+        issue.vec_wen = transaction.vec_wen.value_or(
+            !transaction.store && !transaction.vl_wen);
         issue.vl_wen = transaction.vl_wen;
         issue.vma = transaction.vma;
         issue.vta = transaction.vta;

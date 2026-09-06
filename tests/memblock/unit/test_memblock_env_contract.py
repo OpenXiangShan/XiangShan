@@ -1664,6 +1664,82 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn("class strdiedLSNumOfUopTable", uop_info)
         self.assertIn("(MulDataSize(emul) >> eew).asUInt", common)
 
+    def test_vector_indexed_segment_lmul_emul_nf_matrix_matches_rtl_contract(
+        self,
+    ) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        common = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VecCommon.scala"
+        ).read_text()
+        segment = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VSegmentUnit.scala"
+        ).read_text()
+        uop_info = (
+            REPO_ROOT / "src/main/scala/xiangshan/backend/decode/UopInfoGen.scala"
+        ).read_text()
+
+        configurations = 0
+        total_uops = 0
+        data_uops = 0
+        index_only_uops = 0
+        data_flows = 0
+        extra_index_configurations = 0
+        for eew in range(4):
+            for vsew in range(4):
+                for lmul_log2 in range(-3, 4):
+                    emul_log2 = eew - vsew + lmul_log2
+                    if lmul_log2 < vsew - 3 or not -3 <= emul_log2 <= 3:
+                        continue
+                    lmul_uops = 1 << max(lmul_log2, 0)
+                    emul_uops = 1 << max(emul_log2, 0)
+                    bytes_per_uop = 16 >> max(-lmul_log2, 0)
+                    flow_num = bytes_per_uop >> vsew
+                    for fields in range(2, 9):
+                        data_uop_count = lmul_uops * fields
+                        if data_uop_count > 8:
+                            continue
+                        uop_count = max(data_uop_count, emul_uops)
+                        configurations += 1
+                        total_uops += uop_count
+                        data_uops += data_uop_count
+                        index_only_uops += uop_count - data_uop_count
+                        data_flows += data_uop_count * flow_num
+                        extra_index_configurations += emul_uops > data_uop_count
+        self.assertEqual(configurations, 338)
+        self.assertEqual(total_uops, 1816)
+        self.assertEqual(data_uops, 1774)
+        self.assertEqual(index_only_uops, 42)
+        self.assertEqual(data_flows, 9792)
+        self.assertEqual(extra_index_configurations, 16)
+
+        for contract in (
+            "std::optional<std::array<unsigned char, 128>> oracle_index_group",
+            "std::optional<bool> vec_wen",
+            "transaction.segment && transaction.oracle_index_group",
+            "make_indexed_segment_uops",
+            "const unsigned uop_count = std::max(data_uops, emul_uops)",
+            ".vec_wen = !store && uop < data_uops",
+            "indexed_segment_configurations != 676",
+            "indexed_segment_unordered != 338",
+            "indexed_segment_ordered != 338",
+            "indexed_segment_extra_index_configs != 32",
+            "indexed_segment_load_uops != 7264",
+            "indexed_segment_store_uops != 3632",
+            "indexed_segment_load_index_only_uops != 168",
+            "indexed_segment_store_index_only_uops != 84",
+            "indexed_segment_rob_wraps != 12",
+            '<< " indexed_lmul_configurations="',
+        ):
+            self.assertIn(contract, environment + main)
+        self.assertIn("class indexedLSNumOfUopTable", uop_info)
+        self.assertIn(
+            "GenRealFlowNum(instType, emul, lmul, eew, sew, true)", segment
+        )
+        self.assertIn("isIndexed(instType)", segment)
+        self.assertIn("val splitPtrOffset = Mux(", segment)
+        self.assertIn("val segmentIndexFlowNum", common)
+
     def test_vector_segment_fof_contract_is_registered(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
