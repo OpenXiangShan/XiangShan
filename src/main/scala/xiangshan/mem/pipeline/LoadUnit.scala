@@ -1827,7 +1827,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.ldout.bits        := s3_ld_wb_meta
   io.ldout.bits.data   := Mux(s3_valid, s3_ld_data_frm_pipe(0), s3_ld_data_frm_mmio)
   io.ldout.bits.uop.rfWen := s3_rfWen && !io.ldout.bits.uop.exceptionVec.asUInt.orR
-  io.ldout.bits.uop.fpWen := s3_fpWen
+  io.ldout.bits.uop.fpWen := s3_fpWen && !io.ldout.bits.uop.exceptionVec.asUInt.orR
   io.ldout.bits.uop.pdest := s3_pdest
   io.ldout.bits.uop.exceptionVec := ExceptionNO.selectByFu(s3_ld_wb_meta.uop.exceptionVec, LduCfg)
   io.ldout.bits.isFromLoadUnit := true.B
