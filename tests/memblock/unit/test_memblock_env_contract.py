@@ -548,6 +548,30 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "fp-loads",
         ):
             self.assertIn(contract, environment + main + makefile)
+
+        scala_ptw_modes = {
+            name: int(bits, 2)
+            for name, bits in re.findall(
+                r'def\s+(noS2xlate|onlyStage1|onlyStage2|allStage)\s*=\s*"b([01]+)"',
+                mmu_constants,
+            )
+        }
+        cpp_ptw_modes = {
+            name: int(value)
+            for name, value in re.findall(
+                r"(no_stage_two|only_stage_one|only_stage_two|all_stages)\s*=\s*(\d+)",
+                environment,
+            )
+        }
+        self.assertEqual(
+            cpp_ptw_modes,
+            {
+                "no_stage_two": scala_ptw_modes["noS2xlate"],
+                "only_stage_one": scala_ptw_modes["onlyStage1"],
+                "only_stage_two": scala_ptw_modes["onlyStage2"],
+                "all_stages": scala_ptw_modes["allStage"],
+            },
+        )
         for contract in (
             "map_sv39_2m",
             "map_sv39_1g",

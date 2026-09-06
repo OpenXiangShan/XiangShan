@@ -381,11 +381,13 @@ and checks every Grant/GrantData sink on E-channel GrantAck and forces at least
 one E-channel stall to check payload stability.
 
 `ifetch-ptw-bridge` directly drives the IFU-originated PTW request across the
-MemBlock top-level boundary. It checks Sv39 and Sv48 stage-1 walks plus all
-four Sv39/Sv48 x Sv39x4/Sv48x4 nested walks, reconstructs the translated PPN
-from the sector response, checks ASID/VMID, permissions, faults, and stage-2
-metadata, and holds response ready low to verify stable payload under
-backpressure. This is separate from the data-side TLB translation tests.
+MemBlock top-level boundary. It checks valid and invalid Sv39/Sv48 stage-1
+walks, PBMT=NC/IO leaves, all four Sv39/Sv48 x Sv39x4/Sv48x4 nested walks,
+and both Sv39/Sv48 forms of the VS-only and G-only degenerations. It
+reconstructs translated PPNs from the sector response, checks the active
+stage's ASID/VMID, permissions, PBMT, and faults, requires a cold PTW walk,
+and holds response ready low to verify stable payload under backpressure.
+This is separate from the data-side TLB translation tests.
 
 `uncache-errors` injects one denied and one corrupt Uncache response and checks
 the exception contract through the PBMT=NC adapter. This test caught and now

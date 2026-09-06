@@ -5968,20 +5968,40 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
         memblock::ReferencePageMode vs_mode;
         memblock::ReferencePageMode g_mode;
         bool nested;
+        memblock::ReferencePbmt pbmt;
+        bool page_fault;
     };
-    constexpr std::array<Case, 6> cases{{
+    constexpr std::array<Case, 10> cases{{
         {"Sv39", memblock::ReferencePageMode::sv39,
-         memblock::ReferencePageMode::bare, false},
+         memblock::ReferencePageMode::bare, false,
+         memblock::ReferencePbmt::pma, false},
         {"Sv48", memblock::ReferencePageMode::sv48,
-         memblock::ReferencePageMode::bare, false},
+         memblock::ReferencePageMode::bare, false,
+         memblock::ReferencePbmt::pma, false},
         {"Sv39-Sv39x4", memblock::ReferencePageMode::sv39,
-         memblock::ReferencePageMode::sv39, true},
+         memblock::ReferencePageMode::sv39, true,
+         memblock::ReferencePbmt::pma, false},
         {"Sv39-Sv48x4", memblock::ReferencePageMode::sv39,
-         memblock::ReferencePageMode::sv48, true},
+         memblock::ReferencePageMode::sv48, true,
+         memblock::ReferencePbmt::pma, false},
         {"Sv48-Sv39x4", memblock::ReferencePageMode::sv48,
-         memblock::ReferencePageMode::sv39, true},
+         memblock::ReferencePageMode::sv39, true,
+         memblock::ReferencePbmt::pma, false},
         {"Sv48-Sv48x4", memblock::ReferencePageMode::sv48,
-         memblock::ReferencePageMode::sv48, true},
+         memblock::ReferencePageMode::sv48, true,
+         memblock::ReferencePbmt::pma, false},
+        {"Sv39-PBMT-NC", memblock::ReferencePageMode::sv39,
+         memblock::ReferencePageMode::bare, false,
+         memblock::ReferencePbmt::nc, false},
+        {"Sv48-PBMT-IO", memblock::ReferencePageMode::sv48,
+         memblock::ReferencePageMode::bare, false,
+         memblock::ReferencePbmt::io, false},
+        {"Sv39-invalid-L0", memblock::ReferencePageMode::sv39,
+         memblock::ReferencePageMode::bare, false,
+         memblock::ReferencePbmt::pma, true},
+        {"Sv48-invalid-L0", memblock::ReferencePageMode::sv48,
+         memblock::ReferencePageMode::bare, false,
+         memblock::ReferencePbmt::pma, true},
     }};
     constexpr std::uint64_t vs_root = 0x94000000ULL;
     constexpr std::uint64_t g_root = 0x95000000ULL;
@@ -6012,10 +6032,14 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
             configured = item.vs_mode == memblock::ReferencePageMode::sv48
                 ? environment.map_sv48_4k(
                       virtual_page, stage1_output, vs_root, true, false,
-                      true, false)
+                      true, false,
+                      item.pbmt == memblock::ReferencePbmt::nc,
+                      item.pbmt == memblock::ReferencePbmt::io)
                 : environment.map_sv39_4k(
                       virtual_page, stage1_output, vs_root, true, false,
-                      true, false);
+                      true, false,
+                      item.pbmt == memblock::ReferencePbmt::nc,
+                      item.pbmt == memblock::ReferencePbmt::io);
         }
         if (configured && item.nested) {
             const unsigned vs_table_pages = item.vs_mode ==
@@ -6039,6 +6063,23 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
                           guest_page, host_page, g_root, true, false, true);
             }
         }
+        if (configured && item.page_fault) {
+            const auto leaf_pte = memblock::reference_pte_address_at_level(
+                environment.memory(), vs_root, virtual_page, item.vs_mode, 0);
+            if (!leaf_pte) {
+                configured = false;
+            } else {
+                environment.memory().write_u64(*leaf_pte, 0);
+            }
+        }
+        if (configured) {
+            const auto reference = memblock::reference_page_walk(
+                environment.memory(), vs_root, virtual_page, item.vs_mode);
+            configured = item.page_fault
+                ? !reference.translated && reference.fault_level == 0
+                : reference.translated &&
+                    reference.physical_address == stage1_output;
+        }
         if (configured) {
             configured = item.nested
                 ? environment.activate_two_stage_modes(
@@ -6057,8 +6098,11 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
 
         const std::uint64_t vpn = virtual_page >> 12;
         memblock::Environment::IFetchPtwResponse response;
+        const auto translation_mode = item.nested
+            ? memblock::PtwTranslationMode::all_stages
+            : memblock::PtwTranslationMode::no_stage_two;
         if (!environment.issue_ifetch_ptw_request(
-                vpn, item.nested ? 3U : 0U, response,
+                vpn, translation_mode, response,
                 response_stall_cycles)) {
             std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=" << item.name
                       << " cycle=" << environment.cycle()
@@ -6071,18 +6115,27 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
         const std::uint64_t stage1_ppn = stage1_output >> 12;
         const std::uint64_t reconstructed_s1_ppn =
             (response.s1_ppn << 3) | response.s1_ppn_low[sector];
-        const bool s1_valid =
-            response.s2xlate == (item.nested ? 3U : 0U) &&
+        const bool s1_identity_valid =
+            response.s2xlate == static_cast<std::uint8_t>(translation_mode) &&
             response.s1_tag == (vpn >> 3) && response.s1_asid == asid &&
-            response.s1_n == false && response.s1_pbmt == 0 &&
-            !response.s1_d && response.s1_a && !response.s1_g &&
-            !response.s1_u && response.s1_x && !response.s1_w &&
-            response.s1_r && response.s1_level == 0 && response.s1_v &&
+            response.s1_n == false &&
+            response.s1_pbmt == static_cast<std::uint8_t>(item.pbmt) &&
+            response.s1_level == 0 &&
             response.s1_addr_low == sector &&
             response.s1_pteidx == (1U << sector) &&
-            (response.s1_valididx & (1U << sector)) != 0 &&
-            reconstructed_s1_ppn == stage1_ppn &&
-            !response.s1_pf && !response.s1_af;
+            (response.s1_valididx & (1U << sector)) != 0;
+        const bool s1_result_valid = item.page_fault
+            ? !response.s1_d && !response.s1_a && !response.s1_g &&
+                !response.s1_u && !response.s1_x && !response.s1_w &&
+                !response.s1_r && !response.s1_v &&
+                reconstructed_s1_ppn == 0 && response.s1_pf &&
+                !response.s1_af
+            : !response.s1_d && response.s1_a && !response.s1_g &&
+                !response.s1_u && response.s1_x && !response.s1_w &&
+                response.s1_r && response.s1_v &&
+                reconstructed_s1_ppn == stage1_ppn &&
+                !response.s1_pf && !response.s1_af;
+        const bool s1_valid = s1_identity_valid && s1_result_valid;
         const bool s2_valid = !item.nested ||
             (response.s1_vmid == vmid &&
              response.s2_tag == (guest_page >> 12) &&
@@ -6104,6 +6157,8 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
                       << " s1_asid=" << response.s1_asid
                       << " s1_vmid=" << response.s1_vmid
                       << " s2_vmid=" << response.s2_vmid
+                      << " s1_pbmt=" << static_cast<unsigned>(response.s1_pbmt)
+                      << " s1_v=" << response.s1_v
                       << " s1_perm=" << response.s1_d << response.s1_a
                       << response.s1_g << response.s1_u << response.s1_x
                       << response.s1_w << response.s1_r
@@ -6122,11 +6177,148 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
         total_ptw_requests += environment.ptw_requests();
     }
 
+    struct DegenerateCase {
+        const char *name;
+        memblock::ReferencePageMode mode;
+        bool only_stage_two;
+    };
+    constexpr std::array<DegenerateCase, 4> degenerate_cases{{
+        {"Sv39x4-onlyStage2", memblock::ReferencePageMode::sv39, true},
+        {"Sv48x4-onlyStage2", memblock::ReferencePageMode::sv48, true},
+        {"Sv39-onlyStage1", memblock::ReferencePageMode::sv39, false},
+        {"Sv48-onlyStage1", memblock::ReferencePageMode::sv48, false},
+    }};
+    for (unsigned case_index = 0; case_index < degenerate_cases.size();
+         ++case_index) {
+        const auto &item = degenerate_cases[case_index];
+        memblock::Environment environment(argc, argv);
+        const std::uint64_t input_page = 0xb8012000ULL +
+            case_index * 0x200000ULL;
+        const std::uint64_t output_page = 0xd0012000ULL +
+            case_index * 0x200000ULL;
+        environment.configure_backpressure(
+            0x94d049bb133111ebULL ^ case_index, true,
+            memblock::ResponseLatencyProfile::spec);
+
+        bool configured = environment.reset();
+        if (configured) {
+            if (item.only_stage_two) {
+                configured = item.mode == memblock::ReferencePageMode::sv48
+                    ? environment.map_sv48x4_4k(
+                          input_page, output_page, g_root, true, false, true)
+                    : environment.map_sv39x4_4k(
+                          input_page, output_page, g_root, true, false, true);
+            } else {
+                configured = item.mode == memblock::ReferencePageMode::sv48
+                    ? environment.map_sv48_4k(
+                          input_page, output_page, vs_root, true, false,
+                          true, false)
+                    : environment.map_sv39_4k(
+                          input_page, output_page, vs_root, true, false,
+                          true, false);
+            }
+        }
+        if (configured) {
+            const auto reference = memblock::reference_page_walk(
+                environment.memory(), item.only_stage_two ? g_root : vs_root,
+                input_page, item.mode, item.only_stage_two);
+            configured = reference.translated &&
+                reference.physical_address == output_page;
+        }
+        if (configured) {
+            configured = environment.activate_two_stage_modes(
+                item.only_stage_two
+                    ? memblock::ReferencePageMode::bare
+                    : item.mode,
+                item.only_stage_two
+                    ? item.mode
+                    : memblock::ReferencePageMode::bare,
+                item.only_stage_two ? 0 : vs_root,
+                item.only_stage_two ? g_root : 0, asid, vmid);
+        }
+        if (configured) {
+            configured = environment.run_cycles(64);
+        }
+        if (!configured) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=" << item.name
+                      << " cycle=" << environment.cycle()
+                      << " phase=configuration reason=" << environment.error()
+                      << '\n';
+            return 1;
+        }
+
+        const std::uint64_t vpn = input_page >> 12;
+        const std::uint64_t ptw_before_request = environment.ptw_requests();
+        memblock::Environment::IFetchPtwResponse response;
+        const auto translation_mode = item.only_stage_two
+            ? memblock::PtwTranslationMode::only_stage_two
+            : memblock::PtwTranslationMode::only_stage_one;
+        if (!environment.issue_ifetch_ptw_request(
+                vpn, translation_mode, response,
+                response_stall_cycles)) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=" << item.name
+                      << " cycle=" << environment.cycle()
+                      << " phase=request reason=" << environment.error()
+                      << '\n';
+            return 1;
+        }
+
+        const unsigned sector = static_cast<unsigned>(vpn & 7U);
+        const std::uint64_t reconstructed_s1_ppn =
+            (response.s1_ppn << 3) | response.s1_ppn_low[sector];
+        const bool s1_valid = item.only_stage_two || (
+            response.s1_tag == (vpn >> 3) && response.s1_asid == asid &&
+            response.s1_vmid == vmid && !response.s1_n &&
+            response.s1_pbmt == 0 && response.s1_addr_low == sector &&
+            response.s1_pteidx == (1U << sector) &&
+            (response.s1_valididx & (1U << sector)) != 0 &&
+            !response.s1_d && response.s1_a && !response.s1_g &&
+            !response.s1_u && response.s1_x && !response.s1_w &&
+            response.s1_r && response.s1_level == 0 && response.s1_v &&
+            reconstructed_s1_ppn == (output_page >> 12) &&
+            !response.s1_pf && !response.s1_af);
+        const bool s2_valid = !item.only_stage_two ||
+            (response.s2_tag == vpn && response.s2_vmid == vmid &&
+             !response.s2_n && response.s2_pbmt == 0 &&
+             response.s2_ppn == (output_page >> 12) && !response.s2_d &&
+             response.s2_a && !response.s2_g && response.s2_u &&
+             response.s2_x && !response.s2_w && response.s2_r &&
+             response.s2_level == 0 && !response.s2_gpf &&
+             !response.s2_gaf);
+        if (response.s2xlate != static_cast<std::uint8_t>(translation_mode) ||
+            !s1_valid || !s2_valid ||
+            environment.ptw_requests() <= ptw_before_request) {
+            std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=" << item.name
+                      << " cycle=" << environment.cycle()
+                      << " phase=response"
+                      << " s2xlate=" << static_cast<unsigned>(response.s2xlate)
+                      << " s1_tag=0x" << std::hex << response.s1_tag
+                      << " s1_ppn=0x" << reconstructed_s1_ppn
+                      << " s2_tag=0x" << response.s2_tag
+                      << " s2_ppn=0x" << response.s2_ppn << std::dec
+                      << " s1_asid=" << response.s1_asid
+                      << " s1_vmid=" << response.s1_vmid
+                      << " s2_vmid=" << response.s2_vmid
+                      << " s1_v=" << response.s1_v
+                      << " s1_pf=" << response.s1_pf
+                      << " s1_af=" << response.s1_af
+                      << " s2_gpf=" << response.s2_gpf
+                      << " s2_gaf=" << response.s2_gaf
+                      << " ptw_requests=" << environment.ptw_requests()
+                      << '\n';
+            return 1;
+        }
+        total_cycles += environment.cycle();
+        total_ptw_requests += environment.ptw_requests();
+    }
+
     std::cout << "MEMBLOCK_IFETCH_PTW_BRIDGE_PASS"
-              << " cases=" << cases.size()
-              << " stage1=2 nested=4"
+              << " cases=" << cases.size() + degenerate_cases.size()
+              << " stage1_valid=4 nested_valid=4 stage1_fault=2"
+              << " pbmt=2 only_stage1=2 only_stage2=2"
               << " response_stall_cycles="
-              << cases.size() * response_stall_cycles
+              << (cases.size() + degenerate_cases.size()) *
+                    response_stall_cycles
               << " ptw_requests=" << total_ptw_requests
               << " cycles=" << total_cycles
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
@@ -8174,6 +8366,7 @@ int run_translation_context(int argc, char **argv)
 int run_translation_bare(int argc, char **argv)
 {
     unsigned completed = 0;
+    std::array<std::uint64_t, 4> ptw_requests{};
     auto run_load = [&](memblock::Environment &environment,
                         const memblock::LoadTransaction &transaction) {
         environment.expect_load(transaction);
@@ -8203,6 +8396,7 @@ int run_translation_bare(int argc, char **argv)
                       << environment.error() << '\n';
             return 1;
         }
+        ptw_requests[completed] = environment.ptw_requests();
         ++completed;
     }
 
@@ -8240,6 +8434,7 @@ int run_translation_bare(int argc, char **argv)
             std::cerr << "MEMBLOCK_TRANSLATION_BARE_FAIL phase=g-only-reference\n";
             return 1;
         }
+        ptw_requests[completed] = environment.ptw_requests();
         ++completed;
     }
 
@@ -8269,6 +8464,7 @@ int run_translation_bare(int argc, char **argv)
                       << environment.error() << '\n';
             return 1;
         }
+        ptw_requests[completed] = environment.ptw_requests();
         ++completed;
     }
 
@@ -8295,11 +8491,16 @@ int run_translation_bare(int argc, char **argv)
                       << environment.error() << '\n';
             return 1;
         }
+        ptw_requests[completed] = environment.ptw_requests();
         ++completed;
     }
 
     std::cout << "MEMBLOCK_TRANSLATION_BARE_PASS"
               << " cases=" << completed
+              << " stage1_ptw=" << ptw_requests[0]
+              << " g_only_ptw=" << ptw_requests[1]
+              << " vs_only_ptw=" << ptw_requests[2]
+              << " both_bare_ptw=" << ptw_requests[3]
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

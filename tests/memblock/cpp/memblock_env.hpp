@@ -512,6 +512,14 @@ enum class ReferencePageMode : std::uint8_t {
     sv48 = 9,
 };
 
+// Must remain identical to HasPtwConst in MMUConst.scala.
+enum class PtwTranslationMode : std::uint8_t {
+    no_stage_two = 0,
+    only_stage_one = 1,
+    only_stage_two = 2,
+    all_stages = 3,
+};
+
 enum class ReferencePbmt : std::uint8_t {
     pma = 0,
     nc = 1,
@@ -3101,14 +3109,15 @@ public:
     }
 
     bool issue_ifetch_ptw_request(
-        std::uint64_t vpn, std::uint8_t s2xlate,
+        std::uint64_t vpn, PtwTranslationMode mode,
         IFetchPtwResponse &response, unsigned response_stall_cycles = 4,
         unsigned timeout = 16384)
     {
-        if ((vpn >> 38) != 0 || s2xlate > 3) {
+        if ((vpn >> 38) != 0) {
             error_ = "invalid IFetch PTW request";
             return false;
         }
+        const auto s2xlate = static_cast<std::uint8_t>(mode);
         const auto capture = [&]() {
             IFetchPtwResponse result;
             result.s2xlate = static_cast<std::uint8_t>(
