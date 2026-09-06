@@ -2024,6 +2024,169 @@ int run_load_feedback(int argc, char **argv)
                   << environment.tilelink_requests() << '\n';
         return 1;
     }
+
+    memblock::Environment fault_environment(argc, argv);
+    constexpr std::uint64_t fault_address = 0x60000000ULL;
+    constexpr std::uint64_t fault_root = 0xe4000000ULL;
+    const memblock::LoadTransaction fault_load{
+        .address = fault_address,
+        .op = memblock::LoadOp::ld,
+        .rob = 72,
+        .lq = 0,
+        .pdest = 70,
+        .lane = 0,
+        .expected_exception_mask = memblock::kExceptionLoadPageFault,
+    };
+    if (!fault_environment.reset() ||
+        !fault_environment.activate_sv39(fault_root)) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << fault_environment.cycle()
+                  << " phase=page-fault-configuration reason="
+                  << fault_environment.error() << '\n';
+        return 1;
+    }
+    const std::uint64_t fault_ptw_before = fault_environment.ptw_requests();
+    const std::uint64_t fault_dcache_before =
+        fault_environment.tilelink_requests();
+    fault_environment.expect_load(fault_load);
+    if (!fault_environment.enqueue_load(fault_load) ||
+        !fault_environment.issue_load(fault_load, 256) ||
+        !fault_environment.run_until_complete(4096) ||
+        !fault_environment.run_until_lq_retired(1024) ||
+        !fault_environment.run_cycles(16)) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << fault_environment.cycle()
+                  << " phase=page-fault-complete reason="
+                  << fault_environment.error() << '\n';
+        return 1;
+    }
+    const auto &fault_stats = fault_environment.scalar_load_feedback_stats();
+    std::uint64_t fault_wakeups = 0;
+    std::uint64_t fault_cancels = 0;
+    for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+        fault_wakeups += fault_stats.wakeups[lane];
+        fault_cancels += fault_stats.ld2_cancels[lane];
+    }
+    if (fault_cancels == 0 || fault_wakeups != fault_cancels ||
+        fault_environment.ptw_requests() <= fault_ptw_before ||
+        fault_environment.tilelink_requests() != fault_dcache_before) {
+        std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                  << fault_environment.cycle()
+                  << " phase=page-fault-classification wakeups="
+                  << fault_wakeups << " cancels=" << fault_cancels
+                  << " ptw_before=" << fault_ptw_before << " ptw_after="
+                  << fault_environment.ptw_requests()
+                  << " dcache_before=" << fault_dcache_before
+                  << " dcache_after=" << fault_environment.tilelink_requests()
+                  << '\n';
+        return 1;
+    }
+
+    auto run_uncache_feedback = [&](bool mmio, std::uint64_t &wakeups,
+                                    std::uint64_t &cancels,
+                                    std::uint64_t &case_cycles) {
+        memblock::Environment uncache_environment(argc, argv);
+        const std::uint64_t virtual_address = mmio
+            ? 0x61000018ULL : 0x62000018ULL;
+        const std::uint64_t physical_address = mmio
+            ? 0xa1000018ULL : 0xa2000018ULL;
+        const std::uint64_t root = mmio ? 0xe5000000ULL : 0xe6000000ULL;
+        uncache_environment.memory().fill_incrementing(
+            physical_address & ~std::uint64_t{63}, 64, mmio ? 0xa5 : 0xb7);
+        uncache_environment.configure_backpressure(
+            mmio ? 0x9b05688c2b3e6c1fULL : 0x510e527fade682d1ULL,
+            true, memblock::ResponseLatencyProfile::spec);
+        if (!uncache_environment.reset() ||
+            !uncache_environment.map_sv39_4k(
+                virtual_address, physical_address, root, true, true, false,
+                false, !mmio, mmio) ||
+            !uncache_environment.activate_sv39(root)) {
+            std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                      << uncache_environment.cycle() << " phase="
+                      << (mmio ? "mmio" : "nc")
+                      << "-configuration reason="
+                      << uncache_environment.error() << '\n';
+            return false;
+        }
+        const memblock::LoadTransaction transaction{
+            .address = virtual_address,
+            .oracle_address = physical_address,
+            .op = memblock::LoadOp::ld,
+            .rob = static_cast<std::uint8_t>(mmio ? 80 : 81),
+            .lq = 0,
+            .pdest = static_cast<std::uint8_t>(mmio ? 71 : 72),
+            .lane = static_cast<unsigned>(mmio ? 1 : 2),
+            .expected_debug_is_mmio = mmio,
+            .expected_debug_is_ncio = mmio
+                ? std::optional<bool>{false} : std::nullopt,
+            .expected_debug_is_perf_cnt = false,
+        };
+        const std::uint64_t ptw_before = uncache_environment.ptw_requests();
+        const std::uint64_t dcache_before =
+            uncache_environment.tilelink_requests();
+        const std::uint64_t uncache_before =
+            uncache_environment.uncache_requests();
+        uncache_environment.expect_load(transaction);
+        if (!uncache_environment.set_rob_head(transaction.rob) ||
+            !uncache_environment.enqueue_load(transaction) ||
+            !uncache_environment.issue_load(transaction, 2048) ||
+            (mmio && !uncache_environment.wait_for_mmio_request(
+                transaction.rob, transaction.rob_flag, 4096)) ||
+            !uncache_environment.run_until_complete(8192) ||
+            !uncache_environment.run_until_lq_retired(2048) ||
+            !uncache_environment.run_cycles(16)) {
+            std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                      << uncache_environment.cycle() << " phase="
+                      << (mmio ? "mmio" : "nc") << "-complete reason="
+                      << uncache_environment.error() << '\n';
+            return false;
+        }
+        const auto &feedback =
+            uncache_environment.scalar_load_feedback_stats();
+        bool metadata_match = false;
+        for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+            wakeups += feedback.wakeups[lane];
+            cancels += feedback.ld2_cancels[lane];
+            const auto &sample = feedback.last_wakeup[lane];
+            metadata_match = metadata_match ||
+                (sample.valid && sample.pdest == transaction.pdest &&
+                 sample.rf_wen == transaction.rf_wen &&
+                 sample.fp_wen == transaction.fp_wen);
+        }
+        case_cycles = uncache_environment.cycle();
+        if (cancels == 0 || wakeups != cancels + 1 || !metadata_match ||
+            uncache_environment.ptw_requests() <= ptw_before ||
+            uncache_environment.tilelink_requests() != dcache_before ||
+            uncache_environment.uncache_requests() != uncache_before + 1) {
+            std::cerr << "MEMBLOCK_LOAD_FEEDBACK_FAIL cycle="
+                      << uncache_environment.cycle() << " phase="
+                      << (mmio ? "mmio" : "nc")
+                      << "-classification wakeups=" << wakeups
+                      << " cancels=" << cancels
+                      << " metadata_match=" << metadata_match
+                      << " ptw_before=" << ptw_before << " ptw_after="
+                      << uncache_environment.ptw_requests()
+                      << " dcache_before=" << dcache_before
+                      << " dcache_after="
+                      << uncache_environment.tilelink_requests()
+                      << " uncache_before=" << uncache_before
+                      << " uncache_after="
+                      << uncache_environment.uncache_requests() << '\n';
+            return false;
+        }
+        return true;
+    };
+    std::uint64_t mmio_wakeups = 0;
+    std::uint64_t mmio_cancels = 0;
+    std::uint64_t mmio_cycles = 0;
+    std::uint64_t nc_wakeups = 0;
+    std::uint64_t nc_cancels = 0;
+    std::uint64_t nc_cycles = 0;
+    if (!run_uncache_feedback(
+            true, mmio_wakeups, mmio_cancels, mmio_cycles) ||
+        !run_uncache_feedback(false, nc_wakeups, nc_cancels, nc_cycles)) {
+        return 1;
+    }
     const auto &warm_stats = environment.scalar_load_feedback_stats();
     std::uint64_t wakeups = 0;
     std::uint64_t cancels = 0;
@@ -2037,6 +2200,14 @@ int run_load_feedback(int argc, char **argv)
               << " lanes=" << memblock::kScalarLoadLanes
               << " cold=3 warm=3 bank_conflict=3"
               << " bank_conflict_cancels=" << bank_conflict_cancels
+              << " page_fault_cancels=" << fault_cancels
+              << " page_fault_cycles=" << fault_environment.cycle()
+              << " page_fault_ptw="
+              << fault_environment.ptw_requests() - fault_ptw_before
+              << " mmio_cancels=" << mmio_cancels
+              << " nc_cancels=" << nc_cancels
+              << " mmio_cycles=" << mmio_cycles
+              << " nc_cycles=" << nc_cycles
               << " wakeups=" << wakeups
               << " ld2_cancels=" << cancels
               << " writebacks=" << environment.writebacks()

@@ -158,6 +158,12 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "run_load_feedback",
             "unbalanced_early_wakeup",
             "warm_feedback_or_residency_mismatch",
+            "page-fault-classification",
+            "fault_wakeups != fault_cancels",
+            "wait_for_mmio_request",
+            "mmio_cancels=",
+            "nc_cancels=",
+            "uncache_environment.tilelink_requests() != dcache_before",
             "load-feedback",
         ):
             self.assertIn(contract, environment + main + makefile + generator)

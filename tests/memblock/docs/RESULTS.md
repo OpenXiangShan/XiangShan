@@ -34,8 +34,17 @@ a fixed count. The same-bank phase produced three cancellations without a new
 TileLink request; its initial wakeups carried exact lane/destination metadata,
 and its replayed wakeups satisfied the conservation rule across lanes because
 legal replay can migrate to another LoadUnit. This closes basic lane,
-destination, and read/read bank-conflict semantics; broader cancellation
-crosses remain open in the verification plan.
+destination, and read/read bank-conflict semantics.
+
+Three independent translated runs then classified exception and Uncache
+feedback. The empty Sv39 mapping raised an exact load-page fault in 93 cycles,
+issued one PTW request and no DCache request, and canceled both speculative
+wakeups without leaving a normal wakeup. PBMT=IO MMIO and PBMT=NC loads completed
+in 246 and 248 cycles respectively; each observed two cancellations and one
+final uncanceled wakeup with exact destination metadata, one page-table walk,
+one Uncache request, and no DCache request. The MMIO run additionally completed
+the backend `pendingMMIOld` handshake. Forwarding and other exception-cause
+cancellation crosses remain open in the verification plan.
 
 ## RAW Memory Violation Boundary
 

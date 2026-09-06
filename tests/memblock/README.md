@@ -334,11 +334,16 @@ wakeup: `wakeup_delta = ld2Cancel_delta + 1`. It also issues three resident,
 different-set loads to the same DCache bank in one cycle. That phase requires
 at least two cancellations, no TileLink traffic, exact metadata on the initial
 wakeups, and the same conservation rule summed across lanes because legal
-replays may migrate between LoadUnits. `random-mixed` keeps constant-space
-lane counters and requires both canceled and uncanceled wakeups on every lane.
-When hardware stride prefetch is enabled, that backend gate is frozen before
-training begins because prefetch traffic produces load-pipeline cancel pulses
-without backend wakeups; full-run raw counters remain in the result.
+replays may migrate between LoadUnits. Independent translated cases classify
+three more causes: an Sv39 load-page fault must cancel every speculative wakeup
+without sending a DCache request, while PBMT=IO MMIO and PBMT=NC loads must each
+retain exactly one uncanceled wakeup, issue one Uncache request, and issue no
+DCache request. The MMIO case also performs the backend `pendingMMIOld`
+handshake before completion. `random-mixed` keeps constant-space lane counters
+and requires both canceled and uncanceled wakeups on every lane. When hardware
+stride prefetch is enabled, that backend gate is frozen before training begins
+because prefetch traffic produces load-pipeline cancel pulses without backend
+wakeups; full-run raw counters remain in the result.
 
 `memory-violation` first proves that same-line, byte-disjoint load/store traffic
 does not redirect. It then leaves an older store address unresolved, completes
