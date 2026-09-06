@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `6fcd2e2ca0c6e828f3203dfd2ece3b3c69444396eb920f0f254c6ee93d26d17d`
+- Current rebuilt and frozen UT executable SHA-256: `22ba2f86322ccdd36f8620e6fe4119aebfe8f514b765aa9e3836f629adc06635`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `229ccfc7237ce1c4714963e2460e63648201f174b42b3008b8cea3e92454e721`
+- Frozen runtime manifest SHA-256: `52198d04fc04e133b2133003e700b85cb187ab38ebe5f09e6cfa125249b1747c`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -168,8 +168,9 @@ wakeup without a PTW, DCache, or Uncache request. The existing error tests
 now apply the same feedback oracle: DCache denied and corrupt responses each
 produced two wakeups and two cancellations, while the independently modeled
 G-stage guest-page fault produced three wakeups and three cancellations. Thus
-none left a normal backend wakeup after its exceptional writeback. Fixed-PMA
-denial and physical ECC cancellation crosses remain open.
+none left a normal backend wakeup after its exceptional writeback. The guarded
+fixed-PMA denial also canceled every speculative wakeup without issuing a
+DCache or Uncache request. Physical ECC cancellation injection remains open.
 
 ## Store/Vector IQ Slow Feedback Boundary
 
@@ -1087,7 +1088,7 @@ the historical complete RTL SHA-256 is
 | PBMT=NC store order | Pass | Two stores, two SQ dequeues, two PTW requests, one uncache request |
 | Uncache D-channel errors | Pass | One denied and one corrupt response each reached scalar exception writeback; two uncache requests |
 | Uncache widths/byte lanes | Pass | 29 scalar NC loads across all seven opcodes and legal 8-byte-beat lanes; 29 uncache requests, two request stalls, 90 response-delay cycles |
-| MMIO metadata/error path | Pass | Cycle 818; one normal, one denied, and one corrupt PBMT=IO load plus one cold-TLB scalar PBMT=IO store; a separate non-DebugModule `c=0` PMA load/store pair passed and a guarded DebugModule PMA access produced `LoadAccessFault` with no manager request; `dcache_requests=0`, four Uncache requests, exact load/store metadata, and SQ retirement matched |
+| MMIO metadata/error path | Pass | Cycle 818; one normal, one denied, and one corrupt PBMT=IO load plus one cold-TLB scalar PBMT=IO store; a separate non-DebugModule `c=0` PMA load/store pair passed and a guarded DebugModule PMA access produced `LoadAccessFault` with no manager request or uncanceled load wakeup; `dcache_requests=0`, four Uncache requests, exact load/store metadata, and SQ retirement matched |
 | CBO.ZERO cache-line zeroing | Pass | Cycle 370; cacheable `0x7` CBO.ZERO used the StoreQueue/SBuffer `wline` path, survived one forced DCache A stall and four response-delay cycles, produced exact non-MMIO store metadata, and a pre-mirror cache readback returned an all-zero line; no Uncache request was emitted |
 | Atomic operations and exception metadata | Pass | Cycle 1216; all 9 W-width and 9 D-width AMOs, AMOCAS.W/D compare success/failure, LR/SC success/failure, and all 7 forbidden D-width plus 3 forbidden W-width byte offsets; exceptional writeback carried `storeAddrMisaligned=0x40`, suppressed `rfWen`, and emitted no additional DCache request |
 | Atomic D-channel errors | Pass | Cycle 7,108; 22 W/D LR/AMO/AMOCAS operations crossed with denied and corrupt; all 44 later loads hit poisoned lines and re-reported exact errors, four SC hits reported cached errors, two clean AMO recoveries passed, exceptional `rfWen` stayed suppressed, and exactly 46 cold requests were issued |

@@ -6987,6 +6987,8 @@ int run_mmio_contracts(int argc, char **argv)
     unsigned pma_load_count = 0;
     unsigned pma_store_count = 0;
     unsigned pma_denied_count = 0;
+    std::uint64_t pma_denied_wakeups = 0;
+    std::uint64_t pma_denied_cancels = 0;
     unsigned pma_debug_load_count = 0;
     unsigned pma_debug_store_count = 0;
     {
@@ -7098,6 +7100,8 @@ int run_mmio_contracts(int argc, char **argv)
             pma_environment.tilelink_requests();
         const std::uint64_t denied_uncache_before =
             pma_environment.uncache_requests();
+        const auto denied_feedback_before =
+            pma_environment.scalar_load_feedback_stats();
         pma_environment.expect_load(pma_denied);
         if (!pma_environment.set_rob_head(pma_denied.rob) ||
             !pma_environment.enqueue_load(pma_denied) ||
@@ -7110,6 +7114,25 @@ int run_mmio_contracts(int argc, char **argv)
                       << pma_environment.cycle()
                       << " phase=pma-debug-denied reason="
                       << pma_environment.error() << '\n';
+            return 1;
+        }
+        const auto denied_feedback_after =
+            pma_environment.scalar_load_feedback_stats();
+        for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+            pma_denied_wakeups +=
+                denied_feedback_after.wakeups[lane] -
+                denied_feedback_before.wakeups[lane];
+            pma_denied_cancels +=
+                denied_feedback_after.ld2_cancels[lane] -
+                denied_feedback_before.ld2_cancels[lane];
+        }
+        if (pma_denied_cancels == 0 ||
+            pma_denied_wakeups != pma_denied_cancels) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << pma_environment.cycle()
+                      << " phase=pma-debug-feedback wakeups="
+                      << pma_denied_wakeups << " cancels="
+                      << pma_denied_cancels << '\n';
             return 1;
         }
         ++pma_denied_count;
@@ -7226,6 +7249,8 @@ int run_mmio_contracts(int argc, char **argv)
               << " pma_loads=" << pma_load_count
               << " pma_stores=" << pma_store_count
               << " pma_denied=" << pma_denied_count
+              << " pma_denied_wakeups=" << pma_denied_wakeups
+              << " pma_denied_cancels=" << pma_denied_cancels
               << " pma_debug_loads=" << pma_debug_load_count
               << " pma_debug_stores=" << pma_debug_store_count
               << " dcache_requests=" << environment.tilelink_requests()

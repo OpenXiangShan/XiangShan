@@ -545,8 +545,11 @@ Put, no DCache request, exact store writeback metadata, and SQ retirement. The
 PBMT=IO page is backed by the DDR PMA region, so the store writeback's
 `debug.isMMIO=0` denotes `memBackTypeMM=1`. A second bare-mode pair accesses the
 SoC's non-DebugModule `c=0` PMA interval and requires physical PMA MMIO
-classification for both load and store. A side-effecting device model remains
-a planned boundary. `cbo-zero-contracts` drives the `CBO.ZERO` encoding through
+classification for both load and store. The same scenario accesses the guarded
+DebugModule PMA interval outside Debug Mode, requires an exact load access fault
+with no manager request, and proves every speculative load wakeup is canceled.
+A side-effecting device model remains a planned boundary. `cbo-zero-contracts`
+drives the `CBO.ZERO` encoding through
 the cacheable StoreQueue/SBuffer wline path under randomized DCache
 backpressure, checks exact writeback metadata, and reads the resulting line
 back before updating the reference mirror.
