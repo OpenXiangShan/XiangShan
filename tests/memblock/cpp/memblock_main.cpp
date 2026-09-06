@@ -6722,90 +6722,211 @@ int run_wfi_safety(int argc, char **argv)
 
 int run_reset_recovery(int argc, char **argv)
 {
-    memblock::Environment environment(argc, argv);
-    constexpr std::uint64_t virtual_base = 0x50036000ULL;
-    constexpr std::uint64_t physical_base = 0x90036000ULL;
-    constexpr std::uint64_t root = 0x97008000ULL;
-    environment.memory().fill_incrementing(physical_base, 64, 0x36);
-    environment.configure_backpressure(0x510e527fade682d1ULL, true);
-    if (!environment.reset() ||
-        !environment.map_sv39_4k(
-            virtual_base, physical_base, root) ||
-        !environment.activate_sv39(root)) {
-        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL cycle="
-                  << environment.cycle() << " phase=configuration reason="
-                  << environment.error() << '\n';
-        return 1;
-    }
+    constexpr unsigned response_delay = 256;
+    auto account_canceled_load = [](memblock::Environment &environment) {
+        const std::uint64_t retired =
+            environment.lq_dequeued() + environment.lq_canceled();
+        return retired >= environment.lq_allocated() ||
+            environment.account_lq_cancellation(
+                static_cast<unsigned>(environment.lq_allocated() - retired));
+    };
 
-    // Do not register an expectation for the first load. It is deliberately
-    // reset while translation/manager traffic is outstanding; any stale
-    // writeback after reset is therefore an unexpected architectural event.
-    const memblock::LoadTransaction canceled{
-        .address = virtual_base + 24,
-        .oracle_address = physical_base + 24,
+    memblock::Environment dcache(argc, argv);
+    constexpr std::uint64_t dcache_old =
+        memblock::kDefaultMemoryBase + 0x3c0000;
+    constexpr std::uint64_t dcache_new =
+        memblock::kDefaultMemoryBase + 0x3c1000;
+    dcache.memory().fill_incrementing(dcache_old, 64, 0x31);
+    dcache.memory().fill_incrementing(dcache_new, 64, 0xa1);
+    dcache.configure_backpressure(0x510e527fade682d1ULL, true);
+    const memblock::LoadTransaction dcache_canceled{
+        .address = dcache_old + 24,
         .op = memblock::LoadOp::ld,
         .rob = 0,
         .lq = 0,
         .pdest = 140,
         .lane = 0,
     };
-    if (!environment.enqueue_load(canceled) ||
-        !environment.issue_load(canceled, 2048) ||
-        !environment.reset()) {
-        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL cycle="
-                  << environment.cycle() << " phase=reset-with-outstanding reason="
-                  << environment.error() << '\n';
+    const auto dcache_requests_before = dcache.tilelink_requests();
+    if (!dcache.reset() || !dcache.activate_bare(11)) {
+        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL phase=dcache-configuration"
+                  << " reason=" << dcache.error() << '\n';
         return 1;
     }
-    const std::uint64_t retired =
-        environment.lq_dequeued() + environment.lq_canceled();
-    if (retired < environment.lq_allocated() &&
-        !environment.account_lq_cancellation(
-            static_cast<unsigned>(environment.lq_allocated() - retired))) {
-        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL cycle="
-                  << environment.cycle() << " phase=cancel-accounting reason="
-                  << environment.error() << '\n';
+    dcache.force_next_dcache_response_delay(response_delay);
+    if (!dcache.enqueue_load(dcache_canceled) ||
+        !dcache.issue_load(dcache_canceled, 2048) ||
+        !dcache.run_until_dcache_requests(dcache_requests_before + 1, 4096) ||
+        !dcache.reset() || !account_canceled_load(dcache) ||
+        !dcache.activate_bare(12)) {
+        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL phase=dcache-reset"
+                  << " cycle=" << dcache.cycle()
+                  << " reason=" << dcache.error() << '\n';
         return 1;
     }
-
-    const memblock::LoadTransaction survivor{
-        .address = virtual_base + 8,
-        .oracle_address = physical_base + 8,
+    const memblock::LoadTransaction dcache_survivor{
+        .address = dcache_new + 8,
         .op = memblock::LoadOp::ld,
         .rob = 1,
-        // The DUT's reset starts a fresh internal LQ epoch.  Its first
-        // post-reset allocation therefore reuses LQ slot zero even though
-        // the software conservation counter still includes the canceled
-        // pre-reset entry.
         .lq = 0,
         .pdest = 141,
         .lane = 1,
     };
-    if (!environment.map_sv39_4k(virtual_base, physical_base, root) ||
-        !environment.activate_sv39(root)) {
-        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL cycle="
-                  << environment.cycle() << " phase=reconfigure reason="
-                  << environment.error() << '\n';
+    dcache.expect_load(dcache_survivor);
+    if (!dcache.set_rob_head(dcache_survivor.rob) ||
+        !dcache.enqueue_load(dcache_survivor) ||
+        !dcache.issue_load(dcache_survivor, 2048) ||
+        !dcache.run_until_complete(8192) ||
+        !dcache.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL phase=dcache-survivor"
+                  << " cycle=" << dcache.cycle()
+                  << " reason=" << dcache.error() << '\n';
         return 1;
     }
-    environment.expect_load(survivor);
-    if (!environment.set_rob_head(survivor.rob) ||
-        !environment.enqueue_load(survivor) ||
-        !environment.issue_load(survivor, 2048) ||
-        !environment.run_until_complete(8192) ||
-        !environment.run_until_lq_retired(2048)) {
-        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL cycle="
-                  << environment.cycle() << " phase=survivor reason="
-                  << environment.error() << '\n';
+
+    memblock::Environment ptw(argc, argv);
+    constexpr std::uint64_t ptw_virtual = 0x50036000ULL;
+    constexpr std::uint64_t ptw_old_physical = 0x90036000ULL;
+    constexpr std::uint64_t ptw_new_physical = 0x90037000ULL;
+    constexpr std::uint64_t ptw_old_root = 0x97008000ULL;
+    constexpr std::uint64_t ptw_new_root = 0x9700c000ULL;
+    ptw.memory().fill_incrementing(ptw_old_physical, 64, 0x42);
+    ptw.memory().fill_incrementing(ptw_new_physical, 64, 0xb2);
+    ptw.configure_backpressure(0xbb67ae8584caa73bULL, true);
+    if (!ptw.reset() ||
+        !ptw.map_sv39_4k(ptw_virtual, ptw_old_physical, ptw_old_root) ||
+        !ptw.map_sv39_4k(ptw_virtual, ptw_new_physical, ptw_new_root) ||
+        !ptw.activate_sv39(ptw_old_root, 21)) {
+        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL phase=ptw-configuration"
+                  << " reason=" << ptw.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction ptw_canceled{
+        .address = ptw_virtual + 24,
+        .oracle_address = ptw_old_physical + 24,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 142,
+        .lane = 1,
+    };
+    const auto ptw_requests_before = ptw.ptw_requests();
+    ptw.force_next_ptw_response_delay(response_delay);
+    if (!ptw.enqueue_load(ptw_canceled) ||
+        !ptw.issue_load(ptw_canceled, 2048) ||
+        !ptw.run_until_ptw_requests(ptw_requests_before + 1, 4096) ||
+        !ptw.reset() || !account_canceled_load(ptw) ||
+        !ptw.activate_sv39(ptw_new_root, 22)) {
+        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL phase=ptw-reset"
+                  << " cycle=" << ptw.cycle()
+                  << " reason=" << ptw.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction ptw_survivor{
+        .address = ptw_virtual + 8,
+        .oracle_address = ptw_new_physical + 8,
+        .op = memblock::LoadOp::ld,
+        .rob = 1,
+        .lq = 0,
+        .pdest = 143,
+        .lane = 2,
+    };
+    ptw.expect_load(ptw_survivor);
+    if (!ptw.set_rob_head(ptw_survivor.rob) ||
+        !ptw.enqueue_load(ptw_survivor) ||
+        !ptw.issue_load(ptw_survivor, 2048) ||
+        !ptw.run_until_complete(8192) ||
+        !ptw.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL phase=ptw-survivor"
+                  << " cycle=" << ptw.cycle()
+                  << " reason=" << ptw.error() << '\n';
+        return 1;
+    }
+
+    memblock::Environment uncache(argc, argv);
+    constexpr std::uint64_t mmio_virtual = 0x50038000ULL;
+    constexpr std::uint64_t mmio_old_physical = 0x90038000ULL;
+    constexpr std::uint64_t mmio_new_physical = 0x90039000ULL;
+    constexpr std::uint64_t mmio_old_root = 0x97010000ULL;
+    constexpr std::uint64_t mmio_new_root = 0x97014000ULL;
+    uncache.memory().fill_incrementing(mmio_old_physical, 64, 0x53);
+    uncache.memory().fill_incrementing(mmio_new_physical, 64, 0xc3);
+    uncache.configure_backpressure(0x3c6ef372fe94f82bULL, true);
+    if (!uncache.reset() ||
+        !uncache.map_sv39_4k(
+            mmio_virtual, mmio_old_physical, mmio_old_root,
+            true, true, false, false, false, true) ||
+        !uncache.map_sv39_4k(
+            mmio_virtual, mmio_new_physical, mmio_new_root,
+            true, true, false, false, false, true) ||
+        !uncache.activate_sv39(mmio_old_root, 31)) {
+        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL phase=uncache-configuration"
+                  << " reason=" << uncache.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction uncache_canceled{
+        .address = mmio_virtual + 24,
+        .oracle_address = mmio_old_physical + 24,
+        .op = memblock::LoadOp::ld,
+        .rob = 0,
+        .lq = 0,
+        .pdest = 144,
+        .lane = 2,
+        .expected_debug_is_mmio = true,
+        .expected_debug_is_ncio = false,
+        .expected_debug_is_perf_cnt = false,
+    };
+    const auto uncache_requests_before = uncache.uncache_requests();
+    uncache.force_next_uncache_response_delay(response_delay);
+    if (!uncache.set_rob_head(
+            uncache_canceled.rob, uncache_canceled.rob_flag) ||
+        !uncache.enqueue_load(uncache_canceled) ||
+        !uncache.issue_load(uncache_canceled, 2048) ||
+        !uncache.wait_for_mmio_request(
+            uncache_canceled.rob, uncache_canceled.rob_flag, 4096) ||
+        uncache.uncache_requests() != uncache_requests_before + 1 ||
+        uncache.uncache_outstanding_requests() != 1 ||
+        !uncache.reset() || !account_canceled_load(uncache) ||
+        !uncache.activate_sv39(mmio_new_root, 32)) {
+        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL phase=uncache-reset"
+                  << " cycle=" << uncache.cycle()
+                  << " reason=" << uncache.error() << '\n';
+        return 1;
+    }
+    const memblock::LoadTransaction uncache_survivor{
+        .address = mmio_virtual + 8,
+        .oracle_address = mmio_new_physical + 8,
+        .op = memblock::LoadOp::ld,
+        .rob = 1,
+        .lq = 0,
+        .pdest = 145,
+        .lane = 0,
+        .expected_debug_is_mmio = true,
+        .expected_debug_is_ncio = false,
+        .expected_debug_is_perf_cnt = false,
+    };
+    uncache.expect_load(uncache_survivor);
+    if (!uncache.set_rob_head(
+            uncache_survivor.rob, uncache_survivor.rob_flag) ||
+        !uncache.enqueue_load(uncache_survivor) ||
+        !uncache.issue_load(uncache_survivor, 2048) ||
+        !uncache.wait_for_mmio_request(
+            uncache_survivor.rob, uncache_survivor.rob_flag, 4096) ||
+        !uncache.run_until_complete(8192) ||
+        !uncache.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_RESET_RECOVERY_FAIL phase=uncache-survivor"
+                  << " cycle=" << uncache.cycle()
+                  << " reason=" << uncache.error() << '\n';
         return 1;
     }
 
     std::cout << "MEMBLOCK_RESET_RECOVERY_PASS"
-              << " cycle=" << environment.cycle()
-              << " resets=2"
-              << " canceled=1"
-              << " survivor_writebacks=1"
+              << " cycle=" << dcache.cycle() + ptw.cycle() + uncache.cycle()
+              << " outstanding_resets=3"
+              << " canceled=3"
+              << " survivor_writebacks=3"
+              << " dcache=1 ptw=1 uncache=1"
+              << " response_delay=" << response_delay
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }

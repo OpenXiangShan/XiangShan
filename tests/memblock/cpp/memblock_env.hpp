@@ -1083,6 +1083,34 @@ public:
         forced_next_response_delay_ = cycles;
     }
 
+    void reset_link_state()
+    {
+        b_beats_.clear();
+        d_beats_.clear();
+        probe_responses_.clear();
+        expected_grant_acks_.clear();
+        captured_a_.reset();
+        captured_c_.reset();
+        release_data_.reset();
+        expected_release_lines_.clear();
+        a_fire_ = false;
+        b_fire_ = false;
+        c_fire_ = false;
+        d_fire_ = false;
+        e_fire_ = false;
+        d_gap_ = 0;
+        d_presenting_ = false;
+        forced_next_response_delay_.reset();
+        inject_denied_ = false;
+        inject_corrupt_ = false;
+        force_a_stall_ = random_backpressure_;
+        force_e_stall_ = random_backpressure_;
+        probe_canceled_count_ += probe_request_count_ -
+            probe_response_count_ - probe_canceled_count_;
+        next_probe_source_ = 0;
+        probe_sources_seen_.fill(false);
+    }
+
     void drive(UTMemBlock &dut)
     {
         const bool accept_a = !random_backpressure_ ||
@@ -1238,7 +1266,8 @@ public:
             ++probe_request_count_;
             max_probe_outstanding_ = std::max(
                 max_probe_outstanding_,
-                probe_request_count_ - probe_response_count_);
+                probe_request_count_ - probe_response_count_ -
+                    probe_canceled_count_);
         }
         if (d_fire_) {
             d_beats_.pop_front();
@@ -1716,6 +1745,7 @@ private:
     std::uint64_t release_data_verified_count_ = 0;
     std::uint64_t probe_request_count_ = 0;
     std::uint64_t probe_response_count_ = 0;
+    std::uint64_t probe_canceled_count_ = 0;
     std::uint64_t probe_data_count_ = 0;
     std::uint64_t probe_source_count_ = 0;
     std::uint64_t max_probe_outstanding_ = 0;
@@ -1762,6 +1792,19 @@ public:
     void force_next_response_delay(unsigned cycles)
     {
         forced_next_response_delay_ = cycles;
+    }
+
+    void reset_link_state()
+    {
+        responses_.clear();
+        request_.reset();
+        a_fire_ = false;
+        d_fire_ = false;
+        d_gap_ = 0;
+        d_presenting_ = false;
+        outstanding_requests_ = 0;
+        forced_next_response_delay_.reset();
+        force_a_stall_ = random_backpressure_;
     }
 
     void drive(UTMemBlock &dut)
@@ -2076,6 +2119,21 @@ public:
     void force_next_response_delay(unsigned cycles)
     {
         forced_next_response_delay_ = cycles;
+    }
+
+    void reset_link_state()
+    {
+        responses_.clear();
+        request_.reset();
+        a_fire_ = false;
+        d_fire_ = false;
+        d_gap_ = 0;
+        d_presenting_ = false;
+        outstanding_requests_ = 0;
+        forced_next_response_delay_.reset();
+        force_a_stall_ = random_backpressure_;
+        inject_denied_ = false;
+        inject_corrupt_ = false;
     }
 
     void drive(UTMemBlock &dut)
@@ -4571,6 +4629,12 @@ public:
         // Re-assert external reset for every invocation.  Relying on the
         // constructor's initial value made repeated-reset scenarios silently
         // run without resetting the DUT.
+        // XSTileWrap applies the same child reset to the core and tile-local
+        // managers. Model that reset domain by discarding every in-flight
+        // protocol transaction before the DUT can reuse source identifiers.
+        memory_agent_.reset_link_state();
+        ptw_agent_.reset_link_state();
+        uncache_agent_.reset_link_state();
         scalar_load_feedback_stats_ = {};
         iq_slow_feedback_stats_ = {};
         memory_violation_stats_ = {};

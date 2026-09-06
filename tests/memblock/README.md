@@ -526,10 +526,12 @@ the cacheable StoreQueue/SBuffer wline path under randomized DCache
 backpressure, checks exact writeback metadata, and reads the resulting line
 back before updating the reference mirror.
 
-`reset-recovery` asserts reset again while a translated load has outstanding
-traffic, accounts the canceled queue entry, then reconfigures translation and
-requires a post-reset load to complete normally. It also rejects any stale
-writeback from the canceled request.
+`reset-recovery` separately asserts reset with an accepted DCache refill, PTW
+walk, and Uncache/MMIO request held outstanding by a 256-cycle response delay.
+The harness synchronously resets the corresponding tile-local manager model,
+accounts each canceled queue entry, changes the post-reset address or page-table
+root, and requires three survivor loads to return the new data. Any stale
+pre-reset manager response or architectural writeback fails the scenario.
 
 `exception-contracts` checks exact scalar load exception bits, RF-write
 suppression, software-prefetch fault suppression, and PBMT-NC misalignment. It

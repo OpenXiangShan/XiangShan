@@ -22,6 +22,23 @@
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
+## Reset With Outstanding Manager Traffic
+
+On 2026-09-06, `reset-recovery` passed three independent reset phases in 576
+aggregate cycles on complete RTL SHA-256
+`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
+Each phase first accepted a DCache refill, PTW walk, or Uncache/MMIO request and
+held its response for 256 cycles. Reset then canceled the corresponding LQ
+entry and synchronously discarded the tile-local manager's transient link
+state. Three post-reset survivor loads used a different physical address or
+page-table root and returned the new expected data with no stale completion.
+
+An earlier DUT-only reset experiment retained the external DCache model's old
+queued response and therefore delivered old-line data after TileLink source
+reuse. `XSTileWrap` drives both the core/MemBlock and tile-local L2 from the
+same `childReset`, so retaining the manager response did not model the actual
+reset domain. This was a UT environment correction, not a CPU RTL defect.
+
 ## Top-Down Status Boundary
 
 On 2026-09-06, `topdown-contracts` passed on complete RTL SHA-256
@@ -1004,7 +1021,7 @@ the historical complete RTL SHA-256 is
 | Data-side PMP contracts | Pass | 17 cases in 708 aggregate cycles: TOR/NAPOT exact edges, 4-KiB-grain NA4 WARL conversion, R/W and AMO denial, overlap priority, M-mode unlocked bypass, lock enforcement, and locked address/config immutability; 9 allowed and 8 denied with zero forbidden manager requests |
 | L2-to-L1 DTLB boundary | Pass | Cycle 396; ordinary and prefetch requests returned legal L1 miss responses, `no_translate=1` completed without a translation/fault, `kill=1` produced no response for 128 cycles, 16 source IDs × two L2 hint polarities (32 pulses) were accepted without ghost traffic, PBMT stayed zero, and exported PMP/MMIO classification was observed; miss delegation to external L2 is explicit because MemBlock has no refill response input |
 | IFU-to-Mem PTW bridge | Pass | 36 cases in 26,580 aggregate cycles: valid Sv39/Sv48, all four nested pairs, Sv39/Sv48 VS-only and G-only, PBMT=NC/IO, invalid L0 leaves, all four nested pairs crossed with VS-leaf/final-G-leaf/implicit-page-table-G faults, a 256-cycle delayed IFU walk overlapped with a cold scalar DTLB walk, and two same-VPN requests coalesced into one three-request Sv39 walk with two exact responses. Eight delayed-walk races cover stage-1 and nested context replacement, global/selective `SFENCE.VMA`, and global/selective `HFENCE.VVMA`/`HFENCE.GVMA`, suppressing every stale response for 1,024 cycles before checking the exact replacement mapping; 231 PTW requests, manager outstanding depth 2, exact active-stage/fault/load results, and 185 response-stall cycles passed; RTL SHA-256 `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9` |
-| Reset recovery | Pass | Cycle 170; repeated reset with outstanding translated traffic, explicit cancellation of one pre-reset LQ entry, and one post-reset survivor with no stale writeback |
+| Reset recovery | Pass | 576 aggregate cycles; three repeated-reset phases accepted and canceled DCache-refill, PTW-walk, and Uncache/MMIO traffic under 256-cycle delayed responses, then completed three distinct post-reset survivors with no stale response/writeback |
 | Store TLB-miss preservation | Pass | Cycle 156; two misses and two PTW requests; allocated SQ entry remained address-valid |
 | DCache dirty release | Pass | Ten stores; two ReleaseData writebacks preserved |
 | Redirect | Pass | Canceled miss suppressed; LQ slot reused |

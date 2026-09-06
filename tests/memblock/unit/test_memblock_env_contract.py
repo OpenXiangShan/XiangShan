@@ -723,6 +723,15 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         self.assertIn('options.test == "reset-recovery"', main)
         self.assertIn("reset-recovery", makefile)
         self.assertIn("account_lq_cancellation", main)
+        self.assertEqual(environment.count("void reset_link_state()"), 3)
+        for contract in (
+            "memory_agent_.reset_link_state();",
+            "ptw_agent_.reset_link_state();",
+            "uncache_agent_.reset_link_state();",
+            '" outstanding_resets=3"',
+            '" dcache=1 ptw=1 uncache=1"',
+        ):
+            self.assertIn(contract, environment + main)
 
     def test_wfi_safety_drains_each_memory_manager_before_safe(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
