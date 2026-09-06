@@ -33,6 +33,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "mode_family_cases=",
             "pbmt_combinations=",
             "pbmt_family_cases=",
+            "misaligned_family_cases=",
             "spvp=1 vsum=1 vmxr=1 hlvx=1 hsv=1 pmp_x=1",
         ):
             self.assertIn(contract, environment + driver + makefile)

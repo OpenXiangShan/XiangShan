@@ -9583,7 +9583,8 @@ int run_hypervisor_contracts(int argc, char **argv)
                 vs_mode, g_mode,
                 vs_root, g_root, 61, 71) &&
             environment.set_hypervisor_access_permissions(
-                spvp, mxr, vmxr, vsum);
+                spvp, mxr, vmxr, vsum) &&
+            environment.enable_misaligned_accesses();
     };
 
     std::uint64_t total_cycles = 0;
@@ -9598,6 +9599,7 @@ int run_hypervisor_contracts(int argc, char **argv)
     unsigned mode_family_cases = 0;
     unsigned pbmt_combinations = 0;
     unsigned pbmt_family_cases = 0;
+    unsigned misaligned_family_cases = 0;
 
     auto run_load_case = [&](
                              const char *name,
@@ -9616,7 +9618,8 @@ int run_hypervisor_contracts(int argc, char **argv)
                              memblock::ReferencePbmt vs_pbmt =
                                  memblock::ReferencePbmt::pma,
                              memblock::ReferencePbmt g_pbmt =
-                                 memblock::ReferencePbmt::pma) {
+                                 memblock::ReferencePbmt::pma,
+                             std::uint64_t address_offset = 0x180) {
         const bool hlvx = op == memblock::LoadOp::hlvxhu ||
                           op == memblock::LoadOp::hlvxwu;
         const bool vs_permitted = hlvx
@@ -9666,8 +9669,8 @@ int run_hypervisor_contracts(int argc, char **argv)
             }
         }
         const memblock::LoadTransaction transaction{
-            .address = guest_virtual + 0x180,
-            .oracle_address = host_physical + 0x180,
+            .address = guest_virtual + address_offset,
+            .oracle_address = host_physical + address_offset,
             .op = op,
             .rob = 0,
             .lq = 0,
@@ -9768,7 +9771,8 @@ int run_hypervisor_contracts(int argc, char **argv)
                               memblock::ReferencePbmt vs_pbmt =
                                   memblock::ReferencePbmt::pma,
                               memblock::ReferencePbmt g_pbmt =
-                                  memblock::ReferencePbmt::pma) {
+                                  memblock::ReferencePbmt::pma,
+                              std::uint64_t address_offset = 0x280) {
         const bool vs_permitted =
             memblock::reference_store_permitted(vs, spvp, vsum);
         const bool g_permitted = memblock::reference_store_permitted(
@@ -9782,6 +9786,10 @@ int run_hypervisor_contracts(int argc, char **argv)
             memblock::reference_two_stage_pbmt(vs_pbmt, g_pbmt);
         const bool final_nc = final_pbmt == memblock::ReferencePbmt::nc;
         const bool final_io = final_pbmt == memblock::ReferencePbmt::io;
+        const unsigned access_bytes =
+            1U << (static_cast<unsigned>(op) & 3U);
+        const bool misaligned =
+            ((guest_virtual + address_offset) & (access_bytes - 1U)) != 0;
 
         memblock::Environment environment(argc, argv);
         environment.memory().fill_incrementing(host_physical, 0x1000, 0x71);
@@ -9795,8 +9803,8 @@ int run_hypervisor_contracts(int argc, char **argv)
             return false;
         }
         const memblock::StoreTransaction transaction{
-            .address = guest_virtual + 0x280,
-            .oracle_address = host_physical + 0x280,
+            .address = guest_virtual + address_offset,
+            .oracle_address = host_physical + address_offset,
             .data = data,
             .op = op,
             .rob = 0,
@@ -9814,6 +9822,9 @@ int run_hypervisor_contracts(int argc, char **argv)
             !environment.enqueue_store(transaction, 0) ||
             !environment.issue_store_address_until_tlb_hit(transaction, 16384) ||
             !environment.issue_store_data(transaction, 2048) ||
+            (expected_exception == 0 && misaligned &&
+             !environment.pulse_pending_store(
+                 transaction.rob, transaction.rob_flag)) ||
             (expected_exception == 0 && final_io &&
              !environment.wait_for_mmio_store_request(
                  transaction.rob, transaction.rob_flag, 8192)) ||
@@ -10107,6 +10118,37 @@ int run_hypervisor_contracts(int argc, char **argv)
         pbmt_family_cases += 3;
     }
 
+    if (!run_load_case(
+            "misaligned-hlv", memblock::LoadOp::hlvd,
+            rw_supervisor, g_rw_user,
+            memblock::ReferencePrivilegeMode::supervisor,
+            false, false, false, false,
+            memblock::ReferencePageMode::sv48,
+            memblock::ReferencePageMode::sv48,
+            memblock::ReferencePbmt::pma,
+            memblock::ReferencePbmt::pma, 0x183) ||
+        !run_load_case(
+            "misaligned-hlvx", memblock::LoadOp::hlvxwu,
+            x_supervisor, g_x_user,
+            memblock::ReferencePrivilegeMode::supervisor,
+            false, false, false, false,
+            memblock::ReferencePageMode::sv48,
+            memblock::ReferencePageMode::sv48,
+            memblock::ReferencePbmt::pma,
+            memblock::ReferencePbmt::pma, 0x181) ||
+        !run_store_case(
+            "misaligned-hsv", memblock::StoreOp::hsvd,
+            rw_supervisor, g_rw_user,
+            memblock::ReferencePrivilegeMode::supervisor, false,
+            0x123456789abcdef0ULL,
+            memblock::ReferencePageMode::sv48,
+            memblock::ReferencePageMode::sv48,
+            memblock::ReferencePbmt::pma,
+            memblock::ReferencePbmt::pma, 0x283)) {
+        return 1;
+    }
+    misaligned_family_cases += 3;
+
     std::cout << "MEMBLOCK_HYPERVISOR_CONTRACTS_PASS"
               << " cases=" << load_cases + store_cases
               << " load_cases=" << load_cases
@@ -10118,6 +10160,7 @@ int run_hypervisor_contracts(int argc, char **argv)
               << " mode_family_cases=" << mode_family_cases
               << " pbmt_combinations=" << pbmt_combinations
               << " pbmt_family_cases=" << pbmt_family_cases
+              << " misaligned_family_cases=" << misaligned_family_cases
               << " spvp=1 vsum=1 vmxr=1 hlvx=1 hsv=1 pmp_x=1"
               << " cycles=" << total_cycles
               << " ptw_requests=" << total_ptw_requests

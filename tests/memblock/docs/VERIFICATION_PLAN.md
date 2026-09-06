@@ -256,7 +256,7 @@ cacheable tests pass.
 | Software prefetch | `prefetch.i/r/w`, mapped/unmapped, cacheable/NC, all lanes, duplicate and outstanding requests | Implemented for modeled software prefetch |
 | Atomics | LR/SC, AMOADD/XOR/AND/OR/SWAP/MIN/MAX and signed/unsigned variants, AMOCAS, reservation loss, alignment | Partial; all exposed W/D-width AMO variants, AMOCAS.W/D compare success/failure, LR/SC success/failure, and every illegal byte offset for representative D/W operations execute in `atomic-contracts`; `atomic-dchannel-errors` crosses denied/corrupt with all 22 refill-capable W/D LR/AMO/AMOCAS operations, checks initial exception/RF contracts, later poisoned-line load hits, SC.W/D hits on denied/corrupt metadata, exact request counts, and clean AMO recovery. The SC checks do not claim internal reservation observability. SC cannot have a cold-miss D response because MainPipe returns failure before a request when the line or usable reservation is absent. Cross-hart reservation interference, full opcode-by-offset alignment crosses, and ordering with concurrent traffic remain |
 | CBO/CMO/fences | clean/invalidate/flush/zero, `fence`, `fence.i`, `sfence.vma`, ordering with outstanding traffic | Partial; cacheable `CBO.ZERO` StoreQueue/SBuffer line-zero and readback are executable (`cbo-zero-contracts`), and global `SFENCE.VMA` leaf-update behavior is implemented; CMO CLEAN/FLUSH/INVAL, `fence.i`, and full ordering remain because `cmoOpResp` is internal to DCache rather than a MemBlock top-level port |
-| Hypervisor memory ops | HLV/HLVX/HSV, effective privilege/SPVP, VSUM/VMXR, execute permission, guest/host faults | Partial: `hypervisor-contracts` executes all exposed HLV/HLVX/HSV encodings, SPVP user/supervisor cases, VSUM/VMXR permission changes, VS- and G-stage faults, HLVX execute-only access, physical PMP execute denial, representative HLV/HLVX/HSV operations under all four Sv39/Sv48 and Sv39x4/Sv48x4 pairs, and a five-combination PBMT basis that covers final PMA/NC/IO plus VS-over-G priority for every family. Schema-7+ `random-mixed` weights HLV/HLVX/HSV as one common-generator class. Physical PMA-device behavior, misalignment, and broader PMP crosses remain |
+| Hypervisor memory ops | HLV/HLVX/HSV, effective privilege/SPVP, VSUM/VMXR, execute permission, guest/host faults | Partial: `hypervisor-contracts` executes all exposed HLV/HLVX/HSV encodings, SPVP user/supervisor cases, VSUM/VMXR permission changes, VS- and G-stage faults, HLVX execute-only access, physical PMP execute denial, representative HLV/HLVX/HSV operations under all four Sv39/Sv48 and Sv39x4/Sv48x4 pairs, a five-combination PBMT basis that covers final PMA/NC/IO plus VS-over-G priority for every family, and cacheable misaligned HLV.D/HLVX.WU/HSV.D split paths with exact load/store readback. Schema-7+ `random-mixed` weights HLV/HLVX/HSV as one common-generator class. Physical PMA-device behavior and broader PMP crosses remain |
 
 ### Address, translation, and protection points
 
@@ -463,10 +463,10 @@ are planned work items, not silently accepted coverage:
 - whole-register VSegment transfers, LMUL/EMUL crosses, and integration-owned
   redirect behavior; unit-stride/strided/indexed addressing and both first- and
   later-element segment FOF faults are covered;
-- PMA-device/misalignment crosses for HLV/HLVX/HSV plus the broader hypervisor
-  PMP matrix; all four nested translation mode pairs, PBMT PMA/NC/IO priority,
-  basic SPVP/VSUM/VMXR, stage faults, HLVX execute permission, and physical
-  execute denial are covered;
+- PMA-device crosses for HLV/HLVX/HSV plus the broader hypervisor PMP matrix;
+  all four nested translation mode pairs, PBMT PMA/NC/IO priority, cacheable
+  misaligned split paths, basic SPVP/VSUM/VMXR, stage faults, HLVX execute
+  permission, and physical execute denial are covered;
 - architectural `satp`/`vsatp`/`hgatp` write/readback and WARL mode filtering;
   the MemBlock UT directly supplies the post-CSR `TlbCsrBundle` and therefore
   cannot establish software-visible Sv48/Sv48x4 enablement by itself;

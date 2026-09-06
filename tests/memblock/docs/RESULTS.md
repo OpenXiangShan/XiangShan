@@ -58,7 +58,7 @@ the original VL of 2.
 
 ## Hypervisor Memory Operation Mode Matrix
 
-The expanded `hypervisor-contracts` scenario passed 52 directed cases in 11,793
+The expanded `hypervisor-contracts` scenario passed 55 directed cases in 12,880
 aggregate cycles on complete RTL SHA-256
 `774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
 In addition to every exposed HLV/HLVX/HSV encoding and the existing privilege,
@@ -66,10 +66,11 @@ permission, fault, and PMP checks, it executed one HLV, one HLVX, and one HSV
 under each of `Sv39->Sv39x4`, `Sv39->Sv48x4`, `Sv48->Sv39x4`, and
 `Sv48->Sv48x4`. Five further PBMT combinations crossed every operation family
 with final PMA, NC, and IO manager selection plus VS-over-G priority. The run
-observed 458 PTW requests and 33 data DCache requests; successful stores were
-committed and read back through HLV. No CPU defect was observed. Physical
-PMA-device classification, misalignment, and the broader hypervisor PMP cross
-remain open.
+also completed misaligned cacheable HLV.D, HLVX.WU, and HSV.D through the
+split/replay paths with exact data and store readback. It observed 488 PTW
+requests and 36 data DCache requests; successful stores were committed and read
+back through HLV. No CPU defect was observed. Physical PMA-device
+classification and the broader hypervisor PMP cross remain open.
 
 ## Scalar Load Feedback Boundary
 

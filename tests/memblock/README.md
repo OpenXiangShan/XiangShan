@@ -25,7 +25,8 @@ side effects and CMO CLEAN/FLUSH/INVAL remain explicit boundary gaps.
 execute behavior, and each operation family across all four Sv39/Sv48 and
 Sv39x4/Sv48x4 two-stage translation pairs. A five-case PBMT basis covers final
 PMA/NC/IO classification and VS-over-G priority for every hypervisor operation
-family. Vector FOF and unit-stride, strided, indexed-unordered, and
+family, and cacheable misaligned HLV/HLVX/HSV exercise the scalar split paths.
+Vector FOF and unit-stride, strided, indexed-unordered, and
 indexed-ordered segment load/store takeover are covered by focused tests; the
 common constrained tail mixes segment operations across load/store, EEW
 8/16/32/64, and NF 1..7. Unsupported segment shapes are not silently randomized
