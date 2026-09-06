@@ -113,16 +113,27 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
         makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        memblock = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/MemBlock.scala"
+        ).read_text()
+        repeater = (
+            REPO_ROOT / "src/main/scala/xiangshan/cache/mmu/Repeater.scala"
+        ).read_text()
         for contract in (
             "start_ifetch_ptw_request",
             "complete_ifetch_ptw_request",
             "ifetch_ptw_pending_",
+            "pending_ifetch_ptw_requests",
             "IFU-DTLB-concurrent",
             "ifu_dtlb_source_overlap=1",
             "ptw_max_outstanding_requests() < 2",
+            "IFU-duplicate",
+            "duplicate_requests=2 duplicate_walk_requests=3",
             "ifetch-ptw-bridge",
         ):
             self.assertIn(contract, environment + main + makefile)
+        self.assertIn("PTWRepeaterNB(passReady = false", memblock)
+        self.assertIn("req_in.ready := !sent", repeater)
 
     def test_scalar_load_feedback_is_observed_on_every_lane(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()

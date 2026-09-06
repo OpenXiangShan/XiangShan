@@ -6446,15 +6446,121 @@ int run_ifetch_ptw_bridge(int argc, char **argv)
     total_cycles += concurrent.cycle();
     total_ptw_requests += concurrent.ptw_requests();
 
+    constexpr std::uint64_t duplicate_root = 0x97000000ULL;
+    constexpr std::uint64_t duplicate_virtual = 0x68012000ULL;
+    constexpr std::uint64_t duplicate_physical = 0xe0012000ULL;
+    memblock::Environment duplicate(argc, argv);
+    duplicate.configure_backpressure(
+        0x4f1bbcdc67621a53ULL, true,
+        memblock::ResponseLatencyProfile::spec);
+    bool duplicate_configured = duplicate.reset() &&
+        duplicate.map_sv39_4k(
+            duplicate_virtual, duplicate_physical, duplicate_root, true,
+            false, true, false) &&
+        duplicate.activate_sv39(duplicate_root, asid);
+    const auto duplicate_reference = memblock::reference_page_walk(
+        duplicate.memory(), duplicate_root, duplicate_virtual,
+        memblock::ReferencePageMode::sv39);
+    const auto duplicate_root_pte = memblock::reference_pte_address_at_level(
+        duplicate.memory(), duplicate_root, duplicate_virtual,
+        memblock::ReferencePageMode::sv39, 2);
+    const auto duplicate_leaf_pte = memblock::reference_pte_address_at_level(
+        duplicate.memory(), duplicate_root, duplicate_virtual,
+        memblock::ReferencePageMode::sv39, 0);
+    duplicate_configured = duplicate_configured &&
+        duplicate_reference.translated &&
+        duplicate_reference.physical_address == duplicate_physical &&
+        duplicate_root_pte && duplicate_leaf_pte;
+    if (!duplicate_configured) {
+        std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=IFU-duplicate"
+                  << " cycle=" << duplicate.cycle()
+                  << " phase=configuration reason=" << duplicate.error()
+                  << '\n';
+        return 1;
+    }
+
+    const std::uint64_t duplicate_ptw_before = duplicate.ptw_requests();
+    duplicate.force_next_ptw_response_delay(concurrent_ptw_delay);
+    memblock::Environment::IFetchPtwResponse duplicate_first_response;
+    memblock::Environment::IFetchPtwResponse duplicate_second_response;
+    if (!duplicate.start_ifetch_ptw_request(
+            duplicate_virtual >> 12,
+            memblock::PtwTranslationMode::no_stage_two) ||
+        !duplicate.run_until_ptw_request_covering(
+            *duplicate_root_pte, duplicate_ptw_before, 4096,
+            concurrent_ptw_delay) ||
+        !duplicate.start_ifetch_ptw_request(
+            duplicate_virtual >> 12,
+            memblock::PtwTranslationMode::no_stage_two) ||
+        duplicate.pending_ifetch_ptw_requests() != 2 ||
+        !duplicate.complete_ifetch_ptw_request(
+            duplicate_first_response, response_stall_cycles) ||
+        !duplicate.complete_ifetch_ptw_request(
+            duplicate_second_response, response_stall_cycles) ||
+        duplicate.pending_ifetch_ptw_requests() != 0 ||
+        !duplicate.run_until_ptw_request_covering(
+            *duplicate_leaf_pte, duplicate_ptw_before, 4096) ||
+        duplicate.ptw_requests() - duplicate_ptw_before != 3 ||
+        !(duplicate_first_response == duplicate_second_response)) {
+        std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=IFU-duplicate"
+                  << " cycle=" << duplicate.cycle()
+                  << " phase=request"
+                  << " pending=" << duplicate.pending_ifetch_ptw_requests()
+                  << " ptw_requests="
+                  << duplicate.ptw_requests() - duplicate_ptw_before
+                  << " reason=" << duplicate.error() << '\n';
+        return 1;
+    }
+
+    const std::uint64_t duplicate_vpn = duplicate_virtual >> 12;
+    const unsigned duplicate_sector =
+        static_cast<unsigned>(duplicate_vpn & 7U);
+    const std::uint64_t duplicate_s1_ppn =
+        (duplicate_first_response.s1_ppn << 3) |
+        duplicate_first_response.s1_ppn_low[duplicate_sector];
+    if (duplicate_first_response.s2xlate != static_cast<std::uint8_t>(
+            memblock::PtwTranslationMode::no_stage_two) ||
+        duplicate_first_response.s1_tag != (duplicate_vpn >> 3) ||
+        duplicate_first_response.s1_asid != asid ||
+        duplicate_first_response.s1_n ||
+        duplicate_first_response.s1_pbmt != 0 ||
+        duplicate_first_response.s1_d || !duplicate_first_response.s1_a ||
+        duplicate_first_response.s1_g || duplicate_first_response.s1_u ||
+        !duplicate_first_response.s1_x || duplicate_first_response.s1_w ||
+        !duplicate_first_response.s1_r ||
+        duplicate_first_response.s1_level != 0 ||
+        !duplicate_first_response.s1_v ||
+        duplicate_s1_ppn != (duplicate_physical >> 12) ||
+        duplicate_first_response.s1_addr_low != duplicate_sector ||
+        duplicate_first_response.s1_pteidx != (1U << duplicate_sector) ||
+        (duplicate_first_response.s1_valididx &
+         (1U << duplicate_sector)) == 0 ||
+        duplicate_first_response.s1_pf || duplicate_first_response.s1_af) {
+        std::cerr << "MEMBLOCK_IFETCH_PTW_BRIDGE_FAIL case=IFU-duplicate"
+                  << " cycle=" << duplicate.cycle()
+                  << " phase=response"
+                  << " s1_tag=0x" << std::hex
+                  << duplicate_first_response.s1_tag
+                  << " s1_ppn=0x" << duplicate_s1_ppn << std::dec
+                  << " s1_asid=" << duplicate_first_response.s1_asid
+                  << " s1_v=" << duplicate_first_response.s1_v
+                  << " s1_pf=" << duplicate_first_response.s1_pf
+                  << " s1_af=" << duplicate_first_response.s1_af << '\n';
+        return 1;
+    }
+    total_cycles += duplicate.cycle();
+    total_ptw_requests += duplicate.ptw_requests();
+
     std::cout << "MEMBLOCK_IFETCH_PTW_BRIDGE_PASS"
-              << " cases=" << cases.size() + degenerate_cases.size() + 1
+              << " cases=" << cases.size() + degenerate_cases.size() + 2
               << " stage1_valid=4 nested_valid=4 stage1_fault=2"
               << " pbmt=2 only_stage1=2 only_stage2=2"
               << " ifu_dtlb_source_overlap=1"
+              << " duplicate_requests=2 duplicate_walk_requests=3"
               << " ptw_bus_max_outstanding="
               << concurrent.ptw_max_outstanding_requests()
               << " response_stall_cycles="
-              << (cases.size() + degenerate_cases.size() + 1) *
+              << (cases.size() + degenerate_cases.size() + 3) *
                     response_stall_cycles
               << " ptw_requests=" << total_ptw_requests
               << " cycles=" << total_cycles

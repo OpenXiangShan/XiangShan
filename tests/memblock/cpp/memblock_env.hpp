@@ -3115,10 +3115,6 @@ public:
             error_ = "invalid IFetch PTW request";
             return false;
         }
-        if (ifetch_ptw_pending_) {
-            error_ = "IFetch PTW request already pending";
-            return false;
-        }
         const auto s2xlate = static_cast<std::uint8_t>(mode);
 
         dut_.io_fetch_to_mem_itlb_resp_ready.ImmSet(std::uint64_t{0});
@@ -3146,7 +3142,7 @@ public:
             dut_.io_fetch_to_mem_itlb_resp_ready.ImmSet(std::uint64_t{1});
             return false;
         }
-        ifetch_ptw_pending_ = true;
+        ++ifetch_ptw_pending_;
         return check_components();
     }
 
@@ -3154,7 +3150,7 @@ public:
         IFetchPtwResponse &response, unsigned response_stall_cycles = 4,
         unsigned timeout = 16384)
     {
-        if (!ifetch_ptw_pending_) {
+        if (ifetch_ptw_pending_ == 0) {
             error_ = "no IFetch PTW request pending";
             return false;
         }
@@ -3237,7 +3233,7 @@ public:
         if (!observed) {
             error_ = "timed out waiting for IFetch PTW response";
             dut_.io_fetch_to_mem_itlb_resp_ready.ImmSet(std::uint64_t{1});
-            ifetch_ptw_pending_ = false;
+            ifetch_ptw_pending_ = 0;
             return false;
         }
         for (unsigned cycle = 0; cycle < response_stall_cycles; ++cycle) {
@@ -3245,7 +3241,7 @@ public:
                 !(capture() == held)) {
                 error_ = "IFetch PTW response changed while stalled";
                 dut_.io_fetch_to_mem_itlb_resp_ready.ImmSet(std::uint64_t{1});
-                ifetch_ptw_pending_ = false;
+                ifetch_ptw_pending_ = 0;
                 return false;
             }
             tick(false);
@@ -3253,8 +3249,11 @@ public:
         response = held;
         dut_.io_fetch_to_mem_itlb_resp_ready.ImmSet(std::uint64_t{1});
         tick(false);
-        ifetch_ptw_pending_ = false;
-        if (dut_.io_fetch_to_mem_itlb_resp_valid.B()) {
+        --ifetch_ptw_pending_;
+        if (ifetch_ptw_pending_ != 0) {
+            dut_.io_fetch_to_mem_itlb_resp_ready.ImmSet(std::uint64_t{0});
+            dut_.RefreshComb();
+        } else if (dut_.io_fetch_to_mem_itlb_resp_valid.B()) {
             error_ = "IFetch PTW response did not retire after handshake";
             return false;
         }
@@ -3266,6 +3265,10 @@ public:
         IFetchPtwResponse &response, unsigned response_stall_cycles = 4,
         unsigned timeout = 16384)
     {
+        if (ifetch_ptw_pending_ != 0) {
+            error_ = "synchronous IFetch PTW request requires an empty queue";
+            return false;
+        }
         return start_ifetch_ptw_request(vpn, mode, timeout) &&
             complete_ifetch_ptw_request(
                 response, response_stall_cycles, timeout);
@@ -3372,6 +3375,10 @@ public:
         return memory_agent_.grant_acks_idle();
     }
     std::uint64_t ptw_requests() const { return ptw_agent_.request_count(); }
+    std::uint64_t pending_ifetch_ptw_requests() const
+    {
+        return ifetch_ptw_pending_;
+    }
     std::uint64_t dcache_request_stalls() const
     {
         return memory_agent_.request_stall_cycles();
@@ -4067,7 +4074,7 @@ public:
         memory_violation_stats_ = {};
         ifetch_prefetch_stats_ = {};
         hardware_prefetch_stats_ = {};
-        ifetch_ptw_pending_ = false;
+        ifetch_ptw_pending_ = 0;
         dut_.io_fetch_to_mem_itlb_req_0_valid.ImmSet(std::uint64_t{0});
         dut_.io_fetch_to_mem_itlb_resp_ready.ImmSet(std::uint64_t{1});
         dut_.reset.ImmSet(std::uint64_t{1});
@@ -6789,7 +6796,7 @@ private:
     MemoryViolationStats memory_violation_stats_;
     IfetchPrefetchStats ifetch_prefetch_stats_;
     HardwarePrefetchStats hardware_prefetch_stats_;
-    bool ifetch_ptw_pending_ = false;
+    std::uint64_t ifetch_ptw_pending_ = 0;
     std::uint64_t lq_allocated_ = 0;
     std::uint64_t lq_dequeued_ = 0;
     std::uint64_t lq_canceled_ = 0;

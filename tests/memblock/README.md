@@ -390,7 +390,10 @@ and holds response ready low to verify stable payload under backpressure. A
 separate overlap case delays the IFU root PTE response for 256 cycles, issues a
 cold scalar DTLB miss before retiring the IFU response, requires both leaf PTE
 addresses and a PTW manager outstanding depth of at least two, and checks the
-load writeback against the independent memory oracle.
+load writeback against the independent memory oracle. A duplicate case accepts
+two same-VPN IFU requests before the delayed first response, requires two
+identical responses, and proves they coalesce by observing only the three
+memory requests of one cold Sv39 walk.
 This is separate from the data-side TLB translation tests.
 
 `uncache-errors` injects one denied and one corrupt Uncache response and checks
