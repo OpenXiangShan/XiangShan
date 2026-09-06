@@ -99,7 +99,7 @@ Session: `01a051f8-7787-7003-b87a-79852aa669a7`.
 
 44. [`2026-09-03 20:12:19 CST`] `/goal 1. 需要基于前面的说法，包括“不代表 MMIO、atomics、VSegment 等明确边界外功能已经验证”，完善地补充验证计划，将所有能想到的测试点都补充进去。2. review 验证oracle，也就是如何判断结果的正确性，不应该基于特定的case结果，而是一些通用的oracle，你需要将你用了哪些oracle告诉我，写进单独的文档里。3. 每次完成后，需要用一个独立上下文的agent review验证计划，然后再启动长时间的单元测试回归。`
 
-## Current Session: 40 Prompts
+## Current Session: 45 Prompts
 
 Session: `01a06732-901c-7581-be22-854bdc2f93f0`.
 
@@ -179,6 +179,16 @@ Session: `01a06732-901c-7581-be22-854bdc2f93f0`.
 
 38. [`2026-09-05 13:16:54 CST`] `我看你前面往docs目录下面写了好几个CONSTRAINED_RANDOM*开头的markdown，他们都是指的是BUG吗？`
 
-39. [`2026-09-05 13:18:12 CST`] `SCALAR_LOAD_OPTIONAL_METADATA_ORACLE.md这个是BUG吗`
+39. [`2026-09-05 13:17:25 CST`] `我看了下md，他们好像都不是CPU的bug。下次请你不要记录这种UT环境本身迭代过程中的BUG，仅在确认CPU BUG之后再写md，并用CPU_BUG_*开头命名。控制一下md的生成，不必要的过程就不要单独写md记录了`
 
-40. [`2026-09-05 13:18:30 CST`] `好像今天这些都不是BUG吧，只有之前发现的那几个是BUG`
+40. [`2026-09-05 13:18:12 CST`] `SCALAR_LOAD_OPTIONAL_METADATA_ORACLE.md这个是BUG吗`
+
+41. [`2026-09-05 13:18:30 CST`] `好像今天这些都不是BUG吧，只有之前发现的那几个是BUG`
+
+42. [`2026-09-06 08:56:21 CST`] `在仿真过程中，如果长时间没有BUG，那你应该在关注仿真进度的同时，仔细审阅RTL TOP IO和当前验证计划，看看是否有遗漏或不足的测试，测试所覆盖的范围是否足够广泛，查漏补缺`
+
+43. [`2026-09-06 08:58:22 CST`] `另外现有每一个memblock测试跑多长的时间，大致会有多少个load/store/refill/probe等请求？可能需要让单次长度更长一些，比如各个seed都能到100万的量级`
+
+44. [`2026-09-06 08:59:17 CST`] `PROMPT也记得记录下来`
+
+45. [`2026-09-06 09:07:36 CST`] `我看了一下你前面改的是/tmp/xs-memblock-io-audit/tests/memblock/docs/USER_PROMPTS.md，不是本地的文档啊`
