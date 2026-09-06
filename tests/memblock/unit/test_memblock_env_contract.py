@@ -1574,7 +1574,8 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "run_vector_segment",
             "segment_load_writebacks=2",
             "segment_store_writebacks=2",
-            "const std::uint64_t field_offset = transaction.segment",
+            "vector_segment_field_index",
+            "vector_segment_vd_index",
             "VectorAddressingMode::indexed_ordered",
             "addressed_modes=3",
             "addressed_load_writebacks",
@@ -1603,6 +1604,65 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "!io.feedback.bits.robIdx.needFlush(io.redirect)",
         ):
             self.assertIn(rtl_contract, segment)
+
+    def test_vector_segment_lmul_emul_nf_matrix_matches_rtl_contract(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        common = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VecCommon.scala"
+        ).read_text()
+        segment = (
+            REPO_ROOT / "src/main/scala/xiangshan/mem/vector/VSegmentUnit.scala"
+        ).read_text()
+        uop_info = (
+            REPO_ROOT / "src/main/scala/xiangshan/backend/decode/UopInfoGen.scala"
+        ).read_text()
+
+        configurations = 0
+        uops = 0
+        flows = 0
+        for eew in range(4):
+            for vsew in range(4):
+                for lmul_log2 in range(-3, 4):
+                    emul_log2 = eew - vsew + lmul_log2
+                    if lmul_log2 < vsew - 3 or not -3 <= emul_log2 <= 3:
+                        continue
+                    uops_per_field = 1 << max(emul_log2, 0)
+                    bytes_per_uop = 16 >> max(-emul_log2, 0)
+                    flow_num = bytes_per_uop >> eew
+                    for fields in range(2, 9):
+                        if uops_per_field * fields > 8:
+                            continue
+                        configurations += 1
+                        uops += uops_per_field * fields
+                        flows += uops_per_field * fields * flow_num
+        self.assertEqual(configurations, 338)
+        self.assertEqual(uops, 1774)
+        self.assertEqual(flows, 9792)
+
+        for contract in (
+            "vector_segment_data_mul_log2",
+            "vector_segment_uops_per_field",
+            "vector_segment_field_index",
+            "vector_segment_vd_index",
+            "make_segment_lmul_uops",
+            "segment_lmul_configurations != 676",
+            "segment_lmul_unit_stride != 338",
+            "segment_lmul_strided != 338",
+            "segment_lmul_positive_stride != 169",
+            "segment_lmul_negative_stride != 169",
+            "segment_lmul_load_uops != 7096",
+            "segment_lmul_store_uops != 3548",
+            "segment_lmul_rob_wraps != 12",
+            '<< " lmul_configurations="',
+        ):
+            self.assertIn(contract, environment + main)
+        self.assertIn(
+            "GenRealFlowNum(instType, emul, lmul, eew, sew, true)", segment
+        )
+        self.assertIn("val splitPtrOffset = Mux(", segment)
+        self.assertIn("class strdiedLSNumOfUopTable", uop_info)
+        self.assertIn("(MulDataSize(emul) >> eew).asUInt", common)
 
     def test_vector_segment_fof_contract_is_registered(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()

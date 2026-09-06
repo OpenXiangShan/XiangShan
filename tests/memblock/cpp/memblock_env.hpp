@@ -497,6 +497,33 @@ inline unsigned vector_indexed_split_offset(
     return flows_before_uop - flows_before_vd;
 }
 
+inline int vector_segment_data_mul_log2(
+    const VectorMemoryTransaction &transaction)
+{
+    return vector_is_indexed(transaction)
+        ? vector_lmul_log2(transaction)
+        : vector_emul_log2(transaction);
+}
+
+inline unsigned vector_segment_uops_per_field(
+    const VectorMemoryTransaction &transaction)
+{
+    const int data_mul_log2 = vector_segment_data_mul_log2(transaction);
+    return 1U << static_cast<unsigned>(std::max(data_mul_log2, 0));
+}
+
+inline unsigned vector_segment_field_index(
+    const VectorMemoryTransaction &transaction)
+{
+    return transaction.vuop_idx / vector_segment_uops_per_field(transaction);
+}
+
+inline unsigned vector_segment_vd_index(
+    const VectorMemoryTransaction &transaction)
+{
+    return transaction.vuop_idx % vector_segment_uops_per_field(transaction);
+}
+
 inline std::uint16_t vector_fu_op_type(const VectorMemoryTransaction &transaction)
 {
     if (transaction.eew > 3 || vector_vsew(transaction) > 3) {
@@ -583,21 +610,29 @@ inline std::uint64_t vector_element_address(
                 : base - static_cast<std::uint64_t>(-(delta + 1)) - 1U;
         }
     }
-    const std::uint64_t field_offset = transaction.segment
-        ? static_cast<std::uint64_t>(transaction.vuop_idx) * element_bytes
+    const unsigned segment_element = transaction.segment
+        ? vector_segment_vd_index(transaction) * (16U / element_bytes) +
+            element
+        : element;
+    const unsigned segment_field = transaction.segment
+        ? vector_segment_field_index(transaction)
         : 0;
+    const std::uint64_t field_offset =
+        static_cast<std::uint64_t>(segment_field) * element_bytes;
     switch (transaction.addressing) {
     case VectorAddressingMode::unit_stride:
         if (transaction.segment) {
             return base +
-                (element * (static_cast<unsigned>(transaction.nf) + 1U) +
-                 transaction.vuop_idx) * element_bytes;
+                (segment_element *
+                    (static_cast<unsigned>(transaction.nf) + 1U) +
+                 segment_field) * element_bytes;
         }
         return base + element * element_bytes;
     case VectorAddressingMode::strided:
         {
             const std::int64_t delta =
-                transaction.stride * static_cast<std::int64_t>(element);
+                transaction.stride * static_cast<std::int64_t>(
+                    segment_element);
             return delta >= 0
                 ? base + static_cast<std::uint64_t>(delta) + field_offset
                 : base - static_cast<std::uint64_t>(-(delta + 1)) - 1U +
@@ -606,7 +641,7 @@ inline std::uint64_t vector_element_address(
     case VectorAddressingMode::indexed_unordered:
     case VectorAddressingMode::indexed_ordered: {
         const unsigned index_bytes = 1U << transaction.eew;
-        unsigned index_element = element;
+        unsigned index_element = segment_element;
         if (!transaction.segment) {
             const unsigned split_offset =
                 vector_indexed_split_offset(transaction);
@@ -665,7 +700,7 @@ inline std::uint16_t active_vector_elements(
     const unsigned element_count = 16U >> vector_data_eew(transaction);
     const unsigned effective_vl = vector_effective_vl(transaction);
     const unsigned element_base = transaction.segment
-        ? 0
+        ? vector_segment_vd_index(transaction) * element_count
         : transaction.vuop_idx * element_count;
     std::uint16_t result = 0;
     for (unsigned element = 0; element < element_count; ++element) {

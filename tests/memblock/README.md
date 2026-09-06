@@ -39,6 +39,14 @@ common constrained tail mixes segment operations across load/store, EEW
 8/16/32/64, and NF 1..7. Unsupported segment shapes are not silently randomized
 as ordinary LSQ traffic.
 
+The directed segment matrix exhausts all legal NF 2..8 crosses with the 78
+ELEN=64 EEW/SEW/LMUL/EMUL bases for unit-stride and strided operations, subject
+to the decoder's `ceil(EMUL) * NF <= 8` register-group limit. Across both modes
+it executes 676 configurations, 7,096 load/readback uops, and 3,548 store uops;
+strided cases split evenly between positive and negative strides. The oracle
+maps each uop as `field * ceil(EMUL) + Vd-chunk`, so data, writeback mask, and
+element addresses remain independent of the RTL's segment pointer logic.
+
 `vector-segment-fof` contrasts first- and later-element page faults. A later
 fault suppresses the exception and shortens VL, while a first-element fault
 retains the exception and fault VA and leaves VL unchanged.
@@ -100,7 +108,7 @@ The correctness contracts are cataloged separately in
 `docs/ORACLES.md`. `docs/VERIFICATION_PLAN.md` contains the complete test-point
 inventory, including explicit planned gaps for broader device/error ordering,
 reservation interference and full atomic alignment crosses, CMO CLEAN/FLUSH/INVAL,
-remaining segment LMUL/EMUL combinations, remaining PMP/PMA matrices,
+remaining indexed-segment LMUL/EMUL combinations, remaining PMP/PMA matrices,
 coherence protocol negatives, error injection, cross-cause/vector exception
 priority, and four-state behavior. A passing
 cacheable mixed campaign must not be interpreted as verification of those

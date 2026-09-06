@@ -15,12 +15,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `257396474c8bef35e3e3594a6adac2acf6aa7444e8370f0f4d3e413bd545f301`
 - Complete ordered RTL SHA-256: `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`
-- Current rebuilt and frozen UT executable SHA-256: `99a9722b1ae5204222dc555784b93331bcdc94609e56db1080b74de506324dde`
+- Current rebuilt and frozen UT executable SHA-256: `c5efd1fd784fb18a9fcfd1a0c68f7b95caf367a314729f1dbb1e84760ca12c9b`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `577579039590a2ea7a5e5d4e22901ac1d76afbcc5fed158eaf1cd53c8e5d3984`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `3ffb5c0d39a3402bbe6507a54829d58866e907d02760179159d6945dde00344a`
-- Frozen runtime manifest SHA-256: `af062d3446a233f2e71e78b33f33560936b23fd93a4dfca07470a312fe20df98`
+- Frozen runtime manifest SHA-256: `eb8b75735cc01f4be4333dd7266819f055b78bfdb755e1267c6fcbf9b57443fb`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -332,6 +332,15 @@ from 2 to 1. A separate empty-page-table case faulted on the first element:
 both field uops retained `LoadPageFault`, the reported VA matched the first
 element, one PTW and no DCache request occurred, and the fix-VL uop preserved
 the original VL of 2.
+
+On 2026-09-07, the same scenario added the complete legal non-indexed segment
+matrix. Unit-stride and strided each covered 338 NF 2..8 x
+EEW/SEW/LMUL/EMUL configurations, with 7,096 load/readback uops, 3,548 store
+uops, 12 ROB wraps, zero segment LSQ allocations, and evenly split
+positive/negative strided cases. The 456,785-cycle aggregate issued 2,576
+TileLink requests and passed exact load/store/readback data and metadata on
+complete RTL SHA-256 `e3250bd4594a3f5594b2fe5e215ddf16b89dd121498a72953b2500eecf61fcf8`.
+No CPU defect was observed.
 
 ## Hypervisor Memory Operation Mode Matrix
 
@@ -1342,6 +1351,7 @@ the historical complete RTL SHA-256 is
 | Cold-load refill, partial progress, and merge | Pass | Cycle 74 for two cold lines selecting opposite virtual-address bit-5 values: one ordinary and one `isKeyword` AcquireBlock, two exact 64-bit writebacks, and two GrantAcks. A separate same-line pair completed two exact loads in 172 cycles from one AcquireBlock held for 128 cycles. A partial-refill load wrote back at cycle 44 after only its critical beat; the delayed second beat drained by cycle 300 with no duplicate writeback |
 | Vector loads | Pass | Four EEWs, both vector lanes, four exact 128-bit results |
 | Vector addressing | Pass | Cycle 99,634; all 78 legal ordinary unit-stride and strided EEW/SEW/LMUL/EMUL configurations plus all 78 configurations for each of indexed-unordered and indexed-ordered passed exact load/store/readback. The indexed matrix covered 1,016 load and 508 store uops, 56 `EMUL>LMUL` shared-Vd configurations, ordered forward issue, unordered reverse issue, 4,608 LQ/2,304 SQ allocations, queue wrap, and two ROB wraps. Directed alias/non-monotonic indexed and all 16 whole-register NF/EEW cases remain included; 1,975 load and 983 store writebacks issued 1,064 TileLink requests |
+| Vector segment | Pass | Cycle 456,785; 676 unit-stride/strided segment configurations crossed NF 2..8 with all legal EEW/SEW/LMUL/EMUL values, producing 7,096 exact load/readback and 3,548 store writebacks, 2,576 TileLink requests, zero segment LQ/SQ allocations, and 12 ROB wraps; addressed indexed modes, redirect cancellation, FOF cancellation, and survivor checks remain included |
 | Vector split load | Pass | Three checked writebacks including a split cold-load replay shape |
 | Store forwarding | Pass | Four store widths and four matching scalar loads |
 | Vector forwarding | Pass | Four vector stores and loads with byte-accurate SQ overlay |
