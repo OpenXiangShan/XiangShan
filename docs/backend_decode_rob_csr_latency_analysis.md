@@ -24,7 +24,7 @@ T3 ROB enqueue
 
 | 优先级 | 候选 | 条件性收益 | 主要理由 |
 |---|---|---:|---|
-| P0 | ROB-head exception/flush 快速路径 | 1～2 拍 | head 已是全局最老，无需等待完整 oldest-tree 归并 |
+| P0 | ROB-head exception/flush 快速路径 | 1 拍 | 已实现：旁路 ExceptionGen 已仲裁的 `out`，不绕过 oldest-tree |
 | P0 | 无 RF 写回 CSR 的 early completion | 最多 3 拍 | CSR wrapper 的 3 拍主要服务提前唤醒；`rfWen=false` 没有消费者要唤醒 |
 | P0/P1 | replay-only 提前发 FTQ redirect | 2～3 拍 | replay 目标在 ROB flush 后很早已知，不需要等待 CSR trap target |
 | P1 | 普通无异常 WB→ROB-head completion bypass | 1 拍 | 保留原状态写回，仅前递 head 的“已完成”判断 |
@@ -128,7 +128,7 @@ Dispatch 对这些标志的实际阻塞逻辑在 `Dispatch.scala:738-739, 833-88
 
 ## 4. 推荐优化方案
 
-### 4.1 P0：ROB-head exception/flush 快速路径（预计 1～2 拍）
+### 4.1 P0：ROB-head exception/flush 快速路径（已实现，省 1 拍）
 
 现有异常写回路径较深：
 
@@ -136,17 +136,25 @@ Dispatch 对这些标志的实际阻塞逻辑在 `Dispatch.scala:738-739, 833-88
 2. ExceptionGen 对 WB 分组，各组取 oldest 后寄存，再跨组取 oldest 后寄存，见 `ExceptionGen.scala:97-120`；
 3. ROB 使用 ExceptionGen 的持久 `state`，并在 head 判断中对 `commit_w` 额外做两拍保护，见 `Rob.scala:608-623`。
 
-全局 oldest 选择对任意位置的多个并发异常是必要的，但当某个 WB 的 `robIdx == deqPtr` 时，它已经是全 ROB 最老指令，无需再通过完整 oldest tree 证明优先级。
+全局 oldest 选择对任意位置的多个并发异常是必要的。首版实现没有从 raw WB 直接旁路，因为那样需要在 ROB 中重新构造多端口 oldest 仲裁；实际选择 `exceptionGen.io.out` 作为安全旁路源。该信号已经完成 WB 分组及跨组 oldest 归并，只比持久 `exceptionGen.io.state` 早一拍。
 
-建议增加窄的 `headExceptionCandidate`：
+实现位于 `Rob.scala` 的 ROB-head exception/flush 判断处：
 
-- 从 raw WB 或 CtrlBlock 第一级 WB 取得 `robIdx/exceptionVec/flushPipe/replay/trigger`；
-- 与 ROB 当前 `deqPtr`、entry valid、最后一个待完成 uop 条件比较；
-- 命中时前递 head 的 `needFlush/exceptionData`，同时仍让原 ExceptionGen 更新持久状态；
-- 原 ExceptionGen 保留为所有未命中、多源冲突和复杂向量异常的慢路径；
-- 同拍 redirect、旧 epoch、部分向量 WB、vstart 更新、触发器和 single-step 必须禁止或单独证明。
+- `exceptionGen.io.out.valid` 且完整 `RobPtr`（value 和 flag）等于当前 `deqPtr` 时才形成 fast candidate；
+- 若持久 state 已命中 ROB head，仍由 state 优先，保证原慢路径行为不变；
+- 向量 load exception 明确排除 fast path，继续等待 state 与 RAB 的 partial-result/vstart 恢复路径；
+- fast 和 state 通过统一的 `deqExceptionData` 选择 exception vector、trigger、single-step、flush/replay/satp、fetch-fault、FTQ 和向量元数据，避免 valid 提前而数据仍来自旧 state；
+- 原 state 路径保留两拍 `commit_w` 稳定保护，fast path 使用一拍保护，与 `out` 相对 state 提前一拍的时序对应；
+- flush-after 发生时锁存选中数据的 `isVset`，避免 fast redirect 清空 ExceptionGen 后丢失下一拍的 vtype 恢复通知；
+- 增加 `exception_head_fast_path` 计数器，用于后续统计动态命中次数。
 
-第一版可只覆盖“单 uop 标量 CSR illegal/flush”和明确的标量异常，再逐步扩大。该方案绕过的是仲裁等待，不改变全局异常优先级。
+因此当前实现的确定收益是：对于 state 尚未命中、`out` 已命中 ROB head、且不是向量 load exception 的 exception/flush/replay，ROB 的 `flushOut` 最多提前 **1 拍**。原文估计的第 2 拍需要继续旁路 ExceptionGen 内部 oldest-tree 或 raw WB，这不在本次安全实现范围内。
+
+验证结果（2026-09-06）：
+
+- `mill -i xiangshan.compile`：通过；
+- `NOOP_HOME=$PWD make emu -j 64`：通过；
+- `./build/emu -i ready-to-run/coremark-2-iteration.bin --diff ready-to-run/riscv64-nemu-interpreter-so`：退出码 0，`HIT GOOD TRAP`，663,687 instructions / 296,042 cycles，IPC 2.241868。
 
 ### 4.2 P0：无 RF 写回 CSR 的 early ROB completion（最多省 3 拍）
 
