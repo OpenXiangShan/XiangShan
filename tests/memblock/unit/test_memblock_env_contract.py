@@ -1064,6 +1064,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "phase=device-queued-order",
             "queued_device_loads=",
             "queued_device_max_outstanding=",
+            "phase=device-mixed-load-delay",
+            "phase=device-mixed-store-delay",
+            "phase=device-mixed-order",
+            "mixed_device_ops=",
+            "mixed_device_max_outstanding=",
             "mmio-contracts",
         ):
             self.assertIn(contract, main + makefile)

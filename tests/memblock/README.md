@@ -609,6 +609,10 @@ allowing the first request. It holds the first two responses for 512 and 128
 cycles and proves that MMIO stays serialized at one external request in flight
 even when Uncache outstanding mode is enabled. The read-clear results must be
 the initial value followed by two zeros.
+A mixed phase pre-issues `load -> SW -> load` into the LQ/SQ. Two 256-cycle
+response delays prove that the younger store and final load cannot reach the
+device early. The exact device log must read and clear the initial value, write
+only the selected high four bytes, then return and clear that stored beat.
 `cbo-zero-contracts` drives the `CBO.ZERO` encoding through
 the cacheable StoreQueue/SBuffer wline path under randomized DCache
 backpressure, checks exact writeback metadata, and reads the resulting line

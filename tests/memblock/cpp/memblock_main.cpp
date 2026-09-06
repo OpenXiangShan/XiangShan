@@ -7896,6 +7896,9 @@ int run_mmio_contracts(int argc, char **argv)
     unsigned queued_device_access_count = 0;
     std::uint64_t queued_device_cycles = 0;
     std::uint64_t queued_device_max_outstanding = 0;
+    unsigned mixed_device_access_count = 0;
+    std::uint64_t mixed_device_cycles = 0;
+    std::uint64_t mixed_device_max_outstanding = 0;
     {
         memblock::Environment device(argc, argv);
         constexpr std::uint64_t device_base = 0x35000100ULL;
@@ -8319,6 +8322,183 @@ int run_mmio_contracts(int argc, char **argv)
             queued.uncache_max_outstanding_requests();
     }
 
+    {
+        memblock::Environment mixed(argc, argv);
+        constexpr std::uint64_t device_base = 0x35000300ULL;
+        constexpr std::uint64_t initial_value = 0x1021324354657687ULL;
+        constexpr std::uint32_t store_value = 0xc1d2e3f4U;
+        constexpr std::uint64_t store_bus_data =
+            (std::uint64_t{store_value} << 32) | store_value;
+        constexpr std::uint64_t stored_beat =
+            std::uint64_t{store_value} << 32;
+        mixed.memory().write_u64(device_base, initial_value);
+        mixed.configure_uncache_device(device_base, 8, true);
+        if (!mixed.reset() || !mixed.activate_bare(46) ||
+            !mixed.set_uncache_write_outstanding(true)) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << mixed.cycle()
+                      << " phase=device-mixed-configuration reason="
+                      << mixed.error() << '\n';
+            return 1;
+        }
+
+        const memblock::LoadTransaction load_before{
+            .address = device_base,
+            .oracle_address = device_base,
+            .op = memblock::LoadOp::ld,
+            .rob = 0,
+            .lq = 0,
+            .pdest = 171,
+            .lane = 0,
+            .expected_debug_is_mmio = true,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        const memblock::StoreTransaction store{
+            .address = device_base + 4,
+            .oracle_address = device_base + 4,
+            .data = store_value,
+            .op = memblock::StoreOp::sw,
+            .rob = 1,
+            .sq = 0,
+            .address_lane = 0,
+            .data_lane = 1,
+            .expected_debug_is_mmio = true,
+            .expected_debug_is_ncio = false,
+        };
+        const memblock::LoadTransaction load_after{
+            .address = device_base,
+            .oracle_address = device_base,
+            .op = memblock::LoadOp::ld,
+            .rob = 2,
+            .lq = 1,
+            .pdest = 172,
+            .lane = 1,
+            .expected_debug_is_mmio = true,
+            .expected_debug_is_ncio = false,
+            .expected_debug_is_perf_cnt = false,
+        };
+        mixed.expect_load_data(load_before, initial_value);
+        mixed.expect_store(store);
+        mixed.expect_load_data(load_after, stored_beat);
+        if (!mixed.enqueue_load(load_before) ||
+            !mixed.issue_load(load_before, 2048) ||
+            !mixed.enqueue_store(store, 0) ||
+            !mixed.issue_store_address(store, 2048) ||
+            !mixed.issue_store_data(store, 2048) ||
+            !mixed.enqueue_load(load_after) ||
+            !mixed.issue_load(load_after, 2048) ||
+            mixed.uncache_requests() != 0 ||
+            mixed.pending_scalar_loads() != 2 ||
+            mixed.pending_scalar_stores() != 1) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << mixed.cycle()
+                      << " phase=device-mixed-issue requests="
+                      << mixed.uncache_requests() << " pending_loads="
+                      << mixed.pending_scalar_loads() << " pending_stores="
+                      << mixed.pending_scalar_stores()
+                      << " reason=" << mixed.error() << '\n';
+            return 1;
+        }
+
+        mixed.force_next_uncache_response_delay(256);
+        if (!mixed.wait_for_mmio_request(
+                load_before.rob, load_before.rob_flag, 4096) ||
+            !mixed.run_cycles(128) || mixed.uncache_requests() != 1 ||
+            mixed.uncache_outstanding_requests() != 1 ||
+            mixed.writebacks() != 0 || mixed.store_writebacks() != 0 ||
+            mixed.uncache_device_accesses().size() != 1 ||
+            mixed.bus_expected_load(device_base, memblock::LoadOp::ld) != 0) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << mixed.cycle()
+                      << " phase=device-mixed-load-delay requests="
+                      << mixed.uncache_requests() << " outstanding="
+                      << mixed.uncache_outstanding_requests()
+                      << " load_writebacks=" << mixed.writebacks()
+                      << " store_writebacks=" << mixed.store_writebacks()
+                      << " accesses="
+                      << mixed.uncache_device_accesses().size()
+                      << " reason=" << mixed.error() << '\n';
+            return 1;
+        }
+        if (!mixed.run_until_load_writebacks(1, 4096)) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << mixed.cycle()
+                      << " phase=device-mixed-load-writeback reason="
+                      << mixed.error() << '\n';
+            return 1;
+        }
+
+        mixed.force_next_uncache_response_delay(256);
+        if (!mixed.wait_for_mmio_store_request(store.rob, store.rob_flag, 4096) ||
+            !mixed.run_cycles(128) || mixed.uncache_requests() != 2 ||
+            mixed.uncache_outstanding_requests() != 1 ||
+            mixed.writebacks() != 1 || mixed.store_writebacks() != 0 ||
+            mixed.uncache_device_accesses().size() != 2 ||
+            mixed.bus_expected_load(device_base, memblock::LoadOp::ld) !=
+                stored_beat) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << mixed.cycle()
+                      << " phase=device-mixed-store-delay requests="
+                      << mixed.uncache_requests() << " outstanding="
+                      << mixed.uncache_outstanding_requests()
+                      << " load_writebacks=" << mixed.writebacks()
+                      << " store_writebacks=" << mixed.store_writebacks()
+                      << " accesses="
+                      << mixed.uncache_device_accesses().size()
+                      << " reason=" << mixed.error() << '\n';
+            return 1;
+        }
+        if (!mixed.run_until_store_complete(4096) ||
+            !mixed.commit_stores_through(store, 1) ||
+            !mixed.run_cycles(16)) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << mixed.cycle()
+                      << " phase=device-mixed-store-complete reason="
+                      << mixed.error() << '\n';
+            return 1;
+        }
+        mixed.record_committed_store(store);
+
+        if (!mixed.wait_for_mmio_request(
+                load_after.rob, load_after.rob_flag, 4096) ||
+            !mixed.run_until_complete(4096) ||
+            !mixed.run_until_queues_retired(2048)) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << mixed.cycle()
+                      << " phase=device-mixed-drain reason="
+                      << mixed.error() << '\n';
+            return 1;
+        }
+
+        const auto &accesses = mixed.uncache_device_accesses();
+        if (accesses.size() != 3 || mixed.uncache_requests() != 3 ||
+            mixed.uncache_max_outstanding_requests() != 1 ||
+            accesses[0].sequence != 0 || accesses[0].write ||
+            accesses[0].read_data != initial_value ||
+            accesses[1].sequence != 1 || !accesses[1].write ||
+            accesses[1].size != 2 || accesses[1].mask != 0xf0 ||
+            accesses[1].data != store_bus_data ||
+            accesses[2].sequence != 2 || accesses[2].write ||
+            accesses[2].read_data != stored_beat ||
+            accesses[0].denied || accesses[0].corrupt ||
+            accesses[1].denied || accesses[1].corrupt ||
+            accesses[2].denied || accesses[2].corrupt ||
+            mixed.bus_expected_load(device_base, memblock::LoadOp::ld) != 0) {
+            std::cerr << "MEMBLOCK_MMIO_CONTRACTS_FAIL cycle="
+                      << mixed.cycle()
+                      << " phase=device-mixed-order requests="
+                      << mixed.uncache_requests() << " max_outstanding="
+                      << mixed.uncache_max_outstanding_requests()
+                      << " accesses=" << accesses.size() << '\n';
+            return 1;
+        }
+        mixed_device_access_count = accesses.size();
+        mixed_device_cycles = mixed.cycle();
+        mixed_device_max_outstanding =
+            mixed.uncache_max_outstanding_requests();
+    }
+
     std::cout << "MEMBLOCK_MMIO_CONTRACTS_PASS"
               << " cycle=" << environment.cycle()
               << " normal=" << normal_count
@@ -8344,6 +8524,10 @@ int run_mmio_contracts(int argc, char **argv)
               << " queued_device_max_outstanding="
               << queued_device_max_outstanding
               << " queued_device_cycles=" << queued_device_cycles
+              << " mixed_device_ops=" << mixed_device_access_count
+              << " mixed_device_max_outstanding="
+              << mixed_device_max_outstanding
+              << " mixed_device_cycles=" << mixed_device_cycles
               << " dcache_requests=" << environment.tilelink_requests()
               << " uncache_requests=" << environment.uncache_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
