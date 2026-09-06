@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `385fbeecf9a145e82c6acfe164a01d0a3ad0faba8eff3bb2600a44149ac5576b`
+- Current rebuilt and frozen UT executable SHA-256: `5143f912838d826cb273b73d12e1eaeed91899b2b0a4ae205e62be463b7fec7c`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `2ae87528fca87b9f961b052010323d7fba3d8008db669a85bc2aff68d98a9b95`
+- Frozen runtime manifest SHA-256: `fb1c81cb25fc0cbf96c18e5c74ba3d01049b7b3296e9e19a825c6d4abc6f07b5`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -60,6 +60,22 @@ queued response and therefore delivered old-line data after TileLink source
 reuse. `XSTileWrap` drives both the core/MemBlock and tile-local L2 from the
 same `childReset`, so retaining the manager response did not model the actual
 reset domain. This was a UT environment correction, not a CPU RTL defect.
+
+## Ordinary Vector Multi-Uop Addressing
+
+On 2026-09-06, the expanded `vector-addressing` scenario passed in 1,067
+aggregate cycles on complete RTL SHA-256
+`4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
+Its new LMUL=2 phase checked six exact writebacks from three two-uop loads:
+unit stride with 16-byte `vuopIdx` base advancement, negative stride with
+elements-per-uop advancement, and ordered indexed addressing with an
+independent index vector for each uop. Unit-stride and strided uop 1 issued
+before uop 0; ordered indexed uops obeyed old-to-young acceptance. Global
+element-number slicing selected mask holes across both unit/indexed uops and
+suppressed the final negative-stride tail element. Together with the existing
+cases, the scenario completed 15 vector-load and three vector-store writebacks
+plus exact store readback while issuing 14 TileLink requests. No CPU defect was
+observed.
 
 ## Top-Down Status Boundary
 
@@ -164,9 +180,9 @@ no CPU defect was observed.
 
 ## Concurrent Exception Priority
 
-The expanded `exception-contracts` scenario passed in 495 aggregate cycles on
+The expanded `exception-contracts` scenario passed in 623 aggregate cycles on
 complete RTL SHA-256
-`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`.
+`4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
 Three load page faults were issued together with increasing LQ indices but ROB
 ages 0-after-wrap, 159, and 158; the retained top-level exception VA was
 `0x50007000`, belonging to ROB 158. A separate phase warmed a PBMT-NC store
@@ -177,10 +193,13 @@ expected cause and exceptional loads suppressed RF writes. While both buffers
 retained those results, a further load page fault was injected: selecting store
 continued to report `0x50008011`, selecting load reported its exact
 `0x5000a000` VA after the two-register path, and selecting store again restored
-`0x50008011`. This closes the
-legal wrapped/disagreeing queue-order stimulus for historical fixes `fb9fdc12`
-and `9045e063`; independent revert builds remain pending and the audit does not
-yet label either one reproduced. No current RTL defect was observed.
+`0x50008011`. A further LMUL=2 vector pair used one ROB identity and shared
+architectural base. Uop 1 faulted first at `0x52000018`; the later-issued but
+older uop 0 then replaced the retained address with `0x52000008`. Both exact
+vector exception writebacks completed. This closes the legal wrapped ROB,
+disagreeing queue-order, and same-ROB `uopIdx` stimuli; mixed simultaneous
+exception causes and scalar/vector competition remain open. No current RTL
+defect was observed.
 
 ## Data-Side PMP Contracts
 

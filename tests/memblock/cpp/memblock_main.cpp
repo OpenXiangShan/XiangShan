@@ -9677,12 +9677,131 @@ int run_vector_addressing(int argc, char **argv)
         }
     }
 
+    memblock::Environment multi_uop(argc, argv);
+    constexpr std::uint64_t multi_uop_base =
+        memblock::kDefaultMemoryBase + 0x70000;
+    multi_uop.memory().fill_incrementing(multi_uop_base, 0x4000, 0x61);
+    multi_uop.configure_backpressure(0x13198a2e03707344ULL, true);
+    if (!multi_uop.reset() || !multi_uop.enable_misaligned_accesses()) {
+        std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL cycle="
+                  << multi_uop.cycle()
+                  << " phase=multi-uop-reset reason="
+                  << multi_uop.error() << '\n';
+        return 1;
+    }
+
+    std::array<std::array<memblock::VectorMemoryTransaction, 2>, 3>
+        multi_uop_loads{};
+    multi_uop_loads[0][0] = memblock::VectorMemoryTransaction{
+        .address = multi_uop_base + 0x100,
+        .addressing = memblock::VectorAddressingMode::unit_stride,
+        .eew = 3,
+        .vl = 4,
+        .vm = false,
+        .mask_bits = 0xb,
+        .rob = 40,
+        .lq = 0,
+        .pdest = 80,
+        .lane = 0,
+        .flow_num = 2,
+        .vlmul = 1,
+        .vuop_idx = 0,
+        .last_uop = false,
+    };
+    multi_uop_loads[1][0] = memblock::VectorMemoryTransaction{
+        .address = multi_uop_base + 0x800,
+        .stride = -12,
+        .addressing = memblock::VectorAddressingMode::strided,
+        .eew = 2,
+        .vl = 7,
+        .rob = 41,
+        .lq = 4,
+        .pdest = 82,
+        .lane = 1,
+        .flow_num = 4,
+        .vlmul = 1,
+        .vuop_idx = 0,
+        .last_uop = false,
+    };
+    multi_uop_loads[2][0] = memblock::VectorMemoryTransaction{
+        .address = multi_uop_base + 0x1000,
+        .addressing = memblock::VectorAddressingMode::indexed_ordered,
+        .eew = 1,
+        .vl = 16,
+        .vm = false,
+        .mask_bits = 0xa55a,
+        .rob = 42,
+        .lq = 12,
+        .pdest = 84,
+        .lane = 0,
+        .flow_num = 8,
+        .vlmul = 1,
+        .vuop_idx = 0,
+        .last_uop = false,
+    };
+    constexpr std::array<std::uint16_t, 8> first_indices{
+        28, 4, 40, 16, 52, 0, 36, 12,
+    };
+    constexpr std::array<std::uint16_t, 8> second_indices{
+        156, 132, 168, 144, 180, 128, 164, 140,
+    };
+    for (unsigned element = 0; element < first_indices.size(); ++element) {
+        for (unsigned byte = 0; byte < 2; ++byte) {
+            multi_uop_loads[2][0].index[element * 2 + byte] =
+                static_cast<unsigned char>(first_indices[element] >> (8 * byte));
+        }
+    }
+
+    for (unsigned mode = 0; mode < multi_uop_loads.size(); ++mode) {
+        auto &older = multi_uop_loads[mode][0];
+        auto &younger = multi_uop_loads[mode][1];
+        younger = older;
+        younger.lq = static_cast<std::uint8_t>(older.lq + older.flow_num);
+        younger.pdest = static_cast<std::uint8_t>(older.pdest + 1);
+        younger.lane = mode == 2
+            ? older.lane
+            : (older.lane + 1) % memblock::kVectorMemoryLanes;
+        younger.vuop_idx = 1;
+        younger.last_uop = true;
+        if (mode == 2) {
+            for (unsigned element = 0; element < second_indices.size(); ++element) {
+                for (unsigned byte = 0; byte < 2; ++byte) {
+                    younger.index[element * 2 + byte] =
+                        static_cast<unsigned char>(
+                            second_indices[element] >> (8 * byte));
+                }
+            }
+        }
+
+        multi_uop.expect_vector(older);
+        multi_uop.expect_vector(younger);
+        const auto &first_issue = mode == 2 ? older : younger;
+        const auto &second_issue = mode == 2 ? younger : older;
+        if (!multi_uop.set_rob_head(older.rob, older.rob_flag) ||
+            !multi_uop.enqueue_vector(older) ||
+            !multi_uop.enqueue_vector(younger) ||
+            !multi_uop.issue_vector(first_issue, 512) ||
+            !multi_uop.issue_vector(second_issue, 512) ||
+            !multi_uop.run_until_vector_complete_with_replays(
+                {older, younger}, 16384) ||
+            !multi_uop.run_until_lq_retired(4096)) {
+            std::cerr << "MEMBLOCK_VECTOR_ADDRESSING_FAIL mode=" << mode
+                      << " cycle=" << multi_uop.cycle()
+                      << " phase=multi-uop-load reason="
+                      << multi_uop.error() << '\n';
+            return 1;
+        }
+    }
+
     std::cout << "MEMBLOCK_VECTOR_ADDRESSING_PASS"
-              << " cycle=" << environment.cycle()
-              << " load_writebacks=" << environment.vector_load_writebacks()
+              << " cycle=" << environment.cycle() + multi_uop.cycle()
+              << " load_writebacks=" << environment.vector_load_writebacks() +
+                    multi_uop.vector_load_writebacks()
               << " store_writebacks=" << environment.vector_store_writebacks()
               << " store_modes=3"
-              << " tilelink_requests=" << environment.tilelink_requests()
+              << " multi_uop_modes=3 multi_uop_writebacks=6"
+              << " tilelink_requests=" << environment.tilelink_requests() +
+                    multi_uop.tilelink_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
 }
@@ -9836,6 +9955,76 @@ int run_exception_contracts(int argc, char **argv)
                   << oldest_load_fault.address << " actual_vaddr=0x"
                   << load_priority.exception_vaddr() << std::dec
                   << " reason=" << load_priority.error() << '\n';
+        return 1;
+    }
+
+    memblock::Environment uop_priority(argc, argv);
+    constexpr std::uint64_t uop_priority_root = 0x92300000ULL;
+    constexpr std::uint64_t uop_priority_base = 0x52000000ULL;
+    memblock::VectorMemoryTransaction older_uop{
+        .address = uop_priority_base + 0x8,
+        .eew = 3,
+        .vl = 4,
+        .rob = 32,
+        .lq = 0,
+        .pdest = 46,
+        .lane = 1,
+        .flow_num = 2,
+        .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        .vlmul = 1,
+        .vuop_idx = 0,
+        .last_uop = false,
+    };
+    memblock::VectorMemoryTransaction younger_uop = older_uop;
+    younger_uop.lq = 2;
+    younger_uop.pdest = 47;
+    younger_uop.lane = 0;
+    younger_uop.vuop_idx = 1;
+    younger_uop.last_uop = true;
+    const std::uint64_t younger_uop_fault_address =
+        memblock::vector_element_address(younger_uop, 0);
+    const std::uint64_t older_uop_fault_address =
+        memblock::vector_element_address(older_uop, 0);
+    if (!uop_priority.reset() ||
+        !uop_priority.activate_sv39(uop_priority_root, 23) ||
+        !uop_priority.set_rob_head(older_uop.rob, older_uop.rob_flag) ||
+        !uop_priority.enqueue_vector(older_uop) ||
+        !uop_priority.enqueue_vector(younger_uop)) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << uop_priority.cycle()
+                  << " phase=same-rob-uop-configuration reason="
+                  << uop_priority.error() << '\n';
+        return 1;
+    }
+    uop_priority.expect_vector(younger_uop);
+    if (!uop_priority.issue_vector(younger_uop, 512) ||
+        !uop_priority.run_until_vector_complete_with_replays(
+            younger_uop, 16384) ||
+        !uop_priority.run_cycles(8) ||
+        uop_priority.exception_vaddr() != younger_uop_fault_address) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << uop_priority.cycle()
+                  << " phase=same-rob-younger-uop expected_vaddr=0x"
+                  << std::hex << younger_uop_fault_address
+                  << " actual_vaddr=0x"
+                  << uop_priority.exception_vaddr() << std::dec
+                  << " reason=" << uop_priority.error() << '\n';
+        return 1;
+    }
+    uop_priority.expect_vector(older_uop);
+    if (!uop_priority.issue_vector(older_uop, 512) ||
+        !uop_priority.run_until_vector_complete_with_replays(
+            older_uop, 16384) ||
+        !uop_priority.run_cycles(8) ||
+        uop_priority.exception_vaddr() != older_uop_fault_address ||
+        !uop_priority.run_until_lq_retired(2048)) {
+        std::cerr << "MEMBLOCK_EXCEPTION_CONTRACTS_FAIL cycle="
+                  << uop_priority.cycle()
+                  << " phase=same-rob-older-uop expected_vaddr=0x"
+                  << std::hex << older_uop_fault_address
+                  << " actual_vaddr=0x"
+                  << uop_priority.exception_vaddr() << std::dec
+                  << " reason=" << uop_priority.error() << '\n';
         return 1;
     }
 
@@ -10009,13 +10198,16 @@ int run_exception_contracts(int argc, char **argv)
 
     std::cout << "MEMBLOCK_EXCEPTION_CONTRACTS_PASS"
               << " cycle=" << environment.cycle() + load_priority.cycle() +
-                    store_priority.cycle()
+                    uop_priority.cycle() + store_priority.cycle()
               << " load_writebacks="
               << environment.writebacks() + load_priority.writebacks() +
                     store_priority.writebacks()
               << " store_writebacks=" << store_priority.store_writebacks()
+              << " vector_writebacks="
+              << uop_priority.vector_load_writebacks()
               << " prefetch_writebacks=" << environment.prefetch_writebacks()
-              << " load_priority=3 store_priority=2 selector_cross=1"
+              << " load_priority=3 same_rob_uop_priority=2"
+              << " store_priority=2 selector_cross=1"
               << " load_oldest=0x" << std::hex
               << oldest_load_fault.address
               << " store_oldest=0x" << oldest_store_fault.address << std::dec

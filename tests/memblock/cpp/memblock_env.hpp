@@ -439,9 +439,22 @@ inline std::uint64_t vector_fu_type(const VectorMemoryTransaction &transaction)
 inline std::uint64_t vector_element_address(
     const VectorMemoryTransaction &transaction, unsigned element)
 {
-    const std::uint64_t base = transaction.oracle_address.value_or(
+    std::uint64_t base = transaction.oracle_address.value_or(
         transaction.address);
     const unsigned element_bytes = 1U << transaction.eew;
+    if (!transaction.segment) {
+        if (transaction.addressing == VectorAddressingMode::unit_stride) {
+            base += static_cast<std::uint64_t>(transaction.vuop_idx) * 16U;
+        } else if (transaction.addressing == VectorAddressingMode::strided) {
+            const std::int64_t elements_per_uop = 16 / element_bytes;
+            const std::int64_t delta = transaction.stride *
+                static_cast<std::int64_t>(transaction.vuop_idx) *
+                elements_per_uop;
+            base = delta >= 0
+                ? base + static_cast<std::uint64_t>(delta)
+                : base - static_cast<std::uint64_t>(-(delta + 1)) - 1U;
+        }
+    }
     const std::uint64_t field_offset = transaction.segment
         ? static_cast<std::uint64_t>(transaction.vuop_idx) * element_bytes
         : 0;
@@ -480,12 +493,17 @@ inline std::uint16_t active_vector_elements(
     const VectorMemoryTransaction &transaction)
 {
     const unsigned element_count = 16U >> transaction.eew;
+    const unsigned element_base = transaction.segment
+        ? 0
+        : transaction.vuop_idx * element_count;
     std::uint16_t result = 0;
     for (unsigned element = 0; element < element_count; ++element) {
-        const bool in_range = element >= transaction.vstart &&
-                              element < transaction.vl;
+        const unsigned global_element = element_base + element;
+        const bool in_range = global_element >= transaction.vstart &&
+                              global_element < transaction.vl;
         const bool enabled = transaction.vm ||
-                             ((transaction.mask_bits >> element) & 1U) != 0;
+            (global_element < 16 &&
+             ((transaction.mask_bits >> global_element) & 1U) != 0);
         if (in_range && enabled) {
             result |= static_cast<std::uint16_t>(1U << element);
         }

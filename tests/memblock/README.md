@@ -85,7 +85,7 @@ The correctness contracts are cataloged separately in
 inventory, including explicit planned gaps for MMIO device side effects,
 reservation interference and full atomic alignment crosses, CMO CLEAN/FLUSH/INVAL,
 remaining segment LMUL/whole-register/redirect combinations, remaining PMP/PMA matrices,
-coherence protocol negatives, error injection, same-ROB/vector exception
+coherence protocol negatives, error injection, cross-cause/vector exception
 priority, and four-state behavior. A passing
 cacheable mixed campaign must not be interpreted as verification of those
 planned rows.
@@ -548,7 +548,17 @@ while SQ indices disagree. The final top-level exception VA must identify the
 oldest ROB in both cases, independently of LQ/SQ index order. With both load
 and store exception buffers populated, the test then switches
 `isStoreException` in both directions and checks the exact retained address
-after the two-register output path.
+after the two-register output path. A separate LMUL=2 vector pair shares one
+ROB identity, issues `vuopIdx=1` before `vuopIdx=0`, and requires the older uop
+to replace the younger uop's retained page-fault VA.
+
+`vector-addressing` checks exact unit-stride, strided, indexed-unordered, and
+indexed-ordered data plus vector-store readback. Its ordinary LMUL=2 phase
+drives two uops per instruction for unit-stride, negative-stride, and ordered
+indexed loads. Unit/strided younger uops issue first; indexed uops carry
+independent index vectors and obey ordered acceptance. Cross-uop masks and a
+tail element are selected by global element number. All six writebacks are
+checked against uop-aware addresses from the independent byte-memory model.
 
 `pmp-contracts` drives `pmpaddr0..1` and packed `pmpcfg0` writes through the
 MemBlock distributed CSR boundary. Hand-calculated TOR and NAPOT regions check

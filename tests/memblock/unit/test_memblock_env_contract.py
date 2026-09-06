@@ -463,6 +463,25 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "selector_cross=1",
             "load_oldest=0x",
             "store_oldest=0x",
+            "same_rob_uop_priority=2",
+            "younger_uop.vuop_idx = 1",
+            "vector_element_address(younger_uop, 0)",
+        ):
+            self.assertIn(contract, environment + main)
+
+    def test_vector_address_oracle_covers_ordinary_multi_uop_modes(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        for contract in (
+            "static_cast<std::uint64_t>(transaction.vuop_idx) * 16U",
+            "const std::int64_t elements_per_uop = 16 / element_bytes",
+            "transaction.stride *",
+            "const unsigned global_element = element_base + element",
+            "transaction.mask_bits >> global_element",
+            "multi_uop_loads",
+            "second_indices",
+            "const auto &first_issue = mode == 2 ? older : younger",
+            "multi_uop_modes=3 multi_uop_writebacks=6",
         ):
             self.assertIn(contract, environment + main)
 
