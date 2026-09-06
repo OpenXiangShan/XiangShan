@@ -2851,6 +2851,55 @@ class Environment {
         std::uint8_t replay_mb_index;
     };
 
+    static generated::VectorMemoryIssue make_vector_memory_issue(
+        const VectorMemoryTransaction &transaction)
+    {
+        generated::VectorMemoryIssue issue;
+        issue.ftq_ptr = transaction.ftq_ptr;
+        issue.ftq_offset = transaction.ftq_offset;
+        issue.fu_type = transaction.store ? kFuTypeVectorStore : kFuTypeVectorLoad;
+        issue.fu_op_type = vector_fu_op_type(transaction);
+        issue.vec_wen = !transaction.store;
+        issue.vma = transaction.vma;
+        issue.vta = transaction.vta;
+        issue.vsew = transaction.eew;
+        issue.vlmul = transaction.vlmul;
+        issue.vm = transaction.vm;
+        issue.vstart = transaction.vstart;
+        issue.veew = transaction.eew;
+        issue.pdest = transaction.pdest;
+        issue.rob_flag = transaction.rob_flag;
+        issue.rob_value = transaction.rob;
+        issue.lq_flag = transaction.lq_flag;
+        issue.lq_value = transaction.lq;
+        issue.sq_flag = transaction.sq_flag;
+        issue.sq_value = transaction.sq;
+        issue.flow_num = transaction.flow_num;
+        issue.is_part_replay = transaction.is_part_replay;
+        issue.replay_mask = transaction.replay_mask;
+        issue.replay_mb_index = transaction.replay_mb_index;
+        for (unsigned byte = 0; byte < 8; ++byte) {
+            issue.src[0][byte] = static_cast<unsigned char>(
+                transaction.address >> (8 * byte));
+        }
+        issue.src[2] = transaction.data;
+        if (transaction.addressing == VectorAddressingMode::strided) {
+            const auto stride = static_cast<std::uint64_t>(transaction.stride);
+            for (unsigned byte = 0; byte < 8; ++byte) {
+                issue.src[1][byte] = static_cast<unsigned char>(
+                    stride >> (8 * byte));
+            }
+        } else if (
+            transaction.addressing == VectorAddressingMode::indexed_unordered ||
+            transaction.addressing == VectorAddressingMode::indexed_ordered) {
+            issue.src[1] = transaction.index;
+        }
+        issue.src[3][0] = static_cast<unsigned char>(transaction.mask_bits);
+        issue.src[3][1] = static_cast<unsigned char>(transaction.mask_bits >> 8);
+        issue.src[4][0] = transaction.vl;
+        return issue;
+    }
+
 public:
     struct IFetchPtwResponse {
         std::uint8_t s2xlate = 0;
@@ -2949,6 +2998,38 @@ public:
         std::array<std::uint64_t, kScalarLoadLanes> ld2_cancels{};
         std::array<ScalarLoadWakeupSample, kScalarLoadLanes> last_wakeup{};
         std::array<std::uint64_t, kScalarLoadLanes> last_cancel_cycle{};
+    };
+
+    struct StoreSlowFeedbackSample {
+        unsigned lane = 0;
+        bool hit = false;
+        bool sq_flag = false;
+        std::uint8_t sq_value = 0;
+        std::uint64_t cycle = 0;
+    };
+
+    struct VectorStoreSlowFeedbackSample {
+        unsigned lane = 0;
+        bool hit = false;
+        bool lq_flag = false;
+        std::uint8_t lq_value = 0;
+        bool sq_flag = false;
+        std::uint8_t sq_value = 0;
+        bool is_part_replay = false;
+        std::uint16_t replay_mask = 0;
+        std::uint8_t replay_mb_index = 0;
+        std::uint64_t cycle = 0;
+    };
+
+    struct IqSlowFeedbackStats {
+        std::array<std::uint64_t, kScalarStoreLanes> sta_valid{};
+        std::array<std::uint64_t, kScalarStoreLanes> sta_hits{};
+        std::array<std::uint64_t, kScalarStoreLanes> sta_misses{};
+        std::array<std::uint64_t, kVectorMemoryLanes> vstu_valid{};
+        std::array<std::uint64_t, kVectorMemoryLanes> vstu_hits{};
+        std::array<std::uint64_t, kVectorMemoryLanes> vstu_misses{};
+        std::vector<StoreSlowFeedbackSample> sta_samples;
+        std::vector<VectorStoreSlowFeedbackSample> vstu_samples;
     };
 
     struct MemoryViolationStats {
@@ -3552,6 +3633,10 @@ public:
     {
         return scalar_load_feedback_stats_;
     }
+    const IqSlowFeedbackStats &iq_slow_feedback_stats() const
+    {
+        return iq_slow_feedback_stats_;
+    }
     const MemoryViolationStats &memory_violation_stats() const
     {
         return memory_violation_stats_;
@@ -4133,6 +4218,7 @@ public:
         // constructor's initial value made repeated-reset scenarios silently
         // run without resetting the DUT.
         scalar_load_feedback_stats_ = {};
+        iq_slow_feedback_stats_ = {};
         memory_violation_stats_ = {};
         ifetch_prefetch_stats_ = {};
         hardware_prefetch_stats_ = {};
@@ -5673,49 +5759,8 @@ public:
     bool issue_vector(
         const VectorMemoryTransaction &transaction, unsigned timeout = 64)
     {
-        generated::VectorMemoryIssue issue;
-        issue.ftq_ptr = transaction.ftq_ptr;
-        issue.ftq_offset = transaction.ftq_offset;
-        issue.fu_type = transaction.store ? kFuTypeVectorStore : kFuTypeVectorLoad;
-        issue.fu_op_type = vector_fu_op_type(transaction);
-        issue.vec_wen = !transaction.store;
-        issue.vma = transaction.vma;
-        issue.vta = transaction.vta;
-        issue.vsew = transaction.eew;
-        issue.vlmul = transaction.vlmul;
-        issue.vm = transaction.vm;
-        issue.vstart = transaction.vstart;
-        issue.veew = transaction.eew;
-        issue.pdest = transaction.pdest;
-        issue.rob_flag = transaction.rob_flag;
-        issue.rob_value = transaction.rob;
-        issue.lq_flag = transaction.lq_flag;
-        issue.lq_value = transaction.lq;
-        issue.sq_flag = transaction.sq_flag;
-        issue.sq_value = transaction.sq;
-        issue.flow_num = transaction.flow_num;
-        issue.is_part_replay = transaction.is_part_replay;
-        issue.replay_mask = transaction.replay_mask;
-        issue.replay_mb_index = transaction.replay_mb_index;
-        for (unsigned byte = 0; byte < 8; ++byte) {
-            issue.src[0][byte] = static_cast<unsigned char>(
-                transaction.address >> (8 * byte));
-        }
-        issue.src[2] = transaction.data;
-        if (transaction.addressing == VectorAddressingMode::strided) {
-            const auto stride = static_cast<std::uint64_t>(transaction.stride);
-            for (unsigned byte = 0; byte < 8; ++byte) {
-                issue.src[1][byte] = static_cast<unsigned char>(
-                    stride >> (8 * byte));
-            }
-        } else if (
-            transaction.addressing == VectorAddressingMode::indexed_unordered ||
-            transaction.addressing == VectorAddressingMode::indexed_ordered) {
-            issue.src[1] = transaction.index;
-        }
-        issue.src[3][0] = static_cast<unsigned char>(transaction.mask_bits);
-        issue.src[3][1] = static_cast<unsigned char>(transaction.mask_bits >> 8);
-        issue.src[4][0] = transaction.vl;
+        const generated::VectorMemoryIssue issue =
+            make_vector_memory_issue(transaction);
 
         for (unsigned cycle = 0; cycle < timeout; ++cycle) {
             generated::drive_vector_memory_issue(dut_, transaction.lane, issue);
@@ -5743,6 +5788,54 @@ public:
                 << " lq=" << static_cast<unsigned>(transaction.lq)
                 << " sq=" << static_cast<unsigned>(transaction.sq);
         error_ = message.str();
+        return false;
+    }
+
+    bool issue_vector_batch_same_cycle(
+        const std::vector<VectorMemoryTransaction> &transactions,
+        unsigned timeout = 64)
+    {
+        if (transactions.empty() || transactions.size() > kVectorMemoryLanes) {
+            error_ = "vector issue batch must contain one or two transactions";
+            return false;
+        }
+        std::array<bool, kVectorMemoryLanes> lane_used{};
+        std::vector<generated::VectorMemoryIssue> issues;
+        issues.reserve(transactions.size());
+        for (const auto &transaction : transactions) {
+            if (transaction.lane >= kVectorMemoryLanes ||
+                lane_used[transaction.lane]) {
+                error_ = "vector issue batch lanes must be unique";
+                return false;
+            }
+            lane_used[transaction.lane] = true;
+            issues.push_back(make_vector_memory_issue(transaction));
+        }
+
+        for (unsigned cycle = 0; cycle < timeout; ++cycle) {
+            for (std::size_t index = 0; index < transactions.size(); ++index) {
+                generated::drive_vector_memory_issue(
+                    dut_, transactions[index].lane, issues[index]);
+            }
+            dut_.RefreshComb();
+            const bool all_ready = std::all_of(
+                transactions.begin(), transactions.end(), [&](const auto &transaction) {
+                    return generated::vector_memory_issue_ready(
+                        dut_, transaction.lane);
+                });
+            if (all_ready) {
+                tick();
+                generated::clear_vector_memory_issue_valids(dut_);
+                return check_components();
+            }
+            generated::clear_vector_memory_issue_valids(dut_);
+            tick();
+            if (!check_components()) {
+                return false;
+            }
+        }
+        generated::clear_vector_memory_issue_valids(dut_);
+        error_ = "vector issue batch timed out waiting for same-cycle ready";
         return false;
     }
 
@@ -6955,19 +7048,45 @@ private:
         lq_dequeued_ += dut_.io_mem_to_ooo_lqDeq.U();
         sq_dequeued_ += dut_.io_mem_to_ooo_sqDeq.U();
         if (dut_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid.B()) {
+            const bool hit =
+                dut_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit.B();
             ++store_tlb_feedbacks_;
-            store_tlb_misses_ +=
-                dut_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit.B() ? 0 : 1;
+            store_tlb_misses_ += hit ? 0 : 1;
+            ++iq_slow_feedback_stats_.sta_valid[0];
+            ++(hit ? iq_slow_feedback_stats_.sta_hits[0]
+                   : iq_slow_feedback_stats_.sta_misses[0]);
+            iq_slow_feedback_stats_.sta_samples.push_back(
+                StoreSlowFeedbackSample{
+                    .lane = 0,
+                    .hit = hit,
+                    .sq_flag = dut_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_flag.B(),
+                    .sq_value = static_cast<std::uint8_t>(
+                        dut_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_value.U()),
+                    .cycle = cycle(),
+                });
         }
         if (dut_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_valid.B()) {
+            const bool hit =
+                dut_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit.B();
             ++store_tlb_feedbacks_;
-            store_tlb_misses_ +=
-                dut_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit.B() ? 0 : 1;
+            store_tlb_misses_ += hit ? 0 : 1;
+            ++iq_slow_feedback_stats_.sta_valid[1];
+            ++(hit ? iq_slow_feedback_stats_.sta_hits[1]
+                   : iq_slow_feedback_stats_.sta_misses[1]);
+            iq_slow_feedback_stats_.sta_samples.push_back(
+                StoreSlowFeedbackSample{
+                    .lane = 1,
+                    .hit = hit,
+                    .sq_flag = dut_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_flag.B(),
+                    .sq_value = static_cast<std::uint8_t>(
+                        dut_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_value.U()),
+                    .cycle = cycle(),
+                });
         }
-        if (dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid.B() &&
-            !dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit.B()) {
-            vector_replay_requests_.push_back(VectorReplayRequest{
+        if (dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid.B()) {
+            const VectorStoreSlowFeedbackSample sample{
                 .lane = 0,
+                .hit = dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit.B(),
                 .lq_flag = dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_flag.B(),
                 .lq_value = static_cast<std::uint8_t>(
                     dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_value.U()),
@@ -6979,13 +7098,30 @@ private:
                     dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_vecReplayMask.U()),
                 .replay_mb_index = static_cast<std::uint8_t>(
                     dut_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_vecReplayMbIdx.U()),
-            });
-            ++vector_replay_feedbacks_;
+                .cycle = cycle(),
+            };
+            ++iq_slow_feedback_stats_.vstu_valid[0];
+            ++(sample.hit ? iq_slow_feedback_stats_.vstu_hits[0]
+                          : iq_slow_feedback_stats_.vstu_misses[0]);
+            iq_slow_feedback_stats_.vstu_samples.push_back(sample);
+            if (!sample.hit) {
+                vector_replay_requests_.push_back(VectorReplayRequest{
+                    .lane = sample.lane,
+                    .lq_flag = sample.lq_flag,
+                    .lq_value = sample.lq_value,
+                    .sq_flag = sample.sq_flag,
+                    .sq_value = sample.sq_value,
+                    .is_part_replay = sample.is_part_replay,
+                    .replay_mask = sample.replay_mask,
+                    .replay_mb_index = sample.replay_mb_index,
+                });
+                ++vector_replay_feedbacks_;
+            }
         }
-        if (dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid.B() &&
-            !dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit.B()) {
-            vector_replay_requests_.push_back(VectorReplayRequest{
+        if (dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid.B()) {
+            const VectorStoreSlowFeedbackSample sample{
                 .lane = 1,
+                .hit = dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit.B(),
                 .lq_flag = dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_flag.B(),
                 .lq_value = static_cast<std::uint8_t>(
                     dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_value.U()),
@@ -6997,8 +7133,25 @@ private:
                     dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_vecReplayMask.U()),
                 .replay_mb_index = static_cast<std::uint8_t>(
                     dut_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_vecReplayMbIdx.U()),
-            });
-            ++vector_replay_feedbacks_;
+                .cycle = cycle(),
+            };
+            ++iq_slow_feedback_stats_.vstu_valid[1];
+            ++(sample.hit ? iq_slow_feedback_stats_.vstu_hits[1]
+                          : iq_slow_feedback_stats_.vstu_misses[1]);
+            iq_slow_feedback_stats_.vstu_samples.push_back(sample);
+            if (!sample.hit) {
+                vector_replay_requests_.push_back(VectorReplayRequest{
+                    .lane = sample.lane,
+                    .lq_flag = sample.lq_flag,
+                    .lq_value = sample.lq_value,
+                    .sq_flag = sample.sq_flag,
+                    .sq_value = sample.sq_value,
+                    .is_part_replay = sample.is_part_replay,
+                    .replay_mask = sample.replay_mask,
+                    .replay_mb_index = sample.replay_mb_index,
+                });
+                ++vector_replay_feedbacks_;
+            }
         }
     }
 
@@ -7049,6 +7202,7 @@ private:
     std::uint64_t pin_space_digest_ = 0;
     FrontendBridgeStats frontend_bridge_stats_;
     ScalarLoadFeedbackStats scalar_load_feedback_stats_;
+    IqSlowFeedbackStats iq_slow_feedback_stats_;
     MemoryViolationStats memory_violation_stats_;
     IfetchPrefetchStats ifetch_prefetch_stats_;
     HardwarePrefetchStats hardware_prefetch_stats_;

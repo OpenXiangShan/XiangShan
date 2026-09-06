@@ -55,6 +55,23 @@ none left a normal backend wakeup after its exceptional writeback. PMP/PMA
 denial and physical ECC cancellation crosses remain open because their physical
 injection paths are not yet modeled.
 
+## Store/Vector IQ Slow Feedback Boundary
+
+The `iq-slow-feedback` scenario now records every valid STA and VSTU
+slow-feedback pulse, including its lane, cycle, hit classification, queue
+identity, and vector partial-replay fields. Current RTL passed the independent
+field oracle: two cold Sv39 scalar stores issued on separate StoreUnits returned
+same-cycle misses with exact SQ indices; after both translations were filled,
+two new stores returned same-cycle hits on the same two lanes with exact new SQ
+indices. Two masked-off vector stores then issued on separate vector lanes and
+returned same-cycle hit feedback with exact LQ/SQ identities,
+`isVecPartReplay=0`, and a zero replay mask. A separate misaligned strided
+vector store produced one blocked partial replay with the expected LQ and SQ
+flow identity, `vecReplayMask=0x2`, and merge-buffer index zero, then replayed,
+completed, and committed. The scenario passed against complete RTL SHA-256
+`774dd52e91209904f30e4761d6e46f2fcc547b15b34f519c4c333aeb841b8cf9`;
+no CPU defect was observed.
+
 ## RAW Memory Violation Boundary
 
 The `memory-violation` scenario first completed a same-line byte-disjoint load

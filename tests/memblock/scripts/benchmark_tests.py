@@ -45,6 +45,7 @@ SCENARIOS = (
     "dcache-release",
     "store-rdata-order",
     "store-tlb-miss-preserve",
+    "iq-slow-feedback",
     "redirect",
     "queue-pressure",
     "scalar-misaligned",

@@ -225,6 +225,7 @@ make vector-store-forwarding PICKER="$PICKER" JOBS=8
 make store-forwarding PICKER="$PICKER" JOBS=8
 make store-rdata-order PICKER="$PICKER" JOBS=8
 make store-tlb-miss-preserve PICKER="$PICKER" JOBS=8
+make iq-slow-feedback PICKER="$PICKER" JOBS=8
 make dcache-release PICKER="$PICKER" JOBS=8
 make redirect PICKER="$PICKER" JOBS=8
 make queue-pressure PICKER="$PICKER" JOBS=8
@@ -347,6 +348,16 @@ requires both canceled and uncanceled wakeups on every lane. When hardware
 stride prefetch is enabled, that backend gate is frozen before training begins
 because prefetch traffic produces load-pipeline cancel pulses without backend
 wakeups; full-run raw counters remain in the result.
+
+`iq-slow-feedback` records every valid STA and VSTU slow-feedback pulse with
+its lane, cycle, hit result, queue identity, and vector replay fields. It
+co-issues two cold translated scalar stores and requires same-cycle TLB-miss
+feedback on both STA lanes, warms both translations, and then requires
+same-cycle hit feedback with exact SQ identities. Two masked-off vector stores
+exercise both VSTU lanes in one cycle with exact LQ/SQ identities and zero
+partial-replay metadata. A separate misaligned strided vector store requires a
+blocked VSTU response with an in-range SQ flow, exact LQ identity, a nonzero
+partial replay mask, and a reusable merge-buffer index.
 
 `memory-violation` first proves that same-line, byte-disjoint load/store traffic
 does not redirect. It then leaves an older store address unresolved, completes

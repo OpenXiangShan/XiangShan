@@ -6006,6 +6006,248 @@ int run_store_tlb_miss_preserve(int argc, char **argv)
     return 0;
 }
 
+int run_iq_slow_feedback(int argc, char **argv)
+{
+    constexpr std::uint64_t root = 0x9d000000ULL;
+    constexpr std::array<std::uint64_t, 2> virtual_addresses{
+        0x6d000018ULL, 0x6d002028ULL};
+    constexpr std::array<std::uint64_t, 2> physical_addresses{
+        0xd0000018ULL, 0xd1000028ULL};
+    memblock::Environment scalar(argc, argv);
+    for (const auto address : physical_addresses) {
+        scalar.memory().fill_incrementing(address & ~std::uint64_t{63}, 64, 0x31);
+    }
+    if (!scalar.reset() ||
+        !scalar.map_sv39_4k(virtual_addresses[0], physical_addresses[0], root) ||
+        !scalar.map_sv39_4k(virtual_addresses[1], physical_addresses[1], root) ||
+        !scalar.activate_sv39(root) || !scalar.set_rob_head(0)) {
+        std::cerr << "MEMBLOCK_IQ_SLOW_FEEDBACK_FAIL cycle=" << scalar.cycle()
+                  << " phase=sta-config reason=" << scalar.error() << '\n';
+        return 1;
+    }
+
+    std::vector<memblock::StoreTransaction> misses;
+    for (unsigned lane = 0; lane < memblock::kScalarStoreLanes; ++lane) {
+        misses.push_back(memblock::StoreTransaction{
+            .address = virtual_addresses[lane],
+            .oracle_address = physical_addresses[lane],
+            .data = 0x1020304050607080ULL + lane,
+            .op = memblock::StoreOp::sd,
+            .rob = static_cast<std::uint8_t>(lane),
+            .sq = static_cast<std::uint8_t>(lane),
+            .address_lane = lane,
+            .data_lane = lane,
+        });
+        scalar.expect_store(misses.back());
+        if (!scalar.enqueue_store(misses.back(), static_cast<std::uint8_t>(lane))) {
+            std::cerr << "MEMBLOCK_IQ_SLOW_FEEDBACK_FAIL cycle=" << scalar.cycle()
+                      << " phase=sta-miss-enqueue reason=" << scalar.error() << '\n';
+            return 1;
+        }
+    }
+    if (!scalar.issue_store_address_batch(misses, 256) ||
+        !scalar.run_cycles(16)) {
+        std::cerr << "MEMBLOCK_IQ_SLOW_FEEDBACK_FAIL cycle=" << scalar.cycle()
+                  << " phase=sta-miss-issue reason=" << scalar.error() << '\n';
+        return 1;
+    }
+
+    const auto find_sta = [](const auto &stats, unsigned lane, bool hit,
+                             std::uint8_t sq_value) {
+        return std::find_if(
+            stats.sta_samples.begin(), stats.sta_samples.end(),
+            [&](const auto &sample) {
+                return sample.lane == lane && sample.hit == hit &&
+                    !sample.sq_flag && sample.sq_value == sq_value;
+            });
+    };
+    const auto &miss_stats = scalar.iq_slow_feedback_stats();
+    const auto miss0 = find_sta(miss_stats, 0, false, 0);
+    const auto miss1 = find_sta(miss_stats, 1, false, 1);
+    if (miss0 == miss_stats.sta_samples.end() ||
+        miss1 == miss_stats.sta_samples.end() || miss0->cycle != miss1->cycle) {
+        std::cerr << "MEMBLOCK_IQ_SLOW_FEEDBACK_FAIL cycle=" << scalar.cycle()
+                  << " phase=sta-same-cycle-miss samples="
+                  << miss_stats.sta_samples.size() << " lane_valid="
+                  << miss_stats.sta_valid[0] << ',' << miss_stats.sta_valid[1]
+                  << " lane_miss=" << miss_stats.sta_misses[0] << ','
+                  << miss_stats.sta_misses[1] << '\n';
+        return 1;
+    }
+
+    for (const auto &transaction : misses) {
+        if (!scalar.issue_store_address_until_tlb_hit(transaction, 4096)) {
+            std::cerr << "MEMBLOCK_IQ_SLOW_FEEDBACK_FAIL cycle=" << scalar.cycle()
+                      << " phase=sta-warm reason=" << scalar.error() << '\n';
+            return 1;
+        }
+    }
+    std::vector<memblock::StoreTransaction> hits = misses;
+    for (unsigned lane = 0; lane < hits.size(); ++lane) {
+        hits[lane].rob = static_cast<std::uint8_t>(lane + 2);
+        hits[lane].sq = static_cast<std::uint8_t>(lane + 2);
+        scalar.expect_store(hits[lane]);
+        if (!scalar.enqueue_store(hits[lane], static_cast<std::uint8_t>(lane))) {
+            std::cerr << "MEMBLOCK_IQ_SLOW_FEEDBACK_FAIL cycle=" << scalar.cycle()
+                      << " phase=sta-hit-enqueue reason=" << scalar.error() << '\n';
+            return 1;
+        }
+    }
+    if (!scalar.issue_store_address_batch(hits, 256) || !scalar.run_cycles(8)) {
+        std::cerr << "MEMBLOCK_IQ_SLOW_FEEDBACK_FAIL cycle=" << scalar.cycle()
+                  << " phase=sta-hit-issue reason=" << scalar.error() << '\n';
+        return 1;
+    }
+    const auto &hit_stats = scalar.iq_slow_feedback_stats();
+    const auto hit0 = find_sta(hit_stats, 0, true, 2);
+    const auto hit1 = find_sta(hit_stats, 1, true, 3);
+    if (hit0 == hit_stats.sta_samples.end() ||
+        hit1 == hit_stats.sta_samples.end() || hit0->cycle != hit1->cycle) {
+        std::cerr << "MEMBLOCK_IQ_SLOW_FEEDBACK_FAIL cycle=" << scalar.cycle()
+                  << " phase=sta-same-cycle-hit samples="
+                  << hit_stats.sta_samples.size() << " lane_hit="
+                  << hit_stats.sta_hits[0] << ',' << hit_stats.sta_hits[1] << '\n';
+        return 1;
+    }
+
+    memblock::Environment vector(argc, argv);
+    if (!vector.reset() || !vector.enable_misaligned_accesses() ||
+        !vector.set_rob_head(0)) {
+        std::cerr << "MEMBLOCK_IQ_SLOW_FEEDBACK_FAIL cycle=" << vector.cycle()
+                  << " phase=vstu-config reason=" << vector.error() << '\n';
+        return 1;
+    }
+    std::vector<memblock::VectorMemoryTransaction> vector_hits;
+    for (unsigned lane = 0; lane < memblock::kVectorMemoryLanes; ++lane) {
+        memblock::VectorMemoryTransaction transaction{
+            .store = true,
+            .address = memblock::kDefaultMemoryBase + 0x7e000 + lane * 0x100,
+            .addressing = memblock::VectorAddressingMode::unit_stride,
+            .eew = 0,
+            .vl = 16,
+            .vm = false,
+            .mask_bits = 0,
+            .rob = static_cast<std::uint8_t>(lane),
+            .lq = static_cast<std::uint8_t>(lane + 4),
+            .sq = static_cast<std::uint8_t>(lane),
+            .lane = lane,
+            .flow_num = 1,
+        };
+        vector_hits.push_back(transaction);
+        vector.expect_vector(vector_hits.back());
+        if (!vector.enqueue_vector(vector_hits.back())) {
+            std::cerr << "MEMBLOCK_IQ_SLOW_FEEDBACK_FAIL cycle=" << vector.cycle()
+                      << " phase=vstu-hit-enqueue reason=" << vector.error() << '\n';
+            return 1;
+        }
+    }
+    if (!vector.issue_vector_batch_same_cycle(vector_hits, 256) ||
+        !vector.run_cycles(64)) {
+        std::cerr << "MEMBLOCK_IQ_SLOW_FEEDBACK_FAIL cycle=" << vector.cycle()
+                  << " phase=vstu-hit-issue reason=" << vector.error() << '\n';
+        return 1;
+    }
+    const auto find_vstu_hit = [](const auto &stats, const auto &transaction) {
+        return std::find_if(
+            stats.vstu_samples.begin(), stats.vstu_samples.end(),
+            [&](const auto &sample) {
+                return sample.lane == transaction.lane && sample.hit &&
+                    sample.lq_flag == transaction.lq_flag &&
+                    sample.lq_value == transaction.lq &&
+                    sample.sq_flag == transaction.sq_flag &&
+                    sample.sq_value == transaction.sq &&
+                    !sample.is_part_replay && sample.replay_mask == 0;
+            });
+    };
+    const auto &vector_hit_stats = vector.iq_slow_feedback_stats();
+    const auto vhit0 = find_vstu_hit(vector_hit_stats, vector_hits[0]);
+    const auto vhit1 = find_vstu_hit(vector_hit_stats, vector_hits[1]);
+    if (vhit0 == vector_hit_stats.vstu_samples.end() ||
+        vhit1 == vector_hit_stats.vstu_samples.end() ||
+        vhit0->cycle != vhit1->cycle) {
+        std::cerr << "MEMBLOCK_IQ_SLOW_FEEDBACK_FAIL cycle=" << vector.cycle()
+                  << " phase=vstu-same-cycle-hit samples="
+                  << vector_hit_stats.vstu_samples.size() << " lane_hit="
+                  << vector_hit_stats.vstu_hits[0] << ','
+                  << vector_hit_stats.vstu_hits[1] << '\n';
+        return 1;
+    }
+
+    memblock::Environment replay(argc, argv);
+    constexpr std::uint64_t replay_base =
+        memblock::kDefaultMemoryBase + 0x7f000;
+    replay.memory().fill_incrementing(replay_base, 0x1000, 0x71);
+    if (!replay.reset() || !replay.enable_misaligned_accesses() ||
+        !replay.set_rob_head(0)) {
+        std::cerr << "MEMBLOCK_IQ_SLOW_FEEDBACK_FAIL cycle=" << replay.cycle()
+                  << " phase=vstu-replay-config reason=" << replay.error() << '\n';
+        return 1;
+    }
+    memblock::VectorMemoryTransaction replay_store{
+        .store = true,
+        .address = replay_base + 5,
+        .stride = 8,
+        .addressing = memblock::VectorAddressingMode::strided,
+        .eew = 3,
+        .vl = 2,
+        .rob = 0,
+        .lq = 9,
+        .sq = 0,
+        .lane = 1,
+        .flow_num = 2,
+    };
+    for (unsigned byte = 0; byte < replay_store.data.size(); ++byte) {
+        replay_store.data[byte] = static_cast<unsigned char>(0xa1 + 3 * byte);
+    }
+    replay.expect_vector(replay_store);
+    if (!replay.enqueue_vector(replay_store) ||
+        !replay.issue_vector(replay_store, 512) || !replay.run_cycles(32) ||
+        !replay.pulse_pending_store(replay_store.rob, replay_store.rob_flag) ||
+        !replay.run_until_vector_complete_with_replays(replay_store, 8192) ||
+        !replay.commit_vector_store(replay_store, 8192)) {
+        std::cerr << "MEMBLOCK_IQ_SLOW_FEEDBACK_FAIL cycle=" << replay.cycle()
+                  << " phase=vstu-replay-run reason=" << replay.error() << '\n';
+        return 1;
+    }
+    const auto &replay_stats = replay.iq_slow_feedback_stats();
+    const auto replay_sample = std::find_if(
+        replay_stats.vstu_samples.begin(), replay_stats.vstu_samples.end(),
+        [&](const auto &sample) {
+            const unsigned packed = sample.sq_value +
+                (sample.sq_flag ? memblock::kStoreQueueEntries : 0);
+            const unsigned base = replay_store.sq +
+                (replay_store.sq_flag ? memblock::kStoreQueueEntries : 0);
+            const unsigned distance =
+                (packed + 2 * memblock::kStoreQueueEntries - base) %
+                (2 * memblock::kStoreQueueEntries);
+            return sample.lane == replay_store.lane && !sample.hit &&
+                sample.lq_flag == replay_store.lq_flag &&
+                sample.lq_value == replay_store.lq &&
+                distance < replay_store.flow_num && sample.is_part_replay &&
+                sample.replay_mask != 0;
+        });
+    if (replay_sample == replay_stats.vstu_samples.end()) {
+        std::cerr << "MEMBLOCK_IQ_SLOW_FEEDBACK_FAIL cycle=" << replay.cycle()
+                  << " phase=vstu-replay-fields samples="
+                  << replay_stats.vstu_samples.size() << " lane_miss="
+                  << replay_stats.vstu_misses[0] << ','
+                  << replay_stats.vstu_misses[1] << '\n';
+        return 1;
+    }
+
+    std::cout << "MEMBLOCK_IQ_SLOW_FEEDBACK_PASS"
+              << " sta_samples=" << hit_stats.sta_samples.size()
+              << " sta_same_cycle_miss=2 sta_same_cycle_hit=2"
+              << " vstu_samples=" << vector_hit_stats.vstu_samples.size()
+              << " vstu_same_cycle_hit=2"
+              << " vstu_replays=" << replay.vector_replay_feedbacks()
+              << " replay_mask=0x" << std::hex << replay_sample->replay_mask
+              << std::dec << " replay_mb="
+              << static_cast<unsigned>(replay_sample->replay_mb_index)
+              << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
+    return 0;
+}
+
 int run_redirect(int argc, char **argv)
 {
     memblock::Environment environment(argc, argv);
@@ -16884,6 +17126,9 @@ int main(int argc, char **argv)
         }
         if (options.test == "store-tlb-miss-preserve") {
             return run_store_tlb_miss_preserve(argc, argv);
+        }
+        if (options.test == "iq-slow-feedback") {
+            return run_iq_slow_feedback(argc, argv);
         }
         if (options.test == "redirect") {
             return run_redirect(argc, argv);

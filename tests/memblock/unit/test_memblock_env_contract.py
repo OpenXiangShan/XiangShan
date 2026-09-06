@@ -174,6 +174,24 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
         ):
             self.assertIn(contract, environment + main + makefile + generator)
 
+    def test_store_and_vector_slow_feedback_fields_are_checked(self) -> None:
+        environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
+        main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        makefile = (MEMBLOCK_ROOT / "Makefile").read_text()
+        for contract in (
+            "IqSlowFeedbackStats",
+            "StoreSlowFeedbackSample",
+            "VectorStoreSlowFeedbackSample",
+            "issue_vector_batch_same_cycle",
+            "run_iq_slow_feedback",
+            "sta-same-cycle-miss",
+            "sta-same-cycle-hit",
+            "vstu-same-cycle-hit",
+            "sample.replay_mask != 0",
+            "iq-slow-feedback",
+        ):
+            self.assertIn(contract, environment + main + makefile)
+
     def test_memory_violation_is_sampled_and_checked(self) -> None:
         environment = (MEMBLOCK_ROOT / "cpp/memblock_env.hpp").read_text()
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
