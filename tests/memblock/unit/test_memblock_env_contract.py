@@ -1165,6 +1165,7 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "actual_hypervisor_family=",
             "actual_vector_segment_direction=",
             "actual_vector_segment_eew=",
+            "actual_vector_segment_nf=",
             "actual_atomic_family=",
             "actual_atomic_width=",
             "actual_nc_direction=",

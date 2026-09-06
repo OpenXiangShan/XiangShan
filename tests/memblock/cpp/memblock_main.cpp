@@ -724,7 +724,7 @@ struct RandomConstraints {
                 actions += direction_classes(mmio_stores_per_mille);
             } else if (operation == vector_segment) {
                 actions += std::max(
-                    4U, direction_classes(vector_segment_stores_per_mille));
+                    7U, direction_classes(vector_segment_stores_per_mille));
             } else {
                 ++actions;
             }
@@ -1040,6 +1040,7 @@ struct ConstraintCoverage {
         hypervisor_families{};
     std::array<std::uint64_t, 2> vector_segment_directions{};
     std::array<std::uint64_t, 4> vector_segment_eews{};
+    std::array<std::uint64_t, 7> vector_segment_nfs{};
     std::array<std::uint64_t, 2> nc_directions{};
     std::array<std::uint64_t, 2> mmio_directions{};
     // Atomic operations are pipeline-serializing at the MemBlock boundary;
@@ -1195,6 +1196,9 @@ struct ConstraintCoverage {
                     vector_segment_directions) &&
                 std::all_of(
                     vector_segment_eews.begin(), vector_segment_eews.end(),
+                    [](std::uint64_t count) { return count != 0; }) &&
+                std::all_of(
+                    vector_segment_nfs.begin(), vector_segment_nfs.end(),
                     [](std::uint64_t count) { return count != 0; });
         }
         if (operation == RandomConstraints::noncacheable) {
@@ -1302,6 +1306,10 @@ struct ConstraintCoverage {
                << " actual_vector_segment_eew=" << vector_segment_eews[0]
                << ',' << vector_segment_eews[1] << ','
                << vector_segment_eews[2] << ',' << vector_segment_eews[3]
+               << " actual_vector_segment_nf=" << vector_segment_nfs[0]
+               << ',' << vector_segment_nfs[1] << ',' << vector_segment_nfs[2]
+               << ',' << vector_segment_nfs[3] << ',' << vector_segment_nfs[4]
+               << ',' << vector_segment_nfs[5] << ',' << vector_segment_nfs[6]
                << " actual_nc_direction=" << nc_directions[0] << ','
                << nc_directions[1]
                << " actual_mmio_direction=" << mmio_directions[0] << ','
@@ -19218,6 +19226,15 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         break;
                     }
                 }
+                unsigned nf = 1 + random() % 7;
+                for (unsigned candidate = 0;
+                     candidate < constraint_coverage.vector_segment_nfs.size();
+                     ++candidate) {
+                    if (constraint_coverage.vector_segment_nfs[candidate] == 0) {
+                        nf = candidate + 1;
+                        break;
+                    }
+                }
                 const unsigned elements = 16U >> eew;
                 const bool vector_corner =
                     random() % 1000 < constraints.vector_corner_per_mille;
@@ -19233,10 +19250,11 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     ? static_cast<std::uint8_t>(random() % (vl + 1U))
                     : 0;
                 const std::uint8_t first_pdest =
-                    static_cast<std::uint8_t>(1 + random() % 254);
-                std::array<memblock::VectorMemoryTransaction, 2> fields{};
-                for (unsigned field = 0; field < fields.size(); ++field) {
-                    fields[field] = memblock::VectorMemoryTransaction{
+                    static_cast<std::uint8_t>(1 + random() % (255 - nf));
+                std::vector<memblock::VectorMemoryTransaction> fields;
+                fields.reserve(nf + 1);
+                for (unsigned field = 0; field <= nf; ++field) {
+                    fields.push_back(memblock::VectorMemoryTransaction{
                         .store = vector_segment_store,
                         .segment = true,
                         .address = address,
@@ -19254,20 +19272,21 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                         .lane = 0,
                         .flow_num = static_cast<std::uint8_t>(elements),
                         .vuop_idx = static_cast<std::uint8_t>(field),
-                        .last_uop = field + 1 == fields.size(),
-                        .nf = 1,
-                    };
-                    fields[field].vm = vm;
-                    fields[field].mask_bits = mask_bits;
-                    fields[field].vstart = vstart;
-                    fields[field].ftq_ptr = random() & 0x3fU;
-                    fields[field].ftq_offset =
+                        .last_uop = field == nf,
+                        .nf = static_cast<std::uint8_t>(nf),
+                    });
+                    auto &segment_field = fields.back();
+                    segment_field.vm = vm;
+                    segment_field.mask_bits = mask_bits;
+                    segment_field.vstart = vstart;
+                    segment_field.ftq_ptr = random() & 0x3fU;
+                    segment_field.ftq_offset =
                         static_cast<std::uint8_t>(random() & 7U);
-                    for (auto &byte : fields[field].data) {
+                    for (auto &byte : segment_field.data) {
                         byte = static_cast<unsigned char>(random());
                     }
-                    environment.expect_vector(fields[field]);
-                    if (!environment.issue_vector(fields[field], 4096)) {
+                    environment.expect_vector(segment_field);
+                    if (!environment.issue_vector(segment_field, 4096)) {
                         return false;
                     }
                 }
@@ -19293,6 +19312,7 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 ++constraint_coverage.vector_segment_directions[
                     vector_segment_store ? 1 : 0];
                 ++constraint_coverage.vector_segment_eews[eew];
+                ++constraint_coverage.vector_segment_nfs[nf - 1];
                 ++coverage.cacheable;
             } else if (kind == RandomConstraints::prefetch) {
                 const auto transaction = make_prefetch(

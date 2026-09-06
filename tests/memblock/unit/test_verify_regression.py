@@ -194,7 +194,7 @@ class VerifyRegressionTest(unittest.TestCase):
             {
                 "constraint_schema": 8,
                 "target_translation": "1,0,0",
-                "actual_translation": "4,0,0",
+                "actual_translation": "7,0,0",
                 "target_stage1_mode": "0,0",
                 "actual_stage1_mode": "0,0",
                 "target_vs_mode": "0,0",
@@ -223,20 +223,29 @@ class VerifyRegressionTest(unittest.TestCase):
                 "raw_load_wakeups": "9,7,5",
                 "raw_load_cancels": "3,2,1",
                 "target_ops": "0,0,0,0,1,0,0,0,0,0",
-                "actual_ops": "0,0,0,0,4,0,0,0,0,0",
+                "actual_ops": "0,0,0,0,7,0,0,0,0,0",
                 "target_hypervisor_family": "0,0,0",
                 "actual_hypervisor_family": "0,0,0",
                 "target_vector_segment_store": 500,
-                "actual_vector_segment_direction": "2,2",
-                "actual_vector_segment_eew": "1,1,1,1",
+                "actual_vector_segment_direction": "4,3",
+                "actual_vector_segment_eew": "2,2,2,1",
+                "actual_vector_segment_nf": "1,1,1,1,1,1,1",
             }
         )
         verify_regression._check_mixed_coverage(result)
 
-        result["actual_vector_segment_eew"] = "2,1,1,0"
+        result["actual_vector_segment_eew"] = "3,2,2,0"
         with self.assertRaisesRegex(
             verify_regression.VerificationError,
             "actual_vector_segment_eew",
+        ):
+            verify_regression._check_mixed_coverage(result)
+
+        result["actual_vector_segment_eew"] = "2,2,2,1"
+        result["actual_vector_segment_nf"] = "2,1,1,1,1,1,0"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError,
+            "actual_vector_segment_nf",
         ):
             verify_regression._check_mixed_coverage(result)
 

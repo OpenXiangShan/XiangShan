@@ -405,6 +405,9 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
         actual_segment_eew = _csv_counts(
             result, "actual_vector_segment_eew", 4
         )
+        actual_segment_nf = _csv_counts(
+            result, "actual_vector_segment_nf", 7
+        )
         if target_operations[4] != 0:
             _require(
                 (target_segment_store == 1000 or actual_segment_direction[0] > 0)
@@ -418,8 +421,14 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
                 f"{actual_segment_eew}",
             )
             _require(
+                all(count > 0 for count in actual_segment_nf),
+                "actual_vector_segment_nf has an uncovered class: "
+                f"{actual_segment_nf}",
+            )
+            _require(
                 sum(actual_segment_direction) == actual_operations[4]
-                and sum(actual_segment_eew) == actual_operations[4],
+                and sum(actual_segment_eew) == actual_operations[4]
+                and sum(actual_segment_nf) == actual_operations[4],
                 "vector segment operation/subclass coverage is not conserved",
             )
 
