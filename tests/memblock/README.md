@@ -437,8 +437,13 @@ An independent Sv39 phase dispatches and issues three unmapped `prefetch.i`
 requests in one cycle and requires one exact VA on each lane with no PTW or
 DCache request. This reflects the RTL ownership boundary: LoadUnit marks
 `prefetch.i` as `s0_tlb_no_query`, and the frontend performs any later fetch
-translation. The `random-mixed` coverage schema also requires at least one
-observed instruction-prefetch output in every seed.
+translation. Two further batches mix `prefetch.i/r/w` across all lanes. Cold
+unmapped data hints must complete without PTW or data-manager traffic. The
+mapped batch first warms two TLB entries through ordinary loads, then requires
+data-prefetch DCache traffic with no new PTW request; separate cold-line
+`prefetch.r` and `prefetch.w` operations each require their own request. Data
+prefetches must never emit an IFU-side pulse. The `random-mixed` coverage schema
+also requires at least one observed instruction-prefetch output in every seed.
 
 `hardware-prefetch` first isolates the L1 stride trainer, holds the load PC
 constant, and issues cold misses at a 128-byte stride. Starting with the sixth

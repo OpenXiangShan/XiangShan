@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `ff6132ad86ca09d9be3fe268da7cfe77f9ce0d3e89867d5b375e04be816e7eef`
+- Current rebuilt and frozen UT executable SHA-256: `ccbb24193841cd0fbac8ba72ec6eb3b06feeca3e0256fa28ff424c1e4ac948e4`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `76b5f482afe2b0a320aea053265a3b20f26ee59b2fbc98536a0498180ab4bec2`
+- Frozen runtime manifest SHA-256: `ec45521d0a341b382b829c7c54a46790e9b5c86ab75c27b3215b09fca513229a`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -270,20 +270,27 @@ WritebackQueue rather than echoing B-source.
 The `io_ifetchPrefetch_*` audit corrected the earlier direction/ownership
 classification: these are three LoadUnit outputs carrying software
 instruction-prefetch virtual addresses to the frontend, not IFU training
-inputs. `ifetch-prefetch` passed in 129 cycles, observing exactly one request on
-each lane for three `prefetch.i` operations and no instruction-prefetch pulse
-for read/write data prefetch controls. The three instruction-prefetches issued
-no DCache TileLink request; the two data-prefetch controls accounted for the
-two observed requests. A separate 58-cycle run activated Sv39 with an empty
-root, then dispatched and issued three unmapped `prefetch.i` requests in one
-cycle. All three lanes emitted their exact VA, with no PTW or DCache request.
-This closes the MemBlock contract according to the RTL's explicit
-`s0_tlb_no_query` path; translation and faults for the forwarded VA belong to
-the frontend. `constraint_schema=5` now requires a positive observed
-instruction-prefetch count in every `random-mixed` seed. A two-worker schema-5
-check then passed seeds 912-913 for 512 mixed actions; the two seeds observed
-five and three instruction-prefetch outputs respectively. The independently
-verified artifact `/tmp/memblock-ifetch-schema5.json` has SHA-256
+inputs. On the current RTL, `ifetch-prefetch` passed in 495 aggregate cycles
+with 16 exact no-RF/no-exception completions. It first observed one exact
+`prefetch.i` VA on each lane and no IFU pulse for sequential `prefetch.r/w`.
+A separate empty-Sv39 run issued three unmapped `prefetch.i` requests together;
+all three lanes emitted their VA with no PTW or DCache request, matching the
+explicit `s0_tlb_no_query` path.
+
+Two further same-cycle batches each mixed `prefetch.i/r/w` across the three
+lanes. Cold unmapped data hints completed with zero PTW, DCache, or Uncache
+requests. For the mapped batch, two ordinary same-page/different-line warmups
+created the TLB entries using six PTW requests; the three-operation batch then
+issued one best-effort DCache request and no new PTW request. Separate mapped
+cold-line `prefetch.r` and `prefetch.w` operations each issued one additional
+DCache request. Across all three mapped data requests, no data prefetch emitted
+an IFU-side pulse. PBMT-NC data-prefetch classification remains open.
+
+`constraint_schema=5` also requires a positive observed instruction-prefetch
+count in every `random-mixed` seed. A historical two-worker schema-5 check
+passed seeds 912-913 for 512 mixed actions; the two seeds observed five and
+three instruction-prefetch outputs respectively. The independently verified
+artifact `/tmp/memblock-ifetch-schema5.json` has SHA-256
 `d053e833417b505d8c7bdcb27be366ce33f1ddb9c491701f640067fea0e182ab`.
 
 The five L2/L3 hardware-prefetch sender pins were then sampled directly.

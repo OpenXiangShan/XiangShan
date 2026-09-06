@@ -420,6 +420,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "concurrent-translation-bypass",
             "concurrent.ptw_requests() != concurrent_ptw_before",
             "concurrent_lanes=3 translation_bypass=3",
+            "run_mixed_prefetches",
+            "mixed_unmapped=3 mixed_mapped=3 mapped_individual=2",
+            "mapped_warmup_ptw=",
+            "mapped_data_dcache=",
+            "phase=mixed-mapped-individual-data",
             "ifetch_prefetches=",
             "ifetch-prefetch",
         ):

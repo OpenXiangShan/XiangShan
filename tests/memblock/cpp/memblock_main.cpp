@@ -3561,14 +3561,238 @@ int run_ifetch_prefetch(int argc, char **argv)
         return 1;
     }
 
+    std::uint64_t mixed_cycles = 0;
+    std::uint64_t mixed_writebacks = 0;
+    std::uint64_t unmapped_data_ptw_requests = 0;
+    std::uint64_t mapped_data_ptw_requests = 0;
+    std::uint64_t mapped_data_dcache_requests = 0;
+    std::uint64_t mapped_warmup_ptw_requests = 0;
+    auto run_mixed_prefetches = [&](bool mapped) {
+        memblock::Environment mixed(argc, argv);
+        constexpr std::uint64_t mixed_virtual = 0x64000000ULL;
+        constexpr std::uint64_t read_page =
+            mixed_virtual + 0x40000000ULL;
+        constexpr std::uint64_t write_page =
+            mixed_virtual + 0x80000000ULL;
+        constexpr std::uint64_t mapped_physical = 0xb4000000ULL;
+        const std::uint64_t mixed_root = mapped
+            ? 0xe7100000ULL
+            : 0xe7200000ULL;
+        const std::uint64_t instruction_address = mixed_virtual + 0x10;
+        const std::uint64_t read_address = read_page + 0x100;
+        const std::uint64_t write_address = write_page + 0x120;
+        mixed.memory().fill_incrementing(mapped_physical, 0x2000, 0x96);
+        if (!mixed.reset() ||
+            (mapped &&
+             (!mixed.map_sv39_4k(
+                  read_page, mapped_physical, mixed_root) ||
+              !mixed.map_sv39_4k(
+                  write_page,
+                  mapped_physical + 0x1000,
+                  mixed_root))) ||
+            !mixed.activate_sv39(mixed_root, mapped ? 28 : 27)) {
+            std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                      << mixed.cycle() << " phase=mixed-"
+                      << (mapped ? "mapped" : "unmapped")
+                      << "-configuration reason=" << mixed.error() << '\n';
+            return false;
+        }
+
+        if (mapped) {
+            const std::array<memblock::LoadTransaction, 2> warmups{{
+                memblock::LoadTransaction{
+                    .address = read_page + 0x800,
+                    .oracle_address = mapped_physical + 0x800,
+                    .op = memblock::LoadOp::ld,
+                    .rob = 28,
+                    .lq = 0,
+                    .pdest = 54,
+                    .lane = 1,
+                },
+                memblock::LoadTransaction{
+                    .address = write_page + 0x800,
+                    .oracle_address = mapped_physical + 0x1800,
+                    .op = memblock::LoadOp::ld,
+                    .rob = 29,
+                    .lq = 1,
+                    .pdest = 55,
+                    .lane = 2,
+                },
+            }};
+            for (const auto &warmup : warmups) {
+                mixed.expect_load(warmup);
+                if (!mixed.set_rob_head(warmup.rob, warmup.rob_flag) ||
+                    !mixed.enqueue_load(warmup) ||
+                    !mixed.issue_load(warmup, 512) ||
+                    !mixed.run_until_complete(8192) ||
+                    !mixed.run_until_lq_retired(2048)) {
+                    std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                              << mixed.cycle()
+                              << " phase=mixed-mapped-tlb-warmup reason="
+                              << mixed.error() << '\n';
+                    return false;
+                }
+            }
+            mapped_warmup_ptw_requests = mixed.ptw_requests();
+        }
+
+        const std::vector<memblock::PrefetchTransaction> transactions{
+            memblock::PrefetchTransaction{
+                .address = instruction_address,
+                .op = memblock::PrefetchOp::instruction,
+                .rob = 32,
+                .lq = static_cast<std::uint8_t>(mapped ? 2 : 0),
+                .lane = 0,
+            },
+            memblock::PrefetchTransaction{
+                .address = read_address,
+                .oracle_address = mapped
+                    ? std::optional<std::uint64_t>{mapped_physical + 0x100}
+                    : std::nullopt,
+                .op = memblock::PrefetchOp::read,
+                .rob = 33,
+                .lq = static_cast<std::uint8_t>(mapped ? 3 : 1),
+                .lane = 1,
+            },
+            memblock::PrefetchTransaction{
+                .address = write_address,
+                .oracle_address = mapped
+                    ? std::optional<std::uint64_t>{
+                          mapped_physical + 0x1120}
+                    : std::nullopt,
+                .op = memblock::PrefetchOp::write,
+                .rob = 34,
+                .lq = static_cast<std::uint8_t>(mapped ? 4 : 2),
+                .lane = 2,
+            },
+        };
+        const auto ifetch_before = mixed.ifetch_prefetch_stats().requests;
+        const std::uint64_t ptw_before = mixed.ptw_requests();
+        const std::uint64_t dcache_before = mixed.tilelink_requests();
+        const std::uint64_t uncache_before = mixed.uncache_requests();
+        for (const auto &transaction : transactions) {
+            mixed.expect_prefetch(transaction);
+        }
+        if (!mixed.set_rob_head(
+                transactions.front().rob, transactions.front().rob_flag) ||
+            !mixed.enqueue_prefetch_batch(transactions, {0, 1, 2}) ||
+            !mixed.issue_prefetch_batch_same_cycle(transactions, 512) ||
+            !mixed.run_until_complete(8192) ||
+            !mixed.run_until_lq_retired(2048) ||
+            !mixed.run_cycles(2)) {
+            std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                      << mixed.cycle() << " phase=mixed-"
+                      << (mapped ? "mapped" : "unmapped")
+                      << "-complete reason=" << mixed.error() << '\n';
+            return false;
+        }
+
+        const auto &mixed_stats = mixed.ifetch_prefetch_stats();
+        bool ifetch_match =
+            mixed_stats.last_vaddr[0] == instruction_address;
+        for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
+            ifetch_match = ifetch_match &&
+                mixed_stats.requests[lane] ==
+                    ifetch_before[lane] + (lane == 0 ? 1 : 0);
+        }
+        const std::uint64_t ptw_delta = mixed.ptw_requests() - ptw_before;
+        const std::uint64_t dcache_delta =
+            mixed.tilelink_requests() - dcache_before;
+        const std::uint64_t uncache_delta =
+            mixed.uncache_requests() - uncache_before;
+        const bool manager_match = mapped
+            ? ptw_delta == 0 && dcache_delta >= 1 && uncache_delta == 0
+            : ptw_delta == 0 && dcache_delta == 0 && uncache_delta == 0;
+        if (!ifetch_match || !manager_match ||
+            mixed.prefetch_writebacks() != transactions.size()) {
+            std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                      << mixed.cycle() << " phase=mixed-"
+                      << (mapped ? "mapped" : "unmapped")
+                      << "-check ifetch=" << mixed_stats.requests[0] << ','
+                      << mixed_stats.requests[1] << ','
+                      << mixed_stats.requests[2]
+                      << " ptw_delta=" << ptw_delta
+                      << " dcache_delta=" << dcache_delta
+                      << " uncache_delta=" << uncache_delta
+                      << " writebacks=" << mixed.prefetch_writebacks()
+                      << '\n';
+            return false;
+        }
+        if (mapped) {
+            const std::array<memblock::PrefetchTransaction, 2>
+                individual_data_prefetches{{
+                    memblock::PrefetchTransaction{
+                        .address = read_page + 0x200,
+                        .oracle_address = mapped_physical + 0x200,
+                        .op = memblock::PrefetchOp::read,
+                        .rob = 35,
+                        .lq = 5,
+                        .lane = 1,
+                    },
+                    memblock::PrefetchTransaction{
+                        .address = write_page + 0x300,
+                        .oracle_address = mapped_physical + 0x1300,
+                        .op = memblock::PrefetchOp::write,
+                        .rob = 36,
+                        .lq = 6,
+                        .lane = 2,
+                    },
+                }};
+            for (const auto &prefetch : individual_data_prefetches) {
+                const std::uint64_t request_before =
+                    mixed.tilelink_requests();
+                mixed.expect_prefetch(prefetch);
+                if (!mixed.set_rob_head(prefetch.rob, prefetch.rob_flag) ||
+                    !mixed.enqueue_prefetch(prefetch) ||
+                    !mixed.issue_prefetch(prefetch, 512) ||
+                    !mixed.run_until_complete(8192) ||
+                    !mixed.run_until_lq_retired(2048) ||
+                    mixed.tilelink_requests() != request_before + 1 ||
+                    mixed.ptw_requests() != ptw_before ||
+                    mixed.uncache_requests() != uncache_before) {
+                    std::cerr << "MEMBLOCK_IFETCH_PREFETCH_FAIL cycle="
+                              << mixed.cycle()
+                              << " phase=mixed-mapped-individual-data"
+                              << " op=" << static_cast<unsigned>(prefetch.op)
+                              << " dcache_before=" << request_before
+                              << " dcache_after="
+                              << mixed.tilelink_requests()
+                              << " reason=" << mixed.error() << '\n';
+                    return false;
+                }
+            }
+        }
+        mixed_cycles += mixed.cycle();
+        mixed_writebacks += mixed.prefetch_writebacks();
+        if (mapped) {
+            mapped_data_ptw_requests = mixed.ptw_requests() - ptw_before;
+            mapped_data_dcache_requests =
+                mixed.tilelink_requests() - dcache_before;
+        } else {
+            unmapped_data_ptw_requests = ptw_delta;
+        }
+        return true;
+    };
+    if (!run_mixed_prefetches(false) || !run_mixed_prefetches(true)) {
+        return 1;
+    }
+
     const auto &stats = environment.ifetch_prefetch_stats();
     std::cout << "MEMBLOCK_IFETCH_PREFETCH_PASS"
-              << " cycle=" << environment.cycle()
+              << " cycle="
+              << environment.cycle() + concurrent.cycle() + mixed_cycles
               << " lane_requests=" << stats.requests[0] << ','
               << stats.requests[1] << ',' << stats.requests[2]
               << " instruction=3 data=2"
               << " concurrent_lanes=3 translation_bypass=3"
-              << " concurrent_cycles=" << concurrent.cycle()
+              << " mixed_unmapped=3 mixed_mapped=3 mapped_individual=2"
+              << " prefetch_writebacks="
+              << environment.prefetch_writebacks() +
+                    concurrent.prefetch_writebacks() + mixed_writebacks
+              << " unmapped_data_ptw=" << unmapped_data_ptw_requests
+              << " mapped_warmup_ptw=" << mapped_warmup_ptw_requests
+              << " mapped_data_ptw=" << mapped_data_ptw_requests
+              << " mapped_data_dcache=" << mapped_data_dcache_requests
               << " tilelink_requests=" << environment.tilelink_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';
     return 0;
