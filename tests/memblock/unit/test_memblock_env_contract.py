@@ -801,8 +801,11 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             pma,
         )
 
-    def test_fp_loads_cover_nan_boxed_mmio_and_exception_suppression(self) -> None:
+    def test_fp_loads_cover_data_paths_and_exception_suppression(self) -> None:
         main = (MEMBLOCK_ROOT / "cpp/memblock_main.cpp").read_text()
+        fp_loads = main[
+            main.index("int run_fp_loads") : main.index("int run_trigger_contracts")
+        ]
         load_unit = (
             REPO_ROOT / "src/main/scala/xiangshan/mem/pipeline/LoadUnit.scala"
         ).read_text()
@@ -810,12 +813,21 @@ class MemBlockEnvironmentContractTest(unittest.TestCase):
             "mmio_fp=5 mmio_flh=1 mmio_flw=2 mmio_fld=2",
             '" mmio_faults="',
             '" page_faults=1"',
+            '" pmp_faults=1 permission_faults=1 guest_faults=1"',
+            '" misaligned_cacheable=3 misaligned_nc_faults=1"',
             "kExceptionLoadAccessFault",
             "kExceptionHardwareError",
             "kExceptionLoadPageFault",
+            "kExceptionLoadGuestPageFault",
+            "kExceptionLoadAddressMisaligned",
+            "configure_pmp",
+            "exception_gpaddr",
+            "exception_is_for_vs_nonleaf_pte",
+            "target.tilelink_requests() == dcache_before",
+            "target.uncache_requests() == uncache_before",
             "mmio_dcache_requests=",
         ):
-            self.assertIn(contract, main)
+            self.assertIn(contract, fp_loads)
         self.assertIn(
             "io.ldout.bits.uop.fpWen := s3_fpWen && "
             "!io.ldout.bits.uop.exceptionVec.asUInt.orR",

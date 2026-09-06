@@ -14,12 +14,12 @@
   subsequent harness changes are recorded in branch history.
 - MemBlock top-file SHA-256: `d47b43afe6c1bd142c50728e40e9a10b8a55c32a1ad5c51b0ca183a204bfdca2`
 - Complete ordered RTL SHA-256: `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`
-- Current rebuilt and frozen UT executable SHA-256: `5aa985de8b40d7a2dc5c5ed3ddb2b4eecc7de779eaaa3aa4fa306ab05b6e595b`
+- Current rebuilt and frozen UT executable SHA-256: `385fbeecf9a145e82c6acfe164a01d0a3ad0faba8eff3bb2600a44149ac5576b`
 - Historical frozen mixed-test executable SHA-256: `2254bb50285a4d0c05a45bd96f43582240b44a9b52d08a188a14b8396716c6d0`
 - Current rebuilt and frozen Verilated model SHA-256: `d470c1d3dfc48fe11a7663df5c672d537e3b1877c0373ed21afb80cb9e56de10`
 - Frozen xspcomm SHA-256: `0592b633c82eb884fc7a5accd3bfd5337d3f58cb69253db6a109f614ae6b9f74`
 - Frozen RTL metadata SHA-256: `e8c4fb56c1c6400f62d795c06f51f18fddbc651947cd38faafc06bc43c008147`
-- Frozen runtime manifest SHA-256: `1f17d44325430737f4fafe2e4861534b53e59d26a3da20e40b7f8b61d1941816`
+- Frozen runtime manifest SHA-256: `2ae87528fca87b9f961b052010323d7fba3d8008db669a85bc2aff68d98a9b95`
 - Picker commit: `c100874936aad4030d3bc4c8425ab652f2fbc7ad`
 - xcomm commit: `23ba5c47310a74dab1567a4ca54ad85dec4512cb`
 
@@ -33,13 +33,16 @@ exception-vector gate already used by scalar integer loads; details and the
 original failing output are in `CPU_BUG_FP_EXCEPTION_FP_WEN.md`.
 
 After full DefaultConfig re-elaboration and Picker rebuild, `fp-loads` passed
-in 895 aggregate cycles on complete RTL SHA-256
+in 1,753 aggregate cycles on complete RTL SHA-256
 `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
-It checked nine FP writebacks: cacheable FLH/FLW/FLD, normal PBMT=IO
-FLH/FLW/FLD, denied FLW, corrupt FLD, and an unmapped FLW page fault. Successful
-narrow loads were exactly NaN-boxed; all three exceptional operations retained
-their exact exception while suppressing both RF write enables. The five MMIO
-cases emitted five Uncache requests and zero DCache requests.
+It checked 16 FP writebacks: aligned cacheable and normal PBMT=IO FLH/FLW/FLD,
+cacheable misaligned FLH/FLW/FLD across line/page boundaries, denied FLW,
+corrupt FLD, and independent page, PMP access, stage-1 permission, G-stage
+guest-page, and PBMT=NC misalignment faults. Successful narrow loads were
+exactly NaN-boxed. Every exceptional operation retained its exact exception
+while suppressing both RF write enables; early faults produced no data-manager
+request, and the guest fault retained exact VA/GPA/nonleaf metadata. The five
+MMIO cases emitted five Uncache requests and zero DCache requests.
 
 ## Reset With Outstanding Manager Traffic
 

@@ -3836,6 +3836,38 @@ int run_hardware_prefetch(int argc, char **argv)
 
 int run_fp_loads(int argc, char **argv)
 {
+    auto expected_fp_data = [](
+                                memblock::SparseMemory &memory,
+                                std::uint64_t address,
+                                memblock::LoadOp op) {
+        const std::uint64_t raw = memory.expected_load(address, op);
+        return op == memblock::LoadOp::lh
+            ? std::uint64_t{0xffffffffffff0000ULL} | (raw & 0xffffULL)
+            : op == memblock::LoadOp::lw
+                ? std::uint64_t{0xffffffff00000000ULL} |
+                    (raw & 0xffffffffULL)
+                : raw;
+    };
+    auto run_fp_transaction = [](
+                                  memblock::Environment &target,
+                                  const memblock::LoadTransaction &transaction,
+                                  std::uint64_t expected_data,
+                                  bool forbid_data_request) {
+        const std::uint64_t dcache_before = target.tilelink_requests();
+        const std::uint64_t uncache_before = target.uncache_requests();
+        target.expect_load_data(transaction, expected_data);
+        if (!target.set_rob_head(transaction.rob, transaction.rob_flag) ||
+            !target.enqueue_load(transaction) ||
+            !target.issue_load(transaction, 4096) ||
+            !target.run_until_complete(32768) ||
+            !target.run_until_lq_retired(8192)) {
+            return false;
+        }
+        return !forbid_data_request ||
+            (target.tilelink_requests() == dcache_before &&
+             target.uncache_requests() == uncache_before);
+    };
+
     memblock::Environment environment(argc, argv);
     constexpr std::uint64_t base = memblock::kDefaultMemoryBase + 0x18000;
     environment.memory().fill_incrementing(base, 64, 0x5b);
@@ -3881,14 +3913,8 @@ int run_fp_loads(int argc, char **argv)
         },
     }};
     for (const auto &transaction : transactions) {
-        const auto raw = environment.memory().expected_load(
-            transaction.address, transaction.op);
-        const auto expected = transaction.op == memblock::LoadOp::lh
-            ? (std::uint64_t{0xffffffffffff0000ULL} | (raw & 0xffffULL))
-            : transaction.op == memblock::LoadOp::lw
-                ? (std::uint64_t{0xffffffff00000000ULL} |
-                   (raw & 0xffffffffULL))
-                : raw;
+        const auto expected = expected_fp_data(
+            environment.memory(), transaction.address, transaction.op);
         environment.expect_load_data(transaction, expected);
         if (!environment.enqueue_load(transaction) ||
             !environment.issue_load(transaction, 512) ||
@@ -3941,14 +3967,8 @@ int run_fp_loads(int argc, char **argv)
             .expected_debug_is_ncio = false,
             .expected_debug_is_perf_cnt = false,
         };
-        const std::uint64_t raw = mmio.memory().expected_load(
-            mmio_physical + offset, op);
-        const std::uint64_t expected = op == memblock::LoadOp::lh
-            ? std::uint64_t{0xffffffffffff0000ULL} | (raw & 0xffffULL)
-            : op == memblock::LoadOp::lw
-                ? std::uint64_t{0xffffffff00000000ULL} |
-                    (raw & 0xffffffffULL)
-                : raw;
+        const std::uint64_t expected = expected_fp_data(
+            mmio.memory(), mmio_physical + offset, op);
         mmio.expect_load_data(transaction, expected);
         if (denied || corrupt) {
             mmio.inject_next_uncache_response_error(denied, corrupt);
@@ -4034,16 +4054,232 @@ int run_fp_loads(int argc, char **argv)
                   << '\n';
         return 1;
     }
+
+    memblock::Environment pmp_fault(argc, argv);
+    constexpr std::uint64_t pmp_base = 0x80600000ULL;
+    constexpr std::uint64_t pmp_size = 0x1000ULL;
+    constexpr std::uint8_t pmp_napot_deny = 0x18;
+    const std::uint64_t pmp_napot_address =
+        (pmp_base | (pmp_size / 2 - 1)) >> 2;
+    const memblock::LoadTransaction pmp_fld{
+        .address = pmp_base + 0x188,
+        .op = memblock::LoadOp::ld,
+        .rob = 6,
+        .lq = 0,
+        .pdest = 26,
+        .lane = 0,
+        .expected_exception_mask = memblock::kExceptionLoadAccessFault,
+        .rf_wen = false,
+        .fp_wen = true,
+    };
+    if (!pmp_fault.reset() || !pmp_fault.activate_bare(43) ||
+        !pmp_fault.configure_pmp(
+            {pmp_napot_address}, {pmp_napot_deny}) ||
+        !run_fp_transaction(pmp_fault, pmp_fld, 0, true)) {
+        std::cerr << "MEMBLOCK_FP_LOADS_FAIL cycle=" << pmp_fault.cycle()
+                  << " phase=pmp-fault reason="
+                  << (pmp_fault.error().empty()
+                          ? "PMP-denied FP load reached a data manager"
+                          : pmp_fault.error())
+                  << " dcache_requests=" << pmp_fault.tilelink_requests()
+                  << " uncache_requests=" << pmp_fault.uncache_requests()
+                  << '\n';
+        return 1;
+    }
+
+    memblock::Environment permission_fault(argc, argv);
+    constexpr std::uint64_t permission_virtual = 0x5003e000ULL;
+    constexpr std::uint64_t permission_physical = 0xc003e000ULL;
+    constexpr std::uint64_t permission_root = 0x97018000ULL;
+    const memblock::LoadTransaction permission_flw{
+        .address = permission_virtual + 0x188,
+        .oracle_address = permission_physical + 0x188,
+        .op = memblock::LoadOp::lw,
+        .rob = 7,
+        .lq = 0,
+        .pdest = 27,
+        .lane = 1,
+        .expected_exception_mask = memblock::kExceptionLoadPageFault,
+        .rf_wen = false,
+        .fp_wen = true,
+    };
+    if (!permission_fault.reset() ||
+        !permission_fault.map_sv39_4k(
+            permission_virtual, permission_physical, permission_root,
+            false, false, true) ||
+        !permission_fault.activate_sv39(permission_root, 45) ||
+        !run_fp_transaction(permission_fault, permission_flw, 0, true)) {
+        std::cerr << "MEMBLOCK_FP_LOADS_FAIL cycle="
+                  << permission_fault.cycle()
+                  << " phase=permission-fault reason="
+                  << (permission_fault.error().empty()
+                          ? "permission-faulting FP load reached a data manager"
+                          : permission_fault.error())
+                  << " dcache_requests="
+                  << permission_fault.tilelink_requests()
+                  << " uncache_requests="
+                  << permission_fault.uncache_requests() << '\n';
+        return 1;
+    }
+
+    memblock::Environment guest_fault(argc, argv);
+    constexpr std::uint64_t guest_virtual = 0x50040000ULL;
+    constexpr std::uint64_t guest_physical = 0x90040000ULL;
+    constexpr std::uint64_t host_physical = 0xc0040000ULL;
+    constexpr std::uint64_t vs_root = 0x97100000ULL;
+    constexpr std::uint64_t g_root = 0x97200000ULL;
+    constexpr std::uint64_t guest_offset = 0x188ULL;
+    const memblock::LoadTransaction guest_fld{
+        .address = guest_virtual + guest_offset,
+        .oracle_address = host_physical + guest_offset,
+        .op = memblock::LoadOp::ld,
+        .rob = 8,
+        .lq = 0,
+        .pdest = 28,
+        .lane = 2,
+        .expected_exception_mask = memblock::kExceptionLoadGuestPageFault,
+        .rf_wen = false,
+        .fp_wen = true,
+    };
+    if (!guest_fault.reset() ||
+        !guest_fault.map_sv39_4k(
+            guest_virtual, guest_physical, vs_root) ||
+        !guest_fault.map_sv39x4_4k(vs_root, vs_root, g_root) ||
+        !guest_fault.map_sv39x4_4k(
+            vs_root + 0x1000, vs_root + 0x1000, g_root) ||
+        !guest_fault.map_sv39x4_4k(
+            vs_root + 0x2000, vs_root + 0x2000, g_root) ||
+        !guest_fault.map_sv39x4_4k(
+            guest_physical, host_physical, g_root,
+            false, false, true) ||
+        !guest_fault.activate_two_stage(vs_root, g_root, 47, 49) ||
+        !run_fp_transaction(guest_fault, guest_fld, 0, true) ||
+        guest_fault.exception_vaddr() != guest_fld.address ||
+        guest_fault.exception_gpaddr() != guest_physical + guest_offset ||
+        guest_fault.exception_is_for_vs_nonleaf_pte()) {
+        std::cerr << "MEMBLOCK_FP_LOADS_FAIL cycle=" << guest_fault.cycle()
+                  << " phase=guest-fault reason="
+                  << (guest_fault.error().empty()
+                          ? "guest-fault metadata or data-manager bypass mismatch"
+                          : guest_fault.error())
+                  << " expected_vaddr=0x" << std::hex << guest_fld.address
+                  << " actual_vaddr=0x" << guest_fault.exception_vaddr()
+                  << " expected_gpaddr=0x" << guest_physical + guest_offset
+                  << " actual_gpaddr=0x" << guest_fault.exception_gpaddr()
+                  << " actual_vs_nonleaf=" << std::dec
+                  << guest_fault.exception_is_for_vs_nonleaf_pte()
+                  << " dcache_requests=" << guest_fault.tilelink_requests()
+                  << " uncache_requests=" << guest_fault.uncache_requests()
+                  << '\n';
+        return 1;
+    }
+
+    memblock::Environment split(argc, argv);
+    constexpr std::uint64_t split_base =
+        memblock::kDefaultMemoryBase + 0x1c000;
+    split.memory().fill_incrementing(split_base, 0x3000, 0xb3);
+    if (!split.reset() || !split.enable_misaligned_accesses()) {
+        std::cerr << "MEMBLOCK_FP_LOADS_FAIL cycle=" << split.cycle()
+                  << " phase=misaligned-configuration reason="
+                  << split.error() << '\n';
+        return 1;
+    }
+    const std::array<memblock::LoadTransaction, 3> split_transactions{{
+        {
+            .address = split_base + 63,
+            .op = memblock::LoadOp::lh,
+            .rob = 9,
+            .lq = 0,
+            .pdest = 29,
+            .lane = 0,
+            .rf_wen = false,
+            .fp_wen = true,
+        },
+        {
+            .address = split_base + 0xffe,
+            .op = memblock::LoadOp::lw,
+            .rob = 10,
+            .lq = 1,
+            .pdest = 30,
+            .lane = 1,
+            .rf_wen = false,
+            .fp_wen = true,
+        },
+        {
+            .address = split_base + 0x1ffd,
+            .op = memblock::LoadOp::ld,
+            .rob = 11,
+            .lq = 2,
+            .pdest = 31,
+            .lane = 2,
+            .rf_wen = false,
+            .fp_wen = true,
+        },
+    }};
+    for (const auto &transaction : split_transactions) {
+        const std::uint64_t expected = expected_fp_data(
+            split.memory(), transaction.address, transaction.op);
+        if (!run_fp_transaction(split, transaction, expected, false)) {
+            std::cerr << "MEMBLOCK_FP_LOADS_FAIL cycle=" << split.cycle()
+                      << " phase=misaligned-cacheable reason="
+                      << split.error() << '\n';
+            return 1;
+        }
+    }
+
+    memblock::Environment nc_misaligned(argc, argv);
+    constexpr std::uint64_t nc_virtual = 0x50044000ULL;
+    constexpr std::uint64_t nc_physical = 0xc0044000ULL;
+    constexpr std::uint64_t nc_root = 0x97300000ULL;
+    const memblock::LoadTransaction nc_fld{
+        .address = nc_virtual + 1,
+        .oracle_address = nc_physical + 1,
+        .op = memblock::LoadOp::ld,
+        .rob = 12,
+        .lq = 0,
+        .pdest = 32,
+        .lane = 0,
+        .expected_exception_mask = memblock::kExceptionLoadAddressMisaligned,
+        .rf_wen = false,
+        .fp_wen = true,
+    };
+    if (!nc_misaligned.reset() ||
+        !nc_misaligned.enable_misaligned_accesses() ||
+        !nc_misaligned.map_sv39_4k(
+            nc_virtual, nc_physical, nc_root,
+            true, true, false, false, true) ||
+        !nc_misaligned.activate_sv39(nc_root, 51) ||
+        !run_fp_transaction(nc_misaligned, nc_fld, 0, true)) {
+        std::cerr << "MEMBLOCK_FP_LOADS_FAIL cycle="
+                  << nc_misaligned.cycle()
+                  << " phase=misaligned-nc reason="
+                  << (nc_misaligned.error().empty()
+                          ? "misaligned NC FP load reached a data manager"
+                          : nc_misaligned.error())
+                  << " dcache_requests="
+                  << nc_misaligned.tilelink_requests()
+                  << " uncache_requests="
+                  << nc_misaligned.uncache_requests() << '\n';
+        return 1;
+    }
+
     std::cout << "MEMBLOCK_FP_LOADS_PASS"
               << " cycle="
-              << environment.cycle() + mmio.cycle() + page_fault.cycle()
+              << environment.cycle() + mmio.cycle() + page_fault.cycle() +
+                     pmp_fault.cycle() + permission_fault.cycle() +
+                     guest_fault.cycle() + split.cycle() +
+                     nc_misaligned.cycle()
               << " writebacks="
               << environment.writebacks() + mmio.writebacks() +
-                     page_fault.writebacks()
+                     page_fault.writebacks() + pmp_fault.writebacks() +
+                     permission_fault.writebacks() + guest_fault.writebacks() +
+                     split.writebacks() + nc_misaligned.writebacks()
               << " fp_destinations=" << transactions.size()
               << " mmio_fp=5 mmio_flh=1 mmio_flw=2 mmio_fld=2"
               << " mmio_faults=" << mmio_faults
               << " page_faults=1"
+              << " pmp_faults=1 permission_faults=1 guest_faults=1"
+              << " misaligned_cacheable=3 misaligned_nc_faults=1"
               << " mmio_dcache_requests=" << mmio.tilelink_requests()
               << " mmio_uncache_requests=" << mmio.uncache_requests()
               << " rtl_sha256=" << memblock::generated::kRtlSha256 << '\n';

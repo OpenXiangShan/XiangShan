@@ -73,20 +73,24 @@ normal FLH/FLW/FLD NaN-boxing, or vector writeback behavior.
 
 ## Regression Contract
 
-`fp-loads` covers normal cacheable FLH/FLW/FLD plus PBMT=IO FLH/FLW/FLD. The
-MMIO portion crosses normal, denied, and corrupt responses and requires exact
-FP destination data for successful operations. An independent empty-page-table
-FLW covers an early translation exception. Every exceptional operation must
-retain its exact exception and metadata while deasserting both `rfWen` and
-`fpWen`; every MMIO operation must bypass DCache.
+`fp-loads` covers normal cacheable FLH/FLW/FLD plus PBMT=IO FLH/FLW/FLD and
+cacheable misaligned FLH/FLW/FLD across line/page boundaries. The MMIO portion
+crosses normal, denied, and corrupt responses and requires exact FP destination
+data for successful operations. Independent page, PMP access, stage-1
+permission, G-stage guest-page, and PBMT=NC misalignment faults cover both early
+and late exception sources. Every exceptional operation must retain its exact
+exception and metadata while deasserting both `rfWen` and `fpWen`; early faults
+must issue no data-manager request, and every MMIO operation must bypass DCache.
 
 After full DefaultConfig re-elaboration, the repaired complete RTL SHA-256 is
 `4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4`.
 The focused regression passes as:
 
 ```text
-MEMBLOCK_FP_LOADS_PASS cycle=895 writebacks=9 fp_destinations=3
+MEMBLOCK_FP_LOADS_PASS cycle=1753 writebacks=16 fp_destinations=3
 mmio_fp=5 mmio_flh=1 mmio_flw=2 mmio_fld=2 mmio_faults=2 page_faults=1
+pmp_faults=1 permission_faults=1 guest_faults=1
+misaligned_cacheable=3 misaligned_nc_faults=1
 mmio_dcache_requests=0 mmio_uncache_requests=5
 rtl_sha256=4d3f33202176692516f83069c08568f7efa46d466699504851961d4ccd6218e4
 ```

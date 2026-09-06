@@ -62,6 +62,7 @@ CSR or full-core integration test.
 | Contract | Independent oracle | DUT obligation | Status |
 | --- | --- | --- | --- |
 | Scalar load | Byte-addressed sparse memory plus ISA width/sign extension | Exactly one completion with the expected ROB/destination, data, and exception bits | Implemented for modeled scalar loads |
+| Floating load | Byte-addressed sparse memory plus FLH/FLW NaN-boxing and FLD bit preservation; translation, PMP, PBMT, and manager-error causes remain independent inputs | Exact FP destination/data on success with no integer-RF enable; exact memory exception and neither RF enable on fault; early faults issue no DCache/Uncache data request | Implemented for aligned and cacheable split FLH/FLW/FLD, PBMT=IO normal/error responses, and page/PMP/permission/guest-page/PBMT-misalignment faults in `fp-loads` |
 | Scalar store | ISA store width/mask applied to an architectural reference separate from bus backing memory | Address/data writebacks compare exception/ROB/flush/debug metadata; committed bytes are recovered by an independent load. PBMT=IO stores must use Uncache, avoid DCache, complete the response/writeback sequence, and retire the SQ entry | Implemented for modeled scalar stores and scalar PBMT=IO contract |
 | Vector load | Independent unit/strided/indexed address decoder, `vl`/`vstart`/mask rules, old destination, and legal `vma/vta` agnostic values | Exact active data and active-element mask for EEW 8/16/32/64; inactive data is constrained by RVV policy | Implemented for modeled 128-bit operations |
 | Vector store | The same independent address/mask decoder applied to source bytes | Eventual completion/commit, exact vector readback of every active byte, RF write-enable/flush metadata, and optional trigger/debug metadata | Implemented for modeled 128-bit stores |
@@ -246,7 +247,7 @@ cacheable tests pass.
 | --- | --- | --- |
 | Integer loads | `lb/lbu/lh/lhu/lw/lwu/ld`, all destination classes, all issue lanes, zero/sign-extension patterns | Implemented |
 | Integer stores | `sb/sh/sw/sd`, address-first/data-first, byte masks, all issue lanes, commit timing | Partial; issue/commit and modeled readback are covered, but the boundary exposes no store payload monitor |
-| Floating loads/stores | FLH/FLW/FLD and narrow/widening formats, NaN-boxing, FP exception bits, integer/FP destination separation | Partial at MemBlock: `fp-loads` checks cacheable and PBMT=IO FLH/FLW/FLD destination class and exact payload/NaN-boxing, plus page-fault, denied, and corrupt exception write suppression. Store-data formatting is upstream because `issueStd.src(0)` already carries formatted raw bits; PMP, permission, guest-fault, and misalignment crosses remain |
+| Floating loads/stores | FLH/FLW/FLD and narrow/widening formats, NaN-boxing, memory exceptions, integer/FP destination separation | Implemented for the MemBlock-observable load boundary: `fp-loads` checks cacheable and PBMT=IO FLH/FLW/FLD destination class and exact payload/NaN-boxing, cacheable cross-line/page misalignment, and page, PMP, permission, guest-page, PBMT=NC misalignment, denied, and corrupt exception write suppression. Store-data formatting is upstream because `issueStd.src(0)` already carries formatted raw bits |
 | Vector unit stride | EEW 8/16/32/64, `vl=0..VLEN`, `vstart` at start/middle/end, `vm`, mask holes, `vma/vta` | Implemented for modeled 128-bit operations |
 | Vector strided | Positive, zero, and negative legal load strides; non-overlapping positive and negative store strides; element gaps and split windows | Implemented for modeled 128-bit operations; overlapping stores remain excluded because their final memory value is not a single deterministic oracle |
 | Vector indexed unordered | Repeated indices, aliasing, non-monotonic indices, all EEWs, masked elements | Partial; basic unordered mode implemented |
@@ -447,11 +448,6 @@ The current harness does not yet own a complete legal producer, independent
 reference model, or externally observable contract for the following. These
 are planned work items, not silently accepted coverage:
 
-- broader FP exception crosses including PMP, permission, guest-fault, and
-  misalignment (cacheable and PBMT=IO FLH/FLW/FLD exact data/NaN-boxing plus
-  page-fault, denied, and corrupt write suppression are covered by `fp-loads`;
-  floating-point store formatting is upstream because the MemBlock `issueStd`
-  boundary receives already formatted raw store bits);
 - MMIO/device reads and writes with modeled side effects and multi-request
   ordering beyond the current PBMT=IO load/store, denied/corrupt, metadata, and
   SQ-retirement contracts;

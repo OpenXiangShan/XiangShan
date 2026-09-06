@@ -344,10 +344,12 @@ LSQ conservation.
 
 `fp-loads` exercises the separate FP destination-enable path for cacheable and
 PBMT=IO 16-, 32-, and 64-bit load widths. The scoreboard requires exact FLH/FLW
-NaN-boxing, exact FLD data, and no integer-register write. A page-faulting FLW
-and denied/corrupt MMIO FLW/FLD additionally require exact exception metadata
-while suppressing both integer and FP register writes; every MMIO case must
-bypass DCache.
+NaN-boxing, exact FLD data, and no integer-register write. Cacheable FLH/FLW/FLD
+also cross line and page boundaries through the misaligned split path. Page,
+PMP access, stage-1 permission, G-stage guest-page, PBMT=NC misalignment, and
+denied/corrupt MMIO faults require exact exception metadata while suppressing
+both integer and FP register writes. Translation/PMP faults must reach neither
+data manager, and every MMIO case must bypass DCache.
 
 `trigger-contracts` programs a memory breakpoint through the top-level CSR
 trigger interface and checks the breakpoint exception bit, trigger action, and
