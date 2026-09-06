@@ -99,6 +99,7 @@ still decided by the returned data or exact exception, not by the hit itself.
 | Vector loads | EEW 8/16/32/64; both lanes; unit, strided, indexed unordered/ordered; mask, `vstart`, partial `vl`; split windows | Exact 128-bit result, active mask, metadata, replay, LQ drain; each address mode counted independently |
 | Vector stores | All EEWs and address modes; mask, `vstart`, partial `vl`; misaligned and cross-page split/replay | Exact active-byte readback, completion, commit, SQ drain; each address mode counted independently |
 | Software prefetch | `prefetch.i/r/w`, all scalar issue lanes, mapped and unmapped VAs | Completion without RF write or exception; LQ drain |
+| Hardware data prefetch | Fixed-PC cold loads with a 128-byte stride, weighted by the common `stride-stream` constraint and mixed with cache/TLB/manager pressure | Focused exact L2 target/source/confidence checks; random-mixed source-12 observation; no output after CSR disable; L3 idle in the current disabled configuration |
 | Translation mode selection | Legal decoded `satp` Bare/Sv39/Sv48, `vsatp` Bare/Sv39/Sv48, and `hgatp` Bare/Sv39x4/Sv48x4 inputs | Selected mode is reflected after the required flush; no stale translation from the previous legal mode; architectural CSR WARL write/readback behavior is integration-level |
 | Sv39 | 3-level walk; 4-KiB, 2-MiB, and 1-GiB leaves; low and high canonical VAs; both noncanonical sign-extension directions; cold/warm reuse | PA-derived data, exact page/access fault, PTW activity/reuse, leaf alignment; high-half canonical and both noncanonical directions are executable |
 | Sv48 | 4-level walk; 4-KiB, 2-MiB, 1-GiB, and 512-GiB leaves; L3 non-leaf and leaf faults; low and high canonical VAs; both noncanonical sign-extension directions | PA-derived data, exact page/access fault, fourth-level walk, canonicality fault; 4-KiB and superpage paths, high-half canonical, and both noncanonical directions are executable |
@@ -129,7 +130,9 @@ prefix; only the tail is constrained-random:
   plus an exact vector VS-non-leaf guest-page fault;
 - mapped/unmapped software prefetch, PBMT-NC store/load, DCache dirty eviction,
   redirect recovery, simultaneous heterogeneous issue, and both cross-type
-  forwarding directions.
+  forwarding directions;
+- fixed-PC stride streams mixed with scalar/vector/atomic/NC/MMIO traffic,
+  translation changes, cache refills, Probes, and variable manager latency.
 
 There is one canonical mixed generator. Realistic traffic, balanced coverage,
 and corner pressure are constraint sets over that generator, not independently
@@ -138,7 +141,8 @@ selects a baseline and repeatable `--constraint key=value` arguments override
 operation mix, address locality, heterogeneous overlap, translation regime and
 Sv39/Sv48/VS/G modes, context-switch and legal fence kind/scope rates,
 misalignment, vector corner bias, atomic family/width, NC/MMIO direction, legal
-special overlap, and independent DCache/PTW/Uncache response latency. The complete interface
+special overlap, hardware stride-stream pressure, and independent
+DCache/PTW/Uncache response latency. The complete interface
 and performance-counter calibration are specified in
 [`CONSTRAINED_RANDOM.md`](CONSTRAINED_RANDOM.md).
 
@@ -372,9 +376,9 @@ TileLink, 20 Uncache TileLink, eight performance, and two infrastructure ports.
 | DCache A/B/C/D/E TileLink (53 ports) | Partial | A/C/D refill, error, eviction, and ReleaseData paths plus deterministic B Probe and E GrantAck are implemented. `random-mixed` now constrains dirty toB/toN Probe sequences and requested/mandatory data. Add Probe overlap with unrelated miss/refill traffic and multiple outstanding Probe sources |
 | PTW and Uncache manager boundaries (41 ports) | Partial | Legal traffic, long latency, and backpressure are implemented. Add malformed/duplicate/early/late responses as explicit negative protocol modes rather than normal workload traffic |
 | IFU-to-Mem PTW request/response (`io_fetch_to_mem_itlb_*`, 64 ports) | Partial | `ifetch-ptw-bridge` now drives the raw IFU PTW request and checks all response fields for valid Sv39/Sv48 and all four nested mode pairs while forcing response backpressure. Add Bare, fault/PBMT, duplicate/coalesced requests, and concurrent DTLB activity |
-| Backend `memoryViolation` (8), `ldCancel` (3), and wakeup (12) outputs | Partial, high priority | `load-feedback` independently samples all wakeup/cancel pins, matches lane and destination metadata, and requires one uncanceled wakeup per completed cold/warm load without constraining replay count. `random-mixed` gates canceled/uncanceled observations on every lane under mixed pressure. `memory-violation` checks all eight redirect fields for scalar RAW, while `rar-violation` checks dirty-line release ordering, the architectural enable, and RAR's distinct `flushAfter` result. Add non-overlap/oldest/wraparound/vector/concurrent redirect crosses and independently classified exception/MMIO/NC/forwarding/bank-conflict cancellation crosses |
+| Backend `memoryViolation` (8), `ldCancel` (3), and wakeup (12) outputs | Partial, high priority | `load-feedback` independently samples all wakeup/cancel pins, matches lane and destination metadata, and requires one uncanceled wakeup per completed cold/warm load without constraining replay count. `random-mixed` gates canceled/uncanceled observations on every lane under mixed pressure; with hardware prefetch enabled it freezes this architectural gate before training and records full-run raw counts separately because prefetch cancels have no backend wakeup. `memory-violation` checks all eight redirect fields for scalar RAW, while `rar-violation` checks dirty-line release ordering, the architectural enable, and RAR's distinct `flushAfter` result. Add non-overlap/oldest/wraparound/vector/concurrent redirect crosses and independently classified exception/MMIO/NC/forwarding/bank-conflict cancellation crosses |
 | IFU software instruction-prefetch outputs (`io_ifetchPrefetch_*`, 6 ports) | Implemented | `ifetch-prefetch` checks lane and virtual address for all three LoadUnit outputs and rejects data-prefetch false positives; `random-mixed` requires an observed `prefetch.i` output in every seed. Add translated/faulted instruction-prefetch and same-cycle lane overlap crosses |
-| L2/L3 prefetch sender outputs (5 ports) | Partial | `hardware-prefetch` checks fixed-PC stride confidence, exact L2 address/source, CSR-disable suppression, and the configured-off L3 invariant. Add SMS/stream causality and arbitration, random miss/refill pressure, and a positive L3-enabled configuration |
+| L2/L3 prefetch sender outputs (5 ports) | Partial | `hardware-prefetch` checks fixed-PC stride confidence, exact L2 address/source, CSR-disable suppression, and the configured-off L3 invariant. `random-mixed` adds weighted fixed-PC stride streams under ordinary/corner miss, refill, translation, Probe, and latency pressure with a per-seed L2 source-12 gate. Add SMS/stream causality and arbitration, exact random-stream address attribution, and a positive L3-enabled configuration |
 | Store/vector IQ slow feedback | Partial | STA feedback and VSTU replay fields are sampled; add per-field coverage and same-cycle competition checks for every exposed lane |
 | Performance, trace, interrupt, DFT, hart/reset, and bypass plumbing | Structural or integration-owned | Keep pin/reset sanity in `pin-space`; test architectural interrupt/trace/DFT semantics at their owning integration boundary instead of claiming them from MemBlock data-path tests |
 

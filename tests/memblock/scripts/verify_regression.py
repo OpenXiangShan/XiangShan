@@ -150,7 +150,7 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
     schema = result.get("constraint_schema")
     if schema is None:
         return
-    _require(schema in (2, 3, 4, 5), f"unsupported constraint_schema: {schema!r}")
+    _require(schema in (2, 3, 4, 5, 6), f"unsupported constraint_schema: {schema!r}")
 
     target_translation = _csv_counts(result, "target_translation", 3)
     actual_translation = _csv_counts(result, "actual_translation", 3)
@@ -319,6 +319,37 @@ def _check_constraint_coverage(result: dict[str, Any]) -> None:
             and ifetch_prefetches > 0,
             "no software instruction-prefetch output was observed",
         )
+
+    if schema >= 6:
+        target_stride_stream = result.get("target_stride_stream")
+        stride_prefetches = result.get("l2_stride_prefetches")
+        raw_wakeups = _csv_counts(result, "raw_load_wakeups", 3)
+        raw_cancels = _csv_counts(result, "raw_load_cancels", 3)
+        _require(
+            all(raw >= gated for raw, gated in zip(raw_wakeups, wakeups))
+            and all(raw >= gated for raw, gated in zip(raw_cancels, cancels)),
+            "raw scalar load feedback cannot be smaller than its gated window: "
+            f"raw_wakeup={raw_wakeups} wakeup={wakeups} "
+            f"raw_cancel={raw_cancels} cancel={cancels}",
+        )
+        _require(
+            isinstance(target_stride_stream, int)
+            and not isinstance(target_stride_stream, bool)
+            and 0 <= target_stride_stream <= 1000,
+            f"target_stride_stream is not a per-mille integer: "
+            f"{target_stride_stream!r}",
+        )
+        _require(
+            isinstance(stride_prefetches, int)
+            and not isinstance(stride_prefetches, bool)
+            and stride_prefetches >= 0,
+            f"l2_stride_prefetches is invalid: {stride_prefetches!r}",
+        )
+        if target_stride_stream != 0:
+            _require(
+                stride_prefetches > 0,
+                "enabled stride stream produced no L2 prefetch output",
+            )
 
 
 def _positive_csv_prefix(

@@ -182,7 +182,7 @@ class VerifyRegressionTest(unittest.TestCase):
 
     def test_unknown_constraint_schema_is_rejected(self) -> None:
         result = mixed_result(7)
-        result["constraint_schema"] = 6
+        result["constraint_schema"] = 7
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "unsupported constraint_schema"
         ):
@@ -235,6 +235,27 @@ class VerifyRegressionTest(unittest.TestCase):
         result["ifetch_prefetches"] = 0
         with self.assertRaisesRegex(
             verify_regression.VerificationError, "instruction-prefetch"
+        ):
+            verify_regression._check_mixed_coverage(result)
+
+        result["ifetch_prefetches"] = 1
+        result["constraint_schema"] = 6
+        result["target_stride_stream"] = 100
+        result["l2_stride_prefetches"] = 3
+        result["raw_load_wakeups"] = "12,11,10"
+        result["raw_load_cancels"] = "6,5,4"
+        verify_regression._check_mixed_coverage(result)
+
+        result["l2_stride_prefetches"] = 0
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "stride stream"
+        ):
+            verify_regression._check_mixed_coverage(result)
+
+        result["l2_stride_prefetches"] = 3
+        result["raw_load_cancels"] = "2,5,4"
+        with self.assertRaisesRegex(
+            verify_regression.VerificationError, "cannot be smaller"
         ):
             verify_regression._check_mixed_coverage(result)
 

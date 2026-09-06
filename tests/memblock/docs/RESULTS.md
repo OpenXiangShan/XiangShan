@@ -73,6 +73,20 @@ the isolated run. L3 remained idle as required because this RTL build's
 `enableL3StreamPrefetch` elaboration constant is false; positive L3 coverage
 requires a configuration built with that feature enabled.
 
+Hardware stride training was next lifted into the common constraint interface
+as `stride-stream`, with preset rates of 500, 100, and 750 per mille for
+`coverage`, `spec`, and `corner`. Real 256-action RTL runs for seeds 921, 920,
+and 922 passed and observed 4, 7, and 11 L2 source-12 outputs respectively.
+The corner run also demonstrated why schema 6 separates architectural backend
+load feedback from full-run counters: lane 1 had 50 wakeups/42 cancels before
+prefetch training and 81 wakeups/124 cancels over the full run. Prefetch cancel
+pulses have no backend wakeup by design, so the former window is the valid load
+replay gate while both are retained in the artifact. A two-worker SPEC check
+then passed seeds 923-924 for 512 actions each, observing 17 and 26 L2 stride
+outputs. The independently verified artifact
+`/tmp/memblock-stride-schema6-spec-2x512.json` has SHA-256
+`e9498967687a4dc107565ebe611b4388458b52ae29ed881618b9fa6957aef021`.
+
 ## Translation Constraint Interface Validation
 
 Commit `f6820b9ff` extends the common `random-mixed` generator with weighted

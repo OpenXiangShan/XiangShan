@@ -332,6 +332,9 @@ lines without a new TileLink request. The oracle permits any number of legal
 replays but requires each completed normal load to have exactly one uncanceled
 wakeup: `wakeup_delta = ld2Cancel_delta + 1`. `random-mixed` keeps constant-space
 lane counters and requires both canceled and uncanceled wakeups on every lane.
+When hardware stride prefetch is enabled, that backend gate is frozen before
+training begins because prefetch traffic produces load-pipeline cancel pulses
+without backend wakeups; full-run raw counters remain in the result.
 
 `memory-violation` leaves an older store address unresolved, completes a
 younger same-byte load, and then resolves the store address. It requires one
@@ -357,6 +360,10 @@ RTL-defined depth (`current address + 4096`), then disables the CSR and checks
 that further accesses do not emit requests. The present build elaborates L3
 stream prefetch disabled, so the L3 output is monitored and required to remain
 idle instead of being reported as positive functional coverage.
+The same fixed-PC stream is available through the common `random-mixed`
+`stride-stream` constraint. It runs alongside the configured operation,
+translation, miss/refill, Probe, and response-latency mix and requires an L2
+source-12 observation in every enabled seed.
 
 `dcache-errors` injects one denied and one corrupt DCache response and checks
 the corresponding scalar load access-fault and hardware-error writebacks with
@@ -461,7 +468,8 @@ LR/SC/AMO path blocks the load pipeline while active. The generator constrains
 AMO/LRSC/AMOCAS family and W/D width, NC/MMIO load/store direction, Bare/Sv39/
 Sv48 and all four nested VS/G mode pairs, translation switch and legal fence
 kind/scope, manager Probe rate/toB/need-data crosses, and DCache, PTW, and
-Uncache latency independently. It includes
+Uncache latency independently. `stride-stream` also controls fixed-PC cold-load
+training pressure on the L1 stride prefetcher. It includes
 simultaneous scalar/vector issue, every scalar width, every vector EEW and every
 load/store address mode independently, scalar/vector misalignment, software
 `prefetch.i/r/w`, both cross-forwarding directions, randomized cold/warm
@@ -484,7 +492,7 @@ make random-mixed PICKER="$PICKER" SEED=1 TRANSACTIONS=65536 \
   CONSTRAINTS=spec
 make random-mixed PICKER="$PICKER" SEED=2 TRANSACTIONS=32768 \
   CONSTRAINTS=corner \
-  CONSTRAINT='translation-nested=250 translation-switch=750 tlb-flush=200 concurrent=750 atomic-lrsc=20 mmio-store=400 ptw-latency=spec'
+  CONSTRAINT='translation-nested=250 translation-switch=750 tlb-flush=200 concurrent=750 atomic-lrsc=20 mmio-store=400 stride-stream=750 ptw-latency=spec'
 ```
 
 `extended-regression`, `final-regression`, and `long-final-regression` default

@@ -123,6 +123,7 @@ struct RandomConstraints {
     unsigned probe_need_data_per_mille = 0;
     unsigned nc_stores_per_mille = 0;
     unsigned mmio_stores_per_mille = 0;
+    unsigned stride_stream_per_mille = 0;
     memblock::ResponseLatencyProfiles response_latency{};
 
     static RandomConstraints preset(std::string_view name)
@@ -151,6 +152,7 @@ struct RandomConstraints {
                 .probe_need_data_per_mille = 500,
                 .nc_stores_per_mille = 500,
                 .mmio_stores_per_mille = 500,
+                .stride_stream_per_mille = 500,
                 .response_latency = {},
             };
         }
@@ -181,6 +183,7 @@ struct RandomConstraints {
                 .probe_need_data_per_mille = 500,
                 .nc_stores_per_mille = 300,
                 .mmio_stores_per_mille = 300,
+                .stride_stream_per_mille = 100,
                 .response_latency = {
                     memblock::ResponseLatencyProfile::spec,
                     memblock::ResponseLatencyProfile::spec,
@@ -211,6 +214,7 @@ struct RandomConstraints {
                 .probe_need_data_per_mille = 500,
                 .nc_stores_per_mille = 500,
                 .mmio_stores_per_mille = 500,
+                .stride_stream_per_mille = 750,
                 .response_latency = {
                     memblock::ResponseLatencyProfile::spec,
                     memblock::ResponseLatencyProfile::spec,
@@ -383,6 +387,8 @@ struct RandomConstraints {
             nc_stores_per_mille = parsed;
         } else if (key == "mmio-store") {
             mmio_stores_per_mille = parsed;
+        } else if (key == "stride-stream") {
+            stride_stream_per_mille = parsed;
         } else {
             throw std::invalid_argument(
                 "unknown random constraint key: " + std::string(key));
@@ -444,7 +450,8 @@ struct RandomConstraints {
             probe_to_b_per_mille > 1000 ||
             probe_need_data_per_mille > 1000 ||
             nc_stores_per_mille > 1000 ||
-            mmio_stores_per_mille > 1000) {
+            mmio_stores_per_mille > 1000 ||
+            stride_stream_per_mille > 1000) {
             throw std::invalid_argument(
                 "per-mille random constraints must be in 0..1000");
         }
@@ -477,6 +484,13 @@ struct RandomConstraints {
         if (probes_per_mille != 0 && operation_weights[scalar_store] == 0) {
             throw std::invalid_argument(
                 "probe requires a nonzero scalar-store weight");
+        }
+        if (stride_stream_per_mille != 0 &&
+            (operation_weights[scalar_load] == 0 ||
+             locality_weights[2] == 0)) {
+            throw std::invalid_argument(
+                "stride-stream requires nonzero scalar-load and locality-cold "
+                "weights");
         }
         if (tlb_flushes_per_mille != 0) {
             const bool has_stage1_fence =
@@ -675,7 +689,8 @@ struct RandomConstraints {
                     (fence_kind_weights[fence_hfence_gvma] != 0));
             }
         }
-        return std::max({actions, translation_actions, fence_actions});
+        return std::max({actions, translation_actions, fence_actions}) +
+            (stride_stream_per_mille == 0 ? 0U : 8U);
     }
 
     bool uses_dcache() const
@@ -700,7 +715,7 @@ struct RandomConstraints {
     std::string summary() const
     {
         std::ostringstream stream;
-        stream << "constraint_schema=5 constraints=" << name
+        stream << "constraint_schema=6 constraints=" << name
                << " target_ops=";
         for (std::size_t index = 0; index < operation_weights.size(); ++index) {
             stream << (index == 0 ? "" : ",") << operation_weights[index];
@@ -737,6 +752,7 @@ struct RandomConstraints {
                << probe_need_data_per_mille
                << " target_nc_store=" << nc_stores_per_mille
                << " target_mmio_store=" << mmio_stores_per_mille
+               << " target_stride_stream=" << stride_stream_per_mille
                << " target_latency=" << latency_name(response_latency.dcache)
                << ',' << latency_name(response_latency.ptw) << ','
                << latency_name(response_latency.uncache);
@@ -11163,8 +11179,9 @@ int run_random_mixed(int argc, char **argv, const Options &options)
     environment.memory().fill_incrementing(host_physical, 0x1000, 0xc5);
     environment.configure_backpressure(
         options.seed ^ 0x1f83d9abfb41bd6bULL, options.backpressure);
-    const auto load_feedback_complete = [&]() {
-        const auto &feedback = environment.scalar_load_feedback_stats();
+    memblock::Environment::ScalarLoadFeedbackStats backend_load_feedback{};
+    bool backend_load_feedback_frozen = false;
+    const auto load_feedback_complete = [&](const auto &feedback) {
         for (unsigned lane = 0; lane < memblock::kScalarLoadLanes; ++lane) {
             if (feedback.ld2_cancels[lane] == 0 ||
                 feedback.wakeups[lane] <= feedback.ld2_cancels[lane]) {
@@ -11173,14 +11190,28 @@ int run_random_mixed(int argc, char **argv, const Options &options)
         }
         return true;
     };
-    const auto load_feedback_summary = [&]() {
-        const auto &feedback = environment.scalar_load_feedback_stats();
+    const auto load_feedback_summary = [&](const auto &feedback) {
         std::ostringstream stream;
         stream << "load_wakeups=" << feedback.wakeups[0] << ','
                << feedback.wakeups[1] << ',' << feedback.wakeups[2]
                << " load_cancels=" << feedback.ld2_cancels[0] << ','
                << feedback.ld2_cancels[1] << ',' << feedback.ld2_cancels[2];
         return stream.str();
+    };
+    const auto raw_load_feedback_summary = [&]() {
+        const auto &feedback = environment.scalar_load_feedback_stats();
+        std::ostringstream stream;
+        stream << "raw_load_wakeups=" << feedback.wakeups[0] << ','
+               << feedback.wakeups[1] << ',' << feedback.wakeups[2]
+               << " raw_load_cancels=" << feedback.ld2_cancels[0] << ','
+               << feedback.ld2_cancels[1] << ','
+               << feedback.ld2_cancels[2];
+        return stream.str();
+    };
+    const auto &load_feedback_for_gate = [&]() -> const auto & {
+        return backend_load_feedback_frozen
+            ? backend_load_feedback
+            : environment.scalar_load_feedback_stats();
     };
     const auto total_ifetch_prefetches = [&]() {
         const auto &stats = environment.ifetch_prefetch_stats();
@@ -12853,6 +12884,18 @@ int run_random_mixed(int argc, char **argv, const Options &options)
 
         phase = "seeded-mixed-tail";
         const unsigned target_before_redirect = options.transactions - 2;
+        if (constraints.stride_stream_per_mille != 0) {
+            // Hardware prefetch requests use load-pipeline cancel outputs but
+            // intentionally have no backend wakeup. Freeze the architectural
+            // load replay cross before enabling the prefetcher so those
+            // unrelated pulses cannot corrupt the backend feedback oracle.
+            backend_load_feedback = environment.scalar_load_feedback_stats();
+            backend_load_feedback_frozen = true;
+        }
+        if (!environment.configure_stride_prefetch(
+                constraints.stride_stream_per_mille != 0)) {
+            return false;
+        }
         environment.configure_backpressure(
             options.seed ^ 0x1f83d9abfb41bd6bULL, options.backpressure,
             constraints.response_latency);
@@ -13264,16 +13307,28 @@ int run_random_mixed(int argc, char **argv, const Options &options)
             atomic_values[slot] = environment.memory().expected_load(
                 atomic_base + slot * 64, memblock::LoadOp::ld);
         }
+        constexpr unsigned stride_training_loads = 8;
+        constexpr std::uint64_t random_stride_base = cache0_base + 0x50000;
+        constexpr std::uint64_t random_stride_bytes = 128;
+        constexpr unsigned random_stride_slots = 2048;
+        unsigned stride_stream_loads = 0;
 
         while (actions < target_before_redirect) {
-            unsigned kind = constraints.choose_operation(random());
-            for (unsigned candidate = 0;
-                 candidate < RandomConstraints::operation_count; ++candidate) {
-                if (constraints.operation_weights[candidate] != 0 &&
-                    !constraint_coverage.operation_complete(
-                        constraints, candidate)) {
-                    kind = candidate;
-                    break;
+            const bool closing_stride_stream =
+                constraints.stride_stream_per_mille != 0 &&
+                stride_stream_loads < stride_training_loads;
+            unsigned kind = closing_stride_stream
+                ? RandomConstraints::scalar_load
+                : constraints.choose_operation(random());
+            if (!closing_stride_stream) {
+                for (unsigned candidate = 0;
+                     candidate < RandomConstraints::operation_count; ++candidate) {
+                    if (constraints.operation_weights[candidate] != 0 &&
+                        !constraint_coverage.operation_complete(
+                            constraints, candidate)) {
+                        kind = candidate;
+                        break;
+                    }
                 }
             }
             bool nc_store = kind == RandomConstraints::noncacheable &&
@@ -13298,14 +13353,16 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                     mmio_store = true;
                 }
             }
-            TranslationContext translation = choose_translation_context();
+            TranslationContext translation = closing_stride_stream
+                ? dominant_translation_context()
+                : choose_translation_context();
             if ((kind == RandomConstraints::noncacheable ||
                  kind == RandomConstraints::mmio) &&
                 translation.regime == RandomConstraints::translation_bare) {
                 translation = translated_context();
             }
             if (!enter_translation_context(translation) ||
-                !issue_constrained_fence(kind)) {
+                (!closing_stride_stream && !issue_constrained_fence(kind))) {
                 return false;
             }
 
@@ -13318,8 +13375,23 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 const auto op = static_cast<memblock::LoadOp>(random() % 7);
                 const unsigned size =
                     1U << (static_cast<unsigned>(op) & 3U);
-                const auto transaction = make_load(
-                    constrained_cacheable_address(size), op, random() % 3);
+                const bool stride_shaped = closing_stride_stream ||
+                    (constraints.stride_stream_per_mille != 0 &&
+                     random() % 1000 < constraints.stride_stream_per_mille);
+                auto transaction = make_load(
+                    stride_shaped
+                        ? random_stride_base +
+                              (stride_stream_loads % random_stride_slots) *
+                                  random_stride_bytes
+                        : constrained_cacheable_address(size),
+                    op, random() % 3);
+                if (stride_shaped) {
+                    const std::uint64_t epoch =
+                        stride_stream_loads / random_stride_slots;
+                    transaction.pc = 0x6000 + epoch * 4;
+                    ++stride_stream_loads;
+                    ++constraint_coverage.locality[2];
+                }
                 if (!issue_load(transaction)) {
                     return false;
                 }
@@ -13727,8 +13799,10 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                 environment.dcache_response_latency_stats(),
                 environment.ptw_response_latency_stats(),
                 environment.uncache_response_latency_stats()) ||
+            (constraints.stride_stream_per_mille != 0 &&
+             environment.hardware_prefetch_stats().l2_source_counts[12] == 0) ||
             total_ifetch_prefetches() == 0 ||
-            !load_feedback_complete() ||
+            !load_feedback_complete(load_feedback_for_gate()) ||
             !coverage.backpressure_complete(options.backpressure)) {
             phase = "coverage-gates";
             return false;
@@ -13752,11 +13826,14 @@ int run_random_mixed(int argc, char **argv, const Options &options)
                   << " uncache=" << environment.uncache_requests()
                   << " release_data=" << environment.tilelink_release_data()
                   << " ifetch_prefetches=" << total_ifetch_prefetches()
+                  << " l2_stride_prefetches="
+                  << environment.hardware_prefetch_stats().l2_source_counts[12]
                   << " reason="
                   << (environment.error().empty()
                           ? "mixed_coverage_or_accounting_gate_failed"
                           : environment.error())
-                  << ' ' << load_feedback_summary()
+                  << ' ' << load_feedback_summary(load_feedback_for_gate())
+                  << ' ' << raw_load_feedback_summary()
                   << ' ' << coverage.summary() << ' '
                   << constraint_coverage.summary(
                          constraints,
@@ -13787,9 +13864,12 @@ int run_random_mixed(int argc, char **argv, const Options &options)
               << " grant_acks=" << environment.dcache_grant_acks()
               << " release_data=" << environment.tilelink_release_data()
               << " ifetch_prefetches=" << total_ifetch_prefetches()
+              << " l2_stride_prefetches="
+              << environment.hardware_prefetch_stats().l2_source_counts[12]
               << " ptw_requests=" << environment.ptw_requests()
               << " uncache_requests=" << environment.uncache_requests()
-              << ' ' << load_feedback_summary()
+              << ' ' << load_feedback_summary(load_feedback_for_gate())
+              << ' ' << raw_load_feedback_summary()
               << " lq=" << environment.lq_dequeued() << '+'
               << environment.lq_canceled() << '/'
               << environment.lq_allocated()

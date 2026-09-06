@@ -71,6 +71,7 @@ fields use per-mille values in the inclusive range `0..1000`.
 | `probe-to-b` | Per-mille share of generated Probe sequences that retain the line in Branch state; the generator follows each with a toN cleanup Probe |
 | `probe-need-data` | Per-mille share of generated Probe sequences that explicitly request data; dirty lines must return exact data even when this is zero |
 | `nc-store`, `mmio-store` | Per-mille store share within each memory-type class |
+| `stride-stream` | Per-mille chance that a scalar load joins a fixed-PC, 128-byte-stride cold stream; nonzero settings reserve eight closing loads so every seed can train the L1 stride prefetcher |
 | `latency` | Set DCache, PTW, and Uncache to `compact` or `spec` together |
 | `dcache-latency`, `ptw-latency`, `uncache-latency` | Override one manager's latency profile independently |
 
@@ -80,6 +81,8 @@ manager-latency settings, and unknown latency profiles fail before simulation
 traffic begins. The harness has no programmable PMA region at this boundary,
 so randomized NC and MMIO traffic requires stage-1 or nested PBMT translation.
 An NC/MMIO-only operation mix cannot also request Bare coverage.
+An enabled `stride-stream` requires nonzero scalar-load and cold-locality
+weights because the prefetch oracle depends on real cold load misses.
 `random-mixed` requires at least 256 actions so the mandatory architectural
 prefix, four overlap windows, and each enabled constrained class can coexist.
 
@@ -114,6 +117,7 @@ scenario implementations:
 | Translation state | Bare/Sv39/Sv48 and all four Sv39/Sv48 x Sv39x4/Sv48x4 pairs are weighted tail contexts; switches occur only at drained boundaries; cold walk/reuse and the legal fence kind/scope matrix are per-seed gates | Distinct-page walks and redirected root/ASID/VMID/MODE/`V` changes with delayed PTW responses are covered by directed matrices; random context changes remain restricted to drained boundaries |
 | Response latency | `latency` sets all managers; `dcache-latency`, `ptw-latency`, and `uncache-latency` override them independently, with separate observed histograms and gates | Add finer numeric/distribution controls only when a calibrated workload needs them |
 | Cache Probe | `probe`, `probe-to-b`, and `probe-need-data` generate manager Probes after randomized dirty scalar stores, check exact 64-byte ProbeAckData, cover toB/toN and requested/mandatory data, and invalidate retained toB lines with a checked cleanup Probe | Overlap Probes with unrelated misses/refills and support multiple outstanding Probe sources |
+| Hardware data prefetch | `stride-stream` composes fixed-PC stride training with the common scalar/vector/atomic/NC/MMIO, translation, miss/refill, latency, and Probe generator; every enabled seed must observe source 12 on the L2 sender | Add SMS/stream causality and arbitration plus a positive L3-enabled configuration |
 | Error injection | Errors are confined to focused deterministic contracts | Add a normally-zero or very-low random error rate with independently checked denied/corrupt outcomes; realistic presets must keep this rare |
 
 The remaining rows do not change the architecture: `coverage`, `spec`, and
@@ -123,14 +127,14 @@ choice into the common interface and its coverage contract, not adding
 
 ## Shipped Presets
 
-Operation columns are relative weights. Locality is `hot/warm/cold`; the next
-five columns are per-mille values.
+Operation columns are relative weights. Locality is `hot/warm/cold`; the
+remaining numeric direction columns are per-mille values.
 
-| Preset | Scalar L/S | Vector L/S | Prefetch | Atomic | NC | MMIO | Locality | Concurrent | TLB flush | Misaligned | Vector corner | Probe | Latency |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| `coverage` | 200/150 | 150/150 | 100 | 100 | 75 | 75 | 250/250/500 | 1000 | 50 | 500 | 1000 | 20 | compact |
-| `spec` | 650/270 | 20/10 | 35 | 5 | 5 | 5 | 800/150/50 | 100 | 20 | 5 | 100 | 1 | spec |
-| `corner` | 125/125 | 125/125 | 125 | 125 | 125 | 125 | 100/200/700 | 500 | 100 | 500 | 1000 | 100 | spec |
+| Preset | Scalar L/S | Vector L/S | Prefetch | Atomic | NC | MMIO | Locality | Concurrent | TLB flush | Misaligned | Vector corner | Probe | Stride stream | Latency |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `coverage` | 200/150 | 150/150 | 100 | 100 | 75 | 75 | 250/250/500 | 1000 | 50 | 500 | 1000 | 20 | 500 | compact |
+| `spec` | 650/270 | 20/10 | 35 | 5 | 5 | 5 | 800/150/50 | 100 | 20 | 5 | 100 | 1 | 100 | spec |
+| `corner` | 125/125 | 125/125 | 125 | 125 | 125 | 125 | 100/200/700 | 500 | 100 | 500 | 1000 | 100 | 750 | spec |
 
 Atomic family weights (AMO/LRSC/CAS) are `8/2/2`, `90/5/5`, and `1/1/1` for
 `coverage`, `spec`, and `corner`; all three use `1/1` W/D weights. Their
@@ -144,6 +148,10 @@ committed store into SBuffer, so the Probe sequence first allows half of the
 bounded manager-completion window for older SBuffer traffic to drain. This
 prevents a legal early NtoN response from being misclassified as a dirty-line
 failure under the long-tail latency profile.
+Their stride-stream rates are `500`, `100`, and `750` per mille. The lower
+`spec` value keeps prefetch training present without turning ordinary load
+traffic into an artificial continuous stream; mandatory closing loads retain
+the per-seed output gate even at this low rate.
 `spec` and `corner` use the calibrated long-tail profile independently on all
 three managers; `coverage` uses compact latency.
 
@@ -218,12 +226,13 @@ each latency class; later responses follow the distribution statistically.
 
 ## Coverage And Replay Contract
 
-Every terminal line prints `constraint_schema=5`, the resolved target weights,
+Every terminal line prints `constraint_schema=6`, the resolved target weights,
 and actual operation, atomic family/width, NC/MMIO direction, legal special
 overlap, locality, translation regime/mode/pair, fence kind/scope, cold-walk/
 reuse, TLB-flush, hit/miss, Probe sequence/cap/need-data, all three scalar-load
 wakeup/cancel lanes, IFU software instruction-prefetch observations, and
-per-manager latency counts. Each enabled class must be observed at least once.
+L2 stride-prefetch observations, and per-manager latency counts. Each enabled
+class must be observed at least once.
 Probe counts must also conserve sequences and their toB cleanup requests. Every
 load lane must observe both canceled and uncanceled wakeups without constraining
 the legal replay count, and every seed must emit at least one `prefetch.i`
@@ -235,6 +244,16 @@ must independently observe all four latency classes. The simulator and offline
 artifact verifier both enforce these obligations. They are minimum gates;
 distribution quality is evaluated over long multi-seed campaigns from the
 recorded counts.
+
+Hardware prefetch traffic shares load-pipeline cancel outputs but has no
+backend wakeup by design. When `stride-stream` is enabled, the architectural
+load replay gate therefore uses a counter snapshot taken immediately before
+the prefetcher is enabled. The terminal summary reports that gate window as
+`load_wakeups/load_cancels` and the full simulation as
+`raw_load_wakeups/raw_load_cancels`; schema 6 requires each raw count to be at
+least its corresponding snapshot count. L2 source-12 observation is checked
+separately, so this separation neither hides prefetch activity nor mistakes it
+for a failed backend load.
 
 The mandatory prefix still closes architectural invariants that should never be
 left to chance, including width/lane legality, nested translation mode pairs,
